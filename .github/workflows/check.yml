@@ -30,3 +30,6 @@ jobs:
 
       - name: 内核与模板是否逐字一致
         run: node scripts/compose-agents.mjs . --check
+
+      - name: README 的目录与标题是否同步
+        run: node scripts/sync-toc.mjs README.md --check

@@ -853,6 +853,87 @@ group('[22] 双语文档的成对维护规则必须**写进项目契约**，不�
   }
 }
 
+group('[23] 目录同步：从标题生成、锚点算对、三种现状都能接管')
+{
+  const toc = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'sync-toc.mjs'), join(dir, 'README.md'), ...a], { encoding: 'utf8' })
+
+  // ① 有手写目录、没有标记 → 就地接管，**不新增第二个目录**
+  const hand = fixture('toc-hand', {
+    'README.md': [
+      '# x', '', '## 目录', '', '- [旧的](#错的锚点)', '',
+      '## 第一节', '', '正文', '', '## 第二节', '', '正文', '',
+      '## 第三节', '', '正文', '', '## 第四节', '', '正文', '', '## 第五节', '', '正文', '',
+    ].join('\n'),
+  })
+  const r1 = toc(hand)
+  const t1 = readFileSync(join(hand, 'README.md'), 'utf8')
+  const dirCount = (t1.match(/^## 目录$/gm) ?? []).length
+  const ok1 = dirCount === 1
+  check(ok1, '手写目录被接管，且没有出现第二个「目录」节', `目录节 ${dirCount} 个`)
+  report(ok1, '手写目录：就地接管，不重复')
+  const ok2 = !/错的锚点/.test(t1) && /#第一节/.test(t1)
+  check(ok2, '内容被换成按标题算出的正确锚点')
+  report(ok2, '锚点已重算')
+  check(r1.status === 0, '接管成功退出码 0')
+
+  // ② 幂等 + --check 能发现漂移
+  const r2 = toc(hand, '--check')
+  check(r2.status === 0, '接管后 --check 通过', `exit=${r2.status}`)
+  report(r2.status === 0, '接管后 --check 通过')
+  writeFileSync(join(hand, 'README.md'),
+    readFileSync(join(hand, 'README.md'), 'utf8') + '\n## 第六节\n\n正文\n', 'utf8')
+  const r3 = toc(hand, '--check')
+  const ok3 = r3.status !== 0 && /不同步/.test(r3.stdout ?? '')
+  check(ok3, '加了一节之后 --check 报不同步', `exit=${r3.status}`)
+  report(ok3, '加节后 --check 报不同步')
+
+  // ③ 锚点算法：中文、序号、中英混排、大小写
+  const anchors = fixture('toc-anchor', {
+    'README.md': [
+      '# x', '',
+      '## 环境要求', '', 'a', '',
+      '## 1. 局域网访问', '', 'a', '',
+      '## 3. 移动端交互与 PWA 独立全屏 App', '', 'a', '',
+      '## What it does', '', 'a', '',
+      '## 第六节', '', 'a', '',
+    ].join('\n'),
+  })
+  toc(anchors)
+  const t3 = readFileSync(join(anchors, 'README.md'), 'utf8')
+  const wants = [
+    ['中文标题', '#环境要求'],
+    ['带序号的中文', '#1-局域网访问'],
+    ['中英混排', '#3-移动端交互与-pwa-独立全屏-app'],
+    ['英文标题', '#what-it-does'],
+  ]
+  for (const [label, anchor] of wants) {
+    const ok = t3.includes(`(#${anchor.replace(/^#/, '')})`)
+    check(ok, `锚点：${label} → ${anchor}`)
+    report(ok, `锚点 ${label}`)
+  }
+
+  // ④ 代码块里的 `## x` 不是标题，不该进目录
+  const fenced = fixture('toc-fence', {
+    'README.md': [
+      '# x', '', '## 真标题', '', '```md', '## 这是代码块里的假标题', '```', '',
+      '## 二', '', 'a', '', '## 三', '', 'a', '', '## 四', '', 'a', '', '## 五', '', 'a', '',
+    ].join('\n'),
+  })
+  toc(fenced)
+  const t4 = readFileSync(join(fenced, 'README.md'), 'utf8')
+  const ok4 = !/假标题/.test(t4.replace(/```md[\s\S]*?```/, ''))
+  check(ok4, '围栏代码块里的 `## x` 不进目录')
+  report(ok4, '代码块里的标题被跳过')
+
+  // ⑤ 节数少时不加目录（短 README 加目录是累赘）
+  const short = fixture('toc-short', { 'README.md': '# x\n\n## 一\n\na\n\n## 二\n\nb\n' })
+  const r5 = toc(short)
+  const ok5 = !/## 目录/.test(readFileSync(join(short, 'README.md'), 'utf8')) && /不需要目录/.test(r5.stdout ?? '')
+  check(ok5, '节数少于阈值时不加目录，并说明原因')
+  report(ok5, '短 README：不加目录')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

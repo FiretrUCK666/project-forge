@@ -350,7 +350,8 @@ function checkGlobalRules() {
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
-  for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs', 'release-notes.mjs']) {
+  for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs',
+    'release-notes.mjs', 'check-badges.mjs']) {
     const p = join(dir, f)
     if (!existsSync(p)) { fail(`缺少 scripts/${f}。`); continue }
     const text = readText(p)
@@ -477,6 +478,33 @@ function checkStatedCounts() {
     骨架模板: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`templates\/[a-z-]+\.md`/),
   }
 
+  // **与磁盘对账**，不只是两份文档互相对。
+  //
+  // 这一步是必须的：计数检查原先只比「文件地图的行数」与「文档里写的数量」，
+  // 而**两个文档同时漏掉同一个脚本时，它两边都对得上**——实测漏了 sync-toc.mjs 而
+  // 检查全绿。文档之间互相印证不构成证据，得跟事实比。
+  const scriptsDir = join(SKILL_ROOT, 'scripts')
+  if (existsSync(scriptsDir)) {
+    const onDisk = readdirSync(scriptsDir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
+      .map((e) => e.name)
+    for (const f of onDisk) {
+      if (!readText(join(SKILL_ROOT, 'SKILL.md')).includes(`scripts/${f}`)) {
+        fail(`scripts/${f} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+      }
+    }
+    for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs']) {
+      if (!onDisk.includes(f)) fail(`磁盘上缺少 scripts/${f}。`)
+    }
+  }
+  const readmeText = existsSync(join(SKILL_ROOT, 'README.md'))
+    ? readText(join(SKILL_ROOT, 'README.md')).replace(/^\uFEFF/, '') : ''
+  for (const m of readmeText.matchAll(/`scripts\/([a-z-]+\.mjs)`/g)) {
+    if (!existsSync(join(SKILL_ROOT, 'scripts', m[1]))) {
+      fail(`README.md 提到了不存在的脚本 scripts/${m[1]}。`)
+    }
+  }
+
   // 文档里出现的「<中文数字><量词>」与「<阿拉伯数字> 个<量词>」
   const WATCHED = [
     { word: '硬不变量', key: '硬不变量' },
@@ -594,6 +622,34 @@ function checkPluginChapters() {
   if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')
 }
 
+// ── 检查十一：README 的目录与标题同步 ───────────────────────────────────────
+
+/**
+ * README 的目录是派生内容（由各节标题决定），因此必须与标题保持同步。
+ *
+ * 这条检查的价值在于「漂移会当场暴露」：加了一节忘了加目录项、改了标题忘了改锚点，
+ * 而**锚点写错的表现是「点了没反应」**——不报错、不显眼，作者也不会去点自己的目录。
+ * 所以不能靠记得，得靠检查。
+ *
+ * 只查本地能算的东西（目录 vs 标题），**不查徽章**：徽章要联网、依赖外部服务，
+ * 放进检查会因为对方抖动而误报，那种检查很快就会被无视。
+ */
+function checkReadmeToc() {
+  const readme = join(SKILL_ROOT, 'README.md')
+  if (!existsSync(readme)) { warn('没有 README.md。'); return }
+  const script = join(SKILL_ROOT, 'scripts', 'sync-toc.mjs')
+  if (!existsSync(script)) { fail('缺少 scripts/sync-toc.mjs（README 目录的同步工具）。'); return }
+  const r = spawnSync(process.execPath, [script, readme, '--check'], { encoding: 'utf8', env: process.env })
+  if (r.error !== undefined) { fail(`目录同步检查无法执行：${r.error.message}`); return }
+  if (r.status !== 0) {
+    const detail = (r.stdout ?? '').trim().split('\n').filter((l) => l.trim() !== '').join(' / ')
+    fail(`README 的目录与标题不同步：${detail}\n`
+      + `      修正：node scripts/sync-toc.mjs README.md`)
+    return
+  }
+  process.stdout.write('README 目录：与标题一致\n')
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 function main() {
@@ -607,6 +663,7 @@ function main() {
   checkScriptsRun()
   checkStatedCounts()
   checkPluginChapters()
+  checkReadmeToc()
   checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。

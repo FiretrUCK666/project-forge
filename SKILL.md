@@ -328,6 +328,8 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `scripts/preflight.mjs` | **维护本 skill 自身时**的自检（与目标项目无关） |
 | `scripts/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定（与目标项目无关） |
 | `scripts/release-notes.mjs` | 写发布说明——`references/remote-github.md` 那条「非 ASCII 正文不经 shell」规则的落地工具 |
+| `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（`references/docs-set.md` 那条「只写能显示的」的落地工具） |
+| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（`references/docs-set.md` 那条「派生内容用工具同步」的落地工具） |
 
 ## 边界
 

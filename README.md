@@ -1,10 +1,34 @@
 # project-forge
 
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.md#环境要求)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.md#环境要求)
+
 把一个项目目录锻造成规范项目：版本管理、远端仓库、文档套装、发布通道，一次配到位。
 
 给它一个目录，它先只读勘察，看清这个项目现在是什么状态，再自己判断该做哪几件事、
 跳过哪几件事。它不预设技术栈——Node、Python、Rust、Go、纯文档目录，甚至插件类项目，
 判断依据都是勘察出来的事实。
+
+## 目录
+
+<!-- toc:start -->
+
+- [它解决什么问题](#它解决什么问题)
+- [安装](#安装)
+- [更新](#更新)
+- [使用](#使用)
+- [它不会做的事](#它不会做的事)
+- [里面有什么](#里面有什么)
+- [脚本](#脚本)
+- [设计原则](#设计原则)
+- [环境要求](#环境要求)
+- [这个仓库自己是怎么配的](#这个仓库自己是怎么配的)
+- [遇到问题](#遇到问题)
+- [贡献](#贡献)
+- [许可](#许可)
+
+<!-- toc:end -->
 
 ## 它解决什么问题
 
@@ -99,6 +123,8 @@ git pull
 | `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
 | `scripts/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
+| `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（私有仓库上的 GitHub 徽章显示不出来） |
+| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（从标题生成，锚点按 GitHub 的算法算） |
 
 ## 脚本
 

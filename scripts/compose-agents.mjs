@@ -450,6 +450,56 @@ function injectKernel(text, kernel) {
   return `${before}\n${kernel}\n${after}`
 }
 
+/**
+ * 给一个**手写的、没有内核标记的** AGENTS.md 做增量升级。
+ *
+ * 这是「项目已经有了 AGENTS.md，但写得不好或漏了很多」这一常见场景的入口。它必须做到
+ * 三件事，缺一件就不合格：
+ *   1. **不报错退出**——原来的实现直接抛「找不到内核标记」，把最常见的场景变成了死路；
+ *   2. **不破坏已有内容**——手写的段落一律保留，包括它自己那套标题体系；
+ *   3. **只做加法，并把加了什么说清楚**——插入内核、补上缺失的节，然后逐条报告。
+ *
+ * 内核插在一级标题之后、第一个二级标题之前。这是唯一不需要猜测的位置：文件标题是
+ * 每个 AGENTS.md 都有的，而内核属于「总纲」性质，放在正文之前符合它被阅读的顺序。
+ */
+function upgradeHandwritten(existing, kernel, target) {
+  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target)))
+  const old = splitSections(existing)
+
+  // 1) 插入内核：一级标题之后、第一个二级标题之前。
+  const lines = existing.split('\n')
+  let insertAt = -1
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^##\s+\S/.test(lines[i])) { insertAt = i; break }
+  }
+  if (insertAt < 0) insertAt = lines.length // 通篇没有二级标题：追加到末尾
+  const withKernel = [
+    ...lines.slice(0, insertAt),
+    START,
+    kernel,
+    END,
+    '',
+    ...lines.slice(insertAt),
+  ].join('\n')
+
+  // 2) 补上缺失的节：只补「语义上明显缺」的整节，且一律追加在末尾，不改动原有顺序。
+  const oldHeadings = new Set(old.sections.map((s) => s.heading))
+  const added = []
+  const parts = [withKernel.replace(/\n+$/, '')]
+  for (const section of fresh.sections) {
+    if (oldHeadings.has(section.heading)) continue
+    // 纯生成内容才补：需要人写的节补进去也是一堆占位符，不如让 AI 按上下文写
+    const body = section.lines.join('\n')
+    if (findAuthors(body).length > 0) continue
+    parts.push(body)
+    added.push(section.heading)
+  }
+
+  let text = collapseBlankLines(parts.join('\n\n'))
+  if (!text.endsWith('\n')) text += '\n'
+  return { text, added }
+}
+
 // ── 命令行 ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_BUDGET_NOTE = `预算默认 ${DEFAULT_BUDGET} 字节`
@@ -458,12 +508,14 @@ function parseArgs(argv) {
   const positional = []
   let check = false
   let status = false
+  let upgrade = false
   let budget = DEFAULT_BUDGET
   let help = false
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--check') { check = true; continue }
     if (arg === '--status') { status = true; continue }
+    if (arg === '--upgrade') { upgrade = true; continue }
     if (arg === '--help' || arg === '-h') { help = true; continue }
     if (arg === '--budget') {
       const value = Number(argv[i + 1])
@@ -475,7 +527,7 @@ function parseArgs(argv) {
     if (arg.startsWith('--')) throw new Error(`无法识别的参数：${arg}`)
     positional.push(arg)
   }
-  return { check, status, budget, help, positional }
+  return { check, status, upgrade, budget, help, positional }
 }
 
 function reportAuthors(authors, stream) {
@@ -492,12 +544,83 @@ function reportAuthors(authors, stream) {
 }
 
 /**
+ * 手写 AGENTS.md 的体检报告。
+ *
+ * 这是「项目已经有 AGENTS.md，但写得不好或漏了很多」场景的默认动作：**不动文件**，
+ * 只把事实摊开——它有什么、缺什么、和标准结构的差距在哪——然后给出明确的下一步。
+ *
+ * 为什么不直接升级：这份文件是别人写的，重排和补写都属于对他人成果的改动。默认沉默地
+ * 改掉，比不动更糟。但也不能像以前那样报错退出——那等于告诉使用者「你这个场景不支持」。
+ * 所以默认只报告，升级要显式要求。
+ */
+function reportHandwritten(agentsPath, existing, target, kernel, budget, status, check) {
+  const facts = deriveFacts(target)
+  const rendered = materialize(readUtf8(SKELETON_PATH), facts)
+  const standard = splitSections(rendered)
+  const current = splitSections(existing)
+
+  const have = new Set(current.sections.map((s) => s.heading))
+  const missing = standard.sections
+    .filter((s) => !have.has(s.heading))
+    .map((s) => ({ heading: s.heading, needsHuman: findAuthors(s.lines.join('\n')).length > 0 }))
+
+  const bytes = Buffer.byteLength(existing, 'utf8')
+  const out = []
+  out.push(`${agentsPath}`)
+  out.push(`  这是一份手写的 AGENTS.md（没有内核标记），共 ${bytes} 字节。`)
+  out.push(`  本脚本**没有改动它**——手写文件的改动应当由你确认后再做。`)
+  out.push('')
+  out.push(`  它现有的节（${current.sections.length} 个）：`)
+  for (const s of current.sections) out.push(`    - ${s.heading}`)
+  if (missing.length > 0) {
+    out.push('')
+    out.push(`  与标准结构相比，缺少这些节（${missing.length} 个）：`)
+    for (const m of missing) {
+      out.push(`    - ${m.heading}${m.needsHuman ? '（需要读代码后自己写）' : '（可自动补）'}`)
+    }
+  }
+
+  const emit = (stream) => { for (const line of out) stream.write(`${line}\n`) }
+
+  if (check) {
+    // 校验模式下没有内核就是不达标；但要把「怎么办」说清楚，而不是只报一句失败
+    emit(process.stdout)
+    process.stderr.write('\n校验失败：这份 AGENTS.md 还没有内核标记，无法与模板比对。\n'
+      + `  要把它升级为标准结构（只会增加内容，不删不改已有段落）：\n`
+      + `    node "<本领目录>/scripts/compose-agents.mjs" "${target}" --upgrade\n`)
+    return 1
+  }
+  if (status) {
+    emit(process.stdout)
+    return 0
+  }
+
+  emit(process.stdout)
+  process.stdout.write('\n下一步：\n'
+    + '  - 想保留原样、只做体检 → 到此为止，本脚本不会动它。\n'
+    + '  - 想升级为标准结构 → 加 --upgrade 再跑一次。它只做加法：\n'
+    + '      插入内核段落、补上上面标着「可自动补」的节；\n'
+    + '      已有的段落一个字节都不删、不改、不重排。\n')
+  return 0
+}
+
+/**
  * 报告刷新时做了什么。三件事都值得说，因为它们都改变了文件内容，而使用者需要知道
  * 「为什么这次跑完文件变了」——尤其是「模板里有而文件里没有」的节，脚本刻意不补，
  * 让人自己决定。
  */
 function reportRefresh(report, stream) {
   if (report === undefined) return
+  if (report.upgradedFrom === 'handwritten') {
+    stream.write('\n已按标准结构升级这份手写的 AGENTS.md（只做加法）：\n')
+    stream.write('  - 插入了内核段落（行事总纲、本文件的定位与编辑规则、任务编排方法论）\n')
+    if (report.added.length > 0) {
+      stream.write(`  - 补上了 ${report.added.length} 个缺失的节：\n`)
+      for (const a of report.added) stream.write(`      ${a}\n`)
+    }
+    stream.write('  - 原有段落全部保留（未删除、未改写、未重排）\n')
+    return
+  }
   if (report.refreshed !== undefined && report.refreshed.length > 0) {
     stream.write(`\n按当前项目事实重新求值的节（共 ${report.refreshed.length} 节）：\n`)
     for (const r of report.refreshed) stream.write(`  - ${r}\n`)
@@ -519,18 +642,20 @@ function main(argv) {
     process.stderr.write(`错误：${error.message}\n`)
     return 2
   }
-  const { check, status, budget, help, positional } = parsed
+  const { check, status, upgrade, budget, help, positional } = parsed
   if (help) {
     process.stdout.write([
-      '用法：node scripts/compose-agents.mjs [目录] [--check|--status] [--budget N]',
+      '用法：node scripts/compose-agents.mjs [目录] [选项]',
       '',
       '  生成或刷新目标项目的 AGENTS.md。',
-      '  - 通用内核由 templates/agents-kernel.md 逐字注入，标记之外不动；',
-      '  - 首次生成时按项目事实保留/丢弃条件段落、填充取值；',
-      '  - 脚本填不了的部分留下 pf:author 标记并报出数量。',
+      '  - 文件不存在 → 按项目事实生成一份；',
+      '  - 文件已存在且有内核标记 → 按节合并：人写的保留，纯生成的按当前事实重新求值；',
+      '  - 文件已存在但**没有**内核标记（手写的）→ 默认只体检、不动它。',
       '',
+      '  --upgrade  把一份手写的 AGENTS.md 升级为标准结构。**只做加法**：',
+      '             插入内核段落、补上缺失的自动节；已有段落不删不改不重排。',
       '  --check    只校验内核一致性，不写入；不一致时退出码 1',
-      '  --status   只报告待填写项与字节数，不写入',
+      '  --status   只报告现状，不写入',
       `  --budget N ${DEFAULT_BUDGET_NOTE}`,
       '',
     ].join('\n'))
@@ -558,20 +683,24 @@ function main(argv) {
   let refreshReport
   try {
     if (exists) {
-      // 已存在：重新求值条件段落，并按节合并保住在这些段落里写下的真实内容。
-      //
-      // 这里曾经是「只刷新内核，项目段落一个字节都不动」。那个做法有个致命后果：条件
-      // 段落只在首次生成时求值一次，此后**永久冻结**。而本 skill 的顺序是 P3（版本管理）
-      // → P4（文档）→ P5（远端）——生成文档时远端**必然**还不存在。于是「有远端才有」
-      // 的那几段（发版规则、角色判定、标签与版本号一致）对所有新项目**永远缺席**，
-      // 而且再跑脚本只会说「无需改动」。
-      //
-      // 正确做法是把条件段落当作**派生内容**而非用户内容：每次按当前事实重新求值，
-      // 合并时以「这一节是否已被人工填写」为准——已填的保留，未填的用新求值的结果。
       const existing = readUtf8(agentsPath)
-      const refreshed = refreshFromTemplate(target, existing, kernel)
-      composed = refreshed.text
-      refreshReport = refreshed.report
+      const hasKernel = existing.includes(START) && existing.includes(END)
+
+      if (!hasKernel) {
+        // 手写的 AGENTS.md：不带内核标记。
+        //
+        // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
+        // 报错退出**（那会把最常见的场景变成死路），也不能擅自重写（那是覆盖用户的成果）。
+        // 默认只做体检并给出下一步；用户明确要升级时才动手，且只做加法。
+        if (!upgrade) return reportHandwritten(agentsPath, existing, target, kernel, budget, status, check)
+        const upgraded = upgradeHandwritten(existing, kernel, target)
+        composed = upgraded.text
+        refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [], missing: [] }
+      } else {
+        const refreshed = refreshFromTemplate(target, existing, kernel)
+        composed = refreshed.text
+        refreshReport = refreshed.report
+      }
       if (!composed.endsWith('\n')) composed += '\n'
     } else {
       if (check) {

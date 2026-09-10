@@ -39,12 +39,16 @@ Issue，避免重复。
 
 ## 开发环境
 
-这个项目**零依赖**，克隆下来就能改。需要 Node.js（用到 `node:` 内置模块与 ESM）。
+这个项目**零依赖**，克隆下来就能改。需要 **Node.js 16 或更高**——脚本只用 Node 内置
+模块，没有第三方依赖，也不需要 Python 或任何其他运行时。
 
 ```sh
 git clone https://github.com/FiretrUCK666/project-forge.git
 cd project-forge
 ```
+
+`git` 是可选但建议安装的：没有它时依赖它的那几组自检会**自动跳过并说明**，不会报成
+失败。
 
 ## 提交前门禁
 
@@ -83,8 +87,10 @@ node scripts/compose-agents.mjs .
 最关键的几条（**完整规范以 [`AGENTS.md`](AGENTS.md) 为准**）：
 
 1. **禁 emoji**：代码、注释、文档、提交信息一律不得出现 emoji 字符。
-2. **零依赖**：`scripts/` 只允许 `node:` 前缀的内置模块。这个 skill 会被 AI 在各种陌生
-   项目里调用，不能要求先装东西。
+2. **零依赖、只用 JavaScript**：`scripts/` 只允许 `node:` 前缀的内置模块与 `.mjs` 文件。
+   不引入第三方依赖，也**不引入第二个运行时**（README 对外承诺「Python 完全不需要」，
+   加一个 `.py` 脚本就让那句话变成假话）。这个 skill 会被 AI 在各种陌生项目里调用，
+   不能要求先装东西。`preflight.mjs` 会检查这两条。
 3. **不写死取值**：文档里凡是需要具体值的地方（账号、路径、版本号、仓库地址），一律写
    「从哪里取」。
 4. **入口不复述**：`SKILL.md` 只写原则与指针，细节在 `references/` 里。

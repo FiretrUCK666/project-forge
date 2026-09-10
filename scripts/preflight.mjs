@@ -334,7 +334,7 @@ function checkGlobalRules() {
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
-  for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs']) {
+  for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs']) {
     const p = join(dir, f)
     if (!existsSync(p)) { fail(`缺少 scripts/${f}。`); continue }
     const text = readText(p)
@@ -348,6 +348,19 @@ function checkScripts() {
       const spec = m[1]
       if (spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../')) continue
       fail(`scripts/${f} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
+    }
+  }
+
+  // scripts/ 里只允许 JavaScript。
+  //
+  // README 对外承诺「Python 完全不需要」，那条承诺必须由机制守住，否则某天有人为了
+  // 图方便加一个 .py 辅助脚本，承诺就悄悄变成假话，而没有任何检查会提示。
+  const entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+  for (const entry of entries) {
+    if (entry.isDirectory()) { fail(`scripts/ 下不应有子目录：${entry.name}。`); continue }
+    if (!/\.mjs$/.test(entry.name)) {
+      fail(`scripts/${entry.name} 不是 .mjs —— 这个 skill 只允许 JavaScript 脚本`
+        + '（README 承诺「Python 完全不需要」，别让那句变成假话）。')
     }
   }
 }
@@ -402,15 +415,25 @@ function checkBehavior() {
   const p = join(SKILL_ROOT, 'scripts', 'selftest.mjs')
   if (!existsSync(p)) { fail('缺少 scripts/selftest.mjs（行为自检）。'); return }
   const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
-  const tail = (r.stdout ?? '').trim().split('\n').slice(-1)[0] ?? ''
+  const out = r.stdout ?? ''
   if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
+  // 摘要是以「行为自检：」开头的那一行。不能用「最后一行」——环境不具备时后面还会跟
+  // 一段「跳过」清单，取最后一行会取到清单里的最后一项。
+  const summary = out.split('\n').find((l) => l.startsWith('行为自检：')) ?? '(未输出摘要)'
   if (r.status !== 0) {
-    const body = (r.stdout ?? '').split('失败项：')[1] ?? ''
+    const body = out.split('失败项：')[1] ?? ''
     const fails = body.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- '))
-    fail(`行为自检未通过（${tail.replace(/^行为自检：/, '')}）:\n       ${fails.join('\n       ')}`)
+    fail(`行为自检未通过（${summary.replace(/^行为自检：/, '')}）:\n       ${fails.join('\n       ')}`)
     return
   }
-  process.stdout.write(`行为自检：${tail.replace(/^行为自检：/, '')}\n`)
+  process.stdout.write(`${summary.replace(/^行为自检：/, '行为自检：')}\n`)
+  // 有跳过时一并转述：跳过是环境不具备，不是缺陷，但它改变了这次检查的覆盖面，
+  // 不说明就等于悄悄缩小了验证范围。
+  const skipBlock = out.split('跳过（环境不具备，不是缺陷）：')[1]
+  if (skipBlock !== undefined) {
+    const items = skipBlock.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- '))
+    for (const s of items) process.stdout.write(`         ${s}\n`)
+  }
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────

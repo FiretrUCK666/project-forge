@@ -644,9 +644,19 @@ function deriveCommands(root, root_, eco) {
   return out
 }
 
-/** 发布相关的既成事实：决定「产物入不入库」和「发布范围」。 */
+/**
+ * 发布相关的既成事实：决定「产物入不入库」和「发布范围」。
+ *
+ * 其中 `runtimeRequirements` 是**项目自己声明的运行环境下限**。它值得单独读出来，因为
+ * 文档套装要求「环境要求那一节必须写具体版本号、不许编造」——而项目自己声明的那个数字
+ * 就是唯一权威来源。让勘察把它带出来，写文档时就不必猜、也不会漏读。
+ * 读不到就是**没有声明**，此时按文档套装的规则：宁可不写那一节，也不要编一个数字。
+ */
 function detectArtifacts(root, root_, eco) {
-  const facts = { publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [] }
+  const facts = {
+    publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [],
+    runtimeRequirements: [],
+  }
   const pkg = eco.manifest
   if (pkg !== undefined) {
     if (Array.isArray(pkg.files)) facts.publishScope = { kind: 'files-whitelist', entries: pkg.files }
@@ -655,7 +665,28 @@ function detectArtifacts(root, root_, eco) {
       if (typeof pkg.scripts?.[hook] === 'string') facts.hooks.push(hook)
     }
     if (pkg.private === true) facts.private = true
+    if (typeof pkg.engines === 'object' && pkg.engines !== null) {
+      for (const [runtime, range] of Object.entries(pkg.engines)) {
+        facts.runtimeRequirements.push({
+          declaredIn: 'package.json 的 engines', runtime, range: String(range),
+        })
+      }
+    }
   }
+  // 其他生态的下限声明：写法各不相同，所以只在清单里逐行找那个字段，把「运行时 + 约束」
+  // 作为事实带出来，**不解释具体语法**（那属于各生态自己的事）。
+  const readRange = (fileName, re, runtime, label) => {
+    const real = root_.real(fileName)
+    if (real === undefined) return
+    const m = re.exec(readText(join(root, real)) ?? '')
+    if (m === null) return
+    facts.runtimeRequirements.push({ declaredIn: label, runtime, range: m[1] })
+  }
+  readRange('pyproject.toml', /^\s*requires-python\s*=\s*["']([^"']+)["']/m, 'python', 'pyproject.toml 的 requires-python')
+  readRange('cargo.toml', /^\s*rust-version\s*=\s*["']([^"']+)["']/m, 'rust', 'Cargo.toml 的 rust-version')
+  readRange('go.mod', /^go\s+(\S+)/m, 'go', 'go.mod 的 go 指令')
+  // JS 的 engines 已在上面按对象读取，这里不再重复。
+
   for (const d of ['dist', 'lib', 'build', 'out']) {
     const e = root_.entry(d)
     if (e?.isDir === true) facts.distDirsPresent.push(e.name)
@@ -931,6 +962,14 @@ function toMarkdown(s) {
   L.push(`- 产物目录存在：${a.distDirsPresent === undefined || a.distDirsPresent.length === 0
     ? '无' : a.distDirsPresent.join('、')}`)
   L.push(`- 忽略配置文件：${a.hasNpmIgnore === true ? '有' : '无'}`)
+  const reqs = a.runtimeRequirements ?? []
+  if (reqs.length === 0) {
+    L.push('- 声明的运行环境下限：**未声明**'
+      + '（写面向使用者的文档时，取不到就不要写那一节，也不要编一个数字）')
+  } else {
+    L.push('- 声明的运行环境下限（写环境要求那一节的唯一权威来源）：')
+    for (const r of reqs) L.push(`  - ${r.runtime} ${r.range}（${r.declaredIn}）`)
+  }
   L.push('')
   L.push('## 文档现状')
   L.push('')

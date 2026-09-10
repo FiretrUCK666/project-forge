@@ -24,14 +24,35 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const ROOT = join(tmpdir(), `project-forge-selftest-${process.pid}`)
 
+/**
+ * 环境能力探测。
+ *
+ * 「有没有 git」直接决定哪些断言可以跑：没有 git 时，`git init` 不起作用，涉及仓库
+ * 状态的断言会全部失败——**那是环境缺失，不是代码缺陷**。把它们报成失败会误导人，
+ * 也会让人开始怀疑一个其实正确的实现。所以按能力分组跳过，并说明跳过了什么。
+ */
+const HAS_GIT = (() => {
+  const r = spawnSync('git', ['--version'], { encoding: 'utf8', windowsHide: true })
+  return r.error === undefined && r.status === 0
+})()
+
 let passed = 0
 let failed = 0
+let skipped = 0
 const failures = []
+const skips = []
 
 function check(ok, label, detail) {
   if (ok) { passed += 1; return }
   failed += 1
   failures.push(`${label}${detail === undefined ? '' : `  —— ${detail}`}`)
+}
+
+/** 整组跳过（环境不具备），与「断言失败」严格区分。 */
+function skipGroup(title, why) {
+  skipped += 1
+  skips.push(`${title}（${why}）`)
+  process.stdout.write(`\n${title}\n  跳过：${why}\n`)
 }
 
 function group(title) {
@@ -96,6 +117,9 @@ group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
 
 // ── 二、仓库边界（曾把外层仓库的远端当成目标目录的） ─────────────────────────
 
+if (!HAS_GIT) {
+  skipGroup('[2] 目录在别人的仓库里时必须识别出来', '环境里没有 git')
+} else {
 group('[2] 目录在别人的仓库里时必须识别出来')
 {
   const outer = fixture('outer', { 'inner/README.md': '# inner\n', 'outer.txt': 'x\n' })
@@ -114,7 +138,11 @@ group('[2] 目录在别人的仓库里时必须识别出来')
   check(s.git?.remote !== undefined, '（外层仓库确实有远端，说明这个误判有实际后果）')
   report(s.git?.isRepoRoot === false, '子目录不被当成仓库根')
 }
+}
 
+if (!HAS_GIT) {
+  skipGroup('[3] 仓库根的各种路径写法都必须判真', '环境里没有 git')
+} else {
 group('[3] 仓库根的各种路径写法都必须判真')
 {
   const repo = fixture('repo-root', { 'README.md': '# r\n' })
@@ -141,6 +169,7 @@ group('[3] 仓库根的各种路径写法都必须判真')
   }
   process.stdout.write(`  （本机文件系统${caseInsensitive ? '不区分' : '区分'}大小写，`
     + `${caseInsensitive ? '已' : '未'}断言大小写场景）\n`)
+}
 }
 
 // ── 四、生态判定（曾把有代码的项目判成纯文档目录） ───────────────────────────
@@ -216,17 +245,27 @@ group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
   writeFileSync(agents, readFileSync(agents, 'utf8')
     .replace(/<!--\s*pf:author[\s\S]*?-->/g, '（已填写的真实内容）'), 'utf8')
 
-  spawnSync('git', ['init', '-q'], { cwd: dir })
-  spawnSync('git', ['remote', 'add', 'origin', 'https://example.invalid/x.git'], { cwd: dir })
+  if (HAS_GIT) {
+    spawnSync('git', ['init', '-q'], { cwd: dir })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://example.invalid/x.git'], { cwd: dir })
+  } else {
+    // 没有 git 时用一个等价的替代信号：手写一个 .git 目录不足以让 git 认它，所以改为
+    // 直接跳过「远端出现」这一组断言，其余（人写内容保留、幂等）照常验证。
+    process.stdout.write('  （环境里没有 git，跳过「建好远端后角色判定出现」这一条）\n')
+  }
   compose(dir)
   const t = readFileSync(agents, 'utf8')
   const checks = [
-    ['建好远端后「角色判定」出现（曾永久冻结）', /^### 角色判定/m.test(t)],
-    ['发版规则出现', /^### 发版规则/m.test(t)],
     ['人写的内容保留', /（已填写的真实内容）/.test(t)],
     ['没有重复的版本节', (t.match(/^## 版本管理（必守）$/gm) ?? []).length === 1],
     ['没有内核被追加多份', (t.match(/project-forge:kernel:start/g) ?? []).length === 1],
   ]
+  if (HAS_GIT) {
+    checks.unshift(
+      ['建好远端后「角色判定」出现（曾永久冻结）', /^### 角色判定/m.test(t)],
+      ['发版规则出现', /^### 发版规则/m.test(t)],
+    )
+  }
   for (const [label, ok] of checks) { check(ok, label); report(ok, label) }
 
   const r = compose(dir)
@@ -292,11 +331,44 @@ group('[9] 多生态：命令按生态分组，不互相覆盖')
   for (const [label, ok] of checks) { check(ok, label); report(ok, label) }
 }
 
+group('[10] 运行环境下限：读项目自己的声明，读不到就是没有')
+{
+  const nodeProj = fixture('env-node', {
+    'package.json': JSON.stringify({ name: 'e', version: '1.0.0', engines: { node: '>=20' } }),
+  })
+  const reqs = survey(nodeProj).artifacts?.runtimeRequirements ?? []
+  const ok1 = reqs.some((r) => r.runtime === 'node' && r.range === '>=20')
+  check(ok1, '读出 package.json 的 engines.node', JSON.stringify(reqs))
+  report(ok1, '读出 package.json 的 engines.node')
+
+  const pyProj = fixture('env-py', {
+    'pyproject.toml': '[project]\nname = "e"\nrequires-python = ">=3.10"\n',
+  })
+  const reqs2 = survey(pyProj).artifacts?.runtimeRequirements ?? []
+  const ok2 = reqs2.some((r) => r.runtime === 'python' && r.range === '>=3.10')
+  check(ok2, '读出 pyproject.toml 的 requires-python', JSON.stringify(reqs2))
+  report(ok2, '读出 pyproject.toml 的 requires-python')
+
+  // 没声明时必须是空数组，不能凭空给一个值——文档套装禁止编造版本号，
+  // 而「编造」的入口正是勘察这里给了一个看似合理的默认值。
+  const bare = fixture('env-none', { 'README.md': '# x\n', 'src/a.js': 'export const a=1\n' })
+  const reqs3 = survey(bare).artifacts?.runtimeRequirements ?? []
+  const ok3 = reqs3.length === 0
+  check(ok3, '未声明时为空（不得凭空给默认值）', JSON.stringify(reqs3))
+  report(ok3, '未声明时为空，不编造')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })
 
-process.stdout.write(`\n行为自检：${passed} 项通过，${failed} 项失败\n`)
+const envNote = HAS_GIT ? '' : '（本机没有 git，已跳过依赖它的分组）'
+process.stdout.write(`\n行为自检：${passed} 项通过，${failed} 项失败`
+  + `${skipped > 0 ? `，${skipped} 组跳过` : ''}${envNote}\n`)
+if (skips.length > 0) {
+  process.stdout.write('\n跳过（环境不具备，不是缺陷）：\n')
+  for (const s of skips) process.stdout.write(`  - ${s}\n`)
+}
 if (failed > 0) {
   process.stdout.write('\n失败项：\n')
   for (const f of failures) process.stdout.write(`  - ${f}\n`)

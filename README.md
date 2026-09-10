@@ -17,16 +17,24 @@ project-forge 把这些收敛成一条流程，并且把判断依据写下来—
 
 ## 安装
 
-这是一个 DeepSeek Harness 的 skill。把它放进用户级 skill 根即可被识别：
+这是一个 skill，用的是通用的 `SKILL.md` 格式：一个入口文件，加上 `references/`、
+`templates/`、`scripts/` 三个同级目录。frontmatter 里只写了 `name` 与 `description`
+两个字段——这是这套格式各家共通的核心字段，所以**凡是支持该格式的宿主都能加载它**。
+脚本是纯 Node，不调用任何宿主接口。
+
+安装就是把整个目录放进**你所用宿主的用户级 skill 根**。这个位置由宿主决定，通常是
+该宿主配置目录下的 `skills` 子目录。以 DeepSeek Harness 为例（它的根默认为
+`~/.dsh/skills`）：
 
 ```sh
-git clone https://github.com/FiretrUCK666/project-forge.git "%USERPROFILE%\.dsh\Skills\project-forge"
+git clone https://github.com/FiretrUCK666/project-forge.git ~/.dsh/skills/project-forge
 ```
 
-macOS 或 Linux 上把目标路径换成 `~/.dsh/Skills/project-forge`（注意：Windows 上目录名
-是 `Skills`，大小写不敏感；其他系统上若你的 skill 根是小写 `skills`，放那里即可）。
+Windows 上把目标路径换成 `"%USERPROFILE%\.dsh\skills\project-forge"`。
 
-放好之后不需要注册或重启——宿主按目录发现，`SKILL.md` 就是入口。
+用别的宿主时，把它放到那个宿主的 skill 根即可。目录名保持 `project-forge`——它必须与
+frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主按目录发现，`SKILL.md`
+就是入口。
 
 ## 使用
 

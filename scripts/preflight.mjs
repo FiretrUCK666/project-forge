@@ -146,7 +146,9 @@ function checkSkillFile() {
 function checkReferencesResolve() {
   const docs = collectTextFiles(SKILL_ROOT).filter((f) => f.endsWith('.md'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
-  // 只认这三种路径形状：本 skill 的资源就在这三类目录下
+  // 只认这三种路径形状：本 skill 的资源就在这三类目录下。
+  // 占位示例请写成 `references/<文件名>.md`——尖括号不在字符类里，因此不会被当成真实
+  // 路径去检查。这是刻意的：占位符不是引用，报它属于误报。
   const re = /`((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)`/g
   let total = 0
   for (const full of docs) {

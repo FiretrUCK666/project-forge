@@ -5,7 +5,7 @@ description: |
   触发词：弄版本管理、配 git、上仓库、建仓库、推到 GitHub、初始化项目、项目起步、
   新项目配置、标准化项目、规范项目、整理项目、给项目弄好、写 AGENTS.md、写 README、
   写贡献指南、配 LICENSE、配 CI、发到 npm、发布。
-  覆盖各种技术栈：Node、Python、Rust、Go、Java、纯文档目录，以及 DSH 插件与 skill 项目。
+  覆盖各种技术栈：Node、Python、Rust、Go、Java、纯文档目录，以及插件类项目与 skill 项目。
   只读勘察先行，按事实判定该做与不该做；幂等、可重复执行；默认私有仓库。
 ---
 
@@ -82,7 +82,7 @@ description: |
 | `docs-only`（纯文档 / 素材） | 做 | 做 | 做 | **不做** |
 | `node` | 做 | 做 | 做 | 视声明而定 |
 | `python` / `rust` / `go` / `java` / `ruby` / `php` / `dotnet` / `cpp` | 做 | 做 | 做 | 视声明而定 |
-| `dsh-plugin` / `vscode-extension` / `obsidian-plugin`（**插件类**） | 做，**产物必须入库** | 做 | 做 | 可发布（见专章） |
+| `dsh-plugin` / `vscode-extension` / `obsidian-plugin` 等（**插件类**，即被宿主加载的扩展；无专章按判定协议处理） | 做，**产物必须入库** | 做 | 做 | 可发布（见专章） |
 | `dsh-skill` | 做 | 做 | 做 | 通常不发布（远端即分发） |
 | `unknown` 或 `unrecognized` | **先问用户**这是什么项目；用户说明后，按他声明的生态对应行执行，并把该结论记作本次判定依据 | 同左 | 同左 | 同左 |
 | **`git.isRepoRoot` 为假**（目录在别人的仓库里） | **停下**：这些 git 事实属于外层仓库，先问清边界 | 同左 | 同左 | 同左 |

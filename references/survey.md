@@ -80,7 +80,8 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 
 可能的值：`node`、`python`、`rust`、`go`、`java`、`ruby`、`php`、`dotnet`、
 `dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`dsh-skill`、`cpp`、`shell`、
-`docs-only`、`unrecognized`、`unknown`。
+`docs-only`、`unrecognized`、`unknown`（新生态出现时往此追加；未知宿主不硬塞已知类型，
+按 `references/plugin-project.md` 第九节处理）。
 
 后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
 共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见

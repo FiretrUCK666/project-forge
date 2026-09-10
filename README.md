@@ -39,6 +39,23 @@ Windows 上把目标路径换成 `"%USERPROFILE%\.dsh\skills\project-forge"`。
 frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主按目录发现，`SKILL.md`
 就是入口。
 
+## 更新
+
+这个 skill 靠克隆分发，**不在任何包管理器里**，所以更新就是拉取最新代码：
+
+```sh
+cd <你放 skill 的目录>/project-forge
+git pull
+```
+
+**怎么知道有新版**：看仓库的 [Releases](https://github.com/FiretrUCK666/project-forge/releases)。
+每个有使用者能感知变化的版本都会打一个标签并写一段发布说明，说明这次改了什么、
+要不要跟着更新。提交历史更详细，但那是给维护者看的。
+
+**升级安全吗**：`SKILL.md`、`references/`、`templates/`、`scripts/` 都是纯文本与
+零依赖脚本，没有需要重新编译或迁移的东西，直接 `git pull` 即可。若你按下面的
+「开发」改过它，拉取前先提交自己的改动，避免冲突。
+
 ## 使用
 
 直接用自然语言描述你的需求即可，触发词包括：

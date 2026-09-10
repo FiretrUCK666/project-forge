@@ -670,6 +670,39 @@ group('[18] 手工改坏的文件：一律拒绝写坏，并说清怎么修')
   report(ok4, '正常文件不受影响')
 }
 
+group('[19] 发版规则：有版本号与没有版本号，两种写法都要有')
+{
+  // 有版本号 → 标签名对齐清单里那一处
+  const withV = fixture('ver-with', {
+    'package.json': JSON.stringify({ name: 'a', version: '1.2.3' }),
+  })
+  compose(withV)
+  const t1 = readFileSync(join(withV, 'AGENTS.md'), 'utf8')
+  const ok1 = /标签名必须与清单文件里的版本号一致/.test(t1)
+  check(ok1, '有版本号 → 标签名要对齐它')
+  report(ok1, '有版本号：标签名对齐清单')
+  const ok2 = !/本项目没有版本号/.test(t1)
+  check(ok2, '有版本号 → 不出现「没有版本号」分支')
+  report(ok2, '有版本号：不误报「没有版本号」')
+
+  // 没有版本号 → 命名自定，且**不得**出现「必须与版本号一致」（那会让执行者无从下手）
+  const noV = fixture('ver-none', {
+    'go.mod': 'module x\n\ngo 1.22\n',
+    'main.go': 'package main\n',
+  })
+  compose(noV)
+  const t2 = readFileSync(join(noV, 'AGENTS.md'), 'utf8')
+  const ok3 = /本项目没有版本号/.test(t2) && /单调、不重复、可排序/.test(t2)
+  check(ok3, '没有版本号 → 给出自定命名规则')
+  report(ok3, '没有版本号：给出命名规则')
+  const ok4 = !/标签名必须与清单文件里的版本号一致/.test(t2)
+  check(ok4, '没有版本号 → 不出现「必须与版本号一致」')
+  report(ok4, '没有版本号：不出现矛盾要求')
+  const ok5 = /不要编一个出来/.test(t2)
+  check(ok5, '没有版本号 → 明确禁止编造一个')
+  report(ok5, '没有版本号：禁止编造')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

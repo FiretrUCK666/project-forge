@@ -802,8 +802,26 @@ function deriveCommands(root, root_, eco) {
 function detectArtifacts(root, root_, eco) {
   const facts = {
     publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [],
-    runtimeRequirements: [], publishableManifest: undefined,
+    runtimeRequirements: [], publishableManifest: undefined, declaredVersion: undefined,
   }
+
+  // 项目声明的版本号。它是标签命名与「抬版本号」判据的唯一权威来源——
+  // 读不到就是**没有声明**，此时不能编一个（那会造出一个没人维护、却看起来权威的数字）。
+  // 各生态的字段名不同，所以只在清单里找那个字段，不解释语义。
+  const readVersion = (fileName, re, label) => {
+    if (facts.declaredVersion !== undefined) return
+    const real = root_.real(fileName)
+    if (real === undefined) return
+    const m = re.exec(readText(join(root, real)) ?? '')
+    if (m === null) return
+    facts.declaredVersion = m[1]
+    facts.declaredVersionIn = label
+  }
+  readVersion('package.json', /"version"\s*:\s*"([^"]+)"/, 'package.json 的 version')
+  readVersion('pyproject.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'pyproject.toml 的 version')
+  readVersion('cargo.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'Cargo.toml 的 version')
+  readVersion('composer.json', /"version"\s*:\s*"([^"]+)"/, 'composer.json 的 version')
+  // Go 没有版本号字段（靠标签），故不读——读不到就是「没有声明」，这是正确结果。
 
   // 可发布清单：按知名度顺序取第一个存在的。它不一定与「主生态」相同（一个 Python 项目
   // 也可能因为某个原因带 package.json），所以单独判定，不从 kinds 推。

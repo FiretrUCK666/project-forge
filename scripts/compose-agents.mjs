@@ -205,6 +205,12 @@ function deriveFacts(target) {
   const hasGit = s.git?.present === true
   const hasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0
 
+  // 「有没有版本号」决定发版规则怎么写：有版本号时标签名要对齐它，没有时命名自定。
+  // 这两个分支必须都在——只写「标签名必须与版本号一致」会让没有版本号的项目无从下手，
+  // 而没有版本号的项目并不少见（不发布制品的工具、纯文档项目、以及 skill 本身）。
+  const hasVersion = typeof s.artifacts?.declaredVersion === 'string'
+    && s.artifacts.declaredVersion.trim() !== ''
+
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
   // 产出错名字；而模板里的未知条件会直接报错，等于把错误推迟到运行时。
@@ -217,6 +223,8 @@ function deriveFacts(target) {
     'no-remote': !hasRemote,
     'has-commands': hasCommands,
     'no-commands': !hasCommands,
+    'has-version': hasVersion,
+    'no-version': !hasVersion,
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
     publishable,

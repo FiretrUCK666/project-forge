@@ -24,6 +24,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -289,12 +290,49 @@ function checkScripts() {
     const text = readText(p)
     if (!text.startsWith('#!/usr/bin/env node')) warn(`scripts/${f} 缺少 node shebang。`)
     if (statSync(p).size < 200) fail(`scripts/${f} 内容异常短。`)
-    // 脚本必须只用内置模块：这个 skill 不能要求使用者先装依赖
+    // 零依赖的含义是「不要求使用者先装东西」，因此允许两类：
+    //   - `node:` 前缀的内置模块；
+    //   - 相对路径（本 skill 自己的其他脚本，随仓库一起走）。
+    // 其余裸模块名一律拒绝：那是要装的东西。
     for (const m of text.matchAll(/from\s+'([^']+)'/g)) {
       const spec = m[1]
-      if (!spec.startsWith('node:')) {
-        fail(`scripts/${f} 引入了非内置模块「${spec}」—— 这个 skill 必须零依赖。`)
-      }
+      if (spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../')) continue
+      fail(`scripts/${f} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
+    }
+  }
+}
+
+// ── 检查八：脚本真的能跑起来 ────────────────────────────────────────────────
+
+/**
+ * 静态检查抓不到「import 写错、运行时抛错、参数解析有 bug」这类问题——本 skill 的
+ * survey.mjs 就曾因为少一个 import 直接崩溃，而当时的自检全绿放行了它。
+ * 所以这里实际执行一遍，只看退出码与是否吐出应有结构的输出。
+ *
+ * 只跑只读或幂等的模式：--markdown 只读，--check/--status 不写文件。
+ */
+function checkScriptsRun() {
+  const cases = [
+    { file: 'survey.mjs', args: [SKILL_ROOT, '--markdown'], expect: /勘察结果/ },
+    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--check'], expect: /内核一致|校验失败/ },
+    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--status'], expect: /字节/ },
+  ]
+  for (const { file, args, expect } of cases) {
+    const p = join(SKILL_ROOT, 'scripts', file)
+    if (!existsSync(p)) continue
+    const r = spawnSync(process.execPath, [p, ...args], { encoding: 'utf8', env: process.env })
+    const label = `${file} ${args.slice(1).join(' ') || '(无参数)'}`
+    if (r.error !== undefined) {
+      fail(`scripts/${file} 无法执行：${r.error.message}`)
+      continue
+    }
+    if (r.status !== 0 && !expect.test(r.stdout ?? '')) {
+      const detail = (r.stderr ?? '').trim().split('\n').slice(0, 3).join(' / ')
+      fail(`scripts/${file} 以退出码 ${r.status} 结束（${label}）：${detail}`)
+      continue
+    }
+    if (r.status === 0 && !expect.test(r.stdout ?? '')) {
+      fail(`scripts/${file} 退出码为 0，但没有输出预期内容（${label}）—— 可能被静默改坏。`)
     }
   }
 }
@@ -309,6 +347,7 @@ function main() {
   checkAgentsKernel()
   checkGlobalRules()
   checkScripts()
+  checkScriptsRun()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。
   if (skill !== undefined && !/^## 何时使用[ \t]*$/m.test(skill.text)) {

@@ -28,13 +28,9 @@ jobs:
       - name: 内核与模板是否逐字一致
         run: node scripts/compose-agents.mjs . --check
 
-      - name: 勘察脚本能否在本项目上正常运行
-        run: node scripts/survey.mjs . --markdown
-
-      - name: 三个脚本都必须零依赖
+      - name: 三个脚本都必须能跑起来
         run: |
-          if grep -rnE "from ['\"][^'\"]+['\"]" scripts/*.mjs | grep -vE "from ['\"]node:"; then
-            echo "发现非内置模块的 import，这个 skill 必须零依赖。"
-            exit 1
-          fi
-          echo "零依赖检查通过。"
+          node scripts/survey.mjs . --markdown > /dev/null
+          node scripts/compose-agents.mjs . --status > /dev/null
+          node scripts/compose-agents.mjs . --check > /dev/null
+          echo "三个脚本均正常退出。"

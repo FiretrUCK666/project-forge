@@ -32,6 +32,9 @@ git clone https://github.com/FiretrUCK666/project-forge.git ~/.dsh/skills/projec
 
 Windows 上把目标路径换成 `"%USERPROFILE%\.dsh\skills\project-forge"`。
 
+**目录名的大小写以本机实际存在的那个为准。** 在区分大小写的系统上，`Skills` 与
+`skills` 是两个不同的路径，写错就会装到一个宿主不会扫描的地方。
+
 用别的宿主时，把它放到那个宿主的 skill 根即可。目录名保持 `project-forge`——它必须与
 frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主按目录发现，`SKILL.md`
 就是入口。

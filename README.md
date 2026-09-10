@@ -3,7 +3,7 @@
 把一个项目目录锻造成规范项目：版本管理、远端仓库、文档套装、发布通道，一次配到位。
 
 给它一个目录，它先只读勘察，看清这个项目现在是什么状态，再自己判断该做哪几件事、
-跳过哪几件事。它不预设技术栈——Node、Python、Rust、Go、纯文档目录，或者一个 DSH 插件，
+跳过哪几件事。它不预设技术栈——Node、Python、Rust、Go、纯文档目录，甚至插件类项目，
 判断依据都是勘察出来的事实。
 
 ## 它解决什么问题
@@ -18,40 +18,22 @@ project-forge 把这些收敛成一条流程，并且把判断依据写下来—
 ## 安装
 
 这是一个 skill，用的是通用的 `SKILL.md` 格式：一个入口文件，加上 `references/`、
-`templates/`、`scripts/` 三个同级目录。frontmatter 里只写了 `name` 与 `description`
-两个字段——这是这套格式各家共通的核心字段，所以**凡是支持该格式的宿主都能加载它**。
-脚本是纯 Node，不调用任何宿主接口。
+`templates/`、`scripts/` 三个同级目录。frontmatter 里只用了 `name` 与 `description`
+这两个各家共通的字段，脚本是纯 Node、不调用任何宿主接口。
 
-**装到哪**：你所用宿主的**用户级 skill 根**。这个位置由宿主决定，本 skill 不作假定：
+把整个目录放进**你所用宿主的用户级 skill 根**：
 
-- **宿主里已经装了别的 skill** → 放到它们所在的目录。这是最可靠的判断，不用记路径。
-- **一个都没有** → 查该宿主的文档。支持 skill 的宿主都有一个用户级目录，位置写在它的
-  文档里（不少宿主还允许用环境变量改它，那就以环境变量为准）。
-
-**以 DeepSeek Harness 为例。** 它扫两个并列的用户级位置，两个都是「基目录 + `skills`」，
-基目录都能被环境变量覆盖（下表是未设置时的默认值）：
-
-| 位置 | 说明 |
-| --- | --- |
-| `$DSH_HOME/skills` | `DSH_HOME` 未设置时即 `~/.dsh/skills` |
-| `$DSH_AGENTS_HOME/skills` | `DSH_AGENTS_HOME` 未设置时即 `~/.agents/skills` |
-
-放哪个都行，选你已经在用的那个。以第一个为例：
+- **已经装过别的 skill** → 放到它们所在的目录。这是最可靠的判断，不用记路径。
+- **一个都没有** → 查该宿主的文档，位置写在它的文档里。
 
 ```sh
-git clone https://github.com/FiretrUCK666/project-forge.git "$DSH_HOME/skills/project-forge"
+git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/project-forge"
 ```
 
-`DSH_HOME` 没设时，把 `"$DSH_HOME/skills/…"` 换成 `~/.dsh/skills/project-forge`；
-Windows 上是 `"%USERPROFILE%\.dsh\skills\project-forge"`（只是分隔符不同）。
+目录名保持 `project-forge`——它必须与 frontmatter 里的 `name` 一致。**注意路径的大小写**：
+区分大小写的系统上，大小写不同就是另一个目录。
 
-**子目录名必须是小写 `skills`。** 宿主读的就是这个字面量。Windows 与默认配置的 macOS 上
-`Skills` 也能命中（文件系统不区分大小写），但**在区分大小写的系统上，`Skills` 是另一个
-宿主不会扫描的目录**——所以一律写小写。
-
-用别的宿主时同理：放到它的 skill 根，**子目录名照它文档写的那个写法**。目录名保持
-`project-forge`——它必须与 frontmatter 里的 `name` 一致。放好之后不需要注册或重启：
-宿主按目录发现，`SKILL.md` 就是入口。
+放好之后不需要注册或重启：宿主按目录发现，`SKILL.md` 就是入口。
 
 ## 更新
 

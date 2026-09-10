@@ -72,8 +72,10 @@ AI 会去读项目、能找到真值；人需要一眼看到能粘贴的东西�
 ### 内核必须由脚本注入，不能手抄
 
 ```sh
-node scripts/compose-agents.mjs <项目目录>          # 注入
-node scripts/compose-agents.mjs <项目目录> --check  # 只校验，不一致时退出码 1
+# <本领目录> = 本 skill 自己的位置，与目标项目是两个不同的目录
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"          # 生成或刷新
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --check  # 只校验，不一致时退出码 1
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --status # 只看还差几处待填写
 ```
 
 理由：内核那三段对任何项目都成立，靠手抄必然漂移——改了一处漏了另一处，几个月后各个

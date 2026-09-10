@@ -42,7 +42,19 @@ const KERNEL_END = '<!-- project-forge:kernel:end -->'
 /** 本文件自身含私有路径的形状定义，按惯例豁免；理由与豁免范围一并写在这里。 */
 const SELF_EXEMPT = new Set(['scripts/preflight.mjs', 'scripts/survey.mjs'])
 
+/**
+ * 参与文本检查的文件。
+ *
+ * 按扩展名判断会漏掉一整类重要的文件：`.gitignore`、`.gitattributes`、`LICENSE`、
+ * `Makefile` 这些**没有扩展名**或名字特殊的文件，恰恰是配置与许可证所在。
+ * 所以除了扩展名，另外按已知的特殊文件名与「无扩展名但不大」的规则收进来。
+ */
 const TEXT_EXTENSIONS = new Set(['.md', '.mjs', '.js', '.json', '.yml', '.yaml', '.txt'])
+const TEXT_SPECIAL_NAMES = new Set([
+  '.gitignore', '.gitattributes', '.npmignore', '.editorconfig', '.env.example',
+  'license', 'licence', 'makefile', 'dockerfile', 'procfile',
+])
+const MAX_TEXTLESS_BYTES = 256 * 1024
 
 /** SKILL.md 之外允许存在的顶层条目。多出来的东西要有人解释它为什么在这。 */
 const ALLOWED_TOP_LEVEL = new Set([
@@ -75,8 +87,16 @@ function collectTextFiles(root, out = []) {
     const full = join(root, entry.name)
     if (entry.isDirectory()) { collectTextFiles(full, out); continue }
     if (!entry.isFile()) continue
-    const ext = entry.name.slice(entry.name.lastIndexOf('.'))
-    if (TEXT_EXTENSIONS.has(ext)) out.push(full)
+    const lower = entry.name.toLowerCase()
+    const dot = entry.name.lastIndexOf('.')
+    const ext = dot <= 0 ? '' : entry.name.slice(dot).toLowerCase()
+    if (TEXT_EXTENSIONS.has(ext) || TEXT_SPECIAL_NAMES.has(lower)) { out.push(full); continue }
+    // 无扩展名的文件也纳入，但要排除明显的二进制大文件
+    if (dot <= 0) {
+      try {
+        if (statSync(full).size <= MAX_TEXTLESS_BYTES) out.push(full)
+      } catch { /* 读不到就跳过 */ }
+    }
   }
   return out
 }

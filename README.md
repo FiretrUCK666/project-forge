@@ -90,14 +90,17 @@ frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主
 
 ```sh
 # 勘察一个项目（只读，不写任何文件）
-node scripts/survey.mjs <项目目录> --markdown
+node <本领目录>/scripts/survey.mjs <项目目录> --markdown
 
-# 把通用内核注入项目的 AGENTS.md（幂等；--check 只校验不写）
-node scripts/compose-agents.mjs <项目目录>
+# 生成或刷新项目的 AGENTS.md（幂等；--check 只校验不写，--status 只看还差几处待填写）
+node <本领目录>/scripts/compose-agents.mjs <项目目录>
 
 # 自检这个 skill 自身
-node scripts/preflight.mjs
+node <本领目录>/scripts/preflight.mjs
 ```
+
+`<本领目录>` 是这个 skill 所在的位置，`<项目目录>` 是你想处理的那个项目——两者通常
+不是同一个目录。路径都是显式传入的，所以在哪个工作目录下执行都可以。
 
 `survey.mjs` 只负责回答「读到了什么」，不负责「所以该怎么办」——判据在 `references/`
 里。这条分工是刻意的：事实不随项目类型变化，判据会。

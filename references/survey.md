@@ -21,9 +21,13 @@
 ## 二、怎么勘察
 
 ```sh
-node scripts/survey.mjs <项目目录> --markdown   # 给人看的摘要
-node scripts/survey.mjs <项目目录> --json       # 给机器消费
+# <本领目录> = 本 skill 自己的位置，与目标项目是两个不同的目录
+node "<本领目录>/scripts/survey.mjs" "<项目目录>" --markdown   # 给人看的摘要
+node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机器消费
 ```
+
+路径都显式传入，所以**在哪个工作目录下执行都可以**——但两个路径不要混起来：脚本来自
+本 skill，参数指向被勘察的项目。
 
 脚本只用运行环境内置的模块，零依赖，不会因为项目里缺什么而跑不起来。
 

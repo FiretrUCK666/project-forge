@@ -1,0 +1,40 @@
+# 持续集成：把「本机能过」变成「换台机器也能过」。
+#
+# 这个项目没有构建步骤，所以检查很轻：自检 + 内核一致性 + 勘察脚本自跑一遍。
+# 全程只用 Node，几秒钟跑完。私有仓库的自动构建有额度，所以这里只放必要项。
+
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 自检
+        run: node scripts/preflight.mjs
+
+      - name: 内核与模板是否逐字一致
+        run: node scripts/compose-agents.mjs . --check
+
+      - name: 勘察脚本能否在本项目上正常运行
+        run: node scripts/survey.mjs . --markdown
+
+      - name: 三个脚本都必须零依赖
+        run: |
+          if grep -rnE "from ['\"][^'\"]+['\"]" scripts/*.mjs | grep -vE "from ['\"]node:"; then
+            echo "发现非内置模块的 import，这个 skill 必须零依赖。"
+            exit 1
+          fi
+          echo "零依赖检查通过。"

@@ -1,0 +1,38 @@
+# 文本属性：先声明行尾，再提交。
+#
+# 理由：行尾不一致会让「同一份源码在不同机器上构建出不同字节的产物」，
+# 尤其是内嵌了源码原文的产物（源码映射、生成的代码、快照）。
+# 这份声明必须在首次提交之前就位，晚了就得重新规范化一次工作区。
+
+* text=auto eol=lf
+
+# 必须在 Windows 上保留 CRLF 的脚本类型
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制：不做行尾转换，也不参与文本差异与合并
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.7z binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+*.wasm binary

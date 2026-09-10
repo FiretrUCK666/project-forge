@@ -1,0 +1,33 @@
+# 这个 skill 零依赖：脚本只用运行环境内置的模块。
+# 下面这些条目是为了「万一将来有人装了依赖」时不把依赖目录带进仓库。
+
+node_modules/
+.pnpm-store/
+.yarn/
+bower_components/
+
+# Python（scripts 目前全是 Node，但保留以免将来混入）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器与操作系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# 临时与产物
+*.log
+*.tmp
+*.bak
+*.tgz
+coverage/
+.cache/

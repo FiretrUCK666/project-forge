@@ -218,6 +218,36 @@ function checkTemplates() {
   for (const f of ['agents-kernel.md', 'agents-project.md', 'readme.md', 'contributing.md']) {
     if (!existsSync(join(dir, f))) fail(`缺少 templates/${f}。`)
   }
+  // 许可证模板：docs-set 让使用者从这里取用而不是凭记忆写，缺了就等于没守住那条规则。
+  //
+  // 占位符按模板逐个声明，不用统一规则：Unlicense 是「放弃权利」，**全文没有版权行**
+  // ——没有年份也没有持有人，这是它与其他许可证的实质区别。给它硬塞占位符反而是错的。
+  const LICENSE_TEMPLATES = [
+    { file: 'license-mit.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
+    { file: 'license-isc.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
+    { file: 'license-bsd-2-clause.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
+    { file: 'license-bsd-3-clause.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
+    { file: 'license-unlicense.txt', tokens: [], note: '放弃权利，无版权行' },
+  ]
+  for (const { file, tokens } of LICENSE_TEMPLATES) {
+    const p = join(dir, file)
+    if (!existsSync(p)) { fail(`缺少 templates/${file}（许可证模板，docs-set 引用它）。`); continue }
+    const text = readText(p)
+    for (const token of tokens) {
+      if (!text.includes(token)) fail(`templates/${file} 缺少占位符 ${token}。`)
+    }
+    if (text.trim().length < 200) fail(`templates/${file} 内容异常短，可能不是完整许可证文本。`)
+  }
+  // docs-set 里列出的模板表必须与实际文件一致
+  const docsSet = join(SKILL_ROOT, 'references', 'docs-set.md')
+  if (existsSync(docsSet)) {
+    const text = readText(docsSet)
+    for (const m of text.matchAll(/`(templates\/license-[a-z0-9-]+\.txt)`/g)) {
+      if (!existsSync(join(SKILL_ROOT, m[1]))) {
+        fail(`references/docs-set.md 引用了不存在的许可证模板：${m[1]}。`)
+      }
+    }
+  }
   const kernelPath = join(dir, 'agents-kernel.md')
   if (!existsSync(kernelPath)) return
 

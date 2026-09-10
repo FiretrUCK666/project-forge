@@ -79,10 +79,10 @@ frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主
 | `references/publish.md` | 发布总纲：能不能发、发到哪、版本号语义、什么时候该抬版本号 |
 | `references/publish-npm.md` | npm 专章：基础操作、各种既有状态怎么接、适用范围与常见误解 |
 | `references/dsh-plugin.md` | DSH 插件专章：两个半区、两个身份、产物为什么必须入库 |
-| `templates/` | 可直接起步的文档骨架 |
+| `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
-| `scripts/compose-agents.mjs` | 把通用内核逐字注入项目的 `AGENTS.md` |
-| `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范 |
+| `scripts/compose-agents.mjs` | 生成 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |
+| `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、三个脚本能否跑起来 |
 
 ## 三个脚本
 

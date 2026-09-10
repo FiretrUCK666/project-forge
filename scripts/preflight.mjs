@@ -340,7 +340,7 @@ function checkGlobalRules() {
   let entries = []
   try { entries = readdirSync(SKILL_ROOT, { withFileTypes: true, encoding: 'utf8' }).map((e) => e.name) } catch { /* 忽略 */ }
   for (const entry of entries) {
-    if (!ALLOWED_TOP_LEVEL.has(entry)) {
+    if (!ALLOWED_TOP_LEVEL.has(entry) && !/^readme([._-][a-z]{2}([._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i.test(entry)) {
       warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
     }
   }

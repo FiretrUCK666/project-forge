@@ -285,7 +285,7 @@ DSH 插件与 skill 项目本身。**判断依据永远是勘察出的事实，�
 node scripts/preflight.mjs                      # 结构自检：引用完整、内核一致、硬性规范
 node scripts/selftest.mjs                       # 行为自检：造 fixture 实跑，断言判定结果
 node scripts/compose-agents.mjs . --check       # 内核与模板是否逐字一致
-node scripts/sync-toc.mjs README.md --check     # README 目录与标题是否同步
+node scripts/sync-toc.mjs README.md README.en.md --check     # README 目录与标题是否同步
 ```
 
 `preflight.mjs` 检查的是「坏了就一定会出问题」的**结构**性质，不是风格偏好：
@@ -315,8 +315,8 @@ CMake 项目判成纯文档目录时，引用与格式全都正常。而这个 s
 
 | 内容 | 由什么决定 | 怎么同步 |
 | --- | --- | --- |
-| **目录** | 各节标题 | `node scripts/sync-toc.mjs README.md`（`--check` 只校验） |
-| **徽章** | 外部服务返回的内容 | `node scripts/check-badges.mjs README.md`（**写之前**先验一遍） |
+| **目录** | 各节标题 | `node scripts/sync-toc.mjs README.md README.en.md`（`--check` 只校验） |
+| **徽章** | 外部服务返回的内容 | `node scripts/check-badges.mjs README.md README.en.md`（**写之前**先验一遍） |
 
 目录由工具插在成对标记之间，**标记之外一个字节都不动**；加节、改名、删节之后重跑即
 同步。`preflight.mjs` 与持续集成里都跑它的 `--check`——所以漂移会当场暴露，而不是等到
@@ -324,6 +324,10 @@ CMake 项目判成纯文档目录时，引用与格式全都正常。而这个 s
 
 **改 README 的结构后必须重跑 `sync-toc.mjs`**，不要手工编辑标记之间的内容（下次生成
 会覆盖它）。
+
+**双语说明文档成对维护**：`README.md`（权威）与 `README.en.md` 是同一份文档的两个版本，
+改任何一份都算用户可见变化。改一份时必须打开另一份一起看，改完要能回答「另一份同步了吗」；
+不一致时以中文权威版为准。不要机械对译。
 
 **徽章不进自动检查**：它依赖网络与外部服务，放进 CI 会因对方抖动而误报。规则是
 「写之前验一遍」。已知**私有仓库上的 GitHub 系列徽章全部显示不出来**（星标、许可、

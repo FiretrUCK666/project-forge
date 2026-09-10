@@ -404,6 +404,28 @@ function isSecretFile(name) {
 /** 文档类扩展名：它们不算「这个项目里有代码」的证据。 */
 const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
 
+/**
+ * README 的语言变体：`README.en.md`、`README_CN.md`、`README.zh-CN.md` 这几种写法都常见。
+ *
+ * 为什么要单独识别：双语 README 是一个**需要维护的成对关系**，而它会漂移——一份改了
+ * 另一份没改，两份说的是不同的事。这件事只有先认出「它们是一对」才谈得上检查。
+ */
+const README_LANG_RE = /^readme[._-]([a-z]{2}(?:[_-][a-z]{2})?)\.(md|markdown|rst|txt|adoc)$/i
+
+/** 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。 */
+function markdownH2(filePath) {
+  const text = readText(filePath)
+  if (text === undefined) return []
+  return text.split('\n')
+    .filter((l) => /^##\s+\S/.test(l))
+    .map((l) => l.trim())
+}
+
+/** 这个文件名是不是「默认语言」的 README（`README.md` 这类，没有语言后缀）。 */
+function isDefaultReadme(name) {
+  return /^readme\.(md|markdown|rst|txt|adoc)$/i.test(name)
+}
+
 /** 认了但不算「非文档内容」的杂项文件：每个项目都有，不构成形态证据。 */
 const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|changelog|changes|history|todo|\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmignore|\.dockerignore)(\..*)?$/i
 
@@ -874,6 +896,36 @@ function detectDocs(root, root_) {
   // 匹配 README.md / README.en.md / readme.rst 等：语言后缀是可选的，别写死成单个点分。
   const readmes = root_.filesIn('', /^readme(\.[a-z]{2}(-[a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i)
   docs.readme = readmes
+
+  // 双语 README：把它作为**一对**报出来，而不是只报两个文件名。
+  //
+  // 这个区分有实际后果：成对的 README 会漂移（一份改了另一份没改），而漂移只有在
+  // 「知道它们是一对」的前提下才谈得上检查。同时它影响「随包发出的说明」的判据——
+  // 两份都会展示在制品库页面上、都在包内，改哪一份都算用户可见变化。
+  if (readmes.length > 1) {
+    const variants = readmes
+      .map((f) => ({ file: f, lang: README_LANG_RE.exec(f)?.[1]?.toLowerCase() }))
+      .filter((x) => x.lang !== undefined)
+    const defaultOne = readmes.find((f) => isDefaultReadme(f))
+    if (variants.length > 0 && defaultOne !== undefined) {
+      docs.readmePair = {
+        default: defaultOne,
+        variants: variants.map((v) => v.file),
+        note: '这是一对双语 README。两份都会随包分发、都会展示在制品库页面上，'
+          + '改任何一份都算用户可见变化；且**它们会漂移**——改一份时另一份必须一起看。',
+      }
+    }
+  }
+
+  // 主 README 的现有节结构。
+  //
+  // 报告这个而不是「缺哪几节」，是因为 README 的结构**本来就没有标准**：命令行工具、
+  // 库、数据项目的合理结构各不相同，模板只是建议。脚本给出事实（它有哪些节），
+  // 由读的人对照模板判断——这比让脚本假装能判断「合格不合格」诚实。
+  const primary = readmes.find((f) => isDefaultReadme(f)) ?? readmes[0]
+  if (primary !== undefined) {
+    docs.readmeSections = markdownH2(join(root, primary))
+  }
   for (const [key, candidates] of [
     ['agents', ['AGENTS.md', 'CLAUDE.md']],
     ['contributing', ['CONTRIBUTING.md', 'CONTRIBUTING.rst']],
@@ -1211,10 +1263,24 @@ function toMarkdown(s) {
   L.push('## 文档现状')
   L.push('')
   for (const [k, v] of Object.entries(s.docs)) {
+    if (k === 'readmePair' || k === 'readmeSections') continue
     if (v === undefined) L.push(`- ${k}：缺`)
     else if (Array.isArray(v)) L.push(`- ${k}：${v.length === 0 ? '缺' : v.join('、')}`)
     else if (typeof v === 'object' && v.file !== undefined) L.push(`- ${k}：${v.file}（${humanBytes(v.bytes)}）`)
     else L.push(`- ${k}：${JSON.stringify(v)}`)
+  }
+  const pair = s.docs?.readmePair
+  if (pair !== undefined) {
+    L.push(`- **双语 README**：默认 \`${pair.default}\`，另有 ${pair.variants.join('、')}`)
+    L.push(`  - ${pair.note}`)
+  }
+  const sections = s.docs?.readmeSections
+  if (Array.isArray(sections) && sections.length > 0) {
+    // 只报「有哪些节」，不报「缺哪几节」：README 的结构本来就没有标准，
+    // 命令行工具、库、数据项目的合理结构各不相同。给出事实，判断留给读的人。
+    L.push(`- 主 README 的节（${sections.length} 个）：${sections.join('　')}`)
+    L.push('  - 这是事实不是结论。对照 `templates/readme.md` 看该补什么——'
+      + '但**不要为了对齐模板而重排作者的编排**，README 的结构没有标准。')
   }
   L.push('')
   L.push('## 风险')

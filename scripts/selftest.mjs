@@ -703,6 +703,51 @@ group('[19] 发版规则：有版本号与没有版本号，两种写法都要�
   report(ok5, '没有版本号：禁止编造')
 }
 
+group('[20] 已有的 README：双语要认出来，结构不同不强行对齐')
+{
+  // 双语 README 必须被认成**一对**，而不是两个无关文件——只有知道它们是一对，
+  // 「改一份要看另一份」这条才谈得上。
+  const bi = fixture('readme-bilingual', {
+    'README.md': '# 中文说明\n\n## 安装\n\n## 使用\n',
+    'README.en.md': '# English\n\n## Installation\n\n## Usage\n',
+    'src/a.js': 'export const a=1\n',
+  })
+  const pair = survey(bi).docs?.readmePair
+  const ok1 = pair !== undefined && pair.default === 'README.md'
+  check(ok1, '双语 README 被认成一对', JSON.stringify(pair))
+  report(ok1, '双语 README：认成一对')
+  const ok2 = Array.isArray(pair?.variants) && pair.variants.includes('README.en.md')
+  check(ok2, '另一语言的文件列在 variants 里')
+  report(ok2, '双语 README：列出另一语言')
+
+  // 报告里要写明「两份都会随包发出」「会漂移」——否则「成对」这个事实没有可操作的后果
+  const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), bi, '--markdown'],
+    { encoding: 'utf8' }).stdout ?? ''
+  const ok3 = /双语 README/.test(md) && /漂移/.test(md)
+  check(ok3, '报告里写明成对关系的后果（随包发出 + 会漂移）')
+  report(ok3, '报告写明后果')
+
+  // 单语 README 不该被误报成一对（否则「成对」这个信号会贬值）
+  const single = fixture('readme-single', { 'README.md': '# x\n\n## 安装\n', 'src/a.js': 'x\n' })
+  const ok4 = survey(single).docs?.readmePair === undefined
+  check(ok4, '单语 README 不报成一对')
+  report(ok4, '单语 README：不误报')
+
+  // 结构完全不同的 README：必须报出**它现有的节**（事实），而不是「缺哪几节」（结论）。
+  // README 没有标准结构，脚本不该假装能判合格与否。
+  const custom = fixture('readme-custom', {
+    'README.md': '# tool\n\n## 它解决什么\n\n## 装在哪\n\n## 日常用法\n',
+    'src/a.js': 'x\n',
+  })
+  const sections = survey(custom).docs?.readmeSections ?? []
+  const ok5 = sections.includes('## 它解决什么') && sections.includes('## 日常用法')
+  check(ok5, '报出自定义结构的实际节名（不按模板改名判断）', JSON.stringify(sections))
+  report(ok5, '结构不同：报实际节名')
+  const ok6 = sections.length === 3
+  check(ok6, '不把模板的节名混进来', String(sections.length))
+  report(ok6, '不混入模板节名')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

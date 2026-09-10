@@ -748,6 +748,62 @@ group('[20] 已有的 README：双语要认出来，结构不同不强行对齐'
   report(ok6, '不混入模板节名')
 }
 
+group('[21] 插件类：三种生态各自认出，未知生态不被误判')
+{
+  // 三个生态的清单文件与判定字段都不同——这正说明「一个通用类型」不够用：
+  // VS Code 用 package.json 的 engines.vscode，Obsidian 用独立的 manifest.json，
+  // 混淆任何两个都会把产物入库、发布范围这类判断做错。
+  const vsc = fixture('plug-vscode', {
+    'package.json': JSON.stringify({
+      name: 'myext', version: '1.0.0', publisher: 'me', engines: { vscode: '^1.80.0' },
+    }, null, 2),
+    'src/extension.ts': 'export function activate() {}\n',
+  })
+  const okVsc = (survey(vsc).ecosystem?.kinds ?? []).includes('vscode-extension')
+  check(okVsc, 'VS Code 扩展被认出（engines.vscode）', JSON.stringify(survey(vsc).ecosystem?.kinds))
+  report(okVsc, 'VS Code：认出 vscode-extension')
+
+  const obs = fixture('plug-obsidian', {
+    'manifest.json': JSON.stringify({
+      id: 'my-plugin', name: 'My Plugin', version: '1.0.0', minAppVersion: '1.0.0',
+    }, null, 2),
+    'main.js': 'module.exports = class {}\n',
+  })
+  const okObs = (survey(obs).ecosystem?.kinds ?? []).includes('obsidian-plugin')
+  check(okObs, 'Obsidian 插件被认出（manifest.json 的 minAppVersion）',
+    JSON.stringify(survey(obs).ecosystem?.kinds))
+  report(okObs, 'Obsidian：认出 obsidian-plugin')
+
+  const dsh = fixture('plug-dsh', {
+    'package.json': JSON.stringify({ name: 'p', version: '1.0.0', dsh: { bundle: {} } }),
+    'cordis.patch.yml': '- id: p\n',
+  })
+  const okDsh = (survey(dsh).ecosystem?.kinds ?? []).includes('dsh-plugin')
+  check(okDsh, 'DSH 插件仍被认出', JSON.stringify(survey(dsh).ecosystem?.kinds))
+  report(okDsh, 'DSH：认出 dsh-plugin')
+
+  // 关键的**反向**断言：一个普通的 `manifest.json`（不含 minAppVersion，例如 PWA 或
+  // 浏览器扩展的清单）不该被误判成 Obsidian 插件——误判会让产物入库等判断全错。
+  const pwa = fixture('plug-pwa', {
+    'manifest.json': JSON.stringify({ name: 'App', short_name: 'App', start_url: '/', display: 'standalone' }, null, 2),
+    'index.html': '<html></html>\n',
+  })
+  const pwaKinds = survey(pwa).ecosystem?.kinds ?? []
+  const okPwa = !pwaKinds.includes('obsidian-plugin')
+  check(okPwa, '普通 manifest.json 不被误判成 Obsidian 插件', JSON.stringify(pwaKinds))
+  report(okPwa, '反向：PWA 清单不误判')
+
+  // 未知生态：不该被硬塞进已知类型，应落到需要人判断的那一类
+  const unknown = fixture('plug-unknown-host', {
+    'myhost-extension.json': JSON.stringify({ hostVersion: '3.0', id: 'x' }, null, 2),
+    'src/main.rs': 'fn main() {}\n',
+  })
+  const ukKinds = survey(unknown).ecosystem?.kinds ?? []
+  const okUnknown = !ukKinds.some((k) => /plugin|extension/.test(k))
+  check(okUnknown, '未知宿主不被硬塞进已知插件类型', JSON.stringify(ukKinds))
+  report(okUnknown, '未知宿主：不硬塞已知类型')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

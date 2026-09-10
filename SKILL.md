@@ -82,7 +82,7 @@ description: |
 | `docs-only`（纯文档 / 素材） | 做 | 做 | 做 | **不做** |
 | `node` | 做 | 做 | 做 | 视声明而定 |
 | `python` / `rust` / `go` / `java` / `ruby` / `php` / `dotnet` / `cpp` | 做 | 做 | 做 | 视声明而定 |
-| `dsh-plugin` | 做，**产物必须入库** | 做 | 做 | 可发布（见专章） |
+| `dsh-plugin` / `vscode-extension` / `obsidian-plugin`（**插件类**） | 做，**产物必须入库** | 做 | 做 | 可发布（见专章） |
 | `dsh-skill` | 做 | 做 | 做 | 通常不发布（远端即分发） |
 | `unknown` 或 `unrecognized` | **先问用户**这是什么项目；用户说明后，按他声明的生态对应行执行，并把该结论记作本次判定依据 | 同左 | 同左 | 同左 |
 | **`git.isRepoRoot` 为假**（目录在别人的仓库里） | **停下**：这些 git 事实属于外层仓库，先问清边界 | 同左 | 同左 | 同左 |
@@ -224,8 +224,10 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 脚本会报告「按当前项目事实重新求值的节」，据此可以确认补上了。**漏掉这一步，用户拿到
 的契约里就永远没有发布那半部分**——那部分恰恰是使用者最容易忘记、也最容易做错的地方。
 
-判定为 DSH 插件时，`references/dsh-plugin.md` 在 **P1 之后就该读**（它影响 P3 的产物
+判定为**插件类**时，`references/plugin-project.md` 在 **P1 之后就该读**（它影响 P3 的产物
 入库判断、P4 的发布范围写法、P5 的发布范围核对）——不要等到 P3 或 P6 才读。
+该文件同时给出**判定协议**：遇到没有专章的插件生态时，按它的六个问题去查，
+再把答案沉淀成新专章（`references/plugins/` 下）。
 
 ## 硬门控
 
@@ -238,7 +240,7 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 | G3 | 写任何文档之前 | `references/docs-set.md` |
 | G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单 |
 | G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm 时加读 `references/publish-npm.md` |
-| G6 | 判定为 DSH 插件时 | `references/dsh-plugin.md`（P1 之后即读，见「执行流程」） |
+| G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读，见「执行流程」）；有对应专章时一并读 `references/plugins/<生态>.md` |
 | G7 | 写 `LICENSE` / 承诺环境要求之前 | 见下「只有用户能定的事」 |
 
 ### G7：只有用户能定的事，一次问清
@@ -315,7 +317,8 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `references/docs-set.md` | 写任何文档时。各文档的读者、职责、写法与同步纪律 |
 | `references/publish.md` | 任何发布决策。能不能发、发到哪、版本语义、抬版本的判据、安全发布 |
 | `references/publish-npm.md` | 涉及 npm 时。基础操作、各种既有状态怎么接、适用范围与常见误解 |
-| `references/dsh-plugin.md` | 判定为 DSH 插件时。两个半区、两个身份、产物入库、可复现构建 |
+| `references/plugin-project.md` | 判定为插件类时。共同性质、判定协议（六个问题）、无专章时怎么办、新增专章的模板 |
+| `references/plugins/<生态>.md` | 该生态的专章：清单、两个标识、宿主加载什么、版本约束、打包发放、特有坑 |
 | `templates/agents-kernel.md` | 生成 `AGENTS.md` 时（由脚本读取，**不手工编辑**；标记区归它独占） |
 | `templates/agents-project.md` | 新建 `AGENTS.md` 时作为骨架 |
 | `templates/readme.md` | 新建 `README` 时作为骨架 |

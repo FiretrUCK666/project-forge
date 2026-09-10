@@ -549,6 +549,51 @@ function countNumberedItems(file, headingRe, itemRe) {
   return count
 }
 
+// ── 检查十：插件专章必须都登记在索引里 ──────────────────────────────────────
+
+/**
+ * `references/plugins/` 下的每个专章，都必须出现在 `plugin-project.md` 的索引表里。
+ *
+ * 这个结构有个隐蔽的失效方式：**专章写了，但没人知道它存在**——通用文件是入口
+ * （G6 只强制读它），索引表是唯一的路标。漏登记的专章等于没写，而文件确实在那儿、
+ * 检查也全绿。
+ *
+ * 反向也查：索引里列了、文件却不在（引用断链）。
+ */
+function checkPluginChapters() {
+  const dir = join(SKILL_ROOT, 'references', 'plugins')
+  const index = join(SKILL_ROOT, 'references', 'plugin-project.md')
+  if (!existsSync(dir)) {
+    if (existsSync(index)) fail('references/plugin-project.md 存在，但没有 references/plugins/ 目录。')
+    return
+  }
+  if (!existsSync(index)) {
+    fail('缺少 references/plugin-project.md —— 插件类项目的入口文件，专章靠它索引。')
+    return
+  }
+  const indexText = readText(index).replace(/^\uFEFF/, '')
+
+  const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+
+  for (const f of files) {
+    const rel = `references/plugins/${f}`
+    if (!indexText.includes(rel)) {
+      fail(`${rel} 没有登记在 references/plugin-project.md 的「专章索引」里 ——`
+        + '专章写了却没人知道它存在，等于没写。')
+    }
+  }
+  // 索引里指向不存在文件的引用，由 checkReferencesResolve 统一查；这里只补一条：
+  // 索引表里出现的 plugins 路径必须真有对应文件
+  for (const m of indexText.matchAll(/`(references\/plugins\/[a-z0-9-]+\.md)`/g)) {
+    if (!existsSync(join(SKILL_ROOT, m[1]))) {
+      fail(`references/plugin-project.md 的索引引用了不存在的专章：${m[1]}。`)
+    }
+  }
+  if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 function main() {
@@ -561,6 +606,7 @@ function main() {
   checkScripts()
   checkScriptsRun()
   checkStatedCounts()
+  checkPluginChapters()
   checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。

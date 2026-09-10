@@ -79,7 +79,12 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 发现。
 
 可能的值：`node`、`python`、`rust`、`go`、`java`、`ruby`、`php`、`dotnet`、
-`dsh-plugin`、`dsh-skill`、`cpp`、`shell`、`docs-only`、`unrecognized`、`unknown`。
+`dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`dsh-skill`、`cpp`、`shell`、
+`docs-only`、`unrecognized`、`unknown`。
+
+后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
+共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见
+`references/plugins/`。
 
 判定分三层，**认清结论出自哪一层很重要**：
 

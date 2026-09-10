@@ -607,11 +607,29 @@ function detectEcosystem(root, root_, walked) {
       evidence.push(cordisPatch !== undefined ? cordisPatch : 'package.json 的 dsh.bundle 声明')
       kinds.push('dsh-plugin')
     }
+    // VS Code 扩展：判据是 `engines.vscode`——只有扩展会声明它。
+    // `contributes` 单独出现不足以判定（别的生态也可能用这个词）。
+    if (pkg.engines?.vscode !== undefined) {
+      evidence.push('package.json 的 engines.vscode')
+      kinds.push('vscode-extension')
+    }
   } else if (cordisPatch !== undefined || skill !== undefined) {
     // 有插件配置或 skill 入口但没有 JS 清单：仍然可能是这两类形态，不能等到认出
-    // package.json 才认。DSH 插件的「产物必须入库」判据依赖这个识别结果。
+    // package.json 才认。插件的「产物必须入库」判据依赖这个识别结果。
     if (cordisPatch !== undefined) { evidence.push(cordisPatch); kinds.push('dsh-plugin') }
     if (skill !== undefined) { evidence.push(`SKILL.md（name: ${skill.name}）`); kinds.push('dsh-skill') }
+  }
+  // Obsidian 插件：独立的 `manifest.json`，判据是 `minAppVersion`（只有它用这个字段）。
+  // 注意与 VS Code 的区别——同样是插件，清单文件完全不同，这正是需要专章的理由。
+  if (kinds.length === 0 || !kinds.includes('vscode-extension')) {
+    const obsManifest = root_.real('manifest.json')
+    if (obsManifest !== undefined) {
+      const obs = readJson(join(root, obsManifest))
+      if (obs !== undefined && obs.minAppVersion !== undefined) {
+        evidence.push('manifest.json 的 minAppVersion')
+        kinds.push('obsidian-plugin')
+      }
+    }
   }
   if (skill !== undefined && !kinds.includes('dsh-skill')) {
     evidence.push(`SKILL.md（name: ${skill.name}）`)

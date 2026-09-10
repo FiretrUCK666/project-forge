@@ -91,7 +91,8 @@ git pull
 | `references/docs-set.md` | 文档套装：各文档的读者是谁、职责、写法与同步纪律 |
 | `references/publish.md` | 发布总纲：能不能发、发到哪、版本号语义、什么时候该抬版本号 |
 | `references/publish-npm.md` | npm 专章：基础操作、各种既有状态怎么接、适用范围与常见误解 |
-| `references/dsh-plugin.md` | DSH 插件专章：两个半区、两个身份、产物为什么必须入库 |
+| `references/plugin-project.md` | 插件类项目：共同性质、判定协议、没有专章时的处理与生长规则 |
+| `references/plugins/` | 各生态的插件专章（一个生态一个文件） |
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |

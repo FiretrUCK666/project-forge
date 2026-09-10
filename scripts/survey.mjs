@@ -15,7 +15,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -161,6 +161,47 @@ function sizeOf(p) {
   }
 }
 
+/**
+ * 判断两个路径是否指向同一个位置。
+ *
+ * 逐字符比较是不够的，在 Windows 上会大面积误判——同一个目录至少有四种写法会被当成
+ * 不同路径：大小写不同（盘符或任意层级）、8.3 短名（`C:\Users\FIRETR~1\...`）、
+ * 正反斜杠混用、以及经由 junction 或符号链接到达。这些形式在真实环境里到处都是
+ * （环境变量 `%TEMP%` 就常常是短名形式），误判的后果不轻：目录明明就是仓库根，却被
+ * 报成「在别人的仓库里」，于是整条流程按规则停下来并警告「不要提交、不要推送」。
+ *
+ * 因此按三层逐级放宽：字面 → realpath 归一化 → 大小写不敏感比较（仅在大小写不敏感
+ * 的平台上）。任一层相等即认为相同。
+ */
+function samePath(a, b) {
+  const flat = (p) => resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
+  const fa = flat(a)
+  const fb = flat(b)
+  if (fa === fb) return true
+
+  // realpath 同时解决短名、符号链接与 junction
+  const real = (p) => {
+    try {
+      return flat(realpathSync.native(p))
+    } catch {
+      return undefined
+    }
+  }
+  const ra = real(a)
+  const rb = real(b)
+  if (ra !== undefined && rb !== undefined && ra === rb) return true
+
+  // 大小写：Windows 与 macOS 默认不敏感。用「同一路径的两种写法是否都解析到同一个
+  // realpath」来判定平台的敏感性，而不是硬编码平台名。
+  if (ra !== undefined && rb !== undefined) {
+    const probe = real(ra.toUpperCase())
+    if (probe !== undefined && probe === ra) {
+      return ra.toLowerCase() === rb.toLowerCase()
+    }
+  }
+  return false
+}
+
 /** 解析 frontmatter 里的 name/description（只为识别 skill 项目，不做完整 YAML 解析）。 */
 function skillFrontmatter(text) {
   if (text === undefined) return undefined
@@ -198,6 +239,13 @@ function walk(root) {
     // 只扫顶层，而报告仍显示「0 命中」，看起来像扫过了。
     textCandidates: [],
     contentScanTruncated: false,
+    // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
+    // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
+    sourceScan: {
+      byExtension: new Map(),   // 生态 → 首个命中的文件名
+      byBuildFile: new Map(),   // 生态 → 首个命中的构建描述文件名
+      nonDocSamples: [],        // 疑似「非文档」的文件（用于区分纯文档目录）
+    },
   }
   // inCountingArea 为假时表示正走在「像产物、但可能藏源码」的目录里：
   // 这些文件要参与凭据扫描，但不计入体量（见 ARTIFACT_MAYBE_DIRS 的说明）。
@@ -251,6 +299,7 @@ function walk(root) {
         if (result.textCandidates.length < CONTENT_SCAN_MAX_FILES) result.textCandidates.push(rel)
         else result.contentScanTruncated = true
       }
+      collectSourceEvidence(result.sourceScan, entry.name, rel)
     }
   }
   return result
@@ -259,6 +308,32 @@ function walk(root) {
 function isSecretFile(name) {
   if (SECRET_FILE_ALLOWLIST.some((re) => re.test(name))) return false
   return SECRET_FILE_PATTERNS.some((re) => re.test(name))
+}
+
+/** 文档类扩展名：它们不算「这个项目里有代码」的证据。 */
+const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
+
+/** 认了但不算「非文档内容」的杂项文件：每个项目都有，不构成形态证据。 */
+const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|changelog|changes|history|todo|\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmignore|\.dockerignore)(\..*)?$/i
+
+/**
+ * 从单个文件名收集「这是什么项目」的形状证据。
+ * 只在走查时调用一次，避免为了兜底判定再遍历一遍目录树。
+ */
+function collectSourceEvidence(scan, name, rel) {
+  const lower = name.toLowerCase()
+  const build = BUILD_FILE_KINDS.find(([f]) => f === lower)
+  if (build !== undefined && !scan.byBuildFile.has(build[1])) {
+    scan.byBuildFile.set(build[1], rel)
+  }
+  for (const [re, kind] of SOURCE_EXT_KINDS) {
+    if (re.test(name)) {
+      if (!scan.byExtension.has(kind)) scan.byExtension.set(kind, rel)
+      return
+    }
+  }
+  if (DOC_EXT_RE.test(name) || MISC_FILE_RE.test(lower)) return
+  if (scan.nonDocSamples.length < 5) scan.nonDocSamples.push(rel)
 }
 
 /** 对文本文件做内容级扫描：凭据形状 + 本机私有路径。 */
@@ -364,7 +439,7 @@ const BUILD_FILE_KINDS = [
   ['dockerfile', 'shell'],
 ]
 
-function detectEcosystem(root, root_) {
+function detectEcosystem(root, root_, walked) {
   const evidence = []
   const kinds = []
   const pkg = readJson(join(root, root_.real('package.json') ?? 'package.json'))
@@ -408,23 +483,25 @@ function detectEcosystem(root, root_) {
   }
   // 没有清单时，用源码与构建描述文件兜底：**它们证明这是代码项目**，
   // 从而避免被误判成纯文档目录。
-  if (kinds.length === 0 || (kinds.length === 1 && kinds[0] === 'dsh-skill')) {
-    const byBuild = root_.first(BUILD_FILE_KINDS.map(([f]) => f))
-    if (byBuild !== undefined) {
-      const kind = BUILD_FILE_KINDS.find(([f]) => f === byBuild.toLowerCase())?.[1]
-      if (kind !== undefined) { evidence.push(`${byBuild}（构建描述文件，无清单）`); kinds.push(kind) }
-    }
-    const byExt = new Map()
-    for (const name of root_.filesIn('', /\.[A-Za-z0-9]+$/)) {
-      for (const [re, kind] of SOURCE_EXT_KINDS) {
-        if (re.test(name)) {
-          if (!byExt.has(kind)) byExt.set(kind, name)
-          break
-        }
+  //
+  // 兜底必须看**子目录**，不能只看顶层：真实项目里代码几乎总在 src/、packages/、
+  // cmd/ 这类子目录下，顶层只有一个 README。只看顶层会把 `README.md + src/app.js`
+  // 判成「纯文档目录」，而 docs-only 的发布列是「不做」——整条发布链路会被跳过。
+  //
+  // 但它**只在什么都没认出来时**才用：扩展名是很弱的证据，而一旦已经认出这是 skill、
+  // 插件或某种清单型项目，再凭「目录里有个 .py 文件」追加一个生态，只会制造误判
+  // （例如把技能自带的 scripts/ 当成一个 Node 项目）。
+  if (kinds.length === 0) {
+    const scan = walked?.sourceScan
+    if (scan !== undefined) {
+      for (const [kind, sample] of scan.byBuildFile) {
+        evidence.push(`${sample}（构建描述文件，无清单）`)
+        kinds.push(kind)
       }
-    }
-    for (const [kind, sample] of byExt) {
-      if (!kinds.includes(kind)) { evidence.push(`${sample}（源码扩展名，无清单文件）`); kinds.push(kind) }
+      for (const [kind, sample] of scan.byExtension) {
+        evidence.push(`${sample}（源码扩展名，无清单文件）`)
+        kinds.push(kind)
+      }
     }
   }
 
@@ -432,26 +509,39 @@ function detectEcosystem(root, root_) {
   const unique = [...new Set(kinds)]
   if (unique.length === 0) {
     const hasMarkdown = root_.first(['README.md', 'README.rst', 'README.txt']) !== undefined
-    // 判据是「除文档外还有没有别的东西」。只看「有没有文件」会把 Markdown 自己也算进去，
-    // 于是纯文档目录永远判不出 docs-only。
-    const nonDocFiles = root_.filesIn('', /./).filter((n) => !/\.(md|markdown|rst|txt|adoc)$/i.test(n))
-    if (hasMarkdown && nonDocFiles.length === 0) {
+    // 判据是「除文档外还有没有别的东西」。**只看源码与构建描述文件**，不要把
+    // LICENSE、.gitignore 这类每个项目都有的文件算成「别的东西」——那会把正常的
+    // 纯文档目录误报成 unrecognized，反过来触发一次无谓的追问。
+    const nonDoc = walked?.sourceScan?.nonDocSamples ?? []
+    if (hasMarkdown && nonDoc.length === 0) {
       unique.push('docs-only')
       evidence.push('仅见 Markdown 文档')
-    } else if (nonDocFiles.length > 0) {
-      // 有文档也有别的东西，但没认出任何形态：不猜，交给上层问用户。
+    } else if (nonDoc.length > 0) {
       unique.push('unrecognized')
-      evidence.push(`未识别出项目形态（非文档文件示例：${nonDocFiles.slice(0, 3).join('、')}）`)
+      evidence.push(`未识别出项目形态（非文档文件示例：${nonDoc.slice(0, 3).join('、')}）`)
     } else unique.push('unknown')
   }
   return { kinds: unique, evidence, manifest: pkg, skill }
 }
 
-/** 从清单文件推导「怎么构建/测试/校验」。取不到就留空，不编造。 */
+/**
+ * 从清单文件推导「怎么构建/测试/校验」。取不到就留空，不编造。
+ *
+ * 返回值里既有扁平字段（`build`、`test` 一类，取「最可信的那个」），也有
+ * `byEcosystem`（按生态分开）。两者都给是因为用途不同：
+ *   - 只想跑一条命令时用扁平字段，方便；
+ *   - 要把它**写进文档**时必须用 byEcosystem——多生态项目里扁平字段会让后算的生态
+ *     覆盖先算的（实测 node + python 的项目里，项目自己的 `vitest run` 被
+ *     `python -m pytest` 顶掉，而这条错误命令会被原样渲染进 AGENTS.md）。
+ * 覆盖是静默的，所以调用方必须能看出「这个值属于哪个生态」。
+ */
 function deriveCommands(root, root_, eco) {
   const out = {}
-  const pkg = eco.manifest
-  if (pkg?.scripts !== undefined && typeof pkg.scripts === 'object') {
+  const byEcosystem = {}
+
+  if (eco.manifest !== undefined && typeof eco.manifest.scripts === 'object') {
+    const pkg = eco.manifest
+    const node = {}
     // 先定包管理器：命令前缀由它决定。在 pnpm/yarn/bun 项目里写 npm run 是错的——
     // 轻则绕过了项目的约定，重则在 workspace 里直接失败。
     // 判据顺序：清单里的显式声明 > 锁文件 > 默认。
@@ -461,31 +551,35 @@ function deriveCommands(root, root_, eco) {
     } else if (root_.has('pnpm-lock.yaml') || root_.has('pnpm-workspace.yaml')) pm = 'pnpm'
     else if (root_.has('yarn.lock')) pm = 'yarn'
     else if (root_.has('bun.lockb') || root_.has('bun.lock')) pm = 'bun'
-    out.packageManager = pm
+    node.packageManager = pm
 
-    const run = (script) => (pm === 'npm' ? `npm run ${script}` : `${pm} run ${script}`)
     for (const [key, aliases] of [
       ['install', ['install']], ['build', ['build']], ['test', ['test']],
       ['typecheck', ['typecheck', 'type-check', 'tsc']], ['lint', ['lint']],
       ['verify', ['verify', 'check', 'validate']], ['smoke', ['smoke']],
     ]) {
       const hit = aliases.find((a) => typeof pkg.scripts[a] === 'string')
-      if (hit !== undefined) out[key] = run(hit)
+      if (hit !== undefined) node[key] = `${pm} run ${hit}`
     }
-    // 依赖安装命令用同一个包管理器，不用 npm 兜底
-    out.install = `${pm} install`
+    node.install = `${pm} install`
+    byEcosystem.node = node
   }
+
   if (eco.kinds.includes('python')) {
     const pyName = root_.real('pyproject.toml')
     const py = pyName === undefined ? '' : (readText(join(root, pyName)) ?? '')
+    const python = {}
     const hasPytest = root_.entry('tests')?.isDir === true
       || root_.has('pytest.ini') || /\[tool\.pytest/.test(py)
-    if (hasPytest) out.test = 'python -m pytest'
+    if (hasPytest) python.test = 'python -m pytest'
     if (/\[tool\.ruff/.test(py) || root_.has('ruff.toml') || root_.has('.ruff.toml')) {
-      out.lint = 'python -m ruff check .'
+      python.lint = 'python -m ruff check .'
     }
-    if (root_.has('requirements.txt')) out.install = 'pip install -r requirements.txt'
+    if (root_.has('requirements.txt')) python.install = 'pip install -r requirements.txt'
+    else if (pyName !== undefined) python.install = 'pip install -e .'
+    if (Object.keys(python).length > 0) byEcosystem.python = python
   }
+
   // Rust 与 Go：命令只在**清单文件确实存在**时给出。
   //
   // 区别在这里：「有个 .rs 文件」只说明这个项目里有 Rust 代码，不说明它用 cargo 构建
@@ -493,12 +587,25 @@ function deriveCommands(root, root_, eco) {
   // 「我是 cargo 项目」。前者是猜，后者是读。所以判据挂在清单文件上，不挂在生态判定上
   // ——生态可能是靠源码扩展名兜底认出来的。
   if (root_.has('cargo.toml')) {
-    out.build = 'cargo build'
-    out.test = 'cargo test'
+    byEcosystem.rust = { build: 'cargo build', test: 'cargo test' }
   }
   if (root_.has('go.mod')) {
-    out.build = 'go build ./...'
-    out.test = 'go test ./...'
+    byEcosystem.go = { build: 'go build ./...', test: 'go test ./...' }
+  }
+
+  // 扁平视图：按「声明强度」排序取先到者。
+  // 有清单的生态排在前面——它的命令是项目自己声明的，比按惯例推断的可信。
+  const order = ['node', 'python', 'rust', 'go']
+  const keys = [...order.filter((k) => k in byEcosystem),
+    ...Object.keys(byEcosystem).filter((k) => !order.includes(k))]
+  for (const kind of keys) {
+    for (const [k, v] of Object.entries(byEcosystem[kind])) {
+      if (!(k in out)) out[k] = v
+    }
+  }
+  if (Object.keys(byEcosystem).length > 1) {
+    out.byEcosystem = byEcosystem
+    out.multipleEcosystems = keys
   }
   return out
 }
@@ -577,8 +684,7 @@ function detectGit(root) {
   // 缺即可」的结论，然后把改动提交进、甚至推送到一个完全不相干的仓库——这是本 skill
   // 能造成的破坏里最严重的一种。
   const toplevel = run('git', ['rev-parse', '--show-toplevel'], root)
-  const norm = (p) => resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
-  const isRepoRoot = toplevel !== undefined && norm(toplevel) === norm(root)
+  const isRepoRoot = toplevel !== undefined && samePath(toplevel, root)
 
   const info = {
     available: true,
@@ -654,8 +760,10 @@ function survey(target) {
   if (!st.isDirectory()) throw new Error(`不是目录：${root}`)
 
   const root_ = listRoot(root)
-  const eco = detectEcosystem(root, root_)
+  // 先走查：它收集的形状证据（源码扩展名、构建描述文件）是生态兜底判定的输入，
+  // 顺序不能颠倒。
   const walked = walk(root)
+  const eco = detectEcosystem(root, root_, walked)
   const git = detectGit(root)
 
   // 内容级扫描的候选来自**递归走查**，不来自版本控制。

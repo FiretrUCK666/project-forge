@@ -324,6 +324,7 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--status` 只看现状，`--upgrade` 升级手写文件） |
 | `scripts/preflight.mjs` | **维护本 skill 自身时**的自检（与目标项目无关） |
 | `scripts/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定（与目标项目无关） |
+| `scripts/release-notes.mjs` | 写发布说明——`references/remote-github.md` 那条「非 ASCII 正文不经 shell」规则的落地工具 |
 
 ## 边界
 

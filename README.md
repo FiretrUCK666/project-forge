@@ -101,6 +101,7 @@ git pull
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |
 | `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
 | `scripts/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
+| `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
 
 ## 脚本
 
@@ -150,7 +151,7 @@ node <本领目录>/scripts/selftest.mjs
 
 ### 运行时
 
-**Node.js 16 或更高。** 这是全部要求——四个脚本只用 Node 内置模块（`node:fs`、
+**Node.js 16 或更高。** 这是全部要求——所有脚本只用 Node 内置模块（`node:fs`、
 `node:path`、`node:url`、`node:os`、`node:child_process`），**没有任何第三方依赖**，
 不需要先装任何东西。
 

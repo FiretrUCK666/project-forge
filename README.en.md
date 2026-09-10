@@ -63,7 +63,7 @@ git pull
 ```
 
 **How to know a new version exists**: see the [Releases](https://github.com/FiretrUCK666/project-forge/releases).
-Every version with user-visible changes gets a tag and release notes describing what changed and whether you should update. The commit history has more detail, but that is for maintainers.
+Every version with user-visible changes gets a tag and release notes describing what changed and whether you should update (notes are generated automatically once the tag is pushed). The commit history has more detail, but that is for maintainers.
 
 **Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate, just `git pull`. If you modified it as described under "Development" below, commit your changes before pulling to avoid conflicts.
 

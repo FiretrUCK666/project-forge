@@ -957,6 +957,34 @@ function detectIgnores(root, root_) {
   const gaName = root_.real('.gitattributes')
   if (gaName !== undefined) out.gitattributes = { bytes: sizeOf(join(root, gaName)) }
 
+  // **已知的产物/依赖目录，是否已被忽略**。
+  //
+  // 这个交叉核对是必要的：勘察本来就能看到 `venv/` 存在（outputs 里报了它），也能读到
+  // 忽略文件，却不把两者对一下——于是「虚拟环境目录就在那里、而忽略规则没覆盖它」
+  // 这件**下一次提交就会把整个环境写进历史**的事，要人自己去发现。
+  // 报「有未忽略的产物目录」比报「忽略文件 108 字节」有用得多。
+  //
+  // 用版本控制自己判断有没有被忽略，而不是解析忽略语法：语法有通配、否定、层级差异，
+  // 自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。
+  const probe = []
+  for (const d of OUTPUT_DIR_HINTS) {
+    const e = root_.entry(d)
+    if (e?.isDir !== true) continue
+    const r = spawnSync('git', ['check-ignore', '-q', '--', e.name],
+      { cwd: root, windowsHide: true })
+    probe.push({ dir: e.name, ignored: r.status === 0 })
+  }
+  if (probe.length > 0) {
+    out.presentOutputDirs = probe
+    const notIgnored = probe.filter((x) => !x.ignored).map((x) => x.dir)
+    if (notIgnored.length > 0) {
+      out.unignoredOutputDirs = notIgnored
+      out.unignoredNote = '这些目录已经存在，但忽略规则没有覆盖它们。下一次提交若带上它们，'
+        + '会把整个目录写进历史（体积、平台差异、其中可能的本机配置）。'
+        + '**这是与安全无关但很紧急的修复**——先把忽略规则补上。'
+    }
+  }
+
   // 重要：忽略规则对「已被跟踪」的文件无效——这里直接查出来。
   // 必须关掉路径转义：含中文或空格的路径在默认输出里会被引号化，那种字符串既不是
   // 真实路径、也对不上任何文件，报出来等于没报。
@@ -1133,6 +1161,23 @@ function toMarkdown(s) {
   } else {
     L.push('- 声明的运行环境下限（写环境要求那一节的唯一权威来源）：')
     for (const r of reqs) L.push(`  - ${r.runtime} ${r.range}（${r.declaredIn}）`)
+  }
+  L.push('')
+  L.push('## 忽略规则')
+  L.push('')
+  const ig = s.ignores ?? {}
+  L.push(`- 忽略文件：${ig.gitignore === undefined ? '**缺**（没有它，依赖与产物目录会被提交）'
+    : `有（${ig.gitignore.lines} 条有效规则）`}`)
+  L.push(`- 文本属性声明：${ig.gitattributes === undefined
+    ? '缺（行尾不一致会让产物在不同机器上重建出不同字节）' : '有'}`)
+  if (Array.isArray(ig.unignoredOutputDirs) && ig.unignoredOutputDirs.length > 0) {
+    L.push(`- **存在但未被忽略的目录**：${ig.unignoredOutputDirs.join('、')}`)
+    L.push(`  - ${ig.unignoredNote}`)
+  }
+  if (Array.isArray(ig.ignoredButTracked) && ig.ignoredButTracked.length > 0) {
+    L.push(`- **已被跟踪又被忽略**：${ig.ignoredButTracked.length} 个`
+      + '（忽略规则对已跟踪文件无效，它们仍在版本库里；要移除须先从索引删除）')
+    for (const p of ig.ignoredButTracked.slice(0, 5)) L.push(`  - ${p}`)
   }
   L.push('')
   L.push('## 文档现状')

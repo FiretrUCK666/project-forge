@@ -544,6 +544,43 @@ group('[16] 报告要给到行，并说明在不在版本库里')
   }
 }
 
+group('[17] 忽略规则：交叉核对「目录存在」与「是否已忽略」')
+{
+  if (!HAS_GIT) {
+    skipGroup('[17] 忽略规则交叉核对', '环境里没有 git')
+  } else {
+    // venv 就在那里，而忽略规则没覆盖它——下一次 git add -A 会把整个虚拟环境写进历史。
+    // 勘察本来两边都看得到，却不做交叉核对，于是这件事要人自己去发现。
+    const gap = fixture('ignore-gap', {
+      'src/a.py': 'x = 1\n',
+      'venv/lib/thing.py': 'y = 2\n',
+      '.gitignore': '*.pyc\n',
+    })
+    spawnSync('git', ['init', '-q'], { cwd: gap })
+    const s = survey(gap)
+    const notIgnored = s.ignores?.unignoredOutputDirs ?? []
+    const ok1 = notIgnored.includes('venv')
+    check(ok1, '报出「存在但未被忽略」的目录', JSON.stringify(notIgnored))
+    report(ok1, 'venv 存在但未忽略 → 报出来')
+
+    // 反向：忽略规则覆盖了它之后，就不该再报（否则成噪音，人会开始忽略这条提示）
+    writeFileSync(join(gap, '.gitignore'), '*.pyc\nvenv/\n', 'utf8')
+    const s2 = survey(gap)
+    const ok2 = (s2.ignores?.unignoredOutputDirs ?? []).length === 0
+    check(ok2, '已忽略后不再报', JSON.stringify(s2.ignores?.unignoredOutputDirs))
+    report(ok2, '补上忽略规则后不再报')
+
+    // 缺忽略文件本身也要报（没有它，产物与依赖会被提交）
+    const noIgnore = fixture('ignore-none', { 'src/a.py': 'x = 1\n', 'venv/lib/y.py': 'z\n' })
+    spawnSync('git', ['init', '-q'], { cwd: noIgnore })
+    const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), noIgnore, '--markdown'],
+      { encoding: 'utf8' }).stdout ?? ''
+    const ok3 = /忽略文件：\*\*缺\*\*/.test(md)
+    check(ok3, '缺忽略文件时明确报「缺」')
+    report(ok3, '缺忽略文件 → 明确报缺')
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

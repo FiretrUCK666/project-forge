@@ -24,8 +24,8 @@ import { readFileSync, existsSync } from 'node:fs'
 /** 从 Markdown 里抽出徽章图片地址。只认 shields 一类的徽章服务，避免把普通图片当徽章。 */
 const BADGE_HOSTS = /img\.shields\.io|badgen\.net|badge\.fury\.io|codecov\.io|travis-ci|github\.com\/.*\.svg|api\.netlify\.com/i
 
-/** 这些字样出现在 SVG 里，说明徽章没取到数据。 */
-const FAILURE_WORDS = /not found|invalid|no such|unknown|unable|too new|no releases|error/i
+/** 这些字样出现在徽章可见文字里，说明没取到数据；只判可见文字，不判整段 SVG（含样式与元数据，避免 errors: 0 误报）。 */
+const FAILURE_WORDS = /not found|invalid|no such|unknown|unable|too new|no releases/i
 
 function extractBadges(text) {
   const out = []
@@ -53,7 +53,7 @@ async function inspect(url) {
     .map((m) => m[1].trim())
     .filter((w) => w !== '' && !/^[\s\d.]+$/.test(w))
   const shows = words.slice(-1)[0] ?? ''
-  if (FAILURE_WORDS.test(body)) {
+  if (FAILURE_WORDS.test(shows)) {
     return { ok: false, reason: '徽章里显示的是失败字样', shows }
   }
   return { ok: true, reason: '', shows }

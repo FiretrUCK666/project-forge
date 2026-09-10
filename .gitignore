@@ -1,5 +1,5 @@
-# 这个 skill 零依赖：脚本只用运行环境内置的模块。
-# 下面这些条目是为了「万一将来有人装了依赖」时不把依赖目录带进仓库。
+# 本仓库 scripts 零依赖，只用运行环境内置模块。
+# 下面是各生态常见的依赖与产物目录，为协作者本地环境兜底，不代表本仓库需要它们。
 
 node_modules/
 .pnpm-store/
@@ -31,3 +31,22 @@ desktop.ini
 *.tgz
 coverage/
 .cache/
+
+# 构建产物（Node / 通用）
+dist/
+build/
+out/
+
+# 构建产物（Rust / Java）
+target/
+
+# 依赖兜底（Go / PHP 等 vendored 依赖）
+vendor/
+
+# 前端框架产物（Next.js / Nuxt）
+.next/
+.nuxt/
+
+# 构建缓存（Gradle / Turborepo）
+.gradle/
+.turbo/

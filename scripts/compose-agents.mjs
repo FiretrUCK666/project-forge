@@ -1021,6 +1021,10 @@ function main(argv) {
   }
 
   if (status) {
+    if (!existsSync(agentsPath)) {
+      process.stderr.write(`状态：${agentsPath} 不存在（尚未生成）。\n`)
+      return 1
+    }
     const missing = missingSections(target, readUtf8(agentsPath))
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
       + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)

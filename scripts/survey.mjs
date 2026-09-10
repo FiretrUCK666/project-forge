@@ -102,7 +102,7 @@ const CONTENT_SCAN_SKIP = /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|tar|7z|rar|w
  */
 const HOME_PATH_PATTERNS = [
   { re: /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+/g, volume: 'windows' },
-  { re: /[\\/](?:home|Users)[\\/][A-Za-z0-9._-]+/g, volume: 'posix' },
+  { re: /[\\/](?:home|Users)[\\/][^\\/\s"'`]+/g, volume: 'posix' },
 ]
 
 /** 这些路径形状出现在测试与示例里是正常的，不该按「泄漏」处置。 */
@@ -225,7 +225,7 @@ function readJson(p) {
   try {
     return JSON.parse(t)
   } catch {
-    return undefined
+    return { __corrupt: true }
   }
 }
 
@@ -329,6 +329,7 @@ function walk(root) {
     // **静默地不扫**是最坏的结果——报告里写着「递归、已排除依赖目录」，读起来像全扫过了。
     // 实测过：30 层处的 `.env` 既不计数也不扫描，`truncated` 还是 false。
     depthLimited: 0,
+    depthLimitedPaths: [],
     // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
     // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
     sourceScan: {
@@ -343,7 +344,11 @@ function walk(root) {
   const stack = [{ dir: root, depth: 0, inCountingArea: true }]
   while (stack.length > 0) {
     const { dir, depth, inCountingArea } = stack.pop()
-    if (depth > MAX_WALK_DEPTH) { result.depthLimited += 1; continue }
+    if (depth > MAX_WALK_DEPTH) {
+      result.depthLimited += 1
+      if (result.depthLimitedPaths.length < 20) result.depthLimitedPaths.push(dir.slice(root.length + 1) || '.')
+      continue
+    }
     let entries
     try {
       entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
@@ -361,12 +366,12 @@ function walk(root) {
       }
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name.toLowerCase())) {
-          if (!result.heavyDirs.includes(entry.name)) result.heavyDirs.push(entry.name)
+          if (depth === 0 && !result.heavyDirs.includes(entry.name)) result.heavyDirs.push(entry.name)
           continue
         }
         if (entry.name === '.git') continue
         const isArtifactMaybe = ARTIFACT_MAYBE_DIRS.has(entry.name.toLowerCase())
-        if (isArtifactMaybe && !result.heavyDirs.includes(entry.name)) {
+        if (depth === 0 && isArtifactMaybe && !result.heavyDirs.includes(entry.name)) {
           result.heavyDirs.push(entry.name)
         }
         // 嵌套仓库：子目录里另有一个 .git
@@ -610,6 +615,10 @@ function detectEcosystem(root, root_, walked) {
   const skill = skillFrontmatter(skillText)
 
   if (pkg !== undefined) {
+    if (pkg.__corrupt === true) {
+      evidence.push(`${root_.real('package.json')}（清单损坏，JSON 解析失败）`)
+      kinds.push('node')
+    } else {
     evidence.push(root_.real('package.json'))
     kinds.push('node')
     if (pkg.dsh?.bundle !== undefined || cordisPatch !== undefined) {
@@ -621,6 +630,7 @@ function detectEcosystem(root, root_, walked) {
     if (pkg.engines?.vscode !== undefined) {
       evidence.push('package.json 的 engines.vscode')
       kinds.push('vscode-extension')
+    }
     }
   } else if (cordisPatch !== undefined || skill !== undefined) {
     // 有插件配置或 skill 入口但没有 JS 清单：仍然可能是这两类形态，不能等到认出
@@ -809,6 +819,14 @@ function deriveCommands(root, root_, eco) {
   }
   if (root_.has('go.mod')) {
     byEcosystem.go = { build: 'go build ./...', test: 'go test ./...' }
+  }
+
+  // java/dotnet/ruby/php 等：已能识别生态，但本脚本暂不推导命令（需读构建配置确认）。
+  // 明确标记“未实现”而非“项目无命令”，调用方据此区分两种空。
+  for (const kind of eco.kinds) {
+    if (['java', 'dotnet', 'ruby', 'php', 'cpp', 'dotnet'].includes(kind) && byEcosystem[kind] === undefined) {
+      byEcosystem[kind] = { note: '该生态的命令推导尚未实现，请读构建配置确认' }
+    }
   }
 
   // 扁平视图：按「声明强度」排序取先到者。
@@ -1174,7 +1192,8 @@ function survey(target) {
         // （前者要确认那层深目录里是不是有东西，后者要重扫）。任何一种都不能读成
         // 「检查过了，很干净」。
         depthLimited: walked.depthLimited,
-        scope: '递归（已排除依赖与构建产物目录、二进制与超大文件）',
+        depthLimitedPaths: (walked.depthLimitedPaths ?? []).slice(0, 20),
+        scope: '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除）',
       },
       largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
       symlinks: walked.symlinks.slice(0, 50),
@@ -1240,7 +1259,8 @@ function toMarkdown(s) {
   L.push('')
   L.push('## 可执行命令')
   L.push('')
-  const cmds = Object.entries(s.commands)
+  const cmds = Object.entries(s.commands).filter(([k, v]) => typeof v === 'string'
+    && !['packageManager', 'byEcosystem', 'multipleEcosystems'].includes(k) && !k.endsWith('Note'))
   if (cmds.length === 0) L.push('- 未推导出任何命令（正常结果：说明项目没声明这些命令，'
     + '不代表错误；此时 P7 的验证不成立，见 SKILL.md）')
   else for (const [k, v] of cmds) L.push(`- ${k}：\`${v}\``)

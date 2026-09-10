@@ -46,7 +46,7 @@ function usage() {
   ].join('\n')
 }
 
-/** 从 package.json 的 repository 字段推导 owner/name。 */
+/** 从本 skill 自带 package.json 推导 owner/name，仅供本仓库自用；给别的项目发版必须显式 --repo。 */
 function repoFromManifest() {
   const p = join(ROOT, 'package.json')
   if (!existsSync(p)) return undefined
@@ -73,6 +73,7 @@ function makeHeaders(token) {
 
 /** 查一个标签是否已有发布说明。404 表示还没有，这是正常情况不是错误。 */
 async function findRelease(repo, tag, headers) {
+  if (typeof fetch !== 'function') throw new Error('当前 Node 不提供全局 fetch，需要 Node 18 或更高才能运行本脚本。')
   const r = await fetch(`${API}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, { headers })
   if (r.status === 404) return undefined
   if (!r.ok) throw new Error(`查询发布说明失败：HTTP ${r.status} ${r.statusText}`)

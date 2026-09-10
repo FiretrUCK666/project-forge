@@ -314,7 +314,8 @@ function checkAgentsKernel() {
 
 /** Extended_Pictographic 覆盖绝大多数 emoji；箭头、对勾一类符号不在其内，可正常使用。 */
 const EMOJI = /\p{Extended_Pictographic}/u
-const HOME_PATH = /[A-Za-z]:\\Users\\|\/home\/[A-Za-z0-9._-]+\/|\/Users\/[A-Za-z0-9._-]+\//
+/** 与 survey.mjs 共用同一语义：双分隔符、用户名宽容（见 survey HOME_PATH_PATTERNS，真相源在 survey，改动需两边同步）。 */
+const HOME_PATH = /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+|[\\/](?:home|Users)[\\/][^\\/\s"'`]+/
 
 function checkGlobalRules() {
   const files = collectTextFiles(SKILL_ROOT)

@@ -804,6 +804,55 @@ group('[21] 插件类：三种生态各自认出，未知生态不被误判')
   report(okUnknown, '未知宿主：不硬塞已知类型')
 }
 
+group('[22] 双语文档的成对维护规则必须**写进项目契约**，不只是写在参考文件里')
+{
+  // 这一组测的是「机制缺口」：references 里写了双语会漂移、要成对改，但模板里没有
+  // 对应段落——于是生成出来的契约里没有这条规则，项目也就不会照它做。
+  // 实测后果：一个双语文档的项目，英文版漏掉了一条更新命令，而它的契约里一个字都没提。
+  //
+  // 规则写在参考文件里只对「读过那份文件的人」有效；写进项目自己的契约，
+  // 才对以后每一次会话有效。所以断言落在**生成物**上，不是落在模板上。
+  const bi = fixture('doc-bi', {
+    'package.json': JSON.stringify({ name: 'bi', version: '1.0.0' }),
+    'README.md': '# bi\n\n## 安装\n',
+    'README.en.md': '# bi\n\n## Install\n',
+  })
+  compose(bi)
+  const t = readFileSync(join(bi, 'AGENTS.md'), 'utf8')
+  const ok1 = /双语说明文档要/.test(t)
+  check(ok1, '有双语 README → 生成的契约含成对维护一节')
+  report(ok1, '有双语 README：契约含那一节')
+  const ok2 = /另一份同步了吗/.test(t)
+  check(ok2, '含可自查的那句话（改完要能回答「另一份同步了吗」）')
+  report(ok2, '含自查句')
+  const ok3 = /漂移/.test(t) && /默认语言那份是权威/.test(t)
+  check(ok3, '含「会漂移」与「哪份权威」两条关键判据')
+  report(ok3, '含漂移与权威判据')
+
+  // 反向：单语项目不该出现这一节（否则是噪音，而且会让 AI 去找不存在的第二份文档）
+  const mono = fixture('doc-mono', {
+    'package.json': JSON.stringify({ name: 'mono', version: '1.0.0' }),
+    'README.md': '# mono\n',
+  })
+  compose(mono)
+  const t2 = readFileSync(join(mono, 'AGENTS.md'), 'utf8')
+  const ok4 = !/双语说明文档要/.test(t2)
+  check(ok4, '单语 README → 不含这一节')
+  report(ok4, '单语：不误报')
+
+  // 变体的写法要认全：语言后缀有多种常见拼法，只认一种会漏
+  for (const [label, name] of [['点分', 'README.en.md'], ['下划线', 'README_CN.md'], ['连字符', 'README.zh-CN.md']]) {
+    const d = fixture(`doc-var-${label === '点分' ? 'dot' : label === '下划线' ? 'under' : 'dash'}`, {
+      'package.json': JSON.stringify({ name: 'v', version: '1.0.0' }),
+      'README.md': '# v\n',
+      [name]: '# v\n',
+    })
+    const ok = survey(d).docs?.readmePair !== undefined
+    check(ok, `变体写法「${name}」被认成一对`)
+    report(ok, `变体写法 ${name}`)
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

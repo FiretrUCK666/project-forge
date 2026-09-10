@@ -405,12 +405,21 @@ function isSecretFile(name) {
 const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
 
 /**
- * README 的语言变体：`README.en.md`、`README_CN.md`、`README.zh-CN.md` 这几种写法都常见。
+ * README 及其语言变体：`README.md`、`README.en.md`、`README_CN.md`、`README.zh-CN.md`
+ * 这几种写法都常见。
  *
- * 为什么要单独识别：双语 README 是一个**需要维护的成对关系**，而它会漂移——一份改了
- * 另一份没改，两份说的是不同的事。这件事只有先认出「它们是一对」才谈得上检查。
+ * **这一个正则同时管「收集文件」与「识别语言变体」**，不要再写第二个。
+ * 曾经有两个：收集用的那个只认点分隔（`(\.[a-z]{2})?`），语言识别用的那个认点与下划线。
+ * 于是 `README_CN.md` 根本进不了列表——语言识别的正则再宽松也没用，那个文件压根没被看到。
+ * 两处规则表达同一件事时，先失效的永远是更窄的那个，而且失效得无声无息。
  */
-const README_LANG_RE = /^readme[._-]([a-z]{2}(?:[_-][a-z]{2})?)\.(md|markdown|rst|txt|adoc)$/i
+const README_RE = /^readme([._-][a-z]{2}(?:[._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i
+
+/** 从 README 文件名里取出语言标记；没有语言标记（默认语言）时返回 undefined。 */
+function readmeLangOf(name) {
+  const m = /^readme[._-]([a-z]{2}(?:[._-][a-z]{2})?)\./i.exec(name)
+  return m === null ? undefined : m[1].toLowerCase()
+}
 
 /** 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。 */
 function markdownH2(filePath) {
@@ -911,8 +920,8 @@ function detectArtifacts(root, root_, eco) {
 
 function detectDocs(root, root_) {
   const docs = {}
-  // 匹配 README.md / README.en.md / readme.rst 等：语言后缀是可选的，别写死成单个点分。
-  const readmes = root_.filesIn('', /^readme(\.[a-z]{2}(-[a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i)
+  // 用同一个正则收集：语言后缀是可选的，分隔符点与下划线都认。
+  const readmes = root_.filesIn('', README_RE)
   docs.readme = readmes
 
   // 双语 README：把它作为**一对**报出来，而不是只报两个文件名。
@@ -922,7 +931,7 @@ function detectDocs(root, root_) {
   // 两份都会展示在制品库页面上、都在包内，改哪一份都算用户可见变化。
   if (readmes.length > 1) {
     const variants = readmes
-      .map((f) => ({ file: f, lang: README_LANG_RE.exec(f)?.[1]?.toLowerCase() }))
+      .map((f) => ({ file: f, lang: readmeLangOf(f) }))
       .filter((x) => x.lang !== undefined)
     const defaultOne = readmes.find((f) => isDefaultReadme(f))
     if (variants.length > 0 && defaultOne !== undefined) {

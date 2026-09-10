@@ -211,6 +211,15 @@ function deriveFacts(target) {
   const hasVersion = typeof s.artifacts?.declaredVersion === 'string'
     && s.artifacts.declaredVersion.trim() !== ''
 
+  // 「说明文档是不是多语言的」决定要不要把成对维护规则写进契约。
+  //
+  // 这一条是**机制缺口**补上的：references 里早就写了双语文档会漂移、要成对改，
+  // 但模板里没有对应段落——于是生成出来的契约里没有这条规则，项目也就不会照它做。
+  // 实测后果：一个双语文档的项目，英文版漏掉了一条更新命令，而它的契约里
+  // 一个字都没提「中文改了英文也要改」。规则写在参考文件里只对「读过那份文件的人」
+  // 有效；写进项目自己的契约，才对**以后每一次会话**有效。
+  const hasBilingualReadme = s.docs?.readmePair !== undefined
+
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
   // 产出错名字；而模板里的未知条件会直接报错，等于把错误推迟到运行时。
@@ -225,6 +234,8 @@ function deriveFacts(target) {
     'no-commands': !hasCommands,
     'has-version': hasVersion,
     'no-version': !hasVersion,
+    'has-bilingual-readme': hasBilingualReadme,
+    'no-bilingual-readme': !hasBilingualReadme,
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
     publishable,

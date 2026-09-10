@@ -443,7 +443,13 @@ function scanContents(root, candidates, realHomes) {
     const text = readText(full)
     if (text === undefined) continue
     for (const { label, re } of SECRET_CONTENT_PATTERNS) {
-      if (re.test(text)) { secrets.push({ path: rel, kind: label }); break }
+      const m = re.exec(text)
+      if (m === null) continue
+      // 带行号：只报文件名不构成可执行的报告——使用者还得自己搜一遍。
+      // 行号从匹配位置数换行符得到，不重跑一遍全文。
+      const line = text.slice(0, m.index).split('\n').length
+      secrets.push({ path: rel, kind: label, line })
+      break
     }
     for (const { re } of HOME_PATH_PATTERNS) {
       const m = text.match(re)
@@ -648,6 +654,24 @@ function detectEcosystem(root, root_, walked) {
 }
 
 /**
+ * 清单文件 → 它是不是「可发布的清单」（即声明了这个项目的身份与版本，能对外发）。
+ *
+ * 这份表存在的理由是一个真实缺陷：判断「这个项目能不能发布」时只认 `package.json`，
+ * 于是**任何非 JS 项目一律被判成不可发布**，生成的契约里整块丢掉版本号语义、抬版本号
+ * 判据、发版规则、角色判定——而 SKILL.md 的能力矩阵明写「python / rust / go：
+ * 发布视声明而定」。读这张表就不会把「我没解析那种清单」误当成「它不能发布」。
+ */
+const PUBLISHABLE_MANIFESTS = [
+  ['package.json', 'node'],
+  ['pyproject.toml', 'python'], ['setup.py', 'python'], ['setup.cfg', 'python'],
+  ['cargo.toml', 'rust'],
+  ['go.mod', 'go'],
+  ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
+  ['gemfile', 'ruby'], ['composer.json', 'php'],
+  ['pubspec.yaml', 'dart'], ['mix.exs', 'elixir'], ['package.swift', 'swift'],
+]
+
+/**
  * 从清单文件推导「怎么构建/测试/校验」。取不到就留空，不编造。
  *
  * 返回值里既有扁平字段（`build`、`test` 一类，取「最可信的那个」），也有
@@ -689,12 +713,28 @@ function deriveCommands(root, root_, eco) {
   }
 
   if (eco.kinds.includes('python')) {
+    const python = {}
     const pyName = root_.real('pyproject.toml')
     const py = pyName === undefined ? '' : (readText(join(root, pyName)) ?? '')
-    const python = {}
-    const hasPytest = root_.entry('tests')?.isDir === true
-      || root_.has('pytest.ini') || /\[tool\.pytest/.test(py)
-    if (hasPytest) python.test = 'python -m pytest'
+    // **声明**优先：只有项目自己声明了测试框架，才给出对应的测试命令。
+    //
+    // 这里曾经只要「有 tests 目录」就给出 `python -m pytest`——那是**按生态惯例推断**，
+    // 不是读项目声明。实测一个用标准库 unittest 的项目（装了 pytest 也跑不起来）
+    // 拿到一条跑不通的「硬门禁」命令，而且它把 P7 的诚实分支遮住了：SKILL.md 说
+    // 「推不出命令时要如实说明没有验证过」，但脚本总能推出一条假命令，那个分支永不触发。
+    const declaresPytest = /\[tool\.pytest/.test(py) || root_.has('pytest.ini') || root_.has('tox.ini')
+    const declaresUnittest = /\[tool\.unittest/.test(py)
+      || (/unittest/.test(readText(join(root, 'setup.cfg')) ?? '') && root_.has('setup.cfg'))
+    // **注明出处**：这条是按「有测试目录 + 无框架声明」推断的，不是项目声明的。
+    // 写进文档时必须带着这个说明——否则它看起来和项目自己声明的命令一样可靠，
+    // 而实测过：一个用标准库 unittest 的项目，曾经的推断会给出一条跑不通的 pytest
+    // 命令，还被当成「硬门禁」写进契约。
+    if (declaresPytest) python.test = 'python -m pytest'
+    else if (declaresUnittest) python.test = 'python -m unittest discover -s tests -v'
+    else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
+      python.test = 'python -m unittest discover -s tests -v'
+      python.testNote = '项目未声明测试框架；此命令按标准库 unittest 推断，请与项目实际用法核对'
+    }
     if (/\[tool\.ruff/.test(py) || root_.has('ruff.toml') || root_.has('.ruff.toml')) {
       python.lint = 'python -m ruff check .'
     }
@@ -743,16 +783,31 @@ function deriveCommands(root, root_, eco) {
 /**
  * 发布相关的既成事实：决定「产物入不入库」和「发布范围」。
  *
- * 其中 `runtimeRequirements` 是**项目自己声明的运行环境下限**。它值得单独读出来，因为
- * 文档套装要求「环境要求那一节必须写具体版本号、不许编造」——而项目自己声明的那个数字
- * 就是唯一权威来源。让勘察把它带出来，写文档时就不必猜、也不会漏读。
- * 读不到就是**没有声明**，此时按文档套装的规则：宁可不写那一节，也不要编一个数字。
+ * 其中 `publishableManifest` 是**这个项目可发布身份的唯一来源**。它存在的理由是一个
+ * 真实缺陷：判断「能不能发布」时只认 JS 的 `package.json`，于是**任何非 JS 项目一律
+ * 被判成不可发布**，生成的契约里整块丢掉版本号语义、抬版本号判据、发版规则、角色判定
+ * ——而 SKILL.md 的能力矩阵明写「python / rust / go：发布视声明而定」。
+ * 读这张表就不会把「我没解析那种清单」误当成「它不能发布」。
+ *
+ * `runtimeRequirements` 是**项目自己声明的运行环境下限**。它值得单独读出来，因为文档
+ * 套装要求「环境要求那一节必须写具体版本号、不许编造」——而项目自己声明的那个数字就是
+ * 唯一权威来源。读不到就是**没有声明**，此时宁可不写那一节，也不要编一个数字。
  */
 function detectArtifacts(root, root_, eco) {
   const facts = {
     publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [],
-    runtimeRequirements: [],
+    runtimeRequirements: [], publishableManifest: undefined,
   }
+
+  // 可发布清单：按知名度顺序取第一个存在的。它不一定与「主生态」相同（一个 Python 项目
+  // 也可能因为某个原因带 package.json），所以单独判定，不从 kinds 推。
+  for (const [file, kind] of PUBLISHABLE_MANIFESTS) {
+    const real = root_.real(file)
+    if (real === undefined) continue
+    facts.publishableManifest = { file: real, ecosystem: kind }
+    break
+  }
+
   const pkg = eco.manifest
   if (pkg !== undefined) {
     if (Array.isArray(pkg.files)) facts.publishScope = { kind: 'files-whitelist', entries: pkg.files }
@@ -948,6 +1003,18 @@ function survey(target) {
 
   const scanned = scanContents(root, candidates, realHomeSpellings())
 
+  // 给风险项补上「已经在版本库里了吗」——这一个比特决定处置方式完全不同：
+  // 未跟踪的大文件只要加进忽略就解决了；已跟踪的必须先从索引移除，否则它仍会随
+  // 下一次提交进入历史。凭据同理：未跟踪的能从这次提交排除，已在历史里的只能轮换。
+  const trackedSet = new Set(runGitPaths(['ls-files', '-z'], root) ?? [])
+  const markTracked = (entry) => {
+    const rel = entry.path.replace(/\\/g, '/')
+    const tracked = trackedSet.has(rel) || trackedSet.has(entry.path)
+    return { ...entry, tracked }
+  }
+  const secrets = scanned.secrets.map(markTracked)
+  const largeFiles = walked.largeFiles.map(markTracked)
+
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
   const ignoredButTracked = detectIgnores(root, root_).ignoredButTracked
 
@@ -965,7 +1032,7 @@ function survey(target) {
     },
     risks: {
       secretFiles: walked.secretFiles,
-      secretContent: scanned.secrets,
+      secretContent: secrets,
       homePathLeaks: scanned.homePaths,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
       // 截断时不能把「没报」当成「没有」。
@@ -974,7 +1041,7 @@ function survey(target) {
         truncated: walked.contentScanTruncated === true,
         scope: '递归（已排除依赖与构建产物目录、二进制与超大文件）',
       },
-      largeFiles: walked.largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
+      largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
       symlinks: walked.symlinks.slice(0, 50),
       nestedRepos: walked.nestedRepos,
     },
@@ -1083,7 +1150,13 @@ function toMarkdown(s) {
   L.push(`- 敏感文件：${r.secretFiles.length === 0 ? '无' : r.secretFiles.length + ' 个（' + r.secretFiles.slice(0, 5).join('、') + '）'}`)
   L.push(`- 内容里的凭据形状：${r.secretContent.length === 0 ? '无' : r.secretContent.length + ' 处'}`)
   if (r.secretContent.length > 0) {
-    for (const hit of r.secretContent.slice(0, 10)) L.push(`  - ${hit.path}（${hit.kind}）`)
+    for (const hit of r.secretContent.slice(0, 10)) {
+      // tracked 这一个比特决定处置：未跟踪的能从这次提交排除，已在历史里的只能轮换。
+      L.push(`  - ${hit.path}:${hit.line ?? '?'}（${hit.kind}，`
+        + `${hit.tracked === true ? '**已在版本库里**' : '尚未跟踪'}）`)
+    }
+    L.push('  - 处置分情况，见 references/version-control.md 的「密钥与敏感信息门控」：'
+      + '不要因为一处历史凭据就停下全部工作。')
   }
   const leaks = r.homePathLeaks.filter((h) => h.kind === 'leak')
   const benign = r.homePathLeaks.filter((h) => h.kind !== 'leak')

@@ -66,19 +66,29 @@ function deriveFacts(target) {
   const s = survey(target)
   const manifestPath = s.ecosystem.kinds.includes('node') ? 'package.json' : undefined
   const commands = s.commands ?? {}
-  // 「有没有可跑的命令」只看真实命令字段：byEcosystem / multipleEcosystems 是结构信息，
-  // 不是命令本身，把它们算进来会让一个空项目也显示「有命令」。
+  // 「有没有可跑的命令」只看**真实命令字段**。
+  // 要排除三类非命令的键，否则一个只有说明、没有命令的项目也会显示「有命令」：
+  //   - `packageManager`：包管理器名，不是命令；
+  //   - `byEcosystem` / `multipleEcosystems`：结构信息；
+  //   - `*Note`：对某条命令的推断说明（例如「此命令按标准库推断」），本身不可执行。
+  const NON_COMMAND_KEYS = new Set(['packageManager', 'byEcosystem', 'multipleEcosystems'])
   const hasCommands = Object.keys(commands)
-    .some((k) => k !== 'packageManager' && k !== 'byEcosystem' && k !== 'multipleEcosystems')
+    .some((k) => !NON_COMMAND_KEYS.has(k) && !k.endsWith('Note')
+      && typeof commands[k] === 'string')
 
-  // 可发布 = **有可分发的清单**且没被声明为私有。
+  // 可发布 = **有这个生态的可发布清单**且没被声明为私有。
   //
-  // 这里曾经要求「声明了发布范围（files 白名单）」才算可发布，那是错的：绝大多数普通
-  // 包并不写 files 字段（靠默认规则决定发什么），于是它们被判成「不可发布」，文档里
-  // 连版本与发布这一节都没有。判据应当是「这个项目有没有可分发的形态」，而清单文件的
-  // 存在正是这件事的声明；`private: true` 才是明确的「不要发布」。
-  const hasManifest = manifestPath !== undefined
-  const publishable = hasManifest && s.artifacts?.private !== true
+  // 这里踩过两次坑，都记下来免得再犯：
+  //   一、曾经要求「声明了发布范围（files 白名单）」才算可发布——而绝大多数包并不写
+  //       该字段（靠默认规则决定发什么），于是它们被判成不可发布；
+  //   二、改成「有清单即可」之后又只认 `package.json`——于是**所有非 JS 项目**（Python
+  //       的 pyproject.toml、Rust 的 Cargo.toml、Go 的 go.mod）一律被判成不可发布，
+  //       整块丢掉版本号语义、抬版本号判据、发版规则、角色判定，而能力矩阵明写
+  //       「python / rust / go：发布视声明而定」。
+  // 判据现在来自勘察读出的 `publishableManifest`——它按各生态的清单文件名逐個确认，
+  // 不依赖「主生态是不是 node」。
+  const publishableManifest = s.artifacts?.publishableManifest
+  const publishable = publishableManifest !== undefined && s.artifacts?.private !== true
 
   // 有依赖 = 清单里声明了任意一类依赖，或其他生态的依赖声明文件存在
   let hasDeps = false
@@ -162,6 +172,9 @@ function renderCommands(commands) {
       if (typeof command !== 'string') continue
       lines.push(`# ${label}`)
       lines.push(command)
+      // 命令带「推断说明」时紧跟其后写明，别让读者以为它是项目自己声明的。
+      const note = cmds[`${key}Note`]
+      if (typeof note === 'string') lines.push(`# （${note}）`)
     }
     return lines
   }
@@ -530,17 +543,52 @@ function parseArgs(argv) {
   return { check, status, upgrade, budget, help, positional }
 }
 
-function reportAuthors(authors, stream) {
-  if (authors.length === 0) return
-  stream.write(`\n待填写 ${authors.length} 处（脚本无法从项目事实推出，需要读代码后补上）：\n`)
-  const seen = new Set()
-  for (const { section, note } of authors) {
-    const line = note === '' ? section : `${section} —— ${note}`
-    if (seen.has(line)) continue
-    seen.add(line)
-    stream.write(`  - ${line}\n`)
+/**
+ * 报告缺口。两件事都要说，缺一件就会误导：
+ *
+ *   - **待填写项**（`pf:author`）：模板说要人写的节，还没写；
+ *   - **缺失的节**：模板里有、文件里没有的节。
+ *
+ * 为什么两个都要：`--upgrade` 刻意**不补**需要人写的节（补进去只是占位符），于是
+ * 一份刚升级完、一个项目节都没写的手写文件，`pf:author` 数**立刻就是 0**——如果只报
+ * 「待填写 0 处」，使用者会以为写完了，而实际上项目定位、架构、不变量、构建验证、
+ * 硬性规范、测试约定六节全缺。这正是 SKILL.md 自己警告过的「看起来完整、实际空洞」，
+ * 而报告本身成了那个错觉的来源。
+ */
+function reportGaps(authors, missing, stream) {
+  const complete = authors.length === 0 && missing.length === 0
+  if (complete) {
+    stream.write('\n内容完整：没有待填写项，也没有缺失的节。\n')
+    return
   }
-  stream.write('填完后请删掉对应的 pf:author 标记，并重新运行本脚本确认归零。\n')
+  if (authors.length > 0) {
+    stream.write(`\n待填写 ${authors.length} 处（脚本填不了，要读代码后写）：\n`)
+    const seen = new Set()
+    for (const { section, note } of authors) {
+      const line = note === '' ? section : `${section} —— ${note}`
+      if (seen.has(line)) continue
+      seen.add(line)
+      stream.write(`  - ${line}\n`)
+    }
+  }
+  if (missing.length > 0) {
+    stream.write(`\n缺失 ${missing.length} 个节（模板里有、本文件没有）：\n`)
+    for (const m of missing) {
+      stream.write(`  - ${m.heading}${m.needsHuman ? '（需要读代码后自己写）' : '（可由脚本补）'}\n`)
+    }
+    stream.write('**这些节没写，文档就不算完成**——它们正是未来的会话真正需要的内容。\n')
+  }
+  stream.write('写完后重跑本脚本，确认「内容完整」。\n')
+}
+
+/** 算出相对模板还缺哪些节。`--status` 与普通运行共用同一份判据。 */
+function missingSections(target, currentText) {
+  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target)))
+  const have = new Set(splitSections(currentText)
+    .sections.map((s) => s.heading))
+  return fresh.sections
+    .filter((s) => !have.has(s.heading))
+    .map((s) => ({ heading: s.heading, needsHuman: findAuthors(s.lines.join('\n')).length > 0 }))
 }
 
 /**
@@ -749,9 +797,10 @@ function main(argv) {
   }
 
   if (status) {
+    const missing = missingSections(target, readUtf8(agentsPath))
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
-      + `待填写 ${authors.length} 处\n`)
-    reportAuthors(authors, process.stdout)
+      + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)
+    reportGaps(authors, missing, process.stdout)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
       return 1
@@ -759,9 +808,10 @@ function main(argv) {
     return 0
   }
 
+  const missing = missingSections(target, composed)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
-    reportAuthors(authors, process.stdout)
+    reportGaps(authors, missing, process.stdout)
     reportRefresh(refreshReport, process.stdout)
     return 0
   }
@@ -771,7 +821,7 @@ function main(argv) {
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
-  reportAuthors(authors, process.stdout)
+  reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
   if (bytes > budget) {
     process.stderr.write(

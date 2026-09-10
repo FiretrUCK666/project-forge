@@ -308,14 +308,16 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
 
 group('[9] 多生态：命令按生态分组，不互相覆盖')
 {
+  // 两边都**显式声明**了测试框架：只有这样断言才有意义。若不声明，勘察给出的是
+  // 「按标准库推断」的带说明命令（那是正确的行为，见第 13 组）。
   const dir = fixture('multi', {
     'package.json': JSON.stringify({
       name: 'mixed', version: '1.0.0',
       scripts: { build: 'tsc', test: 'vitest run' },
       devDependencies: { typescript: '^5.0.0' },
     }, null, 2),
+    'pyproject.toml': '[project]\nname = "mixed"\nversion = "1.0.0"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
     'requirements.txt': 'pdfplumber>=0.10\n',
-    'pyproject.toml': '[project]\nname = "mixed"\nversion = "1.0.0"\n',
     'src/index.ts': 'export const x = 1\n',
     'tests/test_a.py': 'def test_a(): pass\n',
   })
@@ -329,6 +331,34 @@ group('[9] 多生态：命令按生态分组，不互相覆盖')
     ['node 与 python 的命令都在', /npm run test/.test(t) && /python -m pytest/.test(t)],
   ]
   for (const [label, ok] of checks) { check(ok, label); report(ok, label) }
+}
+
+group('[13] Python 测试命令：只在项目声明了框架时才给，不按生态惯例编')
+{
+  // 声明了 pytest → 给 pytest
+  const withPytest = fixture('py-pytest', {
+    'pyproject.toml': '[project]\nname = "p"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+    'tests/test_a.py': 'def test_a(): pass\n',
+  })
+  const c1 = survey(withPytest).commands ?? {}
+  const ok1 = c1.test === 'python -m pytest'
+  check(ok1, '声明了 pytest → 给 pytest', JSON.stringify(c1.test))
+  report(ok1, '声明 pytest → 用 pytest')
+
+  // **没有**声明框架（用标准库 unittest 的项目就是这样）→ 给标准库那条，
+  // 且必须带说明。曾经这里按生态惯例给 pytest，结果一个 unittest 项目拿到跑不通的
+  // 「硬门禁」命令，还把 P7 的诚实分支遮住了。
+  const noDecl = fixture('py-nodecl', {
+    'pyproject.toml': '[project]\nname = "p"\n',
+    'tests/test_a.py': 'import unittest\n',
+  })
+  const c2 = survey(noDecl).commands ?? {}
+  const ok2 = c2.test === 'python -m unittest discover -s tests -v'
+  check(ok2, '未声明框架 → 给标准库那条', JSON.stringify(c2.test))
+  report(ok2, '未声明框架 → 给标准库那条')
+  const ok3 = typeof c2.testNote === 'string' && c2.testNote.length > 0
+  check(ok3, '未声明框架时带「这是推断」的说明')
+  report(ok3, '并注明这是推断，非项目声明')
 }
 
 group('[10] 运行环境下限：读项目自己的声明，读不到就是没有')
@@ -413,6 +443,105 @@ group('[12] 生态与命令：细化不算第二套命令')
   const ok3 = Array.isArray(survey(multi).commands?.multipleEcosystems)
   check(ok3, 'node + python 仍报多生态')
   report(ok3, '真多生态：仍然报')
+}
+
+group('[14] 完成判据不能空转：只升级不填写时，必须报出缺失的节')
+{
+  const dir = fixture('vacuous', {
+    'pyproject.toml': '[project]\nname = "x"\nversion = "1.0.0"\n',
+    'main.py': 'print(1)\n',
+  })
+  writeFileSync(join(dir, 'AGENTS.md'), '# x\n\n说明。\n\n## 怎么跑\n\npython main.py\n', 'utf8')
+  compose(dir, '--upgrade')
+  const st = compose(dir, '--status')
+  const out = st.stdout ?? ''
+  // 只做升级、一个项目节都没写时，pf:author 数立刻是 0——只看这个数字会以为写完了。
+  const noAuthors = /待填写 0 处/.test(out)
+  check(noAuthors, '前提：升级后待填写确实是 0')
+  const reportsMissing = /缺失 \d+ 节/.test(out)
+  check(reportsMissing, '--status 报出缺失的节（否则完成判据会空转）', out.split('\n')[0])
+  report(reportsMissing, '--status 报出缺失节数')
+  const warns = /不算完成/.test(out)
+  check(warns, '--status 明确说明这些节没写就不算完成')
+  report(warns, '并说明不算完成')
+
+  // 新生成的文件：节**都在**（来自模板），但都还没填——所以判据必须落在
+  // 「待填写」上，且绝不能报「内容完整」。只看缺失节数会漏掉这种情况。
+  const fresh = fixture('fresh', { 'README.md': '# x\n', 'src/a.js': 'export const a=1\n' })
+  compose(fresh)
+  const st2 = compose(fresh, '--status')
+  const out2 = st2.stdout ?? ''
+  const authorCount = Number((/待填写 (\d+) 处/.exec(out2) ?? [])[1] ?? -1)
+  const ok1 = authorCount > 0
+  check(ok1, '新生成的文件报出待填写项', String(authorCount))
+  report(ok1, `新生成文件报待填写 ${authorCount} 处`)
+  // 注意：提示语里有一句「写完后重跑本脚本，确认「内容完整」」，它**包含**这个短语。
+  // 所以断言要匹配「以它开头的整行」，不能匹配子串——否则测试永远为假。
+  const hasCompleteLine = (text) => text.split('\n').some((l) => l.trim().startsWith('内容完整'))
+  const ok2 = !hasCompleteLine(out2)
+  check(ok2, '新生成的文件不得报「内容完整」')
+  report(ok2, '且不报「内容完整」')
+
+  // 反例：两个数字都归零时才该报「内容完整」——用一个已填好的文件验证
+  const done = fixture('done', {
+    'package.json': JSON.stringify({ name: 'd', version: '1.0.0', private: true, scripts: { test: 'x' } }),
+  })
+  compose(done)
+  const dpath = join(done, 'AGENTS.md')
+  // 把待填写标记全部换成真实内容
+  writeFileSync(dpath, readFileSync(dpath, 'utf8')
+    .replace(/<!--\s*pf:author[\s\S]*?-->/g, '（已填写）'), 'utf8')
+  const st3 = compose(done, '--status')
+  const ok3 = hasCompleteLine(st3.stdout ?? '')
+  check(ok3, '两个数字都归零时报「内容完整」')
+  report(ok3, '填完后报「内容完整」')
+}
+
+group('[15] 非 JS 项目必须照样拿到发布那一半契约')
+{
+  // 这条曾经整块丢失：判「能不能发布」时只认 package.json，于是所有非 JS 项目
+  // 都被写成「本项目不对外发布」，版本号语义、抬版本号判据、发版规则全没了。
+  for (const [label, files] of [
+    ['Python', { 'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\n' }],
+    ['Rust', { 'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\n' }],
+    ['Go', { 'go.mod': 'module p\n\ngo 1.22\n' }],
+  ]) {
+    const dir = fixture(`pub-${label.toLowerCase()}`, files)
+    compose(dir)
+    const t = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const ok1 = !/不对外发布/.test(t)
+    check(ok1, `${label}：不判成「不对外发布」`)
+    report(ok1, `${label}：不判成不可发布`)
+    const ok2 = /^### 版本号语义$/m.test(t) && /^### 发版规则$/m.test(t)
+    check(ok2, `${label}：含版本号语义与发版规则`)
+    report(ok2, `${label}：含版本号语义与发版规则`)
+  }
+}
+
+group('[16] 报告要给到行，并说明在不在版本库里')
+{
+  const dir = fixture('line-num', {
+    'src/c.py': '# a\n# b\nK = "ghp_1234567890abcdefghijklmnopqrstuvwx"\n',
+    'free.env': 'npm_abcdefghijklmnopqrstuvwxyz0123456789\n',
+  })
+  if (HAS_GIT) {
+    for (const args of [['init', '-q'], ['config', 'user.name', 'T'],
+      ['config', 'user.email', 't@e.com'], ['add', 'src'], ['commit', '-q', '-m', 'i']]) {
+      spawnSync('git', args, { cwd: dir })
+    }
+  }
+  const hits = survey(dir).risks?.secretContent ?? []
+  const ok1 = hits.every((h) => Number.isInteger(h.line) && h.line > 0)
+  check(ok1, '凭据命中带行号（只给文件名不构成可执行的报告）', JSON.stringify(hits))
+  report(ok1, '凭据命中带行号')
+  if (HAS_GIT) {
+    const tracked = hits.find((h) => /c\.py/.test(h.path))
+    const untracked = hits.find((h) => /env/.test(h.path))
+    const ok2 = tracked?.tracked === true && untracked?.tracked === false
+    check(ok2, '区分「已在版本库里」与「尚未跟踪」（决定处置方式）',
+      JSON.stringify(hits.map((h) => [h.path, h.tracked])))
+    report(ok2, '区分已跟踪 / 未跟踪')
+  }
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

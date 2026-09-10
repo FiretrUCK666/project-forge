@@ -452,6 +452,103 @@ function checkBehavior() {
   }
 }
 
+// ── 检查九：文档里的「数量自称」必须与现实相符 ──────────────────────────────
+
+/** 中文数字 → 数值。只覆盖文档里实际会用到的那几个。 */
+const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 }
+
+/**
+ * 文档里写「三道门控」「四个脚本」这类数量时，**必须与实际相符**。
+ *
+ * 这类数字是典型的快照：加了东西忘了改，文档就开始说假话，而假话没有任何症状——
+ * 这个 skill 自己就中过：硬门控从 6 道加到 7 道、脚本从 3 个加到 4 个之后，
+ * README 与 AGENTS.md 里「六道硬门控」「三个脚本」还留着，直到人工核对才发现。
+ *
+ * 判据是「文档里的数字 vs 实际数出来的数量」，全自动，不需要人记得。
+ */
+function checkStatedCounts() {
+  const actual = {
+    硬不变量: countNumberedItems('SKILL.md', /^## 硬不变量/, /^\d+\.\s+\*\*/),
+    硬门控: countMatches('SKILL.md', /^\|\s*G\d+\s*\|/gm),
+    // 数文件地图里那一节的行，而不是全文匹配：正文里提到某个脚本（例如「本 skill 自身的
+    // 自检（`scripts/preflight.mjs`）」）也会命中，那是叙述不是清单。
+    脚本: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`scripts\/[a-z-]+\.mjs`/),
+    参考文档: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`references\/[a-z-]+\.md`/),
+    骨架模板: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`templates\/[a-z-]+\.md`/),
+  }
+
+  // 文档里出现的「<中文数字><量词>」与「<阿拉伯数字> 个<量词>」
+  const WATCHED = [
+    { word: '硬不变量', key: '硬不变量' },
+    { word: '硬门控', key: '硬门控' },
+  ]
+  const docs = ['SKILL.md', 'README.md', 'AGENTS.md', 'CONTRIBUTING.md']
+  for (const doc of docs) {
+    const p = join(SKILL_ROOT, doc)
+    if (!existsSync(p)) continue
+    const text = readText(p).replace(/^\uFEFF/, '')
+    for (const { word, key } of WATCHED) {
+      // 要求数字前不是「第」——「第一硬不变量」是序数（「第一个」），不是数量断言，
+      // 误报它只会让人去改一句其实正确的话。
+      const re = new RegExp(`(?<!第)([一二三四五六七八九十]+|\\d+)\\s*(?:道|条|个)?${word}`, 'g')
+      for (const m of text.matchAll(re)) {
+        const raw = m[1]
+        const n = /^\d+$/.test(raw) ? Number(raw) : CN_NUM[raw]
+        if (n === undefined) continue
+        if (n !== actual[key]) {
+          fail(`${doc} 写着「${raw}${word}」，实际是 ${actual[key]} —— 数量自称与代码不符。`
+            + '要么改数字，要么去掉数字（数量是快照，会过期）。')
+        }
+      }
+    }
+    // 脚本数量：写成「N 个脚本」时核对
+    for (const m of text.matchAll(/(?<!第)([一二三四五六七八九十]+|\d+)\s*个?\s*脚本/g)) {
+      const raw = m[1]
+      const n = /^\d+$/.test(raw) ? Number(raw) : CN_NUM[raw]
+      if (n !== undefined && n !== actual['脚本']) {
+        fail(`${doc} 写着「${raw}个脚本」，实际是 ${actual['脚本']} 个 —— 数量自称与代码不符。`)
+      }
+    }
+  }
+}
+
+/** 在某个二级标题之下，数匹配到的行数。用于「文件地图」这类表格清单。 */
+function countTableRows(file, headingRe, rowRe) {
+  const p = join(SKILL_ROOT, file)
+  if (!existsSync(p)) return -1
+  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
+  const start = lines.findIndex((l) => headingRe.test(l))
+  if (start < 0) return -1
+  let count = 0
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s/.test(lines[i])) break
+    if (rowRe.test(lines[i])) count += 1
+  }
+  return count
+}
+
+/** 数某个文件里匹配到的个数。 */
+function countMatches(file, re) {
+  const p = join(SKILL_ROOT, file)
+  if (!existsSync(p)) return -1
+  return (readText(p).replace(/^\uFEFF/, '').match(re) ?? []).length
+}
+
+/** 数「某个二级标题之下、某个模式的编号项」有几条。 */
+function countNumberedItems(file, headingRe, itemRe) {
+  const p = join(SKILL_ROOT, file)
+  if (!existsSync(p)) return -1
+  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
+  const start = lines.findIndex((l) => headingRe.test(l))
+  if (start < 0) return -1
+  let count = 0
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s/.test(lines[i])) break
+    if (itemRe.test(lines[i])) count += 1
+  }
+  return count
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 function main() {
@@ -463,6 +560,7 @@ function main() {
   checkGlobalRules()
   checkScripts()
   checkScriptsRun()
+  checkStatedCounts()
   checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。

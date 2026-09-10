@@ -22,22 +22,36 @@ project-forge 把这些收敛成一条流程，并且把判断依据写下来—
 两个字段——这是这套格式各家共通的核心字段，所以**凡是支持该格式的宿主都能加载它**。
 脚本是纯 Node，不调用任何宿主接口。
 
-安装就是把整个目录放进**你所用宿主的用户级 skill 根**。这个位置由宿主决定，通常是
-该宿主配置目录下的 `skills` 子目录。以 DeepSeek Harness 为例（它的根默认为
-`~/.dsh/skills`）：
+**装到哪**：你所用宿主的**用户级 skill 根**。这个位置由宿主决定，本 skill 不作假定：
+
+- **宿主里已经装了别的 skill** → 放到它们所在的目录。这是最可靠的判断，不用记路径。
+- **一个都没有** → 查该宿主的文档。支持 skill 的宿主都有一个用户级目录，位置写在它的
+  文档里（不少宿主还允许用环境变量改它，那就以环境变量为准）。
+
+**以 DeepSeek Harness 为例。** 它扫两个并列的用户级位置，两个都是「基目录 + `skills`」，
+基目录都能被环境变量覆盖（下表是未设置时的默认值）：
+
+| 位置 | 说明 |
+| --- | --- |
+| `$DSH_HOME/skills` | `DSH_HOME` 未设置时即 `~/.dsh/skills` |
+| `$DSH_AGENTS_HOME/skills` | `DSH_AGENTS_HOME` 未设置时即 `~/.agents/skills` |
+
+放哪个都行，选你已经在用的那个。以第一个为例：
 
 ```sh
-git clone https://github.com/FiretrUCK666/project-forge.git ~/.dsh/skills/project-forge
+git clone https://github.com/FiretrUCK666/project-forge.git "$DSH_HOME/skills/project-forge"
 ```
 
-Windows 上把目标路径换成 `"%USERPROFILE%\.dsh\skills\project-forge"`。
+`DSH_HOME` 没设时，把 `"$DSH_HOME/skills/…"` 换成 `~/.dsh/skills/project-forge`；
+Windows 上是 `"%USERPROFILE%\.dsh\skills\project-forge"`（只是分隔符不同）。
 
-**目录名的大小写以本机实际存在的那个为准。** 在区分大小写的系统上，`Skills` 与
-`skills` 是两个不同的路径，写错就会装到一个宿主不会扫描的地方。
+**子目录名必须是小写 `skills`。** 宿主读的就是这个字面量。Windows 与默认配置的 macOS 上
+`Skills` 也能命中（文件系统不区分大小写），但**在区分大小写的系统上，`Skills` 是另一个
+宿主不会扫描的目录**——所以一律写小写。
 
-用别的宿主时，把它放到那个宿主的 skill 根即可。目录名保持 `project-forge`——它必须与
-frontmatter 里的 `name` 一致。放好之后不需要注册或重启：宿主按目录发现，`SKILL.md`
-就是入口。
+用别的宿主时同理：放到它的 skill 根，**子目录名照它文档写的那个写法**。目录名保持
+`project-forge`——它必须与 frontmatter 里的 `name` 一致。放好之后不需要注册或重启：
+宿主按目录发现，`SKILL.md` 就是入口。
 
 ## 更新
 

@@ -125,15 +125,22 @@ group('[3] 仓库根的各种路径写法都必须判真')
 
   const cases = [
     ['精确路径', repo],
-    ['大小写变化', repo.toUpperCase()],
     ['正斜杠', repo.replace(/\\/g, '/')],
     ['结尾分隔符', repo + (process.platform === 'win32' ? '\\' : '/')],
   ]
+  // 大小写只在**大小写不敏感的**文件系统上才该判真。在 Linux 上，全大写的路径是一个
+  // 真正不存在的路径，判假才是对的。所以这一条按平台能力条件化——把 Windows 的行为
+  // 当成所有平台的行为，测试本身就成了错的（CI 在 Ubuntu 上就是这样红的）。
+  const caseInsensitive = existsSync(repo.toUpperCase())
+  if (caseInsensitive) cases.push(['大小写变化', repo.toUpperCase()])
+
   for (const [label, p] of cases) {
     const ok = survey(p).git?.isRepoRoot === true
     check(ok, `${label} → true`)
     report(ok, label)
   }
+  process.stdout.write(`  （本机文件系统${caseInsensitive ? '不区分' : '区分'}大小写，`
+    + `${caseInsensitive ? '已' : '未'}断言大小写场景）\n`)
 }
 
 // ── 四、生态判定（曾把有代码的项目判成纯文档目录） ───────────────────────────

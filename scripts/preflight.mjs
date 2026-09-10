@@ -137,21 +137,31 @@ function checkSkillFile() {
 
 // ── 检查二：引用完整性 ──────────────────────────────────────────────────────
 
-function checkReferencesResolve(skill) {
-  if (skill === undefined) return
-  const referenced = new Set()
+/**
+ * 扫描所有 Markdown 里的资源引用，逐个确认文件存在。
+ *
+ * 覆盖全部文档而不只是 SKILL.md：reference 之间互相引用是常态，只查入口等于只守住了
+ * 一扇门。引用断链的代价很高——AI 按图索骥走到死路，然后开始猜。
+ */
+function checkReferencesResolve() {
+  const docs = collectTextFiles(SKILL_ROOT).filter((f) => f.endsWith('.md'))
+  if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
   // 只认这三种路径形状：本 skill 的资源就在这三类目录下
   const re = /`((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)`/g
-  for (const m of skill.text.matchAll(re)) referenced.add(m[1])
-  if (referenced.size === 0) {
-    warn('SKILL.md 里没有引用任何 resources/references/templates/scripts 路径。')
-    return
-  }
-  for (const target of [...referenced].sort()) {
-    if (!existsSync(join(SKILL_ROOT, target))) {
-      fail(`SKILL.md 引用了不存在的文件：${target} —— AI 会按图索骥走到死路。`)
+  let total = 0
+  for (const full of docs) {
+    const name = rel(full)
+    const text = readText(full).replace(/^\uFEFF/, '')
+    const seen = new Set()
+    for (const m of text.matchAll(re)) seen.add(m[1])
+    for (const target of [...seen].sort()) {
+      total += 1
+      if (!existsSync(join(SKILL_ROOT, target))) {
+        fail(`${name} 引用了不存在的文件：${target} —— AI 会按图索骥走到死路。`)
+      }
     }
   }
+  if (total === 0) warn('全文没有引用任何 references / templates / scripts 路径。')
 }
 
 // ── 检查三：references 的结构约定 ───────────────────────────────────────────
@@ -291,12 +301,17 @@ function checkScripts() {
 
 function main() {
   const skill = checkSkillFile()
-  checkReferencesResolve(skill)
+  checkReferencesResolve()
   checkReferences()
   checkTemplates()
   checkAgentsKernel()
   checkGlobalRules()
   checkScripts()
+  // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
+  // 入口本身不能例外。
+  if (skill !== undefined && !/^## 何时使用[ \t]*$/m.test(skill.text)) {
+    fail('SKILL.md 缺少二级标题「## 何时使用」—— 入口必须说清什么情况下该用它。')
+  }
 
   for (const w of warnings) process.stdout.write(`WARN  ${w}\n`)
   for (const f of failures) process.stdout.write(`FAIL  ${f}\n`)

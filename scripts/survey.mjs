@@ -323,6 +323,12 @@ function walk(root) {
     // 只扫顶层，而报告仍显示「0 命中」，看起来像扫过了。
     textCandidates: [],
     contentScanTruncated: false,
+    // 深度超限被跳过的子树数量。
+    //
+    // 这个计数是必须的：递归有深度上限（防止符号链接环或病态嵌套把扫描拖死），但
+    // **静默地不扫**是最坏的结果——报告里写着「递归、已排除依赖目录」，读起来像全扫过了。
+    // 实测过：30 层处的 `.env` 既不计数也不扫描，`truncated` 还是 false。
+    depthLimited: 0,
     // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
     // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
     sourceScan: {
@@ -337,7 +343,7 @@ function walk(root) {
   const stack = [{ dir: root, depth: 0, inCountingArea: true }]
   while (stack.length > 0) {
     const { dir, depth, inCountingArea } = stack.pop()
-    if (depth > MAX_WALK_DEPTH) continue
+    if (depth > MAX_WALK_DEPTH) { result.depthLimited += 1; continue }
     let entries
     try {
       entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
@@ -1067,6 +1073,10 @@ function survey(target) {
       contentScan: {
         filesScanned: candidates.length,
         truncated: walked.contentScanTruncated === true,
+        // 深度超限是另一种「没扫到」，与「文件数超限」分开报——两者的处置不同
+        // （前者要确认那层深目录里是不是有东西，后者要重扫）。任何一种都不能读成
+        // 「检查过了，很干净」。
+        depthLimited: walked.depthLimited,
         scope: '递归（已排除依赖与构建产物目录、二进制与超大文件）',
       },
       largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
@@ -1223,7 +1233,12 @@ function toMarkdown(s) {
   const scan = r.contentScan
   if (scan !== undefined) {
     L.push(`- 内容扫描覆盖：${scan.filesScanned} 个文件（${scan.scope}）`
-      + (scan.truncated ? ' **已达上限被截断，未报不等于没有**' : ''))
+      + (scan.truncated ? ' **已达文件数上限被截断，未报不等于没有**' : ''))
+    if (scan.depthLimited > 0) {
+      L.push(`- **有 ${scan.depthLimited} 个子目录因嵌套过深未进入**`
+        + `（超过 ${MAX_WALK_DEPTH} 层）——里面若放了凭据不会被发现。`
+        + '确认那些目录不需要检查，或手工看一眼。')
+    }
   }
   const ibt = s.ignores?.ignoredButTracked
   if (Array.isArray(ibt) && ibt.length > 0) {

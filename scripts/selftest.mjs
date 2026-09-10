@@ -301,9 +301,45 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
     ['原有内容一行未丢', lost.length === 0],
     ['补上了可自动补的节', /^## 版本管理（必守）$/m.test(after)],
     ['未补需要人写的空节', !/pf:author/.test(after)],
-    ['升级后可正常校验', compose(dir, '--check').status === 0],
   ]
   for (const [label, ok] of checks) { check(ok, label, lost.length > 0 ? `丢失：${lost.join(' | ')}` : undefined); report(ok, label) }
+
+  // `--check` 会验「有没有缺失的节」，但**按文件性质区别对待**：
+  //   - 脚本生成的文件（带 managed 标记）→ 缺节是缺陷，失败；
+  //   - 作者手写后被升级的 → 作者的编排是权威，缺节只提示。
+  // 前者防「被掏空的契约过 CI」，后者防「逼作者改成模板的样子」——两种错法都发生过。
+  const upCheck = compose(dir, '--check')
+  const okUp = upCheck.status === 0 && /提示：缺失/.test(upCheck.stdout ?? '')
+  check(okUp, '作者编排的文件：缺节只提示，--check 仍通过', `exit=${upCheck.status}`)
+  report(okUp, '作者编排的文件：缺节只提示')
+
+  // 生成的文件删掉一整节 → 必须失败（审计指出的「掏空的契约过 CI」）
+  const gdir = fixture('gutted', { 'package.json': '{"name":"g","version":"1.0.0"}\n' })
+  compose(gdir)
+  const gf = join(gdir, 'AGENTS.md')
+  const gt = readFileSync(gf, 'utf8')
+  // 删「文档同步」——它对任何项目都会生成，不像「依赖版本同步」只在有依赖时才有。
+  // 注意结束锚点用 `(?![\s\S])` 而不是 `\Z`：后者不是 JavaScript 的正则转义，
+  // 会被当成字面量 Z，于是当这一节位于文件末尾时匹配不上。
+  const killed = gt.replace(/^## 文档同步[\s\S]*?(?=^## |(?![\s\S]))/m, '')
+  check(killed !== gt && killed.length < gt.length, '前提：成功删掉一节',
+    `${gt.length} -> ${killed.length}`)
+  writeFileSync(gf, killed, 'utf8')
+  const gcheck = compose(gdir, '--check')
+  const okGut = gcheck.status !== 0 && /缺失/.test(gcheck.stderr ?? '')
+  check(okGut, '生成的文件被掏空 → --check 失败', `exit=${gcheck.status}`)
+  report(okGut, '生成的文件被掏空 → --check 失败')
+
+  // 在正文里合法地加一行注释，不该被指控成「内核不一致」
+  const cdir = fixture('comment-added', { 'package.json': '{"name":"c","version":"1.0.0"}\n' })
+  compose(cdir)
+  const cf = join(cdir, 'AGENTS.md')
+  writeFileSync(cf, readFileSync(cf, 'utf8')
+    .replace('### 提交纪律', '<!-- 我们自己的补充说明 -->\n### 提交纪律'), 'utf8')
+  const ccheck = compose(cdir, '--check')
+  const okComment = ccheck.status === 0
+  check(okComment, '正文合法编辑不被误指为内核不一致', `exit=${ccheck.status}`)
+  report(okComment, '正文合法编辑不被误报')
 }
 
 group('[9] 多生态：命令按生态分组，不互相覆盖')
@@ -579,6 +615,59 @@ group('[17] 忽略规则：交叉核对「目录存在」与「是否已忽略�
     check(ok3, '缺忽略文件时明确报「缺」')
     report(ok3, '缺忽略文件 → 明确报缺')
   }
+}
+
+group('[18] 手工改坏的文件：一律拒绝写坏，并说清怎么修')
+{
+  const base = { 'package.json': JSON.stringify({ name: 'r', version: '1.0.0', scripts: { test: 'x' } }) }
+
+  // 三态判定：手写 / 受管 / **受损**。受损必须停下——曾经它被压进「手写」，
+  // 于是 --upgrade 把 14KB 内核又插一遍，文件里出现两份内核，而 --check 与 --status
+  // 同时报绿（--check 只看第一对标记，--status 数不到缺节）。
+  const damaged = [
+    ['只删掉结束标记', (t) => t.replace('<!-- project-forge:kernel:end -->', '')],
+    ['只删掉开始标记', (t) => t.replace('<!-- project-forge:kernel:start -->', '')],
+    ['整段内核被复制两份', (t) => {
+      const S = '<!-- project-forge:kernel:start -->'
+      const E = '<!-- project-forge:kernel:end -->'
+      const s = t.indexOf(S)
+      const e = t.indexOf(E) + E.length
+      return `${t.slice(0, e)}\n${t.slice(s, e)}\n${t.slice(e)}`
+    }],
+  ]
+  // fixture 名用**序号**，不要从中文标签里剥字母：剥完三个都是空串，于是三个用例共用
+  // 同一个目录，后两个跑在被前一个改坏的文件上——测试自己就成了污染源。
+  for (const [i, [label, mutate]] of damaged.entries()) {
+    const dir = fixture(`damaged-${i}`, base)
+    compose(dir)
+    const f = join(dir, 'AGENTS.md')
+    const broken = mutate(readFileSync(f, 'utf8'))
+    if (broken === readFileSync(f, 'utf8')) { check(false, `${label}：测试构造失败`); continue }
+    writeFileSync(f, broken, 'utf8')
+    const hashBefore = readFileSync(f, 'utf8')
+
+    const r1 = compose(dir)
+    const ok1 = r1.status === 2
+    check(ok1, `${label} → 普通运行拒绝（exit 2）`, `exit=${r1.status}`)
+    const r2 = compose(dir, '--upgrade')
+    const ok2 = r2.status === 2
+    check(ok2, `${label} → --upgrade 也拒绝`, `exit=${r2.status}`)
+    const r3 = compose(dir, '--check')
+    const ok3 = r3.status !== 0
+    check(ok3, `${label} → --check 报失败`, `exit=${r3.status}`)
+    const untouched = readFileSync(f, 'utf8') === hashBefore
+    check(untouched, `${label} → 文件一个字节没动`)
+    const hints = /标记受损|标记/.test(r1.stderr ?? '')
+    check(hints, `${label} → 报错说明是标记问题并给出修法`)
+    report(ok1 && ok2 && ok3 && untouched, `${label}：三条路径都拒绝且文件未动`)
+  }
+
+  // 正常受管文件仍应照常工作（别把守卫做得太紧）
+  const good = fixture('still-works', base)
+  compose(good)
+  const ok4 = compose(good, '--check').status === 0
+  check(ok4, '正常文件仍然通过 --check')
+  report(ok4, '正常文件不受影响')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

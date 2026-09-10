@@ -27,7 +27,7 @@
  *   <!-- pf:scaffold --> … <!-- pf:endscaffold -->  脚手架，待填写项归零后自动移除
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,6 +40,19 @@ const SKELETON_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
 
 const START = '<!-- project-forge:kernel:start -->'
 const END = '<!-- project-forge:kernel:end -->'
+/**
+ * 「这份文件由本脚本生成」的标记。
+ *
+ * 它区分开两种**都带内核**的文件，而两者的验收标准不同：
+ *   - **生成的文件**（从骨架生成）：节结构由模板决定，**缺节就是缺陷**，该报错；
+ *   - **作者的文件**（手写后被 --upgrade 升级）：作者可能刻意换一种组织方式
+ *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」），
+ *     此时缺节只**提示**，不否决。
+ *
+ * 没有这个区分时只有两种错法：要么把作者的编排当成缺陷（误报，逼人改成模板的样子），
+ * 要么对掏空的契约睁一眼闭一眼（漏报）。两者都发生过。
+ */
+const MANAGED = '<!-- project-forge:managed -->'
 const DEFAULT_BUDGET = 65536
 
 /**
@@ -52,6 +65,88 @@ const AUTHOR_RE = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
 
 function readUtf8(p) {
   return readFileSync(p, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+}
+
+/**
+ * 严格读取：只接受能**无损**读出的 UTF-8。
+ *
+ * 为什么要严格：这个文件每次会话都会被注入，而它可能在中文 Windows 上被记事本或
+ * PowerShell 的 `Out-File` 存成 UTF-16、或因别的工具变成 GBK。宽松地读（Node 默认
+ * 用替换字符吞掉无法解码的字节）会**丢掉原始字节**，然后脚本把这份已经失真的文本
+ * 写回去——文件被改成 NUL 交错的乱码，而 `--check` 还报「内核一致」。
+ * 那是唯一一种不可恢复的损坏，所以宁可不写，也不能写坏。
+ *
+ * 顺带嗅探 BOM：UTF-16/32 的 BOM 是明确信号，能给出比「解码失败」更具体的提示。
+ */
+function readUtf8Strict(p) {
+  const buf = readFileSync(p)
+  if (buf.length >= 4) {
+    const [a, b, c, d] = [buf[0], buf[1], buf[2], buf[3]]
+    if ((a === 0xff && b === 0xfe && c === 0 && d === 0) || (a === 0 && b === 0 && c === 0xfe && d === 0xff)) {
+      return { error: 'UTF-32（带 BOM）' }
+    }
+  }
+  if (buf.length >= 2) {
+    const [a, b] = [buf[0], buf[1]]
+    if ((a === 0xff && b === 0xfe) || (a === 0xfe && b === 0xff)) return { error: 'UTF-16（带 BOM）' }
+  }
+  let text
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    const nul = buf.reduce((n, x) => n + (x === 0 ? 1 : 0), 0)
+    return {
+      error: nul > 0
+        ? `含 ${nul} 个 NUL 字节，看起来是 UTF-16（但缺 BOM）`
+        : '不是合法的 UTF-8（可能是 GBK 等本地编码）',
+    }
+  }
+  return { text: text.replace(/^\uFEFF/, '') }
+}
+
+/**
+ * 判断文件处于什么状态。这是本脚本最关键的一次判断——三种状态的处理方式完全不同，
+ * 而它们过去被压成了两种，于是**受损的受管文件被当成手写文件**：
+ *
+ *   - 手写：两个标记都没有 → 只体检，不动文件；
+ *   - 受管：**恰好**一对标记 → 按节刷新；
+ *   - 受损：标记数量不对（只有一个、或不止一对）→ **停下报错**。
+ *
+ * 受损那一格是必须存在的：删掉一行 `kernel:end` 就会让 `includes` 判定失败，
+ * 于是脚本把它当成手写文件，`--upgrade` 把 14KB 内核**又插了一遍**——文件里出现两份
+ * 内核，而 `--check` 只看第一对标记、`--status` 数不到缺节，两道门同时报绿。
+ */
+function documentState(text) {
+  const starts = countOccurrences(text, START)
+  const ends = countOccurrences(text, END)
+  if (starts === 0 && ends === 0) return { kind: 'handwritten' }
+  if (starts === 1 && ends === 1) {
+    if (text.indexOf(END) < text.indexOf(START)) {
+      return {
+        kind: 'damaged',
+        reason: '内核的结束标记出现在开始标记之前，顺序反了',
+      }
+    }
+    return { kind: 'managed' }
+  }
+  const parts = []
+  if (starts !== 1) parts.push(`开始标记 ${starts} 个（应为 1）`)
+  if (ends !== 1) parts.push(`结束标记 ${ends} 个（应为 1）`)
+  return {
+    kind: 'damaged',
+    reason: parts.join('，'),
+    hint: starts > 1 || ends > 1
+      ? '常见成因：复制粘贴了整段内核，或合并冲突留下了重复内容。'
+      : '常见成因：编辑器吞掉了一行、合并冲突只留了一半。',
+  }
+}
+
+/** 数一段文本里某个标记出现几次。 */
+function countOccurrences(text, needle) {
+  let n = 0
+  let i = text.indexOf(needle)
+  while (i >= 0) { n += 1; i = text.indexOf(needle, i + needle.length) }
+  return n
 }
 
 // ── 项目事实 → 模板条件与取值 ───────────────────────────────────────────────
@@ -460,7 +555,28 @@ function injectKernel(text, kernel) {
   if (endAt < startAt) throw new Error('内核标记顺序颠倒：end 出现在 start 之前。')
   const before = text.slice(0, startAt + START.length)
   const after = text.slice(endAt)
-  return `${before}\n${kernel}\n${after}`
+  const injected = `${before}\n${kernel}\n${after}`
+
+  // 多余的第二个内核区要清掉。
+  //
+  // 这不是假想情况：把文件内容复制粘贴一遍就会产生两块。而 `indexOf` 只找**第一个**
+  // 结束标记，于是第二块被原样留在 `after` 里——文件从此带着两份内核，每次注入都
+  // 继续留着，越往后越没人说得清哪个是真的。既然本脚本拥有这段内容，重复的部分就
+  // 由它清掉，而不是留着让读者困惑。
+  const extraStart = injected.indexOf(START, injected.indexOf(START) + START.length)
+  if (extraStart < 0) return injected
+  const firstEnd = injected.indexOf(END) + END.length
+  // 只保留第一份，删掉其后所有成对的内核区
+  const head = injected.slice(0, firstEnd)
+  let rest = injected.slice(firstEnd)
+  rest = rest.replace(new RegExp(
+    `${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}\\n?`, 'g'), '')
+  return collapseBlankLines(head + rest)
+}
+
+/** 把字符串转义成正则字面量。 */
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
@@ -722,6 +838,18 @@ function main(argv) {
   }
 
   const exists = existsSync(agentsPath)
+  // AGENTS.md 是个**目录**时给一句人话，而不是抛内部的 EISDIR。
+  if (exists && statSync(agentsPath).isDirectory()) {
+    process.stderr.write(
+      `错误：${agentsPath} 是一个目录，不是文件。\n`
+      + '  本脚本要写的是文件。请先把这个同名目录移走或改名，再重跑。\n',
+    )
+    return 2
+  }
+  // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）
+  for (const stale of [`${agentsPath}.tmp-${process.pid}`]) {
+    if (existsSync(stale)) { try { unlinkSync(stale) } catch { /* 清不掉就算了 */ } }
+  }
   if (check && !exists) {
     process.stderr.write(`校验失败：${agentsPath} 不存在。\n`)
     return 1
@@ -729,12 +857,39 @@ function main(argv) {
 
   let composed
   let refreshReport
+  let managedExisting
   try {
     if (exists) {
-      const existing = readUtf8(agentsPath)
-      const hasKernel = existing.includes(START) && existing.includes(END)
+      // ① 编码守卫：读不出无损 UTF-8 就**不写**。
+      // 宽松地读会把无法解码的字节替换掉，再写回去就是不可恢复的损坏。
+      const read = readUtf8Strict(agentsPath)
+      if (read.error !== undefined) {
+        process.stderr.write(
+          `错误：无法把 ${agentsPath} 当作 UTF-8 读取——${read.error}。\n`
+          + '  **本脚本没有改动它。**\n'
+          + '  这个文件每次会话都会被注入，而且要在版本库里长期保存，所以它必须是 UTF-8。\n'
+          + '  请先用编辑器把它转存为 UTF-8（不要用「Unicode」「ANSI」这些本地编码选项），再重跑。\n',
+        )
+        return 2
+      }
+      const existing = read.text
 
-      if (!hasKernel) {
+      // ② 三态判定：手写 / 受管 / 受损。受损必须停下，不能当成手写。
+      const state = documentState(existing)
+      if (state.kind === 'damaged') {
+        process.stderr.write(
+          `错误：${agentsPath} 的内核标记受损——${state.reason}。\n`
+          + `  ${state.hint ?? ''}\n`
+          + '  **本脚本没有改动它。**\n'
+          + '  请手工把标记修回恰好一对（下面这两行，各一个）：\n'
+          + `    ${START}\n    ${END}\n`
+          + '  修好后重跑；若确认想丢弃内核段落重新生成，删掉这两行后再跑，'
+          + '它会被当作手写文件对待。\n',
+        )
+        return 2
+      }
+
+      if (state.kind === 'handwritten') {
         // 手写的 AGENTS.md：不带内核标记。
         //
         // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
@@ -745,6 +900,7 @@ function main(argv) {
         composed = upgraded.text
         refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [], missing: [] }
       } else {
+        managedExisting = existing
         const refreshed = refreshFromTemplate(target, existing, kernel)
         composed = refreshed.text
         refreshReport = refreshed.report
@@ -766,11 +922,23 @@ function main(argv) {
       composed = stripScaffold(composed, authors.length)
       if (!composed.endsWith('\n')) composed += '\n'
       composed = injectKernel(composed, kernel)
+      // 记住「这是生成的文件」：它的节结构由模板决定，缺节即缺陷。
+      composed = composed.replace('\n\n' + START, `\n\n${MANAGED}\n\n${START}`)
       if (!composed.endsWith('\n')) composed += '\n'
     }
   } catch (error) {
     process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
+  }
+
+  // 沿用原文件的行尾风格。
+  //
+  // 不这么做的话，一个 CRLF 的文件在「事实发生变化、需要重写」时会**整篇变成 LF**，
+  // 而 git 会把每一行都记为改动——正是本文档自己「构建可复现」一节讲过的那个坑。
+  // 只在原文件确实是 CRLF 时才转回去，不猜。
+  if (exists && managedExisting !== undefined && /\r\n/.test(readFileSync(agentsPath, 'utf8'))
+    && !/\r\n/.test(composed)) {
+    composed = composed.replace(/\n/g, '\r\n')
   }
 
   const authors = findAuthors(composed)
@@ -779,15 +947,52 @@ function main(argv) {
   const current = exists ? readUtf8(agentsPath) : undefined
   const same = current !== undefined && composed === current
 
+  // `--check` 判什么，与它**自称**判什么必须一致。
+  //
+  // 它过去判的是「整个文件是否等于按当前事实重跑一遍的结果」，而文案写的是「内核与
+  // 模板是否逐字一致」。两者差得很远，且两个方向都出错：
+  //   误报通过——复制或删掉一个纯生成节不改整文件？不，那是差异；但**重复节**与
+  //     **整节被删**在特定路径下同样能过，而缺节本该是失败；
+  //   误报失败——在某个生成节里合法地加一行注释，会被指控成「内核不一致」，
+  //     尽管内核区间逐字节相同。
+  // 现在它判三件事，各自独立报错：内核区间逐字一致、标记恰好一对、没有缺失的节。
   if (check) {
-    if (!same) {
-      process.stderr.write(
-        '校验失败：AGENTS.md 里的内核与 templates/agents-kernel.md 不一致。\n'
-        + `  文件：${agentsPath}\n`
-        + `  修正：node scripts/compose-agents.mjs "${target}"\n`,
-      )
+    const problems = []
+    const warnings = []
+    if (managedExisting === undefined) {
+      problems.push('这份 AGENTS.md 还是手写的，没有内核标记（用 --upgrade 升级）')
+    } else {
+      // 用**原文**取内核区间。注意不能用 extractKernel() 的结果——它会把内核整段换成
+      // 一行占位符（那是给按节合并用的），拿它来比对等于拿 41 字节比 14315 字节。
+      const raw = managedExisting
+      const embedded = raw.slice(
+        raw.indexOf(START) + START.length,
+        raw.indexOf(END),
+      ).replace(/^\n/, '').replace(/\n$/, '')
+      const template = kernelBody()
+      if (embedded !== template) {
+        problems.push('内核区间与 templates/agents-kernel.md 不一致'
+          + `（文件里 ${Buffer.byteLength(embedded, 'utf8')} 字节，模板 ${Buffer.byteLength(template, 'utf8')} 字节）`)
+      }
+    }
+    const missingNow = missingSections(target, managedExisting ?? composed)
+    // 缺节是否算失败，取决于这份文件是不是脚本生成的：
+    //   - 生成的 → 节结构由模板决定，缺节就是缺陷；
+    //   - 作者升级来的 → 缺节只提示（作者的编排是权威，不逼他改成模板的样子）。
+    const isManaged = (managedExisting ?? composed).includes(MANAGED)
+    if (missingNow.length > 0) {
+      const detail = `缺失 ${missingNow.length} 个节：${missingNow.map((m) => m.heading).join('、')}`
+      if (isManaged) problems.push(detail)
+      else warnings.push(`${detail}（这份文件是作者编排的，缺节只作提示；`
+        + '若确实该有这些内容，请补上）')
+    }
+    if (problems.length > 0) {
+      process.stderr.write(`校验失败：${agentsPath}\n`)
+      for (const p of problems) process.stderr.write(`  - ${p}\n`)
+      process.stderr.write(`  修正：node scripts/compose-agents.mjs "${target}"\n`)
       return 1
     }
+    for (const w of warnings) process.stdout.write(`提示：${w}\n`)
     process.stdout.write(`内核一致：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
@@ -816,8 +1021,26 @@ function main(argv) {
     return 0
   }
 
-  mkdirSync(dirname(agentsPath), { recursive: true })
-  writeFileSync(agentsPath, composed, { encoding: 'utf8' })
+  // 写入：纳入错误处理，且**先写临时文件再改名**。
+  //
+  // 两件事都是必要的：
+  //   - 写路径原先在 try 之外，权限不足、磁盘满、文件被独占都会抛出**裸的 Node 栈**，
+  //     使用者看不到「哪个文件、为什么」；
+  //   - 直接覆盖原文件时，写入中途失败会留下半截文件。改名在同一分区上是原子的，
+  //     所以要么是旧内容、要么是新内容，不会出现第三种状态。
+  try {
+    mkdirSync(dirname(agentsPath), { recursive: true })
+    const tmp = `${agentsPath}.tmp-${process.pid}`
+    writeFileSync(tmp, composed, { encoding: 'utf8' })
+    renameSync(tmp, agentsPath)
+  } catch (error) {
+    process.stderr.write(
+      `错误：无法写入 ${agentsPath}——${error instanceof Error ? error.message : String(error)}\n`
+      + '  文件未被改动（写入失败时原文件保持不变）。\n'
+      + '  常见原因：文件被其他程序占用、目录只读、磁盘空间不足。\n',
+    )
+    return 2
+  }
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )

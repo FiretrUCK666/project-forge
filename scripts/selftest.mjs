@@ -934,6 +934,27 @@ group('[23] 目录同步：从标题生成、锚点算对、三种现状都能�
   report(ok5, '短 README：不加目录')
 }
 
+group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要能读出来')
+{
+  // 正向：带发布 job 且引用 Secrets 的工作流
+  const withRelease = fixture('auto-with', {
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: gh release create "$TAG" --generate-notes\n        env:\n          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}\n',
+  })
+  const a1 = survey(withRelease).docs?.workflowAutomation
+  const ok1 = a1?.hasReleaseJob === true && a1?.usesSecrets === true
+  check(ok1, '带发布 job 的工作流被认出', JSON.stringify(a1))
+  report(ok1, '有发布 job：认出')
+
+  // 反向：纯检查工作流不误报发布 job
+  const plain = fixture('auto-plain', {
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const a2 = survey(plain).docs?.workflowAutomation
+  const ok2 = a2?.hasReleaseJob === false
+  check(ok2, '纯检查工作流不误报发布 job', JSON.stringify(a2))
+  report(ok2, '无发布 job：不误报')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

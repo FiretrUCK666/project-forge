@@ -323,6 +323,8 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `templates/agents-project.md` | 新建 `AGENTS.md` 时作为骨架 |
 | `templates/readme.md` | 新建 `README` 时作为骨架 |
 | `templates/contributing.md` | 新建 `CONTRIBUTING` 时作为骨架 |
+| `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
+| `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `scripts/survey.mjs` | P1 勘察 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--status` 只看现状，`--upgrade` 升级手写文件） |
 | `scripts/preflight.mjs` | **维护本 skill 自身时**的自检（与目标项目无关） |

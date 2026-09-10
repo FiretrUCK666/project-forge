@@ -312,6 +312,36 @@ Release 关联的是同一个 tag，不出现「tag 已更新、Release 还挂�
 秒级的自检（格式、产物一致性、关键单元测试），耗时长的全量测试留到确有必要时再挂，或只在
 特定分支与标签上跑。
 
+### 从模板落盘，不要手写
+
+骨架每次都长一样，所以不要现场手敲——从模板复制，按 TODO 替换取值，删掉注释块：
+
+| 模板 | 落到哪里 | 什么时候拿 |
+| --- | --- | --- |
+| `templates/ci-check.yml` | 目标项目的 `.github/workflows/check.yml` | 任何要 CI 的项目都要 |
+| `templates/ci-release.yml` | 目标项目的 `.github/workflows/release.yml` | P2 判定可发布、且用户要自动写发布说明时 |
+
+手写 CI 是目标项目自动化遗漏的主要来源（上次漏的就是英文版校验），模板把“有哪些节”固定下来，
+AI 只填取值，漏不掉。
+
+### 发布自动化的人工部分（自动化做不了，照着做只要 5 分钟）
+
+`templates/ci-release.yml` 用的凭证在仓库 Secrets 里，名叫 `RELEASE_TOKEN`：细粒度 token，
+仅 Contents 读写、仅本仓库、90 天过期。建成后验证三件事：推一个 `v*` 标签 → `release` job 变绿 →
+Releases 页出现该版本。token 过期或换人时只换 Secrets 里那一个值，代码不动。
+
+### 配完后的核对表（给目标项目配完自动化，逐项打勾）
+
+| 核对项 | 怎么确认 |
+| --- | --- |
+| CI 跑的命令与本地门禁是同一批 | 逐条对照 `AGENTS.md` 构建与验证节 |
+| 产物入库的项目有逐字节一致检查 | 看 CI 里有没有重建比对那一步 |
+| 打标签能触发 Release | 推一个测试标签或看 `release` job 历史 |
+| Secret 已建且名字 exactly `RELEASE_TOKEN` | 看仓库 Settings → Secrets（只看有没有，不看值） |
+| 标签形状与清单/专章一致 | npm 一类 `v*`；Obsidian 与 `manifest.json` 完全一致 |
+
+有一项没勾，自动化就不算配完——宁可当时多看一眼，不要等用户装不上再回头查。
+
 ---
 
 ## 九、推送之后的三处状态

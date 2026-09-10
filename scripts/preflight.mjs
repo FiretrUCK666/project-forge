@@ -352,7 +352,7 @@ function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
   for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs',
-    'release-notes.mjs', 'check-badges.mjs']) {
+    'release-notes.mjs', 'check-badges.mjs', 'sync-toc.mjs']) {
     const p = join(dir, f)
     if (!existsSync(p)) { fail(`缺少 scripts/${f}。`); continue }
     const text = readText(p)

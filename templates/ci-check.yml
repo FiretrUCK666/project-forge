@@ -1,0 +1,44 @@
+# project-forge CI 检查骨架：把「本机能过」变成「换台机器也能过」。
+#
+# 用法：复制到目标项目的 .github/workflows/check.yml，按 TODO 逐项替换后删掉本注释块。
+# 判据见 references/remote-github.md 第八节；机制不要改，只换取值。
+#
+# TODO(1) 运行环境：按下表只留一行，删掉其余——
+#   Node 项目：setup-node，版本取清单声明（无声明写验证过的版本，见 AGENTS.md 环境要求）；
+#   Python 项目：setup-python；Rust：rust-toolchain；Go：setup-go；纯文档目录：整段删掉。
+# TODO(2) 门禁命令：从目标项目 AGENTS.md「构建与验证」节逐条搬运，一行一条；
+#   命令怎么写不重要，重要的是与本地跑的是同一条（同一条命令，两处引用）。
+# TODO(3) 产物一致性：产物入库的项目（插件类、被安装的包）必须加最后一条——
+#   重新构建一次，与提交的产物逐字节一致，否则源码与产物迟早脱节。
+# TODO(4) tags 行：只在「打标签也值得跑一遍检查」时保留；纯检查留分支与 PR 即可。
+
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 准备运行环境  # TODO(1)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 门禁（与 AGENTS.md 构建与验证节同一批命令）  # TODO(2)
+        run: |
+          <安装命令>
+          <构建命令>
+          <测试命令>
+
+      # TODO(3) 产物入库的项目取消下面注释：
+      # - name: 产物与提交一致
+      #   run: |
+      #     <重新构建命令>
+      #     <比对命令：不一致即失败>

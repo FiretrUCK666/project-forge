@@ -994,8 +994,23 @@ function detectDocs(root, root_) {
     const wfEntry = loadSubdir(gh).entry('workflows')
     if (wfEntry?.isDir === true) {
       try {
-        docs.workflows = readdirSync(join(gh, wfEntry.name), { encoding: 'utf8' })
-          .filter((n) => /\.ya?ml$/.test(n))
+        const files = readdirSync(join(gh, wfEntry.name), { encoding: 'utf8' })
+          .filter((n) => /\.ya?ml$/i.test(n))
+        docs.workflows = files
+        // 自动化现状：只看形状（有没有发布 job、用没用 Secrets），不判对错——
+        // 对错由 references/remote-github.md 第八节的核对表判定。
+        // 只读每个文件前 64KB，大工作流不至于拖慢勘察。
+        const auto = { files, hasReleaseJob: false, usesSecrets: false }
+        for (const f of files) {
+          const text = readText(join(gh, wfEntry.name, f))
+          if (text === undefined) continue
+          const head = text.slice(0, 65536)
+          if (/gh\s+release\s+(create|upload)/.test(head) || /releases\s*:\s*write/.test(head)) {
+            auto.hasReleaseJob = true
+          }
+          if (/secrets\./.test(head)) auto.usesSecrets = true
+        }
+        docs.workflowAutomation = auto
       } catch { /* 忽略 */ }
     }
   }
@@ -1310,7 +1325,7 @@ function toMarkdown(s) {
   L.push('## 文档现状')
   L.push('')
   for (const [k, v] of Object.entries(s.docs)) {
-    if (k === 'readmePair' || k === 'readmeSections') continue
+    if (k === 'readmePair' || k === 'readmeSections' || k === 'workflowAutomation') continue
     if (v === undefined) L.push(`- ${k}：缺`)
     else if (Array.isArray(v)) L.push(`- ${k}：${v.length === 0 ? '缺' : v.join('、')}`)
     else if (typeof v === 'object' && v.file !== undefined) L.push(`- ${k}：${v.file}（${humanBytes(v.bytes)}）`)
@@ -1328,6 +1343,12 @@ function toMarkdown(s) {
     L.push(`- 主 README 的节（${sections.length} 个）：${sections.join('　')}`)
     L.push('  - 这是事实不是结论。对照 `templates/readme.md` 看该补什么——'
       + '但**不要为了对齐模板而重排作者的编排**，README 的结构没有标准。')
+  }
+  const auto = s.docs?.workflowAutomation
+  if (auto !== undefined) {
+    L.push(`- 自动化现状：工作流 ${auto.files.join('、') || '无'}；`
+      + `发布 job：${auto.hasReleaseJob ? '有' : '无'}；Secrets 引用：${auto.usesSecrets ? '有' : '无'}`)
+    if (!auto.hasReleaseJob) L.push('  - 无发布 job 时对照 `templates/ci-release.yml` 看该不该补')
   }
   L.push('')
   L.push('## 风险')

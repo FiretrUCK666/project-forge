@@ -16,6 +16,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -88,11 +89,94 @@ const SECRET_CONTENT_PATTERNS = [
 /** 扫描内容时要跳过的文件（体积大或必然误报）。 */
 const CONTENT_SCAN_SKIP = /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|tar|7z|rar|woff2?|ttf|otf|eot|mp[34]|mov|avi|so|dll|dylib|exe|bin|wasm|lock)$/i
 
-/** 判定「是不是本机私有路径」的形状：只认明显的绝对路径写法，避免误伤文档示例。 */
+/**
+ * 判定「是不是本机私有路径」的形状。
+ *
+ * 两个必须同时覆盖的维度，漏一个就会静默失效：
+ *   - **分隔符**：Windows 路径在源码里可能写成反斜杠也可能写成正斜杠（很多工具和
+ *     配置文件一律用正斜杠）。只认反斜杠会让 `C:/Users/...` 完全不被发现；
+ *   - **盘符**：`/Users/<名>` 这种截断形式要能匹配上，否则比对时缺少盘符段。
+ *
+ * 因此两个模式都用 `[\\/]` 接受两种分隔符，盘符部分可选。真正的性质判定交给
+ * classifyHomePath()——形状匹配只是找出候选。
+ */
 const HOME_PATH_PATTERNS = [
-  /[A-Za-z]:\\Users\\[^\\\s"'`]+/g,
-  /\/(?:home|Users)\/[A-Za-z0-9._-]+/g,
+  { re: /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+/g, volume: 'windows' },
+  { re: /[\\/](?:home|Users)[\\/][A-Za-z0-9._-]+/g, volume: 'posix' },
 ]
+
+/** 这些路径形状出现在测试与示例里是正常的，不该按「泄漏」处置。 */
+const TEST_PATH_RE = /(^|[\\/])(tests?|specs?|__tests__|fixtures?|examples?|samples?|__mocks__|e2e)([\\/]|$)|\.(spec|test)\.[a-z]+$/i
+
+/** 这些扩展名本身就是「给人看的文本」，里面的路径通常是示例。 */
+const DOC_FILE_RE = /\.(md|markdown|rst|txt|adoc)$/i
+
+/**
+ * 把候选路径分成三档。
+ *
+ * 分档的意义在于**处置建议完全不同**：
+ *   - 真泄漏 → 必须改（换台机器就会失准，或者已经把别人的目录结构发出去了）；
+ *   - 测试数据 → **不要改**，改了测试就失去意义；报出来只会制造噪音；
+ *   - 文档示例 → 多数是正常的跨平台写法，提示一下即可。
+ *
+ * 曾经这三档混为一谈：一个项目在测试里写了 `cwd: '/home/me/deepseek'` 作为假数据，
+ * 勘察报「本机私有路径」并建议「改成相对路径或环境变量」——照着做就把测试改坏了。
+ */
+function classifyHomePath(rel, sample, realHomes) {
+  const flat = (v) => v.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const normalized = flat(sample)
+
+  // 比对本机真实主目录。
+  //
+  // 不能只做 startsWith：匹配到的片段常常缺少盘符（`/Users/x` 是从 `C:/Users/x` 里
+  // 截出来的），直接比会判不出来——而那正是「真泄漏被判成 other、于是不提醒」的成因。
+  // 所以同时比对「末尾两段」这种带边界的特征，它在两种截断形式下都成立。
+  for (const home of realHomes) {
+    const h = flat(home)
+    if (h === '') continue
+    if (normalized.startsWith(h)) return LEAK
+    const tail = h.split('/').slice(-2).join('/')
+    if (tail.split('/').length === 2 && (`/${normalized}/`).includes(`/${tail}/`)) return LEAK
+    if (`/${normalized}/`.includes(`/${h}/`)) return LEAK
+  }
+  if (TEST_PATH_RE.test(rel)) return TEST_DATA
+  if (DOC_FILE_RE.test(rel)) return DOC_EXAMPLE
+  return OTHER
+}
+
+const LEAK = {
+  kind: 'leak',
+  advice: '这是本机真实主目录，换台机器就会失准，也可能已经暴露了你的目录结构——'
+    + '改成相对路径或环境变量。',
+}
+const TEST_DATA = {
+  kind: 'test-data',
+  advice: '位于测试或示例目录，通常是有意写的假路径——**不要为了消除提示去改它**。'
+    + '只有当它确实来自本机时才需要处理。',
+}
+const DOC_EXAMPLE = {
+  kind: 'doc-example',
+  advice: '位于文档中，通常是跨平台示例写法。确认一下是不是真实路径即可，一般无需改动。',
+}
+const OTHER = {
+  kind: 'other',
+  advice: '不像本机路径，可能是从别的机器带过来的。确认它是否应该写成相对路径。',
+}
+
+/** 本机可能的主目录写法：同时取环境变量与系统 API 的结果，去重后转成小写正斜杠。 */
+function realHomeSpellings() {
+  const out = new Set()
+  const push = (v) => {
+    if (typeof v !== 'string' || v.trim() === '') return
+    out.add(v.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase())
+  }
+  try {
+    push(homedir())
+  } catch { /* 取不到就只靠环境变量 */ }
+  push(process.env.HOME)
+  push(process.env.USERPROFILE)
+  return [...out]
+}
 
 const MAX_WALK_ENTRIES = 200000
 const MAX_WALK_DEPTH = 24
@@ -348,7 +432,7 @@ function collectSourceEvidence(scan, name, rel, depth) {
 }
 
 /** 对文本文件做内容级扫描：凭据形状 + 本机私有路径。 */
-function scanContents(root, candidates) {
+function scanContents(root, candidates, realHomes) {
   const secrets = []
   const homePaths = []
   for (const rel of candidates) {
@@ -361,9 +445,14 @@ function scanContents(root, candidates) {
     for (const { label, re } of SECRET_CONTENT_PATTERNS) {
       if (re.test(text)) { secrets.push({ path: rel, kind: label }); break }
     }
-    for (const re of HOME_PATH_PATTERNS) {
+    for (const { re } of HOME_PATH_PATTERNS) {
       const m = text.match(re)
-      if (m !== null && m.length > 0) { homePaths.push({ path: rel, sample: m[0] }); break }
+      if (m === null || m.length === 0) continue
+      // 同一个文件里同一形状只报一处，避免一个测试文件刷出几十行
+      const sample = m[0]
+      const verdict = classifyHomePath(rel, sample, realHomes)
+      homePaths.push({ path: rel, sample, ...verdict })
+      break
     }
   }
   return { secrets, homePaths }
@@ -637,9 +726,16 @@ function deriveCommands(root, root_, eco) {
       if (!(k in out)) out[k] = v
     }
   }
-  if (Object.keys(byEcosystem).length > 1) {
+  // 「多生态」只在**真的有多套命令**时才算。
+  //
+  // 判据是「有几个生态产出了命令」，不是「命中几个生态标签」：`dsh-plugin` 是 node 的
+  // 一种**细化**（它就是一个 node 项目），`dsh-skill` 是描述，它们不会带来第二套命令。
+  // 把它们算进去会误报——实测一个 pnpm 插件项目会收到「每类命令只保留了一个」的警告，
+  // 而它其实只有一套命令；收到这种警告的 AI 会去找不存在的第二套命令。
+  const commandKinds = Object.keys(byEcosystem)
+  if (commandKinds.length > 1) {
     out.byEcosystem = byEcosystem
-    out.multipleEcosystems = keys
+    out.multipleEcosystems = keys.filter((k) => k in byEcosystem)
   }
   return out
 }
@@ -850,7 +946,7 @@ function survey(target) {
   for (const f of ['.env', '.env.local', '.npmrc', '.pypirc', '.netrc', 'docker-compose.yml',
     'docker-compose.yaml', '.git-credentials', 'config.json', 'settings.json']) pushIf(f)
 
-  const scanned = scanContents(root, candidates)
+  const scanned = scanContents(root, candidates, realHomeSpellings())
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
   const ignoredButTracked = detectIgnores(root, root_).ignoredButTracked
@@ -946,10 +1042,11 @@ function toMarkdown(s) {
   if (cmds.length === 0) L.push('- 未推导出任何命令（正常结果：说明项目没声明这些命令，'
     + '不代表错误；此时 P7 的验证不成立，见 SKILL.md）')
   else for (const [k, v] of cmds) L.push(`- ${k}：\`${v}\``)
-  if (s.ecosystem.kinds.filter((k) => k !== 'dsh-skill' && k !== 'docs-only').length > 1) {
+  if (s.commands?.multipleEcosystems !== undefined) {
     L.push('')
-    L.push('- **注意：本项目命中多种生态**，上面每类命令只保留了一个（同名字段会互相覆盖）。'
-      + '实际执行前请按生态分别确认，不要把某一个生态的命令当成全部。')
+    L.push(`- **本项目命中多种生态**：${s.commands.multipleEcosystems.join('、')}。`
+      + '上面每类命令只保留了一个（同名字段会互相覆盖）。实际执行前请按生态分别确认，'
+      + '不要把某一个生态的命令当成全部。')
   }
   L.push('')
   L.push('## 发布相关事实')
@@ -988,7 +1085,21 @@ function toMarkdown(s) {
   if (r.secretContent.length > 0) {
     for (const hit of r.secretContent.slice(0, 10)) L.push(`  - ${hit.path}（${hit.kind}）`)
   }
-  L.push(`- 本机私有路径：${r.homePathLeaks.length === 0 ? '无' : r.homePathLeaks.length + ' 处'}`)
+  const leaks = r.homePathLeaks.filter((h) => h.kind === 'leak')
+  const benign = r.homePathLeaks.filter((h) => h.kind !== 'leak')
+  if (leaks.length > 0) {
+    L.push(`- **本机私有路径 ${leaks.length} 处（需要处理）**：`)
+    for (const h of leaks.slice(0, 5)) L.push(`  - ${h.path}（${h.sample}）—— ${h.advice}`)
+  } else {
+    L.push('- 本机私有路径：无')
+  }
+  if (benign.length > 0) {
+    // 与真泄漏分开报：处置建议相反，混在一起会让人去改不该改的东西
+    L.push(`- 形似路径但无需处理 ${benign.length} 处（已按性质分类，处置建议各不相同）：`)
+    for (const h of benign.slice(0, 5)) {
+      L.push(`  - ${h.path}（${h.sample}，${h.kind}）—— ${h.advice}`)
+    }
+  }
   L.push(`- 大文件（≥20MB）：${r.largeFiles.length === 0 ? '无' : r.largeFiles.map((f) => f.path).slice(0, 5).join('、')}`)
   L.push(`- 嵌套仓库：${r.nestedRepos.length === 0 ? '无' : r.nestedRepos.join('、')}`)
   const scan = r.contentScan

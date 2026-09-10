@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -356,6 +356,63 @@ group('[10] 运行环境下限：读项目自己的声明，读不到就是没�
   const ok3 = reqs3.length === 0
   check(ok3, '未声明时为空（不得凭空给默认值）', JSON.stringify(reqs3))
   report(ok3, '未声明时为空，不编造')
+}
+
+group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
+{
+  const realHome = homedir().replace(/\\/g, '/')
+  // 真泄漏：源码里写了本机真实主目录（用正斜杠写法——很多工具与配置都这么写，
+  // 只认反斜杠的检测会完全漏掉它）
+  const leak = fixture('leak-real', {
+    'src/config.ts': `export const ROOT = '${realHome}/projects/thing'\n`,
+  })
+  const hits = survey(leak).risks?.homePathLeaks ?? []
+  const ok1 = hits.some((h) => h.kind === 'leak')
+  check(ok1, '源码里的本机真实路径判为 leak（正斜杠写法也要认）',
+    JSON.stringify(hits.map((h) => [h.path, h.kind])))
+  report(ok1, '真泄漏：判为 leak')
+
+  // 测试数据：假路径不该被当成泄漏，且建议必须明确「不要改它」——
+  // 曾经这里报「本机私有路径」并建议改成相对路径，照着做会把测试改坏。
+  const fake = fixture('leak-testdata', {
+    'tests/controller.spec.ts': "sessions.setInfo('s-1', { cwd: '/home/me/deepseek' })\n",
+  })
+  const hits2 = survey(fake).risks?.homePathLeaks ?? []
+  const ok2 = hits2.length > 0 && !hits2.some((h) => h.kind === 'leak')
+  check(ok2, '测试文件里的假路径不判为 leak', JSON.stringify(hits2.map((h) => h.kind)))
+  report(ok2, '测试数据：不判为 leak')
+  const ok3 = hits2.every((h) => !/改成相对路径或环境变量/.test(h.advice ?? ''))
+  check(ok3, '测试数据给出的建议不是「改成相对路径」')
+  report(ok3, '测试数据：建议不改它')
+}
+
+group('[12] 生态与命令：细化不算第二套命令')
+{
+  // dsh-plugin 是 node 的细化，只有一套命令；把它算成多生态会让 AI 去找不存在的第二套。
+  const plugin = fixture('eco-plugin', {
+    'package.json': JSON.stringify({
+      name: 'p', version: '1.0.0', private: true, scripts: { build: 'tsc', test: 'vitest' },
+    }, null, 2),
+    'cordis.patch.yml': '- id: p\n',
+    'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+  })
+  const r1 = survey(plugin)
+  const ok1 = r1.commands?.multipleEcosystems === undefined
+  check(ok1, 'node + dsh-plugin 不报多生态', JSON.stringify(r1.commands?.multipleEcosystems))
+  report(ok1, '插件项目：不误报多生态')
+  const ok2 = r1.commands?.packageManager === 'pnpm'
+  check(ok2, '包管理器取锁文件（pnpm），不写死 npm', String(r1.commands?.packageManager))
+  report(ok2, '插件项目：沿用它自己的 pnpm')
+
+  // 真两套命令仍要报
+  const multi = fixture('eco-multi', {
+    'package.json': JSON.stringify({ name: 'm', version: '1.0.0', scripts: { test: 'vitest' } }),
+    'pyproject.toml': '[project]\nname = "m"\n',
+    'tests/test_a.py': 'def test_a(): pass\n',
+  })
+  const ok3 = Array.isArray(survey(multi).commands?.multipleEcosystems)
+  check(ok3, 'node + python 仍报多生态')
+  report(ok3, '真多生态：仍然报')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

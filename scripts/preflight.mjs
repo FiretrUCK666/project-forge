@@ -39,8 +39,23 @@ const INSTRUCTION_BUDGET = 65536
 const KERNEL_START = '<!-- project-forge:kernel:start -->'
 const KERNEL_END = '<!-- project-forge:kernel:end -->'
 
-/** 本文件自身含私有路径的形状定义，按惯例豁免；理由与豁免范围一并写在这里。 */
-const SELF_EXEMPT = new Set(['scripts/preflight.mjs', 'scripts/survey.mjs'])
+/**
+ * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
+ *
+ * 两类都合法，但理由不同：
+ *   - **定义模式的文件**：它们必须写出各种路径形状才能检测别人（survey、preflight 自己）；
+ *   - **测试数据的文件**：selftest 故意在 fixture 里放 `/home/me` 这类假路径，用来验证
+ *     「真泄漏要报、测试数据不要误导」这条判定。删掉它就等于删掉那组测试。
+ *
+ * 顺带说明为什么不用「自动识别测试目录」来豁免：那会让检查逻辑与 survey 的判定逻辑
+ * 缠在一起，而这一项检查的意义恰恰是**独立**看一眼有没有真路径漏进产物。宁可维护一份
+ * 带理由的短名单，也不要让它学会忽略。
+ */
+const HOME_PATH_EXEMPT = new Map([
+  ['scripts/preflight.mjs', '定义路径检测模式，必须写出各种路径形状'],
+  ['scripts/survey.mjs', '定义路径检测模式，必须写出各种路径形状'],
+  ['scripts/selftest.mjs', '故意在 fixture 里放假路径，验证分档判定'],
+])
 
 /**
  * 参与文本检查的文件。
@@ -315,8 +330,9 @@ function checkGlobalRules() {
     if (/\r\n/.test(raw)) {
       warn(`${name} 含 CRLF 行尾。若在 Windows 上检出后出现，执行 git add --renormalize . 重新规范化。`)
     }
-    if (!SELF_EXEMPT.has(name) && HOME_PATH.test(raw)) {
-      fail(`${name} 含构建机私有路径 —— 换台机器就会失准。`)
+    if (!HOME_PATH_EXEMPT.has(name) && HOME_PATH.test(raw)) {
+      fail(`${name} 含构建机私有路径 —— 换台机器就会失准。`
+        + '（若这是有意的测试数据或模式定义，请把它加进 preflight.mjs 的 HOME_PATH_EXEMPT 并写明理由。）')
     }
   }
   // 顶层目录整洁：多出来的条目必须有明确归属

@@ -242,9 +242,10 @@ function walk(root) {
     // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
     // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
     sourceScan: {
-      byExtension: new Map(),   // 生态 → 首个命中的文件名
-      byBuildFile: new Map(),   // 生态 → 首个命中的构建描述文件名
-      nonDocSamples: [],        // 疑似「非文档」的文件（用于区分纯文档目录）
+      byExtension: new Map(),        // 生态 → 首个命中的源码文件
+      byBuildFile: new Map(),        // 生态 → 首个命中的构建描述文件
+      byNestedManifest: new Map(),   // 生态 → 子目录里的首个清单（monorepo 线索）
+      nonDocSamples: [],             // 疑似「非文档」的文件（用于区分纯文档目录）
     },
   }
   // inCountingArea 为假时表示正走在「像产物、但可能藏源码」的目录里：
@@ -299,7 +300,7 @@ function walk(root) {
         if (result.textCandidates.length < CONTENT_SCAN_MAX_FILES) result.textCandidates.push(rel)
         else result.contentScanTruncated = true
       }
-      collectSourceEvidence(result.sourceScan, entry.name, rel)
+      collectSourceEvidence(result.sourceScan, entry.name, rel, depth)
     }
   }
   return result
@@ -319,12 +320,22 @@ const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|chan
 /**
  * 从单个文件名收集「这是什么项目」的形状证据。
  * 只在走查时调用一次，避免为了兜底判定再遍历一遍目录树。
+ *
+ * `depth`（相对目标目录的层级）由走查直接给出，**不要用路径里有没有斜杠来判断嵌套**：
+ * 那个写法在 Windows 上会失效（分隔符是反斜杠），而失效的形式是静默的——monorepo 会被
+ * 判成 unrecognized。
  */
-function collectSourceEvidence(scan, name, rel) {
+function collectSourceEvidence(scan, name, rel, depth) {
   const lower = name.toLowerCase()
   const build = BUILD_FILE_KINDS.find(([f]) => f === lower)
   if (build !== undefined && !scan.byBuildFile.has(build[1])) {
     scan.byBuildFile.set(build[1], rel)
+  }
+  // 子目录里的清单：monorepo 的主要线索。根目录的清单由 detectEcosystem 直接处理，
+  // 走不到这里也不需要走。
+  const manifest = NESTED_MANIFEST_KINDS.find(([f]) => f === lower)
+  if (manifest !== undefined && depth > 0 && !scan.byNestedManifest.has(manifest[1])) {
+    scan.byNestedManifest.set(manifest[1], rel)
   }
   for (const [re, kind] of SOURCE_EXT_KINDS) {
     if (re.test(name)) {
@@ -439,6 +450,24 @@ const BUILD_FILE_KINDS = [
   ['dockerfile', 'shell'],
 ]
 
+/**
+ * 清单文件名 → 生态。用于**子目录**里的清单。
+ *
+ * 这一条专治 monorepo：根目录只有一个 README，真正的清单在 packages、apps 这些子目录
+ * 下面。只看根目录会得出「既没有清单、源码扩展名也匹配不上」的结论，落到 unrecognized，
+ * 然后触发一次本可避免的追问。子目录里出现清单，是这个项目属于该生态的强证据。
+ */
+const NESTED_MANIFEST_KINDS = [
+  ['package.json', 'node'],
+  ['pyproject.toml', 'python'], ['setup.py', 'python'], ['requirements.txt', 'python'],
+  ['cargo.toml', 'rust'],
+  ['go.mod', 'go'],
+  ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
+  ['gemfile', 'ruby'],
+  ['composer.json', 'php'],
+  ['pubspec.yaml', 'dart'],
+]
+
 function detectEcosystem(root, root_, walked) {
   const evidence = []
   const kinds = []
@@ -494,6 +523,11 @@ function detectEcosystem(root, root_, walked) {
   if (kinds.length === 0) {
     const scan = walked?.sourceScan
     if (scan !== undefined) {
+      // 子目录里的清单是最强的线索（monorepo），排在构建描述文件与扩展名之前。
+      for (const [kind, sample] of scan.byNestedManifest) {
+        evidence.push(`${sample}（子目录里的清单，根目录没有）`)
+        kinds.push(kind)
+      }
       for (const [kind, sample] of scan.byBuildFile) {
         evidence.push(`${sample}（构建描述文件，无清单）`)
         kinds.push(kind)

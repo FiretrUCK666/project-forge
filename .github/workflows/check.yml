@@ -25,12 +25,8 @@ jobs:
       - name: 自检
         run: node scripts/preflight.mjs
 
+      - name: 行为自检（造 fixture 实跑，断言判定结果）
+        run: node scripts/selftest.mjs
+
       - name: 内核与模板是否逐字一致
         run: node scripts/compose-agents.mjs . --check
-
-      - name: 三个脚本都必须能跑起来
-        run: |
-          node scripts/survey.mjs . --markdown > /dev/null
-          node scripts/compose-agents.mjs . --status > /dev/null
-          node scripts/compose-agents.mjs . --check > /dev/null
-          echo "三个脚本均正常退出。"

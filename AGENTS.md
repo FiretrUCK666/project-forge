@@ -274,24 +274,31 @@ DSH 插件与 skill 项目本身。**判断依据永远是勘察出的事实，�
 
 ## 构建与验证（改完必跑，全绿才算完成）
 
-本项目没有构建步骤，验证就是自检加实际跑一遍脚本：
+本项目没有构建步骤，验证就是自检加实跑：
 
 ```sh
-node scripts/preflight.mjs                      # 自检：引用完整性、内核一致性、硬性规范
+node scripts/preflight.mjs                      # 结构自检：引用完整、内核一致、硬性规范
+node scripts/selftest.mjs                       # 行为自检：造 fixture 实跑，断言判定结果
 node scripts/compose-agents.mjs . --check       # 内核与模板是否逐字一致
-node scripts/survey.mjs . --markdown            # 勘察脚本对本项目自身是否正常
 ```
 
-`preflight.mjs` 检查的是「坏了就一定会出问题」的性质，不是风格偏好：
+`preflight.mjs` 检查的是「坏了就一定会出问题」的**结构**性质，不是风格偏好：
 
 - `SKILL.md` 能否被宿主识别（frontmatter 合法、`name` 与目录名一致、名称形状正确）；
 - `description` 是否会在会话技能目录里被截断（超出部分等于不存在）；
-- `SKILL.md` 引用的每个文件是否真实存在（引用断链 = AI 按图索骥走到死路）；
+- 全文引用的每个文件是否真实存在（引用断链 = AI 按图索骥走到死路）；
 - 每份 reference 是否有一级标题与「何时读本文件」节；
-- `agents-kernel.md` 是否具备三个必需章节；
+- `agents-kernel.md` 是否具备三个必需章节、许可证模板是否齐全；
 - `AGENTS.md` 里的内核与模板是否逐字一致、总字节数是否在预算内；
 - 全文是否含 emoji、BOM、构建机私有路径；
-- `scripts/` 是否引入了非内置模块。
+- `scripts/` 是否引入了非内置模块；
+- 三个脚本是否真能跑起来（语法错误、运行时崩溃都在这里暴露）。
+
+**`selftest.mjs` 是另一半，同样不可省。** 静态检查看不出「判定写错了」——survey 把
+CMake 项目判成纯文档目录时，引用与格式全都正常。而这个 skill 上已经出现过三次这类错误
+（密钥门控静默失效、仓库边界误判、条件段落永久冻结），**每一次都是靠手工造 fixture
+才发现的**。手工造一次就丢，下一个改动会把同样的错误再引入一遍。所以把它固化成常驻
+检查：造 fixture、实跑、断言结果。
 
 **改动 `templates/agents-kernel.md` 后必须重新注入并提交**，否则自检会红。
 

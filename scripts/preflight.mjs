@@ -365,7 +365,7 @@ function checkScriptsRun() {
   const cases = [
     { file: 'survey.mjs', args: [SKILL_ROOT, '--markdown'], expect: /勘察结果/ },
     { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--check'], expect: /内核一致|校验失败/ },
-    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--status'], expect: /字节/ },
+    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--status'], expect: /字节|手写/ },
   ]
   for (const { file, args, expect } of cases) {
     const p = join(SKILL_ROOT, 'scripts', file)
@@ -377,7 +377,10 @@ function checkScriptsRun() {
       continue
     }
     if (r.status !== 0 && !expect.test(r.stdout ?? '')) {
-      const detail = (r.stderr ?? '').trim().split('\n').slice(0, 3).join(' / ')
+      // 首行通常只是位置信息，真正的错误在更靠后的行——把整段 stderr 收进来，
+      // 否则最需要的那句（SyntaxError、ReferenceError 之类）会被切掉。
+      const detail = (r.stderr ?? '').trim().split('\n').filter((l) => l.trim() !== '')
+        .slice(0, 6).join(' / ')
       fail(`scripts/${file} 以退出码 ${r.status} 结束（${label}）：${detail}`)
       continue
     }
@@ -385,6 +388,29 @@ function checkScriptsRun() {
       fail(`scripts/${file} 退出码为 0，但没有输出预期内容（${label}）—— 可能被静默改坏。`)
     }
   }
+}
+
+/**
+ * 跑行为自检。
+ *
+ * 静态检查抓不到「判定写错了」——survey 把 CMake 项目判成纯文档目录，引用与格式全都
+ * 正常。而这类错误在这个 skill 上已经出现过三次（密钥门控失效、仓库边界误判、条件段落
+ * 冻结），每次都是靠手工造 fixture 才发现的。所以把 fixture 固化成常驻检查：改动之后
+ * 跑一遍，行为退化立刻可见。
+ */
+function checkBehavior() {
+  const p = join(SKILL_ROOT, 'scripts', 'selftest.mjs')
+  if (!existsSync(p)) { fail('缺少 scripts/selftest.mjs（行为自检）。'); return }
+  const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
+  const tail = (r.stdout ?? '').trim().split('\n').slice(-1)[0] ?? ''
+  if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
+  if (r.status !== 0) {
+    const body = (r.stdout ?? '').split('失败项：')[1] ?? ''
+    const fails = body.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- '))
+    fail(`行为自检未通过（${tail.replace(/^行为自检：/, '')}）:\n       ${fails.join('\n       ')}`)
+    return
+  }
+  process.stdout.write(`行为自检：${tail.replace(/^行为自检：/, '')}\n`)
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
@@ -398,6 +424,7 @@ function main() {
   checkGlobalRules()
   checkScripts()
   checkScriptsRun()
+  checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。
   if (skill !== undefined && !/^## 何时使用[ \t]*$/m.test(skill.text)) {

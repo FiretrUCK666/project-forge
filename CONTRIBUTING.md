@@ -52,11 +52,16 @@ cd project-forge
 
 ```sh
 node scripts/preflight.mjs
+node scripts/selftest.mjs
 node scripts/compose-agents.mjs . --check
 ```
 
-第一条是自检（引用完整性、内核一致性、硬性规范）；第二条确认 `AGENTS.md` 里的通用内核
-与 `templates/agents-kernel.md` 逐字一致。
+第一条是结构自检（引用完整性、内核一致性、硬性规范）；第二条是**行为自检**——它造
+临时 fixture 实跑，断言每条判定的结果；第三条确认 `AGENTS.md` 里的通用内核与
+`templates/agents-kernel.md` 逐字一致。
+
+**改动判定逻辑时必须同时补 fixture。** `selftest.mjs` 里每一条断言都对应一个曾经真实
+出过的错误，改动之后如果它红了，先怀疑自己的改动，不要改断言去迁就实现。
 
 **如果你改了 `templates/agents-kernel.md`**，需要重新注入并一起提交：
 
@@ -64,7 +69,7 @@ node scripts/compose-agents.mjs . --check
 node scripts/compose-agents.mjs .
 ```
 
-否则第二条门禁会红。
+否则第三条门禁会红。
 
 ## 改动行为时请附带验证
 

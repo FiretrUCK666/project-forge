@@ -964,6 +964,31 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   report(ok2, '无发布 job：不误报')
 }
 
+group('[25] 交付门禁：缺项拦得住，待问消得掉')
+{
+  const review = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+
+  // 空项目：AGENTS 缺失 → 缺，退出码非零
+  const bare = fixture('review-bare', { 'README.md': '# x\n' })
+  const r1 = review(bare)
+  const ok1 = r1.status !== 0 && /\[缺\]/.test(r1.stdout ?? '')
+  check(ok1, '缺 AGENTS 时报缺且非零退出', `exit=${r1.status}`)
+  report(ok1, '缺项：拦得住')
+
+  // 待问全部用 flag 消掉（除 AGENTS 缺失仍是缺）→ 待问清零
+  const r2 = review(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  const ok2 = !/\[待问\]/.test(r2.stdout ?? '') && /\[缺\]/.test(r2.stdout ?? '')
+  check(ok2, 'flag 能消掉待问，只剩真缺项', (r2.stdout ?? '').split('\n')[0])
+  report(ok2, '待问：消得掉')
+
+  // 未知 flag 直接报错，不静默忽略
+  const r3 = review(bare, '--no-whatever')
+  const ok3 = r3.status !== 0 && /无法识别/.test(r3.stderr ?? '')
+  check(ok3, '未知 flag 报错')
+  report(ok3, '未知 flag：报错')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

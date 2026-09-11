@@ -115,6 +115,7 @@ It never starts by writing. The first step is always a survey, then it tells you
 | `scripts/release-notes.mjs` | Write release notes from a UTF-8 file (non-ASCII never goes through the shell, read back and compare) |
 | `scripts/check-badges.mjs` | Check whether README badges actually render (GitHub badges on private repos do not) |
 | `scripts/sync-toc.mjs` | Keep a Markdown TOC in sync with headings (generated from headings, GitHub anchor algorithm) |
+| `scripts/review.mjs` | P4/P5 delivery gate: no missing items, open questions resolved via flags before done |
 
 ## Scripts
 

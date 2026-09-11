@@ -126,6 +126,7 @@ git pull
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（私有仓库上的 GitHub 徽章显示不出来） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（从标题生成，锚点按 GitHub 的算法算） |
+| `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 
 ## 脚本
 

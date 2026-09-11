@@ -965,7 +965,8 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   report(ok2, '无发布 job：不误报')
 
   // 英文模板模式要被点名：有 generate-notes、无 notes-file → review 必须待问
-  const rEn = review(withRelease)
+  const rEn = spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), withRelease], { encoding: 'utf8' })
   const okEn = /英文模板模式/.test(rEn.stdout ?? '')
   check(okEn, '纯英文模板触发待问', (rEn.stdout ?? '').split('\n')[0])
   report(okEn, '英文模板：待问，不默过')

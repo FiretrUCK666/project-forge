@@ -1003,6 +1003,17 @@ function detectDsh(root, root_, eco) {
   if (carrier === false) {
     warnings.push('补丁文本里没有出现包名，可能缺发现载体行（name 等于包名自身的那一行）')
   }
+  // 锁定的宿主版本：dependencies/devDependencies/peerDependencies 里 `@deepseek-ai/*`
+  // 的声明值（去重，原样保留范围符号，归一化由比对方做）。专章滞后判断用它。
+  const pinnedVersions = [...new Set(
+    ['dependencies', 'devDependencies', 'peerDependencies'].flatMap((k) => {
+      const deps = pkg[k]
+      if (typeof deps !== 'object' || deps === null) return []
+      return Object.entries(deps)
+        .filter(([name, range]) => name.startsWith('@deepseek-ai/') && typeof range === 'string')
+        .map(([, range]) => range)
+    }),
+  )]
   return {
     packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
     patchFile,
@@ -1013,6 +1024,7 @@ function detectDsh(root, root_, eco) {
     hasHostEntry,
     hasClientEntry,
     discoveryCarrierLikely: carrier,
+    pinnedVersions,
     warnings,
   }
 }

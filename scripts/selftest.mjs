@@ -1399,6 +1399,40 @@ group('[30] 事实采全与门禁诚实：tracked/远端/发布链/截断/strict
   }
 }
 
+group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程')
+{
+  const mkDual = (ver) => fixture(`dsh-fresh-${ver.replace(/[^a-z0-9]+/gi, '_')}`, {
+    'package.json': JSON.stringify({
+      name: 'dsh-fresh', version: '0.1.0',
+      devDependencies: { '@deepseek-ai/dsh-foo': ver },
+      exports: { '.': './lib/index.js' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: fresh\n      name: 'dsh-fresh'\n",
+    'lib/index.js': 'export const name = "fresh"\n',
+  })
+  // 与标记一致 → 安静（只断言无警告，不断言其他输出）
+  {
+    const dir = mkDual('^0.1.5-rc.1')
+    const pinned = survey(dir).dsh?.pinnedVersions ?? []
+    const okPin = pinned.includes('^0.1.5-rc.1')
+    check(okPin, '锁定版本被收录', JSON.stringify(pinned))
+    report(okPin, '锁定版本：收录')
+    const r = compose(dir)
+    const okQuiet = !/专章上次核对/.test(r.stdout ?? '')
+    check(okQuiet, '对齐时无滞后警告')
+    report(okQuiet, '对齐：安静')
+  }
+  // 漂移 → 警告但不失败
+  {
+    const dir = mkDual('^9.9.9')
+    const r = compose(dir)
+    const okWarn = /专章上次核对/.test(r.stdout ?? '') && r.status === 0
+    check(okWarn, '漂移时警告且不拦流程', `exit=${r.status}`)
+    report(okWarn, '漂移：警告')
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

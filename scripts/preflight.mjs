@@ -664,6 +664,21 @@ function checkPluginChapters() {
     }
   }
   if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')
+  // 每个专章必须有「事实来源」节：无来源的版本事实会被当成通则背诵，过期无人知。
+  for (const f of files) {
+    const text = readText(join(dir, f)).replace(/^\uFEFF/, '')
+    if (!/^## 事实来源[ \t]*$/m.test(text)) {
+      fail(`references/plugins/${f} 缺少「事实来源」节——新专章必须写来源与核实方式（见 plugin-project.md 模板第八节）。`)
+    }
+  }
+  // DSH 专章的核对标记必须格式合法：compose 靠它判断滞后，格式坏了等于没有。
+  const dshPath = join(dir, 'dsh.md')
+  if (existsSync(dshPath)) {
+    const dshText = readText(dshPath).replace(/^\uFEFF/, '')
+    if (!/dsh-verified:\s*host=\S+\s+date=\S+/.test(dshText)) {
+      fail('references/plugins/dsh.md 的核对标记格式不对——应为 <!-- dsh-verified: host=<版本> date=<日期> --> 一行。')
+    }
+  }
 }
 
 // ── 检查十一：README 的目录与标题同步 ───────────────────────────────────────

@@ -749,6 +749,32 @@ function missingSections(target, currentText) {
 }
 
 /**
+ * DSH 专章滞后提醒：寄生在本来就要看的输出里，不另起命令、不拦流程、不记入缺口。
+ *
+ * 比较专章标记的核对版本与项目锁定的宿主版本。标记读不到、项目非插件、
+ * 项目无锁定版本时一律安静——没证据不断言，避免误报打扰非 DSH 项目。
+ */
+function dshFreshnessWarning(target) {
+  let s
+  try {
+    s = survey(target)
+  } catch { return undefined }
+  if (!s.ecosystem.kinds.includes('dsh-plugin')) return undefined
+  const pinned = s.dsh?.pinnedVersions ?? []
+  if (pinned.length === 0) return undefined
+  let marker = ''
+  try {
+    marker = readUtf8(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'))
+  } catch { return undefined }
+  const m = /dsh-verified:\s*host=(\S+)\s+date=(\S+)/.exec(marker)
+  if (m === null) return undefined
+  const norm = (v) => v.replace(/^[\^~>=<\s]+/, '')
+  if (pinned.some((p) => norm(p) === norm(m[1]))) return undefined
+  return `提示：DSH 专章上次核对宿主 ${m[1]}（${m[2]}），本项目锁定 ${pinned.join('、')}；`
+    + '两者不一致时按 references/plugins/dsh.md 事实来源节重核第五节至第八节。'
+}
+
+/**
  * 手写 AGENTS.md 的体检报告。
  *
  * 这是「项目已经有 AGENTS.md，但写得不好或漏了很多」场景的默认动作：**不动文件**，
@@ -1051,6 +1077,8 @@ function main(argv) {
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
       + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)
     reportGaps(authors, missing, process.stdout)
+    const stale = dshFreshnessWarning(target)
+    if (stale !== undefined) process.stdout.write(`${stale}\n`)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
       return 1
@@ -1063,6 +1091,8 @@ function main(argv) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportGaps(authors, missing, process.stdout)
     reportRefresh(refreshReport, process.stdout)
+    const staleSame = dshFreshnessWarning(target)
+    if (staleSame !== undefined) process.stdout.write(`${staleSame}\n`)
     return 0
   }
 
@@ -1091,6 +1121,8 @@ function main(argv) {
   )
   reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
+  const staleNew = dshFreshnessWarning(target)
+  if (staleNew !== undefined) process.stdout.write(`${staleNew}\n`)
   if (bytes > budget) {
     process.stderr.write(
       `警告：总字节数 ${bytes} 已超出预算 ${budget}。\n`

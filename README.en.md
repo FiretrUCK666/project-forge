@@ -2,7 +2,8 @@
 
 [中文](README.md) | English
 
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![stars](https://img.shields.io/github/stars/FiretrUCK666/project-forge)](https://github.com/FiretrUCK666/project-forge)
+[![license](https://img.shields.io/github/license/FiretrUCK666/project-forge)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.en.md#requirements)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.en.md#requirements)
 

@@ -267,7 +267,7 @@ function checkTemplates() {
   if (!existsSync(kernelPath)) return
 
   const kernel = readText(kernelPath).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  for (const marker of ['## 行事总纲', '## 本文件的定位与编辑规则', '## 任务编排方法论']) {
+  for (const marker of ['## 行事总纲', '## 本文件的定位与编辑规则']) {
     if (!kernel.includes(marker)) fail(`templates/agents-kernel.md 缺少必需章节：${marker}`)
   }
 

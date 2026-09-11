@@ -224,6 +224,12 @@ function deriveFacts(target) {
   // 有效；写进项目自己的契约，才对**以后每一次会话**有效。
   const hasBilingualReadme = s.docs?.readmePair !== undefined
 
+  // 插件类条件：只按勘察事实求值，不猜具体取值。模板里的 DSH 段落靠它们显隐，
+  // 非插件项目不受影响；读不到即按无处理。
+  const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
+  const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
+  const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
+
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
   // 产出错名字；而模板里的未知条件会直接报错，等于把错误推迟到运行时。
@@ -242,6 +248,9 @@ function deriveFacts(target) {
     'no-bilingual-readme': !hasBilingualReadme,
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
+    'is-dsh-plugin': isDshPlugin,
+    'has-dsh-client': hasDshClient,
+    'has-dsh-bundle': hasDshBundle,
     publishable,
     'no-publish': !publishable,
   }

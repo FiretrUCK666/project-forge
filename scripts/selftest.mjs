@@ -1069,6 +1069,97 @@ group('[27] 署名门禁：有仓库无署名必报缺，有署名放行')
 }
 }
 
+group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
+{
+  // 最小 host-only bundle：有补丁声明 + 补丁含包名 + host 入口
+  const hostOnly = fixture('dsh-hostonly', {
+    'package.json': JSON.stringify({
+      name: 'dsh-hello', version: '0.1.0', type: 'module',
+      main: 'lib/index.js', exports: { '.': './lib/index.js' },
+      files: ['lib/index.js', 'cordis.patch.yml'],
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: hello\n      name: 'dsh-hello'\n",
+    'lib/index.js': 'export const name = "hello"\n',
+  })
+  const s1 = survey(hostOnly)
+  const ok1 = (s1.ecosystem?.kinds ?? []).includes('dsh-plugin')
+  check(ok1, 'host-only bundle 认出 dsh-plugin', JSON.stringify(s1.ecosystem?.kinds))
+  report(ok1, 'host-only：认出 dsh-plugin')
+  const ok2 = s1.dsh?.bundlePatch?.exists === true && s1.dsh?.hasClientDecl === false
+  check(ok2, '补丁存在且无 client 声明', JSON.stringify(s1.dsh))
+  report(ok2, 'host-only：补丁存在、无 client')
+  const ok3 = s1.dsh?.discoveryCarrierLikely === true
+  check(ok3, '补丁含包名 → 发现载体可能存在', String(s1.dsh?.discoveryCarrierLikely))
+  report(ok3, 'host-only：载体检查通过')
+  compose(hostOnly)
+  const t1 = readFileSync(join(hostOnly, 'AGENTS.md'), 'utf8')
+  const ok4 = /插件标识与加载/.test(t1) && !/双半区与浏览器产物/.test(t1)
+  check(ok4, '生成契约含标识节、不含双半区节（按事实取舍）')
+  report(ok4, 'host-only：条件段取舍正确')
+
+  // 双面 bundle：client 声明 + 双入口 + 补丁含包名
+  const dual = fixture('dsh-dual', {
+    'package.json': JSON.stringify({
+      name: '@scope/dsh-dual', version: '0.1.0', type: 'module',
+      exports: { '.': './lib/index.js', './client': './lib/client.js' },
+      files: ['lib/index.js', 'lib/client.js', 'cordis.patch.yml'],
+      dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: dual\n      name: '@scope/dsh-dual'\n",
+    'lib/index.js': 'export function apply() {}\n',
+    'lib/client.js': 'globalThis.x = 1\n',
+  })
+  const s2 = survey(dual)
+  const ok5 = s2.dsh?.hasClientDecl === true && s2.dsh?.hasClientEntry === true
+  check(ok5, '双面：client 声明与入口同时识别', JSON.stringify(s2.dsh))
+  report(ok5, '双面：client 识别')
+  compose(dual)
+  const t2 = readFileSync(join(dual, 'AGENTS.md'), 'utf8')
+  const ok6 = /双半区与浏览器产物/.test(t2) && /补丁层与挂载/.test(t2)
+  check(ok6, '双面契约含双半区与补丁层两节')
+  report(ok6, '双面：两节都在')
+
+  // 缺载体：补丁文本里没有包名 → 告警，不硬判失败
+  const nocarrier = fixture('dsh-nocarrier', {
+    'package.json': JSON.stringify({
+      name: 'dsh-nocarrier', version: '0.1.0',
+      exports: { '.': './lib/index.js' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: other\n      name: 'some-other-package'\n",
+  })
+  const s3 = survey(nocarrier)
+  const ok7 = s3.dsh?.discoveryCarrierLikely === false
+    && (s3.dsh?.warnings ?? []).some((w) => /载体/.test(w))
+  check(ok7, '缺载体 → 报警告（不断言加载一定失败）', JSON.stringify(s3.dsh?.warnings))
+  report(ok7, '缺载体：报警告')
+
+  // 声明与入口不一致：有 client 声明无 ./client 入口 → 告警
+  const mismatch = fixture('dsh-mismatch', {
+    'package.json': JSON.stringify({
+      name: 'dsh-mismatch', version: '0.1.0',
+      exports: { '.': './lib/index.js' },
+      dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: m\n      name: 'dsh-mismatch'\n",
+  })
+  const s4 = survey(mismatch)
+  const ok8 = (s4.dsh?.warnings ?? []).some((w) => /.\/client/.test(w))
+  check(ok8, 'client 声明无入口 → 报警告', JSON.stringify(s4.dsh?.warnings))
+  report(ok8, '声明入口不一致：报警告')
+
+  // 反向：普通 node 项目不出现 DSH 段
+  const plain = fixture('dsh-plain', {
+    'package.json': JSON.stringify({ name: 'plain', version: '1.0.0', scripts: { test: 'x' } }),
+  })
+  compose(plain)
+  const t3 = readFileSync(join(plain, 'AGENTS.md'), 'utf8')
+  const ok9 = !/插件标识与加载/.test(t3)
+  check(ok9, '非插件项目不含 DSH 段（不制造噪音）')
+  report(ok9, '非插件：不误报 DSH 段')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

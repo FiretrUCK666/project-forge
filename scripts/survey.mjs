@@ -936,6 +936,66 @@ function detectArtifacts(root, root_, eco) {
   return facts
 }
 
+/**
+ * DSH 插件的补充事实：Bundle 声明、客户端声明、入口与发现载体。
+ *
+ * 只在已判定为 `dsh-plugin` 时返回对象，其余返回 undefined。所有取值都从项目自身读，
+ * 读不到就标缺失，不编造：
+ *   - 包名 ← 清单 `name`；补丁路径 ← 清单 `dsh.bundle.patch`（单个字符串）；
+ *   - 客户端声明 ← 清单 `dsh.client`；入口 ← 清单 `exports`；
+ *   - 补丁文件 ← 根目录的 `cordis.patch.yml` 一类；发现载体 ← 补丁文本里是否出现包名。
+ * 发现载体只是文本包含判断（YAML 不做完整解析），供人复核用，不做硬结论。
+ */
+function detectDsh(root, root_, eco) {
+  if (!eco.kinds.includes('dsh-plugin')) return undefined
+  const pkg = eco.manifest
+  if (pkg === undefined || pkg.__corrupt === true) return undefined
+  const patchFile = root_.first(['cordis.patch.yml', 'cordis.patch.yaml', 'cordis.yml'])
+  const dsh = typeof pkg.dsh === 'object' && pkg.dsh !== null ? pkg.dsh : {}
+  const bundleDecl = dsh.bundle
+  const bundlePatchPath = typeof bundleDecl === 'object' && bundleDecl !== null
+    && typeof bundleDecl.patch === 'string' ? bundleDecl.patch : undefined
+  const bundlePatchExists = bundlePatchPath === undefined ? undefined
+    : exists(join(root, bundlePatchPath.replace(/^\.\//, '')))
+  const clientDecl = dsh.client
+  const hasClientDecl = clientDecl !== undefined
+  const exportsMap = typeof pkg.exports === 'object' && pkg.exports !== null
+    ? Object.keys(pkg.exports) : []
+  const hasHostEntry = exportsMap.includes('.') || typeof pkg.main === 'string'
+  const hasClientEntry = exportsMap.includes('./client')
+  const warnings = []
+  if (bundleDecl !== undefined && bundlePatchPath !== undefined && bundlePatchExists === false) {
+    warnings.push(`清单声明了补丁路径 ${bundlePatchPath}，但该文件不存在`)
+  }
+  if (hasClientDecl && !hasClientEntry) {
+    warnings.push('清单声明了 dsh.client，但 exports 里没有 ./client 入口')
+  }
+  if (!hasClientDecl && hasClientEntry) {
+    warnings.push('exports 里有 ./client 入口，但清单没有 dsh.client 声明')
+  }
+  // 发现载体行：补丁文本里是否出现包名。只是文本包含，不解析 YAML。
+  let carrier = undefined
+  if (patchFile !== undefined && typeof pkg.name === 'string' && pkg.name.length > 0) {
+    const text = readText(join(root, patchFile))
+    if (text !== undefined) carrier = text.includes(pkg.name)
+  }
+  if (carrier === false) {
+    warnings.push('补丁文本里没有出现包名，可能缺发现载体行（name 等于包名自身的那一行）')
+  }
+  return {
+    packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
+    patchFile,
+    bundlePatch: bundlePatchPath === undefined ? undefined
+      : { path: bundlePatchPath, exists: bundlePatchExists },
+    hasClientDecl,
+    exportsKeys: exportsMap,
+    hasHostEntry,
+    hasClientEntry,
+    discoveryCarrierLikely: carrier,
+    warnings,
+  }
+}
+
 function detectDocs(root, root_) {
   const docs = {}
   // 用同一个正则收集：语言后缀是可选的，分隔符点与下划线都认。
@@ -1191,6 +1251,7 @@ function survey(target) {
     ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name },
     commands: deriveCommands(root, root_, eco),
     artifacts: detectArtifacts(root, root_, eco),
+    dsh: detectDsh(root, root_, eco),
     docs: detectDocs(root, root_),
     ignores: detectIgnores(root, root_),
     outputs: {
@@ -1274,6 +1335,16 @@ function toMarkdown(s) {
   L.push('')
   L.push(`- 判定结果：${s.ecosystem.kinds.join(' / ')}`)
   L.push(`- 依据：${s.ecosystem.evidence.join('、') || '无'}`)
+  if (s.dsh !== undefined) {
+    const d = s.dsh
+    L.push(`- DSH 包名：${d.packageName ?? '未声明'}`)
+    L.push(`- DSH 补丁文件：${d.patchFile ?? '缺'}`
+      + (d.bundlePatch === undefined ? '' : `；清单声明 ${d.bundlePatch.path}（${d.bundlePatch.exists ? '存在' : '缺失'}）`))
+    L.push(`- DSH 入口：host ${d.hasHostEntry ? '有' : '缺'}；client ${d.hasClientEntry ? '有' : '无'}`
+      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）`)
+    if (d.discoveryCarrierLikely === false) L.push('- **DSH 发现载体可能缺失**：补丁文本里没有出现包名')
+    for (const w of d.warnings ?? []) L.push(`- DSH 注意：${w}`)
+  }
   L.push('')
   L.push('## 可执行命令')
   L.push('')

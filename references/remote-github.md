@@ -255,6 +255,9 @@ Release 不存在。
 **完成判据**：tag 指向的提交与预期一致；Release 正文与源文件逐字一致（回读比对通过）；
 Release 关联的是同一个 tag，不出现「tag 已更新、Release 还挂在旧提交上」。
 
+想让“推 tag 即自动建 Release”：用 `templates/ci-release.yml` 落盘（先建 `RELEASE_TOKEN`），
+配完走第八节末的核对表——日常攒提交、发版打标签，标签不再碎。
+
 ---
 
 ## 七、协作基础设施（当项目可能接受外部贡献时）

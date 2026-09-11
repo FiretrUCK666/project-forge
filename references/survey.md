@@ -57,12 +57,13 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 | **`isRepoRoot`** | **这个目录本身是不是仓库根** | **见下方专栏——这是最容易酿成大错的一格** |
 | `workTreeRoot` | 实际的工作区根 | `isRepoRoot` 为假时，用它向用户解释「你在哪个仓库里」 |
 | `branch` | 当前分支 | 决定推送哪个分支 |
-| `remote` / `remotes` | 远端地址与全部远端 | **有远端时先看它指向谁**：指向正本还是别人的 fork，决定了这个操作者是维护者还是贡献者。多个远端时 `remote` 只是默认 origin，别当成唯一的那个 |
+| `remote` / `remotes` / `remoteUrls` | 远端地址与全部远端 | **有远端时先看它指向谁**：指向正本还是别人的 fork，决定了这个操作者是维护者还是贡献者。多个远端时 `remote` 只是默认 origin，别当成唯一的那个；`remoteUrls` 给出每个远端的地址，fork 比对用它 |
 | `dirty` | 未提交的改动数 | 大于 0 时先存一个可回退的存档点 |
 | `commits` | 提交数 | 0 表示还没有任何提交 |
-| `identity` | 提交署名与它的作用域 | 空则记为缺口、不卡首次提交，推送前必须确认；`scope` 说明它来自仓库级还是继承自全局 |
-| `upstream` | 上游跟踪分支 | 未设置时推送需要显式指定 |
-| `tags` | 已有版本标签 | 与清单文件里的版本号对照，看是否已经对齐 |
+| `identity`（含 `globalEmail`） | 提交署名与它的作用域 | 空则记为缺口、不卡首次提交，推送前必须确认；`scope` 说明它来自仓库级还是继承自全局；`globalEmail` 用于发现全局与仓库级不一致 |
+| `historyAuthors` | 历史提交去重后的署名列表（前 20） | 多种署名混杂说明换过人或换过机器，按署名审计清单处理 |
+| `upstream` | 上游跟踪分支 | 未设置时推送需要显式指定；有远端而未设时 `review` 会提示 |
+| `tags` | 已有版本标签 | 与清单文件里的版本号对照，看是否已经对齐（对照结果见 `artifacts.versionAligned`） |
 
 **`isRepoRoot` 为假时必须停下来。** 目标目录若是某个外层仓库的子目录，`git` 报出的
 远端、分支与提交数**全部属于那个外层仓库**——它们看起来完全正常，只是不属于你要处理的
@@ -148,9 +149,11 @@ cargo。`commands` 一节会区分这一点。
 | `hooks` | 发布前后的钩子（说明「产物是构建出来的」） |
 | `distDirsPresent` | 常见的产物目录是否存在 |
 | `private` | 项目是否被标记为不可发布 |
-| `publishableManifest` | 勘察输出的可发布清单（文件与生态），P2 判定能不能走发布链路的依据 |
-| `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据 |
-| `runtimeRequirements` | **项目自己声明的运行环境下限**（见下） |
+| `publishableManifest` | 勘察输出的可发布清单（文件与生态），P2 判定能不能走发布链路的依据（含 Obsidian 的 `manifest.json`，以含 `minAppVersion` 为前提） |
+| `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据（含 Obsidian 的 `manifest.json`） |
+| `versionAligned` | 标签与版本号是否对齐（`true`/`false`，取不到标签列表时留空不判） |
+| `obsidianArtifacts` | Obsidian 发布三件套 presence（`main.js` 缺即安装断链） |
+| `runtimeRequirements` | **项目自己声明的运行环境下限**（见下，含 Obsidian 的 `minAppVersion`） |
 
 前四个字段合起来回答一个问题：**拿到这个项目的人，会不会自己跑一次构建？**
 - 会（这是源码，产物由使用者生成）→ 产物**不进**版本库
@@ -175,8 +178,9 @@ cargo。`commands` 一节会区分这一点。
 | 字段 | 回答什么 |
 | --- | --- |
 | `readme` | 有哪些 README 文件 |
-| `readmePair` | **这些 README 是不是一对双语文件**（有值就是） |
+| `readmePair` | **这些 README 是不是一对双语文件**（有值就是；双非默认同样成对，此时 `defaultMissing` 为真） |
 | `readmeSections` | 主 README **现有的节**有哪些 |
+| `workflowAutomation.truncated` | 工作流是否只读了前 64KB（为真时“无发布 job”不可信，需手工确认） |
 
 **`readmePair` 有值时，那份文档是要成对维护的**：两份都随包分发、都展示在制品库页面上
 （改任何一份都算用户可见变化），而且**它们会漂移**——一次改动只更新了一份，两份说着不同
@@ -224,7 +228,7 @@ cargo。`commands` 一节会区分这一点。
 
 | 字段 | 含义 | 处置 |
 | --- | --- | --- |
-| `secretFiles` | 形状上像敏感文件的文件 | 见下一节 |
+| `secretFiles` | 形状上像敏感文件的文件（带 `tracked`：已在库 vs 尚未跟踪，处置完全不同） | 见下一节 |
 | `secretContent` | 文件内容里出现凭据形状 | 见下一节 |
 | `contentScan` | **这次内容扫描覆盖了多深** | 见下方专栏，**不能忽略这一项** |
 | `homePathLeaks` | 内容里形似本机路径的字符串，**已分档** | **按 kind 分别处置，见下** |

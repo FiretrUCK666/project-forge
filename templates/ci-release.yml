@@ -27,7 +27,7 @@
 #
 #   permissions:
 #     id-token: write   # 签发短时身份用；建 Release 另需 contents: write，二者互不干扰
-#   - uses: actions/setup-node@v6
+#   - uses: actions/setup-node@v4   # 与 ci-check.yml 同大版本，分头写会漂移
 #     with:
 #       node-version: '<清单声明的版本>'
 #       registry-url: 'https://registry.npmjs.org'

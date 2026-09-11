@@ -27,7 +27,7 @@
 | `minAppVersion` | 能运行本插件的最低宿主版本 |
 | `description` | 说明 |
 | `author` | 作者 |
-| `authorUrl` / `isDesktopOnly` | 可选：作者主页；是否仅限桌面端 |
+| `authorUrl` / `isDesktopOnly` | 作者主页（可选）；是否仅限桌面端（必填：用不用 Node/Electron 能力都要显式声明） |
 
 ## 三、两个标识分别是什么
 

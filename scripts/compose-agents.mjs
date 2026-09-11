@@ -229,6 +229,8 @@ function deriveFacts(target) {
   const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
   const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
   const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
+  // 上游跟踪：有远端才有意义；非仓库根时远端属外层仓库，已随 has-remote 置假。
+  const hasUpstream = hasRemote && typeof s.git?.upstream === 'string' && s.git.upstream.length > 0
 
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
@@ -251,6 +253,8 @@ function deriveFacts(target) {
     'is-dsh-plugin': isDshPlugin,
     'has-dsh-client': hasDshClient,
     'has-dsh-bundle': hasDshBundle,
+    'has-upstream': hasUpstream,
+    'no-upstream': !hasUpstream,
     publishable,
     'no-publish': !publishable,
   }

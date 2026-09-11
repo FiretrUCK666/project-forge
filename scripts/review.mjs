@@ -37,6 +37,7 @@ const FLAGS = new Set([
   '--private-no-license', // 用户确认：保留所有权利，不落盘 LICENSE
   '--no-ci', // 用户确认：暂不要 CI
   '--no-auto-release', // 用户确认：暂不要自动发布
+  '--strict', // 严格模式：待问事项同样拦住（exit 2），用于 CI；默认待问只提示不拦
 ])
 
 function readText(p) {
@@ -86,8 +87,10 @@ function main(argv) {
   if (parsed.help) {
     process.stdout.write(
       '用法：node scripts/review.mjs <项目目录> [--no-bilingual] [--no-contributing]\n'
-      + '      [--private-no-license] [--no-ci] [--no-auto-release]\n\n'
-      + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n',
+      + '      [--private-no-license] [--no-ci] [--no-auto-release] [--strict]\n\n'
+      + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n'
+      + '  默认[待问]不拦（exit 0 但结论写“还有待问”）；--strict 下[待问]同样拦住（exit 2），用于 CI。\n'
+      + '  无对应 flag 的[待问]（徽章离线、DSH 挂载建议、英文模板、纯文档构建命令）只能改文件消掉。\n',
     )
     return 0
   }
@@ -108,7 +111,8 @@ function main(argv) {
   const line = (st, text) => process.stdout.write(`  [${st}] ${text}\n`)
   process.stdout.write(`交付门禁：${s.target.name}（${s.target.path}）\n`)
 
-  // 1. AGENTS.md：内核标记 + 待填写归零（缺节由 compose --status 判定，此处只看两数中的待填写）。
+  // 1. AGENTS.md：一致性真相源是 compose --check 的字节比对，本门只转述。
+  // 自己另起一套“有标记即一致”必然漂移其一，故不自判，只调用。
   const agentsPath = join(root, 'AGENTS.md')
   const agents = readText(agentsPath)
   if (agents === undefined) {
@@ -116,9 +120,22 @@ function main(argv) {
   } else {
     const authors = (agents.match(AUTHOR_RE) ?? []).length
     const kernel = agents.includes(KERNEL_START) && agents.includes(KERNEL_END)
-    if (!kernel) missing.push('AGENTS.md 缺少内核标记（跑 compose-agents 生成或升级）')
-    else if (authors > 0) missing.push(`AGENTS.md 待填写 ${authors} 处（读代码填实，删标记）`)
-    else ok.push('AGENTS.md 内核一致、待填写归零')
+    if (!kernel) {
+      missing.push('AGENTS.md 缺少内核标记（跑 compose-agents 生成或升级）')
+    } else if (authors > 0) {
+      missing.push(`AGENTS.md 待填写 ${authors} 处（读代码填实，删标记）`)
+    } else {
+      const cc = spawnSync(process.execPath, [join(HERE, 'compose-agents.mjs'), root, '--check'],
+        { encoding: 'utf8' })
+      const ccOut = `${cc.stdout ?? ''}\n${cc.stderr ?? ''}`
+      if (cc.status !== 0) {
+        const first = ccOut.split('\n').map((l) => l.trim()).filter(Boolean)
+          .find((l) => /缺失|不一致/.test(l)) ?? '与模板不一致或有缺节'
+        missing.push(`AGENTS.md 未通过 compose --check：${first}（跑 compose-agents 补齐重验）`)
+      } else {
+        ok.push('AGENTS.md 通过 compose --check（内核一致、待填写归零）')
+      }
+    }
   }
 
   // 2. 提交署名：没有仓库时跳过（P3 建库时再定）；有仓库而署名缺失必须补——
@@ -133,6 +150,16 @@ function main(argv) {
     }
   }
 
+  // 2b. 上游跟踪：有远端而未设跟踪时，首推需显式指定。只提示，不阻断。
+  if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
+    && git.upstream === undefined && git.isRepoRoot !== false) {
+    pending.push('上游跟踪未设置：首推用显式分支并设跟踪（改文件消不掉，推一次即有）')
+  }
+
+  // 2c. 标签与版本号：只报事实比对，不下结论（形生态各异，见 publish.md）。
+  if (s.artifacts?.declaredVersion !== undefined && s.artifacts?.versionAligned === false) {
+    pending.push(`标签与版本号未对齐：清单 ${s.artifacts.declaredVersion}，标签 ${(s.artifacts.versionAlignedTags ?? []).join('、') || '无'}（自动化会对不上，先确认）`)
+  }
   // 3. README：必须有；双语要么成对，要么用户明确说单语。
   const readmes = s.docs?.readme ?? []
   if (readmes.length === 0) {
@@ -227,6 +254,10 @@ function main(argv) {
     return 1
   }
   if (pending.length > 0) {
+    if (flags.has('--strict')) {
+      process.stdout.write(`\n结论：--strict 下 ${pending.length} 处待问同样拦住，问完消掉重跑。\n`)
+      return 2
+    }
     process.stdout.write('\n结论：无缺失，但有待问事项——问完用户、加 flag 重跑，全齐才算交付。\n')
     return 0
   }

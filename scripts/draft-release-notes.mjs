@@ -62,6 +62,8 @@ function main() {
   const lines = [`## 本次更新`, '']
   if (subjects.length === 0) lines.push('（该区间无提交记录）')
   else for (const s of subjects) lines.push(`- ${s}`)
+  // 取数上限必须明示：超 100 条时老的提交静默丢失，不写就是“看起来全了”。
+  if (subjects.length >= 100) lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')
   lines.push('', `**完整改动**：${compare}`, '')
   const target = outPath ?? `./${tag}-notes.md`
   try {

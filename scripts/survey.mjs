@@ -734,6 +734,9 @@ const PUBLISHABLE_MANIFESTS = [
   ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
   ['gemfile', 'ruby'], ['composer.json', 'php'],
   ['pubspec.yaml', 'dart'], ['mix.exs', 'elixir'], ['package.swift', 'swift'],
+  // Obsidian 插件的 manifest.json：只认含 minAppVersion 的那一种，
+  // 普通 PWA 的 manifest.json 在此同样被跳过（见下循环内的守卫）。
+  ['manifest.json', 'obsidian'],
 ]
 
 /**
@@ -888,13 +891,21 @@ function detectArtifacts(root, root_, eco) {
   readVersion('pyproject.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'pyproject.toml 的 version')
   readVersion('cargo.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'Cargo.toml 的 version')
   readVersion('composer.json', /"version"\s*:\s*"([^"]+)"/, 'composer.json 的 version')
+  // Obsidian：只读含 minAppVersion 的 manifest.json，不认 PWA 的同名文件。
+  if (/minAppVersion/.test(readText(join(root, root_.real('manifest.json') ?? 'manifest.json')) ?? '')) {
+    readVersion('manifest.json', /"version"\s*:\s*"([^"]+)"/, 'manifest.json 的 version')
+  }
   // Go 没有版本号字段（靠标签），故不读——读不到就是「没有声明」，这是正确结果。
 
   // 可发布清单：按知名度顺序取第一个存在的。它不一定与「主生态」相同（一个 Python 项目
   // 也可能因为某个原因带 package.json），所以单独判定，不从 kinds 推。
+  // manifest.json 同样守卫 minAppVersion，避免 PWA 被当成可发布插件。
   for (const [file, kind] of PUBLISHABLE_MANIFESTS) {
     const real = root_.real(file)
     if (real === undefined) continue
+    if (file === 'manifest.json') {
+      if (!/minAppVersion/.test(readText(join(root, real)) ?? '')) continue
+    }
     facts.publishableManifest = { file: real, ecosystem: kind }
     break
   }
@@ -927,11 +938,31 @@ function detectArtifacts(root, root_, eco) {
   readRange('pyproject.toml', /^\s*requires-python\s*=\s*["']([^"']+)["']/m, 'python', 'pyproject.toml 的 requires-python')
   readRange('cargo.toml', /^\s*rust-version\s*=\s*["']([^"']+)["']/m, 'rust', 'Cargo.toml 的 rust-version')
   readRange('go.mod', /^go\s+(\S+)/m, 'go', 'go.mod 的 go 指令')
+  readRange('manifest.json', /"minAppVersion"\s*:\s*"([^"]+)"/, 'obsidian', 'manifest.json 的 minAppVersion')
   // JS 的 engines 已在上面按对象读取，这里不再重复。
 
   for (const d of ['dist', 'lib', 'build', 'out']) {
     const e = root_.entry(d)
     if (e?.isDir === true) facts.distDirsPresent.push(e.name)
+  }
+  // Obsidian 发布三件套 presence：目录处理读默认分支 HEAD 的 manifest，
+  // 安装从 tag==version 的 release 下载三件，缺一件即断链。
+  if (root_.real('manifest.json') !== undefined) {
+    facts.obsidianArtifacts = {
+      manifest: true,
+      mainJs: root_.has('main.js'),
+      stylesCss: root_.has('styles.css'),
+    }
+  }
+  // 标签与版本号对齐：自动化对不上的根源。只做事实比对，不下结论。
+  // 取不到标签列表（无 git 或非仓库）时保持 undefined，不判 false。
+  if (facts.declaredVersion !== undefined) {
+    const raw = run('git', ['tag', '--list'], root)
+    if (raw !== undefined) {
+      const tags = raw.split('\n').filter(Boolean)
+      facts.versionAligned = tags.some((t) => t === facts.declaredVersion || t === `v${facts.declaredVersion}`)
+      facts.versionAlignedTags = tags.slice(-5)
+    }
   }
   return facts
 }
@@ -941,7 +972,7 @@ function detectArtifacts(root, root_, eco) {
  *
  * 只在已判定为 `dsh-plugin` 时返回对象，其余返回 undefined。所有取值都从项目自身读，
  * 读不到就标缺失，不编造：
- *   - 包名 ← 清单 `name`；补丁路径 ← 清单 `dsh.bundle.patch`（单个字符串）；
+ *   - 包名 ← 清单 `name`；补丁路径 ← 清单 `dsh.bundle.patch`（对象里的单个字符串路径）；
  *   - 客户端声明 ← 清单 `dsh.client`；入口 ← 清单 `exports`；
  *   - 补丁文件 ← 根目录的 `cordis.patch.yml` 一类；发现载体 ← 补丁文本里是否出现包名。
  * 发现载体只是文本包含判断（YAML 不做完整解析），供人复核用，不做硬结论。
@@ -1019,6 +1050,14 @@ function detectDocs(root, root_) {
         note: '这是一对双语 README。两份都会随包分发、都会展示在制品库页面上，'
           + '改任何一份都算用户可见变化；且**它们会漂移**——改一份时另一份必须一起看。',
       }
+    } else if (variants.length > 1 && defaultOne === undefined) {
+      // 双非默认（如只有 README.zh-CN 与 README.en）：同样会漂移，不能静默不成对。
+      docs.readmePair = {
+        default: variants[0].file,
+        defaultMissing: true,
+        variants: variants.map((v) => v.file),
+        note: '两份带语言后缀的 README（缺默认语言版）。它们同样会漂移，改一份时另一份必须一起看。',
+      }
     }
   }
 
@@ -1059,11 +1098,13 @@ function detectDocs(root, root_) {
         docs.workflows = files
         // 自动化现状：只看形状（有没有发布 job、用没用 Secrets），不判对错——
         // 对错由 references/remote-github.md 第八节的核对表判定。
-        // 只读每个文件前 64KB，大工作流不至于拖慢勘察。
-        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false }
+        // 只读每个文件前 64KB，大工作流不至于拖慢勘察；超限时必须置 truncated，
+        // 否则下游会把“没看到”当成“没有”。
+        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false, truncated: false }
         for (const f of files) {
           const text = readText(join(gh, wfEntry.name, f))
           if (text === undefined) continue
+          if (text.length > 65536) auto.truncated = true
           const head = text.slice(0, 65536)
           if (/gh\s+release\s+(create|upload)/.test(head) || /releases\s*:\s*write/.test(head)) {
             auto.hasReleaseJob = true
@@ -1110,13 +1151,29 @@ function detectGit(root) {
     branch: run('git', ['branch', '--show-current'], root),
     remote: run('git', ['remote', 'get-url', 'origin'], root),
     remotes: (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean),
+    // 远端全地址：只存名列表会在 fork 比对时无米之炊。这里补每个远端的 URL，
+    // 取不到就标缺失，不编造。历史字段 `remotes` 保持原样以兼容旧消费。
+    remoteUrls: (() => {
+      const out = {}
+      for (const name of (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean)) {
+        out[name] = run('git', ['remote', 'get-url', name], root)
+      }
+      return out
+    })(),
     identity: {
       name: run('git', ['config', 'user.name'], root),
       email: run('git', ['config', 'user.email'], root),
       scope: run('git', ['config', '--local', 'user.name'], root) !== undefined ? 'repo' : 'inherit',
       globalName: run('git', ['config', '--global', 'user.name'], root),
+      globalEmail: run('git', ['config', '--global', 'user.email'], root),
     },
     tags: (run('git', ['tag', '--list'], root) ?? '').split('\n').filter(Boolean),
+    // 历史署名去重前 20：老项目换人换机器时一眼看出混杂，不再靠人工 git log。
+    historyAuthors: (() => {
+      const out = run('git', ['log', '--format=%an <%ae>', '--no-merges', '-n', '200'], root)
+      if (out === undefined) return undefined
+      return [...new Set(out.split('\n').filter(Boolean))].slice(0, 20)
+    })(),
   }
   const status = run('git', ['status', '--porcelain'], root)
   info.dirty = status === undefined ? undefined : status.split('\n').filter(Boolean).length
@@ -1165,13 +1222,37 @@ function detectIgnores(root, root_) {
   //
   // 用版本控制自己判断有没有被忽略，而不是解析忽略语法：语法有通配、否定、层级差异，
   // 自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。
+  // 无仓库时跳过：此时 check-ignore 全失败，会把所有目录误报为未忽略。
   const probe = []
-  for (const d of OUTPUT_DIR_HINTS) {
-    const e = root_.entry(d)
-    if (e?.isDir !== true) continue
-    const r = spawnSync('git', ['check-ignore', '-q', '--', e.name],
+  const gitUsable = run('git', ['rev-parse', '--is-inside-work-tree'], root) === 'true'
+  const checkOne = (rel) => {
+    const r = spawnSync('git', ['check-ignore', '-q', '--', rel],
       { cwd: root, windowsHide: true })
-    probe.push({ dir: e.name, ignored: r.status === 0 })
+    probe.push({ dir: rel, ignored: r.status === 0 })
+  }
+  if (gitUsable) {
+    for (const d of OUTPUT_DIR_HINTS) {
+      const e = root_.entry(d)
+      if (e?.isDir !== true) continue
+      checkOne(e.name)
+    }
+    // monorepo 子包下沉一层：顶层只有 packages/ 时，子包的 dist/build 同样致命。
+    // 只下一层，不递归爆；读目录失败就跳过该分支。
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true, encoding: 'utf8' })) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+        if (SKIP_DIRS.has(entry.name.toLowerCase())) continue
+        let subs = []
+        try {
+          subs = readdirSync(join(root, entry.name), { withFileTypes: true, encoding: 'utf8' })
+        } catch { continue }
+        for (const sub of subs) {
+          if (!sub.isDirectory()) continue
+          if (!OUTPUT_DIR_HINTS.includes(sub.name.toLowerCase()) && !OUTPUT_DIR_HINTS.includes(sub.name)) continue
+          checkOne(`${entry.name}/${sub.name}`)
+        }
+      }
+    } catch { /* 读不到就只用顶层结果 */ }
   }
   if (probe.length > 0) {
     out.presentOutputDirs = probe
@@ -1241,6 +1322,9 @@ function survey(target) {
   }
   const secrets = scanned.secrets.map(markTracked)
   const largeFiles = walked.largeFiles.map(markTracked)
+  // 敏感文件名同样要标 tracked：分案第一步就问“在不在库里”，缺了这个比特，
+  // 会把已在历史里的凭据当未跟踪排除，白忙且留泄露。
+  const secretFiles = walked.secretFiles.map((p) => markTracked({ path: p }))
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
   const ignoredButTracked = detectIgnores(root, root_).ignoredButTracked
@@ -1259,7 +1343,7 @@ function survey(target) {
       knownOutputDirs: OUTPUT_DIR_HINTS.filter((d) => root_.entry(d)?.isDir === true),
     },
     risks: {
-      secretFiles: walked.secretFiles,
+      secretFiles,
       secretContent: secrets,
       homePathLeaks: scanned.homePaths,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
@@ -1317,13 +1401,21 @@ function toMarkdown(s) {
     L.push(`- 分支：${yn(s.git.branch)}　提交数：${yn(s.git.commits)}　未提交：${yn(s.git.dirty)}`)
     if (Array.isArray(s.git.remotes) && s.git.remotes.length > 1) {
       L.push(`- 远端（${s.git.remotes.length} 个）：${s.git.remotes.join('、')}`)
-      L.push(`  - 默认 origin：${s.git.remote === undefined ? '未设置' : s.git.remote}`)
+      for (const [name, url] of Object.entries(s.git.remoteUrls ?? {})) {
+        L.push(`  - ${name}：${url === undefined ? '地址读不到' : url}`)
+      }
       L.push(`  - 上游跟踪：${s.git.upstream === undefined ? '未设置' : s.git.upstream}`)
     } else {
       L.push(`- 远端：${s.git.remote === undefined ? '无' : s.git.remote}`)
       if (s.git.upstream === undefined) L.push('- 上游跟踪：未设置')
     }
     L.push(`- 署名：${yn(s.git.identity.name)} <${yn(s.git.identity.email)}>（${s.git.identity.scope}）`)
+    if (s.git.identity.globalEmail !== undefined) {
+      L.push(`- 全局署名邮箱：${s.git.identity.globalEmail}（与仓库级不一致时以仓库级为准）`)
+    }
+    if (Array.isArray(s.git.historyAuthors) && s.git.historyAuthors.length > 1) {
+      L.push(`- 历史署名 ${s.git.historyAuthors.length} 种：${s.git.historyAuthors.join('；')}`)
+    }
     if (Array.isArray(s.git.tags) && s.git.tags.length > 0) {
       const shown = s.git.tags.slice(-5)
       L.push(`- 已有版本标签 ${s.git.tags.length} 个：${shown.join('、')}`
@@ -1378,6 +1470,18 @@ function toMarkdown(s) {
     L.push('- 声明的运行环境下限（写环境要求那一节的唯一权威来源）：')
     for (const r of reqs) L.push(`  - ${r.runtime} ${r.range}（${r.declaredIn}）`)
   }
+  if (a.declaredVersion !== undefined) {
+    if (a.versionAligned === true) L.push(`- 标签与版本号：对齐（清单 ${a.declaredVersion}）`)
+    else if (a.versionAligned === false) {
+      L.push(`- **标签与版本号未对齐**：清单 ${a.declaredVersion}，已有标签 ${(a.versionAlignedTags ?? []).join('、') || '无'}`
+        + '——不一致会让后续自动化对不上')
+    }
+  }
+  if (a.obsidianArtifacts !== undefined) {
+    const o = a.obsidianArtifacts
+    L.push(`- Obsidian 发布三件套：manifest.json 有；main.js ${o.mainJs ? '有' : '**缺**'}；styles.css ${o.stylesCss ? '有' : '无（可选）'}`
+      + (o.mainJs ? '' : '——缺 main.js 即安装断链'))
+  }
   L.push('')
   L.push('## 忽略规则')
   L.push('')
@@ -1424,12 +1528,24 @@ function toMarkdown(s) {
       + `发布 job：${auto.hasReleaseJob ? '有' : '无'}；Secrets 引用：${auto.usesSecrets ? '有' : '无'}；`
       + `OIDC 短时身份：${auto.usesOidc ? '有' : '无'}（npm 自动发布靠它，无则对照可信发布接线步骤）`)
     if (!auto.hasReleaseJob) L.push('  - 无发布 job 时对照 `templates/ci-release.yml` 看该不该补')
+    if (auto.truncated === true) {
+      L.push('  - **有工作流只读了前 64KB，未报不等于没有**：发布 job 藏在后面的大文件需手工确认')
+    }
   }
   L.push('')
   L.push('## 风险')
   L.push('')
   const r = s.risks
-  L.push(`- 敏感文件：${r.secretFiles.length === 0 ? '无' : r.secretFiles.length + ' 个（' + r.secretFiles.slice(0, 5).join('、') + '）'}`)
+  if (r.secretFiles.length === 0) {
+    L.push('- 敏感文件：无')
+  } else {
+    const names = r.secretFiles.slice(0, 5).map((h) => typeof h === 'string' ? h : h.path).join('、')
+    L.push(`- 敏感文件：${r.secretFiles.length} 个（${names}）`)
+    for (const hit of r.secretFiles.slice(0, 5)) {
+      if (typeof hit === 'string') continue
+      L.push(`  - ${hit.path}（${hit.tracked === true ? '**已在版本库里**' : '尚未跟踪'}）`)
+    }
+  }
   L.push(`- 内容里的凭据形状：${r.secretContent.length === 0 ? '无' : r.secretContent.length + ' 处'}`)
   if (r.secretContent.length > 0) {
     for (const hit of r.secretContent.slice(0, 10)) {

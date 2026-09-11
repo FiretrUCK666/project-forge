@@ -352,7 +352,7 @@ function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
   for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs',
-    'release-notes.mjs', 'check-badges.mjs', 'sync-toc.mjs']) {
+    'release-notes.mjs', 'draft-release-notes.mjs', 'review.mjs', 'check-badges.mjs', 'sync-toc.mjs']) {
     const p = join(dir, f)
     if (!existsSync(p)) { fail(`缺少 scripts/${f}。`); continue }
     const text = readText(p)
@@ -679,19 +679,63 @@ function checkPluginChapters() {
  * 放进检查会因为对方抖动而误报，那种检查很快就会被无视。
  */
 function checkReadmeToc() {
-  const readme = join(SKILL_ROOT, 'README.md')
-  if (!existsSync(readme)) { warn('没有 README.md。'); return }
+  // 中英文两份都查：CI 查两份，只查中文会让英文漂移漏网。
+  const readmes = [join(SKILL_ROOT, 'README.md'), join(SKILL_ROOT, 'README.en.md')]
+    .filter((p) => existsSync(p))
+  if (readmes.length === 0) { warn('没有 README.md。'); return }
   const script = join(SKILL_ROOT, 'scripts', 'sync-toc.mjs')
   if (!existsSync(script)) { fail('缺少 scripts/sync-toc.mjs（README 目录的同步工具）。'); return }
-  const r = spawnSync(process.execPath, [script, readme, '--check'], { encoding: 'utf8', env: process.env })
+  const r = spawnSync(process.execPath, [script, ...readmes, '--check'], { encoding: 'utf8', env: process.env })
   if (r.error !== undefined) { fail(`目录同步检查无法执行：${r.error.message}`); return }
   if (r.status !== 0) {
     const detail = (r.stdout ?? '').trim().split('\n').filter((l) => l.trim() !== '').join(' / ')
     fail(`README 的目录与标题不同步：${detail}\n`
-      + `      修正：node scripts/sync-toc.mjs README.md`)
+      + `      修正：node scripts/sync-toc.mjs README.md README.en.md`)
     return
   }
   process.stdout.write('README 目录：与标题一致\n')
+}
+
+// ── 检查十二：取值污染（单样本个案值不得回流进通用文档） ─────────────────────
+//
+// references/ 与 templates/ 是通用规则，只能写查法与判据。task-board 这类单样本的
+// 具体取值（包名、存储键、插槽座位、列名、路由）一旦写进来，就会被 AI 当成结论照抄
+// 到别的插件上。判据是字面出现，不是语义：出现即红。
+function checkValuePollution() {
+  const targets = []
+  const collect = (dir) => {
+    let entries = []
+    try {
+      entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    } catch { return }
+    for (const e of entries) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) { collect(full); continue }
+      if (!/\.(md|mjs|yml)$/.test(e.name)) continue
+      targets.push(full)
+    }
+  }
+  collect(join(SKILL_ROOT, 'references'))
+  collect(join(SKILL_ROOT, 'templates'))
+  // 白名单：本检查自身的字面引用不算污染。
+  const self = join(SKILL_ROOT, 'scripts', 'preflight.mjs')
+  const banned = ['dsh-task-board', 'dsh_task_board', 'dsh.taskBoard', '@firetruck666']
+  let hits = 0
+  for (const f of targets) {
+    let text = ''
+    try {
+      text = readText(f)
+    } catch { continue }
+    for (const b of banned) {
+      if (text.includes(b)) {
+        const rel = relative(SKILL_ROOT, f).split('\\').join('/')
+        fail(`取值污染：${rel} 出现单样本字面「${b}」——通用文档只写查法，个案值须现场读。`)
+        hits += 1
+        break
+      }
+    }
+  }
+  if (hits === 0) process.stdout.write('取值无污染：通用文档无单样本字面\n')
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
@@ -708,6 +752,7 @@ function main() {
   checkStatedCounts()
   checkPluginChapters()
   checkReadmeToc()
+  checkValuePollution()
   checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。

@@ -1250,6 +1250,155 @@ group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查'
   report(ok3, '插件专属：拦得住')
 }
 
+group('[30] 事实采全与门禁诚实：tracked/远端/发布链/截断/strict')
+{
+  const review = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+
+  // 敏感文件名带 tracked 比特（无仓库时为尚未跟踪，不断言真值只断言形状）
+  {
+    const dir = fixture('facts-secretfile', { '.env': 'x=1\n', 'README.md': '# x\n' })
+    const hits = survey(dir).risks?.secretFiles ?? []
+    const ok = Array.isArray(hits) && hits.length > 0
+      && hits.every((h) => typeof h.path === 'string' && typeof h.tracked === 'boolean')
+    check(ok, 'secretFiles 带 path/tracked（分案首问可答）', JSON.stringify(hits.slice(0, 2)))
+    report(ok, 'secretFiles：形状正确')
+  }
+
+  // Obsidian 发布链：含 minAppVersion 即有可发布身份、版本号与下限
+  {
+    const dir = fixture('facts-obsidian', {
+      'manifest.json': JSON.stringify({
+        id: 'my-plugin', name: 'My Plugin', version: '1.2.3', minAppVersion: '1.0.0',
+        description: 'd', author: 'a', isDesktopOnly: false,
+      }),
+      'main.js': 'module.exports = {}\n',
+    })
+    const s = survey(dir)
+    const ok = (s.ecosystem?.kinds ?? []).includes('obsidian-plugin')
+      && s.artifacts?.publishableManifest?.ecosystem === 'obsidian'
+      && s.artifacts?.declaredVersion === '1.2.3'
+      && (s.artifacts?.runtimeRequirements ?? []).some((r) => r.runtime === 'obsidian')
+    check(ok, 'Obsidian 有发布身份/版本/下限', JSON.stringify(s.artifacts?.publishableManifest))
+    report(ok, 'Obsidian：发布链不断')
+
+    const pwa = fixture('facts-pwa', {
+      'manifest.json': JSON.stringify({ name: 'App', short_name: 'App', start_url: '/' }),
+      'index.html': '<html></html>\n',
+    })
+    const sp = survey(pwa)
+    const okPwa = !(sp.ecosystem?.kinds ?? []).includes('obsidian-plugin')
+      && sp.artifacts?.publishableManifest === undefined
+    check(okPwa, 'PWA 同名文件不进发布链', JSON.stringify(sp.ecosystem?.kinds))
+    report(okPwa, 'PWA：不误判发布身份')
+  }
+
+  // 工作流超 64KB 置 truncated，不把“没看到”当“没有”
+  {
+    const big = `# pad\n${'x'.repeat(70000)}\ngh release create\n`
+    const dir = fixture('facts-bigwf', {
+      'package.json': '{"name":"w","version":"1.0.0"}\n',
+      '.github/workflows/release.yml': `name: release\non: [push]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n${big}`,
+    })
+    const auto = survey(dir).docs?.workflowAutomation
+    const ok = auto?.truncated === true
+    check(ok, '大工作流标 truncated', JSON.stringify({ truncated: auto?.truncated }))
+    report(ok, '工作流截断：诚实')
+  }
+
+  // 双非默认 README 同样成对（缺默认需标出）
+  {
+    const dir = fixture('facts-bipair', {
+      'README.zh-CN.md': '# 中文\n',
+      'README.en.md': '# English\n',
+      'src/a.js': 'export const a=1\n',
+    })
+    const pair = survey(dir).docs?.readmePair
+    const ok = pair !== undefined && pair.defaultMissing === true
+    check(ok, '双非默认成对并标 defaultMissing', JSON.stringify(pair))
+    report(ok, '双语：双非默认不漏')
+  }
+
+  // --strict：仅剩待问时默认放行、严格拦住
+  {
+    const contrib = '# C\n\n## 提问与反馈\n到 Issue 区。\n\n## 报告缺陷\n四件事。\n\n'
+      + '## 提出改动\n先 fork，在分支上开发，门禁全绿开请求。不推主干，不打标签，不发布。\n\n'
+      + '## 开发环境\n用 pnpm 安装依赖。\n\n## 提交前门禁\n跑构建测试，全绿。\n\n'
+      + '## 硬性规范\n完整规范以 AGENTS.md 为准。\n\n## 提交信息\n一句话。\n\n## 许可\n见 LICENSE。\n'
+    const dir = fixture('facts-strict', {
+      'package.json': JSON.stringify({ name: 't', version: '1.0.0', private: true, scripts: { test: 'x' } }),
+      'README.md': '# t\n',
+      'LICENSE': 'MIT\n',
+      'CONTRIBUTING.md': contrib,
+      '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+    })
+    // 用脚本生成合法 AGENTS 并填实，使“仅剩双语待问”精确成立
+    compose(dir)
+    const apath = join(dir, 'AGENTS.md')
+    writeFileSync(apath, readFileSync(apath, 'utf8')
+      .replace(/<!--\s*pf:author[\s\S]*?-->/g, '（已填写）'), 'utf8')
+    const r1 = review(dir)
+    const ok1 = r1.status === 0 && /\[待问\]/.test(r1.stdout ?? '')
+    check(ok1, '仅剩待问时默认 exit 0 但有待问', `exit=${r1.status}`)
+    report(ok1, '默认：待问不拦但明示')
+    const r2 = review(dir, '--strict')
+    const ok2 = r2.status === 2 && /\[待问\]/.test(r2.stdout ?? '')
+    check(ok2, '--strict 下待问 exit 2', `exit=${r2.status}`)
+    report(ok2, '严格：待问拦得住')
+  }
+
+  if (!HAS_GIT) {
+    skipGroup('[30] git 相关事实（远端/署名历史/标签对齐/上游）', '环境里没有 git')
+  } else {
+    // 远端全地址 + 历史署名（全局配置走临时文件，不碰本机真实全局配置）
+    const dir = fixture('facts-git', { 'README.md': '# x\n' })
+    for (const args of [['init', '-q'], ['remote', 'add', 'origin', 'https://example.invalid/r.git'],
+      ['remote', 'add', 'fork', 'https://example.invalid/f.git'],
+      ['config', 'user.name', 'T'], ['config', 'user.email', 't@e.com']]) {
+      spawnSync('git', args, { cwd: dir })
+    }
+    spawnSync('git', ['add', '-A'], { cwd: dir })
+    spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
+    writeFileSync(join(dir, 'fake-global-gitconfig'), '[user]\n\tname = G\n\temail = g@e.com\n', 'utf8')
+    const prevGlobal = process.env.GIT_CONFIG_GLOBAL
+    const prevNoSys = process.env.GIT_CONFIG_NOSYSTEM
+    process.env.GIT_CONFIG_GLOBAL = join(dir, 'fake-global-gitconfig')
+    process.env.GIT_CONFIG_NOSYSTEM = '1'
+    let g = {}
+    try {
+      g = survey(dir).git ?? {}
+    } finally {
+      if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL
+      else process.env.GIT_CONFIG_GLOBAL = prevGlobal
+      if (prevNoSys === undefined) delete process.env.GIT_CONFIG_NOSYSTEM
+      else process.env.GIT_CONFIG_NOSYSTEM = prevNoSys
+    }
+    const okUrl = g.remoteUrls?.origin === 'https://example.invalid/r.git'
+      && g.remoteUrls?.fork === 'https://example.invalid/f.git'
+    check(okUrl, '远端全地址可查（fork 比对有米）', JSON.stringify(g.remoteUrls))
+    report(okUrl, '远端：全地址')
+    const okMail = g.identity?.globalEmail === 'g@e.com'
+    check(okMail, '全局邮箱可查', String(g.identity?.globalEmail))
+    report(okMail, '署名：全局邮箱')
+
+    // 标签与版本号未对齐 → 事实 false，review 报待问
+    const ver = fixture('facts-ver', {
+      'package.json': JSON.stringify({ name: 'v', version: '1.2.3' }),
+      'README.md': '# v\n',
+    })
+    for (const args of [['init', '-q'], ['config', 'user.name', 'T'], ['config', 'user.email', 't@e.com']]) {
+      spawnSync('git', args, { cwd: ver })
+    }
+    spawnSync('git', ['add', '-A'], { cwd: ver })
+    spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: ver })
+    spawnSync('git', ['tag', 'v9.9.9'], { cwd: ver })
+    const va = survey(ver).artifacts ?? {}
+    const okVa = va.versionAligned === false
+    check(okVa, '标签版本不一致判 false（不编造对齐）', String(va.versionAligned))
+    report(okVa, '版本对齐：事实比对')
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

@@ -1160,6 +1160,96 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
   report(ok9, '非插件：不误报 DSH 段')
 }
 
+group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查')
+{
+  const review = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const GOOD = `# C 贡献指南
+
+## 提问与反馈
+
+到 Issue 区提出。
+
+## 报告缺陷
+
+四件事。
+
+## 提出改动
+
+先 fork，在分支上开发，跑完门禁全绿再提交开请求。不推主干，不打标签，不发布。
+
+## 开发环境
+
+用 pnpm 安装依赖后构建测试。
+
+## 提交前门禁
+
+跑构建测试，全绿才算完成。
+
+## 硬性规范
+
+完整规范以 AGENTS.md 为准。
+
+## 提交信息
+
+一句话。
+
+## 许可
+
+见 LICENSE。
+`
+
+  // 好文件：node+插件生态下无 CONTRIBUTING 缺项
+  const good = fixture('contrib-good', {
+    'package.json': JSON.stringify({
+      name: 'p', version: '1.0.0', scripts: { build: 'tsc', test: 'vitest run' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: p\n      name: 'p'\n",
+    'AGENTS.md': '# p\n\n<!-- project-forge:kernel:start -->\n<!-- project-forge:kernel:end -->\n',
+    'README.md': '# p\n',
+    'LICENSE': 'MIT\n',
+    'CONTRIBUTING.md': `${GOOD}产物与源码一起提交。本地挂载后重启宿主验证。\n`,
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const r1 = review(good, '--no-bilingual', '--no-auto-release')
+  const ok1 = !/CONTRIBUTING 缺/.test(r1.stdout ?? '')
+  check(ok1, '好文件不报 CONTRIBUTING 缺', (r1.stdout ?? '').split('\n').find((l) => /CONTRIBUTING/.test(l)) ?? '')
+  report(ok1, '好文件：放行')
+
+  // 缺 fork 与门禁 → 报缺
+  const bad = fixture('contrib-bad', {
+    'package.json': JSON.stringify({ name: 'q', version: '1.0.0', scripts: { test: 'x' } }),
+    'AGENTS.md': '# q\n\n<!-- project-forge:kernel:start -->\n<!-- project-forge:kernel:end -->\n',
+    'README.md': '# q\n',
+    'LICENSE': 'MIT\n',
+    'CONTRIBUTING.md': '# 贡献\n\n随便改改就行。\n',
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const r2 = review(bad, '--no-bilingual', '--no-auto-release')
+  const ok2 = r2.status !== 0 && /CONTRIBUTING 缺/.test(r2.stdout ?? '')
+  check(ok2, '缺核心节报缺且非零退出', `exit=${r2.status}`)
+  report(ok2, '坏文件：拦得住')
+
+  // 插件缺产物同提交 → 报缺
+  const noartifact = fixture('contrib-noartifact', {
+    'package.json': JSON.stringify({
+      name: 'r', version: '1.0.0', scripts: { test: 'x' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: r\n      name: 'r'\n",
+    'AGENTS.md': '# r\n\n<!-- project-forge:kernel:start -->\n<!-- project-forge:kernel:end -->\n',
+    'README.md': '# r\n',
+    'LICENSE': 'MIT\n',
+    'CONTRIBUTING.md': GOOD,
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const r3 = review(noartifact, '--no-bilingual', '--no-auto-release')
+  const ok3 = /产物同提交/.test(r3.stdout ?? '')
+  check(ok3, '插件缺产物同提交报缺', (r3.stdout ?? '').split('\n').find((l) => /产物/.test(l)) ?? '')
+  report(ok3, '插件专属：拦得住')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

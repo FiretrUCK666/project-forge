@@ -150,8 +150,48 @@ function main(argv) {
   else if (badgeResult.state === 'offline') pending.push('徽章未能联网验证：在汇报里写明未验及原因')
   else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
 
-  // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳。
-  if (s.docs?.contributing !== undefined) ok.push('CONTRIBUTING 有')
+  // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳；有了要看内容是否齐全。
+  // 内容检查只认关键词的有无，不判措辞好坏：措辞无法用机器判，判了就是误报源。
+  if (s.docs?.contributing !== undefined) {
+    ok.push('CONTRIBUTING 有')
+    const contributingFile = typeof s.docs.contributing === 'string'
+      ? s.docs.contributing
+      : s.docs.contributing.file
+    const contributing = readText(join(root, contributingFile)) ?? ''
+    const coreChecks = [
+      [/提问|Issue|反馈/, '提问与反馈'],
+      [/fork/i, 'fork 指引'],
+      [/分支|branch/i, '分支指引'],
+      [/门禁|全绿|测试|构建/, '提交前门禁'],
+      [/AGENTS\.md/, 'AGENTS 指向'],
+      [/许可|LICENSE/, '许可'],
+    ]
+    for (const [re, label] of coreChecks) {
+      if (!re.test(contributing)) missing.push(`CONTRIBUTING 缺${label}（补对应节，见 docs-set 第五节通用骨架）`)
+    }
+    const kinds = s.ecosystem?.kinds ?? []
+    const isNode = kinds.includes('node')
+    const isPlugin = kinds.some((k) => /plugin|extension/.test(k))
+    const isDsh = kinds.includes('dsh-plugin')
+    const isDocsOnly = kinds.includes('docs-only')
+    if (isNode && !/(npm|pnpm|yarn|bun|安装依赖|安装)/.test(contributing)) {
+      missing.push('CONTRIBUTING 缺包管理器或安装说明（node 项目：沿用它自己的包管理器）')
+    }
+    if (isPlugin) {
+      if (!/(产物|一起提交)/.test(contributing)) {
+        missing.push('CONTRIBUTING 缺产物同提交（插件类：安装方不构建，产物缺了即加载失败）')
+      }
+      if (!/(主干|标签|发布)/.test(contributing)) {
+        missing.push('CONTRIBUTING 缺三类越权（不推主干、不打标签、不发布）')
+      }
+    }
+    if (isDsh && !/(挂载|重启|刷新|分发)/.test(contributing)) {
+      pending.push('CONTRIBUTING 可补本地挂载与生效规则（DSH 插件：两条路差别是最高频问题）')
+    }
+    if (isDocsOnly && /```sh[\s\S]*?(npm|pnpm|cargo|pytest|go test)/.test(contributing)) {
+      pending.push('纯文档项目的 CONTRIBUTING 含构建命令：确认是否真的需要开发环境节')
+    }
+  }
   else if (flags.has('--no-contributing')) ok.push('无 CONTRIBUTING（用户已确认自用）')
   else pending.push('CONTRIBUTING 缺失：问用户会不会给别人用（会→补，不会→加 --no-contributing）')
   if (s.docs?.license !== undefined) ok.push('LICENSE 有')

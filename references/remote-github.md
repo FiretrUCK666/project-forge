@@ -342,6 +342,7 @@ Releases 页出现该版本。token 过期或换人时只换 Secrets 里那一�
 | 产物入库的项目有逐字节一致检查 | 看 CI 里有没有重建比对那一步 |
 | 打标签能触发 Release | 推一个测试标签或看 `release` job 历史 |
 | Secret 已建且名字 exactly `RELEASE_TOKEN` | 看仓库 Settings → Secrets（只看有没有，不看值） |
+| npm 包要自动发布：可信发布已登记 | 按 `references/publish-npm.md` 接线步骤逐项核对（组织/仓库/文件名逐字一致） |
 | 标签形状与清单/专章一致 | npm 一类 `v*`；Obsidian 与 `manifest.json` 完全一致 |
 
 有一项没勾，自动化就不算配完——宁可当时多看一眼，不要等用户装不上再回头查。

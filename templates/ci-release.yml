@@ -15,6 +15,26 @@
 # TODO(3) 门禁先行：本文件独立触发，默认不含门禁；要“检查全绿才许发布”时，
 #   把 templates/ci-check.yml 的 job 合并进同一文件再加 needs，而不要跨文件 needs。
 # 补漏：标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名——不要重打标签。
+#
+# TODO(4) npm 包才需要以下这段（GitHub Release 上面已建好）：可信发布（OIDC）无需长期令牌，
+#   但要先带用户在 npm 网站登记发布者身份（组织/仓库/工作流文件名逐字一致，见
+#   references/publish-npm.md「可信发布接线步骤」），否则 Publish 步骤报无权失败。
+#   非 npm 项目整段删掉。
+#
+#   permissions:
+#     id-token: write   # 签发短时身份用；建 Release 另需 contents: write，二者互不干扰
+#   - uses: actions/setup-node@v6
+#     with:
+#       node-version: '<清单声明的版本>'
+#       registry-url: 'https://registry.npmjs.org'
+#       package-manager-cache: false   # 发布构建不用缓存，旧缓存会改变发出去的东西
+#   # Node 自带的 npm 可能过旧（可信发布要较新的 npm 大版本）：npm install -g npm@^<大版本>
+#   - name: 发布前门禁（与 check  job 同一批命令，不许发布没验过的树）
+#     run: |
+#       <构建命令>
+#       <测试命令>
+#   - name: 发布到 npm（tag 与清单版本号不一致直接失败，见模板 TODO(1)）
+#     run: npm publish --access public   # 私有包把 public 换成 restricted
 
 name: release
 

@@ -1000,7 +1000,7 @@ function detectDocs(root, root_) {
         // 自动化现状：只看形状（有没有发布 job、用没用 Secrets），不判对错——
         // 对错由 references/remote-github.md 第八节的核对表判定。
         // 只读每个文件前 64KB，大工作流不至于拖慢勘察。
-        const auto = { files, hasReleaseJob: false, usesSecrets: false }
+        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false }
         for (const f of files) {
           const text = readText(join(gh, wfEntry.name, f))
           if (text === undefined) continue
@@ -1009,6 +1009,7 @@ function detectDocs(root, root_) {
             auto.hasReleaseJob = true
           }
           if (/secrets\./.test(head)) auto.usesSecrets = true
+          if (/id-token\s*:\s*write/.test(head)) auto.usesOidc = true
         }
         docs.workflowAutomation = auto
       } catch { /* 忽略 */ }
@@ -1347,7 +1348,8 @@ function toMarkdown(s) {
   const auto = s.docs?.workflowAutomation
   if (auto !== undefined) {
     L.push(`- 自动化现状：工作流 ${auto.files.join('、') || '无'}；`
-      + `发布 job：${auto.hasReleaseJob ? '有' : '无'}；Secrets 引用：${auto.usesSecrets ? '有' : '无'}`)
+      + `发布 job：${auto.hasReleaseJob ? '有' : '无'}；Secrets 引用：${auto.usesSecrets ? '有' : '无'}；`
+      + `OIDC 短时身份：${auto.usesOidc ? '有' : '无'}（npm 自动发布靠它，无则对照可信发布接线步骤）`)
     if (!auto.hasReleaseJob) L.push('  - 无发布 job 时对照 `templates/ci-release.yml` 看该不该补')
   }
   L.push('')

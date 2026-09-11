@@ -945,6 +945,15 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   check(ok1, '带发布 job 的工作流被认出', JSON.stringify(a1))
   report(ok1, '有发布 job：认出')
 
+  // OIDC 短时身份也要认出来——npm 自动发布靠它，没有就是没接线
+  const withOidc = fixture('auto-oidc', {
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\npermissions:\n  id-token: write\n  contents: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm publish\n',
+  })
+  const a3 = survey(withOidc).docs?.workflowAutomation
+  const ok3 = a3?.usesOidc === true
+  check(ok3, 'OIDC 声明被认出', JSON.stringify(a3))
+  report(ok3, '有 OIDC：认出')
+
   // 反向：纯检查工作流不误报发布 job
   const plain = fixture('auto-plain', {
     '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',

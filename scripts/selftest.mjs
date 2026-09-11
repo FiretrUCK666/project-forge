@@ -938,6 +938,7 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
 {
   // 正向：带发布 job 且引用 Secrets 的工作流
   const withRelease = fixture('auto-with', {
+    'package.json': '{"name":"demo","version":"0.1.0"}\n',
     '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: gh release create "$TAG" --generate-notes\n        env:\n          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}\n',
   })
   const a1 = survey(withRelease).docs?.workflowAutomation
@@ -962,6 +963,12 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   const ok2 = a2?.hasReleaseJob === false
   check(ok2, '纯检查工作流不误报发布 job', JSON.stringify(a2))
   report(ok2, '无发布 job：不误报')
+
+  // 英文模板模式要被点名：有 generate-notes、无 notes-file → review 必须待问
+  const rEn = review(withRelease)
+  const okEn = /英文模板模式/.test(rEn.stdout ?? '')
+  check(okEn, '纯英文模板触发待问', (rEn.stdout ?? '').split('\n')[0])
+  report(okEn, '英文模板：待问，不默过')
 }
 
 group('[25] 交付门禁：缺项拦得住，待问消得掉')

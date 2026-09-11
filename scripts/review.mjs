@@ -166,7 +166,14 @@ function main(argv) {
   } else {
     ok.push(`工作流有（${auto.files.join('、')}）`)
     if (s.artifacts?.publishableManifest !== undefined && s.artifacts?.private !== true) {
-      if (auto.hasReleaseJob) ok.push('发布 job 有')
+      if (auto.hasReleaseJob) {
+        ok.push('发布 job 有')
+        // 英文回退确认：纯 --generate-notes 出来是英文模板（首版更是白卷）。
+        // 有 notes-file 模式即中文链；没有就必须问一句，不能默认英文可接受。
+        if (!auto.usesNotesFile && auto.usesGenerateNotes) {
+          pending.push('发布说明是英文模板模式：确认英文可接受，否则换 notes-file 中文链（见模板 TODO(2)）')
+        }
+      }
       else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
       else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')
     }

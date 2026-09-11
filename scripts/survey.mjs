@@ -1000,7 +1000,7 @@ function detectDocs(root, root_) {
         // 自动化现状：只看形状（有没有发布 job、用没用 Secrets），不判对错——
         // 对错由 references/remote-github.md 第八节的核对表判定。
         // 只读每个文件前 64KB，大工作流不至于拖慢勘察。
-        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false }
+        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false }
         for (const f of files) {
           const text = readText(join(gh, wfEntry.name, f))
           if (text === undefined) continue
@@ -1010,6 +1010,8 @@ function detectDocs(root, root_) {
           }
           if (/secrets\./.test(head)) auto.usesSecrets = true
           if (/id-token\s*:\s*write/.test(head)) auto.usesOidc = true
+          if (/--notes-file/.test(head)) auto.usesNotesFile = true
+          if (/--generate-notes/.test(head)) auto.usesGenerateNotes = true
         }
         docs.workflowAutomation = auto
       } catch { /* 忽略 */ }

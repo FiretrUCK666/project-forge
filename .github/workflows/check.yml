@@ -10,12 +10,6 @@ on:
     branches: ['**']
     tags: ['v*']
   pull_request:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: '已存在的标签名（例如 v0.2.0），为空则用当前触发的标签'
-        required: false
-        default: ''
 
 jobs:
   check:
@@ -40,26 +34,3 @@ jobs:
 
       - name: README 的目录与标题是否同步
         run: node scripts/sync-toc.mjs README.md README.en.md --check
-
-  # 打标签自动写发布说明：只在标签推送或手动触发时跑。
-  # 凭证来自仓库 Secrets 的 RELEASE_TOKEN（细粒度 token，仅 Contents 读写、仅本仓库），
-  # 不在仓库里存任何明文凭据。说明正文由 GitHub 按提交记录自动生成（中文不经 shell）。
-  release:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出标签
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
-      - name: 建 Release（不存在才建，已存在则跳过）
-        run: |
-          TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，跳过。"
-          else
-            gh release create "$TAG" --generate-notes --title "$TAG"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

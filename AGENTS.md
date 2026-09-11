@@ -417,7 +417,7 @@ CMake 项目判成纯文档目录时，引用与格式全都正常。而这个 s
 4. CI 自动写发布说明（见下），回读 Releases 页确认；
 5. 汇报只说版号与去哪看。
 
-**发布说明由 CI 自动写**：推 `v*` 标签 → `check.yml` 的 `release` job 用仓库 Secrets 里的
+**发布说明由 CI 自动写**：推 `v*` 标签 → `release.yml` 用仓库 Secrets 里的
 `RELEASE_TOKEN`（细粒度 token，仅 Contents 读写、仅本仓库）建 Release，正文由 GitHub 按提交记录生成，
 已存在则跳过（幂等）。token 过期或换人时只换 Secrets 里那一个值，代码不动。标签推得比 job 早、
 或 job 失败时，用 `workflow_dispatch` 手动触发一次并填标签名补漏——不要重打标签。

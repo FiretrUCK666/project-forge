@@ -980,6 +980,10 @@ function detectDsh(root, root_, eco) {
     : exists(join(root, bundlePatchPath.replace(/^\.\//, '')))
   const clientDecl = dsh.client
   const hasClientDecl = clientDecl !== undefined
+  // 未知字段现形：宿主未来加了新声明时，静默忽略等于装懂。这里只报名字，
+  // 不解释语义——语义按六问现场查，不要猜。
+  const knownDshKeys = new Set(['bundle', 'client', 'profile'])
+  const unknownKeys = Object.keys(dsh).filter((k) => !knownDshKeys.has(k))
   const exportsMap = typeof pkg.exports === 'object' && pkg.exports !== null
     ? Object.keys(pkg.exports) : []
   const hasHostEntry = exportsMap.includes('.') || typeof pkg.main === 'string'
@@ -1025,6 +1029,7 @@ function detectDsh(root, root_, eco) {
     hasClientEntry,
     discoveryCarrierLikely: carrier,
     pinnedVersions,
+    unknownKeys,
     warnings,
   }
 }
@@ -1448,6 +1453,10 @@ function toMarkdown(s) {
     L.push(`- DSH 入口：host ${d.hasHostEntry ? '有' : '缺'}；client ${d.hasClientEntry ? '有' : '无'}`
       + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）`)
     if (d.discoveryCarrierLikely === false) L.push('- **DSH 发现载体可能缺失**：补丁文本里没有出现包名')
+    if (Array.isArray(d.unknownKeys) && d.unknownKeys.length > 0) {
+      L.push(`- **DSH 清单有不认识的字段**：${d.unknownKeys.join('、')}`
+        + '——可能是新版宿主加的东西，按六问现场核实，不要猜，也不要照旧流程装懂')
+    }
     for (const w of d.warnings ?? []) L.push(`- DSH 注意：${w}`)
   }
   L.push('')

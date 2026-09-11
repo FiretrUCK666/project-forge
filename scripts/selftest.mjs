@@ -1431,6 +1431,26 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     check(okWarn, '漂移时警告且不拦流程', `exit=${r.status}`)
     report(okWarn, '漂移：警告')
   }
+  // 未知 dsh 字段现形；已知字段不误报
+  {
+    const dir = fixture('dsh-unknownkey', {
+      'package.json': JSON.stringify({
+        name: 'dsh-unk', version: '0.1.0',
+        exports: { '.': './lib/index.js' },
+        dsh: { bundle: { patch: './cordis.patch.yml' }, frobnicate: {} },
+      }, null, 2),
+      'cordis.patch.yml': "- insert:\n    - id: unk\n      name: 'dsh-unk'\n",
+    })
+    const unk = survey(dir).dsh?.unknownKeys ?? []
+    const okUnk = unk.includes('frobnicate')
+    check(okUnk, '未知 dsh 字段被点名', JSON.stringify(unk))
+    report(okUnk, '未知字段：现形')
+    const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), dir, '--markdown'],
+      { encoding: 'utf8' }).stdout ?? ''
+    const okMd = /不认识的字段/.test(md) && /frobnicate/.test(md)
+    check(okMd, '报告里写明未知字段名', 'markdown 含提示行')
+    report(okMd, '未知字段：报告可读')
+  }
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

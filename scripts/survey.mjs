@@ -954,16 +954,6 @@ function detectArtifacts(root, root_, eco) {
       stylesCss: root_.has('styles.css'),
     }
   }
-  // 标签与版本号对齐：自动化对不上的根源。只做事实比对，不下结论。
-  // 取不到标签列表（无 git 或非仓库）时保持 undefined，不判 false。
-  if (facts.declaredVersion !== undefined) {
-    const raw = run('git', ['tag', '--list'], root)
-    if (raw !== undefined) {
-      const tags = raw.split('\n').filter(Boolean)
-      facts.versionAligned = tags.some((t) => t === facts.declaredVersion || t === `v${facts.declaredVersion}`)
-      facts.versionAlignedTags = tags.slice(-5)
-    }
-  }
   return facts
 }
 
@@ -1326,18 +1316,29 @@ function survey(target) {
   // 会把已在历史里的凭据当未跟踪排除，白忙且留泄露。
   const secretFiles = walked.secretFiles.map((p) => markTracked({ path: p }))
 
+  // 标签与版本号对齐：自动化对不上的根源。复用 detectGit 已取到的标签列表，
+  // 不另起 git 进程；非仓库根（标签属外层仓库）或取不到时保持 undefined，不判 false。
+  // 只做事实比对，不下结论。
+  const artifacts = detectArtifacts(root, root_, eco)
+  if (artifacts.declaredVersion !== undefined && git.isRepoRoot !== false && Array.isArray(git.tags)) {
+    artifacts.versionAligned = git.tags.some(
+      (t) => t === artifacts.declaredVersion || t === `v${artifacts.declaredVersion}`)
+    artifacts.versionAlignedTags = git.tags.slice(-5)
+  }
+
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
-  const ignoredButTracked = detectIgnores(root, root_).ignoredButTracked
+  // 忽略探查只跑一次，两处复用同一结果。
+  const ignores = detectIgnores(root, root_)
 
   return {
     target: { path: root, name: basename(root) },
     git,
     ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name },
     commands: deriveCommands(root, root_, eco),
-    artifacts: detectArtifacts(root, root_, eco),
+    artifacts,
     dsh: detectDsh(root, root_, eco),
     docs: detectDocs(root, root_),
-    ignores: detectIgnores(root, root_),
+    ignores,
     outputs: {
       heavyDirsPresent: walked.heavyDirs,
       knownOutputDirs: OUTPUT_DIR_HINTS.filter((d) => root_.entry(d)?.isDir === true),

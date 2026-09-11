@@ -989,6 +989,41 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   report(ok3, '未知 flag：报错')
 }
 
+group('[26] 起草发布说明：中文提交即中文说明，无上一版不交白卷')
+{
+  if (!HAS_GIT) {
+    skipGroup('[26] 起草发布说明', '环境里没有 git')
+  } else {
+    const draft = (dir, ...a) => spawnSync(process.execPath,
+      [join(HERE, 'draft-release-notes.mjs'), ...a], { encoding: 'utf8', cwd: dir })
+    const repo = fixture('draft-repo', { 'README.md': '# x\n' })
+    for (const args of [['init', '-q'], ['config', 'user.name', 'T'],
+      ['config', 'user.email', 't@e.com'], ['add', '-A'], ['commit', '-q', '-m', '中文首版']]) {
+      spawnSync('git', args, { cwd: repo })
+    }
+    spawnSync('git', ['tag', 'v9.9.1'], { cwd: repo })
+    writeFileSync(join(repo, 'CHANGE.txt'), 'more\n', 'utf8')
+    for (const args of [['add', '-A'], ['commit', '-q', '-m', '中文第二版']]) {
+      spawnSync('git', args, { cwd: repo })
+    }
+    spawnSync('git', ['tag', 'v9.9.2'], { cwd: repo })
+
+    const r1 = draft(repo, 'v9.9.2', join(repo, 'notes.md'))
+    const t1 = existsSync(join(repo, 'notes.md')) ? readFileSync(join(repo, 'notes.md'), 'utf8') : ''
+    const ok1 = r1.status === 0 && /中文第二版/.test(t1) && !/中文首版/.test(t1)
+    check(ok1, '区间提交逐条列出，不含上一版之前', t1.split('\n')[0])
+    report(ok1, '区间正确：只含本版提交')
+    const ok2 = /完整改动/.test(t1)
+    check(ok2, '带完整改动对比行')
+    report(ok2, '对比行：有')
+
+    const r2 = draft(repo, 'v0.0.0-nope', join(repo, 'bad.md'))
+    const ok3 = r2.status !== 0 && /不存在/.test(r2.stderr ?? '')
+    check(ok3, '不存在的标签拒绝并指路（先打标签）')
+    report(ok3, '坏标签：拒绝')
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

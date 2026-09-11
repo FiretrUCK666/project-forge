@@ -10,7 +10,11 @@
 #
 # TODO(1) 标签形状：按生态惯例只留一个——npm 一类 `v*`；Go 模块代理 `v*` 同形；
 #   Obsidian 插件必须与 manifest.json 的 version 完全一致（注意带不带 v，见专章）。
-# TODO(2) 发布正文：--generate-notes 按提交记录自动生成（中文不经 shell，最稳）；
+# TODO(2) 发布正文：默认从提交记录起草中文说明（提交信息本来就是人话，收集即正文；
+#   无上一标签的首版取全量，不交英文白卷）。做法：检出加 fetch-depth: 0，
+#   先跑起草脚本写出 UTF-8 文件，再 --notes-file 发送（中文不经 shell）。
+#   起草脚本各项目自备一小段（Node 见本 skill 的 draft-release-notes.mjs，
+#   纯脚本项目用同原理的 shell 版）；只要 --generate-notes 就仍是英文模板。
 #   要手写正文时改用 scripts/release-notes.mjs 路径（UTF-8 文件按字节发送、回读比对）。
 # TODO(3) 门禁先行：本文件独立触发，默认不含门禁；要“检查全绿才许发布”时，
 #   把 templates/ci-check.yml 的 job 合并进同一文件再加 needs，而不要跨文件 needs。
@@ -53,17 +57,19 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: 检出标签
+      - name: 检出标签（含全历史，起草要读上一个标签）
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          fetch-depth: 0
       - name: 建 Release（幂等，已存在则跳过）  # TODO(2)
         run: |
           TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，跳过。"
           else
-            gh release create "$TAG" --generate-notes --title "$TAG"
+            <起草命令，把正文写进 notes.md>
+            gh release create "$TAG" --notes-file notes.md --title "$TAG"
           fi
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

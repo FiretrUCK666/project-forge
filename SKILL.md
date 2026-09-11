@@ -338,6 +338,7 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（`references/docs-set.md` 那条「只写能显示的」的落地工具） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（`references/docs-set.md` 那条「派生内容用工具同步」的落地工具） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完（治“写完就忘”） |
+| `scripts/draft-release-notes.mjs` | 从提交记录起草中文发布说明（`--generate-notes` 只会英文模板） |
 
 ## 边界
 

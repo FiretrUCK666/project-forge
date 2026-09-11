@@ -37,6 +37,9 @@ function extractBadges(text) {
 
 /** 读回徽章 SVG，返回它实际显示的文字，以及是否像是失败态。 */
 async function inspect(url) {
+  if (typeof fetch !== 'function') {
+    return { ok: false, reason: '当前 Node 不提供全局 fetch，需要 Node 18 或更高', shows: '' }
+  }
   let res
   try {
     res = await fetch(url, { redirect: 'follow' })

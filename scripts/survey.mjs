@@ -824,7 +824,7 @@ function deriveCommands(root, root_, eco) {
   // java/dotnet/ruby/php 等：已能识别生态，但本脚本暂不推导命令（需读构建配置确认）。
   // 明确标记“未实现”而非“项目无命令”，调用方据此区分两种空。
   for (const kind of eco.kinds) {
-    if (['java', 'dotnet', 'ruby', 'php', 'cpp', 'dotnet'].includes(kind) && byEcosystem[kind] === undefined) {
+    if (['java', 'dotnet', 'ruby', 'php', 'cpp', 'dart', 'swift'].includes(kind) && byEcosystem[kind] === undefined) {
       byEcosystem[kind] = { note: '该生态的命令推导尚未实现，请读构建配置确认' }
     }
   }

@@ -178,7 +178,8 @@ node <本领目录>/scripts/selftest.mjs
 
 **Node.js 16 或更高。** 这是全部要求——所有脚本只用 Node 内置模块（`node:fs`、
 `node:path`、`node:url`、`node:os`、`node:child_process`），**没有任何第三方依赖**，
-不需要先装任何东西。
+不需要先装任何东西。联网检查徽章与调用接口的脚本需要 Node 18 的全局 `fetch`，
+16 下会明确报错而不是静默失败。
 
 版本下限来自脚本用到的语言特性：ESM 的 `node:` 前缀导入、`String.prototype.replaceAll`、
 `fs.rmSync`。三者中要求最高的是 `replaceAll`（Node 15 引入）；取 16 是因为它是覆盖全部

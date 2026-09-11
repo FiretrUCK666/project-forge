@@ -161,7 +161,8 @@ The same thing is supposed to look different in the two kinds of docs.
 
 **Node.js 16 or later.** That is the only requirement — all scripts use only Node built-in modules (`node:fs`,
 `node:path`, `node:url`, `node:os`, `node:child_process`), with **no third-party dependencies**,
-nothing to install first.
+nothing to install first. Scripts that fetch over the network or call APIs need Node 18's global `fetch`
+and fail loudly there instead of silently.
 
 The floor comes from language features used in the scripts: ESM `node:`-prefixed imports, `String.prototype.replaceAll`,
 `fs.rmSync`. The most demanding of the three is `replaceAll` (introduced in Node 15); 16 is picked because it is the first LTS covering all of them.

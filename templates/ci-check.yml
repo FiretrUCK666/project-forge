@@ -29,7 +29,7 @@ jobs:
       - name: 准备运行环境  # TODO(1)
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '<清单声明的版本>'  # 占位符：填清单里声明的版本，不要照抄示例数字
 
       - name: 门禁（与 AGENTS.md 构建与验证节同一批命令）  # TODO(2)
         run: |

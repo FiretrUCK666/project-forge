@@ -203,7 +203,11 @@ function deriveFacts(target) {
   }
 
   const hasGit = s.git?.present === true
-  const hasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0
+  // 非仓库根时远端/分支/提交数全属外层仓库（survey 已标 note），此处必须丢弃——
+  // 否则会生成“本地+远端/角色判定/发版规则”，与 SKILL 能力矩阵 isRepoRoot 优先行矛盾，
+  // 实测后果是往毫不相干的仓库推。判据与 survey.mjs 的 samePath 三层放宽同源。
+  const isRepoRoot = s.git?.isRepoRoot !== false
+  const hasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0 && isRepoRoot
 
   // 「有没有版本号」决定发版规则怎么写：有版本号时标签名要对齐它，没有时命名自定。
   // 这两个分支必须都在——只写「标签名必须与版本号一致」会让没有版本号的项目无从下手，
@@ -242,16 +246,25 @@ function deriveFacts(target) {
     'no-publish': !publishable,
   }
 
-  // 项目名优先取**项目自己声明的**名字（清单里的 name），没有才退回目录名。
+  // 项目名优先取**项目自己声明的**名字（各生态清单里的 name），没有才退回目录名。
   // 目录名常常是临时起的（demo、new-project），而清单里的名字才是项目身份。
+  // 判据挂在清单文件上，不挂在主生态上——非 JS 项目同样有正式名字。
   let projectName = s.target.name
-  if (manifestPath !== undefined) {
+  const nameReaders = [
+    [manifestPath, (pkg) => pkg.name],
+    ['pyproject.toml', (text) => /^name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
+    ['Cargo.toml', (text) => /^\s*name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
+    ['go.mod', (text) => /^module\s+(\S+)/m.exec(text)?.[1]?.split('/').pop()],
+  ]
+  for (const [file, pick] of nameReaders) {
+    if (file === undefined || projectName !== s.target.name) continue
     try {
-      const pkg = JSON.parse(readUtf8(join(target, manifestPath)))
-      if (typeof pkg.name === 'string' && pkg.name.trim().length > 0) {
-        projectName = pkg.name.replace(/^@[^/]+\//, '') // 去掉作用域前缀，标题里更好读
+      const raw = readUtf8(join(target, file))
+      const hit = file === manifestPath ? pick(JSON.parse(raw)) : pick(raw)
+      if (typeof hit === 'string' && hit.trim().length > 0) {
+        projectName = hit.trim().replace(/^@[^/]+\//, '') // 去掉作用域前缀，标题里更好读
       }
-    } catch { /* 解析失败就用目录名 */ }
+    } catch { /* 解析失败就试下一个，最终用目录名 */ }
   }
 
   const tokens = {

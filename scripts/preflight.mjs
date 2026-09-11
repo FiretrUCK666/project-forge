@@ -498,6 +498,49 @@ function checkStatedCounts() {
       if (!onDisk.includes(f)) fail(`磁盘上缺少 scripts/${f}。`)
     }
   }
+  // 磁盘对账：references 与 templates ——新文件加了却没登记在文件地图里即隐身。
+  // 只查顶层 .md（子目录专章由插件索引检查覆盖）与全部模板文件。
+  {
+    const skillText = readText(join(SKILL_ROOT, 'SKILL.md'))
+    const refDir = join(SKILL_ROOT, 'references')
+    if (existsSync(refDir)) {
+      for (const e of readdirSync(refDir, { withFileTypes: true, encoding: 'utf8' })) {
+        if (!e.isFile() || !e.name.endsWith('.md')) continue
+        if (!skillText.includes(`references/${e.name}`)) {
+          fail(`references/${e.name} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+        }
+      }
+    }
+    const tplDir = join(SKILL_ROOT, 'templates')
+    if (existsSync(tplDir)) {
+      for (const e of readdirSync(tplDir, { withFileTypes: true, encoding: 'utf8' })) {
+        if (!e.isFile()) continue
+        if (!skillText.includes(`templates/${e.name}`)) {
+          fail(`templates/${e.name} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+        }
+      }
+    }
+  }
+  // 常量一致性：两处预算必须相等；约定名 RELEASE_TOKEN 必须在模板与文档同拼写。
+  // 改一处忘另一处是本类最常见的 drift，注释写“同步”不如机器断言。
+  {
+    const composeText = existsSync(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'))
+      ? readText(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs')) : ''
+    const budgetA = /DEFAULT_BUDGET\s*=\s*(\d+)/.exec(composeText)?.[1]
+    const budgetB = /INSTRUCTION_BUDGET\s*=\s*(\d+)/.exec(readText(join(SKILL_ROOT, 'scripts', 'preflight.mjs')))?.[1]
+    if (budgetA !== undefined && budgetB !== undefined && budgetA !== budgetB) {
+      fail(`字节预算不一致：compose-agents.mjs 为 ${budgetA}，preflight.mjs 为 ${budgetB} —— 两处必须是同一数。`)
+    }
+    const tokenSpellings = new Set()
+    for (const f of ['templates/ci-release.yml', '.github/workflows/check.yml', 'references/remote-github.md', 'AGENTS.md', 'SKILL.md']) {
+      const p = join(SKILL_ROOT, f)
+      if (!existsSync(p)) continue
+      for (const m of readText(p).matchAll(/RELEASE[_-]?TOKEN/ig)) tokenSpellings.add(m[0])
+    }
+    if (tokenSpellings.size > 1) {
+      fail(`约定名拼写不一致：${[...tokenSpellings].join('、')} —— 必须统一为 RELEASE_TOKEN。`)
+    }
+  }
   const readmeText = existsSync(join(SKILL_ROOT, 'README.md'))
     ? readText(join(SKILL_ROOT, 'README.md')).replace(/^\uFEFF/, '') : ''
   for (const m of readmeText.matchAll(/`scripts\/([a-z-]+\.mjs)`/g)) {

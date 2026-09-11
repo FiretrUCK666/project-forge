@@ -82,6 +82,7 @@ description: |
 | `docs-only`（纯文档 / 素材） | 做 | 做 | 做 | **不做** |
 | `node` | 做 | 做 | 做 | 视声明而定 |
 | `python` / `rust` / `go` / `java` / `ruby` / `php` / `dotnet` / `cpp` | 做 | 做 | 做 | 视声明而定 |
+| 其他已识别生态（以勘察 `kinds` 为准，如 `dart` / `swift` / `shell` 等） | 做 | 做 | 做 | 视声明而定（无专章时按通用判据，不硬塞已知类型） |
 | `dsh-plugin` / `vscode-extension` / `obsidian-plugin` 等（**插件类**，即被宿主加载的扩展；无专章按判定协议处理） | 做，**产物必须入库** | 做 | 做 | 可发布（见专章） |
 | `dsh-skill` | 做 | 做 | 做 | 通常不发布（远端即分发） |
 | `unknown` 或 `unrecognized` | **先问用户**这是什么项目；用户说明后，按他声明的生态对应行执行，并把该结论记作本次判定依据 | 同左 | 同左 | 同左 |
@@ -144,11 +145,11 @@ description: |
 | --- | --- | --- |
 | **P0 定位** | 确定目标目录。候选不唯一时问一次 | — |
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
-| **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示） | 本文件 |
+| **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
 | **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写） | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** | `references/remote-github.md` |
-| **P6 发布** | 仅当 P2 判定可发布。配好版本语义与自动发布 | `references/publish.md` |
+| **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报 | — |
 
 **P7 针对的是目标项目，不是本 skill**。本 skill 自身的自检（`scripts/preflight.mjs`）
@@ -257,13 +258,15 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 没有 `LICENSE`、没有环境要求节，都**不算这次交付的缺陷**——编一个才是。汇报时说明
 「这两项等你确认后再补」即可。
 
-**G4 的确认清单**必须包含这五项，缺一项就不算对齐：
+**G4 的确认清单**必须包含这六项，缺一项就不算对齐（以 `references/remote-github.md` 建仓节表格为准，
+此处是同一清单的简写，两处改动需同步）：
 
 1. 平台与仓库名（规范化之后的名字，不是目录原名）；
 2. **可见性**（默认私有；改成公开要单独说明后果）；
-3. 将要推送的远端地址与分支，以及是否设置上游跟踪；
+3. 将要推送的远端地址与分支、地址形式（HTTPS 还是 SSH 及理由），以及是否设置上游跟踪；
 4. 本次将要推上去的大致内容范围（多少文件、有没有大文件）；
 5. **本次跳过哪些动作**（不发布、不改可见性、不动已有标签）。
+6. 署名确认：若 P3 用的是临时署名，此处必须已修正（推送后署名永久，见版本管理署名节）。
 
 这份清单与 P2 的那句结论不是一回事：P2 说的是**本次任务做什么**（可能只是补文档），
 G4 说的是**这次对外动作具体是什么**（确切的仓库名、可见性、分支）。两者都只说一次，
@@ -325,6 +328,7 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `templates/contributing.md` | 新建 `CONTRIBUTING` 时作为骨架 |
 | `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
+| `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/survey.mjs` | P1 勘察 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--status` 只看现状，`--upgrade` 升级手写文件） |
 | `scripts/preflight.mjs` | **维护本 skill 自身时**的自检（与目标项目无关） |

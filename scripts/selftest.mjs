@@ -1024,6 +1024,43 @@ group('[26] 起草发布说明：中文提交即中文说明，无上一版不�
   }
 }
 
+if (!HAS_GIT) {
+  skipGroup('[27] 署名门禁：有仓库无署名必报缺', '环境里没有 git')
+} else {
+group('[27] 署名门禁：有仓库无署名必报缺，有署名放行')
+{
+  const review = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+
+  // 有仓库、无任何署名 → 缺。把全局配置从环境里隔离掉，测的是真缺失
+  // （否则本机全局署名会继承进来，缺的数量永远是 0）。
+  const bare = fixture('review-nosig', { 'README.md': '# x\n' })
+  spawnSync('git', ['init', '-q'], { cwd: bare })
+  const noGlobalEnv = {
+    ...process.env,
+    HOME: bare,
+    USERPROFILE: bare,
+    GIT_CONFIG_GLOBAL: join(bare, 'no-global-gitconfig'),
+    GIT_CONFIG_NOSYSTEM: '1',
+  }
+  const reviewNoGlobal = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8', env: noGlobalEnv })
+  const r1 = reviewNoGlobal(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  const out1 = `${r1.stdout ?? ''}\n${r1.stderr ?? ''}`
+  const ok1 = /署名缺失/.test(out1)
+  check(ok1, '无署名报缺', out1.split('\n')[0])
+  report(ok1, '无署名：报缺')
+
+  // 同一仓库补上署名 → 放行（只看有无，占位值靠人眼是 G7 的事）
+  spawnSync('git', ['config', 'user.name', 'T'], { cwd: bare })
+  spawnSync('git', ['config', 'user.email', 't@e.com'], { cwd: bare })
+  const r2 = reviewNoGlobal(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  const ok2 = /提交署名有/.test(r2.stdout ?? '')
+  check(ok2, '有署名放行')
+  report(ok2, '有署名：放行')
+}
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

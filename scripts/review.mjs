@@ -121,7 +121,19 @@ function main(argv) {
     else ok.push('AGENTS.md 内核一致、待填写归零')
   }
 
-  // 2. README：必须有；双语要么成对，要么用户明确说单语。
+  // 2. 提交署名：没有仓库时跳过（P3 建库时再定）；有仓库而署名缺失必须补——
+  // 否则首个提交永久带着错误署名。占位值靠人眼（G7），机器只卡缺失。
+  const git = s.git ?? {}
+  if (git.present === true) {
+    const id = git.identity ?? {}
+    if (!id.name || !id.email) {
+      missing.push('提交署名缺失（只写仓库级，见版本管理署名审计清单）')
+    } else {
+      ok.push(`提交署名有（${id.name}，${id.scope === 'repo' ? '仓库级' : '继承全局'}；占位值须人眼确认）`)
+    }
+  }
+
+  // 3. README：必须有；双语要么成对，要么用户明确说单语。
   const readmes = s.docs?.readme ?? []
   if (readmes.length === 0) {
     missing.push('README 缺失')
@@ -132,13 +144,13 @@ function main(argv) {
     else pending.push('双语：只有一份 README，问用户要不要英文版（要→补，不要→加 --no-bilingual）')
   }
 
-  // 3. 徽章：有就必须验（联网跑 check-badges，离线如实报）；没有徽章不强求。
+  // 4. 徽章：有就必须验（联网跑 check-badges，离线如实报）；没有徽章不强求。
   const badgeResult = checkBadges(root, readmes)
   if (badgeResult.state === 'bad') missing.push('徽章显示不出来（见上文输出，删掉或修好）')
   else if (badgeResult.state === 'offline') pending.push('徽章未能联网验证：在汇报里写明未验及原因')
   else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
 
-  // 4. CONTRIBUTING / LICENSE：缺了必须问，不能默跳。
+  // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳。
   if (s.docs?.contributing !== undefined) ok.push('CONTRIBUTING 有')
   else if (flags.has('--no-contributing')) ok.push('无 CONTRIBUTING（用户已确认自用）')
   else pending.push('CONTRIBUTING 缺失：问用户会不会给别人用（会→补，不会→加 --no-contributing）')
@@ -146,7 +158,7 @@ function main(argv) {
   else if (flags.has('--private-no-license')) ok.push('无 LICENSE（用户已选保留所有权利）')
   else pending.push('LICENSE 缺失：问用户选哪个许可证（保留权利→加 --private-no-license）')
 
-  // 5. 工作流：CI 与自动发布要么落盘，要么用户明确说暂不要。
+  // 6. 工作流：CI 与自动发布要么落盘，要么用户明确说暂不要。
   const auto = s.docs?.workflowAutomation
   if (auto === undefined || auto.files.length === 0) {
     if (flags.has('--no-ci')) ok.push('无 CI（用户已确认暂不要）')

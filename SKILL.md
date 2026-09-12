@@ -234,7 +234,7 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 | G2 | 首次提交之前 | `references/version-control.md`；且已按四分案处置、无新增凭据进本次提交 |
 | G3 | 写任何文档之前 | `references/docs-set.md` |
 | G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时用户指调用方，写进回执等指示，不直接执行） |
-| G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm 时加读 `references/publish-npm.md` |
+| G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm、Python、Go、Rust 时加读对应 `references/publish-<生态>.md` |
 | G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读，见「执行流程」）；有对应专章时一并读 `references/plugins/<生态>.md` |
 | G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下「只有用户能定的事」 |
 
@@ -308,6 +308,9 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `references/docs-set.md` | 写任何文档时。各文档的读者、职责、写法与同步纪律 |
 | `references/publish.md` | 任何发布决策。能不能发、发到哪、版本语义、抬版本的判据、安全发布 |
 | `references/publish-npm.md` | 涉及 npm 时。基础操作、各种既有状态怎么接、适用范围与常见误解 |
+| `references/publish-python.md` | 涉及 Python 时。清单三表、构建与预演、TestPyPI、可信发布、版本与修正 |
+| `references/publish-go.md` | 涉及 Go 时。标签形状、无上传模型、收录确认、撤回、私有模块 |
+| `references/publish-rust.md` | 涉及 Rust 时。清单字段、发布范围、预演、认证、修正 |
 | `references/plugin-project.md` | 判定为插件类时。共同性质、判定协议（六个问题）、无专章时怎么办、新增专章的模板 |
 | `references/plugins/<生态>.md` | 该生态的专章：清单、两个标识、宿主加载什么、版本约束、打包发放、特有坑 |
 | `templates/agents-kernel.md` | 生成 `AGENTS.md` 时（由脚本读取，**不手工编辑**；标记区归它独占） |

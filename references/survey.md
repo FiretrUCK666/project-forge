@@ -148,11 +148,14 @@ cargo。`commands` 一节会区分这一点。
 | `publishScope` | 项目是否声明了发布范围（哪些文件会被分发出去） |
 | `hooks` | 发布前后的钩子（说明「产物是构建出来的」） |
 | `distDirsPresent` | 常见的产物目录是否存在 |
-| `private` | 项目是否被标记为不可发布 |
+| `private` | 项目是否被标记为不可发布（清单的 `private` 开关，或 Cargo 的 `publish = false`） |
 | `publishableManifest` | 勘察输出的可发布清单（文件与生态），P2 判定能不能走发布链路的依据（含 Obsidian 的 `manifest.json`，以含 `minAppVersion` 为前提） |
-| `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据（含 Obsidian 的 `manifest.json`） |
+| `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据（含 Obsidian 的 `manifest.json`；Go 故意不读——靠标签，读不到是正确结果） |
 | `versionAligned` | 标签与版本号是否对齐（`true`/`false`，取不到标签列表时留空不判） |
 | `obsidianArtifacts` | Obsidian 发布三件套 presence（`main.js` 缺即安装断链） |
+| `cargoMeta` | Cargo 发布必填元数据的 presence（`license`、`description` 有无，只报有无） |
+| `goModule` | Go 模块路径、`go` 指令版本、`retract` 有无（只读文本；`go` 指令缺失由门禁提示） |
+| `pythonBuild` | 是否声明构建后端（有才有权威构建命令，否则 review 待问） |
 | `runtimeRequirements` | **项目自己声明的运行环境下限**（见下，含 Obsidian 的 `minAppVersion`） |
 
 前四个字段合起来回答一个问题：**拿到这个项目的人，会不会自己跑一次构建？**

@@ -810,6 +810,8 @@ function deriveCommands(root, root_, eco) {
     }
     if (root_.has('requirements.txt')) python.install = 'pip install -r requirements.txt'
     else if (pyName !== undefined) python.install = 'pip install -e .'
+    // 构建命令只在声明了构建后端时给：无 [build-system] 即无权威构建入口，不编。
+    if (/\[build-system\]/.test(py)) python.build = 'python -m build'
     if (Object.keys(python).length > 0) byEcosystem.python = python
   }
 
@@ -955,6 +957,33 @@ function detectArtifacts(root, root_, eco) {
       mainJs: root_.has('main.js'),
       stylesCss: root_.has('styles.css'),
     }
+  }
+  // Rust：publish=false 即声明不可发布（复用 private 机器）；license/description 有无进 facts。
+  // 只做文本 presence 判断，不解释 Cargo 语义。
+  const cargoReal = root_.real('cargo.toml')
+  if (cargoReal !== undefined) {
+    const cargo = readText(join(root, cargoReal)) ?? ''
+    if (/^\s*publish\s*=\s*false/m.test(cargo)) facts.private = true
+    facts.cargoMeta = {
+      license: /^\s*license\s*=/m.test(cargo),
+      description: /^\s*description\s*=/m.test(cargo),
+    }
+  }
+  // Go：module 路径、go 指令版本、retract 有无。只读文本，不下结论。
+  const goReal = root_.real('go.mod')
+  if (goReal !== undefined) {
+    const goText = readText(join(root, goReal)) ?? ''
+    facts.goModule = {
+      module: (/^module\s+(\S+)/m.exec(goText) ?? [])[1],
+      goDirective: (/^go\s+(\S+)/m.exec(goText) ?? [])[1],
+      hasRetract: /^\s*retract\s+/m.test(goText),
+    }
+  }
+  // Python：构建后端声明有无（构建命令只在有后端时给，见 deriveCommands）。
+  const pyReal = root_.real('pyproject.toml')
+  if (pyReal !== undefined) {
+    const pyText = readText(join(root, pyReal)) ?? ''
+    facts.pythonBuild = { hasBuildSystem: /\[build-system\]/.test(pyText) }
   }
   return facts
 }

@@ -43,6 +43,10 @@
 #       <测试命令>
 #   - name: 发布到 npm（tag 与清单版本号不一致直接失败，见模板 TODO(1)）
 #     run: npm publish --access public   # 私有包把 public 换成 restricted
+#
+# TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写——Python 见
+#   references/publish-python.md「认证」一节（构建与发布分 job），Rust 见
+#   references/publish-rust.md「认证」一节，Go 无上传动作不需要发布 job（标签即发布）。
 
 name: release
 

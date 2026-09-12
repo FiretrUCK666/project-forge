@@ -296,7 +296,7 @@ function main(argv) {
   } else {
     ok.push(`工作流有（${auto.files.join('、')}）`)
     if (auto.truncated === true && auto.hasReleaseJob !== true) {
-      pending.push('工作流只读了前 64KB：“无发布 job”不可信，大文件需手工确认后再定')
+      pending.push(`工作流只读了前 ${auto.headLimit ?? '若干'} 字符：“无发布 job”不可信，大文件需手工确认后再定`)
     }
     if (s.artifacts?.publishableManifest !== undefined && s.artifacts?.private !== true) {
       if (auto.hasReleaseJob) {
@@ -310,6 +310,21 @@ function main(argv) {
       else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
       else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')
     }
+  }
+
+  // 6d. 生态发布门禁：只判本生态清单事实，不拼他生态命令。
+  const ecoKinds = s.ecosystem?.kinds ?? []
+  if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined
+    && s.artifacts.pythonBuild.hasBuildSystem !== true) {
+    pending.push('Python 缺构建后端声明：无 [build-system] 即无权威构建入口，补上再定发布预演')
+  }
+  if (ecoKinds.includes('go') && s.artifacts?.goModule !== undefined
+    && s.artifacts.goModule.goDirective === undefined) {
+    pending.push('Go 缺 go 指令：最低版本不明，补上再定兼容承诺')
+  }
+  if (ecoKinds.includes('rust') && s.artifacts?.cargoMeta !== undefined) {
+    if (s.artifacts.cargoMeta.license !== true) missing.push('Rust 缺 license 声明（发布必填其一：license 或 license-file）')
+    if (s.artifacts.cargoMeta.description !== true) missing.push('Rust 缺 description 声明（发布必填）')
   }
 
   for (const t of ok) line('齐', t)

@@ -1636,6 +1636,72 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
   }
 }
 
+group('[34] Python/Go/Rust 发布事实与门禁：只认本生态清单')
+{
+  const rv = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const rvOut = (r) => r.stdout ?? ''
+
+  // Python：有后端 → 有构建命令、无构建后端待问
+  const pyFull = fixture('eco-pyfull', {
+    'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\nrequires-python = ">=3.10"\n\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n',
+  })
+  const sp = survey(pyFull)
+  const okP1 = sp.artifacts?.pythonBuild?.hasBuildSystem === true
+    && survey(pyFull).commands?.build === 'python -m build'
+  check(okP1, 'Python 有后端 → 有构建命令', JSON.stringify(survey(pyFull).commands?.build))
+  report(okP1, 'Python：构建命令有权威来源')
+  const okP2 = !/构建后端/.test(rvOut(rv(pyFull, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release')))
+  check(okP2, 'Python 有后端 → 门禁不问构建后端')
+  report(okP2, 'Python：门禁放行')
+  const pyBare = fixture('eco-pybare', { 'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\n' })
+  const okP3 = survey(pyBare).artifacts?.pythonBuild?.hasBuildSystem === false
+    && /构建后端/.test(rvOut(rv(pyBare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release')))
+  check(okP3, 'Python 无后端 → 事实为假且门禁待问')
+  report(okP3, 'Python：缺后端拦得住')
+
+  // Go：有 go 指令 → 无待问；无 → 待问；retract 照实读
+  const goFull = fixture('eco-gofull', {
+    'go.mod': 'module example.com/m\n\ngo 1.22\n',
+  })
+  const sg = survey(goFull)
+  const okG1 = sg.artifacts?.goModule?.module === 'example.com/m'
+    && sg.artifacts?.goModule?.goDirective === '1.22'
+    && sg.artifacts?.goModule?.hasRetract === false
+  check(okG1, 'Go 读出模块路径、指令与 retract', JSON.stringify(sg.artifacts?.goModule))
+  report(okG1, 'Go：事实照实读')
+  const okG2 = !/go 指令/.test(rvOut(rv(goFull, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release')))
+  check(okG2, 'Go 有指令 → 门禁不问')
+  report(okG2, 'Go：门禁放行')
+  const goBare = fixture('eco-gobare', { 'go.mod': 'module example.com/m\n' })
+  const okG3 = /go 指令/.test(rvOut(rv(goBare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release')))
+  check(okG3, 'Go 无指令 → 门禁待问')
+  report(okG3, 'Go：缺指令问得住')
+
+  // Rust：元数据齐 → 放行；缺 license → 报缺；publish=false → 不可发布
+  const rsFull = fixture('eco-rsfull', {
+    'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\ndescription = "x"\nlicense = "MIT"\n',
+  })
+  const okR1 = !/Rust 缺/.test(rvOut(rv(rsFull, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release')))
+  check(okR1, 'Rust 元数据齐 → 门禁不拦')
+  report(okR1, 'Rust：门禁放行')
+  const rsBare = fixture('eco-rsbare', { 'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\n' })
+  const rBare = rvOut(rv(rsBare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release'))
+  const okR2 = /Rust 缺 license/.test(rBare) && /Rust 缺 description/.test(rBare)
+  check(okR2, 'Rust 缺元数据 → 报缺')
+  report(okR2, 'Rust：缺项拦得住')
+  const rsPriv = fixture('eco-rspriv', {
+    'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\ndescription = "x"\nlicense = "MIT"\npublish = false\n',
+  })
+  const okR3 = survey(rsPriv).artifacts?.private === true
+  check(okR3, 'Rust publish=false → 不可发布', String(survey(rsPriv).artifacts?.private))
+  report(okR3, 'Rust：私有开关复用机器')
+  compose(rsPriv)
+  const okR4 = /不对外发布/.test(readFileSync(join(rsPriv, 'AGENTS.md'), 'utf8'))
+  check(okR4, 'Rust 私有 → 契约写不对外发布')
+  report(okR4, 'Rust：契约一致')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 rmSync(ROOT, { recursive: true, force: true })

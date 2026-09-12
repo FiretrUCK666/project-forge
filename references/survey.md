@@ -195,6 +195,32 @@ cargo。`commands` 一节会区分这一点。
 `references/docs-set.md` 的「已有的 README 不符合规范时怎么办」——那里按「缺 / 错 /
 结构不同 / 完全过时」分了四种情况，处置各不相同。
 
+### `dsh`
+
+只在判定为 `dsh-plugin` 时有值，其余为 undefined。回答「这个 DSH 插件的清单与补丁事实是什么」：
+
+| 字段 | 回答什么 |
+| --- | --- |
+| `packageName`、`patchFile` | 包名与补丁文件（有无、清单声明的路径是否存在） |
+| `hasHostEntry`、`hasClientEntry`、`hasClientDecl`、`hasInvariantEntry` | host、client、伴生三路入口各有没有；client 声明与入口打架时先对齐，由此定 host-only、client-only 还是双面 |
+| `filesHasLib`、`filesHasPatch` | `files` 白名单含不含构建产物与补丁（含了才发得出去） |
+| `libTracked` | 构建产物目录有没有被跟踪（与上一行是两套集合，合起来才知道走成品路线还是源码路线） |
+| `hostRuntimeInDeps` | 宿主运行时是不是放错进了 `dependencies`（应为 peer） |
+| `toolchain` | 构建与测试工具链的 presence（构建器、测试运行器、类型感知检查、工作区与锁文件），只报有无 |
+| `localWorkflow`、`contractDoc`、`patchesDir` | 本地 workflow、契约文档、补丁目录各有没有（缺席是正常态） |
+| `discoveryCarrierLikely` | 补丁文本里是否出现包名（文本包含判断，供人复核，不做硬结论） |
+| `pinnedVersions` | 锁定的宿主版本声明（去重，原样保留范围符号） |
+| `unknownKeys` | 清单里不认识的 `dsh.*` 字段（只报名字，语义现场查） |
+| `warnings` | 上述不一致逐条列出 |
+
+### `localSkills`
+
+仓库内可提交的本地 skills 盘点（通用协议，不止 DSH）。只收三处：`.agents/skills/*`、
+`.claude/skills/*`、包内 `skills/*`；家目录、外部 checkout、企业下发不在 scope 内，
+缺了不算漏。每个 skill 只报位置、目录名与 `name` 是否一致、`description` 首行、
+有无 `scripts/` 与 `references/`；损坏的标 corrupt，不中断。空数组是正常结果，
+含义是「这个仓库没有本地 skills」，不是“没扫到”。
+
 ### `ignores`
 
 忽略规则的现状。三个字段都要看，它们回答三个不同的问题：

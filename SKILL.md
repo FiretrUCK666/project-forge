@@ -147,7 +147,7 @@ description: |
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
 | **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
-| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]全部用 flag 消掉才算完 | `references/docs-set.md` |
+| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]全部用 flag 消掉才算完 | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报 | — |

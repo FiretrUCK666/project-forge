@@ -183,6 +183,8 @@ const MAX_WALK_DEPTH = 24
 const LARGE_FILE_BYTES = 20 * 1024 * 1024
 const CONTENT_SCAN_MAX_BYTES = 2 * 1024 * 1024
 const CONTENT_SCAN_MAX_FILES = 5000
+/** 单个工作流文件只读的前 N 字符；超限置 truncated，值随输出携带。 */
+const WORKFLOW_HEAD_LIMIT = 65536
 
 // ── 工具函数 ────────────────────────────────────────────────────────────────
 
@@ -1190,14 +1192,14 @@ function detectDocs(root, root_) {
         docs.workflows = files
         // 自动化现状：只看形状（有没有发布 job、用没用 Secrets），不判对错——
         // 对错由 references/remote-github.md 第八节的核对表判定。
-        // 只读每个文件前 64KB，大工作流不至于拖慢勘察；超限时必须置 truncated，
-        // 否则下游会把“没看到”当成“没有”。
-        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false, truncated: false }
+        // 只读每个文件前 WORKFLOW_HEAD_LIMIT，大工作流不至于拖慢勘察；超限时必须置 truncated，
+        // 否则下游会把“没看到”当成“没有”。limit 值随输出携带，文档只写“实现定义的截断上限”。
+        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false, truncated: false, headLimit: WORKFLOW_HEAD_LIMIT }
         for (const f of files) {
           const text = readText(join(gh, wfEntry.name, f))
           if (text === undefined) continue
-          if (text.length > 65536) auto.truncated = true
-          const head = text.slice(0, 65536)
+          if (text.length > WORKFLOW_HEAD_LIMIT) auto.truncated = true
+          const head = text.slice(0, WORKFLOW_HEAD_LIMIT)
           if (/gh\s+release\s+(create|upload)/.test(head) || /releases\s*:\s*write/.test(head)) {
             auto.hasReleaseJob = true
           }
@@ -1646,7 +1648,7 @@ function toMarkdown(s) {
       + `OIDC 短时身份：${auto.usesOidc ? '有' : '无'}（npm 自动发布靠它，无则对照可信发布接线步骤）`)
     if (!auto.hasReleaseJob) L.push('  - 无发布 job 时对照 `templates/ci-release.yml` 看该不该补')
     if (auto.truncated === true) {
-      L.push('  - **有工作流只读了前 64KB，未报不等于没有**：发布 job 藏在后面的大文件需手工确认')
+      L.push(`  - **有工作流只读了前 ${auto.headLimit ?? WORKFLOW_HEAD_LIMIT} 字符，未报不等于没有**：发布 job 藏在后面的大文件需手工确认`)
     }
   }
   L.push('')

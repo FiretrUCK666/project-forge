@@ -111,6 +111,24 @@ group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
   check(/泄漏/.test(hits), '扫到非 ASCII 路径（git 默认会转义它）', hits)
   check(typeof s.risks?.contentScan?.filesScanned === 'number',
     '报告了扫描覆盖范围（「没报」与「没扫」必须可区分）')
+  // 深度超限：25 层嵌套必触发 depthLimited，“没扫到深层”不能读成干净
+  const deepFiles = {}
+  let deepPath = ''
+  for (let i = 0; i < 25; i += 1) deepPath += `d${i}/`
+  deepFiles[`${deepPath}deep.py`] = 'x = 1\n'
+  const deepDir = fixture('deep-limit', deepFiles)
+  const sd = survey(deepDir)
+  const okDepth = (sd.risks?.contentScan?.depthLimited ?? 0) > 0
+  check(okDepth, '超深目录 → depthLimited 计数大于 0', JSON.stringify(sd.risks?.contentScan?.depthLimited))
+  report(okDepth, '深度超限：如实标记')
+  // 文件数超限：超 5000 候选必触发 truncated，“0 命中”不能读成干净
+  const manyFiles = {}
+  for (let i = 0; i < 5100; i += 1) manyFiles[`f${String(i).padStart(4, '0')}.txt`] = 'x\n'
+  const manyDir = fixture('many-files', manyFiles)
+  const sm = survey(manyDir)
+  const okTrunc = sm.risks?.contentScan?.truncated === true
+  check(okTrunc, '超量文件 → truncated 为真', String(sm.risks?.contentScan?.filesScanned))
+  report(okTrunc, '文件超限：如实标记')
   for (const [label, ok] of [['密钥覆盖子目录', /config\.py/.test(hits)],
     ['密钥覆盖 bin/', /\.env/.test(hits)], ['密钥覆盖中文路径', /泄漏/.test(hits)]]) report(ok, label)
 }
@@ -205,6 +223,15 @@ group('[5] 生态判定：纯文档目录仍要判成 docs-only')
     check(ok, `${name} → docs-only`, JSON.stringify(kinds))
     report(ok, `${name} → docs-only`)
   }
+  // 边界另一侧：陌生非文档文件不是纯文档，空目录不是“没扫到”
+  const unrec = survey(fixture('docs-unrec', { 'README.md': '# x\n', 'data.xyz': '???\n' }))
+  const okU = (unrec.ecosystem?.kinds ?? []).includes('unrecognized')
+  check(okU, '陌生文件 → unrecognized（不误判 docs-only 跳过发布链）', JSON.stringify(unrec.ecosystem?.kinds))
+  report(okU, '陌生文件 → unrecognized')
+  const unk = survey(fixture('docs-empty', {}))
+  const okN = (unk.ecosystem?.kinds ?? []).includes('unknown')
+  check(okN, '空目录 → unknown（停下问，不编生态）', JSON.stringify(unk.ecosystem?.kinds))
+  report(okN, '空目录 → unknown')
 }
 
 // ── 六、AGENTS.md 生成与刷新 ────────────────────────────────────────────────
@@ -235,6 +262,15 @@ group('[6] 生成：按项目事实取舍条件段落')
     ['无连续 3 行以上空行', !/\n{3,}/.test(t)],
   ]
   for (const [label, ok] of checks) { check(ok, label); report(ok, label) }
+  // 另一侧：无依赖则无“依赖版本同步”节（条件双向可验证非冻结）
+  const nodeps = fixture('gen-nodeps', {
+    'package.json': JSON.stringify({ name: 'bare', version: '0.1.0' }, null, 2),
+  })
+  compose(nodeps)
+  const tn = readFileSync(join(nodeps, 'AGENTS.md'), 'utf8')
+  const okNd = !/^## 依赖版本同步$/m.test(tn)
+  check(okNd, '无依赖 → 不含依赖版本同步')
+  report(okNd, '无依赖：该节隐藏')
 }
 
 group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
@@ -395,6 +431,16 @@ group('[13] Python 测试命令：只在项目声明了框架时才给，不按�
   const ok3 = typeof c2.testNote === 'string' && c2.testNote.length > 0
   check(ok3, '未声明框架时带「这是推断」的说明')
   report(ok3, '并注明这是推断，非项目声明')
+
+  // 显式声明 unittest → 给 unittest 且不带推断说明（第三分支不断言会回退到惯例旧错）
+  const withUnit = fixture('py-unit', {
+    'pyproject.toml': '[project]\nname = "p"\n\n[tool.unittest]\n',
+    'tests/test_a.py': 'import unittest\n',
+  })
+  const c3 = survey(withUnit).commands ?? {}
+  const ok4 = c3.test === 'python -m unittest discover -s tests -v' && c3.testNote === undefined
+  check(ok4, '声明 unittest → 给 unittest 且无推断说明', JSON.stringify(c3.test))
+  report(ok4, '声明 unittest → 无推断说明')
 }
 
 group('[10] 运行环境下限：读项目自己的声明，读不到就是没有')
@@ -450,6 +496,20 @@ group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
   const ok3 = hits2.every((h) => !/改成相对路径或环境变量/.test(h.advice ?? ''))
   check(ok3, '测试数据给出的建议不是「改成相对路径」')
   report(ok3, '测试数据：建议不改它')
+
+  // 文档示例：文档里的路径判为 doc-example（提示确认即可）；模板文件放行不报
+  const doc = fixture('leak-doc', {
+    'README.md': '# x\n\n路径示例：/home/someone/projects/demo\n',
+    '.env.example': 'API_KEY=your-key-here\n',
+  })
+  const hits3 = survey(doc).risks?.homePathLeaks ?? []
+  const ok4 = hits3.every((h) => h.kind !== 'leak')
+  check(ok4, '文档里的示例路径不判为 leak', JSON.stringify(hits3.map((h) => h.kind)))
+  report(ok4, '文档示例：不判为 leak')
+  const files3 = survey(doc).risks?.secretFiles ?? []
+  const ok5 = !files3.some((f) => /env\.example/.test(typeof f === 'string' ? f : f.path))
+  check(ok5, '.env.example 模板文件放行', JSON.stringify(files3))
+  report(ok5, '模板文件：放行')
 }
 
 group('[12] 生态与命令：细化不算第二套命令')
@@ -552,6 +612,34 @@ group('[15] 非 JS 项目必须照样拿到发布那一半契约')
     check(ok2, `${label}：含版本号语义与发版规则`)
     report(ok2, `${label}：含版本号语义与发版规则`)
   }
+  // 反侧：private 明确不可发布 → 写“不对外发布”，且无版本号语义与发版规则
+  const priv = fixture('pub-private', {
+    'package.json': JSON.stringify({ name: 'p', version: '1.0.0', private: true }, null, 2),
+  })
+  compose(priv)
+  const tp = readFileSync(join(priv, 'AGENTS.md'), 'utf8')
+  const okP = /不对外发布/.test(tp) && !/^### 版本号语义$/m.test(tp) && !/^### 发版规则$/m.test(tp)
+  check(okP, 'private：写不对外发布且无发版规则')
+  report(okP, 'private：反侧正确')
+}
+
+group('[33] 易漏生态分支：skill、损坏清单、dotnet 各有出口')
+{
+  // 根 SKILL.md 即 dsh-skill，不因无清单被判 unknown
+  const sk = fixture('eco-skill', { 'SKILL.md': '---\nname: my-skill\ndescription: 做 X 时用\n---\n\n# my-skill\n' })
+  const okS = (survey(sk).ecosystem?.kinds ?? []).includes('dsh-skill')
+  check(okS, '根 SKILL.md → dsh-skill', JSON.stringify(survey(sk).ecosystem?.kinds))
+  report(okS, 'skill：认出 dsh-skill')
+  // 损坏的 package.json 仍按 node 处理（ corruption 是事实，不是换生态的理由）
+  const bad = fixture('eco-corrupt', { 'package.json': '{oops' })
+  const okC = (survey(bad).ecosystem?.kinds ?? []).includes('node')
+  check(okC, '损坏清单 → 仍判 node 并带损坏证据', JSON.stringify(survey(bad).ecosystem?.kinds))
+  report(okC, '损坏清单：不换生态')
+  // dotnet csproj 即 dotnet，不落空
+  const dn = fixture('eco-dotnet', { 'app.csproj': '<Project></Project>\n' })
+  const okD = (survey(dn).ecosystem?.kinds ?? []).includes('dotnet')
+  check(okD, 'csproj → dotnet', JSON.stringify(survey(dn).ecosystem?.kinds))
+  report(okD, 'dotnet：认出')
 }
 
 group('[16] 报告要给到行，并说明在不在版本库里')
@@ -995,6 +1083,20 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   const ok3 = r3.status !== 0 && /无法识别/.test(r3.stderr ?? '')
   check(ok3, '未知 flag 报错')
   report(ok3, '未知 flag：报错')
+
+  // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）
+  const sec = fixture('review-secret', {
+    'README.md': '# x\n',
+    'src/a.py': 'K = "ghp_1234567890abcdefghijklmnopqrstuvwx"\n',
+  })
+  const r4 = review(sec, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  const ok4 = /凭据形状/.test(r4.stdout ?? '') && r4.status !== 0
+  check(ok4, '凭据命中 → 报缺且非零退出', `exit=${r4.status}`)
+  report(ok4, '凭据：拦得住')
+  const r5 = review(sec, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--secrets-reviewed')
+  const ok5 = !/凭据形状/.test(r5.stdout ?? '')
+  check(ok5, '--secrets-reviewed 消掉已确认的凭据项')
+  report(ok5, '确认后：消得掉')
 }
 
 group('[26] 起草发布说明：中文提交即中文说明，无上一版不交白卷')
@@ -1193,6 +1295,11 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
   const okN2 = si.dsh?.hasInvariantEntry === true
   check(okN2, 'invariant 入口识别', JSON.stringify(si.dsh?.exportsKeys))
   report(okN2, 'invariant：识别')
+  compose(inv)
+  const ti = readFileSync(join(inv, 'AGENTS.md'), 'utf8')
+  const okN2b = /伴生/.test(ti)
+  check(okN2b, '有 invariant → 契约含伴生段')
+  report(okN2b, 'invariant：契约渲染')
 
   // 宿主运行时放错位置
   const baddep = fixture('dsh-baddep', {
@@ -1220,6 +1327,11 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
   const okN4 = Array.isArray(sw.localSkills) && sw.localSkills.some((x) => x.path === '.claude/skills/my-helper')
   check(okN4, '本地 skills 按位置盘点（不写死名单）', JSON.stringify(sw.localSkills))
   report(okN4, '本地 skills：盘点出')
+  compose(wskills)
+  const tw = readFileSync(join(wskills, 'AGENTS.md'), 'utf8')
+  const okN4b = /仓库本地 skills/.test(tw)
+  check(okN4b, '有 skills → 契约含本地 skills 段')
+  report(okN4b, '本地 skills：契约渲染')
 
   // 反向：无 skills 时为空数组，不误报
   const noskills = fixture('noskills', {

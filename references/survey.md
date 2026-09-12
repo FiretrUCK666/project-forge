@@ -173,14 +173,14 @@ cargo。`commands` 一节会区分这一点。
 
 文档现状：哪些已有、字节数多少、`.github` 下有什么。这是「文档套装」那一步的缺口清单。
 
-三个字段需要单独说明，它们回答的是不同的问题：
+四个字段需要单独说明，它们回答的是不同的问题：
 
 | 字段 | 回答什么 |
 | --- | --- |
 | `readme` | 有哪些 README 文件 |
 | `readmePair` | **这些 README 是不是一对双语文件**（有值就是；双非默认同样成对，此时 `defaultMissing` 为真） |
 | `readmeSections` | 主 README **现有的节**有哪些 |
-| `workflowAutomation.truncated` | 工作流是否只读了前 64KB（为真时“无发布 job”不可信，需手工确认） |
+| `workflowAutomation.truncated` | 工作流是否只读了前部（为真时“无发布 job”不可信，需手工确认；上限值见输出的 `headLimit`） |
 
 **`readmePair` 有值时，那份文档是要成对维护的**：两份都随包分发、都展示在制品库页面上
 （改任何一份都算用户可见变化），而且**它们会漂移**——一次改动只更新了一份，两份说着不同
@@ -201,7 +201,9 @@ cargo。`commands` 一节会区分这一点。
 
 | 字段 | 回答什么 |
 | --- | --- |
-| `packageName`、`patchFile` | 包名与补丁文件（有无、清单声明的路径是否存在） |
+| `packageName` | 包名（清单声明） |
+| `patchFile` | 磁盘上实际存在的补丁文件（根目录的 `cordis.patch.yml` 一类） |
+| `bundlePatch` | 清单声明的补丁路径与存在性（`dsh.bundle.patch` 指过去，文件在不在） |
 | `hasHostEntry`、`hasClientEntry`、`hasClientDecl`、`hasInvariantEntry` | host、client、伴生三路入口各有没有；client 声明与入口打架时先对齐，由此定 host-only、client-only 还是双面 |
 | `filesHasLib`、`filesHasPatch` | `files` 白名单含不含构建产物与补丁（含了才发得出去） |
 | `libTracked` | 构建产物目录有没有被跟踪（与上一行是两套集合，合起来才知道走成品路线还是源码路线） |
@@ -223,7 +225,7 @@ cargo。`commands` 一节会区分这一点。
 
 ### `ignores`
 
-忽略规则的现状。三个字段都要看，它们回答三个不同的问题：
+忽略规则的现状。四个字段都要看，它们回答四个不同的问题：
 
 | 字段 | 回答的问题 |
 | --- | --- |

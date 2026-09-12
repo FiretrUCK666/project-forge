@@ -37,6 +37,7 @@ const FLAGS = new Set([
   '--private-no-license', // 用户确认：保留所有权利，不落盘 LICENSE
   '--no-ci', // 用户确认：暂不要 CI
   '--no-auto-release', // 用户确认：暂不要自动发布
+  '--secrets-reviewed', // 用户确认：已按密钥门控逐条核对剩余命中，均为占位或测试数据
   '--strict', // 严格模式：待问事项同样拦住（exit 2），用于 CI；默认待问只提示不拦
 ])
 
@@ -87,7 +88,7 @@ function main(argv) {
   if (parsed.help) {
     process.stdout.write(
       '用法：node scripts/review.mjs <项目目录> [--no-bilingual] [--no-contributing]\n'
-      + '      [--private-no-license] [--no-ci] [--no-auto-release] [--strict]\n\n'
+      + '      [--private-no-license] [--no-ci] [--no-auto-release] [--secrets-reviewed] [--strict]\n\n'
       + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n'
       + '  默认[待问]不拦（exit 0 但结论写“还有待问”）；--strict 下[待问]同样拦住（exit 2），用于 CI。\n'
       + '  无对应 flag 的[待问]（徽章离线、DSH 挂载建议、英文模板、纯文档构建命令）只能改文件消掉。\n',
@@ -159,6 +160,30 @@ function main(argv) {
   // 2c. 标签与版本号：只报事实比对，不下结论（形生态各异，见 publish.md）。
   if (s.artifacts?.declaredVersion !== undefined && s.artifacts?.versionAligned === false) {
     pending.push(`标签与版本号未对齐：清单 ${s.artifacts.declaredVersion}，标签 ${(s.artifacts.versionAlignedTags ?? []).join('、') || '无'}（自动化会对不上，先确认）`)
+  }
+
+  // 2d. 密钥与扫描可信度：凭据命中即拦；扫描被截断时“无命中”不可信，转待问。
+  // 这是 G2 的机器落点：人不记得扫描，门就替他记得。
+  const risks = s.risks ?? {}
+  const secretHits = [...(risks.secretFiles ?? []), ...(risks.secretContent ?? [])]
+  if (secretHits.length > 0) {
+    if (flags.has('--secrets-reviewed')) ok.push(`凭据命中 ${secretHits.length} 处（用户已按门控确认为占位或测试数据）`)
+    else missing.push(`凭据形状 ${secretHits.length} 处（按版本管理密钥门控分案处置后重跑；确认为占位或测试数据时加 --secrets-reviewed，位置见勘察报告）`)
+  }
+  if (risks.contentScan?.truncated === true) {
+    pending.push('内容扫描被截断：“无命中”不可信，提高上限重扫或在汇报里写明覆盖范围')
+  }
+
+  // 2e. 忽略规则：未忽略的产物目录与“已跟踪又被忽略”是提交前必须消掉的两项。
+  const ig = s.ignores ?? {}
+  if (Array.isArray(ig.unignoredOutputDirs) && ig.unignoredOutputDirs.length > 0) {
+    missing.push(`未忽略的产物目录：${ig.unignoredOutputDirs.join('、')}（下次提交会整个写进历史，先补忽略规则）`)
+  }
+  if (Array.isArray(ig.ignoredButTracked) && ig.ignoredButTracked.length > 0) {
+    pending.push(`已被跟踪又被忽略 ${ig.ignoredButTracked.length} 个（忽略对它们无效，需从索引移除；确认后逐个处理）`)
+  }
+  if (ig.gitattributes === undefined && git.present === true) {
+    pending.push('文本属性声明缺失：首次提交前补上，否则跨机器产物字节不可复现')
   }
   // 3. README：必须有；双语要么成对，要么用户明确说单语。
   const readmes = s.docs?.readme ?? []
@@ -243,6 +268,15 @@ function main(argv) {
       pending.push('DSH 三态不明：exports 与 dsh.client 声明打架，先对齐再定 host-only 还是双面')
     }
   }
+  // 非 DSH 插件：无专属门禁，按通用协议六问核对产物与标识（无专章时现场查宿主文档）。
+  if (dshKinds.some((k) => /plugin|extension/.test(k)) && !dshKinds.includes('dsh-plugin')) {
+    pending.push('非 DSH 插件：按通用协议核对产物同提交、两标识与挂载分发两条路（见 plugin-project.md）')
+  }
+  // Obsidian 发布三件套：缺 main.js 即安装断链。
+  if (dshKinds.includes('obsidian-plugin') && s.artifacts?.obsidianArtifacts !== undefined
+    && s.artifacts.obsidianArtifacts.mainJs !== true) {
+    missing.push('Obsidian 产物缺 main.js（安装时从发布下载三件，缺一件即断链）')
+  }
 
   // 6c. 本地 skills：只盘点，不强求；已有被改坏才拦。
   if (Array.isArray(s.localSkills) && s.localSkills.length > 0) {
@@ -261,6 +295,9 @@ function main(argv) {
     else pending.push('CI 缺失：问用户要不要检查自动化与自动发布（不要→加 --no-ci，不要默跳）')
   } else {
     ok.push(`工作流有（${auto.files.join('、')}）`)
+    if (auto.truncated === true && auto.hasReleaseJob !== true) {
+      pending.push('工作流只读了前 64KB：“无发布 job”不可信，大文件需手工确认后再定')
+    }
     if (s.artifacts?.publishableManifest !== undefined && s.artifacts?.private !== true) {
       if (auto.hasReleaseJob) {
         ok.push('发布 job 有')

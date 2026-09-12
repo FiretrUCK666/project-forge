@@ -3,13 +3,15 @@
 # 用法：复制到目标项目的 .github/workflows/check.yml，按 TODO 逐项替换后删掉本注释块。
 # 判据见 references/remote-github.md 第八节；机制不要改，只换取值。
 #
-# TODO(1) 运行环境：按下表只留一行，删掉其余——
-#   Node 项目：setup-node，版本取清单声明（无声明写验证过的版本，见 AGENTS.md 环境要求）；
-#   Python 项目：setup-python；Rust：rust-toolchain；Go：setup-go；纯文档目录：整段删掉。
+# TODO(1) 运行环境：按命中生态只留一块——
+#   Node：setup-node（版本取清单声明，无声明写验证过的版本，见 AGENTS.md 环境要求）；
+#   Python：setup-python；Rust：rust-toolchain；Go：setup-go；纯文档目录：整段删掉。
+#   落盘前核对所用 Action 的最新大版本（不要照抄这里的 vN）。
 # TODO(2) 门禁命令：从目标项目 AGENTS.md「构建与验证」节逐条搬运，一行一条；
 #   命令怎么写不重要，重要的是与本地跑的是同一条（同一条命令，两处引用）。
 # TODO(3) 产物一致性：产物入库的项目（插件类、被安装的包）必须加最后一条——
 #   重新构建一次，与提交的产物逐字节一致，否则源码与产物迟早脱节。
+#   成品包路线（产物忽略、files 分发）则改查 pack 清单，不查逐字节一致。
 # TODO(4) tags 行：只在「打标签也值得跑一遍检查」时保留；纯检查留分支与 PR 即可。
 
 name: check
@@ -24,9 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # 落盘前核对最新大版本
 
-      - name: 准备运行环境  # TODO(1)
+      # TODO(1)：按生态只留一块，其余整块删掉。Python 换 setup-python，Rust/Go 换对应
+      # setup action，纯文档目录本块整段删掉。未选生态时下面默认块是错的，先选再删注释。
+      - name: 准备运行环境
         uses: actions/setup-node@v4
         with:
           node-version: '<清单声明的版本>'  # 占位符：填清单里声明的版本，不要照抄示例数字

@@ -11,6 +11,9 @@
 `repo not found`）；`npm` 的下载量徽章在新包刚发布时显示 `package not found or too new`。
 这两类在仓库转公开、或包积累一段时间之后会自动恢复——所以**不是永远不写，是现在不写**。
 
+下表默认是 npm 生态的地址：非 npm 项目整表删掉，按对应制品库重写，不要照抄。
+落盘后用 `scripts/check-badges.mjs` 逐个验一遍再留。
+
 | 徽章 | 地址 | 何时可用 |
 | --- | --- | --- |
 | 制品库版本 | `https://img.shields.io/npm/v/<包名>` | 已发布即可 |

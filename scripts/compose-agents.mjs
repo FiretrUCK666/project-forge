@@ -227,6 +227,7 @@ function deriveFacts(target) {
   // 插件类条件：只按勘察事实求值，不猜具体取值。模板里的 DSH 段落靠它们显隐，
   // 非插件项目不受影响；读不到即按无处理。
   const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
+  const isPlugin = s.ecosystem.kinds.some((k) => /plugin|extension/.test(k))
   const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
   const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
   const hasDshInvariant = s.dsh?.hasInvariantEntry === true
@@ -254,6 +255,8 @@ function deriveFacts(target) {
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
     'is-dsh-plugin': isDshPlugin,
+    'is-plugin': isPlugin,
+    'no-plugin': !isPlugin,
     'has-dsh-client': hasDshClient,
     'has-dsh-bundle': hasDshBundle,
     'has-dsh-invariant': hasDshInvariant,
@@ -264,7 +267,7 @@ function deriveFacts(target) {
     'no-dsh-local-workflow': !hasDshLocalWorkflow,
     'has-local-skills': hasLocalSkills,
     'no-local-skills': !hasLocalSkills,
-    publishable,
+    'has-publish': publishable,
     'no-publish': !publishable,
   }
 

@@ -4,7 +4,7 @@
 # 判据见 references/remote-github.md 第六节与 references/publish.md；机制不要改，只换取值。
 #
 # 前置（人做，自动化做不了）：仓库 Settings → Secrets → Actions 建 RELEASE_TOKEN——
-#   细粒度 token，仅 Contents 读写、仅本仓库、90 天过期（以平台当前上限为准）；
+#   细粒度 token，仅 Contents 读写、仅本仓库、有效期以创建页显示的上限为准；
 #   过期或换人只换 Secrets 里那一个值。
 #   token 一辈子只出现在两个框里（生成框 → Secrets 输入框），不进仓库、不进聊天。
 #

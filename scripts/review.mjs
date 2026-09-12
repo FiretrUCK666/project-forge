@@ -226,6 +226,35 @@ function main(argv) {
   else pending.push('LICENSE 缺失：问用户选哪个许可证（保留权利→加 --private-no-license）')
 
   // 6. 工作流：CI 与自动发布要么落盘，要么用户明确说暂不要。
+  // 6b. DSH 插件：只在判定为 dsh-plugin 时检查，不猜取值。
+  const dshKinds = s.ecosystem?.kinds ?? []
+  if (dshKinds.includes('dsh-plugin') && s.dsh !== undefined) {
+    const d = s.dsh
+    if (d.filesHasLib === false) missing.push('DSH 发布范围缺 lib（成品包路线要求 files 含构建产物，以 pack 清单为准）')
+    if (d.filesHasPatch === false) missing.push('DSH 发布范围缺补丁（声明 bundle 时 files 应含补丁文件）')
+    if (d.libTracked === true && d.filesHasLib !== true) {
+      missing.push('DSH 产物跟踪与发布范围矛盾：lib 被跟踪但 files 未含，先定成品还是源码路线')
+    }
+    if (d.hostRuntimeInDeps === true) missing.push('DSH 依赖放错：宿主运行时进了 dependencies，应为 peer')
+    if (d.discoveryCarrierLikely === false) {
+      missing.push('DSH 发现载体可能缺失：补丁文本里没有出现包名（补 name 等于包名自身的一行）')
+    }
+    if ((d.hasClientEntry === true) !== (d.hasClientDecl === true)) {
+      pending.push('DSH 三态不明：exports 与 dsh.client 声明打架，先对齐再定 host-only 还是双面')
+    }
+  }
+
+  // 6c. 本地 skills：只盘点，不强求；已有被改坏才拦。
+  if (Array.isArray(s.localSkills) && s.localSkills.length > 0) {
+    ok.push(`本地 skills 有（${s.localSkills.map((x) => x.path).join('、')}）`)
+    for (const x of s.localSkills) {
+      if (x.corrupt === true) missing.push(`本地 skill 损坏：${x.path} 缺 SKILL.md 或首部非法`)
+      else if (x.nameOk === false) missing.push(`本地 skill 名实不符：${x.path} 目录名与 name 不一致`)
+      else if (x.descriptionHead === undefined || x.descriptionHead.length < 10) {
+        pending.push(`本地 skill 描述过短：${x.path}（触发语不明，改完再验）`)
+      }
+    }
+  }
   const auto = s.docs?.workflowAutomation
   if (auto === undefined || auto.files.length === 0) {
     if (flags.has('--no-ci')) ok.push('无 CI（用户已确认暂不要）')

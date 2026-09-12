@@ -1160,6 +1160,77 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
   report(ok9, '非插件：不误报 DSH 段')
 }
 
+group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
+{
+  // files 缺 lib：成品包路线应报缺（review 拦），勘察只报事实
+  const nofiles = fixture('dsh-nofiles', {
+    'package.json': JSON.stringify({
+      name: 'dsh-nofiles', version: '0.1.0', type: 'module',
+      main: 'lib/index.js', exports: { '.': './lib/index.js' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: n\n      name: 'dsh-nofiles'\n",
+    'lib/index.js': 'export const name = "n"\n',
+  })
+  const sn = survey(nofiles)
+  const okN1 = sn.dsh?.filesHasLib === false
+  check(okN1, 'files 缺 lib → 事实为假', JSON.stringify(sn.dsh?.filesHasLib))
+  report(okN1, 'files 缺 lib：勘察报假')
+
+  // invariant 入口识别
+  const inv = fixture('dsh-invariant', {
+    'package.json': JSON.stringify({
+      name: 'dsh-inv', version: '0.1.0', type: 'module',
+      exports: { '.': './lib/index.js', './invariant': './lib/invariant.js' },
+      files: ['lib/index.js', 'lib/invariant.js', 'cordis.patch.yml'],
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: v\n      name: 'dsh-inv'\n",
+    'lib/index.js': 'export const name = "v"\n',
+    'lib/invariant.js': 'export const name = "v-invariant"\n',
+  })
+  const si = survey(inv)
+  const okN2 = si.dsh?.hasInvariantEntry === true
+  check(okN2, 'invariant 入口识别', JSON.stringify(si.dsh?.exportsKeys))
+  report(okN2, 'invariant：识别')
+
+  // 宿主运行时放错位置
+  const baddep = fixture('dsh-baddep', {
+    'package.json': JSON.stringify({
+      name: 'dsh-baddep', version: '0.1.0',
+      exports: { '.': './lib/index.js' },
+      files: ['lib/index.js', 'cordis.patch.yml'],
+      dependencies: { cordis: '^4.0.0' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, null, 2),
+    'cordis.patch.yml': "- insert:\n    - id: b\n      name: 'dsh-baddep'\n",
+    'lib/index.js': 'export const name = "b"\n',
+  })
+  const sb = survey(baddep)
+  const okN3 = sb.dsh?.hostRuntimeInDeps === true
+  check(okN3, '宿主运行时进 dependencies → 标出', JSON.stringify(sb.dsh?.hostRuntimeInDeps))
+  report(okN3, '依赖放错：标出')
+
+  // 本地 skills 通用盘点：完全不同的名字也能认出，不写死名单
+  const wskills = fixture('localskills', {
+    'package.json': JSON.stringify({ name: 'w', version: '1.0.0' }),
+    '.claude/skills/my-helper/SKILL.md': '---\nname: my-helper\ndescription: 帮我整理发布说明的本地 workflow\n---\n\n# my-helper\n',
+  })
+  const sw = survey(wskills)
+  const okN4 = Array.isArray(sw.localSkills) && sw.localSkills.some((x) => x.path === '.claude/skills/my-helper')
+  check(okN4, '本地 skills 按位置盘点（不写死名单）', JSON.stringify(sw.localSkills))
+  report(okN4, '本地 skills：盘点出')
+
+  // 反向：无 skills 时为空数组，不误报
+  const noskills = fixture('noskills', {
+    'package.json': JSON.stringify({ name: 'n', version: '1.0.0' }),
+  })
+  const sn2 = survey(noskills)
+  const okN5 = Array.isArray(sn2.localSkills) && sn2.localSkills.length === 0
+  check(okN5, '无 skills 时为空（不误报）', JSON.stringify(sn2.localSkills))
+  report(okN5, '无 skills：为空')
+}
+
 group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,

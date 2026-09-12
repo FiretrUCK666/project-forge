@@ -229,6 +229,11 @@ function deriveFacts(target) {
   const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
   const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
   const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
+  const hasDshInvariant = s.dsh?.hasInvariantEntry === true
+  const hasDshToolchain = s.dsh?.toolchain !== undefined
+    && (s.dsh.toolchain.tsdown === true || s.dsh.toolchain.vitest === true || s.dsh.toolchain.oxlint === true)
+  const hasDshLocalWorkflow = s.dsh?.localWorkflow === true || s.dsh?.contractDoc === true
+  const hasLocalSkills = Array.isArray(s.localSkills) && s.localSkills.length > 0
 
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
@@ -251,6 +256,14 @@ function deriveFacts(target) {
     'is-dsh-plugin': isDshPlugin,
     'has-dsh-client': hasDshClient,
     'has-dsh-bundle': hasDshBundle,
+    'has-dsh-invariant': hasDshInvariant,
+    'no-dsh-invariant': !hasDshInvariant,
+    'has-dsh-toolchain': hasDshToolchain,
+    'no-dsh-toolchain': !hasDshToolchain,
+    'has-dsh-local-workflow': hasDshLocalWorkflow,
+    'no-dsh-local-workflow': !hasDshLocalWorkflow,
+    'has-local-skills': hasLocalSkills,
+    'no-local-skills': !hasLocalSkills,
     publishable,
     'no-publish': !publishable,
   }

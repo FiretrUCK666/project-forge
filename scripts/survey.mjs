@@ -1009,15 +1009,49 @@ function detectDsh(root, root_, eco) {
   }
   // 锁定的宿主版本：dependencies/devDependencies/peerDependencies 里 `@deepseek-ai/*`
   // 的声明值（去重，原样保留范围符号，归一化由比对方做）。专章滞后判断用它。
+  // 另把 cordis / schemastery 一并收录：模板时代宿主运行时不一定带 @deepseek-ai 前缀。
   const pinnedVersions = [...new Set(
     ['dependencies', 'devDependencies', 'peerDependencies'].flatMap((k) => {
       const deps = pkg[k]
       if (typeof deps !== 'object' || deps === null) return []
       return Object.entries(deps)
-        .filter(([name, range]) => name.startsWith('@deepseek-ai/') && typeof range === 'string')
+        .filter(([name, range]) => (name.startsWith('@deepseek-ai/') || name === 'cordis' || name === 'schemastery') && typeof range === 'string')
         .map(([, range]) => range)
     }),
   )]
+  // 伴生入口：exports 是否含 ./invariant。语义件的有无决定要不要查正反测试。
+  const hasInvariantEntry = exportsMap.includes('./invariant')
+  // 发布范围：files 是否含构建产物与补丁。只做包含判断，不解释语义。
+  const filesList = Array.isArray(pkg.files) ? pkg.files.map(String) : []
+  const filesHasLib = filesList.some((f) => /(^|\/)lib(\/|$)/.test(f) || /^lib/.test(f))
+  const filesHasPatch = patchFile !== undefined && filesList.some((f) => f.includes('cordis.patch'))
+  // 构建产物是否被跟踪：git 视角的事实，与 files 是两套集合，缺一不可。
+  let libTracked = undefined
+  try {
+    const r = spawnSync('git', ['ls-files', 'lib'], { cwd: root, encoding: 'utf8', windowsHide: true })
+    if (r.error === undefined && r.status === 0) libTracked = (r.stdout ?? '').trim().length > 0
+  } catch { /* 取不到就不判 */ }
+  // 宿主运行时放对位置没有：cordis 一类应在 peer，不应被打进 dependencies。
+  const hostRuntimeInDeps = ['dependencies'].some((k) => {
+    const deps = pkg[k]
+    if (typeof deps !== 'object' || deps === null) return false
+    return Object.keys(deps).some((n) => n === 'cordis' || n === 'schemastery' || n.startsWith('@deepseek-ai/'))
+  })
+  // 工具链 presence：只报有无，不读版本号语义。
+  const toolchain = {
+    tsdown: root_.has('tsdown.config.ts') || root_.has('tsdown.config.js') || root_.has('tsdown.config.mjs'),
+    vitest: root_.has('vitest.config.ts') || root_.has('vitest.config.js') || root_.has('vitest.config.mjs'),
+    oxlint: root_.has('.oxlintrc.json'),
+    pnpmWorkspace: root_.has('pnpm-workspace.yaml'),
+    lockfile: root_.has('pnpm-lock.yaml'),
+  }
+  // 本地 workflow 与补丁目录：只报 presence，不展开内容。
+  const localWorkflow = root_.entry('.agents')?.isDir === true
+  const contractDoc = root_.has('docs/dsh-plugin-contracts.md')
+  const patchesDir = root_.entry('patches')?.isDir === true
+  if (hasInvariantEntry === false && hasClientEntry === false && hasHostEntry === true) {
+    // host-only 是正常形态，不告警；三态判定由上层按本对象推导。
+  }
   return {
     packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
     patchFile,
@@ -1027,11 +1061,62 @@ function detectDsh(root, root_, eco) {
     exportsKeys: exportsMap,
     hasHostEntry,
     hasClientEntry,
+    hasInvariantEntry,
+    filesHasLib,
+    filesHasPatch,
+    libTracked,
+    hostRuntimeInDeps,
+    toolchain,
+    localWorkflow,
+    contractDoc,
+    patchesDir,
     discoveryCarrierLikely: carrier,
     pinnedVersions,
     unknownKeys,
     warnings,
   }
+}
+
+/**
+ * 仓库本地 skills 盘点：通用协议，不止 DSH。
+ *
+ * 只收仓库内可提交的位置（`.agents/skills/*`、`.claude/skills/*`、包内 `skills/*`），
+ * 不碰家目录与外部 checkout。每个 skill 只读目录名、`SKILL.md` 首部 `name` 与
+ * `description` 首行、是否有 `scripts/` 与 `references/`，不展开正文。
+ * 损坏的 SKILL.md 标 corrupt，不中断。
+ */
+function detectLocalSkills(root) {
+  const out = []
+  const bases = ['.agents/skills', '.claude/skills', 'skills']
+  const readDir = (p) => {
+    try { return readdirSync(p, { withFileTypes: true, encoding: 'utf8' }) } catch { return [] }
+  }
+  for (const base of bases) {
+    const abs = join(root, base)
+    for (const e of readDir(abs)) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue
+      const skillPath = join(abs, e.name, 'SKILL.md')
+      let nameOk = undefined
+      let descriptionHead = undefined
+      let corrupt = false
+      try {
+        const text = readFileSync(skillPath, 'utf8').replace(/^\uFEFF/, '')
+        const m = /^name:[ \t]*(.+)$/m.exec(text.split('---')[1] ?? '')
+        nameOk = m !== null && m[1].trim() === e.name
+        const d = /^description:[ \t]*\|?([^\n]*)/m.exec(text)
+        descriptionHead = d === null ? undefined : d[1].trim().slice(0, 120)
+      } catch { corrupt = true }
+      let hasScripts = false
+      let hasReferences = false
+      try {
+        const sub = readDir(join(abs, e.name))
+        hasScripts = sub.some((x) => x.name === 'scripts')
+        hasReferences = sub.some((x) => x.name === 'references')
+      } catch { /* 读不到就不判 */ }
+      out.push({ path: `${base}/${e.name}`, nameOk, descriptionHead, hasScripts, hasReferences, corrupt })
+    }
+  }
+  return out
 }
 
 function detectDocs(root, root_) {
@@ -1354,6 +1439,7 @@ function survey(target) {
     commands: deriveCommands(root, root_, eco),
     artifacts,
     dsh: detectDsh(root, root_, eco),
+    localSkills: detectLocalSkills(root),
     docs: detectDocs(root, root_),
     ignores,
     outputs: {
@@ -1451,13 +1537,22 @@ function toMarkdown(s) {
     L.push(`- DSH 补丁文件：${d.patchFile ?? '缺'}`
       + (d.bundlePatch === undefined ? '' : `；清单声明 ${d.bundlePatch.path}（${d.bundlePatch.exists ? '存在' : '缺失'}）`))
     L.push(`- DSH 入口：host ${d.hasHostEntry ? '有' : '缺'}；client ${d.hasClientEntry ? '有' : '无'}`
-      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）`)
+      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）；invariant ${d.hasInvariantEntry ? '有' : '无'}`)
+    if (d.filesHasLib !== undefined) L.push(`- DSH 发布范围：files ${d.filesHasLib ? '含' : '缺'} lib；${d.filesHasPatch ? '含' : '缺'}补丁`)
+    if (d.libTracked !== undefined) L.push(`- DSH 构建产物跟踪：lib ${d.libTracked ? '已被跟踪' : '未被跟踪'}（与 files 是两套集合）`)
+    if (d.hostRuntimeInDeps === true) L.push('- **DSH 依赖放错**：宿主运行时进了 dependencies，应为 peer')
     if (d.discoveryCarrierLikely === false) L.push('- **DSH 发现载体可能缺失**：补丁文本里没有出现包名')
     if (Array.isArray(d.unknownKeys) && d.unknownKeys.length > 0) {
       L.push(`- **DSH 清单有不认识的字段**：${d.unknownKeys.join('、')}`
         + '——可能是新版宿主加的东西，按六问现场核实，不要猜，也不要照旧流程装懂')
     }
     for (const w of d.warnings ?? []) L.push(`- DSH 注意：${w}`)
+  }
+  if (Array.isArray(s.localSkills) && s.localSkills.length > 0) {
+    L.push(`- 本地 skills ${s.localSkills.length} 个：${s.localSkills.map((x) => x.path).join('、')}`)
+    for (const x of s.localSkills) {
+      if (x.corrupt === true) L.push(`  - ${x.path}：SKILL.md 损坏或缺失，先修再用`)
+    }
   }
   L.push('')
   L.push('## 可执行命令')

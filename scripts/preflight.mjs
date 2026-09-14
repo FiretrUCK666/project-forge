@@ -16,6 +16,8 @@
  *   - 无 BOM；行尾一致（可复现构建的前提）
  *   - 不含构建机私有路径（换台机器就要能跑）
  *   - AGENTS.md 里的内核与 templates/agents-kernel.md 逐字一致
+ *   - 带外部易变事实的章节文件都有统一核对标记（缺标记、错 scope、坏日期即失败；
+ *     超期只警告——时间流逝不是破损）
  *
  * 用法：
  *   node scripts/preflight.mjs [skill 目录]
@@ -38,6 +40,15 @@ const INSTRUCTION_BUDGET = 65536
 
 const KERNEL_START = '<!-- project-forge:kernel:start -->'
 const KERNEL_END = '<!-- project-forge:kernel:end -->'
+
+/**
+ * 保鲜超期阈值（天）。超过这么多天没重核即警告。
+ *
+ * 只警告不失败：时间流逝不是破损，红了就是误报——那种检查很快会被无视，
+ * 而被无视的检查等于不存在。阈值只在这里定义一处，文档里不写死数字
+ * （写了就会漂移）；警告信息里会报出已过期天数与重核哪几节。
+ */
+export const FRESHNESS_STALE_DAYS = 180
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -664,21 +675,135 @@ function checkPluginChapters() {
     }
   }
   if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')
-  // 每个专章必须有「事实来源」节：无来源的版本事实会被当成通则背诵，过期无人知。
-  for (const f of files) {
-    const text = readText(join(dir, f)).replace(/^\uFEFF/, '')
-    if (!/^## 事实来源[ \t]*$/m.test(text)) {
-      fail(`references/plugins/${f} 缺少「事实来源」节——新专章必须写来源与核实方式（见 plugin-project.md 模板第八节）。`)
-    }
+  // 「事实来源」节与核对标记的校验已收敛到 checkFreshness（检查十三）统一处理，
+  // 这里不再另起一套——两处各判一遍，迟早漏一边。
+}
+
+// ── 检查十三：外部事实保鲜（统一核对标记） ──────────────────────────────────
+
+/**
+ * 根因：外部事实（字段名、数量上限、UI 路径、版本下限）会过期，而文档把它当永久
+ * 知识存，过期后没有任何声音。所以每份“带外部易变事实”的章节文件，都在
+ * 「事实来源」节末尾带一个机器可读的核对标记；本检查校验它。
+ *
+ * 标记形状（向后兼容：现存标记本来就长这样，这里只是第一次把它写下来）：
+ *   <!-- <scope>-verified: date=YYYY-MM-DD [key=value ...] -->
+ * scope 必须与文件名对应，date 必须是真实日历日期；key=value 允许扩展
+ * （如 dsh 的 host=，compose 靠它判断滞后），本检查只认 date。
+ *
+ * 分工（判据见 AGENTS.md「外部事实保鲜」节，此处只实现，不复述）：
+ *   - 章节家族（references/plugins/*.md 与 references/publish-*.md）：
+ *     节与标记双向缺一不可——缺节说明来源没交代，缺标记说明核对没落到纸面。
+ *   - 其他 references 文件（机制稳定的，如 publish.md、survey.md）：
+ *     不强制要求；但一旦带了标记，就按同一套规则校验（不能悬空、不能错位）。
+ *   - 超期只警告不失败；格式/归属/位置错才失败。
+ */
+
+/** 按文件名推导标记作用域：dsh.md→dsh，publish-npm.md→npm。 */
+function expectedFreshnessScope(rel) {
+  const base = rel.split('/').pop().replace(/\.md$/, '')
+  return base.replace(/^publish-/, '')
+}
+
+/**
+ * 纯函数：判定一份文档里的保鲜标记。只管格式，不管“该不该有”
+ * （“该不该有”由 checkFreshness 按文件家族定——混在一起，单测就写不清了）。
+ *
+ * 返回 { hasSection, count, scope, date, ageDays, errors[], warnings[] }。
+ * 无标记时 errors/warnings 为空，调用方按家族规则决定要不要 fail。
+ */
+export function evalFreshnessMarker(rel, text, todayStr, tomorrowStr) {
+  const result = {
+    hasSection: false, count: 0,
+    scope: undefined, date: undefined, ageDays: undefined,
+    errors: [], warnings: [],
   }
-  // DSH 专章的核对标记必须格式合法：compose 靠它判断滞后，格式坏了等于没有。
-  const dshPath = join(dir, 'dsh.md')
-  if (existsSync(dshPath)) {
-    const dshText = readText(dshPath).replace(/^\uFEFF/, '')
-    if (!/dsh-verified:\s*host=\S+\s+date=\S+/.test(dshText)) {
-      fail('references/plugins/dsh.md 的核对标记格式不对——应为 <!-- dsh-verified: host=<版本> date=<日期> --> 一行。')
-    }
+  const clean = text.replace(/^\uFEFF/, '')
+  const sectionAt = clean.search(/^## 事实来源[ \t]*$/m)
+  result.hasSection = sectionAt >= 0
+  const found = [...clean.matchAll(/<!--\s*([A-Za-z0-9-]+)-verified:\s*([^>]*?)\s*-->/g)]
+  result.count = found.length
+  if (found.length === 0) return result
+  if (found.length > 1) {
+    result.errors.push(`有 ${found.length} 个核对标记，只能恰好一个 —— 删掉重复的，留日期最新的那一个。`)
+    return result
   }
+  const marker = found[0]
+  if (!result.hasSection) {
+    result.errors.push('核对标记没有对应的「事实来源」节 —— 标记必须住在该节末尾，不能悬空。')
+    return result
+  }
+  if (marker.index < sectionAt) {
+    result.errors.push('核对标记在「事实来源」节之前 —— 把它移到该节末尾（见兄弟文件的同名节）。')
+    return result
+  }
+  const scope = marker[1]
+  result.scope = scope
+  const expected = expectedFreshnessScope(rel)
+  if (scope !== expected) {
+    result.errors.push(`核对标记的作用域是「${scope}」，按文件名应为「${expected}」—— 从别的文件复制时忘了改吧？`)
+  }
+  const dateMatch = /(?:^|\s)date=([0-9-]+)(?:\s|$)/.exec(` ${marker[2].trim()} `)
+  if (dateMatch === null) {
+    result.errors.push('核对标记里没有 date=YYYY-MM-DD —— 格式见 AGENTS.md「外部事实保鲜」节。')
+    return result
+  }
+  const dateStr = dateMatch[1]
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+    || Number.isNaN(Date.parse(dateStr))
+    || new Date(`${dateStr}T00:00:00Z`).toISOString().slice(0, 10) !== dateStr) {
+    result.errors.push(`核对标记的日期「${dateStr}」不是真实日历日期 —— 按 YYYY-MM-DD 写真实日期。`)
+    return result
+  }
+  result.date = dateStr
+  if (dateStr > tomorrowStr) {
+    // 允许一天宽限：写标记的人与跑检查的机器可能有时区差；超过一天就是笔误。
+    result.errors.push(`核对标记的日期「${dateStr}」在未来 —— 把 date 改成重核的当天日期。`)
+    return result
+  }
+  const ageDays = Math.floor(
+    (Date.parse(`${todayStr}T00:00:00Z`) - Date.parse(`${dateStr}T00:00:00Z`)) / 86400000,
+  )
+  result.ageDays = ageDays
+  if (ageDays > FRESHNESS_STALE_DAYS) {
+    result.warnings.push(`上次核对是 ${dateStr}（${ageDays} 天前），超期了 —— 按「事实来源」节写明的范围重核官方文档，确认无误后把 date 改成当天。`)
+  }
+  return result
+}
+
+function checkFreshness() {
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const files = []
+  try {
+    for (const e of readdirSync(join(SKILL_ROOT, 'references'), { withFileTypes: true, encoding: 'utf8' })) {
+      if (e.isFile() && e.name.endsWith('.md')) files.push(`references/${e.name}`)
+    }
+  } catch { /* 缺目录由检查三报，这里不重复 */ }
+  try {
+    const plugDir = join(SKILL_ROOT, 'references', 'plugins')
+    for (const e of readdirSync(plugDir, { withFileTypes: true, encoding: 'utf8' })) {
+      if (e.isFile() && e.name.endsWith('.md')) files.push(`references/plugins/${e.name}`)
+    }
+  } catch { /* 缺目录由检查十报，这里不重复 */ }
+  for (const rel of files.sort()) {
+    let text
+    try {
+      text = readText(join(SKILL_ROOT, rel))
+    } catch { continue }
+    const isChapter = /^references\/plugins\/[a-z0-9-]+\.md$/.test(rel)
+      || /^references\/publish-[a-z0-9-]+\.md$/.test(rel)
+    const r = evalFreshnessMarker(rel, text, todayStr, tomorrowStr)
+    if (isChapter && !r.hasSection) {
+      fail(`${rel} 缺少「事实来源」节——带外部易变事实的章节必须写来源与核实方式（插件专章见 plugin-project.md 模板第八节，发布专章见兄弟文件的同名节）。`)
+    }
+    if (isChapter && r.count === 0) {
+      fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式见 AGENTS.md「外部事实保鲜」节）。`)
+    }
+    for (const e of r.errors) fail(`${rel} ${e}`)
+    for (const w of r.warnings) warn(`${rel} ${w}`)
+  }
+  process.stdout.write('保鲜标记：格式与归属一致\n')
 }
 
 // ── 检查十一：README 的目录与标题同步 ───────────────────────────────────────
@@ -766,6 +891,7 @@ function main() {
   checkScriptsRun()
   checkStatedCounts()
   checkPluginChapters()
+  checkFreshness()
   checkReadmeToc()
   checkValuePollution()
   checkBehavior()
@@ -784,4 +910,9 @@ function main() {
   return failures.length === 0 ? 0 : 1
 }
 
-process.exitCode = main()
+// 与 survey.mjs 同一模式：直接执行才跑 main，被 import（selftest 测保鲜判据时
+// 会 import 本文件）时只取导出的纯函数，不产生副作用。
+const invokedDirectly = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (invokedDirectly) process.exitCode = main()

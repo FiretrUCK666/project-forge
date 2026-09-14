@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
+import { evalFreshnessMarker, FRESHNESS_STALE_DAYS } from './preflight.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -1868,6 +1869,90 @@ group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC �
   const okC1 = /contents: write/.test(rvOut(rv(noContents, ...baseFlags)))
   check(okC1, '缺 contents:write → 待问')
   report(okC1, 'Release 形状：问得住')
+}
+
+group('[37] 保鲜标记判据：好标记放行，坏标记各有断言')
+{
+  // 测的是 preflight 导出的纯函数，不是整次 preflight——整次跑只能看到本仓库
+  // 现状，覆盖不了“坏标记长什么样”。日期相对今天算，不写死：写死的那天起，
+  // 用例自己就过期了（那正是本检查要消灭的东西）。
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayMs = Date.parse(`${todayStr}T00:00:00Z`)
+  const daysAgo = (n) => new Date(todayMs - n * 86400000).toISOString().slice(0, 10)
+  const tomorrowStr = new Date(todayMs + 86400000).toISOString().slice(0, 10)
+  const doc = (marker) => `# x\n\n## 事实来源\n\n来源略。\n\n${marker}\n`
+  const run = (rel, text) => evalFreshnessMarker(rel, text, todayStr, tomorrowStr)
+
+  // 1) 好标记：当天 → 无错无警告，scope/date/ageDays 正确。
+  {
+    const r = run('references/publish-npm.md', doc(`<!-- npm-verified: date=${todayStr} -->`))
+    const ok = r.errors.length === 0 && r.warnings.length === 0
+      && r.scope === 'npm' && r.date === todayStr && r.ageDays === 0
+    check(ok, '好标记放行且读出 scope/date/age', JSON.stringify({ scope: r.scope, date: r.date, ageDays: r.ageDays }))
+    report(ok, '好标记：放行')
+  }
+
+  // 2) 扩展键允许：dsh 的 host= 是合法扩展，检查只认 date。
+  {
+    const r = run('references/plugins/dsh.md', doc(`<!-- dsh-verified: host=9.9.9 date=${todayStr} -->`))
+    const ok = r.errors.length === 0 && r.scope === 'dsh'
+    check(ok, '扩展键不拦', JSON.stringify(r.errors))
+    report(ok, '扩展键：允许')
+  }
+
+  // 3) 坏日期：月份 13、不存在的 2 月 30 日 → 各报一个错。
+  {
+    const r1 = run('references/publish-go.md', doc('<!-- go-verified: date=2026-13-40 -->'))
+    const r2 = run('references/publish-go.md', doc('<!-- go-verified: date=2026-02-30 -->'))
+    const ok = r1.errors.length === 1 && r2.errors.length === 1
+    check(ok, '坏日期拦得住', `${r1.errors[0] ?? ''} / ${r2.errors[0] ?? ''}`)
+    report(ok, '坏日期：拦得住')
+  }
+
+  // 4) 未来日期 → 错（笔误）；缺 date → 错。
+  {
+    const r1 = run('references/publish-go.md', doc('<!-- go-verified: date=9999-01-01 -->'))
+    const r2 = run('references/publish-go.md', doc('<!-- go-verified: -->'))
+    const ok = r1.errors.some((e) => /未来/.test(e)) && r2.errors.length === 1
+    check(ok, '未来与缺 date 拦得住')
+    report(ok, '未来/缺 date：拦得住')
+  }
+
+  // 5) scope 错位：从别的文件复制忘了改 → 点名双方。
+  {
+    const r = run('references/publish-npm.md', doc(`<!-- rust-verified: date=${todayStr} -->`))
+    const ok = r.errors.some((e) => /rust/.test(e) && /npm/.test(e))
+    check(ok, 'scope 错位点名双方', r.errors[0] ?? '')
+    report(ok, '错 scope：点名')
+  }
+
+  // 6) 超期：阈值之外 → 无错、有警告且报出天数；阈值之内 → 安静。
+  {
+    const stale = run('references/publish-go.md', doc(`<!-- go-verified: date=${daysAgo(FRESHNESS_STALE_DAYS + 10)} -->`))
+    const fresh = run('references/publish-go.md', doc(`<!-- go-verified: date=${daysAgo(FRESHNESS_STALE_DAYS - 10)} -->`))
+    const ok = stale.errors.length === 0 && stale.warnings.length === 1
+      && /天前/.test(stale.warnings[0]) && fresh.warnings.length === 0
+    check(ok, '超期警告、期内安静', stale.warnings[0] ?? '')
+    report(ok, '超期：只警告不失败')
+  }
+
+  // 7) 双标记 → 错；无标记 → 判据函数无错（“是否必需”由 preflight 按文件家族定）。
+  {
+    const r1 = run('references/publish-go.md', doc(`<!-- go-verified: date=${todayStr} -->\n\n<!-- go-verified: date=${todayStr} -->`))
+    const r2 = run('references/publish-go.md', doc('# x\n\n## 事实来源\n\n来源略。\n'))
+    const ok = r1.errors.length === 1 && r2.errors.length === 0 && r2.count === 0
+    check(ok, '双标记拦、无标记不判')
+    report(ok, '数量：只认恰好一个')
+  }
+
+  // 8) 标记在节之前（npm 曾经的结构漂移）→ 错；无节有标记（悬空）→ 错。
+  {
+    const r1 = run('references/publish-npm.md', `<!-- npm-verified: date=${todayStr} -->\n\n## 事实来源\n\n来源略。\n`)
+    const r2 = run('references/publish-npm.md', `# x\n\n<!-- npm-verified: date=${todayStr} -->\n`)
+    const ok = r1.errors.some((e) => /之前/.test(e)) && r2.errors.some((e) => /悬空|没有对应/.test(e))
+    check(ok, '错位与悬空拦得住')
+    report(ok, '位置：必须在节末尾')
+  }
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

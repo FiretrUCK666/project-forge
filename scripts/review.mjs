@@ -269,13 +269,47 @@ function main(argv) {
     }
   }
   // 非 DSH 插件：无专属门禁，按通用协议六问核对产物与标识（无专章时现场查宿主文档）。
-  if (dshKinds.some((k) => /plugin|extension/.test(k)) && !dshKinds.includes('dsh-plugin')) {
+  // Obsidian 项目在上面已有附件与触发器两条待问，这里不再重复通用提示。
+  if (dshKinds.some((k) => /plugin|extension/.test(k)) && !dshKinds.includes('dsh-plugin')
+    && !dshKinds.includes('obsidian-plugin')) {
     pending.push('非 DSH 插件：按通用协议核对产物同提交、两标识与挂载分发两条路（见 plugin-project.md）')
   }
-  // Obsidian 发布三件套：缺 main.js 即安装断链。
-  if (dshKinds.includes('obsidian-plugin') && s.artifacts?.obsidianArtifacts !== undefined
-    && s.artifacts.obsidianArtifacts.mainJs !== true) {
-    missing.push('Obsidian 产物缺 main.js（安装时从发布下载三件，缺一件即断链）')
+  // Obsidian 发布链：四件事各有各的判据，不要压成一句“缺 main.js 即断链”——
+  //   旧判据把“仓库根无 main.js”直接报缺，而官方模板要求它只进发布附件不进库，
+  //   于是按官方模板做的项目永远过不了门。正确分工：
+  //   缺 = 仓库侧事实缺（manifest id 形状非法——提交审核会被拒）；
+  //   待问 = 附件侧只能人去看发布页（附件齐不齐、tag 与版本三方一致、触发器是不是裸版本）。
+  if (dshKinds.includes('obsidian-plugin') && s.artifacts?.obsidianArtifacts !== undefined) {
+    const o = s.artifacts.obsidianArtifacts
+    if (o.manifestIdShapeOk === false) {
+      missing.push(`Obsidian 插件 id 形状非法：${o.manifestId ?? '（读不到）'}（应为小写字母与连字符、不含 obsidian、不以 plugin 结尾，提交审核会被拒）`)
+    } else if (o.manifestId !== undefined) {
+      ok.push(`Obsidian 插件 id 形状符合（${o.manifestId}）`)
+    }
+    if (o.mainJs !== true && o.mainJsIgnored !== true) {
+      pending.push('Obsidian main.js 不在仓库根且未被忽略：要么还没构建，要么忽略规则漏了 main.js（官方模板要求它只进发布附件；确认构建与忽略规则后消掉）')
+    } else {
+      ok.push(o.mainJs === true ? 'Obsidian main.js 在仓库根（构建过；发布前确认附件即可）' : 'Obsidian main.js 被忽略（符合官方模板：只进发布附件）')
+    }
+    if (o.hasVersionsJson !== true) {
+      pending.push('Obsidian 缺 versions.json：只在 minAppVersion 变化时才需要；加文件可消（加上它），确认旧宿主无需回退时在汇报里记一笔')
+    }
+    // 附件侧只能人去发布页看，机器只负责把“看什么”列全，不替人下结论。
+    // 无标签、无发布 job 时无 release 可看，不问；一旦开始发版，每版都要看。
+    const hasAnyTag = Array.isArray(s.git?.tags) && s.git.tags.length > 0
+    const hasRelJob = s.docs?.workflowAutomation?.hasReleaseJob === true
+    if (hasAnyTag || hasRelJob) {
+      pending.push('Obsidian 发布附件待核：去该版本 Release 页确认 main.js + manifest.json (+styles.css 如有) 都在附件列表，且 tag 与两处 manifest.json 版本三方一致')
+    }
+    // 触发器形状：裸版本（1.2.3）才对；v* 只对 npm 一类成立。
+    // releaseTriggerTags 取的是各工作流 on.push.tags 原文；releaseJobConditionTagsV
+    // 说明条件里写死了 refs/tags/v（裸标签永远进不来）。两者任一命中 v 即问。
+    const trig = s.docs?.workflowAutomation?.releaseTriggerTags ?? []
+    const condV = s.docs?.workflowAutomation?.releaseJobConditionTagsV === true
+    const trigHasV = trig.some((t) => /(^|[^0-9])v\*?/i.test(t) || /^v/i.test(t))
+    if (trigHasV || condV) {
+      pending.push(`Obsidian 标签触发器是 v 形状（触发器原文：${trig.join('、') || '未读到'}${condV ? '；条件写死了 refs/tags/v' : ''}）：宿主要求裸版本 tag（如 1.2.3），v* 推上去认不出——按专章第七节改触发器`)
+    }
   }
 
   // 6c. 本地 skills：只盘点，不强求；已有被改坏才拦。
@@ -314,17 +348,71 @@ function main(argv) {
 
   // 6d. 生态发布门禁：只判本生态清单事实，不拼他生态命令。
   const ecoKinds = s.ecosystem?.kinds ?? []
-  if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined
-    && s.artifacts.pythonBuild.hasBuildSystem !== true) {
-    pending.push('Python 缺构建后端声明：无 [build-system] 即无权威构建入口，补上再定发布预演')
+  // Python：后端缺了即无权威构建入口（待问）；readme/license 缺了服务端大概率
+  // 拒绝（报缺——长描述渲染炸是最常见的 400）；requires-python 缺了只待问
+  // （装到旧版难定位，但不挡发布）；dynamic version 只提示 tag 对齐按后端取值。
+  if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined) {
+    if (s.artifacts.pythonBuild.hasBuildSystem !== true) {
+      pending.push('Python 缺构建后端声明：无 [build-system] 即无权威构建入口，补上再定发布预演')
+    }
+    const pm = s.artifacts.pythonMeta
+    if (pm !== undefined) {
+      if (pm.hasReadme !== true) missing.push('Python 缺 readme 声明（长描述渲染失败是服务端最常见的拒绝原因，先补再发）')
+      if (pm.hasLicense !== true) missing.push('Python 缺 license 声明（新后端要求 SPDX 字符串 + license-files，旧写法会报“应为 dict”）')
+      if (pm.hasRequiresPython !== true) {
+        pending.push('Python 缺 requires-python：不挡发布，但用户装到旧版时难定位；确认支持下限后补上')
+      }
+      if (pm.hasDynamicVersion === true) {
+        pending.push('Python 版本号走 dynamic：tag 对齐按后端取值（如 tag 或源码），不要照抄文件里的字面版本号')
+      }
+    }
   }
   if (ecoKinds.includes('go') && s.artifacts?.goModule !== undefined
     && s.artifacts.goModule.goDirective === undefined) {
     pending.push('Go 缺 go 指令：最低版本不明，补上再定兼容承诺')
   }
+  // Rust：license/description 缺了服务端拒绝（报缺）；keywords/categories 超 5 个
+  // 同样拒绝（报缺——勘察已数好个数）；edition 未声明只待问（缺省 2015 可发布）。
   if (ecoKinds.includes('rust') && s.artifacts?.cargoMeta !== undefined) {
     if (s.artifacts.cargoMeta.license !== true) missing.push('Rust 缺 license 声明（发布必填其一：license 或 license-file）')
     if (s.artifacts.cargoMeta.description !== true) missing.push('Rust 缺 description 声明（发布必填）')
+    const cm = s.artifacts.cargoMeta
+    if (typeof cm.keywordsCount === 'number' && cm.keywordsCount > 5) {
+      missing.push(`Rust keywords ${cm.keywordsCount} 个（上限 5 个，超了服务端拒绝）`)
+    }
+    if (typeof cm.categoriesCount === 'number' && cm.categoriesCount > 5) {
+      missing.push(`Rust categories ${cm.categoriesCount} 个（上限 5 个，超了服务端拒绝）`)
+    }
+    if (cm.hasEdition !== true) {
+      pending.push('Rust 未声明 edition（缺省 2015 可发布，建议显式声明当前版本）')
+    }
+  }
+  // 发布自动化接线：有发布动作痕迹的生态，按对应专章逐项核对“登记了没有”。
+  // 机器只认“动作痕迹 + OIDC 有无”两个比特，不猜登记内容对不对——对不对只能人去
+  // 制品库设置页逐字对，错了只在发布那一刻爆错。三种都是待问（问完消不掉，只能改文件）。
+  const auto2 = s.docs?.workflowAutomation
+  if (auto2 !== undefined && s.artifacts?.private !== true) {
+    if (auto2.hasNpmPublish === true && auto2.usesOidc !== true) {
+      pending.push('npm 有发布动作但无 OIDC 声明：可信发布要 id-token: write + 制品库侧登记（组织/仓库/工作流文件名逐字一致）；用长期令牌则规划迁移（见 publish-npm 接线步骤）')
+    }
+    if (auto2.hasPypiPublish === true && auto2.usesOidc !== true) {
+      pending.push('PyPI 有发布动作但无 OIDC 声明：可信发布要 pending publisher（包名/仓库/工作流文件名/environment）+ 发布 job 的 id-token: write，且构建与发布分 job；用 API Token 则确认已放机密存储（见 publish-python 认证一节）')
+    }
+    if (auto2.hasCargoPublish === true && auto2.usesOidc !== true) {
+      pending.push('crates.io 有发布动作但无 OIDC 声明：可信发布要用官方认证 action 换短期令牌 + job 的 id-token: write，且先手动发布过一次（见 publish-rust 认证一节）；用 API Token 则确认已放机密存储')
+    }
+    // Release job 的形状三件套：引用约定名、写权限、全历史检出。缺一即待问。
+    if (auto2.hasReleaseJob === true) {
+      if (auto2.usesReleaseToken !== true) {
+        pending.push('发布 job 未引用约定的 RELEASE_TOKEN：凭据名拼错会静默空跑出 401，先查名（只看有没有，不看值）')
+      }
+      if (auto2.hasContentsWrite !== true) {
+        pending.push('发布 job 未声明 contents: write：建 Release 需要写权限（npm OIDC 的 id-token 与它是两回事，不要以为写了一个另一个顺带有了）')
+      }
+      if (auto2.hasFetchDepthZero !== true) {
+        pending.push('发布 job 检出缺 fetch-depth: 0：起草脚本要读上一个标签，无全历史首版取全量与区间都算不对')
+      }
+    }
   }
 
   for (const t of ok) line('齐', t)

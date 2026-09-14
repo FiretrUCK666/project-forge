@@ -335,7 +335,9 @@ AI 只填取值，漏不掉。
 ### 发布自动化的人工部分（自动化做不了，照着做只要 5 分钟）
 
 `templates/ci-release.yml` 用的凭证在仓库 Secrets 里，名叫 `RELEASE_TOKEN`：细粒度 token，
-仅 Contents 读写、仅本仓库、有效期以上限为准（以平台创建页显示为准）。建成后验证三件事：推一个 `v*` 标签 → `release` job 变绿 →
+仅 Contents 读写、仅本仓库、有效期以上限为准（以平台创建页显示为准；有效期取 1–366 整数或
+不限，默认 30 天；组织可设最长有效期卡掉不限期；令牌绑定签发人，失权即失效）。
+建成后验证三件事：推一个 `v*` 标签 → `release` job 变绿 →
 Releases 页出现该版本。token 过期或换人时只换 Secrets 里那一个值，代码不动。
 
 ### 配完后的核对表（给目标项目配完自动化，逐项打勾）
@@ -345,9 +347,12 @@ Releases 页出现该版本。token 过期或换人时只换 Secrets 里那一�
 | CI 跑的命令与本地门禁是同一批 | 逐条对照 `AGENTS.md` 构建与验证节 |
 | 产物入库的项目有逐字节一致检查 | 看 CI 里有没有重建比对那一步 |
 | 打标签能触发 Release | 推一个测试标签或看 `release` job 历史 |
-| Secret 已建且名字 exactly `RELEASE_TOKEN` | 看仓库 Settings → Secrets（只看有没有，不看值） |
-| npm 包要自动发布：可信发布已登记 | 按 `references/publish-npm.md` 接线步骤逐项核对（组织/仓库/文件名逐字一致） |
-| 标签形状与清单/专章一致 | npm 一类 `v*`；Obsidian 与 `manifest.json` 完全一致 |
+| Secret 已建且名字 exactly `RELEASE_TOKEN` | 看仓库 Settings → Secrets（只看有没有，不看值；引用错名会静默空跑出认证失败，先查名） |
+| Release job 有写权限与全历史检出 | 看工作流里有没有 `contents: write` 与 `fetch-depth: 0`（前者建 Release 用，后者起草读上一个标签用） |
+| npm 包要自动发布：可信发布已登记 | 按 `references/publish-npm.md` 接线步骤逐项核对（组织/仓库/文件名逐字一致，另有 environment 名与允许的动作） |
+| Python 包要自动发布：可信发布已登记 | 按 `references/publish-python.md` 接线步骤逐项核对（包名/仓库/工作流文件名/environment 名逐字一致，构建与发布分 job） |
+| Rust 包要自动发布：可信发布已登记 | 按 `references/publish-rust.md` 接线步骤逐项核对（仓库/工作流文件名逐字一致，短时身份权限与官方认证 action，先手动发布过一次） |
+| 标签形状与清单/专章一致 | npm 一类 `v*`；Obsidian 与 `manifest.json` 完全一致（裸版本，不带 `v`，见专章第七节） |
 
 有一项没勾，自动化就不算配完——宁可当时多看一眼，不要等用户装不上再回头查。
 

@@ -949,24 +949,60 @@ function detectArtifacts(root, root_, eco) {
     const e = root_.entry(d)
     if (e?.isDir === true) facts.distDirsPresent.push(e.name)
   }
-  // Obsidian 发布三件套 presence：目录处理读默认分支 HEAD 的 manifest，
-  // 安装从 tag==version 的 release 下载三件，缺一件即断链。
+  // Obsidian 发布三件套 presence：
+  //   - manifest 恒有（能走到这里说明 manifest.json 已被守卫过 minAppVersion）；
+  //   - mainJs/stylesCss 只看根目录有无：官方模板的忽略规则要求 main.js 不进版本库、
+  //     只进发布附件，所以“根目录无 main.js”是正常态，不是缺陷——review 只在
+  //     release 附件语境下问它，不在这里下结论；
+  //   - mainJsIgnored 告诉上层“无 main.js 是有意的忽略还是真的没构建”；
+  //   - hasVersionsJson 回退映射有无（旧宿主用户靠它）；
+  //   - manifestId 合法性只做文本形状判断（小写字母与连字符、不含 obsidian、
+  //     不以 plugin 结尾），供人复核，不做硬结论。
   if (root_.real('manifest.json') !== undefined) {
+    const manifestText = readText(join(root, root_.real('manifest.json'))) ?? ''
+    const manifestId = (/"id"\s*:\s*"([^"]+)"/.exec(manifestText) ?? [])[1]
+    let mainJsIgnored = undefined
+    try {
+      const gi = readText(join(root, root_.real('.gitignore') ?? '.gitignore'))
+      if (gi !== undefined) {
+        mainJsIgnored = gi.split(/\r?\n/).some((l) => {
+          const t = l.trim()
+          return t !== '' && !t.startsWith('#') && /(^|\/)main\.js$/.test(t)
+        })
+      }
+    } catch { /* 读不到就不判 */ }
     facts.obsidianArtifacts = {
       manifest: true,
       mainJs: root_.has('main.js'),
       stylesCss: root_.has('styles.css'),
+      hasVersionsJson: root_.has('versions.json'),
+      mainJsIgnored,
+      manifestId,
+      manifestIdShapeOk: manifestId === undefined ? undefined
+        : /^[a-z-]+$/.test(manifestId)
+        && !manifestId.includes('obsidian')
+        && !manifestId.endsWith('plugin'),
     }
   }
   // Rust：publish=false 即声明不可发布（复用 private 机器）；license/description 有无进 facts。
   // 只做文本 presence 判断，不解释 Cargo 语义。
+  // 另收 keywords/categories 数量（各至多 5 个，超了服务端拒绝）与 dependents 风险位：
+  // edition 缺省 2015 可发布（不是必填），authors 已废弃不判。
   const cargoReal = root_.real('cargo.toml')
   if (cargoReal !== undefined) {
     const cargo = readText(join(root, cargoReal)) ?? ''
     if (/^\s*publish\s*=\s*false/m.test(cargo)) facts.private = true
+    const countList = (key) => {
+      const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(cargo)
+      if (m === null) return undefined
+      return m[1].split(',').map((s) => s.trim()).filter(Boolean).length
+    }
     facts.cargoMeta = {
       license: /^\s*license\s*=/m.test(cargo),
       description: /^\s*description\s*=/m.test(cargo),
+      keywordsCount: countList('keywords'),
+      categoriesCount: countList('categories'),
+      hasEdition: /^\s*edition\s*=/m.test(cargo),
     }
   }
   // Go：module 路径、go 指令版本、retract 有无。只读文本，不下结论。
@@ -980,10 +1016,20 @@ function detectArtifacts(root, root_, eco) {
     }
   }
   // Python：构建后端声明有无（构建命令只在有后端时给，见 deriveCommands）。
+  // 另收发布硬门禁的三组 presence（只报有无，供 review 逐项点名）：
+  //   readme/license 字段（长描述渲染炸是最常见的 400 拒绝）；
+  //   requires-python（装到旧版的根因定位用）；
+  //   dynamic version（版本号权威在后端，tag 对齐要按后端取值）。
   const pyReal = root_.real('pyproject.toml')
   if (pyReal !== undefined) {
     const pyText = readText(join(root, pyReal)) ?? ''
     facts.pythonBuild = { hasBuildSystem: /\[build-system\]/.test(pyText) }
+    facts.pythonMeta = {
+      hasReadme: /^\s*readme\s*=/m.test(pyText),
+      hasLicense: /^\s*license(\s*=|\s*\[)/m.test(pyText),
+      hasRequiresPython: /^\s*requires-python\s*=/m.test(pyText),
+      hasDynamicVersion: /dynamic\s*=\s*\[[^\]]*["']version["']/.test(pyText),
+    }
   }
   return facts
 }
@@ -1223,7 +1269,21 @@ function detectDocs(root, root_) {
         // 对错由 references/remote-github.md 第八节的核对表判定。
         // 只读每个文件前 WORKFLOW_HEAD_LIMIT，大工作流不至于拖慢勘察；超限时必须置 truncated，
         // 否则下游会把“没看到”当成“没有”。limit 值随输出携带，文档只写“实现定义的截断上限”。
-        const auto = { files, hasReleaseJob: false, usesSecrets: false, usesOidc: false, usesNotesFile: false, usesGenerateNotes: false, truncated: false, headLimit: WORKFLOW_HEAD_LIMIT }
+        const auto = {
+          files, hasReleaseJob: false, usesSecrets: false, usesOidc: false,
+          usesNotesFile: false, usesGenerateNotes: false,
+          // 发布链路的进一步形状（review 门禁的输入，只做文本 presence 判断）：
+          //   releaseTriggerTags  各工作流 on.push.tags 里声明的标签模式原文（如 v*）；
+          //   releaseJobConditionTagsV  条件里写死了 refs/tags/v（裸版本标签永远进不来）；
+          //   usesReleaseToken  是否引用了约定的 RELEASE_TOKEN；
+          //   hasContentsWrite  是否声明了 contents: write（建 Release 所需权限之一）；
+          //   hasFetchDepthZero  检出是否含全历史（起草要读上一个标签）；
+          //   hasNpmPublish / hasPypiPublish / hasCargoPublish  各生态的发布动作痕迹。
+          releaseTriggerTags: [], releaseJobConditionTagsV: false,
+          usesReleaseToken: false, hasContentsWrite: false, hasFetchDepthZero: false,
+          hasNpmPublish: false, hasPypiPublish: false, hasCargoPublish: false,
+          truncated: false, headLimit: WORKFLOW_HEAD_LIMIT,
+        }
         for (const f of files) {
           const text = readText(join(gh, wfEntry.name, f))
           if (text === undefined) continue
@@ -1236,6 +1296,27 @@ function detectDocs(root, root_) {
           if (/id-token\s*:\s*write/.test(head)) auto.usesOidc = true
           if (/--notes-file/.test(head)) auto.usesNotesFile = true
           if (/--generate-notes/.test(head)) auto.usesGenerateNotes = true
+          if (/secrets\.RELEASE_TOKEN/.test(head)) auto.usesReleaseToken = true
+          if (/contents\s*:\s*write/.test(head)) auto.hasContentsWrite = true
+          if (/fetch-depth\s*:\s*0/.test(head)) auto.hasFetchDepthZero = true
+          if (/npm\s+publish/.test(head)) auto.hasNpmPublish = true
+          if (/pypa\/gh-action-pypi-publish|twine\s+upload/.test(head)) auto.hasPypiPublish = true
+          if (/cargo\s+publish/.test(head)) auto.hasCargoPublish = true
+          if (/refs\/tags\/v/.test(head)) auto.releaseJobConditionTagsV = true
+          // 标签触发器只认 on.push.tags 的两种常见 YAML 写法（行内数组与短横列表），
+          // 取原文不解释语义；workflow_dispatch 的 inputs.tag 是单数，不会误收。
+          for (const m of head.matchAll(/tags\s*:\s*\[([^\]]*)\]/g)) {
+            for (const item of m[1].split(',')) {
+              const v = item.trim().replace(/^['"]|['"]$/g, '')
+              if (v !== '' && !auto.releaseTriggerTags.includes(v)) auto.releaseTriggerTags.push(v)
+            }
+          }
+          for (const m of head.matchAll(/tags\s*:\s*\n((?:[ \t]*-[ \t]*[^\n]+\n?)+)/g)) {
+            for (const line of m[1].split('\n')) {
+              const v = line.replace(/^\s*-\s*/, '').trim().replace(/^['"]|['"]$/g, '')
+              if (v !== '' && !auto.releaseTriggerTags.includes(v)) auto.releaseTriggerTags.push(v)
+            }
+          }
         }
         docs.workflowAutomation = auto
       } catch { /* 忽略 */ }
@@ -1627,8 +1708,43 @@ function toMarkdown(s) {
   }
   if (a.obsidianArtifacts !== undefined) {
     const o = a.obsidianArtifacts
-    L.push(`- Obsidian 发布三件套：manifest.json 有；main.js ${o.mainJs ? '有' : '**缺**'}；styles.css ${o.stylesCss ? '有' : '无（可选）'}`
-      + (o.mainJs ? '' : '——缺 main.js 即安装断链'))
+    // main.js 根目录缺席是正常态（官方模板要求它只进发布附件，不进版本库）：
+    // “有”只说明构建过，“无”不说明断链——断链看的是发布附件，不是仓库根。
+    // mainJsIgnored 区分“有意忽略”与“还没构建过”。
+    const mainState = o.mainJs === true ? '有（构建产物在仓库根，发布前确认附件即可）'
+      : o.mainJsIgnored === true ? '无（已被忽略规则排除，符合官方模板：只进发布附件）'
+        : '无（且未被忽略：要么还没构建，要么忽略规则漏了 main.js）'
+    L.push(`- Obsidian 发布：manifest.json 有；main.js ${mainState}；`
+      + `styles.css ${o.stylesCss ? '有' : '无（可选，无样式时两处都可省略）'}；`
+      + `versions.json ${o.hasVersionsJson ? '有' : '无（只在 minAppVersion 变化时才需要）'}`)
+    if (o.manifestId !== undefined) {
+      L.push(`- Obsidian 插件 id：${o.manifestId}`
+        + (o.manifestIdShapeOk === true ? '（形状符合：小写连字符、无 obsidian、无 plugin 结尾）'
+          : o.manifestIdShapeOk === false ? '（**形状可疑**：应为小写字母与连字符、不含 obsidian、不以 plugin 结尾，提交审核会被拒）'
+            : ''))
+    }
+  }
+  if (a.pythonMeta !== undefined) {
+    const p = a.pythonMeta
+    const lacks = []
+    if (p.hasBuildSystem !== true && a.pythonBuild?.hasBuildSystem !== true) lacks.push('构建后端')
+    if (p.hasReadme !== true) lacks.push('readme')
+    if (p.hasLicense !== true) lacks.push('license')
+    if (p.hasRequiresPython !== true) lacks.push('requires-python')
+    const lacksText = lacks.length === 0 ? '构建后端/readme/license/requires-python 都有'
+      : '缺 ' + lacks.join('、') + '（前两者缺了服务端大概率拒绝，末者缺了装到旧版难定位）'
+    L.push('- Python 发布元数据：' + lacksText
+      + (p.hasDynamicVersion === true ? '；版本号走 dynamic（tag 对齐按后端取值，不要照抄文件里的字面）' : ''))
+  }
+  if (a.cargoMeta !== undefined) {
+    const c = a.cargoMeta
+    const over = []
+    if (typeof c.keywordsCount === 'number' && c.keywordsCount > 5) over.push(`keywords ${c.keywordsCount} 个（上限 5）`)
+    if (typeof c.categoriesCount === 'number' && c.categoriesCount > 5) over.push(`categories ${c.categoriesCount} 个（上限 5）`)
+    const overText = over.length > 0 ? '；**' + over.join('、') + '，超了服务端拒绝**' : ''
+    L.push('- Rust 发布元数据：license ' + (c.license ? '有' : '**缺**') + '；description ' + (c.description ? '有' : '**缺**')
+      + (c.hasEdition === true ? '；edition 有' : '；edition 未声明（缺省 2015 可发布，建议显式声明）')
+      + overText)
   }
   L.push('')
   L.push('## 忽略规则')
@@ -1676,6 +1792,23 @@ function toMarkdown(s) {
       + `发布 job：${auto.hasReleaseJob ? '有' : '无'}；Secrets 引用：${auto.usesSecrets ? '有' : '无'}；`
       + `OIDC 短时身份：${auto.usesOidc ? '有' : '无'}（npm 自动发布靠它，无则对照可信发布接线步骤）`)
     if (!auto.hasReleaseJob) L.push('  - 无发布 job 时对照 `templates/ci-release.yml` 看该不该补')
+    else {
+      // 发布 job 的三处形状只报“有无”，结论由 review 下：
+      // RELEASE_TOKEN 引用、contents 写权限、全历史检出，三者缺一都值得问一句。
+      const shapeLacks = []
+      if (auto.usesReleaseToken !== true) shapeLacks.push('未引用约定的 RELEASE_TOKEN')
+      if (auto.hasContentsWrite !== true) shapeLacks.push('未声明 contents: write')
+      if (auto.hasFetchDepthZero !== true) shapeLacks.push('检出缺 fetch-depth: 0（起草读不到上一个标签）')
+      if (shapeLacks.length > 0) L.push(`  - 发布 job 形状缺口：${shapeLacks.join('、')}`)
+      if (Array.isArray(auto.releaseTriggerTags) && auto.releaseTriggerTags.length > 0) {
+        L.push(`  - 标签触发器原文：${auto.releaseTriggerTags.join('、')}（Obsidian 项目须为裸版本形状，见专章第七节）`)
+      }
+      const ecoPublishes = []
+      if (auto.hasNpmPublish === true) ecoPublishes.push('npm publish')
+      if (auto.hasPypiPublish === true) ecoPublishes.push('pypi 上传')
+      if (auto.hasCargoPublish === true) ecoPublishes.push('cargo publish')
+      if (ecoPublishes.length > 0) L.push(`  - 生态发布动作痕迹：${ecoPublishes.join('、')}（按对应专章核对接线，不要只看 Release 建了没有）`)
+    }
     if (auto.truncated === true) {
       L.push(`  - **有工作流只读了前 ${auto.headLimit ?? WORKFLOW_HEAD_LIMIT} 字符，未报不等于没有**：发布 job 藏在后面的大文件需手工确认`)
     }

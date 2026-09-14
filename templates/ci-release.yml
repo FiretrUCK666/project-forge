@@ -9,7 +9,8 @@
 #   token 一辈子只出现在两个框里（生成框 → Secrets 输入框），不进仓库、不进聊天。
 #
 # TODO(1) 标签形状：按生态惯例只留一个——npm 一类 `v*`；Go 模块代理 `v*` 同形；
-#   Obsidian 插件必须与 manifest.json 的 version 完全一致（注意带不带 v，见专章）。
+#   Obsidian 插件必须与 manifest.json 的 version 完全一致（裸版本，不带 v，
+#   如 1.2.3；v* 推上去宿主认不出，见专章第七节）。review 会按触发器原文卡这一项。
 # TODO(2) 发布正文：默认从提交记录起草中文说明（提交信息本来就是人话，收集即正文；
 #   无上一标签的首版取全量，不交英文白卷）。做法：检出加 fetch-depth: 0，
 #   先跑起草脚本写出 UTF-8 文件，再 --notes-file 发送（中文不经 shell）。
@@ -17,26 +18,37 @@
 #   纯脚本项目用同原理的 shell 版）；只要 --generate-notes 就仍是英文模板。
 #   要手写正文时改用 scripts/release-notes.mjs 路径（UTF-8 文件按字节发送、回读比对）。
 # TODO(3) 门禁先行：本文件独立触发，默认不含门禁；要“检查全绿才许发布”时，
-#   把 templates/ci-check.yml 的 job 合并进同一文件再加 needs，而不要跨文件 needs。
+#   把 templates/ci-check.yml 的 job 合并进同一文件再加 needs，而不要跨文件 needs
+#   （needs 只能引用同一文件内的 job，跨文件在语法层即无效；替代桥 workflow_run
+#   引入竞态与复杂度，本模板不选它）。
 # 补漏：标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名——不要重打标签。
+#   必须触发登记的同一个文件名（身份含文件名，调别的文件身份不对），且该文件须在默认分支上
+#   （否则点触发没反应不是“坏了”）。tag 名打错时创建命令会自动建一个同名新标签，
+#   所以先确认标签已存在，必要时加校验标签的 flag。
 #
 # 变体（分支驱动附件发布）：有的仓库推主干即发版、附件随包走（如插件模板的成品 tgz）。
 #   那是另一套政策，不是本模板改个触发分支就能套用的：版本号来源、附件命名、同版重推
 #   是否刷新、CI 与发布是否同文件，都要按该仓库文档重定。本模板只覆盖“标签驱动写发布说明”。
 #
 # TODO(4) npm 包才需要以下这段（GitHub Release 上面已建好）：可信发布（OIDC）无需长期令牌，
-#   但要先带用户在 npm 网站登记发布者身份（组织/仓库/工作流文件名逐字一致，见
-#   references/publish-npm.md「可信发布接线步骤」），否则 Publish 步骤报无权失败。
+#   但要先带用户在 npm 网站登记发布者身份（组织/仓库/工作流文件名逐字一致，另有 environment 名
+#   与允许的动作，见 references/publish-npm.md「可信发布接线步骤」），否则 Publish 步骤报无权失败。
 #   非 npm 项目整段删掉。
 #
 #   permissions:
-#     id-token: write   # 签发短时身份用；建 Release 另需 contents: write，二者互不干扰
-#   - uses: actions/setup-node@v4   # 与 ci-check.yml 同大版本，分头写会漂移
+#     id-token: write   # 给 npm 可信发布换短期令牌用
+#     contents: read    # 供检出与读代码用；建 Release 另需 contents: write（顶层另声明），
+#                       # 两者服务对象不同：一个给制品库，一个给平台——不要以为写了一个另一个顺带有了
+#   - uses: actions/setup-node@v4   # 与 ci-check.yml 同大版本，分头写会漂移；落盘前核对最新大版本
 #     with:
 #       node-version: '<清单声明的版本>'
-#       registry-url: 'https://registry.npmjs.org'
-#       package-manager-cache: false   # 发布构建不用缓存，旧缓存会改变发出去的东西
-#   # Node 自带的 npm 可能过旧（可信发布要较新的 npm 大版本）：npm install -g npm@^<大版本>
+#       registry-url: 'https://registry.npmjs.org'   # 决定短时身份交换的地址，必须写公共制品库
+#       package-manager-cache: false   # 发布构建永不用缓存：旧缓存会改变发出去的东西，
+#                                      # 且中毒的缓存可把短时身份令牌暴露给攻击者控制的代码
+#   # Node 自带的 npm 可能过旧：可信发布要求较新的 npm 大版本与较新的 Node 配对
+#   #   （setup-node 没有 npm-version 输入，只能单起一步升级）：
+#   #   npm install -g npm@11.5.1
+#   # 首版实战有人报告不加显式背书声明发不出去、加了就通：把显式声明留在命令或清单里无害。
 #   - name: 发布前门禁（与 check  job 同一批命令，不许发布没验过的树）
 #     run: |
 #       <构建命令>
@@ -66,9 +78,72 @@
 #       echo "::error::$NAME@$VERSION 发布 5 分钟后仍未在制品库出现（最后一次 HTTP $CODE）——不要重发同号，先查原因。"
 #       exit 1
 #
-# TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写——Python 见
-#   references/publish-python.md「认证」一节（构建与发布分 job），Rust 见
-#   references/publish-rust.md「认证」一节，Go 无上传动作不需要发布 job（标签即发布）。
+# TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写——
+#   Python 见下 TODO(5a)（构建与发布分 job），Rust 见下 TODO(5b)，
+#   Go 无上传动作不需要发布 job（标签即发布，推完触发代理收录即可）。
+#
+# TODO(5a) Python 包的发布段（GitHub Release 上面已建好之后再加这段）：
+#   登记：制品库网站建 pending publisher（包名/仓库/工作流文件名/environment 名逐字一致，
+#   正式与测试各建各的，见 references/publish-python.md「可信发布接线步骤」）。
+#   机制：构建与发布分两个 job——构建 job 产出 dist 并上传为 artifact，
+#   发布 job 只下载 artifact 再上传，不在发布 job 内构建。
+#   发布 job 声明短时身份签发权限；正式只在标签推送时发，测试每次推送都可发
+#   （测试发布地址指测试源）。切到可信发布后删掉旧的长期令牌。
+#
+#   jobs:
+#     build:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#         - uses: actions/setup-python@v5   # 落盘前核对最新大版本
+#           with: { python-version: '<清单声明的版本>' }
+#         - run: python -m build             # 先产出确切文件
+#         - run: python -m twine check --strict dist/*   # 长描述渲染先验
+#         - uses: actions/upload-artifact@v4 # 落盘前核对最新大版本
+#           with: { name: python-package-distributions, path: dist/ }
+#     publish-to-pypi:
+#       if: startsWith(github.ref, 'refs/tags/v')
+#       needs: [build]
+#       runs-on: ubuntu-latest
+#       environment: pypi   # 与登记的 environment 名逐字一致；正式建议配人工审批
+#       permissions: { id-token: write }   # 短时身份用；只给发布 job
+#       steps:
+#         - uses: actions/download-artifact@v4
+#           with: { name: python-package-distributions, path: dist/ }
+#         - uses: pypa/gh-action-pypi-publish@release/v1   # 落盘前核对版本
+#     publish-to-testpypi:   # 可选：每次推送都发测试源看流水健康
+#       needs: [build]
+#       runs-on: ubuntu-latest
+#       environment: testpypi
+#       permissions: { id-token: write }
+#       steps:
+#         - uses: actions/download-artifact@v4
+#           with: { name: python-package-distributions, path: dist/ }
+#         - uses: pypa/gh-action-pypi-publish@release/v1
+#           with: { repository-url: 'https://test.pypi.org/legacy/' }   # 测试源只差这一行
+#
+# TODO(5b) Rust 包的发布段（GitHub Release 上面已建好之后再加这段）：
+#   登记：先手动发布过一次（操作者为所有者），再在 crate 设置页登记仓库、
+#   workflow 文件名（逐字一致）与可选 environment（见 references/publish-rust.md「认证」一节）。
+#   机制：发布 job 声明短时身份签发权限，用官方认证 action 换出 30 分钟令牌
+#   再以环境变量传给发布命令；触发器收敛到标签或受保护分支。
+#
+#     publish-to-crates:
+#       if: startsWith(github.ref, 'refs/tags/v')
+#       runs-on: ubuntu-latest
+#       environment: release   # 可选，配合审批缩攻击面；与登记一致
+#       permissions: { id-token: write }   # 换短期令牌用；只给发布 job
+#       steps:
+#         - uses: actions/checkout@v4
+#         - uses: <官方认证 action>   # 落盘时按专章写全名并核对版本，换出的令牌用完自动吊销
+#           id: auth
+#         - run: cargo publish --dry-run   # 先预演（只校验加打包，不上传）
+#         - run: cargo package --list      # 再核对文件清单
+#         - run: cargo publish
+#           env: { CARGO_REGISTRY_TOKEN: '${{ steps.auth.outputs.token }}' }
+#
+#   超时先查索引上有没有该版，有则按已发布处理，无则修因同号重发，不要改号重试；
+#   验通后删掉旧长期令牌（两法可并存过渡）。
 
 name: release
 

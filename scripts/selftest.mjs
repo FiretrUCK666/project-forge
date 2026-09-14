@@ -1700,6 +1700,174 @@ group('[34] Python/Go/Rust 发布事实与门禁：只认本生态清单')
   const okR4 = /不对外发布/.test(readFileSync(join(rsPriv, 'AGENTS.md'), 'utf8'))
   check(okR4, 'Rust 私有 → 契约写不对外发布')
   report(okR4, 'Rust：契约一致')
+
+  // Rust 新增位：keywords 超 5 个报缺（服务端拒绝），edition 缺席只待问（可发布）。
+  // 正反都要：超了拦得住，不超不误报——只验正面等于没验。
+  const rsOver = fixture('eco-rsover', {
+    'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\ndescription = "x"\nlicense = "MIT"\nkeywords = ["a", "b", "c", "d", "e", "f"]\n',
+  })
+  const rOver = rvOut(rv(rsOver, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release'))
+  const okR5 = /keywords 6 个/.test(rOver)
+  check(okR5, 'Rust keywords 超 5 → 报缺', rOver.split('\n').find((l) => /keywords/.test(l)) ?? '')
+  report(okR5, 'Rust：超限拦得住')
+  const rFull2 = rvOut(rv(rsFull, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release'))
+  const okR6 = !/keywords/.test(rFull2) && /edition/.test(rFull2)
+  check(okR6, 'Rust 元数据齐 → 不误报超限，但提示 edition 未声明')
+  report(okR6, 'Rust：反向不误报')
+
+  // Python 新增位：缺 readme/license 报缺（服务端大概率拒绝），缺 requires-python
+  // 只待问（不挡发布），dynamic version 提示 tag 对齐按后端取值。
+  const pyNoReadme = fixture('eco-pynoreadme', {
+    'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\n\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n',
+  })
+  const rPyNo = rvOut(rv(pyNoReadme, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release'))
+  const okPy4 = /Python 缺 readme/.test(rPyNo) && /Python 缺 license/.test(rPyNo)
+  check(okPy4, 'Python 缺 readme/license → 报缺', rPyNo.split('\n').find((l) => /Python 缺/.test(l)) ?? '')
+  report(okPy4, 'Python：缺元数据拦得住')
+  const pyDyn = fixture('eco-pydyn', {
+    'pyproject.toml': '[project]\nname = "p"\ndynamic = ["version"]\nreadme = "README.md"\nlicense = "MIT"\nrequires-python = ">=3.10"\n\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n',
+    'README.md': '# p\n',
+  })
+  const rPyDyn = rvOut(rv(pyDyn, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release'))
+  const okPy5 = !/Python 缺/.test(rPyDyn) && /dynamic/.test(rPyDyn)
+  check(okPy5, 'Python 元数据齐 + dynamic → 不报缺，但提示对齐按后端取值')
+  report(okPy5, 'Python：dynamic 提示到位')
+}
+
+group('[35] Obsidian 发布链：附件语境与触发器形状，机器说了算')
+{
+  const rv = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const rvOut = (r) => r.stdout ?? ''
+  const baseFlags = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release']
+  const manifestOf = (id) => JSON.stringify({
+    id, name: 'My Plugin', version: '1.2.3', minAppVersion: '1.0.0',
+    description: 'd.', author: 'a', isDesktopOnly: false,
+  })
+  // 未构建态的 CONTRIBUTING 骨架：review 的 CONTRIBUTING 门只认关键词有无，
+  // 这里给一份关键词齐全的，把变量固定在 Obsidian 门上，不让贡献指南门串扰。
+  const OBS_CONTRIB = '# C\n\n提问与反馈到 Issue 区。\n\n报告缺陷四件事。\n\n'
+    + '提出改动：先 fork，在分支上开发，门禁全绿开请求。不推主干，不打标签，不发布。\n\n'
+    + '开发环境：构建测试。\n\n提交前门禁：跑构建测试，全绿。\n\n'
+    + '硬性规范：完整规范以 AGENTS.md 为准。\n\n提交信息：一句话。\n\n许可：见 LICENSE。\n\n'
+    + '产物与源码一起提交。本地挂载后重启宿主验证。\n'
+
+  // 1) 官方模板态：main.js 被忽略、根目录无 main.js → 不报缺，只报附件待核。
+  // 旧判据在这里报“产物缺 main.js”，按官方模板做的项目永远过不了门——这就是要锁死的回归。
+  const tplState = fixture('obs-tplstate', {
+    'manifest.json': `${manifestOf('my-plugin')}\n`,
+    '.gitignore': 'main.js\n',
+    'README.md': '# p\n',
+  })
+  const sTpl = survey(tplState)
+  const okT1 = sTpl.artifacts?.obsidianArtifacts?.mainJs === false
+    && sTpl.artifacts?.obsidianArtifacts?.mainJsIgnored === true
+  check(okT1, '模板态：main.js 缺但被忽略 → 事实分得清', JSON.stringify(sTpl.artifacts?.obsidianArtifacts))
+  report(okT1, 'Obsidian：模板态事实正确')
+  const rTpl = rvOut(rv(tplState, ...baseFlags))
+  const okT2 = !/产物缺 main\.js/.test(rTpl) && /只进发布附件/.test(rTpl)
+  check(okT2, '模板态：不报“产物缺”，报附件语境')
+  report(okT2, 'Obsidian：模板态不误报')
+
+  // 2) 反向：main.js 既不在根目录、也没被忽略 → 待问（还没构建 or 忽略漏了）。
+  const noBuild = fixture('obs-nobuild', {
+    'manifest.json': `${manifestOf('my-plugin')}\n`,
+    'README.md': '# p\n',
+    'LICENSE': 'MIT\n',
+    'CONTRIBUTING.md': OBS_CONTRIB,
+    'AGENTS.md': '# p\n\n<!-- project-forge:kernel:start -->\n<!-- project-forge:kernel:end -->\n',
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const rNoBuild = rvOut(rv(noBuild, ...baseFlags))
+  const okN1 = /还没构建/.test(rNoBuild)
+  check(okN1, '未构建态 → 待问（不报缺）')
+  report(okN1, 'Obsidian：未构建问得住')
+
+  // 3) id 形状非法（含大写 obsidian 结尾 plugin 三毒俱全）→ 报缺，拦得住。
+  const badId = fixture('obs-badid', {
+    'manifest.json': `${manifestOf('Obsidian-Foo-Plugin')}\n`,
+    '.gitignore': 'main.js\n',
+    'README.md': '# p\n',
+  })
+  const rBad = rvOut(rv(badId, ...baseFlags))
+  const okB1 = /形状非法/.test(rBad)
+  check(okB1, '非法 id → 报缺', rBad.split('\n').find((l) => /形状/.test(l)) ?? '')
+  report(okB1, 'Obsidian：非法 id 拦得住')
+
+  // 4) 触发器形状：v* 触发器 + refs/tags/v 条件 → 待问裸版本；裸版本触发器则安静。
+  const vTrigger = fixture('obs-vtrigger', {
+    'manifest.json': `${manifestOf('my-plugin')}\n`,
+    '.gitignore': 'main.js\n',
+    'README.md': '# p\n',
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    if: startsWith(github.ref, \'refs/tags/v\')\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const rV = rvOut(rv(vTrigger, ...baseFlags))
+  const okV1 = /裸版本/.test(rV)
+  check(okV1, 'v* 触发器 → 待问裸版本')
+  report(okV1, 'Obsidian：v 形状问得住')
+  const bareTrigger = fixture('obs-baretrigger', {
+    'manifest.json': `${manifestOf('my-plugin')}\n`,
+    '.gitignore': 'main.js\n',
+    'README.md': '# p\n',
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["[0-9]*.[0-9]*.[0-9]*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const rBare = rvOut(rv(bareTrigger, ...baseFlags))
+  const okV2 = !/裸版本/.test(rBare)
+  check(okV2, '裸版本触发器 → 不误报')
+  report(okV2, 'Obsidian：裸形安静')
+}
+
+group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC 即安静')
+{
+  const rv = (dir, ...a) => spawnSync(process.execPath,
+    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const rvOut = (r) => r.stdout ?? ''
+  const baseFlags = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release']
+  const relBase = (extraStep) => 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n'
+    + `      - run: ${extraStep}\n        env:\n          GH_TOKEN: \${{ secrets.RELEASE_TOKEN }}\n`
+
+  // npm：有 publish 无 OIDC → 待问；加了 id-token 即安静。
+  const npmNo = fixture('auto-npmno', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/release.yml': `${relBase('npm publish')}`,
+  })
+  const okN1 = /npm 有发布动作但无 OIDC/.test(rvOut(rv(npmNo, ...baseFlags)))
+  check(okN1, 'npm 无 OIDC → 待问')
+  report(okN1, 'npm 接线：问得住')
+  const npmYes = fixture('auto-npmyes', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\npermissions:\n  id-token: write\n  contents: write\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm publish\n        env:\n          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}\n',
+  })
+  const okN2 = !/npm 有发布动作但无 OIDC/.test(rvOut(rv(npmYes, ...baseFlags)))
+  check(okN2, 'npm 有 OIDC → 不误报')
+  report(okN2, 'npm 接线：安静')
+
+  // PyPI：twine 痕迹无 OIDC → 待问。
+  const pyNo = fixture('auto-pyno', {
+    'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\n',
+    '.github/workflows/release.yml': `${relBase('twine upload dist/*')}`,
+  })
+  const okP1 = /PyPI 有发布动作但无 OIDC/.test(rvOut(rv(pyNo, ...baseFlags)))
+  check(okP1, 'PyPI 无 OIDC → 待问')
+  report(okP1, 'PyPI 接线：问得住')
+
+  // cargo：cargo publish 痕迹无 OIDC → 待问。
+  const rsNo = fixture('auto-rsno', {
+    'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\ndescription = "x"\nlicense = "MIT"\n',
+    '.github/workflows/release.yml': `${relBase('cargo publish')}`,
+  })
+  const okR1 = /crates\.io 有发布动作但无 OIDC/.test(rvOut(rv(rsNo, ...baseFlags)))
+  check(okR1, 'cargo 无 OIDC → 待问')
+  report(okR1, 'cargo 接线：问得住')
+
+  // Release 形状三件套：缺 contents:write 即待问；齐了即安静。
+  const noContents = fixture('auto-nocontents', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/release.yml': 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: gh release create test --notes-file n\n        env:\n          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}\n',
+  })
+  const okC1 = /contents: write/.test(rvOut(rv(noContents, ...baseFlags)))
+  check(okC1, '缺 contents:write → 待问')
+  report(okC1, 'Release 形状：问得住')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

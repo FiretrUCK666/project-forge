@@ -18,6 +18,11 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # 建 Release 要写权限：gh 默认拿 GITHUB_TOKEN（只读），这里显式给写。
+    # npm 可信发布的 id-token: write 与它是两回事（一个给制品库换短期令牌，
+    # 一个给平台建 Release），不要以为写了一个另一个顺带有了。
+    permissions:
+      contents: write
     steps:
       - name: 检出标签（含全历史，起草要读上一个标签）
         uses: actions/checkout@v4

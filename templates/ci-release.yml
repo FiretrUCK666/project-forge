@@ -44,6 +44,28 @@
 #   - name: 发布到 npm（tag 与清单版本号不一致直接失败，见模板 TODO(1)）
 #     run: npm publish --access public   # 私有包把 public 换成 restricted
 #
+#   # 发布后回读：`npm publish` 会在包「还在处理、尚不可见」时就成功退出并打印
+#   # `+ 包名@版本`，所以退出码 0 **不等于**制品库上真的有这一版。回读是唯一
+#   # 判据（见 references/publish.md「发布不是原子操作」）。没有这一步，
+#   # 一次没真正落地的发布会以「全绿」的样子过去，靠人事后肉眼核对才发现。
+#   - name: 确认制品库上真的出现了这个版本（回读，不是看退出码）
+#     run: |
+#       set -euo pipefail
+#       NAME="$(node -p "require('./package.json').name")"
+#       VERSION="$(node -p "require('./package.json').version")"
+#       ENCODED="$(node -p "encodeURIComponent(require('./package.json').name)")"
+#       URL="https://registry.npmjs.org/$ENCODED/$VERSION"
+#       for attempt in $(seq 1 60); do
+#         CODE="$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)"
+#         if [ "$CODE" = "200" ]; then
+#           echo "$NAME@$VERSION 已可见：$URL"
+#           exit 0
+#         fi
+#         sleep 5
+#       done
+#       echo "::error::$NAME@$VERSION 发布 5 分钟后仍未在制品库出现（最后一次 HTTP $CODE）——不要重发同号，先查原因。"
+#       exit 1
+#
 # TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写——Python 见
 #   references/publish-python.md「认证」一节（构建与发布分 job），Rust 见
 #   references/publish-rust.md「认证」一节，Go 无上传动作不需要发布 job（标签即发布）。

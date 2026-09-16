@@ -117,6 +117,9 @@ git pull
 | `references/docs-set.md` | 文档套装：各文档的读者是谁、职责、写法与同步纪律 |
 | `references/publish.md` | 发布总纲：能不能发、发到哪、版本号语义、什么时候该抬版本号 |
 | `references/publish-npm.md` | npm 专章：基础操作、各种既有状态怎么接、适用范围与常见误解 |
+| `references/publish-python.md` | Python 专章：清单三表、构建与预演、测试源、可信发布、版本与修正 |
+| `references/publish-go.md` | Go 专章：标签形状、无上传模型、收录确认、撤回、私有模块 |
+| `references/publish-rust.md` | Rust 专章：清单字段、发布范围、预演、认证、修正 |
 | `references/plugin-project.md` | 插件类项目：共同性质、判定协议、没有专章时的处理与生长规则 |
 | `references/plugins/` | 各生态的插件专章（一个生态一个文件） |
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
@@ -125,6 +128,7 @@ git pull
 | `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
 | `scripts/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
+| `scripts/draft-release-notes.mjs` | 从提交记录起草中文发布说明（平台的自动生成只会给英文模板） |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（私有仓库上的 GitHub 徽章显示不出来） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（从标题生成，锚点按 GitHub 的算法算） |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |

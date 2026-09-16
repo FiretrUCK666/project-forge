@@ -106,6 +106,9 @@ It never starts by writing. The first step is always a survey, then it tells you
 | `references/docs-set.md` | Doc set: who reads each doc, responsibilities, writing and sync discipline |
 | `references/publish.md` | Release overview: whether to release, where, version semantics, when to bump |
 | `references/publish-npm.md` | npm chapter: basics, how to pick up each existing state, scope and common misunderstandings |
+| `references/publish-python.md` | Python chapter: the three metadata tables, build and dry run, test index, trusted publishing, versions and fixes |
+| `references/publish-go.md` | Go chapter: tag shape, no-upload model, indexing confirmation, retraction, private modules |
+| `references/publish-rust.md` | Rust chapter: manifest fields, publish scope, dry run, authentication, fixes |
 | `references/plugin-project.md` | Plugin projects: shared traits, decision protocol, what to do without a dedicated chapter and growth rules |
 | `references/plugins/` | Per-ecosystem plugin chapters (one file each) |
 | `templates/` | Doc skeletons ready to start from, plus standard texts of short licenses |
@@ -114,6 +117,7 @@ It never starts by writing. The first step is always a survey, then it tells you
 | `scripts/preflight.mjs` | Self-check: reference integrity, kernel consistency, hard rules, scripts actually run |
 | `scripts/selftest.mjs` | Behavioral self-test: build fixtures, run for real, assert each decision |
 | `scripts/release-notes.mjs` | Write release notes from a UTF-8 file (non-ASCII never goes through the shell, read back and compare) |
+| `scripts/draft-release-notes.mjs` | Draft release notes from the commit log (the platform's generator only produces an English template) |
 | `scripts/check-badges.mjs` | Check whether README badges actually render (GitHub badges on private repos do not) |
 | `scripts/sync-toc.mjs` | Keep a Markdown TOC in sync with headings (generated from headings, GitHub anchor algorithm) |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, open questions resolved via flags before done |

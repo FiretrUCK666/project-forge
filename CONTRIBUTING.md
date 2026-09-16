@@ -61,13 +61,15 @@ cd project-forge
 node scripts/preflight.mjs
 node scripts/selftest.mjs
 node scripts/compose-agents.mjs . --check
-node scripts/sync-toc.mjs README.md --check
+node scripts/sync-toc.mjs README.md README.en.md --check
 ```
 
 第一条是结构自检（引用完整性、内核一致性、硬性规范）；第二条是**行为自检**——它造
-临时 fixture 实跑，断言每条判定的结果；第三条确认 `AGENTS.md` 里的通用内核与
-`templates/agents-kernel.md` 逐字一致；第四条确认 `README.md` 的目录与标题同步，
-改了标题或增删节后重跑 `node scripts/sync-toc.mjs README.md` 即同步。
+临时 fixture 实跑，断言每条判定的结果；第三条校验三件事：`AGENTS.md` 里的通用内核与
+`templates/agents-kernel.md` 逐字一致、内核标记恰好一对、**脚本生成的文件不缺节**
+（作者自己编排的文件不判缺节——编排是权威，脚本也不会替它补节）；第四条确认
+`README.md` 与 `README.en.md` 的目录与标题同步，改了标题或增删节后重跑
+`node scripts/sync-toc.mjs README.md README.en.md` 即同步。
 
 **改动判定逻辑时必须同时补 fixture。** `selftest.mjs` 里每一条断言都对应一个曾经真实
 出过的错误，改动之后如果它红了，先怀疑自己的改动，不要改断言去迁就实现。

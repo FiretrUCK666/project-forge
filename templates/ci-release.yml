@@ -11,6 +11,8 @@
 # TODO(1) 标签形状：按生态惯例只留一个——npm 一类 `v*`；Go 模块代理 `v*` 同形；
 #   Obsidian 插件必须与 manifest.json 的 version 完全一致（裸版本，不带 v，
 #   如 1.2.3；v* 推上去宿主认不出，见专章第七节）。review 会按触发器原文卡这一项。
+#   **触发行与 job 级 `if:` 里的 `refs/tags/v` 必须同时改**：只改 `on.push.tags`
+#   而把条件留着，裸版本标签永远进不来，job 一次都不会跑（模板里两处都标了 TODO(1)）。
 # TODO(2) 发布正文：默认从提交记录起草中文说明（提交信息本来就是人话，收集即正文；
 #   无上一标签的首版取全量，不交英文白卷）。做法：检出加 fetch-depth: 0，
 #   先跑起草脚本写出 UTF-8 文件，再 --notes-file 发送（中文不经 shell）。
@@ -47,7 +49,7 @@
 #                                      # 且中毒的缓存可把短时身份令牌暴露给攻击者控制的代码
 #   # Node 自带的 npm 可能过旧：可信发布要求较新的 npm 大版本与较新的 Node 配对
 #   #   （setup-node 没有 npm-version 输入，只能单起一步升级）：
-#   #   npm install -g npm@11.5.1
+#   #   npm install -g npm@<与该 Node 配对的最新大版本>   # 版本现场查，不要照抄示例号
 #   # 首版实战有人报告不加显式背书声明发不出去、加了就通：把显式声明留在命令或清单里无害。
 #   - name: 发布前门禁（与 check  job 同一批命令，不许发布没验过的树）
 #     run: |
@@ -149,7 +151,7 @@ name: release
 
 on:
   push:
-    tags: ['v*']  # TODO(1)
+    tags: ['v*']  # TODO(1) 改触发行时必须同改下面 job 级的 if: 条件
   workflow_dispatch:
     inputs:
       tag:

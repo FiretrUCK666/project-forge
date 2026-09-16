@@ -14,12 +14,14 @@
  * 退出码 0 = 全部通过；1 = 有失败。临时 fixture 用完即删。
  */
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import {
+  mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync,
+} from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
-import { evalFreshnessMarker, FRESHNESS_STALE_DAYS } from './preflight.mjs'
+import { evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles } from './preflight.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -91,6 +93,45 @@ function compose(dir, ...extra) {
   return spawnSync(process.execPath, [join(HERE, 'compose-agents.mjs'), dir, ...extra],
     { encoding: 'utf8' })
 }
+
+/** 把一棵目录树整份复制到 dest（跳过 skip 里的名字）。端到端跑 preflight 时用。 */
+function copyTree(src, dest, skip = new Set()) {
+  mkdirSync(dest, { recursive: true })
+  for (const e of readdirSync(src, { withFileTypes: true, encoding: 'utf8' })) {
+    if (skip.has(e.name)) continue
+    const from = join(src, e.name)
+    const to = join(dest, e.name)
+    if (e.isDirectory()) { copyTree(from, to, skip); continue }
+    if (e.isFile()) copyFileSync(from, to)
+  }
+}
+
+/** 在 fixture 里跑 git，用来造仓库状态。 */
+function gitIn(dir, ...args) {
+  return spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', windowsHide: true })
+}
+
+/** 在某个目录里跑真实的 preflight.mjs——它按脚本自身位置推导检查对象。 */
+function preflightIn(dir) {
+  const r = spawnSync(process.execPath, [join(dir, 'scripts', 'preflight.mjs')],
+    { encoding: 'utf8', windowsHide: true })
+  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+}
+
+/**
+ * 端到端自检用的 selftest 替身。
+ *
+ * 真实 selftest 会跑 preflight，而 preflight 又会跑 selftest —— 直接套娃。
+ * 这里只提供 preflight 期望的那一行摘要，让「脚本真的能跑起来」这条检查有事可做。
+ */
+const SELFTEST_STUB = [
+  '#!/usr/bin/env node',
+  '// preflight 的端到端 fixture 专用替身：只输出摘要行，不做任何检查。',
+  '// 用途是让 preflight 的「脚本真的能跑起来」那一步有输出可断言，',
+  '// 同时避免 preflight 与 selftest 互相调用造成无限递归。',
+  'process.stdout.write("行为自检：0 项通过，0 项失败\\n")',
+  '',
+].join('\n')
 
 // ── 一、未初始化 git 时的密钥扫描（曾静默退化成只扫顶层） ────────────────────
 
@@ -1596,10 +1637,20 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     'lib/index.js': 'export const name = "fresh"\n',
   })
   // 与标记一致 → 安静（只断言无警告，不断言其他输出）
+  //
+  // 基准从专章的核对标记**现场取**，不写死版本号：写死就等于每次重核宿主后都要有人
+  // 记得来改这个 fixture，而忘了改的症状恰好就是「对齐场景报红」——那会让人误以为
+  // 实现坏了。对齐断言该问的只有一件事：**与标记相同的锁定版本，会不会被误报成漂移**。
   {
-    const dir = mkDual('^0.1.5-rc.1')
+    const markerText = readFileSync(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'), 'utf8')
+    const hostPin = /dsh-verified:\s*host=(\S+)/.exec(markerText)?.[1]
+    check(typeof hostPin === 'string' && hostPin.length > 0,
+      '专章核对标记的 host= 取得到（对齐 fixture 的基准）', String(hostPin))
+    report(typeof hostPin === 'string' && hostPin.length > 0, `专章标记 host=${hostPin}`)
+    const dir = mkDual(`^${hostPin}`)
+    const pin = `^${hostPin}`
     const pinned = survey(dir).dsh?.pinnedVersions ?? []
-    const okPin = pinned.includes('^0.1.5-rc.1')
+    const okPin = pinned.includes(pin)
     check(okPin, '锁定版本被收录', JSON.stringify(pinned))
     report(okPin, '锁定版本：收录')
     const r = compose(dir)
@@ -1952,6 +2003,449 @@ group('[37] 保鲜标记判据：好标记放行，坏标记各有断言')
     const ok = r1.errors.some((e) => /之前/.test(e)) && r2.errors.some((e) => /悬空|没有对应/.test(e))
     check(ok, '错位与悬空拦得住')
     report(ok, '位置：必须在节末尾')
+  }
+}
+
+// ── 检查域与判据的适用范围（守的是一类错误，不是一次） ──────────────────────
+
+group('[38] 文本检查域 = 仓库定义域：本机状态目录不参与，仓库内的照旧全查')
+{
+  // 这一组守的是**一类**错误：检查器走文件系统，把「工作目录里现在有什么」当成「这个
+  // 仓库的内容」。于是依赖目录、编辑器缓存、多智能体协作的团队清单都被拿去查 emoji 与
+  // 私有路径，还被要求解释「为什么在这」——而它们 `git ls-files` 计数为 0，根本不属于
+  // 这个仓库。
+  //
+  // 判据必须是仓库的定义域（受跟踪 + 未忽略），且**不能靠往豁免名单里加目录名**：那样
+  // 每来一个工具就要再加一条。下面同时给正例与反例：被忽略的目录必须缺席，未忽略的新
+  // 目录必须照旧被抓——否则「缺席」可能只是检查失灵。
+  const EMOJI_MARK = String.fromCodePoint(0x2795)
+  const FAKE_HOME = ['C:', 'Users', 'someone', 'work.md'].join('\\')
+
+  // 1) 判定本身：受跟踪的、未忽略的新文件都在域内，被忽略的不在。
+  if (HAS_GIT) {
+    const repo = fixture('domain-git', {
+      '.gitignore': 'generated-state/\n',
+      'tracked.md': '# tracked\n',
+      'untracked.md': '# untracked\n',
+      'generated-state/state.json': '{ "note": "本机状态" }\n',
+    })
+    gitIn(repo, 'init')
+    gitIn(repo, 'add', 'tracked.md')
+    const d = listRepoFiles(repo)
+    const ok = d.source === 'git'
+      && d.files.includes('tracked.md')
+      && d.files.includes('untracked.md')
+      && d.files.includes('.gitignore')
+      && !d.files.some((p) => p.startsWith('generated-state/'))
+      && !d.files.some((p) => p.startsWith('.git/'))
+    check(ok, '定义域 = 受跟踪 + 未忽略', JSON.stringify({ source: d.source, files: d.files }))
+    report(ok, '定义域：被忽略的目录不进')
+  } else {
+    skipGroup('[38.1] 定义域的版本控制判定', '本机没有 git')
+  }
+
+  // 2) 没有 git 时：退回文件系统扫描（跳过两个一定不属于仓库的目录），判定要如实交代来源。
+  {
+    const plain = fixture('domain-fs', {
+      'a.md': '# a\n',
+      'node_modules/pkg/index.js': 'x\n',
+      '.git/config': 'y\n',
+    })
+    const d = listRepoFiles(plain)
+    const ok = d.source === 'fs' && d.files.includes('a.md')
+      && !d.files.some((p) => p.startsWith('node_modules/') || p.startsWith('.git/'))
+    check(ok, '无 git 时降级但可用', JSON.stringify({ source: d.source, files: d.files }))
+    report(ok, '降级：退回文件系统扫描')
+  }
+
+  // 3) 端到端（正例）：整棵 skill 树 + 被忽略的本机状态目录 → 全绿，且那些目录一个字都不提。
+  if (!HAS_GIT) {
+    skipGroup('[38.3] 检查域的端到端判定', '本机没有 git')
+  } else {
+    const clone = join(fixture('domain-e2e', {}), 'project-forge')
+    copyTree(SKILL_ROOT, clone, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
+    writeFileSync(join(clone, 'scripts', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
+    // 两个本机状态目录：一个被仓库自己的 .gitignore 兜住（真实场景），一个由本 fixture
+    // 新加一条忽略规则兜住——后者证明判据认的是「被忽略」这件事，不是某个目录名。
+    mkdirSync(join(clone, '.agent-teams'), { recursive: true })
+    writeFileSync(join(clone, '.agent-teams', 'team.json'),
+      `{"note":"本机状态","mark":"${EMOJI_MARK}","path":"${FAKE_HOME}"}\n`, 'utf8')
+    writeFileSync(join(clone, '.gitignore'),
+      `${readFileSync(join(clone, '.gitignore'), 'utf8')}**/.other-tool/\n`, 'utf8')
+    mkdirSync(join(clone, '.other-tool'), { recursive: true })
+    writeFileSync(join(clone, '.other-tool', 'cache.json'), `{"mark":"${EMOJI_MARK}"}\n`, 'utf8')
+    gitIn(clone, 'init')
+    gitIn(clone, 'add', '-A')
+
+    const r1 = preflightIn(clone)
+    const silent = !/\.agent-teams|\.other-tool/.test(r1.out)
+    check(silent, '被忽略的本机状态目录不进检查域、不做顶层告警',
+      r1.out.split('\n').filter((l) => /FAIL|WARN/.test(l)).join(' / '))
+    report(silent, '本机状态：不进域、不告警')
+    const green = r1.status === 0 && /0 项失败/.test(r1.out)
+    check(green, '植入本机状态后仍然全绿', `exit=${r1.status}`)
+    report(green, '结果：0 项失败')
+
+    // 4) 端到端（反例，证伪用）：同一个仓库里，未忽略的新目录必须照旧被抓——内容与顶层归属都报。
+    mkdirSync(join(clone, '.unregistered-tool'), { recursive: true })
+    writeFileSync(join(clone, '.unregistered-tool', 'state.json'),
+      `{"mark":"${EMOJI_MARK}"}\n`, 'utf8')
+    const r2 = preflightIn(clone)
+    const caught = r2.status === 1 && /\.unregistered-tool\/state\.json/.test(r2.out)
+      && /未登记的条目：\.unregistered-tool/.test(r2.out)
+    check(caught, '未忽略的新目录照旧被抓（内容与顶层归属都报）',
+      r2.out.split('\n').filter((l) => /FAIL|WARN/.test(l)).join(' / '))
+    report(caught, '对照：未忽略的新目录照旧被抓')
+  }
+
+  // 5) 端到端（降级）：没有版本控制时，提示必须出现（不许静默假装成功），且正常文件照旧查。
+  {
+    const plain = join(fixture('domain-nogit', {}), 'project-forge')
+    copyTree(SKILL_ROOT, plain, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
+    writeFileSync(join(plain, 'scripts', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
+    writeFileSync(join(plain, 'notes-with-emoji.md'), `# 正常文件\n\n${EMOJI_MARK}\n`, 'utf8')
+    const r = preflightIn(plain)
+    const declared = /退回文件系统扫描/.test(r.out)
+    check(declared, '无 git 时显式报告降级', r.out.split('\n').filter((l) => /WARN/.test(l)).join(' / '))
+    report(declared, '降级：显式报告，不静默')
+    const stillScanned = /notes-with-emoji\.md/.test(r.out) && /自检完成/.test(r.out)
+    check(stillScanned, '降级时正常文件照旧全查，且不崩')
+    report(stillScanned, '降级：正常文件照旧查')
+  }
+}
+
+group('[39] 缺节判据只对结构由脚本决定的文件成立')
+{
+  // 这一组守的是「拿骨架的 H2 标题字面差集当缺节判据」这一类错误：**写了但措辞不同**
+  // （本 skill 自己的「版本管理流程」对骨架的「版本管理」）会被永远报成没写，而作者
+  // 并没有「补」的义务——脚本从来不会替他补这些节。判据必须先问结构是谁定的：
+  //   生成 → 缺节是缺陷（防空壳契约过 CI）；升级 → 缺节是待办；作者编排 → 判据不适用。
+  const pkg = '{"name":"t","version":"1.0.0","scripts":{"test":"x"}}\n'
+
+  // 1) 生成的文件：掏空一节 → --check 必须失败。
+  {
+    const dir = fixture('sec-managed', { 'package.json': pkg })
+    compose(dir)
+    const f = join(dir, 'AGENTS.md')
+    const before = readFileSync(f, 'utf8')
+    check(before.includes('<!-- project-forge:managed -->'), '前提：生成物带 managed 标记')
+    const gutted = before.replace(/^## 版本管理（必守）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
+    check(gutted !== before && gutted.length < before.length, '前提：成功删掉一节')
+    writeFileSync(f, gutted, 'utf8')
+    const r = compose(dir, '--check')
+    const ok = r.status === 1 && /缺失/.test(r.stderr ?? '')
+    check(ok, '生成的文件缺节 → --check 失败', `exit=${r.status}`)
+    report(ok, '生成：缺节是缺陷')
+  }
+
+  // 2) 作者编排的文件：抹掉 managed 标记并删掉一整节 → 判据不适用：--check 通过且不报缺节。
+  {
+    const dir = fixture('sec-authored', { 'package.json': pkg })
+    compose(dir)
+    const f = join(dir, 'AGENTS.md')
+    const text = readFileSync(f, 'utf8')
+      .replace('<!-- project-forge:managed -->\n\n', '')
+      .replace(/^## 测试（约定）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
+      .replace(/<!--\s*pf:author[\s\S]*?-->/g, '（已填写）')
+    writeFileSync(f, text, 'utf8')
+    const r1 = compose(dir, '--check')
+    const ok1 = r1.status === 0 && !/缺失/.test(`${r1.stdout ?? ''}${r1.stderr ?? ''}`)
+    check(ok1, '作者编排的文件：不判缺节，--check 通过', `exit=${r1.status} ${(r1.stdout ?? '').trim()}`)
+    report(ok1, '作者编排：不判缺节')
+    const r2 = compose(dir, '--status')
+    const out2 = r2.stdout ?? ''
+    const ok2 = /缺失 0 节/.test(out2) && out2.split('\n').some((l) => l.trim().startsWith('内容完整'))
+    check(ok2, '作者编排的文件：缺失记 0，且报内容完整', out2.trim().split('\n')[0])
+    report(ok2, '作者编排：内容完整')
+  }
+
+  // 3) 升级的文件：--upgrade 落一个 upgraded 标记（判据有据可依，不靠猜），缺节仍作待办报出。
+  {
+    const dir = fixture('sec-upgraded', { 'package.json': pkg })
+    writeFileSync(join(dir, 'AGENTS.md'), '# x\n\n说明。\n\n## 怎么跑\n\nnpm test\n', 'utf8')
+    compose(dir, '--upgrade')
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const marked = after.includes('<!-- project-forge:upgraded -->')
+    check(marked, '--upgrade 留下 upgraded 标记（判据有据可依）', after.slice(0, 80).replace(/\n/g, ' '))
+    report(marked, '升级：标记落盘')
+    const r = compose(dir, '--check')
+    const ok = r.status === 0 && /提示：缺失/.test(r.stdout ?? '')
+    check(ok, '升级的文件：缺节是待办（提示），不是缺陷', `exit=${r.status}`)
+    report(ok, '升级：缺节只提示')
+
+    // 4) 同一批缺节只打印一次：曾经 reportGaps 说「这些节没写，文档就不算完成」，紧接着
+    //    reportRefresh 又说「未自动添加，需要就手动补」——同一事实两个结论。
+    const r2 = compose(dir)
+    const text = `${r2.stdout ?? ''}${r2.stderr ?? ''}`
+    const heads = (text.match(/缺失 \d+ 个节|模板里有、本文件没有的节/g) ?? []).length
+    const ok2 = heads <= 1
+    check(ok2, '同一批缺节只报一次（两处矛盾的报告已合并）', `出现 ${heads} 次`)
+    report(ok2, '缺节报告：只出现一次')
+  }
+}
+
+group('[40] 保鲜节标题：编号与括注是装饰，不该让专章判成缺节')
+{
+  // 专章模板的骨架写的是 `## 八、事实来源（必填）`：编号让它在文件里定位得到，括注提醒
+  // 写的人这一节必填。判据要抓的是「这一节在不在」，不是标题那一串字——按字面匹配会让
+  // 照模板新建的专章被判成没有来源节，模板与检查器互相打架。
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const tomorrowStr = new Date(Date.parse(`${todayStr}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)
+  const withHeading = (h) => `# 测试生态 插件\n\n## 何时读本文件\n\n- 略\n\n${h}\n\n来源略。\n\n`
+    + `<!-- foo-verified: date=${todayStr} -->\n`
+  const run = (text) => evalFreshnessMarker('references/plugins/foo.md', text, todayStr, tomorrowStr)
+
+  for (const [label, heading] of [
+    ['裸标题', '## 事实来源'],
+    ['中文编号', '## 八、事实来源'],
+    ['尾部括注', '## 事实来源（必填）'],
+    ['编号 + 括注（专章模板的写法）', '## 八、事实来源（必填）'],
+    ['阿拉伯编号', '## 3. 事实来源'],
+  ]) {
+    const r = run(withHeading(heading))
+    const ok = r.hasSection && r.errors.length === 0
+    check(ok, `标题形状放行：${label}`, JSON.stringify(r.errors))
+    report(ok, `放行：${label}`)
+  }
+
+  // 反例：放宽的是装饰，不是判据本身——真缺节仍然红。
+  {
+    const r = run(`# x\n\n## 何时读本文件\n\n- 略\n\n来源略。\n\n<!-- foo-verified: date=${todayStr} -->\n`)
+    const ok = !r.hasSection && r.errors.some((e) => /没有对应/.test(e))
+    check(ok, '真缺节仍然红', JSON.stringify(r.errors))
+    report(ok, '反例：真缺节仍然红')
+  }
+  // 反例：改名不算这一节（判据没有被放宽成「有来源二字就算」）。
+  {
+    const ok = !run(withHeading('## 事实来源与更新')).hasSection
+    check(ok, '改名不算这一节（判据没被放宽成永真）')
+    report(ok, '反例：改名不算')
+  }
+  // 反例：三级标题不算——要求的是二级标题。
+  {
+    const ok = !run(withHeading('### 事实来源')).hasSection
+    check(ok, '三级标题不算（要求二级标题）')
+    report(ok, '反例：三级标题不算')
+  }
+}
+
+// ── 机制类断言：把这次审计发现的一类类错误固定下来 ──────────────────────────
+
+const readSkill = (rel) => readFileSync(join(SKILL_ROOT, rel), 'utf8')
+
+group('[41] 文档与实现的一致性机制：互引、范围、取值、声明口径')
+{
+  // 这一组不测某个具体案例，测的是**这一类错误的可检性**：指错节、两处范围不一致、
+  // 写死的取值、未登记的声明。每条都对应一次真实发现，且都能被单独证伪。
+
+  // 1) 同文件内的「见第 N 节」必须真有那一节。跨文件引用（写「专章」或给出 references/
+  //    路径的）不在本组判定范围内——那要靠人读目标文件。
+  {
+    const dir = join(SKILL_ROOT, 'references')
+    const walk = (sub) => {
+      const out = []
+      for (const e of readdirSync(join(dir, sub), { withFileTypes: true, encoding: 'utf8' })) {
+        const rel = sub === '' ? e.name : `${sub}/${e.name}`
+        if (e.isDirectory()) { out.push(...walk(rel)); continue }
+        if (e.isFile() && e.name.endsWith('.md')) out.push(rel)
+      }
+      return out
+    }
+    const bad = []
+    for (const rel of walk('')) {
+      const text = readSkill(`references/${rel}`)
+      const headings = [...text.matchAll(/^##\s+([0-9一二三四五六七八九十百]+)、/gm)].map((m) => m[1])
+      for (const m of text.matchAll(/见第([0-9一二三四五六七八九十百]+)节/g)) {
+        const around = text.slice(Math.max(0, m.index - 40), m.index + m[0].length + 10)
+        if (/专章|references\//.test(around)) continue // 跨文件引用，本组不判
+        if (!headings.includes(m[1])) bad.push(`references/${rel} 的「${m[0]}」在本文件里没有对应标题`)
+      }
+    }
+    const ok = bad.length === 0
+    check(ok, '同文件互引指向真实存在的节', bad.slice(0, 4).join(' / '))
+    report(ok, '互引：指到的节真实存在')
+  }
+
+  // 2) 宿主升级后要重核的范围，代码提示与专章必须说同一件事。
+  {
+    const dsh = readSkill('references/plugins/dsh.md')
+    const compose = readSkill('scripts/compose-agents.mjs')
+    const inDoc = /重核第([一二三四五六七八九十]+)节至第([一二三四五六七八九十]+)节/.exec(dsh)
+    const inCode = /重核第([一二三四五六七八九十]+)节至第([一二三四五六七八九十]+)节/.exec(compose)
+    const ok = inDoc !== null && inCode !== null
+      && inDoc[1] === inCode[1] && inDoc[2] === inCode[2]
+    check(ok, 'dsh 重核范围：代码提示与专章一致',
+      `专章=${inDoc?.[0] ?? '(未写)'} 代码=${inCode?.[0] ?? '(未写)'}`)
+    report(ok, '重核范围：两处一致')
+  }
+
+  // 3) 多生态的扁平命令字段是「先到者胜」：行为钉住，文档才不能凭想象改写机制。
+  {
+    const dir = fixture('flat-order', {
+      'package.json': JSON.stringify({
+        name: 'm', version: '1.0.0',
+        scripts: { build: 'tsc', test: 'vitest run' },
+        devDependencies: { typescript: '^5.0.0' },
+      }, null, 2),
+      'pyproject.toml': '[project]\nname = "m"\nversion = "1.0.0"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+      'src/index.ts': 'export const x = 1\n',
+      'main.py': 'print(1)\n',
+    })
+    const s = survey(dir)
+    const ok = s.commands?.build === 'npm run build'
+      && s.commands?.byEcosystem?.python?.test === 'python -m pytest'
+      && s.commands?.test !== 'python -m pytest'
+    check(ok, '扁平命令取声明强度最高者、不被后来者覆盖',
+      JSON.stringify({ flat: s.commands?.test, py: s.commands?.byEcosystem?.python?.test }))
+    report(ok, '扁平字段：先到者胜')
+  }
+
+  // 4) 包管理器是「声明 > 锁文件 > 默认」推出来的，不是「项目声明过」的证据。
+  {
+    const dir = fixture('pm-chain', {
+      'package.json': JSON.stringify({ name: 'p', version: '1.0.0', scripts: { test: 'x' } }),
+      'pnpm-lock.yaml': 'lockfileVersion: 9\n',
+      'src/a.js': 'export const a = 1\n',
+    })
+    const s = survey(dir)
+    const ok = s.commands?.packageManager === 'pnpm'
+      && (s.commands?.install ?? '').startsWith('pnpm ')
+    check(ok, '包管理器按锁文件推导', JSON.stringify({ pm: s.commands?.packageManager, install: s.commands?.install }))
+    report(ok, '包管理器：按锁文件推导')
+  }
+
+  // 5) review 的 flag 全集必须在它自己的用法输出里（用户与 AI 只能从那儿拿到全集）。
+  {
+    const text = readSkill('scripts/review.mjs')
+    const flags = [...text.matchAll(/^\s*'(--[a-z-]+)',/gm)].map((m) => m[1])
+    const helpBlock = text.slice(text.indexOf('用法：node scripts/review.mjs'))
+    const missing = flags.filter((f) => !helpBlock.includes(f))
+    const documented = /review\.mjs --help/.test(readSkill('SKILL.md'))
+    const ok = flags.length > 0 && missing.length === 0 && documented
+    check(ok, 'review 的 flag 全部写在用法输出里，且文档指向它',
+      `缺=${missing.join(',') || '无'} 文档指向=${documented}`)
+    report(ok, 'review flag：用法输出即权威')
+  }
+
+  // 6) compose 的开关也要有人写下来（--budget 曾经只存在于脚本注释里）。
+  {
+    const text = readSkill('scripts/compose-agents.mjs')
+    const flags = [...new Set([...text.matchAll(/'(--[a-z-]+)'/g)].map((m) => m[1]))]
+      .filter((f) => f !== '--help')
+    const docs = `${readSkill('README.md')}\n${readSkill('SKILL.md')}\n${readSkill('references/docs-set.md')}`
+    const missing = flags.filter((f) => !docs.includes(f))
+    const ok = flags.length > 0 && missing.length === 0
+    check(ok, 'compose 的开关都写进了文档', `缺=${missing.join(',') || '无'}`)
+    report(ok, 'compose 开关：都有出处')
+  }
+
+  // 7) 模板里不钉第三方补丁版本：模板会被照抄，钉死的号几乎必然过时。
+  {
+    const dir = join(SKILL_ROOT, 'templates')
+    const bad = []
+    for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
+      if (!e.isFile()) continue
+      const hit = /npm@\d+\.\d+\.\d+/.exec(readSkill(`templates/${e.name}`))
+      if (hit !== null) bad.push(`${e.name}: ${hit[0]}`)
+    }
+    const ok = bad.length === 0
+    check(ok, '模板里不出现钉死的第三方补丁版本', bad.join(' / '))
+    report(ok, '模板：不钉第三方版本号')
+  }
+
+  // 8) 通用文档不点名本机某个具体 skill。
+  {
+    const bad = []
+    for (const rel of ['references/docs-set.md', 'references/plugin-project.md', 'templates/agents-project.md']) {
+      if (/oil-tone/.test(readSkill(rel))) bad.push(rel)
+    }
+    const ok = bad.length === 0
+    check(ok, '通用文档不点名具体某个 skill', bad.join(' / '))
+    report(ok, '通用性：不点名本机 skill')
+  }
+
+  // 9) ci-release 的 TODO(1) 必须交代 job 级 if 条件也要改（否则裸版本标签永远进不来）。
+  {
+    const text = readSkill('templates/ci-release.yml')
+    const todo = /# TODO\(1\)[\s\S]{0,500}?TODO\(2\)/.exec(text)?.[0] ?? ''
+    const ok = /if:/.test(todo) && /refs\/tags\/v/.test(todo)
+    check(ok, 'ci-release TODO(1) 覆盖 job 级 if 条件', todo.slice(0, 60).replace(/\n/g, ' '))
+    report(ok, 'ci-release：TODO(1) 含 if 条件')
+  }
+
+  // 10) 模板 DSL（pf:if 等）在文档里有指针，改模板的人知道去哪查。
+  {
+    const ok = /pf:if/.test(readSkill('references/docs-set.md'))
+      || /pf:if/.test(readSkill('SKILL.md'))
+    check(ok, '模板标记 DSL 在文档里有指针')
+    report(ok, 'DSL：文档里有指针')
+  }
+
+  // 11) 保鲜范围按「承载易变事实」判：总纲两份也在册，且都写了查法。
+  {
+    const bad = []
+    for (const rel of ['references/publish.md', 'references/remote-github.md']) {
+      const text = readSkill(rel)
+      const hasSection = /^##\s*(?:[0-9一二三四五六七八九十百]+[、.．)）]\s*)?事实来源/m.test(text)
+      const hasMarker = /<!--\s*[A-Za-z0-9-]+-verified:\s*[^>]*date=/.test(text)
+      const hasWhere = /官方|文档|https?:\/\//.test(text.slice(text.search(/^##\s*.*事实来源/m)))
+      if (!(hasSection && hasMarker && hasWhere)) bad.push(`${rel}(${hasSection}/${hasMarker}/${hasWhere})`)
+    }
+    const ok = bad.length === 0
+    check(ok, '总纲也带事实来源节、标记与查法', bad.join(' / '))
+    report(ok, '保鲜：总纲也在册')
+  }
+
+  // 12) 专章都要有「何时读本文件」——新增专章漏写时要拦住（此前只查顶层 references/）。
+  {
+    const dir = join(SKILL_ROOT, 'references', 'plugins')
+    const bad = []
+    for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
+      if (!e.isFile() || !e.name.endsWith('.md')) continue
+      if (!/^## 何时读本文件[ \t]*$/m.test(readSkill(`references/plugins/${e.name}`))) bad.push(e.name)
+    }
+    const ok = bad.length === 0
+    check(ok, '专章都写了「何时读本文件」', bad.join(' / '))
+    report(ok, '专章结构：齐备')
+  }
+
+  // 13) Unlicense 是反向断言：没有版权行、没有占位符（好心补一行会让文档变假话）。
+  {
+    const text = readSkill('templates/license-unlicense.txt')
+    const ok = !text.includes('Copyright (c)') && !text.includes('{{')
+    check(ok, 'Unlicense 模板无版权行、无占位符')
+    report(ok, 'Unlicense：反向断言成立')
+  }
+
+  // 14) dsh 专章要写明 host= 只能靠人维护（检查无法跨宿主比对），不让它悄悄过期。
+  {
+    const text = readSkill('references/plugins/dsh.md')
+    const ok = /host=/.test(text) && /本机实际运行的宿主|跨宿主/.test(text)
+    check(ok, 'dsh 专章交代了 host= 的维护边界')
+    report(ok, 'dsh：host= 维护边界有交代')
+  }
+
+  // 15) survey.md 要记载判定结果是个数组、条件字段缺省即空——它们是判定与汇报的入口。
+  {
+    const text = readSkill('references/survey.md')
+    const ok = /`kinds`/.test(text) && /条件字段：缺省即/.test(text)
+    check(ok, 'survey.md 记载 kinds 与条件字段语义')
+    report(ok, 'survey.md：字段语义完整')
+  }
+
+  // 16) 能力清单覆盖 survey 能产出的 kind 全集（这一条是回归网：文档漏一个即红）。
+  {
+    const KINDS = [
+      'node', 'python', 'rust', 'go', 'java', 'ruby', 'php', 'dotnet', 'dart', 'swift',
+      'elixir', 'clojure', 'perl', 'cpp', 'shell', 'lua', 'r', 'julia', 'erlang', 'haskell',
+      'dsh-plugin', 'vscode-extension', 'obsidian-plugin', 'dsh-skill',
+      'docs-only', 'unrecognized', 'unknown',
+    ]
+    const text = readSkill('references/survey.md')
+    const missing = KINDS.filter((k) => !text.includes(`\`${k}\``))
+    const ok = missing.length === 0
+    check(ok, 'survey.md 覆盖全部 kind', `缺=${missing.join(',') || '无'}`)
+    report(ok, 'kind 清单：无遗漏')
   }
 }
 

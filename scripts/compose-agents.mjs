@@ -16,9 +16,12 @@
  *
  * 用法：
  *   node scripts/compose-agents.mjs [目录]              生成或刷新
- *   node scripts/compose-agents.mjs [目录] --check      只校验内核一致性，不写入
- *   node scripts/compose-agents.mjs [目录] --status     只报告待填写项，不写入
+ *   node scripts/compose-agents.mjs [目录] --check      只校验，不写入
+ *   node scripts/compose-agents.mjs [目录] --status     只报告现状（待填写项与缺节），不写入
  *   node scripts/compose-agents.mjs [目录] --budget N   指定预算字节数（默认 65536）
+ *
+ * 缺节判据只对**结构由脚本决定**的文件成立（见 MANAGED / UPGRADED 两个常量的注释）：
+ * 生成的文件缺节是缺陷，升级过的文件缺节是待办，作者自己编排的文件不判缺节。
  *
  * 模板标记（写在 templates/agents-project.md 里）：
  *   {{TOKEN}}                  由项目事实替换
@@ -43,16 +46,30 @@ const END = '<!-- project-forge:kernel:end -->'
 /**
  * 「这份文件由本脚本生成」的标记。
  *
- * 它区分开两种**都带内核**的文件，而两者的验收标准不同：
+ * 它区分开三种**都带内核**的文件，而它们的验收标准不同：
  *   - **生成的文件**（从骨架生成）：节结构由模板决定，**缺节就是缺陷**，该报错；
- *   - **作者的文件**（手写后被 --upgrade 升级）：作者可能刻意换一种组织方式
- *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」），
- *     此时缺节只**提示**，不否决。
+ *   - **升级的文件**（手写后被 --upgrade 改造，见 UPGRADED）：结构已向模板对齐，
+ *     但需要人写的节脚本刻意不补，所以缺节是**待办**，只提示不否决；
+ *   - **作者编排的文件**（自己写的，只带内核标记）：作者可能刻意换一种组织方式
+ *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」，
+ *     而「文档同步」的规则由内核段承担）。此时**模板的标题清单不是判据**：脚本既不会
+ *     替他补这些节，也不该拿字面差集去催他——那只会把「写了但措辞不同」报成「没写」，
+ *     而一份永远在喊同一批假缺失的报告，等于不存在。
  *
  * 没有这个区分时只有两种错法：要么把作者的编排当成缺陷（误报，逼人改成模板的样子），
  * 要么对掏空的契约睁一眼闭一眼（漏报）。两者都发生过。
  */
 const MANAGED = '<!-- project-forge:managed -->'
+
+/**
+ * 「这份文件的结构已按模板升级过」的标记。
+ *
+ * `--upgrade` 只做加法：插入内核、补上可自动补的节，**需要人写的节一个都不补**。
+ * 所以升级完的文件必然还缺若干节，那是**待办**而不是缺陷——判据必须能把它与
+ * 「作者自己编排的文件」区分开，否则两者只能取同一个标准，而两个标准都会错：
+ * 按缺陷判，升级后的文件永远红；按不判，P4 的「两个节数归零」就空转了。
+ */
+const UPGRADED = '<!-- project-forge:upgraded -->'
 const DEFAULT_BUDGET = 65536
 
 /**
@@ -652,6 +669,9 @@ function upgradeHandwritten(existing, kernel, target) {
   const old = splitSections(existing)
 
   // 1) 插入内核：一级标题之后、第一个二级标题之前。
+  //
+  // 同时打上 UPGRADED 标记：升级只做加法，需要人写的节一个都没补，所以这份文件此后
+  // 必然还缺若干节——那是**待办**，不是缺陷。标记记在文件里，判据才有依据（见该常量注释）。
   const lines = existing.split('\n')
   let insertAt = -1
   for (let i = 0; i < lines.length; i += 1) {
@@ -660,6 +680,8 @@ function upgradeHandwritten(existing, kernel, target) {
   if (insertAt < 0) insertAt = lines.length // 通篇没有二级标题：追加到末尾
   const withKernel = [
     ...lines.slice(0, insertAt),
+    UPGRADED,
+    '',
     START,
     kernel,
     END,
@@ -763,6 +785,31 @@ function missingSections(target, currentText) {
     .map((s) => ({ heading: s.heading, needsHuman: findAuthors(s.lines.join('\n')).length > 0 }))
 }
 
+/** 这份文件的节结构是谁定的：脚本生成 / 脚本升级 / 作者自己编排。判据写在文件里，不靠调用方传参。 */
+function documentStructure(text) {
+  if (/^<!-- project-forge:managed -->\s*$/m.test(text)) return 'generated'
+  if (/^<!-- project-forge:upgraded -->\s*$/m.test(text)) return 'upgraded'
+  return 'authored'
+}
+
+/**
+ * 缺节判据的适用范围：**结构的由来决定它算不算缺口**。
+ *
+ *   - `generated`：结构来自模板，缺一节就是被掏空 → 交给调用方当缺陷；
+ *   - `upgraded`：结构已向模板对齐，但需要人写的节刻意没补 → 缺口是待办；
+ *   - `authored`：编排是作者的决定（本 skill 自己的 AGENTS.md 就是），既不算缺陷也不算
+ *     待办——**判据直接不适用**，返回空列表。否则「版本管理流程」对「版本管理」这种
+ *     措辞差异会被永远报成缺节，而作者没有「补」的义务：脚本从来不会替他补这些节。
+ *
+ * 只按标题字面差集判缺，本身就是这一格的老毛病；同一个道理在 docs-set.md 的 README
+ * 一节里已经写明白了——「缺」要按内容判，不能按标题名判。这里补上另一半：连适用与否
+ * 都要先按文件的性质判。
+ */
+function applicableMissingSections(target, text) {
+  if (documentStructure(text) === 'authored') return []
+  return missingSections(target, text)
+}
+
 /**
  * DSH 专章滞后提醒：寄生在本来就要看的输出里，不另起命令、不拦流程、不记入缺口。
  *
@@ -786,7 +833,7 @@ function dshFreshnessWarning(target) {
   const norm = (v) => v.replace(/^[\^~>=<\s]+/, '')
   if (pinned.some((p) => norm(p) === norm(m[1]))) return undefined
   return `提示：DSH 专章上次核对宿主 ${m[1]}（${m[2]}），本项目锁定 ${pinned.join('、')}；`
-    + '两者不一致时按 references/plugins/dsh.md 事实来源节重核第五节至第八节。'
+    + '两者不一致时按 references/plugins/dsh.md 事实来源节重核第七节至第九节。'
 }
 
 /**
@@ -855,6 +902,14 @@ function reportHandwritten(agentsPath, existing, target, kernel, budget, status,
  * 「为什么这次跑完文件变了」——尤其是「模板里有而文件里没有」的节，脚本刻意不补，
  * 让人自己决定。
  */
+/**
+ * 「为什么这次跑完文件变了」——逐条说明这次重新求值、保留、补上了哪些节。
+ *
+ * **「模板里有、文件里没有的节」不在这里打印**：那份清单由 reportGaps 统一负责。
+ * 两处各打一遍的后果不是冗余，而是**结论互相矛盾**——同一批节，reportGaps 说
+ * 「这些节没写，文档就不算完成」，这里说「未自动添加，需要就手动补」，读者不知道该
+ * 相信哪一句。同一件事只留一个出口。
+ */
 function reportRefresh(report, stream) {
   if (report === undefined) return
   if (report.upgradedFrom === 'handwritten') {
@@ -870,10 +925,6 @@ function reportRefresh(report, stream) {
   if (report.refreshed !== undefined && report.refreshed.length > 0) {
     stream.write(`\n按当前项目事实重新求值的节（共 ${report.refreshed.length} 节）：\n`)
     for (const r of report.refreshed) stream.write(`  - ${r}\n`)
-  }
-  if (report.missing.length > 0) {
-    stream.write(`\n模板里有、本文件没有的节（未自动添加，需要就手动补）：\n`)
-    for (const m of report.missing) stream.write(`  - ${m}\n`)
   }
   if (report.kept.length > 0) {
     stream.write(`\n保留原样的节（共 ${report.kept.length} 节，人写的内容不动）\n`)
@@ -900,7 +951,9 @@ function main(argv) {
       '',
       '  --upgrade  把一份手写的 AGENTS.md 升级为标准结构。**只做加法**：',
       '             插入内核段落、补上缺失的自动节；已有段落不删不改不重排。',
-      '  --check    只校验内核一致性，不写入；不一致时退出码 1',
+      '  --check    只校验，不写入；以下任一项不满足即退出码 1：',
+      '             内核区间与 templates/agents-kernel.md 逐字一致、内核标记恰好一对、',
+      '             脚本生成的文件不缺节（作者自己编排的文件不判缺节——编排是权威）。',
       '  --status   只报告现状，不写入',
       `  --budget N ${DEFAULT_BUDGET_NOTE}`,
       '',
@@ -1057,15 +1110,15 @@ function main(argv) {
           + `（文件里 ${Buffer.byteLength(embedded, 'utf8')} 字节，模板 ${Buffer.byteLength(template, 'utf8')} 字节）`)
       }
     }
-    const missingNow = missingSections(target, managedExisting ?? composed)
-    // 缺节是否算失败，取决于这份文件是不是脚本生成的：
-    //   - 生成的 → 节结构由模板决定，缺节就是缺陷；
-    //   - 作者升级来的 → 缺节只提示（作者的编排是权威，不逼他改成模板的样子）。
-    const isManaged = (managedExisting ?? composed).includes(MANAGED)
+    const missingNow = applicableMissingSections(target, managedExisting ?? composed)
+    // 缺节是否算失败，取决于这份文件的节结构是谁定的：
+    //   - generated → 结构由模板决定，缺节就是缺陷；
+    //   - upgraded  → 结构已对齐模板，但需要人写的节还要作者补，缺节只提示；
+    //   - authored  → 判据不适用（applicableMissingSections 已返回空）。
     if (missingNow.length > 0) {
       const detail = `缺失 ${missingNow.length} 个节：${missingNow.map((m) => m.heading).join('、')}`
-      if (isManaged) problems.push(detail)
-      else warnings.push(`${detail}（这份文件是作者编排的，缺节只作提示；`
+      if (documentStructure(managedExisting ?? composed) === 'generated') problems.push(detail)
+      else warnings.push(`${detail}（这份文件是升级来的：作者的编排是权威，缺节只作提示；`
         + '若确实该有这些内容，请补上）')
     }
     if (problems.length > 0) {
@@ -1088,7 +1141,7 @@ function main(argv) {
       process.stderr.write(`状态：${agentsPath} 不存在（尚未生成）。\n`)
       return 1
     }
-    const missing = missingSections(target, readUtf8(agentsPath))
+    const missing = applicableMissingSections(target, readUtf8(agentsPath))
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
       + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)
     reportGaps(authors, missing, process.stdout)
@@ -1101,7 +1154,7 @@ function main(argv) {
     return 0
   }
 
-  const missing = missingSections(target, composed)
+  const missing = applicableMissingSections(target, composed)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportGaps(authors, missing, process.stdout)

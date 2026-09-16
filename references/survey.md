@@ -64,6 +64,9 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 | `historyAuthors` | 历史提交去重后的署名列表（前 20） | 多种署名混杂说明换过人或换过机器，按署名审计清单处理 |
 | `upstream` | 上游跟踪分支 | 未设置时推送需要显式指定；有远端而未设时 `review` 会提示 |
 | `tags` | 已有版本标签 | 与清单文件里的版本号对照，看是否已经对齐（对照结果见 `artifacts.versionAligned`） |
+| `trackedFiles` | 受版本控制的文件数 | 与 `scale` 对照，可看出「仓库里有的是哪一部分」 |
+| `head` / `version` | 当前提交标识与环境里的版本控制工具版本 | 汇报与排查时贴出来，省得再问 |
+| `initDefaultBranch` | 新建仓库时默认分支会叫什么 | 建库前读一次，免得建出来的分支名与用户预期不符 |
 
 **`isRepoRoot` 为假时必须停下来。** 目标目录若是某个外层仓库的子目录，`git` 报出的
 远端、分支与提交数**全部属于那个外层仓库**——它们看起来完全正常，只是不属于你要处理的
@@ -76,13 +79,22 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 
 ### `ecosystem`
 
-判定出的项目类型与**判定依据**。依据是给人和 AI 复核用的——判定错了，看依据能立刻
-发现。
+判定出的项目类型与**判定依据**，形如 `{ kinds, evidence, skillName }`：
 
-可能的值：`node`、`python`、`rust`、`go`、`java`、`ruby`、`php`、`dotnet`、
-`dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`dsh-skill`、`cpp`、`shell`、
-`docs-only`、`unrecognized`、`unknown`（新生态出现时往此追加；未知宿主不硬塞已知类型，
-按 `references/plugin-project.md` 第九节处理）。
+| 字段 | 含义 |
+| --- | --- |
+| `kinds` | 判定结果**数组**（可为多项，见下）。值域以 `scripts/survey.mjs` 的检测表为准 |
+| `evidence` | 逐条判定依据，与 `kinds` 一一对应；给人和 AI 复核用——判定错了，看依据能立刻发现 |
+| `skillName` | 认出 `SKILL.md` 时，frontmatter 里的 `name`（只在 `dsh-skill` 时有值） |
+
+常见的 `kinds` 取值：`node`、`python`、`rust`、`go`、`java`、`ruby`、`php`、`dotnet`、
+`dart`、`swift`、`elixir`、`clojure`、`perl`、`cpp`、`shell`、`lua`、`r`、`julia`、
+`erlang`、`haskell`、`dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`dsh-skill`、
+`docs-only`、`unrecognized`、`unknown`。
+
+**这张清单是「常见值」不是「完整枚举」**：检测表新增生态时，以 `scripts/survey.mjs` 为
+准（它同时是判定实现与值域来源），`SKILL.md` 的能力矩阵按 `kinds` 逐行求值——未知宿主
+不硬塞已知类型，按 `references/plugin-project.md` 第九节处理。
 
 后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
 共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见
@@ -118,9 +130,11 @@ cargo。`commands` 一节会区分这一点。
 不是错误**——空的含义是「这个项目没有声明这些命令」，此时不要自己编一条命令出来，
 而应当去读项目已有的说明文档，或问用户。
 
-有 `packageManager` 字段时，说明项目已经指定了包管理器——**沿用它的，不要换成别的**。
-命令前缀由它决定：在 pnpm 项目里写 `npm run` 是错的，轻则绕过项目约定，重则在多包
-仓库里直接失败。
+`packageManager` 是**脚本判定出来的结果**，不是「项目声明过」的证据——判定顺序是
+「清单里的声明 > 锁文件 > 默认 `npm`」，所以它在任何 Node 项目里都有值。命令前缀由它
+决定：在 pnpm 项目里写 `npm run` 是错的，轻则绕过项目约定，重则在多包仓库里直接失败。
+**沿用它的，不要换成别的**；要在汇报里说「项目指定了哪个包管理器」时，先分清它是声明来的
+还是脚本按锁文件推出来的。
 
 **命中多种生态时，会多出两个字段**：
 
@@ -129,8 +143,9 @@ cargo。`commands` 一节会区分这一点。
 | `byEcosystem` | 按生态分开的命令表，例如 `{ node: {...}, python: {...} }` |
 | `multipleEcosystems` | 命中的生态列表，按可信度排序 |
 
-扁平字段（`build`、`test` 一类）在多生态时**只保留一个生态的值**——同名字段会互相
-覆盖，且覆盖是静默的。因此：
+扁平字段（`build`、`test` 一类）在多生态时**只保留一个生态的值**：按**声明强度**取先到者
+（`node` → `python` → `rust` → `go` → 其余），先写进去的那个不再被后来的覆盖。所以存活
+下来的值属于哪个生态是确定的，但它**不是**「这个项目的命令」，只是其中一个生态的。因此：
 
 - **只跑一条命令**时用扁平字段，方便；
 - **要把命令写进文档或脚本**时必须用 `byEcosystem`，否则会把一条属于别的生态的命令
@@ -152,6 +167,8 @@ cargo。`commands` 一节会区分这一点。
 | `publishableManifest` | 勘察输出的可发布清单（文件与生态），P2 判定能不能走发布链路的依据（含 Obsidian 的 `manifest.json`，以含 `minAppVersion` 为前提） |
 | `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据（含 Obsidian 的 `manifest.json`；Go 故意不读——靠标签，读不到是正确结果） |
 | `versionAligned` | 标签与版本号是否对齐（`true`/`false`，取不到标签列表时留空不判） |
+| `versionAlignedTags` | 上面的判断所依据的那几个标签原文（给人复核用） |
+| `hasNpmIgnore` | 有没有 `.npmignore`（与 `publishScope` 是两套机制：白名单与黑名单） |
 | `obsidianArtifacts` | Obsidian 发布三件套 presence（`main.js` 缺即安装断链） |
 | `cargoMeta` | Cargo 发布必填元数据的 presence（`license`、`description` 有无，只报有无） |
 | `goModule` | Go 模块路径、`go` 指令版本、`retract` 有无（只读文本；`go` 指令缺失由门禁提示） |
@@ -184,6 +201,15 @@ cargo。`commands` 一节会区分这一点。
 | `readmePair` | **这些 README 是不是一对双语文件**（有值就是；双非默认同样成对，此时 `defaultMissing` 为真） |
 | `readmeSections` | 主 README **现有的节**有哪些 |
 | `workflowAutomation.truncated` | 工作流是否只读了前部（为真时“无发布 job”不可信，需手工确认；上限值见输出的 `headLimit`） |
+
+其余字段按用途读：`docs` 下的 `agents` / `contributing` / `license` / `changelog` /
+`codeOfConduct` 是「文件与字节数」；`githubDir` / `workflows` / `issueTemplates` /
+`prTemplate` 是 `.github` 下的现状。`workflowAutomation` 里还有一组**只在发布判定时才看**
+的布尔位：`files`、`hasReleaseJob`、`usesSecrets`、`usesOidc`、`usesReleaseToken`、
+`hasContentsWrite`、`hasFetchDepthZero`、`usesNotesFile`、`usesGenerateNotes`、
+`hasNpmPublish`、`hasPypiPublish`、`hasCargoPublish`、`releaseJobConditionTagsV`、
+`releaseTriggerTags`（原文）——它们正是 `review.mjs` 判断「自动化接线到没到位」的输入，
+不要只看 `truncated` 一项。
 
 **`readmePair` 有值时，那份文档是要成对维护的**：两份都随包分发、都展示在制品库页面上
 （改任何一份都算用户可见变化），而且**它们会漂移**——一次改动只更新了一份，两份说着不同
@@ -234,8 +260,11 @@ cargo。`commands` 一节会区分这一点。
 | --- | --- |
 | `gitignore` | 有没有忽略文件、有几条规则（**缺**本身就是要报的事实） |
 | `gitattributes` | 有没有声明文本属性（缺了会让产物在不同机器上重建出不同字节） |
-| `unignoredOutputDirs` | **哪些目录明明存在、却没被忽略** |
-| `ignoredButTracked` | 哪些文件**已经被跟踪又被忽略**（忽略规则对它们无效） |
+| `unignoredOutputDirs` | **哪些目录明明存在、却没被忽略**（**条件字段**：没有这类问题就整个不存在） |
+| `ignoredButTracked` | 哪些文件**已经被跟踪又被忽略**（忽略规则对它们无效；同样是条件字段） |
+
+**后两个是条件字段：缺省即「没有这类问题」，不是「读不到」。** 它们只在查出东西时才出现，
+所以看不到它们是好消息，不要当成信息缺口，也不要去追它。
 
 **`unignoredOutputDirs` 是最紧急的一格。** 它的含义是：这个依赖目录或产物目录就在
 那里，而忽略规则没覆盖它——下一次 `git add -A` 会把它**整个写进历史**（体积、平台差异、
@@ -299,6 +328,7 @@ cargo。`commands` 一节会区分这一点。
 目录不应当整体纳入仓库。
 
 `truncated` 为真表示走查提前结束了（目录太大），这时体量数字是下界，不是准确值。
+`note` 是给汇报用的一句话口径说明（例如「统计不含依赖目录与版本控制目录」），不是判据。
 
 ## 四、从事实到动作：判定表
 

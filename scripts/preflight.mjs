@@ -12,6 +12,8 @@
  *   - SKILL.md 引用的每一个文件都真实存在（引用断链 = AI 按图索骥走到死路）
  *   - 每份 reference 都有标题与「何时读本文件」节（缺了 AI 不知道何时该读它）
  *   - 每份模板都具备脚本依赖的标记
+ *   - 检查域 = 仓库的定义域：只查属于这个仓库的文本文件——被忽略的本机状态目录
+ *     （编辑器缓存、依赖、多智能体协作状态……）一律不参与，脚本不需要认识它们
  *   - 全文无 emoji（项目硬性规范）
  *   - 无 BOM；行尾一致（可复现构建的前提）
  *   - 不含构建机私有路径（换台机器就要能跑）
@@ -20,7 +22,10 @@
  *     超期只警告——时间流逝不是破损）
  *
  * 用法：
- *   node scripts/preflight.mjs [skill 目录]
+ *   node scripts/preflight.mjs
+ *
+ * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上一级），不接受目录参数——
+ * 换目录检查的做法会让「检查了谁」变成一个可传错的值。
  *
  * 退出码 0 = 全绿；1 = 有 FAIL；2 = 脚本自身用法错误。
  */
@@ -100,22 +105,78 @@ function readText(p) {
   return readFileSync(p, 'utf8')
 }
 
-/** 递归收集文本文件；跳过版本控制与依赖目录。 */
-function collectTextFiles(root, out = []) {
-  let entries
-  try {
-    entries = readdirSync(root, { withFileTypes: true, encoding: 'utf8' })
-  } catch {
-    return out
+/**
+ * 这个仓库的文件全集（相对仓库根，POSIX 分隔符）。
+ *
+ * 判据是**仓库的定义域**，不是「工作目录里现在有什么」：受版本控制跟踪的文件，
+ * 加上尚未被忽略的新文件——这正是「这个仓库包含什么」，由项目自己的版本控制给出。
+ *
+ * 为什么不维护「该跳过哪些目录」的黑名单：那种写法每来一个工具就要再加一条
+ * （编辑器缓存、依赖、构建产物、多智能体协作状态……），而这份名单永远追不上环境
+ * 的变化；它还会把「检查了谁」变成一个需要人记得维护的取值。按定义域判则一视同仁：
+ * 只要这些目录被忽略（正常项目都会忽略），就自动落在定义之外，脚本不需要认识
+ * 其中任何一个——通则即稳定。
+ *
+ * 为什么不用 git 之外的手段判断忽略规则：忽略语法有通配、否定、层级差异，自己解析
+ * 必然有偏差，而这里的偏差代价是「该查的没查」或「不该查的被查」。项目自身的忽略
+ * 规则才是权威来源（它同时覆盖仓库级、本机级与全局级）。
+ *
+ * git 不可用（没装、或这个目录还不是仓库）时退回纯文件系统扫描：此时没有权威的忽略
+ * 规则，只能跳过两个一定不属于仓库的目录，并把降级如实报告出来。静默降级会让检查
+ * 看起来覆盖了全部文件而实际没有——那比不查更坏。
+ *
+ * 导出给 selftest：判定要能被直接证伪，而不是只能靠跑整棵 skill 树观察（同 evalFreshnessMarker）。
+ */
+export function listRepoFiles(root) {
+  const r = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  })
+  if (r.error === undefined && r.status === 0 && typeof r.stdout === 'string') {
+    // -z：路径按字节给、不做引号转义，含空格或中文的路径才不会被改写成另一个字符串。
+    return { files: r.stdout.split('\0').filter((p) => p !== ''), source: 'git' }
   }
-  for (const entry of entries) {
-    if (entry.name === '.git' || entry.name === 'node_modules') continue
-    const full = join(root, entry.name)
-    if (entry.isDirectory()) { collectTextFiles(full, out); continue }
-    if (!entry.isFile()) continue
-    const lower = entry.name.toLowerCase()
-    const dot = entry.name.lastIndexOf('.')
-    const ext = dot <= 0 ? '' : entry.name.slice(dot).toLowerCase()
+  const files = []
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) { walk(full); continue }
+      if (entry.isFile()) files.push(relative(root, full).split(/[\\/]/).join('/'))
+    }
+  }
+  walk(root)
+  return { files, source: 'fs' }
+}
+
+/** 定义域只算一次；降级提示也只报一次（两个调用方共用同一份结果）。 */
+let repoDomainCache
+function repoDomain() {
+  if (repoDomainCache === undefined) {
+    repoDomainCache = listRepoFiles(SKILL_ROOT)
+    if (repoDomainCache.source === 'fs') {
+      warn('git 不可用：文本检查域退回文件系统扫描（只跳过 .git 与依赖目录）——'
+        + '本机状态目录可能被一并计入，覆盖面与「仓库定义域」不同。这是降级，不是全查。')
+    }
+  }
+  return repoDomainCache
+}
+
+/** 定义域里参与逐字检查的文本文件（绝对路径）。 */
+function repoTextFiles() {
+  const out = []
+  for (const rel of repoDomain().files) {
+    const full = join(SKILL_ROOT, rel)
+    // 索引里有、工作区里没有（已暂存删除）的条目要跳过，否则读文件时直接抛错。
+    if (!existsSync(full)) continue
+    const lower = rel.split('/').pop().toLowerCase()
+    const dot = lower.lastIndexOf('.')
+    const ext = dot <= 0 ? '' : lower.slice(dot)
     if (TEXT_EXTENSIONS.has(ext) || TEXT_SPECIAL_NAMES.has(lower)) { out.push(full); continue }
     // 无扩展名的文件也纳入，但要排除明显的二进制大文件
     if (dot <= 0) {
@@ -191,7 +252,7 @@ function checkSkillFile() {
  * 一扇门。引用断链的代价很高——AI 按图索骥走到死路，然后开始猜。
  */
 function checkReferencesResolve() {
-  const docs = collectTextFiles(SKILL_ROOT).filter((f) => f.endsWith('.md'))
+  const docs = repoTextFiles().filter((f) => f.endsWith('.md'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
   // 只认这三种路径形状：本 skill 的资源就在这三类目录下。
   // 占位示例请写成 `references/<文件名>.md`——尖括号不在字符类里，因此不会被当成真实
@@ -218,7 +279,18 @@ function checkReferencesResolve() {
 function checkReferences() {
   const dir = join(SKILL_ROOT, 'references')
   if (!existsSync(dir)) { fail('缺少 references 目录。'); return }
-  const files = readdirSync(dir).filter((f) => f.endsWith('.md'))
+  const files = []
+  const collect = (sub) => {
+    let entries = []
+    try {
+      entries = readdirSync(join(dir, sub), { withFileTypes: true, encoding: 'utf8' })
+    } catch { return }
+    for (const e of entries) {
+      if (e.isDirectory()) { collect(sub === '' ? e.name : `${sub}/${e.name}`); continue }
+      if (e.isFile() && e.name.endsWith('.md')) files.push(sub === '' ? e.name : `${sub}/${e.name}`)
+    }
+  }
+  collect('')
   if (files.length === 0) { fail('references 目录里没有任何 Markdown 文件。'); return }
   for (const file of files) {
     const text = readText(join(dir, file)).replace(/^\uFEFF/, '')
@@ -253,14 +325,28 @@ function checkTemplates() {
     { file: 'license-isc.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
     { file: 'license-bsd-2-clause.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
     { file: 'license-bsd-3-clause.txt', tokens: ['{{YEAR}}', '{{HOLDER}}'] },
-    { file: 'license-unlicense.txt', tokens: [], note: '放弃权利，无版权行' },
+    // Unlicense 是**反向**断言：它的实质是放弃权利，所以既没有占位符、也没有版权行。
+    // 只查「占位符存在」会漏掉这一类——有人好心地补一行 `Copyright (c)` 进去，
+    // 文档里那句「全文没有版权行」就变成了假话，而检查什么都不会说。
+    {
+      file: 'license-unlicense.txt',
+      tokens: [],
+      absent: ['Copyright (c)', '{{'],
+      note: '放弃权利，无版权行',
+    },
   ]
-  for (const { file, tokens } of LICENSE_TEMPLATES) {
+  for (const { file, tokens, absent } of LICENSE_TEMPLATES) {
     const p = join(dir, file)
     if (!existsSync(p)) { fail(`缺少 templates/${file}（许可证模板，docs-set 引用它）。`); continue }
     const text = readText(p)
     for (const token of tokens) {
       if (!text.includes(token)) fail(`templates/${file} 缺少占位符 ${token}。`)
+    }
+    for (const marker of absent ?? []) {
+      if (text.includes(marker)) {
+        fail(`templates/${file} 出现了不该有的内容「${marker}」——它是放弃权利的标准文本，`
+          + '没有版权行也没有占位符；补上它们会与 docs-set 的说明和许可证性质矛盾。')
+      }
     }
     if (text.trim().length < 200) fail(`templates/${file} 内容异常短，可能不是完整许可证文本。`)
   }
@@ -329,7 +415,7 @@ const EMOJI = /\p{Extended_Pictographic}/u
 const HOME_PATH = /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+|[\\/](?:home|Users)[\\/][^\\/\s"'`]+/
 
 function checkGlobalRules() {
-  const files = collectTextFiles(SKILL_ROOT)
+  const files = repoTextFiles()
   if (files.length === 0) { fail('没有收集到任何文本文件。'); return }
   for (const full of files) {
     const name = rel(full)
@@ -347,13 +433,19 @@ function checkGlobalRules() {
         + '（若这是有意的测试数据或模式定义，请把它加进 preflight.mjs 的 HOME_PATH_EXEMPT 并写明理由。）')
     }
   }
-  // 顶层目录整洁：多出来的条目必须有明确归属
+  // 顶层目录整洁：多出来的条目必须有明确归属。
+  //
+  // 判据同样取**仓库定义域**：本机状态目录（被忽略、不属于这个仓库）不该在这里被要求
+  // 解释——它不是这个仓库的内容，工具下次还会生成它。只有属于仓库的条目才需要有人
+  // 说明它为什么在这。
   let entries = []
   try { entries = readdirSync(SKILL_ROOT, { withFileTypes: true, encoding: 'utf8' }).map((e) => e.name) } catch { /* 忽略 */ }
+  const domainFiles = repoDomain().files
   for (const entry of entries) {
-    if (!ALLOWED_TOP_LEVEL.has(entry) && !/^readme([._-][a-z]{2}([._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i.test(entry)) {
-      warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
-    }
+    if (ALLOWED_TOP_LEVEL.has(entry)) continue
+    if (/^readme([._-][a-z]{2}([._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i.test(entry)) continue
+    if (!domainFiles.some((p) => p === entry || p.startsWith(`${entry}/`))) continue
+    warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
   }
 }
 
@@ -532,6 +624,74 @@ function checkStatedCounts() {
       }
     }
   }
+  // README 方向的对账：README 面向的是「刚拿到这个 skill 的人」，它的脚本表与文件表
+  // 就是他的全景图。**只查 SKILL.md 那一侧会漏掉这一半**——实测 README 少列了一个脚本
+  // 与三份发布专章，而所有检查全绿（读者照着 README 找东西，找不到就是找不到）。
+  // 两份 README 都要查：它们成对维护，只查一份等于放另一半漂移。
+  for (const readme of ['README.md', 'README.en.md']) {
+    const p = join(SKILL_ROOT, readme)
+    if (!existsSync(p)) continue
+    const text = readText(p).replace(/^\uFEFF/, '')
+    const missing = []
+    const scan = (dir, prefix, filter) => {
+      if (!existsSync(dir)) return
+      for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
+        if (!filter(e)) continue
+        if (!text.includes(`${prefix}${e.name}`)) missing.push(`${prefix}${e.name}`)
+      }
+    }
+    scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
+    scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
+    if (missing.length > 0) {
+      fail(`${readme} 没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
+        + '读者照着它找东西，找不到就是找不到；补进文件表再提交。')
+    }
+  }
+  // 门禁命令表在 AGENTS.md 与 CONTRIBUTING 各写了一份，**两处必须说同一件事**：
+  // 贡献者按 CONTRIBUTING 自查、CI 与维护者按 AGENTS.md 自查，少一个参数就是
+  // 「照做的人拿到的命令不是真命令」（实测 sync-toc 漏了 README.en.md 那次）。
+  {
+    const commands = (file, headingRe) => {
+      const p = join(SKILL_ROOT, file)
+      if (!existsSync(p)) return undefined
+      const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
+      const at = lines.findIndex((l) => headingRe.test(l))
+      if (at < 0) return undefined
+      // 只看标题之后的**第一个围栏代码块**：那一节里可能还有别的命令示例（例如
+      // 「改了内核后要重新注入」那一小段），把它们算进「门禁命令表」是读错了范围。
+      const out = new Set()
+      let inFence = false
+      let seenFence = false
+      for (let i = at + 1; i < lines.length; i += 1) {
+        if (/^##\s/.test(lines[i])) break
+        if (/^\s*```/.test(lines[i])) {
+          if (!inFence) {
+            if (seenFence) break
+            inFence = true
+            seenFence = true
+          } else inFence = false
+          continue
+        }
+        if (!inFence) continue
+        const line = lines[i].trim()
+        if (!line.startsWith('node ')) continue
+        out.add(line.split(/\s+#/)[0].replace(/\s+/g, ' ').trim())
+      }
+      return out
+    }
+    const a = commands('AGENTS.md', /^## 构建与验证/)
+    const c = commands('CONTRIBUTING.md', /^## 提交前门禁/)
+    if (a !== undefined && c !== undefined) {
+      const onlyA = [...a].filter((x) => !c.has(x))
+      const onlyC = [...c].filter((x) => !a.has(x))
+      if (onlyA.length > 0 || onlyC.length > 0) {
+        fail('提交前门禁的命令表在两处不一致：'
+          + `${onlyA.length > 0 ? `只有 AGENTS.md 有 ${onlyA.join(' / ')}；` : ''}`
+          + `${onlyC.length > 0 ? `只有 CONTRIBUTING.md 有 ${onlyC.join(' / ')}；` : ''}`
+          + '两处必须是同一批命令（含参数）。')
+      }
+    }
+  }
   // 常量一致性：两处预算必须相等；约定名 RELEASE_TOKEN 必须在模板与文档同拼写。
   // 改一处忘另一处是本类最常见的 drift，注释写“同步”不如机器断言。
   {
@@ -706,6 +866,21 @@ function expectedFreshnessScope(rel) {
 }
 
 /**
+ * 「事实来源」节的标题形状。
+ *
+ * 判的是**这一节在不在**，不是「标题这一串字长得对不对」。专章模板的骨架写成
+ * `## 八、事实来源（必填）`——编号让它在文件里定位得到，括注提醒写的人这一节必填；
+ * 若按字面匹配，照着模板新建的专章会被判成「没有来源节」，于是模板与检查器互相打架。
+ * 所以容忍两类**装饰**：编号前缀（`八、`、`3.`）与尾部括注（`（必填）`）。
+ *
+ * 不容忍的是**改名**：`## 事实来源与更新` 之类不算这一节——那已经不是同一节了，
+ * 而放行它等于让「有没有交代来源」这个问题失去判据。要放宽这条，先想清楚新的
+ * 失效模式是什么，别为了少报一次失败把判据调成永真。
+ */
+const FRESHNESS_SECTION_RE =
+  /^##[ \t]*(?:[0-9一二三四五六七八九十百]+[、.．)）][ \t]*)?事实来源(?:[ \t]*[（(][^）)\n]*[）)])?[ \t]*$/m
+
+/**
  * 纯函数：判定一份文档里的保鲜标记。只管格式，不管“该不该有”
  * （“该不该有”由 checkFreshness 按文件家族定——混在一起，单测就写不清了）。
  *
@@ -719,7 +894,7 @@ export function evalFreshnessMarker(rel, text, todayStr, tomorrowStr) {
     errors: [], warnings: [],
   }
   const clean = text.replace(/^\uFEFF/, '')
-  const sectionAt = clean.search(/^## 事实来源[ \t]*$/m)
+  const sectionAt = clean.search(FRESHNESS_SECTION_RE)
   result.hasSection = sectionAt >= 0
   const found = [...clean.matchAll(/<!--\s*([A-Za-z0-9-]+)-verified:\s*([^>]*?)\s*-->/g)]
   result.count = found.length
@@ -791,14 +966,27 @@ function checkFreshness() {
     try {
       text = readText(join(SKILL_ROOT, rel))
     } catch { continue }
+    // 判据是「这个文件承载了外部易变事实」，**不是文件名模式**：总纲 publish.md 与
+    // remote-github.md 同样带着跨生态的易变取值（制品库行为、令牌有效期、界面路径），
+    // 按文件名匹配会把它们漏在保鲜之外——而它们恰恰是最常被照抄的那两页。
     const isChapter = /^references\/plugins\/[a-z0-9-]+\.md$/.test(rel)
       || /^references\/publish-[a-z0-9-]+\.md$/.test(rel)
+      || rel === 'references/publish.md'
+      || rel === 'references/remote-github.md'
     const r = evalFreshnessMarker(rel, text, todayStr, tomorrowStr)
     if (isChapter && !r.hasSection) {
       fail(`${rel} 缺少「事实来源」节——带外部易变事实的章节必须写来源与核实方式（插件专章见 plugin-project.md 模板第八节，发布专章见兄弟文件的同名节）。`)
     }
     if (isChapter && r.count === 0) {
-      fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式见 AGENTS.md「外部事实保鲜」节）。`)
+      fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式与用法见 references/publish.md 的「专章的『事实来源』标记」一节）。`)
+    }
+    // 「事实来源」不能只是一句套话：它必须写出**查法**（去哪个官方文档的哪一节查），
+    // 否则「上次看到的值」过期时，读的人无处可查——来源节就成了装饰。
+    if (isChapter && r.hasSection) {
+      const body = text.slice(text.search(FRESHNESS_SECTION_RE))
+      if (!/https?:\/\/|官方|文档|来源/.test(body)) {
+        fail(`${rel} 的「事实来源」节没有写出查法——至少要说清去哪个官方文档的哪一节重核。`)
+      }
     }
     for (const e of r.errors) fail(`${rel} ${e}`)
     for (const w of r.warnings) warn(`${rel} ${w}`)

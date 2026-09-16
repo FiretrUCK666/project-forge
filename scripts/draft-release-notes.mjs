@@ -4,8 +4,13 @@
  *
  * 存在的理由：`gh release create --generate-notes` 是 GitHub 服务器按英文模板
  * 渲染的（What's Changed + Full Changelog 链接），它不认识中文，产出的说明
- * 没有一句人话。而我们的提交信息本来就是中文人话——起草只是把它们收集起来，
- * 而不是重新发明内容。
+ * 没有一句人话。所以这里自己起草中文正文。
+ *
+ * **起草结果是素材，不是成品**：发布页面的读者是使用者，正文必须回答
+ * 「这一版更新了什么、修复了什么」，用他看得懂的话——不能照搬内部编号、任务代号、
+ * 分支名与提交哈希，也不该把对使用者无影响的重构写进去。提交信息本身面向使用者时，
+ * 收集起来就够用；夹着代号或内部说法时，发版前由人改写一遍再发。
+ * 这条与 references/remote-github.md 第六节的判据一致，实现与文档只有一份说法。
  *
  * 用法：
  *   node scripts/draft-release-notes.mjs <标签> [输出文件]
@@ -64,7 +69,11 @@ function main() {
   const repo = remote === undefined ? undefined : parseGitHubRepo(remote)
   if (repo !== undefined) compare = `[${prev ?? '初始'}...${tag}](https://github.com/${repo}/compare/${range})`
 
-  const lines = [`## 本次更新`, '']
+  // 标题用疑问句的两问，而不是「本次更新」这类中性词：发布页面的读者是使用者，
+  // 他要的答案是「更新了什么、修复了什么」。提交信息本身面向使用者时，逐条列出即成品；
+  // 夹着内部编号或任务代号时，发版前由人把这些条目改写成使用者看得懂的说法再发
+  // （判据见 references/remote-github.md 第六节——文档与实现只有一份说法）。
+  const lines = [`## 这一版更新了什么、修复了什么`, '']
   if (subjects.length === 0) lines.push('（该区间无提交记录）')
   else for (const s of subjects) lines.push(`- ${s}`)
   // 取数上限必须明示：超 100 条时老的提交静默丢失，不写就是“看起来全了”。

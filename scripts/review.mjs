@@ -15,7 +15,7 @@
  *           不允许“没问就当不要”。flag 本身就是用户答复的机器载体。
  *
  * 退出码：0 = 无[缺]（[待问]须已用 flag 消掉）；1 = 有[缺]或用法错误。
- * 只读（会跑 check-badges 联网验徽章，离线时如实报跳过）；不写任何文件。
+ * 只读（会跑 check-badges 联网验徽章；没查完时如实报「未核对」，绝不读成通过）。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -23,13 +23,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey } from './survey.mjs'
+import { survey, authorMarkers, isMainModule } from './survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 const KERNEL_START = '<!-- project-forge:kernel:start -->'
 const KERNEL_END = '<!-- project-forge:kernel:end -->'
-const AUTHOR_RE = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
 
 const FLAGS = new Set([
   '--no-bilingual', // 用户确认：单语即可，不要英文版
@@ -65,16 +64,70 @@ function parseArgs(argv) {
   return { target: positional[0] ?? process.cwd(), flags }
 }
 
-/** 跑徽章检查。返回 ok / bad / offline / nobadge 四态，不抛错。 */
+/**
+ * 徽章检查的结论行（check-badges.mjs 输出）与退出码的对应关系。
+ *
+ * 判定**只认这一行与退出码**，不去嗅探人话。理由是一个实测过的假绿：子进程崩在
+ * 未包裹的 `res.text()` 上（坏 gzip → `TypeError: terminated`），输出里一条结论字样
+ * 都没有，而按文字嗅探的兜底恰好落在最宽松的「没问题」上——于是 review 报
+ * 「[齐] 徽章全部可显示」。拿不到结论行、或结论行与退出码不一致，一律判「没查完」。
+ */
+const BADGE_STATE_RE = /check-badges: state=(ok|bad|unverified|nobadge)\b/
+const BADGE_EXPECT_EXIT = { ok: 0, nobadge: 0, bad: 1, unverified: 3 }
+
+/**
+ * 由子进程原始输出与退出码推出徽章结论。纯函数，供 selftest 直接喂数据证伪。
+ * 返回 { state: 'ok'|'bad'|'unverified'|'nobadge', why }。
+ */
+export function badgeVerdict(stdout, stderr, status) {
+  const out = `${stdout ?? ''}\n${stderr ?? ''}`
+  const m = BADGE_STATE_RE.exec(out)
+  if (m === null) return { state: 'unverified', why: `子进程没有给出结论行（退出码 ${status}）` }
+  if (BADGE_EXPECT_EXIT[m[1]] !== status) {
+    return { state: 'unverified', why: `结论行说 ${m[1]}，退出码却是 ${status}` }
+  }
+  return { state: m[1], why: '' }
+}
+
+/**
+ * 凭据命中按处置分档。纯函数，供 selftest 直接喂数据证伪。
+ *
+ * 判据来自版本管理那套分案（version-control.md 的密钥门控、SKILL.md 的 G2）：
+ *   tracked=true               → blocking（已在版本库里，只能移除并轮换）
+ *   tracked=false, ignored=true→ safe（不进版本库；这是 .gitignore 里 .env 的正常形态）
+ *   tracked=false, ignored≠true→ blocking（`git add -A` 会把它带进去）
+ * 注意 `ignored` 为 undefined 时按「未忽略」处理——没证据就当没被忽略，
+ * 免得勘察拿不到忽略比特时这里悄悄放行。
+ */
+export function tierSecrets(hits) {
+  const list = Array.isArray(hits) ? hits : []
+  const tracked = list.filter((h) => h.tracked === true)
+  const safe = list.filter((h) => h.tracked !== true && h.ignored === true)
+  const exposed = list.filter((h) => h.tracked !== true && h.ignored !== true)
+  return { tracked, safe, exposed, blocking: [...tracked, ...exposed] }
+}
+
+/**
+ * 这个门禁**已经消费**的风险类别。新增一类风险时，这里与下面的处理必须一起加：
+ * 只加 survey 的字段、不在门禁里落结论，新类别就会悄悄没人管（下一个维护者
+ * 一定会忘）。所以判据不是「这里有没有写」，而是「survey 报的每个键都在这个集合里」，
+ * 缺一个就报「未处理的风险类别」——由 unhandledRiskKeys 兜底。
+ */
+export const HANDLED_RISK_KEYS = new Set([
+  'secretFiles', 'secretContent', 'contentScan', 'homePathLeaks', 'largeFiles', 'symlinks', 'nestedRepos',
+])
+
+/** 勘察报了、但门禁没有落结论的风险类别。纯函数，供 selftest 直接喂数据证伪。 */
+export function unhandledRiskKeys(risks) {
+  return Object.keys(risks ?? {}).filter((key) => !HANDLED_RISK_KEYS.has(key))
+}
+
+/** 跑徽章检查。返回 ok / bad / unverified / nobadge 四态，不抛错。 */
 function checkBadges(root, readmes) {
   if (readmes.length === 0) return { state: 'nobadge' }
   const r = spawnSync(process.execPath, [join(HERE, 'check-badges.mjs'),
     ...readmes.map((f) => join(root, f))], { encoding: 'utf8' })
-  const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
-  if (/没有徽章/.test(out)) return { state: 'nobadge' }
-  if (/显示不出来/.test(out)) return { state: 'bad', detail: out }
-  if (/没能检查|请求失败|注意：/.test(out)) return { state: 'offline' }
-  return { state: 'ok' }
+  return badgeVerdict(r.stdout, r.stderr, r.status)
 }
 
 function main(argv) {
@@ -91,7 +144,7 @@ function main(argv) {
       + '      [--private-no-license] [--no-ci] [--no-auto-release] [--secrets-reviewed] [--strict]\n\n'
       + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n'
       + '  默认[待问]不拦（exit 0 但结论写“还有待问”）；--strict 下[待问]同样拦住（exit 2），用于 CI。\n'
-      + '  无对应 flag 的[待问]（徽章离线、DSH 挂载建议、英文模板、纯文档构建命令）只能改文件消掉。\n',
+      + '  无对应 flag 的[待问]（徽章没查完、DSH 挂载建议、英文模板、纯文档构建命令、扫描未覆盖范围）只能改文件消掉。\n',
     )
     return 0
   }
@@ -119,7 +172,10 @@ function main(argv) {
   if (agents === undefined) {
     missing.push('AGENTS.md 缺失')
   } else {
-    const authors = (agents.match(AUTHOR_RE) ?? []).length
+    // 待填写的数法**只有一处实现**：survey 导出的 authorMarkers（整篇扫描）。
+    // 曾经 compose 与 review 各写一份——一个逐行、一个整篇，于是同一份文件在
+    // 多行标记下得到两个结论（compose 说「内容完整」，review 说「待填写 7 处」）。
+    const authors = authorMarkers(agents).length
     const kernel = agents.includes(KERNEL_START) && agents.includes(KERNEL_END)
     if (!kernel) {
       missing.push('AGENTS.md 缺少内核标记（跑 compose-agents 生成或升级）')
@@ -157,21 +213,89 @@ function main(argv) {
     pending.push('上游跟踪未设置：首推用显式分支并设跟踪（改文件消不掉，推一次即有）')
   }
 
+  // 2b-2. 「P5 之后强制回跑 P4」这条规则以前没有任何机器落点：有远端却与发布无关的
+  // 契约照样交付，用户拿到的 AGENTS.md 永远缺发布那半部分。判据是**事实 + 文本**
+  // 两条都有：有远端（`git.remote` 非空）时，契约里必须提到远端与发布/标签——
+  // 否则那次回跑没做。中英文都认，避免语言假设。
+  if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
+    && git.isRepoRoot !== false && agents !== undefined) {
+    const hasRemoteText = /远端|remote|origin|推送|push/i.test(agents)
+    const hasReleaseText = /发布|release|标签|tag|版本/i.test(agents)
+    if (!hasRemoteText || !hasReleaseText) {
+      missing.push('AGENTS.md 缺远端与发布部分（有远端就必须写清怎么推、怎么发版：P5 之后要回跑 P4 的 compose-agents）')
+    }
+  }
+
   // 2c. 标签与版本号：只报事实比对，不下结论（形生态各异，见 publish.md）。
   if (s.artifacts?.declaredVersion !== undefined && s.artifacts?.versionAligned === false) {
     pending.push(`标签与版本号未对齐：清单 ${s.artifacts.declaredVersion}，标签 ${(s.artifacts.versionAlignedTags ?? []).join('、') || '无'}（自动化会对不上，先确认）`)
   }
 
-  // 2d. 密钥与扫描可信度：凭据命中即拦；扫描被截断时“无命中”不可信，转待问。
-  // 这是 G2 的机器落点：人不记得扫描，门就替他记得。
+  // 2d. 密钥与扫描可信度。**按分案判，不再一律报缺**（判据与 version-control.md 的
+  // 密钥门控同源，SKILL.md 的 G2 也写「未跟踪排除、已历史轮换、占位继续」）：
+  //   - 已跟踪（已经在版本库里）→ 缺：只能从索引移除并轮换凭据；
+  //   - 未跟踪且**已被忽略** → 报「齐」：这是最常见的正常形态（.gitignore 里的 .env），
+  //     一律报缺会把门禁变成噪音，操作者的对策就是条件反射式加 flag——安全信号被稀释；
+  //   - 未跟踪且未被忽略 → 缺：`git add -A` 会把它带进历史。
   const risks = s.risks ?? {}
   const secretHits = [...(risks.secretFiles ?? []), ...(risks.secretContent ?? [])]
-  if (secretHits.length > 0) {
-    if (flags.has('--secrets-reviewed')) ok.push(`凭据命中 ${secretHits.length} 处（用户已按门控确认为占位或测试数据）`)
-    else missing.push(`凭据形状 ${secretHits.length} 处（按版本管理密钥门控分案处置后重跑；确认为占位或测试数据时加 --secrets-reviewed，位置见勘察报告）`)
+  const secretTiers = tierSecrets(secretHits)
+  if (secretTiers.blocking.length > 0) {
+    if (flags.has('--secrets-reviewed')) {
+      ok.push(`凭据命中 ${secretTiers.blocking.length} 处（用户已按门控确认为占位或测试数据）`)
+    } else {
+      missing.push(`凭据形状 ${secretTiers.blocking.length} 处`
+        + `（已入库 ${secretTiers.tracked.length}、未忽略 ${secretTiers.exposed.length}；`
+        + '按版本管理密钥门控分案处置后重跑；确认为占位或测试数据时加 --secrets-reviewed，位置见勘察报告）')
+    }
   }
-  if (risks.contentScan?.truncated === true) {
-    pending.push('内容扫描被截断：“无命中”不可信，提高上限重扫或在汇报里写明覆盖范围')
+  if (secretTiers.safe.length > 0) {
+    ok.push(`未跟踪且已被忽略的敏感文件 ${secretTiers.safe.length} 处（不进版本库就不拦；确认忽略规则真的覆盖它们）`)
+  }
+  // 扫描覆盖：**「没扫到」必须与「扫过没命中」可区分**。截断、超体积、扩展名黑名单、
+  // 读失败、非 UTF-8——五类都进这一条，任何一类非零都要问一句，不能读成干净。
+  const scan = risks.contentScan ?? {}
+  const uncovered = []
+  if (scan.truncated === true) uncovered.push('文件数达上限被截断')
+  if (typeof scan.skippedLarge === 'number' && scan.skippedLarge > 0) uncovered.push(`${scan.skippedLarge} 个文件超过单文件上限未扫`)
+  if (typeof scan.skippedByExtension === 'number' && scan.skippedByExtension > 0) uncovered.push(`${scan.skippedByExtension} 个文件按扩展名跳过`)
+  if (typeof scan.unreadable === 'number' && scan.unreadable > 0) uncovered.push(`${scan.unreadable} 个文件读不出来（权限或占用）`)
+  if (typeof scan.notUtf8 === 'number' && scan.notUtf8 > 0) uncovered.push(`${scan.notUtf8} 个文件不是 UTF-8（编码未嗅探）`)
+  if (typeof scan.depthLimited === 'number' && scan.depthLimited > 0) uncovered.push(`${scan.depthLimited} 个子目录因嵌套过深未进入`)
+  if (uncovered.length > 0) {
+    pending.push(`内容扫描有未覆盖范围（${uncovered.join('；')}）——“无命中”不可信，写明覆盖范围或提高上限重扫`)
+  }
+
+  // 2d-2. 其余风险类别：**逐类落结论，不许沉默**。
+  // 这里做成表驱动并带兜底：勘察将来新增一类风险而这里没处理，下面那条兜底会把它
+  // 报成待问——「加了字段但没人消费」不会再悄悄发生。
+  for (const key of unhandledRiskKeys(risks)) {
+    pending.push(`勘察报了未处理的风险类别「${key}」：新类别必须在交付门禁里落一个结论（缺 / 待问），不能沉默`)
+  }
+  const allLeaks = (risks.homePathLeaks ?? []).filter((h) => h.kind === 'leak')
+  // 已被忽略规则覆盖的本机路径不进版本库：与凭据同一分案，报事实但不拦。
+  // 否则一个只在本机存在、且已忽略的状态文件（工具生成的那种）会让门禁永远叫喊。
+  const leaks = allLeaks.filter((h) => h.ignored !== true)
+  const ignoredLeaks = allLeaks.filter((h) => h.ignored === true)
+  if (leaks.length > 0) {
+    missing.push(`本机私有路径 ${leaks.length} 处（换台机器就失准，也可能已经暴露了目录结构；改成相对路径或环境变量）`)
+  }
+  if (ignoredLeaks.length > 0) {
+    pending.push(`本机私有路径 ${ignoredLeaks.length} 处已被忽略规则覆盖（不进版本库；确认忽略规则真的覆盖它们）`)
+  }
+  const bigTracked = (risks.largeFiles ?? []).filter((f) => f.tracked === true)
+  const bigUntracked = (risks.largeFiles ?? []).filter((f) => f.tracked !== true)
+  if (bigTracked.length > 0) {
+    missing.push(`已在版本库里的大文件 ${bigTracked.length} 个（≥20MB，克隆与历史都会长期承担；先确认该不该入库）`)
+  }
+  if (bigUntracked.length > 0) {
+    pending.push(`未跟踪的大文件 ${bigUntracked.length} 个（≥20MB；提交前先决定忽略还是入库）`)
+  }
+  if (Array.isArray(risks.symlinks) && risks.symlinks.length > 0) {
+    pending.push(`符号链接目录 ${risks.symlinks.length} 个未进入扫描（链接指向仓库外时不该扫；确认里面没有该查的东西）`)
+  }
+  if (Array.isArray(risks.nestedRepos) && risks.nestedRepos.length > 0) {
+    pending.push(`嵌套仓库 ${risks.nestedRepos.length} 个（子目录里另有 .git；确认是有意为之，否则它不会被外层仓库跟踪）`)
   }
 
   // 2e. 忽略规则：未忽略的产物目录与“已跟踪又被忽略”是提交前必须消掉的两项。
@@ -196,14 +320,19 @@ function main(argv) {
     else pending.push('双语：只有一份 README，问用户要不要英文版（要→补，不要→加 --no-bilingual）')
   }
 
-  // 4. 徽章：有就必须验（联网跑 check-badges，离线如实报）；没有徽章不强求。
+  // 4. 徽章：有就必须验（联网跑 check-badges）；没有徽章不强求。
+  // 「没查完」与「查过且可显示」是两回事——第三态走待问，绝不并进齐。
   const badgeResult = checkBadges(root, readmes)
   if (badgeResult.state === 'bad') missing.push('徽章显示不出来（见上文输出，删掉或修好）')
-  else if (badgeResult.state === 'offline') pending.push('徽章未能联网验证：在汇报里写明未验及原因')
+  else if (badgeResult.state === 'unverified') pending.push(`徽章没能查完（${badgeResult.why}）：在汇报里写明未验及原因，不要读成通过`)
   else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
 
   // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳；有了要看内容是否齐全。
-  // 内容检查只认关键词的有无，不判措辞好坏：措辞无法用机器判，判了就是误报源。
+  //
+  // 内容判据**必须语言无关**：写 CONTRIBUTING 的人用哪种语言是他的自由，而门禁
+  // 用中文关键词会让一份合格的英文贡献指南被判三处缺（实测过），于是「合格产物
+  // 过不了门」——那比不判更坏。所以每条判据都同时认中英文，且大小写不敏感；
+  // 只与项目约定有关的指向（例如 AGENTS.md）降为待问，不当成缺失。
   if (s.docs?.contributing !== undefined) {
     ok.push('CONTRIBUTING 有')
     const contributingFile = typeof s.docs.contributing === 'string'
@@ -211,29 +340,33 @@ function main(argv) {
       : s.docs.contributing.file
     const contributing = readText(join(root, contributingFile)) ?? ''
     const coreChecks = [
-      [/提问|Issue|反馈/, '提问与反馈'],
+      [/提问|问题|反馈|issue|question|feedback|support|discussion|help/i, '提问与反馈'],
       [/fork/i, 'fork 指引'],
       [/分支|branch/i, '分支指引'],
-      [/门禁|全绿|测试|构建/, '提交前门禁'],
-      [/AGENTS\.md/, 'AGENTS 指向'],
-      [/许可|LICENSE/, '许可'],
+      [/门禁|全绿|测试|构建|check|test|build|verify|ci\b|lint|gate/i, '提交前门禁'],
+      [/许可|licen[cs]e/i, '许可'],
     ]
     for (const [re, label] of coreChecks) {
-      if (!re.test(contributing)) missing.push(`CONTRIBUTING 缺${label}（补对应节，见 docs-set 第五节通用骨架）`)
+      if (!re.test(contributing)) {
+        missing.push(`CONTRIBUTING 缺${label}（补对应节，见 docs-set 第五节通用骨架；中英文皆可）`)
+      }
+    }
+    if (!/AGENTS\.md/.test(contributing)) {
+      pending.push('CONTRIBUTING 未指向 AGENTS.md：项目契约在哪、改动前先读什么，写清楚更省事（不是缺失，按项目习惯定）')
     }
     const kinds = s.ecosystem?.kinds ?? []
     const isNode = kinds.includes('node')
     const isPlugin = kinds.some((k) => /plugin|extension/.test(k))
     const isDsh = kinds.includes('dsh-plugin')
     const isDocsOnly = kinds.includes('docs-only')
-    if (isNode && !/(npm|pnpm|yarn|bun|安装依赖|安装)/.test(contributing)) {
+    if (isNode && !/(npm|pnpm|yarn|bun|安装依赖|安装|dependenc|install)/i.test(contributing)) {
       missing.push('CONTRIBUTING 缺包管理器或安装说明（node 项目：沿用它自己的包管理器）')
     }
     if (isPlugin) {
-      if (!/(产物|一起提交)/.test(contributing)) {
+      if (!/(产物|一起提交|artifact|commit.*build|build.*artifact|dist)/i.test(contributing)) {
         missing.push('CONTRIBUTING 缺产物同提交（插件类：安装方不构建，产物缺了即加载失败）')
       }
-      if (!/(主干|标签|发布)/.test(contributing)) {
+      if (!/(主干|标签|发布|main|tag|release|publish)/i.test(contributing)) {
         missing.push('CONTRIBUTING 缺三类越权（不推主干、不打标签、不发布）')
       }
     }
@@ -434,4 +567,6 @@ function main(argv) {
   return 0
 }
 
-process.exitCode = main(process.argv)
+// 与 survey / preflight 同一模式：直接执行才跑 main；被 import（selftest 单测本文件的
+// 纯函数）时不产生副作用。判据按真实路径比较，经 junction 调用也算直接执行。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(process.argv)

@@ -29,6 +29,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseGitHubRepo } from './survey.mjs'
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..')
 
@@ -54,8 +56,8 @@ function repoFromManifest() {
     const pkg = JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''))
     const url = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
     if (typeof url !== 'string') return undefined
-    const m = /github\.com[/:]([^/]+)\/([^/.]+)/.exec(url)
-    return m === null ? undefined : `${m[1]}/${m[2]}`
+    // 与 draft-release-notes、survey 共用同一份判据（带点的仓库名不能被截断）。
+    return parseGitHubRepo(url)
   } catch {
     return undefined
   }

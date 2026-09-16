@@ -20,6 +20,8 @@
 import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 
+import { parseGitHubRepo } from './survey.mjs'
+
 function git(args, cwd) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
   if (r.error !== undefined || r.status !== 0) return undefined
@@ -54,10 +56,13 @@ function main() {
   const subjects = log.split('\n').map((l) => l.trim()).filter((l) => l !== '')
 
   // 对比链接：能解析出 GitHub 地址才给，给不出就只写区间（不编地址）。
+  // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：过去的正则用
+  // `[^/.]+` 取仓库名，把带点的名字截断（`acme/my.repo` → `acme/my`），于是起草出的
+  // 对比链接指向一个不存在的仓库——而它看起来完全正常，只有点开才发现。
   let compare = `\`${range}\``
   const remote = git(['remote', 'get-url', 'origin'], cwd)
-  const m = remote === undefined ? null : /github\.com[/:]([^/]+)\/([^/.]+)/.exec(remote)
-  if (m !== null) compare = `[${prev ?? '初始'}...${tag}](https://github.com/${m[1]}/${m[2]}/compare/${range})`
+  const repo = remote === undefined ? undefined : parseGitHubRepo(remote)
+  if (repo !== undefined) compare = `[${prev ?? '初始'}...${tag}](https://github.com/${repo}/compare/${range})`
 
   const lines = [`## 本次更新`, '']
   if (subjects.length === 0) lines.push('（该区间无提交记录）')

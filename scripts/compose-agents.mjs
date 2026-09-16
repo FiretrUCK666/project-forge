@@ -34,7 +34,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, 
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey } from './survey.mjs'
+import { survey, authorMarkers } from './survey.mjs'
+import { normVersion, parseMarkerKeys } from './preflight.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -71,14 +72,6 @@ const MANAGED = '<!-- project-forge:managed -->'
  */
 const UPGRADED = '<!-- project-forge:upgraded -->'
 const DEFAULT_BUDGET = 65536
-
-/**
- * 待填写标记。三种写法都要认：带说明、裸标记、以及多余空格。
- * 这里必须与 materialize 里的 MARK_RE **同样宽松**：曾经因为这里要求冒号、而 MARK_RE
- * 不要求，导致裸写的 `<!-- pf:author -->` 被保留在文件里却**不计入**待填写数——脚本
- * 报「0 处」并顺手移除了脚手架，而那个没填的 TODO 还留在正文里。
- */
-const AUTHOR_RE = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
 
 function readUtf8(p) {
   return readFileSync(p, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -456,21 +449,15 @@ function materialize(template, facts) {
   return collapseBlankLines(out.join(''))
 }
 
-/** 统计待填写项，并给出它们各自所在的小节标题。 */
-function findAuthors(text) {
-  const found = []
-  const lines = text.split('\n')
-  let lastHeading = '(文件开头)'
-  for (const line of lines) {
-    const heading = /^#{2,3}\s+(.+?)\s*$/.exec(line)
-    if (heading !== null) lastHeading = heading[1]
-    for (const hit of line.matchAll(AUTHOR_RE)) {
-      const note = /pf:author:\s*([\s\S]*?)\s*-->/.exec(hit[0])
-      found.push({ section: lastHeading, note: note === null ? '' : note[1] })
-    }
-  }
-  return found
-}
+/**
+ * 统计待填写项（含所在小节）。**判定只有一处实现**：survey 的 authorMarkers。
+ *
+ * 这里曾经自己走一遍、而且**逐行**扫：标记写成两行（`<!-- pf:author:` 换行后 `-->`）
+ * 就一个都数不到，于是脚本报「内容完整」并顺手删掉脚手架，而那几处 TODO 还在正文里；
+ * review 用整篇扫描数出 7 处——同一份文件两个结论。两处各写一份再对齐，迟早不一致；
+ * 现在 compose 与 review 都引用 survey 里的那一份。
+ */
+const findAuthors = authorMarkers
 
 /** 待填写项归零后，脚手架段落自动移除。 */
 function stripScaffold(text, authorCount) {
@@ -811,12 +798,18 @@ function applicableMissingSections(target, text) {
 }
 
 /**
- * DSH 专章滞后提醒：寄生在本来就要看的输出里，不另起命令、不拦流程、不记入缺口。
+ * 「本项目声明的兼容范围 vs 专章核对时的宿主版本」——一条**兼容性**提示。
  *
- * 比较专章标记的核对版本与项目锁定的宿主版本。标记读不到、项目非插件、
- * 项目无锁定版本时一律安静——没证据不断言，避免误报打扰非 DSH 项目。
+ * 这不是 `host=` 的核对结果：`host=` 的含义是「上次核对时**本机实际运行**的那套
+ * 宿主版本」，它只与本机实际宿主比对（那件事在 preflight 里做，带一致/不同/未核对
+ * 三态）。这里说的是另一件事——本项目为宿主声明的兼容范围可能早于专章核对过的版本。
+ * 两者是不同调用点、不同消息；共用的只有**归一化**（preflight 的 normVersion，
+ * 全仓只此一份），不共用语义——同一键两种语义正是这条提示过去的问题。
+ *
+ * 寄生在本来就要看的输出里：不另起命令、不拦流程、不记入缺口。标记读不到、项目非
+ * 插件、项目无锁定版本时一律安静——没证据不断言，避免误报打扰非 DSH 项目。
  */
-function dshFreshnessWarning(target) {
+function dshCompatibilityNotice(target) {
   let s
   try {
     s = survey(target)
@@ -828,12 +821,15 @@ function dshFreshnessWarning(target) {
   try {
     marker = readUtf8(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'))
   } catch { return undefined }
-  const m = /dsh-verified:\s*host=(\S+)\s+date=(\S+)/.exec(marker)
-  if (m === null) return undefined
-  const norm = (v) => v.replace(/^[\^~>=<\s]+/, '')
-  if (pinned.some((p) => norm(p) === norm(m[1]))) return undefined
-  return `提示：DSH 专章上次核对宿主 ${m[1]}（${m[2]}），本项目锁定 ${pinned.join('、')}；`
-    + '两者不一致时按 references/plugins/dsh.md 事实来源节重核第七节至第九节。'
+  // 标记的解析与键形状**只有一处实现**（preflight 的 parseMarkerKeys）。自己写正则
+  // 的代价实测过：那条正则要求 host 在 date 之前，两键顺序一换就静默失效。
+  const parsed = parseMarkerKeys(/dsh-verified:\s*([^>]*?)\s*-->/.exec(marker)?.[1] ?? '')
+  const hostPin = parsed.keys.host
+  if (hostPin === undefined) return undefined
+  if (pinned.some((p) => normVersion(p) === normVersion(hostPin))) return undefined
+  return `提示：本项目声明的 DSH 兼容范围 ${pinned.join('、')} 与专章核对时的宿主版本 ${hostPin} 不同——`
+    + '那是核对当时的本机版本，不是本项目的承诺；给这个项目配兼容范围时留意它可能早于核对过的宿主。'
+    + '按 references/plugins/dsh.md 事实来源节重核第七节至第九节。'
 }
 
 /**
@@ -846,7 +842,7 @@ function dshFreshnessWarning(target) {
  * 改掉，比不动更糟。但也不能像以前那样报错退出——那等于告诉使用者「你这个场景不支持」。
  * 所以默认只报告，升级要显式要求。
  */
-function reportHandwritten(agentsPath, existing, target, kernel, budget, status, check) {
+function reportHandwritten(agentsPath, existing, target, status, check) {
   const facts = deriveFacts(target)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
   const standard = splitSections(rendered)
@@ -1030,7 +1026,7 @@ function main(argv) {
         // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
         // 报错退出**（那会把最常见的场景变成死路），也不能擅自重写（那是覆盖用户的成果）。
         // 默认只做体检并给出下一步；用户明确要升级时才动手，且只做加法。
-        if (!upgrade) return reportHandwritten(agentsPath, existing, target, kernel, budget, status, check)
+        if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check)
         const upgraded = upgradeHandwritten(existing, kernel, target)
         composed = upgraded.text
         refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [], missing: [] }
@@ -1071,16 +1067,26 @@ function main(argv) {
   // 不这么做的话，一个 CRLF 的文件在「事实发生变化、需要重写」时会**整篇变成 LF**，
   // 而 git 会把每一行都记为改动——正是本文档自己「构建可复现」一节讲过的那个坑。
   // 只在原文件确实是 CRLF 时才转回去，不猜。
-  if (exists && managedExisting !== undefined && /\r\n/.test(readFileSync(agentsPath, 'utf8'))
-    && !/\r\n/.test(composed)) {
-    composed = composed.replace(/\n/g, '\r\n')
+  // 行尾策略按**主导**行尾决定，不按「出现过任意一个 CRLF」。
+  // 后者有两个实测过的毛病：文件里只要有一个 CRLF，还原条件就恒真；而文件里同时有
+  // CRLF 与 LF 时（PowerShell 的 `Set-Content` 就会造出这种），`composed` 里已经带着
+  // 那个 CRLF，于是整篇还原又被跳过——混合行尾永久留下，且每次运行都说「已刷新」，
+  // 尽管三次运行的字节完全相同。
+  if (exists && managedExisting !== undefined) {
+    const original = readFileSync(agentsPath, 'utf8')
+    const crlf = (original.match(/\r\n/g) ?? []).length
+    const lf = (original.match(/(?<!\r)\n/g) ?? []).length
+    if (crlf > lf && !/\r\n/.test(composed)) composed = composed.replace(/\n/g, '\r\n')
   }
 
   const authors = findAuthors(composed)
   const bytes = Buffer.byteLength(composed, 'utf8')
   const ratio = ((bytes / budget) * 100).toFixed(1)
+  // 比较前两侧都归一化：current 已经由 readUtf8 归一成 LF，composed 可能是 CRLF。
+  // 不归一就会出现「字节没变却每次都说改了」——那会让「无需改动」这个信号失效，
+  // 而它是使用者判断文件是否已经稳定的唯一依据。
   const current = exists ? readUtf8(agentsPath) : undefined
-  const same = current !== undefined && composed === current
+  const same = current !== undefined && composed.replace(/\r\n/g, '\n') === current
 
   // `--check` 判什么，与它**自称**判什么必须一致。
   //
@@ -1145,7 +1151,7 @@ function main(argv) {
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
       + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)
     reportGaps(authors, missing, process.stdout)
-    const stale = dshFreshnessWarning(target)
+    const stale = dshCompatibilityNotice(target)
     if (stale !== undefined) process.stdout.write(`${stale}\n`)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
@@ -1159,7 +1165,7 @@ function main(argv) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportGaps(authors, missing, process.stdout)
     reportRefresh(refreshReport, process.stdout)
-    const staleSame = dshFreshnessWarning(target)
+    const staleSame = dshCompatibilityNotice(target)
     if (staleSame !== undefined) process.stdout.write(`${staleSame}\n`)
     return 0
   }
@@ -1189,7 +1195,7 @@ function main(argv) {
   )
   reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
-  const staleNew = dshFreshnessWarning(target)
+  const staleNew = dshCompatibilityNotice(target)
   if (staleNew !== undefined) process.stdout.write(`${staleNew}\n`)
   if (bytes > budget) {
     process.stderr.write(

@@ -85,16 +85,23 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 | --- | --- |
 | `kinds` | 判定结果**数组**（可为多项，见下）。值域以 `scripts/survey.mjs` 的检测表为准 |
 | `evidence` | 逐条判定依据，与 `kinds` 一一对应；给人和 AI 复核用——判定错了，看依据能立刻发现 |
-| `skillName` | 认出 `SKILL.md` 时，frontmatter 里的 `name`（只在 `dsh-skill` 时有值） |
+| `skillName` | 认出 `SKILL.md` 时，frontmatter 里的 `name`（只在 `skill` 时有值） |
 
 常见的 `kinds` 取值：`node`、`python`、`rust`、`go`、`java`、`ruby`、`php`、`dotnet`、
 `dart`、`swift`、`elixir`、`clojure`、`perl`、`cpp`、`shell`、`lua`、`r`、`julia`、
-`erlang`、`haskell`、`dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`dsh-skill`、
+`erlang`、`haskell`、`dsh-plugin`、`vscode-extension`、`obsidian-plugin`、`skill`、
 `docs-only`、`unrecognized`、`unknown`。
 
-**这张清单是「常见值」不是「完整枚举」**：检测表新增生态时，以 `scripts/survey.mjs` 为
-准（它同时是判定实现与值域来源），`SKILL.md` 的能力矩阵按 `kinds` 逐行求值——未知宿主
+**这张清单与代码里的值域集合相等**（`survey.mjs` 的 `kindVocabulary()` 是唯一真相源，
+`selftest.mjs` 断言两者集合相等）：检测表新增生态时只改代码一处，文档没跟上会当场变红——
+不用记，检查会喊。`SKILL.md` 的能力矩阵按 `kinds` 逐行求值——未知宿主
 不硬塞已知类型，按 `references/plugin-project.md` 第九节处理。
+
+`skill` 这个 kind 的判据与语义：目录里有 `SKILL.md`，且 frontmatter 带 `name` 与
+`description`——即**被宿主加载的能力目录**（入口文件加 `references/`、`templates/`、
+`scripts/` 三个同级目录）。它是**跨宿主的通用格式**，不绑定任何一个宿主；分发靠克隆或
+复制而不是包管理器，所以「发布」列通常是**不发布**（远端即分发）。名字取 `skill` 而不带
+某个宿主的前缀，就是这个道理：格式是通用的，挂到某个宿主名下会把通用能力写成个例。
 
 后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
 共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见

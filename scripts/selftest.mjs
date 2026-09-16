@@ -15,17 +15,38 @@
  */
 
 import {
-  mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync,
+  mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync,
 } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
-import { evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles } from './preflight.mjs'
+import {
+  evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles,
+  normVersion, compareHostMarker, parseMarkerKeys, hostDateBatchStatus,
+  freshnessSectionBody, hasActionableSources,
+} from './preflight.mjs'
+import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary } from './survey.mjs'
+import { badgeVerdict, tierSecrets, unhandledRiskKeys } from './review.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const ROOT = join(tmpdir(), `project-forge-selftest-${process.pid}`)
+
+/**
+ * 夹具里的「凭据形状」一律**运行时拼出**，不在源码里留字面量。
+ *
+ * 为什么：这个仓库自己的源码也会被自己的密钥扫描扫到，而交付门禁对**已跟踪**的命中
+ * 一律报缺——于是本仓库跑 `review.mjs .` 永远带着一条假「凭据」缺，而唯一的消项 flag
+ * 语义（"确认为占位或测试数据"）与它并不对应。拼出来两边都干净：扫描器仍被这些夹具
+ * 证明有效，仓库里不再存凭据形状的字符串。
+ */
+const FAKE_GH_TOKEN = `ghp_${'a'.repeat(36)}`
+const FAKE_NPM_TOKEN = `npm_${'b'.repeat(36)}`
+const FAKE_AWS_KEY = `AKIA${'C'.repeat(16)}`
+// 锚点用例里要放一个 emoji（验证它不进锚点）。emoji 一律**运行时拼出**：
+// 源码里留一个图形字符会被 preflight 的「禁 emoji」判红——那是项目的硬性规范。
+const FAKE_EMOJI = String.fromCodePoint(0x1f680)
 
 /**
  * 环境能力探测。
@@ -139,10 +160,10 @@ group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
 {
   const dir = fixture('secrets', {
     'README.md': '# app\n',
-    'src/config.py': 'API_KEY = "ghp_1234567890abcdefghijklmnopqrstuvwx"\n',
-    'tests/fixtures/token.json': '{"t":"npm_abcdefghijklmnopqrstuvwxyz0123456789"}\n',
-    'bin/.env': 'AWS_KEY=AKIAIOSFODNN7EXAMPLE\n',
-    '中文目录/泄漏.txt': 'token = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n',
+    'src/config.py': `API_KEY = "${FAKE_GH_TOKEN}"\n`,
+    'tests/fixtures/token.json': `{"t":"${FAKE_NPM_TOKEN}"}\n`,
+    'bin/.env': `AWS_KEY=${FAKE_AWS_KEY}\n`,
+    '中文目录/泄漏.txt': `token = "${FAKE_GH_TOKEN}"\n`,
   })
   const s = survey(dir)
   const hits = (s.risks?.secretContent ?? []).map((h) => h.path).join(' ')
@@ -545,11 +566,19 @@ group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
     '.env.example': 'API_KEY=your-key-here\n',
   })
   const hits3 = survey(doc).risks?.homePathLeaks ?? []
-  const ok4 = hits3.every((h) => h.kind !== 'leak')
+  // 非空前提：`every` 在空数组上恒真，缺了它「一个都没识别出来」也会显示通过。
+  const ok4 = hits3.length > 0 && hits3.every((h) => h.kind !== 'leak')
   check(ok4, '文档里的示例路径不判为 leak', JSON.stringify(hits3.map((h) => h.kind)))
   report(ok4, '文档示例：不判为 leak')
   const files3 = survey(doc).risks?.secretFiles ?? []
+  // 这一条是**否定**断言（这些文件不该出现在命中里）：空数组就是它想要的结果，
+  // 所以不能像上面那样加「非空前提」——但否定断言只有在「检测器确实活着」时才可信，
+  // 于是配一条正向断言：同目录里的真 `.env` 必须被报出来。
   const ok5 = !files3.some((f) => /env\.example/.test(typeof f === 'string' ? f : f.path))
+  const probeFiles = survey(fixture('leak-doc-probe', { '.env': 'x=1\n', 'README.md': '# x\n' })).risks?.secretFiles ?? []
+  const ok5b = probeFiles.some((f) => /(^|[\\/])\.env$/.test(typeof f === 'string' ? f : f.path))
+  check(ok5b, '同一判定对真 .env 仍报出来（否定断言的前提：检测器活着）', JSON.stringify(probeFiles))
+  report(ok5b, '模板放行的对照：真 .env 仍被报出')
   check(ok5, '.env.example 模板文件放行', JSON.stringify(files3))
   report(ok5, '模板文件：放行')
 }
@@ -667,11 +696,11 @@ group('[15] 非 JS 项目必须照样拿到发布那一半契约')
 
 group('[33] 易漏生态分支：skill、损坏清单、dotnet 各有出口')
 {
-  // 根 SKILL.md 即 dsh-skill，不因无清单被判 unknown
+  // 根 SKILL.md 即 skill（被宿主加载的能力目录），不因无清单被判 unknown
   const sk = fixture('eco-skill', { 'SKILL.md': '---\nname: my-skill\ndescription: 做 X 时用\n---\n\n# my-skill\n' })
-  const okS = (survey(sk).ecosystem?.kinds ?? []).includes('dsh-skill')
-  check(okS, '根 SKILL.md → dsh-skill', JSON.stringify(survey(sk).ecosystem?.kinds))
-  report(okS, 'skill：认出 dsh-skill')
+  const okS = (survey(sk).ecosystem?.kinds ?? []).includes('skill')
+  check(okS, '根 SKILL.md → skill', JSON.stringify(survey(sk).ecosystem?.kinds))
+  report(okS, 'skill：认出 skill')
   // 损坏的 package.json 仍按 node 处理（ corruption 是事实，不是换生态的理由）
   const bad = fixture('eco-corrupt', { 'package.json': '{oops' })
   const okC = (survey(bad).ecosystem?.kinds ?? []).includes('node')
@@ -687,8 +716,8 @@ group('[33] 易漏生态分支：skill、损坏清单、dotnet 各有出口')
 group('[16] 报告要给到行，并说明在不在版本库里')
 {
   const dir = fixture('line-num', {
-    'src/c.py': '# a\n# b\nK = "ghp_1234567890abcdefghijklmnopqrstuvwx"\n',
-    'free.env': 'npm_abcdefghijklmnopqrstuvwxyz0123456789\n',
+    'src/c.py': `# a\n# b\nK = "${FAKE_GH_TOKEN}"\n`,
+    'free.env': `${FAKE_NPM_TOKEN}\n`,
   })
   if (HAS_GIT) {
     for (const args of [['init', '-q'], ['config', 'user.name', 'T'],
@@ -697,7 +726,8 @@ group('[16] 报告要给到行，并说明在不在版本库里')
     }
   }
   const hits = survey(dir).risks?.secretContent ?? []
-  const ok1 = hits.every((h) => Number.isInteger(h.line) && h.line > 0)
+  // 同上：必须有命中，否则这条断言在「扫描整个失效」时也会通过。
+  const ok1 = hits.length > 0 && hits.every((h) => Number.isInteger(h.line) && h.line > 0)
   check(ok1, '凭据命中带行号（只给文件名不构成可执行的报告）', JSON.stringify(hits))
   report(ok1, '凭据命中带行号')
   if (HAS_GIT) {
@@ -1129,7 +1159,7 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）
   const sec = fixture('review-secret', {
     'README.md': '# x\n',
-    'src/a.py': 'K = "ghp_1234567890abcdefghijklmnopqrstuvwx"\n',
+    'src/a.py': `K = "${FAKE_GH_TOKEN}"\n`,
   })
   const r4 = review(sec, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
   const ok4 = /凭据形状/.test(r4.stdout ?? '') && r4.status !== 0
@@ -1486,6 +1516,9 @@ group('[30] 事实采全与门禁诚实：tracked/远端/发布链/截断/strict
     const hits = survey(dir).risks?.secretFiles ?? []
     const ok = Array.isArray(hits) && hits.length > 0
       && hits.every((h) => typeof h.path === 'string' && typeof h.tracked === 'boolean')
+      // 两个比特都要在：tracked 决定「能不能从这次提交排除」，ignored 决定
+      // 「进不进版本库」。缺一个，门禁就只能一律报缺。
+      && hits.every((h) => typeof h.ignored === 'boolean')
     check(ok, 'secretFiles 带 path/tracked（分案首问可答）', JSON.stringify(hits.slice(0, 2)))
     report(ok, 'secretFiles：形状正确')
   }
@@ -1654,17 +1687,23 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     check(okPin, '锁定版本被收录', JSON.stringify(pinned))
     report(okPin, '锁定版本：收录')
     const r = compose(dir)
-    const okQuiet = !/专章上次核对/.test(r.stdout ?? '')
-    check(okQuiet, '对齐时无滞后警告')
+    const okQuiet = !/兼容范围/.test(r.stdout ?? '')
+    check(okQuiet, '兼容范围与标记一致时无提示')
     report(okQuiet, '对齐：安静')
   }
-  // 漂移 → 警告但不失败
+  // 漂移 → 提示但不失败。
+  //
+  // 哨兵值**从基准派生**，不写死 `9.9.9`：写死的话，专章标记恰好是 9.9.9 时这个
+  // 反例会静默退化成「对齐」用例——一个不再能证伪的断言（实测过这类碰撞风险）。
   {
-    const dir = mkDual('^9.9.9')
+    const markerForDrift = readFileSync(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'), 'utf8')
+    const base = /dsh-verified:\s*[^>]*?host=(\S+)/.exec(markerForDrift)?.[1] ?? '1.0.0'
+    const driftPin = base === '9.9.9' ? '8.8.8' : '9.9.9'
+    const dir = mkDual(`^${driftPin}`)
     const r = compose(dir)
-    const okWarn = /专章上次核对/.test(r.stdout ?? '') && r.status === 0
-    check(okWarn, '漂移时警告且不拦流程', `exit=${r.status}`)
-    report(okWarn, '漂移：警告')
+    const okWarn = /兼容范围/.test(r.stdout ?? '') && r.status === 0
+    check(okWarn, '兼容范围与标记不同时提示且不拦流程', `exit=${r.status}`)
+    report(okWarn, '漂移：提示')
   }
   // 未知 dsh 字段现形；已知字段不误报
   {
@@ -2433,19 +2472,385 @@ group('[41] 文档与实现的一致性机制：互引、范围、取值、声�
     report(ok, 'survey.md：字段语义完整')
   }
 
-  // 16) 能力清单覆盖 survey 能产出的 kind 全集（这一条是回归网：文档漏一个即红）。
+  // 16) kind 清单的对照**不在这里**：它由 [43] 用 `survey.mjs` 导出的 `kindVocabulary()`
+  // 与文档做集合相等断言。曾经这里手抄了一份一模一样的清单——那既是第二份真相源
+  // （新增生态时两处都要改），又是「拿实现给实现打分」的形状。
+}
+
+// ── [42] 本轮修复的回归网：每条断言都要能证伪 ─────────────────────────────────
+
+group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点权威期望')
+{
+  // ── P1：入口判定按真实路径（junction / 符号链接下不许静默空跑） ──
+  //
+  // 旧判据是字面比较 argv[1] 与 import.meta.url：经 junction 调用时永不相等，脚本
+  // 什么都不做并返回 0——实测 preflight 走 junction 就是 exit 0、零输出，那是
+  // 「自检假绿」：CI 与人都会读成通过。
   {
-    const KINDS = [
-      'node', 'python', 'rust', 'go', 'java', 'ruby', 'php', 'dotnet', 'dart', 'swift',
-      'elixir', 'clojure', 'perl', 'cpp', 'shell', 'lua', 'r', 'julia', 'erlang', 'haskell',
-      'dsh-plugin', 'vscode-extension', 'obsidian-plugin', 'dsh-skill',
-      'docs-only', 'unrecognized', 'unknown',
+    // 链接指向**技能根**：要测的是「经链接调用本脚本」，不是链接一个空 fixture。
+    const linkDir = join(ROOT, 'mainmod-link')
+    try {
+      symlinkSync(SKILL_ROOT, linkDir, 'junction')
+    } catch { /* 本机不许建链接就跳过下面的链接断言 */ }
+    if (existsSync(join(linkDir, 'scripts', 'survey.mjs'))) {
+      const realFile = join(SKILL_ROOT, 'scripts', 'survey.mjs')
+      const metaUrl = pathToFileURL(realFile).href
+      check(isMainModule(metaUrl, realFile) === true, '字面路径：判定为直接执行')
+      check(isMainModule(metaUrl, join(linkDir, 'scripts', 'survey.mjs')) === true,
+        '经 junction 调用：仍判定为直接执行（真实路径归一）', join(linkDir, 'scripts', 'survey.mjs'))
+      check(isMainModule(metaUrl, join(SKILL_ROOT, 'scripts', 'preflight.mjs')) === false, '别的文件：判定为被 import')
+      const viaLink = spawnSync(process.execPath, [join(linkDir, 'scripts', 'survey.mjs'), SKILL_ROOT, '--markdown'],
+        { encoding: 'utf8' })
+      const okLink = (viaLink.stdout ?? '').includes('勘察结果')
+      check(okLink, '经 junction 调用 survey：有输出、不静默空跑', JSON.stringify((viaLink.stdout ?? '').slice(0, 40)))
+      report(okLink, 'P1 入口判定：链接下不退化成空跑')
+    } else {
+      skipGroup('[42] 入口判定的链接断言', '本机不支持创建目录链接')
+    }
+  }
+
+  // ── P2：徽章结论按「结论行 + 退出码」判，崩溃 / 未查完一律不读成通过 ──
+  {
+    const crash = badgeVerdict('C:\\x\\README.md：找到 1 个徽章\n', 'TypeError: terminated\n', 1)
+    check(crash.state === 'unverified', '子进程崩溃（无结论行）→ unverified，不读成 ok', crash.state)
+    check(badgeVerdict('check-badges: state=ok checked=1 bad=0 unverified=0\n', '', 0).state === 'ok', '结论行 ok + 退出码 0 → ok')
+    check(badgeVerdict('check-badges: state=bad checked=1 bad=1 unverified=0\n', '', 1).state === 'bad', '结论行 bad + 退出码 1 → bad')
+    check(badgeVerdict('check-badges: state=nobadge checked=0 bad=0 unverified=0\n', '', 0).state === 'nobadge', '没有徽章 → nobadge')
+    const mismatch = badgeVerdict('check-badges: state=ok checked=1 bad=0 unverified=0\n', '', 1)
+    check(mismatch.state === 'unverified', '结论行与退出码不一致 → unverified（两处证据必须同向）', mismatch.state)
+    report(crash.state === 'unverified', 'P2 徽章裁决：崩溃不再落进「可显示」')
+
+    // 端到端：徽章地址连不上（端口 9 拒绝连接）→ 检查未完成，退出码 3
+    const badgeDir = fixture('badge-unreached', {
+      'README.md': '# x\n\n![b](http://127.0.0.1:9/img.shields.io/badge.svg)\n',
+    })
+    const cb = spawnSync(process.execPath, [join(HERE, 'check-badges.mjs'), join(badgeDir, 'README.md')],
+      { encoding: 'utf8' })
+    check(cb.status === 3 && /state=unverified/.test(cb.stdout ?? ''),
+      '连不上时：退出码 3 且结论行写 unverified', 'exit=' + cb.status)
+    report(cb.status === 3, 'P2 端到端：没查完 → 退出码 3')
+  }
+
+  // ── P3：目录识别感知代码围栏（不再插进代码块、不删闭合行） ──
+  {
+    const sync = (file, ...extra) => spawnSync(process.execPath,
+      [join(HERE, 'sync-toc.mjs'), file, ...extra], { encoding: 'utf8' })
+    const fenced = fixture('toc-fenced-takeover', {
+      'README.md': '# 项目\n\n用法示例：\n\n```md\n## 目录\n```\n\n## 一\n\n## 二\n\n## 三\n\n## 四\n\n## 五\n',
+    })
+    const p = join(fenced, 'README.md')
+    sync(p)
+    const out = readFileSync(p, 'utf8')
+    const beforeFence = out.slice(0, out.indexOf('## 一'))
+    check(beforeFence.includes('```md') && beforeFence.includes('```\n\n## 目录'),
+      '目录插在围栏之外（围栏内那行仍是代码）', JSON.stringify(beforeFence.slice(-40)))
+    check((out.match(/```/g) ?? []).length >= 2, '围栏闭合行没被吃掉（成对出现）')
+    report(out.includes('## 目录') && beforeFence.indexOf('<!-- toc:start -->') > beforeFence.lastIndexOf('```'),
+      'P3 围栏感知：目录在围栏闭合之后')
+
+    // 损坏态（标记落在围栏内）→ 拒绝写入 + --check 必须红
+    const damaged = fixture('toc-damaged-markers', {
+      'README.md': '# x\n\n```md\n<!-- toc:start -->\n\n- [一](#一)\n\n<!-- toc:end -->\n```\n\n## 一\n\n## 二\n\n## 三\n\n## 四\n\n## 五\n',
+    })
+    const dp = join(damaged, 'README.md')
+    const before = readFileSync(dp, 'utf8')
+    const r1 = sync(dp)
+    const r2 = sync(dp, '--check')
+    check(r1.status === 2 && readFileSync(dp, 'utf8') === before,
+      '标记落在围栏内：拒绝写入且文件一个字节没动', 'exit=' + r1.status)
+    check(r2.status !== 0, '同一状态 --check 必须红（不能读成「已是当前状态」）', 'exit=' + r2.status)
+    report(r1.status === 2 && r2.status !== 0, 'P3 损坏态：拒绝写 + --check 红')
+  }
+
+  // ── P4：锚点以**权威实现**的期望值为准 ──
+  //
+  // 这些期望值是拿真实 github-slugger@2 对同一批标题跑出来的结果抄进来的，
+  // 不是「照本实现抄一遍」——那样等于自证式测试。
+  {
+    const cases = [
+      ['A   B', 'a---b'],
+      ['A B', 'a-b'],
+      ['1. 局域网访问', '1-局域网访问'],
+      ['一　二', '一二'],
+      ['说明①', '说明'],
+      ['第一步⑴', '第一步'],
+      ['snake_case 与 README_CN.md', 'snake_case-与-readme_cnmd'],
+      ['a__b 词内双下划线', 'a__b-词内双下划线'],
+      ['~~删除线~~ 标题', '删除线-标题'],
+      ['a_b_c', 'a_b_c'],
+      [`${FAKE_EMOJI} 部署`, '-部署'],
+      ['中文，标点：测试', '中文标点测试'],
+      ['Node.js 20.x 支持', 'nodejs-20x-支持'],
+      ['v1.2.3 发布', 'v123-发布'],
+      ['ＦＵＬＬ　ＷＩＤＴＨ', 'ｆｕｌｌｗｉｄｔｈ'],
+      ['_强调_ 标题', '强调-标题'],
+      ['[引用式][ref] 标题', '引用式-标题'],
+      ['<https://example.com/x> 链接', 'httpsexamplecomx-链接'],
     ]
-    const text = readSkill('references/survey.md')
-    const missing = KINDS.filter((k) => !text.includes(`\`${k}\``))
-    const ok = missing.length === 0
-    check(ok, 'survey.md 覆盖全部 kind', `缺=${missing.join(',') || '无'}`)
-    report(ok, 'kind 清单：无遗漏')
+    const md = '# 标题\n\n' + cases.map(([t]) => `## ${t}\n`).join('\n')
+    const dir = fixture('toc-anchors', { 'README.md': md })
+    const p = join(dir, 'README.md')
+    spawnSync(process.execPath, [join(HERE, 'sync-toc.mjs'), p], { encoding: 'utf8' })
+    const generated = readFileSync(p, 'utf8')
+    const ids = []
+    for (const line of generated.split('\n')) {
+      const m = /^- \[(.*)\]\(#(.*)\)$/.exec(line.trim())
+      if (m !== null) ids.push(m[2])
+    }
+    const diffs = []
+    let same = ids.length === cases.length
+    for (let i = 0; i < cases.length; i += 1) {
+      if (ids[i] !== cases[i][1]) {
+        same = false
+        diffs.push(`${cases[i][0]} → ${ids[i]}（权威期望 ${cases[i][1]}）`)
+      }
+    }
+    check(same, '锚点逐条与 github-slugger@2 的期望一致', diffs.join('；'))
+    report(same, `P4 锚点：${cases.length} 条与权威实现一致`)
+  }
+
+  // ── N1：凭据按分案分档（未跟踪且已忽略的正常形态不拦） ──
+  {
+    const tracked = tierSecrets([{ path: 'a', tracked: true }])
+    const safe = tierSecrets([{ path: 'b', tracked: false, ignored: true }])
+    const exposed = tierSecrets([{ path: 'c', tracked: false, ignored: false }])
+    const unknown = tierSecrets([{ path: 'd' }])
+    check(tracked.blocking.length === 1 && safe.blocking.length === 0
+      && exposed.blocking.length === 1 && unknown.blocking.length === 1,
+      '分档：已跟踪 / 未忽略都拦，未跟踪且已忽略放行',
+      JSON.stringify({ tracked: tracked.blocking.length, safe: safe.blocking.length, exposed: exposed.blocking.length }))
+    report(safe.blocking.length === 0, 'N1 密钥分档：.gitignore 里的 .env 不再永久报缺')
+
+    if (HAS_GIT) {
+      const dir = fixture('secret-ignored', {
+        '.gitignore': '.env\n',
+        '.env': `K="ghp_${'d'.repeat(36)}"\n`,
+        'README.md': '# x\n',
+      })
+      spawnSync('git', ['init', '-q'], { cwd: dir })
+      const r = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, '--no-bilingual', '--no-contributing',
+        '--private-no-license', '--no-ci'], { encoding: 'utf8' })
+      const out = r.stdout ?? ''
+      const hits = out.split('\n').filter((l) => /凭据/.test(l)).join(' / ')
+      check(!/\[缺\] 凭据形状/.test(out), '未跟踪且已忽略的 .env：不报凭据缺', hits)
+      report(!/\[缺\] 凭据形状/.test(out), 'N1 端到端：已忽略的 .env 安静')
+    } else {
+      skipGroup('[42] 已忽略凭据的端到端断言', '环境里没有 git')
+    }
+  }
+
+  // ── P5：待填写标记只有一处实现（单行与多行判据必须一致） ──
+  {
+    const dir = fixture('authors-onepass', {
+      'package.json': '{"name":"a","version":"1.0.0","scripts":{"test":"x"}}\n',
+    })
+    compose(dir)
+    const p = join(dir, 'AGENTS.md')
+    writeFileSync(p, readFileSync(p, 'utf8')
+      .replace(/<!--\s*pf:author:\s*([\s\S]*?)-->/g, (m, note) => `<!-- pf:author:\n${note.trim()} -->`), 'utf8')
+    const multi = authorMarkers(readFileSync(p, 'utf8')).length
+    const st = compose(dir, '--status')
+    const composeCount = Number((/待填写 (\d+) 处/.exec(st.stdout ?? '') ?? [])[1] ?? -1)
+    const rv = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir], { encoding: 'utf8' })
+    const reviewCount = Number((/AGENTS\.md 待填写 (\d+) 处/.exec(rv.stdout ?? '') ?? [])[1] ?? -1)
+    check(multi > 0 && composeCount === multi && reviewCount === multi,
+      '多行标记：compose 与 review 数出同一个数（一处实现）',
+      JSON.stringify({ multi, composeCount, reviewCount }))
+    report(composeCount === multi && reviewCount === multi, 'P5 待填写计数：两处同源')
+  }
+
+  // ── P6：CONTRIBUTING 内容判据语言无关（合格英文版不许被判缺） ──
+  {
+    const dir = fixture('contributing-en', {
+      'README.md': '# demo\n',
+      'LICENSE': 'MIT\n',
+      'package.json': '{"name":"demo","version":"1.0.0","scripts":{"verify":"node --test"}}\n',
+      'CONTRIBUTING.md': '# Contributing\n\nThanks for your interest.\n\n'
+        + '## Questions and feedback\n\nFor questions, open an issue or start a discussion.\n\n'
+        + '## Before you start\n\nFork the repository, then create a branch named `feat/topic` from `main`.\n\n'
+        + '## Running the checks\n\nInstall dependencies with `npm ci`, then run:\n\n'
+        + '```sh\nnpm run verify\n```\n\nAll checks must be green.\n\n'
+        + '## License\n\nBy contributing you agree that your work is released under the license in `LICENSE`.\n',
+    })
+    const r = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, '--no-bilingual', '--no-ci',
+      '--secrets-reviewed'], { encoding: 'utf8' })
+    const bad = (r.stdout ?? '').split('\n').filter((l) => /\[缺\] CONTRIBUTING/.test(l))
+    check(bad.length === 0, '英文 CONTRIBUTING 不再被判缺', bad.join(' / '))
+    report(bad.length === 0, 'P6 语言无关：英文版不被误判')
+  }
+
+  // ── P7：扫描未覆盖范围必须报出来（超体积文件不再静默） ──
+  {
+    const bigDir = fixture('scan-oversize', { 'README.md': '# x\n' })
+    writeFileSync(join(bigDir, 'big.txt'), 'x'.repeat(2 * 1024 * 1024 + 64) + `\nK="ghp_${'e'.repeat(36)}"\n`, 'utf8')
+    const s = survey(bigDir)
+    const scan = s.risks?.contentScan ?? {}
+    check((scan.skippedLarge ?? 0) >= 1, '超单文件上限的文件被计数（不再是静默跳过）', JSON.stringify(scan))
+    report((scan.skippedLarge ?? 0) >= 1, 'P7 超体积：计数进报告')
+  }
+
+  // ── P8：门禁消费全部风险类别（新增类别自动进闸门） ──
+  {
+    const unhandled = unhandledRiskKeys({ secretFiles: [], contentScan: {}, futureRisk: 1 })
+    check(unhandled.length === 1 && unhandled[0] === 'futureRisk',
+      '勘察新增的风险类别会被点名为「未处理」，不会沉默', JSON.stringify(unhandled))
+    report(unhandled.length === 1, 'P8 风险类别：加了字段就必须落结论')
+  }
+
+  // ── P9：嵌套产物目录（monorepo）不被漏掉 ──
+  {
+    if (HAS_GIT) {
+      const dir = fixture('nested-outdir', {
+        'packages/a/package.json': '{"name":"a","version":"1.0.0"}\n',
+        'packages/a/dist/bundle.js': 'x\n',
+        'packages/b/package.json': '{"name":"b","version":"1.0.0"}\n',
+        'packages/b/dist/bundle.js': 'x\n',
+        'dist/root.js': 'x\n',
+        'README.md': '# x\n',
+      })
+      spawnSync('git', ['init', '-q'], { cwd: dir })
+      const notIgnored = survey(dir).ignores?.unignoredOutputDirs ?? []
+      const nested = notIgnored.filter((d) => /packages[/\\][ab][/\\]dist/.test(d))
+      check(nested.length === 2, '两层的 packages/*/dist 都被报出来（不再只报顶层）', JSON.stringify(notIgnored))
+      report(nested.length === 2, 'P9 嵌套产物目录：全深度')
+
+      const single = fixture('single-outdir', { 'dist/a.js': 'x\n', 'README.md': '# x\n' })
+      spawnSync('git', ['init', '-q'], { cwd: single })
+      const one = survey(single).ignores?.unignoredOutputDirs ?? []
+      check(one.includes('dist') && one.length === 1, '单包项目只报一个顶层产物目录', JSON.stringify(one))
+      report(one.length === 1, 'P9 反例：单包不误报')
+    } else {
+      skipGroup('[42] 嵌套产物目录', '环境里没有 git')
+    }
+  }
+
+  // ── P11 / P12：帮助开关与畸形清单（两条都曾是崩溃或静默错判） ──
+  {
+    const help = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), '-h'], { encoding: 'utf8' })
+    const okHelp = help.status === 0 && /用法：/.test(help.stdout ?? '')
+    check(okHelp, '`-h` 给用法（曾被当成目录名，报「目录不存在」）', 'exit=' + help.status)
+    report(okHelp, 'P11 -h：给用法而不是报目录不存在')
+
+    const nullPkg = fixture('null-manifest', { 'package.json': 'null\n' })
+    const r = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), nullPkg, '--json'], { encoding: 'utf8' })
+    const okNull = r.status === 0
+    check(okNull, 'package.json 内容为 null 不再让勘察崩掉（清单形状统一归一）',
+      (r.stderr ?? '').split('\n')[0])
+    report(okNull, 'P12 畸形清单：不崩')
+  }
+
+  // ── P10：带点的仓库名不许被截断（仓库边界识别只有一处实现） ──
+  {
+    const cases = [
+      ['https://github.com/acme/my.repo.git', 'acme/my.repo'],
+      ['git@github.com:acme/my.repo.git', 'acme/my.repo'],
+      ['https://github.com/acme/plain', 'acme/plain'],
+      ['https://GitHub.com/acme/Plain.git', 'acme/Plain'],
+      ['https://gitlab.com/a/b.git', undefined],
+      ['https://github.com/acme', undefined],
+    ]
+    const diffs = []
+    for (const [url, want] of cases) {
+      const got = parseGitHubRepo(url)
+      if (got !== want) diffs.push(`${url} → ${got}（期望 ${want}）`)
+    }
+    check(diffs.length === 0, 'owner/name 解析与期望一致（含带点仓库名）', diffs.join('；'))
+    report(diffs.length === 0, 'P10 仓库边界：带点名字不截断')
+  }
+}
+
+group('[43] host= 机制：三态比对、键形状、两键同批、查法判据、kind 清单')
+{
+  {
+    const samePairs = [
+      [normVersion('^1.2.3'), normVersion('1.2.3')],
+      [normVersion('v0.1.6'), normVersion('0.1.6')],
+      [normVersion('0.1.6-RC.1'), normVersion('0.1.6-rc.1')],
+      [normVersion(' >= 0.1.6 '), normVersion('0.1.6')],
+    ]
+    const okSame = samePairs.every(([a, b]) => a === b)
+    check(okSame, '归一等价：前缀 / v / 大小写 / 空白都算同一版', JSON.stringify(samePairs))
+    check(normVersion('0.1.5-rc.1') !== normVersion('0.1.5'),
+      '预发布与正式版**不同**（不折叠：那是两次不同的发布）')
+    report(okSame, '归一化：只吃写法差异')
+  }
+
+  {
+    const match = compareHostMarker('1.2.3', [{ source: 'cli', value: 'v1.2.3' }])
+    const mismatch = compareHostMarker('1.2.3', [{ source: 'cli', value: '9.9.9' }])
+    const none = compareHostMarker('1.2.3', [{ source: 'cli', value: undefined, reason: '未装' }])
+    const conflict = compareHostMarker('1.2.3', [
+      { source: 'cli', value: '1.2.3' },
+      { source: 'metadata', value: '2.0.0' },
+    ])
+    check(match.state === 'match', '一致 → match（调用方据此静默）', match.state)
+    check(mismatch.state === 'mismatch' && /1\.2\.3/.test(mismatch.reason) && /9\.9\.9/.test(mismatch.reason),
+      '不同 → mismatch 且报出两个值', mismatch.reason)
+    check(none.state === 'undetermined' && /取不到/.test(none.reason), '取不到 → undetermined（未核对 + 原因）', none.reason)
+    check(conflict.state === 'undetermined' && /矛盾/.test(conflict.reason),
+      '两条来源矛盾 → undetermined（无法确定，不是「不同」）', conflict.reason)
+    const ok = match.state === 'match' && mismatch.state === 'mismatch'
+      && none.state === 'undetermined' && conflict.state === 'undetermined'
+    report(ok, 'host 机制：四态结论都可证伪')
+  }
+
+  {
+    const good = parseMarkerKeys('host=9.9.9 date=2026-01-01')
+    check(good.errors.length === 0 && good.keys.host === '9.9.9',
+      'host=9.9.9 放行（合法形状，落「不同」态而不是形状错误）', JSON.stringify(good.errors))
+    const empty = parseMarkerKeys('host=')
+    check(empty.errors.length === 1 && /空/.test(empty.errors[0]), '空值 → 形状错误', JSON.stringify(empty.errors))
+    const multi = parseMarkerKeys('host=1.2.3,2.0.0 date=2026-01-01')
+    check(multi.errors.length === 1 && /单个/.test(multi.errors[0]), '多值 host= → 形状错误并提示改写', JSON.stringify(multi.errors))
+    const spaced = parseMarkerKeys('note=two words')
+    check(spaced.errors.length >= 1, '值里带空白 → 形状错误（值必须非空且单行）', JSON.stringify(spaced.errors))
+    const unknownKey = parseMarkerKeys('hostv=1 date=2026-01-01')
+    check(unknownKey.errors.length === 0 && unknownKey.notes.length === 1 && /没有认领/.test(unknownKey.notes[0]),
+      '未登记的键：不失败，但提示「未核对」', JSON.stringify(unknownKey.notes))
+    report(good.errors.length === 0 && empty.errors.length === 1 && multi.errors.length === 1, '标记键形状：四条判据各自可证伪')
+  }
+
+  {
+    const mkGit = (logOut, beforeText, afterText) => (args) => {
+      if (args.includes('log')) return logOut
+      const target = args[1] ?? ''
+      if (target.includes('^:')) return beforeText
+      return afterText
+    }
+    const stale = hostDateBatchStatus('/x', 'references/plugins/dsh.md', '1.0.0',
+      mkGit('abc1234\n', '<!-- dsh-verified: host=1.0.0 date=2026-01-01 -->\n', '<!-- dsh-verified: host=1.0.0 date=2026-01-01 -->\n'))
+    check(stale.state === 'stale', 'host= 变了而 date= 没变 → stale（那条日期不可信）', stale.reason)
+    const okBatch = hostDateBatchStatus('/x', 'references/plugins/dsh.md', '1.0.0',
+      mkGit('abc1234\n', '<!-- dsh-verified: host=0.9.0 date=2026-01-01 -->\n', '<!-- dsh-verified: host=1.0.0 date=2026-03-01 -->\n'))
+    check(okBatch.state === 'ok', '同批改动 → ok（安静）', okBatch.reason)
+    const unknown = hostDateBatchStatus('/x', 'references/plugins/dsh.md', '1.0.0', mkGit('', '', ''))
+    check(unknown.state === 'unverified' && /未提交|未跟踪|git 历史/.test(unknown.reason),
+      '取不到那次提交 → unverified（不静默、不失败）', unknown.reason)
+    report(stale.state === 'stale' && okBatch.state === 'ok' && unknown.state === 'unverified',
+      '两键同批：stale / ok / unverified 三态都有正反例')
+  }
+
+  {
+    const minimal = '# x\n\n## 事实来源\n\n<!-- npm-verified: date=2026-01-01 -->\n'
+    const withLink = '# x\n\n## 事实来源\n\n字段上限见 https://docs.npmjs.com/cli/v10/commands/npm-publish 一节。\n\n<!-- npm-verified: date=2026-01-01 -->\n'
+    const bodyMinimal = freshnessSectionBody(minimal)
+    const bodyLink = freshnessSectionBody(withLink)
+    check(!hasActionableSources(bodyMinimal), '只有标题 + 标记的「事实来源」节不通过（判据不再永真）', JSON.stringify(bodyMinimal))
+    check(hasActionableSources(bodyLink), '写出链接的节通过（别把判据做宽到误报）', JSON.stringify(bodyLink.slice(0, 40)))
+    report(!hasActionableSources(bodyMinimal) && hasActionableSources(bodyLink), '查法判据：正反例都能证伪')
+  }
+
+  {
+    const doc = readFileSync(join(SKILL_ROOT, 'references', 'survey.md'), 'utf8')
+    const para = /常见的 `kinds` 取值：([\s\S]*?)。\n/.exec(doc)
+    const documented = para === null ? [] : [...para[1].matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1])
+    const code = kindVocabulary()
+    const missing = code.filter((k) => !documented.includes(k))
+    const extra = documented.filter((k) => !code.includes(k))
+    check(missing.length === 0 && extra.length === 0,
+      'references/survey.md 的 kind 清单与代码值域集合相等（新增生态必须同步文档）',
+      JSON.stringify({ missing, extra }))
+    report(missing.length === 0 && extra.length === 0, `kind 清单：${code.length} 个，文档与代码一致`)
   }
 }
 

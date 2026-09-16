@@ -212,6 +212,26 @@ function runGitPaths(args, cwd) {
   return out.includes('\0') ? out.split('\0').filter(Boolean) : out.split('\n').filter(Boolean)
 }
 
+/**
+ * 一批路径里哪些被忽略规则覆盖。返回 Set（统一成 POSIX 分隔符）。
+ *
+ * **一次进程判定全部候选**（`check-ignore --stdin -z`）：逐个 spawn 的代价随候选数
+ * 线性增长，那正是旧实现只敢探一层深的原因。`-z` 让路径按字节进出，含空格与中文的
+ * 路径不会被引号化改写成另一个字符串。
+ * 退出码 1 = 「一个都没忽略」，那是正常结果不是错误；取不到 git 也返回空集——
+ * 调用方据此走「没有证据」的分支，不许当成「已忽略」。
+ */
+function gitIgnoredSet(cwd, relPaths) {
+  const list = (relPaths ?? []).filter((p) => typeof p === 'string' && p !== '')
+  if (list.length === 0) return new Set()
+  const r = spawnSync('git', ['-c', 'core.quotepath=false', 'check-ignore', '-z', '--stdin'], {
+    cwd, encoding: 'utf8', windowsHide: true,
+    input: `${list.join('\0')}\0`, maxBuffer: 16 * 1024 * 1024,
+  })
+  if (r.error !== undefined || (r.status !== 0 && r.status !== 1)) return new Set()
+  return new Set(String(r.stdout ?? '').split('\0').filter(Boolean).map((p) => p.replace(/\\/g, '/')))
+}
+
 function readText(p) {
   try {
     // 去 BOM：带 BOM 的 JSON / YAML 在 Windows 上很常见，解析器会直接失败。
@@ -221,14 +241,92 @@ function readText(p) {
   }
 }
 
+/**
+ * 读 JSON：**结果形状只有两种**——对象或 `{ __corrupt: true }`。
+ *
+ * `JSON.parse` 合法的结果不止对象（`null`、数组、字符串、数字都是合法 JSON），
+ * 而所有消费点都按对象用（`pkg.__corrupt`、`obs.minAppVersion`）。曾经有一个
+ * package.json 内容为 `null` 就把整次勘察打断（`Cannot read properties of null`），
+ * 于是「清单损坏」这种可预期的形态变成崩溃。这里一次归一，消费点就不必各写守卫。
+ */
 function readJson(p) {
   const t = readText(p)
   if (t === undefined) return undefined
+  let parsed
   try {
-    return JSON.parse(t)
+    parsed = JSON.parse(t)
   } catch {
     return { __corrupt: true }
   }
+  if (parsed !== null && typeof parsed === 'object') return parsed
+  return { __corrupt: true }
+}
+
+/**
+ * 本文件是不是被**直接执行**（而不是被 import）。
+ *
+ * 判据不能用字面路径比较：`process.argv[1]` 保留调用方写下的写法，而
+ * `import.meta.url` 已被 Node 解析成真实路径。经 junction / 符号链接调用时两者
+ * 永不相等，脚本于是**什么都不做并返回 0**——实测 preflight 走 junction 就是这样：
+ * exit 0、零输出，CI 与人都会读成「自检通过」。所以这里按真实路径归一后比较。
+ *
+ * 判不出来（文件不存在等）时返回 false：被 import 才是常态，且 import 侧有守卫
+ * 兜底（调用方必须自己保证「没跑就报错」，不能靠这里返回真来掩盖）。
+ */
+export function isMainModule(metaUrl, argv1) {
+  if (typeof argv1 !== 'string' || argv1 === '') return false
+  const target = fileURLToPath(metaUrl)
+  try {
+    if (resolve(argv1) === resolve(target)) return true
+  } catch { /* 路径非法就走真实路径比较 */ }
+  const real = (p) => {
+    try { return realpathSync.native(p) } catch { return undefined }
+  }
+  const a = real(argv1)
+  const b = real(target)
+  return a !== undefined && b !== undefined && a === b
+}
+
+/**
+ * 数 AGENTS.md 里的待填写标记（`<!-- pf:author: … -->`），并给出它所在的小节。
+ *
+ * **整篇扫描，不逐行**：标记可以写成多行（`<!-- pf:author:` 换行后 `-->`），
+ * 逐行扫会漏掉它们——而那正是「脚本报 0 处、脚手架被删、TODO 还留在正文」的成因。
+ * compose-agents 与 review 都用这一份，不再各写一份再对齐。
+ */
+export function authorMarkers(text) {
+  const re = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
+  const found = []
+  let lastHeading = '(文件开头)'
+  let cursor = 0
+  for (const hit of String(text).matchAll(re)) {
+    const before = String(text).slice(cursor, hit.index)
+    for (const line of before.split('\n')) {
+      const h = /^#{2,3}\s+(.+?)\s*$/.exec(line)
+      if (h !== null) lastHeading = h[1]
+    }
+    cursor = hit.index + hit[0].length
+    const note = /pf:author:\s*([\s\S]*?)\s*-->/.exec(hit[0])
+    found.push({ section: lastHeading, note: note === null ? '' : note[1] })
+  }
+  return found
+}
+
+/**
+ * 从远端地址里取 owner/name（GitHub）。取不到返回 undefined——**不编造**。
+ *
+ * 判据是「剥掉可能的 .git 后缀，再取路径的最后两段」，**不能按点切分**：仓库名允许
+ * 含点（\`next.js\`、\`my.repo\`），用排除点的字符类会把名字截断，于是生成一条指向不存在
+ * 仓库的对比链接（实测 \`acme/my.repo\` → \`acme/my\`）。域名比较大小写不敏感。
+ * 这个判定只实现一处：draft-release-notes 与 release-notes 都引用它。
+ */
+export function parseGitHubRepo(url) {
+  if (typeof url !== 'string') return undefined
+  const m = /github\.com[/:](.+)$/i.exec(url.trim())
+  if (m === null) return undefined
+  const parts = m[1].replace(/\.git$/i, '').replace(/\/+$/, '').split('/').filter(Boolean)
+  if (parts.length < 2) return undefined
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
 function exists(p) {
@@ -325,6 +423,14 @@ function walk(root) {
     // 只扫顶层，而报告仍显示「0 命中」，看起来像扫过了。
     textCandidates: [],
     contentScanTruncated: false,
+    // 被排除在内容扫描之外的文件数，按原因分开数。
+    // 这些数字是必须的：四类排除（超体积、扩展名黑名单、读不出来、非 UTF-8）
+    // 过去都不出现在报告里，于是「0 命中」被读成「扫过了、很干净」——
+    // 实测一个 2.1MiB 的 .txt（只超上限 100 字节，里面是真令牌）就这样静默漏掉。
+    skippedLarge: 0,
+    skippedByExtension: 0,
+    // 产物目录候选（全树、任何深度），由 detectIgnores 一次批处理判定忽略与否。
+    outputDirCandidates: [],
     // 深度超限被跳过的子树数量。
     //
     // 这个计数是必须的：递归有深度上限（防止符号链接环或病态嵌套把扫描拖死），但
@@ -376,6 +482,12 @@ function walk(root) {
         if (depth === 0 && isArtifactMaybe && !result.heavyDirs.includes(entry.name)) {
           result.heavyDirs.push(entry.name)
         }
+        // 产物目录候选：**全树任何深度**都收，不猜「只下沉一层」。
+        // 曾经只探到 depth=1（`packages/<名字恰为 dist>`），而标准 monorepo 布局是
+        // `packages/<包名>/dist`——实测 200 个未忽略的产物目录只报出 1 个，
+        // 也就是说它们会被下一次 `git add -A` 整个写进历史，而门禁一声不响。
+        // 判据交给版本控制：候选全量收齐后，一次 `git check-ignore --stdin` 批处理。
+        if (OUTPUT_DIR_HINTS.includes(entry.name.toLowerCase())) result.outputDirCandidates.push(rel)
         // 嵌套仓库：子目录里另有一个 .git
         if (exists(join(full, '.git'))) result.nestedRepos.push(rel)
         stack.push({
@@ -396,6 +508,12 @@ function walk(root) {
       if (size > 0 && size <= CONTENT_SCAN_MAX_BYTES && !CONTENT_SCAN_SKIP.test(rel)) {
         if (result.textCandidates.length < CONTENT_SCAN_MAX_FILES) result.textCandidates.push(rel)
         else result.contentScanTruncated = true
+      } else if (size > CONTENT_SCAN_MAX_BYTES) {
+        // 「没扫到」也是事实：超单文件上限的文件数要报出来，
+        // 否则「0 命中」会被读成「扫过了、很干净」。
+        result.skippedLarge += 1
+      } else if (size > 0 && CONTENT_SCAN_SKIP.test(rel)) {
+        result.skippedByExtension += 1
       }
       collectSourceEvidence(result.sourceScan, entry.name, rel, depth)
     }
@@ -421,6 +539,15 @@ const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
  * 两处规则表达同一件事时，先失效的永远是更窄的那个，而且失效得无声无息。
  */
 const README_RE = /^readme([._-][a-z]{2}(?:[._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i
+
+/**
+ * README 文件名判据（含语言变体）——**全仓只此一份**：preflight 的「顶层未登记条目」
+ * 豁免也用它。曾经两处各写一份，而两份规则表达同一件事时，先失效的永远是更窄的那个。
+ */
+export const README_NAME_RE = README_RE
+
+/** 本机私有路径（任一宿主平台习惯写法）的判据，供 preflight 引用，避免第二份手写正则。 */
+export const HOME_PATH_RE = /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+|[\\/](?:home|Users)[\\/][^\\/\s"'`]+/
 
 /** 从 README 文件名里取出语言标记；没有语言标记（默认语言）时返回 undefined。 */
 function readmeLangOf(name) {
@@ -475,17 +602,60 @@ function collectSourceEvidence(scan, name, rel, depth) {
   if (scan.nonDocSamples.length < 5) scan.nonDocSamples.push(rel)
 }
 
+/**
+ * 把文件按 UTF-8 严格解码；非 UTF-8 时按 UTF-16 再试一次（带 BOM 或 NUL 密集）。
+ *
+ * 为什么必须做：本 skill 零依赖、只用内置模块，而 `readFileSync(p,'utf8')` 是**宽松**
+ * 解码——非法字节被替换字符吞掉，不报错。Windows 上 `Out-File` / `Set-Content` 默认
+ * 存 UTF-16LE，于是里面的凭据形状全是「字节 + NUL」交错，ASCII 形状的正则一个都匹配
+ * 不上，而报告显示「无命中」。实测过：同一份内容存成 UTF-16LE 就漏，存成 UTF-8 就报。
+ *
+ * 返回 { text, encoding } 或 { error }（读不出来）。
+ */
+function decodeText(buffer) {
+  const stripBom = (s) => s.replace(/^\uFEFF/, '')
+  try {
+    return { text: stripBom(new TextDecoder('utf-8', { fatal: true }).decode(buffer)), encoding: 'utf-8' }
+  } catch { /* 不是合法 UTF-8，继续试探 UTF-16 */ }
+  const nul = buffer.reduce((n, x) => n + (x === 0 ? 1 : 0), 0)
+  const looksUtf16 = nul / Math.max(1, buffer.length) > 0.15
+    || (buffer.length >= 2 && ((buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff)))
+  if (looksUtf16) {
+    for (const enc of ['utf-16le', 'utf-16be']) {
+      try {
+        return { text: stripBom(new TextDecoder(enc, { fatal: true }).decode(buffer)), encoding: enc }
+      } catch { /* 换另一种端序 */ }
+    }
+  }
+  // 既不是 UTF-8 也不是 UTF-16：按宽松解码尽力扫一遍，同时**如实记为未覆盖**。
+  return { text: readTextFromBuffer(buffer), encoding: 'unknown' }
+}
+
+function readTextFromBuffer(buffer) {
+  return buffer.toString('utf8').replace(/^\uFEFF/, '')
+}
+
 /** 对文本文件做内容级扫描：凭据形状 + 本机私有路径。 */
 function scanContents(root, candidates, realHomes) {
   const secrets = []
   const homePaths = []
+  const stats = { unreadable: 0, notUtf8: 0, utf16Decoded: 0 }
   for (const rel of candidates) {
     if (CONTENT_SCAN_SKIP.test(rel)) continue
     const full = join(root, rel)
-    const size = sizeOf(full)
-    if (size === undefined || size > CONTENT_SCAN_MAX_BYTES) continue
-    const text = readText(full)
-    if (text === undefined) continue
+    let buffer
+    try {
+      buffer = readFileSync(full)
+    } catch {
+      // 读不出来（权限、被独占、路径失效）**要计数**：它和「扫过没命中」不是一件事。
+      stats.unreadable += 1
+      continue
+    }
+    if (buffer.length > CONTENT_SCAN_MAX_BYTES) continue
+    const decoded = decodeText(buffer)
+    if (decoded.encoding === 'unknown') stats.notUtf8 += 1
+    if (decoded.encoding === 'utf-16le' || decoded.encoding === 'utf-16be') stats.utf16Decoded += 1
+    const text = decoded.text
     for (const { label, re } of SECRET_CONTENT_PATTERNS) {
       const m = re.exec(text)
       if (m === null) continue
@@ -505,7 +675,7 @@ function scanContents(root, candidates, realHomes) {
       break
     }
   }
-  return { secrets, homePaths }
+  return { secrets, homePaths, stats }
 }
 
 /**
@@ -638,7 +808,7 @@ function detectEcosystem(root, root_, walked) {
     // 有插件配置或 skill 入口但没有 JS 清单：仍然可能是这两类形态，不能等到认出
     // package.json 才认。插件的「产物必须入库」判据依赖这个识别结果。
     if (cordisPatch !== undefined) { evidence.push(cordisPatch); kinds.push('dsh-plugin') }
-    if (skill !== undefined) { evidence.push(`SKILL.md（name: ${skill.name}）`); kinds.push('dsh-skill') }
+    if (skill !== undefined) { evidence.push(`SKILL.md（name: ${skill.name}）`); kinds.push('skill') }
   }
   // Obsidian 插件：独立的 `manifest.json`，判据是 `minAppVersion`（只有它用这个字段）。
   // 注意与 VS Code 的区别——同样是插件，清单文件完全不同，这正是需要专章的理由。
@@ -652,9 +822,9 @@ function detectEcosystem(root, root_, walked) {
       }
     }
   }
-  if (skill !== undefined && !kinds.includes('dsh-skill')) {
+  if (skill !== undefined && !kinds.includes('skill')) {
     evidence.push(`SKILL.md（name: ${skill.name}）`)
-    kinds.push('dsh-skill')
+    kinds.push('skill')
   }
   for (const [file, kind] of [
     ['pyproject.toml', 'python'], ['setup.py', 'python'], ['setup.cfg', 'python'],
@@ -771,13 +941,16 @@ function deriveCommands(root, root_, eco) {
     node.packageManager = pm
 
     for (const [key, aliases] of [
-      ['install', ['install']], ['build', ['build']], ['test', ['test']],
+      ['build', ['build']], ['test', ['test']],
       ['typecheck', ['typecheck', 'type-check', 'tsc']], ['lint', ['lint']],
       ['verify', ['verify', 'check', 'validate']], ['smoke', ['smoke']],
     ]) {
       const hit = aliases.find((a) => typeof pkg.scripts[a] === 'string')
       if (hit !== undefined) node[key] = `${pm} run ${hit}`
     }
+    // 装依赖永远是包管理器自己的命令：`scripts.install` 是项目自定义的安装钩子，
+    // 不是「怎么装依赖」。曾经把它列进上面的别名表，结果被这一行无条件覆盖——
+    // 一条永远不生效的分支，且读代码的人会以为它生效。
     node.install = `${pm} install`
     byEcosystem.node = node
   }
@@ -849,7 +1022,7 @@ function deriveCommands(root, root_, eco) {
   // 「多生态」只在**真的有多套命令**时才算。
   //
   // 判据是「有几个生态产出了命令」，不是「命中几个生态标签」：`dsh-plugin` 是 node 的
-  // 一种**细化**（它就是一个 node 项目），`dsh-skill` 是描述，它们不会带来第二套命令。
+  // 一种**细化**（它就是一个 node 项目），`skill` 是描述，它们不会带来第二套命令。
   // 把它们算进去会误报——实测一个 pnpm 插件项目会收到「每类命令只保留了一个」的警告，
   // 而它其实只有一套命令；收到这种警告的 AI 会去找不存在的第二套命令。
   const commandKinds = Object.keys(byEcosystem)
@@ -1126,9 +1299,6 @@ function detectDsh(root, root_, eco) {
   const localWorkflow = root_.entry('.agents')?.isDir === true
   const contractDoc = root_.has('docs/dsh-plugin-contracts.md')
   const patchesDir = root_.entry('patches')?.isDir === true
-  if (hasInvariantEntry === false && hasClientEntry === false && hasHostEntry === true) {
-    // host-only 是正常形态，不告警；三态判定由上层按本对象推导。
-  }
   return {
     packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
     patchFile,
@@ -1403,7 +1573,7 @@ function detectGit(root) {
   return info
 }
 
-function detectIgnores(root, root_) {
+function detectIgnores(root, root_, outputDirCandidates) {
   const out = {}
   const giName = root_.real('.gitignore')
   if (giName !== undefined) {
@@ -1427,36 +1597,24 @@ function detectIgnores(root, root_) {
   // 用版本控制自己判断有没有被忽略，而不是解析忽略语法：语法有通配、否定、层级差异，
   // 自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。
   // 无仓库时跳过：此时 check-ignore 全失败，会把所有目录误报为未忽略。
-  const probe = []
+  //
+  // **一次批处理，不逐个起子进程**：候选来自 walk() 的全树枚举（任何深度），
+  // 用 `check-ignore --stdin -z` 一把判定。逐个 spawn 的代价随目录数线性增长，
+  // 也正是旧实现只敢「下沉一层」的原因——于是标准 monorepo 的
+  // `packages/<包名>/dist` 全被漏掉（实测 201 个未忽略目录只报 1 个）。
   const gitUsable = run('git', ['rev-parse', '--is-inside-work-tree'], root) === 'true'
-  const checkOne = (rel) => {
-    const r = spawnSync('git', ['check-ignore', '-q', '--', rel],
-      { cwd: root, windowsHide: true })
-    probe.push({ dir: rel, ignored: r.status === 0 })
-  }
+  const probe = []
   if (gitUsable) {
-    for (const d of OUTPUT_DIR_HINTS) {
-      const e = root_.entry(d)
-      if (e?.isDir !== true) continue
-      checkOne(e.name)
-    }
-    // monorepo 子包下沉一层：顶层只有 packages/ 时，子包的 dist/build 同样致命。
-    // 只下一层，不递归爆；读目录失败就跳过该分支。
-    try {
-      for (const entry of readdirSync(root, { withFileTypes: true, encoding: 'utf8' })) {
-        if (!entry.isDirectory() || entry.name.startsWith('.')) continue
-        if (SKIP_DIRS.has(entry.name.toLowerCase())) continue
-        let subs = []
-        try {
-          subs = readdirSync(join(root, entry.name), { withFileTypes: true, encoding: 'utf8' })
-        } catch { continue }
-        for (const sub of subs) {
-          if (!sub.isDirectory()) continue
-          if (!OUTPUT_DIR_HINTS.includes(sub.name.toLowerCase()) && !OUTPUT_DIR_HINTS.includes(sub.name)) continue
-          checkOne(`${entry.name}/${sub.name}`)
-        }
-      }
-    } catch { /* 读不到就只用顶层结果 */ }
+    // 候选 = 全树候选（任何深度的产物目录名）∪ 顶层已知产物目录名。
+    // 后一半是必须的：`venv/`、`node_modules/` 这类名字在 walk 里被当作依赖目录整体
+    // 跳过了，不会进走查结果——而「虚拟环境就在那里、忽略规则却没覆盖它」正是最该
+    // 报出来的那种情况。
+    const topLevel = OUTPUT_DIR_HINTS
+      .filter((d) => root_.entry(d)?.isDir === true)
+      .map((d) => root_.real(d))
+    const candidates = [...new Set([...(outputDirCandidates ?? []), ...topLevel])]
+    const ignored = gitIgnoredSet(root, candidates)
+    for (const dir of candidates) probe.push({ dir, ignored: ignored.has(dir) })
   }
   if (probe.length > 0) {
     out.presentOutputDirs = probe
@@ -1515,20 +1673,31 @@ function survey(target) {
 
   const scanned = scanContents(root, candidates, realHomeSpellings())
 
-  // 给风险项补上「已经在版本库里了吗」——这一个比特决定处置方式完全不同：
-  // 未跟踪的大文件只要加进忽略就解决了；已跟踪的必须先从索引移除，否则它仍会随
-  // 下一次提交进入历史。凭据同理：未跟踪的能从这次提交排除，已在历史里的只能轮换。
+  // 给风险项补上两个比特：「已经在版本库里了吗」「被忽略规则覆盖了吗」。
+  // 两个比特决定处置方式，缺一个就只能一律报缺——而那正是门禁变噪音的原因：
+  //   - 已跟踪：只能从索引移除并轮换；
+  //   - 未跟踪且已忽略：不进版本库（.gitignore 里的 .env 就是这样），报事实但不拦；
+  //   - 未跟踪且未忽略：下一次 `git add -A` 就会把它带进历史。
+  // 三条风险（凭据内容、敏感文件名、本机私有路径）共用同一次批处理，判定只有一个实现。
   const trackedSet = new Set(runGitPaths(['ls-files', '-z'], root) ?? [])
-  const markTracked = (entry) => {
+  const markBits = (entry) => {
     const rel = entry.path.replace(/\\/g, '/')
-    const tracked = trackedSet.has(rel) || trackedSet.has(entry.path)
-    return { ...entry, tracked }
+    return { ...entry, tracked: trackedSet.has(rel) || trackedSet.has(entry.path), ignored: false }
   }
-  const secrets = scanned.secrets.map(markTracked)
-  const largeFiles = walked.largeFiles.map(markTracked)
+  let secrets = scanned.secrets.map(markBits)
+  let largeFiles = walked.largeFiles.map(markBits)
   // 敏感文件名同样要标 tracked：分案第一步就问“在不在库里”，缺了这个比特，
   // 会把已在历史里的凭据当未跟踪排除，白忙且留泄露。
-  const secretFiles = walked.secretFiles.map((p) => markTracked({ path: p }))
+  let secretFiles = walked.secretFiles.map((p) => markBits({ path: p }))
+  let homePathLeaks = scanned.homePaths.map(markBits)
+  const bitPaths = [...secrets, ...secretFiles, ...homePathLeaks].map((x) => x.path)
+  if (bitPaths.length > 0) {
+    const ignoredSet = gitIgnoredSet(root, bitPaths)
+    const fill = (list) => list.map((entry) => ({ ...entry, ignored: ignoredSet.has(entry.path.replace(/\\/g, '/')) }))
+    secrets = fill(secrets)
+    secretFiles = fill(secretFiles)
+    homePathLeaks = fill(homePathLeaks)
+  }
 
   // 标签与版本号对齐：自动化对不上的根源。复用 detectGit 已取到的标签列表，
   // 不另起 git 进程；非仓库根（标签属外层仓库）或取不到时保持 undefined，不判 false。
@@ -1542,7 +1711,7 @@ function survey(target) {
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
   // 忽略探查只跑一次，两处复用同一结果。
-  const ignores = detectIgnores(root, root_)
+  const ignores = detectIgnores(root, root_, walked.outputDirCandidates)
 
   return {
     target: { path: root, name: basename(root) },
@@ -1561,7 +1730,7 @@ function survey(target) {
     risks: {
       secretFiles,
       secretContent: secrets,
-      homePathLeaks: scanned.homePaths,
+      homePathLeaks,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
       // 截断时不能把「没报」当成「没有」。
       contentScan: {
@@ -1572,7 +1741,15 @@ function survey(target) {
         // 「检查过了，很干净」。
         depthLimited: walked.depthLimited,
         depthLimitedPaths: (walked.depthLimitedPaths ?? []).slice(0, 20),
-        scope: '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除）',
+        // 其余四类「没扫到」也各有一个数：超单文件上限、按扩展名跳过、读不出来、
+        // 非 UTF-8（按宽松解码尽力扫，但编码没嗅探到）。任何一类非零，
+        // 「无命中」都不等于「干净」。
+        skippedLarge: walked.skippedLarge ?? 0,
+        skippedByExtension: walked.skippedByExtension ?? 0,
+        unreadable: scanned.stats.unreadable,
+        notUtf8: scanned.stats.notUtf8,
+        utf16Decoded: scanned.stats.utf16Decoded,
+        scope: '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除，UTF-16 已按 BOM 或 NUL 密度嗅探解码）',
       },
       largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
       symlinks: walked.symlinks.slice(0, 50),
@@ -1885,8 +2062,10 @@ function toMarkdown(s) {
 
 function main(argv) {
   const args = argv.slice(2)
-  const flags = args.filter((a) => a.startsWith('--'))
-  const positional = args.filter((a) => !a.startsWith('--'))
+  // `-h` 也是帮助开关，必须先从位置参数里排除：只看 `--` 前缀的话，`-h` 会被当成
+  // 目录名（实测报「目录不存在 …\-h」，而帮助分支永不成立）。
+  const flags = args.filter((a) => a.startsWith('--') || a === '-h')
+  const positional = args.filter((a) => !a.startsWith('--') && a !== '-h')
   const target = positional[0] ?? process.cwd()
   const asMarkdown = flags.includes('--markdown')
   if (flags.includes('--help') || flags.includes('-h')) {
@@ -1913,11 +2092,27 @@ function main(argv) {
   return 0
 }
 
-// 只有被直接执行时才跑 main；被 import 时只导出 survey，不产生副作用。
-// 判据是入口脚本的路径，不依赖任何环境变量或平台特性。
-const invokedDirectly = process.argv[1] !== undefined
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+// 只有被直接执行时才跑 main；被 import 时只导出纯函数与 survey，不产生副作用。
+// 判据见 isMainModule：按**真实路径**比较，经 junction / 符号链接调用也算直接执行
+// （字面比较会静默空跑并返回 0，那是自检假绿）。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(process.argv)
 
-if (invokedDirectly) process.exitCode = main(process.argv)
+/**
+ * 这个脚本**可能产出的全部 kind**。
+ *
+ * 文档里的生态清单以它为准：selftest 断言 `references/survey.md` 的清单与它集合相等，
+ * 于是「代码加了新生态、文档没跟上」当场变红——而不是等人照着过期文档判断。
+ * 新增生态时只改代码，文档由断言逼着同步。
+ */
+export function kindVocabulary() {
+  return [...new Set([
+    ...SOURCE_EXT_KINDS.map(([, kind]) => kind),
+    ...BUILD_FILE_KINDS.map(([, kind]) => kind),
+    ...NESTED_MANIFEST_KINDS.map(([, kind]) => kind),
+    'node', 'python', 'rust', 'go', 'java', 'dotnet', 'ruby', 'php', 'swift', 'dart', 'elixir', 'clojure', 'perl', 'cpp',
+    'dsh-plugin', 'skill', 'vscode-extension', 'obsidian-plugin',
+    'docs-only', 'unrecognized', 'unknown',
+  ])].sort()
+}
 
 export { survey, toMarkdown, humanBytes }

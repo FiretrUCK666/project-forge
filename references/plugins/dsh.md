@@ -132,7 +132,7 @@
 
 **第七节至第九节的核对方法与证据**（版本号一律现场取，不把插件的依赖范围当成宿主版本）：
 
-- 层叠顺序与组合入口：宿主安装目录 `README.zh.md` 的 Profile 一节列出层序，`node_modules/@deepseek-ai/dsh-app-boot/lib/index.js` 里 `composeEntries` 的注释说明「profile 的 patch 层在所有 bundle 层之后」，层组装函数按 `dsh.profile.bundles` 顺序逐层取各 bundle 的补丁。
+- 层叠顺序与组合入口：宿主安装目录 `README.zh.md` 的 Profile 一节列出层序，`node_modules/@deepseek-ai/dsh-app-boot/lib/index.js` 里 profile 与补丁层的文档注释（该文件顶部介绍 profile 清单位置与图层关系处）说明「profile 的 patch 层在所有 bundle 层之后」，同文件的 `composeEntries` 是真正执行逐层组合的函数（按 `dsh.profile.bundles` 顺序取各 bundle 的补丁）。
 - 三条硬约束：同一文件的补丁应用函数里，按 id 命中后对补丁携带的每个键做**顶层整值赋值**（所以 `config` 整单替换、没写的键保持原样），`name` 失配走告警后 `skipping`，顶层特殊键只有 `id` / `insert` / `name` 三个。
 - 热更新边界：`lib/profile-boot-*.js` 里 `patchReload === "live"` 成立时才装载 HMR，随后对 profile 补丁路径与家目录补丁路径各调用一次监听函数——因此监听范围就是这两份文件，bundle 级补丁与 `--patch` 覆盖层不在其中。
 

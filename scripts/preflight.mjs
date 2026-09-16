@@ -35,6 +35,8 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { isMainModule, README_NAME_RE, HOME_PATH_RE } from './survey.mjs'
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 
@@ -411,8 +413,8 @@ function checkAgentsKernel() {
 
 /** Extended_Pictographic 覆盖绝大多数 emoji；箭头、对勾一类符号不在其内，可正常使用。 */
 const EMOJI = /\p{Extended_Pictographic}/u
-/** 与 survey.mjs 共用同一语义：双分隔符、用户名宽容（见 survey HOME_PATH_PATTERNS，真相源在 survey，改动需两边同步）。 */
-const HOME_PATH = /[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`]+|[\\/](?:home|Users)[\\/][^\\/\s"'`]+/
+/** 本机私有路径的判据与 survey 同源（survey 导出 HOME_PATH_RE，两份手写正则必然漂移）。 */
+const HOME_PATH = HOME_PATH_RE
 
 function checkGlobalRules() {
   const files = repoTextFiles()
@@ -443,7 +445,7 @@ function checkGlobalRules() {
   const domainFiles = repoDomain().files
   for (const entry of entries) {
     if (ALLOWED_TOP_LEVEL.has(entry)) continue
-    if (/^readme([._-][a-z]{2}([._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i.test(entry)) continue
+    if (README_NAME_RE.test(entry)) continue
     if (!domainFiles.some((p) => p === entry || p.startsWith(`${entry}/`))) continue
     warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
   }
@@ -891,6 +893,7 @@ export function evalFreshnessMarker(rel, text, todayStr, tomorrowStr) {
   const result = {
     hasSection: false, count: 0,
     scope: undefined, date: undefined, ageDays: undefined,
+    keys: {},
     errors: [], warnings: [],
   }
   const clean = text.replace(/^\uFEFF/, '')
@@ -943,7 +946,266 @@ export function evalFreshnessMarker(rel, text, todayStr, tomorrowStr) {
   if (ageDays > FRESHNESS_STALE_DAYS) {
     result.warnings.push(`上次核对是 ${dateStr}（${ageDays} 天前），超期了 —— 按「事实来源」节写明的范围重核官方文档，确认无误后把 date 改成当天。`)
   }
+  // 其余键的形状校验：**机器无关的那一半进失败区**（零成本纯收益）；
+  // 没认领的键只提示「未核对」，不失败——扩展键是允许的，但它的含义得有人认领。
+  const parsed = parseMarkerKeys(marker[2])
+  result.keys = parsed.keys
+  for (const e of parsed.errors) result.errors.push(e)
+  for (const note of parsed.notes) result.warnings.push(note)
   return result
+}
+
+/**
+ * 取「事实来源」节的**正文**：标题行之后，到下一个同级或更高级标题（或文件尾）为止。
+ *
+ * 不能用 `text.slice(text.search(RE))`——那从标题本身切起，而标题里就含「来源」二字，
+ * 判据于是恒真。按 markdown 语义取正文，判据才可能真的失败。
+ */
+export function freshnessSectionBody(text) {
+  const lines = String(text).split('\n')
+  const at = lines.findIndex((l) => FRESHNESS_SECTION_RE.test(l))
+  if (at < 0) return ''
+  const level = (/^#+/.exec(lines[at].trim())?.[0].length) ?? 2
+  const body = []
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const h = /^(#+)\s+/.exec(lines[i])
+    if (h !== null && h[1].length <= level) break
+    body.push(lines[i])
+  }
+  return body.join('\n')
+}
+
+/**
+ * 这一节的来源说明能不能照着做：链接 / 文档名 / 具体步骤，至少得有一类。
+ * 判据按「有」而不是「没有」写，避免把措辞差异判成缺陷；但**空节必须失败**。
+ */
+export function hasActionableSources(body) {
+  const textBody = String(body ?? '')
+  if (textBody.trim() === '') return false
+  const hasLink = /https?:\/\/\S+/.test(textBody)
+  const hasDocName = /官方|文档|手册|指南|manual|docs?\.|reference|changelog|release notes/i.test(textBody)
+  const hasSteps = /节|章|页|section|chapter|查|核对|重核|步骤|命令|search|look up|check/i.test(textBody)
+    && textBody.trim().length >= 40
+  return hasLink || hasDocName || hasSteps
+}
+
+/**
+ * 已认领的标记键：含义与形状**只在这里定义一次**。
+ *
+ * 没认领的键不是错误（可扩展），但要按「未核对」提示出来——它不会被校验、也不参与
+ * 比对。值一律要求**非空且单行**（标记解析按空白切分，值里带空白本身就写不成单行）。
+ * `host=` 的语义是「上次核对时**本机实际运行**的那套宿主版本」——不是兼容下界，
+ * 也不是某个目标项目锁定的版本；多值写法已否决（它表达不了「本机跑的是哪一版」）。
+ */
+export const CLAIMED_MARKER_KEYS = {
+  date: { note: '核对日期' },
+  host: { reject: /[,\s]/, note: '上次核对时本机实际运行的那套宿主版本' },
+}
+
+/** 解析标记里的 key=value，返回 { keys, errors, notes }。纯函数，直接可证伪。 */
+export function parseMarkerKeys(raw) {
+  const errors = []
+  const notes = []
+  const keys = {}
+  for (const part of String(raw ?? '').trim().split(/\s+/).filter(Boolean)) {
+    const eq = part.indexOf('=')
+    if (eq <= 0) {
+      errors.push(`核对标记里的「${part}」不是 key=value 形状——每个键写成 key=value，值不许含空白（值必须非空且单行）。`)
+      continue
+    }
+    const name = part.slice(0, eq)
+    const value = part.slice(eq + 1)
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
+      errors.push(`核对标记的键名「${name}」形状非法——用字母开头，其后是字母、数字、下划线或连字符。`)
+      continue
+    }
+    if (value === '') {
+      errors.push(`核对标记的「${name}=」值是空的——值必须非空且单行。`)
+      continue
+    }
+    if (keys[name] !== undefined) {
+      errors.push(`核对标记里「${name}」出现了多次——每个键只写一次。`)
+      continue
+    }
+    const claimed = CLAIMED_MARKER_KEYS[name]
+    if (claimed === undefined) {
+      notes.push(`核对标记里的「${name}=」没有认领的含义——它不会被校验，也不能参与比对（未登记即未核对）。`)
+    } else if (claimed.reject !== undefined && claimed.reject.test(value)) {
+      errors.push(`核对标记的「${name}=${value}」格式非法——${name} 应是单个不含量空白与逗号的值。`)
+    }
+    keys[name] = value
+  }
+  return { keys, errors, notes }
+}
+
+/**
+ * 版本串归一：**只吃写法差异，不做版本序、不折叠预发布**。
+ * 顺序：trim → 去开头 `^ ~ > = <` 与空白 → 去开头 v/V（后面紧跟数字时）→ 小写。
+ *
+ * **只实现这一处**：compose-agents 与 preflight 共用同一份（两处各判一次同类问题，
+ * 迟早给出两种答案）。`0.1.5-rc.1` 与 `0.1.5` 归一后**不同**——那是两次不同的发布，
+ * 折叠掉等于隐瞒「章里核的是 rc、本机装的是正式版」这个事实。
+ */
+export function normVersion(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^[\^~>=<\s]+/, '')
+    .replace(/^[vV](?=\d)/, '')
+    .toLowerCase()
+}
+
+/**
+ * 标记里的 host= 与本机宿主的三态比对。**纯函数**（来源由调用方给），fixture 才喂得进
+ * 数据。三态各有确定文本，于是断言可以只锁确定的那部分、不锁「本机装了什么」。
+ *
+ * sources: [{ source, value, reason }]，value 为 undefined 表示这条来源取不到。
+ */
+export function compareHostMarker(markerHost, sources) {
+  const usable = (sources ?? []).filter((s) => typeof s?.value === 'string' && s.value.trim() !== '')
+  if (usable.length === 0) {
+    const why = (sources ?? []).map((s) => `${s.source}${s.reason ? `（${s.reason}）` : ''}`).join('；')
+    return { state: 'undetermined', reason: `本机取不到宿主版本（未装、查询失败或没有可用的取值途径）${why ? `：${why}` : ''}`, values: [] }
+  }
+  const values = usable.map((s) => ({ source: s.source, value: normVersion(s.value) }))
+  const distinct = [...new Set(values.map((v) => v.value))]
+  if (distinct.length > 1) {
+    return {
+      state: 'undetermined',
+      reason: `本机两条来源互相矛盾（无法确定本机跑的是哪一版）：${values.map((v) => `${v.source} ⇒ ${v.value}`).join('；')}`,
+      values,
+    }
+  }
+  const mine = distinct[0]
+  const theirs = normVersion(markerHost)
+  if (mine === theirs) return { state: 'match', reason: '', values }
+  return { state: 'mismatch', reason: `标记里是 ${markerHost}，本机实际是 ${usable[0].value}`, values }
+}
+
+/** 探针超时：宿主 CLI 启动可能慢，但一次卡住不能挂住整次自检。超时 = 未核对。 */
+const HOST_PROBE_TIMEOUT_MS = 20000
+
+/**
+ * 按 scope 登记的取值途径。**只有登记过的宿主参与比对**；没登记就是「未核对」。
+ *
+ * 通用代码里不出现任何宿主的名字、命令或路径——名字与参数都在这张表里；每条登记项
+ * 给两个**独立来源**：宿主自己的版本查询入口 + 它自己的安装元数据。
+ */
+const HOST_PROBES = {
+  dsh: {
+    cli: { command: 'dsh', args: ['--version'] },
+    metadata: { manager: 'npm', package: '@deepseek-ai/dsh' },
+  },
+}
+
+/** 跑登记表里的命令。失败返回 undefined（不抛错，调用方按「取不到」处理）。 */
+function runRegisteredCommand(command, args) {
+  const first = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, timeout: HOST_PROBE_TIMEOUT_MS })
+  if (first.error === undefined && first.status === 0) return first.stdout ?? ''
+  if (process.platform !== 'win32') return undefined
+  // Windows 上的两级退让：Node 不套 PATHEXT（裸名 ENOENT），也拒绝直接 spawn
+  // `.cmd`/`.bat`（EINVAL，CVE-2024-27980 起的加固）。于是走 `cmd.exe /d /s /c`——
+  // 命令行与参数**全部来自上面的登记表字面量**，不插入任何项目派生内容或用户输入。
+  // `cmd.exe` 是平台胶水，对所有登记项一视同仁，所以它不进登记表。
+  // 不用 `shell: true`：它在 Node 里已废弃（DEP0190，且参数只拼接不转义）——
+  // 把弃用路径写进常驻检查，将来红的会是我们的自检，而不是使用者的代码。
+  const line = [command, ...args].join(' ')
+  const viaCmd = spawnSync('cmd.exe', ['/d', '/s', '/c', line], { encoding: 'utf8', windowsHide: true, timeout: HOST_PROBE_TIMEOUT_MS })
+  if (viaCmd.error === undefined && viaCmd.status === 0) return viaCmd.stdout ?? ''
+  return undefined
+}
+
+/** 从命令输出里取版本：只认**唯一**的版本形状 token，出现两个不同值就视为取不到。 */
+function versionFromOutput(out) {
+  const tokens = String(out ?? '').match(/\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.]+)?/g) ?? []
+  const distinct = [...new Set(tokens)]
+  return distinct.length === 1 ? distinct[0] : undefined
+}
+
+/** 安装元数据来源：分发根**运行时查**，路径由「分发根 + 登记项里的包名」拼出，不写死。 */
+function hostMetadataValue(entry) {
+  const meta = entry?.metadata
+  if (meta === undefined) return undefined
+  const rootOut = runRegisteredCommand(meta.manager, ['root', '-g'])
+  const root = String(rootOut ?? '').trim().split('\n').map((l) => l.trim()).filter(Boolean)[0]
+  if (root === undefined || root === '') return undefined
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, ...meta.package.split('/'), 'package.json'), 'utf8').replace(/^\uFEFF/, ''))
+    return typeof pkg.version === 'string' ? pkg.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const hostProbeCache = new Map()
+
+/**
+ * 取本机宿主版本。**惰性 + 每进程每 scope 只跑一次**（同 repoDomainCache 的做法）。
+ * 返回 { scope, registered, sources }；sources 里每条都带取不到的原因。
+ */
+export function probeHost(scope) {
+  if (hostProbeCache.has(scope)) return hostProbeCache.get(scope)
+  const entry = HOST_PROBES[scope]
+  let result
+  if (entry === undefined) {
+    result = { scope, registered: false, sources: [], reason: `没有登记「${scope}」的取值途径——未登记即未核对` }
+  } else {
+    const sources = []
+    if (entry.cli !== undefined) {
+      const out = runRegisteredCommand(entry.cli.command, entry.cli.args)
+      const value = out === undefined ? undefined : versionFromOutput(out)
+      sources.push({
+        source: `${entry.cli.command} ${entry.cli.args.join(' ')}`,
+        value,
+        reason: out === undefined
+          ? '命令取不到（未装或查询失败）'
+          : (value === undefined ? `输出里没有唯一的版本形状（原文首行：${String(out).split('\n')[0].slice(0, 60)}）` : ''),
+      })
+    }
+    if (entry.metadata !== undefined) {
+      const value = hostMetadataValue(entry)
+      sources.push({
+        source: `${entry.metadata.package} 的安装元数据`,
+        value,
+        reason: value === undefined ? '分发根或包元数据读不到（没有对应的包管理器，或该包不在全局安装里）' : '',
+      })
+    }
+    result = { scope, registered: true, sources }
+  }
+  hostProbeCache.set(scope, result)
+  return result
+}
+
+/**
+ * 「改 host= 必须与 date= 同批」——做成机制，不是注释提醒。
+ *
+ * 判据：找出最后一次改动 `host=` 的那个提交 A（`git log -S`），再看 A 与 A^ 两版里
+ * `date=` 是否同时变化。A 里 host= 变了而 date= 没变，就是那次只改了版本号、日期还停在
+ * 上一次核对日：比对会喊「一致」，而日期是假的——最难发现的一种假绿。
+ *
+ * 取不到 A（值尚未提交、文件未跟踪、浅克隆或无 git）→ 报「未核对」，不静默也不失败：
+ * 换台机器或浅克隆不该因此变红。`runGit` 可注入，fixture 直接喂数据。
+ */
+export function hostDateBatchStatus(repoRoot, rel, hostValue, runGit) {
+  const git = runGit ?? ((args) => {
+    const r = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', windowsHide: true })
+    return r.error === undefined && r.status === 0 ? (r.stdout ?? '') : undefined
+  })
+  const found = git(['-c', 'core.quotepath=false', 'log', '-1', '--format=%H', '-S', `host=${hostValue}`, '--', rel])
+  const commit = String(found ?? '').trim().split('\n')[0].trim()
+  if (commit === '') {
+    return { state: 'unverified', reason: '版本控制里找不到改动 host= 的提交（值尚未提交、文件未跟踪，或没有可用的 git 历史）' }
+  }
+  const after = git(['show', `${commit}:${rel}`])
+  const before = git(['show', `${commit}^:${rel}`])
+  if (after === undefined || before === undefined) {
+    return { state: 'unverified', reason: `读不到提交 ${commit.slice(0, 8)} 前后的内容（可能是根提交或浅克隆）` }
+  }
+  const dateOf = (text) => /(?:^|\s)date=([0-9-]+)/.exec(String(text))?.[1]
+  if (dateOf(after) !== dateOf(before)) return { state: 'ok', reason: '' }
+  return {
+    state: 'stale',
+    reason: `最后一次改 host= 的提交 ${commit.slice(0, 8)} 没有同时改 date=（两版里都是 ${dateOf(after) ?? '未声明'}）——只改了版本号的日期是不可信的`,
+  }
 }
 
 function checkFreshness() {
@@ -980,16 +1242,49 @@ function checkFreshness() {
     if (isChapter && r.count === 0) {
       fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式与用法见 references/publish.md 的「专章的『事实来源』标记」一节）。`)
     }
-    // 「事实来源」不能只是一句套话：它必须写出**查法**（去哪个官方文档的哪一节查），
-    // 否则「上次看到的值」过期时，读的人无处可查——来源节就成了装饰。
+    // 「事实来源」不能只是一句套话：它必须写出**能照着做的查法**（来源链接，或
+    // 去哪个文档的哪一节怎么核），否则「上次看到的值」过期时读的人无处可查。
+    //
+    // 这条判据曾经是**永真**的：它从 `text.slice(text.search(FRESHNESS_SECTION_RE))`
+    // 取「正文」，而那一段从**标题本身**切起——标题里就有「来源」二字，于是
+    // `/https?:\/\/|官方|文档|来源/` 恒命中，fail 是死代码（实测：一份只有标题加标记的
+    // 最简文档照样 0 失败通过）。现在按 markdown 语义取节正文，并在 selftest 里
+    // 用「只有标题的最简文档必须报错」证伪它。
     if (isChapter && r.hasSection) {
-      const body = text.slice(text.search(FRESHNESS_SECTION_RE))
-      if (!/https?:\/\/|官方|文档|来源/.test(body)) {
-        fail(`${rel} 的「事实来源」节没有写出查法——至少要说清去哪个官方文档的哪一节重核。`)
+      if (!hasActionableSources(freshnessSectionBody(text))) {
+        fail(`${rel} 的「事实来源」节没有写出可执行的查法——至少要有来源链接，或写明去哪个文档的哪一节怎么核；只有一句套话等于没有。`)
       }
     }
     for (const e of r.errors) fail(`${rel} ${e}`)
     for (const w of r.warnings) warn(`${rel} ${w}`)
+
+    // host= 的三态比对：**只有带这个键的专章参与**，按 scope 查登记的取值途径。
+    // 全部落在提示区、绝不失败：换台机器校验、宿主回滚、同机多份宿主都能造出
+    // 「不同」，脚本判不了是不是真滞后——判不了罪就不能失败，而且进失败区就是
+    // 「换台机器必红」，那是本项目明确要避免的检查。
+    if (isChapter && r.keys?.host !== undefined) {
+      const scope = expectedFreshnessScope(rel)
+      const probe = probeHost(scope)
+      if (probe.registered !== true) {
+        warn(`${rel} 的 host=${r.keys.host} 未核对：${probe.reason}。**「没比」与「比过且一致」是两回事，不要读成通过。**`)
+      } else {
+        const cmp = compareHostMarker(r.keys.host, probe.sources)
+        if (cmp.state === 'match') {
+          // 一致 → 静默（不产生噪音，这一态是绝大多数情况）
+        } else if (cmp.state === 'mismatch') {
+          warn(`${rel} 的 host=${r.keys.host} 与本机实际宿主不同（${cmp.reason}）——两种解释都成立："
+            + '专章滞后（宿主升级后没重核），或换台机器校验 / 宿主回滚 / 同机存在多份宿主。'
+            + '**只提示不失败**：脚本判不了是不是真滞后。按该文件的「事实来源」节重核后，把 host= 与 date= **一起**改。`)
+        } else {
+          warn(`${rel} 的 host= 未核对：${cmp.reason}。**「没比」与「比过且一致」是两回事，不要读成通过。**`)
+        }
+      }
+      // 两键同批：只改 host= 而不改 date= 的假绿在这里现形（同样只提示不失败——
+      // 历史提交改不了，判成失败等于留下一条永远消不掉的红色）。
+      const batch = hostDateBatchStatus(SKILL_ROOT, rel, r.keys.host)
+      if (batch.state === 'stale') warn(`${rel} 的 host= 与 date= 不是同批更新的：${batch.reason}`)
+      else if (batch.state === 'unverified') warn(`${rel} 的 host= 与 date= 是否同批**未核对**：${batch.reason}`)
+    }
   }
   process.stdout.write('保鲜标记：格式与归属一致\n')
 }
@@ -1045,8 +1340,6 @@ function checkValuePollution() {
   }
   collect(join(SKILL_ROOT, 'references'))
   collect(join(SKILL_ROOT, 'templates'))
-  // 白名单：本检查自身的字面引用不算污染。
-  const self = join(SKILL_ROOT, 'scripts', 'preflight.mjs')
   const banned = ['dsh-task-board', 'dsh_task_board', 'dsh.taskBoard', '@firetruck666']
   let hits = 0
   for (const f of targets) {
@@ -1100,7 +1393,8 @@ function main() {
 
 // 与 survey.mjs 同一模式：直接执行才跑 main，被 import（selftest 测保鲜判据时
 // 会 import 本文件）时只取导出的纯函数，不产生副作用。
-const invokedDirectly = process.argv[1] !== undefined
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-
-if (invokedDirectly) process.exitCode = main()
+//
+// 判据是**真实路径**比较（survey 的 isMainModule，只此一处实现）：字面比较在经
+// junction 或符号链接调用时永不相等，脚本于是什么都不做并返回 0——实测「preflight
+// 走 junction」就是 exit 0、零输出，CI 与人都会读成自检通过。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main()

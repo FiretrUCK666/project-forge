@@ -9,7 +9,7 @@
 
 Forge any project directory into a well-formed project: version control, remote repository, documentation set, and release channel, all in one pass.
 
-Give it a directory. It first surveys read-only to see what the project currently is, then decides on its own what to do and what to skip. It assumes no stack — Node, Python, Rust, Go, docs-only directories, even plugin projects are all judged from surveyed facts.
+Give it a directory. It first surveys read-only to see what the project currently is, then decides on its own what to do and what to skip. It assumes no stack — Node, Python, Rust, Go, Java, docs-only directories, plugin projects, and skill projects are all judged from surveyed facts.
 
 ## Contents
 
@@ -132,6 +132,7 @@ node <skill directory>/scripts/survey.mjs <project directory> --markdown
 
 # Generate, refresh, or upgrade a project's AGENTS.md
 node <skill directory>/scripts/compose-agents.mjs <project directory>
+node <skill directory>/scripts/compose-agents.mjs <project directory> --check     # verify only; exit 1 on mismatch
 node <skill directory>/scripts/compose-agents.mjs <project directory> --status    # inspect only, write nothing
 node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written file to the standard structure
 
@@ -149,7 +150,7 @@ That split is deliberate: facts do not vary by project type, criteria do.
 
 A few principles run through the whole skill, and they are also the bar for "should this practice be added":
 
-**Look before acting.** No files are written before the survey finishes. Applying the same steps to every project is guaranteed to do the wrong thing — a release flow for a docs-only directory is busywork, recreating a repo for a project that already has a remote is destruction.
+**Read-only first.** No files are written before the survey finishes. Applying the same steps to every project is guaranteed to do the wrong thing — a release flow for a docs-only directory is busywork, recreating a repo for a project that already has a remote is destruction.
 
 **Give criteria, not checklists.** Checklists rot (files added/renamed, tools renamed); criteria do not. Wherever something can be written as "how to decide", it is not written as "copy this".
 

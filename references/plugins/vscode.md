@@ -88,8 +88,7 @@
 ## 事实来源
 
 清单的必填字段、`engines.vscode` 不可为 `*`、`main` 与 `browser` 两个入口、扩展 id 的
-构成（`${publisher}.${name}`）、`extensionDependencies`、`vscode:prepublish` 与
-`vscode:uninstall`，均来自 VS Code 官方文档的「Extension Manifest」一节
+构成（`${publisher}.${name}`）、`extensionDependencies`、`vscode:prepublish`，均来自 VS Code 官方文档的「Extension Manifest」一节
 （https://code.visualstudio.com/api/references/extension-manifest ，核实于本文件写入时）。
 
 打包与发布流程的具体命令、忽略文件名与语法，来自官方文档「Publishing Extensions」

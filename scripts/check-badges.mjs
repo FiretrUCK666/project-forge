@@ -69,7 +69,7 @@ async function inspect(url) {
   let body
   try {
     // 这一步**必须在 try 里**：坏 gzip、连接半途断开、代理改写都会在这里抛
-    // （实测过 `TypeError: terminated`，原因是 `incorrect header check`）。
+    // （坏 gzip 典型表现为 `TypeError: terminated`）。
     body = await res.text()
   } catch (error) {
     return { verdict: 'unverified', reason: `正文读取失败：${error.message}`, shows: '' }

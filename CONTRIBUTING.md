@@ -71,8 +71,8 @@ node scripts/sync-toc.mjs README.md README.en.md --check
 `README.md` 与 `README.en.md` 的目录与标题同步，改了标题或增删节后重跑
 `node scripts/sync-toc.mjs README.md README.en.md` 即同步。
 
-**改动判定逻辑时必须同时补 fixture。** `selftest.mjs` 里每一条断言都对应一个曾经真实
-出过的错误，改动之后如果它红了，先怀疑自己的改动，不要改断言去迁就实现。
+**改动判定逻辑时必须同时补 fixture。** `selftest.mjs` 里每条断言对应一类必须防住的
+行为契约，改动之后如果它红了，先怀疑自己的改动，不要改断言去迁就实现。
 
 **如果你改了 `templates/agents-kernel.md`**，需要重新注入并一起提交：
 

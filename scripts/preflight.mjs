@@ -568,8 +568,7 @@ const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8,
  * 文档里写「三道门控」「四个脚本」这类数量时，**必须与实际相符**。
  *
  * 这类数字是典型的快照：加了东西忘了改，文档就开始说假话，而假话没有任何症状——
- * 这个 skill 自己就中过：硬门控从 6 道加到 7 道、脚本从 3 个加到 4 个之后，
- * README 与 AGENTS.md 里「六道硬门控」「三个脚本」还留着，直到人工核对才发现。
+ * 没有检查时它只能靠人工核对发现，而人工核对恰恰是这类数字失准的盲区。
  *
  * 判据是「文档里的数字 vs 实际数出来的数量」，全自动，不需要人记得。
  */
@@ -586,9 +585,9 @@ function checkStatedCounts() {
 
   // **与磁盘对账**，不只是两份文档互相对。
   //
-  // 这一步是必须的：计数检查原先只比「文件地图的行数」与「文档里写的数量」，
-  // 而**两个文档同时漏掉同一个脚本时，它两边都对得上**——实测漏了 sync-toc.mjs 而
-  // 检查全绿。文档之间互相印证不构成证据，得跟事实比。
+  // 这一步是必须的：只比「文件地图的行数」与「文档里写的数量」时，**两个文档同时
+  // 漏掉同一个脚本，它两边都对得上**——文档之间互相印证不构成证据，得跟磁盘上的
+  // 事实比。
   const scriptsDir = join(SKILL_ROOT, 'scripts')
   if (existsSync(scriptsDir)) {
     const onDisk = readdirSync(scriptsDir, { withFileTypes: true, encoding: 'utf8' })
@@ -627,8 +626,8 @@ function checkStatedCounts() {
     }
   }
   // README 方向的对账：README 面向的是「刚拿到这个 skill 的人」，它的脚本表与文件表
-  // 就是他的全景图。**只查 SKILL.md 那一侧会漏掉这一半**——实测 README 少列了一个脚本
-  // 与三份发布专章，而所有检查全绿（读者照着 README 找东西，找不到就是找不到）。
+  // 就是他的全景图。**只查 SKILL.md 那一侧会漏掉这一半**——README 少列一个文件时
+  // 别的检查不会出声（读者照着 README 找东西，找不到就是找不到）。
   // 两份 README 都要查：它们成对维护，只查一份等于放另一半漂移。
   for (const readme of ['README.md', 'README.en.md']) {
     const p = join(SKILL_ROOT, readme)
@@ -1237,10 +1236,10 @@ function checkFreshness() {
       || rel === 'references/remote-github.md'
     const r = evalFreshnessMarker(rel, text, todayStr, tomorrowStr)
     if (isChapter && !r.hasSection) {
-      fail(`${rel} 缺少「事实来源」节——带外部易变事实的章节必须写来源与核实方式（插件专章见 plugin-project.md 模板第八节，发布专章见兄弟文件的同名节）。`)
+      fail(`${rel} 缺少「事实来源」节——带外部易变事实的章节必须写来源与核实方式（插件专章见 plugin-project.md 骨架的「事实来源（必填）」节，发布专章见兄弟文件的同名节）。`)
     }
     if (isChapter && r.count === 0) {
-      fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式与用法见 references/publish.md 的「专章的『事实来源』标记」一节）。`)
+      fail(`${rel} 缺少统一核对标记——在「事实来源」节末尾附一个（格式与用法见 references/publish.md 的『专章的「事实来源」标记』一节）。`)
     }
     // 「事实来源」不能只是一句套话：它必须写出**能照着做的查法**（来源链接，或
     // 去哪个文档的哪一节怎么核），否则「上次看到的值」过期时读的人无处可查。

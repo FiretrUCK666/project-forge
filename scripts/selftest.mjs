@@ -6,9 +6,8 @@
  * 「判定逻辑写错了」这类问题——因为静态检查看不出 survey 把 CMake 项目判成了纯文档目录。
  *
  * 这个脚本补上另一半：**造出能证伪每条判定的 fixture，实跑，断言结果**。
- * 它的价值已经被验证过三次：密钥门控失效、仓库边界误判、条件段落冻结，三个都是
- * 「静态检查全绿、实际行为错误」，而且都是靠手工造 fixture 才发现的。手工造一次就丢，
- * 下一个改动会把同样的错误再引入一遍。所以把它固化成常驻检查。
+ * 「静态检查全绿、实际行为错误」的判定缺陷只有实跑才能暴露，而手工造一次 fixture
+ * 就丢，下一个改动会把同样的错误再引入一遍。所以把它固化成常驻检查。
  *
  * 用法：node scripts/selftest.mjs
  * 退出码 0 = 全部通过；1 = 有失败。临时 fixture 用完即删。
@@ -384,7 +383,7 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
 
   const r1 = compose(dir)
   const untouched = readFileSync(join(dir, 'AGENTS.md'), 'utf8') === original
-  check(r1.status === 0, '默认运行不报错（曾以退出码 2 失败）', `退出码 ${r1.status}`)
+  check(r1.status === 0, '默认运行不报错', `退出码 ${r1.status}`)
   check(untouched, '默认运行不动手写文件')
   check(/缺少这些节/.test(r1.stdout), '输出了缺口报告')
   report(r1.status === 0 && untouched, '默认运行：不报错、不动文件、给出体检')

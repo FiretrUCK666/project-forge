@@ -61,9 +61,9 @@ function main() {
   const subjects = log.split('\n').map((l) => l.trim()).filter((l) => l !== '')
 
   // 对比链接：能解析出 GitHub 地址才给，给不出就只写区间（不编地址）。
-  // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：过去的正则用
-  // `[^/.]+` 取仓库名，把带点的名字截断（`acme/my.repo` → `acme/my`），于是起草出的
-  // 对比链接指向一个不存在的仓库——而它看起来完全正常，只有点开才发现。
+  // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：这里若另写一份取
+  // 仓库名的正则，`[^/.]+` 会把带点的名字截断（`acme/my.repo` → `acme/my`），起草出的
+  // 对比链接就指向一个不存在的仓库——而它看起来完全正常，只有点开才发现。
   let compare = `\`${range}\``
   const remote = git(['remote', 'get-url', 'origin'], cwd)
   const repo = remote === undefined ? undefined : parseGitHubRepo(remote)

@@ -14,7 +14,8 @@
  *   [待问] 机器判不了，需要问用户 → 问完用对应的 --no-* flag 把答案记下来再跑，
  *           不允许“没问就当不要”。flag 本身就是用户答复的机器载体。
  *
- * 退出码：0 = 无[缺]（[待问]须已用 flag 消掉）；1 = 有[缺]或用法错误。
+ * 退出码：0 = 无[缺]（默认模式有[待问]也退出 0，结论写明还有待问）；1 = 有[缺]；
+ *          2 = 用法错误、勘察失败，或 --strict 拦下[待问]。
  * 只读（会跑 check-badges 联网验徽章；没查完时如实报「未核对」，绝不读成通过）。
  */
 
@@ -67,10 +68,10 @@ function parseArgs(argv) {
 /**
  * 徽章检查的结论行（check-badges.mjs 输出）与退出码的对应关系。
  *
- * 判定**只认这一行与退出码**，不去嗅探人话。理由是一个实测过的假绿：子进程崩在
- * 未包裹的 `res.text()` 上（坏 gzip → `TypeError: terminated`），输出里一条结论字样
- * 都没有，而按文字嗅探的兜底恰好落在最宽松的「没问题」上——于是 review 报
- * 「[齐] 徽章全部可显示」。拿不到结论行、或结论行与退出码不一致，一律判「没查完」。
+ * 判定**只认这一行与退出码**，不去嗅探人话：子进程崩掉时（坏 gzip 在未包裹的
+ * `res.text()` 上抛 `TypeError: terminated`）输出里一条结论字样都没有，而按文字
+ * 嗅探分不清「没有结论」与「没问题」，猜错的方向就是把崩溃读成通过。拿不到结论行、
+ * 或结论行与退出码不一致，一律判「没查完」。
  */
 const BADGE_STATE_RE = /check-badges: state=(ok|bad|unverified|nobadge)\b/
 const BADGE_EXPECT_EXIT = { ok: 0, nobadge: 0, bad: 1, unverified: 3 }
@@ -173,8 +174,8 @@ function main(argv) {
     missing.push('AGENTS.md 缺失')
   } else {
     // 待填写的数法**只有一处实现**：survey 导出的 authorMarkers（整篇扫描）。
-    // 曾经 compose 与 review 各写一份——一个逐行、一个整篇，于是同一份文件在
-    // 多行标记下得到两个结论（compose 说「内容完整」，review 说「待填写 7 处」）。
+    // 若两处各写一份扫描（一个逐行、一个整篇），同一份文件在多行标记下会得到
+    // 两个互相矛盾的结论——所以数法必须共用这一份。
     const authors = authorMarkers(agents).length
     const kernel = agents.includes(KERNEL_START) && agents.includes(KERNEL_END)
     if (!kernel) {

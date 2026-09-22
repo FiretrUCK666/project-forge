@@ -31,6 +31,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { relative } from 'node:path'
 
 const START = '<!-- toc:start -->'
 const END = '<!-- toc:end -->'
@@ -331,7 +332,10 @@ async function main() {
   if (check && drifted > 0) {
     // 含空格或中文的路径必须加引号，否则给出的「修正命令」照抄就失败（实测过）。
     const quoted = files.map((f) => (/\s/.test(f) ? `"${f}"` : f)).join(' ')
-    process.stderr.write(`\n${drifted} 个文件的目录需要同步。修正：node scripts/sync-toc.mjs ${quoted}\n`)
+    // 提示里给脚本自己的路径：写死 scripts/ 时，脚本被放到别处（例如仓库的 tools/）后
+    // 这条"照抄即修复"的命令会直接失败，而它恰恰是给人复制的。
+    const selfRel = relative(process.cwd(), process.argv[1] ?? '') || 'sync-toc.mjs'
+    process.stderr.write(`\n${drifted} 个文件的目录需要同步。修正：node ${selfRel} ${quoted}\n`)
     return 1
   }
   return 0

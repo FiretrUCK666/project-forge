@@ -94,13 +94,13 @@
 
 ## 七、Bundle 层语义（最容易写错的一节，先读宿主当前实现再动手）
 
-补丁是按 `id` 寻址的修改单，不是完整树。生效树按层叠加，后层赢：各 bundle 按 profile 清单列表序加 profile 自身补丁加家目录级补丁加单次启动叠加加预设与遥测开关。根组合每次启动重建，真实组合完全由补丁层组成。
+补丁是按 `id` 寻址的修改单，不是完整树。生效树按层叠加，后层赢：各 bundle 按 profile 清单列表序，其上是 profile 自身补丁，再其上是家目录级补丁，然后是单次启动叠加（`--patch`），最后是遥测开关。根组合每次启动重建，真实组合完全由补丁层组成。
 
 三条硬约束：`config` 整单替换；`name` 失配只告警后跳过；补丁语法里**没有 `replace` / `ignore` 这类动词**——覆盖就是按 id 直接写键，写进去的键整值替换，没写的键保持原样。
 
 **别把第三条读成「没有替换语义」**：整值替换是真的（见第一条），第三条说的是**语法**——键直接写，不需要（也没有）动词来声明意图。
 
-覆盖已有行之前，先看目标组合当前行，把该行需要的键完整重述一遍。热更新边界按宿主当前实现确认：`live` 只监听 profile 自身补丁与家目录级补丁这两份文件，**bundle 级补丁与 `--patch` 覆盖层不在监听范围内**，改它们要重启。版本号一律现场取，不把插件的依赖范围当成宿主版本。
+覆盖已有行之前，先看目标组合当前行，把该行需要的键完整重述一遍。热更新边界按宿主当前实现确认：HMR（YAML 里启用的 `dsh-hmr`）监听 profile 清单、profile 自身补丁与家目录级补丁这几处，**bundle 级补丁与 `--patch` 覆盖层不在监听范围内**，单独改它们不触发重载。版本号一律现场取，不把插件的依赖范围当成宿主版本。
 
 ## 八、本地开发 workflow 与补丁目录（可选，有则按契约，无则不强求）
 
@@ -132,13 +132,13 @@
 
 **第七节至第九节的核对方法与证据**（版本号一律现场取，不把插件的依赖范围当成宿主版本）：
 
-- 层叠顺序与组合入口：宿主安装目录 `README.zh.md` 的 Profile 一节列出层序，`node_modules/@deepseek-ai/dsh-app-boot/lib/index.js` 里 profile 与补丁层的文档注释（该文件顶部介绍 profile 清单位置与图层关系处）说明「profile 的 patch 层在所有 bundle 层之后」，同文件的 `composeEntries` 是真正执行逐层组合的函数（按 `dsh.profile.bundles` 顺序取各 bundle 的补丁）。
+- 层叠顺序与组合入口：宿主安装目录 `README.zh.md` 的 Profile 一节列出层序，`node_modules/@deepseek-ai/dsh-app-boot/lib/index.js` 里 profile 与补丁层的文档注释（该文件顶部介绍 profile 清单位置与图层关系处）说明「profile 的 patch 层在所有 bundle 层之后」，同文件的 `composeEntries` 是执行逐层组合的函数，把载入 profile 时按 `dsh.profile.bundles` 顺序取好的各 bundle 补丁层逐层施加在空根上。
 - 三条硬约束：同一文件的补丁应用函数里，按 id 命中后对补丁携带的每个键做**顶层整值赋值**（所以 `config` 整单替换、没写的键保持原样），`name` 失配走告警后 `skipping`，顶层特殊键只有 `id` / `insert` / `name` 三个。
-- 热更新边界：`lib/profile-boot-*.js` 里 `patchReload === "live"` 成立时才装载 HMR，随后对 profile 补丁路径与家目录补丁路径各调用一次监听函数——因此监听范围就是这两份文件，bundle 级补丁与 `--patch` 覆盖层不在其中。
+- 热更新边界：宿主安装目录 `README.zh.md` 的 Profile 一节写明由 YAML 启用的 `dsh-hmr` 监视 profile manifest、profile 与 home 级补丁文件；`node_modules/@deepseek-ai/dsh-hmr/lib/index.js` 的 HMR 服务初始化里对 profile 补丁路径与家目录补丁路径各注册一次配置监听，再对 profile 目录的 `package.json` 注册一次——因此监听范围就是这三处，bundle 级补丁与 `--patch` 覆盖层不在其中。
 
 **核对版本（每次升级宿主后更新本行并重核第七节至第九节）**：
 
-<!-- dsh-verified: host=0.1.6-alpha.1 date=2026-09-16 -->
+<!-- dsh-verified: host=0.1.7-alpha.1 date=2026-09-22 -->
 
 上面一行是机器可读的核对标记，格式固定不要改。两个键的含义与纪律：
 

@@ -53,12 +53,24 @@ function main() {
   // 上一个标签：没有则取全量（上限 100 条，发布说明不是提交编年史）。
   const prev = git(['describe', '--tags', '--abbrev=0', `${tag}^`], cwd)
   const range = prev === undefined ? tag : `${prev}..${tag}`
-  const log = git(['log', '--format=%s', '--no-merges', '-n', '100', range], cwd)
-  if (log === undefined) {
+  // 取**完整提交信息**，不只取主题行。主题行一句话，按项目约定「一次实质变更一个
+  // 提交，主题说最主要的那件、其余进正文」——只读主题，等于把正文里写给使用者的
+  // 那一大半丢在门外，起草出来的页面只有一行标题。
+  // 用 \x1e 分条、\x1f 分字段：提交正文本身可以有多行，任何基于换行的分隔都会被
+  // 正文里的空行或缩进列表骗到。
+  const raw = git(['log', '--no-merges', '-n', '100', `--format=%s\x1f%b\x1e`, range], cwd)
+  if (raw === undefined) {
     process.stderr.write('错误：读取提交记录失败。\n')
     return 1
   }
-  const subjects = log.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+  const commits = raw
+    .split('\x1e')
+    .map((rec) => rec.replace(/^[\r\n]+/, ''))
+    .filter((rec) => rec.trim() !== '')
+    .map((rec) => {
+      const cut = rec.indexOf('\x1f')
+      return { subject: rec.slice(0, cut).trim(), body: rec.slice(cut + 1).trim() }
+    })
 
   // 对比链接：能解析出 GitHub 地址才给，给不出就只写区间（不编地址）。
   // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：这里若另写一份取
@@ -74,10 +86,21 @@ function main() {
   // 夹着内部编号或任务代号时，发版前由人把这些条目改写成使用者看得懂的说法再发
   // （判据见 references/remote-github.md 第六节——文档与实现只有一份说法）。
   const lines = [`## 这一版更新了什么、修复了什么`, '']
-  if (subjects.length === 0) lines.push('（该区间无提交记录）')
-  else for (const s of subjects) lines.push(`- ${s}`)
+  if (commits.length === 0) lines.push('（该区间无提交记录）')
+  else if (commits.length === 1) {
+    // 单个提交时它的正文就是这一版的说明——项目约定正文写给使用者，直接展开。
+    lines.push(`- ${commits[0].subject}`)
+    if (commits[0].body !== '') lines.push('', commits[0].body)
+  } else {
+    // 多条提交时正文逐条展开会长到没人读得下去，而这一版该讲什么也不等于「每条提交
+    // 各讲一段」。所以这里只列主题作索引，并**明说还需要人补一段总述**——让「只有
+    // 一行标题」的稿子冒充成品，比直接说它没写完坏得多。
+    for (const c of commits) lines.push(`- ${c.subject}`)
+    lines.push('', `（该区间有 ${commits.length} 条提交，上面只是提交主题。`
+      + '发版前请补一段面向使用者的总述，说清这一版更新了什么、影响谁、要不要动手。）')
+  }
   // 取数上限必须明示：超 100 条时老的提交静默丢失，不写就是“看起来全了”。
-  if (subjects.length >= 100) lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')
+  if (commits.length >= 100) lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')
   lines.push('', `**完整改动**：${compare}`, '')
   const target = outPath ?? `./${tag}-notes.md`
   try {
@@ -86,7 +109,7 @@ function main() {
     process.stderr.write(`错误：无法写入 ${target}——${error instanceof Error ? error.message : String(error)}\n`)
     return 1
   }
-  process.stdout.write(`已起草：${target}（${subjects.length} 条提交）\n`)
+  process.stdout.write(`已起草：${target}（${commits.length} 条提交）\n`)
   return 0
 }
 

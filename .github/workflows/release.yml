@@ -38,10 +38,14 @@ jobs:
       REPO: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
-      - name: 检出标签（含全历史，起草要读上一个标签）
+      - name: 检出（全历史；工具取自触发处，说明描述的是 TAG 那个标签）
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          # 取触发时的 ref 而不是标签：推标签时两者是同一个东西；而 workflow_dispatch
+          # 触发时，ref 是你点「运行」的那个分支——**工具用最新的，要补的那一版才有
+          # 可能被修好**。若固定检出标签，工具的修复永远补不回已发布的说明，而那一页
+          # 又恰恰只能靠补跑来改。历史取全量，所以按标签读提交记录照样完整。
+          ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: 起草正文（顺带确认标签存在，别把这一步挪到发送之后）

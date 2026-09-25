@@ -21,56 +21,89 @@ import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * 走目录时完全不进入的目录：它们装的是依赖、缓存或工具产物，**不可能是项目自己的源码**，
- * 因此既不参与体量统计，也不需要做凭据扫描。
- * 判据是「这个目录里的东西一定是外部获取或自动生成的」——拿不准的目录不要放这里。
- * 注意：这里不放 .git（版本控制元数据是另一回事），它由 walk() 单独跳过。
- */
-const SKIP_DIRS = new Set([
-  'node_modules', '.pnpm-store', '.yarn', 'bower_components',
-  '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
-  '.gradle', '.idea', '.vscode', '.cache', '.parcel-cache', '.turbo',
-  '.docusaurus', '_site', '.tox', '.coverage', '.next', '.nuxt', '.svelte-kit',
-])
-
-/**
- * 名字像产物、但**也可能藏着源码或配置**的目录。
+ * 走目录时的目录规则。**一份表，两种投影**——之前分成「走查跳过哪些」与「哪些应当被
+ * 忽略」两张清单，各自维护过一次，漂移出来的后果是两头都不落：`walk()` 整目录跳过的
+ * 名字进不了走查结果，而顶层补漏只按第二张清单筛，于是它既没被走查统计，也从没进过
+ * 「存在但未被忽略」的检查。
  *
- * 这类目录不能一概跳过：`bin/` 在 C++、Java 项目里是编译输出，在脚本项目里却常是源码
- * 目录，里面放个 `.env` 再正常不过；`vendor/` 在 PHP、Go 里是依赖，但里面也常常有被
- * 复制进来的凭据文件。把它们当作「产物目录」整体跳过，`bin/.env` 里的访问密钥
- * 就会零命中——而报告仍显示「无命中」。
+ * 每条两个字段，都必须写明：
+ *   - `walk`：`external` = 装的是依赖、缓存或工具产物，**不可能是项目自己的源码**，
+ *     走查整体跳过（体量与凭据都不参与）；`artifact` = 名字像产物，但**也可能藏着源码
+ *     或配置**——`bin/` 在 C++、Java 项目里是编译输出，在脚本项目里却常是源码目录，
+ *     `vendor/` 里也常有被复制进来的凭据文件。整体跳过会让 `bin/.env` 里的密钥零命中
+ *     而报告仍显示「无命中」，所以它们**统计体量时排除、凭据扫描照常进入**。
+ *   - `ignored`：这个目录「存在却没被忽略」时值不值得报一句。判据是「提交它几乎总是
+ *     意外的」——`bin/`、`release/` 这类名字在脚本项目里就是源码，提交它常常是有意的，
+ *     报出来是噪音；编辑器本地状态同理。
  *
- * 因此对它们采取折中：**统计体量时排除，做凭据扫描时进入**。体量统计错一点无关紧要，
- * 漏掉一个真凭据则是另一回事。
+ * 判据是「这个名字出现时，里面装的大概率不是项目自己的源码」——拿不准的不要放这里。
+ * `.git` 不在此表：版本控制元数据是另一回事，由 walk() 单独跳过。
  */
-const ARTIFACT_MAYBE_DIRS = new Set([
-  'dist', 'build', 'out', 'bin', 'obj', 'target', 'vendor', 'release', 'debug',
-])
-
-/** 判定「不该进版本库」时用到的目录名（是否真的被忽略由 git 判定，这里只做提示）。 */
-const OUTPUT_DIR_HINTS = [
-  'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'build',
-  'out', '.next', '.nuxt', 'vendor', 'coverage', '.gradle', '.cache', '.turbo',
+const DIR_RULES = [
+  { name: 'node_modules', walk: 'external', ignored: true },
+  { name: '.pnpm-store', walk: 'external', ignored: true },
+  { name: '.yarn', walk: 'external', ignored: true },
+  { name: 'bower_components', walk: 'external', ignored: true },
+  { name: '.venv', walk: 'external', ignored: true },
+  { name: 'venv', walk: 'external', ignored: true },
+  { name: '__pycache__', walk: 'external', ignored: true },
+  { name: '.mypy_cache', walk: 'external', ignored: true },
+  { name: '.pytest_cache', walk: 'external', ignored: true },
+  { name: '.ruff_cache', walk: 'external', ignored: true },
+  { name: '.tox', walk: 'external', ignored: true },
+  { name: '.gradle', walk: 'external', ignored: true },
+  { name: '.cache', walk: 'external', ignored: true },
+  { name: '.parcel-cache', walk: 'external', ignored: true },
+  { name: '.turbo', walk: 'external', ignored: true },
+  { name: '.docusaurus', walk: 'external', ignored: true },
+  { name: '.svelte-kit', walk: 'external', ignored: true },
+  { name: '_site', walk: 'external', ignored: true },
+  { name: '.next', walk: 'external', ignored: true },
+  { name: '.nuxt', walk: 'external', ignored: true },
+  { name: 'dist', walk: 'artifact', ignored: true },
+  { name: 'build', walk: 'artifact', ignored: true },
+  { name: 'out', walk: 'artifact', ignored: true },
+  { name: 'target', walk: 'artifact', ignored: true },
+  { name: 'coverage', walk: 'artifact', ignored: true },
+  { name: 'vendor', walk: 'artifact', ignored: true },
+  { name: 'bin', walk: 'artifact', ignored: false },
+  { name: 'obj', walk: 'artifact', ignored: false },
+  { name: 'release', walk: 'artifact', ignored: false },
+  { name: 'debug', walk: 'artifact', ignored: false },
+  { name: '.idea', walk: 'artifact', ignored: false },
+  { name: '.vscode', walk: 'artifact', ignored: false },
 ]
 
-/** 敏感文件的判定：按文件名/后缀的形状命中，不依赖具体项目。 */
+/** 走查整体跳过的目录名。 */
+const SKIP_DIRS = new Set(DIR_RULES.filter((d) => d.walk === 'external').map((d) => d.name))
+/** 体量统计排除、但凭据扫描要进入的目录名。 */
+const ARTIFACT_MAYBE_DIRS = new Set(DIR_RULES.filter((d) => d.walk === 'artifact').map((d) => d.name))
+/** 「存在却没被忽略」时值得报一句的目录名。全树任何深度都收候选，判定交给版本控制。 */
+const OUTPUT_DIR_HINTS = DIR_RULES.filter((d) => d.ignored).map((d) => d.name)
+
+/**
+ * 敏感文件按**名字形状**命中，分两档。
+ *
+ * `always` —— 名字本身就是凭据：`.env*` 装的是环境变量、私钥后缀装的是密钥，
+ * 不看内容也该看一眼。
+ * `confirm` —— 名字像，但同一个名字下绝大多数是正常配置：`.npmrc` 里通常只有一行
+ * `registry=`（几乎每个 JS 项目都有），`credentials` / `secrets` 也常是模板或空壳。
+ * 这一档要**内容里出现凭据形状**才报，复用 SECRET_CONTENT_PATTERNS。
+ *
+ * 两档都要：漏报一个真凭据是安全事故，而让 `.npmrc` 天天误报则会让使用者学会忽略
+ * 「敏感文件」这一整行——那才是真正的漏报。取值落在内容层，不落在文件名层。
+ */
 const SECRET_FILE_PATTERNS = [
-  /^\.env(\..+)?$/i,                       // .env / .env.local（.env.example 单独放行）
-  /\.(pem|key|p12|pfx|jks|keystore)$/i,
-  /^id_(rsa|dsa|ecdsa|ed25519)$/i,
-  /^(credentials|secrets?|\.netrc|\.npmrc|\.pypirc|\.git-credentials)$/i,
-  /\.(token|secret|credential)s?$/i,
-  /^service-account.*\.json$/i,
+  { re: /^\.env(\..+)?$/i, tier: 'always' },        // .env / .env.local
+  { re: /\.(pem|key|p12|pfx|jks|keystore)$/i, tier: 'always' },
+  { re: /^id_(rsa|dsa|ecdsa|ed25519)$/i, tier: 'always' },
+  { re: /^(credentials|secrets?)\b/i, tier: 'confirm' },
+  { re: /\.(npmrc|netrc|pypirc|git-credentials)$/i, tier: 'confirm' },
+  { re: /\.(token|secret|credential)s?\./i, tier: 'confirm' },
+  { re: /^service-account.*\.(json|ya?ml)$/i, tier: 'confirm' },
 ]
 
-/**
- * 这些同名文件是模板而非真凭据，不报为风险。
- *
- * 后缀是逐个列举的模板标记，**不按扩展名整类放行**：曾经在这里放行过 `*.md`，于是
- * 叫 `credentials.md` 或 `secrets.md` 的文件永远不会被报出来——而那恰恰是最该看一眼
- * 的文件名。宁可多报一个模板让人扫一眼，也不要漏报一个真凭据。
- */
+/** 这些同名文件是模板而非真凭据，不报为风险。 */
 const SECRET_FILE_ALLOWLIST = [
   /\.(example|sample|template|dist|tmpl|tpl)$/i,
   /^example[.-]/i,
@@ -119,8 +152,8 @@ const DOC_FILE_RE = /\.(md|markdown|rst|txt|adoc)$/i
  *   - 测试数据 → **不要改**，改了测试就失去意义；报出来只会制造噪音；
  *   - 文档示例 → 多数是正常的跨平台写法，提示一下即可。
  *
- * 曾经这三档混为一谈：一个项目在测试里写了 `cwd: '/home/me/deepseek'` 作为假数据，
- * 勘察报「本机私有路径」并建议「改成相对路径或环境变量」——照着做就把测试改坏了。
+ * 三档必须分开：测试里写的 `cwd: '/home/me/deepseek'` 是**假数据**，把它报成真泄漏
+ * 并建议「改成相对路径或环境变量」，照着做就把测试改坏了。
  */
 function classifyHomePath(rel, sample, realHomes) {
   const flat = (v) => v.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -188,8 +221,22 @@ const WORKFLOW_HEAD_LIMIT = 65536
 
 // ── 工具函数 ────────────────────────────────────────────────────────────────
 
+/** 版本控制的批量输出可能很大（受控文件清单、标签列表）。留足余量。 */
+const GIT_MAX_BUFFER = 16 * 1024 * 1024
+
+/**
+ * 路径归一化成正斜杠——**进出集合都过这一层，别各写各的**。
+ *
+ * git 的输入输出一律用正斜杠，本地 `join` 用平台分隔符。两边写法不同就配不上，
+ * 而症状恰好落在危险的那一侧：明明已被忽略的目录被报成「未被忽略」。归一化散在几个
+ * 调用点各写一遍时漏掉一处，判定就只在某个平台上错。
+ */
+export function posixPath(p) {
+  return String(p ?? '').replace(/\\/g, '/')
+}
+
 function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true })
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: GIT_MAX_BUFFER })
   if (r.error || r.status !== 0) return undefined
   return (r.stdout ?? '').trim()
 }
@@ -202,34 +249,39 @@ function run(cmd, args, cwd) {
  * 结果里消失——中文目录里的文件因此永远不被检查。
  * `-c core.quotepath=false` 让它按原样输出；`-z` 则进一步用 NUL 分隔，彻底避开转义与
  * 空格带来的解析歧义。
+ *
+ * 返回值已归一化成正斜杠。**取不到时返回 undefined**，调用方必须把它与「结果是空的」
+ * 区分开：前者是「没问出来」，后者是「问出来是没有」。
  */
 function runGitPaths(args, cwd) {
   const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args],
-    { cwd, encoding: 'utf8', windowsHide: true })
+    { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: GIT_MAX_BUFFER })
   if (r.error || r.status !== 0) return undefined
   const out = r.stdout ?? ''
   // 使用 -z 时按 NUL 切分；否则按换行。两者都过滤空项。
-  return out.includes('\0') ? out.split('\0').filter(Boolean) : out.split('\n').filter(Boolean)
+  const parts = out.includes('\0') ? out.split('\0') : out.split('\n')
+  return parts.filter(Boolean).map(posixPath)
 }
 
 /**
- * 一批路径里哪些被忽略规则覆盖。返回 Set（统一成 POSIX 分隔符）。
+ * 一批路径里哪些被忽略规则覆盖。返回 Set（正斜杠分隔）。
  *
  * **一次进程判定全部候选**（`check-ignore --stdin -z`）：逐个 spawn 的代价随候选数
- * 线性增长，那正是旧实现只敢探一层深的原因。`-z` 让路径按字节进出，含空格与中文的
- * 路径不会被引号化改写成另一个字符串。
- * 退出码 1 = 「一个都没忽略」，那是正常结果不是错误；取不到 git 也返回空集——
- * 调用方据此走「没有证据」的分支，不许当成「已忽略」。
+ * 线性增长。`-z` 让路径按字节进出，含空格与中文的路径不会被引号化改写成另一个字符串。
+ * 退出码 1 = 「一个都没忽略」，那是正常结果，返回空集。
+ *
+ * **取不到时返回 undefined**（不是工作区、命令不存在、输出超上限）。调用方据此走
+ * 「无法确认」的分支：把取不到当成「没被忽略」会凭空造出一条假的紧急警报。
  */
 function gitIgnoredSet(cwd, relPaths) {
-  const list = (relPaths ?? []).filter((p) => typeof p === 'string' && p !== '')
+  const list = (relPaths ?? []).map(posixPath).filter((p) => p !== '')
   if (list.length === 0) return new Set()
   const r = spawnSync('git', ['-c', 'core.quotepath=false', 'check-ignore', '-z', '--stdin'], {
     cwd, encoding: 'utf8', windowsHide: true,
-    input: `${list.join('\0')}\0`, maxBuffer: 16 * 1024 * 1024,
+    input: `${list.join('\0')}\0`, maxBuffer: GIT_MAX_BUFFER,
   })
-  if (r.error !== undefined || (r.status !== 0 && r.status !== 1)) return new Set()
-  return new Set(String(r.stdout ?? '').split('\0').filter(Boolean).map((p) => p.replace(/\\/g, '/')))
+  if (r.error !== undefined || (r.status !== 0 && r.status !== 1)) return undefined
+  return new Set(String(r.stdout ?? '').split('\0').filter(Boolean).map(posixPath))
 }
 
 function readText(p) {
@@ -244,10 +296,10 @@ function readText(p) {
 /**
  * 读 JSON：**结果形状只有两种**——对象或 `{ __corrupt: true }`。
  *
- * `JSON.parse` 合法的结果不止对象（`null`、数组、字符串、数字都是合法 JSON），
- * 而所有消费点都按对象用（`pkg.__corrupt`、`obs.minAppVersion`）。曾经有一个
- * package.json 内容为 `null` 就把整次勘察打断（`Cannot read properties of null`），
- * 于是「清单损坏」这种可预期的形态变成崩溃。这里一次归一，消费点就不必各写守卫。
+ * `JSON.parse` 合法的结果不止对象（`null`、数组、字符串、数字都是合法 JSON），而所有
+ * 消费点都按对象用（`pkg.__corrupt`、`obs.minAppVersion`）。一个内容为 `null` 的
+ * package.json 会把整次勘察打断，于是「清单损坏」这种**可预期**的形态变成崩溃。
+ * 这里一次归一，消费点就不必各写守卫。
  */
 function readJson(p) {
   const t = readText(p)
@@ -404,6 +456,12 @@ function skillFrontmatter(text) {
   return { name, ok: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) }
 }
 
+/** 能力目录的入口文件名（大小写两种写法都在用）。生态判定与本地盘点共用这一份。 */
+const SKILL_ENTRY_NAMES = ['SKILL.md', 'skill.md']
+
+/** 本地 skills 在仓库内的可提交位置。这三处是格式的一部分，不是某家的目录布局。 */
+const LOCAL_SKILL_BASES = ['.agents/skills', '.claude/skills', 'skills']
+
 // ── 目录走查（体量、风险） ──────────────────────────────────────────────────
 
 function walk(root) {
@@ -424,10 +482,13 @@ function walk(root) {
     textCandidates: [],
     contentScanTruncated: false,
     // 被排除在内容扫描之外的文件数，按原因分开数。
-    // 这些数字是必须的：四类排除（超体积、扩展名黑名单、读不出来、非 UTF-8）
-    // 过去都不出现在报告里，于是「0 命中」被读成「扫过了、很干净」——
-    // 实测一个 2.1MiB 的 .txt（只超上限 100 字节，里面是真令牌）就这样静默漏掉。
+    // 这些数字是必须的：每一类「没扫到」都不报出来时，「0 命中」会被读成
+    // 「扫过了、很干净」——一个只超上限 100 字节、里面是真令牌的 2.1MiB 文本
+    // 就这样静默漏掉。
     skippedLarge: 0,
+    // 超单文件上限的**路径**也要留着：敏感文件的两级判定用它区分「扫过没命中」与
+    // 「根本没扫」。只记数量的话，一个超限的 credentials.json 只能靠猜。
+    skippedLargePaths: new Set(),
     skippedByExtension: 0,
     // 产物目录候选（全树、任何深度），由 detectIgnores 一次批处理判定忽略与否。
     outputDirCandidates: [],
@@ -435,14 +496,14 @@ function walk(root) {
     //
     // 这个计数是必须的：递归有深度上限（防止符号链接环或病态嵌套把扫描拖死），但
     // **静默地不扫**是最坏的结果——报告里写着「递归、已排除依赖目录」，读起来像全扫过了。
-    // 实测过：30 层处的 `.env` 既不计数也不扫描，`truncated` 还是 false。
     depthLimited: 0,
     depthLimitedPaths: [],
     // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
     // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
     sourceScan: {
       byExtension: new Map(),        // 生态 → 首个命中的源码文件
-      byBuildFile: new Map(),        // 生态 → 首个命中的构建描述文件
+      byBuildFile: new Map(),        // 生态 → 首个命中的构建描述文件（强信号）
+      byBuildEntry: new Map(),       // 构建入口文件 → 路径（弱信号，不定生态）
       byNestedManifest: new Map(),   // 生态 → 子目录里的首个清单（monorepo 线索）
       nonDocSamples: [],             // 疑似「非文档」的文件（用于区分纯文档目录）
     },
@@ -482,10 +543,9 @@ function walk(root) {
         if (depth === 0 && isArtifactMaybe && !result.heavyDirs.includes(entry.name)) {
           result.heavyDirs.push(entry.name)
         }
-        // 产物目录候选：**全树任何深度**都收，不猜「只下沉一层」。
-        // 曾经只探到 depth=1（`packages/<名字恰为 dist>`），而标准 monorepo 布局是
-        // `packages/<包名>/dist`——实测 200 个未忽略的产物目录只报出 1 个，
-        // 也就是说它们会被下一次 `git add -A` 整个写进历史，而门禁一声不响。
+        // 产物目录候选：**全树任何深度**都收，不猜「只下沉一层」。标准 monorepo 布局是
+        // `packages/<包名>/dist`，只探到 depth=1 会漏掉它——漏掉的那些会被下一次
+        // `git add -A` 整个写进历史，而门禁一声不响。
         // 判据交给版本控制：候选全量收齐后，一次 `git check-ignore --stdin` 批处理。
         if (OUTPUT_DIR_HINTS.includes(entry.name.toLowerCase())) result.outputDirCandidates.push(rel)
         // 嵌套仓库：子目录里另有一个 .git
@@ -504,7 +564,10 @@ function walk(root) {
         result.bytes += size
         if (size >= LARGE_FILE_BYTES) result.largeFiles.push({ path: rel, bytes: size })
       }
-      if (isSecretFile(entry.name)) result.secretFiles.push(rel)
+      // 记下「文件名命中哪一档」。`confirm` 那一档要等内容扫描完才能定案，所以这里
+      // 只记账，不下结论——结论在 survey() 里把内容结果合进来时才算。
+      const tier = secretFileTier(entry.name)
+      if (tier !== undefined) result.secretFiles.push({ path: rel, tier })
       if (size > 0 && size <= CONTENT_SCAN_MAX_BYTES && !CONTENT_SCAN_SKIP.test(rel)) {
         if (result.textCandidates.length < CONTENT_SCAN_MAX_FILES) result.textCandidates.push(rel)
         else result.contentScanTruncated = true
@@ -512,6 +575,7 @@ function walk(root) {
         // 「没扫到」也是事实：超单文件上限的文件数要报出来，
         // 否则「0 命中」会被读成「扫过了、很干净」。
         result.skippedLarge += 1
+        result.skippedLargePaths.add(rel)
       } else if (size > 0 && CONTENT_SCAN_SKIP.test(rel)) {
         result.skippedByExtension += 1
       }
@@ -521,9 +585,19 @@ function walk(root) {
   return result
 }
 
-function isSecretFile(name) {
-  if (SECRET_FILE_ALLOWLIST.some((re) => re.test(name))) return false
-  return SECRET_FILE_PATTERNS.some((re) => re.test(name))
+/**
+ * 这个文件名命中哪一档敏感形状：模板一律放行；命中则返回 `always` 或 `confirm`，
+ * 都不命中返回 undefined。
+ *
+ * 消费方拿到的必须是一句明确的判定，不能是「匹配上了」——`confirm` 那一档还要看内容，
+ * 而内容是走查之后才读到的。
+ */
+function secretFileTier(name) {
+  if (SECRET_FILE_ALLOWLIST.some((re) => re.test(name))) return undefined
+  for (const { re, tier } of SECRET_FILE_PATTERNS) {
+    if (re.test(name)) return tier
+  }
+  return undefined
 }
 
 /** 文档类扩展名：它们不算「这个项目里有代码」的证据。 */
@@ -533,16 +607,15 @@ const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
  * README 及其语言变体：`README.md`、`README.en.md`、`README_CN.md`、`README.zh-CN.md`
  * 这几种写法都常见。
  *
- * **这一个正则同时管「收集文件」与「识别语言变体」**，不要再写第二个。
- * 曾经有两个：收集用的那个只认点分隔（`(\.[a-z]{2})?`），语言识别用的那个认点与下划线。
- * 于是 `README_CN.md` 根本进不了列表——语言识别的正则再宽松也没用，那个文件压根没被看到。
- * 两处规则表达同一件事时，先失效的永远是更窄的那个，而且失效得无声无息。
+ * **这一个正则同时管「收集文件」与「识别语言变体」**，不要再写第二个：两份规则表达
+ * 同一件事时，先失效的永远是更窄的那个，而且失效得无声无息——收集用的那一份只认点
+ * 分隔时，`README_CN.md` 连列表都进不去，语言识别写得再宽松也没用。
  */
 const README_RE = /^readme([._-][a-z]{2}(?:[._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i
 
 /**
  * README 文件名判据（含语言变体）——**全仓只此一份**：preflight 的「顶层未登记条目」
- * 豁免也用它。曾经两处各写一份，而两份规则表达同一件事时，先失效的永远是更窄的那个。
+ * 豁免也用它。同一条规则写两遍，漂移的那一处没人会在改动时想起。
  */
 export const README_NAME_RE = README_RE
 
@@ -564,13 +637,28 @@ function markdownH2(filePath) {
     .map((l) => l.trim())
 }
 
-/** 这个文件名是不是「默认语言」的 README（`README.md` 这类，没有语言后缀）。 */
+/**
+ * 这个文件名是不是「默认语言」的 README（`README.md` 这类，没有语言后缀）。
+ *
+ * 判据写成「是 README 且没有语言标记」，而不是再抄一份文件名正则——扩展名清单只留在
+ * `README_RE` 一处，改那一处就够。
+ */
 function isDefaultReadme(name) {
-  return /^readme\.(md|markdown|rst|txt|adoc)$/i.test(name)
+  return README_RE.test(name) && readmeLangOf(name) === undefined
 }
 
 /** 认了但不算「非文档内容」的杂项文件：每个项目都有，不构成形态证据。 */
 const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|changelog|changes|history|todo|\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmignore|\.dockerignore)(\..*)?$/i
+
+/**
+ * 纯配置文件：文档项目里配一个 CI 工作流、一个格式化配置再正常不过，它们**不说明
+ * 这个项目里有代码**。把它们算进「非文档内容」，一个纯文档目录会因此被判成
+ * unrecognized，白白多问用户一次「这是什么项目」。
+ *
+ * 只收「不可能是项目自己的产物」的类型；`data.json` 这类拿不准的不收——宁可多问一次，
+ * 也不能把一个认不出的代码项目说成纯文档目录。
+ */
+const CONFIG_FILE_RE = /\.(ya?ml|toml|ini|cfg|conf|properties|editorconfig)$|^\.(prettierrc|eslintrc|babelrc|browserslistrc|nvmrc|tool-versions|gitattributes|gitignore|dockerignore|npmignore|env)$/i
 
 /**
  * 从单个文件名收集「这是什么项目」的形状证据。
@@ -582,15 +670,24 @@ const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|chan
  */
 function collectSourceEvidence(scan, name, rel, depth) {
   const lower = name.toLowerCase()
+  // 强信号：这类构建描述文件指着某种语言，记下即定生态。认它之后不再往下走——
+  // 它已经说明「这是代码项目」，不该同时被当成一条泛泛的「非文档内容」。
   const build = BUILD_FILE_KINDS.find(([f]) => f === lower)
-  if (build !== undefined && !scan.byBuildFile.has(build[1])) {
-    scan.byBuildFile.set(build[1], rel)
+  if (build !== undefined) {
+    if (!scan.byBuildFile.has(build[1])) scan.byBuildFile.set(build[1], rel)
+    return
+  }
+  // 弱信号：只说明「这里有个构建入口」，不说明是什么语言（理由见 BUILD_ENTRY_FILES）。
+  // 记成事实供人复核，同样不构成「这个目录里有代码」的证据。
+  if (BUILD_ENTRY_FILES.includes(lower)) {
+    if (!scan.byBuildEntry.has(lower)) scan.byBuildEntry.set(lower, rel)
+    return
   }
   // 子目录里的清单：monorepo 的主要线索。根目录的清单由 detectEcosystem 直接处理，
   // 走不到这里也不需要走。
-  const manifest = NESTED_MANIFEST_KINDS.find(([f]) => f === lower)
-  if (manifest !== undefined && depth > 0 && !scan.byNestedManifest.has(manifest[1])) {
-    scan.byNestedManifest.set(manifest[1], rel)
+  const manifest = MANIFEST_KINDS.find((m) => m.file === lower)
+  if (manifest !== undefined && depth > 0 && !scan.byNestedManifest.has(manifest.ecosystem)) {
+    scan.byNestedManifest.set(manifest.ecosystem, rel)
   }
   for (const [re, kind] of SOURCE_EXT_KINDS) {
     if (re.test(name)) {
@@ -598,7 +695,7 @@ function collectSourceEvidence(scan, name, rel, depth) {
       return
     }
   }
-  if (DOC_EXT_RE.test(name) || MISC_FILE_RE.test(lower)) return
+  if (DOC_EXT_RE.test(name) || CONFIG_FILE_RE.test(name) || MISC_FILE_RE.test(lower)) return
   if (scan.nonDocSamples.length < 5) scan.nonDocSamples.push(rel)
 }
 
@@ -635,10 +732,16 @@ function readTextFromBuffer(buffer) {
   return buffer.toString('utf8').replace(/^\uFEFF/, '')
 }
 
-/** 对文本文件做内容级扫描：凭据形状 + 本机私有路径。 */
+/**
+ * 对文本文件做内容级扫描：凭据形状 + 本机私有路径。
+ *
+ * `shaped` 是「内容里出现过凭据形状的文件集合」，供敏感文件的第二级判定使用——只报出
+ * 了形状和行号的 `secrets` 不足以回答「某个 `.npmrc` 到底算不算凭据」。
+ */
 function scanContents(root, candidates, realHomes) {
   const secrets = []
   const homePaths = []
+  const shaped = new Set()
   const stats = { unreadable: 0, notUtf8: 0, utf16Decoded: 0 }
   for (const rel of candidates) {
     if (CONTENT_SCAN_SKIP.test(rel)) continue
@@ -663,6 +766,7 @@ function scanContents(root, candidates, realHomes) {
       // 行号从匹配位置数换行符得到，不重跑一遍全文。
       const line = text.slice(0, m.index).split('\n').length
       secrets.push({ path: rel, kind: label, line })
+      shaped.add(rel)
       break
     }
     for (const { re } of HOME_PATH_PATTERNS) {
@@ -675,7 +779,7 @@ function scanContents(root, candidates, realHomes) {
       break
     }
   }
-  return { secrets, homePaths, stats }
+  return { secrets, homePaths, shaped, stats }
 }
 
 /**
@@ -722,6 +826,24 @@ function listRoot(root) {
   }
 }
 
+/**
+ * 这个目录里有没有**属于该生态的**清单。
+ *
+ * 清单在不在还不够：表里带 `marker` 的那一项（Obsidian 的 `manifest.json`）要求清单正文
+ * 里出现那个字段，否则不算——普通 PWA 也有同名文件。这个判据被生态判定、可发布清单、
+ * 版本号、发布元数据共用：各判一次就已经漂移过一次，把 PWA 当成插件并告知它 id 形状
+ * 不合规。
+ */
+function hasManifestOf(root, root_, ecosystem) {
+  return MANIFEST_KINDS.some((m) => {
+    if (m.ecosystem !== ecosystem) return false
+    const real = root_.real(m.file)
+    if (real === undefined) return false
+    if (m.marker === undefined) return true
+    return m.marker.test(readText(join(root, real)) ?? '')
+  })
+}
+
 // ── 生态判定 ────────────────────────────────────────────────────────────────
 
 /**
@@ -752,37 +874,106 @@ const SOURCE_EXT_KINDS = [
   [/\.(pl|pm)$/i, 'perl'],
 ]
 
-/** 构建描述文件 → 生态。它们本身不是清单，但足以说明「这是代码项目，不是文档目录」。 */
+/**
+ * 构建描述文件 → 生态。**只收确实指着某种语言的那些**：它们本身就是那种语言的构建入口，
+ * 认出来是读到了声明，不是猜。
+ */
 const BUILD_FILE_KINDS = [
-  ['cmakelists.txt', 'cpp'], ['makefile', 'cpp'], ['meson.build', 'cpp'],
-  ['configure.ac', 'cpp'], ['sconstruct', 'cpp'],
-  ['dockerfile', 'shell'],
+  ['cmakelists.txt', 'cpp'],
+  ['meson.build', 'cpp'], ['configure.ac', 'cpp'],
+  // SCons 的构建脚本本身是 Python（官方用户指南：「SConstruct Files Are Python
+  // Scripts」），所以它指的是 Python，而不是「被它构建的那种语言」。
+  ['sconstruct', 'python'],
 ]
 
 /**
- * 清单文件名 → 生态。用于**子目录**里的清单。
+ * 构建入口文件，但**不据此定生态**。
  *
- * 这一条专治 monorepo：根目录只有一个 README，真正的清单在 packages、apps 这些子目录
- * 下面。只看根目录会得出「既没有清单、源码扩展名也匹配不上」的结论，落到 unrecognized，
- * 然后触发一次本可避免的追问。子目录里出现清单，是这个项目属于该生态的强证据。
+ * 判据是「这个文件只说明有人在这里构建，不说明是什么语言」。`Makefile` 在文档站里
+ * 极其常见（`make html`、`make serve`），`Dockerfile` 是打包方式而不是语言。
+ * 把它们映射到某个生态，代价是**不对称的**：能力矩阵里纯文档目录的发布列是「不做」，
+ * 而任一代码生态是「视声明而定」——一个带 Makefile 的文档站因此被推去配发布链路，
+ * 而它根本没有可分发制品。反过来，真实的 C/C++ 项目去掉这条路也认得出来：源码扩展名
+ * 判据会把它兜住（`.c` / `.cpp` / `.h` 都在表里）。所以降级是安全的。
+ *
+ * 它们也不构成「这个目录里有代码」的证据——理由同上，一个文档站同样有 Makefile。
+ * 只记成 `artifacts.buildEntryFiles` 这个事实，供读的人知道「该去读它自己确认」。
  */
-const NESTED_MANIFEST_KINDS = [
-  ['package.json', 'node'],
-  ['pyproject.toml', 'python'], ['setup.py', 'python'], ['requirements.txt', 'python'],
-  ['cargo.toml', 'rust'],
-  ['go.mod', 'go'],
-  ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
-  ['gemfile', 'ruby'],
-  ['composer.json', 'php'],
-  ['pubspec.yaml', 'dart'],
+const BUILD_ENTRY_FILES = ['makefile', 'dockerfile']
+
+/**
+ * 清单文件表——**全仓唯一一份**。生态判定、monorepo 识别、可发布清单、声明版本号、
+ * 运行环境下限、逐生态发布元数据都从这张表派生。
+ *
+ * 各写一份时的漂移是**静默**的：少一行的后果是「读不到」，不是「报错」。所以一个生态
+ * 要在这里补齐下列全部字段，新增生态的成本才是「加一行」而不是「改五处」：
+ *
+ *   - `file`   文件名（小写，比对时统一小写；文档一律用磁盘上的真实名）；
+ *   - `ecosystem` 这份清单说明项目属于哪个生态；
+ *   - `kind`    判定结果里用的名字。默认与 `ecosystem` 相同；两者不同的只有一种情况——
+ *     某个生态同时是「插件类」的一种，判定结果要带 `-plugin` 后缀而生态名不带；
+ *   - `publishable` 这份清单是否声明了「我是可对外分发的这个包」（发布链路的入口）。
+ *   - `version` 声明版本号的字段。没写 = **不读**，不是「这个生态没有版本号」；
+ *   - `requires` 声明运行环境下限的字段与对应运行时。没写 = 不读；
+ *   - `marker` 该清单必须出现的内容特征。普通 PWA 也有 `manifest.json`，所以那一项要
+ *     额外要求正文里出现插件才用的字段。
+ *
+ * 表里**每一项都是子目录线索**：根目录只有一个 README、真正的清单在 `packages/`
+ * 下面很常见，只看根目录会落到 unrecognized。根目录的那一份由生态判定直接读，
+ * 不必也不该走这条路径，所以「出现在子目录」这一层由走查的层级判断，不在表里再开
+ * 一列——开一列就得有人逐行决定，而这里的答案对每一行都一样。
+ *
+ * JSON 清单里结构化的字段（`package.json` 的 `engines`）不走这里的正则：那是解析对象，
+ * 不是文本搜索，写成同一张表反而会让人以为两者等价。
+ *
+ * JSON 清单里结构化的字段（`package.json` 的 `engines`）不走这里的正则：那是解析对象，
+ * 不是文本搜索，写成同一张表反而会让人以为两者等价。
+ */
+const MANIFEST_KINDS = [
+  { file: 'package.json', ecosystem: 'node', publishable: true,
+    version: { re: /"version"\s*:\s*"([^"]+)"/, field: 'version' } },
+  { file: 'pyproject.toml', ecosystem: 'python', publishable: true,
+    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version' },
+    requires: { re: /^\s*requires-python\s*=\s*["']([^"']+)["']/m, field: 'requires-python', runtime: 'python' } },
+  { file: 'setup.py', ecosystem: 'python', publishable: true },
+  { file: 'setup.cfg', ecosystem: 'python', publishable: true },
+  { file: 'requirements.txt', ecosystem: 'python' },
+  { file: 'pipfile', ecosystem: 'python' },
+  { file: 'cargo.toml', ecosystem: 'rust', publishable: true,
+    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version' },
+    requires: { re: /^\s*rust-version\s*=\s*["']([^"']+)["']/m, field: 'rust-version', runtime: 'rust' } },
+  { file: 'go.mod', ecosystem: 'go', publishable: true,
+    // Go 的版本不在清单里（靠标签声明），所以只读 `go` 指令给出的语言下限。
+    requires: { re: /^go\s+(\S+)/m, field: 'go 指令', runtime: 'go' } },
+  { file: 'pom.xml', ecosystem: 'java', publishable: true },
+  { file: 'build.gradle', ecosystem: 'java', publishable: true },
+  { file: 'build.gradle.kts', ecosystem: 'java', publishable: true },
+  { file: 'gemfile', ecosystem: 'ruby', publishable: true },
+  { file: 'composer.json', ecosystem: 'php', publishable: true,
+    version: { re: /"version"\s*:\s*"([^"]+)"/, field: 'version' } },
+  { file: 'pubspec.yaml', ecosystem: 'dart', publishable: true },
+  { file: 'mix.exs', ecosystem: 'elixir', publishable: true },
+  { file: 'project.clj', ecosystem: 'clojure' },
+  { file: 'package.swift', ecosystem: 'swift', publishable: true },
+  { file: 'cpanfile', ecosystem: 'perl' },
+  { file: 'manifest.json', ecosystem: 'obsidian', kind: 'obsidian-plugin', publishable: true,
+    version: { re: /"version"\s*:\s*"([^"]+)"/, field: 'version' },
+    requires: { re: /"minAppVersion"\s*:\s*"([^"]+)"/, field: 'minAppVersion', runtime: 'obsidian' },
+    // 同名文件是 PWA 的，不算插件——判据是下面那个字段，不是文件在不在。
+    marker: /minAppVersion/ },
 ]
+
+/** 判定结果里用的名字：表里没单独声明 `kind` 时就是生态名。 */
+function manifestKind(m) {
+  return m.kind ?? m.ecosystem
+}
 
 function detectEcosystem(root, root_, walked) {
   const evidence = []
   const kinds = []
   const pkg = readJson(join(root, root_.real('package.json') ?? 'package.json'))
   const cordisPatch = root_.first(['cordis.patch.yml', 'cordis.patch.yaml', 'cordis.yml'])
-  const skillFile = root_.first(['SKILL.md', 'skill.md'])
+  const skillFile = root_.first(SKILL_ENTRY_NAMES)
   const skillText = skillFile === undefined ? undefined : readText(join(root, skillFile))
   const skill = skillFrontmatter(skillText)
 
@@ -810,34 +1001,22 @@ function detectEcosystem(root, root_, walked) {
     if (cordisPatch !== undefined) { evidence.push(cordisPatch); kinds.push('dsh-plugin') }
     if (skill !== undefined) { evidence.push(`SKILL.md（name: ${skill.name}）`); kinds.push('skill') }
   }
-  // Obsidian 插件：独立的 `manifest.json`，判据是 `minAppVersion`（只有它用这个字段）。
-  // 注意与 VS Code 的区别——同样是插件，清单文件完全不同，这正是需要专章的理由。
-  if (kinds.length === 0 || !kinds.includes('vscode-extension')) {
-    const obsManifest = root_.real('manifest.json')
-    if (obsManifest !== undefined) {
-      const obs = readJson(join(root, obsManifest))
-      if (obs !== undefined && obs.minAppVersion !== undefined) {
-        evidence.push('manifest.json 的 minAppVersion')
-        kinds.push('obsidian-plugin')
-      }
-    }
+  // 清单表：先判 `package.json`（它还要看清单内部的字段），其余按表扫。
+  // 表里带 `marker` 的那一项（Obsidian 的 manifest.json）要求清单正文里出现那个字段，
+  // 否则不算命中——普通 PWA 也有同名文件。
+  for (const m of MANIFEST_KINDS) {
+    if (m.ecosystem === 'node') continue
+    const real = root_.real(m.file)
+    if (real === undefined) continue
+    if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
+    evidence.push(real)
+    kinds.push(manifestKind(m))
   }
+  // skill 入口与 JS 清单互不依赖：两个都在时上面已经各推过一次，这里补齐「有清单
+  // 但没有 skill 分支」的那一种。
   if (skill !== undefined && !kinds.includes('skill')) {
     evidence.push(`SKILL.md（name: ${skill.name}）`)
     kinds.push('skill')
-  }
-  for (const [file, kind] of [
-    ['pyproject.toml', 'python'], ['setup.py', 'python'], ['setup.cfg', 'python'],
-    ['requirements.txt', 'python'], ['pipfile', 'python'],
-    ['cargo.toml', 'rust'],
-    ['go.mod', 'go'],
-    ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
-    ['gemfile', 'ruby'], ['composer.json', 'php'],
-    ['pubspec.yaml', 'dart'], ['mix.exs', 'elixir'], ['project.clj', 'clojure'],
-    ['package.swift', 'swift'], ['cpanfile', 'perl'],
-  ]) {
-    const real = root_.real(file)
-    if (real !== undefined) { evidence.push(real); kinds.push(kind) }
   }
   for (const name of root_.filesIn('', /\.(csproj|fsproj|vbproj|sln)$/i)) {
     evidence.push(name); kinds.push('dotnet'); break
@@ -874,12 +1053,15 @@ function detectEcosystem(root, root_, walked) {
   // 仍然什么都没认出来，才按目录性质区分。
   const unique = [...new Set(kinds)]
   if (unique.length === 0) {
-    const hasMarkdown = root_.first(['README.md', 'README.rst', 'README.txt']) !== undefined
+    // 「有没有 README」用 README_RE 判，与 detectDocs 同一个来源。这里曾另写一份
+    // 最窄的名字清单，于是只有 `README_CN.md` 的文档目录被判成 unknown——而同一份
+    // 报告的 docs.readme 又正确列出了它，同一件事判出两个答案。
+    const readmes = root_.filesIn('', README_RE)
     // 判据是「除文档外还有没有别的东西」。**只看源码与构建描述文件**，不要把
-    // LICENSE、.gitignore 这类每个项目都有的文件算成「别的东西」——那会把正常的
-    // 纯文档目录误报成 unrecognized，反过来触发一次无谓的追问。
+    // LICENSE、.gitignore、CI 配置这类每个项目都有的文件算成「别的东西」——那会把
+    // 正常的纯文档目录误报成 unrecognized，反过来触发一次无谓的追问。
     const nonDoc = walked?.sourceScan?.nonDocSamples ?? []
-    if (hasMarkdown && nonDoc.length === 0) {
+    if (readmes.length > 0 && nonDoc.length === 0) {
       unique.push('docs-only')
       evidence.push('仅见 Markdown 文档')
     } else if (nonDoc.length > 0) {
@@ -891,25 +1073,29 @@ function detectEcosystem(root, root_, walked) {
 }
 
 /**
- * 清单文件 → 它是不是「可发布的清单」（即声明了这个项目的身份与版本，能对外发）。
+ * 清单表里标了 `publishable` 的那些：声明了「我是可对外分发的这个包」，也就是
+ * 发布链路的入口。
  *
- * 这份表存在的理由是一个真实缺陷：判断「这个项目能不能发布」时只认 `package.json`，
- * 于是**任何非 JS 项目一律被判成不可发布**，生成的契约里整块丢掉版本号语义、抬版本号
- * 判据、发版规则、角色判定——而 SKILL.md 的能力矩阵明写「python / rust / go：
- * 发布视声明而定」。读这张表就不会把「我没解析那种清单」误当成「它不能发布」。
+ * 判据不能只认 `package.json`——那会让**任何非 JS 项目一律被判成不可发布**，生成的
+ * 契约里整块丢掉版本号语义、抬版本号判据、发版规则、角色判定，而能力矩阵明写
+ * 「python / rust / go：发布视声明而定」。读这张表就不会把「我没解析那种清单」误当成
+ * 「它不能发布」。带 `marker` 的那一项还要求清单正文里出现那个字段。
  */
-const PUBLISHABLE_MANIFESTS = [
-  ['package.json', 'node'],
-  ['pyproject.toml', 'python'], ['setup.py', 'python'], ['setup.cfg', 'python'],
-  ['cargo.toml', 'rust'],
-  ['go.mod', 'go'],
-  ['pom.xml', 'java'], ['build.gradle', 'java'], ['build.gradle.kts', 'java'],
-  ['gemfile', 'ruby'], ['composer.json', 'php'],
-  ['pubspec.yaml', 'dart'], ['mix.exs', 'elixir'], ['package.swift', 'swift'],
-  // Obsidian 插件的 manifest.json：只认含 minAppVersion 的那一种，
-  // 普通 PWA 的 manifest.json 在此同样被跳过（见下循环内的守卫）。
-  ['manifest.json', 'obsidian'],
-]
+const PUBLISHABLE_MANIFESTS = MANIFEST_KINDS.filter((m) => m.publishable)
+
+/** 一条命令的键。正向清单——用「是哪些」而不是「不是哪些」，新增键不会被误当成命令。 */
+const COMMAND_KEYS = ['install', 'build', 'typecheck', 'lint', 'test', 'verify', 'smoke']
+
+/**
+ * 能搬进扁平视图的键。`packageManager` 在列：它是命令的前缀（`pnpm install` 而不是
+ * `npm install`），单独看不是命令，但调用方需要知道项目指定了哪个。
+ */
+const FLAT_KEYS = new Set([...COMMAND_KEYS, 'packageManager'])
+
+/** 描述「某条命令从哪来」的键（`note` / 以 `Note` 结尾）：不是命令本身。 */
+function isNoteKey(key) {
+  return key === 'note' || key.endsWith('Note')
+}
 
 /**
  * 从清单文件推导「怎么构建/测试/校验」。取不到就留空，不编造。
@@ -918,9 +1104,9 @@ const PUBLISHABLE_MANIFESTS = [
  * `byEcosystem`（按生态分开）。两者都给是因为用途不同：
  *   - 只想跑一条命令时用扁平字段，方便；
  *   - 要把它**写进文档**时必须用 byEcosystem——多生态项目里扁平字段会让后算的生态
- *     覆盖先算的（实测 node + python 的项目里，项目自己的 `vitest run` 被
- *     `python -m pytest` 顶掉，而这条错误命令会被原样渲染进 AGENTS.md）。
- * 覆盖是静默的，所以调用方必须能看出「这个值属于哪个生态」。
+ *     覆盖先算的：node + python 的项目里，项目自己的 `vitest run` 会被
+ *     `python -m pytest` 顶掉，而这条错误命令会被原样渲染进 AGENTS.md。
+ *     覆盖是静默的，所以调用方必须能看出「这个值属于哪个生态」。
  */
 function deriveCommands(root, root_, eco) {
   const out = {}
@@ -949,8 +1135,8 @@ function deriveCommands(root, root_, eco) {
       if (hit !== undefined) node[key] = `${pm} run ${hit}`
     }
     // 装依赖永远是包管理器自己的命令：`scripts.install` 是项目自定义的安装钩子，
-    // 不是「怎么装依赖」。曾经把它列进上面的别名表，结果被这一行无条件覆盖——
-    // 一条永远不生效的分支，且读代码的人会以为它生效。
+    // 不是「怎么装依赖」，所以它不进上面那张别名表——放进去会被这一行无条件覆盖，
+    // 留下一条永远不生效、而读代码的人会以为生效的分支。
     node.install = `${pm} install`
     byEcosystem.node = node
   }
@@ -961,17 +1147,14 @@ function deriveCommands(root, root_, eco) {
     const py = pyName === undefined ? '' : (readText(join(root, pyName)) ?? '')
     // **声明**优先：只有项目自己声明了测试框架，才给出对应的测试命令。
     //
-    // 这里曾经只要「有 tests 目录」就给出 `python -m pytest`——那是**按生态惯例推断**，
-    // 不是读项目声明。实测一个用标准库 unittest 的项目（装了 pytest 也跑不起来）
-    // 拿到一条跑不通的「硬门禁」命令，而且它把 P7 的诚实分支遮住了：SKILL.md 说
-    // 「推不出命令时要如实说明没有验证过」，但脚本总能推出一条假命令，那个分支永不触发。
+    // **只给项目自己声明过的测试框架**。按生态惯例推断出来的命令（看到 `tests/`
+    // 就给 pytest）会同时造成两件事：给出一个这个项目根本跑不通的「硬门禁」，以及
+    // 让 P7 的「没有门禁命令」分支永不触发——脚本总能推出一条假命令，那条诚实信号
+    // 就没有机会出现。
     const declaresPytest = /\[tool\.pytest/.test(py) || root_.has('pytest.ini') || root_.has('tox.ini')
     const declaresUnittest = /\[tool\.unittest/.test(py)
       || (/unittest/.test(readText(join(root, 'setup.cfg')) ?? '') && root_.has('setup.cfg'))
-    // **注明出处**：这条是按「有测试目录 + 无框架声明」推断的，不是项目声明的。
-    // 写进文档时必须带着这个说明——否则它看起来和项目自己声明的命令一样可靠，
-    // 而实测过：一个用标准库 unittest 的项目，曾经的推断会给出一条跑不通的 pytest
-    // 命令，还被当成「硬门禁」写进契约。
+    // 推断出来的命令一律带出处说明：否则它看起来和项目声明的命令一样可靠。
     if (declaresPytest) python.test = 'python -m pytest'
     else if (declaresUnittest) python.test = 'python -m unittest discover -s tests -v'
     else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
@@ -1011,20 +1194,27 @@ function deriveCommands(root, root_, eco) {
 
   // 扁平视图：按「声明强度」排序取先到者。
   // 有清单的生态排在前面——它的命令是项目自己声明的，比按惯例推断的可信。
+  //
+  // **只搬命令键与说明键**。搬全部键会让 `{ note: '该生态的命令推导尚未实现' }` 变成
+  // 扁平视图里的一条 `note`，而消费方按「有没有字符串键」判断「本项目有没有命令」——
+  // 那种项目于是永远拿不到「未推导出任何命令」这个信号（它正是 P7 要求如实汇报
+  // 「没有验证过」的依据）。
   const order = ['node', 'python', 'rust', 'go']
   const keys = [...order.filter((k) => k in byEcosystem),
     ...Object.keys(byEcosystem).filter((k) => !order.includes(k))]
   for (const kind of keys) {
     for (const [k, v] of Object.entries(byEcosystem[kind])) {
-      if (!(k in out)) out[k] = v
+      if (FLAT_KEYS.has(k) || isNoteKey(k)) {
+        if (!(k in out)) out[k] = v
+      }
     }
   }
   // 「多生态」只在**真的有多套命令**时才算。
   //
   // 判据是「有几个生态产出了命令」，不是「命中几个生态标签」：`dsh-plugin` 是 node 的
   // 一种**细化**（它就是一个 node 项目），`skill` 是描述，它们不会带来第二套命令。
-  // 把它们算进去会误报——实测一个 pnpm 插件项目会收到「每类命令只保留了一个」的警告，
-  // 而它其实只有一套命令；收到这种警告的 AI 会去找不存在的第二套命令。
+  // 把它们算进去，一个只有一套命令的插件项目会收到「每类命令只保留了一个」的警告，
+  // 收到这种警告的 AI 会去找并不存在的第二套命令。
   const commandKinds = Object.keys(byEcosystem)
   if (commandKinds.length > 1) {
     out.byEcosystem = byEcosystem
@@ -1046,44 +1236,46 @@ function deriveCommands(root, root_, eco) {
  * 套装要求「环境要求那一节必须写具体版本号、不许编造」——而项目自己声明的那个数字就是
  * 唯一权威来源。读不到就是**没有声明**，此时宁可不写那一节，也不要编一个数字。
  */
-function detectArtifacts(root, root_, eco) {
+function detectArtifacts(root, root_, eco, walked) {
   const facts = {
     publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [],
     runtimeRequirements: [], publishableManifest: undefined, declaredVersion: undefined,
   }
 
-  // 项目声明的版本号。它是标签命名与「抬版本号」判据的唯一权威来源——
-  // 读不到就是**没有声明**，此时不能编一个（那会造出一个没人维护、却看起来权威的数字）。
-  // 各生态的字段名不同，所以只在清单里找那个字段，不解释语义。
-  const readVersion = (fileName, re, label) => {
-    if (facts.declaredVersion !== undefined) return
-    const real = root_.real(fileName)
-    if (real === undefined) return
-    const m = re.exec(readText(join(root, real)) ?? '')
-    if (m === null) return
-    facts.declaredVersion = m[1]
-    facts.declaredVersionIn = label
+  // 声明版本号与运行下限：都从清单表派生。标签命名与「抬版本号」判据的唯一权威来源
+  // 是项目自己声明的那个数字——读不到就是**没有声明**，此时不能编一个（那会造出一个
+  // 没人维护、却看起来权威的数字）。标签一律用磁盘上的真实文件名，不写死大小写。
+  for (const m of MANIFEST_KINDS) {
+    if (m.version === undefined && m.requires === undefined) continue
+    const real = root_.real(m.file)
+    if (real === undefined) continue
+    if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
+    const text = readText(join(root, real)) ?? ''
+    if (m.version !== undefined && facts.declaredVersion === undefined) {
+      const hit = m.version.re.exec(text)
+      if (hit !== null) {
+        facts.declaredVersion = hit[1]
+        facts.declaredVersionIn = `${real} 的 ${m.version.field}`
+      }
+    }
+    if (m.requires !== undefined) {
+      const hit = m.requires.re.exec(text)
+      if (hit !== null) {
+        facts.runtimeRequirements.push({
+          declaredIn: `${real} 的 ${m.requires.field}`, runtime: m.requires.runtime, range: hit[1],
+        })
+      }
+    }
   }
-  readVersion('package.json', /"version"\s*:\s*"([^"]+)"/, 'package.json 的 version')
-  readVersion('pyproject.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'pyproject.toml 的 version')
-  readVersion('cargo.toml', /^\s*version\s*=\s*["']([^"']+)["']/m, 'Cargo.toml 的 version')
-  readVersion('composer.json', /"version"\s*:\s*"([^"]+)"/, 'composer.json 的 version')
-  // Obsidian：只读含 minAppVersion 的 manifest.json，不认 PWA 的同名文件。
-  if (/minAppVersion/.test(readText(join(root, root_.real('manifest.json') ?? 'manifest.json')) ?? '')) {
-    readVersion('manifest.json', /"version"\s*:\s*"([^"]+)"/, 'manifest.json 的 version')
-  }
-  // Go 没有版本号字段（靠标签），故不读——读不到就是「没有声明」，这是正确结果。
+  // Go 的版本不在清单里（靠标签声明），所以表里只给它 `go` 指令那一项。
 
   // 可发布清单：按知名度顺序取第一个存在的。它不一定与「主生态」相同（一个 Python 项目
   // 也可能因为某个原因带 package.json），所以单独判定，不从 kinds 推。
-  // manifest.json 同样守卫 minAppVersion，避免 PWA 被当成可发布插件。
-  for (const [file, kind] of PUBLISHABLE_MANIFESTS) {
-    const real = root_.real(file)
+  for (const m of PUBLISHABLE_MANIFESTS) {
+    const real = root_.real(m.file)
     if (real === undefined) continue
-    if (file === 'manifest.json') {
-      if (!/minAppVersion/.test(readText(join(root, real)) ?? '')) continue
-    }
-    facts.publishableManifest = { file: real, ecosystem: kind }
+    if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
+    facts.publishableManifest = { file: real, ecosystem: m.ecosystem }
     break
   }
 
@@ -1098,114 +1290,124 @@ function detectArtifacts(root, root_, eco) {
     if (typeof pkg.engines === 'object' && pkg.engines !== null) {
       for (const [runtime, range] of Object.entries(pkg.engines)) {
         facts.runtimeRequirements.push({
-          declaredIn: 'package.json 的 engines', runtime, range: String(range),
+          declaredIn: `${root_.real('package.json') ?? 'package.json'} 的 engines`,
+          runtime, range: String(range),
         })
       }
     }
   }
-  // 其他生态的下限声明：写法各不相同，所以只在清单里逐行找那个字段，把「运行时 + 约束」
-  // 作为事实带出来，**不解释具体语法**（那属于各生态自己的事）。
-  const readRange = (fileName, re, runtime, label) => {
-    const real = root_.real(fileName)
-    if (real === undefined) return
-    const m = re.exec(readText(join(root, real)) ?? '')
-    if (m === null) return
-    facts.runtimeRequirements.push({ declaredIn: label, runtime, range: m[1] })
-  }
-  readRange('pyproject.toml', /^\s*requires-python\s*=\s*["']([^"']+)["']/m, 'python', 'pyproject.toml 的 requires-python')
-  readRange('cargo.toml', /^\s*rust-version\s*=\s*["']([^"']+)["']/m, 'rust', 'Cargo.toml 的 rust-version')
-  readRange('go.mod', /^go\s+(\S+)/m, 'go', 'go.mod 的 go 指令')
-  readRange('manifest.json', /"minAppVersion"\s*:\s*"([^"]+)"/, 'obsidian', 'manifest.json 的 minAppVersion')
-  // JS 的 engines 已在上面按对象读取，这里不再重复。
+  // JS 的 engines 走对象解析，不在清单表的文本正则里——其余生态的下限一律由上表的
+  // `requires` 给出，只带出「运行时 + 约束」，**不解释具体语法**（那属于各生态自己的事）。
 
   for (const d of ['dist', 'lib', 'build', 'out']) {
     const e = root_.entry(d)
     if (e?.isDir === true) facts.distDirsPresent.push(e.name)
   }
-  // Obsidian 发布三件套 presence：
-  //   - manifest 恒有（能走到这里说明 manifest.json 已被守卫过 minAppVersion）；
-  //   - mainJs/stylesCss 只看根目录有无：官方模板的忽略规则要求 main.js 不进版本库、
-  //     只进发布附件，所以“根目录无 main.js”是正常态，不是缺陷——review 只在
-  //     release 附件语境下问它，不在这里下结论；
-  //   - mainJsIgnored 告诉上层“无 main.js 是有意的忽略还是真的没构建”；
-  //   - hasVersionsJson 回退映射有无（旧宿主用户靠它）；
-  //   - manifestId 合法性只做文本形状判断（小写字母与连字符、不含 obsidian、
-  //     不以 plugin 结尾），供人复核，不做硬结论。
-  if (root_.real('manifest.json') !== undefined) {
-    const manifestText = readText(join(root, root_.real('manifest.json'))) ?? ''
-    const manifestId = (/"id"\s*:\s*"([^"]+)"/.exec(manifestText) ?? [])[1]
-    let mainJsIgnored = undefined
-    try {
-      const gi = readText(join(root, root_.real('.gitignore') ?? '.gitignore'))
-      if (gi !== undefined) {
-        mainJsIgnored = gi.split(/\r?\n/).some((l) => {
-          const t = l.trim()
-          return t !== '' && !t.startsWith('#') && /(^|\/)main\.js$/.test(t)
-        })
-      }
-    } catch { /* 读不到就不判 */ }
-    facts.obsidianArtifacts = {
-      manifest: true,
-      mainJs: root_.has('main.js'),
-      stylesCss: root_.has('styles.css'),
-      hasVersionsJson: root_.has('versions.json'),
-      mainJsIgnored,
-      manifestId,
-      manifestIdShapeOk: manifestId === undefined ? undefined
-        : /^[a-z-]+$/.test(manifestId)
-        && !manifestId.includes('obsidian')
-        && !manifestId.endsWith('plugin'),
-    }
-  }
-  // Rust：publish=false 即声明不可发布（复用 private 机器）；license/description 有无进 facts。
-  // 只做文本 presence 判断，不解释 Cargo 语义。
-  // 另收 keywords/categories 数量（各至多 5 个，超了服务端拒绝）与 dependents 风险位：
-  // edition 缺省 2015 可发布（不是必填），authors 已废弃不判。
-  const cargoReal = root_.real('cargo.toml')
-  if (cargoReal !== undefined) {
-    const cargo = readText(join(root, cargoReal)) ?? ''
-    if (/^\s*publish\s*=\s*false/m.test(cargo)) facts.private = true
-    const countList = (key) => {
-      const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(cargo)
-      if (m === null) return undefined
-      return m[1].split(',').map((s) => s.trim()).filter(Boolean).length
-    }
-    facts.cargoMeta = {
-      license: /^\s*license\s*=/m.test(cargo),
-      description: /^\s*description\s*=/m.test(cargo),
-      keywordsCount: countList('keywords'),
-      categoriesCount: countList('categories'),
-      hasEdition: /^\s*edition\s*=/m.test(cargo),
-    }
-  }
-  // Go：module 路径、go 指令版本、retract 有无。只读文本，不下结论。
-  const goReal = root_.real('go.mod')
-  if (goReal !== undefined) {
-    const goText = readText(join(root, goReal)) ?? ''
-    facts.goModule = {
-      module: (/^module\s+(\S+)/m.exec(goText) ?? [])[1],
-      goDirective: (/^go\s+(\S+)/m.exec(goText) ?? [])[1],
-      hasRetract: /^\s*retract\s+/m.test(goText),
-    }
-  }
-  // Python：构建后端声明有无（构建命令只在有后端时给，见 deriveCommands）。
-  // 另收发布硬门禁的三组 presence（只报有无，供 review 逐项点名）：
-  //   readme/license 字段（长描述渲染炸是最常见的 400 拒绝）；
-  //   requires-python（装到旧版的根因定位用）；
-  //   dynamic version（版本号权威在后端，tag 对齐要按后端取值）。
-  const pyReal = root_.real('pyproject.toml')
-  if (pyReal !== undefined) {
-    const pyText = readText(join(root, pyReal)) ?? ''
-    facts.pythonBuild = { hasBuildSystem: /\[build-system\]/.test(pyText) }
-    facts.pythonMeta = {
-      hasReadme: /^\s*readme\s*=/m.test(pyText),
-      hasLicense: /^\s*license(\s*=|\s*\[)/m.test(pyText),
-      hasRequiresPython: /^\s*requires-python\s*=/m.test(pyText),
-      hasDynamicVersion: /dynamic\s*=\s*\[[^\]]*["']version["']/.test(pyText),
-    }
+  // 有构建入口、但推不出命令。它是「这个项目怎么构建」的唯一线索，脚本不解释它
+  // （Makefile 的 target、Dockerfile 的阶段各生态各不同），只报出「有这么个文件」。
+  const buildEntryFiles = [...(walked?.sourceScan?.byBuildEntry ?? new Map()).keys()]
+  if (buildEntryFiles.length > 0) facts.buildEntryFiles = buildEntryFiles
+  for (const m of ECOSYSTEM_ARTIFACT_FACTS) {
+    if (hasManifestOf(root, root_, m.ecosystem)) m.read(root, root_, facts)
   }
   return facts
 }
+
+/**
+ * 逐生态的发布元数据：**清单在不在由清单表判，具体读什么由这里给**。
+ *
+ * 写成注册表而不是一串 if，是为了让「新增一个生态」的成本等于「加一行」——清单表加一行
+ * 之外，这里再加一个读法，不必再回头往 detectArtifacts 的函数体里插一段。
+ *
+ * 每一项只做**文本 presence 判断**，不解释该生态的语义（字段含义、必填性、上限都是
+ * 各生态自己的事，判据在对应专章里）。
+ */
+const ECOSYSTEM_ARTIFACT_FACTS = [
+  {
+    ecosystem: 'obsidian',
+    read(root, root_, facts) {
+      // 发布三件套 presence：
+      //   - manifest 恒有（能走到这里说明 manifest.json 已被 `minAppVersion` 判据认过，
+      //     所以不会把 PWA 的同名文件当成插件）；
+      //   - mainJs/stylesCss 只看根目录有无：官方模板的忽略规则要求 main.js 不进版本库、
+      //     只进发布附件，所以「根目录无 main.js」是正常态，不是缺陷；
+      //   - mainJsIgnored 告诉上层「无 main.js 是有意的忽略还是真的没构建」；
+      //   - hasVersionsJson 是旧宿主用户靠的回退映射；
+      //   - manifestId 只做形状判断（小写字母与连字符、不含 obsidian、不以 plugin 结尾），
+      //     供人复核，不做硬结论。
+      const manifestText = readText(join(root, root_.real('manifest.json') ?? 'manifest.json')) ?? ''
+      const manifestId = (/"id"\s*:\s*"([^"]+)"/.exec(manifestText) ?? [])[1]
+      const gi = readText(join(root, root_.real('.gitignore') ?? '.gitignore'))
+      const mainJsIgnored = gi === undefined ? undefined : gi.split(/\r?\n/).some((l) => {
+        const t = l.trim()
+        return t !== '' && !t.startsWith('#') && /(^|\/)main\.js$/.test(t)
+      })
+      facts.obsidianArtifacts = {
+        manifest: true,
+        mainJs: root_.has('main.js'),
+        stylesCss: root_.has('styles.css'),
+        hasVersionsJson: root_.has('versions.json'),
+        mainJsIgnored,
+        manifestId,
+        manifestIdShapeOk: manifestId === undefined ? undefined
+          : /^[a-z-]+$/.test(manifestId)
+            && !manifestId.includes('obsidian')
+            && !manifestId.endsWith('plugin'),
+      }
+    },
+  },
+  {
+    ecosystem: 'rust',
+    read(root, root_, facts) {
+      // publish=false 即声明不可发布（复用 private 机器）。另收 keywords/categories
+      // 数量（各至多 5 个，超了服务端拒绝）与 edition 风险位（缺省 2015 可发布，
+      // 不是必填）；authors 已废弃不判。
+      const cargo = readText(join(root, root_.real('cargo.toml') ?? 'Cargo.toml')) ?? ''
+      if (/^\s*publish\s*=\s*false/m.test(cargo)) facts.private = true
+      const countList = (key) => {
+        const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(cargo)
+        if (m === null) return undefined
+        return m[1].split(',').map((s) => s.trim()).filter(Boolean).length
+      }
+      facts.cargoMeta = {
+        license: /^\s*license\s*=/m.test(cargo),
+        description: /^\s*description\s*=/m.test(cargo),
+        keywordsCount: countList('keywords'),
+        categoriesCount: countList('categories'),
+        hasEdition: /^\s*edition\s*=/m.test(cargo),
+      }
+    },
+  },
+  {
+    ecosystem: 'go',
+    read(root, root_, facts) {
+      // module 路径、go 指令版本、retract 有无。只读文本，不下结论。
+      const goText = readText(join(root, root_.real('go.mod') ?? 'go.mod')) ?? ''
+      facts.goModule = {
+        module: (/^module\s+(\S+)/m.exec(goText) ?? [])[1],
+        goDirective: (/^go\s+(\S+)/m.exec(goText) ?? [])[1],
+        hasRetract: /^\s*retract\s+/m.test(goText),
+      }
+    },
+  },
+  {
+    ecosystem: 'python',
+    read(root, root_, facts) {
+      // 构建后端声明有无（构建命令只在有后端时给，见 deriveCommands）。另收发布硬门禁
+      // 的几组 presence（只报有无，供门禁逐项点名）：readme/license 字段（长描述渲染
+      // 炸是最常见的拒绝理由）、requires-python（装到旧版的根因定位）、dynamic version
+      // （版本号权威在后端，标签对齐要按后端取值而不是照抄文件里的字面）。
+      const pyText = readText(join(root, root_.real('pyproject.toml') ?? 'pyproject.toml')) ?? ''
+      facts.pythonBuild = { hasBuildSystem: /\[build-system\]/.test(pyText) }
+      facts.pythonMeta = {
+        hasReadme: /^\s*readme\s*=/m.test(pyText),
+        hasLicense: /^\s*license(\s*=|\s*\[)/m.test(pyText),
+        hasRequiresPython: /^\s*requires-python\s*=/m.test(pyText),
+        hasDynamicVersion: /dynamic\s*=\s*\[[^\]]*["']version["']/.test(pyText),
+      }
+    },
+  },
+]
 
 /**
  * DSH 插件的补充事实：Bundle 声明、客户端声明、入口与发现载体。
@@ -1328,39 +1530,38 @@ function detectDsh(root, root_, eco) {
  * 仓库本地 skills 盘点：通用协议，不止 DSH。
  *
  * 只收仓库内可提交的位置（`.agents/skills/*`、`.claude/skills/*`、包内 `skills/*`），
- * 不碰家目录与外部 checkout。每个 skill 只读目录名、`SKILL.md` 首部 `name` 与
- * `description` 首行、是否有 `scripts/` 与 `references/`，不展开正文。
- * 损坏的 SKILL.md 标 corrupt，不中断。
+ * 不碰家目录与外部 checkout。每个 skill 只读目录名、`SKILL.md` 的 frontmatter、
+ * 是否有 `scripts/` 与 `references/`，不展开正文。损坏的入口标 corrupt，不中断。
+ *
+ * 入口文件名与 frontmatter 解析都走 `SKILL_ENTRY_NAMES` 与 `skillFrontmatter`——与生态
+ * 判定同一个来源。**同一种能力目录用两套解析器判定**，窄的那套会先失效：只认大写
+ * `SKILL.md` 时，小写写法的目录在生态判定里认得、在盘点里报 corrupt，同一个目录两个
+ * 答案。
  */
 function detectLocalSkills(root) {
   const out = []
-  const bases = ['.agents/skills', '.claude/skills', 'skills']
   const readDir = (p) => {
     try { return readdirSync(p, { withFileTypes: true, encoding: 'utf8' }) } catch { return [] }
   }
-  for (const base of bases) {
+  for (const base of LOCAL_SKILL_BASES) {
     const abs = join(root, base)
     for (const e of readDir(abs)) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue
-      const skillPath = join(abs, e.name, 'SKILL.md')
-      let nameOk = undefined
-      let descriptionHead = undefined
-      let corrupt = false
-      try {
-        const text = readFileSync(skillPath, 'utf8').replace(/^\uFEFF/, '')
-        const m = /^name:[ \t]*(.+)$/m.exec(text.split('---')[1] ?? '')
-        nameOk = m !== null && m[1].trim() === e.name
-        const d = /^description:[ \t]*\|?([^\n]*)/m.exec(text)
-        descriptionHead = d === null ? undefined : d[1].trim().slice(0, 120)
-      } catch { corrupt = true }
-      let hasScripts = false
-      let hasReferences = false
-      try {
-        const sub = readDir(join(abs, e.name))
-        hasScripts = sub.some((x) => x.name === 'scripts')
-        hasReferences = sub.some((x) => x.name === 'references')
-      } catch { /* 读不到就不判 */ }
-      out.push({ path: `${base}/${e.name}`, nameOk, descriptionHead, hasScripts, hasReferences, corrupt })
+      const dir = join(abs, e.name)
+      const entryName = SKILL_ENTRY_NAMES.find((n) => existsSync(join(dir, n)))
+      const text = entryName === undefined ? undefined : readText(join(dir, entryName))
+      const fm = skillFrontmatter(text)
+      const descriptionHead = text === undefined
+        ? undefined : (/^description:[ \t]*\|?([^\n]*)/m.exec(text) ?? [])[1]?.trim().slice(0, 120)
+      const sub = readDir(dir)
+      out.push({
+        path: `${base}/${e.name}`,
+        nameOk: fm === undefined ? undefined : fm.name === e.name,
+        descriptionHead,
+        hasScripts: sub.some((x) => x.name === 'scripts'),
+        hasReferences: sub.some((x) => x.name === 'references'),
+        corrupt: entryName === undefined || text === undefined,
+      })
     }
   }
   return out
@@ -1429,7 +1630,7 @@ function detectDocs(root, root_) {
     docs.githubDir = entries
     docs.issueTemplates = entries.some((n) => /^ISSUE_TEMPLATE/i.test(n))
     docs.prTemplate = entries.some((n) => /^pull_request_template/i.test(n))
-    const wfEntry = loadSubdir(gh).entry('workflows')
+    const wfEntry = listRoot(gh).entry('workflows')
     if (wfEntry?.isDir === true) {
       try {
         const files = readdirSync(join(gh, wfEntry.name), { encoding: 'utf8' })
@@ -1495,9 +1696,13 @@ function detectDocs(root, root_) {
   return docs
 }
 
-/** 对任意目录做与 listRoot 相同的列表视图。 */
-function loadSubdir(dir) {
-  return listRoot(dir)
+/**
+ * 版本标签，按**创建时间倒序**。取不到返回 undefined——那是「没问出来」，
+ * 消费方要能与「一个标签都没有」区分。
+ */
+function readTags(root) {
+  const out = run('git', ['tag', '--list', '--sort=-creatordate'], root)
+  return out === undefined ? undefined : out.split('\n').filter(Boolean)
 }
 
 function detectGit(root) {
@@ -1515,6 +1720,8 @@ function detectGit(root) {
   // 能造成的破坏里最严重的一种。
   const toplevel = run('git', ['rev-parse', '--show-toplevel'], root)
   const isRepoRoot = toplevel !== undefined && samePath(toplevel, root)
+  // 远端列名取一次就够：历史字段 `remotes` 与下面那份全地址表共用同一次查询。
+  const remotes = (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean)
 
   const info = {
     available: true,
@@ -1524,14 +1731,11 @@ function detectGit(root) {
     version: run('git', ['--version'], root),
     branch: run('git', ['branch', '--show-current'], root),
     remote: run('git', ['remote', 'get-url', 'origin'], root),
-    remotes: (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean),
-    // 远端全地址：只存名列表会在 fork 比对时无米之炊。这里补每个远端的 URL，
-    // 取不到就标缺失，不编造。历史字段 `remotes` 保持原样以兼容旧消费。
+    remotes,
+    // 远端全地址：只存名列表会在 fork 比对时无米之炊。取不到就标缺失，不编造。
     remoteUrls: (() => {
       const out = {}
-      for (const name of (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean)) {
-        out[name] = run('git', ['remote', 'get-url', name], root)
-      }
+      for (const name of remotes) out[name] = run('git', ['remote', 'get-url', name], root)
       return out
     })(),
     identity: {
@@ -1541,8 +1745,11 @@ function detectGit(root) {
       globalName: run('git', ['config', '--global', 'user.name'], root),
       globalEmail: run('git', ['config', '--global', 'user.email'], root),
     },
-    tags: (run('git', ['tag', '--list'], root) ?? '').split('\n').filter(Boolean),
-    // 历史署名去重前 20：老项目换人换机器时一眼看出混杂，不再靠人工 git log。
+    // 标签按**创建时间倒序**，不是 git 默认的 ref 名字典序。字典序会把 `v0.10.0` 排在
+    // `v0.9.0` 前面，取「最后几个」拿到的是最旧的那批——而这个列表正是用来判断
+    // 「当前版本有没有打标签」和「拿哪几个标签去对齐」的。
+    tags: readTags(root),
+    // 历史署名去重前 20：换过人或换过机器时一眼看出混杂，不再靠人工 git log。
     historyAuthors: (() => {
       const out = run('git', ['log', '--format=%an <%ae>', '--no-merges', '-n', '200'], root)
       if (out === undefined) return undefined
@@ -1596,29 +1803,37 @@ function detectIgnores(root, root_, outputDirCandidates) {
   //
   // 用版本控制自己判断有没有被忽略，而不是解析忽略语法：语法有通配、否定、层级差异，
   // 自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。
-  // 无仓库时跳过：此时 check-ignore 全失败，会把所有目录误报为未忽略。
+  // 不在工作区时跳过：此时 check-ignore 全失败，会把所有目录误报为未忽略。
   //
   // **一次批处理，不逐个起子进程**：候选来自 walk() 的全树枚举（任何深度），
   // 用 `check-ignore --stdin -z` 一把判定。逐个 spawn 的代价随目录数线性增长，
-  // 也正是旧实现只敢「下沉一层」的原因——于是标准 monorepo 的
-  // `packages/<包名>/dist` 全被漏掉（实测 201 个未忽略目录只报 1 个）。
+  // 而只探一层的后果是标准 monorepo 的 `packages/<包名>/dist` 全被漏掉。
   const gitUsable = run('git', ['rev-parse', '--is-inside-work-tree'], root) === 'true'
   const probe = []
   if (gitUsable) {
     // 候选 = 全树候选（任何深度的产物目录名）∪ 顶层已知产物目录名。
-    // 后一半是必须的：`venv/`、`node_modules/` 这类名字在 walk 里被当作依赖目录整体
+    // 后一半是必须的：`venv/`、`node_modules/` 这类名字在走查里被当作依赖目录整体
     // 跳过了，不会进走查结果——而「虚拟环境就在那里、忽略规则却没覆盖它」正是最该
-    // 报出来的那种情况。
+    // 报出来的那种情况。两半都取自同一张目录规则表，不会各自漂移。
     const topLevel = OUTPUT_DIR_HINTS
       .filter((d) => root_.entry(d)?.isDir === true)
       .map((d) => root_.real(d))
     const candidates = [...new Set([...(outputDirCandidates ?? []), ...topLevel])]
     const ignored = gitIgnoredSet(root, candidates)
-    for (const dir of candidates) probe.push({ dir, ignored: ignored.has(dir) })
+    // 查的 key 与存进集合的写法必须一致：walk 产出的相对路径在 Windows 上是反斜杠，
+    // 而 check-ignore 的输出已归一化成正斜杠。不归一就永远配不上，症状是「顶层目录
+    // 判得对、嵌套目录全被判成未忽略」。
+    for (const dir of candidates) {
+      probe.push({ dir, ignored: ignored === undefined ? undefined : ignored.has(posixPath(dir)) })
+    }
+    if (ignored === undefined) {
+      out.ignoreProbeUnavailable = '版本控制没能回答「哪些目录被忽略」——本节判定不完整，'
+        + '请手工核对，不要把读不到当成已覆盖'
+    }
   }
   if (probe.length > 0) {
     out.presentOutputDirs = probe
-    const notIgnored = probe.filter((x) => !x.ignored).map((x) => x.dir)
+    const notIgnored = probe.filter((x) => x.ignored === false).map((x) => x.dir)
     if (notIgnored.length > 0) {
       out.unignoredOutputDirs = notIgnored
       out.unignoredNote = '这些目录已经存在，但忽略规则没有覆盖它们。下一次提交若带上它们，'
@@ -1654,10 +1869,10 @@ function survey(target) {
 
   // 内容级扫描的候选来自**递归走查**，不来自版本控制。
   //
-  // 这里曾经用 `git ls-files` 取候选，未初始化仓库时退化到只扫顶层——而「给一个还没有
-  // 版本库的项目配版本管理」正是本 skill 的主场景。后果是 src/ 里的 API key 一个都扫
-  // 不到，报告仍显示「0 命中」，G2 据此放行提交。密钥门控的失效方式是最坏的一种：
-  // 它看起来像在工作。
+  // 「给一个还没有版本库的项目配版本管理」正是本 skill 的主场景，那时没有任何已跟踪
+  // 文件可查——候选若取自版本控制，扫描会静默退化成只扫顶层，于是 src/ 里的 API key
+  // 一个都扫不到，报告仍显示「0 命中」，G2 据此放行提交。密钥门控最坏的失效方式就是
+  // 这个：它看起来像在工作。
   //
   // 不作为的那些目录（依赖、构建产物）已在 walk() 里排除，所以递归的代价是有界的；
   // 超出上限时用 contentScanTruncated 如实标记，让上层知道扫描被截断了。
@@ -1673,40 +1888,63 @@ function survey(target) {
 
   const scanned = scanContents(root, candidates, realHomeSpellings())
 
+  // 敏感文件名分两档定案：`always` 名字即足够；`confirm` 要内容里也出现凭据形状。
+  //
+  // 「没扫到」与「扫过没命中」必须区分：扫不到（超上限、二进制、读不出）的 confirm 文件
+  // 仍然要报出来并标成未确认，否则一个 2MB 的 `credentials.json` 会因为超单文件上限而
+  // 变成一条**看不见的**风险——那正是密钥门控最坏的失效方式。
+  const notScanned = new Set(walked.skippedLargePaths ?? [])
+  const secretFiles = walked.secretFiles
+    .filter((h) => h.tier === 'always' || scanned.shaped.has(h.path) || notScanned.has(h.path))
+    .map((h) => ({
+      ...h,
+      confirmed: h.tier === 'always' ? true : scanned.shaped.has(h.path) ? true : undefined,
+    }))
+
   // 给风险项补上两个比特：「已经在版本库里了吗」「被忽略规则覆盖了吗」。
   // 两个比特决定处置方式，缺一个就只能一律报缺——而那正是门禁变噪音的原因：
   //   - 已跟踪：只能从索引移除并轮换；
   //   - 未跟踪且已忽略：不进版本库（.gitignore 里的 .env 就是这样），报事实但不拦；
   //   - 未跟踪且未忽略：下一次 `git add -A` 就会把它带进历史。
   // 三条风险（凭据内容、敏感文件名、本机私有路径）共用同一次批处理，判定只有一个实现。
-  const trackedSet = new Set(runGitPaths(['ls-files', '-z'], root) ?? [])
-  const markBits = (entry) => {
-    const rel = entry.path.replace(/\\/g, '/')
-    return { ...entry, tracked: trackedSet.has(rel) || trackedSet.has(entry.path), ignored: false }
-  }
+  //
+  // 两个比特都是**三态**（真 / 假 / 取不到）。「取不到」时留 undefined 而不是 false：
+  // 目录不在工作区里，「没有被跟踪」是确定的（false）；在工作区里但清单读不全
+  // （输出超上限、命令失败），那是**没问出来**，与「问出来是没有」不是一回事。把它
+  // 读成 false 会让已在历史里的凭据被当成可以从这次提交里排除，处置方向正好反了。
+  const inWorkTree = git.available === true && git.present === true
+  const trackedList = runGitPaths(['ls-files', '-z'], root)
+  const trackedSet = trackedList === undefined && inWorkTree ? undefined : new Set(trackedList ?? [])
+  const markBits = (entry) => ({
+    ...entry,
+    tracked: trackedSet === undefined
+      ? undefined
+      : trackedSet.has(posixPath(entry.path)) || trackedSet.has(entry.path),
+    ignored: false,
+  })
   let secrets = scanned.secrets.map(markBits)
   let largeFiles = walked.largeFiles.map(markBits)
-  // 敏感文件名同样要标 tracked：分案第一步就问“在不在库里”，缺了这个比特，
-  // 会把已在历史里的凭据当未跟踪排除，白忙且留泄露。
-  let secretFiles = walked.secretFiles.map((p) => markBits({ path: p }))
+  let tagged = secretFiles.map(markBits)
   let homePathLeaks = scanned.homePaths.map(markBits)
-  const bitPaths = [...secrets, ...secretFiles, ...homePathLeaks].map((x) => x.path)
-  if (bitPaths.length > 0) {
-    const ignoredSet = gitIgnoredSet(root, bitPaths)
-    const fill = (list) => list.map((entry) => ({ ...entry, ignored: ignoredSet.has(entry.path.replace(/\\/g, '/')) }))
-    secrets = fill(secrets)
-    secretFiles = fill(secretFiles)
-    homePathLeaks = fill(homePathLeaks)
-  }
+  const bitPaths = [...secrets, ...tagged, ...homePathLeaks].map((x) => x.path)
+  const ignoredSet = bitPaths.length > 0 ? gitIgnoredSet(root, bitPaths) : new Set()
+  // 不在工作区里就没有「被忽略」这回事，取值确定是 false；工作区里读不到才是未知。
+  const fill = (list) => list.map((entry) => ({
+    ...entry,
+    ignored: ignoredSet === undefined ? (inWorkTree ? undefined : false) : ignoredSet.has(posixPath(entry.path)),
+  }))
+  secrets = fill(secrets)
+  tagged = fill(tagged)
+  homePathLeaks = fill(homePathLeaks)
 
   // 标签与版本号对齐：自动化对不上的根源。复用 detectGit 已取到的标签列表，
   // 不另起 git 进程；非仓库根（标签属外层仓库）或取不到时保持 undefined，不判 false。
   // 只做事实比对，不下结论。
-  const artifacts = detectArtifacts(root, root_, eco)
+  const artifacts = detectArtifacts(root, root_, eco, walked)
   if (artifacts.declaredVersion !== undefined && git.isRepoRoot !== false && Array.isArray(git.tags)) {
     artifacts.versionAligned = git.tags.some(
       (t) => t === artifacts.declaredVersion || t === `v${artifacts.declaredVersion}`)
-    artifacts.versionAlignedTags = git.tags.slice(-5)
+    artifacts.versionAlignedTags = git.tags.slice(0, 5)
   }
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
@@ -1728,7 +1966,7 @@ function survey(target) {
       knownOutputDirs: OUTPUT_DIR_HINTS.filter((d) => root_.entry(d)?.isDir === true),
     },
     risks: {
-      secretFiles,
+      secretFiles: tagged,
       secretContent: secrets,
       homePathLeaks,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
@@ -1759,7 +1997,10 @@ function survey(target) {
       files: walked.files,
       bytes: walked.bytes,
       truncated: walked.truncated,
-      note: '体量统计不含依赖目录与 .git',
+      // 口径要与 contentScan.scope 对齐：体量统计排除的是「整目录跳过的依赖/缓存」
+      // 加上「名字像产物但可能藏着源码」的那类（它们仍参与凭据扫描）。
+      note: '体量统计不含依赖目录、版本控制目录，以及名字像产物但可能藏着源码的目录'
+        + '（后者仍参与凭据扫描）',
     },
   }
 }
@@ -1810,9 +2051,12 @@ function toMarkdown(s) {
       L.push(`- 历史署名 ${s.git.historyAuthors.length} 种：${s.git.historyAuthors.join('；')}`)
     }
     if (Array.isArray(s.git.tags) && s.git.tags.length > 0) {
-      const shown = s.git.tags.slice(-5)
-      L.push(`- 已有版本标签 ${s.git.tags.length} 个：${shown.join('、')}`
+      // 列表头就是最近的（readTags 按创建时间倒序），所以取前几个。
+      const shown = s.git.tags.slice(0, 5)
+      L.push(`- 已有版本标签 ${s.git.tags.length} 个（由近及远）：${shown.join('、')}`
         + (s.git.tags.length > shown.length ? '（仅列最近 5 个）' : ''))
+    } else if (s.git.present === true && s.git.tags === undefined) {
+      L.push('- 已有版本标签：**读不到**（标签列表没取到，不是「一个都没有」）')
     }
   }
   L.push('')
@@ -1846,11 +2090,19 @@ function toMarkdown(s) {
   L.push('')
   L.push('## 可执行命令')
   L.push('')
-  const cmds = Object.entries(s.commands).filter(([k, v]) => typeof v === 'string'
-    && !['packageManager', 'byEcosystem', 'multipleEcosystems'].includes(k) && !k.endsWith('Note'))
+  // **正向清单**：只有 COMMAND_KEYS 里的键算命令。排除式的黑名单要求每加一个新键
+  // 就补一次，漏掉的那个会被当命令渲染出来——`note`（「该生态的命令推导尚未实现」）
+  // 就这样被渲染成一条可执行命令，而它的存在又让下面那条「没有命令」永远不出现：
+  // P7 要求如实汇报「这个项目一行都没验证过」的那条信号，就这样被一条注释顶掉了。
+  const cmds = Object.entries(s.commands).filter(([k, v]) => COMMAND_KEYS.includes(k) && typeof v === 'string')
   if (cmds.length === 0) L.push('- 未推导出任何命令（正常结果：说明项目没声明这些命令，'
     + '不代表错误；此时 P7 的验证不成立，见 SKILL.md）')
   else for (const [k, v] of cmds) L.push(`- ${k}：\`${v}\``)
+  // 说明与命令分开列：它们解释「这条命令从哪来」，本身不是命令。
+  for (const [k, v] of Object.entries(s.commands)) {
+    if (!isNoteKey(k) || typeof v !== 'string') continue
+    L.push(`  - \`${k}\`：${v}`)
+  }
   if (s.commands?.multipleEcosystems !== undefined) {
     L.push('')
     L.push(`- **本项目命中多种生态**：${s.commands.multipleEcosystems.join('、')}。`
@@ -1868,6 +2120,11 @@ function toMarkdown(s) {
   L.push(`- 产物目录存在：${a.distDirsPresent === undefined || a.distDirsPresent.length === 0
     ? '无' : a.distDirsPresent.join('、')}`)
   L.push(`- 忽略配置文件：${a.hasNpmIgnore === true ? '有' : '无'}`)
+  if (Array.isArray(a.buildEntryFiles) && a.buildEntryFiles.length > 0) {
+    L.push(`- 构建入口文件：${a.buildEntryFiles.join('、')}`
+      + '（说明这里有构建步骤，但脚本不据此推命令——target 与阶段各项目不同，'
+      + '「怎么构建」要读它自己确认）')
+  }
   const reqs = a.runtimeRequirements ?? []
   if (reqs.length === 0) {
     L.push('- 声明的运行环境下限：**未声明**'
@@ -1994,22 +2251,28 @@ function toMarkdown(s) {
   L.push('## 风险')
   L.push('')
   const r = s.risks
+  /** 三态渲染：读不到就说读不到，不能读成「不在库里」。 */
+  const trackedText = (t) => t === true ? '**已在版本库里**'
+    : t === false ? '尚未跟踪'
+      : '**无法确认是否已入库**（受控文件清单没取到，请手工核对）'
   if (r.secretFiles.length === 0) {
     L.push('- 敏感文件：无')
   } else {
-    const names = r.secretFiles.slice(0, 5).map((h) => typeof h === 'string' ? h : h.path).join('、')
+    const names = r.secretFiles.slice(0, 5).map((h) => h.path).join('、')
     L.push(`- 敏感文件：${r.secretFiles.length} 个（${names}）`)
     for (const hit of r.secretFiles.slice(0, 5)) {
-      if (typeof hit === 'string') continue
-      L.push(`  - ${hit.path}（${hit.tracked === true ? '**已在版本库里**' : '尚未跟踪'}）`)
+      // 名字像但内容没确认的（扫不到）要单独标出来——「没扫到」不是「没问题」。
+      const unconfirmed = hit.confirmed === undefined ? '，内容未能确认' : ''
+      L.push(`  - ${hit.path}（${trackedText(hit.tracked)}；`
+        + `${hit.ignored === true ? '已被忽略规则排除' : hit.ignored === false ? '未被忽略' : '忽略状态读不到'}`
+        + `${unconfirmed}）`)
     }
   }
   L.push(`- 内容里的凭据形状：${r.secretContent.length === 0 ? '无' : r.secretContent.length + ' 处'}`)
   if (r.secretContent.length > 0) {
     for (const hit of r.secretContent.slice(0, 10)) {
       // tracked 这一个比特决定处置：未跟踪的能从这次提交排除，已在历史里的只能轮换。
-      L.push(`  - ${hit.path}:${hit.line ?? '?'}（${hit.kind}，`
-        + `${hit.tracked === true ? '**已在版本库里**' : '尚未跟踪'}）`)
+      L.push(`  - ${hit.path}:${hit.line ?? '?'}（${hit.kind}，${trackedText(hit.tracked)}）`)
     }
     L.push('  - 处置分情况，见 references/version-control.md 的「密钥与敏感信息门控」：'
       + '不要因为一处历史凭据就停下全部工作。')
@@ -2102,14 +2365,17 @@ if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(proc
  *
  * 文档里的生态清单以它为准：selftest 断言 `references/survey.md` 的清单与它集合相等，
  * 于是「代码加了新生态、文档没跟上」当场变红——而不是等人照着过期文档判断。
- * 新增生态时只改代码，文档由断言逼着同步。
+ *
+ * 三张表（源码扩展名、构建描述文件、清单表）都是**自动**并进来的：给其中任意一张加一个
+ * 生态，值域自动跟着长，不需要在这里再抄一遍。这里只列「不由文件名识别」的那几个 kind
+ * ——.NET 靠工程文件、插件类靠清单内部的字段、三个无形态是判定结果而非生态。
  */
 export function kindVocabulary() {
   return [...new Set([
     ...SOURCE_EXT_KINDS.map(([, kind]) => kind),
     ...BUILD_FILE_KINDS.map(([, kind]) => kind),
-    ...NESTED_MANIFEST_KINDS.map(([, kind]) => kind),
-    'node', 'python', 'rust', 'go', 'java', 'dotnet', 'ruby', 'php', 'swift', 'dart', 'elixir', 'clojure', 'perl', 'cpp',
+    ...MANIFEST_KINDS.map(manifestKind),
+    'dotnet',
     'dsh-plugin', 'skill', 'vscode-extension', 'obsidian-plugin',
     'docs-only', 'unrecognized', 'unknown',
   ])].sort()

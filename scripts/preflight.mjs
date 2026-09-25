@@ -248,6 +248,27 @@ function checkSkillFile() {
 // ── 检查二：引用完整性 ──────────────────────────────────────────────────────
 
 /**
+ * 一份 Markdown 里引用的资源路径（去重）。
+ *
+ * 两种写法都要收：行内代码 `` `references/x.md` `` 与 Markdown 链接 `[说明](references/x.md)`。
+ * 同一套目录下的两种形状必须一起查——只认一种，另一种就成了没人看守的门，而链接写法
+ * 恰恰是 AI 最容易顺手写出来的形状。
+ *
+ * 只认这三种目录：本 skill 的资源就在这三类下。占位示例请写成
+ * `references/<文件名>.md`——尖括号不在字符类里，因此不会被当成真实路径去检查。
+ * 这是刻意的：占位符不是引用，报它属于误报。链接形态额外容忍锚点与标题尾巴。
+ */
+export function referencedPaths(text) {
+  const out = new Set()
+  const src = String(text ?? '')
+  for (const m of src.matchAll(/`((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)`/g)) out.add(m[1])
+  for (const m of src.matchAll(
+    /\]\(\s*((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)\s*(?:#[^)\s]*)?\s*(?:"[^"]*")?\)/g,
+  )) out.add(m[1])
+  return [...out]
+}
+
+/**
  * 扫描所有 Markdown 里的资源引用，逐个确认文件存在。
  *
  * 覆盖全部文档而不只是 SKILL.md：reference 之间互相引用是常态，只查入口等于只守住了
@@ -256,17 +277,11 @@ function checkSkillFile() {
 function checkReferencesResolve() {
   const docs = repoTextFiles().filter((f) => f.endsWith('.md'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
-  // 只认这三种路径形状：本 skill 的资源就在这三类目录下。
-  // 占位示例请写成 `references/<文件名>.md`——尖括号不在字符类里，因此不会被当成真实
-  // 路径去检查。这是刻意的：占位符不是引用，报它属于误报。
-  const re = /`((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)`/g
   let total = 0
   for (const full of docs) {
     const name = rel(full)
     const text = readText(full).replace(/^\uFEFF/, '')
-    const seen = new Set()
-    for (const m of text.matchAll(re)) seen.add(m[1])
-    for (const target of [...seen].sort()) {
+    for (const target of referencedPaths(text).sort()) {
       total += 1
       if (!existsSync(join(SKILL_ROOT, target))) {
         fail(`${name} 引用了不存在的文件：${target} —— AI 会按图索骥走到死路。`)
@@ -411,7 +426,12 @@ function checkAgentsKernel() {
 
 // ── 检查六：全文硬性规范（emoji / BOM / 行尾 / 私有路径） ───────────────────
 
-/** Extended_Pictographic 覆盖绝大多数 emoji；箭头、对勾一类符号不在其内，可正常使用。 */
+/**
+ * Extended_Pictographic 覆盖绝大多数 emoji。箭头一类符号不在其内（U+2192），可正常使用。
+ *
+ * 「对勾」要看具体码位：U+2713（CHECK MARK）不在其内，U+2714（HEAVY CHECK MARK）**在**
+ * 其内——两者几乎一样宽，被这条判红的却是后者。文档里要打勾用前者。
+ */
 const EMOJI = /\p{Extended_Pictographic}/u
 /** 本机私有路径的判据与 survey 同源（survey 导出 HOME_PATH_RE，两份手写正则必然漂移）。 */
 const HOME_PATH = HOME_PATH_RE
@@ -453,6 +473,38 @@ function checkGlobalRules() {
 
 // ── 检查七：脚本自身可执行 ──────────────────────────────────────────────────
 
+/**
+ * 文本里出现的模块说明符（去重、保序）。
+ *
+ * 四种形状都收：静态导入的说明符、裸副作用导入、动态导入、CommonJS 的 require，
+ * 单引号与双引号等价。只认其中一种会让其余全部溜过去——而它们装的是同一个东西：
+ * 外部依赖。纯函数，直接可证伪。
+ *
+ * **整行的注释不参与扫描**。文档注释里常要举「动态导入长什么样」的例子，照抄字面量
+ * 就会把自己变成一条假阳性；而整行注释（以两个斜杠、星号或注释起始符开头）不可能是
+ * 代码，剔掉它不改变任何一条真实导入的判定。
+ */
+export function moduleSpecifiers(text) {
+  const code = String(text ?? '')
+    .split('\n').filter((l) => !/^\s*(?:\/\/|\/\*|\*)/.test(l)).join('\n')
+  const out = []
+  const push = (spec) => { if (spec !== '' && !out.includes(spec)) out.push(spec) }
+  for (const m of code.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*(['"])([^'"\n]+)\1/g)) push(m[2])
+  for (const m of code.matchAll(/\brequire\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g)) push(m[2])
+  return out
+}
+
+/**
+ * 零依赖的含义是「不要求使用者先装东西」，因此允许两类：`node:` 前缀的内置模块，
+ * 与相对路径（本 skill 自己的其他脚本，随仓库一起走）。其余裸模块名一律拒绝：
+ * 那是要装的东西。
+ */
+export function externalModules(text) {
+  return moduleSpecifiers(text).filter(
+    (spec) => !spec.startsWith('node:') && !spec.startsWith('./') && !spec.startsWith('../'),
+  )
+}
+
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
@@ -463,13 +515,7 @@ function checkScripts() {
     const text = readText(p)
     if (!text.startsWith('#!/usr/bin/env node')) warn(`scripts/${f} 缺少 node shebang。`)
     if (statSync(p).size < 200) fail(`scripts/${f} 内容异常短。`)
-    // 零依赖的含义是「不要求使用者先装东西」，因此允许两类：
-    //   - `node:` 前缀的内置模块；
-    //   - 相对路径（本 skill 自己的其他脚本，随仓库一起走）。
-    // 其余裸模块名一律拒绝：那是要装的东西。
-    for (const m of text.matchAll(/from\s+'([^']+)'/g)) {
-      const spec = m[1]
-      if (spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../')) continue
+    for (const spec of externalModules(text)) {
       fail(`scripts/${f} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
     }
   }
@@ -491,16 +537,34 @@ function checkScripts() {
 // ── 检查八：脚本真的能跑起来 ────────────────────────────────────────────────
 
 /**
+ * 子进程失败时的诊断片段。
+ *
+ * 首行通常只是位置信息，真正的错误在更靠后的行——把整段 stderr 收进来，
+ * 否则最需要的那句（SyntaxError、ReferenceError 之类）会被切掉。
+ */
+function stderrExcerpt(r, lines = 6) {
+  return (r.stderr ?? '').trim().split('\n').filter((l) => l.trim() !== '')
+    .slice(0, lines).join(' / ')
+}
+
+/**
  * 静态检查抓不到「import 写错、运行时抛错、参数解析有 bug」这类问题——本 skill 的
  * survey.mjs 就曾因为少一个 import 直接崩溃，而当时的自检全绿放行了它。
- * 所以这里实际执行一遍，只看退出码与是否吐出应有结构的输出。
+ * 所以这里实际执行一遍。
+ *
+ * **退出码是硬证据，输出只是佐证**：`expect` 绝不参与判断非零退出是否可接受。
+ * 倒过来的后果是：脚本先把报告打印完、收尾时再崩，stdout 里已有期望词，
+ * 非零退出码就被读成通过——而那正是「跑过但没跑完」最容易藏身的形状。
+ * `expect` 只回答另一个问题：退出码为 0 时，它到底干了活没有。
  *
  * 只跑只读或幂等的模式：--markdown 只读，--check/--status 不写文件。
  */
 function checkScriptsRun() {
   const cases = [
     { file: 'survey.mjs', args: [SKILL_ROOT, '--markdown'], expect: /勘察结果/ },
-    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--check'], expect: /内核一致|校验失败/ },
+    // compose-agents 的失败文案只写 stderr，所以这里只认它成功时 stdout 上的那行；
+    // 失败由退出码判，不靠嗅探文案。
+    { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--check'], expect: /内核一致/ },
     { file: 'compose-agents.mjs', args: [SKILL_ROOT, '--status'], expect: /字节|手写/ },
   ]
   for (const { file, args, expect } of cases) {
@@ -512,15 +576,11 @@ function checkScriptsRun() {
       fail(`scripts/${file} 无法执行：${r.error.message}`)
       continue
     }
-    if (r.status !== 0 && !expect.test(r.stdout ?? '')) {
-      // 首行通常只是位置信息，真正的错误在更靠后的行——把整段 stderr 收进来，
-      // 否则最需要的那句（SyntaxError、ReferenceError 之类）会被切掉。
-      const detail = (r.stderr ?? '').trim().split('\n').filter((l) => l.trim() !== '')
-        .slice(0, 6).join(' / ')
-      fail(`scripts/${file} 以退出码 ${r.status} 结束（${label}）：${detail}`)
+    if (r.status !== 0) {
+      fail(`scripts/${file} 以退出码 ${r.status} 结束（${label}）：${stderrExcerpt(r)}`)
       continue
     }
-    if (r.status === 0 && !expect.test(r.stdout ?? '')) {
+    if (!expect.test(r.stdout ?? '')) {
       fail(`scripts/${file} 退出码为 0，但没有输出预期内容（${label}）—— 可能被静默改坏。`)
     }
   }
@@ -533,6 +593,9 @@ function checkScriptsRun() {
  * 正常。而这类错误在这个 skill 上已经出现过三次（密钥门控失效、仓库边界误判、条件段落
  * 冻结），每次都是靠手工造 fixture 才发现的。所以把 fixture 固化成常驻检查：改动之后
  * 跑一遍，行为退化立刻可见。
+ *
+ * 「有没有跑到」是硬证据，「跑出来说什么」是佐证：摘要行取不到就是没跑到，
+ * 哪怕退出码是 0——被换成空壳的自检正是这个形状，它一声不吭就把整套行为断言拿掉了。
  */
 function checkBehavior() {
   const p = join(SKILL_ROOT, 'scripts', 'selftest.mjs')
@@ -542,14 +605,23 @@ function checkBehavior() {
   if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
   // 摘要是以「行为自检：」开头的那一行。不能用「最后一行」——环境不具备时后面还会跟
   // 一段「跳过」清单，取最后一行会取到清单里的最后一项。
-  const summary = out.split('\n').find((l) => l.startsWith('行为自检：')) ?? '(未输出摘要)'
+  const line = out.split('\n').find((l) => l.startsWith('行为自检：'))
+  if (line === undefined) {
+    // 崩在中途（不是断言失败）时摘要与失败清单两处都取不到。只报「未通过」等于让人
+    // 自己去猜，所以把子进程的 stderr 一并带出来。
+    fail('行为自检没有输出摘要行——它可能崩在中途，或已不是本项目的自检'
+      + `（退出码 ${r.status}）：${stderrExcerpt(r)}`)
+    return
+  }
+  const summary = line.replace(/^行为自检：/, '')
   if (r.status !== 0) {
     const body = out.split('失败项：')[1] ?? ''
     const fails = body.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- '))
-    fail(`行为自检未通过（${summary.replace(/^行为自检：/, '')}）:\n       ${fails.join('\n       ')}`)
+    const detail = fails.length > 0 ? `\n       ${fails.join('\n       ')}` : `\n       ${stderrExcerpt(r)}`
+    fail(`行为自检未通过（${summary}）:${detail}`)
     return
   }
-  process.stdout.write(`${summary.replace(/^行为自检：/, '行为自检：')}\n`)
+  process.stdout.write(`行为自检：${summary}\n`)
   // 有跳过时一并转述：跳过是环境不具备，不是缺陷，但它改变了这次检查的覆盖面，
   // 不说明就等于悄悄缩小了验证范围。
   const skipBlock = out.split('跳过（环境不具备，不是缺陷）：')[1]
@@ -578,9 +650,8 @@ function checkStatedCounts() {
     硬门控: countMatches('SKILL.md', /^\|\s*G\d+\s*\|/gm),
     // 数文件地图里那一节的行，而不是全文匹配：正文里提到某个脚本（例如「本 skill 自身的
     // 自检（`scripts/preflight.mjs`）」）也会命中，那是叙述不是清单。
-    脚本: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`scripts\/[a-z-]+\.mjs`/),
-    参考文档: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`references\/[a-z-]+\.md`/),
-    骨架模板: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`templates\/[a-z-]+\.md`/),
+    // 字符类要含数字：否则将来出现 `toc2.mjs` 这类名字就数不到，计数会与磁盘脱钩。
+    脚本: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`scripts\/[A-Za-z0-9._-]+\.mjs`/),
   }
 
   // **与磁盘对账**，不只是两份文档互相对。
@@ -652,12 +723,14 @@ function checkStatedCounts() {
   // 贡献者按 CONTRIBUTING 自查、CI 与维护者按 AGENTS.md 自查，少一个参数就是
   // 「照做的人拿到的命令不是真命令」（实测 sync-toc 漏了 README.en.md 那次）。
   {
-    const commands = (file, headingRe) => {
+    const commands = (file, headingRe, headingName) => {
       const p = join(SKILL_ROOT, file)
-      if (!existsSync(p)) return undefined
+      // 文件不存在可以合法跳过；**标题找不到不行**：这份文件的开关就是一个标题字符串，
+      // 把它改个名就能让整块检查静默消失（而命令表一个字没动），那正是它要防的漂移。
+      if (!existsSync(p)) return { state: 'absent' }
       const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
       const at = lines.findIndex((l) => headingRe.test(l))
-      if (at < 0) return undefined
+      if (at < 0) return { state: 'heading-missing', heading: headingName }
       // 只看标题之后的**第一个围栏代码块**：那一节里可能还有别的命令示例（例如
       // 「改了内核后要重新注入」那一小段），把它们算进「门禁命令表」是读错了范围。
       const out = new Set()
@@ -678,13 +751,19 @@ function checkStatedCounts() {
         if (!line.startsWith('node ')) continue
         out.add(line.split(/\s+#/)[0].replace(/\s+/g, ' ').trim())
       }
-      return out
+      return { state: 'ok', commands: out }
     }
-    const a = commands('AGENTS.md', /^## 构建与验证/)
-    const c = commands('CONTRIBUTING.md', /^## 提交前门禁/)
-    if (a !== undefined && c !== undefined) {
-      const onlyA = [...a].filter((x) => !c.has(x))
-      const onlyC = [...c].filter((x) => !a.has(x))
+    const a = commands('AGENTS.md', /^## 构建与验证/, '## 构建与验证')
+    const c = commands('CONTRIBUTING.md', /^## 提交前门禁/, '## 提交前门禁')
+    for (const [file, r] of [['AGENTS.md', a], ['CONTRIBUTING.md', c]]) {
+      if (r.state === 'heading-missing') {
+        fail(`${file} 里没有「${r.heading}」这一节 —— 提交前门禁的命令表因此无从比对，`
+          + '两处是否一致已无从判断。把该节标题改回来。')
+      }
+    }
+    if (a.state === 'ok' && c.state === 'ok') {
+      const onlyA = [...a.commands].filter((x) => !c.commands.has(x))
+      const onlyC = [...c.commands].filter((x) => !a.commands.has(x))
       if (onlyA.length > 0 || onlyC.length > 0) {
         fail('提交前门禁的命令表在两处不一致：'
           + `${onlyA.length > 0 ? `只有 AGENTS.md 有 ${onlyA.join(' / ')}；` : ''}`
@@ -703,14 +782,15 @@ function checkStatedCounts() {
     if (budgetA !== undefined && budgetB !== undefined && budgetA !== budgetB) {
       fail(`字节预算不一致：compose-agents.mjs 为 ${budgetA}，preflight.mjs 为 ${budgetB} —— 两处必须是同一数。`)
     }
-    const tokenSpellings = new Set()
-    for (const f of ['templates/ci-release.yml', '.github/workflows/check.yml', 'references/remote-github.md', 'AGENTS.md', 'SKILL.md']) {
-      const p = join(SKILL_ROOT, f)
-      if (!existsSync(p)) continue
-      for (const m of readText(p).matchAll(/RELEASE[_-]?TOKEN/ig)) tokenSpellings.add(m[0])
-    }
-    if (tokenSpellings.size > 1) {
-      fail(`约定名拼写不一致：${[...tokenSpellings].join('、')} —— 必须统一为 RELEASE_TOKEN。`)
+    // 约定名拼写：**扫定义域内全部文本文件**，只对出现过它的那些文件判一致性。
+    // 维护文件白名单是这条检查最脆的地方：真正消费这个密钥的
+    // `.github/workflows/release.yml` 曾不在名单里，于是把它改错拼法自检一声不吭。
+    // 判据落在「全仓拼写是否统一」上，新增文件不必记得登记。
+    const spellings = releaseTokenSpellings(repoTextFiles().map((f) => {
+      try { return readText(f) } catch { return '' }
+    }))
+    if (spellings.size > 1) {
+      fail(`约定名拼写不一致：${[...spellings].join('、')} —— 必须统一为 RELEASE_TOKEN。`)
     }
   }
   const readmeText = existsSync(join(SKILL_ROOT, 'README.md'))
@@ -793,7 +873,28 @@ function countNumberedItems(file, headingRe, itemRe) {
   return count
 }
 
+/**
+ * 约定名的各种拼写（去重）。
+ *
+ * 判据是「全仓出现过的拼写是否只有一种」。扫全部文本文件而不是维护文件白名单：
+ * 白名单最脆的地方就是**漏掉真正消费它的那个文件**，而新增文件不该要求人记得登记。
+ *
+ * **大小写敏感**：约定名是环境变量形状的全大写标识符，破坏它的方式是分隔符写错
+ * （把下划线换成连字符或点）或干脆连写，不是首字母小写。不敏感地扫会把
+ * `usesReleaseToken` 这类普通标识符算成一种拼写——那正是字面启发式自己制造的假阳性。
+ * 注意这条检查扫的是**全文**（含文档正文），所以写文档时别把错误拼法照抄进来举例——
+ * 那正是它要报的东西。纯函数，selftest 直接喂数据证伪。
+ */
+export function releaseTokenSpellings(texts) {
+  const out = new Set()
+  for (const text of texts ?? []) {
+    for (const m of String(text ?? '').matchAll(/RELEASE[._-]?TOKEN/g)) out.add(m[0])
+  }
+  return out
+}
+
 // ── 检查十：插件专章必须都登记在索引里 ──────────────────────────────────────
+
 
 /**
  * `references/plugins/` 下的每个专章，都必须出现在 `plugin-project.md` 的索引表里。
@@ -975,17 +1076,27 @@ export function freshnessSectionBody(text) {
 }
 
 /**
- * 这一节的来源说明能不能照着做：链接 / 文档名 / 具体步骤，至少得有一类。
- * 判据按「有」而不是「没有」写，避免把措辞差异判成缺陷；但**空节必须失败**。
+ * 这一节的来源说明能不能照着做：读者得能拿着它**直接去查**。
+ *
+ * 判据是「有没有可定位物」，不是「有没有出现过相关词」。按词判会被中文里绕过去：
+ * 「本节的内容以前是核过的，读者可以自行查阅相关文档的对应章节确认」既没有链接也没有
+ * 具体对象，却同时含「文档」与「章节」——而那正是一句套话，不是查法。词频高到这个
+ * 程度的词不能当判据，能当判据的是**对象**：地址、文件名、章节号、字段名。
+ *
+ * 至少命中一类即通过：措辞差异不该被当成缺陷，所以判据一律按「有」写。
  */
 export function hasActionableSources(body) {
-  const textBody = String(body ?? '')
-  if (textBody.trim() === '') return false
-  const hasLink = /https?:\/\/\S+/.test(textBody)
-  const hasDocName = /官方|文档|手册|指南|manual|docs?\.|reference|changelog|release notes/i.test(textBody)
-  const hasSteps = /节|章|页|section|chapter|查|核对|重核|步骤|命令|search|look up|check/i.test(textBody)
-    && textBody.trim().length >= 40
-  return hasLink || hasDocName || hasSteps
+  const text = String(body ?? '').trim()
+  if (text === '') return false
+  // 可定位物之一：地址。
+  const hasUrl = /https?:\/\/\S+/.test(text)
+  // 之二：被行内代码或书名号/直角引号包住的具体对象（文件路径、文档名、字段名、标识符）。
+  const hasNamed = /`[^`\n]{2,}`/.test(text) || /《[^》\n]{2,}》/.test(text) || /「[^」\n]{2,}」/.test(text)
+  // 之三：查法句式——动作词后面紧跟一个可数的定位对象（「按第 N 节」「去 X 的 Y 一节」）。
+  // 动词与对象必须在同一句内相邻出现，所以「按常规流程重核一次」这种不带对象的说法不算。
+  const hasProcedure = /(?:去|按|照|见|依|据)[^。\n；;]{0,24}?(?:第[0-9一二三四五六七八九十]+[节章页]|的[^。\n；;]{0,12}?[一节章节页])/
+    .test(text)
+  return hasUrl || hasNamed || hasProcedure
 }
 
 /**
@@ -1207,6 +1318,19 @@ export function hostDateBatchStatus(repoRoot, rel, hostValue, runGit) {
   }
 }
 
+/**
+ * host= 与本机不同的提示正文。抽成纯函数是为了让「它渲染成什么样」可被直接断言。
+ *
+ * 提示是给人（和接手时的 AI）看的处置指引，所以它必须是**提示本身**：拼接一旦写坏，
+ * 冒号后面接的会是源码片段，而那段源码里恰好又写着正确的做法——看的人分不清哪句才是
+ * 给他看的，于是整条提示作废。
+ */
+export function hostMismatchMessage(rel, host, reason) {
+  return `${rel} 的 host=${host} 与本机实际宿主不同（${reason}）——两种解释都成立：`
+    + '专章滞后（宿主升级后没重核），或换台机器校验 / 宿主回滚 / 同机存在多份宿主。'
+    + '**只提示不失败**：脚本判不了是不是真滞后。按该文件的「事实来源」节重核后，把 host= 与 date= **一起**改。'
+}
+
 function checkFreshness() {
   const todayStr = new Date().toISOString().slice(0, 10)
   const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
@@ -1271,9 +1395,7 @@ function checkFreshness() {
         if (cmp.state === 'match') {
           // 一致 → 静默（不产生噪音，这一态是绝大多数情况）
         } else if (cmp.state === 'mismatch') {
-          warn(`${rel} 的 host=${r.keys.host} 与本机实际宿主不同（${cmp.reason}）——两种解释都成立："
-            + '专章滞后（宿主升级后没重核），或换台机器校验 / 宿主回滚 / 同机存在多份宿主。'
-            + '**只提示不失败**：脚本判不了是不是真滞后。按该文件的「事实来源」节重核后，把 host= 与 date= **一起**改。`)
+          warn(hostMismatchMessage(rel, r.keys.host, cmp.reason))
         } else {
           warn(`${rel} 的 host= 未核对：${cmp.reason}。**「没比」与「比过且一致」是两回事，不要读成通过。**`)
         }
@@ -1318,46 +1440,6 @@ function checkReadmeToc() {
   process.stdout.write('README 目录：与标题一致\n')
 }
 
-// ── 检查十二：取值污染（单样本个案值不得回流进通用文档） ─────────────────────
-//
-// references/ 与 templates/ 是通用规则，只能写查法与判据。task-board 这类单样本的
-// 具体取值（包名、存储键、插槽座位、列名、路由）一旦写进来，就会被 AI 当成结论照抄
-// 到别的插件上。判据是字面出现，不是语义：出现即红。
-function checkValuePollution() {
-  const targets = []
-  const collect = (dir) => {
-    let entries = []
-    try {
-      entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
-    } catch { return }
-    for (const e of entries) {
-      const full = join(dir, e.name)
-      if (e.isDirectory()) { collect(full); continue }
-      if (!/\.(md|mjs|yml)$/.test(e.name)) continue
-      targets.push(full)
-    }
-  }
-  collect(join(SKILL_ROOT, 'references'))
-  collect(join(SKILL_ROOT, 'templates'))
-  const banned = ['dsh-task-board', 'dsh_task_board', 'dsh.taskBoard', '@firetruck666']
-  let hits = 0
-  for (const f of targets) {
-    let text = ''
-    try {
-      text = readText(f)
-    } catch { continue }
-    for (const b of banned) {
-      if (text.includes(b)) {
-        const rel = relative(SKILL_ROOT, f).split('\\').join('/')
-        fail(`取值污染：${rel} 出现单样本字面「${b}」——通用文档只写查法，个案值须现场读。`)
-        hits += 1
-        break
-      }
-    }
-  }
-  if (hits === 0) process.stdout.write('取值无污染：通用文档无单样本字面\n')
-}
-
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 function main() {
@@ -1373,7 +1455,6 @@ function main() {
   checkPluginChapters()
   checkFreshness()
   checkReadmeToc()
-  checkValuePollution()
   checkBehavior()
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。

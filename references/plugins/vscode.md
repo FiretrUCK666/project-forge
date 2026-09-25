@@ -27,6 +27,18 @@
 `categories`、`keywords`、`main`、`browser`、`contributes`、`activationEvents`、
 `icon`、`license`、以及指向仓库与问题反馈的 `repository` / `bugs` / `homepage`。
 
+**其中两个字段填错会直接发不出去，得单独盯：**
+
+- **`categories` 只能取官方枚举里的值**——不在枚举里，发布就失败。上次核对到的枚举是：
+  `Programming Languages`、`Snippets`、`Linters`、`Themes`、`Debuggers`、`Formatters`、
+  `Keymaps`、`SCM Providers`、`Other`、`Extension Packs`、`Language Packs`、
+  `Data Science`、`Machine Learning`、`Visualization`、`Notebooks`、`Education`、`Testing`。
+  **枚举会随市场增加，以官方 Extension Manifest 页里 `categories` 的 Allowed values 为准**
+  （另有一条：某些类别是给特定场景保留的，例如本地化语言包那一类，别拿来当普通分类用）。
+- **`keywords` 有数量上限**，超了同样发不出去。**上限以官方该页当前写的数字为准，别背。**
+
+两个都是易变项，上面那份枚举是上次核对到的样子。
+
 ## 三、两个标识分别是什么
 
 | 标识 | 是什么 |
@@ -81,22 +93,26 @@
 
 - **`engines.vscode` 写 `*` 会被打包工具拒绝**——这不是风格问题，是硬性校验。
 - **`name` 与 `displayName` 都要求在市场上唯一**：撞名时发布失败，而不是自动加后缀。
+- **`categories` 填枚举外的值、`keywords` 填超量**：两种都是发布时直接失败，不给模糊提示
+  （见第二节写的那两条）。
 - **网页版扩展（写 `browser` 入口的）不能用 Node 能力**：文件系统、子进程、原生模块都
   不可用。同一份源码要同时支持两种环境时，能力差异必须显式处理，不能假定「本地能跑」。
 - **扩展依赖用 id 形式声明**，改 `name` 或 `publisher` 会连带影响依赖它的扩展。
 
 ## 事实来源
 
-清单的必填字段、`engines.vscode` 不可为 `*`、`main` 与 `browser` 两个入口、扩展 id 的
-构成（`${publisher}.${name}`）、`extensionDependencies`、`vscode:prepublish`，均来自 VS Code 官方文档的「Extension Manifest」一节
-（https://code.visualstudio.com/api/references/extension-manifest ，核实于本文件写入时）。
+**本文件的易变项**：清单的必填字段与各自的唯一性要求、`engines.vscode` 的约束、
+`categories` 的允许值枚举、`keywords` 的数量上限、`main` 与 `browser` 两个入口、
+扩展 id 的构成、打包与忽略规则。
 
-打包与发布流程的具体命令、忽略文件名与语法，来自官方文档「Publishing Extensions」
-一节的主题范围，**本文件没有逐条抄录——以官方文档为准**。
+- 清单字段（必填项、`engines.vscode` 不可为 `*`、`name` 与 `displayName` 的唯一性、
+  `main` / `browser`、`extensionDependencies`、`vscode:prepublish`）：
+  <https://code.visualstudio.com/api/references/extension-manifest>
+- 打包与发布流程、打包命令、忽略文件名与语法：
+  <https://code.visualstudio.com/api/working-with-extensions/publishing-extension>
 
-**核对版本（宿主大版本变化时重核第二、三、五节）**：
+第二页的内容**本文件没有逐条抄录**（命令与语法会变），用到时直接照那一页做。
 
-<!-- vscode-verified: date=2026-09-12 -->
+格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-上面一行是核对标记，格式固定不要改。重核时把 `date=` 改成当天日期，并逐条对照
-官方文档确认字段与校验规则未变。
+<!-- vscode-verified: date=2026-09-25 -->

@@ -29,7 +29,7 @@
 | `name` | string | 是 | 显示名。短而描述性，优先英文与 Basic Latin；标点只许连字符/加号/括号；禁 emoji；禁含 `Obsidian` 及其变体；禁单独使用核心功能名；插件名禁含 `Plugin` 一词；全生态唯一 |
 | `version` | string | 是 | 只支持 `x.y.z` 三段格式，需符合语义化版本；预发布后缀不进社区稳定通道 |
 | `minAppVersion` | string | 是 | 能运行本插件的最低宿主版本；不知道填什么就填最新稳定版号 |
-| `description` | string | 是 | 以动作语句开头，不以 `This is a plugin` 开头；不超 250 字符；以句号结尾；禁 emoji；遵官方 style guide |
+| `description` | string | 是 | 以动作语句开头，不以 `This is a plugin` 开头；**不超过官方规定的字符数上限**（上限随平台政策变，按「提交要求」那一节重核，见「事实来源」）；以句号结尾；禁 emoji；遵官方 style guide |
 | `author` | string | 是 | 作者名 |
 | `isDesktopOnly` | boolean | 是 | 是否仅桌面端。用了 Node/Electron 能力必须填 `true`；不用也要显式声明 `false`，不要省略 |
 | `authorUrl` | string | 否 | 作者主页 |
@@ -158,17 +158,22 @@
 
 ## 事实来源
 
-`manifest.json` 的字段集合与命名限制、`version` 只支持 `x.y.z`、发布标签必须与清单版本
-一致且不带 `v`、安装时下载 `main.js` / `manifest.json` / `styles.css`、社区目录读取默认分支
-最新提交的 `manifest.json`、`versions.json` 的作用、官方模板的忽略规则与工作流机制、
-测试通道的后缀陷阱，均来自官方开发者文档的提交、版本、动作、测试、目录管理各节与官方模板仓库
-（核实日期 2026-09-14，方式为抓取官方文档与模板仓库原文）。
+**本文件的易变项**：`manifest.json` 的字段集合与命名限制、`description` 的字符数上限、
+发布标签的形状、必附附件清单、社区目录读取哪一份 `manifest.json`、提交审核的要求、
+官方模板的忽略规则与工作流机制。
 
-社区目录的提交界面与审核细则可能变化——**以官方文档为准**。
+- 字段集合、必填项、`id` 与 `name` 的限制、`version` 的格式：
+  <https://docs.obsidian.md/Reference/Manifest>
+- 发布三件套、发布标签必须等于清单版本、安装时下载哪些文件、目录读默认分支最新提交、
+  提交前必须有 README 与 LICENSE：<https://docs.obsidian.md/plugins/releasing/submit-plugin>
+- `description` 的写法与字符数上限、`minAppVersion` 怎么取、`isDesktopOnly` 何时必须为真、
+  `fundingUrl` 的用法：<https://docs.obsidian.md/community-directory/submission-requirements-for-plugins>
+- 测试通道（官方不提供正式 beta 通道，用社区的测试分发工具）：
+  <https://docs.obsidian.md/Plugins/Releasing/Beta-testing+plugins>
+- 官方模板的忽略规则（`main.js` 不入库）与发布工作流：
+  <https://github.com/obsidianmd/obsidian-sample-plugin>（仓库里的 `.gitignore` 与
+  `.github/workflows/release.yml`）
 
-**核对版本（官方发布流程变化时重核第四、五、七节）**：
+格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- obsidian-verified: date=2026-09-14 -->
-
-上面一行是核对标记，格式固定不要改。重核时把 `date=` 改成当天日期，并逐条对照
-官方文档确认标签形状、附件清单与目录读取规则未变。
+<!-- obsidian-verified: date=2026-09-25 -->

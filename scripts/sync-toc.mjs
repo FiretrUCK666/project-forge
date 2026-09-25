@@ -27,11 +27,17 @@
  * 而 `--check` 还说没问题。损坏（标记落在围栏内）时**拒绝写入**并说清怎么修，
  * 与 compose-agents 处理受损标记同一种做法：宁可不写，也不写坏。
  *
+ * 本文件同时是**围栏扫描的唯一实现**：`scanLines` / `fencedSpans` / `markerPositions`
+ * 导出去给 `compose-agents.mjs` 用。它要判的是同一件事（这对标记是不是真在正文里），
+ * 两边各写一份状态机，就会出现同一个文件、同一种损坏，两处给出不同答案。
+ * 所以入口必须能被安全引入：main 只在**本文件被直接执行**时才跑。
+ *
  * 退出码：0 = 已同步 / 无需同步；1 = --check 发现不同步；2 = 用法或文件错误。
  */
 
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
-import { relative } from 'node:path'
+import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const START = '<!-- toc:start -->'
 const END = '<!-- toc:end -->'
@@ -100,21 +106,37 @@ function slug(text) {
 }
 
 /**
- * 逐行扫描，同时给出围栏状态与标题。**所有结构判据都从这里取**。
+ * 逐行扫描，同时给出**偏移量**、围栏状态与标题。**所有结构判据都从这里取**。
  *
  * 围栏按 CommonMark 的常见形态：起始围栏可带语言标记，闭合围栏须同类字符且不短于
  * 起始长度（` ``` ` 与 ` ~~~~ ` 不互相闭合）。
+ *
+ * 带上偏移量是刻意的：改写文件时按偏移**切原字符串**，而不是把行拆开再按统一行尾
+ * 拼回去。后者会把标记之外那些行尾不一的行悄悄改掉——文字一个字没动，字节动了，
+ * 而「标记之外一个字节都不动」正是本工具对外承诺的那句话。
+ * `start` 是本行首字符的位置，`end` 是本行行尾符之后的位置（末行没有行尾符时即文末）。
  */
-function scanLines(text) {
+export function scanLines(text) {
   const out = []
   let fence = null // { marker: '`' | '~', len: n }
+  let offset = 0
   for (const raw of text.split('\n')) {
+    const start = offset
+    offset = Math.min(start + raw.length + 1, text.length)
     const line = raw.replace(/\r$/, '')
-    const info = { line, inFence: fence !== null, heading: null }
+    const info = {
+      line,
+      raw,
+      start,
+      end: offset,
+      inFence: fence !== null,
+      fenceEvent: null,
+      heading: null,
+    }
     const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line)
     if (m !== null && (fence === null || m[1][0] === fence.marker)) {
-      if (fence === null) fence = { marker: m[1][0], len: m[1].length }
-      else if (m[1].length >= fence.len && m[2].trim() === '') fence = null
+      if (fence === null) { fence = { marker: m[1][0], len: m[1].length }; info.fenceEvent = 'open' }
+      else if (m[1].length >= fence.len && m[2].trim() === '') { fence = null; info.fenceEvent = 'close' }
       info.inFence = true
       out.push(info)
       continue
@@ -126,6 +148,55 @@ function scanLines(text) {
     out.push(info)
   }
   return out
+}
+
+/**
+ * 围栏覆盖的区间（`[起点, 终点)` 列表）。**围栏扫描的唯一出口**。
+ *
+ * 未闭合的围栏一直算到文末：那种文件的后半截在 Markdown 意义上就是代码，
+ * 按「还在围栏里」处理才不会把代码里的标记当成正文的。
+ */
+export function fencedSpans(text) {
+  const spans = []
+  let openAt = -1
+  for (const info of scanLines(text)) {
+    if (info.fenceEvent === 'open') openAt = info.start
+    else if (info.fenceEvent === 'close' && openAt >= 0) { spans.push([openAt, info.end]); openAt = -1 }
+  }
+  if (openAt >= 0) spans.push([openAt, text.length])
+  return spans
+}
+
+/**
+ * 某个标记在**围栏之外**的出现位置（升序）。
+ *
+ * 排除围栏内的出现不是洁癖：文档里在代码块里展示这对标记是正常的用法（本脚本的
+ * 报错信息就是这么写的），把它算进去会得到「文件里有两对标记」这种错误答案，
+ * 进而把一份好文件判成受损。
+ */
+export function markerPositions(text, marker, spans = fencedSpans(text)) {
+  const out = []
+  for (let i = text.indexOf(marker); i >= 0; i = text.indexOf(marker, i + marker.length)) {
+    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
+  }
+  return out
+}
+
+/** 按原文件的主导行尾决定新内容的行尾；判不出来用 LF。 */
+function detectEol(text) {
+  const crlf = (text.match(/\r\n/g) ?? []).length
+  const lf = (text.match(/(?<!\r)\n/g) ?? []).length
+  return crlf > lf ? '\r\n' : '\n'
+}
+
+/**
+ * 去掉一段前缀末尾的空行（含最后那个换行本身）。
+ *
+ * 结果以**非空白字符**结尾，接上 `${eol}${eol}` 才正好是「内容 / 空行 / 空行 / 新内容」。
+ * 少去一个换行会叠出三四行空白，多留一个换行会让围栏闭合行与新节之间多出一道空行。
+ */
+function trimTrailingBlanks(prefix) {
+  return prefix.replace(/[ \t]*(?:\r?\n[ \t]*)+$/, '')
 }
 
 /** 抽出标题。**必须跳过围栏代码块**——代码块里以 `#` 开头的行不是标题。 */
@@ -161,56 +232,84 @@ function renderToc(items, eol) {
   return lines.join(eol)
 }
 
-/** 按原文件的主导行尾决定新内容的行尾；判不出来用 LF。 */
-function detectEol(text) {
-  const crlf = (text.match(/\r\n/g) ?? []).length
-  const lf = (text.match(/(?<!\r)\n/g) ?? []).length
-  return crlf > lf ? '\r\n' : '\n'
+/**
+ * 标记在文件里的状态。**判据只有一处**，标题、目录节定位、插入点、损坏检查都从这里取。
+ *
+ *   - `absent`：正文里没有这对标记（围栏内的展示不算）；
+ *   - `ok`：围栏外恰好一对，附带两个偏移量；
+ *   - `in-fence`：正文里一对都没有，但文件里出现过——**文件已经被写坏了**
+ *     （旧版本会把目录插进代码块内部并吃掉围栏闭合行）。此时既不能刷新也不能读成
+ *     「已是当前状态」：越修越坏，而且下一次 `--check` 会把损坏说成正常；
+ *   - `reversed`：结束标记在开始标记之前；
+ *   - `duplicated`：不止一对。
+ *
+ * 后三种一律**停下报错、不写文件**。
+ */
+function markerState(text) {
+  const spans = fencedSpans(text)
+  const starts = markerPositions(text, START, spans)
+  const ends = markerPositions(text, END, spans)
+  if (starts.length === 0 && ends.length === 0) {
+    return text.includes(START) || text.includes(END) ? { kind: 'in-fence' } : { kind: 'absent' }
+  }
+  if (starts.length === 1 && ends.length === 1) {
+    return starts[0] < ends[0]
+      ? { kind: 'ok', startAt: starts[0], endAt: ends[0] }
+      : { kind: 'reversed' }
+  }
+  return { kind: 'duplicated', starts: starts.length, ends: ends.length }
 }
 
-/** 把正文插进标记之间（标记已存在）。 */
-function replaceBetween(text, body, eol) {
-  const s = text.indexOf(START)
-  const e = text.indexOf(END)
-  if (s < 0 || e < 0 || e < s) throw new Error('目录标记不成对')
-  return `${text.slice(0, s + START.length)}${eol}${eol}${body}${eol}${eol}${text.slice(e)}`
+/** 状态异常时，把「这是什么、为什么停下、怎么手工修」说清楚，然后返回退出码 2。 */
+function reportBroken(f, state) {
+  const repair = `    ${START}\n    ${END}\n`
+  if (state.kind === 'in-fence') {
+    process.stderr.write(
+      `${f}：目录标记落在代码围栏内部——文件已被写坏（目录被插进了代码块）。\n`
+      + '  **本脚本没有改动它。** 请手工删掉围栏内的这一对标记：\n'
+      + repair
+      + '  删掉后重跑本脚本，它会在正确位置重建目录。\n',
+    )
+    return 2
+  }
+  if (state.kind === 'reversed') {
+    process.stderr.write(
+      `${f}：目录标记顺序颠倒——结束标记出现在开始标记之前。\n`
+      + '  **本脚本没有改动它。** 请把这一对标记调回正确顺序（各一个）：\n'
+      + repair,
+    )
+    return 2
+  }
+  const parts = []
+  if (state.starts !== 1) parts.push(`开始标记 ${state.starts} 个（应为 1）`)
+  if (state.ends !== 1) parts.push(`结束标记 ${state.ends} 个（应为 1）`)
+  process.stderr.write(
+    `${f}：目录标记不成对——${parts.join('，')}。\n`
+    + '  **本脚本没有改动它。** 多半是复制粘贴了整段目录，或合并冲突留下了重复内容。\n'
+    + '  请手工清理到恰好一对（各一个）：\n'
+    + repair,
+  )
+  return 2
 }
 
 /**
- * 标记是否落在代码围栏里——文件已被写坏的判据。
+ * 读一个数字选项。**校验与 compose-agents 的 --budget 同形**。
  *
- * 旧版本会把目录插进代码块内部（并吃掉围栏闭合行），那种文件的标记就在围栏里。
- * 检出后**不写**，避免越修越坏；`--check` 同样报错（不能读成「已是当前状态」）。
+ * 不校验的代价不是「报错」而是「换判据」：`Number(undefined)` 与 `Number('两')` 都是
+ * NaN，而 NaN 与任何数比较都是 false，于是 `level > maxLevel` 恒真（筛选失效，标题被
+ * 多收）、`items.length < minSections` 恒假（阈值失效，短文件也被加目录）。
+ * 两种都静默成功、退出码 0，随后 `--check` 还会把结果读成「已是当前状态」。
  */
-function markersInsideFence(text) {
-  const s = text.indexOf(START)
-  const e = text.indexOf(END)
-  if (s < 0 || e < 0) return false
-  const flags = { start: false, end: false }
-  let offset = 0
-  let fence = null
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/\r$/, '')
-    const at = offset
-    const next = offset + raw.length + 1
-    if (at <= s && s < next) flags.start = fence !== null
-    if (at <= e && e < next) flags.end = fence !== null
-    const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line)
-    if (m !== null && (fence === null || m[1][0] === fence.marker)) {
-      if (fence === null) fence = { marker: m[1][0], len: m[1].length }
-      else if (m[1].length >= fence.len && m[2].trim() === '') fence = null
-    }
-    offset = next
+function readIntOption(flag, raw, min) {
+  const n = Number(raw)
+  if (raw === undefined || !Number.isInteger(n) || n < min) {
+    const shown = raw === undefined ? '（后面没有值）' : `「${raw}」`
+    throw new Error(`${flag} 需要一个不小于 ${min} 的整数，收到 ${shown}。`)
   }
-  return flags.start || flags.end
+  return n
 }
 
-/** 把行数组按原文行尾接回去（scanLines 去掉了行尾的 \r，这里按主导行尾还原）。 */
-function joinLines(lines, eol) {
-  return lines.map((l) => l.line).join(eol)
-}
-
-async function main() {
+function main() {
   const args = process.argv.slice(2)
   const files = []
   let check = false
@@ -220,8 +319,16 @@ async function main() {
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i]
     if (a === '--check') { check = true; continue }
-    if (a === '--max-level') { maxLevel = Number(args[++i]); continue }
-    if (a === '--min-sections') { minSections = Number(args[++i]); continue }
+    if (a === '--max-level' || a === '--min-sections') {
+      try {
+        const n = readIntOption(a, args[++i], a === '--max-level' ? 2 : 1)
+        if (a === '--max-level') maxLevel = n
+        else minSections = n
+      } catch (error) {
+        process.stderr.write(`错误：${error.message}\n`); return 2
+      }
+      continue
+    }
     if (a === '--help' || a === '-h') {
       process.stdout.write('用法：node scripts/sync-toc.mjs <文件.md...> [--check] [--max-level N] [--min-sections N]\n')
       return 0
@@ -237,95 +344,105 @@ async function main() {
 
   let drifted = 0
   for (const f of files) {
-    const text = readFileSync(f, 'utf8').replace(/^\uFEFF/, '')
-    const items = headings(text, maxLevel)
-    const hasMarkers = text.includes(START) && text.includes(END)
-    const eol = detectEol(text)
-    const body = renderToc(items, eol)
-
-    if (hasMarkers && markersInsideFence(text)) {
-      process.stderr.write(
-        `${f}：目录标记落在代码围栏内部——文件已被写坏（目录被插进了代码块）。\n`
-        + '  **本脚本没有改动它。** 请手工删掉围栏内的这一对标记：\n'
-        + `    ${START}\n    ${END}\n`
-        + '  删掉后重跑本脚本，它会在正确位置重建目录。\n',
-      )
+    // 读一次、判一次。标记状态异常时**停下不写**，并说清是什么、怎么手工修
+    //（与 compose-agents 同一种做法：宁可不写，也不写坏）。
+    let text
+    try {
+      text = readFileSync(f, 'utf8').replace(/^\uFEFF/, '')
+    } catch (error) {
+      process.stderr.write(`${f}：读不出来——${error.message}\n  **本脚本没有改动它。**\n`)
       return 2
     }
+    const state = markerState(text)
+    if (state.kind !== 'absent' && state.kind !== 'ok') return reportBroken(f, state)
+    // 每次处理都清一遍残留临时文件，**不只在要写的时候**：上一次运行被杀时留下的
+    // 临时文件，若这一轮判定「无需改动」就会一直留着，而顶层多出来的条目会被结构
+    // 自检当成无主文件。
+    clearStaleTemps(f)
 
-    if (!hasMarkers && items.length < minSections) {
-      process.stdout.write(`${f}：${items.length} 节，少于阈值 ${minSections}，**不需要目录**\n`)
-      continue
-    }
+    try {
+      const items = headings(text, maxLevel)
+      const eol = detectEol(text)
+      const body = renderToc(items, eol)
 
-    if (hasMarkers) {
-      const next = replaceBetween(text, body, eol)
-      if (next === text) {
-        process.stdout.write(`${f}：目录已是当前状态（${items.length} 项）\n`)
-      } else if (check) {
-        drifted += 1
-        process.stdout.write(`${f}：**目录与标题不同步**（应为 ${items.length} 项）\n`)
-      } else {
-        writeAtomic(f, next)
-        process.stdout.write(`${f}：已刷新目录（${items.length} 项）\n`)
+      if (state.kind === 'ok') {
+        const next = `${text.slice(0, state.startAt + START.length)}${eol}${eol}${body}${eol}${eol}${text.slice(state.endAt)}`
+        if (next === text) {
+          process.stdout.write(`${f}：目录已是当前状态（${items.length} 项）\n`)
+        } else if (check) {
+          drifted += 1
+          process.stdout.write(`${f}：**目录与标题不同步**（应为 ${items.length} 项）\n`)
+        } else {
+          writeAtomic(f, next)
+          process.stdout.write(`${f}：已刷新目录（${items.length} 项）\n`)
+        }
+        continue
       }
-      continue
-    }
 
-    // 没有标记。分两种情况：已有手写目录节，或完全没有。
-    // 判据取**围栏外**的行；接管手写目录时只吃「目录标题 + 紧随其后的连续列表项」，
-    // 不用「标题到下一个标题」那种区间——那会把区间里的说明文字、乃至围栏闭合行
-    // 一并吃掉（实测过）。
-    const lines = scanLines(text)
-    const tocAt = lines.findIndex(
-      (l) => !l.inFence && l.heading !== null && l.heading.level === 2
-        && TOC_HEADING_RE.test(`## ${l.heading.title}`),
-    )
-    if (tocAt >= 0) {
-      // 只吃掉「目录标题之后的空行与列表项」，到**最后一个列表项**为止：
-      // 之后的说明文字、引用块、围栏都留在原地。空行不算内容，但也不许越过它去
-      // 吃后面的东西——那正是旧版本「标题到下一个标题」的区间式接管的病根。
-      let lastItem = tocAt
-      for (let i = tocAt + 1; i < lines.length; i += 1) {
-        const l = lines[i]
-        if (l.inFence || l.heading !== null) break
-        const blank = l.line.trim() === ''
-        const item = /^\s*(?:[-*+]|\d+[.)])\s+/.test(l.line)
-        if (!blank && !item) break
-        if (item) lastItem = i
+      if (items.length < minSections) {
+        process.stdout.write(`${f}：${items.length} 节，少于阈值 ${minSections}，**不需要目录**\n`)
+        continue
       }
-      const endLine = lastItem + 1
-      const head = joinLines(lines.slice(0, tocAt + 1), eol)
-      const tail = joinLines(lines.slice(endLine), eol)
-      const managed = `${head}${eol}${eol}${START}${eol}${eol}${body}${eol}${eol}${END}`
-      const next = tail === '' ? `${managed}${eol}` : `${managed}${eol}${eol}${tail}`
+
+      // 没有标记。分两种情况：已有手写目录节，或完全没有。
+      // 判据取**围栏外**的行；接管手写目录时只吃「目录标题 + 紧随其后的连续列表项」，
+      // 不用「标题到下一个标题」那种区间——那会把区间里的说明文字、乃至围栏闭合行
+      // 一并吃掉（实测过）。
+      const lines = scanLines(text)
+      const tocAt = lines.findIndex(
+        (l) => !l.inFence && l.heading !== null && l.heading.level === 2
+          && TOC_HEADING_RE.test(`## ${l.heading.title}`),
+      )
+      if (tocAt >= 0) {
+        // 只吃掉「目录标题之后的空行与列表项」，到**最后一个列表项**为止：
+        // 之后的说明文字、引用块、围栏都留在原地。空行不算内容，但也不许越过它去
+        // 吃后面的东西——那正是旧版本「标题到下一个标题」的区间式接管的病根。
+        let lastItem = tocAt
+        for (let i = tocAt + 1; i < lines.length; i += 1) {
+          const l = lines[i]
+          if (l.inFence || l.heading !== null) break
+          const blank = l.line.trim() === ''
+          const item = /^\s*(?:[-*+]|\d+[.)])\s+/.test(l.line)
+          if (!blank && !item) break
+          if (item) lastItem = i
+        }
+        // 头尾都**按偏移切原字符串**：标记之外的那些行连同它们各自的行尾原样搬过去。
+        const head = trimTrailingBlanks(text.slice(0, lines[tocAt].end))
+        const tail = text.slice(lines[lastItem].end)
+        const managed = `${head}${eol}${eol}${START}${eol}${eol}${body}${eol}${eol}${END}`
+        const next = tail === '' ? `${managed}${eol}` : `${managed}${eol}${eol}${tail}`
+        if (check) {
+          drifted += 1
+          process.stdout.write(`${f}：目录是手写的、还没纳入自动同步（${items.length} 项应生成）\n`)
+        } else {
+          writeAtomic(f, next)
+          process.stdout.write(`${f}：已把手写目录纳入自动同步（${items.length} 项）\n`)
+        }
+        continue
+      }
+
+      // 完全没有目录：插在**围栏外的第一个二级标题**之前；没有二级标题就追加到文件末尾。
+      // 前后各留一个空行：先按偏移切出头部、去掉它末尾的空行，再补两处，避免叠出三四行空白。
+      const firstH2 = lines.findIndex((l) => !l.inFence && l.heading !== null && l.heading.level === 2)
+      const tailStart = firstH2 >= 0 ? lines[firstH2].start : text.length
+      const head = trimTrailingBlanks(text.slice(0, tailStart))
+      const tail = text.slice(tailStart)
+      const section = `## 目录${eol}${eol}${START}${eol}${eol}${body}${eol}${eol}${END}`
+      const tailPart = tail === '' ? `${eol}` : `${eol}${eol}${tail}`
+      const next = head === '' ? `${section}${tailPart}` : `${head}${eol}${eol}${section}${tailPart}`
       if (check) {
         drifted += 1
-        process.stdout.write(`${f}：目录是手写的、还没纳入自动同步（${items.length} 项应生成）\n`)
+        process.stdout.write(`${f}：**缺少目录**（${items.length} 节，建议加）\n`)
       } else {
         writeAtomic(f, next)
-        process.stdout.write(`${f}：已把手写目录纳入自动同步（${items.length} 项）\n`)
+        process.stdout.write(`${f}：已添加目录（${items.length} 项）\n`)
       }
-      continue
-    }
-
-    // 完全没有目录：插在**围栏外的第一个二级标题**之前；没有二级标题就追加到文件末尾。
-    // 前后各留一个空行：拼装时先去掉头部末尾的空行，再补两处，避免叠出三四行空白。
-    const firstH2 = lines.findIndex((l) => !l.inFence && l.heading !== null && l.heading.level === 2)
-    const atLine = firstH2 >= 0 ? firstH2 : lines.length
-    const headLines = lines.slice(0, atLine).map((l) => l.line)
-    while (headLines.length > 0 && headLines[headLines.length - 1].trim() === '') headLines.pop()
-    const head = headLines.join(eol)
-    const tail = joinLines(lines.slice(atLine), eol)
-    const section = `## 目录${eol}${eol}${START}${eol}${eol}${body}${eol}${eol}${END}`
-    const tailPart = tail === '' ? `${eol}` : `${eol}${eol}${tail}`
-    const next = head === '' ? `${section}${tailPart}` : `${head}${eol}${eol}${section}${tailPart}`
-    if (check) {
-      drifted += 1
-      process.stdout.write(`${f}：**缺少目录**（${items.length} 节，建议加）\n`)
-    } else {
-      writeAtomic(f, next)
-      process.stdout.write(`${f}：已添加目录（${items.length} 项）\n`)
+    } catch (error) {
+      process.stderr.write(
+        `${f}：处理失败——${error instanceof Error ? error.message : String(error)}\n`
+        + '  **本脚本没有改动它。**\n',
+      )
+      return 2
     }
   }
 
@@ -333,15 +450,40 @@ async function main() {
     // 含空格或中文的路径必须加引号，否则给出的「修正命令」照抄就失败（实测过）。
     const quoted = files.map((f) => (/\s/.test(f) ? `"${f}"` : f)).join(' ')
     // 提示里给脚本自己的路径：写死 scripts/ 时，脚本被放到别处（例如仓库的 tools/）后
-    // 这条"照抄即修复"的命令会直接失败，而它恰恰是给人复制的。
-    const selfRel = relative(process.cwd(), process.argv[1] ?? '') || 'sync-toc.mjs'
-    process.stderr.write(`\n${drifted} 个文件的目录需要同步。修正：node ${selfRel} ${quoted}\n`)
+    // 这条「照抄即修复」的命令会直接失败，而它恰恰是给人复制的。脚本路径自己同样要
+    // 引号——装在带空格的目录下时，未加引号的这条命令照样跑不起来。
+    const selfPath = resolve(process.argv[1] ?? 'sync-toc.mjs')
+    const selfRel = relative(process.cwd(), selfPath) || 'sync-toc.mjs'
+    const selfQuoted = /\s/.test(selfRel) ? `"${selfRel}"` : selfRel
+    process.stderr.write(`\n${drifted} 个文件的目录需要同步。修正：node ${selfQuoted} ${quoted}\n`)
     return 1
   }
   return 0
 }
 
-/** 先写临时文件再改名：中途失败不会留下半截文件。 */
+/**
+ * 清掉这个文件此前的临时文件（**任何**进程号留下的）。
+ *
+ * 只清自己那个进程号的等于没清：进程被杀掉时留下的是当时的进程号，下一次运行换了
+ * pid，那个文件就永远躺在那里——而顶层多出来的条目会被结构自检当成无主文件
+ * （见 preflight 的顶层目录整洁检查）。按「同目录、同前缀」匹配，不误删别人的文件。
+ */
+function clearStaleTemps(path) {
+  const dir = dirname(path)
+  const prefix = `${basename(path)}.tmp-`
+  let entries
+  try { entries = readdirSync(dir) } catch { return }
+  for (const name of entries) {
+    if (!name.startsWith(prefix)) continue
+    try { unlinkSync(join(dir, name)) } catch { /* 清不掉就算了 */ }
+  }
+}
+
+/**
+ * 先写临时文件再改名：中途失败不会留下半截文件。
+ *
+ * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在仓库里，会被结构自检当成无主文件。
+ */
 function writeAtomic(path, content) {
   const tmp = `${path}.tmp-${process.pid}`
   try {
@@ -353,4 +495,7 @@ function writeAtomic(path, content) {
   }
 }
 
-process.exitCode = await main()
+// 入口守卫：本文件同时是围栏扫描的实现方，被 compose-agents.mjs 引入时不能顺带跑一遍。
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = main()
+}

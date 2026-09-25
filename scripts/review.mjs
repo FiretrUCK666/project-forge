@@ -37,7 +37,7 @@ const FLAGS = new Set([
   '--private-no-license', // 用户确认：保留所有权利，不落盘 LICENSE
   '--no-ci', // 用户确认：暂不要 CI
   '--no-auto-release', // 用户确认：暂不要自动发布
-  '--secrets-reviewed', // 用户确认：已按密钥门控逐条核对剩余命中，均为占位或测试数据
+  '--secrets-reviewed', // 用户确认：未跟踪未忽略的命中均为占位或测试数据（已入库那一档不在此列）
   '--strict', // 严格模式：待问事项同样拦住（exit 2），用于 CI；默认待问只提示不拦
 ])
 
@@ -105,7 +105,42 @@ export function tierSecrets(hits) {
   const tracked = list.filter((h) => h.tracked === true)
   const safe = list.filter((h) => h.tracked !== true && h.ignored === true)
   const exposed = list.filter((h) => h.tracked !== true && h.ignored !== true)
-  return { tracked, safe, exposed, blocking: [...tracked, ...exposed] }
+  // 保守方向：读不到仍按最坏情况算进 blocking——凭据误信「未忽略」就等于把它提交进
+  // 历史，而拦下来只是多看一眼。但**报告文案不能陈述一个没验证过的事实**：把读不到
+  // 的那批与「读到确实没忽略」分开，前者要的处置是手工核对，后者才是加 flag。
+  const unknown = exposed.filter((h) => h.tracked === undefined || h.ignored === undefined)
+  const confirmed = exposed.filter((h) => h.tracked !== undefined && h.ignored !== undefined)
+  return { tracked, safe, exposed, unknown, confirmed, blocking: [...tracked, ...exposed] }
+}
+
+/**
+ * 三态比特的分档。`true` / `false` / `undefined`（读不到）的正确处置各不相同：
+ * 读到的可以按事实判，读不到的必须让人**手工核对**。并进 `false` 会让人对一个没
+ * 验证过的判断采取行动，方向还可能是反的。
+ *
+ * 只负责分开数。保守方向由调用点自己定——凭据那边偏严、私有路径那边偏松。
+ */
+function splitTri(list, bit) {
+  const arr = Array.isArray(list) ? list : []
+  return {
+    yes: arr.filter((h) => bit(h) === true),
+    no: arr.filter((h) => bit(h) === false),
+    unknown: arr.filter((h) => bit(h) === undefined),
+  }
+}
+
+/**
+ * 契约里「作者自己写的那部分」——内核标记之外的正文。
+ *
+ * 注入的内核由 `templates/agents-kernel.md` 独占，它自带「远端」「发布」「版本」这些词。
+ * 判「这份契约有没有写清远端与发版」时若按全文判，内核会替作者答上来，判据于是恒真。
+ * 没有结束标记时（手写文件）返回全文——那时没有内核可依赖，全文就是作者的部分。
+ */
+export function outsideKernel(text) {
+  const s = String(text ?? '')
+  const at = s.indexOf(KERNEL_END)
+  if (at < 0) return s
+  return s.slice(at + KERNEL_END.length)
 }
 
 /**
@@ -145,6 +180,8 @@ function main(argv) {
       + '      [--private-no-license] [--no-ci] [--no-auto-release] [--secrets-reviewed] [--strict]\n\n'
       + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n'
       + '  默认[待问]不拦（exit 0 但结论写“还有待问”）；--strict 下[待问]同样拦住（exit 2），用于 CI。\n'
+      + '  --secrets-reviewed 只覆盖「未跟踪且未忽略」的命中；已经进了版本库的凭据改文件不解决，\n'
+      + '  任何 flag 都不消那一档——从索引移除并轮换。\n'
       + '  无对应 flag 的[待问]（徽章没查完、DSH 挂载建议、英文模板、纯文档构建命令、扫描未覆盖范围）只能改文件消掉。\n',
     )
     return 0
@@ -218,12 +255,21 @@ function main(argv) {
   // 契约照样交付，用户拿到的 AGENTS.md 永远缺发布那半部分。判据是**事实 + 文本**
   // 两条都有：有远端（`git.remote` 非空）时，契约里必须提到远端与发布/标签——
   // 否则那次回跑没做。中英文都认，避免语言假设。
+  //
+  // 只看**内核标记之外**的正文。注入的内核自带「远端」「发布」这些词（「本文件的定位
+  // 与编辑规则」那张表、还有「最小可用…不为未来需求提版本」里的「版本」），按全文判
+  // 等于拿内核给自己作证：一份删到只剩内核的契约照样通过，这条检查对每一个由本
+  // skill 生成的项目都是死代码，而它本该是这条规则唯一的机器落点。
   if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
     && git.isRepoRoot !== false && agents !== undefined) {
-    const hasRemoteText = /远端|remote|origin|推送|push/i.test(agents)
-    const hasReleaseText = /发布|release|标签|tag|版本/i.test(agents)
+    const body = outsideKernel(agents)
+    const hasRemoteText = /远端|remote|origin|推送|push/i.test(body)
+    const hasReleaseText = /发布|release|标签|tag/i.test(body)
     if (!hasRemoteText || !hasReleaseText) {
-      missing.push('AGENTS.md 缺远端与发布部分（有远端就必须写清怎么推、怎么发版：P5 之后要回跑 P4 的 compose-agents）')
+      const lack = [!hasRemoteText ? '远端/推送' : null, !hasReleaseText ? '发布/标签' : null]
+        .filter((x) => x !== null).join('与')
+      missing.push(`AGENTS.md 的内核之外缺${lack}部分（有远端就必须写清怎么推、怎么发版：`
+        + 'P5 之后要回跑 P4 的 compose-agents）')
     }
   }
 
@@ -241,14 +287,26 @@ function main(argv) {
   const risks = s.risks ?? {}
   const secretHits = [...(risks.secretFiles ?? []), ...(risks.secretContent ?? [])]
   const secretTiers = tierSecrets(secretHits)
-  if (secretTiers.blocking.length > 0) {
+  // flag 的效力按**处置档**分开：`--secrets-reviewed` 的语义是「这一处是占位或测试数据」，
+  // 而「已经进了版本库」不在这个语义里——那一档的处置是从索引移除并轮换，没有「确认一下
+  // 就算了」这个选项。所以它只覆盖 `exposed`（未跟踪未忽略），`tracked` 永不被 flag 消。
+  // 否则一个 flag 就能把「凭据已写进 git 历史」读成「全部齐备」，纪律挡不住机制缺失。
+  if (secretTiers.confirmed.length > 0) {
     if (flags.has('--secrets-reviewed')) {
-      ok.push(`凭据命中 ${secretTiers.blocking.length} 处（用户已按门控确认为占位或测试数据）`)
+      ok.push(`未跟踪未忽略的凭据 ${secretTiers.confirmed.length} 处已确认为占位或测试数据（不进版本库）`)
     } else {
-      missing.push(`凭据形状 ${secretTiers.blocking.length} 处`
-        + `（已入库 ${secretTiers.tracked.length}、未忽略 ${secretTiers.exposed.length}；`
-        + '按版本管理密钥门控分案处置后重跑；确认为占位或测试数据时加 --secrets-reviewed，位置见勘察报告）')
+      missing.push(`凭据形状 ${secretTiers.confirmed.length} 处（未跟踪且未忽略，下次提交会带进历史；`
+        + '确认为占位或测试数据时加 --secrets-reviewed，位置见勘察报告）')
     }
+  }
+  if (secretTiers.unknown.length > 0) {
+    missing.push(`凭据形状 ${secretTiers.unknown.length} 处无法确认是否已入库或被忽略（受控文件清单没取到，`
+      + '常见于仓库过大或版本控制不可用）：已按最坏情况拦下，但**先手工核对再处置**——'
+      + '加 --secrets-reviewed 会消掉一个可能真的没问题的项，也可能放走一个真的会进历史的项')
+  }
+  if (secretTiers.tracked.length > 0) {
+    missing.push(`凭据形状 ${secretTiers.tracked.length} 处已在版本库里（git 历史已含它，`
+      + '改文件不解决问题）：从索引移除并轮换该凭据后重跑；这不是 flag 能消的一项')
   }
   if (secretTiers.safe.length > 0) {
     ok.push(`未跟踪且已被忽略的敏感文件 ${secretTiers.safe.length} 处（不进版本库就不拦；确认忽略规则真的覆盖它们）`)
@@ -276,21 +334,27 @@ function main(argv) {
   const allLeaks = (risks.homePathLeaks ?? []).filter((h) => h.kind === 'leak')
   // 已被忽略规则覆盖的本机路径不进版本库：与凭据同一分案，报事实但不拦。
   // 否则一个只在本机存在、且已忽略的状态文件（工具生成的那种）会让门禁永远叫喊。
-  const leaks = allLeaks.filter((h) => h.ignored !== true)
-  const ignoredLeaks = allLeaks.filter((h) => h.ignored === true)
-  if (leaks.length > 0) {
-    missing.push(`本机私有路径 ${leaks.length} 处（换台机器就失准，也可能已经暴露了目录结构；改成相对路径或环境变量）`)
+  // 读不到忽略状态时归「待问」而不是「缺」：路径本身确实该改，但**是否已经暴露**
+  // 是没验证过的，不该用「缺」这种断言语气。
+  const leakBits = splitTri(allLeaks, (h) => h.ignored)
+  if (leakBits.no.length > 0) {
+    missing.push(`本机私有路径 ${leakBits.no.length} 处（换台机器就失准，也可能已经暴露了目录结构；改成相对路径或环境变量）`)
   }
-  if (ignoredLeaks.length > 0) {
-    pending.push(`本机私有路径 ${ignoredLeaks.length} 处已被忽略规则覆盖（不进版本库；确认忽略规则真的覆盖它们）`)
+  if (leakBits.yes.length > 0) {
+    pending.push(`本机私有路径 ${leakBits.yes.length} 处已被忽略规则覆盖（不进版本库；确认忽略规则真的覆盖它们）`)
   }
-  const bigTracked = (risks.largeFiles ?? []).filter((f) => f.tracked === true)
-  const bigUntracked = (risks.largeFiles ?? []).filter((f) => f.tracked !== true)
-  if (bigTracked.length > 0) {
-    missing.push(`已在版本库里的大文件 ${bigTracked.length} 个（≥20MB，克隆与历史都会长期承担；先确认该不该入库）`)
+  if (leakBits.unknown.length > 0) {
+    pending.push(`本机私有路径 ${leakBits.unknown.length} 处无法确认是否已被忽略规则覆盖（请手工核对；改法同上）`)
   }
-  if (bigUntracked.length > 0) {
-    pending.push(`未跟踪的大文件 ${bigUntracked.length} 个（≥20MB；提交前先决定忽略还是入库）`)
+  const big = splitTri(risks.largeFiles, (f) => f.tracked)
+  if (big.yes.length > 0) {
+    missing.push(`已在版本库里的大文件 ${big.yes.length} 个（≥20MB，克隆与历史都会长期承担；先确认该不该入库）`)
+  }
+  if (big.no.length > 0) {
+    pending.push(`未跟踪的大文件 ${big.no.length} 个（≥20MB；提交前先决定忽略还是入库）`)
+  }
+  if (big.unknown.length > 0) {
+    pending.push(`大文件 ${big.unknown.length} 个无法确认是否已入库（受控文件清单没取到；请手工核对）`)
   }
   if (Array.isArray(risks.symlinks) && risks.symlinks.length > 0) {
     pending.push(`符号链接目录 ${risks.symlinks.length} 个未进入扫描（链接指向仓库外时不该扫；确认里面没有该查的东西）`)

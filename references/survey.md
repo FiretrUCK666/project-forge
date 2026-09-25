@@ -112,11 +112,18 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 | 依据 | 强度 | 说明 |
 | --- | --- | --- |
 | 清单文件（`package.json`、`pyproject.toml`、`Cargo.toml` 一类） | 强 | 项目自己声明的形态，可直接采信 |
-| 构建描述文件（`CMakeLists.txt`、`Makefile` 一类） | 中 | 说明这是代码项目，构建方式仍需确认 |
+| 构建描述文件（`CMakeLists.txt`、`meson.build` 一类） | 中 | 这些文件本身就指向某种语言，据此定生态 |
 | 源码扩展名（`.cpp`、`.py` 一类） | 弱 | 只说明「有这种代码」，不足以断定工具链 |
 
+**只说明「有人在这里构建」的文件不参与生态判定。** `Makefile`（文档站里极常见）、
+`Dockerfile`（那是打包方式，不是语言）记到 `artifacts.buildEntryFiles`，但不进 `kinds`。
+理由是**判错的代价不对称**：纯文档目录的发布列是「不做」，代码生态是「视声明而定」——
+带一个 `Makefile` 的文档站若被判成 C++，就会被推去配一条它根本没有制品可发的发布链路。
+反过来不漏判：真实的 C/C++ 项目去掉这条路也认得出来，`.c` / `.cpp` / `.h` 的扩展名判据
+兜得住。
+
 因此**别把生态判定直接当成工具链结论**：`python` 不代表用 pytest，`rust` 不代表用
-cargo。`commands` 一节会区分这一点。
+cargo，`cpp` 不代表用 CMake。`commands` 一节会区分这一点。
 
 两个需要额外处理的判定结果：
 
@@ -161,6 +168,22 @@ cargo。`commands` 一节会区分这一点。
 
 生成 `AGENTS.md` 时脚本已经按生态分组渲染，不会犯这个错；自己取用时注意这一点。
 
+**「不是命令」的键只有两类，不要把它们当命令用**：
+
+| 键 | 含义 |
+| --- | --- |
+| `packageManager` | 命令前缀由它决定，单独看不是命令 |
+| `note` / `<键>Note` | 描述某条命令**从哪来**，不是命令本身。例如「此命令按标准库 unittest 推断，请与项目实际用法核对」 |
+
+判定用**正向清单**（哪些键算命令）而不是排除式黑名单：新增命令键时黑名单要补，
+漏掉的那个会被当成一条可执行的命令渲染出去。`references/../scripts/compose-agents.mjs`
+用的是同一份正向清单。
+
+**「有没有命令」只认真正的命令键。** 某个生态的命令推导尚未实现时，它带的是一条
+`note` 而**不是**命令；那时 `commands` 里一条命令都没有，报告会出现「未推导出任何命令」。
+那句不是客套——它正是 P7 要求如实汇报「这个项目一行都没验证过」的触发条件，被一条
+说明顶掉就等于把不安全的那一侧换成了看起来安全的那一侧。
+
 ### `artifacts`
 
 决定「产物入不入库」的既成事实：
@@ -174,12 +197,14 @@ cargo。`commands` 一节会区分这一点。
 | `publishableManifest` | 勘察输出的可发布清单（文件与生态），P2 判定能不能走发布链路的依据（含 Obsidian 的 `manifest.json`，以含 `minAppVersion` 为前提） |
 | `declaredVersion` | 勘察输出的清单声明版本号，P6 标签命名与抬版本号判据的依据（含 Obsidian 的 `manifest.json`；Go 故意不读——靠标签，读不到是正确结果） |
 | `versionAligned` | 标签与版本号是否对齐（`true`/`false`，取不到标签列表时留空不判） |
-| `versionAlignedTags` | 上面的判断所依据的那几个标签原文（给人复核用） |
+| `versionAlignedTags` | 上面的判断所依据的那几个标签原文（给人复核用），**由近及远** |
 | `hasNpmIgnore` | 有没有 `.npmignore`（与 `publishScope` 是两套机制：白名单与黑名单） |
-| `obsidianArtifacts` | Obsidian 发布三件套 presence（`main.js` 缺即安装断链） |
-| `cargoMeta` | Cargo 发布必填元数据的 presence（`license`、`description` 有无，只报有无） |
+| `buildEntryFiles` | 有构建入口文件（`Makefile` 一类）但脚本据此**推不出命令**。target 与阶段各项目不同，「怎么构建」要读它自己确认（**条件字段**：没有则整个不存在） |
+| `obsidianArtifacts` | Obsidian 发布三件套 presence（`main.js` 缺即安装断链）。**只在真是 Obsidian 插件时有值**——判据是 `manifest.json` 含 `minAppVersion`，普通 PWA 的同名文件不算 |
+| `cargoMeta` | Cargo 发布必填元数据的 presence（`license`、`description` 有无，只报有无；另带 `keywords` / `categories` 数量与 `edition` 有无） |
 | `goModule` | Go 模块路径、`go` 指令版本、`retract` 有无（只读文本；`go` 指令缺失由门禁提示） |
 | `pythonBuild` | 是否声明构建后端（有才有权威构建命令，否则 review 待问） |
+| `pythonMeta` | Python 发布硬门禁那几项的 presence：`readme` / `license` / `requires-python` / `dynamic version` 有无。门禁逐项点名用，只报有无 |
 | `runtimeRequirements` | **项目自己声明的运行环境下限**（见下，含 Obsidian 的 `minAppVersion`） |
 
 前四个字段合起来回答一个问题：**拿到这个项目的人，会不会自己跑一次构建？**
@@ -187,6 +212,10 @@ cargo。`commands` 一节会区分这一点。
 - 不会（这是被安装、被分发的东西）→ 产物**必须进**版本库
 
 详细判据见 `references/version-control.md`。
+
+**`buildEntryFiles` 与「生态判定」是两件事，别混用。** 带了 `Makefile` 的目录
+（一堆文档站都带）不因此就是某个语言的代码项目，所以它不进生态判定，只作为
+「这里有构建步骤」这个事实报出来。生态由清单文件与源码扩展名决定。
 
 **`runtimeRequirements` 是写文档时的权威来源。** 文档套装要求「环境要求那一节必须写
 **具体版本号**、不许写『或更高』这类兑现不了的承诺、更不许编造」，而项目自己声明的那个
@@ -241,6 +270,7 @@ cargo。`commands` 一节会区分这一点。
 | `patchFile` | 磁盘上实际存在的补丁文件（根目录的 `cordis.patch.yml` 一类） |
 | `bundlePatch` | 清单声明的补丁路径与存在性（`dsh.bundle.patch` 指过去，文件在不在） |
 | `hasHostEntry`、`hasClientEntry`、`hasClientDecl`、`hasInvariantEntry` | host、client、伴生三路入口各有没有；client 声明与入口打架时先对齐，由此定 host-only、client-only 还是双面 |
+| `exportsKeys` | 清单 `exports` 的键原文。上面那几格是判定结果，这一格是判定的依据——要复核「为什么说没有 client 入口」时看它 |
 | `filesHasLib`、`filesHasPatch` | `files` 白名单含不含构建产物与补丁（含了才发得出去） |
 | `libTracked` | 构建产物目录有没有被跟踪（与上一行是两套集合，合起来才知道走成品路线还是源码路线） |
 | `hostRuntimeInDeps` | 宿主运行时是不是放错进了 `dependencies`（应为 peer） |
@@ -255,9 +285,11 @@ cargo。`commands` 一节会区分这一点。
 
 仓库内可提交的本地 skills 盘点（通用协议，不止 DSH）。只收三处：`.agents/skills/*`、
 `.claude/skills/*`、包内 `skills/*`；家目录、外部 checkout、企业下发不在 scope 内，
-缺了不算漏。每个 skill 只报位置、目录名与 `name` 是否一致、`description` 首行、
-有无 `scripts/` 与 `references/`；损坏的标 corrupt，不中断。空数组是正常结果，
-含义是「这个仓库没有本地 skills」，不是“没扫到”。
+缺了不算漏。入口文件名与 frontmatter 的判据**与生态判定同一个来源**（大小写两种写法都认），
+所以同一个目录在两处的结论不会打架。每个 skill 报位置、`name` 是否与目录名一致
+（判不出时为 undefined，与「不一致」区分）、`description` 首行、有无 `scripts/` 与
+`references/`；入口文件缺失或读不出标 corrupt，不中断。空数组是正常结果，
+含义是「这个仓库没有本地 skills」，不是「没扫到」。
 
 ### `ignores`
 
@@ -269,8 +301,9 @@ cargo。`commands` 一节会区分这一点。
 | `gitattributes` | 有没有声明文本属性（缺了会让产物在不同机器上重建出不同字节） |
 | `unignoredOutputDirs` | **哪些目录明明存在、却没被忽略**（**条件字段**：没有这类问题就整个不存在） |
 | `ignoredButTracked` | 哪些文件**已经被跟踪又被忽略**（忽略规则对它们无效；同样是条件字段） |
+| `ignoreProbeUnavailable` | 版本控制**没能回答**「哪些目录被忽略」（**条件字段**）。有它就说明本节判定不完整，要手工核对——别把「没问出来」读成「已覆盖」 |
 
-**后两个是条件字段：缺省即「没有这类问题」，不是「读不到」。** 它们只在查出东西时才出现，
+**后三个是条件字段：缺省即「没有这类问题」，不是「读不到」。** 它们只在查出东西时才出现，
 所以看不到它们是好消息，不要当成信息缺口，也不要去追它。
 
 **`unignoredOutputDirs` 是最紧急的一格。** 它的含义是：这个依赖目录或产物目录就在
@@ -282,7 +315,8 @@ cargo。`commands` 一节会区分这一点。
 「`venv/` 存在但没被忽略，下次提交会把它写进历史」。
 
 判据来自版本控制自己的 `check-ignore`，不是解析忽略语法：语法有通配、否定、层级差异，
-自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。
+自己解析必然有偏差，而这个问题上偏差的代价是「误以为已忽略」。候选目录是**全树任何
+深度**都收的（标准 monorepo 布局是 `packages/<包名>/dist`），所以判定一次到位。
 
 **`ignoredButTracked`** 是最容易埋雷的另一种状态——用户以为加了忽略就没事了，实际上
 文件还在版本库里。要移除必须先从索引删。
@@ -295,7 +329,7 @@ cargo。`commands` 一节会区分这一点。
 
 | 字段 | 含义 | 处置 |
 | --- | --- | --- |
-| `secretFiles` | 形状上像敏感文件的文件（带 `tracked`：已在库 vs 尚未跟踪，处置完全不同） | 见下一节 |
+| `secretFiles` | 形状上像敏感文件的文件（**名字形状 + 内容形状两级判定**，见下） | 见下一节 |
 | `secretContent` | 文件内容里出现凭据形状 | 见下一节 |
 | `contentScan` | **这次内容扫描覆盖了多深** | 见下方专栏，**不能忽略这一项** |
 | `homePathLeaks` | 内容里形似本机路径的字符串，**已分档** | **按 kind 分别处置，见下** |
@@ -303,8 +337,46 @@ cargo。`commands` 一节会区分这一点。
 | `symlinks` | 符号链接 | 跨平台行为不同，要提醒 |
 | `nestedRepos` | 子目录里还有另一个仓库 | **停下报告**，问清楚是纳入还是忽略 |
 
-**`contentScan` 决定「无命中」这三个字可不可信。** 它给出扫描了多少个文件、以及是否
-因为达到上限而被截断：
+**`tracked` 与 `ignored` 是三态，不是布尔。** 取值为 `true` / `false` / `undefined`
+（读不到）。三者必须分开处理：
+
+| 取值 | 含义 | 处置方向 |
+| --- | --- | --- |
+| `tracked: true` | 已在版本库里 | **只能轮换**，从索引删掉不够 |
+| `tracked: false` | 确定不在库里 | 可以从这次提交排除 |
+| `tracked: undefined` | **没问出来**（清单没取到） | **不能按「不在库里」处置**，要手工核对 |
+
+把第三种读成第二种是这一格最危险的失效方式：处置方向正好反了。目录**不在工作区里**
+时 `tracked` 确定是 `false`（那里没有任何东西被提交过），这与「在工作区里但没取到」
+是两种不同的事实。
+
+**`secretFiles` 分两档判定，两档的取舍相反。** 只按文件名判会同时犯两个方向的错：
+`credentials.json`、`secrets.yaml` 这类最常见的真凭据文件名压根不认；而只含一行
+`registry=` 的 `.npmrc`（几乎每个 JS 项目都有）天天误报。所以：
+
+| 档 | 判定 | 典型文件 |
+| --- | --- | --- |
+| `confirmed: true` | 名字像，且**内容里也有凭据形状**；或名字本身就足够（私钥、`.env`） | `.env`、`production.pem`、`secrets.yaml`（内容含真令牌） |
+| 不报 | 名字像、内容扫过且没有凭据形状 | 只写了 registry 的 `.npmrc`、空的 `credentials.json` |
+| `confirmed: undefined` | 名字像，但**内容没扫到**（超单文件上限等） | 超过体积上限的 `credentials.json` |
+
+第三行是刻意留的：**扫不到不等于没问题**。它照样要报出来，标成未确认，让人去核对——
+否则一个 2MB 的 `credentials.json` 会因为超上限而从报告里彻底消失，那正是密钥门控
+最坏的失效方式：看起来在工作。
+
+**`contentScan` 决定「无命中」这三个字可不可信。** 它逐项报出这次**没有**覆盖到哪：
+
+| 字段 | 含义 | 非零意味着 |
+| --- | --- | --- |
+| `filesScanned` | 实际扫了多少个文件 | — |
+| `truncated` | 达到文件数上限 | 「无命中」= 已扫的部分没有 |
+| `depthLimited` / `depthLimitedPaths` | 有子目录因嵌套过深没进去 | 那些目录里的东西完全没检查 |
+| `skippedLarge` | 超单文件体积上限的文件数 | 同上，且 `secretFiles` 里未确认的那一档就是它们 |
+| `skippedByExtension` | 按扩展名跳过的文件数 | 图片、压缩包、锁文件一类 |
+| `unreadable` | 读不出来的文件数（权限、被独占） | 那些文件没被检查 |
+| `notUtf8` | 编码没嗅探出来的文件数 | 已尽力扫，但不保证没漏 |
+| `utf16Decoded` | 按 UTF-16 重新解码的文件数 | 正常，说明嗅探起了作用 |
+| `scope` | 一句话口径说明 | 给汇报用，不是判据 |
 
 - `truncated` 为真 → 扫描**没有覆盖全部文件**。此时「凭据形状：无」的含义是「已扫的
   部分没有」，**不是**「项目里没有」。要么提高上限重扫，要么在汇报里写明扫描被截断，
@@ -331,11 +403,12 @@ cargo。`commands` 一节会区分这一点。
 
 ### `scale`
 
-文件数与总体积（**不含**依赖目录与版本控制目录）。用途是判断仓库边界：体量异常大的
-目录不应当整体纳入仓库。
+文件数与总体积。用途是判断仓库边界：体量异常大的目录不应当整体纳入仓库。
 
 `truncated` 为真表示走查提前结束了（目录太大），这时体量数字是下界，不是准确值。
-`note` 是给汇报用的一句话口径说明（例如「统计不含依赖目录与版本控制目录」），不是判据。
+`note` 是给汇报用的一句话口径说明，不是判据——**它必须与 `contentScan.scope` 口径
+一致**：体量统计既不含依赖目录，也不含**名字像产物但可能藏着源码的那类目录**
+（`bin/`、`vendor/` 一类，它们参与凭据扫描但不计入体量）。
 
 ## 四、从事实到动作：判定表
 

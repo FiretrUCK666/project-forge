@@ -102,7 +102,10 @@ async function main() {
 
   for (const f of files) {
     if (!existsSync(f)) {
-      process.stderr.write(`跳过（不存在）：${f}\n`)
+      // 读不到就是没检查过。静默跳过会让「一个都没查」被读成「都没问题」——
+      // 路径打错、文件刚被改名，都走到这里，而结论行仍然是 ok。
+      process.stdout.write(`  没能检查  ${f}：文件不存在（路径写错了？徽章检查的就是这些文件本身）\n`)
+      unverified += 1
       continue
     }
     let text
@@ -138,7 +141,7 @@ async function main() {
   const state = bad > 0 ? 'bad' : (unverified > 0 ? 'unverified' : (foundAny === 0 ? 'nobadge' : 'ok'))
   process.stdout.write(`\n${STATE_PREFIX}${state} checked=${checked} bad=${bad} unverified=${unverified}\n`)
   if (unverified > 0) {
-    process.stdout.write('注意：有徽章没能检查到，上面的结论不完整——**「没能检查」不等于「可以显示」**。\n')
+    process.stdout.write('注意：有的徽章或文件没能检查到，上面的结论不完整——**「没能检查」不等于「可以显示」**。\n')
   }
   if (bad > 0) {
     process.stdout.write(
@@ -149,7 +152,13 @@ async function main() {
     return 1
   }
   if (unverified > 0) return 3
-  process.stdout.write(`\n全部 ${checked} 个徽章都能正常显示。\n`)
+  // 一个都没查到的场合不说「都能正常显示」：这句话会被读成检查通过，
+  // 而实际情况是没有任何一个徽章被看过。
+  if (checked === 0) {
+    process.stdout.write('\n没有实际检查到任何徽章——**这不等于「都没问题」**，先确认上面每个文件都读到了。\n')
+  } else {
+    process.stdout.write(`\n全部 ${checked} 个徽章都能正常显示。\n`)
+  }
   return 0
 }
 

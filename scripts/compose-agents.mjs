@@ -30,12 +30,15 @@
  *   <!-- pf:scaffold --> … <!-- pf:endscaffold -->  脚手架，待填写项归零后自动移除
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers } from './survey.mjs'
 import { normVersion, parseMarkerKeys } from './preflight.mjs'
+// 围栏扫描只有一份实现，放在 sync-toc.mjs 并导出来：它要判的是同一件事
+// （这对标记是不是真在正文里），两边各写一份状态机就会给出不同答案。
+import { fencedSpans, markerPositions } from './sync-toc.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -115,51 +118,118 @@ function readUtf8Strict(p) {
 }
 
 /**
- * 判断文件处于什么状态。这是本脚本最关键的一次判断——三种状态的处理方式完全不同，
+ * 判断文件处于什么状态。这是本脚本最关键的一次判断——四种状态的处理方式完全不同，
  * 而它们过去被压成了两种，于是**受损的受管文件被当成手写文件**：
  *
- *   - 手写：两个标记都没有 → 只体检，不动文件；
- *   - 受管：**恰好**一对标记 → 按节刷新；
- *   - 受损：标记数量不对（只有一个、或不止一对）→ **停下报错**。
+ *   - 手写：正文里两个标记都没有 → 只体检，不动文件；
+ *   - 受管：正文里**恰好**一对标记 → 按节刷新（附带两个偏移量，供后面切片用）；
+ *   - 围栏内：正文里一对都没有，但文件里出现过——标记被当普通文本摆在代码块里，
+ *     而真正那对已经不在。这种文件既不能刷新也不该读成手写：停下报错；
+ *   - 受损：标记数量不对（只有一个、顺序反了、或不止一对）→ **停下报错**。
  *
- * 受损那一格是必须存在的：删掉一行 `kernel:end` 就会让 `includes` 判定失败，
- * 于是脚本把它当成手写文件，`--upgrade` 把 14KB 内核**又插了一遍**——文件里出现两份
+ * 后两格是必须存在的：删掉一行 `kernel:end` 就会让 `includes` 判定失败，
+ * 于是脚本把它当成手写文件，`--upgrade` 把内核**又插了一遍**——文件里出现两份
  * 内核，而 `--check` 只看第一对标记、`--status` 数不到缺节，两道门同时报绿。
+ *
+ * 计数只数**围栏外**的出现：文档里在代码块中展示这对标记是正常用法（本脚本的报错
+ * 信息就是这么写的），算进去会把一份好文件判成受损。围栏状态机在 sync-toc.mjs，
+ * 那边与目录工具共用同一份。
  */
 function documentState(text) {
-  const starts = countOccurrences(text, START)
-  const ends = countOccurrences(text, END)
-  if (starts === 0 && ends === 0) return { kind: 'handwritten' }
-  if (starts === 1 && ends === 1) {
-    if (text.indexOf(END) < text.indexOf(START)) {
+  const spans = fencedSpans(text)
+  const starts = markerPositions(text, START, spans)
+  const ends = markerPositions(text, END, spans)
+  if (starts.length === 0 && ends.length === 0) {
+    if (text.includes(START) || text.includes(END)) {
+      return {
+        kind: 'damaged',
+        reason: '这一对内核标记全部落在代码围栏里，正文中找不到',
+        hint: '把它们移到正文（围栏之外），或删掉围栏里这一对后重跑。',
+      }
+    }
+    return { kind: 'handwritten' }
+  }
+  if (starts.length === 1 && ends.length === 1) {
+    if (ends[0] < starts[0]) {
       return {
         kind: 'damaged',
         reason: '内核的结束标记出现在开始标记之前，顺序反了',
+        hint: '把这一对标记调回正确顺序（开始在前、结束在后），各一个。',
       }
     }
-    return { kind: 'managed' }
+    return { kind: 'managed', startAt: starts[0], endAt: ends[0] }
   }
   const parts = []
-  if (starts !== 1) parts.push(`开始标记 ${starts} 个（应为 1）`)
-  if (ends !== 1) parts.push(`结束标记 ${ends} 个（应为 1）`)
+  if (starts.length !== 1) parts.push(`开始标记 ${starts.length} 个（应为 1）`)
+  if (ends.length !== 1) parts.push(`结束标记 ${ends.length} 个（应为 1）`)
   return {
     kind: 'damaged',
     reason: parts.join('，'),
-    hint: starts > 1 || ends > 1
+    hint: starts.length > 1 || ends.length > 1
       ? '常见成因：复制粘贴了整段内核，或合并冲突留下了重复内容。'
       : '常见成因：编辑器吞掉了一行、合并冲突只留了一半。',
   }
 }
 
-/** 数一段文本里某个标记出现几次。 */
-function countOccurrences(text, needle) {
-  let n = 0
-  let i = text.indexOf(needle)
-  while (i >= 0) { n += 1; i = text.indexOf(needle, i + needle.length) }
-  return n
+// ── 项目事实 → 模板条件与取值 ───────────────────────────────────────────────
+
+/**
+ * 能写进文档的**命令键**。**正向清单**：`has-commands` 与 `renderCommands` 都以它为准。
+ *
+ * 为什么是白名单而不是「排除掉几个已知的非命令键」：勘察用三种键表达「不是命令」——
+ * `packageManager`（包管理器名）、`byEcosystem` / `multipleEcosystems`（结构信息）、
+ * `note` / `<键>Note`（对某条命令的说明，例如「此命令按标准库推断」）。黑名单要靠
+ * 一个个补：漏一个就把它算成命令，于是模板走 has-commands 分支、而渲染结果是空串，
+ * 产出一段空的代码块，并且把「本项目尚未声明命令」的待办整条丢掉。
+ *
+ * 同一个键名叫 `note`（小写），所以「以 Note 结尾」这种写法按大小写敏感是筛不掉的。
+ * 正向清单的另一个好处：勘察将来新增命令键时，这里不补就**不会**被当成命令——
+ * 缺的是一条命令说明（报「没有可跑的命令」并给出待办），而不是一段空壳。
+ */
+const COMMAND_LABELS = [
+  ['install', '安装依赖'],
+  ['build', '构建'],
+  ['typecheck', '类型检查'],
+  ['lint', '静态检查'],
+  ['test', '测试'],
+  ['verify', '自检'],
+  ['smoke', '冒烟'],
+]
+const COMMAND_KEYS = new Set(COMMAND_LABELS.map(([key]) => key))
+/** 描述「某条命令从哪来 / 有没有」的键：不是命令本身。 */
+function isNoteKey(key) {
+  return key === 'note' || key.endsWith('Note')
 }
 
-// ── 项目事实 → 模板条件与取值 ───────────────────────────────────────────────
+/**
+ * 声明了依赖的文件（清单之外的那些）。判据是「存在即认为有依赖」。
+ *
+ * 大小写一律**小写**：各生态的惯例写法不统一（`Cargo.toml` / `Gemfile` 首字母大写），
+ * 而文件系统在 Linux 上大小写敏感、在 Windows 上不敏感——写成首字母大写的后果是
+ * 「在 Windows 上测过没事、换个系统就不认」。真正的读取按**磁盘上的原名**走，见
+ * rootIndex。
+ */
+const DEPENDENCY_FILES = [
+  'requirements.txt', 'pipfile', 'pyproject.toml', 'setup.py',
+  'cargo.toml', 'go.mod', 'gemfile', 'composer.json',
+  'pubspec.yaml', 'mix.exs',
+]
+
+/**
+ * 根目录文件名索引：**按小写匹配**，返回磁盘上的原名。
+ *
+ * 一次 readdir 供本文件所有清单判据共用，既避免大小写不一致，也避免每个判据各扫一次
+ * 目录。找不到时返回 undefined，调用方据此走「没有这一项」的分支。
+ */
+function rootIndex(target) {
+  let entries = []
+  try { entries = readdirSync(target) } catch { /* 目录不可读就当什么都没有 */ }
+  const byLower = new Map(entries.map((e) => [e.toLowerCase(), e]))
+  return {
+    has: (name) => byLower.has(name.toLowerCase()),
+    real: (name) => byLower.get(name.toLowerCase()),
+  }
+}
 
 /**
  * 把勘察结果翻译成模板能用的条件与取值。
@@ -169,17 +239,15 @@ function countOccurrences(text, needle) {
  */
 function deriveFacts(target) {
   const s = survey(target)
+  const index = rootIndex(target)
   const manifestPath = s.ecosystem.kinds.includes('node') ? 'package.json' : undefined
   const commands = s.commands ?? {}
-  // 「有没有可跑的命令」只看**真实命令字段**。
-  // 要排除三类非命令的键，否则一个只有说明、没有命令的项目也会显示「有命令」：
-  //   - `packageManager`：包管理器名，不是命令；
-  //   - `byEcosystem` / `multipleEcosystems`：结构信息；
-  //   - `*Note`：对某条命令的推断说明（例如「此命令按标准库推断」），本身不可执行。
-  const NON_COMMAND_KEYS = new Set(['packageManager', 'byEcosystem', 'multipleEcosystems'])
-  const hasCommands = Object.keys(commands)
-    .some((k) => !NON_COMMAND_KEYS.has(k) && !k.endsWith('Note')
-      && typeof commands[k] === 'string')
+  // 「有没有可跑的命令」按**命令键**判，不按「有没有一个字符串键」判。
+  // 多生态时逐个生态桶看——扁平视图是它们的并集，看它等价，但按桶看更贴近事实。
+  const buckets = commands.byEcosystem === undefined
+    ? [commands]
+    : Object.values(commands.byEcosystem)
+  const hasCommands = buckets.some((b) => [...COMMAND_KEYS].some((k) => typeof b[k] === 'string'))
 
   // 可发布 = **有这个生态的可发布清单**且没被声明为私有。
   //
@@ -208,8 +276,7 @@ function deriveFacts(target) {
     } catch { /* 读不到就按无依赖处理 */ }
   }
   if (!hasDeps) {
-    hasDeps = ['requirements.txt', 'Pipfile', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'Gemfile', 'composer.json']
-      .some((f) => existsSync(join(target, f)))
+    hasDeps = DEPENDENCY_FILES.some((f) => index.has(f))
   }
 
   const hasGit = s.git?.present === true
@@ -237,6 +304,7 @@ function deriveFacts(target) {
   // 插件类条件：只按勘察事实求值，不猜具体取值。模板里的 DSH 段落靠它们显隐，
   // 非插件项目不受影响；读不到即按无处理。
   const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
+  const isGo = s.ecosystem.kinds.includes('go')
   const isPlugin = s.ecosystem.kinds.some((k) => /plugin|extension/.test(k))
   const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
   const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
@@ -244,6 +312,14 @@ function deriveFacts(target) {
   const hasDshToolchain = s.dsh?.toolchain !== undefined
     && (s.dsh.toolchain.tsdown === true || s.dsh.toolchain.vitest === true || s.dsh.toolchain.oxlint === true)
   const hasDshLocalWorkflow = s.dsh?.localWorkflow === true || s.dsh?.contractDoc === true
+  // 「版本与可复现」这一节恒属于 DSH 插件：版本面（peer 版本、补丁层）是宿主契约的一部分，
+  // 不是「有没有读到某个文件」决定的。
+  //
+  // 判据特意**不**挂在 `hasDshBundle || hasDshClient` 上：那两个字段为假有两种完全相反的
+  // 含义——「没声明补丁层」和「声明了、但补丁文件不在」。后者恰恰是最需要这一节的破损插件；
+  // 而按「文件在不在」来决定这一节适不适用，等于把「该报警」变成「静默省略」。判据的
+  // 性质不对，方向也是错的：省掉一节短文换不回什么，弄丢一次报警赔得上。
+  const hasDshVersion = isDshPlugin
   const hasLocalSkills = Array.isArray(s.localSkills) && s.localSkills.length > 0
 
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
@@ -265,6 +341,7 @@ function deriveFacts(target) {
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
     'is-dsh-plugin': isDshPlugin,
+    'is-go': isGo,
     'is-plugin': isPlugin,
     'no-plugin': !isPlugin,
     'has-dsh-client': hasDshClient,
@@ -273,6 +350,8 @@ function deriveFacts(target) {
     'no-dsh-invariant': !hasDshInvariant,
     'has-dsh-toolchain': hasDshToolchain,
     'no-dsh-toolchain': !hasDshToolchain,
+    'has-dsh-version': hasDshVersion,
+    'no-dsh-version': !hasDshVersion,
     'has-dsh-local-workflow': hasDshLocalWorkflow,
     'no-dsh-local-workflow': !hasDshLocalWorkflow,
     'has-local-skills': hasLocalSkills,
@@ -284,17 +363,27 @@ function deriveFacts(target) {
   // 项目名优先取**项目自己声明的**名字（各生态清单里的 name），没有才退回目录名。
   // 目录名常常是临时起的（demo、new-project），而清单里的名字才是项目身份。
   // 判据挂在清单文件上，不挂在主生态上——非 JS 项目同样有正式名字。
+  // 标题里只留包名那一段：npm 的作用域前缀与 Composer 的 vendor 前缀去掉后读起来一样
+  // （npm 的那个由下面的通用替换去掉，Composer 的由它自己的读取器去掉），而带上前缀的
+  // `vendor/pkg` 在一级标题里既不是包名也不是目录名。
   let projectName = s.target.name
+  // 文件名一律**小写**，由 index 解析成磁盘上的原名再读——见 DEPENDENCY_FILES 上面的理由。
+  // 读不到的生态不是「没有名字」，而是这个读取器不认识它的格式，那就退到目录名。
   const nameReaders = [
     [manifestPath, (pkg) => pkg.name],
     ['pyproject.toml', (text) => /^name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
-    ['Cargo.toml', (text) => /^\s*name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
+    ['cargo.toml', (text) => /^\s*name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
     ['go.mod', (text) => /^module\s+(\S+)/m.exec(text)?.[1]?.split('/').pop()],
+    ['composer.json', (text) => /"name"\s*:\s*"([^"]+)"/.exec(text)?.[1]?.split('/').pop()],
+    ['pubspec.yaml', (text) => /^name:\s*["']?([^"'\n#]+?)["']?\s*$/m.exec(text)?.[1]],
+    ['mix.exs', (text) => /^\s*app:\s*:(\w+)/m.exec(text)?.[1]],
   ]
   for (const [file, pick] of nameReaders) {
     if (file === undefined || projectName !== s.target.name) continue
+    const real = index.real(file)
+    if (real === undefined) continue
     try {
-      const raw = readUtf8(join(target, file))
+      const raw = readUtf8(join(target, real))
       const hit = file === manifestPath ? pick(JSON.parse(raw)) : pick(raw)
       if (typeof hit === 'string' && hit.trim().length > 0) {
         projectName = hit.trim().replace(/^@[^/]+\//, '') // 去掉作用域前缀，标题里更好读
@@ -311,32 +400,75 @@ function deriveFacts(target) {
 }
 
 /**
+ * 在锚点（内核开始标记）**之前**插入一行标记，用来找回「这份文件的结构由谁决定」。
+ *
+ * 为什么不能靠「前面正好有一个空行」那种字符串替换：那是骨架里的一处排版细节，改一次
+ * 排版（少一个空行、把内核段挪到别处）替换就静默落空，标记没写进文件——而
+ * documentStructure 会因此把一份生成的文件读成「作者编排」，`applicableMissingSections`
+ * 随之返回**不适用**，整道缺节检查就此对这份文件永久关闭，且没有任何提示。
+ * 那种状态下删掉一整个「硬性规范」节，`--check` 照样报「内核一致」。
+ *
+ * 所以这里**按偏移插入并断言结果**：宁可不写，也不产出一份门禁已关的文件。
+ */
+function attachMarker(text, marker, anchor) {
+  const at = markerPositions(text, anchor)[0]
+  if (at === undefined) {
+    throw new Error(`注入内核之后找不到 ${anchor}，无法写入 ${marker}。`)
+  }
+  const next = `${text.slice(0, at)}${marker}\n\n${text.slice(at)}`
+  if (!next.includes(marker)) {
+    throw new Error(`没能把 ${marker} 写进文件——不写，以免产出一份结构标记缺失的文件。`)
+  }
+  return next
+}
+
+/**
+ * 清掉这个文件此前的临时文件（**任何**进程号留下的）。见 sync-toc.mjs 里的同名函数：
+ * 只清自己那个 pid 的等于没清，而顶层多出来的条目会被结构自检当成无主文件。
+ */
+function clearStaleTemps(path) {
+  const dir = dirname(path)
+  const prefix = `${basename(path)}.tmp-`
+  let entries
+  try { entries = readdirSync(dir) } catch { return }
+  for (const name of entries) {
+    if (!name.startsWith(prefix)) continue
+    try { unlinkSync(join(dir, name)) } catch { /* 清不掉就算了 */ }
+  }
+}
+
+/**
  * 把推导出的命令渲染成可直接粘进文档的 shell 块。
  *
  * 多生态项目**按生态分组渲染**，不做扁平化：扁平视图里同名字段只会留下一个生态的值
  * （后算的覆盖先算的），写进文档就是把一条属于别的生态的命令当成这个项目的命令。
  * 这种错误很难被发现——命令看起来完全正常，只是跑的不是这个项目。
+ *
+ * 勘察用 `note` 表达「这个生态的命令推导还没做」（例如 Java / .NET / Ruby 这类），
+ * 它必须**渲染成注释行**：丢掉它就只剩一个空的代码块，读者看到的是「本项目什么命令
+ * 都没有」而不是「脚本还没算出来」。同理，`COMMAND_LABELS` 之外的新命令键也要落到
+ * 文档里——静默丢弃一个真实存在的命令，比显示出来难看得多。
  */
 function renderCommands(commands) {
-  const labels = [
-    ['install', '安装依赖'],
-    ['build', '构建'],
-    ['typecheck', '类型检查'],
-    ['lint', '静态检查'],
-    ['test', '测试'],
-    ['verify', '自检'],
-    ['smoke', '冒烟'],
-  ]
+  const STRUCTURAL_KEYS = new Set(['packageManager', 'byEcosystem', 'multipleEcosystems'])
   const renderOne = (cmds) => {
     const lines = []
-    for (const [key, label] of labels) {
+    const used = new Set()
+    for (const [key, label] of COMMAND_LABELS) {
       const command = cmds[key]
       if (typeof command !== 'string') continue
+      used.add(key)
       lines.push(`# ${label}`)
       lines.push(command)
       // 命令带「推断说明」时紧跟其后写明，别让读者以为它是项目自己声明的。
-      const note = cmds[`${key}Note`]
-      if (typeof note === 'string') lines.push(`# （${note}）`)
+      const noteKey = `${key}Note`
+      const note = cmds[noteKey]
+      if (typeof note === 'string') { used.add(noteKey); lines.push(`# （${note}）`) }
+    }
+    for (const [k, v] of Object.entries(cmds)) {
+      if (used.has(k) || STRUCTURAL_KEYS.has(k) || typeof v !== 'string') continue
+      if (isNoteKey(k)) { lines.push(`# ${v}`); continue }
+      lines.push(`# ${k}`, v)
     }
     return lines
   }
@@ -465,9 +597,34 @@ function stripScaffold(text, authorCount) {
   return text.replace(/<!--\s*pf:scaffold\s*-->[\s\S]*?<!--\s*pf:endscaffold\s*-->\n?/g, '')
 }
 
-/** 折叠被丢弃的条件段落留下的成串空行。生成与刷新两条路径都要走它。 */
+/**
+ * 折叠被丢弃的条件段落留下的成串空行。**只对脚本自己刚生成的内容用**。
+ *
+ * 它的作用域必须受限：条件段落被丢掉后会在原地留下成串空行，那要收拾；但同一条
+ * 规则若套在**人写的段落**上，就是在替作者改排版——作者故意留的三行空行会被悄悄
+ * 收成两行，而报告同时在打「保留原样的节（人写的内容不动）」。两句话互相打脸，
+ * 比排版不整齐糟得多。调用点用 collapseJoined 表达这个区别。
+ */
 function collapseBlankLines(text) {
   return text.replace(/\n{3,}/g, '\n\n')
+}
+
+/**
+ * 拼「本次重新求值的部分」+「沿用的人写部分」，**只收拾前者**。
+ *
+ * `sep` 是块与块之间的分隔符，由调用点定：刷新路径里每节自带结尾的空行（那是原文里
+ * 本来就有的一行），用单换行接；升级路径补进去的是整节、自身不带结尾空行，要用
+ * 空行接。
+ */
+function collapseJoined(parts, sep = '\n') {
+  return parts.map((p) => p.fresh ? collapseBlankLines(p.text) : p.text).join(sep)
+}
+
+/** 按主导行尾定行尾：CRLF 多于 LF 用 CRLF，否则 LF。混合时取多数那一侧。 */
+function dominantEol(text) {
+  const crlf = (text.match(/\r\n/g) ?? []).length
+  const lf = (text.match(/(?<!\r)\n/g) ?? []).length
+  return crlf > lf ? '\r\n' : '\n'
 }
 
 /** 把文本按二级标题切成「前言 + 各节」，用于按节合并。 */
@@ -496,10 +653,11 @@ function splitSections(text) {
  * 必须这么做：**内核自己就含有二级标题**（行事总纲、本文件的定位与编辑规则）。若不摘除就按二级标题切分，内核里的每一节都会被当成普通节参与合并——它们
  * 在「新求值的结果」里不存在（那时内核是空的），于是每次刷新都被当作「用户自己加的节」
  * 追加一遍。文件于是每跑一次就膨胀一份内核。
+ *
+ * 位置从 `documentState` 传来（**围栏外**那一对），不从 `indexOf` 找：文档里在代码块
+ * 中展示这对标记是正常用法，`indexOf` 会找到展示用的那一份，把整段内核当代码块内容摘掉。
  */
-function extractKernel(text) {
-  const startAt = text.indexOf(START)
-  const endAt = text.indexOf(END)
+function extractKernel(text, startAt, endAt) {
   if (startAt < 0 || endAt < 0) return { body: text, hadKernel: false }
   const placeholder = '<!-- project-forge:kernel-placeholder -->'
   const body = text.slice(0, startAt + START.length) + '\n' + placeholder + '\n'
@@ -519,12 +677,13 @@ function extractKernel(text) {
  * 反过来判断（看旧文件有没有 author 标记）是错的：纯生成的小节本来就没有 author 标记，
  * 会被误判成「人已填写」，于是**永远冻结**——「有远端才有」的那几段就再也补不进来。
  */
-function refreshFromTemplate(target, existing, kernel) {
+function refreshFromTemplate(target, existing, kernel, state) {
   const facts = deriveFacts(target)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
 
-  const oldBody = extractKernel(existing).body
-  const freshBody = extractKernel(rendered).body
+  const oldBody = extractKernel(existing, state.startAt, state.endAt).body
+  const freshState = documentState(rendered)
+  const freshBody = extractKernel(rendered, freshState.startAt, freshState.endAt).body
   const fresh = splitSections(freshBody)
   const old = splitSections(oldBody)
 
@@ -537,7 +696,6 @@ function refreshFromTemplate(target, existing, kernel) {
     if (!freshByHeading.has(section.heading)) freshByHeading.set(section.heading, section)
   }
 
-  const added = []
   const kept = []
   const missing = []
   const refreshed = []
@@ -554,18 +712,18 @@ function refreshFromTemplate(target, existing, kernel) {
       // 模板里已经没有这个标题：原样保留。可能是作者自己加的，也可能是作者刻意换了一种
       // 组织方式（本 skill 自己的「版本管理流程」就是如此）。脚本不删。
       kept.push(section.heading)
-      merged.push(section)
+      merged.push({ text: section.lines.join('\n'), fresh: false })
       continue
     }
     const freshText = freshSection.lines.join('\n')
     if (findAuthors(freshText).length > 0) {
       // 模板说这一节要人来写：保留既有内容，别把人写的冲掉
       kept.push(section.heading)
-      merged.push(section)
+      merged.push({ text: section.lines.join('\n'), fresh: false })
     } else {
       // 纯生成内容：用新求值的结果，让条件段落能随事实增删
       refreshed.push(section.heading)
-      merged.push(freshSection)
+      merged.push({ text: freshText, fresh: true })
     }
   }
   // 模板里有、文件里没有的节：**不自动添加**，只报告。
@@ -583,16 +741,14 @@ function refreshFromTemplate(target, existing, kernel) {
   // 前言（标题与效力声明）也保留既有的：它常写着这个项目特有的完成标准，是作者写的，
   // 不该被模板里那句通用表述换掉。
   const head = old.head.trim().length > 0 ? old.head : fresh.head
-  const parts = [head]
-  for (const section of merged) parts.push(section.lines.join('\n'))
+  const parts = [{ text: head, fresh: old.head.trim().length === 0 }, ...merged]
 
-  let text = parts.join('\n')
+  let text = collapseJoined(parts)
   text = injectKernel(text, kernel)
   const authors = findAuthors(text)
   text = stripScaffold(text, authors.length)
-  text = collapseBlankLines(text)
 
-  const report = { added, kept, refreshed, missing, authors: authors.length }
+  const report = { kept, refreshed, missing, authors: authors.length }
   return { text, report }
 }
 
@@ -603,40 +759,28 @@ function kernelBody() {
     .replace(/^\n+/, '').replace(/\n+$/, '')
 }
 
-/** 用内核替换标记之间的内容。标记缺失即报错——绝不猜测该插到哪里。 */
+/**
+ * 用内核替换标记之间的内容。标记缺失即报错——绝不猜测该插到哪里。
+ *
+ * 位置**按围栏外那一对**取，不用 `indexOf`：文档里在代码块中展示这对标记是正常用法
+ * （本脚本的报错信息就是这么写的），`indexOf` 会命中展示用的那一份，把整段内核注入
+ * 到代码围栏内部。带两对以上的情况不在这里处理——`documentState` 已经先一步报错退出，
+ * 所以本函数只需要处理「恰好一对」这一种。
+ */
 function injectKernel(text, kernel) {
-  const startAt = text.indexOf(START)
-  const endAt = text.indexOf(END)
-  if (startAt < 0 || endAt < 0) {
+  const spans = fencedSpans(text)
+  const starts = markerPositions(text, START, spans)
+  const ends = markerPositions(text, END, spans)
+  if (starts.length !== 1 || ends.length !== 1) {
     throw new Error(
-      `AGENTS.md 里找不到内核标记。请先放入这一对标记，再执行注入：\n  ${START}\n  ${END}`,
+      `AGENTS.md 里找不到一对完整的内核标记（找到开始 ${starts.length} 个、结束 ${ends.length} 个）。`
+      + `请先放入这一对标记，再执行注入：\n  ${START}\n  ${END}`,
     )
   }
-  if (endAt < startAt) throw new Error('内核标记顺序颠倒：end 出现在 start 之前。')
-  const before = text.slice(0, startAt + START.length)
-  const after = text.slice(endAt)
-  const injected = `${before}\n${kernel}\n${after}`
-
-  // 多余的第二个内核区要清掉。
-  //
-  // 这不是假想情况：把文件内容复制粘贴一遍就会产生两块。而 `indexOf` 只找**第一个**
-  // 结束标记，于是第二块被原样留在 `after` 里——文件从此带着两份内核，每次注入都
-  // 继续留着，越往后越没人说得清哪个是真的。既然本脚本拥有这段内容，重复的部分就
-  // 由它清掉，而不是留着让读者困惑。
-  const extraStart = injected.indexOf(START, injected.indexOf(START) + START.length)
-  if (extraStart < 0) return injected
-  const firstEnd = injected.indexOf(END) + END.length
-  // 只保留第一份，删掉其后所有成对的内核区
-  const head = injected.slice(0, firstEnd)
-  let rest = injected.slice(firstEnd)
-  rest = rest.replace(new RegExp(
-    `${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}\\n?`, 'g'), '')
-  return collapseBlankLines(head + rest)
-}
-
-/** 把字符串转义成正则字面量。 */
-function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (ends[0] < starts[0]) throw new Error('内核标记顺序颠倒：end 出现在 start 之前。')
+  const before = text.slice(0, starts[0] + START.length)
+  const after = text.slice(ends[0])
+  return `${before}\n${kernel}\n${after}`
 }
 
 /**
@@ -655,42 +799,49 @@ function upgradeHandwritten(existing, kernel, target) {
   const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target)))
   const old = splitSections(existing)
 
+  // 行尾先定下来：插入的内容按**原文件的主导行尾**排。
+  // 不定的话，CRLF 的手写文件会被插进一段 LF 的内核与新增节，得到一个**混合行尾**的
+  // 文件——那正是刷新路径花了力气要避免的状态（见 main 里的行尾归一化），两条路径
+  // 不该产出两种行尾状态。为「只做加法」而把原有行尾也统一，不算改内容：文字一字
+  // 未动，只是把本来就属于同一行的 `\r\n` 还原成它自己该有的样子。
+  const eol = dominantEol(existing)
+  const lines = existing.replace(/\r\n/g, '\n').split('\n')
+
   // 1) 插入内核：一级标题之后、第一个二级标题之前。
   //
   // 同时打上 UPGRADED 标记：升级只做加法，需要人写的节一个都没补，所以这份文件此后
   // 必然还缺若干节——那是**待办**，不是缺陷。标记记在文件里，判据才有依据（见该常量注释）。
-  const lines = existing.split('\n')
+  // 已经打上过的**不再打第二份**：用户手工删掉内核标记、留下这个标记来修文件是合理
+  // 的做法，重复的标记会让「它升级过几次」变成读文件才能回答的问题。
   let insertAt = -1
   for (let i = 0; i < lines.length; i += 1) {
     if (/^##\s+\S/.test(lines[i])) { insertAt = i; break }
   }
   if (insertAt < 0) insertAt = lines.length // 通篇没有二级标题：追加到末尾
+  const inserted = []
+  if (!lines.includes(UPGRADED)) inserted.push(UPGRADED, '')
+  inserted.push(START, kernel, END, '')
   const withKernel = [
     ...lines.slice(0, insertAt),
-    UPGRADED,
-    '',
-    START,
-    kernel,
-    END,
-    '',
+    ...inserted,
     ...lines.slice(insertAt),
-  ].join('\n')
+  ].join(eol)
 
   // 2) 补上缺失的节：只补「语义上明显缺」的整节，且一律追加在末尾，不改动原有顺序。
   const oldHeadings = new Set(old.sections.map((s) => s.heading))
   const added = []
-  const parts = [withKernel.replace(/\n+$/, '')]
+  const parts = [{ text: withKernel.replace(/(?:\r?\n)+$/, ''), fresh: false }]
   for (const section of fresh.sections) {
     if (oldHeadings.has(section.heading)) continue
     // 纯生成内容才补：需要人写的节补进去也是一堆占位符，不如让 AI 按上下文写
     const body = section.lines.join('\n')
     if (findAuthors(body).length > 0) continue
-    parts.push(body)
+    parts.push({ text: collapseBlankLines(body), fresh: true })
     added.push(section.heading)
   }
 
-  let text = collapseBlankLines(parts.join('\n\n'))
-  if (!text.endsWith('\n')) text += '\n'
+  let text = collapseJoined(parts, '\n\n')
+  if (!text.endsWith(eol)) text += eol
   return { text, added }
 }
 
@@ -725,41 +876,63 @@ function parseArgs(argv) {
 }
 
 /**
- * 报告缺口。两件事都要说，缺一件就会误导：
+ * 报告缺口。三件事都要说，缺一件就会误导：
  *
  *   - **待填写项**（`pf:author`）：模板说要人写的节，还没写；
- *   - **缺失的节**：模板里有、文件里没有的节。
+ *   - **缺失的节**：模板里有、文件里没有的节；
+ *   - **判据是否适用**：不适用时（「作者编排」的文件）不报「0」，报「不适用」。
  *
- * 为什么两个都要：`--upgrade` 刻意**不补**需要人写的节（补进去只是占位符），于是
+ * 为什么两个数都要：`--upgrade` 刻意**不补**需要人写的节（补进去只是占位符），于是
  * 一份刚升级完、一个项目节都没写的手写文件，`pf:author` 数**立刻就是 0**——如果只报
  * 「待填写 0 处」，使用者会以为写完了，而实际上项目定位、架构、不变量、构建验证、
  * 硬性规范、测试约定六节全缺。这正是 SKILL.md 自己警告过的「看起来完整、实际空洞」，
  * 而报告本身成了那个错觉的来源。
+ *
+ * 为什么「不适用」不能印成 0：作者编排的文件（含本仓库自己那份）根本不参与缺节判据，
+ * 那个 `[]` 是**没查**，不是**查过没有**。印成「缺失 0 节」就等于把「没比」说成
+ * 「比过且一致」——而 `SKILL.md` 与 `docs-set.md` 都把本脚本的「内容完整」当成 P4
+ * 唯一的完成信号。不适用时说「未验证」，并说明为什么，那才是真话。
  */
 function reportGaps(authors, missing, stream) {
-  const complete = authors.length === 0 && missing.length === 0
+  const applicable = missing.applicable
+  if (!applicable) {
+    if (authors.length > 0) {
+      stream.write(`\n待填写 ${authors.length} 处（脚本填不了，要读代码后写）：\n`)
+      writeAuthorList(authors, stream)
+    }
+    stream.write('\n缺节判据**不适用**：这份文件由作者编排，节结构是作者的决定，'
+      + '脚本既不会替他补这些节，也不按模板的标题清单判缺。\n')
+    stream.write('因此「缺失 0 节」在这里是**没查**，不是「查过没有」——'
+      + '本文件不构成「内容完整」的证据。\n')
+    return
+  }
+  const complete = authors.length === 0 && missing.list.length === 0
   if (complete) {
     stream.write('\n内容完整：没有待填写项，也没有缺失的节。\n')
     return
   }
   if (authors.length > 0) {
     stream.write(`\n待填写 ${authors.length} 处（脚本填不了，要读代码后写）：\n`)
-    const seen = new Set()
-    for (const { section, note } of authors) {
-      const line = note === '' ? section : `${section} —— ${note}`
-      if (seen.has(line)) continue
-      seen.add(line)
-      stream.write(`  - ${line}\n`)
-    }
+    writeAuthorList(authors, stream)
   }
-  if (missing.length > 0) {
-    stream.write(`\n缺失 ${missing.length} 个节（模板里有、本文件没有）：\n`)
-    for (const m of missing) {
+  if (missing.list.length > 0) {
+    stream.write(`\n缺失 ${missing.list.length} 个节（模板里有、本文件没有）：\n`)
+    for (const m of missing.list) {
       stream.write(`  - ${m.heading}${m.needsHuman ? '（需要读代码后自己写）' : '（可由脚本补）'}\n`)
     }
     stream.write('**这些节没写，文档就不算完成**——它们正是未来的会话真正需要的内容。\n')
   }
   stream.write('写完后重跑本脚本，确认「内容完整」。\n')
+}
+
+function writeAuthorList(authors, stream) {
+  const seen = new Set()
+  for (const { section, note } of authors) {
+    const line = note === '' ? section : `${section} —— ${note}`
+    if (seen.has(line)) continue
+    seen.add(line)
+    stream.write(`  - ${line}\n`)
+  }
 }
 
 /** 算出相对模板还缺哪些节。`--status` 与普通运行共用同一份判据。 */
@@ -785,16 +958,19 @@ function documentStructure(text) {
  *   - `generated`：结构来自模板，缺一节就是被掏空 → 交给调用方当缺陷；
  *   - `upgraded`：结构已向模板对齐，但需要人写的节刻意没补 → 缺口是待办；
  *   - `authored`：编排是作者的决定（本 skill 自己的 AGENTS.md 就是），既不算缺陷也不算
- *     待办——**判据直接不适用**，返回空列表。否则「版本管理流程」对「版本管理」这种
- *     措辞差异会被永远报成缺节，而作者没有「补」的义务：脚本从来不会替他补这些节。
+ *     待办——**判据直接不适用**。否则「版本管理流程」对「版本管理」这种措辞差异会被
+ *     永远报成缺节，而作者没有「补」的义务：脚本从来不会替他补这些节。
  *
  * 只按标题字面差集判缺，本身就是这一格的老毛病；同一个道理在 docs-set.md 的 README
  * 一节里已经写明白了——「缺」要按内容判，不能按标题名判。这里补上另一半：连适用与否
  * 都要先按文件的性质判。
+ *
+ * 返回值带 `applicable`：**不适用时 list 为空是「没查」，不是「查过没有」**，调用方
+ * 必须把它与「查了、真的一个不缺」分开报。
  */
 function applicableMissingSections(target, text) {
-  if (documentStructure(text) === 'authored') return []
-  return missingSections(target, text)
+  if (documentStructure(text) === 'authored') return { applicable: false, list: [] }
+  return { applicable: true, list: missingSections(target, text) }
 }
 
 /**
@@ -829,7 +1005,7 @@ function dshCompatibilityNotice(target) {
   if (pinned.some((p) => normVersion(p) === normVersion(hostPin))) return undefined
   return `提示：本项目声明的 DSH 兼容范围 ${pinned.join('、')} 与专章核对时的宿主版本 ${hostPin} 不同——`
     + '那是核对当时的本机版本，不是本项目的承诺；给这个项目配兼容范围时留意它可能早于核对过的宿主。'
-    + '按 references/plugins/dsh.md 事实来源节重核第七节至第九节。'
+    + '按 references/plugins/dsh.md 事实来源节重核第一节至第七节。'
 }
 
 /**
@@ -927,6 +1103,49 @@ function reportRefresh(report, stream) {
   }
 }
 
+/**
+ * 模板用到的每个 `pf:if` 条件，都必须在条件表里有定义。**只查这一个方向。**
+ *
+ * 漏了会怎样：条件名不在表里，`materialize` 会把那一段**整段丢弃**——而丢弃是静默的，
+ * 生成出来的契约里那一节凭空消失，没有任何提示说它本该在。名字拼错一个字母
+ * （`has-remote` 写成 `has-remotes`）就是这个结果。
+ *
+ * **为什么不查反向**（条件表里有、模板里没用到）：那是**正常**的，而且是有用的正常。
+ * 条件可以先备好、模板段落之后才写——比如某个判据已经确定要做、但专章还没落地。
+ * 把它当失败，会逼着人删掉有用的判据，或者反过来逼着人立刻写一段这个项目并不需要的
+ * 段落。两种都是拿一条会叫喊的检查去换一次合法的工作顺序。
+ *
+ * 这与「不加抓不住问题、又会叫喊的检查，比不加更坏」是同一条推理：**只查确定会坏的那一半。**
+ *
+ * 检查条件是**表里有定义**，不是「这个项目下为真」——后者会让「判据此时为假」被误当成
+ * 「定义缺失」，而那完全正常。
+ */
+function assertTemplateConditionsKnown(target) {
+  if (!existsSync(SKELETON_PATH)) return // 骨架缺失由后面那条分支报，不在这里重复
+  const used = new Set(
+    [...readUtf8(SKELETON_PATH).matchAll(/<!--\s*pf:if\s+([A-Za-z0-9_-]+)\s*-->/g)]
+      .map((m) => m[1]),
+  )
+  if (used.size === 0) return
+  let conditions
+  try {
+    conditions = deriveFacts(target).conditions
+  } catch {
+    // 勘察本身读不出这个目录：那是后面处理这个目录时会报的事，不在这里抢着报，
+    // 也不要把一次校验失败变成一次工具崩溃。
+    return
+  }
+  const missing = [...used].filter((name) => !(name in conditions)).sort()
+  if (missing.length > 0) {
+    throw new Error(
+      `templates/agents-project.md 用到了条件表里没有的条件：${missing.join('、')}。\n`
+      + '  请在 compose-agents.mjs 的 deriveFacts() 条件表里补上同名条目。\n'
+      + '  未定义的条件会让那一段内容被**整段丢弃**，而丢弃是静默的——生成出来的契约里'
+      + '那一节会凭空消失，没有任何提示说它本该在。',
+    )
+  }
+}
+
 function main(argv) {
   let parsed
   try {
@@ -948,10 +1167,13 @@ function main(argv) {
       '  --upgrade  把一份手写的 AGENTS.md 升级为标准结构。**只做加法**：',
       '             插入内核段落、补上缺失的自动节；已有段落不删不改不重排。',
       '  --check    只校验，不写入；以下任一项不满足即退出码 1：',
-      '             内核区间与 templates/agents-kernel.md 逐字一致、内核标记恰好一对、',
-      '             脚本生成的文件不缺节（作者自己编排的文件不判缺节——编排是权威）。',
+      '             内核区间与 templates/agents-kernel.md 逐字一致（按行尾归一化后比）、',
+      '             内核标记恰好一对、脚本生成的文件不缺节（作者自己编排的文件不判缺节——',
+      '             编排是权威，那一项只作提示）。超出字节预算同样返回 1。',
       '  --status   只报告现状，不写入',
       `  --budget N ${DEFAULT_BUDGET_NOTE}`,
+      '',
+      '  退出码：0 = 通过或无需改动；1 = --check 发现不一致（含超预算）；2 = 用法或文件错误。',
       '',
     ].join('\n'))
     return 0
@@ -959,6 +1181,19 @@ function main(argv) {
 
   const target = resolve(positional[0] ?? process.cwd())
   const agentsPath = join(target, 'AGENTS.md')
+
+  // 模板与条件表的一致性：放在**任何早退分支之前**。
+  //
+  // materialize 自己也会拒绝未知条件（那道报错很好），但它只在**走到求值**时才触发。
+  // 「文件不存在」（--check 直接报不存在退出）、「标记受损」（报受损退出）这些更早的
+  // 分支都走不到它——模板坏没坏于是被另一个错误盖住，下一次也没人再问它，而 CI 跑的就是
+  // --check。放在这里，那两条路径上模板也照样受检。
+  try {
+    assertTemplateConditionsKnown(target)
+  } catch (error) {
+    process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
+    return 2
+  }
 
   let kernel
   try {
@@ -977,10 +1212,11 @@ function main(argv) {
     )
     return 2
   }
-  // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）
-  for (const stale of [`${agentsPath}.tmp-${process.pid}`]) {
-    if (existsSync(stale)) { try { unlinkSync(stale) } catch { /* 清不掉就算了 */ } }
-  }
+  // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）。
+  // 按「同目录、同前缀」清**任何**进程号留下的：只清自己那个 pid 的等于没清——被杀的
+  // 进程留下的是它的 pid，下次换了 pid 就再也清不掉，而顶层多出来的条目会被结构自检
+  // 当成无主文件。sync-toc.mjs 对它自己的临时文件做同一件事。
+  clearStaleTemps(agentsPath)
   if (check && !exists) {
     process.stderr.write(`校验失败：${agentsPath} 不存在。\n`)
     return 1
@@ -1005,7 +1241,7 @@ function main(argv) {
       }
       const existing = read.text
 
-      // ② 三态判定：手写 / 受管 / 受损。受损必须停下，不能当成手写。
+      // ② 四态判定：手写 / 受管 / 围栏内 / 受损。后两者必须停下，不能当成手写。
       const state = documentState(existing)
       if (state.kind === 'damaged') {
         process.stderr.write(
@@ -1029,10 +1265,10 @@ function main(argv) {
         if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check)
         const upgraded = upgradeHandwritten(existing, kernel, target)
         composed = upgraded.text
-        refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [], missing: [] }
+        refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [] }
       } else {
         managedExisting = existing
-        const refreshed = refreshFromTemplate(target, existing, kernel)
+        const refreshed = refreshFromTemplate(target, existing, kernel, state)
         composed = refreshed.text
         refreshReport = refreshed.report
       }
@@ -1054,7 +1290,7 @@ function main(argv) {
       if (!composed.endsWith('\n')) composed += '\n'
       composed = injectKernel(composed, kernel)
       // 记住「这是生成的文件」：它的节结构由模板决定，缺节即缺陷。
-      composed = composed.replace('\n\n' + START, `\n\n${MANAGED}\n\n${START}`)
+      composed = attachMarker(composed, MANAGED, START)
       if (!composed.endsWith('\n')) composed += '\n'
     }
   } catch (error) {
@@ -1062,21 +1298,16 @@ function main(argv) {
     return 2
   }
 
-  // 沿用原文件的行尾风格。
+  // 沿用原文件的行尾风格，并且**整篇统一**。
   //
-  // 不这么做的话，一个 CRLF 的文件在「事实发生变化、需要重写」时会**整篇变成 LF**，
-  // 而 git 会把每一行都记为改动——正是本文档自己「构建可复现」一节讲过的那个坑。
-  // 只在原文件确实是 CRLF 时才转回去，不猜。
-  // 行尾策略按**主导**行尾决定，不按「出现过任意一个 CRLF」。
-  // 后者有两个实测过的毛病：文件里只要有一个 CRLF，还原条件就恒真；而文件里同时有
-  // CRLF 与 LF 时（PowerShell 的 `Set-Content` 就会造出这种），`composed` 里已经带着
-  // 那个 CRLF，于是整篇还原又被跳过——混合行尾永久留下，且每次运行都说「已刷新」，
-  // 尽管三次运行的字节完全相同。
-  if (exists && managedExisting !== undefined) {
-    const original = readFileSync(agentsPath, 'utf8')
-    const crlf = (original.match(/\r\n/g) ?? []).length
-    const lf = (original.match(/(?<!\r)\n/g) ?? []).length
-    if (crlf > lf && !/\r\n/.test(composed)) composed = composed.replace(/\n/g, '\r\n')
+  // 不统一的后果是混合行尾：既有的人写节带着 CRLF，新注入的内核是 LF，于是产出物
+  // 一半 CRLF 一半 LF——这种文件每次运行都说「已刷新」而字节其实没变，git 也把整篇
+  // 记成改动。所以这里先整体归一化成 LF，再按原文件的主导行尾一次性铺回去。
+  // 两条路径（刷新与升级）都走这里，产出行尾状态才不会两样。
+  if (exists) {
+    const eol = dominantEol(readFileSync(agentsPath, 'utf8'))
+    const normalized = composed.replace(/\r\n/g, '\n')
+    composed = eol === '\r\n' ? normalized.replace(/\n/g, '\r\n') : normalized
   }
 
   const authors = findAuthors(composed)
@@ -1105,24 +1336,36 @@ function main(argv) {
     } else {
       // 用**原文**取内核区间。注意不能用 extractKernel() 的结果——它会把内核整段换成
       // 一行占位符（那是给按节合并用的），拿它来比对等于拿 41 字节比 14315 字节。
-      const raw = managedExisting
-      const embedded = raw.slice(
-        raw.indexOf(START) + START.length,
-        raw.indexOf(END),
-      ).replace(/^\n/, '').replace(/\n$/, '')
+      // 位置取围栏外那一对（documentState 已经算好），不能用 indexOf：文档里在代码块
+      // 中展示这对标记是正常用法，indexOf 会命中展示用的那一份。
+      //
+      // 两侧**都按 LF 归一化后再比**：readUtf8Strict 不改行尾（它得保留原文），而
+      // kernelBody 走 readUtf8 会把 CRLF 换成 LF。不归一的后果是 CRLF 的文件恒定报
+      // 「内核不一致」，而写入路径**不会**改掉行尾（它沿用原文件的主导行尾），于是
+      // 报错信息给的「修正」命令再跑一遍也还是红的——一个自己退不出来的失败。
+      // 归一化换了字节，偏移量也跟着变，所以位置在**归一化之后**重新取。
+      const raw = managedExisting.replace(/\r\n/g, '\n')
       const template = kernelBody()
+      const rawState = documentState(raw)
+      const embedded = raw.slice(rawState.startAt + START.length, rawState.endAt)
+        .replace(/^\n/, '').replace(/\n$/, '')
       if (embedded !== template) {
         problems.push('内核区间与 templates/agents-kernel.md 不一致'
-          + `（文件里 ${Buffer.byteLength(embedded, 'utf8')} 字节，模板 ${Buffer.byteLength(template, 'utf8')} 字节）`)
+          + `（文件里 ${Buffer.byteLength(embedded, 'utf8')} 字节，模板 ${Buffer.byteLength(template, 'utf8')} 字节）`
+          + '。两侧都按 LF 归一化后比过，所以这不是行尾问题——是内核内容真的不同。')
       }
     }
     const missingNow = applicableMissingSections(target, managedExisting ?? composed)
     // 缺节是否算失败，取决于这份文件的节结构是谁定的：
     //   - generated → 结构由模板决定，缺节就是缺陷；
     //   - upgraded  → 结构已对齐模板，但需要人写的节还要作者补，缺节只提示；
-    //   - authored  → 判据不适用（applicableMissingSections 已返回空）。
-    if (missingNow.length > 0) {
-      const detail = `缺失 ${missingNow.length} 个节：${missingNow.map((m) => m.heading).join('、')}`
+    //   - authored  → 判据不适用（applicableMissingSections 已标明），既不算缺陷也不提示，
+    //                 却在输出里要说清楚——否则「没查」会被读成「查过没有」。
+    if (!missingNow.applicable) {
+      warnings.push('缺节判据不适用：这份文件由作者编排，节结构是作者的决定，脚本不按模板'
+        + '的标题清单判缺。这**不代表不缺节**——它代表这一项没有被检查过。')
+    } else if (missingNow.list.length > 0) {
+      const detail = `缺失 ${missingNow.list.length} 个节：${missingNow.list.map((m) => m.heading).join('、')}`
       if (documentStructure(managedExisting ?? composed) === 'generated') problems.push(detail)
       else warnings.push(`${detail}（这份文件是升级来的：作者的编排是权威，缺节只作提示；`
         + '若确实该有这些内容，请补上）')
@@ -1149,7 +1392,8 @@ function main(argv) {
     }
     const missing = applicableMissingSections(target, readUtf8(agentsPath))
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
-      + `待填写 ${authors.length} 处，缺失 ${missing.length} 节\n`)
+      + `待填写 ${authors.length} 处，`
+      + (missing.applicable ? `缺失 ${missing.list.length} 节\n` : '缺节判据不适用（作者编排）\n'))
     reportGaps(authors, missing, process.stdout)
     const stale = dshCompatibilityNotice(target)
     if (stale !== undefined) process.stdout.write(`${stale}\n`)

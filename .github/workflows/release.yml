@@ -1,7 +1,15 @@
-# 发布说明自动写：推 v* 标签即建 GitHub Release，幂等，已存在则跳过。
+# 发布说明自动写：推 v* 标签即建 GitHub Release；已存在则更新正文。
+#
 # 正文由 scripts/draft-release-notes.mjs 从提交记录起草（中文人话 + 对比链接），
-# 写进 UTF-8 文件再按字节发送——中文绝不经 shell 传递。
-# 标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名补漏。
+# 写进 UTF-8 文件，再由 scripts/release-notes.mjs 按字节发送、写完回读比对——
+# 中文绝不经 shell 传递，也不靠「命令成功」推断真的写对了。
+#
+# 起草在前、发送在后，这个顺序是护栏：起草脚本先确认标签存在（标签不存在时它直接失败），
+# 而建 Release 的接口在标签不存在时会拿默认分支自动建出一个同名新标签。顺序一换，
+# 标签名打错就会静悄悄地建出新标签，而这次发版看起来还是绿的。
+#
+# 重跑会用起草结果覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
+# 标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名补跑。
 name: release
 
 on:
@@ -18,25 +26,26 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # 建 Release 要写权限：gh 默认拿 GITHUB_TOKEN（只读），这里显式给写。
-    # npm 可信发布的 id-token: write 与它是两回事（一个给制品库换短期令牌，
-    # 一个给平台建 Release），不要以为写了一个另一个顺带有了。
+    # 声明这个 job 会写仓库的发布。写入凭据是 secrets.RELEASE_TOKEN（下面经环境变量
+    # 交给脚本），但权限仍显式写出来：一来让「这个 job 有写权限」在文件里看得见，
+    # 二来交付门禁按 contents: write 判定这一项，删掉它门禁会一直报待问。
     permissions:
       contents: write
+    # 取值只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
+    # 经 env 传入而不是直接展开进脚本正文——展开的话，输入框里的内容会被当成 shell 语法。
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      REPO: ${{ github.repository }}
+      GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
       - name: 检出标签（含全历史，起草要读上一个标签）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          ref: ${{ env.TAG }}
           fetch-depth: 0
-      - name: 建 Release（不存在才建，已存在则跳过）
-        run: |
-          TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，跳过。"
-          else
-            node scripts/draft-release-notes.mjs "$TAG" notes.md
-            gh release create "$TAG" --notes-file notes.md --title "$TAG"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: 起草正文（顺带确认标签存在，别把这一步挪到发送之后）
+        run: node scripts/draft-release-notes.mjs "$TAG" notes.md
+
+      - name: 写发布说明（已存在则更新；写完回读比对，不一致即失败）
+        run: node scripts/release-notes.mjs "$TAG" notes.md --repo "$REPO"

@@ -30,127 +30,39 @@
 #   引入竞态与复杂度，本模板不选它）。
 # 补漏：标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名——不要重打标签。
 #   必须触发登记的同一个文件名（身份含文件名，调别的文件身份不对），且该文件须在默认分支上
-#   （否则点触发没反应不是“坏了”）。tag 名打错时创建命令会自动建一个同名新标签，
-#   所以先确认标签已存在，必要时加校验标签的 flag。
+#   （否则点触发没反应不是“坏了”）。--verify-tag 是为此设的护栏：标签名打错时它直接失败；
+#   没有它，创建命令会拿默认分支的状态自动建出一个同名新标签，而这次发版看起来还是绿的。
 #
 # 变体（分支驱动附件发布）：有的仓库推主干即发版、附件随包走（如插件模板的成品 tgz）。
 #   那是另一套政策，不是本模板改个触发分支就能套用的：版本号来源、附件命名、同版重推
 #   是否刷新、CI 与发布是否同文件，都要按该仓库文档重定。本模板只覆盖“标签驱动写发布说明”。
+# 改写已有 Release 的正文，模板不做这件事——走 references/remote-github.md 6.1 的更新路径
+#   （先按 tag 查出标识，再用标识去改，改完回读比对）。本模板只保证「同一份内容不重复创建」。
 #
-# TODO(4) npm 包才需要以下这段（GitHub Release 上面已建好）：可信发布（OIDC）无需长期令牌，
-#   但要先带用户在 npm 网站登记发布者身份（组织/仓库/工作流文件名逐字一致，另有 environment 名
-#   与允许的动作，见 references/publish-npm.md「可信发布接线步骤」），否则 Publish 步骤报无权失败。
+# Action 大版本：落盘前逐个核对当前大版本，并保持与 templates/ci-check.yml 同一大版本——
+# 分头写会漂移，而漂移的那一处正是发版当天才暴露的那一处。
+#
+# TODO(4) npm 包才需要这一段（GitHub Release 上面已建好）。接线步骤照
+#   `references/publish-npm.md` 的「可信发布接线步骤」逐项做——登记项（包名、仓库、
+#   工作流文件名、environment 名）要在制品库网站上与本仓库逐字一致，漏一项到发布那一刻才报无权。
+#   本文件只固定「有哪些节」，少一节就是漏一步：
+#   - 发布 job 声明 id-token: write（短时身份换令牌用），它与建 Release 的 contents: write 是两回事；
+#   - 发布 job 关掉包管理器缓存：旧缓存会改变发出去的东西；
+#   - 发布前先跑门禁，不许发布没验过的树；
+#   - 发布后回读「制品库上真的出现了这一版」：发布命令退出码为 0 不等于那一版已经在库上。
+#     不写回读，一次没落地的发布会以全绿的样子过去，直到有人去页面上核对才发现。
 #   非 npm 项目整段删掉。
 #
-#   permissions:
-#     id-token: write   # 给 npm 可信发布换短期令牌用
-#     contents: read    # 供检出与读代码用；建 Release 另需 contents: write（顶层另声明），
-#                       # 两者服务对象不同：一个给制品库，一个给平台——不要以为写了一个另一个顺带有了
-#   - uses: actions/setup-node@v4   # 与 ci-check.yml 同大版本，分头写会漂移；落盘前核对最新大版本
-#     with:
-#       node-version: '<清单声明的版本>'
-#       registry-url: 'https://registry.npmjs.org'   # 决定短时身份交换的地址，必须写公共制品库
-#       package-manager-cache: false   # 发布构建永不用缓存：旧缓存会改变发出去的东西，
-#                                      # 且中毒的缓存可把短时身份令牌暴露给攻击者控制的代码
-#   # Node 自带的 npm 可能过旧：可信发布要求较新的 npm 大版本与较新的 Node 配对
-#   #   （setup-node 没有 npm-version 输入，只能单起一步升级）：
-#   #   npm install -g npm@<与该 Node 配对的最新大版本>   # 版本现场查，不要照抄示例号
-#   # 显式声明背书是稳妥做法，模板默认写上。
-#   - name: 发布前门禁（与 check  job 同一批命令，不许发布没验过的树）
-#     run: |
-#       <构建命令>
-#       <测试命令>
-#   - name: 发布到 npm（tag 与清单版本号不一致直接失败，见模板 TODO(1)）
-#     run: npm publish --access public   # 私有包把 public 换成 restricted
-#
-#   # 发布后回读：`npm publish` 会在包「还在处理、尚不可见」时就成功退出并打印
-#   # `+ 包名@版本`，所以退出码 0 **不等于**制品库上真的有这一版。回读是唯一
-#   # 判据（见 references/publish.md「发布失败与中断」一节）。没有这一步，
-#   # 一次没真正落地的发布会以「全绿」的样子过去，靠人事后肉眼核对才发现。
-#   - name: 确认制品库上真的出现了这个版本（回读，不是看退出码）
-#     run: |
-#       set -euo pipefail
-#       NAME="$(node -p "require('./package.json').name")"
-#       VERSION="$(node -p "require('./package.json').version")"
-#       ENCODED="$(node -p "encodeURIComponent(require('./package.json').name)")"
-#       URL="https://registry.npmjs.org/$ENCODED/$VERSION"
-#       for attempt in $(seq 1 60); do
-#         CODE="$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)"
-#         if [ "$CODE" = "200" ]; then
-#           echo "$NAME@$VERSION 已可见：$URL"
-#           exit 0
-#         fi
-#         sleep 5
-#       done
-#       echo "::error::$NAME@$VERSION 发布 5 分钟后仍未在制品库出现（最后一次 HTTP $CODE）——不要重发同号，先查原因。"
-#       exit 1
-#
-# TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写——
-#   Python 见下 TODO(5a)（构建与发布分 job），Rust 见下 TODO(5b)，
-#   Go 无上传动作不需要发布 job（标签即发布，推完触发代理收录即可）。
-#
-# TODO(5a) Python 包的发布段（GitHub Release 上面已建好之后再加这段）：
-#   登记：制品库网站建 pending publisher（包名/仓库/工作流文件名/environment 名逐字一致，
-#   正式与测试各建各的，见 references/publish-python.md「可信发布接线步骤」）。
-#   机制：构建与发布分两个 job——构建 job 产出 dist 并上传为 artifact，
-#   发布 job 只下载 artifact 再上传，不在发布 job 内构建。
-#   发布 job 声明短时身份签发权限；正式只在标签推送时发，测试每次推送都可发
-#   （测试发布地址指测试源）。切到可信发布后删掉旧的长期令牌。
-#
-#   jobs:
-#     build:
-#       runs-on: ubuntu-latest
-#       steps:
-#         - uses: actions/checkout@v4
-#         - uses: actions/setup-python@v5   # 落盘前核对最新大版本
-#           with: { python-version: '<清单声明的版本>' }
-#         - run: python -m build             # 先产出确切文件
-#         - run: python -m twine check --strict dist/*   # 长描述渲染先验
-#         - uses: actions/upload-artifact@v4 # 落盘前核对最新大版本
-#           with: { name: python-package-distributions, path: dist/ }
-#     publish-to-pypi:
-#       if: startsWith(github.ref, 'refs/tags/v')
-#       needs: [build]
-#       runs-on: ubuntu-latest
-#       environment: pypi   # 与登记的 environment 名逐字一致；正式建议配人工审批
-#       permissions: { id-token: write }   # 短时身份用；只给发布 job
-#       steps:
-#         - uses: actions/download-artifact@v4
-#           with: { name: python-package-distributions, path: dist/ }
-#         - uses: pypa/gh-action-pypi-publish@release/v1   # 落盘前核对版本
-#     publish-to-testpypi:   # 可选：每次推送都发测试源看流水健康
-#       needs: [build]
-#       runs-on: ubuntu-latest
-#       environment: testpypi
-#       permissions: { id-token: write }
-#       steps:
-#         - uses: actions/download-artifact@v4
-#           with: { name: python-package-distributions, path: dist/ }
-#         - uses: pypa/gh-action-pypi-publish@release/v1
-#           with: { repository-url: 'https://test.pypi.org/legacy/' }   # 测试源只差这一行
-#
-# TODO(5b) Rust 包的发布段（GitHub Release 上面已建好之后再加这段）：
-#   登记：先手动发布过一次（操作者为所有者），再在 crate 设置页登记仓库、
-#   workflow 文件名（逐字一致）与可选 environment（见 references/publish-rust.md「认证」一节）。
-#   机制：发布 job 声明短时身份签发权限，用官方认证 action 换出 30 分钟令牌
-#   再以环境变量传给发布命令；触发器收敛到标签或受保护分支。
-#
-#     publish-to-crates:
-#       if: startsWith(github.ref, 'refs/tags/v')
-#       runs-on: ubuntu-latest
-#       environment: release   # 可选，配合审批缩攻击面；与登记一致
-#       permissions: { id-token: write }   # 换短期令牌用；只给发布 job
-#       steps:
-#         - uses: actions/checkout@v4
-#         - uses: <官方认证 action>   # 落盘时按专章写全名并核对版本，换出的令牌用完自动吊销
-#           id: auth
-#         - run: cargo publish --dry-run   # 先预演（只校验加打包，不上传）
-#         - run: cargo package --list      # 再核对文件清单
-#         - run: cargo publish
-#           env: { CARGO_REGISTRY_TOKEN: '${{ steps.auth.outputs.token }}' }
-#
-#   超时先查索引上有没有该版，有则按已发布处理，无则修因同号重发，不要改号重试；
-#   验通后删掉旧长期令牌（两法可并存过渡）。
+# TODO(5) 非 npm 发布：删掉 TODO(4) 整段，按对应专章的接线段落重写。两条机制任何生态都成立：
+#   发布 job 声明短时身份签发权限（只给发布 job，不给检查 job）；发布后回读一次再收工。
+# TODO(5a) Python：另有一条——**构建与发布分两个 job**。构建 job 产出 dist 并上传为制品，
+#   发布 job 只下载制品再上传，不在发布 job 内构建（同一份产物经两处生成，来源不同就对不上）。
+#   正式源只在标签推送时发，测试源每次推送可发。登记与接线见
+#   `references/publish-python.md`「可信发布接线步骤」。
+# TODO(5b) Rust：先手动发布过一次（操作者为所有者）再去登记；短时身份用官方认证 action 换出
+#   短期令牌，经环境变量传给发布命令（不拼进命令行），用完自动吊销。登记与接线见
+#   `references/publish-rust.md`「认证」一节。
+# TODO(5c) Go：没有上传动作，不需要发布 job——标签即发布，推完触发代理收录即可。
 
 name: release
 
@@ -168,20 +80,27 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # 建 Release 要写权限。GITHUB_TOKEN 的初始权限取仓库/组织的默认设置，受限默认下这里会 403；
+    # 凭据本身走 secrets.RELEASE_TOKEN，那个令牌已经能建 Release，不依赖 GITHUB_TOKEN。
+    permissions:
+      contents: write
+    # 标签名只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
+    # 经 env 传入而不是直接展开进脚本正文——展开的话，输入框里的内容会被当成 shell 语法。
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: 检出标签（含全历史，起草要读上一个标签）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7  # 落盘前核对最新大版本
         with:
-          ref: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          ref: ${{ env.TAG }}
           fetch-depth: 0
       - name: 建 Release（幂等，已存在则跳过）  # TODO(2)
         run: |
-          TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，跳过。"
           else
             <起草命令，把正文写进 notes.md>
-            gh release create "$TAG" --notes-file notes.md --title "$TAG"
+            gh release create "$TAG" --notes-file notes.md --title "$TAG" --verify-tag
           fi
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

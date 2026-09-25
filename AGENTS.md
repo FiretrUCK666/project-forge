@@ -252,9 +252,12 @@ node scripts/sync-toc.mjs README.md README.en.md --check     # README 目录与�
 - 文档里的「数量自称」与实际是否相符（硬不变量、硬门控、脚本数），磁盘上的每个
   `references/`、`templates/`、`scripts/` 文件是否都登记在 `SKILL.md` 的文件地图里，
   `README` 与 `README.en.md` 是否把磁盘上的脚本与参考文档都列到了；
-- `references/plugins/` 下每个专章是否都登记在 `plugin-project.md` 的索引里；
-- `references/` 与 `templates/` 里有没有回流进来的单样本取值（历史回归网，清单在
-  `preflight.mjs` 的 `checkValuePollution`；新增样本值后要补进去）。
+- `references/plugins/` 下每个专章是否都登记在 `plugin-project.md` 的索引里。
+
+**单样本取值不回流进通用文档，这条没有自动检查，也不要试图加**：判断落在「这是通则
+还是个案」上，不是字面特征。字面黑名单抓不住真正出问题的那次——往通用文档里注入
+任何新的包名、存储键或账号它照样全绿，而它自身的名单又得逐条维护，还把个人身份
+钉进了通用代码。加一个抓不住问题、又会叫喊的检查，比不加更坏（同「硬性规范」第 8 条）。
 
 **`selftest.mjs` 是另一半，同样不可省。** 静态检查看不出「判定写错了」——survey 把
 CMake 项目判成纯文档目录时，引用与格式全都正常。这类错误只能靠造 fixture 实跑发现，
@@ -397,7 +400,8 @@ CMake 项目判成纯文档目录时，引用与格式全都正常。这类错�
 
 - **用时检查**：P5 落盘、P6 发布前，扫一眼相关标记超期没有，超了就现查官方文档再动手。
 - **失败驱动**：发布报“无权 / 不存在 / 字段非法”时，第一动作是重核那一页，
-  不是重试（各专章翻车表已是这个顺序）。
+  不是重试（四个专章的翻车表都按这个顺序；没有专章的生态按 `references/publish.md`
+  的「发布失败与中断」表走）。
 - **平时不管**：没超期、没失败，就别刷。刷了也是浪费，还制造提交噪音。
 
 ### 两条不做、以及为什么
@@ -468,13 +472,15 @@ CONTRIBUTING）连攒都不用特意记。
 4. CI 自动写发布说明（见下），回读 Releases 页确认；
 5. 汇报只说版号与去哪看。
 
-**发布说明由 CI 自动写**：推 `v*` 标签 → `release.yml` 建 Release，已存在则跳过（幂等）。
+**发布说明由 CI 自动写**：推 `v*` 标签 → `release.yml` 建 Release；**已存在则更新正文并回读比对**
+（内容不一致就报错退出，job 直接红）。
 **机制以 `.github/workflows/release.yml` 为准，这里不复述**（正文由
-`scripts/draft-release-notes.mjs` 起草中文、再用 `--notes-file` 发送，
+`scripts/draft-release-notes.mjs` 起草中文，再由 `scripts/release-notes.mjs` 按字节发送并回读比对，
 不是平台按提交记录生成的模板）。凭证用仓库 Secrets 里的
 `RELEASE_TOKEN`（细粒度 token，仅 Contents 读写、仅本仓库）；token 过期或换人时只换
 Secrets 里那一个值，代码不动。标签推得比 job 早、
 或 job 失败时，用 `workflow_dispatch` 手动触发一次并填标签名补漏——不要重打标签。
+**重跑会用起草结果覆盖已有 Release 的正文**；发布页上有人工改写时不要重跑。
 
 **标签命名**用 `v0.x.y`（序号语义，延续 `v0.1.0`）：本项目没有版本号可以对齐，所以命名规则自定，
 只要**单调、不重复、可排序**即可。不要与日期方案混用——混用即不可排序。

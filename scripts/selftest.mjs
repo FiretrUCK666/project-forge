@@ -17,20 +17,58 @@ import {
   mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync,
 } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import {
   evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles,
   normVersion, compareHostMarker, parseMarkerKeys, hostDateBatchStatus,
   freshnessSectionBody, hasActionableSources,
+  referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
 } from './preflight.mjs'
 import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary } from './survey.mjs'
-import { badgeVerdict, tierSecrets, unhandledRiskKeys } from './review.mjs'
+import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from './review.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
-const ROOT = join(tmpdir(), `project-forge-selftest-${process.pid}`)
+const FIXTURE_PREFIX = 'project-forge-selftest-'
+const ROOT = join(tmpdir(), `${FIXTURE_PREFIX}${process.pid}`)
+
+/**
+ * fixture 的清理。
+ *
+ * 挂在 `exit` 上而不是只写在末尾一句：这份文件有近三千行顶层的造目录逻辑，任何一处
+ * 抛出都会让「末尾那句 rmSync」根本执行不到，于是整棵树（含 5000 多个文件的压力用例）
+ * 留在临时目录里。所以末尾显式调一次，`exit` 再兜一次——两次都幂等。
+ *
+ * `maxRetries` 是给文件系统留的余量：Windows 上刚写完的目录可能被索引器短暂占住，
+ * 默认不重试就直接放弃了（`force` 只吞「本来就不存在」，不吞这个）。
+ */
+function cleanupFixtures() {
+  try {
+    rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  } catch (error) {
+    process.stderr.write(`提示：临时 fixture 没能清干净（${ROOT}）：${error instanceof Error ? error.message : String(error)}\n`)
+  }
+}
+
+process.once('exit', cleanupFixtures)
+
+/**
+ * 上一次运行留下的 fixture。
+ *
+ * 报出来而不是默默留着：清理失败过一次就说明这台机器上还会再失败，而「看不见的债」
+ * 是最容易被当成没有的那种债。这里只报数，不替别人删——并发的另一次运行可能正用着它。
+ */
+function staleFixtureDirs() {
+  let entries = []
+  try {
+    entries = readdirSync(tmpdir(), { withFileTypes: true, encoding: 'utf8' })
+  } catch { return [] }
+  return entries
+    .filter((e) => e.isDirectory() && e.name.startsWith(FIXTURE_PREFIX) && join(tmpdir(), e.name) !== ROOT)
+    .map((e) => e.name)
+}
 
 /**
  * 夹具里的「凭据形状」一律**运行时拼出**，不在源码里留字面量。
@@ -98,18 +136,49 @@ function fixture(name, files) {
   return dir
 }
 
+/**
+ * 所有 fixture 实际跑出来的 kind（去重）。
+ *
+ * 记在**唯一的出口**上，而不是逐个用例去登记：那样每加一个 fixture 就要记得补一句，
+ * 忘了就等于没断言——而这正是它要防的那类遗漏。`survey()` 是全文件所有勘察调用的收口，
+ * 所以在这里记一次就等于记了全部。
+ */
+const observedKinds = new Set()
+
 function survey(dir, ...extra) {
   const r = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), dir, '--json', ...extra],
     { encoding: 'utf8' })
   if (r.status !== 0) return { error: (r.stderr ?? '').slice(0, 300) }
   try {
-    return JSON.parse((r.stdout ?? '').replace(/^\uFEFF/, ''))
+    const data = JSON.parse((r.stdout ?? '').replace(/^\uFEFF/, ''))
+    for (const k of data.ecosystem?.kinds ?? []) observedKinds.add(k)
+    return data
   } catch (error) {
     return { error: `输出不是合法 JSON：${error.message}` }
   }
 }
 
+/**
+ * 跑 compose-agents。**失败即抛**，错误里带上子进程自己的 stderr。
+ *
+ * 不抛的话，调用方下一行去读 AGENTS.md 会拿到一个 ENOENT——「生成失败」被显示成
+ * 「文件不存在」，指向错误的现象比没有现象更贵：那次真错是勘察脚本崩了，而报告里
+ * 找不到任何一个字提到它。
+ *
+ * 需要断言「它本来就该失败」的用例用 composeExpectingFailure。
+ */
 function compose(dir, ...extra) {
+  const r = composeExpectingFailure(dir, ...extra)
+  if (r.status !== 0) {
+    const why = `${r.stderr ?? ''}${r.stdout ?? ''}`.trim().split('\n')
+      .filter((l) => l.trim() !== '').slice(0, 4).join(' / ')
+    throw new Error(`compose-agents.mjs ${extra.join(' ') || '(无参数)'} 以退出码 ${r.status} 结束：${why}`)
+  }
+  return r
+}
+
+/** 断言退出码本身的场景：返回原始结果，退出码由用例自己判。 */
+function composeExpectingFailure(dir, ...extra) {
   return spawnSync(process.execPath, [join(HERE, 'compose-agents.mjs'), dir, ...extra],
     { encoding: 'utf8' })
 }
@@ -152,6 +221,34 @@ const SELFTEST_STUB = [
   'process.stdout.write("行为自检：0 项通过，0 项失败\\n")',
   '',
 ].join('\n')
+
+/**
+ * 端到端自检用的**哑弹** selftest：什么都不做，退出码 0，连摘要行都不打。
+ *
+ * 它是「行为自检被换成空壳」那个场景的构造物。长度要够（否则被「内容异常短」那条先拦下，
+ * 测不到想测的东西），但必须不输出摘要行——那正是旧判据读成通过、而新判据必须抓住的形状。
+ */
+const SELFTEST_MUTE = [
+  '#!/usr/bin/env node',
+  '// 哑弹替身：刻意什么都不做，退出码 0。',
+  '// 它模拟「行为自检被摘掉」——旧判据只看出身码，于是整套行为断言凭空消失还全绿。',
+  `process.stderr.write('MUTE-STUB-MARKER: 这一行是诊断用的\\n')`,
+  'process.exitCode = 0',
+  `// 填充到长度阈值以上，避免先被「内容异常短」拦下：` + 'x'.repeat(200),
+  '',
+].join('\n')
+
+/** 造一棵可独立跑 preflight 的 skill 副本（目录名必须是 project-forge，否则 name 对账必红）。 */
+function skillClone(name, { selftest = SELFTEST_STUB } = {}) {
+  const clone = join(fixture(name, {}), 'project-forge')
+  copyTree(SKILL_ROOT, clone, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
+  writeFileSync(join(clone, 'scripts', 'selftest.mjs'), selftest, 'utf8')
+  if (HAS_GIT) {
+    gitIn(clone, 'init')
+    gitIn(clone, 'add', '-A')
+  }
+  return clone
+}
 
 // ── 一、未初始化 git 时的密钥扫描（曾静默退化成只扫顶层） ────────────────────
 
@@ -381,14 +478,14 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   const original = `# legacy\n\n一句说明。\n\n## 项目简介\n\n做报表用的。\n\n## 怎么跑\n\nnpm test。\n\n## 注意事项\n\n- 别乱改数据库\n`
   writeFileSync(join(dir, 'AGENTS.md'), original, 'utf8')
 
-  const r1 = compose(dir)
+  const r1 = composeExpectingFailure(dir)
   const untouched = readFileSync(join(dir, 'AGENTS.md'), 'utf8') === original
   check(r1.status === 0, '默认运行不报错', `退出码 ${r1.status}`)
   check(untouched, '默认运行不动手写文件')
   check(/缺少这些节/.test(r1.stdout), '输出了缺口报告')
   report(r1.status === 0 && untouched, '默认运行：不报错、不动文件、给出体检')
 
-  const r2 = compose(dir, '--upgrade')
+  const r2 = composeExpectingFailure(dir, '--upgrade')
   const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
   const lost = original.split('\n').filter((l) => l.trim() !== '')
     .filter((l) => !new Set(after.split('\n').map((x) => x.trim())).has(l.trim()))
@@ -406,7 +503,7 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   //   - 脚本生成的文件（带 managed 标记）→ 缺节是缺陷，失败；
   //   - 作者手写后被升级的 → 作者的编排是权威，缺节只提示。
   // 前者防「被掏空的契约过 CI」，后者防「逼作者改成模板的样子」——两种错法都发生过。
-  const upCheck = compose(dir, '--check')
+  const upCheck = composeExpectingFailure(dir, '--check')
   const okUp = upCheck.status === 0 && /提示：缺失/.test(upCheck.stdout ?? '')
   check(okUp, '作者编排的文件：缺节只提示，--check 仍通过', `exit=${upCheck.status}`)
   report(okUp, '作者编排的文件：缺节只提示')
@@ -423,7 +520,7 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   check(killed !== gt && killed.length < gt.length, '前提：成功删掉一节',
     `${gt.length} -> ${killed.length}`)
   writeFileSync(gf, killed, 'utf8')
-  const gcheck = compose(gdir, '--check')
+  const gcheck = composeExpectingFailure(gdir, '--check')
   const okGut = gcheck.status !== 0 && /缺失/.test(gcheck.stderr ?? '')
   check(okGut, '生成的文件被掏空 → --check 失败', `exit=${gcheck.status}`)
   report(okGut, '生成的文件被掏空 → --check 失败')
@@ -434,7 +531,7 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   const cf = join(cdir, 'AGENTS.md')
   writeFileSync(cf, readFileSync(cf, 'utf8')
     .replace('### 提交纪律', '<!-- 我们自己的补充说明 -->\n### 提交纪律'), 'utf8')
-  const ccheck = compose(cdir, '--check')
+  const ccheck = composeExpectingFailure(cdir, '--check')
   const okComment = ccheck.status === 0
   check(okComment, '正文合法编辑不被误指为内核不一致', `exit=${ccheck.status}`)
   report(okComment, '正文合法编辑不被误报')
@@ -805,13 +902,13 @@ group('[18] 手工改坏的文件：一律拒绝写坏，并说清怎么修')
     writeFileSync(f, broken, 'utf8')
     const hashBefore = readFileSync(f, 'utf8')
 
-    const r1 = compose(dir)
+    const r1 = composeExpectingFailure(dir)
     const ok1 = r1.status === 2
     check(ok1, `${label} → 普通运行拒绝（exit 2）`, `exit=${r1.status}`)
-    const r2 = compose(dir, '--upgrade')
+    const r2 = composeExpectingFailure(dir, '--upgrade')
     const ok2 = r2.status === 2
     check(ok2, `${label} → --upgrade 也拒绝`, `exit=${r2.status}`)
-    const r3 = compose(dir, '--check')
+    const r3 = composeExpectingFailure(dir, '--check')
     const ok3 = r3.status !== 0
     check(ok3, `${label} → --check 报失败`, `exit=${r3.status}`)
     const untouched = readFileSync(f, 'utf8') === hashBefore
@@ -824,7 +921,7 @@ group('[18] 手工改坏的文件：一律拒绝写坏，并说清怎么修')
   // 正常受管文件仍应照常工作（别把守卫做得太紧）
   const good = fixture('still-works', base)
   compose(good)
-  const ok4 = compose(good, '--check').status === 0
+  const ok4 = composeExpectingFailure(good, '--check').status === 0
   check(ok4, '正常文件仍然通过 --check')
   report(ok4, '正常文件不受影响')
 }
@@ -1155,18 +1252,20 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   check(ok3, '未知 flag 报错')
   report(ok3, '未知 flag：报错')
 
-  // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）
+  // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）。
+  // 断言认的是 `[缺]` 那行而不是「凭据形状」四个字：被确认之后它会出现在 `[齐]` 里
+  // 作为「已确认」的说明，认字面词就分不出「已消掉」与「仍在报缺」。
   const sec = fixture('review-secret', {
     'README.md': '# x\n',
     'src/a.py': `K = "${FAKE_GH_TOKEN}"\n`,
   })
   const r4 = review(sec, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
-  const ok4 = /凭据形状/.test(r4.stdout ?? '') && r4.status !== 0
+  const ok4 = /\[缺\] 凭据形状/.test(r4.stdout ?? '') && r4.status !== 0
   check(ok4, '凭据命中 → 报缺且非零退出', `exit=${r4.status}`)
   report(ok4, '凭据：拦得住')
   const r5 = review(sec, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--secrets-reviewed')
-  const ok5 = !/凭据形状/.test(r5.stdout ?? '')
-  check(ok5, '--secrets-reviewed 消掉已确认的凭据项')
+  const ok5 = !/\[缺\] 凭据形状/.test(r5.stdout ?? '')
+  check(ok5, '--secrets-reviewed 消掉未跟踪未忽略的那一档', (r5.stdout ?? '').split('\n').find((l) => /凭据/.test(l)) ?? '')
   report(ok5, '确认后：消得掉')
 }
 
@@ -2170,7 +2269,7 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
     const gutted = before.replace(/^## 版本管理（必守）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
     check(gutted !== before && gutted.length < before.length, '前提：成功删掉一节')
     writeFileSync(f, gutted, 'utf8')
-    const r = compose(dir, '--check')
+    const r = composeExpectingFailure(dir, '--check')
     const ok = r.status === 1 && /缺失/.test(r.stderr ?? '')
     check(ok, '生成的文件缺节 → --check 失败', `exit=${r.status}`)
     report(ok, '生成：缺节是缺陷')
@@ -2186,15 +2285,18 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
       .replace(/^## 测试（约定）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
       .replace(/<!--\s*pf:author[\s\S]*?-->/g, '（已填写）')
     writeFileSync(f, text, 'utf8')
-    const r1 = compose(dir, '--check')
+    const r1 = composeExpectingFailure(dir, '--check')
     const ok1 = r1.status === 0 && !/缺失/.test(`${r1.stdout ?? ''}${r1.stderr ?? ''}`)
     check(ok1, '作者编排的文件：不判缺节，--check 通过', `exit=${r1.status} ${(r1.stdout ?? '').trim()}`)
     report(ok1, '作者编排：不判缺节')
     const r2 = compose(dir, '--status')
     const out2 = r2.stdout ?? ''
-    const ok2 = /缺失 0 节/.test(out2) && out2.split('\n').some((l) => l.trim().startsWith('内容完整'))
-    check(ok2, '作者编排的文件：缺失记 0，且报内容完整', out2.trim().split('\n')[0])
-    report(ok2, '作者编排：内容完整')
+    // 「没查」与「查过没有」必须可区分：作者编排的文件，脚本不按模板的标题清单判缺节，
+    // 所以它既不能报「内容完整」（那是拿没查充数），也不该报缺。
+    const ok2 = /缺节判据不适用|判据不适用/.test(out2)
+      && !out2.split('\n').some((l) => l.trim().startsWith('内容完整'))
+    check(ok2, '作者编排的文件：声明缺节判据不适用，且不拿它充「内容完整」', out2.trim().split('\n')[1] ?? '')
+    report(ok2, '作者编排：不判缺节，也不报完整')
   }
 
   // 3) 升级的文件：--upgrade 落一个 upgraded 标记（判据有据可依，不靠猜），缺节仍作待办报出。
@@ -2206,7 +2308,7 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
     const marked = after.includes('<!-- project-forge:upgraded -->')
     check(marked, '--upgrade 留下 upgraded 标记（判据有据可依）', after.slice(0, 80).replace(/\n/g, ' '))
     report(marked, '升级：标记落盘')
-    const r = compose(dir, '--check')
+    const r = composeExpectingFailure(dir, '--check')
     const ok = r.status === 0 && /提示：缺失/.test(r.stdout ?? '')
     check(ok, '升级的文件：缺节是待办（提示），不是缺陷', `exit=${r.status}`)
     report(ok, '升级：缺节只提示')
@@ -2853,13 +2955,277 @@ group('[43] host= 机制：三态比对、键形状、两键同批、查法判�
   }
 }
 
+// ── 机制自身的假绿回归网 ────────────────────────────────────────────────────
+//
+// 这一组守的是「自检自己会不会被架空」这一类错误：判据写成永真、把硬证据当软证据、
+// 检查的开关是一个可以随手改掉的字符串。每一段都用「旧的过、新的不过」构造，
+// 所以判据被改回去时这一组会立刻红。
+
+group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
+{
+  // 1) 行为自检被换成哑弹（什么都不做、退出码 0）→ 必须报缺，且必须带出它的 stderr。
+  //
+  //    旧判据只看出身码，于是整套行为断言凭空消失而门禁全绿；新判据把「有没有输出摘要
+  //    行」与退出码并列——「跑没跑到」是硬证据，「跑出来说什么」是佐证。
+  if (!HAS_GIT) {
+    skipGroup('[44.1-2] 哑弹自检与空转脚本的端到端判定', '本机没有 git')
+  } else {
+    const clone = skillClone('mech-mute', { selftest: SELFTEST_MUTE })
+    const r = preflightIn(clone)
+    const caught = r.status === 1 && /没有输出摘要行/.test(r.out)
+    check(caught, '哑弹自检（无摘要、退出码 0）→ preflight 失败',
+      `exit=${r.status} ${r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' / ')}`.slice(0, 220))
+    report(caught, '空壳自检：被判缺')
+    // 崩在中途要说得清：诊断片段必须带得出来，否则现场只能靠翻 stderr 猜。
+    check(/MUTE-STUB-MARKER/.test(r.out), '摘要缺失的报错里带出了子进程 stderr（能一眼定位）',
+      r.out.split('\n').filter((l) => /摘要/.test(l)).join(' / ').slice(0, 200))
+    report(/MUTE-STUB-MARKER/.test(r.out), '诊断：带出 stderr')
+  }
+
+  // 2) 被实跑的脚本「先打印完报告、再以非零退出」→ 必须报缺。
+  //
+  //    旧判据是「非零退出且 stdout 没有期望词」，于是 stdout 里已经出现「勘察结果」就
+  //    足以豁免非零退出码——P1 勘察在 markdown 模式下崩掉也读成通过。这里把失败限定在
+  //    --markdown 路径，selftest 用的 --json 路径不受影响，所以这一段是唯一能抓住它的网。
+  if (!HAS_GIT) {
+    skipGroup('[44.2] 空转脚本的端到端判定', '本机没有 git')
+  } else {
+    const clone = skillClone('mech-survey')
+    const p = join(clone, 'scripts', 'survey.mjs')
+    const src = readFileSync(p, 'utf8')
+    const anchor = 'process.exitCode = main(process.argv)'
+    check(src.includes(anchor), '前提：找到了 survey 的主流程锚点')
+    writeFileSync(p, `${src}\nif (isMainModule(import.meta.url, process.argv[1])\n  && process.argv.includes('--markdown')) {\n  process.stderr.write('LATE-STAGE-FAILURE-MARKER')\n  process.exitCode = 7\n}\n`, 'utf8')
+    const r = preflightIn(clone)
+    const caught = r.status === 1 && /survey\.mjs 以退出码 7 结束/.test(r.out)
+    check(caught, '打印完报告再非零退出 → preflight 失败（退出码不被 stdout 豁免）',
+      `exit=${r.status} ${r.out.split('\n').filter((l) => /survey/.test(l)).join(' / ')}`.slice(0, 220))
+    report(caught, '非零退出：一律算失败')
+  }
+
+  // 3) 门禁命令表的一致性：改个标题就关掉的那块检查，必须自己喊。
+  if (!HAS_GIT) {
+    skipGroup('[44.3] 门禁命令表的端到端判定', '本机没有 git')
+  } else {
+    const clone = skillClone('mech-gate')
+    const p = join(clone, 'CONTRIBUTING.md')
+    const text = readFileSync(p, 'utf8')
+    const renamed = text.replace(/^## 提交前门禁/m, '## 提交前的检查')
+    check(renamed !== text, '前提：CONTRIBUTING 的门禁小节标题改掉了')
+    writeFileSync(p, renamed, 'utf8')
+    const r = preflightIn(clone)
+    const caught = r.status === 1 && /没有「## 提交前门禁」这一节/.test(r.out)
+    check(caught, '门禁小节改名 → 两处命令表无从比对 → preflight 失败（不再静默跳过）',
+      `exit=${r.status}`)
+    report(caught, '命令表：标题缺失即失败')
+  }
+
+  // 4) 凭据分档：--secrets-reviewed 只覆盖「未跟踪未忽略」那一档。
+  //    已入库那一档的处置是「从索引移除并轮换」，没有「确认一下就算了」这个选项，
+  //    所以任何 flag 都不该消它——flag 的语义是「这处是占位或测试数据」，而它不在其中。
+  if (!HAS_GIT) {
+    skipGroup('[44.4] 凭据分档与 flag 效力', '本机没有 git')
+  } else {
+    const exposed = fixture('mech-secret-exposed', {
+      'README.md': '# x\n', 'LICENSE': 'MIT\n',
+      'free.env': `${FAKE_NPM_TOKEN}\n`,
+    })
+    gitIn(exposed, 'init')
+    const rv = (dir, ...a) => spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    const base = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci']
+    const before = rv(exposed, ...base)
+    const after = rv(exposed, ...base, '--secrets-reviewed')
+    check(/\[缺\] 凭据形状/.test(before.stdout ?? ''), '未跟踪未忽略的凭据 → 报缺',
+      (before.stdout ?? '').split('\n').find((l) => /凭据/.test(l)) ?? '')
+    check(!/\[缺\] 凭据形状/.test(after.stdout ?? ''), '这一档可被 --secrets-reviewed 消掉（语义对得上）',
+      (after.stdout ?? '').split('\n').find((l) => /凭据/.test(l)) ?? '')
+    report(!/\[缺\] 凭据形状/.test(after.stdout ?? ''), '未跟踪档：flag 有效')
+
+    const tracked = fixture('mech-secret-tracked', {
+      'README.md': '# x\n', 'LICENSE': 'MIT\n',
+      'src/a.py': `K = "${FAKE_GH_TOKEN}"\n`,
+    })
+    gitIn(tracked, 'init')
+    gitIn(tracked, 'config', 'user.name', 'T')
+    gitIn(tracked, 'config', 'user.email', 't@e.com')
+    gitIn(tracked, 'add', '-A')
+    gitIn(tracked, 'commit', '-q', '-m', 'i')
+    const tFlag = rv(tracked, ...base, '--secrets-reviewed')
+    const stillMissing = /已在版本库里/.test(tFlag.stdout ?? '')
+    check(stillMissing, '已入库的凭据 + --secrets-reviewed → 仍然报缺（flag 消不掉它）',
+      (tFlag.stdout ?? '').split('\n').find((l) => /凭据/.test(l)) ?? '')
+    report(stillMissing, '已入库档：flag 无效')
+    check(tFlag.status !== 0, '已入库的凭据使门禁非零退出', `exit=${tFlag.status}`)
+    report(tFlag.status !== 0, '已入库档：拦住')
+  }
+
+  // 5) 「有远端就得写清远端与发版」：判据必须落在内核之外。
+  {
+    const kernel = readFileSync(join(SKILL_ROOT, 'templates', 'agents-kernel.md'), 'utf8')
+    const inKernel = outsideKernel(`<!-- project-forge:kernel:start -->\n${kernel}\n<!-- project-forge:kernel:end -->\n\n## 怎么跑\n\nnode .\n`)
+    const okOut = !/远端|推送|发布|标签/i.test(inKernel)
+    check(okOut, '内核区之外不残留远端/发布字样（否则这条判据拿内核给自己作证）',
+      JSON.stringify(inKernel.slice(0, 80)))
+    report(okOut, '判据范围：内核之外')
+    const withBody = `${inKernel}\n## 版本节点\n\n打标签前先抬版本号，远端推上去。\n`
+    check(/远端/.test(outsideKernel(withBody)) && /发布|标签/.test(outsideKernel(withBody)),
+      '作者写了那两段 → 判据通过（不是恒假）')
+    report(/远端/.test(outsideKernel(withBody)), '反侧：写了就通过')
+    check(outsideKernel('没有标记的手写文件全文都算作者的部分') === '没有标记的手写文件全文都算作者的部分',
+      '没有内核标记时返回全文（手写文件没有内核可依赖）')
+  }
+
+  // 6) 来源节判据的第三档：像人话但没有可定位物的套话，必须失败。
+  //    旧判据只测了空正文与带链接两极，中间那档从没喂过，于是「不可证伪」一直没暴露。
+  {
+    const vacuous = '本节的内容以前是核过的，读者可以自行查阅相关文档的对应章节确认；'
+      + '若有疑问请按常规流程重核一次即可，不必另行处理。'
+    const okVacuous = !hasActionableSources(vacuous)
+    check(okVacuous, '纯套话（无链接、无对象、无查法句式）→ 不通过', vacuous.slice(0, 40))
+    report(okVacuous, '套话：被拦')
+    const byPath = hasActionableSources('字段语义见 `dsh-app-boot` 包里 bundlePatchFiles 的校验，以及 README.zh.md 的 Profile 一节。')
+    check(byPath, '写出了具体对象（行内代码里的文件/文档）→ 通过')
+    report(byPath, '有对象：放行')
+    const byStep = hasActionableSources('去宿主文档的第 7 节核对字段名，再按本节列表逐条对一遍。')
+    check(byStep, '查法句式（去 X 的第 N 节）→ 通过')
+    report(byStep, '查法句式：放行')
+  }
+
+  // 7) 零依赖：四种说明符形状都收，内置与相对路径放行，注释里的举例不算数。
+  //
+  //    包名一律**运行时拼出**：本文件也在零依赖检查的射程内，字面量写在这里，
+  //    那条检查就会把这份测试当成真导入——于是测试自己被自己的被测对象判红。
+  {
+    const Q = String.fromCharCode(39)
+    const DQ = '"'
+    const pkg = (...half) => half.join('')
+    const probe = [
+      `import a from ${Q}node:fs${Q}`,
+      `import b from ${Q}./local.mjs${Q}`,
+      `import c from ${DQ}${pkg('cha', 'lk')}${DQ}`,
+      `const d = require(${Q}${pkg('k', 'leur')}${Q})`,
+      `const e = await import(${DQ}${pkg('pico', 'colors')}${DQ})`,
+      `import ${Q}side-effect-only${Q}`,
+    ].join('\n')
+    const specs = moduleSpecifiers(probe)
+    const bad = specs.filter((s) => !['node:fs', './local.mjs'].includes(s))
+    check(specs.includes('node:fs') && specs.includes('./local.mjs'), '内置模块与相对路径照常识别',
+      JSON.stringify(specs))
+    check(bad.length === 4 && bad.includes(pkg('cha', 'lk')) && bad.includes(pkg('k', 'leur'))
+      && bad.includes(pkg('pico', 'colors')) && bad.includes('side-effect-only'),
+      '双引号 / require / 动态导入 / 裸导入四种形状都被收（旧的只认单引号 from）', JSON.stringify(bad))
+    report(bad.length === 4, '零依赖：四种形状都收')
+    const prose = [
+      `// 举例：动态导入写成 import(${Q}x${Q}) 就完事了`,
+      `/* require(${DQ}y${DQ}) 也不许 */`,
+      'const z = 1',
+    ].join('\n')
+    const fromProse = externalModules(prose)
+    check(fromProse.length === 0, '整行注释里的举例不算数（否则文档注释会变成地雷）',
+      JSON.stringify(fromProse))
+    report(fromProse.length === 0, '注释：不算')
+  }
+
+  // 8) 引用完整性：行内代码与 Markdown 链接两种写法必须一起查。
+  {
+    const text = [
+      '见 `references/survey.md`。',
+      '另见 [勘察协议](references/docs-set.md) 与 [带锚点的](scripts/survey.mjs#L1) 与 [带标题](references/publish.md "标题")。',
+      '占位示例：`references/<文件名>.md`。',
+      '非资源目录：docs/architecture.md。',
+    ].join('\n')
+    const got = referencedPaths(text)
+    check(got.includes('references/survey.md') && got.includes('references/docs-set.md'),
+      '两种写法都被认出', JSON.stringify(got))
+    report(got.includes('references/docs-set.md'), '链接写法：被认出')
+    check(got.includes('scripts/survey.mjs') && got.includes('references/publish.md'),
+      '链接带锚点与标题时仍取到路径（别把尾巴当成路径的一部分）', JSON.stringify(got))
+    check(!got.some((p) => p.includes('<')), '尖括号占位示例不当成真实引用（否则误报）', JSON.stringify(got))
+    report(!got.some((p) => p.includes('<')), '占位符：不报')
+  }
+
+  // 9) 约定名拼写：判据是「全仓只有一种拼写」，大小写敏感，注释里别照抄错拼法。
+  {
+    const good = 'a RELEASE_TOKEN b\nc RELEASE_TOKEN d\n'
+    check(releaseTokenSpellings([good]).size === 1, '全仓统一 → 只有一种拼写')
+    const sep = 'RELEASE' + '-' + 'TOKEN'
+    const joined = 'RELEASE' + 'TOKEN'
+    const bad = releaseTokenSpellings([good, `x ${sep} y`, `z ${joined} w`])
+    check(bad.size === 3, '分隔符写错或连写 → 判为不一致（大小写敏感的扫描）', JSON.stringify([...bad]))
+    report(bad.size === 3, '错拼法：被认出')
+    const camel = 'usesReleaseToken / releaseToken / ReleaseToken'
+    check(releaseTokenSpellings([good, camel]).size === 1,
+      'camelCase 标识符不算约定名拼写（不敏感地扫会自造假阳性）', JSON.stringify([...releaseTokenSpellings([good, camel])]))
+    report(releaseTokenSpellings([good, camel]).size === 1, 'camelCase：不算')
+  }
+
+  // 10) host= 不一致的提示必须渲染成提示本身。
+  //     拼接写坏时，冒号后面接的会是源码片段，而那段源码里恰好又写着正确做法——
+  //     看的人分不清哪句是给他的，整条提示作废。
+  {
+    const msg = hostMismatchMessage('references/plugins/dsh.md', '1.2.3', '本机实际是 1.2.4')
+    check(!/\+\s*'/.test(msg), '提示正文里不出现源码拼接痕迹', JSON.stringify(msg.slice(0, 90)))
+    check(/两种解释都成立/.test(msg) && /专章滞后/.test(msg) && /一起/.test(msg),
+      '两种解释与处置指引都在', JSON.stringify(msg.slice(-40)))
+    report(!/\+\s*'/.test(msg), '提示：渲染正常')
+  }
+
+  // 11) fixture 清理：清理由 exit 钩子兜底，抛异常也会执行；且残留必须报出来。
+  {
+    check(process.listeners('exit').includes(cleanupFixtures),
+      '清理挂在 exit 上（抛异常也会执行；只写在末尾一句就等于没有兜底）')
+    report(process.listeners('exit').includes(cleanupFixtures), '清理：exit 钩子已挂')
+    check(existsSync(ROOT), '前提：运行期间 fixture 目录确实存在（否则这条清理断言没东西可清）')
+    const leftover = staleFixtureDirs()
+    check(!leftover.includes(basename(ROOT)), '残留清单不含本次自己的目录（报数才有意义）',
+      JSON.stringify(leftover.slice(0, 3)))
+    report(!leftover.includes(basename(ROOT)), '残留清单：不含自己')
+  }
+}
+
+
+group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，不等真实项目踩到')
+{
+  const vocab = kindVocabulary()
+  const outsideOf = (kinds) => [...kinds].filter((k) => !vocab.includes(k)).sort()
+
+  // 非空前提：filter 在空集合上恒真，缺了它「一个都没观测到」也会显示通过。
+  const observedEnough = observedKinds.size >= 5
+  check(observedEnough, '前提：确实观测到了多个 fixture 跑出的 kind',
+    `${observedKinds.size} 个：${[...observedKinds].sort().join('、')}`)
+  report(observedEnough, `观测到 ${observedKinds.size} 个 kind`)
+
+  // 判据可证伪：塞一个词表外的 kind，必须被点出来。少了这一步，上面那条有可能恒真。
+  const canDetect = outsideOf([...observedKinds, 'a-kind-that-does-not-exist']).length === 1
+  check(canDetect, '前提：判据分得清词表内外（否则上面那条是恒真的）')
+  report(canDetect, '判据：分得清内外')
+
+  const outside = outsideOf(observedKinds)
+  check(outside.length === 0,
+    '任何 fixture 实际跑出的 kind 都在 kindVocabulary() 里（文档声称值域以它为准）',
+    `词表外：${outside.join('、')}`)
+  report(outside.length === 0, `值域：${observedKinds.size} 个 kind 全部在册`)
+
+  // 反向：值域里的 kind 若没有 fixture 覆盖到，说明有生态只存在于清单里、从没被验过
+  // 跑得出来。报出来让人决定要不要补 fixture——只提示，不拦（补 fixture 是加覆盖，
+  // 不是修缺陷）。
+  const neverSeen = vocab.filter((k) => !observedKinds.has(k))
+  if (neverSeen.length > 0) {
+    process.stdout.write(`         （值域里有 ${neverSeen.length} 个 kind 还没有 fixture 覆盖：${neverSeen.join('、')}）\n`)
+  }
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
-rmSync(ROOT, { recursive: true, force: true })
+cleanupFixtures()
 
 const envNote = HAS_GIT ? '' : '（本机没有 git，已跳过依赖它的分组）'
+const stale = staleFixtureDirs()
+const staleNote = stale.length > 0
+  ? `；另有 ${stale.length} 个上次遗留的临时 fixture 目录未清（${stale.slice(0, 3).join('、')}${stale.length > 3 ? '…' : ''}）`
+  : ''
 process.stdout.write(`\n行为自检：${passed} 项通过，${failed} 项失败`
-  + `${skipped > 0 ? `，${skipped} 组跳过` : ''}${envNote}\n`)
+  + `${skipped > 0 ? `，${skipped} 组跳过` : ''}${envNote}${staleNote}\n`)
 if (skips.length > 0) {
   process.stdout.write('\n跳过（环境不具备，不是缺陷）：\n')
   for (const s of skips) process.stdout.write(`  - ${s}\n`)

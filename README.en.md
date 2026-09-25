@@ -66,7 +66,7 @@ git pull
 **How to know a new version exists**: see the [Releases](https://github.com/FiretrUCK666/project-forge/releases).
 Day-to-day changes are only committed and pushed; tags are cut at release milestones (on an explicit release request), with notes generated automatically. The commit history has more detail, but that is for maintainers.
 
-**Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate, just `git pull`. If you modified it as described under "Development" below, commit your changes before pulling to avoid conflicts.
+**Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate, just `git pull`. If you modified it as described under the development sections of [CONTRIBUTING.md](CONTRIBUTING.md), commit your changes before pulling to avoid conflicts.
 
 ## Usage
 

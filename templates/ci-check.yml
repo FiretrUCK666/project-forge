@@ -26,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出
-        uses: actions/checkout@v4  # 落盘前核对最新大版本
+        uses: actions/checkout@v7  # 落盘前核对最新大版本
 
       # TODO(1)：按生态只留一块，其余整块删掉。Python 换 setup-python，Rust/Go 换对应
       # setup action，纯文档目录本块整段删掉。未选生态时下面默认块是错的，先选再删注释。
       - name: 准备运行环境
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '<清单声明的版本>'  # 占位符：填清单里声明的版本，不要照抄示例数字
 

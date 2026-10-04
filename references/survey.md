@@ -102,6 +102,11 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 `scripts/` 三个同级目录）。它是**跨宿主的通用格式**，不绑定任何一个宿主；分发靠克隆或
 复制而不是包管理器，所以「发布」列通常是**不发布**（远端即分发）。名字取 `skill` 而不带
 某个宿主的前缀，就是这个道理：格式是通用的，挂到某个宿主名下会把通用能力写成个例。
+这一类的判定协议与「指令型扩展」的通则见 `references/skill-project.md`。
+
+**这一类最容易被误判成「没装」**：缺必填字段、名字形状非法、调用或可见性键非法等情形，会让宿主
+**直接丢弃整个能力目录**，而模型侧拿不到逐目录诊断，分不清「不存在」与「不合法」。所以勘察要
+**按事实单独报出被丢弃的目录**，不与「没有」混同——见下方 `localSkills` 的 `dropped`。
 
 后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
 共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见
@@ -269,7 +274,10 @@ cargo，`cpp` 不代表用 CMake。`commands` 一节会区分这一点。
 | `packageName` | 包名（清单声明） |
 | `patchFile` | 磁盘上实际存在的补丁文件（根目录的 `cordis.patch.yml` 一类） |
 | `bundlePatch` | 清单声明的补丁路径与存在性（`dsh.bundle.patch` 指过去，文件在不在） |
-| `hasHostEntry`、`hasClientEntry`、`hasClientDecl`、`hasInvariantEntry` | host、client、伴生三路入口各有没有；client 声明与入口打架时先对齐，由此定 host-only、client-only 还是双面 |
+| `hasHostEntry`、`hasClientEntry`、`hasClientDecl` | host 与 client 两路入口各有没有，client 声明在不在；两者打架时先对齐，由此定 host-only、client-only 还是双面 |
+| `hasManifestVersion` | 清单有没有声明清单格式版本（`dsh.manifestVersion === 1`）。它与包版本号、与会话格式版本是三件不同的东西，同名不同物 |
+| `enginesDsh` | 宿主兼容范围的声明原文（`engines.dsh`，**范围符号原样保留**）。**它只作声明**：装与加载都不强制执行，声明一个不兼容的范围照样装得进、加载得起来，因此不能拿它当兼容性结论 |
+| `hasIcon` | 清单有没有声明展示图标（`package.json.icon`，是字符串）。子路径插件不再单独读自己的清单，展示文字与图标要靠对应的子路径导出才读得到 |
 | `exportsKeys` | 清单 `exports` 的键原文。上面那几格是判定结果，这一格是判定的依据——要复核「为什么说没有 client 入口」时看它 |
 | `filesHasLib`、`filesHasPatch` | `files` 白名单含不含构建产物与补丁（含了才发得出去） |
 | `libTracked` | 构建产物目录有没有被跟踪（与上一行是两套集合，合起来才知道走成品路线还是源码路线） |
@@ -278,18 +286,29 @@ cargo，`cpp` 不代表用 CMake。`commands` 一节会区分这一点。
 | `localWorkflow`、`contractDoc`、`patchesDir` | 本地 workflow、契约文档、补丁目录各有没有（缺席是正常态） |
 | `discoveryCarrierLikely` | 补丁文本里是否出现包名（文本包含判断，供人复核，不做硬结论） |
 | `pinnedVersions` | 锁定的宿主版本声明（去重，原样保留范围符号） |
-| `unknownKeys` | 清单里不认识的 `dsh.*` 字段（只报名字，语义现场查） |
+| `unknownKeys` | 公开作者字段与宿主内部字段之外出现的 `dsh.*` 键（只报名字，不解释语义） |
 | `warnings` | 上述不一致逐条列出 |
 
 ### `localSkills`
 
-仓库内可提交的本地 skills 盘点（通用协议，不止 DSH）。只收三处：`.agents/skills/*`、
-`.claude/skills/*`、包内 `skills/*`；家目录、外部 checkout、企业下发不在 scope 内，
-缺了不算漏。入口文件名与 frontmatter 的判据**与生态判定同一个来源**（大小写两种写法都认），
-所以同一个目录在两处的结论不会打架。每个 skill 报位置、`name` 是否与目录名一致
-（判不出时为 undefined，与「不一致」区分）、`description` 首行、有无 `scripts/` 与
-`references/`；入口文件缺失或读不出标 corrupt，不中断。空数组是正常结果，
+仓库内可提交的本地 skills 盘点（通用协议，不止 DSH）。**具体收哪几处位置，以勘察脚本当前的
+实际行为为准**——本文件不复述那个清单，改了脚本就以脚本为准。家目录、外部 checkout、企业下发
+不在 scope 内，缺了不算漏。入口文件名与 frontmatter 的判据**与生态判定同一个来源**
+（大小写两种写法都认），所以同一个目录在两处的结论不会打架。每个 skill 报位置、
+`name` 是否与目录名一致（判不出时为 undefined，与「不一致」区分）、`description` 首行、
+有无 `scripts/` 与 `references/`；入口文件缺失或读不出标 corrupt，不中断。空数组是正常结果，
 含义是「这个仓库没有本地 skills」，不是「没扫到」。
+
+两个新增字段，回答的是不同的问题：
+
+| 字段 | 取值与含义 |
+| --- | --- |
+| `dropped` | **被宿主丢弃的能力目录**，逐条报位置与丢弃原因（缺必填字段、名字形状非法、调用或可见性键非法、入口读不出等）。它的含义是「磁盘上有，但宿主加载不了」——**与「没装」是两回事**，必须单独报出来。模型侧看不到它，工具侧往往也不给诊断，所以不报就等于静默丢失 |
+| `invocation` | 每个 skill 的调用与可见性策略：模型能不能指名调用、用户能不能手动调用，以及各自是否被显式关闭。取值来自入口文件元数据里的那组键，**具体的键名与取值形状由宿主定义**（见对应专章），这里只报读到的结果 |
+
+**这两者要一起看。** `invocation` 里某个接口被关掉，与整份目录被丢弃是两回事，处置方向相反：
+前者内容仍然加载、只是少一条入口；后者内容**根本不加载**，改任何开关都没用。
+不少「模型从来不调用它」的案例根因在 `dropped` 里，而不在 `invocation` 里。
 
 ### `ignores`
 

@@ -308,7 +308,6 @@ function deriveFacts(target) {
   const isPlugin = s.ecosystem.kinds.some((k) => /plugin|extension/.test(k))
   const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
   const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
-  const hasDshInvariant = s.dsh?.hasInvariantEntry === true
   const hasDshToolchain = s.dsh?.toolchain !== undefined
     && (s.dsh.toolchain.tsdown === true || s.dsh.toolchain.vitest === true || s.dsh.toolchain.oxlint === true)
   const hasDshLocalWorkflow = s.dsh?.localWorkflow === true || s.dsh?.contractDoc === true
@@ -321,6 +320,12 @@ function deriveFacts(target) {
   // 性质不对，方向也是错的：省掉一节短文换不回什么，弄丢一次报警赔得上。
   const hasDshVersion = isDshPlugin
   const hasLocalSkills = Array.isArray(s.localSkills) && s.localSkills.length > 0
+  // 「宿主不会加载」是**单独一节**，不并进上面的盘点节：盘点节说「有什么」，这一节说
+  // 「哪几条是坏的、为什么坏」。两件事的读者动作不同——盘点节要求只读不改，这一节要求
+  // 先修好再继续，而它的症状（目录在、技能不在）与「压根没装」无法从目录列表上看出来。
+  const hasDroppedSkills = Array.isArray(s.localSkills)
+    && s.localSkills.some((x) => x.dropped !== undefined || x.corrupt === true)
+    || s.ecosystem.skillDropped !== undefined
 
   // 条件名**显式成对声明**，不靠「自动加前缀取反」推导。
   // 推导出来的名字（例如把 has-git 取反成 no-has-git）看着能跑，实则一改规则就静默
@@ -346,8 +351,6 @@ function deriveFacts(target) {
     'no-plugin': !isPlugin,
     'has-dsh-client': hasDshClient,
     'has-dsh-bundle': hasDshBundle,
-    'has-dsh-invariant': hasDshInvariant,
-    'no-dsh-invariant': !hasDshInvariant,
     'has-dsh-toolchain': hasDshToolchain,
     'no-dsh-toolchain': !hasDshToolchain,
     'has-dsh-version': hasDshVersion,
@@ -356,6 +359,8 @@ function deriveFacts(target) {
     'no-dsh-local-workflow': !hasDshLocalWorkflow,
     'has-local-skills': hasLocalSkills,
     'no-local-skills': !hasLocalSkills,
+    'has-dropped-skills': hasDroppedSkills,
+    'no-dropped-skills': !hasDroppedSkills,
     'has-publish': publishable,
     'no-publish': !publishable,
   }
@@ -1005,7 +1010,7 @@ function dshCompatibilityNotice(target) {
   if (pinned.some((p) => normVersion(p) === normVersion(hostPin))) return undefined
   return `提示：本项目声明的 DSH 兼容范围 ${pinned.join('、')} 与专章核对时的宿主版本 ${hostPin} 不同——`
     + '那是核对当时的本机版本，不是本项目的承诺；给这个项目配兼容范围时留意它可能早于核对过的宿主。'
-    + '按 references/plugins/dsh.md 事实来源节重核第一节至第七节。'
+    + '按 references/plugins/dsh.md 事实来源节重核第一节至第九节。'
 }
 
 /**

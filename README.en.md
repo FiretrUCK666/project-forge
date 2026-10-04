@@ -110,6 +110,7 @@ It never starts by writing. The first step is always a survey, then it tells you
 | `references/publish-go.md` | Go chapter: tag shape, no-upload model, indexing confirmation, retraction, private modules |
 | `references/publish-rust.md` | Rust chapter: manifest fields, publish scope, dry run, authentication, fixes |
 | `references/plugin-project.md` | Plugin projects: shared traits, decision protocol, what to do without a dedicated chapter and growth rules |
+| `references/skill-project.md` | Capability-directory projects: the host loads instructions rather than code, so none of the six questions shares an answer with plugin projects; includes the host-chapter index |
 | `references/plugins/` | Per-ecosystem plugin chapters (one file each) |
 | `templates/` | Doc skeletons ready to start from, plus standard texts of short licenses |
 | `scripts/survey.mjs` | Read-only survey, outputs structured facts |

@@ -104,6 +104,9 @@ description: |
 - **判据**：目录里有 `SKILL.md`（含小写 `skill.md`），且它的 frontmatter **同时带 `name` 与 `description`**——两者缺一，勘察就不认它是能力目录（只此一条判据，不看包管理器，也不看清单文件：能力目录本来就不靠它们标识自己）。
 - **语义**：它是**被宿主加载的能力目录**（入口文件加 `references/`、`templates/`、`scripts/` 三个同级目录），**跨宿主的通用格式**——凡支持这套格式的宿主都能加载它。名字取 `skill` 而不带某个宿主的前缀，就是这个道理：把通用能力挂到某个宿主名下，会把通则说成个例（与「不写死取值」同一条准则）。
 - **发布列**：通常是**不发布**——分发靠克隆或复制，远端仓库本身就是分发渠道；包管理器那一套（版本号对齐、制品库登记、附件）在这里没有对象。个别能力目录另有自己的分发方式时，按它自己声明的事实判，不要照搬本行。
+- **与插件类的分野**：插件把**代码**加载进宿主进程，能力目录把**指令**加载进模型上下文，两者的六问答案没有一条是相同的。因此它有自己的判据文件 `references/skill-project.md`，不要拿插件那套套上去。
+
+这一类最容易出的故障是「装上了却像不存在」：宿主不加载时会**保持沉默**，症状与压根没装一模一样。所以**先按 `references/skill-project.md` 查清宿主的发现与校验契约，再动自己的文件**——勘察报出的 `dropped` 已经把成因与位置一并列出来了。
 
 这条 kind 的取值域以 `scripts/survey.mjs` 的 `kindVocabulary()` 为唯一真相源，`references/survey.md` 的说明与它集合相等（`selftest.mjs` 断言）；本行只讲这一类该做哪几件事，不重复枚举全部 kind。
 
@@ -256,6 +259,7 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 | G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时用户指调用方，写进回执等指示，不直接执行） |
 | G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm、Python、Go、Rust 时加读对应 `references/publish-<生态>.md` |
 | G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读，见「执行流程」）；有对应专章时一并读 `references/plugins/<生态>.md` |
+| G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
 | G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下「只有用户能定的事」 |
 
 ### G7：只有用户能定的事，一次问清
@@ -332,6 +336,7 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `references/publish-go.md` | 涉及 Go 时。标签形状、无上传模型、收录确认、撤回、私有模块 |
 | `references/publish-rust.md` | 涉及 Rust 时。清单字段、发布范围、预演、认证、修正 |
 | `references/plugin-project.md` | 判定为插件类时。共同性质、判定协议（六个问题）、无专章时怎么办、新增专章的模板 |
+| `references/skill-project.md` | 判定为能力目录类时。宿主加载的是指令而非代码，六问答案与插件类没有一条相同；含宿主专章索引 |
 | `references/plugins/<生态>.md` | 该生态的专章：清单、两个标识、宿主加载什么、版本约束、打包发放、特有坑 |
 | `templates/agents-kernel.md` | 生成 `AGENTS.md` 时（由脚本读取，**不手工编辑**；标记区归它独占） |
 | `templates/agents-project.md` | 新建 `AGENTS.md` 时作为骨架 |

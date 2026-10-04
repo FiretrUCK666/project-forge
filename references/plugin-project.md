@@ -194,6 +194,9 @@
 2. **按第二节的六个问题去查**。查清了，这个生态就已经被正确处理。
 3. **查到的答案沉淀成一份新专章**（按下面的模板），这样下一次不用再查一遍。
    **这是把「一次性排查」变成「能力」的唯一动作**，不做的话下次还要从头查。
+   沉淀的目标形态不是唯一的：**宿主加载的是代码**时按下面的模板写成插件专章；**宿主加载的
+   是指令**（纯能力目录、无构建步骤）时，通则与判据见 `references/skill-project.md`，
+   它给的是另一套六问的提问方式。写新专章前先分清是哪一种。
 4. 查不到的项，如实说明并请用户确认——**不要猜**。
 
 ### 新增专章：模板与要求
@@ -245,6 +248,13 @@
 | DeepSeek Harness | `references/plugins/dsh.md` | `dsh-plugin` |
 | Visual Studio Code | `references/plugins/vscode.md` | `vscode-extension` |
 | Obsidian | `references/plugins/obsidian.md` | `obsidian-plugin` |
+| 能力目录宿主 | `references/skill-project.md` | `skill` |
+
+**一个生态可以同时出现在两张索引里。** 上表按「宿主加载你的代码」组织，而
+`references/skill-project.md` 里的索引表按「宿主加载你的指令」组织——两者是**同一批宿主的
+两个侧面**，不是两个生态：DeepSeek Harness 既是插件宿主也是能力目录宿主，同一份专章
+（`references/plugins/dsh.md`）会同时被两张索引指到。按哪张索引找，看这个项目是代码类扩展
+还是纯指令的能力目录。
 
 **没有找到你的生态**：按第九节处理——通用结论照用，六个问题照查，然后把答案写成新专章。
 

@@ -40,7 +40,12 @@ import { isMainModule, README_NAME_RE, HOME_PATH_RE } from './survey.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 
-/** 会话技能目录对 description 的截断长度（宿主实现事实，超出即不可见）。 */
+/**
+ * 会话技能目录对 description 的截断长度（宿主实现事实，超出即不可见）。
+ *
+ * 取值现场从宿主当前实现确认，不靠记忆。**长度按空白归一化之后算**——宿主的截断代码
+ * 先把连续空白压成一个空格再比长度，所以下面那道检查也必须同一个算法，见使用处。
+ */
 const CATALOG_DESCRIPTION_MAX = 500
 /** 会话上下文对工作区指令的字节预算。 */
 const INSTRUCTION_BUDGET = 65536
@@ -212,7 +217,12 @@ function checkSkillFile() {
   }
   const dirName = basename(SKILL_ROOT)
   if (name !== dirName) {
-    fail(`SKILL.md 的 name「${name}」与目录名「${dirName}」不一致 —— 两者必须相同。`)
+    // 这条是**本 skill 自己的约定**，不是宿主要求：目录名只是定位，`name` 才是路由与
+    // 覆盖的依据，两者不一致宿主照样加载得起来。仍然报错，是因为它自己的文档到处按
+    // 目录路径指认自己（安装、克隆、报错信息都靠它），不一致时读的人得先查一遍装的
+    // 到底是哪一个。判据来自真实需要，措辞就不能冒充宿主规则。
+    fail(`SKILL.md 的 name「${name}」与目录名「${dirName}」不一致 —— 这是本 skill 的约定：`
+      + '目录路径就是它对外的身份，不一致时读者要先查一遍装的是哪一个。')
   }
   if (!/^description:[ \t]*\|?/m.test(block)) {
     fail('SKILL.md frontmatter 缺少 description —— 宿主不识别没有描述的技能。')
@@ -228,10 +238,15 @@ function checkSkillFile() {
       }
     }
     const desc = descLines.join('\n').trim()
-    if (desc.length === 0) fail('SKILL.md 的 description 为空。')
-    else if (desc.length > CATALOG_DESCRIPTION_MAX) {
+    // 长度必须按**空白归一化之后**算，与宿主目录里那段截断代码同一个算法。
+    // 用原始长度判会算错：块标量里一次缩进换行就是一个字符，而宿主先把连续空白压成
+    // 一个空格再比——按原始长度报出的「超限」在宿主那里根本没超，按原始长度放过的
+    // 才真的会被截掉。后者是更难查的那种（自检全绿，目录里却少了半句）。
+    const descNorm = desc.replace(/\s+/g, ' ').trim()
+    if (descNorm.length === 0) fail('SKILL.md 的 description 为空。')
+    else if (descNorm.length > CATALOG_DESCRIPTION_MAX) {
       fail(
-        `description 长度 ${desc.length} 超过 ${CATALOG_DESCRIPTION_MAX} —— `
+        `description 归一化后长度 ${descNorm.length} 超过 ${CATALOG_DESCRIPTION_MAX} —— `
         + '超出部分在会话技能目录里会被截断，等于不存在。请把触发词前置、精简表述。',
       )
     }
@@ -897,26 +912,37 @@ export function releaseTokenSpellings(texts) {
 
 
 /**
- * `references/plugins/` 下的每个专章，都必须出现在 `plugin-project.md` 的索引表里。
+ * `references/plugins/` 下的每个专章，都必须出现在**某一张**索引表里。
  *
  * 这个结构有个隐蔽的失效方式：**专章写了，但没人知道它存在**——通用文件是入口
  * （G6 只强制读它），索引表是唯一的路标。漏登记的专章等于没写，而文件确实在那儿、
  * 检查也全绿。
  *
+ * 索引不止一张：宿主既可能加载你的代码（插件），也可能加载你的指令（能力目录），
+ * 同一套形态两边的入口文件不同，判据也不同，所以各有各的入口文件与索引。
+ * 判据因此是「**至少登记在一张**」，不是「必须登记在某一张」——一个生态完全可以
+ * 两边都出现（它既发布插件、又是能力目录宿主）。
+ *
  * 反向也查：索引里列了、文件却不在（引用断链）。
  */
 function checkPluginChapters() {
   const dir = join(SKILL_ROOT, 'references', 'plugins')
-  const index = join(SKILL_ROOT, 'references', 'plugin-project.md')
+  const indexes = [
+    { rel: 'references/plugin-project.md', required: true, label: '插件类' },
+    { rel: 'references/skill-project.md', required: false, label: '能力目录' },
+  ]
+    .map((x) => ({ ...x, abs: join(SKILL_ROOT, ...x.rel.split('/')) }))
+    .filter((x) => existsSync(x.abs))
+    .map((x) => ({ ...x, text: readText(x.abs).replace(/^\uFEFF/, '') }))
+  const present = indexes.find((x) => x.required)
   if (!existsSync(dir)) {
-    if (existsSync(index)) fail('references/plugin-project.md 存在，但没有 references/plugins/ 目录。')
+    if (present !== undefined) fail('references/plugin-project.md 存在，但没有 references/plugins/ 目录。')
     return
   }
-  if (!existsSync(index)) {
+  if (present === undefined) {
     fail('缺少 references/plugin-project.md —— 插件类项目的入口文件，专章靠它索引。')
     return
   }
-  const indexText = readText(index).replace(/^\uFEFF/, '')
 
   const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
     .filter((e) => e.isFile() && e.name.endsWith('.md'))
@@ -924,16 +950,18 @@ function checkPluginChapters() {
 
   for (const f of files) {
     const rel = `references/plugins/${f}`
-    if (!indexText.includes(rel)) {
-      fail(`${rel} 没有登记在 references/plugin-project.md 的「专章索引」里 ——`
+    if (!indexes.some((x) => x.text.includes(rel))) {
+      fail(`${rel} 没有登记在任何一张专章索引里（${indexes.map((x) => x.rel).join('、')}）——`
         + '专章写了却没人知道它存在，等于没写。')
     }
   }
   // 索引里指向不存在文件的引用，由 checkReferencesResolve 统一查；这里只补一条：
   // 索引表里出现的 plugins 路径必须真有对应文件
-  for (const m of indexText.matchAll(/`(references\/plugins\/[a-z0-9-]+\.md)`/g)) {
-    if (!existsSync(join(SKILL_ROOT, m[1]))) {
-      fail(`references/plugin-project.md 的索引引用了不存在的专章：${m[1]}。`)
+  for (const x of indexes) {
+    for (const m of x.text.matchAll(/`(references\/plugins\/[a-z0-9-]+\.md)`/g)) {
+      if (!existsSync(join(SKILL_ROOT, m[1]))) {
+        fail(`${x.rel} 的索引引用了不存在的专章：${m[1]}。`)
+      }
     }
   }
   if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')

@@ -438,7 +438,54 @@ function samePath(a, b) {
   return false
 }
 
-/** 解析 frontmatter 里的 name/description（只为识别 skill 项目，不做完整 YAML 解析）。 */
+/**
+ * 能力目录的可见性键与它接受的等价真值写法。
+ *
+ * 宿主侧的契约（键名用连字符、驼峰写法会让整个目录被丢弃、取值是布尔或等价真值、
+ * 拼错同样丢弃而不静默放行某一个接口）写在 `references/skill-project.md`；
+ * 这里只实现「怎么从文本里读出它」，形状照抄那份契约，不在代码里另立一套规则。
+ */
+const SKILL_INVOCATION_KEYS = [
+  // [frontmatter 键, 结果字段, 取真值时的字段值]
+  ['disable-model-invocation', 'modelInvocable', false],
+  ['user-invocable', 'userInvocable', true],
+]
+/** 宿主明确拒绝的驼峰旧键：出现即整个目录被丢弃，语义上等于「不存在」。 */
+const SKILL_LEGACY_INVOCATION_KEYS = ['disableModelInvocation', 'modelInvocable', 'userInvocable']
+const SKILL_BOOL_TRUE = /^(?:true|yes|on|1)$/i
+const SKILL_BOOL_FALSE = /^(?:false|no|off|0)$/i
+
+/**
+ * 读 frontmatter 里的可见性键，省略的键默认放行。
+ *
+ * 三种结果：正常值、键名非法（驼峰）、取值非法。第三种与第二种都必须报出来——
+ * 宿主对它们的反应是「整个目录不存在」，症状与「压根没装」完全一样。
+ */
+function skillInvocation(block) {
+  for (const key of SKILL_LEGACY_INVOCATION_KEYS) {
+    if (new RegExp(`^${key}:`, 'm').test(block)) {
+      return { dropped: `调用键「${key}」是驼峰写法，宿主会丢弃整个能力目录` }
+    }
+  }
+  const invocation = { modelInvocable: true, userInvocable: true }
+  for (const [key, field, whenTrue] of SKILL_INVOCATION_KEYS) {
+    const matched = new RegExp(`^${key}:[ \\t]*(.*)$`, 'm').exec(block)
+    if (matched === null) continue
+    const raw = matched[1].trim().replace(/^["']|["']$/g, '')
+    if (SKILL_BOOL_TRUE.test(raw)) invocation[field] = whenTrue
+    else if (SKILL_BOOL_FALSE.test(raw)) invocation[field] = !whenTrue
+    else return { dropped: `调用键「${key}」的取值「${raw}」不是布尔值，宿主会丢弃整个能力目录` }
+  }
+  return { invocation, dropped: undefined }
+}
+
+/**
+ * 解析 frontmatter 里的 name/description（只为识别 skill 项目，不做完整 YAML 解析）。
+ *
+ * 返回 undefined = 「这不是能力目录」；`dropped` 非空 = 「是，但宿主会把它整个丢掉」。
+ * 这两种状态必须能分开报告：后者的症状是「目录在、技能不在」，混进「没有」里就
+ * 再也查不出来，而它恰恰是这一类最常见、也最容易被误诊的故障。
+ */
 function skillFrontmatter(text) {
   if (text === undefined) return undefined
   const normalized = text.replace(/^\uFEFF/, '')
@@ -453,14 +500,40 @@ function skillFrontmatter(text) {
   const name = /^name:\s*(.+)$/m.exec(block)?.[1]?.trim().replace(/^["']|["']$/g, '')
   const hasDescription = /^description:\s*/m.test(block)
   if (name === undefined || !hasDescription) return undefined
-  return { name, ok: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) }
+  const invocation = skillInvocation(block)
+  return {
+    name,
+    ok: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name),
+    invocation: invocation.invocation,
+    dropped: invocation.dropped,
+  }
 }
 
 /** 能力目录的入口文件名（大小写两种写法都在用）。生态判定与本地盘点共用这一份。 */
 const SKILL_ENTRY_NAMES = ['SKILL.md', 'skill.md']
 
-/** 本地 skills 在仓库内的可提交位置。这三处是格式的一部分，不是某家的目录布局。 */
-const LOCAL_SKILL_BASES = ['.agents/skills', '.claude/skills', 'skills']
+/**
+ * 本地 skills 在仓库内的可提交位置。
+ *
+ * 这些位置是**格式约定**的一部分，被多家宿主各取其一，不是某一家独占的目录布局。
+ * 新增一处的判据是「确实有宿主会从这里发现」，不是「这个路径看着合理」——多收一处
+ * 就会报出宿主根本不会加载的目录，而盘点一旦开始报假的东西，就没人再读它了。
+ * 顺序即报告里的优先级：同一个能力目录出现在多处时，先出现的排在前面。
+ */
+const LOCAL_SKILL_BASES = ['.dsh/skills', '.agents/skills', '.claude/skills', 'skills']
+
+/**
+ * 清单里 `dsh` 对象下的已知键，分两类。
+ *
+ * 拆成两类不是为了好看，是因为两类**该不该被作者写**不同：公开作者字段是作者声明
+ * 的意图，宿主内部字段是宿主自己的元数据。混在一起报「不认识」会造出假警报——
+ * 而一个会喊狼来了的检查，不如没有。
+ *
+ * 词表以宿主的公共清单类型为准；宿主加新键时，往对应的那一组里加一条，而不是让
+ * 这份词表去猜。语义仍按 `references/plugin-project.md` 的六问现场查。
+ */
+const DSH_PUBLIC_KEYS = new Set(['manifestVersion', 'bundle', 'profile', 'client'])
+const DSH_HOST_INTERNAL_KEYS = new Set(['sessionFormatMigration'])
 
 // ── 目录走查（体量、风险） ──────────────────────────────────────────────────
 
@@ -1432,10 +1505,13 @@ function detectDsh(root, root_, eco) {
     : exists(join(root, bundlePatchPath.replace(/^\.\//, '')))
   const clientDecl = dsh.client
   const hasClientDecl = clientDecl !== undefined
-  // 未知字段现形：宿主未来加了新声明时，静默忽略等于装懂。这里只报名字，
-  // 不解释语义——语义按六问现场查，不要猜。
-  const knownDshKeys = new Set(['bundle', 'client', 'profile'])
-  const unknownKeys = Object.keys(dsh).filter((k) => !knownDshKeys.has(k))
+  // 未知字段现形：宿主未来加了新声明时，静默忽略等于装懂。但**已知字段要分两类**，
+  // 两类都不该报「不认识」——报了就是假警报，而假警报会让人连真警报一起忽略：
+  //   - 公开作者字段：作者在清单里写的（宿主公共类型里的 `dsh` 下那几个键）；
+  //   - 宿主内部字段：宿主自己读、作者不控制的（随包镜像打包器与启动器的元数据）。
+  // 其余键只报名字，不解释语义——语义按六问现场查，不要猜。
+  const unknownKeys = Object.keys(dsh)
+    .filter((k) => !DSH_PUBLIC_KEYS.has(k) && !DSH_HOST_INTERNAL_KEYS.has(k))
   const exportsMap = typeof pkg.exports === 'object' && pkg.exports !== null
     ? Object.keys(pkg.exports) : []
   const hasHostEntry = exportsMap.includes('.') || typeof pkg.main === 'string'
@@ -1471,8 +1547,6 @@ function detectDsh(root, root_, eco) {
         .map(([, range]) => range)
     }),
   )]
-  // 伴生入口：exports 是否含 ./invariant。语义件的有无决定要不要查正反测试。
-  const hasInvariantEntry = exportsMap.includes('./invariant')
   // 发布范围：files 是否含构建产物与补丁。只做包含判断，不解释语义。
   const filesList = Array.isArray(pkg.files) ? pkg.files.map(String) : []
   const filesHasLib = filesList.some((f) => /(^|\/)lib(\/|$)/.test(f) || /^lib/.test(f))
@@ -1501,6 +1575,11 @@ function detectDsh(root, root_, eco) {
   const localWorkflow = root_.entry('.agents')?.isDir === true
   const contractDoc = root_.has('docs/dsh-plugin-contracts.md')
   const patchesDir = root_.entry('patches')?.isDir === true
+  // 声明式元数据：格式版本、宿主兼容范围、展示图标。三项都只报「有没有」与原文，
+  // 不解释语义——**声明不等于闸门**，是否真的强制执行由宿主当前实现决定。
+  const hasManifestVersion = dsh.manifestVersion !== undefined
+  const enginesDsh = typeof pkg.engines?.dsh === 'string' ? pkg.engines.dsh : undefined
+  const hasIcon = typeof pkg.icon === 'string'
   return {
     packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
     patchFile,
@@ -1510,7 +1589,9 @@ function detectDsh(root, root_, eco) {
     exportsKeys: exportsMap,
     hasHostEntry,
     hasClientEntry,
-    hasInvariantEntry,
+    hasManifestVersion,
+    enginesDsh,
+    hasIcon,
     filesHasLib,
     filesHasPatch,
     libTracked,
@@ -1529,9 +1610,11 @@ function detectDsh(root, root_, eco) {
 /**
  * 仓库本地 skills 盘点：通用协议，不止 DSH。
  *
- * 只收仓库内可提交的位置（`.agents/skills/*`、`.claude/skills/*`、包内 `skills/*`），
- * 不碰家目录与外部 checkout。每个 skill 只读目录名、`SKILL.md` 的 frontmatter、
- * 是否有 `scripts/` 与 `references/`，不展开正文。损坏的入口标 corrupt，不中断。
+ * 只收仓库内可提交的位置（见 `LOCAL_SKILL_BASES`），不碰家目录与外部 checkout。
+ * **发现深度只有一层**——这套格式本身就是这么被发现的，更深的嵌套入口宿主根本不会
+ * 加载，收进来只会报出一堆装不上的目录。每个 skill 只读目录名、`SKILL.md`
+ * 的 frontmatter、是否有 `scripts/` 与 `references/`，不展开正文。损坏的入口标
+ * corrupt，被宿主丢弃的标 dropped，两者都不是「没有」——中断一律不发生。
  *
  * 入口文件名与 frontmatter 解析都走 `SKILL_ENTRY_NAMES` 与 `skillFrontmatter`——与生态
  * 判定同一个来源。**同一种能力目录用两套解析器判定**，窄的那套会先失效：只认大写
@@ -1543,25 +1626,48 @@ function detectLocalSkills(root) {
   const readDir = (p) => {
     try { return readdirSync(p, { withFileTypes: true, encoding: 'utf8' }) } catch { return [] }
   }
+  const describe = (path, name, dir, entryName, text) => {
+    const fm = skillFrontmatter(text)
+    const descriptionHead = text === undefined
+      ? undefined : (/^description:[ \t]*\|?([^\n]*)/m.exec(text) ?? [])[1]?.trim().slice(0, 120)
+    const sub = readDir(dir)
+    return {
+      path,
+      nameOk: fm === undefined ? undefined : fm.name === name,
+      descriptionHead,
+      hasScripts: sub.some((x) => x.name === 'scripts'),
+      hasReferences: sub.some((x) => x.name === 'references'),
+      corrupt: entryName === undefined || text === undefined,
+      dropped: fm?.dropped,
+      invocation: fm?.invocation,
+    }
+  }
   for (const base of LOCAL_SKILL_BASES) {
     const abs = join(root, base)
     for (const e of readDir(abs)) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue
-      const dir = join(abs, e.name)
-      const entryName = SKILL_ENTRY_NAMES.find((n) => existsSync(join(dir, n)))
-      const text = entryName === undefined ? undefined : readText(join(dir, entryName))
-      const fm = skillFrontmatter(text)
-      const descriptionHead = text === undefined
-        ? undefined : (/^description:[ \t]*\|?([^\n]*)/m.exec(text) ?? [])[1]?.trim().slice(0, 120)
-      const sub = readDir(dir)
-      out.push({
-        path: `${base}/${e.name}`,
-        nameOk: fm === undefined ? undefined : fm.name === e.name,
-        descriptionHead,
-        hasScripts: sub.some((x) => x.name === 'scripts'),
-        hasReferences: sub.some((x) => x.name === 'references'),
-        corrupt: entryName === undefined || text === undefined,
-      })
+      if (e.name.startsWith('.')) continue
+      // 两种形状：目录 bundle（`<名字>/SKILL.md`）与平铺的 `<名字>.md`。
+      if (e.isDirectory()) {
+        const dir = join(abs, e.name)
+        const entryName = SKILL_ENTRY_NAMES.find((n) => existsSync(join(dir, n)))
+        const rec = describe(`${base}/${e.name}`, e.name, dir, entryName,
+          entryName === undefined ? undefined : readText(join(dir, entryName)))
+        // 入口不在这一层、但更深一层有：发现深度只有一层，宿主根本走不到那里。
+        // 这是「目录在、技能不在」的另一种成因，报出来才不会让人一直找别的原因。
+        if (entryName === undefined) {
+          const buried = readDir(dir)
+            .filter((x) => x.isDirectory())
+            .find((x) => SKILL_ENTRY_NAMES.some((n) => existsSync(join(dir, x.name, n))))
+          if (buried !== undefined) {
+            rec.dropped = `入口在 ${buried.name}/ 里，比发现深度多一层，宿主不会发现它`
+          }
+        }
+        out.push(rec)
+      } else if (e.isFile() && e.name.endsWith('.md')) {
+        const file = join(abs, e.name)
+        const name = e.name.slice(0, -'.md'.length)
+        out.push(describe(`${base}/${e.name}`, name, abs, e.name, readText(file)))
+      }
     }
   }
   return out
@@ -1954,7 +2060,7 @@ function survey(target) {
   return {
     target: { path: root, name: basename(root) },
     git,
-    ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name },
+    ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name, skillDropped: eco.skill?.dropped },
     commands: deriveCommands(root, root_, eco),
     artifacts,
     dsh: detectDsh(root, root_, eco),
@@ -2070,7 +2176,10 @@ function toMarkdown(s) {
     L.push(`- DSH 补丁文件：${d.patchFile ?? '缺'}`
       + (d.bundlePatch === undefined ? '' : `；清单声明 ${d.bundlePatch.path}（${d.bundlePatch.exists ? '存在' : '缺失'}）`))
     L.push(`- DSH 入口：host ${d.hasHostEntry ? '有' : '缺'}；client ${d.hasClientEntry ? '有' : '无'}`
-      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）；invariant ${d.hasInvariantEntry ? '有' : '无'}`)
+      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）`)
+    L.push(`- DSH 声明式元数据：manifestVersion ${d.hasManifestVersion ? '有' : '无'}`
+      + `；engines.dsh ${d.enginesDsh ?? '未声明'}；包根图标 ${d.hasIcon ? '有' : '无'}`
+      + '（都是声明，宿主当前是否强制执行另查专章）')
     if (d.filesHasLib !== undefined) L.push(`- DSH 发布范围：files ${d.filesHasLib ? '含' : '缺'} lib；${d.filesHasPatch ? '含' : '缺'}补丁`)
     if (d.libTracked !== undefined) L.push(`- DSH 构建产物跟踪：lib ${d.libTracked ? '已被跟踪' : '未被跟踪'}（与 files 是两套集合）`)
     if (d.hostRuntimeInDeps === true) L.push('- **DSH 依赖放错**：宿主运行时进了 dependencies，应为 peer')
@@ -2081,10 +2190,15 @@ function toMarkdown(s) {
     }
     for (const w of d.warnings ?? []) L.push(`- DSH 注意：${w}`)
   }
+  if (s.ecosystem.skillDropped !== undefined) {
+    L.push(`- **本仓库的能力目录会被宿主丢弃**：${s.ecosystem.skillDropped}——症状是「目录在、技能不在」，先按专章核对宿主契约`)
+  }
   if (Array.isArray(s.localSkills) && s.localSkills.length > 0) {
     L.push(`- 本地 skills ${s.localSkills.length} 个：${s.localSkills.map((x) => x.path).join('、')}`)
     for (const x of s.localSkills) {
-      if (x.corrupt === true) L.push(`  - ${x.path}：SKILL.md 损坏或缺失，先修再用`)
+      // 有具体成因就先报成因：「入口多了一层」比「入口缺失」更能指到要改的那一处。
+      if (x.dropped !== undefined) L.push(`  - **${x.path}：${x.dropped}**`)
+      else if (x.corrupt === true) L.push(`  - ${x.path}：SKILL.md 损坏或缺失，先修再用`)
     }
   }
   L.push('')

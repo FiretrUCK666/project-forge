@@ -1449,27 +1449,42 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
   check(okN1, 'files 缺 lib → 事实为假', JSON.stringify(sn.dsh?.filesHasLib))
   report(okN1, 'files 缺 lib：勘察报假')
 
-  // invariant 入口识别
-  const inv = fixture('dsh-invariant', {
+  // 「已知 `dsh.*` 键」分两类，两类都不该报「不认识」，真不认识的要照报。
+  // 正反必须一起写：只测「manifestVersion 不报」的话，一个把 unknownKeys 整个清空的
+  // 实现也能过，而那正是下一版宿主加字段时最危险的那种退化。
+  const keys = fixture('dsh-keys', {
     'package.json': JSON.stringify({
-      name: 'dsh-inv', version: '0.1.0', type: 'module',
-      exports: { '.': './lib/index.js', './invariant': './lib/invariant.js' },
-      files: ['lib/index.js', 'lib/invariant.js', 'cordis.patch.yml'],
-      dsh: { bundle: { patch: './cordis.patch.yml' } },
+      name: 'dsh-keys', version: '0.1.0', type: 'module',
+      exports: { '.': './lib/index.js' },
+      files: ['lib/index.js', 'cordis.patch.yml'],
+      icon: './icon.svg',
+      engines: { node: '>=24', dsh: '0.2.1-alpha.1' },
+      dsh: {
+        manifestVersion: 1,
+        sessionFormatMigration: { from: 3, to: 4 },
+        bundle: { patch: './cordis.patch.yml' },
+        client: { platform: 'web' },
+        mystery: true,
+      },
     }, null, 2),
-    'cordis.patch.yml': "- insert:\n    - id: v\n      name: 'dsh-inv'\n",
-    'lib/index.js': 'export const name = "v"\n',
-    'lib/invariant.js': 'export const name = "v-invariant"\n',
+    'cordis.patch.yml': "- insert:\n    - id: k\n      name: 'dsh-keys'\n",
+    'lib/index.js': 'export const name = "k"\n',
+    'icon.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
   })
-  const si = survey(inv)
-  const okN2 = si.dsh?.hasInvariantEntry === true
-  check(okN2, 'invariant 入口识别', JSON.stringify(si.dsh?.exportsKeys))
-  report(okN2, 'invariant：识别')
-  compose(inv)
-  const ti = readFileSync(join(inv, 'AGENTS.md'), 'utf8')
-  const okN2b = /伴生/.test(ti)
-  check(okN2b, '有 invariant → 契约含伴生段')
-  report(okN2b, 'invariant：契约渲染')
+  const sk = survey(keys)
+  const knownNoNoise = (sk.dsh?.unknownKeys ?? []).join() === 'mystery'
+  check(knownNoNoise, '公开/内部字段不报，真不认识的照报',
+    JSON.stringify({ unknown: sk.dsh?.unknownKeys }))
+  report(knownNoNoise, '已知键：内部字段与公开字段均不误报，真未知键仍报出')
+  const declFacts = sk.dsh?.hasManifestVersion === true && sk.dsh?.enginesDsh === '0.2.1-alpha.1'
+    && sk.dsh?.hasIcon === true
+  check(declFacts, '声明式元数据逐项读出', JSON.stringify({
+    v: sk.dsh?.hasManifestVersion, engines: sk.dsh?.enginesDsh, icon: sk.dsh?.hasIcon,
+  }))
+  report(declFacts, '声明式元数据：格式版本、宿主范围、图标均读出')
+  const noStale = sk.dsh !== undefined && sk.dsh.hasInvariantEntry === undefined
+  check(noStale, '事实集里不再有宿主已移除的伴生入口字段', JSON.stringify(Object.keys(sk.dsh ?? {})))
+  report(noStale, '陈旧字段：已随宿主移除而清干净')
 
   // 宿主运行时放错位置
   const baddep = fixture('dsh-baddep', {
@@ -1502,6 +1517,57 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
   const okN4b = /仓库本地 skills/.test(tw)
   check(okN4b, '有 skills → 契约含本地 skills 段')
   report(okN4b, '本地 skills：契约渲染')
+
+  // 位置表加了新的一处之后，旧的位置**不能因此消失**——只测新位置的话，一个把表整个
+  // 换掉的实现照样全绿。所以一处已有的、一处新加的、一个平铺文件，一起断言。
+  const bases = fixture('skillbases', {
+    'package.json': JSON.stringify({ name: 'b', version: '1.0.0' }),
+    '.dsh/skills/proj-one/SKILL.md': '---\nname: proj-one\ndescription: 项目内那份本地 workflow，用来做勘察\n---\n',
+    '.agents/skills/proj-two/SKILL.md': '---\nname: proj-two\ndescription: 另一处项目内的本地 workflow\n---\n',
+    '.claude/skills/old-three/SKILL.md': '---\nname: old-three\ndescription: 原有位置那份，本轮不该被挤掉\n---\n',
+    '.dsh/skills/flat-four.md': '---\nname: flat-four\ndescription: 平铺文件形态的能力目录\n---\n',
+  })
+  const sb2 = survey(bases)
+  const paths = (sb2.localSkills ?? []).map((x) => x.path)
+  const okBases = ['.dsh/skills/proj-one', '.agents/skills/proj-two', '.claude/skills/old-three', '.dsh/skills/flat-four.md']
+    .every((p) => paths.includes(p))
+  check(okBases, '各处位置都收（旧位置不因新增而消失）', JSON.stringify(paths))
+  report(okBases, '本地 skills 位置：新旧并存，平铺文件也收')
+
+  // 「装上了却像不存在」是这一类最常见也最难查的故障：宿主不加载，而且**不告诉模型**。
+  // 三种成因各要能单独报出来，正向的（正常 skill）也必须干净，否则一个「一律报坏」的
+  // 实现也能让上面那条通过。
+  const dropped = fixture('skilldropped', {
+    'package.json': JSON.stringify({ name: 'd', version: '1.0.0' }),
+    '.dsh/skills/fine/SKILL.md': '---\nname: fine\ndescription: 完全正常的一份本地 workflow\n---\n',
+    '.dsh/skills/legacy-key/SKILL.md': '---\nname: legacy-key\ndescription: 驼峰调用键\nuserInvocable: true\n---\n',
+    '.dsh/skills/bad-value/SKILL.md': '---\nname: bad-value\ndescription: 取值非法\ndisable-model-invocation: maybe\n---\n',
+    '.dsh/skills/too-deep/deeper/SKILL.md': '---\nname: too-deep\ndescription: 比发现深度多一层\n---\n',
+  })
+  const sd = survey(dropped)
+  const byPath = Object.fromEntries((sd.localSkills ?? []).map((x) => [x.path, x]))
+  const okDropKey = /userInvocable/.test(byPath['.dsh/skills/legacy-key']?.dropped ?? '')
+  check(okDropKey, '驼峰调用键 → 报出丢弃成因', JSON.stringify(byPath['.dsh/skills/legacy-key']?.dropped))
+  report(okDropKey, '丢弃成因：驼峰调用键')
+  const okDropVal = /disable-model-invocation/.test(byPath['.dsh/skills/bad-value']?.dropped ?? '')
+  check(okDropVal, '取值非法 → 报出丢弃成因', JSON.stringify(byPath['.dsh/skills/bad-value']?.dropped))
+  report(okDropVal, '丢弃成因：调用键取值非法')
+  const okDropDeep = /deeper/.test(byPath['.dsh/skills/too-deep']?.dropped ?? '')
+  check(okDropDeep, '入口多一层 → 报出宿主走不到那里', JSON.stringify(byPath['.dsh/skills/too-deep']?.dropped))
+  report(okDropDeep, '丢弃成因：入口比发现深度多一层')
+  const okFine = byPath['.dsh/skills/fine']?.dropped === undefined && byPath['.dsh/skills/fine']?.corrupt !== true
+  check(okFine, '正常 skill 不误报坏', JSON.stringify(byPath['.dsh/skills/fine']))
+  report(okFine, '反向：正常 skill 不误报')
+  compose(dropped)
+  const td = readFileSync(join(dropped, 'AGENTS.md'), 'utf8')
+  const okDropSec = /宿主不会加载的 skills/.test(td)
+  check(okDropSec, '有被丢弃的 → 契约含专门一节')
+  report(okDropSec, '被丢弃的 skills：契约渲染')
+  compose(wskills)
+  const tw2 = readFileSync(join(wskills, 'AGENTS.md'), 'utf8')
+  const okNoDropSec = !/宿主不会加载的 skills/.test(tw2)
+  check(okNoDropSec, '没有被丢弃的 → 不渲染那一节（不制造噪音）')
+  report(okNoDropSec, '反向：无丢弃则不渲染该节')
 
   // 反向：无 skills 时为空数组，不误报
   const noskills = fixture('noskills', {
@@ -1785,8 +1851,10 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     check(okPin, '锁定版本被收录', JSON.stringify(pinned))
     report(okPin, '锁定版本：收录')
     const r = compose(dir)
-    const okQuiet = !/兼容范围/.test(r.stdout ?? '')
-    check(okQuiet, '兼容范围与标记一致时无提示')
+    // 判据用**漂移提示独有的那句**，不用「兼容范围」这个通用词：后者在契约正文里
+    // 也会出现（讲清声明与闸门的分工就得写它），拿它当判据，改一次文案就假红一次。
+    const okQuiet = !/与专章核对时的宿主版本/.test(r.stdout ?? '')
+    check(okQuiet, '兼容范围与标记一致时无提示', r.stdout ?? '')
     report(okQuiet, '对齐：安静')
   }
   // 漂移 → 提示但不失败。
@@ -1799,7 +1867,7 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     const driftPin = base === '9.9.9' ? '8.8.8' : '9.9.9'
     const dir = mkDual(`^${driftPin}`)
     const r = compose(dir)
-    const okWarn = /兼容范围/.test(r.stdout ?? '') && r.status === 0
+    const okWarn = /与专章核对时的宿主版本/.test(r.stdout ?? '') && r.status === 0
     check(okWarn, '兼容范围与标记不同时提示且不拦流程', `exit=${r.status}`)
     report(okWarn, '漂移：提示')
   }

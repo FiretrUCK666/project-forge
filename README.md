@@ -122,6 +122,7 @@ git pull
 | `references/publish-go.md` | Go 专章：标签形状、无上传模型、收录确认、撤回、私有模块 |
 | `references/publish-rust.md` | Rust 专章：清单字段、发布范围、预演、认证、修正 |
 | `references/plugin-project.md` | 插件类项目：共同性质、判定协议、没有专章时的处理与生长规则 |
+| `references/skill-project.md` | 能力目录类项目：宿主加载的是指令而非代码，六问答案与插件类没有一条相同；含宿主专章索引 |
 | `references/plugins/` | 各生态的插件专章（一个生态一个文件） |
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |

@@ -511,15 +511,28 @@ function main(argv) {
   }
 
   // 6c. 本地 skills：只盘点，不强求；已有被改坏才拦。
+  //
+  // 「装上了却像不存在」是这一类最常见也最难查的故障：宿主要么整个目录不加载，要么
+  // 根本走不到那里，而两边都**不告诉模型**——症状与「压根没装」完全一样。所以凡能指出
+  // 具体成因的，一律进缺项（它有确定的修法），不降级成待问。
   if (Array.isArray(s.localSkills) && s.localSkills.length > 0) {
     ok.push(`本地 skills 有（${s.localSkills.map((x) => x.path).join('、')}）`)
     for (const x of s.localSkills) {
-      if (x.corrupt === true) missing.push(`本地 skill 损坏：${x.path} 缺 SKILL.md 或首部非法`)
-      else if (x.nameOk === false) missing.push(`本地 skill 名实不符：${x.path} 目录名与 name 不一致`)
+      if (x.dropped !== undefined) missing.push(`本地 skill 宿主不会加载：${x.path} ${x.dropped}`)
+      else if (x.corrupt === true) missing.push(`本地 skill 损坏：${x.path} 缺入口文件或首部非法`)
       else if (x.descriptionHead === undefined || x.descriptionHead.length < 10) {
         pending.push(`本地 skill 描述过短：${x.path}（触发语不明，改完再验）`)
+      } else if (x.nameOk === false) {
+        // 目录名与 name 不一致，**宿主并不校验**——目录名只是定位，name 才是路由与覆盖
+        // 的依据。所以它是通用约定（改了更不容易走丢），不是缺陷；报成缺会让一批本来
+        // 完全能跑的目录被判为未交付。降成待问：确认后再改，或确认后按通用约定改名。
+        pending.push(`本地 skill 名实不符：${x.path} 目录名与 name 不一致（宿主不校验这一项，是通用约定；确认后再改名或确认保留）`)
       }
     }
+  }
+  // 仓库自身就是能力目录时，同一条判据适用于根入口，不只适用于仓库内的 skills。
+  if (s.ecosystem?.skillDropped !== undefined) {
+    missing.push(`本仓库的能力目录宿主不会加载：${s.ecosystem.skillDropped}`)
   }
   const auto = s.docs?.workflowAutomation
   if (auto === undefined || auto.files.length === 0) {

@@ -72,10 +72,10 @@ Day-to-day changes are only committed and pushed; tags are cut at release milest
 
 Just describe your need in natural language. Trigger phrases include:
 
-- Version control: set up version control, set up git, push to a repo, create a repo, push to GitHub, start a project
+- Version control: set up version control, set up git, push to a repo, create a repo, push to GitHub
 - Docs: write AGENTS.md, write README, set up LICENSE, write contributing guide
 - Release: publish to npm, release, set up CI
-- General: standardize the project, normalize the project, tidy up the project
+- General: initialize a project, start a project, new project setup, standardize the project, normalize the project, tidy up the project, get the project sorted
 
 For example:
 
@@ -89,6 +89,7 @@ It never starts by writing. The first step is always a survey, then it tells you
 
 ## What it will not do
 
+- It does not create the project itself: no stack selection, no project skeleton (source, entry files, framework configs) — that is scaffolding's job; this skill governs, and governing runs after the skeleton exists;
 - It does not touch your code logic — only version control, remotes, docs, and releases;
 - It does not pick a license for you — only criteria and options;
 - It never makes a repository public on its own (private by default; public needs your explicit nod);

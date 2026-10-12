@@ -10,6 +10,13 @@
 #
 # 重跑会用起草结果覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
 # 标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名补跑。
+#
+# 同一个 job 还做两件事：
+#   - **发版门禁**：标签、`SKILL.md` 的 `metadata.version`、被标签指到的那次提交必须
+#     三者对齐。这个字段存在的唯一理由是让没有版本历史的用户包副本知道自己属于哪一版，
+#     对不上就是在说假话；
+#   - **用户包**：用 `git archive` 按 `.gitattributes` 的排除规则导出，核对条目之后
+#     挂到发布页上。拿到压缩包的人不需要 git，也不需要这份仓库的协作设施。
 name: release
 
 on:
@@ -48,8 +55,28 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
+      - name: 发版门禁（标签、SKILL.md 的版本、被标签指到的提交三者对齐）
+        run: node scripts/dev/preflight.mjs --release "$TAG"
+
       - name: 起草正文（顺带确认标签存在，别把这一步挪到发送之后）
         run: node scripts/draft-release-notes.mjs "$TAG" notes.md
 
+      # 产出物与发布说明的顺序不能反：发布页必须先存在，附件才有地方挂。
+      # 先列条目核对、再打包，是因为核对要对着**这次真正要发出去的那份内容**做；
+      # 打包带 --prefix，用户解压出来就是一个 project-forge-<版本>/ 目录。
+      - name: 产出用户包（按 .gitattributes 的排除规则导出，并核对条目）
+        run: |
+          VERSION="${TAG#v}"
+          git archive --format=tar "$TAG" | tar -t > package-list.txt
+          node scripts/dev/preflight.mjs --package package-list.txt
+          git archive --format=zip --prefix="project-forge-${VERSION}/" \
+            -o "project-forge-${VERSION}.zip" "$TAG"
+          echo "ASSET=project-forge-${VERSION}.zip" >> "$GITHUB_ENV"
+
       - name: 写发布说明（已存在则更新；写完回读比对，不一致即失败）
         run: node scripts/release-notes.mjs "$TAG" notes.md --repo "$REPO"
+
+      - name: 把用户包挂到这一版的发布页上
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: gh release upload "$TAG" "$ASSET" --clobber

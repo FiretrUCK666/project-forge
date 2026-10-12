@@ -22,7 +22,9 @@
  *     超期只警告——时间流逝不是破损）
  *
  * 用法：
- *   node scripts/dev/preflight.mjs
+ *   node scripts/dev/preflight.mjs                          # 结构自检
+ *   node scripts/dev/preflight.mjs --package <清单文件>      # 产出物与文件地图核对（持续集成）
+ *   node scripts/dev/preflight.mjs --release <标签>          # 标签、版本、提交三者对齐（发布）
  *
  * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数——
  * 换目录检查的做法会让「检查了谁」变成一个可传错的值。
@@ -35,7 +37,7 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
+import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -99,7 +101,7 @@ const HOME_PATH_EXEMPT = new Map([
  * `Makefile` 这些**没有扩展名**或名字特殊的文件，恰恰是配置与许可证所在。
  * 所以除了扩展名，另外按已知的特殊文件名与「无扩展名但不大」的规则收进来。
  */
-const TEXT_EXTENSIONS = new Set(['.md', '.mjs', '.js', '.json', '.yml', '.yaml', '.txt'])
+const TEXT_EXTENSIONS = new Set(['.md', '.mjs', '.js', '.json', '.yml', '.yaml', '.txt', '.svg'])
 const TEXT_SPECIAL_NAMES = new Set([
   '.gitignore', '.gitattributes', '.npmignore', '.editorconfig', '.env.example',
   'license', 'licence', 'makefile', 'dockerfile', 'procfile',
@@ -281,16 +283,17 @@ function checkSkillFile() {
  * 同一套目录下的两种形状必须一起查——只认一种，另一种就成了没人看守的门，而链接写法
  * 恰恰是 AI 最容易顺手写出来的形状。
  *
- * 只认这三种目录：本 skill 的资源就在这三类下。占位示例请写成
+ * 只认这四个目录：本 skill 的资源就在这几类下（`assets/` 是 README 的图，图片链接断掉
+ * 同样是「读者照着它找东西，找不到」）。占位示例请写成
  * `references/<文件名>.md`——尖括号不在字符类里，因此不会被当成真实路径去检查。
  * 这是刻意的：占位符不是引用，报它属于误报。链接形态额外容忍锚点与标题尾巴。
  */
 export function referencedPaths(text) {
   const out = new Set()
   const src = String(text ?? '')
-  for (const m of src.matchAll(/`((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)`/g)) out.add(m[1])
+  for (const m of src.matchAll(/`((?:references|templates|scripts|assets)\/[A-Za-z0-9._/-]+)`/g)) out.add(m[1])
   for (const m of src.matchAll(
-    /\]\(\s*((?:references|templates|scripts)\/[A-Za-z0-9._/-]+)\s*(?:#[^)\s]*)?\s*(?:"[^"]*")?\)/g,
+    /\]\(\s*((?:references|templates|scripts|assets)\/[A-Za-z0-9._/-]+)\s*(?:#[^)\s]*)?\s*(?:"[^"]*")?\)/g,
   )) out.add(m[1])
   return [...out]
 }
@@ -542,12 +545,20 @@ export function externalModules(text) {
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
-  // 两张清单对应「用户包里有 / 仓库里另有」这条分野：scripts/ 顶层的脚本随包分发、
-  // 会被用在目标项目上；scripts/dev/ 的脚本只服务本仓库，不进用户包（见 .gitattributes）。
-  // 新增脚本时**放错位置**由「文件地图位置判据」当场指出，不靠这两张清单记住。
-  const USER_SCRIPTS = ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'sync-toc.mjs',
-    'check-badges.mjs', 'release-notes.mjs', 'draft-release-notes.mjs']
-  const DEV_SCRIPTS = ['preflight.mjs', 'selftest.mjs']
+  // 两份清单**从文件地图推导**，不另抄一份：`scripts/` 顶层的脚本随包分发、会被用在
+  // 目标项目上，`scripts/dev/` 的只服务本仓库。抄一份清单下来，新增脚本就会悄悄绕过
+  // 下面每一项检查——而那正是这条检查要防的「没人知道它存不存在」。
+  const map = readFileMap()
+  const pick = (entries, prefix) => entries
+    .filter((f) => f.startsWith(prefix) && f.endsWith('.mjs') && !f.slice(prefix.length).includes('/'))
+    .map((f) => f.slice(prefix.length))
+  const USER_SCRIPTS = pick(map.shipped, 'scripts/')
+  const DEV_SCRIPTS = pick(map.repoOnly, 'scripts/dev/')
+  if (USER_SCRIPTS.length === 0 || DEV_SCRIPTS.length === 0) {
+    fail('文件地图里读不到脚本清单（「用户包里有」与「仓库里另有」两张表）—— '
+      + '脚本检查因此无从下手，不是「没有脚本要查」。')
+    return
+  }
   const inspect = (p, rel) => {
     if (!existsSync(p)) { fail(`缺少 ${rel}。`); return }
     const text = readText(p)
@@ -555,6 +566,12 @@ function checkScripts() {
     if (statSync(p).size < 200) fail(`${rel} 内容异常短。`)
     for (const spec of externalModules(text)) {
       fail(`${rel} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
+    }
+    // 语法检查：只看能不能解析，不执行。没有这一条，一个语法错误的脚本要等到有人真的
+    // 跑到它才会暴露——而 `update.mjs` 这类只在特定时机被调用的脚本，可能很久都没人跑。
+    const parsed = spawnSync(process.execPath, ['--check', p], { encoding: 'utf8', windowsHide: true })
+    if (parsed.status !== 0) {
+      fail(`${rel} 有语法错误（node --check）：${stderrExcerpt(parsed, 4)}`)
     }
   }
   for (const f of USER_SCRIPTS) inspect(join(dir, f), `scripts/${f}`)
@@ -597,9 +614,8 @@ function stderrExcerpt(r, lines = 6) {
 }
 
 /**
- * 静态检查抓不到「import 写错、运行时抛错、参数解析有 bug」这类问题——本 skill 的
- * survey.mjs 就曾因为少一个 import 直接崩溃，而当时的自检全绿放行了它。
- * 所以这里实际执行一遍。
+ * 静态检查抓不到「import 写错、运行时抛错、参数解析有 bug」这类问题——少一个 import
+ * 就能让脚本直接崩溃，而结构检查全绿。所以这里实际执行一遍。
  *
  * **退出码是硬证据，输出只是佐证**：`expect` 绝不参与判断非零退出是否可接受。
  * 倒过来的后果是：脚本先把报告打印完、收尾时再崩，stdout 里已有期望词，
@@ -839,9 +855,9 @@ function checkStatedCounts() {
       fail(`字节预算不一致：compose-agents.mjs 为 ${budgetA}，preflight.mjs 为 ${budgetB} —— 两处必须是同一数。`)
     }
     // 约定名拼写：**扫定义域内全部文本文件**，只对出现过它的那些文件判一致性。
-    // 维护文件白名单是这条检查最脆的地方：真正消费这个密钥的
-    // `.github/workflows/release.yml` 曾不在名单里，于是把它改错拼法自检一声不吭。
-    // 判据落在「全仓拼写是否统一」上，新增文件不必记得登记。
+    // 维护文件白名单是这条检查最脆的地方：真正消费这个密钥的工作流漏在名单外时，
+    // 把它改成另一种拼法自检一声不吭。判据落在「全仓拼写是否统一」上，
+    // 新增文件不必记得登记。
     const spellings = releaseTokenSpellings(repoTextFiles().map((f) => {
       try { return readText(f) } catch { return '' }
     }))
@@ -1437,11 +1453,10 @@ function checkFreshness() {
     // 「事实来源」不能只是一句套话：它必须写出**能照着做的查法**（来源链接，或
     // 去哪个文档的哪一节怎么核），否则「上次看到的值」过期时读的人无处可查。
     //
-    // 这条判据曾经是**永真**的：它从 `text.slice(text.search(FRESHNESS_SECTION_RE))`
-    // 取「正文」，而那一段从**标题本身**切起——标题里就有「来源」二字，于是
-    // `/https?:\/\/|官方|文档|来源/` 恒命中，fail 是死代码（实测：一份只有标题加标记的
-    // 最简文档照样 0 失败通过）。现在按 markdown 语义取节正文，并在 selftest 里
-    // 用「只有标题的最简文档必须报错」证伪它。
+    // 这条判据最容易变成**永真**：从标题本身切起的「正文」里就带着「来源」二字，
+    // `/https?:\/\/|官方|文档|来源/` 恒命中，fail 就成了死代码（一份只有标题加标记的
+    // 最简文档照样通过）。所以按 markdown 语义取节正文，并在 selftest 里用
+    // 「只有标题的最简文档必须报错」证伪它。
     if (isChapter && r.hasSection) {
       if (!hasActionableSources(freshnessSectionBody(text))) {
         fail(`${rel} 的「事实来源」节没有写出可执行的查法——至少要有来源链接，或写明去哪个文档的哪一节怎么核；只有一句套话等于没有。`)
@@ -1513,7 +1528,70 @@ function checkReadmeToc() {
 
 // ── 检查十一：用户包边界 ────────────────────────────────────────────────────
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * 解析 `git archive` 输出的 tar 流，取出其中的条目名。
+ *
+ * 为什么直接解析，而不是调 `tar` 命令、或自己把 `.gitattributes` 的通配规则翻译一遍：
+ * **包内容的权威来源就是 git 自己的导出结果**。自己实现一遍匹配规则等于维护第二份真相，
+ * 两份不一致时从外面看不出来，而它判的恰恰是「哪些文件会被发出去」——实测就撞过一次：
+ * `git check-attr` 对目录模式下的文件报「未设置」，而 `git archive` 确实把它排除了。
+ * tar 的块结构是固定格式，解析它比复刻 git 的匹配语义可靠得多。
+ *
+ * pax 扩展头（长路径或含非 ASCII 时 git 会写）里的 `path=` 作用于紧随其后的那一条；
+ * GNU 长名头 `L` 同理，一并认。
+ */
+export function tarEntries(buf) {
+  const out = []
+  let off = 0
+  let pending
+  while (off + 512 <= buf.length) {
+    const header = buf.subarray(off, off + 512)
+    if (header.every((b) => b === 0)) break
+    const field = (a, b) => header.subarray(a, b).toString('utf8').replace(/\0[\s\S]*$/, '').trim()
+    const sizeText = field(124, 136)
+    const parsed = Number.parseInt(sizeText, 8)
+    const bytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+    const type = String.fromCharCode(header[156] === 0 ? 0x30 : header[156])
+    const data = buf.subarray(off + 512, off + 512 + bytes)
+    if (type === 'x') {
+      const m = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(data.toString('utf8'))
+      pending = m === null ? undefined : m[1]
+    } else if (type === 'L') {
+      pending = data.toString('utf8').replace(/\0[\s\S]*$/, '')
+    } else if (type !== 'g') {
+      const name = pending ?? field(0, 100)
+      pending = undefined
+      if (name !== '') out.push(name)
+    }
+    off += 512 + Math.ceil(bytes / 512) * 512
+  }
+  return out
+}
+
+/**
+ * 当前索引会导出成什么（相对仓库根的文件路径）。取不到返回 undefined。
+ *
+ * 做法是**真跑一次导出**：`git write-tree` 把索引写成树对象，再对它 `git archive`——
+ * 于是「哪些文件会被发出去」由 git 自己回答，`export-ignore` 的实际效果也在内。用索引
+ * 而不是 HEAD，是为了让「新增了文件但还没提交」也能当场核对（那正是最容易漏排的时刻）；
+ * 用索引而不是工作区，是因为产物最终来自被提交的内容。
+ *
+ * git 不可用、索引里有未合并条目等情况下返回 undefined：**「没比」与「比过且一致」
+ * 必须可区分**，读不到就报未核对，不静默放行。
+ */
+function packageMembers() {
+  const run = (args, encoding) => spawnSync('git', args, {
+    cwd: SKILL_ROOT, encoding, windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  })
+  const tree = run(['write-tree'], 'utf8')
+  if (tree.error !== undefined || tree.status !== 0) return undefined
+  const sha = (tree.stdout ?? '').trim()
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) return undefined
+  const archive = run(['archive', '--format=tar', sha], undefined)
+  if (archive.error !== undefined || archive.status !== 0) return undefined
+  const files = tarEntries(archive.stdout ?? Buffer.alloc(0)).filter((n) => !n.endsWith('/'))
+  return files.length === 0 ? undefined : files
+}
 
 /**
  * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
@@ -1548,30 +1626,37 @@ function readFileMap() {
   return buckets
 }
 
-/** 已跟踪的文件清单（包内容的来源）。git 不可用时返回 undefined。 */
-function trackedFiles() {
-  const r = spawnSync('git', ['-c', 'core.quotepath=false', 'ls-files', '-z'],
-    { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true })
-  if (r.error !== undefined || r.status !== 0) return undefined
-  return (r.stdout ?? '').split('\0').filter((s) => s !== '')
-}
-
-/** `.gitattributes` 里 export-ignore 模式的匹配器。通配按 git 的粗粒度语义翻译。 */
-function exportIgnoreMatchers() {
-  const p = join(SKILL_ROOT, '.gitattributes')
-  if (!existsSync(p)) return undefined
-  const out = []
-  for (const line of readText(p).split('\n')) {
-    const m = /^(\S+)\s+export-ignore\s*$/.exec(line.trim())
-    if (m === null) continue
-    let pat = m[1].replace(/^\//, '')
-    if (pat.endsWith('/')) pat = `${pat}**`
-    const re = pat.split('**')
-      .map((seg) => seg.split('*').map(escapeRe).join('[^/]*'))
-      .join('.*')
-    out.push(new RegExp(`^${re}$`))
+/**
+ * 把一份包内容清单与文件地图双向对齐，返回发现的矛盾数。
+ *
+ * 两个调用方共用同一份判据，只是喂进来的清单来源不同：一处是当前索引的导出结果
+ * （日常，`checkPackageBoundary`），一处是持续集成里真跑出来的那份产出物
+ * （`checkProducedPackage`）。判据只写一遍，两处不会给出两种答案。
+ */
+function alignPackage(list, map, label) {
+  let problems = 0
+  const bad = (message) => { fail(message); problems += 1 }
+  const covers = (entries, f) => entries.some((x) => (x.endsWith('/') ? f.startsWith(x) : f === x))
+  for (const f of list) {
+    if (f === 'SKILL.md') continue
+    if (covers(map.repoOnly, f)) {
+      bad(`${label}里有 ${f}，却登记在「仓库里另有」—— .gitattributes 里少了排除它的那条。`)
+    } else if (!covers(map.shipped, f)) {
+      bad(`${label}里有 ${f}，却没有登记在文件地图的「用户包里有」里 —— 登记它，或把它排除（自用脚本放 scripts/dev/）。`)
+    }
   }
-  return out
+  for (const entry of map.shipped) {
+    if (entry.endsWith('/')) {
+      if (!list.some((f) => f.startsWith(entry))) bad(`「用户包里有」声明了 ${entry}，但${label}里一个文件都没有。`)
+      continue
+    }
+    if (!existsSync(join(SKILL_ROOT, entry))) {
+      bad(`「用户包里有」声明了 ${entry}，磁盘上却没有这个文件。`)
+      continue
+    }
+    if (!list.includes(entry)) bad(`${entry} 登记在「用户包里有」，却没有出现在${label}里 —— 声明与实际矛盾。`)
+  }
+  return problems
 }
 
 /**
@@ -1581,8 +1666,8 @@ function exportIgnoreMatchers() {
  * 自用脚本整目录排除（`scripts/dev/`），随包分发的脚本放 `scripts/` 顶层；新增文件
  * 漏登记、放错位置、声明与实际矛盾，都在这里当场红。
  *
- * 离线的包集合是**近似**（按 `.gitattributes` 的声明算）；git 的真值以持续集成里那次
- * 真跑 `git archive` 并列出条目为准——两处都留：一处管日常，一处管事实。
+ * 包集合的来源是**真跑一次的导出结果**（见 `packageMembers`），不是把 `.gitattributes`
+ * 的规则另算一遍——后者是近似，而近似在这里正好会放过最该抓的那种错。
  */
 function checkPackageBoundary() {
   const map = readFileMap()
@@ -1606,33 +1691,111 @@ function checkPackageBoundary() {
     }
   }
   // 包集合：声明与实际双向对齐。入口文件天然在包里——没有它就不是一个 skill。
-  const matchers = exportIgnoreMatchers()
-  const tracked = trackedFiles()
-  if (matchers === undefined || tracked === undefined) {
-    warn('用户包边界未核对（缺 .gitattributes 或 git 不可用）—— 持续集成里会真跑 git archive 核对。')
+  const pkg = packageMembers()
+  if (pkg === undefined) {
+    warn('用户包边界未核对（git 不可用，或索引里有未合并的条目）—— 报「未核对」，不放行。')
     return
   }
-  const pkg = tracked.filter((f) => !matchers.some((re) => re.test(f)))
-  const covers = (entries, f) => entries.some((x) => (x.endsWith('/') ? f.startsWith(x) : f === x))
-  for (const f of pkg) {
-    if (f === 'SKILL.md') continue
-    if (covers(map.repoOnly, f)) {
-      fail(`${f} 会随包分发，却登记在「仓库里另有」—— .gitattributes 里少了排除它的那条。`)
-    } else if (!covers(map.shipped, f)) {
-      fail(`${f} 会随包分发，却没有登记在文件地图的「用户包里有」里 —— 登记它，或把它排除（自用脚本放 scripts/dev/）。`)
-    }
-  }
-  for (const entry of map.shipped) {
-    if (entry.endsWith('/')) {
-      if (!pkg.some((f) => f.startsWith(entry))) fail(`「用户包里有」声明了 ${entry}，但包里一个文件都没有。`)
-      continue
-    }
-    if (!tracked.includes(entry)) { fail(`「用户包里有」声明了 ${entry}，磁盘上却没有这个文件。`); continue }
-    if (!pkg.includes(entry)) fail(`${entry} 登记在「用户包里有」，却被 .gitattributes 排除了 —— 声明自相矛盾。`)
+  if (alignPackage(pkg, map, '实际导出') === 0) {
+    process.stdout.write(`用户包边界：${pkg.length} 个文件，与文件地图一致\n`)
   }
 }
 
-function main() {
+/**
+ * 核对一份真跑出来的产出物：清单文件里一行一个条目（`git archive <标签> | tar -t` 的结果）。
+ *
+ * 与 `checkPackageBoundary` 的分工：那一条看的是「当前索引会导出成什么」，在本地随时能跑；
+ * 这一条看的是**真的那份包**，由发布工作流在产出物生成后立刻调用。前者管日常，后者管事实。
+ */
+function checkProducedPackage(listPath) {
+  const map = readFileMap()
+  if (map.shipped.length === 0 || map.repoOnly.length === 0) {
+    fail('SKILL.md 的文件地图缺少「用户包里有」或「仓库里另有」小节 —— 包边界无从判断。')
+    return
+  }
+  if (!existsSync(listPath)) { fail(`找不到产出物清单 ${listPath}。`); return }
+  const list = readText(listPath).split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s !== '' && !s.endsWith('/'))
+  if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
+  if (alignPackage(list, map, '产出物') === 0) {
+    process.stdout.write(`产出物核对：${list.length} 个条目，与文件地图一致\n`)
+  }
+}
+
+/**
+ * 发版门禁：标签、入口声明的版本、被标签指到的那次提交，三者必须对得上。
+ *
+ * 由发布工作流调用（见 `.github/workflows/release.yml`），不在日常自检里跑——日常没有标签，
+ * 这条判据没有输入。`metadata.version` 存在的唯一理由是让**没有版本历史的用户包副本**
+ * 知道自己属于哪一版，所以它必须与标签同号，否则那个字段就是在说假话。
+ */
+function checkReleaseTag(tag) {
+  const declared = skillVersion(readText(join(SKILL_ROOT, 'SKILL.md')))
+  if (declared === undefined) {
+    fail('SKILL.md 的 frontmatter 里读不到 metadata.version —— 没有它，标签与副本对不上号。')
+    return
+  }
+  if (declared !== tag.replace(/^v/, '')) {
+    fail(`标签 ${tag} 与 SKILL.md 的 metadata.version「${declared}」不一致 —— 两者必须同号，`
+      + '否则用户包副本会以为自己属于另一版。')
+  }
+  const run = (args) => spawnSync('git', args, { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true })
+  const tagged = run(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
+  if (tagged.error !== undefined || tagged.status !== 0) { fail(`仓库里没有标签 ${tag}。`); return }
+  const head = run(['rev-parse', 'HEAD'])
+  if (head.status === 0 && (head.stdout ?? '').trim() !== (tagged.stdout ?? '').trim()) {
+    fail(`标签 ${tag} 指的不是当前检出的提交 —— 产出物会与标签对不上。`)
+  }
+  if (failures.length === 0) process.stdout.write(`发版门禁：标签 ${tag} 与 metadata.version ${declared} 一致\n`)
+}
+
+function usage() {
+  return [
+    '用法：node scripts/dev/preflight.mjs [--package <清单文件> | --release <标签>]',
+    '',
+    '  不带参数：结构自检（引用完整、内核一致、硬性规范、用户包边界、行为自检）。',
+    '',
+    '  --package <清单文件>  只做一件事：把产出物条目（一行一个，由',
+    '                        `git archive <标签> | tar -t` 得到）与文件地图双向核对。',
+    '                        由持续集成调用——它看的是真的那份包，不是推算出来的。',
+    '  --release <标签>      只做一件事：核对标签、SKILL.md 的 metadata.version、',
+    '                        被标签指到的那次提交三者对齐。由发布工作流调用。',
+    '',
+    '  两个模式各只做一件事，做完就退出：它们出现的地方，结构自检已经单独跑过。',
+    '  检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数。',
+    '  退出码 0 = 全绿；1 = 有 FAIL；2 = 脚本自身用法错误。',
+    '',
+  ].join('\n')
+}
+
+function main(argv = []) {
+  if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(usage()); return 0 }
+  const value = (name) => {
+    const i = argv.indexOf(name)
+    if (i < 0) return undefined
+    const v = argv[i + 1]
+    return v === undefined || v.startsWith('--') ? '' : v
+  }
+  const producedList = value('--package')
+  const releaseTag = value('--release')
+  if (producedList === '' || releaseTag === '') {
+    fail(`参数缺值。\n${usage()}`)
+    return 2
+  }
+  const known = new Set(['--package', '--release', producedList, releaseTag].filter((x) => x !== undefined))
+  const unknown = argv.filter((a) => !known.has(a))
+  if (unknown.length > 0) {
+    fail(`未知参数：${unknown.join(' ')}\n${usage()}`)
+    return 2
+  }
+
+  // 两个模式各只做一件事，做完就汇总。它们由持续集成与发布工作流调用，而那里
+  // 结构自检已经单独跑过一遍——重复跑一遍只是白花时间，还会让「这一条到底查了什么」
+  // 变得说不清。
+  if (producedList !== undefined) { checkProducedPackage(producedList); return summarize() }
+  if (releaseTag !== undefined) { checkReleaseTag(releaseTag); return summarize() }
+
   const skill = checkSkillFile()
   checkReferencesResolve()
   checkReferences()
@@ -1652,7 +1815,10 @@ function main() {
   if (skill !== undefined && !/^## 何时使用[ \t]*$/m.test(skill.text)) {
     fail('SKILL.md 缺少二级标题「## 何时使用」—— 入口必须说清什么情况下该用它。')
   }
+  return summarize()
+}
 
+function summarize() {
   for (const w of warnings) process.stdout.write(`WARN  ${w}\n`)
   for (const f of failures) process.stdout.write(`FAIL  ${f}\n`)
   process.stdout.write(
@@ -1668,4 +1834,4 @@ function main() {
 // 判据是**真实路径**比较（survey 的 isMainModule，只此一处实现）：字面比较在经
 // junction 或符号链接调用时永不相等，脚本于是什么都不做并返回 0——实测「preflight
 // 走 junction」就是 exit 0、零输出，CI 与人都会读成自检通过。
-if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main()
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(process.argv.slice(2))

@@ -480,6 +480,37 @@ function skillInvocation(block) {
 }
 
 /**
+ * frontmatter 区块（不含两端的 `---` 行）。不是 frontmatter 时返回 undefined。
+ *
+ * 只此一处切分：能力目录的识别、版本读取、宿主字段检查都从这里取块，各切各的迟早
+ * 会在某个边界条件上给出两种答案（块标量里的 `---`、BOM、行尾）。
+ */
+export function frontmatterBlock(text) {
+  if (text === undefined) return undefined
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
+  if (lines[0] !== '---') return undefined
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i] === '---') return lines.slice(1, i).join('\n')
+  }
+  return undefined
+}
+
+/**
+ * 入口声明的版本（frontmatter 里 `metadata.version`）。
+ *
+ * 存在的理由只有一个：**没有版本历史的用户包副本**靠它知道自己属于哪一版。有版本历史时
+ * 标签才是权威，这个字段是它的副本，所以发版门禁要求两者同号
+ * （见 `scripts/dev/preflight.mjs` 的 `checkReleaseTag`）。读不到就返回 undefined——
+ * 不编一个，也不拿别的字段凑。
+ */
+export function skillVersion(text) {
+  const block = frontmatterBlock(text)
+  if (block === undefined) return undefined
+  const m = /^[ \t]+version:[ \t]*["']?([^"'\n]+?)["']?[ \t]*$/m.exec(block)
+  return m === null ? undefined : m[1].trim()
+}
+
+/**
  * 解析 frontmatter 里的 name/description（只为识别 skill 项目，不做完整 YAML 解析）。
  *
  * 返回 undefined = 「这不是能力目录」；`dropped` 非空 = 「是，但宿主会把它整个丢掉」。
@@ -487,16 +518,8 @@ function skillInvocation(block) {
  * 再也查不出来，而它恰恰是这一类最常见、也最容易被误诊的故障。
  */
 function skillFrontmatter(text) {
-  if (text === undefined) return undefined
-  const normalized = text.replace(/^\uFEFF/, '')
-  const lines = normalized.split(/\r?\n/)
-  if (lines[0] !== '---') return undefined
-  let end = -1
-  for (let i = 1; i < lines.length; i += 1) {
-    if (lines[i] === '---') { end = i; break }
-  }
-  if (end < 0) return undefined
-  const block = lines.slice(1, end).join('\n')
+  const block = frontmatterBlock(text)
+  if (block === undefined) return undefined
   const name = /^name:\s*(.+)$/m.exec(block)?.[1]?.trim().replace(/^["']|["']$/g, '')
   const hasDescription = /^description:\s*/m.test(block)
   if (name === undefined || !hasDescription) return undefined
@@ -1126,9 +1149,9 @@ function detectEcosystem(root, root_, walked) {
   // 仍然什么都没认出来，才按目录性质区分。
   const unique = [...new Set(kinds)]
   if (unique.length === 0) {
-    // 「有没有 README」用 README_RE 判，与 detectDocs 同一个来源。这里曾另写一份
-    // 最窄的名字清单，于是只有 `README_CN.md` 的文档目录被判成 unknown——而同一份
-    // 报告的 docs.readme 又正确列出了它，同一件事判出两个答案。
+    // 「有没有 README」用 README_RE 判，与 detectDocs 同一个来源。另写一份最窄的名字
+    // 清单会判出两个答案：只有 `README_CN.md` 的文档目录被判成 unknown，而同一份
+    // 报告的 docs.readme 又正确列出了它。
     const readmes = root_.filesIn('', README_RE)
     // 判据是「除文档外还有没有别的东西」。**只看源码与构建描述文件**，不要把
     // LICENSE、.gitignore、CI 配置这类每个项目都有的文件算成「别的东西」——那会把

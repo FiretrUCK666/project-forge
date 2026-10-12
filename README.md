@@ -13,11 +13,14 @@
 跳过哪几件事。它不预设技术栈——Node、Python、Rust、Go、Java、纯文档目录，以及插件类
 项目与 skill 项目，判断依据都是勘察出来的事实。
 
+![project-forge：给一个项目目录，先只读勘察，再按事实判断该做哪几件事](assets/readme/hero.svg)
+
 ## 目录
 
 <!-- toc:start -->
 
 - [它解决什么问题](#它解决什么问题)
+- [它怎么工作](#它怎么工作)
 - [安装](#安装)
 - [更新](#更新)
 - [使用](#使用)
@@ -42,51 +45,84 @@
 project-forge 把这些收敛成一条流程，并且把判断依据写下来——所以它不只知道「该做什么」，
 还知道「为什么」和「什么时候不该做」。
 
+## 它怎么工作
+
+四步，顺序不能反：
+
+1. **勘察**（只读）。读项目的清单文件、目录结构、版本控制配置和已有文档，产出事实。
+   这一步不写任何文件——判断建立在事实上，不建立在猜测上；
+2. **判定**。拿事实去套能力矩阵，算出这次做哪几件、跳过哪几件，并把结论告诉你；
+3. **门控**。动手之前必须先读对应的判据：建仓库、写文档、发布各有各的门槛，跳过门控
+   等于凭猜测做事；
+4. **落盘**。写文件、建远端、推送、发布，做完回读确认。
+
+![project-forge 的工作链路：只读勘察、按事实判定、过硬门控、落盘与发布](assets/readme/pipeline.svg)
+
+判断依据是**勘察出来的事实**，不是预设清单。所以它不会给纯文档目录配发布流程，也不会
+重建一个已经有远端的仓库——「不发布」和「跳过某件事」都是正常结果，不是失败。
+
 ## 安装
 
-这是一个 skill，用的是通用的 `SKILL.md` 格式：一个入口文件，加上 `references/`、
-`templates/`、`scripts/` 三个同级目录。frontmatter 里只用了 `name` 与 `description`
-这两个各家共通的字段，脚本是纯 Node、不调用任何宿主接口。
+两种装法，选一种。
 
-把整个目录放进**你所用宿主的用户级 skill 根**：
-
-- **已经装过别的 skill** → 放到它们所在的目录。这是最可靠的判断，不用记路径。
-- **一个都没有** → 查该宿主的文档，位置写在它的文档里。
+### 克隆安装（能自动更新）
 
 ```sh
 git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/project-forge"
 ```
 
-目录名保持 `project-forge`——它必须与 frontmatter 里的 `name` 一致。**注意路径的大小写**：
-区分大小写的系统上，大小写不同就是另一个目录。
+### 压缩包安装（不需要 git）
+
+到 [Releases](https://github.com/FiretrUCK666/project-forge/releases) 下载最新版的
+`project-forge-<版本>.zip`，解压到你的 skill 根，目录名保持 `project-forge`。
+
+这种装法**不能自动更新**——副本没有版本历史，没法自己核对。有新版时重新下载覆盖。
+
+### 放在哪里
+
+放进**你所用宿主的用户级 skill 根**：
+
+- **已经装过别的 skill** → 放到它们所在的目录。这是最可靠的判断，不用记路径。
+- **一个都没有** → 查该宿主的文档，位置写在它的文档里。
+
+目录名保持 `project-forge`——它必须与 `SKILL.md` 里 frontmatter 的 `name` 一致。
+**注意路径的大小写**：区分大小写的系统上，大小写不同就是另一个目录。
 
 放好之后不需要注册或重启：宿主按目录发现，`SKILL.md` 就是入口。
 
 ## 更新
 
-这个 skill 靠克隆分发，**不在任何包管理器里**，所以更新就是拉取最新代码：
+**克隆装的会自己更新。** 每次任务开始时，它会先跑一次这个：
 
 ```sh
-cd <你放 skill 的目录>/project-forge
-git pull
+node "<本领目录>/scripts/update.mjs" --quiet
 ```
 
-**怎么知道有新版**：看仓库的 [Releases](https://github.com/FiretrUCK666/project-forge/releases)。
-日常改动只提交推送不打标签；攒到发版里程碑（明确说发版）才打标签，发布说明由自动流程生成。提交历史更详细，但那是给维护者看的。
+它查一下上游有没有新版，有就快进更新。判据是**这个副本有没有本地工作**：有未提交的
+改动、有未推送的提交、不在分支上，一概不碰。所以它不会覆盖你的改动，也不会把上游合并
+进贡献者的分支。默认 24 小时只查一次，同一台机器上装了几份副本时各查各的。
 
-**升级安全吗**：`SKILL.md`、`references/`、`templates/`、`scripts/` 都是纯文本与
-零依赖脚本，没有需要重新编译或迁移的东西，直接 `git pull` 即可。若你按
-[CONTRIBUTING.md](CONTRIBUTING.md) 里的「开发环境」与「提交前门禁」改过它，拉取前先提交
-自己的改动，避免冲突。
+想自己看一眼状态（只报告，不更新）：
+
+```sh
+node "<本领目录>/scripts/update.mjs" --check
+```
+
+**压缩包装的不会自动更新**，到 [Releases](https://github.com/FiretrUCK666/project-forge/releases)
+下载新版覆盖即可。
+
+**升级安全吗**：`SKILL.md`、`references/`、`templates/`、`scripts/` 都是纯文本和零依赖
+脚本，没有需要重新编译或迁移的东西。如果你按 [CONTRIBUTING.md](CONTRIBUTING.md) 改过
+它，更新脚本会看到本地改动并自动跳过，不会跟你的改动打架。
 
 ## 使用
 
 直接用自然语言描述你的需求即可，触发词包括：
 
-- 版本管理类：弄版本管理、配 git、上仓库、建仓库、推到 GitHub
-- 文档类：写 AGENTS.md、写 README、配 LICENSE、写贡献指南
-- 发布类：发到 npm、发布、配 CI
-- 笼统类：初始化项目、项目起步、新项目配置、标准化项目、规范项目、整理项目、给项目弄好
+- 版本管理类：`弄版本管理`、`配 git`、`上仓库`、`建仓库`、`推到 GitHub`
+- 文档类：`写 AGENTS.md`、`写 README`、`配 LICENSE`、`写贡献指南`
+- 发布类：`发到 npm`、`发布`、`配 CI`
+- 笼统类：`初始化项目`、`项目起步`、`新项目配置`、`标准化项目`、`规范项目`、`整理项目`、`给项目弄好`
 
 例如：
 
@@ -111,6 +147,10 @@ git pull
 
 ## 里面有什么
 
+### 用户包里有
+
+克隆下来的整份、或从 Releases 下载的压缩包，里面是这些：
+
 | 路径 | 内容 |
 | --- | --- |
 | `SKILL.md` | 入口：硬不变量、能力矩阵、执行流程、硬门控 |
@@ -127,21 +167,39 @@ git pull
 | `references/skill-project.md` | 能力目录类项目：宿主加载的是指令而非代码，六问答案与插件类没有一条相同；含宿主专章索引 |
 | `references/plugins/` | 各生态的插件专章（一个生态一个文件） |
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
+| `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |
-| `scripts/dev/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
-| `scripts/dev/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
+| `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
 | `scripts/draft-release-notes.mjs` | 从提交记录起草中文发布说明（平台的自动生成只会给英文模板） |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（私有仓库上的 GitHub 徽章显示不出来） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（从标题生成，锚点按 GitHub 的算法算） |
-| `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
+| `README.md`、`README.en.md` | 你正在看的这份说明，中英成对，中文是权威版 |
+| `LICENSE` | 许可证全文 |
+| `assets/readme/` | 上面那两张图（纯 SVG，可以直接改） |
+
+### 仓库里另有
+
+这些**不进压缩包**：它们只服务这个仓库自己，拿到包的人不需要，也不该被它们干扰。
+想改这个 skill 的话，从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始。
+
+| 路径 | 内容 |
+| --- | --- |
+| `AGENTS.md` | 这个仓库自己的项目契约：机制、不变量、构建与验证、硬性规范 |
+| `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
+| `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
+| `scripts/dev/preflight.mjs` | 维护这个 skill 自身时的结构自检：引用完整性、内核一致性、硬性规范、用户包边界 |
+| `scripts/dev/selftest.mjs` | 维护这个 skill 自身时的行为自检：造 fixture 实跑，断言每条判定 |
 
 ## 脚本
 
 全部脚本只用运行环境内置的模块，**零依赖**，跨平台。
 
 ```sh
+# 让这个副本保持最新（--check 只报告不更新）
+node <本领目录>/scripts/update.mjs --quiet
+
 # 勘察一个项目（只读，不写任何文件）
 node <本领目录>/scripts/survey.mjs <项目目录> --markdown
 
@@ -151,7 +209,7 @@ node <本领目录>/scripts/compose-agents.mjs <项目目录> --check     # 只�
 node <本领目录>/scripts/compose-agents.mjs <项目目录> --status    # 只看现状，不写入
 node <本领目录>/scripts/compose-agents.mjs <项目目录> --upgrade   # 把手写的升级为标准结构
 
-# 自检这个 skill 自身
+# 自检这个 skill 自身（只在改它的时候跑）
 node <本领目录>/scripts/dev/preflight.mjs
 node <本领目录>/scripts/dev/selftest.mjs
 ```
@@ -188,8 +246,8 @@ node <本领目录>/scripts/dev/selftest.mjs
 
 **Node.js 16 或更高。** 这是全部要求——所有脚本只用 Node 内置模块（`node:fs`、
 `node:path`、`node:url`、`node:os`、`node:child_process`），**没有任何第三方依赖**，
-不需要先装任何东西。联网检查徽章与调用接口的脚本需要 Node 18 的全局 `fetch`，
-16 下会明确报错而不是静默失败。
+不需要先装任何东西。联网检查徽章、核对更新与调用接口的脚本需要 Node 18 的全局
+`fetch`，16 下会明确报错而不是静默失败。
 
 版本下限来自脚本用到的语言特性：ESM 的 `node:` 前缀导入、`String.prototype.replaceAll`、
 `fs.rmSync`。三者中要求最高的是 `replaceAll`（Node 15 引入）；取 16 是因为它是覆盖全部
@@ -204,13 +262,14 @@ node <本领目录>/scripts/dev/selftest.mjs
 脚本本身不依赖 git：勘察照常工作（会如实报告「git 不可用」），文档相关的功能完全不受
 影响。**行为自检里依赖 git 的分组会自动跳过并说明**，不会报成失败。
 
-需要 git 的是这些能力：版本管理的建立与维护、远端仓库、推送与发布。没有 git 时这几件
-事做不了——勘察会明确告诉你，而不是假装成功。
+需要 git 的是这些能力：版本管理的建立与维护、远端仓库、推送与发布，以及**自动更新**
+（没有版本历史的副本没法自己核对新版）。没有 git 时这几件事做不了——勘察会明确告诉你，
+而不是假装成功。
 
 ### 网络
 
-勘察与文档生成全程离线。只有远端仓库（建仓、推送、元数据）与发布相关步骤需要访问对应
-的托管平台。
+勘察与文档生成全程离线。只有远端仓库（建仓、推送、元数据）、发布相关步骤，以及自动
+更新需要联网。
 
 ## 这个仓库自己是怎么配的
 

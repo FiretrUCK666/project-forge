@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 1200 400" role="img" aria-labelledby="pfHeroTitle pfHeroDesc">
+  <title id="pfHeroTitle">project-forge，通用的项目治理 skill</title>
+  <desc id="pfHeroDesc">左侧是名称 project-forge 与一句说明：给它一个项目目录，先只读勘察，再按事实决定做哪几件、跳过哪几件。右侧是它的四件事：版本管理、文档套装、远端仓库、发布通道，每件列出真实产物，右侧留一个尚未判定的勾选框。底部列出用户包里的四个部分。</desc>
+
+  <defs>
+    <pattern id="pfHeroGridMinor" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 24 24 M 0 24 L 24 24" fill="none" stroke="#E7E1D3" stroke-width="1"/>
+    </pattern>
+    <pattern id="pfHeroGridMajor" width="120" height="120" patternUnits="userSpaceOnUse">
+      <path d="M 120 0 L 120 120 M 0 120 L 120 120" fill="none" stroke="#DCD4C1" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <g id="sheet">
+    <rect width="1200" height="400" rx="22" fill="#F4F1EA"/>
+    <rect width="1200" height="400" rx="22" fill="url(#pfHeroGridMajor)"/>
+    <rect width="1200" height="400" rx="22" fill="url(#pfHeroGridMinor)"/>
+    <rect x="0.75" y="0.75" width="1198.5" height="398.5" rx="22" fill="none" stroke="#CFC7B6" stroke-width="1.5"/>
+    <g fill="none" stroke="#CFC7B6" stroke-width="1.2">
+      <path d="M 34 56 L 34 34 L 56 34"/>
+      <path d="M 1144 34 L 1166 34 L 1166 56"/>
+      <path d="M 34 344 L 34 366 L 56 366"/>
+      <path d="M 1144 366 L 1166 366 L 1166 344"/>
+    </g>
+  </g>
+
+  <g id="title-block" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+    <text x="64" y="48" font-size="20" fill="#6B675C">通用的项目治理 skill</text>
+    <text x="1136" y="47" font-size="19" fill="#6B675C" text-anchor="end">Node ≥ 16 · 零依赖</text>
+    <line x1="64" y1="66" x2="1136" y2="66" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="64" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="62" font-weight="600" fill="#1B1A17">project-forge</text>
+    <line x1="64" y1="178" x2="660" y2="178" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="64" y="228" font-size="24" fill="#1B1A17">给它一个项目目录，先只读勘察，</text>
+    <text x="64" y="264" font-size="24" fill="#1B1A17">再按事实决定做哪几件、跳过哪几件。</text>
+    <text x="64" y="306" font-size="21" fill="#6B675C">不生成项目骨架，也不替你选技术栈。</text>
+  </g>
+
+  <g id="capability-panel" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+    <rect x="700" y="78" width="436" height="268" rx="4" fill="#FBF9F4" stroke="#CFC7B6" stroke-width="1.2"/>
+    <text x="724" y="110" font-size="22" font-weight="600" fill="#1B1A17">四件事</text>
+    <text x="1112" y="110" font-size="18" fill="#A6381F" text-anchor="end">勘察之前，四件都还没定</text>
+    <line x1="724" y1="126" x2="1112" y2="126" stroke="#CFC7B6" stroke-width="1"/>
+
+    <rect x="724" y="141" width="40" height="24" rx="2" fill="none" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="744" y="158" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C" text-anchor="middle">P3</text>
+    <text x="780" y="160" font-size="22" font-weight="600" fill="#1B1A17">版本管理</text>
+    <text x="780" y="183" font-size="18" fill="#6B675C">忽略规则 · 署名 · 密钥扫描 · 首次提交</text>
+    <rect x="1084" y="152" width="24" height="24" rx="2" fill="none" stroke="#A6381F" stroke-width="1.6"/>
+
+    <rect x="724" y="191" width="40" height="24" rx="2" fill="none" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="744" y="208" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C" text-anchor="middle">P4</text>
+    <text x="780" y="210" font-size="22" font-weight="600" fill="#1B1A17">文档套装</text>
+    <text x="780" y="233" font-size="18" fill="#6B675C">AGENTS.md · README · LICENSE 等</text>
+    <rect x="1084" y="202" width="24" height="24" rx="2" fill="none" stroke="#A6381F" stroke-width="1.6"/>
+
+    <rect x="724" y="241" width="40" height="24" rx="2" fill="none" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="744" y="258" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C" text-anchor="middle">P5</text>
+    <text x="780" y="260" font-size="22" font-weight="600" fill="#1B1A17">远端仓库</text>
+    <text x="780" y="283" font-size="18" fill="#6B675C">建仓 · 推送 · 元数据 · 回读校验</text>
+    <rect x="1084" y="252" width="24" height="24" rx="2" fill="none" stroke="#A6381F" stroke-width="1.6"/>
+
+    <rect x="724" y="291" width="40" height="24" rx="2" fill="none" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="744" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C" text-anchor="middle">P6</text>
+    <text x="780" y="310" font-size="22" font-weight="600" fill="#1B1A17">发布通道</text>
+    <text x="780" y="333" font-size="18" fill="#6B675C">先判能不能发 · 预演 · 发布 · 回读</text>
+    <rect x="1084" y="302" width="24" height="24" rx="2" fill="none" stroke="#A6381F" stroke-width="1.6"/>
+  </g>
+
+  <g id="package-strip" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+    <line x1="64" y1="356" x2="1136" y2="356" stroke="#CFC7B6" stroke-width="1"/>
+    <text x="64" y="382" font-size="19" fill="#6B675C">里面有什么</text>
+    <g stroke="#CFC7B6" stroke-width="1">
+      <line x1="183" y1="368" x2="183" y2="386"/>
+      <line x1="314" y1="368" x2="314" y2="386"/>
+      <line x1="479" y1="368" x2="479" y2="386"/>
+      <line x1="633" y1="368" x2="633" y2="386"/>
+    </g>
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1B1A17">
+      <text x="199" y="382">SKILL.md</text>
+      <text x="330" y="382">references/</text>
+      <text x="495" y="382">templates/</text>
+      <text x="649" y="382">scripts/</text>
+    </g>
+  </g>
+</svg>

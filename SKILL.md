@@ -25,7 +25,7 @@ metadata:
 - **版本管理**：弄版本管理、配 git、上仓库、建仓库、推到 GitHub；
 - **文档套装**：写 AGENTS.md、写 README、写贡献指南、配 LICENSE；
 - **发布通道**：发到 npm、发布、配 CI；
-- **笼统说法**：初始化项目、项目起步、新项目配置、标准化项目、规范项目、整理项目、给项目弄好。
+- **笼统说法**：`初始化项目`、`项目起步`、`新项目配置`、`标准化项目`、`规范项目`、`整理项目`、`给项目弄好`。
 
 ### 与项目脚手架的分工（顺序不能反）
 
@@ -178,6 +178,24 @@ metadata:
 
 **P7 针对的是目标项目，不是本 skill**。本 skill 自身的自检（`scripts/dev/preflight.mjs`）
 只在维护本 skill 时跑，见「怎么用」。
+
+### 动手之前：先跑一次自动更新
+
+```sh
+node "<本领目录>/scripts/update.mjs" --quiet
+```
+
+这一步放在**任何读取之前**——它可能把本文件换掉。判据与做法都在脚本里，这里只说三件
+必须知道的事：
+
+- **只在副本没有本地工作时才快进更新**。有未提交改动、有未推送的提交、不在分支上、
+  或压根没有版本历史（下载的压缩包），一概不碰。所以它不会覆盖使用者的成果，也不会
+  把上游合并进贡献者的分支；
+- **默认 24 小时只查一次**，同一台机器上装了几份副本时各查各的。`--check` 是人主动问：
+  只报告不更新，且不受节流限制；
+- **它说「已更新」时，你手上这份文件已经过期**——重新读 `SKILL.md` 再继续。其余情况
+  在 `--quiet` 下一律安静，所以「没输出」就是「没有变化」；这次没联网核对成时它也不
+  假装，用 `--check` 能看到那行说明。
 
 ### P7 的一条分支：项目没有门禁命令时
 
@@ -367,10 +385,12 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
+| `scripts/update.mjs` | **任何任务的第一步**（见「动手之前：先跑一次自动更新」）。让这个副本保持最新 |
 | `scripts/survey.mjs` | P1 勘察 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 只校验不写入，`--status` 只看现状，`--upgrade` 升级手写文件，`--budget N` 覆盖注入预算） |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |
+| `assets/readme/` | README 里那两张图的 SVG 源文件（纯矢量，可直接改） |
 | `scripts/release-notes.mjs` | 写发布说明——`references/remote-github.md` 那条「非 ASCII 正文不经 shell」规则的落地工具 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（`references/docs-set.md` 那条「只写能显示的」的落地工具） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（`AGENTS.md`「派生内容用工具同步」一节的落地工具） |

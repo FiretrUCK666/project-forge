@@ -26,7 +26,7 @@ import {
   freshnessSectionBody, hasActionableSources,
   referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
 } from './preflight.mjs'
-import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary } from '../survey.mjs'
+import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion } from '../survey.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -253,7 +253,7 @@ function skillClone(name, { selftest = SELFTEST_STUB } = {}) {
   return clone
 }
 
-// ── 一、未初始化 git 时的密钥扫描（曾静默退化成只扫顶层） ────────────────────
+// ── 一、未初始化 git 时的密钥扫描（防退化成只扫顶层） ────────────────────────
 
 group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
 {
@@ -295,7 +295,7 @@ group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
     ['密钥覆盖 bin/', /\.env/.test(hits)], ['密钥覆盖中文路径', /泄漏/.test(hits)]]) report(ok, label)
 }
 
-// ── 二、仓库边界（曾把外层仓库的远端当成目标目录的） ─────────────────────────
+// ── 二、仓库边界（防把外层仓库的远端当成目标目录的） ─────────────────────────
 
 if (!HAS_GIT) {
   skipGroup('[2] 目录在别人的仓库里时必须识别出来', '环境里没有 git')
@@ -352,7 +352,7 @@ group('[3] 仓库根的各种路径写法都必须判真')
 }
 }
 
-// ── 四、生态判定（曾把有代码的项目判成纯文档目录） ───────────────────────────
+// ── 四、生态判定（防把有代码的项目判成纯文档目录） ───────────────────────────
 
 group('[4] 生态判定：代码在子目录里也不能判成纯文档')
 {
@@ -460,7 +460,7 @@ group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
   ]
   if (HAS_GIT) {
     checks.unshift(
-      ['建好远端后「角色判定」出现（曾永久冻结）', /^### 角色判定/m.test(t)],
+      ['建好远端后「角色判定」出现（防条件段落被永久冻结）', /^### 角色判定/m.test(t)],
       ['发版规则出现', /^### 发版规则/m.test(t)],
     )
   }
@@ -580,8 +580,8 @@ group('[13] Python 测试命令：只在项目声明了框架时才给，不按�
   report(ok1, '声明 pytest → 用 pytest')
 
   // **没有**声明框架（用标准库 unittest 的项目就是这样）→ 给标准库那条，
-  // 且必须带说明。曾经这里按生态惯例给 pytest，结果一个 unittest 项目拿到跑不通的
-  // 「硬门禁」命令，还把 P7 的诚实分支遮住了。
+  // 且必须带说明。按生态惯例给 pytest，会让一个 unittest 项目拿到跑不通的
+  // 「硬门禁」命令，还把 P7 的诚实分支遮住。
   const noDecl = fixture('py-nodecl', {
     'pyproject.toml': '[project]\nname = "p"\n',
     'tests/test_a.py': 'import unittest\n',
@@ -647,7 +647,7 @@ group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
   report(ok1, '真泄漏：判为 leak')
 
   // 测试数据：假路径不该被当成泄漏，且建议必须明确「不要改它」——
-  // 曾经这里报「本机私有路径」并建议改成相对路径，照着做会把测试改坏。
+  // 把测试数据报成「本机私有路径」并建议改成相对路径，照着做会把测试改坏。
   const fake = fixture('leak-testdata', {
     'tests/controller.spec.ts': "sessions.setInfo('s-1', { cwd: '/home/me/deepseek' })\n",
   })
@@ -765,8 +765,8 @@ group('[14] 完成判据不能空转：只升级不填写时，必须报出缺�
 
 group('[15] 非 JS 项目必须照样拿到发布那一半契约')
 {
-  // 这条曾经整块丢失：判「能不能发布」时只认 package.json，于是所有非 JS 项目
-  // 都被写成「本项目不对外发布」，版本号语义、抬版本号判据、发版规则全没了。
+  // 判「能不能发布」时只认 package.json，会让所有非 JS 项目都被写成
+  // 「本项目不对外发布」，版本号语义、抬版本号判据、发版规则全没了。
   for (const [label, files] of [
     ['Python', { 'pyproject.toml': '[project]\nname = "p"\nversion = "1.0.0"\n' }],
     ['Rust', { 'Cargo.toml': '[package]\nname = "p"\nversion = "1.0.0"\n' }],
@@ -880,8 +880,8 @@ group('[18] 手工改坏的文件：一律拒绝写坏，并说清怎么修')
 {
   const base = { 'package.json': JSON.stringify({ name: 'r', version: '1.0.0', scripts: { test: 'x' } }) }
 
-  // 三态判定：手写 / 受管 / **受损**。受损必须停下——曾经它被压进「手写」，
-  // 于是 --upgrade 把 14KB 内核又插一遍，文件里出现两份内核，而 --check 与 --status
+  // 三态判定：手写 / 受管 / **受损**。受损必须停下——把它压进「手写」，
+  // --upgrade 就会把 14KB 内核又插一遍，文件里出现两份内核，而 --check 与 --status
   // 同时报绿（--check 只看第一对标记，--status 数不到缺节）。
   const damaged = [
     ['只删掉结束标记', (t) => t.replace('<!-- project-forge:kernel:end -->', '')],
@@ -2204,7 +2204,7 @@ group('[37] 保鲜标记判据：好标记放行，坏标记各有断言')
     report(ok, '数量：只认恰好一个')
   }
 
-  // 8) 标记在节之前（npm 曾经的结构漂移）→ 错；无节有标记（悬空）→ 错。
+  // 8) 标记落在节之前（结构漂移的形状）→ 错；无节有标记（悬空）→ 错。
   {
     const r1 = run('references/publish-npm.md', `<!-- npm-verified: date=${todayStr} -->\n\n## 事实来源\n\n来源略。\n`)
     const r2 = run('references/publish-npm.md', `# x\n\n<!-- npm-verified: date=${todayStr} -->\n`)
@@ -2384,8 +2384,8 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
     check(ok, '升级的文件：缺节是待办（提示），不是缺陷', `exit=${r.status}`)
     report(ok, '升级：缺节只提示')
 
-    // 4) 同一批缺节只打印一次：曾经 reportGaps 说「这些节没写，文档就不算完成」，紧接着
-    //    reportRefresh 又说「未自动添加，需要就手动补」——同一事实两个结论。
+    // 4) 同一批缺节只打印一次：两处报告说同一件事就会给出两个结论——一处说
+    //    「这些节没写，文档就不算完成」，紧接着另一处说「未自动添加，需要就手动补」。
     const r2 = compose(dir)
     const text = `${r2.stdout ?? ''}${r2.stderr ?? ''}`
     const heads = (text.match(/缺失 \d+ 个节|模板里有、本文件没有的节/g) ?? []).length
@@ -2538,7 +2538,7 @@ group('[41] 文档与实现的一致性机制：互引、范围、取值、声�
     report(ok, 'review flag：用法输出即权威')
   }
 
-  // 6) compose 的开关也要有人写下来（--budget 曾经只存在于脚本注释里）。
+  // 6) compose 的开关也要有人写下来（只存在于脚本注释里的开关等于没有）。
   {
     const text = readSkill('scripts/compose-agents.mjs')
     const flags = [...new Set([...text.matchAll(/'(--[a-z-]+)'/g)].map((m) => m[1]))]
@@ -2645,7 +2645,7 @@ group('[41] 文档与实现的一致性机制：互引、范围、取值、声�
   }
 
   // 16) kind 清单的对照**不在这里**：它由 [43] 用 `survey.mjs` 导出的 `kindVocabulary()`
-  // 与文档做集合相等断言。曾经这里手抄了一份一模一样的清单——那既是第二份真相源
+  // 与文档做集合相等断言。在这里手抄一份一模一样的清单，既是第二份真相源
   // （新增生态时两处都要改），又是「拿实现给实现打分」的形状。
 }
 
@@ -2896,11 +2896,11 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
     }
   }
 
-  // ── P11 / P12：帮助开关与畸形清单（两条都曾是崩溃或静默错判） ──
+  // ── P11 / P12：帮助开关与畸形清单（两条都防崩溃或静默错判） ──
   {
     const help = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), '-h'], { encoding: 'utf8' })
     const okHelp = help.status === 0 && /用法：/.test(help.stdout ?? '')
-    check(okHelp, '`-h` 给用法（曾被当成目录名，报「目录不存在」）', 'exit=' + help.status)
+    check(okHelp, '`-h` 给用法（防被当成目录名而报「目录不存在」）', 'exit=' + help.status)
     report(okHelp, 'P11 -h：给用法而不是报目录不存在')
 
     const nullPkg = fixture('null-manifest', { 'package.json': 'null\n' })
@@ -3029,15 +3029,15 @@ group('[43] host= 机制：三态比对、键形状、两键同批、查法判�
 // ── 机制自身的假绿回归网 ────────────────────────────────────────────────────
 //
 // 这一组守的是「自检自己会不会被架空」这一类错误：判据写成永真、把硬证据当软证据、
-// 检查的开关是一个可以随手改掉的字符串。每一段都用「旧的过、新的不过」构造，
-// 所以判据被改回去时这一组会立刻红。
+// 检查的开关是一个可以随手改掉的字符串。每一段都用「放宽了会过、收紧了不过」构造，
+// 所以判据被改松时这一组会立刻红。
 
 group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
 {
   // 1) 行为自检被换成哑弹（什么都不做、退出码 0）→ 必须报缺，且必须带出它的 stderr。
   //
-  //    旧判据只看出身码，于是整套行为断言凭空消失而门禁全绿；新判据把「有没有输出摘要
-  //    行」与退出码并列——「跑没跑到」是硬证据，「跑出来说什么」是佐证。
+  //    只看出身码的判据会放它过去，整套行为断言凭空消失而门禁全绿；把「有没有输出摘要
+  //    行」与退出码并列才拦得住——「跑没跑到」是硬证据，「跑出来说什么」是佐证。
   if (!HAS_GIT) {
     skipGroup('[44.1-2] 哑弹自检与空转脚本的端到端判定', '本机没有 git')
   } else {
@@ -3184,7 +3184,7 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
       JSON.stringify(specs))
     check(bad.length === 4 && bad.includes(pkg('cha', 'lk')) && bad.includes(pkg('k', 'leur'))
       && bad.includes(pkg('pico', 'colors')) && bad.includes('side-effect-only'),
-      '双引号 / require / 动态导入 / 裸导入四种形状都被收（旧的只认单引号 from）', JSON.stringify(bad))
+      '双引号 / require / 动态导入 / 裸导入四种形状都被收（只认单引号 from 的写法会漏掉其余三种）', JSON.stringify(bad))
     report(bad.length === 4, '零依赖：四种形状都收')
     const prose = [
       `// 举例：动态导入写成 import(${Q}x${Q}) 就完事了`,
@@ -3283,6 +3283,131 @@ group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，�
   const neverSeen = vocab.filter((k) => !observedKinds.has(k))
   if (neverSeen.length > 0) {
     process.stdout.write(`         （值域里有 ${neverSeen.length} 个 kind 还没有 fixture 覆盖：${neverSeen.join('、')}）\n`)
+  }
+}
+
+// ── [46] 自动更新：判据是「这个副本有没有本地工作」，不是「它装在哪」 ────────
+
+if (!HAS_GIT) {
+  skipGroup('[46] 自动更新（快进、跳过、节流）', '本机没有 git')
+} else {
+  group('[46] 自动更新：快进、跳过、节流')
+  const FIXTURE_ID = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']
+  const commitIn = (dir, message) => {
+    gitIn(dir, 'add', '-A')
+    return gitIn(dir, ...FIXTURE_ID, 'commit', '-m', message)
+  }
+
+  // 节流状态落在这个目录里：跑完随 fixture 一起清掉，也不会污染本机真正的临时目录。
+  const updateTmp = join(ROOT, 'update-tmp')
+  mkdirSync(updateTmp, { recursive: true })
+  const runUpdate = (skillDir, ...extra) => spawnSync(
+    process.execPath, [join(skillDir, 'scripts', 'update.mjs'), ...extra],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, TEMP: updateTmp, TMPDIR: updateTmp } },
+  )
+  const out = (r) => `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
+
+  // 一棵自带的「上游」：从当前工作区复制一份并提交，再克隆出副本。
+  // 用它而不是本仓库自身，是为了让断言不依赖本仓库的历史——那种依赖会在
+  // 「历史一改，测试就莫名其妙地红」时浪费掉一整个下午。
+  const seed = join(ROOT, 'update-seed')
+  copyTree(SKILL_ROOT, seed, new Set(['.git', '.agent-teams', 'node_modules']))
+  gitIn(seed, 'init')
+  commitIn(seed, 'seed')
+  const seedVersion = skillVersion(readFileSync(join(seed, 'SKILL.md'), 'utf8'))
+  const bumpSeed = (version) => {
+    const p = join(seed, 'SKILL.md')
+    writeFileSync(p, readFileSync(p, 'utf8').replace(/version:[ \t]*"[^"]*"/, `version: "${version}"`), 'utf8')
+    commitIn(seed, `bump ${version}`)
+  }
+
+  // 1) 没有版本历史的副本（下载的压缩包）：如实说明无法自更新，不假装查过
+  {
+    const zipCopy = join(ROOT, 'update-zipcopy', 'project-forge')
+    copyTree(SKILL_ROOT, zipCopy, new Set(['.git', '.agent-teams', 'node_modules']))
+    const r = runUpdate(zipCopy, '--check')
+    const ok = r.status === 0 && /没有版本历史/.test(out(r))
+    check(ok, '无版本历史的副本：报告无法自动核对，不静默也不假装成功', out(r).slice(0, 120))
+    report(ok, '无版本历史：如实说明')
+  }
+
+  const clone = join(ROOT, 'update-clone')
+  gitIn(ROOT, 'clone', '--quiet', seed, clone)
+
+  // 2) 干净且已是最新：明确报「已是最新」，与「没核对成」区分开
+  {
+    const r = runUpdate(clone, '--check')
+    const ok = r.status === 0 && /已是最新/.test(out(r))
+    check(ok, '干净副本：明确报告已是最新', out(r).slice(0, 120))
+    report(ok, '已是最新：报告可区分')
+  }
+
+  // 3) 落后：--check 只报告不更新；新副本没有节流状态，默认跑一次就快进并报出前后版本
+  {
+    // 先在旧版上克隆，再让上游前进——于是这个副本「干净且落后」，正是要测的形状。
+    const clone3 = join(ROOT, 'update-clone3')
+    gitIn(ROOT, 'clone', '--quiet', seed, clone3)
+    bumpSeed('9.9.9')
+    const checked = runUpdate(clone, '--check')
+    const reported = /上游有 1 个新提交可更新/.test(out(checked))
+    check(reported, '落后 1 个提交：--check 报出可更新', out(checked).slice(0, 120))
+    const untouched = !/9\.9\.9/.test(readFileSync(join(clone, 'SKILL.md'), 'utf8'))
+    check(untouched, '--check 只报告，确实没有动文件')
+    report(reported && untouched, '落后：只报告不更新')
+
+    const pulled = runUpdate(clone3)
+    const expected = `已更新：${seedVersion} -> 9.9.9`
+    const ok = pulled.status === 0 && out(pulled).includes(expected)
+    check(ok, `干净副本：快进更新并报出前后版本（期望含「${expected}」）`, out(pulled).slice(0, 160))
+    const landed = /9\.9\.9/.test(readFileSync(join(clone3, 'SKILL.md'), 'utf8'))
+    check(landed, '快进之后磁盘上的文件确实变了（报成功与实际一致）')
+    report(ok && landed, '落后：快进更新')
+  }
+
+  // 4) 有未提交改动：一概不碰。这条是「不覆盖用户成果」在更新路径上的落点。
+  {
+    writeFileSync(join(clone, 'README.md'), '\n本地改动\n', { flag: 'a' })
+    bumpSeed('9.9.8')
+    const r = runUpdate(clone, '--check')
+    const ok = /有未提交的改动，跳过更新/.test(out(r))
+      && /本地改动/.test(readFileSync(join(clone, 'README.md'), 'utf8'))
+    check(ok, '有未提交改动：跳过更新且不动文件', out(r).slice(0, 120))
+    report(ok, '有本地改动：跳过')
+    gitIn(clone, 'checkout', '--', 'README.md')
+  }
+
+  // 5) 本地领先上游（贡献者的常态）：不合并上游，只报告
+  {
+    writeFileSync(join(clone, 'LOCAL.txt'), 'x\n', 'utf8')
+    gitIn(clone, 'add', 'LOCAL.txt')
+    gitIn(clone, ...FIXTURE_ID, 'commit', '-m', 'local work')
+    const r = runUpdate(clone, '--check')
+    const ok = /本地有 1 个未推送的提交，跳过更新/.test(out(r))
+    check(ok, '本地领先上游：跳过更新，不把上游合并进他的分支', out(r).slice(0, 120))
+    report(ok, '本地领先：跳过')
+  }
+
+  // 6) 节流：默认 24 小时内只查一次；--check 是人主动问，绕过节流。
+  //    没有这一条，「节流」与「坏了什么都不做」从外面看一模一样。
+  {
+    const clone2 = join(ROOT, 'update-clone2')
+    gitIn(ROOT, 'clone', '--quiet', seed, clone2)
+    const first = runUpdate(clone2)
+    const firstOk = /已是最新/.test(out(first))
+    check(firstOk, '前提：首次运行确实查了一次（否则下面的节流断言没有对象）', out(first).slice(0, 120))
+
+    bumpSeed('9.9.7')
+    const throttled = runUpdate(clone2)
+    const silent = out(throttled) === ''
+    check(silent, '节流：间隔内完全不输出', out(throttled).slice(0, 120))
+    const notPulled = !/9\.9\.7/.test(readFileSync(join(clone2, 'SKILL.md'), 'utf8'))
+    check(notPulled, '节流：间隔内确实没有更新（不是「更新了但没说话」）')
+    report(firstOk && silent && notPulled, '节流：间隔内不查也不更新')
+
+    const forced = runUpdate(clone2, '--check')
+    const ok = /上游有 1 个新提交可更新/.test(out(forced))
+    check(ok, '--check 绕过节流：人主动问的时候必须真的去查', out(forced).slice(0, 120))
+    report(ok, '节流：--check 可绕过')
   }
 }
 

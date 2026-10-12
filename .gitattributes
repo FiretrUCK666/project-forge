@@ -36,3 +36,17 @@
 *.dylib binary
 *.exe binary
 *.wasm binary
+
+# 用户包内容：打标签时用 git archive 产出用户包，只收用户与目标项目需要的文件。
+# 下面这些是这个仓库自己的协作设施，拿到包的人不需要它们：
+# 项目契约、贡献指南、持续集成与协作模板、仓库级配置，以及只服务本仓库的自用脚本。
+#
+# 新增自用脚本一律放进 scripts/dev/ —— 它整目录排除，不必逐个登记；
+# 放错位置（例如把自用脚本丢在 scripts/ 顶层）会由自检的位置判据当场指出。
+# 包的实际内容与这里的声明是否一致，由自检的包集合判据与 CI 的「用户包内容」一步守着。
+/AGENTS.md        export-ignore
+/CONTRIBUTING.md  export-ignore
+/.github/         export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore
+/scripts/dev/     export-ignore

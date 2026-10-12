@@ -64,8 +64,8 @@ cd project-forge
 改完必须全绿：
 
 ```sh
-node scripts/preflight.mjs
-node scripts/selftest.mjs
+node scripts/dev/preflight.mjs
+node scripts/dev/selftest.mjs
 node scripts/compose-agents.mjs . --check
 node scripts/sync-toc.mjs README.md README.en.md --check
 ```

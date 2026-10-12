@@ -24,10 +24,10 @@ jobs:
           node-version: '22'
 
       - name: 自检
-        run: node scripts/preflight.mjs
+        run: node scripts/dev/preflight.mjs
 
       - name: 行为自检（造 fixture 实跑，断言判定结果）
-        run: node scripts/selftest.mjs
+        run: node scripts/dev/selftest.mjs
 
       - name: 内核与模板是否逐字一致
         run: node scripts/compose-agents.mjs . --check

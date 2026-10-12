@@ -7,6 +7,10 @@ description: |
   写贡献指南、配 LICENSE、配 CI、发到 npm、发布。
   覆盖各种技术栈：Node、Python、Rust、Go、Java、纯文档目录，以及插件类项目与 skill 项目。
   只读勘察先行，按事实判定该做与不该做；幂等、可重复执行；默认私有仓库。
+  不用于：只改代码写法、只修一个 bug、只回答概念问题，也不替项目选型或生成骨架。
+whenToUse: 要给一个项目配版本管理、上远端仓库、写文档套装、配发布通道，或对它说「规范一下」「初始化」时。
+metadata:
+  version: "0.13.1"
 ---
 
 # project-forge
@@ -172,7 +176,7 @@ description: |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报 | — |
 
-**P7 针对的是目标项目，不是本 skill**。本 skill 自身的自检（`scripts/preflight.mjs`）
+**P7 针对的是目标项目，不是本 skill**。本 skill 自身的自检（`scripts/dev/preflight.mjs`）
 只在维护本 skill 时跑，见「怎么用」。
 
 ### P7 的一条分支：项目没有门禁命令时
@@ -328,13 +332,19 @@ node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 
 ```sh
 # 自检本 skill：内核是否与模板一致、引用是否断链、是否含 emoji
-node "<本 skill 目录>/scripts/preflight.mjs"
+node "<本 skill 目录>/scripts/dev/preflight.mjs"
 ```
 
 各脚本都只用运行环境内置的模块，零依赖，跨平台。含中文的目录路径作为参数传入是
 正常用法，按所在 shell 的规则正确引用即可。
 
 ## 文件地图
+
+分两张表：**用户包里有**（随包分发，用户与目标项目会用到）与**仓库里另有**（只服务本仓库，
+不进用户包）。这条分野不是靠人记的清单：`.gitattributes` 的 `export-ignore` 决定包的实际内容，
+自检里的位置判据与包集合判据负责让「放错位置」和「漏登记」当场红。
+
+### 用户包里有
 
 | 文件 | 何时读 |
 | --- | --- |
@@ -359,13 +369,26 @@ node "<本 skill 目录>/scripts/preflight.mjs"
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/survey.mjs` | P1 勘察 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 只校验不写入，`--status` 只看现状，`--upgrade` 升级手写文件，`--budget N` 覆盖注入预算） |
-| `scripts/preflight.mjs` | **维护本 skill 自身时**的自检（与目标项目无关） |
-| `scripts/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定（与目标项目无关） |
+| `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
+| `LICENSE` | 许可证全文 |
 | `scripts/release-notes.mjs` | 写发布说明——`references/remote-github.md` 那条「非 ASCII 正文不经 shell」规则的落地工具 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（`references/docs-set.md` 那条「只写能显示的」的落地工具） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（`AGENTS.md`「派生内容用工具同步」一节的落地工具） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完（治“写完就忘”） |
 | `scripts/draft-release-notes.mjs` | 从提交记录起草中文发布说明（`--generate-notes` 只会英文模板） |
+
+### 仓库里另有
+
+这些文件**不进用户包**（`.gitattributes` 里排除了它们）：它们是这个仓库自己的协作设施，
+拿到包的人不需要，也不该被它们干扰。
+
+| 文件 | 何时读 |
+| --- | --- |
+| `AGENTS.md` | 本仓库的项目契约：机制、不变量、构建与验证、硬性规范 |
+| `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
+| `.github/` | 持续集成与协作模板（`workflows/`、issue 与 PR 模板） |
+| `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界） |
+| `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定 |
 
 ## 边界
 

@@ -129,8 +129,8 @@ git pull
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |
-| `scripts/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
-| `scripts/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
+| `scripts/dev/preflight.mjs` | 自检：引用完整性、内核一致性、硬性规范、脚本能否跑起来 |
+| `scripts/dev/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定结果 |
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |
 | `scripts/draft-release-notes.mjs` | 从提交记录起草中文发布说明（平台的自动生成只会给英文模板） |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（私有仓库上的 GitHub 徽章显示不出来） |
@@ -152,8 +152,8 @@ node <本领目录>/scripts/compose-agents.mjs <项目目录> --status    # 只�
 node <本领目录>/scripts/compose-agents.mjs <项目目录> --upgrade   # 把手写的升级为标准结构
 
 # 自检这个 skill 自身
-node <本领目录>/scripts/preflight.mjs
-node <本领目录>/scripts/selftest.mjs
+node <本领目录>/scripts/dev/preflight.mjs
+node <本领目录>/scripts/dev/selftest.mjs
 ```
 
 `<本领目录>` 是这个 skill 所在的位置，`<项目目录>` 是你想处理的那个项目——两者通常
@@ -216,7 +216,7 @@ node <本领目录>/scripts/selftest.mjs
 
 这个 skill 是自己的第一个用户：它的版本管理、文档与持续集成，都是按它自己的标准配的。
 `AGENTS.md` 里的通用内核来自 `templates/agents-kernel.md`，由脚本注入而非手抄——
-`scripts/preflight.mjs` 会检查两者是否逐字一致，持续集成里也跑这一条。
+`scripts/dev/preflight.mjs` 会检查两者是否逐字一致，持续集成里也跑这一条。
 
 换句话说，如果这个 skill 教的东西是错的，它自己的仓库会先出问题。
 

@@ -9,7 +9,7 @@
  * 「静态检查全绿、实际行为错误」的判定缺陷只有实跑才能暴露，而手工造一次 fixture
  * 就丢，下一个改动会把同样的错误再引入一遍。所以把它固化成常驻检查。
  *
- * 用法：node scripts/selftest.mjs
+ * 用法：node scripts/dev/selftest.mjs
  * 退出码 0 = 全部通过；1 = 有失败。临时 fixture 用完即删。
  */
 
@@ -26,11 +26,14 @@ import {
   freshnessSectionBody, hasActionableSources,
   referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
 } from './preflight.mjs'
-import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary } from './survey.mjs'
-import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from './review.mjs'
+import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary } from '../survey.mjs'
+import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const SKILL_ROOT = resolve(HERE, '..')
+// 本文件住在 scripts/dev/ 下（自用脚本，不进用户包），所以根目录要退两级。
+const SKILL_ROOT = resolve(HERE, '..', '..')
+/** 随包分发的脚本在 scripts/ 顶层；本文件与 preflight 住在 scripts/dev/（自用，不进包）。 */
+const SCRIPTS_DIR = join(HERE, '..')
 const FIXTURE_PREFIX = 'project-forge-selftest-'
 const ROOT = join(tmpdir(), `${FIXTURE_PREFIX}${process.pid}`)
 
@@ -146,7 +149,7 @@ function fixture(name, files) {
 const observedKinds = new Set()
 
 function survey(dir, ...extra) {
-  const r = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), dir, '--json', ...extra],
+  const r = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--json', ...extra],
     { encoding: 'utf8' })
   if (r.status !== 0) return { error: (r.stderr ?? '').slice(0, 300) }
   try {
@@ -179,7 +182,7 @@ function compose(dir, ...extra) {
 
 /** 断言退出码本身的场景：返回原始结果，退出码由用例自己判。 */
 function composeExpectingFailure(dir, ...extra) {
-  return spawnSync(process.execPath, [join(HERE, 'compose-agents.mjs'), dir, ...extra],
+  return spawnSync(process.execPath, [join(SCRIPTS_DIR, 'compose-agents.mjs'), dir, ...extra],
     { encoding: 'utf8' })
 }
 
@@ -202,7 +205,7 @@ function gitIn(dir, ...args) {
 
 /** 在某个目录里跑真实的 preflight.mjs——它按脚本自身位置推导检查对象。 */
 function preflightIn(dir) {
-  const r = spawnSync(process.execPath, [join(dir, 'scripts', 'preflight.mjs')],
+  const r = spawnSync(process.execPath, [join(dir, 'scripts', 'dev', 'preflight.mjs')],
     { encoding: 'utf8', windowsHide: true })
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
@@ -242,7 +245,7 @@ const SELFTEST_MUTE = [
 function skillClone(name, { selftest = SELFTEST_STUB } = {}) {
   const clone = join(fixture(name, {}), 'project-forge')
   copyTree(SKILL_ROOT, clone, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
-  writeFileSync(join(clone, 'scripts', 'selftest.mjs'), selftest, 'utf8')
+  writeFileSync(join(clone, 'scripts', 'dev', 'selftest.mjs'), selftest, 'utf8')
   if (HAS_GIT) {
     gitIn(clone, 'init')
     gitIn(clone, 'add', '-A')
@@ -865,7 +868,7 @@ group('[17] 忽略规则：交叉核对「目录存在」与「是否已忽略�
     // 缺忽略文件本身也要报（没有它，产物与依赖会被提交）
     const noIgnore = fixture('ignore-none', { 'src/a.py': 'x = 1\n', 'venv/lib/y.py': 'z\n' })
     spawnSync('git', ['init', '-q'], { cwd: noIgnore })
-    const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), noIgnore, '--markdown'],
+    const md = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), noIgnore, '--markdown'],
       { encoding: 'utf8' }).stdout ?? ''
     const ok3 = /忽略文件：\*\*缺\*\*/.test(md)
     check(ok3, '缺忽略文件时明确报「缺」')
@@ -977,7 +980,7 @@ group('[20] 已有的 README：双语要认出来，结构不同不强行对齐'
   report(ok2, '双语 README：列出另一语言')
 
   // 报告里要写明「两份都会随包发出」「会漂移」——否则「成对」这个事实没有可操作的后果
-  const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), bi, '--markdown'],
+  const md = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), bi, '--markdown'],
     { encoding: 'utf8' }).stdout ?? ''
   const ok3 = /双语 README/.test(md) && /漂移/.test(md)
   check(ok3, '报告里写明成对关系的后果（随包发出 + 会漂移）')
@@ -1112,7 +1115,7 @@ group('[22] 双语文档的成对维护规则必须**写进项目契约**，不�
 group('[23] 目录同步：从标题生成、锚点算对、三种现状都能接管')
 {
   const toc = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'sync-toc.mjs'), join(dir, 'README.md'), ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'sync-toc.mjs'), join(dir, 'README.md'), ...a], { encoding: 'utf8' })
 
   // ① 有手写目录、没有标记 → 就地接管，**不新增第二个目录**
   const hand = fixture('toc-hand', {
@@ -1222,7 +1225,7 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
 
   // 英文模板模式要被点名：有 generate-notes、无 notes-file → review 必须待问
   const rEn = spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), withRelease], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), withRelease], { encoding: 'utf8' })
   const okEn = /英文模板模式/.test(rEn.stdout ?? '')
   check(okEn, '纯英文模板触发待问', (rEn.stdout ?? '').split('\n')[0])
   report(okEn, '英文模板：待问，不默过')
@@ -1231,7 +1234,7 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
 group('[25] 交付门禁：缺项拦得住，待问消得掉')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
 
   // 空项目：AGENTS 缺失 → 缺，退出码非零
   const bare = fixture('review-bare', { 'README.md': '# x\n' })
@@ -1275,7 +1278,7 @@ group('[26] 起草发布说明：中文提交即中文说明，无上一版不�
     skipGroup('[26] 起草发布说明', '环境里没有 git')
   } else {
     const draft = (dir, ...a) => spawnSync(process.execPath,
-      [join(HERE, 'draft-release-notes.mjs'), ...a], { encoding: 'utf8', cwd: dir })
+      [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), ...a], { encoding: 'utf8', cwd: dir })
     const repo = fixture('draft-repo', { 'README.md': '# x\n' })
     for (const args of [['init', '-q'], ['config', 'user.name', 'T'],
       ['config', 'user.email', 't@e.com'], ['add', '-A'], ['commit', '-q', '-m', '中文首版']]) {
@@ -1310,7 +1313,7 @@ if (!HAS_GIT) {
 group('[27] 署名门禁：有仓库无署名必报缺，有署名放行')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
 
   // 有仓库、无任何署名 → 缺。把全局配置从环境里隔离掉，测的是真缺失
   // （否则本机全局署名会继承进来，缺的数量永远是 0）。
@@ -1324,7 +1327,7 @@ group('[27] 署名门禁：有仓库无署名必报缺，有署名放行')
     GIT_CONFIG_NOSYSTEM: '1',
   }
   const reviewNoGlobal = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8', env: noGlobalEnv })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8', env: noGlobalEnv })
   const r1 = reviewNoGlobal(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
   const out1 = `${r1.stdout ?? ''}\n${r1.stderr ?? ''}`
   const ok1 = /署名缺失/.test(out1)
@@ -1582,7 +1585,7 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
 group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
   const GOOD = `# C 贡献指南
 
 ## 提问与反馈
@@ -1672,7 +1675,7 @@ group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查'
 group('[30] 事实采全与门禁诚实：tracked/远端/发布链/截断/strict')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
 
   // 敏感文件名带 tracked 比特（无仓库时为尚未跟踪，不断言真值只断言形状）
   {
@@ -1885,7 +1888,7 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     const okUnk = unk.includes('frobnicate')
     check(okUnk, '未知 dsh 字段被点名', JSON.stringify(unk))
     report(okUnk, '未知字段：现形')
-    const md = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), dir, '--markdown'],
+    const md = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--markdown'],
       { encoding: 'utf8' }).stdout ?? ''
     const okMd = /不认识的字段/.test(md) && /frobnicate/.test(md)
     check(okMd, '报告里写明未知字段名', 'markdown 含提示行')
@@ -1896,7 +1899,7 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
 group('[34] Python/Go/Rust 发布事实与门禁：只认本生态清单')
 {
   const rv = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
   const rvOut = (r) => r.stdout ?? ''
 
   // Python：有后端 → 有构建命令、无构建后端待问
@@ -1994,7 +1997,7 @@ group('[34] Python/Go/Rust 发布事实与门禁：只认本生态清单')
 group('[35] Obsidian 发布链：附件语境与触发器形状，机器说了算')
 {
   const rv = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
   const rvOut = (r) => r.stdout ?? ''
   const baseFlags = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release']
   const manifestOf = (id) => JSON.stringify({
@@ -2077,7 +2080,7 @@ group('[35] Obsidian 发布链：附件语境与触发器形状，机器说了�
 group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC 即安静')
 {
   const rv = (dir, ...a) => spawnSync(process.execPath,
-    [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
   const rvOut = (r) => r.stdout ?? ''
   const baseFlags = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci', '--no-auto-release']
   const relBase = (extraStep) => 'name: release\non:\n  push:\n    tags: ["v*"]\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n'
@@ -2269,7 +2272,7 @@ group('[38] 文本检查域 = 仓库定义域：本机状态目录不参与，�
   } else {
     const clone = join(fixture('domain-e2e', {}), 'project-forge')
     copyTree(SKILL_ROOT, clone, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
-    writeFileSync(join(clone, 'scripts', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
+    writeFileSync(join(clone, 'scripts', 'dev', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
     // 两个本机状态目录：一个被仓库自己的 .gitignore 兜住（真实场景），一个由本 fixture
     // 新加一条忽略规则兜住——后者证明判据认的是「被忽略」这件事，不是某个目录名。
     mkdirSync(join(clone, '.agent-teams'), { recursive: true })
@@ -2307,7 +2310,7 @@ group('[38] 文本检查域 = 仓库定义域：本机状态目录不参与，�
   {
     const plain = join(fixture('domain-nogit', {}), 'project-forge')
     copyTree(SKILL_ROOT, plain, new Set(['.git', '.agent-teams', 'node_modules', 'selftest.mjs']))
-    writeFileSync(join(plain, 'scripts', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
+    writeFileSync(join(plain, 'scripts', 'dev', 'selftest.mjs'), SELFTEST_STUB, 'utf8')
     writeFileSync(join(plain, 'notes-with-emoji.md'), `# 正常文件\n\n${EMOJI_MARK}\n`, 'utf8')
     const r = preflightIn(plain)
     const declared = /退回文件系统扫描/.test(r.out)
@@ -2667,7 +2670,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
       check(isMainModule(metaUrl, realFile) === true, '字面路径：判定为直接执行')
       check(isMainModule(metaUrl, join(linkDir, 'scripts', 'survey.mjs')) === true,
         '经 junction 调用：仍判定为直接执行（真实路径归一）', join(linkDir, 'scripts', 'survey.mjs'))
-      check(isMainModule(metaUrl, join(SKILL_ROOT, 'scripts', 'preflight.mjs')) === false, '别的文件：判定为被 import')
+      check(isMainModule(metaUrl, join(SKILL_ROOT, 'scripts', 'dev', 'preflight.mjs')) === false, '别的文件：判定为被 import')
       const viaLink = spawnSync(process.execPath, [join(linkDir, 'scripts', 'survey.mjs'), SKILL_ROOT, '--markdown'],
         { encoding: 'utf8' })
       const okLink = (viaLink.stdout ?? '').includes('勘察结果')
@@ -2693,7 +2696,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
     const badgeDir = fixture('badge-unreached', {
       'README.md': '# x\n\n![b](http://127.0.0.1:9/img.shields.io/badge.svg)\n',
     })
-    const cb = spawnSync(process.execPath, [join(HERE, 'check-badges.mjs'), join(badgeDir, 'README.md')],
+    const cb = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'check-badges.mjs'), join(badgeDir, 'README.md')],
       { encoding: 'utf8' })
     check(cb.status === 3 && /state=unverified/.test(cb.stdout ?? ''),
       '连不上时：退出码 3 且结论行写 unverified', 'exit=' + cb.status)
@@ -2703,7 +2706,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
   // ── P3：目录识别感知代码围栏（不再插进代码块、不删闭合行） ──
   {
     const sync = (file, ...extra) => spawnSync(process.execPath,
-      [join(HERE, 'sync-toc.mjs'), file, ...extra], { encoding: 'utf8' })
+      [join(SCRIPTS_DIR, 'sync-toc.mjs'), file, ...extra], { encoding: 'utf8' })
     const fenced = fixture('toc-fenced-takeover', {
       'README.md': '# 项目\n\n用法示例：\n\n```md\n## 目录\n```\n\n## 一\n\n## 二\n\n## 三\n\n## 四\n\n## 五\n',
     })
@@ -2759,7 +2762,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
     const md = '# 标题\n\n' + cases.map(([t]) => `## ${t}\n`).join('\n')
     const dir = fixture('toc-anchors', { 'README.md': md })
     const p = join(dir, 'README.md')
-    spawnSync(process.execPath, [join(HERE, 'sync-toc.mjs'), p], { encoding: 'utf8' })
+    spawnSync(process.execPath, [join(SCRIPTS_DIR, 'sync-toc.mjs'), p], { encoding: 'utf8' })
     const generated = readFileSync(p, 'utf8')
     const ids = []
     for (const line of generated.split('\n')) {
@@ -2797,7 +2800,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
         'README.md': '# x\n',
       })
       spawnSync('git', ['init', '-q'], { cwd: dir })
-      const r = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, '--no-bilingual', '--no-contributing',
+      const r = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review.mjs'), dir, '--no-bilingual', '--no-contributing',
         '--private-no-license', '--no-ci'], { encoding: 'utf8' })
       const out = r.stdout ?? ''
       const hits = out.split('\n').filter((l) => /凭据/.test(l)).join(' / ')
@@ -2820,7 +2823,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
     const multi = authorMarkers(readFileSync(p, 'utf8')).length
     const st = compose(dir, '--status')
     const composeCount = Number((/待填写 (\d+) 处/.exec(st.stdout ?? '') ?? [])[1] ?? -1)
-    const rv = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir], { encoding: 'utf8' })
+    const rv = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review.mjs'), dir], { encoding: 'utf8' })
     const reviewCount = Number((/AGENTS\.md 待填写 (\d+) 处/.exec(rv.stdout ?? '') ?? [])[1] ?? -1)
     check(multi > 0 && composeCount === multi && reviewCount === multi,
       '多行标记：compose 与 review 数出同一个数（一处实现）',
@@ -2841,7 +2844,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
         + '```sh\nnpm run verify\n```\n\nAll checks must be green.\n\n'
         + '## License\n\nBy contributing you agree that your work is released under the license in `LICENSE`.\n',
     })
-    const r = spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, '--no-bilingual', '--no-ci',
+    const r = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review.mjs'), dir, '--no-bilingual', '--no-ci',
       '--secrets-reviewed'], { encoding: 'utf8' })
     const bad = (r.stdout ?? '').split('\n').filter((l) => /\[缺\] CONTRIBUTING/.test(l))
     check(bad.length === 0, '英文 CONTRIBUTING 不再被判缺', bad.join(' / '))
@@ -2895,13 +2898,13 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
 
   // ── P11 / P12：帮助开关与畸形清单（两条都曾是崩溃或静默错判） ──
   {
-    const help = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), '-h'], { encoding: 'utf8' })
+    const help = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), '-h'], { encoding: 'utf8' })
     const okHelp = help.status === 0 && /用法：/.test(help.stdout ?? '')
     check(okHelp, '`-h` 给用法（曾被当成目录名，报「目录不存在」）', 'exit=' + help.status)
     report(okHelp, 'P11 -h：给用法而不是报目录不存在')
 
     const nullPkg = fixture('null-manifest', { 'package.json': 'null\n' })
-    const r = spawnSync(process.execPath, [join(HERE, 'survey.mjs'), nullPkg, '--json'], { encoding: 'utf8' })
+    const r = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), nullPkg, '--json'], { encoding: 'utf8' })
     const okNull = r.status === 0
     check(okNull, 'package.json 内容为 null 不再让勘察崩掉（清单形状统一归一）',
       (r.stderr ?? '').split('\n')[0])
@@ -3099,7 +3102,7 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
       'free.env': `${FAKE_NPM_TOKEN}\n`,
     })
     gitIn(exposed, 'init')
-    const rv = (dir, ...a) => spawnSync(process.execPath, [join(HERE, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+    const rv = (dir, ...a) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
     const base = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci']
     const before = rv(exposed, ...base)
     const after = rv(exposed, ...base, '--secrets-reviewed')

@@ -22,9 +22,9 @@
  *     超期只警告——时间流逝不是破损）
  *
  * 用法：
- *   node scripts/preflight.mjs
+ *   node scripts/dev/preflight.mjs
  *
- * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上一级），不接受目录参数——
+ * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数——
  * 换目录检查的做法会让「检查了谁」变成一个可传错的值。
  *
  * 退出码 0 = 全绿；1 = 有 FAIL；2 = 脚本自身用法错误。
@@ -35,10 +35,12 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE } from './survey.mjs'
+import { isMainModule, README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const SKILL_ROOT = resolve(HERE, '..')
+// 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
+// scripts/dev/ 只服务本仓库（自检、行为自检），不进用户包。所以根目录要退两级。
+const SKILL_ROOT = resolve(HERE, '..', '..')
 
 /**
  * 会话技能目录对 description 的截断长度（宿主实现事实，超出即不可见）。
@@ -49,6 +51,16 @@ const SKILL_ROOT = resolve(HERE, '..')
 const CATALOG_DESCRIPTION_MAX = 500
 /** 会话上下文对工作区指令的字节预算。 */
 const INSTRUCTION_BUDGET = 65536
+/**
+ * 本项目自己那份 `AGENTS.md` 的字节上限（45 KB）。
+ *
+ * 比通用注入预算严：这一份每次会话都被注入，同时还要给人看。**上限只压项目节**——
+ * 行事总纲与编辑规则由 `templates/agents-kernel.md` 独占，要改就改那份模板并重新注入，
+ * 不受这个数字约束；装不下时压项目节，不要去动内核。
+ */
+const OWN_AGENTS_MAX_BYTES = 45 * 1024
+/** 余量告警线：离上限不足这么多字节时提醒一次（而不是天天喊）。 */
+const OWN_AGENTS_WARN_HEADROOM = 1024
 
 const KERNEL_START = '<!-- project-forge:kernel:start -->'
 const KERNEL_END = '<!-- project-forge:kernel:end -->'
@@ -75,9 +87,9 @@ export const FRESHNESS_STALE_DAYS = 180
  * 带理由的短名单，也不要让它学会忽略。
  */
 const HOME_PATH_EXEMPT = new Map([
-  ['scripts/preflight.mjs', '定义路径检测模式，必须写出各种路径形状'],
+  ['scripts/dev/preflight.mjs', '定义路径检测模式，必须写出各种路径形状'],
   ['scripts/survey.mjs', '定义路径检测模式，必须写出各种路径形状'],
-  ['scripts/selftest.mjs', '故意在 fixture 里放假路径，验证分档判定'],
+  ['scripts/dev/selftest.mjs', '故意在 fixture 里放假路径，验证分档判定'],
 ])
 
 /**
@@ -97,7 +109,7 @@ const MAX_TEXTLESS_BYTES = 256 * 1024
 /** SKILL.md 之外允许存在的顶层条目。多出来的东西要有人解释它为什么在这。 */
 const ALLOWED_TOP_LEVEL = new Set([
   'SKILL.md', 'AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'LICENSE',
-  'references', 'templates', 'scripts', '.github', '.gitignore', '.gitattributes', '.git',
+  'references', 'templates', 'scripts', 'assets', '.github', '.gitignore', '.gitattributes', '.git',
 ])
 
 const failures = []
@@ -399,6 +411,7 @@ function checkTemplates() {
   for (const marker of ['## 行事总纲', '## 本文件的定位与编辑规则']) {
     if (!kernel.includes(marker)) fail(`templates/agents-kernel.md 缺少必需章节：${marker}`)
   }
+  // 内核不受 AGENTS.md 的字节上限约束：它归这份模板独占，改多少都行，改完重新注入即可。
 
   const skeletonPath = join(dir, 'agents-project.md')
   if (!existsSync(skeletonPath)) return
@@ -432,10 +445,16 @@ function checkAgentsKernel() {
     fail('AGENTS.md 里的内核与 templates/agents-kernel.md 不一致。修正：node scripts/compose-agents.mjs .')
   }
   const bytes = Buffer.byteLength(agents, 'utf8')
+  // 本项目自己那份的硬上限，比通用预算严：它每次会话都注入，同时还要给人看。
+  // 超了压项目节——内核归 templates/agents-kernel.md 独占，不受这个数字约束。
+  if (bytes > OWN_AGENTS_MAX_BYTES) {
+    fail(`AGENTS.md 共 ${bytes} 字节，超过本项目自己的上限 ${OWN_AGENTS_MAX_BYTES}（45 KB）—— `
+      + '要压就压项目节，不要去动行事总纲（内核由 templates/agents-kernel.md 独占，改它只需改模板并重新注入）。')
+  } else if (bytes > OWN_AGENTS_MAX_BYTES - OWN_AGENTS_WARN_HEADROOM) {
+    warn(`AGENTS.md 距本项目上限只剩 ${OWN_AGENTS_MAX_BYTES - bytes} 字节，项目节该收一收了。`)
+  }
   if (bytes > INSTRUCTION_BUDGET) {
     fail(`AGENTS.md 共 ${bytes} 字节，超出 ${INSTRUCTION_BUDGET} 预算，注入时会被截断。`)
-  } else if (bytes > INSTRUCTION_BUDGET * 0.8) {
-    warn(`AGENTS.md 已占预算 ${((bytes / INSTRUCTION_BUDGET) * 100).toFixed(1)}%，余量不多。`)
   }
 }
 
@@ -523,30 +542,45 @@ export function externalModules(text) {
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
-  for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs',
-    'release-notes.mjs', 'draft-release-notes.mjs', 'review.mjs', 'check-badges.mjs', 'sync-toc.mjs']) {
-    const p = join(dir, f)
-    if (!existsSync(p)) { fail(`缺少 scripts/${f}。`); continue }
+  // 两张清单对应「用户包里有 / 仓库里另有」这条分野：scripts/ 顶层的脚本随包分发、
+  // 会被用在目标项目上；scripts/dev/ 的脚本只服务本仓库，不进用户包（见 .gitattributes）。
+  // 新增脚本时**放错位置**由「文件地图位置判据」当场指出，不靠这两张清单记住。
+  const USER_SCRIPTS = ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'sync-toc.mjs',
+    'check-badges.mjs', 'release-notes.mjs', 'draft-release-notes.mjs']
+  const DEV_SCRIPTS = ['preflight.mjs', 'selftest.mjs']
+  const inspect = (p, rel) => {
+    if (!existsSync(p)) { fail(`缺少 ${rel}。`); return }
     const text = readText(p)
-    if (!text.startsWith('#!/usr/bin/env node')) warn(`scripts/${f} 缺少 node shebang。`)
-    if (statSync(p).size < 200) fail(`scripts/${f} 内容异常短。`)
+    if (!text.startsWith('#!/usr/bin/env node')) warn(`${rel} 缺少 node shebang。`)
+    if (statSync(p).size < 200) fail(`${rel} 内容异常短。`)
     for (const spec of externalModules(text)) {
-      fail(`scripts/${f} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
+      fail(`${rel} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
     }
   }
+  for (const f of USER_SCRIPTS) inspect(join(dir, f), `scripts/${f}`)
+  for (const f of DEV_SCRIPTS) inspect(join(dir, 'dev', f), `scripts/dev/${f}`)
 
-  // scripts/ 里只允许 JavaScript。
+  // 两个目录里都只允许 JavaScript。
   //
   // README 对外承诺「Python 完全不需要」，那条承诺必须由机制守住，否则某天有人为了
   // 图方便加一个 .py 辅助脚本，承诺就悄悄变成假话，而没有任何检查会提示。
-  const entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
-  for (const entry of entries) {
-    if (entry.isDirectory()) { fail(`scripts/ 下不应有子目录：${entry.name}。`); continue }
-    if (!/\.mjs$/.test(entry.name)) {
-      fail(`scripts/${entry.name} 不是 .mjs —— 这个 skill 只允许 JavaScript 脚本`
-        + '（README 承诺「Python 完全不需要」，别让那句变成假话）。')
+  const ALLOWED_SUBDIRS = new Set(['dev'])
+  const scanDir = (d, prefix) => {
+    if (!existsSync(d)) return
+    for (const entry of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+      if (entry.isDirectory()) {
+        if (prefix === 'scripts/' && ALLOWED_SUBDIRS.has(entry.name)) continue
+        fail(`${prefix} 下不应有子目录：${entry.name}。`)
+        continue
+      }
+      if (!/\.mjs$/.test(entry.name)) {
+        fail(`${prefix}${entry.name} 不是 .mjs —— 这个 skill 只允许 JavaScript 脚本`
+          + '（README 承诺「Python 完全不需要」，别让那句变成假话）。')
+      }
     }
   }
+  scanDir(dir, 'scripts/')
+  scanDir(join(dir, 'dev'), 'scripts/dev/')
 }
 
 // ── 检查八：脚本真的能跑起来 ────────────────────────────────────────────────
@@ -613,8 +647,8 @@ function checkScriptsRun() {
  * 哪怕退出码是 0——被换成空壳的自检正是这个形状，它一声不吭就把整套行为断言拿掉了。
  */
 function checkBehavior() {
-  const p = join(SKILL_ROOT, 'scripts', 'selftest.mjs')
-  if (!existsSync(p)) { fail('缺少 scripts/selftest.mjs（行为自检）。'); return }
+  const p = join(SKILL_ROOT, 'scripts', 'dev', 'selftest.mjs')
+  if (!existsSync(p)) { fail('缺少 scripts/dev/selftest.mjs（行为自检）。'); return }
   const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
   const out = r.stdout ?? ''
   if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
@@ -664,7 +698,7 @@ function checkStatedCounts() {
     硬不变量: countNumberedItems('SKILL.md', /^## 硬不变量/, /^\d+\.\s+\*\*/),
     硬门控: countMatches('SKILL.md', /^\|\s*G\d+\s*\|/gm),
     // 数文件地图里那一节的行，而不是全文匹配：正文里提到某个脚本（例如「本 skill 自身的
-    // 自检（`scripts/preflight.mjs`）」）也会命中，那是叙述不是清单。
+    // 自检（`scripts/dev/preflight.mjs`）」）也会命中，那是叙述不是清单。
     // 字符类要含数字：否则将来出现 `toc2.mjs` 这类名字就数不到，计数会与磁盘脱钩。
     脚本: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`scripts\/[A-Za-z0-9._-]+\.mjs`/),
   }
@@ -676,16 +710,22 @@ function checkStatedCounts() {
   // 事实比。
   const scriptsDir = join(SKILL_ROOT, 'scripts')
   if (existsSync(scriptsDir)) {
-    const onDisk = readdirSync(scriptsDir, { withFileTypes: true, encoding: 'utf8' })
-      .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
-      .map((e) => e.name)
-    for (const f of onDisk) {
-      if (!readText(join(SKILL_ROOT, 'SKILL.md')).includes(`scripts/${f}`)) {
-        fail(`scripts/${f} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+    const onDisk = []
+    for (const [d, prefix] of [[scriptsDir, 'scripts/'], [join(scriptsDir, 'dev'), 'scripts/dev/']]) {
+      if (!existsSync(d)) continue
+      for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+        if (e.isFile() && e.name.endsWith('.mjs')) onDisk.push(`${prefix}${e.name}`)
       }
     }
-    for (const f of ['survey.mjs', 'compose-agents.mjs', 'preflight.mjs', 'selftest.mjs']) {
-      if (!onDisk.includes(f)) fail(`磁盘上缺少 scripts/${f}。`)
+    const skillText = readText(join(SKILL_ROOT, 'SKILL.md'))
+    for (const rel of onDisk) {
+      if (!skillText.includes(rel)) {
+        fail(`${rel} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+      }
+    }
+    for (const rel of ['scripts/survey.mjs', 'scripts/compose-agents.mjs',
+      'scripts/dev/preflight.mjs', 'scripts/dev/selftest.mjs']) {
+      if (!onDisk.includes(rel)) fail(`磁盘上缺少 ${rel}。`)
     }
   }
   // 磁盘对账：references 与 templates ——新文件加了却没登记在文件地图里即隐身。
@@ -728,6 +768,7 @@ function checkStatedCounts() {
       }
     }
     scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
+    scan(join(SKILL_ROOT, 'scripts', 'dev'), 'scripts/dev/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
     if (missing.length > 0) {
       fail(`${readme} 没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
@@ -793,7 +834,7 @@ function checkStatedCounts() {
     const composeText = existsSync(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'))
       ? readText(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs')) : ''
     const budgetA = /DEFAULT_BUDGET\s*=\s*(\d+)/.exec(composeText)?.[1]
-    const budgetB = /INSTRUCTION_BUDGET\s*=\s*(\d+)/.exec(readText(join(SKILL_ROOT, 'scripts', 'preflight.mjs')))?.[1]
+    const budgetB = /INSTRUCTION_BUDGET\s*=\s*(\d+)/.exec(readText(join(SKILL_ROOT, 'scripts', 'dev', 'preflight.mjs')))?.[1]
     if (budgetA !== undefined && budgetB !== undefined && budgetA !== budgetB) {
       fail(`字节预算不一致：compose-agents.mjs 为 ${budgetA}，preflight.mjs 为 ${budgetB} —— 两处必须是同一数。`)
     }
@@ -810,7 +851,7 @@ function checkStatedCounts() {
   }
   const readmeText = existsSync(join(SKILL_ROOT, 'README.md'))
     ? readText(join(SKILL_ROOT, 'README.md')).replace(/^\uFEFF/, '') : ''
-  for (const m of readmeText.matchAll(/`scripts\/([a-z-]+\.mjs)`/g)) {
+  for (const m of readmeText.matchAll(/`scripts\/((?:dev\/)?[a-z-]+\.mjs)`/g)) {
     if (!existsSync(join(SKILL_ROOT, 'scripts', m[1]))) {
       fail(`README.md 提到了不存在的脚本 scripts/${m[1]}。`)
     }
@@ -1470,6 +1511,127 @@ function checkReadmeToc() {
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
+// ── 检查十一：用户包边界 ────────────────────────────────────────────────────
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
+ *
+ * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
+ * 声明。新增文件时忘了登记，下面的判据会喊：这正是「不靠记性」的落点。
+ */
+function readFileMap() {
+  const buckets = { shipped: [], repoOnly: [] }
+  let bucket
+  for (const line of readText(join(SKILL_ROOT, 'SKILL.md')).split('\n')) {
+    if (/^###\s+用户包里有/.test(line)) { bucket = buckets.shipped; continue }
+    if (/^###\s+仓库里另有/.test(line)) { bucket = buckets.repoOnly; continue }
+    if (/^##\s/.test(line)) { bucket = undefined; continue }
+    if (bucket === undefined) continue
+    // 只看表格行的**第一格**：那一格才是文件清单，说明格里的反引号（提到的文档、
+    // 命令开关、凭据名）不是声明，读进来会造出一堆假失败。
+    if (!/^\s*\|/.test(line)) continue
+    const cells = line.split('|')
+    if (cells.length < 3) continue
+    for (const m of cells[1].matchAll(/`([^`]+)`/g)) {
+      const v = m[1].trim()
+      if (v.includes('<')) {
+        // 占位条目（形如 `references/plugins/<生态>.md`）取它所在的目录当前缀
+        const dir = v.slice(0, v.lastIndexOf('/') + 1)
+        if (dir !== '') bucket.push(dir)
+        continue
+      }
+      if (/^[A-Za-z0-9._/-]+$/.test(v)) bucket.push(v)
+    }
+  }
+  return buckets
+}
+
+/** 已跟踪的文件清单（包内容的来源）。git 不可用时返回 undefined。 */
+function trackedFiles() {
+  const r = spawnSync('git', ['-c', 'core.quotepath=false', 'ls-files', '-z'],
+    { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true })
+  if (r.error !== undefined || r.status !== 0) return undefined
+  return (r.stdout ?? '').split('\0').filter((s) => s !== '')
+}
+
+/** `.gitattributes` 里 export-ignore 模式的匹配器。通配按 git 的粗粒度语义翻译。 */
+function exportIgnoreMatchers() {
+  const p = join(SKILL_ROOT, '.gitattributes')
+  if (!existsSync(p)) return undefined
+  const out = []
+  for (const line of readText(p).split('\n')) {
+    const m = /^(\S+)\s+export-ignore\s*$/.exec(line.trim())
+    if (m === null) continue
+    let pat = m[1].replace(/^\//, '')
+    if (pat.endsWith('/')) pat = `${pat}**`
+    const re = pat.split('**')
+      .map((seg) => seg.split('*').map(escapeRe).join('[^/]*'))
+      .join('.*')
+    out.push(new RegExp(`^${re}$`))
+  }
+  return out
+}
+
+/**
+ * 用户包边界：位置判据与包集合双向判据。
+ *
+ * 用意是**让「哪些文件进用户包」由结构与声明决定**，而不是靠一份要人记得改的清单：
+ * 自用脚本整目录排除（`scripts/dev/`），随包分发的脚本放 `scripts/` 顶层；新增文件
+ * 漏登记、放错位置、声明与实际矛盾，都在这里当场红。
+ *
+ * 离线的包集合是**近似**（按 `.gitattributes` 的声明算）；git 的真值以持续集成里那次
+ * 真跑 `git archive` 并列出条目为准——两处都留：一处管日常，一处管事实。
+ */
+function checkPackageBoundary() {
+  const map = readFileMap()
+  if (map.shipped.length === 0 || map.repoOnly.length === 0) {
+    fail('SKILL.md 的文件地图缺少「用户包里有」或「仓库里另有」小节 —— 包边界无从判断。')
+    return
+  }
+  // 位置判据：脚本按目录归类，放错位置即红（不靠谁记得去改排除清单）。
+  for (const [dir, prefix, bucket, hint] of [
+    ['scripts', 'scripts/', map.shipped, '只服务本仓库的脚本放 scripts/dev/'],
+    [join('scripts', 'dev'), 'scripts/dev/', map.repoOnly, '随包分发的脚本放 scripts/ 顶层'],
+  ]) {
+    const d = join(SKILL_ROOT, dir)
+    if (!existsSync(d)) continue
+    for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+      if (!e.isFile() || !e.name.endsWith('.mjs')) continue
+      const rel = `${prefix}${e.name}`
+      if (!bucket.includes(rel)) {
+        fail(`${rel} 没有登记在文件地图的「${bucket === map.shipped ? '用户包里有' : '仓库里另有'}」里 —— ${hint}。`)
+      }
+    }
+  }
+  // 包集合：声明与实际双向对齐。入口文件天然在包里——没有它就不是一个 skill。
+  const matchers = exportIgnoreMatchers()
+  const tracked = trackedFiles()
+  if (matchers === undefined || tracked === undefined) {
+    warn('用户包边界未核对（缺 .gitattributes 或 git 不可用）—— 持续集成里会真跑 git archive 核对。')
+    return
+  }
+  const pkg = tracked.filter((f) => !matchers.some((re) => re.test(f)))
+  const covers = (entries, f) => entries.some((x) => (x.endsWith('/') ? f.startsWith(x) : f === x))
+  for (const f of pkg) {
+    if (f === 'SKILL.md') continue
+    if (covers(map.repoOnly, f)) {
+      fail(`${f} 会随包分发，却登记在「仓库里另有」—— .gitattributes 里少了排除它的那条。`)
+    } else if (!covers(map.shipped, f)) {
+      fail(`${f} 会随包分发，却没有登记在文件地图的「用户包里有」里 —— 登记它，或把它排除（自用脚本放 scripts/dev/）。`)
+    }
+  }
+  for (const entry of map.shipped) {
+    if (entry.endsWith('/')) {
+      if (!pkg.some((f) => f.startsWith(entry))) fail(`「用户包里有」声明了 ${entry}，但包里一个文件都没有。`)
+      continue
+    }
+    if (!tracked.includes(entry)) { fail(`「用户包里有」声明了 ${entry}，磁盘上却没有这个文件。`); continue }
+    if (!pkg.includes(entry)) fail(`${entry} 登记在「用户包里有」，却被 .gitattributes 排除了 —— 声明自相矛盾。`)
+  }
+}
+
 function main() {
   const skill = checkSkillFile()
   checkReferencesResolve()
@@ -1480,6 +1642,7 @@ function main() {
   checkScripts()
   checkScriptsRun()
   checkStatedCounts()
+  checkPackageBoundary()
   checkPluginChapters()
   checkFreshness()
   checkReadmeToc()

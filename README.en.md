@@ -116,8 +116,8 @@ It never starts by writing. The first step is always a survey, then it tells you
 | `templates/` | Doc skeletons ready to start from, plus standard texts of short licenses |
 | `scripts/survey.mjs` | Read-only survey, outputs structured facts |
 | `scripts/compose-agents.mjs` | Generate, refresh, or upgrade `AGENTS.md`: fill from project facts, keep/drop conditional sections by facts, report sections still needing a human |
-| `scripts/preflight.mjs` | Self-check: reference integrity, kernel consistency, hard rules, scripts actually run |
-| `scripts/selftest.mjs` | Behavioral self-test: build fixtures, run for real, assert each decision |
+| `scripts/dev/preflight.mjs` | Self-check: reference integrity, kernel consistency, hard rules, scripts actually run |
+| `scripts/dev/selftest.mjs` | Behavioral self-test: build fixtures, run for real, assert each decision |
 | `scripts/release-notes.mjs` | Write release notes from a UTF-8 file (non-ASCII never goes through the shell, read back and compare) |
 | `scripts/draft-release-notes.mjs` | Draft release notes from the commit log (the platform's generator only produces an English template) |
 | `scripts/check-badges.mjs` | Check whether README badges actually render (GitHub badges on private repos do not) |
@@ -139,8 +139,8 @@ node <skill directory>/scripts/compose-agents.mjs <project directory> --status  
 node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written file to the standard structure
 
 # Self-check this skill itself
-node <skill directory>/scripts/preflight.mjs
-node <skill directory>/scripts/selftest.mjs
+node <skill directory>/scripts/dev/preflight.mjs
+node <skill directory>/scripts/dev/selftest.mjs
 ```
 
 `<skill directory>` is where this skill lives, `<project directory>` is the project you want to work on — usually not the same directory. All paths are passed explicitly, so the working directory does not matter.
@@ -195,7 +195,7 @@ Surveying and doc generation are fully offline. Only remote repos (create, push,
 
 This skill is its own first user: its version control, docs, and CI are set up to its own standard.
 The generic kernel in `AGENTS.md` comes from `templates/agents-kernel.md`, injected by script rather than hand-copied —
-`scripts/preflight.mjs` checks they are byte-identical, and CI runs that check too.
+`scripts/dev/preflight.mjs` checks they are byte-identical, and CI runs that check too.
 
 In other words, if what this skill teaches were wrong, its own repo would break first.
 

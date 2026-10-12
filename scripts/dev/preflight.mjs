@@ -37,7 +37,7 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion } from '../survey.mjs'
+import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, parseMarkerKeys, normVersion } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -1185,71 +1185,6 @@ export function hasActionableSources(body) {
 }
 
 /**
- * 已认领的标记键：含义与形状**只在这里定义一次**。
- *
- * 没认领的键不是错误（可扩展），但要按「未核对」提示出来——它不会被校验、也不参与
- * 比对。值一律要求**非空且单行**（标记解析按空白切分，值里带空白本身就写不成单行）。
- * `host=` 的语义是「上次核对时**本机实际运行**的那套宿主版本」——不是兼容下界，
- * 也不是某个目标项目锁定的版本；多值写法已否决（它表达不了「本机跑的是哪一版」）。
- */
-export const CLAIMED_MARKER_KEYS = {
-  date: { note: '核对日期' },
-  host: { reject: /[,\s]/, note: '上次核对时本机实际运行的那套宿主版本' },
-}
-
-/** 解析标记里的 key=value，返回 { keys, errors, notes }。纯函数，直接可证伪。 */
-export function parseMarkerKeys(raw) {
-  const errors = []
-  const notes = []
-  const keys = {}
-  for (const part of String(raw ?? '').trim().split(/\s+/).filter(Boolean)) {
-    const eq = part.indexOf('=')
-    if (eq <= 0) {
-      errors.push(`核对标记里的「${part}」不是 key=value 形状——每个键写成 key=value，值不许含空白（值必须非空且单行）。`)
-      continue
-    }
-    const name = part.slice(0, eq)
-    const value = part.slice(eq + 1)
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
-      errors.push(`核对标记的键名「${name}」形状非法——用字母开头，其后是字母、数字、下划线或连字符。`)
-      continue
-    }
-    if (value === '') {
-      errors.push(`核对标记的「${name}=」值是空的——值必须非空且单行。`)
-      continue
-    }
-    if (keys[name] !== undefined) {
-      errors.push(`核对标记里「${name}」出现了多次——每个键只写一次。`)
-      continue
-    }
-    const claimed = CLAIMED_MARKER_KEYS[name]
-    if (claimed === undefined) {
-      notes.push(`核对标记里的「${name}=」没有认领的含义——它不会被校验，也不能参与比对（未登记即未核对）。`)
-    } else if (claimed.reject !== undefined && claimed.reject.test(value)) {
-      errors.push(`核对标记的「${name}=${value}」格式非法——${name} 应是单个不含量空白与逗号的值。`)
-    }
-    keys[name] = value
-  }
-  return { keys, errors, notes }
-}
-
-/**
- * 版本串归一：**只吃写法差异，不做版本序、不折叠预发布**。
- * 顺序：trim → 去开头 `^ ~ > = <` 与空白 → 去开头 v/V（后面紧跟数字时）→ 小写。
- *
- * **只实现这一处**：compose-agents 与 preflight 共用同一份（两处各判一次同类问题，
- * 迟早给出两种答案）。`0.1.5-rc.1` 与 `0.1.5` 归一后**不同**——那是两次不同的发布，
- * 折叠掉等于隐瞒「章里核的是 rc、本机装的是正式版」这个事实。
- */
-export function normVersion(value) {
-  return String(value ?? '')
-    .trim()
-    .replace(/^[\^~>=<\s]+/, '')
-    .replace(/^[vV](?=\d)/, '')
-    .toLowerCase()
-}
-
-/**
  * 标记里的 host= 与本机宿主的三态比对。**纯函数**（来源由调用方给），fixture 才喂得进
  * 数据。三态各有确定文本，于是断言可以只锁确定的那部分、不锁「本机装了什么」。
  *
@@ -1660,6 +1595,67 @@ function alignPackage(list, map, label) {
 }
 
 /**
+ * 包自洽性：包里的脚本能不能互相找到，包里的文档有没有把读者指到包外。
+ *
+ * 包集合判据只回答「文件集合对不对」，不回答「这些东西放在一起能不能用」。实测撞过两次，
+ * 两次的集合都是**完全正确**的：
+ *   - `compose-agents.mjs` 导入了被排除出包的 `scripts/dev/preflight.mjs`——用户拿到的包里
+ *     那个脚本一跑就报 ERR_MODULE_NOT_FOUND，而门禁全绿；
+ *   - 面向使用者的文档里指向 `CONTRIBUTING.md` 的相对链接，在包里是死链。
+ * 判据是**包内的相对引用必须落在包内**，与逐个人工登记无关：新增文件、搬动文件、改排除
+ * 规则，都会在这里当场暴露。
+ *
+ * `templates/` 里的文档不参与链接检查：那些骨架是**将要落到别的项目里**的内容，其中的
+ * 相对链接指向那个项目的文件，本来就不该在本包里解析得到。
+ */
+function checkPackageSelfConsistency(pkg) {
+  const inPkg = new Set(pkg)
+  const present = (target) => inPkg.has(target) || pkg.some((x) => x.startsWith(`${target}/`))
+  const resolveRel = (from, spec) => {
+    const dir = from.includes('/') ? from.slice(0, from.lastIndexOf('/') + 1) : ''
+    const out = []
+    for (const part of `${dir}${spec}`.split('/')) {
+      if (part === '' || part === '.') continue
+      if (part === '..') out.pop()
+      else out.push(part)
+    }
+    return out.join('/')
+  }
+  let checked = 0
+  for (const f of pkg) {
+    if (f.startsWith('templates/')) continue
+    const full = join(SKILL_ROOT, f)
+    if (!existsSync(full)) continue
+    const text = readText(full)
+    if (f.endsWith('.mjs')) {
+      for (const spec of moduleSpecifiers(text)) {
+        if (!spec.startsWith('./') && !spec.startsWith('../')) continue
+        checked += 1
+        const target = resolveRel(f, spec)
+        if (!present(target)) {
+          fail(`${f} 导入了 ${spec}，而 ${target} 不在用户包里 —— 包里的脚本会一跑就崩。`
+            + '共用的实现要放在随包分发的模块里（scripts/ 顶层），不能放在 scripts/dev/。')
+        }
+      }
+    } else if (f.endsWith('.md')) {
+      // 只认 Markdown 链接与图片：行内代码里的路径是「提到」，不是可点的引用。
+      for (const m of text.matchAll(/\]\(\s*([^)\s]+)\s*(?:"[^"]*")?\s*\)/g)) {
+        const raw = m[1]
+        if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('#') || raw.startsWith('//')) continue
+        const target = resolveRel(f, raw.split('#')[0])
+        if (target === '') continue
+        checked += 1
+        if (!present(target)) {
+          fail(`${f} 里的相对链接指向 ${target}，而它不在用户包里 —— 拿到包的人点了是死链。`
+            + '指向仓库自用文件时请写仓库的完整网址。')
+        }
+      }
+    }
+  }
+  return checked
+}
+
+/**
  * 用户包边界：位置判据与包集合双向判据。
  *
  * 用意是**让「哪些文件进用户包」由结构与声明决定**，而不是靠一份要人记得改的清单：
@@ -1697,7 +1693,11 @@ function checkPackageBoundary() {
     return
   }
   if (alignPackage(pkg, map, '实际导出') === 0) {
-    process.stdout.write(`用户包边界：${pkg.length} 个文件，与文件地图一致\n`)
+    const links = checkPackageSelfConsistency(pkg)
+    if (failures.length === 0) {
+      process.stdout.write(`用户包边界：${pkg.length} 个文件，与文件地图一致；`
+        + `包内 ${links} 处相对引用全部落在包内\n`)
+    }
   }
 }
 
@@ -1719,7 +1719,11 @@ function checkProducedPackage(listPath) {
     .filter((s) => s !== '' && !s.endsWith('/'))
   if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
   if (alignPackage(list, map, '产出物') === 0) {
-    process.stdout.write(`产出物核对：${list.length} 个条目，与文件地图一致\n`)
+    const links = checkPackageSelfConsistency(list)
+    if (failures.length === 0) {
+      process.stdout.write(`产出物核对：${list.length} 个条目，与文件地图一致；`
+        + `包内 ${links} 处相对引用全部落在包内\n`)
+    }
   }
 }
 

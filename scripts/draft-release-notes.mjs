@@ -8,15 +8,18 @@
  *
  * **起草结果是素材，不是成品**：发布页面的读者是使用者，正文必须回答
  * 「这一版更新了什么、修复了什么」，用他看得懂的话——不能照搬内部编号、任务代号、
- * 分支名与提交哈希，也不该把对使用者无影响的重构写进去。提交信息本身面向使用者时，
- * 收集起来就够用；夹着代号或内部说法时，发版前由人改写一遍再发。
- * 这条与 references/remote-github.md 第六节的判据一致，实现与文档只有一份说法。
+ * 分支名与提交哈希，也不该把对使用者无影响的重构写进去。
+ *
+ * 正文只有一个来源：**被标签指到的那次提交的正文**。发版那一步本来就要改版本号，
+ * 总述写在那里是最短的路，不需要新文件、新开关。那次提交没有正文时，这里只列得出
+ * 提交主题，并写下一行 `pf:needs-summary` 标记——`release-notes.mjs` 见到它就拒绝
+ * 发送，所以半成品不会出现在使用者看到的页面上。
  *
  * 用法：
  *   node scripts/draft-release-notes.mjs <标签> [输出文件]
  *
  *   标签必须已存在（先打标签再起草）。输出文件省略时写到 `./<标签>-notes.md`。
- *   正文写进 UTF-8 文件（无 BOM），再由 gh 或 release-notes.mjs 按字节发送——
+ *   正文写进 UTF-8 文件（无 BOM），再由 release-notes.mjs 按字节发送——
  *   中文绝不经 shell 传递的那条规则，在这里同样适用。
  *
  * 退出码：0 = 写好；1 = 失败；2 = 用法或仓库状态错误。
@@ -25,7 +28,7 @@
 import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 
-import { parseGitHubRepo } from './survey.mjs'
+import { parseGitHubRepo, SUMMARY_MARKER } from './survey.mjs'
 
 function git(args, cwd) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -81,23 +84,26 @@ function main() {
   const repo = remote === undefined ? undefined : parseGitHubRepo(remote)
   if (repo !== undefined) compare = `[${prev ?? '初始'}...${tag}](https://github.com/${repo}/compare/${range})`
 
-  // 标题用疑问句的两问，而不是「本次更新」这类中性词：发布页面的读者是使用者，
-  // 他要的答案是「更新了什么、修复了什么」。提交信息本身面向使用者时，逐条列出即成品；
-  // 夹着内部编号或任务代号时，发版前由人把这些条目改写成使用者看得懂的说法再发
-  // （判据见 references/remote-github.md 第六节——文档与实现只有一份说法）。
+  // 说明的唯一来源是**被标签指到的那次提交**（`git log` 按时间倒序，第一条就是它）。
+  // 发版那一步本来就要改 SKILL.md 的版本号，把面向使用者的总述写在那次提交的正文里
+  // 是最短的路：不需要新文件、新开关，也不需要谁记得在别处再写一遍。单条提交与多条
+  // 提交因此是同一个规则，不再分两套。
+  //
+  // 没有总述时不许冒充成品：写一行**给维护者**的标记，`release-notes.mjs` 见到它就拒绝
+  // 发送，所以它永远不会出现在使用者看到的页面上。让「只有一行标题」的稿子直接发布，
+  // 比让这次发版失败坏得多。
   const lines = [`## 这一版更新了什么、修复了什么`, '']
-  if (commits.length === 0) lines.push('（该区间无提交记录）')
-  else if (commits.length === 1) {
-    // 单个提交时它的正文就是这一版的说明——项目约定正文写给使用者，直接展开。
-    lines.push(`- ${commits[0].subject}`)
-    if (commits[0].body !== '') lines.push('', commits[0].body)
+  const head = commits[0]
+  if (head === undefined) {
+    lines.push('（该区间无提交记录）')
+  } else if (head.body.trim() === '') {
+    lines.push(`- ${head.subject}`)
+    for (const c of commits.slice(1)) lines.push(`- ${c.subject}`)
+    lines.push('', `<!-- ${SUMMARY_MARKER} 该区间有 ${commits.length} 条提交，而被标签指到的那次`
+      + '提交没有正文。发版前请在那次提交的正文里补一段面向使用者的总述（说清更新了什么、'
+      + '影响谁、要不要动手），重新起草后再发。只列提交主题的稿子不算成品。 -->')
   } else {
-    // 多条提交时正文逐条展开会长到没人读得下去，而这一版该讲什么也不等于「每条提交
-    // 各讲一段」。所以这里只列主题作索引，并**明说还需要人补一段总述**——让「只有
-    // 一行标题」的稿子冒充成品，比直接说它没写完坏得多。
-    for (const c of commits) lines.push(`- ${c.subject}`)
-    lines.push('', `（该区间有 ${commits.length} 条提交，上面只是提交主题。`
-      + '发版前请补一段面向使用者的总述，说清这一版更新了什么、影响谁、要不要动手。）')
+    lines.push(head.body)
   }
   // 取数上限必须明示：超 100 条时老的提交静默丢失，不写就是“看起来全了”。
   if (commits.length >= 100) lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')

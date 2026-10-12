@@ -13,7 +13,7 @@
 跳过哪几件事。它不预设技术栈——Node、Python、Rust、Go、Java、纯文档目录，以及插件类
 项目与 skill 项目，判断依据都是勘察出来的事实。
 
-![project-forge：给一个项目目录，先只读勘察，再按事实判断该做哪几件事](assets/readme/hero.svg)
+![project-forge：给一个项目目录，先只读勘察，再按事实判断该做哪几件事；图里还列出它做的四件事（版本管理、文档套装、远端仓库、发布通道）与包内结构](assets/readme/hero.svg)
 
 ## 目录
 
@@ -112,7 +112,7 @@ node "<本领目录>/scripts/update.mjs" --check
 下载新版覆盖即可。
 
 **升级安全吗**：`SKILL.md`、`references/`、`templates/`、`scripts/` 都是纯文本和零依赖
-脚本，没有需要重新编译或迁移的东西。如果你按 [CONTRIBUTING.md](CONTRIBUTING.md) 改过
+脚本，没有需要重新编译或迁移的东西。如果你按 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md) 改过
 它，更新脚本会看到本地改动并自动跳过，不会跟你的改动打架。
 
 ## 使用
@@ -182,7 +182,7 @@ node "<本领目录>/scripts/update.mjs" --check
 ### 仓库里另有
 
 这些**不进压缩包**：它们只服务这个仓库自己，拿到包的人不需要，也不该被它们干扰。
-想改这个 skill 的话，从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始。
+想改这个 skill 的话，从 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md) 开始。
 
 | 路径 | 内容 |
 | --- | --- |
@@ -209,7 +209,7 @@ node <本领目录>/scripts/compose-agents.mjs <项目目录> --check     # 只�
 node <本领目录>/scripts/compose-agents.mjs <项目目录> --status    # 只看现状，不写入
 node <本领目录>/scripts/compose-agents.mjs <项目目录> --upgrade   # 把手写的升级为标准结构
 
-# 自检这个 skill 自身（只在改它的时候跑）
+# 自检这个 skill 自身（只在改它的时候跑；这两条只有仓库里有，压缩包里没有）
 node <本领目录>/scripts/dev/preflight.mjs
 node <本领目录>/scripts/dev/selftest.mjs
 ```
@@ -245,9 +245,10 @@ node <本领目录>/scripts/dev/selftest.mjs
 ### 运行时
 
 **Node.js 16 或更高。** 这是全部要求——所有脚本只用 Node 内置模块（`node:fs`、
-`node:path`、`node:url`、`node:os`、`node:child_process`），**没有任何第三方依赖**，
-不需要先装任何东西。联网检查徽章、核对更新与调用接口的脚本需要 Node 18 的全局
-`fetch`，16 下会明确报错而不是静默失败。
+`node:path`、`node:url`、`node:os`、`node:child_process`、`node:crypto`），**没有任何
+第三方依赖**，不需要先装任何东西。需要联网的脚本里，取回网页与调用接口的那几个要用
+Node 18 的全局 `fetch`，16 下会明确报错而不是静默失败；自动更新用的是 `git`，不受这条
+限制。
 
 版本下限来自脚本用到的语言特性：ESM 的 `node:` 前缀导入、`String.prototype.replaceAll`、
 `fs.rmSync`。三者中要求最高的是 `replaceAll`（Node 15 引入）；取 16 是因为它是覆盖全部
@@ -274,10 +275,9 @@ node <本领目录>/scripts/dev/selftest.mjs
 ## 这个仓库自己是怎么配的
 
 这个 skill 是自己的第一个用户：它的版本管理、文档与持续集成，都是按它自己的标准配的。
-`AGENTS.md` 里的通用内核来自 `templates/agents-kernel.md`，由脚本注入而非手抄——
-`scripts/dev/preflight.mjs` 会检查两者是否逐字一致，持续集成里也跑这一条。
-
-换句话说，如果这个 skill 教的东西是错的，它自己的仓库会先出问题。
+换句话说，如果它教的东西是错的，它自己的仓库会先出问题。具体怎么配的见
+[AGENTS.md](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md)——那是这个仓库
+自己的项目契约，里面记着机制与纪律。
 
 本文件是中文权威版，`README.en.md` 是它的英文译本；两者不一致时以本文件为准，并同步英文版。
 
@@ -293,7 +293,7 @@ node <本领目录>/scripts/dev/selftest.mjs
 
 ## 贡献
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
 ## 许可
 

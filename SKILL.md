@@ -293,8 +293,8 @@ node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
 | G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时用户指调用方，写进回执等指示，不直接执行） |
 | G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm、Python、Go、Rust 时加读对应 `references/publish-<生态>.md` |
 | G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读，见「执行流程」）；有对应专章时一并读 `references/plugins/<生态>.md` |
-| G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
 | G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下「只有用户能定的事」 |
+| G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
 
 ### G7：只有用户能定的事，一次问清
 
@@ -331,7 +331,7 @@ G4 说的是**这次对外动作具体是什么**（确切的仓库名、可见�
 **先读协议，再跑脚本**——G1 要求任何写入前读完 `references/survey.md`，而勘察本身是
 只读的，所以先跑勘察不会违规，但读协议要在动手之前完成。
 
-下面三条命令里的 `<本 skill 目录>` 指这个 skill 自己的位置（本文件所在目录），
+下面两条命令里的 `<本 skill 目录>` 指这个 skill 自己的位置（本文件所在目录），
 `<项目目录>` 指被处理的那个项目。两者通常不同，**命令可以在任意工作目录下执行**，
 因为路径都是显式传入的。
 

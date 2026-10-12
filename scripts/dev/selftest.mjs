@@ -22,11 +22,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import {
   evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles,
-  normVersion, compareHostMarker, parseMarkerKeys, hostDateBatchStatus,
+  compareHostMarker, hostDateBatchStatus,
   freshnessSectionBody, hasActionableSources,
   referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
 } from './preflight.mjs'
-import { isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion } from '../survey.mjs'
+import {
+  isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, needsSummary,
+  parseMarkerKeys, normVersion,
+} from '../survey.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -3409,6 +3412,125 @@ if (!HAS_GIT) {
     check(ok, '--check 绕过节流：人主动问的时候必须真的去查', out(forced).slice(0, 120))
     report(ok, '节流：--check 可绕过')
   }
+
+  // 7) git 不可用 ≠ 没有版本历史。合成一句话会把「没装 git」读成解压安装，
+  //    而两者的处置完全不同（一个是装 git，一个是重新下载）。判据是**进程起没起来**，
+  //    不是退出码——不在仓库里时那条命令同样是非零退出。
+  {
+    const noGit = spawnSync(process.execPath, [join(clone, 'scripts', 'update.mjs'), '--check'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env, PATH: '', TEMP: updateTmp, TMPDIR: updateTmp },
+    })
+    const text = out(noGit)
+    const ok = /读不到 git/.test(text) && !/没有版本历史/.test(text)
+    check(ok, 'git 不可用时报「读不到 git」，不与「没有版本历史」混同', text.slice(0, 140))
+    report(ok, 'git 不可用：与无版本历史分开')
+  }
+}
+
+// ── [47] 发布说明：正文只来自被标签指到的那次提交，半成品发不出去 ────────────
+
+if (!HAS_GIT) {
+  skipGroup('[47] 发布说明起草与发送门禁', '本机没有 git')
+} else {
+  group('[47] 发布说明：来源单一、半成品发不出去')
+  const ID = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']
+  const repo = join(ROOT, 'notes-repo')
+  mkdirSync(repo, { recursive: true })
+  gitIn(repo, 'init')
+  writeFileSync(join(repo, 'a.txt'), 'x\n', 'utf8')
+  gitIn(repo, 'add', '-A')
+  gitIn(repo, ...ID, 'commit', '-m', '第一条：没有正文')
+  gitIn(repo, 'tag', 'v0.1.0')
+  writeFileSync(join(repo, 'b.txt'), 'y\n', 'utf8')
+  gitIn(repo, 'add', '-A')
+  gitIn(repo, ...ID, 'commit', '-m', '第二条：也没有正文')
+  gitIn(repo, 'tag', 'v0.2.0')
+
+  const draft = (tag, out) => spawnSync(
+    process.execPath, [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), tag, out],
+    { cwd: repo, encoding: 'utf8', windowsHide: true },
+  )
+
+  // 1) 被标签指到的提交没有正文 → 只能列出主题，并留下给维护者的标记
+  const bare = join(ROOT, 'notes-bare.md')
+  const r1 = draft('v0.2.0', bare)
+  const bareText = existsSync(bare) ? readFileSync(bare, 'utf8') : ''
+  const marked = r1.status === 0 && bareText.includes('pf:needs-summary')
+  check(marked, '没有总述时写下 pf:needs-summary 标记（而不是冒充成品）', bareText.slice(0, 120))
+  report(marked, '无总述：留下标记')
+
+  // 2) 这份起草稿交给发送端 → 必须拒绝（exit 2），不许发出去
+  //    给它一个假凭据与一个假仓库名：拒绝发生在任何网络动作之前，所以这条断言是纯本地的。
+  const send = spawnSync(
+    process.execPath,
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), 'v0.2.0', bare, '--repo', 'owner/name'],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: 'fixture-token-not-used' } },
+  )
+  const refused = send.status === 2
+  check(refused, '起草稿被发送端拒绝（半成品发不出去）', `exit=${send.status} ${(send.stderr ?? '').slice(0, 120)}`)
+  report(refused, '半成品：拒绝发送')
+
+  // 3) 被标签指到的提交有正文 → 正文就是说明，且不留标记
+  writeFileSync(join(repo, 'c.txt'), 'z\n', 'utf8')
+  gitIn(repo, 'add', '-A')
+  gitIn(repo, ...ID, 'commit', '-m', '第三条：有正文', '-m', '这一版把某个命令的参数改了，用的人需要跟着改一次。')
+  gitIn(repo, 'tag', 'v0.3.0')
+  const withBody = join(ROOT, 'notes-body.md')
+  const r3 = draft('v0.3.0', withBody)
+  const bodyText = existsSync(withBody) ? readFileSync(withBody, 'utf8') : ''
+  const used = r3.status === 0
+    && bodyText.includes('这一版把某个命令的参数改了')
+    && !bodyText.includes('pf:needs-summary')
+  check(used, '有正文时直接采用它，不再列提交主题', bodyText.slice(0, 160))
+  report(used, '有总述：直接采用')
+
+  // 4) 判据本身要能两面证伪：带标记的认出来、不带标记的放行。少了这一半，
+  //    「拒绝发送」有可能是一句恒真的拒绝，而上面那条断言照样绿。
+  check(needsSummary(bareText) && !needsSummary(bodyText),
+    '「还没写完」的判据两面都分得清（带标记认出、不带标记放行）',
+    `bare=${needsSummary(bareText)} body=${needsSummary(bodyText)}`)
+  report(needsSummary(bareText) && !needsSummary(bodyText), '判据：两面都分得清')
+}
+
+// ── [48] 包自洽性：包里的相对引用必须落在包内 ────────────────────────────────
+
+group('[48] 包自洽性：包里的相对引用必须落在包内')
+{
+  const clone = skillClone('selfcontained')
+  const before = preflightIn(clone)
+  const green = before.status === 0
+  check(green, '前提：未改动的副本本来是全绿的（否则下面两条断言没有对象）',
+    before.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(green, '前提：未改动副本全绿')
+
+  // 反例一：随包分发的脚本导入了只在仓库里的脚本。
+  // 这正是实测撞过的那一次：**文件集合完全正确**（39 个文件、两张表都对得上），
+  // 而用户拿到的包里 compose-agents.mjs 一跑就报 ERR_MODULE_NOT_FOUND。
+  const compose = join(clone, 'scripts', 'compose-agents.mjs')
+  const composeBefore = readFileSync(compose, 'utf8')
+  writeFileSync(compose, composeBefore.replace("from './survey.mjs'", "from './dev/preflight.mjs'"), 'utf8')
+  gitIn(clone, 'add', '-A')
+  const brokenImport = preflightIn(clone)
+  const importCaught = brokenImport.status === 1 && /不在用户包里/.test(brokenImport.out)
+  check(importCaught, '包里的脚本导入仓库自用脚本 → 当场红（「集合对、包却崩」那类问题）',
+    brokenImport.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(importCaught, '反例一：包内导入越界')
+  writeFileSync(compose, composeBefore, 'utf8')
+
+  // 反例二：包里的文档把读者指到包外。同样是「集合正确、读者点开是死链」。
+  const readme = join(clone, 'README.md')
+  const readmeBefore = readFileSync(readme, 'utf8')
+  writeFileSync(readme,
+    readmeBefore.replace('https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md', 'CONTRIBUTING.md'),
+    'utf8')
+  gitIn(clone, 'add', '-A')
+  const deadLink = preflightIn(clone)
+  const linkCaught = deadLink.status === 1 && /不在用户包里/.test(deadLink.out)
+  check(linkCaught, '包里的文档链接指向仓库自用文件 → 当场红（拿到包的人点了是死链）',
+    deadLink.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(linkCaught, '反例二：包内链接越界')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

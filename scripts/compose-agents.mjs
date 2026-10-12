@@ -35,7 +35,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers } from './survey.mjs'
-import { normVersion, parseMarkerKeys } from './dev/preflight.mjs'
+import { normVersion, parseMarkerKeys } from './survey.mjs'
 // 围栏扫描只有一份实现，放在 sync-toc.mjs 并导出来：它要判的是同一件事
 // （这对标记是不是真在正文里），两边各写一份状态机就会给出不同答案。
 import { fencedSpans, markerPositions } from './sync-toc.mjs'

@@ -496,6 +496,89 @@ export function frontmatterBlock(text) {
 }
 
 /**
+ * 发布说明的「还没写完」标记，以及它的判据。
+ *
+ * 起草脚本在「被标签指到的那次提交没有正文」时写下它——那一刻它只列得出提交主题，
+ * 而发布页的读者是使用者，提交主题清单不是他能读懂的说明。发送端见到这个标记就拒绝
+ * 发送，所以半成品不会出现在页面上。标记与判据**只此一份**：起草端写、发送端认，
+ * 各写一遍字符串迟早在某次改名后对不上，而那时两边都看不出来。
+ */
+export const SUMMARY_MARKER = 'pf:needs-summary'
+
+export function needsSummary(text) {
+  return String(text ?? '').includes(SUMMARY_MARKER)
+}
+
+/**
+ * 已认领的标记键：含义与形状**只在这里定义一次**。
+ *
+ * 没认领的键不是错误（可扩展），但要按「未核对」提示出来——它不会被校验、也不参与
+ * 比对。值一律要求**非空且单行**（标记解析按空白切分，值里带空白本身就写不成单行）。
+ * `host=` 的语义是「上次核对时**本机实际运行**的那套宿主版本」——不是兼容下界，
+ * 也不是某个目标项目锁定的版本；多值写法已否决（它表达不了「本机跑的是哪一版」）。
+ *
+ * 放在这里而不是自检脚本里：认领、归一化与比对是**随包分发的脚本也要用**的东西
+ * （compose-agents 用它做宿主兼容性提示），而自检脚本不进用户包。共用一份的前提是
+ * 那一份住在双方都拿得到的地方——依赖方向反过来，包里的脚本就会在运行时找不到模块。
+ */
+export const CLAIMED_MARKER_KEYS = {
+  date: { note: '核对日期' },
+  host: { reject: /[,\s]/, note: '上次核对时本机实际运行的那套宿主版本' },
+}
+
+/** 解析标记里的 key=value，返回 { keys, errors, notes }。纯函数，直接可证伪。 */
+export function parseMarkerKeys(raw) {
+  const errors = []
+  const notes = []
+  const keys = {}
+  for (const part of String(raw ?? '').trim().split(/\s+/).filter(Boolean)) {
+    const eq = part.indexOf('=')
+    if (eq <= 0) {
+      errors.push(`核对标记里的「${part}」不是 key=value 形状——每个键写成 key=value，值不许含空白（值必须非空且单行）。`)
+      continue
+    }
+    const name = part.slice(0, eq)
+    const value = part.slice(eq + 1)
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
+      errors.push(`核对标记的键名「${name}」形状非法——用字母开头，其后是字母、数字、下划线或连字符。`)
+      continue
+    }
+    if (value === '') {
+      errors.push(`核对标记的「${name}=」值是空的——值必须非空且单行。`)
+      continue
+    }
+    if (keys[name] !== undefined) {
+      errors.push(`核对标记里「${name}」出现了多次——每个键只写一次。`)
+      continue
+    }
+    const claimed = CLAIMED_MARKER_KEYS[name]
+    if (claimed === undefined) {
+      notes.push(`核对标记里的「${name}=」没有认领的含义——它不会被校验，也不能参与比对（未登记即未核对）。`)
+    } else if (claimed.reject !== undefined && claimed.reject.test(value)) {
+      errors.push(`核对标记的「${name}=${value}」格式非法——${name} 应是单个不含量空白与逗号的值。`)
+    }
+    keys[name] = value
+  }
+  return { keys, errors, notes }
+}
+
+/**
+ * 版本串归一：**只吃写法差异，不做版本序、不折叠预发布**。
+ * 顺序：trim → 去开头 `^ ~ > = <` 与空白 → 去开头 v/V（后面紧跟数字时）→ 小写。
+ *
+ * **只实现这一处**：compose-agents 与 preflight 共用同一份（两处各判一次同类问题，
+ * 迟早给出两种答案）。`0.1.5-rc.1` 与 `0.1.5` 归一后**不同**——那是两次不同的发布，
+ * 折叠掉等于隐瞒「章里核的是 rc、本机装的是正式版」这个事实。
+ */
+export function normVersion(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^[\^~>=<\s]+/, '')
+    .replace(/^[vV](?=\d)/, '')
+    .toLowerCase()
+}
+
+/**
  * 入口声明的版本（frontmatter 里 `metadata.version`）。
  *
  * 存在的理由只有一个：**没有版本历史的用户包副本**靠它知道自己属于哪一版。有版本历史时

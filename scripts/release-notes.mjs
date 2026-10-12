@@ -16,6 +16,10 @@
  * 第 3 条是关键：前两条都可能被别的东西破坏（代理、编码层、平台侧的规范化），
  * 而只有回读能证明真的写对了。
  *
+ * 还有一条与内容有关的前置检查：正文里出现 `pf:needs-summary` 时**拒绝发送**——
+ * 那是起草脚本给维护者的标记（「这一版还没有面向使用者的总述」），而发布页的读者
+ * 是使用者。发一个半成品出去，比让这次发版失败坏得多。
+ *
  * 用法：
  *   GITHUB_TOKEN=<凭据> node scripts/release-notes.mjs <标签> <说明文件> [--repo owner/name]
  *
@@ -28,7 +32,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
-import { parseGitHubRepo } from './survey.mjs'
+import { parseGitHubRepo, needsSummary } from './survey.mjs'
 
 const API = 'https://api.github.com'
 
@@ -151,6 +155,18 @@ async function main() {
   const notes = stripBom(readFileSync(notesPath, 'utf8'))
   if (notes.trim() === '') {
     process.stderr.write('错误：说明文件是空的。\n')
+    return 2
+  }
+  // 起草稿不是成品：它只有提交主题，没有面向使用者的总述。这一行由
+  // draft-release-notes.mjs 在「被标签指到的那次提交没有正文」时写下，收件人是维护者，
+  // 而发布页的收件人是使用者——把它发出去，等于把内部待办挂在给使用者看的页面上。
+  if (needsSummary(notes)) {
+    process.stderr.write(
+      '错误：这份说明还是起草稿，只有提交主题，没有面向使用者的总述。\n'
+      + '  修法：在被标签指到的那次提交的正文里写一段总述（更新了什么、影响谁、'
+      + '要不要动手），重新起草后再发。\n'
+      + '  提交主题清单不是使用者能读懂的说明，所以这里拒绝发送，而不是发一个半成品。\n',
+    )
     return 2
   }
 

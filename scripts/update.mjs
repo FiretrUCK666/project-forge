@@ -78,8 +78,11 @@ function git(args, { timeout = NETWORK_TIMEOUT_MS } = {}) {
     timeout,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
   })
-  if (r.error !== undefined) return { ok: false, out: '' }
-  return { ok: r.status === 0, out: (r.stdout ?? '').trim() }
+  // `ran` 与 `ok` 是两件事：进程**起来了**但命令失败（例如「这不是一个仓库」），
+  // 与**压根没起来**（没装 git、不在 PATH 上）必须分得开——只看退出码会把后者
+  // 也算成前者。这里正是「读不到与读到空必须可区分」那条纪律的落点。
+  if (r.error !== undefined) return { ok: false, ran: false, out: '' }
+  return { ok: r.status === 0, ran: true, out: (r.stdout ?? '').trim() }
 }
 
 function localVersion() {
@@ -96,13 +99,18 @@ function localVersion() {
  */
 function readFacts() {
   const inside = git(['rev-parse', '--is-inside-work-tree'])
-  if (!inside.ok || inside.out !== 'true') return { hasHistory: false, version: localVersion() }
+  // git 不可用与「这个副本没有版本历史」是两件事，必须分开报：合成一句「没有版本历史」
+  // 会让一个明明有历史的克隆被读成解压安装，而原因（没装 git / 没进 PATH）就此丢失。
+  // 判据是**进程起没起来**，不是退出码——不在仓库里时这条命令也是非零退出。
+  if (!inside.ran) return { hasGit: false, hasHistory: false, version: localVersion() }
+  if (inside.out !== 'true') return { hasGit: true, hasHistory: false, version: localVersion() }
   const branch = git(['symbolic-ref', '--short', '-q', 'HEAD'])
   const upstream = branch.ok
     ? git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
     : { ok: false, out: '' }
   const dirty = git(['status', '--porcelain', '--untracked-files=no'])
   return {
+    hasGit: true,
     hasHistory: true,
     version: localVersion(),
     branch: branch.ok ? branch.out : undefined,
@@ -162,7 +170,9 @@ function main(argv) {
   // 没有版本历史：这个副本无法自己核对新版，如实说明——不假装查过了。
   if (!facts.hasHistory) {
     report([
-      `project-forge ${tag}：这个副本没有版本历史，无法自动核对新版。`,
+      facts.hasGit
+        ? `project-forge ${tag}：这个副本没有版本历史，无法自动核对新版。`
+        : `project-forge ${tag}：本机读不到 git，无法自动核对新版（这不是「已是最新」）。`,
       '  更新方式见 README 的「更新」一节（下载新版覆盖，或改用克隆安装）。',
     ], { quiet })
     return 0

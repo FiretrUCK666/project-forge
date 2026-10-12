@@ -11,7 +11,7 @@ Forge any project directory into a well-formed project: version control, remote 
 
 Give it a directory. It first surveys read-only to see what the project currently is, then decides on its own what to do and what to skip. It assumes no stack — Node, Python, Rust, Go, Java, docs-only directories, plugin projects, and skill projects are all judged from surveyed facts.
 
-![project-forge: give it a project directory; it surveys read-only first, then decides from facts what to do](assets/readme/hero.svg)
+![project-forge: give it a project directory; it surveys read-only first, then decides from facts what to do. The image also lists the four things it does — version control, docs, remote, release — and the package layout](assets/readme/hero.svg)
 
 ## Contents
 
@@ -98,7 +98,7 @@ node "<skill directory>/scripts/update.mjs" --check
 
 **A zip install does not update itself** — download the new version from [Releases](https://github.com/FiretrUCK666/project-forge/releases) and overwrite.
 
-**Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate. If you modified it as described in [CONTRIBUTING.md](CONTRIBUTING.md), the update script sees the local changes and skips, so it will not fight your work.
+**Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate. If you modified it as described in [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md), the update script sees the local changes and skips, so it will not fight your work.
 
 ## Usage
 
@@ -164,7 +164,7 @@ This is what you get from a clone, or from the zip on the Releases page:
 
 ### Only in the repo
 
-These **do not ship in the zip**: they serve this repository itself, and whoever gets the package neither needs them nor should be distracted by them. If you want to change this skill, start at [CONTRIBUTING.md](CONTRIBUTING.md).
+These **do not ship in the zip**: they serve this repository itself, and whoever gets the package neither needs them nor should be distracted by them. If you want to change this skill, start at [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
 | Path | Contents |
 | --- | --- |
@@ -191,7 +191,7 @@ node <skill directory>/scripts/compose-agents.mjs <project directory> --check   
 node <skill directory>/scripts/compose-agents.mjs <project directory> --status    # inspect only, write nothing
 node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written file to the standard structure
 
-# Self-check this skill itself (only when changing it)
+# Self-check this skill itself (only when changing it; these two exist in the repo only, not in the zip)
 node <skill directory>/scripts/dev/preflight.mjs
 node <skill directory>/scripts/dev/selftest.mjs
 ```
@@ -222,9 +222,9 @@ The same thing is supposed to look different in the two kinds of docs.
 ### Runtime
 
 **Node.js 16 or later.** That is the only requirement — all scripts use only Node built-in modules (`node:fs`,
-`node:path`, `node:url`, `node:os`, `node:child_process`), with **no third-party dependencies**,
-nothing to install first. Scripts that check badges, compare versions over the network, or call APIs need Node 18's global `fetch`
-and fail loudly there instead of silently.
+`node:path`, `node:url`, `node:os`, `node:child_process`, `node:crypto`), with **no third-party dependencies**,
+nothing to install first. Among the scripts that go online, the ones that fetch pages or call APIs need Node 18's global `fetch`
+and fail loudly there instead of silently; the self-update check goes through `git`, so this does not apply to it.
 
 The floor comes from language features used in the scripts: ESM `node:`-prefixed imports, `String.prototype.replaceAll`,
 `fs.rmSync`. The most demanding of the three is `replaceAll` (introduced in Node 15); 16 is picked because it is the first LTS covering all of them.
@@ -247,10 +247,8 @@ Surveying and doc generation are fully offline. Only remote repos (create, push,
 ## How this repo itself is set up
 
 This skill is its own first user: its version control, docs, and CI are set up to its own standard.
-The generic kernel in `AGENTS.md` comes from `templates/agents-kernel.md`, injected by script rather than hand-copied —
-`scripts/dev/preflight.mjs` checks they are byte-identical, and CI runs that check too.
-
-In other words, if what this skill teaches were wrong, its own repo would break first.
+In other words, if what this skill teaches were wrong, its own repo would break first. For how it is actually set up, see
+[AGENTS.md](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md) — that is this repository's own project contract, and it records the mechanisms and the rules.
 
 This English version is a translation of `README.md` (which stays authoritative); when they disagree, the Chinese one wins, and the other should be synced.
 
@@ -265,7 +263,7 @@ File issues in [Issues](https://github.com/FiretrUCK666/project-forge/issues). T
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
 ## License
 

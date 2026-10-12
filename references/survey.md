@@ -108,6 +108,12 @@ node "<本领目录>/scripts/survey.mjs" "<项目目录>" --json       # 给机�
 **直接丢弃整个能力目录**，而模型侧拿不到逐目录诊断，分不清「不存在」与「不合法」。所以勘察要
 **按事实单独报出被丢弃的目录**，不与「没有」混同——见下方 `localSkills` 的 `dropped`。
 
+`docs-only` 的判据有**两个前提，缺一不可**：目录里能找到 README（`README_RE` 认的那几种写法），
+且除 Markdown 之外没有任何源码或构建描述文件。所以「一堆 `.md` 但没有 README」判成 `unknown`，
+不是判错——那种目录可能是什么都还没写，按 `unknown` 问一句比猜成文档项目稳妥。
+`LICENSE`、`.gitignore`、CI 配置这类每个项目都有的文件不算「别的东西」，否则正常的文档目录
+会被误报成 `unrecognized`，反过来触发一次无谓的追问。
+
 后三类 `*-plugin` / `*-extension` 合称**插件类**：它们都是「被某个宿主加载的扩展」，
 共同性质与判定协议见 `references/plugin-project.md`，各生态的具体事实见
 `references/plugins/`。
@@ -181,7 +187,7 @@ cargo，`cpp` 不代表用 CMake。`commands` 一节会区分这一点。
 | `note` / `<键>Note` | 描述某条命令**从哪来**，不是命令本身。例如「此命令按标准库 unittest 推断，请与项目实际用法核对」 |
 
 判定用**正向清单**（哪些键算命令）而不是排除式黑名单：新增命令键时黑名单要补，
-漏掉的那个会被当成一条可执行的命令渲染出去。`references/../scripts/compose-agents.mjs`
+漏掉的那个会被当成一条可执行的命令渲染出去。`<本领目录>/scripts/compose-agents.mjs`
 用的是同一份正向清单。
 
 **「有没有命令」只认真正的命令键。** 某个生态的命令推导尚未实现时，它带的是一条

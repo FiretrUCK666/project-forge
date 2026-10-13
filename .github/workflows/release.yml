@@ -68,7 +68,7 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           git archive --format=tar "$TAG" | tar -t > package-list.txt
-          node scripts/dev/preflight.mjs --package package-list.txt
+          node scripts/dev/preflight.mjs --package package-list.txt --at "$TAG"
           git archive --format=zip --prefix="project-forge-${VERSION}/" \
             -o "project-forge-${VERSION}.zip" "$TAG"
           echo "ASSET=project-forge-${VERSION}.zip" >> "$GITHUB_ENV"

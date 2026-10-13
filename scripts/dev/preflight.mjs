@@ -22,9 +22,9 @@
  *     超期只警告——时间流逝不是破损）
  *
  * 用法：
- *   node scripts/dev/preflight.mjs                          # 结构自检
- *   node scripts/dev/preflight.mjs --package <清单文件>      # 产出物与文件地图核对（持续集成）
- *   node scripts/dev/preflight.mjs --release <标签>          # 标签、版本、提交三者对齐（发布）
+ *   node scripts/dev/preflight.mjs                              # 结构自检
+ *   node scripts/dev/preflight.mjs --package <清单文件> [--at <版本>]  # 产出物与文件地图核对
+ *   node scripts/dev/preflight.mjs --release <标签>              # 标签与它里面的版本同号
  *
  * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数——
  * 换目录检查的做法会让「检查了谁」变成一个可传错的值。
@@ -545,20 +545,11 @@ export function externalModules(text) {
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
-  // 两份清单**从文件地图推导**，不另抄一份：`scripts/` 顶层的脚本随包分发、会被用在
-  // 目标项目上，`scripts/dev/` 的只服务本仓库。抄一份清单下来，新增脚本就会悄悄绕过
-  // 下面每一项检查——而那正是这条检查要防的「没人知道它存不存在」。
-  const map = readFileMap()
-  const pick = (entries, prefix) => entries
-    .filter((f) => f.startsWith(prefix) && f.endsWith('.mjs') && !f.slice(prefix.length).includes('/'))
-    .map((f) => f.slice(prefix.length))
-  const USER_SCRIPTS = pick(map.shipped, 'scripts/')
-  const DEV_SCRIPTS = pick(map.repoOnly, 'scripts/dev/')
-  if (USER_SCRIPTS.length === 0 || DEV_SCRIPTS.length === 0) {
-    fail('文件地图里读不到脚本清单（「用户包里有」与「仓库里另有」两张表）—— '
-      + '脚本检查因此无从下手，不是「没有脚本要查」。')
-    return
-  }
+  // **扫磁盘，不扫清单**：这一组检查（shebang、体积、零依赖、语法）必须覆盖每一个真实存在的
+  // 脚本文件，包括「刚建好、还没登记进文件地图」的那个——那正是最需要先过一遍语法与依赖的
+  // 时刻。文件地图在这组检查里只用来标出「这个脚本应该在包内还是包外」，不决定查谁；
+  // 该不该登记由「数量自称」的磁盘对账与包边界的位置判据负责，各有分工。
+  const map = fileMapFromWorktree()
   const inspect = (p, rel) => {
     if (!existsSync(p)) { fail(`缺少 ${rel}。`); return }
     const text = readText(p)
@@ -574,8 +565,21 @@ function checkScripts() {
       fail(`${rel} 有语法错误（node --check）：${stderrExcerpt(parsed, 4)}`)
     }
   }
-  for (const f of USER_SCRIPTS) inspect(join(dir, f), `scripts/${f}`)
-  for (const f of DEV_SCRIPTS) inspect(join(dir, 'dev', f), `scripts/dev/${f}`)
+  const inMap = (rel, bucket) => map[bucket].includes(rel)
+  const scan = (d, prefix, bucket) => {
+    if (!existsSync(d)) return
+    for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+      if (!e.isFile() || !e.name.endsWith('.mjs')) continue
+      inspect(join(d, e.name), `${prefix}${e.name}`)
+      // 登记与否不在这里判（有专门的判据），但把它标出来，读日志的人才知道这一份
+      // 是在包内还是包外。
+      if (!inMap(`${prefix}${e.name}`, bucket)) {
+        warn(`${prefix}${e.name} 还没登记进文件地图，这一份是按磁盘扫到的。`)
+      }
+    }
+  }
+  scan(dir, 'scripts/', 'shipped')
+  scan(join(dir, 'dev'), 'scripts/dev/', 'repoOnly')
 
   // 两个目录里都只允许 JavaScript。
   //
@@ -767,28 +771,32 @@ function checkStatedCounts() {
       }
     }
   }
-  // README 方向的对账：README 面向的是「刚拿到这个 skill 的人」，它的脚本表与文件表
+  // README 方向的对账：README 面向的是「刚拿到这个 skill 的人」，它的文件表
   // 就是他的全景图。**只查 SKILL.md 那一侧会漏掉这一半**——README 少列一个文件时
   // 别的检查不会出声（读者照着 README 找东西，找不到就是找不到）。
   // 两份 README 都要查：它们成对维护，只查一份等于放另一半漂移。
+  //
+  // 判据落在**表格行**上，不是「全文出现过这个名字」：后者只要正文里顺口提一句就满足，
+  // 而把文件表里那一行删掉反而不会响——实测过，那正是这条检查要防的漂移。
   for (const readme of ['README.md', 'README.en.md']) {
     const p = join(SKILL_ROOT, readme)
     if (!existsSync(p)) continue
-    const text = readText(p).replace(/^\uFEFF/, '')
+    const rows = tableFirstCells(readText(p))
+    const listed = (name) => rows.some((cell) => cell.includes(name))
     const missing = []
     const scan = (dir, prefix, filter) => {
       if (!existsSync(dir)) return
       for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
         if (!filter(e)) continue
-        if (!text.includes(`${prefix}${e.name}`)) missing.push(`${prefix}${e.name}`)
+        if (!listed(`${prefix}${e.name}`)) missing.push(`${prefix}${e.name}`)
       }
     }
     scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'scripts', 'dev'), 'scripts/dev/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
     if (missing.length > 0) {
-      fail(`${readme} 没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
-        + '读者照着它找东西，找不到就是找不到；补进文件表再提交。')
+      fail(`${readme} 的文件表里没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
+        + '读者照着它找东西，找不到就是找不到；补进表格行再提交（正文里提一句不算）。')
     }
   }
   // 门禁命令表在 AGENTS.md 与 CONTRIBUTING 各写了一份，**两处必须说同一件事**：
@@ -1529,25 +1537,46 @@ function packageMembers() {
 }
 
 /**
+ * 表格行的**第一格**原文。不是表格行时返回 undefined。
+ *
+ * 「什么算表格行」只在这里定义一次：文件地图的解析与 README 文件表的对账都从它取，
+ * 两处各写一套迟早会在某个边界形状上给出两种答案。
+ */
+function tableRowFirstCell(line) {
+  if (!/^\s*\|/.test(line)) return undefined
+  const cells = line.split('|')
+  return cells.length < 3 ? undefined : cells[1]
+}
+
+/** 一份 Markdown 里所有表格行第一格的原文。 */
+function tableFirstCells(text) {
+  const out = []
+  for (const line of String(text ?? '').split('\n')) {
+    const cell = tableRowFirstCell(line)
+    if (cell !== undefined) out.push(cell.trim())
+  }
+  return out
+}
+
+/**
  * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
  *
  * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
  * 声明。新增文件时忘了登记，下面的判据会喊：这正是「不靠记性」的落点。
  */
-function readFileMap() {
+function readFileMap(skillText) {
   const buckets = { shipped: [], repoOnly: [] }
   let bucket
-  for (const line of readText(join(SKILL_ROOT, 'SKILL.md')).split('\n')) {
+  for (const line of String(skillText ?? '').split('\n')) {
     if (/^###\s+用户包里有/.test(line)) { bucket = buckets.shipped; continue }
     if (/^###\s+仓库里另有/.test(line)) { bucket = buckets.repoOnly; continue }
     if (/^##\s/.test(line)) { bucket = undefined; continue }
     if (bucket === undefined) continue
     // 只看表格行的**第一格**：那一格才是文件清单，说明格里的反引号（提到的文档、
     // 命令开关、凭据名）不是声明，读进来会造出一堆假失败。
-    if (!/^\s*\|/.test(line)) continue
-    const cells = line.split('|')
-    if (cells.length < 3) continue
-    for (const m of cells[1].matchAll(/`([^`]+)`/g)) {
+    const cell = tableRowFirstCell(line)
+    if (cell === undefined) continue
+    for (const m of cell.matchAll(/`([^`]+)`/g)) {
       const v = m[1].trim()
       if (v.includes('<')) {
         // 占位条目（形如 `references/plugins/<生态>.md`）取它所在的目录当前缀
@@ -1561,14 +1590,36 @@ function readFileMap() {
   return buckets
 }
 
+/** 当前工作区里 SKILL.md 的文件地图。 */
+function fileMapFromWorktree() {
+  return readFileMap(readText(join(SKILL_ROOT, 'SKILL.md')))
+}
+
+/**
+ * 从某个版本读一个文件的内容（`git show <ref>:<路径>`）。读不到返回 undefined。
+ *
+ * 包核对必须**两边同源**：产出物取自某个版本，判据（文件地图）就必须取自同一个版本。
+ * 拿当前工作区的地图去核对一个旧版本的产出物，会在发版那天恰好一致，之后每过一天
+ * 偏离一点——「今天碰巧对」正是本项目要消灭的那种性质。
+ */
+function fileFromRef(ref, path) {
+  const r = spawnSync('git', ['show', `${ref}:${path}`],
+    { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
+  if (r.error !== undefined || r.status !== 0) return undefined
+  return (r.stdout ?? '').replace(/^\uFEFF/, '')
+}
+
 /**
  * 把一份包内容清单与文件地图双向对齐，返回发现的矛盾数。
  *
  * 两个调用方共用同一份判据，只是喂进来的清单来源不同：一处是当前索引的导出结果
  * （日常，`checkPackageBoundary`），一处是持续集成里真跑出来的那份产出物
  * （`checkProducedPackage`）。判据只写一遍，两处不会给出两种答案。
+ *
+ * `onDisk` 为真时，「声明了却没有」这一半按工作区里有没有这个文件判；为假时（核对某个
+ * 版本的产出物）只按清单判——那时工作区可能已经不在那个版本上了，拿它当依据就是混源。
  */
-function alignPackage(list, map, label) {
+function alignPackage(list, map, label, { onDisk = true } = {}) {
   let problems = 0
   const bad = (message) => { fail(message); problems += 1 }
   const covers = (entries, f) => entries.some((x) => (x.endsWith('/') ? f.startsWith(x) : f === x))
@@ -1585,7 +1636,7 @@ function alignPackage(list, map, label) {
       if (!list.some((f) => f.startsWith(entry))) bad(`「用户包里有」声明了 ${entry}，但${label}里一个文件都没有。`)
       continue
     }
-    if (!existsSync(join(SKILL_ROOT, entry))) {
+    if (onDisk && !existsSync(join(SKILL_ROOT, entry))) {
       bad(`「用户包里有」声明了 ${entry}，磁盘上却没有这个文件。`)
       continue
     }
@@ -1608,7 +1659,7 @@ function alignPackage(list, map, label) {
  * `templates/` 里的文档不参与链接检查：那些骨架是**将要落到别的项目里**的内容，其中的
  * 相对链接指向那个项目的文件，本来就不该在本包里解析得到。
  */
-function checkPackageSelfConsistency(pkg) {
+function checkPackageSelfConsistency(pkg, readContent) {
   const inPkg = new Set(pkg)
   const present = (target) => inPkg.has(target) || pkg.some((x) => x.startsWith(`${target}/`))
   const resolveRel = (from, spec) => {
@@ -1624,9 +1675,11 @@ function checkPackageSelfConsistency(pkg) {
   let checked = 0
   for (const f of pkg) {
     if (f.startsWith('templates/')) continue
-    const full = join(SKILL_ROOT, f)
-    if (!existsSync(full)) continue
-    const text = readText(full)
+    const text = readContent(f)
+    if (text === undefined) {
+      warn(`包自洽性未核对：读不到 ${f} 的内容（它可能只存在于被核对的产出物里）。`)
+      continue
+    }
     if (f.endsWith('.mjs')) {
       for (const spec of moduleSpecifiers(text)) {
         if (!spec.startsWith('./') && !spec.startsWith('../')) continue
@@ -1655,6 +1708,12 @@ function checkPackageSelfConsistency(pkg) {
   return checked
 }
 
+/** 从工作区读文件内容；读不到返回 undefined。 */
+function contentFromWorktree(f) {
+  const full = join(SKILL_ROOT, f)
+  return existsSync(full) ? readText(full) : undefined
+}
+
 /**
  * 用户包边界：位置判据与包集合双向判据。
  *
@@ -1666,7 +1725,7 @@ function checkPackageSelfConsistency(pkg) {
  * 的规则另算一遍——后者是近似，而近似在这里正好会放过最该抓的那种错。
  */
 function checkPackageBoundary() {
-  const map = readFileMap()
+  const map = fileMapFromWorktree()
   if (map.shipped.length === 0 || map.repoOnly.length === 0) {
     fail('SKILL.md 的文件地图缺少「用户包里有」或「仓库里另有」小节 —— 包边界无从判断。')
     return
@@ -1692,8 +1751,8 @@ function checkPackageBoundary() {
     warn('用户包边界未核对（git 不可用，或索引里有未合并的条目）—— 报「未核对」，不放行。')
     return
   }
-  if (alignPackage(pkg, map, '实际导出') === 0) {
-    const links = checkPackageSelfConsistency(pkg)
+  if (alignPackage(pkg, map, '实际导出', { onDisk: true }) === 0) {
+    const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
     if (failures.length === 0) {
       process.stdout.write(`用户包边界：${pkg.length} 个文件，与文件地图一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
@@ -1702,15 +1761,21 @@ function checkPackageBoundary() {
 }
 
 /**
- * 核对一份真跑出来的产出物：清单文件里一行一个条目（`git archive <标签> | tar -t` 的结果）。
+ * 核对一份真跑出来的产出物：清单文件里一行一个条目（`git archive <版本> | tar -t` 的结果）。
  *
  * 与 `checkPackageBoundary` 的分工：那一条看的是「当前索引会导出成什么」，在本地随时能跑；
  * 这一条看的是**真的那份包**，由发布工作流在产出物生成后立刻调用。前者管日常，后者管事实。
+ *
+ * `atRef` 给出版本时，**文件地图与文件内容都从那个版本读**——判据与对象必须同源。
+ * 拿当前工作区的地图去核对一个旧版本的产出物，会在发版那天恰好一致、之后每过一天偏离
+ * 一点，而「今天碰巧对」正是本项目要消灭的那种性质。
  */
-function checkProducedPackage(listPath) {
-  const map = readFileMap()
+function checkProducedPackage(listPath, atRef) {
+  const map = atRef === undefined
+    ? fileMapFromWorktree()
+    : readFileMap(fileFromRef(atRef, 'SKILL.md') ?? '')
   if (map.shipped.length === 0 || map.repoOnly.length === 0) {
-    fail('SKILL.md 的文件地图缺少「用户包里有」或「仓库里另有」小节 —— 包边界无从判断。')
+    fail(`从 ${atRef === undefined ? '工作区' : atRef} 的 SKILL.md 里读不到文件地图的两张小节 —— 包边界无从判断。`)
     return
   }
   if (!existsSync(listPath)) { fail(`找不到产出物清单 ${listPath}。`); return }
@@ -1718,53 +1783,64 @@ function checkProducedPackage(listPath) {
     .map((s) => s.trim())
     .filter((s) => s !== '' && !s.endsWith('/'))
   if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
-  if (alignPackage(list, map, '产出物') === 0) {
-    const links = checkPackageSelfConsistency(list)
+  if (alignPackage(list, map, '产出物', { onDisk: atRef === undefined }) === 0) {
+    const readContent = atRef === undefined
+      ? contentFromWorktree
+      : (f) => fileFromRef(atRef, f)
+    const links = checkPackageSelfConsistency(list, readContent)
     if (failures.length === 0) {
-      process.stdout.write(`产出物核对：${list.length} 个条目，与文件地图一致；`
+      process.stdout.write(`产出物核对：${list.length} 个条目，与 ${atRef ?? '工作区'} 的文件地图一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }
   }
 }
 
 /**
- * 发版门禁：标签、入口声明的版本、被标签指到的那次提交，三者必须对得上。
+ * 发版门禁：标签的名字、标签里那份 `SKILL.md` 声明的版本，两者必须同号。
  *
  * 由发布工作流调用（见 `.github/workflows/release.yml`），不在日常自检里跑——日常没有标签，
  * 这条判据没有输入。`metadata.version` 存在的唯一理由是让**没有版本历史的用户包副本**
  * 知道自己属于哪一版，所以它必须与标签同号，否则那个字段就是在说假话。
+ *
+ * **版本从标签里读，不从工作区读**：门禁判的是「要发出去的那份包」，而工作区可能已经
+ * 往前走过了（补漏重跑时它一定往前走过了）。同理这里**不判**「标签是否指向当前检出的
+ * 提交」——产出物取自标签那棵树，与检出了什么无关，而判它会把「用 `workflow_dispatch`
+ * 补漏」这条文档指定的路径整条堵死（补漏时检出的是分支，不是标签）。
  */
 function checkReleaseTag(tag) {
-  const declared = skillVersion(readText(join(SKILL_ROOT, 'SKILL.md')))
-  if (declared === undefined) {
-    fail('SKILL.md 的 frontmatter 里读不到 metadata.version —— 没有它，标签与副本对不上号。')
-    return
-  }
-  if (declared !== tag.replace(/^v/, '')) {
-    fail(`标签 ${tag} 与 SKILL.md 的 metadata.version「${declared}」不一致 —— 两者必须同号，`
-      + '否则用户包副本会以为自己属于另一版。')
-  }
   const run = (args) => spawnSync('git', args, { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true })
   const tagged = run(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
   if (tagged.error !== undefined || tagged.status !== 0) { fail(`仓库里没有标签 ${tag}。`); return }
-  const head = run(['rev-parse', 'HEAD'])
-  if (head.status === 0 && (head.stdout ?? '').trim() !== (tagged.stdout ?? '').trim()) {
-    fail(`标签 ${tag} 指的不是当前检出的提交 —— 产出物会与标签对不上。`)
+  const skillText = fileFromRef(tag, 'SKILL.md')
+  if (skillText === undefined) { fail(`读不到标签 ${tag} 里的 SKILL.md —— 无法核对版本。`); return }
+  const declared = skillVersion(skillText)
+  if (declared === undefined) {
+    fail(`标签 ${tag} 里的 SKILL.md 读不到 metadata.version —— 没有它，标签与副本对不上号。`)
+    return
   }
-  if (failures.length === 0) process.stdout.write(`发版门禁：标签 ${tag} 与 metadata.version ${declared} 一致\n`)
+  if (declared !== tag.replace(/^v/, '')) {
+    fail(`标签 ${tag} 与它里面 SKILL.md 的 metadata.version「${declared}」不一致 —— 两者必须同号，`
+      + '否则用户包副本会以为自己属于另一版。')
+  }
+  if (failures.length === 0) {
+    process.stdout.write(`发版门禁：标签 ${tag} 与它里面的 metadata.version ${declared} 一致\n`)
+  }
 }
 
 function usage() {
   return [
-    '用法：node scripts/dev/preflight.mjs [--package <清单文件> | --release <标签>]',
+    '用法：node scripts/dev/preflight.mjs [--package <清单文件> [--at <版本>] | --release <标签>]',
     '',
     '  不带参数：结构自检（引用完整、内核一致、硬性规范、用户包边界、行为自检）。',
     '',
     '  --package <清单文件>  只做一件事：把产出物条目（一行一个，由',
-    '                        `git archive <标签> | tar -t` 得到）与文件地图双向核对。',
+    '                        `git archive <版本> | tar -t` 得到）与文件地图双向核对。',
     '                        由持续集成调用——它看的是真的那份包，不是推算出来的。',
-    '  --release <标签>      只做一件事：核对标签、SKILL.md 的 metadata.version、',
-    '                        被标签指到的那次提交三者对齐。由发布工作流调用。',
+    '  --at <版本>           --package 的搭档：文件地图与文件内容都从这个版本读。',
+    '                        判据与对象必须同源，否则核对的是「今天的规矩」与',
+    '                        「那天的产出物」，只在发版那天恰好一致。',
+    '  --release <标签>      只做一件事：核对标签与它里面 SKILL.md 的 metadata.version 同号。',
+    '                        由发布工作流调用。',
     '',
     '  两个模式各只做一件事，做完就退出：它们出现的地方，结构自检已经单独跑过。',
     '  检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数。',
@@ -1783,11 +1859,13 @@ function main(argv = []) {
   }
   const producedList = value('--package')
   const releaseTag = value('--release')
-  if (producedList === '' || releaseTag === '') {
+  const atRef = value('--at')
+  if (producedList === '' || releaseTag === '' || atRef === '') {
     fail(`参数缺值。\n${usage()}`)
     return 2
   }
-  const known = new Set(['--package', '--release', producedList, releaseTag].filter((x) => x !== undefined))
+  const known = new Set(['--package', '--release', '--at', producedList, releaseTag, atRef]
+    .filter((x) => x !== undefined))
   const unknown = argv.filter((a) => !known.has(a))
   if (unknown.length > 0) {
     fail(`未知参数：${unknown.join(' ')}\n${usage()}`)
@@ -1797,7 +1875,7 @@ function main(argv = []) {
   // 两个模式各只做一件事，做完就汇总。它们由持续集成与发布工作流调用，而那里
   // 结构自检已经单独跑过一遍——重复跑一遍只是白花时间，还会让「这一条到底查了什么」
   // 变得说不清。
-  if (producedList !== undefined) { checkProducedPackage(producedList); return summarize() }
+  if (producedList !== undefined) { checkProducedPackage(producedList, atRef); return summarize() }
   if (releaseTag !== undefined) { checkReleaseTag(releaseTag); return summarize() }
 
   const skill = checkSkillFile()

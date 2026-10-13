@@ -38,7 +38,8 @@ jobs:
       # 上一条自检里的包边界看的是「按当前索引导出会得到什么」，这里看的是**真跑出来的
       # 那份包**：声明与实际是否一致，最终得由产出物自己回答。tar 只用来列条目，
       # 判定仍在自检里——同一份判据，两处不会给出两种答案。
+      # `--at HEAD` 让文件地图也从同一个版本读：判据与对象同源，不靠「恰好一致」。
       - name: 用户包内容（真跑 git archive，与文件地图双向核对）
         run: |
           git archive --format=tar HEAD | tar -t > package-list.txt
-          node scripts/dev/preflight.mjs --package package-list.txt
+          node scripts/dev/preflight.mjs --package package-list.txt --at HEAD

@@ -40,6 +40,12 @@ const SCRIPTS_DIR = join(HERE, '..')
 const FIXTURE_PREFIX = 'project-forge-selftest-'
 const ROOT = join(tmpdir(), `${FIXTURE_PREFIX}${process.pid}`)
 
+// 目录名带 pid 还不够：**另一个正在跑的 selftest 也是这个名字形状**。所以再写一个所有权
+// 标记，让「上次遗留」与「别人正在用」分得开——分不开的话，它会报出一笔并不存在的债，
+// 而「看不见的债」与「假的债」一样会让人不再相信这份报告。
+mkdirSync(ROOT, { recursive: true })
+writeFileSync(join(ROOT, 'owner.pid'), `${process.pid}\n`, 'utf8')
+
 /**
  * fixture 的清理。
  *
@@ -65,7 +71,22 @@ process.once('exit', cleanupFixtures)
  *
  * 报出来而不是默默留着：清理失败过一次就说明这台机器上还会再失败，而「看不见的债」
  * 是最容易被当成没有的那种债。这里只报数，不替别人删——并发的另一次运行可能正用着它。
+ *
+ * 「正用着」是**判出来的，不是猜的**：每个 fixture 根目录写着它的进程号，那个进程还活着
+ * 就不算遗留。少了这一半，另一次并发运行的活目录会被报成「上次没清干净」，
+ * 报告里就多出一笔不存在的债。
  */
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // ESRCH = 没有这个进程；其余（例如 EPERM）说明进程存在，只是问不动它。
+    return error?.code !== 'ESRCH'
+  }
+}
+
 function staleFixtureDirs() {
   let entries = []
   try {
@@ -73,6 +94,15 @@ function staleFixtureDirs() {
   } catch { return [] }
   return entries
     .filter((e) => e.isDirectory() && e.name.startsWith(FIXTURE_PREFIX) && join(tmpdir(), e.name) !== ROOT)
+    .filter((e) => {
+      try {
+        const pid = Number.parseInt(readFileSync(join(tmpdir(), e.name, 'owner.pid'), 'utf8').trim(), 10)
+        return !processAlive(pid)
+      } catch {
+        // 读不到标记（这个标记之前留下的目录）→ 只能按遗留算，如实报出来。
+        return true
+      }
+    })
     .map((e) => e.name)
 }
 
@@ -3249,7 +3279,8 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
     check(process.listeners('exit').includes(cleanupFixtures),
       '清理挂在 exit 上（抛异常也会执行；只写在末尾一句就等于没有兜底）')
     report(process.listeners('exit').includes(cleanupFixtures), '清理：exit 钩子已挂')
-    check(existsSync(ROOT), '前提：运行期间 fixture 目录确实存在（否则这条清理断言没东西可清）')
+    check(existsSync(join(ROOT, 'owner.pid')),
+      'fixture 根目录写着所有权标记（「别人正在用」与「上次遗留」才分得开）')
     const leftover = staleFixtureDirs()
     check(!leftover.includes(basename(ROOT)), '残留清单不含本次自己的目录（报数才有意义）',
       JSON.stringify(leftover.slice(0, 3)))
@@ -3320,7 +3351,7 @@ if (!HAS_GIT) {
   const seedVersion = skillVersion(readFileSync(join(seed, 'SKILL.md'), 'utf8'))
   const bumpSeed = (version) => {
     const p = join(seed, 'SKILL.md')
-    writeFileSync(p, readFileSync(p, 'utf8').replace(/version:[ \t]*"[^"]*"/, `version: "${version}"`), 'utf8')
+    writeFileSync(p, readFileSync(p, 'utf8').replace(/^[ \t]+version:[ \t]*"[^"]*"[ \t]*$/m, `  version: "${version}"`), 'utf8')
     commitIn(seed, `bump ${version}`)
   }
 

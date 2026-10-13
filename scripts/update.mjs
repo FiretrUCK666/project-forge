@@ -81,8 +81,21 @@ function git(args, { timeout = NETWORK_TIMEOUT_MS } = {}) {
   // `ran` 与 `ok` 是两件事：进程**起来了**但命令失败（例如「这不是一个仓库」），
   // 与**压根没起来**（没装 git、不在 PATH 上）必须分得开——只看退出码会把后者
   // 也算成前者。这里正是「读不到与读到空必须可区分」那条纪律的落点。
-  if (r.error !== undefined) return { ok: false, ran: false, out: '' }
-  return { ok: r.status === 0, ran: true, out: (r.stdout ?? '').trim() }
+  if (r.error !== undefined) return { ok: false, ran: false, out: '', err: '' }
+  return {
+    ok: r.status === 0,
+    ran: true,
+    out: (r.stdout ?? '').trim(),
+    // stderr 一并留着：失败原因几乎总在那里（`git pull` 报「未跟踪文件会被覆盖」时，
+    // stdout 只有一行 `Updating a..b`，照着它根本不知道要删哪个文件）。
+    err: (r.stderr ?? '').trim(),
+  }
+}
+
+/** 命令失败时的一句话说明：把 stderr 带出来，别只报「失败了」。 */
+function gitFailure(r) {
+  const detail = (r.err !== '' ? r.err : r.out).split('\n').filter((l) => l.trim() !== '')
+  return detail.length === 0 ? '（没有输出）' : detail.join('\n  ')
 }
 
 function localVersion() {
@@ -198,11 +211,14 @@ function main(argv) {
   if (!fetched.ok) {
     // 「没比」与「比过且一致」必须可区分：网络不通时不能读成「已是最新」。
     // 仍然记下这次时间，否则离线时每次任务都会重试并重复报同一句话。
-    rememberCheck()
+    if (!checkOnly) rememberCheck()
     report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
     return 0
   }
-  rememberCheck()
+  // **只有真的跑过默认流程才记时间**：`--check` 是人主动问，它不该替接下来的自动更新
+  // 做决定。记了的话，「先看一眼状态」等于把往后 24 小时的自动更新悄悄推迟掉，
+  // 而那时默认流程是**完全静默**的——使用者看不出发生过什么。
+  if (!checkOnly) rememberCheck()
 
   const counts = git(['rev-list', '--left-right', '--count', `${facts.upstream}...HEAD`])
   if (!counts.ok) {
@@ -237,7 +253,7 @@ function main(argv) {
     // 用 --ff-only 是有意的：它失败时工作区原样不动，所以这里报错是安全的，不需要回滚。
     report([
       `project-forge ${tag}：更新失败，这个副本没有改动。`,
-      `  git 说：${pulled.out === '' ? '（没有输出）' : pulled.out.split('\n').join('\n  ')}`,
+      `  git 说：${gitFailure(pulled)}`,
     ], { quiet, always: true })
     return 1
   }

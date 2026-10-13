@@ -486,8 +486,7 @@ function main(argv) {
     pending.push('非 DSH 插件：按通用协议核对产物同提交、两标识与挂载分发两条路（见 plugin-project.md）')
   }
   // Obsidian 发布链：四件事各有各的判据，不要压成一句“缺 main.js 即断链”——
-  //   旧判据把“仓库根无 main.js”直接报缺，而官方模板要求它只进发布附件不进库，
-  //   于是按官方模板做的项目永远过不了门。正确分工：
+  //   官方模板要求 main.js 只进发布附件、不进库，所以「仓库根无 main.js」不是缺失。正确分工：
   //   缺 = 仓库侧事实缺（manifest id 形状非法——提交审核会被拒）；
   //   待问 = 附件侧只能人去看发布页（附件齐不齐、tag 与版本三方一致、触发器是不是裸版本）。
   if (dshKinds.includes('obsidian-plugin') && s.artifacts?.obsidianArtifacts !== undefined) {

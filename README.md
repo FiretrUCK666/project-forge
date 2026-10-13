@@ -110,7 +110,9 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 
 ## 更新
 
-![它怎么保持最新：每次用比一次版本，有新版就整份换掉，同一份副本 24 小时内最多换一次](assets/readme/update.svg)
+<p align="center">
+  <img src="assets/readme/update.svg" width="100%" alt="它怎么保持最新：每次用比一次版本，有新版就整份换掉，同一份副本 24 小时内最多换一次">
+</p>
 
 下载装的那份会自己保持最新，你不用做任何事。每次用它时它安静地比一次版本号：是同一版就结束、
 什么都不做，有新版本就整份换成新版，并告诉你从哪一版换到了哪一版。

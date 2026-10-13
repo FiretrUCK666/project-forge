@@ -348,7 +348,8 @@ export function isMainModule(metaUrl, argv1) {
  *
  * **整篇扫描，不逐行**：标记可以写成多行（`<!-- pf:author:` 换行后 `-->`），
  * 逐行扫会漏掉它们——而那正是「脚本报 0 处、脚手架被删、TODO 还留在正文」的成因。
- * compose-agents 与 review 都用这一份，不再各写一份再对齐。
+ * compose-agents 与 review 都引用这一份：三处各写一份的实现，同一份多行标记会得出
+ * 三个数，而调用方只信自己那份。
  */
 export function authorMarkers(text) {
   const re = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
@@ -1005,10 +1006,11 @@ const CONFIGISH_NAME_RE = /^(tsconfig|jsconfig|deno|biome|eslint|prettier|stylel
 /**
  * 这个文件名像不像一份**认不出来的项目清单**。
  *
- * 为什么要判：**没认出来的清单是重要事实**。以前它连痕迹都不留，报告还会顺口说
- * 「无清单文件」——于是新生态项目看起来和普通 JS 项目一模一样，AI 永远收不到
- * 「这里有我不认识的东西」这个提示，也就不会去走「无专章的插件类怎么判」那条协议。
- * 判不出来就照实说「这里有个我不认识的清单」，这比默认它不存在诚实。
+ * 为什么要判：**没认出来的清单是重要事实**。漏掉它，新生态项目就会看起来和普通 JS
+ * 项目一模一样（`src/extension.ts` 这样的扩展名会兜底判成 node），而报告里还会顺口
+ * 说「无清单文件」——那句是假的，根目录明明有。于是 AI 永远收不到「这里有我不认识的
+ * 东西」这个提示，也就不会去走「无专章的插件类怎么判」那条协议。判不出来就照实说
+ * 「这里有个我不认识的清单」，这比默认它不存在诚实。
  */
 export function looksLikeManifest(name) {
   const lower = String(name ?? '').toLowerCase()
@@ -1439,8 +1441,9 @@ function detectEcosystem(root, root_, walked) {
   // **子目录里的清单与其它两类不是一回事，所以分开**：
   //   - 清单是**强证据**（与根目录那份同一个量级：它本来就声明了「这里有一个这种生态的
   //     项目」），monorepo 里根目录有 package.json、`backend/` 下还有 pyproject.toml 是
-  //     常态。这道判断原先被 `kinds.length === 0` 挡在后面，于是「一个仓库里有多种生态
-  //     时逐项分别处理」那句话在真正的 monorepo 上不成立——子目录那一半整体消失。
+  //     常态。**这道判断不能被「根目录什么都没认出来」这个前提挡住**：挡住它，「一个仓库
+  //     里有多种生态时逐项分别处理」那句话在真正的 monorepo 上就不成立，子目录那一半
+  //     会整体消失。
   //   - 构建描述文件与源码扩展名是**弱证据**：一旦已经认出这是 skill、插件或某种清单型
   //     项目，再凭「目录里有个 .py 文件」追加一个生态只会制造误判（例如把技能自带的
   //     scripts/ 当成一个 Node 项目）。所以这两类仍然只在什么都没认出来时才用。
@@ -1468,7 +1471,8 @@ function detectEcosystem(root, root_, walked) {
   // 它是这一份报告里唯一能指向「这是个新生态」的事实。不报的后果是：一个带
   // `hedgehog.toml` 的新生态项目会被当成普通 JS 项目（`src/extension.ts` 让扩展名兜底
   // 判成 node），AI 再也收不到「这里有我不认识的东西」，也就不会去走「无专章的插件类
-  // 怎么判」那条协议；而报告里原来那句「无清单文件」还是**假的**——根目录明明有。
+  // 怎么判」那条协议。同理，别处也不能顺口说「无清单文件」：只要根目录有清单形状的
+  // 文件，那句话就是假的。
   const unknownManifests = scan?.unrecognizedManifests ?? []
   if (unknownManifests.length > 0) {
     evidence.push(`根目录有清单形状的文件但清单表里没有这一种：${unknownManifests.slice(0, 3).join('、')}`
@@ -1657,9 +1661,9 @@ function deriveCommands(root, root_, eco) {
 /**
  * 发布相关的既成事实：决定「产物入不入库」和「发布范围」。
  *
- * 其中 `publishableManifest` 是**这个项目可发布身份的唯一来源**。它存在的理由是一个
- * 真实缺陷：判断「能不能发布」时只认 JS 的 `package.json`，于是**任何非 JS 项目一律
- * 被判成不可发布**，生成的契约里整块丢掉版本号语义、抬版本号判据、发版规则、角色判定
+ * 其中 `publishableManifest` 是**这个项目可发布身份的唯一来源**。判据不能只认 JS 的
+ * `package.json`——那会让**任何非 JS 项目一律被判成不可发布**，生成的契约里整块丢掉
+ * 版本号语义、抬版本号判据、发版规则、角色判定
  * ——而 SKILL.md 的能力矩阵明写「python / rust / go：发布视声明而定」。
  * 读这张表就不会把「我没解析那种清单」误当成「它不能发布」。
  *
@@ -1993,6 +1997,8 @@ function detectLocalSkills(root) {
     return {
       path,
       nameOk: fm === undefined ? undefined : fm.name === name,
+      // 名字本身也带上：只报「不一致」而不报两边的名字，读的人还得自己去翻一遍文件。
+      skillName: fm?.name,
       descriptionHead,
       hasScripts: sub.some((x) => x.name === 'scripts'),
       hasReferences: sub.some((x) => x.name === 'references'),
@@ -2562,6 +2568,13 @@ function toMarkdown(s) {
       // 有具体成因就先报成因：「入口多了一层」比「入口缺失」更能指到要改的那一处。
       if (x.dropped !== undefined) L.push(`  - **${x.path}：${x.dropped}**`)
       else if (x.corrupt === true) L.push(`  - ${x.path}：SKILL.md 损坏或缺失，先修再用`)
+      // 目录名与 frontmatter 的 name 不一致：宿主要求两者逐字相同，不一致时**整份会被丢弃**，
+      // 而症状与「压根没装」一模一样。判定早就算出来了（`nameOk`），不渲染出来等于白算。
+      else if (x.nameOk === false) {
+        L.push(`  - **${x.path}：目录名与 frontmatter 的 name 不一致`
+          + `${x.skillName === undefined ? '' : `（name: ${x.skillName}）`}`
+          + '——宿主按目录发现、按 name 校验，两者须逐字相同，否则整份被丢弃**')
+      }
     }
   }
   L.push('')

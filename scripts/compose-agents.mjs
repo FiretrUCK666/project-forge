@@ -259,6 +259,10 @@ function deriveFacts(target) {
 
   // 有依赖 = 清单里声明了任意一类依赖，或其他生态的依赖声明文件存在
   let hasDeps = false
+  // 清单**存在但解析不了**：这不是「没有依赖」，而是「读不到」。两者混成一个 false，
+  // 后果是生成件里「依赖版本同步」那一节整块消失、而报告照样说「已生成」——AI 按
+  // P4「两个数字归零 = 内容完整」收尾，交出去的东西少一节且无人知道。
+  let manifestBroken = false
   if (manifestPath !== undefined) {
     // 依赖字段名各生态不同，这里按「清单里出现 dependency 字样的键」判断，
     // 避免把某个生态的字段名写死。
@@ -267,7 +271,10 @@ function deriveFacts(target) {
       hasDeps = Object.keys(pkg).some((k) => /dependenc/i.test(k) && (
         typeof pkg[k] === 'object' ? Object.keys(pkg[k]).length > 0 : false
       ))
-    } catch { /* 读不到就按无依赖处理 */ }
+    } catch {
+      // 读不到就**不能**按无依赖处理：说一句，并让交付门禁看得见（见调用处）。
+      manifestBroken = index.has(manifestPath)
+    }
   }
   if (!hasDeps) {
     hasDeps = DEPENDENCY_FILES.some((f) => index.has(f))
@@ -288,11 +295,9 @@ function deriveFacts(target) {
 
   // 「说明文档是不是多语言的」决定要不要把成对维护规则写进契约。
   //
-  // 这一条是**机制缺口**补上的：references 里早就写了双语文档会漂移、要成对改，
-  // 但模板里没有对应段落——于是生成出来的契约里没有这条规则，项目也就不会照它做。
-  // 实测后果：一个双语文档的项目，英文版漏掉了一条更新命令，而它的契约里
-  // 一个字都没提「中文改了英文也要改」。规则写在参考文件里只对「读过那份文件的人」
-  // 有效；写进项目自己的契约，才对**以后每一次会话**有效。
+  // 规则写在 `references/` 里只对「读过那份文件的人」有效，而契约是**以后每一次会话**
+  // 都会读到的东西——成对维护这类要求必须落在那里，否则一个双语文档的项目改了中文、
+  // 英文版就停在原处，而它的契约里一个字都没提要一起改。
   const hasBilingualReadme = s.docs?.readmePair !== undefined
 
   // 插件类条件：只按勘察事实求值，不猜具体取值。模板里的 DSH 段落靠它们显隐，
@@ -395,7 +400,7 @@ function deriveFacts(target) {
     COMMANDS: renderCommands(commands),
   }
 
-  return { survey: s, conditions, tokens }
+  return { survey: s, conditions, tokens, manifestBroken }
 }
 
 /**
@@ -786,7 +791,7 @@ function injectKernel(text, kernel) {
  *
  * 这是「项目已经有了 AGENTS.md，但写得不好或漏了很多」这一常见场景的入口。它必须做到
  * 三件事，缺一件就不合格：
- *   1. **不报错退出**——原来的实现直接抛「找不到内核标记」，把最常见的场景变成了死路；
+ *   1. **不报错退出**——缺内核标记是最常见的场景，直接抛错会把它变成死路；
  *   2. **不破坏已有内容**——手写的段落一律保留，包括它自己那套标题体系；
  *   3. **只做加法，并把加了什么说清楚**——插入内核、补上缺失的节，然后逐条报告。
  *
@@ -959,7 +964,7 @@ function documentStructure(text) {
  *     待办——**判据直接不适用**。否则「版本管理流程」对「版本管理」这种措辞差异会被
  *     永远报成缺节，而作者没有「补」的义务：脚本从来不会替他补这些节。
  *
- * 只按标题字面差集判缺，本身就是这一格的老毛病；同一个道理在 docs-set.md 的 README
+ * 只按标题字面差集判缺，是这一格长期存在的毛病；同一个道理在 docs-set.md 的 README
  * 一节里已经写明白了——「缺」要按内容判，不能按标题名判。这里补上另一半：连适用与否
  * 都要先按文件的性质判。
  *
@@ -995,8 +1000,9 @@ function dshCompatibilityNotice(target) {
   try {
     marker = readUtf8(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'))
   } catch { return undefined }
-  // 标记的解析与键形状**只有一处实现**（preflight 的 parseMarkerKeys）。自己写正则
-  // 的代价实测过：那条正则要求 host 在 date 之前，两键顺序一换就静默失效。
+  // 标记的解析与键形状**只有一处实现**（preflight 的 parseMarkerKeys）。两处各写一份
+  // 就有两份判据：自己那条一旦依赖键的顺序（例如要求 host 排在 date 之前），顺序一换
+  // 就静默失效——而失效的表现是「比对说一致」，最难发现的那种。
   const parsed = parseMarkerKeys(/dsh-verified:\s*([^>]*?)\s*-->/.exec(marker)?.[1] ?? '')
   const hostPin = parsed.keys.host
   if (hostPin === undefined) return undefined
@@ -1223,6 +1229,8 @@ function main(argv) {
   let composed
   let refreshReport
   let managedExisting
+  // 生成时留下的勘察结论：报告里要用它说清「这一节为什么没生成」（清单解析不了时）。
+  let factsForReport
   try {
     if (exists) {
       // ① 编码守卫：读不出无损 UTF-8 就**不写**。
@@ -1281,6 +1289,7 @@ function main(argv) {
         return 2
       }
       const facts = deriveFacts(target)
+      factsForReport = facts
       composed = materialize(readUtf8(SKELETON_PATH), facts)
       if (!composed.endsWith('\n')) composed += '\n'
       const authors = findAuthors(composed)
@@ -1414,7 +1423,7 @@ function main(argv) {
   // 写入：纳入错误处理，且**先写临时文件再改名**。
   //
   // 两件事都是必要的：
-  //   - 写路径原先在 try 之外，权限不足、磁盘满、文件被独占都会抛出**裸的 Node 栈**，
+  //   - 写路径必须纳入错误处理，否则权限不足、磁盘满、文件被独占都会抛出**裸的 Node 栈**，
   //     使用者看不到「哪个文件、为什么」；
   //   - 直接覆盖原文件时，写入中途失败会留下半截文件。改名在同一分区上是原子的，
   //     所以要么是旧内容、要么是新内容，不会出现第三种状态。
@@ -1434,6 +1443,14 @@ function main(argv) {
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
+  // 清单解析不了时，生成件里「依赖版本同步」那一节是**读不到**而不是「没有依赖」。
+  // 不说这一句，报告就只显示「已生成 + 待填写 0 处」——一份少了一节的契约被读成完整的。
+  if (factsForReport?.manifestBroken === true) {
+    process.stdout.write(
+      '提示：package.json 解析不了（JSON 语法错误？），本次按「依赖未知」处理'
+      + '——「依赖版本同步」那一节因此没有生成。修好清单后再跑一次，它会补上。\n',
+    )
+  }
   reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
   const staleNew = dshCompatibilityNotice(target)

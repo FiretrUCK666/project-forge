@@ -90,9 +90,9 @@ metadata:
 
 这张表的输入是勘察产出的**全部事实**，不只是生态判定：中间几行由 `ecosystem.kinds`
 决定（可以命中多项，一个仓库里有多种生态时逐项分别处理；生态名单以勘察为准，
-新增生态时矩阵、插件索引、勘察三处同步），最后三行由 `git`（远端指向
-谁）与 `artifacts`（有没有声明不可发布）决定。**逐行求值，不要只遍历 kinds**——最后
-三行恰恰是安全相关的。
+新增生态时矩阵、插件索引、勘察三处同步），末尾那几行由 `git`（远端指向
+谁）与 `artifacts`（有没有声明不可发布）决定。**逐行求值，不要只遍历 kinds**——末尾
+那几行恰恰是安全相关的。
 
 **这张表算的是「该做哪几件事」，与项目是新是旧无关。** 已经进过 git、已经有远端、
 已经有文档的项目，同样按这张表走——区别只在每一步是「建立」还是「补齐」。具体见下面
@@ -393,7 +393,7 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 只校验不写入，`--status` 只看现状，`--upgrade` 升级手写文件，`--budget N` 覆盖注入预算） |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |
-| `assets/readme/` | README 里那两张图的 SVG 源文件（纯矢量，可直接改） |
+| `assets/readme/` | README 里那几组卡片的 SVG 源文件（中英成对，纯矢量，可直接改） |
 | `scripts/release-notes.mjs` | 写发布说明——`references/remote-github.md` 那条「非 ASCII 正文不经 shell」规则的落地工具 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示（`references/docs-set.md` 那条「只写能显示的」的落地工具） |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步（`AGENTS.md`「派生内容用工具同步」一节的落地工具） |

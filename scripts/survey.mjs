@@ -20,6 +20,10 @@ import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// 围栏扫描（代码块边界）只有一份实现，住在 sync-toc.mjs：本文件的二级标题读取与
+// 标记定位都要判「这一行是不是在代码块里」，各写一份状态机迟早给出两种答案。
+import { scanLines, fencedSpans } from './sync-toc.mjs'
+
 /**
  * 走目录时的目录规则。**一份表，两种投影**——之前分成「走查跳过哪些」与「哪些应当被
  * 忽略」两张清单，各自维护过一次，漂移出来的后果是两头都不落：`walk()` 整目录跳过的
@@ -767,6 +771,8 @@ function walk(root) {
     // **静默地不扫**是最坏的结果——报告里写着「递归、已排除依赖目录」，读起来像全扫过了。
     depthLimited: 0,
     depthLimitedPaths: [],
+    // 读不出来的目录（整棵子树没进勘察）。与 sourceScan 无关，所以挂在顶层。
+    unreadableDirs: [],
     // 生态兜底判定要用的证据：走查时顺手在**全树**里找源码与构建描述文件。
     // 只在顶层找是不够的——真实项目的代码几乎总在 src/、packages/、cmd/ 这类子目录下。
     sourceScan: {
@@ -775,6 +781,7 @@ function walk(root) {
       byBuildEntry: new Map(),       // 构建入口文件 → 路径（弱信号，不定生态）
       byNestedManifest: new Map(),   // 生态 → 子目录里的首个清单（monorepo 线索）
       nonDocSamples: [],             // 疑似「非文档」的文件（用于区分纯文档目录）
+      unrecognizedManifests: [],     // 根目录里「像清单但清单表里没有」的文件（新生态的线索）
     },
   }
   // inCountingArea 为假时表示正走在「像产物、但可能藏源码」的目录里：
@@ -791,8 +798,15 @@ function walk(root) {
     try {
       entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
     } catch {
+      // 读不出来的目录**必须计数**：跳过一个目录等于整棵子树没进勘察，而「跳过了」
+      // 与「里面没有东西」在报告里长得一样。文件读失败会计数，目录读失败同样要——
+      // 同一类问题两种待遇，先失效的永远是没计数的那一个。
+      result.unreadableDirs.push(dir.slice(root.length + 1) || '.')
       continue
     }
+    // 按码位排：遍历顺序会传到 `kinds` 的先后（各平台的 `readdirSync` 次序不同），
+    // 同一份输入在不同文件系统上给出不同顺序的报告是这个工具最不该有的性质。
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     for (const entry of entries) {
       if (result.totalFilesSeen > MAX_WALK_ENTRIES) { result.truncated = true; return result }
       result.totalFilesSeen += 1
@@ -874,13 +888,15 @@ const DOC_EXT_RE = /\.(md|markdown|rst|txt|adoc|asciidoc|org)$/i
 
 /**
  * README 及其语言变体：`README.md`、`README.en.md`、`README_CN.md`、`README.zh-CN.md`
- * 这几种写法都常见。
+ * 这几种写法都常见。**扩展名可以没有**：老项目、随发布附件分发的项目里
+ * 光秃秃一个 `README` 是常见写法，不认它就会去补一份 `README.md`，与已有的那份并排成
+ * 两份真相。
  *
  * **这一个正则同时管「收集文件」与「识别语言变体」**，不要再写第二个：两份规则表达
  * 同一件事时，先失效的永远是更窄的那个，而且失效得无声无息——收集用的那一份只认点
  * 分隔时，`README_CN.md` 连列表都进不去，语言识别写得再宽松也没用。
  */
-const README_RE = /^readme([._-][a-z]{2}(?:[._-][a-z]{2})?)?\.(md|markdown|rst|txt|adoc)$/i
+const README_RE = /^readme(?:[._-][a-z]{2}(?:[._-][a-z]{2})?)?(?:\.(?:md|markdown|rst|txt|adoc))?$/i
 
 /**
  * README 文件名判据（含语言变体）——**全仓只此一份**：preflight 的「顶层未登记条目」
@@ -897,13 +913,57 @@ function readmeLangOf(name) {
   return m === null ? undefined : m[1].toLowerCase()
 }
 
-/** 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。 */
+/**
+ * 内核标记与围栏感知的标记定位：**全仓只此一份**。
+ *
+ * 这条字面量三个脚本都要用（注入、自检、交付门禁），各写一份的后果比一般重复更重：
+ * 它们对不上时，注入方找不到标记区，要么静默不注入、要么把整块当新内容对待——而后者
+ * 会连用户写在标记之间的正文一起覆盖，且两边都不出声。它没有任何检查盯得住（检查本身
+ * 就是拿它去比的），所以只能让它只有一个来源。
+ *
+ * 定位实现也只有一个来源：本文件从 `sync-toc.mjs` 取围栏跨距，`markerPositions` 直接
+ * 复用它的那份判据。两处各写一遍「什么算围栏」迟早会给出两种答案。
+ */
+export const KERNEL_START = '<!-- project-forge:kernel:start -->'
+export const KERNEL_END = '<!-- project-forge:kernel:end -->'
+export { fencedSpans, scanLines }
+
+/**
+ * 会话上下文对工作区指令（`AGENTS.md`）的字节预算。
+ *
+ * 注入方按它截断、自检按它判红，所以**必须是同一个数**：各写一份时，扩容一处之后
+ * 两边按不同预算判断，而两边都会「绿」——注入的按新预算放行，自检的按旧预算说没问题。
+ */
+export const INSTRUCTION_BUDGET = 65536
+
+/** 某个标记在**围栏之外**的出现位置（升序）。文档里用代码块展示这对标记是正常写法。 */
+export function markerPositions(text, marker) {
+  const s = String(text ?? '')
+  const spans = fencedSpans(s)
+  const out = []
+  for (let i = s.indexOf(marker); i >= 0; i = s.indexOf(marker, i + marker.length)) {
+    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
+  }
+  return out
+}
+
+/**
+ * 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。
+ *
+ * **跳过围栏代码块**：README 的示例里出现 `## 用法` 是正常写法，而按行首匹配会把它算成
+ * 一个真实存在的节——报告于是多出一节，读的人照着它判断「README 已经写过这一节」。
+ * 围栏判据只有一处实现（`sync-toc.mjs` 的 `scanLines`），这里引用它。
+ */
 function markdownH2(filePath) {
   const text = readText(filePath)
   if (text === undefined) return []
-  return text.split('\n')
-    .filter((l) => /^##\s+\S/.test(l))
-    .map((l) => l.trim())
+  const out = []
+  for (const info of scanLines(text)) {
+    if (info.inFence || info.heading === null) continue
+    if (info.heading.level !== 2) continue
+    out.push(info.line.trim())
+  }
+  return out
 }
 
 /**
@@ -930,6 +990,33 @@ const MISC_FILE_RE = /^(license|licence|copying|notice|authors|contributors|chan
 const CONFIG_FILE_RE = /\.(ya?ml|toml|ini|cfg|conf|properties|editorconfig)$|^\.(prettierrc|eslintrc|babelrc|browserslistrc|nvmrc|tool-versions|gitattributes|gitignore|dockerignore|npmignore|env)$/i
 
 /**
+ * 「会自己声明项目身份的清单」这一类扩展名：`json / toml / yaml / mod / csproj` 这些
+ * 文件名几乎总在说「我是什么」。收得广一点是刻意的——**看不出来的东西留给读的人看**，
+ * 而漏掉一个真正的清单会让整个项目少认一块（那份 `metadata.source` 也补不回来）。
+ */
+const MANIFEST_SHAPED_RE = /\.(json|toml|ya?ml|mod|gradle|csproj|fsproj|vbproj)$/i
+/**
+ * 排除项：工具配置不声明「这个项目是什么」，它们只是每个项目都有的设置。
+ * 排的是**具体已知的文件名**，不是「凡是配置文件」——后者会把 `hedgehog.toml`
+ * 这类没见过的清单一起排掉，而那正是这一项要抓的东西。
+ */
+const CONFIGISH_NAME_RE = /^(tsconfig|jsconfig|deno|biome|eslint|prettier|stylelint|babel|browserslist|jest|vitest|playwright|cypress|rollup|vite|webpack|esbuild|tsup|swc|next|nuxt|svelte|astro|tailwind|postcss|uni|bunfig|renovate|dependabot|settings|launch|tasks|extensions|keybindings|typings|global)\b|^\./i
+
+/**
+ * 这个文件名像不像一份**认不出来的项目清单**。
+ *
+ * 为什么要判：**没认出来的清单是重要事实**。以前它连痕迹都不留，报告还会顺口说
+ * 「无清单文件」——于是新生态项目看起来和普通 JS 项目一模一样，AI 永远收不到
+ * 「这里有我不认识的东西」这个提示，也就不会去走「无专章的插件类怎么判」那条协议。
+ * 判不出来就照实说「这里有个我不认识的清单」，这比默认它不存在诚实。
+ */
+export function looksLikeManifest(name) {
+  const lower = String(name ?? '').toLowerCase()
+  if (CONFIGISH_NAME_RE.test(lower)) return false
+  return MANIFEST_SHAPED_RE.test(lower)
+}
+
+/**
  * 从单个文件名收集「这是什么项目」的形状证据。
  * 只在走查时调用一次，避免为了兜底判定再遍历一遍目录树。
  *
@@ -953,10 +1040,15 @@ function collectSourceEvidence(scan, name, rel, depth) {
     return
   }
   // 子目录里的清单：monorepo 的主要线索。根目录的清单由 detectEcosystem 直接处理，
-  // 走不到这里也不需要走。
+  // 走不到这里也不需要走。**根目录同样要在这里挡掉**——挡的是后面那条「认不出来的
+  // 清单」：`package.json` / `Cargo.toml` 这些是**认识的**清单，把它们也报成
+  // 「清单表里没有这一种」是一句错话，而错话比不报告坏得多。
   const manifest = MANIFEST_KINDS.find((m) => m.file === lower)
-  if (manifest !== undefined && depth > 0 && !scan.byNestedManifest.has(manifest.ecosystem)) {
-    scan.byNestedManifest.set(manifest.ecosystem, rel)
+  if (manifest !== undefined) {
+    if (depth > 0 && !scan.byNestedManifest.has(manifest.ecosystem)) {
+      scan.byNestedManifest.set(manifest.ecosystem, rel)
+    }
+    return
   }
   for (const [re, kind] of SOURCE_EXT_KINDS) {
     if (re.test(name)) {
@@ -964,7 +1056,14 @@ function collectSourceEvidence(scan, name, rel, depth) {
       return
     }
   }
-  if (DOC_EXT_RE.test(name) || CONFIG_FILE_RE.test(name) || MISC_FILE_RE.test(lower)) return
+  if (DOC_EXT_RE.test(name) || MISC_FILE_RE.test(lower) || README_RE.test(name)) return
+  // 不认识的清单（**只有根目录的才算**）：报出来，并让调用方知道「没认出来的清单在这儿」。
+  // 子目录里不算——`packages/*/` 下每一层都可能有一份，报出来只会是噪音。
+  if (looksLikeManifest(name)) {
+    if (depth === 0 && !scan.unrecognizedManifests.includes(rel)) scan.unrecognizedManifests.push(rel)
+    return
+  }
+  if (CONFIG_FILE_RE.test(name)) return
   if (scan.nonDocSamples.length < 5) scan.nonDocSamples.push(rel)
 }
 
@@ -1057,11 +1156,19 @@ function scanContents(root, candidates, realHomes) {
  * 不逐个 existsSync 试探的理由：大小写不敏感的文件系统（Windows、macOS 默认）上，
  * 试探 README.md 与 readme.md 会双双命中同一个文件，于是报出并不存在的「重复」。
  * 以真实目录项为准，就没有这个问题，顺便也更快。
+ *
+ * **顺序一律按码位排**：`readdirSync` 的次序由文件系统决定（同 NTFS、APFS、ext4 三者
+ * 各不相同），而这张表的插入顺序会一路传到 `kinds` 与报告里的先后——同一份输入在不同
+ * 平台上给出不同顺序的报告，正是这个工具最不该有的性质。`localeCompare` 不用：它随
+ * 系统语言变，等于把顺序换了一个主人。大小写敏感的系统上「只差大小写」的两个文件会
+ * 折叠成一条，那是这个表的设计（见上），保留先出现的那条并记下来即可，不必另作处理。
  */
 function listRoot(root) {
   const table = new Map()
   try {
-    for (const entry of readdirSync(root, { withFileTypes: true, encoding: 'utf8' })) {
+    const entries = readdirSync(root, { withFileTypes: true, encoding: 'utf8' })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const entry of entries) {
       if (entry.isSymbolicLink()) continue
       table.set(entry.name.toLowerCase(), {
         name: entry.name,
@@ -1187,13 +1294,14 @@ const BUILD_ENTRY_FILES = ['makefile', 'dockerfile']
  *   - `marker` 该清单必须出现的内容特征。普通 PWA 也有 `manifest.json`，所以那一项要
  *     额外要求正文里出现插件才用的字段。
  *
+ * **`version` 与 `requires` 里带 `table` 的，是 TOML 清单**：字段名只在那一张表下才算
+ * 声明（切法见 `manifestSection`）。同一份 TOML 里 `version` 会出现在依赖表下，那是依赖
+ * 的版本号，读成项目自己的就是一个假结论。JSON 清单没有表，不写这一列。
+ *
  * 表里**每一项都是子目录线索**：根目录只有一个 README、真正的清单在 `packages/`
  * 下面很常见，只看根目录会落到 unrecognized。根目录的那一份由生态判定直接读，
  * 不必也不该走这条路径，所以「出现在子目录」这一层由走查的层级判断，不在表里再开
  * 一列——开一列就得有人逐行决定，而这里的答案对每一行都一样。
- *
- * JSON 清单里结构化的字段（`package.json` 的 `engines`）不走这里的正则：那是解析对象，
- * 不是文本搜索，写成同一张表反而会让人以为两者等价。
  *
  * JSON 清单里结构化的字段（`package.json` 的 `engines`）不走这里的正则：那是解析对象，
  * 不是文本搜索，写成同一张表反而会让人以为两者等价。
@@ -1202,15 +1310,15 @@ const MANIFEST_KINDS = [
   { file: 'package.json', ecosystem: 'node', publishable: true,
     version: { re: /"version"\s*:\s*"([^"]+)"/, field: 'version' } },
   { file: 'pyproject.toml', ecosystem: 'python', publishable: true,
-    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version' },
-    requires: { re: /^\s*requires-python\s*=\s*["']([^"']+)["']/m, field: 'requires-python', runtime: 'python' } },
+    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version', table: '[project]' },
+    requires: { re: /^\s*requires-python\s*=\s*["']([^"']+)["']/m, field: 'requires-python', runtime: 'python', table: '[project]' } },
   { file: 'setup.py', ecosystem: 'python', publishable: true },
   { file: 'setup.cfg', ecosystem: 'python', publishable: true },
   { file: 'requirements.txt', ecosystem: 'python' },
   { file: 'pipfile', ecosystem: 'python' },
   { file: 'cargo.toml', ecosystem: 'rust', publishable: true,
-    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version' },
-    requires: { re: /^\s*rust-version\s*=\s*["']([^"']+)["']/m, field: 'rust-version', runtime: 'rust' } },
+    version: { re: /^\s*version\s*=\s*["']([^"']+)["']/m, field: 'version', table: '[package]' },
+    requires: { re: /^\s*rust-version\s*=\s*["']([^"']+)["']/m, field: 'rust-version', runtime: 'rust', table: '[package]' } },
   { file: 'go.mod', ecosystem: 'go', publishable: true,
     // Go 的版本不在清单里（靠标签声明），所以只读 `go` 指令给出的语言下限。
     requires: { re: /^go\s+(\S+)/m, field: 'go 指令', runtime: 'go' } },
@@ -1231,6 +1339,37 @@ const MANIFEST_KINDS = [
     // 同名文件是 PWA 的，不算插件——判据是下面那个字段，不是文件在不在。
     marker: /minAppVersion/ },
 ]
+
+/**
+ * 清单表里某一项的正文：TOML 先切出它声明的那张表，其余格式原样返回。
+ *
+ * 为什么必须切表：TOML 清单里 `version = "..."` 出现在好几张表下，而 `[dependencies]` 里
+ * 那些是**依赖的**版本号。用一条行首锚点的正则扫全文，会把依赖的版本读成项目自己的版本，
+ * 于是报告里出现一个项目从没声明过的版本，发布判据据此报「标签与版本号未对齐」——
+ * 现象是一条看起来很有据的假结论。实测两种写法都会中：Cargo 的
+ * `version.workspace = true` 配 `[dependencies.anyhow] version = "1.0.0"`、
+ * 以及 pyproject 的 `dynamic = ["version"]` 配 `[tool.poetry.group.dev.dependencies]`。
+ *
+ * 切法就是文本级的：从表头行到下一个表头行。不解析 TOML——这里要的是「这段文字里有没有
+ * 那个字段」，而表头本身是逐字可认的。取不到那张表时返回空串：**读不到就是没声明**，
+ * 不该退回全文再扫一遍（那正是上面那个错误结论的来源）。
+ */
+function manifestSection(text, table) {
+  if (table === undefined) return text
+  const lines = String(text ?? '').split('\n')
+  const head = table.toLowerCase()
+  const out = []
+  let inside = false
+  for (const line of lines) {
+    const m = /^\s*\[+([^\]]+)\]/.exec(line)
+    if (m !== null) {
+      inside = `[${m[1].trim().toLowerCase()}]` === head
+      continue
+    }
+    if (inside) out.push(line)
+  }
+  return out.join('\n')
+}
 
 /** 判定结果里用的名字：表里没单独声明 `kind` 时就是生态名。 */
 function manifestKind(m) {
@@ -1297,17 +1436,22 @@ function detectEcosystem(root, root_, walked) {
   // cmd/ 这类子目录下，顶层只有一个 README。只看顶层会把 `README.md + src/app.js`
   // 判成「纯文档目录」，而 docs-only 的发布列是「不做」——整条发布链路会被跳过。
   //
-  // 但它**只在什么都没认出来时**才用：扩展名是很弱的证据，而一旦已经认出这是 skill、
-  // 插件或某种清单型项目，再凭「目录里有个 .py 文件」追加一个生态，只会制造误判
-  // （例如把技能自带的 scripts/ 当成一个 Node 项目）。
-  if (kinds.length === 0) {
-    const scan = walked?.sourceScan
-    if (scan !== undefined) {
-      // 子目录里的清单是最强的线索（monorepo），排在构建描述文件与扩展名之前。
-      for (const [kind, sample] of scan.byNestedManifest) {
-        evidence.push(`${sample}（子目录里的清单，根目录没有）`)
-        kinds.push(kind)
-      }
+  // **子目录里的清单与其它两类不是一回事，所以分开**：
+  //   - 清单是**强证据**（与根目录那份同一个量级：它本来就声明了「这里有一个这种生态的
+  //     项目」），monorepo 里根目录有 package.json、`backend/` 下还有 pyproject.toml 是
+  //     常态。这道判断原先被 `kinds.length === 0` 挡在后面，于是「一个仓库里有多种生态
+  //     时逐项分别处理」那句话在真正的 monorepo 上不成立——子目录那一半整体消失。
+  //   - 构建描述文件与源码扩展名是**弱证据**：一旦已经认出这是 skill、插件或某种清单型
+  //     项目，再凭「目录里有个 .py 文件」追加一个生态只会制造误判（例如把技能自带的
+  //     scripts/ 当成一个 Node 项目）。所以这两类仍然只在什么都没认出来时才用。
+  const scan = walked?.sourceScan
+  if (scan !== undefined) {
+    for (const [kind, sample] of scan.byNestedManifest) {
+      if (kinds.includes(kind)) continue
+      evidence.push(`${sample}（子目录里的清单，根目录没有）`)
+      kinds.push(kind)
+    }
+    if (kinds.length === 0) {
       for (const [kind, sample] of scan.byBuildFile) {
         evidence.push(`${sample}（构建描述文件，无清单）`)
         kinds.push(kind)
@@ -1317,6 +1461,18 @@ function detectEcosystem(root, root_, walked) {
         kinds.push(kind)
       }
     }
+  }
+
+  // 根目录里「像清单但清单表不认识」的那些文件：**无论如何都报出来**。
+  //
+  // 它是这一份报告里唯一能指向「这是个新生态」的事实。不报的后果是：一个带
+  // `hedgehog.toml` 的新生态项目会被当成普通 JS 项目（`src/extension.ts` 让扩展名兜底
+  // 判成 node），AI 再也收不到「这里有我不认识的东西」，也就不会去走「无专章的插件类
+  // 怎么判」那条协议；而报告里原来那句「无清单文件」还是**假的**——根目录明明有。
+  const unknownManifests = scan?.unrecognizedManifests ?? []
+  if (unknownManifests.length > 0) {
+    evidence.push(`根目录有清单形状的文件但清单表里没有这一种：${unknownManifests.slice(0, 3).join('、')}`
+      + '（新生态的线索；在把它归成已知生态之前，先确认这是什么项目）')
   }
 
   // 仍然什么都没认出来，才按目录性质区分。
@@ -1329,8 +1485,9 @@ function detectEcosystem(root, root_, walked) {
     // 判据是「除文档外还有没有别的东西」。**只看源码与构建描述文件**，不要把
     // LICENSE、.gitignore、CI 配置这类每个项目都有的文件算成「别的东西」——那会把
     // 正常的纯文档目录误报成 unrecognized，反过来触发一次无谓的追问。
-    const nonDoc = walked?.sourceScan?.nonDocSamples ?? []
-    if (readmes.length > 0 && nonDoc.length === 0) {
+    const nonDoc = scan?.nonDocSamples ?? []
+    if (unknownManifests.length > 0) unique.push('unrecognized')
+    else if (readmes.length > 0 && nonDoc.length === 0) {
       unique.push('docs-only')
       evidence.push('仅见 Markdown 文档')
     } else if (nonDoc.length > 0) {
@@ -1361,8 +1518,13 @@ const COMMAND_KEYS = ['install', 'build', 'typecheck', 'lint', 'test', 'verify',
  */
 const FLAT_KEYS = new Set([...COMMAND_KEYS, 'packageManager'])
 
-/** 描述「某条命令从哪来」的键（`note` / 以 `Note` 结尾）：不是命令本身。 */
-function isNoteKey(key) {
+/**
+ * 描述「某条命令从哪来」的键（`note` / 以 `Note` 结尾）：不是命令本身。
+ *
+ * 导出给 compose-agents 用——同一份判据写在两处时，新增一种 `xxxNote` 只会在其中一处
+ * 生效，而现象是「命令段整块消失」或「多出一条根本不是命令的项」，两边都不会报错。
+ */
+export function isNoteKey(key) {
   return key === 'note' || key.endsWith('Note')
 }
 
@@ -1518,17 +1680,18 @@ function detectArtifacts(root, root_, eco, walked) {
     if (m.version === undefined && m.requires === undefined) continue
     const real = root_.real(m.file)
     if (real === undefined) continue
-    if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
-    const text = readText(join(root, real)) ?? ''
+    const raw = readText(join(root, real)) ?? ''
+    if (m.marker !== undefined && !m.marker.test(raw)) continue
+    // 每个字段各切一次它声明的那张表（JSON 清单没有表，原样返回）。
     if (m.version !== undefined && facts.declaredVersion === undefined) {
-      const hit = m.version.re.exec(text)
+      const hit = m.version.re.exec(manifestSection(raw, m.version.table))
       if (hit !== null) {
         facts.declaredVersion = hit[1]
         facts.declaredVersionIn = `${real} 的 ${m.version.field}`
       }
     }
     if (m.requires !== undefined) {
-      const hit = m.requires.re.exec(text)
+      const hit = m.requires.re.exec(manifestSection(raw, m.requires.table))
       if (hit !== null) {
         facts.runtimeRequirements.push({
           declaredIn: `${real} 的 ${m.requires.field}`, runtime: m.requires.runtime, range: hit[1],
@@ -2289,6 +2452,10 @@ function survey(target) {
         unreadable: scanned.stats.unreadable,
         notUtf8: scanned.stats.notUtf8,
         utf16Decoded: scanned.stats.utf16Decoded,
+        // 读不出来的**目录**：整棵子树都没进勘察。与 `unreadable`（文件）分开列，
+        // 因为处置不同——一个是「这个文件没扫」，一个是「这块地方整个没看」。
+        unreadableDirs: (walked.unreadableDirs ?? []).slice(0, 20),
+        unreadableDirCount: (walked.unreadableDirs ?? []).length,
         scope: '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除，UTF-16 已按 BOM 或 NUL 密度嗅探解码）',
       },
       largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
@@ -2612,6 +2779,11 @@ function toMarkdown(s) {
       L.push(`- **有 ${scan.depthLimited} 个子目录因嵌套过深未进入**`
         + `（超过 ${MAX_WALK_DEPTH} 层）——里面若放了凭据不会被发现。`
         + '确认那些目录不需要检查，或手工看一眼。')
+    }
+    if ((scan.unreadableDirCount ?? 0) > 0) {
+      L.push(`- **有 ${scan.unreadableDirCount} 个子目录读不出来（权限或锁定），整棵子树没进勘察**：`
+        + `${(scan.unreadableDirs ?? []).slice(0, 5).join('、')}`
+        + '——「没报」在这些目录里不等于「没有」。看一眼权限，或手工检查那几个目录。')
     }
   }
   const ibt = s.ignores?.ignoredButTracked

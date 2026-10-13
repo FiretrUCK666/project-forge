@@ -442,4 +442,4 @@ NuGet、pub.dev 都有可信发布。**Maven Central 有没有，上次没核到
 格式与用法见本文件的『专章的「事实来源」标记』一节；格式的权威定义在本 skill 自己仓库的
 自检实现里（`scripts/dev/preflight.mjs`，不进用户包），此处不复述。
 
-<!-- publish-verified: date=2026-09-25 -->
+<!-- publish-verified: date=2026-10-13 -->

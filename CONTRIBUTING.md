@@ -48,6 +48,9 @@ Issue，避免重复。
 这个项目**零依赖**，克隆下来就能改。需要 **Node.js 16 或更高**——脚本只用 Node 内置
 模块，没有第三方依赖，也不需要 Python 或任何其他运行时。
 
+一个例外：发布相关的两个脚本（`release-notes.mjs`、`check-badges.mjs`）用的是 Node 18
+才有的全局 `fetch`，跑它们要 Node 18 或更高。它们只在发版与核对徽章时用到。
+
 ```sh
 # 没有写权限（fork 者）：克隆自己账号下的那份
 git clone https://github.com/<你的用户名>/project-forge.git

@@ -1,45 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="420" viewBox="0 0 1200 420"
+     width="1200" height="460" viewBox="0 0 1200 460"
      role="img" aria-labelledby="pfInstallTitle pfInstallDesc">
   <title id="pfInstallTitle">两种装法</title>
-  <desc id="pfInstallDesc">左边是从发布页下载压缩包，三步装好、不需要 git，装上之后自己保持最新；右边是克隆仓库，适合要改它或者要跟着每次改动走的人，但它不会自动更新。</desc>
+  <desc id="pfInstallDesc">左边是从发布页下载压缩包：三步装好、不需要 git，装上之后自己保持最新；右边是克隆仓库，适合要改它或者要跟着每次改动走的人，但它不会自动更新。</desc>
 
-  <!-- 左侧那一条竖线把两种装法分开：它们的区别只有一条，就是会不会自己更新 -->
-  <rect width="1200" height="420" fill="#E9E8E4"/>
+  <!--
+    两列同一套栅格：留白左右 64，块间距 40，两列各占一半。
+    标题后面的「推荐」用 dx 紧跟标题，不写死坐标——写死的话中文一个值、英文另一个值，
+    改一个字就得重新量一遍。
+  -->
+  <rect width="1200" height="460" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <rect x="64" y="56" width="6" height="26" fill="#C2410C"/>
-    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">两种装法</text>
-    <text x="1136" y="78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <rect x="64" y="50" width="6" height="26" fill="#C2410C"/>
+    <text x="84" y="74" font-size="40" font-weight="700" fill="#17181A">两种装法</text>
+    <text x="1136" y="72" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">选一种就行</text>
   </g>
 
-  <line x1="64" y1="104" x2="1136" y2="104" stroke="#C6C4BF" stroke-width="1"/>
-  <line x1="590" y1="130" x2="590" y2="366" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="64" y1="100" x2="1136" y2="100" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="600" y1="124" x2="600" y2="404" stroke="#C6C4BF" stroke-width="1"/>
 
   <g id="download" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <text x="64" y="158" font-size="26" font-weight="700" fill="#17181A">下载压缩包</text>
-    <text x="420" y="158" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="17" fill="#C2410C" text-anchor="end">推荐</text>
+    <text x="64" y="146" font-size="26" font-weight="700" fill="#17181A">下载压缩包<tspan dx="14"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17"
+          font-weight="400" fill="#C2410C">推荐</tspan></text>
 
-    <text x="64" y="200" font-size="19" fill="#5D6064">1　点发布页上那个安装包，解压</text>
-    <text x="64" y="236" font-size="19" fill="#5D6064">2　放进你所用宿主的 skill 根</text>
-    <text x="64" y="272" font-size="19" fill="#5D6064">3　目录名保持 project-forge</text>
+    <text x="64" y="198" font-size="19" fill="#5D6064">1　点发布页上那个安装包，解压</text>
+    <text x="64" y="238" font-size="19" fill="#5D6064">2　放进你所用宿主的 skill 根</text>
+    <text x="64" y="278" font-size="19" fill="#5D6064">3　目录名保持 project-forge</text>
 
-    <text x="64" y="330" font-size="20" font-weight="700" fill="#17181A">装上之后自己保持最新</text>
-    <text x="64" y="358" font-size="18" fill="#5D6064">不需要 git，也不需要你管</text>
+    <text x="64" y="366" font-size="20" font-weight="700" fill="#17181A">装上之后自己保持最新</text>
+    <text x="64" y="398" font-size="18" fill="#5D6064">不需要 git，也不需要你管</text>
   </g>
 
   <g id="clone" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <text x="640" y="158" font-size="26" font-weight="700" fill="#17181A">克隆仓库</text>
+    <text x="640" y="146" font-size="26" font-weight="700" fill="#17181A">克隆仓库</text>
 
-    <text x="640" y="200" font-size="19" fill="#5D6064">要改这个 skill 本身，或者想</text>
-    <text x="640" y="228" font-size="19" fill="#5D6064">跟着每一次改动走时，用这条</text>
+    <text x="640" y="198" font-size="19" fill="#5D6064">要改这个 skill 本身，或者想</text>
+    <text x="640" y="238" font-size="19" fill="#5D6064">跟着每一次改动走时，用这条</text>
 
-    <text x="640" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="640" y="278" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="17" fill="#17181A">git clone &lt;仓库地址&gt;</text>
 
-    <text x="640" y="330" font-size="20" font-weight="700" fill="#17181A">它不会自动更新</text>
-    <text x="640" y="358" font-size="18" fill="#5D6064">目录里有 .git 就是这种；更新请自己 git pull</text>
+    <text x="640" y="366" font-size="20" font-weight="700" fill="#17181A">它不会自动更新</text>
+    <text x="640" y="398" font-size="18" fill="#5D6064">目录里有 .git 就是这种；更新请自己 git pull</text>
   </g>
 </svg>

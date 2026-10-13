@@ -34,8 +34,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers } from './survey.mjs'
-import { normVersion, parseMarkerKeys } from './survey.mjs'
+import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey,
+  KERNEL_START, KERNEL_END, INSTRUCTION_BUDGET } from './survey.mjs'
 // 围栏扫描只有一份实现，放在 sync-toc.mjs 并导出来：它要判的是同一件事
 // （这对标记是不是真在正文里），两边各写一份状态机就会给出不同答案。
 import { fencedSpans, markerPositions } from './sync-toc.mjs'
@@ -45,8 +45,8 @@ const SKILL_ROOT = resolve(HERE, '..')
 const KERNEL_PATH = join(SKILL_ROOT, 'templates', 'agents-kernel.md')
 const SKELETON_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
 
-const START = '<!-- project-forge:kernel:start -->'
-const END = '<!-- project-forge:kernel:end -->'
+const START = KERNEL_START
+const END = KERNEL_END
 /**
  * 「这份文件由本脚本生成」的标记。
  *
@@ -74,7 +74,7 @@ const MANAGED = '<!-- project-forge:managed -->'
  * 按缺陷判，升级后的文件永远红；按不判，P4 的「两个节数归零」就空转了。
  */
 const UPGRADED = '<!-- project-forge:upgraded -->'
-const DEFAULT_BUDGET = 65536
+const DEFAULT_BUDGET = INSTRUCTION_BUDGET
 
 function readUtf8(p) {
   return readFileSync(p, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -196,10 +196,6 @@ const COMMAND_LABELS = [
   ['smoke', '冒烟'],
 ]
 const COMMAND_KEYS = new Set(COMMAND_LABELS.map(([key]) => key))
-/** 描述「某条命令从哪来 / 有没有」的键：不是命令本身。 */
-function isNoteKey(key) {
-  return key === 'note' || key.endsWith('Note')
-}
 
 /**
  * 声明了依赖的文件（清单之外的那些）。判据是「存在即认为有依赖」。

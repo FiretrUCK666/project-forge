@@ -1,4 +1,5 @@
-# project-forge 发布自动化骨架：打标签即写发布说明，幂等，已存在则跳过。
+# project-forge 发布自动化骨架：打标签即写发布说明，写完回读比对，不一致即失败。
+# 注意：**不是「已存在就跳过」**——重跑会更新正文，发布页上有人工改写时不要重跑。
 #
 # 用法：复制到目标项目的 .github/workflows/release.yml，按 TODO 逐项替换后删掉本注释块。
 # 判据见 references/remote-github.md 第六节与 references/publish.md；机制不要改，只换取值。
@@ -102,13 +103,12 @@ jobs:
           # 读提交记录照样完整。
           ref: ${{ github.ref }}
           fetch-depth: 0
-      - name: 建 Release（幂等，已存在则跳过）  # TODO(2)
+      - name: 写 Release 正文（建或更新，写完回读比对）  # TODO(2)
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，跳过。"
-          else
-            <起草命令，把正文写进 notes.md>
-            gh release create "$TAG" --notes-file notes.md --title "$TAG" --verify-tag
-          fi
+          # **是「建或更新」，不是「已存在就跳过」**：补漏重跑时必须回填正文，跳过会让
+          # 那次发布永远只有一行标签名。代价是重跑会覆盖已有正文——发布页上有人工改写时
+          # 不要重跑。写完回读比对（不一致即失败），别改成只发不读。
+          <起草命令，把正文写进 notes.md>
+          node scripts/release-notes.mjs "$TAG" notes.md
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

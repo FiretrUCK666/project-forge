@@ -93,7 +93,10 @@ function makeHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
+    // 钉住 API 版本：不写这个头时 GitHub 按它自己的默认版本解析（实测今天仍是
+    // 2022-11-28），而默认值会随它推进而变——那时这个脚本的行为会跟着一起变，
+    // 且没有本地改动、没有提交可查。查法与核对日期见 references/remote-github.md。
+    'X-GitHub-Api-Version': '2026-03-10',
     'User-Agent': 'project-forge-release-notes',
     'Content-Type': 'application/json; charset=utf-8',
   }

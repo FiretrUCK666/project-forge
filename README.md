@@ -4,8 +4,8 @@
 
 [![stars](https://img.shields.io/github/stars/FiretrUCK666/project-forge)](https://github.com/FiretrUCK666/project-forge)
 [![license](https://img.shields.io/github/license/FiretrUCK666/project-forge)](LICENSE)
-[![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.md#环境要求)
-[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.md#环境要求)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.md#开始之前)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.md#开始之前)
 
 <p align="center">
   <img src="assets/readme/hero.svg" width="100%" alt="project-forge：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察脚本的一次真实输出">
@@ -23,13 +23,13 @@
 
 - [它做什么](#它做什么)
 - [它怎么工作](#它怎么工作)
+- [开始之前](#开始之前)
 - [安装](#安装)
 - [更新](#更新)
 - [使用](#使用)
 - [它不会做的事](#它不会做的事)
 - [里面有什么](#里面有什么)
 - [脚本](#脚本)
-- [环境要求](#环境要求)
 - [这个仓库自己是怎么配的](#这个仓库自己是怎么配的)
 - [遇到问题](#遇到问题)
 - [贡献](#贡献)
@@ -54,10 +54,23 @@
 
 ## 它怎么工作
 
-![project-forge 的工作链路：只读勘察、按事实判定、过硬门控、落盘推送发布](assets/readme/pipeline.svg)
-
+<p align="center">
+  <img src="assets/readme/pipeline.svg" width="100%" alt="project-forge 的工作链路：只读勘察、按事实判定、过硬门控、落盘推送发布">
+</p>
 四步的顺序不能反。判定依据是勘察出来的事实，不是预设的清单，所以它不会给纯文档目录配发布流程，
 也不会重建一个已经有远端的仓库。「不发布」和「跳过某件事」都是正常结果，不是失败。
+
+## 开始之前
+
+**Node.js 16 或更高**，不需要先装任何东西。日常用到的脚本都在这个下限上（持续集成跑
+Node 22，开发机跑 Node 24；16 到 21 没有逐版实测，遇到问题欢迎提 Issue）。
+
+唯一的例外是**发布相关的两个脚本**（`release-notes.mjs` 与 `check-badges.mjs`）：
+它们用的是 Node 18 才有的全局 `fetch`，跑它们需要 Node 18 或更高。它们只在维护这个
+skill 本身时才用得上，平时用它治理项目碰不到。
+
+`git` 可选：没有它，勘察与文档相关的功能照常，它会如实报告「git 不可用」；需要它的是
+版本管理的建立与维护、远端仓库、推送与发布这几件事。
 
 ## 安装
 
@@ -71,7 +84,9 @@
 
 解压到你的 skill 根，目录名保持 `project-forge`。就这一步。
 
-![两种装法对照：下载压缩包会自己保持最新；克隆仓库不会自动更新](assets/readme/install.svg)
+<p align="center">
+  <img src="assets/readme/install.svg" width="100%" alt="两种装法对照：下载压缩包会自己保持最新；克隆仓库不会自动更新">
+</p>
 
 **想改它，或者想跟着每一次改动走**，就用克隆：
 
@@ -82,9 +97,8 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 两种装法的区别只有一条：**克隆下来的那份不会自己更新**。目录里有 `.git` 说明它是拿来改的，
 工具对它只读。改法见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
-> **别下错东西。** 发布页上还有 GitHub 自动生成的 `Source code`，那是给开发者看的源码。
-> 安装包是 `project-forge.zip`。源码包里会多出 `.github`、`AGENTS.md` 这些文件，看到它们
-> 说明下错了，删掉重下即可。
+> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，里面的文件与安装包
+> 逐字相同，两个都能装，装上都会自己保持最新。安装包是专门为安装打的，推荐用它。
 
 ### 放在哪里
 
@@ -106,6 +120,9 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 ```sh
 node "<本领目录>/scripts/update.mjs" --check
 ```
+
+它去哪儿问新版，取决于那份副本自己记的地址（装的时候就在包里）。读不到时用内置的兜底地址，
+自建镜像或内网发布可以把兜底改掉：设一个环境变量 `PF_UPDATE_SOURCE`（只在副本没记地址时生效）。
 
 ## 使用
 
@@ -147,7 +164,11 @@ node "<本领目录>/scripts/update.mjs" --check
 | `references/docs-set.md` | 文档套装：各文档的读者是谁、职责、写法与同步纪律 |
 | `references/publish.md`、`references/publish-npm.md`、`references/publish-python.md`、`references/publish-go.md`、`references/publish-rust.md` | 发布总纲与各生态专章：能不能发、发到哪、版本号语义、安全发布、各种既有状态怎么接 |
 | `references/plugin-project.md`、`references/skill-project.md`、`references/plugins/` | 插件类与 skill 类项目的判定协议，以及各生态的专章 |
-| `templates/` | 可直接起步的骨架（`agents-project.md`、`readme.md`、`contributing.md`、`ci-check.yml`、`ci-release.yml`）与几份短许可证标准全文 |
+| `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
+| `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
+| `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
+| `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |
+| `templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt` | 两份 BSD 许可证的标准全文（二条款、三条款） |
 | `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实；也放全项目共用的文本判据 |
 | `scripts/zip.mjs` | 解开 zip 包：自更新要读得动下载回来的那份 |
@@ -195,19 +216,6 @@ node <本领目录>/scripts/dev/selftest.mjs
 ```
 
 `<本领目录>` 是这个 skill 所在的位置，`<项目目录>` 是你要处理的那个项目，两者通常不是同一个目录。
-
-## 环境要求
-
-**Node.js 16 或更高。** 这是全部要求，不需要先装任何东西。
-
-版本下限来自脚本用到的语言特性（ESM 的 `node:` 前缀导入、`String.prototype.replaceAll`、
-`fs.rmSync`），三者中要求最高的是 `replaceAll`。取 16 是因为它是覆盖全部特性的第一个长期支持版本。
-实际验证过的是 Node 22（持续集成每次推送都跑）与 Node 24（开发机）；16 到 21 属于按特性推导的
-可用区间，没有逐版实测，遇到问题欢迎提 Issue。
-
-`git` 可选：勘察照常工作（会如实报告「git 不可用」），文档相关的功能完全不受影响。需要它的是
-版本管理的建立与维护、远端仓库、推送与发布这几件事。没有 git 时它们做不了，勘察会明确告诉你，
-而不是假装成功。
 
 ## 这个仓库自己是怎么配的
 

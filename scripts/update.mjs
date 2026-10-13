@@ -50,14 +50,24 @@ import { get as httpGet } from 'node:http'
 import { get as httpsGet } from 'node:https'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readFileMap, repoPath, skillSource, skillVersion } from './survey.mjs'
+import { readFileMap, repoPath, skillSource, skillVersion, isMainModule } from './survey.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
+
+/**
+ * 这份代码自己的来处。
+ *
+ * 副本里记的来源（`SKILL.md` 的 `metadata.source`）才是首选——fork 出去自己发版的人写自己的
+ * 地址，就该更新他自己的。但**只靠那个字段是脆的**：宿主不认这个扩展字段、谁手删了一行、
+ * 或者有人把整份拷进另一个目录，副本就再也说不出自己在哪儿，更新于是静默失效。而这段代码
+ * 本身随包走，它写着的地址永远是「这套代码的产出者」，所以拿它兜底：两条都读不到才认输。
+ */
+const UPSTREAM = 'https://github.com/FiretrUCK666/project-forge'
 
 /** 更新成功后的静默期：这段时间里不再换文件，但照常比版本。 */
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -81,6 +91,9 @@ function usage() {
     '',
     '  --quiet   只在「真的更新了」时输出',
     '  --check   只报告不更新，也不受 24 小时窗口限制',
+    '',
+    '  来源：优先用副本自己记的那个（SKILL.md 的 metadata.source）；读不到时用兜底地址，',
+    '  可用环境变量 PF_UPDATE_SOURCE 改（自建镜像、内网发布用）——它只在副本没记来源时生效。',
     '',
   ].join('\n')
 }
@@ -294,6 +307,21 @@ function pruneEmptyDirs(dir) {
 }
 
 /**
+ * 这个路径落不落在本领目录之内。
+ *
+ * **下载来的东西不能决定写到哪儿。** 包里的条目名与文件地图里的清单都来自网络上的那一份，
+ * 而它们以前直接被拼成本机路径：`../victim/` 这样的名字会让删除与写入跑到 skill 目录之外，
+ * 把旁边的东西删掉或覆盖——那是这个工具能做的最坏的事，而且报告会把它说成「顺手清掉了
+ * 包里不该有的文件」。判据是**解析之后**的路径边界，不是字符串前缀（`startsWith` 在
+ * `…/project-forge-secret` 这类同前缀目录上会误判为「在之内」）。
+ */
+function insideSkill(target) {
+  const full = resolve(target)
+  if (full === SKILL_ROOT) return true
+  return full.startsWith(SKILL_ROOT.endsWith(sep) ? SKILL_ROOT : SKILL_ROOT + sep)
+}
+
+/**
  * 把一份包的内容写进本领目录，并清掉包里不该有的东西。
  *
  * 覆盖是**整份**的：先全部写进去，再删掉旧包里已经不存在、以及「仓库自用」那些文件。
@@ -304,14 +332,26 @@ function pruneEmptyDirs(dir) {
  * 顺带说明**什么不动**：使用者放在同一个目录里的其它文件（笔记、自己的临时文件）留着。
  * 覆盖的是「这个 skill 的文件」，不是把整个目录清空——顺手删掉别人的东西，比不更新坏。
  *
- * 顺序是「先写、后删」：写失败时目录还是原来那一份，不会剩下一半新一半旧。
+ * 顺序是「先写、后删」：写失败时目录还是原来那一份，不会剩下一半新一半旧。但它**不是
+ * 原子的**：写到一半被杀会留下半新半旧的一份（下一次运行会重修，所以危害有限，但那段时间
+ * 版本号在骗人）。做真原子要先解到临时目录再整体替换，代价与风险都更大，这里选择说清楚。
  */
 function applyPackage(entries) {
-  const map = readFileMap(skillText() ?? '')
+  // 判据取自**装进来这一份**的地图，而不是磁盘上旧那一份：
+  //   - 它才是「更新之后应该有什么」的定义，而清理问的正是那个问题；
+  //   - 旧副本的地图读不出来时（被改过、被截断、版本太老），按旧地图清理会**静默做半件事**
+  //     ——包照换、文件照写、报告照说「已更新」，而该清的一个都没清。那时包内这份地图
+  //     仍然在，于是这种情况从根上不发生。
+  const packSkill = entries.find((e) => e.name === 'SKILL.md')?.data.toString('utf8')
+    ?? skillText() ?? ''
+  const map = readFileMap(packSkill)
   const removed = []
+  const skipped = []
   const now = new Set(entries.map((e) => e.name))
   for (const e of entries) {
     const p = join(SKILL_ROOT, e.name)
+    // 越界条目一律不写、报出来：正常包里不会有这种名字，出现即说明这一份不是它自称的东西。
+    if (!insideSkill(p)) { skipped.push(e.name); continue }
     mkdirSync(dirname(p), { recursive: true })
     writeFileSync(p, e.data)
   }
@@ -319,6 +359,7 @@ function applyPackage(entries) {
   for (const name of map.shipped.filter((x) => !x.endsWith('/'))) {
     if (now.has(name)) continue
     const p = join(SKILL_ROOT, name)
+    if (!insideSkill(p)) { skipped.push(name); continue }
     if (existsSync(p) && statSync(p).isFile()) { rmSync(p); removed.push(name) }
   }
   // 仓库自用文件：包里本来就不该有。
@@ -343,17 +384,42 @@ function applyPackage(entries) {
       // 删不掉就**不报**：它不影响使用，为它让整次更新失败不值得，但也不能谎报。
     }
   }
+  // 表里带 `../` 这种名字的：不删不写，报出来。它只会出现在「这一份不是它自称的东西」时。
+  for (const name of map.repoOnly) {
+    if (!insideSkill(join(SKILL_ROOT, name))) skipped.push(name)
+  }
   // 空目录不再有用（新包里没有它），顺手收掉——只收空的，里面还有东西就留着。
   for (const entry of map.shipped) {
     if (!entry.endsWith('/')) continue
     const d = join(SKILL_ROOT, entry)
+    if (!insideSkill(d)) { skipped.push(entry); continue }
     try {
       if (existsSync(d) && statSync(d).isDirectory() && readdirSync(d).length === 0) remove(d)
     } catch {
       // 同上：空目录不影响使用。
     }
   }
-  return removed
+  // 两张表都空 = 地图没读出来（文件地图的小标题被改过、或包里的 SKILL.md 不是这个格式）。
+  // 这时清理**什么都没做**，而「什么都没做」与「确实没东西要清」必须分得开：前者要说出来，
+  // 否则使用者的副本里会一直留着 `.github/`、`AGENTS.md`，而报告说这次更新一切正常。
+  return {
+    removed,
+    skipped,
+    mapRead: map.shipped.length > 0 || map.repoOnly.length > 0,
+  }
+}
+/**
+ * 兜底来源可以被一个环境变量覆盖。
+ *
+ * 为什么要它：自建镜像、内网发布、以及**自动化测试**都需要「把来源指到别处」而不改包里的
+ * 任何文件。它只在**副本自己没记来源**时才起作用——`metadata.source` 是权威的，写了就用
+ * 它（fork 出去自己发版的人正是靠这一条更新他自己的）。
+ *
+ * 名字叫 `PF_UPDATE_SOURCE`（`PF` = project-forge）：一个进程级、不与任何宿主绑定的名字。
+ */
+function fallbackSource() {
+  const fromEnv = originUrl(process.env.PF_UPDATE_SOURCE)
+  return fromEnv ?? originUrl(UPSTREAM)
 }
 
 /** 来源地址得是个 http(s) 地址，才谈得上「去哪儿取新版」。 */
@@ -377,11 +443,11 @@ function reportSourceCopy(facts, { quiet }) {
 function reportUnverifiable(facts, { quiet }) {
   const tag = facts.version === undefined ? '（版本读不到）' : facts.version
   const missing = facts.source === undefined
-    ? '副本里没有记着自己是从哪儿来的（SKILL.md 的 metadata.source）'
-    : '本机读不到 git，也读不到这个副本的来源'
+    ? '这份副本没有记着自己是从哪儿来的（SKILL.md 的 metadata.source 没有或不成地址）'
+    : '这份副本读不到自己属于哪一版（SKILL.md 的 metadata.version）'
   report([
     `project-forge ${tag}：${missing}，无法自动核对新版（这不是「已是最新」）。`,
-    '  更新方式见 README 的「更新」一节（下载新版覆盖）。',
+    '  要更新就自己下载新版覆盖；写上一行 metadata.source（仓库地址）就能恢复自动核对。',
   ], { quiet })
   return 0
 }
@@ -403,7 +469,12 @@ async function main(argv) {
   // 源码副本：只读报告，到此为止。这条不联网，也就没有窗口的理由。
   if (facts.hasGit) return reportSourceCopy(facts, { quiet })
 
-  const source = originUrl(facts.source)
+  // 来源**先看副本自己记的那个**：fork 出去自己发版的人写了自己的地址，就该更新他自己的；
+  // 读不到或不成地址时退回兜底地址（`PF_UPDATE_SOURCE`，没设就是这段代码自己写着的那个）。
+  //
+  // 兜底那一支要的是**地址本身**，不是 `repoPath` 归一出来的 `owner/name`——后者是拿来
+  // 比对的形状，不含协议与主机，喂给下载函数会拼出一个非法 URL（现象是更新静默失效）。
+  const source = originUrl(facts.source) ?? fallbackSource()
   if (source === undefined || facts.version === undefined) return reportUnverifiable(facts, { quiet })
 
   const { lastUpdateAt } = readState()
@@ -474,8 +545,26 @@ async function main(argv) {
     return 1
   }
 
+  // ── 同源校验：**装进来的那一份必须就是刚才说要装的那一版** ─────────────────
+  //
+  // 比的是标签、装的是附件，而这两样来自平台上两个不同的地方：附件可以被人换、被旧的
+  // 缓存顶着、fork 沿用了同一个附件名。不核对时，真发生那种事的结果有两种，都很坏：
+  // 装进来的其实是旧版（**静默降级**，而报告说「已更新到最新版」），或者装进来的版本
+  // 与本地同号（白写一遍文件、还占掉 24 小时窗口）。所以：不一致就一个字节都不写，
+  // 把两个版本都报出来。
+  //
+  // 只在问到了标签时才比（退回取整包那条路上，版本就是从包里读的，没有第二个来源可比）。
+  if (probe.state === 'ok' && latest.version !== remote) {
+    report([
+      `project-forge ${tag}：最新发布是 ${remote}，但那个安装包里的却是 ${latest.version ?? '读不到版本'}`
+        + ' —— 两处对不上，这次**没有更新**，你这份还是原样。',
+      '  多半是附件被换过、或缓存顶着旧包。去发布页确认那一版的附件，或手工下载覆盖。',
+    ], { quiet, always: true })
+    return 1
+  }
+
   // ── 三：整份覆盖 ──────────────────────────────────────────────────────────
-  const removed = applyPackage(latest.entries)
+  const { removed, skipped, mapRead } = applyPackage(latest.entries)
   const after = localVersion()
   rememberUpdate()
   report([
@@ -484,8 +573,21 @@ async function main(argv) {
     removed.length > 0
       ? `  顺手清掉了 ${removed.length} 个包里不该有的文件（${removed.slice(0, 3).join('、')}${removed.length > 3 ? ' 等' : ''}）。`
       : undefined,
+    skipped.length > 0
+      ? `  有 ${skipped.length} 个条目指向本领目录之外，已跳过（${skipped.slice(0, 3).join('、')}）`
+        + ' —— 正常的包里不会有这种名字，这一份值得核对一下来源。'
+      : undefined,
+    mapRead ? undefined
+      : '  这份包里的文件地图读不出来，所以没有清理「包里不该有」的残留文件'
+        + '（`.github/`、`AGENTS.md` 一类会一直留着；下次更新若恢复正常，会自动清掉）。',
   ], { quiet, always: true })
   return 0
 }
 
-main(process.argv.slice(2)).then((code) => { process.exitCode = code })
+// 分成两块顺手带出一个可测性：文件被 import 时只交出常量，与它被当成脚本跑时一样的东西。
+// 自检就靠这个核对「兜底地址」与「静默期」没有另抄一份值。
+export { UPSTREAM, UPDATE_INTERVAL_MS }
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code })
+}

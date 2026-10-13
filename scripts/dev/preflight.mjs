@@ -38,7 +38,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoPath,
-  tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../survey.mjs'
+  tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion,
+  KERNEL_START, KERNEL_END, INSTRUCTION_BUDGET } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -52,8 +53,6 @@ const SKILL_ROOT = resolve(HERE, '..', '..')
  * 先把连续空白压成一个空格再比长度，所以下面那道检查也必须同一个算法，见使用处。
  */
 const CATALOG_DESCRIPTION_MAX = 500
-/** 会话上下文对工作区指令的字节预算。 */
-const INSTRUCTION_BUDGET = 65536
 /**
  * 本项目自己那份 `AGENTS.md` 的字节上限（45 KB）。
  *
@@ -65,8 +64,8 @@ const OWN_AGENTS_MAX_BYTES = 45 * 1024
 /** 余量告警线：离上限不足这么多字节时提醒一次（而不是天天喊）。 */
 const OWN_AGENTS_WARN_HEADROOM = 1024
 
-const KERNEL_START = '<!-- project-forge:kernel:start -->'
-const KERNEL_END = '<!-- project-forge:kernel:end -->'
+// 内核标记与字节预算都从 survey.mjs 取，本文件不再自己写一份：它们是「同一件事的
+// 同一个值」，抄一份就多一个要人记得同步的地方，而标记对不上的后果是覆盖用户正文。
 
 /**
  * 保鲜超期阈值（天）。超过这么多天没重核即警告。
@@ -923,6 +922,9 @@ function checkStatedCounts() {
     scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'scripts', 'dev'), 'scripts/dev/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
+    // templates/ 也要扫：它是「拿到包的人」最需要知道的一块（骨架与许可证全文），
+    // 而两张 README 表以前只用人眼数，`agents-kernel.md` 漏了很久没人发现。
+    scan(join(SKILL_ROOT, 'templates'), 'templates/', (e) => e.isFile())
     if (missing.length > 0) {
       fail(`${readme} 的文件表里没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
         + '读者照着它找东西，找不到就是找不到；补进表格行再提交（正文里提一句不算）。')
@@ -981,16 +983,12 @@ function checkStatedCounts() {
       }
     }
   }
-  // 常量一致性：两处预算必须相等；约定名 RELEASE_TOKEN 必须在模板与文档同拼写。
+  // 常量一致性：约定名 RELEASE_TOKEN 必须在模板与文档同拼写。
   // 改一处忘另一处是本类最常见的 drift，注释写“同步”不如机器断言。
+  //
+  // 字节预算**不在这里比对了**：它以前是 compose 与 preflight 各写一份，所以只能拿正则
+  // 读两处文本互比。现在两边都从 `survey.mjs` 取同一个导出，比对的对象已经不存在。
   {
-    const composeText = existsSync(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'))
-      ? readText(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs')) : ''
-    const budgetA = /DEFAULT_BUDGET\s*=\s*(\d+)/.exec(composeText)?.[1]
-    const budgetB = /INSTRUCTION_BUDGET\s*=\s*(\d+)/.exec(readText(join(SKILL_ROOT, 'scripts', 'dev', 'preflight.mjs')))?.[1]
-    if (budgetA !== undefined && budgetB !== undefined && budgetA !== budgetB) {
-      fail(`字节预算不一致：compose-agents.mjs 为 ${budgetA}，preflight.mjs 为 ${budgetB} —— 两处必须是同一数。`)
-    }
     // 约定名拼写：**扫定义域内全部文本文件**，只对出现过它的那些文件判一致性。
     // 维护文件白名单是这条检查最脆的地方：真正消费这个密钥的工作流漏在名单外时，
     // 把它改成另一种拼法自检一声不吭。判据落在「全仓拼写是否统一」上，

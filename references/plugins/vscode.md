@@ -115,4 +115,4 @@
 
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- vscode-verified: date=2026-09-25 -->
+<!-- vscode-verified: date=2026-10-13 -->

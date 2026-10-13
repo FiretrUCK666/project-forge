@@ -4,8 +4,8 @@
 
 [![stars](https://img.shields.io/github/stars/FiretrUCK666/project-forge)](https://github.com/FiretrUCK666/project-forge)
 [![license](https://img.shields.io/github/license/FiretrUCK666/project-forge)](LICENSE)
-[![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.en.md#requirements)
-[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.en.md#requirements)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.en.md#before-you-start)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.en.md#before-you-start)
 
 <p align="center">
   <img src="assets/readme/hero.en.svg" width="100%" alt="project-forge: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is real output from the survey script">
@@ -24,13 +24,13 @@ skill project: the decision always comes from the facts it surveyed.
 
 - [What it does](#what-it-does)
 - [How it works](#how-it-works)
+- [Before you start](#before-you-start)
 - [Install](#install)
 - [Update](#update)
 - [Usage](#usage)
 - [What it will not do](#what-it-will-not-do)
 - [What is inside](#what-is-inside)
 - [Scripts](#scripts)
-- [Requirements](#requirements)
 - [How this repository is set up](#how-this-repository-is-set-up)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -66,6 +66,20 @@ Four steps, and the order matters. The input is surveyed facts, not a preset che
 not bolt a release flow onto a docs-only directory and will not recreate a repo that already has a
 remote. "Not releasing" and "skipping something" are normal outcomes, not failures.
 
+## Before you start
+
+**Node.js 16 or newer**, and nothing to install first. Everything you use day to day runs at that
+floor (CI runs Node 22, the development machine runs Node 24; 16 through 21 has not been tested
+release by release, and reports of trouble there are welcome).
+
+The one exception is the **two release-related scripts** (`release-notes.mjs` and
+`check-badges.mjs`): they use the global `fetch`, which arrived in Node 18, so running them needs
+Node 18 or newer. They are only used when maintaining this skill itself.
+
+`git` is optional. Without it the survey and everything about documentation still work, and it
+reports "git unavailable" plainly. What needs git is setting up and maintaining version control,
+remote repositories, pushing and releasing.
+
 ## Install
 
 **Download the package.** No git needed:
@@ -93,10 +107,9 @@ The two differ in exactly one way: **a clone does not update itself**. A `.git` 
 copy is meant for editing, and the tool leaves it alone. How to work on it is in
 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
-> **Do not download the wrong thing.** The Releases page also offers GitHub's auto-generated
-> `Source code`, which is developer source. The package is `project-forge.zip`. A source download
-> contains extra files such as `.github` and `AGENTS.md`; if you see those, delete it and download
-> again.
+> **The `Source code` download works too.** It is GitHub's generated source archive, and it holds
+> exactly the same files as the package — both install, and both keep themselves current. The
+> package is built for the purpose, so prefer it.
 
 ### Where it goes
 
@@ -123,6 +136,10 @@ look at the state yourself (report only, no update):
 ```sh
 node "<skill directory>/scripts/update.mjs" --check
 ```
+
+Where it asks depends on the address that copy records for itself (it ships in the package). If that
+is missing it falls back to a built-in address, and a self-hosted mirror can change that fallback:
+set the `PF_UPDATE_SOURCE` environment variable (it applies only when the copy records no address).
 
 ## Usage
 
@@ -164,7 +181,11 @@ the project is in, what it plans to do, and why it is skipping the rest.
 | `references/docs-set.md` | Documentation set: who reads each document, its job, how to write it, how to keep them in sync |
 | `references/publish.md`, `references/publish-npm.md`, `references/publish-python.md`, `references/publish-go.md`, `references/publish-rust.md` | Release overview and per-ecosystem chapters: can it ship, where, version semantics, safe release, how to join an existing state |
 | `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
-| `templates/` | Ready-to-start skeletons (`agents-project.md`, `readme.md`, `contributing.md`, `ci-check.yml`, `ci-release.yml`) and the full text of several short licenses |
+| `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
+| `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
+| `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
+| `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |
+| `templates/license-bsd-2-clause.txt`, `templates/license-bsd-3-clause.txt` | Full standard text of the two BSD licenses (2-clause, 3-clause) |
 | `scripts/update.mjs` | Keeps this copy current (see Update) |
 | `scripts/survey.mjs` | Read-only survey producing structured facts; also holds the shared text criteria |
 | `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
@@ -213,21 +234,6 @@ node <skill directory>/scripts/dev/selftest.mjs
 
 `<skill directory>` is where this skill lives and `<project directory>` is the project you want it
 to work on. They are usually not the same directory.
-
-## Requirements
-
-**Node.js 16 or newer.** That is everything; nothing to install first.
-
-The lower bound comes from the language features the scripts use (ESM `node:` imports,
-`String.prototype.replaceAll`, `fs.rmSync`), and `replaceAll` is the highest of the three. 16 is the
-first long-term-support release that covers all of them. Verified on Node 22 (CI, every push) and
-Node 24 (development machine); 16 through 21 is a range derived from those features rather than
-tested release by release. Reports of trouble there are welcome.
-
-`git` is optional: the survey still works (it reports "git unavailable" plainly) and everything
-about documentation is unaffected. What needs git is setting up and maintaining version control,
-remote repositories, pushing and releasing. Without it those cannot be done, and the survey says so
-instead of pretending otherwise.
 
 ## How this repository is set up
 

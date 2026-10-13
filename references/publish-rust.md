@@ -140,4 +140,4 @@ crates.io 的前提与字段。
 
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- rust-verified: date=2026-09-25 -->
+<!-- rust-verified: date=2026-10-13 -->

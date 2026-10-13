@@ -68,7 +68,7 @@ TestPyPI（`test.pypi.org`）与正式 PyPI 账号、Token、存储完全隔离�
 
 | 方式 | 怎么工作 | 前提 |
 | --- | --- | --- |
-| 可信发布（OIDC） | CI 提交短期身份，PyPI 匹配受信配置后铸造一个**短时有效的**项目级 Token（有效期以官方该页当前写的分钟数为准） | 在 PyPI 上为该包建 pending publisher（包名、仓库、workflow 文件名逐字一致，另有 environment 名）；job 声明短时身份签发权限；构建与发布分 job（不支持在发布 job 内构建）；旧的长期 Token 删掉并吊销 |
+| 可信发布（OIDC） | CI 提交短期身份，PyPI 匹配受信配置后铸造一个**短时有效的**项目级 Token（有效期以官方该页当前写的分钟数为准） | 在 PyPI 上为该包建 pending publisher（包名、仓库、workflow 文件名逐字一致，另有 environment 名）；job 声明短时身份签发权限；构建与发布分 job（不支持在发布 job 内构建）；旧的长期 Token 删掉并吊销。**首版不需要先手工传一次**：pending publisher 在第一次发布时就把项目建出来——代价是那之前包名尚未归你，被别人先注册即作废 |
 | API Token | 长期有效的密钥 | 用户名固定填 `__token__`，口令填 Token；放 CI 机密存储或 `~/.pypirc`（该文件权限收紧）；[TestPyPI 与正式各用各的 Token |
 
 账号本身必须开双因素。**敏感操作**（加删协作者、删分发、建 Token、配双因素）**距上次确认
@@ -152,4 +152,4 @@ PyPI 不支持私有包。只给内部用时自建索引服务，发布目标与
 
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- python-verified: date=2026-09-25 -->
+<!-- python-verified: date=2026-10-13 -->

@@ -25,6 +25,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers, isMainModule } from './survey.mjs'
+import { markerPositions } from './sync-toc.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -135,12 +136,24 @@ function splitTri(list, bit) {
  * 注入的内核由 `templates/agents-kernel.md` 独占，它自带「远端」「发布」「版本」这些词。
  * 判「这份契约有没有写清远端与发版」时若按全文判，内核会替作者答上来，判据于是恒真。
  * 没有结束标记时（手写文件）返回全文——那时没有内核可依赖，全文就是作者的部分。
+ *
+ * **位置要按围栏之外的那一个算**：在文档里用代码块展示这对标记是正常写法，而两个
+ * 朴素写法都错——`indexOf` 会命中展示用的那份，于是「内核之外」变成「内核正文」，
+ * 内核里的「远端」「发布」把这条判据顶成恒真；`includes` 则会把「展示过标记」读成
+ * 「有内核」。位置判定只有一处实现（`sync-toc.mjs` 的 `markerPositions`），这里引用它。
  */
 export function outsideKernel(text) {
   const s = String(text ?? '')
-  const at = s.indexOf(KERNEL_END)
-  if (at < 0) return s
+  const ends = markerPositions(s, KERNEL_END)
+  if (ends.length === 0) return s
+  const at = ends[ends.length - 1]
   return s.slice(at + KERNEL_END.length)
+}
+
+/** 这份契约有没有内核（只看围栏之外的那一对标记）。 */
+function hasKernel(text) {
+  const s = String(text ?? '')
+  return markerPositions(s, KERNEL_START).length > 0 && markerPositions(s, KERNEL_END).length > 0
 }
 
 /**
@@ -214,7 +227,7 @@ function main(argv) {
     // 若两处各写一份扫描（一个逐行、一个整篇），同一份文件在多行标记下会得到
     // 两个互相矛盾的结论——所以数法必须共用这一份。
     const authors = authorMarkers(agents).length
-    const kernel = agents.includes(KERNEL_START) && agents.includes(KERNEL_END)
+    const kernel = hasKernel(agents)
     if (!kernel) {
       missing.push('AGENTS.md 缺少内核标记（跑 compose-agents 生成或升级）')
     } else if (authors > 0) {

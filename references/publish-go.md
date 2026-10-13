@@ -86,4 +86,4 @@ git push origin v0.1.0
 
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- go-verified: date=2026-09-25 -->
+<!-- go-verified: date=2026-10-13 -->

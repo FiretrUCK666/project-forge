@@ -7,52 +7,64 @@
 [![Node](https://img.shields.io/badge/Node-%E2%89%A516-339933)](README.en.md#requirements)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.en.md#requirements)
 
-Forge any project directory into a well-formed project: version control, remote repository, documentation set, and release channel, all in one pass.
+<p align="center">
+  <img src="assets/readme/hero.en.svg" width="100%" alt="project-forge: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is real output from the survey script">
+</p>
 
-Give it a directory. It first surveys read-only to see what the project currently is, then decides on its own what to do and what to skip. It assumes no stack — Node, Python, Rust, Go, Java, docs-only directories, plugin projects, and skill projects are all judged from surveyed facts.
+Turn any project directory into a well-formed project. Give it a directory and it surveys
+read-only first, sees what the project actually is, then decides what to do this time and what
+to leave alone.
 
-![project-forge: give it a project directory; it surveys read-only first, then decides from facts what to do. The image also lists the four things it does — version control, docs, remote, release — and the package layout](assets/readme/hero.svg)
+It assumes no stack. Node, Python, Rust, Go, Java, a docs-only directory, a plugin project, or a
+skill project: the decision always comes from the facts it surveyed.
 
 ## Contents
 
 <!-- toc:start -->
 
-- [What problem it solves](#what-problem-it-solves)
+- [What it does](#what-it-does)
 - [How it works](#how-it-works)
 - [Install](#install)
 - [Update](#update)
-- [Update](#update-1)
 - [Usage](#usage)
 - [What it will not do](#what-it-will-not-do)
 - [What is inside](#what-is-inside)
 - [Scripts](#scripts)
-- [Design principles](#design-principles)
 - [Requirements](#requirements)
-- [How this repo itself is set up](#how-this-repo-itself-is-set-up)
+- [How this repository is set up](#how-this-repository-is-set-up)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
 
 <!-- toc:end -->
 
-## What problem it solves
+## What it does
 
-There is a pile of small but error-prone chores between "it runs" and "it looks like a real project": ignore rules, whether build outputs belong in the repo, commit identity, whether the README promises things that actually hold, whether the release flow could leak a secret. Each one is easy; together they are many, and **mistakes often surface long after they are made**.
+Between "it runs" and "it looks like a real project" sits a pile of small, error-prone chores:
+whether the ignore rules are right, whether build output belongs in the repo, whether commit
+identity is set, whether the README promises things that hold, whether the release flow could
+leak a secret. None of them is hard. Together they are many, and mistakes surface long after
+they are made.
 
-project-forge converges them into one flow and writes down the rationale — so it knows not just "what to do", but "why" and "when not to".
+project-forge brings them into one flow:
+
+- **Version control**: ignore rules, text attributes, commit identity, commit discipline, secret scan;
+- **Documentation set**: `AGENTS.md`, `README`, `CONTRIBUTING`, `LICENSE` — each with its own reader, none repeating another;
+- **Remote repository**: create (private by default), push, metadata, collaboration templates, CI;
+- **Release channel**: whether it can ship, where to, how versions are numbered, how to ship safely.
+
+It only governs. It does not create the project itself: it picks no stack and writes no source or
+framework config. Governance runs after the skeleton exists.
 
 ## How it works
 
-Four steps, and the order matters:
+<p align="center">
+  <img src="assets/readme/pipeline.en.svg" width="100%" alt="project-forge's chain: survey read-only, decide from facts, pass the hard gates, then write, push and release">
+</p>
 
-1. **Survey** (read-only). Read the project's manifest files, directory layout, version-control config, and existing docs, and produce facts. Nothing is written in this step — decisions rest on facts, not on guesses;
-2. **Decide.** Feed the facts through the capability matrix, work out what to do this time and what to skip, and tell you the conclusion;
-3. **Gate.** Before touching anything you must read the matching criteria: creating a repo, writing docs, and releasing each have their own threshold. Skipping a gate means working from guesswork;
-4. **Write.** Write files, create the remote, push, release — then read back to confirm.
-
-![project-forge's chain: read-only survey, decide from facts, pass the hard gates, write and release](assets/readme/pipeline.svg)
-
-The input is **surveyed facts**, not a preset checklist. So it will not bolt a release flow onto a docs-only directory, and it will not recreate a repo that already has a remote — "not releasing" and "skipping something" are normal outcomes, not failures.
+Four steps, and the order matters. The input is surveyed facts, not a preset checklist, so it will
+not bolt a release flow onto a docs-only directory and will not recreate a repo that already has a
+remote. "Not releasing" and "skipping something" are normal outcomes, not failures.
 
 ## Install
 
@@ -60,247 +72,180 @@ The input is **surveyed facts**, not a preset checklist. So it will not bolt a r
 
 <p align="center">
   <a href="https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip">
-    <b>Download the latest version (the download starts right away)</b>
+    <b>Download the latest version</b>
   </a>
 </p>
 
-Unzip it into your skill root and keep the folder named `project-forge`. That is the whole install.
+Unzip it into your skill directory and keep the folder named `project-forge`. That is the whole
+install.
 
-> **Do not download the wrong thing.** The Releases page also offers GitHub's auto-generated
-> `Source code`, which is the developer source. The package is `project-forge.zip`, and the link
-> above always gives you that one. A source download contains `.github`, `AGENTS.md` and
-> `CONTRIBUTING.md` — if you see those, you got the source; delete it and download again.
-> Nothing is wrong with your machine.
+<p align="center">
+  <img src="assets/readme/install.en.svg" width="100%" alt="Two ways to install: the downloaded package keeps itself current; a clone does not update itself">
+</p>
 
-**To modify it, or to follow every change**, clone instead:
+**To change it, or to follow every commit**, clone instead:
 
 ```sh
-git clone https://github.com/FiretrUCK666/project-forge.git "<your skill root>/project-forge"
+git clone https://github.com/FiretrUCK666/project-forge.git "<your skill directory>/project-forge"
 ```
 
-The only difference between the two: **a clone never updates itself.** It carries `.git`, so it is
-a source copy — something you edit. The tool treats it as read-only; run `git pull` yourself when
-you want the newer version. Having your files swapped while you are editing them is far worse than
-not being updated. See [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
+The two differ in exactly one way: **a clone does not update itself**. A `.git` folder means that
+copy is meant for editing, and the tool leaves it alone. How to work on it is in
+[CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
+
+> **Do not download the wrong thing.** The Releases page also offers GitHub's auto-generated
+> `Source code`, which is developer source. The package is `project-forge.zip`. A source download
+> contains extra files such as `.github` and `AGENTS.md`; if you see those, delete it and download
+> again.
 
 ### Where it goes
 
-Put it in **your host's user-level skill root**:
+Put it in **your host's user-level skill directory**. If you already have other skills, put it
+where they live; if you have none, check that host's documentation. Keep the folder named
+`project-forge` — it has to match the `name` field in the `SKILL.md` frontmatter. On
+case-sensitive systems, a different case is a different directory.
 
-- **You already have other skills** → put it where they live. That is the most reliable answer, and
-  you do not have to remember any path.
-- **You have none** → check that host's documentation; the location is written there.
-
-Keep the folder named `project-forge` — it must match `name` in `SKILL.md`'s frontmatter.
-**Watch the case**: on a case-sensitive system, a different case is a different folder.
-
-No registration and no restart: hosts discover skills by directory, and `SKILL.md` is the entry.
+Nothing to register and no restart: hosts discover skills by directory, and `SKILL.md` is the entry.
 
 ## Update
 
-**The downloaded copy updates itself.** At the start of every task it runs:
+<p align="center">
+  <img src="assets/readme/update.en.svg" width="100%" alt="How it stays current: one version check per use, a full replacement when there is a newer version, and at most one file replacement per copy every 24 hours">
+</p>
 
-```sh
-node "<skill directory>/scripts/update.mjs" --quiet
-```
+The downloaded copy keeps itself current. You do nothing. On each use it quietly compares version
+numbers: same version and it stops there changing nothing, newer version and it swaps in the whole
+copy, telling you which version it moved from and to.
 
-It does three things: downloads the latest package from the Releases page; **checks whether this
-copy is still the one that was released** (file by file); and if it matches, replaces it — if it
-does not, it touches nothing and tells you what differs.
-
-The test is **whether this copy holds anything of yours**, not where it is installed: change one
-byte and it stays away. So it never overwrites your work. It checks at most once every 24 hours,
-and copies on the same machine decide for themselves.
-
-To look at the state yourself (report only, no update):
+A copy replaces its files at most once every 24 hours, so it cannot flip several times a day. To
+look at the state yourself (report only, no update):
 
 ```sh
 node "<skill directory>/scripts/update.mjs" --check
 ```
-
-**A clone never updates itself**: a directory with `.git` is a source copy, the tool is read-only
-towards it, and you update it with `git pull`.
-## Update
-
-**A cloned copy keeps itself current.** At the start of every task it runs this first:
-
-```sh
-node "<skill directory>/scripts/update.mjs" --quiet
-```
-
-It checks upstream for a new version and fast-forwards if there is one. The test is **whether this copy has local work**: uncommitted changes, unpushed commits, or not being on a branch all mean it leaves the copy alone. So it never overwrites your edits, and it never merges upstream into a contributor's branch. It checks at most once every 24 hours, and separate copies on the same machine check separately.
-
-To look at the state yourself (reports only, changes nothing):
-
-```sh
-node "<skill directory>/scripts/update.mjs" --check
-```
-
-**A zip install does not update itself** — download the new version from [Releases](https://github.com/FiretrUCK666/project-forge/releases) and overwrite.
-
-**Is upgrading safe**: `SKILL.md`, `references/`, `templates/`, and `scripts/` are plain text plus zero-dependency scripts — nothing to recompile or migrate. If you modified it as described in [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md), the update script sees the local changes and skips, so it will not fight your work.
 
 ## Usage
 
-Just describe your need in natural language. Trigger phrases include:
+Just describe what you want, in plain language:
 
-- Version control: `set up version control`, `set up git`, `push to a repo`, `create a repo`, `push to GitHub`
-- Docs: `write AGENTS.md`, `write README`, `set up LICENSE`, `write contributing guide`
-- Release: `publish to npm`, `release`, `set up CI`
-- General: `initialize a project`, `start a project`, `new project setup`, `standardize the project`, `normalize the project`, `tidy up the project`, `get the project sorted`
-
-For example:
+- Version control: `set up version control`, `configure git`, `push to GitHub`
+- Documentation: `write AGENTS.md`, `write a README`, `add a LICENSE`, `write a contributing guide`
+- Release: `publish to npm`, `release it`, `add CI`
+- General: `initialize this project`, `set this project up`, `standardize this repo`
 
 ```
-Help me normalize this project
-Set up version control and docs for <project directory>
-Should this project be published to npm
+clean up this project
+set up version control and docs for D:\work\my-tool
+should this project be published to npm?
 ```
 
-It never starts by writing. The first step is always a survey, then it tells you: what state this project is in, what it is going to do, and **why it skips the rest**.
+It never starts by writing. The first step is always the survey, and then it tells you what state
+the project is in, what it plans to do, and why it is skipping the rest.
 
 ## What it will not do
 
-- It does not create the project itself: no stack selection, no project skeleton (source, entry files, framework configs) — that is scaffolding's job; this skill governs, and governing runs after the skeleton exists;
-- It does not touch your code logic — only version control, remotes, docs, and releases;
-- It does not pick a license for you — only criteria and options;
-- It never makes a repository public on its own (private by default; public needs your explicit nod);
-- No force pushes, no rewriting pushed history, no deleting released versions;
-- No deployment or server configuration.
+- Create the project itself: it picks no stack and writes no skeleton — that is a scaffolder's job;
+- Touch your code logic; it handles version control, remotes, docs and releases only;
+- Choose a license for you — it gives criteria and options;
+- Make a repository public on its own (private by default);
+- Force-push, rewrite pushed history, or delete a published release;
+- Deploy or configure servers.
 
 ## What is inside
 
 ### In the package
 
-This is what you get from a clone, or from the zip on the Releases page:
-
 | Path | Contents |
 | --- | --- |
-| `SKILL.md` | Entry: hard invariants, capability matrix, execution flow, hard gates |
-| `references/survey.md` | Survey protocol: what to read, what each field means, how facts translate into actions |
-| `references/version-control.md` | Version control end to end: artifact criteria, ignore rules, identity, commit discipline, rollback tiers, secret gate |
-| `references/remote-github.md` | Remote repos: channel discovery, creation, push, metadata, version nodes and release notes, collaboration templates, CI |
-| `references/docs-set.md` | Doc set: who reads each doc, responsibilities, writing and sync discipline |
-| `references/publish.md` | Release overview: whether to release, where, version semantics, when to bump |
-| `references/publish-npm.md` | npm chapter: basics, how to pick up each existing state, scope and common misunderstandings |
-| `references/publish-python.md` | Python chapter: the three metadata tables, build and dry run, test index, trusted publishing, versions and fixes |
-| `references/publish-go.md` | Go chapter: tag shape, no-upload model, indexing confirmation, retraction, private modules |
-| `references/publish-rust.md` | Rust chapter: manifest fields, publish scope, dry run, authentication, fixes |
-| `references/plugin-project.md` | Plugin projects: shared traits, decision protocol, what to do without a dedicated chapter and growth rules |
-| `references/skill-project.md` | Capability-directory projects: the host loads instructions rather than code, so none of the six questions shares an answer with plugin projects; includes the host-chapter index |
-| `references/plugins/` | Per-ecosystem plugin chapters (one file each) |
-| `templates/` | Doc skeletons ready to start from, plus standard texts of short licenses |
-| `scripts/update.mjs` | Keep this copy current (see Update) |
-| `scripts/survey.mjs` | Read-only survey, outputs structured facts; also holds text predicates shared across the project |
-| `scripts/zip.mjs` | Read zip archives: the updater uses it to check whether this copy is still the released one |
-| `scripts/compose-agents.mjs` | Generate, refresh, or upgrade `AGENTS.md`: fill from project facts, keep/drop conditional sections by facts, report sections still needing a human |
-| `scripts/review.mjs` | P4/P5 delivery gate: no missing items, open questions resolved via flags before done |
-| `scripts/release-notes.mjs` | Write release notes from a UTF-8 file (non-ASCII never goes through the shell, read back and compare) |
-| `scripts/draft-release-notes.mjs` | Draft release notes from the commit log (the platform's generator only produces an English template) |
-| `scripts/check-badges.mjs` | Check whether README badges actually render (GitHub badges on private repos do not) |
-| `scripts/sync-toc.mjs` | Keep a Markdown TOC in sync with headings (generated from headings, GitHub anchor algorithm) |
-| `README.md`, `README.en.md` | This document, in two languages; the Chinese one is authoritative |
-| `LICENSE` | Full license text |
-| `assets/readme/` | The two images above, as plain SVG you can edit |
+| `SKILL.md` | Entry point: hard invariants, capability matrix, execution flow, hard gates |
+| `references/survey.md` | Survey protocol: what to read, what each field means, how facts turn into actions |
+| `references/version-control.md` | Version control: what belongs in the repo, ignore rules, identity, commit discipline, rollback tiers, secret gating |
+| `references/remote-github.md` | Remote repository: channel discovery, creating, pushing, metadata, version nodes and release notes, collaboration templates, CI |
+| `references/docs-set.md` | Documentation set: who reads each document, its job, how to write it, how to keep them in sync |
+| `references/publish.md`, `references/publish-npm.md`, `references/publish-python.md`, `references/publish-go.md`, `references/publish-rust.md` | Release overview and per-ecosystem chapters: can it ship, where, version semantics, safe release, how to join an existing state |
+| `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
+| `templates/` | Ready-to-start skeletons (`agents-project.md`, `readme.md`, `contributing.md`, `ci-check.yml`, `ci-release.yml`) and the full text of several short licenses |
+| `scripts/update.mjs` | Keeps this copy current (see Update) |
+| `scripts/survey.mjs` | Read-only survey producing structured facts; also holds the shared text criteria |
+| `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
+| `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
+| `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
+| `scripts/release-notes.mjs`, `scripts/draft-release-notes.mjs` | Writes release notes from a UTF-8 file so Chinese never passes through a shell; and drafts them from the commit log |
+| `scripts/check-badges.mjs` | Checks that the README badges actually render |
+| `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |
+| `README.md`, `README.en.md`, `LICENSE`, `assets/readme/` | This documentation (paired, Chinese is authoritative), the license text, and the cards used in the README |
 
 ### Only in the repo
 
-These **do not ship in the zip**: they serve this repository itself, and whoever gets the package neither needs them nor should be distracted by them. If you want to change this skill, start at [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
+These never enter the package. To work on this skill, start with
+[CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
 | Path | Contents |
 | --- | --- |
-| `AGENTS.md` | This repo's own contract: mechanisms, invariants, build and verification, hard rules |
-| `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, pre-commit gates |
+| `AGENTS.md` | This repository's own contract: mechanisms, invariants, build and verification, hard rules |
+| `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, the gate before committing |
 | `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
-| `scripts/dev/preflight.mjs` | Structural self-check when maintaining this skill: reference integrity, kernel consistency, hard rules, package boundary |
-| `scripts/dev/selftest.mjs` | Behavioral self-test when maintaining this skill: build fixtures, run for real, assert each decision |
+| `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
+| `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |
+| `scripts/dev/selftest.mjs` | Behavioural self-check: builds fixtures, runs them, asserts each decision |
+| `scripts/dev/render-svg.mjs` | Renders the README cards and measures their margins; use it to accept a card change |
 
 ## Scripts
 
-All scripts use only the runtime's built-in modules — **zero dependencies**, cross-platform.
+Every script uses only built-in modules: no dependencies, cross-platform.
 
 ```sh
-# Keep this copy current (--check reports only, changes nothing)
+# Keep this copy current (--check reports without updating)
 node <skill directory>/scripts/update.mjs --quiet
 
 # Survey a project (read-only, writes nothing)
 node <skill directory>/scripts/survey.mjs <project directory> --markdown
 
-# Generate, refresh, or upgrade a project's AGENTS.md
+# Generate, refresh or upgrade a project's AGENTS.md
 node <skill directory>/scripts/compose-agents.mjs <project directory>
-node <skill directory>/scripts/compose-agents.mjs <project directory> --check     # verify only; exit 1 on mismatch
-node <skill directory>/scripts/compose-agents.mjs <project directory> --status    # inspect only, write nothing
-node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written file to the standard structure
+node <skill directory>/scripts/compose-agents.mjs <project directory> --status    # look, do not write
+node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written one
 
-# Self-check this skill itself (only when changing it; these two exist in the repo only, not in the zip)
+# Self-checks for this skill (run only when changing it)
 node <skill directory>/scripts/dev/preflight.mjs
 node <skill directory>/scripts/dev/selftest.mjs
 ```
 
-`<skill directory>` is where this skill lives, `<project directory>` is the project you want to work on — usually not the same directory. All paths are passed explicitly, so the working directory does not matter.
-
-`survey.mjs` only answers "what did it read", not "what should be done" — the criteria live in `references/`.
-That split is deliberate: facts do not vary by project type, criteria do.
-
-## Design principles
-
-A few principles run through the whole skill, and they are also the bar for "should this practice be added":
-
-**Read-only first.** No files are written before the survey finishes. Applying the same steps to every project is guaranteed to do the wrong thing — a release flow for a docs-only directory is busywork, recreating a repo for a project that already has a remote is destruction.
-
-**Give criteria, not checklists.** Checklists rot (files added/renamed, tools renamed); criteria do not. Wherever something can be written as "how to decide", it is not written as "copy this".
-
-**Write intent, not snapshots.** Version numbers, dates, and one-off decisions do not go into docs — they start rotting the day they are written.
-Wherever a value is needed, write "where to read it from".
-
-**Different readers, different writing.** Docs for AI (`AGENTS.md`) carry mechanisms and criteria, and tell it where to read concrete values; docs for humans (`README`, `CONTRIBUTING`) carry concrete copy-pasteable commands.
-The same thing is supposed to look different in the two kinds of docs.
-
-**Idempotent, never overwrite.** Every step gives the same result when repeated; existing files are read first and merged, and conflicting content is reported and left alone, never silently picked.
+`<skill directory>` is where this skill lives and `<project directory>` is the project you want it
+to work on. They are usually not the same directory.
 
 ## Requirements
 
-### Runtime
+**Node.js 16 or newer.** That is everything; nothing to install first.
 
-**Node.js 16 or later.** That is the only requirement — all scripts use only Node built-in modules (`node:fs`,
-`node:path`, `node:url`, `node:os`, `node:child_process`, `node:crypto`), with **no third-party dependencies**,
-nothing to install first. Among the scripts that go online, the ones that fetch pages or call APIs need Node 18's global `fetch`
-and fail loudly there instead of silently; the self-update check goes through `git`, so this does not apply to it.
+The lower bound comes from the language features the scripts use (ESM `node:` imports,
+`String.prototype.replaceAll`, `fs.rmSync`), and `replaceAll` is the highest of the three. 16 is the
+first long-term-support release that covers all of them. Verified on Node 22 (CI, every push) and
+Node 24 (development machine); 16 through 21 is a range derived from those features rather than
+tested release by release. Reports of trouble there are welcome.
 
-The floor comes from language features used in the scripts: ESM `node:`-prefixed imports, `String.prototype.replaceAll`,
-`fs.rmSync`. The most demanding of the three is `replaceAll` (introduced in Node 15); 16 is picked because it is the first LTS covering all of them.
+`git` is optional: the survey still works (it reports "git unavailable" plainly) and everything
+about documentation is unaffected. What needs git is setting up and maintaining version control,
+remote repositories, pushing and releasing. Without it those cannot be done, and the survey says so
+instead of pretending otherwise.
 
-**Versions actually verified**: Node 22 (CI, runs on every push) and Node 24 (dev machine).
-16 through 21 are an inferred working range from features, **not tested version by version**; if you hit a problem on those versions,
-please file an issue.
+## How this repository is set up
 
-### git (optional but strongly recommended)
+This skill is its own first user: its version control, documentation and CI all follow its own
+standard. If what it teaches were wrong, its own repository would break first. Details are in
+[AGENTS.md](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md).
 
-The scripts do not depend on git: surveying works as usual (it honestly reports "git unavailable"), and doc-related features are unaffected.
-**Self-test groups that need git are skipped automatically with an explanation**, never reported as failures.
-
-What needs git is: setting up and maintaining version control, remote repos, push and release, and **self-updating** (a copy with no version history cannot check for a new version on its own). Without git those cannot be done — the survey tells you so explicitly instead of pretending success.
-
-### Network
-
-Surveying and doc generation are fully offline. Only remote repos (create, push, metadata), release steps, and the self-update check need the network.
-
-## How this repo itself is set up
-
-This skill is its own first user: its version control, docs, and CI are set up to its own standard.
-In other words, if what this skill teaches were wrong, its own repo would break first. For how it is actually set up, see
-[AGENTS.md](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md) — that is this repository's own project contract, and it records the mechanisms and the rules.
-
-This English version is a translation of `README.md` (which stays authoritative); when they disagree, the Chinese one wins, and the other should be synced.
+This file is the English translation; `README.md` is authoritative. When the two disagree, the
+Chinese one wins and this one gets updated.
 
 ## Troubleshooting
 
-File issues in [Issues](https://github.com/FiretrUCK666/project-forge/issues). To make them actionable, attach:
+Open an [issue](https://github.com/FiretrUCK666/project-forge/issues). To make it findable, include:
 
-- Your OS and Node version;
-- The full command you ran;
-- The complete error text (the original, not a paraphrase);
-- If it is about a specific project, that project's stack and rough layout.
+- your OS and Node version;
+- the exact command you ran;
+- the full error text (the original, not a description of it);
+- if it concerns a specific project, that project's stack and rough directory layout.
 
 ## Contributing
 

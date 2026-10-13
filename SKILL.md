@@ -10,7 +10,7 @@ description: |
   不用于：只改代码写法、只修一个 bug、只回答概念问题，也不替项目选型或生成骨架。
 whenToUse: 要给一个项目配版本管理、上远端仓库、写文档套装、配发布通道，或对它说「规范一下」「初始化」时。
 metadata:
-  version: "0.15.0"
+  version: "0.16.0"
   source: "https://github.com/FiretrUCK666/project-forge"
 ---
 
@@ -189,11 +189,12 @@ node "<本领目录>/scripts/update.mjs" --quiet
 这一步放在**任何读取之前**——它可能把本文件换掉。判据与做法都在脚本里，这里只说三件
 必须知道的事：
 
-- **只在副本没有本地工作时才快进更新**。有未提交改动、有未推送的提交、不在分支上、
-  或压根没有版本历史（下载的压缩包），一概不碰。所以它不会覆盖使用者的成果，也不会
-  把上游合并进贡献者的分支；
-- **默认 24 小时只查一次**，同一台机器上装了几份副本时各查各的。`--check` 是人主动问：
-  只报告不更新，且不受节流限制；
+- **它问一次「最新版是哪个标签」，有新版才下载、下载后整份覆盖**。不问、不比、不看
+  本地有没有改动——使用者要的是「用的时候是最新版」，替他判断「他改的算不算数」只会
+  把该更新的拦下或者把该保留的覆盖掉。**唯一的例外是目录里有 `.git` 的副本**：那是
+  拿来改的那一份，工具对它只读，绝不写（判断依据是 `.git` 存在，不看它是文件还是目录）；
+- **同一份副本 24 小时内最多换一次文件**（换文件会改掉磁盘上正在被读的内容）。检查照跑，
+  所以新版一发布就看得见，只是等窗口过完才动手；窗口内它会说清还要等多久；
 - **它说「已更新」时，你手上这份文件已经过期**——重新读 `SKILL.md` 再继续。其余情况
   在 `--quiet` 下一律安静，所以「没输出」意味着**没有可动作的变化**（联网没成功时也
   不出声，那不是「已是最新」——想看那行说明用 `--check`）。
@@ -386,9 +387,9 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
-| `scripts/update.mjs` | **任何任务的第一步**（见「动手之前：先跑一次自动更新」）。让这个副本保持最新 |
+| `scripts/update.mjs` | **任何任务的第一步**（见「动手之前：先跑一次自动更新」）。有新版就把这个副本整份换成新版 |
 | `scripts/survey.mjs` | P1 勘察；也是全项目共用的文本判据（frontmatter、文件地图、仓库地址归一） |
-| `scripts/zip.mjs` | 解开 zip 包——自更新要拿「同一版本的包」逐文件核对，先得读得动它 |
+| `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那份包，先得会解开它 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 只校验不写入，`--status` 只看现状，`--upgrade` 升级手写文件，`--budget N` 覆盖注入预算） |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |
@@ -411,8 +412,9 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `.github/` | 持续集成与协作模板（`workflows/`、issue 与 PR 模板） |
 | `.gitattributes` | 用户包的排除规则：`export-ignore` 列出哪些不进包 |
 | `.gitignore` | 不进版本库的本机产物（依赖目录、构建输出、本机状态目录） |
-| `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界） |
+| `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界、卡片断言） |
 | `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定 |
+| `scripts/dev/render-svg.mjs` | **改 README 卡片时**用它验收：渲染成位图并量出四边留白与画布尺寸是否合规 |
 
 ## 边界
 

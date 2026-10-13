@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="420" viewBox="0 0 1200 420"
+     role="img" aria-labelledby="pfInstallTitle pfInstallDesc">
+  <title id="pfInstallTitle">Two ways to install</title>
+  <desc id="pfInstallDesc">On the left, download the package from the Releases page: three steps, no git needed, and it keeps itself current. On the right, clone the repository: for changing the skill or following every commit, and it does not update itself.</desc>
+
+  <rect width="1200" height="420" fill="#E9E8E4"/>
+
+  <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <rect x="64" y="56" width="6" height="26" fill="#C2410C"/>
+    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">Two ways to install</text>
+    <text x="1136" y="78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" fill="#5D6064">pick one</text>
+  </g>
+
+  <line x1="64" y1="104" x2="1136" y2="104" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="590" y1="130" x2="590" y2="366" stroke="#C6C4BF" stroke-width="1"/>
+
+  <g id="download" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="64" y="158" font-size="26" font-weight="700" fill="#17181A">Download the package</text>
+    <text x="420" y="158" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#C2410C" text-anchor="end">recommended</text>
+
+    <text x="64" y="200" font-size="19" fill="#5D6064">1&#8195;unzip into your host&apos;s skill directory</text>
+    <text x="64" y="236" font-size="19" fill="#5D6064">2&#8195;keep the folder named project-forge</text>
+    <text x="64" y="272" font-size="19" fill="#5D6064">3&#8195;that is the whole install</text>
+
+    <text x="64" y="330" font-size="20" font-weight="700" fill="#17181A">It keeps itself current</text>
+    <text x="64" y="358" font-size="18" fill="#5D6064">no git, nothing for you to do</text>
+  </g>
+
+  <g id="clone" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="640" y="158" font-size="26" font-weight="700" fill="#17181A">Clone the repository</text>
+
+    <text x="640" y="200" font-size="19" fill="#5D6064">for changing this skill itself, or</text>
+    <text x="640" y="228" font-size="19" fill="#5D6064">following every commit as it lands</text>
+
+    <text x="640" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#17181A">git clone &lt;repository url&gt;</text>
+
+    <text x="640" y="330" font-size="20" font-weight="700" fill="#17181A">It will not update itself</text>
+    <text x="640" y="358" font-size="18" fill="#5D6064">if there is a .git folder, run git pull yourself</text>
+  </g>
+</svg>

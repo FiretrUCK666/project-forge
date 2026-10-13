@@ -1,51 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="410" viewBox="0 0 1200 410"
-     role="img" aria-labelledby="hero-title hero-desc">
-  <title id="hero-title">project-forge</title>
-  <desc id="hero-desc">通用项目治理 skill：给它一个项目目录，先只读勘察，再按事实决定做哪几件。右侧是一次勘察的真实输出片段。</desc>
+     width="1200" height="420" viewBox="0 0 1200 420"
+     role="img" aria-labelledby="pfHeroTitle pfHeroDesc">
+  <title id="pfHeroTitle">project-forge</title>
+  <desc id="pfHeroDesc">通用项目治理 skill：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察脚本的一次真实输出。</desc>
 
   <!--
     中性底色，不跟主题走：宿主页面可能是浅色也可能是深色，卡片自带底色才不会一半看不清。
-    留白一律对称——左右各 64，上下各 56，块与块之间一律 24。
+    留白一律对称——左右各 64、上下各 56，块与块之间一律 24。
+    配色：底 #E9E8E4、正文 #17181A、次要 #5D6064、分隔 #C6C4BF、强调 #C2410C、面板 #DFDED9。
   -->
-  <rect width="1200" height="410" fill="#E9E8E4"/>
+  <rect width="1200" height="420" fill="#E9E8E4"/>
 
-  <!-- 左：名称与一句话承诺 -->
-  <g id="title-block">
-    <rect x="64" y="57" width="6" height="20" fill="#C2410C"/>
+  <!-- 左：这是什么 -->
+  <g id="title-block" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <rect x="64" y="58" width="6" height="20" fill="#C2410C"/>
     <text x="82" y="74" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">通用项目治理 skill</text>
 
-    <text x="60" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-          font-size="88" font-weight="700" letter-spacing="-2.5" fill="#17181A">project-forge</text>
+    <text x="60" y="188" font-size="88" font-weight="700" letter-spacing="-2.5"
+          fill="#17181A">project-forge</text>
 
-    <text x="64" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-          font-size="30" fill="#17181A">给它一个项目目录：先只读勘察，</text>
-    <text x="64" y="292" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-          font-size="30" fill="#17181A">再按事实决定做哪几件。</text>
+    <text x="64" y="252" font-size="30" fill="#17181A">给它一个项目目录：先只读勘察，</text>
+    <text x="64" y="294" font-size="30" fill="#17181A">再按事实决定做哪几件事。</text>
 
-    <text x="64" y="348" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-          font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道</text>
-
-    <text x="1136" y="348" text-anchor="end"
-          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="18" fill="#5D6064">Node &#8805; 16 · 零依赖</text>
+    <text x="64" y="352" font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道</text>
+    <text x="1136" y="352" font-size="18" text-anchor="end" fill="#5D6064"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Node &#8805; 16 · 零依赖</text>
   </g>
 
   <!-- 右：一次勘察的真实输出（P1 的产物，不是示意图） -->
   <g id="survey-proof">
-    <rect x="676" y="112" width="460" height="176" fill="#DFDED9"/>
+    <rect x="676" y="112" width="460" height="214" fill="#DFDED9"/>
 
-    <text x="704" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" fill="#5D6064">$ node scripts/survey.mjs .</text>
+    <text x="704" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" fill="#5D6064">$ node scripts/survey.mjs .</text>
 
-    <text x="704" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" fill="#17181A">生态   node</text>
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19">
+      <text x="704" y="196" fill="#5D6064">生态</text>
+      <text x="768" y="196" fill="#17181A">node</text>
 
-    <text x="704" y="224" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" fill="#17181A">文档   AGENTS.md <tspan fill="#C2410C">缺</tspan></text>
+      <text x="704" y="234" fill="#5D6064">文档</text>
+      <text x="768" y="234" fill="#17181A">AGENTS.md <tspan fill="#C2410C">缺</tspan></text>
 
-    <text x="704" y="262" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="19" fill="#17181A">发布   没有可发布的产物</text>
+      <text x="704" y="272" fill="#5D6064">发布</text>
+      <text x="768" y="272" fill="#17181A">没有可发布的产物</text>
+
+      <text x="704" y="310" fill="#5D6064">远端</text>
+      <text x="768" y="310" fill="#17181A">没有</text>
+    </g>
   </g>
 </svg>

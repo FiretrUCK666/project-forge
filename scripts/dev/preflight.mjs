@@ -701,6 +701,134 @@ function checkBehavior() {
   }
 }
 
+// ── 检查十四：README 卡片里的数字断言必须两边同源、且与实现一致 ──────────────
+
+/**
+ * 卡片对外做出的断言，逐条列成表。**值与含义一起写在这里**，卡片里只留一个 key。
+ *
+ * 卡片是手写的 SVG，句子（说法、措辞）只能靠人跟着 README 走——那部分没有检查，也不该有：
+ * 判断落在「这句话还准不准」上，字面特征抓不住。但**数字与硬断言**可以，而它们恰恰是
+ * 最难靠眼睛发现的漂移：实现把 24 小时改成 6 小时，两份卡片和两份 README 会一起停在
+ * 「24 小时」上，四份文件互相印证，谁也不出声——文档之间互相印证不构成证据。
+ *
+ * 所以每个值都配两样东西：中文与英文各要求的字面句，以及一条**从实现里量出来的**事实。
+ * 哪一项自己核不了（例如实现改成别的量法），就把它删掉——留一个核不了的项，
+ * 比没有这一项更坏：它会绿，而绿是会被相信的。
+ */
+const CARD_CLAIMS = {
+  'update-interval': {
+    meaning: '同一份副本重新换文件之间的最短间隔',
+    zh: '24 小时',
+    en: '24 hours',
+    // 从实现里量：间隔常量换算成小时，应当与卡片上写的一样。
+    fromCode: () => {
+      const m = /const UPDATE_INTERVAL_MS\s*=\s*([^;\n]+)/.exec(readText(join(SKILL_ROOT, 'scripts', 'update.mjs')))
+      const hours = m === null ? undefined : evalHours(m[1])
+      return hours === undefined ? undefined : `${hours} 小时`
+    },
+  },
+  'same-version-does-nothing': {
+    meaning: '版本相同时不写任何文件',
+    zh: '是同一版就结束',
+    // 小写：这句话在英文文档里出现在句子中间，写死首字母大写会让「换了行、改了句首」
+    // 变成假红——这一条要盯的是「还说不说这件事」，不是它在句子的哪个位置。
+    en: 'same version',
+  },
+  'source-copy-readonly': {
+    meaning: '有 .git 的副本（拿来改的那份）工具只读',
+    zh: '工具对它只读',
+    en: 'leaves it alone',
+  },
+}
+
+/** 把 `24 * 60 * 60 * 1000` 这样的常量算式换算成小时。算不出来返回 undefined（不猜）。 */
+function evalHours(expr) {
+  const parts = String(expr).split('*').map((x) => x.trim())
+  if (!parts.every((p) => /^\d+$/.test(p))) return undefined
+  const product = parts.reduce((a, b) => a * Number(b), 1)
+  return product % 3600000 === 0 ? product / 3600000 : undefined
+}
+
+/** 一份卡片里声明的断言（`pf:claims` 那一行里的 `key=value`）。 */
+function cardClaims(text) {
+  const m = /<!--\s*pf:claims\s+([^>]*?)-->/.exec(text)
+  if (m === null) return undefined
+  const out = {}
+  for (const pair of m[1].trim().split(/\s+/)) {
+    const [key, ...rest] = pair.split('=')
+    out[key] = rest.join('=')
+  }
+  return out
+}
+
+function checkCardClaims() {
+  const dir = join(SKILL_ROOT, 'assets', 'readme')
+  if (!existsSync(dir)) return
+  const cards = readdirSync(dir).filter((f) => f.endsWith('.svg'))
+  const readme = (lang) => {
+    const p = join(SKILL_ROOT, lang === 'zh' ? 'README.md' : 'README.en.md')
+    return existsSync(p) ? readText(p) : ''
+  }
+  const readmes = { zh: readme('zh'), en: readme('en') }
+  let checked = 0
+
+  for (const file of cards) {
+    const claims = cardClaims(readText(join(dir, file)))
+    if (claims === undefined) continue
+    const lang = file.endsWith('.en.svg') ? 'en' : 'zh'
+    if (lang === 'en') {
+      fail(`assets/readme/${file} 声明了 pf:claims —— 断言只写中文版那一份（它是两份卡片的源头），`
+        + '英文版跟着它走。两份都写等于两个源头，迟早对不上。')
+      continue
+    }
+    const enFile = file.replace(/\.svg$/, '.en.svg')
+    if (!existsSync(join(dir, enFile))) {
+      fail(`assets/readme/${file} 有英文版吗：找不到 assets/readme/${enFile} —— 两份成对维护。`)
+      continue
+    }
+    const enText = readText(join(dir, enFile))
+    for (const [key, value] of Object.entries(claims)) {
+      const spec = CARD_CLAIMS[key]
+      if (spec === undefined) {
+        fail(`assets/readme/${file} 的 pf:claims 里有不认得的断言「${key}」—— 文字说明不算断言。`
+          + `认得的只有：${Object.keys(CARD_CLAIMS).join('、')}。要么用认得的那个，`
+          + '要么在 preflight 的登记表里认领它并给出两语言的字面与核法。')
+        continue
+      }
+      checked += 1
+      const where = []
+      // 用「压掉空白后包含」判，不要求逐字整句：卡片是排过版的，断行位置与 README 不同，
+      // 要求整句相等会把「换了行」误报成「说法不一致」——那正是最容易让人开始怀疑一个
+      // 其实正确的检查的方式。
+      const has = (text, want) => text.replace(/\s+/g, '').includes(want.replace(/\s+/g, ''))
+      if (!has(readText(join(dir, file)), spec.zh)) where.push(`中文卡片里没有出现「${spec.zh}」`)
+      if (!has(enText, spec.en)) where.push(`英文卡片里没有出现「${spec.en}」`)
+      if (!has(readmes.zh, spec.zh)) where.push(`README.md 里没有出现「${spec.zh}」`)
+      if (!has(readmes.en, spec.en)) where.push(`README.en.md 里没有出现「${spec.en}」`)
+      if (spec.fromCode !== undefined) {
+        const want = spec.fromCode()
+        if (want === undefined) {
+          where.push(`核不了：实现里读不出「${spec.meaning}」这个量（核不了的项比没有更坏，要修 checkCardClaims）`)
+        } else if (spec.zh !== want) {
+          // 与**登记表里那条中文说法**比，而不是与卡片里那个 key 的取值比：取值是给日后
+          // 想写别种写法的自己留的余地，而登记表里的中文才是「四份文件必须都说这句」。
+          where.push(`实现里量出来是「${want}」，而登记表要求四份文件都写「${spec.zh}」`
+            + `（卡片声明的是 ${key}=${value}）—— 两边说的不是同一件事`)
+        }
+      }
+      if (where.length > 0) {
+        fail(`断言「${spec.meaning}」对不上：${where.join('；')}。`
+          + '改了实现或换了说法，就要把两份卡片与两份 README 一起改。')
+      } else {
+        process.stdout.write(`卡片断言：${key}（${spec.meaning}）四份文件说法一致\n`)
+      }
+    }
+  }
+  if (checked > 0 && failures.length === 0) {
+    process.stdout.write(`卡片断言：${checked} 条，两边同源\n`)
+  }
+}
+
 // ── 检查九：文档里的「数量自称」必须与现实相符 ──────────────────────────────
 
 /** 中文数字 → 数值。只覆盖文档里实际会用到的那几个。 */
@@ -1865,6 +1993,7 @@ function main(argv = []) {
   checkScripts()
   checkScriptsRun()
   checkStatedCounts()
+  checkCardClaims()
   checkPackageBoundary()
   checkPluginChapters()
   checkFreshness()

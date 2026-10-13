@@ -652,10 +652,10 @@ export function tableFirstCells(text) {
  * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
  * 声明。这份结果有两个读者，而且它们必须看到同一份答案：
  *   - `preflight.mjs` 用它核对包边界（漏登记、放错位置、声明与实际矛盾）；
- *   - `update.mjs` 用它判断**这个副本是什么角色**——目录里有「仓库里另有」那些文件，
- *     说明这是源码副本（拿来改的），否则是用户包副本（该自更新的那份）。
+ *   - `update.mjs` 用它清掉副本里「包里本来不该有」的那些文件——当初下成了 GitHub 的
+ *     `Source code` 时，`.github/`、`AGENTS.md` 一类会一直留在那里碍事。
  * 所以它住在随包分发的模块里，而不是仓库自用的自检脚本里：用户包里没有自检脚本，
- * 但用户包副本恰恰最需要回答第二个问题。
+ * 但用户包副本恰恰最需要那份排除表。
  */
 export function readFileMap(skillText) {
   const buckets = { shipped: [], repoOnly: [] }

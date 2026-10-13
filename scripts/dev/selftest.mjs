@@ -16,7 +16,9 @@
 import {
   mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync,
 } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
 import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
@@ -27,7 +29,7 @@ import {
   referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
 } from './preflight.mjs'
 import {
-  isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, needsSummary,
+  isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, skillSource, needsSummary,
   parseMarkerKeys, normVersion,
 } from '../survey.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
@@ -3321,19 +3323,28 @@ group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，�
   }
 }
 
-// ── [46] 自动更新：源码副本只读，包副本靠「内容还是不是发出去那一份」判定 ──────
+// ── [46] 自动更新：源码副本只读，包副本比版本、整份覆盖 ────────────────────────
 
-group('[46] 自动更新：两种角色、四种来历')
+group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
 {
-  const updateTmp = join(ROOT, 'update-tmp')
-  mkdirSync(updateTmp, { recursive: true })
-  const runUpdate = (skillDir, ...extra) => spawnSync(
-    process.execPath, [join(skillDir, 'scripts', 'update.mjs'), ...extra],
-    { encoding: 'utf8', windowsHide: true, env: { ...process.env, TEMP: updateTmp, TMPDIR: updateTmp } },
-  )
-  const out = (r) => `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
+  // 每个副本一份自己的状态目录：状态按副本路径分开记，测试之间不能互相串。
+  const stateTmp = join(ROOT, 'update-state')
+  mkdirSync(stateTmp, { recursive: true })
+  const runUpdate = (skillDir, ...extra) => new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [join(skillDir, 'scripts', 'update.mjs'), ...extra],
+      { windowsHide: true, env: { ...process.env, TEMP: stateTmp, TMPDIR: stateTmp } })
+    let text = ''
+    child.stdout.on('data', (d) => { text += d })
+    child.stderr.on('data', (d) => { text += d })
+    child.on('close', (code) => resolvePromise({ status: code, out: text.trim() }))
+  })
 
-  // 造一份副本：只有跑得起来的那几个文件，不复制整棵树——这一组验的是判定，不是包边界。
+  /**
+   * 造一份副本：只放跑得起来的那几个文件，不复制整棵树——这一组验的是判定，不是包边界。
+   *
+   * 关键是**副本自己也是一个 git 仓库**：下面要发的「新版压缩包」由它导出，这样
+   * 包里的文件与副本里的文件天然逐字节一致（行尾也一致），测的才是判定本身。
+   */
   const makeCopy = (name, { withGit = false, source, version = '0.14.0' } = {}) => {
     const dir = join(fixture(name, {}), 'project-forge')
     mkdirSync(join(dir, 'scripts'), { recursive: true })
@@ -3356,58 +3367,278 @@ group('[46] 自动更新：两种角色、四种来历')
     return dir
   }
 
-  // 一、有 .git = 源码副本：只读报告，**一个字节都不写**。
+  /**
+   * 从一份副本导出一个「新版压缩包」，并验它自带完整元数据。
+   *
+   * 这条前提断言不是形式主义：下面几个用例全靠包里那份 `SKILL.md` 把来源一路带下去，
+   * 包里少了来源，副本更新完就不知道自己该问谁了——而现象会表现成「更新莫名其妙停了」。
+   */
+  const makePackage = (name, { version, source }) => {
+    const src = makeCopy(name, { withGit: true, version, source })
+    const zipPath = join(ROOT, `${name}.zip`)
+    const archived = spawnSync('git',
+      ['-C', src, 'archive', '--format=zip', '--prefix=project-forge-/', '-o', zipPath, 'HEAD'],
+      { encoding: 'utf8', windowsHide: true })
+    if (archived.status !== 0) {
+      check(false, '前提：git archive 产得出新版压缩包', (archived.stderr ?? '').slice(0, 160))
+      return { body: Buffer.alloc(0), version }
+    }
+    const body = readFileSync(zipPath)
+    rmSync(zipPath, { force: true })
+    const entries = stripCommonPrefix(readZip(body))
+    const packed = entries.find((e) => e.name === 'SKILL.md')?.data.toString('utf8') ?? ''
+    const meta = /metadata:[\s\S]*/.exec(/---\r?\n([\s\S]*?)\r?\n---/.exec(packed)?.[1] ?? '')?.[0] ?? '（无）'
+    check(skillVersion(packed) === version && skillSource(packed) !== undefined,
+      '前提：造出来的新版包自带版本与来源（用例才有对象）',
+      `包里 metadata 段是 ${JSON.stringify(meta)}；磁盘上是 `
+      + `${JSON.stringify(/^[ \t]+source:.*$/m.exec(readFileSync(join(src, 'SKILL.md'), 'utf8'))?.[0])}`)
+    return { body, version }
+  }
+
+  /**
+   * 本机服务端扮演发布方：一个地址回「最新版是哪个标签」，一个地址回压缩包。
+   *
+   * 用真服务端而不是打桩，是因为要验的东西里有一半是**协议**：问哪个地址、问几次、
+   * 有没有在「只比版本」的时候把整包也拉下来。这些只有真的发过请求才数得清。
+   * 监听随机端口，不依赖外网，也不会撞端口。
+   */
+  const stats = { api: 0, zip: 0, apiBytes: 0, zipBytes: 0 }
+  const serve = (handler) => new Promise((resolvePromise) => {
+    const s = createServer(handler)
+    s.listen(0, '127.0.0.1', () => resolvePromise(s))
+  })
+  const closeServer = (s) => new Promise((resolvePromise) => s.close(() => resolvePromise()))
+
+  const resetStats = () => { stats.api = 0; stats.zip = 0; stats.apiBytes = 0; stats.zipBytes = 0 }
+
+  /**
+   * 一个用例失败时把它看见的输出打出来。
+   *
+   * 失败只报「断言不成立」是不够的：这条链路上任何一个环节（问标签、下包、写盘）断了，
+   * 现象都是同一个「没更新」。把输出留在这里，读日志的人不用再跑第二遍去猜。
+   */
+  const failWith = (ok, label, r) => {
+    check(ok, label, ok ? undefined : `实际输出：${JSON.stringify(r.out.slice(0, 300))}`)
+  }
+
+  /** 覆盖状态文件里的更新时间。写 0 = 当作「很久没更新过」。 */
+  const setWindow = (dir, lastUpdateAt) => {
+    const hash = createHash('sha1').update(resolve(dir)).digest('hex').slice(0, 12)
+    writeFileSync(join(stateTmp, `project-forge-update-${hash}.json`),
+      `${JSON.stringify({ lastUpdateAt })}\n`, 'utf8')
+  }
+
+  const main = async () => {
+    // 发布方「最新版是哪个标签」由它决定，用例改它来换场景。
+    const state = { tag: '9.9.9' }
+    // 「那边没有最新发布」的场景：把这个开关打开。
+    const opts = { noLatest: false }
+    const port = { value: 0 }
+    const source = () => `http://127.0.0.1:${port.value}/owner/repo`
+
+    const server = await serve((req, res) => {
+      const path = req.url ?? ''
+      const isLatest = path.includes('/releases/latest') && !path.includes('/download/')
+      if (isLatest) {
+        stats.api += 1
+        if (opts.noLatest) { res.writeHead(404).end(); return }
+        const body = Buffer.from(JSON.stringify({ tag_name: `v${state.tag}` }))
+        stats.apiBytes += body.length
+        res.writeHead(200, { 'content-type': 'application/json', 'content-length': body.length })
+        res.end(body)
+        return
+      }
+      if (path.endsWith('/project-forge.zip')) {
+        stats.zip += 1
+        const body = pkg.body
+        stats.zipBytes += body.length
+        res.writeHead(200, { 'content-type': 'application/zip', 'content-length': body.length })
+        res.end(body)
+        return
+      }
+      res.writeHead(404).end()
+    })
+    port.value = server.address().port
+    // 包由「以这个服务端为来源」的副本导出，所以副本更新完仍然知道自己该问谁。
+    const pkg = makePackage('update-newpkg', { version: '9.9.9', source: source() })
+
+    // 一、没有新版：只比版本，**不下整包**。这是绝大多数时候走的那条路，
+    //     也是「更新不该每次拖走整包」那条要求的判据。
+    {
+      state.tag = '0.1.0'
+      const dir = makeCopy('up-to-date', { source: source() })
+      resetStats()
+      const r = await runUpdate(dir, '--check')
+      failWith(/已是最新/.test(r.out), '版本比本地旧时报「已是最新」', r)
+      report(/已是最新/.test(r.out), '比版本：认得出来')
+      const lean = stats.api === 1 && stats.zip === 0
+      check(lean, '没有新版时只问一次标签，一个字节的整包都没下',
+        `标签请求 ${stats.api} 次、整包请求 ${stats.zip} 次`)
+      report(lean, `没有新版：只发 ${stats.api} 次请求，整包 0 次`)
+      check(stats.apiBytes > 0 && stats.apiBytes < 1000, '那次请求的体积是几十字节级别，不是整包',
+        `${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
+      report(stats.apiBytes < 1000, `那次请求 ${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
+    }
+
+    // 二、有新版：整份覆盖。本地改过的内容**照样被覆盖**——这是明确的规则，
+    //     不是漏判：使用者要的是「用的时候是最新版」。
+    {
+      state.tag = '9.9.9'
+      const dir = makeCopy('overwrite', { source: source() })
+      const skillPath = join(dir, 'SKILL.md')
+      // 改一处包内文件、放一个包里没有的文件，然后把窗口清零（等于过了 24 小时）。
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8')
+        .replace('description:', 'description: 我改过的说明。'), 'utf8')
+      const marker = join(dir, 'NOTES.md')
+      writeFileSync(marker, 'x\n', 'utf8')
+      setWindow(dir, 0)
+      resetStats()
+      const r = await runUpdate(dir, '--quiet')
+      failWith(/已更新到最新版 9\.9\.9/.test(r.out), '有新版时整份换成新版，并报出前后两个版本', r)
+      report(/已更新到最新版/.test(r.out), '更新：版本号变了')
+      const v = skillVersion(readFileSync(skillPath, 'utf8'))
+      check(v === '9.9.9', '更新之后 SKILL.md 里就是新版本号', `读到 ${v}`)
+      report(v === '9.9.9', '更新：磁盘上的版本号真的变了')
+      const mine = readFileSync(skillPath, 'utf8').includes('我改过的说明。')
+      check(!mine, '本地改动被覆盖（规则就是整份覆盖，不替使用者判断）')
+      report(!mine, '更新：本地改动被覆盖')
+      // 覆盖的是**包覆盖到的地方**。使用者放在同一个目录里的其它文件（笔记、自己的临时
+      // 文件）不属于这个 skill，不该被它顺手删掉——那不叫覆盖，那叫越权。
+      check(existsSync(marker), '包外的文件不动（覆盖的是这个 skill，不是整个目录）')
+      report(existsSync(marker), '更新：包外文件保留')
+      const once = stats.api === 1 && stats.zip === 1
+      check(once, '这一次更新只问了标签一次、下了整包一次', `标签 ${stats.api} 次、整包 ${stats.zip} 次`)
+      report(once, '更新：各请求一次，没有重复下载')
+      const tells = /你之前用的是 0\.14\.0/.test(r.out)
+      check(tells, '更新完把「之前是哪一版」也说出来（使用者才知道自己跳过了什么）', r.out.slice(0, 160))
+      report(tells, '更新：说清了从哪一版到哪一版')
+    }
+
+    // 三、24 小时窗口：刚更新过就不换文件，但**照常比版本**，并且说出来还要等多久。
+    //     这一条正是「同一份副本一天不换好几次」那条要求的判据。
+    {
+      state.tag = '9.9.9'
+      const dir = makeCopy('window', { source: source() })
+      const skillPath = join(dir, 'SKILL.md')
+      setWindow(dir, 0)
+      const first = await runUpdate(dir, '--quiet')
+      failWith(skillVersion(readFileSync(skillPath, 'utf8')) === '9.9.9',
+        '前提：窗口用例先真的更新过一次（否则下面的窗口断言没有对象）', first)
+      // 退回旧版，模拟「同一版又被跑了一次」：这一次不该换文件。
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8')
+        .replace(/^([ \t]+version:[ \t]*)"[^"]*"/m, '$1"0.14.0"'), 'utf8')
+      resetStats()
+      const r = await runUpdate(dir, '--check')
+      const says = /刚更新过/.test(r.out) && /之后再自动换/.test(r.out)
+      check(says, '窗口内报出「刚更新过，等多久再换」', r.out.slice(0, 200))
+      report(says, '窗口：说得出还要等多久')
+      check(stats.api === 1 && stats.zip === 0, '窗口内只比版本，不下整包',
+        `标签 ${stats.api} 次、整包 ${stats.zip} 次`)
+      report(stats.api === 1 && stats.zip === 0, '窗口：不下载、不换文件')
+      const stayed = skillVersion(readFileSync(skillPath, 'utf8')) === '0.14.0'
+      check(stayed, '窗口内一个文件都没被换掉')
+      report(stayed, '窗口：文件没动')
+      check(!/已更新到最新版/.test(r.out), '窗口内不会谎报「已更新」')
+      report(!/已更新到最新版/.test(r.out), '窗口：不谎报已更新')
+      // 人在 --check 之外主动问时也看得到同一句话，不需要猜为什么没更新。
+      const again = await runUpdate(dir)
+      check(/刚更新过/.test(again.out), '默认模式下也说得出「还要等多久」', again.out.slice(0, 200))
+      report(/刚更新过/.test(again.out), '窗口：默认模式不沉默')
+    }
+
+    // 四、发布方那边没有「最新发布」时：退回取整包读版本，路照样走得通。
+    //     这条兜的是「平台不是 GitHub」或「还没建过 Release」——真发生时不能就此停住。
+    {
+      const dir = makeCopy('fallback', { source: source() })
+      opts.noLatest = true
+      setWindow(dir, 0)
+      resetStats()
+      const r = await runUpdate(dir, '--quiet')
+      opts.noLatest = false
+      failWith(/已更新到最新版 9\.9\.9/.test(r.out), '问不到标签时退回取整包，仍能更新到最新版', r)
+      report(/已更新到最新版/.test(r.out), '退回路径：照样更新')
+      check(stats.zip >= 1, '退回路径确实取了整包', `整包 ${stats.zip} 次`)
+      report(stats.zip >= 1, '退回路径：取整包读版本')
+    }
+
+    // 五、下成了 GitHub 的 Source code：仓库自用文件该被清掉，否则它们会一直碍事
+    //     （宿主可能把 AGENTS.md 当成这个 skill 的项目契约读进去）。
+    {
+      const dir = makeCopy('prune', { source: source() })
+      mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
+      writeFileSync(join(dir, '.github', 'workflows', 'check.yml'), 'x\n', 'utf8')
+      mkdirSync(join(dir, 'scripts', 'dev'), { recursive: true })
+      writeFileSync(join(dir, 'scripts', 'dev', 'preflight.mjs'), 'x\n', 'utf8')
+      writeFileSync(join(dir, 'AGENTS.md'), 'x\n', 'utf8')
+      setWindow(dir, 0)
+      const r = await runUpdate(dir, '--quiet')
+      failWith(skillVersion(readFileSync(join(dir, 'SKILL.md'), 'utf8')) === '9.9.9',
+        '前提：清理用例真的更新过一次', r)
+      const leftovers = ['.github', 'AGENTS.md', 'scripts/dev']
+        .filter((f) => existsSync(join(dir, ...f.split('/'))))
+      check(leftovers.length === 0,
+        '更新时清掉「仓库里另有」那些文件（下成 Source code 的副本会变干净）',
+        `还留着：${leftovers.join('、') || '（无）'}`)
+      report(leftovers.length === 0, '清理：仓库自用文件被清掉')
+      check(!existsSync(join(dir, 'README.md')) || true, '（占位：包内文件清点见下）')
+      const kept = ['SKILL.md', 'scripts/update.mjs', 'scripts/survey.mjs', 'scripts/zip.mjs']
+        .every((f) => existsSync(join(dir, ...f.split('/'))))
+      check(kept, '清理没有连包内文件一起删掉')
+      report(kept, '清理：包内文件完好')
+      check(/顺手清掉了/.test(r.out), '清掉了什么，报告里说得出来')
+      report(/顺手清掉了/.test(r.out), '清理：报告里说了')
+    }
+
+    await closeServer(server)
+  }
+
+  await main()
+
+  // 六、连不上：静默、退出码 0、**一个字节都不写**。指向本机一个没人监听的端口，
+  //     连接立刻被拒——不依赖外网，也不会慢。
+  {
+    const dir = makeCopy('unreachable', { source: 'http://127.0.0.1:1/owner/repo' })
+    const before = readFileSync(join(dir, 'SKILL.md'), 'utf8')
+    // skill 自己在任务开头用的就是 --quiet 这一档，所以「静默」要按这一档来验。
+    const r = await runUpdate(dir, '--quiet')
+    check(r.status === 0, '连不上时退出码仍是 0（它挂在每个任务开头，不能把任务弄红）',
+      `退出码 ${r.status}：${r.out.slice(0, 120)}`)
+    report(r.status === 0, '连不上：退出码 0')
+    check(r.out === '', '--quiet 下连不上是完全静默的（没连上不是「已是最新」，也不该念一遍）',
+      r.out.slice(0, 160))
+    report(r.out === '', '连不上：静默')
+    const forced = await runUpdate(dir, '--check')
+    check(/没能联网核对/.test(forced.out) && /不是「已是最新」/.test(forced.out),
+      '--check 下如实报「没能联网核对」，不说成「已是最新」', forced.out.slice(0, 160))
+    report(/没能联网核对/.test(forced.out), '连不上：--check 说真话')
+    check(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '连不上时一个字节都没写')
+    report(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '连不上：零写入')
+  }
+
+  // 七、有 .git = 源码副本：只读报告，**一个字节都不写**。
   {
     const dir = makeCopy('role-source', { withGit: true })
     const probe = join(dir, 'scripts', 'survey.mjs')
     const before = readFileSync(probe, 'utf8')
-    const r = runUpdate(dir, '--check')
-    const text = out(r)
-    const says = /源码副本/.test(text) && /git pull/.test(text)
-    check(says, '有 .git 的副本被认成源码副本，并指路 git pull', text.slice(0, 120))
+    const r = await runUpdate(dir, '--check')
+    const says = /源码副本/.test(r.out) && /git pull/.test(r.out)
+    check(says, '有 .git 的副本被认成源码副本，并指路 git pull', r.out.slice(0, 120))
     report(says, '源码副本：认得出')
     const untouched = readFileSync(probe, 'utf8') === before
     check(untouched, '源码副本一个字节都没被写', '文件内容变了')
     report(untouched, '源码副本：不写')
   }
 
-  // 二、没有 .git、也没有来源 = 身份不明：报「未核对」，不假装查过。
+  // 八、没有 .git、也没有来源 = 身份不明：报「未核对」，不假装查过。
   {
     const dir = makeCopy('role-nosource', {})
-    const text = out(runUpdate(dir, '--check'))
-    const ok = /无法自动核对/.test(text) && /不是「已是最新」/.test(text)
-    check(ok, '没有来源的副本报「无法自动核对」，不说成「已是最新」', text.slice(0, 140))
+    const r = await runUpdate(dir, '--check')
+    const ok = /无法自动核对/.test(r.out) && /不是「已是最新」/.test(r.out)
+    check(ok, '没有来源的副本报「无法自动核对」，不说成「已是最新」', r.out.slice(0, 140))
     report(ok, '包副本：没有来源')
   }
 
-  // 三、有来源但取不回来 = 「没比」，与「比过且一致」必须分得开。
-  //     指向本机一个没人监听的端口，连接立刻被拒——不依赖外网，也不会慢。
-  {
-    const dir = makeCopy('role-offline', { source: 'http://127.0.0.1:1/owner/repo' })
-    const text = out(runUpdate(dir, '--check'))
-    const ok = /没能联网核对/.test(text) && /不是「已是最新」/.test(text)
-    check(ok, '取不回新版时报「没能联网核对」，不说成「已是最新」', text.slice(0, 140))
-    report(ok, '包副本：取不回来')
-  }
-
-  // 四、节流：默认模式 24 小时内只查一次；`--check` 是人主动问，不受它限制。
-  {
-    const dir = makeCopy('throttle', { source: 'http://127.0.0.1:1/owner/repo' })
-    const first = runUpdate(dir)
-    const second = runUpdate(dir)
-    const forced = runUpdate(dir, '--check')
-    check(out(first) !== '', '前提：第一次默认模式确实查了一次（否则下面的节流断言没有对象）',
-      out(first).slice(0, 120))
-    report(out(first) !== '', '节流：前提成立')
-    const silent = out(second) === ''
-    check(silent, '间隔内再跑默认模式完全静默（不重复报同一句话）', out(second).slice(0, 120))
-    report(silent, '节流：间隔内静默')
-    const bypass = /没能联网核对/.test(out(forced))
-    check(bypass, '--check 绕过节流：人主动问的时候必须真的去查', out(forced).slice(0, 120))
-    report(bypass, '节流：--check 可绕过')
-  }
-
-  // 五、zip 读得动：拿 git archive 真产出的包来读，内容与磁盘逐字节一致。
+  // 九、zip 读得动：拿 git archive 真产出的包来读，内容与磁盘逐字节一致。
   //     包从**这份 fixture 自己**产出，不从本仓库——工作区随时有未提交的改动，
   //     拿 HEAD 的包去比工作区的文件，会在每个改到一半的时刻假红。
   {

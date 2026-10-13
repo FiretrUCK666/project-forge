@@ -10,7 +10,7 @@ description: |
   不用于：只改代码写法、只修一个 bug、只回答概念问题，也不替项目选型或生成骨架。
 whenToUse: 要给一个项目配版本管理、上远端仓库、写文档套装、配发布通道，或对它说「规范一下」「初始化」时。
 metadata:
-  version: "0.16.1"
+  version: "0.16.2"
   source: "https://github.com/FiretrUCK666/project-forge"
 ---
 

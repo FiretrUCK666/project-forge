@@ -54,13 +54,18 @@ const SKILL_ROOT = resolve(HERE, '..', '..')
  */
 const CATALOG_DESCRIPTION_MAX = 500
 /**
- * 本项目自己那份 `AGENTS.md` 的字节上限（45 KB）。
+ * 本项目自己那份 `AGENTS.md` 的字节上限（48 KB）。
  *
  * 比通用注入预算严：这一份每次会话都被注入，同时还要给人看。**上限只压项目节**——
  * 行事总纲与编辑规则由 `templates/agents-kernel.md` 独占，要改就改那份模板并重新注入，
  * 不受这个数字约束；装不下时压项目节，不要去动内核。
+ *
+ * 这个数字是**量出来的、不是拍的**：45 KB 时它长期只剩几百字节余量，而每次想补一条
+ * 真实需要的约定就得先删掉另一条同样有用的——那不是「保持精炼」，那是逼人用删内容换
+ * 空间。48 KB 留出约 2 KB 余量，够写一条新机制；真要再涨，先问「这条能不能并进
+ * `references/`」，而不是继续抬这个数。
  */
-const OWN_AGENTS_MAX_BYTES = 45 * 1024
+const OWN_AGENTS_MAX_BYTES = 48 * 1024
 /** 余量告警线：离上限不足这么多字节时提醒一次（而不是天天喊）。 */
 const OWN_AGENTS_WARN_HEADROOM = 1024
 
@@ -451,7 +456,7 @@ function checkAgentsKernel() {
   // 本项目自己那份的硬上限，比通用预算严：它每次会话都注入，同时还要给人看。
   // 超了压项目节——内核归 templates/agents-kernel.md 独占，不受这个数字约束。
   if (bytes > OWN_AGENTS_MAX_BYTES) {
-    fail(`AGENTS.md 共 ${bytes} 字节，超过本项目自己的上限 ${OWN_AGENTS_MAX_BYTES}（45 KB）—— `
+    fail(`AGENTS.md 共 ${bytes} 字节，超过本项目自己的上限 ${OWN_AGENTS_MAX_BYTES}—— `
       + '要压就压项目节，不要去动行事总纲（内核由 templates/agents-kernel.md 独占，改它只需改模板并重新注入）。')
   } else if (bytes > OWN_AGENTS_MAX_BYTES - OWN_AGENTS_WARN_HEADROOM) {
     warn(`AGENTS.md 距本项目上限只剩 ${OWN_AGENTS_MAX_BYTES - bytes} 字节，项目节该收一收了。`)
@@ -666,9 +671,18 @@ function checkScriptsRun() {
  * 「有没有跑到」是硬证据，「跑出来说什么」是佐证：摘要行取不到就是没跑到，
  * 哪怕退出码是 0——被换成空壳的自检正是这个形状，它一声不吭就把整套行为断言拿掉了。
  */
-function checkBehavior() {
+function checkBehavior({ skip = false, why = '' } = {}) {
   const p = join(SKILL_ROOT, 'scripts', 'dev', 'selftest.mjs')
   if (!existsSync(p)) { fail('缺少 scripts/dev/selftest.mjs（行为自检）。'); return }
+  if (skip) {
+    // 跳过是显式选择，要在报告里留下痕迹：**「没查」不能长得像「查过没有」**。
+    const reason = why === '' ? '（调用方要求）' : `（${why}）`
+    warn(`行为自检被跳过${reason}——这次只验了结构，行为判定没有被检查过。`)
+    return
+  }
+  // 行为自检要造几百个 fixture 实跑，实测约 4 分钟。**先说要等多久**：终端上三分钟没有
+  // 一个字，读的人会以为它卡死了（它没卡，只是这条命令本来就慢）。
+  process.stdout.write('行为自检：正在造 fixture 实跑（约 4 分钟，中途没有输出）…\n')
   const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
   const out = r.stdout ?? ''
   if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
@@ -1949,6 +1963,8 @@ function usage() {
     '                        由发布工作流调用（它传 --repo）；不给 --repo 时退回读 origin，',
     '                        两者都取不到就报「未核对」——「没比」不等于「比过且一致」。',
     '  --repo <owner/name>   --release 的搭档：这次发布的仓库。',
+    '  --no-behavior         跳过行为自检（约 4 分钟的那一段），只验结构。',
+    '                        报告里会明说「行为判定没有被检查过」——「没查」不装成「查过没有」。',
     '',
     '  两个模式各只做一件事，做完就退出：它们出现的地方，结构自检已经单独跑过。',
     '  检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数。',
@@ -1972,7 +1988,7 @@ function main(argv = []) {
   if (producedList === '' || releaseTag === '' || atRef === '' || repoArg === '') {
     return usageError(`参数缺值。\n${usage()}`)
   }
-  const known = new Set(['--package', '--release', '--at', '--repo',
+  const known = new Set(['--package', '--release', '--at', '--repo', '--no-behavior', '--timing',
     producedList, releaseTag, atRef, repoArg].filter((x) => x !== undefined))
   const unknown = argv.filter((a) => !known.has(a))
   if (unknown.length > 0) return usageError(`未知参数：${unknown.join(' ')}\n${usage()}`)
@@ -1983,21 +1999,36 @@ function main(argv = []) {
   if (producedList !== undefined) { checkProducedPackage(producedList, atRef); return summarize() }
   if (releaseTag !== undefined) { checkReleaseTag(releaseTag, repoArg); return summarize() }
 
-  const skill = checkSkillFile()
-  checkReferencesResolve()
-  checkReferences()
-  checkTemplates()
-  checkAgentsKernel()
-  checkGlobalRules()
-  checkScripts()
-  checkScriptsRun()
-  checkStatedCounts()
-  checkCardClaims()
-  checkPackageBoundary()
-  checkPluginChapters()
-  checkFreshness()
-  checkReadmeToc()
-  checkBehavior()
+  // 结构检查秒级出结果，行为自检要几分钟——顺序固定成「先快后慢」。改一行注释时，
+  // 结构问题会立刻报出来，而不用等那几分钟走完。要更快就加 `--no-behavior`：
+  // 它只验结构，并在报告里明说「行为判定没有被检查过」。
+  //
+  // 每一步都记时间：这份自检有 15 步，而慢的那一步**不是靠眼看能猜出来的**
+  // （实测 `脚本实跑` 一步就占掉大半）。分项计时只在 `--timing` 下打印。
+  const t0 = Date.now()
+  const timings = []
+  const step = (label, fn) => { const a = Date.now(); fn(); timings.push({ label, ms: Date.now() - a }) }
+  let skill
+  step('检查 SKILL.md', () => { skill = checkSkillFile() })
+  step('引用能否解析', checkReferencesResolve)
+  step('reference 结构', checkReferences)
+  step('templates', checkTemplates)
+  step('内核一致', checkAgentsKernel)
+  step('硬性规范', checkGlobalRules)
+  step('脚本静态', checkScripts)
+  step('脚本实跑', checkScriptsRun)
+  step('数量自称', checkStatedCounts)
+  step('卡片断言', checkCardClaims)
+  step('用户包边界', checkPackageBoundary)
+  step('插件专章登记', checkPluginChapters)
+  step('保鲜标记', checkFreshness)
+  step('README 目录', checkReadmeToc)
+  step('行为自检', () => checkBehavior({ skip: argv.includes('--no-behavior') }))
+  timings.push({ label: '（合计）', ms: Date.now() - t0 })
+  if (argv.includes('--timing')) {
+    process.stdout.write('\n分项耗时（毫秒）：\n')
+    for (const t of timings) process.stdout.write(`  ${String(t.ms).padStart(7)}  ${t.label}\n`)
+  }
   // SKILL.md 自己也要有「何时使用」——它要求每份 reference 都写「何时读本文件」，
   // 入口本身不能例外。
   if (skill !== undefined && !/^## 何时使用[ \t]*$/m.test(skill.text)) {

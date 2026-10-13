@@ -79,16 +79,39 @@ const BADGE_EXPECT_EXIT = { ok: 0, nobadge: 0, bad: 1, unverified: 3 }
 
 /**
  * 由子进程原始输出与退出码推出徽章结论。纯函数，供 selftest 直接喂数据证伪。
- * 返回 { state: 'ok'|'bad'|'unverified'|'nobadge', why }。
+ * 返回 { state, why, bad }：`bad` 是「显示不出来」的那些徽章的逐条明细（结论为空）。
+ *
+ * `bad` 由**同一行输出**里解析出来：结论要能自证，不能只说「见上文」——跑在子进程里、
+ * 日志被截断、只看结论行的时候，读的人手上并没有那段上文。
  */
 export function badgeVerdict(stdout, stderr, status) {
   const out = `${stdout ?? ''}\n${stderr ?? ''}`
   const m = BADGE_STATE_RE.exec(out)
-  if (m === null) return { state: 'unverified', why: `子进程没有给出结论行（退出码 ${status}）` }
+  const bad = badBadges(out)
+  if (m === null) return { state: 'unverified', why: `子进程没有给出结论行（退出码 ${status}）`, bad: [] }
   if (BADGE_EXPECT_EXIT[m[1]] !== status) {
-    return { state: 'unverified', why: `结论行说 ${m[1]}，退出码却是 ${status}` }
+    return { state: 'unverified', why: `结论行说 ${m[1]}，退出码却是 ${status}`, bad: [] }
   }
-  return { state: m[1], why: '' }
+  return { state: m[1], why: '', bad }
+}
+
+/**
+ * 从 `check-badges.mjs` 的输出里取「显示不出来」那几行。
+ *
+ * 认的是它自己的两个记号：一行以「显示不出来」开头（后面跟原因），下一行是缩进的 URL。
+ * 认不出来时给空数组——**不猜**：宁可只说「有徽章显示不出来」，也不编一条明细。
+ */
+function badBadges(out) {
+  const lines = out.split('\n')
+  const found = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /^\s*显示不出来\s*(.*)$/.exec(lines[i])
+    if (m === null) continue
+    const url = (lines[i + 1] ?? '').trim()
+    const reason = m[1].trim()
+    found.push(url === '' ? reason : `${reason}（${url}）`)
+  }
+  return found
 }
 
 /**
@@ -400,10 +423,16 @@ function main(argv) {
 
   // 4. 徽章：有就必须验（联网跑 check-badges）；没有徽章不强求。
   // 「没查完」与「查过且可显示」是两回事——第三态走待问，绝不并进齐。
+  //
+  // 逐条明细**直接写进这一行**：只写「见上文输出」时，读的人手上未必有那份输出
+  // （跑在子进程里、日志被截断、报告只看结论行），而他要的正是「哪一个徽章坏了」。
   const badgeResult = checkBadges(root, readmes)
-  if (badgeResult.state === 'bad') missing.push('徽章显示不出来（见上文输出，删掉或修好）')
-  else if (badgeResult.state === 'unverified') pending.push(`徽章没能查完（${badgeResult.why}）：在汇报里写明未验及原因，不要读成通过`)
-  else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
+  if (badgeResult.state === 'bad') {
+    const which = badgeResult.bad?.length > 0 ? `：${badgeResult.bad.join('；')}` : ''
+    missing.push(`徽章显示不出来${which}（删掉或修好）`)
+  } else if (badgeResult.state === 'unverified') {
+    pending.push(`徽章没能查完（${badgeResult.why}）：在汇报里写明未验及原因，不要读成通过`)
+  } else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
 
   // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳；有了要看内容是否齐全。
   //

@@ -53,7 +53,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readFileMap, repoPath, skillSource, skillVersion, isMainModule } from './survey.mjs'
+import { readFileMap, skillSource, skillVersion, isMainModule } from './survey.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -171,7 +171,7 @@ function report(lines, { quiet, always = false } = {}) {
  * 它说什么协议就按什么协议取。这也让这套逻辑能在本机拿一个临时服务端实跑验证，
  * 不必为了测试在代码里开一个只有测试才走的后门。
  */
-function download(url, { redirects = 5, accept = '*/*' } = {}) {
+function download(url, { redirects = 5, accept = '*/*', final } = {}) {
   return new Promise((resolvePromise) => {
     const secure = url.startsWith('https:')
     const request = (secure ? httpsGet : httpGet)(url, {
@@ -183,20 +183,21 @@ function download(url, { redirects = 5, accept = '*/*' } = {}) {
       if (statusCode !== undefined && statusCode >= 300 && statusCode < 400
         && location !== undefined && redirects > 0) {
         res.resume()
-        resolvePromise(download(new URL(location, url).toString(), { redirects: redirects - 1, accept }))
+        const next = new URL(location, url).toString()
+        resolvePromise(download(next, { redirects: redirects - 1, accept, final: next }))
         return
       }
       if (statusCode !== 200) {
         res.resume()
-        resolvePromise({ ok: false, status: statusCode ?? 0 })
+        resolvePromise({ ok: false, status: statusCode ?? 0, final })
         return
       }
       const chunks = []
       res.on('data', (c) => chunks.push(c))
-      res.on('end', () => resolvePromise({ ok: true, status: 200, body: Buffer.concat(chunks) }))
-      res.on('error', () => resolvePromise({ ok: false, status: 0 }))
+      res.on('end', () => resolvePromise({ ok: true, status: 200, final, body: Buffer.concat(chunks) }))
+      res.on('error', () => resolvePromise({ ok: false, status: 0, final }))
     })
-    request.on('timeout', () => { request.destroy(); resolvePromise({ ok: false, status: 0 }) })
+    request.on('timeout', () => { request.destroy(); resolvePromise({ ok: false, status: 0, final }) })
     request.on('error', () => resolvePromise({ ok: false, status: 0 }))
   })
 }
@@ -211,17 +212,36 @@ function download(url, { redirects = 5, accept = '*/*' } = {}) {
  * 三种结果必须分得开：「问到了」「那边没有最新发布」「没连上」。后两种走的路不一样。
  */
 async function fetchLatestTag(source) {
-  const repo = repoPath(source)
-  if (repo === undefined) return { state: 'absent' }
+  // **不要求来源是 `owner/name` 那种形状**：它只是一个 http(s) 地址，探针也只需要地址。
+  // 早年这里拿 `repoPath` 当门槛，于是自建镜像给的 `http://host:port` 被挡在门外，
+  // 而挡的方式是「那边没有最新发布」——一个看起来像事实的错误结论。
   const res = await download(`${source}/releases/latest`, { accept: 'application/vnd.github+json' })
   if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
-  try {
-    const tag = JSON.parse(res.body.toString('utf8'))?.tag_name
-    const version = typeof tag === 'string' ? plainVersion(tag) : ''
-    return version !== '' ? { state: 'ok', version } : { state: 'absent' }
-  } catch {
-    return { state: 'absent' }
+
+  // 一：**看它最后落在哪个地址**。托管平台的 `releases/latest` 会跳到那一版的页面，
+  // 地址末尾就是标签（`…/releases/tag/v0.16.1`）。这一条路**一个字节正文都不用读**，
+  // 既省流量，也不依赖 API 主机。
+  const fromUrl = /\/releases\/tag\/([^/?#]+)/.exec(res.final ?? '')
+  if (fromUrl !== null) {
+    const version = plainVersion(decodeURIComponent(fromUrl[1]))
+    if (version !== '') return { state: 'ok', version }
   }
+
+  // 二：正文是 JSON（API 形状、或自建服务端按 API 形状回应）。
+  const text = res.body.toString('utf8')
+  if (/^\s*[[{]/.test(text)) {
+    try {
+      const tag = JSON.parse(text)?.tag_name
+      const version = typeof tag === 'string' ? plainVersion(tag) : ''
+      if (version !== '') return { state: 'ok', version }
+    } catch { /* 不是合法 JSON：落到下面当「那边没有」处理 */ }
+  }
+
+  // 三：跳到了别处、正文也不是 JSON（例如自建服务端只回一个静态页）。
+  // **这里不能再拿正文去猜版本号**：正文里出现的版本串可以是任何东西（页脚、变更记录、
+  // 友情链接），猜错的方向是把使用者降级到一版更旧的代码。宁可说「那边没有最新发布」，
+  // 让调用方去下那一份包、从包里读。
+  return { state: 'absent' }
 }
 
 /** 下载一份包并解开，顺带读出它的版本。任何一个环节不成立都不返回半份内容。 */
@@ -424,8 +444,21 @@ function fallbackSource() {
 
 /** 来源地址得是个 http(s) 地址，才谈得上「去哪儿取新版」。 */
 function originUrl(source) {
-  const s = String(source ?? '').trim().replace(/\/+$/, '')
-  return /^https?:\/\/[^\s/]+\/.+/i.test(s) ? s : undefined
+  const s = String(source ?? '').trim()
+  if (s === '') return undefined
+  let url
+  try {
+    url = new URL(s)
+  } catch {
+    return undefined
+  }
+  // 只校协议与主机：**根路径也是合法来源**。以前靠一条正则要求「主机后面必须还有一段
+  // 路径」，于是 `http://127.0.0.1:8080`、`http://mirror.internal:9000` 这类自建镜像
+  // 被静默拒绝——改了环境变量的人以为指到了内网，实际还在打硬编码的那个仓库。
+  if (!/^https?:$/.test(url.protocol) || url.host === '') return undefined
+  // 查询串与锚点会被拼进 `releases/latest` 的路径里，拼出一个不存在的地址；直接不接受。
+  if (url.search !== '' || url.hash !== '') return undefined
+  return (url.origin + url.pathname).replace(/\/+$/, '')
 }
 
 /** 源码副本：只读报告，一个字节都不写。 */

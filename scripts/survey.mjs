@@ -1493,7 +1493,9 @@ function detectEcosystem(root, root_, walked) {
     if (unknownManifests.length > 0) unique.push('unrecognized')
     else if (readmes.length > 0 && nonDoc.length === 0) {
       unique.push('docs-only')
-      evidence.push('仅见 Markdown 文档')
+      // 措辞按**事实**给：这一格只说明「除文档之外没别的东西」。文档是 Markdown 还是
+      // 光秃秃一份纯文本 README，判据没有看内容，就不下那个结论。
+      evidence.push('仅见文档类文件')
     } else if (nonDoc.length > 0) {
       unique.push('unrecognized')
       evidence.push(`未识别出项目形态（非文档文件示例：${nonDoc.slice(0, 3).join('、')}）`)
@@ -1569,11 +1571,30 @@ function deriveCommands(root, root_, eco) {
       const hit = aliases.find((a) => typeof pkg.scripts[a] === 'string')
       if (hit !== undefined) node[key] = `${pm} run ${hit}`
     }
-    // 装依赖永远是包管理器自己的命令：`scripts.install` 是项目自定义的安装钩子，
-    // 不是「怎么装依赖」，所以它不进上面那张别名表——放进去会被这一行无条件覆盖，
-    // 留下一条永远不生效、而读代码的人会以为生效的分支。
-    node.install = `${pm} install`
+
+    // 清单里声明了 scripts，但一条常规脚本名都没命中（`forge`、`smelt`、`release:prod` 这类
+    // 自定义名字很常见）。此时**必须说清「为什么推不出来」并给出原始脚本名**：
+    // 只说「未推导出任何命令」，读的人会以为这个项目没有可跑的命令，而项目其实声明了一堆
+    // ——P7 那道验证门就这样落空了。名字一并带出来，AI 才能自己挑出该跑哪条。
+    const declared = Object.keys(pkg.scripts).filter((k) => typeof pkg.scripts[k] === 'string')
+    const matched = ['build', 'test', 'typecheck', 'lint', 'verify', 'smoke'].some((k) => k in node)
+
+    // 装依赖的命令（`scripts.install` 是项目自定义的安装钩子，不是「怎么装依赖」，
+    // 所以它不进上面那张别名表）。**只在真的推出一条验证命令时，才把它带上**：
+    // `install` 单独出现会灌满扁平视图，「未推导出任何命令」这条诚实信号（P7 汇报
+    // 「这个项目一行都没验证过」的依据）就再也不出现了，而装依赖撑不起验证门。
+    if (matched) node.install = `${pm} install`
+    else {
+      node.note = declared.length > 0
+        ? '清单里声明了这些脚本，但没有一条是常规名字（build / test / lint 一类），'
+          + `所以没有推导出命令：${declared.slice(0, 8).join('、')}${declared.length > 8 ? ' 等' : ''}`
+          + '——请读清单确认哪一条是本项目的构建或验证命令'
+        : '清单里的 scripts 是空的，没有可推导的命令'
+    }
     byEcosystem.node = node
+  } else if (eco.kinds.includes('node')) {
+    // 有 node 生态但没有 scripts 字段：只说一句，**不给 `install`**——理由同上。
+    byEcosystem.node = { note: '清单里没有 scripts 字段，命令要读项目自己的说明' }
   }
 
   if (eco.kinds.includes('python')) {
@@ -2588,10 +2609,11 @@ function toMarkdown(s) {
   if (cmds.length === 0) L.push('- 未推导出任何命令（正常结果：说明项目没声明这些命令，'
     + '不代表错误；此时 P7 的验证不成立，见 SKILL.md）')
   else for (const [k, v] of cmds) L.push(`- ${k}：\`${v}\``)
-  // 说明与命令分开列：它们解释「这条命令从哪来」，本身不是命令。
+  // 说明与命令分开列：它们解释「这条命令从哪来」，本身不是命令。`note` 是普通说明，
+  // 不套反引号——套上会让一段话看起来像一个可执行的名字（`xxxNote` 那类键名才需要）。
   for (const [k, v] of Object.entries(s.commands)) {
     if (!isNoteKey(k) || typeof v !== 'string') continue
-    L.push(`  - \`${k}\`：${v}`)
+    L.push(k === 'note' ? `  - 说明：${v}` : `  - \`${k}\`：${v}`)
   }
   if (s.commands?.multipleEcosystems !== undefined) {
     L.push('')

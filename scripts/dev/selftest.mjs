@@ -18,7 +18,7 @@ import {
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
@@ -42,11 +42,14 @@ const SKILL_ROOT = resolve(HERE, '..', '..')
 /** 随包分发的脚本在 scripts/ 顶层；本文件与 preflight 住在 scripts/dev/（自用，不进包）。 */
 const SCRIPTS_DIR = join(HERE, '..')
 const FIXTURE_PREFIX = 'project-forge-selftest-'
-const ROOT = join(tmpdir(), `${FIXTURE_PREFIX}${process.pid}`)
+// 目录名 = 前缀 + pid + 随机后缀。**随机后缀不是装饰**：进程号会被系统回收，两次运行
+// 完全可能拿到同一个号，而那次「同名」的后果是后一次把自己的 fixture 建进前一次正在用的
+// 目录里——清理时 rmSync 会把别人正在读的文件一起删掉。实测撞过一次：行为自检跑到一半
+// 报 `ENOENT …CONTRIBUTING.md`，被前置检查记成失败，看起来像代码坏了。
+const ROOT = join(tmpdir(), `${FIXTURE_PREFIX}${process.pid}-${randomBytes(3).toString('hex')}`)
 
-// 目录名带 pid 还不够：**另一个正在跑的 selftest 也是这个名字形状**。所以再写一个所有权
-// 标记，让「上次遗留」与「别人正在用」分得开——分不开的话，它会报出一笔并不存在的债，
-// 而「看不见的债」与「假的债」一样会让人不再相信这份报告。
+// 目录名已经带随机后缀，两次运行不可能同名；所有权标记仍然留着——它让**清理流程**能分辨
+// 「上次遗留」与「别人正在用」，也顺手把这次用的是哪个目录告诉跑的人。
 mkdirSync(ROOT, { recursive: true })
 writeFileSync(join(ROOT, 'owner.pid'), `${process.pid}\n`, 'utf8')
 
@@ -157,7 +160,25 @@ function skipGroup(title, why) {
 }
 
 function group(title) {
+  markTime(title)
   process.stdout.write(`\n${title}\n`)
+}
+
+/**
+ * 记下「刚才是哪一组、花了多久」。
+ *
+ * 这一趟要跑几分钟，而慢的地方**不一定是看起来最大的那一组**：实测大头是几处
+ * 「拿一整份副本当真跑一遍 preflight」——它们每次都把整套结构检查重跑一遍。
+ * 没有这个计时，优化只能靠猜；有了它，末尾那张表直接指出该动哪一处。
+ */
+let lastGroupTitle = '（开场）'
+let lastGroupAt = Date.now()
+const groupTimes = []
+function markTime(next = '（收尾）') {
+  const now = Date.now()
+  groupTimes.push({ title: lastGroupTitle, ms: now - lastGroupAt })
+  lastGroupTitle = next
+  lastGroupAt = now
 }
 
 function report(ok, label) {
@@ -3098,6 +3119,11 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
   if (!HAS_GIT) {
     skipGroup('[44.2] 空转脚本的端到端判定', '本机没有 git')
   } else {
+    // `skillClone` 给的副本里，行为自检是那个**只打印摘要行的替身**。这是刻意的：
+    // 不做替身的话，副本里的 preflight 会去跑一整套真实自检，而那一套又会拉起副本的
+    // preflight —— `preflight → selftest → preflight` 套娃，实测把副本的每一趟
+    // preflight 从十几秒推到几十秒。判定逻辑由主检出那一趟覆盖，副本只需要一个
+    // 「跑得起来、说得出一句话」的自检。
     const clone = skillClone('mech-survey')
     const p = join(clone, 'scripts', 'survey.mjs')
     const src = readFileSync(p, 'utf8')
@@ -3462,7 +3488,7 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     // 发布方「最新版是哪个标签」由它决定，用例改它来换场景。
     const state = { tag: '9.9.9' }
     // 「那边没有最新发布」的场景：把这个开关打开。
-    const opts = { noLatest: false }
+    const opts = { noLatest: false, tagPage: false }
     const port = { value: 0 }
     const source = () => `http://127.0.0.1:${port.value}/owner/repo`
 
@@ -3484,6 +3510,21 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
         stats.zipBytes += body.length
         res.writeHead(200, { 'content-type': 'application/zip', 'content-length': body.length })
         res.end(body)
+        return
+      }
+      // 托管平台形状的探针：`releases/latest` 跳到那一版的页面，**地址里带着标签**。
+      // 这一支要单独验，因为它是真实 GitHub 上唯一会发生的那一支：跟着跳到页面会把
+      // 一整页 HTML（近 200 KB）拉回来，正文里没有 JSON，于是退回「下载整包读版本」
+      // ——每次任务开头 546 KB。判据因此不能只看「版本认得出来」，必须看**没去下包**。
+      if (path.endsWith('/releases/tag/tag-page')) {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end(`<html><body><h1>Release v${state.tag}</h1>${'x'.repeat(2000)}</body></html>`)
+        return
+      }
+      if (path.endsWith('/releases/latest') && opts.tagPage === true) {
+        stats.api += 1
+        res.writeHead(302, { location: new URL('/o/r/releases/tag/tag-page', source()).toString() })
+        res.end()
         return
       }
       res.writeHead(404).end()
@@ -3508,6 +3549,24 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       check(stats.apiBytes > 0 && stats.apiBytes < 1000, '那次请求的体积是几十字节级别，不是整包',
         `${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
       report(stats.apiBytes < 1000, `那次请求 ${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
+    }
+
+    // 一之二、托管平台形状：`releases/latest` 跳到那一版的页面，标签就在地址里。
+    //     判据是**没有去下整包**——只验「版本认得出来」的话，跟着跳到页面、把 HTML
+    //     拉回来、再退回下载整包那条路也会显示通过，而那正是每次任务 546 KB 的成因。
+    {
+      state.tag = '9.9.9'
+      opts.tagPage = true
+      const dir = makeCopy('tag-page', { source: source() })
+      resetStats()
+      const r = await runUpdate(dir, '--check')
+      opts.tagPage = false
+      failWith(/有新版本 9\.9\.9/.test(r.out), '跳转地址里带着标签时，版本照样认得出来', r)
+      report(/有新版本 9\.9\.9/.test(r.out), '跳转探针：版本从落点地址里读出来')
+      const noPackage = stats.zip === 0
+      check(noPackage, '标签从落点地址读到时，不去下整包（这一条就是「每次任务 546 KB」的判据）',
+        `整包请求 ${stats.zip} 次`)
+      report(noPackage, '跳转探针：一个字节的整包都没下')
     }
 
     // 二、有新版：整份覆盖。本地改过的内容**照样被覆盖**——这是明确的规则，
@@ -3711,6 +3770,21 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       const usedFallback = /有新版本 9\.9\.9/.test(r.out)
       failWith(usedFallback, '读不到来源时用兜底地址继续核对（PF_UPDATE_SOURCE 真的生效）', r)
       report(usedFallback, '无来源：兜底地址被用起来了')
+
+      // 兜底地址可以**只有主机名、没有路径**：自建镜像与内网发布常常就是一个裸的
+      // `http://host:port`。以前靠一条「主机后面必须还有一段路径」的正则判它，裸地址被
+      // 静默拒绝——改环境变量的人以为指到了内网，实际还在打硬编码的那个仓库。
+      // 这里连**请求路径**一起断言：地址被接受不等于拼出来的地址是对的。
+      const bare = `http://127.0.0.1:${server.address().port}`
+      resetStats()
+      const rBare = await runUpdate(makeCopy('no-source-bare', {}), '--check',
+        { env: { PF_UPDATE_SOURCE: bare } })
+      const bareAccepted = /有新版本 9\.9\.9/.test(rBare.out)
+      failWith(bareAccepted, '兜底地址只有主机名（没有路径）时也要被接受', rBare)
+      report(bareAccepted, '无来源：裸主机名的兜底地址被接受')
+      check(stats.api > 0, '裸主机名的地址拼出来的问询路径是对的（服务端真的收到了请求）',
+        `约定端点收到 ${stats.api} 次请求`)
+      report(stats.api > 0, '裸主机名：请求真的到了服务端')
 
       // 副本自己的来源优先：它指着本机服务端时，兜底指向哪儿都不该被用。
       const own = makeCopy('own-source-wins', { source: source() })
@@ -3958,8 +4032,58 @@ group('[49] 命令行用法：打错了必须说出来')
   report(helpOk, '--help 打印用法')
 }
 
+group('[50] 命令推导的四种空：每一种都要说得出「为什么空」')
+{
+  // 这一组守的是 P7 那道验证门。命令推不出来本身不可怕，可怕的是**推不出来还不说为什么**
+  // ——读的人会以为项目没有可跑的命令，于是把没验证过的东西汇报成「已验证」。
+  const scriptsOf = (data) => data.commands ?? {}
+  const noteOf = (data) => scriptsOf(data).note ?? ''
+
+  // 1) 常规脚本名：推得出命令，且**不**该有说明（有说明就说明判据走进了别的分支）。
+  const normal = survey(fixture('cmd-normal', {
+    'package.json': '{"name":"n","scripts":{"build":"tsc","test":"vitest run","lint":"eslint ."}}\n',
+  }))
+  const normalOk = scriptsOf(normal).build === 'npm run build'
+    && scriptsOf(normal).test === 'npm run test'
+    && scriptsOf(normal).install === 'npm install'
+    && noteOf(normal) === ''
+  check(normalOk, '常规脚本名：推出命令、带上 install、没有多余的说明',
+    JSON.stringify(scriptsOf(normal)))
+  report(normalOk, '常规脚本名：有命令、无说明')
+
+  // 2) 只有自定义脚本名：**说得出为什么空，并列出原始脚本名**。这是本组的主角。
+  const custom = survey(fixture('cmd-custom', {
+    'package.json': '{"name":"c","scripts":{"forge":"node forge.mjs","smelt":"node smelt.mjs"}}\n',
+  }))
+  const customNote = noteOf(custom)
+  const customOk = scriptsOf(custom).build === undefined
+    && customNote.includes('forge') && customNote.includes('smelt') && customNote.includes('常规名字')
+  check(customOk, '自定义脚本名：一条命令都没有，但说明里列出了清单声明的脚本名',
+    customNote === '' ? '(没有说明——这正是要防的静默)' : customNote.slice(0, 80))
+  report(customOk, '自定义脚本名：说明里带出原始脚本名')
+
+  // 3) 没有 scripts 字段：也要有说明，且**不能给 install**——给了它，扁平视图里就有了一条
+  //    命令，「未推导出任何命令」这条诚实信号便不再出现。
+  const bare = survey(fixture('cmd-bare', { 'package.json': '{"name":"b"}\n' }))
+  const bareOk = scriptsOf(bare).install === undefined && noteOf(bare).includes('scripts')
+  check(bareOk, '没有 scripts 字段：不给 install，且说明里说清原因', JSON.stringify(scriptsOf(bare)))
+  report(bareOk, '没有 scripts 字段：有说明、无假命令')
+
+  // 4) scripts 是空对象：与「没有这个字段」分得开（两句话不同）。
+  const empty = survey(fixture('cmd-empty', { 'package.json': '{"name":"e","scripts":{}}\n' }))
+  const emptyOk = noteOf(empty) !== '' && noteOf(empty) !== noteOf(bare)
+  check(emptyOk, 'scripts 是空的：与「没有 scripts 字段」说得出不同的话', noteOf(empty).slice(0, 60))
+  report(emptyOk, 'scripts 是空的：与另一种空分得开')
+
+  // 5) 反过来证伪：上面那几条不能恒真——给一个**能**推出命令的项目，说明必须消失。
+  const canBeSilent = noteOf(normal) === '' && scriptsOf(normal).build !== undefined
+  check(canBeSilent, '前提：说明只出现在真的推不出命令时（否则上面几条是恒真的）')
+  report(canBeSilent, '前提：有命令时没有说明')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
+markTime()
 cleanupFixtures()
 
 const envNote = HAS_GIT ? '' : '（本机没有 git，已跳过依赖它的分组）'
@@ -3969,6 +4093,13 @@ const staleNote = stale.length > 0
   : ''
 process.stdout.write(`\n行为自检：${passed} 项通过，${failed} 项失败`
   + `${skipped > 0 ? `，${skipped} 组跳过` : ''}${envNote}${staleNote}\n`)
+// 最慢的几组直接列出来：这份自检要跑几分钟，而下一次想让它更快的人需要知道**花在哪儿**
+// ——没有这张表，优化只能靠猜。
+const slowest = [...groupTimes].sort((a, b) => b.ms - a.ms).slice(0, 5).filter((g) => g.ms >= 1000)
+if (slowest.length > 0) {
+  process.stdout.write('\n最慢的几组（毫秒）：\n')
+  for (const g of slowest) process.stdout.write(`  ${String(g.ms).padStart(7)}  ${g.title}\n`)
+}
 if (skips.length > 0) {
   process.stdout.write('\n跳过（环境不具备，不是缺陷）：\n')
   for (const s of skips) process.stdout.write(`  - ${s}\n`)

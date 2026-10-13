@@ -3564,6 +3564,32 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
   report(linkCaught, '反例二：包内链接越界')
 }
 
+// ── [49] 命令行用法：打错了必须说出来 ────────────────────────────────────────
+
+group('[49] 命令行用法：打错了必须说出来')
+{
+  const run = (args) => spawnSync(process.execPath,
+    [join(SKILL_ROOT, 'scripts', 'dev', 'preflight.mjs'), ...args],
+    { encoding: 'utf8', windowsHide: true })
+  // 断的是「有输出」，不是只断退出码：只断退出码正是让「提示被 return 2 吃掉」这个缺陷
+  // 溜过去的原因——退出码对了，人却什么都看不到。
+  for (const [args, label] of [
+    [['--bogus'], '未知参数'],
+    [['--release'], '参数缺值'],
+    [['--package'], '参数缺值'],
+  ]) {
+    const r = run(args)
+    const text = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
+    const ok = r.status === 2 && text !== ''
+    check(ok, `用法错误（${label}）退出 2 且说得出话`, `exit=${r.status} 输出 ${text.length} 字节`)
+    report(ok, `用法错误：${label}`)
+  }
+  const help = run(['--help'])
+  const helpOk = help.status === 0 && /用法/.test(help.stdout ?? '')
+  check(helpOk, '--help 退出 0 并打印用法', `exit=${help.status}`)
+  report(helpOk, '--help 打印用法')
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 
 cleanupFixtures()

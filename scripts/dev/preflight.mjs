@@ -1827,6 +1827,20 @@ function checkReleaseTag(tag) {
   }
 }
 
+/**
+ * 用法错误：**先把话说出来，再退出**。
+ *
+ * `fail()` 只往 `failures` 里追加，真正打印它的是 `summarize()`；用法错误的路径不经过
+ * 汇总，所以直接 `return 2` 等于「打错了，但一个字都不告诉你」——提示白写了，退出码
+ * 又只有脚本自己看得懂。这里把已记下的失败原样打印到 stderr，再返回用法错误码。
+ */
+function usageError(message) {
+  fail(message)
+  process.stderr.write(`${failures.join('\n')}\n`)
+  failures.length = 0
+  return 2
+}
+
 function usage() {
   return [
     '用法：node scripts/dev/preflight.mjs [--package <清单文件> [--at <版本>] | --release <标签>]',
@@ -1861,16 +1875,12 @@ function main(argv = []) {
   const releaseTag = value('--release')
   const atRef = value('--at')
   if (producedList === '' || releaseTag === '' || atRef === '') {
-    fail(`参数缺值。\n${usage()}`)
-    return 2
+    return usageError(`参数缺值。\n${usage()}`)
   }
   const known = new Set(['--package', '--release', '--at', producedList, releaseTag, atRef]
     .filter((x) => x !== undefined))
   const unknown = argv.filter((a) => !known.has(a))
-  if (unknown.length > 0) {
-    fail(`未知参数：${unknown.join(' ')}\n${usage()}`)
-    return 2
-  }
+  if (unknown.length > 0) return usageError(`未知参数：${unknown.join(' ')}\n${usage()}`)
 
   // 两个模式各只做一件事，做完就汇总。它们由持续集成与发布工作流调用，而那里
   // 结构自检已经单独跑过一遍——重复跑一遍只是白花时间，还会让「这一条到底查了什么」

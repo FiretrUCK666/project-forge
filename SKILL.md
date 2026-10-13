@@ -11,6 +11,7 @@ description: |
 whenToUse: 要给一个项目配版本管理、上远端仓库、写文档套装、配发布通道，或对它说「规范一下」「初始化」时。
 metadata:
   version: "0.14.0"
+  source: "https://github.com/FiretrUCK666/project-forge"
 ---
 
 # project-forge
@@ -386,7 +387,8 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/update.mjs` | **任何任务的第一步**（见「动手之前：先跑一次自动更新」）。让这个副本保持最新 |
-| `scripts/survey.mjs` | P1 勘察 |
+| `scripts/survey.mjs` | P1 勘察；也是全项目共用的文本判据（frontmatter、文件地图、仓库地址归一） |
+| `scripts/zip.mjs` | 解开 zip 包——自更新要拿「同一版本的包」逐文件核对，先得读得动它 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 只校验不写入，`--status` 只看现状，`--upgrade` 升级手写文件，`--budget N` 覆盖注入预算） |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |

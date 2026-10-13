@@ -1,125 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 1200 340" role="img" aria-labelledby="pfPipeTitle pfPipeDesc">
-  <title id="pfPipeTitle">project-forge 的执行链路</title>
-  <desc id="pfPipeDesc">一张自上而下的链路表。第一行是只读勘察读到的事实；接着按四件事分列：版本管理、文档套装、远端仓库、发布通道；第二行按事实判定每件做还是跳过；第三行是硬门控 G1–G8，其中 G2 到 G5 各自对应一件；第四行是落盘、推送与发布的产物。判定依据是勘察出的全部事实，不是预设清单。</desc>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="340" viewBox="0 0 1200 340"
+     role="img" aria-labelledby="pfFlowTitle pfFlowDesc">
+  <title id="pfFlowTitle">它怎么工作</title>
+  <desc id="pfFlowDesc">三段流程：先只读勘察，读事实而不写文件；再按事实判定该做哪几件、跳过哪几件；最后落盘、推送、发布，并回读确认。判定依据是勘察出的全部事实，不是预设清单。</desc>
 
-  <defs>
-    <pattern id="pfPipeGridMinor" width="24" height="24" patternUnits="userSpaceOnUse">
-      <path d="M 24 0 L 24 24 M 0 24 L 24 24" fill="none" stroke="#E7E1D3" stroke-width="1"/>
-    </pattern>
-    <pattern id="pfPipeGridMajor" width="120" height="120" patternUnits="userSpaceOnUse">
-      <path d="M 120 0 L 120 120 M 0 120 L 120 120" fill="none" stroke="#DCD4C1" stroke-width="1"/>
-    </pattern>
-  </defs>
+  <!-- 与 hero 同一套中性底色与留白：左右各 64，上下各 56 -->
+  <rect width="1200" height="340" fill="#E9E8E4"/>
 
-  <g id="sheet">
-    <rect width="1200" height="340" rx="22" fill="#F4F1EA"/>
-    <rect width="1200" height="340" rx="22" fill="url(#pfPipeGridMajor)"/>
-    <rect width="1200" height="340" rx="22" fill="url(#pfPipeGridMinor)"/>
-    <rect x="0.75" y="0.75" width="1198.5" height="338.5" rx="22" fill="none" stroke="#CFC7B6" stroke-width="1.5"/>
-    <g fill="none" stroke="#CFC7B6" stroke-width="1.2">
-      <path d="M 34 56 L 34 34 L 56 34"/>
-      <path d="M 1144 34 L 1166 34 L 1166 56"/>
-      <path d="M 34 284 L 34 306 L 56 306"/>
-      <path d="M 1144 306 L 1166 306 L 1166 284"/>
+  <g id="head">
+    <rect x="64" y="58" width="6" height="26" fill="#C2410C"/>
+    <text x="84" y="84" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+          font-size="40" font-weight="700" fill="#17181A">它怎么工作</text>
+    <text x="1136" y="82" text-anchor="end"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" fill="#5D6064">P0–P7 · 硬门控 G1–G8</text>
+  </g>
+
+  <line x1="64" y1="122" x2="1136" y2="122" stroke="#C6C4BF" stroke-width="1"/>
+
+  <g id="stages" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="64" y="180" font-size="30" font-weight="700" fill="#17181A">只读勘察</text>
+    <text x="64" y="210" font-size="19" fill="#5D6064">读事实，不写任何文件</text>
+
+    <text x="452" y="180" font-size="30" font-weight="700" fill="#17181A">按事实判定</text>
+    <text x="452" y="210" font-size="19" fill="#5D6064">该做哪几件，跳过哪几件</text>
+
+    <text x="840" y="180" font-size="30" font-weight="700" fill="#17181A">落盘 · 推送 · 发布</text>
+    <text x="840" y="210" font-size="19" fill="#5D6064">做完回读，确认真的成了</text>
+
+    <g fill="none" stroke="#C2410C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M400 174 L440 174 M430 166 L440 174 L430 182"/>
+      <path d="M788 174 L828 174 M818 166 L828 174 L818 182"/>
     </g>
   </g>
 
-  <g id="sheet-head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="64" y="46" font-size="32" font-weight="600" fill="#1B1A17">它怎么工作</text>
-    <text x="1136" y="44" font-size="19" fill="#6B675C" text-anchor="end">执行流程 P0–P7 · 硬门控 G1–G8</text>
-    <line x1="64" y1="60" x2="1136" y2="60" stroke="#CFC7B6" stroke-width="1"/>
-  </g>
+  <line x1="64" y1="236" x2="1136" y2="236" stroke="#C6C4BF" stroke-width="1"/>
 
-  <g id="flow-spine" fill="none">
-    <line x1="56" y1="66" x2="56" y2="284" stroke="#CFC7B6" stroke-width="1.2"/>
-    <g stroke="#A6381F" stroke-width="1.6">
-      <path d="M 51 116 L 56 123 L 61 116"/>
-      <path d="M 51 176 L 56 183 L 61 176"/>
-      <path d="M 51 226 L 56 233 L 61 226"/>
-    </g>
-  </g>
-
-  <g id="table-frame" stroke="#CFC7B6" stroke-width="1">
-    <line x1="64" y1="106" x2="1136" y2="106"/>
-    <line x1="64" y1="136" x2="1136" y2="136"/>
-    <line x1="64" y1="180" x2="1136" y2="180"/>
-    <line x1="64" y1="230" x2="1136" y2="230"/>
-    <line x1="64" y1="292" x2="1136" y2="292"/>
-    <line x1="260" y1="106" x2="260" y2="292"/>
-    <line x1="479" y1="106" x2="479" y2="292"/>
-    <line x1="698" y1="106" x2="698" y2="292"/>
-    <line x1="917" y1="106" x2="917" y2="292"/>
-  </g>
-
-  <g id="row-labels" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="72" y="78" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C">P1</text>
-    <text x="72" y="97" font-size="20" font-weight="600" fill="#1B1A17">只读勘察</text>
-
-    <text x="72" y="126" font-size="20" font-weight="600" fill="#1B1A17">四件事</text>
-
-    <text x="72" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C">P2</text>
-    <text x="72" y="171" font-size="20" font-weight="600" fill="#1B1A17">按事实判定</text>
-
-    <text x="72" y="199" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C">G1–G8</text>
-    <text x="72" y="218" font-size="20" font-weight="600" fill="#1B1A17">硬门控</text>
-
-    <text x="72" y="256" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#6B675C">P3–P6</text>
-    <text x="72" y="275" font-size="20" font-weight="600" fill="#1B1A17">落盘 / 推送 / 发布</text>
-  </g>
-
-  <g id="survey-row" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="274" y="88" font-size="20" fill="#1B1A17">生态与清单 · 仓库与远端 · 产物与发布声明</text>
-    <text x="1112" y="88" font-size="18" fill="#6B675C" text-anchor="end">读不到不编造</text>
-  </g>
-
-  <g id="face-heads" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="274" y="126" font-size="22" font-weight="600" fill="#1B1A17">版本管理</text>
-    <text x="493" y="126" font-size="22" font-weight="600" fill="#1B1A17">文档套装</text>
-    <text x="712" y="126" font-size="22" font-weight="600" fill="#1B1A17">远端仓库</text>
-    <text x="931" y="126" font-size="22" font-weight="600" fill="#1B1A17">发布通道</text>
-  </g>
-
-  <g id="judgement-row" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="274" y="162" font-size="18" fill="#6B675C">已有仓库只补缺</text>
-    <text x="493" y="162" font-size="18" fill="#6B675C">先读一遍，只补缺失</text>
-    <text x="712" y="162" font-size="18" fill="#6B675C">已有远端不重建</text>
-    <text x="931" y="162" font-size="18" fill="#6B675C">不发布也是正常结果</text>
-  </g>
-
-  <g id="gate-row" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <rect x="274" y="192" width="40" height="26" rx="2" fill="none" stroke="#A6381F" stroke-width="1.4"/>
-    <text x="294" y="209" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#A6381F" text-anchor="middle">G2</text>
-    <text x="326" y="209" font-size="18" fill="#1B1A17">首次提交前</text>
-
-    <rect x="493" y="192" width="40" height="26" rx="2" fill="none" stroke="#A6381F" stroke-width="1.4"/>
-    <text x="513" y="209" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#A6381F" text-anchor="middle">G3</text>
-    <text x="545" y="209" font-size="18" fill="#1B1A17">写文档前</text>
-
-    <rect x="712" y="192" width="40" height="26" rx="2" fill="none" stroke="#A6381F" stroke-width="1.4"/>
-    <text x="732" y="209" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#A6381F" text-anchor="middle">G4</text>
-    <text x="764" y="209" font-size="18" fill="#1B1A17">建仓推送前</text>
-
-    <rect x="931" y="192" width="40" height="26" rx="2" fill="none" stroke="#A6381F" stroke-width="1.4"/>
-    <text x="951" y="209" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#A6381F" text-anchor="middle">G5</text>
-    <text x="983" y="209" font-size="18" fill="#1B1A17">发布前</text>
-  </g>
-
-  <g id="output-row" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="274" y="251" font-size="18" fill="#1B1A17">忽略规则 · 署名</text>
-    <text x="274" y="279" font-size="18" fill="#1B1A17">密钥扫描 · 首次提交</text>
-
-    <text x="493" y="251" font-size="18" fill="#1B1A17">AGENTS.md</text>
-    <text x="493" y="279" font-size="18" fill="#1B1A17">README · LICENSE</text>
-
-    <text x="712" y="251" font-size="18" fill="#1B1A17">建仓 · 推送</text>
-    <text x="712" y="279" font-size="18" fill="#1B1A17">元数据 · 回读校验</text>
-
-    <text x="931" y="251" font-size="18" fill="#1B1A17">先判能不能发</text>
-    <text x="931" y="279" font-size="18" fill="#1B1A17">预演 · 发布 · 回读</text>
-  </g>
-
-  <g id="sheet-foot" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-    <text x="64" y="318" font-size="19" fill="#1B1A17">判定依据是勘察出的全部事实，不是预设清单。</text>
-    <text x="1136" y="318" font-size="18" fill="#6B675C" text-anchor="end">G1 写入前 · G6 插件类 · G7 用户定的事 · G8 能力目录类</text>
+  <g id="foot" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="64" y="280" font-size="19" fill="#17181A">判定依据是勘察出的全部事实，不是预设清单。</text>
+    <text x="1136" y="280" font-size="19" fill="#5D6064" text-anchor="end">每次写入之前，硬门控先拦一下</text>
   </g>
 </svg>

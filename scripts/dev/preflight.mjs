@@ -24,7 +24,7 @@
  * 用法：
  *   node scripts/dev/preflight.mjs                              # 结构自检
  *   node scripts/dev/preflight.mjs --package <清单文件> [--at <版本>]  # 产出物与文件地图核对
- *   node scripts/dev/preflight.mjs --release <标签>              # 标签与它里面的版本同号
+ *   node scripts/dev/preflight.mjs --release <标签> [--repo <owner/name>]   # 标签与版本、来源
  *
  * 检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数——
  * 换目录检查的做法会让「检查了谁」变成一个可传错的值。
@@ -37,7 +37,8 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, parseMarkerKeys, normVersion } from '../survey.mjs'
+import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoPath,
+  tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -1536,59 +1537,6 @@ function packageMembers() {
   return files.length === 0 ? undefined : files
 }
 
-/**
- * 表格行的**第一格**原文。不是表格行时返回 undefined。
- *
- * 「什么算表格行」只在这里定义一次：文件地图的解析与 README 文件表的对账都从它取，
- * 两处各写一套迟早会在某个边界形状上给出两种答案。
- */
-function tableRowFirstCell(line) {
-  if (!/^\s*\|/.test(line)) return undefined
-  const cells = line.split('|')
-  return cells.length < 3 ? undefined : cells[1]
-}
-
-/** 一份 Markdown 里所有表格行第一格的原文。 */
-function tableFirstCells(text) {
-  const out = []
-  for (const line of String(text ?? '').split('\n')) {
-    const cell = tableRowFirstCell(line)
-    if (cell !== undefined) out.push(cell.trim())
-  }
-  return out
-}
-
-/**
- * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
- *
- * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
- * 声明。新增文件时忘了登记，下面的判据会喊：这正是「不靠记性」的落点。
- */
-function readFileMap(skillText) {
-  const buckets = { shipped: [], repoOnly: [] }
-  let bucket
-  for (const line of String(skillText ?? '').split('\n')) {
-    if (/^###\s+用户包里有/.test(line)) { bucket = buckets.shipped; continue }
-    if (/^###\s+仓库里另有/.test(line)) { bucket = buckets.repoOnly; continue }
-    if (/^##\s/.test(line)) { bucket = undefined; continue }
-    if (bucket === undefined) continue
-    // 只看表格行的**第一格**：那一格才是文件清单，说明格里的反引号（提到的文档、
-    // 命令开关、凭据名）不是声明，读进来会造出一堆假失败。
-    const cell = tableRowFirstCell(line)
-    if (cell === undefined) continue
-    for (const m of cell.matchAll(/`([^`]+)`/g)) {
-      const v = m[1].trim()
-      if (v.includes('<')) {
-        // 占位条目（形如 `references/plugins/<生态>.md`）取它所在的目录当前缀
-        const dir = v.slice(0, v.lastIndexOf('/') + 1)
-        if (dir !== '') bucket.push(dir)
-        continue
-      }
-      if (/^[A-Za-z0-9._/-]+$/.test(v)) bucket.push(v)
-    }
-  }
-  return buckets
-}
 
 /** 当前工作区里 SKILL.md 的文件地图。 */
 function fileMapFromWorktree() {
@@ -1796,18 +1744,19 @@ function checkProducedPackage(listPath, atRef) {
 }
 
 /**
- * 发版门禁：标签的名字、标签里那份 `SKILL.md` 声明的版本，两者必须同号。
+ * 发版门禁：标签的名字、标签里那份 `SKILL.md` 声明的版本与来源。
  *
  * 由发布工作流调用（见 `.github/workflows/release.yml`），不在日常自检里跑——日常没有标签，
  * 这条判据没有输入。`metadata.version` 存在的唯一理由是让**没有版本历史的用户包副本**
- * 知道自己属于哪一版，所以它必须与标签同号，否则那个字段就是在说假话。
+ * 知道自己属于哪一版，所以它必须与标签同号，否则那个字段就是在说假话。`metadata.source`
+ * 同理：那份副本靠它知道去哪儿找新版，指向别人的仓库是在说另一种假话。
  *
- * **版本从标签里读，不从工作区读**：门禁判的是「要发出去的那份包」，而工作区可能已经
+ * **两样都从标签里读，不从工作区读**：门禁判的是「要发出去的那份包」，而工作区可能已经
  * 往前走过了（补漏重跑时它一定往前走过了）。同理这里**不判**「标签是否指向当前检出的
  * 提交」——产出物取自标签那棵树，与检出了什么无关，而判它会把「用 `workflow_dispatch`
  * 补漏」这条文档指定的路径整条堵死（补漏时检出的是分支，不是标签）。
  */
-function checkReleaseTag(tag) {
+function checkReleaseTag(tag, repoArg) {
   const run = (args) => spawnSync('git', args, { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true })
   const tagged = run(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`])
   if (tagged.error !== undefined || tagged.status !== 0) { fail(`仓库里没有标签 ${tag}。`); return }
@@ -1822,8 +1771,23 @@ function checkReleaseTag(tag) {
     fail(`标签 ${tag} 与它里面 SKILL.md 的 metadata.version「${declared}」不一致 —— 两者必须同号，`
       + '否则用户包副本会以为自己属于另一版。')
   }
+  // 来源这一半：取不到可比对的取值时报「未核对」，不静默放行——「没比」与「比过且一致」
+  // 必须分得开，否则一个 fork 会把用户包副本指去别人的仓库，而门禁一路绿。
+  const declaredSource = skillSource(skillText)
+  const origin = run(['remote', 'get-url', 'origin'])
+  const repo = repoArg ?? (origin.status === 0 ? (origin.stdout ?? '').trim() : undefined)
+  if (repo === undefined || repo === '') {
+    warn('发版门禁未核对来源：没给 --repo，也读不到 origin —— 标签里声明的 source 是不是'
+      + '这次发布的仓库，这次判不了。')
+  } else if (declaredSource === undefined) {
+    fail(`标签 ${tag} 里的 SKILL.md 读不到 metadata.source —— 压缩包副本会不知道去哪儿找新版。`)
+  } else if (repoPath(declaredSource) !== repoPath(repo)) {
+    fail(`标签 ${tag} 里声明的来源是 ${declaredSource}，而这次发布的是 ${repo} —— 两者不是同一个`
+      + '仓库，用户包副本会跑去别人的仓库更新。改 SKILL.md 的 metadata.source 再发。')
+  }
   if (failures.length === 0) {
-    process.stdout.write(`发版门禁：标签 ${tag} 与它里面的 metadata.version ${declared} 一致\n`)
+    process.stdout.write(`发版门禁：标签 ${tag} 与它里面的 metadata.version ${declared} 一致`
+      + `；来源 ${declaredSource ?? '（未核对）'}\n`)
   }
 }
 
@@ -1843,7 +1807,7 @@ function usageError(message) {
 
 function usage() {
   return [
-    '用法：node scripts/dev/preflight.mjs [--package <清单文件> [--at <版本>] | --release <标签>]',
+    '用法：node scripts/dev/preflight.mjs [--package <清单文件> [--at <版本>] | --release <标签> [--repo <owner/name>]]',
     '',
     '  不带参数：结构自检（引用完整、内核一致、硬性规范、用户包边界、行为自检）。',
     '',
@@ -1853,8 +1817,11 @@ function usage() {
     '  --at <版本>           --package 的搭档：文件地图与文件内容都从这个版本读。',
     '                        判据与对象必须同源，否则核对的是「今天的规矩」与',
     '                        「那天的产出物」，只在发版那天恰好一致。',
-    '  --release <标签>      只做一件事：核对标签与它里面 SKILL.md 的 metadata.version 同号。',
-    '                        由发布工作流调用。',
+    '  --release <标签>      只做一件事：核对标签与它里面 SKILL.md 的 metadata.version 同号，',
+    '                        并核对 metadata.source 是不是这次发布的那个仓库。',
+    '                        由发布工作流调用（它传 --repo）；不给 --repo 时退回读 origin，',
+    '                        两者都取不到就报「未核对」——「没比」不等于「比过且一致」。',
+    '  --repo <owner/name>   --release 的搭档：这次发布的仓库。',
     '',
     '  两个模式各只做一件事，做完就退出：它们出现的地方，结构自检已经单独跑过。',
     '  检查对象由脚本自身位置推导（根 = 本文件所在目录的上两级），不接受目录参数。',
@@ -1874,11 +1841,12 @@ function main(argv = []) {
   const producedList = value('--package')
   const releaseTag = value('--release')
   const atRef = value('--at')
-  if (producedList === '' || releaseTag === '' || atRef === '') {
+  const repoArg = value('--repo')
+  if (producedList === '' || releaseTag === '' || atRef === '' || repoArg === '') {
     return usageError(`参数缺值。\n${usage()}`)
   }
-  const known = new Set(['--package', '--release', '--at', producedList, releaseTag, atRef]
-    .filter((x) => x !== undefined))
+  const known = new Set(['--package', '--release', '--at', '--repo',
+    producedList, releaseTag, atRef, repoArg].filter((x) => x !== undefined))
   const unknown = argv.filter((a) => !known.has(a))
   if (unknown.length > 0) return usageError(`未知参数：${unknown.join(' ')}\n${usage()}`)
 
@@ -1886,7 +1854,7 @@ function main(argv = []) {
   // 结构自检已经单独跑过一遍——重复跑一遍只是白花时间，还会让「这一条到底查了什么」
   // 变得说不清。
   if (producedList !== undefined) { checkProducedPackage(producedList, atRef); return summarize() }
-  if (releaseTag !== undefined) { checkReleaseTag(releaseTag); return summarize() }
+  if (releaseTag !== undefined) { checkReleaseTag(releaseTag, repoArg); return summarize() }
 
   const skill = checkSkillFile()
   checkReferencesResolve()

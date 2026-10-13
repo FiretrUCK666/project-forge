@@ -63,20 +63,30 @@ project-forge 把这些收敛成一条流程，并且把判断依据写下来—
 
 ## 安装
 
-两种装法，选一种。
+**下载压缩包**，不需要 git：
 
-### 克隆安装（能自动更新）
+<p align="center">
+  <a href="https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip">
+    <b>点这里下载最新版（点击就开始下载）</b>
+  </a>
+</p>
+
+解压到你的 skill 根，目录名保持 `project-forge`。就这一步。
+
+> **别下错东西。** 发布页上还有 GitHub 自动生成的 `Source code`，那是给开发者看的源码。
+> 安装包是 `project-forge.zip`，点上面那条链接拿到的就是它。源码包里会多出 `.github`、
+> `AGENTS.md`、`CONTRIBUTING.md` 这些文件——看到它们说明下的是源码，删掉重下即可，
+> 不影响使用。
+
+**想自己改它，或者想跟着每一次改动走**，就用克隆：
 
 ```sh
 git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/project-forge"
 ```
 
-### 压缩包安装（不需要 git）
-
-到 [Releases](https://github.com/FiretrUCK666/project-forge/releases) 下载最新版的
-`project-forge-<版本>.zip`，解压到你的 skill 根，目录名保持 `project-forge`。
-
-这种装法**不能自动更新**——副本没有版本历史，没法自己核对。有新版时重新下载覆盖。
+这两种的区别只有一条：**克隆下来的那份不会自己更新**。它带着 `.git`，是源码副本，
+是拿来改的——工具对它只读，要更新自己 `git pull`。改着改着文件突然被换掉，比「没更新」
+坏得多。改法见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
 ### 放在哪里
 
@@ -92,15 +102,17 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 
 ## 更新
 
-**克隆装的会自己更新。** 每次任务开始时，它会先跑一次这个：
+**下载装的那份会自己更新。** 每次任务开始时，它会先跑一次这个：
 
 ```sh
 node "<本领目录>/scripts/update.mjs" --quiet
 ```
 
-它查一下上游有没有新版，有就快进更新。判据是**这个副本有没有本地工作**：有未提交的
-改动、有未推送的提交、不在分支上，一概不碰。所以它不会覆盖你的改动，也不会把上游合并
-进贡献者的分支。默认 24 小时只查一次，同一台机器上装了几份副本时各查各的。
+它做三件事：从发布页下载最新版的包；**核对这个副本还是不是当初发出去的那一份**（逐文件比）；
+一致就替换，不一致就一个字节都不动，并告诉你哪里不一样。
+
+判据是**这个副本有没有你自己的东西**，不是「它装在哪」：改过任何一处，它就不碰了。
+所以它不会覆盖你的改动。默认 24 小时只查一次，同一台机器上装了几份副本时各查各的。
 
 想自己看一眼状态（只报告，不更新）：
 
@@ -108,13 +120,8 @@ node "<本领目录>/scripts/update.mjs" --quiet
 node "<本领目录>/scripts/update.mjs" --check
 ```
 
-**压缩包装的不会自动更新**，到 [Releases](https://github.com/FiretrUCK666/project-forge/releases)
-下载新版覆盖即可。
-
-**升级安全吗**：`SKILL.md`、`references/`、`templates/`、`scripts/` 都是纯文本和零依赖
-脚本，没有需要重新编译或迁移的东西。如果你按 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md) 改过
-它，更新脚本会看到本地改动并自动跳过，不会跟你的改动打架。
-
+**克隆装的那份不自动更新**：目录里有 `.git` 就是源码副本，工具对它只读，更新请自己
+`git pull`。
 ## 使用
 
 直接用自然语言描述你的需求即可，触发词包括：
@@ -168,7 +175,8 @@ node "<本领目录>/scripts/update.mjs" --check
 | `references/plugins/` | 各生态的插件专章（一个生态一个文件） |
 | `templates/` | 可直接起步的文档骨架，以及几份短许可证的标准全文 |
 | `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
-| `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
+| `scripts/survey.mjs` | 只读勘察，输出结构化事实；也放全项目共用的文本判据 |
+| `scripts/zip.mjs` | 解开 zip 包：自更新用它核对「这个副本还是不是发出去的那一份」 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md`：按项目事实填充、按事实取舍条件段落、报出还需人工补写的节 |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 | `scripts/release-notes.mjs` | 用 UTF-8 文件写发布说明（中文不经 shell，写完回读比对） |

@@ -31,6 +31,7 @@ import {
   parseMarkerKeys, normVersion,
 } from '../survey.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
+import { readZip, stripCommonPrefix } from '../zip.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下（自用脚本，不进用户包），所以根目录要退两级。
@@ -3320,19 +3321,10 @@ group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，�
   }
 }
 
-// ── [46] 自动更新：判据是「这个副本有没有本地工作」，不是「它装在哪」 ────────
+// ── [46] 自动更新：源码副本只读，包副本靠「内容还是不是发出去那一份」判定 ──────
 
-if (!HAS_GIT) {
-  skipGroup('[46] 自动更新（快进、跳过、节流）', '本机没有 git')
-} else {
-  group('[46] 自动更新：快进、跳过、节流')
-  const FIXTURE_ID = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']
-  const commitIn = (dir, message) => {
-    gitIn(dir, 'add', '-A')
-    return gitIn(dir, ...FIXTURE_ID, 'commit', '-m', message)
-  }
-
-  // 节流状态落在这个目录里：跑完随 fixture 一起清掉，也不会污染本机真正的临时目录。
+group('[46] 自动更新：两种角色、四种来历')
+{
   const updateTmp = join(ROOT, 'update-tmp')
   mkdirSync(updateTmp, { recursive: true })
   const runUpdate = (skillDir, ...extra) => spawnSync(
@@ -3341,122 +3333,109 @@ if (!HAS_GIT) {
   )
   const out = (r) => `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
 
-  // 一棵自带的「上游」：从当前工作区复制一份并提交，再克隆出副本。
-  // 用它而不是本仓库自身，是为了让断言不依赖本仓库的历史——那种依赖会在
-  // 「历史一改，测试就莫名其妙地红」时浪费掉一整个下午。
-  const seed = join(ROOT, 'update-seed')
-  copyTree(SKILL_ROOT, seed, new Set(['.git', '.agent-teams', 'node_modules']))
-  gitIn(seed, 'init')
-  commitIn(seed, 'seed')
-  const seedVersion = skillVersion(readFileSync(join(seed, 'SKILL.md'), 'utf8'))
-  const bumpSeed = (version) => {
-    const p = join(seed, 'SKILL.md')
-    writeFileSync(p, readFileSync(p, 'utf8').replace(/^[ \t]+version:[ \t]*"[^"]*"[ \t]*$/m, `  version: "${version}"`), 'utf8')
-    commitIn(seed, `bump ${version}`)
+  // 造一份副本：只有跑得起来的那几个文件，不复制整棵树——这一组验的是判定，不是包边界。
+  const makeCopy = (name, { withGit = false, source, version = '0.14.0' } = {}) => {
+    const dir = join(fixture(name, {}), 'project-forge')
+    mkdirSync(join(dir, 'scripts'), { recursive: true })
+    for (const f of ['SKILL.md', 'scripts/update.mjs', 'scripts/survey.mjs', 'scripts/zip.mjs']) {
+      writeFileSync(join(dir, f), readFileSync(join(SKILL_ROOT, f)))
+    }
+    const skillPath = join(dir, 'SKILL.md')
+    let text = readFileSync(skillPath, 'utf8')
+      .replace(/^[ \t]+version:[ \t]*"[^"]*"[ \t]*$/m, `  version: "${version}"`)
+    text = source === undefined
+      ? text.replace(/^[ \t]+source:[ \t]*"[^"]*"[ \t]*$\n/m, '')
+      : text.replace(/^[ \t]+source:[ \t]*"[^"]*"[ \t]*$/m, `  source: "${source}"`)
+    writeFileSync(skillPath, text, 'utf8')
+    if (withGit) {
+      gitIn(dir, 'init')
+      gitIn(dir, 'add', '-A')
+      gitIn(dir, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+        'commit', '-m', 'fixture')
+    }
+    return dir
   }
 
-  // 1) 没有版本历史的副本（下载的压缩包）：如实说明无法自更新，不假装查过
+  // 一、有 .git = 源码副本：只读报告，**一个字节都不写**。
   {
-    const zipCopy = join(ROOT, 'update-zipcopy', 'project-forge')
-    copyTree(SKILL_ROOT, zipCopy, new Set(['.git', '.agent-teams', 'node_modules']))
-    const r = runUpdate(zipCopy, '--check')
-    const ok = r.status === 0 && /没有版本历史/.test(out(r))
-    check(ok, '无版本历史的副本：报告无法自动核对，不静默也不假装成功', out(r).slice(0, 120))
-    report(ok, '无版本历史：如实说明')
+    const dir = makeCopy('role-source', { withGit: true })
+    const probe = join(dir, 'scripts', 'survey.mjs')
+    const before = readFileSync(probe, 'utf8')
+    const r = runUpdate(dir, '--check')
+    const text = out(r)
+    const says = /源码副本/.test(text) && /git pull/.test(text)
+    check(says, '有 .git 的副本被认成源码副本，并指路 git pull', text.slice(0, 120))
+    report(says, '源码副本：认得出')
+    const untouched = readFileSync(probe, 'utf8') === before
+    check(untouched, '源码副本一个字节都没被写', '文件内容变了')
+    report(untouched, '源码副本：不写')
   }
 
-  const clone = join(ROOT, 'update-clone')
-  gitIn(ROOT, 'clone', '--quiet', seed, clone)
-
-  // 2) 干净且已是最新：明确报「已是最新」，与「没核对成」区分开
+  // 二、没有 .git、也没有来源 = 身份不明：报「未核对」，不假装查过。
   {
-    const r = runUpdate(clone, '--check')
-    const ok = r.status === 0 && /已是最新/.test(out(r))
-    check(ok, '干净副本：明确报告已是最新', out(r).slice(0, 120))
-    report(ok, '已是最新：报告可区分')
+    const dir = makeCopy('role-nosource', {})
+    const text = out(runUpdate(dir, '--check'))
+    const ok = /无法自动核对/.test(text) && /不是「已是最新」/.test(text)
+    check(ok, '没有来源的副本报「无法自动核对」，不说成「已是最新」', text.slice(0, 140))
+    report(ok, '包副本：没有来源')
   }
 
-  // 3) 落后：--check 只报告不更新；新副本没有节流状态，默认跑一次就快进并报出前后版本
+  // 三、有来源但取不回来 = 「没比」，与「比过且一致」必须分得开。
+  //     指向本机一个没人监听的端口，连接立刻被拒——不依赖外网，也不会慢。
   {
-    // 先在旧版上克隆，再让上游前进——于是这个副本「干净且落后」，正是要测的形状。
-    const clone3 = join(ROOT, 'update-clone3')
-    gitIn(ROOT, 'clone', '--quiet', seed, clone3)
-    bumpSeed('9.9.9')
-    const checked = runUpdate(clone, '--check')
-    const reported = /上游有 1 个新提交可更新/.test(out(checked))
-    check(reported, '落后 1 个提交：--check 报出可更新', out(checked).slice(0, 120))
-    const untouched = !/9\.9\.9/.test(readFileSync(join(clone, 'SKILL.md'), 'utf8'))
-    check(untouched, '--check 只报告，确实没有动文件')
-    report(reported && untouched, '落后：只报告不更新')
-
-    const pulled = runUpdate(clone3)
-    const expected = `已更新：${seedVersion} -> 9.9.9`
-    const ok = pulled.status === 0 && out(pulled).includes(expected)
-    check(ok, `干净副本：快进更新并报出前后版本（期望含「${expected}」）`, out(pulled).slice(0, 160))
-    const landed = /9\.9\.9/.test(readFileSync(join(clone3, 'SKILL.md'), 'utf8'))
-    check(landed, '快进之后磁盘上的文件确实变了（报成功与实际一致）')
-    report(ok && landed, '落后：快进更新')
+    const dir = makeCopy('role-offline', { source: 'http://127.0.0.1:1/owner/repo' })
+    const text = out(runUpdate(dir, '--check'))
+    const ok = /没能联网核对/.test(text) && /不是「已是最新」/.test(text)
+    check(ok, '取不回新版时报「没能联网核对」，不说成「已是最新」', text.slice(0, 140))
+    report(ok, '包副本：取不回来')
   }
 
-  // 4) 有未提交改动：一概不碰。这条是「不覆盖用户成果」在更新路径上的落点。
+  // 四、节流：默认模式 24 小时内只查一次；`--check` 是人主动问，不受它限制。
   {
-    writeFileSync(join(clone, 'README.md'), '\n本地改动\n', { flag: 'a' })
-    bumpSeed('9.9.8')
-    const r = runUpdate(clone, '--check')
-    const ok = /有未提交的改动，跳过更新/.test(out(r))
-      && /本地改动/.test(readFileSync(join(clone, 'README.md'), 'utf8'))
-    check(ok, '有未提交改动：跳过更新且不动文件', out(r).slice(0, 120))
-    report(ok, '有本地改动：跳过')
-    gitIn(clone, 'checkout', '--', 'README.md')
+    const dir = makeCopy('throttle', { source: 'http://127.0.0.1:1/owner/repo' })
+    const first = runUpdate(dir)
+    const second = runUpdate(dir)
+    const forced = runUpdate(dir, '--check')
+    check(out(first) !== '', '前提：第一次默认模式确实查了一次（否则下面的节流断言没有对象）',
+      out(first).slice(0, 120))
+    report(out(first) !== '', '节流：前提成立')
+    const silent = out(second) === ''
+    check(silent, '间隔内再跑默认模式完全静默（不重复报同一句话）', out(second).slice(0, 120))
+    report(silent, '节流：间隔内静默')
+    const bypass = /没能联网核对/.test(out(forced))
+    check(bypass, '--check 绕过节流：人主动问的时候必须真的去查', out(forced).slice(0, 120))
+    report(bypass, '节流：--check 可绕过')
   }
 
-  // 5) 本地领先上游（贡献者的常态）：不合并上游，只报告
+  // 五、zip 读得动：拿 git archive 真产出的包来读，内容与磁盘逐字节一致。
+  //     包从**这份 fixture 自己**产出，不从本仓库——工作区随时有未提交的改动，
+  //     拿 HEAD 的包去比工作区的文件，会在每个改到一半的时刻假红。
   {
-    writeFileSync(join(clone, 'LOCAL.txt'), 'x\n', 'utf8')
-    gitIn(clone, 'add', 'LOCAL.txt')
-    gitIn(clone, ...FIXTURE_ID, 'commit', '-m', 'local work')
-    const r = runUpdate(clone, '--check')
-    const ok = /本地有 1 个未推送的提交，跳过更新/.test(out(r))
-    check(ok, '本地领先上游：跳过更新，不把上游合并进他的分支', out(r).slice(0, 120))
-    report(ok, '本地领先：跳过')
-  }
-
-  // 6) 节流：默认 24 小时内只查一次；--check 是人主动问，绕过节流。
-  //    没有这一条，「节流」与「坏了什么都不做」从外面看一模一样。
-  {
-    const clone2 = join(ROOT, 'update-clone2')
-    gitIn(ROOT, 'clone', '--quiet', seed, clone2)
-    const first = runUpdate(clone2)
-    const firstOk = /已是最新/.test(out(first))
-    check(firstOk, '前提：首次运行确实查了一次（否则下面的节流断言没有对象）', out(first).slice(0, 120))
-
-    bumpSeed('9.9.7')
-    const throttled = runUpdate(clone2)
-    const silent = out(throttled) === ''
-    check(silent, '节流：间隔内完全不输出', out(throttled).slice(0, 120))
-    const notPulled = !/9\.9\.7/.test(readFileSync(join(clone2, 'SKILL.md'), 'utf8'))
-    check(notPulled, '节流：间隔内确实没有更新（不是「更新了但没说话」）')
-    report(firstOk && silent && notPulled, '节流：间隔内不查也不更新')
-
-    const forced = runUpdate(clone2, '--check')
-    const ok = /上游有 1 个新提交可更新/.test(out(forced))
-    check(ok, '--check 绕过节流：人主动问的时候必须真的去查', out(forced).slice(0, 120))
-    report(ok, '节流：--check 可绕过')
-  }
-
-  // 7) git 不可用 ≠ 没有版本历史。合成一句话会把「没装 git」读成解压安装，
-  //    而两者的处置完全不同（一个是装 git，一个是重新下载）。判据是**进程起没起来**，
-  //    不是退出码——不在仓库里时那条命令同样是非零退出。
-  {
-    const noGit = spawnSync(process.execPath, [join(clone, 'scripts', 'update.mjs'), '--check'], {
-      encoding: 'utf8',
-      windowsHide: true,
-      env: { ...process.env, PATH: '', TEMP: updateTmp, TMPDIR: updateTmp },
-    })
-    const text = out(noGit)
-    const ok = /读不到 git/.test(text) && !/没有版本历史/.test(text)
-    check(ok, 'git 不可用时报「读不到 git」，不与「没有版本历史」混同', text.slice(0, 140))
-    report(ok, 'git 不可用：与无版本历史分开')
+    const dir = makeCopy('zipread', { withGit: true })
+    const zipPath = join(ROOT, 'zipread.zip')
+    const archived = spawnSync('git',
+      ['-C', dir, 'archive', '--format=zip', '--prefix=project-forge-0.14.0/', '-o', zipPath, 'HEAD'],
+      { encoding: 'utf8', windowsHide: true })
+    if (archived.status !== 0) {
+      check(false, '前提：git archive 产得出 zip（否则下面的读包断言没有对象）',
+        (archived.stderr ?? '').slice(0, 160))
+      report(false, 'zip：前提')
+    } else {
+      const entries = stripCommonPrefix(readZip(readFileSync(zipPath)))
+      const skill = entries.find((e) => e.name === 'SKILL.md')
+      // 比内容，不比行尾：git archive 会按机器的 core.autocrlf 写出行尾（Windows 上是 CRLF），
+      // 而库里存的是 LF。这一条要验的是「读得对」，不是「这台机器的行尾设置是什么」。
+      const lf = (s) => String(s).replace(/\r\n/g, '\n')
+      const ok = entries.length >= 4 && skill !== undefined
+        && lf(skill.data.toString('utf8')) === lf(readFileSync(join(dir, 'SKILL.md'), 'utf8'))
+      check(ok, 'zip 读得动：条目数合理，且 SKILL.md 与磁盘那一份逐字节一致（行尾除外）',
+        `条目 ${entries.length}，SKILL.md ${skill === undefined ? '缺失' : '在'}`)
+      report(ok, 'zip：读得动且内容一致')
+      const prefixed = entries.every((e) => !e.name.startsWith('project-forge-0.14.0/'))
+      check(prefixed, 'zip 读出来的路径已经去掉打包前缀（比对的是包内路径）')
+      report(prefixed, 'zip：前缀已去掉')
+    }
+    rmSync(zipPath, { force: true })
   }
 }
 

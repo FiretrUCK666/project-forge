@@ -57,8 +57,8 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
-      - name: 发版门禁（标签与它里面那份 SKILL.md 的版本同号）
-        run: node scripts/dev/preflight.mjs --release "$TAG"
+      - name: 发版门禁（标签与它里面那份 SKILL.md 的版本同号、来源对得上）
+        run: node scripts/dev/preflight.mjs --release "$TAG" --repo "$REPO"
 
       - name: 起草正文（顺带确认标签存在，别把这一步挪到发送之后）
         run: node scripts/draft-release-notes.mjs "$TAG" notes.md
@@ -71,9 +71,12 @@ jobs:
           VERSION="${TAG#v}"
           git archive --format=tar "$TAG" | tar -t > package-list.txt
           node scripts/dev/preflight.mjs --package package-list.txt --at "$TAG"
+          # 附件名固定不带版本号：这样 `releases/latest/download/project-forge.zip` 永远指向
+          # 最新版——README 用它做「点这里下载」，压缩包副本也用它找新版。要某一版就去点
+          # 发布页上那个标签，文件照样在，只是名字一样。
           git archive --format=zip --prefix="project-forge-${VERSION}/" \
-            -o "project-forge-${VERSION}.zip" "$TAG"
-          echo "ASSET=project-forge-${VERSION}.zip" >> "$GITHUB_ENV"
+            -o "project-forge.zip" "$TAG"
+          echo "ASSET=project-forge.zip" >> "$GITHUB_ENV"
 
       - name: 写发布说明（已存在则更新；写完回读比对，不一致即失败）
         run: node scripts/release-notes.mjs "$TAG" notes.md --repo "$REPO"

@@ -21,6 +21,7 @@ Give it a directory. It first surveys read-only to see what the project currentl
 - [How it works](#how-it-works)
 - [Install](#install)
 - [Update](#update)
+- [Update](#update-1)
 - [Usage](#usage)
 - [What it will not do](#what-it-will-not-do)
 - [What is inside](#what-is-inside)
@@ -55,31 +56,70 @@ The input is **surveyed facts**, not a preset checklist. So it will not bolt a r
 
 ## Install
 
-Two ways. Pick one.
+**Download the package.** No git needed:
 
-### Clone (updates itself)
+<p align="center">
+  <a href="https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip">
+    <b>Download the latest version (the download starts right away)</b>
+  </a>
+</p>
+
+Unzip it into your skill root and keep the folder named `project-forge`. That is the whole install.
+
+> **Do not download the wrong thing.** The Releases page also offers GitHub's auto-generated
+> `Source code`, which is the developer source. The package is `project-forge.zip`, and the link
+> above always gives you that one. A source download contains `.github`, `AGENTS.md` and
+> `CONTRIBUTING.md` — if you see those, you got the source; delete it and download again.
+> Nothing is wrong with your machine.
+
+**To modify it, or to follow every change**, clone instead:
 
 ```sh
 git clone https://github.com/FiretrUCK666/project-forge.git "<your skill root>/project-forge"
 ```
 
-### Zip (no git needed)
+The only difference between the two: **a clone never updates itself.** It carries `.git`, so it is
+a source copy — something you edit. The tool treats it as read-only; run `git pull` yourself when
+you want the newer version. Having your files swapped while you are editing them is far worse than
+not being updated. See [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
-Download the latest `project-forge-<version>.zip` from [Releases](https://github.com/FiretrUCK666/project-forge/releases) and unzip it into your skill root, keeping the directory name `project-forge`.
+### Where it goes
 
-This install **cannot update itself** — the copy has no version history to compare against. When a new version lands, download it and overwrite.
+Put it in **your host's user-level skill root**:
 
-### Where to put it
+- **You already have other skills** → put it where they live. That is the most reliable answer, and
+  you do not have to remember any path.
+- **You have none** → check that host's documentation; the location is written there.
 
-Drop it into **your host's user-level skill root**:
+Keep the folder named `project-forge` — it must match `name` in `SKILL.md`'s frontmatter.
+**Watch the case**: on a case-sensitive system, a different case is a different folder.
 
-- **You already have other skills** → put it where they live. That is the most reliable signal; no path to memorize.
-- **You have none** → check that host's docs for the location.
+No registration and no restart: hosts discover skills by directory, and `SKILL.md` is the entry.
 
-Keep the directory name `project-forge` — it must match the frontmatter `name`. **Mind the case**: on case-sensitive systems a different case is a different directory.
+## Update
 
-No registration or restart is needed: hosts discover by directory, and `SKILL.md` is the entry point.
+**The downloaded copy updates itself.** At the start of every task it runs:
 
+```sh
+node "<skill directory>/scripts/update.mjs" --quiet
+```
+
+It does three things: downloads the latest package from the Releases page; **checks whether this
+copy is still the one that was released** (file by file); and if it matches, replaces it — if it
+does not, it touches nothing and tells you what differs.
+
+The test is **whether this copy holds anything of yours**, not where it is installed: change one
+byte and it stays away. So it never overwrites your work. It checks at most once every 24 hours,
+and copies on the same machine decide for themselves.
+
+To look at the state yourself (report only, no update):
+
+```sh
+node "<skill directory>/scripts/update.mjs" --check
+```
+
+**A clone never updates itself**: a directory with `.git` is a source copy, the tool is read-only
+towards it, and you update it with `git pull`.
 ## Update
 
 **A cloned copy keeps itself current.** At the start of every task it runs this first:
@@ -151,7 +191,8 @@ This is what you get from a clone, or from the zip on the Releases page:
 | `references/plugins/` | Per-ecosystem plugin chapters (one file each) |
 | `templates/` | Doc skeletons ready to start from, plus standard texts of short licenses |
 | `scripts/update.mjs` | Keep this copy current (see Update) |
-| `scripts/survey.mjs` | Read-only survey, outputs structured facts |
+| `scripts/survey.mjs` | Read-only survey, outputs structured facts; also holds text predicates shared across the project |
+| `scripts/zip.mjs` | Read zip archives: the updater uses it to check whether this copy is still the released one |
 | `scripts/compose-agents.mjs` | Generate, refresh, or upgrade `AGENTS.md`: fill from project facts, keep/drop conditional sections by facts, report sections still needing a human |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, open questions resolved via flags before done |
 | `scripts/release-notes.mjs` | Write release notes from a UTF-8 file (non-ASCII never goes through the shell, read back and compare) |

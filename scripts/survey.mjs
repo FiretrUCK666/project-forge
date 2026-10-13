@@ -594,6 +594,96 @@ export function skillVersion(text) {
 }
 
 /**
+ * `metadata.source`：这个 skill 的来处。
+ *
+ * 与 `metadata.version` 同一类事实、同一个读者：**没有 `.git` 的副本**。它靠版本知道自己
+ * 属于哪一版，靠来源知道该去哪儿找新版——两样都读不到时，那份副本就只能等人来手动覆盖。
+ * 只在 frontmatter 里读，不做完整 YAML 解析，与 `skillVersion` 保持同一种形状。
+ */
+export function skillSource(text) {
+  const block = frontmatterBlock(text)
+  if (block === undefined) return undefined
+  const m = /^[ \t]+source:[ \t]*["']?([^"'\n]+?)["']?[ \t]*$/m.exec(block)
+  return m === null ? undefined : m[1].trim()
+}
+
+/**
+ * 把仓库地址归一成 `owner/name`。认不出来时返回 undefined。
+ *
+ * 同一个仓库有好几种写法（完整网址、带 `.git`、`git@…`、检出时可能内嵌凭据的地址），
+ * 比对要认得出它们是同一个，否则判据会在换一种检出方式时开始误报。两个读者共用它：
+ * 发版门禁比对「声明的来源」与「这次发布的仓库」，更新脚本用它把来源变成可下载的地址。
+ */
+export function repoPath(value) {
+  let s = String(value ?? '').trim().toLowerCase()
+  if (s === '') return undefined
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')   // 协议头
+  s = s.replace(/^[^@/]*@/, '')                  // 内嵌凭据（检出时常见）
+  s = s.replace(/^[^/]*\.[^/]*\//, '')           // 含点的主机名，例如 github.com/
+  s = s.replace(/\.git$/, '').replace(/\/+$/, '')
+  return /^[^/\s]+\/[^/\s]+$/.test(s) ? s : undefined
+}
+
+/**
+ * 表格行的**第一格**原文。不是表格行时返回 undefined。
+ *
+ * 「什么算表格行」只在这里定义一次：文件地图的解析与 README 文件表的对账都从它取，
+ * 两处各写一套迟早会在某个边界形状上给出两种答案。
+ */
+export function tableRowFirstCell(line) {
+  if (!/^\s*\|/.test(line)) return undefined
+  const cells = line.split('|')
+  return cells.length < 3 ? undefined : cells[1]
+}
+
+/** 一份 Markdown 里所有表格行第一格的原文。 */
+export function tableFirstCells(text) {
+  const out = []
+  for (const line of String(text ?? '').split('\n')) {
+    const cell = tableRowFirstCell(line)
+    if (cell !== undefined) out.push(cell.trim())
+  }
+  return out
+}
+
+/**
+ * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
+ *
+ * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
+ * 声明。这份结果有两个读者，而且它们必须看到同一份答案：
+ *   - `preflight.mjs` 用它核对包边界（漏登记、放错位置、声明与实际矛盾）；
+ *   - `update.mjs` 用它判断**这个副本是什么角色**——目录里有「仓库里另有」那些文件，
+ *     说明这是源码副本（拿来改的），否则是用户包副本（该自更新的那份）。
+ * 所以它住在随包分发的模块里，而不是仓库自用的自检脚本里：用户包里没有自检脚本，
+ * 但用户包副本恰恰最需要回答第二个问题。
+ */
+export function readFileMap(skillText) {
+  const buckets = { shipped: [], repoOnly: [] }
+  let bucket
+  for (const line of String(skillText ?? '').split('\n')) {
+    if (/^###\s+用户包里有/.test(line)) { bucket = buckets.shipped; continue }
+    if (/^###\s+仓库里另有/.test(line)) { bucket = buckets.repoOnly; continue }
+    if (/^##\s/.test(line)) { bucket = undefined; continue }
+    if (bucket === undefined) continue
+    // 只看表格行的**第一格**：那一格才是文件清单，说明格里的反引号（提到的文档、
+    // 命令开关、凭据名）不是声明，读进来会造出一堆假失败。
+    const cell = tableRowFirstCell(line)
+    if (cell === undefined) continue
+    for (const m of cell.matchAll(/`([^`]+)`/g)) {
+      const v = m[1].trim()
+      if (v.includes('<')) {
+        // 占位条目（形如 `references/plugins/<生态>.md`）取它所在的目录当前缀
+        const dir = v.slice(0, v.lastIndexOf('/') + 1)
+        if (dir !== '') bucket.push(dir)
+        continue
+      }
+      if (/^[A-Za-z0-9._/-]+$/.test(v)) bucket.push(v)
+    }
+  }
+  return buckets
+}
+
+/**
  * 解析 frontmatter 里的 name/description（只为识别 skill 项目，不做完整 YAML 解析）。
  *
  * 返回 undefined = 「这不是能力目录」；`dropped` 非空 = 「是，但宿主会把它整个丢掉」。

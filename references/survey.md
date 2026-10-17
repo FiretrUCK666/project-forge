@@ -296,7 +296,7 @@ cargo，`cpp` 不代表用 CMake。`commands` 一节会区分这一点。
 | `patchFile` | 磁盘上实际存在的补丁文件（根目录的 `cordis.patch.yml` 一类） |
 | `bundlePatch` | 清单声明的补丁路径与存在性（`dsh.bundle.patch` 指过去，文件在不在） |
 | `hasHostEntry`、`hasClientEntry`、`hasClientDecl` | host 与 client 两路入口各有没有，client 声明在不在；两者打架时先对齐，由此定 host-only、client-only 还是双面 |
-| `hasManifestVersion` | 清单有没有声明清单格式版本（`dsh.manifestVersion === 1`）。它与包版本号、与会话格式版本是三件不同的东西，同名不同物 |
+| `hasManifestVersion` | 清单有没有声明清单格式版本（只判声没声明，不校验取值）。它与包版本号、与会话格式版本是三件不同的东西，同名不同物 |
 | `enginesDsh` | 宿主兼容范围的声明原文（`engines.dsh`，**范围符号原样保留**）。**声明了它就是判据**：宿主按它**单独**决定兼容性（同一清单里的 peer 声明此时被忽略），范围不含本机运行版本时装或加载会被挡，所以不能只看这段原文就下兼容性结论 |
 | `hasIcon` | 清单有没有声明展示图标（`package.json.icon`，是字符串）。子路径插件不再单独读自己的清单，展示文字与图标要靠对应的子路径导出才读得到 |
 | `exportsKeys` | 清单 `exports` 的键原文。上面那几格是判定结果，这一格是判定的依据——要复核「为什么说没有 client 入口」时看它 |

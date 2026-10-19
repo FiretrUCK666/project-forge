@@ -32,7 +32,7 @@ import {
   isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, skillSource, needsSummary,
   parseMarkerKeys, normVersion, repoPath, readFileMap,
 } from '../survey.mjs'
-import { UPSTREAM } from '../update.mjs'
+import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 
@@ -3465,12 +3465,15 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     check(ok, label, ok ? undefined : `实际输出：${JSON.stringify(r.out.slice(0, 300))}`)
   }
 
-  /** 覆盖状态文件里的更新时间。写 0 = 当作「很久没更新过」。 */
-  const setWindow = (dir, lastUpdateAt) => {
+  /** 写副本的状态文件。文件名按副本目录算，与 update.mjs 自己那一套必须一致。 */
+  const writeState = (dir, patch) => {
     const hash = createHash('sha1').update(resolve(dir)).digest('hex').slice(0, 12)
     writeFileSync(join(stateTmp, `project-forge-update-${hash}.json`),
-      `${JSON.stringify({ lastUpdateAt })}\n`, 'utf8')
+      `${JSON.stringify(patch)}\n`, 'utf8')
   }
+
+  /** 覆盖状态文件里的更新时间。写 0 = 当作「很久没更新过」。 */
+  const setWindow = (dir, lastUpdateAt) => writeState(dir, { lastUpdateAt })
 
   /** 读状态文件里的更新时间（没有就是 0）。用来验「这次有没有占掉 24 小时窗口」。 */
   const readStateFile = (dir) => {
@@ -3800,7 +3803,7 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     {
       const dir = makeCopy('no-source-offline', {})
       const r = await runUpdate(dir, '--check', { env: { PF_UPDATE_SOURCE: 'http://127.0.0.1:1/owner/repo' } })
-      const tells = /这次没能联网核对/.test(r.out) && /不是「已是最新」/.test(r.out)
+      const tells = /(没能联网核对|没能连上发布方)/.test(r.out) && /不是「已是最新」/.test(r.out)
       const quietEnough = !/已更新到最新版/.test(r.out)
       failWith(tells && quietEnough, '兜底也连不上时如实报「没能联网核对」，不谎报已更新', r)
       report(tells && quietEnough, '核对不了：如实说，不假装')
@@ -3818,30 +3821,94 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
         '兜底来源归一成 owner/name 之后仍然认得出（发版门禁按这个形状比对）', repoPath(UPSTREAM))
     }
 
+    // 七之二、问版本有两条路，按优先顺序排：认得出的托管平台先给接口路，认不出的只给
+    //         网页路。**认不出就不猜**——给自建镜像硬拼一个接口地址，换来的是一句看起来
+    //         像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
+    //
+    //         这是规则本身的断言（不发网络请求），而它值得单独验：排错一条路的现象是
+    //         「更新莫名其妙不灵了」，而上面那一串用例照样全绿——它们走的都是网页路。
+    {
+      const gh = routesFor('https://github.com/owner/repo')
+      const twoRoutes = gh.length === 2 && gh[0].kind === 'api' && gh[1].kind === 'web'
+      check(twoRoutes, '托管平台形状的来源排得出两条路，接口路在前', JSON.stringify(gh))
+      report(twoRoutes, '排路：托管平台给两条')
+      const apiOk = gh[0].endpoint === 'https://api.github.com/repos/owner/repo/releases/latest'
+      check(apiOk, '接口地址按平台公布的规律拼出来', gh[0].endpoint)
+      report(apiOk, '排路：接口地址拼得对')
+      const webKept = gh[1].endpoint === 'https://github.com/owner/repo/releases/latest'
+      check(webKept, '网页路问的还是原来那个地址（退路不该是新的猜测）', gh[1].endpoint)
+      report(webKept, '排路：网页地址没变')
+
+      // 反例：认不出来的形状只留网页路，接口那一支完全不出现。
+      const unrecognized = [
+        ['自建镜像', 'http://127.0.0.1:9000/mirror'],
+        ['别的托管平台', 'https://gitee.com/owner/repo'],
+        ['多出几段路径', 'https://github.com/owner/repo/tree/main'],
+      ]
+      for (const [label, bad] of unrecognized) {
+        const routes = routesFor(bad)
+        check(routes.length === 1 && routes[0].kind === 'web' && apiEndpoint(bad) === undefined,
+          `${label}：认不出就不给接口路（宁可少一条，也不猜一个地址出来）`, JSON.stringify(routes))
+      }
+      report(unrecognized.every(([, bad]) => routesFor(bad).length === 1), '排路：认不出的只给网页路')
+    }
+
     await closeServer(server)
   }
 
   await main()
 
-  // 六、连不上：静默、退出码 0、**一个字节都不写**。指向本机一个没人监听的端口，
+  // 六、连不上：退出码 0、**一个字节都不写**，并且不吵。指向本机一个没人监听的端口，
   //     连接立刻被拒——不依赖外网，也不会慢。
+  //     静默的判据是「上次还核对得上」，不是「这次没连上」：后者会在网络抖一下时也出声。
   {
     const dir = makeCopy('unreachable', { source: 'http://127.0.0.1:1/owner/repo' })
+    // 阈值的四分之一以前还核对得上：这属于「抖了一下」，下次再用就自己好了。
+    writeState(dir, { lastUpdateAt: 0, lastOkAt: Date.now() - STALE_CHECK_MS / 4 })
     const before = readFileSync(join(dir, 'SKILL.md'), 'utf8')
     // skill 自己在任务开头用的就是 --quiet 这一档，所以「静默」要按这一档来验。
     const r = await runUpdate(dir, '--quiet')
     check(r.status === 0, '连不上时退出码仍是 0（它挂在每个任务开头，不能把任务弄红）',
       `退出码 ${r.status}：${r.out.slice(0, 120)}`)
     report(r.status === 0, '连不上：退出码 0')
-    check(r.out === '', '--quiet 下连不上是完全静默的（没连上不是「已是最新」，也不该念一遍）',
+    check(r.out === '', '刚核对得上、这次没连上时保持静默（网络抖一下不该念一遍）',
       r.out.slice(0, 160))
-    report(r.out === '', '连不上：静默')
+    report(r.out === '', '连不上：偶尔一次静默')
     const forced = await runUpdate(dir, '--check')
     check(/没能联网核对/.test(forced.out) && /不是「已是最新」/.test(forced.out),
       '--check 下如实报「没能联网核对」，不说成「已是最新」', forced.out.slice(0, 160))
     report(/没能联网核对/.test(forced.out), '连不上：--check 说真话')
     check(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '连不上时一个字节都没写')
     report(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '连不上：零写入')
+  }
+
+  // 六之二、一直核对不上就要说出来。一路静默会被读成「一切正常」，而真相是这份停在了
+  //         某一版——那正是「网络不通的人永远不知道自己落后了」的成因。判据落在「已经
+  //         多久没能核对上」而不是「这次有没有连上」，所以它不会变成每次任务都念的噪音。
+  {
+    const stale = makeCopy('stale-speaks', { source: 'http://127.0.0.1:1/owner/repo' })
+    writeState(stale, { lastUpdateAt: 0, lastOkAt: Date.now() - STALE_CHECK_MS * 3 })
+    const r = await runUpdate(stale, '--quiet')
+    const speaks = /没能核对新版/.test(r.out) && /不是「已是最新」/.test(r.out)
+    failWith(speaks, '隔了好几天没能核对上时，--quiet 下也要说一句，并说清那不是「已是最新」', r)
+    report(speaks, '连不上：隔久了会说')
+    // 说完要安静一阵，否则它就从「提醒」变成了「每次任务都念一遍」。
+    const again = await runUpdate(stale, '--quiet')
+    check(again.out === '', '提醒过之后不再重复念（同一份副本按同一节奏才再说一次）',
+      again.out.slice(0, 160))
+    report(again.out === '', '连不上：说过就安静一阵')
+    // 从没核对成功过也算「隔久了」：刚装上就撞上连不上，这件事本身值得知道。
+    const never = makeCopy('never-checked-speaks', { source: 'http://127.0.0.1:1/owner/repo' })
+    const rNever = await runUpdate(never, '--quiet')
+    check(/一直没能连上发布方/.test(rNever.out) && /不是「已是最新」/.test(rNever.out),
+      '从没核对成功过的副本也要说出来（新装的副本一用就撞上，不能一声不吭）',
+      rNever.out.slice(0, 200))
+    report(/一直没能连上发布方/.test(rNever.out), '连不上：从没成功过会说')
+    // --check 是人主动问的，它每次都得说真话，不受上面那个节奏管。
+    const ask = await runUpdate(stale, '--check')
+    check(ask.out !== '' && /不是「已是最新」/.test(ask.out),
+      '--check 每次都说真话，不因为刚提醒过就沉默', ask.out.slice(0, 160))
+    report(ask.out !== '', '连不上：--check 照说')
   }
 
   // 七、有 .git = 源码副本：只读报告，**一个字节都不写**。

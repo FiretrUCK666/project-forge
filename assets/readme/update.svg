@@ -20,7 +20,7 @@
     <text x="64" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">01</text>
     <text x="128" y="152" font-size="21" fill="#17181A">每次用它时，安静地比一次版本号</text>
-    <text x="128" y="178" font-size="18" fill="#5D6064">不会提醒你、不问你、也不会把整个安装包拉下来</text>
+    <text x="128" y="178" font-size="18" fill="#5D6064">平时不出声、不问你，也不会把整个安装包拉下来</text>
 
     <text x="64" y="226" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">02</text>

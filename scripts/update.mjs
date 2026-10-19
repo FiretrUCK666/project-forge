@@ -17,12 +17,24 @@
  *
  * 每次使用发生的事，三步：
  *
- *   1. **比版本**：问一次「最新版是哪个标签」（一个请求，几十 KB 的元数据，不下整包），
- *      与本地版本比。不是更新版就结束——这是绝大多数时候。
+ *   1. **比版本**：问一次「最新版是哪个标签」（一个请求、几十 KB 的元数据，不下整包），
+ *      与本地版本比。不是更新版就结束——这是绝大多数时候，所以这一步必须便宜。
+ *
+ *      **问谁有两条路，按顺序试**（见 `routesFor`）：
+ *
+ *        - **接口路**：托管平台给程序用的接口。一次请求同时给出标签与「那一版的附件在
+ *          哪儿取」，**整条链路不碰网页主机**——而网页主机恰是最容易时通时不通的那一环，
+ *          它的接口主机往往另有一套、稳得多；
+ *        - **网页路**：网页地址。平台认不出来时（自建镜像、别的托管平台）只有这条路，
+ *          它同时是接口路的退路。
+ *
+ *      两条都问不到才算「没能核对」。**认不出平台就不猜**：给自建镜像硬拼一个接口地址，
+ *      换来的是一句看起来像事实的「那边没有最新发布」。
  *   2. **看窗口**：距上次成功更新不足 24 小时就不换文件（检查照跑，所以新版一发布
  *      就看得见，只是等窗口过完才动手）。窗口的用处是**不让同一份副本一天换好几次**：
  *      换文件会改掉磁盘上的内容，频繁换对正在读它的会话不友好。
- *   3. **换**：下载新版整包 → 整份覆盖 → 说一句 → 记下时刻。
+ *   3. **换**：下载新版整包 → 整份覆盖 → 说一句 → 记下时刻。下载同样按优先顺序试：
+ *      接口路给的附件地址在前，网页地址在后。
  *
  * **版本号只有标签一个来源，不在这里另记一份。** 问标签、或读包里 `SKILL.md` 的
  * `metadata.version`，两者都由发版门禁保证同号；这个脚本不生成、不维护任何版本清单
@@ -31,6 +43,11 @@
  * 任何一步不成立（没网、取不到、包读不动）→ **什么都不做，一个字节不写**，下次再用
  * 重试。所以不存在「更新到一半」的状态：要么整份换好，要么跟没跑过一样。失败也不占
  * 那 24 小时的额度——占了就等于「一次断网，今天不再更新」。
+ *
+ * **核对不上时不再一路沉默**：隔了好一阵（含从没成功过）都问不到远端版本，就在
+ * `--quiet` 下也说一句——使用者有权知道「这份停在某一版、是核对不了，不是最新」，
+ * 而不是把静默读成「一切正常」。偶尔抖一次不算（下次再用就自己好了），说过之后也隔
+ * 同样久才会再说，所以它不会变成每次任务都念一遍的噪音。
  *
  * 状态按副本路径分开，写在系统临时目录里，**不写在 skill 目录里**：那份目录只该
  * 有包里的东西，多出一个状态文件是污染。读不到或坏了都当成「没更新过」——多更新一次
@@ -71,6 +88,13 @@ const UPSTREAM = 'https://github.com/FiretrUCK666/project-forge'
 
 /** 更新成功后的静默期：这段时间里不再换文件，但照常比版本。 */
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
+/**
+ * 隔这么久都问不到远端版本，就该让使用者知道一次；也是两次提醒之间的最短间隔。
+ *
+ * 两个用途共用一个值是有意的：判据是「已经很久没能核对上了」，而既然要说，一天说一次
+ * 就够了——更密就变成噪音，更疏则「一直落后」这件事会被藏起来。
+ */
+const STALE_CHECK_MS = 24 * 60 * 60 * 1000
 /** 单次网络动作的上限。它挂在每个任务的开头，卡住就等于把任务卡住。 */
 const NETWORK_TIMEOUT_MS = 10 * 1000
 /** 附件名。固定不带版本号，`releases/latest/download/<这个名字>` 才永远指向最新版。 */
@@ -133,20 +157,30 @@ function readFacts() {
  * 容错放在**读**这一侧：写的那一侧无论怎么写，读回来都得对。
  */
 function readState() {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
   try {
     const raw = JSON.parse(readFileSync(STATE_PATH, 'utf8').replace(/^\uFEFF/, ''))
-    const t = Number(raw?.lastUpdateAt)
-    return { lastUpdateAt: Number.isFinite(t) ? t : 0 }
+    return {
+      lastUpdateAt: num(raw?.lastUpdateAt),
+      lastOkAt: num(raw?.lastOkAt),
+      lastNoticeAt: num(raw?.lastNoticeAt),
+    }
   } catch {
-    return { lastUpdateAt: 0 }
+    return { lastUpdateAt: 0, lastOkAt: 0, lastNoticeAt: 0 }
   }
 }
 
-function rememberUpdate() {
+/**
+ * 记下这次发生的事。
+ *
+ * **读—改—写**，不是整份覆盖：三个时刻各管各的（换文件的窗口、上次真的核对到了远端
+ * 版本、上次为此提醒过使用者），谁都不该把别人抹掉。
+ */
+function rememberState(patch) {
   try {
-    writeFileSync(STATE_PATH, `${JSON.stringify({ lastUpdateAt: Date.now() })}\n`, 'utf8')
+    writeFileSync(STATE_PATH, `${JSON.stringify({ ...readState(), ...patch })}\n`, 'utf8')
   } catch {
-    // 写不进去只是失去窗口，不影响正确性：下次再查一遍就是了。
+    // 写不进去只是失去窗口与提醒节奏，不影响正确性：下次再查一遍就是了。
   }
 }
 
@@ -203,37 +237,125 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
 }
 
 /**
- * 问发布方「最新版是哪个标签」。
+ * 托管平台给程序用的那套接口，地址由网页地址推出来。
  *
- * 这是**每次使用都会走的那一步**，所以它必须便宜：一个请求、不下整包。版本号来自
- * 标签本身——项目里版本号只有一个来源就是标签，这里不去读任何「版本清单」文件，
- * 也就不会多出一份要人记得同步的东西。
- *
- * 三种结果必须分得开：「问到了」「那边没有最新发布」「没连上」。后两种走的路不一样。
+ * 判据是**平台自己公布的地址规律**（网页是 `<主机>/<owner>/<仓库>`，接口是
+ * `api.<主机>/repos/<owner>/<仓库>`），不是猜。认不出来（自建镜像、别的托管平台、
+ * 形状不对的地址）就返回 `undefined`——**不猜**：给一个不会应答的地方硬拼出接口路径，
+ * 换来的是一句看起来像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
  */
-async function fetchLatestTag(source) {
+function apiEndpoint(source) {
+  let url
+  try {
+    url = new URL(source)
+  } catch {
+    return undefined
+  }
+  if (url.hostname !== 'github.com') return undefined
+  const segments = url.pathname.split('/').filter((s) => s !== '')
+  if (segments.length !== 2) return undefined
+  return `https://api.github.com/repos/${segments[0]}/${segments[1]}/releases/latest`
+}
+
+/**
+ * 问发布方这件事，按优先顺序排好的路。
+ *
+ * 两条路的差别不只是地址。**接口路一次请求同时给出标签与附件的取用地址**，于是整条
+ * 更新链路只碰「接口主机 + 资产主机」；网页路拿不到附件地址，下载只能回到网页主机上
+ * 那个固定地址。所以多这一条路的意义不止「多试一次」，而是**换掉整条链路里最不稳的
+ * 那一段**——网页主机恰恰是时通时不通得最厉害的一环。
+ *
+ * 来源是自建镜像时只排得出网页路。那不是退步，是如实：镜像不提供接口，就没有接口路。
+ */
+function routesFor(source) {
+  const routes = []
+  const api = apiEndpoint(source)
+  if (api !== undefined) routes.push({ kind: 'api', endpoint: api })
+  routes.push({ kind: 'web', endpoint: `${source}/releases/latest` })
+  return routes
+}
+
+/**
+ * 最新版的包地址。附件名固定不带版本号，所以这个地址永远指向最新版。
+ *
+ * 网页路用它，以及「问不到标签、退回取整包读版本」那一支用它。
+ */
+function latestPackageUrl(source) {
+  return `${source}/releases/latest/download/${ASSET}`
+}
+
+/** 网页路能给的下载地址只有一个：那个固定指向最新版的地址。 */
+function webPackageUrls(source) {
+  return [{ url: latestPackageUrl(source), accept: '*/*' }]
+}
+
+/**
+ * 接口路：一次请求同时拿到「最新版是哪个标签」与「那一版的附件在哪儿取」。
+ *
+ * 附件地址用**接口给的那一条**，不按名字自己拼：发布方可以把附件取成任何名字，接口
+ * 给的是这一版实际挂着的那一个。取它时要声明「要原始字节」，平台才会把你交给资产主机。
+ *
+ * 三种结果必须分得开：「问到了」「那边确实没有最新发布」「这条路这次没走通」。中间
+ * 那种是结论，后一种该换条路再问——**限流与超时都归进「没走通」**：它们说的是
+ * 「这次问不成」，不是「那边没有」。
+ */
+async function probeApi(endpoint, source) {
+  const res = await download(endpoint, { accept: 'application/vnd.github+json' })
+  if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
+  let payload
+  try {
+    payload = JSON.parse(res.body.toString('utf8'))
+  } catch {
+    // 说是接口却不是 JSON：这条路这次不能用，交给下一条。
+    return { state: 'unreachable' }
+  }
+  const version = plainVersion(payload?.tag_name)
+  // 「说好是接口，回的却不是那个形状」属于**这条路没走通**，不是「那边没有最新发布」：
+  // 前者该换条路再问（网页路多半问得出来），后者才是结论。认错这两个，代价是一次
+  // 本可以成功的更新被静默跳过。
+  if (version === '') return { state: 'unreachable' }
+  const asset = Array.isArray(payload.assets)
+    ? payload.assets.find((a) => a?.name === ASSET) : undefined
+  const packageUrls = []
+  if (typeof asset?.url === 'string' && /^https?:/.test(asset.url)) {
+    packageUrls.push({ url: asset.url, accept: 'application/octet-stream' })
+  }
+  // 接口没给出附件地址（附件被改名、或那一版没挂附件）时，退到网页那个固定地址：
+  // 它与接口说的是同一版，只是取法不同。
+  packageUrls.push(...webPackageUrls(source))
+  return { state: 'ok', version, packageUrls }
+}
+
+/**
+ * 网页路：问发布方「最新版是哪个标签」。
+ *
+ * 接口路认不出来时这是唯一的一条，所以它必须便宜：一个请求、不下整包。版本号来自标签
+ * 本身——项目里版本号只有一个来源就是标签，这里不去读任何「版本清单」文件，也就不会
+ * 多出一份要人记得同步的东西。
+ */
+async function probeWeb(endpoint, source) {
   // **不要求来源是 `owner/name` 那种形状**：它只是一个 http(s) 地址，探针也只需要地址。
   // 早年这里拿 `repoPath` 当门槛，于是自建镜像给的 `http://host:port` 被挡在门外，
   // 而挡的方式是「那边没有最新发布」——一个看起来像事实的错误结论。
-  const res = await download(`${source}/releases/latest`, { accept: 'application/vnd.github+json' })
+  const res = await download(endpoint, { accept: 'application/vnd.github+json' })
   if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
 
   // 一：**看它最后落在哪个地址**。托管平台的 `releases/latest` 会跳到那一版的页面，
   // 地址末尾就是标签（`…/releases/tag/v0.16.1`）。这一条路**一个字节正文都不用读**，
-  // 既省流量，也不依赖 API 主机。
+  // 既省流量，也不依赖接口主机。
   const fromUrl = /\/releases\/tag\/([^/?#]+)/.exec(res.final ?? '')
   if (fromUrl !== null) {
     const version = plainVersion(decodeURIComponent(fromUrl[1]))
-    if (version !== '') return { state: 'ok', version }
+    if (version !== '') return { state: 'ok', version, packageUrls: webPackageUrls(source) }
   }
 
-  // 二：正文是 JSON（API 形状、或自建服务端按 API 形状回应）。
+  // 二：正文是 JSON（接口形状、或自建服务端按接口形状回应）。
   const text = res.body.toString('utf8')
   if (/^\s*[[{]/.test(text)) {
     try {
       const tag = JSON.parse(text)?.tag_name
       const version = typeof tag === 'string' ? plainVersion(tag) : ''
-      if (version !== '') return { state: 'ok', version }
+      if (version !== '') return { state: 'ok', version, packageUrls: webPackageUrls(source) }
     } catch { /* 不是合法 JSON：落到下面当「那边没有」处理 */ }
   }
 
@@ -244,9 +366,14 @@ async function fetchLatestTag(source) {
   return { state: 'absent' }
 }
 
-/** 下载一份包并解开，顺带读出它的版本。任何一个环节不成立都不返回半份内容。 */
-async function fetchPackage(url) {
-  const res = await download(url)
+/**
+ * 下载一份包并解开，顺带读出它的版本。任何一个环节不成立都不返回半份内容。
+ *
+ * `accept` 由调用方给：接口给出的附件地址要声明「要原始字节」，平台才会把字节交出来；
+ * 网页那个固定地址不必声明。
+ */
+async function fetchPackage(url, accept = '*/*') {
+  const res = await download(url, { accept })
   if (!res.ok) return { ok: false, why: res.status === 404 ? '没有这一版' : '没能取回', status: res.status }
   let entries
   try {
@@ -257,11 +384,6 @@ async function fetchPackage(url) {
   const skill = entries.find((e) => e.name === 'SKILL.md')
   if (skill === undefined) return { ok: false, why: '包里没有 SKILL.md', status: 200 }
   return { ok: true, entries, version: skillVersion(skill.data.toString('utf8')) }
-}
-
-/** 最新版的包地址。附件名固定不带版本号，所以这个地址永远指向最新版。 */
-function latestPackageUrl(source) {
-  return `${source}/releases/latest/download/${ASSET}`
 }
 
 /**
@@ -295,8 +417,8 @@ function isNewer(candidate, current) {
   return false
 }
 
-/** 人话的剩余时间：用来告诉用户「等多久会更新」，不写内部毫秒数。 */
-function waitText(ms) {
+/** 一段时长的人话：用来告诉使用者「还要等多久」或「已经多久了」，不写内部毫秒数。 */
+function durationText(ms) {
   const minutes = Math.max(1, Math.ceil(ms / 60000))
   if (minutes < 60) return `${minutes} 分钟`
   const hours = Math.ceil(minutes / 60)
@@ -510,28 +632,56 @@ async function main(argv) {
   const source = originUrl(facts.source) ?? fallbackSource()
   if (source === undefined || facts.version === undefined) return reportUnverifiable(facts, { quiet })
 
-  const { lastUpdateAt } = readState()
-  const sinceUpdate = Date.now() - lastUpdateAt
+  const state = readState()
+  const sinceUpdate = Date.now() - state.lastUpdateAt
   // **窗口与 --check 是两件事**：窗口说的是「换不换文件」，--check 说的是「报不报」。
   // 合成一个变量就会出事：--check 是「把结论说出来」这个参数，而它会把窗口那件事本身
   // 绕过去——「刚更新过，还要等多久」这句话永远轮不到输出，而那正是人在问的东西。
   const inWindow = sinceUpdate < UPDATE_INTERVAL_MS
 
   // ── 一：比版本 ────────────────────────────────────────────────────────────
-  const probe = await fetchLatestTag(source)
-  if (probe.state === 'unreachable') {
-    // 没连上不是「已是最新」，也不该在每次任务开头念一遍。这次就算了，下次再用会重试。
+  // 两条路按顺序试。**只有「这条路这次没走通」才换下一条**：「那边没有最新发布」是
+  // 结论，换个地方再问一遍问不出不同的答案，白白多等一个超时。
+  let found = { state: 'unreachable' }
+  for (const route of routesFor(source)) {
+    found = route.kind === 'api'
+      ? await probeApi(route.endpoint, source)
+      : await probeWeb(route.endpoint, source)
+    if (found.state !== 'unreachable') break
+  }
+
+  if (found.state === 'unreachable') {
+    // 没连上不是「已是最新」。**偶尔一次不吭声**——下次再用就自己好了；但隔久了还没能
+    // 核对上就要说一句：使用者会把一路静默读成「一切正常」，而真相是这份停在了某一版。
+    // 说过之后同样隔那么久才会再说，所以它不会变成每次任务都念一遍的噪音。
+    const neverChecked = state.lastOkAt === 0
+    const staleFor = neverChecked ? 0 : Date.now() - state.lastOkAt
+    const spokeRecently = Date.now() - state.lastNoticeAt < STALE_CHECK_MS
+    if (!spokeRecently && (neverChecked || staleFor >= STALE_CHECK_MS)) {
+      // --check 是人主动问的，它每次都要说真话，所以它不参与「说话的节奏」。
+      if (!checkOnly) rememberState({ lastNoticeAt: Date.now() })
+      report([
+        neverChecked
+          ? `project-forge ${tag}：一直没能连上发布方核对新版，这份停在 ${tag}（不是「已是最新」）。`
+          : `project-forge ${tag}：已经 ${durationText(staleFor)}没能核对新版了，这份停在 ${tag}（不是「已是最新」）。`,
+        '  核对不上不影响它干活，只是会一直停在这个版本；换一个能连上发布方的网络就能恢复。',
+      ], { quiet, always: true })
+      return 0
+    }
     report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
     return 0
   }
 
-  // 问不到标签（平台不是 GitHub、没有最新发布）时，退回「取整包读版本」。
+  // 核对上了：记下时刻。它决定上面那句提醒该不该出现。
+  rememberState({ lastOkAt: Date.now() })
+
+  // 问不到标签（平台没有最新发布）时，退回「取整包读版本」。
   // 那条路要下整包，所以只在真需要更新时才走——而「需不需要」得先读出来才知道，
   // 于是这里退化成「下载一次，顺手就当更新用」，不做第二遍下载。
   let latest
   let remote
-  if (probe.state === 'ok') {
-    remote = probe.version
+  if (found.state === 'ok') {
+    remote = found.version
   } else {
     latest = await fetchPackage(latestPackageUrl(source))
     if (!latest.ok) {
@@ -561,7 +711,7 @@ async function main(argv) {
     const left = UPDATE_INTERVAL_MS - sinceUpdate
     report([
       `project-forge ${tag}：有新版本 ${remote}。这份副本刚更新过，`,
-      `  ${waitText(left)}之后再自动换；这次继续用现在这份就够（想马上要新版，去发布页下载覆盖）。`,
+      `  ${durationText(left)}之后再自动换；这次继续用现在这份就够（想马上要新版，去发布页下载覆盖）。`,
     ], { quiet, always: true })
     return 0
   }
@@ -571,7 +721,14 @@ async function main(argv) {
   }
 
   // ── 二：下载新版（上面没下过才下） ────────────────────────────────────────
-  if (latest === undefined) latest = await fetchPackage(latestPackageUrl(source))
+  // 候选地址按优先顺序试：接口路给的那条在前（它走资产主机，**不碰网页主机**），网页
+  // 那条在后。一条取不到就换下一条——两处说的是同一版，只是取法不同。
+  if (latest === undefined) {
+    for (const candidate of found.packageUrls ?? webPackageUrls(source)) {
+      latest = await fetchPackage(candidate.url, candidate.accept)
+      if (latest.ok) break
+    }
+  }
   if (!latest.ok) {
     report([`project-forge ${tag}：新版没取回来（${latest.why}），没有更新，这份还是原样。`],
       { quiet, always: true })
@@ -587,7 +744,7 @@ async function main(argv) {
   // 把两个版本都报出来。
   //
   // 只在问到了标签时才比（退回取整包那条路上，版本就是从包里读的，没有第二个来源可比）。
-  if (probe.state === 'ok' && latest.version !== remote) {
+  if (found.state === 'ok' && latest.version !== remote) {
     report([
       `project-forge ${tag}：最新发布是 ${remote}，但那个安装包里的却是 ${latest.version ?? '读不到版本'}`
         + ' —— 两处对不上，这次**没有更新**，你这份还是原样。',
@@ -599,7 +756,7 @@ async function main(argv) {
   // ── 三：整份覆盖 ──────────────────────────────────────────────────────────
   const { removed, skipped, mapRead } = applyPackage(latest.entries)
   const after = localVersion()
-  rememberUpdate()
+  rememberState({ lastUpdateAt: Date.now() })
   report([
     `project-forge 已更新到最新版 ${after ?? remote} —— 你之前用的是 ${tag}。`,
     '  这个 skill 的文件换了，我重新读一遍 SKILL.md 再继续。',
@@ -617,9 +774,9 @@ async function main(argv) {
   return 0
 }
 
-// 分成两块顺手带出一个可测性：文件被 import 时只交出常量，与它被当成脚本跑时一样的东西。
-// 自检就靠这个核对「兜底地址」与「静默期」没有另抄一份值。
-export { UPSTREAM, UPDATE_INTERVAL_MS }
+// 分成两块顺手带出一个可测性：文件被 import 时只交出判据，与它被当成脚本跑时一样的东西。
+// 自检就靠这个核对「兜底地址」「静默期」「提醒节奏」没有另抄一份值，并直接验排路的规则。
+export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code })

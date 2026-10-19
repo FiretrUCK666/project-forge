@@ -137,9 +137,26 @@ look at the state yourself (report only, no update):
 node "<skill directory>/scripts/update.mjs" --check
 ```
 
-Where it asks depends on the address that copy records for itself (it ships in the package). If that
-is missing it falls back to a built-in address, and a self-hosted mirror can change that fallback:
-set the `PF_UPDATE_SOURCE` environment variable (it applies only when the copy records no address).
+Where it asks depends on the address that copy records for itself — it ships in the package, in the
+`SKILL.md` `metadata.source` field. It recognises the hosting platform's address pattern, so it
+**prefers the platform's API**: one request returns both the version and the download address,
+without touching the web host. The web address is the fallback.
+
+A copy replaces its files at most once every 24 hours, so it cannot flip several times a day. To
+look at the state yourself (report only, no update):
+
+```sh
+node "<skill directory>/scripts/update.mjs" --check
+```
+
+**When it cannot connect**: that run is skipped (it will not damage your copy or hold up the task),
+and the next use retries. But if it has been more than a day without reaching the platform, it says
+one line telling you which version this copy is stuck on — that is a warning that you are behind,
+not an error.
+
+To make it ask somewhere else (a self-hosted mirror, an internal release), edit `metadata.source` in
+that copy's `SKILL.md`; the `PF_UPDATE_SOURCE` environment variable only stands in when the copy
+records no address.
 
 ## Usage
 

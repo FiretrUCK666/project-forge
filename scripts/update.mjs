@@ -77,7 +77,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 
 /**
- * 这套代码的产出处。
+ * 这份代码自己的来处。
  *
  * 副本里记的来源（`SKILL.md` 的 `metadata.source`）才是首选——fork 出去自己发版的人写自己的
  * 地址，就该更新他自己的。但**只靠那个字段是脆的**：宿主不认这个扩展字段、谁手删了一行、
@@ -85,16 +85,6 @@ const SKILL_ROOT = resolve(HERE, '..')
  * 本身随包走，它写着的地址永远是「这套代码的产出者」，所以拿它兜底：两条都读不到才认输。
  */
 const UPSTREAM = 'https://github.com/FiretrUCK666/project-forge'
-
-/**
- * 备用上游：同一个包放在别处的另一份，主路不通时才轮到它，按重要性排序。
- *
- * 它是**产出处的事实**——哪个镜像上放着这个包，只有产出处知道，所以跟着代码走，不跟着
- * 副本走；副本自己记了别的来源（fork 出去的人写了他自己的）时，它不参与。
- *
- * 空列表是**如实**，不是留位：现在确实只有主路这一条。
- */
-const MIRRORS = []
 
 /** 更新成功后的静默期：这段时间里不再换文件，但照常比版本。 */
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -109,15 +99,6 @@ const STALE_CHECK_MS = 24 * 60 * 60 * 1000
 const NETWORK_TIMEOUT_MS = 10 * 1000
 /** 附件名。固定不带版本号，`releases/latest/download/<这个名字>` 才永远指向最新版。 */
 const ASSET = 'project-forge.zip'
-/**
- * 探针请求的 `Accept`。
- *
- * **必须是普适的，不能带某家平台专用的媒体类型。** 这个头是内容协商：给一个它不认识的
- * 类型，平台会按「我没有这种表示形式」处理——Gitee 实测直接回 404，而现象是「这条路
- * 明明存在却问不到」。探针问的是「最新版是哪个标签」，哪家平台都该答得上来，所以这里
- * 只说「JSON 或网页都行」。
- */
-const PROBE_ACCEPT = 'application/json, text/html;q=0.9, */*;q=0.8'
 
 /** 状态按副本路径分开：一份副本的更新不该替另一份做决定。 */
 const STATE_PATH = join(tmpdir(),
@@ -258,14 +239,10 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
 /**
  * 托管平台给程序用的那套接口，地址由网页地址推出来。
  *
- * 判据是**平台自己公布的地址规律**，不是猜。认不出来（自建镜像、别的托管平台、形状
- * 不对的地址）就返回 `undefined`——**不猜**：给一个不会应答的地方硬拼出接口路径，
+ * 判据是**平台自己公布的地址规律**（网页是 `<主机>/<owner>/<仓库>`，接口是
+ * `api.<主机>/repos/<owner>/<仓库>`），不是猜。认不出来（自建镜像、别的托管平台、
+ * 形状不对的地址）就返回 `undefined`——**不猜**：给一个不会应答的地方硬拼出接口路径，
  * 换来的是一句看起来像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
- *
- * 两家的规矩不一样，所以逐个认，不套一条通用公式：
- *   - GitHub：接口在另一个主机上（`api.`），路径多一段 `repos/`；
- *   - Gitee：接口在同一个主机的 `/api/v5/` 下。
- * 路径还必须是 `<owner>/<仓库>` 两段——多一段少一段都不是这套规律管得着的地址。
  */
 function apiEndpoint(source) {
   let url
@@ -274,16 +251,10 @@ function apiEndpoint(source) {
   } catch {
     return undefined
   }
+  if (url.hostname !== 'github.com') return undefined
   const segments = url.pathname.split('/').filter((s) => s !== '')
   if (segments.length !== 2) return undefined
-  const [owner, repo] = segments
-  if (url.hostname === 'github.com') {
-    return `https://api.github.com/repos/${owner}/${repo}/releases/latest`
-  }
-  if (url.hostname === 'gitee.com') {
-    return `${url.origin}/api/v5/repos/${owner}/${repo}/releases/latest`
-  }
-  return undefined
+  return `https://api.github.com/repos/${segments[0]}/${segments[1]}/releases/latest`
 }
 
 /**
@@ -305,47 +276,31 @@ function routesFor(source) {
 }
 
 /**
- * 按标签拼出来的下载候选。
+ * 最新版的包地址。附件名固定不带版本号，所以这个地址永远指向最新版。
  *
- * **不用「永远指向最新版」的那种固定地址**（两个平台里只有 GitHub 有）：按标签拼出来的
- * 才是刚刚探测到的那一版，中间就算又发了新版也不会取错。标签要编码——它可能含 `/`
- * 之类的字符，直接拼进路径会变成一个不存在的地址。
- */
-function packageUrlsAt(source, tag) {
-  return [{ url: `${source}/releases/download/${encodeURIComponent(tag)}/${ASSET}`, accept: '*/*' }]
-}
-
-/**
- * 「永远指向最新版」的包地址。附件名固定不带版本号，所以这个地址永远指向最新版。
- *
- * 只有「问不到标签、退回取整包读版本」那一支用它——那一步正是**还没有标签**的时候。
- * **不是每个平台都有这种地址**：Gitee 实测没有（那个路径 404），遇到它就不给，
- * 那一支随之走不了。这是如实，不是退步。
+ * 网页路用它，以及「问不到标签、退回取整包读版本」那一支用它。
  */
 function latestPackageUrl(source) {
-  let url
-  try {
-    url = new URL(source)
-  } catch {
-    return undefined
-  }
-  if (url.hostname === 'gitee.com') return undefined
   return `${source}/releases/latest/download/${ASSET}`
+}
+
+/** 网页路能给的下载地址只有一个：那个固定指向最新版的地址。 */
+function webPackageUrls(source) {
+  return [{ url: latestPackageUrl(source), accept: '*/*' }]
 }
 
 /**
  * 接口路：一次请求同时拿到「最新版是哪个标签」与「那一版的附件在哪儿取」。
  *
- * 附件地址优先用**接口给的那一条**，不按名字自己拼：发布方可以把附件取成任何名字，
- * 接口给的是这一版实际挂着的那一个。两家给的字段不同（一个给「还得再取一次的地址」、
- * 一个给「直接可下载的地址」），两种都认，认不出才退到按标签拼的那个地址。
+ * 附件地址用**接口给的那一条**，不按名字自己拼：发布方可以把附件取成任何名字，接口
+ * 给的是这一版实际挂着的那一个。取它时要声明「要原始字节」，平台才会把你交给资产主机。
  *
  * 三种结果必须分得开：「问到了」「那边确实没有最新发布」「这条路这次没走通」。中间
  * 那种是结论，后一种该换条路再问——**限流与超时都归进「没走通」**：它们说的是
  * 「这次问不成」，不是「那边没有」。
  */
 async function probeApi(endpoint, source) {
-  const res = await download(endpoint, { accept: PROBE_ACCEPT })
+  const res = await download(endpoint, { accept: 'application/vnd.github+json' })
   if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
   let payload
   try {
@@ -354,26 +309,21 @@ async function probeApi(endpoint, source) {
     // 说是接口却不是 JSON：这条路这次不能用，交给下一条。
     return { state: 'unreachable' }
   }
-  const tag = String(payload?.tag_name ?? '').trim()
-  const version = plainVersion(tag)
+  const version = plainVersion(payload?.tag_name)
   // 「说好是接口，回的却不是那个形状」属于**这条路没走通**，不是「那边没有最新发布」：
   // 前者该换条路再问（网页路多半问得出来），后者才是结论。认错这两个，代价是一次
   // 本可以成功的更新被静默跳过。
-  if (tag === '' || version === '') return { state: 'unreachable' }
+  if (version === '') return { state: 'unreachable' }
   const asset = Array.isArray(payload.assets)
     ? payload.assets.find((a) => a?.name === ASSET) : undefined
   const packageUrls = []
-  // 前一个要再声明一次「要原始字节」才拿得到内容；后一个本身就能下载。
   if (typeof asset?.url === 'string' && /^https?:/.test(asset.url)) {
     packageUrls.push({ url: asset.url, accept: 'application/octet-stream' })
   }
-  if (typeof asset?.browser_download_url === 'string' && /^https?:/.test(asset.browser_download_url)) {
-    packageUrls.push({ url: asset.browser_download_url, accept: '*/*' })
-  }
-  // 接口没给出附件地址（附件被改名、或那一版没挂附件）时，退到按标签拼的那一个：
+  // 接口没给出附件地址（附件被改名、或那一版没挂附件）时，退到网页那个固定地址：
   // 它与接口说的是同一版，只是取法不同。
-  packageUrls.push(...packageUrlsAt(source, tag))
-  return { state: 'ok', tag, version, packageUrls }
+  packageUrls.push(...webPackageUrls(source))
+  return { state: 'ok', version, packageUrls }
 }
 
 /**
@@ -387,26 +337,25 @@ async function probeWeb(endpoint, source) {
   // **不要求来源是 `owner/name` 那种形状**：它只是一个 http(s) 地址，探针也只需要地址。
   // 早年这里拿 `repoPath` 当门槛，于是自建镜像给的 `http://host:port` 被挡在门外，
   // 而挡的方式是「那边没有最新发布」——一个看起来像事实的错误结论。
-  const res = await download(endpoint, { accept: PROBE_ACCEPT })
+  const res = await download(endpoint, { accept: 'application/vnd.github+json' })
   if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
 
   // 一：**看它最后落在哪个地址**。托管平台的 `releases/latest` 会跳到那一版的页面，
   // 地址末尾就是标签（`…/releases/tag/v0.16.1`）。这一条路**一个字节正文都不用读**，
-  // 既省流量，也不依赖接口主机。两个平台都是这个形态。
+  // 既省流量，也不依赖接口主机。
   const fromUrl = /\/releases\/tag\/([^/?#]+)/.exec(res.final ?? '')
   if (fromUrl !== null) {
-    const tag = decodeURIComponent(fromUrl[1])
-    const version = plainVersion(tag)
-    if (version !== '') return { state: 'ok', tag, version, packageUrls: packageUrlsAt(source, tag) }
+    const version = plainVersion(decodeURIComponent(fromUrl[1]))
+    if (version !== '') return { state: 'ok', version, packageUrls: webPackageUrls(source) }
   }
 
   // 二：正文是 JSON（接口形状、或自建服务端按接口形状回应）。
   const text = res.body.toString('utf8')
   if (/^\s*[[{]/.test(text)) {
     try {
-      const tag = String(JSON.parse(text)?.tag_name ?? '').trim()
-      const version = plainVersion(tag)
-      if (version !== '') return { state: 'ok', tag, version, packageUrls: packageUrlsAt(source, tag) }
+      const tag = JSON.parse(text)?.tag_name
+      const version = typeof tag === 'string' ? plainVersion(tag) : ''
+      if (version !== '') return { state: 'ok', version, packageUrls: webPackageUrls(source) }
     } catch { /* 不是合法 JSON：落到下面当「那边没有」处理 */ }
   }
 
@@ -415,51 +364,6 @@ async function probeWeb(endpoint, source) {
   // 友情链接），猜错的方向是把使用者降级到一版更旧的代码。宁可说「那边没有最新发布」，
   // 让调用方去下那一份包、从包里读。
   return { state: 'absent' }
-}
-
-/**
- * 按顺序问每一个源，返回第一个答得上来的结果。
- *
- * **两个层次的失败要分得开**，合成一个就会出错：
- *
- *   - 同一个源之内，一条路没走通就换下一条（接口路不行，网页路还在）；
- *   - 一个源说「那边没有最新发布」是这个源的**结论**，不是整件事的结论——换下一个源问。
- *
- * 全部走完还没问到时：只要有一个源说过「没有最新发布」就报它，否则报「这次没连上」。
- * 这两句对使用者不是一回事：前者是「那里确实没有」，后者是「你这份还没核对上」。
- *
- * 结果里带上它**来自哪个源**：下载要按那个源的地址取，别的源只能当后备。
- */
-async function probeSources(sources) {
-  let absent
-  for (const source of sources) {
-    for (const route of routesFor(source)) {
-      const probed = route.kind === 'api'
-        ? await probeApi(route.endpoint, source)
-        : await probeWeb(route.endpoint, source)
-      if (probed.state === 'ok') return { ...probed, source }
-      if (probed.state === 'absent') { absent = { ...probed, source }; break }
-    }
-  }
-  return absent ?? { state: 'unreachable' }
-}
-
-/**
- * 下载候选，按优先顺序。
- *
- * **选定源给的地址在前**（接口给的那条最准），其余源按标签拼出来的地址在后——它们说的
- * 是同一版，只是放在不同的地方。跨源的后备不是多余的：问版本与取文件打的是**不同的
- * 主机**（接口主机、资产主机），一个通不代表另一个通。问到了版本却取不回文件时，
- * 别处的同一个包就是唯一的出路。
- */
-function downloadCandidates(found, sources) {
-  const candidates = [...(found.packageUrls ?? [])]
-  if (found.tag === undefined) return candidates
-  for (const source of sources) {
-    if (source === found.source) continue
-    candidates.push(...packageUrlsAt(source, found.tag))
-  }
-  return candidates
 }
 
 /**
@@ -647,39 +551,17 @@ function applyPackage(entries) {
   }
 }
 /**
- * 环境变量给的源，可以给**多个**（空格或逗号分隔）。
+ * 兜底来源可以被一个环境变量覆盖。
  *
  * 为什么要它：自建镜像、内网发布、以及**自动化测试**都需要「把来源指到别处」而不改包里的
- * 任何文件。多给几个是为了能在本机把「第一条通、第二条不通」与「第一条不通、第二条通」
- * 都造出来——那正是这套回退逻辑的全部内容，不实跑就等于没验。
- *
- * 它只在**副本自己没记来源**时才起作用——`metadata.source` 是权威的，写了就用它
- * （fork 出去自己发版的人正是靠这一条更新他自己的）。
+ * 任何文件。它只在**副本自己没记来源**时才起作用——`metadata.source` 是权威的，写了就用
+ * 它（fork 出去自己发版的人正是靠这一条更新他自己的）。
  *
  * 名字叫 `PF_UPDATE_SOURCE`（`PF` = project-forge）：一个进程级、不与任何宿主绑定的名字。
  */
-function environmentSources() {
-  const raw = String(process.env.PF_UPDATE_SOURCE ?? '').trim()
-  if (raw === '') return undefined
-  const list = raw.split(/[\s,]+/).map(originUrl).filter((s) => s !== undefined)
-  return list.length > 0 ? list : undefined
-}
-
-/**
- * 这次要按顺序问哪些源。
- *
- *   1. **副本自己记的那个**（`SKILL.md` 的 `metadata.source`）—— fork 出去自己发版的人
- *      写了自己的地址，就该更新他自己的，这套代码自带的备用上游与他无关；
- *   2. 记的**就是产出处**时，把它连同这套代码带的备用上游（`MIRRORS`）一起排上，按顺序试；
- *   3. 副本**没记来源**时兜底回到产出处；这一段还能被 `PF_UPDATE_SOURCE` 整个换掉。
- *
- * 「记的是哪个地址」只用来决定**要不要带上备用上游**，不用来判断可信度：地址就是地址，
- * 谁能答上来就用谁的。
- */
-function sourcesFor(facts) {
-  const own = originUrl(facts.source)
-  if (own !== undefined) return own === UPSTREAM ? [own, ...MIRRORS] : [own]
-  return environmentSources() ?? [UPSTREAM, ...MIRRORS]
+function fallbackSource() {
+  const fromEnv = originUrl(process.env.PF_UPDATE_SOURCE)
+  return fromEnv ?? originUrl(UPSTREAM)
 }
 
 /** 来源地址得是个 http(s) 地址，才谈得上「去哪儿取新版」。 */
@@ -712,21 +594,15 @@ function reportSourceCopy(facts, { quiet }) {
   return 0
 }
 
-/**
- * 包副本但核对不了：说清缺哪一样，不假装查过。
- *
- * 会走到这里的基本都是「读不到自己属于哪一版」——没记来源时会兜底到产出处，不算残缺。
- * 而版本号是比对的另一半，缺了它整件事做不成，所以两个都数出来，缺哪个说哪个。
- */
+/** 包副本但读不到来源：说清为什么，不假装查过。 */
 function reportUnverifiable(facts, { quiet }) {
   const tag = facts.version === undefined ? '（版本读不到）' : facts.version
-  const missing = []
-  if (facts.source === undefined) missing.push('metadata.source（这份副本从哪儿来）')
-  if (facts.version === undefined) missing.push('metadata.version（自己是哪一版）')
+  const missing = facts.source === undefined
+    ? '这份副本没有记着自己是从哪儿来的（SKILL.md 的 metadata.source 没有或不成地址）'
+    : '这份副本读不到自己属于哪一版（SKILL.md 的 metadata.version）'
   report([
-    `project-forge ${tag}：这份副本读不到 ${missing.join('、')}，所以没法核对新版`
-      + '（这不是「已是最新」）。',
-    '  两样都写进 SKILL.md 就能恢复自动核对；想现在更新就直接下载新版覆盖。',
+    `project-forge ${tag}：${missing}，无法自动核对新版（这不是「已是最新」）。`,
+    '  要更新就自己下载新版覆盖；写上一行 metadata.source（仓库地址）就能恢复自动核对。',
   ], { quiet })
   return 0
 }
@@ -748,11 +624,13 @@ async function main(argv) {
   // 源码副本：只读报告，到此为止。这条不联网，也就没有窗口的理由。
   if (facts.hasGit) return reportSourceCopy(facts, { quiet })
 
-  // 这次要问哪些源、按什么顺序，见 `sourcesFor`。它拿的是**地址本身**，不是 `repoPath`
-  // 归一出来的 `owner/name`——后者是拿来比对的形状，不含协议与主机，喂给下载函数会拼出
-  // 一个非法 URL（现象是更新静默失效）。
-  const sources = sourcesFor(facts)
-  if (sources.length === 0 || facts.version === undefined) return reportUnverifiable(facts, { quiet })
+  // 来源**先看副本自己记的那个**：fork 出去自己发版的人写了自己的地址，就该更新他自己的；
+  // 读不到或不成地址时退回兜底地址（`PF_UPDATE_SOURCE`，没设就是这段代码自己写着的那个）。
+  //
+  // 兜底那一支要的是**地址本身**，不是 `repoPath` 归一出来的 `owner/name`——后者是拿来
+  // 比对的形状，不含协议与主机，喂给下载函数会拼出一个非法 URL（现象是更新静默失效）。
+  const source = originUrl(facts.source) ?? fallbackSource()
+  if (source === undefined || facts.version === undefined) return reportUnverifiable(facts, { quiet })
 
   const state = readState()
   const sinceUpdate = Date.now() - state.lastUpdateAt
@@ -762,8 +640,15 @@ async function main(argv) {
   const inWindow = sinceUpdate < UPDATE_INTERVAL_MS
 
   // ── 一：比版本 ────────────────────────────────────────────────────────────
-  // 每个源各有两条路，源之间也按顺序试——规矩见 `probeSources`。
-  const found = await probeSources(sources)
+  // 两条路按顺序试。**只有「这条路这次没走通」才换下一条**：「那边没有最新发布」是
+  // 结论，换个地方再问一遍问不出不同的答案，白白多等一个超时。
+  let found = { state: 'unreachable' }
+  for (const route of routesFor(source)) {
+    found = route.kind === 'api'
+      ? await probeApi(route.endpoint, source)
+      : await probeWeb(route.endpoint, source)
+    if (found.state !== 'unreachable') break
+  }
 
   if (found.state === 'unreachable') {
     // 没连上不是「已是最新」。**偶尔一次不吭声**——下次再用就自己好了；但隔久了还没能
@@ -790,23 +675,15 @@ async function main(argv) {
   // 核对上了：记下时刻。它决定上面那句提醒该不该出现。
   rememberState({ lastOkAt: Date.now() })
 
-  // 问不到标签（那边确实没有最新发布）时，退回「取整包读版本」。
+  // 问不到标签（平台没有最新发布）时，退回「取整包读版本」。
   // 那条路要下整包，所以只在真需要更新时才走——而「需不需要」得先读出来才知道，
   // 于是这里退化成「下载一次，顺手就当更新用」，不做第二遍下载。
-  //
-  // 它要的是**不带标签也能取到包**的地址，那种地址不是每个平台都有（Gitee 就没有）；
-  // 没有时这一支走不了，如实报「没能核对」——凭空拼一个地址出来只会得到 404。
   let latest
   let remote
   if (found.state === 'ok') {
     remote = found.version
   } else {
-    const atLatest = latestPackageUrl(found.source)
-    if (atLatest === undefined) {
-      report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
-      return 0
-    }
-    latest = await fetchPackage(atLatest)
+    latest = await fetchPackage(latestPackageUrl(source))
     if (!latest.ok) {
       report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
       return 0
@@ -844,8 +721,10 @@ async function main(argv) {
   }
 
   // ── 二：下载新版（上面没下过才下） ────────────────────────────────────────
+  // 候选地址按优先顺序试：接口路给的那条在前（它走资产主机，**不碰网页主机**），网页
+  // 那条在后。一条取不到就换下一条——两处说的是同一版，只是取法不同。
   if (latest === undefined) {
-    for (const candidate of downloadCandidates(found, sources)) {
+    for (const candidate of found.packageUrls ?? webPackageUrls(source)) {
       latest = await fetchPackage(candidate.url, candidate.accept)
       if (latest.ok) break
     }
@@ -897,7 +776,7 @@ async function main(argv) {
 
 // 分成两块顺手带出一个可测性：文件被 import 时只交出判据，与它被当成脚本跑时一样的东西。
 // 自检就靠这个核对「兜底地址」「静默期」「提醒节奏」没有另抄一份值，并直接验排路的规则。
-export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor, latestPackageUrl }
+export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code })

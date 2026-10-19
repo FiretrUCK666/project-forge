@@ -32,7 +32,7 @@ import {
   isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, skillSource, needsSummary,
   parseMarkerKeys, normVersion, repoPath, readFileMap,
 } from '../survey.mjs'
-import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor, latestPackageUrl } from '../update.mjs'
+import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 
@@ -3446,16 +3446,14 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
    * 有没有在「只比版本」的时候把整包也拉下来。这些只有真的发过请求才数得清。
    * 监听随机端口，不依赖外网，也不会撞端口。
    */
-  const stats = { api: 0, zip: 0, apiBytes: 0, zipBytes: 0, vendorAccept: 0 }
+  const stats = { api: 0, zip: 0, apiBytes: 0, zipBytes: 0 }
   const serve = (handler) => new Promise((resolvePromise) => {
     const s = createServer(handler)
     s.listen(0, '127.0.0.1', () => resolvePromise(s))
   })
   const closeServer = (s) => new Promise((resolvePromise) => s.close(() => resolvePromise()))
 
-  const resetStats = () => {
-    stats.api = 0; stats.zip = 0; stats.apiBytes = 0; stats.zipBytes = 0; stats.vendorAccept = 0
-  }
+  const resetStats = () => { stats.api = 0; stats.zip = 0; stats.apiBytes = 0; stats.zipBytes = 0 }
 
   /**
    * 一个用例失败时把它看见的输出打出来。
@@ -3499,10 +3497,6 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
 
     const server = await serve((req, res) => {
       const path = req.url ?? ''
-      // 探针的 `Accept` 必须是普适的：带某家平台专用的媒体类型（含 `vnd.`），另一家会按
-      // 「我没有这种表示形式」处理而回 404——Gitee 实测如此，现象是「这条路明明存在却
-      // 问不到」。真实平台才会这样挑剔，所以只能把「它发了什么」记下来在这一层断言。
-      if (/vnd\./.test(String(req.headers.accept ?? ''))) stats.vendorAccept += 1
       const isLatest = path.includes('/releases/latest') && !path.includes('/download/')
       if (isLatest) {
         stats.api += 1
@@ -3558,13 +3552,6 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       check(stats.apiBytes > 0 && stats.apiBytes < 1000, '那次请求的体积是几十字节级别，不是整包',
         `${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
       report(stats.apiBytes < 1000, `那次请求 ${stats.apiBytes} 字节（整包 ${pkg.body.length} 字节）`)
-      // `Accept` 是内容协商：写死某一家的专用媒体类型，另一家会当作「没有这种表示形式」
-      // 而回 404。Gitee 对 `application/vnd.github+json` 就直接 404，同一个地址不带那个头
-      // 却是 302 跳转。这种挑剔只有真实平台才有，所以判据落在「发出去的那个头」上。
-      check(stats.vendorAccept === 0,
-        '探针的 Accept 不带平台专用媒体类型（带了另一家会按「没有这种表示形式」回 404）',
-        `收到 ${stats.vendorAccept} 次带 vnd. 的 Accept`)
-      report(stats.vendorAccept === 0, '探针 Accept：普适')
     }
 
     // 一之二、托管平台形状：`releases/latest` 跳到那一版的页面，标签就在地址里。
@@ -3852,25 +3839,10 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       check(webKept, '网页路问的还是原来那个地址（退路不该是新的猜测）', gh[1].endpoint)
       report(webKept, '排路：网页地址没变')
 
-      // Gitee 的规矩与 GitHub 不同，所以要单独认：接口在同一个主机的 `/api/v5/` 下。
-      const gitee = routesFor('https://gitee.com/owner/repo')
-      const giteeOk = gitee.length === 2 && gitee[0].kind === 'api'
-        && gitee[0].endpoint === 'https://gitee.com/api/v5/repos/owner/repo/releases/latest'
-      check(giteeOk, 'Gitee 形状的来源也排得出两条路，接口地址按它自己的规律拼', JSON.stringify(gitee))
-      report(giteeOk, '排路：Gitee 的接口地址')
-      // 它**没有**「永远指向最新版」的下载地址（实测那个路径 404），所以那一项必须为空：
-      // 凭空拼一个出来只会得到 404，而现象是「更新莫名其妙失败」。
-      const noLatestOnGitee = latestPackageUrl('https://gitee.com/owner/repo') === undefined
-      check(noLatestOnGitee, 'Gitee 不提供「永远指向最新版」的下载地址（那一项是空的，不是拼一个出来）')
-      report(noLatestOnGitee, '排路：Gitee 没有固定最新地址')
-      const latestOnGitHub = typeof latestPackageUrl('https://github.com/owner/repo') === 'string'
-      check(latestOnGitHub, 'GitHub 有那种地址（「退回取整包读版本」那一支要用它）')
-      report(latestOnGitHub, '排路：GitHub 有固定最新地址')
-
       // 反例：认不出来的形状只留网页路，接口那一支完全不出现。
       const unrecognized = [
         ['自建镜像', 'http://127.0.0.1:9000/mirror'],
-        ['形状对但平台不认得', 'https://gitlab.com/owner/repo'],
+        ['别的托管平台', 'https://gitee.com/owner/repo'],
         ['多出几段路径', 'https://github.com/owner/repo/tree/main'],
       ]
       for (const [label, bad] of unrecognized) {
@@ -3879,35 +3851,6 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
           `${label}：认不出就不给接口路（宁可少一条，也不猜一个地址出来）`, JSON.stringify(routes))
       }
       report(unrecognized.every(([, bad]) => routesFor(bad).length === 1), '排路：认不出的只给网页路')
-    }
-
-    // 七之三、多个源按顺序试——**备用上游的全部内容就是这一条**。两种「前面那个不行」
-    //         走的是不同分支，所以两个方向都要造出来：连不上（该换下一条路再试）、
-    //         那边确实没有（该换下一个源）。少了哪一半，回退都可能只做对一半。
-    {
-      state.tag = '9.9.9'
-
-      // 方向一：第一个源连不上（本机一个没人监听的端口），第二个源答得上来。
-      const dirA = makeCopy('multi-first-dead', {})
-      const rA = await runUpdate(dirA, '--check',
-        { env: { PF_UPDATE_SOURCE: `http://127.0.0.1:1/owner/repo ${source()}` } })
-      failWith(/有新版本 9\.9\.9/.test(rA.out), '第一个源连不上时，照样从第二个源问到新版', rA)
-      report(/有新版本 9\.9\.9/.test(rA.out), '多源：前面不通就换后面的')
-
-      // 方向二：第一个源说「那边没有最新发布」（404），第二个源答得上来。
-      const dirB = makeCopy('multi-first-absent', {})
-      const rB = await runUpdate(dirB, '--check',
-        { env: { PF_UPDATE_SOURCE: `http://127.0.0.1:${port.value}/nonexistent ${source()}` } })
-      failWith(/有新版本 9\.9\.9/.test(rB.out), '第一个源说「没有最新发布」时，也要换到第二个源问', rB)
-      report(/有新版本 9\.9\.9/.test(rB.out), '多源：前面说没有就换后面的')
-
-      // 反例：所有源都不通时，不能谎报「已是最新」，也不能编出一个版本号。
-      const dirC = makeCopy('multi-all-dead', {})
-      const rC = await runUpdate(dirC, '--check',
-        { env: { PF_UPDATE_SOURCE: 'http://127.0.0.1:1/a http://127.0.0.1:1/b' } })
-      const honest = /不是「已是最新」/.test(rC.out) && !/有新版本/.test(rC.out)
-      failWith(honest, '所有源都不通时如实说「没能核对」，不谎报', rC)
-      report(honest, '多源：全不通就说全不通')
     }
 
     await closeServer(server)

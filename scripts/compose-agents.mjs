@@ -20,7 +20,8 @@
  *   node scripts/compose-agents.mjs [目录] --status     只报告现状（待填写项与缺节），不写入
  *   node scripts/compose-agents.mjs [目录] --budget N   指定预算字节数（默认 65536）
  *
- * 缺节判据只对**结构由脚本决定**的文件成立（见 MANAGED / UPGRADED 两个常量的注释）：
+ * 缺节判据只对**结构由脚本决定**的文件成立（见 survey.mjs 里 MANAGED / UPGRADED 两个
+ * 常量的注释）：
  * 生成的文件缺节是缺陷，升级过的文件缺节是待办，作者自己编排的文件不判缺节。
  *
  * 模板标记（写在 templates/agents-project.md 里）：
@@ -30,15 +31,16 @@
  *   <!-- pf:scaffold --> … <!-- pf:endscaffold -->  脚手架，待填写项归零后自动移除
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey,
-  KERNEL_START, KERNEL_END, INSTRUCTION_BUDGET } from './survey.mjs'
-// 围栏扫描只有一份实现，放在 sync-toc.mjs 并导出来：它要判的是同一件事
-// （这对标记是不是真在正文里），两边各写一份状态机就会给出不同答案。
-import { fencedSpans, markerPositions } from './sync-toc.mjs'
+import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey, isMainModule,
+  readTextFile, fencedSpans, markerPositions,
+  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, INSTRUCTION_BUDGET } from './survey.mjs'
+// 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
+// 使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取，不再自己写一遍。
+import { clearStaleTemps, tempPathFor, reportTemps } from './sync-toc.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -47,37 +49,29 @@ const SKELETON_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
 
 const START = KERNEL_START
 const END = KERNEL_END
-/**
- * 「这份文件由本脚本生成」的标记。
- *
- * 它区分开三种**都带内核**的文件，而它们的验收标准不同：
- *   - **生成的文件**（从骨架生成）：节结构由模板决定，**缺节就是缺陷**，该报错；
- *   - **升级的文件**（手写后被 --upgrade 改造，见 UPGRADED）：结构已向模板对齐，
- *     但需要人写的节脚本刻意不补，所以缺节是**待办**，只提示不否决；
- *   - **作者编排的文件**（自己写的，只带内核标记）：作者可能刻意换一种组织方式
- *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」，
- *     而「文档同步」的规则由内核段承担）。此时**模板的标题清单不是判据**：脚本既不会
- *     替他补这些节，也不该拿字面差集去催他——那只会把「写了但措辞不同」报成「没写」，
- *     而一份永远在喊同一批假缺失的报告，等于不存在。
- *
- * 没有这个区分时只有两种错法：要么把作者的编排当成缺陷（误报，逼人改成模板的样子），
- * 要么对掏空的契约睁一眼闭一眼（漏报）——区分的两支各自挡住其中一种错法。
- */
-const MANAGED = '<!-- project-forge:managed -->'
-
-/**
- * 「这份文件的结构已按模板升级过」的标记。
- *
- * `--upgrade` 只做加法：插入内核、补上可自动补的节，**需要人写的节一个都不补**。
- * 所以升级完的文件必然还缺若干节，那是**待办**而不是缺陷——判据必须能把它与
- * 「作者自己编排的文件」区分开，否则两者只能取同一个标准，而两个标准都会错：
- * 按缺陷判，升级后的文件永远红；按不判，P4 的「两个节数归零」就空转了。
- */
-const UPGRADED = '<!-- project-forge:upgraded -->'
+// MANAGED 与 UPGRADED 的定义与理由在 survey.mjs 里，与 KERNEL_START 同源：这几枚标记
+// 都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
 const DEFAULT_BUDGET = INSTRUCTION_BUDGET
 
 function readUtf8(p) {
   return readFileSync(p, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+}
+
+/**
+ * 读目标项目里的一个文本文件：**按内容嗅探编码**，与勘察同一套解码。
+ *
+ * 为什么不用 `readUtf8`：那份是「按 UTF-8 读、读不出来就当空」，而清单存成 UTF-16 的
+ * 项目会被解成乱码、JSON 解析失败，于是被报成「清单损坏」——而勘察那边的内容扫描
+ * 用的是会嗅探编码的那一套，同一个文件两个答案。现在两边都走 survey.mjs 的
+ * `readTextFile`。
+ *
+ * 返回 { text, encoding } 或 undefined（读不出来）。`encoding` 为 `unknown` 表示
+ * 既不是 UTF-8 也不是 UTF-16（多半是本地编码）——那与「JSON 语法错误」是两种事。
+ */
+function readProjectText(p) {
+  const decoded = readTextFile(p)
+  if (decoded === undefined) return undefined
+  return { text: decoded.text.replace(/\r\n/g, '\n'), encoding: decoded.encoding }
 }
 
 /**
@@ -114,7 +108,10 @@ function readUtf8Strict(p) {
         : '不是合法的 UTF-8（可能是 GBK 等本地编码）',
     }
   }
-  return { text: text.replace(/^\uFEFF/, '') }
+  // BOM 要**从原始字节**判：TextDecoder 按规范会自己吃掉 UTF-8 的 BOM，
+  // 解出来的文本里已经没有它了——拿文本去判，结论永远是「没有 BOM」。
+  const hadBom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf
+  return { text: text.replace(/^\uFEFF/, ''), hadBom }
 }
 
 /**
@@ -263,17 +260,31 @@ function deriveFacts(target) {
   // 后果是生成件里「依赖版本同步」那一节整块消失、而报告照样说「已生成」——AI 按
   // P4「两个数字归零 = 内容完整」收尾，交出去的东西少一节且无人知道。
   let manifestBroken = false
+  // 读不出来时**为什么**要分清：内容读出来了但 JSON 语法错（该改 JSON），与内容压根
+  // 读不出来——不是合法 UTF-8/UTF-16（该转存编码）。合成一句话会让使用者去改一个
+  // 没坏的文件。
+  let manifestBrokenWhy = ''
   if (manifestPath !== undefined) {
     // 依赖字段名各生态不同，这里按「清单里出现 dependency 字样的键」判断，
     // 避免把某个生态的字段名写死。
-    try {
-      const pkg = JSON.parse(readUtf8(join(target, manifestPath)))
-      hasDeps = Object.keys(pkg).some((k) => /dependenc/i.test(k) && (
-        typeof pkg[k] === 'object' ? Object.keys(pkg[k]).length > 0 : false
-      ))
-    } catch {
-      // 读不到就**不能**按无依赖处理：说一句，并让交付门禁看得见（见调用处）。
+    const raw = readProjectText(join(target, manifestPath))
+    if (raw === undefined) {
       manifestBroken = index.has(manifestPath)
+      manifestBrokenWhy = manifestBroken ? 'unreadable' : ''
+    } else if (raw.encoding === 'unknown') {
+      manifestBroken = index.has(manifestPath)
+      manifestBrokenWhy = 'encoding'
+    } else {
+      try {
+        const pkg = JSON.parse(raw.text)
+        hasDeps = Object.keys(pkg).some((k) => /dependenc/i.test(k) && (
+          typeof pkg[k] === 'object' ? Object.keys(pkg[k]).length > 0 : false
+        ))
+      } catch {
+        // 读不到就**不能**按无依赖处理：说一句，并让交付门禁看得见（见调用处）。
+        manifestBroken = index.has(manifestPath)
+        manifestBrokenWhy = manifestBroken ? 'syntax' : ''
+      }
     }
   }
   if (!hasDeps) {
@@ -387,8 +398,9 @@ function deriveFacts(target) {
     const real = index.real(file)
     if (real === undefined) continue
     try {
-      const raw = readUtf8(join(target, real))
-      const hit = file === manifestPath ? pick(JSON.parse(raw)) : pick(raw)
+      const decoded = readProjectText(join(target, real))
+      if (decoded === undefined) continue
+      const hit = file === manifestPath ? pick(JSON.parse(decoded.text)) : pick(decoded.text)
       if (typeof hit === 'string' && hit.trim().length > 0) {
         projectName = hit.trim().replace(/^@[^/]+\//, '') // 去掉作用域前缀，标题里更好读
       }
@@ -400,7 +412,7 @@ function deriveFacts(target) {
     COMMANDS: renderCommands(commands),
   }
 
-  return { survey: s, conditions, tokens, manifestBroken }
+  return { survey: s, conditions, tokens, manifestBroken, manifestBrokenWhy, manifestPath }
 }
 
 /**
@@ -424,21 +436,6 @@ function attachMarker(text, marker, anchor) {
     throw new Error(`没能把 ${marker} 写进文件——不写，以免产出一份结构标记缺失的文件。`)
   }
   return next
-}
-
-/**
- * 清掉这个文件此前的临时文件（**任何**进程号留下的）。见 sync-toc.mjs 里的同名函数：
- * 只清自己那个 pid 的等于没清，而顶层多出来的条目会被结构自检当成无主文件。
- */
-function clearStaleTemps(path) {
-  const dir = dirname(path)
-  const prefix = `${basename(path)}.tmp-`
-  let entries
-  try { entries = readdirSync(dir) } catch { return }
-  for (const name of entries) {
-    if (!name.startsWith(prefix)) continue
-    try { unlinkSync(join(dir, name)) } catch { /* 清不掉就算了 */ }
-  }
 }
 
 /**
@@ -669,6 +666,21 @@ function extractKernel(text, startAt, endAt) {
 }
 
 /**
+ * 现有节里多出来的行：模板重新求值后不再包含的那些行。
+ *
+ * 判据是**逐行比对**，不是「整节是否相同」：条件段落整块出现或整块消失时，整节比对
+ * 会把整节都算成「多出来的」，而那些行只是上一轮求值的结果、这一轮该消失。
+ * 逐行看，两种情况才分得开——分不开时报出来的就是一句噪声，而噪声报多了等于没报。
+ *
+ * 返回的是**行**，不是「是不是你自己写的」：脚本分不出使用者写的字与模板上一轮的
+ * 产物。报告里说的是「这一节里现有的这些行不在新结果里」，那一句是真的。
+ */
+function extraLines(oldText, freshText) {
+  const fresh = new Set(freshText.split('\n').map((l) => l.trim()).filter((l) => l !== ''))
+  return oldText.split('\n').map((l) => l.trim()).filter((l) => l !== '' && !fresh.has(l))
+}
+
+/**
  * 按当前事实重新求值模板，再与既有文件**按节合并**。
  *
  * 合并判据只有一条，而且判据来自**新求值的结果**：
@@ -724,8 +736,13 @@ function refreshFromTemplate(target, existing, kernel, state) {
       kept.push(section.heading)
       merged.push({ text: section.lines.join('\n'), fresh: false })
     } else {
-      // 纯生成内容：用新求值的结果，让条件段落能随事实增删
-      refreshed.push(section.heading)
+      // 纯生成内容：用新求值的结果，让条件段落能随事实增删。
+      //
+      // **覆盖行为不变**（它就是设计要的：否则「有远端才有」的内容永远补不进来），
+      // 变的是**告知**：这一节里现有的、模板重新求值后不再有的那些行，本次会被替换掉。
+      // 不说的话，报告只说「按当前项目事实重新求值」，读的人以为只有条件段落在动，
+      // 而他自己在这一节里补的说明已经没了。
+      refreshed.push({ heading: section.heading, extra: extraLines(section.lines.join('\n'), freshText) })
       merged.push({ text: freshText, fresh: true })
     }
   }
@@ -752,7 +769,9 @@ function refreshFromTemplate(target, existing, kernel, state) {
   text = stripScaffold(text, authors.length)
 
   const report = { kept, refreshed, missing, authors: authors.length }
-  return { text, report }
+  // facts 一并带出去：报告要用它说清「清单读不出来」这类事（那与本次刷新无关，
+  // 但契约里少了一节，使用者必须知道）。
+  return { text, report, facts }
 }
 
 function kernelBody() {
@@ -784,6 +803,22 @@ function injectKernel(text, kernel) {
   const before = text.slice(0, starts[0] + START.length)
   const after = text.slice(ends[0])
   return `${before}\n${kernel}\n${after}`
+}
+
+/**
+ * 文件里现有的内核区间（两个标记之间的正文）：按 LF 归一化，并去掉紧贴标记的那一个换行。
+ *
+ * 返回 undefined 表示这份文件没有一对完整的内核标记。
+ *
+ * **判据只有这一处**：`--check` 报的「内核不一致」与写入路径的「会被覆盖」提醒必须
+ * 同源——两处各判一次，改了一处就会出现「自检说一致、写入却覆盖」。
+ */
+function embeddedKernel(text) {
+  const normalized = text.replace(/\r\n/g, '\n')
+  const state = documentState(normalized)
+  if (state.kind !== 'managed') return undefined
+  return normalized.slice(state.startAt + START.length, state.endAt)
+    .replace(/^\n/, '').replace(/\n$/, '')
 }
 
 /**
@@ -948,10 +983,18 @@ function missingSections(target, currentText) {
     .map((s) => ({ heading: s.heading, needsHuman: findAuthors(s.lines.join('\n')).length > 0 }))
 }
 
-/** 这份文件的节结构是谁定的：脚本生成 / 脚本升级 / 作者自己编排。判据写在文件里，不靠调用方传参。 */
+/**
+ * 这份文件的节结构是谁定的：脚本生成 / 脚本升级 / 作者自己编排。判据写在文件里，不靠调用方传参。
+ *
+ * **按标记常量判，不另写一份字面量**：这两个标记有写入方（本脚本的 `attachMarker`）
+ * 与读取方（这里），写入用导入的常量、读取用内联正则，字面量一改就会得到「写进去的是
+ * 新标记、读出来认不出」的分裂——那份文件于是被判成「作者编排」，缺节检查从此对它
+ * 永久关闭且没有任何提示。
+ */
 function documentStructure(text) {
-  if (/^<!-- project-forge:managed -->\s*$/m.test(text)) return 'generated'
-  if (/^<!-- project-forge:upgraded -->\s*$/m.test(text)) return 'upgraded'
+  const lines = text.split('\n').map((l) => l.trim())
+  if (lines.includes(MANAGED)) return 'generated'
+  if (lines.includes(UPGRADED)) return 'upgraded'
   return 'authored'
 }
 
@@ -1100,7 +1143,14 @@ function reportRefresh(report, stream) {
   }
   if (report.refreshed !== undefined && report.refreshed.length > 0) {
     stream.write(`\n按当前项目事实重新求值的节（共 ${report.refreshed.length} 节）：\n`)
-    for (const r of report.refreshed) stream.write(`  - ${r}\n`)
+    for (const r of report.refreshed) {
+      stream.write(`  - ${r.heading}\n`)
+      if (r.extra.length > 0) {
+        stream.write(`      注意：这一节现有的内容里有 ${r.extra.length} 行不在模板重新求值的结果里`
+          + '（可能是你自己写的，也可能是上一轮的条件段落），本次会被替换掉。\n')
+        stream.write('      要保留自己写的内容，把它挪到模板没有的二级标题下——那些节脚本原样保留。\n')
+      }
+    }
   }
   if (report.kept.length > 0) {
     stream.write(`\n保留原样的节（共 ${report.kept.length} 节，人写的内容不动）\n`)
@@ -1110,9 +1160,11 @@ function reportRefresh(report, stream) {
 /**
  * 模板用到的每个 `pf:if` 条件，都必须在条件表里有定义。**只查这一个方向。**
  *
- * 漏了会怎样：条件名不在表里，`materialize` 会把那一段**整段丢弃**——而丢弃是静默的，
- * 生成出来的契约里那一节凭空消失，没有任何提示说它本该在。名字拼错一个字母
- * （`has-remote` 写成 `has-remotes`）就是这个结果。
+ * 漏了会怎样：条件名不在表里，`materialize` 会抛错，**本次运行以退出码 2 中止**，
+ * 产出文件不会被写入。所以消息必须指向「在条件表里补上同名条目」——
+ * 早先的说法是「那一段会被整段丢弃、丢弃是静默的、那一节会凭空消失」，那描述的是
+ * 一个**根本没发生**的后果：命令根本没跑完，文件也没生成。照那句话去排查的人会去
+ * 找「那一节为什么不见了」，而正确动作是补条件名后重跑。
  *
  * **为什么不查反向**（条件表里有、模板里没用到）：那是**正常**的，而且是有用的正常。
  * 条件可以先备好、模板段落之后才写——比如某个判据已经确定要做、但专章还没落地。
@@ -1144,8 +1196,8 @@ function assertTemplateConditionsKnown(target) {
     throw new Error(
       `templates/agents-project.md 用到了条件表里没有的条件：${missing.join('、')}。\n`
       + '  请在 compose-agents.mjs 的 deriveFacts() 条件表里补上同名条目。\n'
-      + '  未定义的条件会让那一段内容被**整段丢弃**，而丢弃是静默的——生成出来的契约里'
-      + '那一节会凭空消失，没有任何提示说它本该在。',
+      + '  未定义的条件会让本次运行**以退出码 2 中止**，产出文件不会被写入——'
+      + '不是静默丢弃那一段。补上条件名再跑一次即可。',
     )
   }
 }
@@ -1217,10 +1269,12 @@ function main(argv) {
     return 2
   }
   // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）。
-  // 按「同目录、同前缀」清**任何**进程号留下的：只清自己那个 pid 的等于没清——被杀的
-  // 进程留下的是它的 pid，下次换了 pid 就再也清不掉，而顶层多出来的条目会被结构自检
-  // 当成无主文件。sync-toc.mjs 对它自己的临时文件做同一件事。
-  clearStaleTemps(agentsPath)
+  //
+  // 判据与报告都在 sync-toc.mjs 那一处：只删「能证明是已经死掉的进程留下的」那些，
+  // 同前缀但不是纯数字的（使用者自己的文件）与属主还活着的（另一个正在跑的进程手里
+  // 的）一律留下并报出来——删掉前者是悄悄毁掉别人的东西，删掉后者会让那次运行的改名
+  // 失败。本文件从前写的那份判据是「同前缀全删」，那是上面两种误伤都有的版本。
+  reportTemps(agentsPath, clearStaleTemps(agentsPath))
   if (check && !exists) {
     process.stderr.write(`校验失败：${agentsPath} 不存在。\n`)
     return 1
@@ -1229,6 +1283,11 @@ function main(argv) {
   let composed
   let refreshReport
   let managedExisting
+  // 原文件带不带 BOM：BOM 不是内容，却属于「这个文件原本的样子」，写回去时要带上。
+  let hadBom = false
+  // 内核区与模板不一致 → 这次运行会用模板刷新它，而内核区里的内容会没。
+  // 契约要求「注入前先提醒他会被覆盖」（SKILL.md 硬不变量 2）。
+  let kernelWillBeOverwritten = false
   // 生成时留下的勘察结论：报告里要用它说清「这一节为什么没生成」（清单解析不了时）。
   let factsForReport
   try {
@@ -1246,6 +1305,7 @@ function main(argv) {
         return 2
       }
       const existing = read.text
+      hadBom = read.hadBom === true
 
       // ② 四态判定：手写 / 受管 / 围栏内 / 受损。后两者必须停下，不能当成手写。
       const state = documentState(existing)
@@ -1277,6 +1337,9 @@ function main(argv) {
         const refreshed = refreshFromTemplate(target, existing, kernel, state)
         composed = refreshed.text
         refreshReport = refreshed.report
+        factsForReport = refreshed.facts
+        // 内核区会被模板刷新：判据与 `--check` 的「内核不一致」同源（embeddedKernel）。
+        kernelWillBeOverwritten = embeddedKernel(existing) !== kernel
       }
       if (!composed.endsWith('\n')) composed += '\n'
     } else {
@@ -1318,7 +1381,11 @@ function main(argv) {
   }
 
   const authors = findAuthors(composed)
-  const bytes = Buffer.byteLength(composed, 'utf8')
+  // 原文件带 BOM 就把它带回去。BOM 不是正文，却属于「这个文件原本的样子」：悄悄去掉
+  // 它与「标记之外一个字节都不动」的说法冲突，而 BOM 是 Windows 上不少编辑器的默认，
+  // 去掉之后用户的编辑器下一次保存又加回来，于是版本库里反复出现「只多了个 BOM」的改动。
+  const payload = hadBom ? '\uFEFF' + composed : composed
+  const bytes = Buffer.byteLength(payload, 'utf8')
   const ratio = ((bytes / budget) * 100).toFixed(1)
   // 比较前两侧都归一化：current 已经由 readUtf8 归一成 LF，composed 可能是 CRLF。
   // 不归一就会出现「字节没变却每次都说改了」——那会让「无需改动」这个信号失效，
@@ -1349,12 +1416,11 @@ function main(argv) {
       // kernelBody 走 readUtf8 会把 CRLF 换成 LF。不归一的后果是 CRLF 的文件恒定报
       // 「内核不一致」，而写入路径**不会**改掉行尾（它沿用原文件的主导行尾），于是
       // 报错信息给的「修正」命令再跑一遍也还是红的——一个自己退不出来的失败。
-      // 归一化换了字节，偏移量也跟着变，所以位置在**归一化之后**重新取。
-      const raw = managedExisting.replace(/\r\n/g, '\n')
+      //
+      // 取值与归一化只有一处实现（embeddedKernel），写入路径的「会被覆盖」提醒用它
+      // 同一份判据：两处各判一次，改了一处就会出现「自检说一致、写入却覆盖」。
       const template = kernelBody()
-      const rawState = documentState(raw)
-      const embedded = raw.slice(rawState.startAt + START.length, rawState.endAt)
-        .replace(/^\n/, '').replace(/\n$/, '')
+      const embedded = embeddedKernel(managedExisting)
       if (embedded !== template) {
         problems.push('内核区间与 templates/agents-kernel.md 不一致'
           + `（文件里 ${Buffer.byteLength(embedded, 'utf8')} 字节，模板 ${Buffer.byteLength(template, 'utf8')} 字节）`
@@ -1427,10 +1493,24 @@ function main(argv) {
   //     使用者看不到「哪个文件、为什么」；
   //   - 直接覆盖原文件时，写入中途失败会留下半截文件。改名在同一分区上是原子的，
   //     所以要么是旧内容、要么是新内容，不会出现第三种状态。
+  //
+  // 提醒先于写入、也先于「已刷新」：**先看到提醒，才知道这次跑完文件变成什么样**。
+  // 契约要求的是「提醒」不是「禁止」——内核区归模板独占，但使用者有权知道自己的
+  // 内容会被覆盖，并在事后把要紧的话挪到标记之外。
+  if (kernelWillBeOverwritten) {
+    process.stdout.write(
+      '提醒：这份 AGENTS.md 的内核区与 templates/agents-kernel.md 不一致——\n'
+      + '  内核区归通用内核模板独占（单一真相源），本次运行会用模板刷新它。\n'
+      + '  你在这两个标记之间写的内容会被覆盖。要保留它，请把它移到内核区之外（标记之外）。\n',
+    )
+  }
+  if (hadBom) {
+    process.stdout.write('（原文件带 UTF-8 BOM，已原样保留。）\n')
+  }
   try {
     mkdirSync(dirname(agentsPath), { recursive: true })
-    const tmp = `${agentsPath}.tmp-${process.pid}`
-    writeFileSync(tmp, composed, { encoding: 'utf8' })
+    const tmp = tempPathFor(agentsPath)
+    writeFileSync(tmp, payload, { encoding: 'utf8' })
     renameSync(tmp, agentsPath)
   } catch (error) {
     process.stderr.write(
@@ -1445,11 +1525,31 @@ function main(argv) {
   )
   // 清单解析不了时，生成件里「依赖版本同步」那一节是**读不到**而不是「没有依赖」。
   // 不说这一句，报告就只显示「已生成 + 待填写 0 处」——一份少了一节的契约被读成完整的。
+  //
+  // **为什么读不出来要分三种说**：合成一句「JSON 语法错误」会把「文件不是 UTF-8/UTF-16」
+  // 说成「JSON 写错了」，于是使用者去改一个语法完全正确的文件。修正动作完全不同：
+  // 语法错要改 JSON，编码不对要转存编码。
   if (factsForReport?.manifestBroken === true) {
-    process.stdout.write(
-      '提示：package.json 解析不了（JSON 语法错误？），本次按「依赖未知」处理'
-      + '——「依赖版本同步」那一节因此没有生成。修好清单后再跑一次，它会补上。\n',
-    )
+    const file = factsForReport.manifestPath ?? 'package.json'
+    const why = factsForReport.manifestBrokenWhy
+    const tail = '——「依赖版本同步」那一节因此没有生成。'
+    if (why === 'encoding') {
+      process.stdout.write(
+        `提示：${file} 不是合法的 UTF-8/UTF-16（多半是存成了 UTF-16 或本地编码），`
+        + `本次读不出它的内容，按「依赖未知」处理${tail}\n`
+        + '  请先用编辑器把它转存为 UTF-8，再跑一次，它会补上。\n',
+      )
+    } else if (why === 'unreadable') {
+      process.stdout.write(
+        `提示：${file} 读不出来，本次按「依赖未知」处理${tail}\n`
+        + '  文件恢复可读之后重跑一次，它会补上。\n',
+      )
+    } else {
+      process.stdout.write(
+        `提示：${file} 的 JSON 语法错误，本次按「依赖未知」处理${tail}\n`
+        + '  修好清单后再跑一次，它会补上。\n',
+      )
+    }
   }
   reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
@@ -1465,4 +1565,10 @@ function main(argv) {
   return 0
 }
 
-process.exitCode = main(process.argv)
+// 与 survey / review / preflight 同一模式：直接执行才跑 main；被 import（自检要引用
+// 本文件的纯函数）时不产生副作用。
+//
+// 少了这道守卫的代价很具体：import 这个模块会在**当前工作目录**里生成一份 AGENTS.md
+// ——在调用者根本没要求的项目里写文件，而 import 的人只是想用它的某个函数。
+// 判据按真实路径比较，经 junction 调用也算直接执行。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(process.argv)

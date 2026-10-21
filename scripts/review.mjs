@@ -24,13 +24,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, isMainModule } from './survey.mjs'
-import { markerPositions } from './sync-toc.mjs'
+import { survey, authorMarkers, isMainModule, KERNEL_START, KERNEL_END, markerPositions } from './survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-
-const KERNEL_START = '<!-- project-forge:kernel:start -->'
-const KERNEL_END = '<!-- project-forge:kernel:end -->'
 
 const FLAGS = new Set([
   '--no-bilingual', // 用户确认：单语即可，不要英文版
@@ -194,12 +190,45 @@ export function unhandledRiskKeys(risks) {
   return Object.keys(risks ?? {}).filter((key) => !HANDLED_RISK_KEYS.has(key))
 }
 
+/**
+ * 徽章检查子进程的上限：**到点就杀掉**，不让交付门禁挂死。
+ *
+ * 为什么必须有：徽章检查要联网，而网络有黑洞——服务器接受连接却永不回应时，
+ * 子进程会一直等下去，门禁也跟着一直等下去。纯离线是快速失败，代理黑洞不是。
+ * 门禁挂死比门禁报错坏得多：报错时人会去查，挂死时人只会等。
+ *
+ * 与子进程自己的预算比：check-badges.mjs 给单次请求 8 秒、整轮 25 秒，所以它自己
+ * 会在 25 秒左右退出。这一层是**兜底**——子进程因为自身预算之外的原因卡住时
+ * （DNS 解析挂在预算之外、子进程启动就卡住），门禁仍然要有终点。因此留足余量：
+ * 比子进程的整轮预算大得多，余量用来容忍慢机器上的启动与收尾开销。
+ */
+const BADGE_CHECK_TIMEOUT_MS = 45000
+
+/**
+ * 子进程没给出结论时的结论。纯函数，供自检直接喂数据证伪。
+ *
+ * `status === null` 就是**被终止**（超时杀掉，或压根没起来）：结论行取不到，
+ * 归入「未核对」——**不是失败，也不是假装通过**。这正是「没查完」该有的样子。
+ */
+export function badgeSubprocessVerdict(result, timeoutMs) {
+  const r = result ?? {}
+  if (r.status === null || r.status === undefined) {
+    return {
+      state: 'unverified',
+      why: `徽章检查在 ${Math.round(timeoutMs / 1000)} 秒内没有结束，已终止`
+        + '（多半是网络黑洞，不是徽章坏了）',
+      bad: [],
+    }
+  }
+  return badgeVerdict(r.stdout, r.stderr, r.status)
+}
+
 /** 跑徽章检查。返回 ok / bad / unverified / nobadge 四态，不抛错。 */
 function checkBadges(root, readmes) {
   if (readmes.length === 0) return { state: 'nobadge' }
   const r = spawnSync(process.execPath, [join(HERE, 'check-badges.mjs'),
-    ...readmes.map((f) => join(root, f))], { encoding: 'utf8' })
-  return badgeVerdict(r.stdout, r.stderr, r.status)
+    ...readmes.map((f) => join(root, f))], { encoding: 'utf8', timeout: BADGE_CHECK_TIMEOUT_MS })
+  return badgeSubprocessVerdict(r, BADGE_CHECK_TIMEOUT_MS)
 }
 
 function main(argv) {

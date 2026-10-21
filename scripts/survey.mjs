@@ -20,10 +20,6 @@ import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// 围栏扫描（代码块边界）只有一份实现，住在 sync-toc.mjs：本文件的二级标题读取与
-// 标记定位都要判「这一行是不是在代码块里」，各写一份状态机迟早给出两种答案。
-import { scanLines, fencedSpans } from './sync-toc.mjs'
-
 /**
  * 走目录时的目录规则。**一份表，两种投影**——之前分成「走查跳过哪些」与「哪些应当被
  * 忽略」两张清单，各自维护过一次，漂移出来的后果是两头都不落：`walk()` 整目录跳过的
@@ -78,8 +74,15 @@ const DIR_RULES = [
   { name: '.vscode', walk: 'artifact', ignored: false },
 ]
 
-/** 走查整体跳过的目录名。 */
-const SKIP_DIRS = new Set(DIR_RULES.filter((d) => d.walk === 'external').map((d) => d.name))
+/**
+ * 走查整体跳过的目录名。
+ *
+ * **导出来给别的脚本复用**：哪些目录「装的是依赖与缓存，不可能装本项目的痕迹」是一条
+ * 通则，各脚本各立一份名单，迟早出现一个脚本没跳、于是把几百兆依赖目录读进来——
+ * 而两边的名单谁也没错，只是漂了。唯一的例外是 `.git`：版本控制元数据由 walk() 单独
+ * 跳过，不在这张表里。
+ */
+export const SKIP_DIRS = new Set(DIR_RULES.filter((d) => d.walk === 'external').map((d) => d.name))
 /** 体量统计排除、但凭据扫描要进入的目录名。 */
 const ARTIFACT_MAYBE_DIRS = new Set(DIR_RULES.filter((d) => d.walk === 'artifact').map((d) => d.name))
 /** 「存在却没被忽略」时值得报一句的目录名。全树任何深度都收候选，判定交给版本控制。 */
@@ -215,10 +218,18 @@ function realHomeSpellings() {
   return [...out]
 }
 
-const MAX_WALK_ENTRIES = 200000
-const MAX_WALK_DEPTH = 24
+/**
+ * 遍历的硬上限：条目数与深度。
+ *
+ * **导出来给别的脚本复用**：这两个数是「别在超大仓库上跑成天」的兜底，各脚本各定一个，
+ * 就会出现一个脚本的上限松到能读几小时、而另一个早就放弃了。唯一的理由不同就该调这里，
+ * 而不是各写各的。
+ */
+export const MAX_WALK_ENTRIES = 200000
+export const MAX_WALK_DEPTH = 24
 const LARGE_FILE_BYTES = 20 * 1024 * 1024
-const CONTENT_SCAN_MAX_BYTES = 2 * 1024 * 1024
+/** 单文件内容扫描的字节上限：超限的文件算「没扫到」，并把路径报出来。 */
+export const CONTENT_SCAN_MAX_BYTES = 2 * 1024 * 1024
 const CONTENT_SCAN_MAX_FILES = 5000
 /** 单个工作流文件只读的前 N 字符；超限置 truncated，值随输出携带。 */
 const WORKFLOW_HEAD_LIMIT = 65536
@@ -288,13 +299,29 @@ function gitIgnoredSet(cwd, relPaths) {
   return new Set(String(r.stdout ?? '').split('\0').filter(Boolean).map(posixPath))
 }
 
-function readText(p) {
+/**
+ * 读一个文本文件：**按内容嗅探编码**后解码。**全仓唯一的读法**。
+ *
+ * 清单与内容扫描曾经各用各的解码器，于是同一个文件有两个答案：清单走宽松的 UTF-8
+ * 解码，存成 UTF-16 的 package.json 被解成乱码、JSON 解析失败、被报成「清单损坏」；
+ * 同一份文件在内容扫描里却被另一套解码器正确读出并计入 `utf16Decoded`。
+ * 两边现在走同一份实现（`decodeText`），那种分裂没有了。
+ *
+ * 返回 `{ text, encoding }`；读不出来返回 undefined。
+ */
+export function readTextFile(p) {
+  let buffer
   try {
-    // 去 BOM：带 BOM 的 JSON / YAML 在 Windows 上很常见，解析器会直接失败。
-    return readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
+    buffer = readFileSync(p)
   } catch {
     return undefined
   }
+  return decodeText(buffer)
+}
+
+function readText(p) {
+  const r = readTextFile(p)
+  return r === undefined ? undefined : r.text
 }
 
 /**
@@ -304,18 +331,24 @@ function readText(p) {
  * 消费点都按对象用（`pkg.__corrupt`、`obs.minAppVersion`）。一个内容为 `null` 的
  * package.json 会把整次勘察打断，于是「清单损坏」这种**可预期**的形态变成崩溃。
  * 这里一次归一，消费点就不必各写守卫。
+ *
+ * **`__reason` 区分三种读不出来**：内容读出来了但不是合法 JSON（`syntax`）、内容压根
+ * 没读出来——不是合法 UTF-8/UTF-16（`encoding`）、内容是合法 JSON 但不是对象（`shape`）。
+ * 修正动作完全不同：前两种一个要改 JSON、一个要转存编码，而把它们混成一句话，
+ * 使用者就会去改一个没坏的文件（或去转存一个只是 JSON 写错了的文件）。
  */
 function readJson(p) {
-  const t = readText(p)
-  if (t === undefined) return undefined
+  const r = readTextFile(p)
+  if (r === undefined) return undefined
+  if (r.encoding === 'unknown') return { __corrupt: true, __reason: 'encoding' }
   let parsed
   try {
-    parsed = JSON.parse(t)
+    parsed = JSON.parse(r.text)
   } catch {
-    return { __corrupt: true }
+    return { __corrupt: true, __reason: 'syntax' }
   }
   if (parsed !== null && typeof parsed === 'object') return parsed
-  return { __corrupt: true }
+  return { __corrupt: true, __reason: 'shape' }
 }
 
 /**
@@ -352,12 +385,18 @@ export function isMainModule(metaUrl, argv1) {
  * 三个数，而调用方只信自己那份。
  */
 export function authorMarkers(text) {
+  const s = String(text)
+  // 一个标记也必须有闭合的 `-->`。正文里压根没有它时，一个标记都不可能有——
+  // 先花一次线性扫描把它挡掉，否则下面那个正则会在每个候选位置上向前一直找
+  // 到文末，耗时按文件长度的**平方**增长（实测 300KB 就要 130 多毫秒，
+  // 而单文件上限是 2MB）。这条挡掉的是病态输入，判定结果与不挡时**完全一样**。
+  if (!s.includes('-->')) return []
   const re = /<!--\s*pf:author\s*(?::[\s\S]*?)?-->/g
   const found = []
   let lastHeading = '(文件开头)'
   let cursor = 0
-  for (const hit of String(text).matchAll(re)) {
-    const before = String(text).slice(cursor, hit.index)
+  for (const hit of s.matchAll(re)) {
+    const before = s.slice(cursor, hit.index)
     for (const line of before.split('\n')) {
       const h = /^#{2,3}\s+(.+?)\s*$/.exec(line)
       if (h !== null) lastHeading = h[1]
@@ -809,7 +848,14 @@ function walk(root) {
     // 同一份输入在不同文件系统上给出不同顺序的报告是这个工具最不该有的性质。
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     for (const entry of entries) {
-      if (result.totalFilesSeen > MAX_WALK_ENTRIES) { result.truncated = true; return result }
+      if (result.totalFilesSeen > MAX_WALK_ENTRIES) {
+        result.truncated = true
+        // 走查提前退出 = 整棵树没走完 = 内容扫描只覆盖了走过的那部分。
+        // 不置这个标志，「内容里的凭据形状：无」会被读成「扫过了、很干净」——
+        // 而它其实只是没扫到。那是这个标志存在的全部理由。
+        result.contentScanTruncated = true
+        return result
+      }
       result.totalFilesSeen += 1
       const full = join(dir, entry.name)
       const rel = full.slice(root.length + 1)
@@ -922,12 +968,121 @@ function readmeLangOf(name) {
  * 会连用户写在标记之间的正文一起覆盖，且两边都不出声。它没有任何检查盯得住（检查本身
  * 就是拿它去比的），所以只能让它只有一个来源。
  *
- * 定位实现也只有一个来源：本文件从 `sync-toc.mjs` 取围栏跨距，`markerPositions` 直接
- * 复用它的那份判据。两处各写一遍「什么算围栏」迟早会给出两种答案。
+ * 定位实现也只有一个来源：下面那三个围栏扫描函数就住在本文件里，
+ * `markerPositions` 直接用它们。「什么算围栏」只有这一处状态机，
+ * 两处各写一遍迟早会给出两种答案。
+ *
+ * **本文件里的标记字面量只有这一个来源**：下面四枚标记（内核一对、managed、upgraded）
+ * 现在都有三个消费方（注入、自检、交付门禁），各写一份时它们对不上不会有任何东西
+ * 出声——所以只能有一份。与 KERNEL_START 同一条理由，不再各写一遍。
  */
 export const KERNEL_START = '<!-- project-forge:kernel:start -->'
 export const KERNEL_END = '<!-- project-forge:kernel:end -->'
-export { fencedSpans, scanLines }
+
+/**
+ * 「这份文件由本脚本生成」的标记。
+ *
+ * 它区分开三种**都带内核**的文件，而它们的验收标准不同：
+ *   - **生成的文件**（从骨架生成）：节结构由模板决定，**缺节就是缺陷**，该报错；
+ *   - **升级的文件**（手写后被 --upgrade 改造，见 UPGRADED）：结构已向模板对齐，
+ *     但需要人写的节脚本刻意不补，所以缺节是**待办**，只提示不否决；
+ *   - **作者编排的文件**（自己写的，只带内核标记）：作者可能刻意换一种组织方式
+ *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」，
+ *     而「文档同步」的规则由内核段承担）。此时**模板的标题清单不是判据**：脚本既不会
+ *     替他补这些节，也不该拿字面差集去催他——那只会把「写了但措辞不同」报成「没写」，
+ *     而一份永远在喊同一批假缺失的报告，等于不存在。
+ *
+ * 没有这个区分时只有两种错法：要么把作者的编排当成缺陷（误报，逼人改成模板的样子），
+ * 要么对掏空的契约睁一眼闭一眼（漏报）——区分的两支各自挡住其中一种错法。
+ */
+export const MANAGED = '<!-- project-forge:managed -->'
+
+/**
+ * 「这份文件的结构已按模板升级过」的标记。
+ *
+ * `--upgrade` 只做加法：插入内核、补上可自动补的节，**需要人写的节一个都不补**。
+ * 所以升级完的文件必然还缺若干节，那是**待办**而不是缺陷——判据必须能把它与
+ * 「作者自己编排的文件」区分开，否则两者只能取同一个标准，而两个标准都会错：
+ * 按缺陷判，升级后的文件永远红；按不判，P4 的「两个节数归零」就空转了。
+ */
+export const UPGRADED = '<!-- project-forge:upgraded -->'
+
+/**
+ * 逐行扫描，同时给出**偏移量**、围栏状态与标题。**所有结构判据都从这里取**。
+ *
+ * 围栏按 CommonMark 的常见形态：起始围栏可带语言标记，闭合围栏须同类字符且不短于
+ * 起始长度（` ``` ` 与 ` ~~~~ ` 不互相闭合）。
+ *
+ * 带上偏移量是刻意的：改写文件时按偏移**切原字符串**，而不是把行拆开再按统一行尾
+ * 拼回去。后者会把标记之外那些行尾不一的行悄悄改掉——文字一个字没动，字节动了，
+ * 而「标记之外一个字节都不动」正是本工具对外承诺的那句话。
+ * `start` 是本行首字符的位置，`end` 是本行行尾符之后的位置（末行没有行尾符时即文末）。
+ */
+export function scanLines(text) {
+  const out = []
+  let fence = null // { marker: '`' | '~', len: n }
+  let offset = 0
+  for (const raw of text.split('\n')) {
+    const start = offset
+    offset = Math.min(start + raw.length + 1, text.length)
+    const line = raw.replace(/\r$/, '')
+    const info = {
+      line,
+      raw,
+      start,
+      end: offset,
+      inFence: fence !== null,
+      fenceEvent: null,
+      heading: null,
+    }
+    const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+    if (m !== null && (fence === null || m[1][0] === fence.marker)) {
+      if (fence === null) { fence = { marker: m[1][0], len: m[1].length }; info.fenceEvent = 'open' }
+      else if (m[1].length >= fence.len && m[2].trim() === '') { fence = null; info.fenceEvent = 'close' }
+      info.inFence = true
+      out.push(info)
+      continue
+    }
+    if (!info.inFence) {
+      const h = /^(#{1,6})\s+(.+?)\s*$/.exec(line)
+      if (h !== null) info.heading = { level: h[1].length, title: h[2] }
+    }
+    out.push(info)
+  }
+  return out
+}
+
+/**
+ * 围栏覆盖的区间（`[起点, 终点)` 列表）。**围栏扫描的唯一出口**。
+ *
+ * 未闭合的围栏一直算到文末：那种文件的后半截在 Markdown 意义上就是代码，
+ * 按「还在围栏里」处理才不会把代码里的标记当成正文的。
+ */
+export function fencedSpans(text) {
+  const spans = []
+  let openAt = -1
+  for (const info of scanLines(text)) {
+    if (info.fenceEvent === 'open') openAt = info.start
+    else if (info.fenceEvent === 'close' && openAt >= 0) { spans.push([openAt, info.end]); openAt = -1 }
+  }
+  if (openAt >= 0) spans.push([openAt, text.length])
+  return spans
+}
+
+/**
+ * 某个标记在**围栏之外**的出现位置（升序）。
+ *
+ * 排除围栏内的出现不是洁癖：文档里在代码块里展示这对标记是正常的用法（本脚本的
+ * 报错信息就是这么写的），把它算进去会得到「文件里有两对标记」这种错误答案，
+ * 进而把一份好文件判成受损。
+ */
+export function markerPositions(text, marker, spans = fencedSpans(text)) {
+  const out = []
+  for (let i = text.indexOf(marker); i >= 0; i = text.indexOf(marker, i + marker.length)) {
+    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
+  }
+  return out
+}
 
 /**
  * 会话上下文对工作区指令（`AGENTS.md`）的字节预算。
@@ -937,23 +1092,12 @@ export { fencedSpans, scanLines }
  */
 export const INSTRUCTION_BUDGET = 65536
 
-/** 某个标记在**围栏之外**的出现位置（升序）。文档里用代码块展示这对标记是正常写法。 */
-export function markerPositions(text, marker) {
-  const s = String(text ?? '')
-  const spans = fencedSpans(s)
-  const out = []
-  for (let i = s.indexOf(marker); i >= 0; i = s.indexOf(marker, i + marker.length)) {
-    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
-  }
-  return out
-}
-
 /**
  * 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。
  *
  * **跳过围栏代码块**：README 的示例里出现 `## 用法` 是正常写法，而按行首匹配会把它算成
  * 一个真实存在的节——报告于是多出一节，读的人照着它判断「README 已经写过这一节」。
- * 围栏判据只有一处实现（`sync-toc.mjs` 的 `scanLines`），这里引用它。
+ * 围栏判据只有一处实现（本文件的 `scanLines`），这里直接用它。
  */
 function markdownH2(filePath) {
   const text = readText(filePath)
@@ -1079,7 +1223,7 @@ function collectSourceEvidence(scan, name, rel, depth) {
  *
  * 返回 { text, encoding } 或 { error }（读不出来）。
  */
-function decodeText(buffer) {
+export function decodeText(buffer) {
   const stripBom = (s) => s.replace(/^\uFEFF/, '')
   try {
     return { text: stripBom(new TextDecoder('utf-8', { fatal: true }).decode(buffer)), encoding: 'utf-8' }
@@ -1378,6 +1522,19 @@ function manifestKind(m) {
   return m.kind ?? m.ecosystem
 }
 
+/**
+ * 清单读不出来时的说明。**两种原因要分开说**：内容读出来了但不是合法 JSON，
+ * 与内容压根没读出来（不是合法 UTF-8/UTF-16）。
+ *
+ * 合成一句话的代价是具体的：说成「JSON 语法错误」，使用者就去改 JSON——而一个
+ * UTF-16 的 package.json 语法完全正确，改 JSON 改不动它，得转存编码。
+ */
+function corruptReasonText(reason) {
+  if (reason === 'encoding') return '清单读不出来：不是合法的 UTF-8/UTF-16（多半是本地编码），请先转存为 UTF-8'
+  if (reason === 'shape') return '清单损坏：内容不是 JSON 对象'
+  return '清单损坏，JSON 语法错误'
+}
+
 function detectEcosystem(root, root_, walked) {
   const evidence = []
   const kinds = []
@@ -1389,7 +1546,7 @@ function detectEcosystem(root, root_, walked) {
 
   if (pkg !== undefined) {
     if (pkg.__corrupt === true) {
-      evidence.push(`${root_.real('package.json')}（清单损坏，JSON 解析失败）`)
+      evidence.push(`${root_.real('package.json')}（${corruptReasonText(pkg.__reason)}）`)
       kinds.push('node')
     } else {
     evidence.push(root_.real('package.json'))

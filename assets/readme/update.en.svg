@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg"
      width="1200" height="452" viewBox="0 0 1200 452"
      role="img" aria-labelledby="pfUpdateTitle pfUpdateDesc">
-  <title id="pfUpdateTitle">It keeps itself current</title>
-  <desc id="pfUpdateDesc">Every time the skill is used it quietly compares version numbers. Same version: nothing happens. Newer version: it swaps in the whole copy and tells you which version it moved from and to. A copy replaces its files at most once every 24 hours. If the folder contains .git, that copy is for editing and the tool leaves it alone.</desc>
+  <title id="pfUpdateTitle">The downloaded copy keeps itself current</title>
+  <desc id="pfUpdateDesc">Every time the downloaded copy is used it quietly compares version numbers. Same version: nothing happens. Newer version: it swaps in the whole copy and tells you which version it moved from and to. A copy replaces its files at most once every 24 hours. If the folder contains .git, that copy is for editing and the tool leaves it alone.</desc>
 
   <rect width="1200" height="452" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
     <rect x="64" y="56" width="6" height="26" fill="#C2410C"/>
-    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">It keeps itself current</text>
+    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">The downloaded copy keeps itself current</text>
     <text x="1136" y="78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">nothing for you to do</text>
   </g>
@@ -18,8 +18,8 @@
   <g id="how" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
     <text x="64" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">01</text>
-    <text x="128" y="152" font-size="21" fill="#17181A">On each use it quietly compares version numbers</text>
-    <text x="128" y="178" font-size="18" fill="#5D6064">quiet by default, and it does not pull the package down</text>
+    <text x="128" y="152" font-size="21" fill="#17181A">The downloaded copy compares version numbers on each use</text>
+    <text x="128" y="178" font-size="18" fill="#5D6064">quiet by default; normally it fetches just the version, not the whole package</text>
 
     <text x="64" y="226" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">02</text>
@@ -35,5 +35,5 @@
   <line x1="64" y1="366" x2="1136" y2="366" stroke="#C6C4BF" stroke-width="1"/>
   <text x="1136" y="396" text-anchor="end"
         font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
-        font-size="18" fill="#5D6064">If the folder has .git, that copy is yours to edit: run git pull yourself</text>
+        font-size="18" fill="#5D6064">If the folder has .git, it is yours to edit: the tool leaves it alone, run git pull yourself</text>
 </svg>

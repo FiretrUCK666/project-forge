@@ -2,11 +2,12 @@
      width="1200" height="420" viewBox="0 0 1200 420"
      role="img" aria-labelledby="pfHeroTitle pfHeroDesc">
   <title id="pfHeroTitle">project-forge</title>
-  <desc id="pfHeroDesc">通用项目治理 skill：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察脚本的一次真实输出。</desc>
+  <desc id="pfHeroDesc">通用项目治理 skill：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察结果节选：数值来自勘察脚本，行是卡片自己排的。</desc>
 
   <!--
     中性底色，不跟主题走：宿主页面可能是浅色也可能是深色，卡片自带底色才不会一半看不清。
-    留白一律对称——左右各 64、上下各 56，块与块之间一律 24。
+    左右留白一律 64（render-svg.mjs 会量并判对称）；上下留白随内容高度走、各卡不同——
+    本卡实测上 58、下 66。改完文案重新量，别照抄别的卡片的数。
     配色：底 #E9E8E4、正文 #17181A、次要 #5D6064、分隔 #C6C4BF、强调 #C2410C、面板 #DFDED9。
   -->
   <rect width="1200" height="420" fill="#E9E8E4"/>
@@ -23,12 +24,12 @@
     <text x="64" y="252" font-size="30" fill="#17181A">给它一个项目目录：先只读勘察，</text>
     <text x="64" y="294" font-size="30" fill="#17181A">再按事实决定做哪几件事。</text>
 
-    <text x="64" y="352" font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道</text>
+    <text x="64" y="352" font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道 · 交棒</text>
     <text x="1136" y="352" font-size="18" text-anchor="end" fill="#5D6064"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Node &#8805; 16 · 零依赖</text>
   </g>
 
-  <!-- 右：一次勘察的真实输出（P1 的产物，不是示意图） -->
+  <!-- 右：勘察结果节选——数值来自勘察脚本，行是卡片自己排的（脚本本身不输出这个形状） -->
   <g id="survey-proof">
     <rect x="676" y="112" width="460" height="214" fill="#DFDED9"/>
 

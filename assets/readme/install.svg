@@ -26,9 +26,9 @@
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17"
           font-weight="400" fill="#C2410C">推荐</tspan></text>
 
-    <text x="64" y="198" font-size="19" fill="#5D6064">1　点发布页上那个安装包，解压</text>
-    <text x="64" y="238" font-size="19" fill="#5D6064">2　放进你所用宿主的 skill 根</text>
-    <text x="64" y="278" font-size="19" fill="#5D6064">3　目录名保持 project-forge</text>
+    <text x="64" y="198" font-size="19" fill="#5D6064">1　点发布页上那个安装包</text>
+    <text x="64" y="238" font-size="19" fill="#5D6064">2　解压，放进你所用宿主的 skill 根</text>
+    <text x="64" y="278" font-size="19" fill="#5D6064">3　目录名保持 project-forge，就这一步</text>
 
     <text x="64" y="366" font-size="20" font-weight="700" fill="#17181A">装上之后自己保持最新</text>
     <text x="64" y="398" font-size="18" fill="#5D6064">不需要 git，也不需要你管</text>

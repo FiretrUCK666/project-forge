@@ -27,17 +27,25 @@
  * 而 `--check` 还说没问题。损坏（标记落在围栏内）时**拒绝写入**并说清怎么修，
  * 与 compose-agents 处理受损标记同一种做法：宁可不写，也不写坏。
  *
- * 本文件同时是**围栏扫描的唯一实现**：`scanLines` / `fencedSpans` / `markerPositions`
- * 导出去给 `compose-agents.mjs` 用。它要判的是同一件事（这对标记是不是真在正文里），
- * 两边各写一份状态机，就会出现同一个文件、同一种损坏，两处给出不同答案。
- * 所以入口必须能被安全引入：main 只在**本文件被直接执行**时才跑。
+ * 围栏扫描这一族判据（`scanLines` / `fencedSpans` / `markerPositions`）**住在
+ * `survey.mjs`**——那里是全项目共用的文本判据的所在地，本文件从那里取。
+ * 它要判的是同一件事（这对标记是不是真在正文里），两边各写一份状态机，就会出现
+ * 同一个文件、同一种损坏，两处给出不同答案。
  *
  * 退出码：0 = 已同步 / 无需同步；1 = --check 发现不同步；2 = 用法或文件错误。
  */
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+
+// 入口判定与围栏扫描这一族文本判据都住在 survey.mjs：入口判定按**真实路径**归一，
+// 经 junction / 符号链接调用也算直接执行——字面比较在那种调用下会**什么都不做并
+// 返回 0**，而「exit 0、零输出」会被调用方读成「目录已是最新」，那是本工具最不该
+// 给出的答案。围栏扫描放在一起的理由同上：它判的是「这一行是不是在代码块里」，
+// 各写一份状态机迟早给出两种答案。
+//
+// **依赖方向**：本文件只依赖 survey.mjs 一个方向，没有环。
+import { isMainModule, scanLines, fencedSpans, markerPositions } from './survey.mjs'
 
 const START = '<!-- toc:start -->'
 const END = '<!-- toc:end -->'
@@ -103,83 +111,6 @@ function slug(text) {
     out += ch
   }
   return out.replace(/ /g, '-')
-}
-
-/**
- * 逐行扫描，同时给出**偏移量**、围栏状态与标题。**所有结构判据都从这里取**。
- *
- * 围栏按 CommonMark 的常见形态：起始围栏可带语言标记，闭合围栏须同类字符且不短于
- * 起始长度（` ``` ` 与 ` ~~~~ ` 不互相闭合）。
- *
- * 带上偏移量是刻意的：改写文件时按偏移**切原字符串**，而不是把行拆开再按统一行尾
- * 拼回去。后者会把标记之外那些行尾不一的行悄悄改掉——文字一个字没动，字节动了，
- * 而「标记之外一个字节都不动」正是本工具对外承诺的那句话。
- * `start` 是本行首字符的位置，`end` 是本行行尾符之后的位置（末行没有行尾符时即文末）。
- */
-export function scanLines(text) {
-  const out = []
-  let fence = null // { marker: '`' | '~', len: n }
-  let offset = 0
-  for (const raw of text.split('\n')) {
-    const start = offset
-    offset = Math.min(start + raw.length + 1, text.length)
-    const line = raw.replace(/\r$/, '')
-    const info = {
-      line,
-      raw,
-      start,
-      end: offset,
-      inFence: fence !== null,
-      fenceEvent: null,
-      heading: null,
-    }
-    const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line)
-    if (m !== null && (fence === null || m[1][0] === fence.marker)) {
-      if (fence === null) { fence = { marker: m[1][0], len: m[1].length }; info.fenceEvent = 'open' }
-      else if (m[1].length >= fence.len && m[2].trim() === '') { fence = null; info.fenceEvent = 'close' }
-      info.inFence = true
-      out.push(info)
-      continue
-    }
-    if (!info.inFence) {
-      const h = /^(#{1,6})\s+(.+?)\s*$/.exec(line)
-      if (h !== null) info.heading = { level: h[1].length, title: h[2] }
-    }
-    out.push(info)
-  }
-  return out
-}
-
-/**
- * 围栏覆盖的区间（`[起点, 终点)` 列表）。**围栏扫描的唯一出口**。
- *
- * 未闭合的围栏一直算到文末：那种文件的后半截在 Markdown 意义上就是代码，
- * 按「还在围栏里」处理才不会把代码里的标记当成正文的。
- */
-export function fencedSpans(text) {
-  const spans = []
-  let openAt = -1
-  for (const info of scanLines(text)) {
-    if (info.fenceEvent === 'open') openAt = info.start
-    else if (info.fenceEvent === 'close' && openAt >= 0) { spans.push([openAt, info.end]); openAt = -1 }
-  }
-  if (openAt >= 0) spans.push([openAt, text.length])
-  return spans
-}
-
-/**
- * 某个标记在**围栏之外**的出现位置（升序）。
- *
- * 排除围栏内的出现不是洁癖：文档里在代码块里展示这对标记是正常的用法（本脚本的
- * 报错信息就是这么写的），把它算进去会得到「文件里有两对标记」这种错误答案，
- * 进而把一份好文件判成受损。
- */
-export function markerPositions(text, marker, spans = fencedSpans(text)) {
-  const out = []
-  for (let i = text.indexOf(marker); i >= 0; i = text.indexOf(marker, i + marker.length)) {
-    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
-  }
-  return out
 }
 
 /** 按原文件的主导行尾决定新内容的行尾；判不出来用 LF。 */
@@ -358,7 +289,10 @@ function main() {
     // 每次处理都清一遍残留临时文件，**不只在要写的时候**：上一次运行被杀时留下的
     // 临时文件，若这一轮判定「无需改动」就会一直留着，而顶层多出来的条目会被结构
     // 自检当成无主文件。
-    clearStaleTemps(f)
+    //
+    // 清哪些、留哪些由 clearStaleTemps 判（只删「已经死掉的进程」留下的那些），这里把
+    // 它的结论说出去——没清掉的文件得让人看见，否则下一次运行还会再遇到它。
+    reportTemps(f, clearStaleTemps(f))
 
     try {
       const items = headings(text, maxLevel)
@@ -462,21 +396,102 @@ function main() {
 }
 
 /**
- * 清掉这个文件此前的临时文件（**任何**进程号留下的）。
+ * 本工具的临时文件名：**原名 + `.tmp-` + 进程号**。
  *
- * 只清自己那个进程号的等于没清：进程被杀掉时留下的是当时的进程号，下一次运行换了
- * pid，那个文件就永远躺在那里——而顶层多出来的条目会被结构自检当成无主文件
- * （见 preflight 的顶层目录整洁检查）。按「同目录、同前缀」匹配，不误删别人的文件。
+ * 形状写在两处就一定会漂（写死的那份迟早对不上），所以它只此一份，
+ * `compose-agents.mjs` 与 `update.mjs` 都从这里取。
+ *
+ * 进程号是「属主」：清理时靠它判断这个临时文件还有没有主。
  */
-function clearStaleTemps(path) {
+export function tempPathFor(target, pid = process.pid) {
+  return `${target}.tmp-${pid}`
+}
+
+/**
+ * 这个进程号还活着吗？
+ *
+ * 判据用 `process.kill(pid, 0)`：ESRCH = 没有这个进程；其余（例如 EPERM）
+ * 说明进程存在、只是问不动它——**问不动不等于不在**，所以那种情况按「还活着」处理。
+ * 问不出来（不是合法进程号）一律按「不在」，但那类文件根本进不到这一步。
+ */
+export function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error?.code !== 'ESRCH'
+  }
+}
+
+/**
+ * 清掉这个文件此前的临时文件。
+ *
+ * **只删能证明是「已经死掉的进程」留下的那些**，其余一律留下并报出来。两条判据都要：
+ *
+ *   - **形状**必须是 `<原名>.tmp-<纯数字>`。纯数字是进程号；同前缀但不是纯数字的
+ *     （`README.md.tmp-backup` 这类）是**使用者自己的文件**，不是残留——删掉它就是
+ *     悄悄毁掉别人的东西。而且它连残留报告都认不出来（那边用的是同一个形状判据），
+ *     于是使用者永远不知道自己被删了。
+ *   - **属主还活着吗**：活着说明它是**另一个正在跑的进程**手里的临时文件。删了它，
+ *     那次运行的改名会失败（ENOENT），报一句「处理失败」收工——文件没坏，
+ *     但那次白跑。并发是这个工具的常态（AI 并行、CI 并发、编辑器插件与 AI 同时操作）。
+ *     死了才是上次被杀进程留下的残留。
+ *
+ * 代价说清楚：进程号会被系统回收。**被回收的那个号**若正好落在一个活着的进程上，
+ * 它的残留就清不掉（要等那个进程也退出）。留着比误删好——残留是一个文件，误删是丢数据。
+ *
+ * 返回 { removed, kept }：removed 是清掉的，kept 是留下的（带原因，交上层报出来）。
+ */
+export function clearStaleTemps(path) {
   const dir = dirname(path)
   const prefix = `${basename(path)}.tmp-`
+  const removed = []
+  const kept = []
   let entries
-  try { entries = readdirSync(dir) } catch { return }
+  try { entries = readdirSync(dir) } catch { return { removed, kept } }
   for (const name of entries) {
     if (!name.startsWith(prefix)) continue
-    try { unlinkSync(join(dir, name)) } catch { /* 清不掉就算了 */ }
+    const suffix = name.slice(prefix.length)
+    if (!/^\d+$/.test(suffix)) {
+      kept.push({ name, why: '不是本工具的临时文件（使用者自己的？）' })
+      continue
+    }
+    const pid = Number(suffix)
+    if (pid === process.pid) {
+      kept.push({ name, why: '本次运行正在写它' })
+      continue
+    }
+    if (processAlive(pid)) {
+      kept.push({ name, why: '另一个正在运行的进程正在写它' })
+      continue
+    }
+    try {
+      unlinkSync(join(dir, name))
+      removed.push(name)
+    } catch { /* 清不掉就算了 */ }
   }
+  return { removed, kept }
+}
+
+/**
+ * 临时文件的清理结果要说出来：清了什么、什么没清以及为什么。
+ *
+ * 不说就是「静默」：没清掉的文件会一直躺在那儿，而看报告的人无从判断它是残留
+ * 还是别人的东西——下一次运行还会再遇到它。
+ *
+ * 导出给别的脚本用：临时文件的判据与它的报告是一件事的两半，各写一份报告格式，
+ * 就会出现同一个残留在一个工具里报「已清理」、在另一个工具里报「没动」。
+ */
+export function reportTemps(file, temps) {
+  if (temps.removed.length === 0 && temps.kept.length === 0) return
+  const parts = []
+  if (temps.removed.length > 0) parts.push(`清掉 ${temps.removed.length} 个上次遗留的临时文件`)
+  if (temps.kept.length > 0) {
+    parts.push(`没动 ${temps.kept.length} 个同前缀但不属于本次运行的文件：`
+      + temps.kept.map((k) => `${k.name}（${k.why}）`).join('、'))
+  }
+  process.stdout.write(`${file}：${parts.join('；')}\n`)
 }
 
 /**
@@ -485,7 +500,7 @@ function clearStaleTemps(path) {
  * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在仓库里，会被结构自检当成无主文件。
  */
 function writeAtomic(path, content) {
-  const tmp = `${path}.tmp-${process.pid}`
+  const tmp = tempPathFor(path)
   try {
     writeFileSync(tmp, content, { encoding: 'utf8' })
     renameSync(tmp, path)
@@ -495,7 +510,9 @@ function writeAtomic(path, content) {
   }
 }
 
-// 入口守卫：本文件同时是围栏扫描的实现方，被 compose-agents.mjs 引入时不能顺带跑一遍。
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = main()
-}
+// 入口守卫：本文件被别的脚本引入时不能顺带跑一遍。
+//
+// 判据按**真实路径**归一（survey.mjs 的 isMainModule，全仓只此一份）：字面比较在经
+// junction / 符号链接调用时会**什么都不做并返回 0**，而「exit 0、零输出」与「目录
+// 已是最新」在调用方眼里长得一模一样——那正是这个工具最不该给出的答案。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main()

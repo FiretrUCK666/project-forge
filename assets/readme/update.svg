@@ -2,14 +2,14 @@
      width="1200" height="452" viewBox="0 0 1200 452"
      role="img" aria-labelledby="pfUpdateTitle pfUpdateDesc">
   <!-- pf:claims update-interval=24h same-version-does-nothing source-copy-readonly -->
-  <title id="pfUpdateTitle">它会自己保持最新</title>
-  <desc id="pfUpdateDesc">每次用这个 skill 时它安静地比一次版本号：是同一版就结束，什么都不做；有新版就整份换成新版，并告诉你从哪一版换到了哪一版。同一份副本 24 小时内最多换一次文件；目录里有 .git 的那份是拿来改的，工具对它只读。</desc>
+  <title id="pfUpdateTitle">下载装的那份会自己保持最新</title>
+  <desc id="pfUpdateDesc">下载装的那份每次用这个 skill 时安静地比一次版本号：是同一版就结束，什么都不做；有新版就整份换成新版，并告诉你从哪一版换到了哪一版。同一份副本 24 小时内最多换一次文件；目录里有 .git 的那份是拿来改的，工具对它只读。</desc>
 
   <rect width="1200" height="452" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
     <rect x="64" y="56" width="6" height="26" fill="#C2410C"/>
-    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">它会自己保持最新</text>
+    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">下载装的那份会自己保持最新</text>
     <text x="1136" y="78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">你不需要做任何事</text>
   </g>
@@ -19,8 +19,8 @@
   <g id="how" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
     <text x="64" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">01</text>
-    <text x="128" y="152" font-size="21" fill="#17181A">每次用它时，安静地比一次版本号</text>
-    <text x="128" y="178" font-size="18" fill="#5D6064">平时不出声、不问你，也不会把整个安装包拉下来</text>
+    <text x="128" y="152" font-size="21" fill="#17181A">下载装的那份每次被用时，安静地比一次版本号</text>
+    <text x="128" y="178" font-size="18" fill="#5D6064">平时不出声、不问你；通常只取版本号，不拉整个安装包</text>
 
     <text x="64" y="226" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">02</text>

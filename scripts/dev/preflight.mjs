@@ -774,6 +774,27 @@ function cardClaims(text) {
   return out
 }
 
+/**
+ * 一张 SVG 里**看得见的**文字：只取 `<text>` 元素里的内容。
+ *
+ * `<desc>` 与 `<title>` 是给读屏软件与搜索引擎看的，画面上并没有那行字——「写在文件里」
+ * 不等于「印在卡上」。断言守的是「卡片上说了这句话」，判据就得落在画面上：整份文件全文
+ * 匹配会让 `<desc>` 里的半句话把守卫哄绿，而读者在卡上永远看不到它。实测踩过：英文卡片
+ * 的断言只活在 `<desc>` 里，守卫是绿的，那句话在画面上不存在。
+ */
+function visibleSvgText(svgText) {
+  const decode = (s) => s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+  const out = []
+  for (const m of svgText.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/g)) {
+    out.push(decode(m[1].replace(/<[^>]*>/g, '')))
+  }
+  return out.join(' ')
+}
+
 function checkCardClaims() {
   const dir = join(SKILL_ROOT, 'assets', 'readme')
   if (!existsSync(dir)) return
@@ -814,8 +835,15 @@ function checkCardClaims() {
       // 要求整句相等会把「换了行」误报成「说法不一致」——那正是最容易让人开始怀疑一个
       // 其实正确的检查的方式。
       const has = (text, want) => text.replace(/\s+/g, '').includes(want.replace(/\s+/g, ''))
-      if (!has(readText(join(dir, file)), spec.zh)) where.push(`中文卡片里没有出现「${spec.zh}」`)
-      if (!has(enText, spec.en)) where.push(`英文卡片里没有出现「${spec.en}」`)
+      // **卡片只查看得见的文字**（`<text>` 元素里的内容）：`<desc>` 与 `<title>` 是给读屏
+      // 软件看的，画面上并没有那行字。「写在文件里」不等于「印在卡上」——整份文件全文
+      // 匹配会让 `<desc>` 里的半句话把守卫哄绿，而读者在卡上永远看不到它。
+      if (!has(visibleSvgText(readText(join(dir, file))), spec.zh)) {
+        where.push(`中文卡片的可见文字里没有出现「${spec.zh}」`)
+      }
+      if (!has(visibleSvgText(enText), spec.en)) {
+        where.push(`英文卡片的可见文字里没有出现「${spec.en}」`)
+      }
       if (!has(readmes.zh, spec.zh)) where.push(`README.md 里没有出现「${spec.zh}」`)
       if (!has(readmes.en, spec.en)) where.push(`README.en.md 里没有出现「${spec.en}」`)
       if (spec.fromCode !== undefined) {
@@ -859,10 +887,13 @@ function checkStatedCounts() {
   const actual = {
     硬不变量: countNumberedItems('SKILL.md', /^## 硬不变量/, /^\d+\.\s+\*\*/),
     硬门控: countMatches('SKILL.md', /^\|\s*G\d+\s*\|/gm),
-    // 数文件地图里那一节的行，而不是全文匹配：正文里提到某个脚本（例如「本 skill 自身的
-    // 自检（`scripts/dev/preflight.mjs`）」）也会命中，那是叙述不是清单。
-    // 字符类要含数字：否则将来出现 `toc2.mjs` 这类名字就数不到，计数会与磁盘脱钩。
-    脚本: countTableRows('SKILL.md', /^## 文件地图/, /^\|\s*`scripts\/[A-Za-z0-9._-]+\.mjs`/),
+    // 数文件地图里那一节登记的**脚本文件数**，不是表格行数：一张表行可以并列两个脚本
+    // （发布说明那两个就是），按行数算，文档里一句「十三个脚本」这种**真话**会被判成假话。
+    // 判据的对象是「有多少个脚本」，所以数的必须是文件。
+    // 只在文件地图那一节里数：正文里提到某个脚本（例如「本 skill 自身的自检
+    // （`scripts/dev/preflight.mjs`）」）也会命中，那是叙述不是清单。
+    // 路径形状要允许子目录（`scripts/dev/` 下的自用脚本也在地图里），否则那三个数不到。
+    脚本: countMapPaths('SKILL.md', /^## 文件地图/, /scripts\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.mjs/g),
   }
 
   // **与磁盘对账**，不只是两份文档互相对。
@@ -1047,11 +1078,20 @@ function checkStatedCounts() {
         }
       }
     }
-    // 脚本数量：写成「N 个脚本」时核对
+    // 脚本数量：写成「N 个脚本」时核对。
+    //
+    // **「一」在这里不当数量**：中文「一个脚本」是泛指冠词（"a script"），不是「脚本有
+    // 一个」。脚本是通用名词，这个读法极常见；而「一个脚本」这种数量断言本身既罕见、
+    // 错了也没人受害。**代价不对称**：为它误报一次，整道门禁就红一次，而红过一次的门禁
+    // 会被当成坏了——那比漏掉这一条坏得多。
+    //
+    // 硬不变量与硬门控不受这条影响：那两个词是本项目特有的术语，「一条硬不变量」永远
+    // 是数量断言，没有泛指的读法。
     for (const m of text.matchAll(/(?<!第)([一二三四五六七八九十]+|\d+)\s*个?\s*脚本/g)) {
       const raw = m[1]
       const n = /^\d+$/.test(raw) ? Number(raw) : CN_NUM[raw]
-      if (n !== undefined && n !== actual['脚本']) {
+      if (n === undefined || n === 1) continue
+      if (n !== actual['脚本']) {
         fail(`${doc} 写着「${raw}个脚本」，实际是 ${actual['脚本']} 个 —— 数量自称与代码不符。`)
       }
     }
@@ -1071,6 +1111,27 @@ function countTableRows(file, headingRe, rowRe) {
     if (rowRe.test(lines[i])) count += 1
   }
   return count
+}
+
+/**
+ * 在某个二级标题之下，数**登记的路径个数**（去重后），而不是表格行数。
+ *
+ * 一张表行可以并列多个路径（文件地图里「发布说明那两个脚本」就是一行两路径），
+ * 按行数算会把「有多少个文件」数成「有多少行」——那不是同一件事，而数量自称的
+ * 判据对象恰恰是文件。
+ */
+function countMapPaths(file, headingRe, pathRe) {
+  const p = join(SKILL_ROOT, file)
+  if (!existsSync(p)) return -1
+  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
+  const start = lines.findIndex((l) => headingRe.test(l))
+  if (start < 0) return -1
+  const seen = new Set()
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s/.test(lines[i])) break
+    for (const m of lines[i].matchAll(pathRe)) seen.add(m[0])
+  }
+  return seen.size
 }
 
 /** 数某个文件里匹配到的个数。 */

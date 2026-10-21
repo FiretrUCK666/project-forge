@@ -1,10 +1,11 @@
 ---
 name: project-forge
 description: |
-  把一个项目目录锻造为规范项目：版本管理、远端仓库、文档套装、发布通道一次配齐。
+  把一个项目目录锻造为规范项目：版本管理、远端仓库、文档套装、发布通道一次配齐，
+  收尾时问你要不要把它留下的痕迹清干净。
   触发词：弄版本管理、配 git、上仓库、建仓库、推到 GitHub、初始化项目、项目起步、
   新项目配置、标准化项目、规范项目、整理项目、给项目弄好、写 AGENTS.md、写 README、
-  写贡献指南、配 LICENSE、配 CI、发到 npm、发布。
+  写贡献指南、配 LICENSE、配 CI、发到 npm、发布、交棒、把脚手架痕迹清干净。
   覆盖各种技术栈：Node、Python、Rust、Go、Java、纯文档目录，以及插件类项目与 skill 项目。
   只读勘察先行，按事实判定该做与不该做；幂等、可重复执行；默认私有仓库。
   不用于：只改代码写法、只修一个 bug、只回答概念问题，也不替项目选型或生成骨架。
@@ -29,6 +30,7 @@ metadata:
 - **版本管理**：弄版本管理、配 git、上仓库、建仓库、推到 GitHub；
 - **文档套装**：写 AGENTS.md、写 README、写贡献指南、配 LICENSE；
 - **发布通道**：发到 npm、发布、配 CI；
+- **交棒**：把脚手架痕迹清干净、撤掉本 skill 留下的东西、这个项目以后不用这个 skill 了；
 - **笼统说法**：`初始化项目`、`项目起步`、`新项目配置`、`标准化项目`、`规范项目`、`整理项目`、`给项目弄好`。
 
 不必使用的情况：只改代码写法、只修一个 bug、只回答一个概念问题——都不涉及这四个能力面。
@@ -44,8 +46,9 @@ metadata:
 2. **幂等**：同一件事重复执行结果相同。已存在的文件先读后合并，**永不覆盖**；内容冲突
    时报告并停下，不擅自取舍。
    **一处例外**：`AGENTS.md` 里由内核标记圈定的那段内容归 `templates/agents-kernel.md`
-   独占，注入即刷新——那是单一真相源的同步，不算覆盖用户的成果。标记之外照旧一个字节
-   不动；用户若在标记区内写过东西，注入前先提醒他会被覆盖。
+   独占，注入即刷新——那是单一真相源的同步，不算覆盖用户的成果。**标记之外**照旧不动：
+   标着「这里要人写」的节保留既有内容，纯生成内容按**当前**项目事实重新求值（所以 P5 建好
+   远端之后要再跑一次）。用户若在标记区内写过东西，注入前脚本会提醒他这段会被覆盖。
 3. **密钥零入库**：提交之前先扫描，按 `references/version-control.md` 的密钥门控分情况
    处置（未跟踪排除、已历史轮换、占位继续）。报告位置到行，给出处置建议。凭据只从运行
    环境读取，绝不写进项目里的任何文件。
@@ -61,6 +64,9 @@ metadata:
 8. **单一入口**：细节全在 `references/` 与 `templates/` 里，本文件不复述它们。
 9. **先确认仓库边界**：目录体量异常大、或里面还嵌着别的仓库时，先停下确认，不要把
    整根纳入。
+10. **收尾必问**：P7 汇报时**必须问一次**「要不要把本 skill 留下的痕迹清掉」（交棒）。
+    不问就收工，等于把痕迹永久留在项目里，那不是交付。**问不到人时不要自作主张拆掉**
+    ——把这条待确认项写进汇报，等人回来定。判据与拆除顺序见 `references/handoff.md`。
 
 ## 取值从哪来
 
@@ -137,6 +143,7 @@ metadata:
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报 | — |
+| **P8 交棒**（**常规收尾，仅用户可达时**） | P7 完成后**主动提出**：勘察痕迹 → 报告 → 等用户明确确认 → 按顺序拆 → 复验。**无人值守时不执行**，把待确认项写进汇报 | `references/handoff.md` |
 
 动手之前**先跑一次自动更新**（它可能把本文件换掉，所以要放在任何读取之前）：
 
@@ -166,7 +173,7 @@ node "<本领目录>/scripts/update.mjs" --quiet
   的借口**：用默认值推进，把决定权留清楚；
 - 判定为**插件类**时，`references/plugin-project.md` 在 **P1 之后就该读**（它影响 P3 的
   产物入库判断、P4 的发布范围写法、P5 的发布范围核对）；该文件同时给出判定协议：遇到
-  没有专章的插件生态时按它的六个问题去查，再把答案沉淀成新专章（`references/plugins/`）。
+  没有专章的插件生态时按它的判定协议去查，再把答案沉淀成新专章（`references/plugins/`）。
 
 ## 硬门控
 
@@ -182,15 +189,21 @@ node "<本领目录>/scripts/update.mjs" --quiet
 | G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读）；有对应专章时一并读 `references/plugins/<生态>.md` |
 | G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下 |
 | G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
+| G9 | 拆除本 skill 在目标项目里留下的痕迹之前（交棒或撤销） | `references/handoff.md` |
 
-**G7：只有用户能定的事，一次问清。** 四件事实脚本推不出来、也不能替用户决定，它们都在
+**G7：只有用户能定的事，一次问清。** 几件事实脚本推不出来、也不能替用户决定，它们都在
 写文档时才需要，所以集中到一处一次问完（不要分几次打断用户）：**许可证**、**版权行署名**、
-**环境要求的最低版本**、**双语与自动化**（`review.mjs` 的[待问]要 flag 才能消掉——**可用的
+**要不要写贡献指南**、**要不要维护另一语言的 README**、**要不要 CI 与自动发布**
+（`review.mjs` 的[待问]要 flag 才能消掉——**可用的
 flag 全集以 `node scripts/review.mjs --help` 的输出为准**，本文件不另抄一份，抄了就会漂移）。
-四件各自「为什么不能替你定」与「要不到时怎么做」，见 `references/docs-set.md` 的
-「选择」与「双语 README」两节、以及 `references/publish.md` 的「跟随版本与最低支持版本」；
-两条硬线：**无可靠依据时宁可不写环境要求那一节，也不写一个编造的数字**；**署名取到明显的
-占位值（例如操作系统默认用户名）时不要直接用**。
+各自「为什么不能替你定」与「要不到时怎么做」，见 `references/docs-set.md` 的「选择」一节；
+一条硬线：**署名取到明显的占位值（例如操作系统默认用户名）时不要直接用**。
+
+**环境要求的最低版本不在这一问里**：它由勘察给出——读 `survey.mjs` 的
+`artifacts.runtimeRequirements`（项目声明的 `engines`、`requires-python`、`rust-version`
+之类），**读得到就照着写**；项目没声明就不写那一节，**不要为此去问用户**
+（去问脚本本来就知道的数字，答错就写进了 README）。判据见 `references/survey.md`
+「运行时要求」那一节与 `references/publish.md` 的「跟随版本与最低支持版本」。
 
 **G4 的确认清单**以 `references/remote-github.md` 建仓节表格为准，此处不复述——两处各存
 一份迟早漏一项。它与 P2 那句结论不是一回事：P2 说的是**本次任务做什么**，G4 说的是
@@ -213,6 +226,9 @@ node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
 # 3. 把通用内核注入目标项目的 AGENTS.md（幂等；标记区归内核独占，注入即刷新）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
+
+# 4. P8 交棒：先勘察本 skill 在目标项目里留下的痕迹（只读），再按协议决定拆不拆
+node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 ```
 
 下面这条**只在维护本 skill 自身时**运行，与目标项目无关（它按脚本自身位置推导检查对象，
@@ -247,6 +263,7 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `references/publish-rust.md` | 涉及 Rust 时 |
 | `references/plugin-project.md` | 判定为插件类时（含判定协议与新增专章的模板） |
 | `references/skill-project.md` | 判定为能力目录类时（含宿主专章索引） |
+| `references/handoff.md` | P8 交棒：拆除本 skill 在目标项目里留下的痕迹（交棒与撤销的判据、顺序、验收） |
 | `references/plugins/<生态>.md` | 命中该生态时：清单、标识、宿主加载什么、版本约束、打包发放、特有坑 |
 | `templates/agents-kernel.md` | 生成 `AGENTS.md` 时（由脚本读取，**不手工编辑**） |
 | `templates/agents-project.md` | 新建 `AGENTS.md` 时作为骨架 |
@@ -256,13 +273,14 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
-| `scripts/survey.mjs` | P1 勘察；也是全项目共用的文本判据（frontmatter、文件地图、仓库地址归一） |
+| `scripts/survey.mjs` | P1 勘察；也是全项目共用的文本判据（frontmatter、文件地图、仓库地址归一、围栏扫描） |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--budget N` 改预算） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
+| `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单、`--verify` 判是否已干净） |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 写发布说明；「非 ASCII 正文不经 shell」那条规则的落地工具，含从提交记录起草 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示 |
-| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
+| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步；临时文件的命名形状与归属判据也在这里 |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |
 | `assets/readme/` | README 里那几组卡片的 SVG 源文件（中英成对，纯矢量，可直接改） |
@@ -286,18 +304,20 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 ## 边界
 
 **做**：版本管理的建立与维护、远端仓库的建立与元数据、文档套装的建立与同步、发布通道
-的配置与发布本身。
+的配置与发布本身、**交棒时把自己在目标项目里留下的痕迹清干净**。
 
 **不做**：部署与服务器配置、容器编排、运行环境安装、代码本身的编写与重构、项目骨架的
 生成（不选技术栈、不创建源码与框架配置文件）。
 
 **永不自动做**：公开一个私有仓库、强制推送、改写已推送历史、删除已发布版本、替用户
-决定许可证、替用户编造署名或账号。
+决定许可证、替用户编造署名或账号、**未经用户明确确认就拆掉自己留下的东西**。
 
 ## 汇报纪律
 
 - 每个阶段结束时同步进度，不要闷头做完再说。
 - P2 的判定要复述给用户（做了哪些、跳过哪些、为什么），因为判定可能与用户预期不同。
 - 收尾按「做了什么 / 结果如何 / 下一步建议」汇报。
+- **收尾汇报里必须带一条交棒询问**（措辞与硬不变量 10 那一处一致，问法见
+  `references/handoff.md`）。问不到人时把它写进汇报的待办，**不要自作主张拆掉**。
 - 用户可见的改动完成后，**只报版本号**；文档与流程细节不必复述。
 - 跳过某件事时要说清**为什么跳过**——「不发布」和「忘了发布」在用户看来是一样的。

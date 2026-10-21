@@ -2,9 +2,9 @@
      width="1200" height="440" viewBox="0 0 1200 440"
      role="img" aria-labelledby="pfFlowTitle pfFlowDesc">
   <title id="pfFlowTitle">它怎么工作</title>
-  <desc id="pfFlowDesc">四步流程：先只读勘察、再按事实判定该做哪几件、写之前过硬门控、最后落盘推送发布并回读确认。判定依据是勘察出的全部事实，不是预设清单。</desc>
+  <desc id="pfFlowDesc">四步流程：先只读勘察、再按事实判定该做哪几件、写之前过硬门控、最后落盘推送发布并回读确认，跑完再问一句要不要把痕迹清掉。判定依据是勘察出的全部事实，不是预设清单。</desc>
 
-  <!-- 与 hero 同一套中性底色与留白：左右各 64，上下各 56 -->
+  <!-- 与 hero 同一套中性底色：左右留白一律 64；上下随内容高度走（本卡实测上 45、下 57），改完文案重新量 -->
   <rect width="1200" height="440" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
@@ -35,6 +35,6 @@
     <text x="64" y="352" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="19" fill="#C2410C" font-weight="700">04</text>
     <text x="128" y="352" font-size="24" font-weight="700" fill="#17181A">落盘 · 推送 · 发布</text>
-    <text x="128" y="380" font-size="19" fill="#5D6064">做完回读一遍，确认真的成了，再按「做了什么 / 结果 / 下一步」汇报</text>
+    <text x="128" y="380" font-size="19" fill="#5D6064">做完回读一遍，确认真的成了；收尾问一句要不要清掉痕迹，再按「做了什么 / 结果 / 下一步」汇报</text>
   </g>
 </svg>

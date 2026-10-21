@@ -40,6 +40,37 @@ const FAILURE_WORDS = /not found|invalid|no such|unknown|unable|too new|no relea
 /** 机器可读结论行的前缀：调用方认它，不认人话。 */
 const STATE_PREFIX = 'check-badges: state='
 
+/**
+ * 单次请求的上限。
+ *
+ * **必须有**：没有它，一个「连得上但不回话」的地址（代理黑洞、自建服务挂起、
+ * 被限速的边缘节点）会让这个脚本永远不返回——而它是被交付门禁 spawnSync 调用的，
+ * 门禁就跟着永久挂住，AI 会一直等下去。
+ *
+ * 实现用 AbortController + setTimeout，**不用 AbortSignal.timeout**：后者是
+ * Node 17.3+ 才有的，而本项目承诺 Node 16 起可用。
+ */
+const REQUEST_TIMEOUT_MS = 8 * 1000
+
+/**
+ * 整轮检查的时间预算。
+ *
+ * 单次上限只保证「一个徽章不会挂住」；徽章多的时候仍会累加到很久，而调用方要的
+ * 是一个**能读成结论的退出**。预算用完之后剩下的徽章**不查了**，按「没查完」报出去
+ * ——「没查完」与「都能显示」必须分得开，合并就是把没检查读成通过。
+ */
+const TOTAL_TIMEOUT_MS = 25 * 1000
+
+/**
+ * 错误要说人话。超时要单独说，否则「This operation was aborted」没人看得懂，
+ * 而「超时」与「地址不可达」的处置不同：前者多半是慢，后者多半是坏。
+ */
+function describeError(error) {
+  const name = error?.name
+  if (name === 'AbortError' || name === 'TimeoutError') return '请求超时'
+  return error instanceof Error ? error.message : String(error)
+}
+
 function extractBadges(text) {
   const out = []
   // Markdown 图片语法 ![alt](url)，以及裸的 <img src="...">
@@ -54,38 +85,53 @@ function extractBadges(text) {
  * verdict: 'ok'（能显示）/ 'bad'（确认显示不出来）/ 'unverified'（没查完）。
  * 请求本身发不出去、或正文读不出来，一律 unverified——那不是徽章的结论，
  * 是这次检查没做完的证据。
+ *
+ * `timeoutMs` 是这次请求的上限：**超时要算「没查完」，不算「显示不出来」**——
+ * 「没查完」与「确认坏」是两件事，合并了就是把没检查读成确认失败。
  */
-async function inspect(url) {
+async function inspect(url, timeoutMs) {
   if (typeof fetch !== 'function') {
     return { verdict: 'unverified', reason: '当前 Node 不提供全局 fetch，需要 Node 18 或更高', shows: '' }
   }
-  let res
+  // 超时靠 AbortController 打断 fetch。定时器**必须一直活到正文读完**——
+  // 只包住 fetch 的话，「发来了响应头、正文却卡住」那种情况照样挂死。
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    res = await fetch(url, { redirect: 'follow' })
-  } catch (error) {
-    return { verdict: 'unverified', reason: `请求失败：${error.message}`, shows: '' }
+    let res
+    try {
+      res = await fetch(url, { redirect: 'follow', signal: controller.signal })
+    } catch (error) {
+      return { verdict: 'unverified', reason: `请求失败：${describeError(error)}`, shows: '' }
+    }
+    if (!res.ok) {
+      // 正文不读，但**要让连接收掉**：留着不管，连接会一直挂在这个进程上。
+      try { await res.body?.cancel?.() } catch { /* 收不掉也不影响结论 */ }
+      return { verdict: 'bad', reason: `HTTP ${res.status}`, shows: '' }
+    }
+    let body
+    try {
+      // 这一步**必须在 try 里**：坏 gzip、连接半途断开、代理改写都会在这里抛
+      // （坏 gzip 典型表现为 `TypeError: terminated`）。
+      body = await res.text()
+    } catch (error) {
+      return { verdict: 'unverified', reason: `正文读取失败：${describeError(error)}`, shows: '' }
+    }
+    if (/<svg/i.test(body) === false && /\.svg/i.test(url)) {
+      return { verdict: 'bad', reason: '返回的不是 SVG', shows: '' }
+    }
+    // 把 SVG 里的可见文字抽出来：>文字<
+    const words = [...body.matchAll(/>([^<>]{1,60})</g)]
+      .map((m) => m[1].trim())
+      .filter((w) => w !== '' && !/^[\s\d.]+$/.test(w))
+    const shows = words.slice(-1)[0] ?? ''
+    if (FAILURE_WORDS.test(shows)) {
+      return { verdict: 'bad', reason: '徽章里显示的是失败字样', shows }
+    }
+    return { verdict: 'ok', reason: '', shows }
+  } finally {
+    clearTimeout(timer)
   }
-  if (!res.ok) return { verdict: 'bad', reason: `HTTP ${res.status}`, shows: '' }
-  let body
-  try {
-    // 这一步**必须在 try 里**：坏 gzip、连接半途断开、代理改写都会在这里抛
-    // （坏 gzip 典型表现为 `TypeError: terminated`）。
-    body = await res.text()
-  } catch (error) {
-    return { verdict: 'unverified', reason: `正文读取失败：${error.message}`, shows: '' }
-  }
-  if (/<svg/i.test(body) === false && /\.svg/i.test(url)) {
-    return { verdict: 'bad', reason: '返回的不是 SVG', shows: '' }
-  }
-  // 把 SVG 里的可见文字抽出来：>文字<
-  const words = [...body.matchAll(/>([^<>]{1,60})</g)]
-    .map((m) => m[1].trim())
-    .filter((w) => w !== '' && !/^[\s\d.]+$/.test(w))
-  const shows = words.slice(-1)[0] ?? ''
-  if (FAILURE_WORDS.test(shows)) {
-    return { verdict: 'bad', reason: '徽章里显示的是失败字样', shows }
-  }
-  return { verdict: 'ok', reason: '', shows }
 }
 
 async function main() {
@@ -99,6 +145,10 @@ async function main() {
   let checked = 0
   let unverified = 0
   let foundAny = 0
+  // 整轮的时间预算：从这一刻起算，不是每个徽章各算一份。
+  // **必须有一个上限**：调用方（交付门禁）等的是一个能读成结论的退出，
+  // 而「永久等待」在这个协议里既不是「没查完」也不是「通过」。
+  const deadline = Date.now() + TOTAL_TIMEOUT_MS
 
   for (const f of files) {
     if (!existsSync(f)) {
@@ -124,7 +174,15 @@ async function main() {
     foundAny += 1
     process.stdout.write(`${f}：找到 ${badges.length} 个徽章\n`)
     for (const url of badges) {
-      const r = await inspect(url)
+      // 预算用完就不查了：剩下的按「没查完」计，**不查成「显示不出来」**——
+      // 没查过与查过是坏的，两者的处置不同（前者多半是网络或预算，后者要改文件）。
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
+        unverified += 1
+        process.stdout.write(`  没能检查  已用完本次检查的时间预算，没查这个：${url}\n`)
+        continue
+      }
+      const r = await inspect(url, Math.min(REQUEST_TIMEOUT_MS, remaining))
       checked += 1
       if (r.verdict === 'ok') {
         process.stdout.write(`  可以  ${r.shows || '(无文字)'}\n         ${url}\n`)

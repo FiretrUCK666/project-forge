@@ -62,7 +62,7 @@
  * 退出码：0 = 无事或已更新；1 = 尝试更新但失败；2 = 用法错误。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { get as httpGet } from 'node:http'
 import { get as httpsGet } from 'node:https'
 import { createHash } from 'node:crypto'
@@ -72,6 +72,10 @@ import { fileURLToPath } from 'node:url'
 
 import { readFileMap, skillSource, skillVersion, isMainModule } from './survey.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
+// 临时文件的**形状与归属判据**只有一份，住在 sync-toc.mjs：compose-agents.mjs 从那里取，
+// 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
+// 使用者自己的文件也删了」。
+import { clearStaleTemps, tempPathFor } from './sync-toc.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -217,7 +221,16 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
       if (statusCode !== undefined && statusCode >= 300 && statusCode < 400
         && location !== undefined && redirects > 0) {
         res.resume()
-        const next = new URL(location, url).toString()
+        let next
+        try {
+          next = new URL(location, url).toString()
+        } catch {
+          // 重定向目标不是合法地址：这条路走不通，如实说「没走通」。
+          // **不能抛出去**——抛出去就是整个进程带着一整段栈死掉，而调用方
+          // 还有别的路可走（换一条探针路、或者退回取整包读版本）。
+          resolvePromise({ ok: false, status: 0, final })
+          return
+        }
         resolvePromise(download(next, { redirects: redirects - 1, accept, final: next }))
         return
       }
@@ -345,7 +358,12 @@ async function probeWeb(endpoint, source) {
   // 既省流量，也不依赖接口主机。
   const fromUrl = /\/releases\/tag\/([^/?#]+)/.exec(res.final ?? '')
   if (fromUrl !== null) {
-    const version = plainVersion(decodeURIComponent(fromUrl[1]))
+    // 解码可能失败：地址里的标签段带残缺的百分号转义（`%E0%A4%A` 这类）时，
+    // decodeURIComponent 抛 URIError。**这里不能崩**——崩了就是整个进程带着栈死掉，
+    // 而这条路本来还有退路：解不出标签就按「从地址里读不到版本号」处理，
+    // 接着走下面两条已有的分支（正文是 JSON 就从正文读，还不是就当「那边没有最新
+    // 发布」，让调用方去取整包、从包里读版本）。**不新增一条平行的失败路径。**
+    const version = decodeTagSegment(fromUrl[1])
     if (version !== '') return { state: 'ok', version, packageUrls: webPackageUrls(source) }
   }
 
@@ -395,6 +413,21 @@ async function fetchPackage(url, accept = '*/*') {
  */
 function plainVersion(value) {
   return String(value ?? '').trim().replace(/^v(?=\d)/i, '')
+}
+
+/**
+ * 地址里的标签段：能解码就解码，解码不了就当「读不到」。
+ *
+ * 残缺的百分号转义（`%E0%A4%A` 这类）会让 decodeURIComponent 抛 URIError。
+ * 抛出去就是整个进程带着一整段栈死掉，而这里要的只是「这个地址里读不出版本号」
+ * 这一条事实——读不到不是灾难，是「换条路读」。
+ */
+function decodeTagSegment(segment) {
+  try {
+    return plainVersion(decodeURIComponent(segment))
+  } catch {
+    return ''
+  }
 }
 
 /** 版本号比大小：按 `.` 分段比数字，比不出来就返回 undefined（不猜）。 */
@@ -474,9 +507,11 @@ function insideSkill(target) {
  * 顺带说明**什么不动**：使用者放在同一个目录里的其它文件（笔记、自己的临时文件）留着。
  * 覆盖的是「这个 skill 的文件」，不是把整个目录清空——顺手删掉别人的东西，比不更新坏。
  *
- * 顺序是「先写、后删」：写失败时目录还是原来那一份，不会剩下一半新一半旧。但它**不是
- * 原子的**：写到一半被杀会留下半新半旧的一份（下一次运行会重修，所以危害有限，但那段时间
- * 版本号在骗人）。做真原子要先解到临时目录再整体替换，代价与风险都更大，这里选择说清楚。
+ * 顺序是「先写、后删」：写失败时目录还是原来那一份，不会剩下一半新一半旧。
+ * **每个文件各自是原子的**（先写同目录的临时文件再改名），所以写到一半被杀留下的是
+ * 「旧文件 + 新文件」的混合，而不是半截文件——半截的 SKILL.md 就是不可用的 skill，
+ * 而包副本没有 .git，没有回退手段。整份一起原子（先解到临时目录再整体替换）代价与
+ * 风险都更大，这里选择这一步，并在下面把没做完的部分照实报出来。
  */
 function applyPackage(entries) {
   // 判据取自**装进来这一份**的地图，而不是磁盘上旧那一份：
@@ -489,13 +524,20 @@ function applyPackage(entries) {
   const map = readFileMap(packSkill)
   const removed = []
   const skipped = []
+  const keptTemps = []
   const now = new Set(entries.map((e) => e.name))
   for (const e of entries) {
     const p = join(SKILL_ROOT, e.name)
     // 越界条目一律不写、报出来：正常包里不会有这种名字，出现即说明这一份不是它自称的东西。
     if (!insideSkill(p)) { skipped.push(e.name); continue }
+    // 临时文件与目标同目录：改名在同分区上是原子的，跨分区就不是。
+    // 它也必须落在本领目录之内——落在外面就说明这个条目指到了不该指的地方。
+    if (!insideSkill(tempPathFor(p))) { skipped.push(e.name); continue }
     mkdirSync(dirname(p), { recursive: true })
-    writeFileSync(p, e.data)
+    // 清掉这个文件此前的临时文件（上次被杀进程留下的）：判据与 sync-toc.mjs 共用一份，
+    // 两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉、另一个清不掉」。
+    for (const k of clearStaleTemps(p).kept) keptTemps.push(k.name)
+    writeAtomic(p, e.data)
   }
   // 旧包里已被删掉的文件：留着就是一份永远没人读的残留。
   for (const name of map.shipped.filter((x) => !x.endsWith('/'))) {
@@ -547,7 +589,28 @@ function applyPackage(entries) {
   return {
     removed,
     skipped,
+    keptTemps: [...new Set(keptTemps)],
     mapRead: map.shipped.length > 0 || map.repoOnly.length > 0,
+  }
+}
+
+/**
+ * 写一个文件：先写同目录的临时文件，再改名。
+ *
+ * **为什么**：改名的原子性让「写到一半被杀」不再留下半截文件。包副本没有 .git，
+ * 半截的 SKILL.md 就是不可用的 skill，而且没有回退手段（源码副本有 git，那是另一条路，
+ * 不走这里）。
+ *
+ * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在本领目录里，会被结构自检当成无主文件。
+ */
+function writeAtomic(path, data) {
+  const tmp = tempPathFor(path)
+  try {
+    writeFileSync(tmp, data)
+    renameSync(tmp, path)
+  } catch (error) {
+    try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* 清不掉就算了 */ }
+    throw error
   }
 }
 /**
@@ -754,7 +817,7 @@ async function main(argv) {
   }
 
   // ── 三：整份覆盖 ──────────────────────────────────────────────────────────
-  const { removed, skipped, mapRead } = applyPackage(latest.entries)
+  const { removed, skipped, keptTemps, mapRead } = applyPackage(latest.entries)
   const after = localVersion()
   rememberState({ lastUpdateAt: Date.now() })
   report([
@@ -766,6 +829,9 @@ async function main(argv) {
     skipped.length > 0
       ? `  有 ${skipped.length} 个条目指向本领目录之外，已跳过（${skipped.slice(0, 3).join('、')}）`
         + ' —— 正常的包里不会有这种名字，这一份值得核对一下来源。'
+      : undefined,
+    keptTemps.length > 0
+      ? `  有 ${keptTemps.length} 个同前缀但不属于本次运行的临时文件，没动（${keptTemps.slice(0, 3).join('、')}${keptTemps.length > 3 ? ' 等' : ''}）。`
       : undefined,
     mapRead ? undefined
       : '  这份包里的文件地图读不出来，所以没有清理「包里不该有」的残留文件'
@@ -779,5 +845,14 @@ async function main(argv) {
 export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => { process.exitCode = code })
+  main(process.argv.slice(2))
+    .then((code) => { process.exitCode = code })
+    .catch((error) => {
+      // 顶层兜底：**任何没预料到的异常也要变成一句人话 + 一个退出码**。
+      // 少了这一段，未处理的 promise rejection 会让进程带着一整段栈死掉，
+      // 而在这条链路上「崩了」与「更新完了」在调用方眼里没有区别——
+      // 退出码 1 至少还能被读成「这次没成」。
+      process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
+      process.exitCode = 1
+    })
 }

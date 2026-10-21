@@ -33,6 +33,7 @@ import {
   parseMarkerKeys, normVersion, repoPath, readFileMap,
 } from '../survey.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
+import { clearStaleTemps } from '../sync-toc.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 
@@ -4146,6 +4147,401 @@ group('[50] 命令推导的四种空：每一种都要说得出「为什么空�
   const canBeSilent = noteOf(normal) === '' && scriptsOf(normal).build !== undefined
   check(canBeSilent, '前提：说明只出现在真的推不出命令时（否则上面几条是恒真的）')
   report(canBeSilent, '前提：有命令时没有说明')
+}
+
+group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记不误伤')
+{
+  const handoff = (dir, ...a) => spawnSync(process.execPath,
+    [join(SCRIPTS_DIR, 'handoff.mjs'), dir, ...a], { encoding: 'utf8' })
+  const handoffJson = (dir, ...a) => {
+    const r = handoff(dir, '--json', ...a)
+    // 退出码 0 与 1 都是正常结果：0 = 干净，1 = 不干净。2 才是失败。
+    if (r.status !== 0 && r.status !== 1) return { error: (r.stderr ?? '').slice(0, 300) }
+    try {
+      return JSON.parse((r.stdout ?? '').replace(/^\uFEFF/, ''))
+    } catch (error) {
+      return { error: `输出不是合法 JSON：${error.message}` }
+    }
+  }
+  const pick = (groups, path, kind) => (groups ?? []).find(
+    (f) => f.path === path && (kind === undefined || f.kind === kind),
+  )
+  const every = (groups) => Object.values(groups ?? {}).flat()
+  const blockingOf = (data) => every(data.groups).filter((f) => f.blocks === true).length
+
+  // ── 1) 正例：每一类痕迹都要被找到，且行号与相对路径都对 ──
+  const dirty = fixture('handoff-dirty', {
+    'AGENTS.md': [
+      '# 项目',
+      '',
+      '<!-- project-forge:kernel:start -->',
+      '内核正文',
+      '<!-- project-forge:kernel:end -->',
+      '',
+      '## 一节',
+      '',
+      '<!-- pf:author: 说明本项目的运行前提 -->',
+      '',
+    ].join('\n'),
+    'notes/managed.md': '<!-- project-forge:managed -->\n',
+    'notes/author.md': '<!-- pf:author: 待补 -->\n',
+    'LICENSE': 'MIT License\n\nCopyright (c) {{YEAR}} {{HOLDER}}\n',
+    'AGENTS.md.tmp-123': '半成品\n',
+  })
+  const j1 = handoffJson(dirty, '--scan')
+  const m1 = j1.groups?.markers ?? []
+  const u1 = j1.groups?.unfinished ?? []
+  const p1 = j1.groups?.placeholders ?? []
+  const r1 = j1.groups?.residue ?? []
+
+  const kStart = pick(m1, 'AGENTS.md', 'kernel-start')
+  const kEnd = pick(m1, 'AGENTS.md', 'kernel-end')
+  const managed = pick(m1, 'notes/managed.md', 'managed')
+  const author = pick(u1, 'notes/author.md', 'author-placeholder')
+  const year = pick(p1, 'LICENSE', 'placeholder')
+  const tmp = pick(r1, 'AGENTS.md.tmp-123', 'tmp-file')
+
+  const foundOk = kStart?.line === 3 && kEnd?.line === 5 && managed?.line === 1
+    && author?.line === 1 && year?.line === 3 && tmp !== undefined
+  check(foundOk, '每一类痕迹都被找到，且行号正确',
+    `kernel=${kStart?.line}/${kEnd?.line} managed=${managed?.line} author=${author?.line} 占位=${year?.line} 残留=${tmp === undefined ? '无' : '有'}`)
+  report(foundOk, '正例：痕迹全找到、行号对')
+
+  // pf:author 必须**单独成组**：它与「skill 装进来的」标识符不是一类东西，混在一组里
+  // 会被顺手删掉——删掉标记而不补内容，交出去的是一份干净但空的契约。
+  const ownGroupOk = m1.every((f) => f.kind !== 'author-placeholder')
+    && u1.some((f) => f.kind === 'author-placeholder')
+  check(ownGroupOk, 'pf:author 单独成组（不在标识符那一组里）',
+    `标识符组 ${m1.length} 条，未完成组 ${u1.length} 条`)
+  report(ownGroupOk, '未完成的占位：单独成组')
+
+  // 相对路径必须是**相对项目目录**的：报告里的路径要能直接对着项目核对，
+  // 绝对路径在换台机器后就没法核对了。分隔符统一用正斜杠。
+  const relOk = [kStart, kEnd, managed, author, year, tmp].every((f) => f !== undefined)
+    && managed?.path === 'notes/managed.md'
+    && !/^[A-Za-z]:/.test(String(managed?.path))
+    && !String(managed?.path).startsWith('/')
+  check(relOk, '相对路径相对项目目录，且用正斜杠', `path=${managed?.path}`)
+  report(relOk, '相对路径：正确')
+
+  const scanExit = handoff(dirty, '--scan').status
+  const verifyExit = handoff(dirty, '--verify').status
+  const exitOk = scanExit === 0 && verifyExit === 1
+  check(exitOk, 'scan 恒为 0（它是报告），verify 不干净为 1', `scan=${scanExit} verify=${verifyExit}`)
+  report(exitOk, '退出码：scan=0 / verify=1')
+
+  const cleanOk = j1.clean === false && j1.blocking === blockingOf(j1)
+  check(cleanOk, '不干净时 clean=false，且 blocking 只数挡判定的那些',
+    `clean=${j1.clean} blocking=${j1.blocking}`)
+  report(cleanOk, '判定：不干净')
+
+  // ── 2) 反例（防误伤）：通用标记不算痕迹，疑似项要标出来 ──
+  const innocent = fixture('handoff-innocent', {
+    'README.md': '# 项目\n\n<!-- toc:start -->\n- 目录\n<!-- toc:end -->\n\n## 安装\n',
+    'cards.md': '<!-- pf:claims update-interval=24h -->\n',
+  })
+  const j2 = handoffJson(innocent, '--scan')
+  const all2 = every(j2.groups)
+  // toc 标记是 sync-toc 的通用目录标记，不专属本 skill：它**根本不出现**在报告里。
+  const tocOk = all2.every((f) => !/toc:start|toc:end/.test(String(f.literal ?? f.match)))
+  check(tocOk, 'toc 标记不算痕迹（一条都不报）',
+    all2.map((f) => String(f.literal ?? f.match)).join('、') || '(无)')
+  report(tocOk, '通用目录标记：不误伤')
+  // pf:claims 出现在目标项目属异常，要报；但它是「疑似」，不是确定的痕迹。
+  const claims = pick(j2.groups?.markers, 'cards.md', 'claims')
+  const claimsOk = claims !== undefined && claims.suspect === true
+  check(claimsOk, 'pf:claims 报出来但标为「疑似」（不是确定的痕迹）',
+    claims === undefined ? '没报出来' : JSON.stringify(claims.suspect))
+  report(claimsOk, '本 skill 自己的标记：报为疑似')
+
+  // ── 3) 干净 fixture：没有痕迹 → verify 退出 0，且说得出「已经是干净状态」 ──
+  const cleanDir = fixture('handoff-clean', {
+    'README.md': '# 项目\n\n## 安装\n\n装它。\n',
+    'main.js': "console.log('hi')\n",
+  })
+  const j3 = handoffJson(cleanDir, '--verify')
+  const v3 = handoff(cleanDir, '--verify')
+  const s3 = handoff(cleanDir, '--scan')
+  const cleanFixtureOk = v3.status === 0 && j3.clean === true && j3.findings === 0
+    && /已经是干净状态/.test(s3.stdout ?? '')
+  check(cleanFixtureOk, '干净项目：verify 退出 0、clean=true、scan 说「已经是干净状态」',
+    `exit=${v3.status} clean=${j3.clean} findings=${j3.findings}`)
+  report(cleanFixtureOk, '干净项目：判得过')
+
+  // ── 4) 不干净 fixture：verify 退出 1，且列出的命中与实际一致 ──
+  const j4 = handoffJson(dirty, '--verify')
+  const v4 = handoff(dirty, '--verify')
+  const listed = blockingOf(j4)
+  const dirtyFixtureOk = v4.status === 1 && j4.clean === false && listed === j4.blocking
+    && (v4.stdout ?? '').includes('不干净')
+  check(dirtyFixtureOk, '不干净项目：verify 退出 1，列出的命中数与 blocking 一致',
+    `exit=${v4.status} listed=${listed} blocking=${j4.blocking}`)
+  report(dirtyFixtureOk, '不干净项目：拦得住')
+
+  // ── 5) 报告里**不出现处置文字** ──
+  // 处置是判断，它归协议管。脚本与协议各写一份，协议改了一句而脚本还在给旧答案，
+  // 两边都没有检查盯得住。所以脚本只说「哪里有、是什么」。
+  const noAction = every(j1.groups).every((f) => f.action === undefined)
+  const textHasNoVerdict = !/规则搬进|删掉指针句子|必须留在项目里|改写成项目自己的做法/
+    .test(handoff(dirty, '--scan').stdout ?? '')
+  const actionOk = noAction && textHasNoVerdict
+  check(actionOk, '报告里没有处置文字（处置归协议）',
+    actionOk ? '' : (noAction ? '文字输出里出现了处置句' : 'finding 里还有 action 字段'))
+  report(actionOk, '处置文字：不在脚本里')
+
+  // ── 6) 悬空指针：指向本 skill、而目标项目里没有的路径 ──
+  // 这一类的判据是**两份事实交叉比对**（本 skill 的文件树 + 目标项目的文件树），
+  // 标识符那种「一份事实就够」的判据套不上，所以每个分支都得单独证伪。
+  const dangle = fixture('handoff-dangle', {
+    'AGENTS.md': [
+      '# 项目',
+      '',
+      '发布规则见 `references/publish.md` 一节。',
+      '专章见 `references/publish-<生态>.md`。',
+      '插件见 `references/plugins/dsh.md`。',
+      '',
+      '```sh',
+      '# 这里只是举例：references/publish.md',
+      '```',
+      '',
+    ].join('\n'),
+  })
+  const j5 = handoffJson(dangle, '--scan')
+  const d5 = j5.groups?.dangling ?? []
+  const exact = pick(d5, 'AGENTS.md', 'dangling-rule')
+  const wild = d5.find((f) => /publish-<生态>/.test(String(f.match)))
+  // 精确形态：行号 3，指向 references/publish.md。
+  const exactOk = exact !== undefined && exact.line === 3
+    && exact.match === 'references/publish.md'
+    && Array.isArray(exact.targets) && exact.targets.includes('references/publish.md')
+  check(exactOk, '悬空指针：精确形态被检出，行号与指向都对',
+    exact === undefined ? '没检出' : `${exact.match}@${exact.line}`)
+  report(exactOk, '悬空指针：精确形态')
+  // 通配形态：<生态> 展开成通配，匹配上那一族专章。
+  const wildOk = wild !== undefined && wild.line === 4
+    && (wild.targets ?? []).length > 1
+    && (wild.targets ?? []).includes('references/publish-npm.md')
+  check(wildOk, '悬空指针：尖括号通配形态被检出，且匹配到一族文件',
+    wild === undefined ? '没检出' : (wild.targets ?? []).join('、'))
+  report(wildOk, '悬空指针：通配形态')
+  // 子目录形态：名字里带一层目录，探针不能在这里被截断——截断了就永远查不出来，
+  // 而插件类项目恰恰是靠这一层指针引专章的。
+  const sub = d5.find((f) => f.match === 'references/plugins/dsh.md')
+  const subOk = sub !== undefined && sub.line === 5
+    && (sub.targets ?? []).includes('references/plugins/dsh.md')
+  check(subOk, '悬空指针：带子目录的指针能查出来（references/plugins/dsh.md）',
+    sub === undefined ? '没检出' : `${sub.match}@${sub.line}`)
+  report(subOk, '悬空指针：子目录形态')
+  // 围栏里的那一处是举例说明，不是引用——不算。
+  const fenceOk = d5.every((f) => f.line !== 7)
+  check(fenceOk, '围栏代码块里的示例路径不算引用', `行号：${d5.map((f) => f.line).join('、')}`)
+  report(fenceOk, '悬空指针：围栏内的示例不算')
+  // 悬空指针计入 blocking：不搬规则就不算干净。
+  const blockingOk = j5.blocking === blockingOf(j5) && j5.clean === false
+  check(blockingOk, '悬空指针计入 blocking（不搬规则就不算干净）',
+    `blocking=${j5.blocking} 悬空=${d5.length}`)
+  report(blockingOk, '悬空指针：计入 blocking')
+
+  // 反例：目标项目**自己就有**那个文件 → 不是悬空（它是自己项目的文档，不是本 skill 的）。
+  const hasOwn = fixture('handoff-has-own', {
+    'AGENTS.md': '# 项目\n\n见 `references/publish.md` 一节。\n',
+    'references/publish.md': '# 本项目自己的发布说明\n',
+  })
+  const j6 = handoffJson(hasOwn, '--scan')
+  const ownOk = (j6.groups?.dangling ?? []).length === 0
+  check(ownOk, '目标项目自己就有那个文件 → 不报悬空',
+    `报出 ${(j6.groups?.dangling ?? []).length} 条`)
+  report(ownOk, '悬空指针：自己的文件不算')
+
+  // ── 7) 同名不同物：文档里提到一个本 skill 也有、但项目自己没有的脚本名 ──
+  // 机器分不出「那是项目自己的脚本」还是「那是本 skill 的脚本」，所以它**不计入**
+  // 干净判定：计入的话，用户唯一的出路就是造个同名空文件骗过检查。
+  const collide = fixture('handoff-collide', {
+    'SKILL.md': '# 另一个 skill\n\n打包用 `node scripts/zip.mjs` 跑。\n',
+  })
+  const j7 = handoffJson(collide, '--scan')
+  const c7 = pick(j7.groups?.dangling, 'SKILL.md', 'dangling-name-collision')
+  const collideOk = c7 !== undefined && c7.blocks === false && c7.suspect === true
+    && j7.clean === true && j7.blocking === 0
+  check(collideOk, '同名不同物：标为疑似且不计入 blocking（不挡验收）',
+    c7 === undefined ? '没报出来' : `blocks=${c7.blocks} blocking=${j7.blocking}`)
+  report(collideOk, '同名不同物：不挡验收')
+
+  // ── 8) 工作流里对本 skill 脚本的调用：处置与文档里那一类不同 ──
+  // 引用出现在机器会照着跑的配置里 → 那条调用会真的被执行，脚本没了就是坏了。
+  // 所以它与「同名不同物」分开，并且计入 blocking。
+  const wfDir = fixture('handoff-workflow', {
+    '.github/workflows/release.yml': readFileSync(
+      join(SKILL_ROOT, 'templates', 'ci-release.yml'), 'utf8'),
+  })
+  const j8 = handoffJson(wfDir, '--scan')
+  const w8 = (j8.groups?.dangling ?? []).filter((f) => f.kind === 'dangling-script-in-automation')
+  const wfOk = w8.length > 0 && w8.every((f) => f.blocks === true)
+    && w8.some((f) => f.match === 'scripts/release-notes.mjs')
+  check(wfOk, '工作流里对本 skill 脚本的调用：单独一类，计入 blocking',
+    `命中 ${w8.length} 条`)
+  report(wfOk, '工作流里的脚本调用：单独一类')
+  // 落盘的模板顶部注释块里有本 skill 的名字——验收的总判据是「全项目搜名字零命中」，
+  // 而机器原来看不见它。
+  const nameHit = pick(j8.groups?.markers, '.github/workflows/release.yml', 'skill-name-in-comment')
+  const nameOk = nameHit !== undefined && nameHit.blocks === true
+  check(nameOk, '落盘模板的注释块里出现本 skill 的名字 → 被检出',
+    nameHit === undefined ? '没检出' : `第 ${nameHit.line} 行`)
+  report(nameOk, '模板注释块：被检出')
+
+  // ── 9) 临时文件：只有本 skill 自己的写法是确定痕迹 ──
+  // 别的工具也留 `build.tmp-4242` 这种形状的临时文件，那不是本 skill 留下的，
+  // 不该由本 skill 的报告说「删掉」，更不该因此挡住验收。
+  const tmpDir = fixture('handoff-tmp', {
+    'AGENTS.md.tmp-123': '半成品\n',
+    'build.tmp-4242': '别家的缓存\n',
+  })
+  const j9 = handoffJson(tmpDir, '--scan')
+  const ownTmp = pick(j9.groups?.residue, 'AGENTS.md.tmp-123', 'tmp-file')
+  const otherTmp = pick(j9.groups?.residue, 'build.tmp-4242', 'tmp-file-suspect')
+  const tmpOk = ownTmp?.blocks === true
+    && otherTmp?.blocks === false && otherTmp?.suspect === true
+    && j9.blocking === 1
+  check(tmpOk, '临时文件：只有 AGENTS.md.tmp-<数字> 是确定痕迹，其余疑似且不挡验收',
+    `own=${ownTmp?.blocks} other=${otherTmp?.blocks} blocking=${j9.blocking}`)
+  report(tmpOk, '临时文件：分清是谁的')
+
+  // ── 10) 发布说明草稿：可排除，且不挡验收 ──
+  // 草稿里的 needs-summary 标记不单独报：文件名已经认出它是草稿了，再报一次就是
+  // 把同一个文件数两遍，而两处的说法还不一样。
+  const draft = fixture('handoff-draft', {
+    'v0.9.1-notes.md': '# 草稿\n\n<!-- pf:needs-summary 缺总述 -->\n',
+  })
+  const j10 = handoffJson(draft, '--scan')
+  const draftHits = every(j10.groups).filter((f) => f.path === 'v0.9.1-notes.md')
+  const draftOk = draftHits.length === 1 && draftHits[0].kind === 'notes-draft'
+    && draftHits[0].blocks === false && j10.blocking === 0 && j10.clean === true
+  check(draftOk, '发布说明草稿：只报一次、不计入 blocking（用户可以决定保留）',
+    `命中 ${draftHits.length} 次：${draftHits.map((f) => f.kind).join('、')}`)
+  report(draftOk, '发布说明草稿：可排除')
+
+  // ── 11) 注入中断的四种控制标记：各报各的名字 ──
+  const ctrl = fixture('handoff-control', {
+    'AGENTS.md': [
+      '<!-- pf:if has-x -->',
+      '<!-- pf:endif -->',
+      '<!-- pf:scaffold -->',
+      '<!-- pf:endscaffold -->',
+      '',
+    ].join('\n'),
+  })
+  const j11 = handoffJson(ctrl, '--scan')
+  const c11 = (j11.groups?.markers ?? []).filter((f) => f.kind === 'inject-control')
+  const ctrlOk = c11.length === 4
+    && ['pf:if', 'pf:endif', 'pf:scaffold', 'pf:endscaffold']
+      .every((n) => c11.some((f) => f.literal === n))
+  check(ctrlOk, '四种控制标记各报各的名字（处置不同，不能报成一个串）',
+    c11.map((f) => f.literal).join('、'))
+  report(ctrlOk, '控制标记：各报各的')
+
+  // ── 12) 目标给成文件：结论不能是肯定句 ──
+  // 「没扫到」被读成「扫过了、很干净」是这个工具最不该有的误读，而零命中 + 一句
+  // 「已经是干净状态」正是它的长相。
+  const oneFile = handoff(join(cleanDir, 'README.md'), '--scan')
+  const oneFileOk = /没扫到全部/.test(oneFile.stdout ?? '')
+    && !/已经是干净状态/.test(oneFile.stdout ?? '')
+  check(oneFileOk, '目标给成文件时，结论不是肯定句',
+    (oneFile.stdout ?? '').split('\n').filter((l) => l.includes('结论')).join(' / '))
+  report(oneFileOk, '只扫一部分：不肯定')
+}
+
+// ── [52] 结构守卫：依赖图无环、判据只有一份、临时文件三态 ──────────────────────
+group('[52] 结构守卫：依赖图无环、判据只有一份、临时文件三态')
+{
+  // ── 1) 依赖图不能有环 ──
+  // 两个模块互相 import 在 ESM 里不会立刻出事（函数声明在模块实例化阶段就完成
+  // 初始化），所以环能一路绿灯地活下来——直到有人把一个 const 提到模块顶层，
+  // 那时才开始踩时序差（TDZ）。而「无环」这件事没有任何症状会提醒人。
+  // 所以把它变成常驻断言，而不是靠人记得。
+  const scriptFiles = []
+  const collectScripts = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
+      if (e.isDirectory()) { collectScripts(join(dir, e.name)); continue }
+      if (e.name.endsWith('.mjs')) scriptFiles.push(join(dir, e.name))
+    }
+  }
+  collectScripts(join(SKILL_ROOT, 'scripts'))
+  const edges = new Map()
+  for (const f of scriptFiles) {
+    // 说明符的提取复用 preflight 那一份实现，不在这里另写一个正则——两处各判一次
+    // 同一类东西，迟早给出两个答案。
+    const deps = moduleSpecifiers(readFileSync(f, 'utf8'))
+      .filter((s) => s.startsWith('.'))
+      .map((s) => resolve(dirname(f), s))
+      .filter((t) => scriptFiles.includes(t))
+    edges.set(f, deps)
+  }
+  const visiting = new Set()
+  const finished = new Set()
+  const cycles = []
+  const visit = (f, stack) => {
+    if (finished.has(f)) return
+    if (visiting.has(f)) {
+      cycles.push([...stack, f].map((p) => basename(p)).join(' → '))
+      return
+    }
+    visiting.add(f)
+    for (const d of edges.get(f) ?? []) visit(d, [...stack, f])
+    visiting.delete(f)
+    finished.add(f)
+  }
+  for (const f of scriptFiles) visit(f, [])
+  check(cycles.length === 0,
+    'scripts/ 的依赖图无环——环在 ESM 里能一路绿灯，直到有人把 const 提到模块顶层才炸',
+    cycles.join('；'))
+  report(cycles.length === 0, '依赖图：无环')
+
+  // ── 2) 共享判据只能有一份实现 ──
+  // 「围栏扫描」这一族判据曾经同时住在 survey.mjs 与 sync-toc.mjs 里，而 survey 的
+  // 注释明写「实现也只有一个来源」——**注释说一份、代码两份**，是最坏的一种漂：
+  // 它看上去是对的。注释靠不住，断言才靠得住。
+  const sharedJudgements = ['scanLines', 'fencedSpans', 'markerPositions', 'isMainModule']
+  const dupes = []
+  for (const name of sharedJudgements) {
+    const defRe = new RegExp(`export function ${name}\\s*\\(`)
+    const hits = scriptFiles.filter((f) => defRe.test(readFileSync(f, 'utf8')))
+    if (hits.length !== 1) {
+      dupes.push(`${name}×${hits.length}（${hits.map((f) => basename(f)).join('、') || '无'}）`)
+    }
+  }
+  check(dupes.length === 0, '共享判据在全仓只定义一次', dupes.join('；'))
+  report(dupes.length === 0, '共享判据：各一份')
+
+  // ── 3) 临时文件的归属三态 ──
+  // 「同前缀全删」曾把使用者自己的备份、和另一个正在运行的进程手里的临时文件一起
+  // 删掉：前者是毁掉别人的东西，后者会让那次运行的改名失败。判据现在分三态——
+  // 已死进程留下的清掉、活着的留着、使用者自己的留着，而且留下的要说得出原因。
+  const tmpDir = fixture('tmp-ownership', {})
+  const target = join(tmpDir, 'AGENTS.md')
+  writeFileSync(target, 'x', 'utf8')
+  // 一个真的跑过又退出的进程，它的进程号此刻已不在了——这比随手写一个数字可靠。
+  const deadPid = spawnSync(process.execPath, ['-e', ''], { encoding: 'utf8', windowsHide: true }).pid
+  const own = `${basename(target)}.tmp-backup`
+  const alive = `${basename(target)}.tmp-${process.pid}`
+  const dead = `${basename(target)}.tmp-${deadPid}`
+  writeFileSync(join(tmpDir, own), 'x', 'utf8')
+  writeFileSync(join(tmpDir, alive), 'x', 'utf8')
+  writeFileSync(join(tmpDir, dead), 'x', 'utf8')
+  // 进程刚退出时系统可能还没回收它，等一下再问「它还活着吗」。
+  for (let i = 0; i < 50 && processAlive(deadPid); i += 1) {
+    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},30)'], { windowsHide: true })
+  }
+  const cleared = clearStaleTemps(target)
+  const tmpOk = cleared.removed.includes(dead)
+    && cleared.kept.some((k) => k.name === alive)
+    && cleared.kept.some((k) => k.name === own)
+    && existsSync(join(tmpDir, alive))
+    && existsSync(join(tmpDir, own))
+    && !existsSync(join(tmpDir, dead))
+  check(tmpOk,
+    '临时文件按归属分三态：已死进程的清掉，活着的与使用者自己的留下并说得出原因',
+    `removed=${cleared.removed.join('、') || '无'}；kept=${cleared.kept.map((k) => k.name).join('、') || '无'}`)
+  report(tmpOk, '临时文件：三态分明')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

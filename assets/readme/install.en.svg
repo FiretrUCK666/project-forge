@@ -25,9 +25,9 @@
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17"
           font-weight="400" fill="#C2410C">recommended</tspan></text>
 
-    <text x="64" y="198" font-size="19" fill="#5D6064">1&#8195;unzip into your host&apos;s skill directory</text>
-    <text x="64" y="238" font-size="19" fill="#5D6064">2&#8195;keep the folder named project-forge</text>
-    <text x="64" y="278" font-size="19" fill="#5D6064">3&#8195;that is the whole install</text>
+    <text x="64" y="198" font-size="19" fill="#5D6064">1&#8195;get the package from the Releases page</text>
+    <text x="64" y="238" font-size="19" fill="#5D6064">2&#8195;unzip it into your host&apos;s skill directory</text>
+    <text x="64" y="278" font-size="19" fill="#5D6064">3&#8195;keep the folder named project-forge, that is all</text>
 
     <text x="64" y="366" font-size="20" font-weight="700" fill="#17181A">It keeps itself current</text>
     <text x="64" y="398" font-size="18" fill="#5D6064">no git, nothing for you to do</text>

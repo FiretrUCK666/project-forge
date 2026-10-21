@@ -8,7 +8,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.en.md#before-you-start)
 
 <p align="center">
-  <img src="assets/readme/hero.en.svg" width="100%" alt="project-forge: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is real output from the survey script">
+  <img src="assets/readme/hero.en.svg" width="100%" alt="project-forge: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is an excerpt of the survey result">
 </p>
 
 Turn any project directory into a well-formed project. Give it a directory and it surveys
@@ -51,20 +51,41 @@ project-forge brings them into one flow:
 - **Version control**: ignore rules, text attributes, commit identity, commit discipline, secret scan;
 - **Documentation set**: `AGENTS.md`, `README`, `CONTRIBUTING`, `LICENSE` — each with its own reader, none repeating another;
 - **Remote repository**: create (private by default), push, metadata, collaboration templates, CI;
-- **Release channel**: whether it can ship, where to, how versions are numbered, how to ship safely.
+- **Release channel**: whether it can ship, where to, how versions are numbered, how to ship safely;
+- **Hand-off**: once the project is in shape, it asks whether you want its traces cleaned up.
 
 It only governs. It does not create the project itself: it picks no stack and writes no source or
 framework config. Governance runs after the skeleton exists.
 
+### Hand-off: done with it, want the traces gone
+
+Once a project has been put in shape, it still carries what this skill left behind — identifiers,
+unfilled template placeholders, residue from an interrupted injection. **It always asks at the end
+whether you want those cleared**, and it does not finish without asking.
+
+When it asks, it scans the project first and tells you which parts are traces, which belong to the
+project, and what to delete or keep for each — then waits for your go-ahead. **It never deletes on
+its own**, and irreversible moves such as removing a remote or rewriting history need a separate,
+explicit confirmation.
+
+To see the scan yourself:
+
+```sh
+node "<skill directory>/scripts/handoff.mjs" "<project directory>" --scan
+```
+
 ## How it works
 
 <p align="center">
-  <img src="assets/readme/pipeline.en.svg" width="100%" alt="project-forge's chain: survey read-only, decide from facts, pass the hard gates, then write, push and release">
+  <img src="assets/readme/pipeline.en.svg" width="100%" alt="project-forge's chain: survey read-only, decide from facts, pass the hard gates, then write, push and release, and ask at the end whether to clear the traces">
 </p>
 
-Four steps, and the order matters. The input is surveyed facts, not a preset checklist, so it will
-not bolt a release flow onto a docs-only directory and will not recreate a repo that already has a
-remote. "Not releasing" and "skipping something" are normal outcomes, not failures.
+Four steps, and the order matters: survey read-only, decide from facts, pass the hard gates, then
+write, push and release. When it is done it also asks whether you want the traces it left cleaned
+up — that is the closing move, not a fifth step. The input is surveyed facts, not a preset
+checklist, so it will not bolt a release flow onto a docs-only directory and will not recreate a
+repo that already has a remote. "Not releasing" and "skipping something" are normal outcomes, not
+failures.
 
 ## Before you start
 
@@ -90,8 +111,9 @@ remote repositories, pushing and releasing.
   </a>
 </p>
 
-Unzip it into your skill directory and keep the folder named `project-forge`. That is the whole
-install.
+Unzip it into your skill directory, then **rename** the `project-forge-<version>/` folder inside it
+to `project-forge` — the folder name has to match the `name` field in the `SKILL.md` frontmatter,
+and on case-sensitive systems a different case is a different directory.
 
 <p align="center">
   <img src="assets/readme/install.en.svg" width="100%" alt="Two ways to install: the downloaded package keeps itself current; a clone does not update itself">
@@ -107,9 +129,10 @@ The two differ in exactly one way: **a clone does not update itself**. A `.git` 
 copy is meant for editing, and the tool leaves it alone. How to work on it is in
 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
-> **The `Source code` download works too.** It is GitHub's generated source archive, and it holds
-> exactly the same files as the package — both install, and both keep themselves current. The
-> package is built for the purpose, so prefer it.
+> **The `Source code` download works too.** It is GitHub's generated source archive: **the same set
+> of files** as the package, but it has no versioned top-level folder — create a `project-forge/`
+> folder and put the files in it. Both install, and both keep themselves current. The package is
+> built for the purpose, so prefer it.
 
 ### Where it goes
 
@@ -123,7 +146,7 @@ Nothing to register and no restart: hosts discover skills by directory, and `SKI
 ## Update
 
 <p align="center">
-  <img src="assets/readme/update.en.svg" width="100%" alt="How it stays current: one version check per use, a full replacement when there is a newer version, and at most one file replacement per copy every 24 hours">
+  <img src="assets/readme/update.en.svg" width="100%" alt="How the downloaded copy stays current: one version check per use, a full replacement when there is a newer version, and at most one file replacement per copy every 24 hours">
 </p>
 
 The downloaded copy keeps itself current. You do nothing. On each use it quietly compares version
@@ -141,13 +164,6 @@ Where it asks depends on the address that copy records for itself — it ships i
 `SKILL.md` `metadata.source` field. It recognises the hosting platform's address pattern, so it
 **prefers the platform's API**: one request returns both the version and the download address,
 without touching the web host. The web address is the fallback.
-
-A copy replaces its files at most once every 24 hours, so it cannot flip several times a day. To
-look at the state yourself (report only, no update):
-
-```sh
-node "<skill directory>/scripts/update.mjs" --check
-```
 
 **When it cannot connect**: that run is skipped (it will not damage your copy or hold up the task),
 and the next use retries. But if it has been more than a day without reaching the platform, it says
@@ -183,6 +199,7 @@ the project is in, what it plans to do, and why it is skipping the rest.
 - Choose a license for you — it gives criteria and options;
 - Make a repository public on its own (private by default);
 - Force-push, rewrite pushed history, or delete a published release;
+- Delete what it left behind without your confirmation;
 - Deploy or configure servers.
 
 ## What is inside
@@ -198,6 +215,7 @@ the project is in, what it plans to do, and why it is skipping the rest.
 | `references/docs-set.md` | Documentation set: who reads each document, its job, how to write it, how to keep them in sync |
 | `references/publish.md`, `references/publish-npm.md`, `references/publish-python.md`, `references/publish-go.md`, `references/publish-rust.md` | Release overview and per-ecosystem chapters: can it ship, where, version semantics, safe release, how to join an existing state |
 | `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
+| `references/handoff.md` | Hand-off: how a trace is judged, what to remove and what to keep, the order of removal, how to accept the result |
 | `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
 | `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
 | `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
@@ -208,6 +226,7 @@ the project is in, what it plans to do, and why it is skipping the rest.
 | `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
 | `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
+| `scripts/handoff.mjs` | Read-only scan of the traces this skill left in a project; can also judge whether it is already clean |
 | `scripts/release-notes.mjs`, `scripts/draft-release-notes.mjs` | Writes release notes from a UTF-8 file so Chinese never passes through a shell; and drafts them from the commit log |
 | `scripts/check-badges.mjs` | Checks that the README badges actually render |
 | `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |
@@ -234,23 +253,28 @@ Every script uses only built-in modules: no dependencies, cross-platform.
 
 ```sh
 # Keep this copy current (--check reports without updating)
-node <skill directory>/scripts/update.mjs --quiet
+node "<skill directory>/scripts/update.mjs" --quiet
 
 # Survey a project (read-only, writes nothing)
-node <skill directory>/scripts/survey.mjs <project directory> --markdown
+node "<skill directory>/scripts/survey.mjs" "<project directory>" --markdown
 
 # Generate, refresh or upgrade a project's AGENTS.md
-node <skill directory>/scripts/compose-agents.mjs <project directory>
-node <skill directory>/scripts/compose-agents.mjs <project directory> --status    # look, do not write
-node <skill directory>/scripts/compose-agents.mjs <project directory> --upgrade   # upgrade a hand-written one
+node "<skill directory>/scripts/compose-agents.mjs" "<project directory>"
+node "<skill directory>/scripts/compose-agents.mjs" "<project directory>" --status    # look, do not write
+node "<skill directory>/scripts/compose-agents.mjs" "<project directory>" --upgrade   # upgrade a hand-written one
+
+# Survey the traces this skill left in a project (read-only)
+node "<skill directory>/scripts/handoff.mjs" "<project directory>" --scan     # list traces and what to do with each
+node "<skill directory>/scripts/handoff.mjs" "<project directory>" --verify   # judge whether it is already clean
 
 # Self-checks for this skill (run only when changing it)
-node <skill directory>/scripts/dev/preflight.mjs
-node <skill directory>/scripts/dev/selftest.mjs
+node "<skill directory>/scripts/dev/preflight.mjs"
+node "<skill directory>/scripts/dev/selftest.mjs"
 ```
 
 `<skill directory>` is where this skill lives and `<project directory>` is the project you want it
-to work on. They are usually not the same directory.
+to work on. They are usually not the same directory. Keep the quotes when a path contains spaces
+or non-ASCII characters — that is not styling, it is whether the command runs at all.
 
 ## How this repository is set up
 

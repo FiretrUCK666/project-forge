@@ -8,7 +8,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](README.md#开始之前)
 
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="project-forge：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察脚本的一次真实输出">
+  <img src="assets/readme/hero.svg" width="100%" alt="project-forge：给一个项目目录，先只读勘察，再按事实决定做哪几件事。右侧是勘察结果节选">
 </p>
 
 把一个项目目录弄成规范项目。给它一个目录，它先只读勘察，看清这个项目现在是什么样，
@@ -48,17 +48,33 @@
 - **版本管理**：忽略规则、文本属性、提交署名、提交纪律、密钥扫描；
 - **文档套装**：`AGENTS.md`、`README`、`CONTRIBUTING`、`LICENSE`，各写各的读者，互不复述；
 - **远端仓库**：建仓库（默认私有）、推送、元数据、协作模板、持续集成；
-- **发布通道**：能不能发、发到哪、版本号怎么算、怎么发才安全。
+- **发布通道**：能不能发、发到哪、版本号怎么算、怎么发才安全；
+- **交棒**：项目规整好之后，问你要不要把它留下的痕迹清掉。
 
 它只做治理，不生成项目本身：不替你选技术栈，也不创建源码和框架配置。治理跑在骨架就绪之后。
+
+### 交棒：用完了，想把痕迹清掉
+
+项目被规整好之后，里面会留着这个 skill 留下的东西——标识符、没填完的模板占位符、
+注入中断的残留。**它收尾时一定会问你要不要清掉**，不问就收工。
+
+问的时候它先把项目扫一遍，列清楚哪些是痕迹、哪些是项目自己的东西、每个该删还是该留，
+等你点头才动手。**它不会自己删**——删远端、删历史这类不可逆的动作尤其要单独确认。
+
+想自己看一眼扫出来什么：
+
+```sh
+node "<本领目录>/scripts/handoff.mjs" "<项目目录>" --scan
+```
 
 ## 它怎么工作
 
 <p align="center">
-  <img src="assets/readme/pipeline.svg" width="100%" alt="project-forge 的工作链路：只读勘察、按事实判定、过硬门控、落盘推送发布">
+  <img src="assets/readme/pipeline.svg" width="100%" alt="project-forge 的工作链路：只读勘察、按事实判定、过硬门控、落盘推送发布，收尾再问一句要不要清掉痕迹">
 </p>
-四步的顺序不能反。判定依据是勘察出来的事实，不是预设的清单，所以它不会给纯文档目录配发布流程，
-也不会重建一个已经有远端的仓库。「不发布」和「跳过某件事」都是正常结果，不是失败。
+四步的顺序不能反：只读勘察、按事实判定、过硬门控、落盘推送发布。跑完它还会问一句要不要把留下的
+痕迹清掉——那是收尾动作，不是第五步。判定依据是勘察出来的事实，不是预设的清单，所以它不会给纯文档
+目录配发布流程，也不会重建一个已经有远端的仓库。「不发布」和「跳过某件事」都是正常结果，不是失败。
 
 ## 开始之前
 
@@ -82,7 +98,8 @@ skill 本身时才用得上，平时用它治理项目碰不到。
   </a>
 </p>
 
-解压到你的 skill 根，目录名保持 `project-forge`。就这一步。
+解压到你的 skill 根，把里面的 `project-forge-<版本>/` **改名**成 `project-forge`——目录名必须与
+`SKILL.md` 里 frontmatter 的 `name` 一致，区分大小写的系统上，大小写不同就是另一个目录。
 
 <p align="center">
   <img src="assets/readme/install.svg" width="100%" alt="两种装法对照：下载压缩包会自己保持最新；克隆仓库不会自动更新">
@@ -97,8 +114,9 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 两种装法的区别只有一条：**克隆下来的那份不会自己更新**。目录里有 `.git` 说明它是拿来改的，
 工具对它只读。改法见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
-> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，里面的文件与安装包
-> 逐字相同，两个都能装，装上都会自己保持最新。安装包是专门为安装打的，推荐用它。
+> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，**文件集合与安装包相同**，
+> 但它没有版本号前缀目录——解压后要自己建一个 `project-forge/` 放进去。两个都能装，装上都会自己
+> 保持最新。安装包是专门为安装打的，推荐用它。
 
 ### 放在哪里
 
@@ -111,7 +129,7 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 ## 更新
 
 <p align="center">
-  <img src="assets/readme/update.svg" width="100%" alt="它怎么保持最新：每次用比一次版本，有新版就整份换掉，同一份副本 24 小时内最多换一次">
+  <img src="assets/readme/update.svg" width="100%" alt="下载装的那份怎么保持最新：每次用比一次版本，有新版就整份换掉，同一份副本 24 小时内最多换一次">
 </p>
 
 下载装的那份会自己保持最新，你不用做任何事。每次用它时它安静地比一次版本号：是同一版就结束、
@@ -159,6 +177,7 @@ node "<本领目录>/scripts/update.mjs" --check
 - 不替你决定许可证，只给判据和选项；
 - 不擅自把仓库设为公开（默认私有）；
 - 不强制推送、不改写已推送的历史、不删除已发布的版本；
+- 不未经你确认就删掉自己留下的东西；
 - 不做部署和服务器配置。
 
 ## 里面有什么
@@ -174,6 +193,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `references/docs-set.md` | 文档套装：各文档的读者是谁、职责、写法与同步纪律 |
 | `references/publish.md`、`references/publish-npm.md`、`references/publish-python.md`、`references/publish-go.md`、`references/publish-rust.md` | 发布总纲与各生态专章：能不能发、发到哪、版本号语义、安全发布、各种既有状态怎么接 |
 | `references/plugin-project.md`、`references/skill-project.md`、`references/plugins/` | 插件类与 skill 类项目的判定协议，以及各生态的专章 |
+| `references/handoff.md` | 交棒：痕迹怎么判、拆什么留什么、拆的顺序、拆完怎么验收 |
 | `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
 | `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
 | `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
@@ -184,6 +204,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `scripts/zip.mjs` | 解开 zip 包：自更新要读得动下载回来的那份 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
+| `scripts/handoff.mjs` | 只读勘察目标项目里这个 skill 留下的痕迹；也能判「已经干净」 |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 用 UTF-8 文件写发布说明，中文不经 shell；并从提交记录起草中文稿 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是不是真的显示得出来 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
@@ -210,22 +231,27 @@ node "<本领目录>/scripts/update.mjs" --check
 
 ```sh
 # 让这个副本保持最新（--check 只报告不更新）
-node <本领目录>/scripts/update.mjs --quiet
+node "<本领目录>/scripts/update.mjs" --quiet
 
 # 勘察一个项目（只读，不写任何文件）
-node <本领目录>/scripts/survey.mjs <项目目录> --markdown
+node "<本领目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
 # 生成、刷新或升级项目的 AGENTS.md
-node <本领目录>/scripts/compose-agents.mjs <项目目录>
-node <本领目录>/scripts/compose-agents.mjs <项目目录> --status    # 只看现状，不写入
-node <本领目录>/scripts/compose-agents.mjs <项目目录> --upgrade   # 把手写的升级成标准结构
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --status    # 只看现状，不写入
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --upgrade   # 把手写的升级成标准结构
+
+# 勘察目标项目里这个 skill 留下的痕迹（只读）
+node "<本领目录>/scripts/handoff.mjs" "<项目目录>" --scan     # 列出痕迹与处置建议
+node "<本领目录>/scripts/handoff.mjs" "<项目目录>" --verify   # 判「是否已经干净」
 
 # 自检这个 skill 自身（只在改它的时候跑）
-node <本领目录>/scripts/dev/preflight.mjs
-node <本领目录>/scripts/dev/selftest.mjs
+node "<本领目录>/scripts/dev/preflight.mjs"
+node "<本领目录>/scripts/dev/selftest.mjs"
 ```
 
 `<本领目录>` 是这个 skill 所在的位置，`<项目目录>` 是你要处理的那个项目，两者通常不是同一个目录。
+路径带空格或中文时**要留着引号**——那不是排版讲究，是命令能不能跑起来的事。
 
 ## 这个仓库自己是怎么配的
 

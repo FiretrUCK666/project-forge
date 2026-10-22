@@ -374,6 +374,17 @@ function main(argv) {
     pending.push(`标签与版本号未对齐：清单 ${s.artifacts.declaredVersion}，标签 ${(s.artifacts.versionAlignedTags ?? []).join('、') || '无'}（自动化会对不上，先确认）`)
   }
 
+  // 2c-1. 多个 AI 宿主的约定文件并存：报出来，并提醒先对齐。
+  //
+  // 这件事没有机器能判对错——两份约定说的是同一件事却给了不同答案时，谁赢取决于宿主
+  // 实现，不取决于哪份更权威。而本 skill 生成的那份**看起来最正式、最长、还带内核**，
+  // 于是矛盾会被永久留在项目里，谁也不知道该信哪个。所以至少要让使用者知道它存在。
+  const conv = s.docs?.aiConventions
+  if (Array.isArray(conv) && conv.length > 1) {
+    pending.push(`这个项目有 ${conv.length} 份 AI 约定文件（${conv.map((c) => c.file).join('、')}）：`
+      + '落盘前先对齐它们说的是不是同一件事——否则新生成的那份看起来最权威，矛盾会被留下来')
+  }
+
   // 2d. 密钥与扫描可信度。**按分案判，不一律报缺**（判据与 version-control.md 的
   // 密钥门控同源，SKILL.md 的 G2 也写「未跟踪排除、已历史轮换、占位继续」）：
   //   - 已跟踪（已经在版本库里）→ 缺：只能从索引移除并轮换凭据；
@@ -543,7 +554,15 @@ function main(argv) {
   }
   else if (flags.has('--no-contributing')) ok.push('无 CONTRIBUTING（用户已确认自用）')
   else pending.push('CONTRIBUTING 缺失：问用户会不会给别人用（会→补，不会→加 --no-contributing）')
-  if (s.docs?.license !== undefined) ok.push('LICENSE 有')
+  if (s.docs?.license !== undefined) {
+    // 许可证文件族要多说一句：双许可（`LICENSE-MIT` + `LICENSE-APACHE`）是 Rust 等生态的
+    // 标准布局，**没有**单个 `LICENSE`。只报「LICENSE 有」会让下一个读的人以为只有一份，
+    // 进而去补一个与清单里的 `OR` 表达式打架的 `LICENSE`。
+    const fam = s.docs.licenseFamily
+    ok.push(fam !== undefined && fam.length > 1
+      ? `LICENSE 有（许可证文件族 ${fam.length} 份：${fam.join('、')}——双许可常见，不要再补单个 LICENSE）`
+      : 'LICENSE 有')
+  }
   else if (flags.has('--private-no-license')) ok.push('无 LICENSE（用户已选保留所有权利）')
   else pending.push('LICENSE 缺失：问用户选哪个许可证（保留权利→加 --private-no-license）')
 

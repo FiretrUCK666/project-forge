@@ -748,6 +748,57 @@ group('[10] 运行环境下限：读项目自己的声明，读不到就是没�
   report(ok3, '未声明时为空，不编造')
 }
 
+// 这一组守的是「文档勘察按声明判，不按文件名清单判」。
+//
+// 固定清单一定会漏，而漏的后果不是「少报一个文件」，是**诱导去补一份不该存在的**：
+// Rust 的标准双许可布局是两个 LICENSE-* 加清单里的 `license = "MIT OR Apache-2.0"`，
+// 根本没有单个 LICENSE；按清单判成「缺」之后补一个，就与清单里的声明打架。
+group('[10b] 文档勘察按声明判：许可证文件族与别的宿主约定文件')
+{
+  // 正例：双许可不该判成「缺」。
+  const dual = fixture('docs-dual-license', {
+    'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nlicense = "MIT OR Apache-2.0"\n',
+    'LICENSE-MIT': 'MIT text\n',
+    'LICENSE-APACHE': 'Apache text\n',
+  })
+  const sDual = survey(dual)
+  check(sDual.docs?.license !== undefined, '双许可：认得出许可证存在（不判「缺」）',
+    JSON.stringify(sDual.docs?.license))
+  report(sDual.docs?.license !== undefined, '双许可：不判缺')
+  check(Array.isArray(sDual.docs?.licenseFamily) && sDual.docs.licenseFamily.length === 2,
+    '双许可：把整个文件族都报出来（上层才不会去补单个 LICENSE）',
+    JSON.stringify(sDual.docs?.licenseFamily))
+  report(sDual.docs?.licenseFamily?.length === 2, '双许可：文件族报全')
+
+  // 反例：没有许可证文件时仍然是「缺」——放宽不能放到丢掉这个事实。
+  const nolic = fixture('docs-no-license', {
+    'package.json': '{"name":"a","version":"1.0.0"}\n',
+  })
+  const sNo = survey(nolic)
+  check(sNo.docs?.license === undefined, '反例：确实没有许可证时，仍是「缺」')
+  report(sNo.docs?.license === undefined, '反例：真缺仍是缺')
+
+  // 正例：多份 AI 宿主约定文件要全部报出来。
+  // 只认 AGENTS.md + CLAUDE.md 时，`.cursorrules` / `GEMINI.md` 里的矛盾完全看不见，
+  // 而新生成的那份看起来最权威，矛盾就被永久留下了。
+  const hosts = fixture('docs-hosts', {
+    'AGENTS.md': 'Use pnpm.\n',
+    'CLAUDE.md': 'Use yarn.\n',
+    '.cursorrules': 'Use npm.\n',
+    'GEMINI.md': 'Use bun.\n',
+  })
+  const sHosts = survey(hosts)
+  const found = (sHosts.docs?.aiConventions ?? []).map((c) => c.file)
+  check(found.length === 4, '多宿主：四份约定文件全部报出（不只认两个文件名）', found.join('、'))
+  report(found.length === 4, '多宿主：全部报出')
+
+  // 反例：只有一份时不该多话。
+  const one = fixture('docs-one-host', { 'AGENTS.md': 'Use pnpm.\n' })
+  const sOne = survey(one)
+  check((sOne.docs?.aiConventions ?? []).length === 1, '反例：只有一份时不虚报')
+  report((sOne.docs?.aiConventions ?? []).length === 1, '反例：单份不虚报')
+}
+
 group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
 {
   const realHome = homedir().replace(/\\/g, '/')

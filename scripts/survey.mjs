@@ -2292,7 +2292,6 @@ function detectDocs(root, root_) {
     docs.readmeSections = markdownH2(join(root, primary))
   }
   for (const [key, candidates] of [
-    ['agents', ['AGENTS.md', 'CLAUDE.md']],
     ['contributing', ['CONTRIBUTING.md', 'CONTRIBUTING.rst']],
     ['license', ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'COPYING']],
     ['changelog', ['CHANGELOG.md', 'CHANGES.md', 'HISTORY.md']],
@@ -2300,6 +2299,48 @@ function detectDocs(root, root_) {
   ]) {
     const hit = root_.first(candidates)
     docs[key] = hit === undefined ? undefined : { file: hit, bytes: sizeOf(join(root, hit)) }
+  }
+
+  // 许可证：**按声明判，不按文件名清单**。
+  //
+  // 一张固定的文件名清单一定会漏，而漏的后果是会诱导再写一份：Rust 生态的标准双许可
+  // 布局是两个 `LICENSE-MIT` / `LICENSE-APACHE` 加清单里的 `license = "MIT OR Apache-2.0"`，
+  // 根本**没有**单个 `LICENSE` 文件。按清单判成「缺」之后，AI 会去补一个 `LICENSE`，
+  // 与清单里的双许可声明打架——而许可证一旦发布就收不回来。
+  //
+  // 判据与 `version-control.md` 那条通则一致：来源是**声明本身**，不是某个固定文件名。
+  // 所以这里认的是「`LICENSE*` 这一族文件」，并把它们的名字全报出来。
+  const licenseFamily = (() => {
+    let entries = []
+    try { entries = readdirSync(root, { encoding: 'utf8' }) } catch { return [] }
+    return entries.filter((n) => /^(?:LICEN[CS]E|COPYING|UNLICENSE)(?:[._-].*)?$/i.test(n)).sort()
+  })()
+  if (licenseFamily.length > 0) {
+    const primary = docs.license?.file ?? licenseFamily[0]
+    docs.license = { file: primary, bytes: sizeOf(join(root, primary)) }
+    // 一份以上是「许可证文件族」：双许可、或分语言/分发行版的常见布局。
+    // 报出来，上层才不会把「没有 LICENSE 但有 LICENSE-MIT」判成缺。
+    if (licenseFamily.length > 1) docs.licenseFamily = licenseFamily
+  }
+
+  // 别的 AI 宿主的约定文件：**只当事实报出来，不参与落盘决策**。
+  //
+  // 它们与 `AGENTS.md` 是并列的约定来源，一个项目里同时存在多份、甚至互相矛盾是常见的
+  // （一份说用 pnpm、另一份说用 yarn）。不报出来的后果不是「少一个文件」，而是新生成的
+  // 那份**看起来最权威**，于是矛盾被永久留在项目里，谁也不知道该信哪个。
+  const HOST_CONVENTION_FILES = [
+    'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.cursorrules', '.windsurfrules',
+    'COPILOT_INSTRUCTIONS.md', '.github/copilot-instructions.md',
+  ]
+  const conventions = []
+  for (const rel of HOST_CONVENTION_FILES) {
+    const name = root_.real(rel)
+    if (name === undefined) continue
+    conventions.push({ file: name, bytes: sizeOf(join(root, name)) })
+  }
+  if (conventions.length > 0) {
+    docs.aiConventions = conventions
+    docs.agents = { file: conventions[0].file, bytes: conventions[0].bytes }
   }
   const ghEntry = root_.entry('.github')
   if (ghEntry?.isDir === true) {

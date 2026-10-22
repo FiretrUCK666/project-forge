@@ -304,13 +304,20 @@ export function referencedPaths(text) {
 }
 
 /**
- * 扫描所有 Markdown 里的资源引用，逐个确认文件存在。
+ * 扫描文档里的资源引用，逐个确认文件存在。
  *
  * 覆盖全部文档而不只是 SKILL.md：reference 之间互相引用是常态，只查入口等于只守住了
  * 一扇门。引用断链的代价很高——AI 按图索骥走到死路，然后开始猜。
+ *
+ * **`templates/` 不在这里判**：那些文件会落盘到别的项目，它们的引用该问的是「归属是谁」
+ * 而不是「本包里有没有」——对着本仓库根判存在，对它们正好说反话。那份判据归
+ * `checkDeliveredAttribution`。一个文件只归一个判据管：两套方向相反的判据并存，
+ * 迟早给出两个答案，而其中必有一个是错的。
  */
 function checkReferencesResolve() {
-  const docs = repoTextFiles().filter((f) => f.endsWith('.md'))
+  const docs = repoTextFiles()
+    .filter((f) => f.endsWith('.md'))
+    .filter((f) => !rel(f).startsWith('templates/'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
   let total = 0
   for (const full of docs) {
@@ -431,6 +438,168 @@ function checkTemplates() {
   const ei = skeleton.indexOf(KERNEL_END)
   if (si >= 0 && ei > si && skeleton.slice(si + KERNEL_START.length, ei).trim() !== '') {
     warn('templates/agents-project.md 的内核标记之间不是空的 —— 注入时会被覆盖，这是预期的，但请确认没有把项目特有内容放进去。')
+  }
+}
+
+// ── 检查四之二：落盘族的引用归属 ────────────────────────────────────────────
+
+/**
+ * `templates/` 整棵树是「落盘族」：这里的文件会被复制或生成为**别的项目**的文件。
+ *
+ * 判据只问一件事：**这条引用是谁的文件**。
+ *
+ * 为什么不能用「本包里找得到吗」：`checkReferencesResolve` 对着本仓库根判存在，
+ * 而那对落盘族正好说反话——`references/publish.md` 在本仓真实存在，落盘到目标项目
+ * 却是一条死链。**越是自己家的东西，那个判据给的答案越像「没问题」。**
+ *
+ * 所以这里的定义域由目录结构给出（`templates/` 整棵树），不看「本包有没有」，
+ * 只看归属：
+ *
+ *   - 落在本 skill 独占命名空间（`references/`、`templates/`、`assets/`）→ 红。
+ *     目标项目不可能自然需要这些目录，出现即是把本 skill 的路径带了过去。
+ *   - 指向本包真实存在的脚本 → 红。读者会照着跑，而目标项目没有那个文件。
+ *     这条只在**本包真的有同名脚本**时成立：否则那是目标项目自己的脚本名，不能判。
+ *   - 不带这些前缀的（`README.en.md`、`CONTRIBUTING.md`、`LICENSE`、`.github/*`）
+ *     → **根本不判**。它们本来就是目标项目的文件。
+ *
+ * 定义域来自目录结构，所以新增 `templates/security.md` 这类文件**自动纳入**，
+ * 不需要谁记得登记清单。
+ *
+ * 三类例外，各有理由：
+ *   - `pf:` 与 `project-forge:kernel:` 是**受管围栏标记**，不是引用；
+ *   - 围栏代码块里的示例不判（`.md` 才适用；`.yml` 里 `run:` 下的就是真执行，照判）；
+ *   - 尖括号通配（`references/publish-<生态>.md`）按 `*` 展开后匹配——读者看到的
+ *     就是一个路径，它对读者和对门禁应当一视同仁。
+ */
+function checkDeliveredAttribution() {
+  const dir = join(SKILL_ROOT, 'templates')
+  if (!existsSync(dir)) { fail('缺少 templates 目录。'); return }
+
+  // 受管标记：它们是本 skill 自己的围栏，不是写给目标项目的引用。
+  const MANAGED_MARK_RE = /<!--\s*(?:project-forge:kernel:(?:start|end)|project-forge:(?:managed|upgraded)|pf:[^>]*?)\s*-->/g
+
+  // 本包独占命名空间。`scripts/` 另判：它是通用目录名，目标项目也常有。
+  //
+  // 路径主体的字符类用**排除式**而不是白名单：白名单会把中文挡在外面，而真实的
+  // 遗留写法恰好是 `references/publish-<生态>.md` —— 占位符里就是中文。用白名单时
+  // 它只会匹配到 `references/publish-<` 就截断，于是这条判据对最典型的那种写法失灵。
+  const PATH_CHAR = '[^\\s`\'"()\\[\\]，。；：、！？]'
+  const OWNED_RE = new RegExp(`(?:^|[^\\w/.-])((?:references|templates|assets)/${PATH_CHAR}+)`, 'g')
+  const SCRIPT_RE = new RegExp(`(?:^|[^\\w/.-])(scripts/${PATH_CHAR}+\\.mjs)`, 'g')
+
+  const expand = (spec) => (spec.includes('<') || spec.includes('>')
+    ? spec.replace(/<[^<>]{1,40}>/g, '*')
+    : spec)
+
+  const fileExistsLoose = (spec) => {
+    if (!spec.includes('*')) return existsSync(join(SKILL_ROOT, spec))
+    const re = new RegExp(`^${spec.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`)
+    const base = spec.split('/')[0]
+    let entries = []
+    try {
+      entries = readdirSync(join(SKILL_ROOT, base), { withFileTypes: true, encoding: 'utf8' })
+    } catch { return false }
+    return entries.some((e) => re.test(`${base}/${e.name}`))
+  }
+
+  // 归属判据只看**命名空间**，不看文件在不在。
+  //
+  // `references/`、`templates/`、`assets/` 是本 skill 自己的布局，目标项目不会自然长出来；
+  // 所以凡是这三个前缀开头的引用，都是把本 skill 的路径带了过去——**路径写错、文件不存在
+  // 同样是错的**，而且那种更糟：它在两个项目里都找不到东西。要求「文件存在」才算归属，
+  // 恰好会放过这一类。
+  const isOwned = (spec) => /^(?:references|templates|assets)\//.test(spec)
+
+  // `scripts/` 是通用目录名，目标项目也常有，所以这一条必须看本包**真的有**那个脚本：
+  // 否则目标项目自己的 `scripts/build.mjs` 会被误判成我们的。
+  const isOurScript = (spec) => spec.startsWith('scripts/') && fileExistsLoose(expand(spec))
+
+  // 围栏代码块：只对 Markdown 生效。行号要与原文对齐，所以按行追踪。
+  const fencedLines = (text, isMarkdown) => {
+    const out = new Set()
+    if (!isMarkdown) return out
+    let inside = false
+    let fence = ''
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^\s*(`{3,}|~{3,})/.exec(lines[i])
+      if (m !== null) {
+        if (!inside) { inside = true; fence = m[1][0] } else if (m[1][0] === fence) { inside = false; fence = '' }
+        out.add(i + 1)
+        continue
+      }
+      if (inside) out.add(i + 1)
+    }
+    return out
+  }
+
+  const files = []
+  const collect = (sub) => {
+    let entries = []
+    try {
+      entries = readdirSync(join(dir, sub), { withFileTypes: true, encoding: 'utf8' })
+    } catch { return }
+    for (const e of entries) {
+      const rel = sub === '' ? e.name : `${sub}/${e.name}`
+      if (e.isDirectory()) collect(rel)
+      else files.push(rel)
+    }
+  }
+  collect('')
+
+  let checked = 0
+  for (const rel of files.sort()) {
+    const full = join(dir, rel)
+    const text = readText(full).replace(/^\uFEFF/, '')
+    const isMarkdown = rel.endsWith('.md')
+    const isYaml = rel.endsWith('.yml') || rel.endsWith('.yaml')
+    const skip = fencedLines(text, isMarkdown)
+    // 受管标记先抹成等长空白，保持行号不变
+    const stripped = text.replace(MANAGED_MARK_RE, (m) => ' '.repeat(m.length))
+
+    const lines = stripped.split('\n')
+    for (let i = 0; i < lines.length; i += 1) {
+      if (skip.has(i + 1)) continue
+      const line = lines[i]
+      for (const re of [OWNED_RE, SCRIPT_RE]) {
+        re.lastIndex = 0
+        let m
+        while ((m = re.exec(line)) !== null) {
+          const spec = m[1]
+          checked += 1
+          const owned = re === OWNED_RE ? isOwned(spec) : isOurScript(spec)
+          if (!owned) continue
+          // 两种情形分开说，因为修法不同：一种是把别人的路径带过去了（改成自足的判据），
+          // 一种是连本包里都没有这个概念（那是写错了，先确认要指的是什么）。
+          const exists = fileExistsLoose(expand(spec))
+          const why = exists
+            ? '那是本 skill 自己的路径，落盘到别的项目后读者会扑空（目标项目没有这个目录或文件）。'
+            : '这个路径在本 skill 里也不存在——读者在两个项目里都找不到东西。'
+          // YAML 里的非注释行是**真会执行**的指令，比文档里的一句话严重得多：
+          // 文档里的死链读者会发现，流水线里的死命令是发版当天才红。
+          const tail = isYaml && !/^\s*#/.test(line)
+            ? '这一行在流水线里会**真的被执行**，不只是读不到。'
+            : ''
+          fail(`templates/${rel}:${i + 1} 引用了 ${spec} —— ${why}`
+            + tail
+            + '改法：讲规则就把判据写在这里，指工具就写成外部地址或显式占位。')
+        }
+      }
+    }
+  }
+  // 零命中就是正常状态：落盘族里本来就不该出现本 skill 的路径。这条判据的红是
+  // 「发现了」，不是「没发现」。
+  //
+  // 但有一种情形值得喊：模板里**确实写着** `references/` 这类前缀，而判据一处都没收进来。
+  // 那说明正则或定义域失效了——判据在，却什么也没看见，而它不会以红的方式表现出来。
+  // 「判据自己报告有没有命中」是不可靠的自证，所以这里直接拿前缀当探针。
+  if (checked === 0) {
+    const probe = /(?:references|templates|assets)\/|scripts\/[^\s`'"]+\.mjs/
+    const suspects = files.filter((rel) => probe.test(readText(join(dir, rel)) ?? ''))
+    if (suspects.length > 0) {
+      fail(`templates/ 里 ${suspects.join('、')} 出现了路径前缀，而归属判据一处都没扫到 —— `
+        + '判据在，却没看见东西；先修判据，不要当它已经生效。')
+    }
   }
 }
 
@@ -643,7 +812,10 @@ function checkScriptsRun() {
   ]
   for (const { file, args, expect } of cases) {
     const p = join(SKILL_ROOT, 'scripts', file)
-    if (!existsSync(p)) continue
+    // 脚本不存在就报缺，不能跳过：「没查」与「查过没问题」必须长得不一样。
+    // 同一个文件里 checkBehavior 对缺 selftest.mjs 报的就是 fail——一处一种写法，
+    // 迟早有一处把缺失读成通过。
+    if (!existsSync(p)) { fail(`缺少 scripts/${file} —— 它登记在「用户包里」，缺了整个流程跑不起来。`); continue }
     const r = spawnSync(process.execPath, [p, ...args], { encoding: 'utf8', env: process.env })
     const label = `${file} ${args.slice(1).join(' ') || '(无参数)'}`
     if (r.error !== undefined) {
@@ -1806,8 +1978,13 @@ function alignPackage(list, map, label, { onDisk = true } = {}) {
  * 判据是**包内的相对引用必须落在包内**，与逐个人工登记无关：新增文件、搬动文件、改排除
  * 规则，都会在这里当场暴露。
  *
- * `templates/` 里的文档不参与链接检查：那些骨架是**将要落到别的项目里**的内容，其中的
- * 相对链接指向那个项目的文件，本来就不该在本包里解析得到。
+ * `templates/` 里的**相对链接**不参与这项检查：那些骨架是**将要落到别的项目里**的内容，
+ * 其中的相对链接指向那个项目的文件，本来就不该在本包里解析得到。
+ *
+ * 但「指向目标项目」与「指向本包」是两回事，混成一条规则就会连后者一起放过：
+ * `templates/ci-release.yml` 里那句 `node scripts/release-notes.mjs` 指向的是**本包**
+ * 的脚本，落盘后一定悬空——它正是靠这条豁免躲过所有门禁的。归属判据归
+ * `checkDeliveredAttribution`，这里只放行「指向目标项目」那一类。
  */
 function checkPackageSelfConsistency(pkg, readContent) {
   const inPkg = new Set(pkg)
@@ -2074,6 +2251,7 @@ function main(argv = []) {
   step('引用能否解析', checkReferencesResolve)
   step('reference 结构', checkReferences)
   step('templates', checkTemplates)
+step('落盘族引用归属', checkDeliveredAttribution)
   step('内核一致', checkAgentsKernel)
   step('硬性规范', checkGlobalRules)
   step('脚本静态', checkScripts)

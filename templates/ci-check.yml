@@ -1,7 +1,8 @@
 # project-forge CI 检查骨架：把「本机能过」变成「换台机器也能过」。
 #
-# 用法：复制到目标项目的 .github/workflows/check.yml，按 TODO 逐项替换后删掉本注释块。
-# 判据见 references/remote-github.md 第八节；机制不要改，只换取值。
+# 用法：复制到项目的 .github/workflows/check.yml，按 TODO 逐项替换后删掉本注释块。
+# 机制不要改，只换取值。落地前先看那个路径上有没有已存在的工作流：有就合并，
+# 不要覆盖——里面可能有这个项目自己的门禁。
 #
 # TODO(1) 运行环境：按命中生态只留一块——
 #   Node：setup-node（版本取清单声明，无声明写验证过的版本，见 AGENTS.md 环境要求）；

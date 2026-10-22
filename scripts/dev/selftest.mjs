@@ -15,6 +15,7 @@
 
 import {
   mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync,
+  unlinkSync,
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -4074,6 +4075,150 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
   report(linkCaught, '反例二：包内链接越界')
 }
 
+// ── [48b] 落盘族的引用归属：模板不许带本 skill 自己的路径 ────────────────────
+
+group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，别人的文件不许误判')
+{
+  // 这一组守的是「文件集合正确、包自身也对，但落盘到别人家之后读者扑空」那一类。
+  // 判据的**方向**与前一组相反：前一组问「本包里有吗」，这一组问「这是谁的文件」。 
+  // 两个方向都必须有用例，否则改任何一边都不会有人知道。
+  const clone = skillClone('delivered-attribution')
+  const before = preflightIn(clone)
+  const green = before.status === 0
+  check(green, '前提：未改动的副本本来是全绿的（否则下面几条断言没有对象）',
+    before.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(green, '前提：未改动副本全绿')
+
+  const probe = (mutate, label) => {
+    mutate()
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    return { ok: r.status === 1 && /落盘族|本 skill 自己的路径/.test(r.out), out: r.out, label }
+  }
+
+  const readmePath = join(clone, 'templates', 'readme.md')
+  const readmeBefore = readFileSync(readmePath, 'utf8')
+
+  // 正例一：本包独占命名空间 → 红。这就是「读者点进去扑空」的最小形态。
+  {
+    const r = probe(() => writeFileSync(readmePath,
+      `${readmeBefore}\n见 \`references/publish.md\` 的说明。\n`, 'utf8'))
+    check(r.ok, '正例：templates/ 里指向 references/ → 红',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(r.ok, '正例：指向 references/ 被抓住')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 正例二：指向本包真实存在的脚本 → 红。读者会照着跑，而目标项目没有那个文件。
+  {
+    const r = probe(() => writeFileSync(readmePath,
+      `${readmeBefore}\n跑 \`scripts/sync-toc.mjs\` 生成目录。\n`, 'utf8'))
+    check(r.ok, '正例：templates/ 里指向本包脚本 → 红',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(r.ok, '正例：指向本包脚本被抓住')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 正例三：**新建**一个模板，不登记任何清单 → 仍然被抓。
+  // 这条验的是「定义域由目录结构给出，不靠人工清单」这个通则本身；
+  // 没有它，新增模板就得靠谁记得去改名单，而名单迟早漏。
+  {
+    const newTemplate = join(clone, 'templates', 'security.md')
+    const r = probe(() => writeFileSync(newTemplate, '# 安全\n\n判据见 `references/handoff.md`。\n', 'utf8'))
+    check(r.ok, '正例：新建模板无需登记，自动化纳入判据',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(r.ok, '正例：新增模板自动纳入')
+    // 清理必须验证：一个静默失败的 catch 会让这个文件留在副本里，
+    // 把后面每一条反例都污染成红——症状出现在别处，根因却在这里。
+    if (existsSync(newTemplate)) unlinkSync(newTemplate)
+    check(!existsSync(newTemplate), '前置：新模板已删除（否则后续复位用例无意义）')
+  }
+
+  // 正例四：尖括号通配形态 —— 读者看到的也是一个路径，不能因为含 `<>` 就对门禁隐形。
+  {
+    const r = probe(() => writeFileSync(readmePath,
+      `${readmeBefore}\n另有 \`references/publish-<生态>.md\`。\n`, 'utf8'))
+    check(r.ok, '正例：尖括号通配形态也被判（读者看它就是路径）',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(r.ok, '正例：尖括号通配')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 正例五：命名空间对、但文件在本包里也不存在 → 同样红，且措辞要说清是另一种错。
+  // 归属只看命名空间，不看文件在不在：`references/` 是本 skill 的布局，目标项目不会
+  // 自然长出来，所以「写错名字」不该比「写对名字」更容易过门。
+  {
+    writeFileSync(readmePath, `${readmeBefore}\n见 \`references/does-not-exist.md\`。\n`, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    const ok = r.status === 1 && /在两个项目里都找不到/.test(r.out)
+    check(ok, '正例：命名空间内的不存在路径也红，措辞区分「本包也没有」',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(ok, '正例：不存在的命名空间路径')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 反例一：目标项目自己的文件 → 不判。
+  // 这几份**本来就应该**出现在目标项目的模板里；判它们会让好的模板变红。
+  {
+    writeFileSync(readmePath,
+      `${readmeBefore}\n[English](README.en.md) | [贡献](CONTRIBUTING.md) | [许可](LICENSE)\n`, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    const ok = r.status === 0
+    check(ok, '反例：指向目标项目自有文件（README.en.md 等）→ 不判',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(ok, '反例：目标项目自有文件放行')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 反例二：目标项目自己的脚本名（本包**没有**这个文件）→ 不判。
+  // 不这样分，「同名不同物」就会天天误报，而误报的门禁会被当成坏了。
+  {
+    writeFileSync(readmePath, `${readmeBefore}\n跑 \`scripts/build.mjs\` 构建。\n`, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    const ok = r.status === 0
+    check(ok, '反例：本包没有的脚本名（目标项目自己的）→ 不判',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(ok, '反例：同名不同物放行')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 反例三：受管标记本身不是引用，不能因为带 `pf:` 就红。
+  {
+    writeFileSync(readmePath,
+      `${readmeBefore}\n<!-- project-forge:kernel:start -->\n<!-- pf:author: 测试 -->\n`, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    const ok = r.status === 0
+    check(ok, '反例：受管围栏标记（pf: / kernel:）→ 不判',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(ok, '反例：受管标记放行')
+    writeFileSync(readmePath, readmeBefore, 'utf8')
+  }
+
+  // 反例四：YAML 里在注释中提到本包路径也要红（它是落盘族的文件，注释同样会被读者看到）。
+  {
+    const ciPath = join(clone, 'templates', 'ci-check.yml')
+    const ciBefore = readFileSync(ciPath, 'utf8')
+    writeFileSync(ciPath, `# 判据见 references/remote-github.md 第八节。\n${ciBefore}`, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone)
+    const ok = r.status === 1 && /本 skill 自己的路径/.test(r.out)
+    check(ok, '正例：.yml 模板也要判（原先只扫 .md，8 处漏检就出在这里）',
+      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+    report(ok, '.yml 模板纳入判据')
+    writeFileSync(ciPath, ciBefore, 'utf8')
+  }
+
+  gitIn(clone, 'add', '-A')
+  const final = preflightIn(clone)
+  check(final.status === 0, '末尾：全部复位后应回到全绿',
+    final.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(final.status === 0, '末尾：复位后回绿')
+}
+
 // ── [49] 命令行用法：打错了必须说出来 ────────────────────────────────────────
 
 group('[49] 命令行用法：打错了必须说出来')
@@ -4370,9 +4515,25 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
   // ── 8) 工作流里对本 skill 脚本的调用：处置与文档里那一类不同 ──
   // 引用出现在机器会照着跑的配置里 → 那条调用会真的被执行，脚本没了就是坏了。
   // 所以它与「同名不同物」分开，并且计入 blocking。
+  //
+  // 这里**手工写一个带悬空调用的工作流**，而不是拿 `templates/ci-release.yml` 当夹具：
+  // 模板自己已经不含这种调用（模板就该落盘成能跑的东西，指向别人家的脚本是错的）。
+  // 拿模板当夹具曾让这条用例在模板改对之后变成空测——它测的其实是「模板有没有那个 bug」，
+  // 而不是「判据认不认得出这种情况」。
   const wfDir = fixture('handoff-workflow', {
-    '.github/workflows/release.yml': readFileSync(
-      join(SKILL_ROOT, 'templates', 'ci-release.yml'), 'utf8'),
+    '.github/workflows/release.yml': [
+      'name: release',
+      'on:',
+      '  push:',
+      "    tags: ['v*']",
+      'jobs:',
+      '  release:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - name: notes',
+      '        run: node scripts/release-notes.mjs "$TAG" notes.md',
+      '',
+    ].join('\n'),
   })
   const j8 = handoffJson(wfDir, '--scan')
   const w8 = (j8.groups?.dangling ?? []).filter((f) => f.kind === 'dangling-script-in-automation')
@@ -4382,8 +4543,25 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
     `命中 ${w8.length} 条`)
   report(wfOk, '工作流里的脚本调用：单独一类')
   // 落盘的模板顶部注释块里有本 skill 的名字——验收的总判据是「全项目搜名字零命中」，
-  // 而机器原来看不见它。
-  const nameHit = pick(j8.groups?.markers, '.github/workflows/release.yml', 'skill-name-in-comment')
+  // 而机器原来看不见它。同样用**自造的**夹具，不拿真模板当输入：真模板哪天改成
+  // 不含名字，这条用例就会静默失去对象，而它要守的是判据本身。
+  const nameDir = fixture('handoff-name-in-comment', {
+    '.github/workflows/release.yml': [
+      '# project-forge 发布自动化骨架：打标签即写发布说明。',
+      'name: release',
+      'on:',
+      '  push:',
+      "    tags: ['v*']",
+      'jobs:',
+      '  release:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: echo ok',
+      '',
+    ].join('\n'),
+  })
+  const jName = handoffJson(nameDir, '--scan')
+  const nameHit = pick(jName.groups?.markers, '.github/workflows/release.yml', 'skill-name-in-comment')
   const nameOk = nameHit !== undefined && nameHit.blocks === true
   check(nameOk, '落盘模板的注释块里出现本 skill 的名字 → 被检出',
     nameHit === undefined ? '没检出' : `第 ${nameHit.line} 行`)
@@ -4542,6 +4720,35 @@ group('[52] 结构守卫：依赖图无环、判据只有一份、临时文件�
     '临时文件按归属分三态：已死进程的清掉，活着的与使用者自己的留下并说得出原因',
     `removed=${cleared.removed.join('、') || '无'}；kept=${cleared.kept.map((k) => k.name).join('、') || '无'}`)
   report(tmpOk, '临时文件：三态分明')
+}
+
+// ── [53] 落盘模板自身：不能带着只有本 skill 才有的可执行调用 ───────────────────
+
+group('[53] 落盘模板自身不得含悬空调用：模板落进别的项目后要能真的跑起来')
+{
+  // [48b] 判的是「模板里不许有本 skill 的路径」。这一组补另一半：**可执行上下文**。
+  // 一个模板即使路径写法正确，只要 `run:` 下调用了一本项目没有的脚本，落盘后就是
+  // 发版当天才红的那种失败——而它比读不到更贵。
+  const ciRelease = join(SKILL_ROOT, 'templates', 'ci-release.yml')
+  const text = readFileSync(ciRelease, 'utf8')
+
+  // 逐行找出所有非注释的 `node <路径>` 调用。注释里的说明可以提，`run:` 下真的会被执行。
+  const executableCalls = text.split('\n')
+    .map((line, i) => ({ line, no: i + 1 }))
+    .filter(({ line }) => /^\s*node\s+\S+/.test(line))
+    .filter(({ line }) => !/^\s*#/.test(line))
+
+  const ok = executableCalls.length === 0
+  check(ok, 'templates/ci-release.yml 里没有可直接执行的 node 调用（都要先换成项目自己的实现）',
+    executableCalls.map(({ line, no }) => `L${no}: ${line.trim()}`).join(' | '))
+  report(ok, '落盘模板：无可执行的本 skill 调用')
+
+  // 反向：占位必须留下来，否则落盘的人会以为那一段已经写好了。
+  const hasPlaceholder = /<[^<>\n]{2,60}>/.test(text.split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n'))
+  check(hasPlaceholder, '落盘前后要替换的位置仍留着显式占位（不能看起来像已经写好）')
+  report(hasPlaceholder, '落盘模板：占位仍在')
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

@@ -306,7 +306,12 @@ function main(argv) {
     if (!id.name || !id.email) {
       missing.push('提交署名缺失（只写仓库级，见版本管理署名审计清单）')
     } else {
-      ok.push(`提交署名有（${id.name}，${id.scope === 'repo' ? '仓库级' : '继承全局'}；占位值须人眼确认）`)
+      // 层级有三档：local / global / system。只报「仓库级 / 继承全局」会让 system 层的
+      // 来源看起来像「哪里都没设」——而全局工具的安装器恰恰常写在那里。
+      const scopeLabel = id.scope === 'local' || id.scope === 'repo' ? '仓库级'
+        : id.scope === 'unset' ? '来源未知'
+          : `继承自 ${id.scope}`
+      ok.push(`提交署名有（${id.name}，${scopeLabel}；占位值须人眼确认）`)
     }
   }
 
@@ -314,6 +319,30 @@ function main(argv) {
   if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
     && git.upstream === undefined && git.isRepoRoot !== false) {
     pending.push('上游跟踪未设置：首推用显式分支并设跟踪（改文件消不掉，推一次即有）')
+  }
+
+  // 2b-1. 推送认证：**有远端地址不等于能推上去**，这是两条独立的事实。
+  //
+  // 判据直接读勘察产出的 `git.auth`，不在这里重新推断——两处各推一次，迟早给出两种答案。
+  // 三档的落点各不相同，尤其是 `undetermined`：把「没问出来」报成「缺失」，正是那次
+  // 「明明有凭据却说没有」的机器版本，会让用户去做一件完全没必要做的事。
+  if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
+    && git.isRepoRoot !== false) {
+    const auth = git.auth ?? {}
+    if (auth.https === 'available') {
+      ok.push(`推送认证可用（凭据助手 ${auth.helper ?? '未声明'}，${auth.helperScope ?? '层级未知'}）`)
+    } else if (auth.https === 'no-credential') {
+      missing.push('推送认证取不到凭据：配好之后重跑（这是唯一需要用户动手的一档）'
+        + (auth.httpsReason !== undefined ? `：${auth.httpsReason}` : ''))
+    } else if (auth.https !== 'n/a') {
+      pending.push('推送认证未确认：不要据此断言「没有凭据」，先看勘察报告里凭据助手所在的层级'
+        + (auth.httpsReason !== undefined ? `（${auth.httpsReason}）` : ''))
+    }
+    // 网络不可达时单独说，因为此时凭据状态本来就不可知——两件事混在一起会导向错误的处置。
+    if (auth.network === 'unreachable') {
+      pending.push(`远端当前不可达（${auth.networkReason ?? '原因未识别'}）：`
+        + '先解决网络，此时不要碰凭据——网络不通时凭据状态不可知')
+    }
   }
 
   // 2b-2. 「P5 之后强制回跑 P4」这条规则需要一个机器落点：没有它，有远端却与发布无关的

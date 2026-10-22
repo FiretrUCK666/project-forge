@@ -257,6 +257,26 @@ function run(cmd, args, cwd) {
 }
 
 /**
+ * 一次问 git 一件事的通用入口：**多数取值都不止需要一个字段**。
+ *
+ * 与 `run` 的区别只有一条：它把「命令失败」与「输出为空」分开传出来。
+ * 版本控制状态要分三态（有 / 没有 / 没问出来），而 `run` 把失败折叠成
+ * `undefined`、把空输出折叠成 `''`，两者在下游没法区分。这里统一成对象。
+ *
+ * 不抛异常、不重试：调用方要的是「问到了什么」，不是「命令成功了吗」。
+ */
+function runCapture(args, cwd) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: GIT_MAX_BUFFER })
+  const failed = r.error !== undefined || r.status !== 0
+  return {
+    ok: !failed,
+    status: r.status ?? -1,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+  }
+}
+
+/**
  * 与 run 相同，但关掉 git 对非 ASCII 路径的引号转义。
  *
  * git 默认把含非 ASCII 的路径输出成 `"\344\270\255..."` 这种带引号的八进制转义形式。
@@ -2345,21 +2365,28 @@ function detectDocs(root, root_) {
   return docs
 }
 
-/**
- * 版本标签，按**创建时间倒序**。取不到返回 undefined——那是「没问出来」，
- * 消费方要能与「一个标签都没有」区分。
- */
-function readTags(root) {
-  const out = run('git', ['tag', '--list', '--sort=-creatordate'], root)
-  return out === undefined ? undefined : out.split('\n').filter(Boolean)
-}
-
 function detectGit(root) {
   const version = run('git', ['--version'], root)
   if (version === undefined) return { available: false }
-  const inside = run('git', ['rev-parse', '--is-inside-work-tree'], root)
-  const present = inside === 'true'
+
+  // **一次取回一批事实**，而不是每个字段各起一个子进程。
+  //
+  // 实测（Windows，单次 git 约 32 ms）：改动前这个函数要起 19 个子进程，
+  // 占一次勘察总耗时的 56%；CPU 剖面里子进程占了 96%，JS 自己的逻辑只有 4%。
+  // 也就是说那些时间**一点覆盖率都没买到**——问的是同一批信息，只是分成了很多次问。
+  //
+  // 这里的合并全部是**同一份数据的另一种取法**，不减少任何一项信息：
+  //   - `status --porcelain=v2 --branch` 同时给出分支、上游跟踪、领先/落后、脏文件数
+  //     （原先 branch / status / rev-parse @{u} 三次）；
+  //   - `config --list --show-scope --show-origin` 一次给出全部配置及其层级
+  //     （原先 user.name / user.email / --local / --global×2 / init.defaultBranch 六次）；
+  //   - `for-each-ref` 给标签（原一次）；
+  //   - `rev-parse` 一次给出「在不在工作区」与「工作区根在哪」（原先两次，且两处各问一次）。
+  const insideR = runCapture(['rev-parse', '--is-inside-work-tree', '--show-toplevel'], root)
+  const lines0 = insideR.ok ? insideR.stdout.split('\n').map((s) => s.trim()) : []
+  const present = lines0[0] === 'true'
   if (!present) return { available: true, present: false, version }
+  const toplevel = lines0[1]
 
   // 关键区分：**这个目录本身是仓库根，还是只是处在别人的仓库里**。
   //
@@ -2367,18 +2394,85 @@ function detectGit(root) {
   // 查询会如实返回**外层仓库**的远端、分支与提交数。照单全收就会得出「已有远端，只补
   // 缺即可」的结论，然后把改动提交进、甚至推送到一个完全不相干的仓库——这是本 skill
   // 能造成的破坏里最严重的一种。
-  const toplevel = run('git', ['rev-parse', '--show-toplevel'], root)
-  const isRepoRoot = toplevel !== undefined && samePath(toplevel, root)
-  // 远端列名取一次就够：历史字段 `remotes` 与下面那份全地址表共用同一次查询。
+  const isRepoRoot = toplevel !== undefined && toplevel !== '' && samePath(toplevel, root)
+
+  // ── 配置：一次取全，按层级解析 ─────────────────────────────────────────────
+  //
+  // 层级必须是**三层**（system / global / local）。之前的心智模型只有
+  // 「仓库级 / 继承」两层，于是「~/.gitconfig 不存在」被读成「没有任何配置」——
+  // 而全局工具的安装器常把配置写在 system 层（实测：Git Credential Manager 就写在那里，
+  // 凭据助手 `manager` 只在 system 层可见）。那个两层的模型是错误结论的来源。
+  const cfgR = runCapture(['config', '--list', '--show-scope', '--show-origin'], root)
+  const cfg = { byScope: { system: {}, global: {}, local: {} }, keys: new Set() }
+  if (cfgR.ok) {
+    for (const raw of cfgR.stdout.split('\n')) {
+      const line = raw.trim()
+      if (line === '') continue
+      // 形如 `local\tfile:.git/config\tuser.name=值`；值里可能有 `=`，只切前两个制表符。
+      const parts = line.split('\t')
+      if (parts.length < 3) continue
+      const scope = parts[0]
+      const body = parts.slice(2).join('\t')
+      const eq = body.indexOf('=')
+      if (eq < 0) continue
+      const key = body.slice(0, eq).trim()
+      const value = body.slice(eq + 1)
+      cfg.keys.add(key)
+      if (cfg.byScope[scope] !== undefined) cfg.byScope[scope][key] = value
+    }
+  }
+  const cfgGet = (key) => {
+    // local 优先于 global，global 优先于 system —— 与 git 自己的取值顺序一致。
+    for (const scope of ['local', 'global', 'system']) {
+      const v = cfg.byScope[scope]?.[key]
+      if (v !== undefined) return v
+    }
+    return undefined
+  }
+  const cfgScope = (key) => {
+    for (const scope of ['local', 'global', 'system']) {
+      if (cfg.byScope[scope]?.[key] !== undefined) return scope
+    }
+    return undefined
+  }
+
+  // ── 分支与工作区状态：一次取全 ─────────────────────────────────────────────
+  const stR = runCapture(['status', '--porcelain=v2', '--branch'], root)
+  const branchInfo = { branch: undefined, upstream: undefined, ahead: 0, behind: 0 }
+  let dirty
+  if (stR.ok) {
+    const rows = stR.stdout.split('\n').filter((l) => l !== '')
+    dirty = rows.filter((l) => !l.startsWith('#')).length
+    for (const l of rows) {
+      if (!l.startsWith('#')) continue
+      const m = /^# branch\.(head|upstream|ab)\s+(.*)$/.exec(l)
+      if (m === null) continue
+      if (m[1] === 'head') branchInfo.branch = m[2].trim()
+      else if (m[1] === 'upstream') branchInfo.upstream = m[2].trim()
+      else {
+        const ab = /\+(\d+)\s+-(\d+)/.exec(m[2])
+        if (ab !== null) { branchInfo.ahead = Number(ab[1]); branchInfo.behind = Number(ab[2]) }
+      }
+    }
+  }
+
   const remotes = (run('git', ['remote'], root) ?? '').split('\n').filter(Boolean)
+
+  // ── 标签：一次取全（按创建时间倒序）────────────────────────────────────────
+  //
+  // 按**创建时间倒序**，不是 git 默认的 ref 名字典序。字典序会把 `v0.10.0` 排在
+  // `v0.9.0` 前面，取「最后几个」拿到的是最旧的那批——而这个列表正是用来判断
+  // 「当前版本有没有打标签」和「拿哪几个标签去对齐」的。
+  const tagsR = runCapture(['for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags'], root)
+  const tags = tagsR.ok ? tagsR.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : undefined
 
   const info = {
     available: true,
     present: true,
     isRepoRoot,
     workTreeRoot: toplevel,
-    version: run('git', ['--version'], root),
-    branch: run('git', ['branch', '--show-current'], root),
+    version,
+    branch: branchInfo.branch ?? (run('git', ['branch', '--show-current'], root) ?? undefined),
     remote: run('git', ['remote', 'get-url', 'origin'], root),
     remotes,
     // 远端全地址：只存名列表会在 fork 比对时无米之炊。取不到就标缺失，不编造。
@@ -2388,16 +2482,19 @@ function detectGit(root) {
       return out
     })(),
     identity: {
-      name: run('git', ['config', 'user.name'], root),
-      email: run('git', ['config', 'user.email'], root),
-      scope: run('git', ['config', '--local', 'user.name'], root) !== undefined ? 'repo' : 'inherit',
-      globalName: run('git', ['config', '--global', 'user.name'], root),
-      globalEmail: run('git', ['config', '--global', 'user.email'], root),
+      name: cfgGet('user.name'),
+      email: cfgGet('user.email'),
+      // 三档，不是两档：配置可以来自 system / global / local 任一层。
+      // 只分「仓库级 / 继承」会让「没有 ~/.gitconfig」看起来等于「没有任何配置」。
+      scope: cfgScope('user.name') ?? 'unset',
+      identityScope: cfgScope('user.name'),
+      globalName: cfg.byScope.global['user.name'],
+      globalEmail: cfg.byScope.global['user.email'],
+      // 凭据助手所在的层级与取值：本机经验证落在 system 层，两层模型看不见它。
+      credentialHelper: cfg.byScope.system['credential.helper'] ?? cfg.byScope.global['credential.helper'],
+      credentialHelperScope: cfgScope('credential.helper'),
     },
-    // 标签按**创建时间倒序**，不是 git 默认的 ref 名字典序。字典序会把 `v0.10.0` 排在
-    // `v0.9.0` 前面，取「最后几个」拿到的是最旧的那批——而这个列表正是用来判断
-    // 「当前版本有没有打标签」和「拿哪几个标签去对齐」的。
-    tags: readTags(root),
+    tags,
     // 历史署名去重前 20：换过人或换过机器时一眼看出混杂，不再靠人工 git log。
     historyAuthors: (() => {
       const out = run('git', ['log', '--format=%an <%ae>', '--no-merges', '-n', '200'], root)
@@ -2405,18 +2502,24 @@ function detectGit(root) {
       return [...new Set(out.split('\n').filter(Boolean))].slice(0, 20)
     })(),
   }
-  const status = run('git', ['status', '--porcelain'], root)
-  info.dirty = status === undefined ? undefined : status.split('\n').filter(Boolean).length
+  info.dirty = dirty
+  info.ahead = branchInfo.ahead
+  info.behind = branchInfo.behind
+
+  // **读不到与 0 是两件事**。`rev-list` 在没有提交、游离 HEAD、仓库损坏时都会失败；
+  // 折叠成 0 会让上游把「一个已有历史的仓库」当成全新仓库，走向「首次提交」那条分支。
+  // 同函数的 `dirty` 一直保留着 undefined，这里跟上它。
   const count = run('git', ['rev-list', '--count', 'HEAD'], root)
-  info.commits = count === undefined ? 0 : Number(count)
+  info.commits = count === undefined ? undefined : Number(count)
+  info.commitsState = count === undefined ? 'unreadable' : 'ok'
+
   const tracked = runGitPaths(['ls-files', '-z'], root)
   info.trackedFiles = tracked === undefined ? undefined : tracked.length
-  const upstream = run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], root)
-  info.upstream = upstream
+  info.upstream = branchInfo.upstream
   info.head = run('git', ['rev-parse', 'HEAD'], root)
   // 初始化新仓库前需要知道默认分支会叫什么。平台默认分支名不一致（有的 main、有的
   // master），而这件事由本地配置决定——提前读出来，免得建出来的分支名与用户预期不符。
-  info.initDefaultBranch = run('git', ['config', '--get', 'init.defaultBranch'], root)
+  info.initDefaultBranch = cfgGet('init.defaultBranch')
     ?? '(未配置，取决于 git 版本与平台默认)'
 
   // 不是仓库根时，上面这些值都属于外层仓库，对判定没有意义。明确标注，并给出正确的
@@ -2426,7 +2529,123 @@ function detectGit(root) {
       + '都属于那个外层仓库，不代表本目录的状态。给本目录建库前必须先与用户确认边界'
       + '（是并入外层仓库，还是在本目录单独建库）；在确认之前不要提交、也不要推送。'
   }
+  info.auth = detectAuth(info, cfg)
   return info
+}
+
+/**
+ * 推送认证的现状：**「能不能推代码」是一条独立的事实，不是从工具装没装推出来的。**
+ *
+ * 这条判据解决的是一个真实误判：`~/.gitconfig` 不存在、`gh` 没装，被读成了「本机没有
+ * 凭据」，于是让用户去做一件完全没必要做的事——而实际上凭据助手在 system 层，
+ * 推送一直是通的。
+ *
+ * **判据用 git 自己的协议，不翻译一遍**：`git credential fill` 问的是「这条远端能不能
+ * 拿到凭据」，退出码就是答案。这与本仓库已经用了两次的做法同源（用导出清单判包内容、
+ * 用忽略检查判忽略），不是新机制。
+ *
+ * 三条红线：
+ *   - 只判「有没有」，**绝不读取密码的值**，长度也不外传；
+ *   - 必须屏蔽交互与超时，否则无人值守时会挂死等人输入；
+ *   - 判不出来就是 `undetermined`，**不许读成 `no-credential`**。
+ */
+function detectAuth(info, cfg) {
+  const out = {
+    // 凭据助手所在的层级与取值：两层模型（仓库级/继承）看不见 system 层，而那正是常见落点。
+    helper: info.identity.credentialHelper,
+    helperScope: info.identity.credentialHelperScope,
+    https: 'undetermined',
+    httpsReason: undefined,
+    network: 'undetermined',
+    networkReason: undefined,
+  }
+
+  const remote = info.remote
+  if (typeof remote !== 'string' || remote === '') {
+    out.https = 'n/a'
+    out.httpsReason = '没有远端地址，谈不上推送认证'
+    out.network = 'n/a'
+    return out
+  }
+  // SSH 远端不走凭据助手这条路：它的认证是密钥 + agent，`credential fill` 对它无意义。
+  if (!/^https?:\/\//i.test(remote)) {
+    out.https = 'undetermined'
+    out.httpsReason = '远端不是 HTTPS 形式（SSH 一类），推送认证由密钥与 agent 决定，'
+      + '这条协议判不出来——不要据此断言「没有凭据」'
+    return out
+  }
+
+  // ── HTTPS：问凭据助手要一次，只看退出码 ────────────────────────────────────
+  //
+  // 屏蔽交互是硬要求：没有凭据时 `credential fill` 会提示输入密码，无人值守时挂死。
+  // `GCM_INTERACTIVE=never` 关掉凭据管理器自己的弹窗与 provider 探测。
+  let host = ''
+  try { host = new URL(remote).host } catch { host = '' }
+  if (host === '') {
+    out.httpsReason = '远端地址解析不出主机名'
+  } else {
+    const r = spawnSync('git', ['credential', 'fill'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+      input: `protocol=https\nhost=${host}\n\n`,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GCM_INTERACTIVE: 'never',
+        GIT_ASKPASS: '',
+        SSH_ASKPASS: '',
+      },
+    })
+    if (r.error !== undefined) {
+      out.httpsReason = `凭据助手没跑起来：${r.error.code ?? r.error.message}`
+    } else if (r.status === 0) {
+      // 成功即「拿得到凭据」。**不解析值**：这里只需要知道「有没有」。
+      out.https = 'available'
+      out.httpsReason = `凭据助手（${out.helper ?? '未声明'}）为 ${host} 返回了凭据`
+    } else {
+      // 非零退出说明这次没拿到，但「没拿到」不等于「机器上没有凭据」：
+      // 也许助手本身不可用、也许超时。原因写进 reason，状态留给上层判。
+      out.https = 'no-credential'
+      const tail = String(r.stderr ?? '').split('\n').filter(Boolean).slice(-2).join('；')
+      out.httpsReason = tail === '' ? `凭据助手以退出码 ${r.status} 结束` : tail
+    }
+  }
+
+  // ── 网络可达性：一次只读的 ls-remote ──────────────────────────────────────
+  //
+  // `ls-remote` 不推不拉不改远端，是纯读操作。失败时只**提取可分类的那一段**，
+  // 不做终局判定：这些文本会随平台与语言环境变，只应当作佐证，不能当作唯一依据。
+  const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 20000,
+    maxBuffer: 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+  })
+  if (netR.error !== undefined) {
+    out.networkReason = `探测没跑起来：${netR.error.code ?? netR.error.message}`
+  } else if (netR.status === 0) {
+    out.network = 'reachable'
+  } else {
+    out.network = 'unreachable'
+    const err = String(netR.stderr ?? '')
+    const signals = [
+      [/Could not resolve host/i, 'DNS 解析失败'],
+      [/Failed to connect to/i, '连接不上（防火墙/代理/端口）'],
+      [/Repository not found|not found/i, '远端不存在，或凭据对私有仓库不可见'],
+      [/Authentication failed|Bad credentials|Invalid username or token/i, '认证被拒'],
+      [/terminal prompts disabled|could not read Username/i, '非交互环境取不到凭据'],
+      [/timed out|Timeout/i, '超时'],
+    ]
+    const hit = signals.find(([re]) => re.test(err))
+    out.networkReason = hit !== undefined ? hit[1] : '未识别的失败（见 stderr）'
+  }
+
+  return out
 }
 
 function detectIgnores(root, root_, outputDirCandidates) {
@@ -2700,11 +2919,32 @@ function toMarkdown(s) {
     if (s.git.identity.globalEmail !== undefined) {
       L.push(`- 全局署名邮箱：${s.git.identity.globalEmail}（与仓库级不一致时以仓库级为准）`)
     }
+    // 推送认证单独成行，**与「远端地址有没有」分开说**：有地址不等于能推上去，
+    // 这两件事最常见的组合就是「能推但建不了新的」或反过来。
+    const auth = s.git.auth
+    if (auth !== undefined) {
+      const label = auth.https === 'available' ? '**可用**（直接推，不要要求用户配置凭据）'
+        : auth.https === 'no-credential' ? '**取不到凭据**（才需要提示用户配置）'
+          : auth.https === 'n/a' ? '不适用'
+            : '**未确认**（不等于没有凭据，不要据此让用户重新登录）'
+      L.push(`- 推送认证（HTTPS）：${label}`)
+      if (auth.helper !== undefined) {
+        L.push(`  - 凭据助手：${auth.helper}（${auth.helperScope ?? '层级未知'}）`
+          + '——注意它可能在 system 层，`~/.gitconfig` 不存在不代表没有配置')
+      }
+      if (auth.httpsReason !== undefined) L.push(`  - 依据：${auth.httpsReason}`)
+      if (auth.network === 'unreachable') {
+        L.push(`- 远端可达性：**不可达**（${auth.networkReason ?? '原因未识别'}）`
+          + '——网络不通时不要去查凭据，那是两件事')
+      } else if (auth.network === 'undetermined' && auth.networkReason !== undefined) {
+        L.push(`- 远端可达性：未确认（${auth.networkReason}）`)
+      }
+    }
     if (Array.isArray(s.git.historyAuthors) && s.git.historyAuthors.length > 1) {
       L.push(`- 历史署名 ${s.git.historyAuthors.length} 种：${s.git.historyAuthors.join('；')}`)
     }
     if (Array.isArray(s.git.tags) && s.git.tags.length > 0) {
-      // 列表头就是最近的（readTags 按创建时间倒序），所以取前几个。
+      // 列表头就是最近的（标签按创建时间倒序取的），所以取前几个。
       const shown = s.git.tags.slice(0, 5)
       L.push(`- 已有版本标签 ${s.git.tags.length} 个（由近及远）：${shown.join('、')}`
         + (s.git.tags.length > shown.length ? '（仅列最近 5 个）' : ''))

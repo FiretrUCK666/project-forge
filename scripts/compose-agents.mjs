@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey, isMainModule,
   readTextFile, fencedSpans, markerPositions,
-  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, INSTRUCTION_BUDGET } from './survey.mjs'
+  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
 // 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
 // 使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取，不再自己写一遍。
 import { clearStaleTemps, tempPathFor, reportTemps } from './sync-toc.mjs'
@@ -722,19 +722,35 @@ function refreshFromTemplate(target, existing, kernel, state) {
   // 一旦文件已经存在，作者摆放它的方式就是权威。
   const merged = []
   for (const section of old.sections) {
+    const body = section.lines.join('\n')
     const freshSection = freshByHeading.get(section.heading)
+
+    // 判据的**第一优先**是「这段字节是谁写的」，不是「标题在不在模板里」。
+    //
+    // `pf:keep` 由 `--upgrade` 打在它保留下来的每一节上，含义是「这些内容归使用者」。
+    // 它优先于下面所有判据：即使模板里有同名节、即使模板那一节不带 pf:author，也不覆盖。
+    //
+    // 没有这一条时，用户手写的「版本管理（必守）」「构建与验证」这类**人人都会这么起名**
+    // 的节，在升级后的强制刷新里会被整节替换——实测一句「发版由 release manager 手工
+    // 执行」就是这样消失的，而且事后没有任何痕迹。
+    if (body.includes(KEEP)) {
+      kept.push(section.heading)
+      merged.push({ text: body, fresh: false })
+      continue
+    }
+
     if (freshSection === undefined) {
       // 模板里已经没有这个标题：原样保留。可能是作者自己加的，也可能是作者刻意换了一种
       // 组织方式（本 skill 自己的「版本管理流程」就是如此）。脚本不删。
       kept.push(section.heading)
-      merged.push({ text: section.lines.join('\n'), fresh: false })
+      merged.push({ text: body, fresh: false })
       continue
     }
     const freshText = freshSection.lines.join('\n')
     if (findAuthors(freshText).length > 0) {
       // 模板说这一节要人来写：保留既有内容，别把人写的冲掉
       kept.push(section.heading)
-      merged.push({ text: section.lines.join('\n'), fresh: false })
+      merged.push({ text: body, fresh: false })
     } else {
       // 纯生成内容：用新求值的结果，让条件段落能随事实增删。
       //
@@ -742,7 +758,10 @@ function refreshFromTemplate(target, existing, kernel, state) {
       // 变的是**告知**：这一节里现有的、模板重新求值后不再有的那些行，本次会被替换掉。
       // 不说的话，报告只说「按当前项目事实重新求值」，读的人以为只有条件段落在动，
       // 而他自己在这一节里补的说明已经没了。
-      refreshed.push({ heading: section.heading, extra: extraLines(section.lines.join('\n'), freshText) })
+      //
+      // 报告里把那几行**原文打出来**，不只给个数：只给数量时，读的人无法判断被换掉的
+      // 是不是要紧的东西，也就无从拦截。
+      refreshed.push({ heading: section.heading, extra: extraLines(body, freshText) })
       merged.push({ text: freshText, fresh: true })
     }
   }
@@ -880,7 +899,57 @@ function upgradeHandwritten(existing, kernel, target) {
 
   let text = collapseJoined(parts, '\n\n')
   if (!text.endsWith(eol)) text += eol
+  // 3) 给保留下来的每一节打上「内容归使用者」的标记。
+  //
+  // 这一步是这次升级**唯一对原有内容做的事**，而它不改动任何一个字节的正文——只在节
+  // 标题下面插一行注释。没有它，下一次刷新会按「节标题在模板里」把撞名的节整节替换，
+  // 而那次刷新是流程里标着「强制」的一步：使用者的句子就这样静默消失，事后没有任何
+  // 痕迹能说明它去哪了。
+  //
+  // 打了标记之后，判据变成「这段字节是谁写的」，与标题叫什么无关。
+  text = markKeptSections(text)
   return { text, added }
+}
+
+/**
+ * 给每一节打上 `pf:keep`，**跳过内核区**（那段由内核模板独占）。
+ *
+ * 幂等：已经有标记的节不重复打。围栏代码块里的 `## ...` 不算节——它是示例，
+ * 在它前面插标记会破坏代码块。
+ */
+function markKeptSections(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let inKernel = false
+  let inFence = false
+  let fenceChar = ''
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.includes(KERNEL_START)) inKernel = true
+
+    const fm = /^\s*(`{3,}|~{3,})/.exec(line)
+    if (fm !== null) {
+      if (!inFence) { inFence = true; fenceChar = fm[1][0] } else if (fm[1][0] === fenceChar) { inFence = false; fenceChar = '' }
+      out.push(line)
+      if (line.includes(KERNEL_END)) inKernel = false
+      continue
+    }
+
+    out.push(line)
+    if (inKernel || inFence) {
+      if (line.includes(KERNEL_END)) inKernel = false
+      continue
+    }
+
+    // 二级标题：它下面那一行若已经是标记就不重复打。
+    if (/^##\s+\S/.test(line)) {
+      const next = lines[i + 1] ?? ''
+      if (next.trim() !== KEEP) out.push('', KEEP)
+    }
+    if (line.includes(KERNEL_END)) inKernel = false
+  }
+  return out.join('\n')
 }
 
 // ── 命令行 ──────────────────────────────────────────────────────────────────
@@ -1146,9 +1215,13 @@ function reportRefresh(report, stream) {
     for (const r of report.refreshed) {
       stream.write(`  - ${r.heading}\n`)
       if (r.extra.length > 0) {
-        stream.write(`      注意：这一节现有的内容里有 ${r.extra.length} 行不在模板重新求值的结果里`
-          + '（可能是你自己写的，也可能是上一轮的条件段落），本次会被替换掉。\n')
+        stream.write(`      注意：这一节现有的内容里有 ${r.extra.length} 行不在模板重新求值的结果里，`
+          + '本次会被替换掉。原文如下，确认是不是你要留的：\n')
+        for (const line of r.extra.slice(0, 12)) stream.write(`        | ${line}\n`)
+        if (r.extra.length > 12) stream.write(`        | …另有 ${r.extra.length - 12} 行\n`)
         stream.write('      要保留自己写的内容，把它挪到模板没有的二级标题下——那些节脚本原样保留。\n')
+        stream.write('      手写的整份文件可以先跑 --upgrade：它会给保留下来的每一节打上归使用者\n')
+        stream.write('      所有的标记，此后刷新不再动那些节（标记是 pf:keep）。\n')
       }
     }
   }

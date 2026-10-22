@@ -178,6 +178,48 @@ const UNFINISHED_RULE = {
  */
 const PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
 
+/**
+ * **本 skill 自己造的** `{{TOKEN}}` 取值名。
+ *
+ * 这一层是必需的，理由是一个实测出来的误伤：`{{ title }}`、`{{ page_title }}`、
+ * `{{ cardTitle }}` 这些是 Vue / Jinja / Handlebars / Go template 的**正常语法**，
+ * 与「模板没填完」形状完全一样。只看形状时，一个正常的 Vue 项目跑 `--verify` 会
+ * 退出 1 并被告知「填掉或删掉」——照着做就是删掉使用者模板里的变量名。
+ *
+ * 判据因此从「形状像不像」换成「**这个名字是不是我们的**」：只有本 skill 的模板真的
+ * 用过的取值名，才算未填完的占位符。名单由模板里实际出现的 `{{...}}` 反推，不手写，
+ * 所以模板新增取值时这里自动跟上，不会漂。
+ */
+const SKILL_TOKENS = (() => {
+  const out = new Set()
+  const walk = (sub) => {
+    let entries = []
+    try { entries = readdirSync(join(TEMPLATES_DIR, sub), { withFileTypes: true, encoding: 'utf8' }) } catch { return }
+    for (const e of entries) {
+      const rel = sub === '' ? e.name : `${sub}/${e.name}`
+      if (e.isDirectory()) { walk(rel); continue }
+      let text = ''
+      try { text = readFileSync(join(TEMPLATES_DIR, rel), 'utf8') } catch { continue }
+      for (const m of text.matchAll(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g)) out.add(m[1])
+    }
+  }
+  walk('')
+  return out
+})()
+
+/**
+ * 尖括号占位符：`<安装命令>`、`<清单声明的版本>`、`<owner>/<repo>` 这类。
+ *
+ * **必须限定形状**，不能裸判 `<`——HTML 标签、JSX、泛型 `Array<T>`、比较运算都在用它。
+ * 判据取「尖括号里是中文，或是一个明显的人话短语（含空格/以命令结尾的名词）」，并且
+ * 要求它出现在会被替换的位置上。
+ *
+ * 这一条补的是一个真实漏判：CI 模板用 `<安装命令>` 标未替换的位置，而旧判据只认
+ * `{{TOKEN}}`。于是把模板注释块删掉之后，`--verify` 报「已经是干净状态」，而工作流
+ * 里还是空壳——跑起来必红。
+ */
+const ANGLE_PLACEHOLDER_RE = /<([\u4e00-\u9fa5][^<>\n]{0,58}|[A-Za-z][A-Za-z0-9 _-]{2,58}(?:命令|版本|步骤|路径|名称|地址|名字))>/g
+
 // ── C 组：注入残留 ─────────────────────────────────────────────────────────
 
 /**
@@ -1006,14 +1048,31 @@ function scan(root, onlyFile) {
     }
 
     // ── B 组：未替换的占位符 ──
+    //
+    // 判据是「这个名字是不是本 skill 的」，不是「形状像不像占位符」。
+    // 只看形状会把 Vue / Jinja / Handlebars 的正常变量判成没填完，而照那个建议去做
+    // 就是删掉使用者模板里的变量名。
     PLACEHOLDER_RE.lastIndex = 0
     for (const hit of text.matchAll(PLACEHOLDER_RE)) {
+      const token = hit[1]
+      if (!SKILL_TOKENS.has(token)) continue
       placeholders.push({
         path: file.rel,
         line: lineOf(starts, hit.index),
         match: hit[0],
         kind: 'placeholder',
-        what: '模板没填完的占位符',
+        what: `模板没填完的占位符（${token} 是本 skill 模板里的取值名）`,
+        blocks: true,
+      })
+    }
+    for (const hit of text.matchAll(ANGLE_PLACEHOLDER_RE)) {
+      if (inFence(hit.index)) continue
+      placeholders.push({
+        path: file.rel,
+        line: lineOf(starts, hit.index),
+        match: hit[0],
+        kind: 'placeholder',
+        what: '模板没填完的占位符（尖括号里还是人话，没有换成实际值）',
         blocks: true,
       })
     }

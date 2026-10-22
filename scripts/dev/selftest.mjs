@@ -531,6 +531,63 @@ group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
   report(stable && /无需改动/.test(r.stdout), '幂等：再跑一次报「无需改动」')
 }
 
+// 这一组守的是「升级之后再刷新，用户写的东西不能消失」。
+//
+// 判据曾经是「节标题在不在模板里」——而节标题是人和模板都会用的公共词汇，
+// 「构建与验证」「版本管理」几乎人人这么起名。于是撞名时用户的正文被当成生成内容
+// 整节替换掉，而那次刷新是流程里标着「强制」的一步，事后没有任何痕迹。
+// 现在判据变成「这段字节是谁写的」：--upgrade 给保留下来的每一节打 pf:keep。
+group('[7b] 升级后刷新：用户手写的节一个字都不能丢')
+{
+  const dir = fixture('upgrade-keep', {
+    'package.json': '{"name":"keep-demo","version":"1.0.0","scripts":{"test":"echo ok"}}\n',
+    'AGENTS.md': [
+      '# 项目说明',
+      '',
+      '## 构建与验证',
+      '',
+      '我们用 Perforce 镜像，不走 git flow。这一行绝不能丢。',
+      '',
+      '## 版本管理（必守）',
+      '',
+      '发版由 release manager 手工执行，任何人不得自行打标签。',
+      '',
+    ].join('\n'),
+  })
+
+  compose(dir, '--upgrade')
+  const upgraded = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  check(/<!--\s*pf:keep\s*-->/.test(upgraded),
+    '升级时给保留下来的节打上归使用者所有的标记',
+    upgraded.split('\n').filter((l) => /^##|pf:keep/.test(l)).join(' | ').slice(0, 200))
+  report(/<!--\s*pf:keep\s*-->/.test(upgraded), '升级：打上 pf:keep')
+
+  // 内核区不能被打标记：那段归内核模板独占，刷新时本来就该换。
+  const kernelStart = upgraded.indexOf('project-forge:kernel:start')
+  const kernelEnd = upgraded.indexOf('project-forge:kernel:end')
+  const insideKernel = upgraded.slice(kernelStart, kernelEnd)
+  const noKeepInKernel = !insideKernel.includes('pf:keep')
+  check(noKeepInKernel, '内核区里不打 pf:keep（那段归内核独占，本就该换）')
+  report(noKeepInKernel, '升级：内核区不打标记')
+
+  // 关键断言：强制刷新之后，用户那两句话必须还在。
+  compose(dir)
+  const refreshed = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  const keepPerforce = refreshed.includes('Perforce')
+  const keepReleaseManager = refreshed.includes('release manager')
+  check(keepPerforce && keepReleaseManager,
+    '刷新后用户写的正文仍然在（这正是原先静默丢失的那两行）',
+    `Perforce=${keepPerforce} releaseManager=${keepReleaseManager}`)
+  report(keepPerforce && keepReleaseManager, '刷新：用户正文零丢失')
+
+  // 幂等：再刷一次不该继续变动。
+  const before = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  compose(dir)
+  const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  check(before === after, '打了标记之后刷新是幂等的')
+  report(before === after, '刷新：幂等')
+}
+
 group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
 {
   const dir = fixture('handwritten', {
@@ -4217,6 +4274,74 @@ group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，�
   check(final.status === 0, '末尾：全部复位后应回到全绿',
     final.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
   report(final.status === 0, '末尾：复位后回绿')
+}
+
+// 这一组守的是「占位符判据按归属而不是形状」。
+//
+// 只看形状时两头都错：`{{ title }}` 是 Vue/Jinja 的正常语法却被判成没填完（照着做
+// 就是删掉使用者的变量名），而 `<安装命令>` 这种真占位符反而看不见（工作流是空壳，
+// 却说「已经干净」）。判据改成「这个名字是不是本 skill 模板里的」之后，两头都对。
+group('[51b] 占位符判据：认自己家的取值名，不认别人的模板语法')
+{
+  const handoff = (dir, flag = '--verify') => spawnSync(process.execPath,
+    [join(SKILL_ROOT, 'scripts', 'handoff.mjs'), dir, flag],
+    { encoding: 'utf8', windowsHide: true })
+
+  // 反例一：Vue / Jinja / Handlebars 的变量名 —— 一个字都不该被判成占位符。
+  // 这是原先的误伤：一个正常前端项目跑 --verify 会退出 1 并被建议「填掉或删掉」。
+  const vue = fixture('ho-vue', {
+    'package.json': '{"name":"v","version":"1.0.0"}\n',
+    'src/App.vue': '<template>\n  <h1>{{ title }}</h1>\n  <p>{{ user_name }}</p>\n</template>\n',
+    'templates/card.hbs': '<div>{{ cardTitle }}</div>\n',
+    'templates/page.jinja': '<h1>{{ page_title }}</h1>\n',
+  })
+  const rVue = handoff(vue)
+  check(rVue.status === 0, '反例：Vue/Jinja/Handlebars 变量不判成未填占位符',
+    String(rVue.stdout ?? '').split('\n').filter((l) => /\{\{|待处理/.test(l)).join(' | ').slice(0, 220))
+  report(rVue.status === 0, '反例：别人的模板语法放行')
+
+  // 反例二：HTML 标签、TS 泛型、比较运算里的 `<` 不能被当成占位符。
+  const html = fixture('ho-html', {
+    'package.json': '{"name":"h","version":"1.0.0"}\n',
+    'index.html': '<div class="x"><span>hello</span><br/></div>\n',
+    'a.ts': 'const x: Array<string> = []; if (a < b) {}\n',
+  })
+  const rHtml = handoff(html)
+  check(rHtml.status === 0, '反例：HTML/JSX/泛型里的尖括号不判',
+    String(rHtml.stdout ?? '').split('\n').filter((l) => /待处理/.test(l)).join(' | ').slice(0, 220))
+  report(rHtml.status === 0, '反例：尖括号的普通用法放行')
+
+  // 正例：本 skill 模板真用过的取值名 → 必须判出来。
+  const real = fixture('ho-realtoken', {
+    'LICENSE': 'Copyright (c) {{YEAR}} {{HOLDER}}\n',
+  })
+  const rReal = handoff(real)
+  const caught = rReal.status === 1 && /YEAR|HOLDER/.test(String(rReal.stdout ?? ''))
+  check(caught, '正例：本 skill 模板的取值名（YEAR/HOLDER）必须被判出来',
+    String(rReal.stdout ?? '').split('\n').filter((l) => /待处理|占位/.test(l)).join(' | ').slice(0, 220))
+  report(caught, '正例：自家取值名被抓')
+
+  // 正例：CI 里没换掉的尖括号占位符 → 必须判出来。
+  // 这是原先的漏判：把模板注释块删掉后 --verify 报「已经干净」，而工作流是空壳。
+  const ci = fixture('ho-angle', {
+    'package.json': '{"name":"c","version":"1.0.0"}\n',
+    '.github/workflows/check.yml': [
+      'name: check',
+      'on:',
+      '  push:',
+      'jobs:',
+      '  check:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      "      - run: '<安装命令>'",
+      '',
+    ].join('\n'),
+  })
+  const rCi = handoff(ci)
+  const ciCaught = rCi.status === 1 && /安装命令/.test(String(rCi.stdout ?? ''))
+  check(ciCaught, '正例：尖括号占位符（安装命令）必须被判出来',
+    String(rCi.stdout ?? '').split('\n').filter((l) => /待处理|占位/.test(l)).join(' | ').slice(0, 220))
+  report(ciCaught, '正例：尖括号占位符被抓')
 }
 
 // ── [49] 命令行用法：打错了必须说出来 ────────────────────────────────────────

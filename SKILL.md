@@ -279,6 +279,7 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--budget N` 改预算） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
 | `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单、`--verify` 判是否已干净） |
+| `scripts/ledger.mjs` | 痕迹判定的账本：落盘时记下「我写了哪个字节区间、哈希是多少」，交棒时查它而不是猜形状 |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 写发布说明；「非 ASCII 正文不经 shell」那条规则的落地工具，含从提交记录起草 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步；临时文件的命名形状与归属判据也在这里 |

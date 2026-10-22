@@ -31,7 +31,7 @@ import {
 } from './preflight.mjs'
 import {
   isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, skillSource, needsSummary,
-  parseMarkerKeys, normVersion, repoPath, readFileMap,
+  parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap,
 } from '../survey.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../sync-toc.mjs'
@@ -3931,6 +3931,38 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
         '兜底来源归一成 owner/name 之后仍然认得出（发版门禁按这个形状比对）', repoPath(UPSTREAM))
     }
 
+    // 七之一、仓库身份比对：三值，不是布尔。
+    //
+    // 判据曾是 `repoPath(a) !== repoPath(b)`。两个都认不出时它是 `undefined !== undefined`
+    // = false，也就是「判为一致」——而「两个都认不出」正是最该停下的时候。
+    // `git@host:owner/name` 这种 git 最常见的克隆写法当时就归一不出来，于是 fork 比对
+    // 静默通过，用户包副本可能被指去别人的仓库而门禁一路绿。
+    {
+      const pairs = [
+        ['git@github.com:acme/plain.git', 'https://github.com/acme/plain'],
+        ['ssh://git@github.com/acme/x.git', 'git@github.com:acme/x'],
+        ['https://user:token@github.com/acme/y.git', 'https://github.com/acme/y.git'],
+      ]
+      for (const [a, b] of pairs) {
+        const rel = repoRelation(a, b)
+        check(rel === 'same', `同一仓库的不同写法判为 same：${a}`, `得到 ${rel}`)
+        report(rel === 'same', `身份归一：${a.slice(0, 26)}`)
+      }
+
+      const diff = repoRelation('https://github.com/acme/one', 'https://github.com/acme/two')
+      check(diff === 'different', '不同仓库判为 different（不是「看起来像就算了」）', `得到 ${diff}`)
+      report(diff === 'different', '身份归一：不同仓库')
+
+      // 本组重点：把「没法比」读成「比过且一致」是最坏的一种失效。
+      const unknown = repoRelation('not a url at all', 'also not one')
+      check(unknown === 'unknown', '两个都认不出时判 unknown —— 不许当成 same', `得到 ${unknown}`)
+      report(unknown === 'unknown', '身份归一：认不出报 unknown')
+
+      const half = repoRelation('https://github.com/acme/x', '???')
+      check(half === 'unknown', '只有一个认得出时也是 unknown', `得到 ${half}`)
+      report(half === 'unknown', '身份归一：单边认不出')
+    }
+
     // 七之二、问版本有两条路，按优先顺序排：认得出的托管平台先给接口路，认不出的只给
     //         网页路。**认不出就不猜**——给自建镜像硬拼一个接口地址，换来的是一句看起来
     //         像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
@@ -4482,6 +4514,24 @@ group('[50] 命令推导的四种空：每一种都要说得出「为什么空�
   report(canBeSilent, '前提：有命令时没有说明')
 }
 
+// 交棒勘察的调用封装：**文件级**，因为不止一个分组要用它。
+// 放在组内会让别的组引用不到，而那种错只在运行时炸出来（ReferenceError），
+// 前面已经通过的断言全都白跑——一次真实的教训。
+function handoff(dir, ...a) {
+  return spawnSync(process.execPath, [join(SCRIPTS_DIR, 'handoff.mjs'), dir, ...a], { encoding: 'utf8' })
+}
+
+function handoffJson(dir, ...a) {
+  const r = handoff(dir, '--json', ...a)
+  // 退出码 0 与 1 都是正常结果：0 = 干净，1 = 不干净。2 才是失败。
+  if (r.status !== 0 && r.status !== 1) return { error: (r.stderr ?? '').slice(0, 300) }
+  try {
+    return JSON.parse((r.stdout ?? '').replace(/^\uFEFF/, ''))
+  } catch (error) {
+    return { error: `输出不是合法 JSON：${error.message}` }
+  }
+}
+
 group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记不误伤')
 {
   const handoff = (dir, ...a) => spawnSync(process.execPath,
@@ -4814,6 +4864,71 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
   check(oneFileOk, '目标给成文件时，结论不是肯定句',
     (oneFile.stdout ?? '').split('\n').filter((l) => l.includes('结论')).join(' / '))
   report(oneFileOk, '只扫一部分：不肯定')
+}
+
+// 这一组守的是「痕迹判定从猜变成查」。
+//
+// 在此之前，判断「这段是不是本 skill 写的」靠形状——而形状必然两头都错：
+// Vue 的 `{{ title }}` 被误判（照做就是删使用者的代码），`<安装命令>` 被漏判
+// （空壳工作流报成干净）。账本把「来历」变成记录：落盘时写下字节哈希，此后只比对。
+group('[51c] 账本：痕迹判定查哈希，不再猜形状')
+{
+  const dir = fixture('ledger-basic', {
+    'package.json': '{"name":"led","version":"1.0.0"}\n',
+  })
+  compose(dir)
+
+  // 正例一：落盘之后账本必须存在，且记了内核区与受管节。
+  const ledgerFile = join(dir, '.project-forge', 'ledger.json')
+  check(existsSync(ledgerFile), '落盘后账本存在（此后判定有依据，不用猜）')
+  report(existsSync(ledgerFile), '账本：落盘即记账')
+
+  let led = {}
+  if (existsSync(ledgerFile)) led = JSON.parse(readFileSync(ledgerFile, 'utf8'))
+  const ids = Object.keys(led.segments?.['AGENTS.md'] ?? {})
+  check(ids.includes('kernel'), '内核区按字节区间单独记一条', ids.slice(0, 4).join('、'))
+  report(ids.includes('kernel'), '账本：内核区成段记')
+  check(ids.some((i) => i.startsWith('section:')), '受管节按节分别记（整份记会让使用者改一个字就全失效）')
+  report(ids.some((i) => i.startsWith('section:')), '账本：受管节分记')
+
+  // 正例二：handoff 用账本确认「这一段是我写的」。
+  const scanOut = handoffJson(dir, '--scan')
+  const mine = (scanOut.groups?.ledger ?? []).filter((f) => f.kind === 'ledger-mine')
+  check(mine.length > 0, '交棒时账本确认识别出自己的片段（这是「查」出来的，不是猜的）',
+    `ledger-mine ${mine.length} 条`)
+  report(mine.length > 0, '账本：确认自己的片段')
+
+  // 正例三：使用者改过的节必须报「改过」，不能报「是我的」——
+  // 报成「是我的」意味着撤除时会把使用者改过的内容一起删掉。
+  const agents = join(dir, 'AGENTS.md')
+  const edited = readFileSync(agents, 'utf8')
+    .replace(/## 硬性规范(\r?\n)/, '## 硬性规范$1\n使用者补充的一行。\n')
+  writeFileSync(agents, edited, 'utf8')
+  const editedScan = handoffJson(dir, '--scan')
+  const editedHits = (editedScan.groups?.ledger ?? []).filter((f) => f.kind === 'ledger-edited')
+  check(editedHits.length > 0, '使用者改过的节报「改过」（撤除时会停下来问人，不会删掉他的字）',
+    `ledger-edited ${editedHits.length} 条`)
+  report(editedHits.length > 0, '账本：改过的一节被判为改过')
+
+  // 正例四：使用者删掉的节报「不见了」，不能当成「没写过」重新插一遍。
+  const gone = edited.replace(/(?:\r?\n)## 文档同步[\s\S]*?(?=\r?\n## |$)/, '')
+  writeFileSync(agents, gone, 'utf8')
+  const goneScan = handoffJson(dir, '--scan')
+  const goneHits = (goneScan.groups?.ledger ?? []).filter((f) => f.kind === 'ledger-gone')
+  check(goneHits.length > 0, '使用者删掉的节报「不见了」（不自动补回去，否则他的删除被撤销）',
+    `ledger-gone ${goneHits.length} 条`)
+  report(goneHits.length > 0, '账本：删掉的节报不见了')
+
+  // 反例：完全没有账本的项目，不能因此误报。
+  // 账本缺失是正常状态（老项目、被清理过），此时只应退化成「什么都不认」。
+  const noLedger = fixture('ledger-absent', {
+    'package.json': '{"name":"nl","version":"1.0.0"}\n',
+    'AGENTS.md': '# 我自己写的\n\n## 构建与验证\n\n跑 make check。\n',
+  })
+  const nlScan = handoffJson(noLedger, '--scan')
+  const nlHits = nlScan.groups?.ledger ?? []
+  check(nlHits.length === 0, '反例：没有账本时不虚报任何账本结论', JSON.stringify(nlHits).slice(0, 120))
+  report(nlHits.length === 0, '反例：无账本不虚报')
 }
 
 // ── [52] 结构守卫：依赖图无环、判据只有一份、临时文件三态 ──────────────────────

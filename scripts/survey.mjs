@@ -672,20 +672,44 @@ export function skillSource(text) {
 }
 
 /**
- * 把仓库地址归一成 `owner/name`。认不出来时返回 undefined。
+ * 把仓库地址归一成 `owner/name`。
  *
- * 同一个仓库有好几种写法（完整网址、带 `.git`、`git@…`、检出时可能内嵌凭据的地址），
- * 比对要认得出它们是同一个，否则判据会在换一种检出方式时开始误报。两个读者共用它：
- * 发版门禁比对「声明的来源」与「这次发布的仓库」，更新脚本用它把来源变成可下载的地址。
+ * 同一个仓库有好几种写法（完整网址、带 `.git`、`git@host:owner/name` 这种 scp 写法、
+ * 检出时可能内嵌凭据的地址），比对要认得出它们是同一个，否则判据会在换一种检出方式时
+ * 开始误报。两个读者共用它：发版门禁比对「声明的来源」与「这次发布的仓库」，
+ * 更新脚本用它把来源变成可下载的地址。
+ *
+ * **认不出来时返回 undefined，而两个 undefined 相等。** 这是它唯一危险的用法：
+ * 拿它做等值比较却不管 undefined，就是「两个都认不出 → 判成一样 → 门禁放行」。
+ * 调用方因此必须写 `a !== undefined && a === b`，或者用 `repoRelation()`。
+ * 这一条在 scp 写法上真的发生过：`git@github.com:owner/repo` 剥不掉主机名，
+ * 返回 undefined，于是 fork 比对静默通过。
  */
 export function repoPath(value) {
   let s = String(value ?? '').trim().toLowerCase()
   if (s === '') return undefined
-  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')   // 协议头
-  s = s.replace(/^[^@/]*@/, '')                  // 内嵌凭据（检出时常见）
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')   // 协议头 https://
+  s = s.replace(/^[^@/]*@/, '')                  // 内嵌凭据或用户名（git@、user:token@）
+  // scp 写法 `host:owner/name`：主机名后面跟的是**冒号**，不是斜杠。
+  // 只认斜杠时这一整类都归一不出结果，而那正是 git 最常见的克隆写法之一。
+  s = s.replace(/^[^/:]+:/, '')
   s = s.replace(/^[^/]*\.[^/]*\//, '')           // 含点的主机名，例如 github.com/
   s = s.replace(/\.git$/, '').replace(/\/+$/, '')
   return /^[^/\s]+\/[^/\s]+$/.test(s) ? s : undefined
+}
+
+/**
+ * 两个仓库地址的关系：`same` / `different` / `unknown`。
+ *
+ * **存在的理由就是那个 `unknown`**：把「认不出」压进 undefined 之后，`a !== b` 在两个
+ * 都认不出时返回 false，于是门禁把「没法比」读成「比过且一致」——这正是最坏的一种失效，
+ * 因为它看起来是绿的。这个函数让「没法比」必须被显式处理，处理方式是报未核对，不是放行。
+ */
+export function repoRelation(a, b) {
+  const pa = repoPath(a)
+  const pb = repoPath(b)
+  if (pa === undefined || pb === undefined) return 'unknown'
+  return pa === pb ? 'same' : 'different'
 }
 
 /**

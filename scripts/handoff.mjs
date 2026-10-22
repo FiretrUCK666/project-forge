@@ -37,6 +37,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { readLedger, hasAnyRecord, segmentIds, provenance } from './ledger.mjs'
+
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
 import {
@@ -48,6 +50,32 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATES_DIR = join(SKILL_ROOT, 'templates')
+
+/** 账本里内核区的片段 id（与 compose-agents.mjs 同源，见那边的常量注释）。 */
+const LEDGER_KERNEL = 'kernel'
+const LEDGER_SECTION_PREFIX = 'section:'
+
+/**
+ * 把文本按二级标题切成「前言 + 各节」。
+ *
+ * 与 compose-agents 里那份语义一致：`heading` 存**整行**（含 `## ` 前缀）。两处要能
+ * 对得上同一个片段，所以格式必须逐字相同——账本按这个 key 记账、也按它查。
+ */
+function splitSections(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const sections = []
+  let current
+  for (const line of lines) {
+    if (/^##\s+\S/.test(line)) {
+      if (current !== undefined) sections.push(current)
+      current = { heading: line.trim(), lines: [line] }
+      continue
+    }
+    if (current !== undefined) current.lines.push(line)
+  }
+  if (current !== undefined) sections.push(current)
+  return sections
+}
 const SKILL_ENTRY = join(SKILL_ROOT, 'SKILL.md')
 
 /** 单文件超过这个字节数就不读：痕迹标记与占位符不会出现在几十兆的产物里，而读完很贵。 */
@@ -921,6 +949,13 @@ const GROUPS = [
       + 'kind=dangling-script-in-automation 查「对某个发布脚本的调用」那一行，'
       + 'kind=dangling-name-collision 是同名不同物，机器判不出，由人判读',
   },
+  {
+    key: 'ledger',
+    title: '[L] 账本判定（这一组是**查**出来的，不是猜出来的）',
+    pointer: 'kind=ledger-mine 是本 skill 写的，可以精确撤除；'
+      + 'kind=ledger-edited 是使用者改过的，**问人再动**；'
+      + 'kind=ledger-gone 是使用者删掉的，**不要自动补回去**',
+  },
 ]
 
 // ── 勘察 ───────────────────────────────────────────────────────────────────
@@ -939,6 +974,17 @@ function scan(root, onlyFile) {
   const stateDir = []
   const templateSimilar = []
   const dangling = []
+  // 账本判定的结论**单独成组**：它是唯一一组「查出来」而不是「猜出来」的。
+  // 其余各组都是从产物倒推来历，必然有假阳性与假阴性；这一组只有三态，没有猜测。
+  const ledgerHits = []
+
+  // ── L 组：账本 ──
+  //
+  // 有账本时，痕迹判定从「形状像不像」变成「哈希对不对」。这是这一段代码存在的全部理由：
+  // 形状判据没法同时避免误伤（Vue 的 `{{ title }}`）与漏判（`<安装命令>`），
+  // 因为它问的是「像不像」，而不是「是不是」。
+  const ledger = readLedger(root)
+  const ledgerHasAgents = hasAnyRecord(ledger, 'AGENTS.md')
 
   // ── E 组：状态目录 ──
   for (const dir of dirs) {
@@ -954,6 +1000,71 @@ function scan(root, onlyFile) {
   }
 
   for (const file of files) {
+    // ── L 组：账本判定 ──
+    //
+    // 有账本时先查账本：**账本的结论覆盖形状判据**。同一段字节，账本说「哈希对上，
+    // 是我写的」就是痕迹；说「哈希不对，使用者改过」就不是（该问人，不是该删）。
+    // 形状判据（A/B 两组）只在**该文件没有账本记录**时才作为线索使用——那是老项目，
+    // 账本还不存在，除了猜没有别的办法，但猜出来的结论要标明是猜的。
+    if (file.rel === 'AGENTS.md' && ledgerHasAgents) {
+      const text = readScannable(file.full, scanned)
+      if (text !== undefined) {
+        for (const id of segmentIds(ledger, 'AGENTS.md')) {
+          const isKernel = id === LEDGER_KERNEL
+          const heading = isKernel ? null : id.slice(LEDGER_SECTION_PREFIX.length)
+          const prov = provenance(ledger, {
+            file: 'AGENTS.md',
+            id,
+            existing: text,
+            extract: (whole) => {
+              if (isKernel) {
+                const a = whole.indexOf(KERNEL_START)
+                if (a < 0) return null
+                const b = whole.indexOf(KERNEL_END, a + KERNEL_START.length)
+                if (b < 0) return false
+                return whole.slice(a + KERNEL_START.length, b)
+              }
+              const sec = splitSections(whole).find((s) => s.heading === heading)
+              // 那一节已经不在了：使用者删掉或改了标题。这不是「我该重新插一遍」，
+              // 而是「他不要这一节了」——报出来让交棒的人知道。
+              return sec === undefined ? null : sec.lines.join('\n')
+            },
+          })
+          if (prov.state === 'mine') {
+            ledgerHits.push({
+              path: 'AGENTS.md',
+              line: null,
+              match: isKernel ? 'kernel' : heading,
+              kind: 'ledger-mine',
+              what: `账本确认这一段是本 skill 写的（${isKernel ? '内核区' : '受管节'}），可以精确撤除`,
+              blocks: true,
+            })
+          } else if (prov.state === 'edited') {
+            ledgerHits.push({
+              path: 'AGENTS.md',
+              line: null,
+              match: isKernel ? 'kernel' : heading,
+              kind: 'ledger-edited',
+              what: `账本有这一段，但内容已被改动过（${isKernel ? '内核区' : '受管节'}）`,
+              blocks: false,
+              suspect: true,
+            })
+          } else if (prov.state === 'gone') {
+            ledgerHits.push({
+              path: 'AGENTS.md',
+              line: null,
+              match: isKernel ? 'kernel' : heading,
+              kind: 'ledger-gone',
+              what: `账本记过这一段，但文件里已经找不到它（${isKernel ? '内核区' : '受管节'}）`
+                + '——是使用者删的，不要自动补回去',
+              blocks: false,
+              suspect: true,
+            })
+          }
+        }
+      }
+    }
+
     // ── C 组：按文件名认的残留 ──
     // 先判是不是本 skill 自己的写法：只有它才是确定痕迹，别的工具留下的同名形状
     // 归「疑似」，不计入干净判定（协议：不在清单里的东西不要顺手删）。
@@ -1202,9 +1313,10 @@ function scan(root, onlyFile) {
     templateSimilar,
     stateDir,
     dangling,
+    ledger: ledgerHits,
   }
   const all = [...markers, ...unfinished, ...placeholders, ...residue,
-    ...templateSimilar, ...stateDir, ...dangling]
+    ...templateSimilar, ...stateDir, ...dangling, ...ledgerHits]
   const findings = all.length
   // 干净与否看**挡着验收的那些**（blocks 为真的）：相似那一组不挡，疑似且不挡的那些
   // 也不挡——它们是「机器判不准、请人判读」，把它们算成不干净，用户唯一的出路就是

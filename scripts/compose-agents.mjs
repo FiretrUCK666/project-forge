@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url'
 import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey, isMainModule,
   readTextFile, fencedSpans, markerPositions,
   KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
+import { readLedger, writeLedger, recordSegment, forgetSegment } from './ledger.mjs'
 // 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
 // 使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取，不再自己写一遍。
 import { clearStaleTemps, tempPathFor, reportTemps } from './sync-toc.mjs'
@@ -962,6 +963,56 @@ function markKeptSections(text, headings) {
 
 // ── 命令行 ──────────────────────────────────────────────────────────────────
 
+/** 账本里内核区的片段 id。 */
+const LEDGER_KERNEL = 'kernel'
+/** 账本里受管节的片段 id 前缀，后面接节标题。 */
+const LEDGER_SECTION_PREFIX = 'section:'
+
+/**
+ * 把刚写下去的 AGENTS.md 记进账本：内核区一段，每个受管节各一段。
+ *
+ * **为什么按节记而不是整份记**：整份文件里混着使用者的正文，整份哈希一旦变化就什么都
+ * 不认了——而使用者在正文里改一个字是常态。按节记之后，「他改了他的节」不影响「我的节
+ * 仍然归我」，撤除才能只撤我写的那部分。
+ *
+ * **只记受管节**：带 `pf:keep` 的节内容归使用者，不该记成我的；记了会在撤除时被当成
+ * 痕迹删掉。这条边界正是「按字节归属」与「按节标题」的分界。
+ */
+function recordLanded(target, agentsPath, text) {
+  const ledger = readLedger(target)
+  const file = 'AGENTS.md'
+
+  // 内核区：一对锚点圈定的字节区间。缺任何一端就跳过——记一条提不出内容的记录没有意义。
+  const si = text.indexOf(KERNEL_START)
+  const ei = text.indexOf(KERNEL_END, si + KERNEL_START.length)
+  if (si >= 0 && ei > si) {
+    recordSegment(ledger, {
+      file,
+      id: LEDGER_KERNEL,
+      landing: 'anchored',
+      content: text.slice(si + KERNEL_START.length, ei),
+    })
+  }
+
+  // 受管节：这一版求值出来的、归脚本决定的那些节。
+  for (const section of splitSections(text).sections) {
+    const body = section.lines.join('\n')
+    // 归使用者所有的节不记：撤除时不该碰它。
+    if (body.includes(KEEP)) {
+      forgetSegment(ledger, file, `${LEDGER_SECTION_PREFIX}${section.heading}`)
+      continue
+    }
+    recordSegment(ledger, {
+      file,
+      id: `${LEDGER_SECTION_PREFIX}${section.heading}`,
+      landing: 'section',
+      content: body,
+    })
+  }
+
+  writeLedger(target, ledger)
+}
+
 const DEFAULT_BUDGET_NOTE = `预算默认 ${DEFAULT_BUDGET} 字节`
 
 function parseArgs(argv) {
@@ -1604,6 +1655,20 @@ function main(argv) {
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
+  // 落盘之后**立刻记账**：写下「这份文件的内核区、以及每个受管节，各自的字节哈希」。
+  //
+  // 账本是痕迹判定的唯一依据——有了它，「这段是不是我写的」就从推断变成比对：
+  // 哈希对上就是我写的（可撤可刷），对不上就是使用者改过（停下问人），没有记录就不是
+  // 我写的（一个字节都不动）。没有账本时，交棒只能靠形状猜，而形状必然两头都错。
+  //
+  // 记账失败**不中断**：文件已经写好了，账本只是下一次判定的依据；这里报一句，
+  // 下一次会退化成「什么都不敢认」，那是安全的退化方向。
+  try {
+    recordLanded(target, agentsPath, payload)
+  } catch (error) {
+    process.stderr.write(`提示：账本没能更新（${error instanceof Error ? error.message : String(error)}\n`
+      + '  文件已写入；下次判定会退化成「只做加法、不撤任何东西」。\n')
+  }
   // 清单解析不了时，生成件里「依赖版本同步」那一节是**读不到**而不是「没有依赖」。
   // 不说这一句，报告就只显示「已生成 + 待填写 0 处」——一份少了一节的契约被读成完整的。
   //

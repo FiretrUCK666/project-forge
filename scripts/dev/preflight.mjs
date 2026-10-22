@@ -37,7 +37,7 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoPath,
+import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoRelation,
   tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion,
   KERNEL_START, KERNEL_END } from '../survey.mjs'
 
@@ -726,7 +726,12 @@ function checkScripts() {
   const inspect = (p, rel) => {
     if (!existsSync(p)) { fail(`缺少 ${rel}。`); return }
     const text = readText(p)
-    if (!text.startsWith('#!/usr/bin/env node')) warn(`${rel} 缺少 node shebang。`)
+    // shebang 只对**可执行入口**有意义。纯模块（只被 import、从不直接跑）加了它是噪音，
+    // 不加它也不影响任何事——按「是不是入口」判，而不是按「在不在 scripts/ 下」判。
+    // 判据：文件里有 `isMainModule(...)` 说明它自己处理命令行调用，那就是入口。
+    if (!text.startsWith('#!/usr/bin/env node') && /isMainModule\s*\(/.test(text)) {
+      warn(`${rel} 看起来是入口（有命令行处理），但没有 node shebang。`)
+    }
     if (statSync(p).size < 200) fail(`${rel} 内容异常短。`)
     for (const spec of externalModules(text)) {
       fail(`${rel} 引入了外部模块「${spec}」—— 这个 skill 必须零依赖。`)
@@ -2151,6 +2156,11 @@ function checkReleaseTag(tag, repoArg) {
   }
   // 来源这一半：取不到可比对的取值时报「未核对」，不静默放行——「没比」与「比过且一致」
   // 必须分得开，否则一个 fork 会把用户包副本指去别人的仓库，而门禁一路绿。
+  //
+  // **这里是三值比较，不是 `!==`**。写成 `repoPath(a) !== repoPath(b)` 时，两个都认不出
+  // 会得到 `undefined !== undefined` = false，即「判为一致」——而「两个都认不出」恰恰是
+  // 最需要停下来的时候。`git@host:owner/name` 这种最常见的克隆写法曾经就归一不出来，
+  // 于是 fork 比对静默通过。`repoRelation` 让「没法比」必须被显式处理。
   const declaredSource = skillSource(skillText)
   const origin = run(['remote', 'get-url', 'origin'])
   const repo = repoArg ?? (origin.status === 0 ? (origin.stdout ?? '').trim() : undefined)
@@ -2159,9 +2169,15 @@ function checkReleaseTag(tag, repoArg) {
       + '这次发布的仓库，这次判不了。')
   } else if (declaredSource === undefined) {
     fail(`标签 ${tag} 里的 SKILL.md 读不到 metadata.source —— 压缩包副本会不知道去哪儿找新版。`)
-  } else if (repoPath(declaredSource) !== repoPath(repo)) {
-    fail(`标签 ${tag} 里声明的来源是 ${declaredSource}，而这次发布的是 ${repo} —— 两者不是同一个`
-      + '仓库，用户包副本会跑去别人的仓库更新。改 SKILL.md 的 metadata.source 再发。')
+  } else {
+    const relation = repoRelation(declaredSource, repo)
+    if (relation === 'different') {
+      fail(`标签 ${tag} 里声明的来源是 ${declaredSource}，而这次发布的是 ${repo} —— 两者不是同一个`
+        + '仓库，用户包副本会跑去别人的仓库更新。改 SKILL.md 的 metadata.source 再发。')
+    } else if (relation === 'unknown') {
+      warn(`发版门禁未核对来源：声明的 ${declaredSource} 与这次的 ${repo} 里至少有一个`
+        + '归一不出 owner/name，没法判断是不是同一个仓库。这是「没比」，不是「比过且一致」。')
+    }
   }
   if (failures.length === 0) {
     process.stdout.write(`发版门禁：标签 ${tag} 与它里面的 metadata.version ${declared} 一致`

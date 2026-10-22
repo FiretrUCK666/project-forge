@@ -1118,7 +1118,10 @@ function scan(root, onlyFile) {
     // 占位符**不**做同样的处理：模板里的 `{{COMMANDS}}` 本来就写在代码块里，而它留在
     // 目标项目里正是要报的那一类。
     const spans = fencedSpans(text)
-    const inFence = (index) => spans.some(([a, b]) => index >= a && index < b)
+    // 只是把权威实现给出的区间包成一个查询函数，**不是另一套状态机**——
+    // 名字要避开 `inFence`：那个标识符归 survey.mjs 独占，撞名会让「谁在重写围栏判据」
+    // 这件事变得看不出来。
+    const isInsideFence = (index) => spans.some(([a, b]) => index >= a && index < b)
     // 文档 = 给人读的散文；其余是机器会照着跑的配置或脚本。这一条决定悬空指针的
     // 处置分支（引用出现在哪种文件里）与「名字在注释里」那一条的注释形状。
     const isDocument = DOC_EXT_RE.test(file.name)
@@ -1130,7 +1133,7 @@ function scan(root, onlyFile) {
       if (isNotesDraft && rule.kind === 'needs-summary') continue
       rule.re.lastIndex = 0
       for (const hit of text.matchAll(rule.re)) {
-        if (inFence(hit.index)) continue
+        if (isInsideFence(hit.index)) continue
         const name2 = rule.literalFrom === undefined ? null : hit[rule.literalFrom]
         const literal = name2 === null
           ? rule.literal
@@ -1150,7 +1153,7 @@ function scan(root, onlyFile) {
 
     // 注释里出现本 skill 的名字：模板注释块的残留。
     for (const hit of commentNameHits(text, name, !isDocument)) {
-      if (inFence(hit.index)) continue
+      if (isInsideFence(hit.index)) continue
       markers.push({
         path: file.rel,
         line: hit.line,
@@ -1165,7 +1168,7 @@ function scan(root, onlyFile) {
     // ── A2 组：交付还没做完的占位 ──
     UNFINISHED_RULE.re.lastIndex = 0
     for (const hit of text.matchAll(UNFINISHED_RULE.re)) {
-      if (inFence(hit.index)) continue
+      if (isInsideFence(hit.index)) continue
       unfinished.push({
         path: file.rel,
         line: lineOf(starts, hit.index),
@@ -1195,7 +1198,7 @@ function scan(root, onlyFile) {
       })
     }
     for (const hit of text.matchAll(ANGLE_PLACEHOLDER_RE)) {
-      if (inFence(hit.index)) continue
+      if (isInsideFence(hit.index)) continue
       placeholders.push({
         path: file.rel,
         line: lineOf(starts, hit.index),
@@ -1239,7 +1242,7 @@ function scan(root, onlyFile) {
     const fileDir = dirname(file.full)
     REFERENCE_RE.lastIndex = 0
     for (const hit of text.matchAll(REFERENCE_RE)) {
-      if (inFence(hit.index)) continue
+      if (isInsideFence(hit.index)) continue
       const prefix = hit[1]
       const token = hit[2].replace(/\.+$/, '')
       if (token === '') continue

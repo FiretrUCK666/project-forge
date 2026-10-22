@@ -36,7 +36,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey, isMainModule,
-  readTextFile, fencedSpans, markerPositions,
+  readTextFile, fencedSpans, markerPositions, scanLines,
   KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './ledger.mjs'
 // 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
@@ -946,26 +946,27 @@ function upgradeHandwritten(existing, kernel, target) {
  */
 function markKeptSections(text, headings) {
   if (headings.size === 0) return text
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const normalized = text.replace(/\r\n/g, '\n')
+  // 围栏状态**只从权威实现取**（survey.mjs 的 scanLines）。
+  //
+  // 这里曾手写过一个循环，它只比围栏符的首字符、不校验闭合行是否不短于起始行，
+  // 于是「三个反引号开头、五行反引号结尾」这种写法在两处的判定不同。而围栏判错的后果
+  // 很具体：把代码块里的 `## 示例` 当成真节，在它前面插一行 `pf:keep`，破坏代码块。
+  const scanned = scanLines(normalized)
   const out = []
   let inKernel = false
-  let inFence = false
-  let fenceChar = ''
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
+  for (let i = 0; i < scanned.length; i += 1) {
+    const info = scanned[i]
+    const line = info.line
     if (line.includes(KERNEL_START)) inKernel = true
 
-    const fm = /^\s*(`{3,}|~{3,})/.exec(line)
-    if (fm !== null) {
-      if (!inFence) { inFence = true; fenceChar = fm[1][0] } else if (fm[1][0] === fenceChar) { inFence = false; fenceChar = '' }
-      out.push(line)
+    out.push(line)
+    if (info.inFence) {
       if (line.includes(KERNEL_END)) inKernel = false
       continue
     }
-
-    out.push(line)
-    if (inKernel || inFence) {
+    if (inKernel) {
       if (line.includes(KERNEL_END)) inKernel = false
       continue
     }
@@ -973,7 +974,7 @@ function markKeptSections(text, headings) {
     // 二级标题：只有被认领的那些才打，且下面一行已经是标记时不重复打。
     // `headings` 里的值是 `splitSections` 存的**整行**（含 `## ` 前缀），比较时用整行。
     if (/^##\s+\S/.test(line) && headings.has(line.trim())) {
-      const next = lines[i + 1] ?? ''
+      const next = scanned[i + 1]?.line ?? ''
       if (next.trim() !== KEEP) out.push('', KEEP)
     }
     if (line.includes(KERNEL_END)) inKernel = false

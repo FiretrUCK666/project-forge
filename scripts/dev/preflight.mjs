@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoRelation,
   tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion,
-  KERNEL_START, KERNEL_END } from '../survey.mjs'
+  scanLines, KERNEL_START, KERNEL_END } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -699,8 +699,32 @@ export function moduleSpecifiers(text) {
     .split('\n').filter((l) => !/^\s*(?:\/\/|\/\*|\*)/.test(l)).join('\n')
   const out = []
   const push = (spec) => { if (spec !== '' && !out.includes(spec)) out.push(spec) }
-  for (const m of code.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*(['"])([^'"\n]+)\1/g)) push(m[2])
-  for (const m of code.matchAll(/\brequire\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g)) push(m[2])
+
+  // 判据要同时防住两头，而这两头都真实发生过：
+  //
+  //   漏报：只认 `from 'x'` 一种写法，于是双引号、`require(…)`、动态 `import(…)`、
+  //         纯副作用导入四种形状全漏（实测漏过四个）。
+  //   误报：`from` 的前边界用 `\b`，于是 `const leaks = []` 里 `leaks` 结尾的
+  //         `s` 与后面的 `from` 之间**恰好是词边界**，匹配上；中间那个 `\s*` 再跨过
+  //         换行，把下一行的字符串当成模块名。报出来的名字是「, leaks.join(」这种
+  //         明显不是模块的碎片，而它报的却是「你必须先装东西才能用这个 skill」。
+  //
+  // 两个边界因此都收紧：
+  //   前边界：关键字前面必须是**行首或空白/标点**（不能紧贴标识符，`leaks` 里的 `s`
+  //           与 `from` 之间恰好是词边界，用 `\b` 会匹配上）；
+  //   后边界：关键字与引号之间**必须有空白或左括号**，且不许跨行。
+  //   这一条还挡掉另一种真实写法：`'...别处只能 import', leaks.join(` —— 散文里提到
+  //   `import` 这个词，后面紧跟的是引号收尾，不是模块名。关键字后没有任何空白 / 括号，
+  //   就不可能是导入。
+  const KW = '(?:^|[\\s;{(,])(?:from|import|require)'
+  // 语句式：`from 'x'`、`import 'x'`、`import { a } from 'x'`、`import ('x')`
+  for (const m of code.matchAll(
+    new RegExp(`${KW}[ \\t]+(?:\\([ \\t]*)?(['"])([^'"\\n]+)\\1`, 'gm'),
+  )) push(m[2])
+  // 调用式：`require('x')`、`import('x')`（关键字与括号之间允许紧贴）
+  for (const m of code.matchAll(
+    new RegExp(`${KW}[ \\t]*\\([ \\t]*(['"])([^'"\\n]+)\\1`, 'gm'),
+  )) push(m[2])
   return out
 }
 
@@ -1161,26 +1185,29 @@ function checkStatedCounts() {
       // 文件不存在可以合法跳过；**标题找不到不行**：这份文件的开关就是一个标题字符串，
       // 把它改个名就能让整块检查静默消失（而命令表一个字没动），那正是它要防的漂移。
       if (!existsSync(p)) return { state: 'absent' }
-      const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
-      const at = lines.findIndex((l) => headingRe.test(l))
+      const text = readText(p).replace(/^\uFEFF/, '')
+      // 围栏状态**只从权威实现取**（survey.mjs 的 scanLines）。
+      //
+      // 这里曾经手写过一个 `inFence` 循环，它只认 ` ``` `、不认 `~~~`，也不管闭合行
+      // 是否不短于起始行。同一种 Markdown 在三个脚本里会得到三种「哪几行是代码」的答案，
+      // 而这三处判的都是「门禁命令表里写了什么」——判错的后果是命令表对不上却报绿。
+      const scanned = scanLines(text)
+      const at = scanned.findIndex((l) => headingRe.test(l.line))
       if (at < 0) return { state: 'heading-missing', heading: headingName }
       // 只看标题之后的**第一个围栏代码块**：那一节里可能还有别的命令示例（例如
       // 「改了内核后要重新注入」那一小段），把它们算进「门禁命令表」是读错了范围。
       const out = new Set()
-      let inFence = false
       let seenFence = false
-      for (let i = at + 1; i < lines.length; i += 1) {
-        if (/^##\s/.test(lines[i])) break
-        if (/^\s*```/.test(lines[i])) {
-          if (!inFence) {
-            if (seenFence) break
-            inFence = true
-            seenFence = true
-          } else inFence = false
+      for (let i = at + 1; i < scanned.length; i += 1) {
+        const info = scanned[i]
+        if (!info.inFence && info.heading !== null && info.heading.level <= 2) break
+        if (info.fenceEvent === 'open') {
+          if (seenFence) break
+          seenFence = true
           continue
         }
-        if (!inFence) continue
-        const line = lines[i].trim()
+        if (!info.inFence) continue
+        const line = info.line.trim()
         if (!line.startsWith('node ')) continue
         out.add(line.split(/\s+#/)[0].replace(/\s+/g, ' ').trim())
       }

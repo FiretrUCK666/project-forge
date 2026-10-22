@@ -3368,6 +3368,22 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
     check(fromProse.length === 0, '整行注释里的举例不算数（否则文档注释会变成地雷）',
       JSON.stringify(fromProse))
     report(fromProse.length === 0, '注释：不算')
+
+    // 反例：「变量名里含 from」不能被当成导入。
+    //
+    // 判据曾经是 `(?:\bfrom|\bimport)\s*\(?\s*(['"])(...)\1`，中间的 `\s*\(?\s*` 跨行时
+    // 会一路吃掉换行，于是 `leaks` 里的 `from` 匹配到**下一行**开头的引号，被报成
+    // 「引入了外部模块」。而它报的是「你必须先装东西才能用这个 skill」——一条会让人
+    // 真的去装东西的假警报。
+    const trap = [
+      'const leaks = []',
+      `  check(ok, ${DQ}这是断言消息${DQ})`,
+      'const from = 1',
+      'foo("another string")',
+    ].join('\n')
+    const fromTrap = externalModules(trap)
+    check(fromTrap.length === 0, '变量名里含 from 不算导入（跨行不该被吃掉）', JSON.stringify(fromTrap))
+    report(fromTrap.length === 0, '零依赖：含 from 的变量名不误报')
   }
 
   // 8) 引用完整性：行内代码与 Markdown 链接两种写法必须一起查。
@@ -5051,6 +5067,36 @@ group('[52] 结构守卫：依赖图无环、判据只有一份、临时文件�
   }
   check(dupes.length === 0, '共享判据在全仓只定义一次', dupes.join('；'))
   report(dupes.length === 0, '共享判据：各一份')
+
+  // ── 2b) 共享判据不许被「另写一遍」 ──
+  //
+  // 上面那条只认 `export function <名字>`，抓得住「同名导出两份」，**抓不住
+  // 「不 import、自己手写一个内联循环」**——而那正是实际发生过的事：`preflight.mjs`
+  // 与 `compose-agents.mjs` 各写了一个 `inFence` 状态机，只比围栏符首字符、不校验
+  // 闭合长度。守卫的存在反而给了「已经统一」的错觉。
+  //
+  // 判据改成「专属标识符只许出现在权威实现里」：`inFence` 这种名字不会自然出现。
+  const RESTRICTED = {
+    inFence: 'survey.mjs',           // 围栏状态机
+    fenceEvent: 'survey.mjs',        // 同上
+    fencedSpans: 'survey.mjs',       // 围栏区间
+    scanLines: 'survey.mjs',         // 逐行扫描
+    markerPositions: 'survey.mjs',   // 标记在围栏外的位置
+  }
+  const leaks = []
+  for (const file of scriptFiles) {
+    const base = basename(file)
+    const text = readFileSync(file, 'utf8')
+    for (const [token, owner] of Object.entries(RESTRICTED)) {
+      if (base === owner) continue
+      // 只看**定义或赋值**，不看 import 与注释：调用权威实现是应该的。
+      const re = new RegExp(`^\\s*(?:let|const|var)\\s+${token}\\b`, 'm')
+      const reFn = new RegExp(`^\\s*function\\s+${token}\\b`, 'm')
+      if (re.test(text) || reFn.test(text)) leaks.push(`${base} 自己定义了 ${token}`)
+    }
+  }
+  check(leaks.length === 0, '围栏扫描只在 survey.mjs 里实现，别处只能 import', leaks.join('；'))
+  report(leaks.length === 0, '共享判据：不许另写一遍')
 
   // ── 3) 临时文件的归属三态 ──
   // 「同前缀全删」曾把使用者自己的备份、和另一个正在运行的进程手里的临时文件一起

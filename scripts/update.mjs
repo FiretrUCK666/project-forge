@@ -595,6 +595,68 @@ function applyPackage(entries) {
 }
 
 /**
+ * 装完之后验一次：**这份副本现在还能不能用**。
+ *
+ * 验的不是「写文件有没有报错」（那只能说明没崩），而是三件会真的让它不可用的事：
+ *
+ *   1. `SKILL.md` 还在，而且 frontmatter 读得出 `name` —— 读不出这个名字，宿主根本不会
+ *      加载它，整个 skill 等于没装；
+ *   2. 包里带的脚本，落盘之后**真的都在** —— 少了 `survey.mjs` 这类共用模块，
+ *      别的脚本一跑就是 ERR_MODULE_NOT_FOUND；
+ *   3. 版本号读得回来，而且与这次要装的版本一致 —— 这一条防的是「装的是旧包却报成功」，
+ *      它与前面那条同源校验是同一条判据的两端。
+ *
+ * **这一步失败不抛异常**：文件已经写下去了，抛错只会让调用方拿不到「写到什么程度」。
+ * 正确做法是把结论交回去，由报告说清「副本可能已不可用」，并**不要**烧掉 24 小时窗口。
+ *
+ * 存在的理由：这条路径的特殊风险是它没有退路——包副本是 `git archive` 解出来的，
+ * **没有 .git**，写坏了没有 `git checkout` 可退。而「版本号对得上」并不证明内容完好：
+ * 一个 SKILL.md 被截断、`scripts/` 少了几个文件的包，版本号照样对得上。
+ */
+function verifyInstalled(entries, after, remote) {
+  const root = SKILL_ROOT
+
+  const skillFile = join(root, 'SKILL.md')
+  if (!existsSync(skillFile)) {
+    return { ok: false, why: '装完之后 SKILL.md 不见了', hint: '这份副本已经不能用了。' }
+  }
+  const text = existsSync(skillFile) ? readFileSync(skillFile, 'utf8') : ''
+  const name = /^name:[ \t]*(.+)$/m.exec(text)?.[1]?.trim()
+  if (name === undefined || name === '') {
+    return {
+      ok: false,
+      why: 'SKILL.md 的 frontmatter 里读不到 name（文件可能被截断）',
+      hint: '宿主不会加载没有 name 的技能。',
+    }
+  }
+
+  const expectScripts = (entries ?? [])
+    .map((e) => String(e.name).replace(/\\/g, '/'))
+    .filter((n) => /^scripts\/[^/]+\.mjs$/.test(n))
+  const missing = expectScripts.filter((rel) => !existsSync(join(root, rel)))
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      why: `包里带了的 ${missing.length} 个脚本没有落盘（${missing.slice(0, 3).join('、')}）`,
+      hint: '缺共用模块时，别的脚本一跑就会报找不到模块。',
+    }
+  }
+
+  if (after === undefined) {
+    return { ok: false, why: '装完之后读不到版本号', hint: `这次要装的是 ${remote}。` }
+  }
+  if (remote !== undefined && after !== remote) {
+    return {
+      ok: false,
+      why: `装完的版本是 ${after}，而要装的是 ${remote}`,
+      hint: '装进去的可能不是那一版。',
+    }
+  }
+
+  return { ok: true }
+}
+
+/**
  * 写一个文件：先写同目录的临时文件，再改名。
  *
  * **为什么**：改名的原子性让「写到一半被杀」不再留下半截文件。包副本没有 .git，
@@ -817,12 +879,30 @@ async function main(argv) {
   }
 
   // ── 三：整份覆盖 ──────────────────────────────────────────────────────────
+  //
+  // 覆盖之后**必须验收**，不能只信「写文件没抛异常」。
+  //
+  // 这条路径的特殊风险是它没有退路：包副本是 `git archive` 解出来的，**没有 .git**，
+  // 写坏了没有 `git checkout` 可退。而「版本号对得上」并不能证明内容完好——一个
+  // SKILL.md 被截断、`scripts/` 少了几个文件的包，版本号照样对得上。旧写法在这里
+  // 直接把 `localVersion()` 读回来就宣布成功，读不到时甚至用远端版本号顶上。
   const { removed, skipped, keptTemps, mapRead } = applyPackage(latest.entries)
   const after = localVersion()
-  rememberState({ lastUpdateAt: Date.now() })
+  const health = verifyInstalled(latest.entries, after, remote)
+
+  // **验收不通过就不烧掉 24 小时窗口**：否则修好之后再跑，还要白等一天。
+  // 窗口的语义是「多久之内不要重复联网问」，而一次失败的安装根本没有「成功过」可言。
+  if (health.ok) rememberState({ lastUpdateAt: Date.now() })
+
+  const versionText = after === undefined
+    ? `project-forge 的文件已换成 ${remote} 那一份，但版本号读不出来`
+    : `project-forge 已更新到最新版 ${after} —— 你之前用的是 ${tag}。`
   report([
-    `project-forge 已更新到最新版 ${after ?? remote} —— 你之前用的是 ${tag}。`,
-    '  这个 skill 的文件换了，我重新读一遍 SKILL.md 再继续。',
+    health.ok ? versionText : `project-forge 更新了文件，但**验收没过**：${health.why}`,
+    health.ok
+      ? '  这个 skill 的文件换了，我重新读一遍 SKILL.md 再继续。'
+      : `  你这份副本可能已经不可用。${health.hint ?? ''}`,
+    health.ok ? undefined : '  重新跑一次更新可以再试；仍然不行就手工下载后覆盖整个目录。',
     removed.length > 0
       ? `  顺手清掉了 ${removed.length} 个包里不该有的文件（${removed.slice(0, 3).join('、')}${removed.length > 3 ? ' 等' : ''}）。`
       : undefined,

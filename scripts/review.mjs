@@ -652,7 +652,16 @@ function main(argv) {
     missing.push(`本仓库的能力目录宿主不会加载：${s.ecosystem.skillDropped}`)
   }
   const auto = s.docs?.workflowAutomation
-  if (auto === undefined || auto.files.length === 0) {
+  // 「读不到」与「真的没有」必须分开判。
+  //
+  // 合成一句话的后果：`.github/workflows` 存在但读不了时，勘察的 auto 缺席，这里落进
+  // 「CI 缺失」分支，于是让用户去确认「不要 CI」——而他明明已经有 CI。把「没读到」
+  // 说成「没有」，是这门语言里最容易犯也最难发现的一种错。
+  const wfUnreadable = s.docs?.workflowsUnreadable === true
+  if (wfUnreadable) {
+    pending.push('CI 状态读不出来：`.github/workflows` 存在但读不了。'
+      + '**这不代表没有 CI**——先确认目录权限，再重跑，不要据这一条去新建工作流')
+  } else if (auto === undefined || auto.files.length === 0) {
     if (flags.has('--no-ci')) ok.push('无 CI（用户已确认暂不要）')
     else pending.push('CI 缺失：问用户要不要检查自动化与自动发布（不要→加 --no-ci，不要默跳）')
   } else {

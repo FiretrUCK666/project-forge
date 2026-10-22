@@ -1323,7 +1323,24 @@ function scan(root, onlyFile) {
   // 造个假文件骗过检查。
   const blocking = all.filter((f) => f.blocks === true).length
   const clean = blocking === 0
-  return { project: root, groups, clean, findings, blocking, scanned }
+  // 「干净」只有在**真的扫全了**的时候才成立。
+  //
+  // 这里有两条方向相反的安全默认值，必须分开：
+  //   - 对「删不删」：默认安全。本脚本只读，一个字节都不会删，所以把判断不了的东西
+  //     一律不删，这条底线在代码层面成立；
+  //   - 对「验不验得过」：默认**危险**。没扫到的部分（超大文件、二进制、读不出的目录、
+  //     遍历截断）原来只写在正文里，`--verify` 照样退 0——任何拿它当关卡的地方都会把
+  //     「没扫到」读成「扫过了、很干净」。这正是本脚本自己警告过的那件事，却只防住了
+  //     「零命中」这一条路，没防住「跳过了」这一条。
+  const gaps = []
+  if (scanned.truncated === true) gaps.push('遍历被截断（文件数超上限）')
+  if (scanned.depthLimited > 0) gaps.push(`${scanned.depthLimited} 个子目录因嵌套过深未进入`)
+  if (scanned.unreadable > 0) gaps.push(`${scanned.unreadable} 个条目读不出来`)
+  if (scanned.skippedLarge > 0) gaps.push(`${scanned.skippedLarge} 个文件超过体积上限未读`)
+  if (scanned.skippedBinary > 0) gaps.push(`${scanned.skippedBinary} 个二进制文件未读`)
+  if (scanned.partial === true) gaps.push('只扫了指定的一部分')
+  const complete = gaps.length === 0
+  return { project: root, groups, clean, findings, blocking, scanned, gaps, complete }
 }
 
 // ── 输出 ───────────────────────────────────────────────────────────────────
@@ -1362,7 +1379,7 @@ function renderText(report, mode) {
   const out = []
   out.push(`痕迹勘察：${report.project}`)
   out.push(mode === 'verify'
-    ? '模式：verify（干净退出 0，不干净退出 1）'
+    ? '模式：verify（干净退出 0，不干净退出 1，扫描不完整退出 3）'
     : '模式：scan（报告模式，退出码恒为 0）')
   const gap = scanGaps(report.scanned)
   if (gap !== undefined) out.push(gap)
@@ -1405,7 +1422,19 @@ function renderText(report, mode) {
       out.push('[D] 组列出的模板衍生物交棒时一律不动，见 references/handoff.md 第四节。')
     }
   } else {
-    out.push(`结论：${mode === 'verify' ? '不干净——' : ''}${verdict}${tail}。`)
+    // 判决要三档，因为「干净」有两种截然不同的成立条件：
+    // 扫全了、什么都没发现；以及没扫全、所以什么都没发现。
+    // 后者不是结论，是「判不了」——把它们合成一句话，等于让「没查」冒充「查过没有」。
+    if (mode === 'verify' && report.clean && report.complete === false) {
+      out.push('结论：**判不了**——扫描没有覆盖全部，所以「没发现」不等于「没有」。')
+      for (const g of report.gaps ?? []) out.push(`  - ${g}`)
+      out.push('  退出码 3。要得到结论，先把上面那几处补上（或改用 --scan 逐条人工核对）。')
+    } else {
+      out.push(`结论：${mode === 'verify' ? '不干净——' : ''}${verdict}${tail}。`)
+      if (mode === 'verify' && report.clean) {
+        out.push('  （扫描完整：所有条目都读到了。）')
+      }
+    }
   }
   return `${out.join('\n')}\n`
 }
@@ -1488,12 +1517,28 @@ function main(argv) {
       // scanned 把「没扫到」的那几类也带出去：只给「零命中」而不给这个，消费方会把
       // 没扫到读成扫过了。
       scanned: report.scanned,
+      // complete 与 gaps 是**判决的前提**：它说这次到底扫全了没有。
+      // 不给出这个，`clean: true` 会被读成「扫过了，很干净」，而它可能只是「没扫到」。
+      complete: report.complete,
+      gaps: report.gaps,
     }, null, 2)}\n`)
   } else {
     process.stdout.write(renderText(report, parsed.mode))
   }
   // scan 是报告，退出码恒为 0；verify 才是判决。
-  if (parsed.mode === 'verify') return report.clean ? 0 : 1
+  //
+  // 判决有**三档**，不是两档：
+  //   0 = 干净（扫描完整，且没有挡着验收的痕迹）
+  //   1 = 不干净（扫描到了确定的问题）
+  //   3 = **判不了**（扫描没覆盖全部，所以「没发现」不等于「没有」）
+  //
+  // 第三档是必需的：没有它，任何把 `--verify` 当关卡的地方都会在扫描被截断、有超大文件
+  // 被跳过、或目录读不出来时拿到退出码 0，也就是把「没扫到」读成「扫过且干净」。
+  // 那正是本脚本自己在正文里警告过的那种失效。
+  if (parsed.mode === 'verify') {
+    if (!report.clean) return 1
+    return report.complete ? 0 : 3
+  }
   return 0
 }
 

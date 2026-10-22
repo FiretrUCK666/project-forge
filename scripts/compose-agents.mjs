@@ -217,11 +217,25 @@ const DEPENDENCY_FILES = [
  */
 function rootIndex(target) {
   let entries = []
-  try { entries = readdirSync(target) } catch { /* 目录不可读就当什么都没有 */ }
+  let readError
+  try {
+    entries = readdirSync(target)
+  } catch (error) {
+    // **读不到目录与「目录是空的」必须分开。**
+    //
+    // 合成一句「什么都没有」的后果不是少一个字段，而是整条判定链一起落空：生态认不出、
+    // 清单判据全部不命中、命令导不出来，最后生成一份写着「这个项目没有依赖、没有命令、
+    // 不可发布」的契约。而使用者读那份契约看不出任何异常——它长得跟一个真的空项目一样。
+    //
+    // 读不到就明确记下来，由调用方决定是停下还是提示。
+    readError = error instanceof Error ? error.message : String(error)
+  }
   const byLower = new Map(entries.map((e) => [e.toLowerCase(), e]))
   return {
     has: (name) => byLower.has(name.toLowerCase()),
     real: (name) => byLower.get(name.toLowerCase()),
+    readError,
+    complete: readError === undefined,
   }
 }
 
@@ -234,6 +248,12 @@ function rootIndex(target) {
 function deriveFacts(target) {
   const s = survey(target)
   const index = rootIndex(target)
+  // 目录读不到时**不许继续生成**：这条链的每一个判据都建立在「读得到目录」之上，
+  // 读不到却照常往下走，产出的是一份看起来正常的错误契约。明确报错，留给人处理。
+  if (index.complete === false) {
+    throw new Error(`读不了目标目录 ${target}：${index.readError}。`
+      + '据此生成的契约会把每一条都判成「没有」，那比不做更糟——先确认目录权限再重跑。')
+  }
   const manifestPath = s.ecosystem.kinds.includes('node') ? 'package.json' : undefined
   const commands = s.commands ?? {}
   // 「有没有可跑的命令」按**命令键**判，不按「有没有一个字符串键」判。

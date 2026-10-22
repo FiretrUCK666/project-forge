@@ -2370,14 +2370,22 @@ function detectDocs(root, root_) {
   if (ghEntry?.isDir === true) {
     const gh = join(root, ghEntry.name)
     let entries = []
+    let ghReadable = true
     try {
       for (const e of readdirSync(gh, { withFileTypes: true, encoding: 'utf8' })) entries.push(e.name)
-    } catch { /* 忽略 */ }
+    } catch {
+      // 读不到 `.github` 与「`.github` 里什么都没有」必须分开：合成一句话之后，
+      // 下游会把「读不到」当成「没有 Issue 模板、没有 CI」，进而建议用户去建一份
+      // 他其实已经有的东西。
+      ghReadable = false
+      docs.githubUnreadable = true
+    }
     docs.githubDir = entries
-    docs.issueTemplates = entries.some((n) => /^ISSUE_TEMPLATE/i.test(n))
-    docs.prTemplate = entries.some((n) => /^pull_request_template/i.test(n))
+    docs.issueTemplates = ghReadable ? entries.some((n) => /^ISSUE_TEMPLATE/i.test(n)) : undefined
+    docs.prTemplate = ghReadable ? entries.some((n) => /^pull_request_template/i.test(n)) : undefined
     const wfEntry = listRoot(gh).entry('workflows')
     if (wfEntry?.isDir === true) {
+      let wfReadable = true
       try {
         const files = readdirSync(join(gh, wfEntry.name), { encoding: 'utf8' })
           .filter((n) => /\.ya?ml$/i.test(n))
@@ -2436,7 +2444,13 @@ function detectDocs(root, root_) {
           }
         }
         docs.workflowAutomation = auto
-      } catch { /* 忽略 */ }
+      } catch {
+        // 读不到工作流目录 ≠「这个项目没有 CI」。合成一句话之后，下游会建议用户去建
+        // 一份他其实已经有的东西；更糟的是 review 会说「CI 缺失，问用户要不要」。
+        wfReadable = false
+        docs.workflowsUnreadable = true
+      }
+      if (!wfReadable) docs.workflows = undefined
     }
   }
   return docs

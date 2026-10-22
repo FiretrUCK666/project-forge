@@ -4109,6 +4109,31 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     }
     rmSync(zipPath, { force: true })
   }
+
+  // ── 装完之后必须验收：版本号对得上，不等于内容是好的 ──
+  //
+  // 这条路径没有退路：包副本是 git archive 解出来的，**没有 .git**，写坏了没有
+  // git checkout 可退。而「版本号读得回来」证明不了「SKILL.md 没被截断、脚本都在」——
+  // 旧写法正是在这里直接宣布成功，读不到版本时甚至拿远端版本号顶上。
+  {
+    const src = readFileSync(join(SKILL_ROOT, 'scripts', 'update.mjs'), 'utf8')
+
+    check(/function verifyInstalled\(/.test(src),
+      '装完验收是一个独立函数（不与写入混在一段里，才验得清）')
+    report(/function verifyInstalled\(/.test(src), '装后验收：实现存在')
+
+    check(/装完之后读不到版本号/.test(src),
+      '版本号读不到时判「不健康」，而不是用远端版本号顶上')
+    report(/装完之后读不到版本号/.test(src), '装后验收：读不到版本号不算成功')
+
+    check(/if \(health\.ok\) rememberState/.test(src),
+      '验收不通过时不烧掉 24 小时窗口（否则修复后要白等一天）')
+    report(/if \(health\.ok\) rememberState/.test(src), '装后验收：失败不烧窗口')
+
+    check(/包里带了的 \$\{missing\.length\} 个脚本没有落盘/.test(src),
+      '包里带的脚本没落盘时要判不健康（缺共用模块会让别的脚本一跑就崩）')
+    report(/包里带了的/.test(src), '装后验收：缺脚本判不健康')
+  }
 }
 
 // ── [47] 发布说明：正文只来自被标签指到的那次提交，半成品发不出去 ────────────
@@ -4929,6 +4954,40 @@ group('[51c] 账本：痕迹判定查哈希，不再猜形状')
   const nlHits = nlScan.groups?.ledger ?? []
   check(nlHits.length === 0, '反例：没有账本时不虚报任何账本结论', JSON.stringify(nlHits).slice(0, 120))
   report(nlHits.length === 0, '反例：无账本不虚报')
+
+  // ── verify 的判决有三档，不是两档 ──
+  //
+  // 第三档（退出码 3）是「判不了」：扫描没覆盖全部时，「没发现」不等于「没有」。
+  // 没有它，任何把 --verify 当关卡的地方在扫描被截断、有超大文件被跳过、或目录读不出时
+  // 都会拿到 0，也就是把「没扫到」读成「扫过且干净」。
+  {
+    const cleanDir = fixture('verify-clean', {
+      'package.json': '{"name":"v","version":"1.0.0"}\n',
+    })
+    const rClean = handoff(cleanDir, '--verify')
+    check(rClean.status === 0, '干净且扫全时退出 0', `实际 ${rClean.status}`)
+    report(rClean.status === 0, 'verify 三档：干净=0')
+
+    // 造一个超过体积上限的文件：它会被跳过，于是扫描不完整。
+    const gapDir = fixture('verify-gap', {
+      'package.json': '{"name":"g","version":"1.0.0"}\n',
+    })
+    writeFileSync(join(gapDir, 'huge.txt'), 'x'.repeat(2300000), 'utf8')
+    const rGap = handoff(gapDir, '--verify')
+    check(rGap.status === 3, '有文件没扫到时退出 3（判不了，不是干净）', `实际 ${rGap.status}`)
+    report(rGap.status === 3, 'verify 三档：没扫全=3')
+    check(/判不了/.test(String(rGap.stdout ?? '')),
+      '「判不了」在文字里也说清，不只靠退出码')
+    report(/判不了/.test(String(rGap.stdout ?? '')), 'verify 三档：文字也说清')
+
+    const dirtyDir = fixture('verify-dirty', {
+      'package.json': '{"name":"d","version":"1.0.0"}\n',
+      'AGENTS.md': '<!-- project-forge:kernel:start -->\n',
+    })
+    const rDirty = handoff(dirtyDir, '--verify')
+    check(rDirty.status === 1, '有痕迹时退出 1（不被「扫描不完整」那一档吞掉）', `实际 ${rDirty.status}`)
+    report(rDirty.status === 1, 'verify 三档：不干净=1')
+  }
 }
 
 // ── [52] 结构守卫：依赖图无环、判据只有一份、临时文件三态 ──────────────────────

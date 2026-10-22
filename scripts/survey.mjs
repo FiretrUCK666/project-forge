@@ -2456,7 +2456,7 @@ function detectDocs(root, root_) {
   return docs
 }
 
-function detectGit(root) {
+function detectGit(root, options = {}) {
   const version = run('git', ['--version'], root)
   if (version === undefined) return { available: false }
 
@@ -2619,7 +2619,7 @@ function detectGit(root) {
       + '都属于那个外层仓库，不代表本目录的状态。给本目录建库前必须先与用户确认边界'
       + '（是并入外层仓库，还是在本目录单独建库）；在确认之前不要提交、也不要推送。'
   }
-  info.auth = detectAuth(info, root)
+  info.auth = detectAuth(info, root, options)
   return info
 }
 
@@ -2639,7 +2639,7 @@ function detectGit(root) {
  *   - 必须屏蔽交互与超时，否则无人值守时会挂死等人输入；
  *   - 判不出来就是 `undetermined`，**不许读成 `no-credential`**。
  */
-function detectAuth(info, root) {
+function detectAuth(info, root, options = {}) {
   const out = {
     // 凭据助手所在的层级与取值：两层模型（仓库级/继承）看不见 system 层，而那正是常见落点。
     helper: info.identity.credentialHelper,
@@ -2709,35 +2709,44 @@ function detectAuth(info, root) {
     }
   }
 
-  // ── 网络可达性：一次只读的 ls-remote ──────────────────────────────────────
+  // ── 网络可达性：**默认不探测** ──────────────────────────────────────────
   //
-  // `ls-remote` 不推不拉不改远端，是纯读操作。失败时只**提取可分类的那一段**，
-  // 不做终局判定：这些文本会随平台与语言环境变，只应当作佐证，不能当作唯一依据。
-  const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
-    cwd: root,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 20000,
-    maxBuffer: 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-  })
-  if (netR.error !== undefined) {
-    out.networkReason = `探测没跑起来：${netR.error.code ?? netR.error.message}`
-  } else if (netR.status === 0) {
-    out.network = 'reachable'
+  // 这一段曾经默认跑 `git ls-remote`，实测在网络受限的机器上一次要等 **21 秒**
+  // （连接超时），而勘察本身只要 0.9 秒——它把一件「偶尔想知道」的事变成了每次勘察都
+  // 要付的代价。这条判据的收益远小于它拖慢每一次调用的代价。
+  //
+  // 现在默认给 `undetermined` 并说明「没有探测」，需要时用 `--probe-network` 显式开。
+  // 判据取「不阻塞主流程」，而不是「顺手也测一下」：勘察要被反复调用，任何一次网络
+  // 往返都不该混进来。
+  if (options.probeNetwork === true) {
+    const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 8000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    })
+    if (netR.error !== undefined) {
+      out.networkReason = `探测没跑起来：${netR.error.code ?? netR.error.message}`
+    } else if (netR.status === 0) {
+      out.network = 'reachable'
+    } else {
+      out.network = 'unreachable'
+      const err = String(netR.stderr ?? '')
+      const signals = [
+        [/Could not resolve host/i, 'DNS 解析失败'],
+        [/Failed to connect to/i, '连接不上（防火墙/代理/端口）'],
+        [/Repository not found|not found/i, '远端不存在，或凭据对私有仓库不可见'],
+        [/Authentication failed|Bad credentials|Invalid username or token/i, '认证被拒'],
+        [/terminal prompts disabled|could not read Username/i, '非交互环境取不到凭据'],
+        [/timed out|Timeout/i, '超时'],
+      ]
+      const hit = signals.find(([re]) => re.test(err))
+      out.networkReason = hit !== undefined ? hit[1] : '未识别的失败（见 stderr）'
+    }
   } else {
-    out.network = 'unreachable'
-    const err = String(netR.stderr ?? '')
-    const signals = [
-      [/Could not resolve host/i, 'DNS 解析失败'],
-      [/Failed to connect to/i, '连接不上（防火墙/代理/端口）'],
-      [/Repository not found|not found/i, '远端不存在，或凭据对私有仓库不可见'],
-      [/Authentication failed|Bad credentials|Invalid username or token/i, '认证被拒'],
-      [/terminal prompts disabled|could not read Username/i, '非交互环境取不到凭据'],
-      [/timed out|Timeout/i, '超时'],
-    ]
-    const hit = signals.find(([re]) => re.test(err))
-    out.networkReason = hit !== undefined ? hit[1] : '未识别的失败（见 stderr）'
+    out.networkReason = '没有探测（默认不联网；需要时加 --probe-network）'
   }
 
   return out
@@ -2817,7 +2826,7 @@ function detectIgnores(root, root_, outputDirCandidates) {
 
 // ── 组装 ────────────────────────────────────────────────────────────────────
 
-function survey(target) {
+function survey(target, options = {}) {
   const root = resolve(target)
   if (!exists(root)) throw new Error(`目录不存在：${root}`)
   const st = statSync(root)
@@ -2828,7 +2837,7 @@ function survey(target) {
   // 顺序不能颠倒。
   const walked = walk(root)
   const eco = detectEcosystem(root, root_, walked)
-  const git = detectGit(root)
+  const git = detectGit(root, options)
 
   // 内容级扫描的候选来自**递归走查**，不来自版本控制。
   //
@@ -3349,12 +3358,16 @@ function main(argv) {
   const positional = args.filter((a) => !a.startsWith('--') && a !== '-h')
   const target = positional[0] ?? process.cwd()
   const asMarkdown = flags.includes('--markdown')
+  // 网络探测默认关闭：网络受限时一次 `ls-remote` 要等十几秒，而勘察本身不到一秒。
+  // 需要时显式开，不把「偶尔想知道」的事塞进每一次调用。
+  const probeNetwork = flags.includes('--probe-network')
   if (flags.includes('--help') || flags.includes('-h')) {
     process.stdout.write([
-      '用法：node scripts/survey.mjs [目录] [--json|--markdown]',
+      '用法：node scripts/survey.mjs [目录] [--json|--markdown] [--probe-network]',
       '',
-      '  --json       输出 JSON（默认）',
-      '  --markdown   输出给人看的摘要',
+      '  --json            输出 JSON（默认）',
+      '  --markdown        输出给人看的摘要',
+      '  --probe-network   额外探测远端可达性（会联网，网络不通时可等十几秒）',
       '',
       '只读勘察：不写任何文件。',
       '',
@@ -3363,7 +3376,7 @@ function main(argv) {
   }
   let result
   try {
-    result = survey(target)
+    result = survey(target, { probeNetwork })
   } catch (error) {
     const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
     process.stderr.write(`勘察失败：${detail}\n`)

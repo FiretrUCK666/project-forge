@@ -4960,6 +4960,33 @@ group('[51c] 账本：痕迹判定查哈希，不再猜形状')
     `ledger-gone ${goneHits.length} 条`)
   report(goneHits.length > 0, '账本：删掉的节报不见了')
 
+  // ── 勘察不许联网 ──
+  //
+  // 曾经默认跑 `git ls-remote` 探远端可达性。网络受限的机器上一次要等 **21 秒**
+  // （连接超时），而勘察本身不到一秒——一件「偶尔想知道」的事变成了每次调用都要付的
+  // 代价，比它换来的信息贵得多。
+  //
+  // 判据是「不联网」，所以断言看的是**结果**：默认调用里网络那一档必须是「没有探测」，
+  // 且整个 JSON 里不能出现 reachable/unreachable。
+  {
+    const dir = fixture('survey-no-network', {
+      'package.json': '{"name":"n","version":"1.0.0"}\n',
+    })
+    if (HAS_GIT) {
+      gitIn(dir, 'init')
+      gitIn(dir, 'remote', 'add', 'origin', 'https://example.invalid/x.git')
+    }
+    const s = survey(dir)
+    const net = s.git?.auth?.network
+    check(net === 'undetermined' || net === 'n/a',
+      '默认勘察不联网：网络那一档是「未探测」，不是去连一次', `得到 ${net}`)
+    report(net === 'undetermined' || net === 'n/a', '勘察：默认不联网')
+    check(String(s.git?.auth?.networkReason ?? '').includes('没有探测'),
+      '并且说清「没有探测」，不让人以为探测过且通了',
+      String(s.git?.auth?.networkReason ?? ''))
+    report(String(s.git?.auth?.networkReason ?? '').includes('没有探测'), '勘察：说明没探测')
+  }
+
   // 反例：完全没有账本的项目，不能因此误报。
   // 账本缺失是正常状态（老项目、被清理过），此时只应退化成「什么都不认」。
   const noLedger = fixture('ledger-absent', {

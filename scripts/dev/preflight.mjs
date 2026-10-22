@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoPath,
   tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion,
-  KERNEL_START, KERNEL_END, INSTRUCTION_BUDGET } from '../survey.mjs'
+  KERNEL_START, KERNEL_END } from '../survey.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -630,9 +630,8 @@ function checkAgentsKernel() {
   } else if (bytes > OWN_AGENTS_MAX_BYTES - OWN_AGENTS_WARN_HEADROOM) {
     warn(`AGENTS.md 距本项目上限只剩 ${OWN_AGENTS_MAX_BYTES - bytes} 字节，项目节该收一收了。`)
   }
-  if (bytes > INSTRUCTION_BUDGET) {
-    fail(`AGENTS.md 共 ${bytes} 字节，超出 ${INSTRUCTION_BUDGET} 预算，注入时会被截断。`)
-  }
+  // 本项目自己的上限（48 KB）严于通用注入预算，所以后者在这里判不到——
+  // 留一条不可达的分支只会让下一个改常量的人以为它在生效。
 }
 
 // ── 检查六：全文硬性规范（emoji / BOM / 行尾 / 私有路径） ───────────────────

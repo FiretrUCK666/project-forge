@@ -203,7 +203,8 @@ flag 全集以 `node scripts/review.mjs --help` 的输出为准**，本文件不
 `artifacts.runtimeRequirements`（项目声明的 `engines`、`requires-python`、`rust-version`
 之类），**读得到就照着写**；项目没声明就不写那一节，**不要为此去问用户**
 （去问脚本本来就知道的数字，答错就写进了 README）。判据见 `references/survey.md`
-「运行时要求」那一节与 `references/publish.md` 的「跟随版本与最低支持版本」。
+`artifacts` 一节里 `runtimeRequirements` 那两段，以及 `references/publish.md` 的
+「跟随版本与最低支持版本」。
 
 **G4 的确认清单**以 `references/remote-github.md` 建仓节表格为准，此处不复述——两处各存
 一份迟早漏一项。它与 P2 那句结论不是一回事：P2 说的是**本次任务做什么**，G4 说的是

@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url'
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
 import {
-  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, SUMMARY_MARKER,
+  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER,
   SKIP_DIRS, MAX_WALK_DEPTH, MAX_WALK_ENTRIES, CONTENT_SCAN_MAX_BYTES,
   frontmatterBlock, isMainModule, scanLines, fencedSpans,
 } from './survey.mjs'
@@ -105,6 +105,13 @@ const MARKER_RULES = [
     re: new RegExp(escapeRe(UPGRADED), 'g'),
     literal: UPGRADED,
     what: '这份 AGENTS.md 的结构已按模板升级过（它缺的那些节是待办，不是缺陷）',
+  },
+  {
+    kind: 'keep',
+    re: new RegExp(escapeRe(KEEP), 'g'),
+    literal: KEEP,
+    what: '「这一节的内容归使用者，刷新时不动」的标记。留着它的后果是**文件此后永远'
+      + '不再刷新**，而没有任何东西会说明为什么——所以它必须被认出来并可撤掉',
   },
   {
     kind: 'inject-control',
@@ -208,17 +215,28 @@ const SKILL_TOKENS = (() => {
 })()
 
 /**
- * 尖括号占位符：`<安装命令>`、`<清单声明的版本>`、`<owner>/<repo>` 这类。
+ * 尖括号占位符：`<安装命令>`、`<清单声明的版本>` 这类。
  *
- * **必须限定形状**，不能裸判 `<`——HTML 标签、JSX、泛型 `Array<T>`、比较运算都在用它。
- * 判据取「尖括号里是中文，或是一个明显的人话短语（含空格/以命令结尾的名词）」，并且
- * 要求它出现在会被替换的位置上。
+ * **判据仍然是「形状」，所以必须收得很紧**——这是本文件里唯一一处只能靠形状判的地方，
+ * 因为尖括号不像 `{{}}` 那样有取值名可对。放松一点就会误伤：中文技术文档里
+ * `<生产环境>`、`<部署文档>`、`<项目邮箱>` 全是**正常的指路写法**，判成占位符会让人
+ * 去删掉自己的文档。
  *
- * 这一条补的是一个真实漏判：CI 模板用 `<安装命令>` 标未替换的位置，而旧判据只认
- * `{{TOKEN}}`。于是把模板注释块删掉之后，`--verify` 报「已经是干净状态」，而工作流
- * 里还是空壳——跑起来必红。
+ * 收法是**只认两类**：
+ *   1. 以「命令 / 版本 / 步骤 / 路径 / 名称 / 地址 / 文件名」这类**明显的操作位名词**结尾
+ *      ——它们是「这里要填一个具体值」的信号；
+ *   2. 全大写占位名（`<OWNER>`、`<REPO>`），那是占位符的通行写法。
+ *
+ * 反例（都不命中）：`<生产环境>`（环境名，不是要填的位）、`<部署文档>`（文档名）、
+ * `<项目邮箱>`（联系方式）——它们是读者要去的地方，不是要替换的洞。
  */
-const ANGLE_PLACEHOLDER_RE = /<([\u4e00-\u9fa5][^<>\n]{0,58}|[A-Za-z][A-Za-z0-9 _-]{2,58}(?:命令|版本|步骤|路径|名称|地址|名字))>/g
+const ANGLE_PLACEHOLDER_RE = new RegExp(
+  '<('
+  + '[\\u4e00-\\u9fa5A-Za-z0-9 _./-]{0,50}?(?:命令|版本|步骤|路径|名称|地址|文件名|占位|链接)'
+  + '|[A-Z][A-Z0-9_]{1,30}'
+  + ')>',
+  'g',
+)
 
 // ── C 组：注入残留 ─────────────────────────────────────────────────────────
 

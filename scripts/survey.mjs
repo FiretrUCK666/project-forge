@@ -763,7 +763,6 @@ function skillFrontmatter(text) {
   const invocation = skillInvocation(block)
   return {
     name,
-    ok: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name),
     invocation: invocation.invocation,
     dropped: invocation.dropped,
   }
@@ -2416,7 +2415,7 @@ function detectGit(root) {
   // 而全局工具的安装器常把配置写在 system 层（实测：Git Credential Manager 就写在那里，
   // 凭据助手 `manager` 只在 system 层可见）。那个两层的模型是错误结论的来源。
   const cfgR = runCapture(['config', '--list', '--show-scope', '--show-origin'], root)
-  const cfg = { byScope: { system: {}, global: {}, local: {} }, keys: new Set() }
+  const cfg = { byScope: { system: {}, global: {}, local: {} } }
   if (cfgR.ok) {
     for (const raw of cfgR.stdout.split('\n')) {
       const line = raw.trim()
@@ -2430,7 +2429,6 @@ function detectGit(root) {
       if (eq < 0) continue
       const key = body.slice(0, eq).trim()
       const value = body.slice(eq + 1)
-      cfg.keys.add(key)
       if (cfg.byScope[scope] !== undefined) cfg.byScope[scope][key] = value
     }
   }
@@ -2497,13 +2495,13 @@ function detectGit(root) {
     identity: {
       name: cfgGet('user.name'),
       email: cfgGet('user.email'),
-      // 三档，不是两档：配置可以来自 system / global / local 任一层。
-      // 只分「仓库级 / 继承」会让「没有 ~/.gitconfig」看起来等于「没有任何配置」。
+      // 四档，不是两档：配置可以来自 system / global / local 任一层。
+      // 只分「仓库级 / 继承」会让「没有 ~/.gitconfig」看起来等于「没有任何配置」，
+      // 而全局工具的安装器常把配置写在 system 层。
       scope: cfgScope('user.name') ?? 'unset',
-      identityScope: cfgScope('user.name'),
       globalName: cfg.byScope.global['user.name'],
       globalEmail: cfg.byScope.global['user.email'],
-      // 凭据助手所在的层级与取值：本机经验证落在 system 层，两层模型看不见它。
+      // 凭据助手所在的层级与取值：实测本机落在 system 层，两层模型看不见它。
       credentialHelper: cfg.byScope.system['credential.helper'] ?? cfg.byScope.global['credential.helper'],
       credentialHelperScope: cfgScope('credential.helper'),
     },
@@ -2542,7 +2540,7 @@ function detectGit(root) {
       + '都属于那个外层仓库，不代表本目录的状态。给本目录建库前必须先与用户确认边界'
       + '（是并入外层仓库，还是在本目录单独建库）；在确认之前不要提交、也不要推送。'
   }
-  info.auth = detectAuth(info, cfg)
+  info.auth = detectAuth(info, root)
   return info
 }
 
@@ -2562,7 +2560,7 @@ function detectGit(root) {
  *   - 必须屏蔽交互与超时，否则无人值守时会挂死等人输入；
  *   - 判不出来就是 `undetermined`，**不许读成 `no-credential`**。
  */
-function detectAuth(info, cfg) {
+function detectAuth(info, root) {
   const out = {
     // 凭据助手所在的层级与取值：两层模型（仓库级/继承）看不见 system 层，而那正是常见落点。
     helper: info.identity.credentialHelper,
@@ -2597,8 +2595,13 @@ function detectAuth(info, cfg) {
   if (host === '') {
     out.httpsReason = '远端地址解析不出主机名'
   } else {
+    // **必须在目标项目里问**，不能取当前工作目录。
+    //
+    // `credential fill` 会读 local 层配置，而 local 层是**仓库自己的**配置：在别的目录里
+    // 问，拿到的是那个仓库的凭据助手，不是这个项目的。刚建立的三层配置模型里 local 层
+    // 的全部意义就在于此，跑错目录等于把它废掉。
     const r = spawnSync('git', ['credential', 'fill'], {
-      cwd: process.cwd(),
+      cwd: root,
       encoding: 'utf8',
       windowsHide: true,
       timeout: 15000,
@@ -2632,7 +2635,7 @@ function detectAuth(info, cfg) {
   // `ls-remote` 不推不拉不改远端，是纯读操作。失败时只**提取可分类的那一段**，
   // 不做终局判定：这些文本会随平台与语言环境变，只应当作佐证，不能当作唯一依据。
   const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
-    cwd: process.cwd(),
+    cwd: root,
     encoding: 'utf8',
     windowsHide: true,
     timeout: 20000,
@@ -2917,7 +2920,16 @@ function toMarkdown(s) {
       L.push('  - 下面这些值**属于外层仓库**，不代表本目录的状态。建库前先与用户确认边界，')
       L.push('    在确认之前不要提交、也不要推送。')
     }
-    L.push(`- 分支：${yn(s.git.branch)}　提交数：${yn(s.git.commits)}　未提交：${yn(s.git.dirty)}`)
+    // 提交数读不到时**说出来**，不要印一个 0 —— 0 的含义是「还没有任何提交」，
+    // 与「问了但没问出来」是两件事，后者会让一个已有历史的仓库被带向首次提交。
+    const commitsText = s.git.commitsState === 'unreadable'
+      ? '**读不到**（不是「零个提交」）'
+      : yn(s.git.commits)
+    L.push(`- 分支：${yn(s.git.branch)}　提交数：${commitsText}　未提交：${yn(s.git.dirty)}`)
+    if (s.git.ahead > 0 || s.git.behind > 0) {
+      L.push(`- 相对上游：领先 ${s.git.ahead} 个提交、落后 ${s.git.behind} 个`
+        + (s.git.behind > 0 ? '——推送前先取回远端' : ''))
+    }
     if (Array.isArray(s.git.remotes) && s.git.remotes.length > 1) {
       L.push(`- 远端（${s.git.remotes.length} 个）：${s.git.remotes.join('、')}`)
       for (const [name, url] of Object.entries(s.git.remoteUrls ?? {})) {

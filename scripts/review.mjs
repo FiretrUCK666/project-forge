@@ -308,8 +308,10 @@ function main(argv) {
     } else {
       // 层级有三档：local / global / system。只报「仓库级 / 继承全局」会让 system 层的
       // 来源看起来像「哪里都没设」——而全局工具的安装器恰恰常写在那里。
-      const scopeLabel = id.scope === 'local' || id.scope === 'repo' ? '仓库级'
-        : id.scope === 'unset' ? '来源未知'
+      // 层级有四种取值：local / global / system / unset。只报「仓库级 / 继承全局」会让
+      // system 层的来源看起来像「哪里都没设」——而全局工具的安装器恰恰常写在那里。
+      const scopeLabel = id.scope === 'local' ? '仓库级'
+        : id.scope === 'unset' || id.scope === undefined ? '来源未知'
           : `继承自 ${id.scope}`
       ok.push(`提交署名有（${id.name}，${scopeLabel}；占位值须人眼确认）`)
     }
@@ -500,10 +502,7 @@ function main(argv) {
   // 只与项目约定有关的指向（例如 AGENTS.md）降为待问，不当成缺失。
   if (s.docs?.contributing !== undefined) {
     ok.push('CONTRIBUTING 有')
-    const contributingFile = typeof s.docs.contributing === 'string'
-      ? s.docs.contributing
-      : s.docs.contributing.file
-    const contributing = readText(join(root, contributingFile)) ?? ''
+    const contributing = readText(join(root, s.docs.contributing.file)) ?? ''
     const coreChecks = [
       [/提问|问题|反馈|issue|question|feedback|support|discussion|help/i, '提问与反馈'],
       [/fork/i, 'fork 指引'],

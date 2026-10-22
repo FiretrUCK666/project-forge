@@ -899,25 +899,32 @@ function upgradeHandwritten(existing, kernel, target) {
 
   let text = collapseJoined(parts, '\n\n')
   if (!text.endsWith(eol)) text += eol
-  // 3) 给保留下来的每一节打上「内容归使用者」的标记。
+  // 3) 给**升级前就存在的**那些节打上「内容归使用者」的标记。
   //
-  // 这一步是这次升级**唯一对原有内容做的事**，而它不改动任何一个字节的正文——只在节
-  // 标题下面插一行注释。没有它，下一次刷新会按「节标题在模板里」把撞名的节整节替换，
-  // 而那次刷新是流程里标着「强制」的一步：使用者的句子就这样静默消失，事后没有任何
-  // 痕迹能说明它去哪了。
+  // 只打原有的那几节，不打脚本刚补进来的——这一点是承重的：
+  // 补进来的节是生成内容，建好远端之后它们**必须**能被强制回刷补上新段落。
+  // 如果给它们也打上标记，`docs-set.md` 里标着「这不是可选项」的那次回刷会静默变成
+  // 「无需改动」，用户拿到的契约里就永远没有发布那半部分。
   //
-  // 打了标记之后，判据变成「这段字节是谁写的」，与标题叫什么无关。
-  text = markKeptSections(text)
+  // 而原有的节必须打：没有标记时，下一次刷新会按「节标题在模板里」把撞名的节整节替换，
+  // 而节标题是人和模板都会用的公共词汇（「构建与验证」「版本管理」几乎人人这么起名）。
+  //
+  // 这一步不改动任何字节的正文，只在节标题下面插一行注释。
+  text = markKeptSections(text, new Set(old.sections.map((s) => s.heading)))
   return { text, added }
 }
 
 /**
- * 给每一节打上 `pf:keep`，**跳过内核区**（那段由内核模板独占）。
+ * 给**指定标题的那些节**打上 `pf:keep`，跳过内核区（那段由内核模板独占）。
+ *
+ * `headings` 是这次要认领的节。传空集就一个都不打——调用方必须明确说出
+ * 「这些节的内容归使用者」，而不是让函数替它猜。
  *
  * 幂等：已经有标记的节不重复打。围栏代码块里的 `## ...` 不算节——它是示例，
  * 在它前面插标记会破坏代码块。
  */
-function markKeptSections(text) {
+function markKeptSections(text, headings) {
+  if (headings.size === 0) return text
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   const out = []
   let inKernel = false
@@ -942,8 +949,9 @@ function markKeptSections(text) {
       continue
     }
 
-    // 二级标题：它下面那一行若已经是标记就不重复打。
-    if (/^##\s+\S/.test(line)) {
+    // 二级标题：只有被认领的那些才打，且下面一行已经是标记时不重复打。
+    // `headings` 里的值是 `splitSections` 存的**整行**（含 `## ` 前缀），比较时用整行。
+    if (/^##\s+\S/.test(line) && headings.has(line.trim())) {
       const next = lines[i + 1] ?? ''
       if (next.trim() !== KEEP) out.push('', KEEP)
     }

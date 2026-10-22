@@ -4342,6 +4342,18 @@ group('[51b] 占位符判据：认自己家的取值名，不认别人的模板�
   check(ciCaught, '正例：尖括号占位符（安装命令）必须被判出来',
     String(rCi.stdout ?? '').split('\n').filter((l) => /待处理|占位/.test(l)).join(' | ').slice(0, 220))
   report(ciCaught, '正例：尖括号占位符被抓')
+
+  // 反例三：中文技术文档里的**指路写法**不能当占位符。
+  // `<生产环境>`、`<部署文档>`、`<项目邮箱>` 是读者要去的地方，不是要替换的洞；
+  // 判成占位符会让人去删掉自己的文档。判据收在「以操作位名词结尾」这一类上。
+  const cjkDoc = fixture('ho-cjk-angle', {
+    'package.json': '{"name":"d","version":"1.0.0"}\n',
+    'README.md': '部署到 <生产环境> 之前先备份。反馈发到 <项目邮箱>。详见 <部署文档>。\n',
+  })
+  const rCjk = handoff(cjkDoc)
+  check(rCjk.status === 0, '反例：中文指路写法（生产环境/部署文档/项目邮箱）不判成占位符',
+    String(rCjk.stdout ?? '').split('\n').filter((l) => /待处理|占位/.test(l)).join(' | ').slice(0, 220))
+  report(rCjk.status === 0, '反例：中文指路写法放行')
 }
 
 // ── [49] 命令行用法：打错了必须说出来 ────────────────────────────────────────

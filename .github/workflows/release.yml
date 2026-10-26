@@ -47,14 +47,15 @@ jobs:
       REPO: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
-      - name: 检出（全历史；工具取自触发处，说明描述的是 TAG 那个标签）
+      - name: 检出（全历史；工具取自默认分支，说明描述的是 TAG 那个标签）
         uses: actions/checkout@v7
         with:
-          # 取触发时的 ref 而不是标签：推标签时两者是同一个东西；而 workflow_dispatch
-          # 触发时，ref 是你点「运行」的那个分支——**工具用最新的，要补的那一版才有
-          # 可能被修好**。若固定检出标签，工具的修复永远补不回已发布的说明，而那一页
-          # 又恰恰只能靠补跑来改。历史取全量，所以按标签读提交记录照样完整。
-          ref: ${{ github.ref }}
+          # 工具取默认分支，**不是**触发时的 ref。推标签时 `github.ref` 就是那个标签，
+          # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面，修不了；
+          # 手动触发时它还是你在界面上选的那个 ref，选标签就同样退回旧提交。
+          # 所以两者都改成默认分支：**工具永远用最新的那版**，被描述的标签由 TAG 指定。
+          # 历史取全量，所以按标签读提交记录照样完整。
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
       - name: 发版门禁（标签与它里面那份 SKILL.md 的版本同号、来源对得上）

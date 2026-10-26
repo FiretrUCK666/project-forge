@@ -31,23 +31,23 @@
 
   <!-- 右：勘察结果节选——数值来自勘察脚本，行是卡片自己排的（脚本本身不输出这个形状） -->
   <g id="survey-proof">
-    <rect x="676" y="112" width="460" height="214" fill="#DFDED9"/>
+    <rect x="676" y="98" width="460" height="214" fill="#DFDED9"/>
 
-    <text x="704" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="704" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">$ node scripts/survey.mjs .</text>
 
     <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19">
-      <text x="704" y="196" fill="#5D6064">生态</text>
-      <text x="768" y="196" fill="#17181A">node</text>
+      <text x="704" y="176" fill="#5D6064">生态</text>
+      <text x="768" y="176" fill="#17181A">node</text>
 
-      <text x="704" y="234" fill="#5D6064">文档</text>
-      <text x="768" y="234" fill="#17181A">AGENTS.md <tspan fill="#C2410C">缺</tspan></text>
+      <text x="704" y="214" fill="#5D6064">文档</text>
+      <text x="768" y="214" fill="#17181A">README <tspan fill="#C2410C">缺</tspan></text>
 
-      <text x="704" y="272" fill="#5D6064">发布</text>
-      <text x="768" y="272" fill="#17181A">没有可发布的产物</text>
+      <text x="704" y="252" fill="#5D6064">发布</text>
+      <text x="768" y="252" fill="#17181A">未声明</text>
 
-      <text x="704" y="310" fill="#5D6064">远端</text>
-      <text x="768" y="310" fill="#17181A">没有</text>
+      <text x="704" y="290" fill="#5D6064">仓库</text>
+      <text x="768" y="290" fill="#17181A">未初始化</text>
     </g>
   </g>
 </svg>

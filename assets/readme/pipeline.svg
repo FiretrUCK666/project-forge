@@ -30,7 +30,7 @@
     <text x="64" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="19" fill="#C2410C" font-weight="700">03</text>
     <text x="128" y="282" font-size="24" font-weight="700" fill="#17181A">过硬门控</text>
-    <text x="128" y="310" font-size="19" fill="#5D6064">写文档、建仓库、发布之前各读一份判据；跳过它等于凭猜做事</text>
+    <text x="128" y="310" font-size="19" fill="#5D6064">写入、建仓库、发布、拆痕迹之前各读一份判据；跳过它等于凭猜做事</text>
 
     <text x="64" y="352" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="19" fill="#C2410C" font-weight="700">04</text>

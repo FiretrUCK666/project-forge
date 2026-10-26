@@ -1262,11 +1262,27 @@ function checkStatedCounts() {
     { word: '硬不变量', key: '硬不变量' },
     { word: '硬门控', key: '硬门控' },
   ]
-  const docs = ['SKILL.md', 'README.md', 'AGENTS.md', 'CONTRIBUTING.md']
-  for (const doc of docs) {
-    const p = join(SKILL_ROOT, doc)
+  // 卡片也要核：卡片是 README 的摘要，它上面写的数量同样会变成没人知道的一句假话。
+  // 卡片不是 Markdown，但判据（「文档里写着 N 条」）与文档是同一件事，所以走同一张表、
+  // 同一个 actual——两处各写一份核对，迟早给出两种答案。
+  const sources = [
+    ...['SKILL.md', 'README.md', 'AGENTS.md', 'CONTRIBUTING.md'].map((f) => ({ label: f, file: f })),
+    ...(existsSync(join(SKILL_ROOT, 'assets', 'readme'))
+      ? readdirSync(join(SKILL_ROOT, 'assets', 'readme'))
+        .filter((f) => f.endsWith('.svg'))
+        .sort()
+        .map((f) => ({
+          label: `assets/readme/${f}`,
+          file: join('assets', 'readme', f),
+          // 只查看得见的文字：`<desc>` 里写「九道门」不算卡片说了这句话。
+          text: visibleSvgText(readText(join(SKILL_ROOT, 'assets', 'readme', f))),
+        }))
+      : []),
+  ]
+  for (const { label: doc, file, text: preset } of sources) {
+    const p = join(SKILL_ROOT, file)
     if (!existsSync(p)) continue
-    const text = readText(p).replace(/^\uFEFF/, '')
+    const text = preset ?? readText(p).replace(/^\uFEFF/, '')
     for (const { word, key } of WATCHED) {
       // 要求数字前不是「第」——「第一硬不变量」是序数（「第一个」），不是数量断言，
       // 误报它只会让人去改一句其实正确的话。

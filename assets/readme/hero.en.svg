@@ -32,23 +32,23 @@
 
   <!-- Right: an excerpt of the survey result — the values come from the script, the rows are laid out by the card -->
   <g id="survey-proof">
-    <rect x="676" y="112" width="460" height="214" fill="#DFDED9"/>
+    <rect x="676" y="98" width="460" height="214" fill="#DFDED9"/>
 
-    <text x="704" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="704" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">$ node scripts/survey.mjs .</text>
 
     <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19">
-      <text x="704" y="196" fill="#5D6064">stack</text>
-      <text x="790" y="196" fill="#17181A">node</text>
+      <text x="704" y="176" fill="#5D6064">stack</text>
+      <text x="790" y="176" fill="#17181A">node</text>
 
-      <text x="704" y="234" fill="#5D6064">docs</text>
-      <text x="790" y="234" fill="#17181A">AGENTS.md <tspan fill="#C2410C">missing</tspan></text>
+      <text x="704" y="214" fill="#5D6064">docs</text>
+      <text x="790" y="214" fill="#17181A">README <tspan fill="#C2410C">missing</tspan></text>
 
-      <text x="704" y="272" fill="#5D6064">release</text>
-      <text x="790" y="272" fill="#17181A">nothing to publish</text>
+      <text x="704" y="252" fill="#5D6064">release</text>
+      <text x="790" y="252" fill="#17181A">undeclared</text>
 
-      <text x="704" y="310" fill="#5D6064">remote</text>
-      <text x="790" y="310" fill="#17181A">none</text>
+      <text x="704" y="290" fill="#5D6064">repo</text>
+      <text x="790" y="290" fill="#17181A">not set up</text>
     </g>
   </g>
 </svg>

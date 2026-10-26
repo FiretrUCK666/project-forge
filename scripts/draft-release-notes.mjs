@@ -79,10 +79,15 @@ function main() {
   // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：这里若另写一份取
   // 仓库名的正则，`[^/.]+` 会把带点的名字截断（`acme/my.repo` → `acme/my`），起草出的
   // 对比链接就指向一个不存在的仓库——而它看起来完全正常，只有点开才发现。
+  //
+  // **没有上一个标签时不生成对比链接**：GitHub 的 compare 要两个端点，只有一个时那个
+  // 地址打不开。发一个点开是 404 的「完整改动」比不写更坏——读者以为那里有东西。
   let compare = `\`${range}\``
   const remote = git(['remote', 'get-url', 'origin'], cwd)
   const repo = remote === undefined ? undefined : parseGitHubRepo(remote)
-  if (repo !== undefined) compare = `[${prev ?? '初始'}...${tag}](https://github.com/${repo}/compare/${range})`
+  if (repo !== undefined && prev !== undefined) {
+    compare = `[${prev}...${tag}](https://github.com/${repo}/compare/${range})`
+  }
 
   // 说明的唯一来源是**被标签指到的那次提交**（`git log` 按时间倒序，第一条就是它）。
   // 发版那一步本来就要改 SKILL.md 的版本号，把面向使用者的总述写在那次提交的正文里
@@ -94,9 +99,14 @@ function main() {
   // 比让这次发版失败坏得多。
   const lines = [`## 这一版更新了什么、修复了什么`, '']
   const head = commits[0]
+  // 页面上有没有列出提交主题，决定「仅列最近 100 条」那句话成不成立。
+  // 只有走「无总述」那支时才把主题铺在页面上；有总述时页面正文只写总述，
+  // 一句提交都没列——那时再说「仅列最近 100 条」是凭空多出来的假话。
+  let listedSubjects = false
   if (head === undefined) {
     lines.push('（该区间无提交记录）')
   } else if (head.body.trim() === '') {
+    listedSubjects = true
     lines.push(`- ${head.subject}`)
     for (const c of commits.slice(1)) lines.push(`- ${c.subject}`)
     lines.push('', `<!-- ${SUMMARY_MARKER} 该区间有 ${commits.length} 条提交，而被标签指到的那次`
@@ -106,8 +116,13 @@ function main() {
     lines.push(head.body)
   }
   // 取数上限必须明示：超 100 条时老的提交静默丢失，不写就是“看起来全了”。
-  if (commits.length >= 100) lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')
-  lines.push('', `**完整改动**：${compare}`, '')
+  if (listedSubjects && commits.length >= 100) {
+    lines.push('', '（仅列最近 100 条，更早的见完整改动对比）')
+  }
+  // 没有上一个标签时没有可比区间：只写一句说明，不给点不开的链接。
+  if (prev === undefined) lines.push('', '这是这个仓库的第一个版本，没有可对比的上一版。')
+  else lines.push('', `**完整改动**：${compare}`)
+  lines.push('')
   const target = outPath ?? `./${tag}-notes.md`
   try {
     writeFileSync(target, lines.join('\n'), { encoding: 'utf8' })

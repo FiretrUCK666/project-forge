@@ -4215,6 +4215,34 @@ if (!HAS_GIT) {
     '「还没写完」的判据两面都分得清（带标记认出、不带标记放行）',
     `bare=${needsSummary(bareText)} body=${needsSummary(bodyText)}`)
   report(needsSummary(bareText) && !needsSummary(bodyText), '判据：两面都分得清')
+
+  // 5) 没有上一个标签时（仓库的第一个版本），不许给出点不开的对比链接，
+  //    也不许写「仅列最近 100 条」——有总述时页面上一句提交都没列，那句话是凭空多出来的。
+  //
+  //    两个都是实际发生过的事：第一次发版时页面底部挂着
+  //    `compare/v1.0.0`（只有一个端点，点开 404），上面还写着「仅列最近 100 条」，
+  //    而正文里一条都没列。
+  const first = join(ROOT, 'notes-first.md')
+  const fresh = spawnSync(
+    process.execPath, [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), 'v0.1.0', first],
+    { cwd: repo, encoding: 'utf8', windowsHide: true },
+  )
+  const firstText = existsSync(first) ? readFileSync(first, 'utf8') : ''
+  const noDeadLink = fresh.status === 0 && !/compare\//.test(firstText)
+  check(noDeadLink, '第一个版本：不给点不开的对比链接', firstText.split('\n').slice(-3).join(' | ').slice(0, 160))
+  report(noDeadLink, '首版：没有死链')
+  const noPhantomCount = !firstText.includes('仅列最近 100 条')
+  check(noPhantomCount, '没有列提交时不写「仅列最近 100 条」（那句话要真有列表才成立）',
+    firstText.slice(0, 120))
+  report(noPhantomCount, '没有假计数')
+  // 反面对照：有上一个版本时，「完整改动」那一行必须给出两个端点组成的区间，
+  // 否则上面那条「不给死链」会被「永远不给区间」这种退化解满足。
+  // 这里不假定有 remote：没有 remote 时不给链接是对的（不编地址），但区间照写；
+  // 区间是「上一个标签..这个标签」，即紧邻的那一个，不是最早的任何一个。
+  const linked = /完整改动/.test(bodyText) && /v0\.2\.0\.\.v0\.3\.0/.test(bodyText)
+  check(linked, '有上一个版本时照旧给出区间（否则「不给死链」可以靠从不给区间蒙过去）',
+    bodyText.split('\n').filter((l) => l.includes('完整改动')).join(' | ').slice(0, 160))
+  report(linked, '有上一版：区间照给')
 }
 
 // ── [48] 包自洽性：包里的相对引用必须落在包内 ────────────────────────────────

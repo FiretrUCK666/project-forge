@@ -1,48 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="460" viewBox="0 0 1200 460"
+     width="1200" height="502" viewBox="0 0 1200 502"
      role="img" aria-labelledby="pfInstallTitle pfInstallDesc">
   <title id="pfInstallTitle">Two ways to install</title>
   <desc id="pfInstallDesc">On the left, download the package from the Releases page: three steps, no git needed, and it keeps itself current. On the right, clone the repository: for changing the skill or following every commit, and it does not update itself.</desc>
 
   <!--
-    Same grid as the Chinese card: 64 left and right, 40 between blocks, each column half the width.
+    Same grid as the Chinese card: 64 left and right, each column half the width, divider at 600.
     The "recommended" label rides along with the title via dx, so it never drifts when a word changes.
+    Vertical rhythm: accent bar at y74, title baseline 98, divider from 128, column title baseline 188,
+    steps 40 apart, bottom title set 68 below the last step so the two blocks read as separate,
+    bottom note 32 below that. Re-measure after editing copy.
   -->
-  <rect width="1200" height="460" fill="#E9E8E4"/>
+  <rect width="1200" height="502" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <rect x="64" y="50" width="6" height="26" fill="#C2410C"/>
-    <text x="84" y="74" font-size="40" font-weight="700" fill="#17181A">Two ways to install</text>
-    <text x="1136" y="72" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <rect x="64" y="74" width="6" height="26" fill="#C2410C"/>
+    <text x="84" y="98" font-size="40" font-weight="700" fill="#17181A">Two ways to install</text>
+    <text x="1136" y="96" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">pick one</text>
   </g>
 
-  <line x1="64" y1="100" x2="1136" y2="100" stroke="#C6C4BF" stroke-width="1"/>
-  <line x1="600" y1="124" x2="600" y2="404" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="64" y1="128" x2="1136" y2="128" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="600" y1="152" x2="600" y2="436" stroke="#C6C4BF" stroke-width="1"/>
 
   <g id="download" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <text x="64" y="146" font-size="26" font-weight="700" fill="#17181A">Download the package<tspan dx="14"
+    <text x="64" y="188" font-size="26" font-weight="700" fill="#17181A">Download the package<tspan dx="14"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17"
           font-weight="400" fill="#C2410C">recommended</tspan></text>
 
-    <text x="64" y="198" font-size="19" fill="#5D6064">1&#8195;get the package from the Releases page</text>
-    <text x="64" y="238" font-size="19" fill="#5D6064">2&#8195;unzip it into your host&apos;s skill directory</text>
-    <text x="64" y="278" font-size="19" fill="#5D6064">3&#8195;rename the unzipped folder to project-forge</text>
+    <text x="64" y="238" font-size="19" fill="#5D6064">1&#8195;get the package from the Releases page</text>
+    <text x="64" y="278" font-size="19" fill="#5D6064">2&#8195;unzip it into your host&apos;s skill directory</text>
+    <text x="64" y="318" font-size="19" fill="#5D6064">3&#8195;rename the unzipped folder to project-forge</text>
 
-    <text x="64" y="366" font-size="20" font-weight="700" fill="#17181A">It keeps itself current</text>
-    <text x="64" y="398" font-size="18" fill="#5D6064">no git, nothing for you to do</text>
+    <text x="64" y="386" font-size="20" font-weight="700" fill="#17181A">It keeps itself current</text>
+    <text x="64" y="418" font-size="18" fill="#5D6064">no git, nothing for you to do</text>
   </g>
 
   <g id="clone" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <text x="640" y="146" font-size="26" font-weight="700" fill="#17181A">Clone the repository</text>
+    <text x="640" y="188" font-size="26" font-weight="700" fill="#17181A">Clone the repository</text>
 
-    <text x="640" y="198" font-size="19" fill="#5D6064">for changing this skill itself, or</text>
-    <text x="640" y="238" font-size="19" fill="#5D6064">following every commit as it lands</text>
+    <text x="640" y="238" font-size="19" fill="#5D6064">for changing this skill itself, or</text>
+    <text x="640" y="278" font-size="19" fill="#5D6064">following every commit as it lands</text>
 
-    <text x="640" y="278" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="640" y="318" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="17" fill="#17181A">git clone &lt;repository url&gt;</text>
 
-    <text x="640" y="366" font-size="20" font-weight="700" fill="#17181A">It will not update itself</text>
-    <text x="640" y="398" font-size="18" fill="#5D6064">if there is a .git folder, run git pull yourself</text>
+    <text x="640" y="386" font-size="20" font-weight="700" fill="#17181A">It will not update itself</text>
+    <text x="640" y="418" font-size="18" fill="#5D6064">if there is a .git folder, run git pull yourself</text>
   </g>
 </svg>

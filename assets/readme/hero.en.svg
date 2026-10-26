@@ -1,54 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="420" viewBox="0 0 1200 420"
+     width="1200" height="512" viewBox="0 0 1200 512"
      role="img" aria-labelledby="pfHeroTitle pfHeroDesc">
   <title id="pfHeroTitle">project-forge</title>
   <desc id="pfHeroDesc">A general project-governance skill: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is an excerpt of the survey result: the values come from the survey script, the rows are laid out by the card.</desc>
 
   <!--
-    Neutral background on purpose: the host page may be light or dark, and a card that
-    carries its own background stays readable on both. Left and right margins are 64
-    everywhere (render-svg.mjs measures them and checks symmetry); the top and bottom
-    margins follow the content height and differ per card — 58 top and 66 bottom on this
-    one. Re-measure after editing copy; do not copy another card's numbers.
+    All four cards share the same 512 canvas height. Left and right margins are 64 everywhere
+    (render-svg.mjs measures them and checks symmetry); the top and bottom margins are both 64,
+    produced by laying the content out rather than by padding. Re-measure after editing copy.
     Palette: background #E9E8E4, ink #17181A, muted #5D6064, rule #C6C4BF, accent #C2410C, panel #DFDED9.
   -->
-  <rect width="1200" height="420" fill="#E9E8E4"/>
+  <rect width="1200" height="512" fill="#E9E8E4"/>
 
   <g id="title-block" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <rect x="64" y="58" width="6" height="20" fill="#C2410C"/>
-    <text x="82" y="74" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <rect x="64" y="64" width="6" height="24" fill="#C2410C"/>
+    <text x="82" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">project governance skill</text>
 
-    <text x="60" y="188" font-size="88" font-weight="700" letter-spacing="-2.5"
+    <text x="60" y="232" font-size="88" font-weight="700" letter-spacing="-2.5"
           fill="#17181A">project-forge</text>
 
-    <text x="64" y="252" font-size="30" fill="#17181A">Point it at a project directory.</text>
-    <text x="64" y="294" font-size="30" fill="#17181A">It surveys first, then decides.</text>
+    <text x="64" y="312" font-size="30" fill="#17181A">Point it at a project directory.</text>
+    <text x="64" y="356" font-size="30" fill="#17181A">It surveys first, then decides.</text>
 
-    <text x="64" y="352" font-size="19" fill="#5D6064">Version control · Docs · Remote · Releases · Hand-off</text>
-    <text x="1136" y="352" font-size="18" text-anchor="end" fill="#5D6064"
+    <text x="64" y="440" font-size="19" fill="#5D6064">Version control · Docs · Remote · Releases · Hand-off</text>
+    <text x="1136" y="440" font-size="18" text-anchor="end" fill="#5D6064"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Node &#8805; 16 · no dependencies</text>
   </g>
 
   <!-- Right: an excerpt of the survey result — the values come from the script, the rows are laid out by the card -->
   <g id="survey-proof">
-    <rect x="676" y="98" width="460" height="214" fill="#DFDED9"/>
+    <rect x="676" y="119" width="460" height="268" fill="#DFDED9"/>
 
-    <text x="704" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="704" y="167" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">$ node scripts/survey.mjs .</text>
 
     <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19">
-      <text x="704" y="176" fill="#5D6064">stack</text>
-      <text x="790" y="176" fill="#17181A">node</text>
+      <text x="704" y="211" fill="#5D6064">stack</text>
+      <text x="790" y="211" fill="#17181A">node</text>
 
-      <text x="704" y="214" fill="#5D6064">docs</text>
-      <text x="790" y="214" fill="#17181A">README <tspan fill="#C2410C">missing</tspan></text>
+      <text x="704" y="255" fill="#5D6064">docs</text>
+      <text x="790" y="255" fill="#17181A">README <tspan fill="#C2410C">missing</tspan></text>
 
-      <text x="704" y="252" fill="#5D6064">release</text>
-      <text x="790" y="252" fill="#17181A">undeclared</text>
+      <text x="704" y="299" fill="#5D6064">release</text>
+      <text x="790" y="299" fill="#17181A">undeclared</text>
 
-      <text x="704" y="290" fill="#5D6064">repo</text>
-      <text x="790" y="290" fill="#17181A">not set up</text>
+      <text x="704" y="343" fill="#5D6064">repo</text>
+      <text x="790" y="343" fill="#17181A">not set up</text>
     </g>
   </g>
 </svg>

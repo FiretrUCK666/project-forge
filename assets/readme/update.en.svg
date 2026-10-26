@@ -1,39 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="452" viewBox="0 0 1200 452"
+     width="1200" height="505" viewBox="0 0 1200 505"
      role="img" aria-labelledby="pfUpdateTitle pfUpdateDesc">
   <title id="pfUpdateTitle">The downloaded copy keeps itself current</title>
   <desc id="pfUpdateDesc">Every time the downloaded copy is used it quietly compares version numbers. Same version: nothing happens. Newer version: it swaps in the whole copy and tells you which version it moved from and to. A copy replaces its files at most once every 24 hours. If the folder contains .git, that copy is for editing and the tool leaves it alone.</desc>
 
-  <rect width="1200" height="452" fill="#E9E8E4"/>
+  <!-- Same vertical rhythm as the Chinese card: accent bar at y74, title baseline 98,
+       divider at 128, first block baseline 178, 28 between the two lines of a block,
+       80 between blocks; bottom rule 40 after the last block, footer 32 below that.
+       Re-measure after editing copy. -->
+  <rect width="1200" height="505" fill="#E9E8E4"/>
 
   <g id="head" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <rect x="64" y="56" width="6" height="26" fill="#C2410C"/>
-    <text x="84" y="80" font-size="40" font-weight="700" fill="#17181A">The downloaded copy keeps itself current</text>
-    <text x="1136" y="78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <rect x="64" y="74" width="6" height="26" fill="#C2410C"/>
+    <text x="84" y="98" font-size="40" font-weight="700" fill="#17181A">The downloaded copy keeps itself current</text>
+    <text x="1136" y="96" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#5D6064">nothing for you to do</text>
   </g>
 
-  <line x1="64" y1="110" x2="1136" y2="110" stroke="#C6C4BF" stroke-width="1"/>
+  <line x1="64" y1="128" x2="1136" y2="128" stroke="#C6C4BF" stroke-width="1"/>
 
   <g id="how" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
-    <text x="64" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="64" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">01</text>
-    <text x="128" y="152" font-size="21" fill="#17181A">The downloaded copy compares version numbers on each use</text>
-    <text x="128" y="178" font-size="18" fill="#5D6064">quiet by default; normally it fetches just the version, not the whole package</text>
+    <text x="128" y="178" font-size="21" fill="#17181A">The downloaded copy compares version numbers on each use</text>
+    <text x="128" y="206" font-size="18" fill="#5D6064">quiet by default; normally it fetches just the version, not the whole package</text>
 
-    <text x="64" y="226" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="64" y="258" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">02</text>
-    <text x="128" y="226" font-size="21" fill="#17181A">same version: it stops there and changes nothing</text>
-    <text x="128" y="252" font-size="18" fill="#5D6064">which is what happens almost every time</text>
+    <text x="128" y="258" font-size="21" fill="#17181A">same version: it stops there and changes nothing</text>
+    <text x="128" y="286" font-size="18" fill="#5D6064">which is what happens almost every time</text>
 
-    <text x="64" y="300" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    <text x="64" y="338" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="18" fill="#C2410C" font-weight="700">03</text>
-    <text x="128" y="300" font-size="21" fill="#17181A">Newer version: it swaps in the whole copy and tells you</text>
-    <text x="128" y="326" font-size="18" fill="#5D6064">at most once per copy every 24 hours, so it cannot flip all day</text>
+    <text x="128" y="338" font-size="21" fill="#17181A">Newer version: it swaps in the whole copy and tells you</text>
+    <text x="128" y="366" font-size="18" fill="#5D6064">at most once per copy every 24 hours, so it cannot flip all day</text>
   </g>
 
-  <line x1="64" y1="366" x2="1136" y2="366" stroke="#C6C4BF" stroke-width="1"/>
-  <text x="1136" y="396" text-anchor="end"
+  <line x1="64" y1="406" x2="1136" y2="406" stroke="#C6C4BF" stroke-width="1"/>
+  <text x="1136" y="438" text-anchor="end"
         font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
         font-size="18" fill="#5D6064">If the folder has .git, it is yours to edit: the tool leaves it alone, run git pull yourself</text>
 </svg>

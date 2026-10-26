@@ -109,6 +109,32 @@ function pixel(png, x, y) {
 /** 与底色差得够远就算「这里画了东西」。容差取 6：抗锯齿边缘不算内容。 */
 const isInk = (p, bg) => Math.abs(p[0] - bg[0]) > 6 || Math.abs(p[1] - bg[1]) > 6 || Math.abs(p[2] - bg[2]) > 6
 
+/**
+ * 按行切出「内容带」：连续有墨迹的行算一带，带与带之间的空行就是间距。
+ *
+ * 为什么需要它：调纵向节奏时真正要动的是**带与带之间的空行**，而不是画布高度。
+ * 只看「上留白 / 下留白」两个数，会得出一张「留白很均匀、内容全挤在中间」的卡片。
+ *
+ * 阈值 `minInk` 默认 2：纵向分隔线（stroke-width 1）每行只贡献 1 个像素，取 2 就把它
+ * 滤掉了。不滤的话它会从第一条文字带一路连到最后一条，把整张卡的节奏糊成一带。
+ */
+function inkBands(png, bg, maxY, from, to, minInk = 2) {
+  const bands = []
+  let start = -1
+  for (let y = 0; y <= maxY; y += 1) {
+    let count = 0
+    for (let x = from; x < to; x += 1) if (isInk(pixel(png, x, y), bg)) count += 1
+    if (count >= minInk) {
+      if (start < 0) start = y
+    } else if (start >= 0) {
+      bands.push({ top: start, bottom: y - 1 })
+      start = -1
+    }
+  }
+  if (start >= 0) bands.push({ top: start, bottom: maxY })
+  return bands
+}
+
 function render(svgPath, width, outPath) {
   const exe = browser()
   if (exe === undefined) return { ok: false, why: '这台机器上没有找到 Chrome 或 Edge' }
@@ -224,6 +250,32 @@ function main(argv) {
       for (const p of problems) process.stdout.write(`  不合格：${p}\n`)
       return 1
     }
+
+    // 指定了 --bands 时，把纵向节奏摊开：每一条内容带的起止，以及带与带之间的空行。
+    //
+    // 这一项存在的理由：判「画布加高而内容没动」不能靠肉眼。上留白与下留白同时变大、
+    // 而带间距一个没变，就是那种情况的指纹——它看起来「留白很足」，其实什么都没重排。
+    const bandArg = argv.indexOf('--bands')
+    if (bandArg >= 0) {
+      const [from, to] = String(argv[bandArg + 1] ?? `64-${png.width - 64}`).split('-').map(Number)
+      const bands = inkBands(png, bg, cardBottom, from, to)
+      process.stdout.write(`  纵向节奏（x ${from}–${to}，共 ${bands.length} 带）：\n`)
+      let prev
+      for (const b of bands) {
+        const gap = prev === undefined ? '' : `　↑ 空 ${b.top - prev - 1}`
+        process.stdout.write(`    ${String(b.top).padStart(4)}–${String(b.bottom).padEnd(4)} 高 ${String(b.bottom - b.top + 1).padStart(3)}${gap}\n`)
+        prev = b.bottom
+      }
+      const gaps = bands.slice(1).map((b, i) => b.top - bands[i].bottom - 1)
+      if (gaps.length > 0) {
+        // 间距的离散程度是「节奏是否统一」的直接指标：一串块之间本该等距，
+        // 差得太多说明某处是硬塞进去的，而不是排出来的。
+        const uniq = [...new Set(gaps)]
+        process.stdout.write(`  带间距：${gaps.join(' / ')}`
+          + `${uniq.length === 1 ? '（等距）' : `（${uniq.length} 种，不等距）`}\n`)
+      }
+    }
+
     process.stdout.write('  合格：画布与内容一致，没有越界，留白对称\n')
     return 0
   } finally {

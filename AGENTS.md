@@ -343,6 +343,7 @@ node scripts/dev/preflight.mjs                # 结构自检：引用完整、�
 node scripts/dev/selftest.mjs                 # 行为自检：造 fixture 实跑，断言判定结果
 node scripts/compose-agents.mjs . --check     # 内核逐字一致、标记恰好一对、生成文件不缺节
 node scripts/sync-toc.mjs README.md README.en.md --check   # README 目录与标题是否同步
+git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt --at HEAD   # 产出物与文件地图双向核对（与 check.yml 同一批）
 ```
 
 `preflight.mjs` 检查的是「坏了就一定会出问题」的**结构**性质，不是风格偏好：

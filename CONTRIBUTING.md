@@ -8,13 +8,9 @@
 到 [Issues](https://github.com/FiretrUCK666/project-forge/issues) 提出。请先搜索已有的
 Issue，避免重复。
 
-为了让问题能被定位，请一并附上：
-
-- 操作系统与 Node 版本；
-- 你运行的**完整命令**；
-- **完整的报错文本**（不要只描述现象，也不要只截一行）；
-- 如果是勘察判定错了，附上被勘察目录的技术栈与大致结构（哪些清单文件、有什么产物
-  目录），并说明你认为正确的判定应该是什么。
+报缺陷请用仓库里的[缺陷报告模板](.github/ISSUE_TEMPLATE/bug_report.md)：它会逐项问你
+期望发生什么、实际发生什么、怎么复现、在什么环境上。**要求只有那一处**，本文不再另抄
+一份——两份清单各自维护，改一边就会漂移。
 
 ## 报告缺陷
 
@@ -25,7 +21,8 @@ Issue，避免重复。
 ## 提出改动
 
 1. 开一个 Issue 说明你想改什么、为什么。涉及行为变化或新增文件的，先在 Issue 里
-   讨论清楚再动手。
+   讨论清楚再动手。**只改文字（错别字、文档表述）不必开 Issue**，直接走第 2 条的第三
+   条路径即可。
 2. 在分支上改，然后开拉取请求：
    - **没有本仓库写权限**（大多数情况）：先 **fork** 到你自己的账号，克隆 fork 出来的
      那份，在分支上开发，推回你自己的 fork，再从那个分支开拉取请求；
@@ -59,19 +56,30 @@ git clone https://github.com/FiretrUCK666/project-forge.git
 cd project-forge
 ```
 
-`git` 是可选但建议安装的：没有它时依赖它的那几组自检会**自动跳过并说明**，不会报成
-失败。
+`git` 只改文档时可以不用：没有它时依赖它的那几组自检会**自动跳过并说明**，不会报成
+失败。但**要让门禁全绿就必须有 `git`**——上面第五条与 CI 都用 `git archive` 核对产出物，
+没装 `git` 这一关跑不了。
+
+克隆下来后**不要把目录改名**：`SKILL.md` 里的 `name` 必须与目录名一致（目录名就是它对
+外的身份），改了 `preflight.mjs` 会直接报错。要换位置可以，但保持目录名仍是
+`project-forge`。
 
 ## 提交前门禁
 
-改完必须全绿：
+改完必须全绿。**第一、二条各要跑几分钟，中途没有任何输出**——`preflight.mjs` 里那条
+行为自检实测约 4 分钟，两条合起来一刻钟上下。终端上几分钟没动静不是卡死，别 CTRL+C。
 
 ```sh
 node scripts/dev/preflight.mjs
 node scripts/dev/selftest.mjs
 node scripts/compose-agents.mjs . --check
 node scripts/sync-toc.mjs README.md README.en.md --check
+git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt --at HEAD
 ```
+
+前四条是本地日常，第五条核对**真跑出来的那份用户包**：`git archive` 导出这个版本实际会
+分发出去的文件，再与 `SKILL.md` 的文件地图双向对齐。CI 里跑的也是这五条，所以本地全绿
+等于 CI 全绿。跑完的 `package-list.txt` 是个中间产物，已被 `.gitignore` 忽略。
 
 第一条是结构自检（引用完整性、内核一致性、硬性规范）；第二条是**行为自检**——它造
 临时 fixture 实跑，断言每条判定的结果；第三条校验三件事：`AGENTS.md` 里的通用内核与

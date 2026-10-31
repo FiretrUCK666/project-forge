@@ -18,9 +18,10 @@ node scripts/dev/preflight.mjs
 node scripts/dev/selftest.mjs
 node scripts/compose-agents.mjs . --check
 node scripts/sync-toc.mjs README.md README.en.md --check
+git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt --at HEAD
 ```
 
-- [ ] 上面四条全绿
+- [ ] 上面五条全绿（与 CI 是同一批命令）
 - [ ] 改了判定逻辑的话，同时补了能证伪它的 fixture（一个该被识别成 X 的目录，一个容易被误判成 X 的目录）
 - [ ] 改了 `templates/agents-kernel.md` 的话，同一次提交里带上了重新注入的 `AGENTS.md`
 - [ ] 改了 README 的结构的话，重跑过 `sync-toc.mjs`

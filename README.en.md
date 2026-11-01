@@ -223,6 +223,7 @@ the project is in, what it plans to do, and why it is skipping the rest.
 | `templates/license-bsd-2-clause.txt`, `templates/license-bsd-3-clause.txt` | Full standard text of the two BSD licenses (2-clause, 3-clause) |
 | `scripts/update.mjs` | Keeps this copy current (see Update) |
 | `scripts/survey.mjs` | Read-only survey producing structured facts |
+| `scripts/ecosystems.mjs` | Declarative ecosystem descriptors; adding one touches only this file |
 | `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
 | `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |

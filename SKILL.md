@@ -232,7 +232,7 @@ node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 ```
 
-维护本 skill 自身时跑 `scripts/dev/preflight.mjs`（它按脚本自身位置推导检查对象，
+维护本 skill 时跑 `scripts/dev/preflight.mjs`（按脚本自身位置推导检查对象，
 不接受项目目录参数，不是 P7）。
 
 各脚本零依赖、跨平台。含中文或空格的路径作为独立参数传入是正常用法
@@ -270,9 +270,10 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
 | `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
+| `scripts/ecosystems.mjs` | 生态描述符：加一个生态只改这里 |
 | `scripts/lib/text.mjs`、`scripts/lib/markdown.mjs`、`scripts/lib/fs-atomic.mjs`、`scripts/lib/ledger.mjs` | 随包分发的公共模块（文本判据、围栏扫描、原子写入、账本） |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
-| `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--budget N` 改预算） |
+| `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
 | `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单；`--verify` 判是否已干净——退出码 **0 干净 / 1 不干净 / 3 判不了**，「判不了」指扫描没覆盖全部，**不要读成干净**） |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 写发布说明；「非 ASCII 正文不经 shell」那条规则的落地工具，含从提交记录起草 |

@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 // 否则任何想判断「这是不是主模块」的脚本又得把整个勘察引擎加载进来。
 import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock } from './lib/text.mjs'
 import { scanLines } from './lib/markdown.mjs'
+import { HOST_ECOSYSTEMS, detectHost, deriveHostFacts } from './ecosystems.mjs'
 
 
 /**
@@ -880,7 +881,7 @@ const MANIFEST_SHAPED_RE = /\.(json|toml|ya?ml|mod|gradle|csproj|fsproj|vbproj)$
  * 排的是**具体已知的文件名**，不是「凡是配置文件」——后者会把 `hedgehog.toml`
  * 这类没见过的清单一起排掉，而那正是这一项要抓的东西。
  */
-const CONFIGISH_NAME_RE = /^(tsconfig|jsconfig|deno|biome|eslint|prettier|stylelint|babel|browserslist|jest|vitest|playwright|cypress|rollup|vite|webpack|esbuild|tsup|swc|next|nuxt|svelte|astro|tailwind|postcss|uni|bunfig|renovate|dependabot|settings|launch|tasks|extensions|keybindings|typings|global)\b|^\./i
+const CONFIGISH_NAME_RE = /^(pnpm-workspace|turbo|nx|lerna|tsconfig|jsconfig|deno|biome|eslint|prettier|stylelint|babel|browserslist|jest|vitest|playwright|cypress|rollup|vite|webpack|esbuild|tsup|swc|next|nuxt|svelte|astro|tailwind|postcss|uni|bunfig|renovate|dependabot|settings|launch|tasks|extensions|keybindings|typings|global)\b|^\./i
 
 /**
  * 这个文件名像不像一份**认不出来的项目清单**。
@@ -1980,7 +1981,8 @@ function detectArtifacts(root, root_, eco, walked) {
     const e = root_.entry(d)
     if (e?.isDir === true) facts.distDirsPresent.push(e.name)
   }
-  // 有构建入口、但推不出命令。它是「这个项目怎么构建」的唯一线索，脚本不解释它
+  // 构建入口文件的存在本身就是线索：命令可能由下面 taskRunnerCommands 推导出来，
+  // 也可能推不出来（Dockerfile 只说明打包方式）。推不出来时说清「有这么个文件」。
   // （Makefile 的 target、Dockerfile 的阶段各生态各不同），只报出「有这么个文件」。
   const buildEntryFiles = [...(walked?.sourceScan?.byBuildEntry ?? new Map()).keys()]
   if (buildEntryFiles.length > 0) facts.buildEntryFiles = buildEntryFiles
@@ -2087,129 +2089,49 @@ const ECOSYSTEM_ARTIFACT_FACTS = [
 ]
 
 /**
- * DSH 插件的补充事实：Bundle 声明、客户端声明、入口与发现载体。
+ * 宿主生态的补充勘察：**由 `scripts/ecosystems.mjs` 的描述符驱动**。
  *
- * 只在已判定为 `dsh-plugin` 时返回对象，其余返回 undefined。所有取值都从项目自身读，
- * 读不到就标缺失，不编造：
- *   - 包名 ← 清单 `name`；补丁路径 ← 清单 `dsh.bundle.patch`（对象里的单个字符串路径）；
- *   - 客户端声明 ← 清单 `dsh.client`；入口 ← 清单 `exports`；
- *   - 补丁文件 ← 根目录的 `cordis.patch.yml` 一类；发现载体 ← 补丁文本里是否出现包名。
- * 发现载体只是文本包含判断（YAML 不做完整解析），供人复核用，不做硬结论。
+ * 本函数不认识任何一个具体生态——它只准备通用上下文（读清单、找文件），
+ * 然后把活交给描述符。加一个新宿主只要往那张表里加一个对象，这里一行都不用改。
+ *
+ * 返回 undefined 表示「这个项目不属于任何已登记的宿主生态」。
  */
-function detectDsh(root, root_, eco) {
-  if (!eco.kinds.includes('dsh-plugin')) return undefined
-  const pkg = eco.manifest
-  if (pkg === undefined || pkg.__corrupt === true) return undefined
-  const patchFile = root_.first(['cordis.patch.yml', 'cordis.patch.yaml', 'cordis.yml'])
-  const dsh = typeof pkg.dsh === 'object' && pkg.dsh !== null ? pkg.dsh : {}
-  const bundleDecl = dsh.bundle
-  const bundlePatchPath = typeof bundleDecl === 'object' && bundleDecl !== null
-    && typeof bundleDecl.patch === 'string' ? bundleDecl.patch : undefined
-  const bundlePatchExists = bundlePatchPath === undefined ? undefined
-    : exists(join(root, bundlePatchPath.replace(/^\.\//, '')))
-  const clientDecl = dsh.client
-  const hasClientDecl = clientDecl !== undefined
-  // 未知字段现形：宿主未来加了新声明时，静默忽略等于装懂。但**已知字段要分两类**，
-  // 两类都不该报「不认识」——报了就是假警报，而假警报会让人连真警报一起忽略：
-  //   - 公开作者字段：作者在清单里写的（宿主公共类型里的 `dsh` 下那几个键）；
-  //   - 宿主内部字段：宿主自己读、作者不控制的（随包镜像打包器与启动器的元数据）。
-  // 其余键只报名字，不解释语义——语义按六问现场查，不要猜。
-  const unknownKeys = Object.keys(dsh)
-    .filter((k) => !DSH_PUBLIC_KEYS.has(k) && !DSH_HOST_INTERNAL_KEYS.has(k))
-  const exportsMap = typeof pkg.exports === 'object' && pkg.exports !== null
-    ? Object.keys(pkg.exports) : []
-  const hasHostEntry = exportsMap.includes('.') || typeof pkg.main === 'string'
-  const hasClientEntry = exportsMap.includes('./client')
-  const warnings = []
-  if (bundleDecl !== undefined && bundlePatchPath !== undefined && bundlePatchExists === false) {
-    warnings.push(`清单声明了补丁路径 ${bundlePatchPath}，但该文件不存在`)
+function detectHostEcosystem(root, root_, eco) {
+  const ctx = {
+    exists: (rel) => root_.has(rel),
+    readText: (rel) => {
+      const real = root_.real(rel)
+      return real === undefined ? undefined : readText(join(root, real))
+    },
+    manifest: (name) => {
+      // 只有主清单已被本文件解析过时才复用；否则现读——但**不吞掉损坏**：
+      // 损坏的清单由生态判定那一支单独报，这里返回 undefined 即可。
+      if (name === 'package.json' && eco.manifest !== undefined) {
+        return eco.manifest.__corrupt === true ? undefined : eco.manifest
+      }
+      return undefined
+    },
   }
-  if (hasClientDecl && !hasClientEntry) {
-    warnings.push('清单声明了 dsh.client，但 exports 里没有 ./client 入口')
-  }
-  if (!hasClientDecl && hasClientEntry) {
-    warnings.push('exports 里有 ./client 入口，但清单没有 dsh.client 声明')
-  }
-  // 发现载体行：补丁文本里是否出现包名。只是文本包含，不解析 YAML。
-  let carrier = undefined
-  if (patchFile !== undefined && typeof pkg.name === 'string' && pkg.name.length > 0) {
-    const text = readText(join(root, patchFile))
-    if (text !== undefined) carrier = text.includes(pkg.name)
-  }
-  if (carrier === false) {
-    warnings.push('补丁文本里没有出现包名，可能缺发现载体行（name 等于包名自身的那一行）')
-  }
-  // 锁定的宿主版本：dependencies/devDependencies/peerDependencies 里 `@deepseek-ai/*`
-  // 的声明值（去重，原样保留范围符号，归一化由比对方做）。专章滞后判断用它。
-  // 另把 cordis / schemastery 一并收录：模板时代宿主运行时不一定带 @deepseek-ai 前缀。
-  const pinnedVersions = [...new Set(
-    ['dependencies', 'devDependencies', 'peerDependencies'].flatMap((k) => {
-      const deps = pkg[k]
-      if (typeof deps !== 'object' || deps === null) return []
-      return Object.entries(deps)
-        .filter(([name, range]) => (name.startsWith('@deepseek-ai/') || name === 'cordis' || name === 'schemastery') && typeof range === 'string')
-        .map(([, range]) => range)
-    }),
-  )]
-  // 发布范围：files 是否含构建产物与补丁。只做包含判断，不解释语义。
-  const filesList = Array.isArray(pkg.files) ? pkg.files.map(String) : []
-  const filesHasLib = filesList.some((f) => /(^|\/)lib(\/|$)/.test(f) || /^lib/.test(f))
-  const filesHasPatch = patchFile !== undefined && filesList.some((f) => f.includes('cordis.patch'))
-  // 构建产物是否被跟踪：git 视角的事实，与 files 是两套集合，缺一不可。
-  let libTracked = undefined
-  try {
-    const r = spawnSync('git', ['ls-files', 'lib'], { cwd: root, encoding: 'utf8', windowsHide: true })
-    if (r.error === undefined && r.status === 0) libTracked = (r.stdout ?? '').trim().length > 0
-  } catch { /* 取不到就不判 */ }
-  // 宿主运行时放对位置没有：cordis 一类应在 peer，不应被打进 dependencies。
-  const hostRuntimeInDeps = ['dependencies'].some((k) => {
-    const deps = pkg[k]
-    if (typeof deps !== 'object' || deps === null) return false
-    return Object.keys(deps).some((n) => n === 'cordis' || n === 'schemastery' || n.startsWith('@deepseek-ai/'))
-  })
-  // 工具链 presence：只报有无，不读版本号语义。
-  const toolchain = {
+  const d = detectHost(HOST_ECOSYSTEMS, ctx)
+  if (d === undefined) return undefined
+  const facts = deriveHostFacts(d, ctx)
+  if (facts === undefined) return undefined
+  // 工具链与本地约定是**目录形状**的事实，不属于任何一个宿主的声明；
+  // 但它们只对已登记的宿主有意义，所以仍挂在这里，键名由描述符的 id 决定。
+  facts.toolchain = {
     tsdown: root_.has('tsdown.config.ts') || root_.has('tsdown.config.js') || root_.has('tsdown.config.mjs'),
     vitest: root_.has('vitest.config.ts') || root_.has('vitest.config.js') || root_.has('vitest.config.mjs'),
     oxlint: root_.has('.oxlintrc.json'),
     pnpmWorkspace: root_.has('pnpm-workspace.yaml'),
     lockfile: root_.has('pnpm-lock.yaml'),
   }
-  // 本地 workflow 与补丁目录：只报 presence，不展开内容。
-  const localWorkflow = root_.entry('.agents')?.isDir === true
-  const contractDoc = root_.has('docs/dsh-plugin-contracts.md')
-  const patchesDir = root_.entry('patches')?.isDir === true
-  // 声明式元数据：格式版本、宿主兼容范围、展示图标。三项都只报「有没有」与原文，
-  // 不解释语义——**声明不等于闸门**，是否真的强制执行由宿主当前实现决定。
-  const hasManifestVersion = dsh.manifestVersion !== undefined
-  const enginesDsh = typeof pkg.engines?.dsh === 'string' ? pkg.engines.dsh : undefined
-  const hasIcon = typeof pkg.icon === 'string'
-  return {
-    packageName: typeof pkg.name === 'string' ? pkg.name : undefined,
-    patchFile,
-    bundlePatch: bundlePatchPath === undefined ? undefined
-      : { path: bundlePatchPath, exists: bundlePatchExists },
-    hasClientDecl,
-    exportsKeys: exportsMap,
-    hasHostEntry,
-    hasClientEntry,
-    hasManifestVersion,
-    enginesDsh,
-    hasIcon,
-    filesHasLib,
-    filesHasPatch,
-    libTracked,
-    hostRuntimeInDeps,
-    toolchain,
-    localWorkflow,
-    contractDoc,
-    patchesDir,
-    discoveryCarrierLikely: carrier,
-    pinnedVersions,
-    unknownKeys,
-    warnings,
-  }
+  facts.localWorkflow = root_.entry('.agents')?.isDir === true
+  facts.patchesDir = root_.entry('patches')?.isDir === true
+  facts.contractDoc = root_.has(`docs/${d.id}-contracts.md`)
+  return facts
 }
+
+
 
 /**
  * 仓库本地 skills 盘点：通用协议，不止 DSH。
@@ -2940,7 +2862,9 @@ function survey(target, options = {}) {
     commands: deriveCommands(root, root_, eco),
     workspace,
     artifacts,
-    dsh: detectDsh(root, root_, eco),
+    // 宿主生态的补充事实：由描述符驱动，主引擎不认识任何具体生态名。
+    // 保留 dsh 这个键是向后兼容——消费方改名是另一件事，不在这次改动里。
+    dsh: detectHostEcosystem(root, root_, eco),
     localSkills: detectLocalSkills(root),
     docs: detectDocs(root, root_),
     ignores,

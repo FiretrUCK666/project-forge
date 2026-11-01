@@ -39,8 +39,8 @@ import { survey, authorMarkers, isNoteKey, KERNEL_START, KERNEL_END, MANAGED, UP
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
-// 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
-// 使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取，不再自己写一遍。
+// 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
+// 哪些是使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取。
 import { clearStaleTemps, tempPathFor, reportTemps } from './lib/fs-atomic.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -1005,22 +1005,30 @@ const LEDGER_SECTION_PREFIX = 'section:'
  * 痕迹删掉。这条边界正是「按字节归属」与「按节标题」的分界。
  */
 /**
- * 账本登记：把「这次写下去的字节」记成可精确撤除的片段。
+ * 把一份**由本 skill 落盘**的产物记进账本。
  *
- * 分两种落地形态，判据是**这段字节与文件的关系**：
+ * 用途：README、CONTRIBUTING、CI 工作流、LICENSE 这类文件由 AI 照着模板写，
+ * 不由本脚本生成。它们同样需要「这段字节是谁写的」的精确记录——否则交棒时
+ * 只能靠形状猜，而「像」不等于「是」。
  *
- *   - `whole`（整份文件由我们新建）：整份内容就是一个片段。撤除时只有当文件与
- *     我们记的完全一致才敢删——使用者改过一个字，它就不再是我们的东西。
- *     适用于 LICENSE、新落盘的 workflow、.gitattributes 这类一次性新建的文件。
- *   - `anchored` / `section`（文件里的一段）：AGENTS.md 的内核区与受管节。
+ * 用法：`node scripts/compose-agents.mjs <项目> --record <相对路径>`
+ * 在**写完那份文件之后**调用。它读当前内容、算哈希、记成 `whole` 落地。
  *
- * **文件名不能写死**：判据只管「这段字节的哈希」，与它落在哪个文件无关。写死过一次
- * 的代价是账本只覆盖 AGENTS.md，其余产物在交棒时只能靠形状猜，而「像」不等于「是」。
+ * 为什么由调用方显式记，而不是脚本自己接管写盘：这些产物要按项目事实取舍、
+ * 要人读代码后写，本脚本写不了。**记账与写盘分离**，但归属仍然是确定的。
  */
-function recordWholeFile(target, rel, content) {
+function recordWholeFile(target, rel) {
+  const full = join(target, rel)
+  if (!existsSync(full)) {
+    process.stderr.write(`错误：${rel} 不存在，无法登记。先写文件再登记。\n`)
+    return 1
+  }
+  const content = readFileSync(full, 'utf8')
   const ledger = readLedger(target)
-  recordSegment(ledger, { file: rel, id: LEDGER_WHOLE, landing: 'whole', content })
+  recordSegment(ledger, { file: rel.replace(/\\/g, '/'), id: LEDGER_WHOLE, landing: 'whole', content })
   writeLedger(target, ledger)
+  process.stdout.write(`已登记：${rel}（整份文件，${Buffer.byteLength(content, 'utf8')} 字节）\n`)
+  return 0
 }
 
 function recordLanded(target, agentsPath, text) {
@@ -1067,8 +1075,17 @@ function parseArgs(argv) {
   let upgrade = false
   let budget = DEFAULT_BUDGET
   let help = false
+  /** 非空表示「只登记这份产物，不做别的」。 */
+  let record
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i]
+    if (arg === '--record') {
+      const value = argv[i + 1]
+      if (typeof value !== 'string' || value === '') throw new Error('--record 需要一个相对路径。')
+      record = value
+      i += 1
+      continue
+    }
     if (arg === '--check') { check = true; continue }
     if (arg === '--status') { status = true; continue }
     if (arg === '--upgrade') { upgrade = true; continue }
@@ -1083,7 +1100,7 @@ function parseArgs(argv) {
     if (arg.startsWith('--')) throw new Error(`无法识别的参数：${arg}`)
     positional.push(arg)
   }
-  return { check, status, upgrade, budget, help, positional }
+  return { check, status, upgrade, budget, help, record, positional }
 }
 
 /**
@@ -1381,7 +1398,7 @@ function main(argv) {
     process.stderr.write(`错误：${error.message}\n`)
     return 2
   }
-  const { check, status, upgrade, budget, help, positional } = parsed
+  const { check, status, upgrade, budget, help, record, positional } = parsed
   if (help) {
     process.stdout.write([
       '用法：node scripts/compose-agents.mjs [目录] [选项]',
@@ -1399,6 +1416,9 @@ function main(argv) {
       '             编排是权威，那一项只作提示）。超出字节预算同样返回 1。',
       '  --status   只报告现状，不写入',
       `  --budget N ${DEFAULT_BUDGET_NOTE}`,
+      '  --record <相对路径>  把一份由本 skill 落盘的产物记进账本（写完再调）。',
+      '                      用途：README / CONTRIBUTING / CI 工作流 / LICENSE 这类由 AI',
+      '                      照着模板写的文件。不记的话交棒时只能靠形状猜，而「像」不等于「是」。',
       '',
       '  退出码：0 = 通过或无需改动；1 = --check 发现不一致（含超预算）；2 = 用法或文件错误。',
       '',
@@ -1408,6 +1428,10 @@ function main(argv) {
 
   const target = resolve(positional[0] ?? process.cwd())
   const agentsPath = join(target, 'AGENTS.md')
+
+  // --record：只登记一份产物，不做别的。这是「AI 照着模板写了 README / CI /
+  // LICENSE，但要让它进账本」的唯一入口——那些文件不由本脚本写，却是本 skill 的产出。
+  if (record !== undefined) return recordWholeFile(target, record)
 
   // 模板与条件表的一致性：放在**任何早退分支之前**。
   //

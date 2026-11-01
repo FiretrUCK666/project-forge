@@ -201,6 +201,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt` | 两份 BSD 许可证的标准全文（二条款、三条款） |
 | `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
 | `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
+| `scripts/ecosystems.mjs` | 声明式生态描述符，加一个生态只改这里 |
 | `scripts/zip.mjs` | 解开 zip 包：自更新要读得动下载回来的那份 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |

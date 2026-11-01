@@ -54,6 +54,8 @@ const TEMPLATES_DIR = join(SKILL_ROOT, 'templates')
 /** 账本里内核区的片段 id（与 compose-agents.mjs 同源，见那边的常量注释）。 */
 const LEDGER_KERNEL = 'kernel'
 const LEDGER_SECTION_PREFIX = 'section:'
+/** 整份文件记成一个片段时的 id（compose-agents 记 LICENSE / workflow 用）。 */
+const LEDGER_WHOLE = 'whole'
 
 /**
  * 把文本按二级标题切成「前言 + 各节」。
@@ -984,7 +986,8 @@ function scan(root, onlyFile) {
   // 形状判据没法同时避免误伤（Vue 的 `{{ title }}`）与漏判（`<安装命令>`），
   // 因为它问的是「像不像」，而不是「是不是」。
   const ledger = readLedger(root)
-  const ledgerHasAgents = hasAnyRecord(ledger, 'AGENTS.md')
+  // 账本里**有记录的文件名集合**：不写死 AGENTS.md，账本记了哪个文件就查哪个。
+  const ledgerFiles = new Set(Object.keys(ledger.segments ?? {}))
 
   // ── E 组：状态目录 ──
   //
@@ -1012,17 +1015,23 @@ function scan(root, onlyFile) {
     // 是我写的」就是痕迹；说「哈希不对，使用者改过」就不是（该问人，不是该删）。
     // 形状判据（A/B 两组）只在**该文件没有账本记录**时才作为线索使用——那是老项目，
     // 账本还不存在，除了猜没有别的办法，但猜出来的结论要标明是猜的。
-    if (file.rel === 'AGENTS.md' && ledgerHasAgents) {
+    //
+    // **判据不写死文件名**：账本记的是「这段字节的哈希」，与它落在哪个文件无关。
+    // 只认 AGENTS.md 时，其余产物在交棒时只能靠形状猜，而「像」不等于「是」。
+    if (ledgerFiles.has(file.rel)) {
       const text = readScannable(file.full, scanned)
       if (text !== undefined) {
-        for (const id of segmentIds(ledger, 'AGENTS.md')) {
+        for (const id of segmentIds(ledger, file.rel)) {
           const isKernel = id === LEDGER_KERNEL
-          const heading = isKernel ? null : id.slice(LEDGER_SECTION_PREFIX.length)
+          const isWhole = id === LEDGER_WHOLE
+          const heading = isKernel || isWhole ? null : id.slice(LEDGER_SECTION_PREFIX.length)
+          const label = isKernel ? '内核区' : isWhole ? '整份文件' : '受管节'
           const prov = provenance(ledger, {
-            file: 'AGENTS.md',
+            file: file.rel,
             id,
             existing: text,
             extract: (whole) => {
+              if (isWhole) return whole
               if (isKernel) {
                 const a = whole.indexOf(KERNEL_START)
                 if (a < 0) return null
@@ -1036,32 +1045,33 @@ function scan(root, onlyFile) {
               return sec === undefined ? null : sec.lines.join('\n')
             },
           })
+          const match = isKernel ? 'kernel' : isWhole ? '（整份）' : heading
           if (prov.state === 'mine') {
             ledgerHits.push({
-              path: 'AGENTS.md',
+              path: file.rel,
               line: null,
-              match: isKernel ? 'kernel' : heading,
+              match,
               kind: 'ledger-mine',
-              what: `账本确认这一段是本 skill 写的（${isKernel ? '内核区' : '受管节'}），可以精确撤除`,
+              what: `账本确认这一段是本 skill 写的（${label}），可以精确撤除`,
               blocks: true,
             })
           } else if (prov.state === 'edited') {
             ledgerHits.push({
-              path: 'AGENTS.md',
+              path: file.rel,
               line: null,
-              match: isKernel ? 'kernel' : heading,
+              match,
               kind: 'ledger-edited',
-              what: `账本有这一段，但内容已被改动过（${isKernel ? '内核区' : '受管节'}）`,
+              what: `账本有这一段，但内容已被改动过（${label}）`,
               blocks: false,
               suspect: true,
             })
           } else if (prov.state === 'gone') {
             ledgerHits.push({
-              path: 'AGENTS.md',
+              path: file.rel,
               line: null,
-              match: isKernel ? 'kernel' : heading,
+              match,
               kind: 'ledger-gone',
-              what: `账本记过这一段，但文件里已经找不到它（${isKernel ? '内核区' : '受管节'}）`
+              what: `账本记过这一段，但文件里已经找不到它（${label}）`
                 + '——是使用者删的，不要自动补回去',
               blocks: false,
               suspect: true,

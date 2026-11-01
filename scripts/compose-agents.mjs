@@ -989,6 +989,8 @@ function markKeptSections(text, headings) {
 
 /** 账本里内核区的片段 id。 */
 const LEDGER_KERNEL = 'kernel'
+/** 整份文件的片段 id：一个文件只有一个，因为整份内容就是这一段。 */
+const LEDGER_WHOLE = 'whole'
 /** 账本里受管节的片段 id 前缀，后面接节标题。 */
 const LEDGER_SECTION_PREFIX = 'section:'
 
@@ -1002,6 +1004,25 @@ const LEDGER_SECTION_PREFIX = 'section:'
  * **只记受管节**：带 `pf:keep` 的节内容归使用者，不该记成我的；记了会在撤除时被当成
  * 痕迹删掉。这条边界正是「按字节归属」与「按节标题」的分界。
  */
+/**
+ * 账本登记：把「这次写下去的字节」记成可精确撤除的片段。
+ *
+ * 分两种落地形态，判据是**这段字节与文件的关系**：
+ *
+ *   - `whole`（整份文件由我们新建）：整份内容就是一个片段。撤除时只有当文件与
+ *     我们记的完全一致才敢删——使用者改过一个字，它就不再是我们的东西。
+ *     适用于 LICENSE、新落盘的 workflow、.gitattributes 这类一次性新建的文件。
+ *   - `anchored` / `section`（文件里的一段）：AGENTS.md 的内核区与受管节。
+ *
+ * **文件名不能写死**：判据只管「这段字节的哈希」，与它落在哪个文件无关。写死过一次
+ * 的代价是账本只覆盖 AGENTS.md，其余产物在交棒时只能靠形状猜，而「像」不等于「是」。
+ */
+function recordWholeFile(target, rel, content) {
+  const ledger = readLedger(target)
+  recordSegment(ledger, { file: rel, id: LEDGER_WHOLE, landing: 'whole', content })
+  writeLedger(target, ledger)
+}
+
 function recordLanded(target, agentsPath, text) {
   const ledger = readLedger(target)
   const file = 'AGENTS.md'

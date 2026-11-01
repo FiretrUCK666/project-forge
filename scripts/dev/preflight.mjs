@@ -2318,9 +2318,10 @@ function main(argv = []) {
   if (producedList === '' || releaseTag === '' || atRef === '' || repoArg === '') {
     return usageError(`参数缺值。\n${usage()}`)
   }
-  const known = new Set(['--package', '--release', '--at', '--repo', '--no-behavior', '--timing',
+  const known = new Set(['--package', '--release', '--at', '--repo', '--no-behavior', '--timing', '--only',
     producedList, releaseTag, atRef, repoArg].filter((x) => x !== undefined))
-  const unknown = argv.filter((a) => !known.has(a))
+  // `--only=xxx` 是带值形式，按前缀认；精确匹配会把它判成未知参数。
+  const unknown = argv.filter((a) => !known.has(a) && !a.startsWith('--only='))
   if (unknown.length > 0) return usageError(`未知参数：${unknown.join(' ')}\n${usage()}`)
 
   // 两个模式各只做一件事，做完就汇总。它们由持续集成与发布工作流调用，而那里
@@ -2337,7 +2338,42 @@ function main(argv = []) {
   // （实测 `脚本实跑` 一步就占掉大半）。分项计时只在 `--timing` 下打印。
   const t0 = Date.now()
   const timings = []
-  const step = (label, fn) => { const a = Date.now(); fn(); timings.push({ label, ms: Date.now() - a }) }
+  // `--only=<标签|标签>`：只跑指定的那几步。
+  //
+  // 这是给**测试自己**用的：每组行为断言只需要它关心的那一两项检查，而完整结构自检
+  // 有十六步、其中「脚本实跑」一步就占掉大半。让 [48b] 那组跑八次全量，等于把
+  // 同一批无关检查重复八遍——实测它一组就占了全量耗时的四分之一。
+  //
+  // 没给 --only 时行为完全不变（跑全部）。给了却写出不认识的标签会**直接报错**：
+  // 静默忽略会让测试以为自己验了某项，其实那一项根本没跑——那是最坏的假绿。
+  // `--only` 的三档语义：
+  //
+  //   1. 点名的步骤  → 照跑；
+  //   2. **昂贵且与被测项无关**的步骤 → 跳过。目前是这三步：
+  //        「脚本静态」1.0 秒（解析全部脚本的 import）
+  //        「脚本实跑」1.4 秒（每个脚本真跑一遍）
+  //        「保鲜标记」0.7 秒（扫全部 references 的核对标记）
+  //      合计约 3.1 秒，占全量的九成，而与「落盘族归属」「用户包边界」这类
+  //      单项判据毫无关系。
+  //   3. 其余**廉价的前置检查** → 照跑（合计不到 0.3 秒）。
+  //
+  // 第 3 档是必须的：那些步骤判定的是「这个副本本身是不是一个合法的 skill」
+  // （目录名、引用的文件在不在、文件地图有没有）。跳过它们，测试就失去上下文——
+  // 实测把目录名检查一并跳过时，[48b] 的八条断言全变成「输出里没有期望那句话」，
+  // 而真正的原因在几步之前。
+  const HEAVY_STEPS = new Set(['脚本静态', '脚本实跑', '保鲜标记'])
+
+  const onlyIdx = argv.findIndex((a) => a.startsWith('--only='))
+  const only = onlyIdx >= 0
+    ? argv[onlyIdx].slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined
+
+  const step = (label, fn) => {
+    if (only !== undefined && HEAVY_STEPS.has(label) && !only.includes(label)) return
+    const a = Date.now()
+    fn()
+    timings.push({ label, ms: Date.now() - a })
+  }
   let skill
   step('检查 SKILL.md', () => { skill = checkSkillFile() })
   step('引用能否解析', checkReferencesResolve)
@@ -2355,6 +2391,15 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
   step('行为自检', () => checkBehavior({ skip: argv.includes('--no-behavior') }))
+  // --only 写了不认识的标签必须报错。
+  // 静默忽略比不实现更坏：测试会以为自己验了那一项，而它根本没跑。
+  if (only !== undefined) {
+    const ran = new Set(timings.map((t) => t.label))
+    const missing = only.filter((l) => !ran.has(l) && l !== '行为自检')
+    if (missing.length > 0) {
+      fail(`--only 里有不认识的检查项：${missing.join('、')}。可用项见 --help。`)
+    }
+  }
   timings.push({ label: '（合计）', ms: Date.now() - t0 })
   if (argv.includes('--timing')) {
     process.stdout.write('\n分项耗时（毫秒）：\n')

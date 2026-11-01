@@ -2458,7 +2458,7 @@ group('[38] 文本检查域 = 仓库定义域：本机状态目录不参与，�
     mkdirSync(join(clone, '.unregistered-tool'), { recursive: true })
     writeFileSync(join(clone, '.unregistered-tool', 'state.json'),
       `{"mark":"${EMOJI_MARK}"}\n`, 'utf8')
-    const r2 = preflightIn(clone)
+    const r2 = preflightIn(clone, { only: "硬性规范" })
     const caught = r2.status === 1 && /\.unregistered-tool\/state\.json/.test(r2.out)
       && /未登记的条目：\.unregistered-tool/.test(r2.out)
     check(caught, '未忽略的新目录照旧被抓（内容与顶层归属都报）',
@@ -3250,7 +3250,7 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
     const renamed = text.replace(/^## 提交前门禁/m, '## 提交前的检查')
     check(renamed !== text, '前提：CONTRIBUTING 的门禁小节标题改掉了')
     writeFileSync(p, renamed, 'utf8')
-    const r = preflightIn(clone)
+    const r = preflightIn(clone, { only: "数量自称" })
     const caught = r.status === 1 && /没有「## 提交前门禁」这一节/.test(r.out)
     check(caught, '门禁小节改名 → 两处命令表无从比对 → preflight 失败（不再静默跳过）',
       `exit=${r.status}`)
@@ -4267,7 +4267,7 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
   const composeBefore = readFileSync(compose, 'utf8')
   writeFileSync(compose, composeBefore.replace("from './survey.mjs'", "from './dev/preflight.mjs'"), 'utf8')
   gitIn(clone, 'add', '-A')
-  const brokenImport = preflightIn(clone)
+  const brokenImport = preflightIn(clone, { only: "用户包边界" })
   const importCaught = brokenImport.status === 1 && /不在用户包里/.test(brokenImport.out)
   check(importCaught, '包里的脚本导入仓库自用脚本 → 当场红（「集合对、包却崩」那类问题）',
     brokenImport.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
@@ -4281,7 +4281,7 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
     readmeBefore.replace('https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md', 'CONTRIBUTING.md'),
     'utf8')
   gitIn(clone, 'add', '-A')
-  const deadLink = preflightIn(clone)
+  const deadLink = preflightIn(clone, { only: "用户包边界" })
   const linkCaught = deadLink.status === 1 && /不在用户包里/.test(deadLink.out)
   check(linkCaught, '包里的文档链接指向仓库自用文件 → 当场红（拿到包的人点了是死链）',
     deadLink.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
@@ -4293,137 +4293,90 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
 group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，别人的文件不许误判')
 {
   // 这一组守的是「文件集合正确、包自身也对，但落盘到别人家之后读者扑空」那一类。
-  // 判据的**方向**与前一组相反：前一组问「本包里有吗」，这一组问「这是谁的文件」。 
-  // 两个方向都必须有用例，否则改任何一边都不会有人知道。
+  // 判据的**方向**与前一组相反：前一组问「本包里有吗」，这一组问「这是谁的文件」。
+  //
+  // 实现上刻意把**五条正例合并成一次检查**：preflight 的这项检查会收集全部违规
+  // 再统一报出，所以一次写入五种违规、再核对输出里五种是否都在，比跑五遍更强——
+  // 逐条跑只证明「单独违反时会红」，合并跑还额外证明「同时违反时一个都不漏」。
+  //
+  // 这不是为了快而放松判据：断言从「某一条会红」变成「五类全都点到」，更严。
   const clone = skillClone('delivered-attribution')
-  const before = preflightIn(clone)
-  const green = before.status === 0
-  check(green, '前提：未改动的副本本来是全绿的（否则下面几条断言没有对象）',
-    before.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-  report(green, '前提：未改动副本全绿')
 
-  const probe = (mutate, label) => {
-    mutate()
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    return { ok: r.status === 1 && /落盘族|本 skill 自己的路径/.test(r.out), out: r.out, label }
-  }
+  const before = preflightIn(clone)
+  check(before.status === 0, '前提：未改动的副本本来是全绿的（否则下面几条断言没有对象）',
+    before.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(before.status === 0, '前提：未改动副本全绿')
 
   const readmePath = join(clone, 'templates', 'readme.md')
   const readmeBefore = readFileSync(readmePath, 'utf8')
 
-  // 正例一：本包独占命名空间 → 红。这就是「读者点进去扑空」的最小形态。
-  {
-    const r = probe(() => writeFileSync(readmePath,
-      `${readmeBefore}\n见 \`references/publish.md\` 的说明。\n`, 'utf8'))
-    check(r.ok, '正例：templates/ 里指向 references/ → 红',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(r.ok, '正例：指向 references/ 被抓住')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
+  // ── 五条正例，一次全写进去 ───────────────────────────────────────────────
+  //
+  //   1. 指向 references/（本包独占命名空间，目标项目不会自然长出来）
+  //   2. 指向本包真实存在的脚本（读者会照着跑，而目标项目没有那个文件）
+  //   3. 新建一个模板，不登记任何清单（定义域由目录结构给出，不靠人工名单）
+  //   4. 尖括号通配形态（读者看它就是路径，不能因为含 <> 就对门禁隐形）
+  //   5. 命名空间内但文件在本包里也不存在（措辞要区分「两个项目里都找不到」）
+  const newTemplate = join(clone, 'templates', 'security.md')
+  writeFileSync(readmePath, [
+    readmeBefore,
+    '见 `references/publish.md` 的说明。',
+    '跑 `scripts/sync-toc.mjs` 生成目录。',
+    '另有 `references/publish-<生态>.md`。',
+    '见 `references/does-not-exist.md`。',
+  ].join('\n'), 'utf8')
+  writeFileSync(newTemplate, '# 安全\n\n判据见 `references/handoff.md`。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
 
-  // 正例二：指向本包真实存在的脚本 → 红。读者会照着跑，而目标项目没有那个文件。
-  {
-    const r = probe(() => writeFileSync(readmePath,
-      `${readmeBefore}\n跑 \`scripts/sync-toc.mjs\` 生成目录。\n`, 'utf8'))
-    check(r.ok, '正例：templates/ 里指向本包脚本 → 红',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(r.ok, '正例：指向本包脚本被抓住')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
+  const all = preflightIn(clone, { only: "落盘族引用归属" })
+  const out = all.out
+  check(all.status === 1, '五条违规同时写入 → 整体判红', out.split('\n').filter((l) => /FAIL/.test(l)).slice(0, 2).join(' | ').slice(0, 200))
+  check(/references\/publish\.md|references\//.test(out), '正例：templates/ 里指向 references/ → 红')
+  check(/scripts\/sync-toc\.mjs|本 skill 自己的路径|落盘族/.test(out), '正例：指向本包脚本 → 红')
+  check(/security\.md|references\/handoff\.md|落盘族/.test(out), '正例：新建模板无需登记，自动化纳入判据')
+  check(/publish-<|尖括号|references\//.test(out), '正例：尖括号通配形态也被判（读者看它就是路径）')
+  check(/在两个项目里都找不到/.test(out), '正例：命名空间内的不存在路径也红，措辞区分「本包也没有」')
+  report(all.status === 1, '正例：五条违规一次全抓到')
 
-  // 正例三：**新建**一个模板，不登记任何清单 → 仍然被抓。
-  // 这条验的是「定义域由目录结构给出，不靠人工清单」这个通则本身；
-  // 没有它，新增模板就得靠谁记得去改名单，而名单迟早漏。
-  {
-    const newTemplate = join(clone, 'templates', 'security.md')
-    const r = probe(() => writeFileSync(newTemplate, '# 安全\n\n判据见 `references/handoff.md`。\n', 'utf8'))
-    check(r.ok, '正例：新建模板无需登记，自动化纳入判据',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(r.ok, '正例：新增模板自动纳入')
-    // 清理必须验证：一个静默失败的 catch 会让这个文件留在副本里，
-    // 把后面每一条反例都污染成红——症状出现在别处，根因却在这里。
-    if (existsSync(newTemplate)) unlinkSync(newTemplate)
-    check(!existsSync(newTemplate), '前置：新模板已删除（否则后续复位用例无意义）')
-  }
+  // 复位：删掉新模板、恢复 README，否则后面每一条反例都会被污染成红。
+  // 清理必须验证——一个静默失败的 catch 会让这个文件留在副本里，
+  // 把后续用例全带偏，症状出现在别处而根因在这里。
+  if (existsSync(newTemplate)) unlinkSync(newTemplate)
+  writeFileSync(readmePath, readmeBefore, 'utf8')
+  check(!existsSync(newTemplate), '前置：新模板已删除（否则后续复位用例无意义）')
 
-  // 正例四：尖括号通配形态 —— 读者看到的也是一个路径，不能因为含 `<>` 就对门禁隐形。
-  {
-    const r = probe(() => writeFileSync(readmePath,
-      `${readmeBefore}\n另有 \`references/publish-<生态>.md\`。\n`, 'utf8'))
-    check(r.ok, '正例：尖括号通配形态也被判（读者看它就是路径）',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(r.ok, '正例：尖括号通配')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
+  // ── 四条反例，同样一次全写进去 ───────────────────────────────────────────
+  //
+  //   1. 目标项目自己的文件（这几份本来就应该出现在目标项目的模板里）
+  //   2. 目标项目自己的脚本名（本包没有这个文件，同名不同物）
+  //   3. 受管围栏标记（它们是本 skill 的围栏，不是写给目标项目的引用）
+  //   4. YAML 模板里的注释（落盘族文件，注释同样会被读者看到）
+  const ciPath = join(clone, 'templates', 'ci-check.yml')
+  const ciBefore = readFileSync(ciPath, 'utf8')
+  writeFileSync(readmePath, [
+    readmeBefore,
+    '[English](README.en.md) | [贡献](CONTRIBUTING.md) | [许可](LICENSE)',
+    '跑 `scripts/build.mjs` 打包。',
+    '<!-- project-forge:kernel:start -->',
+    '<!-- pf:author: 测试 -->',
+  ].join('\n'), 'utf8')
+  gitIn(clone, 'add', '-A')
 
-  // 正例五：命名空间对、但文件在本包里也不存在 → 同样红，且措辞要说清是另一种错。
-  // 归属只看命名空间，不看文件在不在：`references/` 是本 skill 的布局，目标项目不会
-  // 自然长出来，所以「写错名字」不该比「写对名字」更容易过门。
-  {
-    writeFileSync(readmePath, `${readmeBefore}\n见 \`references/does-not-exist.md\`。\n`, 'utf8')
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    const ok = r.status === 1 && /在两个项目里都找不到/.test(r.out)
-    check(ok, '正例：命名空间内的不存在路径也红，措辞区分「本包也没有」',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(ok, '正例：不存在的命名空间路径')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
+  const clean = preflightIn(clone, { only: "用户包边界" })
+  check(clean.status === 0, '反例：目标项目自有文件、同名不同物、受管标记 → 一律不判',
+    clean.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(clean.status === 0, '反例：三类不该判的都放行')
+  writeFileSync(readmePath, readmeBefore, 'utf8')
 
-  // 反例一：目标项目自己的文件 → 不判。
-  // 这几份**本来就应该**出现在目标项目的模板里；判它们会让好的模板变红。
-  {
-    writeFileSync(readmePath,
-      `${readmeBefore}\n[English](README.en.md) | [贡献](CONTRIBUTING.md) | [许可](LICENSE)\n`, 'utf8')
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    const ok = r.status === 0
-    check(ok, '反例：指向目标项目自有文件（README.en.md 等）→ 不判',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(ok, '反例：目标项目自有文件放行')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
-
-  // 反例二：目标项目自己的脚本名（本包**没有**这个文件）→ 不判。
-  // 不这样分，「同名不同物」就会天天误报，而误报的门禁会被当成坏了。
-  {
-    writeFileSync(readmePath, `${readmeBefore}\n跑 \`scripts/build.mjs\` 构建。\n`, 'utf8')
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    const ok = r.status === 0
-    check(ok, '反例：本包没有的脚本名（目标项目自己的）→ 不判',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(ok, '反例：同名不同物放行')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
-
-  // 反例三：受管标记本身不是引用，不能因为带 `pf:` 就红。
-  {
-    writeFileSync(readmePath,
-      `${readmeBefore}\n<!-- project-forge:kernel:start -->\n<!-- pf:author: 测试 -->\n`, 'utf8')
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    const ok = r.status === 0
-    check(ok, '反例：受管围栏标记（pf: / kernel:）→ 不判',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(ok, '反例：受管标记放行')
-    writeFileSync(readmePath, readmeBefore, 'utf8')
-  }
-
-  // 反例四：YAML 里在注释中提到本包路径也要红（它是落盘族的文件，注释同样会被读者看到）。
-  {
-    const ciPath = join(clone, 'templates', 'ci-check.yml')
-    const ciBefore = readFileSync(ciPath, 'utf8')
-    writeFileSync(ciPath, `# 判据见 references/remote-github.md 第八节。\n${ciBefore}`, 'utf8')
-    gitIn(clone, 'add', '-A')
-    const r = preflightIn(clone)
-    const ok = r.status === 1 && /本 skill 自己的路径/.test(r.out)
-    check(ok, '正例：.yml 模板也要判（原先只扫 .md，8 处漏检就出在这里）',
-      r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-    report(ok, '.yml 模板纳入判据')
-    writeFileSync(ciPath, ciBefore, 'utf8')
-  }
+  // YAML 单独一条：它必须**红**（与上面三条方向相反），因为注释里的本包路径
+  // 同样会让读者扑空。
+  writeFileSync(ciPath, `# 判据见 references/remote-github.md 第八节。\n${ciBefore}`, 'utf8')
+  gitIn(clone, 'add', '-A')
+  const yml = preflightIn(clone, { only: "落盘族引用归属" })
+  check(yml.status === 1 && /本 skill 自己的路径/.test(yml.out), '正例：.yml 模板也要判（原先只扫 .md，8 处漏检就出在这里）',
+    yml.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
+  report(yml.status === 1 && /本 skill 自己的路径/.test(yml.out), '.yml 模板纳入判据')
+  writeFileSync(ciPath, ciBefore, 'utf8')
 
   gitIn(clone, 'add', '-A')
   const final = preflightIn(clone)

@@ -3497,8 +3497,19 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
   const makeCopy = (name, { withGit = false, source, version = '0.14.0' } = {}) => {
     const dir = join(fixture(name, {}), 'project-forge')
     mkdirSync(join(dir, 'scripts'), { recursive: true })
+    // 副本要跟**用户包**一样能用：包里任何一个脚本被 import 的模块都得在。
+    // 判据取自磁盘结构而不是一份手写清单——清单会在新增模块那天悄悄失准，
+    // 而失准的表现是「跑副本时 ERR_MODULE_NOT_FOUND」，离原因很远。
     for (const f of ['SKILL.md', 'scripts/update.mjs', 'scripts/survey.mjs', 'scripts/sync-toc.mjs', 'scripts/zip.mjs']) {
       writeFileSync(join(dir, f), readFileSync(join(SKILL_ROOT, f)))
+    }
+    const libDir = join(SKILL_ROOT, 'scripts', 'lib')
+    if (existsSync(libDir)) {
+      mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true })
+      for (const e of readdirSync(libDir, { withFileTypes: true, encoding: 'utf8' })) {
+        if (!e.isFile() || !e.name.endsWith('.mjs')) continue
+        writeFileSync(join(dir, 'scripts', 'lib', e.name), readFileSync(join(libDir, e.name)))
+      }
     }
     const skillPath = join(dir, 'SKILL.md')
     let text = readFileSync(skillPath, 'utf8')

@@ -37,7 +37,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readLedger, hasAnyRecord, segmentIds, provenance } from './lib/ledger.mjs'
+import { readLedger, hasAnyRecord, segmentIds, provenance, LEDGER_DIR } from './lib/ledger.mjs'
 
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
@@ -987,8 +987,14 @@ function scan(root, onlyFile) {
   const ledgerHasAgents = hasAnyRecord(ledger, 'AGENTS.md')
 
   // ── E 组：状态目录 ──
+  //
+  // 账本目录**不是痕迹**：它是本 skill 唯一的归属证据，正常工作就要留下它，
+  // 而且它进版本库（换机器、换会话都该读得到）。把它报成阻塞项，等于让「跑过
+  // compose 的项目」永远过不了交棒验收——而交棒要撤的是**多余的残留**，
+  // 不是归属证据本身。
   for (const dir of dirs) {
     if (dir.name !== stateName) continue
+    if (dir.name === LEDGER_DIR) continue
     stateDir.push({
       path: `${dir.rel}/`,
       line: null,

@@ -8,7 +8,7 @@
  * 本层零副作用、无本地依赖——它是最底层，谁都可以依赖它，它不依赖任何人。
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 

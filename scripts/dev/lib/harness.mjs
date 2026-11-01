@@ -256,9 +256,18 @@ export function gitIn(dir, ...args) {
 }
 
 /** 在某个目录里跑真实的 preflight.mjs——它按脚本自身位置推导检查对象。 */
-export function preflightIn(dir) {
-  const r = spawnSync(process.execPath, [join(dir, 'scripts', 'dev', 'preflight.mjs')],
-    { encoding: 'utf8', windowsHide: true })
+export function preflightIn(dir, opts = {}) {
+  // **必须带 `--no-behavior`**：不带的话 preflight 会自己再跑一遍行为自检，而副本里的
+  // selftest 是只打印摘要的替身——那一趟跑不出任何判定，却要跑满整套 fixture。
+  // 实测副本里带它 177 秒、不带 3.2 秒，差五十多倍；而 [48b] 一组就要调八次。
+  //
+  // 判据没有因此变松：这一步验的是「副本的结构有没有坏」，行为判定由主检出那一趟覆盖。
+  //
+  // 极少数用例要验「哑弹自检会不会被抓」——那条判据本身就是「preflight 真的跑了
+  // 行为自检并识破它」。那一处显式传 { behavior: true }，并接受它慢。
+  const args = [join(dir, 'scripts', 'dev', 'preflight.mjs')]
+  if (opts.behavior !== true) args.push('--no-behavior')
+  const r = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true })
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
 

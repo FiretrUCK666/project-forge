@@ -83,7 +83,7 @@ import {
     skipGroup('[44.1-2] 哑弹自检与空转脚本的端到端判定', '本机没有 git')
   } else {
     const clone = skillClone('mech-mute', { selftest: SELFTEST_MUTE })
-    const r = preflightIn(clone)
+    const r = preflightIn(clone, { behavior: true })
     const caught = r.status === 1 && /没有输出摘要行/.test(r.out)
     check(caught, '哑弹自检（无摘要、退出码 0）→ preflight 失败',
       `exit=${r.status} ${r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' / ')}`.slice(0, 220))
@@ -1187,6 +1187,5 @@ if (failures.length > 0) {
   for (const f of failures) process.stdout.write(`  - ${f}\n`)
 }
 process.exitCode = failed === 0 ? 0 : 1
-
 
 

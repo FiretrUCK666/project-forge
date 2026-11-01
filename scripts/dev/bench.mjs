@@ -32,7 +32,7 @@ const ROUNDS = 3
  */
 const CASES = [
   { id: 'survey', title: '勘察（JSON）', argv: ['scripts/survey.mjs', '<T>'] },
-  { id: 'survey-fast', title: '勘察（--fast）', argv: ['scripts/survey.mjs', '<T>', '--fast'], optional: true },
+  { id: 'survey-fast', title: '勘察（--fast）', argv: ['scripts/survey.mjs', '<T>', '--fast'], },
   { id: 'survey-md', title: '勘察（--markdown）', argv: ['scripts/survey.mjs', '<T>', '--markdown'] },
   { id: 'compose-check', title: '注入校验', argv: ['scripts/compose-agents.mjs', '<T>', '--check'] },
   { id: 'compose-status', title: '注入现状', argv: ['scripts/compose-agents.mjs', '<T>', '--status'] },

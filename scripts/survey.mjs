@@ -2286,6 +2286,19 @@ function detectAuth(info, root, options = {}) {
     networkReason: undefined,
   }
 
+  // 轻量模式跳过凭据探测：`git credential fill` 会等凭据助手，是整个勘察里
+  // 最容易卡住的一步（实测在凭据助手响应慢的机器上要等十几秒）。
+  // 而调用方若只关心「有没有远端、在哪个分支」（compose 就是这样），它不看 auth。
+  // 跳过时如实标注「没探测」，不读成「没有凭据」。
+  if (options.light === true) {
+    out.https = 'undetermined'
+    out.httpsReason = '轻量勘察没有探测凭据（发布前要单独确认）'
+    out.network = 'undetermined'
+    out.networkReason = '轻量勘察没有探测网络'
+    out.skipped = true
+    return out
+  }
+
   const remote = info.remote
   if (typeof remote !== 'string' || remote === '') {
     out.https = 'n/a'
@@ -2495,7 +2508,14 @@ function survey(target, options = {}) {
   for (const f of ['.env', '.env.local', '.npmrc', '.pypirc', '.netrc', 'docker-compose.yml',
     'docker-compose.yaml', '.git-credentials', 'config.json', 'settings.json']) pushIf(f)
 
-  const scanned = scanContents(root, candidates, realHomeSpellings())
+  // 轻量模式跳过内容扫密：那一步要把全仓最多几千个源码文件读出来跑密钥正则，
+  // 是整套勘察里最贵的一步。而调用方若只关心生态、命令、文档现状（compose 就是这样），
+  // 它根本不看 risks。跳过时如实标注「没扫」，不假装扫过没命中。
+  // **形状必须与真实实现一致**：跳过只是不读文件，返回的结构一个字段都不能少——
+  // 下游对 stats.unreadable 之类的调用不会因为「这次跳过了」就消失。
+  const scanned = options.light === true
+    ? { secrets: [], homePaths: [], shaped: new Set(), stats: { unreadable: 0, notUtf8: 0, utf16Decoded: 0 }, skipped: true }
+    : scanContents(root, candidates, realHomeSpellings())
 
   // 敏感文件名分两档定案：`always` 名字即足够；`confirm` 要内容里也出现凭据形状。
   //
@@ -2594,7 +2614,10 @@ function survey(target, options = {}) {
         // 深度超限是另一种「没扫到」，与「文件数超限」分开报——两者的处置不同
         // （前者要确认那层深目录里是不是有东西，后者要重扫）。任何一种都不能读成
         // 「检查过了，很干净」。
-        depthLimited: walked.depthLimited,
+    depthLimited: walked.depthLimited,
+    // 上限本身也是数据：呈现层要说「超过多少层」，它不该反过来依赖勘察引擎的常量。
+    // 与 auto.headLimit 同构——报告里出现的每个数值都要能从输入数据拿到。
+    maxDepth: MAX_WALK_DEPTH,
         depthLimitedPaths: (walked.depthLimitedPaths ?? []).slice(0, 20),
         // 其余四类「没扫到」也各有一个数：超单文件上限、按扩展名跳过、读不出来、
         // 非 UTF-8（按宽松解码尽力扫，但编码没嗅探到）。任何一类非零，
@@ -2638,10 +2661,24 @@ function main(argv) {
   const flags = args.filter((a) => a.startsWith('--') || a === '-h')
   const positional = args.filter((a) => !a.startsWith('--') && a !== '-h')
   const target = positional[0] ?? process.cwd()
+  // 未知开关**必须报错**，不能静默忽略：拼错 `--probe-network` 或 `--markdown` 时
+  // 脚本会照常跑完并返回 0，调用方以为「这个开关生效了」。基准脚本就踩过——
+  // 测了一个并不存在的 `--fast`，测出的是普通模式的耗时，而它自己不知道。
+  const KNOWN_FLAGS = new Set(['--json', '--markdown', '--probe-network', '--fast', '--help'])
+  const unknownFlags = flags.filter((f) => f !== '-h' && !KNOWN_FLAGS.has(f))
+  if (unknownFlags.length > 0) {
+    process.stderr.write(`无法识别的开关：${unknownFlags.join('、')}。`
+      + `可用：${[...KNOWN_FLAGS].join('、')}。跑 --help 看说明。\n`)
+    return 2
+  }
   const asMarkdown = flags.includes('--markdown')
   // 网络探测默认关闭：网络受限时一次 `ls-remote` 要等十几秒，而勘察本身不到一秒。
   // 需要时显式开，不把「偶尔想知道」的事塞进每一次调用。
   const probeNetwork = flags.includes('--probe-network')
+  // `--fast` 跳过两步最贵的：全仓内容扫密、凭据助手探测。适合只关心
+  // 生态/命令/文档现状的场合（生成契约、批量巡检）。跳过的部分会如实标注「没扫」，
+  // 不假装扫过没命中——发布前那些必须用完整模式再确认一次。
+  const light = flags.includes('--fast')
   if (flags.includes('--help') || flags.includes('-h')) {
     process.stdout.write([
       '用法：node scripts/survey.mjs [目录] [--json|--markdown] [--probe-network]',
@@ -2649,6 +2686,7 @@ function main(argv) {
       '  --json            输出 JSON（默认）',
       '  --markdown        输出给人看的摘要',
       '  --probe-network   额外探测远端可达性（会联网，网络不通时可等十几秒）',
+      '  --fast            轻量勘察：跳过内容扫密与凭据探测（快得多，但风险与认证两项未查）',
       '',
       '只读勘察：不写任何文件。',
       '',
@@ -2657,7 +2695,7 @@ function main(argv) {
   }
   let result
   try {
-    result = survey(target, { probeNetwork })
+  result = survey(target, { probeNetwork, light })
   } catch (error) {
     const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
     process.stderr.write(`勘察失败：${detail}\n`)
@@ -2697,5 +2735,5 @@ export { survey }
 // 呈现层已搬到 lib/render.mjs：它只把事实排成人能读的样子，与勘察逻辑没有共同点。
 // 这里保留转发，是为了让既有的引用不必跟着改——那是另一件事。
 export { toMarkdown, humanBytes } from './lib/render.mjs'
-// ESM 的 xport {} from 不在本模块作用域建局部绑定，所以还要真引入一次。
+// ESM 的 export {} from 不在本模块作用域建局部绑定，所以还要真引入一次。
 import { toMarkdown, humanBytes } from './lib/render.mjs'

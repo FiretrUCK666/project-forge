@@ -263,7 +263,23 @@ function hostDescriptorFor(s) {
   return HOST_ECOSYSTEMS.find((e) => kinds.includes(e.id))
 }
 
-function deriveFacts(target, s = survey(target)) {
+/**
+ * 轻量勘察：跳过内容扫密与凭据探测。
+ *
+ * 为什么 compose 用得起：它的 deriveFacts 只消费生态、命令、产物、git 的
+ * present/isRepoRoot/remote、文档成对状态、本地能力目录——**不看 risks（扫密结果）
+ * 也不看 git.auth（推送凭据）**。那两步恰好是整套勘察里最贵的：一个要把全仓最多
+ * 几千个源码文件读出来跑密钥正则，一个要等凭据助手响应。
+ *
+ * 跳过之后这两项在勘察结果里如实标注「没扫 / 没探测」，不假装查过没命中。
+ * 需要它们的人（发布前、交付审计）得用完整模式再跑一次——这是刻意的分工，
+ * 不是偷工减料。
+ */
+function surveyLight(target) {
+  return survey(target, { light: true })
+}
+
+function deriveFacts(target, s = surveyLight(target)) {
   const index = rootIndex(target)
   // 目录读不到时**不许继续生成**：这条链的每一个判据都建立在「读得到目录」之上，
   // 读不到却照常往下走，产出的是一份看起来正常的错误契约。明确报错，留给人处理。
@@ -762,7 +778,7 @@ function extraLines(oldText, freshText) {
  * 反过来判断（看旧文件有没有 author 标记）是错的：纯生成的小节本来就没有 author 标记，
  * 会被误判成「人已填写」，于是**永远冻结**——「有远端才有」的那几段就再也补不进来。
  */
-function refreshFromTemplate(target, existing, kernel, state, s = survey(target)) {
+function refreshFromTemplate(target, existing, kernel, state, s = surveyLight(target)) {
   const facts = deriveFacts(target, s)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
 
@@ -922,7 +938,7 @@ function embeddedKernel(text) {
  * 内核插在一级标题之后、第一个二级标题之前。这是唯一不需要猜测的位置：文件标题是
  * 每个 AGENTS.md 都有的，而内核属于「总纲」性质，放在正文之前符合它被阅读的顺序。
  */
-function upgradeHandwritten(existing, kernel, target, s = survey(target)) {
+function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
   const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s)))
   const old = splitSections(existing)
 
@@ -1212,7 +1228,7 @@ function writeAuthorList(authors, stream) {
 }
 
 /** 算出相对模板还缺哪些节。`--status` 与普通运行共用同一份判据。 */
-function missingSections(target, currentText, s = survey(target)) {
+function missingSections(target, currentText, s = surveyLight(target)) {
   const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s)))
   const have = new Set(splitSections(currentText)
     .sections.map((s) => s.heading))
@@ -1252,7 +1268,7 @@ function documentStructure(text) {
  * 返回值带 `applicable`：**不适用时 list 为空是「没查」，不是「查过没有」**，调用方
  * 必须把它与「查了、真的一个不缺」分开报。
  */
-function applicableMissingSections(target, text, s = survey(target)) {
+function applicableMissingSections(target, text, s = surveyLight(target)) {
   if (documentStructure(text) === 'authored') return { applicable: false, list: [] }
   return { applicable: true, list: missingSections(target, text, s) }
 }
@@ -1299,7 +1315,7 @@ function dshCompatibilityNotice(s) {
  * 改掉，比不动更糟。但直接报错退出也不行——那等于告诉使用者「你这个场景不支持」。
  * 所以默认只报告，升级要显式要求。
  */
-function reportHandwritten(agentsPath, existing, target, status, check, s = survey(target)) {
+function reportHandwritten(agentsPath, existing, target, status, check, s = surveyLight(target)) {
   const facts = deriveFacts(target, s)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
   const standard = splitSections(rendered)
@@ -1412,7 +1428,7 @@ function reportRefresh(report, stream) {
  * 检查条件是**表里有定义**，不是「这个项目下为真」——后者会让「判据此时为假」被误当成
  * 「定义缺失」，而那完全正常。
  */
-function assertTemplateConditionsKnown(target, s = survey(target)) {
+function assertTemplateConditionsKnown(target, s = surveyLight(target)) {
   if (!existsSync(SKELETON_PATH)) return // 骨架缺失由后面那条分支报，不在这里重复
   const used = new Set(
     [...readUtf8(SKELETON_PATH).matchAll(/<!--\s*pf:if\s+([A-Za-z0-9_-]+)\s*-->/g)]
@@ -1492,7 +1508,7 @@ function main(argv) {
   // 这里算出来的结果往下透传，`--status` 因此从三遍降为一遍。
   let s
   try {
-    s = survey(target)
+    s = surveyLight(target)
   } catch (error) {
     process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
     return 2

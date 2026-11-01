@@ -304,7 +304,7 @@ export function toMarkdown(s) {
       if (ecoPublishes.length > 0) L.push(`  - 生态发布动作痕迹：${ecoPublishes.join('、')}（按对应专章核对接线，不要只看 Release 建了没有）`)
     }
     if (auto.truncated === true) {
-      L.push(`  - **有工作流只读了前 ${auto.headLimit ?? WORKFLOW_HEAD_LIMIT} 字符，未报不等于没有**：发布 job 藏在后面的大文件需手工确认`)
+      L.push(`  - **有工作流只读了前 ${auto.headLimit} 字符，未报不等于没有**：发布 job 藏在后面的大文件需手工确认`)
     }
   }
   L.push('')
@@ -360,7 +360,7 @@ export function toMarkdown(s) {
       + (scan.truncated ? ' **已达文件数上限被截断，未报不等于没有**' : ''))
     if (scan.depthLimited > 0) {
       L.push(`- **有 ${scan.depthLimited} 个子目录因嵌套过深未进入**`
-        + `（超过 ${MAX_WALK_DEPTH} 层）——里面若放了凭据不会被发现。`
+        + `（超过 ${scan.maxDepth} 层）——里面若放了凭据不会被发现。`
         + '确认那些目录不需要检查，或手工看一眼。')
     }
     if ((scan.unreadableDirCount ?? 0) > 0) {

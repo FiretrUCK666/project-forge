@@ -98,8 +98,19 @@ export const FRESHNESS_STALE_DAYS = 180
 const HOME_PATH_EXEMPT = new Map([
   ['scripts/dev/preflight.mjs', '定义路径检测模式，必须写出各种路径形状'],
   ['scripts/survey.mjs', '定义路径检测模式，必须写出各种路径形状'],
-  ['scripts/dev/selftest.mjs', '故意在 fixture 里放假路径，验证分档判定'],
 ])
+
+/**
+ * 行为自检的分片：**整类豁免，不逐个登记**。
+ *
+ * 这些文件的主要工作就是往 fixture 里写「看着像泄漏」的假路径，用来验证分档判定
+ * 是否准确。按文件名逐个登记的话，每拆一个测试文件就得回来加一行——而漏加的表现
+ * 是「别的测试断言副本全绿，却被这条误报带红」，症状出现在别处，根因在这里。
+ *
+ * 判据落在「这是不是自检的测试代码」这个类别上，所以用目录加文件族来认，
+ * 不用枚举文件名。
+ */
+const isSelftestCase = (rel) => /^scripts\/dev\/cases(-\d+)?\.mjs$/.test(rel)
 
 /**
  * 参与文本检查的文件。
@@ -689,9 +700,10 @@ function checkGlobalRules() {
     if (/\r\n/.test(raw)) {
       warn(`${name} 含 CRLF 行尾。若在 Windows 上检出后出现，执行 git add --renormalize . 重新规范化。`)
     }
-    if (!HOME_PATH_EXEMPT.has(name) && HOME_PATH.test(raw)) {
+    if (!HOME_PATH_EXEMPT.has(name) && !isSelftestCase(name) && HOME_PATH.test(raw)) {
       fail(`${name} 含构建机私有路径 —— 换台机器就会失准。`
-        + '（若这是有意的测试数据或模式定义，请把它加进 preflight.mjs 的 HOME_PATH_EXEMPT 并写明理由。）')
+        + '（自检的分片会故意放假路径来验分档判定，那一类由 isSelftestCase 认；'
+        + '其余文件若确实需要，加进 HOME_PATH_EXEMPT 并写明理由。）')
     }
   }
   // 顶层目录整洁：多出来的条目必须有明确归属。
@@ -820,12 +832,24 @@ function checkScripts() {
   // `lib/` 是随包分发的公共模块层：多个脚本共用同一份实现，按「放错位置」的判据它
   // 属于**用户包内**（包里的脚本要 import 它）。把它列在这里是让它成为结构的一部分，
   // 而不是每次新增模块都要改一遍白名单。
-  const ALLOWED_SUBDIRS = new Set(['dev', 'lib'])
+  // 允许存在的子目录，按**完整路径**列，不按名字列。
+  //
+  // 按名字列时，"lib" 在 scripts/ 放行、在 scripts/dev/ 也放行——两处语义不同却共用
+  // 一条规则，等于没有规则。按路径列则每一条都说得出它为什么在那里。
+  //
+  // scripts/lib/      随包分发的公共模块，包里的脚本要 import 它，属于用户包内；
+  // scripts/dev/      只服务本仓库的工具，整目录被 .gitattributes 排除在包外；
+  // scripts/dev/lib/  自检的共享层（fixture 工厂、断言、计数器），同样只服务本仓库。
+  const ALLOWED_SUBDIRS = new Set(['scripts/dev', 'scripts/lib', 'scripts/dev/lib'])
   const scanDir = (d, prefix) => {
     if (!existsSync(d)) return
     for (const entry of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
       if (entry.isDirectory()) {
-        if (prefix === 'scripts/' && ALLOWED_SUBDIRS.has(entry.name)) continue
+        if (ALLOWED_SUBDIRS.has(`${prefix}${entry.name}`)) {
+          // 允许的子目录本身也要过一遍：它里面的文件同样受「只能 .mjs」约束。
+          scanDir(join(d, entry.name), `${prefix}${entry.name}/`)
+          continue
+        }
         fail(`${prefix} 下不应有子目录：${entry.name}。`)
         continue
       }

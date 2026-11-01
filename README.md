@@ -237,7 +237,12 @@ node "<本领目录>/scripts/update.mjs" --check
 | `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
 | `.gitattributes`、`.gitignore` | 哪些不进用户包、哪些不进版本库 |
 | `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |
-| `scripts/dev/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定 |
+| `scripts/dev/selftest.mjs` | 行为自检入口：并行跑下面的分片并合并计数 |
+| `scripts/dev/cases-0.mjs` | 行为自检分片之一，由 `selftest.mjs` 调度 |
+| `scripts/dev/cases-1.mjs` | 同上 |
+| `scripts/dev/cases-2.mjs` | 同上 |
+| `scripts/dev/cases-3.mjs` | 同上 |
+| `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器 |
 | `scripts/dev/render-svg.mjs` | 把 README 的卡片渲染成图并量出留白，改卡片时用它验收 |
 | `scripts/dev/bench.mjs` | 量关键命令的耗时，判断这次改动有没有变慢 |
 

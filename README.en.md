@@ -260,7 +260,12 @@ These never enter the package. To work on this skill, start with
 | `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
 | `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
 | `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |
-| `scripts/dev/selftest.mjs` | Behavioural self-check: builds fixtures, runs them, asserts each decision |
+| `scripts/dev/selftest.mjs` | Behavioural self-check entry point: runs the shards below in parallel and merges their counts |
+| `scripts/dev/cases-0.mjs` | One behavioural-self-check shard, dispatched by `selftest.mjs` |
+| `scripts/dev/cases-1.mjs` | Same as above |
+| `scripts/dev/cases-2.mjs` | Same as above |
+| `scripts/dev/cases-3.mjs` | Same as above |
+| `scripts/dev/lib/harness.mjs` | Shared layer for the shards: fixture factory, assertions, counters |
 | `scripts/dev/render-svg.mjs` | Renders the README cards and measures their margins; use it to accept a card change |
 | `scripts/dev/bench.mjs` | Times the key commands so you can tell whether a change made things slower |
 

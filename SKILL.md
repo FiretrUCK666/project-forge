@@ -292,7 +292,12 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `.gitattributes` | 用户包的排除规则：`export-ignore` 列出哪些不进包 |
 | `.gitignore` | 不进版本库的本机产物（依赖目录、构建输出、本机状态目录） |
 | `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界、卡片断言） |
-| `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定 |
+| `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检入口：并行跑下面的分片并合并计数 |
+| `scripts/dev/cases-0.mjs` | 行为自检分片之一，由 `selftest.mjs` 并行调度；改断言改这里 |
+| `scripts/dev/cases-1.mjs` | 同上 |
+| `scripts/dev/cases-2.mjs` | 同上 |
+| `scripts/dev/cases-3.mjs` | 同上 |
+| `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器、跨组的小工具 |
 | `scripts/dev/render-svg.mjs` | **改 README 卡片时**用它验收：渲染成位图并量出四边留白与画布尺寸是否合规 |
 | `scripts/dev/bench.mjs` | **判断这次改动有没有变慢**：量关键命令的耗时，改前改后各跑一遍对比 |
 

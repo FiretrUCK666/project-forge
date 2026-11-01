@@ -63,7 +63,7 @@ cd project-forge
 ## 提交前门禁
 
 改完必须全绿。**第一、二条各要跑几分钟，中途没有任何输出**——`preflight.mjs` 里那条
-行为自检实测约 4 分钟，两条合起来一刻钟上下。终端上几分钟没动静不是卡死，别 CTRL+C。
+行为自检实测约一分钟（分四片并行），两条合起来两分钟上下。终端上没动静不是卡死，别 CTRL+C。
 
 ```sh
 node scripts/dev/preflight.mjs --no-behavior

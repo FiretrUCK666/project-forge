@@ -192,6 +192,20 @@ should this project be published to npm?
 It never starts by writing. The first step is always the survey, and then it tells you what state
 the project is in, what it plans to do, and why it is skipping the rest.
 
+### When you only want one thing
+
+On an existing project you often just want to add one piece — a CI workflow, a LICENSE. The full
+pipeline would stop you for lacking an AGENTS.md, which is not what you asked for.
+
+The delivery check can be narrowed: 
+ode scripts/review.mjs <project directory> --scope=ci
+checks the CI facet only and says nothing about the rest. The available facets and exact usage
+are whatever 
+ode scripts/review.mjs --help prints — this file does not copy them, because a
+copy drifts.
+
+Without --scope the check is still the full one, for the "deliver the whole thing" case.
+
 ## What it will not do
 
 - Create the project itself: it picks no stack and writes no skeleton — that is a scaffolder's job;

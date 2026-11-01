@@ -32,7 +32,8 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
-import { parseGitHubRepo, needsSummary } from './survey.mjs'
+import { parseGitHubRepo } from './lib/text.mjs'
+import { needsSummary } from './lib/protocol.mjs'
 
 const API = 'https://api.github.com'
 

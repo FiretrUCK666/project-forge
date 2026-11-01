@@ -24,7 +24,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, KERNEL_START, KERNEL_END } from './survey.mjs'
+import { survey, authorMarkers } from './survey.mjs'
+import { KERNEL_START, KERNEL_END } from './lib/protocol.mjs'
 import { isMainModule } from './lib/text.mjs'
 import { markerPositions } from './lib/markdown.mjs'
 

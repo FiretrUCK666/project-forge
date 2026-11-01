@@ -35,7 +35,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, isNoteKey, KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
+import { survey, authorMarkers, isNoteKey } from './survey.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'

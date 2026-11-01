@@ -28,7 +28,8 @@
 import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 
-import { parseGitHubRepo, SUMMARY_MARKER } from './survey.mjs'
+import { parseGitHubRepo } from './lib/text.mjs'
+import { SUMMARY_MARKER } from './lib/protocol.mjs'
 
 function git(args, cwd) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })

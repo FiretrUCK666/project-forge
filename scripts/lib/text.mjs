@@ -311,3 +311,20 @@ export function frontmatterBlock(text) {
   }
   return undefined
 }
+
+/**
+ * 从远端地址里取 owner/name（GitHub）。取不到返回 undefined——**不编造**。
+ *
+ * 判据是「剥掉可能的 .git 后缀，再取路径的最后两段」，**不能按点切分**：仓库名允许
+ * 含点（\`next.js\`、\`my.repo\`），用排除点的字符类会把名字截断，于是生成一条指向不存在
+ * 仓库的对比链接（实测 \`acme/my.repo\` → \`acme/my\`）。域名比较大小写不敏感。
+ * 这个判定只实现一处：draft-release-notes 与 release-notes 都引用它。
+ */
+export function parseGitHubRepo(url) {
+  if (typeof url !== 'string') return undefined
+  const m = /github\.com[/:](.+)$/i.exec(url.trim())
+  if (m === null) return undefined
+  const parts = m[1].replace(/\.git$/i, '').replace(/\/+$/, '').split('/').filter(Boolean)
+  if (parts.length < 2) return undefined
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+}

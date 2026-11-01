@@ -38,7 +38,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
-import { README_NAME_RE, HOME_PATH_RE, KERNEL_START, KERNEL_END } from '../survey.mjs'
+import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
+import { KERNEL_START, KERNEL_END } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { scanLines } from '../lib/markdown.mjs'
 

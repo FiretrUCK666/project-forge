@@ -41,8 +41,9 @@ import { readLedger, hasAnyRecord, segmentIds, provenance, LEDGER_DIR } from './
 
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
-import {
-  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, SKIP_DIRS, MAX_WALK_DEPTH, MAX_WALK_ENTRIES, CONTENT_SCAN_MAX_BYTES } from './survey.mjs'
+import { SKIP_DIRS, MAX_WALK_DEPTH, MAX_WALK_ENTRIES, CONTENT_SCAN_MAX_BYTES } from './survey.mjs'
+import { KERNEL_START } from './lib/protocol.mjs'
+import { KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER } from './lib/protocol.mjs'
 import { frontmatterBlock } from './lib/text.mjs'
 import { isMainModule } from './lib/text.mjs'
 import { scanLines, fencedSpans } from './lib/markdown.mjs'

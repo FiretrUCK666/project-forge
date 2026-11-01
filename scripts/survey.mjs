@@ -26,6 +26,13 @@ import { fileURLToPath } from 'node:url'
 // 它们是本文件的下游，本文件不转出它们——需要的人直接从 lib/ 取，
 // 否则任何想判断「这是不是主模块」的脚本又得把整个勘察引擎加载进来。
 import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock } from './lib/text.mjs'
+export { parseGitHubRepo } from './lib/text.mjs'
+// 协议常量（注入标记、占位符、预算）住在 lib/protocol.mjs：它们被四个脚本共用，
+// 而任何想拿一个标记的脚本都不该因此加载整个勘察引擎。
+export {
+  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, INSTRUCTION_BUDGET,
+} from './lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, INSTRUCTION_BUDGET } from './lib/protocol.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { HOST_ECOSYSTEMS, detectHost, deriveHostFacts } from './ecosystems.mjs'
 
@@ -385,22 +392,6 @@ export function authorMarkers(text) {
   return found
 }
 
-/**
- * 从远端地址里取 owner/name（GitHub）。取不到返回 undefined——**不编造**。
- *
- * 判据是「剥掉可能的 .git 后缀，再取路径的最后两段」，**不能按点切分**：仓库名允许
- * 含点（\`next.js\`、\`my.repo\`），用排除点的字符类会把名字截断，于是生成一条指向不存在
- * 仓库的对比链接（实测 \`acme/my.repo\` → \`acme/my\`）。域名比较大小写不敏感。
- * 这个判定只实现一处：draft-release-notes 与 release-notes 都引用它。
- */
-export function parseGitHubRepo(url) {
-  if (typeof url !== 'string') return undefined
-  const m = /github\.com[/:](.+)$/i.exec(url.trim())
-  if (m === null) return undefined
-  const parts = m[1].replace(/\.git$/i, '').replace(/\/+$/, '').split('/').filter(Boolean)
-  if (parts.length < 2) return undefined
-  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
-}
 
 function exists(p) {
   try {
@@ -501,19 +492,7 @@ function skillInvocation(block) {
 }
 
 
-/**
- * 发布说明的「还没写完」标记，以及它的判据。
- *
- * 起草脚本在「被标签指到的那次提交没有正文」时写下它——那一刻它只列得出提交主题，
- * 而发布页的读者是使用者，提交主题清单不是他能读懂的说明。发送端见到这个标记就拒绝
- * 发送，所以半成品不会出现在页面上。标记与判据**只此一份**：起草端写、发送端认，
- * 各写一遍字符串迟早在某次改名后对不上，而那时两边都看不出来。
- */
-export const SUMMARY_MARKER = 'pf:needs-summary'
 
-export function needsSummary(text) {
-  return String(text ?? '').includes(SUMMARY_MARKER)
-}
 
 
 
@@ -757,76 +736,13 @@ function readmeLangOf(name) {
   return m === null ? undefined : m[1].toLowerCase()
 }
 
-/**
- * 内核标记与围栏感知的标记定位：**全仓只此一份**。
- *
- * 这条字面量三个脚本都要用（注入、自检、交付门禁），各写一份的后果比一般重复更重：
- * 它们对不上时，注入方找不到标记区，要么静默不注入、要么把整块当新内容对待——而后者
- * 会连用户写在标记之间的正文一起覆盖，且两边都不出声。它没有任何检查盯得住（检查本身
- * 就是拿它去比的），所以只能让它只有一个来源。
- *
- * 定位实现也只有一个来源：下面那三个围栏扫描函数就住在本文件里，
- * `markerPositions` 直接用它们。「什么算围栏」只有这一处状态机，
- * 两处各写一遍迟早会给出两种答案。
- *
- * **本文件里的标记字面量只有这一个来源**：下面四枚标记（内核一对、managed、upgraded）
- * 现在都有三个消费方（注入、自检、交付门禁），各写一份时它们对不上不会有任何东西
- * 出声——所以只能有一份。与 KERNEL_START 同一条理由，不再各写一遍。
- */
-export const KERNEL_START = '<!-- project-forge:kernel:start -->'
-export const KERNEL_END = '<!-- project-forge:kernel:end -->'
-
-/**
- * 「这份文件由本脚本生成」的标记。
- *
- * 它区分开三种**都带内核**的文件，而它们的验收标准不同：
- *   - **生成的文件**（从骨架生成）：节结构由模板决定，**缺节就是缺陷**，该报错；
- *   - **升级的文件**（手写后被 --upgrade 改造，见 UPGRADED）：结构已向模板对齐，
- *     但需要人写的节脚本刻意不补，所以缺节是**待办**，只提示不否决；
- *   - **作者编排的文件**（自己写的，只带内核标记）：作者可能刻意换一种组织方式
- *     （本 skill 自己的 AGENTS.md 就是——它有「版本管理流程」而不是模板的「版本管理」，
- *     而「文档同步」的规则由内核段承担）。此时**模板的标题清单不是判据**：脚本既不会
- *     替他补这些节，也不该拿字面差集去催他——那只会把「写了但措辞不同」报成「没写」，
- *     而一份永远在喊同一批假缺失的报告，等于不存在。
- *
- * 没有这个区分时只有两种错法：要么把作者的编排当成缺陷（误报，逼人改成模板的样子），
- * 要么对掏空的契约睁一眼闭一眼（漏报）——区分的两支各自挡住其中一种错法。
- */
-export const MANAGED = '<!-- project-forge:managed -->'
-
-/**
- * 「这份文件的结构已按模板升级过」的标记。
- *
- * `--upgrade` 只做加法：插入内核、补上可自动补的节，**需要人写的节一个都不补**。
- * 所以升级完的文件必然还缺若干节，那是**待办**而不是缺陷——判据必须能把它与
- * 「作者自己编排的文件」区分开，否则两者只能取同一个标准，而两个标准都会错：
- * 按缺陷判，升级后的文件永远红；按不判，P4 的「两个节数归零」就空转了。
- */
-export const UPGRADED = '<!-- project-forge:upgraded -->'
-
-/**
- * 「这一节的内容是使用者写的，刷新时一个字节都不要动」的标记。
- *
- * 判据必须是**这段字节是谁写的**，不能是「节标题在不在模板里」——节标题是人和模板
- * 都会用的公共词汇（「构建与验证」「版本管理」几乎人人这么起名），拿它当身份，就必然
- * 在撞名时把使用者的正文当成生成内容覆盖掉。实测：一句「发版由 release manager 手工
- * 执行」在升级后会被下一次刷新静默删掉，而那次刷新正是流程里标着「强制」的一步。
- *
- * 这个标记由 `--upgrade` 打在**它保留下来的**那些节上：升级只做加法，所以凡是升级时
- * 已经存在的节，内容都归使用者，此后刷新遇到它一律原样保留。
- */
-export const KEEP = '<!-- pf:keep -->'
 
 
 
 
-/**
- * 会话上下文对工作区指令（`AGENTS.md`）的字节预算。
- *
- * 注入方按它截断、自检按它判红，所以**必须是同一个数**：各写一份时，扩容一处之后
- * 两边按不同预算判断，而两边都会「绿」——注入的按新预算放行，自检的按旧预算说没问题。
- */
-export const INSTRUCTION_BUDGET = 65536
+
+
+
 
 /**
  * 读一个 Markdown 文件的二级标题列表，用于「现有文档有哪些节」这种机械报告。

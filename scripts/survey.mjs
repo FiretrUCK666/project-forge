@@ -1500,11 +1500,35 @@ function deriveCommands(root, root_, eco) {
     byEcosystem.go = { build: 'go build ./...', test: 'go test ./...' }
   }
 
-  // java/dotnet/ruby/php 等：已能识别生态，但本脚本暂不推导命令（需读构建配置确认）。
-  // 明确标记“未实现”而非“项目无命令”，调用方据此区分两种空。
-  for (const kind of eco.kinds) {
-    if (['java', 'dotnet', 'ruby', 'php', 'cpp', 'dart', 'swift'].includes(kind) && byEcosystem[kind] === undefined) {
-      byEcosystem[kind] = { note: '该生态的命令推导尚未实现，请读构建配置确认' }
+  // java/dotnet/ruby/php 等：生态认得出来，但**本段不按生态惯例编命令**——
+  // 它们的构建命令写在各自的入口文件里（gradle / maven / .NET / CMake），
+  // 由下面那段按任务入口推导负责。这里只在**确实没推出命令**时才说一声，
+  // 否则会与下面那段打架：同一个项目既「已推导出 gradle build」又「尚未实现」。
+  // 本节跑在任务入口推导之前，所以这里只记下待补的生态，最后再统一判定。
+
+  // ── 通用任务入口 ──
+  //
+  // 上面那些分支按**生态**推导；这一段按**任务入口**推导，两者正交：一个 Python 项目
+  // 可以用 Makefile 组织测试，一个 C++ 项目可能只有 CMakeLists。只看生态会漏掉
+  // 整类项目——它们的构建命令写在入口文件里，而不在生态惯例里。
+  //
+  // 判据一律是「这个文件真的存在」，并且**只从文件内容里读，不按惯例编**：
+  // 读不到就说读不到，不给一条跑不通的假命令。
+  const runner = taskRunnerCommands(root, root_)
+  if (runner !== undefined) {
+    byEcosystem.runner = runner
+  }
+
+  // 统一判定「哪些生态认得出来、却一条命令都没推出来」。
+  // 判据落在**整个项目有没有命令**上，而不是某个生态桶：CMake 项目的命令出自
+  // 任务入口那一段，生态桶里本来就是空的，那时再说「尚未实现」就是假话。
+  const anyCommand = Object.values(byEcosystem).some((bucket) => [...COMMAND_KEYS]
+    .some((k) => typeof bucket[k] === 'string'))
+  if (!anyCommand) {
+    for (const kind of eco.kinds) {
+      if (['java', 'dotnet', 'ruby', 'php', 'cpp', 'dart', 'swift'].includes(kind) && byEcosystem[kind] === undefined) {
+        byEcosystem[kind] = { note: '该生态的命令推导尚未实现，请读构建配置确认' }
+      }
     }
   }
 
@@ -1537,6 +1561,342 @@ function deriveCommands(root, root_, eco) {
     out.multipleEcosystems = keys.filter((k) => k in byEcosystem)
   }
   return out
+}
+
+/**
+ * workspace 拓扑：这个仓库是不是多包仓库，包在哪里。
+ *
+ * 判据一律来自**项目自己的声明**（`pnpm-workspace.yaml`、`package.json#workspaces`、
+ * `Cargo.toml` 的 `[workspace]`、`go.work` 的 `use`），不从目录形状猜——`packages/`
+ * 里恰好有三个目录不代表它是 monorepo，而**没有声明就不是**。
+ *
+ * 为什么要这个事实：根目录没有清单时，命令推导会空手而归，而真正的构建命令在子包里；
+ * 产物检测只看根目录，会漏掉 `packages/core/dist`。上层据此把「该在哪一层跑」写进契约。
+ */
+function detectWorkspace(root, root_) {
+  const out = { declared: false, tools: [], patterns: [], packages: [], note: undefined }
+
+  const readRoot = (name) => {
+    const real = root_.real(name)
+    if (real === undefined) return undefined
+    try {
+      return readFileSync(join(root, real), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 把 `packages/*` 这类通配展开成真实子目录名（只展开一级，不递归）。 */
+  const expand = (pattern) => {
+    const clean = pattern.replace(/\/+$/, '').replace(/^\.\//, '')
+    // 非通配：可能是嵌套路径（crates/a），而 root_ 只认顶层条目，所以直接问文件系统。
+    if (!clean.includes('*')) {
+      try {
+        return statSync(join(root, clean)).isDirectory() ? [clean] : []
+      } catch {
+        return []
+      }
+    }
+    const idx = clean.indexOf('*')
+    const head = clean.slice(0, idx).replace(/\/+$/, '')
+    const tail = clean.slice(idx + 1).replace(/^\/+/, '')
+    const e = root_.entry(head)
+    if (e === undefined || !e.isDir) return []
+    let names
+    try {
+      names = readdirSync(join(root, root_.real(head) ?? head), { withFileTypes: true, encoding: 'utf8' })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .map((d) => d.name)
+    } catch {
+      return []
+    }
+    const out2 = []
+    for (const n of names) {
+      const rel = `${head}/${n}`
+      if (tail === '') out2.push(rel)
+      else if (root_.entry(`${rel}/${tail}`)?.isDir === true) out2.push(`${rel}/${tail}`)
+    }
+    return out2
+  }
+
+  const addPatterns = (tool, patterns) => {
+    if (!out.tools.includes(tool)) out.tools.push(tool)
+    for (const p of patterns) {
+      if (!out.patterns.includes(p)) out.patterns.push(p)
+      for (const pkg of expand(p)) {
+        if (!out.packages.includes(pkg)) out.packages.push(pkg)
+      }
+    }
+  }
+
+  // pnpm-workspace.yaml：`packages:` 下的 `- 'xxx'` 列表。
+  const pnpm = readRoot('pnpm-workspace.yaml')
+  if (pnpm !== undefined) {
+    const patterns = []
+    let inPackages = false
+    for (const line of pnpm.split(/\r?\n/)) {
+      if (/^packages\s*:/.test(line)) { inPackages = true; continue }
+      if (inPackages) {
+        if (/^\S/.test(line) && !/^\s*-/.test(line)) { inPackages = false; continue }
+        const m = /^\s*-\s*['"]?([^'"#]+?)['"]?\s*(?:#.*)?$/.exec(line)
+        if (m !== null) patterns.push(m[1].trim())
+      }
+    }
+    addPatterns('pnpm', patterns)
+  }
+
+  // package.json#workspaces：数组，或 `{ packages: [...] }`。
+  const pkgText = readRoot('package.json')
+  if (pkgText !== undefined) {
+    try {
+      const pkg = JSON.parse(pkgText)
+      const ws = pkg?.workspaces
+      const patterns = Array.isArray(ws) ? ws.filter((x) => typeof x === 'string')
+        : (Array.isArray(ws?.packages) ? ws.packages.filter((x) => typeof x === 'string') : [])
+      if (patterns.length > 0) addPatterns('npm', patterns)
+    } catch { /* JSON 坏了由别处报，这里不重复 */ }
+  }
+
+  // Cargo.toml 的 [workspace] members。
+  const cargo = readRoot('cargo.toml')
+  if (cargo !== undefined) {
+    const head = /\[workspace\]/.exec(cargo)
+    if (head !== null) {
+      const after = cargo.slice(head.index + head[0].length)
+      const stop = after.search(/^\[/)
+      const body = stop < 0 ? after : after.slice(0, stop)
+      const patterns = []
+      // members = ["a", "b"] 或跨行的 members = [\n  "a",\n]
+      const arr = /members\s*=\s*\[([\s\S]*?)\]/.exec(body)
+      if (arr !== null) {
+        for (const m of arr[1].matchAll(/["']([^"']+)["']/g)) patterns.push(m[1])
+      }
+      addPatterns('cargo', patterns)
+    }
+  }
+
+  // go.work 的 use 指令。
+  const gowork = readRoot('go.work')
+  if (gowork !== undefined) {
+    const dirs = []
+    for (const line of gowork.split(/\r?\n/)) {
+      const m = /^\s*use\s+(?:\(\s*)?([^\s()]+)?/.exec(line)
+      if (m !== null && m[1] !== undefined) dirs.push(m[1].replace(/^\.\//, '').replace(/\/+$/, ''))
+    }
+    // use ( ... ) 块：逐行读块内的路径
+    const block = /use\s*\(([\s\S]*?)\)/.exec(gowork)
+    if (block !== null) {
+      for (const line of block[1].split(/\r?\n/)) {
+        const t = line.trim().replace(/^\.\//, '').replace(/\/+$/, '')
+        if (t !== '' && !t.startsWith('//')) dirs.push(t)
+      }
+    }
+    addPatterns('go', dirs)
+  }
+
+  out.declared = out.tools.length > 0
+  if (!out.declared) {
+    out.note = undefined
+    return out
+  }
+  if (out.packages.length === 0) {
+    out.note = '声明了 workspace，但没有展开出任何真实子目录——'
+      + '通配可能没匹配上，或包目录还没建。请打开声明文件确认。'
+  }
+  return out
+}
+
+/**
+ * 从**任务入口文件**推导命令。与按生态推导正交，两者都要跑。
+ *
+ * 为什么单独一段：一个 Python 项目可以用 Makefile 组织测试，一个 C++ 项目可能只有
+ * CMakeLists.txt，一个 polyglot 仓库常常只靠 justfile 串起来。只看生态会漏掉整类
+ * 项目——它们的构建命令写在入口文件里，不在生态惯例里。
+ *
+ * 两条纪律：
+ *   - **只读文件里真实存在的目标**。Makefile 里没有 test 目标就报没有，不按惯例编一个
+ *     make test——那会造出一条跑不通的「硬门禁」，而 P7 的「没有验证过」这个诚实信号
+ *     再也出现不了。
+ *   - **读不懂就说读不懂**。JSON 解析不了、文件读不出来时给一条 note 说明原因，
+ *     而不是静默返回空——空的意思是「这个项目没有入口」，那是另一回事。
+ */
+function taskRunnerCommands(root, root_) {
+  const build = {}
+  const byTool = {}
+  let sawAny = false
+
+  const readIf = (name) => {
+    const real = root_.real(name)
+    if (real === undefined) return undefined
+    try {
+      return readFileSync(join(root, real), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 从一组目标名里挑出常规命令键；一条都没有时给 note 并带上真实目标名。 */
+  const pickTargets = (names, make, label, file) => {
+    const got = {}
+    for (const [key, aliases] of [
+      ['build', ['build', 'all']], ['test', ['test', 'check']],
+      ['lint', ['lint']], ['verify', ['verify']], ['install', ['install']],
+    ]) {
+      const hit = aliases.find((a) => names.has(a))
+      if (hit !== undefined) got[key] = make(hit)
+    }
+    if (Object.keys(got).length > 0) return got
+    const shown = [...names].filter((t) => !t.startsWith('.')).slice(0, 8)
+    return {
+      note: `有 ${file}，但没有 build / test 一类目标：`
+        + `已定义的是 ${shown.length > 0 ? shown.join('、') : '（空）'}——请读它确认该跑哪一条`,
+    }
+  }
+
+  /** Makefile：从目标名推导。 */
+  const makefile = root_.first(['Makefile', 'makefile', 'GNUmakefile'])
+  if (makefile !== undefined) {
+    const text = readIf(makefile)
+    if (text === undefined) {
+      byTool.make = { note: `有 ${makefile} 但读不出来，命令要打开它确认` }
+    } else {
+      const targets = new Set()
+      for (const line of text.split(/\r?\n/)) {
+        if (/^\s/.test(line)) continue
+        const m = /^([A-Za-z0-9_.-]+)\s*:(?!=)/.exec(line)
+        if (m !== null) targets.add(m[1])
+      }
+      byTool.make = pickTargets(targets, (t) => `make ${t}`, 'make', makefile)
+      if (byTool.make.note === undefined) sawAny = true
+    }
+  }
+
+  /** justfile：recipe 名在行首，可带参数与依赖。 */
+  const justfile = root_.first(['justfile', 'Justfile', '.justfile'])
+  if (justfile !== undefined) {
+    const text = readIf(justfile)
+    if (text === undefined) {
+      byTool.just = { note: `有 ${justfile} 但读不出来，命令要打开它确认` }
+    } else {
+      const recipes = new Set()
+      for (const line of text.split(/\r?\n/)) {
+        if (/^\s/.test(line) || line.startsWith('#')) continue
+        const m = /^@?([A-Za-z0-9_-]+)(?:\s+[^:]*)?\s*:/.exec(line)
+        if (m !== null) recipes.add(m[1])
+      }
+      byTool.just = pickTargets(recipes, (t) => `just ${t}`, 'just', justfile)
+      if (byTool.just.note === undefined) sawAny = true
+    }
+  }
+
+  /** Taskfile：只认 tasks: 之下、比 tasks 行多缩进一级的键。 */
+  const taskfile = root_.first(['Taskfile.yml', 'Taskfile.yaml', 'taskfile.yml', 'taskfile.yaml'])
+  if (taskfile !== undefined) {
+    const text = readIf(taskfile)
+    if (text === undefined) {
+      byTool.task = { note: `有 ${taskfile} 但读不出来，命令要打开它确认` }
+    } else {
+      const tasks = new Set()
+      let inTasks = false
+      let taskIndent = -1
+      for (const line of text.split(/\r?\n/)) {
+        if (/^\s*(?:#|$)/.test(line)) continue
+        const indent = line.length - line.trimStart().length
+        if (/^\s*tasks\s*:/.test(line)) { inTasks = true; taskIndent = -1; continue }
+        if (!inTasks) continue
+        if (indent === 0) { inTasks = false; continue }
+        if (taskIndent < 0) taskIndent = indent
+        if (indent !== taskIndent) continue
+        const m = /^\s+([A-Za-z0-9_:.-]+)\s*:/.exec(line)
+        if (m !== null) tasks.add(m[1])
+      }
+      byTool.task = pickTargets(tasks, (t) => `task ${t}`, 'task', taskfile)
+      if (byTool.task.note === undefined) sawAny = true
+    }
+  }
+
+  /** deno.json：tasks 是 JSON 对象；jsonc 去注释与尾逗号后再解析。 */
+  const denoName = root_.first(['deno.json', 'deno.jsonc'])
+  if (denoName !== undefined) {
+    const text = readIf(denoName)
+    if (text === undefined) {
+      byTool.deno = { note: `有 ${denoName} 但读不出来，命令要打开它确认` }
+    } else {
+      let tasks
+      let parsed = true
+      try {
+        const stripped = text.replace(/^\s*\/\/.*$/gm, '').replace(/,([\s}\]])/g, '$1')
+        tasks = JSON.parse(stripped)?.tasks
+      } catch {
+        parsed = false
+      }
+      if (!parsed) {
+        byTool.deno = { note: `${denoName} 解析不了（不是合法 JSON），命令要打开它确认` }
+      } else if (tasks !== undefined && typeof tasks === 'object' && tasks !== null) {
+        const names = new Set(Object.keys(tasks).filter((k) => typeof tasks[k] === 'string'))
+        byTool.deno = pickTargets(names, (t) => `deno task ${t}`, 'deno', denoName)
+        if (byTool.deno.note === undefined) sawAny = true
+      } else {
+        byTool.deno = { note: `${denoName} 里没有 tasks 字段` }
+      }
+    }
+  }
+
+  /** Gradle：有包装器就用包装器，没有就用 PATH 里的 gradle。 */
+  const gradlew = root_.first(['gradlew', 'gradlew.bat'])
+  const gradleBuild = root_.first(['build.gradle', 'build.gradle.kts'])
+  if (gradlew !== undefined || gradleBuild !== undefined) {
+    const prefix = gradlew === undefined ? 'gradle' : (gradlew.endsWith('.bat') ? '.\\gradlew.bat' : './gradlew')
+    byTool.gradle = { build: `${prefix} build`, test: `${prefix} test` }
+    sawAny = true
+  }
+
+  /** Maven：同上。 */
+  const mvnw = root_.first(['mvnw', 'mvnw.cmd'])
+  const pom = root_.first(['pom.xml'])
+  if (mvnw !== undefined || pom !== undefined) {
+    const prefix = mvnw === undefined ? 'mvn' : (mvnw.endsWith('.cmd') ? '.\\mvnw.cmd' : './mvnw')
+    byTool.maven = { build: `${prefix} -B package`, test: `${prefix} -B test` }
+    sawAny = true
+  }
+
+  /** .NET：解决方案或单个项目文件，dotnet test 对两者都成立。 */
+  const dotnetProj = root_.filesIn('', /\.(sln|csproj|fsproj|vbproj)$/i)
+  if (dotnetProj.length > 0) {
+    byTool.dotnet = { build: 'dotnet build', test: 'dotnet test' }
+    sawAny = true
+  }
+
+  /** CMake：配置与构建两步；测试只在开了 CTest 惯例时给。 */
+  const cmakeLists = root_.first(['CMakeLists.txt'])
+  if (cmakeLists !== undefined) {
+    const text = readIf(cmakeLists) ?? ''
+    const got = { install: 'cmake -S . -B build', build: 'cmake --build build' }
+    if (/enable_testing\s*\(|include\s*\(\s*CTest/i.test(text)) got.test = 'ctest --test-dir build'
+    byTool.cmake = got
+    sawAny = true
+  }
+
+  /** Go workspace：命令要覆盖全部模块，而不是只覆盖根目录那一个。 */
+  if (root_.has('go.work')) {
+    byTool.goWorkspace = { build: 'go build ./...', test: 'go test ./...' }
+    sawAny = true
+  }
+
+  if (!sawAny && Object.keys(byTool).length === 0) return undefined
+
+  // 各工具的命令并进一张扁平表：真冲突时先到者为准，byTool 让人看得到每条出自哪个文件。
+  for (const got of Object.values(byTool)) {
+    for (const [k, v] of Object.entries(got)) {
+      if (k !== 'note' && typeof v === 'string' && !(k in build)) build[k] = v
+    }
+  }
+  if (Object.keys(build).length > 0) {
+    build.byTool = byTool
+  } else {
+    build.note = `有任务入口文件（${Object.keys(byTool).join('、')}），但没有推导出命令——请读它们确认`
+  }
+  return build
 }
 
 /**
@@ -2570,11 +2930,16 @@ function survey(target, options = {}) {
   // 忽略探查只跑一次，两处复用同一结果。
   const ignores = detectIgnores(root, root_, walked.outputDirCandidates)
 
+  // workspace 拓扑：多包仓库的事实，供上层决定「命令该在哪一层跑」、
+  // 「产物在哪个子包里」。读不到就是没有声明，不按目录形状猜。
+  const workspace = detectWorkspace(root, root_)
+
   return {
     target: { path: root, name: basename(root) },
     git,
     ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name, skillDropped: eco.skill?.dropped },
     commands: deriveCommands(root, root_, eco),
+    workspace,
     artifacts,
     dsh: detectDsh(root, root_, eco),
     localSkills: detectLocalSkills(root),
@@ -2717,6 +3082,14 @@ function toMarkdown(s) {
   L.push('')
   L.push(`- 判定结果：${s.ecosystem.kinds.join(' / ')}`)
   L.push(`- 依据：${s.ecosystem.evidence.join('、') || '无'}`)
+  // 多包仓库要单独说：命令该在哪一层跑、产物在哪个子包里，都取决于这份事实。
+  if (s.workspace?.declared === true) {
+    L.push(`- 多包仓库：由 ${s.workspace.tools.join('、')} 声明，`
+      + `展开出 ${s.workspace.packages.length} 个子包`
+      + (s.workspace.packages.length > 0 ? `（${s.workspace.packages.slice(0, 6).join('、')}` : '')
+      + (s.workspace.packages.length > 6 ? ' 等）' : (s.workspace.packages.length > 0 ? '）' : '')))
+    if (s.workspace.note !== undefined) L.push(`  - ${s.workspace.note}`)
+  }
   if (s.dsh !== undefined) {
     const d = s.dsh
     L.push(`- DSH 包名：${d.packageName ?? '未声明'}`)
@@ -2791,8 +3164,8 @@ function toMarkdown(s) {
   L.push(`- 忽略配置文件：${a.hasNpmIgnore === true ? '有' : '无'}`)
   if (Array.isArray(a.buildEntryFiles) && a.buildEntryFiles.length > 0) {
     L.push(`- 构建入口文件：${a.buildEntryFiles.join('、')}`
-      + '（说明这里有构建步骤，但脚本不据此推命令——target 与阶段各项目不同，'
-      + '「怎么构建」要读它自己确认）')
+      + '（Makefile 的目标名已按实际内容推导进「可执行命令」；Dockerfile 只记存在，'
+      + '它说的是打包方式，不是构建命令）')
   }
   const reqs = a.runtimeRequirements ?? []
   if (reqs.length === 0) {

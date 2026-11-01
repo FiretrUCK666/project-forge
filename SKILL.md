@@ -135,14 +135,14 @@ metadata:
 
 | 阶段 | 动作 | 参考 |
 | --- | --- | --- |
-| **P0 定位** | 确定目标目录。候选不唯一时问一次；问不到人时**禁止默认选定**，停下列候选清单进汇报待下会话续接 | — |
+| **P0 定位** | 确定目标目录。候选不唯一时问一次；问不到人时**禁止默认选定**，停下列候选清单进汇报待下会话续接。**用户只要一件事时（「配个 CI」）记下范围**，那是 `--scope` 的输入 | — |
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
 | **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
-| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
+| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**每写完一份非 `AGENTS.md` 的产物，立刻 `compose-agents.mjs <项目> --record <路径>` 记账**——不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
-| **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报 | — |
+| **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报。**P0 记下的局部诉求在这里传 `review.mjs --scope=<切面>`**：只验那几面，其余不报缺 | — |
 | **P8 交棒**（**常规收尾，仅用户可达时**） | P7 完成后**主动提出**：勘察痕迹 → 报告 → 等用户明确确认 → 按顺序拆 → 复验。**无人值守时不执行**，把待确认项写进汇报 | `references/handoff.md` |
 
 动手之前**先跑一次自动更新**（它可能把本文件换掉，所以要放在任何读取之前）：
@@ -177,7 +177,7 @@ node "<本领目录>/scripts/update.mjs" --quiet
 
 ## 硬门控
 
-这些是**必须先读全文才能动手**的关卡。跳过它们等于凭猜测做事。
+这些是**必须先读全文才能动手**的关卡。
 
 | 门控 | 条件 | 必须先读 |
 | --- | --- | --- |
@@ -186,7 +186,7 @@ node "<本领目录>/scripts/update.mjs" --quiet
 | G3 | 写任何文档之前 | `references/docs-set.md` |
 | G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时用户指调用方，写进回执等指示，不直接执行） |
 | G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm、Python、Go、Rust 时加读对应 `references/publish-<生态>.md` |
-| G6 | 判定为**插件类**时（`dsh-plugin` / `vscode-extension` / `obsidian-plugin`，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读）；有对应专章时一并读 `references/plugins/<生态>.md` |
+| G6 | 判定为**插件类**时（勘察出的 kind 以 `-plugin` / `-extension` 结尾，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读）；有对应专章时一并读 `references/plugins/<生态>.md` |
 | G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下 |
 | G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
 | G9 | 拆除本 skill 在目标项目里留下的痕迹之前（交棒或撤销） | `references/handoff.md` |
@@ -199,18 +199,14 @@ flag 全集以 `node scripts/review.mjs --help` 的输出为准**，本文件不
 各自「为什么不能替你定」与「要不到时怎么做」，见 `references/docs-set.md` 的「选择」一节；
 一条硬线：**署名取到明显的占位值（例如操作系统默认用户名）时不要直接用**。
 
-**环境要求的最低版本不在这一问里**：它由勘察给出——读 `survey.mjs` 的
-`artifacts.runtimeRequirements`（项目声明的 `engines`、`requires-python`、`rust-version`
-之类），**读得到就照着写**；项目没声明就不写那一节，**不要为此去问用户**
-（去问脚本本来就知道的数字，答错就写进了 README）。判据见 `references/survey.md`
-`artifacts` 一节里 `runtimeRequirements` 那两段，以及 `references/publish.md` 的
-「跟随版本与最低支持版本」。
+**环境要求的最低版本不在这一问里**：由勘察给出（`artifacts.runtimeRequirements`），
+**读得到就照着写，没声明就不写那一节，不必问用户**——去问脚本本来就知道的数字，
+答错就写进了 README。判据见 `references/survey.md` 与 `references/publish.md`。
 
-**G4 的确认清单**以 `references/remote-github.md` 建仓节表格为准，此处不复述——两处各存
-一份迟早漏一项。它与 P2 那句结论不是一回事：P2 说的是**本次任务做什么**，G4 说的是
-**这次对外动作具体是什么**（确切的仓库名、可见性、分支）。两者都只说一次。**边界**：
-不可逆或对外的动作都要走 G4 式对齐，纯本地写入不需要；**改可见性是最危险的一个**，
-步骤见 `references/remote-github.md`「可见性变更」，必须完整走完，默认答案是「不做」。
+**G4 的确认清单**以 `references/remote-github.md` 建仓节表格为准，此处不复述。
+它与 P2 那句结论不是一回事：P2 说**本次任务做什么**，G4 说**这次对外动作具体是什么**
+（确切仓库名、可见性、分支）。不可逆或对外的动作都走 G4 式对齐，纯本地写入不需要；
+**改可见性最危险**，步骤见 `references/remote-github.md`「可见性变更」，默认答案是「不做」。
 
 ## 怎么用
 

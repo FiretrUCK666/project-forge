@@ -32,7 +32,7 @@ export { parseGitHubRepo } from './lib/text.mjs'
 export {
   KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, INSTRUCTION_BUDGET,
 } from './lib/protocol.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, INSTRUCTION_BUDGET } from './lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, INSTRUCTION_BUDGET, COMMAND_KEYS } from './lib/protocol.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { HOST_ECOSYSTEMS, detectHost, deriveHostFacts } from './ecosystems.mjs'
 
@@ -538,18 +538,6 @@ const SKILL_ENTRY_NAMES = ['SKILL.md', 'skill.md']
  */
 const LOCAL_SKILL_BASES = ['.dsh/skills', '.agents/skills', '.claude/skills', 'skills']
 
-/**
- * 清单里 `dsh` 对象下的已知键，分两类。
- *
- * 拆成两类不是为了好看，是因为两类**该不该被作者写**不同：公开作者字段是作者声明
- * 的意图，宿主内部字段是宿主自己的元数据。混在一起报「不认识」会造出假警报——
- * 而一个会喊狼来了的检查，不如没有。
- *
- * 词表以宿主的公共清单类型为准；宿主加新键时，往对应的那一组里加一条，而不是让
- * 这份词表去猜。语义仍按 `references/plugin-project.md` 的六问现场查。
- */
-const DSH_PUBLIC_KEYS = new Set(['manifestVersion', 'bundle', 'profile', 'client'])
-const DSH_HOST_INTERNAL_KEYS = new Set(['sessionFormatMigration'])
 
 // ── 目录走查（体量、风险） ──────────────────────────────────────────────────
 
@@ -749,7 +737,7 @@ function readmeLangOf(name) {
  *
  * **跳过围栏代码块**：README 的示例里出现 `## 用法` 是正常写法，而按行首匹配会把它算成
  * 一个真实存在的节——报告于是多出一节，读的人照着它判断「README 已经写过这一节」。
- * 围栏判据只有一处实现（本文件的 `scanLines`），这里直接用它。
+ * 围栏判据只有一处实现（lib/markdown.mjs 的 `scanLines`），这里直接用它。
  */
 function markdownH2(filePath) {
   const text = readText(filePath)
@@ -1293,7 +1281,7 @@ function detectEcosystem(root, root_, walked) {
 const PUBLISHABLE_MANIFESTS = MANIFEST_KINDS.filter((m) => m.publishable)
 
 /** 一条命令的键。正向清单——用「是哪些」而不是「不是哪些」，新增键不会被误当成命令。 */
-const COMMAND_KEYS = ['install', 'build', 'typecheck', 'lint', 'test', 'verify', 'smoke']
+// 命令键是跨脚本协议：定义在 lib/protocol.mjs，本文件只引入。
 
 /**
  * 能搬进扁平视图的键。`packageManager` 在列：它是命令的前缀（`pnpm install` 而不是
@@ -2032,18 +2020,16 @@ function detectHostEcosystem(root, root_, eco) {
   if (d === undefined) return undefined
   const facts = deriveHostFacts(d, ctx)
   if (facts === undefined) return undefined
-  // 工具链与本地约定是**目录形状**的事实，不属于任何一个宿主的声明；
-  // 但它们只对已登记的宿主有意义，所以仍挂在这里，键名由描述符的 id 决定。
-  facts.toolchain = {
-    tsdown: root_.has('tsdown.config.ts') || root_.has('tsdown.config.js') || root_.has('tsdown.config.mjs'),
-    vitest: root_.has('vitest.config.ts') || root_.has('vitest.config.js') || root_.has('vitest.config.mjs'),
-    oxlint: root_.has('.oxlintrc.json'),
-    pnpmWorkspace: root_.has('pnpm-workspace.yaml'),
-    lockfile: root_.has('pnpm-lock.yaml'),
+  // 工具链与本地约定：**清单名由描述符声明**，本函数只按「有没有」逐个问文件系统。
+  // 不在这里写死某个生态的配置文件名——那正是「主引擎不认识具体生态」的含义。
+  facts.toolchain = {}
+  for (const [key, names] of Object.entries(d.toolchain ?? {})) {
+    facts.toolchain[key] = names.some((n) => root_.has(n))
   }
-  facts.localWorkflow = root_.entry('.agents')?.isDir === true
-  facts.patchesDir = root_.entry('patches')?.isDir === true
-  facts.contractDoc = root_.has(`docs/${d.id}-contracts.md`)
+  for (const [key, dir] of Object.entries(d.localDirs ?? {})) {
+    facts[key] = root_.entry(dir)?.isDir === true
+  }
+  if (typeof d.contractDoc === 'function') facts.contractDoc = root_.has(d.contractDoc(d.id))
   return facts
 }
 

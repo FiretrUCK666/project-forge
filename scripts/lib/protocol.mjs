@@ -89,3 +89,29 @@ export const INSTRUCTION_BUDGET = 65536
 export function needsSummary(text) {
   return String(text ?? '').includes(SUMMARY_MARKER)
 }
+/**
+ * 「这一行是本 skill 的受管标记吗」的判据：**基于上面那些常量拼出来，不另抄字面量**。
+ *
+ * 用法是逐行匹配（`re.test(line)`），所以带 `g` 标志的版本另有 `lastIndex` 的坑——
+ * 这里导出的是无状态版本，调用方每次 `test` 都从零开始。
+ *
+ * 除四枚具名标记外，还认 `pf:` 开头的开放命名空间：`pf:author`、`pf:if ...`、
+ * `pf:scaffold` 这些是模板指令，数量会随模板演进增长，逐枚枚举必然漏。
+ */
+export const MANAGED_MARK_RE = new RegExp(
+  `<!--\\s*(?:${[KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP]
+    .map((m) => m.replace(/^<!--\s*/, '').replace(/\s*-->$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')}|pf:[^>]*?)\\s*-->`,
+)
+/**
+ * 命令键：哪些键算「这个项目有可跑的命令」。
+ *
+ * **全仓唯一一份**。原先 survey 有一份数组、compose 有一份从标签表派生的 Set，
+ * 两边各判一次：改了一处另一边不报错，症状是命令段静默消失或多出空壳。
+ *
+ * 顺序有意义：扁平视图按这个顺序取先到者，所以「声明的」排在「推断的」前面。
+ */
+export const COMMAND_KEYS = ['install', 'build', 'typecheck', 'lint', 'test', 'verify', 'smoke']
+
+/** 同上的集合形态，供频繁查表用。 */
+export const COMMAND_KEY_SET = new Set(COMMAND_KEYS)

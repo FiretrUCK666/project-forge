@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { scanLines } from '../lib/markdown.mjs'
 
@@ -478,7 +478,9 @@ function checkDeliveredAttribution() {
   if (!existsSync(dir)) { fail('缺少 templates 目录。'); return }
 
   // 受管标记：它们是本 skill 自己的围栏，不是写给目标项目的引用。
-  const MANAGED_MARK_RE = /<!--\s*(?:project-forge:kernel:(?:start|end)|project-forge:(?:managed|upgraded)|pf:[^>]*?)\s*-->/g
+  // 判据来自 lib/protocol.mjs：四枚具名标记从常量拼出来，外加 `pf:` 开放命名空间。
+  // 在这里重抄一遍字面量，就是第二份真相——改一处另一边不出声。
+  const MANAGED_MARK_RE = new RegExp(PROTOCOL_MANAGED_MARK_RE.source, 'g')
 
   // 本包独占命名空间。`scripts/` 另判：它是通用目录名，目标项目也常有。
   //

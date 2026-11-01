@@ -36,7 +36,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
@@ -185,6 +185,8 @@ function documentState(text) {
  * 正向清单的另一个好处：勘察将来新增命令键时，这里不补就**不会**被当成命令——
  * 缺的是一条命令说明（报「没有可跑的命令」并给出待办），而不是一段空壳。
  */
+// 标签是展示层的事（中文措辞只在这里），**键的清单不是**——它定义在 lib/protocol.mjs，
+// 与勘察侧共用同一份。各写一份时改了这边那边不报错，症状是命令段静默消失。
 const COMMAND_LABELS = [
   ['install', '安装依赖'],
   ['build', '构建'],
@@ -194,7 +196,7 @@ const COMMAND_LABELS = [
   ['verify', '自检'],
   ['smoke', '冒烟'],
 ]
-const COMMAND_KEYS = new Set(COMMAND_LABELS.map(([key]) => key))
+const COMMAND_KEYS = PROTOCOL_COMMAND_KEYS
 
 /**
  * 声明了依赖的文件（清单之外的那些）。判据是「存在即认为有依赖」。

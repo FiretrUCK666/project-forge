@@ -34,11 +34,26 @@ export const HOST_ECOSYSTEMS = [
     id: 'dsh-plugin',
     manifest: 'package.json',
     patchFiles: ['cordis.patch.yml', 'cordis.patch.yaml', 'cordis.yml'],
+    // 清单里 `dsh` 对象下的已知键，分两类。拆成两类不是为了好看，是因为两类
+    // **该不该被作者写**不同：公开作者字段是作者声明的意图，宿主内部字段是宿主自己
+    // 的元数据。混在一起报「不认识」会造出假警报——而一个会喊狼来了的检查，不如没有。
+    // 宿主加新键时往对应的那一组里加一条，而不是让这份词表去猜。
     publicKeys: ['manifestVersion', 'bundle', 'profile', 'client'],
     hostInternalKeys: ['sessionFormatMigration'],
     runtimeScopes: ['@deepseek-ai/'],
     runtimePackages: ['cordis', 'schemastery'],
     chapter: 'dsh',
+    // 工具链与本地约定是**目录形状**的事实，但它们只对这类宿主有意义，
+    // 所以由描述符声明要找什么，而不是让勘察引擎替某个生态写死一串配置名。
+    toolchain: {
+      tsdown: ['tsdown.config.ts', 'tsdown.config.js', 'tsdown.config.mjs'],
+      vitest: ['vitest.config.ts', 'vitest.config.js', 'vitest.config.mjs'],
+      oxlint: ['.oxlintrc.json'],
+      pnpmWorkspace: ['pnpm-workspace.yaml'],
+      lockfile: ['pnpm-lock.yaml'],
+    },
+    localDirs: { localWorkflow: '.agents', patchesDir: 'patches' },
+    contractDoc: (id) => `docs/${id}-contracts.md`,
   },
 ]
 

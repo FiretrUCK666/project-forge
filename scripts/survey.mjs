@@ -2434,8 +2434,10 @@ function detectGit(root, options = {}) {
   info.commits = count === undefined ? undefined : Number(count)
   info.commitsState = count === undefined ? 'unreadable' : 'ok'
 
-  const tracked = runGitPaths(['ls-files', '-z'], root)
-  info.trackedFiles = tracked === undefined ? undefined : tracked.length
+  // 受控文件清单只取一次：这里要数量，下面判断凭据是否已入库要集合。
+  // 同一条命令跑两遍是纯浪费——它在 Windows 上约 30 毫秒，而清单可能很长。
+  info.trackedPaths = runGitPaths(['ls-files', '-z'], root)
+  info.trackedFiles = info.trackedPaths === undefined ? undefined : info.trackedPaths.length
   info.upstream = branchInfo.upstream
   info.head = run('git', ['rev-parse', 'HEAD'], root)
   // 初始化新仓库前需要知道默认分支会叫什么。平台默认分支名不一致（有的 main、有的
@@ -2582,7 +2584,7 @@ function detectAuth(info, root, options = {}) {
   return out
 }
 
-function detectIgnores(root, root_, outputDirCandidates) {
+function detectIgnores(root, root_, outputDirCandidates, gitFact) {
   const out = {}
   const giName = root_.real('.gitignore')
   if (giName !== undefined) {
@@ -2610,7 +2612,9 @@ function detectIgnores(root, root_, outputDirCandidates) {
   // **一次批处理，不逐个起子进程**：候选来自 walk() 的全树枚举（任何深度），
   // 用 `check-ignore --stdin -z` 一把判定。逐个 spawn 的代价随目录数线性增长，
   // 而只探一层的后果是标准 monorepo 的 `packages/<包名>/dist` 全被漏掉。
-  const gitUsable = run('git', ['rev-parse', '--is-inside-work-tree'], root) === 'true'
+  // 复用已经问过的 git 事实：工作区在不在，detectGit 早就答过了。
+  // 再跑一次 rev-parse 是纯浪费，而且两处各答一次就可能各错一次。
+  const gitUsable = gitFact !== undefined ? gitFact.present === true : run('git', ['rev-parse', '--is-inside-work-tree'], root) === 'true'
   const probe = []
   if (gitUsable) {
     // 候选 = 全树候选（任何深度的产物目录名）∪ 顶层已知产物目录名。
@@ -2715,7 +2719,8 @@ function survey(target, options = {}) {
   // （输出超上限、命令失败），那是**没问出来**，与「问出来是没有」不是一回事。把它
   // 读成 false 会让已在历史里的凭据被当成可以从这次提交里排除，处置方向正好反了。
   const inWorkTree = git.available === true && git.present === true
-  const trackedList = runGitPaths(['ls-files', '-z'], root)
+  // 复用 detectGit 已经取过的清单：同一条命令不重复跑。
+  const trackedList = git.trackedPaths
   const trackedSet = trackedList === undefined && inWorkTree ? undefined : new Set(trackedList ?? [])
   const markBits = (entry) => ({
     ...entry,
@@ -2751,7 +2756,7 @@ function survey(target, options = {}) {
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
   // 忽略探查只跑一次，两处复用同一结果。
-  const ignores = detectIgnores(root, root_, walked.outputDirCandidates)
+  const ignores = detectIgnores(root, root_, walked.outputDirCandidates, git)
 
   // workspace 拓扑：多包仓库的事实，供上层决定「命令该在哪一层跑」、
   // 「产物在哪个子包里」。读不到就是没有声明，不按目录形状猜。

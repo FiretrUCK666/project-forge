@@ -110,6 +110,36 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     localDirs: { localWorkflow: '.agents', patchesDir: 'patches' },
     contractDoc: (id) => `docs/${id}-contracts.md`,
   },
+  {
+    /**
+     * VS Code 扩展：判据是清单里的 `engines.vscode`——只有扩展会声明它。
+     * `contributes` 单独出现不足以判定（别的生态也可能用这个词）。
+     */
+    id: 'vscode-extension',
+    manifest: 'package.json',
+    /** 只有清单里出现这个字段路径才算这类——字段名就是身份的判据。 */
+    markerField: ['engines', 'vscode'],
+    publicKeys: ['contributes', 'activationEvents', 'extensionKind', 'l10n'],
+    hostInternalKeys: [],
+    runtimeScopes: [],
+    runtimePackages: ['vscode', '@types/vscode'],
+    chapter: 'vscode',
+  },
+  {
+    /**
+     * 插件：清单是独立的 manifest.json，判据是 `minAppVersion` 字段。
+     * 同名文件是 PWA 的（manifest.json 到处都是），所以**判据是那个字段，
+     * 不是文件在不在**。
+     */
+    id: 'obsidian-plugin',
+    manifest: 'manifest.json',
+    markerField: ['minAppVersion'],
+    publicKeys: ['id', 'name', 'version', 'minAppVersion', 'isDesktopOnly', 'author', 'authorUrl', 'fundingUrl', 'description'],
+    hostInternalKeys: [],
+    runtimeScopes: [],
+    runtimePackages: ['obsidian'],
+    chapter: 'obsidian',
+  },
 ]
 
 /**
@@ -118,15 +148,36 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
  * 判据一律来自**项目自己的声明**（清单字段或补丁文件），不按目录形状猜。
  * 返回命中的描述符，没有则 undefined。
  */
+/**
+ * 按字段路径取值：['engines','vscode'] → pkg.engines.vscode。
+ *
+ * 取不到返回 undefined，不抛错——路径不存在就是「没有这个声明」，
+ * 和「清单坏了」是两件事，后者由调用方单独报。
+ */
+export function fieldAt(obj, path) {
+  let cur = obj
+  for (const key of path) {
+    if (cur === null || typeof cur !== 'object') return undefined
+    cur = cur[key]
+  }
+  return cur
+}
+
 export function detectHost(descriptors, ctx) {
   for (const d of descriptors) {
     const pkg = ctx.manifest(d.manifest)
-    if (pkg !== undefined && typeof pkg === 'object' && pkg !== null) {
-      // 清单里有该宿主的字段对象：最直接的声明。字段名取 id 的前缀
-      // （`dsh-plugin` → `dsh`），不另开一列——那一列对每一行都一样。
-      const field = d.id.split('-')[0]
-      if (typeof pkg[field] === 'object' && pkg[field] !== null) return d
+    if (pkg !== undefined && typeof pkg === "object" && pkg !== null) {
+      // 判据是「清单里有没有那个字段路径」，路径由描述符自己声明。
+      // 不能统一按 id 前缀取：不同宿主的身份字段形状差别很大——
+      // dsh 是一个对象（pkg.dsh），VS Code 是 engines.vscode 一个字符串，
+      // 是 minAppVersion 一个字段。写死取法就只能认其中一种，
+      // 加第二个宿主时必然要改这段——那正是描述符要消灭的事情。
+      const path = d.markerField ?? [d.id.split("-")[0]]
+      const value = fieldAt(pkg, path)
+      // undefined 才算没有；空对象、空串、false 都是「声明了」。
+      if (value !== undefined) return d
     }
+    // 有的宿主靠一个承载配置的文件表明身份（补丁文件），没有 JS 清单也算。
     if (Array.isArray(d.patchFiles) && d.patchFiles.some((f) => ctx.exists(f))) return d
   }
   return undefined

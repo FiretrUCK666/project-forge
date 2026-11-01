@@ -200,12 +200,12 @@ node "<本领目录>/scripts/update.mjs" --check
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |
 | `templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt` | 两份 BSD 许可证的标准全文（二条款、三条款） |
 | `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
-| `scripts/survey.mjs` | 只读勘察，输出结构化事实；也放全项目共用的文本判据 |
+| `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
 | `scripts/zip.mjs` | 解开 zip 包：自更新要读得动下载回来的那份 |
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 | `scripts/handoff.mjs` | 只读勘察目标项目里这个 skill 留下的痕迹；也能判「已经干净」 |
-| `scripts/ledger.mjs` | 记下「这个 skill 在项目里写过哪些字节区间」，撤除时据此精确地只撤自己写的那部分 |
+| `scripts/lib/` | 公共模块：文本判据、围栏扫描、原子写入、账本（`ledger.mjs` 记下写过哪些字节区间，撤除时据此只撤自己写的那部分） |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 用 UTF-8 文件写发布说明，中文不经 shell；并从提交记录起草中文稿 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是不是真的显示得出来 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
@@ -225,6 +225,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |
 | `scripts/dev/selftest.mjs` | 行为自检：造 fixture 实跑，断言每条判定 |
 | `scripts/dev/render-svg.mjs` | 把 README 的卡片渲染成图并量出留白，改卡片时用它验收 |
+| `scripts/dev/bench.mjs` | 量关键命令的耗时，判断这次改动有没有变慢 |
 
 ## 脚本
 

@@ -222,12 +222,12 @@ the project is in, what it plans to do, and why it is skipping the rest.
 | `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |
 | `templates/license-bsd-2-clause.txt`, `templates/license-bsd-3-clause.txt` | Full standard text of the two BSD licenses (2-clause, 3-clause) |
 | `scripts/update.mjs` | Keeps this copy current (see Update) |
-| `scripts/survey.mjs` | Read-only survey producing structured facts; also holds the shared text criteria |
+| `scripts/survey.mjs` | Read-only survey producing structured facts |
 | `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
 | `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
 | `scripts/handoff.mjs` | Read-only scan of the traces this skill left in a project; can also judge whether it is already clean |
-| `scripts/ledger.mjs` | Records which byte ranges this skill wrote in a project, so teardown removes exactly its own bytes |
+| `scripts/lib/` | Shared modules: text criteria, fence scanning, atomic writes, ledger (`ledger.mjs` records which byte ranges this skill wrote, so teardown removes exactly its own bytes) |
 | `scripts/release-notes.mjs`, `scripts/draft-release-notes.mjs` | Writes release notes from a UTF-8 file so Chinese never passes through a shell; and drafts them from the commit log |
 | `scripts/check-badges.mjs` | Checks that the README badges actually render |
 | `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |
@@ -247,6 +247,7 @@ These never enter the package. To work on this skill, start with
 | `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |
 | `scripts/dev/selftest.mjs` | Behavioural self-check: builds fixtures, runs them, asserts each decision |
 | `scripts/dev/render-svg.mjs` | Renders the README cards and measures their margins; use it to accept a card change |
+| `scripts/dev/bench.mjs` | Times the key commands so you can tell whether a change made things slower |
 
 ## Scripts
 

@@ -13,10 +13,7 @@
  * 退出码 0 = 全部通过；1 = 有失败。临时 fixture 用完即删。
  */
 
-import {
-  mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync,
-  unlinkSync,
-} from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, copyFileSync, readdirSync, symlinkSync, unlinkSync, } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
@@ -24,17 +21,13 @@ import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import {
-  evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles,
-  compareHostMarker, hostDateBatchStatus,
-  freshnessSectionBody, hasActionableSources,
-  referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage,
-} from './preflight.mjs'
+  evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, } from './preflight.mjs'
 import {
-  isMainModule, authorMarkers, parseGitHubRepo, kindVocabulary, skillVersion, skillSource, needsSummary,
-  parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap,
-} from '../survey.mjs'
+  authorMarkers, parseGitHubRepo, kindVocabulary, needsSummary } from '../survey.mjs'
+import { isMainModule } from '../lib/text.mjs'
+import { skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
-import { clearStaleTemps } from '../sync-toc.mjs'
+import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 

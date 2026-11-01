@@ -27,25 +27,21 @@
  * 而 `--check` 还说没问题。损坏（标记落在围栏内）时**拒绝写入**并说清怎么修，
  * 与 compose-agents 处理受损标记同一种做法：宁可不写，也不写坏。
  *
- * 围栏扫描这一族判据（`scanLines` / `fencedSpans` / `markerPositions`）**住在
- * `survey.mjs`**——那里是全项目共用的文本判据的所在地，本文件从那里取。
- * 它要判的是同一件事（这对标记是不是真在正文里），两边各写一份状态机，就会出现
- * 同一个文件、同一种损坏，两处给出不同答案。
+ * 围栏扫描这一族判据与入口判定都住在 `lib/markdown.mjs` / `lib/text.mjs`，
+ * 本文件只从那里取，不自己实现。
  *
  * 退出码：0 = 已同步 / 无需同步；1 = --check 发现不同步；2 = 用法或文件错误。
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 
-// 入口判定与围栏扫描这一族文本判据都住在 survey.mjs：入口判定按**真实路径**归一，
-// 经 junction / 符号链接调用也算直接执行——字面比较在那种调用下会**什么都不做并
-// 返回 0**，而「exit 0、零输出」会被调用方读成「目录已是最新」，那是本工具最不该
-// 给出的答案。围栏扫描放在一起的理由同上：它判的是「这一行是不是在代码块里」，
-// 各写一份状态机迟早给出两种答案。
-//
-// **依赖方向**：本文件只依赖 survey.mjs 一个方向，没有环。
-import { isMainModule, scanLines, fencedSpans, markerPositions } from './survey.mjs'
+// 入口判定按**真实路径**归一，经 junction / 符号链接调用也算直接执行——字面比较在
+// 那种调用下会**什么都不做并返回 0**，而「exit 0、零输出」会被调用方读成「目录已是
+// 最新」，那是本工具最不该给出的答案。
+import { isMainModule } from './lib/text.mjs'
+import { scanLines, fencedSpans, markerPositions } from './lib/markdown.mjs'
+import { tempPathFor, clearStaleTemps, reportTemps, writeAtomic } from './lib/fs-atomic.mjs'
 
 const START = '<!-- toc:start -->'
 const END = '<!-- toc:end -->'
@@ -393,121 +389,6 @@ function main() {
     return 1
   }
   return 0
-}
-
-/**
- * 本工具的临时文件名：**原名 + `.tmp-` + 进程号**。
- *
- * 形状写在两处就一定会漂（写死的那份迟早对不上），所以它只此一份，
- * `compose-agents.mjs` 与 `update.mjs` 都从这里取。
- *
- * 进程号是「属主」：清理时靠它判断这个临时文件还有没有主。
- */
-export function tempPathFor(target, pid = process.pid) {
-  return `${target}.tmp-${pid}`
-}
-
-/**
- * 这个进程号还活着吗？
- *
- * 判据用 `process.kill(pid, 0)`：ESRCH = 没有这个进程；其余（例如 EPERM）
- * 说明进程存在、只是问不动它——**问不动不等于不在**，所以那种情况按「还活着」处理。
- * 问不出来（不是合法进程号）一律按「不在」，但那类文件根本进不到这一步。
- */
-export function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return error?.code !== 'ESRCH'
-  }
-}
-
-/**
- * 清掉这个文件此前的临时文件。
- *
- * **只删能证明是「已经死掉的进程」留下的那些**，其余一律留下并报出来。两条判据都要：
- *
- *   - **形状**必须是 `<原名>.tmp-<纯数字>`。纯数字是进程号；同前缀但不是纯数字的
- *     （`README.md.tmp-backup` 这类）是**使用者自己的文件**，不是残留——删掉它就是
- *     悄悄毁掉别人的东西。而且它连残留报告都认不出来（那边用的是同一个形状判据），
- *     于是使用者永远不知道自己被删了。
- *   - **属主还活着吗**：活着说明它是**另一个正在跑的进程**手里的临时文件。删了它，
- *     那次运行的改名会失败（ENOENT），报一句「处理失败」收工——文件没坏，
- *     但那次白跑。并发是这个工具的常态（AI 并行、CI 并发、编辑器插件与 AI 同时操作）。
- *     死了才是上次被杀进程留下的残留。
- *
- * 代价说清楚：进程号会被系统回收。**被回收的那个号**若正好落在一个活着的进程上，
- * 它的残留就清不掉（要等那个进程也退出）。留着比误删好——残留是一个文件，误删是丢数据。
- *
- * 返回 { removed, kept }：removed 是清掉的，kept 是留下的（带原因，交上层报出来）。
- */
-export function clearStaleTemps(path) {
-  const dir = dirname(path)
-  const prefix = `${basename(path)}.tmp-`
-  const removed = []
-  const kept = []
-  let entries
-  try { entries = readdirSync(dir) } catch { return { removed, kept } }
-  for (const name of entries) {
-    if (!name.startsWith(prefix)) continue
-    const suffix = name.slice(prefix.length)
-    if (!/^\d+$/.test(suffix)) {
-      kept.push({ name, why: '不是本工具的临时文件（使用者自己的？）' })
-      continue
-    }
-    const pid = Number(suffix)
-    if (pid === process.pid) {
-      kept.push({ name, why: '本次运行正在写它' })
-      continue
-    }
-    if (processAlive(pid)) {
-      kept.push({ name, why: '另一个正在运行的进程正在写它' })
-      continue
-    }
-    try {
-      unlinkSync(join(dir, name))
-      removed.push(name)
-    } catch { /* 清不掉就算了 */ }
-  }
-  return { removed, kept }
-}
-
-/**
- * 临时文件的清理结果要说出来：清了什么、什么没清以及为什么。
- *
- * 不说就是「静默」：没清掉的文件会一直躺在那儿，而看报告的人无从判断它是残留
- * 还是别人的东西——下一次运行还会再遇到它。
- *
- * 导出给别的脚本用：临时文件的判据与它的报告是一件事的两半，各写一份报告格式，
- * 就会出现同一个残留在一个工具里报「已清理」、在另一个工具里报「没动」。
- */
-export function reportTemps(file, temps) {
-  if (temps.removed.length === 0 && temps.kept.length === 0) return
-  const parts = []
-  if (temps.removed.length > 0) parts.push(`清掉 ${temps.removed.length} 个上次遗留的临时文件`)
-  if (temps.kept.length > 0) {
-    parts.push(`没动 ${temps.kept.length} 个同前缀但不属于本次运行的文件：`
-      + temps.kept.map((k) => `${k.name}（${k.why}）`).join('、'))
-  }
-  process.stdout.write(`${file}：${parts.join('；')}\n`)
-}
-
-/**
- * 先写临时文件再改名：中途失败不会留下半截文件。
- *
- * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在仓库里，会被结构自检当成无主文件。
- */
-function writeAtomic(path, content) {
-  const tmp = tempPathFor(path)
-  try {
-    writeFileSync(tmp, content, { encoding: 'utf8' })
-    renameSync(tmp, path)
-  } catch (error) {
-    try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* 清不掉就算了 */ }
-    throw error
-  }
 }
 
 // 入口守卫：本文件被别的脚本引入时不能顺带跑一遍。

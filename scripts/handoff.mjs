@@ -37,15 +37,15 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readLedger, hasAnyRecord, segmentIds, provenance } from './ledger.mjs'
+import { readLedger, hasAnyRecord, segmentIds, provenance } from './lib/ledger.mjs'
 
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
 import {
-  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER,
-  SKIP_DIRS, MAX_WALK_DEPTH, MAX_WALK_ENTRIES, CONTENT_SCAN_MAX_BYTES,
-  frontmatterBlock, isMainModule, scanLines, fencedSpans,
-} from './survey.mjs'
+  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER, SKIP_DIRS, MAX_WALK_DEPTH, MAX_WALK_ENTRIES, CONTENT_SCAN_MAX_BYTES } from './survey.mjs'
+import { frontmatterBlock } from './lib/text.mjs'
+import { isMainModule } from './lib/text.mjs'
+import { scanLines, fencedSpans } from './lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')

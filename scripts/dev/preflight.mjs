@@ -37,9 +37,10 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, README_NAME_RE, HOME_PATH_RE, skillVersion, skillSource, repoRelation,
-  tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion,
-  scanLines, KERNEL_START, KERNEL_END } from '../survey.mjs'
+import { isMainModule } from '../lib/text.mjs'
+import { README_NAME_RE, HOME_PATH_RE, KERNEL_START, KERNEL_END } from '../survey.mjs'
+import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+import { scanLines } from '../lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -787,7 +788,11 @@ function checkScripts() {
   //
   // README 对外承诺「Python 完全不需要」，那条承诺必须由机制守住，否则某天有人为了
   // 图方便加一个 .py 辅助脚本，承诺就悄悄变成假话，而没有任何检查会提示。
-  const ALLOWED_SUBDIRS = new Set(['dev'])
+  //
+  // `lib/` 是随包分发的公共模块层：多个脚本共用同一份实现，按「放错位置」的判据它
+  // 属于**用户包内**（包里的脚本要 import 它）。把它列在这里是让它成为结构的一部分，
+  // 而不是每次新增模块都要改一遍白名单。
+  const ALLOWED_SUBDIRS = new Set(['dev', 'lib'])
   const scanDir = (d, prefix) => {
     if (!existsSync(d)) return
     for (const entry of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
@@ -804,6 +809,7 @@ function checkScripts() {
   }
   scanDir(dir, 'scripts/')
   scanDir(join(dir, 'dev'), 'scripts/dev/')
+  scanDir(join(dir, 'lib'), 'scripts/lib/')
 }
 
 // ── 检查八：脚本真的能跑起来 ────────────────────────────────────────────────
@@ -2107,6 +2113,7 @@ function checkPackageBoundary() {
   // 位置判据：脚本按目录归类，放错位置即红（不靠谁记得去改排除清单）。
   for (const [dir, prefix, bucket, hint] of [
     ['scripts', 'scripts/', map.shipped, '只服务本仓库的脚本放 scripts/dev/'],
+    [join('scripts', 'lib'), 'scripts/lib/', map.shipped, '公共模块随包分发，要登记在「用户包里有」'],
     [join('scripts', 'dev'), 'scripts/dev/', map.repoOnly, '随包分发的脚本放 scripts/ 顶层'],
   ]) {
     const d = join(SKILL_ROOT, dir)

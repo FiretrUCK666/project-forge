@@ -24,7 +24,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, isMainModule, KERNEL_START, KERNEL_END, markerPositions } from './survey.mjs'
+import { survey, authorMarkers, KERNEL_START, KERNEL_END } from './survey.mjs'
+import { isMainModule } from './lib/text.mjs'
+import { markerPositions } from './lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 

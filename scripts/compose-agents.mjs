@@ -35,13 +35,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, authorMarkers, normVersion, parseMarkerKeys, isNoteKey, isMainModule,
-  readTextFile, fencedSpans, markerPositions, scanLines,
-  KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
-import { readLedger, writeLedger, recordSegment, forgetSegment } from './ledger.mjs'
+import { survey, authorMarkers, isNoteKey, KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET } from './survey.mjs'
+import { normVersion, parseMarkerKeys, isMainModule, readTextFile } from './lib/text.mjs'
+import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
+import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
 // 临时文件的形状与清理判据住在 sync-toc.mjs：那一族判据（哪些是本工具的残留、哪些是
 // 使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取，不再自己写一遍。
-import { clearStaleTemps, tempPathFor, reportTemps } from './sync-toc.mjs'
+import { clearStaleTemps, tempPathFor, reportTemps } from './lib/fs-atomic.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')

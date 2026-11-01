@@ -70,12 +70,13 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readFileMap, skillSource, skillVersion, isMainModule } from './survey.mjs'
+import { readFileMap } from './lib/text.mjs'
+import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
 // 临时文件的**形状与归属判据**只有一份，住在 sync-toc.mjs：compose-agents.mjs 从那里取，
 // 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
 // 使用者自己的文件也删了」。
-import { clearStaleTemps, tempPathFor } from './sync-toc.mjs'
+import { clearStaleTemps, tempPathFor } from './lib/fs-atomic.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')

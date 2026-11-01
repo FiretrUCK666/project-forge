@@ -274,12 +274,12 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
-| `scripts/survey.mjs` | P1 勘察；也是全项目共用的文本判据（frontmatter、文件地图、仓库地址归一、围栏扫描） |
+| `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
+| `scripts/lib/text.mjs`、`scripts/lib/markdown.mjs`、`scripts/lib/fs-atomic.mjs`、`scripts/lib/ledger.mjs` | 随包分发的公共模块（文本判据、围栏扫描、原子写入、账本） |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
 | `scripts/compose-agents.mjs` | P4 生成、刷新或升级 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--budget N` 改预算） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
 | `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单；`--verify` 判是否已干净——退出码 **0 干净 / 1 不干净 / 3 判不了**，「判不了」指扫描没覆盖全部，**不要读成干净**） |
-| `scripts/ledger.mjs` | 痕迹判定的账本：落盘时记下「我写了哪个字节区间、哈希是多少」，交棒时查它而不是猜形状 |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 写发布说明；「非 ASCII 正文不经 shell」那条规则的落地工具，含从提交记录起草 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步；临时文件的命名形状与归属判据也在这里 |
@@ -302,6 +302,7 @@ node "<本 skill 目录>/scripts/dev/preflight.mjs"
 | `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界、卡片断言） |
 | `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检：造 fixture 实跑，断言每条判定 |
 | `scripts/dev/render-svg.mjs` | **改 README 卡片时**用它验收：渲染成位图并量出四边留白与画布尺寸是否合规 |
+| `scripts/dev/bench.mjs` | **判断这次改动有没有变慢**：量关键命令的耗时，改前改后各跑一遍对比 |
 
 ## 边界
 

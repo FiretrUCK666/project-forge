@@ -30,6 +30,31 @@ import { markerPositions } from './lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
+/**
+ * 门禁的切面。**只校验本次任务涉及的那几面**，不因为项目别处没配而拦下。
+ *
+ * 存在的理由：这个门禁原先只有「全量」一种口径，于是「只让你补一个 LICENSE」的老项目
+ * 会被缺 AGENTS.md、缺 README 一起拦死——而那不是本次任务的范围。判据是**这次要交付
+ * 什么**，不是**这个项目是否完美**。
+ *
+ * 默认值（不给 --scope）仍是全量：现有 CI 与既有用法依赖它，改成默认裁剪会静默放走
+ * 本来能拦住的问题。
+ */
+const SCOPES = [
+  'git', // 提交署名、上游跟踪、忽略规则（版本管理那一面）
+  'agents', // AGENTS.md 与内核
+  'docs', // README、双语文档
+  'contributing', // CONTRIBUTING
+  'license', // LICENSE
+  'ci', // 检查自动化
+  'release', // 发布自动化与各生态发布门禁
+  'badges', // README 徽章
+  'secrets', // 凭据、本机路径、大文件、扫描可信度
+  'ecosystem', // 生态特有门禁（插件/能力目录/发布清单）
+]
+
+const ALL_SCOPES = new Set(SCOPES)
+
 const FLAGS = new Set([
   '--no-bilingual', // 用户确认：单语即可，不要英文版
   '--no-contributing', // 用户确认：自用项目，不要贡献指南
@@ -51,9 +76,24 @@ function readText(p) {
 function parseArgs(argv) {
   const positional = []
   const flags = new Set()
+  /** undefined = 没给 --scope，跑全量（现有 CI 与既有用法依赖这个默认）。 */
+  let scope
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i]
     if (a === '--help' || a === '-h') return { help: true }
+    if (a.startsWith('--scope=')) {
+      const wanted = a.slice('--scope='.length).split(',').map((x) => x.trim()).filter(Boolean)
+      if (wanted.length === 0) {
+        throw new Error(`--scope= 后面要写切面名（逗号分隔）；可用的有：${[...ALL_SCOPES].join('、')}`)
+      }
+      const bad = wanted.filter((x) => !ALL_SCOPES.has(x))
+      if (bad.length > 0) {
+        throw new Error(`--scope 里有不认得的切面：${bad.join('、')}`
+          + `（可用的有：${[...ALL_SCOPES].join('、')}）`)
+      }
+      scope = new Set(wanted)
+      continue
+    }
     if (a.startsWith('--')) {
       if (!FLAGS.has(a)) throw new Error(`无法识别的参数：${a}（可用：${[...FLAGS].join('、')}）`)
       flags.add(a)
@@ -61,7 +101,7 @@ function parseArgs(argv) {
     }
     positional.push(a)
   }
-  return { target: positional[0] ?? process.cwd(), flags }
+  return { target: positional[0] ?? process.cwd(), flags, scope }
 }
 
 /**
@@ -242,19 +282,37 @@ function main(argv) {
     return 2
   }
   if (parsed.help) {
-    process.stdout.write(
-      '用法：node scripts/review.mjs <项目目录> [--no-bilingual] [--no-contributing]\n'
-      + '      [--private-no-license] [--no-ci] [--no-auto-release] [--secrets-reviewed] [--strict]\n\n'
-      + '  无[缺]即退出码 0。[待问]必须问用户后用对应 flag 消掉，不许默跳。\n'
-      + '  默认[待问]不拦（exit 0 但结论写“还有待问”）；--strict 下[待问]同样拦住（exit 2），用于 CI。\n'
-      + '  --secrets-reviewed 只覆盖「未跟踪且未忽略」的命中；已经进了版本库的凭据改文件不解决，\n'
-      + '  任何 flag 都不消那一档——从索引移除并轮换。\n'
-      + '  无对应 flag 的[待问]（徽章没查完、DSH 挂载建议、英文模板、纯文档构建命令、扫描未覆盖范围）只能改文件消掉。\n',
-    )
+    process.stdout.write([
+      '用法：node scripts/review.mjs <项目目录> [--scope=<切面>[,...]] [选项]',
+      '',
+      '  --scope=a,b   只校验这几面，其余不查、不报缺。不给就是全量（默认）。',
+      '                切面：git agents docs contributing license ci release badges secrets ecosystem',
+      '                用在「只让你补一件东西」的场景：老项目缺 AGENTS.md，',
+      '                但任务只是配 CI 时，--scope=ci 不该被前者拦下。',
+      '',
+      '  --no-bilingual         用户确认：单语即可',
+      '  --no-contributing      用户确认：自用项目，不要贡献指南',
+      '  --private-no-license   用户确认：保留所有权利，不落盘 LICENSE',
+      '  --no-ci                用户确认：暂不要 CI',
+      '  --no-auto-release      用户确认：暂不要自动发布',
+      '  --secrets-reviewed     用户确认：未跟踪未忽略的命中均为占位或测试数据',
+      '  --strict               严格模式：待问事项同样拦住（exit 2），用于 CI',
+      '',
+      '  退出码：0 = 无[缺]（默认下[待问]也放行）；1 = 有[缺]；2 = 用法错误或 --strict 拦下[待问]。',
+      '  已经进了版本库的凭据改文件不解决，任何 flag 都不消那一档——从索引移除并轮换。',
+    ].join('\n') + '\n')
     return 0
   }
-  const { target, flags } = parsed
+  const { target, flags, scope } = parsed
   const root = resolve(target)
+
+  /**
+   * 这一面要不要查。不给 `--scope` 时永远为真（全量门禁）。
+   *
+   * 判据是**这次要交付什么**，不是**这个项目是否完美**：用户说「帮我补个 LICENSE」，
+   * 缺 README 不在范围内，不该把他拦在这道门外。
+   */
+  const wants = (face) => scope === undefined || scope.has(face)
 
   let s
   try {
@@ -264,16 +322,26 @@ function main(argv) {
     return 2
   }
 
+  // 多面共用的派生事实：提交署名、上游、忽略规则读 git；凭据、私有路径、
+  // 大文件读 risks。声明在段外，避免被某个 scope 块关在里面而在别处变成
+  // ReferenceError——那正是「按需裁剪」最容易引入的一类错。
+  const git = s.git ?? {}
+  const risks = s.risks ?? {}
+  // README 列表归文档面定义，徽章面要拿它去验——两段共用一个事实，声明在段外。
+  const readmes = s.docs?.readme ?? []
+  // AGENTS.md 的正文归 agents 面读，发布面要拿它核对「内核之外有没有写清怎么推、怎么发版」。
+  const agentsPath = join(root, 'AGENTS.md')
+  const agents = readText(agentsPath)
+
   const missing = []
   const pending = []
   const ok = []
   const line = (st, text) => process.stdout.write(`  [${st}] ${text}\n`)
   process.stdout.write(`交付门禁：${s.target.name}（${s.target.path}）\n`)
 
+  if (wants('agents')) { // scope: agents
   // 1. AGENTS.md：一致性真相源是 compose --check 的字节比对，本门只转述。
   // 自己另起一套“有标记即一致”必然漂移其一，故不自判，只调用。
-  const agentsPath = join(root, 'AGENTS.md')
-  const agents = readText(agentsPath)
   if (agents === undefined) {
     missing.push('AGENTS.md 缺失')
   } else {
@@ -300,9 +368,10 @@ function main(argv) {
     }
   }
 
+  } // scope: agents
+  if (wants('git')) { // scope: git
   // 2. 提交署名：没有仓库时跳过（P3 建库时再定）；有仓库而署名缺失必须补——
   // 否则首个提交永久带着错误署名。占位值靠人眼（G7），机器只卡缺失。
-  const git = s.git ?? {}
   if (git.present === true) {
     const id = git.identity ?? {}
     if (!id.name || !id.email) {
@@ -319,6 +388,8 @@ function main(argv) {
     }
   }
 
+  } // scope: git
+  if (wants('git')) { // scope: git
   // 2b. 上游跟踪：有远端而未设跟踪时，首推需显式指定。只提示，不阻断。
   if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
     && git.upstream === undefined && git.isRepoRoot !== false) {
@@ -371,6 +442,8 @@ function main(argv) {
     }
   }
 
+  } // scope: git
+  if (wants('release')) { // scope: release
   // 2c. 标签与版本号：只报事实比对，不下结论（形生态各异，见 publish.md）。
   if (s.artifacts?.declaredVersion !== undefined && s.artifacts?.versionAligned === false) {
     pending.push(`标签与版本号未对齐：清单 ${s.artifacts.declaredVersion}，标签 ${(s.artifacts.versionAlignedTags ?? []).join('、') || '无'}（自动化会对不上，先确认）`)
@@ -387,13 +460,14 @@ function main(argv) {
       + '落盘前先对齐它们说的是不是同一件事——否则新生成的那份看起来最权威，矛盾会被留下来')
   }
 
+  } // scope: release
+  if (wants('secrets')) { // scope: secrets
   // 2d. 密钥与扫描可信度。**按分案判，不一律报缺**（判据与 version-control.md 的
   // 密钥门控同源，SKILL.md 的 G2 也写「未跟踪排除、已历史轮换、占位继续」）：
   //   - 已跟踪（已经在版本库里）→ 缺：只能从索引移除并轮换凭据；
   //   - 未跟踪且**已被忽略** → 报「齐」：这是最常见的正常形态（.gitignore 里的 .env），
   //     一律报缺会把门禁变成噪音，操作者的对策就是条件反射式加 flag——安全信号被稀释；
   //   - 未跟踪且未被忽略 → 缺：`git add -A` 会把它带进历史。
-  const risks = s.risks ?? {}
   const secretHits = [...(risks.secretFiles ?? []), ...(risks.secretContent ?? [])]
   const secretTiers = tierSecrets(secretHits)
   // flag 的效力按**处置档**分开：`--secrets-reviewed` 的语义是「这一处是占位或测试数据」，
@@ -472,6 +546,8 @@ function main(argv) {
     pending.push(`嵌套仓库 ${risks.nestedRepos.length} 个（子目录里另有 .git；确认是有意为之，否则它不会被外层仓库跟踪）`)
   }
 
+  } // scope: secrets
+  if (wants('git')) { // scope: git
   // 2e. 忽略规则：未忽略的产物目录与“已跟踪又被忽略”是提交前必须消掉的两项。
   const ig = s.ignores ?? {}
   if (Array.isArray(ig.unignoredOutputDirs) && ig.unignoredOutputDirs.length > 0) {
@@ -483,8 +559,9 @@ function main(argv) {
   if (ig.gitattributes === undefined && git.present === true) {
     pending.push('文本属性声明缺失：首次提交前补上，否则跨机器产物字节不可复现')
   }
+  } // scope: git
+  if (wants('docs')) { // scope: docs
   // 3. README：必须有；双语要么成对，要么用户明确说单语。
-  const readmes = s.docs?.readme ?? []
   if (readmes.length === 0) {
     missing.push('README 缺失')
   } else {
@@ -494,6 +571,8 @@ function main(argv) {
     else pending.push('双语：只有一份 README，问用户要不要英文版（要→补，不要→加 --no-bilingual）')
   }
 
+  } // scope: docs
+  if (wants('badges')) { // scope: badges
   // 4. 徽章：有就必须验（联网跑 check-badges）；没有徽章不强求。
   // 「没查完」与「查过且可显示」是两回事——第三态走待问，绝不并进齐。
   //
@@ -507,6 +586,8 @@ function main(argv) {
     pending.push(`徽章没能查完（${badgeResult.why}）：在汇报里写明未验及原因，不要读成通过`)
   } else ok.push(badgeResult.state === 'ok' ? '徽章全部可显示' : '无徽章（可选，不强求）')
 
+  } // scope: badges
+  if (wants('contributing')) { // scope: contributing
   // 5. CONTRIBUTING / LICENSE：缺了必须问，不能默跳；有了要看内容是否齐全。
   //
   // 内容判据**必须语言无关**：写 CONTRIBUTING 的人用哪种语言是他的自由，而门禁
@@ -556,20 +637,23 @@ function main(argv) {
   }
   else if (flags.has('--no-contributing')) ok.push('无 CONTRIBUTING（用户已确认自用）')
   else pending.push('CONTRIBUTING 缺失：问用户会不会给别人用（会→补，不会→加 --no-contributing）')
-  if (s.docs?.license !== undefined) {
+  } // scope: contributing
+  if (wants('license')) { // scope: license
     // 许可证文件族要多说一句：双许可（`LICENSE-MIT` + `LICENSE-APACHE`）是 Rust 等生态的
     // 标准布局，**没有**单个 `LICENSE`。只报「LICENSE 有」会让下一个读的人以为只有一份，
     // 进而去补一个与清单里的 `OR` 表达式打架的 `LICENSE`。
-    const fam = s.docs.licenseFamily
-    ok.push(fam !== undefined && fam.length > 1
-      ? `LICENSE 有（许可证文件族 ${fam.length} 份：${fam.join('、')}——双许可常见，不要再补单个 LICENSE）`
-      : 'LICENSE 有')
-  }
-  else if (flags.has('--private-no-license')) ok.push('无 LICENSE（用户已选保留所有权利）')
-  else pending.push('LICENSE 缺失：问用户选哪个许可证（保留权利→加 --private-no-license）')
-
+    if (s.docs?.license !== undefined) {
+      const fam = s.docs.licenseFamily
+      ok.push(fam !== undefined && fam.length > 1
+        ? `LICENSE 有（许可证文件族 ${fam.length} 份：${fam.join('、')}——双许可常见，不要再补单个 LICENSE）`
+        : 'LICENSE 有')
+    } else if (flags.has('--private-no-license')) ok.push('无 LICENSE（用户已选保留所有权利）')
+    else pending.push('LICENSE 缺失：问用户选哪个许可证（保留权利→加 --private-no-license）')
+  } // scope: license
+  if (wants('ci')) { // scope: ci
   // 6. 工作流：CI 与自动发布要么落盘，要么用户明确说暂不要。
-  // 6b. DSH 插件：只在判定为 dsh-plugin 时检查，不猜取值。
+  } // scope: ci
+  if (wants('ecosystem')) { // scope: ecosystem
   const dshKinds = s.ecosystem?.kinds ?? []
   if (dshKinds.includes('dsh-plugin') && s.dsh !== undefined) {
     const d = s.dsh
@@ -629,6 +713,8 @@ function main(argv) {
     }
   }
 
+  } // scope: ecosystem
+  if (wants('ecosystem')) { // scope: ecosystem
   // 6c. 本地 skills：只盘点，不强求；已有被改坏才拦。
   //
   // 「装上了却像不存在」是这一类最常见也最难查的故障：宿主要么整个目录不加载，要么
@@ -685,6 +771,8 @@ function main(argv) {
     }
   }
 
+  } // scope: ecosystem
+  if (wants('release')) { // scope: release
   // 6d. 生态发布门禁：只判本生态清单事实，不拼他生态命令。
   const ecoKinds = s.ecosystem?.kinds ?? []
   // Python：后端缺了即无权威构建入口（待问）；readme/license 缺了服务端大概率
@@ -754,6 +842,7 @@ function main(argv) {
     }
   }
 
+  } // scope: release
   for (const t of ok) line('齐', t)
   for (const t of pending) line('待问', t)
   for (const t of missing) line('缺', t)

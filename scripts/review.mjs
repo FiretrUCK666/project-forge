@@ -372,6 +372,11 @@ function main(argv) {
   if (wants('git')) { // scope: git
   // 2. 提交署名：没有仓库时跳过（P3 建库时再定）；有仓库而署名缺失必须补——
   // 否则首个提交永久带着错误署名。占位值靠人眼（G7），机器只卡缺失。
+  // 目录里没有仓库时，git 面**没有可验的对象**。不能说「齐备」——那是把
+  // 「没查」说成「查过没问题」。报一项待问，让调用方知道这一面没被覆盖。
+  if (git.present !== true && scope !== undefined && scope.has('git')) {
+    pending.push('这个目录不是 git 仓库——版本管理这一面没有可验的对象（先 git init，或去掉 --scope=git）')
+  }
   if (git.present === true) {
     const id = git.identity ?? {}
     if (!id.name || !id.email) {

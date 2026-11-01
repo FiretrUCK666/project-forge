@@ -985,7 +985,7 @@ function cardClaims(text) {
  *
  * `<desc>` 与 `<title>` 是给读屏软件与搜索引擎看的，画面上并没有那行字——「写在文件里」
  * 不等于「印在卡上」。断言守的是「卡片上说了这句话」，判据就得落在画面上：整份文件全文
- * 匹配会让 `<desc>` 里的半句话把守卫哄绿，而读者在卡上永远看不到它。实测踩过：英文卡片
+ * 匹配会让 `<desc>` 里的半句话把守卫哄绿，而读者在卡上永远看不到它。典型形态：英文卡片
  * 的断言只活在 `<desc>` 里，守卫是绿的，那句话在画面上不存在。
  */
 function visibleSvgText(svgText) {
@@ -1194,9 +1194,8 @@ function checkStatedCounts() {
       const text = readText(p).replace(/^\uFEFF/, '')
       // 围栏状态**只从权威实现取**（survey.mjs 的 scanLines）。
       //
-      // 这里曾经手写过一个 `inFence` 循环，它只认 ` ``` `、不认 `~~~`，也不管闭合行
-      // 是否不短于起始行。同一种 Markdown 在三个脚本里会得到三种「哪几行是代码」的答案，
-      // 而这三处判的都是「门禁命令表里写了什么」——判错的后果是命令表对不上却报绿。
+      // 围栏判定手写一份就必然与别处不同：只认三个反引号、不认波浪线、不管闭合行长度。
+      // 三处判的都是「门禁命令表里写了什么」，判错的后果是命令表对不上却报绿——只取那一份。
       const scanned = scanLines(text)
       const at = scanned.findIndex((l) => headingRe.test(l.line))
       if (at < 0) return { state: 'heading-missing', heading: headingName }
@@ -2209,7 +2208,7 @@ function checkReleaseTag(tag, repoArg) {
   //
   // **这里是三值比较，不是 `!==`**。写成 `repoPath(a) !== repoPath(b)` 时，两个都认不出
   // 会得到 `undefined !== undefined` = false，即「判为一致」——而「两个都认不出」恰恰是
-  // 最需要停下来的时候。`git@host:owner/name` 这种最常见的克隆写法曾经就归一不出来，
+  // 最需要停下来的时候。`git@host:owner/name` 这种最常见的克隆写法容易漏掉，
   // 于是 fork 比对静默通过。`repoRelation` 让「没法比」必须被显式处理。
   const declaredSource = skillSource(skillText)
   const origin = run(['remote', 'get-url', 'origin'])

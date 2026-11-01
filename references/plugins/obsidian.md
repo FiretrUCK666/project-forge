@@ -174,6 +174,12 @@
   <https://github.com/obsidianmd/obsidian-sample-plugin>（仓库里的 `.gitignore` 与
   `.github/workflows/release.yml`）
 
+**上次核对看到的值**（2026-11-01 复核，与正文逐项比对一致）：必填字段七项（uthor /
+minAppVersion / 
+ame / ersion / description / id / isDesktopOnly）、id 只许小写字母
+与连字符且不得含 obsidian、不得以 plugin 结尾、undingUrl 支持字符串与对象两种形态。
+核对方式：抓官方 Manifest 参考页全文比对。
+
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 
-<!-- obsidian-verified: date=2026-10-13 -->
+<!-- obsidian-verified: date=2026-11-01 -->

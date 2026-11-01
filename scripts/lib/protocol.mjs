@@ -115,3 +115,12 @@ export const COMMAND_KEYS = ['install', 'build', 'typecheck', 'lint', 'test', 'v
 
 /** 同上的集合形态，供频繁查表用。 */
 export const COMMAND_KEY_SET = new Set(COMMAND_KEYS)
+/**
+ * 描述「某条命令从哪来」的键（`note` / 以 `Note` 结尾）：不是命令本身。
+ *
+ * 导出给 compose-agents 用——同一份判据写在两处时，新增一种 `xxxNote` 只会在其中一处
+ * 生效，而现象是「命令段整块消失」或「多出一条根本不是命令的项」，两边都不会报错。
+ */
+export function isNoteKey(key) {
+  return key === 'note' || key.endsWith('Note')
+}

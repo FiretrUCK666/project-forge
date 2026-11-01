@@ -271,7 +271,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
 | `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
 | `scripts/ecosystems.mjs` | 生态描述符：加一个生态只改这里 |
-| `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` | 随包分发的公共模块 |
+| `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/render.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` | 随包分发的公共模块 |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
 | `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |

@@ -219,7 +219,7 @@ ode scripts/review.mjs --help 为准——
 | `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 | `scripts/handoff.mjs` | 只读勘察目标项目里这个 skill 留下的痕迹；也能判「已经干净」 |
-| `scripts/lib/` | 公共模块：文本判据、围栏扫描、协议常量、原子写入、账本（`ledger.mjs` 记下写过哪些字节区间，撤除时据此只撤自己写的那部分） |
+| `scripts/lib/` | 公共模块：文本判据、围栏扫描、协议常量、Markdown 呈现、原子写入、账本（`ledger.mjs` 记下写过哪些字节区间，撤除时据此只撤自己写的那部分） |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 用 UTF-8 文件写发布说明，中文不经 shell；并从提交记录起草中文稿 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是不是真的显示得出来 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |

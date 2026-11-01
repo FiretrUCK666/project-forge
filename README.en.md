@@ -242,7 +242,7 @@ Without --scope the check is still the full one, for the "deliver the whole thin
 | `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
 | `scripts/handoff.mjs` | Read-only scan of the traces this skill left in a project; can also judge whether it is already clean |
-| `scripts/lib/` | Shared modules: text criteria, fence scanning, protocol constants, atomic writes, ledger (`ledger.mjs` records which byte ranges this skill wrote, so teardown removes exactly its own bytes) |
+| `scripts/lib/` | Shared modules: text criteria, fence scanning, protocol constants, Markdown rendering, atomic writes, ledger (`ledger.mjs` records which byte ranges this skill wrote, so teardown removes exactly its own bytes) |
 | `scripts/release-notes.mjs`, `scripts/draft-release-notes.mjs` | Writes release notes from a UTF-8 file so Chinese never passes through a shell; and drafts them from the commit log |
 | `scripts/check-badges.mjs` | Checks that the README badges actually render |
 | `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |

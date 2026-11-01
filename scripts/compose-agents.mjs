@@ -43,6 +43,7 @@ import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/led
 // 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
 // 哪些是使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取。
 import { clearStaleTemps, tempPathFor, reportTemps } from './lib/fs-atomic.mjs'
+import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -252,6 +253,16 @@ function rootIndex(target) {
  * 反复重跑纯属浪费——实测一次 `--status` 会跑三遍，把 1.1 秒拖成 3.2 秒。默认参数
  * 只为「只想要事实、不在乎成本」的一次性调用保留。
  */
+/**
+ * 这个项目命中的那个宿主生态的描述符；没命中返回 undefined。
+ *
+ * 判据取勘察结果里已经算好的生态种类，不重新判定一次——两处各判一次就会各错一次。
+ */
+function hostDescriptorFor(s) {
+  const kinds = s?.ecosystem?.kinds ?? []
+  return HOST_ECOSYSTEMS.find((e) => kinds.includes(e.id))
+}
+
 function deriveFacts(target, s = survey(target)) {
   const index = rootIndex(target)
   // 目录读不到时**不许继续生成**：这条链的每一个判据都建立在「读得到目录」之上，
@@ -439,7 +450,14 @@ function deriveFacts(target, s = survey(target)) {
     COMMANDS: renderCommands(commands),
   }
 
-  return { survey: s, conditions, tokens, manifestBroken, manifestBrokenWhy, manifestPath }
+  // 专属模板段落：段落正文住在生态描述符里，这里只把「命中那个生态」的那份取出来。
+  // 没命中任何生态时是空对象，模板里的 pf:include 随之整段不出现。
+  const hostDesc = hostDescriptorFor(s)
+  // 空对象表示「这个项目不属于任何已登记生态」，模板里的 pf:include 应当整段不出现；
+  // 而「命中了生态但那段没登记」才是缺陷，由 hostId 的有无来区分这两种情况。
+  const includes = hostDesc?.includes ?? {}
+  const hostId = hostDesc?.id
+  return { survey: s, conditions, tokens, manifestBroken, manifestBrokenWhy, manifestPath, includes, hostId }
 }
 
 /**
@@ -523,12 +541,13 @@ function renderCommands(commands) {
  */
 function materialize(template, facts) {
   const TOKEN_RE = /\{\{([^{}]*)\}\}/g
-  const MARK_RE = /<!--\s*pf:(if\s+[^\s>]+|endif|scaffold|endscaffold|author\s*(?::[\s\S]*?)?)\s*-->/g
+  const MARK_RE = /<!--\s*pf:(if\s+[^\s>]+|endif|scaffold|endscaffold|include\s+[A-Za-z0-9_-]+|author\s*(?::[\s\S]*?)?)\s*-->/g
 
   const out = []
   const stack = [] // { kind: 'if'|'scaffold', active: boolean }
   const unknownConditions = []
   const unknownTokens = new Set()
+  const unknownIncludes = new Set()
   let cursor = 0
 
   const active = () => stack.every((f) => f.active)
@@ -588,12 +607,36 @@ function materialize(template, facts) {
       if (active()) out.push(m[0])
       continue
     }
-    // pf:author：保留标记本身，它是要交出去的待办事项
+    // pf:include：把某个生态的专属段落取进来。
+    //
+    // 段落正文住在描述符里（scripts/ecosystems.mjs），不写在通用模板里——
+    // 那样每加一个宿主都要改模板，而改漏的症状是「该有的段落没出现」，没人报错。
+    // 本指令只认「当前项目命中的那个生态」，没命中就整段不出现。
+    if (body.startsWith('include ')) {
+      const slot = body.slice(8).trim()
+      if (active()) {
+        const snippet = facts.includes?.[slot]
+        // 取进来的段落**本身也是模板**：里面有 pf:if / pf:author。
+        // 直接 push 原文，那些指令会以注释形式留在产出里，条件也就失效了——
+        // 症状是「按事实取舍」变成「一股脑全出现」。所以递归过一次。
+        if (typeof snippet === 'string' && snippet !== '') out.push(materialize(snippet, facts))
+        // 只有「命中生态却没登记这段」才算缺陷；没命中生态时整段本就该不出现。
+        else if (facts.hostId !== undefined) unknownIncludes.add(slot)
+      }
+      continue
+    }
     if (active()) out.push(m[0])
   }
   emit(template.slice(cursor))
 
   if (stack.length > 0) throw new Error('模板里有未闭合的 pf:if 或 pf:scaffold。')
+  // 未登记的 include 槽位必须报错：它意味着模板要一段没人提供的正文。
+  // 静默跳过时产出照常生成、门禁全绿，只是**该有的段落不见了**——
+  // 那是最难发现的一种缺失。
+  if (unknownIncludes.size > 0) {
+    throw new Error(`模板要求了未登记的专属段落：${[...unknownIncludes].join('、')}。`
+      + '请在 scripts/ecosystems.mjs 对应生态的 includes 里补上它，或删掉模板里的这一行。')
+  }
   if (unknownConditions.length > 0) {
     throw new Error(`模板使用了未知条件：${[...new Set(unknownConditions)].join('、')}。`
       + '请在 compose-agents.mjs 的 deriveFacts() 里定义它，不要让它静默丢弃内容。')

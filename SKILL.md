@@ -232,16 +232,11 @@ node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 ```
 
-下面这条**只在维护本 skill 自身时**运行，与目标项目无关（它按脚本自身位置推导检查对象，
-不接受项目目录参数）。它不是 P7：
+维护本 skill 自身时跑 `scripts/dev/preflight.mjs`（它按脚本自身位置推导检查对象，
+不接受项目目录参数，不是 P7）。
 
-```sh
-# 自检本 skill：内核是否与模板一致、引用是否断链、是否含 emoji
-node "<本 skill 目录>/scripts/dev/preflight.mjs"
-```
-
-各脚本都只用运行环境内置的模块，零依赖，跨平台。含中文或空格的目录路径作为独立参数传入
-是正常用法（**不要把它拼进命令行字符串**，理由见 `references/remote-github.md` 的 6.1）。
+各脚本零依赖、跨平台。含中文或空格的路径作为独立参数传入是正常用法
+（**不要拼进命令行字符串**，理由见 `references/remote-github.md` 的 6.1）。
 
 ## 文件地图
 

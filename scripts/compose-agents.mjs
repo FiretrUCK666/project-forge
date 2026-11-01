@@ -244,9 +244,12 @@ function rootIndex(target) {
  *
  * 每个条件的判据都写在代码里而不是散在模板里：模板只声明「这段在什么条件下出现」，
  * 「什么时候满足这个条件」由这里统一决定。这样加一个新条件只需要改一处。
+ *
+ * **勘察结果由调用方传进来**（`s`）。它是一次全盘走查加若干 git 子进程，一次运行里
+ * 反复重跑纯属浪费——实测一次 `--status` 会跑三遍，把 1.1 秒拖成 3.2 秒。默认参数
+ * 只为「只想要事实、不在乎成本」的一次性调用保留。
  */
-function deriveFacts(target) {
-  const s = survey(target)
+function deriveFacts(target, s = survey(target)) {
   const index = rootIndex(target)
   // 目录读不到时**不许继续生成**：这条链的每一个判据都建立在「读得到目录」之上，
   // 读不到却照常往下走，产出的是一份看起来正常的错误契约。明确报错，留给人处理。
@@ -713,8 +716,8 @@ function extraLines(oldText, freshText) {
  * 反过来判断（看旧文件有没有 author 标记）是错的：纯生成的小节本来就没有 author 标记，
  * 会被误判成「人已填写」，于是**永远冻结**——「有远端才有」的那几段就再也补不进来。
  */
-function refreshFromTemplate(target, existing, kernel, state) {
-  const facts = deriveFacts(target)
+function refreshFromTemplate(target, existing, kernel, state, s = survey(target)) {
+  const facts = deriveFacts(target, s)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
 
   const oldBody = extractKernel(existing, state.startAt, state.endAt).body
@@ -873,8 +876,8 @@ function embeddedKernel(text) {
  * 内核插在一级标题之后、第一个二级标题之前。这是唯一不需要猜测的位置：文件标题是
  * 每个 AGENTS.md 都有的，而内核属于「总纲」性质，放在正文之前符合它被阅读的顺序。
  */
-function upgradeHandwritten(existing, kernel, target) {
-  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target)))
+function upgradeHandwritten(existing, kernel, target, s = survey(target)) {
+  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s)))
   const old = splitSections(existing)
 
   // 行尾先定下来：插入的内容按**原文件的主导行尾**排。
@@ -1123,8 +1126,8 @@ function writeAuthorList(authors, stream) {
 }
 
 /** 算出相对模板还缺哪些节。`--status` 与普通运行共用同一份判据。 */
-function missingSections(target, currentText) {
-  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target)))
+function missingSections(target, currentText, s = survey(target)) {
+  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s)))
   const have = new Set(splitSections(currentText)
     .sections.map((s) => s.heading))
   return fresh.sections
@@ -1163,9 +1166,9 @@ function documentStructure(text) {
  * 返回值带 `applicable`：**不适用时 list 为空是「没查」，不是「查过没有」**，调用方
  * 必须把它与「查了、真的一个不缺」分开报。
  */
-function applicableMissingSections(target, text) {
+function applicableMissingSections(target, text, s = survey(target)) {
   if (documentStructure(text) === 'authored') return { applicable: false, list: [] }
-  return { applicable: true, list: missingSections(target, text) }
+  return { applicable: true, list: missingSections(target, text, s) }
 }
 
 /**
@@ -1180,12 +1183,8 @@ function applicableMissingSections(target, text) {
  * 寄生在本来就要看的输出里：不另起命令、不拦流程、不记入缺口。标记读不到、项目非
  * 插件、项目无锁定版本时一律安静——没证据不断言，避免误报打扰非 DSH 项目。
  */
-function dshCompatibilityNotice(target) {
-  let s
-  try {
-    s = survey(target)
-  } catch { return undefined }
-  if (!s.ecosystem.kinds.includes('dsh-plugin')) return undefined
+function dshCompatibilityNotice(s) {
+  if (s === undefined || !s.ecosystem.kinds.includes('dsh-plugin')) return undefined
   const pinned = s.dsh?.pinnedVersions ?? []
   if (pinned.length === 0) return undefined
   let marker = ''
@@ -1214,8 +1213,8 @@ function dshCompatibilityNotice(target) {
  * 改掉，比不动更糟。但直接报错退出也不行——那等于告诉使用者「你这个场景不支持」。
  * 所以默认只报告，升级要显式要求。
  */
-function reportHandwritten(agentsPath, existing, target, status, check) {
-  const facts = deriveFacts(target)
+function reportHandwritten(agentsPath, existing, target, status, check, s = survey(target)) {
+  const facts = deriveFacts(target, s)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
   const standard = splitSections(rendered)
   const current = splitSections(existing)
@@ -1329,7 +1328,7 @@ function reportRefresh(report, stream) {
  * 检查条件是**表里有定义**，不是「这个项目下为真」——后者会让「判据此时为假」被误当成
  * 「定义缺失」，而那完全正常。
  */
-function assertTemplateConditionsKnown(target) {
+function assertTemplateConditionsKnown(target, s = survey(target)) {
   if (!existsSync(SKELETON_PATH)) return // 骨架缺失由后面那条分支报，不在这里重复
   const used = new Set(
     [...readUtf8(SKELETON_PATH).matchAll(/<!--\s*pf:if\s+([A-Za-z0-9_-]+)\s*-->/g)]
@@ -1338,7 +1337,7 @@ function assertTemplateConditionsKnown(target) {
   if (used.size === 0) return
   let conditions
   try {
-    conditions = deriveFacts(target).conditions
+    conditions = deriveFacts(target, s).conditions
   } catch {
     // 勘察本身读不出这个目录：那是后面处理这个目录时会报的事，不在这里抢着报，
     // 也不要把一次校验失败变成一次工具崩溃。
@@ -1397,8 +1396,19 @@ function main(argv) {
   // 「文件不存在」（--check 直接报不存在退出）、「标记受损」（报受损退出）这些更早的
   // 分支都走不到它——模板坏没坏于是被另一个错误盖住，下一次也没人再问它，而 CI 跑的就是
   // --check。放在这里，那两条路径上模板也照样受检。
+  //
+  // 勘察只跑一次：它是一次全盘走查加若干 git 子进程，重跑一遍就是白等一秒多。
+  // 这里算出来的结果往下透传，`--status` 因此从三遍降为一遍。
+  let s
   try {
-    assertTemplateConditionsKnown(target)
+    s = survey(target)
+  } catch (error) {
+    process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
+    return 2
+  }
+
+  try {
+    assertTemplateConditionsKnown(target, s)
   } catch (error) {
     process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
@@ -1481,13 +1491,13 @@ function main(argv) {
         // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
         // 报错退出**（那会把最常见的场景变成死路），也不能擅自重写（那是覆盖用户的成果）。
         // 默认只做体检并给出下一步；用户明确要升级时才动手，且只做加法。
-        if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check)
-        const upgraded = upgradeHandwritten(existing, kernel, target)
+        if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check, s)
+        const upgraded = upgradeHandwritten(existing, kernel, target, s)
         composed = upgraded.text
         refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [] }
       } else {
         managedExisting = existing
-        const refreshed = refreshFromTemplate(target, existing, kernel, state)
+        const refreshed = refreshFromTemplate(target, existing, kernel, state, s)
         composed = refreshed.text
         refreshReport = refreshed.report
         factsForReport = refreshed.facts
@@ -1504,7 +1514,7 @@ function main(argv) {
         process.stderr.write(`错误：找不到骨架 ${SKELETON_PATH}。\n`)
         return 2
       }
-      const facts = deriveFacts(target)
+      const facts = deriveFacts(target, s)
       factsForReport = facts
       composed = materialize(readUtf8(SKELETON_PATH), facts)
       if (!composed.endsWith('\n')) composed += '\n'
@@ -1580,7 +1590,7 @@ function main(argv) {
           + '。两侧都按 LF 归一化后比过，所以这不是行尾问题——是内核内容真的不同。')
       }
     }
-    const missingNow = applicableMissingSections(target, managedExisting ?? composed)
+    const missingNow = applicableMissingSections(target, managedExisting ?? composed, s)
     // 缺节是否算失败，取决于这份文件的节结构是谁定的：
     //   - generated → 结构由模板决定，缺节就是缺陷；
     //   - upgraded  → 结构已对齐模板，但需要人写的节还要作者补，缺节只提示；
@@ -1615,12 +1625,12 @@ function main(argv) {
       process.stderr.write(`状态：${agentsPath} 不存在（尚未生成）。\n`)
       return 1
     }
-    const missing = applicableMissingSections(target, readUtf8(agentsPath))
+    const missing = applicableMissingSections(target, readUtf8(agentsPath), s)
     process.stdout.write(`${agentsPath}\n  ${bytes} 字节，占预算 ${ratio}%，`
       + `待填写 ${authors.length} 处，`
       + (missing.applicable ? `缺失 ${missing.list.length} 节\n` : '缺节判据不适用（作者编排）\n'))
     reportGaps(authors, missing, process.stdout)
-    const stale = dshCompatibilityNotice(target)
+    const stale = dshCompatibilityNotice(s)
     if (stale !== undefined) process.stdout.write(`${stale}\n`)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
@@ -1629,12 +1639,12 @@ function main(argv) {
     return 0
   }
 
-  const missing = applicableMissingSections(target, composed)
+  const missing = applicableMissingSections(target, composed, s)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportGaps(authors, missing, process.stdout)
     reportRefresh(refreshReport, process.stdout)
-    const staleSame = dshCompatibilityNotice(target)
+    const staleSame = dshCompatibilityNotice(s)
     if (staleSame !== undefined) process.stdout.write(`${staleSame}\n`)
     return 0
   }
@@ -1720,7 +1730,7 @@ function main(argv) {
   }
   reportGaps(authors, missing, process.stdout)
   reportRefresh(refreshReport, process.stdout)
-  const staleNew = dshCompatibilityNotice(target)
+  const staleNew = dshCompatibilityNotice(s)
   if (staleNew !== undefined) process.stdout.write(`${staleNew}\n`)
   if (bytes > budget) {
     process.stderr.write(

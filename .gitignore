@@ -62,3 +62,7 @@ package-list.txt
 
 # 勘察输出的基线快照：只在重构期间用来比对行为有没有变，含本机路径，不入库。
 scripts/dev/.baseline/
+
+# 本 skill 在目标项目里留下的账本目录。它属于**目标项目**、进那个项目的版本库；
+# 本仓库自己是 skill 源码，不该有它。误跑 --record 时兜住。
+.project-forge/

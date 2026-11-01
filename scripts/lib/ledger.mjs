@@ -70,29 +70,38 @@ function emptyLedger() {
 }
 
 /**
- * 读账本。**读不到就返回空账本，不抛错**——账本缺失是正常状态（老项目、被清理过），
- * 而「没有账本」的正确行为是「什么都不敢认」，不是停下来。
+ * 读账本，**区分「没有账本」与「账本读不出来」**——这两件事的后果完全不同。
+ *
+ *   - **不存在**（老项目、被清理过）：空账本是正确答案。行为退化成「什么都不敢认」，
+ *     落盘只做加法、撤除一律问人，错在少撤而不是多撤。这是唯一安全的退化方向。
+ *   - **存在但坏了 / 版本不认识 / 结构不对**：这**不是**「没有账本」。把它读成空，
+ *     验收工具会对着一个「账本明明记着、只是我读不出来」的项目说「已经干净」——
+ *     那是假绿，而且恰恰发生在用户最需要它说真话的时候。
+ *
+ * 所以返回 { ledger, state }：state 为 'absent' / 'ok' / 'unreadable'。
+ * 调用方必须自己决定 unreadable 怎么办——勘察工具可以当没有，**验收工具必须报出来**。
  */
 export function readLedger(root) {
   const p = ledgerPath(root)
-  if (!existsSync(p)) return emptyLedger()
+  if (!existsSync(p)) return { ledger: emptyLedger(), state: 'absent' }
   let raw
   try {
     raw = readFileSync(p, 'utf8')
   } catch {
-    return emptyLedger()
+    return { ledger: emptyLedger(), state: 'unreadable' }
   }
   let data
   try {
     data = JSON.parse(raw)
   } catch {
-    // 账本坏了等同于没有：继续用一份空账本，既不覆盖也不删。
-    return emptyLedger()
+    return { ledger: emptyLedger(), state: 'unreadable' }
   }
-  if (typeof data !== 'object' || data === null) return emptyLedger()
-  if (data.schema !== LEDGER_SCHEMA) return emptyLedger()
-  if (typeof data.segments !== 'object' || data.segments === null) return emptyLedger()
-  return data
+  if (typeof data !== 'object' || data === null) return { ledger: emptyLedger(), state: 'unreadable' }
+  if (data.schema !== LEDGER_SCHEMA) return { ledger: emptyLedger(), state: 'unreadable' }
+  if (typeof data.segments !== 'object' || data.segments === null) {
+    return { ledger: emptyLedger(), state: 'unreadable' }
+  }
+  return { ledger: data, state: 'ok' }
 }
 
 /** 原子写账本：先写同目录临时文件再改名，中途被杀不会留下半截 JSON。 */

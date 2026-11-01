@@ -985,9 +985,15 @@ function scan(root, onlyFile) {
   // 有账本时，痕迹判定从「形状像不像」变成「哈希对不对」。这是这一段代码存在的全部理由：
   // 形状判据没法同时避免误伤（Vue 的 `{{ title }}`）与漏判（`<安装命令>`），
   // 因为它问的是「像不像」，而不是「是不是」。
-  const ledger = readLedger(root)
+  // 账本**读不出来**与**不存在**是两件事：前者意味着「归属证据在，但我读不到」，
+  // 此时任何「干净」的结论都是假绿。所以把它记进 gaps，让 complete 机会归零、
+  // 退出码走 3（判不了），而不是 0（干净）。
+  const ledgerRead = readLedger(root)
+  const ledger = ledgerRead.ledger
   // 账本里**有记录的文件名集合**：不写死 AGENTS.md，账本记了哪个文件就查哪个。
   const ledgerFiles = new Set(Object.keys(ledger.segments ?? {}))
+  // 账本状态要传到 scanGaps：读不出来时「干净」这个结论是假的。
+  scanned.ledgerState = ledgerRead.state
 
   // ── E 组：状态目录 ──
   //
@@ -1352,9 +1358,12 @@ function scan(root, onlyFile) {
   //     「没扫到」读成「扫过了、很干净」。这正是本脚本自己警告过的那件事，却只防住了
   //     「零命中」这一条路，没防住「跳过了」这一条。
   const gaps = []
-  if (scanned.truncated === true) gaps.push('遍历被截断（文件数超上限）')
-  if (scanned.depthLimited > 0) gaps.push(`${scanned.depthLimited} 个子目录因嵌套过深未进入`)
-  if (scanned.unreadable > 0) gaps.push(`${scanned.unreadable} 个条目读不出来`)
+  // 账本**读不出来**与**不存在**是两件事：前者意味着「归属证据在，但我读不到」，
+  // 此时任何「干净」的结论都是假绿。记进 gaps 会让 complete 归零、退出码走 3。
+  if (scanned.ledgerState === 'unreadable') {
+    gaps.push('账本存在但读不出来（损坏 / 版本不认识 / 结构不对）——归属判定无从核对，'
+      + '这不能读成「干净」；先修复或删除 .project-forge/ledger.json 再重跑')
+  }
   if (scanned.skippedLarge > 0) gaps.push(`${scanned.skippedLarge} 个文件超过体积上限未读`)
   if (scanned.skippedBinary > 0) gaps.push(`${scanned.skippedBinary} 个二进制文件未读`)
   if (scanned.partial === true) gaps.push('只扫了指定的一部分')
@@ -1384,6 +1393,8 @@ function formatFinding(finding) {
  */
 function scanGaps(scanned) {
   const parts = []
+    // 账本读不出来 → 结论只覆盖能确认的那部分，不能说「干净」。
+    if (scanned.ledgerState === 'unreadable') parts.push('账本读不出来，归属无从核对')
   if (scanned.partial) parts.push('目标是文件，只扫了那一个')
   if (scanned.truncated) parts.push('遍历被条目上限截断')
   if (scanned.depthLimited > 0) parts.push(`${scanned.depthLimited} 处目录超过深度上限`)

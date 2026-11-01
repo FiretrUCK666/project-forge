@@ -1024,7 +1024,9 @@ function recordWholeFile(target, rel) {
     return 1
   }
   const content = readFileSync(full, 'utf8')
-  const ledger = readLedger(target)
+  // 账本读不出来时按「没有账本」处理：落盘只做加法，不会破坏任何东西。
+  // 「读不出来」与「没有」的区别只在验收侧有后果，那里另有处理。
+  const { ledger } = readLedger(target)
   recordSegment(ledger, { file: rel.replace(/\\/g, '/'), id: LEDGER_WHOLE, landing: 'whole', content })
   writeLedger(target, ledger)
   process.stdout.write(`已登记：${rel}（整份文件，${Buffer.byteLength(content, 'utf8')} 字节）\n`)
@@ -1032,7 +1034,7 @@ function recordWholeFile(target, rel) {
 }
 
 function recordLanded(target, agentsPath, text) {
-  const ledger = readLedger(target)
+  const { ledger } = readLedger(target)
   const file = 'AGENTS.md'
 
   // 内核区：一对锚点圈定的字节区间。缺任何一端就跳过——记一条提不出内容的记录没有意义。

@@ -2091,8 +2091,36 @@ function detectDocs(root, root_) {
 }
 
 function detectGit(root, options = {}) {
+  // 轻量模式不查 git 版本：生成契约只问「在不在仓库里、是不是根、远端是什么」，
+  // 版本号没人读。省掉的这一趟在 Windows 上就是三四十毫秒。
+  // 但**「git 可不可用」仍然要判**——用 rev-parse 的成败回答它，不另起一次 --version。
+  if (options.light === true) {
+    const insideLight = runCapture(['rev-parse', '--is-inside-work-tree', '--show-toplevel'], root)
+    if (!insideLight.ok) return { available: true, present: false }
+    const l0 = insideLight.stdout.split('\n').map((s) => s.trim())
+    if (l0[0] !== 'true') return { available: true, present: false }
+    const top = l0[1]
+    return {
+      available: true,
+      present: true,
+      isRepoRoot: top !== undefined && top !== '' && samePath(top, root),
+      workTreeRoot: top,
+      remote: run('git', ['remote', 'get-url', 'origin'], root),
+      light: true,
+      lightSkip: '轻量勘察没有读分支、标签、署名、提交数、受控清单与忽略规则，'
+        + '要这些请用完整模式再跑一次',
+    }
+  }
   const version = run('git', ['--version'], root)
   if (version === undefined) return { available: false }
+
+
+  // 关键区分：**这个目录本身是仓库根，还是只是处在别人的仓库里**。
+  //
+  // 目标目录若是某个外层仓库的子目录（放错位置，或想给一个子项目单独建库），下面那些
+  // 查询会如实返回**外层仓库**的远端、分支与提交数。照单全收就会得出「已有远端，只补
+  // 缺即可」的结论，然后把改动提交进、甚至推送到一个完全不相干的仓库——这是本 skill
+  // 能造成的破坏里最严重的一种。
 
   // **一次取回一批事实**，而不是每个字段各起一个子进程。
   //
@@ -2101,25 +2129,18 @@ function detectGit(root, options = {}) {
   // 也就是说那些时间**一点覆盖率都没买到**——问的是同一批信息，只是分成了很多次问。
   //
   // 这里的合并全部是**同一份数据的另一种取法**，不减少任何一项信息：
-  //   - `status --porcelain=v2 --branch` 同时给出分支、上游跟踪、领先/落后、脏文件数
-  //     （原先 branch / status / rev-parse @{u} 三次）；
-  //   - `config --list --show-scope --show-origin` 一次给出全部配置及其层级
-  //     （原先 user.name / user.email / --local / --global×2 / init.defaultBranch 六次）；
-  //   - `for-each-ref` 给标签（原一次）；
-  //   - `rev-parse` 一次给出「在不在工作区」与「工作区根在哪」（原先两次，且两处各问一次）。
+  //   - `status --porcelain=v2 --branch` 同时给出分支、上游跟踪、领先/落后、脏文件数；
+  //   - `config --list --show-scope --show-origin` 一次给出全部配置及其层级；
+  //   - `for-each-ref` 给标签；
+  //   - `rev-parse` 一次给出「在不在工作区」与「工作区根在哪」。
   const insideR = runCapture(['rev-parse', '--is-inside-work-tree', '--show-toplevel'], root)
   const lines0 = insideR.ok ? insideR.stdout.split('\n').map((s) => s.trim()) : []
   const present = lines0[0] === 'true'
   if (!present) return { available: true, present: false, version }
   const toplevel = lines0[1]
 
-  // 关键区分：**这个目录本身是仓库根，还是只是处在别人的仓库里**。
-  //
-  // 目标目录若是某个外层仓库的子目录（放错位置，或想给一个子项目单独建库），下面那些
-  // 查询会如实返回**外层仓库**的远端、分支与提交数。照单全收就会得出「已有远端，只补
-  // 缺即可」的结论，然后把改动提交进、甚至推送到一个完全不相干的仓库——这是本 skill
-  // 能造成的破坏里最严重的一种。
   const isRepoRoot = toplevel !== undefined && toplevel !== '' && samePath(toplevel, root)
+
 
   // ── 配置：一次取全，按层级解析 ─────────────────────────────────────────────
   //

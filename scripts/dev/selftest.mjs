@@ -21,7 +21,7 @@ import { existsSync, readdirSync, rmSync } from 'node:fs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 /** 分片数。加一个 cases-N.mjs 就相应加一项，下面的自检会核对文件存在。 */
-const SHARDS = ['cases-0.mjs', 'cases-1.mjs', 'cases-2.mjs', 'cases-3.mjs']
+const SHARDS = ['cases-0.mjs', 'cases-1.mjs', 'cases-2.mjs', 'cases-3.mjs', 'cases-4.mjs']
 
 /** 每个进程一个独立的 fixture 根：并行时绝不能共用目录。 */
 const RUN_ROOT = join(tmpdir(), `project-forge-selftest-${process.pid}-${randomBytes(3).toString('hex')}`)

@@ -73,9 +73,7 @@ import {
 //
 // 这一组守的是「自检自己会不会被架空」这一类错误：判据写成永真、把硬证据当软证据、
 // 检查的开关是一个可以随手改掉的字符串。每一段都用「放宽了会过、收紧了不过」构造，
-// 所以判据被改松时这一组会立刻红。
-
-group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
+// 所以判据被改松时这一组会立刻红。group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
 {
   // 1) 行为自检被换成哑弹（什么都不做、退出码 0）→ 必须报缺，且必须带出它的 stderr。
   //
@@ -320,7 +318,6 @@ group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证�
   }
 }
 
-
 group('[41] 文档与实现的一致性机制：互引、范围、取值、声明口径')
 {
   // 这一组不测某个具体案例，测的是**这一类错误的可检性**：指错节、两处范围不一致、
@@ -528,6 +525,7 @@ group('[41] 文档与实现的一致性机制：互引、范围、取值、声�
 
 
 // ── [52] 结构守卫：依赖图无环、判据只有一份、临时文件三态 ──────────────────────
+
 group('[52] 结构守卫：依赖图无环、判据只有一份、临时文件三态')
 {
   // ── 1) 依赖图不能有环 ──
@@ -654,102 +652,6 @@ group('[52] 结构守卫：依赖图无环、判据只有一份、临时文件�
 
 // ── [48b] 落盘族的引用归属：模板不许带本 skill 自己的路径 ────────────────────
 
-group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，别人的文件不许误判')
-{
-  // 这一组守的是「文件集合正确、包自身也对，但落盘到别人家之后读者扑空」那一类。
-  // 判据的**方向**与前一组相反：前一组问「本包里有吗」，这一组问「这是谁的文件」。
-  //
-  // 实现上刻意把**五条正例合并成一次检查**：preflight 的这项检查会收集全部违规
-  // 再统一报出，所以一次写入五种违规、再核对输出里五种是否都在，比跑五遍更强——
-  // 逐条跑只证明「单独违反时会红」，合并跑还额外证明「同时违反时一个都不漏」。
-  //
-  // 这不是为了快而放松判据：断言从「某一条会红」变成「五类全都点到」，更严。
-  const clone = skillClone('delivered-attribution')
-
-  const before = preflightIn(clone)
-  check(before.status === 0, '前提：未改动的副本本来是全绿的（否则下面几条断言没有对象）',
-    before.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-  report(before.status === 0, '前提：未改动副本全绿')
-
-  const readmePath = join(clone, 'templates', 'readme.md')
-  const readmeBefore = readFileSync(readmePath, 'utf8')
-
-  // ── 五条正例，一次全写进去 ───────────────────────────────────────────────
-  //
-  //   1. 指向 references/（本包独占命名空间，目标项目不会自然长出来）
-  //   2. 指向本包真实存在的脚本（读者会照着跑，而目标项目没有那个文件）
-  //   3. 新建一个模板，不登记任何清单（定义域由目录结构给出，不靠人工名单）
-  //   4. 尖括号通配形态（读者看它就是路径，不能因为含 <> 就对门禁隐形）
-  //   5. 命名空间内但文件在本包里也不存在（措辞要区分「两个项目里都找不到」）
-  const newTemplate = join(clone, 'templates', 'security.md')
-  writeFileSync(readmePath, [
-    readmeBefore,
-    '见 `references/publish.md` 的说明。',
-    '跑 `scripts/sync-toc.mjs` 生成目录。',
-    '另有 `references/publish-<生态>.md`。',
-    '见 `references/does-not-exist.md`。',
-  ].join('\n'), 'utf8')
-  writeFileSync(newTemplate, '# 安全\n\n判据见 `references/handoff.md`。\n', 'utf8')
-  gitIn(clone, 'add', '-A')
-
-  const all = preflightIn(clone, { only: "落盘族引用归属" })
-  const out = all.out
-  check(all.status === 1, '五条违规同时写入 → 整体判红', out.split('\n').filter((l) => /FAIL/.test(l)).slice(0, 2).join(' | ').slice(0, 200))
-  check(/references\/publish\.md|references\//.test(out), '正例：templates/ 里指向 references/ → 红')
-  check(/scripts\/sync-toc\.mjs|本 skill 自己的路径|落盘族/.test(out), '正例：指向本包脚本 → 红')
-  check(/security\.md|references\/handoff\.md|落盘族/.test(out), '正例：新建模板无需登记，自动化纳入判据')
-  check(/publish-<|尖括号|references\//.test(out), '正例：尖括号通配形态也被判（读者看它就是路径）')
-  check(/在两个项目里都找不到/.test(out), '正例：命名空间内的不存在路径也红，措辞区分「本包也没有」')
-  report(all.status === 1, '正例：五条违规一次全抓到')
-
-  // 复位：删掉新模板、恢复 README，否则后面每一条反例都会被污染成红。
-  // 清理必须验证——一个静默失败的 catch 会让这个文件留在副本里，
-  // 把后续用例全带偏，症状出现在别处而根因在这里。
-  if (existsSync(newTemplate)) unlinkSync(newTemplate)
-  writeFileSync(readmePath, readmeBefore, 'utf8')
-  check(!existsSync(newTemplate), '前置：新模板已删除（否则后续复位用例无意义）')
-
-  // ── 四条反例，同样一次全写进去 ───────────────────────────────────────────
-  //
-  //   1. 目标项目自己的文件（这几份本来就应该出现在目标项目的模板里）
-  //   2. 目标项目自己的脚本名（本包没有这个文件，同名不同物）
-  //   3. 受管围栏标记（它们是本 skill 的围栏，不是写给目标项目的引用）
-  //   4. YAML 模板里的注释（落盘族文件，注释同样会被读者看到）
-  const ciPath = join(clone, 'templates', 'ci-check.yml')
-  const ciBefore = readFileSync(ciPath, 'utf8')
-  writeFileSync(readmePath, [
-    readmeBefore,
-    '[English](README.en.md) | [贡献](CONTRIBUTING.md) | [许可](LICENSE)',
-    '跑 `scripts/build.mjs` 打包。',
-    '<!-- project-forge:kernel:start -->',
-    '<!-- pf:author: 测试 -->',
-  ].join('\n'), 'utf8')
-  gitIn(clone, 'add', '-A')
-
-  const clean = preflightIn(clone, { only: "用户包边界" })
-  check(clean.status === 0, '反例：目标项目自有文件、同名不同物、受管标记 → 一律不判',
-    clean.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-  report(clean.status === 0, '反例：三类不该判的都放行')
-  writeFileSync(readmePath, readmeBefore, 'utf8')
-
-  // YAML 单独一条：它必须**红**（与上面三条方向相反），因为注释里的本包路径
-  // 同样会让读者扑空。
-  writeFileSync(ciPath, `# 判据见 references/remote-github.md 第八节。\n${ciBefore}`, 'utf8')
-  gitIn(clone, 'add', '-A')
-  const yml = preflightIn(clone, { only: "落盘族引用归属" })
-  check(yml.status === 1 && /本 skill 自己的路径/.test(yml.out), '正例：.yml 模板也要判（原先只扫 .md，8 处漏检就出在这里）',
-    yml.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-  report(yml.status === 1 && /本 skill 自己的路径/.test(yml.out), '.yml 模板纳入判据')
-  writeFileSync(ciPath, ciBefore, 'utf8')
-
-  gitIn(clone, 'add', '-A')
-  const final = preflightIn(clone)
-  check(final.status === 0, '末尾：全部复位后应回到全绿',
-    final.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 220))
-  report(final.status === 0, '末尾：复位后回绿')
-}
-
-
 group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
 {
   // 最小 host-only bundle：有补丁声明 + 补丁含包名 + host 入口
@@ -841,7 +743,6 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
   report(ok9, '非插件：不误报 DSH 段')
 }
 
-
 group('[23] 目录同步：从标题生成、锚点算对、三种现状都能接管')
 {
   const toc = (dir, ...a) => spawnSync(process.execPath,
@@ -923,7 +824,6 @@ group('[23] 目录同步：从标题生成、锚点算对、三种现状都能�
   report(ok5, '短 README：不加目录')
 }
 
-
 group('[50] 命令推导的四种空：每一种都要说得出「为什么空」')
 {
   // 这一组守的是 P7 那道验证门。命令推不出来本身不可怕，可怕的是**推不出来还不说为什么**
@@ -977,8 +877,6 @@ group('[50] 命令推导的四种空：每一种都要说得出「为什么空�
 // 放在组内会让别的组引用不到，而那种错只在运行时炸出来（ReferenceError），
 // 前面已经通过的断言全都白跑——一次真实的教训。
 
-
-
 group('[14] 完成判据不能空转：只升级不填写时，必须报出缺失的节')
 {
   const dir = fixture('vacuous', {
@@ -1030,7 +928,6 @@ group('[14] 完成判据不能空转：只升级不填写时，必须报出缺�
   check(ok3, '两个数字都归零时报「内容完整」')
   report(ok3, '填完后报「内容完整」')
 }
-
 
 group('[22] 双语文档的成对维护规则必须**写进项目契约**，不只是写在参考文件里')
 {
@@ -1121,7 +1018,6 @@ group('[6] 生成：按项目事实取舍条件段落')
   report(okNd, '无依赖：该节隐藏')
 }
 
-
 group('[13] Python 测试命令：只在项目声明了框架时才给，不按生态惯例编')
 {
   // 声明了 pytest → 给 pytest
@@ -1160,7 +1056,6 @@ group('[13] Python 测试命令：只在项目声明了框架时才给，不按�
   report(ok4, '声明 unittest → 无推断说明')
 }
 
-
 group('[19] 发版规则：有版本号与没有版本号，两种写法都要有')
 {
   // 有版本号 → 标签名对齐清单里那一处
@@ -1194,7 +1089,6 @@ group('[19] 发版规则：有版本号与没有版本号，两种写法都要�
   report(ok5, '没有版本号：禁止编造')
 }
 
-
 if (!HAS_GIT) {
   skipGroup('[3] 仓库根的各种路径写法都必须判真', '环境里没有 git')
 } else {
@@ -1226,7 +1120,6 @@ group('[3] 仓库根的各种路径写法都必须判真')
     + `${caseInsensitive ? '已' : '未'}断言大小写场景）\n`)
 }
 }
-
 
 group('[9] 多生态：命令按生态分组，不互相覆盖')
 {
@@ -1281,6 +1174,7 @@ group('[49] 命令行用法：打错了必须说出来')
   check(helpOk, '--help 退出 0 并打印用法', `exit=${help.status}`)
   report(helpOk, '--help 打印用法')
 }
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。
@@ -1293,3 +1187,6 @@ if (failures.length > 0) {
   for (const f of failures) process.stdout.write(`  - ${f}\n`)
 }
 process.exitCode = failed === 0 ? 0 : 1
+
+
+

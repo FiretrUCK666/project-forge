@@ -265,6 +265,7 @@ These never enter the package. To work on this skill, start with
 | `scripts/dev/cases-1.mjs` | Same as above |
 | `scripts/dev/cases-2.mjs` | Same as above |
 | `scripts/dev/cases-3.mjs` | Same as above |
+| `scripts/dev/cases-4.mjs` | Same as above |
 | `scripts/dev/lib/harness.mjs` | Shared layer for the shards: fixture factory, assertions, counters |
 | `scripts/dev/render-svg.mjs` | Renders the README cards and measures their margins; use it to accept a card change |
 | `scripts/dev/bench.mjs` | Times the key commands so you can tell whether a change made things slower |

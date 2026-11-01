@@ -940,7 +940,7 @@ function checkBehavior({ skip = false, why = '' } = {}) {
   }
   // 行为自检要造几百个 fixture 实跑，实测约一分钟（四片并行）。**先说要等多久**：终端上
   // 一个字，读的人会以为它卡死了（它没卡，只是这条命令本来就慢）。
-  process.stdout.write('行为自检：正在造 fixture 实跑（分四片并行，约一分钟，中途没有输出）…\n')
+  process.stdout.write('行为自检：正在造 fixture 实跑（分五片并行，约半分钟，中途没有输出）…\n')
   const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
   const out = r.stdout ?? ''
   if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
@@ -2317,7 +2317,7 @@ function usage() {
     '                        由发布工作流调用（它传 --repo）；不给 --repo 时退回读 origin，',
     '                        两者都取不到就报「未核对」——「没比」不等于「比过且一致」。',
     '  --repo <owner/name>   --release 的搭档：这次发布的仓库。',
-    '  --no-behavior         跳过行为自检（约一分钟的那一段），只验结构。',
+    '  --no-behavior         跳过行为自检（约半分钟的那一段），只验结构。',
     '                        报告里会明说「行为判定没有被检查过」——「没查」不装成「查过没有」。',
     '  --only=<标签>[,...]   只跳过三项昂贵且与被测项无关的步骤（脚本静态、脚本实跑、',
     '                        保鲜标记，合计约 3 秒），其余前置检查照跑。',

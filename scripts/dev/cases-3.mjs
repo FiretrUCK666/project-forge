@@ -68,7 +68,6 @@ import {
   handoff,
   handoffJson,
 } from './lib/harness.mjs'
-
 group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记不误伤')
 {
   const handoff = (dir, ...a) => spawnSync(process.execPath,
@@ -403,7 +402,6 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
   report(oneFileOk, '只扫一部分：不肯定')
 }
 
-
 group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
 {
   // files 缺 lib：成品包路线应报缺（review 拦），勘察只报事实
@@ -660,7 +658,6 @@ group('[38] 文本检查域 = 仓库定义域：本机状态目录不参与，�
   }
 }
 
-
 group('[43] host= 机制：三态比对、键形状、两键同批、查法判据、kind 清单')
 {
   {
@@ -756,7 +753,6 @@ group('[43] host= 机制：三态比对、键形状、两键同批、查法判�
   }
 }
 
-
 group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查')
 {
   const review = (dir, ...a) => spawnSync(process.execPath,
@@ -847,7 +843,6 @@ group('[29] CONTRIBUTING 内容门：通用齐全才放行，专属按生态查'
   report(ok3, '插件专属：拦得住')
 }
 
-
 group('[39] 缺节判据只对结构由脚本决定的文件成立')
 {
   // 这一组守的是「拿骨架的 H2 标题字面差集当缺节判据」这一类错误：**写了但措辞不同**
@@ -921,7 +916,6 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
   }
 }
 
-
 group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
 {
   const dir = fixture('handwritten', {
@@ -990,7 +984,6 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   report(okComment, '正文合法编辑不被误报')
 }
 
-
 group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC 即安静')
 {
   const rv = (dir, ...a) => spawnSync(process.execPath,
@@ -1044,7 +1037,6 @@ group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC �
   report(okC1, 'Release 形状：问得住')
 }
 
-
 group('[40] 保鲜节标题：编号与括注是装饰，不该让专章判成缺节')
 {
   // 专章模板的骨架写的是 `## 八、事实来源（必填）`：编号让它在文件里定位得到，括注提醒
@@ -1092,7 +1084,6 @@ group('[40] 保鲜节标题：编号与括注是装饰，不该让专章判成�
 
 // ── 机制类断言：把「文档与实现不一致」这一类错误固定下来 ──────────────────────
 
-
 group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
 {
   const dir = fixture('secrets', {
@@ -1133,7 +1124,6 @@ group('[1] 无 git 仓库时的密钥扫描必须覆盖子目录')
     ['密钥覆盖 bin/', /\.env/.test(hits)], ['密钥覆盖中文路径', /泄漏/.test(hits)]]) report(ok, label)
 }
 
-
 group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要能读出来')
 {
   // 正向：带发布 job 且引用 Secrets 的工作流
@@ -1172,7 +1162,6 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   report(okEn, '英文模板：待问，不默过')
 }
 
-
 group('[26] 起草发布说明：中文提交即中文说明，无上一版不交白卷')
 {
   if (!HAS_GIT) {
@@ -1208,8 +1197,6 @@ group('[26] 起草发布说明：中文提交即中文说明，无上一版不�
   }
 }
 
-
-
 group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，不等真实项目踩到')
 {
   const vocab = kindVocabulary()
@@ -1227,6 +1214,7 @@ group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，�
 
 
 }
+
 group('[16] 报告要给到行，并说明在不在版本库里')
 {
   const dir = fixture('line-num', {
@@ -1254,7 +1242,6 @@ group('[16] 报告要给到行，并说明在不在版本库里')
   }
 }
 
-
 group('[5] 生态判定：纯文档目录仍要判成 docs-only')
 {
   const cases = [
@@ -1279,6 +1266,7 @@ group('[5] 生态判定：纯文档目录仍要判成 docs-only')
   check(okN, '空目录 → unknown（停下问，不编生态）', JSON.stringify(unk.ecosystem?.kinds))
   report(okN, '空目录 → unknown')
 }
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

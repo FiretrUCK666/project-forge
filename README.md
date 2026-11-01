@@ -242,6 +242,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `scripts/dev/cases-1.mjs` | 同上 |
 | `scripts/dev/cases-2.mjs` | 同上 |
 | `scripts/dev/cases-3.mjs` | 同上 |
+| `scripts/dev/cases-4.mjs` | 同上 |
 | `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器 |
 | `scripts/dev/render-svg.mjs` | 把 README 的卡片渲染成图并量出留白，改卡片时用它验收 |
 | `scripts/dev/bench.mjs` | 量关键命令的耗时，判断这次改动有没有变慢 |

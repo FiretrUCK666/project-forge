@@ -11,7 +11,7 @@ description: |
   不用于：只改代码写法、只修一个 bug、只回答概念问题，也不替项目选型或生成骨架。
 whenToUse: 要给一个项目配版本管理、上远端仓库、写文档套装、配发布通道，或对它说「规范一下」「初始化」时。
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   source: "https://github.com/FiretrUCK666/project-forge"
 ---
 
@@ -297,6 +297,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `scripts/dev/cases-1.mjs` | 同上 |
 | `scripts/dev/cases-2.mjs` | 同上 |
 | `scripts/dev/cases-3.mjs` | 同上 |
+| `scripts/dev/cases-4.mjs` | 同上（单列的耗时组，让并行时各片负载均衡）|
 | `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器、跨组的小工具 |
 | `scripts/dev/render-svg.mjs` | **改 README 卡片时**用它验收：渲染成位图并量出四边留白与画布尺寸是否合规 |
 | `scripts/dev/bench.mjs` | **判断这次改动有没有变慢**：量关键命令的耗时，改前改后各跑一遍对比 |

@@ -648,6 +648,14 @@ function checkAgentsKernel() {
  */
 const EMOJI = /\p{Extended_Pictographic}/u
 /** 本机私有路径的判据与 survey 同源（survey 导出 HOME_PATH_RE，两份手写正则必然漂移）。 */
+
+/**
+ * ASCII 控制字符：**排除**制表、换行、回车这三个正常排版用的。
+ *
+ * 判据取「不可见且不代表排版」这个类，不是枚举某次事故里出现过的那几个字节——
+ * 后者只能挡住已经发生过的事。
+ */
+const CTRL_CHAR_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/
 const HOME_PATH = HOME_PATH_RE
 
 function checkGlobalRules() {
@@ -657,6 +665,23 @@ function checkGlobalRules() {
     const name = rel(full)
     const raw = readText(full)
     if (raw.startsWith('\uFEFF')) fail(`${name} 含 BOM，会让产物在不同工具下出现差异。`)
+    // **控制字符是不可见损坏**，靠眼睛永远发现不了。
+    //
+    // 它最常见的来源不是手误，而是工具链：把含反引号的 Markdown 经 PowerShell 双引号
+    // 字符串传递时，`a `b `f `n `v `e 会被当成转义序列，于是 `author` 变成 0x07 + utor，
+    // `bench.mjs` 变成 0x08 + ench.mjs。写成文件后**终端会吞掉它们**，看起来只是一两个
+    // 字母丢了，而真正的原因藏在字节里。
+    //
+    // 这条判据不是为某一次事故立的碑：它守的是一个类——任何让不可见字节进入文本的路径。
+    const CTRL_HIT = raw.match(CTRL_CHAR_RE)
+    if (CTRL_HIT !== null) {
+      const at = raw.indexOf(CTRL_HIT[0])
+      const line = raw.slice(0, at).split('\n').length
+      const hex = `0x${CTRL_HIT[0].charCodeAt(0).toString(16).padStart(2, '0')}`
+      fail(`${name}:${line} 含 ASCII 控制字符 ${hex} —— 它不可见，但会吞掉终端里的字符。`
+        + '常见成因是拿 PowerShell 双引号传含反引号的 Markdown（`a `b `f `n `v `e 会被转义）；'
+        + '用编辑工具或 Node 脚本写文件，别经 shell 转述。')
+    }
     if (EMOJI.test(raw)) {
       const hit = raw.match(EMOJI)
       fail(`${name} 含 emoji 字符（${JSON.stringify(hit?.[0])}）—— 项目硬性规范禁止。`)

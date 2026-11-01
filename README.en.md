@@ -198,13 +198,13 @@ On an existing project you often just want to add one piece — a CI workflow, a
 pipeline would stop you for lacking an AGENTS.md, which is not what you asked for.
 
 The delivery check can be narrowed: 
-ode scripts/review.mjs <project directory> --scope=ci
+`node scripts/review.mjs <project directory> --scope=ci`
 checks the CI facet only and says nothing about the rest. The available facets and exact usage
 are whatever 
-ode scripts/review.mjs --help prints — this file does not copy them, because a
+`node scripts/review.mjs --help` prints — this file does not copy them, because a
 copy drifts.
 
-Without --scope the check is still the full one, for the "deliver the whole thing" case.
+Without `--scope` the check is still the full one, for the "deliver the whole thing" case.
 
 ## What it will not do
 

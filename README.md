@@ -176,12 +176,12 @@ node "<本领目录>/scripts/update.mjs" --check
 而拦住你，那不是你的任务范围。
 
 交付检查支持按切面验：
-ode scripts/review.mjs <项目目录> --scope=ci 只验 CI 那一面，
-其余不查、不报缺。可用切面与用法以 
-ode scripts/review.mjs --help 为准——
+`node scripts/review.mjs <项目目录> --scope=ci` 只验 CI 那一面，
+其余不查、不报缺。可用切面与用法以
+`node scripts/review.mjs --help` 为准——
 本文不另抄一份，抄了就会漂移。
 
-不给 --scope 时仍是全量检查，用于「整体交付」那个场景。
+不给 `--scope` 时仍是全量检查，用于「整体交付」那个场景。
 
 ## 它不会做的事
 

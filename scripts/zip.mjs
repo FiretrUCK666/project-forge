@@ -40,6 +40,38 @@ function findEocd(buf) {
  *
  * 坏包一律抛错，不返回半份内容：拿到半份内容去覆盖文件，比直接失败坏得多。
  */
+/**
+ * 一份 zip 解压后的**总字节上限**。
+ *
+ * 防的是 zip 炸弹：一个几百 KB 的压缩包可以解出好几 GB，把进程内存吃干净。
+ * 20 MB 对「一个 skill 的用户包」绰绰有余——真正的包解开也就一两 MB。
+ */
+const MAX_UNCOMPRESSED_TOTAL = 20 * 1024 * 1024
+
+/** 单个条目的解压上限。大包里有几个小文件，不该让某一个独吞额度。 */
+const MAX_UNCOMPRESSED_ENTRY = 20 * 1024 * 1024
+
+/**
+ * CRC32 查表。zip 的中央目录里记着每个条目的校验和，**不核对它等于不验完整性**：
+ * 传输截断、镜像篡改、磁盘坏块都会让解压出来的内容与作者写的不一样，而
+ * `inflateRaw` 只要流能解开就不报错。
+ */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let i = 0; i < 256; i += 1) {
+    let c = i
+    for (let k = 0; k < 8; k += 1) c = (c & 1) !== 0 ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+    table[i] = c >>> 0
+  }
+  return table
+})()
+
+function crc32(buf) {
+  let c = 0xFFFFFFFF
+  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8)
+  return (c ^ 0xFFFFFFFF) >>> 0
+}
+
 export function readZip(buf) {
   const eocd = findEocd(buf)
   if (eocd === undefined) throw new Error('找不到中央目录结尾记录 —— 这不是一个完整的 zip')
@@ -52,10 +84,14 @@ export function readZip(buf) {
   }
 
   const entries = []
+  let total = 0
   let p = eocd.offset - eocd.size
   for (let n = 0; n < eocd.count; n += 1) {
     if (buf.readUInt32LE(p) !== CENTRAL_SIG) throw new Error('中央目录条目损坏')
     const method = buf.readUInt16LE(p + 10)
+    // 中央目录的 CRC32 在偏移 +16，**解压后拿它对一遍**：这是唯一能发现
+    // 「内容被换掉了但压缩流仍然解得开」的地方。
+    const expectedCrc = buf.readUInt32LE(p + 16)
     const compressed = buf.readUInt32LE(p + 20)
     const nameLen = buf.readUInt16LE(p + 28)
     const extraLen = buf.readUInt16LE(p + 30)
@@ -68,9 +104,28 @@ export function readZip(buf) {
     if (buf.readUInt32LE(localAt) !== LOCAL_SIG) throw new Error(`条目 ${name} 的本地头损坏`)
     const dataAt = localAt + 30 + buf.readUInt16LE(localAt + 26) + buf.readUInt16LE(localAt + 28)
     const raw = buf.subarray(dataAt, dataAt + compressed)
-    if (method === 0) entries.push({ name, data: Buffer.from(raw) })
-    else if (method === 8) entries.push({ name, data: inflateRawSync(raw) })
-    else throw new Error(`条目 ${name} 用了不认识的压缩方式 ${method}`)
+    let data
+    if (method === 0) {
+      data = Buffer.from(raw)
+    } else if (method === 8) {
+      // maxOutputLength 是**解码期**的上限：它让 zlib 在写出超过额度时自己中止，
+      // 而不是先解出几个 GB 再让我们去量。这是防 zip 炸弹的关键一步。
+      data = inflateRawSync(raw, { maxOutputLength: MAX_UNCOMPRESSED_ENTRY })
+    } else {
+      throw new Error(`条目 ${name} 用了不认识的压缩方式 ${method}`)
+    }
+
+    const actualCrc = crc32(data)
+    if (actualCrc !== expectedCrc) {
+      throw new Error(`条目 ${name} 的校验和不符（期望 ${expectedCrc.toString(16)}，实际 ${actualCrc.toString(16)}）`
+        + '—— 包在传输中损坏或被改动过，不要拿它覆盖文件')
+    }
+
+    total += data.length
+    if (total > MAX_UNCOMPRESSED_TOTAL) {
+      throw new Error(`解压总量超过 ${MAX_UNCOMPRESSED_TOTAL} 字节上限 —— 这不像一个正常的用户包`)
+    }
+    entries.push({ name, data })
   }
   return entries
 }

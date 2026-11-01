@@ -102,6 +102,14 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
 const STALE_CHECK_MS = 24 * 60 * 60 * 1000
 /** 单次网络动作的上限。它挂在每个任务的开头，卡住就等于把任务卡住。 */
 const NETWORK_TIMEOUT_MS = 10 * 1000
+
+/**
+ * 单次下载的字节上限。
+ *
+ * 防的是「收不完」：异常镜像返回无穷流、截断后重传叠成超出预期的体积、
+ * 或者干脆给一个恶意大包。用户包真实大小在一两 MB 量级，20 MB 留足了余量。
+ */
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 /** 附件名。固定不带版本号，`releases/latest/download/<这个名字>` 才永远指向最新版。 */
 const ASSET = 'project-forge.zip'
 
@@ -240,10 +248,34 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
         resolvePromise({ ok: false, status: statusCode ?? 0, final })
         return
       }
+      // **下载也要有上限**：托管的响应是外面给什么就收什么，异常镜像、截断重传、
+      // 恶意大包都能让内存被吃干净。20 MB 对用户包足够——真实包解开也就一两 MB。
+      // 超限时**主动 destroy**，不是收完再判：收完再判等于没防住。
+      const declared = Number(headers['content-length'])
+      if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
+        res.resume()
+        resolvePromise({ ok: false, status: 0, final, tooLarge: true })
+        return
+      }
       const chunks = []
-      res.on('data', (c) => chunks.push(c))
-      res.on('end', () => resolvePromise({ ok: true, status: 200, final, body: Buffer.concat(chunks) }))
-      res.on('error', () => resolvePromise({ ok: false, status: 0, final }))
+      let received = 0
+      let aborted = false
+      res.on('data', (c) => {
+        if (aborted) return
+        received += c.length
+        if (received > MAX_DOWNLOAD_BYTES) {
+          aborted = true
+          chunks.length = 0
+          res.destroy()
+          resolvePromise({ ok: false, status: 0, final, tooLarge: true })
+          return
+        }
+        chunks.push(c)
+      })
+      res.on('end', () => {
+        if (!aborted) resolvePromise({ ok: true, status: 200, final, body: Buffer.concat(chunks) })
+      })
+      res.on('error', () => { if (!aborted) resolvePromise({ ok: false, status: 0, final }) })
     })
     request.on('timeout', () => { request.destroy(); resolvePromise({ ok: false, status: 0, final }) })
     request.on('error', () => resolvePromise({ ok: false, status: 0 }))
@@ -433,20 +465,58 @@ function decodeTagSegment(segment) {
 
 /** 版本号比大小：按 `.` 分段比数字，比不出来就返回 undefined（不猜）。 */
 function isNewer(candidate, current) {
-  // 预发布后缀（`0.16.0-beta.1`）按主号比：使用者要的是「比我这版新」，
-  // 而形状认不出来时这里会返回 undefined，整条更新路径就静默跳过了——那才是坏结果。
+  // 比较遵循 SemVer 的优先级规则，**预发布后缀不能被丢掉**：
+  //
+  //   1.2.0-alpha.1  <  1.2.0
+  //
+  // 丢掉后缀会把这两者判成同一版，于是「从预发布升到正式版」被静默跳过——
+  // 而使用者看到的正是「明明发了新版，它却说我是最新的」。这比多提示一次更新坏得多。
+  //
+  // 形状认不出来时仍返回 undefined（不抛错）：整条更新路径要能安全退化。
   const parse = (v) => {
-    const parts = plainVersion(v).split(/[-+]/)[0].split('.')
+    const s = plainVersion(v)
+    // 主号部分：构建元数据（+ 之后）不参与比较，预发布（第一个 - 之后）单独处理。
+    const noBuild = s.split('+')[0]
+    const dash = noBuild.indexOf('-')
+    const core = (dash >= 0 ? noBuild.slice(0, dash) : noBuild).split('.')
       .map((x) => (/^\d+$/.test(x) ? Number(x) : undefined))
-    return parts.length > 0 && parts.every((x) => x !== undefined) ? parts : undefined
+    if (core.length === 0 || core.some((x) => x === undefined)) return undefined
+    const pre = dash >= 0 ? noBuild.slice(dash + 1).split('.') : []
+    return { core, pre }
   }
+
   const a = parse(candidate)
   const b = parse(current)
   if (a === undefined || b === undefined) return undefined
-  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
-    const x = a[i] ?? 0
-    const y = b[i] ?? 0
+
+  // 先比主号
+  for (let i = 0; i < Math.max(a.core.length, b.core.length); i += 1) {
+    const x = a.core[i] ?? 0
+    const y = b.core[i] ?? 0
     if (x !== y) return x > y
+  }
+
+  // 主号相同，再比预发布：**有预发布 < 无预发布**（正式版高于同号的预发布版）
+  if (a.pre.length === 0 && b.pre.length === 0) return false
+  if (a.pre.length === 0) return true          // a 是正式版，b 是预发布 => a 新
+  if (b.pre.length === 0) return false         // a 是预发布，b 是正式版 => a 旧
+
+  // 两边都是预发布：逐段按 SemVer 比（数字段按数值，其余按字典序；数字段低于字母段）
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i += 1) {
+    const x = a.pre[i]
+    const y = b.pre[i]
+    if (x === undefined) return false          // a 段数少 => a 更小
+    if (y === undefined) return true
+    const xn = /^\d+$/.test(x)
+    const yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const d = Number(x) - Number(y)
+      if (d !== 0) return d > 0
+    } else if (xn !== yn) {
+      return yn                                 // 数字段低于字母段
+    } else if (x !== y) {
+      return x > y
+    }
   }
   return false
 }
@@ -633,7 +703,7 @@ function verifyInstalled(entries, after, remote) {
 
   const expectScripts = (entries ?? [])
     .map((e) => String(e.name).replace(/\\/g, '/'))
-    .filter((n) => /^scripts\/[^/]+\.mjs$/.test(n))
+    .filter((n) => /^scripts\/(?:lib\/)?[^/]+\.mjs$/.test(n))
   const missing = expectScripts.filter((rel) => !existsSync(join(root, rel)))
   if (missing.length > 0) {
     return {

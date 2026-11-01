@@ -66,7 +66,7 @@ cd project-forge
 行为自检实测约 4 分钟，两条合起来一刻钟上下。终端上几分钟没动静不是卡死，别 CTRL+C。
 
 ```sh
-node scripts/dev/preflight.mjs
+node scripts/dev/preflight.mjs --no-behavior
 node scripts/dev/selftest.mjs
 node scripts/compose-agents.mjs . --check
 node scripts/sync-toc.mjs README.md README.en.md --check

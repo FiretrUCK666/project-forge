@@ -164,6 +164,24 @@ async function main() {
   // 起草稿不是成品：它只有提交主题，没有面向使用者的总述。这一行由
   // draft-release-notes.mjs 在「被标签指到的那次提交没有正文」时写下，收件人是维护者，
   // 而发布页的收件人是使用者——把它发出去，等于把内部待办挂在给使用者看的页面上。
+  // 发布页的收件人是使用者，一个看不见的控制字符会让终端吞掉它后面的字。
+  //
+  // 这类损坏最常见的来源是**提交正文本身**：拿 shell 双引号写含反引号的 Markdown 时，
+  // `a `b `f `n `v `e 会被转义成控制字节，随后 `git log --format=%B` 原样把它读出来。
+  // 这里不自动清洗，因为**清洗会掩盖上游的写作方式问题**——正文该改，不是该洗。
+  const ctrl = notes.match(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+  if (ctrl !== null) {
+    const at = notes.indexOf(ctrl[0])
+    const line = notes.slice(0, at).split('\n').length
+    const hex = '0x' + ctrl[0].charCodeAt(0).toString(16).padStart(2, '0')
+    process.stderr.write(
+      `错误：这份说明第 ${line} 行含 ASCII 控制字符 ${hex}，发出去会让终端吞字。\n`
+      + '  修法：改被标签指到的那次提交的正文（或说明文件），把控制字符去掉后重新发送。\n'
+      + '  常见成因：拿 PowerShell 双引号传含反引号的 Markdown，反引号被当成了转义前缀。\n',
+    )
+    return 2
+  }
+
   if (needsSummary(notes)) {
     process.stderr.write(
       '错误：这份说明还是起草稿，只有提交主题，没有面向使用者的总述。\n'

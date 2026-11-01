@@ -76,6 +76,21 @@ function main() {
       return { subject: rec.slice(0, cut).trim(), body: rec.slice(cut + 1).trim() }
     })
 
+  // 提交正文里的控制字符要在**起草阶段**就现形：等到发送那一步才发现，
+  // 中间已经产出过一份坏稿。这里只报不改——改正文是人的事。
+  const ctrlHits = []
+  for (const rec of commits) {
+    const m = rec.body.match(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+    if (m !== null) ctrlHits.push(`${rec.subject.slice(0, 40)}（0x${m[0].charCodeAt(0).toString(16).padStart(2, '0')}）`)
+  }
+  if (ctrlHits.length > 0) {
+    process.stderr.write(
+      '警告：以下提交的正文含 ASCII 控制字符，起草出的说明会带着它们：\n'
+      + ctrlHits.map((h) => `  - ${h}`).join('\n')
+      + '\n  发送前会被 release-notes.mjs 拒绝。先修那几次提交的正文。\n',
+    )
+  }
+
   // 对比链接：能解析出 GitHub 地址才给，给不出就只写区间（不编地址）。
   // 仓库边界识别**只有一处实现**（survey 的 parseGitHubRepo）：这里若另写一份取
   // 仓库名的正则，`[^/.]+` 会把带点的名字截断（`acme/my.repo` → `acme/my`），起草出的

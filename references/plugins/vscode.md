@@ -113,11 +113,10 @@
 
 第二页的内容**本文件没有逐条抄录**（命令与语法会变），用到时直接照那一页做。
 
-**上次核对看到的值**（2026-11-01 复核，与正文逐项比对一致）：必填字段四个（
-ame / ersion /
-publisher / ngines）、ngines.vscode 不可为 *、
-ame 与 displayName 均要求市场内唯一、
-categories 枚举十七项、keywords 上限 30。核对方式：抓官方 Extension Manifest 页全文比对。
+**上次核对看到的值**（2026-11-01 复核，与正文逐项比对一致）：必填字段四个
+（`name` / `version` / `publisher` / `engines`）、`engines.vscode` 不可为 `*`、`name` 与
+`displayName` 均要求市场内唯一、`categories` 枚举十七项、`keywords` 上限 30。
+核对方式：抓官方 Extension Manifest 页全文比对。
 
 格式与用法见 `references/publish.md` 的『专章的「事实来源」标记』一节。
 

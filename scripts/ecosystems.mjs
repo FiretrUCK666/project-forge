@@ -127,7 +127,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
   },
   {
     /**
-     * 插件：清单是独立的 manifest.json，判据是 `minAppVersion` 字段。
+     * Obsidian 插件：清单是独立的 manifest.json，判据是 `minAppVersion` 字段。
      * 同名文件是 PWA 的（manifest.json 到处都是），所以**判据是那个字段，
      * 不是文件在不在**。
      */
@@ -170,7 +170,7 @@ export function detectHost(descriptors, ctx) {
       // 判据是「清单里有没有那个字段路径」，路径由描述符自己声明。
       // 不能统一按 id 前缀取：不同宿主的身份字段形状差别很大——
       // dsh 是一个对象（pkg.dsh），VS Code 是 engines.vscode 一个字符串，
-      // 是 minAppVersion 一个字段。写死取法就只能认其中一种，
+      // Obsidian 插件是 minAppVersion 一个字段。写死取法就只能认其中一种，
       // 加第二个宿主时必然要改这段——那正是描述符要消灭的事情。
       const path = d.markerField ?? [d.id.split("-")[0]]
       const value = fieldAt(pkg, path)

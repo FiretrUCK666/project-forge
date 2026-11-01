@@ -298,7 +298,7 @@ skill 跑完一个项目之后，目标项目里会留着它的痕迹：标识�
 本项目没有构建步骤，验证就是自检加实跑：
 
 ```sh
-node scripts/dev/preflight.mjs                # 结构自检：引用完整、内核一致、硬性规范、用户包边界
+node scripts/dev/preflight.mjs --no-behavior  # 结构自检：引用完整、内核一致、硬性规范、用户包边界
 node scripts/dev/selftest.mjs                 # 行为自检：造 fixture 实跑，断言判定结果
 node scripts/compose-agents.mjs . --check     # 内核逐字一致、标记恰好一对、生成文件不缺节
 node scripts/sync-toc.mjs README.md README.en.md --check   # README 目录与标题是否同步

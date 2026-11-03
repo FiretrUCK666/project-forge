@@ -27,7 +27,11 @@ import {
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../../lib/text.mjs'
 import { needsSummary } from '../../lib/protocol.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../../update.mjs'
-import { clearStaleTemps } from '../../lib/fs-atomic.mjs'
+import { clearStaleTemps, processAlive } from '../../lib/fs-atomic.mjs'
+
+// 分片从 harness 取它（历史上就在这里导出），实现只有一份，住在 fs-atomic。
+// 「这个进程还活着吗」在两处各写一遍，迟早会在 EPERM 这类边角上给出两个答案。
+export { processAlive }
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../../review.mjs'
 import { readZip, stripCommonPrefix } from '../../zip.mjs'
 
@@ -77,17 +81,10 @@ process.once('exit', cleanupFixtures)
  * 「正用着」是**判出来的，不是猜的**：每个 fixture 根目录写着它的进程号，那个进程还活着
  * 就不算遗留。少了这一半，另一次并发运行的活目录会被报成「上次没清干净」，
  * 报告里就多出一笔不存在的债。
+ *
+ * 实现只有一份，住在 `lib/fs-atomic.mjs`——「这个进程还活着吗」在两处各写一遍，
+ * 迟早会在 EPERM 这类边角上给出两个答案，而那时读的人不知道该信哪一个。
  */
-export function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    // ESRCH = 没有这个进程；其余（例如 EPERM）说明进程存在，只是问不动它。
-    return error?.code !== 'ESRCH'
-  }
-}
 
 export function staleFixtureDirs() {
   let entries = []

@@ -84,6 +84,18 @@ const OWN_AGENTS_WARN_HEADROOM = 1024
 export const FRESHNESS_STALE_DAYS = 180
 
 /**
+ * 行为自检至少要跑出这么多条通过，少于此数视为「断言被删掉了一大片」。
+ *
+ * 为什么要这个下限：通过判据原先只看「有摘要行 + 退出码 0」，于是把 selftest.mjs 换成
+ * 一句 `行为自检：0 项通过，0 项失败` 的空壳也算通过——断言全没了，门禁还绿着。
+ * 「跑过但什么都没验」必须与「跑过且验了」长得不一样。
+ *
+ * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
+ * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
+ */
+export const BEHAVIOR_MIN_PASSED = 561
+
+/**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
  *
  * 两类都合法，但理由不同：
@@ -979,6 +991,23 @@ function checkBehavior({ skip = false, why = '' } = {}) {
     return
   }
   const summary = line.replace(/^行为自检：/, '')
+  // **通过数也要看**：只看「有摘要行 + 退出码 0」时，一个打印「0 项通过，0 项失败」的空壳
+  // 也算通过——断言从几百条掉到零，门禁绿着。判据要有下限，而这个下限必须是**量出来的**
+  // 那个数：把已经通过的断言数写在这里当门槛，谁删掉一大片断言，谁就会被拦下。
+  //
+  // 取「当前通过数」作下限而不是随手写个整数：整数会随断言增加而过期，而过期的门槛只会
+  // 让后来的人把它调低——那时它就不再拦任何东西了。
+  const passedMatch = /(\d+)\s*项通过/.exec(summary)
+  const passedCount = passedMatch === null ? undefined : Number(passedMatch[1])
+  if (passedCount === undefined) {
+    fail(`行为自检的摘要行读不出通过数（原文：${summary}）——摘要格式是本项目自检的契约，`
+      + '读不出来就没法判断它到底跑了多少断言。')
+    return
+  }
+  if (passedCount < BEHAVIOR_MIN_PASSED) {
+    fail(`行为自检只跑了 ${passedCount} 项（下限 ${BEHAVIOR_MIN_PASSED}）——断言被删掉了一大片，`
+      + '或者自检被换成了一个只会报「0 项通过」的空壳。少了多少条断言，就等于少了多少处判断。')
+  }
   if (r.status !== 0) {
     const body = out.split('失败项：')[1] ?? ''
     const fails = body.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- '))
@@ -1150,12 +1179,50 @@ function checkCardClaims() {
   if (checked > 0 && failures.length === 0) {
     process.stdout.write(`卡片断言：${checked} 条，两边同源\n`)
   }
+  // **一张卡片带断言，不等于别的卡片也该带**；但**一条都没有**要出声。
+  //
+  // 判据是「`pf:claims` 整行被删掉」这条路：删了之后 `claims === undefined` 一路 continue，
+  // 末尾那句「N 条，两边同源」要 `checked > 0` 才打，于是三条断言可以整批静默消失——
+  // 输出里一个字的差别都没有，门禁照样绿。这是「检查消失了却不报案」的典型形状。
+  //
+  // 阈值取 1 而不是「每张卡片都要有」：断言只能写在那几张真的做了硬承诺的卡片上，要求
+  // 全员都写会把判据变成形式主义。但零条一定意味着有人把唯一那份删掉了。
+  if (checked === 0) {
+    fail('assets/readme/ 里一张卡片都没有 pf:claims 断言——卡片上的硬承诺（数字、'
+      + '「什么都不做」这类）就没有任何检查盯着了。至少让做了硬承诺的那张卡片带上它，'
+      + `格式见 CONTRIBUTING.md 的「README 卡片」一节；认得的键：${Object.keys(CARD_CLAIMS).join('、')}。`)
+  }
 }
 
 // ── 检查九：文档里的「数量自称」必须与现实相符 ──────────────────────────────
 
-/** 中文数字 → 数值。只覆盖文档里实际会用到的那几个。 */
-const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 }
+/**
+ * 中文数字 → 数值。
+ *
+ * 覆盖到九十九：`十三`、`二十`、`二十一` 都得算得出来。原先只列到 `十二`，超过的一律
+ * 返回 undefined，而调用点是 `if (n === undefined) continue`——**静默跳过**。于是文档里
+ * 写「十三个脚本」「二十个脚本」这种真错话，一个字的提示都不会有：判据在它最该出声的那
+ * 一侧哑了。清单会随文件增加而变长，而数字上限写死在那一天，就是下一次漏报的日期。
+ *
+ * 认不出来时**报错，不跳过**：「这个数量我核对不了」本身就是需要作者看一眼的信息。
+ */
+function cnNumber(raw) {
+  if (/^\d+$/.test(raw)) return Number(raw)
+  const D = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+  if (raw === '十') return 10
+  // 十几：`十三` = 13
+  const teen = /^十([一二三四五六七八九])$/.exec(raw)
+  if (teen !== null) return 10 + D[teen[1]]
+  // 几十：`二十` = 20
+  const tens = /^([二三四五六七八九])十$/.exec(raw)
+  if (tens !== null) return D[tens[1]] * 10
+  // 几十几：`二十一` = 21
+  const both = /^([二三四五六七八九])十([一二三四五六七八九])$/.exec(raw)
+  if (both !== null) return D[both[1]] * 10 + D[both[2]]
+  // 个位
+  if (raw.length === 1 && D[raw] !== undefined) return D[raw]
+  return undefined
+}
 
 /**
  * 文档里写「三道门控」「四个脚本」这类数量时，**必须与实际相符**。
@@ -1370,8 +1437,12 @@ function checkStatedCounts() {
       const re = new RegExp(`(?<!第)([一二三四五六七八九十]+|\\d+)\\s*(?:道|条|个)?${word}`, 'g')
       for (const m of text.matchAll(re)) {
         const raw = m[1]
-        const n = /^\d+$/.test(raw) ? Number(raw) : CN_NUM[raw]
-        if (n === undefined) continue
+        const n = cnNumber(raw)
+        if (n === undefined) {
+          // 认不出来就**说一声**，不静默跳过：跳过等于「这条数量我核不了」被读成「核过了没问题」。
+          fail(`${doc} 写着「${raw}${word}」，这个数字我核对不了 —— 换成阿拉伯数字，或去掉数量。`)
+          continue
+        }
         if (n !== actual[key]) {
           fail(`${doc} 写着「${raw}${word}」，实际是 ${actual[key]} —— 数量自称与代码不符。`
             + '要么改数字，要么去掉数字（数量是快照，会过期）。')
@@ -1389,28 +1460,17 @@ function checkStatedCounts() {
     // 是数量断言，没有泛指的读法。
     for (const m of text.matchAll(/(?<!第)([一二三四五六七八九十]+|\d+)\s*个?\s*脚本/g)) {
       const raw = m[1]
-      const n = /^\d+$/.test(raw) ? Number(raw) : CN_NUM[raw]
-      if (n === undefined || n === 1) continue
+      const n = cnNumber(raw)
+      if (n === undefined) {
+        fail(`${doc} 写着「${raw}个脚本」，这个数字我核对不了 —— 换成阿拉伯数字，或去掉数量。`)
+        continue
+      }
+      if (n === 1) continue
       if (n !== actual['脚本']) {
         fail(`${doc} 写着「${raw}个脚本」，实际是 ${actual['脚本']} 个 —— 数量自称与代码不符。`)
       }
     }
   }
-}
-
-/** 在某个二级标题之下，数匹配到的行数。用于「文件地图」这类表格清单。 */
-function countTableRows(file, headingRe, rowRe) {
-  const p = join(SKILL_ROOT, file)
-  if (!existsSync(p)) return -1
-  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
-  const start = lines.findIndex((l) => headingRe.test(l))
-  if (start < 0) return -1
-  let count = 0
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) break
-    if (rowRe.test(lines[i])) count += 1
-  }
-  return count
 }
 
 /**

@@ -73,7 +73,8 @@ import {
 //
 // 这一组守的是「自检自己会不会被架空」这一类错误：判据写成永真、把硬证据当软证据、
 // 检查的开关是一个可以随手改掉的字符串。每一段都用「放宽了会过、收紧了不过」构造，
-// 所以判据被改松时这一组会立刻红。group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
+// 所以判据被改松时这一组会立刻红。
+group('[44] 自检机制自身的假绿回归：硬证据优先、判据可证伪')
 {
   // 1) 行为自检被换成哑弹（什么都不做、退出码 0）→ 必须报缺，且必须带出它的 stderr。
   //
@@ -94,6 +95,23 @@ import {
     report(/MUTE-STUB-MARKER/.test(r.out), '诊断：带出 stderr')
   }
 
+  // 1b) 「有摘要行、退出码 0，但一条断言都没跑」的空壳 → 必须报缺。
+  //
+  //     通过判据原先只看「有摘要行 + 退出码 0」，于是把 selftest 换成一句
+  //     `行为自检：0 项通过，0 项失败` 就算通过——断言全没了，门禁还绿着。
+  //     「跑过但什么都没验」必须与「跑过且验了」长得不一样，所以判据要有下限。
+  if (!HAS_GIT) {
+    skipGroup('[44.1b] 空壳自检的判定', '本机没有 git')
+  } else {
+    const shellStub = "process.stdout.write('行为自检：0 项通过，0 项失败\\n')\n"
+      + `// ${'x'.repeat(200)}\n`
+    const clone = skillClone('mech-shell', { selftest: shellStub })
+    const r = preflightIn(clone, { behavior: true })
+    const caught = r.status === 1 && /只跑了 \d+ 项/.test(r.out)
+    check(caught, '空壳自检（有摘要、退出码 0、零断言）→ preflight 失败',
+      `exit=${r.status} ${r.out.split('\n').filter((l) => /FAIL/.test(l)).join(' / ')}`.slice(0, 240))
+    report(caught, '空壳自检：断言数下限拦得住')
+  }
   // 2) 被实跑的脚本「先打印完报告、再以非零退出」→ 必须报缺。
   //
   //    失败判据必须是「非零退出 **且** 期望词缺席」同时成立：只看非零退出时，stdout 里
@@ -1233,8 +1251,7 @@ group('[50] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给�
     report(caughtSyntax, 'lib 覆盖：语法错被抓')
   }
 
-  // `scripts/dev/lib/` 也是实现代码，也要过同一套判据。
-  //
+  // `scripts/dev/lib/` 也是实现代码，也要过同一套判据。  //
   // 这一层最容易漏：它是「自检工具的共享层」，看起来不属于产品，而它就在
   // `ALLOWED_SUBDIRS` 的放行清单里。放行与检查分成两份清单时，漏掉一处是静默的——
   // 往 `harness.mjs` 隔壁放一个引了外部模块、括号还不闭合的文件，全量自检 0 失败。

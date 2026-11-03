@@ -1332,6 +1332,36 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
     report(saysOk, '切面 ci：有则报有')
   }
 
+  // 「本地齐备」不等于「远端齐备」。
+  //
+  // P5 的顺序是「推送 → 回跑 compose 补远端节 → 落盘 CI」，后两步发生在推送之后；
+  // 不补一次提交推送，远端就永远缺它们，而本地看上去一切正常。勘察早就采到了这两个事实
+  // （`dirty` / `ahead`），只是 review 从没读过——「产出了但没消费」与「没有这个能力」
+  // 在报告上长得一模一样，所以要有断言钉住。
+  if (!HAS_GIT) {
+    skipGroup('[25] 未提交与未推送的判定', '本机没有 git')
+  } else {
+    const repo = join(fixture('review-dirty', {}), 'r')
+    mkdirSync(repo, { recursive: true })
+    gitIn(repo, 'init')
+    writeFileSync(join(repo, 'a.txt'), 'x\n', 'utf8')
+    gitIn(repo, 'add', '-A')
+    gitIn(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'init')
+    // 干净时不该报这两条
+    const clean = review(repo, '--scope=git')
+    const noFalse = !/未提交的改动/.test(clean.stdout ?? '')
+    check(noFalse, '工作区干净时不报「未提交改动」（否则这条会变成常驻噪音）',
+      (clean.stdout ?? '').split('\n').filter((l) => /未提交|干净/.test(l)).join(' | ').slice(0, 200))
+    report(noFalse, '未提交：干净时不误报')
+    // 有未提交改动时要报出来
+    writeFileSync(join(repo, 'b.txt'), 'y\n', 'utf8')
+    const dirty = review(repo, '--scope=git')
+    const caught = /未提交的改动/.test(dirty.stdout ?? '')
+    check(caught, '有未提交改动时报出来（本地全绿、远端缺东西的根源）',
+      (dirty.stdout ?? '').split('\n').filter((l) => /未提交/.test(l)).join(' | ').slice(0, 200))
+    report(caught, '未提交：报得出来')
+  }
+
   // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）。
   // 断言认的是 `[缺]` 那行而不是「凭据形状」四个字：被确认之后它会出现在 `[齐]` 里
   // 作为「已确认」的说明，认字面词就分不出「已消掉」与「仍在报缺」。

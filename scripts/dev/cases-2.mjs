@@ -1222,6 +1222,23 @@ group('[49] 命令行用法：打错了必须说出来')
     check(ok, `用法错误（${label}）退出 2 且说得出话`, `exit=${r.status} 输出 ${text.length} 字节`)
     report(ok, `用法错误：${label}`)
   }
+  // 组合给了就说用法错，不许静默挑一个跑。
+  //
+  // `--at` 单独给时原先被忽略，跑完一整趟结构自检并以 0 退出——调用方以为核的是那个
+  // 版本，实际核的是工作区。`--package` 与 `--release` 同时给时先判前者、后者被丢掉，
+  // 那条发布门禁就白跑了。这类「参数没生效却报绿」与「没比不等于比过」是同一种错。
+  for (const [args, label] of [
+    [['--at', 'v1.2.2', '--no-behavior'], '--at 单独给'],
+    [['--package', 'whatever.txt', '--release', 'v9.9.9'], '--package 与 --release 同给'],
+    [['--repo', 'a/b', '--no-behavior'], '--repo 单独给'],
+  ]) {
+    const r = run(args)
+    const text = `${r.stdout ?? ''}${r.stderr ?? ''}`
+    const ok = r.status === 2 && text.trim() !== ''
+    check(ok, `参数组合非法时退出 2 并说清楚（${label}）`,
+      `exit=${r.status} 输出=${text.trim().slice(0, 120)}`)
+    report(ok, `参数组合：${label}`)
+  }
   const help = run(['--help'])
   const helpOk = help.status === 0 && /用法/.test(help.stdout ?? '')
   check(helpOk, '--help 退出 0 并打印用法', `exit=${help.status}`)

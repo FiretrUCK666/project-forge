@@ -93,7 +93,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 565
+export const BEHAVIOR_MIN_PASSED = 570
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2439,6 +2439,21 @@ function main(argv = []) {
   // 两个模式各只做一件事，做完就汇总。它们由持续集成与发布工作流调用，而那里
   // 结构自检已经单独跑过一遍——重复跑一遍只是白花时间，还会让「这一条到底查了什么」
   // 变得说不清。
+  //
+  // **组合给了就说用法错，不许静默挑一个跑**：`--at` 单独给时被忽略，等于跑完一整趟
+  // 结构自检然后以 0 退出——调用方以为核的是那个版本，实际核的是工作区；`--package`
+  // 与 `--release` 同时给时先判前者、后者被丢掉，那条发布门禁就白跑了。这类「参数没生效
+  // 却报绿」与「没比不等于比过」是同一种错。
+  if (producedList !== undefined && releaseTag !== undefined) {
+    return usageError(`--package 与 --release 是两件事，一次只能给一个。\n${usage()}`)
+  }
+  if (atRef !== undefined && producedList === undefined) {
+    return usageError(`--at 只与 --package 搭配使用（它说的是「按哪个版本的文件地图核对」）。\n`
+      + `只想跑结构自检就不要给 --at。\n${usage()}`)
+  }
+  if (repoArg !== undefined && releaseTag === undefined) {
+    return usageError(`--repo 只与 --release 搭配使用。\n${usage()}`)
+  }
   if (producedList !== undefined) { checkProducedPackage(producedList, atRef); return summarize() }
   if (releaseTag !== undefined) { checkReleaseTag(releaseTag, repoArg); return summarize() }
 

@@ -402,14 +402,27 @@ function main(argv) {
     if (!id.name || !id.email) {
       missing.push('提交署名缺失（只写仓库级，见版本管理署名审计清单）')
     } else {
-      // 层级有三档：local / global / system。只报「仓库级 / 继承全局」会让 system 层的
-      // 来源看起来像「哪里都没设」——而全局工具的安装器恰恰常写在那里。
       // 层级有四种取值：local / global / system / unset。只报「仓库级 / 继承全局」会让
       // system 层的来源看起来像「哪里都没设」——而全局工具的安装器恰恰常写在那里。
       const scopeLabel = id.scope === 'local' ? '仓库级'
         : id.scope === 'unset' || id.scope === undefined ? '来源未知'
           : `继承自 ${id.scope}`
       ok.push(`提交署名有（${id.name}，${scopeLabel}；占位值须人眼确认）`)
+    }
+    // **本地齐备不等于远端齐备。** P5 的顺序是「推送 → 回跑 compose 补远端节 → 落盘 CI」，
+    // 后两步发生在推送之后；不补一次提交推送，远端就永远缺它们，而本地看上去一切正常。
+    // 这两个事实勘察早就采到了（`dirty` / `ahead`），只是没人用——「产出了但没消费」
+    // 与「没有这个能力」在报告上长得一模一样。
+    //
+    // 它们是**待问**不是缺：本地有未提交改动，可能是使用者正在写；而领先上游若干个提交，
+    // 可能是有意攒着。机器判不了「该不该现在推」，但它必须说出来。
+    if (typeof git.dirty === 'number' && git.dirty > 0) {
+      pending.push(`工作区有 ${git.dirty} 处未提交的改动：它们不在远端，别人装上就缺这些`
+        + '。确认是有意暂存时不必处理，否则先提交（P5 落盘 CI 与回跑契约之后尤其要记得再推一次）')
+    }
+    if (typeof git.ahead === 'number' && git.ahead > 0 && git.upstream !== undefined) {
+      pending.push(`本地领先上游 ${git.ahead} 个提交，还没有推：远端仓库缺这些改动`
+        + '（P7 说「已交付」之前先 push，并回读远端分支确认）')
     }
   }
 

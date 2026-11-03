@@ -146,12 +146,13 @@ Nothing to register and no restart: hosts discover skills by directory, and `SKI
 ## Update
 
 <p align="center">
-  <img src="assets/readme/update.en.svg" width="100%" alt="How the downloaded copy stays current: one version check per use, a full replacement when there is a newer version, and at most one file replacement per copy every 24 hours">
+  <img src="assets/readme/update.en.svg" width="100%" alt="How the downloaded copy stays current: at most one version check per hour, a full replacement when there is a newer version, and at most one file replacement per copy every 24 hours">
 </p>
 
-The downloaded copy keeps itself current. You do nothing. On each use it quietly compares version
-numbers: same version and it stops there changing nothing, newer version and it swaps in the whole
-copy, telling you which version it moved from and to.
+The downloaded copy keeps itself current. You do nothing. It quietly asks which version is
+latest: same version and it stops there changing nothing, newer version and it swaps in the whole
+copy, telling you which version it moved from and to. **It asks at most once an hour** — there is
+no point re-fetching an answer that has not changed, so it does not go online on every use.
 
 A copy replaces its files at most once every 24 hours, so it cannot flip several times a day. To
 look at the state yourself (report only, no update):
@@ -172,7 +173,9 @@ not an error.
 
 To make it ask somewhere else (a self-hosted mirror, an internal release), edit `metadata.source` in
 that copy's `SKILL.md`; the `PF_UPDATE_SOURCE` environment variable only stands in when the copy
-records no address.
+records no address. To turn the automatic check off entirely (read-only sandboxes, offline
+machines, audit requirements), set `PF_NO_UPDATE` to any non-empty value: it will not go online,
+it will stay silent, and `--check` still answers as usual.
 
 ## Usage
 

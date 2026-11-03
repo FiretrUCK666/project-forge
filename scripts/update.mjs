@@ -17,6 +17,9 @@
  *
  * 每次使用发生的事，三步：
  *
+ *   0. **看节流**：距上次真的核对上远端版本不足一小时，就到此为止、不联网。这一步
+ *      不改变任何判据，只是不再把同一个结论重复取一遍——它挂在每个任务的开头，
+ *      而「已是最新」这个答案一小时内不会变。
  *   1. **比版本**：问一次「最新版是哪个标签」（一个请求、几十 KB 的元数据，不下整包），
  *      与本地版本比。不是更新版就结束——这是绝大多数时候，所以这一步必须便宜。
  *
@@ -57,7 +60,10 @@
  *   node scripts/update.mjs [--quiet] [--check]
  *
  *   --quiet   只在「真的更新了」时输出（skill 自己在任务开始时用这个）
- *   --check   只报告不更新，不受窗口限制（人主动问的时候用）
+ *   --check   只报告不更新，不受节流与窗口限制（人主动问的时候用）
+ *
+ * 环境变量：`PF_UPDATE_SOURCE` 改来源（副本没记来源时生效）；`PF_NO_UPDATE` 设非空值
+ * 可整个关掉自动检查（--check 不受影响）。
  *
  * 退出码：0 = 无事或已更新；1 = 尝试更新但失败；2 = 用法错误。
  */
@@ -100,6 +106,18 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
  * 就够了——更密就变成噪音，更疏则「一直落后」这件事会被藏起来。
  */
 const STALE_CHECK_MS = 24 * 60 * 60 * 1000
+/**
+ * 两次「问远端要版本号」之间至少隔这么久。
+ *
+ * 与上面那个窗口是两件事：窗口管**换不换文件**，这一条管**联不联网**。原先只有窗口，
+ * 于是「已是最新」这个结论每次任务都重新联网取一遍——它每天最多只有一个小时是新的，
+ * 其余时间都是重复劳动。离线环境下这笔钱更贵：每条路要等到连接失败或超时，实测
+ * 每次任务白等 2 秒左右，而这段时间挂在任务开头。
+ *
+ * 取一小时的理由：新版本发出来到被用上，最多晚一小时，而使用者对「装上之后要过一个
+ * 小时才自动更新」没有感知（他不需要为此做任何事）；换来的是联网次数下降两个数量级。
+ */
+const CHECK_INTERVAL_MS = 60 * 60 * 1000
 /** 单次网络动作的上限。它挂在每个任务的开头，卡住就等于把任务卡住。 */
 const NETWORK_TIMEOUT_MS = 10 * 1000
 
@@ -127,10 +145,11 @@ function usage() {
     '  没有 .git 的是包副本：比版本、下载新版、整份覆盖。',
     '',
     '  --quiet   只在「真的更新了」时输出',
-    '  --check   只报告不更新，也不受 24 小时窗口限制',
+    '  --check   只报告不更新，也不受节流与 24 小时窗口限制',
     '',
     '  来源：优先用副本自己记的那个（SKILL.md 的 metadata.source）；读不到时用兜底地址，',
     '  可用环境变量 PF_UPDATE_SOURCE 改（自建镜像、内网发布用）——它只在副本没记来源时生效。',
+    '  设 PF_NO_UPDATE 为非空值可以整个关掉自动检查（--check 不受影响）。',
     '',
   ].join('\n')
 }
@@ -593,6 +612,18 @@ function applyPackage(entries) {
   const packSkill = entries.find((e) => e.name === 'SKILL.md')?.data.toString('utf8')
     ?? skillText() ?? ''
   const map = readFileMap(packSkill)
+  // **旧副本自己那张表也要留一份，而且必须在写盘之前读**：循环里第一个写下去的可能就是
+  // SKILL.md，之后再去读「旧地图」读到的已经是新的了。
+  //
+  // 为什么需要它：只按新包的表删，删得掉的是「新表里没有、磁盘上有」的文件，而**旧版本
+  // 曾经分发过、后来被删掉的文件**恰好不在任何一张新表里——它们既不是新包的内容，也不是
+  // 仓库自用，于是永远没人认领。实测：从 1.0.0 的副本升到 1.2.2，`scripts/ledger.mjs`
+  // 留在原地（1.1.x 起它搬进了 `scripts/lib/`），报告说「已更新到最新版」，副本里却带着
+  // 一个没有任何文件 import 的死模块。
+  //
+  // 边界仍然是「这个 skill 的文件，不是整个目录」：候选集只来自两张表，使用者自己放进去的
+  // 东西不在任何一张表里，不会被碰。
+  const oldMap = readFileMap(skillText() ?? '')
   const removed = []
   const skipped = []
   const keptTemps = []
@@ -611,8 +642,11 @@ function applyPackage(entries) {
     writeAtomic(p, e.data)
   }
   // 旧包里已被删掉的文件：留着就是一份永远没人读的残留。
-  for (const name of map.shipped.filter((x) => !x.endsWith('/'))) {
-    if (now.has(name)) continue
+  //
+  // 候选集是**新旧两张表的并集**：新表管「现在该有什么」，旧表管「以前分发过什么」。
+  // 只有并集才覆盖「旧版本有、新版本没有」这一类——那正是升级到新结构时唯一会残留的一类。
+  for (const name of [...new Set([...oldMap.shipped, ...map.shipped])]) {
+    if (name.endsWith('/') || now.has(name)) continue
     const p = join(SKILL_ROOT, name)
     if (!insideSkill(p)) { skipped.push(name); continue }
     if (existsSync(p) && statSync(p).isFile()) { rmSync(p); removed.push(name) }
@@ -625,7 +659,7 @@ function applyPackage(entries) {
     rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     return !existsSync(p)
   }
-  for (const name of map.repoOnly) {
+  for (const name of [...new Set([...oldMap.repoOnly, ...map.repoOnly])]) {
     const p = join(SKILL_ROOT, name)
     try {
       const kind = name.endsWith('/') ? 'dir' : 'file'
@@ -640,7 +674,7 @@ function applyPackage(entries) {
     }
   }
   // 表里带 `../` 这种名字的：不删不写，报出来。它只会出现在「这一份不是它自称的东西」时。
-  for (const name of map.repoOnly) {
+  for (const name of [...new Set([...oldMap.repoOnly, ...map.repoOnly])]) {
     if (!insideSkill(join(SKILL_ROOT, name))) skipped.push(name)
   }
   // 空目录不再有用（新包里没有它），顺手收掉——只收空的，里面还有东西就留着。
@@ -814,6 +848,17 @@ async function main(argv) {
   // --check 是人主动问的，它要看到全部状态；与 --quiet 同时给时以 --check 为准。
   const quiet = argv.includes('--quiet') && !checkOnly
 
+  // 宿主或流水线可以整个关掉自动更新：`PF_NO_UPDATE` 有值就不联网、不写盘、不出声。
+  //
+  // 为什么要这个开关：这个脚本挂在**每个任务的开头**，而有几类环境根本不该让它说话——
+  // 宿主禁止 skill 自改（沙箱只读、审计要求）、离线构建机、以及「这次别动我的安装目录」。
+  // 原先这些环境只能靠「断开网络」或「有 .git」凑出来，两条都不是使用者能直接表达的意图。
+  // 与 `PF_UPDATE_SOURCE` 同一族：一个进程级、不与任何宿主绑定的名字。
+  //
+  // **`--check` 不受它管**：那个参数是人主动敲的，他要的就是一句真话；一声不响地退出
+  // 会让人以为这个开关坏了。自动那条路才需要安静。
+  if (!checkOnly && (process.env.PF_NO_UPDATE ?? '') !== '') return 0
+
   const facts = readFacts()
   const tag = facts.version === undefined ? '（版本读不到）' : facts.version
 
@@ -834,6 +879,22 @@ async function main(argv) {
   // 合成一个变量就会出事：--check 是「把结论说出来」这个参数，而它会把窗口那件事本身
   // 绕过去——「刚更新过，还要等多久」这句话永远轮不到输出，而那正是人在问的东西。
   const inWindow = sinceUpdate < UPDATE_INTERVAL_MS
+
+  // 节流：距上次**真的问到了远端版本**不足一小时，就不再联网。
+  //
+  // 判据只能是 `lastOkAt`（那次真的核对上了），不能用 `lastUpdateAt`（那次换了文件）：
+  // 后者在一小时内可能一直是 0，而版本早就核对过；用它判会退化成「每次都联」。
+  //
+  // **只管 `--quiet` 那条路**——那是 skill 在每次任务开头自动跑的模式，也是省下这笔钱
+  // 唯一有意义的地方。人自己敲的命令（不带参数，或带 `--check`）是来问问题的：他要知道
+  // 「有没有新版、还要等多久、这次为什么没换成」，而这些答案必须当场算出来。把它也节流，
+  // 省下的是使用者最有理由期待答案的那一次。
+  //
+  // 节流时不刷新 `lastOkAt`：那个字段的含义是「上一次真的核对上了」，刷新它等于把
+  // 「多久没核对过」这件事抹平，下面那条「已经很久没能核对上了」的提醒就永远不会出现。
+  if (quiet && state.lastOkAt !== 0 && Date.now() - state.lastOkAt < CHECK_INTERVAL_MS) {
+    return 0
+  }
 
   // ── 一：比版本 ────────────────────────────────────────────────────────────
   // 两条路按顺序试。**只有「这条路这次没走通」才换下一条**：「那边没有最新发布」是

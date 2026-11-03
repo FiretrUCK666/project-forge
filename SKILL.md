@@ -112,6 +112,10 @@ metadata:
 `references/skill-project.md`（**P1 之后即读**，见 G8）；`git.isRepoRoot` 为假这一条
 **优先于**上面所有行——不管判出什么生态，只要目录不在自己的仓库根上，先解决边界问题。
 
+**多包仓库另有一行输入**：`workspace.declared` 为真时，P4 的 `AGENTS.md` 按根与子包
+分工写、P5 的 CI 在**根层**跑覆盖全部子包的那条命令；为假时不要去找子包，也不要写
+「各子包分别……」这类句子。字段与判据见 `references/survey.md` 的 `workspace` 一节。
+
 同一行里若有多列冲突，按更保守的那一列执行（例如既 `docs-only` 又已有远端：远端不
 重建，发布仍不做）。发布这一列判「能不能发」的依据见 `references/publish.md`；不是所有
 项目都该发布，**「不发布」是正常结果，不是失败**。
@@ -139,7 +143,7 @@ metadata:
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
 | **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
-| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**每写完一份非 `AGENTS.md` 的产物，立刻 `compose-agents.mjs <项目> --record <路径>` 记账**——不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
+| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**每写完一批非 `AGENTS.md` 的产物，跑一次 `compose-agents.mjs <项目> --record <路径> [更多路径...]` 记账**——`--record` 一次可给多份（全有或全无），不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认 | `references/publish.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报。**P0 记下的局部诉求在这里传 `review.mjs --scope=<切面>`**：只验那几面，其余不报缺 | — |
@@ -151,18 +155,13 @@ metadata:
 node "<本领目录>/scripts/update.mjs" --quiet
 ```
 
-它问一次「最新版是哪个标签」，有新版才下载、下载后整份覆盖，同一份副本 24 小时内最多
-换一次文件。**问版本与下载都按两条路的顺序试**：托管平台的接口在前（一次请求同时给出
-版本与附件地址，整条链路不碰网页主机），网页地址在后——网页主机往往是最不稳的那一环。
-**目录里有 `.git` 的副本是拿来改的那一份，工具对它只读**；**标签说的版本与包里实际的
-版本必须一致**——两者来自平台上两个不同的地方，不一致时它一个字节都不写并把两个版本都
-报出来（否则会出现「装进旧版却说已更新到最新版」）；它说「已更新」时你手上这份文件已经
-过期，重新读 `SKILL.md` 再继续；`--quiet` 下没输出=没有可动作的变化（**网络抖一下**也不
-出声，那不是「已是最新」）。
+它让这份副本保持最新，你不需要为它做什么。**`--quiet` 下没输出 = 没有可动作的变化**；
+它说「已更新」时你手上这份文件已经过期，重新读 `SKILL.md` 再继续。**把它的输出原样转给
+用户**——包括那句「这份停在某一版、而且是核对不了」，那不是故障，是用户有权知道的事。
 
-**它偶尔会主动说一句话，那不是故障**：隔了一天以上还没能核对上新版时，它会把「这份停在
-某一版、而且是核对不了」讲出来。**把这句话转告用户**，别当噪音压掉——它说的正是用户有权
-知道的事；反过来，也别把这一句复述成「出错了」。
+宿主禁止 skill 自改（沙箱只读、审计要求）或本次不想动安装目录时，设环境变量
+`PF_NO_UPDATE` 为非空值即可整个关掉；**要主动查一次版本用 `--check`**，它不受任何节流。
+两条路、窗口、同源校验这些机制细节在 README 的「更新」一节，本文件不复述。
 
 **几条只在特定情况下才用到的判据，按需读**（写下来是为了不靠回忆）：
 
@@ -269,7 +268,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `scripts/ecosystems.mjs` | 生态描述符：加一个生态只改这里 |
 | `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/render.mjs` `scripts/lib/task-runners.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` | 公共模块 |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
-| `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本） |
+| `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本，一次可给多份） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
 | `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单；`--verify` 判是否已干净——退出码 **0 干净 / 1 不干净 / 3 判不了**，「判不了」指扫描没覆盖全部，**不要读成干净**） |
 | `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 写发布说明；「非 ASCII 正文不经 shell」那条规则的落地工具，含从提交记录起草 |

@@ -64,6 +64,18 @@ const FLAGS = new Set([
   '--no-auto-release', // 用户确认：暂不要自动发布
   '--secrets-reviewed', // 用户确认：未跟踪未忽略的命中均为占位或测试数据（已入库那一档不在此列）
   '--strict', // 严格模式：待问事项同样拦住（exit 2），用于 CI；默认待问只提示不拦
+  // 用户确认：项目里已有的 AI 约定文件保持原样，不因为「多份可能打架」就去改写它们。
+  //
+  // 为什么需要这个开关：协议说「无对应 flag 的待问只能改文件消掉」，而「多份约定文件」
+  // 这条的处置只能是「去对齐那几份」或「确认现状可接受」。不给开关，前一条就变成了
+  // 「必须去改使用者手写的约定文件」——那正是协议另一处明令禁止的事。
+  '--conventions-reviewed',
+  // 用户确认：AGENTS.md 是手写的、且他选择保留原样。
+  //
+  // 手写契约可能比生成的那份更贴合项目，但它没有内核标记，于是「缺内核」这条会永远
+  // 挂着。协议说手写文件默认不动、要升级必须显式 `--upgrade`，两边一夹，交付门禁就成
+  // 了一条走不通的路。这个开关的意思是「这份手写文件是有意保留的，不要再判它缺」。
+  '--handwritten-agents',
 ])
 
 function readText(p) {
@@ -297,6 +309,8 @@ function main(argv) {
       '  --no-ci                用户确认：暂不要 CI',
       '  --no-auto-release      用户确认：暂不要自动发布',
       '  --secrets-reviewed     用户确认：未跟踪未忽略的命中均为占位或测试数据',
+      '  --conventions-reviewed 用户确认：多份 AI 约定文件保持原样，不去改写它们',
+      '  --handwritten-agents   用户确认：AGENTS.md 是有意手写的，不注入内核',
       '  --strict               严格模式：待问事项同样拦住（exit 2），用于 CI',
       '',
       '  退出码：0 = 无[缺]（默认下[待问]也放行）；1 = 有[缺]；2 = 用法错误或 --strict 拦下[待问]。',
@@ -352,7 +366,12 @@ function main(argv) {
     const authors = authorMarkers(agents).length
     const kernel = hasKernel(agents)
     if (!kernel) {
-      missing.push('AGENTS.md 缺少内核标记（跑 compose-agents 生成或升级）')
+      // 手写契约可能比生成的那份更贴合项目。协议说这类文件默认不动、要升级必须显式
+      // --upgrade，所以「缺内核」不能是一条无论如何都消不掉的缺——那会把交付门禁变成
+      // 一条走不通的路，而走不通的门禁最后一定会被绕过。
+      if (flags.has('--handwritten-agents')) ok.push('AGENTS.md 是手写的（已确认保留原样，不注入内核）')
+      else pending.push('AGENTS.md 缺少内核标记：跑 compose-agents 生成或升级；'
+        + '若这份是有意手写并保留的，加 --handwritten-agents')
     } else if (authors > 0) {
       missing.push(`AGENTS.md 待填写 ${authors} 处（读代码填实，删标记）`)
     } else {
@@ -462,8 +481,13 @@ function main(argv) {
   // 于是矛盾会被永久留在项目里，谁也不知道该信哪个。所以至少要让使用者知道它存在。
   const conv = s.docs?.aiConventions
   if (Array.isArray(conv) && conv.length > 1) {
-    pending.push(`这个项目有 ${conv.length} 份 AI 约定文件（${conv.map((c) => c.file).join('、')}）：`
-      + '落盘前先对齐它们说的是不是同一件事——否则新生成的那份看起来最权威，矛盾会被留下来')
+    if (flags.has('--conventions-reviewed')) {
+      ok.push(`有 ${conv.length} 份 AI 约定文件（已确认保留原样：${conv.map((c) => c.file).join('、')}）`)
+    } else {
+      pending.push(`这个项目有 ${conv.length} 份 AI 约定文件（${conv.map((c) => c.file).join('、')}）：`
+        + '落盘前先对齐它们说的是不是同一件事——否则新生成的那份看起来最权威，矛盾会被留下来'
+        + '。确认现状可接受时加 --conventions-reviewed')
+    }
   }
 
   } // scope: release

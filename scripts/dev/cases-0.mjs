@@ -136,7 +136,7 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
    * 情形（附件被换过、缓存顶着旧包），而它对使用者的后果很重（静默降级、或白写一遍文件），
    * 所以要有办法造出这种包来验「它会被拦下」。
    */
-  const buildPackage = (name, { version, source, declareVersion }) => {
+  const buildPackage = (name, { version, source, declareVersion, mutate }) => {
     const src = makeCopy(name, { withGit: true, version, source })
     if (declareVersion !== undefined) {
       const p = join(src, 'SKILL.md')
@@ -145,6 +145,14 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       gitIn(src, 'add', '-A')
       gitIn(src, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
         'commit', '-m', 'declare')
+    }
+    // 造「不一样的包」：改法由用例给，这里只管把它提交进导出源。
+    // 有些判据（例如「包里的表格能不能决定删到哪儿」）必须靠一份**内容被改过**的包才验得到。
+    if (typeof mutate === 'function') {
+      mutate(src)
+      gitIn(src, 'add', '-A')
+      gitIn(src, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+        'commit', '-m', 'mutate')
     }
     const zipPath = join(ROOT, `${name}.zip`)
     const archived = spawnSync('git',
@@ -492,6 +500,111 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       check(asked.out !== '', '`--check` 不受 PF_NO_UPDATE 管（人要的是真话）',
         JSON.stringify(asked.out.slice(0, 160)))
       report(asked.out !== '', '关掉开关：--check 照旧说话')
+    }
+
+    // 五之五、**包里的表格不能决定删到哪儿**。
+    //
+    // 条目名来自从网上下载的那份包，不是本地可信数据。`repoOnly` 是「这个包里不该有、
+    // 见到就删」的清单，而删除走的是 `rmSync(recursive: true)`——一个植入了 `../victim/`
+    // 的伪造包，就能删掉使用者磁盘上技能目录之外的任意目录，而报告会把它写成
+    // 「顺手清掉了包里不该有的文件」。这是这个工具能做的最坏的事。
+    //
+    // 判据是**解析之后的路径边界**，而且必须在任何 `statSync` / `rmSync` 之前：
+    // 判完再删但只记一行汇报，等于把「已经删了」说成「已跳过」。
+    {
+      const dir = makeCopy('traversal-guard', { source: source() })
+      const skillRoot = dir
+      // 邻居：一个目录（里面有文件）与一个同前缀目录——后者专测「字符串前缀」那种错判。
+      const sideDir = resolve(skillRoot, '..', 'victim')
+      mkdirSync(sideDir, { recursive: true })
+      writeFileSync(join(sideDir, 'important.txt'), 'IMPORTANT\n', 'utf8')
+      const prefixed = resolve(skillRoot, '..', 'project-forge-secret')
+      mkdirSync(join(prefixed, 'inner'), { recursive: true })
+      writeFileSync(join(prefixed, 'inner', 'precious.txt'), 'PRECIOUS\n', 'utf8')
+
+      // 恶意新版：同样的树，但「仓库里另有」表里多了越界条目。
+      // 锚点必须落在**那张表的首行**上——那个小标题下面先有一段说明文字才到表头，
+      // 拿任意一行当锚点会注进上面那张「用户包里有」表，而那张表的循环本来就有守卫。
+      const evil = buildPackage('traversal-pkg', {
+        version: '9.9.9', source: source(), mutate: (src) => {
+          const p = join(src, 'SKILL.md')
+          const text = readFileSync(p, 'utf8')
+          const at = text.indexOf('### 仓库里另有')
+          const row = text.indexOf('| `AGENTS.md` |', at)
+          check(at >= 0 && row >= 0, '前提：找得到「仓库里另有」表的位置')
+          writeFileSync(p, `${text.slice(0, row)}| \`../victim/\` | evil |\n`
+            + `| \`../project-forge-secret/\` | evil |\n${text.slice(row)}`, 'utf8')
+        },
+      })
+      setWindow(dir, 0)
+      const servedBefore = pkg.body
+      pkg.body = evil.body
+      const r = await runUpdate(dir, '--quiet')
+      pkg.body = servedBefore
+
+      check(existsSync(sideDir) && existsSync(join(sideDir, 'important.txt')),
+        '包里的 ../ 条目不许删到技能目录之外',
+        `victim 目录还在=${existsSync(sideDir)} 输出=${r.out.slice(0, 200)}`)
+      report(existsSync(join(sideDir, 'important.txt')), '越界防护：邻居目录没被删')
+      check(existsSync(join(prefixed, 'inner', 'precious.txt')),
+        '同前缀目录（project-forge-secret）不许被当成「在之内」',
+        `还在=${existsSync(join(prefixed, 'inner', 'precious.txt'))}`)
+      report(existsSync(join(prefixed, 'inner', 'precious.txt')), '越界防护：同前缀目录没被删')
+      check(/已跳过/.test(r.out), '越界条目要**报出来**（不是默默丢掉）', r.out.slice(0, 200))
+      report(/已跳过/.test(r.out), '越界防护：条目被报出')
+    }
+
+    // 五之六、**删除权限归旧副本，不归网上下载的那份包**。
+    //
+    // 一张文件地图能陈述的只有「这份副本当初装进来时应该有什么」。新包没有资格说
+    // 「你磁盘上这个文件该删」——它只说得出自己有什么。否则一个把用户文件写进
+    // 「仓库里另有」表的包，就能让更新顺手清掉使用者的笔记。
+    // 边界的另一半：**旧表说过的照删**，否则「下成 Source code 的副本」永远清不干净。
+    {
+      const dir = makeCopy('repoonly-authority', { source: source() })
+      const mineA = join(dir, 'my-notes.md')
+      const mineB = join(dir, 'references', 'my-own-note.md')
+      mkdirSync(join(dir, 'references'), { recursive: true })
+      writeFileSync(mineA, '# 我的笔记\n', 'utf8')
+      writeFileSync(mineB, '# 我的另一份笔记\n', 'utf8')
+
+      // 恶意新版：把使用者的两个文件写进「仓库里另有」表。
+      const evil = buildPackage('repoonly-pkg', {
+        version: '9.9.9', source: source(), mutate: (src) => {
+          const p = join(src, 'SKILL.md')
+          const text = readFileSync(p, 'utf8')
+          const at = text.indexOf('### 仓库里另有')
+          const row = text.indexOf('| `AGENTS.md` |', at)
+          check(at >= 0 && row >= 0, '前提：找得到「仓库里另有」表的位置（删除权限用例）')
+          writeFileSync(p, `${text.slice(0, row)}| \`my-notes.md\` | evil |\n`
+            + `| \`references/my-own-note.md\` | evil |\n${text.slice(row)}`, 'utf8')
+        },
+      })
+      setWindow(dir, 0)
+      const servedBefore = pkg.body
+      pkg.body = evil.body
+      const r = await runUpdate(dir, '--quiet')
+      pkg.body = servedBefore
+
+      check(existsSync(mineA), '新包单方面声明「这个文件该删」不算数（权限在旧副本的表）',
+        `my-notes.md 还在=${existsSync(mineA)} 输出=${r.out.slice(0, 200)}`)
+      report(existsSync(mineA), '删除权限：新包说了不算')
+      check(existsSync(mineB), 'references/ 里的使用者文件同样保留',
+        `my-own-note.md 还在=${existsSync(mineB)}`)
+      report(existsSync(mineB), '删除权限：子目录同样受保护')
+
+      // 另一半：旧副本自己说过的东西照删。缺了这条，「下成 Source code 的副本」清不干净。
+      const legacy = makeCopy('repoonly-legacy', { source: source() })
+      mkdirSync(join(legacy, '.github', 'workflows'), { recursive: true })
+      writeFileSync(join(legacy, '.github', 'workflows', 'check.yml'), 'x\n', 'utf8')
+      writeFileSync(join(legacy, 'AGENTS.md'), '# 契约\n', 'utf8')
+      setWindow(legacy, 0)
+      const r2 = await runUpdate(legacy, '--quiet')
+      const gone = !existsSync(join(legacy, '.github')) && !existsSync(join(legacy, 'AGENTS.md'))
+      check(gone, '旧副本自己表里列过的排除项照旧清掉（`Source code` 副本要能变干净）',
+        `还留着=${[existsSync(join(legacy, '.github')), existsSync(join(legacy, 'AGENTS.md'))].join(',')}`
+        + ` 输出=${r2.out.slice(0, 160)}`)
+      report(gone, '删除权限：旧表说过的照删')
     }
 
     // 八、同源校验：标签说 9.9.9，附件里却是另一个版本 —— 一个字节都不许写。
@@ -1194,6 +1307,30 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   const ok3 = r3.status !== 0 && /无法识别/.test(r3.stderr ?? '')
   check(ok3, '未知 flag 报错')
   report(ok3, '未知 flag：报错')
+
+  // `--scope=ci` 必须真的查 CI。
+  //
+  // 这个切面曾经是一个空块：用户说「帮我配 CI」，AI 按协议记下范围、交付时传
+  // `--scope=ci`，它回「全部齐备，可以交付」——项目一行 CI 都没有，门禁说齐了。
+  // 「这个切面不查它名字里那件事」比没有这个切面更坏：它让跳过看起来像通过。
+  {
+    const noCi = fixture('review-scope-ci', { 'package.json': '{"name":"t","version":"1.0.0"}\n' })
+    const r = review(noCi, '--scope=ci')
+    const caught = /CI 缺失/.test(r.stdout ?? '')
+    check(caught, '--scope=ci 在没有 CI 的项目上报缺（切面不能报绿但不查）',
+      (r.stdout ?? '').split('\n').filter((l) => /CI|结论/.test(l)).join(' | ').slice(0, 220))
+    report(caught, '切面 ci：真的查 CI')
+    // 同一件事的另一面：有 CI 时要报「齐」，不能一概否定。
+    const withCi = fixture('review-scope-ci-ok', {
+      'package.json': '{"name":"t","version":"1.0.0"}\n',
+      '.github/workflows/check.yml': 'on: push\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n',
+    })
+    const r2 = review(withCi, '--scope=ci')
+    const saysOk = /工作流有/.test(r2.stdout ?? '') && !/CI 缺失/.test(r2.stdout ?? '')
+    check(saysOk, '--scope=ci 在有 CI 时报「有」（不是一概否定）',
+      (r2.stdout ?? '').split('\n').filter((l) => /工作流|结论/.test(l)).join(' | ').slice(0, 220))
+    report(saysOk, '切面 ci：有则报有')
+  }
 
   // 凭据命中拦得住，确认为占位后 flag 消得掉（flag 本身就是用户答复的载体）。
   // 断言认的是 `[缺]` 那行而不是「凭据形状」四个字：被确认之后它会出现在 `[齐]` 里

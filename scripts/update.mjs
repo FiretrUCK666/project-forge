@@ -68,12 +68,12 @@
  * 退出码：0 = 无事或已更新；1 = 尝试更新但失败；2 = 用法错误。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { get as httpGet } from 'node:http'
 import { get as httpsGet } from 'node:https'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readFileMap } from './lib/text.mjs'
@@ -559,7 +559,11 @@ function durationText(ms) {
  */
 function pruneEmptyDirs(dir) {
   let current = dir
-  while (current !== SKILL_ROOT && current.startsWith(SKILL_ROOT)) {
+  // 边界判据用 `insideSkill`，**不写裸 `startsWith`**：`…/project-forge-secret` 以
+  // `…/project-forge` 开头，字符串前缀会把它当成「在之内」，于是向上收空目录时能走出
+  // 技能目录、删掉邻居。这正是 `insideSkill` 的注释里点名的那个陷阱——同一份判据不能
+  // 在这里再手写一遍走样的版本。
+  while (current !== SKILL_ROOT && insideSkill(current)) {
     try {
       if (!existsSync(current) || !statSync(current).isDirectory()) break
       if (readdirSync(current).length > 0) break
@@ -567,7 +571,9 @@ function pruneEmptyDirs(dir) {
     } catch {
       break
     }
-    current = dirname(current)
+    const up = dirname(current)
+    if (up === current) break
+    current = up
   }
 }
 
@@ -579,11 +585,39 @@ function pruneEmptyDirs(dir) {
  * 之外，把旁边的东西删掉或覆盖——那是这个工具能做的最坏的事，而且报告会把它说成「顺手
  * 清掉了包里不该有的文件」。判据是**解析之后**的路径边界，不是字符串前缀（`startsWith`
  * 在 `…/project-forge-secret` 这类同前缀目录上会误判为「在之内」）。
+ *
+ * **符号链接要按它指到的实际位置判，不能按它自己的位置判**：目录里任何一项换成链接之后，
+ * `…/project-forge/templates/readme.md` 这个名字仍然「在之内」，而真正的落点在目录之外。
+ * 不解析链接，整套边界判据在链接面前就是一句话的事。目标还不存在（要新建文件）时，
+ * 从最近的已存在祖先解析，再拼回剩下的相对段。
  */
+function resolveReal(p) {
+  let head = p
+  const rest = []
+  for (;;) {
+    try {
+      return join(realpathSync(head), ...rest.reverse())
+    } catch {
+      const up = dirname(head)
+      // 走到根还解析不了：交回调用方的边界判据去拒绝，不在这里兜。
+      if (up === head) return p
+      rest.push(basename(head))
+      head = up
+    }
+  }
+}
+
 function insideSkill(target) {
+  const root = resolve(SKILL_ROOT)
   const full = resolve(target)
-  if (full === SKILL_ROOT) return true
-  return full.startsWith(SKILL_ROOT.endsWith(sep) ? SKILL_ROOT : SKILL_ROOT + sep)
+  if (full === root) return true
+  const inByName = full.startsWith(root.endsWith(sep) ? root : root + sep)
+  if (!inByName) return false
+  // 名字在之内，还要看真实落点在不在之内。
+  const realRoot = resolveReal(root)
+  const realFull = resolveReal(full)
+  if (realFull === realRoot) return true
+  return realFull.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)
 }
 
 /**
@@ -645,6 +679,11 @@ function applyPackage(entries) {
   //
   // 候选集是**新旧两张表的并集**：新表管「现在该有什么」，旧表管「以前分发过什么」。
   // 只有并集才覆盖「旧版本有、新版本没有」这一类——那正是升级到新结构时唯一会残留的一类。
+  //
+  // 与下面「仓库自用」那一支的分工要说清：这里删的是**随包分发的普通文件**（旧版有、
+  // 新版没有），它本来就是这份 skill 的文件，删掉不会伤到使用者；那一支删的是
+  // 「这个包里根本不该出现的东西」，权限必须归旧副本自己那张表——两处的授权来源不同，
+  // 不能合成一个循环，否则「新包能删什么」这件事就跟着一起放开了。
   for (const name of [...new Set([...oldMap.shipped, ...map.shipped])]) {
     if (name.endsWith('/') || now.has(name)) continue
     const p = join(SKILL_ROOT, name)
@@ -659,8 +698,26 @@ function applyPackage(entries) {
     rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     return !existsSync(p)
   }
-  for (const name of [...new Set([...oldMap.repoOnly, ...map.repoOnly])]) {
+  // 删除权限只归**旧副本自己那张表**。
+  //
+  // 一张文件地图能陈述的只是一件事：「这份副本当初装进来时应该有什么」。新下载的那份包
+  // 没有资格说「你磁盘上这个文件该删」——它只说得出自己有什么。实测过：在包里把
+  // `my-notes.md`、`references/my-own-note.md` 写进「仓库里另有」表，更新完这三个文件
+  // 全部消失，报告还写着「顺手清掉了 3 个包里不该有的文件」。
+  //
+  // 换成旧表之后，「下成 Source code 的副本」这种情况照样清得掉：那时磁盘上的 SKILL.md
+  // 就是仓库里那一份，它自己就把 `.github/`、`AGENTS.md`、`scripts/dev/` 列在「仓库里另有」。
+  // 而新版本新增的排除项不会被误删——旧版本没分发过它，磁盘上那份只可能是使用者自己的。
+  for (const name of new Set(oldMap.repoOnly)) {
+    // 新版真的带了这个文件：那是刚写下去的，不是残留。
+    if (now.has(name)) continue
     const p = join(SKILL_ROOT, name)
+    // **边界判据必须在这里，而且是第一句**。`name` 来自包里的表格，不是本地可信数据：
+    // `../victim/` 这样的条目会让 `join` 解析到技能目录之外，而这一支走的是
+    // `rmSync(recursive: true)`——一个伪造的发布包就能删掉使用者磁盘上任意目录，
+    // 报告还会把它写成「顺手清掉了包里不该有的文件」。
+    // 现在只在这里判一次：不合格的条目连 `statSync` 都不碰。
+    if (!insideSkill(p)) { skipped.push(name); continue }
     try {
       const kind = name.endsWith('/') ? 'dir' : 'file'
       const hit = kind === 'dir' ? statSync(p, { throwIfNoEntry: false })?.isDirectory()
@@ -673,8 +730,10 @@ function applyPackage(entries) {
       // 删不掉就**不报**：它不影响使用，为它让整次更新失败不值得，但也不能谎报。
     }
   }
-  // 表里带 `../` 这种名字的：不删不写，报出来。它只会出现在「这一份不是它自称的东西」时。
-  for (const name of [...new Set([...oldMap.repoOnly, ...map.repoOnly])]) {
+  // 新包宣称是「仓库里另有」、而旧副本没这么说的那些：不删，但要报出来。
+  // 「不删」是因为权限在旧表；「要报」是因为这多半意味着这一份包不太对劲。
+  for (const name of map.repoOnly) {
+    if (oldMap.repoOnly.includes(name)) continue
     if (!insideSkill(join(SKILL_ROOT, name))) skipped.push(name)
   }
   // 空目录不再有用（新包里没有它），顺手收掉——只收空的，里面还有东西就留着。

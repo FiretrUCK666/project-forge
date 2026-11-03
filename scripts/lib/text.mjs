@@ -42,6 +42,45 @@ export function readTextFile(p) {
 }
 
 /**
+ * 按**严格 UTF-8** 读一份要写回去的文本。
+ *
+ * 为什么不能用 `readFileSync(p,'utf8')`：那是宽松解码，非 UTF-8 文件（GBK、UTF-16）
+ * 里的字节会被逐个换成 U+FFFD，然后整篇按 UTF-8 写回去——**原文不可恢复**，而脚本
+ * 还会报「已添加目录」、退出码 0。这是唯一一种不可恢复的损坏，所以宁可不写。
+ *
+ * 顺带嗅探 BOM：UTF-16/32 的 BOM 是明确信号，能给出比「解码失败」更具体的提示；
+ * UTF-8 的 BOM 要被**原样保留**，写回时补上，否则「标记之外一个字节都不动」是假话。
+ */
+export function readUtf8Strict(p) {
+  const buf = readFileSync(p)
+  if (buf.length >= 4) {
+    const [a, b, c, d] = [buf[0], buf[1], buf[2], buf[3]]
+    if ((a === 0xff && b === 0xfe && c === 0 && d === 0) || (a === 0 && b === 0 && c === 0xfe && d === 0xff)) {
+      return { error: 'UTF-32（带 BOM）' }
+    }
+  }
+  if (buf.length >= 2) {
+    const [a, b] = [buf[0], buf[1]]
+    if ((a === 0xff && b === 0xfe) || (a === 0xfe && b === 0xff)) return { error: 'UTF-16（带 BOM）' }
+  }
+  let text
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    const nul = buf.reduce((n, x) => n + (x === 0 ? 1 : 0), 0)
+    return {
+      error: nul > 0
+        ? `含 ${nul} 个 NUL 字节，看起来是 UTF-16（但缺 BOM）`
+        : '不是合法的 UTF-8（可能是 GBK 等本地编码）',
+    }
+  }
+  // BOM 要**从原始字节**判：TextDecoder 按规范会自己吃掉 UTF-8 的 BOM，
+  // 解出来的文本里已经没有它了——拿文本去判，结论永远是「没有 BOM」。
+  const hadBom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf
+  return { text: text.replace(/^\uFEFF/, ''), hadBom }
+}
+
+/**
  * 本文件是不是被**直接执行**（而不是被 import）。
  *
  * 判据不能用字面路径比较：`process.argv[1]` 保留调用方写下的写法，而

@@ -37,6 +37,21 @@ function git(args, cwd) {
   return (r.stdout ?? '').trim()
 }
 
+/**
+ * **标签指向的那次提交**——总述的唯一来源，单独取，不受 `--no-merges` 影响。
+ *
+ * 用 `git log -1` 而不是 `rev-list --parents` 再自己拼：合并提交的正文只有 `-1` 这一种
+ * 取法拿得到（`rev-list` 给的是父提交列表，不是正文）。字段分隔沿用同一套 `%s\x1f%b`��
+ * 让调用方的解析逻辑只有一份。
+ */
+function taggedCommit(tag, cwd) {
+  const raw = git(['log', '-1', `--format=%s\x1f%b`, `${tag}^{commit}`], cwd)
+  if (raw === undefined) return undefined
+  const cut = raw.indexOf('\x1f')
+  if (cut < 0) return { subject: raw, body: '' }
+  return { subject: raw.slice(0, cut), body: raw.slice(cut + 1) }
+}
+
 function usage() {
   return '用法：node scripts/draft-release-notes.mjs <标签> [输出文件]\n'
 }
@@ -105,16 +120,20 @@ function main() {
     compare = `[${prev}...${tag}](https://github.com/${repo}/compare/${range})`
   }
 
-  // 说明的唯一来源是**被标签指到的那次提交**（`git log` 按时间倒序，第一条就是它）。
-  // 发版那一步本来就要改 SKILL.md 的版本号，把面向使用者的总述写在那次提交的正文里
-  // 是最短的路：不需要新文件、新开关，也不需要谁记得在别处再写一遍。单条提交与多条
-  // 提交因此是同一个规则，不再分两套。
+  // 说明的唯一来源是**被标签指到的那次提交**。发版那一步本来就要改 SKILL.md 的版本号，
+  // 把面向使用者的总述写在那次提交的正文里是最短的路：不需要新文件、新开关，也不需要
+  // 谁记得在别处再写一遍。单条提交与多条提交因此是同一个规则，不再分两套。
+  //
+  // **不能拿 `commits[0]` 当它**：上面那次 `git log` 带了 `--no-merges`，用 PR 合并发版
+  // 时被标签指到的恰恰是合并提交，它被过滤掉了，于是总述会取自分支上某次提交的正文——
+  // 那次提交若碰巧有正文，`pf:needs-summary` 不会写，一份内容错位的稿子就会被当成
+  // 成品发出去。所以标签指向的提交**单独取一次**，不受 `--no-merges` 影响。
   //
   // 没有总述时不许冒充成品：写一行**给维护者**的标记，`release-notes.mjs` 见到它就拒绝
   // 发送，所以它永远不会出现在使用者看到的页面上。让「只有一行标题」的稿子直接发布，
   // 比让这次发版失败坏得多。
   const lines = [`## 这一版更新了什么、修复了什么`, '']
-  const head = commits[0]
+  const head = taggedCommit(tag, cwd)
   // 页面上有没有列出提交主题，决定「仅列最近 100 条」那句话成不成立。
   // 只有走「无总述」那支时才把主题铺在页面上；有总述时页面正文只写总述，
   // 一句提交都没列——那时再说「仅列最近 100 条」是凭空多出来的假话。

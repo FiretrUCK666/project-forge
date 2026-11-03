@@ -33,13 +33,13 @@
  * 退出码：0 = 已同步 / 无需同步；1 = --check 发现不同步；2 = 用法或文件错误。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
 // 入口判定按**真实路径**归一，经 junction / 符号链接调用也算直接执行——字面比较在
 // 那种调用下会**什么都不做并返回 0**，而「exit 0、零输出」会被调用方读成「目录已是
 // 最新」，那是本工具最不该给出的答案。
-import { isMainModule } from './lib/text.mjs'
+import { isMainModule, readUtf8Strict } from './lib/text.mjs'
 import { scanLines, fencedSpans, markerPositions } from './lib/markdown.mjs'
 import { tempPathFor, clearStaleTemps, reportTemps, writeAtomic } from './lib/fs-atomic.mjs'
 
@@ -274,8 +274,22 @@ function main() {
     // 读一次、判一次。标记状态异常时**停下不写**，并说清是什么、怎么手工修
     //（与 compose-agents 同一种做法：宁可不写，也不写坏）。
     let text
+    let hadBom
     try {
-      text = readFileSync(f, 'utf8').replace(/^\uFEFF/, '')
+      // **必须按严格 UTF-8 读**，不能 `readFileSync(f,'utf8')`：那是宽松解码，非 UTF-8
+      // 文件（GBK、UTF-16）里的每一个字节都会被替换成 U+FFFD，然后整篇按 UTF-8 写回去
+      // ——原文不可恢复，而脚本还会报「已添加目录」、退出码 0。实测一份 GBK 的 README
+      // 跑完只剩「锟斤拷」，内容 100% 丢失。写盘的入口只有一处，这一处不能是宽松的。
+      const read = readUtf8Strict(f)
+      if (read.error !== undefined) {
+        process.stderr.write(`${f}：读不出来——${read.error}。\n`
+          + '  **本脚本没有改动它。** 先把它转存为 UTF-8（不带 BOM 也可以）再重跑。\n')
+        return 2
+      }
+      text = read.text
+      // BOM 要**原样写回**：判据是「标记之外一个字节都不动」，而 BOM 属于正文之外
+      // 但属于文件——丢一个字节就是破了这条判据，且没有任何提示。
+      hadBom = read.hadBom
     } catch (error) {
       process.stderr.write(`${f}：读不出来——${error.message}\n  **本脚本没有改动它。**\n`)
       return 2
@@ -303,7 +317,7 @@ function main() {
           drifted += 1
           process.stdout.write(`${f}：**目录与标题不同步**（应为 ${items.length} 项）\n`)
         } else {
-          writeAtomic(f, next)
+          writeAtomic(f, hadBom ? `\uFEFF${next}` : next)
           process.stdout.write(`${f}：已刷新目录（${items.length} 项）\n`)
         }
         continue
@@ -345,7 +359,7 @@ function main() {
           drifted += 1
           process.stdout.write(`${f}：目录是手写的、还没纳入自动同步（${items.length} 项应生成）\n`)
         } else {
-          writeAtomic(f, next)
+          writeAtomic(f, hadBom ? `\uFEFF${next}` : next)
           process.stdout.write(`${f}：已把手写目录纳入自动同步（${items.length} 项）\n`)
         }
         continue
@@ -364,7 +378,7 @@ function main() {
         drifted += 1
         process.stdout.write(`${f}：**缺少目录**（${items.length} 节，建议加）\n`)
       } else {
-        writeAtomic(f, next)
+        writeAtomic(f, hadBom ? `\uFEFF${next}` : next)
         process.stdout.write(`${f}：已添加目录（${items.length} 项）\n`)
       }
     } catch (error) {

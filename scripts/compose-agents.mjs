@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
-import { normVersion, parseMarkerKeys, isMainModule, readTextFile } from './lib/text.mjs'
+import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
 // 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
@@ -88,34 +88,6 @@ function readProjectText(p) {
  *
  * 顺带嗅探 BOM：UTF-16/32 的 BOM 是明确信号，能给出比「解码失败」更具体的提示。
  */
-function readUtf8Strict(p) {
-  const buf = readFileSync(p)
-  if (buf.length >= 4) {
-    const [a, b, c, d] = [buf[0], buf[1], buf[2], buf[3]]
-    if ((a === 0xff && b === 0xfe && c === 0 && d === 0) || (a === 0 && b === 0 && c === 0xfe && d === 0xff)) {
-      return { error: 'UTF-32（带 BOM）' }
-    }
-  }
-  if (buf.length >= 2) {
-    const [a, b] = [buf[0], buf[1]]
-    if ((a === 0xff && b === 0xfe) || (a === 0xfe && b === 0xff)) return { error: 'UTF-16（带 BOM）' }
-  }
-  let text
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(buf)
-  } catch {
-    const nul = buf.reduce((n, x) => n + (x === 0 ? 1 : 0), 0)
-    return {
-      error: nul > 0
-        ? `含 ${nul} 个 NUL 字节，看起来是 UTF-16（但缺 BOM）`
-        : '不是合法的 UTF-8（可能是 GBK 等本地编码）',
-    }
-  }
-  // BOM 要**从原始字节**判：TextDecoder 按规范会自己吃掉 UTF-8 的 BOM，
-  // 解出来的文本里已经没有它了——拿文本去判，结论永远是「没有 BOM」。
-  const hadBom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf
-  return { text: text.replace(/^\uFEFF/, ''), hadBom }
-}
 
 /**
  * 判断文件处于什么状态。这是本脚本最关键的一次判断——四种状态的处理方式完全不同，

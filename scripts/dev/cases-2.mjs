@@ -840,6 +840,41 @@ group('[23] 目录同步：从标题生成、锚点算对、三种现状都能�
   const ok5 = !/## 目录/.test(readFileSync(join(short, 'README.md'), 'utf8')) && /不需要目录/.test(r5.stdout ?? '')
   check(ok5, '节数少于阈值时不加目录，并说明原因')
   report(ok5, '短 README：不加目录')
+
+  // ⑥ **非 UTF-8 的文件一个字节都不许动**。
+  //
+  //    宽松解码（readFileSync(p,'utf8')）会把 GBK / UTF-16 的每个字节换成 U+FFFD，
+  //    再整篇按 UTF-8 写回去——原文不可恢复，而脚本还会报「已添加目录」、退出码 0。
+  //    这是唯一一种不可恢复的损坏：写坏别的还能重跑，写坏这个只能从备份找回。
+  {
+    const gbkDir = fixture('toc-gbk', {})
+    const gbkPath = join(gbkDir, 'README.md')
+    // 「# 中文」+「## 一」的 GBK 编码：这些字节不是合法 UTF-8。
+    writeFileSync(gbkPath, Buffer.from([
+      0x23, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0a,
+      0x23, 0x23, 0x20, 0xd2, 0xbb, 0x0a,
+    ]))
+    const beforeBytes = readFileSync(gbkPath)
+    const r6 = toc(gbkDir)
+    const afterBytes = readFileSync(gbkPath)
+    const intact = beforeBytes.equals(afterBytes)
+    check(r6.status === 2 && intact, '非 UTF-8 文件：拒绝处理，且一个字节都没改',
+      `exit=${r6.status} 字节未变=${intact} 输出=${`${r6.stderr ?? ''}${r6.stdout ?? ''}`.slice(0, 160)}`)
+    report(r6.status === 2 && intact, '编码：非 UTF-8 不写坏')
+  }
+
+  // ⑦ **BOM 要原样写回**。判据是「标记之外一个字节都不动」，而 BOM 属于文件字节。
+  {
+    const bomDir = fixture('toc-bom', {
+      'README.md': `\uFEFF# x\n\n## 一\n\na\n\n## 二\n\nb\n\n## 三\n\nc\n\n## 四\n\nd\n\n## 五\n\ne\n`,
+    })
+    const r7 = toc(bomDir)
+    const bytes = readFileSync(join(bomDir, 'README.md'))
+    const kept = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+    check(r7.status === 0 && kept, '写回时保留 UTF-8 BOM（丢了就是动了标记之外的字节）',
+      `exit=${r7.status} BOM 前 3 字节=${[...bytes.slice(0, 3)].join(',')}`)
+    report(r7.status === 0 && kept, '编码：BOM 保留')
+  }
 }
 
 group('[50] 命令推导的四种空：每一种都要说得出「为什么空」')

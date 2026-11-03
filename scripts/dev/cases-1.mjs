@@ -786,6 +786,38 @@ if (!HAS_GIT) {
   check(used, '有正文时直接采用它，不再列提交主题', bodyText.slice(0, 160))
   report(used, '有总述：直接采用')
 
+  // 3b) **标签落在合并提交上时，总述要取合并提交自己的正文。**
+  //
+  //     这条是实测出来的高点：起草用的是 `git log --no-merges`，而用 PR 合并发版时被标签
+  //     指到的恰恰是合并提交，它被那句开关过滤掉了。于是总述会取到分支上某次提交的正文
+  //     ——那次若碰巧有正文，`pf:needs-summary` 不会写，一份内容错位的稿子会被当成成品
+  //     发出去：页面上的说明写的是分支改了什么，不是这一版对使用者意味着什么。
+  {
+    gitIn(repo, 'checkout', '-q', '-b', 'side')
+    writeFileSync(join(repo, 'side.txt'), 's\n', 'utf8')
+    gitIn(repo, 'add', '-A')
+    // 分支提交**故意带正文**：它是最容易被误当成总述的那一份。
+    gitIn(repo, ...ID, 'commit', '-m', '支线上的改动', '-m', '这是支线自己的说明，不是发版总述。')
+    gitIn(repo, 'checkout', '-q', 'master')
+    writeFileSync(join(repo, 'main.txt'), 'm\n', 'utf8')
+    gitIn(repo, 'add', '-A')
+    gitIn(repo, ...ID, 'commit', '-m', '主干上的另一处改动')
+    gitIn(repo, ...ID, 'merge', '--no-ff', 'side', '-m', 'release v0.4.0',
+      '-m', '这一版换掉了某个默认值，用的人需要知道新默认是什么。')
+    gitIn(repo, 'tag', 'v0.4.0')
+    const merged = join(ROOT, 'notes-merged.md')
+    const r4 = draft('v0.4.0', merged)
+    const mergedText = existsSync(merged) ? readFileSync(merged, 'utf8') : ''
+    const tookMerge = r4.status === 0 && mergedText.includes('这一版换掉了某个默认值')
+    check(tookMerge, '标签落在合并提交上时，总述取合并提交自己的正文',
+      mergedText.slice(0, 200))
+    report(tookMerge, '合并提交：总述取自它自己')
+    const notBranch = !mergedText.includes('这是支线自己的说明')
+    check(notBranch, '不误取分支提交的正文（那是最像、也最容易取错的一份）',
+      mergedText.slice(0, 200))
+    report(notBranch, '合并提交：不误取支线正文')
+  }
+
   // 4) 判据本身要能两面证伪：带标记的认出来、不带标记的放行。少了这一半，
   //    「拒绝发送」有可能是一句恒真的拒绝，而上面那条断言照样绿。
   check(needsSummary(bareText) && !needsSummary(bodyText),

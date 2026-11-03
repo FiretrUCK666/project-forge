@@ -269,7 +269,9 @@ skill 跑完一个项目之后，目标项目里会留着它的痕迹：标识�
 | 仓库里另有 | `AGENTS.md`、`CONTRIBUTING.md`、`.github/`、`.gitattributes`、`.gitignore`、`scripts/dev/` | 只服务本仓库 |
 
 - **排除靠一条结构规则**：`.gitattributes` 里 `/scripts/dev/` 整目录排除。新增自用脚本
-  放进 `scripts/dev/` 就行，**不需要改任何清单**——清单会随文件增加而失准，目录不会。
+  放进 `scripts/dev/` 就行，**不用改 `.gitattributes`**——清单会随文件增加而失准，目录不会。
+  但**文件地图与两份 README 的文件表仍要各登记一行**：那是给人读的索引，漏了它会红
+  （位置判据要求 `scripts/dev/` 的文件出现在「仓库里另有」）。
 - **两条门禁兜底**（都在 `scripts/dev/preflight.mjs` 里）：
   - **位置判据**：`scripts/` 顶层的脚本必须登记在文件地图的「用户包里有」，`scripts/dev/`
     的必须登记在「仓库里另有」；放错位置即红，并指出该放到哪里。

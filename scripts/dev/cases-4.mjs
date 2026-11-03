@@ -165,6 +165,65 @@ group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，�
   report(final.status === 0, '末尾：复位后回绿')
 }
 
+// ── [52] 账本登记：一次记多份，且全有或全无 ──────────────────────────────────
+//
+// 分成多次调用是账本机制最容易出错的地方：写 README 时记得调、写 CONTRIBUTING 时忘了，
+// 账本就少一条，交棒时那一份退化成按形状猜——而账本存在的唯一理由就是不再猜。
+// 更要紧的是**失败时不能留半套账**：账本看起来有内容，比它空着更坏。
+group('[52] 账本登记：多份一次记，失败时一份都不记')
+{
+  const dir = fixture('ledger-record', {})
+  for (const f of ['README.md', 'CONTRIBUTING.md', 'LICENSE']) {
+    writeFileSync(join(dir, f), `# ${f}\n`, 'utf8')
+  }
+  const compose = (...args) => spawnSync(process.execPath,
+    [join(SCRIPTS_DIR, 'compose-agents.mjs'), dir, ...args], { encoding: 'utf8', windowsHide: true })
+  const ledgerPath = join(dir, '.project-forge', 'ledger.json')
+  const recorded = () => {
+    if (!existsSync(ledgerPath)) return []
+    try {
+      return Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8').replace(/^\uFEFF/, ''))?.segments ?? {})
+    } catch { return [] }
+  }
+
+  // 一次给三份：账本里就该有三条。
+  const all = compose('--record', 'README.md', 'CONTRIBUTING.md', 'LICENSE')
+  const three = recorded()
+  check(all.status === 0 && three.length === 3,
+    '--record 一次给多份，全部入账（不必为每份各调一次）',
+    `exit=${all.status} 账本里是 ${JSON.stringify(three)}`)
+  report(all.status === 0 && three.length === 3, '多份登记：三份都在账本里')
+
+  // 含一份不存在的：整批拒绝，账本**一条都不写**。
+  rmSync(join(dir, '.project-forge'), { recursive: true, force: true })
+  const bad = compose('--record', 'README.md', 'MISSING.md', 'LICENSE')
+  const afterBad = recorded()
+  check(bad.status !== 0, '有一份不存在时整批失败（不静默只记一部分）',
+    `exit=${bad.status} 输出=${(bad.stderr ?? '').slice(0, 160)}`)
+  report(bad.status !== 0, '全有或全无：失败')
+  check(afterBad.length === 0, '失败时一个字节都没写（半套账比没有账更坏）',
+    `账本里是 ${JSON.stringify(afterBad)}`)
+  report(afterBad.length === 0, '全有或全无：账本没动')
+  check(/MISSING\.md/.test(bad.stderr ?? ''), '失败时说清是哪一份（否则要靠自己找）')
+  report(/MISSING\.md/.test(bad.stderr ?? ''), '全有或全无：说清缺哪份')
+
+  // 重复给 --record 与一次给多份等价。
+  rmSync(join(dir, '.project-forge'), { recursive: true, force: true })
+  const repeated = compose('--record', 'README.md', '--record', 'LICENSE')
+  const two = recorded()
+  check(repeated.status === 0 && two.length === 2,
+    '--record 可以重复给，与一次给多份等价',
+    `exit=${repeated.status} 账本里是 ${JSON.stringify(two)}`)
+  report(repeated.status === 0 && two.length === 2, '重复 --record：等价')
+
+  // 后面不跟值：用法错误，不许当成「没有要记的」静默通过。
+  const bare = compose('--record')
+  check(bare.status === 2 && /需要一个相对路径/.test(bare.stderr ?? ''),
+    '--record 后面不跟路径 → 用法错误（退出 2）',
+    `exit=${bare.status} ${(bare.stderr ?? '').slice(0, 120)}`)
+  report(bare.status === 2, '只给开关不给值：报用法错误')
+}
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

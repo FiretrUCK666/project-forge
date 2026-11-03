@@ -1073,25 +1073,37 @@ const LEDGER_SECTION_PREFIX = 'section:'
  * 不由本脚本生成。它们同样需要「这段字节是谁写的」的精确记录——否则交棒时
  * 只能靠形状猜，而「像」不等于「是」。
  *
- * 用法：`node scripts/compose-agents.mjs <项目> --record <相对路径>`
- * 在**写完那份文件之后**调用。它读当前内容、算哈希、记成 `whole` 落地。
+ * 用法：`node scripts/compose-agents.mjs <项目> --record <相对路径> [更多路径...]`
+ * 在**写完那些文件之后**调用。它读当前内容、算哈希、记成 `whole` 落地。
  *
  * 为什么由调用方显式记，而不是脚本自己接管写盘：这些产物要按项目事实取舍、
  * 要人读代码后写，本脚本写不了。**记账与写盘分离**，但归属仍然是确定的。
+ *
+ * **一次可以登记多份，而且要么全成、要么一份都不记**。分成多次调用是这套机制里最容易
+ * 出错的地方：写 README 时记得调、写 CONTRIBUTING 时忘了调，账本就少一条，交棒时那一份
+ * 退化成「按形状猜」——而账本机制存在的唯一理由就是不再猜。所以先**全部校验存在**，
+ * 有一份不在就整批拒绝并说清是哪一份，一个字节都不写：半套登记比不登记更坏，
+ * 因为它让账本看起来是有内容的。
  */
-function recordWholeFile(target, rel) {
-  const full = join(target, rel)
-  if (!existsSync(full)) {
-    process.stderr.write(`错误：${rel} 不存在，无法登记。先写文件再登记。\n`)
+function recordWholeFile(target, rels) {
+  const missing = rels.filter((rel) => !existsSync(join(target, rel)))
+  if (missing.length > 0) {
+    process.stderr.write(`错误：这些文件不存在，无法登记（一份都没记）：${missing.join('、')}。`
+      + '先写文件再登记。\n')
     return 1
   }
-  const content = readFileSync(full, 'utf8')
   // 账本读不出来时按「没有账本」处理：落盘只做加法，不会破坏任何东西。
   // 「读不出来」与「没有」的区别只在验收侧有后果，那里另有处理。
   const { ledger } = readLedger(target)
-  recordSegment(ledger, { file: rel.replace(/\\/g, '/'), id: LEDGER_WHOLE, landing: 'whole', content })
+  // 读全部内容**在写之前**：任何一份读失败都不该留下半套账。
+  const entries = rels.map((rel) => ({ rel, content: readFileSync(join(target, rel), 'utf8') }))
+  for (const { rel, content } of entries) {
+    recordSegment(ledger, { file: rel.replace(/\\/g, '/'), id: LEDGER_WHOLE, landing: 'whole', content })
+  }
   writeLedger(target, ledger)
-  process.stdout.write(`已登记：${rel}（整份文件，${Buffer.byteLength(content, 'utf8')} 字节）\n`)
+  for (const { rel, content } of entries) {
+    process.stdout.write(`已登记：${rel}（整份文件，${Buffer.byteLength(content, 'utf8')} 字节）\n`)
+  }
   return 0
 }
 
@@ -1139,15 +1151,21 @@ function parseArgs(argv) {
   let upgrade = false
   let budget = DEFAULT_BUDGET
   let help = false
-  /** 非空表示「只登记这份产物，不做别的」。 */
-  let record
+  /** 非空表示「只登记这些产物，不做别的」。 */
+  const record = []
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--record') {
-      const value = argv[i + 1]
-      if (typeof value !== 'string' || value === '') throw new Error('--record 需要一个相对路径。')
-      record = value
-      i += 1
+      // 一次吃到下一个 `--` 开关为止：`--record a.md b.md c.md`。
+      // 只收一个值的写法会**静默丢掉**多给的那些（实测 `--record a b` 只记了 a，
+      // 退出码还是 0）——调用方以为两份都记了，账本里少一条，而漏记的表现要等交棒才出现。
+      let took = 0
+      while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+        const value = argv[i + 1]
+        if (value !== '') { record.push(value); took += 1 }
+        i += 1
+      }
+      if (took === 0) throw new Error('--record 需要一个相对路径。')
       continue
     }
     if (arg === '--check') { check = true; continue }
@@ -1480,9 +1498,11 @@ function main(argv) {
       '             编排是权威，那一项只作提示）。超出字节预算同样返回 1。',
       '  --status   只报告现状，不写入',
       `  --budget N ${DEFAULT_BUDGET_NOTE}`,
-      '  --record <相对路径>  把一份由本 skill 落盘的产物记进账本（写完再调）。',
+      '  --record <相对路径> [更多路径...]',
+      '                      把由本 skill 落盘的产物记进账本（写完再调），一次可给多份。',
       '                      用途：README / CONTRIBUTING / CI 工作流 / LICENSE 这类由 AI',
       '                      照着模板写的文件。不记的话交棒时只能靠形状猜，而「像」不等于「是」。',
+      '                      多份是**全有或全无**：有一份不在就整批拒绝，一个字节都不写。',
       '',
       '  退出码：0 = 通过或无需改动；1 = --check 发现不一致（含超预算）；2 = 用法或文件错误。',
       '',
@@ -1493,9 +1513,9 @@ function main(argv) {
   const target = resolve(positional[0] ?? process.cwd())
   const agentsPath = join(target, 'AGENTS.md')
 
-  // --record：只登记一份产物，不做别的。这是「AI 照着模板写了 README / CI /
+  // --record：只登记这些产物，不做别的。这是「AI 照着模板写了 README / CI /
   // LICENSE，但要让它进账本」的唯一入口——那些文件不由本脚本写，却是本 skill 的产出。
-  if (record !== undefined) return recordWholeFile(target, record)
+  if (record.length > 0) return recordWholeFile(target, record)
 
   // 模板与条件表的一致性：放在**任何早退分支之前**。
   //

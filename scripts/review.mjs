@@ -658,6 +658,41 @@ function main(argv) {
   } // scope: license
   if (wants('ci')) { // scope: ci
   // 6. 工作流：CI 与自动发布要么落盘，要么用户明确说暂不要。
+  //
+  // 判据放在这个切面里，不放在 `ecosystem` 里：`--scope` 是 P0 记下的局部诉求在 P7 的
+  // 落地手段，用户说「帮我配个 CI」时 AI 会传 `--scope=ci`。判据若挂在 `ecosystem` 上，
+  // 那个切面就变成「报了绿但什么都没查」——对使用者来说，这比没这个切面更坏。
+  const auto = s.docs?.workflowAutomation
+  // 「读不到」与「真的没有」必须分开判。
+  //
+  // 合成一句话的后果：`.github/workflows` 存在但读不了时，勘察的 auto 缺席，这里落进
+  // 「CI 缺失」分支，于是让用户去确认「不要 CI」——而他明明已经有 CI。把「没读到」
+  // 说成「没有」，是这门语言里最容易犯也最难发现的一种错。
+  const wfUnreadable = s.docs?.workflowsUnreadable === true
+  if (wfUnreadable) {
+    pending.push('CI 状态读不出来：`.github/workflows` 存在但读不了。'
+      + '**这不代表没有 CI**——先确认目录权限，再重跑，不要据这一条去新建工作流')
+  } else if (auto === undefined || auto.files.length === 0) {
+    if (flags.has('--no-ci')) ok.push('无 CI（用户已确认暂不要）')
+    else pending.push('CI 缺失：问用户要不要检查自动化与自动发布（不要→加 --no-ci，不要默跳）')
+  } else {
+    ok.push(`工作流有（${auto.files.join('、')}）`)
+    if (auto.truncated === true && auto.hasReleaseJob !== true) {
+      pending.push(`工作流只读了前 ${auto.headLimit ?? '若干'} 字符：“无发布 job”不可信，大文件需手工确认后再定`)
+    }
+    if (s.artifacts?.publishableManifest !== undefined && s.artifacts?.private !== true) {
+      if (auto.hasReleaseJob) {
+        ok.push('发布 job 有')
+        // 英文回退确认：纯 --generate-notes 出来是英文模板（首版更是白卷）。
+        // 有 notes-file 模式即中文链；没有就必须问一句，不能默认英文可接受。
+        if (!auto.usesNotesFile && auto.usesGenerateNotes) {
+          pending.push('发布说明是英文模板模式：确认英文可接受，否则换 notes-file 中文链（见模板 TODO(2)）')
+        }
+      }
+      else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
+      else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')
+    }
+  }
   } // scope: ci
   if (wants('ecosystem')) { // scope: ecosystem
   const dshKinds = s.ecosystem?.kinds ?? []
@@ -745,37 +780,8 @@ function main(argv) {
   if (s.ecosystem?.skillDropped !== undefined) {
     missing.push(`本仓库的能力目录宿主不会加载：${s.ecosystem.skillDropped}`)
   }
-  const auto = s.docs?.workflowAutomation
-  // 「读不到」与「真的没有」必须分开判。
-  //
-  // 合成一句话的后果：`.github/workflows` 存在但读不了时，勘察的 auto 缺席，这里落进
-  // 「CI 缺失」分支，于是让用户去确认「不要 CI」——而他明明已经有 CI。把「没读到」
-  // 说成「没有」，是这门语言里最容易犯也最难发现的一种错。
-  const wfUnreadable = s.docs?.workflowsUnreadable === true
-  if (wfUnreadable) {
-    pending.push('CI 状态读不出来：`.github/workflows` 存在但读不了。'
-      + '**这不代表没有 CI**——先确认目录权限，再重跑，不要据这一条去新建工作流')
-  } else if (auto === undefined || auto.files.length === 0) {
-    if (flags.has('--no-ci')) ok.push('无 CI（用户已确认暂不要）')
-    else pending.push('CI 缺失：问用户要不要检查自动化与自动发布（不要→加 --no-ci，不要默跳）')
-  } else {
-    ok.push(`工作流有（${auto.files.join('、')}）`)
-    if (auto.truncated === true && auto.hasReleaseJob !== true) {
-      pending.push(`工作流只读了前 ${auto.headLimit ?? '若干'} 字符：“无发布 job”不可信，大文件需手工确认后再定`)
-    }
-    if (s.artifacts?.publishableManifest !== undefined && s.artifacts?.private !== true) {
-      if (auto.hasReleaseJob) {
-        ok.push('发布 job 有')
-        // 英文回退确认：纯 --generate-notes 出来是英文模板（首版更是白卷）。
-        // 有 notes-file 模式即中文链；没有就必须问一句，不能默认英文可接受。
-        if (!auto.usesNotesFile && auto.usesGenerateNotes) {
-          pending.push('发布说明是英文模板模式：确认英文可接受，否则换 notes-file 中文链（见模板 TODO(2)）')
-        }
-      }
-      else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
-      else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')
-    }
-  }
+  // CI 与发布 job 的判据在 `scope: ci` 里（见上方）。这里不再重复判一遍——
+  // 同一判据实现两处，迟早会一处改了一处没改，而「两处都报」比「一处报」更难读。
 
   } // scope: ecosystem
   if (wants('release')) { // scope: release

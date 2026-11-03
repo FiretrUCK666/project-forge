@@ -839,12 +839,14 @@ function checkScripts() {
   scan(dir, 'scripts/', 'shipped')
   // `scripts/lib/` 是**随包分发的公共模块层**，包里每个脚本都 import 它——它必须和顶层脚本
   // 过同一套判据。漏掉这一层时，「零依赖」与「每个脚本能解析」两条对最大的那几份实现代码
-  // 完全没有检查：`lib/` 里一个 `import chalk` 加一处不闭合的括号，自检照样 0 失败。
-  // 判据不能按目录名字面枚举——新增一层就要记得改一次，而忘记的表现是**静默**的。
-  // 这里放行哪些子目录由 `ALLOWED_SUBDIRS` 管，扫哪些由这一份清单管，两处都在本函数里，
-  // 新增一层时看得见。
+  // 完全没有检查：`lib/` 里一个外部依赖加一处不闭合的括号，自检照样 0 失败。
   scan(join(dir, 'lib'), 'scripts/lib/', 'shipped')
   scan(join(dir, 'dev'), 'scripts/dev/', 'repoOnly')
+  // `scripts/dev/lib/` 是自检的共享层（fixture 工厂、断言、计数器），同样是一层实现代码。
+  // 漏掉它时同样的洞会在那里重开一次：往 `harness.mjs` 隔壁放一个引了外部模块、括号还不闭合
+  // 的文件，全量自检 0 失败。**下面那张 `ALLOWED_SUBDIRS` 放行了哪个目录，这里就要扫哪个**——
+  // 「放行」与「检查」分成两份清单，漏一处就是静默的。
+  scan(join(dir, 'dev', 'lib'), 'scripts/dev/lib/', 'repoOnly')
 
   // 两个目录里都只允许 JavaScript。
   //
@@ -960,7 +962,7 @@ function checkBehavior({ skip = false, why = '' } = {}) {
     warn(`行为自检被跳过${reason}——这次只验了结构，行为判定没有被检查过。`)
     return
   }
-  // 行为自检要造几百个 fixture 实跑，实测约一分钟（四片并行）。**先说要等多久**：终端上
+  // 行为自检要造几百个 fixture 实跑，实测约一分钟（分片并行）。**先说要等多久**：终端上
   // 一个字，读的人会以为它卡死了（它没卡，只是这条命令本来就慢）。
   process.stdout.write('行为自检：正在造 fixture 实跑（分五片并行，约半分钟，中途没有输出）…\n')
   const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })

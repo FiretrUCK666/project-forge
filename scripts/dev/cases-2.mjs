@@ -1233,6 +1233,30 @@ group('[50] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给�
     report(caughtSyntax, 'lib 覆盖：语法错被抓')
   }
 
+  // `scripts/dev/lib/` 也是实现代码，也要过同一套判据。
+  //
+  // 这一层最容易漏：它是「自检工具的共享层」，看起来不属于产品，而它就在
+  // `ALLOWED_SUBDIRS` 的放行清单里。放行与检查分成两份清单时，漏掉一处是静默的——
+  // 往 `harness.mjs` 隔壁放一个引了外部模块、括号还不闭合的文件，全量自检 0 失败。
+  if (!HAS_GIT) {
+    skipGroup('[50] scripts/dev/lib 的覆盖范围', '本机没有 git')
+  } else {
+    const fakePkg = ['cha', 'lk'].join('')
+    const clone = skillClone('cov-devlib')
+    const badBody = ['imp', 'ort ', fakePkg, ' fro', 'm ', JSON.stringify(fakePkg), '\n',
+      'export const x = {\n'].join('')
+    writeFileSync(join(clone, 'scripts', 'dev', 'lib', 'widget.mjs'), badBody, 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone, { only: '脚本静态' })
+    const caughtExternal = /scripts\/dev\/lib\/widget\.mjs 引入了外部模块/.test(r.out)
+    check(caughtExternal, 'scripts/dev/lib/ 里的外部依赖被当成违规（放行的目录必须被检查）',
+      r.out.split('\n').filter((l) => /widget/.test(l)).join(' | ').slice(0, 240))
+    report(caughtExternal, 'dev/lib 覆盖：外部依赖被抓')
+    const caughtSyntax = /scripts\/dev\/lib\/widget\.mjs 有语法错误/.test(r.out)
+    check(caughtSyntax, 'scripts/dev/lib/ 里的语法错被抓')
+    report(caughtSyntax, 'dev/lib 覆盖：语法错被抓')
+  }
+
   // `preflightIn(clone, { only })` 的 `--only` 必须真的传下去。
   //
   // 传丢了不会变红，只会每次都跑全量——最安静的那种退化：调用点写着「只测这一项」，

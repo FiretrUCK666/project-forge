@@ -409,6 +409,91 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       report(/顺手清掉了/.test(r.out), '清理：报告里说了')
     }
 
+    // 五之二、旧版本分发过、新包里已经没有的文件：也要清掉。
+    //
+    // 「仓库里另有」那一支管的是「本来就不该有」，这一支管的是「**以前应该有**」：
+    // 一条文件在 1.0.0 里随包分发、后来搬进了 `scripts/lib/`，那么从 1.0.0 升到新版
+    // 之后，它在磁盘上既不在新包的表里、也不在「仓库里有」的表里——**两张表都认领不到它**。
+    // 判据只看新表时这一类一个都删不掉，副本会永久带着一个没人 import 的死模块。
+    {
+      const dir = makeCopy('prune-legacy', { source: source() })
+      // 造出「旧副本」：磁盘上有它，而且**旧副本自己的那张表里登记着它**。
+      // 两步都要——只往磁盘上放文件，那是使用者自己放的东西，本来就不该被碰。
+      writeFileSync(join(dir, 'scripts', 'legacy.mjs'), '#!/usr/bin/env node\nexport const LEGACY = 1\n', 'utf8')
+      const skillPath = join(dir, 'SKILL.md')
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace(
+        /^(\| `scripts\/survey\.mjs`.*)$/m,
+        '$1\n| `scripts/legacy.mjs` | 旧版遗留的模块 |'), 'utf8')
+      const registered = /scripts\/legacy\.mjs/.test(readFileSync(skillPath, 'utf8'))
+      check(registered, '前提：旧副本的表里登记了那个遗留文件（否则它只是使用者的东西）')
+      const mine = join(dir, 'my-notes.txt')
+      writeFileSync(mine, 'mine\n', 'utf8')
+      setWindow(dir, 0)
+      const r = await runUpdate(dir, '--quiet')
+      failWith(skillVersion(readFileSync(skillPath, 'utf8')) === '9.9.9',
+        '前提：遗留清理用例真的更新过一次', r)
+      check(!existsSync(join(dir, 'scripts', 'legacy.mjs')),
+        '旧版分发过、新版没有的文件被清掉（否则副本永久带着死模块）',
+        `/顺手清掉了/=${/顺手清掉了/.test(r.out)} 输出=${r.out.slice(0, 200)}`)
+      report(!existsSync(join(dir, 'scripts', 'legacy.mjs')), '清理：旧版遗留文件被清掉')
+      // 边界的另一半：**不在任何一张表里**的文件是使用者自己的，一个都不许删。
+      check(existsSync(mine), '旧表里没有的文件不动（清理只认两张表，不扫磁盘）')
+      report(existsSync(mine), '清理：使用者的文件保留')
+    }
+
+    // 五之三、节流的边界：`--quiet` 那条路一小时内不重复联网，人自己敲的要照旧答。
+    //
+    // 这条容易被写成「全都节流」——省下的正好是使用者**最有理由期待答案**的那一次：
+    // 他问「有没有新版」，而回答是「刚问过所以不问了」。
+    {
+      const dir = makeCopy('throttle', { source: source() })
+      setWindow(dir, 0)
+      resetStats()
+      await runUpdate(dir, '--quiet')
+      const firstApi = stats.api
+      check(firstApi >= 1, '前提：节流用例第一次真的联过网', `标签 ${stats.api} 次`)
+      // 紧接着再跑一次（同一个状态目录，距上次不到一小时）：不该再联网。
+      resetStats()
+      const quietAgain = await runUpdate(dir, '--quiet')
+      check(stats.api === 0 && stats.zip === 0, '一小时内再跑不重复联网（`--quiet` 那条路）',
+        `标签 ${stats.api} 次、整包 ${stats.zip} 次，输出=${quietAgain.out.slice(0, 160)}`)
+      report(stats.api === 0, '节流：一小时内不再联网')
+      check(quietAgain.out === '', '节流时不输出（自动那条路要安静）', JSON.stringify(quietAgain.out.slice(0, 160)))
+      report(quietAgain.out === '', '节流：安静')
+      // 人主动问的两条路都不受节流：它们要看到「有没有新版」的当次结论。
+      resetStats()
+      const asked = await runUpdate(dir, '--check')
+      check(stats.api >= 1 && /已是最新|有新版本/.test(asked.out),
+        '`--check` 不受节流（人主动问就要当次结论）',
+        `标签 ${stats.api} 次，输出=${asked.out.slice(0, 160)}`)
+      report(stats.api >= 1, '节流：--check 照旧联网')
+      resetStats()
+      const plain = await runUpdate(dir)
+      check(stats.api >= 1 && plain.out !== '', '不带参数时也不受节流（同样是人在问）',
+        `标签 ${stats.api} 次，输出=${plain.out.slice(0, 160)}`)
+      report(stats.api >= 1, '节流：默认模式照旧联网')
+    }
+
+    // 五之四、`PF_NO_UPDATE` 整个关掉自动检查：不联网、不写盘、不出声。
+    //     宿主禁止 skill 自改、离线构建机需要的是「一次都不许连」，而不是「少连几次」。
+    {
+      const dir = makeCopy('no-update', { source: source() })
+      setWindow(dir, 0)
+      resetStats()
+      const r = await runUpdate(dir, '--quiet', { env: { PF_NO_UPDATE: '1' } })
+      check(stats.api === 0 && stats.zip === 0, 'PF_NO_UPDATE=1 时一次网都不联',
+        `标签 ${stats.api} 次、整包 ${stats.zip} 次`)
+      report(stats.api === 0, '关掉开关：不联网')
+      check(r.status === 0 && r.out === '', 'PF_NO_UPDATE=1 时静默退出 0', JSON.stringify(r.out.slice(0, 160)))
+      report(r.status === 0 && r.out === '', '关掉开关：静默')
+      // 人主动问的那条路不受它管：一声不响地退出会让人以为开关坏了。
+      resetStats()
+      const asked = await runUpdate(dir, '--check', { env: { PF_NO_UPDATE: '1' } })
+      check(asked.out !== '', '`--check` 不受 PF_NO_UPDATE 管（人要的是真话）',
+        JSON.stringify(asked.out.slice(0, 160)))
+      report(asked.out !== '', '关掉开关：--check 照旧说话')
+    }
+
     // 八、同源校验：标签说 9.9.9，附件里却是另一个版本 —— 一个字节都不许写。
     //     不核对时的后果有两种，都很重：静默**降级**（装进旧版还说「已更新到最新版」），
     //     或白写一遍文件并占掉 24 小时窗口。判据是「两个版本都报出来 + 目录原样」。
@@ -1142,9 +1227,16 @@ group('[48] 包自洽性：包里的相对引用必须落在包内')
   // 反例一：随包分发的脚本导入了只在仓库里的脚本。
   // 这正是实测撞过的那一次：**文件集合完全正确**（39 个文件、两张表都对得上），
   // 而用户拿到的包里 compose-agents.mjs 一跑就报 ERR_MODULE_NOT_FOUND。
+  //
+  // 造夹具的方式是**加一行副作用导入**，不是把原有的相对导入改道。改道的写法会把
+  // `survey`、`authorMarkers`、`isNoteKey` 三个绑定一起指到一个不导出它们的模块上，
+  // 于是副本里 compose-agents.mjs 直接 SyntaxError——被验的 preflight 还没跑到包边界
+  // 那一步就已经崩了。断言可能照样通过（它只看退出码和文案），但同一趟里行为自检也崩，
+  // 那句「分片没有输出计数行」是**夹具造成的假故障**，不是被测代码的缺陷。
+  // 判据要的是「包里 import 了包外的东西」，一行副作用导入就精确表达了这件事。
   const compose = join(clone, 'scripts', 'compose-agents.mjs')
   const composeBefore = readFileSync(compose, 'utf8')
-  writeFileSync(compose, composeBefore.replace("from './survey.mjs'", "from './dev/preflight.mjs'"), 'utf8')
+  writeFileSync(compose, `${composeBefore}\nimport './dev/preflight.mjs'\n`, 'utf8')
   gitIn(clone, 'add', '-A')
   const brokenImport = preflightIn(clone, { only: "用户包边界" })
   const importCaught = brokenImport.status === 1 && /不在用户包里/.test(brokenImport.out)

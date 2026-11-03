@@ -1080,6 +1080,91 @@ group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
   report(ok5b, '模板放行的对照：真 .env 仍被报出')
   check(ok5, '.env.example 模板文件放行', JSON.stringify(files3))
   report(ok5, '模板文件：放行')
+
+  // 容器 / CI / root 用户下的主目录形状：`/root`、`/working_dir` 这些**不长得像主目录**，  // 却是那些机器上唯一会真泄漏的东西。判据不能只有「按惯例长得像」那两条静态形状——
+  // 那等于只在开发机上有效。这里改环境变量把主目录模拟成容器里的形状，看候选匹配器
+  // 认不认得出它。**不能用 `homedir()` 改**：它取的是系统事实，测试改不动它。
+  {
+    const probe = (home, body) => {
+      const dir = fixture(`leak-container-${home.replace(/\W/g, '')}-${randomBytes(2).toString('hex')}`, {
+        'src/config.ts': body,
+      })
+      const before = process.env.HOME
+      process.env.HOME = home
+      try {
+        return survey(dir).risks?.homePathLeaks ?? []
+      } finally {
+        if (before === undefined) delete process.env.HOME
+        else process.env.HOME = before
+      }
+    }
+    // 正例：容器里的主目录是 `/root`，源码里带着它 → 必须判成 leak。
+    const rootHits = probe('/root', "export const R = '/root/projects/thing'\n")
+    const okRoot = rootHits.some((h) => h.kind === 'leak')
+    check(okRoot, '主目录是 /root（容器）时，源码里的 /root/... 判为 leak',
+      JSON.stringify(rootHits.map((h) => [h.path, h.kind, h.sample])))
+    report(okRoot, '容器主目录：/root 判为 leak')
+    // 反例（证伪用）：前缀相同但不是同一个目录，不许误命中。
+    const nearHits = probe('/root', "export const R = '/rootDir/notahit'\n")
+    const okNear = nearHits.length === 0
+    check(okNear, '/rootDir 不被当成 /root 的子路径（右边界）',
+      JSON.stringify(nearHits.map((h) => [h.path, h.kind, h.sample])))
+    report(okNear, '右边界：/rootDir 不误命中')
+    // 另一种常见形状：`/working_dir`。
+    const wdHits = probe('/working_dir', "export const R = '/working_dir/demo/x'\n")
+    const okWd = wdHits.some((h) => h.kind === 'leak')
+    check(okWd, '主目录是 /working_dir（云沙箱）时同样认得出',
+      JSON.stringify(wdHits.map((h) => [h.path, h.kind, h.sample])))
+    report(okWd, '云沙箱主目录：/working_dir 判为 leak')
+  }
+}
+
+// ── [53] 多包仓库（workspace）：勘察出拓扑，才谈得上按包分派 ──────────────────
+//
+// `workspace` 这个字段被渲染进报告很久了，却没有任何断言验它——「产出了但没人验」
+// 正是最容易悄悄坏掉的那类。判据同时要有正反两面：多包仓库要认得出（正例），
+// 单包仓库不许凭空造出拓扑（反例，否则 AI 会去读一个不存在的子包）。
+group('[53] 多包仓库：认得出 workspace 拓扑，单包不硬造')
+{
+  const mono = fixture('ws-pnpm', {
+    'package.json': JSON.stringify({ name: 'root', private: true, version: '1.0.0' }, null, 2),
+    'pnpm-workspace.yaml': "packages:\n  - 'packages/*'\n",
+    'packages/a/package.json': JSON.stringify({ name: 'a', version: '1.0.0' }),
+    'packages/b/package.json': JSON.stringify({ name: 'b', version: '1.0.0' }),
+  })
+  const ws = survey(mono).workspace
+  const ok1 = ws?.declared === true
+  check(ok1, 'pnpm workspace 被认成多包仓库', JSON.stringify(ws))
+  report(ok1, '多包仓库：declared 为真')
+  const ok2 = Array.isArray(ws?.tools) && ws.tools.includes('pnpm')
+  check(ok2, '认得出是哪个工具声明了这个拓扑（tools 含 pnpm）', JSON.stringify(ws?.tools))
+  report(ok2, '多包仓库：tools 认得出来')
+  const ok3 = Array.isArray(ws?.packages) && ws.packages.includes('packages/a')
+    && ws.packages.includes('packages/b')
+  check(ok3, '两个子包都被列出来（按包分派要的正是这张表）', JSON.stringify(ws?.packages))
+  report(ok3, '多包仓库：子包列全')
+
+  // 反例：单包仓库不该凭空长出拓扑。`declared` 是「项目自己声明了」这个事实，
+  // 猜出来的拓扑会派生出错误的动作（去读不存在的子包、在根层跑子包才有的命令）。
+  const solo = fixture('ws-solo', {
+    'package.json': JSON.stringify({ name: 'solo', version: '1.0.0' }, null, 2),
+    'src/a.js': 'export const a = 1\n',
+  })
+  const soloWs = survey(solo).workspace
+  const ok4 = soloWs === undefined || soloWs.declared === false
+  check(ok4, '单包仓库不凭空造出 workspace 拓扑', JSON.stringify(soloWs))
+  report(ok4, '单包仓库：不硬造拓扑')
+  // 另一种声明方式：Cargo 的 `[workspace]`。判据不能只认 Node 那一种写法。
+  const cargo = fixture('ws-cargo', {
+    'Cargo.toml': '[workspace]\nmembers = ["crates/one", "crates/two"]\n',
+    'crates/one/Cargo.toml': '[package]\nname = "one"\nversion = "0.1.0"\n',
+    'crates/two/Cargo.toml': '[package]\nname = "two"\nversion = "0.1.0"\n',
+  })
+  const cw = survey(cargo).workspace
+  const ok5 = cw?.declared === true && (cw.tools ?? []).includes('cargo')
+    && (cw.packages ?? []).length >= 2
+  check(ok5, 'Cargo workspace 同样认得出（判据不绑生态）', JSON.stringify(cw))
+  report(ok5, 'Cargo workspace：认得出')
 }
 
 group('[20] 已有的 README：双语要认出来，结构不同不强行对齐')

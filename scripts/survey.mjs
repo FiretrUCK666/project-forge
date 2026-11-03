@@ -166,6 +166,44 @@ const HOME_PATH_PATTERNS = [
   { re: /[\\/](?:home|Users)[\\/][^\\/\s"'`]+/g, volume: 'posix' },
 ]
 
+/**
+ * 候选匹配器：静态形状 + **本机真实主目录**（动态）。
+ *
+ * 静态那两条只覆盖「按惯例长得像主目录」的写法，而主目录的位置不是惯例决定的：
+ * 容器里常是 `/root`，CI runner 是 `/runner/work/...`，云沙箱是 `/workspace`、
+ * `/working_dir/...`。这些机器上，**真正会泄漏的那个路径恰恰一条都不匹配**——
+ * 于是报告说「没有本机路径」，而它明明就写在源码里。漏报的方向是最坏的方向：
+ * 使用者读到的是一句「检查过了，很干净」。
+ *
+ * 所以把当前机器的主目录也当成一种形状。三条边界，缺一条就会从漏报翻成误报：
+ *   - **太短的路径不参与**：`/`、`C:` 这类前缀会命中全文一切，加了等于给每个文件报一条。
+ *     判据落在**归一化之后的长度**上，不落在「有几段」上：容器里的主目录就是 `/root`，
+ *     它只有一段，却是最该被认出来的那一个——按段数判会恰好在最需要它的环境里失效；
+ *   - **右边界**：`/root` 不能命中 `/rootDir`。用「分隔符或收尾」判，不用裸前缀；
+ *   - **大小写不敏感**：Windows 上同一路径有 `c:/users/x` 与 `C:/Users/x` 两种写法。
+ *
+ * `HOME_PATH_RE` 这个导出常量**保持静态**：它的读者是 preflight 的「仓库里不得出现构建机
+ * 私有路径」门禁，那里加上动态前缀会把 `/root` 这种通用词判成私有路径。
+ * 两条判据语义不同，共用一份实现就会有一边是错的。
+ */
+function homePathMatchers(realHomes) {
+  const out = [...HOME_PATH_PATTERNS]
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const home of realHomes ?? []) {
+    const flat = String(home).replace(/\\/g, '/').replace(/\/+$/, '')
+    // 判据是长度，不是段数：`/root` 只有一段，却是容器里最该被认出来的那一个。
+    // 门槛取 3 是为了挡住 `/`、`C:`、`C:/` 这类「命中一切」的前缀。
+    // 代价说清楚：主目录真的只有 `/a` 这种两字符路径时，这一台机器上不做动态匹配，
+    // 静态两条照旧生效。宁可少认一种极端环境，也不要给每个文件都报一条。
+    if (flat.length < 3) continue
+    out.push({
+      re: new RegExp(`${escape(flat)}(?=[\\\\/"'\`\\s]|$)`, 'gi'),
+      volume: 'own-home',
+    })
+  }
+  return out
+}
+
 /** 这些路径形状出现在测试与示例里是正常的，不该按「泄漏」处置。 */
 const TEST_PATH_RE = /(^|[\\/])(tests?|specs?|__tests__|fixtures?|examples?|samples?|__mocks__|e2e)([\\/]|$)|\.(spec|test)\.[a-z]+$/i
 
@@ -895,7 +933,7 @@ function scanContents(root, candidates, realHomes) {
       shaped.add(rel)
       break
     }
-    for (const { re } of HOME_PATH_PATTERNS) {
+    for (const { re } of homePathMatchers(realHomes)) {
       const m = text.match(re)
       if (m === null || m.length === 0) continue
       // 同一个文件里同一形状只报一处，避免一个测试文件刷出几十行

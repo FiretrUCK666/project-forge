@@ -178,8 +178,8 @@ AI）理解这个项目的最短路径；哪天仓库只剩本文和代码，也
 - 目录名必须与 frontmatter 的 `name` 逐字相同。
 - 本项目零依赖：`scripts/` 只用运行环境内置模块，**只用 JavaScript**。**不引入第三方
   依赖，也不引入第二个运行时**——它是被 AI 在各种陌生项目里调用的工具，不能要求先装
-  东西。README 对外承诺「Python 完全不需要」，那条承诺由 `preflight.mjs` 守住（它检查
-  `scripts/` 下只有 `.mjs`）。
+  东西。README 的「开始之前」明说运行要求只有 Node 一项、不要求任何别的东西，那条承诺
+  由 `preflight.mjs` 守住（它检查 `scripts/` 下只有 `.mjs`）。
 - **运行要求只有一项**：Node.js 16 或更高（下限来自 `String.prototype.replaceAll` 等
   语言特性）。**唯一的例外**是两个发布相关脚本（`release-notes.mjs`、`check-badges.mjs`）
   用了 Node 18 才有的全局 `fetch`，跑它们要 18+。`git` 可选——没有它的能力会如实报告
@@ -368,7 +368,7 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 1. **禁 emoji**：代码、注释、文案、文档、提交信息一律不得出现 emoji 字符。由
    `preflight.mjs` 自动检查（它按 Unicode 的图形字符类别判定，箭头一类的符号不受影响）。
 2. **零依赖**：`scripts/` 只允许 `node:` 前缀的内置模块。**只用 JavaScript**——不引入
-   第二个运行时（这条同样重要：README 对外承诺「Python 完全不需要」，多一个 `.py` 脚本
+   第二个运行时（这条同样重要：README 说运行要求只有 Node 一项，多一个 `.py` 脚本
    就让那句话变成假话，而使用者会照着自己的环境判断能不能用）。理由见「关键不变量」
    第 4 条。
 3. **不写死取值**：见「关键不变量」第 5 条。

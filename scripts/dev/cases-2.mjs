@@ -14,7 +14,7 @@ import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import {
-  evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, } from './preflight.mjs'
+  evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, looksLikeEntry, } from './preflight.mjs'
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
@@ -1173,6 +1173,98 @@ group('[49] 命令行用法：打错了必须说出来')
   const helpOk = help.status === 0 && /用法/.test(help.stdout ?? '')
   check(helpOk, '--help 退出 0 并打印用法', `exit=${help.status}`)
   report(helpOk, '--help 打印用法')
+}
+
+// ── [50] 脚本层的判据：入口形状与覆盖范围 ────────────────────────────────────
+//
+// 这一组测的都是**判据本身**，不是某个文件当前的结论：前者改了会被这里抓住，后者改了
+// 本来就该跟着变。判据必须是结构（「行首第 0 列的 `if (isMainModule(`」），不能是
+// 「文件里出现过这个词」——后者会把「拿它做单元断言的测试」和「拿它拼夹具的字符串」
+// 全都算成入口，于是纯模块平白多一条提示，而提示一多就没人读了。
+group('[50] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给真入口')
+{
+  const cases = [
+    ['真入口', 'if (isMainModule(import.meta.url, process.argv[1])) {\n  main()\n}\n', true],
+    ['缩进调用（测试里的单元断言）', "  check(isMainModule(metaUrl, realFile) === true, '判定')\n", false],
+    ['出现在字符串里（拼夹具）', "writeFileSync(p, `if (isMainModule(import.meta.url, process.argv[1])) {`)\n", false],
+    ['条件换行（仍然是入口）', 'if (\n  isMainModule(import.meta.url, process.argv[1])\n) {\n  main()\n}\n', true],
+    ['赋值而不是条件', 'const x = isMainModule(a, b)\n', false],
+  ]
+  for (const [label, text, want] of cases) {
+    const got = looksLikeEntry(text)
+    check(got === want, `入口判据：${label} → ${want ? '算入口' : '不算入口'}`, `实际 ${got}`)
+    report(got === want, `入口判据：${label}`)
+  }
+  // 判据在**真实文件**上的结论：仓库里两个拿它做断言的分片都不该被判成入口。
+  for (const rel of ['scripts/dev/cases-1.mjs', 'scripts/dev/cases-2.mjs']) {
+    const text = readFileSync(join(SKILL_ROOT, ...rel.split('/')), 'utf8')
+    const ok = text.includes('isMainModule(') && !looksLikeEntry(text)
+    check(ok, `${rel} 里有这个词但不判为入口（否则纯模块白白多一条提示）`)
+    report(ok, `真实文件：${rel} 不判为入口`)
+  }
+
+  // `scripts/lib/` 必须和顶层脚本过同一套判据。这一层是**随包分发的公共模块**，
+  // 包里的脚本全靠它；漏掉它时，那个目录里的外部依赖与语法错一条都查不出来。
+  //
+  // 夹具里的模块名**运行时拼**，而且不能拼成一个完整的 `import ... from '...'` 字面量：
+  // 这个分片自己也在被扫的范围内（零依赖门禁扫整个 `scripts/`），写进去的 import 语句
+  // 会被当成真依赖抓出来。拼法是「源码本身不含那条语句的形状」——先拼关键字，再拼名字。
+  if (!HAS_GIT) {
+    skipGroup('[50] scripts/lib 的覆盖范围', '本机没有 git')
+  } else {
+    const fakePkg = ['cha', 'lk'].join('')
+    const clone = skillClone('cov-lib')
+    // 三行分开写：单看每一行都不构成外部依赖，拼起来才是一句 import。
+    const badBody = ['imp', 'ort ', fakePkg, ' fro', 'm ', JSON.stringify(fakePkg), '\n',
+      'export const x = {\n'].join('')
+    writeFileSync(join(clone, 'scripts', 'lib', 'bad.mjs'), badBody, 'utf8')
+    const skillPath = join(clone, 'SKILL.md')
+    writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace(
+      /^(\| `scripts\/lib\/ledger\.mjs`[^\n]*)$/m,
+      '$1\n| `scripts/lib/bad.mjs` | 测试用 |'), 'utf8')
+    gitIn(clone, 'add', '-A')
+    const r = preflightIn(clone, { only: '脚本静态' })
+    const caughtExternal = /scripts\/lib\/bad\.mjs 引入了外部模块/.test(r.out)
+    check(caughtExternal, 'scripts/lib/ 里的外部依赖被当成违规（这一层也随包分发）',
+      r.out.split('\n').filter((l) => /bad\.mjs/.test(l)).join(' | ').slice(0, 240))
+    report(caughtExternal, 'lib 覆盖：外部依赖被抓')
+    const caughtSyntax = /scripts\/lib\/bad\.mjs 有语法错误/.test(r.out)
+    check(caughtSyntax, 'scripts/lib/ 里的语法错被抓（这一层的错误同样让整包不可用）')
+    report(caughtSyntax, 'lib 覆盖：语法错被抓')
+  }
+
+  // `preflightIn(clone, { only })` 的 `--only` 必须真的传下去。
+  //
+  // 传丢了不会变红，只会每次都跑全量——最安静的那种退化：调用点写着「只测这一项」，
+  // 实际跑的是全部，于是「这一组只验结构」这句话成了假话，而它慢得让人不想改测试。
+  //
+  // 判据用 `--timing` 的分项表：它逐条列出**这一趟实际跑了哪几步**。这是唯一干净的
+  // 观察点——用「某句话出现了」判不行，因为 `--only` 只跳过三步昂贵项，其余步骤
+  // （包括 README 目录、数量自称）在两种模式下**都会跑**，拿它们做判据两边都成立。
+  if (!HAS_GIT) {
+    skipGroup('[50] preflightIn 的参数透传', '本机没有 git')
+  } else {
+    const clone = skillClone('ol-passthrough')
+    const runWith = (...a) => spawnSync(process.execPath,
+      [join(clone, 'scripts', 'dev', 'preflight.mjs'), ...a],
+      { encoding: 'utf8', windowsHide: true }).stdout ?? ''
+    const gated = preflightIn(clone, { only: '用户包边界' })
+    const named = /用户包边界/.test(gated.out)
+    check(named, 'preflightIn 传了 --only：点名的那一步真的跑了', gated.out.slice(0, 200))
+    report(named, '参数透传：点名的那一步跑了')
+    // 前提：全量里那三步真的在（否则「跳过」这条判据没有对象）。
+    const fullTiming = runWith('--no-behavior', '--timing')
+    const heavyRan = ['脚本静态', '脚本实跑'].every((l) => new RegExp(`\\d+  ${l}`).test(fullTiming))
+    check(heavyRan, '前提：全量里那几步昂贵检查真的会跑（下面才算得准）')
+    // 判据：传了 --only 之后，那几步不该出现在分项表里。
+    const gatedTiming = preflightIn(clone, { only: '用户包边界' })
+    check(gatedTiming.out !== '' && /用户包边界/.test(gatedTiming.out),
+      '前提：带 --only 那一趟有输出可用')
+    const skipped = !/脚本实跑/.test(gatedTiming.out) && !/保鲜标记/.test(gatedTiming.out)
+    check(skipped, 'preflightIn 传了 --only：没点名的重步骤没跑（否则这组每跑一次都是全量）',
+      gatedTiming.out.split('\n').filter((l) => /脚本实跑|保鲜标记/.test(l)).join(' | ').slice(0, 200))
+    report(skipped, '参数透传：没点名的重步骤没跑')
+  }
 }
 
 // ---- 分片收尾 ----

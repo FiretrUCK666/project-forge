@@ -265,8 +265,14 @@ export function preflightIn(dir, opts = {}) {
   //
   // 极少数用例要验「哑弹自检会不会被抓」——那条判据本身就是「preflight 真的跑了
   // 行为自检并识破它」。那一处显式传 { behavior: true }，并接受它慢。
+  //
+  // `opts.only` 必须真的传下去：各组只关心自己那一两项，点名就是要**跳过**那三步昂贵
+  // 且无关的检查（「脚本静态」「脚本实跑」「保鲜标记」，合计约占全量九成）。传丢了不会
+  // 变红，只会每次都跑全量——最安静的那种退化：调用点写着「只测这一项」，实际跑的是全部。
+  // 实测同一份副本：全量 6.3 秒，点名 0.7 秒。
   const args = [join(dir, 'scripts', 'dev', 'preflight.mjs')]
   if (opts.behavior !== true) args.push('--no-behavior')
+  if (typeof opts.only === 'string' && opts.only.trim() !== '') args.push(`--only=${opts.only.trim()}`)
   const r = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true })
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }

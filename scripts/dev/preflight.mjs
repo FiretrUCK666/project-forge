@@ -780,6 +780,22 @@ export function externalModules(text) {
   )
 }
 
+/**
+ * 这个文件看起来是不是一个**可执行入口**（而不是被 import 的模块）。
+ *
+ * 判据是**顶层锚定**的那一行 `if (isMainModule(`：入口的写法只有这一种形状——行首第 0 列，
+ * 条件里第一件事就是它。而「文件里出现过这个词」不是判据：测试分片拿它做单元断言
+ * （`check(isMainModule(...) === true, ...)`）、拿它拼进字符串当夹具，都会因为这个词
+ * 出现过而被认成入口，于是纯模块白白多出一条提示。提示多了，人会学会忽略它——
+ * 那时它真正要说的那一次也一起被忽略了。
+ *
+ * 导出来是为了让断言能**直接测判据本身**，而不必靠造一个带坏 shebang 的文件再读输出：
+ * 判据改了、断言跟着改，两者不会各说各话。
+ */
+export function looksLikeEntry(text) {
+  return /^if\s*\(\s*isMainModule\s*\(/m.test(text)
+}
+
 function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
@@ -793,8 +809,7 @@ function checkScripts() {
     const text = readText(p)
     // shebang 只对**可执行入口**有意义。纯模块（只被 import、从不直接跑）加了它是噪音，
     // 不加它也不影响任何事——按「是不是入口」判，而不是按「在不在 scripts/ 下」判。
-    // 判据：文件里有 `isMainModule(...)` 说明它自己处理命令行调用，那就是入口。
-    if (!text.startsWith('#!/usr/bin/env node') && /isMainModule\s*\(/.test(text)) {
+    if (!text.startsWith('#!/usr/bin/env node') && looksLikeEntry(text)) {
       warn(`${rel} 看起来是入口（有命令行处理），但没有 node shebang。`)
     }
     if (statSync(p).size < 200) fail(`${rel} 内容异常短。`)
@@ -822,6 +837,13 @@ function checkScripts() {
     }
   }
   scan(dir, 'scripts/', 'shipped')
+  // `scripts/lib/` 是**随包分发的公共模块层**，包里每个脚本都 import 它——它必须和顶层脚本
+  // 过同一套判据。漏掉这一层时，「零依赖」与「每个脚本能解析」两条对最大的那几份实现代码
+  // 完全没有检查：`lib/` 里一个 `import chalk` 加一处不闭合的括号，自检照样 0 失败。
+  // 判据不能按目录名字面枚举——新增一层就要记得改一次，而忘记的表现是**静默**的。
+  // 这里放行哪些子目录由 `ALLOWED_SUBDIRS` 管，扫哪些由这一份清单管，两处都在本函数里，
+  // 新增一层时看得见。
+  scan(join(dir, 'lib'), 'scripts/lib/', 'shipped')
   scan(join(dir, 'dev'), 'scripts/dev/', 'repoOnly')
 
   // 两个目录里都只允许 JavaScript。

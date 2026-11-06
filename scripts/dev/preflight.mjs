@@ -140,8 +140,11 @@ const MAX_TEXTLESS_BYTES = 256 * 1024
 
 /** SKILL.md 之外允许存在的顶层条目。多出来的东西要有人解释它为什么在这。 */
 const ALLOWED_TOP_LEVEL = new Set([
-  'SKILL.md', 'AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'LICENSE',
-  'references', 'templates', 'scripts', 'assets', '.github', '.gitignore', '.gitattributes', '.git',
+  'SKILL.md', 'AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'RELEASING.md', 'LICENSE',
+  // `docs/` 放本仓库自己的发布说明：它是这个项目的版本历史，不进用户包
+  // （`.gitattributes` 里整目录排除，包边界判据会双向核对这一点）。
+  'references', 'templates', 'scripts', 'assets', 'docs',
+  '.github', '.gitignore', '.gitattributes', '.git',
 ])
 
 const failures = []

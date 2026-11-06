@@ -358,19 +358,20 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
     `own=${ownTmp?.blocks} other=${otherTmp?.blocks} blocking=${j9.blocking}`)
   report(tmpOk, '临时文件：分清是谁的')
 
-  // ── 10) 发布说明草稿：可排除，且不挡验收 ──
-  // 草稿里的 needs-summary 标记不单独报：文件名已经认出它是草稿了，再报一次就是
-  // 把同一个文件数两遍，而两处的说法还不一样。
+  // ── 10) 骨架标记出现在项目自己的说明文件里：报出来、计入不干净、标疑似 ──
+  // 那个标记正常只存在于「还没写完的那一份说明」里。它出现在目标项目，可能说明有人
+  // 把一份没写完的说明从别处搬了过来——机器判不出是有意还是无意，所以报出来交给人，
+  // 而不是当成正常内容放过去。
   const draft = fixture('handoff-draft', {
-    'v0.9.1-notes.md': '# 草稿\n\n<!-- pf:needs-summary 缺总述 -->\n',
+    'docs/release-notes/v0.9.1.md': '# v0.9.1\n\n<!-- pf:needs-summary 这一段还没写 -->\n',
   })
   const j10 = handoffJson(draft, '--scan')
-  const draftHits = every(j10.groups).filter((f) => f.path === 'v0.9.1-notes.md')
-  const draftOk = draftHits.length === 1 && draftHits[0].kind === 'notes-draft'
-    && draftHits[0].blocks === false && j10.blocking === 0 && j10.clean === true
-  check(draftOk, '发布说明草稿：只报一次、不计入 blocking（用户可以决定保留）',
-    `命中 ${draftHits.length} 次：${draftHits.map((f) => f.kind).join('、')}`)
-  report(draftOk, '发布说明草稿：可排除')
+  const draftHits = every(j10.groups).filter((f) => f.path === 'docs/release-notes/v0.9.1.md')
+  const draftOk = draftHits.length === 1 && draftHits[0].kind === 'needs-summary'
+    && draftHits[0].blocks === true && draftHits[0].suspect === true && j10.blocking === 1
+  check(draftOk, '说明文件里的骨架标记：报一次、标疑似、计入不干净',
+    `命中 ${draftHits.length} 次：${draftHits.map((f) => `${f.kind}/${f.blocks}/${f.suspect}`).join('、')}`)
+  report(draftOk, '骨架标记：报出来并拦住')
 
   // ── 11) 注入中断的四种控制标记：各报各的名字 ──
   const ctrl = fixture('handoff-control', {
@@ -1037,6 +1038,54 @@ group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC �
   report(okC1, 'Release 形状：问得住')
 }
 
+group('[54] 发版规范：有发布 job 却没规范时问一句，规范在就不再问')
+{
+  // 这条待问的判据是「工作流会去某个固定路径取说明文件」——那个路径总得有个权威出处。
+  // 判据挂在「发布 job 存在」上，**不挂在「有没有 RELEASING.md」上**：从没配过自动化的
+  // 项目没有这个问题，问它只会多一条无用待问。所以两面都要断言。
+  const rv = (dir, ...a) => spawnSync(process.execPath,
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const out = (d, ...a) => rv(d, ...a).stdout ?? ''
+  const base = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci']
+  const releaseWf = 'name: release\non:\n  push:\n    tags: ["v*"]\n'
+    + 'jobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n'
+    + '      - run: gh release create "$TAG" --notes-file notes.md\n'
+    + '        env:\n          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}\n'
+
+  // 正面：有发布 job、没有发版规范 → 待问。
+  const noSpec = fixture('spec-nospec', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/release.yml': releaseWf,
+  })
+  const asked = /没有发版规范/.test(out(noSpec, ...base))
+  check(asked, '有发布 job 而无发版规范 → 待问', out(noSpec, ...base).split('\n')[0])
+  report(asked, '发版规范：问得住')
+
+  // 出路一：加 flag 确认「说明的位置自己记」。
+  const flagged = !/没有发版规范/.test(out(noSpec, ...base, '--no-release-spec'))
+  check(flagged, '加 --no-release-spec 消掉这条待问（用户确认现状可接受）')
+  report(flagged, '发版规范：flag 消得掉')
+
+  // 出路二：补一份 RELEASING.md。
+  const withSpec = fixture('spec-with', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/release.yml': releaseWf,
+    'RELEASING.md': '# 发版规范\n\n说明写在 docs/release-notes/<标签>.md。\n',
+  })
+  const quiet = !/没有发版规范/.test(out(withSpec, ...base))
+  check(quiet, '有发版规范 → 不再问')
+  report(quiet, '发版规范：有就不问')
+
+  // 反侧：没有发布 job 的项目不该被问——那条判据挂在发布链路上，不是挂在项目上。
+  const noJob = fixture('spec-nojob', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n',
+  })
+  const notAsked = !/没有发版规范/.test(out(noJob, ...base))
+  check(notAsked, '没有发布 job → 不问发版规范（判据挂在链路上，不挂在项目上）')
+  report(notAsked, '发版规范：不误报')
+}
+
 group('[40] 保鲜节标题：编号与括注是装饰，不该让专章判成缺节')
 {
   // 专章模板的骨架写的是 `## 八、事实来源（必填）`：编号让它在文件里定位得到，括注提醒
@@ -1162,39 +1211,57 @@ group('[24] 工作流自动化现状：有无发布 job、用没用 Secrets 要�
   report(okEn, '英文模板：待问，不默过')
 }
 
-group('[26] 起草发布说明：中文提交即中文说明，无上一版不交白卷')
+group('[26] 发布说明的发送端：文件式说明，空壳与骨架都发不出去')
 {
-  if (!HAS_GIT) {
-    skipGroup('[26] 起草发布说明', '环境里没有 git')
-  } else {
-    const draft = (dir, ...a) => spawnSync(process.execPath,
-      [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), ...a], { encoding: 'utf8', cwd: dir })
-    const repo = fixture('draft-repo', { 'README.md': '# x\n' })
-    for (const args of [['init', '-q'], ['config', 'user.name', 'T'],
-      ['config', 'user.email', 't@e.com'], ['add', '-A'], ['commit', '-q', '-m', '中文首版']]) {
-      spawnSync('git', args, { cwd: repo })
-    }
-    spawnSync('git', ['tag', 'v9.9.1'], { cwd: repo })
-    writeFileSync(join(repo, 'CHANGE.txt'), 'more\n', 'utf8')
-    for (const args of [['add', '-A'], ['commit', '-q', '-m', '中文第二版']]) {
-      spawnSync('git', args, { cwd: repo })
-    }
-    spawnSync('git', ['tag', 'v9.9.2'], { cwd: repo })
-
-    const r1 = draft(repo, 'v9.9.2', join(repo, 'notes.md'))
-    const t1 = existsSync(join(repo, 'notes.md')) ? readFileSync(join(repo, 'notes.md'), 'utf8') : ''
-    const ok1 = r1.status === 0 && /中文第二版/.test(t1) && !/中文首版/.test(t1)
-    check(ok1, '区间提交逐条列出，不含上一版之前', t1.split('\n')[0])
-    report(ok1, '区间正确：只含本版提交')
-    const ok2 = /完整改动/.test(t1)
-    check(ok2, '带完整改动对比行')
-    report(ok2, '对比行：有')
-
-    const r2 = draft(repo, 'v0.0.0-nope', join(repo, 'bad.md'))
-    const ok3 = r2.status !== 0 && /不存在/.test(r2.stderr ?? '')
-    check(ok3, '不存在的标签拒绝并指路（先打标签）')
-    report(ok3, '坏标签：拒绝')
+  // 这一组测的是**发送前的三道门**，全部在联网之前返回，所以不需要凭据也不需要仓库。
+  //
+  // 说明的来源只有一个：版本库里的那一个文件。所以「文件不存在」「文件是空的」
+  // 「文件还是骨架」都必须当场停住——机器只要有一处放行，发布页上就会多一份空壳，
+  // 而发布页是给使用者看的，它一经发布就很难收回。
+  const send = (file) => spawnSync(
+    process.execPath,
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), 'v9.9.2', file, '--repo', 'owner/name'],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: 'fixture-token-not-used' } },
+  )
+  const dir = fixture('release-notes', {})
+  const write = (name, text) => {
+    const p = join(dir, name)
+    writeFileSync(p, text, 'utf8')
+    return p
   }
+
+  // 1) 文件不存在：发版 job 最常见的那种失败（说明忘了提交推送）。
+  const absent = send(join(dir, 'no-such-notes.md'))
+  check(absent.status === 2 && /找不到说明文件/.test(absent.stderr ?? ''),
+    '说明文件不存在 → 拒绝并指出缺的是哪个文件', (absent.stderr ?? '').split('\n')[0])
+  report(absent.status === 2, '缺文件：拒绝')
+
+  // 2) 空文件：只有标题、正文没写，同样是没写完。
+  const empty = send(write('empty.md', '   \n\n'))
+  check(empty.status === 2 && /空的/.test(empty.stderr ?? ''),
+    '说明文件是空的 → 拒绝', (empty.stderr ?? '').split('\n')[0])
+  report(empty.status === 2, '空文件：拒绝')
+
+  // 3) 骨架：章节标题在、内容一句没写，还留着发版规范给的骨架标记。
+  const shell = send(write('shell.md', '# v9.9.2\n\n## 这一版更新了什么、修复了什么\n\n'
+    + '<!-- pf:needs-summary 这一段还没写 -->\n'))
+  const shellRefused = shell.status === 2 && /还是骨架/.test(shell.stderr ?? '')
+  check(shellRefused, '骨架说明（留着未填充的标记）→ 拒绝', (shell.stderr ?? '').split('\n')[0])
+  report(shellRefused, '骨架：拒绝')
+
+  // 4) 判据本身要能两面证伪：少了这一半，「拒绝骨架」有可能是一句恒真的拒绝。
+  const done = needsSummary('正文\n') === false && needsSummary('<!-- pf:needs-summary -->') === true
+  check(done, '「还是骨架」的判据两面都分得清（带标记认出、不带标记放行）')
+  report(done, '判据：两面都分得清')
+
+  // 5) 写好的说明必须能走到联网那一步（在假凭据下因网络/认证失败是预期的，
+  //    关键是它**不再**被前面三道门拦住）。缺少这一条，前三条可以靠「永远拒绝」满足。
+  const ready = write('ready.md', '# v9.9.2\n\n## 这一版更新了什么、修复了什么\n\n'
+    + '导出报表不再缺最后一页。\n')
+  const passed = send(ready)
+  check(passed.status !== 2, '写好的说明不在发送前的三道门里被拦下（能走到真正发送那一步）',
+    `exit=${passed.status}`)
+  report(passed.status !== 2, '成品：过了发送前的门')
 }
 
 group('[45] 勘察吐出的 kind 必须落在值域内：词表外当场红，不等真实项目踩到')

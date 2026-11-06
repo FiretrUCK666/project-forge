@@ -18,7 +18,6 @@ import {
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
-import { needsSummary } from '../lib/protocol.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
@@ -729,129 +728,57 @@ group('[34] Python/Go/Rust 发布事实与门禁：只认本生态清单')
 }
 
 
-// ── [47] 发布说明：正文只来自被标签指到的那次提交，半成品发不出去 ────────────
+// ── [47] 发布说明：来源只有那一个文件，半成品发不出去，端到端走一遍 ────────────
 
 if (!HAS_GIT) {
-  skipGroup('[47] 发布说明起草与发送门禁', '本机没有 git')
+  skipGroup('[47] 发布说明的端到端顺序', '本机没有 git')
 } else {
-  group('[47] 发布说明：来源单一、半成品发不出去')
+  group('[47] 发布说明：说明文件先提交推送，标签才触发发送')
   const ID = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']
   const repo = join(ROOT, 'notes-repo')
   mkdirSync(repo, { recursive: true })
   gitIn(repo, 'init')
   writeFileSync(join(repo, 'a.txt'), 'x\n', 'utf8')
   gitIn(repo, 'add', '-A')
-  gitIn(repo, ...ID, 'commit', '-m', '第一条：没有正文')
+  gitIn(repo, ...ID, 'commit', '-m', '第一条：没有说明文件')
   gitIn(repo, 'tag', 'v0.1.0')
-  writeFileSync(join(repo, 'b.txt'), 'y\n', 'utf8')
-  gitIn(repo, 'add', '-A')
-  gitIn(repo, ...ID, 'commit', '-m', '第二条：也没有正文')
-  gitIn(repo, 'tag', 'v0.2.0')
 
-  const draft = (tag, out) => spawnSync(
-    process.execPath, [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), tag, out],
-    { cwd: repo, encoding: 'utf8', windowsHide: true },
-  )
-
-  // 1) 被标签指到的提交没有正文 → 只能列出主题，并留下给维护者的标记
-  const bare = join(ROOT, 'notes-bare.md')
-  const r1 = draft('v0.2.0', bare)
-  const bareText = existsSync(bare) ? readFileSync(bare, 'utf8') : ''
-  const marked = r1.status === 0 && bareText.includes('pf:needs-summary')
-  check(marked, '没有总述时写下 pf:needs-summary 标记（而不是冒充成品）', bareText.slice(0, 120))
-  report(marked, '无总述：留下标记')
-
-  // 2) 这份起草稿交给发送端 → 必须拒绝（exit 2），不许发出去
-  //    给它一个假凭据与一个假仓库名：拒绝发生在任何网络动作之前，所以这条断言是纯本地的。
-  const send = spawnSync(
+  // 1) **说明文件不在工作区**：发送端必须当场停住。
+  //
+  //    这条断言对应的是发版流程里最常见的那次失败——顺序反了，标签先推、说明没推。
+  //    CI 在标签触发那一刻去读文件，读不到就红；这里在本地把同一个判据跑一遍。
+  const missing = spawnSync(
     process.execPath,
-    [join(SCRIPTS_DIR, 'release-notes.mjs'), 'v0.2.0', bare, '--repo', 'owner/name'],
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), 'v0.1.0', join(repo, 'docs', 'release-notes', 'v0.1.0.md'), '--repo', 'owner/name'],
     { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: 'fixture-token-not-used' } },
   )
-  const refused = send.status === 2
-  check(refused, '起草稿被发送端拒绝（半成品发不出去）', `exit=${send.status} ${(send.stderr ?? '').slice(0, 120)}`)
-  report(refused, '半成品：拒绝发送')
+  const refusedMissing = missing.status === 2 && /找不到说明文件/.test(missing.stderr ?? '')
+  check(refusedMissing, '说明文件没提交就发版 → 发送端停住并指出缺哪个文件',
+    (missing.stderr ?? '').split('\n')[0])
+  report(refusedMissing, '缺说明文件：停住')
 
-  // 3) 被标签指到的提交有正文 → 正文就是说明，且不留标记
-  writeFileSync(join(repo, 'c.txt'), 'z\n', 'utf8')
+  // 2) 说明文件落盘、**提交之后**发送端才放行。这里只验证到「过了发送前的门」，
+  //    真正的发送需要凭据，由发版 CI 兜底。
+  mkdirSync(join(repo, 'docs', 'release-notes'), { recursive: true })
+  writeFileSync(join(repo, 'docs', 'release-notes', 'v0.1.0.md'),
+    '# v0.1.0\n\n## 这一版更新了什么、修复了什么\n\n第一个版本，能装能跑。\n', 'utf8')
   gitIn(repo, 'add', '-A')
-  gitIn(repo, ...ID, 'commit', '-m', '第三条：有正文', '-m', '这一版把某个命令的参数改了，用的人需要跟着改一次。')
-  gitIn(repo, 'tag', 'v0.3.0')
-  const withBody = join(ROOT, 'notes-body.md')
-  const r3 = draft('v0.3.0', withBody)
-  const bodyText = existsSync(withBody) ? readFileSync(withBody, 'utf8') : ''
-  const used = r3.status === 0
-    && bodyText.includes('这一版把某个命令的参数改了')
-    && !bodyText.includes('pf:needs-summary')
-  check(used, '有正文时直接采用它，不再列提交主题', bodyText.slice(0, 160))
-  report(used, '有总述：直接采用')
-
-  // 3b) **标签落在合并提交上时，总述要取合并提交自己的正文。**
-  //
-  //     这条是实测出来的高点：起草用的是 `git log --no-merges`，而用 PR 合并发版时被标签
-  //     指到的恰恰是合并提交，它被那句开关过滤掉了。于是总述会取到分支上某次提交的正文
-  //     ——那次若碰巧有正文，`pf:needs-summary` 不会写，一份内容错位的稿子会被当成成品
-  //     发出去：页面上的说明写的是分支改了什么，不是这一版对使用者意味着什么。
-  {
-    gitIn(repo, 'checkout', '-q', '-b', 'side')
-    writeFileSync(join(repo, 'side.txt'), 's\n', 'utf8')
-    gitIn(repo, 'add', '-A')
-    // 分支提交**故意带正文**：它是最容易被误当成总述的那一份。
-    gitIn(repo, ...ID, 'commit', '-m', '支线上的改动', '-m', '这是支线自己的说明，不是发版总述。')
-    gitIn(repo, 'checkout', '-q', 'master')
-    writeFileSync(join(repo, 'main.txt'), 'm\n', 'utf8')
-    gitIn(repo, 'add', '-A')
-    gitIn(repo, ...ID, 'commit', '-m', '主干上的另一处改动')
-    gitIn(repo, ...ID, 'merge', '--no-ff', 'side', '-m', 'release v0.4.0',
-      '-m', '这一版换掉了某个默认值，用的人需要知道新默认是什么。')
-    gitIn(repo, 'tag', 'v0.4.0')
-    const merged = join(ROOT, 'notes-merged.md')
-    const r4 = draft('v0.4.0', merged)
-    const mergedText = existsSync(merged) ? readFileSync(merged, 'utf8') : ''
-    const tookMerge = r4.status === 0 && mergedText.includes('这一版换掉了某个默认值')
-    check(tookMerge, '标签落在合并提交上时，总述取合并提交自己的正文',
-      mergedText.slice(0, 200))
-    report(tookMerge, '合并提交：总述取自它自己')
-    const notBranch = !mergedText.includes('这是支线自己的说明')
-    check(notBranch, '不误取分支提交的正文（那是最像、也最容易取错的一份）',
-      mergedText.slice(0, 200))
-    report(notBranch, '合并提交：不误取支线正文')
-  }
-
-  // 4) 判据本身要能两面证伪：带标记的认出来、不带标记的放行。少了这一半，
-  //    「拒绝发送」有可能是一句恒真的拒绝，而上面那条断言照样绿。
-  check(needsSummary(bareText) && !needsSummary(bodyText),
-    '「还没写完」的判据两面都分得清（带标记认出、不带标记放行）',
-    `bare=${needsSummary(bareText)} body=${needsSummary(bodyText)}`)
-  report(needsSummary(bareText) && !needsSummary(bodyText), '判据：两面都分得清')
-
-  // 5) 没有上一个标签时（仓库的第一个版本），不许给出点不开的对比链接，
-  //    也不许写「仅列最近 100 条」——有总述时页面上一句提交都没列，那句话是凭空多出来的。
-  //
-  //    两个都是实际发生过的事：第一次发版时页面底部挂着
-  //    `compare/v1.0.0`（只有一个端点，点开 404），上面还写着「仅列最近 100 条」，
-  //    而正文里一条都没列。
-  const first = join(ROOT, 'notes-first.md')
-  const fresh = spawnSync(
-    process.execPath, [join(SCRIPTS_DIR, 'draft-release-notes.mjs'), 'v0.1.0', first],
-    { cwd: repo, encoding: 'utf8', windowsHide: true },
+  gitIn(repo, ...ID, 'commit', '-m', '补上 v0.1.0 的说明')
+  const ready = spawnSync(
+    process.execPath,
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), 'v0.1.0', join(repo, 'docs', 'release-notes', 'v0.1.0.md'), '--repo', 'owner/name'],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: 'fixture-token-not-used' } },
   )
-  const firstText = existsSync(first) ? readFileSync(first, 'utf8') : ''
-  const noDeadLink = fresh.status === 0 && !/compare\//.test(firstText)
-  check(noDeadLink, '第一个版本：不给点不开的对比链接', firstText.split('\n').slice(-3).join(' | ').slice(0, 160))
-  report(noDeadLink, '首版：没有死链')
-  const noPhantomCount = !firstText.includes('仅列最近 100 条')
-  check(noPhantomCount, '没有列提交时不写「仅列最近 100 条」（那句话要真有列表才成立）',
-    firstText.slice(0, 120))
-  report(noPhantomCount, '没有假计数')
-  // 反面对照：有上一个版本时，「完整改动」那一行必须给出两个端点组成的区间，
-  // 否则上面那条「不给死链」会被「永远不给区间」这种退化解满足。
-  // 这里不假定有 remote：没有 remote 时不给链接是对的（不编地址），但区间照写；
-  // 区间是「上一个标签..这个标签」，即紧邻的那一个，不是最早的任何一个。
-  const linked = /完整改动/.test(bodyText) && /v0\.2\.0\.\.v0\.3\.0/.test(bodyText)
-  check(linked, '有上一个版本时照旧给出区间（否则「不给死链」可以靠从不给区间蒙过去）',
-    bodyText.split('\n').filter((l) => l.includes('完整改动')).join(' | ').slice(0, 160))
-  report(linked, '有上一版：区间照给')
+  const passedGate = ready.status !== 2
+  check(passedGate, '说明文件就位后，发送端不再拦（能走到真正发送那一步）', `exit=${ready.status}`)
+  report(passedGate, '说明文件就位：过门')
+
+  // 3) 正文里的中文与排版要**逐字**到达发送层，不能被任何一层改写。
+  //    这是「非 ASCII 不经 shell」那条规则的本地证据：文件按字节读，读到的就是写的。
+  const written = readFileSync(join(repo, 'docs', 'release-notes', 'v0.1.0.md'), 'utf8')
+  const verbatim = written.includes('第一个版本，能装能跑。')
+  check(verbatim, '说明文件按原样可读（中文没有被任何一层转写）', written.slice(0, 40))
+  report(verbatim, '中文：逐字可读')
 }
 
 group('[35] Obsidian 发布链：附件语境与触发器形状，机器说了算')

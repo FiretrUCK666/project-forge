@@ -18,7 +18,6 @@ import {
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
-import { needsSummary } from '../lib/protocol.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'

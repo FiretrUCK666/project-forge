@@ -1,15 +1,13 @@
-# 发布说明自动写：推 v* 标签即建 GitHub Release；已存在则更新正文。
+# 发布说明投递：推 v* 标签即把 docs/release-notes/<标签>.md 原文贴到发布页；
+# 已存在则更新正文，写完回读比对。
 #
-# 正文由 scripts/draft-release-notes.mjs 从提交记录起草（中文人话 + 对比链接），
-# 写进 UTF-8 文件，再由 scripts/release-notes.mjs 按字节发送、写完回读比对——
-# 中文绝不经 shell 传递，也不靠「命令成功」推断真的写对了。
+# 说明的唯一来源是那个文件：它在打标签之前就写好、提交、推上来，所以这里只负责投递，
+# 不生成、不改写。取的是**默认分支**而不是标签那棵树——标签不可变，读标签的话漏推说明
+# 就只剩「挪标签」（禁止）或「发新补丁版」两条路；读默认分支时，补推 + workflow_dispatch
+# 重跑一次就修好了。顺序要求一点没松：说明不在默认分支上，这一步直接红。
 #
-# 起草在前、发送在后，这个顺序是护栏：起草脚本先确认标签存在（标签不存在时它直接失败），
-# 而建 Release 的接口在标签不存在时会拿默认分支自动建出一个同名新标签。顺序一换，
-# 标签名打错就会静悄悄地建出新标签，而这次发版看起来还是绿的。
-#
-# 重跑会用起草结果覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
-# 标签推得比本文件早、或某次失败时，用 workflow_dispatch 手动触发并填标签名补跑。
+# 重跑会用文件内容覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
+# 标签推得比说明早、或某次失败时，先补推说明，再用 workflow_dispatch 手动触发并填标签名补跑。
 #
 # 同一个 job 还做两件事：
 #   - **发版门禁**：标签与**它里面那份 `SKILL.md`** 的 `metadata.version` 必须同号。
@@ -47,22 +45,31 @@ jobs:
       REPO: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
-      - name: 检出（全历史；工具取自默认分支，说明描述的是 TAG 那个标签）
+      - name: 检出（全历史；工具取自默认分支，说明描述的标签由 TAG 指定）
         uses: actions/checkout@v7
         with:
           # 工具取默认分支，**不是**触发时的 ref。推标签时 `github.ref` 就是那个标签，
           # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面，修不了；
           # 手动触发时它还是你在界面上选的那个 ref，选标签就同样退回旧提交。
-          # 所以两者都改成默认分支：**工具永远用最新的那版**，被描述的标签由 TAG 指定。
-          # 历史取全量，所以按标签读提交记录照样完整。
+          # 所以两者都改成默认分支：**工具与说明永远用最新的那版**，被描述的标签由 TAG 指定。
+          # 历史取全量，所以按标签读提交记录、核版本号照样完整。
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
       - name: 发版门禁（标签与它里面那份 SKILL.md 的版本同号、来源对得上）
         run: node scripts/dev/preflight.mjs --release "$TAG" --repo "$REPO"
 
-      - name: 起草正文（顺带确认标签存在，别把这一步挪到发送之后）
-        run: node scripts/draft-release-notes.mjs "$TAG" notes.md
+      - name: 说明文件必须已经在默认分支上
+        run: |
+          # 这一步拦的正是最常见的那次失败：顺序反了，标签先推、说明没推。
+          # **不要把它删掉换成「找不到就用默认措辞」**——那样发布页上会出现一份没人写过
+          # 的说明，而这次发版看起来还是绿的。
+          NOTES="docs/release-notes/$TAG.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::找不到 $NOTES。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+            exit 1
+          fi
+          echo "NOTES=$NOTES" >> "$GITHUB_ENV"
 
       # 产出物与发布说明的顺序不能反：发布页必须先存在，附件才有地方挂。
       # 先列条目核对、再打包，是因为核对要对着**这次真正要发出去的那份内容**做；
@@ -79,8 +86,8 @@ jobs:
             -o "project-forge.zip" "$TAG"
           echo "ASSET=project-forge.zip" >> "$GITHUB_ENV"
 
-      - name: 写发布说明（已存在则更新；写完回读比对，不一致即失败）
-        run: node scripts/release-notes.mjs "$TAG" notes.md --repo "$REPO"
+      - name: 写发布说明（建或更新；写完回读比对，不一致即失败）
+        run: node scripts/release-notes.mjs "$TAG" "$NOTES" --repo "$REPO"
 
       - name: 把用户包挂到这一版的发布页上
         env:

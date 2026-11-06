@@ -49,6 +49,8 @@
 - **文档套装**：`AGENTS.md`、`README`、`CONTRIBUTING`、`LICENSE`，各写各的读者，互不复述；
 - **远端仓库**：建仓库（默认私有）、推送、元数据、协作模板、持续集成；
 - **发布通道**：能不能发、发到哪、版本号怎么算、怎么发才安全；
+- **发版规范**：给要发版的项目落一份 `RELEASING.md`——说明写在哪、分哪几节、按什么顺序发
+  （说明是版本库里的一个文件，打标签前就写好；自动化把它原样贴到发布页，读不到就失败）；
 - **交棒**：项目规整好之后，问你要不要把它留下的痕迹清掉。
 
 它只做治理，不生成项目本身：不替你选技术栈，也不创建源码和框架配置。治理跑在骨架就绪之后。
@@ -81,7 +83,7 @@ node "<本领目录>/scripts/handoff.mjs" "<项目目录>" --scan
 **Node.js 16 或更高**，不需要先装任何东西。日常用到的脚本都在这个下限上（持续集成跑
 Node 22，开发机跑 Node 24；16 到 21 没有逐版实测，遇到问题欢迎提 Issue）。
 
-唯一的例外是**发布相关的两个脚本**（`release-notes.mjs` 与 `check-badges.mjs`）：
+唯一的例外是**发布与徽章两个脚本**（`release-notes.mjs` 与 `check-badges.mjs`）：
 它们用的是 Node 18 才有的全局 `fetch`，跑它们需要 Node 18 或更高。它们只在维护这个
 skill 本身时才用得上，平时用它治理项目碰不到。
 
@@ -211,6 +213,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `references/plugin-project.md`、`references/skill-project.md`、`references/plugins/` | 插件类与 skill 类项目的判定协议，以及各生态的专章 |
 | `references/handoff.md` | 交棒：痕迹怎么判、拆什么留什么、拆的顺序、拆完怎么验收 |
 | `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
+| `templates/release-spec.md` | 发版规范骨架：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
 | `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
 | `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |
@@ -223,7 +226,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
 | `scripts/handoff.mjs` | 只读勘察目标项目里这个 skill 留下的痕迹；也能判「已经干净」 |
 | `scripts/lib/` | 公共模块：文本判据、围栏扫描、协议常量、Markdown 呈现、原子写入、账本（`ledger.mjs` 记下写过哪些字节区间，撤除时据此只撤自己写的那部分） |
-| `scripts/release-notes.mjs`、`scripts/draft-release-notes.mjs` | 用 UTF-8 文件写发布说明，中文不经 shell；并从提交记录起草中文稿 |
+| `scripts/release-notes.mjs` | 把一份 UTF-8 说明文件按字节发到发布页，写完回读比对；中文不经 shell |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是不是真的显示得出来 |
 | `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
 | `README.md`、`README.en.md`、`LICENSE`、`assets/readme/` | 你正在看的这份说明（中英成对，中文是权威版）、许可证全文、README 里的卡片 |

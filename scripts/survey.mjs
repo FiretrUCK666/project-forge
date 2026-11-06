@@ -1992,6 +1992,10 @@ function detectDocs(root, root_) {
     ['license', ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'COPYING']],
     ['changelog', ['CHANGELOG.md', 'CHANGES.md', 'HISTORY.md']],
     ['codeOfConduct', ['CODE_OF_CONDUCT.md']],
+    // 发版规范：项目自己定义「说明写在哪、分哪几节、按什么顺序发」的那一份文件。
+    // 它决定发布自动化去哪个路径取说明，所以「有没有」是 `review` 判断
+    // 「发布接线完不完整」的输入——缺了它，工作流读的那个路径就没有权威出处。
+    ['releaseSpec', ['RELEASING.md', 'RELEASING.rst']],
   ]) {
     const hit = root_.first(candidates)
     docs[key] = hit === undefined ? undefined : { file: hit, bytes: sizeOf(join(root, hit)) }

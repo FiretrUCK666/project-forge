@@ -52,6 +52,7 @@ project-forge brings them into one flow:
 - **Documentation set**: `AGENTS.md`, `README`, `CONTRIBUTING`, `LICENSE` — each with its own reader, none repeating another;
 - **Remote repository**: create (private by default), push, metadata, collaboration templates, CI;
 - **Release channel**: whether it can ship, where to, how versions are numbered, how to ship safely;
+- **Release spec**: for projects that ship, a `RELEASING.md` saying where the notes live, which sections they use, and in what order to publish (the notes are a file in the repo, written before the tag; automation posts it to the release page and fails loudly when the file is missing);
 - **Hand-off**: once the project is in shape, it asks whether you want its traces cleaned up.
 
 It only governs. It does not create the project itself: it picks no stack and writes no source or
@@ -93,7 +94,7 @@ failures.
 floor (CI runs Node 22, the development machine runs Node 24; 16 through 21 has not been tested
 release by release, and reports of trouble there are welcome).
 
-The one exception is the **two release-related scripts** (`release-notes.mjs` and
+The one exception is the **two scripts that use the network** (`release-notes.mjs` and
 `check-badges.mjs`): they use the global `fetch`, which arrived in Node 18, so running them needs
 Node 18 or newer. They are only used when maintaining this skill itself.
 
@@ -234,6 +235,7 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 | `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
 | `references/handoff.md` | Hand-off: how a trace is judged, what to remove and what to keep, the order of removal, how to accept the result |
 | `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
+| `templates/release-spec.md` | Release-spec skeleton: where the notes live, which sections they use, the order of operations, how to recover from a failed release |
 | `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
 | `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
 | `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |
@@ -246,7 +248,7 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 | `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
 | `scripts/handoff.mjs` | Read-only scan of the traces this skill left in a project; can also judge whether it is already clean |
 | `scripts/lib/` | Shared modules: text criteria, fence scanning, protocol constants, Markdown rendering, atomic writes, ledger (`ledger.mjs` records which byte ranges this skill wrote, so teardown removes exactly its own bytes) |
-| `scripts/release-notes.mjs`, `scripts/draft-release-notes.mjs` | Writes release notes from a UTF-8 file so Chinese never passes through a shell; and drafts them from the commit log |
+| `scripts/release-notes.mjs` | Posts a UTF-8 notes file to the release page byte for byte and reads it back to compare, so Chinese never passes through a shell |
 | `scripts/check-badges.mjs` | Checks that the README badges actually render |
 | `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |
 | `README.md`, `README.en.md`, `LICENSE`, `assets/readme/` | This documentation (paired, Chinese is authoritative), the license text, and the cards used in the README |

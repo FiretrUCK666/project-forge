@@ -159,7 +159,8 @@ const MARKER_RULES = [
     kind: 'needs-summary',
     re: new RegExp(escapeRe(SUMMARY_MARKER), 'g'),
     literal: SUMMARY_MARKER,
-    what: '发布说明草稿的「还没写完」标记，正常不出现在目标项目里',
+    what: '发布说明的骨架标记（「这一段还没写」），正常不出现在目标项目里——'
+      + '它出现在别处，说明有一份说明从别的项目搬了过来',
     suspect: true,
   },
   {
@@ -287,18 +288,6 @@ const ANGLE_PLACEHOLDER_RE = new RegExp(
  */
 const OWN_TMP_RE = /^(?:AGENTS\.md|README(?:\.en)?\.md)\.tmp-\d+$/
 const ANY_TMP_RE = /\.tmp-\d+$/
-
-/**
- * 发布说明草稿。
- *
- * 起草脚本的默认输出是「标签名 + `-notes.md`」，在目标项目目录里跑就会掉一个在那儿。
- * **文件名形态会撞上用户自己的文件**（`release-notes.md` 是极常见的项目文件），
- * 所以只按「标签段像版本号」认：版本号里带数字，而 `release` 这类词不带。
- *
- * 标为「疑似」且**不计入干净判定**：它可能是用户自己写给自己看的草稿，删不删由人决定；
- * 而它挡着验收的话，用户唯一的出路就是造个假文件骗过检查。
- */
-const NOTES_DRAFT_RE = /^(.+)-notes\.md$/i
 
 // ── D 组：与本 skill 模板高度相似的文件 ────────────────────────────────────
 
@@ -1093,8 +1082,6 @@ function scan(root, onlyFile) {
     // 归「疑似」，不计入干净判定（协议：不在清单里的东西不要顺手删）。
     const isOwnTmp = OWN_TMP_RE.test(file.name)
     const isAnyTmp = !isOwnTmp && ANY_TMP_RE.test(file.name)
-    const notes = NOTES_DRAFT_RE.exec(file.name)
-    const isNotesDraft = notes !== null && /\d/.test(notes[1])
     if (isOwnTmp) {
       residue.push({
         path: file.rel,
@@ -1117,19 +1104,6 @@ function scan(root, onlyFile) {
         suspect: true,
       })
     }
-    if (isNotesDraft) {
-      residue.push({
-        path: file.rel,
-        line: null,
-        match: file.name,
-        kind: 'notes-draft',
-        what: '发布说明草稿（起草脚本的默认输出是「标签名 + -notes.md」）——'
-          + '也可能是用户自己写给自己看的草稿，删不删由人决定',
-        blocks: false,
-        suspect: true,
-      })
-    }
-
     const text = readScannable(file.full, scanned)
     if (text === undefined) continue
     const starts = lineStarts(text)
@@ -1151,9 +1125,6 @@ function scan(root, onlyFile) {
 
     // ── A 组：标识符 ──
     for (const rule of MARKER_RULES) {
-      // 发布说明草稿里的 needs-summary 标记**不单独报**：文件名已经认出它是草稿了，
-      // 再报一次就是把同一个文件数两遍，而两处的说法还不一样。
-      if (isNotesDraft && rule.kind === 'needs-summary') continue
       rule.re.lastIndex = 0
       for (const hit of text.matchAll(rule.re)) {
         if (isInsideFence(hit.index)) continue

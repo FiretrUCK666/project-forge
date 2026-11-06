@@ -76,6 +76,10 @@ const FLAGS = new Set([
   // 挂着。协议说手写文件默认不动、要升级必须显式 `--upgrade`，两边一夹，交付门禁就成
   // 了一条走不通的路。这个开关的意思是「这份手写文件是有意保留的，不要再判它缺」。
   '--handwritten-agents',
+  // 用户确认：发布链路会读说明文件，但这个项目不打算写发版规范（说明的位置与结构
+  // 由他自己记着）。存在这个开关，是因为那条待问的另一条出路是「补一份文件」，
+  // 而补文件是写别人的项目——不给他「确认现状可接受」的选项，就只剩逼他加一份文档。
+  '--no-release-spec',
 ])
 
 function readText(p) {
@@ -311,6 +315,7 @@ function main(argv) {
       '  --secrets-reviewed     用户确认：未跟踪未忽略的命中均为占位或测试数据',
       '  --conventions-reviewed 用户确认：多份 AI 约定文件保持原样，不去改写它们',
       '  --handwritten-agents   用户确认：AGENTS.md 是有意手写的，不注入内核',
+      '  --no-release-spec      用户确认：发布链路读说明文件，但不打算写发版规范',
       '  --strict               严格模式：待问事项同样拦住（exit 2），用于 CI',
       '',
       '  退出码：0 = 无[缺]（默认下[待问]也放行）；1 = 有[缺]；2 = 用法错误或 --strict 拦下[待问]。',
@@ -725,6 +730,20 @@ function main(argv) {
         if (!auto.usesNotesFile && auto.usesGenerateNotes) {
           pending.push('发布说明是英文模板模式：确认英文可接受，否则换 notes-file 中文链（见模板 TODO(2)）')
         }
+        // 说明文件是版本库里的一份文件，工作流去某个固定路径取它——**那个路径总得有个
+        // 权威出处**，否则它就是散落在工作流里的一个字符串：改工作流的人不知道它为什么
+        // 是这个值，写说明的人不知道要放哪。发版规范就是那个出处。
+        //
+        // 判据挂在「发布 job 存在」上，不挂在「有没有 RELEASING.md」上：一个从没配过
+        // 自动化的项目没有这个问题（说明还没人自动读），问它只会多一条无用的待问。
+        if (s.docs?.releaseSpec === undefined) {
+          if (flags.has('--no-release-spec')) ok.push('无发版规范（用户已确认说明的位置自己记）')
+          else {
+            pending.push('发布 job 会去某个路径取说明文件，但项目没有发版规范（`RELEASING.md`）：'
+              + '说明写在哪、分几节、按什么顺序发，现在只写在工作流里。'
+              + '要补就跑模板落一份；确认现状可接受时加 --no-release-spec')
+          }
+        } else ok.push(`发版规范有（${s.docs.releaseSpec.file}）`)
       }
       else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
       else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')

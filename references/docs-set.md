@@ -115,9 +115,19 @@ pip install -r requirements.txt  ← 新补的，正确
 | `README` | 这是什么、怎么装、怎么用、出问题找谁 | 必做 |
 | `CONTRIBUTING` | 怎么提问、怎么提交改动 | 会给别人用就必做 |
 | `LICENSE` | 别人能拿它做什么 | 要给别人用就必做 |
+| `RELEASING` | 这个项目怎么发版：说明写在哪、写成什么样、按什么顺序发 | **要发版就必做**（判据见下） |
 | `CHANGELOG` | 每个版本改了什么 | 可选，见下 |
 | `.github/` 下的问题与改动模板 | 让反馈一次带全信息 | 会给别人用就建议做 |
 | 子目录 `AGENTS.md` | 该子树特有的约定 | 大仓库按需 |
+
+**`RELEASING` 为什么是一份独立文件，而不是写进 `AGENTS.md`**：`AGENTS.md` 每次会话都会
+注入，把发版细节抄进去既白占预算，又制造第二处会漂移的副本。所以 `AGENTS.md` 只留一行
+指针，细节住在这份文件里——**读者同样是 AI，但它只在发版时被读**。
+
+**判据是「这个项目会不会发版」**，不是「它是不是代码项目」：纯文档目录、私用工具都不发，
+也就没有这份文件。要问用户的事只有一件——**这个项目的发布说明分成哪几节、每节写什么**；
+那是项目自己的决定，套一份通用章节结构只会让每个项目都写得像别人家的。
+从 `templates/release-spec.md` 起步，按用户给的章节结构改准。
 
 ## 三、`AGENTS.md`
 
@@ -581,6 +591,7 @@ npm / pnpm / cargo / pytest / go test 之一。它**不认**写在正文里的�
 | 对外能力、命令、安装方式 | `README` 是否仍准确 |
 | 架构、约定、门禁 | `AGENTS.md` 项目节是否失准 |
 | 贡献流程、环境要求 | `CONTRIBUTING` 是否失准 |
+| 发布流程（说明放哪、分几节、怎么打标签） | `RELEASING` 与发布工作流是否仍一致——一处改了另一处没改，发版当天才会失败 |
 | **随包分发**的任何文档 | 是否需要抬版本号（见 `references/publish.md`） |
 
 判断「随包分发」的依据是项目的发布范围声明与实际打包结果，不是文件放在哪个目录。
@@ -589,11 +600,11 @@ npm / pnpm / cargo / pytest / go test 之一。它**不认**写在正文里的�
 ### 写下去的每一份产物都要记账
 
 本 skill 落盘的文档里，只有 `AGENTS.md` 是脚本生成的（它自己会记账）。`README`、
-`CONTRIBUTING`、`LICENSE`、CI 工作流这些是照着模板写的——**脚本写不了它们，但它们的
-归属一样要记**。写完就用同一个脚本登记：
+`CONTRIBUTING`、`LICENSE`、`RELEASING`、CI 工作流这些是照着模板写的——**脚本写不了它们，
+但它们的归属一样要记**。写完就用同一个脚本登记：
 
 ```sh
-node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --record README.md CONTRIBUTING.md
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>" --record README.md CONTRIBUTING.md RELEASING.md
 ```
 
 三条用法要点，都是实测出来的坑：

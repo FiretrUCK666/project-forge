@@ -223,6 +223,47 @@ group('[52] 账本登记：多份一次记，失败时一份都不记')
   report(bare.status === 2, '只给开关不给值：报用法错误')
 }
 
+// ── [55] 引用断链：历史快照不算，活文档照判 ──────────────────────────────────
+//
+// 判据问的是「照着这份现在能不能走通」。`docs/` 是**历史快照**（各版本发布说明），它描述的
+// 是那一版的仓库长什么样——里面提到一个后来被删掉的文件，是**正确**的历史陈述，不是断链。
+// 要求它跟着今天的仓库走，等于逼人改写已发布的历史。
+//
+// 两面对称才成立：如果只验「docs/ 不算」，判据可能整个失效而没人发现；如果只验「活文档
+// 照判」，docs/ 一旦被加进去就会误红。所以一次验两条，方向相反。
+group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
+{
+  const clone = skillClone('docs-refs')
+  const histDir = join(clone, 'docs', 'release-notes')
+  mkdirSync(histDir, { recursive: true })
+
+  // 历史说明里提到一个本仓库没有的脚本（真实场景：它后来被删掉了）。
+  writeFileSync(join(histDir, 'v9.9.9.md'),
+    '# v9.9.9\n\n这一版删掉了 `scripts/gone-forever.mjs`，改用别的做法。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+
+  const okHist = preflightIn(clone, { only: '引用能否解析' })
+  const noHit = !/gone-forever/.test(okHist.out)
+  check(okHist.status === 0 && noHit,
+    '历史快照里提到已删除的文件 → 不算断链（那是正确的历史陈述）',
+    okHist.out.split('\n').filter((l) => /FAIL|gone-forever/.test(l)).join(' | ').slice(0, 200))
+  report(okHist.status === 0 && noHit, '历史快照：不误判')
+
+  // 反侧：同一句话放进活文档，必须红。少了这一条，「docs/ 不判」可以靠「整条判据失效」满足。
+  const liveDoc = join(clone, 'references', 'survey.md')
+  const liveBefore = readFileSync(liveDoc, 'utf8')
+  writeFileSync(liveDoc, `${liveBefore}\n跑 \`scripts/gone-forever.mjs\` 即可。\n`, 'utf8')
+  gitIn(clone, 'add', '-A')
+
+  const badLive = preflightIn(clone, { only: '引用能否解析' })
+  check(badLive.status === 1 && /gone-forever/.test(badLive.out),
+    '同一个路径放进活文档 → 断链照判（否则「不判 docs/」可以靠判据整体失效满足）',
+    badLive.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 200))
+  report(badLive.status === 1, '活文档：照判')
+
+  writeFileSync(liveDoc, liveBefore, 'utf8')
+}
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

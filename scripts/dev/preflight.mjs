@@ -341,11 +341,17 @@ export function referencedPaths(text) {
  * 而不是「本包里有没有」——对着本仓库根判存在，对它们正好说反话。那份判据归
  * `checkDeliveredAttribution`。一个文件只归一个判据管：两套方向相反的判据并存，
  * 迟早给出两个答案，而其中必有一个是错的。
+ *
+ * **`docs/` 也不在这里判，理由不同**：那是**历史快照**（各版本发布说明），写的是「那一版
+ * 的仓库长什么样」。它里面提到某个后来被删掉的文件，是**正确**的历史陈述，不是断链——
+ * 要求它跟着今天的仓库走，等于逼人改写已发布的历史。这条判据问的是「照着这份现在能不能
+ * 走通」，而历史文档不承诺这一点。
  */
 function checkReferencesResolve() {
   const docs = repoTextFiles()
     .filter((f) => f.endsWith('.md'))
     .filter((f) => !rel(f).startsWith('templates/'))
+    .filter((f) => !rel(f).startsWith('docs/'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
   let total = 0
   for (const full of docs) {

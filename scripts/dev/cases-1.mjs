@@ -336,7 +336,7 @@ group('[42] 高危四条：入口判定、徽章三态、围栏感知、锚点�
       ['git@github.com:acme/my.repo.git', 'acme/my.repo'],
       ['https://github.com/acme/plain', 'acme/plain'],
       ['https://GitHub.com/acme/Plain.git', 'acme/Plain'],
-      ['https://gitlab.com/a/b.git', undefined],
+      ['https://example.invalid/a/b.git', undefined],
       ['https://github.com/acme', undefined],
     ]
     const diffs = []
@@ -1241,7 +1241,7 @@ group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
   ]
   if (HAS_GIT) {
     checks.unshift(
-      ['建好远端后「角色判定」出现（防条件段落被永久冻结）', /^### 角色判定/m.test(t)],
+      ['建好远端后「先判角色」出现（防条件段落被永久冻结）', /\*\*先判角色。\*\*/.test(t)],
       ['发版规则出现', /^### 发版规则/m.test(t)],
     )
   }
@@ -1370,6 +1370,103 @@ group('[2] 目录在别人的仓库里时必须识别出来')
   check(s.git?.remote !== undefined, '（外层仓库确实有远端，说明这个误判有实际后果）')
   report(s.git?.isRepoRoot === false, '子目录不被当成仓库根')
 }
+}
+
+group('[30c] 角色与协作模板：从事实判出来，不许猜')
+{
+  if (!HAS_GIT) {
+    skipGroup('[30c] 角色与协作模板', '环境里没有 git')
+  } else {
+    // 声明与 origin 同一处 → 维护者。最常见的一种，也是最容易被静默搞错的一种。
+    const own = fixture('role-own', {
+      'package.json': '{"name":"own","version":"1.0.0","repository":"https://github.com/me/own"}\n',
+      'README.md': '# own\n',
+    })
+    gitIn(own, 'init', '-q')
+    gitIn(own, 'remote', 'add', 'origin', 'https://github.com/me/own.git')
+    const s1 = survey(own)
+    const okOwn = s1.git?.role === 'maintainer'
+    check(okOwn, 'origin 与声明源仓库一致 → 维护者', `role=${s1.git?.role} why=${s1.git?.roleReason}`)
+    report(okOwn, '角色：维护者')
+
+    // 声明是别人的仓库（origin 是自己的 fork）→ 贡献者。**错判这一条的代价最重**：
+    // 判成维护者之后，下一句就是「推主干、打标签、发版」。
+    const fork = fixture('role-fork', {
+      'package.json': '{"name":"f","version":"1.0.0","repository":"https://github.com/upstream/f"}\n',
+      'README.md': '# f\n',
+    })
+    gitIn(fork, 'init', '-q')
+    gitIn(fork, 'remote', 'add', 'origin', 'https://github.com/me/f.git')
+    const s2 = survey(fork)
+    const okFork = s2.git?.role === 'contributor-fork'
+    check(okFork, 'origin 与声明源仓库不同 → 贡献者（Fork）', `role=${s2.git?.role}`)
+    report(okFork, '角色：Fork')
+
+    // upstream 是独立证据：没有声明，但有与 origin 不同的 upstream → 仍是贡献者。
+    const up = fixture('role-upstream', { 'README.md': '# u\n' })
+    gitIn(up, 'init', '-q')
+    gitIn(up, 'remote', 'add', 'origin', 'https://github.com/me/u.git')
+    gitIn(up, 'remote', 'add', 'upstream', 'https://github.com/upstream/u.git')
+    const s3 = survey(up)
+    const okUp = s3.git?.role === 'contributor-fork'
+    check(okUp, '没有声明但有与 origin 不同的 upstream → 贡献者', `role=${s3.git?.role}`)
+    report(okUp, '角色：upstream 证据')
+
+    // upstream 与 origin 同址 → **不构成** Fork 证据（同一个仓库写成两个远端名很常见）。
+    const same = fixture('role-upstream-same', { 'README.md': '# s\n' })
+    gitIn(same, 'init', '-q')
+    gitIn(same, 'remote', 'add', 'origin', 'https://github.com/me/s.git')
+    gitIn(same, 'remote', 'add', 'upstream', 'https://github.com/me/s.git')
+    const s4 = survey(same)
+    const okSame = s4.git?.role === 'undetermined'
+    check(okSame, 'upstream 与 origin 同址不误报 Fork（判不了就是判不了）', `role=${s4.git?.role}`)
+    report(okSame, '角色：同址不误报')
+
+    // 没有声明也没有 upstream → 判不了，**不能默认判成维护者**：那会让贡献者读到维护者的流程。
+    const bare = fixture('role-bare', { 'README.md': '# b\n' })
+    gitIn(bare, 'init', '-q')
+    gitIn(bare, 'remote', 'add', 'origin', 'https://github.com/me/b.git')
+    const s5 = survey(bare)
+    const okBare = s5.git?.role === 'undetermined'
+      && typeof s5.git?.roleReason === 'string' && s5.git.roleReason !== ''
+    check(okBare, '没有声明也没有 upstream → undetermined 并给出理由',
+      `role=${s5.git?.role} why=${s5.git?.roleReason}`)
+    report(okBare, '角色：判不了就说判不了')
+  }
+
+  // 空的模板目录不算「有模板」：在 `.github` 一级看名字的旧写法会在这里放行，然后下游跳过
+  // 整整一轮本该发生的追问。
+  const emptyTpl = fixture('tpl-empty', { 'README.md': '# e\n' })
+  mkdirSync(join(emptyTpl, '.github', 'ISSUE_TEMPLATE'), { recursive: true })
+  const s6 = survey(emptyTpl)
+  const okEmpty = s6.docs?.issueTemplates === false
+  check(okEmpty, '空的 ISSUE_TEMPLATE/ 目录不算有模板', `issueTemplates=${s6.docs?.issueTemplates}`)
+  report(okEmpty, '模板：空目录不算')
+
+  // 目录形式的提案模板：报的是**真实文件**，不是那个目录名（旧的写法会把目录当文件读）。
+  const dirTpl = fixture('tpl-prdir', {
+    'README.md': '# p\n',
+    '.github/PULL_REQUEST_TEMPLATE/feature.md': '## 改了什么\n',
+    '.github/PULL_REQUEST_TEMPLATE/fix.md': '## 改了什么\n',
+  })
+  const s7 = survey(dirTpl)
+  const okDir = Array.isArray(s7.docs?.prTemplateFiles) && s7.docs.prTemplateFiles.length === 2
+    && typeof s7.docs?.prTemplateFile === 'string' && s7.docs.prTemplateFile.endsWith('.md')
+  check(okDir, '目录形式的提案模板报真实文件（不把目录当文件读）',
+    `file=${s7.docs?.prTemplateFile} files=${JSON.stringify(s7.docs?.prTemplateFiles)}`)
+  report(okDir, '模板：目录形式指到文件')
+
+  // 单文件形式仍然工作：改判据不能把老形态判死。
+  const single = fixture('tpl-single', {
+    'README.md': '# s\n',
+    '.github/pull_request_template.md': '## 改了什么\n',
+    '.github/ISSUE_TEMPLATE.md': '## 期望发生什么\n',
+  })
+  const s8 = survey(single)
+  const okSingle = s8.docs?.prTemplate === true && s8.docs?.issueTemplates === true
+  check(okSingle, '单文件形式的两种模板仍然认（老形态不能被新判据判死）',
+    `pr=${s8.docs?.prTemplate} issue=${s8.docs?.issueTemplates}`)
+  report(okSingle, '模板：老形态仍认')
 }
 
 // ---- 分片收尾 ----

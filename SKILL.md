@@ -61,8 +61,9 @@ metadata:
    一份清单让用户过目（清单内容见 `references/remote-github.md` 建仓节表格）。
    **强制推送与改写已推送历史永不自动执行**。
 5. **平台中立**：不假设操作系统与 shell。不写死 PowerShell / bash / cmd，不写死路径
-   分隔符。**不把非 ASCII 的正文经 shell 传递**——完整规则见
-   `references/remote-github.md` 的 6.5「含非 ASCII 正文的硬规则」，此处不复述。
+   分隔符。**不把非 ASCII 的正文经 shell 传递**——Release 说明、Issue、提案、审查评论都算，
+   一律先写成 UTF-8 文件、再按文件提交。完整规则见 `references/remote-github.md` 的 6.5 与
+   `references/collaboration.md` 第九节，此处不复述。
 6. **不写死取值**：账号、路径、版本号、仓库地址一律**现场读**（见「取值从哪来」）。
 7. **文档分层**：面向 AI 的文档（`AGENTS.md`）写机制与判据，需要取值时写「从哪里取」；
    面向人的文档（`README` / `CONTRIBUTING`）写具体、可复制的命令与地址。
@@ -117,7 +118,7 @@ metadata:
 | 环境无可用版本控制（`git.available` 为假） | 跳过（本地文件照常整理，提交推送等有 git 再做） | 做 | 跳过 | 按现状（需打标签的发布动作暂缓） |
 | **`git.isRepoRoot` 为假**（目录在别人的仓库里） | **停下**：这些 git 事实属于外层仓库，先问清边界 | 同左 | 同左 | 同左 |
 | 已有远端（`git.remote` 非空 **且** 是仓库根） | 只校验与补缺 | 补缺 | **不重建** | 按现状 |
-| 远端指向别人的仓库（与项目自身声明的仓库不一致） | 做 | 做 | 只推自己分支 | **不发布** |
+| `git.role` 为 `contributor-fork`（origin 与项目声明的源仓库不是同一处，或存在与 origin 不同的 `upstream`） | 做 | 做 | 只推自己分支 | **不发布** |
 | 已声明不可发布（`artifacts.private`） | 做 | 做 | 做 | **不做** |
 
 `skill` 这一类的判据、语义、发布取向与「与插件类的分野」，见
@@ -153,9 +154,9 @@ metadata:
 | --- | --- | --- |
 | **P0 定位** | 确定目标目录。候选不唯一时问一次；问不到人时**禁止默认选定**，停下列候选清单进汇报待下会话续接。**用户只要一件事时（「配个 CI」）记下范围**，那是 `--scope` 的输入 | — |
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
-| **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
+| **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要接受外部贡献、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
-| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**要发版的项目还要落一份发版规范（`RELEASING.md`）**，它的章节结构只在 G7 问一次、不套通用模板；**每写完一批非 `AGENTS.md` 的产物，跑一次 `compose-agents.mjs <项目> --record <路径> [更多路径...]` 记账**——`--record` 一次可给多份（全有或全无），不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
+| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**用户说要接受外部贡献时，落 `.github/pull_request_template.md` 与 `.github/ISSUE_TEMPLATE/` 下的缺陷、需求两份模板**（骨架在 `templates/`，不要手写）；**要发版的项目还要落一份发版规范（`RELEASING.md`）**，它的章节结构只在 G7 问一次、不套通用模板；**每写完一批非 `AGENTS.md` 的产物（含 `.github/` 下那几份），跑一次 `compose-agents.mjs <项目> --record <路径> [更多路径...]` 记账**——`--record` 一次可给多份（全有或全无），不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 → **把这两步的改动提交并再推送一次**（它们是在首次推送之后才产生的，不补这一步，远端就永远缺它们，而本地看上去一切正常） | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认。**发布说明在打标签之前就要写好并推上去**（它是版本库里的一个文件，路径与结构以项目的发版规范为准）——顺序反了，远端自动化读不到文件，发版直接失败 | `references/publish.md`、`references/remote-github.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报。**P0 记下的局部诉求在这里传 `review.mjs --scope=<切面>`**：只验那几面，其余不报缺 | — |
@@ -165,10 +166,12 @@ metadata:
 
 | 什么时候 | 读什么 |
 | --- | --- |
-| 有改动要落地（修缺陷、加能力、改文档、升级依赖） | `references/collaboration.md`：三种入口怎么分、要不要建任务单、什么时候开提案 |
+| 有改动要落地（修缺陷、加能力、改文档、升级依赖） | `references/collaboration.md`：先判角色与改动性质，再决定主干直推还是分支 + 提案 |
+| **用户把一段 Issue 正文、Issue 链接、提案链接或一段报错贴进来** | 同上第一节「外部报告：接单五步」——先核实四要素、不盲猜写代码；提案走第六节 |
 | 收外部报告或外部提案 | 同上第四、六节：审查读书单、外部贡献的信任边界 |
 | 要合并、或要判断谁能合 | 同上第五节：风险分级、弱化门禁的一票否决 |
-| 合并之后 | 同上第七节：先验证真的合并了，再关单、更新主干、先本地后远端删分支 |
+| 合并之后 | 同上第七节：六步顺序与四个坑（含平台自动删分支那种完成态） |
+| 要在平台上发 Issue、提案或审查评论 | 同上第九节：正文一律走文件，不拼命令行 |
 
 动手之前**先跑一次自动更新**（它可能把本文件换掉，所以要放在任何读取之前）：
 
@@ -214,7 +217,8 @@ node "<本领目录>/scripts/update.mjs" --quiet
 
 **G7：只有用户能定的事，一次问清。** 几件事实脚本推不出来、也不能替用户决定，它们都在
 写文档时才需要，所以集中到一处一次问完（不要分几次打断用户）：**许可证**、**版权行署名**、
-**要不要写贡献指南**、**要不要维护另一语言的 README**、**要不要 CI 与自动发布**、
+**要不要接受外部提问与贡献**（一次定四样：贡献指南、缺陷模板、需求模板、提案模板）、
+**要不要维护另一语言的 README**、**要不要 CI 与自动发布**、
 **要发版时发布说明分成哪几节、每节写什么**
 （`review.mjs` 的[待问]要 flag 才能消掉——**可用的
 flag 全集以 `node scripts/review.mjs --help` 的输出为准**，本文件不另抄一份，抄了就会漂移）。
@@ -291,9 +295,11 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `templates/contributing.md` | 新建 `CONTRIBUTING` 时作为骨架 |
 | `templates/release-spec.md` | 给要发版的项目落一份发版规范（`RELEASING.md`）：说明写在哪、分哪几节、按什么顺序发 |
 | `templates/work-item.md` | 给项目落工作项骨架：状态、目标与验收、计划、放弃过什么、断点 |
-| `templates/pull-request-template.md` | 给项目落改动提案模板：改了什么、为什么、怎么验证、回滚点 |
+| `templates/pull-request-template.md` | 给项目落改动提案模板：改了什么、为什么、怎么验证、回滚点、风险与影响范围 |
+| `templates/issue-bug-report.md` | 给项目落缺陷报告模板：期望 / 实际 / 复现 / 环境（四件缺一不可） |
+| `templates/issue-feature-request.md` | 给项目落需求模板：要解决什么问题、期望的行为、影响范围 |
 | `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
-| `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`，先建 `RELEASE_TOKEN`，再把说明目录换成项目自己的） |
+| `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`；凭据默认用平台内置令牌，只有要让发版继续触发下游工作流时才建 `RELEASE_TOKEN`；再把说明目录换成项目自己的） |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
 | `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
@@ -320,7 +326,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `AGENTS.md` | 本仓库的项目契约：机制、不变量、构建与验证、硬性规范 |
 | `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
 | `RELEASING.md` | 本仓库自己的发版规范：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
-| `docs/` | 本仓库自己的发布说明（`docs/release-notes/<标签>.md`），是本仓库的版本历史 |
+| `docs/` | 本仓库自己的发布说明（`docs/release-notes/<标签>.md`）；跨会话的工作项按需放在 `docs/work/`（本仓库目前还没有） |
 | `.github/` | 持续集成与协作模板（`workflows/`、issue 与 PR 模板） |
 | `.gitattributes` | 用户包的排除规则：`export-ignore` 列出哪些不进包 |
 | `.gitignore` | 不进版本库的本机产物（依赖目录、构建输出、本机状态目录） |

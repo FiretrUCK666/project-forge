@@ -41,6 +41,9 @@ import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+// 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
+// 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
+import { issueTemplateGaps } from '../review.mjs'
 import { scanLines } from '../lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -2055,8 +2058,79 @@ function checkReadmeToc() {
 }
 
 /**
- * 章节文件的体量软预算：**只提示，不失败**。
+ * 本仓库自己的协作模板：要素必须齐。
  *
+ * 为什么单独查这一份：`review.mjs` 查的是**目标项目**的模板，而本仓库既是这套规矩的作者、又是
+ * 它的第一个用户。作者自己不满足自己的要求时，模板里的每一栏都会慢慢变成「可选」——那正是
+ * 「教别人的规则自己先用」这条要防的退化，而且它退化时不会有任何声音。
+ */
+function checkOwnTemplates() {
+  const gh = join(SKILL_ROOT, '.github')
+  const prPath = join(gh, 'pull_request_template.md')
+  if (!existsSync(prPath)) {
+    fail('缺少 .github/pull_request_template.md —— 本仓库自己的提案模板。')
+    return
+  }
+  const prText = readText(prPath).replace(/^\uFEFF/, '')
+  const prNeed = [
+    [/怎么验证|验证的/, '怎么验证'],
+    [/回滚/, '回滚点'],
+    [/风险与影响范围/, '风险与影响范围'],
+    [/没有弱化任何门禁/, '「没有弱化任何门禁」这条自查'],
+    [/任务单/, '任务单状态与断点'],
+  ]
+  const prGap = prNeed.filter(([re]) => !re.test(prText)).map(([, label]) => label)
+  if (prGap.length > 0) {
+    fail(`.github/pull_request_template.md 缺 ${prGap.join('、')} —— `
+      + '这几栏是提案模板的全部价值所在；补进模板，别只写在审查的人脑子里。')
+  }
+
+  const issueDir = join(gh, 'ISSUE_TEMPLATE')
+  if (!existsSync(issueDir)) {
+    fail('缺少 .github/ISSUE_TEMPLATE/ —— 外部报告只有在有模板时才会一次带全信息。')
+    return
+  }
+  const issues = readdirSync(issueDir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+  if (issues.length === 0) {
+    fail('`.github/ISSUE_TEMPLATE/` 里没有任何 `.md` 模板 —— 空目录不算有模板。')
+    return
+  }
+  const issueNeed = [
+    [/期望/, '期望发生什么'],
+    [/实际/, '实际发生什么'],
+    [/复现/, '怎么复现'],
+    [/环境/, '在什么环境上'],
+  ]
+  for (const name of issues) {
+    const text = readText(join(issueDir, name)).replace(/^\uFEFF/, '')
+    const verdict = issueTemplateGaps(text)
+    if (verdict === undefined) {
+      fail(`.github/ISSUE_TEMPLATE/${name} 认不出是缺陷模板还是需求模板 —— `
+        + 'frontmatter 的 `name` / `about` 要说清它收什么；认不出就不判，等于这一份没有门禁。')
+      continue
+    }
+    if (verdict.lacking.length > 0) {
+      fail(`.github/ISSUE_TEMPLATE/${name} 缺 ${verdict.lacking.join('、')} —— `
+        + '要素缺一件，每份报告都要来回追问一轮。')
+    }
+  }
+  // 两类都该有：缺陷与需求的必填信息不同，一份模板顶不了两份。
+  const kinds = new Set(issues.map((n) => issueTemplateGaps(readText(join(issueDir, n)).replace(/^\uFEFF/, ''))?.kind))
+  for (const [kind, label] of [['bug', '缺陷'], ['feature', '需求']]) {
+    if (!kinds.has(kind)) {
+      fail(`.github/ISSUE_TEMPLATE/ 里没有${label}模板 —— 两类问题的必填信息不同，`
+        + '一份模板顶不了两份，缺的那类报告会带着另一类的骨架交上来。')
+    }
+  }
+  if (prGap.length === 0 && kinds.has('bug') && kinds.has('feature')) {
+    process.stdout.write(`协作模板：${issues.length} 份问题模板与提案模板的要素齐全\n`)
+  }
+}
+
+/**
+ * 章节文件的体量软预算：**只提示，不失败**。 *
  * 为什么不失败：「不同不等于超标」。一份长文件可能每一段都是判据，删掉任何一段都会让
  * 某个没预料到的情况失去依据；而「读起来累」是相对的，没有一个能一刀切的数字。红的
  * 代价是它会被当成坏了——那比不检查更糟。
@@ -2578,6 +2652,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('卡片断言', checkCardClaims)
   step('用户包边界', checkPackageBoundary)
   step('插件专章登记', checkPluginChapters)
+  step('本仓库协作模板', checkOwnTemplates)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
   step('章节体量', checkChapterSize)

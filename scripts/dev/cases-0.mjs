@@ -1674,6 +1674,163 @@ group('[54] 宿主生态描述符：清单不叫 package.json 也要真的被读
   }
 }
 
+group('[7c] 手写契约升级：缺的节补成骨架，而不是让人手抄标题')
+{
+  const dir = fixture('upgrade-stub', {
+    'package.json': '{"name":"stub-demo","version":"1.0.0"}\n',
+    'README.md': '# stub\n',
+    'AGENTS.md': ['# 项目说明', '', '## 我自己的节', '', '这一行要留。', ''].join('\n'),
+  })
+  compose(dir, '--upgrade')
+  const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+
+  // 模板里的节标题必须**全部**到齐：完成信号是逐字比对标题得出的，差一个字就到不了，
+  // 而且没有任何提示说明差在哪。
+  const want = [
+    '## 项目定位',
+    '## 架构与关键不变量',
+    '## 构建与验证（改完必跑，全绿才算完成）',
+    '## 硬性规范',
+    '## 测试（约定）',
+    '## 文档同步',
+  ]
+  const lacking = want.filter((h) => !text.includes(h))
+  check(lacking.length === 0, '升级后模板的节标题全部到齐（不用手抄）', `缺：${lacking.join('、') || '无'}`)
+  report(lacking.length === 0, '升级：节标题到齐')
+
+  const hasAuthor = /<!--\s*pf:author/.test(text)
+  check(hasAuthor, '需要人写的节补成带指引的骨架（pf:author）')
+  report(hasAuthor, '升级：补的是骨架')
+
+  const kept = text.includes('这一行要留。')
+  check(kept, '升级不删用户原文')
+  report(kept, '升级：原文保留')
+
+  // 升级完 `--check` 直接通过：卡点是「待填写」，不是「缺节」。
+  const chk = composeExpectingFailure(dir, '--check')
+  check(chk.status === 0, '升级后 --check 直接通过（缺节不再是失败点）',
+    (chk.stdout ?? '').trim().split('\n').slice(0, 2).join(' / '))
+  report(chk.status === 0, '升级：--check 通过')
+
+  // 再跑一次：节结构必须稳定（不新增、不重复）。字节级逐字相等的不变量由 [7b] 那组守着，
+  // 这里只断言「不会越跑越长」——那才是用户感觉得到的退化。
+  const before = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  compose(dir, '--upgrade')
+  const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  const heads = (t) => (t.match(/^## /gm) ?? []).length
+  check(heads(before) === heads(after), '再跑一次 --upgrade 不会多出节（节结构稳定）',
+    `${heads(before)} → ${heads(after)}`)
+  report(heads(before) === heads(after), '升级：节结构稳定')
+}
+
+group('[25b] 问题模板：缺陷与需求的要求不同，别拿一份的标准套另一份')
+{
+  const review = (dir, ...a) => spawnSync(process.execPath,
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const base = {
+    'package.json': '{"name":"tpl","version":"1.0.0"}\n',
+    'README.md': '# t\n',
+    'AGENTS.md': '# 契约\n\n## 协作与模板\n\n提案模板见 .github/pull_request_template.md，问题时用 .github/ISSUE_TEMPLATE。\n',
+    '.github/workflows/check.yml': 'on: push\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n',
+    '.github/pull_request_template.md': '## 怎么验证\n\n## 回滚点\n',
+  }
+  const quiet = ['--no-bilingual', '--no-contributing', '--private-no-license']
+
+  // 缺陷模板缺「环境」：要报出来，且报的正是缺的那一条。
+  const bugDir = fixture('review-tpl-bug', {
+    ...base,
+    '.github/ISSUE_TEMPLATE/bug_report.md': '---\nname: 报告缺陷\nabout: 有东西不工作\n---\n\n## 期望发生什么\n\n## 实际发生什么\n\n## 怎么复现\n',
+  })
+  const r1 = review(bugDir, ...quiet)
+  const hit = /缺这几栏：在什么环境上/.test(r1.stdout ?? '')
+  check(hit, '缺陷模板缺「环境」被指出（缺哪条报哪条）',
+    (r1.stdout ?? '').split('\n').filter((l) => /缺这几栏/.test(l)).join(' | ').slice(0, 200))
+  report(hit, '问题模板：缺哪条报哪条')
+
+  // 需求模板不该被要求「实际发生什么 / 在什么环境上」——拿错标准，那条提示会永远为真。
+  const featDir = fixture('review-tpl-feat', {
+    ...base,
+    '.github/ISSUE_TEMPLATE/feature_request.md': '---\nname: 提出需求\nabout: 想要新能力\n---\n\n## 想解决什么问题\n\n## 期望的行为\n',
+  })
+  const r2 = review(featDir, ...quiet)
+  const noBugFields = !/缺这几栏：.*(实际发生|在什么环境上)/.test(r2.stdout ?? '')
+  check(noBugFields, '需求模板不被要求补缺陷报告那四要素',
+    (r2.stdout ?? '').split('\n').filter((l) => /缺这几栏/.test(l)).join(' | ').slice(0, 200))
+  report(noBugFields, '问题模板：不拿错标准')
+
+  // 契约没指向 CONTRIBUTING 时要说一声；手写契约用既有开关消掉（不新增 flag）。
+  const noPointer = fixture('review-agents-pointer', {
+    ...base,
+    'AGENTS.md': '# 契约\n\n## 构建与验证\n\nnpm test\n',
+    'CONTRIBUTING.md': '# 贡献指南\n\n## 提问与反馈\n\n发 Issue。\n\n## 提出改动\n\nfork 后开拉取请求。\n\n## 提交前门禁\n\nnpm test\n\n## 许可\n\nMIT\n',
+    '.github/ISSUE_TEMPLATE/bug_report.md': '---\nname: 报告缺陷\n---\n\n## 期望发生什么\n\n## 实际发生什么\n\n## 怎么复现\n\n## 环境\n',
+  })
+  const r3 = review(noPointer, '--no-bilingual', '--private-no-license')
+  const pointed = /没有指向 CONTRIBUTING/.test(r3.stdout ?? '')
+  check(pointed, '契约没指向 CONTRIBUTING 时给出待问',
+    (r3.stdout ?? '').split('\n').filter((l) => /CONTRIBUTING/.test(l)).join(' | ').slice(0, 200))
+  report(pointed, '契约指针：缺了会说')
+  const r4 = review(noPointer, '--no-bilingual', '--private-no-license', '--handwritten-agents')
+  const silenced = !/没有指向 CONTRIBUTING/.test(r4.stdout ?? '')
+  check(silenced, '--handwritten-agents 能消掉这条待问（不新增开关）')
+  report(silenced, '契约指针：开关消得掉')
+
+  // Fork 模式：发布自动化是维护者那一侧的事，不该要求贡献者去配。
+  const forkDir = fixture('review-fork', {
+    ...base,
+    'package.json': '{"name":"f","version":"1.0.0","repository":"https://github.com/upstream/f"}\n',
+    'AGENTS.md': '# 契约\n\n## 协作\n\n提案模板见 .github/pull_request_template.md。\n',
+  })
+  if (HAS_GIT) {
+    gitIn(forkDir, 'init', '-q')
+    gitIn(forkDir, 'remote', 'add', 'origin', 'https://github.com/me/f.git')
+    const r5 = review(forkDir, ...quiet, '--handwritten-agents')
+    const quietRelease = !/发布 job 缺失/.test(r5.stdout ?? '')
+    check(quietRelease, 'Fork 模式下不要求贡献者配发布自动化',
+      (r5.stdout ?? '').split('\n').filter((l) => /发布/.test(l)).join(' | ').slice(0, 200))
+    report(quietRelease, 'Fork 模式：不判发布')
+  } else skipGroup('[25b] Fork 模式的发布判据', '环境里没有 git')
+
+  // 凭据：内置令牌与约定 Secret 都算接上了；两者都没有才报。
+  const relWorkflow = (envLine) => [
+    'on:',
+    '  push:',
+    "    tags: ['v*']",
+    'jobs:',
+    '  release:',
+    '    permissions:',
+    '      contents: write',
+    '    steps:',
+    '      - run: gh release create "$TAG" --notes-file x.md',
+    ...(envLine === undefined ? [] : ['        env:', `          ${envLine}`]),
+  ].join('\n')
+
+  const builtinDir = fixture('review-token-builtin', {
+    ...base,
+    'AGENTS.md': '# 契约\n\n## 发版\n\n发版见 RELEASING.md。协作见 .github/pull_request_template.md。\n',
+    'RELEASING.md': '# 发版规范\n\n说明写在 docs/release-notes/<标签>.md。\n',
+    '.github/workflows/release.yml': relWorkflow('GH_TOKEN: ${{ github.token }}'),
+    '.github/ISSUE_TEMPLATE/bug_report.md': '---\nname: 报告缺陷\n---\n\n## 期望发生什么\n\n## 实际发生什么\n\n## 怎么复现\n\n## 环境\n',
+  })
+  const r6 = review(builtinDir, ...quiet, '--handwritten-agents')
+  const noTokenComplaint = !/没接上任何凭据/.test(r6.stdout ?? '')
+  check(noTokenComplaint, '用内置令牌接线时不报「没接上凭据」',
+    (r6.stdout ?? '').split('\n').filter((l) => /凭据/.test(l)).join(' | ').slice(0, 200))
+  report(noTokenComplaint, '凭据：内置令牌算接上')
+
+  const noTokenDir = fixture('review-token-none', {
+    ...base,
+    'AGENTS.md': '# 契约\n\n## 发版\n\n发版见 RELEASING.md。协作见 .github/pull_request_template.md。\n',
+    'RELEASING.md': '# 发版规范\n\n说明写在 docs/release-notes/<标签>.md。\n',
+    '.github/workflows/release.yml': relWorkflow(undefined),
+    '.github/ISSUE_TEMPLATE/bug_report.md': '---\nname: 报告缺陷\n---\n\n## 期望发生什么\n\n## 实际发生什么\n\n## 怎么复现\n\n## 环境\n',
+  })
+  const r7 = review(noTokenDir, ...quiet, '--handwritten-agents')
+  const complains = /没接上任何凭据/.test(r7.stdout ?? '')
+  check(complains, '完全没接凭据时报出来（否则发版当天才在日志里看到「认证失败」）')
+  report(complains, '凭据：完全没有会说')
+}
+
 // ---- 分片收尾 ----// 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。
 try { cleanupFixtures() } catch { /* 清不掉不算错，主入口兜底 */ }

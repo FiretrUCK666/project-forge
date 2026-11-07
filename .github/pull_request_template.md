@@ -28,6 +28,8 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 - [ ] 改了 `templates/agents-kernel.md` 的话，同一次提交里带上了重新注入的 `AGENTS.md`
 - [ ] 改了 README 的结构的话，重跑过 `sync-toc.mjs`
 - [ ] 行为变了的话，`README` 与 `AGENTS.md` 里失准的地方都同步了
+- [ ] **没有弱化任何门禁**（没跳过测试、没放宽断言、没降低门槛、没动 CI 配置）
+- [ ] 关联的任务单里，**状态与断点已更新**（没有任务单就说明为什么不需要）
 
 ## 回滚点
 
@@ -37,6 +39,14 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 
 这个项目没有可发布的制品、也没有数据迁移，所以回滚通常是「用反向提交退回上一版」。
 如果这次改动动了判定逻辑或模板，写清退回之后要重跑哪几条命令确认回到可用状态。
+-->
+
+## 风险与影响范围
+
+<!--
+改动落在哪些路径。这个项目有四个高风险区，碰到任何一处就**不能自动合并**，必须人合：
+`scripts/` 下的判定逻辑、`templates/`、`.github/workflows/`、`.gitattributes`（它决定用户包里
+有什么）——它们的错误不会当场失败，而是让门禁**从此少查一项**。
 -->
 
 ## 备注

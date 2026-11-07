@@ -182,6 +182,35 @@ const BADGE_EXPECT_EXIT = { ok: 0, nobadge: 0, bad: 1, unverified: 3 }
  * `bad` 由**同一行输出**里解析出来：结论要能自证，不能只说「见上文」——跑在子进程里、
  * 日志被截断、只看结论行的时候，读的人手上并没有那段上文。
  */
+/**
+ * 问题模板缺哪些要素。
+ *
+ * **两种模板的要求不同，这不是细枝末节**：缺陷报告要「期望 / 实际 / 复现 / 环境」四件事；
+ * 需求提案要的是「要解决什么问题 / 期望的行为」。拿缺陷那四件去要求需求模板，会让每一份
+ * 需求模板永远显示「缺实际发生什么」——那条提示毫无意义，而一条永远为真的提示等于没有。
+ *
+ * 分类判据是模板自己的 frontmatter（`name` / `about`），那是作者写给人看的第一句话。
+ * **读不出类别时不判**：猜错方向比不判更坏，它会诱导人去改一份本来合格的模板。
+ */
+export function issueTemplateGaps(text) {
+  const head = String(text ?? '').slice(0, 800)
+  const isBug = /缺陷|报错|崩溃|不工作|bug|defect|broken/i.test(head)
+  const isFeature = /需求|功能|建议|改进|feature|enhancement|proposal/i.test(head)
+  if (!isBug && !isFeature) return undefined
+  const need = isBug
+    ? [
+      [/(期望|预期|应该发生|expect)/i, '期望发生什么'],
+      [/(实际|报错|错误|崩溃|actual|error)/i, '实际发生什么'],
+      [/(复现|重现|步骤|repro)/i, '怎么复现'],
+      [/(环境|版本|系统|environment|version)/i, '在什么环境上'],
+    ]
+    : [
+      [/(问题|动机|为什么|背景|problem|motivation|why)/i, '要解决什么问题'],
+      [/(期望|结果|行为|用法|expect|result|behavio)/i, '期望的行为或结果'],
+    ]
+  return { kind: isBug ? 'bug' : 'feature', lacking: need.filter(([re]) => !re.test(text)).map(([, label]) => label) }
+}
+
 export function badgeVerdict(stdout, stderr, status) {
   const out = `${stdout ?? ''}\n${stderr ?? ''}`
   const m = BADGE_STATE_RE.exec(out)
@@ -445,6 +474,10 @@ function main(argv) {
   const pending = []
   const ok = []
   const line = (st, text) => process.stdout.write(`  [${st}] ${text}\n`)
+  // 这是别人的仓库：维护者那一侧的判据（发布自动化、发版规范）不适用——贡献者没有权限也
+  // 没有责任去配它们。只对**明确证据**（声明仓库不同 / upstream 不同）生效，`undetermined`
+  // 不走这条路：那会让一个其实自己是维护者的项目静默少查一整套。
+  const forkMode = s.git?.role === 'contributor-fork'
   process.stdout.write(`交付门禁：${s.target.name}（${s.target.path}）\n`)
 
   if (loadedFromLedger.length > 0) {
@@ -801,6 +834,9 @@ function main(argv) {
       // 「怎么提交改动」有两条合法路线，硬要 fork 会把私有仓库判成缺：
       // 全员同仓、各拉分支是私有仓库的常态，那种情况下 fork 反而多余。
       // 判据因此是**二选一**，不是「必须出现 fork」。
+      // 另外收「合并请求 / merge request」这两个叫法：它们只是同一件事的另一种说法，
+      // 而门禁的目标项目的作者可能就这么写——**认不出措辞的代价是一份合格的指南被判缺**，
+      // 那比多认一个词贵得多。
       [/fork|(分支[\s\S]{0,20}(提案|PR|pull request|合并请求))|(branch[\s\S]{0,30}(pull request|PR\b|merge request))/i,
         '改动怎么提交（fork 或同仓分支 + 提案）'],
       [/门禁|全绿|测试|构建|check|test|build|verify|ci\b|lint|gate/i, '提交前门禁'],
@@ -892,6 +928,7 @@ function main(argv) {
         // 自动化的项目没有这个问题（说明还没人自动读），问它只会多一条无用的待问。
         if (s.docs?.releaseSpec === undefined) {
           if (flags.has('--no-release-spec')) ok.push('无发版规范（用户已确认说明的位置自己记）')
+          else if (forkMode) ok.push('无发版规范（Fork 模式：发版是维护者那一侧的事，不判）')
           else {
             pending.push('发布 job 会去某个路径取说明文件，但项目没有发版规范（`RELEASING.md`）：'
               + '说明写在哪、分几节、按什么顺序发，现在只写在工作流里。'
@@ -900,6 +937,7 @@ function main(argv) {
         } else ok.push(`发版规范有（${s.docs.releaseSpec.file}）`)
       }
       else if (flags.has('--no-auto-release')) ok.push('无发布 job（用户已确认暂不要自动发布）')
+      else if (forkMode) ok.push('无发布 job（Fork 模式：发布是维护者那一侧的事，不判）')
       else pending.push('发布 job 缺失：可发布项目问用户要不要自动写 Release（不要→加 --no-auto-release）')
     }
   }
@@ -997,7 +1035,7 @@ function main(argv) {
   if (wants('release')) { // scope: release
   // 6d. 生态发布门禁：只判本生态清单事实，不拼他生态命令。
   const ecoKinds = s.ecosystem?.kinds ?? []
-  const skipRegistryChecks = s.artifacts?.private === true || flags.has('--no-publish')
+  const skipRegistryChecks = s.artifacts?.private === true || flags.has('--no-publish') || forkMode
   if (!skipRegistryChecks) {
     if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined) {
       if (s.artifacts.pythonBuild.hasBuildSystem !== true) {
@@ -1054,8 +1092,9 @@ function main(argv) {
     }
     // Release job 的形状三件套：引用约定名、写权限、全历史检出。缺一即待问。
     if (auto2.hasReleaseJob === true) {
-      if (auto2.usesReleaseToken !== true) {
-        pending.push('发布 job 未引用约定的 RELEASE_TOKEN：凭据名拼错会静默空跑出 401，先查名（只看有没有，不看值）')
+      if (auto2.usesReleaseToken !== true && auto2.usesBuiltinToken !== true) {
+        pending.push('发布 job 没接上任何凭据：要么用平台内置令牌（那个 job 要声明 contents: write），'
+          + '要么引用约定的 RELEASE_TOKEN。两者都没有时建 Release 会认证失败，而日志只报一句「认证」')
       }
       if (auto2.hasContentsWrite !== true) {
         pending.push('发布 job 未声明 contents: write：建 Release 需要写权限（npm OIDC 的 id-token 与它是两回事，不要以为写了一个另一个顺带有了）')
@@ -1080,15 +1119,25 @@ function main(argv) {
     ok.push('无远端：不判协作模板（自己一个人的项目谈不上收贡献）')
   } else {
     const auto3 = s.docs?.workflowAutomation ?? {}
+    // 模板目录读不到时，存在性判据整块不跑：`undefined` 的含义是「没查到」，不是「没有」。
+    // 把权限问题读成缺失，就会让用户去建一个他其实已经有的东西。
+    const tplUnreadable = Array.isArray(s.docs?.templateDirsUnreadable)
+      && s.docs.templateDirsUnreadable.length > 0
+    if (tplUnreadable) {
+      pending.push(`读不到模板目录（${s.docs.templateDirsUnreadable.join('、')}）：**这不代表没有模板**，`
+        + '先确认目录权限再重跑，不要据这一条去新建')
+    }
     // 两种模板，判据不同：
     //   问题报告模板——让别人一次把必要信息给全，缺了就是每份报告都要追问一轮；
     //   改动提案模板——让审查者不必从改动内容反推意图，缺了就是每次审查都靠猜。
     if (s.docs?.prTemplate === true) ok.push('提案模板有')
+    else if (tplUnreadable) { /* 上面已报，不重复 */ }
     else if (flags.has('--no-collab-templates')) ok.push('无提案模板（用户已确认单人不收贡献）')
     else pending.push('提案模板缺失：有远端就会有别人提改动，缺模板等于每次审查都要从改动内容反推意图'
       + '（落一份模板；确认单人不收贡献时加 --no-collab-templates）')
 
     if (s.docs?.issueTemplates === true) ok.push('问题报告模板有')
+    else if (tplUnreadable) { /* 同上 */ }
     else if (flags.has('--no-collab-templates')) ok.push('无问题报告模板（用户已确认）')
     else pending.push('问题报告模板缺失：缺了每份缺陷报告都要来回追问「环境是什么、怎么复现」'
       + '（落一份模板；确认单人不收贡献时加 --no-collab-templates）')
@@ -1143,6 +1192,45 @@ function main(argv) {
         + '或把这个触发器换成 pull_request（见 references/collaboration.md 第六节）')
     } else if (auto3.usesPullRequestTarget === true) {
       ok.push('用了 pull_request_target 但没检出提案代码（合法用法）')
+    }
+  }
+
+  // 下面两条**不挂在「有没有远端」上**：它们判的是**文件内容**，与远端无关。
+  // 挂上去的后果很具体——一个本地项目落了模板，模板缺要素仍然该被看见；没有远端只是
+  // 「不会有人从外面提改动」，不是「模板可以随便写」。
+  {
+    // 问题模板的内容判据：要素缺一件，每份报告就要多一轮追问。
+    // 判据只对**我方落盘的 `.md` 模板**生效——问题表单（`.yml`）的字段形状不同，按标题判会
+    // 误报；存量项目自己写的模板也不强求，理由与提案模板那条完全一致。
+    const issueFiles = Array.isArray(s.docs?.issueTemplateFiles) ? s.docs.issueTemplateFiles : []
+    for (const file of issueFiles) {
+      if (!/\.md$/i.test(file)) continue
+      const text = readText(join(root, file)) ?? ''
+      const verdict = issueTemplateGaps(text)
+      // 读不出是缺陷还是需求时不判：猜错方向会诱导人去改一份本来合格的模板。
+      if (verdict === undefined || verdict.lacking.length === 0) continue
+      const detail = `${file} 缺这几栏：${verdict.lacking.join('、')}`
+      if (ledgerOwnsFile(root, file, text) === true) {
+        missing.push(`${detail}——缺一件，每份报告都要来回追问一轮`)
+      } else {
+        pending.push(`${detail}——这份模板没有账本记录，判为**作者自己写的**，补不补由你定`)
+      }
+    }
+
+    // 契约要把「怎么参与」指给读者：有贡献指南或协作模板，而契约一个字都没提，新会话就只能
+    // 在两套说法之间猜。**手写契约不判**——那是作者自己的编排，用 --handwritten-agents 表过
+    // 态的就不再问（同一个开关，不新增一个只服务这一条的 flag）。
+    if (s.docs?.agents !== undefined && flags.has('--handwritten-agents') !== true) {
+      const agentsText = readText(join(root, s.docs.agents.file)) ?? ''
+      if (s.docs.contributing !== undefined && !/CONTRIBUTING/i.test(agentsText)) {
+        pending.push('AGENTS.md 没有指向 CONTRIBUTING：读者从契约找不到「怎么参与」，只能去翻目录；'
+          + '写一句指针即可（手写契约确认保留原样时加 --handwritten-agents）')
+      }
+      const hasTpl = s.docs.prTemplate === true || s.docs.issueTemplates === true
+      if (hasTpl && !/(pull_request_template|ISSUE_TEMPLATE|提案模板|问题模板|改动请求模板)/i.test(agentsText)) {
+        pending.push('AGENTS.md 没有指向协作模板（`.github/` 下的问题与提案模板）：契约说改动的流程，'
+          + '模板决定这次改动要带什么，两半分开写就一定会有一半被忘掉')
+      }
     }
   }
   } // scope: collaboration

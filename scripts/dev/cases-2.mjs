@@ -686,11 +686,11 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
   const ok1 = (s1.ecosystem?.kinds ?? []).includes('dsh-plugin')
   check(ok1, 'host-only bundle 认出 dsh-plugin', JSON.stringify(s1.ecosystem?.kinds))
   report(ok1, 'host-only：认出 dsh-plugin')
-  const ok2 = s1.dsh?.bundlePatch?.exists === true && s1.dsh?.hasClientDecl === false
-  check(ok2, '补丁存在且无 client 声明', JSON.stringify(s1.dsh))
+  const ok2 = s1.host?.bundlePatch?.exists === true && s1.host?.hasClientDecl === false
+  check(ok2, '补丁存在且无 client 声明', JSON.stringify(s1.host))
   report(ok2, 'host-only：补丁存在、无 client')
-  const ok3 = s1.dsh?.discoveryCarrierLikely === true
-  check(ok3, '补丁含包名 → 发现载体可能存在', String(s1.dsh?.discoveryCarrierLikely))
+  const ok3 = s1.host?.discoveryCarrierLikely === true
+  check(ok3, '补丁含包名 → 发现载体可能存在', String(s1.host?.discoveryCarrierLikely))
   report(ok3, 'host-only：载体检查通过')
   compose(hostOnly)
   const t1 = readFileSync(join(hostOnly, 'AGENTS.md'), 'utf8')
@@ -711,8 +711,8 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
     'lib/client.js': 'globalThis.x = 1\n',
   })
   const s2 = survey(dual)
-  const ok5 = s2.dsh?.hasClientDecl === true && s2.dsh?.hasClientEntry === true
-  check(ok5, '双面：client 声明与入口同时识别', JSON.stringify(s2.dsh))
+  const ok5 = s2.host?.hasClientDecl === true && s2.host?.hasClientEntry === true
+  check(ok5, '双面：client 声明与入口同时识别', JSON.stringify(s2.host))
   report(ok5, '双面：client 识别')
   compose(dual)
   const t2 = readFileSync(join(dual, 'AGENTS.md'), 'utf8')
@@ -730,9 +730,9 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
     'cordis.patch.yml': "- insert:\n    - id: other\n      name: 'some-other-package'\n",
   })
   const s3 = survey(nocarrier)
-  const ok7 = s3.dsh?.discoveryCarrierLikely === false
-    && (s3.dsh?.warnings ?? []).some((w) => /载体/.test(w))
-  check(ok7, '缺载体 → 报警告（不断言加载一定失败）', JSON.stringify(s3.dsh?.warnings))
+  const ok7 = s3.host?.discoveryCarrierLikely === false
+    && (s3.host?.warnings ?? []).some((w) => /载体/.test(w))
+  check(ok7, '缺载体 → 报警告（不断言加载一定失败）', JSON.stringify(s3.host?.warnings))
   report(ok7, '缺载体：报警告')
 
   // 声明与入口不一致：有 client 声明无 ./client 入口 → 告警
@@ -745,8 +745,8 @@ group('[28] DSH 插件：Bundle 与双半区按事实识别，不写死取值')
     'cordis.patch.yml': "- insert:\n    - id: m\n      name: 'dsh-mismatch'\n",
   })
   const s4 = survey(mismatch)
-  const ok8 = (s4.dsh?.warnings ?? []).some((w) => /.\/client/.test(w))
-  check(ok8, 'client 声明无入口 → 报警告', JSON.stringify(s4.dsh?.warnings))
+  const ok8 = (s4.host?.warnings ?? []).some((w) => /.\/client/.test(w))
+  check(ok8, 'client 声明无入口 → 报警告', JSON.stringify(s4.host?.warnings))
   report(ok8, '声明入口不一致：报警告')
 
   // 反向：普通 node 项目不出现 DSH 段
@@ -1356,6 +1356,86 @@ group('[50] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给�
     check(skipped, 'preflightIn 传了 --only：没点名的重步骤没跑（否则这组每跑一次都是全量）',
       gatedTiming.out.split('\n').filter((l) => /脚本实跑|保鲜标记/.test(l)).join(' | ').slice(0, 200))
     report(skipped, '参数透传：没点名的重步骤没跑')
+  }
+}
+
+group('[56] 认证双轨：推代码与调平台 API 是两件事，各自三态')
+{
+  // 这一组守的是「两条轨道混成一句」那一类：SSH 远端在 HTTPS 判据上恒为 n/a，
+  // 混着判，用 SSH 的项目会永远落进「未确认」——严谨退化成一条走不通的路。
+  //
+  // 判据全部**离线可答**，不依赖本机 luck：造假的 ssh 目录靠改 HOME/环境变量太脆，
+  // 所以这里只断言「形状」与「归一」两件不依赖环境的事。
+  const mkRepo = (name, url) => {
+    const dir = fixture(name, { 'package.json': '{"name":"a","version":"1.0.0"}\n' })
+    gitIn(dir, 'init', '-q')
+    gitIn(dir, 'remote', 'add', 'origin', url)
+    return dir
+  }
+
+  // 一、协议归一：两种写法都认成 ssh（不然 ssh:// 那种会被当成 https 去问凭据助手）。
+  for (const [label, url] of [
+    ['scp 形态', 'git@github.com:owner/repo.git'],
+    ['ssh:// 形态', 'ssh://git@github.com/owner/repo.git'],
+  ]) {
+    const d = mkRepo(`auth-${label.replace(/[^a-z]+/gi, '')}`, url)
+    const a = survey(d).git?.auth
+    const okShape = a?.protocol === 'ssh' && typeof a?.transport === 'string'
+      && a.transport !== 'undetermined'
+    check(okShape, `${label}：协议归一为 ssh，且 transport 有确定值（不是「未确认」）`,
+      JSON.stringify({ protocol: a?.protocol, transport: a?.transport }))
+    report(okShape, `协议归一：${label}`)
+  }
+
+  // 二、HTTPS 形态：protocol 必须是 https，且 transport 三态之一。
+  {
+    const d = mkRepo('auth-https', 'https://github.com/owner/repo.git')
+    const a = survey(d).git?.auth
+    const okHttps = a?.protocol === 'https'
+      && ['ok', 'no-credential', 'undetermined'].includes(a?.transport)
+    check(okHttps, 'HTTPS 远端：protocol=https，transport 落在三态里',
+      JSON.stringify({ protocol: a?.protocol, transport: a?.transport }))
+    report(okHttps, 'HTTPS：三态')
+  }
+
+  // 三、没有远端时不能说「没有凭据」：那是两件事。
+  {
+    const d = fixture('auth-noremote', { 'package.json': '{"name":"b","version":"1.0.0"}\n' })
+    gitIn(d, 'init', '-q')
+    const a = survey(d).git?.auth
+    const okNone = a?.transport === 'n/a' && a?.protocol === 'none'
+    check(okNone, '没有远端：transport=n/a（不是「没凭据」）',
+      JSON.stringify({ protocol: a?.protocol, transport: a?.transport }))
+    report(okNone, '无远端：不误报')
+  }
+
+  // 四、轨道 B 与远端无关：没有远端也要能回答「平台凭据有没有」。
+  {
+    const d = fixture('auth-gh-none', { 'package.json': '{"name":"c","version":"1.0.0"}\n' })
+    gitIn(d, 'init', '-q')
+    const a = survey(d).git?.auth
+    const okGh = typeof a?.gh === 'string' && a.gh !== ''
+      && typeof a?.envToken === 'boolean'
+    check(okGh, '轨道 B 与远端无关：gh 与 envToken 始终有值（无远端也能答）',
+      JSON.stringify({ gh: a?.gh, envToken: a?.envToken }))
+    report(okGh, '轨道 B：独立可答')
+  }
+
+  // 五、环境里有令牌 → envToken 为真。只看「有没有」，值绝不外传。
+  {
+    const d = fixture('auth-envtoken', { 'package.json': '{"name":"e","version":"1.0.0"}\n' })
+    gitIn(d, 'init', '-q')
+    const r = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'survey.mjs'), d, '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, GH_TOKEN: FAKE_GH_TOKEN },
+    })
+    const data = JSON.parse((r.stdout ?? '').replace(/^\uFEFF/, ''))
+    const a = data.git?.auth
+    const okEnv = a?.envToken === true
+      && !(r.stdout ?? '').includes(FAKE_GH_TOKEN)
+    check(okEnv, '环境里有令牌：envToken=true，且报告里不出现令牌值（只看有没有）',
+      JSON.stringify({ envToken: a?.envToken }))
+    report(okEnv, '令牌：只看有没有')
   }
 }
 

@@ -28,13 +28,14 @@ import { survey, authorMarkers } from './survey.mjs'
 import { KERNEL_START, KERNEL_END } from './lib/protocol.mjs'
 import { isMainModule } from './lib/text.mjs'
 import { markerPositions } from './lib/markdown.mjs'
+import { readLedger, getSegment, contentHash } from './lib/ledger.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 /**
  * 门禁的切面。**只校验本次任务涉及的那几面**，不因为项目别处没配而拦下。
  *
- * 存在的理由：这个门禁原先只有「全量」一种口径，于是「只让你补一个 LICENSE」的老项目
+ * 存在的理由：只有「全量」一种口径时，「只让你补一个 LICENSE」的老项目
  * 会被缺 AGENTS.md、缺 README 一起拦死——而那不是本次任务的范围。判据是**这次要交付
  * 什么**，不是**这个项目是否完美**。
  *
@@ -84,7 +85,27 @@ const FLAGS = new Set([
   // 用户确认：这个项目只有自己一个人改，不要提案模板与问题报告模板。
   // 判据挂在「有远端」上——没有远端就谈不上协作，那种项目不会被问到。
   '--no-collab-templates',
+  // 用户确认：项目里已有的提案模板沿用原样，不补「回滚点」「怎么验证」两栏。
+  //
+  // 存在这个开关，是因为「缺两栏」的另一条出路是「补两栏」——而补两栏是改别人写好的
+  // 模板。存量项目自带的模板有自己的栏目设计，硬补齐等于替作者决定审查流程。
+  '--pr-template-kept',
 ])
+
+/**
+ * 这个文件是不是本 skill 落的（账本里有 `whole` 记录且内容哈希对得上）。
+ *
+ * 返回 true = 我们落的；false = 不是我们落的（作者自己写的，或他改过）；
+ * undefined = 没有账本，判不了——**判不了不能当成「是我们的」**：那会让存量项目
+ * 被要求补齐两栏，而它连账本都没有。
+ */
+function ledgerOwnsFile(root, rel, text) {
+  const { ledger, state } = readLedger(root)
+  if (state !== 'ok') return undefined
+  const seg = getSegment(ledger, rel, 'whole')
+  if (seg === undefined) return false
+  return contentHash(text) === seg.mine
+}
 
 function readText(p) {
   try {
@@ -150,6 +171,15 @@ export function badgeVerdict(stdout, stderr, status) {
   if (m === null) return { state: 'unverified', why: `子进程没有给出结论行（退出码 ${status}）`, bad: [] }
   if (BADGE_EXPECT_EXIT[m[1]] !== status) {
     return { state: 'unverified', why: `结论行说 ${m[1]}，退出码却是 ${status}`, bad: [] }
+  }
+  if (m[1] === 'unverified') {
+    // 状态自己就叫「未核对」，原因必须说出来——空字符串到了门禁那里会渲染成
+    // 「徽章没能查完（）」，一个空括号既没告诉人发生了什么，也没说该怎么补。
+    return {
+      state: 'unverified',
+      why: '网络不可达或请求超时，徽章没能核对（`node scripts/check-badges.mjs` 报的就是未核对）',
+      bad,
+    }
   }
   return { state: m[1], why: '', bad }
 }
@@ -222,7 +252,7 @@ function splitTri(list, bit) {
  * **位置要按围栏之外的那一个算**：在文档里用代码块展示这对标记是正常写法，而两个
  * 朴素写法都错——`indexOf` 会命中展示用的那份，于是「内核之外」变成「内核正文」，
  * 内核里的「远端」「发布」把这条判据顶成恒真；`includes` 则会把「展示过标记」读成
- * 「有内核」。位置判定只有一处实现（`sync-toc.mjs` 的 `markerPositions`），这里引用它。
+ * 「有内核」。位置判定只有一处实现（`lib/markdown.mjs` 的 `markerPositions`），这里引用它。
  */
 export function outsideKernel(text) {
   const s = String(text ?? '')
@@ -452,14 +482,38 @@ function main(argv) {
   if (git.present === true && typeof git.remote === 'string' && git.remote.length > 0
     && git.isRepoRoot !== false) {
     const auth = git.auth ?? {}
-    if (auth.https === 'available') {
-      ok.push(`推送认证可用（凭据助手 ${auth.helper ?? '未声明'}，${auth.helperScope ?? '层级未知'}）`)
-    } else if (auth.https === 'no-credential') {
+    // 判据读**归一后的 `transport`**，不再读只覆盖 HTTPS 的 `https`：SSH 远端在
+    // `https` 上恒为 `n/a`，于是用 SSH 的项目永远落进「未确认」那一档、永远挂着一条
+    // 待问，且没有任何开关能消掉它——严谨退化成一条走不通的路。
+    if (auth.transport === 'ok') {
+      const how = auth.protocol === 'ssh'
+        ? `SSH 密钥（${auth.sshReason ?? '本机已配'}）`
+        : `凭据助手 ${auth.helper ?? '未声明'}，${auth.helperScope ?? '层级未知'}`
+      ok.push(`推送认证可用（${how}）`)
+    } else if (auth.transport === 'no-credential') {
       missing.push('推送认证取不到凭据：配好之后重跑（这是唯一需要用户动手的一档）'
-        + (auth.httpsReason !== undefined ? `：${auth.httpsReason}` : ''))
-    } else if (auth.https !== 'n/a') {
-      pending.push('推送认证未确认：不要据此断言「没有凭据」，先看勘察报告里凭据助手所在的层级'
-        + (auth.httpsReason !== undefined ? `（${auth.httpsReason}）` : ''))
+        + (auth.transportReason !== undefined ? `：${auth.transportReason}` : ''))
+    } else if (auth.transport !== 'n/a') {
+      pending.push('推送认证未确认：不要据此断言「没有凭据」'
+        + (auth.transportReason !== undefined ? `（${auth.transportReason}）` : '')
+        + '。SSH 远端加 --probe-network 再跑一次能定论')
+    }
+    // 轨道 B 单独报：**能推代码不等于能调平台 API**。两者的凭据来源完全不同，
+    // 混成一句会让「SSH 推得通、但没有任何令牌」的机器被读成「一切就绪」。
+    //
+    // 但**本机没有令牌不等于交付不完整**：发布跑在持续集成里时，用的是仓库 Secrets
+    // 里那份令牌，与本机登录状态无关。把这种情况报成待问，会让每一个「发布交给 CI」
+    // 的项目永远挂一条消不掉的待问——而那种配置恰恰是推荐配置。
+    const ci = s.docs?.workflowAutomation ?? {}
+    const releasesInCi = ci.hasReleaseJob === true && ci.usesSecrets === true
+    if (auth.gh === 'authenticated' || (auth.gh === 'missing' && auth.envToken === true)) {
+      ok.push(`平台 API 凭据有（${auth.gh === 'authenticated' ? 'gh 已登录' : '环境里有令牌'}）`)
+    } else if (releasesInCi) {
+      ok.push('平台 API 凭据不在本机：发布走持续集成，用的是仓库 Secrets 里那份'
+        + '（本机不需要登录，这是推荐配置）')
+    } else if (auth.gh === 'unauthenticated' && auth.envToken !== true) {
+      pending.push('平台 API 凭据没有：建仓库、发 Release、读 issue 都要它'
+        + '（gh auth login 一次，或配 GH_TOKEN；只推代码的话不必现在处理）')
     }
     // 网络不可达时单独说，因为此时凭据状态本来就不可知——两件事混在一起会导向错误的处置。
     if (auth.network === 'unreachable') {
@@ -652,8 +706,11 @@ function main(argv) {
     const contributing = readText(join(root, s.docs.contributing.file)) ?? ''
     const coreChecks = [
       [/提问|问题|反馈|issue|question|feedback|support|discussion|help/i, '提问与反馈'],
-      [/fork/i, 'fork 指引'],
-      [/分支|branch/i, '分支指引'],
+      // 「怎么提交改动」有两条合法路线，硬要 fork 会把私有仓库判成缺：
+      // 全员同仓、各拉分支是私有仓库的常态，那种情况下 fork 反而多余。
+      // 判据因此是**二选一**，不是「必须出现 fork」。
+      [/fork|(分支[\s\S]{0,20}(提案|PR|pull request|合并请求))|(branch[\s\S]{0,30}(pull request|PR\b|merge request))/i,
+        '改动怎么提交（fork 或同仓分支 + 提案）'],
       [/门禁|全绿|测试|构建|check|test|build|verify|ci\b|lint|gate/i, '提交前门禁'],
       [/许可|licen[cs]e/i, '许可'],
     ]
@@ -757,8 +814,8 @@ function main(argv) {
   } // scope: ci
   if (wants('ecosystem')) { // scope: ecosystem
   const dshKinds = s.ecosystem?.kinds ?? []
-  if (dshKinds.includes('dsh-plugin') && s.dsh !== undefined) {
-    const d = s.dsh
+  if (dshKinds.includes('dsh-plugin') && s.host !== undefined) {
+    const d = s.host
     if (d.filesHasLib === false) missing.push('DSH 发布范围缺 lib（成品包路线要求 files 含构建产物，以 pack 清单为准）')
     if (d.filesHasPatch === false) missing.push('DSH 发布范围缺补丁（声明 bundle 时 files 应含补丁文件）')
     if (d.libTracked === true && d.filesHasLib !== true) {
@@ -945,15 +1002,39 @@ function main(argv) {
     // 模板**存在但缺要素**才是「缺」：存在性已判过，这里判内容。
     // 只判两个能机器判的要素——验证证据与回滚点。其余（风险、影响范围）机器判不了，
     // 交给审查的人，不在门禁里假装能判。
+    //
+    // **存量模板不强求**：这两栏是本 skill 落的模板带着的要素，一个自己写模板的存量项目
+    // 没有理由被要求补上。判据因此是「这份模板是不是我们落的」——账本里有 `whole` 记录
+    // 且哈希对得上，才算我们落的；没有记录就是作者编排的，降为待问。
+    // 硬逼存量项目补两栏的后果是可预见的：要么加 `--no-collab-templates` 把整块判据关掉
+    // （连"模板缺失"一起关），要么随便补两行应付过去——两种都比待问糟。
     if (s.docs?.prTemplate === true && s.docs?.prTemplateFile !== undefined) {
       const tpl = readText(join(root, s.docs.prTemplateFile)) ?? ''
+      const ours = ledgerOwnsFile(root, s.docs.prTemplateFile, tpl)
       // 中英两套词都要认：写的人用哪种语言是他的自由，只认中文会让一份合格的英文模板被判缺。
-      if (!/(验证|测试|怎么验|check|test|verif|evidenc)/i.test(tpl)) {
-        missing.push('提案模板没有「怎么验证」一栏：审查与合并的人看的就是这里，缺了等于让他们替你重跑一遍')
-      }
-      if (!/(回滚|撤销|rollback|revert)/i.test(tpl)) {
-        missing.push('提案模板没有「回滚点」一栏：出问题时要能立刻说清退回哪个已知可用的状态，'
-          + '「出事了再说」不算')
+      const checks = [
+        [/(验证|测试|怎么验|check|test|verif|evidenc)/i,
+          '提案模板没有「怎么验证」一栏：审查与合并的人看的就是这里，缺了等于让他们替你重跑一遍'],
+        [/(回滚|撤销|rollback|revert)/i,
+          '提案模板没有「回滚点」一栏：出问题时要能立刻说清退回哪个已知可用的状态，'
+            + '「出事了再说」不算'],
+      ]
+      // 开关一旦表过态，整块判据就不再逐栏跑了：两栏各报一次「已确认沿用」只会
+      // 让同一件事在报告里出现两遍，读的人会以为有两份模板。
+      if (flags.has('--pr-template-kept')) {
+        ok.push(`${s.docs.prTemplateFile}：用户已确认沿用原样`)
+      } else {
+        for (const [re, why] of checks) {
+          if (re.test(tpl)) continue
+          if (ours !== true) {
+            // 判不了也要按「不是我们落的」处理：账本缺失时把存量模板当成自己的，
+            // 就会去要求作者补两栏，而那些项目的账本本来就不存在。
+            pending.push(`${why}——这份模板没有账本记录，判为**作者自己写的**，补不补由你定 `
+              + '（决定沿用原样时加 --pr-template-kept，就不会再问）')
+          } else {
+            missing.push(why)
+          }
+        }
       }
     }
 

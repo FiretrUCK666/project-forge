@@ -15,6 +15,30 @@
  */
 
 /**
+ * 依赖段里宿主运行时的声明值（去重，原样保留范围符号）。
+ *
+ * 「哪些包算宿主运行时」由描述符声明（`runtimeScopes` 前缀 + `runtimePackages` 精确名），
+ * 这里只做查表——主引擎不认识任何一个具体包名。
+ */
+function hostRuntime(pkg, descriptor) {
+  const scopes = descriptor.runtimeScopes ?? []
+  const exact = descriptor.runtimePackages ?? []
+  const isHost = (name) => scopes.some((s) => name.startsWith(s)) || exact.includes(name)
+  const versions = []
+  let inDeps = false
+  for (const [k, deps] of Object.entries(pkg)) {
+    if (!/^(dependencies|devDependencies|peerDependencies|optionalDependencies)$/.test(k)) continue
+    if (typeof deps !== 'object' || deps === null) continue
+    for (const [name, range] of Object.entries(deps)) {
+      if (!isHost(name)) continue
+      if (typeof range === 'string') versions.push(range)
+      if (k === 'dependencies') inDeps = true
+    }
+  }
+  return { versions: [...new Set(versions)], inDeps }
+}
+
+/**
  * 宿主类生态：被宿主加载的扩展。
  *
  * 它们通常是一种语言项目的**细化**（DSH 插件就是 node 项目），所以不带来第二套命令。
@@ -22,11 +46,13 @@
  * 字段：
  *   - `id`            生态标识，与勘察产出的 kind 同名；
  *   - `manifest`      判据所依据的清单文件名；
- *   - `marker`        （可选）清单里必须出现的内容特征，用来区分同名的别的东西；
+ *   - `markerField`   （可选）清单里表明身份的那个字段路径，缺省按 id 首段取；
  *   - `patchFiles`    （可选）承载宿主补丁的文件名候选；
  *   - `publicKeys`    宿主公开给作者写的清单字段；
  *   - `hostInternalKeys` 宿主自己写进清单的内部字段（不算作者的错）；
  *   - `runtimeScopes` / `runtimePackages` 宿主运行时的包名，该在 peer 而非 dependencies；
+ *   - `derive(ctx, pkg)` **这个生态要报哪些事实**——各宿主关心的字段不同，
+ *     所以取法归描述符自己，主引擎只负责把清单交给它；
  *   - `chapter`       专章文件名（不含 .md），与 references/plugins/ 下对应。
  */
 export const HOST_ECOSYSTEMS = [
@@ -109,6 +135,112 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     },
     localDirs: { localWorkflow: '.agents', patchesDir: 'patches' },
     contractDoc: (id) => `docs/${id}-contracts.md`,
+
+    /**
+     * 这个宿主关心的事实。取法住在这里，主引擎不参与——加一个宿主就是加一个对象。
+     *
+     * 一致性检查（声明了补丁但文件不在、声明了 client 但没出口）**只报警告，不判失败**：
+     * 它们都是「可能出问题」的信号，不是确定的故障——宿主实现未必把这两件事绑死，
+     * 断死会制造假警报，而假警报会让人连真警报一起忽略。
+     */
+    derive(ctx, pkg) {
+      const decl = typeof pkg.dsh === 'object' && pkg.dsh !== null ? pkg.dsh : {}
+      const out = {}
+
+      // 补丁文件：候选名里第一个存在的。
+      out.patchFile = this.patchFiles.find((f) => ctx.exists(f))
+
+      // 补丁声明与它指向的文件是否真的在。
+      const bundleDecl = decl.bundle
+      const patchPath = typeof bundleDecl === 'object' && bundleDecl !== null
+        && typeof bundleDecl.patch === 'string' ? bundleDecl.patch : undefined
+      out.bundlePatch = patchPath === undefined ? undefined
+        : { path: patchPath, exists: ctx.exists(patchPath.replace(/^\.\//, '')) }
+
+      // 客户端声明与出口是否对得上。
+      out.hasClientDecl = decl.client !== undefined
+      const exportsField = pkg.exports
+      const hasExport = (key) => (typeof exportsField === 'object' && exportsField !== null
+        && Object.prototype.hasOwnProperty.call(exportsField, key))
+        || exportsField === key
+      out.hasHostEntry = hasExport('.') || typeof pkg.main === 'string'
+      out.hasClientEntry = hasExport('./client')
+
+      out.packageName = typeof pkg.name === 'string' ? pkg.name : undefined
+
+      // 未认领的键：可扩展，但要报出来——它不会被校验、也不参与比对。
+      // 已知字段分两类，两类都不该报「不认识」：报了是假警报。
+      out.unknownKeys = Object.keys(decl)
+        .filter((k) => !this.publicKeys.includes(k) && !this.hostInternalKeys.includes(k))
+
+      // 发现载体：补丁文本里有没有出现包名。只是文本包含，不解析 YAML。
+      if (out.patchFile !== undefined && typeof out.packageName === 'string' && out.packageName.length > 0) {
+        const text = ctx.readText(out.patchFile)
+        if (text !== undefined) out.discoveryCarrierLikely = text.includes(out.packageName)
+      }
+
+      // 锁定的宿主版本：依赖段里宿主运行时包的声明值。
+      // 宿主运行时放对位置没有：该在 peer，被打进 dependencies 就会随包发出去。
+      const rt = hostRuntime(pkg, this)
+      out.pinnedVersions = rt.versions
+      out.hostRuntimeInDeps = rt.inDeps
+
+      // 发布范围：files 是否含构建产物与补丁。只做包含判断，不解释语义。
+      const filesList = Array.isArray(pkg.files) ? pkg.files.map(String) : []
+      out.filesHasLib = filesList.some((f) => /(^|\/)lib(\/|\$)/.test(f) || /^lib/.test(f))
+      out.filesHasPatch = out.patchFile !== undefined
+        && filesList.some((f) => f.includes(out.patchFile.replace(/\.[^.]+$/, '')))
+
+      out.exportsKeys = typeof exportsField === 'object' && exportsField !== null
+        ? Object.keys(exportsField) : []
+
+      // 声明式元数据：只报「有没有」与原文，不解释语义——**声明不等于闸门**，
+      // 是否真的强制执行由宿主当前实现决定。
+      out.hasManifestVersion = decl.manifestVersion !== undefined
+      out.enginesHost = typeof pkg.engines?.dsh === 'string' ? pkg.engines.dsh : undefined
+      out.hasIcon = typeof pkg.icon === 'string'
+
+      const warnings = []
+      if (patchPath !== undefined && out.bundlePatch?.exists === false) {
+        warnings.push(`清单声明了补丁路径 ${patchPath}，但该文件不存在`)
+      }
+      if (out.hasClientDecl === true && out.hasClientEntry !== true) {
+        warnings.push('清单声明了 dsh.client，但 exports 里没有 ./client 入口')
+      }
+      if (out.hasClientDecl !== true && out.hasClientEntry === true) {
+        warnings.push('exports 里有 ./client 入口，但清单没有 dsh.client 声明')
+      }
+      if (out.discoveryCarrierLikely === false) {
+        warnings.push('补丁文本里没有出现包名，可能缺发现载体行（name 等于包名自身的那一行）')
+      }
+      out.warnings = warnings
+      return out
+    },
+
+    /**
+     * 给人看的几行。住在描述符里，因为**行文里的名词就是宿主自己的名词**
+     * （补丁层、浏览器半区、`dsh.client`），主引擎不该认识它们。
+     */
+    describe(f) {
+      const L = []
+      L.push(`- DSH 包名：${f.packageName ?? '未声明'}`)
+      L.push(`- DSH 补丁文件：${f.patchFile ?? '缺'}`
+        + (f.bundlePatch === undefined ? '' : `；清单声明 ${f.bundlePatch.path}（${f.bundlePatch.exists ? '存在' : '缺失'}）`))
+      L.push(`- DSH 入口：host ${f.hasHostEntry ? '有' : '缺'}；client ${f.hasClientEntry ? '有' : '无'}`
+        + `（dsh.client 声明${f.hasClientDecl ? '有' : '无'}）`)
+      L.push(`- DSH 声明式元数据：manifestVersion ${f.hasManifestVersion ? '有' : '无'}`
+        + `；engines.dsh ${f.enginesHost ?? '未声明'}；包根图标 ${f.hasIcon ? '有' : '无'}`
+        + '（都是声明，宿主当前是否强制执行另查专章）')
+      if (f.filesHasLib !== undefined) L.push(`- DSH 发布范围：files ${f.filesHasLib ? '含' : '缺'} lib；${f.filesHasPatch ? '含' : '缺'}补丁`)
+      if (f.libTracked !== undefined) L.push(`- DSH 构建产物跟踪：lib ${f.libTracked ? '已被跟踪' : '未被跟踪'}（与 files 是两套集合）`)
+      if (f.hostRuntimeInDeps === true) L.push('- **DSH 依赖放错**：宿主运行时进了 dependencies，应为 peer')
+      if (Array.isArray(f.unknownKeys) && f.unknownKeys.length > 0) {
+        L.push(`- **DSH 清单有不认识的字段**：${f.unknownKeys.join('、')}`
+          + '——可能是新版宿主加的东西，按六问现场核实，不要猜，也不要照旧流程装懂')
+      }
+      for (const w of f.warnings ?? []) L.push(`- DSH 注意：${w}`)
+      return L
+    },
   },
   {
     /**
@@ -124,6 +256,31 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     runtimeScopes: [],
     runtimePackages: ['vscode', '@types/vscode'],
     chapter: 'vscode',
+
+    derive(ctx, pkg) {
+      const out = {}
+      out.packageName = typeof pkg.name === 'string' ? pkg.name : undefined
+      // 声明的最低宿主版本：`engines.vscode` 是扩展与宿主之间唯一的兼容契约。
+      out.enginesHost = typeof pkg.engines?.vscode === 'string' ? pkg.engines.vscode : undefined
+      out.displayName = typeof pkg.displayName === 'string' ? pkg.displayName : undefined
+      out.hasPublisher = typeof pkg.publisher === 'string' && pkg.publisher.length > 0
+      out.contributesKeys = typeof pkg.contributes === 'object' && pkg.contributes !== null
+        ? Object.keys(pkg.contributes) : []
+      out.activationEvents = Array.isArray(pkg.activationEvents) ? pkg.activationEvents.map(String) : []
+      const rt = hostRuntime(pkg, this)
+      out.pinnedVersions = rt.versions
+      out.hostRuntimeInDeps = rt.inDeps
+
+      const warnings = []
+      // `main` 缺席而 `contributes` 里又没有语言/主题这类纯声明贡献时，扩展加载不起来。
+      const declarationOnly = out.contributesKeys.every((k) => /^(languages|grammars|themes|snippets|jsonValidation)$/.test(k))
+      if (typeof pkg.main !== 'string' && !declarationOnly) {
+        warnings.push('清单没有 main 入口，但 contributes 里有需要代码的贡献点——扩展会加载不起来')
+      }
+      if (out.hasPublisher !== true) warnings.push('清单没有 publisher，打包发布时会失败')
+      out.warnings = warnings
+      return out
+    },
   },
   {
     /**
@@ -139,15 +296,33 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     runtimeScopes: [],
     runtimePackages: ['obsidian'],
     chapter: 'obsidian',
+
+    derive(ctx, pkg) {
+      const out = {}
+      out.pluginId = typeof pkg.id === 'string' ? pkg.id : undefined
+      out.packageName = typeof pkg.name === 'string' ? pkg.name : undefined
+      out.declaredVersion = typeof pkg.version === 'string' ? pkg.version : undefined
+      out.enginesHost = typeof pkg.minAppVersion === 'string' ? pkg.minAppVersion : undefined
+      out.isDesktopOnly = pkg.isDesktopOnly === true
+      const rt = hostRuntime(pkg, this)
+      out.pinnedVersions = rt.versions
+      out.hostRuntimeInDeps = rt.inDeps
+
+      const warnings = []
+      // id 形状：官方要求小写字母与连字符，且不能含 obsidian、不能以 plugin 结尾
+      // （提交审核会被拒）。这里只报事实，结论由消费方给。
+      if (out.pluginId === undefined) {
+        warnings.push('manifest.json 没有 id，宿主无法装载')
+      } else if (!/^[a-z-]+$/.test(out.pluginId)
+        || out.pluginId.includes('obsidian') || out.pluginId.endsWith('plugin')) {
+        warnings.push(`插件 id「${out.pluginId}」形状不合规（应小写字母与连字符、不含 obsidian、不以 plugin 结尾）`)
+      }
+      out.warnings = warnings
+      return out
+    },
   },
 ]
 
-/**
- * 判断这个项目是不是某类宿主生态。
- *
- * 判据一律来自**项目自己的声明**（清单字段或补丁文件），不按目录形状猜。
- * 返回命中的描述符，没有则 undefined。
- */
 /**
  * 按字段路径取值：['engines','vscode'] → pkg.engines.vscode。
  *
@@ -163,6 +338,12 @@ export function fieldAt(obj, path) {
   return cur
 }
 
+/**
+ * 判断这个项目是不是某类宿主生态。
+ *
+ * 判据一律来自**项目自己的声明**（清单字段或补丁文件），不按目录形状猜。
+ * 返回命中的描述符，没有则 undefined。
+ */
 export function detectHost(descriptors, ctx) {
   for (const d of descriptors) {
     const pkg = ctx.manifest(d.manifest)
@@ -186,105 +367,14 @@ export function detectHost(descriptors, ctx) {
 /**
  * 从清单与文件里提取这类宿主要求的事实。
  *
- * 每个宿主关心的字段不同，所以这段由描述符自己声明；主引擎只把上下文交给它，
- * 拿回一个扁平对象挂到勘察结果的 `host` 字段上。
+ * **取法归描述符**（每个描述符自带 `derive(ctx, pkg)`），主引擎只把清单交给它、
+ * 再给结果补上 `id`。加一个宿主 = 加一个对象，这里一行不用改。
  */
 export function deriveHostFacts(descriptor, ctx) {
   if (descriptor === undefined) return undefined
   const pkg = ctx.manifest(descriptor.manifest)
   if (pkg === undefined || pkg === null || typeof pkg !== 'object') return undefined
   if (pkg.__corrupt === true) return undefined
-
-  const field = descriptor.id.split('-')[0]
-  const decl = typeof pkg[field] === 'object' && pkg[field] !== null ? pkg[field] : {}
-  const out = { id: descriptor.id }
-
-  // 补丁文件：候选名里第一个存在的。
-  const patchFile = Array.isArray(descriptor.patchFiles)
-    ? descriptor.patchFiles.find((f) => ctx.exists(f))
-    : undefined
-  out.patchFile = patchFile
-
-  // 补丁声明与它指向的文件是否真的在。
-  const bundleDecl = decl.bundle
-  const patchPath = typeof bundleDecl === 'object' && bundleDecl !== null
-    && typeof bundleDecl.patch === 'string' ? bundleDecl.patch : undefined
-  out.bundlePatch = patchPath === undefined ? undefined
-    : { path: patchPath, exists: ctx.exists(patchPath.replace(/^\.\//, '')) }
-
-  // 客户端声明与出口是否对得上。
-  out.hasClientDecl = decl.client !== undefined
-  const exportsField = pkg.exports
-  const hasExport = (key) => (typeof exportsField === 'object' && exportsField !== null
-    && Object.prototype.hasOwnProperty.call(exportsField, key))
-    || exportsField === key
-  out.hasHostEntry = hasExport('.') || typeof pkg.main === 'string'
-  out.hasClientEntry = hasExport('./client')
-
-  out.packageName = typeof pkg.name === 'string' ? pkg.name : undefined
-
-  // 未认领的键：可扩展，但要报出来——它不会被校验、也不参与比对。
-  // 已知字段分两类，两类都不该报「不认识」：报了是假警报，假警报会让人连真警报一起忽略。
-  out.unknownKeys = Object.keys(decl)
-    .filter((k) => !descriptor.publicKeys.includes(k) && !descriptor.hostInternalKeys.includes(k))
-
-  // 发现载体：补丁文本里有没有出现包名。只是文本包含，不解析 YAML。
-  if (patchFile !== undefined && typeof out.packageName === 'string' && out.packageName.length > 0) {
-    const text = ctx.readText(patchFile)
-    if (text !== undefined) out.discoveryCarrierLikely = text.includes(out.packageName)
-  }
-
-  // 锁定的宿主版本：各依赖段里宿主作用域包的声明值（去重，原样保留范围符号）。
-  const scopes = descriptor.runtimeScopes ?? []
-  const pkgs = descriptor.runtimePackages ?? []
-  const isHostRuntime = (name) => scopes.some((s) => name.startsWith(s)) || pkgs.includes(name)
-  out.pinnedVersions = [...new Set(
-    ['dependencies', 'devDependencies', 'peerDependencies'].flatMap((k) => {
-      const deps = pkg[k]
-      if (typeof deps !== 'object' || deps === null) return []
-      return Object.entries(deps)
-        .filter(([name, range]) => isHostRuntime(name) && typeof range === 'string')
-        .map(([, range]) => range)
-    }),
-  )]
-
-  // 宿主运行时放对位置没有：该在 peer，被打进 dependencies 就会随包发出去。
-  const deps = pkg.dependencies
-  out.hostRuntimeInDeps = typeof deps === 'object' && deps !== null
-    && Object.keys(deps).some(isHostRuntime)
-
-  // 发布范围：files 是否含构建产物与补丁。只做包含判断，不解释语义。
-  const filesList = Array.isArray(pkg.files) ? pkg.files.map(String) : []
-  out.filesHasLib = filesList.some((f) => /(^|\/)lib(\/|\$)/.test(f) || /^lib/.test(f))
-  out.filesHasPatch = patchFile !== undefined && filesList.some((f) => f.includes(patchFile.replace(/\.[^.]+$/, '')))
-
-  out.exportsKeys = typeof exportsField === 'object' && exportsField !== null
-    ? Object.keys(exportsField) : []
-
-  // 声明式元数据：只报「有没有」与原文，不解释语义——**声明不等于闸门**，
-  // 是否真的强制执行由宿主当前实现决定。
-  out.hasManifestVersion = decl.manifestVersion !== undefined
-
-  // 一致性检查：声明与实现对不上时**只报警告，不判失败**。
-  // 「补丁声明了但文件不在」「声明了 client 但没有出口」都是**可能**出问题的信号，
-  // 不是确定的故障——宿主当前实现未必把这两件事绑死，断死会制造假警报。
-  const warnings = []
-  if (patchPath !== undefined && out.bundlePatch?.exists === false) {
-    warnings.push(`清单声明了补丁路径 ${patchPath}，但该文件不存在`)
-  }
-  if (out.hasClientDecl === true && out.hasClientEntry !== true) {
-    warnings.push(`清单声明了 ${field}.client，但 exports 里没有 ./client 入口`)
-  }
-  if (out.hasClientDecl !== true && out.hasClientEntry === true) {
-    warnings.push(`exports 里有 ./client 入口，但清单没有 ${field}.client 声明`)
-  }
-  if (out.discoveryCarrierLikely === false) {
-    warnings.push('补丁文本里没有出现包名，可能缺发现载体行（name 等于包名自身的那一行）')
-  }
-  out.warnings = warnings
-  // 字段名与勘察结果的历史形状保持一致：改它对调用方是破坏性变更，不在这次改动范围内。
-  out.enginesDsh = typeof pkg.engines?.[field] === 'string' ? pkg.engines[field] : undefined
-  out.hasIcon = typeof pkg.icon === 'string'
-
-  return out
+  if (typeof descriptor.derive !== 'function') return undefined
+  return { id: descriptor.id, ...(descriptor.derive(ctx, pkg) ?? {}) }
 }

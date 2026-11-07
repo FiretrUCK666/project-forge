@@ -7,7 +7,7 @@
  * 所以「怎么构建」只能从这些文件里读。
  *
  * 从 survey.mjs 拆出来，是因为它是**独立的一个维度**：输入是文件系统，输出是命令表，
- * 与生态判定、文档盘点、git 事实没有共享状态。原先夹在勘察引擎中间，改一种工具的
+ * 与生态判定、文档盘点、git 事实没有共享状态。夹在勘察引擎中间时，改一种工具的
  * 解析要在三千行里找。
  *
  * 判据一律是「找到那个文件 → 读它 → 认出里面有哪些任务」，认不出就返回空，
@@ -154,11 +154,34 @@ export function taskRunnerCommands(root, root_) {
     }
   }
 
+  /**
+   * 从同一工具的多个包装器里挑一个，并给出该平台上能直接照抄的调用形式。
+   *
+   * **Windows 上要挑 `.bat` / `.cmd`**：`gradlew`（无后缀的 shell 脚本）和
+   * `gradlew.bat` 通常同时存在，而 PowerShell 里 `./gradlew` 会走到 `.bat` 上
+   * ——名字对吗？不对，PowerShell 会去找 `gradlew.ps1` 或按 PATHEXT 补后缀，
+   * 补出来的正是 `.bat`，但打印出来的命令写着 `./gradlew`，读者在 cmd 里照样失败。
+   * 契约里的命令是要**照抄去跑**的，所以必须写清这个平台上真正能跑的那个。
+   *
+   * 只有其中一个存在时就用那一个：项目只带 `gradlew.bat` 的 Windows-only 情形，
+   * 或只带 `gradlew` 的 Unix-only 情形，都不该被写成一个不存在的路径。
+   *
+   * 退回 PATH 里的全局命令时，前缀不带路径——那件事交给 PATH。
+   */
+  const pickWrapper = (candidates, fallback, winExt) => {
+    const present = candidates.filter((n) => root_.first([n]) !== undefined)
+    if (present.length === 0) return fallback
+    const preferred = process.platform === 'win32'
+      ? (present.find((n) => n.endsWith(winExt)) ?? present[0])
+      : (present.find((n) => !n.endsWith(winExt)) ?? present[0])
+    return preferred.endsWith(winExt) ? `.\\${preferred}` : `./${preferred}`
+  }
+
   /** Gradle：有包装器就用包装器，没有就用 PATH 里的 gradle。 */
   const gradlew = root_.first(['gradlew', 'gradlew.bat'])
   const gradleBuild = root_.first(['build.gradle', 'build.gradle.kts'])
   if (gradlew !== undefined || gradleBuild !== undefined) {
-    const prefix = gradlew === undefined ? 'gradle' : (gradlew.endsWith('.bat') ? '.\\gradlew.bat' : './gradlew')
+    const prefix = pickWrapper(['gradlew', 'gradlew.bat'], 'gradle', '.bat')
     byTool.gradle = { build: `${prefix} build`, test: `${prefix} test` }
     sawAny = true
   }
@@ -167,7 +190,7 @@ export function taskRunnerCommands(root, root_) {
   const mvnw = root_.first(['mvnw', 'mvnw.cmd'])
   const pom = root_.first(['pom.xml'])
   if (mvnw !== undefined || pom !== undefined) {
-    const prefix = mvnw === undefined ? 'mvn' : (mvnw.endsWith('.cmd') ? '.\\mvnw.cmd' : './mvnw')
+    const prefix = pickWrapper(['mvnw', 'mvnw.cmd'], 'mvn', '.cmd')
     byTool.maven = { build: `${prefix} -B package`, test: `${prefix} -B test` }
     sawAny = true
   }

@@ -4,7 +4,7 @@
  * 它只管「怎么把已经算好的事实排成人能读的样子」，不碰文件系统、不跑 git、
  * 不认识任何生态——**输入是 survey() 的返回值，输出是一段文本**。
  *
- * 从 survey.mjs 搬出来，是因为它原先与勘察逻辑挤在一个文件里：那是三百多行
+ * 独立成模块，是因为它与勘察逻辑挤在一个文件里时是三百多行
  * 纯排版代码，占全文十分之一，而它和「怎么读出这些事实」没有任何共同点。
  * 混在一起时，改一个标题格式要在一份三千行的勘察引擎里翻半天。
  *
@@ -12,6 +12,7 @@
  */
 
 import { COMMAND_KEYS, isNoteKey } from './protocol.mjs'
+import { HOST_ECOSYSTEMS } from '../ecosystems.mjs'
 
 export function humanBytes(n) {
   if (n < 1024) return `${n} B`
@@ -108,25 +109,13 @@ export function toMarkdown(s) {
       + (s.workspace.packages.length > 6 ? ' 等）' : (s.workspace.packages.length > 0 ? '）' : '')))
     if (s.workspace.note !== undefined) L.push(`  - ${s.workspace.note}`)
   }
-  if (s.dsh !== undefined) {
-    const d = s.dsh
-    L.push(`- DSH 包名：${d.packageName ?? '未声明'}`)
-    L.push(`- DSH 补丁文件：${d.patchFile ?? '缺'}`
-      + (d.bundlePatch === undefined ? '' : `；清单声明 ${d.bundlePatch.path}（${d.bundlePatch.exists ? '存在' : '缺失'}）`))
-    L.push(`- DSH 入口：host ${d.hasHostEntry ? '有' : '缺'}；client ${d.hasClientEntry ? '有' : '无'}`
-      + `（dsh.client 声明${d.hasClientDecl ? '有' : '无'}）`)
-    L.push(`- DSH 声明式元数据：manifestVersion ${d.hasManifestVersion ? '有' : '无'}`
-      + `；engines.dsh ${d.enginesDsh ?? '未声明'}；包根图标 ${d.hasIcon ? '有' : '无'}`
-      + '（都是声明，宿主当前是否强制执行另查专章）')
-    if (d.filesHasLib !== undefined) L.push(`- DSH 发布范围：files ${d.filesHasLib ? '含' : '缺'} lib；${d.filesHasPatch ? '含' : '缺'}补丁`)
-    if (d.libTracked !== undefined) L.push(`- DSH 构建产物跟踪：lib ${d.libTracked ? '已被跟踪' : '未被跟踪'}（与 files 是两套集合）`)
-    if (d.hostRuntimeInDeps === true) L.push('- **DSH 依赖放错**：宿主运行时进了 dependencies，应为 peer')
-    if (d.discoveryCarrierLikely === false) L.push('- **DSH 发现载体可能缺失**：补丁文本里没有出现包名')
-    if (Array.isArray(d.unknownKeys) && d.unknownKeys.length > 0) {
-      L.push(`- **DSH 清单有不认识的字段**：${d.unknownKeys.join('、')}`
-        + '——可能是新版宿主加的东西，按六问现场核实，不要猜，也不要照旧流程装懂')
-    }
-    for (const w of d.warnings ?? []) L.push(`- DSH 注意：${w}`)
+  if (s.host !== undefined) {
+    // 这些行由**描述符自己写**：行文里的名词（补丁层、浏览器半区、`dsh.client`）
+    // 是宿主自己的说法，渲染层不该认识它们。加一个宿主就是给那个对象加一个
+    // `describe(facts)`，这里一行不用改。
+    const descriptor = HOST_ECOSYSTEMS.find((d) => d.id === s.host.id)
+    if (typeof descriptor?.describe === 'function') L.push(...descriptor.describe(s.host))
+    else L.push(`- 宿主生态：${s.host.id}（该生态还没有登记给人看的说明）`)
   }
   if (s.ecosystem.skillDropped !== undefined) {
     L.push(`- **本仓库的能力目录会被宿主丢弃**：${s.ecosystem.skillDropped}——症状是「目录在、技能不在」，先按专章核对宿主契约`)
@@ -260,12 +249,27 @@ export function toMarkdown(s) {
   L.push('')
   L.push('## 文档现状')
   L.push('')
+  // 值有三类形状，各给一句人话；认不出的按 JSON 兜底。数组元素可能是字符串，
+  // 也可能是 `{ file, bytes }` 这样的记录——直接 `join` 会把后者渲染成
+  // `[object Object]`，那是报告里最糟的一种输出：它看起来像出了故障，却查不出哪一处。
+  const describe = (x) => {
+    if (typeof x === 'string') return x
+    if (x === null || x === undefined) return String(x)
+    if (typeof x === 'object') {
+      if (typeof x.file === 'string') {
+        return x.bytes === undefined ? x.file : `${x.file}（${humanBytes(x.bytes)}）`
+      }
+      if (typeof x.path === 'string') return x.path
+      if (typeof x.name === 'string') return x.name
+    }
+    return JSON.stringify(x)
+  }
   for (const [k, v] of Object.entries(s.docs)) {
     if (k === 'readmePair' || k === 'readmeSections' || k === 'workflowAutomation') continue
     if (v === undefined) L.push(`- ${k}：缺`)
-    else if (Array.isArray(v)) L.push(`- ${k}：${v.length === 0 ? '缺' : v.join('、')}`)
-    else if (typeof v === 'object' && v.file !== undefined) L.push(`- ${k}：${v.file}（${humanBytes(v.bytes)}）`)
-    else L.push(`- ${k}：${JSON.stringify(v)}`)
+    else if (Array.isArray(v)) L.push(`- ${k}：${v.length === 0 ? '缺' : v.map(describe).join('、')}`)
+    else if (typeof v === 'object' && v.file !== undefined) L.push(`- ${k}：${describe(v)}`)
+    else L.push(`- ${k}：${describe(v)}`)
   }
   const pair = s.docs?.readmePair
   if (pair !== undefined) {

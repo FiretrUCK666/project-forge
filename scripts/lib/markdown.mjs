@@ -85,3 +85,42 @@ export function markerPositions(text, marker, spans = fencedSpans(text)) {
   }
   return out
 }
+
+/**
+ * 按二级标题把一份 Markdown 切成「前言 + 若干节」。**全仓唯一实现**。
+ *
+ * 按节合并的地方有三处（注入、刷新、交棒勘察），它们必须对「哪里是下一节」给出
+ * **同一个答案**：一处认为某段属于上一节、另一处认为它自成一节时，账本记的归属与
+ * 实际落盘的位置就错开了，而错开的表现是「撤除时删掉了不该删的内容」。
+ *
+ * 两条硬规矩，都来自真实损坏：
+ *
+ *   1. **围栏里的 `##` 不是标题**。文档里展示一段 Markdown 示例（`## 用法` 之类）
+ *      是极常见的写法；按行首匹配去切，会把围栏拆成两半，代码块前半截留在上一节、
+ *      后半截被当成下一节的正文。切分必须走 `scanLines`，与全仓其余结构判据同源。
+ *   2. **`heading` 就是整行去掉首尾空白**，不做任何美化。账本用它当键，键一变，
+ *      历史记录就全对不上了——那是静默的失效，台账看上去仍然「有一堆记录」。
+ *
+ * 返回的 `lines` 含标题行本身，行尾符保留原样；`head` 是第一行标题之前的内容。
+ */
+export function splitSections(text) {
+  const lines = scanLines(text)
+  // 只认**围栏之外**的二级标题。
+  const heads = lines
+    .map((info, i) => ({ info, i }))
+    .filter((x) => !x.info.inFence && x.info.heading !== null && x.info.heading.level === 2)
+  if (heads.length === 0) return { head: text, sections: [] }
+  // 前言与各节都按**行**拼回去，不带额外的行尾符：调用方会把它与别的片段一起 join，
+  // 多出来或少了的那一个换行会变成成串空行，而那正是「每次都说改了、其实只差一个换行」
+  // 的来源。
+  const head = lines.slice(0, heads[0].i).map((l) => l.raw).join('\n')
+  const sections = heads.map(({ info }, k) => {
+    const endLine = k + 1 < heads.length ? heads[k + 1].i : lines.length
+    // `lines` 与 `text` 给的是同一段内容的两种形态：按行改的调用方用前者，
+    // 需要逐字比较字节的调用方用后者。二者都含标题行本身。
+    const body = lines.slice(heads[k].i, endLine).map((l) => l.raw)
+    const end = k + 1 < heads.length ? heads[k + 1].info.start : text.length
+    return { heading: info.line.trim(), lines: body, text: body.join('\n'), start: info.start, end }
+  })
+  return { head, sections }
+}

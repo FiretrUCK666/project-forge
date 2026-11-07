@@ -664,7 +664,10 @@ function walk(root) {
       }
       result.totalFilesSeen += 1
       const full = join(dir, entry.name)
-      const rel = full.slice(root.length + 1)
+      // 归一成 `/`：这份 rel 会出现在 `largeFiles`、`secretFiles`、`symlinks`、`nestedRepos`
+      // 等所有对外字段里。Windows 上直接切字符串会留下反斜杠，同一份项目在两台机器上
+      // 给出两种路径写法——而报告是对外的东西，路径写法是它的一部分。
+      const rel = posixPath(full.slice(root.length + 1))
       if (entry.isSymbolicLink()) {
         result.symlinks.push(rel)
         continue
@@ -1524,25 +1527,33 @@ function detectWorkspace(root, root_) {
     }
   }
 
+  /**
+   * 某个相对路径是不是目录。
+   *
+   * **一律问文件系统，不用 `root_.entry()`**：那个缓存只登记了根目录的顶层条目，
+   * 对 `crates/api` 这种嵌套路径永远返回 undefined。用它判嵌套目录，症状是
+   * 「声明了 workspace，但没有展开出任何真实子目录」——而目录就在那里。
+   */
+  const isDirAt = (rel) => {
+    try {
+      return statSync(join(root, rel)).isDirectory()
+    } catch {
+      return false
+    }
+  }
+
   /** 把 `packages/*` 这类通配展开成真实子目录名（只展开一级，不递归）。 */
   const expand = (pattern) => {
     const clean = pattern.replace(/\/+$/, '').replace(/^\.\//, '')
-    // 非通配：可能是嵌套路径（crates/a），而 root_ 只认顶层条目，所以直接问文件系统。
-    if (!clean.includes('*')) {
-      try {
-        return statSync(join(root, clean)).isDirectory() ? [clean] : []
-      } catch {
-        return []
-      }
-    }
+    // 非通配：可能是嵌套路径（crates/a），走同一个判定。
+    if (!clean.includes('*')) return isDirAt(clean) ? [clean] : []
     const idx = clean.indexOf('*')
     const head = clean.slice(0, idx).replace(/\/+$/, '')
     const tail = clean.slice(idx + 1).replace(/^\/+/, '')
-    const e = root_.entry(head)
-    if (e === undefined || !e.isDir) return []
+    if (head !== '' && !isDirAt(head)) return []
     let names
     try {
-      names = readdirSync(join(root, root_.real(head) ?? head), { withFileTypes: true, encoding: 'utf8' })
+      names = readdirSync(join(root, head), { withFileTypes: true, encoding: 'utf8' })
         .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
         .map((d) => d.name)
     } catch {
@@ -1550,9 +1561,9 @@ function detectWorkspace(root, root_) {
     }
     const out2 = []
     for (const n of names) {
-      const rel = `${head}/${n}`
+      const rel = head === '' ? n : `${head}/${n}`
       if (tail === '') out2.push(rel)
-      else if (root_.entry(`${rel}/${tail}`)?.isDir === true) out2.push(`${rel}/${tail}`)
+      else if (isDirAt(`${rel}/${tail}`)) out2.push(`${rel}/${tail}`)
     }
     return out2
   }
@@ -1842,20 +1853,33 @@ const ECOSYSTEM_ARTIFACT_FACTS = [
  * 返回 undefined 表示「这个项目不属于任何已登记的宿主生态」。
  */
 function detectHostEcosystem(root, root_, eco) {
+  // 清单读取**按文件名走同一个缓存**：描述符声明自己要看哪个文件（`package.json`、
+  // `manifest.json`……），这里负责读一次并记住。只认一个文件名的话，凡是不以
+  // `package.json` 为清单的宿主（Obsidian 用 `manifest.json`）永远走不到——
+  // 症状是那个生态的整段事实静默为空，而报告看起来一切正常。
+  const cache = new Map()
+  const readManifest = (name) => {
+    if (cache.has(name)) return cache.get(name)
+    let value
+    if (name === 'package.json' && eco.manifest !== undefined) {
+      // 主清单已被本文件解析过，直接复用。损坏时返回 undefined——损坏本身由生态
+      // 判定那一支单独报，这里再报一次是两处说同一件事。
+      value = eco.manifest.__corrupt === true ? undefined : eco.manifest
+    } else {
+      const real = root_.real(name)
+      const parsed = real === undefined ? undefined : readJson(join(root, real))
+      value = parsed === undefined || parsed.__corrupt === true ? undefined : parsed
+    }
+    cache.set(name, value)
+    return value
+  }
   const ctx = {
     exists: (rel) => root_.has(rel),
     readText: (rel) => {
       const real = root_.real(rel)
       return real === undefined ? undefined : readText(join(root, real))
     },
-    manifest: (name) => {
-      // 只有主清单已被本文件解析过时才复用；否则现读——但**不吞掉损坏**：
-      // 损坏的清单由生态判定那一支单独报，这里返回 undefined 即可。
-      if (name === 'package.json' && eco.manifest !== undefined) {
-        return eco.manifest.__corrupt === true ? undefined : eco.manifest
-      }
-      return undefined
-    },
+    manifest: readManifest,
   }
   const d = detectHost(HOST_ECOSYSTEMS, ctx)
   if (d === undefined) return undefined
@@ -2362,6 +2386,10 @@ function detectGit(root, options = {}) {
       + '都属于那个外层仓库，不代表本目录的状态。给本目录建库前必须先与用户确认边界'
       + '（是并入外层仓库，还是在本目录单独建库）；在确认之前不要提交、也不要推送。'
   }
+  // 远端协议**只判一次**，供认证与网络两处共用：两处各判一次，
+  // `git@host:` 与 `ssh://` 两种写法迟早有一边认不出。
+  info.remoteProtocol = typeof info.remote !== 'string' || info.remote === '' ? 'none'
+    : (/^https?:\/\//i.test(info.remote) ? 'https' : 'ssh')
   info.auth = detectAuth(info, root, options)
   return info
 }
@@ -2382,11 +2410,183 @@ function detectGit(root, options = {}) {
  *   - 必须屏蔽交互与超时，否则无人值守时会挂死等人输入；
  *   - 判不出来就是 `undetermined`，**不许读成 `no-credential`**。
  */
+/**
+ * 轨道 B：平台 API 的凭据现场（建仓库、发 Release、读 issue 要的那份）。
+ *
+ * 与「能不能推代码」是**两件事**：SSH 推得通的机器上可能一个令牌都没有；装了 gh 但
+ * 没登录的机器上，推送也照样通。混成一句会给两个都不准的答案。
+ *
+ * 三条红线，与凭据探测同源：
+ *   - 只看**有没有**：环境变量只判存在，**绝不外传值**，长度也不；
+ *   - `gh auth status` 的意义只有退出码，输出一律不读也不打印（它可能含令牌片段）；
+ *   - 判不出来就是 `undetermined`，不许读成 `missing`。
+ */
+function detectPlatformAuth(out) {
+  out.envToken = Boolean(process.env.GH_TOKEN || process.env.GITHUB_TOKEN)
+  const gh = spawnSync('gh', ['--version'], {
+    encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024,
+  })
+  if (gh.error !== undefined) {
+    // 没装与装了但跑不起来，处置不同，分开说。
+    out.gh = gh.error.code === 'ENOENT' ? 'missing' : 'undetermined'
+    out.ghReason = gh.error.code === 'ENOENT'
+      ? '没有装 gh（不装也能用：MCP 或 REST 带令牌即可）'
+      : `gh 跑不起来（${gh.error.code ?? gh.error.message}）`
+    return
+  }
+  const status = spawnSync('gh', ['auth', 'status'], {
+    encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' },
+  })
+  if (status.error !== undefined || status.status === null) {
+    out.gh = 'undetermined'
+    out.ghReason = `gh auth status 没跑起来（${status.error?.code ?? '超时'}）`
+  } else if (status.status === 0) {
+    out.gh = 'authenticated'
+    out.ghReason = 'gh 已登录（平台 API 可走 gh）'
+  } else {
+    out.gh = 'unauthenticated'
+    out.ghReason = 'gh 装了但没登录（gh auth login 一次即可；也可以改用令牌或 MCP）'
+  }
+}
+
+/**
+ * 轨道 A 的 SSH 分支：**离线可答**的那个问题——本机配过 SSH 没有。
+ *
+ * 判据只认两样**存在性**事实，不连网、不读私钥内容：
+ *   - `~/.ssh` 下有 `id_*` 一类的私钥文件（`.pub` 不算：只有公钥推不了）；
+ *   - 或 `~/.ssh/config` 里有指向 github.com 的 Host 段（命名密钥、443 端口都配在这里）。
+ */
+function detectSshAuth(out) {
+  const dir = join(homedir(), '.ssh')
+  let entries = []
+  try {
+    entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+  } catch {
+    out.ssh = 'missing'
+    out.sshReason = `没有 ${dir} 目录（SSH 远端需要先配密钥，见 references/remote-github.md）`
+    out.transport = 'no-credential'
+    out.transportReason = out.sshReason
+    return
+  }
+  const keyFiles = entries
+    .filter((e) => e.isFile() && /^id_/.test(e.name) && !e.name.endsWith('.pub'))
+    .map((e) => e.name)
+  let hasGithubHost = false
+  if (entries.some((e) => e.isFile() && e.name === 'config')) {
+    try {
+      const cfg = readFileSync(join(dir, 'config'), 'utf8')
+      hasGithubHost = /^\s*Host\s+[^\n]*github\.com/im.test(cfg)
+    } catch { hasGithubHost = false }
+  }
+  if (keyFiles.length === 0 && !hasGithubHost) {
+    out.ssh = 'missing'
+    out.sshReason = `${dir} 里没有 id_* 私钥，config 里也没有 github.com 段`
+    out.transport = 'no-credential'
+    out.transportReason = out.sshReason
+    return
+  }
+  out.ssh = 'configured'
+  const bits = []
+  if (keyFiles.length > 0) {
+    bits.push(`私钥 ${keyFiles.slice(0, 3).join('、')}${keyFiles.length > 3 ? ' 等' : ''}`)
+  }
+  if (hasGithubHost) bits.push('config 里有 github.com 段')
+  out.sshReason = `${dir} 里：${bits.join('，')}——离线只能判「配过」，通不通要加 --probe-network`
+  // 配过就按「能推」记：离线判不了通不通，而把它记成「没凭据」会让人去重配一遍本来
+  // 配好的东西。真通不通由 --probe-network 回答。
+  out.transport = 'ok'
+  out.transportReason = out.sshReason
+}
+
+/**
+ * 网络可达性：**默认不探测**。
+ *
+ * 默认跑 `git ls-remote` 时，网络受限的机器上一次要等二十来秒（连接超时），
+ * 而勘察本身不到一秒——它把一件「偶尔想知道」的事变成每次调用都要付的代价。
+ *
+ * 默认给 `undetermined` 并说明「没有探测」，需要时用 `--probe-network` 显式开。
+ * 判据取「不阻塞主流程」，而不是「顺手也测一下」：勘察要被反复调用，任何一次网络
+ * 往返都不该混进来。
+ */
+function detectNetwork(out, info, options) {
+  const root = info.root
+  const remote = info.remote
+  if (options.probeNetwork !== true) {
+    out.networkReason = '没有探测（默认不联网；需要时加 --probe-network）'
+    return
+  }
+  if (info.remoteProtocol === 'ssh') {
+    // GitHub 认证成功时**退出码是 1**、文案里写着 successfully authenticated。
+    // 按 0 判会把「通」读成「不通」——这是它的既定行为，不是异常。
+    const r = spawnSync('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], {
+      cwd: root, encoding: 'utf8', windowsHide: true, timeout: 12000, maxBuffer: 1024 * 1024,
+    })
+    const text = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
+    if (r.error !== undefined) {
+      out.networkReason = `探测没跑起来：${r.error.code ?? r.error.message}`
+    } else if (/successfully authenticated/i.test(text)) {
+      out.network = 'reachable'
+      out.ssh = 'configured'
+      out.sshReason = 'SSH 握手成功（GitHub 回 successfully authenticated）'
+    } else if (/Permission denied/i.test(text)) {
+      out.network = 'unreachable'
+      out.ssh = 'missing'
+      out.sshReason = 'SSH 被拒：公钥没加到平台账号，或 agent 里没有这把钥匙'
+    } else {
+      out.network = 'unreachable'
+      out.networkReason = /Connection refused|timed out|Timeout/i.test(text)
+        ? '连不上（22 端口被封时改用 ssh.github.com:443，见 references/remote-github.md）'
+        : '未识别的失败（见 ssh -T 的输出）'
+    }
+    return
+  }
+  const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 8000,
+    maxBuffer: 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+  })
+  if (netR.error !== undefined) {
+    out.networkReason = `探测没跑起来：${netR.error.code ?? netR.error.message}`
+  } else if (netR.status === 0) {
+    out.network = 'reachable'
+  } else {
+    out.network = 'unreachable'
+    const err = String(netR.stderr ?? '')
+    const signals = [
+      [/Could not resolve host/i, 'DNS 解析失败'],
+      [/Failed to connect to/i, '连接不上（防火墙/代理/端口）'],
+      [/Repository not found|not found/i, '远端不存在，或凭据对私有仓库不可见'],
+      [/Authentication failed|Bad credentials|Invalid username or token/i, '认证被拒'],
+      [/terminal prompts disabled|could not read Username/i, '非交互环境取不到凭据'],
+      [/timed out|Timeout/i, '超时'],
+    ]
+    const hit = signals.find(([re]) => re.test(err))
+    out.networkReason = hit !== undefined ? hit[1] : '未识别的失败（见 stderr）'
+  }
+}
+
 function detectAuth(info, root, options = {}) {
   const out = {
     // 凭据助手所在的层级与取值：两层模型（仓库级/继承）看不见 system 层，而那正是常见落点。
     helper: info.identity.credentialHelper,
     helperScope: info.identity.credentialHelperScope,
+    // **两条轨道分开判**，因为它们要的凭据完全不同：
+    //   轨道 A（git 传输：推代码）——HTTPS 走凭据助手，SSH 走密钥与 agent；
+    //   轨道 B（平台 API：建仓库、发 Release、读 issue）——MCP / gh / REST，都要令牌。
+    // 混成一句「有没有凭据」会给出两个都不准的答案：SSH 推送通的机器上平台 API 可能
+    // 没有任何令牌，反之亦然。
+    protocol: 'none',
+    transport: 'n/a',
+    transportReason: undefined,
+    ssh: 'undetermined',
+    sshReason: undefined,
+    gh: 'undetermined',
+    ghReason: undefined,
+    envToken: false,
     https: 'undetermined',
     httpsReason: undefined,
     network: 'undetermined',
@@ -2400,35 +2600,64 @@ function detectAuth(info, root, options = {}) {
   if (options.light === true) {
     out.https = 'undetermined'
     out.httpsReason = '轻量勘察没有探测凭据（发布前要单独确认）'
+    out.ssh = 'undetermined'
+    out.sshReason = '轻量勘察没有探测（发布前要单独确认）'
+    out.gh = 'undetermined'
+    out.ghReason = '轻量勘察没有探测（发布前要单独确认）'
     out.network = 'undetermined'
     out.networkReason = '轻量勘察没有探测网络'
     out.skipped = true
     return out
   }
 
+  // 轨道 B 与远端无关：`gh` 有没有登录、环境里有没有令牌，是可以独立回答的两件事。
+  // **放在最前面**，这样「还没有远端」的项目也能知道自己的平台凭据是什么状态——
+  // 建仓库之前正需要这个答案，而那时远端还不存在。
+  detectPlatformAuth(out)
+
   const remote = info.remote
   if (typeof remote !== 'string' || remote === '') {
     out.https = 'n/a'
     out.httpsReason = '没有远端地址，谈不上推送认证'
     out.network = 'n/a'
+    out.transportReason = '没有远端地址'
+    out.sshReason = '没有远端地址'
     return out
   }
   // SSH 远端不走凭据助手这条路：它的认证是密钥 + agent，`credential fill` 对它无意义。
+  //
+  // 但它**不是判不了**：本机有没有配过 SSH 是一个离线可答的问题（看 `~/.ssh`）。
+  // 从前这里直接返回 `undetermined`，后果是**每一个用 SSH 的项目在交付门禁里永远挂着
+  // 一条待问，而且没有任何开关能消掉它**——严谨退化成了一条走不通的路。
   if (!/^https?:\/\//i.test(remote)) {
-    out.https = 'undetermined'
-    out.httpsReason = '远端不是 HTTPS 形式（SSH 一类），推送认证由密钥与 agent 决定，'
-      + '这条协议判不出来——不要据此断言「没有凭据」'
+    out.protocol = 'ssh'
+    detectSshAuth(out)
+    out.https = 'n/a'
+    out.httpsReason = '远端是 SSH 形式，不走凭据助手（推送认证由密钥与 agent 决定）'
+    if (options.probeNetwork === true) detectNetwork(out, info, options)
+    else out.networkReason = '没有探测（默认不联网；需要时加 --probe-network）'
     return out
   }
+  out.protocol = 'https'
 
   // ── HTTPS：问凭据助手要一次，只看退出码 ────────────────────────────────────
   //
   // 屏蔽交互是硬要求：没有凭据时 `credential fill` 会提示输入密码，无人值守时挂死。
   // `GCM_INTERACTIVE=never` 关掉凭据管理器自己的弹窗与 provider 探测。
   let host = ''
-  try { host = new URL(remote).host } catch { host = '' }
+  let credPath = ''
+  try {
+    const u = new URL(remote)
+    host = u.host
+    // `owner/repo.git`：`git credential fill` 认的是这个形状，不是 `/owner/repo`。
+    const segs = u.pathname.replace(/^\/+/, '').replace(/\.git$/, '').split('/').filter(Boolean)
+    if (segs.length >= 2) credPath = `${segs[0]}/${segs[1]}.git`
+  } catch {
+    host = ''
+  }
   if (host === '') {
     out.httpsReason = '远端地址解析不出主机名'
+    out.transportReason = out.httpsReason
   } else {
     // **必须在目标项目里问**，不能取当前工作目录。
     //
@@ -2441,7 +2670,10 @@ function detectAuth(info, root, options = {}) {
       windowsHide: true,
       timeout: 15000,
       maxBuffer: 1024 * 1024,
-      input: `protocol=https\nhost=${host}\n\n`,
+      // `path=` 不能省：`credential.useHttpPath=true` 时（细粒度 PAT、同机多账号
+      // 的常见配置），凭据是按**仓库路径**存的，只给 host 会查不到——症状是「明明能推，
+      // 勘察却说没有凭据」。路径从远端 URL 取，取不到就不加（不多编一个空值）。
+      input: `protocol=https\nhost=${host}\n${credPath === '' ? '' : `path=${credPath}\n`}\n`,
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
@@ -2451,59 +2683,26 @@ function detectAuth(info, root, options = {}) {
       },
     })
     if (r.error !== undefined) {
-      out.httpsReason = `凭据助手没跑起来：${r.error.code ?? r.error.message}`
+      out.transportReason = `凭据助手没跑起来：${r.error.code ?? r.error.message}`
+      out.httpsReason = out.transportReason
     } else if (r.status === 0) {
       // 成功即「拿得到凭据」。**不解析值**：这里只需要知道「有没有」。
       out.https = 'available'
-      out.httpsReason = `凭据助手（${out.helper ?? '未声明'}）为 ${host} 返回了凭据`
+      out.transport = 'ok'
+      out.transportReason = `凭据助手（${out.helper ?? '未声明'}）为 ${host} 返回了凭据`
+      out.httpsReason = out.transportReason
     } else {
       // 非零退出说明这次没拿到，但「没拿到」不等于「机器上没有凭据」：
       // 也许助手本身不可用、也许超时。原因写进 reason，状态留给上层判。
       out.https = 'no-credential'
+      out.transport = 'no-credential'
       const tail = String(r.stderr ?? '').split('\n').filter(Boolean).slice(-2).join('；')
       out.httpsReason = tail === '' ? `凭据助手以退出码 ${r.status} 结束` : tail
+      out.transportReason = out.httpsReason
     }
   }
 
-  // ── 网络可达性：**默认不探测** ──────────────────────────────────────────
-  //
-  // 默认跑 `git ls-remote` 时，网络受限的机器上一次要等二十来秒（连接超时），
-  // 而勘察本身不到一秒——它把一件「偶尔想知道」的事变成每次调用都要付的代价。
-  //
-  // 现在默认给 `undetermined` 并说明「没有探测」，需要时用 `--probe-network` 显式开。
-  // 判据取「不阻塞主流程」，而不是「顺手也测一下」：勘察要被反复调用，任何一次网络
-  // 往返都不该混进来。
-  if (options.probeNetwork === true) {
-    const netR = spawnSync('git', ['ls-remote', '--heads', remote], {
-      cwd: root,
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 8000,
-      maxBuffer: 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-    })
-    if (netR.error !== undefined) {
-      out.networkReason = `探测没跑起来：${netR.error.code ?? netR.error.message}`
-    } else if (netR.status === 0) {
-      out.network = 'reachable'
-    } else {
-      out.network = 'unreachable'
-      const err = String(netR.stderr ?? '')
-      const signals = [
-        [/Could not resolve host/i, 'DNS 解析失败'],
-        [/Failed to connect to/i, '连接不上（防火墙/代理/端口）'],
-        [/Repository not found|not found/i, '远端不存在，或凭据对私有仓库不可见'],
-        [/Authentication failed|Bad credentials|Invalid username or token/i, '认证被拒'],
-        [/terminal prompts disabled|could not read Username/i, '非交互环境取不到凭据'],
-        [/timed out|Timeout/i, '超时'],
-      ]
-      const hit = signals.find(([re]) => re.test(err))
-      out.networkReason = hit !== undefined ? hit[1] : '未识别的失败（见 stderr）'
-    }
-  } else {
-    out.networkReason = '没有探测（默认不联网；需要时加 --probe-network）'
-  }
-
+  detectNetwork(out, info, options)
   return out
 }
 
@@ -2700,8 +2899,8 @@ function survey(target, options = {}) {
     workspace,
     artifacts,
     // 宿主生态的补充事实：由描述符驱动，主引擎不认识任何具体生态名。
-    // 保留 dsh 这个键是向后兼容——消费方改名是另一件事，不在这次改动里。
-    dsh: detectHostEcosystem(root, root_, eco),
+    // 键名 `host` 与描述符的通用契约同名——DSH 只是其中一类宿主，不是这把槽位本身。
+    host: detectHostEcosystem(root, root_, eco),
     localSkills: detectLocalSkills(root),
     docs: detectDocs(root, root_),
     ignores,

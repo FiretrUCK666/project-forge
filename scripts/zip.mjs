@@ -136,11 +136,19 @@ export function readZip(buf) {
  * 用户包是用 `--prefix=project-forge-<版本>/` 打的，解压出来是一个目录；而副本自己就在
  * 那个目录里，所以比对时要看的是**前缀之后**的路径。前缀由第一个条目推出来，不写死——
  * 版本号会变。
+ *
+ * **前缀只到第一段**，不到最后一段：条目的先后由归档里的写入顺序决定，第一个条目可能
+ * 在子目录里（`repo-1.0/assets/a.svg`）。取「最后一个斜杠之前」会得到 `repo-1.0/assets/`，
+ * 剥完剩下的路径全都少了半截，`SKILL.md` 也随之消失——症状是更新时报「包里没有 SKILL.md」，
+ * 而包本身完好。
+ *
+ * 剥之前先验：所有条目都要落在候选前缀之下。验不过就原样返回——宁可不剥（后续按原名找
+ * 文件、找不到会如实报错），也不要剥出一份**看起来正常、实际错位**的文件集合。
  */
 export function stripCommonPrefix(entries) {
   if (entries.length === 0) return entries
   const first = entries[0].name
-  const cut = first.lastIndexOf('/')
+  const cut = first.indexOf('/')
   if (cut < 0) return entries
   const prefix = first.slice(0, cut + 1)
   if (!entries.every((e) => e.name.startsWith(prefix))) return entries

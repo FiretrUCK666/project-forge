@@ -394,10 +394,12 @@ group('[51] 交棒勘察：痕迹找得到、干净的判得对、通用标记�
 
   // ── 12) 目标给成文件：结论不能是肯定句 ──
   // 「没扫到」被读成「扫过了、很干净」是这个工具最不该有的误读，而零命中 + 一句
-  // 「已经是干净状态」正是它的长相。
+  // 「已经是干净状态」正是它的长相。判据是**语义**：结论里必须出现「判不了」，
+  // 且绝不能出现「已经是干净状态」——追某个具体措辞会让这条断言在下次改文案时假红。
   const oneFile = handoff(join(cleanDir, 'README.md'), '--scan')
-  const oneFileOk = /没扫到全部/.test(oneFile.stdout ?? '')
+  const oneFileOk = /判不了/.test(oneFile.stdout ?? '')
     && !/已经是干净状态/.test(oneFile.stdout ?? '')
+    && /只扫了/.test(oneFile.stdout ?? '')
   check(oneFileOk, '目标给成文件时，结论不是肯定句',
     (oneFile.stdout ?? '').split('\n').filter((l) => l.includes('结论')).join(' / '))
   report(oneFileOk, '只扫一部分：不肯定')
@@ -416,8 +418,8 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
     'lib/index.js': 'export const name = "n"\n',
   })
   const sn = survey(nofiles)
-  const okN1 = sn.dsh?.filesHasLib === false
-  check(okN1, 'files 缺 lib → 事实为假', JSON.stringify(sn.dsh?.filesHasLib))
+  const okN1 = sn.host?.filesHasLib === false
+  check(okN1, 'files 缺 lib → 事实为假', JSON.stringify(sn.host?.filesHasLib))
   report(okN1, 'files 缺 lib：勘察报假')
 
   // 「已知 `dsh.*` 键」分两类，两类都不该报「不认识」，真不认识的要照报。
@@ -443,18 +445,18 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
     'icon.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
   })
   const sk = survey(keys)
-  const knownNoNoise = (sk.dsh?.unknownKeys ?? []).join() === 'mystery'
+  const knownNoNoise = (sk.host?.unknownKeys ?? []).join() === 'mystery'
   check(knownNoNoise, '公开/内部字段不报，真不认识的照报',
-    JSON.stringify({ unknown: sk.dsh?.unknownKeys }))
+    JSON.stringify({ unknown: sk.host?.unknownKeys }))
   report(knownNoNoise, '已知键：内部字段与公开字段均不误报，真未知键仍报出')
-  const declFacts = sk.dsh?.hasManifestVersion === true && sk.dsh?.enginesDsh === '0.2.1-alpha.1'
-    && sk.dsh?.hasIcon === true
+  const declFacts = sk.host?.hasManifestVersion === true && sk.host?.enginesHost === '0.2.1-alpha.1'
+    && sk.host?.hasIcon === true
   check(declFacts, '声明式元数据逐项读出', JSON.stringify({
-    v: sk.dsh?.hasManifestVersion, engines: sk.dsh?.enginesDsh, icon: sk.dsh?.hasIcon,
+    v: sk.host?.hasManifestVersion, engines: sk.host?.enginesHost, icon: sk.host?.hasIcon,
   }))
   report(declFacts, '声明式元数据：格式版本、宿主范围、图标均读出')
-  const noStale = sk.dsh !== undefined && sk.dsh.hasInvariantEntry === undefined
-  check(noStale, '事实集里不再有宿主已移除的伴生入口字段', JSON.stringify(Object.keys(sk.dsh ?? {})))
+  const noStale = sk.host !== undefined && sk.host.hasInvariantEntry === undefined
+  check(noStale, '事实集里不再有宿主已移除的伴生入口字段', JSON.stringify(Object.keys(sk.host ?? {})))
   report(noStale, '陈旧字段：已随宿主移除而清干净')
 
   // 宿主运行时放错位置
@@ -470,8 +472,8 @@ group('[32] DSH 新事实与本地 skills：按分发判、不写死名单')
     'lib/index.js': 'export const name = "b"\n',
   })
   const sb = survey(baddep)
-  const okN3 = sb.dsh?.hostRuntimeInDeps === true
-  check(okN3, '宿主运行时进 dependencies → 标出', JSON.stringify(sb.dsh?.hostRuntimeInDeps))
+  const okN3 = sb.host?.hostRuntimeInDeps === true
+  check(okN3, '宿主运行时进 dependencies → 标出', JSON.stringify(sb.host?.hostRuntimeInDeps))
   report(okN3, '依赖放错：标出')
 
   // 本地 skills 通用盘点：完全不同的名字也能认出，不写死名单
@@ -1430,6 +1432,41 @@ group('[56] 协作门禁：模板在不在、模板里有没有验证与回滚�
   const o7 = out(danger, ...base, '--no-collab-templates')
   check(!/任意陌生人/.test(o7), '同一触发器只打标签 → 不误报（合法用法）')
   report(!/任意陌生人/.test(o7), '合法用法：放行')
+}
+
+group('[55] 自己的源仓库：标识符与占位是应有状态，别处照旧严格')
+{
+  // 一条豁免、两条反例。少了反例，这条豁免可以靠「整条判据失效」满足——
+  // 而判据失效的后果是真正的残留再也查不出来。
+  const out = handoff(SKILL_ROOT, '--verify')
+  const okSelf = out.status === 0 && /已经是干净状态/.test(out.stdout ?? '')
+  check(okSelf, '本 skill 自己的源仓库：--verify 退出 0（模板里的占位不是残留）',
+    `exit=${out.status} ` + (out.stdout ?? '').split('\n').filter((l) => l.includes('结论')).join(' / '))
+  report(okSelf, '自身仓库：判为干净')
+
+  // 反例一：把名字改掉就不是自己了。判据是名字，不是路径——
+  // 换成按路径判，同一份文件搬到别处就会得到两种答案。
+  const renamed = join(ROOT, 'self-renamed')
+  copyTree(SKILL_ROOT, renamed, new Set(['.git', '.project-forge', 'node_modules']))
+  const entry = join(renamed, 'SKILL.md')
+  writeFileSync(entry, readFileSync(entry, 'utf8').replace(/^name:\s*project-forge\s*$/m, 'name: some-other-skill'), 'utf8')
+  const other = handoff(renamed, '--verify')
+  check(other.status === 1, '名字不同 → 恢复严格判定（豁免只认名字，不认路径）', `exit=${other.status}`)
+  report(other.status === 1, '别的仓库：照旧严格')
+
+  // 反例二：真残留仍然要报——在一份**不是自己**的仓库里放一个本 skill 的标识符。
+  // 只写 SKILL.md 的名字不够：真正的判据是「名字相同 + 内核模板逐字相同」，
+  // 一份没有 templates/ 的目录本来就不该被当成自己的源仓库。所以这里塞进去的
+  // 是**真残留**——模板占位与带本 skill 标识符的注释。
+  const dirty = fixture('self-dirty', {
+    'SKILL.md': '---\nname: project-forge\ndescription: 冒名\n---\n\n# x\n',
+    'NOTES.md': '<!-- pf:author: 这里要人写 -->\n\n<安装命令>\n',
+  })
+  const dirtyOut = handoff(dirty, '--verify')
+  const okDirty = dirtyOut.status === 1
+  check(okDirty, '冒名的目录里出现本 skill 标识符 → 照旧报出来（豁免不能变成盲区）',
+    `exit=${dirtyOut.status}`)
+  report(okDirty, '冒名目录：照旧报')
 }
 
 // ---- 分片收尾 ----

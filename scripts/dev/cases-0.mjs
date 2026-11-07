@@ -926,6 +926,39 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     rmSync(zipPath, { force: true })
   }
 
+  // 九之二、前缀剥离不依赖条目顺序。
+  //
+  // 归档里条目的先后由写入顺序决定，第一个条目完全可能落在子目录里（`repo-1.0/assets/a.svg`）。
+  // 剥前缀时若按「最后一个斜杠」切，剥出来的是一份**少了半截路径**的集合：`SKILL.md` 随之
+  // 消失，调用方报的是「包里没有 SKILL.md」——而包本身完好，错的是这层剥离。
+  {
+    const strip = (names) => stripCommonPrefix(names.map((name) => ({ name, data: Buffer.alloc(0) })))
+      .map((e) => e.name)
+
+    const deepFirst = strip(['repo-1.0/assets/a.svg', 'repo-1.0/SKILL.md', 'repo-1.0/scripts/x.mjs'])
+    const okDeep = deepFirst.includes('SKILL.md') && deepFirst.includes('assets/a.svg')
+      && deepFirst.includes('scripts/x.mjs')
+    check(okDeep, '首项在子目录时，前缀只剥到第一段（SKILL.md 仍在）', JSON.stringify(deepFirst))
+    report(okDeep, '前缀剥离：与条目顺序无关')
+
+    const rootFirst = strip(['repo-1.0/SKILL.md', 'repo-1.0/assets/a.svg'])
+    const okRoot = rootFirst.includes('SKILL.md') && rootFirst.includes('assets/a.svg')
+    check(okRoot, '首项在根时，前缀照常剥掉', JSON.stringify(rootFirst))
+    report(okRoot, '前缀剥离：首项在根也成立')
+
+    // 验不过就原样返回：宁可不剥（后面按原名找不到文件会如实报错），
+    // 也不要剥出一份看起来正常、实际错位的集合。
+    const mixed = strip(['repo-1.0/SKILL.md', 'other/x.md'])
+    const okMixed = mixed.includes('repo-1.0/SKILL.md') && mixed.includes('other/x.md')
+    check(okMixed, '条目不共享前缀时不剥（原样返回）', JSON.stringify(mixed))
+    report(okMixed, '前缀剥离：不共享时不动')
+
+    const flat = strip(['SKILL.md', 'README.md'])
+    const okFlat = flat.includes('SKILL.md') && flat.includes('README.md')
+    check(okFlat, '没有目录层时原样返回', JSON.stringify(flat))
+    report(okFlat, '前缀剥离：无目录层')
+  }
+
   // ── 装完之后必须验收：版本号对得上，不等于内容是好的 ──
   //
   // 这条路径没有退路：包副本是 git archive 解出来的，**没有 .git**，写坏了没有
@@ -1559,6 +1592,86 @@ group('[33] 易漏生态分支：skill、损坏清单、dotnet 各有出口')
   const okD = (survey(dn).ecosystem?.kinds ?? []).includes('dotnet')
   check(okD, 'csproj → dotnet', JSON.stringify(survey(dn).ecosystem?.kinds))
   report(okD, 'dotnet：认出')
+}
+
+group('[54] 宿主生态描述符：清单不叫 package.json 也要真的被读')
+{
+  // 这一组守的是「描述符写好了、主引擎却读不到清单」那一类：清单文件名由描述符声明，
+  // 而主引擎只认 package.json 时，凡是不用 package.json 当清单的宿主（Obsidian 用
+  // manifest.json）**整段事实静默为空**——报告看起来一切正常，只是少了半页。
+  {
+    const ob = fixture('host-obsidian', {
+      'manifest.json': JSON.stringify({
+        id: 'my-plugin', name: 'My Plugin', version: '1.2.3',
+        minAppVersion: '1.0.0', description: 'd', author: 'a', isDesktopOnly: false,
+      }),
+      'main.js': 'module.exports = {}\n',
+      'README.md': '# d\n',
+    })
+    const h = survey(ob).host
+    const okId = h?.id === 'obsidian-plugin'
+    check(okId, 'Obsidian 插件 → 认出宿主，且事实不是空的', JSON.stringify(h?.id))
+    report(okId, 'Obsidian：认出')
+    const okFacts = h?.pluginId === 'my-plugin' && h?.enginesHost === '1.0.0'
+      && h?.declaredVersion === '1.2.3'
+    check(okFacts, 'Obsidian：清单字段都读到了（id / minAppVersion / version）',
+      JSON.stringify({ id: h?.pluginId, eng: h?.enginesHost, ver: h?.declaredVersion }))
+    report(okFacts, 'Obsidian：字段读全')
+  }
+  // 反例：同名 manifest.json 的 PWA 不是插件。少了这一条，「读 manifest.json」可以靠
+  // 「凡有 manifest.json 就当插件」满足——而到处都是 PWA。
+  {
+    const pwa = fixture('host-pwa', {
+      'manifest.json': JSON.stringify({ name: 'App', start_url: '/', display: 'standalone' }),
+      'index.html': '<!doctype html>\n',
+    })
+    const h2 = survey(pwa).host
+    const okPwa = h2 === undefined
+    check(okPwa, 'PWA 的 manifest.json（无 minAppVersion）→ 不判成插件', JSON.stringify(h2?.id))
+    report(okPwa, 'PWA：不误判')
+  }
+  // 损坏的 manifest.json 不能把勘察打断，也不该编出一段事实。
+  {
+    const broken = fixture('host-broken', {
+      'manifest.json': '{oops',
+      'main.js': 'x\n',
+    })
+    const h3 = survey(broken).host
+    const okBroken = h3 === undefined
+    check(okBroken, 'manifest.json 损坏 → 不崩、也不编事实', JSON.stringify(h3?.id))
+    report(okBroken, '损坏清单：不崩')
+  }
+  // VS Code 扩展：判据是 engines.vscode，事实要读到 publisher 与贡献点。
+  {
+    const vs = fixture('host-vscode', {
+      'package.json': JSON.stringify({
+        name: 'ext', version: '0.0.1', publisher: 'me', main: './out/extension.js',
+        engines: { vscode: '^1.80.0' },
+        contributes: { commands: [{ command: 'x.y', title: 'Y' }] },
+      }),
+      'out/extension.js': 'x\n',
+    })
+    const h4 = survey(vs).host
+    const okVs = h4?.id === 'vscode-extension' && h4?.enginesHost === '^1.80.0'
+      && h4?.hasPublisher === true
+    check(okVs, 'VS Code 扩展：认出来并读到 engines.vscode / publisher',
+      JSON.stringify({ id: h4?.id, eng: h4?.enginesHost, pub: h4?.hasPublisher }))
+    report(okVs, 'VS Code：认出来')
+  }
+  // 没有 main 却有需要代码的贡献点 → 报警告（只告警，不断言一定加载不起来）。
+  {
+    const noMain = fixture('host-vscode-nomain', {
+      'package.json': JSON.stringify({
+        name: 'ext2', version: '0.0.1', publisher: 'me',
+        engines: { vscode: '^1.80.0' },
+        contributes: { commands: [{ command: 'x.y', title: 'Y' }] },
+      }),
+    })
+    const h5 = survey(noMain).host
+    const okWarn = (h5?.warnings ?? []).some((w) => /main/.test(w))
+    check(okWarn, '无 main 但有需要代码的贡献点 → 报警告', JSON.stringify(h5?.warnings))
+    report(okWarn, 'VS Code：缺 main 有告警')
+  }
 }
 
 // ---- 分片收尾 ----// 主入口靠这一行读计数。格式固定。

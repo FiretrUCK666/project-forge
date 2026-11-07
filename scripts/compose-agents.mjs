@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url'
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
-import { fencedSpans, markerPositions, scanLines } from './lib/markdown.mjs'
+import { fencedSpans, markerPositions, scanLines, splitSections } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
 // 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
 // 哪些是使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取。
@@ -104,7 +104,7 @@ function readProjectText(p) {
  * 内核，而 `--check` 只看第一对标记、`--status` 数不到缺节，两道门同时报绿。
  *
  * 计数只数**围栏外**的出现：文档里在代码块中展示这对标记是正常用法（本脚本的报错
- * 信息就是这么写的），算进去会把一份好文件判成受损。围栏状态机在 sync-toc.mjs，
+ * 信息就是这么写的），算进去会把一份好文件判成受损。围栏状态机在 scripts/lib/markdown.mjs，
  * 那边与目录工具共用同一份。
  */
 function documentState(text) {
@@ -342,11 +342,11 @@ function deriveFacts(target, s = surveyLight(target)) {
   const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
   const isGo = s.ecosystem.kinds.includes('go')
   const isPlugin = s.ecosystem.kinds.some((k) => /plugin|extension/.test(k))
-  const hasDshClient = s.dsh?.hasClientEntry === true || s.dsh?.hasClientDecl === true
-  const hasDshBundle = s.dsh?.bundlePatch !== undefined || s.dsh?.patchFile !== undefined
-  const hasDshToolchain = s.dsh?.toolchain !== undefined
-    && (s.dsh.toolchain.tsdown === true || s.dsh.toolchain.vitest === true || s.dsh.toolchain.oxlint === true)
-  const hasDshLocalWorkflow = s.dsh?.localWorkflow === true || s.dsh?.contractDoc === true
+  const hasDshClient = s.host?.hasClientEntry === true || s.host?.hasClientDecl === true
+  const hasDshBundle = s.host?.bundlePatch !== undefined || s.host?.patchFile !== undefined
+  const hasDshToolchain = s.host?.toolchain !== undefined
+    && (s.host.toolchain.tsdown === true || s.host.toolchain.vitest === true || s.host.toolchain.oxlint === true)
+  const hasDshLocalWorkflow = s.host?.localWorkflow === true || s.host?.contractDoc === true
   // 「版本与可复现」这一节恒属于 DSH 插件：版本面（peer 版本、补丁层）是宿主契约的一部分，
   // 不是「有没有读到某个文件」决定的。
   //
@@ -685,25 +685,7 @@ function dominantEol(text) {
   return crlf > lf ? '\r\n' : '\n'
 }
 
-/** 把文本按二级标题切成「前言 + 各节」，用于按节合并。 */
-function splitSections(text) {
-  const lines = text.split('\n')
-  const head = []
-  const sections = []
-  let current = undefined
-  for (const line of lines) {
-    const isH2 = /^##\s+\S/.test(line)
-    if (isH2) {
-      if (current !== undefined) sections.push(current)
-      current = { heading: line.trim(), lines: [line] }
-      continue
-    }
-    if (current === undefined) head.push(line)
-    else current.lines.push(line)
-  }
-  if (current !== undefined) sections.push(current)
-  return { head: head.join('\n'), sections }
-}
+
 
 /**
  * 把内核区整段摘出来，换成一行占位。
@@ -846,9 +828,12 @@ function refreshFromTemplate(target, existing, kernel, state, s = surveyLight(ta
   text = stripScaffold(text, authors.length)
 
   const report = { kept, refreshed, missing, authors: authors.length }
+  // `fresh` 一并带出去：账本要按「模板这次求值出什么」判归属，不能在落盘后的成品上
+  // 反推——成品里作者手填的节已经不含 pf:author 了，看着就像我生成的。
+  const freshRendered = rendered
   // facts 一并带出去：报告要用它说清「清单读不出来」这类事（那与本次刷新无关，
   // 但契约里少了一节，使用者必须知道）。
-  return { text, report, facts }
+  return { text, report, facts, fresh: freshRendered }
 }
 
 function kernelBody() {
@@ -911,7 +896,8 @@ function embeddedKernel(text) {
  * 每个 AGENTS.md 都有的，而内核属于「总纲」性质，放在正文之前符合它被阅读的顺序。
  */
 function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
-  const fresh = splitSections(materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s)))
+  const rendered = materialize(readUtf8(SKELETON_PATH), deriveFacts(target, s))
+  const fresh = splitSections(rendered)
   const old = splitSections(existing)
 
   // 行尾先定下来：插入的内容按**原文件的主导行尾**排。
@@ -969,7 +955,8 @@ function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
   //
   // 这一步不改动任何字节的正文，只在节标题下面插一行注释。
   text = markKeptSections(text, new Set(old.sections.map((s) => s.heading)))
-  return { text, added }
+  // `fresh` 同样带出去：升级只做加法，账本据此确认「哪些节是我这次真的写下去的」。
+  return { text, added, fresh: rendered }
 }
 
 /**
@@ -1079,7 +1066,7 @@ function recordWholeFile(target, rels) {
   return 0
 }
 
-function recordLanded(target, agentsPath, text) {
+function recordLanded(target, agentsPath, text, freshRendered) {
   const { ledger } = readLedger(target)
   const file = 'AGENTS.md'
 
@@ -1090,24 +1077,47 @@ function recordLanded(target, agentsPath, text) {
     recordSegment(ledger, {
       file,
       id: LEDGER_KERNEL,
-      landing: 'anchored',
+      landing: 'anchor',
       content: text.slice(si + KERNEL_START.length, ei),
     })
   }
 
-  // 受管节：这一版求值出来的、归脚本决定的那些节。
+  // 受管节：只认**这一次真的由我求值写下去**的那几节。判据两条同时成立：
+  //
+  //   1. **在内核区之外**——内核区已经按一段记过了，再按节记一遍等于同一段字节
+  //      有两个归属，撤除时先删哪个都可能留下半截；
+  //   2. **文件里的这一节与本次新求值的结果逐字相同**——这次我只是把它原样留着，
+  //      没有重写过它。认领「我留着的东西」与认领「我写的东西」是两件事，前者正是
+  //      存量项目里最危险的错误：作者手填的一节，会在下一次刷新触发后突然变成
+  //      「账本确认这一段是本 skill 写的，可以精确撤除」。
+  //
+  // 第 2 条同时覆盖了「模板说这段归人写」的情形：作者一旦填了那一节，它与模板求值
+  // 的结果就不再逐字相同，于是不被认领。
+  //
+  // 两条都不满足的，**主动摘掉记录**：留着一条旧记录会让「这一节归谁」在两个版本之间
+  // 摇摆，而摇摆的结果是撤除时动到不该动的东西。
+  const freshByHeading = new Map()
+  if (freshRendered !== undefined) {
+    for (const s of splitSections(freshRendered).sections) {
+      if (!freshByHeading.has(s.heading)) freshByHeading.set(s.heading, s.text)
+    }
+  }
+  const kernelBody = si >= 0 && ei > si ? text.slice(si, ei + KERNEL_END.length) : ''
   for (const section of splitSections(text).sections) {
-    const body = section.lines.join('\n')
-    // 归使用者所有的节不记：撤除时不该碰它。
-    if (body.includes(KEEP)) {
-      forgetSegment(ledger, file, `${LEDGER_SECTION_PREFIX}${section.heading}`)
+    const id = `${LEDGER_SECTION_PREFIX}${section.heading}`
+    const inKernel = kernelBody !== '' && section.text.length > 0 && kernelBody.includes(section.text)
+    const freshText = freshByHeading.get(section.heading)
+    const untouched = freshText !== undefined
+      && freshText.replace(/\r\n/g, '\n') === section.text.replace(/\r\n/g, '\n')
+    if (inKernel || section.text.includes(KEEP) || !untouched) {
+      forgetSegment(ledger, file, id)
       continue
     }
     recordSegment(ledger, {
       file,
-      id: `${LEDGER_SECTION_PREFIX}${section.heading}`,
+      id,
       landing: 'section',
-      content: body,
+      content: section.text,
     })
   }
 
@@ -1277,7 +1287,7 @@ function applicableMissingSections(target, text, s = surveyLight(target)) {
  */
 function dshCompatibilityNotice(s) {
   if (s === undefined || !s.ecosystem.kinds.includes('dsh-plugin')) return undefined
-  const pinned = s.dsh?.pinnedVersions ?? []
+  const pinned = s.host?.pinnedVersions ?? []
   if (pinned.length === 0) return undefined
   let marker = ''
   try {
@@ -1532,7 +1542,7 @@ function main(argv) {
   }
   // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）。
   //
-  // 判据与报告都在 sync-toc.mjs 那一处：只删「能证明是已经死掉的进程留下的」那些，
+  // 判据与报告都在 lib/fs-atomic.mjs 那一处：只删「能证明是已经死掉的进程留下的」那些，
   // 同前缀但不是纯数字的（使用者自己的文件）与属主还活着的（另一个正在跑的进程手里
   // 的）一律留下并报出来——删掉前者是悄悄毁掉别人的东西，删掉后者会让那次运行的改名
   // 失败。
@@ -1552,6 +1562,8 @@ function main(argv) {
   let kernelWillBeOverwritten = false
   // 生成时留下的勘察结论：报告里要用它说清「这一节为什么没生成」（清单解析不了时）。
   let factsForReport
+  // 本次模板求值的原文：账本按它判「哪些节是脚本这次真的写下去的」。
+  let freshForLedger
   try {
     if (exists) {
       // ① 编码守卫：读不出无损 UTF-8 就**不写**。
@@ -1593,11 +1605,13 @@ function main(argv) {
         if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check, s)
         const upgraded = upgradeHandwritten(existing, kernel, target, s)
         composed = upgraded.text
+        freshForLedger = upgraded.fresh
         refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [] }
       } else {
         managedExisting = existing
         const refreshed = refreshFromTemplate(target, existing, kernel, state, s)
         composed = refreshed.text
+        freshForLedger = refreshed.fresh
         refreshReport = refreshed.report
         factsForReport = refreshed.facts
         // 内核区会被模板刷新：判据与 `--check` 的「内核不一致」同源（embeddedKernel）。
@@ -1616,6 +1630,8 @@ function main(argv) {
       const facts = deriveFacts(target, s)
       factsForReport = facts
       composed = materialize(readUtf8(SKELETON_PATH), facts)
+      // 账本按**模板求值原文**判归属，所以这一份要在加工之前留出来。
+      freshForLedger = composed
       if (!composed.endsWith('\n')) composed += '\n'
       const authors = findAuthors(composed)
       composed = stripScaffold(composed, authors.length)
@@ -1794,7 +1810,7 @@ function main(argv) {
   // 记账失败**不中断**：文件已经写好了，账本只是下一次判定的依据；这里报一句，
   // 下一次会退化成「什么都不敢认」，那是安全的退化方向。
   try {
-    recordLanded(target, agentsPath, payload)
+    recordLanded(target, agentsPath, payload, freshForLedger)
   } catch (error) {
     process.stderr.write(`提示：账本没能更新（${error instanceof Error ? error.message : String(error)}\n`
       + '  文件已写入；下次判定会退化成「只做加法、不撤任何东西」。\n')

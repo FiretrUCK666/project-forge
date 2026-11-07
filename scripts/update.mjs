@@ -79,7 +79,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileMap } from './lib/text.mjs'
 import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
-// 临时文件的**形状与归属判据**只有一份，住在 sync-toc.mjs：compose-agents.mjs 从那里取，
+// 临时文件的**形状与归属判据**只有一份，住在 lib/fs-atomic.mjs：compose-agents.mjs 从那里取，
 // 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
 // 使用者自己的文件也删了」。
 import { clearStaleTemps, tempPathFor } from './lib/fs-atomic.mjs'
@@ -109,7 +109,7 @@ const STALE_CHECK_MS = 24 * 60 * 60 * 1000
 /**
  * 两次「问远端要版本号」之间至少隔这么久。
  *
- * 与上面那个窗口是两件事：窗口管**换不换文件**，这一条管**联不联网**。原先只有窗口，
+ * 与上面那个窗口是两件事：窗口管**换不换文件**，这一条管**联不联网**。只有窗口时，
  * 于是「已是最新」这个结论每次任务都重新联网取一遍——它每天最多只有一个小时是新的，
  * 其余时间都是重复劳动。离线环境下这笔钱更贵：每条路要等到连接失败或超时，实测
  * 每次任务白等 2 秒左右，而这段时间挂在任务开头。
@@ -400,7 +400,7 @@ async function probeApi(endpoint, source) {
  */
 async function probeWeb(endpoint, source) {
   // **不要求来源是 `owner/name` 那种形状**：它只是一个 http(s) 地址，探针也只需要地址。
-  // 早年这里拿 `repoPath` 当门槛，于是自建镜像给的 `http://host:port` 被挡在门外，
+  // 判据不能用 `repoPath`：自建镜像给的 `http://host:port` 会被它挡在门外，
   // 而挡的方式是「那边没有最新发布」——一个看起来像事实的错误结论。
   const res = await download(endpoint, { accept: 'application/vnd.github+json' })
   if (!res.ok) return { state: res.status === 404 ? 'absent' : 'unreachable' }
@@ -670,7 +670,7 @@ function applyPackage(entries) {
     // 它也必须落在本领目录之内——落在外面就说明这个条目指到了不该指的地方。
     if (!insideSkill(tempPathFor(p))) { skipped.push(e.name); continue }
     mkdirSync(dirname(p), { recursive: true })
-    // 清掉这个文件此前的临时文件（上次被杀进程留下的）：判据与 sync-toc.mjs 共用一份，
+    // 清掉这个文件此前的临时文件（上次被杀进程留下的）：判据与 lib/fs-atomic.mjs 共用一份，
     // 两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉、另一个清不掉」。
     for (const k of clearStaleTemps(p).kept) keptTemps.push(k.name)
     writeAtomic(p, e.data)
@@ -863,7 +863,7 @@ function originUrl(source) {
   } catch {
     return undefined
   }
-  // 只校协议与主机：**根路径也是合法来源**。以前靠一条正则要求「主机后面必须还有一段
+  // 只校协议与主机：**根路径也是合法来源**。靠「主机后面必须还有一段路径」的正则
   // 路径」，于是 `http://127.0.0.1:8080`、`http://mirror.internal:9000` 这类自建镜像
   // 被静默拒绝——改了环境变量的人以为指到了内网，实际还在打硬编码的那个仓库。
   if (!/^https?:$/.test(url.protocol) || url.host === '') return undefined

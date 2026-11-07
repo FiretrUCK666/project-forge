@@ -547,6 +547,35 @@ group('[51c] 账本：痕迹判定查哈希，不再猜形状')
     `ledger-edited ${editedHits.length} 条`)
   report(editedHits.length > 0, '账本：改过的一节被判为改过')
 
+  // 正例五：**作者手填的节不能被认领**。存量项目里最危险的错误是这一条——
+  // 生成一次 → 作者填了「项目定位」→ 加远端触发真实重写 → 账本把那一节记成「我写的」,
+  // 交棒时就会说「可以精确撤除」，撤除即是删掉作者写的那段。
+  //
+  // 判据是「这一节与本次模板求值的结果是否逐字相同」：作者一填，两者就不同。
+  {
+    const d2 = fixture('ledger-authored', { 'package.json': '{"name":"led2","version":"1.0.0"}\n' })
+    compose(d2)
+    const p2 = join(d2, 'AGENTS.md')
+    const filled = readFileSync(p2, 'utf8')
+      .replace(/(## 项目定位\r?\n)/, '$1\n作者自己写的一句话。\n')
+    writeFileSync(p2, filled, 'utf8')
+    // 让本次刷新真的重写文件：加一个远端，发布那半部分条件段落会跟着变。
+    gitIn(d2, 'init', '-q')
+    gitIn(d2, 'remote', 'add', 'origin', 'https://github.com/example/repo.git')
+    compose(d2)
+    const led2 = JSON.parse(readFileSync(join(d2, '.project-forge', 'ledger.json'), 'utf8'))
+    const ids2 = Object.keys(led2.segments?.['AGENTS.md'] ?? {})
+    const claimed = ids2.some((i) => i.includes('项目定位'))
+    check(!claimed, '作者手填过的节不被账本认领（认领了就会在撤除时删掉他的字）',
+      ids2.filter((i) => i.includes('定位')).join('、'))
+    report(!claimed, '账本：不认领作者填过的节')
+    // 反向也要断言：纯生成的节仍然必须被认领，否则上面那条可以靠「什么都不记」满足。
+    const stillMine = ids2.some((i) => i.includes('版本管理'))
+    check(stillMine, '纯生成的节仍被认领（否则「不认领」可以靠整本不记来满足）',
+      ids2.filter((i) => i.includes('版本管理')).join('、'))
+    report(stillMine, '账本：纯生成节照旧认领')
+  }
+
   // 正例四：使用者删掉的节报「不见了」，不能当成「没写过」重新插一遍。
   const gone = edited.replace(/(?:\r?\n)## 文档同步[\s\S]*?(?=\r?\n## |$)/, '')
   writeFileSync(agents, gone, 'utf8')
@@ -889,7 +918,7 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
     report(typeof hostPin === 'string' && hostPin.length > 0, `专章标记 host=${hostPin}`)
     const dir = mkDual(`^${hostPin}`)
     const pin = `^${hostPin}`
-    const pinned = survey(dir).dsh?.pinnedVersions ?? []
+    const pinned = survey(dir).host?.pinnedVersions ?? []
     const okPin = pinned.includes(pin)
     check(okPin, '锁定版本被收录', JSON.stringify(pinned))
     report(okPin, '锁定版本：收录')
@@ -924,7 +953,7 @@ group('[31] DSH 专章滞后提醒：对齐安静，漂移警告，不拦流程'
       }, null, 2),
       'cordis.patch.yml': "- insert:\n    - id: unk\n      name: 'dsh-unk'\n",
     })
-    const unk = survey(dir).dsh?.unknownKeys ?? []
+    const unk = survey(dir).host?.unknownKeys ?? []
     const okUnk = unk.includes('frobnicate')
     check(okUnk, '未知 dsh 字段被点名', JSON.stringify(unk))
     report(okUnk, '未知字段：现形')

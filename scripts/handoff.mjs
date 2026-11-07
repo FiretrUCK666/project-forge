@@ -46,7 +46,7 @@ import { KERNEL_START } from './lib/protocol.mjs'
 import { KERNEL_END, MANAGED, UPGRADED, KEEP, SUMMARY_MARKER } from './lib/protocol.mjs'
 import { frontmatterBlock } from './lib/text.mjs'
 import { isMainModule } from './lib/text.mjs'
-import { scanLines, fencedSpans } from './lib/markdown.mjs'
+import { scanLines, fencedSpans, splitSections } from './lib/markdown.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -58,27 +58,7 @@ const LEDGER_SECTION_PREFIX = 'section:'
 /** 整份文件记成一个片段时的 id（compose-agents 记 LICENSE / workflow 用）。 */
 const LEDGER_WHOLE = 'whole'
 
-/**
- * 把文本按二级标题切成「前言 + 各节」。
- *
- * 与 compose-agents 里那份语义一致：`heading` 存**整行**（含 `## ` 前缀）。两处要能
- * 对得上同一个片段，所以格式必须逐字相同——账本按这个 key 记账、也按它查。
- */
-function splitSections(text) {
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  const sections = []
-  let current
-  for (const line of lines) {
-    if (/^##\s+\S/.test(line)) {
-      if (current !== undefined) sections.push(current)
-      current = { heading: line.trim(), lines: [line] }
-      continue
-    }
-    if (current !== undefined) current.lines.push(line)
-  }
-  if (current !== undefined) sections.push(current)
-  return sections
-}
+
 const SKILL_ENTRY = join(SKILL_ROOT, 'SKILL.md')
 
 /** 单文件超过这个字节数就不读：痕迹标记与占位符不会出现在几十兆的产物里，而读完很贵。 */
@@ -249,26 +229,43 @@ const SKILL_TOKENS = (() => {
 /**
  * 尖括号占位符：`<安装命令>`、`<清单声明的版本>` 这类。
  *
- * **判据仍然是「形状」，所以必须收得很紧**——这是本文件里唯一一处只能靠形状判的地方，
- * 因为尖括号不像 `{{}}` 那样有取值名可对。放松一点就会误伤：中文技术文档里
- * `<生产环境>`、`<部署文档>`、`<项目邮箱>` 全是**正常的指路写法**，判成占位符会让人
- * 去删掉自己的文档。
+ * 判据与上面 `{{TOKEN}}` **同一条**：认「这个名字是不是我们的」，不认「形状像不像」。
+ * 名单由模板里实际出现的 `<...>` 反推，不手写——模板新增占位时这里自动跟上。
  *
- * 收法是**只认两类**：
- *   1. 以「命令 / 版本 / 步骤 / 路径 / 名称 / 地址 / 文件名」这类**明显的操作位名词**结尾
- *      ——它们是「这里要填一个具体值」的信号；
- *   2. 全大写占位名（`<OWNER>`、`<REPO>`），那是占位符的通行写法。
+ * 只看形状会误伤两类完全正常的写法，两类都实测过：
  *
- * 反例（都不命中）：`<生产环境>`（环境名，不是要填的位）、`<部署文档>`（文档名）、
- * `<项目邮箱>`（联系方式）——它们是读者要去的地方，不是要替换的洞。
+ *   1. **中文里指路的写法**：`<生产环境>`、`<项目邮箱>`、`references/<文件名>.md`
+ *      ——最后这个就写在 `AGENTS.md` 里，用来告诉读者「占位示例怎么写」。按形状判，
+ *      本 skill 自己的仓库会被自己报成「模板没填完」。
+ *   2. **源码里的泛型**：`Array<USER_ID>`、`Result<DATA_TYPE>`、`Vec<ITEM_ID>`、
+ *      `<BR>`——它们在 `.ts` / `.rs` / `.go` 里是类型参数，不是待填的洞。
+ *
+ * 反过来，`<安装命令>`、`<标签名>` 这类**只出现在本 skill 模板里**的洞，
+ * 填没填一望即知——这正是要抓的那一类。
  */
-const ANGLE_PLACEHOLDER_RE = new RegExp(
-  '<('
-  + '[\\u4e00-\\u9fa5A-Za-z0-9 _./-]{0,50}?(?:命令|版本|步骤|路径|名称|地址|文件名|占位|链接)'
-  + '|[A-Z][A-Z0-9_]{1,30}'
-  + ')>',
-  'g',
-)
+const SKILL_ANGLES = (() => {
+  const out = new Set()
+  const walk = (sub) => {
+    let entries = []
+    try { entries = readdirSync(join(TEMPLATES_DIR, sub), { withFileTypes: true, encoding: 'utf8' }) } catch { return }
+    for (const e of entries) {
+      const rel = sub === '' ? e.name : `${sub}/${e.name}`
+      if (e.isDirectory()) { walk(rel); continue }
+      let text = ''
+      try { text = readFileSync(join(TEMPLATES_DIR, rel), 'utf8') } catch { continue }
+      for (const m of text.matchAll(/<([^<>\n]{1,60})>/g)) {
+        const inner = m[1]
+        // `<!-- 注释 -->` 与闭合标签也被这段正则框住了：它们的内部以 `!` 或 `/` 开头。
+        // 那是**标记**不是占位——把注释也算进名单，会让每一份带本 skill 内核的文件
+        // （包括本仓库自己的 AGENTS.md）都被报成「模板没填完」。
+        if (inner.startsWith('!') || inner.startsWith('/')) continue
+        out.add(inner)
+      }
+    }
+  }
+  walk('')
+  return out
+})()
 
 // ── C 组：注入残留 ─────────────────────────────────────────────────────────
 
@@ -952,12 +949,44 @@ const GROUPS = [
 
 // ── 勘察 ───────────────────────────────────────────────────────────────────
 
+/**
+ * 目标目录是不是**本 skill 自己的源仓库**。
+ *
+ * 判据是两条同时成立：目标根有 `SKILL.md`，且它 frontmatter 里的 `name` 与本脚本所在的
+ * skill 同名。**不按路径判**——路径会随安装位置变，而名字是这套格式对外的身份。
+ *
+ * 为什么需要这一条：本仓库里到处是 `templates/` 的占位符、`pf:` 标记、以及写着本 skill
+ * 名字的注释。那都是**应有的状态**，不是残留。不认自己，交棒勘察在自己的仓库里会报出
+ * 几百条「痕迹」，真正需要看的那几条就淹在里面了。
+ */
+function isOwnSourceRepo(root) {
+  const entry = join(root, 'SKILL.md')
+  let text
+  try { text = readFileSync(entry, 'utf8') } catch { return false }
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/^\uFEFF/, ''))?.[1] ?? ''
+  const name = /^name:\s*(.*)$/m.exec(fm)?.[1]?.trim().replace(/^["']|["']$/g, '')
+  if (name === undefined || name !== skillName()) return false
+  // 只认名字不够：一个目标项目完全可能恰好也叫这个名字（或者被人照着起了一个）。
+  // 再核一处**只有本 skill 才有的东西**——内核模板逐字相同。目标项目里没有
+  // `templates/agents-kernel.md`（那是源码件，不进用户包、也不进目标项目），
+  // 所以这一条同时排除了「同名但不是本 skill 的树」。
+  try {
+    const theirs = readFileSync(join(root, 'templates', 'agents-kernel.md'), 'utf8')
+    const ours = readFileSync(join(TEMPLATES_DIR, 'agents-kernel.md'), 'utf8')
+    return theirs.replace(/\r\n/g, '\n') === ours.replace(/\r\n/g, '\n')
+  } catch {
+    return false
+  }
+}
+
 function scan(root, onlyFile) {
   const { files, dirs, scanned } = collectFiles(root, onlyFile)
   const templates = loadTemplates()
   const skillTree = loadSkillTree()
   const name = skillName()
   const stateName = `.${name}`
+  // 自己的源仓库：标识符与模板相似是应有状态，不是痕迹。
+  const selfRepo = onlyFile === undefined && isOwnSourceRepo(root)
 
   const markers = []
   const unfinished = []
@@ -1035,7 +1064,7 @@ function scan(root, onlyFile) {
                 if (b < 0) return false
                 return whole.slice(a + KERNEL_START.length, b)
               }
-              const sec = splitSections(whole).find((s) => s.heading === heading)
+              const sec = splitSections(whole).sections.find((s) => s.heading === heading)
               // 那一节已经不在了：使用者删掉或改了标题。这不是「我该重新插一遍」，
               // 而是「他不要这一节了」——报出来让交棒的人知道。
               return sec === undefined ? null : sec.lines.join('\n')
@@ -1109,7 +1138,7 @@ function scan(root, onlyFile) {
     const starts = lineStarts(text)
 
     // 围栏里的出现不算：文档在代码块里展示这对标记是正常写法（本项目的 references 就是
-    // 这么写的），把它算进去会把一份好文件判成有痕迹。围栏判据取自 sync-toc.mjs 的
+    // 这么写的），把它算进去会把一份好文件判成有痕迹。围栏判据取自 lib/markdown.mjs 的
     // 那份实现，不另立一套状态机。
     //
     // 占位符**不**做同样的处理：模板里的 `{{COMMANDS}}` 本来就写在代码块里，而它留在
@@ -1138,8 +1167,9 @@ function scan(root, onlyFile) {
           line: lineOf(starts, hit.index),
           literal,
           kind: rule.kind,
-          what,
-          blocks: true,
+          // 自己的源仓库里这些标识符**本来就该在**：模板、协议、脚本都写着它们。
+          what: selfRepo ? `${what}（本 skill 自己的源仓库：这是应有状态）` : what,
+          blocks: !selfRepo,
           ...(rule.suspect === true ? { suspect: true } : {}),
         })
       }
@@ -1153,9 +1183,11 @@ function scan(root, onlyFile) {
         line: hit.line,
         literal: name,
         kind: 'skill-name-in-comment',
-        what: '本 skill 的名字出现在注释里（模板顶部那块「按 TODO 逐项替换后删掉本注释块」'
-          + '的说明落盘后留下的）',
-        blocks: true,
+        what: selfRepo
+          ? '本 skill 的名字出现在注释里（本 skill 自己的源仓库：这是应有状态）'
+          : '本 skill 的名字出现在注释里（模板顶部那块「按 TODO 逐项替换后删掉本注释块」'
+            + '的说明落盘后留下的）',
+        blocks: !selfRepo,
       })
     }
 
@@ -1168,8 +1200,10 @@ function scan(root, onlyFile) {
         line: lineOf(starts, hit.index),
         literal: UNFINISHED_RULE.literal,
         kind: UNFINISHED_RULE.kind,
-        what: UNFINISHED_RULE.what,
-        blocks: true,
+        what: selfRepo
+          ? '本 skill 自己的源仓库：模板里的待填写标记本来就该在'
+          : UNFINISHED_RULE.what,
+        blocks: !selfRepo,
       })
     }
 
@@ -1187,19 +1221,24 @@ function scan(root, onlyFile) {
         line: lineOf(starts, hit.index),
         match: hit[0],
         kind: 'placeholder',
-        what: `模板没填完的占位符（${token} 是本 skill 模板里的取值名）`,
-        blocks: true,
+        what: selfRepo
+          ? `本 skill 自己的源仓库：${token} 是模板自己的取值名，本来就该在`
+          : `模板没填完的占位符（${token} 是本 skill 模板里的取值名）`,
+        blocks: !selfRepo,
       })
     }
-    for (const hit of text.matchAll(ANGLE_PLACEHOLDER_RE)) {
+    for (const hit of text.matchAll(/<([^<>\n]{1,60})>/g)) {
+      if (!SKILL_ANGLES.has(hit[1])) continue
       if (isInsideFence(hit.index)) continue
       placeholders.push({
         path: file.rel,
         line: lineOf(starts, hit.index),
         match: hit[0],
         kind: 'placeholder',
-        what: '模板没填完的占位符（尖括号里还是人话，没有换成实际值）',
-        blocks: true,
+        what: selfRepo
+          ? `本 skill 自己的源仓库：${hit[0]} 是模板自己的占位写法，本来就该在`
+          : `模板没填完的占位符（${hit[0]} 是本 skill 模板里的占位写法）`,
+        blocks: !selfRepo,
       })
     }
 
@@ -1219,6 +1258,7 @@ function scan(root, onlyFile) {
         line: null,
         match: best.template.name,
         kind: 'template-similar',
+        ...(selfRepo ? { suspect: false } : {}),
         what: `与本 skill 的模板 ${best.template.name} 高度相似（${Math.round(best.sim.similarity * 100)}%，命中 ${best.sim.matchedCount}/${best.sim.total} 个${best.sim.unit}）`,
         blocks: false,
         similarity: best.sim.similarity,
@@ -1329,6 +1369,9 @@ function scan(root, onlyFile) {
   //     遍历截断）原来只写在正文里，`--verify` 照样退 0——任何拿它当关卡的地方都会把
   //     「没扫到」读成「扫过了、很干净」。这正是本脚本自己警告过的那件事，却只防住了
   //     「零命中」这一条路，没防住「跳过了」这一条。
+  //
+  // gaps 的判据只有一条：**这一处没扫到，里面可能有痕迹**。凡是「不可能含痕迹」的，
+  // 一律不进 gaps——把它们算成盲区会让整份报告永远给不出「干净」这个结论。
   const gaps = []
   // 账本**读不出来**与**不存在**是两件事：前者意味着「归属证据在，但我读不到」，
   // 此时任何「干净」的结论都是假绿。记进 gaps 会让 complete 归零、退出码走 3。
@@ -1336,9 +1379,23 @@ function scan(root, onlyFile) {
     gaps.push('账本存在但读不出来（损坏 / 版本不认识 / 结构不对）——归属判定无从核对，'
       + '这不能读成「干净」；先修复或删除 .project-forge/ledger.json 再重跑')
   }
-  if (scanned.skippedLarge > 0) gaps.push(`${scanned.skippedLarge} 个文件超过体积上限未读`)
-  if (scanned.skippedBinary > 0) gaps.push(`${scanned.skippedBinary} 个二进制文件未读`)
+  if (scanned.skippedLarge > 0) {
+    gaps.push(`${scanned.skippedLarge} 个文件超过体积上限未读（大文件里可能藏着痕迹）`)
+  }
+  // 二进制文件不读进内存：它们不可能含有文本形态的标识符、占位符或围栏，
+  // 所以「没读」在这里**不是**盲区。按盲区算的代价是实测出来的：一个只多了一张
+  // 图标的干净项目会永远判不出干净（`--verify` 退出码 3），而它真的干净。
   if (scanned.partial === true) gaps.push('只扫了指定的一部分')
+  if (scanned.truncated === true) {
+    gaps.push('遍历被条目上限截断——上限之外的文件一个都没扫到，'
+      + '这不能读成「干净」；换个目录重跑，或先清掉不需要扫描的子目录')
+  }
+  if (scanned.depthLimited > 0) {
+    gaps.push(`${scanned.depthLimited} 处目录超过深度上限未展开——深层文件一个都没扫到`)
+  }
+  if (scanned.unreadable > 0) {
+    gaps.push(`${scanned.unreadable} 处读不出来（目录或文件权限）——里面的内容没被检查过`)
+  }
   const complete = gaps.length === 0
   return { project: root, groups, clean, findings, blocking, scanned, gaps, complete }
 }
@@ -1358,21 +1415,25 @@ function formatFinding(finding) {
 /**
  * 「没扫到」的部分要说出来。
  *
- * 每一类没扫到的东西都单独报：跳过的二进制文件、超大的文件、读不出来的目录、被上限
- * 截断的遍历、目标给成了文件。**不报它们，「零命中」就会被读成「扫过了、很干净」**
- * ——而「没扫到」与「里面没有东西」是两件事，混成一样时，结论就成了一句没人能核对的
- * 假话。
+ * 两类分开报，因为后果不同：
+ *
+ * - **盲区**：里面可能有痕迹，没扫到就不能给「干净」这个结论（超大文件、读不出来的
+ *   目录、被上限截断的遍历、只扫了一部分）；
+ * - **不影响判定**：二进制文件不读进内存，而文本形态的标识符、占位符、围栏都不可能
+ *   出现在二进制里，所以它们既不算盲区、也不该在每次勘察时都占一行。
+ *
+ * 混成一句「结论只覆盖已扫到的部分」，会让每个带一张图标的项目都看到这句提示，
+ * 于是这句提示在真正需要它的时候已经没人看了。
  */
 function scanGaps(scanned) {
   const parts = []
-    // 账本读不出来 → 结论只覆盖能确认的那部分，不能说「干净」。
-    if (scanned.ledgerState === 'unreadable') parts.push('账本读不出来，归属无从核对')
+  // 账本读不出来 → 结论只覆盖能确认的那部分，不能说「干净」。
+  if (scanned.ledgerState === 'unreadable') parts.push('账本读不出来，归属无从核对')
   if (scanned.partial) parts.push('目标是文件，只扫了那一个')
   if (scanned.truncated) parts.push('遍历被条目上限截断')
   if (scanned.depthLimited > 0) parts.push(`${scanned.depthLimited} 处目录超过深度上限`)
   if (scanned.unreadable > 0) parts.push(`${scanned.unreadable} 处读不出来`)
   if (scanned.skippedLarge > 0) parts.push(`${scanned.skippedLarge} 个文件超过 ${MAX_FILE_BYTES} 字节未读`)
-  if (scanned.skippedBinary > 0) parts.push(`${scanned.skippedBinary} 个二进制文件未读`)
   if (parts.length === 0) return undefined
   return `注意：${parts.join('；')}——结论只覆盖已扫到的部分（已扫 ${scanned.files} 个文件）。`
 }
@@ -1390,11 +1451,16 @@ function renderText(report, mode) {
     + '用 compose-agents.mjs <项目目录> --status（只报告，不写入）确认。')
   out.push('')
   if (report.findings === 0) {
-    // 「已经干净」只在**确实扫到了全部**时才准说：没扫到全的时候说「已经干净」，
-    // 就是把「没扫到」说成「扫过了、很干净」——那正是这个工具最不该有的误读。
-    out.push(gap !== undefined
-      ? '结论：没有发现痕迹（本次没扫到全部，见上面的提示）。'
-      : '结论：已经是干净状态（没有发现任何 project-forge 的痕迹）。')
+    // 「已经干净」只在**确实扫到了全部**时才准说。没扫全时说「没有发现痕迹」，
+    // 就是把「没查」说成「查过没有」——而这个工具的退出码此时是 3，正文却报了干净，
+    // 任何拿退出码当关卡的地方都会与正文对不上。
+    if (report.complete === false) {
+      out.push('结论：**判不了**——扫描没有覆盖全部，所以「没发现」不等于「没有」。')
+      for (const g of report.gaps ?? []) out.push(`  - ${g}`)
+      out.push('  要得到结论，先把上面那几处补上（或改用 --scan 逐条人工核对）。')
+    } else {
+      out.push('结论：已经是干净状态（没有发现任何 project-forge 的痕迹）。')
+    }
     return `${out.join('\n')}\n`
   }
   for (const group of GROUPS) {
@@ -1416,26 +1482,24 @@ function renderText(report, mode) {
   const tail = tails.length > 0 ? `（${tails.join('；')}）` : ''
   const verdict = report.clean ? '已经是干净状态' : `还有 ${report.blocking} 处待处理`
   out.push('')
-  if (report.clean) {
-    out.push(gap !== undefined
-      ? '结论：没有发现痕迹（本次没扫到全部，见上面的提示）。'
-      : `结论：${verdict}（没有发现任何 project-forge 的痕迹）。`)
+  // 判决分三档，顺序是**先判能不能判，再判干不干净**：
+  //
+  //   1. 有挡着的命中        → 不干净
+  //   2. 没有挡着的，但没扫全 → 判不了（「没发现」不等于「没有」）
+  //   3. 没有挡着的，也扫全了 → 干净
+  //
+  // 顺序颠倒（先判干净、再在里面问扫全没有）会让第 2 档永远进不去——那正是
+  // 「退出码 3、正文却说没有发现痕迹」这种自相矛盾的来源。
+  if (!report.clean) {
+    out.push(`结论：${mode === 'verify' ? '不干净——' : ''}${verdict}${tail}。`)
+  } else if (report.complete === false) {
+    out.push('结论：**判不了**——扫描没有覆盖全部，所以「没发现」不等于「没有」。')
+    for (const g of report.gaps ?? []) out.push(`  - ${g}`)
+    out.push('  要得到结论，先把上面那几处补上（或改用 --scan 逐条人工核对）。')
+  } else {
+    out.push(`结论：${verdict}（没有发现任何 project-forge 的痕迹）。`)
     if (report.groups.templateSimilar.length > 0) {
       out.push('[D] 组列出的模板衍生物交棒时一律不动，见 references/handoff.md 第四节。')
-    }
-  } else {
-    // 判决要三档，因为「干净」有两种截然不同的成立条件：
-    // 扫全了、什么都没发现；以及没扫全、所以什么都没发现。
-    // 后者不是结论，是「判不了」——把它们合成一句话，等于让「没查」冒充「查过没有」。
-    if (mode === 'verify' && report.clean && report.complete === false) {
-      out.push('结论：**判不了**——扫描没有覆盖全部，所以「没发现」不等于「没有」。')
-      for (const g of report.gaps ?? []) out.push(`  - ${g}`)
-      out.push('  退出码 3。要得到结论，先把上面那几处补上（或改用 --scan 逐条人工核对）。')
-    } else {
-      out.push(`结论：${mode === 'verify' ? '不干净——' : ''}${verdict}${tail}。`)
-      if (mode === 'verify' && report.clean) {
-        out.push('  （扫描完整：所有条目都读到了。）')
-      }
     }
   }
   return `${out.join('\n')}\n`

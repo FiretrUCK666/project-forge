@@ -53,6 +53,7 @@ project-forge brings them into one flow:
 - **Remote repository**: create (private by default), push, metadata, collaboration templates, CI;
 - **Release channel**: whether it can ship, where to, how versions are numbered, how to ship safely;
 - **Release spec**: for projects that ship, a `RELEASING.md` saying where the notes live, which sections they use, and in what order to publish (the notes are a file in the repo, written before the tag; automation posts it to the release page and fails loudly when the file is missing);
+- **Collaboration protocol**: how work actually lands once the setup is done — where changes come from (outside reports, outside pull requests, your own daily edits), where work items live, how review runs, who may merge (irreversible territory always needs a human), and how to clean up after a merge;
 - **Hand-off**: once the project is in shape, it asks whether you want its traces cleaned up.
 
 It only governs. It does not create the project itself: it picks no stack and writes no source or
@@ -87,6 +88,12 @@ up — that is the closing move, not a fifth step. The input is surveyed facts, 
 checklist, so it will not bolt a release flow onto a docs-only directory and will not recreate a
 repo that already has a remote. "Not releasing" and "skipping something" are normal outcomes, not
 failures.
+
+**Those four steps set the project up. What follows is a second track: how you use it day to day.**
+A change has to be routed — where it came from (an outside report, an outside pull request, your own
+daily edit), whether it needs a work item, who reviews it, who may merge, and how to clean up
+afterwards. That track has no stage numbers; read it when you need it, in
+`references/collaboration.md`.
 
 ## Before you start
 

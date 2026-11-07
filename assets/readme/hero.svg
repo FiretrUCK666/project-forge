@@ -24,7 +24,7 @@
     <text x="64" y="312" font-size="30" fill="#17181A">给它一个项目目录：先只读勘察，</text>
     <text x="64" y="356" font-size="30" fill="#17181A">再按事实决定做哪几件事。</text>
 
-    <text x="64" y="440" font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道 · 交棒</text>
+    <text x="64" y="440" font-size="19" fill="#5D6064">版本管理 · 文档套装 · 远端仓库 · 发布通道 · 发版规范 · 协作协议 · 交棒</text>
     <text x="1136" y="440" font-size="18" text-anchor="end" fill="#5D6064"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Node &#8805; 16 · 零依赖</text>
   </g>

@@ -18,6 +18,8 @@
  *   node scripts/compose-agents.mjs [目录]              生成或刷新
  *   node scripts/compose-agents.mjs [目录] --check      只校验，不写入
  *   node scripts/compose-agents.mjs [目录] --status     只报告现状（待填写项与缺节），不写入
+ *   node scripts/compose-agents.mjs [目录] --upgrade    升级手写的 AGENTS.md 注入通用内核
+ *   node scripts/compose-agents.mjs [目录] --record <文件...> 登记落盘文件到账本
  *   node scripts/compose-agents.mjs [目录] --budget N   指定预算字节数（默认 65536）
  *
  * 缺节判据只对**结构由脚本决定**的文件成立（见 survey.mjs 里 MANAGED / UPGRADED 两个
@@ -35,11 +37,12 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { listRoot, manifestSection } from './lib/manifest.mjs'
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines, splitSections } from './lib/markdown.mjs'
-import { readLedger, writeLedger, recordSegment, forgetSegment } from './lib/ledger.mjs'
+import { readLedger, writeLedger, recordSegment, forgetSegment, recordSnapshot } from './lib/ledger.mjs'
 // 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
 // 哪些是使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取。
 import { clearStaleTemps, tempPathFor, reportTemps } from './lib/fs-atomic.mjs'
@@ -186,73 +189,19 @@ const DEPENDENCY_FILES = [
 ]
 
 /**
- * 根目录文件名索引：**按小写匹配**，返回磁盘上的原名。
- *
- * 一次 readdir 供本文件所有清单判据共用，既避免大小写不一致，也避免每个判据各扫一次
- * 目录。找不到时返回 undefined，调用方据此走「没有这一项」的分支。
- */
-function rootIndex(target) {
-  let entries = []
-  let readError
-  try {
-    entries = readdirSync(target)
-  } catch (error) {
-    // **读不到目录与「目录是空的」必须分开。**
-    //
-    // 合成一句「什么都没有」的后果不是少一个字段，而是整条判定链一起落空：生态认不出、
-    // 清单判据全部不命中、命令导不出来，最后生成一份写着「这个项目没有依赖、没有命令、
-    // 不可发布」的契约。而使用者读那份契约看不出任何异常——它长得跟一个真的空项目一样。
-    //
-    // 读不到就明确记下来，由调用方决定是停下还是提示。
-    readError = error instanceof Error ? error.message : String(error)
-  }
-  const byLower = new Map(entries.map((e) => [e.toLowerCase(), e]))
-  return {
-    has: (name) => byLower.has(name.toLowerCase()),
-    real: (name) => byLower.get(name.toLowerCase()),
-    readError,
-    complete: readError === undefined,
-  }
-}
-
-/**
- * 把勘察结果翻译成模板能用的条件与取值。
- *
- * 每个条件的判据都写在代码里而不是散在模板里：模板只声明「这段在什么条件下出现」，
- * 「什么时候满足这个条件」由这里统一决定。这样加一个新条件只需要改一处。
- *
- * **勘察结果由调用方传进来**（`s`）。它是一次全盘走查加若干 git 子进程，一次运行里
- * 反复重跑纯属浪费——实测一次 `--status` 会跑三遍，把 1.1 秒拖成 3.2 秒。默认参数
- * 只为「只想要事实、不在乎成本」的一次性调用保留。
- */
-/**
  * 这个项目命中的那个宿主生态的描述符；没命中返回 undefined。
- *
- * 判据取勘察结果里已经算好的生态种类，不重新判定一次——两处各判一次就会各错一次。
  */
 function hostDescriptorFor(s) {
   const kinds = s?.ecosystem?.kinds ?? []
   return HOST_ECOSYSTEMS.find((e) => kinds.includes(e.id))
 }
 
-/**
- * 轻量勘察：跳过内容扫密与凭据探测。
- *
- * 为什么 compose 用得起：它的 deriveFacts 只消费生态、命令、产物、git 的
- * present/isRepoRoot/remote、文档成对状态、本地能力目录——**不看 risks（扫密结果）
- * 也不看 git.auth（推送凭据）**。那两步恰好是整套勘察里最贵的：一个要把全仓最多
- * 几千个源码文件读出来跑密钥正则，一个要等凭据助手响应。
- *
- * 跳过之后这两项在勘察结果里如实标注「没扫 / 没探测」，不假装查过没命中。
- * 需要它们的人（发布前、交付审计）得用完整模式再跑一次——这是刻意的分工，
- * 不是偷工减料。
- */
 function surveyLight(target) {
   return survey(target, { light: true })
 }
 
 function deriveFacts(target, s = surveyLight(target)) {
-  const index = rootIndex(target)
+  const index = listRoot(target)
   // 目录读不到时**不许继续生成**：这条链的每一个判据都建立在「读得到目录」之上，
   // 读不到却照常往下走，产出的是一份看起来正常的错误契约。明确报错，留给人处理。
   if (index.complete === false) {
@@ -368,6 +317,14 @@ function deriveFacts(target, s = surveyLight(target)) {
   // 产出错名字；而模板里的未知条件会直接报错，等于把错误推迟到运行时。
   // 模板里用到哪个名字，这里就必须有哪个名字——这样「模板要什么」与「脚本给什么」
   // 是同一份清单，漏了立刻报错。
+  const hasRegistryPublish = publishable && s.artifacts?.publishableManifest?.ecosystem !== 'skill'
+  const hasRelease = publishable
+    || (Array.isArray(s.git?.tags) && s.git.tags.length > 0)
+    || s.docs?.releaseSpec !== undefined
+    || s.docs?.workflowAutomation?.hasReleaseJob === true
+    || s.ecosystem?.kinds?.includes('skill')
+    || s.ecosystem?.kinds?.includes('obsidian')
+
   const conditions = {
     'has-git': hasGit,
     'no-git': !hasGit,
@@ -399,6 +356,10 @@ function deriveFacts(target, s = surveyLight(target)) {
     'no-dropped-skills': !hasDroppedSkills,
     'has-publish': publishable,
     'no-publish': !publishable,
+    'has-registry-publish': hasRegistryPublish,
+    'no-registry-publish': !hasRegistryPublish,
+    'has-release': hasRelease,
+    'no-release': !hasRelease,
   }
 
   // 项目名优先取**项目自己声明的**名字（各生态清单里的 name），没有才退回目录名。
@@ -407,13 +368,17 @@ function deriveFacts(target, s = surveyLight(target)) {
   // 标题里只留包名那一段：npm 的作用域前缀与 Composer 的 vendor 前缀去掉后读起来一样
   // （npm 的那个由下面的通用替换去掉，Composer 的由它自己的读取器去掉），而带上前缀的
   // `vendor/pkg` 在一级标题里既不是包名也不是目录名。
-  let projectName = s.target.name
+  let projectName = s.ecosystem?.skillName ?? s.target.name
   // 文件名一律**小写**，由 index 解析成磁盘上的原名再读——见 DEPENDENCY_FILES 上面的理由。
   // 读不到的生态不是「没有名字」，而是这个读取器不认识它的格式，那就退到目录名。
   const nameReaders = [
     [manifestPath, (pkg) => pkg.name],
-    ['pyproject.toml', (text) => /^name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
-    ['cargo.toml', (text) => /^\s*name\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]],
+    ['pyproject.toml', (text) => /^name\s*=\s*["']([^"']+)["']/m.exec(manifestSection(text, '[project]'))?.[1]],
+    ['cargo.toml', (text) => {
+      const p = manifestSection(text, '[package]')
+      const wp = manifestSection(text, '[workspace.package]')
+      return /^\s*name\s*=\s*["']([^"']+)["']/m.exec(p || wp)?.[1]
+    }],
     ['go.mod', (text) => /^module\s+(\S+)/m.exec(text)?.[1]?.split('/').pop()],
     ['composer.json', (text) => /"name"\s*:\s*"([^"]+)"/.exec(text)?.[1]?.split('/').pop()],
     ['pubspec.yaml', (text) => /^name:\s*["']?([^"'\n#]+?)["']?\s*$/m.exec(text)?.[1]],
@@ -972,10 +937,6 @@ function markKeptSections(text, headings) {
   if (headings.size === 0) return text
   const normalized = text.replace(/\r\n/g, '\n')
   // 围栏状态**只从权威实现取**（survey.mjs 的 scanLines）。
-  //
-  // 这里曾手写过一个循环，它只比围栏符的首字符、不校验闭合行是否不短于起始行，
-  // 于是「三个反引号开头、五行反引号结尾」这种写法在两处的判定不同。而围栏判错的后果
-  // 很具体：把代码块里的 `## 示例` 当成真节，在它前面插一行 `pf:keep`，破坏代码块。
   const scanned = scanLines(normalized)
   const out = []
   let inKernel = false
@@ -983,17 +944,15 @@ function markKeptSections(text, headings) {
   for (let i = 0; i < scanned.length; i += 1) {
     const info = scanned[i]
     const line = info.line
-    if (line.includes(KERNEL_START)) inKernel = true
-
     out.push(line)
-    if (info.inFence) {
-      if (line.includes(KERNEL_END)) inKernel = false
+    if (info.inFence) continue
+    const trimmed = line.trim()
+    if (trimmed === KERNEL_START) inKernel = true
+    if (trimmed === KERNEL_END) {
+      inKernel = false
       continue
     }
-    if (inKernel) {
-      if (line.includes(KERNEL_END)) inKernel = false
-      continue
-    }
+    if (inKernel) continue
 
     // 二级标题：只有被认领的那些才打，且下面一行已经是标记时不重复打。
     // `headings` 里的值是 `splitSections` 存的**整行**（含 `## ` 前缀），比较时用整行。
@@ -1001,7 +960,6 @@ function markKeptSections(text, headings) {
       const next = scanned[i + 1]?.line ?? ''
       if (next.trim() !== KEEP) out.push('', KEEP)
     }
-    if (line.includes(KERNEL_END)) inKernel = false
   }
   return out.join('\n')
 }
@@ -1066,13 +1024,15 @@ function recordWholeFile(target, rels) {
   return 0
 }
 
-function recordLanded(target, agentsPath, text, freshRendered) {
+function recordLanded(target, agentsPath, text, freshRendered, s) {
   const { ledger } = readLedger(target)
   const file = 'AGENTS.md'
 
   // 内核区：一对锚点圈定的字节区间。缺任何一端就跳过——记一条提不出内容的记录没有意义。
-  const si = text.indexOf(KERNEL_START)
-  const ei = text.indexOf(KERNEL_END, si + KERNEL_START.length)
+  const starts = markerPositions(text, KERNEL_START)
+  const ends = markerPositions(text, KERNEL_END)
+  const si = starts.length === 1 ? starts[0] : -1
+  const ei = ends.length === 1 ? ends[0] : -1
   if (si >= 0 && ei > si) {
     recordSegment(ledger, {
       file,
@@ -1082,20 +1042,7 @@ function recordLanded(target, agentsPath, text, freshRendered) {
     })
   }
 
-  // 受管节：只认**这一次真的由我求值写下去**的那几节。判据两条同时成立：
-  //
-  //   1. **在内核区之外**——内核区已经按一段记过了，再按节记一遍等于同一段字节
-  //      有两个归属，撤除时先删哪个都可能留下半截；
-  //   2. **文件里的这一节与本次新求值的结果逐字相同**——这次我只是把它原样留着，
-  //      没有重写过它。认领「我留着的东西」与认领「我写的东西」是两件事，前者正是
-  //      存量项目里最危险的错误：作者手填的一节，会在下一次刷新触发后突然变成
-  //      「账本确认这一段是本 skill 写的，可以精确撤除」。
-  //
-  // 第 2 条同时覆盖了「模板说这段归人写」的情形：作者一旦填了那一节，它与模板求值
-  // 的结果就不再逐字相同，于是不被认领。
-  //
-  // 两条都不满足的，**主动摘掉记录**：留着一条旧记录会让「这一节归谁」在两个版本之间
-  // 摇摆，而摇摆的结果是撤除时动到不该动的东西。
+  // 受管节：只认**这一次真的由我求值写下去**的那几节。
   const freshByHeading = new Map()
   if (freshRendered !== undefined) {
     for (const s of splitSections(freshRendered).sections) {
@@ -1119,6 +1066,21 @@ function recordLanded(target, agentsPath, text, freshRendered) {
       landing: 'section',
       content: section.text,
     })
+  }
+
+  if (s !== undefined) {
+    const commandsKey = Object.entries(s.commands ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}:${v}`)
+      .join(';')
+    const snapshot = {
+      hasGit: s.git?.present === true,
+      hasRemote: typeof s.git?.remote === 'string' && s.git.remote.length > 0,
+      hasPublish: s.artifacts?.publishableManifest !== undefined,
+      hasBilingualReadme: s.docs?.readmePair !== undefined,
+      commandsKey,
+    }
+    recordSnapshot(ledger, snapshot)
   }
 
   writeLedger(target, ledger)
@@ -1810,7 +1772,7 @@ function main(argv) {
   // 记账失败**不中断**：文件已经写好了，账本只是下一次判定的依据；这里报一句，
   // 下一次会退化成「什么都不敢认」，那是安全的退化方向。
   try {
-    recordLanded(target, agentsPath, payload, freshForLedger)
+    recordLanded(target, agentsPath, payload, freshForLedger, s)
   } catch (error) {
     process.stderr.write(`提示：账本没能更新（${error instanceof Error ? error.message : String(error)}\n`
       + '  文件已写入；下次判定会退化成「只做加法、不撤任何东西」。\n')

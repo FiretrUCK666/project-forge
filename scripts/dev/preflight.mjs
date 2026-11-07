@@ -1155,7 +1155,7 @@ function checkCardClaims() {
       // 用「压掉空白后包含」判，不要求逐字整句：卡片是排过版的，断行位置与 README 不同，
       // 要求整句相等会把「换了行」误报成「说法不一致」——那正是最容易让人开始怀疑一个
       // 其实正确的检查的方式。
-      const has = (text, want) => text.replace(/\s+/g, '').includes(want.replace(/\s+/g, ''))
+      const has = (text, want) => text.replace(/\s+/g, '').toLowerCase().includes(want.replace(/\s+/g, '').toLowerCase())
       // **卡片只查看得见的文字**（`<text>` 元素里的内容）：`<desc>` 与 `<title>` 是给读屏
       // 软件看的，画面上并没有那行字。「写在文件里」不等于「印在卡上」——整份文件全文
       // 匹配会让 `<desc>` 里的半句话把守卫哄绿，而读者在卡上永远看不到它。
@@ -2035,21 +2035,23 @@ function checkFreshness() {
  * 放进检查会因为对方抖动而误报，那种检查很快就会被无视。
  */
 function checkReadmeToc() {
-  // 中英文两份都查：CI 查两份，只查中文会让英文漂移漏网。
-  const readmes = [join(SKILL_ROOT, 'README.md'), join(SKILL_ROOT, 'README.en.md')]
-    .filter((p) => existsSync(p))
-  if (readmes.length === 0) { warn('没有 README.md。'); return }
+  const targetDocs = [
+    join(SKILL_ROOT, 'README.md'),
+    join(SKILL_ROOT, 'README.en.md'),
+    join(SKILL_ROOT, 'references', '*.md'),
+    join(SKILL_ROOT, 'references', 'plugins', '*.md'),
+  ]
   const script = join(SKILL_ROOT, 'scripts', 'sync-toc.mjs')
-  if (!existsSync(script)) { fail('缺少 scripts/sync-toc.mjs（README 目录的同步工具）。'); return }
-  const r = spawnSync(process.execPath, [script, ...readmes, '--check'], { encoding: 'utf8', env: process.env })
+  if (!existsSync(script)) { fail('缺少 scripts/sync-toc.mjs（目录同步工具）。'); return }
+  const r = spawnSync(process.execPath, [script, ...targetDocs, '--check'], { encoding: 'utf8', env: process.env })
   if (r.error !== undefined) { fail(`目录同步检查无法执行：${r.error.message}`); return }
   if (r.status !== 0) {
     const detail = (r.stdout ?? '').trim().split('\n').filter((l) => l.trim() !== '').join(' / ')
-    fail(`README 的目录与标题不同步：${detail}\n`
-      + `      修正：node scripts/sync-toc.mjs README.md README.en.md`)
+    fail(`文档目录与标题不同步：${detail}\n`
+      + `      修正：node scripts/sync-toc.mjs README.md README.en.md "references/*.md" "references/plugins/*.md"`)
     return
   }
-  process.stdout.write('README 目录：与标题一致\n')
+  process.stdout.write('文档目录：与标题一致（含 README 及全部参考专章）\n')
 }
 
 /**

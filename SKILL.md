@@ -62,7 +62,7 @@ metadata:
    **强制推送与改写已推送历史永不自动执行**。
 5. **平台中立**：不假设操作系统与 shell。不写死 PowerShell / bash / cmd，不写死路径
    分隔符。**不把非 ASCII 的正文经 shell 传递**——完整规则见
-   `references/remote-github.md` 的 6.1「含非 ASCII 正文的硬规则」，此处不复述。
+   `references/remote-github.md` 的 6.5「含非 ASCII 正文的硬规则」，此处不复述。
 6. **不写死取值**：账号、路径、版本号、仓库地址一律**现场读**（见「取值从哪来」）。
 7. **文档分层**：面向 AI 的文档（`AGENTS.md`）写机制与判据，需要取值时写「从哪里取」；
    面向人的文档（`README` / `CONTRIBUTING`）写具体、可复制的命令与地址。
@@ -259,7 +259,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 不接受项目目录参数，不是 P7）。
 
 各脚本零依赖、跨平台。含中文或空格的路径作为独立参数传入是正常用法
-（**不要拼进命令行字符串**，理由见 `references/remote-github.md` 的 6.1）。
+（**不要拼进命令行字符串**，理由见 `references/remote-github.md` 的 6.5）。
 
 ## 文件地图
 
@@ -298,7 +298,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
 | `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
 | `scripts/ecosystems.mjs` | 生态描述符：加一个生态只改这里 |
-| `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/render.mjs` `scripts/lib/task-runners.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` | 公共模块 |
+| `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/render.mjs` `scripts/lib/task-runners.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` `scripts/lib/manifest.mjs` | 公共模块 |
 | `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
 | `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本，一次可给多份） |
 | `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |

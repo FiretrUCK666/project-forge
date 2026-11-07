@@ -137,12 +137,12 @@ The two differ in exactly one way: **a clone does not update itself**. A `.git` 
 copy is meant for editing, and the tool leaves it alone. How to work on it is in
 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
-> **The `Source code` download works too.** It is GitHub's generated source archive: **the same set
-> of files** as the package (it honours the repository's export rules, so `.github/`, `AGENTS.md`
-> and `scripts/dev/` are not in it). The only difference is the top-level folder name: the package
-> uses `project-forge/`, the source archive uses `project-forge-<tag>/`. Rename that folder to
-> `project-forge` after extracting. Both install, and both keep themselves current. The package is
-> built for the purpose, so prefer it.
+> **The `Source code` download works too.** That is GitHub's automatic source archive, which extracts
+> to a `project-forge-<version>/` directory just like the install package. The only difference is the
+> file contents: the install package excludes development-only files (`.github/`, `AGENTS.md`, `scripts/dev/`)
+> via `.gitattributes`, whereas the source archive contains the full repository. Rename the extracted
+> folder to `project-forge`. Both install, and both keep themselves current. The package is tailored for
+> installation, so prefer it.
 
 ### Where it goes
 

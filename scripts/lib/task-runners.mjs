@@ -154,6 +154,36 @@ export function taskRunnerCommands(root, root_) {
     }
   }
 
+  /** turbo.json：tasks 或 pipeline 字典；推导 pnpm/yarn/bun/npx turbo run <task>。 */
+  const turboName = root_.first(['turbo.json'])
+  if (turboName !== undefined) {
+    const text = readIf(turboName)
+    if (text === undefined) {
+      byTool.turbo = { note: `有 ${turboName} 但读不出来，命令要打开它确认` }
+    } else {
+      let turboTasks
+      let parsed = true
+      try {
+        const stripped = text.replace(/^\s*\/\/.*$/gm, '').replace(/,([\s}\]])/g, '$1')
+        const obj = JSON.parse(stripped)
+        turboTasks = obj?.tasks ?? obj?.pipeline
+      } catch {
+        parsed = false
+      }
+      if (!parsed) {
+        byTool.turbo = { note: `${turboName} 解析不了（不是合法 JSON），命令要打开它确认` }
+      } else if (turboTasks !== undefined && typeof turboTasks === 'object' && turboTasks !== null) {
+        const names = new Set(Object.keys(turboTasks))
+        const runner = root_.has('pnpm-lock.yaml') ? 'pnpm turbo run'
+          : root_.has('yarn.lock') ? 'yarn turbo run'
+          : root_.has('bun.lockb') || root_.has('bun.lock') ? 'bun turbo run'
+          : 'npx turbo run'
+        byTool.turbo = pickTargets(names, (t) => `${runner} ${t}`, 'turbo', turboName)
+        if (byTool.turbo.note === undefined) sawAny = true
+      }
+    }
+  }
+
   /**
    * 从同一工具的多个包装器里挑一个，并给出该平台上能直接照抄的调用形式。
    *

@@ -46,7 +46,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
       - name: 检出（全历史；工具取自默认分支，说明描述的标签由 TAG 指定）
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           # 工具取默认分支，**不是**触发时的 ref。推标签时 `github.ref` 就是那个标签，
           # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面，修不了；

@@ -82,7 +82,7 @@ import { readZip, stripCommonPrefix } from './zip.mjs'
 // 临时文件的**形状与归属判据**只有一份，住在 lib/fs-atomic.mjs：compose-agents.mjs 从那里取，
 // 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
 // 使用者自己的文件也删了」。
-import { clearStaleTemps, tempPathFor } from './lib/fs-atomic.mjs'
+import { clearStaleTemps, tempPathFor, writeAtomic } from './lib/fs-atomic.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -685,10 +685,26 @@ function applyPackage(entries) {
   // 「这个包里根本不该出现的东西」，权限必须归旧副本自己那张表——两处的授权来源不同，
   // 不能合成一个循环，否则「新包能删什么」这件事就跟着一起放开了。
   for (const name of [...new Set([...oldMap.shipped, ...map.shipped])]) {
-    if (name.endsWith('/') || now.has(name)) continue
     const p = join(SKILL_ROOT, name)
     if (!insideSkill(p)) { skipped.push(name); continue }
-    if (existsSync(p) && statSync(p).isFile()) { rmSync(p); removed.push(name) }
+    if (name.endsWith('/')) {
+      if (!now.has(name) && existsSync(p) && statSync(p).isDirectory()) {
+        try {
+          if (readdirSync(p).length === 0) {
+            rmSync(p, { recursive: true, force: true })
+            removed.push(name)
+            pruneEmptyDirs(dirname(p))
+          }
+        } catch {}
+      }
+      continue
+    }
+    if (now.has(name)) continue
+    if (existsSync(p) && statSync(p).isFile()) {
+      rmSync(p)
+      removed.push(name)
+      pruneEmptyDirs(dirname(p))
+    }
   }
   // 仓库自用文件：包里本来就不该有。
   //
@@ -820,25 +836,7 @@ function verifyInstalled(entries, after, remote) {
   return { ok: true }
 }
 
-/**
- * 写一个文件：先写同目录的临时文件，再改名。
- *
- * **为什么**：改名的原子性让「写到一半被杀」不再留下半截文件。包副本没有 .git，
- * 半截的 SKILL.md 就是不可用的 skill，而且没有回退手段（源码副本有 git，那是另一条路，
- * 不走这里）。
- *
- * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在本领目录里，会被结构自检当成无主文件。
- */
-function writeAtomic(path, data) {
-  const tmp = tempPathFor(path)
-  try {
-    writeFileSync(tmp, data)
-    renameSync(tmp, path)
-  } catch (error) {
-    try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* 清不掉就算了 */ }
-    throw error
-  }
-}
+
 /**
  * 兜底来源可以被一个环境变量覆盖。
  *

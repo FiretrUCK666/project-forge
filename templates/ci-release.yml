@@ -73,7 +73,7 @@ jobs:
       NOTES_DIR: '<发布说明目录>'  # TODO(2) 换成本项目的目录
     steps:
       - name: 检出默认分支（读说明文件；工具永远用最新那一版）
-        uses: actions/checkout@v7  # 落盘前核对最新大版本
+        uses: actions/checkout@v4  # 落盘前核对最新大版本
         with:
           # 取默认分支而不是触发时的 ref：说明文件必须能从默认分支读到（见文件头那段），
           # 而 workflow_dispatch 补漏时它还是你在界面上选的那个 ref。历史取全量，

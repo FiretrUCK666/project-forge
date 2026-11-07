@@ -118,7 +118,7 @@ export function reportTemps(file, temps) {
 export function writeAtomic(path, content) {
   const tmp = tempPathFor(path)
   try {
-    writeFileSync(tmp, content, { encoding: 'utf8' })
+    writeFileSync(tmp, content)
     renameSync(tmp, path)
   } catch (error) {
     try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* 清不掉就算了 */ }

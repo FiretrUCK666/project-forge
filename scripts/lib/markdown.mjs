@@ -72,16 +72,24 @@ export function fencedSpans(text) {
 }
 
 /**
- * 某个标记在**围栏之外**的出现位置（升序）。
+ * 某个标记在**围栏之外且独占一行**的出现位置（升序）。
  *
- * 排除围栏内的出现不是洁癖：文档里在代码块里展示这对标记是正常的用法（本脚本的
- * 报错信息就是这么写的），把它算进去会得到「文件里有两对标记」这种错误答案，
- * 进而把一份好文件判成受损。
+ * 排除围栏内与行内反引号内部的出现：正文在行内举例展示标记（如 `- `<!-- toc:start -->`...`）
+ * 或在代码块里展示是正常用法；要求标记独占一行（行首到标记前、标记后到行尾只有空白），
+ * 避免将行内代码或正文中的举例误判为结构标记。
  */
 export function markerPositions(text, marker, spans = fencedSpans(text)) {
   const out = []
   for (let i = text.indexOf(marker); i >= 0; i = text.indexOf(marker, i + marker.length)) {
-    if (!spans.some(([a, b]) => i >= a && i < b)) out.push(i)
+    if (spans.some(([a, b]) => i >= a && i < b)) continue
+    const lineStart = text.lastIndexOf('\n', i - 1) + 1
+    const before = text.slice(lineStart, i)
+    if (!/^[ \t]*$/.test(before)) continue
+    let lineEnd = text.indexOf('\n', i + marker.length)
+    if (lineEnd < 0) lineEnd = text.length
+    const after = text.slice(i + marker.length, lineEnd)
+    if (!/^[ \t]*\r?$/.test(after)) continue
+    out.push(i)
   }
   return out
 }

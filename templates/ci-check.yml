@@ -19,7 +19,7 @@
 #   本文件用的是 `pull_request`，fork 来的提案会**自动降成只读令牌、扣掉全部密钥**——
 #   这是平台的安全网，不要为了「让检查跑起来」把它拆掉。
 #   **绝不要把这个触发器换成 `pull_request_target` 并去检出提案那边的代码**：
-#   那个触发器**能拿到密钥**，一旦它执行的又是指案里的代码，就等于让任意陌生人拿你的
+#   那个触发器**能拿到密钥**，一旦它执行的又是提案里的代码，就等于让任意陌生人拿你的
 #   密钥跑他的代码（这类攻击叫 pwn request）。确实需要「有密钥的步骤」时，正确做法是
 #   拆成两个工作流：这个只读的跑检查并上传产物，另一个在它跑完之后只消费产物。
 #   判断依据写在这个项目的协作约定里（为什么危险、哪些写法算危险），配之前先看那份。
@@ -36,12 +36,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出
-        uses: actions/checkout@v7  # 落盘前核对最新大版本
+        uses: actions/checkout@v4  # 落盘前核对最新大版本
 
       # TODO(1)：按生态只留一块，其余整块删掉。Python 换 setup-python，Rust/Go 换对应
       # setup action，纯文档目录本块整段删掉。未选生态时下面默认块是错的，先选再删注释。
       - name: 准备运行环境
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: '<清单声明的版本>'  # 占位符：填清单里声明的版本，不要照抄示例数字
 

@@ -22,6 +22,7 @@ import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
+import { markerPositions } from '../lib/markdown.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -280,6 +281,132 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
   report(badWork.status === 1, '工作项：照判，不跟着历史快照一起豁免')
 
   rmSync(workDir, { recursive: true, force: true })
+}
+
+group('[57] 架构升级与逻辑补全：决策持久化、工具链推导与行内反引号隔离')
+{
+  // 1. markerPositions: 行内反引号内的标记被忽略，独占一行的标记被正确解析
+  const sampleDoc = [
+    '# 标题',
+    '',
+    '正文举例：`- \`<!-- toc:start -->\` / \`<!-- toc:end -->\`` 这一行不应被匹配。',
+    '',
+    '```markdown',
+    '<!-- toc:start -->',
+    '围栏内部的不应被匹配',
+    '<!-- toc:end -->',
+    '```',
+    '',
+    '<!-- toc:start -->',
+    '- [标题](#标题)',
+    '<!-- toc:end -->',
+  ].join('\n')
+
+  const posStart = markerPositions(sampleDoc, '<!-- toc:start -->')
+  const posEnd = markerPositions(sampleDoc, '<!-- toc:end -->')
+  const okMarker = posStart.length === 1 && posEnd.length === 1
+  check(okMarker, 'markerPositions：行内反引号与围栏内标记均被排除，仅匹配独占一行的真标记')
+  report(okMarker, '标记位置：行内反引号与围栏隔离')
+
+  // 2. Cargo workspace.package 继承版本号
+  const cargoWs = fixture('cargo-ws-pkg', {
+    'Cargo.toml': [
+      '[workspace]',
+      'members = ["crates/*"]',
+      '',
+      '[workspace.package]',
+      'version = "1.9.9"',
+      'edition = "2021"',
+    ].join('\n'),
+    'crates/sub/Cargo.toml': [
+      '[package]',
+      'name = "sub-crate"',
+      'version.workspace = true',
+    ].join('\n'),
+    'crates/sub/src/lib.rs': 'pub fn hi() {}\n',
+  })
+  const sCargo = survey(cargoWs)
+  const okCargo = sCargo.artifacts?.declaredVersion === '1.9.9'
+  check(okCargo, 'Cargo 多包仓库：根表 [workspace.package] 版本被正确识别为 declaredVersion')
+  report(okCargo, 'Cargo workspace：继承版本号')
+
+  // 3. Python uv 工具链推导
+  const pyUv = fixture('py-uv-tool', {
+    'pyproject.toml': [
+      '[project]',
+      'name = "uv-demo"',
+      'version = "0.1.0"',
+      '',
+      '[tool.uv]',
+      'dev-dependencies = ["pytest"]',
+    ].join('\n'),
+    'uv.lock': '',
+    'tests/test_demo.py': 'def test_pass(): assert True\n',
+  })
+  const sPy = survey(pyUv)
+  const okUv = /uv run pytest/.test(sPy.commands?.test ?? '')
+  check(okUv, 'Python uv 工具链：检测到 uv.lock 或 tool.uv 时自动推导 uv run 测试命令')
+  report(okUv, 'Python uv：推导命令')
+
+  // 4. Turbo task runner 推导
+  const turboProj = fixture('turbo-proj', {
+    'package.json': JSON.stringify({
+      name: 'turbo-monorepo',
+    }),
+    'pnpm-lock.yaml': '',
+    'turbo.json': JSON.stringify({
+      tasks: {
+        build: { dependsOn: ['^build'] },
+        test: { dependsOn: ['build'] },
+      },
+    }),
+  })
+  const sTurbo = survey(turboProj)
+  const okTurbo = /pnpm turbo run test/.test(sTurbo.commands?.test ?? '')
+  check(okTurbo, 'Turbo task runner：结合 pnpm 锁文件自动推导 pnpm turbo run test')
+  report(okTurbo, 'Turbo 运行器：推导命令')
+
+  // 5. review 决策持久化（--remember / --forget 与 ledger 同步）
+  const decProj = fixture('decision-proj', {
+    'README.md': '# Demo\n',
+    'LICENSE': 'MIT\n',
+  })
+  // 运行 review.mjs --remember --no-publish
+  const runRem = spawnSync(process.execPath, [
+    join(SCRIPTS_DIR, 'review.mjs'), decProj, '--remember', '--no-publish',
+  ], { encoding: 'utf8', windowsHide: true })
+  const ledgerPath = join(decProj, '.project-forge', 'ledger.json')
+  const l1 = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, 'utf8')) : {}
+  const okRem = l1.decisions?.['no-publish'] === true
+  check(okRem, '决策记忆：review.mjs --remember 成功写入 .project-forge/ledger.json')
+  report(okRem, '决策记忆：写入账本')
+
+  // 运行 review.mjs --forget --no-publish
+  const runFor = spawnSync(process.execPath, [
+    join(SCRIPTS_DIR, 'review.mjs'), decProj, '--forget', '--no-publish',
+  ], { encoding: 'utf8', windowsHide: true })
+  const l2 = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, 'utf8')) : {}
+  const okFor = l2.decisions?.['no-publish'] === undefined
+  check(okFor, '决策遗忘：review.mjs --forget 成功从账本清除已记忆项')
+  report(okFor, '决策遗忘：清除账本')
+
+  // 6. 交棒 graduation mode（账本记录为 blocks: false，不阻塞交棒）
+  const gradProj = fixture('grad-proj', {
+    'README.md': '# Grad\n',
+    'LICENSE': 'MIT\n',
+    '.project-forge/ledger.json': JSON.stringify({
+      version: 1,
+      deliverables: {
+        'README.md': { hash: 'abcd1234ef', at: '2026-11-08T00:00:00Z', section: 'whole' },
+      },
+      decisions: {},
+    }),
+  })
+  const runHandoff = spawnSync(process.execPath, [
+    join(SCRIPTS_DIR, 'handoff.mjs'), gradProj, '--scan',
+  ], { encoding: 'utf8', windowsHide: true })
+  check(runHandoff.status === 0, '交棒毕业状态：账本交付物记录不再阻塞交棒完成')
+  report(runHandoff.status === 0, '交棒毕业：非阻塞交付物账本')
 }
 
 // ---- 分片收尾 ----

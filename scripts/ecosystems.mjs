@@ -103,7 +103,7 @@ export const HOST_ECOSYSTEMS = [
 <!-- pf:if has-dsh-version -->
 ### 版本与可复现
 
-<!-- pf:author: 写清跟随版本查法（读实际运行宿主版本作目标，逐包确认存在，不用 latest 单值）、最低下限上移条件、客户端模块表每次升级核对法、构建传仓库相对路径与文本属性先行、自检换目录重建逐字节同。清单里声明的宿主兼容范围是**声明**，真正生效的是 peer 范围——两者的分工要写清，别让「我声明过」被当成「已经有闸门」。版本号一律现场取，不写死。 -->
+<!-- pf:author: 写清跟随版本查法（读实际运行宿主版本作目标，逐包确认存在，不用 latest 单值）、最低下限上移条件、客户端模块表每次升级核对法、构建传仓库相对路径与文本属性先行、自检换目录重建逐字节同。engines.dsh 是宿主强制检查的唯一硬闸门，peerDependencies 仅作为生态回退——两者的分工要写清，别颠倒主次。版本号一律现场取，不写死。 -->
 <!-- pf:endif -->`,
       'plugin-conventions': `## DSH 插件（按事实取舍）
 
@@ -194,8 +194,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
       out.exportsKeys = typeof exportsField === 'object' && exportsField !== null
         ? Object.keys(exportsField) : []
 
-      // 声明式元数据：只报「有没有」与原文，不解释语义——**声明不等于闸门**，
-      // 是否真的强制执行由宿主当前实现决定。
+      // 声明式元数据：engines.dsh 是宿主强制检查的硬闸门（peerDependencies 仅为备用回退）。
       out.hasManifestVersion = decl.manifestVersion !== undefined
       out.enginesHost = typeof pkg.engines?.dsh === 'string' ? pkg.engines.dsh : undefined
       out.hasIcon = typeof pkg.icon === 'string'
@@ -229,8 +228,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
       L.push(`- DSH 入口：host ${f.hasHostEntry ? '有' : '缺'}；client ${f.hasClientEntry ? '有' : '无'}`
         + `（dsh.client 声明${f.hasClientDecl ? '有' : '无'}）`)
       L.push(`- DSH 声明式元数据：manifestVersion ${f.hasManifestVersion ? '有' : '无'}`
-        + `；engines.dsh ${f.enginesHost ?? '未声明'}；包根图标 ${f.hasIcon ? '有' : '无'}`
-        + '（都是声明，宿主当前是否强制执行另查专章）')
+        + `；engines.dsh ${f.enginesHost ?? '未声明'}（宿主强制硬闸门）；包根图标 ${f.hasIcon ? '有' : '无'}`)
       if (f.filesHasLib !== undefined) L.push(`- DSH 发布范围：files ${f.filesHasLib ? '含' : '缺'} lib；${f.filesHasPatch ? '含' : '缺'}补丁`)
       if (f.libTracked !== undefined) L.push(`- DSH 构建产物跟踪：lib ${f.libTracked ? '已被跟踪' : '未被跟踪'}（与 files 是两套集合）`)
       if (f.hostRuntimeInDeps === true) L.push('- **DSH 依赖放错**：宿主运行时进了 dependencies，应为 peer')

@@ -40,6 +40,12 @@ import { dirname, join } from 'node:path'
 export const LEDGER_DIR = '.project-forge'
 export const LEDGER_FILE = 'ledger.json'
 
+/** 账本里内核区的片段 id（全仓统一定义）。 */
+export const LEDGER_KERNEL = 'kernel'
+export const LEDGER_SECTION_PREFIX = 'section:'
+/** 整份文件记成一个片段时的 id（记 LICENSE / workflow 用）。 */
+export const LEDGER_WHOLE = 'whole'
+
 /** 账本格式版本。读取时版本不符就当作「没有账本」，退化成只做加法。 */
 const LEDGER_SCHEMA = 1
 
@@ -66,7 +72,14 @@ export function ledgerPath(root) {
 
 /** 空账本。 */
 function emptyLedger() {
-  return { schema: LEDGER_SCHEMA, skill: 'project-forge', segments: {} }
+  return {
+    version: LEDGER_SCHEMA,
+    schema: LEDGER_SCHEMA,
+    skill: 'project-forge',
+    decisions: {},
+    scope: [],
+    segments: {},
+  }
 }
 
 /**
@@ -97,10 +110,19 @@ export function readLedger(root) {
     return { ledger: emptyLedger(), state: 'unreadable' }
   }
   if (typeof data !== 'object' || data === null) return { ledger: emptyLedger(), state: 'unreadable' }
-  if (data.schema !== LEDGER_SCHEMA) return { ledger: emptyLedger(), state: 'unreadable' }
-  if (typeof data.segments !== 'object' || data.segments === null) {
+  const schemaVer = data.version ?? data.schema
+  if (schemaVer !== LEDGER_SCHEMA) return { ledger: emptyLedger(), state: 'unreadable' }
+  const segs = (typeof data.segments === 'object' && data.segments !== null)
+    ? data.segments
+    : (typeof data.files === 'object' && data.files !== null)
+      ? data.files
+      : null
+  if (segs === null) {
     return { ledger: emptyLedger(), state: 'unreadable' }
   }
+  data.segments = segs
+  if (typeof data.decisions !== 'object' || data.decisions === null) data.decisions = {}
+  if (!Array.isArray(data.scope)) data.scope = []
   return { ledger: data, state: 'ok' }
 }
 
@@ -109,13 +131,55 @@ export function writeLedger(root, ledger) {
   const p = ledgerPath(root)
   mkdirSync(dirname(p), { recursive: true })
   const tmp = `${p}.tmp-${process.pid}`
-  writeFileSync(tmp, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8')
+  const out = {
+    version: LEDGER_SCHEMA,
+    schema: LEDGER_SCHEMA,
+    skill: 'project-forge',
+    decisions: ledger.decisions ?? {},
+    scope: ledger.scope ?? [],
+    ...(ledger.snapshot !== undefined ? { snapshot: ledger.snapshot } : {}),
+    segments: ledger.segments ?? {},
+  }
+  writeFileSync(tmp, `${JSON.stringify(out, null, 2)}\n`, 'utf8')
   try {
     renameSync(tmp, p)
   } catch (error) {
     try { unlinkSync(tmp) } catch { /* 清不掉就留着，下次清理 */ }
     throw error
   }
+}
+
+/** 写入或更新一项确认决策。 */
+export function setDecision(ledger, key, value = true) {
+  if (typeof ledger.decisions !== 'object' || ledger.decisions === null) ledger.decisions = {}
+  const k = key.replace(/^--/, '')
+  ledger.decisions[k] = value
+  return ledger
+}
+
+/** 遗忘一项决策。 */
+export function forgetDecision(ledger, key) {
+  if (typeof ledger.decisions === 'object' && ledger.decisions !== null) {
+    const k = key.replace(/^--/, '')
+    delete ledger.decisions[k]
+  }
+  return ledger
+}
+
+/** 获取全部已确认决策。 */
+export function getDecisions(ledger) {
+  return ledger.decisions ?? {}
+}
+
+/** 记录环境快照指纹。 */
+export function recordSnapshot(ledger, snapshot) {
+  ledger.snapshot = snapshot
+  return ledger
+}
+
+/** 读取环境快照指纹。 */
+export function getSnapshot(ledger) {
+  return ledger.snapshot
 }
 
 /**

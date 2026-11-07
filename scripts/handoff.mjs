@@ -37,7 +37,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readLedger, hasAnyRecord, segmentIds, provenance, LEDGER_DIR } from './lib/ledger.mjs'
+import {
+  readLedger, hasAnyRecord, segmentIds, provenance, LEDGER_DIR,
+  LEDGER_KERNEL, LEDGER_SECTION_PREFIX, LEDGER_WHOLE,
+} from './lib/ledger.mjs'
 
 // 标记字面量只有一个来源：survey.mjs 里的那几枚常量。与 KERNEL_START 同一条理由——
 // 这些字面量都有三个消费方（注入、自检、交付门禁），各写一份时对不上不会有任何东西出声。
@@ -51,13 +54,6 @@ import { scanLines, fencedSpans, splitSections } from './lib/markdown.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATES_DIR = join(SKILL_ROOT, 'templates')
-
-/** 账本里内核区的片段 id（与 compose-agents.mjs 同源，见那边的常量注释）。 */
-const LEDGER_KERNEL = 'kernel'
-const LEDGER_SECTION_PREFIX = 'section:'
-/** 整份文件记成一个片段时的 id（compose-agents 记 LICENSE / workflow 用）。 */
-const LEDGER_WHOLE = 'whole'
-
 
 const SKILL_ENTRY = join(SKILL_ROOT, 'SKILL.md')
 
@@ -243,6 +239,20 @@ const SKILL_TOKENS = (() => {
  * 反过来，`<安装命令>`、`<标签名>` 这类**只出现在本 skill 模板里**的洞，
  * 填没填一望即知——这正是要抓的那一类。
  */
+/** 判定位置是否位于行内反引号 `...` 内部。 */
+function isInsideInlineCode(text, index) {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1
+  let lineEnd = text.indexOf('\n', index)
+  if (lineEnd < 0) lineEnd = text.length
+  const line = text.slice(lineStart, lineEnd)
+  const offset = index - lineStart
+  const re = /(`+)([\s\S]*?)\1/g
+  for (const m of line.matchAll(re)) {
+    if (offset >= m.index && offset < m.index + m[0].length) return true
+  }
+  return false
+}
+
 const SKILL_ANGLES = (() => {
   const out = new Set()
   const walk = (sub) => {
@@ -256,9 +266,11 @@ const SKILL_ANGLES = (() => {
       for (const m of text.matchAll(/<([^<>\n]{1,60})>/g)) {
         const inner = m[1]
         // `<!-- 注释 -->` 与闭合标签也被这段正则框住了：它们的内部以 `!` 或 `/` 开头。
-        // 那是**标记**不是占位——把注释也算进名单，会让每一份带本 skill 内核的文件
-        // （包括本仓库自己的 AGENTS.md）都被报成「模板没填完」。
         if (inner.startsWith('!') || inner.startsWith('/')) continue
+        // 排除 URL 链接（如 <https://unlicense.org>）
+        if (/^https?:\/\//i.test(inner)) continue
+        // 排除行内反引号内部的代码与举例（如 `v<日期>`、`v<序号>`、`<标签名>`）
+        if (isInsideInlineCode(text, m.index)) continue
         out.add(inner)
       }
     }
@@ -1078,7 +1090,7 @@ function scan(root, onlyFile) {
               match,
               kind: 'ledger-mine',
               what: `账本确认这一段是本 skill 写的（${label}），可以精确撤除`,
-              blocks: true,
+              blocks: false,
             })
           } else if (prov.state === 'edited') {
             ledgerHits.push({
@@ -1230,6 +1242,7 @@ function scan(root, onlyFile) {
     for (const hit of text.matchAll(/<([^<>\n]{1,60})>/g)) {
       if (!SKILL_ANGLES.has(hit[1])) continue
       if (isInsideFence(hit.index)) continue
+      if (isInsideInlineCode(text, hit.index)) continue
       placeholders.push({
         path: file.rel,
         line: lineOf(starts, hit.index),
@@ -1243,32 +1256,35 @@ function scan(root, onlyFile) {
     }
 
     // ── D 组：与模板高度相似 ──
-    let best
-    const derived = {}
-    for (const template of applicableTemplates(templates, file.name)) {
-      const sim = similarity(template, text, derived)
-      if (sim === undefined) continue
-      if (best === undefined || sim.similarity > best.sim.similarity) {
-        best = { template, sim }
+    // 形状判据只在文件没有账本记录时才作为线索，避免重复输出同义的相似度命中
+    if (!ledgerFiles.has(file.rel)) {
+      let best
+      const derived = {}
+      for (const template of applicableTemplates(templates, file.name)) {
+        const sim = similarity(template, text, derived)
+        if (sim === undefined) continue
+        if (best === undefined || sim.similarity > best.sim.similarity) {
+          best = { template, sim }
+        }
       }
-    }
-    if (best !== undefined) {
-      templateSimilar.push({
-        path: file.rel,
-        line: null,
-        match: best.template.name,
-        kind: 'template-similar',
-        ...(selfRepo ? { suspect: false } : {}),
-        what: `与本 skill 的模板 ${best.template.name} 高度相似（${Math.round(best.sim.similarity * 100)}%，命中 ${best.sim.matchedCount}/${best.sim.total} 个${best.sim.unit}）`,
-        blocks: false,
-        similarity: best.sim.similarity,
-        basis: {
-          unit: best.sim.unit,
-          matched: best.sim.matched,
-          missing: best.sim.missing,
-          total: best.sim.total,
-        },
-      })
+      if (best !== undefined) {
+        templateSimilar.push({
+          path: file.rel,
+          line: null,
+          match: best.template.name,
+          kind: 'template-similar',
+          ...(selfRepo ? { suspect: false } : {}),
+          what: `与本 skill 的模板 ${best.template.name} 高度相似（${Math.round(best.sim.similarity * 100)}%，命中 ${best.sim.matchedCount}/${best.sim.total} 个${best.sim.unit}）`,
+          blocks: false,
+          similarity: best.sim.similarity,
+          basis: {
+            unit: best.sim.unit,
+            matched: best.sim.matched,
+            missing: best.sim.missing,
+            total: best.sim.total,
+          },
+        })
+      }
     }
 
     // ── F 组：指向本 skill 的悬空指针 ──

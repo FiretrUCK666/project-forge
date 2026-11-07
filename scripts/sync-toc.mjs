@@ -33,7 +33,7 @@
  * 退出码：0 = 已同步 / 无需同步；1 = --check 发现不同步；2 = 用法或文件错误。
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
 // 入口判定按**真实路径**归一，经 junction / 符号链接调用也算直接执行——字面比较在
@@ -261,7 +261,21 @@ function main() {
       return 0
     }
     if (a.startsWith('--')) { process.stderr.write(`错误：无法识别的参数 ${a}\n`); return 2 }
-    files.push(a)
+    if (a.includes('*')) {
+      const norm = a.replace(/\\/g, '/')
+      const slash = norm.lastIndexOf('/')
+      const dir = slash >= 0 ? norm.slice(0, slash) : '.'
+      const pat = slash >= 0 ? norm.slice(slash + 1) : norm
+      const re = new RegExp('^' + pat.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$')
+      try {
+        const matches = readdirSync(dir).filter((e) => re.test(e)).sort()
+        for (const m of matches) files.push(slash >= 0 ? `${dir}/${m}` : m)
+      } catch {
+        files.push(a)
+      }
+    } else {
+      files.push(a)
+    }
   }
   if (files.length === 0) { process.stderr.write('用法：node scripts/sync-toc.mjs <文件.md...> [--check]\n'); return 2 }
   if (files.some((f) => !existsSync(f))) {

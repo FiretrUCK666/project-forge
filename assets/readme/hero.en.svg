@@ -5,7 +5,7 @@
   <desc id="pfHeroDesc">A general project-governance skill: point it at a project directory, it surveys read-only first, then decides from facts what to do. On the right is an excerpt of the survey result: the values come from the survey script, the rows are laid out by the card.</desc>
 
   <!--
-    All four cards share the same 512 canvas height. Left and right margins are 64 everywhere
+    Canvas heights: hero 512, install 502, pipeline 522, update 505. Left and right margins are 64 everywhere
     (render-svg.mjs measures them and checks symmetry); the top and bottom margins are both 64,
     produced by laying the content out rather than by padding. Re-measure after editing copy.
     Palette: background #E9E8E4, ink #17181A, muted #5D6064, rule #C6C4BF, accent #C2410C, panel #DFDED9.

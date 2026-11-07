@@ -122,10 +122,10 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 两种装法的区别只有一条：**克隆下来的那份不会自己更新**。目录里有 `.git` 说明它是拿来改的，
 工具对它只读。改法见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
-> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，**文件集合与安装包相同**
-> （同样遵守仓库里的导出规则，`.github/`、`AGENTS.md`、`scripts/dev/` 都不在里面），区别只在
-> 顶层目录名：安装包是 `project-forge/`，源码包是 `project-forge-<标签>/`。解压后把那个目录
-> 改名成 `project-forge` 即可。两个都能装，装上都会自己保持最新；安装包是专门为安装打的，
+> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，与专门打包的安装包一样解压为
+> `project-forge-<版本>/` 目录，区别只在包含的文件集合：安装包按 `.gitattributes` 排除了开发专属文件
+> （`.github/`、`AGENTS.md`、`scripts/dev/`），而源码包包含仓库全量文件。解压后把顶层目录
+> 改名成 `project-forge` 即可。两个都能装，装上都会自己保持最新；安装包专为安装打造，
 > 推荐用它。
 
 ### 放在哪里

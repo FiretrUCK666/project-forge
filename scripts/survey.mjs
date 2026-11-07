@@ -7,9 +7,11 @@
  * 读不到的字段一律留空，不编造。
  *
  * 用法：
- *   node scripts/survey.mjs [目录] [--json|--markdown]
- *   --json      输出 JSON（默认，供机器消费）
- *   --markdown  输出给人看的摘要
+ *   node scripts/survey.mjs [目录] [--json|--markdown] [--probe-network] [--fast]
+ *   --json           输出 JSON（默认，供机器消费）
+ *   --markdown       输出给人看的摘要
+ *   --probe-network  额外探测远端可达性（会联网）
+ *   --fast           轻量勘察：跳过全仓内容扫描与凭据探测
  *
  * 依赖：只用 Node 内置模块。无第三方依赖，跨平台。
  */
@@ -17,8 +19,11 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { listRoot, manifestSection } from './lib/manifest.mjs'
+export { listRoot, manifestSection } from './lib/manifest.mjs'
 
 // ── 从 lib/ 转出 ────────────────────────────────────────────────────────────
 //
@@ -155,8 +160,8 @@ const CONTENT_SCAN_SKIP = /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|tar|7z|rar|w
  *
  * 两个必须同时覆盖的维度，漏一个就会静默失效：
  *   - **分隔符**：Windows 路径在源码里可能写成反斜杠也可能写成正斜杠（很多工具和
- *     配置文件一律用正斜杠）。只认反斜杠会让 `C:/Users/...` 完全不被发现；
- *   - **盘符**：`/Users/<名>` 这种截断形式要能匹配上，否则比对时缺少盘符段。
+ *     配置文件一律用正斜杠）。只认反斜杠会让正斜杠形式完全不被发现；
+ *   - **盘符**：缺少盘符前缀的截断形式要能匹配上，否则比对时缺少盘符段。
  *
  * 因此两个模式都用 `[\\/]` 接受两种分隔符，盘符部分可选。真正的性质判定交给
  * classifyHomePath()——形状匹配只是找出候选。
@@ -180,7 +185,7 @@ const HOME_PATH_PATTERNS = [
  *     判据落在**归一化之后的长度**上，不落在「有几段」上：容器里的主目录就是 `/root`，
  *     它只有一段，却是最该被认出来的那一个——按段数判会恰好在最需要它的环境里失效；
  *   - **右边界**：`/root` 不能命中 `/rootDir`。用「分隔符或收尾」判，不用裸前缀；
- *   - **大小写不敏感**：Windows 上同一路径有 `c:/users/x` 与 `C:/Users/x` 两种写法。
+ *   - **大小写不敏感**：Windows 上同一路径有小写 users 与大写 Users 等多种大小写写法。
  *
  * `HOME_PATH_RE` 这个导出常量**保持静态**：它的读者是 preflight 的「仓库里不得出现构建机
  * 私有路径」门禁，那里加上动态前缀会把 `/root` 这种通用词判成私有路径。
@@ -218,7 +223,7 @@ const DOC_FILE_RE = /\.(md|markdown|rst|txt|adoc)$/i
  *   - 测试数据 → **不要改**，改了测试就失去意义；报出来只会制造噪音；
  *   - 文档示例 → 多数是正常的跨平台写法，提示一下即可。
  *
- * 三档必须分开：测试里写的 `cwd: '/home/me/deepseek'` 是**假数据**，把它报成真泄漏
+ * 三档必须分开：测试里写的假路径（如示例中的假主目录）是**假数据**，把它报成真泄漏
  * 并建议「改成相对路径或环境变量」，照着做就把测试改坏了。
  */
 function classifyHomePath(rel, sample, realHomes) {
@@ -227,7 +232,7 @@ function classifyHomePath(rel, sample, realHomes) {
 
   // 比对本机真实主目录。
   //
-  // 不能只做 startsWith：匹配到的片段常常缺少盘符（`/Users/x` 是从 `C:/Users/x` 里
+  // 不能只做 startsWith：匹配到的片段常常缺少盘符（`/<用户>/x` 是从完整路径里
   // 截出来的），直接比会判不出来——而那正是「真泄漏被判成 other、于是不提醒」的成因。
   // 所以同时比对「末尾两段」这种带边界的特征，它在两种截断形式下都成立。
   for (const home of realHomes) {
@@ -238,7 +243,9 @@ function classifyHomePath(rel, sample, realHomes) {
     if (tail.split('/').length === 2 && (`/${normalized}/`).includes(`/${tail}/`)) return LEAK
     if (`/${normalized}/`.includes(`/${h}/`)) return LEAK
   }
-  if (TEST_PATH_RE.test(rel)) return TEST_DATA
+  if (TEST_PATH_RE.test(rel) || /(^|[\\/])scripts[\\/]dev[\\/]/.test(rel)) return TEST_DATA
+  const EXAMPLE_USER_RE = /(?:^|[\\/])(?:home|users)[\\/](?:[a-z]|alice|bob|me|foo|bar|username|user)(?:[\\/]|$)/i
+  if (EXAMPLE_USER_RE.test(normalized)) return DOC_EXAMPLE
   if (DOC_FILE_RE.test(rel)) return DOC_EXAMPLE
   return OTHER
 }
@@ -455,7 +462,7 @@ function sizeOf(p) {
  * 判断两个路径是否指向同一个位置。
  *
  * 逐字符比较是不够的，在 Windows 上会大面积误判——同一个目录至少有四种写法会被当成
- * 不同路径：大小写不同（盘符或任意层级）、8.3 短名（`C:\Users\FIRETR~1\...`）、
+ * 不同路径：大小写不同（盘符或任意层级）、8.3 短名（形如短目录名带有波浪号的路径段）、
  * 正反斜杠混用、以及经由 junction 或符号链接到达。这些形式在真实环境里到处都是
  * （环境变量 `%TEMP%` 就常常是短名形式），误判的后果不轻：目录明明就是仓库根，却被
  * 报成「在别人的仓库里」，于是整条流程按规则停下来并警告「不要提交、不要推送」。
@@ -559,9 +566,17 @@ function skillFrontmatter(text) {
   const name = /^name:\s*(.+)$/m.exec(block)?.[1]?.trim().replace(/^["']|["']$/g, '')
   const hasDescription = /^description:\s*/m.test(block)
   if (name === undefined || !hasDescription) return undefined
+  let version = /^version:\s*(.+)$/m.exec(block)?.[1]?.trim().replace(/^["']|["']$/g, '')
+  if (version === undefined) {
+    const metaMatch = /metadata:\s*([\s\S]*?)(?=\n[A-Za-z0-9_-]+:|$)/.exec(block)
+    if (metaMatch !== null) {
+      version = /^\s+version:\s*(.+)$/m.exec(metaMatch[1])?.[1]?.trim().replace(/^["']|["']$/g, '')
+    }
+  }
   const invocation = skillInvocation(block)
   return {
     name,
+    version,
     invocation: invocation.invocation,
     dropped: invocation.dropped,
   }
@@ -949,57 +964,6 @@ function scanContents(root, candidates, realHomes) {
   return { secrets, homePaths, shaped, stats }
 }
 
-/**
- * 列一次顶层目录，之后所有文件名判定都查这张表。
- *
- * 不逐个 existsSync 试探的理由：大小写不敏感的文件系统（Windows、macOS 默认）上，
- * 试探 README.md 与 readme.md 会双双命中同一个文件，于是报出并不存在的「重复」。
- * 以真实目录项为准，就没有这个问题，顺便也更快。
- *
- * **顺序一律按码位排**：`readdirSync` 的次序由文件系统决定（同 NTFS、APFS、ext4 三者
- * 各不相同），而这张表的插入顺序会一路传到 `kinds` 与报告里的先后——同一份输入在不同
- * 平台上给出不同顺序的报告，正是这个工具最不该有的性质。`localeCompare` 不用：它随
- * 系统语言变，等于把顺序换了一个主人。大小写敏感的系统上「只差大小写」的两个文件会
- * 折叠成一条，那是这个表的设计（见上），保留先出现的那条并记下来即可，不必另作处理。
- */
-function listRoot(root) {
-  const table = new Map()
-  try {
-    const entries = readdirSync(root, { withFileTypes: true, encoding: 'utf8' })
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue
-      table.set(entry.name.toLowerCase(), {
-        name: entry.name,
-        isFile: entry.isFile(),
-        isDir: entry.isDirectory(),
-      })
-    }
-  } catch { /* 读不到就当空目录 */ }
-  return {
-    has(name) { return table.has(name.toLowerCase()) },
-    /** 返回目录里的真实文件名（保留原始大小写），不存在则 undefined。 */
-    real(name) { return table.get(name.toLowerCase())?.name },
-    entry(name) { return table.get(name.toLowerCase()) },
-    /** 在候选名里找第一个存在的，返回真实文件名。 */
-    first(candidates) {
-      for (const c of candidates) {
-        const hit = table.get(c.toLowerCase())
-        if (hit !== undefined) return hit.name
-      }
-      return undefined
-    },
-    filesIn(prefix, re) {
-      const out = []
-      const lower = prefix.toLowerCase()
-      for (const [key, e] of table) {
-        if (!key.startsWith(lower) || !e.isFile) continue
-        if (re.test(e.name)) out.push(e.name)
-      }
-      return out
-    },
-  }
-}
 
 /**
  * 这个目录里有没有**属于该生态的**清单。
@@ -1139,36 +1103,6 @@ const MANIFEST_KINDS = [
     marker: /minAppVersion/ },
 ]
 
-/**
- * 清单表里某一项的正文：TOML 先切出它声明的那张表，其余格式原样返回。
- *
- * 为什么必须切表：TOML 清单里 `version = "..."` 出现在好几张表下，而 `[dependencies]` 里
- * 那些是**依赖的**版本号。用一条行首锚点的正则扫全文，会把依赖的版本读成项目自己的版本，
- * 于是报告里出现一个项目从没声明过的版本，发布判据据此报「标签与版本号未对齐」——
- * 现象是一条看起来很有据的假结论。实测两种写法都会中：Cargo 的
- * `version.workspace = true` 配 `[dependencies.anyhow] version = "1.0.0"`、
- * 以及 pyproject 的 `dynamic = ["version"]` 配 `[tool.poetry.group.dev.dependencies]`。
- *
- * 切法就是文本级的：从表头行到下一个表头行。不解析 TOML——这里要的是「这段文字里有没有
- * 那个字段」，而表头本身是逐字可认的。取不到那张表时返回空串：**读不到就是没声明**，
- * 不该退回全文再扫一遍（那正是上面那个错误结论的来源）。
- */
-function manifestSection(text, table) {
-  if (table === undefined) return text
-  const lines = String(text ?? '').split('\n')
-  const head = table.toLowerCase()
-  const out = []
-  let inside = false
-  for (const line of lines) {
-    const m = /^\s*\[+([^\]]+)\]/.exec(line)
-    if (m !== null) {
-      inside = `[${m[1].trim().toLowerCase()}]` === head
-      continue
-    }
-    if (inside) out.push(line)
-  }
-  return out.join('\n')
-}
 
 /** 判定结果里用的名字：表里没单独声明 `kind` 时就是生态名。 */
 function manifestKind(m) {
@@ -1332,7 +1266,7 @@ const PUBLISHABLE_MANIFESTS = MANIFEST_KINDS.filter((m) => m.publishable)
  * 能搬进扁平视图的键。`packageManager` 在列：它是命令的前缀（`pnpm install` 而不是
  * `npm install`），单独看不是命令，但调用方需要知道项目指定了哪个。
  */
-const FLAT_KEYS = new Set([...COMMAND_KEYS, 'packageManager'])
+const FLAT_KEYS = new Set([...COMMAND_KEYS, 'packageManager', 'toolchain', 'nestedDir'])
 
 
 /**
@@ -1346,7 +1280,7 @@ const FLAT_KEYS = new Set([...COMMAND_KEYS, 'packageManager'])
  *     `python -m pytest` 顶掉，而这条错误命令会被原样渲染进 AGENTS.md。
  *     覆盖是静默的，所以调用方必须能看出「这个值属于哪个生态」。
  */
-function deriveCommands(root, root_, eco) {
+function deriveCommands(root, root_, eco, workspace, walked) {
   const out = {}
   const byEcosystem = {}
 
@@ -1394,37 +1328,107 @@ function deriveCommands(root, root_, eco) {
     }
     byEcosystem.node = node
   } else if (eco.kinds.includes('node')) {
-    // 有 node 生态但没有 scripts 字段：只说一句，**不给 `install`**——理由同上。
-    byEcosystem.node = { note: '清单里没有 scripts 字段，命令要读项目自己的说明' }
+    const nestedNode = walked?.sourceScan?.byNestedManifest?.get('node')
+    if (nestedNode !== undefined) {
+      const nestedDir = posixPath(dirname(nestedNode))
+      const nestedPkgText = readText(join(root, nestedNode))
+      let nestedPkg
+      try { nestedPkg = JSON.parse(nestedPkgText) } catch {}
+      if (nestedPkg?.scripts !== undefined) {
+        const pm = (workspace?.declared && workspace.tools.includes('pnpm')) ? 'pnpm' : 'npm'
+        const node = { packageManager: pm, nestedDir }
+        for (const [key, aliases] of [
+          ['build', ['build']], ['test', ['test']],
+          ['typecheck', ['typecheck', 'type-check', 'tsc']], ['lint', ['lint']],
+          ['verify', ['verify', 'check', 'validate']], ['smoke', ['smoke']],
+        ]) {
+          const hit = aliases.find((a) => typeof nestedPkg.scripts[a] === 'string')
+          if (hit !== undefined) {
+            if (pm === 'pnpm' && workspace?.declared) {
+              node[key] = `pnpm -r ${hit}`
+            } else {
+              node[key] = `cd ${nestedDir} && ${pm} run ${hit}`
+            }
+          }
+        }
+        if (['build', 'test', 'typecheck', 'lint', 'verify', 'smoke'].some((k) => k in node)) {
+          node.install = pm === 'pnpm' && workspace?.declared ? 'pnpm install' : `cd ${nestedDir} && ${pm} install`
+          byEcosystem.node = node
+        } else {
+          byEcosystem.node = { note: `子包 ${nestedDir} 里的 scripts 未命中常规名字` }
+        }
+      } else {
+        byEcosystem.node = { note: `根目录无 package.json，子包 ${nestedDir} 清单里没有 scripts 字段` }
+      }
+    } else {
+      byEcosystem.node = { note: '清单里没有 scripts 字段，命令要读项目自己的说明' }
+    }
   }
 
   if (eco.kinds.includes('python')) {
     const python = {}
     const pyName = root_.real('pyproject.toml')
     const py = pyName === undefined ? '' : (readText(join(root, pyName)) ?? '')
-    // **声明**优先：只有项目自己声明了测试框架，才给出对应的测试命令。
-    //
-    // **只给项目自己声明过的测试框架**。按生态惯例推断出来的命令（看到 `tests/`
-    // 就给 pytest）会同时造成两件事：给出一个这个项目根本跑不通的「硬门禁」，以及
-    // 让 P7 的「没有门禁命令」分支永不触发——脚本总能推出一条假命令，那条诚实信号
-    // 就没有机会出现。
+
+    // 现代工具链判据：
+    // uv: uv.lock 或 [tool.uv]
+    // poetry: poetry.lock 或 [tool.poetry]
+    // pdm: pdm.lock 或 [tool.pdm]
+    let toolchain = undefined
+    if (root_.has('uv.lock') || /\[tool\.uv\]/.test(py)) toolchain = 'uv'
+    else if (root_.has('poetry.lock') || /\[tool\.poetry\]/.test(py)) toolchain = 'poetry'
+    else if (root_.has('pdm.lock') || /\[tool\.pdm\]/.test(py)) toolchain = 'pdm'
+
     const declaresPytest = /\[tool\.pytest/.test(py) || root_.has('pytest.ini') || root_.has('tox.ini')
     const declaresUnittest = /\[tool\.unittest/.test(py)
       || (/unittest/.test(readText(join(root, 'setup.cfg')) ?? '') && root_.has('setup.cfg'))
-    // 推断出来的命令一律带出处说明：否则它看起来和项目声明的命令一样可靠。
-    if (declaresPytest) python.test = 'python -m pytest'
-    else if (declaresUnittest) python.test = 'python -m unittest discover -s tests -v'
-    else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
-      python.test = 'python -m unittest discover -s tests -v'
-      python.testNote = '项目未声明测试框架；此命令按标准库 unittest 推断，请与项目实际用法核对'
+    const declaresRuff = /\[tool\.ruff/.test(py) || root_.has('ruff.toml') || root_.has('.ruff.toml')
+
+    if (toolchain === 'uv') {
+      python.toolchain = 'uv'
+      python.install = 'uv sync'
+      if (declaresPytest) python.test = 'uv run pytest'
+      else if (declaresUnittest) python.test = 'uv run python -m unittest discover -s tests -v'
+      else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
+        python.test = 'uv run pytest'
+        python.testNote = '项目未声明测试框架；按 tests 目录推断，请与项目实际用法核对'
+      }
+      if (declaresRuff) python.lint = 'uv run ruff check .'
+      if (/\[build-system\]/.test(py)) python.build = 'uv build'
+    } else if (toolchain === 'poetry') {
+      python.toolchain = 'poetry'
+      python.install = 'poetry install'
+      if (declaresPytest) python.test = 'poetry run pytest'
+      else if (declaresUnittest) python.test = 'poetry run python -m unittest discover -s tests -v'
+      else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
+        python.test = 'poetry run pytest'
+        python.testNote = '项目未声明测试框架；按 tests 目录推断，请与项目实际用法核对'
+      }
+      if (declaresRuff) python.lint = 'poetry run ruff check .'
+      if (/\[build-system\]/.test(py)) python.build = 'poetry build'
+    } else if (toolchain === 'pdm') {
+      python.toolchain = 'pdm'
+      python.install = 'pdm install'
+      if (declaresPytest) python.test = 'pdm run pytest'
+      else if (declaresUnittest) python.test = 'pdm run python -m unittest discover -s tests -v'
+      else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
+        python.test = 'pdm run pytest'
+        python.testNote = '项目未声明测试框架；按 tests 目录推断，请与项目实际用法核对'
+      }
+      if (declaresRuff) python.lint = 'pdm run ruff check .'
+      if (/\[build-system\]/.test(py)) python.build = 'pdm build'
+    } else {
+      if (declaresPytest) python.test = 'python -m pytest'
+      else if (declaresUnittest) python.test = 'python -m unittest discover -s tests -v'
+      else if (root_.entry('tests')?.isDir === true && pyName !== undefined) {
+        python.test = 'python -m unittest discover -s tests -v'
+        python.testNote = '项目未声明测试框架；此命令按标准库 unittest 推断，请与项目实际用法核对'
+      }
+      if (declaresRuff) python.lint = 'python -m ruff check .'
+      if (root_.has('requirements.txt')) python.install = 'pip install -r requirements.txt'
+      else if (pyName !== undefined) python.install = 'pip install -e .'
+      if (/\[build-system\]/.test(py)) python.build = 'python -m build'
     }
-    if (/\[tool\.ruff/.test(py) || root_.has('ruff.toml') || root_.has('.ruff.toml')) {
-      python.lint = 'python -m ruff check .'
-    }
-    if (root_.has('requirements.txt')) python.install = 'pip install -r requirements.txt'
-    else if (pyName !== undefined) python.install = 'pip install -e .'
-    // 构建命令只在声明了构建后端时给：无 [build-system] 即无权威构建入口，不编。
-    if (/\[build-system\]/.test(py)) python.build = 'python -m build'
     if (Object.keys(python).length > 0) byEcosystem.python = python
   }
 
@@ -1460,6 +1464,21 @@ function deriveCommands(root, root_, eco) {
     byEcosystem.runner = runner
   }
 
+  // ── 仓库自用检验脚本（DevScripts / Skill）──
+  const hasPreflight = root_.entry('scripts')?.isDir === true && (
+    root_.has('scripts/dev/preflight.mjs') || existsSync(join(root, 'scripts', 'dev', 'preflight.mjs'))
+  )
+  const hasSelftest = root_.entry('scripts')?.isDir === true && (
+    root_.has('scripts/dev/selftest.mjs') || existsSync(join(root, 'scripts', 'dev', 'selftest.mjs'))
+  )
+  if (hasPreflight || hasSelftest) {
+    const dev = {}
+    if (hasPreflight) dev.verify = 'node scripts/dev/preflight.mjs --no-behavior'
+    if (hasSelftest) dev.test = 'node scripts/dev/selftest.mjs'
+    const key = eco.kinds.includes('skill') ? 'skill' : 'dev'
+    byEcosystem[key] = dev
+  }
+
   // 统一判定「哪些生态认得出来、却一条命令都没推出来」。
   // 判据落在**整个项目有没有命令**上，而不是某个生态桶：CMake 项目的命令出自
   // 任务入口那一段，生态桶里本来就是空的，那时再说「尚未实现」就是假话。
@@ -1480,7 +1499,7 @@ function deriveCommands(root, root_, eco) {
   // 扁平视图里的一条 `note`，而消费方按「有没有字符串键」判断「本项目有没有命令」——
   // 那种项目于是永远拿不到「未推导出任何命令」这个信号（它正是 P7 要求如实汇报
   // 「没有验证过」的依据）。
-  const order = ['node', 'python', 'rust', 'go']
+  const order = ['node', 'python', 'rust', 'go', 'skill', 'dev', 'runner']
   const keys = [...order.filter((k) => k in byEcosystem),
     ...Object.keys(byEcosystem).filter((k) => !order.includes(k))]
   for (const kind of keys) {
@@ -1612,7 +1631,7 @@ function detectWorkspace(root, root_) {
     const head = /\[workspace\]/.exec(cargo)
     if (head !== null) {
       const after = cargo.slice(head.index + head[0].length)
-      const stop = after.search(/^\[/)
+      const stop = after.search(/^\[/m)
       const body = stop < 0 ? after : after.slice(0, stop)
       const patterns = []
       // members = ["a", "b"] 或跨行的 members = [\n  "a",\n]
@@ -1669,7 +1688,7 @@ function detectWorkspace(root, root_) {
  * 套装要求「环境要求那一节必须写具体版本号、不许编造」——而项目自己声明的那个数字就是
  * 唯一权威来源。读不到就是**没有声明**，此时宁可不写那一节，也不要编一个数字。
  */
-function detectArtifacts(root, root_, eco, walked) {
+function detectArtifacts(root, root_, eco, walked, workspace) {
   const facts = {
     publishScope: undefined, hooks: [], hasNpmIgnore: false, distDirsPresent: [],
     runtimeRequirements: [], publishableManifest: undefined, declaredVersion: undefined,
@@ -1686,14 +1705,20 @@ function detectArtifacts(root, root_, eco, walked) {
     if (m.marker !== undefined && !m.marker.test(raw)) continue
     // 每个字段各切一次它声明的那张表（JSON 清单没有表，原样返回）。
     if (m.version !== undefined && facts.declaredVersion === undefined) {
-      const hit = m.version.re.exec(manifestSection(raw, m.version.table))
+      let hit = m.version.re.exec(manifestSection(raw, m.version.table))
+      if (hit === null && m.file === 'cargo.toml') {
+        hit = m.version.re.exec(manifestSection(raw, '[workspace.package]'))
+      }
       if (hit !== null) {
         facts.declaredVersion = hit[1]
         facts.declaredVersionIn = `${real} 的 ${m.version.field}`
       }
     }
     if (m.requires !== undefined) {
-      const hit = m.requires.re.exec(manifestSection(raw, m.requires.table))
+      let hit = m.requires.re.exec(manifestSection(raw, m.requires.table))
+      if (hit === null && m.file === 'cargo.toml') {
+        hit = m.requires.re.exec(manifestSection(raw, '[workspace.package]'))
+      }
       if (hit !== null) {
         facts.runtimeRequirements.push({
           declaredIn: `${real} 的 ${m.requires.field}`, runtime: m.requires.runtime, range: hit[1],
@@ -1703,6 +1728,11 @@ function detectArtifacts(root, root_, eco, walked) {
   }
   // Go 的版本不在清单里（靠标签声明），所以表里只给它 `go` 指令那一项。
 
+  if (facts.declaredVersion === undefined && eco.skill?.version !== undefined) {
+    facts.declaredVersion = eco.skill.version
+    facts.declaredVersionIn = 'SKILL.md 的 version'
+  }
+
   // 可发布清单：按知名度顺序取第一个存在的。它不一定与「主生态」相同（一个 Python 项目
   // 也可能因为某个原因带 package.json），所以单独判定，不从 kinds 推。
   for (const m of PUBLISHABLE_MANIFESTS) {
@@ -1711,6 +1741,54 @@ function detectArtifacts(root, root_, eco, walked) {
     if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
     facts.publishableManifest = { file: real, ecosystem: m.ecosystem }
     break
+  }
+  if (facts.publishableManifest === undefined && eco.kinds.includes('skill')) {
+    facts.publishableManifest = { file: root_.real('SKILL.md') ?? 'SKILL.md', ecosystem: 'skill' }
+  }
+
+  // 多包仓库子包聚合：若根目录私有或没有可发布清单，但 workspace 内有子包可发布，聚合事实
+  if (workspace?.declared && Array.isArray(workspace.packages) && workspace.packages.length > 0) {
+    const pubPackages = []
+    for (const pkgRel of workspace.packages) {
+      const pkgDir = join(root, pkgRel)
+      const pJson = join(pkgDir, 'package.json')
+      if (existsSync(pJson)) {
+        try {
+          const parsed = JSON.parse(readFileSync(pJson, 'utf8'))
+          if (parsed.private !== true) {
+            pubPackages.push({ path: pkgRel, name: parsed.name, ecosystem: 'node' })
+          }
+        } catch {}
+        continue
+      }
+      const cToml = join(pkgDir, 'Cargo.toml')
+      if (existsSync(cToml)) {
+        const cText = readFileSync(cToml, 'utf8')
+        const pkgSec = manifestSection(cText, '[package]')
+        if (!/^\s*publish\s*=\s*false/m.test(pkgSec || cText)) {
+          const nameMatch = /^\s*name\s*=\s*["']([^"']+)["']/m.exec(pkgSec || cText)
+          pubPackages.push({ path: pkgRel, name: nameMatch?.[1], ecosystem: 'rust' })
+        }
+        continue
+      }
+      const pyProj = join(pkgDir, 'pyproject.toml')
+      if (existsSync(pyProj)) {
+        const pyText = readFileSync(pyProj, 'utf8')
+        const projSec = manifestSection(pyText, '[project]')
+        const nameMatch = /^\s*name\s*=\s*["']([^"']+)["']/m.exec(projSec || pyText)
+        pubPackages.push({ path: pkgRel, name: nameMatch?.[1], ecosystem: 'python' })
+      }
+    }
+    if (pubPackages.length > 0) {
+      facts.workspacePublishablePackages = pubPackages
+      if (facts.publishableManifest === undefined) {
+        facts.publishableManifest = {
+          file: pubPackages[0].path,
+          ecosystem: pubPackages[0].ecosystem,
+          workspace: true,
+        }
+      }
+    }
   }
 
   const pkg = eco.manifest
@@ -1798,18 +1876,21 @@ const ECOSYSTEM_ARTIFACT_FACTS = [
       // 数量（各至多 5 个，超了服务端拒绝）与 edition 风险位（缺省 2015 可发布，
       // 不是必填）；authors 已废弃不判。
       const cargo = readText(join(root, root_.real('cargo.toml') ?? 'Cargo.toml')) ?? ''
-      if (/^\s*publish\s*=\s*false/m.test(cargo)) facts.private = true
+      const pkgSec = manifestSection(cargo, '[package]')
+      const wsPkgSec = manifestSection(cargo, '[workspace.package]')
+      const effectiveCargo = pkgSec !== '' ? pkgSec : (wsPkgSec !== '' ? wsPkgSec : cargo)
+      if (/^\s*publish\s*=\s*false/m.test(pkgSec || cargo)) facts.private = true
       const countList = (key) => {
-        const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(cargo)
+        const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(effectiveCargo)
         if (m === null) return undefined
         return m[1].split(',').map((s) => s.trim()).filter(Boolean).length
       }
       facts.cargoMeta = {
-        license: /^\s*license\s*=/m.test(cargo),
-        description: /^\s*description\s*=/m.test(cargo),
+        license: /^\s*license(\s*=|-file\s*=)/m.test(effectiveCargo),
+        description: /^\s*description\s*=/m.test(effectiveCargo),
         keywordsCount: countList('keywords'),
         categoriesCount: countList('categories'),
-        hasEdition: /^\s*edition\s*=/m.test(cargo),
+        hasEdition: /^\s*edition\s*=/m.test(effectiveCargo),
       }
     },
   },
@@ -1833,12 +1914,13 @@ const ECOSYSTEM_ARTIFACT_FACTS = [
       // 炸是最常见的拒绝理由）、requires-python（装到旧版的根因定位）、dynamic version
       // （版本号权威在后端，标签对齐要按后端取值而不是照抄文件里的字面）。
       const pyText = readText(join(root, root_.real('pyproject.toml') ?? 'pyproject.toml')) ?? ''
+      const projSec = manifestSection(pyText, '[project]')
       facts.pythonBuild = { hasBuildSystem: /\[build-system\]/.test(pyText) }
       facts.pythonMeta = {
-        hasReadme: /^\s*readme\s*=/m.test(pyText),
-        hasLicense: /^\s*license(\s*=|\s*\[)/m.test(pyText),
-        hasRequiresPython: /^\s*requires-python\s*=/m.test(pyText),
-        hasDynamicVersion: /dynamic\s*=\s*\[[^\]]*["']version["']/.test(pyText),
+        hasReadme: /^\s*readme\s*=/m.test(projSec),
+        hasLicense: /^\s*license(\s*=|\s*\[)/m.test(projSec),
+        hasRequiresPython: /^\s*requires-python\s*=/m.test(projSec),
+        hasDynamicVersion: /dynamic\s*=\s*\[[^\]]*["']version["']/.test(projSec),
       }
     },
   },
@@ -2092,7 +2174,12 @@ function detectDocs(root, root_) {
   }
   if (conventions.length > 0) {
     docs.aiConventions = conventions
-    docs.agents = { file: conventions[0].file, bytes: conventions[0].bytes }
+    const agentsHit = conventions.find((c) => c.file.toLowerCase() === 'agents.md')
+    if (agentsHit !== undefined) {
+      docs.agents = { file: agentsHit.file, bytes: agentsHit.bytes }
+    }
+    const hostFiles = conventions.filter((c) => c.file.toLowerCase() !== 'agents.md')
+    if (hostFiles.length > 0) docs.hostConventions = hostFiles
   }
   const ghEntry = root_.entry('.github')
   if (ghEntry?.isDir === true) {
@@ -2206,9 +2293,9 @@ function detectGit(root, options = {}) {
   // 但**「git 可不可用」仍然要判**——用 rev-parse 的成败回答它，不另起一次 --version。
   if (options.light === true) {
     const insideLight = runCapture(['rev-parse', '--is-inside-work-tree', '--show-toplevel'], root)
-    if (!insideLight.ok) return { available: true, present: false }
+    if (!insideLight.ok) return { available: insideLight.error?.code !== 'ENOENT', present: false, light: true }
     const l0 = insideLight.stdout.split('\n').map((s) => s.trim())
-    if (l0[0] !== 'true') return { available: true, present: false }
+    if (l0[0] !== 'true') return { available: true, present: false, light: true }
     const top = l0[1]
     return {
       available: true,
@@ -2873,10 +2960,14 @@ function survey(target, options = {}) {
   tagged = fill(tagged)
   homePathLeaks = fill(homePathLeaks)
 
+  // workspace 拓扑：多包仓库的事实，供上层决定「命令该在哪一层跑」、
+  // 「产物在哪个子包里」。读不到就是没有声明，不按目录形状猜。
+  const workspace = detectWorkspace(root, root_)
+
   // 标签与版本号对齐：自动化对不上的根源。复用 detectGit 已取到的标签列表，
   // 不另起 git 进程；非仓库根（标签属外层仓库）或取不到时保持 undefined，不判 false。
   // 只做事实比对，不下结论。
-  const artifacts = detectArtifacts(root, root_, eco, walked)
+  const artifacts = detectArtifacts(root, root_, eco, walked, workspace)
   if (artifacts.declaredVersion !== undefined && git.isRepoRoot !== false && Array.isArray(git.tags)) {
     artifacts.versionAligned = git.tags.some(
       (t) => t === artifacts.declaredVersion || t === `v${artifacts.declaredVersion}`)
@@ -2884,18 +2975,14 @@ function survey(target, options = {}) {
   }
 
   // 已跟踪但被忽略的文件也要单独报出来：忽略规则对它们无效，这是个独立的陷阱。
-  // 忽略探查只跑一次，两处复用同一结果。
-  const ignores = detectIgnores(root, root_, walked.outputDirCandidates, git)
-
-  // workspace 拓扑：多包仓库的事实，供上层决定「命令该在哪一层跑」、
-  // 「产物在哪个子包里」。读不到就是没有声明，不按目录形状猜。
-  const workspace = detectWorkspace(root, root_)
+  // 忽略探查只跑一次，两处复用同一结果；轻量模式跳过忽略探查。
+  const ignores = options.light === true ? { light: true } : detectIgnores(root, root_, walked.outputDirCandidates, git)
 
   return {
     target: { path: root, name: basename(root) },
     git,
     ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name, skillDropped: eco.skill?.dropped },
-    commands: deriveCommands(root, root_, eco),
+    commands: deriveCommands(root, root_, eco, workspace, walked),
     workspace,
     artifacts,
     // 宿主生态的补充事实：由描述符驱动，主引擎不认识任何具体生态名。
@@ -2914,16 +3001,16 @@ function survey(target, options = {}) {
       homePathLeaks,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
       // 截断时不能把「没报」当成「没有」。
-      contentScan: {
+      contentScan: options.light === true ? { filesScanned: 0, skipped: true } : {
         filesScanned: candidates.length,
         truncated: walked.contentScanTruncated === true,
         // 深度超限是另一种「没扫到」，与「文件数超限」分开报——两者的处置不同
         // （前者要确认那层深目录里是不是有东西，后者要重扫）。任何一种都不能读成
         // 「检查过了，很干净」。
-    depthLimited: walked.depthLimited,
-    // 上限本身也是数据：呈现层要说「超过多少层」，它不该反过来依赖勘察引擎的常量。
-    // 与 auto.headLimit 同构——报告里出现的每个数值都要能从输入数据拿到。
-    maxDepth: MAX_WALK_DEPTH,
+        depthLimited: walked.depthLimited,
+        // 上限本身也是数据：呈现层要说「超过多少层」，它不该反过来依赖勘察引擎的常量。
+        // 与 auto.headLimit 同构——报告里出现的每个数值都要能从输入数据拿到。
+        maxDepth: MAX_WALK_DEPTH,
         depthLimitedPaths: (walked.depthLimitedPaths ?? []).slice(0, 20),
         // 其余四类「没扫到」也各有一个数：超单文件上限、按扩展名跳过、读不出来、
         // 非 UTF-8（按宽松解码尽力扫，但编码没嗅探到）。任何一类非零，
@@ -2987,7 +3074,7 @@ function main(argv) {
   const light = flags.includes('--fast')
   if (flags.includes('--help') || flags.includes('-h')) {
     process.stdout.write([
-      '用法：node scripts/survey.mjs [目录] [--json|--markdown] [--probe-network]',
+      '用法：node scripts/survey.mjs [目录] [--json|--markdown] [--probe-network] [--fast]',
       '',
       '  --json            输出 JSON（默认）',
       '  --markdown        输出给人看的摘要',

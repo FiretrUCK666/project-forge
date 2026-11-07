@@ -28,7 +28,7 @@ import { survey, authorMarkers } from './survey.mjs'
 import { KERNEL_START, KERNEL_END } from './lib/protocol.mjs'
 import { isMainModule } from './lib/text.mjs'
 import { markerPositions } from './lib/markdown.mjs'
-import { readLedger, getSegment, contentHash } from './lib/ledger.mjs'
+import { readLedger, writeLedger, getSegment, contentHash, setDecision, forgetDecision, getDecisions, getSnapshot } from './lib/ledger.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -90,6 +90,10 @@ const FLAGS = new Set([
   // 存在这个开关，是因为「缺两栏」的另一条出路是「补两栏」——而补两栏是改别人写好的
   // 模板。存量项目自带的模板有自己的栏目设计，硬补齐等于替作者决定审查流程。
   '--pr-template-kept',
+  // 用户确认：本项目不发制品库，跳过制品库硬门禁。
+  '--no-publish',
+  // 自动同步：若契约快照漂移，自动调用 compose-agents.mjs 刷新。
+  '--auto-sync',
 ])
 
 /**
@@ -120,6 +124,8 @@ function parseArgs(argv) {
   const flags = new Set()
   /** undefined = 没给 --scope，跑全量（现有 CI 与既有用法依赖这个默认）。 */
   let scope
+  let remember
+  let forget
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i]
     if (a === '--help' || a === '-h') return { help: true }
@@ -136,6 +142,18 @@ function parseArgs(argv) {
       scope = new Set(wanted)
       continue
     }
+    if (a === '--remember' || a.startsWith('--remember=')) {
+      const val = a.startsWith('--remember=') ? a.slice('--remember='.length) : argv[++i]
+      if (!val) throw new Error('--remember 后面需要指定要固化的决策 flag（例如 --remember --no-bilingual）')
+      remember = val.startsWith('--') ? val : `--${val}`
+      continue
+    }
+    if (a === '--forget' || a.startsWith('--forget=')) {
+      const val = a.startsWith('--forget=') ? a.slice('--forget='.length) : argv[++i]
+      if (!val) throw new Error('--forget 后面需要指定要清除的决策 flag（例如 --forget --no-bilingual）')
+      forget = val.startsWith('--') ? val : `--${val}`
+      continue
+    }
     if (a.startsWith('--')) {
       if (!FLAGS.has(a)) throw new Error(`无法识别的参数：${a}（可用：${[...FLAGS].join('、')}）`)
       flags.add(a)
@@ -143,7 +161,7 @@ function parseArgs(argv) {
     }
     positional.push(a)
   }
-  return { target: positional[0] ?? process.cwd(), flags, scope }
+  return { target: positional[0] ?? process.cwd(), flags, scope, remember, forget }
 }
 
 /**
@@ -346,11 +364,16 @@ function main(argv) {
       '  --private-no-license   用户确认：保留所有权利，不落盘 LICENSE',
       '  --no-ci                用户确认：暂不要 CI',
       '  --no-auto-release      用户确认：暂不要自动发布',
+      '  --no-publish           用户确认：暂不发制品库，跳过制品库硬门禁',
       '  --secrets-reviewed     用户确认：未跟踪未忽略的命中均为占位或测试数据',
       '  --conventions-reviewed 用户确认：多份 AI 约定文件保持原样，不去改写它们',
       '  --handwritten-agents   用户确认：AGENTS.md 是有意手写的，不注入内核',
       '  --no-release-spec      用户确认：发布链路读说明文件，但不打算写发版规范',
       '  --no-collab-templates  用户确认：这个项目只有自己改，不要提案与问题报告模板',
+      '  --pr-template-kept     用户确认：项目里已有的提案模板沿用原样',
+      '  --auto-sync            若检测到项目事实与 AGENTS.md 生成快照漂移，自动调用 compose-agents 刷新',
+      '  --remember <flag>      将决策 flag 固化至 .project-forge/ledger.json 账本中持久生效',
+      '  --forget <flag>        从账本中移除已固化的决策 flag',
       '  --strict               严格模式：待问事项同样拦住（exit 2），用于 CI',
       '',
       '  退出码：0 = 无[缺]（默认下[待问]也放行）；1 = 有[缺]；2 = 用法错误或 --strict 拦下[待问]。',
@@ -358,8 +381,38 @@ function main(argv) {
     ].join('\n') + '\n')
     return 0
   }
-  const { target, flags, scope } = parsed
+  const { target, flags, scope, remember, forget } = parsed
   const root = resolve(target)
+
+  if (remember) {
+    if (!FLAGS.has(remember)) {
+      process.stderr.write(`错误：无法识别要固化的决策：${remember}（可用：${[...FLAGS].join('、')}）\n`)
+      return 2
+    }
+    const { ledger } = readLedger(root)
+    setDecision(ledger, remember, true)
+    writeLedger(root, ledger)
+    process.stdout.write(`已将决策记入账本：${remember}\n`)
+    return 0
+  }
+  if (forget) {
+    const { ledger } = readLedger(root)
+    forgetDecision(ledger, forget)
+    writeLedger(root, ledger)
+    process.stdout.write(`已从账本清除决策：${forget}\n`)
+    return 0
+  }
+
+  // 从账本读取持久化决策
+  const { ledger } = readLedger(root)
+  const savedDecisions = getDecisions(ledger)
+  const loadedFromLedger = []
+  for (const [k, v] of Object.entries(savedDecisions ?? {})) {
+    if (v === true && FLAGS.has(k) && !flags.has(k)) {
+      flags.add(k)
+      loadedFromLedger.push(k)
+    }
+  }
 
   /**
    * 这一面要不要查。不给 `--scope` 时永远为真（全量门禁）。
@@ -393,6 +446,45 @@ function main(argv) {
   const ok = []
   const line = (st, text) => process.stdout.write(`  [${st}] ${text}\n`)
   process.stdout.write(`交付门禁：${s.target.name}（${s.target.path}）\n`)
+
+  if (loadedFromLedger.length > 0) {
+    process.stdout.write(`  [齐] 已从账本自动加载决策：${loadedFromLedger.join('、')}\n`)
+  }
+
+  // 契约快照漂移检测
+  const snapshot = getSnapshot(ledger)
+  if (snapshot !== undefined) {
+    const currentCommandsKey = Object.entries(s.commands ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}:${v}`)
+      .join(';')
+    const currentHasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0
+    const currentHasPublish = s.artifacts?.publishableManifest !== undefined
+
+    const drifts = []
+    if (snapshot.hasRemote !== undefined && snapshot.hasRemote !== currentHasRemote) {
+      drifts.push(`远端状态变更（快照: ${snapshot.hasRemote ? '有' : '无'}, 当前: ${currentHasRemote ? '有' : '无'}）`)
+    }
+    if (snapshot.hasPublish !== undefined && snapshot.hasPublish !== currentHasPublish) {
+      drifts.push(`发布属性变更（快照: ${snapshot.hasPublish ? '可发布' : '不可发布'}, 当前: ${currentHasPublish ? '可发布' : '不可发布'}）`)
+    }
+    if (snapshot.commandsKey !== undefined && snapshot.commandsKey !== currentCommandsKey) {
+      drifts.push('验证/构建命令变更')
+    }
+    if (drifts.length > 0) {
+      if (flags.has('--auto-sync')) {
+        process.stdout.write(`  [齐] 检测到契约快照漂移（${drifts.join('、')}），已触发 --auto-sync 自动同步 AGENTS.md...\n`)
+        const syncRes = spawnSync(process.execPath, [join(HERE, 'compose-agents.mjs'), root], { encoding: 'utf8' })
+        if (syncRes.status === 0) {
+          process.stdout.write('  [齐] AGENTS.md 契约自动同步完成\n')
+        } else {
+          missing.push(`AGENTS.md 契约自动同步失败：${syncRes.stderr || syncRes.stdout}`)
+        }
+      } else {
+        pending.push(`项目现状与 AGENTS.md 生成快照漂移（${drifts.join('、')}）：建议执行 node scripts/compose-agents.mjs . 同步，或在 review 时传 --auto-sync`)
+      }
+    }
+  }
 
   if (wants('agents')) { // scope: agents
   // 1. AGENTS.md：一致性真相源是 compose --check 的字节比对，本门只转述。
@@ -905,44 +997,46 @@ function main(argv) {
   if (wants('release')) { // scope: release
   // 6d. 生态发布门禁：只判本生态清单事实，不拼他生态命令。
   const ecoKinds = s.ecosystem?.kinds ?? []
-  // Python：后端缺了即无权威构建入口（待问）；readme/license 缺了服务端大概率
-  // 拒绝（报缺——长描述渲染炸是最常见的 400）；requires-python 缺了只待问
-  // （装到旧版难定位，但不挡发布）；dynamic version 只提示 tag 对齐按后端取值。
-  if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined) {
-    if (s.artifacts.pythonBuild.hasBuildSystem !== true) {
-      pending.push('Python 缺构建后端声明：无 [build-system] 即无权威构建入口，补上再定发布预演')
-    }
-    const pm = s.artifacts.pythonMeta
-    if (pm !== undefined) {
-      if (pm.hasReadme !== true) missing.push('Python 缺 readme 声明（长描述渲染失败是服务端最常见的拒绝原因，先补再发）')
-      if (pm.hasLicense !== true) missing.push('Python 缺 license 声明（新后端要求 SPDX 字符串 + license-files，旧写法会报“应为 dict”）')
-      if (pm.hasRequiresPython !== true) {
-        pending.push('Python 缺 requires-python：不挡发布，但用户装到旧版时难定位；确认支持下限后补上')
+  const skipRegistryChecks = s.artifacts?.private === true || flags.has('--no-publish')
+  if (!skipRegistryChecks) {
+    if (ecoKinds.includes('python') && s.artifacts?.pythonBuild !== undefined) {
+      if (s.artifacts.pythonBuild.hasBuildSystem !== true) {
+        pending.push('Python 缺构建后端声明：无 [build-system] 即无权威构建入口，补上再定发布预演')
       }
-      if (pm.hasDynamicVersion === true) {
-        pending.push('Python 版本号走 dynamic：tag 对齐按后端取值（如 tag 或源码），不要照抄文件里的字面版本号')
+      const pm = s.artifacts.pythonMeta
+      if (pm !== undefined) {
+        if (pm.hasReadme !== true) missing.push('Python 缺 readme 声明（长描述渲染失败是服务端最常见的拒绝原因，先补再发）')
+        if (pm.hasLicense !== true) missing.push('Python 缺 license 声明（新后端要求 SPDX 字符串 + license-files，旧写法会报“应为 dict”）')
+        if (pm.hasRequiresPython !== true) {
+          pending.push('Python 缺 requires-python：不挡发布，但用户装到旧版时难定位；确认支持下限后补上')
+        }
+        if (pm.hasDynamicVersion === true) {
+          pending.push('Python 版本号走 dynamic：tag 对齐按后端取值（如 tag 或源码），不要照抄文件里的字面版本号')
+        }
       }
     }
-  }
-  if (ecoKinds.includes('go') && s.artifacts?.goModule !== undefined
-    && s.artifacts.goModule.goDirective === undefined) {
-    pending.push('Go 缺 go 指令：最低版本不明，补上再定兼容承诺')
-  }
-  // Rust：license/description 缺了服务端拒绝（报缺）；keywords/categories 超 5 个
-  // 同样拒绝（报缺——勘察已数好个数）；edition 未声明只待问（缺省 2015 可发布）。
-  if (ecoKinds.includes('rust') && s.artifacts?.cargoMeta !== undefined) {
-    if (s.artifacts.cargoMeta.license !== true) missing.push('Rust 缺 license 声明（发布必填其一：license 或 license-file）')
-    if (s.artifacts.cargoMeta.description !== true) missing.push('Rust 缺 description 声明（发布必填）')
-    const cm = s.artifacts.cargoMeta
-    if (typeof cm.keywordsCount === 'number' && cm.keywordsCount > 5) {
-      missing.push(`Rust keywords ${cm.keywordsCount} 个（上限 5 个，超了服务端拒绝）`)
+    if (ecoKinds.includes('go') && s.artifacts?.goModule !== undefined
+      && s.artifacts.goModule.goDirective === undefined) {
+      pending.push('Go 缺 go 指令：最低版本不明，补上再定兼容承诺')
     }
-    if (typeof cm.categoriesCount === 'number' && cm.categoriesCount > 5) {
-      missing.push(`Rust categories ${cm.categoriesCount} 个（上限 5 个，超了服务端拒绝）`)
+    // Rust：license/description 缺了服务端拒绝（报缺）；keywords/categories 超 5 个
+    // 同样拒绝（报缺——勘察已数好个数）；edition 未声明只待问（缺省 2015 可发布）。
+    if (ecoKinds.includes('rust') && s.artifacts?.cargoMeta !== undefined) {
+      if (s.artifacts.cargoMeta.license !== true) missing.push('Rust 缺 license 声明（发布必填其一：license 或 license-file）')
+      if (s.artifacts.cargoMeta.description !== true) missing.push('Rust 缺 description 声明（发布必填）')
+      const cm = s.artifacts.cargoMeta
+      if (typeof cm.keywordsCount === 'number' && cm.keywordsCount > 5) {
+        missing.push(`Rust keywords ${cm.keywordsCount} 个（上限 5 个，超了服务端拒绝）`)
+      }
+      if (typeof cm.categoriesCount === 'number' && cm.categoriesCount > 5) {
+        missing.push(`Rust categories ${cm.categoriesCount} 个（上限 5 个，超了服务端拒绝）`)
+      }
+      if (cm.hasEdition !== true) {
+        pending.push('Rust 未声明 edition（缺省 2015 可发布，建议显式声明当前版本）')
+      }
     }
-    if (cm.hasEdition !== true) {
-      pending.push('Rust 未声明 edition（缺省 2015 可发布，建议显式声明当前版本）')
-    }
+  } else if (flags.has('--no-publish')) {
+    ok.push('已确认不发布到制品库（--no-publish），已跳过制品库硬门禁')
   }
   // 发布自动化接线：有发布动作痕迹的生态，按对应专章逐项核对“登记了没有”。
   // 机器只认“动作痕迹 + OIDC 有无”两个比特，不猜登记内容对不对——对不对只能人去
@@ -1057,18 +1151,78 @@ function main(argv) {
   for (const t of missing) line('缺', t)
   if (missing.length > 0) {
     process.stdout.write(`\n结论：${missing.length} 处缺失，补完重跑。待问事项问完用户后用 flag 消掉。\n`)
+    renderNextActionNavigation(missing, pending, git)
     return 1
   }
   if (pending.length > 0) {
     if (flags.has('--strict')) {
       process.stdout.write(`\n结论：--strict 下 ${pending.length} 处待问同样拦住，问完消掉重跑。\n`)
+      renderNextActionNavigation(missing, pending, git)
       return 2
     }
     process.stdout.write('\n结论：无缺失，但有待问事项——问完用户、加 flag 重跑，全齐才算交付。\n')
+    renderNextActionNavigation(missing, pending, git)
     return 0
   }
   process.stdout.write('\n结论：全部齐备，可以交付。\n')
+  renderNextActionNavigation(missing, pending, git)
   return 0
+}
+
+function renderNextActionNavigation(missing, pending, git) {
+  process.stdout.write('\n下一步行动导航：\n')
+
+  const decisionPending = pending.filter((p) => !p.includes('未提交') && !p.includes('未推') && !p.includes('领先上游'))
+  if (decisionPending.length > 0) {
+    process.stdout.write('【待确认的决策（可用 --remember 固化至账本）】\n')
+    for (const p of decisionPending) {
+      let flagHint = ''
+      if (p.includes('单语') || p.includes('双语')) flagHint = '--no-bilingual'
+      else if (p.includes('贡献指南')) flagHint = '--no-contributing'
+      else if (p.includes('LICENSE')) flagHint = '--private-no-license'
+      else if (p.includes('检查自动化缺失') || p.includes('无工作流') || p.includes('暂不要 CI')) flagHint = '--no-ci'
+      else if (p.includes('自动发布')) flagHint = '--no-auto-release'
+      else if (p.includes('制品库') || p.includes('发布门禁')) flagHint = '--no-publish'
+      else if (p.includes('约定文件')) flagHint = '--conventions-reviewed'
+      else if (p.includes('手写')) flagHint = '--handwritten-agents'
+      else if (p.includes('发版规范') || p.includes('RELEASING.md')) flagHint = '--no-release-spec'
+      else if (p.includes('协作模板') || p.includes('问题报告模板缺失')) flagHint = '--no-collab-templates'
+      else if (p.includes('提案模板')) flagHint = '--pr-template-kept'
+      else if (p.includes('占位或测试数据') || p.includes('凭据')) flagHint = '--secrets-reviewed'
+      
+      process.stdout.write(`  - ${p}${flagHint ? `\n    → 固化命令：\`node scripts/review.mjs . --remember ${flagHint}\`` : ''}\n`)
+    }
+  }
+
+  const neededRefs = []
+  if (missing.some((m) => m.includes('LICENSE')) || pending.some((p) => p.includes('LICENSE'))) {
+    neededRefs.push('references/docs-set.md（第四节：许可协议选择与落盘）')
+  }
+  if (missing.some((m) => m.includes('CONTRIBUTING')) || pending.some((p) => p.includes('CONTRIBUTING'))) {
+    neededRefs.push('references/docs-set.md（第五节：贡献指南）')
+  }
+  if (missing.some((m) => m.includes('工作流') || m.includes('CI')) || decisionPending.some((p) => p.includes('CI'))) {
+    neededRefs.push('references/remote-github.md（持续集成与 GitHub Actions 配线）')
+  }
+  if (missing.some((m) => m.includes('AGENTS.md') || m.includes('内核'))) {
+    neededRefs.push('references/collaboration.md 与 templates/agents-kernel.md')
+  }
+  if (neededRefs.length > 0) {
+    process.stdout.write('【建议按需阅读的参考文档】\n')
+    for (const ref of neededRefs) process.stdout.write(`  - ${ref}\n`)
+  }
+
+  const immediate = []
+  if ((git?.dirty ?? 0) > 0 || (git?.ahead ?? 0) > 0) {
+    immediate.push(`工作区有未提交或未推送变动（dirty: ${git?.dirty ?? 0}, ahead: ${git?.ahead ?? 0}），请执行：git commit && git push`)
+  }
+  if (missing.length > 0) {
+    immediate.push('根据上述 [缺] 项修复文件或补充必要配置后重新运行 review.mjs')
+  }
+  if (immediate.length > 0) {
+    process.stdout.write('【立即可执行的动作】\n')
+    for (const act of immediate) process.stdout.write(`  - ${act}\n`)
+  }
 }
 
 // 与 survey / preflight 同一模式：直接执行才跑 main；被 import（selftest 单测本文件的

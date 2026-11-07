@@ -131,7 +131,7 @@ export function toMarkdown(s) {
       else if (x.nameOk === false) {
         L.push(`  - **${x.path}：目录名与 frontmatter 的 name 不一致`
           + `${x.skillName === undefined ? '' : `（name: ${x.skillName}）`}`
-          + '——宿主按目录发现、按 name 校验，两者须逐字相同，否则整份被丢弃**')
+          + '——宿主不校验目录名与 name 一致，但对齐两者属于通用约定，可避免人工定位混淆**')
       }
     }
   }
@@ -373,12 +373,6 @@ export function toMarkdown(s) {
         + '——「没报」在这些目录里不等于「没有」。看一眼权限，或手工检查那几个目录。')
     }
   }
-  const ibt = s.ignores?.ignoredButTracked
-  if (Array.isArray(ibt) && ibt.length > 0) {
-    L.push(`- **已被跟踪又被忽略**：${ibt.length} 个（忽略规则对已跟踪文件无效，`
-      + `这些文件仍在版本库里；要移除须先从索引删除）`)
-    for (const p of ibt.slice(0, 5)) L.push(`  - ${p}`)
-  }
   L.push('')
   L.push('## 体量')
   L.push('')
@@ -387,5 +381,62 @@ export function toMarkdown(s) {
     L.push('- **走查达到上限被截断**，上面的体量是下界而非准确值')
   }
   L.push(`- 依赖/产物目录：${s.outputs.heavyDirsPresent.join('、') || '无'}`)
+
+  const plan = computeSurveyActionPlan(s)
+  if (plan.length > 0) {
+    L.push('')
+    L.push('## 下一步行动导航')
+    L.push('')
+    L.push(...plan)
+  }
+
   return L.join('\n')
+}
+
+/** 计算勘察后的下一步行动导航（Action Plan）。 */
+export function computeSurveyActionPlan(s) {
+  const lines = []
+  const refs = []
+  const actions = []
+
+  if (s.git?.present !== true) {
+    refs.push('- `references/version-control.md`（配置 Git 版本管理）')
+  } else if (!s.git?.remote) {
+    refs.push('- `references/remote-github.md`（配置 GitHub 远端仓库与协作设施）')
+  }
+  if (!s.docs?.agents) {
+    refs.push('- `references/docs-set.md`（编写 AGENTS.md 契约与文档套装）')
+  }
+  const kinds = s.ecosystem?.kinds ?? []
+  if (s.artifacts?.publishableManifest !== undefined || s.artifacts?.declaredVersion !== undefined) {
+    if (kinds.includes('node')) refs.push('- `references/publish-npm.md`（npm 发布链路）')
+    if (kinds.includes('python')) refs.push('- `references/publish-python.md`（PyPI 发布链路）')
+    if (kinds.includes('rust')) refs.push('- `references/publish-rust.md`（crates.io 发布链路）')
+    if (kinds.includes('go')) refs.push('- `references/publish-go.md`（Go 模块标签发布）')
+  }
+  if (s.host?.id === 'dsh' || kinds.includes('dsh-plugin')) {
+    refs.push('- `references/plugins/dsh.md`（DSH 插件规范）')
+  }
+  const hasPlugin = kinds.some((k) => ['dsh-plugin', 'obsidian-plugin', 'vscode-extension'].includes(k))
+  if (!hasPlugin) {
+    refs.push('- *（本项目未命中插件生态，无需读取 `references/plugins/*`）*')
+  }
+
+  if (s.git?.dirty > 0 || (s.git?.ahead ?? 0) > 0) {
+    actions.push(`- 工作区有未提交或未推送变动（dirty: ${s.git?.dirty ?? 0}, ahead: ${s.git?.ahead ?? 0}），收尾前请执行：\`git commit && git push\``)
+  }
+  if (!s.docs?.agents) {
+    actions.push('- 执行生成项目契约：`node scripts/compose-agents.mjs .`')
+  }
+
+  lines.push('### 【按需加载的参考文档】')
+  if (refs.length > 0) lines.push(...refs)
+  else lines.push('- 当前无需额外加载专章文档')
+
+  lines.push('')
+  lines.push('### 【立即可执行的确定性动作】')
+  if (actions.length > 0) lines.push(...actions)
+  else lines.push('- 运行交付门禁检查：`node scripts/review.mjs .`')
+
+  return lines
 }

@@ -1334,6 +1334,104 @@ group('[5] 生态判定：纯文档目录仍要判成 docs-only')
   report(okN, '空目录 → unknown')
 }
 
+group('[56] 协作门禁：模板在不在、模板里有没有验证与回滚、外部贡献的危险形态')
+{
+  // 三件事合成一组，因为它们判的是同一条链路上的三个点：**有没有模板 → 模板里要素齐不齐
+  // → 外部贡献的安全边界**。分开写成三组会重复三次 fixture 搭建，而这三件事共用同一份
+  // 项目形状（有远端、有工作流）。
+  //
+  // 每一条都要**正反两面**：只验「该红的红了」不够——判据可以靠「永远红」满足。
+  const rv = (dir, ...a) => spawnSync(process.execPath,
+    [join(SCRIPTS_DIR, 'review.mjs'), dir, ...a], { encoding: 'utf8' })
+  const out = (d, ...a) => rv(d, ...a).stdout ?? ''
+  const base = ['--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci']
+
+  // ① 有远端、没有两份模板 → 两条待问。
+  const noTpl = fixture('collab-notpl', { 'package.json': '{"name":"p","version":"1.0.0"}\n' })
+  gitIn(noTpl, 'init')
+  gitIn(noTpl, 'remote', 'add', 'origin', 'https://github.com/o/r.git')
+  const askedPr = /提案模板缺失/.test(out(noTpl, ...base))
+  const askedIssue = /问题报告模板缺失/.test(out(noTpl, ...base))
+  check(askedPr && askedIssue, '有远端而无两份模板 → 两条待问',
+    out(noTpl, ...base).split('\n').filter((l) => /模板/.test(l)).join(' | ').slice(0, 200))
+  report(askedPr && askedIssue, '协作模板：缺了就问')
+
+  // ② 加 flag 消掉（用户确认单人开发）。
+  const flagged = !/模板缺失/.test(out(noTpl, ...base, '--no-collab-templates'))
+  check(flagged, '--no-collab-templates 消掉两条待问（单人不收贡献）')
+  report(flagged, '协作模板：flag 消得掉')
+
+  // ③ 没有远端 → 不问。判据挂在「有远端」上，不是挂在「有没有文件」上：
+  //    还没有远端的项目被问「你怎么不收贡献」，只会多一条无用待问。
+  const noRemote = fixture('collab-noremote', { 'package.json': '{"name":"p","version":"1.0.0"}\n' })
+  gitIn(noRemote, 'init')
+  const notAsked = !/模板缺失/.test(out(noRemote, ...base))
+  check(notAsked, '没有远端 → 不问协作模板（判据挂在链路上，不挂在项目上）')
+  report(notAsked, '协作模板：不误报')
+
+  // ④ 模板在、但缺「怎么验证」与「回滚点」→ 两条[缺]。这两条是**判内容**，不是判存在：
+  //    存在性已由③判过，这里判的是「审查与合并的人有没有依据」。
+  const emptyTpl = fixture('collab-emptytpl', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/pull_request_template.md': '## 改了什么\n\n## 为什么\n',
+  })
+  gitIn(emptyTpl, 'init')
+  gitIn(emptyTpl, 'remote', 'add', 'origin', 'https://github.com/o/r.git')
+  const o4 = out(emptyTpl, ...base)
+  check(/没有「怎么验证」/.test(o4), '提案模板缺「怎么验证」→ 缺', o4.slice(0, 200))
+  check(/没有「回滚点」/.test(o4), '提案模板缺「回滚点」→ 缺')
+  report(/没有「怎么验证」/.test(o4) && /没有「回滚点」/.test(o4), '提案模板：要素缺了报缺')
+
+  // ⑤ 补齐两栏 → 放行。反侧不能省：否则④可以靠「永远报缺」满足。
+  writeFileSync(join(emptyTpl, '.github', 'pull_request_template.md'),
+    '## 改了什么\n\n## 怎么验证的\n\n## 回滚点\n', 'utf8')
+  const o5 = out(emptyTpl, ...base)
+  check(!/没有「怎么验证」/.test(o5) && !/没有「回滚点」/.test(o5), '模板补齐要素 → 不再报缺')
+  report(!/没有「怎么验证」/.test(o5), '提案模板：补齐就放行')
+
+  // ⑥ `pull_request_target` **且**检出提案那边的代码 → 高危，报缺。
+  //    这一条**不给 flag 出路**：它不是「确认接受」的选择，是必须修的错误。
+  const danger = fixture('collab-prt', {
+    'package.json': '{"name":"p","version":"1.0.0"}\n',
+    '.github/workflows/label.yml': [
+      'name: danger',
+      'on: pull_request_target',
+      'jobs:',
+      '  x:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - uses: actions/checkout@v4',
+      '        with:',
+      '          ref: ${{ github.event.pull_request.head.sha }}',
+      '      - run: echo hi',
+      '',
+    ].join('\n'),
+  })
+  gitIn(danger, 'init')
+  gitIn(danger, 'remote', 'add', 'origin', 'https://github.com/o/r.git')
+  const o6 = out(danger, ...base, '--no-collab-templates')
+  check(/任意陌生人/.test(o6), 'pull_request_target + 检出提案代码 → 报缺（高危）', o6.slice(0, 200))
+  const stillMissing = /任意陌生人/.test(out(danger, ...base, '--no-collab-templates'))
+  check(stillMissing, '这一条加 flag 也不消（不能「确认接受」）')
+  report(stillMissing, '高危形态：flag 不给出路')
+
+  // ⑦ 合法用法：同一个触发器只用来打标签 → 放行。
+  //    按关键词判会误报，而误报多了这条判据就没人看了。
+  writeFileSync(join(danger, '.github', 'workflows', 'label.yml'), [
+    'name: label',
+    'on: pull_request_target',
+    'jobs:',
+    '  x:',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    '      - uses: actions/labeler@v5',
+    '',
+  ].join('\n'), 'utf8')
+  const o7 = out(danger, ...base, '--no-collab-templates')
+  check(!/任意陌生人/.test(o7), '同一触发器只打标签 → 不误报（合法用法）')
+  report(!/任意陌生人/.test(o7), '合法用法：放行')
+}
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

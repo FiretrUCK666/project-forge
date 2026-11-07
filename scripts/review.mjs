@@ -52,6 +52,7 @@ const SCOPES = [
   'badges', // README 徽章
   'secrets', // 凭据、本机路径、大文件、扫描可信度
   'ecosystem', // 生态特有门禁（插件/能力目录/发布清单）
+  'collaboration', // 协作基础设施：模板、外部贡献的信任边界
 ]
 
 const ALL_SCOPES = new Set(SCOPES)
@@ -80,6 +81,9 @@ const FLAGS = new Set([
   // 由他自己记着）。存在这个开关，是因为那条待问的另一条出路是「补一份文件」，
   // 而补文件是写别人的项目——不给他「确认现状可接受」的选项，就只剩逼他加一份文档。
   '--no-release-spec',
+  // 用户确认：这个项目只有自己一个人改，不要提案模板与问题报告模板。
+  // 判据挂在「有远端」上——没有远端就谈不上协作，那种项目不会被问到。
+  '--no-collab-templates',
 ])
 
 function readText(p) {
@@ -303,7 +307,7 @@ function main(argv) {
       '用法：node scripts/review.mjs <项目目录> [--scope=<切面>[,...]] [选项]',
       '',
       '  --scope=a,b   只校验这几面，其余不查、不报缺。不给就是全量（默认）。',
-      '                切面：git agents docs contributing license ci release badges secrets ecosystem',
+      '                切面：git agents docs contributing license ci release badges secrets ecosystem collaboration',
       '                用在「只让你补一件东西」的场景：老项目缺 AGENTS.md，',
       '                但任务只是配 CI 时，--scope=ci 不该被前者拦下。',
       '',
@@ -316,6 +320,7 @@ function main(argv) {
       '  --conventions-reviewed 用户确认：多份 AI 约定文件保持原样，不去改写它们',
       '  --handwritten-agents   用户确认：AGENTS.md 是有意手写的，不注入内核',
       '  --no-release-spec      用户确认：发布链路读说明文件，但不打算写发版规范',
+      '  --no-collab-templates  用户确认：这个项目只有自己改，不要提案与问题报告模板',
       '  --strict               严格模式：待问事项同样拦住（exit 2），用于 CI',
       '',
       '  退出码：0 = 无[缺]（默认下[待问]也放行）；1 = 有[缺]；2 = 用法错误或 --strict 拦下[待问]。',
@@ -911,6 +916,61 @@ function main(argv) {
   }
 
   } // scope: release
+  if (wants('collaboration')) { // scope: collaboration
+  // 7. 协作基础设施：有远端才会有别人来改动。**判据挂在「有远端」上**，不挂在
+  //    「有没有文件」上：一个还没有远端的项目被问「你怎么不收贡献」，只会多一条无用待问。
+  //
+  //    这一节同时把两份**早就采到、却没人读**的勘察事实接上判据（issueTemplates、
+  //    prTemplate）。「产出了但没消费」与「没有这个能力」在报告上长得一模一样——
+  //    而前者更坏：它看起来像在管，实际一句话都没说过。
+  const hasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0
+    && s.git?.isRepoRoot !== false
+  if (!hasRemote) {
+    ok.push('无远端：不判协作模板（自己一个人的项目谈不上收贡献）')
+  } else {
+    const auto3 = s.docs?.workflowAutomation ?? {}
+    // 两种模板，判据不同：
+    //   问题报告模板——让别人一次把必要信息给全，缺了就是每份报告都要追问一轮；
+    //   改动提案模板——让审查者不必从改动内容反推意图，缺了就是每次审查都靠猜。
+    if (s.docs?.prTemplate === true) ok.push('提案模板有')
+    else if (flags.has('--no-collab-templates')) ok.push('无提案模板（用户已确认单人不收贡献）')
+    else pending.push('提案模板缺失：有远端就会有别人提改动，缺模板等于每次审查都要从改动内容反推意图'
+      + '（落一份模板；确认单人不收贡献时加 --no-collab-templates）')
+
+    if (s.docs?.issueTemplates === true) ok.push('问题报告模板有')
+    else if (flags.has('--no-collab-templates')) ok.push('无问题报告模板（用户已确认）')
+    else pending.push('问题报告模板缺失：缺了每份缺陷报告都要来回追问「环境是什么、怎么复现」'
+      + '（落一份模板；确认单人不收贡献时加 --no-collab-templates）')
+
+    // 模板**存在但缺要素**才是「缺」：存在性已判过，这里判内容。
+    // 只判两个能机器判的要素——验证证据与回滚点。其余（风险、影响范围）机器判不了，
+    // 交给审查的人，不在门禁里假装能判。
+    if (s.docs?.prTemplate === true && s.docs?.prTemplateFile !== undefined) {
+      const tpl = readText(join(root, s.docs.prTemplateFile)) ?? ''
+      // 中英两套词都要认：写的人用哪种语言是他的自由，只认中文会让一份合格的英文模板被判缺。
+      if (!/(验证|测试|怎么验|check|test|verif|evidenc)/i.test(tpl)) {
+        missing.push('提案模板没有「怎么验证」一栏：审查与合并的人看的就是这里，缺了等于让他们替你重跑一遍')
+      }
+      if (!/(回滚|撤销|rollback|revert)/i.test(tpl)) {
+        missing.push('提案模板没有「回滚点」一栏：出问题时要能立刻说清退回哪个已知可用的状态，'
+          + '「出事了再说」不算')
+      }
+    }
+
+    // 外部贡献的安全边界：`pull_request_target` 能拿到密钥，它**又**去检出提案那边的
+    // 代码时，等于把密钥交给任意陌生人跑他的代码。判的是**配对**，不是单个关键词——
+    // 只用了这个触发器来打标签、评论是合法用法，按关键词判会误报，误报多了没人看。
+    //
+    // 这一条**不给 flag 出路**：它不是一个「确认接受」的选择，是一个必须修的错误。
+    if (auto3.usesPullRequestTarget === true && auto3.checkoutsPrHead === true) {
+      missing.push('工作流同时用了 pull_request_target 并检出提案那边的代码：这等于让任意陌生人'
+        + '拿你的密钥跑他的代码。改成「无特权工作流跑检查 + 有特权工作流只消费产物」，'
+        + '或把这个触发器换成 pull_request（见 references/collaboration.md 第六节）')
+    } else if (auto3.usesPullRequestTarget === true) {
+      ok.push('用了 pull_request_target 但没检出提案代码（合法用法）')
+    }
+  }
+  } // scope: collaboration
   for (const t of ok) line('齐', t)
   for (const t of pending) line('待问', t)
   for (const t of missing) line('缺', t)

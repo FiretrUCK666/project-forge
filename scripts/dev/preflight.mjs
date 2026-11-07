@@ -342,16 +342,17 @@ export function referencedPaths(text) {
  * `checkDeliveredAttribution`。一个文件只归一个判据管：两套方向相反的判据并存，
  * 迟早给出两个答案，而其中必有一个是错的。
  *
- * **`docs/` 也不在这里判，理由不同**：那是**历史快照**（各版本发布说明），写的是「那一版
- * 的仓库长什么样」。它里面提到某个后来被删掉的文件，是**正确**的历史陈述，不是断链——
- * 要求它跟着今天的仓库走，等于逼人改写已发布的历史。这条判据问的是「照着这份现在能不能
- * 走通」，而历史文档不承诺这一点。
+ * **`docs/` 里只有 `release-notes/` 不判，不是整个 `docs/`**：发布说明是**历史快照**——它
+ * 写的是「那一版的仓库长什么样」，提到某个后来被删掉的文件是**正确**的历史陈述，不是断链。
+ * 但同一个 `docs/` 下还有**活文档**（工作项、设计与决策记录）：它们描述的是现在，断链就是
+ * 断链。一刀切豁免整个目录，等于让 `docs/` 变成引用检查的盲区——而那正是 AI 最常去读的
+ * 地方之一。两种东西判据相反，判据就必须分开。
  */
 function checkReferencesResolve() {
   const docs = repoTextFiles()
     .filter((f) => f.endsWith('.md'))
     .filter((f) => !rel(f).startsWith('templates/'))
-    .filter((f) => !rel(f).startsWith('docs/'))
+    .filter((f) => !rel(f).startsWith('docs/release-notes/'))
   if (docs.length === 0) { fail('没有找到任何 Markdown 文件。'); return }
   let total = 0
   for (const full of docs) {
@@ -1958,6 +1959,11 @@ function checkFreshness() {
       || /^references\/publish-[a-z0-9-]+\.md$/.test(rel)
       || rel === 'references/publish.md'
       || rel === 'references/remote-github.md'
+      // 协作那页同样承载外部易变事实：平台对 fork 提案的令牌限制、`pull_request_target`
+      // 的语义与风险、分支保护与合并后删分支的行为——都是「会随平台更新变化」的东西，
+      // 而它们写错一次就变成安全事故。按文件名点名的理由与上两行一致：这四份是总纲，
+      // 不是某生态的专章，模式匹配不到。
+      || rel === 'references/collaboration.md'
     const r = evalFreshnessMarker(rel, text, todayStr, tomorrowStr)
     if (isChapter && !r.hasSection) {
       fail(`${rel} 缺少「事实来源」节——带外部易变事实的章节必须写来源与核实方式（插件专章见 plugin-project.md 骨架的「事实来源（必填）」节，发布专章见兄弟文件的同名节）。`)

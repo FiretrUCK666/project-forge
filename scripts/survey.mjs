@@ -2001,6 +2001,34 @@ function detectDocs(root, root_) {
     docs[key] = hit === undefined ? undefined : { file: hit, bytes: sizeOf(join(root, hit)) }
   }
 
+  // 工作项目录：项目把「正在进行 / 已完成 / 被放弃」的工作记录放在哪。
+  //
+  // 候选按常见程度排，**只认目录、不认文件名**：只要那个目录在，且里面有 .md，
+  // 就说明这个项目在用工作项。判据是「有没有这个习惯」，不是「某个文件叫什么」——
+  // 把文件清单写死，等于逼所有项目改成我们的命名。
+  //
+  // 与 `docs/` 下其他东西分开报：`docs/release-notes/` 是**历史快照**（不可改），
+  // 工作项是**活文档**（引用必须能走通）。两种东西的判据相反，合在一个字段里迟早判错。
+  {
+    const candidates = ['docs/work', 'docs/tasks', 'todo', 'work']
+    for (const rel of candidates) {
+      const full = join(root, ...rel.split('/'))
+      let isDir = false
+      try { isDir = statSync(full).isDirectory() } catch { isDir = false }
+      if (!isDir) continue
+      let files = []
+      let readable = true
+      try {
+        files = readdirSync(full, { withFileTypes: true, encoding: 'utf8' })
+          .filter((x) => x.isFile() && x.name.endsWith('.md'))
+          .map((x) => x.name)
+          .sort()
+      } catch { readable = false }
+      docs.workItems = { dir: rel, count: files.length, files: files.slice(0, 50), readable }
+      break
+    }
+  }
+
   // 许可证：**按声明判，不按文件名清单**。
   //
   // 一张固定的文件名清单一定会漏，而漏的后果是会诱导再写一份：Rust 生态的标准双许可
@@ -2059,6 +2087,10 @@ function detectDocs(root, root_) {
     docs.githubDir = entries
     docs.issueTemplates = ghReadable ? entries.some((n) => /^ISSUE_TEMPLATE/i.test(n)) : undefined
     docs.prTemplate = ghReadable ? entries.some((n) => /^pull_request_template/i.test(n)) : undefined
+    // 文件名也报出来：判「模板里有没有验证与回滚那两栏」要读得到它。
+    // 只报布尔值的话，下游只能再猜一次文件名——平台认的正是这个形状，猜错就判不到。
+    const prFile = entries.find((n) => /^pull_request_template/i.test(n))
+    if (ghReadable && prFile !== undefined) docs.prTemplateFile = `.github/${prFile}`
     const wfEntry = listRoot(gh).entry('workflows')
     if (wfEntry?.isDir === true) {
       let wfReadable = true
@@ -2083,6 +2115,11 @@ function detectDocs(root, root_) {
           releaseTriggerTags: [], releaseJobConditionTagsV: false,
           usesReleaseToken: false, hasContentsWrite: false, hasFetchDepthZero: false,
           hasNpmPublish: false, hasPypiPublish: false, hasCargoPublish: false,
+          // 协作安全：`pull_request_target` 能拿到密钥，而它一旦**又**去检出提案那边的代码，
+          // 就等于把密钥交给任意陌生人跑他的代码（业界叫 pwn request）。
+          // 两个特征**必须分开报**：单个不危险，配对才致命——只判关键词会误报，
+          // 误报多了这条判据就没人看了。
+          usesPullRequestTarget: false, checkoutsPrHead: false,
           truncated: false, headLimit: WORKFLOW_HEAD_LIMIT,
         }
         for (const f of files) {
@@ -2104,6 +2141,13 @@ function detectDocs(root, root_) {
           if (/pypa\/gh-action-pypi-publish|twine\s+upload/.test(head)) auto.hasPypiPublish = true
           if (/cargo\s+publish/.test(head)) auto.hasCargoPublish = true
           if (/refs\/tags\/v/.test(head)) auto.releaseJobConditionTagsV = true
+          if (/pull_request_target/.test(head)) auto.usesPullRequestTarget = true
+          // 「检出提案那边的代码」的几种常见写法。判据是**取到 head 那一侧**，不是
+          // 泛泛地出现 `pull_request`：`github.event.pull_request.number` 一类元数据
+          // 读取是安全的，凭它判会误报。
+          if (/(?:github\.event\.pull_request\.head\.(?:sha|ref)|refs\/pull\/[^\s]*\/merge|pull_request\.head)/.test(head)) {
+            auto.checkoutsPrHead = true
+          }
           // 标签触发器只认 on.push.tags 的两种常见 YAML 写法（行内数组与短横列表），
           // 取原文不解释语义；workflow_dispatch 的 inputs.tag 是单数，不会误收。
           for (const m of head.matchAll(/tags\s*:\s*\[([^\]]*)\]/g)) {

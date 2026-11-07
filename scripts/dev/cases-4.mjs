@@ -262,6 +262,24 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
   report(badLive.status === 1, '活文档：照判')
 
   writeFileSync(liveDoc, liveBefore, 'utf8')
+
+  // 第三条：`docs/` 底下**不全是历史快照**。工作项是活文档，它引用的文件必须走得通。
+  //
+  // 少了这一条，「`docs/` 不判」可以靠「豁免整个目录」满足——而那会让 `docs/` 变成引用
+  // 检查的盲区，偏偏那正是 AI 最常去读的地方之一。判据分开，两面都要断言。
+  const workDir = join(clone, 'docs', 'work')
+  mkdirSync(workDir, { recursive: true })
+  writeFileSync(join(workDir, 'task-a.md'),
+    '# 任务 A\n\n改动落在 `scripts/gone-forever.mjs`。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+
+  const badWork = preflightIn(clone, { only: '引用能否解析' })
+  check(badWork.status === 1 && /gone-forever/.test(badWork.out),
+    '工作项（docs/ 下的活文档）引用不存在的文件 → 断链照判',
+    badWork.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 200))
+  report(badWork.status === 1, '工作项：照判，不跟着历史快照一起豁免')
+
+  rmSync(workDir, { recursive: true, force: true })
 }
 
 // ---- 分片收尾 ----

@@ -234,8 +234,11 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 | `references/publish.md`, `references/publish-npm.md`, `references/publish-python.md`, `references/publish-go.md`, `references/publish-rust.md` | Release overview and per-ecosystem chapters: can it ship, where, version semantics, safe release, how to join an existing state |
 | `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
 | `references/handoff.md` | Hand-off: how a trace is judged, what to remove and what to keep, the order of removal, how to accept the result |
+| `references/collaboration.md` | Collaboration: where changes come from, who reviews, who may merge, and how to clean up after a merge |
 | `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
 | `templates/release-spec.md` | Release-spec skeleton: where the notes live, which sections they use, the order of operations, how to recover from a failed release |
+| `templates/work-item.md` | Work-item skeleton: status, goal and acceptance, plan, what was abandoned, where to resume |
+| `templates/pull-request-template.md` | Pull-request skeleton: what changed, why, how it was verified, rollback point |
 | `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
 | `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
 | `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |

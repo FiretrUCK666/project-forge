@@ -212,8 +212,11 @@ node "<本领目录>/scripts/update.mjs" --check
 | `references/publish.md`、`references/publish-npm.md`、`references/publish-python.md`、`references/publish-go.md`、`references/publish-rust.md` | 发布总纲与各生态专章：能不能发、发到哪、版本号语义、安全发布、各种既有状态怎么接 |
 | `references/plugin-project.md`、`references/skill-project.md`、`references/plugins/` | 插件类与 skill 类项目的判定协议，以及各生态的专章 |
 | `references/handoff.md` | 交棒：痕迹怎么判、拆什么留什么、拆的顺序、拆完怎么验收 |
+| `references/collaboration.md` | 协作：改动从哪来、谁审、谁能合、合并后怎么收尾（配好之后每天用这条） |
 | `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
 | `templates/release-spec.md` | 发版规范骨架：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
+| `templates/work-item.md` | 工作项骨架：状态、目标与验收、计划、放弃过什么、断点（跨会话接续用） |
+| `templates/pull-request-template.md` | 改动提案骨架：改了什么、为什么、怎么验证、回滚点 |
 | `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
 | `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |

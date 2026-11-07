@@ -492,6 +492,8 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 
 **不要拿「推得上去」当许可**：主干保护要不要开、开没开，是仓库设置里的事（脚本读不到，需要
 管理员权限）。**能推不等于该推**——拦住它的是上面那张判据，不是平台。
+**它开着时直接推送会被拒**（远端报「protected branch hook declined」或「required status
+check is expected」）：那是设计，不是故障——改走分支 + 提案，不要去找绕过它的办法。
 
 **提交纪律**：一次实质变更一个提交；**提交信息要说清「更新了什么、修复了什么」**——读它的人
 （包括发版时写发布说明的人）要能据此讲出使用者听得懂的一句话。中文或英文均可，**禁用 emoji**。

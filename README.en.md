@@ -138,8 +138,10 @@ copy is meant for editing, and the tool leaves it alone. How to work on it is in
 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
 
 > **The `Source code` download works too.** It is GitHub's generated source archive: **the same set
-> of files** as the package, but it has no versioned top-level folder — create a `project-forge/`
-> folder and put the files in it. Both install, and both keep themselves current. The package is
+> of files** as the package (it honours the repository's export rules, so `.github/`, `AGENTS.md`
+> and `scripts/dev/` are not in it). The only difference is the top-level folder name: the package
+> uses `project-forge/`, the source archive uses `project-forge-<tag>/`. Rename that folder to
+> `project-forge` after extracting. Both install, and both keep themselves current. The package is
 > built for the purpose, so prefer it.
 
 ### Where it goes
@@ -272,6 +274,8 @@ These never enter the package. To work on this skill, start with
 | --- | --- |
 | `AGENTS.md` | This repository's own contract: mechanisms, invariants, build and verification, hard rules |
 | `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, the gate before committing |
+| `RELEASING.md` | The release spec: where the notes live, which sections they use, in what order to publish, how to recover |
+| `docs/` | Release notes (`release-notes/`) and work items (`work/`), kept in the repo |
 | `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
 | `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
 | `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |

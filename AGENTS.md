@@ -422,7 +422,8 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 
 带外部易变事实的章节文件，必须在 `## 事实来源` 节末尾带恰好一个标记。**判据是「这个文件
 承载了外部易变事实」，不是文件名**——目前包括 `references/publish-<生态>.md`、`references/plugins/`
-下各专章，以及总纲 `references/publish.md` 与 `references/remote-github.md`：
+下各专章，以及总纲 `references/publish.md`、`references/remote-github.md` 与
+`references/collaboration.md`：
 
 `<!-- <scope>-verified: date=YYYY-MM-DD [key=value ...] -->`
 

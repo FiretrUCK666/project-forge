@@ -122,9 +122,11 @@ git clone https://github.com/FiretrUCK666/project-forge.git "<你的 skill 根>/
 两种装法的区别只有一条：**克隆下来的那份不会自己更新**。目录里有 `.git` 说明它是拿来改的，
 工具对它只读。改法见 [CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md)。
 
-> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，**文件集合与安装包相同**，
-> 但它没有版本号前缀目录——解压后要自己建一个 `project-forge/` 放进去。两个都能装，装上都会自己
-> 保持最新。安装包是专门为安装打的，推荐用它。
+> **发布页上的 `Source code` 也能用。** 那是 GitHub 自动生成的源码包，**文件集合与安装包相同**
+> （同样遵守仓库里的导出规则，`.github/`、`AGENTS.md`、`scripts/dev/` 都不在里面），区别只在
+> 顶层目录名：安装包是 `project-forge/`，源码包是 `project-forge-<标签>/`。解压后把那个目录
+> 改名成 `project-forge` 即可。两个都能装，装上都会自己保持最新；安装包是专门为安装打的，
+> 推荐用它。
 
 ### 放在哪里
 
@@ -249,6 +251,8 @@ node "<本领目录>/scripts/update.mjs" --check
 | --- | --- |
 | `AGENTS.md` | 这个仓库自己的项目契约：机制、不变量、构建与验证、硬性规范 |
 | `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
+| `RELEASING.md` | 发版规范：说明写在哪、分哪几节、按什么顺序发、出错了怎么补 |
+| `docs/` | 发布说明（`release-notes/`）与工作项（`work/`），随仓库走 |
 | `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
 | `.gitattributes`、`.gitignore` | 哪些不进用户包、哪些不进版本库 |
 | `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |

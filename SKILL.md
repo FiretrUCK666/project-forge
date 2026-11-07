@@ -305,7 +305,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单；`--verify` 判是否已干净——退出码 **0 干净 / 1 不干净 / 3 判不了**，「判不了」指扫描没覆盖全部，**不要读成干净**） |
 | `scripts/release-notes.mjs` | 写发布说明：按字节发送一份 UTF-8 文件并回读比对；「非 ASCII 正文不经 shell」那条规则的落地工具 |
 | `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示 |
-| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步；临时文件的命名形状与归属判据也在这里 |
+| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
 | `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
 | `LICENSE` | 许可证全文 |
 | `assets/readme/` | README 里那几组卡片的 SVG 源文件（中英成对，纯矢量，可直接改） |

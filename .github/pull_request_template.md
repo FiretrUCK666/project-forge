@@ -14,14 +14,16 @@
 -->
 
 ```sh
-node scripts/dev/preflight.mjs
+node scripts/dev/preflight.mjs --no-behavior
 node scripts/dev/selftest.mjs
 node scripts/compose-agents.mjs . --check
 node scripts/sync-toc.mjs README.md README.en.md --check
 git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt --at HEAD
 ```
 
-- [ ] 上面五条全绿（与 CI 是同一批命令）
+（第一条带 `--no-behavior`：行为那趟交给第二条，两条职责正交。`package-list.txt` 用完删掉。）
+
+- [ ] 上面这几条全绿
 - [ ] 改了判定逻辑的话，同时补了能证伪它的 fixture（一个该被识别成 X 的目录，一个容易被误判成 X 的目录）
 - [ ] 改了 `templates/agents-kernel.md` 的话，同一次提交里带上了重新注入的 `AGENTS.md`
 - [ ] 改了 README 的结构的话，重跑过 `sync-toc.mjs`
@@ -40,7 +42,3 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 ## 备注
 
 <!-- 有没有拿不准的地方、需要维护者拍板的事，写在这里。 -->
-
----
-
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)

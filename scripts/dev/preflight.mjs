@@ -1326,6 +1326,13 @@ function checkStatedCounts() {
     scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'scripts', 'dev'), 'scripts/dev/', (e) => e.isFile() && e.name.endsWith('.mjs'))
     scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
+    // **scripts/lib 逐文件列不合算**：它是内部模块，读者不需要按文件名找它（`SKILL.md`
+    // 与 README 都是按目录一行交代的）。这里只核一件事：目录行在不在。
+    // 不核的后果很具体——整块目录从文件表里消失时，没有一个检查会响。
+    if (existsSync(join(SKILL_ROOT, 'scripts', 'lib'))
+      && !listed('scripts/lib/')) {
+      missing.push('scripts/lib/（公共模块目录整行）')
+    }
     // templates/ 也要扫：它是「拿到包的人」最需要知道的一块（骨架与许可证全文），
     // 而两张 README 表里的漏登只有逐文件比对才看得见——`templates/` 是其中最容易漏的
     // 一块（一枚内核文件就长期没人列）。
@@ -2045,6 +2052,45 @@ function checkReadmeToc() {
   process.stdout.write('README 目录：与标题一致\n')
 }
 
+/**
+ * 章节文件的体量软预算：**只提示，不失败**。
+ *
+ * 为什么不失败：「不同不等于超标」。一份长文件可能每一段都是判据，删掉任何一段都会让
+ * 某个没预料到的情况失去依据；而「读起来累」是相对的，没有一个能一刀切的数字。红的
+ * 代价是它会被当成坏了——那比不检查更糟。
+ *
+ * 为什么还要提示：**它有长出来的趋势**。指标一旦没人看，文件就会一直涨，而涨到某个
+ * 程度时，读它的人（AI）会在读到一半时丢掉上下文——那件事本身不会报错。提示量出来
+ * 的是「这件事正在发生」，怎么处置留给看的人。
+ */
+//
+// 阈值取「明显超过同伴」的位置，不取中位数：判据是**这条提示还值不值得读**。
+// 门槛设在中位数附近时，一半以上的文件都会喊——而一份永远在喊的报告等于不存在。
+const CHAPTER_LINE_BUDGET = 600
+const CHAPTER_BYTE_BUDGET = 45000
+function checkChapterSize() {
+  const dir = join(SKILL_ROOT, 'references')
+  if (!existsSync(dir)) return
+  const walk = (sub) => {
+    const here = join(dir, sub)
+    for (const e of readdirSync(here, { withFileTypes: true, encoding: 'utf8' })) {
+      const rel = sub === '' ? e.name : `${sub}/${e.name}`
+      if (e.isDirectory()) { walk(rel); continue }
+      if (!e.name.endsWith('.md')) continue
+      const full = join(dir, rel)
+      const text = readText(full)
+      const lines = text.split('\n').length
+      const bytes = Buffer.byteLength(text, 'utf8')
+      if (lines <= CHAPTER_LINE_BUDGET && bytes <= CHAPTER_BYTE_BUDGET) continue
+      warn(`references/${rel} 已到 ${lines} 行 / ${Math.round(bytes / 1024)} KB`
+        + `（软预算 ${CHAPTER_LINE_BUDGET} 行 / ${Math.round(CHAPTER_BYTE_BUDGET / 1024)} KB）`
+        + '——不是错误，只是该看一眼：能不能靠去重、拆节或指向兄弟文件压下来。'
+        + '压不下来就留着，判据比篇幅重要。')
+    }
+  }
+  walk('')
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 // ── 检查十一：用户包边界 ────────────────────────────────────────────────────
@@ -2532,6 +2578,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('插件专章登记', checkPluginChapters)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
+  step('章节体量', checkChapterSize)
   step('行为自检', () => checkBehavior({ skip: argv.includes('--no-behavior') }))
   // --only 写了不认识的标签必须报错。
   // 静默忽略比不实现更坏：测试会以为自己验了那一项，而它根本没跑。

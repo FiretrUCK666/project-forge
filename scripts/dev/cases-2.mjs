@@ -929,7 +929,7 @@ group('[50] 命令推导的四种空：每一种都要说得出「为什么空�
 // 放在组内会让别的组引用不到，而那种错只在运行时炸出来（ReferenceError），
 // 前面已经通过的断言全都白跑——一次真实的教训。
 
-group('[14] 完成判据不能空转：只升级不填写时，必须报出缺失的节')
+group('[14] 完成判据不能空转：升级或生成之后，没填写就不许说「完整」')
 {
   const dir = fixture('vacuous', {
     'pyproject.toml': '[project]\nname = "x"\nversion = "1.0.0"\n',
@@ -939,15 +939,17 @@ group('[14] 完成判据不能空转：只升级不填写时，必须报出缺�
   compose(dir, '--upgrade')
   const st = compose(dir, '--status')
   const out = st.stdout ?? ''
-  // 只做升级、一个项目节都没写时，pf:author 数立刻是 0——只看这个数字会以为写完了。
-  const noAuthors = /待填写 0 处/.test(out)
-  check(noAuthors, '前提：升级后待填写确实是 0')
-  const reportsMissing = /缺失 \d+ 节/.test(out)
-  check(reportsMissing, '--status 报出缺失的节（否则完成判据会空转）', out.split('\n')[0])
-  report(reportsMissing, '--status 报出缺失节数')
-  const warns = /不算完成/.test(out)
-  check(warns, '--status 明确说明这些节没写就不算完成')
-  report(warns, '并说明不算完成')
+  // 升级会把缺的节全部补上：能自动生成的写全，需要人写的补成骨架（带 pf:author）。
+  // 于是**缺节归零，待填写不是零**——完成判据必须落在「待填写」上，否则它就是在数
+  // 一个永远为 0 的指标，然后宣布写完了。
+  const hasAuthors = /待填写 [1-9]\d* 处/.test(out)
+  check(hasAuthors, '升级后「待填写」是正数（骨架在，内容还没写）', out.split('\n')[0])
+  report(hasAuthors, '升级：待填写是正数')
+  // 判「有没有报完整」要看**那一行结论**，不能全文找「内容完整」四个字：
+  // 收尾提示里本来就写着「重跑确认『内容完整』」，那是给人的指引，不是结论。
+  const noClaim = !/^内容完整[:：]/m.test(out)
+  check(noClaim, '升级后不得报「内容完整」（一节都没填）', out.split('\n').slice(0, 2).join(' / '))
+  report(noClaim, '升级：不报完整')
 
   // 新生成的文件：节**都在**（来自模板），但都还没填——所以判据必须落在
   // 「待填写」上，且绝不能报「内容完整」。只看缺失节数会漏掉这种情况。
@@ -1054,7 +1056,7 @@ group('[6] 生成：按项目事实取舍条件段落')
     ['含回滚分档（与发布无关，必须总有）', /^### 回滚分档$/m.test(t)],
     ['含版本号语义（有清单 → 可发布）', /^### 版本号语义$/m.test(t)],
     ['含依赖版本同步', /^## 依赖版本同步$/m.test(t)],
-    ['无远端 → 不含角色判定', !/^### 角色判定$/m.test(t)],
+    ['无远端 → 不含角色判定', !/\*\*先判角色。\*\*/.test(t)],
     ['无残留条件标记', !/<!--\s*pf:(if|endif)/.test(t)],
     ['无连续 3 行以上空行', !/\n{3,}/.test(t)],
   ]

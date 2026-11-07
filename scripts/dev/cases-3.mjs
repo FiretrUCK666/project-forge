@@ -894,7 +894,9 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
     report(ok2, '作者编排：不判缺节，也不报完整')
   }
 
-  // 3) 升级的文件：--upgrade 落一个 upgraded 标记（判据有据可依，不靠猜），缺节仍作待办报出。
+  // 3) 升级的文件：--upgrade 落一个 upgraded 标记（判据有据可依，不靠猜）；
+  //    缺的节会被补齐（要人写的补成骨架），所以「缺节」这一项不再是升级后的待办，
+  //    待办是「待填写」。
   {
     const dir = fixture('sec-upgraded', { 'package.json': pkg })
     writeFileSync(join(dir, 'AGENTS.md'), '# x\n\n说明。\n\n## 怎么跑\n\nnpm test\n', 'utf8')
@@ -904,9 +906,9 @@ group('[39] 缺节判据只对结构由脚本决定的文件成立')
     check(marked, '--upgrade 留下 upgraded 标记（判据有据可依）', after.slice(0, 80).replace(/\n/g, ' '))
     report(marked, '升级：标记落盘')
     const r = composeExpectingFailure(dir, '--check')
-    const ok = r.status === 0 && /提示：缺失/.test(r.stdout ?? '')
-    check(ok, '升级的文件：缺节是待办（提示），不是缺陷', `exit=${r.status}`)
-    report(ok, '升级：缺节只提示')
+    const ok = r.status === 0 && !/缺失 \d+ 个节/.test(`${r.stdout ?? ''}${r.stderr ?? ''}`)
+    check(ok, '升级的文件：缺节已补齐，--check 通过且不再报缺失', `exit=${r.status}`)
+    report(ok, '升级：缺节已补齐')
 
     // 4) 同一批缺节只打印一次：两处报告说同一件事就会给出两个结论——一处说
     //    「这些节没写，文档就不算完成」，紧接着另一处说「未自动添加，需要就手动补」。
@@ -945,18 +947,21 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
     ['内核内容非空', /行事总纲/.test(after)],
     ['原有内容一行未丢', lost.length === 0],
     ['补上了可自动补的节', /^## 版本管理（必守）$/m.test(after)],
-    ['未补需要人写的空节', !/pf:author/.test(after)],
+    // 需要人写的节补成**骨架**：节标题 + 那行指引。不补的话，作者/AI 只能手抄标题，
+    // 而完成判据是逐字比对标题得出的——差一个字就永远到不了，且没有任何提示。
+    ['需要人写的节补成带指引的骨架', /pf:author/.test(after)],
+    ['补进去的是骨架不是空节（骨架里写着要填什么）', /pf:author:\s*\S/.test(after)],
   ]
   for (const [label, ok] of checks) { check(ok, label, lost.length > 0 ? `丢失：${lost.join(' | ')}` : undefined); report(ok, label) }
 
   // `--check` 会验「有没有缺失的节」，但**按文件性质区别对待**：
   //   - 脚本生成的文件（带 managed 标记）→ 缺节是缺陷，失败；
-  //   - 作者手写后被升级的 → 作者的编排是权威，缺节只提示。
-  // 前者防「被掏空的契约过 CI」，后者防「逼作者改成模板的样子」——两种错法都要挡住。
+  //   - 作者手写后被升级的 → 今天已经不会缺节（升级就补齐了），所以它通过；
+  //     真正的待办从「缺节」变成了「待填写」，判据落在 pf:author 的计数上。
   const upCheck = composeExpectingFailure(dir, '--check')
-  const okUp = upCheck.status === 0 && /提示：缺失/.test(upCheck.stdout ?? '')
-  check(okUp, '作者编排的文件：缺节只提示，--check 仍通过', `exit=${upCheck.status}`)
-  report(okUp, '作者编排的文件：缺节只提示')
+  const okUp = upCheck.status === 0 && !/缺失 \d+ 个节/.test(`${upCheck.stdout ?? ''}${upCheck.stderr ?? ''}`)
+  check(okUp, '作者编排的文件：升级后不缺节，--check 通过', `exit=${upCheck.status}`)
+  report(okUp, '作者编排的文件：升级后不缺节')
 
   // 生成的文件删掉一整节 → 必须失败（否则一份被掏空的契约能过 CI）
   const gdir = fixture('gutted', { 'package.json': '{"name":"g","version":"1.0.0"}\n' })

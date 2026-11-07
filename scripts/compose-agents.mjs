@@ -273,6 +273,11 @@ function deriveFacts(target, s = surveyLight(target)) {
   const isRepoRoot = s.git?.isRepoRoot !== false
   const hasRemote = typeof s.git?.remote === 'string' && s.git.remote.length > 0 && isRepoRoot
 
+  // 协作那两件都是**事实**，不是偏好：有贡献指南，契约里指向它才有意义（否则是一个悬空
+  // 指针）；是 Fork，才需要那段「你只能推自己的分支」——维护者的契约里写它只是噪音。
+  const hasContributing = s.docs?.contributing !== undefined
+  const isContributorFork = s.git?.role === 'contributor-fork'
+
   // 「有没有版本号」决定发版规则怎么写：有版本号时标签名要对齐它，没有时命名自定。
   // 这两个分支必须都在——只写「标签名必须与版本号一致」会让没有版本号的项目无从下手，
   // 而没有版本号的项目并不少见（不发布制品的工具、纯文档项目、以及 skill 本身）。
@@ -330,6 +335,10 @@ function deriveFacts(target, s = surveyLight(target)) {
     'no-git': !hasGit,
     'has-remote': hasRemote,
     'no-remote': !hasRemote,
+    'has-contributing': hasContributing,
+    'no-contributing': !hasContributing,
+    'is-contributor-fork': isContributorFork,
+    'not-contributor-fork': !isContributorFork,
     'has-commands': hasCommands,
     'no-commands': !hasCommands,
     'has-version': hasVersion,
@@ -875,8 +884,8 @@ function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
 
   // 1) 插入内核：一级标题之后、第一个二级标题之前。
   //
-  // 同时打上 UPGRADED 标记：升级只做加法，需要人写的节一个都没补，所以这份文件此后
-  // 必然还缺若干节——那是**待办**，不是缺陷。标记记在文件里，判据才有依据（见该常量注释）。
+  // 同时打上 UPGRADED 标记：升级只做加法，用户原有的节一律保留并打 pf:keep，所以这份文件
+  // 此后必然还缺若干节——那是**待办**，不是缺陷。标记记在文件里，判据才有依据（见该常量注释）。
   // 已经打上过的**不再打第二份**：用户手工删掉内核标记、留下这个标记来修文件是合理
   // 的做法，重复的标记会让「它升级过几次」变成读文件才能回答的问题。
   let insertAt = -1
@@ -893,17 +902,23 @@ function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
     ...lines.slice(insertAt),
   ].join(eol)
 
-  // 2) 补上缺失的节：只补「语义上明显缺」的整节，且一律追加在末尾，不改动原有顺序。
+  // 2) 补上缺失的节：一律追加在末尾，不改动原有顺序。
+  //
+  // **两类都补，含义不同**：
+  //   - 纯生成内容：补进去就是最终内容；
+  //   - 带 `pf:author`（要读代码后自己写）：补**骨架**——节标题加那行指引原文。
+  //     不补的后果很具体：作者/AI 只能对着模板手抄标题，而「内容完整」是逐字比对标题得出的，
+  //     差一个字就永远到不了那条完成信号，而且没有任何提示说明差在哪。
   const oldHeadings = new Set(old.sections.map((s) => s.heading))
   const added = []
+  const addedHuman = []
   const parts = [{ text: withKernel.replace(/(?:\r?\n)+$/, ''), fresh: false }]
   for (const section of fresh.sections) {
     if (oldHeadings.has(section.heading)) continue
-    // 纯生成内容才补：需要人写的节补进去也是一堆占位符，不如让 AI 按上下文写
     const body = section.lines.join('\n')
-    if (findAuthors(body).length > 0) continue
     parts.push({ text: collapseBlankLines(body), fresh: true })
     added.push(section.heading)
+    if (findAuthors(body).length > 0) addedHuman.push(section.heading)
   }
 
   let text = collapseJoined(parts, '\n\n')
@@ -921,7 +936,7 @@ function upgradeHandwritten(existing, kernel, target, s = surveyLight(target)) {
   // 这一步不改动任何字节的正文，只在节标题下面插一行注释。
   text = markKeptSections(text, new Set(old.sections.map((s) => s.heading)))
   // `fresh` 同样带出去：升级只做加法，账本据此确认「哪些节是我这次真的写下去的」。
-  return { text, added, fresh: rendered }
+  return { text, added, addedHuman, fresh: rendered }
 }
 
 /**
@@ -1300,7 +1315,7 @@ function reportHandwritten(agentsPath, existing, target, status, check, s = surv
     out.push('')
     out.push(`  与标准结构相比，缺少这些节（${missing.length} 个）：`)
     for (const m of missing) {
-      out.push(`    - ${m.heading}${m.needsHuman ? '（需要读代码后自己写）' : '（可自动补）'}`)
+      out.push(`    - ${m.heading}${m.needsHuman ? '（补骨架，读代码后填）' : '（可自动补）'}`)
     }
   }
 
@@ -1323,7 +1338,8 @@ function reportHandwritten(agentsPath, existing, target, status, check, s = surv
   process.stdout.write('\n下一步：\n'
     + '  - 想保留原样、只做体检 → 到此为止，本脚本不会动它。\n'
     + '  - 想升级为标准结构 → 加 --upgrade 再跑一次。它只做加法：\n'
-    + '      插入内核段落、补上上面标着「可自动补」的节；\n'
+    + '      插入内核段落；上面缺的节全部补上——能自动生成的直接写全，\n'
+    + '      需要读代码后写的补成带指引的骨架（标着 pf:author），你填完删标记即可；\n'
     + '      已有的段落一个字节都不删、不改、不重排。\n')
   return 0
 }
@@ -1349,6 +1365,11 @@ function reportRefresh(report, stream) {
     if (report.added.length > 0) {
       stream.write(`  - 补上了 ${report.added.length} 个缺失的节：\n`)
       for (const a of report.added) stream.write(`      ${a}\n`)
+    }
+    if (Array.isArray(report.addedHuman) && report.addedHuman.length > 0) {
+      stream.write(`  - 其中 ${report.addedHuman.length} 个节是**骨架**（脚本推不出内容，标着 pf:author）：\n`)
+      for (const a of report.addedHuman) stream.write(`      ${a}\n`)
+      stream.write('      读代码后把内容填进去，填完删掉那行 pf:author 标记，重跑本脚本确认待填写归零。\n')
     }
     stream.write('  - 原有段落全部保留（未删除、未改写、未重排）\n')
     return
@@ -1435,7 +1456,9 @@ function main(argv) {
       '  - 文件已存在但**没有**内核标记（手写的）→ 默认只体检、不动它。',
       '',
       '  --upgrade  把一份手写的 AGENTS.md 升级为标准结构。**只做加法**：',
-      '             插入内核段落、补上缺失的自动节；已有段落不删不改不重排。',
+      '             插入内核段落、补上全部缺失的节——可自动生成的写全，',
+      '             需要读代码后写的补成带指引的骨架（标着 pf:author），填完删标记即可；',
+      '             已有段落不删不改不重排。',
       '  --check    只校验，不写入；以下任一项不满足即退出码 1：',
       '             内核区间与 templates/agents-kernel.md 逐字一致（按行尾归一化后比）、',
       '             内核标记恰好一对、脚本生成的文件不缺节（作者自己编排的文件不判缺节——',
@@ -1568,7 +1591,7 @@ function main(argv) {
         const upgraded = upgradeHandwritten(existing, kernel, target, s)
         composed = upgraded.text
         freshForLedger = upgraded.fresh
-        refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, kept: [], refreshed: [] }
+        refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, addedHuman: upgraded.addedHuman, kept: [], refreshed: [] }
       } else {
         managedExisting = existing
         const refreshed = refreshFromTemplate(target, existing, kernel, state, s)
@@ -1719,8 +1742,8 @@ function main(argv) {
   const missing = applicableMissingSections(target, composed, s)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
-    reportGaps(authors, missing, process.stdout)
     reportRefresh(refreshReport, process.stdout)
+    reportGaps(authors, missing, process.stdout)
     const staleSame = dshCompatibilityNotice(s)
     if (staleSame !== undefined) process.stdout.write(`${staleSame}\n`)
     return 0
@@ -1805,8 +1828,10 @@ function main(argv) {
       )
     }
   }
-  reportGaps(authors, missing, process.stdout)
+  // **先说什么变了，再说还剩什么**：升级一次会同时补好几个节，先说「还剩 8 处待填」会让读的人
+  // 以为脚本没干活。顺序反过来才对得上因果。
   reportRefresh(refreshReport, process.stdout)
+  reportGaps(authors, missing, process.stdout)
   const staleNew = dshCompatibilityNotice(s)
   if (staleNew !== undefined) process.stdout.write(`${staleNew}\n`)
   if (bytes > budget) {

@@ -33,9 +33,9 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # 声明这个 job 会写仓库的发布。写入凭据是 secrets.RELEASE_TOKEN（下面经环境变量
-    # 交给脚本），但权限仍显式写出来：一来让「这个 job 有写权限」在文件里看得见，
-    # 二来交付门禁按 contents: write 判定这一项，删掉它门禁会一直报待问。
+    # 声明这个 job 会写仓库的发布。凭据优先用 secrets.RELEASE_TOKEN，没配就退回内置令牌；
+    # 两者都靠这一行权限，所以它既不能删，也不能只写在注释里：交付门禁按 contents: write
+    # 判定这一项，删掉它门禁会一直报待问。
     permissions:
       contents: write
     # 取值只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
@@ -43,7 +43,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       REPO: ${{ github.repository }}
-      GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
     steps:
       - name: 检出（全历史；工具取自默认分支，说明描述的标签由 TAG 指定）
         uses: actions/checkout@v4
@@ -91,5 +91,5 @@ jobs:
 
       - name: 把用户包挂到这一版的发布页上
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: gh release upload "$TAG" "$ASSET" --clobber

@@ -59,6 +59,20 @@ export function toMarkdown(s) {
       L.push(`- 远端：${s.git.remote === undefined ? '无' : s.git.remote}`)
       if (s.git.upstream === undefined) L.push('- 上游跟踪：未设置')
     }
+    // 角色决定「推送与发版能做到哪一步」：它和远端地址是两件事——地址说「连着哪」，角色
+    // 说「你是谁」。判不了时明确写出来，而不是静默按维护者处理。
+    if (s.git.role !== undefined) {
+      const roleText = s.git.role === 'maintainer'
+        ? '维护者（可推主干、打标签、发版）'
+        : s.git.role === 'contributor-fork'
+          ? '**贡献者（Fork）**：只推自己的分支、开改动请求，不推主干、不打标签、不发布'
+          : '**判不了**——按贡献者处置（少做几步，而不是做错一步）'
+      L.push(`- 角色：${roleText}`)
+      if (s.git.roleReason !== undefined && s.git.roleReason !== '') L.push(`  - 依据：${s.git.roleReason}`)
+      if (s.git.declaredRepo !== undefined) {
+        L.push(`  - 项目声明的源仓库：${s.git.declaredRepo.url}（来自 ${s.git.declaredRepo.source}）`)
+      }
+    }
     L.push(`- 署名：${yn(s.git.identity.name)} <${yn(s.git.identity.email)}>（${s.git.identity.scope}）`)
     if (s.git.identity.globalEmail !== undefined) {
       L.push(`- 全局署名邮箱：${s.git.identity.globalEmail}（与仓库级不一致时以仓库级为准）`)
@@ -393,26 +407,107 @@ export function toMarkdown(s) {
   return L.join('\n')
 }
 
-/** 计算勘察后的下一步行动导航（Action Plan）。 */
+/**
+ * 计算勘察后的下一步行动导航（Action Plan）。
+ *
+ * **顺序是有意义的，不是排版**：先报「不修会让后面全部白做」的（未忽略的产物目录、暴露的
+ * 凭据），再报「接上次的活」，最后才是常规的按需文档。三组混在一起平铺，读的人会从中间
+ * 随手挑一条做，而第一条才是唯一紧急的那条。
+ *
+ * 每一组只在**有事实**时出现：没有工作项就不提工作项，没配远端就不提协作模板。空条目会
+ * 稀释真正的警告——一份什么都提一句的报告等于什么都没提。
+ */
 export function computeSurveyActionPlan(s) {
   const lines = []
   const refs = []
+  const alerts = []
   const actions = []
+  const kinds = s.ecosystem?.kinds ?? []
+  const git = s.git ?? {}
+  const docs = s.docs ?? {}
 
-  if (s.git?.present !== true) {
+  // ── 第一组：先修这个，否则后面的动作会把它一起带进版本库 ──────────────────
+  const unignored = s.ignores?.unignoredOutputDirs ?? []
+  if (unignored.length > 0) {
+    const shown = unignored.slice(0, 5).join('、')
+    alerts.push(`- **先补忽略规则**：${shown}${unignored.length > 5 ? ' 等' : ''} 已经存在，却没有`
+      + '被忽略规则覆盖——下一次提交会把整个目录写进历史（体积、平台差异、其中可能的本机配置）。')
+  }
+  const leaked = (s.risks?.secretFiles ?? []).filter((f) => f.ignored === false && f.tracked !== true)
+  if (leaked.length > 0) {
+    const shown = leaked.slice(0, 5).map((f) => f.path).join('、')
+    alerts.push(`- **先处置凭据**：${shown}${leaked.length > 5 ? ' 等' : ''} 是凭据形状，既没被忽略`
+      + '也没入库——现在提交就会把它带上去。先加忽略规则或改成占位值。')
+  }
+
+  // ── 第二组：接上次的活。有工作项就说明这件事还没做完 ────────────────────
+  if (docs.workItems !== undefined) {
+    const w = docs.workItems
+    actions.push(`- **先读工作项断点再动手**：\`${w.dir}/\` 有 ${w.count} 份工作记录`
+      + `${w.readable === false ? '（目录读不到，先确认权限）' : ''}——上一个会话留下的接手点在那里，`
+      + '别从零重来。')
+  }
+
+  // ── 第三组：角色。它决定这次能做哪几步，做错一步就收不回来 ────────────────
+  if (git.role === 'contributor-fork') {
+    const contributing = docs.contributing?.file
+    const how = contributing === undefined
+      ? '按 `references/collaboration.md` 第一节的贡献者路线'
+      : `按项目自己的 \`${contributing}\``
+    actions.push(`- **这是别人的仓库（Fork）**：不推主干、不打标签、不发版。${how}走：`
+      + '与上游同步 → 从主干拉新分支 → 门禁全绿 → 推自己仓库的分支 → 向正本开改动请求。')
+  } else if (git.role === 'undetermined' && typeof git.remote === 'string' && git.remote !== '') {
+    actions.push('- **角色判不了**（项目没声明源仓库）：按贡献者处置——只推自己的分支。'
+      + '确认自己就是维护者时，把源仓库写进项目清单再重跑勘察，这条就不出现了。')
+  }
+
+  // ── 第四组：契约与协作设施，按事实给命令 ─────────────────────────────────
+  if (!docs.agents) {
+    refs.push('- `references/docs-set.md`（编写 AGENTS.md 契约与文档套装）')
+    actions.push('- 生成项目契约：`node scripts/compose-agents.mjs .`')
+  } else if (typeof git.remote === 'string' && git.remote !== '') {
+    // 建好远端之后契约要回刷一次：远端与协作那半部分在首次生成时必然还不存在。
+    const sections = docs.agentsSections ?? []
+    const hasCollab = sections.some((t) => /协作|任务单|提案/.test(t))
+    if (!hasCollab) {
+      actions.push('- 契约里还没有协作那半部分（远端与「改动怎么落地」）：建好远端之后必须回跑一次 '
+        + '`node scripts/compose-agents.mjs .`，那次回刷才把它们补进去。')
+    }
+  }
+  if (typeof git.remote === 'string' && git.remote !== '' && docs.agents !== undefined) {
+    if (docs.prTemplate !== true) {
+      actions.push('- 落一份提案模板到 `.github/pull_request_template.md`（骨架见 '
+        + '`templates/pull-request-template.md`），然后 `--record` 记账；单人不收贡献可跳过。')
+    }
+    if (docs.issueTemplates !== true) {
+      actions.push('- 落问题模板到 `.github/ISSUE_TEMPLATE/`（缺陷与需求各一份，骨架见 `templates/`），'
+        + '否则每份报告都要来回追问一轮；单人不收贡献可跳过。')
+    }
+    if (docs.workflowAutomation === undefined || (docs.workflowAutomation.files ?? []).length === 0) {
+      actions.push('- 落检查自动化到 `.github/workflows/`（骨架见 `templates/ci-check.yml`），'
+        + '否则「本机能过」不等于「换台机器也能过」。')
+    }
+  }
+
+  if (s.git?.dirty > 0 || (s.git?.ahead ?? 0) > 0) {
+    actions.push(`- 工作区有未提交或未推送变动（dirty: ${s.git?.dirty ?? 0}, ahead: ${s.git?.ahead ?? 0}），`
+      + '收尾前先提交并推送；走分支时推的是分支，不是主干。')
+  }
+
+  // ── 按需加载的参考文档 ──────────────────────────────────────────────────
+  if (git.present !== true) {
     refs.push('- `references/version-control.md`（配置 Git 版本管理）')
-  } else if (!s.git?.remote) {
+  } else if (!git.remote) {
     refs.push('- `references/remote-github.md`（配置 GitHub 远端仓库与协作设施）')
   }
-  if (!s.docs?.agents) {
-    refs.push('- `references/docs-set.md`（编写 AGENTS.md 契约与文档套装）')
-  }
-  const kinds = s.ecosystem?.kinds ?? []
   if (s.artifacts?.publishableManifest !== undefined || s.artifacts?.declaredVersion !== undefined) {
     if (kinds.includes('node')) refs.push('- `references/publish-npm.md`（npm 发布链路）')
     if (kinds.includes('python')) refs.push('- `references/publish-python.md`（PyPI 发布链路）')
     if (kinds.includes('rust')) refs.push('- `references/publish-rust.md`（crates.io 发布链路）')
     if (kinds.includes('go')) refs.push('- `references/publish-go.md`（Go 模块标签发布）')
+  }
+  if (git.role === 'contributor-fork' || git.role === 'undetermined') {
+    refs.push('- `references/collaboration.md`（角色、分支路线与合并后收尾）')
   }
   if (s.host?.id === 'dsh' || kinds.includes('dsh-plugin')) {
     refs.push('- `references/plugins/dsh.md`（DSH 插件规范）')
@@ -422,13 +517,11 @@ export function computeSurveyActionPlan(s) {
     refs.push('- *（本项目未命中插件生态，无需读取 `references/plugins/*`）*')
   }
 
-  if (s.git?.dirty > 0 || (s.git?.ahead ?? 0) > 0) {
-    actions.push(`- 工作区有未提交或未推送变动（dirty: ${s.git?.dirty ?? 0}, ahead: ${s.git?.ahead ?? 0}），收尾前请执行：\`git commit && git push\``)
+  if (alerts.length > 0) {
+    lines.push('### 【先修这个】')
+    lines.push(...alerts)
+    lines.push('')
   }
-  if (!s.docs?.agents) {
-    actions.push('- 执行生成项目契约：`node scripts/compose-agents.mjs .`')
-  }
-
   lines.push('### 【按需加载的参考文档】')
   if (refs.length > 0) lines.push(...refs)
   else lines.push('- 当前无需额外加载专章文档')

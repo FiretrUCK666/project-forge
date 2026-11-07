@@ -32,7 +32,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 
 /** 从 Markdown 里抽出徽章图片地址。只认 shields 一类的徽章服务，避免把普通图片当徽章。 */
-const BADGE_HOSTS = /img\.shields\.io|badgen\.net|badge\.fury\.io|codecov\.io|travis-ci|github\.com\/.*\.svg|api\.netlify\.com/i
+const BADGE_HOSTS = /img\.shields\.io|badgen\.net|badge\.fury\.io|codecov\.io|github\.com\/.*\.svg|api\.netlify\.com/i
 
 /** 这些字样出现在徽章可见文字里，说明没取到数据；只判可见文字，不判整段 SVG（含样式与元数据，避免 errors: 0 误报）。 */
 const FAILURE_WORDS = /not found|invalid|no such|unknown|unable|too new|no releases/i

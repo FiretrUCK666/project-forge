@@ -5,10 +5,13 @@
 # 机制不要改，只换取值。落地前先看那个路径上有没有已存在的工作流：有就合并，
 # 不要覆盖——里面可能有这个项目自己的发布链路。
 #
-# 前置（人做，自动化做不了）：仓库 Settings → Secrets → Actions 建 RELEASE_TOKEN——
-#   细粒度 token，仅 Contents 读写、仅本仓库、有效期以创建页显示的上限为准；
-#   过期或换人只换 Secrets 里那一个值。
-#   token 一辈子只出现在两个框里（生成框 → Secrets 输入框），不进仓库、不进聊天。
+# 前置（可以不做）：这套流程默认用平台内置令牌——只要下面 job 里的 permissions 声明了
+#   contents: write，它就能建 Release，普通项目零配置即可发版。
+#   只有两种情况才需要额外建一个 RELEASE_TOKEN（细粒度 token，仅 Contents 读写、仅本仓库）：
+#     (1) 要让这次发版继续触发下游工作流——内置令牌触发的事件不会连锁触发别的流水线；
+#     (2) 保护规则要求以特定身份操作。
+#   要用时放进仓库 Settings → Secrets → Actions；有效期以创建页显示的上限为准，过期或换人
+#   只换那一个值。token 一辈子只出现在两个框里（生成框 → Secrets 输入框），不进仓库、不进聊天。
 #
 # 这条流水线只做一件事：**把说明文件的内容原样搬到发布页**。它不生成说明、不改写说明，
 # 所以「这一版更新了什么、修复了什么」这件事，在打标签之前就已经由人写好了——
@@ -62,8 +65,9 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # 建 Release 要写权限。GITHUB_TOKEN 的初始权限取仓库/组织的默认设置，受限默认下这里会
-    # 403；凭据本身走 secrets.RELEASE_TOKEN，那个令牌已经能建 Release。
+    # 建 Release 要写权限。内置令牌的初始权限取仓库/组织的默认设置，受限默认下这里会 403；
+    # 所以这个 job 显式声明 contents: write。凭据优先用 secrets.RELEASE_TOKEN，没配就退回
+    # 内置令牌——两者都靠这一行权限。
     permissions:
       contents: write
     # 标签名只在这里求值一次：每个步骤引用同一个名字，不会算出两个不同的值。
@@ -99,7 +103,8 @@ jobs:
 
       - name: 写发布说明（建或更新，写完回读比对）
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # 优先用仓库 Secret 里的细粒度令牌，没配就退回平台内置令牌（见文件头「前置」）。
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           # **是「建或更新」，不是「已存在就跳过」**：补漏重跑时必须回填正文，跳过会让
           # 那次发布永远只有一行标签名。代价是重跑会覆盖已有正文——发布页上有人工改写时

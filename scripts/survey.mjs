@@ -31,7 +31,7 @@ export { listRoot, manifestSection } from './lib/manifest.mjs'
 // 它们是本文件的下游，本文件不转出它们——需要的人直接从 lib/ 取，
 // 否则任何想判断「这是不是主模块」的脚本又得把整个勘察引擎加载进来。
 import { taskRunnerCommands } from './lib/task-runners.mjs'
-import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock } from './lib/text.mjs'
+import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock, repoPath, repoRelation, skillSource } from './lib/text.mjs'
 export { parseGitHubRepo } from './lib/text.mjs'
 // 协议常量（注入标记、占位符、预算）住在 lib/protocol.mjs：它们被四个脚本共用，
 // 而任何想拿一个标记的脚本都不该因此加载整个勘察引擎。
@@ -2050,6 +2050,33 @@ function detectLocalSkills(root) {
   return out
 }
 
+/**
+ * 一个路径是目录还是文件。**读不到返回 undefined**，不返回 'file' 也不返回 false——
+ * 「读不到」与「不是目录」的处置完全不同，压成一个值就会让权限问题变成一句错误的判断。
+ */
+function entryKind(p) {
+  try {
+    return statSync(p).isDirectory() ? 'dir' : 'file'
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 模板目录里的**真实文件**：只认 `md` / `yml` / `yaml`（问题表单用的是后两种），按名排序，
+ * 返回带前缀的相对路径。读不到返回 undefined，让调用方把「读不到」与「空目录」分开报。
+ */
+function templateFilesIn(dir, prefix) {
+  try {
+    return readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile() && /\.(?:md|ya?ml)$/i.test(e.name))
+      .map((e) => `${prefix}/${e.name}`)
+      .sort()
+  } catch {
+    return undefined
+  }
+}
+
 function detectDocs(root, root_) {
   const docs = {}
   // 用同一个正则收集：语言后缀是可选的，分隔符点与下划线都认。
@@ -2177,6 +2204,15 @@ function detectDocs(root, root_) {
     const agentsHit = conventions.find((c) => c.file.toLowerCase() === 'agents.md')
     if (agentsHit !== undefined) {
       docs.agents = { file: agentsHit.file, bytes: agentsHit.bytes }
+      // 契约「有哪几节」是一个事实，下游要用它判断「远端与协作那半部分补上没有」。
+      // **收到三级标题**：生成出来的契约把「任务单与协作」放在 `###` 下，只收二级会让这个
+      // 判断永远为假，于是一条「必须回跑」的提醒变成了每次都喊的噪音。
+      const rawAgents = readTextFile(join(root, agentsHit.file))
+      if (rawAgents !== undefined) {
+        docs.agentsSections = scanLines(rawAgents.text)
+          .filter((l) => !l.inFence && l.heading !== null && l.heading.level <= 3)
+          .map((l) => l.heading.title)
+      }
     }
     const hostFiles = conventions.filter((c) => c.file.toLowerCase() !== 'agents.md')
     if (hostFiles.length > 0) docs.hostConventions = hostFiles
@@ -2196,12 +2232,53 @@ function detectDocs(root, root_) {
       docs.githubUnreadable = true
     }
     docs.githubDir = entries
-    docs.issueTemplates = ghReadable ? entries.some((n) => /^ISSUE_TEMPLATE/i.test(n)) : undefined
-    docs.prTemplate = ghReadable ? entries.some((n) => /^pull_request_template/i.test(n)) : undefined
-    // 文件名也报出来：判「模板里有没有验证与回滚那两栏」要读得到它。
-    // 只报布尔值的话，下游只能再猜一次文件名——平台认的正是这个形状，猜错就判不到。
-    const prFile = entries.find((n) => /^pull_request_template/i.test(n))
-    if (ghReadable && prFile !== undefined) docs.prTemplateFile = `.github/${prFile}`
+    // 模板要**进目录里数文件**，不能在 `.github` 一级看名字。
+    //
+    // 一级看名字有两个实测过的坑：一个**空的** `ISSUE_TEMPLATE/` 目录也算「有模板」，于是
+    // 下游跳过一次本该发生的追问；而 `PULL_REQUEST_TEMPLATE/`（多模板的目录形式）会被当成
+    // 一个文件去读，读到空——判据全部落空，报告却还说「有」。两种形态都合法，所以两种都进
+    // 目录取真实文件，存在性由文件列表算出来。
+    //
+    // 读不到时**留 undefined**，不写 false：那是「没查到」，与「查了没有」是两件事，
+    // 混成一个 false 之后，下游会把权限问题读成「这个项目没有模板」。
+    if (ghReadable) {
+      const issueEntry = entries.find((n) => /^ISSUE_TEMPLATE$/i.test(n))
+      if (issueEntry !== undefined && entryKind(join(gh, issueEntry)) === 'dir') {
+        const files = templateFilesIn(join(gh, issueEntry), `.github/${issueEntry}`)
+        if (files === undefined) docs.templateDirsUnreadable = [`.github/${issueEntry}`]
+        else {
+          docs.issueTemplateFiles = files
+          docs.issueTemplates = files.length > 0
+        }
+      } else {
+        // 较早的约定是单文件 `.github/ISSUE_TEMPLATE.md`，一并认。
+        const single = entries.find((n) => /^ISSUE_TEMPLATE\.md$/i.test(n))
+        if (single !== undefined) {
+          docs.issueTemplateFiles = [`.github/${single}`]
+          docs.issueTemplates = true
+        } else {
+          docs.issueTemplates = false
+        }
+      }
+
+      const prEntry = entries.find((n) => /^pull_request_template/i.test(n))
+      if (prEntry === undefined) {
+        docs.prTemplate = false
+      } else if (entryKind(join(gh, prEntry)) === 'dir') {
+        const files = templateFilesIn(join(gh, prEntry), `.github/${prEntry}`)
+        if (files === undefined) docs.templateDirsUnreadable = [`.github/${prEntry}`]
+        else {
+          docs.prTemplateFiles = files
+          docs.prTemplate = files.length > 0
+          // 内容判据只需要一个确定的读点；多模板是「按场景选一份」的形态，任一份缺要素都该
+          // 被看见——所以取第一份判，其余的在报告里随 `prTemplateFiles` 一起露出。
+          if (files.length > 0) docs.prTemplateFile = files[0]
+        }
+      } else {
+        docs.prTemplate = true
+        docs.prTemplateFile = `.github/${prEntry}`
+      }
+    }
     const wfEntry = listRoot(gh).entry('workflows')
     if (wfEntry?.isDir === true) {
       let wfReadable = true
@@ -2224,7 +2301,8 @@ function detectDocs(root, root_) {
           //   hasFetchDepthZero  检出是否含全历史（起草要读上一个标签）；
           //   hasNpmPublish / hasPypiPublish / hasCargoPublish  各生态的发布动作痕迹。
           releaseTriggerTags: [], releaseJobConditionTagsV: false,
-          usesReleaseToken: false, hasContentsWrite: false, hasFetchDepthZero: false,
+          usesReleaseToken: false, usesBuiltinToken: false,
+          hasContentsWrite: false, hasFetchDepthZero: false,
           hasNpmPublish: false, hasPypiPublish: false, hasCargoPublish: false,
           // 协作安全：`pull_request_target` 能拿到密钥，而它一旦**又**去检出提案那边的代码，
           // 就等于把密钥交给任意陌生人跑他的代码（业界叫 pwn request）。
@@ -2246,6 +2324,9 @@ function detectDocs(root, root_) {
           if (/--notes-file/.test(head)) auto.usesNotesFile = true
           if (/--generate-notes/.test(head)) auto.usesGenerateNotes = true
           if (/secrets\.RELEASE_TOKEN/.test(head)) auto.usesReleaseToken = true
+          // 内置令牌：平台给每个 job 的那一个。它与约定的 Secret 名是**两条并存的路**，
+          // 差别只在「发版要不要继续触发下游工作流」，不是「哪一种才对」。
+          if (/github\.token|secrets\.GITHUB_TOKEN/.test(head)) auto.usesBuiltinToken = true
           if (/contents\s*:\s*write/.test(head)) auto.hasContentsWrite = true
           if (/fetch-depth\s*:\s*0/.test(head)) auto.hasFetchDepthZero = true
           if (/npm\s+publish/.test(head)) auto.hasNpmPublish = true
@@ -2978,7 +3059,7 @@ function survey(target, options = {}) {
   // 忽略探查只跑一次，两处复用同一结果；轻量模式跳过忽略探查。
   const ignores = options.light === true ? { light: true } : detectIgnores(root, root_, walked.outputDirCandidates, git)
 
-  return {
+  const result = {
     target: { path: root, name: basename(root) },
     git,
     ecosystem: { kinds: eco.kinds, evidence: eco.evidence, skillName: eco.skill?.name, skillDropped: eco.skill?.dropped },
@@ -3040,6 +3121,130 @@ function survey(target, options = {}) {
         + '（后者仍参与凭据扫描）',
     },
   }
+  // 角色是**派生事实**：它同时要 git 的远端与「项目自己声明的源仓库」，而声明的来源随技术栈
+  // 不同（清单字段或能力目录的 frontmatter）。放在对象组装之后算，而不是塞进 detectGit——
+  // 那个函数不认识生态，塞进去等于把「哪种技术栈的清单」写死进最底层。
+  attachRepoRole(result)
+  return result
+}
+
+// ── 角色：维护者还是贡献者 ────────────────────────────────────────────────────
+
+/**
+ * 「这个项目自己声明的源仓库」——从项目自身的事实里读，不猜。
+ *
+ * 按各技术栈常见的声明位置逐个试，**第一个认得出的胜出**。为什么不写一张固定文件名清单：
+ * 那张表迟早漏掉一个生态，而漏掉的后果不是「少一个字段」，是角色被判成「判不了」——那时
+ * 按贡献者处置，用户会看到「你只能推自己的分支」，却不知道为什么。
+ *
+ * 只读**项目自己的清单**，不读远端：远端是「现在连着哪」，声明是「这个项目属于谁」。
+ * 两者比对才有意义。
+ */
+function detectDeclaredRepo(root, root_) {
+  const attempt = (rel, pick) => {
+    const name = root_.real(rel)
+    if (name === undefined) return undefined
+    const raw = readTextFile(join(root, name))
+    if (raw === undefined) return undefined
+    const url = pick(raw.text)
+    if (typeof url !== 'string' || url.trim() === '') return undefined
+    return { url: url.trim(), source: name }
+  }
+
+  // 1) Node 系清单：repository 可以是字符串，也可以是带 url 的对象。
+  const fromPkg = attempt('package.json', (text) => {
+    try {
+      const pkg = JSON.parse(text)
+      if (typeof pkg?.repository === 'string') return pkg.repository
+      if (typeof pkg?.repository?.url === 'string') return pkg.repository.url
+    } catch {
+      // 清单坏了不属于这里要回答的问题：解析失败就当「没声明」，由清单自检去报。
+    }
+    return undefined
+  })
+  if (fromPkg !== undefined) return fromPkg
+
+  // 2) Python：`[project.urls]` 里的 Repository / Source / Homepage。
+  const fromPy = attempt('pyproject.toml', (text) => {
+    const m = /^\s*(?:repository|source|homepage)\s*=\s*["']([^"']+)["']/im
+      .exec(manifestSection(text, '[project.urls]'))
+    return m === null ? undefined : m[1]
+  })
+  if (fromPy !== undefined) return fromPy
+
+  // 3) Rust：`[package] repository`。
+  const fromCargo = attempt('Cargo.toml', (text) => {
+    const m = /^\s*repository\s*=\s*["']([^"']+)["']/m.exec(manifestSection(text, '[package]'))
+    return m === null ? undefined : m[1]
+  })
+  if (fromCargo !== undefined) return fromCargo
+
+  // 4) 能力目录：`SKILL.md` 的 frontmatter `source`。它是这一类项目唯一可靠的归属声明。
+  const fromSkill = attempt('SKILL.md', (text) => skillSource(text))
+  if (fromSkill !== undefined) return fromSkill
+
+  return undefined
+}
+
+/**
+ * 给 `git` 补上角色：`maintainer` / `contributor-fork` / `undetermined`。
+ *
+ * **判不了就是判不了**：三种取值里没有一个是「默认维护者」。把「没比出来」读成「比过且
+ * 一致」，会让一个贡献者读到「推主干、打标签、发版」那套流程，然后去推一个不属于他的
+ * 仓库——而那一步收不回来。所以结论旁边永远带一句 `roleReason`：它是给人看的一句话，
+ * 说明这个结论凭什么下。
+ */
+function attachRepoRole(result) {
+  const git = result.git
+  if (git === undefined || git.present !== true) return
+  const remotes = git.remoteUrls ?? {}
+  const origin = typeof git.remote === 'string' && git.remote !== '' ? git.remote : remotes.origin
+  const declared = detectDeclaredRepo(result.target.path, listRoot(result.target.path))
+  if (declared !== undefined) git.declaredRepo = declared
+
+  const notes = []
+  let role = 'undetermined'
+
+  if (git.isRepoRoot === false) {
+    notes.push('这个目录不是仓库根：远端与声明都属于外层仓库，不判角色')
+  } else if (typeof origin !== 'string' || origin === '') {
+    notes.push('没有远端：本地仓库谈不上维护者还是贡献者')
+  } else {
+    let decided = false
+    if (declared !== undefined) {
+      const rel = repoRelation(origin, declared.url)
+      if (rel === 'same') {
+        role = 'maintainer'
+        notes.push(`origin 与项目声明的源仓库是同一处（声明来自 ${declared.source}）`)
+        decided = true
+      } else if (rel === 'different') {
+        role = 'contributor-fork'
+        notes.push(`origin 与项目声明的源仓库不是同一处（声明来自 ${declared.source}）`)
+        decided = true
+      } else {
+        notes.push(`项目声明了源仓库（${declared.source}），但地址认不出来，比不了`)
+      }
+    } else {
+      notes.push('项目没有声明源仓库，没有可对照的归属')
+    }
+    // 声明缺失或认不出时，`upstream` 是**独立的一条证据**：本地在跟踪另一个仓库，
+    // 那就是从别人那里 fork 出来的。它不是「默认值」，只在真读到不同地址时才成立。
+    if (!decided) {
+      const upstreamUrl = remotes.upstream
+      if (typeof upstreamUrl === 'string' && upstreamUrl !== '') {
+        const rel = repoRelation(origin, upstreamUrl)
+        if (rel === 'different') {
+          role = 'contributor-fork'
+          notes.push('存在与 origin 不同的 upstream 远端——本地在跟踪上游')
+        } else if (rel === 'same') {
+          notes.push('upstream 与 origin 指向同一处，不构成 Fork 的证据')
+        }
+      }
+    }
+  }
+
+  git.role = role
+  git.roleReason = notes.join('；')
 }
 
 // ── 渲染 ────────────────────────────────────────────────────────────────────

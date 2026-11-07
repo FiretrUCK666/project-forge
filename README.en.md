@@ -247,7 +247,9 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 | `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
 | `templates/release-spec.md` | Release-spec skeleton: where the notes live, which sections they use, the order of operations, how to recover from a failed release |
 | `templates/work-item.md` | Work-item skeleton: status, goal and acceptance, plan, what was abandoned, where to resume |
-| `templates/pull-request-template.md` | Pull-request skeleton: what changed, why, how it was verified, rollback point |
+| `templates/pull-request-template.md` | Pull-request skeleton: what changed, why, how it was verified, rollback point, risk and blast radius |
+| `templates/issue-bug-report.md` | Bug-report skeleton: expected, actual, reproduction, environment (all four or it cannot be acted on) |
+| `templates/issue-feature-request.md` | Feature-request skeleton: the problem to solve, the behavior wanted, the blast radius |
 | `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
 | `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
 | `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |
@@ -275,7 +277,7 @@ These never enter the package. To work on this skill, start with
 | `AGENTS.md` | This repository's own contract: mechanisms, invariants, build and verification, hard rules |
 | `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, the gate before committing |
 | `RELEASING.md` | The release spec: where the notes live, which sections they use, in what order to publish, how to recover |
-| `docs/` | Release notes (`release-notes/`) and work items (`work/`), kept in the repo |
+| `docs/` | Release notes (`release-notes/<tag>.md`); work items go in `work/` when a task spans sessions (none yet), kept in the repo |
 | `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
 | `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
 | `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |

@@ -224,7 +224,9 @@ node "<本领目录>/scripts/update.mjs" --check
 | `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
 | `templates/release-spec.md` | 发版规范骨架：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
 | `templates/work-item.md` | 工作项骨架：状态、目标与验收、计划、放弃过什么、断点（跨会话接续用） |
-| `templates/pull-request-template.md` | 改动提案骨架：改了什么、为什么、怎么验证、回滚点 |
+| `templates/pull-request-template.md` | 改动提案骨架：改了什么、为什么、怎么验证、回滚点、风险与影响范围 |
+| `templates/issue-bug-report.md` | 缺陷报告骨架：期望、实际、复现、环境（四件缺一不可） |
+| `templates/issue-feature-request.md` | 需求骨架：要解决什么问题、期望的行为、影响范围 |
 | `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
 | `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
 | `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |
@@ -252,7 +254,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `AGENTS.md` | 这个仓库自己的项目契约：机制、不变量、构建与验证、硬性规范 |
 | `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
 | `RELEASING.md` | 发版规范：说明写在哪、分哪几节、按什么顺序发、出错了怎么补 |
-| `docs/` | 发布说明（`release-notes/`）与工作项（`work/`），随仓库走 |
+| `docs/` | 发布说明（`release-notes/<标签>.md`）；跨会话的工作项按需放在 `work/`（本仓库目前还没有），随仓库走 |
 | `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
 | `.gitattributes`、`.gitignore` | 哪些不进用户包、哪些不进版本库 |
 | `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |

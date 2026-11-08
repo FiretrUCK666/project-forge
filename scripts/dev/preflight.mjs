@@ -2889,8 +2889,12 @@ function checkProducedPackage(listPath, atRef) {
     const readContent = atRef === undefined
       ? contentFromWorktree
       : (f) => fileFromRef(atRef, f)
+    // `checkPackageSelfConsistency` 自己会 fail，但 `bad` 是**这一步开头**的快照，
+    // 不会跟着涨。所以取一次失败数再比——不然链接断了照样打印「全部落在包内」，
+    // 日志里成功行与失败行同时出现，看的人会以为链接检查过了。
+    const beforeLinks = failures.length
     const links = checkPackageSelfConsistency(list, readContent)
-    if (bad === 0) {
+    if (failures.length === beforeLinks) {
       process.stdout.write(`产出物核对：${list.length} 个条目，与受版本控制的文件全集一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }

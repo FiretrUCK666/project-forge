@@ -1510,6 +1510,50 @@ function assertTemplateConditionsKnown(target, s = surveyLight(target)) {
   }
 }
 
+/**
+ * 把「要落到目标项目里」的脚本拷过去（`LANDED_SCRIPTS`，唯一登记处）。
+ *
+ * **它不看 AGENTS.md 变没变**：工具的版本与契约的内容是两件事。挂在「契约无需改动」
+ * 那条提前 return 之后的话，跑过一次的项目里那份门禁脚本就永远停在旧版——症状是
+ * 「门禁还是老的规矩」，不报错、不提示。实测：把目标项目里那份换成旧版后重跑，
+ * 输出「无需改动」，文件仍不一致。
+ *
+ * 逐字节复制，不生成、不改造：改了就不是同一份，两份实现迟早给出两个答案。
+ * 已存在且内容相同时不写（幂等）；内容不同则覆盖并说一句——**不静默改掉用户动过的文件**。
+ */
+function landScripts(target, stream) {
+    // 把要落到这个项目里的脚本一并拷过去（`LANDED_SCRIPTS`，唯一登记处）。
+    //
+    // 为什么归落盘而不是归读者：模板里那句「先把它拷到本项目的 scripts/ 下」是靠人记的，
+    // 而忘了拷的症状是 CI 里一句 MODULE_NOT_FOUND 崩溃栈——离原因很远。落盘是「这个项目
+    // 要用这个工具」的一部分，脚本能做的就不该留成家务。
+    //
+    // 逐字节复制，不生成、不改造：改了就不是同一份，而两份实现迟早给出两个答案。
+    // 已经存在且内容相同时不写（幂等）；内容不同则覆盖，并在输出里说一句——
+    // **不静默改掉用户可能动过的文件**。
+    for (const rel of LANDED_SCRIPTS) {
+      const from = join(SKILL_ROOT, rel)
+      if (!existsSync(from)) {
+        process.stderr.write(`提醒：${rel} 登记为「要落到项目里」，但 skill 里没有这个文件——跳过。\n`)
+        continue
+      }
+      const to = join(target, rel)
+      const payload = readFileSync(from)
+      if (existsSync(to)) {
+        const current = readFileSync(to)
+        if (current.equals(payload)) continue
+        mkdirSync(dirname(to), { recursive: true })
+        writeFileSync(to, payload)
+        process.stdout.write(`已更新：${rel}（与 skill 里那份不一致，按 skill 覆盖）\n`)
+        continue
+      }
+      mkdirSync(dirname(to), { recursive: true })
+      writeFileSync(to, payload)
+      process.stdout.write(`已拷入：${rel}（门禁要用它，随落盘一起过去）\n`)
+    }
+
+}
+
 function main(argv) {
   let parsed
   try {
@@ -1819,6 +1863,8 @@ function main(argv) {
   }
 
   const missing = applicableMissingSections(target, composed, s)
+  // 落地脚本先拷：它不看契约变没变（见 landScripts 的注释）。
+  landScripts(resolve(target), process.stdout)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportRefresh(refreshReport, process.stdout)
@@ -1866,35 +1912,6 @@ function main(argv) {
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
 
-  // 把要落到这个项目里的脚本一并拷过去（`LANDED_SCRIPTS`，唯一登记处）。
-  //
-  // 为什么归落盘而不是归读者：模板里那句「先把它拷到本项目的 scripts/ 下」是靠人记的，
-  // 而忘了拷的症状是 CI 里一句 MODULE_NOT_FOUND 崩溃栈——离原因很远。落盘是「这个项目
-  // 要用这个工具」的一部分，脚本能做的就不该留成家务。
-  //
-  // 逐字节复制，不生成、不改造：改了就不是同一份，而两份实现迟早给出两个答案。
-  // 已经存在且内容相同时不写（幂等）；内容不同则覆盖，并在输出里说一句——
-  // **不静默改掉用户可能动过的文件**。
-  for (const rel of LANDED_SCRIPTS) {
-    const from = join(SKILL_ROOT, rel)
-    if (!existsSync(from)) {
-      process.stderr.write(`提醒：${rel} 登记为「要落到项目里」，但 skill 里没有这个文件——跳过。\n`)
-      continue
-    }
-    const to = join(target, rel)
-    const payload = readFileSync(from)
-    if (existsSync(to)) {
-      const current = readFileSync(to)
-      if (current.equals(payload)) continue
-      mkdirSync(dirname(to), { recursive: true })
-      writeFileSync(to, payload)
-      process.stdout.write(`已更新：${rel}（与 skill 里那份不一致，按 skill 覆盖）\n`)
-      continue
-    }
-    mkdirSync(dirname(to), { recursive: true })
-    writeFileSync(to, payload)
-    process.stdout.write(`已拷入：${rel}（门禁要用它，随落盘一起过去）\n`)
-  }
   // 落盘之后**立刻记账**：写下「这份文件的内核区、以及每个受管节，各自的字节哈希」。
   //
   // 账本是痕迹判定的唯一依据——有了它，「这段是不是我写的」就从推断变成比对：

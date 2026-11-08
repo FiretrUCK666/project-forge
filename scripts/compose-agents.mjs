@@ -417,6 +417,10 @@ function deriveFacts(target, s = surveyLight(target)) {
   const tokens = {
     PROJECT_NAME: projectName,
     COMMANDS: renderCommands(commands),
+    // 发版规范的文件名由**勘察**给（`RELEASE.md`、`docs/releasing.md` 都算），不在这里写死
+    // `RELEASING.md`：写死会让「规范在 docs/ 下」的项目读到一个不存在的路径，而路径错的表现
+    // 是「照着做了却读不到文件」，不是报错。它只在 `has-release-spec` 为真时被渲染。
+    RELEASE_SPEC_FILE: s.docs?.releaseSpec?.file ?? '',
   }
 
   // 专属模板段落：段落正文住在生态描述符里，这里只把「命中那个生态」的那份取出来。

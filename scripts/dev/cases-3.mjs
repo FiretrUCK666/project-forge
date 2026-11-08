@@ -1270,6 +1270,26 @@ group('[26] 发布说明的发送端：文件式说明，空壳与骨架都发�
   check(shellRefused, '骨架说明（留着未填充的标记）→ 拒绝', (shell.stderr ?? '').split('\n')[0])
   report(shellRefused, '骨架：拒绝')
 
+  // 3b) `--check`：只查结构、不联网、不需要凭据。它是发版规范第 3 步写给维护者的命令，
+  //     所以它自己也要能证伪——否则「本地预演通过」会变成一句没人验过的话。
+  const checkOnly = (tag, file) => spawnSync(
+    process.execPath,
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), tag, file, '--check'],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: '' } },
+  )
+  const good = write('check-good.md', '# v9.9.2\n\n## 这一版变了什么\n\n有内容\n')
+  const okCheck = checkOnly('v9.9.2', good)
+  check(okCheck.status === 0 && !/GITHUB_TOKEN/.test(okCheck.stderr ?? ''),
+    '成品 + --check：通过，且不需要凭据', (okCheck.stderr ?? '').split('\n')[0])
+  const noSection = write('check-nosection.md', '# v9.9.2\n\n只有一段正文\n')
+  const badCheck = checkOnly('v9.9.2', noSection)
+  check(badCheck.status === 2 && /没有任何二级节/.test(badCheck.stderr ?? ''),
+    '缺节 + --check：拒绝并指出缺什么', (badCheck.stderr ?? '').split('\n')[0])
+  const wrongTag = checkOnly('v9.9.1', good)
+  check(wrongTag.status === 2 && /不是同一个号/.test(wrongTag.stderr ?? ''),
+    '标签与标题不同号 + --check：拒绝', (wrongTag.stderr ?? '').split('\n')[0])
+  report(okCheck.status === 0 && badCheck.status === 2 && wrongTag.status === 2,
+    '--check：通过、缺节、错号三种都分得清')
   // 4) 判据本身要能两面证伪：少了这一半，「拒绝骨架」有可能是一句恒真的拒绝。
   const done = needsSummary('正文\n') === false && needsSummary('<!-- pf:needs-summary -->') === true
   check(done, '「还是骨架」的判据两面都分得清（带标记认出、不带标记放行）')

@@ -2135,10 +2135,12 @@ function checkOwnTemplates() {
  * 判据只有一处实现（`lib/protocol.mjs` 的 `lintReleaseNotes`），发送端与这里共用同一份——
  * 两处各判一次，迟早一处改了一处没改，而那时的表现是「CI 发送时拒绝，本地校验说没问题」。
  *
- * 只查「任何项目都成立」的那几条：有且只有一个标题、至少一节、没有空节、没有同名节、
- * 没留骨架标记。**不查分了哪几节**（那是每个项目自己的决定），也**不拿文件名去比标题**
- * ——历史说明是快照，当年写成「# v1.2.3 — 首次发布」是合法的，而它不许改回来。标题与标签
- * 同号这件事由**发送端**在发那一份时判（`release-notes.mjs`），那里才有「这一版」的语境。
+ * 只查「任何项目都成立」的那几条：有且只有一个标题、标题里那个号与文件名一致、至少一节、
+ * 没有空节、没有同名节、没留骨架标记。**不查分了哪几节**（那是每个项目自己的决定）。
+ *
+ * 标题与文件名的比对要带着**号**去比（`lintReleaseNotes` 只认标题里第一个像版本号的东西），
+ * 所以「# v1.2.3 — 首次发布」这类写法照过——它不是错号。这一条正是发版链路依赖的事实：
+ * 工作流按标签名取文件，文件里写的是另一个号，页面上的标题就对不上。
  */
 function checkReleaseNotes() {
   const dir = join(SKILL_ROOT, 'docs', 'release-notes')
@@ -2153,7 +2155,8 @@ function checkReleaseNotes() {
   }
   let bad = 0
   for (const name of files) {
-    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''))
+    const tag = name.replace(/\.md$/, '')
+    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''), tag)
     if (problems.length > 0) {
       bad += 1
       fail(`docs/release-notes/${name} 不像一份成品：${problems.join('；')}。`

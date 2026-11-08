@@ -467,8 +467,13 @@ export function computeSurveyActionPlan(s) {
     actions.push('- 生成项目契约：`node scripts/compose-agents.mjs .`')
   } else if (typeof git.remote === 'string' && git.remote !== '') {
     // 建好远端之后契约要回刷一次：远端与协作那半部分在首次生成时必然还不存在。
+    //
+    // 判据不能认「工作记录」这类**无条件渲染**的节——那种节什么时候都在，判出来永远为真，
+    // 这条提醒就再也不会出现（契约会一直写着「目前只有本地仓库」）。要认的是**只有有远端
+    // 才会出现**的那几个节：判角色、审查、合并与收尾。作者手写时用「协作」「提案」也认。
+    // 这一条曾经按旧节名匹配，节名一改就恒假——所以它同时靠下面那条 fixture 守着。
     const sections = docs.agentsSections ?? []
-    const hasCollab = sections.some((t) => /协作|工作记录|提案/.test(t))
+    const hasCollab = sections.some((t) => /判角色|判性质|审查|合并与收尾|协作|提案/.test(t))
     if (!hasCollab) {
       actions.push('- 契约里还没有协作那半部分（远端与「改动怎么落地」）：建好远端之后必须回跑一次 '
         + '`node scripts/compose-agents.mjs .`，那次回刷才把它们补进去。')

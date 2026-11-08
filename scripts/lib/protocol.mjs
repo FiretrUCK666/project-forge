@@ -119,7 +119,17 @@ export function lintReleaseNotes(text, tag) {
     problems.push(`还留着骨架标记（${SUMMARY_MARKER}）：这一段还没写`)
   }
 
-  const lines = scanLines(body)
+  // 结构判据一律跑在「去掉注释之后」的文本上：整份说明被 `<!-- -->` 包起来时，标题在注释里
+  // ——机器若照样数到它，一份读者根本看不到的空壳会被判成合格。围栏里的内容不动：那里面的
+  // `<!--` 是示例，不是注释。
+  const state = { inComment: false }
+  const lines = scanLines(body).map((info) => {
+    if (info.inFence) return info
+    const visible = stripHtmlComments(info.line, state)
+    if (visible === info.line) return info
+    const h = /^(#{1,6})\s+(.+?)\s*$/.exec(visible)
+    return { ...info, line: visible, heading: h === null ? null : { level: h[1].length, title: h[2] } }
+  })
   const marks = []
   lines.forEach((info, i) => {
     if (!info.inFence && info.heading !== null) marks.push({ info, i })
@@ -131,13 +141,15 @@ export function lintReleaseNotes(text, tag) {
   } else if (h1.length > 1) {
     problems.push(`一级标题有 ${h1.length} 个：一份说明只有一个标题`)
   } else if (typeof tag === 'string' && tag.trim() !== '') {
-    // 只比**第一个词**，不比整行：`# v1.2.3`、`# v1.2.3 — 首个公开版`、`# 1.2.3` 都是同一个号。
-    // 判据是「读者看到的号对不对」，而不是「标题是不是只写了号」——后者是文风，不是事实，
-    // 拿它当错号会把一份写得好好的说明拦在门外。
+    // 判据是「标题里那个号对不对」，不是「标题里只许有号」。所以从整行里取**第一个像版本号
+    // 的东西**再比：`# v1.2.3`、`# v1.2.3 — 首个公开版`、`# v1.2.3：修好导出缺页`、
+    // `# v1.2.3（首个公开版）` 都是同一个号。按空白切词会漏掉后两种——那正是「写得好好的
+    // 说明被拦在门外」，而报错还会说「不是同一个号」，与事实不符。
     const got = h1[0].info.heading.title.trim()
-    const firstWord = got.split(/\s+/)[0]
     const strip = (s) => s.trim().replace(/^v/i, '')
-    if (strip(firstWord) !== strip(tag)) {
+    const numLike = (/v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.]+)?/i.exec(got) ?? [])[0] ?? ''
+    const candidate = numLike === '' ? got.split(/\s+/)[0] : numLike
+    if (strip(candidate) !== strip(tag)) {
       problems.push(`一级标题写的是「${got}」，与标签「${tag}」不是同一个号`)
     }
   }
@@ -147,16 +159,15 @@ export function lintReleaseNotes(text, tag) {
     problems.push('没有任何二级节：说明至少要有一节，写清这一版变了什么')
   }
 
-  // 空节：标题之后到下一个「同级或更高级」标题之前，**去掉注释后**没有实际内容。
-  // 只看「非空行」会把 `<!-- 待补 -->` 当成内容——那正是要拦的空壳。
+  // 空节：标题之后到下一个「同级或更高级」标题之前，没有实际内容（`line` 已去掉注释，
+  // 所以一句 `<!-- 待补 -->` 不算内容）。
   for (const { info, i } of h2) {
     const level = info.heading.level
     let hasContent = false
-    const state = { inComment: false }
     for (let k = i + 1; k < lines.length; k += 1) {
       const next = lines[k]
       if (!next.inFence && next.heading !== null && next.heading.level <= level) break
-      if (stripHtmlComments(next.line, state).trim() !== '') { hasContent = true; break }
+      if (next.line.trim() !== '') { hasContent = true; break }
     }
     if (!hasContent) {
       problems.push(`「${info.heading.title}」这一节没有内容：没有内容就整节省略，不要留一个空标题`)

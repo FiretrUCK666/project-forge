@@ -1469,34 +1469,34 @@ group('[30c] 角色与协作模板：从事实判出来，不许猜')
   report(okSingle, '模板：老形态仍认')
 }
 
-group('[57] 行动导航：契约已经带上协作那半部分时不再催回刷')
+group('[57] 行动导航：契约没回刷时提醒，回刷之后安静')
 {
   if (!HAS_GIT) {
     skipGroup('[57] 行动导航', '环境里没有 git')
   } else {
+    // 真实情形：契约在**还没有远端**时生成，之后才加远端。这时契约里写着「目前只有本地
+    // 仓库」，提醒必须出现；回刷一次之后必须消失。
     const dir = fixture('action-plan', {
       'package.json': '{"name":"ap","version":"1.0.0","repository":"https://github.com/acme/ap"}\n',
     })
     gitIn(dir, 'init')
-    gitIn(dir, 'remote', 'add', 'origin', 'https://github.com/acme/ap.git')
     compose(dir)
     const md = () => spawnSync(process.execPath,
       [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--markdown'], { encoding: 'utf8' }).stdout ?? ''
-    const withCollab = md()
-    check(!/契约里还没有协作那半部分/.test(withCollab),
-      '生成过的契约不再被催「回刷协作那半部分」',
-      withCollab.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
 
-    // 反侧：把那一节整段删掉，提醒必须回来——否则上一条可以靠「这段永远不输出」满足。
-    const agentsFile = join(dir, 'AGENTS.md')
-    const text = readFileSync(agentsFile, 'utf8')
-    const without = text.replace(/^## 改动怎么落地（日常）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
-    check(without !== text, '前提：成功删掉「改动怎么落地」一节')
-    writeFileSync(agentsFile, without, 'utf8')
-    const stripped = md()
-    check(/契约里还没有协作那半部分/.test(stripped), '少了那一节就重新提醒（判据不是恒假）')
-    report(!/契约里还没有协作那半部分/.test(withCollab)
-      && /契约里还没有协作那半部分/.test(stripped), '行动导航：该提醒时提醒，不该时安静')
+    gitIn(dir, 'remote', 'add', 'origin', 'https://github.com/acme/ap.git')
+    const stale = md()
+    check(/契约里还没有协作那半部分/.test(stale),
+      '有远端但契约没回刷 → 提醒回跑一次',
+      stale.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
+
+    compose(dir)
+    const fresh = md()
+    check(!/契约里还没有协作那半部分/.test(fresh),
+      '回刷之后不再提醒（判据不是恒真）',
+      fresh.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
+    report(/契约里还没有协作那半部分/.test(stale) && !/契约里还没有协作那半部分/.test(fresh),
+      '行动导航：该提醒时提醒，回刷之后安静')
   }
 }
 // ---- 分片收尾 ----

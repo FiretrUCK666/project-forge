@@ -17,6 +17,7 @@ import {
   evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, } from './preflight.mjs'
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
+import { REPO_ONLY_DIRS, REPO_ONLY_FILES } from '../lib/protocol.mjs'
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation } from '../lib/text.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
@@ -333,7 +334,14 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       check(!/\.\.\//.test(/REPO_ONLY_DIRS[\s\S]*?\]\)/.exec(proto)?.[0] ?? '')
         && !/\.\.\//.test(/REPO_ONLY_FILES[\s\S]*?\]\)/.exec(proto)?.[0] ?? ''),
         '结构规则里没有 `..` —— 常量本身不可能指向技能目录之外', '')
-      report(true, '边界：常量里没有 ..')
+      // 判据要真的算一遍：常量里出现 '..' 时，前缀判据就能把风险路径「逃出去」到项目外面。
+  // 原来这一行写的是 report(true, …) —— 那条断言证明的是「代码里写了这一行」，不是判据。
+  const dirsConst = (REPO_ONLY_DIRS ?? []).join('\n')
+  const filesConst = (REPO_ONLY_FILES ?? []).join('\n')
+  check(!/\.\./.test(dirsConst + filesConst),
+    '边界：结构规则常量里没有 ..（有的话前缀判据能逃到项目外面）',
+    dirsConst + filesConst)
+  report(!/\.\./.test(dirsConst + filesConst), '边界：常量里没有 ..')
 
       check(/if \(!insideSkill\(p\)\) \{ skipped\.push\(e\.name\); continue \}/.test(src)
         && /if \(!insideSkill\(tempPathFor\(p\)\)\)/.test(src),

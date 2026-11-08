@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 710
+export const BEHAVIOR_MIN_PASSED = 715
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -1310,7 +1310,7 @@ function cnNumber(raw) {
  * `checkPackageBoundary` 与 `checkProducedPackage` 会双向核对。两处判的是同一件事，
  * 但一个给方向、一个给结论——方向错了，结论那一步会当场红。
  */
-const isRepoOnly = (rel) => rel.startsWith('scripts/dev/')
+
 
 /**
  * 文档里自称的数量与磁盘对账。
@@ -2323,6 +2323,15 @@ function checkReviewRuleSources() {
       return table.found === true && table.paths.length > 0 && table.skipped.length === 0
     },
     '「## 高风险路径」一节缺失、表是空的、或有解析不出来的行 —— 那条门禁会静默失效')
+
+  // **契约文件自己必须在表里**。删掉那一行，改契约本身就不再需要审查记录——而
+  // 「改窄这张表」正是能一次废掉门禁、且自身不受审查的那条路。自指的洞只能靠显式
+  // 列进来堵住，而「显式列进来」这件事本身要有检查看着。
+  need('AGENTS.md',
+    (x) => readHighRiskTable(x).paths.some((v) => v.replace(/\/$/, '') === 'AGENTS.md'),
+    '「## 高风险路径」表里没有 AGENTS.md 自己 —— 这张表就是判据的输入，'
+    + '删掉它、把它改窄都不再需要审查记录，等于一次就能把门禁废掉。'
+    + '判据的输入文件必须在判据的保护范围内。')
 
   // 三、落盘模板：那一节还要**活过刷新**。
   //

@@ -90,9 +90,12 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           git fetch --no-tags origin "$BASE_REF"
+          # `diff.renames=false`：不带它时，一次改名只报**新路径**——把判定逻辑
+          # `git mv` 到 `scripts/` 之外再改松，门禁会判成「不落在高风险路径」。
+          # 改名挪走判定逻辑是一次实质的风险改动，只是它在 diff 眼里长得像「移动」。
           # `core.quotepath=false`：默认配置会把中文文件名转义成 "\345\256\241..."，
           # 前缀判据匹配不上，中文名的风险改动会被判成非高风险、绿着放行。
-          git -c core.quotepath=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+          git -c core.quotepath=false -c diff.renames=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
           printf '%s' "$PR_BODY" > pr-body.md
 
           # 把评论拉下来拼成一份文件（每条之间一行 ---COMMENT---）。

@@ -224,8 +224,14 @@
    使用者的权威副本；
 <!-- pf:endif -->
 <!-- pf:if has-registry-publish -->
+<!-- pf:if has-remote -->
 5. 按该生态的方式发布（npm 一类发布到制品库；Go 等无上传动作的生态，打标签即发布完毕，
    不要再找上传命令）。
+<!-- pf:endif -->
+<!-- pf:if no-remote -->
+4. 按该生态的方式发布（npm 一类发布到制品库；Go 等无上传动作的生态，打标签即发布完毕，
+   不要再找上传命令）。
+<!-- pf:endif -->
 <!-- pf:endif -->
 
 <!-- pf:if has-remote -->

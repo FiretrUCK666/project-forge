@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { isHighRiskPath, highRiskChanged, reviewRecordState } from './review-record.mjs'
+import { isHighRiskPath, highRiskChanged, reviewRecordState } from '../review-record.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -478,19 +478,20 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
 {
   // 1) 高风险路径的判据：**目录前缀**，不是逐文件清单。
   //    清单要人记得改；目录不会长出新的一处。
+  const RISK = ['scripts/', 'templates/', '.github/workflows/', '.gitattributes']
   const high = ['scripts/survey.mjs', 'templates/x.md', '.github/workflows/check.yml', '.gitattributes', 'scripts/lib/text.mjs']
   const low = ['README.md', 'references/a.md', 'docs/work/x.md', 'scripts-dev/x.mjs']
-  const missed = high.filter((p) => !isHighRiskPath(p))
-  const over = low.filter((p) => isHighRiskPath(p))
+  const missed = high.filter((p) => !isHighRiskPath(p, RISK))
+  const over = low.filter((p) => isHighRiskPath(p, RISK))
   check(missed.length === 0 && over.length === 0, '高风险路径按目录前缀判，且不误伤同名近似路径',
     `漏=${missed.join('、') || '无'} 误判=${over.join('、') || '无'}`)
   report(missed.length === 0 && over.length === 0, '高风险路径：分得清')
 
   // 反例：`scripts-dev/` 不是 `scripts/` 的子串匹配。前缀判据写错（`includes`）时它会误判。
-  check(!isHighRiskPath('scripts-dev/a.mjs'), '前缀判据不是 includes：scripts-dev 不算 scripts')
+  check(!isHighRiskPath('scripts-dev/a.mjs', RISK), '前缀判据不是 includes：scripts-dev 不算 scripts')
 
   // 2) 改动清单去重、排序、只留高风险。
-  const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'])
+  const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'], RISK)
   const okPick = picked.length === 2 && picked[0] === 'scripts/a.mjs' && picked[1] === 'scripts/b.mjs'
   check(okPick, 'from 一份清单里挑出高风险项：去重且排序', picked.join('、'))
   report(okPick, '改动清单：挑得对')
@@ -523,7 +524,7 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   report(reviewRecordState(onlyComment).filled === false, '审查记录：注释不算')
 
   // 4) 端到端：真的跑那个脚本，三种输入三种退出码。
-  const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'dev', 'review-record.mjs'), ...args],
+  const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review-record.mjs'), ...args],
     { encoding: 'utf8', input })
   const dir2 = fixture('review-record', {})
   const bodyPath = join(dir2, 'body.md')

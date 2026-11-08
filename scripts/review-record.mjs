@@ -43,7 +43,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -192,7 +192,7 @@ function usage() {
     '',
     '  --changed         每行一个改动路径的文件；`-` 表示从 stdin 读（`git diff --name-only` 直接接）',
     '  --body            提案正文（Markdown 文件）',
-    '  --root            项目目录；缺省是当前目录（契约与高风险路径表都从那里读）',
+    '  --root            项目目录；缺省从脚本位置推（本脚本在 <项目>/scripts/ 下，往上一层就是根）',
     '  --expect-changes  改动清单**空着就是错**。提案上必须给这个开关：一份提案不可能零改动，',
     '                    清单空只说明那次 diff 没算出来（浅克隆、基线分支名错、fetch 失败），',
     '                    而「没算出来」会被读成「没动高风险路径」——门禁绿着放行，什么都没拦。',
@@ -248,7 +248,7 @@ function main(argv) {
   }
   // **判据来自项目自己的契约**，不来自这份代码：哪几处改了会让门禁从此少查一项，
   // 因项目而异。写死在代码里，换一个项目就判错——而判错的症状不是报错，是该拦的没拦。
-  const root = resolve(rootArg ?? process.cwd())
+  const root = resolve(rootArg ?? join(dirname(fileURLToPath(import.meta.url)), '..'))
   const agentsPath = join(root, 'AGENTS.md')
   let prefixes = []
   let contractMissing = false

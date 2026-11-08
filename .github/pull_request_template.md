@@ -60,7 +60,7 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 审查的人不能是执行者本人：同一个上下文里再读一遍，只会读出「刚才那套没问题」。
 
 不需要审查的低档改动（注释、文档、新增测试）写一行「本档不需要审查」，不要留空——
-留空分不清「没审」与「不需要审」。机器判据：`node scripts/dev/review-record.mjs
+留空分不清「没审」与「不需要审」。机器判据：`node scripts/review-record.mjs
 --changed <改动清单> --body <提案正文>`。
 -->
 

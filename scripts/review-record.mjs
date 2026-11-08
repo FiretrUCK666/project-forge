@@ -386,11 +386,16 @@ export function reviewRecordState(body) {
 /**
  * 评论里有没有**某一轮**的审查结论。
  *
- * 判据分三层，缺一不可：
- *   1. 评论里出现「第 N 轮」（或「round N」「#N 轮」这些写法）；
- *   2. 同一段里出现那个结论词（通过 / 需要返工 …）；
- *   3. 评论长度超过一个下限——「第 1 轮：通过」七个字不算审查结论，
- *      它连「发现了什么」都没有。下限取得很低（默认 80 字符），只拦「一句话交差」。
+ * 判据只有两条，缺一不可：
+ *   一、**这条评论提到了这一轮**——按解析出来的轮次号判（见 `roundMarks`），
+ *       写「第二轮」就只认领第二轮，不是「任何带数字的轮次」；
+ *   二、**这一轮的结论与期望的一致**——按结论位判（见 `roundVerdict`），
+ *       不是「文中出现过这个词」。
+ *
+ * **不判「写得好不好」。** 试过七种判法（字数、关键词、去表态词后的剩余量、顿号列举、
+ * 句子数、排空词、扩展名白名单），每种都误伤真结论或放过纯附和。最后只留「非空」。
+ * 边界见 项目的协作规范 的判据表：这条判据证明「有一轮审查发生过」，
+ * 不证明「审得认真」。
  *
  * 找到时返回那一段的前 80 个字符，报告里能看出是哪一条。
  */
@@ -442,6 +447,9 @@ const VERDICT_TOKENS = [
   ['需要返工', '需要返工'],
   ['需要修改', '需要返工'],
   ['需返工', '需要返工'],
+  ['没有通过', '不通过'],
+  ['未能通过', '不通过'],
+  ['无法通过', '不通过'],
   ['不通过', '不通过'],
   ['未通过', '不通过'],
   ['通过', '通过'],
@@ -494,43 +502,39 @@ const SEVERITY = { '需要返工': 0, '不通过': 1, '通过': 2 }
  */
 export function roundVerdict(round, text) {
   const s = String(text ?? '')
-  const marks = roundMarks(s).filter((m) => m.round === String(Number(round)))
-  if (marks.length === 0) return undefined
-  const rounds = marks.map((m) => m.index)
+  const marks = roundMarks(s)
+  const mine = marks.filter((m) => m.round === String(Number(round)))
+  if (mine.length === 0) return undefined
+
   const hits = verdictHits(s)
   if (hits.length === 0) return undefined
-
-  const lineStart = (idx) => {
-    const before = s.lastIndexOf('\n', idx)
-    return before < 0 ? 0 : before + 1
-  }
-  const lineEnd = (idx) => {
-    const after = s.indexOf('\n', idx)
-    return after < 0 ? s.length : after
-  }
   const mostSevere = (list) => list.reduce((a, b) => (SEVERITY[a.verdict] <= SEVERITY[b.verdict] ? a : b)).verdict
 
-  // 一、**轮次所在的那一行**。审查结论的形状就是「轮次 + 结论」写在标题行。
-  const onRoundLine = []
-  for (const r of rounds) {
-    const from = lineStart(r)
-    const to = lineEnd(r)
-    for (const h of hits) if (h.index >= from && h.index <= to) onRoundLine.push(h)
+  // **每一轮的正文只在自己那一段里找**，而段的边界是**下一个轮次标记**，不是行末。
+  //
+  // 为什么不是行：一行里可以有两个轮次标记（`第 1 轮 —— 通过。第 2 轮待派。`），
+  // 按行取会把两轮的正文混成一段，第 2 轮于是看到属于第 1 轮的「通过」，
+  // 一个「尚未派」的轮次被判成通过。
+  //
+  // 两条边界，各治一种实测过的假绿：
+  //   一、**往前不越界**：段从本轮标记开始，不从「行首」开始。
+  //       否则标题行没结论词时，先出现的「上一版修完复核通过」会被当成这一轮的结论；
+  //   二、**往后不越界**：到下一个轮次标记为止。
+  //       否则第 2 轮会吃到第 1 轮（或第 3 轮）的结论。
+  //
+  // 「这一段里没有任何结论词」就是 undefined —— 这一轮还没结论，而不是「往前找最近的」。
+  let result
+  for (const mark of mine) {
+    const nextMark = marks.map((m) => m.index).filter((x) => x > mark.index)
+    const segEnd = nextMark.length > 0 ? Math.min(...nextMark) : s.length
+    const inSeg = hits.filter((h) => h.index >= mark.index && h.index < segEnd)
+    if (inSeg.length === 0) continue
+    // 段内出现多个结论词时取**更严**的：一段里既说通过又说返工，唯一安全的读法是
+    // 「它没有明确通过」。
+    const v = mostSevere(inSeg)
+    result = result === undefined || SEVERITY[v] < SEVERITY[result] ? v : result
   }
-  if (onRoundLine.length > 0) return mostSevere(onRoundLine)
-
-  // 二、那一行没有：取**轮次之后最近的一个**结论词。
-  //    **只在同一轮之内找**：下一个轮次标记之前的范围。
-  const nextMark = roundMarks(s).map((m) => m.index).filter((x) => x > rounds[0])
-  const limit = nextMark.length > 0 ? Math.min(...nextMark) : s.length
-  const after = hits.filter((h) => h.index >= rounds[0] && h.index < limit)
-  if (after.length > 0) return after[0].verdict
-
-  // 三、都没有：取轮次之前最近的一个（不越到上一轮去）。
-  const prevMark = roundMarks(s).map((m) => m.index).filter((x) => x < rounds[0])
-  const floor = prevMark.length > 0 ? Math.max(...prevMark) : 0
-  const before = hits.filter((h) => h.index < rounds[0] && h.index > floor)
-  return before.length > 0 ? before[before.length - 1].verdict : undefined
+  return result
 }
 
 export function findRoundInComments(round, verdict, comments) {
@@ -587,7 +591,7 @@ export function findRoundInComments(round, verdict, comments) {
  * 留一条会**误伤真结论**的判据，比没有这条判据坏：误伤让人以为自己做错了，
  * 然后去补一条本来就该合格的评论，而真原因（措辞没命中词表）永远不会被发现。
  *
- * 边界写在 `references/collaboration.md` 的判据表里：**这条判据证明「有一轮审查发生过、
+ * 边界写在 项目的协作规范 的判据表里：**这条判据证明「有一轮审查发生过、
  * 结论发成了评论」，不证明「审得认真」。** 后者靠纪律，机器判不了——
  * 同样的话也适用于「审的人不能是执行者」。
  */

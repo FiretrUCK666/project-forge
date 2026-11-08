@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url'
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments , LANDED_SCRIPTS, REPO_ONLY_DIRS, REPO_ONLY_FILES } from '../lib/protocol.mjs'
-import { skillVersion, skillSource, repoRelation, tableFirstCells, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+import { skillVersion, skillSource, repoRelation, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
@@ -2666,6 +2666,21 @@ function trackedFilesAt(ref) {
   return files.length === 0 ? undefined : files
 }
 
+/**
+ * 这个版本号读得到吗。
+ *
+ * 用来把「**没查成**」与「**查过没问题**」分开：`--at` 给了一个拼错的标签或一个
+ * 浅克隆里不存在的版本时，后面每一处读文件都会失败、报 47 条 warn，而成功行照样
+ * 打印「与受版本控制的文件全集一致」——那句话是假的，而退出码是 0。
+ * 发版工作流正是用 `--at "$TAG"` 调它。
+ */
+function refExists(ref) {
+  const r = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+    cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true,
+  })
+  return r.error === undefined && r.status === 0
+}
+
 function packageMembers() {
   const run = (args, encoding) => spawnSync('git', args, {
     cwd: SKILL_ROOT, encoding, windowsHide: true, maxBuffer: 64 * 1024 * 1024,
@@ -2871,6 +2886,9 @@ function checkStructuralRulesAgree() {
  * 的规则另算一遍——后者是近似，而近似在这里正好会放过最该抓的那种错。
  */
 function checkPackageBoundary() {
+  // 这一步的起点。成功行要说「与结构规则一致」时，得连本函数前面那几段的红一起看——
+  // 取在中途的话，「没有归属的文件」那一段红着、成功行照样打印（实测过）。
+  const sectionStart = failures.length
   const pkg = packageMembers()
   if (pkg === undefined) {
     warn('用户包边界未核对（git 不可用，或索引里有未合并的条目）—— 报「未核对」，不放行。')
@@ -2898,7 +2916,13 @@ function checkPackageBoundary() {
   // 一起能不能用」。用全局 `failures` 当开关的话，前面红一下，这里就静默不跑了。
   const before = failures.length
   const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
-  if (failures.length === before) {
+  // **这句「与结构规则一致」要连本函数前面两段的红一起看。**
+  //
+  // `before` 取在调包自洽性之前，所以「不该进包的」「没有归属的」那两段的红不影响它——
+  // 实测日志里 `用户包边界：63 个文件，与结构规则一致` 与
+  // `FAIL pkgtools/y.txt … 没有归属` 同时出现，扫日志的人会以为归属检查过了。
+  // 判据：这句话只在**这一步整体没有失败**时才说。
+  if (failures.length === before && sectionStart === failures.length) {
     process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
       + `包内 ${links} 处相对引用全部落在包内\n`)
   }
@@ -2952,6 +2976,15 @@ function checkProducedPackage(listPath, atRef) {
   }
 
   if (bad === 0) {
+    // **「没查」不能打印成「一致」。**
+    //
+    // `--at` 给了一个读不到的版本（标签拼错、浅克隆里没有）时，后面每一处读文件都失败、
+    // 报几十条 warn，而成功行照样打「与受版本控制的文件全集一致」——那句话是假的，
+    // 退出码还是 0。发版工作流正是用 `--at "$TAG"` 调它。
+    if (atRef !== undefined && !refExists(atRef)) {
+      complain(`读不到 ${atRef} 这个版本，产出物核对没有真正进行 —— 不当作通过。`)
+      return
+    }
     const readContent = atRef === undefined
       ? contentFromWorktree
       : (f) => fileFromRef(atRef, f)

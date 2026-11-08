@@ -503,15 +503,22 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
 
     // 目录不带尾斜杠 → 补成前缀形式。漏一个斜杠的后果是这条判据对整棵树失效，
     // 而症状完全不可见——所以它必须被认。
-    check(JSON.stringify(readHighRiskPaths(table('`src/rules`'))) === '["src/rules/"]',
-      '目录不带尾斜杠 → 补成前缀形式（漏个斜杠不该让判据静默失效）',
+    // 归一化不再猜「文件还是目录」，所以这里断言的是「规范形式 + 真的命中」。
+    // 判据变了但强度没降：能命中才是这条用例要证明的东西。
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules`'))) === '["src/rules"]'
+      && isHighRiskPath('src/rules/a.js', readHighRiskPaths(table('`src/rules`'))),
+      '目录不带尾斜杠 → 规范成 src/rules，且改 src/rules/a.js 仍判高风险',
       JSON.stringify(readHighRiskPaths(table('`src/rules`'))))
     // 格子里带说明 → 取反引号里那一段。
-    check(JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))) === '["src/rules/"]',
-      '格子里带说明 → 取反引号里那一段', JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))))
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))) === '["src/rules"]'
+      && isHighRiskPath('src/rules/a.js', readHighRiskPaths(table('`src/rules/` 下的判定'))),
+      '格子里带说明 → 取反引号里那一段，且仍然命中',
+      JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))))
     // 一格两个路径 → 全都收。
-    check(JSON.stringify(readHighRiskPaths(table('`a/`,`b/`'))) === '["a/","b/"]',
-      '一格写两个路径 → 全部收下', JSON.stringify(readHighRiskPaths(table('`a/`,`b/`'))))
+    const twoPaths = readHighRiskPaths(table('`a/`,`b/`'))
+    check(JSON.stringify(twoPaths) === '["a","b"]'
+      && isHighRiskPath('a/x', twoPaths) && isHighRiskPath('b/x', twoPaths),
+      '一格写两个路径 → 全部收下，且两个都能命中', JSON.stringify(twoPaths))
     // 单个文件照原样，不补斜杠。
     check(JSON.stringify(readHighRiskPaths(table('`AGENTS.md`'))) === '["AGENTS.md"]',
       '单个文件不补斜杠（`AGENTS.md` 不会被写成 `AGENTS.md/`）',
@@ -530,10 +537,11 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
     // 传字面量 true 时它永远通过，而它会算进通过总数——那个下限应该度量「有多少条判据
     // 在守着」，掺进恒真项就失去意义。
     const tableOk = (row, want) => JSON.stringify(readHighRiskPaths(table(row))) === want
-    const allTable = tableOk('`src/rules`', '["src/rules/"]')
-      && tableOk('`src/rules/` 下的判定', '["src/rules/"]')
-      && tableOk('`a/`,`b/`', '["a/","b/"]')
+    const allTable = tableOk('`src/rules`', '["src/rules"]')
+      && tableOk('`src/rules/` 下的判定', '["src/rules"]')
+      && tableOk('`a/`,`b/`', '["a","b"]')
       && tableOk('`AGENTS.md`', '["AGENTS.md"]')
+      && tableOk('`.github/`', '[".github"]')
       && readHighRiskPaths(table('`<替换成这个项目的第一处>`')).length === 0
     const reported = readHighRiskTable(table('<替换成第一处>')).skipped.length === 1
     const absent = readHighRiskTable('# 没有那一节\n').found === false
@@ -544,8 +552,12 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   {
     const esc = '"templates/\\345\\256\\241\\346\\237\\245.md"'
     check(unquoteGitPath(esc) === 'templates/审查.md', 'C 风格转义还原成真实路径', unquoteGitPath(esc))
-    check(isHighRiskPath(esc, ['templates/']) === true,
-      '转义过的中文路径照样判成高风险（不依赖调用方记得关 core.quotepath）')
+    // **转义还原与「算不算高风险」是两步**，这条要验的是「还原之后仍判高风险」。
+    // 上一版直接把转义原文喂给 isHighRiskPath —— 那一步它不做还原（也不该做：
+    // 还原是 unquoteGitPath 的事，两处各做一次迟早给出两个答案），所以判 false
+    // 不是判据坏了，是断言写错了。`highRiskChanged` 里那两步是这个顺序。
+    check(isHighRiskPath(unquoteGitPath(esc), ['templates']) === true,
+      '转义过的中文路径，还原之后照样判成高风险（不依赖调用方记得关 core.quotepath）')
     check(unquoteGitPath('templates/审查.md') === 'templates/审查.md', '没转义的原样返回', '')
     report(unquoteGitPath(esc) === 'templates/审查.md', '转义还原：中文路径不再漏判')
   }

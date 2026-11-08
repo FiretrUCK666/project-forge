@@ -58,7 +58,7 @@
 唯一的正当出路是把它从 `AGENTS.md` 的高风险表里去掉——**那是改契约，要走审查**，
 不是在这一栏写一句「本档不需要审查」。
 
-机器判据（把 `review-record.mjs` 拷进项目的 `scripts/` 目录之后就能跑，它零依赖、单文件）：
+机器判据（`review-record.mjs` 随落盘自动在项目的 `scripts/` 目录里，零依赖、单文件）：
 `node scripts/review-record.mjs --changed <改动清单> --body <这份正文> --comments <评论>`
 它从 `AGENTS.md` 的「## 高风险路径」表读判据；**那张表空了，它就拦不住任何东西**。
 `--comments` 是平台上那些评论的正文（CI 会自己拉下来传进去）。

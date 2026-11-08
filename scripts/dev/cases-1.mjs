@@ -1484,6 +1484,12 @@ group('[57] 行动导航：契约没回刷时提醒，回刷之后安静')
     const md = () => spawnSync(process.execPath,
       [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--markdown'], { encoding: 'utf8' }).stdout ?? ''
 
+    // 条件块夹在表格两行之间时，渲染器必须把标记那一行整个吃掉；否则第二行落到表外，
+    // 读者看到的是「一行不属于任何表格的文字」。这条是那个渲染改动的回归靶子。
+    const agentsRendered = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    check(/^\| 打版本标签 \|.*\n\| 发布到制品库 \|/m.test(agentsRendered),
+      '条件块夹在表格行之间：表不会被拆成两张')
+
     gitIn(dir, 'remote', 'add', 'origin', 'https://github.com/acme/ap.git')
     const stale = md()
     check(/契约里还没有协作那半部分/.test(stale),

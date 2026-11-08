@@ -302,7 +302,7 @@ skill 跑完一个项目之后，目标项目里会留着它的痕迹：标识�
 | `templates/contributing.md` | `CONTRIBUTING.md`（本仓库的实例） |
 | `templates/release-spec.md` | `RELEASING.md`（本仓库的实例）与 `docs/release-notes/` 的实际写法 |
 | `templates/work-item.md`、`references/collaboration.md` | `docs/work/` 里真实的记录：文件名、表头、断点 |
-| `templates/issue-*.md`、`pull-request-template.md`、`ci-*.yml` | `.github/` 下同名的实例 |
+| 落盘模板 → 本仓库实例 | `templates/issue-bug-report.md`→`.github/ISSUE_TEMPLATE/bug_report.md`；`issue-feature-request.md`→`feature_request.md`；`pull-request-template.md`→`.github/pull_request_template.md`；`ci-check.yml`→`.github/workflows/check.yml`；`ci-release.yml`→`release.yml` |
 | 任何 `references/` 里的判据 | 本文件复述它的那一段；`scripts/review.mjs` 的对应检查 |
 | 发布链路的任何一处（说明放哪、怎么发） | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` 三处一起 |
 | `README.md` 的结构或能力 | 与 `README.en.md` 成对改 |

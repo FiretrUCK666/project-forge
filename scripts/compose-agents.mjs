@@ -1423,8 +1423,9 @@ function reportRefresh(report, stream) {
     return
   }
   if (Array.isArray(report.added) && report.added.length > 0) {
-    stream.write(`\n补上了 ${report.added.length} 个模板里有、文件里没有的节（--upgrade）：\n`)
+    stream.write(`\n补上了 ${report.added.length} 个模板里有、文件里没有的节（--upgrade，**追加在末尾**）：\n`)
     for (const a of report.added) stream.write(`  - ${a}\n`)
+    stream.write('  位置在文件末尾而不是模板里的位置：既有文件的顺序以作者为准，脚本只做加法。\n')
   }
   if (report.refreshed !== undefined && report.refreshed.length > 0) {
     stream.write(`\n按当前项目事实重新求值的节（共 ${report.refreshed.length} 节）：\n`)

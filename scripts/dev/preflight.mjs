@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
@@ -2130,6 +2130,40 @@ function checkOwnTemplates() {
 }
 
 /**
+ * 本仓库的发布说明：**它教别人怎么写，自己就得先满足那套判据**。
+ *
+ * 判据只有一处实现（`lib/protocol.mjs` 的 `lintReleaseNotes`），发送端与这里共用同一份——
+ * 两处各判一次，迟早一处改了一处没改，而那时的表现是「CI 发送时拒绝，本地校验说没问题」。
+ *
+ * 只查「任何项目都成立」的那几条：有且只有一个标题且与文件名同源、至少一节、没有空节、
+ * 没有同名节、没留骨架标记。**不查分了哪几节**：那是每个项目自己的决定。
+ *
+ * 历史说明是**快照，不随规范改**：所以这里的期望只有文件名与内容自洽，不与今天的规范比。
+ */
+function checkReleaseNotes() {
+  const dir = join(SKILL_ROOT, 'docs', 'release-notes')
+  if (!existsSync(dir)) return
+  const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort()
+  if (files.length === 0) {
+    fail('docs/release-notes/ 是空的 —— 发过版的仓库至少有一份说明。')
+    return
+  }
+  for (const name of files) {
+    const tag = name.replace(/\.md$/, '')
+    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''), tag)
+    if (problems.length > 0) {
+      fail(`docs/release-notes/${name} 不像一份成品：${problems.join('；')}。`
+        + '历史说明是快照、不按今天的规范改——但空壳、错号、空节在任何一版里都不成立，'
+        + '按报出的那一条修。')
+    }
+  }
+  process.stdout.write(`发布说明：${files.length} 份都通过结构检查（标题、分节、无空节）\n`)
+}
+
+/**
  * 章节文件的体量软预算：**只提示，不失败**。 *
  * 为什么不失败：「不同不等于超标」。一份长文件可能每一段都是判据，删掉任何一段都会让
  * 某个没预料到的情况失去依据；而「读起来累」是相对的，没有一个能一刀切的数字。红的
@@ -2653,6 +2687,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('用户包边界', checkPackageBoundary)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)
+  step('本仓库发布说明', checkReleaseNotes)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
   step('章节体量', checkChapterSize)

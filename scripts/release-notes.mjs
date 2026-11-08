@@ -16,33 +16,41 @@
  * 第 3 条是关键：前两条都可能被别的东西破坏（代理、编码层、平台侧的规范化），
  * 而只有回读能证明真的写对了。
  *
- * 还有一条与内容有关的前置检查：正文里出现 `pf:needs-summary` 时**拒绝发送**——
- * 那是发版规范给写说明的人留的骨架标记（「这一段还没写」），而发布页的读者是使用者。
- * 发一个空壳出去，比让这次发版失败坏得多。
+ * 还有一条与内容有关的前置检查：说明必须**是一份成品**。具体查什么由
+ * `lintReleaseNotes` 给出，只查任何项目都成立的那几条（有标题、标题是这一版、有节、
+ * 节里没空着、没有同名节、没留着骨架标记）——**不查「分了哪几节」**，那是项目自己的
+ * 决定，写进检查就成了拿一家的规范去要求所有项目。
  *
  * 用法：
  *   GITHUB_TOKEN=<凭据> node scripts/release-notes.mjs <标签> <说明文件> [--repo owner/name]
+ *   node scripts/release-notes.mjs <标签> <说明文件> --check
+ *
+ *   `--check` 只做结构检查，不联网、不需要凭据——本地预演用它，发版之前先过一遍。
  *
  *   凭据只从环境变量读，**绝不写进任何文件、绝不拼进命令行**。
  *   --repo 省略时，从当前目录的远端地址推导（远端地址的权威来源是版本控制配置）。
  *
- * 退出码：0 = 成功且回读一致；1 = 失败；2 = 用法或环境错误。
+ * 退出码：0 = 成功且回读一致（`--check` 时为检查通过）；1 = 失败；2 = 用法、环境或内容错误。
  */
 
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 import { parseGitHubRepo } from './lib/text.mjs'
-import { needsSummary } from './lib/protocol.mjs'
+import { lintReleaseNotes } from './lib/protocol.mjs'
 
 const API = 'https://api.github.com'
 
 function usage() {
   return [
     '用法：GITHUB_TOKEN=<凭据> node scripts/release-notes.mjs <标签> <说明文件> [--repo owner/name]',
+    '      node scripts/release-notes.mjs <标签> <说明文件> --check',
     '',
     '  用 UTF-8 文件创建或更新发布说明。脚本按字节发送正文，写完回读比对。',
+    '  发送前先做结构检查：没标题、标题不是这一版、有空节、两节同名、还留着骨架标记，',
+    '  任何一条都拒绝发送。',
     '',
+    '  --check     只做结构检查，不联网、不需要凭据（本地预演用）。',
     '  凭据只从 GITHUB_TOKEN 环境变量读，不写进任何文件、不拼进命令行。',
     '  --repo 省略时，从当前目录的远端地址（origin）推导 owner/name。',
     '',
@@ -136,20 +144,9 @@ async function main() {
     process.stderr.write(`错误：需要标签与说明文件两个参数。\n\n${usage()}`)
     return 2
   }
-  if (repo === undefined) {
-    process.stderr.write(
-      '错误：无法确定仓库。当前目录读不到 origin 远端地址时请用 --repo owner/name 指定。\n',
-    )
-    return 2
-  }
-  const token = process.env.GITHUB_TOKEN
-  if (typeof token !== 'string' || token.trim() === '') {
-    process.stderr.write(
-      '错误：环境变量 GITHUB_TOKEN 为空。\n'
-      + '  凭据只能从环境变量传入——不要把它写进文件或拼进命令行。\n',
-    )
-    return 2
-  }
+  // 只检查、不发送：本地预演要在拿到凭据之前就能跑，否则「先验一遍」这句建议等于
+  // 只有配好密钥的人才用得上。
+  const checkOnly = argv.includes('--check')
   if (!existsSync(notesPath)) {
     process.stderr.write(`错误：找不到说明文件 ${notesPath}。\n`)
     return 2
@@ -184,12 +181,35 @@ async function main() {
     return 2
   }
 
-  if (needsSummary(notes)) {
+  // 骨架不是成品：小标题在、内容一句没写，机器若只判「文件存在」，这份空壳就会被
+  // 原样发到发布页上，而发布页的收件人是使用者。这条与其余几条结构判据放在一起判，
+  // 见 lib/protocol.mjs 的 lintReleaseNotes——判据只实现一处。
+  const structural = lintReleaseNotes(notes, tag)
+  if (structural.length > 0) {
     process.stderr.write(
-      '错误：这份说明还是骨架（还留着未填充的占位标记），不是成品。\n'
-      + `  修法：按项目里那份发版规范的结构，把 ${notesPath} 真正写完，去掉骨架标记后再发。\n`
-      + '  发布页的读者是使用者，一份只有小标题的空壳不是他能读懂的说明——'
-      + '所以这里拒绝发送，而不是发一个空壳。\n',
+      `错误：这份说明还不能发（${structural.length} 处）：\n`
+      + structural.map((p) => `  - ${p}\n`).join('')
+      + `  修法：改 ${notesPath}。分几节由项目的发版规范决定，但上面这几条与项目无关——`
+      + '它们不成立时，这份说明在任何项目里都算不上说明。\n',
+    )
+    return 2
+  }
+  if (checkOnly) {
+    process.stdout.write(`检查通过：${tag} 的说明是一份成品，结构上没发现问题。\n`)
+    return 0
+  }
+
+  if (repo === undefined) {
+    process.stderr.write(
+      '错误：无法确定仓库。当前目录读不到 origin 远端地址时请用 --repo owner/name 指定。\n',
+    )
+    return 2
+  }
+  const token = process.env.GITHUB_TOKEN
+  if (typeof token !== 'string' || token.trim() === '') {
+    process.stderr.write(
+      '错误：环境变量 GITHUB_TOKEN 为空。\n'
+      + '  凭据只能从环境变量传入——不要把它写进文件或拼进命令行。\n',
     )
     return 2
   }

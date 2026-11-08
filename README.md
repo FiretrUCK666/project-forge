@@ -254,7 +254,7 @@ node "<本领目录>/scripts/update.mjs" --check
 | `AGENTS.md` | 这个仓库自己的项目契约：机制、不变量、构建与验证、硬性规范 |
 | `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
 | `RELEASING.md` | 发版规范：说明写在哪、分哪几节、按什么顺序发、出错了怎么补 |
-| `docs/` | 发布说明（`release-notes/<标签>.md`）；跨会话的工作项按需放在 `work/`（本仓库目前还没有），随仓库走 |
+| `docs/` | 发布说明（`release-notes/<标签>.md`）与工作记录（`work/`，跨会话的活记在这里），随仓库走 |
 | `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
 | `.gitattributes`、`.gitignore` | 哪些不进用户包、哪些不进版本库 |
 | `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |

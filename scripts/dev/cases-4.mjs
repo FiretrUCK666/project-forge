@@ -239,8 +239,9 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
   mkdirSync(histDir, { recursive: true })
 
   // 历史说明里提到一个本仓库没有的脚本（真实场景：它后来被删掉了）。
+  // 说明本身要有节：它同时被「发布说明是一份成品」那条检查看着，空壳不是历史陈述。
   writeFileSync(join(histDir, 'v9.9.9.md'),
-    '# v9.9.9\n\n这一版删掉了 `scripts/gone-forever.mjs`，改用别的做法。\n', 'utf8')
+    '# v9.9.9\n\n## 这一版更新了什么、修复了什么\n\n这一版删掉了 `scripts/gone-forever.mjs`，改用别的做法。\n', 'utf8')
   gitIn(clone, 'add', '-A')
 
   const okHist = preflightIn(clone, { only: '引用能否解析' })

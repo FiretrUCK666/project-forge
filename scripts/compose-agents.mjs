@@ -329,6 +329,11 @@ function deriveFacts(target, s = surveyLight(target)) {
     || s.docs?.workflowAutomation?.hasReleaseJob === true
     || s.ecosystem?.kinds?.includes('skill')
     || s.ecosystem?.kinds?.includes('obsidian')
+  // 「发版规范在不在」是独立一格事实：有发布（标签、发布 job、可发布清单、skill 与插件这类
+  // 天然有版本节点的形态）不等于写下了「说明放哪、分几节」。前者决定有没有发版这件事，
+  // 后者决定发版时**有没有权威出处可照**——指着一份不存在的文件写「以它为准」，读者照做
+  // 时才发现没得照。
+  const hasReleaseSpec = s.docs?.releaseSpec !== undefined
 
   const conditions = {
     'has-git': hasGit,
@@ -369,6 +374,8 @@ function deriveFacts(target, s = surveyLight(target)) {
     'no-registry-publish': !hasRegistryPublish,
     'has-release': hasRelease,
     'no-release': !hasRelease,
+    'has-release-spec': hasReleaseSpec,
+    'no-release-spec': !hasReleaseSpec,
   }
 
   // 项目名优先取**项目自己声明的**名字（各生态清单里的 name），没有才退回目录名。

@@ -10,8 +10,11 @@
  *   - 它们对不上时**不会有任何东西出声**（检查本身就是拿它去比的）；
  *   - 所以只能有一份来源，而这一份不该埋在某个具体工具里。
  *
- * 本模块零副作用、无本地依赖，谁都可以依赖它。
+ * 本模块零副作用；唯一的内部依赖是同样纯函数的 `markdown.mjs`（标题与围栏的扫描只此一份，
+ * 发布说明的结构检查要用到它——再审一遍围栏状态机就是第二份判据）。
  */
+
+import { scanLines } from './markdown.mjs'
 
 /**
  * 内核标记：注入方靠它定位要替换的区间。
@@ -91,6 +94,80 @@ export const INSTRUCTION_BUDGET = 65536
  */
 export function needsSummary(text) {
   return String(text ?? '').includes(SUMMARY_MARKER)
+}
+
+/**
+ * 发布说明的结构检查：**只查任何项目的说明都必须成立的那几条**。
+ *
+ * 为什么不查「分了哪几节」：那是项目自己的决定（不同项目的读者关心的事不同，库的读者
+ * 关心接口、插件的读者关心宿主兼容）。把节名或节数写进检查，等于把一家项目的规范按到
+ * 所有项目头上，而下一个项目只会绕开它。
+ *
+ * 能查的是**与项目无关的那些**：有没有标题、标题是不是这一版、有没有节、节里有没有字、
+ * 有没有两节同名、是不是还留着骨架。这几条一旦不成立，说明在任何项目里都算不上说明——
+ * 它们是「空壳」与「成品」的分界，而发布页的读者是使用者。
+ *
+ * 返回问题清单（人话，逐条可修）；空数组表示没发现问题。**未覆盖之处是「没查」，不是
+ * 「查过没问题」**——写得是否对读者有用，只有人和审查能判。
+ */
+export function lintReleaseNotes(text, tag) {
+  const body = String(text ?? '')
+  const problems = []
+  if (body.trim() === '') return ['正文是空的']
+
+  if (needsSummary(body)) {
+    problems.push(`还留着骨架标记（${SUMMARY_MARKER}）：这一段还没写`)
+  }
+
+  const lines = scanLines(body)
+  const marks = []
+  lines.forEach((info, i) => {
+    if (!info.inFence && info.heading !== null) marks.push({ info, i })
+  })
+
+  const h1 = marks.filter((m) => m.info.heading.level === 1)
+  if (h1.length === 0) {
+    problems.push('缺一级标题：第一行应当是这一版的标签名')
+  } else if (h1.length > 1) {
+    problems.push(`一级标题有 ${h1.length} 个：一份说明只有一个标题`)
+  } else if (typeof tag === 'string' && tag.trim() !== '') {
+    const got = h1[0].info.heading.title.trim()
+    // `v1.2.3` 与 `1.2.3` 是同一个号：标签带不带 `v` 由项目自己的命名规则决定，
+    // 而标题里省掉前缀是常见写法——按去前缀后的字面比，避免把写法差异报成错号。
+    const strip = (s) => s.trim().replace(/^v/i, '')
+    if (strip(got) !== strip(tag)) {
+      problems.push(`一级标题写的是「${got}」，与标签「${tag}」不是同一个号`)
+    }
+  }
+
+  const h2 = marks.filter((m) => m.info.heading.level === 2)
+  if (h2.length === 0) {
+    problems.push('没有任何二级节：至少要有「这一版更新了什么、修复了什么」这一节')
+  }
+
+  // 空节：标题之后到下一个「同级或更高级」标题之前，一个非空行都没有。
+  // 按层级找边界而不是按「下一个标题」找，是因为节里可能有它自己的小节。
+  for (const { info, i } of h2) {
+    const level = info.heading.level
+    let hasContent = false
+    for (let k = i + 1; k < lines.length; k += 1) {
+      const next = lines[k]
+      if (!next.inFence && next.heading !== null && next.heading.level <= level) break
+      if (next.line.trim() !== '') { hasContent = true; break }
+    }
+    if (!hasContent) {
+      problems.push(`「${info.heading.title}」这一节没有内容：没有内容就整节省略，不要留一个空标题`)
+    }
+  }
+
+  const seen = new Set()
+  for (const { info } of h2) {
+    const title = info.heading.title.trim()
+    if (seen.has(title)) problems.push(`「${title}」出现了两次：同一节只能有一次`)
+    seen.add(title)
+  }
+
+  return problems
 }
 /**
  * 「这一行是本 skill 的受管标记吗」的判据：**基于上面那些常量拼出来，不另抄字面量**。

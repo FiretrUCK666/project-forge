@@ -277,7 +277,7 @@ These never enter the package. To work on this skill, start with
 | `AGENTS.md` | This repository's own contract: mechanisms, invariants, build and verification, hard rules |
 | `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, the gate before committing |
 | `RELEASING.md` | The release spec: where the notes live, which sections they use, in what order to publish, how to recover |
-| `docs/` | Release notes (`release-notes/<tag>.md`); work items go in `work/` when a task spans sessions (none yet), kept in the repo |
+| `docs/` | Release notes (`release-notes/<tag>.md`) and work records (`work/`, where work spanning sessions is written down), kept in the repo |
 | `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
 | `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
 | `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |

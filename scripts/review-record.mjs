@@ -97,25 +97,63 @@ function isMainModule(metaUrl, argv1) {
  * 读不到这一节就返回空数组——调用方据此说「没声明，这一趟什么也没拦」。
  */
 export function readHighRiskPaths(agentsText) {
+  const { paths } = readHighRiskTable(agentsText)
+  return paths
+}
+
+/**
+ * 读那张表，同时把「读出来什么、跳过了什么」一起给出来。
+ *
+ * 三种最常见的手写形状都要认：
+ *   - 目录不带尾斜杠（`src/rules`）→ 补成前缀形式。人写目录时未必记得带斜杠，
+ *     而漏一个斜杠的后果是这条判据对整棵树失效，症状完全不可见。
+ *   - 格子里带说明（`src/rules/ 下的判定`）→ 取第一个 token。反引号包着的优先取里面的。
+ *   - 一行写两个（`a/`、`b/`）→ 全都收。
+ *
+ * `skipped` 收的是「看起来像表行、但一个路径都没解析出来」的那些行。
+ * 调用方要把它们报出来：**认不出来不等于没有**，静默跳过就是这一整个 bug 的形状。
+ */
+export function readHighRiskTable(agentsText) {
   const text = String(agentsText ?? '')
   const head = /^##+[ \t]*高风险路径[ \t]*$/m.exec(text)
-  if (head === null) return []
+  if (head === null) return { paths: [], skipped: [], found: false }
   const after = text.slice(head.index + head[0].length)
   const nextHead = /^##+[ \t]/m.exec(after)
   const block = nextHead === null ? after : after.slice(0, nextHead.index)
   const out = []
+  const skipped = []
   for (const line of block.split(/\r?\n/)) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('|')) continue
     if (/^\|[\s:|-]+\|$/.test(trimmed) && trimmed.includes('-')) continue
-    const first = trimmed.split('|')[1]?.trim() ?? ''
+    const cells = trimmed.split('|').slice(1, -1).map((c) => c.trim())
+    const first = cells[0] ?? ''
     if (first === '' || /^路径$/.test(first)) continue
-    // 反引号包着就用里面的；没有反引号就整格当路径（requirements = 不强求写法）。
-    const m = /^\`([^\`]+)\`$/.exec(first)
-    const p = (m === null ? first : m[1]).replace(/\\/g, '/').replace(/^\.\//, '').trim()
-    if (p !== '' && !p.startsWith('<')) out.push(p)
+
+    const candidates = []
+    // 反引号包着的路径优先——那是人明确标出来的「这一格是路径」。
+    for (const m of first.matchAll(/`([^`]+)`/g)) candidates.push(m[1])
+    if (candidates.length === 0) {
+      // 没有反引号：取第一个以空白/逗号/顿号切开后像路径的 token。
+      for (const tok of first.split(/[\s,，、]+/)) {
+        if (tok === '' || tok.startsWith('<')) continue
+        if (/^[/\w.@-]/.test(tok)) { candidates.push(tok); break }
+      }
+    }
+
+    let took = 0
+    for (const raw of candidates) {
+      let v = raw.replace(/\\/g, '/').replace(/^\.\//, '').trim()
+      if (v === '' || v.startsWith('<')) continue
+      // 没带斜杠、末段也没有扩展名 → 当目录，补成前缀形式。
+      // 判据：末段里没有点，就是目录名（`src/rules` 是目录，`AGENTS.md` 是文件）。
+      if (!v.endsWith('/') && !/\.[^/]+$/.test(v)) v = `${v}/`
+      out.push(v)
+      took += 1
+    }
+    if (took === 0) skipped.push(trimmed)
   }
-  return [...new Set(out)]
+  return { paths: [...new Set(out)], skipped, found: true }
 }
 
 /**
@@ -393,10 +431,27 @@ function main(argv) {
   const agentsPath = join(root, 'AGENTS.md')
   let prefixes = []
   let contractMissing = false
+  let skippedRows = []
   if (existsSync(agentsPath)) {
-    prefixes = readHighRiskPaths(readFileSync(agentsPath, 'utf8'))
+    const table = readHighRiskTable(readFileSync(agentsPath, 'utf8'))
+    prefixes = table.paths
+    skippedRows = table.skipped
   } else {
     contractMissing = true
+  }
+
+  // **认不出来的行要报出来**：它们是「看起来像表、其实一个路径都没解析出来」的那些。
+  // 静默跳过正是这个 bug 原本的形状——填表的人从任何一处都得不到提示，唯一的症状是
+  // 门禁永久不触发，而那件事不会报错。
+  if (skippedRows.length > 0) {
+    process.stderr.write([
+      `高风险路径表里有 ${skippedRows.length} 行没解析出路径：`,
+      ...skippedRows.slice(0, 6).map((r) => `  ${r}`),
+      '',
+      '  这几行会被当成「没有声明」。路径要能看出来是路径：目录写 `src/rules/`（或 `src/rules`，',
+      '  会补成前缀形式），单个文件写 `AGENTS.md`；格子里可以带说明，但路径本身要能被认出来。',
+    ].join('\n') + '\n')
+    return 1
   }
   if (prefixes.length === 0) {
     // **不静默放行**：说清这一趟什么也没拦。绿着但一个字都没查，是这套机制里最坏的失效。

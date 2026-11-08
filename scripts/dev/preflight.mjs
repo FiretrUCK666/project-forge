@@ -46,6 +46,9 @@ import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
 import { issueTemplateGaps } from '../review.mjs'
 import { scanLines } from '../lib/markdown.mjs'
+// 高风险表的解析**只有一处实现**：脚本要读它判门禁，自检要读它验「那张表还能不能解析」。
+// 两处各写一份，迟早会给出两个答案——而其中一个是「表看起来在、其实读不出来」。
+import { readHighRiskTable } from '../review-record.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -2284,57 +2287,86 @@ function checkReleaseNotes() {
  * 原句一改（换个说法）就误报，而那会让这条检查被当成噪音关掉。
  */
 function checkReviewRuleSources() {
-  const sources = [
-    ['references/collaboration.md', join(SKILL_ROOT, 'references', 'collaboration.md')],
-    ['AGENTS.md', join(SKILL_ROOT, 'AGENTS.md')],
-    ['templates/pull-request-template.md', join(SKILL_ROOT, 'templates', 'pull-request-template.md')],
-    ['.github/pull_request_template.md', join(SKILL_ROOT, '.github', 'pull_request_template.md')],
-  ]
-  const read = (p) => (existsSync(p) ? readText(p) : undefined)
+  const read = (rel) => {
+    const p = join(SKILL_ROOT, rel)
+    return existsSync(p) ? readText(p) : undefined
+  }
   const missing = []
-
-  // 判据一节：必须同时说清「审不审」与「谁能合」，而不是只有后者。
-  const collab = read(sources[0][1])
-  if (collab === undefined) {
-    missing.push('references/collaboration.md 不存在')
-  } else {
-    if (!/必须独立审查/.test(collab)) missing.push('collaboration.md 没有「必须独立审查」这条判据')
-    if (!/谁\*\*必须审|必须审.*谁能合|先判审不审/.test(collab)) {
-      missing.push('collaboration.md 没有把「审不审」与「谁能合」分成两件事')
-    }
+  const need = (rel, test, why) => {
+    const text = read(rel)
+    if (text === undefined) { missing.push(rel + ' 不存在'); return }
+    if (!test(text)) missing.push(rel + '：' + why)
   }
 
-  // 契约一节：本仓库与落盘模板都要有。模板那份是**别的项目**照着用的，缺了这一栏，
-  // 那个项目就永远不会有这条规则。
-  for (const [label, p] of [sources[1], sources[2]]) {
-    const text = read(p)
-    if (text === undefined) { missing.push(`${label} 不存在`); continue }
-    const hasReview = /审查/.test(text)
-    const hasWhoMerge = /谁能合|人合/.test(text)
-    if (!hasReview || !hasWhoMerge) {
-      missing.push(`${label} 里「审查」与「谁能合」没有同时出现`
-        + `（审查=${hasReview} 谁能合=${hasWhoMerge}）`)
-    }
-  }
+  // 一、判据：要有「审不审」那一节，以及「正文是索引、评论是痕迹」那两层。
+  //
+  // 判**结构**而不是关键词。原先判的是 `/必须独立审查/` 这类词，而那个词在这份文件里
+  // 到处都有——把整节删掉照样绿。一条「判据被删掉也看不出来」的检查，比没有更坏：
+  // 它打印的是「四处都在」。
+  need('references/collaboration.md',
+    (x) => /^### 什么时候必须审/m.test(x) && /必须独立审查/.test(x),
+    '缺「### 什么时候必须审」这一节（或节里没有「必须独立审查」）—— 审不审就没有判据了')
+  need('references/collaboration.md',
+    (x) => /索引（提案正文）/.test(x) && /痕迹（平台评论）/.test(x),
+    '没有把「正文是索引、评论是痕迹」分成两层 —— 评论一条不发也能全绿')
+  need('references/collaboration.md',
+    (x) => /^## 五、能不能合/m.test(x) && /\|\s*必须审\s*\|/.test(x),
+    '「## 五、能不能合」那张表没有「必须审」一列 —— 审不审与谁能合又混回一句了')
 
-  // 提案模板那一栏：没有它，审过与否就只能靠嘴说。
-  const prTpl = read(sources[3][1])
-  if (prTpl === undefined) {
-    missing.push('.github/pull_request_template.md 不存在')
-  } else if (!/^##[ \t]*审查记录/m.test(prTpl)) {
-    missing.push('.github/pull_request_template.md 缺「## 审查记录」一节——'
-      + '审过与否就没有可以填的地方，「我审过了」于是无从核对')
+  // 二、本仓库契约：`## 高风险路径` 那一节要有表，而且要能解析出路径。
+  need('AGENTS.md',
+    (x) => {
+      const table = readHighRiskTable(x)
+      return table.found === true && table.paths.length > 0 && table.skipped.length === 0
+    },
+    '「## 高风险路径」一节缺失、表是空的、或有解析不出来的行 —— 那条门禁会静默失效')
+
+  // 三、落盘模板：那一节还要**活过刷新**。
+  //
+  // 这一条是这次审查发现的最重的问题：没有 `pf:author` 时，重跑一次 `compose-agents`
+  // 就把整节冲回占位模板，填好的表一个路径都不剩，而 preflight 与 compose --check 全绿。
+  // 判据落在「这一节带着 author 标记」上——那正是「刷新时保留既有内容」的开关。
+  need('templates/agents-project.md',
+    (x) => {
+      const head = /^## 高风险路径[ \t]*$/m.exec(x)
+      if (head === null) return false
+      const after = x.slice(head.index + head[0].length)
+      const next = /^##[ \t]/m.exec(after)
+      const block = next === null ? after : after.slice(0, next.index)
+      return /pf:author/.test(block) && /\|\s*路径\s*\|/.test(block)
+    },
+    '「## 高风险路径」一节缺了、没有 pf:author 标记（重跑一次生成就把整节冲掉）、'
+    + '或没有那张表 —— 目标项目会拿到一个空表，而门禁什么都不拦')
+
+  // 四、两份提案模板都要有那一节，**而且表格在注释外面**。
+  //
+  // 表格写在 `<!-- -->` 里时，判据（先去注释再看）永远读到空节：目标项目按模板填也过不了，
+  // 只能删掉说明自己重画一张。实测发生过。
+  for (const rel of ['templates/pull-request-template.md', '.github/pull_request_template.md']) {
+    need(rel,
+      (x) => {
+        const head = /^##[ \t]*审查记录[ \t]*$/m.exec(x)
+        if (head === null) return false
+        const after = x.slice(head.index + head[0].length)
+        const next = /^##[ \t]/m.exec(after)
+        const block = next === null ? after : after.slice(0, next.index)
+        const visible = block.replace(/<!--[\s\S]*?-->/g, '')
+        return /\|\s*轮次\s*\|/.test(visible) && /谁审的/.test(visible)
+      },
+      '缺「## 审查记录」这一节，或者表格写在了 HTML 注释里（判据会先去掉注释，'
+      + '那样永远读到空节，照着模板填也过不了）')
   }
 
   if (missing.length > 0) {
     for (const m of missing) {
-      fail(`${m} —— 「必须独立审查」这条规则要在三处同时成立：判据（references）、`
-        + '本仓库契约（AGENTS.md 与落盘模板）、以及能让人填的提案栏目。缺一处，'
-        + '规则就还在、但照着做的人找不到它。')
+      fail(m + ' —— 「必须独立审查」这条规则要在四处同时成立，而且每一处都要**结构上**能判：'
+        + '判据（references）、本仓库契约（AGENTS.md）、落盘模板（agents-project.md）、'
+        + '两份提案模板。缺一处，规则就还在、但照着做的人找不到它。'
+        + '模板那两处还要求「活过刷新」与「表格在注释外面」—— 那两条都实测出过事。')
     }
     return
   }
-  process.stdout.write('审查规则：判据、契约、模板、提案栏目四处都在且指向同一件事\n')
+  process.stdout.write('审查规则：判据、契约、落盘模板、两份提案模板五处都在，结构上都能判\n')
 }
 
 /**
@@ -2371,6 +2403,30 @@ function checkWorkRecords() {
       fail(`${rel} 表头缺 ${gap.join('、')} —— 这三行回答「现在什么状态、什么时候建的、`
         + '最近一次动手是什么时候」，缺了换会话就接不上。')
       continue
+    }
+
+    // **执行者要写得能让下一个人找到人。**
+    //
+    // 这一格的用处只有一个：「这件事该找谁问」。所以「本次会话」「我」「AI」这类代词
+    // 等于空话——换个人打开这份记录，他不知道那是谁；而这个库会被 fork、会被别人接手。
+    // 别人克隆之后填的应当是他自己的署名，不是原作者的——所以这一格必须是**现场取的**。
+    //
+    // 判据取形状而不是取值：要能看出是一个人/一个账号（邮箱、`@`、或平台账号名），
+    // 不认具体是谁。写死某个人名就等于「换个人就失准」，与契约里那条「操作者取值
+    // 一律现场取」是同一个道理。
+    const who = /^\|\s*执行者\s*\|\s*(.*?)\s*\|\s*$/m.exec(text)
+    if (who !== null) {
+      const value = who[1].replace(/<!--[\s\S]*?-->/g, '').trim()
+      const pronoun = /^(本次会话|本会话|我|AI|ai|助手|assistant|Claude|ChatGPT|待填|待定|TBD|无|—|-)$/.test(value)
+      const hasIdentity = /@|[\w.-]+@[\w.-]+|git config user\.(name|email)/.test(value)
+      if (value !== '' && (pronoun || !hasIdentity)) {
+        bad += 1
+        fail(`${rel} 的「执行者」是「${value}」—— 这一格的用处是「这件事该找谁问」，`
+          + '代词在这件事上是零信息，换个人打开就找不到人。写**现场取的身份**：提交署名'
+          + '（`git config user.name` 与 `user.email`）加平台账号；取不到就写「未署名」并'
+          + '说明原因，不要编一个。别人 fork 之后填的是他自己的署名，这也是它必须现场取、'
+          + '不能写死的原因。')
+      }
     }
     const dates = []
     for (const field of ['建单日期', '最近更新']) {

@@ -2217,16 +2217,9 @@ function checkWorkRecords() {
     const points = /^## 断点[ \t]*$/m.exec(text)
     // 截到**下一个二级标题**为止：只删标题那一行的话，后面「完成后的记录」之类的正文会
     // 被当成断点的内容，「断点清空」照样判过——而那正是要拦的样子。
-    const after = points === null ? '' : text.slice(points.index)
-    const body = after
-      .replace(/^## 断点[^\n]*\n/, '')
-      .split('\n')
-      .slice(0, (() => {
-        const rest = after.replace(/^## 断点[^\n]*\n/, '').split('\n')
-        const next = rest.findIndex((l) => /^## /.test(l))
-        return next < 0 ? rest.length : next
-      })())
-      .join('\n')
+    const rest = points === null ? [] : text.slice(points.index).replace(/^## 断点[^\n]*\n/, '').split('\n')
+    const nextHeading = rest.findIndex((line) => /^## /.test(line))
+    const body = (nextHeading < 0 ? rest : rest.slice(0, nextHeading)).join('\n')
     const visible = (() => {
       const state = { inComment: false }
       return body.split('\n').map((line) => stripHtmlComments(line, state)).join('\n').trim()

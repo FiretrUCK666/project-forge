@@ -456,6 +456,14 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
   check(badHead.status === 1 && /缺 最近更新|表头缺/.test(badHead.out),
     '表头缺一行 → 报出来', badHead.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
 
+  // 反例三：断点被清空、但后面那节有正文。截取范围若只删标题行，这条会误判「非空」。
+  writeFileSync(goodName,
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n## 完成后的记录\n\n已经合并，无遗留。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+  const emptyBreak = preflightIn(clone, { only: '本仓库工作记录' })
+  check(emptyBreak.status === 1 && /断点/.test(emptyBreak.out),
+    '断点被清空、后面那节有内容 → 仍报出来', emptyBreak.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+
   // 正例：补齐之后放行（同时证明上一条不是「永远失败」）。
   writeFileSync(goodName,
     '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')

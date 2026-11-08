@@ -190,7 +190,7 @@ export function lintReleaseNotes(text, tag) {
  * 为什么需要：空节判据若只看「这一行非空」，一句 `<!-- 待补 -->` 就算有内容——而那正是
  * 要拦的空壳。注释可以跨行，所以状态要带出去（`state.inComment`）。
  */
-function stripHtmlComments(line, state) {
+export function stripHtmlComments(line, state) {
   let out = ''
   let i = 0
   while (i < line.length) {

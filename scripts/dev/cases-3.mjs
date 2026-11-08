@@ -1575,6 +1575,17 @@ group('[56] 发版规范可配置、审查怎么派、工作记录怎么放（�
   check(bad.noH2.some((p) => /没有任何二级节/.test(p)), '一个节都没有：报出来')
   check(bad.emptyH2.some((p) => /没有内容/.test(p)), '空节：报出来')
   check(bad.dupH2.some((p) => /出现了两次/.test(p)), '同名节：报出来')
+  // 注释与围栏的四种组合：这是「整份空壳」与「正文里合法地写了注释」之间的分界。
+  const commented = lint('<!--\n# v1.0.0\n\n## 变了什么\n\n有内容\n-->\n')
+  const inlineComment = lint('# v1.0.0\n\n## 变了什么\n\n<!-- 说明 -->\n真的正文\n')
+  const fencedComment = lint('# v1.0.0\n\n## 变了什么\n\n```md\n<!-- 示例 -->\n```\n')
+  const multiline = lint('# v1.0.0\n\n## 变了什么\n\n<!--\n待补\n-->\n')
+  check(commented.some((p) => /缺一级标题/.test(p)), '整份被注释包住 → 当场报出来（那是空壳）')
+  check(inlineComment.length === 0, '注释旁边有真内容 → 放行')
+  check(fencedComment.length === 0, '围栏里的注释算内容（那是示例，不是注释）')
+  check(multiline.some((p) => /没有内容/.test(p)), '跨行注释包住的空节 → 报出来')
+  report(commented.length > 0 && inlineComment.length === 0 && fencedComment.length === 0
+    && multiline.length > 0, '注释与围栏：四种组合都分得清')
   check(bad.marker.some((p) => /骨架标记/.test(p)), '还留着骨架标记：报出来')
   report(good.length === 0 && bare.length === 0 && Object.values(bad).every((v) => v.length > 0),
     '结构检查：通用项正反都分得清')

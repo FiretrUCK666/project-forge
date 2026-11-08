@@ -2388,6 +2388,20 @@ function detectGit(root, options = {}) {
       isRepoRoot: top !== undefined && top !== '' && samePath(top, root),
       workTreeRoot: top,
       remote: run('git', ['remote', 'get-url', 'origin'], root),
+      // 远端**名字与地址**也要读：`contributor-fork` 的第二条证据是「存在一个与 origin
+      // 不同的 upstream」，只看 origin 一个地址永远判不出来。轻量模式漏了它，生成契约时
+      // 会把 fork 当维护者渲染（“不打标签、不发布”与“打标签并推送”同时出现），而同一目录
+      // 跑完整勘查（survey）又判成 fork——同一工具两份输出互相打脸。
+      // 一次 `git remote -v` 换到全部名字，比按名字逐个问少起 N 个子进程。
+      remoteUrls: (() => {
+        const listing = run('git', ['remote', '-v'], root) ?? ''
+        const map = {}
+        for (const line of listing.split('\n')) {
+          const m = /^(\S+)\s+(\S+)\s+\((?:fetch|push)\)\s*$/.exec(line.trim())
+          if (m !== null && map[m[1]] === undefined) map[m[1]] = m[2]
+        }
+        return map
+      })(),
       light: true,
       lightSkip: '轻量勘察没有读分支、标签、署名、提交数、受控清单与忽略规则，'
         + '要这些请用完整模式再跑一次',

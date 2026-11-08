@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
@@ -2170,6 +2170,69 @@ function checkReleaseNotes() {
 }
 
 /**
+ * 本仓库的工作记录：**结构与命名是机器能判的那一半**。
+ *
+ * 状态、决策、断点写得对不对，机器判不了（也不该判——那是意图）；能判的是「这份记录有没有
+ * 按自己写下的规范落盘」：文件名带建单日期、表头三行齐全且日期可解析、断点不是空的。
+ * 这一条挡的是最常见的退化——记录还在，但停在上上轮，或者根本没按格式写。
+ *
+ * 判据来源是 `references/collaboration.md` 第二节与 `templates/work-item.md`；**两边谁改了，
+ * 这里也要跟着改**，否则门禁会拿旧规范去判新写法。
+ */
+function checkWorkRecords() {
+  const dir = join(SKILL_ROOT, 'docs', 'work')
+  if (!existsSync(dir)) return
+  const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort()
+  let bad = 0
+  for (const name of files) {
+    const rel = `docs/work/${name}`
+    const text = readText(join(dir, name)).replace(/^\uFEFF/, '')
+    if (!/^\d{4}-\d{2}-\d{2}-.+\.md$/.test(name)) {
+      bad += 1
+      fail(`${rel} 文件名不是 \`YYYY-MM-DD-主题.md\` —— 日期在最前、写建单那天，`
+        + '不带编号与状态。已经在用的老文件不强制改名；新建的照这条走。')
+      continue
+    }
+    const fields = ['状态', '建单日期', '最近更新']
+    const gap = fields.filter((f) => !new RegExp(`^\\|\\s*${f}\\s*\\|`, 'm').test(text))
+    if (gap.length > 0) {
+      bad += 1
+      fail(`${rel} 表头缺 ${gap.join('、')} —— 这三行回答「现在什么状态、什么时候建的、`
+        + '最近一次动手是什么时候」，缺了换会话就接不上。')
+      continue
+    }
+    const dates = []
+    for (const field of ['建单日期', '最近更新']) {
+      const m = new RegExp(`^\\|\\s*${field}\\s*\\|\\s*(\\d{4}-\\d{2}-\\d{2})\\s*\\|`, 'm').exec(text)
+      if (m === null) {
+        bad += 1
+        fail(`${rel} 的「${field}」不是 YYYY-MM-DD 形状 —— 日期要能排序、能算新旧。`)
+        continue
+      }
+      dates.push(m[1])
+    }
+    const points = /^## 断点[ \t]*$/m.exec(text)
+    const after = points === null ? '' : text.slice(points.index)
+    const body = after.replace(/^## 断点[^\n]*\n/, '').replace(/^## .*$/m, '')
+    const visible = (() => {
+      const state = { inComment: false }
+      return body.split('\n').map((line) => stripHtmlComments(line, state)).join('\n').trim()
+    })()
+    if (points === null || visible === '') {
+      bad += 1
+      fail(`${rel} 的「断点」是空的 —— 卡在哪、下一步从哪接，写一句都行；`
+        + '留空会让人以为这里没做完。')
+    }
+  }
+  if (bad === 0) {
+    process.stdout.write(`工作记录：${files.length} 份文件名与表头都合规、断点非空\n`)
+  }
+}
+
+/**
  * 章节文件的体量软预算：**只提示，不失败**。 *
  * 为什么不失败：「不同不等于超标」。一份长文件可能每一段都是判据，删掉任何一段都会让
  * 某个没预料到的情况失去依据；而「读起来累」是相对的，没有一个能一刀切的数字。红的
@@ -2694,6 +2757,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)
   step('本仓库发布说明', checkReleaseNotes)
+  step('本仓库工作记录', checkWorkRecords)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
   step('章节体量', checkChapterSize)

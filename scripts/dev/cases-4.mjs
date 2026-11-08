@@ -432,6 +432,39 @@ group('[58] 本仓库发布说明自检：空壳会被拦住，好说明放行')
   check(good.status === 0, '补上内容之后放行', good.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
   report(bad.status === 1 && good.status === 0, '发布说明自检：空壳拦得住、成品放得过')
 }
+group('[59] 本仓库工作记录：命名、表头、断点各有一条结构判据')
+{
+  const clone = skillClone('work-record-check')
+  const dir = join(clone, 'docs', 'work')
+  mkdirSync(dir, { recursive: true })
+
+  // 反例一：文件名没带日期（最常见的那种「顺手起个名」）。
+  writeFileSync(join(dir, '随手的名字.md'),
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+  const badName = preflightIn(clone, { only: '本仓库工作记录' })
+  check(badName.status === 1 && /YYYY-MM-DD/.test(badName.out),
+    '文件名没带日期 → 报出来', badName.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+
+  // 反例二：名字对了、表头缺「最近更新」。
+  const goodName = join(dir, '2026-11-08-一件事.md')
+  writeFileSync(goodName,
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+  rmSync(join(dir, '随手的名字.md'))
+  gitIn(clone, 'add', '-A')
+  const badHead = preflightIn(clone, { only: '本仓库工作记录' })
+  check(badHead.status === 1 && /缺 最近更新|表头缺/.test(badHead.out),
+    '表头缺一行 → 报出来', badHead.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+
+  // 正例：补齐之后放行（同时证明上一条不是「永远失败」）。
+  writeFileSync(goodName,
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+  const ok = preflightIn(clone, { only: '本仓库工作记录' })
+  check(ok.status === 0, '补齐之后放行', ok.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+  report(badName.status === 1 && badHead.status === 1 && ok.status === 0,
+    '工作记录结构：命名、表头、正例三面都分得清')
+}
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

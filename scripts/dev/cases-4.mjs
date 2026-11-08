@@ -470,8 +470,8 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
   gitIn(clone, 'add', '-A')
   const ok = preflightIn(clone, { only: '本仓库工作记录' })
   check(ok.status === 0, '补齐之后放行', ok.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
-  report(badName.status === 1 && badHead.status === 1 && ok.status === 0,
-    '工作记录结构：命名、表头、正例三面都分得清')
+  report(badName.status === 1 && badHead.status === 1 && emptyBreak.status === 1 && ok.status === 0,
+    '工作记录结构：命名、表头、断点、正例四面都分得清')
 }
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。

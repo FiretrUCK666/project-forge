@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 700
+export const BEHAVIOR_MIN_PASSED = 710
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2373,6 +2373,35 @@ function checkReviewRuleSources() {
 }
 
 /**
+ * 工作记录里「执行者」这一格写得能不能找到人。
+ *
+ * 这一格的用处只有一个：**这件事该找谁问**。所以：
+ *   - 代词（「本次会话」「我」「AI」）不行 —— 换个人打开，他不知道那是谁；
+ *   - 写死的固定人名也不行 —— 同一个人换机器、换账号、fork 出去就变了，而记录留在
+ *     版本库里，改动时没人会回来改这一格；
+ *   - 能认出是一个人/一个账号（署名、邮箱、平台账号）才算。
+ *
+ * 返回 `{ verdict, value }`，verdict 取 absent（没这一格或空着）/ pronoun /
+ * no-identity / ok。**absent 不在这里报** —— 那是表头缺字段那条判据的事，两件事别混。
+ */
+export function executorVerdict(text) {
+  const m = /^\|\s*执行者\s*\|\s*(.*?)\s*\|\s*$/m.exec(String(text ?? ''))
+  if (m === null) return { verdict: 'absent', value: '' }
+  const value = m[1].replace(/<!--[\s\S]*?-->/g, '').trim()
+  if (value === '') return { verdict: 'absent', value: '' }
+  if (/^(本次会话|本会话|我|AI|ai|助手|assistant|待填|待定|TBD|无|—|-)$/.test(value)) {
+    return { verdict: 'pronoun', value }
+  }
+  if (!/@/.test(value)) return { verdict: 'no-identity', value }
+  return { verdict: 'ok', value }
+}
+
+/** 这一格不合格时要说的话（两处共用，避免措辞日后漂移）。 */
+export const EXECUTOR_ADVICE = '这一格的用处是「这件事该找谁问」，代词在这件事上是零信息，'
+  + '换个人打开就找不到人。写**现场取的身份**：提交署名（git config user.name 与 '
+  + 'user.email）加平台账号；取不到就写「未署名」并说明原因，不要编一个。'
+  + '别人 fork 之后填的是他自己的署名，这也是它必须现场取、不能写死的原因。'
+/**
  * 本仓库的工作记录：**结构与命名是机器能判的那一半**。
  *
  * 状态、决策、断点写得对不对，机器判不了（也不该判——那是意图）；能判的是「这份记录有没有
@@ -2417,19 +2446,10 @@ function checkWorkRecords() {
     // 判据取形状而不是取值：要能看出是一个人/一个账号（邮箱、`@`、或平台账号名），
     // 不认具体是谁。写死某个人名就等于「换个人就失准」，与契约里那条「操作者取值
     // 一律现场取」是同一个道理。
-    const who = /^\|\s*执行者\s*\|\s*(.*?)\s*\|\s*$/m.exec(text)
-    if (who !== null) {
-      const value = who[1].replace(/<!--[\s\S]*?-->/g, '').trim()
-      const pronoun = /^(本次会话|本会话|我|AI|ai|助手|assistant|Claude|ChatGPT|待填|待定|TBD|无|—|-)$/.test(value)
-      const hasIdentity = /@|[\w.-]+@[\w.-]+|git config user\.(name|email)/.test(value)
-      if (value !== '' && (pronoun || !hasIdentity)) {
-        bad += 1
-        fail(`${rel} 的「执行者」是「${value}」—— 这一格的用处是「这件事该找谁问」，`
-          + '代词在这件事上是零信息，换个人打开就找不到人。写**现场取的身份**：提交署名'
-          + '（`git config user.name` 与 `user.email`）加平台账号；取不到就写「未署名」并'
-          + '说明原因，不要编一个。别人 fork 之后填的是他自己的署名，这也是它必须现场取、'
-          + '不能写死的原因。')
-      }
+    const who = executorVerdict(text)
+    if (who.verdict !== 'absent' && who.verdict !== 'ok') {
+      bad += 1
+      fail(`${rel} 的「执行者」是「${who.value}」—— ` + EXECUTOR_ADVICE)
     }
     const dates = []
     for (const field of ['建单日期', '最近更新']) {

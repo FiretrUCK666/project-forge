@@ -23,6 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
+import { executorVerdict } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -692,6 +693,46 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   const r6 = cli(['--changed', '-', '--body', bodyPath], '')
   check(r6.status === 0, '不带 --expect-changes 时空清单放行（本地用法不该被绑死）', `exit=${r6.status}`)
   report(r6.status === 0, '脚本：本地空清单放行')
+}
+
+group('[41] 工作记录的「执行者」：写身份，不写代词')
+{
+  const rec = (who) => `# 一件事
+
+| 项 | 值 |
+| --- | --- |
+| 状态 | 进行中 |
+| 建单日期 | 2026-11-09 |
+| 最近更新 | 2026-11-09 |
+| 执行者 | ${who} |
+
+## 断点
+
+等审查。
+`
+
+  // 代词：这一格的用处是「该找谁问」，代词指不到人。
+  check(executorVerdict(rec('本次会话')).verdict === 'pronoun',
+    '写「本次会话」→ 判为代词（换个人打开就找不到人）')
+  check(executorVerdict(rec('我')).verdict === 'pronoun', '写「我」→ 同样判为代词')
+  check(executorVerdict(rec('AI')).verdict === 'pronoun', '写「AI」→ 同样判为代词')
+
+  // 写不出身份（没有 @）：既不是代词，也不是人 —— 仍然不合格。
+  check(executorVerdict(rec('小明')).verdict === 'no-identity',
+    '写了名字但没有可联系的账号 → 判为「写不出身份」（这一格的用处是找人）')
+  check(executorVerdict(rec('未署名')).verdict === 'no-identity',
+    '写「未署名」→ 也不合格（要么补身份，要么说清为什么取不到）')
+
+  // 有身份：署名 + 邮箱。
+  check(executorVerdict(rec('FiretrUCK666 <326200973+FiretrUCK666@users.noreply.github.com>')).verdict === 'ok',
+    '写得出署名与邮箱 → 放行')
+  check(executorVerdict(rec('@someone')).verdict === 'ok', '只写平台账号也算（有 @ 就能找到人）')
+
+  // 反例：整格缺失时**不在这里报**——那是表头缺字段那条判据的事，两件事别混。
+  check(executorVerdict('# 只有正文\n').verdict === 'absent', '没有这一格 → absent，不重复报')
+  check(executorVerdict(rec('<!-- 待填 -->')).verdict === 'absent', '只有注释 → absent（等于没填）')
+
+  report(true, '执行者：代词与写不出身份都拦，有身份就放行')
 }
 
 // ---- 分片收尾 ----

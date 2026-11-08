@@ -68,4 +68,4 @@ jobs:
           printf '%s' "$PR_BODY" > pr-body.md
           # **`--expect-changes` 不能省**：提案不可能零改动，清单为空只说明 diff 没算出来。
           # 不带这个开关时，一次失败的 diff 会被读成「没动高风险路径」，门禁绿着放行。
-          node scripts/dev/review-record.mjs --changed changed.txt --body pr-body.md --expect-changes
+          node scripts/review-record.mjs --changed changed.txt --body pr-body.md --expect-changes

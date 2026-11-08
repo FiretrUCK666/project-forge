@@ -547,6 +547,19 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   check(r4.status === 2 && /都要给/.test(r4.stderr ?? ''), '脚本：参数不全 → 退出码 2（用法错，不是判定错）',
     `exit=${r4.status}`)
   report(r4.status === 2, '脚本：用法错分得开')
+
+  // 空清单 + --expect-changes：**空不能被读成「没动高风险路径」**。
+  // 浅克隆里没有合并基点时 diff 会返回空，而那会被读成通过——门禁绿着放行，什么都没拦。
+  const r5 = cli(['--changed', '-', '--body', bodyPath, '--expect-changes'], '')
+  check(r5.status === 1 && /清单是空的/.test(r5.stderr ?? ''),
+    '清单为空 + --expect-changes → 退出码 1（不许把「没算出来」读成「没动高风险路径」）',
+    `exit=${r5.status} ${(r5.stderr ?? '').slice(0, 120)}`)
+  report(r5.status === 1, '脚本：空清单不当通过')
+
+  // 反例：不带那个开关时，空清单是允许的（本地「这轮只改了别处」是正当用法）。
+  const r6 = cli(['--changed', '-', '--body', bodyPath], '')
+  check(r6.status === 0, '不带 --expect-changes 时空清单放行（本地用法不该被绑死）', `exit=${r6.status}`)
+  report(r6.status === 0, '脚本：本地空清单放行')
 }
 
 // ---- 分片收尾 ----

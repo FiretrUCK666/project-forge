@@ -115,24 +115,30 @@ export function reviewRecordState(body) {
 
 function usage() {
   return [
-    '用法：node scripts/dev/review-record.mjs --changed <清单文件|-> --body <提案正文>',
+    '用法：node scripts/dev/review-record.mjs --changed <清单文件|-> --body <提案正文> [--expect-changes]',
     '',
     '  改动落在高风险路径（判定逻辑、模板、工作流、包排除规则）时，提案正文必须有',
     '  「## 审查记录」且真的填过。它拦的是「CI 绿了就合并、压根没派审查」那一种。',
     '',
-    '  --changed  每行一个改动路径的文件；`-` 表示从 stdin 读（`git diff --name-only` 直接接）',
-    '  --body     提案正文（Markdown 文件）',
+    '  --changed         每行一个改动路径的文件；`-` 表示从 stdin 读（`git diff --name-only` 直接接）',
+    '  --body            提案正文（Markdown 文件）',
+    '  --expect-changes  改动清单**空着就是错**。提案上必须给这个开关：一份提案不可能零改动，',
+    '                    清单空只说明那次 diff 没算出来（浅克隆、基线分支名错、fetch 失败），',
+    '                    而「没算出来」会被读成「没动高风险路径」——门禁绿着放行，什么都没拦。',
     '',
-    '  退出码：0 = 通过；1 = 有高风险改动但审查记录是空的；2 = 用法错误。',
+    '  退出码：0 = 通过；1 = 有高风险改动但审查记录是空的（或 --expect-changes 下清单为空）；',
+    '          2 = 用法错误。',
   ].join('\n')
 }
 
 function main(argv) {
   let changedArg
   let bodyArg
+  let expectChanges = false
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--changed') { changedArg = argv[i + 1]; i += 1; continue }
     if (argv[i] === '--body') { bodyArg = argv[i + 1]; i += 1; continue }
+    if (argv[i] === '--expect-changes') { expectChanges = true; continue }
     if (argv[i] === '--help' || argv[i] === '-h') { process.stdout.write(`${usage()}\n`); return 0 }
     process.stderr.write(`错误：不认识的参数「${argv[i]}」。\n\n${usage()}\n`)
     return 2
@@ -155,7 +161,19 @@ function main(argv) {
     process.stderr.write(`错误：改动清单不存在：${changedArg}\n`)
     return 2
   }
-  const high = highRiskChanged(raw.split(/\r?\n/))
+  const all = raw.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+  if (expectChanges && all.length === 0) {
+    process.stderr.write([
+      '改动清单是空的：这份提案不可能零改动，所以是**清单没算出来**，不是「没动高风险路径」。',
+      '',
+      '  常见原因：浅克隆里没有合并基点（检出要 fetch-depth: 0）、基线分支名写错、fetch 失败。',
+      '  这一步不能跳过——空清单会被读成「通过」，而它本该拦下的东西一件都没拦。',
+      '',
+      '  处置：修好取基线的命令再重跑；不要用「清空清单」的办法让它变绿。',
+    ].join('\n') + '\n')
+    return 1
+  }
+  const high = highRiskChanged(all)
   if (high.length === 0) {
     process.stdout.write('审查记录：本次改动不落在高风险路径，不需要审查记录。\n')
     return 0

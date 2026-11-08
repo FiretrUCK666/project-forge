@@ -118,13 +118,14 @@ export function readHighRiskPaths(agentsText) {
 export function readHighRiskTable(agentsText) {
   const text = String(agentsText ?? '')
   const head = /^##+[ \t]*高风险路径[ \t]*$/m.exec(text)
-  if (head === null) return { paths: [], skipped: [], found: false, whyFilled: true }
+  if (head === null) return { paths: [], skipped: [], found: false, whyFilled: true, state: 'noTable', placeholders: 0 }
   const after = text.slice(head.index + head[0].length)
   const nextHead = /^##+[ \t]/m.exec(after)
   const block = nextHead === null ? after : after.slice(0, nextHead.index)
   const out = []
   const skipped = []
   let whyFilled = true
+  let placeholders = 0
   for (const line of block.split(/\r?\n/)) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('|')) continue
@@ -141,7 +142,19 @@ export function readHighRiskTable(agentsText) {
     // 而 `\`a/,b/\`` 是**一整对反引号包着两个路径**——那种写法要按分隔符再拆一次，
     // 否则整格会被当成一个不存在的路径，两处都静默失效。
     for (const m of first.matchAll(/`([^`]+)`/g)) {
-      for (const part of m[1].split(/[\s,，、]+/)) {
+      const inner = m[1].trim()
+      // **整格是占位就整格跳过，不拆。**
+      //
+      // 骨架里的占位带空格：`<改判定 / 改检查逻辑的那几个目录>/`。按空格拆开会得到
+      // 「<改判定」与「/」两段，后者被收成一条真路径——实测解析出
+      // `["改检查逻辑的那几个目录>", "模板目录>", "scripts"]`，
+      // 于是「还没填表」的新项目看起来有 5 条判据，而在保护一堆不存在的路径，
+      // 且 `partialFill` 永远算不出来。
+      if (inner.startsWith('<') || inner.endsWith('>')) {
+        candidates.push(inner)
+        continue
+      }
+      for (const part of inner.split(/[\s,，、]+/)) {
         if (part !== '') candidates.push(part)
       }
     }
@@ -165,12 +178,14 @@ export function readHighRiskTable(agentsText) {
     // 分成两种情况：
     //   一、整张表都没填（全是占位或空行）→ 走「还没填」，退出码 0，明说没查；
     //   二、填了但有几行认不出来 → 退出码 1，报出那几行。
+    // 这一行是不是「还没填」的占位（整格都是尖括号包着的占位符）。
     const placeholderRow = candidates.length > 0 && candidates.every((c) => c.trim().startsWith('<'))
+    if (placeholderRow) placeholders += 1
 
     let took = 0
     for (const raw of candidates) {
       let v = raw.replace(/\\/g, '/').replace(/^\.\//, '').trim()
-      if (v === '' || v.startsWith('<')) continue
+      if (v === '' || v.startsWith('<') || v.endsWith('>')) continue
       const spec = normalizeEntry(v)
       if (spec === undefined) continue
       out.push(spec.path)
@@ -178,7 +193,12 @@ export function readHighRiskTable(agentsText) {
     }
     if (took === 0 && !placeholderRow) skipped.push(trimmed)
   }
-  return { paths: [...new Set(out)], skipped, found: true, whyFilled }
+  // **「有没有填」分三态**：
+  //   notFilled   —— 有表但一条真路径都没有（整张表是占位或空）
+  //   partialFill —— 有真路径、也有占位行（填了一半）
+  //   filled      —— 全是真路径
+  const state = out.length === 0 ? 'notFilled' : (placeholders > 0 ? 'partialFill' : 'filled')
+  return { paths: [...new Set(out)], skipped, found: true, whyFilled, state, placeholders }
 }
 
 /**
@@ -369,7 +389,11 @@ export function reviewRecordState(body) {
 
   // **最后一轮必须是「通过」**。前面写着「需要返工」而后来的轮次没补，说明还没修完；
   // 机器只认最后一条结论，因为那才是当前状态。
-  const last = rows[rows.length - 1]
+  //
+  // **按轮次号取，不按表格行序**：表格行可以写反（先写第 2 轮、后写第 1 轮），
+  // 而行序不代表时间顺序。按行序判会误判方向——执行者已经按轮次修完了，
+  // 却因为行写反了被卡住。
+  const last = [...rows].sort((a, b) => Number(a.round) - Number(b.round)).pop()
   if (!/^通过$/.test(last.verdict)) {
     return {
       filled: false,
@@ -708,12 +732,30 @@ function main(argv) {
   let prefixes = []
   let contractMissing = false
   let skippedRows = []
+  let tableState = 'noTable'
   if (existsSync(agentsPath)) {
     const table = readHighRiskTable(readFileSync(agentsPath, 'utf8'))
     prefixes = table.paths
     skippedRows = table.skipped
+    tableState = table.state
   } else {
     contractMissing = true
+  }
+
+  // **「填了一半」要报出来。**
+  //
+  // 实测：表里一行真路径 + 一行 `<替换成第二处>` → paths 只有一条、skipped 为空，
+  // 占位行凭空消失。于是「填了一半」看起来像「填完了」，而剩下那半从此不受保护。
+  // 这不是「还没填」（那要走下面「明说没查」那条），是**填了但有缺口**。
+  if (tableState === 'partialFill') {
+    process.stderr.write([
+      `高风险路径表填了一半：有 ${prefixes.length} 条真路径，还有占位行没换掉。`,
+      '',
+      '  占位行不算「认不出来」，也不算「没有」——它是**还没填完**。',
+      '  填了一半的表只会保护填过的那几处，剩下的从此不需要审查记录，而门禁看起来是绿的。',
+      '  把剩下的占位换成这个项目真实的路径；确实不需要那一类时，把整行删掉。',
+    ].join('\n') + '\n')
+    return 1
   }
 
   // **认不出来的行要报出来**：它们是「看起来像表、其实一个路径都没解析出来」的那些。
@@ -734,7 +776,9 @@ function main(argv) {
     process.stderr.write([
       contractMissing
         ? `没有读到项目契约：${agentsPath} 不存在`
-        : `项目契约里没有「## 高风险路径」表（或表是空的）：${agentsPath}`,
+        : (tableState === 'notFilled'
+          ? `项目契约里有「## 高风险路径」这一节，但表还是骨架占位、没有一条真路径：${agentsPath}`
+          : `项目契约里没有「## 高风险路径」表：${agentsPath}`),
       '',
       '  这一趟**没有做任何审查记录检查**——没有「哪几处算高风险」这份声明，就无从判断。',
       '  补上那张表即可启用（骨架见 契约里「## 高风险路径」一节）：',

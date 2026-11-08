@@ -38,7 +38,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import { fileURLToPath } from 'node:url'
 
 import {
-  readLedger, hasAnyRecord, segmentIds, provenance, LEDGER_DIR,
+  readLedger, segmentIds, provenance, LEDGER_DIR,
   LEDGER_KERNEL, LEDGER_SECTION_PREFIX, LEDGER_WHOLE,
 } from './lib/ledger.mjs'
 

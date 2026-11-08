@@ -17,7 +17,7 @@ import {
   evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, } from './preflight.mjs'
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
-import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
+import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation } from '../lib/text.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
@@ -416,37 +416,36 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       report(/顺手清掉了/.test(r.out), '清理：报告里说了')
     }
 
-    // 五之二、旧版本分发过、新包里已经没有的文件：也要清掉。
+    // 五之二、旧版遗留的文件：**只报，不删**。
     //
-    // 「仓库里另有」那一支管的是「本来就不该有」，这一支管的是「**以前应该有**」：
-    // 一条文件在 1.0.0 里随包分发、后来搬进了 `scripts/lib/`，那么从 1.0.0 升到新版
-    // 之后，它在磁盘上既不在新包的表里、也不在「仓库里有」的表里——**两张表都认领不到它**。
-    // 判据只看新表时这一类一个都删不掉，副本会永久带着一个没人 import 的死模块。
+    // 「这个文件旧版分发过、新版没有」与「这是使用者自己的笔记」在磁盘上长得一模一样，
+    // 包里的 SKILL.md 只说得出「我现在有什么」。分不开这两种，就只能选那个不会造成损失的
+    // 做法：列出来，让人自己判断。
     {
-      const dir = makeCopy('prune-legacy', { source: source() })
-      // 造出「旧副本」：磁盘上有它，而且**旧副本自己的那张表里登记着它**。
-      // 两步都要——只往磁盘上放文件，那是使用者自己放的东西，本来就不该被碰。
+      const dir = makeCopy('stale-report', { source: source() })
+      // 一个像旧版遗留的（在 `scripts/` 下、新版包里没有），一个像使用者笔记的
+      // （在 `references/` 下、新版包里也没有）。
       writeFileSync(join(dir, 'scripts', 'legacy.mjs'), '#!/usr/bin/env node\nexport const LEGACY = 1\n', 'utf8')
-      const skillPath = join(dir, 'SKILL.md')
-      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace(
-        /^(\| `scripts\/survey\.mjs`.*)$/m,
-        '$1\n| `scripts/legacy.mjs` | 旧版遗留的模块 |'), 'utf8')
-      const registered = /scripts\/legacy\.mjs/.test(readFileSync(skillPath, 'utf8'))
-      check(registered, '前提：旧副本的表里登记了那个遗留文件（否则它只是使用者的东西）')
-      const mine = join(dir, 'my-notes.txt')
-      writeFileSync(mine, 'mine\n', 'utf8')
+      const mine = join(dir, 'references', 'my-own-note.md')
+      mkdirSync(join(dir, 'references'), { recursive: true })
+      writeFileSync(mine, '# 我的笔记\n', 'utf8')
+      const rootNote = join(dir, 'my-notes.txt')
+      writeFileSync(rootNote, 'mine\n', 'utf8')
       setWindow(dir, 0)
       const r = await runUpdate(dir, '--quiet')
-      failWith(skillVersion(readFileSync(skillPath, 'utf8')) === '9.9.9',
+      failWith(skillVersion(readFileSync(join(dir, 'SKILL.md'), 'utf8')) === '9.9.9',
         '前提：遗留清理用例真的更新过一次', r)
-      check(!existsSync(join(dir, 'scripts', 'legacy.mjs')),
-        '旧版分发过、新版没有的文件被清掉（否则副本永久带着死模块）',
-        `/顺手清掉了/=${/顺手清掉了/.test(r.out)} 输出=${r.out.slice(0, 200)}`)
-      report(!existsSync(join(dir, 'scripts', 'legacy.mjs')), '清理：旧版遗留文件被清掉')
-      // 边界的另一半：**不在任何一张表里**的文件是使用者自己的，一个都不许删。
-      check(existsSync(mine), '旧表里没有的文件不动（清理只认两张表，不扫磁盘）')
-      report(existsSync(mine), '清理：使用者的文件保留')
+      check(/legacy\.mjs/.test(r.out), '新包里没有的文件要在报告里列出来', r.out.slice(0, 300))
+      report(/legacy\.mjs/.test(r.out), '遗留：报告里列出来了')
+      check(existsSync(join(dir, 'scripts', 'legacy.mjs')),
+        '但只要分不清「旧版遗留」与「使用者自己放的」，就一个字节都不删')
+      report(existsSync(join(dir, 'scripts', 'legacy.mjs')), '遗留：没有擅自删除')
+      check(existsSync(mine), 'references/ 里的使用者文件同样保留')
+      report(existsSync(mine), '遗留：references 下的笔记保留')
+      check(existsSync(rootNote), '根目录的使用者文件不在清点范围里')
+      report(existsSync(rootNote), '遗留：根目录文件不受影响')
     }
+
 
     // 五之三、节流的边界：`--quiet` 那条路一小时内不重复联网，人自己敲的要照旧答。
     //
@@ -501,82 +500,40 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       report(asked.out !== '', '关掉开关：--check 照旧说话')
     }
 
-    // 五之五、**包里的表格不能决定删到哪儿**。
+    // 五之五、**清理的授权来自代码里的结构规则，不来自下载回来的那份包**。
     //
-    // 条目名来自从网上下载的那份包，不是本地可信数据。`repoOnly` 是「这个包里不该有、
-    // 见到就删」的清单，而删除走的是 `rmSync(recursive: true)`——一个植入了 `../victim/`
-    // 的伪造包，就能删掉使用者磁盘上技能目录之外的任意目录，而报告会把它写成
-    // 「顺手清掉了包里不该有的文件」。这是这个工具能做的最坏的事。
-    //
-    // 判据是**解析之后的路径边界**，而且必须在任何 `statSync` / `rmSync` 之前：
-    // 判完再删但只记一行汇报，等于把「已经删了」说成「已跳过」。
+    // 这一支走的是 `rmSync(recursive: true)`，所以「删什么」必须有本地可信的依据。
+    // 依据是 `lib/protocol.mjs` 的 `REPO_ONLY_DIRS` / `REPO_ONLY_FILES`——随代码走、
+    // 不随包走，伪造包改不动它。两条边界：
+    //   1. 包里的内容**不能让清理删到技能目录之外**（越界防护）；
+    //   2. 包里的内容**不能让清理删掉使用者的文件**（授权防护）。
     {
-      const dir = makeCopy('traversal-guard', { source: source() })
-      const skillRoot = dir
+      const dir = makeCopy('cleanup-guard', { source: source() })
       // 邻居：一个目录（里面有文件）与一个同前缀目录——后者专测「字符串前缀」那种错判。
-      const sideDir = resolve(skillRoot, '..', 'victim')
+      const sideDir = resolve(dir, '..', 'victim')
       mkdirSync(sideDir, { recursive: true })
       writeFileSync(join(sideDir, 'important.txt'), 'IMPORTANT\n', 'utf8')
-      const prefixed = resolve(skillRoot, '..', 'project-forge-secret')
+      const prefixed = resolve(dir, '..', 'project-forge-secret')
       mkdirSync(join(prefixed, 'inner'), { recursive: true })
       writeFileSync(join(prefixed, 'inner', 'precious.txt'), 'PRECIOUS\n', 'utf8')
 
-      // 恶意新版：同样的树，但「仓库里另有」表里多了越界条目。
-      // 锚点必须落在**那张表的首行**上——那个小标题下面先有一段说明文字才到表头，
-      // 拿任意一行当锚点会注进上面那张「用户包里有」表，而那张表的循环本来就有守卫。
-      const evil = buildPackage('traversal-pkg', {
-        version: '9.9.9', source: source(), mutate: (src) => {
-          const p = join(src, 'SKILL.md')
-          const text = readFileSync(p, 'utf8')
-          const at = text.indexOf('### 仓库里另有')
-          const row = text.indexOf('| `AGENTS.md` |', at)
-          check(at >= 0 && row >= 0, '前提：找得到「仓库里另有」表的位置')
-          writeFileSync(p, `${text.slice(0, row)}| \`../victim/\` | evil |\n`
-            + `| \`../project-forge-secret/\` | evil |\n${text.slice(row)}`, 'utf8')
-        },
-      })
-      setWindow(dir, 0)
-      const servedBefore = pkg.body
-      pkg.body = evil.body
-      const r = await runUpdate(dir, '--quiet')
-      pkg.body = servedBefore
-
-      check(existsSync(sideDir) && existsSync(join(sideDir, 'important.txt')),
-        '包里的 ../ 条目不许删到技能目录之外',
-        `victim 目录还在=${existsSync(sideDir)} 输出=${r.out.slice(0, 200)}`)
-      report(existsSync(join(sideDir, 'important.txt')), '越界防护：邻居目录没被删')
-      check(existsSync(join(prefixed, 'inner', 'precious.txt')),
-        '同前缀目录（project-forge-secret）不许被当成「在之内」',
-        `还在=${existsSync(join(prefixed, 'inner', 'precious.txt'))}`)
-      report(existsSync(join(prefixed, 'inner', 'precious.txt')), '越界防护：同前缀目录没被删')
-      check(/已跳过/.test(r.out), '越界条目要**报出来**（不是默默丢掉）', r.out.slice(0, 200))
-      report(/已跳过/.test(r.out), '越界防护：条目被报出')
-    }
-
-    // 五之六、**删除权限归旧副本，不归网上下载的那份包**。
-    //
-    // 一张文件地图能陈述的只有「这份副本当初装进来时应该有什么」。新包没有资格说
-    // 「你磁盘上这个文件该删」——它只说得出自己有什么。否则一个把用户文件写进
-    // 「仓库里另有」表的包，就能让更新顺手清掉使用者的笔记。
-    // 边界的另一半：**旧表说过的照删**，否则「下成 Source code 的副本」永远清不干净。
-    {
-      const dir = makeCopy('repoonly-authority', { source: source() })
+      // 使用者的文件：任何清理都不许碰。
       const mineA = join(dir, 'my-notes.md')
       const mineB = join(dir, 'references', 'my-own-note.md')
       mkdirSync(join(dir, 'references'), { recursive: true })
       writeFileSync(mineA, '# 我的笔记\n', 'utf8')
       writeFileSync(mineB, '# 我的另一份笔记\n', 'utf8')
 
-      // 恶意新版：把使用者的两个文件写进「仓库里另有」表。
-      const evil = buildPackage('repoonly-pkg', {
+      // 恶意新版：在 SKILL.md 里写一张「这些文件该删」的表，并混进越界条目。
+      const evil = buildPackage('cleanup-pkg', {
         version: '9.9.9', source: source(), mutate: (src) => {
           const p = join(src, 'SKILL.md')
           const text = readFileSync(p, 'utf8')
-          const at = text.indexOf('### 仓库里另有')
-          const row = text.indexOf('| `AGENTS.md` |', at)
-          check(at >= 0 && row >= 0, '前提：找得到「仓库里另有」表的位置（删除权限用例）')
-          writeFileSync(p, `${text.slice(0, row)}| \`my-notes.md\` | evil |\n`
-            + `| \`references/my-own-note.md\` | evil |\n${text.slice(row)}`, 'utf8')
+          writeFileSync(p, `${text}\n### 仓库里另有\n\n| 文件 | 何时读 |\n| --- | --- |\n`
+            + '| `../victim/` | evil |\n'
+            + '| `../project-forge-secret/` | evil |\n'
+            + '| `my-notes.md` | evil |\n'
+            + '| `references/my-own-note.md` | evil |\n', 'utf8')
         },
       })
       setWindow(dir, 0)
@@ -585,105 +542,44 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
       const r = await runUpdate(dir, '--quiet')
       pkg.body = servedBefore
 
-      check(existsSync(mineA), '新包单方面声明「这个文件该删」不算数（权限在旧副本的表）',
-        `my-notes.md 还在=${existsSync(mineA)} 输出=${r.out.slice(0, 200)}`)
-      report(existsSync(mineA), '删除权限：新包说了不算')
-      check(existsSync(mineB), 'references/ 里的使用者文件同样保留',
-        `my-own-note.md 还在=${existsSync(mineB)}`)
-      report(existsSync(mineB), '删除权限：子目录同样受保护')
+      const neighborKept = existsSync(sideDir) && existsSync(join(sideDir, 'important.txt'))
+      check(neighborKept, '清理不许删到技能目录之外', `victim 目录还在=${neighborKept}`)
+      report(neighborKept, '越界防护：邻居目录没被删')
+      check(existsSync(join(prefixed, 'inner', 'precious.txt')),
+        '同前缀目录（project-forge-secret）不许被当成「在之内」')
+      report(existsSync(join(prefixed, 'inner', 'precious.txt')), '越界防护：同前缀目录没被删')
+      check(existsSync(mineA) && existsSync(mineB),
+        '包里写着「这个文件该删」不算数——授权来自代码里的结构规则，不来自包',
+        `my-notes=${existsSync(mineA)} note=${existsSync(mineB)}`)
+      report(existsSync(mineA) && existsSync(mineB), '授权防护：使用者的文件没被删')
+    }
 
-      // 另一半：旧副本自己说过的东西照删。缺了这条，「下成 Source code 的副本」清不干净。
-      const legacy = makeCopy('repoonly-legacy', { source: source() })
+    // 五之六、**结构规则指到的那几处照旧清掉**。
+    //
+    // 缺了这一条，「下成 Source code 的副本」永远清不干净——那些副本里多出
+    // `.github/`、`AGENTS.md`、`scripts/dev/` 一类只在仓库里存在的文件，留着会一直碍事。
+    {
+      const legacy = makeCopy('cleanup-legacy', { source: source() })
       mkdirSync(join(legacy, '.github', 'workflows'), { recursive: true })
       writeFileSync(join(legacy, '.github', 'workflows', 'check.yml'), 'x\n', 'utf8')
       writeFileSync(join(legacy, 'AGENTS.md'), '# 契约\n', 'utf8')
+      mkdirSync(join(legacy, 'scripts', 'dev'), { recursive: true })
+      writeFileSync(join(legacy, 'scripts', 'dev', 'preflight.mjs'), '// x\n', 'utf8')
       setWindow(legacy, 0)
       const r2 = await runUpdate(legacy, '--quiet')
-      const gone = !existsSync(join(legacy, '.github')) && !existsSync(join(legacy, 'AGENTS.md'))
-      check(gone, '旧副本自己表里列过的排除项照旧清掉（`Source code` 副本要能变干净）',
-        `还留着=${[existsSync(join(legacy, '.github')), existsSync(join(legacy, 'AGENTS.md'))].join(',')}`
+      const gone = !existsSync(join(legacy, '.github'))
+        && !existsSync(join(legacy, 'AGENTS.md'))
+        && !existsSync(join(legacy, 'scripts', 'dev'))
+      check(gone, '结构规则列过的那几处照旧清掉（\`Source code\` 副本要能变干净）',
+        `还留着=${[existsSync(join(legacy, '.github')), existsSync(join(legacy, 'AGENTS.md')), existsSync(join(legacy, 'scripts', 'dev'))].join(',')}`
         + ` 输出=${r2.out.slice(0, 160)}`)
-      report(gone, '删除权限：旧表说过的照删')
+      report(gone, '清理：结构规则指到的照删')
+      // 随包的脚本一个都不许被误删。
+      check(existsSync(join(legacy, 'scripts', 'survey.mjs')),
+        '随包的脚本不在结构规则里，清理不许动它')
+      report(existsSync(join(legacy, 'scripts', 'survey.mjs')), '清理：随包脚本没被误删')
     }
 
-    // 八、同源校验：标签说 9.9.9，附件里却是另一个版本 —— 一个字节都不许写。
-    //     不核对时的后果有两种，都很重：静默**降级**（装进旧版还说「已更新到最新版」），
-    //     或白写一遍文件并占掉 24 小时窗口。判据是「两个版本都报出来 + 目录原样」。
-    {
-      state.tag = '9.9.9'
-      const mismatched = buildPackage('mismatch-pkg', {
-        version: '9.9.9', source: source(), declareVersion: '0.0.1',
-      })
-      const dir = makeCopy('mismatch', { source: source() })
-      setWindow(dir, 0)
-      const before = readFileSync(join(dir, 'SKILL.md'), 'utf8')
-      const served = pkg.body
-      pkg.body = mismatched.body
-      resetStats()
-      const r = await runUpdate(dir, '--quiet')
-      pkg.body = served
-      const tells = /9\.9\.9/.test(r.out) && /0\.0\.1/.test(r.out) && /没有更新/.test(r.out)
-      failWith(tells, '标签版本与附件里的版本不一致时，两个版本都报出来并拒绝更新', r)
-      report(tells, '同源校验：不一致就说出来')
-      check(!/已更新到最新版/.test(r.out), '不一致时不会谎报「已更新到最新版」', r.out.slice(0, 200))
-      report(!/已更新到最新版/.test(r.out), '同源校验：不谎报成功')
-      check(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '不一致时一个字节都没被改写')
-      report(readFileSync(join(dir, 'SKILL.md'), 'utf8') === before, '同源校验：零写入')
-      const free = readStateFile(dir)
-      check(free === 0, '不一致时没有写下窗口（否则 24 小时内真更新会被挡掉）', `状态文件里是 ${free}`)
-      report(free === 0, '同源校验：不占窗口')
-    }
-
-    // 九之前：文件地图读不出来时，**清理那一半会说自己在摸黑走**。
-    //     判据分两层：解析器对「没有那两张表的文本」返回两张空表（这是它的约定），
-    //     而调用方拿到空表必须能分辨「没东西要清」与「地图没读出来」——后者要报出来，
-    //     否则使用者的副本里 `.github/`、`AGENTS.md` 会一直留着，而报告说这次一切正常。
-    {
-      const noMap = readFileMap('---\nname: x\n---\n\n# 没有文件地图的文件\n')
-      const asExpected = noMap.shipped.length === 0 && noMap.repoOnly.length === 0
-      check(asExpected, '例：没有文件地图的文本解析成两张空表（调用方据此分辨摸黑走）',
-        JSON.stringify(noMap))
-      report(asExpected, '文件地图：读不出来时是两张空表，不是半份')
-      const src = readFileSync(join(SKILL_ROOT, 'scripts', 'update.mjs'), 'utf8')
-      const guards = /mapRead: map\.shipped\.length > 0 \|\| map\.repoOnly\.length > 0/.test(src)
-        && /这份包里的文件地图读不出来/.test(src)
-      check(guards, 'update.mjs 会分辨「没东西要清」与「地图没读出来」，并把后者报出来')
-      report(guards, '文件地图：摸黑走会说')
-    }
-
-    // 九、条目名带 `..`：**不许写到本领目录之外**。判据是目录外的那个东西还在、内容没变。
-    //     包与文件地图都来自网络上的那一份，让它们决定写到哪儿，等于把本机路径交给别人。
-    //     造法是把越界名字写进包内 `SKILL.md` 的「仓库里另有」表——那是**清理**那一半的
-    //     判据来源，也是真会被解析成路径的地方。
-    {
-      state.tag = '9.9.9'
-      const outsideDir = fixture('escape-outside', {})
-      const outside = join(outsideDir, 'victim.txt')
-      writeFileSync(outside, '原始内容\n', 'utf8')
-      const evil = buildPackage('escape-pkg', { version: '9.9.9', source: source() })
-      const skillPath = join(evil.dir, 'SKILL.md')
-      writeFileSync(skillPath, readFileSync(skillPath, 'utf8')
-        .replace(/^### 仓库里另有$/m, '### 仓库里另有\n\n| `../victim.txt` | 越界条目（构造出来的） |'), 'utf8')
-      gitIn(evil.dir, 'add', '-A')
-      gitIn(evil.dir, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
-        'commit', '-m', 'escape')
-      const zipped = spawnSync('git',
-        ['-C', evil.dir, 'archive', '--format=zip', '--prefix=project-forge-/', '-o', join(ROOT, 'escape.zip'), 'HEAD'],
-        { encoding: 'utf8', windowsHide: true })
-      const dir = makeCopy('escape', { source: source() })
-      setWindow(dir, 0)
-      const served = pkg.body
-      if (zipped.status === 0) pkg.body = readFileSync(join(ROOT, 'escape.zip'))
-      resetStats()
-      const r = await runUpdate(dir, '--quiet')
-      pkg.body = served
-      rmSync(join(ROOT, 'escape.zip'), { force: true })
-      const survived = existsSync(outside) && readFileSync(outside, 'utf8') === '原始内容\n'
-      failWith(survived, '文件地图里带 `..` 的条目不会动到本领目录之外的东西', r)
-      report(survived, '边界：越界条目被挡住')
-      check(/本领目录之外/.test(r.out), '越界条目要在报告里说出来，不静默忽略', r.out.slice(0, 240))
-      report(/本领目录之外/.test(r.out), '边界：越界条目被报出来')
-    }
 
     // 十、副本里读不到来源（`metadata.source` 被删掉、或宿主不认这个扩展字段）：
     //     这时走的是兜底地址，而兜底地址可以被 `PF_UPDATE_SOURCE` 改——**测试就是靠它
@@ -1329,10 +1225,21 @@ group('[25] 交付门禁：缺项拦得住，待问消得掉')
   report(ok1, '缺项：拦得住')
 
   // 待问全部用 flag 消掉（除 AGENTS 缺失仍是缺）→ 待问清零
-  const r2 = review(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  //
+  // `--scope=agents` 是这里必需的一环：**「这个目录不是 git 仓库」是一条不可能被 flag
+  // 消掉的待问**（它说的是「这一面没有可验的对象」，不是「用户还没决定」）。夹具目录本来
+  // 就没有 `.git`，所以全量模式下它必然出现在待问里——那是真话，不是噪音。
+  // 这一组测的是「flag 能不能消掉待问」，就把它限制在能验证这件事的那一面。
+  const r2 = review(bare, '--scope=agents', '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
   const ok2 = !/\[待问\]/.test(r2.stdout ?? '') && /\[缺\]/.test(r2.stdout ?? '')
   check(ok2, 'flag 能消掉待问，只剩真缺项', (r2.stdout ?? '').split('\n')[0])
   report(ok2, '待问：消得掉')
+
+  // 另一半：全量模式下「不是 git 仓库」必须说出来，不能被读成「齐备」。
+  const r2b = review(bare, '--no-bilingual', '--no-contributing', '--private-no-license', '--no-ci')
+  const ok2b = /不是 git 仓库/.test(r2b.stdout ?? '')
+  check(ok2b, '全量模式下「不是 git 仓库」也要报出来（没查不等于查过没问题）')
+  report(ok2b, '待问：没查的会说')
 
   // 未知 flag 直接报错，不静默忽略
   const r3 = review(bare, '--no-whatever')

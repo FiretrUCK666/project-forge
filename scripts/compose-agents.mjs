@@ -38,15 +38,15 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { listRoot, manifestSection } from './lib/manifest.mjs'
+import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines, splitSections } from './lib/markdown.mjs'
-import { readLedger, writeLedger, recordSegment, forgetSegment, recordSnapshot } from './lib/ledger.mjs'
+import { readLedger, writeLedger, recordSegment, forgetSegment, recordSnapshot, ledgerPath } from './lib/ledger.mjs'
 // 临时文件的形状与清理判据住在 lib/fs-atomic.mjs：那一族判据（哪些是本工具的残留、
 // 哪些是使用者自己的文件、属主进程还活着没有）只此一份，本文件从那里取。
 import { clearStaleTemps, tempPathFor, reportTemps } from './lib/fs-atomic.mjs'
-import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
@@ -291,24 +291,14 @@ function deriveFacts(target, s = surveyLight(target)) {
   // 英文版就停在原处，而它的契约里一个字都没提要一起改。
   const hasBilingualReadme = s.docs?.readmePair !== undefined
 
-  // 插件类条件：只按勘察事实求值，不猜具体取值。模板里的 DSH 段落靠它们显隐，
-  // 非插件项目不受影响；读不到即按无处理。
-  const isDshPlugin = s.ecosystem.kinds.includes('dsh-plugin')
+  // 插件类条件：**只按通用事实求值**。各生态自己的条件（哪一段模板该出现）由描述符
+  // 用 `conditions(s)` 给——主引擎不认识任何生态的内部字段名，加一个宿主只是加一个对象。
   const isGo = s.ecosystem.kinds.includes('go')
-  const isPlugin = s.ecosystem.kinds.some((k) => /plugin|extension/.test(k))
-  const hasDshClient = s.host?.hasClientEntry === true || s.host?.hasClientDecl === true
-  const hasDshBundle = s.host?.bundlePatch !== undefined || s.host?.patchFile !== undefined
-  const hasDshToolchain = s.host?.toolchain !== undefined
-    && (s.host.toolchain.tsdown === true || s.host.toolchain.vitest === true || s.host.toolchain.oxlint === true)
-  const hasDshLocalWorkflow = s.host?.localWorkflow === true || s.host?.contractDoc === true
-  // 「版本与可复现」这一节恒属于 DSH 插件：版本面（peer 版本、补丁层）是宿主契约的一部分，
-  // 不是「有没有读到某个文件」决定的。
-  //
-  // 判据特意**不**挂在 `hasDshBundle || hasDshClient` 上：那两个字段为假有两种完全相反的
-  // 含义——「没声明补丁层」和「声明了、但补丁文件不在」。后者恰恰是最需要这一节的破损插件；
-  // 而按「文件在不在」来决定这一节适不适用，等于把「该报警」变成「静默省略」。判据的
-  // 性质不对，方向也是错的：省掉一节短文换不回什么，弄丢一次报警赔得上。
-  const hasDshVersion = isDshPlugin
+  const isPlugin = s.ecosystem.kinds.some((k) => /-(plugin|extension)$/.test(k))
+  // 各描述符贡献的条件：一个生态命中时它给的那几项生效，没命中的不贡献。
+  const ecosystemConditions = Object.assign({}, ...HOST_ECOSYSTEMS
+    .filter((d) => typeof d.conditions === 'function')
+    .map((d) => d.conditions(s) ?? {}))
   const hasLocalSkills = Array.isArray(s.localSkills) && s.localSkills.length > 0
   // 「宿主不会加载」是**单独一节**，不并进上面的盘点节：盘点节说「有什么」，这一节说
   // 「哪几条是坏的、为什么坏」。两件事的读者动作不同——盘点节要求只读不改，这一节要求
@@ -352,18 +342,11 @@ function deriveFacts(target, s = surveyLight(target)) {
     'no-bilingual-readme': !hasBilingualReadme,
     'has-deps': hasDeps,
     'no-deps': !hasDeps,
-    'is-dsh-plugin': isDshPlugin,
     'is-go': isGo,
     'is-plugin': isPlugin,
     'no-plugin': !isPlugin,
-    'has-dsh-client': hasDshClient,
-    'has-dsh-bundle': hasDshBundle,
-    'has-dsh-toolchain': hasDshToolchain,
-    'no-dsh-toolchain': !hasDshToolchain,
-    'has-dsh-version': hasDshVersion,
-    'no-dsh-version': !hasDshVersion,
-    'has-dsh-local-workflow': hasDshLocalWorkflow,
-    'no-dsh-local-workflow': !hasDshLocalWorkflow,
+    // 各生态自己的条件：**名与值都由描述符给**（见 ecosystems.mjs 的 conditions）。
+    ...ecosystemConditions,
     'has-local-skills': hasLocalSkills,
     'no-local-skills': !hasLocalSkills,
     'has-dropped-skills': hasDroppedSkills,
@@ -1066,15 +1049,34 @@ const LEDGER_SECTION_PREFIX = 'section:'
  * 因为它让账本看起来是有内容的。
  */
 function recordWholeFile(target, rels) {
+  // 只认**文件**。指向一个目录时（`--record .` 是最容易敲出来的那种）后面那句 `readFileSync`
+  // 会抛一个 EISDIR 的裸栈——用的人看不懂，也不知道自己该改成什么。这里提前判一次，
+  // 连同「这些路径指针都没办法登记」一起说清。
+  const notFiles = rels.filter((rel) => {
+    const p = join(target, rel)
+    const st = statSync(p, { throwIfNoEntry: false })
+    return st !== undefined && !st.isFile()
+  })
+  if (notFiles.length > 0) {
+    process.stderr.write(`错误：这些路径不是文件，没法按整份登记（一份都没记）：${notFiles.join('、')}。\n`
+      + '  --record 要的是**落盘产物**的路径（README.md、CONTRIBUTING.md 这一类）。\n')
+    return 2
+  }
   const missing = rels.filter((rel) => !existsSync(join(target, rel)))
   if (missing.length > 0) {
     process.stderr.write(`错误：这些文件不存在，无法登记（一份都没记）：${missing.join('、')}。`
       + '先写文件再登记。\n')
     return 1
   }
-  // 账本读不出来时按「没有账本」处理：落盘只做加法，不会破坏任何东西。
-  // 「读不出来」与「没有」的区别只在验收侧有后果，那里另有处理。
-  const { ledger } = readLedger(target)
+  // 账本**读不出来就拒绝写**：整份写回会把已有的记录（谁写过哪些字节）抹成只剩这一次的。
+  // 这条路是使用者主动要登记的，所以拒绝并给出路径与原因，让他能去查那个文件。
+  const { ledger, state } = readLedger(target)
+  if (state === 'unreadable') {
+    process.stderr.write(`错误：账本读不出来，不能往上写：${ledgerPath(target)}\n`
+      + '  整份写回会把已有记录覆盖掉。先看清那个文件是什么（权限？被截断？'
+      + '不是本工具写的？），修好或删掉它之后再重试。\n')
+    return 2
+  }
   // 读全部内容**在写之前**：任何一份读失败都不该留下半套账。
   const entries = rels.map((rel) => ({ rel, content: readFileSync(join(target, rel), 'utf8') }))
   for (const { rel, content } of entries) {
@@ -1088,7 +1090,14 @@ function recordWholeFile(target, rels) {
 }
 
 function recordLanded(target, agentsPath, text, freshRendered, s) {
-  const { ledger } = readLedger(target)
+  // 账本**读不出来就拒绝写**：整份写回会把已有记录抹成只剩这一次的，而那正是
+  // 「痕迹判定」唯一依赖的东西。抛出去由调用方报出来——文件已经写好，账本这一半
+  // 退化成「什么都不敢认」，那是安全的退化方向；静默覆盖则不是。
+  const { ledger, state } = readLedger(target)
+  if (state === 'unreadable') {
+    throw new Error(`账本读不出来，没有往上写：${ledgerPath(target)}`
+      + '（先看清那个文件是什么——权限？被截断？不是本工具写的？）')
+  }
   const file = 'AGENTS.md'
 
   // 内核区：一对锚点圈定的字节区间。缺任何一端就跳过——记一条提不出内容的记录没有意义。
@@ -1308,26 +1317,37 @@ function applicableMissingSections(target, text, s = surveyLight(target)) {
  * 全仓只此一份），不共用语义——同一个键挂两种语义，正是这条提示要避开的问题。
  *
  * 寄生在本来就要看的输出里：不另起命令、不拦流程、不记入缺口。标记读不到、项目非
- * 插件、项目无锁定版本时一律安静——没证据不断言，避免误报打扰非 DSH 项目。
+ * 插件、项目无锁定版本时一律安静——没证据不断言。
+ *
+ * **哪一份专章由命中的生态决定**（`kind` → `references/plugins/<kind 去掉前缀>.md`），
+ * 不在代码里写死某一个生态名：加一个宿主时这里一行都不用改，而写死的那一版会静默地
+ * 只对那一个宿主生效——症状不是报错，是**别的插件永远收不到这条提示**。
  */
-function dshCompatibilityNotice(s) {
-  if (s === undefined || !s.ecosystem.kinds.includes('dsh-plugin')) return undefined
+function hostCompatibilityNotice(s) {
+  const kinds = s?.ecosystem?.kinds ?? []
+  const plugins = kinds.filter((k) => /-(plugin|extension)$/.test(k))
+  if (plugins.length === 0) return undefined
   const pinned = s.host?.pinnedVersions ?? []
   if (pinned.length === 0) return undefined
-  let marker = ''
-  try {
-    marker = readUtf8(join(SKILL_ROOT, 'references', 'plugins', 'dsh.md'))
-  } catch { return undefined }
-  // 标记的解析与键形状**只有一处实现**（preflight 的 parseMarkerKeys）。两处各写一份
-  // 就有两份判据：自己那条一旦依赖键的顺序（例如要求 host 排在 date 之前），顺序一换
-  // 就静默失效——而失效的表现是「比对说一致」，最难发现的那种。
-  const parsed = parseMarkerKeys(/dsh-verified:\s*([^>]*?)\s*-->/.exec(marker)?.[1] ?? '')
-  const hostPin = parsed.keys.host
-  if (hostPin === undefined) return undefined
-  if (pinned.some((p) => normVersion(p) === normVersion(hostPin))) return undefined
-  return `提示：本项目声明的 DSH 兼容范围 ${pinned.join('、')} 与专章核对时的宿主版本 ${hostPin} 不同——`
-    + '那是核对当时的本机版本，不是本项目的承诺；给这个项目配兼容范围时留意它可能早于核对过的宿主。'
-    + '按 references/plugins/dsh.md 事实来源节重核第一节至第九节。'
+  // 命中的第一个带专章的生态：一个仓库同时是两种插件时只提示一次，不叠两条。
+  for (const kind of plugins) {
+    const chapter = kind.replace(/-(plugin|extension)$/, '')
+    let marker = ''
+    try {
+      marker = readUtf8(join(SKILL_ROOT, 'references', 'plugins', `${chapter}.md`))
+    } catch { continue }
+    // 标记的解析与键形状**只有一处实现**（preflight 的 parseMarkerKeys）。两处各写一份
+    // 就有两份判据：自己那条一旦依赖键的顺序（例如要求 host 排在 date 之前），顺序一换
+    // 就静默失效——而失效的表现是「比对说一致」，最难发现的那种。
+    const parsed = parseMarkerKeys(new RegExp(`${chapter}-verified:\\s*([^>]*?)\\s*-->`).exec(marker)?.[1] ?? '')
+    const hostPin = parsed.keys.host
+    if (hostPin === undefined) continue
+    if (pinned.some((p) => normVersion(p) === normVersion(hostPin))) continue
+    return `提示：本项目声明的宿主兼容范围 ${pinned.join('、')} 与专章核对时的宿主版本 ${hostPin} 不同——`
+      + '那是核对当时的本机版本，不是本项目的承诺；配兼容范围时留意它可能早于核对过的宿主。'
+      + `按 references/plugins/${chapter}.md 的事实来源节重核。`
+  }
+  return undefined
 }
 
 /**
@@ -1580,11 +1600,17 @@ function main(argv) {
   }
   // 清理上次异常退出留下的临时文件（正常情况下改名后它就不存在了）。
   //
-  // 判据与报告都在 lib/fs-atomic.mjs 那一处：只删「能证明是已经死掉的进程留下的」那些，
+  // 判据与报告都在 `lib/fs-atomic.mjs` 那一处：只删「能证明是已经死掉的进程留下的」那些，
   // 同前缀但不是纯数字的（使用者自己的文件）与属主还活着的（另一个正在跑的进程手里
   // 的）一律留下并报出来——删掉前者是悄悄毁掉别人的东西，删掉后者会让那次运行的改名
   // 失败。
-  reportTemps(agentsPath, clearStaleTemps(agentsPath))
+  //
+  // **只在真的要写盘时清**：`--check` 与 `--status` 是只读模式（CI 里就跑 `--check`），
+  // 一个自称「只校验」的命令顺手删别人的文件，是最不该有的那种副作用——它在别人的
+  // 工作区里制造了一个无从解释的变化，而报告只说「校验通过」。只读模式改成「发现就说」，
+  // 一个字节都不动。
+  const stale = clearStaleTemps(agentsPath, { dryRun: check || status })
+  reportTemps(agentsPath, stale, { dryRun: check || status })
   if (check && !exists) {
     process.stderr.write(`校验失败：${agentsPath} 不存在。\n`)
     return 1
@@ -1783,7 +1809,7 @@ function main(argv) {
       + `待填写 ${authors.length} 处，`
       + (missing.applicable ? `缺失 ${missing.list.length} 节\n` : '缺节判据不适用（作者编排）\n'))
     reportGaps(authors, missing, process.stdout)
-    const stale = dshCompatibilityNotice(s)
+    const stale = hostCompatibilityNotice(s)
     if (stale !== undefined) process.stdout.write(`${stale}\n`)
     if (bytes > budget) {
       process.stderr.write(`警告：已超出预算 ${budget} 字节，注入时会被截断。\n`)
@@ -1797,7 +1823,7 @@ function main(argv) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportRefresh(refreshReport, process.stdout)
     reportGaps(authors, missing, process.stdout)
-    const staleSame = dshCompatibilityNotice(s)
+    const staleSame = hostCompatibilityNotice(s)
     if (staleSame !== undefined) process.stdout.write(`${staleSame}\n`)
     return 0
   }
@@ -1885,7 +1911,7 @@ function main(argv) {
   // 以为脚本没干活。顺序反过来才对得上因果。
   reportRefresh(refreshReport, process.stdout)
   reportGaps(authors, missing, process.stdout)
-  const staleNew = dshCompatibilityNotice(s)
+  const staleNew = hostCompatibilityNotice(s)
   if (staleNew !== undefined) process.stdout.write(`${staleNew}\n`)
   if (bytes > budget) {
     process.stderr.write(

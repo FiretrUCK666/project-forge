@@ -17,7 +17,7 @@ import {
   evalFreshnessMarker, FRESHNESS_STALE_DAYS, listRepoFiles, compareHostMarker, hostDateBatchStatus, freshnessSectionBody, hasActionableSources, referencedPaths, moduleSpecifiers, externalModules, releaseTokenSpellings, hostMismatchMessage, looksLikeEntry, } from './preflight.mjs'
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
-import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
+import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation } from '../lib/text.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
@@ -368,17 +368,29 @@ group('[41] 文档与实现的一致性机制：互引、范围、取值、声�
     report(ok, '互引：指到的节真实存在')
   }
 
-  // 2) 宿主升级后要重核的范围，代码提示与专章必须说同一件事。
+  // 2) 宿主升级后要给用户的那条提示，必须**说出该重核哪一份专章**。
+  //
+  // 判据换了：从前是「代码里那句重核范围与专章逐字一致」，而那句话已经搬进描述符
+  // （见 `ecosystems.mjs` 的 `chapter`）——代码不再复述范围，只按 kind 拼出专章路径。
+  // 现在要守的是**这条路径真的指得到文件**：指错了，用户升级宿主后照着提示去翻，
+  // 翻到的是一份不存在的文件，而提示本身看着完全正常。
   {
-    const dsh = readSkill('references/plugins/dsh.md')
     const compose = readSkill('scripts/compose-agents.mjs')
-    const inDoc = /重核第([一二三四五六七八九十]+)节至第([一二三四五六七八九十]+)节/.exec(dsh)
-    const inCode = /重核第([一二三四五六七八九十]+)节至第([一二三四五六七八九十]+)节/.exec(compose)
-    const ok = inDoc !== null && inCode !== null
-      && inDoc[1] === inCode[1] && inDoc[2] === inCode[2]
-    check(ok, 'dsh 重核范围：代码提示与专章一致',
-      `专章=${inDoc?.[0] ?? '(未写)'} 代码=${inCode?.[0] ?? '(未写)'}`)
-    report(ok, '重核范围：两处一致')
+    const kindPlug = /plugins\/\$\{chapter\}\.md/.test(compose)
+      || /'plugins',\s*`\$\{chapter\}\.md`/.test(compose)
+      || /plugins', `\$\{chapter\}\.md`/.test(compose)
+    check(kindPlug, '重核提示里的专章路径按 kind 拼出（不写死某一个生态）',
+      `找到按 kind 拼路径=${kindPlug}`)
+    report(kindPlug, '重核范围：按 kind 拼路径')
+
+    // 每个声明了 chapter 的生态，那一份专章必须真的存在。
+    const eco = readSkill('scripts/ecosystems.mjs')
+    const chapters = [...eco.matchAll(/^\s{4}chapter: '([^']+)',$/gm)].map((m) => m[1])
+    const missing = chapters.filter((c) => !existsSync(join(SKILL_ROOT, 'references', 'plugins', `${c}.md`)))
+    const okChapter = chapters.length > 0 && missing.length === 0
+    check(okChapter, '每个声明了 chapter 的生态都有对应专章文件',
+      `缺=${missing.join('、') || '无'}（共 ${chapters.length} 个）`)
+    report(okChapter, '重核范围：专章文件都在')
   }
 
   // 3) 多生态的扁平命令字段是「先到者胜」：行为钉住，文档才不能凭想象改写机制。

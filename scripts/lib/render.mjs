@@ -514,10 +514,16 @@ export function computeSurveyActionPlan(s) {
   if (git.role === 'contributor-fork' || git.role === 'undetermined') {
     refs.push('- `references/collaboration.md`（角色、分支路线与合并后收尾）')
   }
-  if (s.host?.id === 'dsh' || kinds.includes('dsh-plugin')) {
-    refs.push('- `references/plugins/dsh.md`（DSH 插件规范）')
+  // 插件专章**按描述符声明给**：`chapter` 是那个生态自己说「我的专章叫什么」的字段，
+  // 主引擎只负责按 kind 把命中的那些拼成一行。写死某一个生态名在这里的后果很具体——
+  // 第二个插件生态命中了，它的专章**一个字都不会出现在产出的契约里**，而报告看起来正常。
+  const chapters = HOST_ECOSYSTEMS
+    .filter((d) => typeof d.chapter === 'string' && kinds.includes(d.id))
+    .map((d) => d.chapter)
+  for (const ch of chapters) {
+    refs.push(`- \`references/plugins/${ch}.md\`（这个生态的插件规范）`)
   }
-  const hasPlugin = kinds.some((k) => ['dsh-plugin', 'obsidian-plugin', 'vscode-extension'].includes(k))
+  const hasPlugin = kinds.some((k) => k.endsWith('-plugin') || k.endsWith('-extension'))
   if (!hasPlugin) {
     refs.push('- *（本项目未命中插件生态，无需读取 `references/plugins/*`）*')
   }

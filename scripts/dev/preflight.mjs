@@ -40,7 +40,8 @@ import { fileURLToPath } from 'node:url'
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
 import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments } from '../lib/protocol.mjs'
-import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+import { skillVersion, skillSource, repoRelation, tableFirstCells, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
 import { issueTemplateGaps } from '../review.mjs'
@@ -73,6 +74,23 @@ const CATALOG_DESCRIPTION_MAX = 500
 const OWN_AGENTS_MAX_BYTES = 48 * 1024
 /** 余量告警线：离上限不足这么多字节时提醒一次（而不是天天喊）。 */
 const OWN_AGENTS_WARN_HEADROOM = 1024
+
+/**
+ * `SKILL.md` 的字节上限（30 KB）。
+ *
+ * 这份文件**每次调用都整份读进上下文**，它是这个 skill 里唯一一份「多一行就多占一份
+ * 注意力预算」的文档。它靠指针工作：细节都在 `references/`，这里只留「去哪读、按什么
+ * 顺序、哪条不能破」。所以它需要的不是「写得更紧凑」，而是**一条让它不再长的线**——
+ * 没有线的时候，每加一条规则都显得只多两行，而两年后它就变成了另一份 reference。
+ *
+ * 这个数字是**量出来的、不是拍的**：按现在的结构（何时使用 / 硬不变量 / 取值从哪来 /
+ * 能力矩阵 / 已有基础的项目 / 执行流程 / 硬门控 / 文件地图 / 边界 / 汇报纪律）写完是
+ * 二十几 KB，30 KB 留出约 3 KB——够写一条新机制。要再涨，先问「这条能不能并进
+ * `references/`」，而不是抬这个数。
+ */
+const SKILL_MAX_BYTES = 30 * 1024
+/** 余量告警线：离上限不足这么多字节时提醒一次。 */
+const SKILL_WARN_HEADROOM = 2 * 1024
 
 // 内核标记与字节预算都从 survey.mjs 取：它们是「同一件事的同一个值」，本文件自己写一份
 // 就多一个要人记得同步的地方，而标记对不上的后果是覆盖用户正文。
@@ -245,7 +263,7 @@ function repoTextFiles() {
   return out
 }
 
-// ── 检查一：SKILL.md 能否被宿主识别 ─────────────────────────────────────────
+// ── SKILL.md 能否被宿主识别 ─────────────────────────────────────────
 
 function checkSkillFile() {
   const path = join(SKILL_ROOT, 'SKILL.md')
@@ -310,7 +328,7 @@ function checkSkillFile() {
   return { text, name }
 }
 
-// ── 检查二：引用完整性 ──────────────────────────────────────────────────────
+// ── 引用完整性 ──────────────────────────────────────────────────────
 
 /**
  * 一份 Markdown 里引用的资源路径（去重）。
@@ -371,7 +389,7 @@ function checkReferencesResolve() {
   if (total === 0) warn('全文没有引用任何 references / templates / scripts 路径。')
 }
 
-// ── 检查三：references 的结构约定 ───────────────────────────────────────────
+// ── references 的结构约定 ───────────────────────────────────────────
 
 function checkReferences() {
   const dir = join(SKILL_ROOT, 'references')
@@ -405,7 +423,7 @@ function checkReferences() {
   }
 }
 
-// ── 检查四：templates 的标记与内核一致性 ────────────────────────────────────
+// ── templates 的标记与内核一致性 ────────────────────────────────────
 
 function checkTemplates() {
   const dir = join(SKILL_ROOT, 'templates')
@@ -479,7 +497,7 @@ function checkTemplates() {
   }
 }
 
-// ── 检查四之二：落盘族的引用归属 ────────────────────────────────────────────
+// ── 落盘族的引用归属 ────────────────────────────────────────────
 
 /**
  * `templates/` 整棵树是「落盘族」：这里的文件会被复制或生成为**别的项目**的文件。
@@ -643,7 +661,7 @@ function checkDeliveredAttribution() {
   }
 }
 
-// ── 检查五：AGENTS.md 的内核与模板一致 ──────────────────────────────────────
+// ── AGENTS.md 的内核与模板一致 ──────────────────────────────────────
 
 function checkAgentsKernel() {
   const agentsPath = join(SKILL_ROOT, 'AGENTS.md')
@@ -674,7 +692,26 @@ function checkAgentsKernel() {
   // 留一条不可达的分支只会让下一个改常量的人以为它在生效。
 }
 
-// ── 检查六：全文硬性规范（emoji / BOM / 行尾 / 私有路径） ───────────────────
+/**
+ * `SKILL.md` 的体量：它是唯一一份**每次调用都整份进上下文**的文档。
+ *
+ * 判据只压「总字节」，不压某一节——哪一节该压是判断，而判断归人：报告里报出字节数与
+ * 余量，怎么压由写的人定。**超了就是失败**（不是提示）：这条线的全部意义就是「不许再长」，
+ * 一条不会红的线等于没有。
+ */
+function checkSkillSize(skill) {
+  if (skill === undefined || typeof skill.text !== 'string') return
+  const bytes = Buffer.byteLength(skill.text, 'utf8')
+  if (bytes > SKILL_MAX_BYTES) {
+    fail(`SKILL.md 共 ${bytes} 字节，超过上限 ${SKILL_MAX_BYTES} —— 它是每次调用都整份读进`
+      + '上下文的唯一一份文档，再长就开始稀释注意力。要加东西先问「这条能不能并进'
+      + ' `references/`」；判据与论证一律搬走，入口只留指针。')
+  } else if (bytes > SKILL_MAX_BYTES - SKILL_WARN_HEADROOM) {
+    warn(`SKILL.md 距上限只剩 ${SKILL_MAX_BYTES - bytes} 字节——该往 references 搬一点了。`)
+  }
+}
+
+// ── 全文硬性规范（emoji / BOM / 行尾 / 私有路径） ───────────────────
 
 /**
  * Extended_Pictographic 覆盖绝大多数 emoji。箭头一类符号不在其内（U+2192），可正常使用。
@@ -747,7 +784,7 @@ function checkGlobalRules() {
   }
 }
 
-// ── 检查七：脚本自身可执行 ──────────────────────────────────────────────────
+// ── 脚本自身可执行 ──────────────────────────────────────────────────
 
 /**
  * 文本里出现的模块说明符（去重、保序）。
@@ -825,10 +862,9 @@ function checkScripts() {
   const dir = join(SKILL_ROOT, 'scripts')
   if (!existsSync(dir)) { fail('缺少 scripts 目录。'); return }
   // **扫磁盘，不扫清单**：这一组检查（shebang、体积、零依赖、语法）必须覆盖每一个真实存在的
-  // 脚本文件，包括「刚建好、还没登记进文件地图」的那个——那正是最需要先过一遍语法与依赖的
-  // 时刻。文件地图在这组检查里只用来标出「这个脚本应该在包内还是包外」，不决定查谁；
-  // 该不该登记由「数量自称」的磁盘对账与包边界的位置判据负责，各有分工。
-  const map = fileMapFromWorktree()
+  // 脚本文件——包括刚建好、还没人提及的那个，那正是最需要先过一遍语法与依赖的时刻。
+  // 哪些进包由 `checkPackageBoundary` 按结构规则判；这里只管「每个文件本身健不健康」，
+  // 两件事分开，各自都不会漏。
   const inspect = (p, rel) => {
     if (!existsSync(p)) { fail(`缺少 ${rel}。`); return }
     const text = readText(p)
@@ -848,30 +884,24 @@ function checkScripts() {
       fail(`${rel} 有语法错误（node --check）：${stderrExcerpt(parsed, 4)}`)
     }
   }
-  const inMap = (rel, bucket) => map[bucket].includes(rel)
-  const scan = (d, prefix, bucket) => {
+  const scan = (d, prefix) => {
     if (!existsSync(d)) return
     for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
       if (!e.isFile() || !e.name.endsWith('.mjs')) continue
       inspect(join(d, e.name), `${prefix}${e.name}`)
-      // 登记与否不在这里判（有专门的判据），但把它标出来，读日志的人才知道这一份
-      // 是在包内还是包外。
-      if (!inMap(`${prefix}${e.name}`, bucket)) {
-        warn(`${prefix}${e.name} 还没登记进文件地图，这一份是按磁盘扫到的。`)
-      }
     }
   }
-  scan(dir, 'scripts/', 'shipped')
+  scan(dir, 'scripts/')
   // `scripts/lib/` 是**随包分发的公共模块层**，包里每个脚本都 import 它——它必须和顶层脚本
   // 过同一套判据。漏掉这一层时，「零依赖」与「每个脚本能解析」两条对最大的那几份实现代码
   // 完全没有检查：`lib/` 里一个外部依赖加一处不闭合的括号，自检照样 0 失败。
-  scan(join(dir, 'lib'), 'scripts/lib/', 'shipped')
-  scan(join(dir, 'dev'), 'scripts/dev/', 'repoOnly')
+  scan(join(dir, 'lib'), 'scripts/lib/')
+  scan(join(dir, 'dev'), 'scripts/dev/')
   // `scripts/dev/lib/` 是自检的共享层（fixture 工厂、断言、计数器），同样是一层实现代码。
   // 漏掉它时同样的洞会在那里重开一次：往 `harness.mjs` 隔壁放一个引了外部模块、括号还不闭合
   // 的文件，全量自检 0 失败。**下面那张 `ALLOWED_SUBDIRS` 放行了哪个目录，这里就要扫哪个**——
   // 「放行」与「检查」分成两份清单，漏一处就是静默的。
-  scan(join(dir, 'dev', 'lib'), 'scripts/dev/lib/', 'repoOnly')
+  scan(join(dir, 'dev', 'lib'), 'scripts/dev/lib/')
 
   // 两个目录里都只允许 JavaScript。
   //
@@ -913,7 +943,7 @@ function checkScripts() {
   scanDir(join(dir, 'lib'), 'scripts/lib/')
 }
 
-// ── 检查八：脚本真的能跑起来 ────────────────────────────────────────────────
+// ── 脚本真的能跑起来 ────────────────────────────────────────────────
 
 /**
  * 子进程失败时的诊断片段。
@@ -990,9 +1020,25 @@ function checkBehavior({ skip = false, why = '' } = {}) {
   // 行为自检要造几百个 fixture 实跑，实测约一分钟（分片并行）。**先说要等多久**：终端上
   // 一个字，读的人会以为它卡死了（它没卡，只是这条命令本来就慢）。
   process.stdout.write('行为自检：正在造 fixture 实跑（分五片并行，约半分钟，中途没有输出）…\n')
-  const r = spawnSync(process.execPath, [p], { encoding: 'utf8', env: process.env })
+  // **超时**：`spawnSync` 不给上限时，一个卡死的自检会把这整条门禁一起挂住——CI 上表现
+  // 为「跑了四十分钟还在跑」，而它其实什么都没在测（某一处等 stdin、或某个子进程僵死）。
+  // 有上限时它会变成一条明确的失败：说得清是超时，而不是让人对着一个不动的终端猜。
+  //
+  // 上限按实测留了很大余量：正常一趟 110–260 秒（并行分片，机器忙时更长），所以取十倍量级。
+  const startedAt = Date.now()
+  const TIMEOUT_MS = 30 * 60 * 1000
+  const r = spawnSync(process.execPath, [p], {
+    encoding: 'utf8', env: process.env, timeout: TIMEOUT_MS, killSignal: 'SIGKILL',
+  })
+  const elapsedMs = Date.now() - startedAt
   const out = r.stdout ?? ''
-  if (r.error !== undefined) { fail(`行为自检无法执行：${r.error.message}`); return }
+  if (r.error !== undefined) {
+    const why = r.error.code === 'ETIMEDOUT'
+      ? `行为自检超过 ${Math.round(TIMEOUT_MS / 60000)} 分钟没有结束，已终止`
+      : `行为自检无法执行：${r.error.message}`
+    fail(why)
+    return
+  }
   // 摘要是以「行为自检：」开头的那一行。不能用「最后一行」——环境不具备时后面还会跟
   // 一段「跳过」清单，取最后一行会取到清单里的最后一项。
   const line = out.split('\n').find((l) => l.startsWith('行为自检：'))
@@ -1029,6 +1075,9 @@ function checkBehavior({ skip = false, why = '' } = {}) {
     return
   }
   process.stdout.write(`行为自检：${summary}\n`)
+  // 耗时也报出来：**「变慢了」是唯一能在还绿着的时候就发现退化的信号**。这一条不判失败
+  // （机器快慢不同、CI 与本地也不同），只让「这次比上次慢了一倍」这件事有一处落脚点。
+  process.stdout.write(`行为自检耗时：${(elapsedMs / 1000).toFixed(1)} 秒\n`)
   // 有跳过时一并转述：跳过是环境不具备，不是缺陷，但它改变了这次检查的覆盖面，
   // 不说明就等于悄悄缩小了验证范围。
   const skipBlock = out.split('跳过（环境不具备，不是缺陷）：')[1]
@@ -1038,7 +1087,7 @@ function checkBehavior({ skip = false, why = '' } = {}) {
   }
 }
 
-// ── 检查十四：README 卡片里的数字断言必须两边同源、且与实现一致 ──────────────
+// ── README 卡片里的数字断言必须两边同源、且与实现一致 ──────────────
 
 /**
  * 卡片对外做出的断言，逐条列成表。**值与含义一起写在这里**，卡片里只留一个 key。
@@ -1207,7 +1256,7 @@ function checkCardClaims() {
   }
 }
 
-// ── 检查九：文档里的「数量自称」必须与现实相符 ──────────────────────────────
+// ── 文档里的「数量自称」必须与现实相符 ──────────────────────────────
 
 /**
  * 中文数字 → 数值。
@@ -1238,44 +1287,87 @@ function cnNumber(raw) {
 }
 
 /**
- * 文档里写「三道门控」「四个脚本」这类数量时，**必须与实际相符**。
+ * 一个文件进不进用户包，**判据只有一条：它在不在包导出的结果里**。
  *
- * 这类数字是典型的快照：加了东西忘了改，文档就开始说假话，而假话没有任何症状——
- * 没有检查时它只能靠人工核对发现，而人工核对恰恰是这类数字失准的盲区。
+ * 这里用的是目录结构做**快速判据**（`scripts/dev/` 整目录被 `.gitattributes` 排除），
+ * 只用来决定「该去查哪张表」；包的实际内容始终以 `git archive` 那次真导出为准，
+ * `checkPackageBoundary` 与 `checkProducedPackage` 会双向核对。两处判的是同一件事，
+ * 但一个给方向、一个给结论——方向错了，结论那一步会当场红。
+ */
+const isRepoOnly = (rel) => rel.startsWith('scripts/dev/')
+
+/**
+ * 文档里自称的数量与磁盘对账。
  *
- * 判据是「文档里的数字 vs 实际数出来的数量」，全自动，不需要人记得。
+ * **只留两条真会被人数的**：硬不变量与硬门控。它们是这个项目特有的术语（「一条硬不变量」
+ * 永远是数量断言，没有泛指的读法），而且这两个数直接决定读者会不会漏读一段。
+ *
+ * 脚本数量**不在这里数**：文件地图已改成「AI 会跑到的那几条」的示意块，不是逐文件清单，
+ * 数它只会数出一个没有意义的数字。脚本有没有人跑，由下面那条**可达性判据**回答。
  */
 function checkStatedCounts() {
   const actual = {
     硬不变量: countNumberedItems('SKILL.md', /^## 硬不变量/, /^\d+\.\s+\*\*/),
     硬门控: countMatches('SKILL.md', /^\|\s*G\d+\s*\|/gm),
-    // 数文件地图里那一节登记的**脚本文件数**，不是表格行数：一张表行可以并列两个脚本
-    // （发布说明那两个就是），按行数算，文档里一句「十三个脚本」这种**真话**会被判成假话。
-    // 判据的对象是「有多少个脚本」，所以数的必须是文件。
-    // 只在文件地图那一节里数：正文里提到某个脚本（例如「本 skill 自身的自检
-    // （`scripts/dev/preflight.mjs`）」）也会命中，那是叙述不是清单。
-    // 路径形状要允许子目录（`scripts/dev/` 下的自用脚本也在地图里），否则那三个数不到。
-    脚本: countMapPaths('SKILL.md', /^## 文件地图/, /scripts\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.mjs/g),
   }
 
-  // **与磁盘对账**，不只是两份文档互相对。
+  // **脚本靠「被执行」而不是「被查找」到达**，所以这里的判据与 references 那条不同：
+  // 一个脚本要么被文档提到（人可以照着敲），要么被另一个脚本引用（import 或子进程调用，
+  // 机器会自己跑它）。两条都不占的那个脚本，才是真的没人指得到。
   //
-  // 这一步是必须的：只比「文件地图的行数」与「文档里写的数量」时，**两个文档同时
-  // 漏掉同一个脚本，它两边都对得上**——文档之间互相印证不构成证据，得跟磁盘上的
-  // 事实比。
+  // 为什么不用「逐文件登记」：脚本是执行物，不是读物——读者不需要背下
+  // `cases-3.mjs` 叫什么（它在 `selftest.mjs` 的分片表里，自动被调起）。
+  // 真正的风险只有一个：**写完的脚本谁也不调用**，那它就是一坨没人跑的代码。
+  //
+  // `scripts/lib/` 不在这条里：它是被 import 的实现层，由 import 链自然证明；
+  // 包自洽性判据会把「import 了却不在包里」当场抓出来。
   const scriptsDir = join(SKILL_ROOT, 'scripts')
   if (existsSync(scriptsDir)) {
     const onDisk = []
-    for (const [d, prefix] of [[scriptsDir, 'scripts/'], [join(scriptsDir, 'dev'), 'scripts/dev/']]) {
-      if (!existsSync(d)) continue
+    const collect = (d, prefix) => {
+      if (!existsSync(d)) return
       for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
-        if (e.isFile() && e.name.endsWith('.mjs')) onDisk.push(`${prefix}${e.name}`)
+        if (e.isDirectory()) { collect(join(d, e.name), `${prefix}${e.name}/`); continue }
+        if (e.name.endsWith('.mjs')) onDisk.push(`${prefix}${e.name}`)
       }
     }
-    const skillText = readText(join(SKILL_ROOT, 'SKILL.md'))
+    collect(scriptsDir, 'scripts/')
+    const docs = ['SKILL.md', 'README.md', 'README.en.md', 'AGENTS.md', 'CONTRIBUTING.md']
+      .map((f) => {
+        const p = join(SKILL_ROOT, f)
+        return existsSync(p) ? readText(p) : ''
+      })
+    for (const sub of ['references', 'templates']) {
+      const d0 = join(SKILL_ROOT, sub)
+      if (!existsSync(d0)) continue
+      const walk = (d) => {
+        for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+          if (e.isDirectory()) { walk(join(d, e.name)); continue }
+          if (e.name.endsWith('.md')) docs.push(readText(join(d, e.name)))
+        }
+      }
+      walk(d0)
+    }
+    // 脚本之间的调用关系：把所有脚本正文拼起来，谁被别的脚本提到过就算被调用。
+    const sources = new Map(onDisk.map((rel) => [rel, readText(join(SKILL_ROOT, rel))]))
+    const referencedByCode = (rel) => {
+      const base = rel.slice(rel.lastIndexOf('/') + 1)
+      for (const [other, src] of sources) {
+        if (other === rel) continue
+        if (src.includes(base)) return true
+      }
+      return false
+    }
     for (const rel of onDisk) {
-      if (!skillText.includes(rel)) {
-        fail(`${rel} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+      // **只查随包分发的脚本**。判据是读者：`scripts/` 顶层与 `lib/` 是拿到包的人会用到、
+      // 或者会被包里其它脚本 import 的；`scripts/dev/` 只服务本仓库，它在副本里根本不存在
+      // （被打包排除了），拿它做可达性检查只会在副本里制造一堆假红。
+      if (isRepoOnlyPath(rel)) continue
+      const base = rel.slice(rel.lastIndexOf('/') + 1)
+      const inDoc = docs.some((t) => t.includes(rel) || t.includes(base))
+      if (!inDoc && !referencedByCode(rel)) {
+        fail(`${rel} 既没有被任何文档提到，也没有被任何脚本调用 —— 写了却没人指得到，`
+          + '等于没写。要么有人跑它，要么它不该存在。')
       }
     }
     for (const rel of ['scripts/survey.mjs', 'scripts/compose-agents.mjs',
@@ -1283,66 +1375,74 @@ function checkStatedCounts() {
       if (!onDisk.includes(rel)) fail(`磁盘上缺少 ${rel}。`)
     }
   }
-  // 磁盘对账：references 与 templates ——新文件加了却没登记在文件地图里即隐身。
-  // 只查顶层 .md（子目录专章由插件索引检查覆盖）与全部模板文件。
+  // **可达性判据**：每一个 `references/` 与 `templates/` 下的文件，都必须被别的文档
+  // 按名字提到过至少一次。
+  //
+  // 这比「有一张逐文件登记表」更强，也更省：登记表是**第二份真相**，它自己能漏；
+  // 而「有没有人指向它」是文件之间的关系，改文件名、搬目录、删章节时都会当场暴露。
+  // 判据落在一句话上——**写了却没人指得到，等于没写**。
+  //
+  // 候选文档取「会被读到的那几份」：入口、两份 README、本仓库契约，以及 references 与
+  // templates 的全部内容（专章之间互相指是常态，也必须算数）。不取 `docs/`：
+  // 那是历史与工作记录，不是读者查找文件的入口。
   {
-    const skillText = readText(join(SKILL_ROOT, 'SKILL.md'))
-    const refDir = join(SKILL_ROOT, 'references')
-    if (existsSync(refDir)) {
-      for (const e of readdirSync(refDir, { withFileTypes: true, encoding: 'utf8' })) {
-        if (!e.isFile() || !e.name.endsWith('.md')) continue
-        if (!skillText.includes(`references/${e.name}`)) {
-          fail(`references/${e.name} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+    const docs = ['SKILL.md', 'README.md', 'README.en.md', 'AGENTS.md']
+      .map((f) => readText(join(SKILL_ROOT, f)))
+    for (const sub of ['references', 'templates']) {
+      const dir = join(SKILL_ROOT, sub)
+      if (!existsSync(dir)) continue
+      const walk = (d, prefix) => {
+        for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+          if (e.isDirectory()) { walk(join(d, e.name), `${prefix}${e.name}/`); continue }
+          if (e.name.endsWith('.md')) docs.push(readText(join(d, e.name)))
         }
       }
+      walk(dir, '')
     }
-    const tplDir = join(SKILL_ROOT, 'templates')
-    if (existsSync(tplDir)) {
-      for (const e of readdirSync(tplDir, { withFileTypes: true, encoding: 'utf8' })) {
-        if (!e.isFile()) continue
-        if (!skillText.includes(`templates/${e.name}`)) {
-          fail(`templates/${e.name} 没有登记在 SKILL.md 的文件地图里 —— 写了却没人知道它存在，等于没写。`)
+    const mentions = (rel) => {
+      const base = rel.slice(rel.lastIndexOf('/') + 1)
+      // 两种写法都算提到：完整相对路径（`references/x.md`）与裸文件名（`x.md`）。
+      // 后一种是有意的：专章之间常常只写文件名，因为读者已经在那个目录的语境里。
+      return docs.some((t) => t.includes(rel) || t.includes(base))
+    }
+    for (const sub of ['references', 'templates']) {
+      const dir = join(SKILL_ROOT, sub)
+      if (!existsSync(dir)) continue
+      const walk = (d, prefix) => {
+        for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
+          if (e.isDirectory()) { walk(join(d, e.name), `${prefix}${e.name}/`); continue }
+          if (prefix === '' && sub === 'references' && !e.name.endsWith('.md')) continue
+          const rel = `${sub}/${prefix}${e.name}`
+          if (!mentions(rel)) {
+            fail(`${rel} 没有任何文档提到它 —— 写了却没人指得到，等于没写。`
+              + '要么有人在 SKILL.md / references / README 里指向它，要么它不该存在。')
+          }
         }
       }
+      walk(dir, '')
     }
   }
-  // README 方向的对账：README 面向的是「刚拿到这个 skill 的人」，它的文件表
-  // 就是他的全景图。**只查 SKILL.md 那一侧会漏掉这一半**——README 少列一个文件时
-  // 别的检查不会出声（读者照着 README 找东西，找不到就是找不到）。
-  // 两份 README 都要查：它们成对维护，只查一份等于放另一半漂移。
+  // README 的「包里有什么」只核**四类东西都在**，不核逐文件清单。
   //
-  // 判据落在**表格行**上，不是「全文出现过这个名字」：后者只要正文里顺口提一句就满足，
-  // 而把文件表里那一行删掉反而不会响——实测过，那正是这条检查要防的漂移。
-  for (const readme of ['README.md', 'README.en.md']) {
+  // 为什么不再逐文件对账：那样就等于要求 README 维护一份要人记得改的清单，而它的读者
+  // 是「刚拿到这个 skill 的人」——他要判断的是「包里大概有什么」，不是查某一个脚本在不在
+  // （那件事他直接看目录更快）。逐文件清单漏一行的症状是「读者照着找，找不到」，但同一份
+  // 清单**每加一个文件就要改一次**，成本永久高于收益。
+  //
+  // 判据落在那四类东西上：入口、判据、骨架、工具。任一类从 README 里消失，读者就再也
+  // 不知道那个目录存在——那才是这条检查真正要防的事。
+  for (const [readme, probe] of [
+    ['README.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
+    ['README.en.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
+  ]) {
     const p = join(SKILL_ROOT, readme)
     if (!existsSync(p)) continue
-    const rows = tableFirstCells(readText(p))
-    const listed = (name) => rows.some((cell) => cell.includes(name))
-    const missing = []
-    const scan = (dir, prefix, filter) => {
-      if (!existsSync(dir)) return
-      for (const e of readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })) {
-        if (!filter(e)) continue
-        if (!listed(`${prefix}${e.name}`)) missing.push(`${prefix}${e.name}`)
+    const text = readText(p)
+    for (const re of probe) {
+      if (!re.test(text)) {
+        fail(`${readme} 里找不到 ${re} —— 「包里有什么」那一段必须让人看得到这一类东西，`
+          + '否则读者根本不知道那个目录存在。')
       }
-    }
-    scan(join(SKILL_ROOT, 'scripts'), 'scripts/', (e) => e.isFile() && e.name.endsWith('.mjs'))
-    scan(join(SKILL_ROOT, 'scripts', 'dev'), 'scripts/dev/', (e) => e.isFile() && e.name.endsWith('.mjs'))
-    scan(join(SKILL_ROOT, 'references'), 'references/', (e) => e.isFile() && e.name.endsWith('.md'))
-    // **scripts/lib 逐文件列不合算**：它是内部模块，读者不需要按文件名找它（`SKILL.md`
-    // 与 README 都是按目录一行交代的）。这里只核一件事：目录行在不在。
-    // 不核的后果很具体——整块目录从文件表里消失时，没有一个检查会响。
-    if (existsSync(join(SKILL_ROOT, 'scripts', 'lib'))
-      && !listed('scripts/lib/')) {
-      missing.push('scripts/lib/（公共模块目录整行）')
-    }
-    // templates/ 也要扫：它是「拿到包的人」最需要知道的一块（骨架与许可证全文），
-    // 而两张 README 表里的漏登只有逐文件比对才看得见——`templates/` 是其中最容易漏的
-    // 一块（一枚内核文件就长期没人列）。
-    scan(join(SKILL_ROOT, 'templates'), 'templates/', (e) => e.isFile())
-    if (missing.length > 0) {
-      fail(`${readme} 的文件表里没有列出这些磁盘上存在的文件：${missing.join('、')} —— `
-        + '读者照着它找东西，找不到就是找不到；补进表格行再提交（正文里提一句不算）。')
     }
   }
   // 门禁命令表在 AGENTS.md 与 CONTRIBUTING 各写了一份，**两处必须说同一件事**：
@@ -1556,7 +1656,7 @@ export function releaseTokenSpellings(texts) {
   return out
 }
 
-// ── 检查十：插件专章必须都登记在索引里 ──────────────────────────────────────
+// ── 插件专章必须都登记在索引里 ──────────────────────────────────────
 
 
 /**
@@ -1613,11 +1713,11 @@ function checkPluginChapters() {
     }
   }
   if (files.length === 0) warn('references/plugins/ 下还没有任何专章。')
-  // 「事实来源」节与核对标记的校验已收敛到 checkFreshness（检查十三）统一处理，
+  // 「事实来源」节与核对标记的校验已收敛到 checkFreshness统一处理，
   // 这里不再另起一套——两处各判一遍，迟早漏一边。
 }
 
-// ── 检查十三：外部事实保鲜（统一核对标记） ──────────────────────────────────
+// ── 外部事实保鲜（统一核对标记） ──────────────────────────────────
 
 /**
  * 根因：外部事实（字段名、数量上限、UI 路径、版本下限）会过期，而文档把它当永久
@@ -1950,13 +2050,13 @@ function checkFreshness() {
     for (const e of readdirSync(join(SKILL_ROOT, 'references'), { withFileTypes: true, encoding: 'utf8' })) {
       if (e.isFile() && e.name.endsWith('.md')) files.push(`references/${e.name}`)
     }
-  } catch { /* 缺目录由检查三报，这里不重复 */ }
+  } catch { /* 缺目录由对应的检查报，这里不重复 */ }
   try {
     const plugDir = join(SKILL_ROOT, 'references', 'plugins')
     for (const e of readdirSync(plugDir, { withFileTypes: true, encoding: 'utf8' })) {
       if (e.isFile() && e.name.endsWith('.md')) files.push(`references/plugins/${e.name}`)
     }
-  } catch { /* 缺目录由检查十报，这里不重复 */ }
+  } catch { /* 缺目录由对应的检查报，这里不重复 */ }
   for (const rel of files.sort()) {
     let text
     try {
@@ -2025,7 +2125,7 @@ function checkFreshness() {
   process.stdout.write('保鲜标记：格式与归属一致\n')
 }
 
-// ── 检查十一：README 的目录与标题同步 ───────────────────────────────────────
+// ── README 的目录与标题同步 ───────────────────────────────────────
 
 /**
  * README 的目录是派生内容（由各节标题决定），因此必须与标题保持同步。
@@ -2275,7 +2375,7 @@ function checkChapterSize() {
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
-// ── 检查十一：用户包边界 ────────────────────────────────────────────────────
+// ── 用户包边界 ────────────────────────────────────────────────────
 
 /**
  * 解析 `git archive` 输出的 tar 流，取出其中的条目名。
@@ -2343,9 +2443,24 @@ function packageMembers() {
 }
 
 
-/** 当前工作区里 SKILL.md 的文件地图。 */
+/**
+ * 文件地图的两半分别住在两份文件里，**各按各的读者分**：
+ *   - 「用户包里有」在 `SKILL.md`：它随包分发，用户副本里一定有，而那份表就是
+ *     「用户拿到什么」的声明；
+ *   - 「仓库里另有」在 `AGENTS.md`：它不进包，只在维护这个 skill 本身时才需要读。
+ *
+ * 把后者塞进 `SKILL.md` 的代价很具体：那是**用户读的**入口文件，一张「本仓库还有
+ * 哪些自用脚本」的表对他没有任何用处，却要占掉他每次调用时的注意力。
+ *
+ * 两张表仍然是**同一张图的两半**：门禁把两处合起来读，双向核对照样成立。
+ */
+
+/** 当前工作区里的文件地图（两半各取自该去的那份文件）。 */
 function fileMapFromWorktree() {
-  return readFileMap(readText(join(SKILL_ROOT, 'SKILL.md')))
+  return readFileMap(
+    readText(join(SKILL_ROOT, 'SKILL.md')),
+    readText(join(SKILL_ROOT, 'AGENTS.md')),
+  )
 }
 
 /**
@@ -2360,42 +2475,6 @@ function fileFromRef(ref, path) {
     { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
   if (r.error !== undefined || r.status !== 0) return undefined
   return (r.stdout ?? '').replace(/^\uFEFF/, '')
-}
-
-/**
- * 把一份包内容清单与文件地图双向对齐，返回发现的矛盾数。
- *
- * 两个调用方共用同一份判据，只是喂进来的清单来源不同：一处是当前索引的导出结果
- * （日常，`checkPackageBoundary`），一处是持续集成里真跑出来的那份产出物
- * （`checkProducedPackage`）。判据只写一遍，两处不会给出两种答案。
- *
- * `onDisk` 为真时，「声明了却没有」这一半按工作区里有没有这个文件判；为假时（核对某个
- * 版本的产出物）只按清单判——那时工作区可能已经不在那个版本上了，拿它当依据就是混源。
- */
-function alignPackage(list, map, label, { onDisk = true } = {}) {
-  let problems = 0
-  const bad = (message) => { fail(message); problems += 1 }
-  const covers = (entries, f) => entries.some((x) => (x.endsWith('/') ? f.startsWith(x) : f === x))
-  for (const f of list) {
-    if (f === 'SKILL.md') continue
-    if (covers(map.repoOnly, f)) {
-      bad(`${label}里有 ${f}，却登记在「仓库里另有」—— .gitattributes 里少了排除它的那条。`)
-    } else if (!covers(map.shipped, f)) {
-      bad(`${label}里有 ${f}，却没有登记在文件地图的「用户包里有」里 —— 登记它，或把它排除（自用脚本放 scripts/dev/）。`)
-    }
-  }
-  for (const entry of map.shipped) {
-    if (entry.endsWith('/')) {
-      if (!list.some((f) => f.startsWith(entry))) bad(`「用户包里有」声明了 ${entry}，但${label}里一个文件都没有。`)
-      continue
-    }
-    if (onDisk && !existsSync(join(SKILL_ROOT, entry))) {
-      bad(`「用户包里有」声明了 ${entry}，磁盘上却没有这个文件。`)
-      continue
-    }
-    if (!list.includes(entry)) bad(`${entry} 登记在「用户包里有」，却没有出现在${label}里 —— 声明与实际矛盾。`)
-  }
-  return problems
 }
 
 /**
@@ -2473,47 +2552,49 @@ function contentFromWorktree(f) {
 }
 
 /**
- * 用户包边界：位置判据与包集合双向判据。
+ * 用户包边界：**包里的东西由结构决定，不由任何一份清单决定。**
  *
- * 用意是**让「哪些文件进用户包」由结构与声明决定**，而不是靠一份要人记得改的清单：
- * 自用脚本整目录排除（`scripts/dev/`），随包分发的脚本放 `scripts/` 顶层；新增文件
- * 漏登记、放错位置、声明与实际矛盾，都在这里当场红。
+ * 判据只有两条，都不需要人登记：
+ *   1. **不该进包的东西确实没进**：`REPO_ONLY_DIRS` / `REPO_ONLY_FILES` 里那些路径，
+ *      一条都不许出现在导出结果里。`.gitattributes` 漏写一条，这里当场红。
+ *   2. **该在包里的东西确实在**：全部受版本控制的文件，要么出现在包里，要么命中上面那几条
+ *      结构规则。多出来的那个文件**没有归属**——要么它该进包（那内容已经在包里了，
+ *      这一条不会红），要么它该被排除（那就在 `.gitattributes` 里加一条结构规则）。
+ *
+ * 为什么不再拿一张「逐文件登记表」当判据：那张表本身就是要人记得改的东西，而它漏一行的
+ * 症状是「文件在包里但没人知道」。结构规则不会漏——它描述的是**哪几处**不进包，
+ * 那几处在一年里可能一次都不变。
  *
  * 包集合的来源是**真跑一次的导出结果**（见 `packageMembers`），不是把 `.gitattributes`
  * 的规则另算一遍——后者是近似，而近似在这里正好会放过最该抓的那种错。
  */
 function checkPackageBoundary() {
-  const map = fileMapFromWorktree()
-  if (map.shipped.length === 0 || map.repoOnly.length === 0) {
-    fail('SKILL.md 的文件地图缺少「用户包里有」或「仓库里另有」小节 —— 包边界无从判断。')
-    return
-  }
-  // 位置判据：脚本按目录归类，放错位置即红（不靠谁记得去改排除清单）。
-  for (const [dir, prefix, bucket, hint] of [
-    ['scripts', 'scripts/', map.shipped, '只服务本仓库的脚本放 scripts/dev/'],
-    [join('scripts', 'lib'), 'scripts/lib/', map.shipped, '公共模块随包分发，要登记在「用户包里有」'],
-    [join('scripts', 'dev'), 'scripts/dev/', map.repoOnly, '随包分发的脚本放 scripts/ 顶层'],
-  ]) {
-    const d = join(SKILL_ROOT, dir)
-    if (!existsSync(d)) continue
-    for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
-      if (!e.isFile() || !e.name.endsWith('.mjs')) continue
-      const rel = `${prefix}${e.name}`
-      if (!bucket.includes(rel)) {
-        fail(`${rel} 没有登记在文件地图的「${bucket === map.shipped ? '用户包里有' : '仓库里另有'}」里 —— ${hint}。`)
-      }
-    }
-  }
-  // 包集合：声明与实际双向对齐。入口文件天然在包里——没有它就不是一个 skill。
   const pkg = packageMembers()
   if (pkg === undefined) {
     warn('用户包边界未核对（git 不可用，或索引里有未合并的条目）—— 报「未核对」，不放行。')
     return
   }
-  if (alignPackage(pkg, map, '实际导出', { onDisk: true }) === 0) {
+  const inPkg = new Set(pkg)
+  // 一、不该进包的，一个都不许在。
+  for (const f of pkg) {
+    if (isRepoOnlyPath(f)) {
+      fail(`实际导出里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+    }
+  }
+  // 二、受版本控制的文件，要么在包里，要么命中结构规则。第三种状态是「没有归属」。
+  const tracked = trackedFiles()
+  if (tracked !== undefined) {
+    for (const f of tracked) {
+      if (inPkg.has(f) || isRepoOnlyPath(f)) continue
+      fail(`${f} 受了版本控制，却既不在用户包里、也不属于任何「不进包」的结构规则 —— `
+        + '它是没有归属的文件：要么让它进包（删掉 `.gitattributes` 里排除它的那条），'
+        + '要么把它放进已有的那几处自用目录（`scripts/dev/` 一类），或新增一处并登记在 `REPO_ONLY_DIRS`。')
+    }
+  }
+  if (failures.length === 0) {
     const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
     if (failures.length === 0) {
-      process.stdout.write(`用户包边界：${pkg.length} 个文件，与文件地图一致；`
+      process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }
   }
@@ -2525,33 +2606,44 @@ function checkPackageBoundary() {
  * 与 `checkPackageBoundary` 的分工：那一条看的是「当前索引会导出成什么」，在本地随时能跑；
  * 这一条看的是**真的那份包**，由发布工作流在产出物生成后立刻调用。前者管日常，后者管事实。
  *
- * `atRef` 给出版本时，**文件地图与文件内容都从那个版本读**——判据与对象必须同源。
- * 拿当前工作区的地图去核对一个旧版本的产出物，会在发版那天恰好一致、之后每过一天偏离
- * 一点，而「今天碰巧对」正是本项目要消灭的那种性质。
+ * `atRef` 给出版本时，**文件内容也从那个版本读**——包自洽性要读的是那个版本文档里写的
+ * 链接，不是今天工作区里写的。判据与对象必须同源，否则核的是「今天的规矩」与
+ * 「那天的产出物」。
  */
 function checkProducedPackage(listPath, atRef) {
-  const map = atRef === undefined
-    ? fileMapFromWorktree()
-    : readFileMap(fileFromRef(atRef, 'SKILL.md') ?? '')
-  if (map.shipped.length === 0 || map.repoOnly.length === 0) {
-    fail(`从 ${atRef === undefined ? '工作区' : atRef} 的 SKILL.md 里读不到文件地图的两张小节 —— 包边界无从判断。`)
-    return
-  }
   if (!existsSync(listPath)) { fail(`找不到产出物清单 ${listPath}。`); return }
   const list = readText(listPath).split('\n')
     .map((s) => s.trim())
     .filter((s) => s !== '' && !s.endsWith('/'))
   if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
-  if (alignPackage(list, map, '产出物', { onDisk: atRef === undefined }) === 0) {
+  for (const f of list) {
+    if (isRepoOnlyPath(f)) {
+      fail(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+    }
+  }
+  if (failures.length === 0) {
     const readContent = atRef === undefined
       ? contentFromWorktree
       : (f) => fileFromRef(atRef, f)
     const links = checkPackageSelfConsistency(list, readContent)
     if (failures.length === 0) {
-      process.stdout.write(`产出物核对：${list.length} 个条目，与 ${atRef ?? '工作区'} 的文件地图一致；`
+      process.stdout.write(`产出物核对：${list.length} 个条目，全部落在「进包」的结构规则里；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }
   }
+}
+
+/**
+ * 受版本控制的文件（相对仓库根）。取不到返回 undefined。
+ *
+ * 与 `packageMembers` 用的是同一批 git 查询，只是这里要的是**全集**：判「有没有归属」
+ * 必须两边都看，只看包里有什么永远发现不了「有个文件谁都不管」。
+ */
+function trackedFiles() {
+  const r = spawnSync('git', ['-c', 'core.quotepath=false', 'ls-files', '-z'],
+    { cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
+  if (r.error !== undefined || r.status !== 0) return undefined
+  return String(r.stdout ?? '').split('\0').filter(Boolean)
 }
 
 /**
@@ -2746,6 +2838,7 @@ function main(argv = []) {
   }
   let skill
   step('检查 SKILL.md', () => { skill = checkSkillFile() })
+  step('SKILL.md 体量', () => checkSkillSize(skill))
   step('引用能否解析', checkReferencesResolve)
   step('reference 结构', checkReferences)
   step('templates', checkTemplates)

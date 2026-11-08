@@ -45,6 +45,27 @@ metadata:
 用户说「继续」时，**不要把「做到哪一步」交给回忆**——状态有机器载体，读它们：
 判据在 `references/survey.md` 第六节「接着上次做」。
 
+### 默认范围：没说范围时，默认是「整个项目配齐」
+
+这条决定**做多少**，与「做哪些事」是两回事（后者由 P2 判定表回答）。
+
+| 用户怎么说的 | 你做什么 |
+| --- | --- |
+| **什么都没说**（只丢来一个目录，或只说「用一下这个 skill」） | **全量**：勘察整个项目 → 按事实把该配的全部配上 → **已有的融合进来，不推倒重来** → 缺的补齐 |
+| 笼统一句「规范一下 / 整理一下 / 全部补完 / 该有的都配上」 | 同上，一样是全量 |
+| **点名某一件事**（「配个 CI」「弄下版本管理」「写个 README」） | **只做那件事**，其余不碰：判定与报告照旧走，动手范围就是它 |
+| 点名几件事 | 只做这几件 |
+
+**「全量」不等于「全做」**：哪些该做仍由勘察出的事实决定（纯文档目录不该有发布流程，
+已有的远端不重建）。全量是**把该做的都做完、不漏**，不是把清单上每条都执行一遍。
+
+**「融合进已有项目」是默认姿态**：多数项目交到手里时已经有 git、有远端、有 README。
+做法是「先读、再判断、只补缺的」——**已有的文件先读后合并，永不覆盖**，已有的结构是权威；
+只有用户明确说「重写」时才整篇替换。
+
+**记下的范围要贯穿全程**：它决定 P7 传不传 `--scope`，也决定汇报里说「全部配好」还是
+「只做了这一件」。中途改口就跟着改，并在汇报里说明。
+
 ## 硬不变量（任何情况下都成立）
 
 1. **只读先行**：勘察没有完成之前，不写任何文件。判断建立在事实上，不建立在猜测上。
@@ -70,16 +91,13 @@ metadata:
 8. **单一入口**：细节全在 `references/` 与 `templates/` 里，本文件不复述它们。
 9. **先确认仓库边界**：目录体量异常大、或里面还嵌着别的仓库时，先停下确认，不要把
    整根纳入。
-10. **收尾必问**：P7 汇报时**必须问一次**「要不要把本 skill 留下的痕迹清掉」（交棒）。
+10. **收尾必问**：P8 交棒时**必须问一次**「要不要把本 skill 留下的痕迹清掉」。
     不问就收工，等于把痕迹永久留在项目里，那不是交付。**问不到人时不要自作主张拆掉**
     ——把这条待确认项写进汇报，等人回来定。判据与拆除顺序见 `references/handoff.md`。
-11. **合并按「收不收得回来」分级，不按「谁看代码」**：文档与新增测试这类，门禁全绿 +
-    审查零阻塞 + 有回滚点可以自动合；**认证、权限、支付、数据迁移、CI 配置本身、
-    依赖锁文件、发布配置、密钥相关必须人合**——它们的风险在合并**之前**就已经不可逆，
-    回滚不恢复原状。**外部来的提案一律不自动合**：进主干是维护者替他承担后果。
-    另有一条独立硬规则：改动里出现**弱化门禁**的痕迹（跳过测试、放宽断言、降覆盖率门槛、
-    动 CI 配置）**一票否决转人工**——那类改动「通过」是因为判据被改松了。
-    判据见 `references/collaboration.md` 第五节。
+11. **合并按「收不收得回来」分级**：低档可自动合（门禁全绿 + 审查零阻塞 + 有回滚点），
+    中档合完要通知人，**不可逆的那一档必须人合**；弱化门禁的痕迹一票否决，外部提案一律
+    不自动合。分档清单与理由见 `references/collaboration.md` 第五节——三档的边界在那里
+    定义，这里不抄。
 
 ## 取值从哪来
 
@@ -119,6 +137,7 @@ metadata:
 | **`git.isRepoRoot` 为假**（目录在别人的仓库里） | **停下**：这些 git 事实属于外层仓库，先问清边界 | 同左 | 同左 | 同左 |
 | 已有远端（`git.remote` 非空 **且** 是仓库根） | 只校验与补缺 | 补缺 | **不重建** | 按现状 |
 | `git.role` 为 `contributor-fork`（origin 与项目声明的源仓库不是同一处，或存在与 origin 不同的 `upstream`） | 做 | 做 | 只推自己分支 | **不发布** |
+| `git.role` 为 `undetermined`（远端存在但认不出指向谁） | 做 | 做 | **按贡献者走**：拉分支、推自己分支、开改动请求 | **不发布** |
 | 已声明不可发布（`artifacts.private`） | 做 | 做 | 做 | **不做** |
 
 `skill` 这一类的判据、语义、发布取向与「与插件类的分野」，见
@@ -152,11 +171,11 @@ metadata:
 
 | 阶段 | 动作 | 参考 |
 | --- | --- | --- |
-| **P0 定位** | 确定目标目录。候选不唯一时问一次；问不到人时**禁止默认选定**，停下列候选清单进汇报待下会话续接。**用户只要一件事时（「配个 CI」）记下范围**，那是 `--scope` 的输入 | — |
+| **P0 定位** | 确定目标目录。候选不唯一时问一次；问不到人时**禁止默认选定**，停下列候选清单进汇报待下会话续接。**同时定范围**（见「默认范围」）：没说范围就是全量，点名了就只做那几件；它是 P7 传不传 `--scope` 的依据 | — |
 | **P1 勘察** | 跑勘察脚本，读关键文件补齐意图 | `references/survey.md` |
 | **P2 判定** | 用能力矩阵逐行求值，算出做哪几件、跳过哪几件，向用户复述**一句结论**（被委派时用户指调用方，写进回执等指示），并**预告后面要用户定的事**（许可证意向、署名来源、可见性意向、账号/组织、要不要接受外部贡献、要不要 CI 自动发布——此时只预告不问，P4–P6 再落实） | 本文件 |
 | **P3 版本管理** | 文本属性 → 忽略规则 → 署名 → 密钥扫描 → 首次提交 | `references/version-control.md` |
-| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**两个数字归零确认内容完整**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**用户说要接受外部贡献时，落 `.github/pull_request_template.md` 与 `.github/ISSUE_TEMPLATE/` 下的缺陷、需求两份模板**（骨架在 `templates/`，不要手写）；**要发版的项目还要落一份发版规范（`RELEASING.md`）**，它的章节结构只在 G7 问一次、不套通用模板；**每写完一批非 `AGENTS.md` 的产物（含 `.github/` 下那几份），跑一次 `compose-agents.mjs <项目> --record <路径> [更多路径...]` 记账**——`--record` 一次可给多份（全有或全无），不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
+| **P4 文档** | 先过 G7 问清只有用户能定的事；再生成 `AGENTS.md` 并**确认待填写项归零**，然后写 `README` + `CONTRIBUTING` + `LICENSE`（用户选定后才写）；**用户说要接受外部贡献时，落 `.github/pull_request_template.md` 与 `.github/ISSUE_TEMPLATE/` 下的缺陷、需求两份模板**（骨架在 `templates/`，不要手写）；**要发版的项目还要落一份发版规范（`RELEASING.md`）**，它的章节结构只在 G7 问一次、不套通用模板；**每写完一批非 `AGENTS.md` 的产物（含 `.github/` 下那几份），跑一次 `compose-agents.mjs <项目> --record <路径> [更多路径...]` 记账**——`--record` 一次可给多份（全有或全无），不记则交棒只能靠形状猜；目标仓库自带本地 skills 时按通用协议盘点保留（见 `references/plugin-project.md` 第十二节）；收尾跑 `scripts/review.mjs`，无[缺]、[待问]有 flag 用 flag、无 flag 改文件消掉才算完 | `references/docs-set.md` |
 | **P5 远端** | 发现通道 → 建仓库（默认私有）→ 推送 → 元数据 → 回读校验 → **回头再跑一次 P4 的脚本补远端相关节（强制）** → 工作流从模板落盘，`review.mjs` 复验 → **把这两步的改动提交并再推送一次**（它们是在首次推送之后才产生的，不补这一步，远端就永远缺它们，而本地看上去一切正常） | `references/remote-github.md` |
 | **P6 发布** | 仅当 P2 判定可发布。先回四问答案，再预演（清单贴进汇报），再发布，最后回读确认。**发布说明在打标签之前就要写好并推上去**（它是版本库里的一个文件，路径与结构以项目的发版规范为准）——顺序反了，远端自动化读不到文件，发版直接失败 | `references/publish.md`、`references/remote-github.md` |
 | **P7 验证汇报** | 跑**该项目**勘察到的门禁命令；校验远端与文档；按「做了什么 / 结果如何 / 下一步建议」汇报。**P0 记下的局部诉求在这里传 `review.mjs --scope=<切面>`**：只验那几面，其余不报缺 | — |
@@ -168,7 +187,7 @@ metadata:
 | --- | --- |
 | 有改动要落地（修缺陷、加能力、改文档、升级依赖） | `references/collaboration.md`：先判角色与改动性质，再决定主干直推还是分支 + 提案 |
 | **一件事要跨会话、或可能换人接手** | 同上第二节：工作记录放哪、叫什么名、完成的怎么处置；骨架 `templates/work-item.md` |
-| **用户把一段 Issue 正文、Issue 链接或一段报错贴进来** | 同上第一节「外部报告：接单五步」——先核实四要素、不盲猜写代码 |
+| **用户把一段 Issue 正文、Issue 链接或一段报错贴进来** | 同上第一节「外部报告：从贴进来的那段话到一次能定位的修复」——先核实四要素、不盲猜写代码 |
 | **用户把一个提案链接、或「有人提了个改动」贴进来** | 同上第一节「外部提案：别人已经改好了」——先只读 diff、判它有没有说清要解决什么；**没开问题不是退回的理由** |
 | 收外部报告或外部提案 | 同上第四、六节：审查读书单、外部贡献的信任边界 |
 | **要派审查（子代理或新会话）** | 同上第四节「怎么派」：只给材料清单，不给执行者的思路与上一轮结论；通过之后才合并 |
@@ -203,54 +222,45 @@ node "<本领目录>/scripts/update.mjs" --quiet
 
 ## 硬门控
 
-这些是**必须先读全文才能动手**的关卡。
+这些是**必须先读全文才能动手**的关卡。判据全在指向的那份文件里，本节只回答「什么时候必须去读」。
 
 | 门控 | 条件 | 必须先读 |
 | --- | --- | --- |
 | G1 | 任何写入之前 | `references/survey.md`，且勘察已跑完 |
-| G2 | 首次提交之前 | `references/version-control.md`；且已按密钥门控那张表处置、无新增凭据进本次提交 |
-| G3 | 写任何文档之前 | `references/docs-set.md` |
-| G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时用户指调用方，写进回执等指示，不直接执行） |
-| G5 | 任何发布动作之前 | `references/publish.md`；涉及 npm、Python、Go、Rust 时加读对应 `references/publish-<生态>.md`；且**说明文件已按项目的发版规范写好、提交并推送**（`references/remote-github.md` 第六节） |
-| G6 | 判定为**插件类**时（勘察出的 kind 以 `-plugin` / `-extension` 结尾，或形态上是「被宿主加载的扩展」） | `references/plugin-project.md`（P1 之后即读）；有对应专章时一并读 `references/plugins/<生态>.md` |
-| G7 | 写任何文档之前（许可证与环境节在 P4 内一次问清） | 见下 |
-| G8 | 判定为 `skill` 时 | `references/skill-project.md`（P1 之后即读）；宿主有专章时一并读那张索引里指的专章 |
-| G9 | 拆除本 skill 在目标项目里留下的痕迹之前（交棒或撤销） | `references/handoff.md` |
-| G10 | 有远端、而这次改动要落地（收外部报告、审改动、合并、合并后收尾） | `references/collaboration.md` |
+| G2 | 首次提交之前 | `references/version-control.md`；且已按密钥门控处置、无新增凭据进本次提交 |
+| G3 | 写任何文档之前，以及 P7 汇报之前 | `references/docs-set.md` |
+| G4 | 建仓库 / 推送之前 | `references/remote-github.md`；且已给用户确认清单（被委派时写进回执等指示，不直接执行） |
+| G5 | 任何发布动作之前 | `references/publish.md`；涉及具体生态时加读对应 `references/publish-<生态>.md`；且**说明文件已按项目的发版规范写好、提交并推送**（`references/remote-github.md` 第六节） |
+| G6 | P2 判定为**插件类**时，进 P3 之前 | `references/plugin-project.md`；有对应专章时一并读 `references/plugins/<生态>.md` |
+| G7 | 写任何文档之前（只有用户能定的事一次问清） | 见下 |
+| G8 | 判定为 `skill` 时，P1 之后即读 | `references/skill-project.md`；宿主有专章时一并读那张索引里指的专章 |
+| G9 | 拆除本 skill 留下的痕迹之前（交棒或撤销） | `references/handoff.md` |
+| G10 | 有远端、而这次改动要落地（收外部报告、审改动、合并、收尾） | `references/collaboration.md` |
+| G11 | 盘点目标仓库自带的本地 skills 之前（与生态无关） | `references/plugin-project.md` 第十二节 |
 
-**G7：只有用户能定的事，一次问清。** 几件事实脚本推不出来、也不能替用户决定，它们都在
-写文档时才需要，所以集中到一处一次问完（不要分几次打断用户）：**许可证**、**版权行署名**、
-**要不要接受外部提问与贡献**（一次定四样：贡献指南、缺陷模板、需求模板、提案模板）、
-**要不要维护另一语言的 README**、**要不要 CI 与自动发布**、
-**要发版时发布说明分成哪几节、每节写什么**
-（`review.mjs` 的[待问]要 flag 才能消掉——**可用的
-flag 全集以 `node scripts/review.mjs --help` 的输出为准**，本文件不另抄一份，抄了就会漂移）。
-各自「为什么不能替你定」与「要不到时怎么做」，见 `references/docs-set.md` 的「选择」一节；
-一条硬线：**署名取到明显的占位值（例如操作系统默认用户名）时不要直接用**。
+**G7：只有用户能定的事，一次问清。** 那几件事脚本推不出来、也不能替用户决定，而且都只在
+写文档时才需要，所以集中到一处问完，不要分几次打断。**哪几件、为什么不能替你定、
+要不到时怎么办，全在 `references/docs-set.md` 的「选择」一节**——那份清单会随项目经验
+增减，本文件不抄（抄了两处都要改，而漏改的那一处会静默失效）。
+`review.mjs` 的[待问]要用 flag 消掉，**flag 全集以 `node scripts/review.mjs --help` 为准**。
 
-**发布说明的章节结构为什么必须问**：那是项目自己的决定，不是通用规则——不同项目的
-读者关心的事不同（库的读者关心接口变化，工具的读者关心行为变化，插件的读者关心宿主
-兼容性）。套一份通用结构只会让每个项目都写得像别人家的，而 AI 无从知道这个项目的读者
-最在意什么。
+**发布说明的章节结构必须问**：不同项目的读者关心的事不同（库看接口变化，工具看行为变化，
+插件看宿主兼容性），套一份通用结构只会让每个项目都写得像别人家的。问的是「要回答读者
+哪几个问题」，不是「照抄哪几节」——`templates/release-spec.md` 给的是**默认菜单**
+（一节必需 + 几类按需），项目删减完把选定的那几节写进它自己的发版规范。
 
-**问的是「要回答读者哪几个问题」，不是「照抄哪几节」**：`templates/release-spec.md` 给的
-是一份**默认菜单**——一节必需（这一版变了什么），外加几类按需的节（要不要跟着升级、
-兼容范围、已知问题）。项目删减完，把选定的那几节写进它自己的发版规范；**不要把默认菜单
-原样当成答案**，那只是「没有决定过」的样子。
+**环境要求的最低版本不问**：由勘察给出（`artifacts.runtimeRequirements`），
+**读得到就照抄，没声明就不写那一节**——去问脚本本来就知道的数字，答错就写进了 README。
 
-**环境要求的最低版本不在这一问里**：由勘察给出（`artifacts.runtimeRequirements`），
-**读得到就照着写，没声明就不写那一节，不必问用户**——去问脚本本来就知道的数字，
-答错就写进了 README。判据见 `references/survey.md` 与 `references/publish.md`。
+**G4 的确认清单**见 `references/remote-github.md` 建仓节表格。它与 P2 那句结论不是一回事：
+P2 说**本次任务做什么**，G4 说**这次对外动作具体是什么**（确切仓库名、可见性、分支）。
+不可逆或对外的动作都走 G4 式对齐，纯本地写入不需要；**改可见性最危险**，默认答案是「不做」。
 
-**G4 的确认清单**以 `references/remote-github.md` 建仓节表格为准，此处不复述。
-它与 P2 那句结论不是一回事：P2 说**本次任务做什么**，G4 说**这次对外动作具体是什么**
-（确切仓库名、可见性、分支）。不可逆或对外的动作都走 G4 式对齐，纯本地写入不需要；
-**改可见性最危险**，步骤见 `references/remote-github.md`「可见性变更」，默认答案是「不做」。
 
 ## 怎么用
 
 **先读协议，再跑脚本**——G1 要求任何写入前读完 `references/survey.md`，而勘察本身是
-只读的，所以先跑勘察不会违规，但读协议要在动手之前完成。下面两条命令里 `<本 skill 目录>`
+只读的，所以先跑勘察不会违规，但读协议要在动手之前完成。下面这几条命令里 `<本 skill 目录>`
 指这个 skill 自己的位置（本文件所在目录），`<项目目录>` 指被处理的那个项目；两者通常
 不同，**命令可以在任意工作目录下执行**，因为路径都是显式传入的。
 
@@ -275,79 +285,51 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 
 ## 文件地图
 
-分两张表：**用户包里有**（随包分发，用户与目标项目会用到）与**仓库里另有**（只服务本仓库，
-不进用户包）。这条分野不是靠人记的清单：`.gitattributes` 的 `export-ignore` 决定包的实际内容，
-自检里的位置判据与包集合判据负责让「放错位置」和「漏登记」当场红。
+**包里有什么，不靠清单回答。** 权威答案只有一个：`git archive` 那次真导出——
+`.gitattributes` 的 `export-ignore` 决定哪几处不进包。自检按**结构规则**核对它，
+不按任何一张要人记得改的登记表：清单会漏，而漏的症状是「文件在包里但没人知道」或
+「该在却不在」，两种都不会自己出声。
 
-### 用户包里有
+所以本节只做一件事：**告诉你该去读哪一份**。需要时按下面的表查，不需要背。
 
-| 文件 | 何时读 |
+### 判据（`references/`）：动手前按情境读全文
+
+| 什么时候会用到它 | 读哪一份 |
 | --- | --- |
-| `references/survey.md` | **每次任务开始**。勘察协议、事实判定表、接着上次做 |
-| `references/version-control.md` | 配置或使用版本管理时 |
-| `references/remote-github.md` | 涉及远端仓库时（含协作基础设施的平台侧配置） |
-| `references/collaboration.md` | **改动要落地时**：收改动、审改动、谁能合、合并后怎么收尾 |
-| `references/docs-set.md` | 写任何文档时 |
-| `references/publish.md` | 任何发布决策 |
-| `references/publish-npm.md` | 涉及 npm 时 |
-| `references/publish-python.md` | 涉及 Python 时 |
-| `references/publish-go.md` | 涉及 Go 时 |
-| `references/publish-rust.md` | 涉及 Rust 时 |
-| `references/plugin-project.md` | 判定为插件类时（含判定协议与新增专章的模板） |
-| `references/skill-project.md` | 判定为能力目录类时（含宿主专章索引） |
-| `references/handoff.md` | P8 交棒：拆除本 skill 在目标项目里留下的痕迹（交棒与撤销的判据、顺序、验收） |
-| `references/plugins/<生态>.md` | 命中该生态时：清单、标识、宿主加载什么、版本约束、打包发放、特有坑 |
-| `templates/agents-kernel.md` | 生成 `AGENTS.md` 时（由脚本读取，**不手工编辑**） |
-| `templates/agents-project.md` | 新建 `AGENTS.md` 时作为骨架 |
-| `templates/readme.md` | 新建 `README` 时作为骨架 |
-| `templates/contributing.md` | 新建 `CONTRIBUTING` 时作为骨架 |
-| `templates/release-spec.md` | 给要发版的项目落一份发版规范（`RELEASING.md`）：说明写在哪、分哪几节（一节必需 + 按版内容增删）、按什么顺序发、失败了怎么补 |
-| `templates/work-item.md` | 给项目落工作记录骨架（文件名 `YYYY-MM-DD-主题`）：状态、建单日期与最近更新、关联的问题与提案、目标与验收、计划、放弃过什么、断点 |
-| `templates/pull-request-template.md` | 给项目落改动提案模板：改了什么、为什么、怎么验证、回滚点、风险与影响范围 |
-| `templates/issue-bug-report.md` | 给项目落缺陷报告模板：期望 / 实际 / 复现 / 环境（四件缺一不可） |
-| `templates/issue-feature-request.md` | 给项目落需求模板：要解决什么问题、期望的行为、影响范围 |
-| `templates/ci-check.yml` | 给目标项目落 CI 检查（复制到 `.github/workflows/check.yml`，按 TODO 换取值） |
-| `templates/ci-release.yml` | 给目标项目落发布自动化（复制到 `.github/workflows/release.yml`；凭据默认用平台内置令牌，只有要让发版继续触发下游工作流时才建 `RELEASE_TOKEN`；再把说明目录换成项目自己的） |
-| `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt`、`templates/license-unlicense.txt` | 短许可证标准全文（落盘时替换占位符，Unlicense 例外） |
-| `scripts/update.mjs` | **任何任务的第一步**：有新版就把这个副本整份换成新版 |
-| `scripts/survey.mjs` | P1 勘察：走查、生态判定、命令推导、文档与 git 事实 |
-| `scripts/ecosystems.mjs` | 生态描述符：加一个生态只改这里 |
-| `scripts/lib/text.mjs` `scripts/lib/protocol.mjs` `scripts/lib/markdown.mjs` `scripts/lib/render.mjs` `scripts/lib/task-runners.mjs` `scripts/lib/fs-atomic.mjs` `scripts/lib/ledger.mjs` `scripts/lib/manifest.mjs` | 公共模块 |
-| `scripts/zip.mjs` | 解开 zip 包——自更新要读得动下载回来的那一份 |
-| `scripts/compose-agents.mjs` | P4 生成或刷新 `AGENTS.md`（`--check` 校验、`--status` 看现状、`--upgrade` 升级手写文件、`--record` 把 README/CI/LICENSE 等产物记进账本，一次可给多份） |
-| `scripts/review.mjs` | P4/P5 交付门禁：无[缺]、[待问]用 flag 消掉才算写完 |
-| `scripts/handoff.mjs` | P8 交棒：只读勘察目标项目里本 skill 的痕迹（`--scan` 出清单；`--verify` 判是否已干净——退出码 **0 干净 / 1 不干净 / 3 判不了**，「判不了」指扫描没覆盖全部，**不要读成干净**） |
-| `scripts/release-notes.mjs` | 写发布说明：按字节发送一份 UTF-8 文件并回读比对；「非 ASCII 正文不经 shell」那条规则的落地工具 |
-| `scripts/check-badges.mjs` | 检查 README 里的徽章是否真的能显示 |
-| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
-| `README.md`、`README.en.md` | 面向使用者的说明：装、用、更新、包里有什么（双语成对，中文为权威版） |
-| `LICENSE` | 许可证全文 |
-| `assets/readme/` | README 里那几组卡片的 SVG 源文件（中英成对，纯矢量，可直接改） |
+| 每次任务开始 | `references/survey.md`——勘察协议、事实的含义、接着上次做 |
+| 要动版本管理 | `references/version-control.md`——什么该入库、忽略规则、署名、密钥门控 |
+| 要碰远端仓库 | `references/remote-github.md`——通道发现、建仓、推送、元数据、发版接线 |
+| 改动要落地（收报告、审改动、合并、收尾） | `references/collaboration.md` |
+| 要写任何文档 | `references/docs-set.md`——各文档的读者、职责、合并规则 |
+| 要判断能不能发、发到哪 | `references/publish.md`，再按生态加读 `publish-npm.md`、`publish-python.md`、`publish-go.md`、`publish-rust.md` |
+| 判定为插件类 | `references/plugin-project.md`；命中已知生态时加读 `references/plugins/<生态>.md` |
+| 判定为能力目录类 | `references/skill-project.md` |
+| 要交棒（拆掉自己留下的痕迹） | `references/handoff.md` |
 
-### 仓库里另有
+### 落盘骨架（`templates/`）：照抄，不要改写
 
-这些文件**不进用户包**（`.gitattributes` 里排除了它们）：它们是这个仓库自己的协作设施，
-拿到包的人不需要，也不该被它们干扰。
+项目契约、说明、贡献指南、发版规范、工作记录、提案模板、两类问题模板、两份流水线，
+以及几份许可证全文，都在这里。
 
-| 文件 | 何时读 |
-| --- | --- |
-| `AGENTS.md` | 本仓库的项目契约：机制、不变量、构建与验证、硬性规范 |
-| `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
-| `RELEASING.md` | 本仓库自己的发版规范：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
-| `docs/` | 本仓库自己的发布说明（`docs/release-notes/<标签>.md`）与工作记录（`docs/work/`，跨会话的活按 `references/collaboration.md` 第二节的命名规则放） |
-| `.github/` | 持续集成与协作模板（`workflows/`、issue 与 PR 模板） |
-| `.gitattributes` | 用户包的排除规则：`export-ignore` 列出哪些不进包 |
-| `.gitignore` | 不进版本库的本机产物（依赖目录、构建输出、本机状态目录） |
-| `scripts/dev/preflight.mjs` | **维护本 skill 自身时**的自检（结构、引用、内核一致、数量自称、包边界、卡片断言） |
-| `scripts/dev/selftest.mjs` | **维护本 skill 自身时**的行为自检入口：并行跑下面的分片并合并计数 |
-| `scripts/dev/cases-0.mjs` | 行为自检分片之一，由 `selftest.mjs` 并行调度；改断言改这里 |
-| `scripts/dev/cases-1.mjs` | 同上 |
-| `scripts/dev/cases-2.mjs` | 同上 |
-| `scripts/dev/cases-3.mjs` | 同上 |
-| `scripts/dev/cases-4.mjs` | 同上（单列的耗时组，让并行时各片负载均衡）|
-| `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器、跨组的小工具 |
-| `scripts/dev/render-svg.mjs` | **改 README 卡片时**用它验收：渲染成位图并量出四边留白与画布尺寸是否合规 |
-| `scripts/dev/bench.mjs` | **判断这次改动有没有变慢**：量关键命令的耗时，改前改后各跑一遍对比 |
+**它们是落盘产物，不是判据**：写进项目的是一份能用的骨架；为什么这么写、哪里可以不一样，
+一律在 `references/` 里。同一段话两边各写一份，就一定会有一边先过期。
+
+### 工具（`scripts/`）：AI 会跑到的那几条
+
+```sh
+node "<本领目录>/scripts/update.mjs" --quiet                 # 任何任务的第一步：先把副本换成最新
+node "<本领目录>/scripts/survey.mjs" "<项目目录>" --markdown   # P1 勘察（只读）
+node "<本领目录>/scripts/compose-agents.mjs" "<项目目录>"      # P4 生成/刷新契约（--check / --status / --upgrade / --record）
+node "<本领目录>/scripts/review.mjs" "<项目目录>"              # P4/P5 交付门禁（--scope 只验一面）
+node "<本领目录>/scripts/handoff.mjs" "<项目目录>" --scan      # P8 交棒（--verify 判干净）
+```
+
+其余脚本（生态描述符、公共模块、发版说明发送、徽章核对、目录同步、解包）由上面这几个
+按需调用，**不需要另外记住**。
+
+这个仓库自己另有哪些文件（不进包的那些），写在 `AGENTS.md` 的「仓库里另有」一节——
+那是维护这个 skill 时才需要读的东西，不是用这个 skill 的人需要的。
+
 
 ## 边界
 

@@ -20,7 +20,6 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { listRoot, manifestSection } from './lib/manifest.mjs'
 export { listRoot, manifestSection } from './lib/manifest.mjs'
@@ -31,7 +30,7 @@ export { listRoot, manifestSection } from './lib/manifest.mjs'
 // 它们是本文件的下游，本文件不转出它们——需要的人直接从 lib/ 取，
 // 否则任何想判断「这是不是主模块」的脚本又得把整个勘察引擎加载进来。
 import { taskRunnerCommands } from './lib/task-runners.mjs'
-import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock, repoPath, repoRelation, skillSource } from './lib/text.mjs'
+import { posixPath, readTextFile, isMainModule, decodeText, frontmatterBlock, repoRelation, skillSource } from './lib/text.mjs'
 export { parseGitHubRepo } from './lib/text.mjs'
 // 协议常量（注入标记、占位符、预算）住在 lib/protocol.mjs：它们被四个脚本共用，
 // 而任何想拿一个标记的脚本都不该因此加载整个勘察引擎。
@@ -43,7 +42,7 @@ export { isNoteKey } from './lib/protocol.mjs'
 // 与上面同样的道理：转出不在本模块作用域建局部绑定，还要真引入一次。
 import { isNoteKey } from './lib/protocol.mjs'
 import { scanLines } from './lib/markdown.mjs'
-import { HOST_ECOSYSTEMS, detectHost, deriveHostFacts } from './ecosystems.mjs'
+import { HOST_ECOSYSTEMS, detectHosts, deriveHostFacts } from './ecosystems.mjs'
 
 
 /**
@@ -320,6 +319,11 @@ function run(cmd, args, cwd) {
  * `undefined`、把空输出折叠成 `''`，两者在下游没法区分。这里统一成对象。
  *
  * 不抛异常、不重试：调用方要的是「问到了什么」，不是「命令成功了吗」。
+ *
+ * **`error` 必须原样带出来**：调用方要区分「git 根本不存在」（spawn 失败，`error.code`
+ * 是 ENOENT）与「git 在、但这个目录不是仓库」（命令跑了、退出码非零）。只给一个 `ok`
+ * 的话这两种情况长得一模一样，而它们的结论正好相反——前者是「这台机器没有版本控制」，
+ * 后者是「有，只是没建库」。
  */
 function runCapture(args, cwd) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: GIT_MAX_BUFFER })
@@ -329,6 +333,7 @@ function runCapture(args, cwd) {
     status: r.status ?? -1,
     stdout: r.stdout ?? '',
     stderr: r.stderr ?? '',
+    error: r.error,
   }
 }
 
@@ -592,6 +597,9 @@ const SKILL_ENTRY_NAMES = ['SKILL.md', 'skill.md']
  * 新增一处的判据是「确实有宿主会从这里发现」，不是「这个路径看着合理」——多收一处
  * 就会报出宿主根本不会加载的目录，而盘点一旦开始报假的东西，就没人再读它了。
  * 顺序即报告里的优先级：同一个能力目录出现在多处时，先出现的排在前面。
+ *
+ * **这张表是唯一一处按名字写出这些路径的地方**，判定逻辑里不再出现任何一家的名字：
+ * 新增一种布局 = 往这里加一项，`detectLocalSkills` 一行都不用改。
  */
 const LOCAL_SKILL_BASES = ['.dsh/skills', '.agents/skills', '.claude/skills', 'skills']
 
@@ -964,6 +972,45 @@ function scanContents(root, candidates, realHomes) {
   return { secrets, homePaths, shaped, stats }
 }
 
+/**
+ * 「这次内容扫描覆盖了多深」的唯一构造处。**轻量与完整两条路必须走同一个函数。**
+ *
+ * 为什么要单独一处：这段结构有十来个字段，两处各拼一份时，少一个字段的症状是下游读到
+ * `undefined`——实测轻量模式的 markdown 报告就印出过「内容扫描覆盖：0 个文件（undefined）」。
+ * 报告里出现 `undefined`，读的人会以为整个工具坏了，而实际只是「这一趟没扫」。
+ *
+ * 跳过时**不假造数字**：扫过的量为 0 是因为真的没读文件，不是因为「查了、干净」。
+ * 两者由 `skipped` 这个布尔分开——它的存在本身就是「这一趟没有内容结论」的标记。
+ */
+function buildContentScan(light, walked, scanned, candidateCount) {
+  return {
+    filesScanned: light ? 0 : candidateCount,
+    skipped: light,
+    // 「文件数超限」与「深度超限」分开报：前者要重扫，后者要确认那层深目录里有什么。
+    truncated: light ? undefined : walked.contentScanTruncated === true,
+    depthLimited: light ? undefined : walked.depthLimited,
+    // 上限本身也是数据：呈现层要说「超过多少层」，它不该反过来依赖勘察引擎的常量。
+    // 与 auto.headLimit 同构——报告里出现的每个数值都要能从输入数据拿到。
+    maxDepth: MAX_WALK_DEPTH,
+    depthLimitedPaths: light ? [] : (walked.depthLimitedPaths ?? []).slice(0, 20),
+    // 其余四类「没扫到」也各有一个数：超单文件上限、按扩展名跳过、读不出来、
+    // 非 UTF-8（按宽松解码尽力扫，但编码没嗅探到）。任何一类非零，
+    // 「无命中」都不等于「干净」。
+    skippedLarge: walked.skippedLarge ?? 0,
+    skippedByExtension: walked.skippedByExtension ?? 0,
+    unreadable: scanned.stats.unreadable,
+    notUtf8: scanned.stats.notUtf8,
+    utf16Decoded: scanned.stats.utf16Decoded,
+    // 读不出来的**目录**：整棵子树都没进勘察。与 `unreadable`（文件）分开列，
+    // 因为处置不同——一个是「这个文件没扫」，一个是「这块地方整个没看」。
+    unreadableDirs: light ? [] : (walked.unreadableDirs ?? []).slice(0, 20),
+    unreadableDirCount: light ? 0 : (walked.unreadableDirs ?? []).length,
+    scope: light
+      ? '轻量模式：没有做内容扫描（本趟不产生任何内容结论）'
+      : '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除，UTF-16 已按 BOM 或 NUL 密度嗅探解码）',
+  }
+}
+
 
 /**
  * 这个目录里有没有**属于该生态的**清单。
@@ -1126,7 +1173,6 @@ function detectEcosystem(root, root_, walked) {
   const evidence = []
   const kinds = []
   const pkg = readJson(join(root, root_.real('package.json') ?? 'package.json'))
-  const cordisPatch = root_.first(['cordis.patch.yml', 'cordis.patch.yaml', 'cordis.yml'])
   const skillFile = root_.first(SKILL_ENTRY_NAMES)
   const skillText = skillFile === undefined ? undefined : readText(join(root, skillFile))
   const skill = skillFrontmatter(skillText)
@@ -1136,24 +1182,42 @@ function detectEcosystem(root, root_, walked) {
       evidence.push(`${root_.real('package.json')}（${corruptReasonText(pkg.__reason)}）`)
       kinds.push('node')
     } else {
-    evidence.push(root_.real('package.json'))
-    kinds.push('node')
-    if (pkg.dsh?.bundle !== undefined || cordisPatch !== undefined) {
-      evidence.push(cordisPatch !== undefined ? cordisPatch : 'package.json 的 dsh.bundle 声明')
-      kinds.push('dsh-plugin')
+      evidence.push(root_.real('package.json'))
+      kinds.push('node')
     }
-    // VS Code 扩展：判据是 `engines.vscode`——只有扩展会声明它。
-    // `contributes` 单独出现不足以判定（别的生态也可能用这个词）。
-    if (pkg.engines?.vscode !== undefined) {
-      evidence.push('package.json 的 engines.vscode')
-      kinds.push('vscode-extension')
-    }
-    }
-  } else if (cordisPatch !== undefined || skill !== undefined) {
-    // 有插件配置或 skill 入口但没有 JS 清单：仍然可能是这两类形态，不能等到认出
-    // package.json 才认。插件的「产物必须入库」判据依赖这个识别结果。
-    if (cordisPatch !== undefined) { evidence.push(cordisPatch); kinds.push('dsh-plugin') }
-    if (skill !== undefined) { evidence.push(`SKILL.md（name: ${skill.name}）`); kinds.push('skill') }
+  }
+
+  // **宿主类生态一律由描述符判**（见 `scripts/ecosystems.mjs`）：哪一种清单字段、
+  // 哪一个补丁文件表明身份，都写在那张表里；这里只准备「清单与文件在不在」这个上下文。
+  // 主引擎里出现任何一个宿主名，加第二个宿主时就要改这段——而那正是描述符要消灭的事。
+  //
+  // 判据**与有没有 package.json 无关**：有的宿主靠一个承载配置的文件表明身份，
+  // 那种项目根本没有 JS 清单。所以这一支不能被上面的 `if (pkg !== undefined)` 圈住。
+  const hostCtx = {
+    exists: (rel) => root_.has(rel),
+    readText: (rel) => {
+      const real = root_.real(rel)
+      return real === undefined ? undefined : readText(join(root, real))
+    },
+    manifest: (name) => {
+      if (name === 'package.json') {
+        return pkg === undefined || pkg.__corrupt === true ? undefined : pkg
+      }
+      const real = root_.real(name)
+      if (real === undefined) return undefined
+      const parsed = readJson(join(root, real))
+      return parsed === undefined || parsed.__corrupt === true ? undefined : parsed
+    },
+  }
+  for (const d of detectHosts(HOST_ECOSYSTEMS, hostCtx)) {
+    if (kinds.includes(d.id)) continue
+    evidence.push(d.evidenceFor === undefined ? d.id : d.evidenceFor(hostCtx, pkg))
+    kinds.push(d.id)
+  }
+  // skill 入口与生态判定互不依赖：有 JS 清单、也有 skill 入口时，上面那一支认不出后者。
+  if (skill !== undefined && !kinds.includes('skill')) {
+    evidence.push(`SKILL.md（name: ${skill.name}）`)
+    kinds.push('skill')
   }
   // 清单表：先判 `package.json`（它还要看清单内部的字段），其余按表扫。
   // 表里带 `marker` 的那一项（Obsidian 的 manifest.json）要求清单正文里出现那个字段，
@@ -1165,12 +1229,6 @@ function detectEcosystem(root, root_, walked) {
     if (m.marker !== undefined && !m.marker.test(readText(join(root, real)) ?? '')) continue
     evidence.push(real)
     kinds.push(manifestKind(m))
-  }
-  // skill 入口与 JS 清单互不依赖：两个都在时上面已经各推过一次，这里补齐「有清单
-  // 但没有 skill 分支」的那一种。
-  if (skill !== undefined && !kinds.includes('skill')) {
-    evidence.push(`SKILL.md（name: ${skill.name}）`)
-    kinds.push('skill')
   }
   for (const name of root_.filesIn('', /\.(csproj|fsproj|vbproj|sln)$/i)) {
     evidence.push(name); kinds.push('dotnet'); break
@@ -1963,7 +2021,7 @@ function detectHostEcosystem(root, root_, eco) {
     },
     manifest: readManifest,
   }
-  const d = detectHost(HOST_ECOSYSTEMS, ctx)
+  const d = detectHosts(HOST_ECOSYSTEMS, ctx)[0]
   if (d === undefined) return undefined
   const facts = deriveHostFacts(d, ctx)
   if (facts === undefined) return undefined
@@ -2576,6 +2634,11 @@ function detectGit(root, options = {}) {
   // `git@host:` 与 `ssh://` 两种写法迟早有一边认不出。
   info.remoteProtocol = typeof info.remote !== 'string' || info.remote === '' ? 'none'
     : (/^https?:\/\//i.test(info.remote) ? 'https' : 'ssh')
+  // 探测网络与认证时该在**哪个目录**里跑 git：必须是目标项目自己的工作区根，
+  // 不是调用方当前目录。`cwd` 缺省时 spawnSync 用的是进程 cwd，于是同一个目标、同一台
+  // 机器，结论会随「你在哪儿敲的命令」而变——而且变的方向是「报通」（被勘察的那个项目
+  // 什么都没改，只是调用方目录里恰好有一份 `insteadOf` 改写）。
+  info.reachableRoot = info.workTreeRoot !== undefined ? info.workTreeRoot : root
   info.auth = detectAuth(info, root, options)
   return info
 }
@@ -2637,13 +2700,32 @@ function detectPlatformAuth(out) {
 }
 
 /**
+ * 从远端地址里取主机名。
+ *
+ * 两种写法都认：`git@host:owner/repo.git`（scp 形式）与 `ssh://git@host:port/owner/repo.git`。
+ * 取不出来时返回 undefined——**不退回某个默认主机**：猜一个主机名会让「探不通」变成一个
+ * 看起来有依据的失败，而真正的结论是「这个地址我读不懂」。
+ */
+export function sshHostOf(remote) {
+  const s = String(remote ?? '').trim()
+  if (s === '') return undefined
+  const url = /^ssh:\/\/(?:[^@/]+@)?([^/:]+)/i.exec(s)
+  if (url !== null) return url[1]
+  const scp = /^[^@/]+@([^:/]+):/.exec(s)
+  if (scp !== null) return scp[1]
+  return undefined
+}
+
+/**
  * 轨道 A 的 SSH 分支：**离线可答**的那个问题——本机配过 SSH 没有。
  *
  * 判据只认两样**存在性**事实，不连网、不读私钥内容：
  *   - `~/.ssh` 下有 `id_*` 一类的私钥文件（`.pub` 不算：只有公钥推不了）；
- *   - 或 `~/.ssh/config` 里有指向 github.com 的 Host 段（命名密钥、443 端口都配在这里）。
+ *   - 或 `~/.ssh/config` 里有指向**该远端主机**的 Host 段（命名密钥、443 端口都配在这里）。
+ *
+ * 主机从远端地址取，不写死成某一个平台：远端指向哪里，就看那份 config 里有没有它。
  */
-function detectSshAuth(out) {
+function detectSshAuth(out, host) {
   const dir = join(homedir(), '.ssh')
   let entries = []
   try {
@@ -2658,16 +2740,22 @@ function detectSshAuth(out) {
   const keyFiles = entries
     .filter((e) => e.isFile() && /^id_/.test(e.name) && !e.name.endsWith('.pub'))
     .map((e) => e.name)
-  let hasGithubHost = false
+  // config 里有没有这台主机的段。主机名按字面转义后当正则用——它是从地址里读出来的
+  // 一段文本，不是可以拼进正则的常量。
+  let hasHostSection = false
   if (entries.some((e) => e.isFile() && e.name === 'config')) {
     try {
       const cfg = readFileSync(join(dir, 'config'), 'utf8')
-      hasGithubHost = /^\s*Host\s+[^\n]*github\.com/im.test(cfg)
-    } catch { hasGithubHost = false }
+      const needle = host === undefined ? undefined
+        : new RegExp(`^\\s*Host\\s+[^\\n]*${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'im')
+      hasHostSection = needle !== undefined && needle.test(cfg)
+    } catch { hasHostSection = false }
   }
-  if (keyFiles.length === 0 && !hasGithubHost) {
+  if (keyFiles.length === 0 && !hasHostSection) {
     out.ssh = 'missing'
-    out.sshReason = `${dir} 里没有 id_* 私钥，config 里也没有 github.com 段`
+    out.sshReason = host === undefined
+      ? `${dir} 里没有 id_* 私钥，且远端地址里取不出主机名，无法判断 config 里该找哪一段`
+      : `${dir} 里没有 id_* 私钥，config 里也没有 ${host} 段`
     out.transport = 'no-credential'
     out.transportReason = out.sshReason
     return
@@ -2677,7 +2765,7 @@ function detectSshAuth(out) {
   if (keyFiles.length > 0) {
     bits.push(`私钥 ${keyFiles.slice(0, 3).join('、')}${keyFiles.length > 3 ? ' 等' : ''}`)
   }
-  if (hasGithubHost) bits.push('config 里有 github.com 段')
+  if (hasHostSection) bits.push(`config 里有 ${host} 段`)
   out.sshReason = `${dir} 里：${bits.join('，')}——离线只能判「配过」，通不通要加 --probe-network`
   // 配过就按「能推」记：离线判不了通不通，而把它记成「没凭据」会让人去重配一遍本来
   // 配好的东西。真通不通由 --probe-network 回答。
@@ -2696,16 +2784,27 @@ function detectSshAuth(out) {
  * 往返都不该混进来。
  */
 function detectNetwork(out, info, options) {
-  const root = info.root
+  // 在**目标项目自己的**工作区根里跑，不在调用方当前目录里跑。`info.workTreeRoot` 由
+  // detectGit 给出；退化时用外层传入的根（`info.reachableRoot` 就是它）。
+  // 缺省 cwd 会让 spawnSync 用进程 cwd，于是同一个目标、同一台机器会因为「你在哪儿敲的
+  // 命令」得到两个相反的结论——而且偏向「报通」，那是最难发现的一种错。
+  const root = info.reachableRoot
   const remote = info.remote
   if (options.probeNetwork !== true) {
     out.networkReason = '没有探测（默认不联网；需要时加 --probe-network）'
     return
   }
   if (info.remoteProtocol === 'ssh') {
-    // GitHub 认证成功时**退出码是 1**、文案里写着 successfully authenticated。
+    // SSH 这一路探的是「这把钥匙在这台机器上能不能用」，宿主从远端地址取，
+    // **不写死成某一个平台**：远端指向哪里就探哪里。
+    const host = sshHostOf(remote)
+    if (host === undefined) {
+      out.networkReason = '远端地址里取不出主机名，无法探测'
+      return
+    }
+    // 认证成功时 ssh 的退出码是 1、文案里写着 successfully authenticated（各平台一致）。
     // 按 0 判会把「通」读成「不通」——这是它的既定行为，不是异常。
-    const r = spawnSync('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], {
+    const r = spawnSync('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', `git@${host}`], {
       cwd: root, encoding: 'utf8', windowsHide: true, timeout: 12000, maxBuffer: 1024 * 1024,
     })
     const text = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
@@ -2714,7 +2813,7 @@ function detectNetwork(out, info, options) {
     } else if (/successfully authenticated/i.test(text)) {
       out.network = 'reachable'
       out.ssh = 'configured'
-      out.sshReason = 'SSH 握手成功（GitHub 回 successfully authenticated）'
+      out.sshReason = `SSH 握手成功（${host} 回了 successfully authenticated）`
     } else if (/Permission denied/i.test(text)) {
       out.network = 'unreachable'
       out.ssh = 'missing'
@@ -2722,7 +2821,7 @@ function detectNetwork(out, info, options) {
     } else {
       out.network = 'unreachable'
       out.networkReason = /Connection refused|timed out|Timeout/i.test(text)
-        ? '连不上（22 端口被封时改用 ssh.github.com:443，见 references/remote-github.md）'
+        ? `连不上（22 端口被封时改用 ${host}:443，见 references/remote-github.md）`
         : '未识别的失败（见 ssh -T 的输出）'
     }
     return
@@ -2817,7 +2916,7 @@ function detectAuth(info, root, options = {}) {
   // 一条待问，而且没有任何开关能消掉它**——严谨退化成了一条走不通的路。
   if (!/^https?:\/\//i.test(remote)) {
     out.protocol = 'ssh'
-    detectSshAuth(out)
+    detectSshAuth(out, sshHostOf(remote))
     out.https = 'n/a'
     out.httpsReason = '远端是 SSH 形式，不走凭据助手（推送认证由密钥与 agent 决定）'
     if (options.probeNetwork === true) detectNetwork(out, info, options)
@@ -3100,31 +3199,12 @@ function survey(target, options = {}) {
       homePathLeaks,
       // 说明这次内容扫描覆盖了多深。上层据此判断「0 命中」到底是真干净、还是没扫到：
       // 截断时不能把「没报」当成「没有」。
-      contentScan: options.light === true ? { filesScanned: 0, skipped: true } : {
-        filesScanned: candidates.length,
-        truncated: walked.contentScanTruncated === true,
-        // 深度超限是另一种「没扫到」，与「文件数超限」分开报——两者的处置不同
-        // （前者要确认那层深目录里是不是有东西，后者要重扫）。任何一种都不能读成
-        // 「检查过了，很干净」。
-        depthLimited: walked.depthLimited,
-        // 上限本身也是数据：呈现层要说「超过多少层」，它不该反过来依赖勘察引擎的常量。
-        // 与 auto.headLimit 同构——报告里出现的每个数值都要能从输入数据拿到。
-        maxDepth: MAX_WALK_DEPTH,
-        depthLimitedPaths: (walked.depthLimitedPaths ?? []).slice(0, 20),
-        // 其余四类「没扫到」也各有一个数：超单文件上限、按扩展名跳过、读不出来、
-        // 非 UTF-8（按宽松解码尽力扫，但编码没嗅探到）。任何一类非零，
-        // 「无命中」都不等于「干净」。
-        skippedLarge: walked.skippedLarge ?? 0,
-        skippedByExtension: walked.skippedByExtension ?? 0,
-        unreadable: scanned.stats.unreadable,
-        notUtf8: scanned.stats.notUtf8,
-        utf16Decoded: scanned.stats.utf16Decoded,
-        // 读不出来的**目录**：整棵子树都没进勘察。与 `unreadable`（文件）分开列，
-        // 因为处置不同——一个是「这个文件没扫」，一个是「这块地方整个没看」。
-        unreadableDirs: (walked.unreadableDirs ?? []).slice(0, 20),
-        unreadableDirCount: (walked.unreadableDirs ?? []).length,
-        scope: '递归（依赖目录排除；类产物目录体量排除但凭据仍扫描；二进制与超大文件排除，UTF-16 已按 BOM 或 NUL 密度嗅探解码）',
-      },
+      //
+      // **形状与「扫过」那条完全一致，一个字段都不少**：跳过只是不读文件，不是换一种
+      // 结构。少字段时下游会读到 `undefined`——实测轻量模式的 markdown 就印出过
+      // 「内容扫描覆盖：0 个文件（undefined）」，而报告里出现 `undefined` 是会被人当成
+      // 工具坏了的。`skipped: true` 才是「没扫」这个事实本身的位置。
+      contentScan: buildContentScan(options.light === true, walked, scanned, candidates.length),
       largeFiles: largeFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
       symlinks: walked.symlinks.slice(0, 50),
       nestedRepos: walked.nestedRepos,
@@ -3274,17 +3354,27 @@ function main(argv) {
   const args = argv.slice(2)
   // `-h` 也是帮助开关，必须先从位置参数里排除：只看 `--` 前缀的话，`-h` 会被当成
   // 目录名（实测报「目录不存在 …\-h」，而帮助分支永不成立）。
-  const flags = args.filter((a) => a.startsWith('--') || a === '-h')
-  const positional = args.filter((a) => !a.startsWith('--') && a !== '-h')
+  //
+  // **判据是「以 - 开头」，不是一个手抄的清单**：`-x` 这种拼错的短开关原先会被当成
+  // 目录名，报出来的是「目录不存在 …\-x」外加一整段 Node 栈——错误提示指向了错的原因，
+  // 而真正的原因（这个开关不存在）一个字都没说。
+  const flags = args.filter((a) => a.startsWith('-'))
+  const positional = args.filter((a) => !a.startsWith('-'))
   const target = positional[0] ?? process.cwd()
   // 未知开关**必须报错**，不能静默忽略：拼错 `--probe-network` 或 `--markdown` 时
   // 脚本会照常跑完并返回 0，调用方以为「这个开关生效了」。基准脚本就踩过——
   // 测了一个并不存在的 `--fast`，测出的是普通模式的耗时，而它自己不知道。
-  const KNOWN_FLAGS = new Set(['--json', '--markdown', '--probe-network', '--fast', '--help'])
-  const unknownFlags = flags.filter((f) => f !== '-h' && !KNOWN_FLAGS.has(f))
+  const KNOWN_FLAGS = new Set(['--json', '--markdown', '--probe-network', '--fast', '--help', '-h'])
+  const unknownFlags = flags.filter((f) => !KNOWN_FLAGS.has(f))
   if (unknownFlags.length > 0) {
     process.stderr.write(`无法识别的开关：${unknownFlags.join('、')}。`
-      + `可用：${[...KNOWN_FLAGS].join('、')}。跑 --help 看说明。\n`)
+      + `可用：${[...KNOWN_FLAGS].filter((f) => f !== '-h').join('、')}。跑 --help 看说明。\n`)
+    return 2
+  }
+  // 两个输出开关互斥。都给时**不静默挑一个**：机器消费方会拿到 markdown 去 JSON.parse，
+  // 然后报一个与真实原因无关的解析错误。同仓的 handoff 与 preflight 对互斥开关都是显式拒绝。
+  if (flags.includes('--json') && flags.includes('--markdown')) {
+    process.stderr.write('--json 与 --markdown 互斥，只能给一个（不给时默认 --json）。\n')
     return 2
   }
   const asMarkdown = flags.includes('--markdown')

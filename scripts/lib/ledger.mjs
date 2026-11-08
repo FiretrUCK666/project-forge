@@ -246,11 +246,6 @@ export function provenance(ledger, { file, id, existing, extract }) {
   return { state: contentHash(got) === record.mine ? 'mine' : 'edited', record, body: got }
 }
 
-/** 某文件在账本里有没有任何记录。 */
-export function hasAnyRecord(ledger, file) {
-  return segmentIds(ledger, file).length > 0
-}
-
 /** 删掉一条记录（撤除之后调用）。 */
 export function forgetSegment(ledger, file, id) {
   const fileKey = String(file).replace(/\\/g, '/')

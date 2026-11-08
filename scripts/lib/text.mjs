@@ -245,46 +245,9 @@ export function repoRelation(a, b) {
 }
 
 /**
- * 从 SKILL.md 的文件地图里读出两张表：随包分发的、只服务本仓库的。
- *
- * **判据来自文档结构本身，不是另一份清单**——两个小标题之间的表格行里出现的路径就是
- * 声明。这份结果有两个读者，而且它们必须看到同一份答案：
- *   - `preflight.mjs` 用它核对包边界（漏登记、放错位置、声明与实际矛盾）；
- *   - `update.mjs` 用它清掉副本里「包里本来不该有」的那些文件——当初下成了 GitHub 的
- *     `Source code` 时，`.github/`、`AGENTS.md` 一类会一直留在那里碍事。
- * 所以它住在随包分发的模块里，而不是仓库自用的自检脚本里：用户包里没有自检脚本，
- * 但用户包副本恰恰最需要那份排除表。
- */
-export function readFileMap(skillText) {
-  const buckets = { shipped: [], repoOnly: [] }
-  let bucket
-  for (const line of String(skillText ?? '').split('\n')) {
-    if (/^###\s+用户包里有/.test(line)) { bucket = buckets.shipped; continue }
-    if (/^###\s+仓库里另有/.test(line)) { bucket = buckets.repoOnly; continue }
-    if (/^##\s/.test(line)) { bucket = undefined; continue }
-    if (bucket === undefined) continue
-    // 只看表格行的**第一格**：那一格才是文件清单，说明格里的反引号（提到的文档、
-    // 命令开关、凭据名）不是声明，读进来会造出一堆假失败。
-    const cell = tableRowFirstCell(line)
-    if (cell === undefined) continue
-    for (const m of cell.matchAll(/`([^`]+)`/g)) {
-      const v = m[1].trim()
-      if (v.includes('<')) {
-        // 占位条目（形如 `references/plugins/<生态>.md`）取它所在的目录当前缀
-        const dir = v.slice(0, v.lastIndexOf('/') + 1)
-        if (dir !== '') bucket.push(dir)
-        continue
-      }
-      if (/^[A-Za-z0-9._/-]+$/.test(v)) bucket.push(v)
-    }
-  }
-  return buckets
-}
-
-/**
  * 表格行的**第一格**原文。不是表格行时返回 undefined。
  *
- * 「什么算表格行」只在这里定义一次：文件地图的解析与 README 文件表的对账都从它取，
+ * 「什么算表格行」只在这里定义一次：所有需要按表格读文档的地方都从它取，
  * 两处各写一套迟早会在某个边界形状上给出两种答案。
  */
 export function tableRowFirstCell(line) {

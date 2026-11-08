@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableRowFirstCell, tableFirstCells, readFileMap, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
@@ -347,7 +347,7 @@ export function referencedPaths(text) {
  *
  * **`docs/` 里只有 `release-notes/` 不判，不是整个 `docs/`**：发布说明是**历史快照**——它
  * 写的是「那一版的仓库长什么样」，提到某个后来被删掉的文件是**正确**的历史陈述，不是断链。
- * 但同一个 `docs/` 下还有**活文档**（工作项、设计与决策记录）：它们描述的是现在，断链就是
+ * 但同一个 `docs/` 下还有**活文档**（工作记录、设计与决策记录）：它们描述的是现在，断链就是
  * 断链。一刀切豁免整个目录，等于让 `docs/` 变成引用检查的盲区——而那正是 AI 最常去读的
  * 地方之一。两种东西判据相反，判据就必须分开。
  */
@@ -2077,7 +2077,7 @@ function checkOwnTemplates() {
     [/回滚/, '回滚点'],
     [/风险与影响范围/, '风险与影响范围'],
     [/没有弱化任何门禁/, '「没有弱化任何门禁」这条自查'],
-    [/任务单/, '任务单状态与断点'],
+    [/工作记录/, '工作记录状态与断点'],
   ]
   const prGap = prNeed.filter(([re]) => !re.test(prText)).map(([, label]) => label)
   if (prGap.length > 0) {
@@ -2126,6 +2126,112 @@ function checkOwnTemplates() {
   }
   if (prGap.length === 0 && kinds.has('bug') && kinds.has('feature')) {
     process.stdout.write(`协作模板：${issues.length} 份问题模板与提案模板的要素齐全\n`)
+  }
+}
+
+/**
+ * 本仓库的发布说明：**它教别人怎么写，自己就得先满足那套判据**。
+ *
+ * 判据只有一处实现（`lib/protocol.mjs` 的 `lintReleaseNotes`），发送端与这里共用同一份——
+ * 两处各判一次，迟早一处改了一处没改，而那时的表现是「CI 发送时拒绝，本地校验说没问题」。
+ *
+ * 只查「任何项目都成立」的那几条：有且只有一个标题、标题里那个号与文件名一致、至少一节、
+ * 没有空节、没有同名节、没留骨架标记。**不查分了哪几节**（那是每个项目自己的决定）。
+ *
+ * 标题与文件名的比对要带着**号**去比（`lintReleaseNotes` 只认标题里第一个像版本号的东西），
+ * 所以「# v1.2.3 — 首次发布」这类写法照过——它不是错号。这一条正是发版链路依赖的事实：
+ * 工作流按标签名取文件，文件里写的是另一个号，页面上的标题就对不上。
+ */
+function checkReleaseNotes() {
+  const dir = join(SKILL_ROOT, 'docs', 'release-notes')
+  if (!existsSync(dir)) return
+  const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort()
+  if (files.length === 0) {
+    fail('docs/release-notes/ 是空的 —— 发过版的仓库至少有一份说明。')
+    return
+  }
+  let bad = 0
+  for (const name of files) {
+    const tag = name.replace(/\.md$/, '')
+    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''), tag)
+    if (problems.length > 0) {
+      bad += 1
+      fail(`docs/release-notes/${name} 不像一份成品：${problems.join('；')}。`
+        + '历史说明是快照、不按今天的规范改——但空壳、空节、同名节在任何一版里都不成立，'
+        + '按报出的那一条修。')
+    }
+  }
+  if (bad === 0) {
+    process.stdout.write(`发布说明：${files.length} 份都通过结构检查（标题、分节、无空节）\n`)
+  }
+}
+
+/**
+ * 本仓库的工作记录：**结构与命名是机器能判的那一半**。
+ *
+ * 状态、决策、断点写得对不对，机器判不了（也不该判——那是意图）；能判的是「这份记录有没有
+ * 按自己写下的规范落盘」：文件名带建单日期、表头三行齐全且日期可解析、断点不是空的。
+ * 这一条挡的是最常见的退化——记录还在，但停在上上轮，或者根本没按格式写。
+ *
+ * 判据来源是 `references/collaboration.md` 第二节与 `templates/work-item.md`；**两边谁改了，
+ * 这里也要跟着改**，否则门禁会拿旧规范去判新写法。
+ */
+function checkWorkRecords() {
+  const dir = join(SKILL_ROOT, 'docs', 'work')
+  if (!existsSync(dir)) return
+  const files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort()
+  let bad = 0
+  for (const name of files) {
+    const rel = `docs/work/${name}`
+    const text = readText(join(dir, name)).replace(/^\uFEFF/, '')
+    if (!/^\d{4}-\d{2}-\d{2}-.+\.md$/.test(name)) {
+      bad += 1
+      fail(`${rel} 文件名不是 \`YYYY-MM-DD-主题.md\` —— 日期在最前、写建单那天，`
+        + '不带编号与状态。已经在用的老文件不强制改名；新建的照这条走。')
+      continue
+    }
+    const fields = ['状态', '建单日期', '最近更新']
+    const gap = fields.filter((f) => !new RegExp(`^\\|\\s*${f}\\s*\\|`, 'm').test(text))
+    if (gap.length > 0) {
+      bad += 1
+      fail(`${rel} 表头缺 ${gap.join('、')} —— 这三行回答「现在什么状态、什么时候建的、`
+        + '最近一次动手是什么时候」，缺了换会话就接不上。')
+      continue
+    }
+    const dates = []
+    for (const field of ['建单日期', '最近更新']) {
+      const m = new RegExp(`^\\|\\s*${field}\\s*\\|\\s*(\\d{4}-\\d{2}-\\d{2})\\s*\\|`, 'm').exec(text)
+      if (m === null) {
+        bad += 1
+        fail(`${rel} 的「${field}」不是 YYYY-MM-DD 形状 —— 日期要能排序、能算新旧。`)
+        continue
+      }
+      dates.push(m[1])
+    }
+    const points = /^## 断点[ \t]*$/m.exec(text)
+    // 截到**下一个二级标题**为止：只删标题那一行的话，后面「完成后的记录」之类的正文会
+    // 被当成断点的内容，「断点清空」照样判过——而那正是要拦的样子。
+    const rest = points === null ? [] : text.slice(points.index).replace(/^## 断点[^\n]*\n/, '').split('\n')
+    const nextHeading = rest.findIndex((line) => /^## /.test(line))
+    const body = (nextHeading < 0 ? rest : rest.slice(0, nextHeading)).join('\n')
+    const visible = (() => {
+      const state = { inComment: false }
+      return body.split('\n').map((line) => stripHtmlComments(line, state)).join('\n').trim()
+    })()
+    if (points === null || visible === '') {
+      bad += 1
+      fail(`${rel} 的「断点」是空的 —— 卡在哪、下一步从哪接，写一句都行；`
+        + '留空会让人以为这里没做完。')
+    }
+  }
+  if (bad === 0) {
+    process.stdout.write(`工作记录：${files.length} 份文件名与表头都合规、断点非空\n`)
   }
 }
 
@@ -2653,6 +2759,8 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('用户包边界', checkPackageBoundary)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)
+  step('本仓库发布说明', checkReleaseNotes)
+  step('本仓库工作记录', checkWorkRecords)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)
   step('章节体量', checkChapterSize)

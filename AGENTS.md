@@ -290,6 +290,22 @@ skill 跑完一个项目之后，目标项目里会留着它的痕迹：标识�
   版本读，否则核的是「今天的规矩」与「那天的产出物」。用户包在打标签时产出，
   带版本号前缀；包副本的版本从 `SKILL.md` 的 `metadata.version` 读。
 
+### 本仓库是这套规范的第一个用户
+
+本文件不是「给别人看的说明」，它就是这套规范的**实例**：`references/` 与 `templates/` 里写的
+做法，本仓库必须自己做到；做不到时**先改自己，再改规范**（硬性规范第 6 条）。落地方式是下面
+这张**同步对照**——改了一边，另一边一起看（判据：两边说的还是同一件事吗）。
+
+| 这次动了 | 必须一起看 |
+| --- | --- |
+| `templates/agents-project.md` | 本文件的机制段；`references/docs-set.md` 的结构表 |
+| `templates/contributing.md`、`release-spec.md` | `CONTRIBUTING.md`、`RELEASING.md`（本仓库的实例） |
+| `templates/work-item.md`、`references/collaboration.md` | `docs/work/` 里的实际记录 |
+| 落盘模板 → 本仓库实例 | `templates/issue-bug-report.md`→`.github/ISSUE_TEMPLATE/bug_report.md`；`issue-feature-request.md`→`feature_request.md`；`pull-request-template.md`→`.github/pull_request_template.md`；`ci-check.yml`→`.github/workflows/check.yml`；`ci-release.yml`→`release.yml` |
+| 任何 `references/` 里的判据 | 本文件复述它的那一段；`scripts/review.mjs` 的对应检查 |
+| 发布链路的任何一处（说明放哪、怎么发） | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` 三处一起 |
+| `README.md` 的结构或能力 | 与 `README.en.md` 成对改 |
+
 ## README 卡片（`assets/readme/*.svg`）
 
 手写 SVG，改它要量留白与纵向节奏。判据、断言核对方式与验收命令见
@@ -574,11 +590,14 @@ job 直接红）。**机制以 `.github/workflows/release.yml` 为准，这里�
 
 | 环节 | 本项目的做法 |
 | --- | --- |
-| 任务单放哪 | 本项目还没有工作项目录；事情大到要跨会话时，建 `docs/work/` 并按 `templates/work-item.md` 起步 |
+| 工作记录放哪 | `docs/work/YYYY-MM-DD-主题.md`：日期在最前（建单日，之后不改），不带编号与状态；表头有建单日期与最近更新，关联的问题与提案写编号加日期；完成的单子留在原目录，状态改「已完成」 |
 | 提案模板 | `.github/pull_request_template.md`（含「回滚点」一栏，交付门禁会查这两个要素） |
-| 谁审 | 上下文独立的审查：只读本文件、改动全文、门禁结果、任务单与平台原始记录，不读执行者的思路、不读上一轮结论 |
+| 谁审 | **主 Agent 派一个新上下文**（子代理或新会话）：只给材料清单（本文件、改动全文、门禁输出、工作记录、平台原始记录），不给执行者思路与上一轮结论。默认只读，发现返回主 Agent 写回提案评论；**下一轮重新派**。**主 Agent 不能自审** |
 | 谁能合 | 文档与测试类可以自动合（门禁全绿 + 零阻塞 + 有回滚点）；**改判定逻辑、模板、工作流的一律人合**——那几处正是本项目的高风险区 |
-| 合并后 | 先验证真的合并了 → 关单 → 更新主干 → 先本地后远端删分支 |
+| 合并后 | 先验证真的合并了 → 关工作记录 → 更新主干 → 先本地后远端删分支 |
+
+**每轮都要留记录**：本轮的提案评论、工作记录的断点与「最近更新」，与当轮改动**同一次提交**
+——写在工作区没提交等于没写。审查的终止条件里有一条专门查这个。
 
 **这个项目的高风险区比一般项目更明确**：`scripts/` 下的判定逻辑、`templates/`、
 `.github/workflows/`、`.gitattributes`（它决定用户包的内容）。改动落在这四处的**一律
@@ -607,7 +626,7 @@ git push origin --delete <分支>      # 6) 还在才删
 堆叠提案的基底分支不能删。判据与理由见 `references/collaboration.md` 第七节。
 
 **外部报告（别人贴来一段问题描述、链接或报错）**：先核实四要素（期望、实际、复现、环境），
-缺关键信息就先出追问清单，**不盲猜写代码**；再查工作项目录防撞车、认领；然后拉分支，先写
+缺关键信息就先出追问清单，**不盲猜写代码**；再查工作记录目录防撞车、认领；然后拉分支，先写
 一个能复现的失败用例和一个防误判的反例，才改实现。五步流程见 `references/collaboration.md`
 第一节。
 
@@ -623,3 +642,5 @@ git push origin --delete <分支>      # 6) 还在才删
 
 新增判定能力时，**先造出能证伪它的 fixture**：一个该被识别成 X 的目录，和一个容易被
 误判成 X 的目录。只验证正面案例，等于没验证。
+
+临时草稿写系统临时目录、用完即删，不进仓库也不留 `.git/`。

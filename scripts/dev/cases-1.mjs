@@ -1241,7 +1241,7 @@ group('[7] 刷新：条件随事实变化，人写的内容不被冲掉')
   ]
   if (HAS_GIT) {
     checks.unshift(
-      ['建好远端后「先判角色」出现（防条件段落被永久冻结）', /\*\*先判角色。\*\*/.test(t)],
+      ['建好远端后「先判角色」出现（防条件段落被永久冻结）', /### 第一步：判角色/.test(t)],
       ['发版规则出现', /^### 发版规则/m.test(t)],
     )
   }
@@ -1469,6 +1469,42 @@ group('[30c] 角色与协作模板：从事实判出来，不许猜')
   report(okSingle, '模板：老形态仍认')
 }
 
+group('[57] 行动导航：契约没回刷时提醒，回刷之后安静')
+{
+  if (!HAS_GIT) {
+    skipGroup('[57] 行动导航', '环境里没有 git')
+  } else {
+    // 真实情形：契约在**还没有远端**时生成，之后才加远端。这时契约里写着「目前只有本地
+    // 仓库」，提醒必须出现；回刷一次之后必须消失。
+    const dir = fixture('action-plan', {
+      'package.json': '{"name":"ap","version":"1.0.0","repository":"https://github.com/acme/ap"}\n',
+    })
+    gitIn(dir, 'init')
+    compose(dir)
+    const md = () => spawnSync(process.execPath,
+      [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--markdown'], { encoding: 'utf8' }).stdout ?? ''
+
+    // 条件块夹在表格两行之间时，渲染器必须把标记那一行整个吃掉；否则第二行落到表外，
+    // 读者看到的是「一行不属于任何表格的文字」。这条是那个渲染改动的回归靶子。
+    const agentsRendered = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    check(/^\| 打版本标签 \|.*\n\| 发布到制品库 \|/m.test(agentsRendered),
+      '条件块夹在表格行之间：表不会被拆成两张')
+
+    gitIn(dir, 'remote', 'add', 'origin', 'https://github.com/acme/ap.git')
+    const stale = md()
+    check(/契约里还没有协作那半部分/.test(stale),
+      '有远端但契约没回刷 → 提醒回跑一次',
+      stale.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
+
+    compose(dir)
+    const fresh = md()
+    check(!/契约里还没有协作那半部分/.test(fresh),
+      '回刷之后不再提醒（判据不是恒真）',
+      fresh.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
+    report(/契约里还没有协作那半部分/.test(stale) && !/契约里还没有协作那半部分/.test(fresh),
+      '行动导航：该提醒时提醒，回刷之后安静')
+  }
+}
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

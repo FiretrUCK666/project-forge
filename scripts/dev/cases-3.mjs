@@ -18,7 +18,7 @@ import {
 import {
   authorMarkers, kindVocabulary } from '../survey.mjs'
 import { isMainModule, parseGitHubRepo, skillVersion, skillSource, parseMarkerKeys, normVersion, repoPath, repoRelation, readFileMap } from '../lib/text.mjs'
-import { needsSummary } from '../lib/protocol.mjs'
+import { needsSummary, lintReleaseNotes } from '../lib/protocol.mjs'
 import { UPSTREAM, STALE_CHECK_MS, apiEndpoint, routesFor } from '../update.mjs'
 import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
@@ -980,6 +980,18 @@ group('[8] 手写的 AGENTS.md：默认不动，--upgrade 只做加法')
   check(okGut, '生成的文件被掏空 → --check 失败', `exit=${gcheck.status}`)
   report(okGut, '生成的文件被掏空 → --check 失败')
 
+  // 存量项目最关心的一条：新的一级节能不能补进来，而作者自己那一节一个字节不动。
+  // 这是「新规矩放新节」那条纪律的机器证据——塞进别人的节里，就补不进来了。
+  const sdir = fixture('stale-shape', { 'package.json': '{"name":"s","version":"1.0.0"}\n' })
+  const keepLine = '- 我们自己的版本策略：只发补丁号'
+  writeFileSync(join(sdir, 'AGENTS.md'), '# s\n\n## 版本管理\n\n' + keepLine + '\n', 'utf8')
+  composeExpectingFailure(sdir, '--upgrade')
+  const st = readFileSync(join(sdir, 'AGENTS.md'), 'utf8')
+  const keptOld = st.includes(keepLine)
+  const addedNew = /^## 改动怎么落地（日常）$/m.test(st)
+  check(keptOld, '升级后作者自己那节的内容一个字节不动')
+  check(addedNew, '升级补上了新的一级节（存量项目接得上）')
+  report(keptOld && addedNew, '存量项目：新节补进来、旧节不动')
   // 在正文里合法地加一行注释，不该被指控成「内核不一致」
   const cdir = fixture('comment-added', { 'package.json': '{"name":"c","version":"1.0.0"}\n' })
   compose(cdir)
@@ -1250,12 +1262,34 @@ group('[26] 发布说明的发送端：文件式说明，空壳与骨架都发�
   report(empty.status === 2, '空文件：拒绝')
 
   // 3) 骨架：章节标题在、内容一句没写，还留着发版规范给的骨架标记。
+  //    这条现在由结构检查统一报（标记是其中一条），所以断言看的是「拒绝 + 点到标记」，
+  //    不锁死某一句措辞——文案可以改，行为不能。
   const shell = send(write('shell.md', '# v9.9.2\n\n## 这一版更新了什么、修复了什么\n\n'
     + '<!-- pf:needs-summary 这一段还没写 -->\n'))
-  const shellRefused = shell.status === 2 && /还是骨架/.test(shell.stderr ?? '')
+  const shellRefused = shell.status === 2 && /pf:needs-summary/.test(shell.stderr ?? '')
   check(shellRefused, '骨架说明（留着未填充的标记）→ 拒绝', (shell.stderr ?? '').split('\n')[0])
   report(shellRefused, '骨架：拒绝')
 
+  // 3b) `--check`：只查结构、不联网、不需要凭据。它是发版规范第 3 步写给维护者的命令，
+  //     所以它自己也要能证伪——否则「本地预演通过」会变成一句没人验过的话。
+  const checkOnly = (tag, file) => spawnSync(
+    process.execPath,
+    [join(SCRIPTS_DIR, 'release-notes.mjs'), tag, file, '--check'],
+    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GITHUB_TOKEN: '' } },
+  )
+  const good = write('check-good.md', '# v9.9.2\n\n## 这一版变了什么\n\n有内容\n')
+  const okCheck = checkOnly('v9.9.2', good)
+  check(okCheck.status === 0 && !/GITHUB_TOKEN/.test(okCheck.stderr ?? ''),
+    '成品 + --check：通过，且不需要凭据', (okCheck.stderr ?? '').split('\n')[0])
+  const noSection = write('check-nosection.md', '# v9.9.2\n\n只有一段正文\n')
+  const badCheck = checkOnly('v9.9.2', noSection)
+  check(badCheck.status === 2 && /没有任何二级节/.test(badCheck.stderr ?? ''),
+    '缺节 + --check：拒绝并指出缺什么', (badCheck.stderr ?? '').split('\n')[0])
+  const wrongTag = checkOnly('v9.9.1', good)
+  check(wrongTag.status === 2 && /不是同一个号/.test(wrongTag.stderr ?? ''),
+    '标签与标题不同号 + --check：拒绝', (wrongTag.stderr ?? '').split('\n')[0])
+  report(okCheck.status === 0 && badCheck.status === 2 && wrongTag.status === 2,
+    '--check：通过、缺节、错号三种都分得清')
   // 4) 判据本身要能两面证伪：少了这一半，「拒绝骨架」有可能是一句恒真的拒绝。
   const done = needsSummary('正文\n') === false && needsSummary('<!-- pf:needs-summary -->') === true
   check(done, '「还是骨架」的判据两面都分得清（带标记认出、不带标记放行）')
@@ -1474,6 +1508,90 @@ group('[55] 自己的源仓库：标识符与占位是应有状态，别处照�
   report(okDirty, '冒名目录：照旧报')
 }
 
+group('[56] 发版规范可配置、审查怎么派、工作记录怎么放（三处判据同一套）')
+{
+  const template = readSkill('templates/release-spec.md')
+  const spec = readSkill('RELEASING.md')
+  const project = readSkill('templates/agents-project.md')
+  const collab = readSkill('references/collaboration.md')
+  const contract = readSkill('AGENTS.md')
+
+  // A. 发版规范：一节必需 + 按需，不再写死「只写这两节」。
+  check(!/顺序固定[，,]?\s*只用这两节/.test(template),
+    '发版规范模板不再固定两节（那是与「分几节由项目定」矛盾的那句）')
+  report(!/顺序固定[，,]?\s*只用这两节/.test(template), '发版规范：不再写死两节')
+  check(/必需的一节/.test(template) && /按需的节/.test(template),
+    '模板区分「必需的一节」与「按需的节」')
+  check(/整节省略/.test(template), '模板写清空节整节省略（不留一句「无」）')
+  check(/加自己的节/.test(template), '模板允许项目加自己的节，并要求写进自己的规范')
+  check(/默认菜单|不是通用标准|不是标准答案/.test(template),
+    '模板明说它给的是默认菜单，不是标准答案')
+
+  // B. 实例：本仓库按自己的读者选了两节，并写下了它们。
+  check(/本项目用哪几节/.test(spec), '发版规范实例里有「本项目用哪几节」')
+  check(/这一版更新了什么、修复了什么/.test(spec), '实例保留了必需的那一节')
+  check(/要怎么跟着升级/.test(spec), '实例给「要动手」那一节起了读者视角的名字')
+
+  // C. 审查派发：新上下文、不给上一轮结论、下一轮重新派、主 Agent 不自审。
+  check(/新上下文/.test(collab) && /不复用执行者那一轮/.test(collab),
+    '协作判据写明审查要开新上下文、不复用执行者那一轮')
+  check(/上一轮审查的结论/.test(collab) && /不给/.test(collab),
+    '协作判据写明不给上一轮审查的结论')
+  check(/下一轮重新派一个新的/.test(collab), '协作判据写明下一轮重新派一个新的')
+  check(/主 Agent 不能自己充当审查/.test(collab), '协作判据写明主 Agent 不能自审')
+
+  // D. 目标项目那份自包含契约里也要有同样的三件事，否则它手里只有一份「见别处」。
+  check(/### 审查：派一个新上下文/.test(project), '目标项目契约里有「审查：派一个新上下文」一节')
+  check(/### 工作记录：跨会话靠文件/.test(project), '目标项目契约里有工作记录一节')
+  check(/日期在最前/.test(project), '工作记录写明日期在文件名最前')
+  check(/YYYY-MM-DD-一句话主题/.test(project), '工作记录给了带日期的文件名形状')
+  check(/不带编号/.test(project) && /不带状态/.test(project), '工作记录写明文件名不带编号与状态')
+  const workItem = readSkill('templates/work-item.md')
+  check(/建单日期/.test(workItem) && /最近更新/.test(workItem), '工作记录骨架有建单日期与最近更新两行')
+  check(/关联提案/.test(workItem) && /关联问题/.test(workItem), '工作记录骨架把问题与提案分开记')
+  check(/日期在最前面/.test(workItem), '骨架的填写指引写明日期在最前、之后不改')
+  check(/不要为问题建文件夹/.test(project), '工作记录写明不要为问题建文件夹')
+  check(/对话本身不落盘/.test(project), '工作记录写明对话不落盘、落档靠三样')
+  check(/留在原目录/.test(project), '工作记录写明完成的单子不搬家')
+
+  // F. 结构检查本身：只查任何项目都成立的那几条，正反两面都要分得清。
+  const lint = (text, tag = 'v1.0.0') => lintReleaseNotes(text, tag)
+  const good = lint('# v1.0.0\n\n## 这一版变了什么\n\n有内容\n')
+  const bare = lint('# 1.0.0\n\n## 这一版变了什么\n\n有内容\n')
+  const bad = {
+    empty: lint('   \n'),
+    noH1: lint('## 这一版变了什么\n\n有内容\n'),
+    wrongH1: lint('# v1.0.1\n\n## 这一版变了什么\n\n有内容\n'),
+    noH2: lint('# v1.0.0\n\n只有一段正文\n'),
+    emptyH2: lint('# v1.0.0\n\n## 这一节空着\n\n## 这一节有内容\n\nx\n'),
+    dupH2: lint('# v1.0.0\n\n## 同一节\n\nx\n\n## 同一节\n\ny\n'),
+    marker: lint('# v1.0.0\n\n## 这一版变了什么\n\nx\n\n<!-- pf:needs-summary 还没写 -->\n'),
+  }
+  check(good.length === 0, '成品说明：结构检查不报问题', JSON.stringify(good))
+  check(bare.length === 0, '标题省掉 v 前缀仍认作同一个号（写法差异不算错号）')
+  check(bad.empty.length > 0 && /空的/.test(bad.empty[0]), '空正文：报出来')
+  check(bad.noH1.some((p) => /缺一级标题/.test(p)), '缺标题：报出来')
+  check(bad.wrongH1.some((p) => /不是同一个号/.test(p)), '标题与标签不同号：报出来')
+  check(bad.noH2.some((p) => /没有任何二级节/.test(p)), '一个节都没有：报出来')
+  check(bad.emptyH2.some((p) => /没有内容/.test(p)), '空节：报出来')
+  check(bad.dupH2.some((p) => /出现了两次/.test(p)), '同名节：报出来')
+  // 注释与围栏的四种组合：这是「整份空壳」与「正文里合法地写了注释」之间的分界。
+  const commented = lint('<!--\n# v1.0.0\n\n## 变了什么\n\n有内容\n-->\n')
+  const inlineComment = lint('# v1.0.0\n\n## 变了什么\n\n<!-- 说明 -->\n真的正文\n')
+  const fencedComment = lint('# v1.0.0\n\n## 变了什么\n\n```md\n<!-- 示例 -->\n```\n')
+  const multiline = lint('# v1.0.0\n\n## 变了什么\n\n<!--\n待补\n-->\n')
+  check(commented.some((p) => /缺一级标题/.test(p)), '整份被注释包住 → 当场报出来（那是空壳）')
+  check(inlineComment.length === 0, '注释旁边有真内容 → 放行')
+  check(fencedComment.length === 0, '围栏里的注释算内容（那是示例，不是注释）')
+  check(multiline.some((p) => /没有内容/.test(p)), '跨行注释包住的空节 → 报出来')
+  report(commented.length > 0 && inlineComment.length === 0 && fencedComment.length === 0
+    && multiline.length > 0, '注释与围栏：四种组合都分得清')
+  check(bad.marker.some((p) => /骨架标记/.test(p)), '还留着骨架标记：报出来')
+  report(good.length === 0 && bare.length === 0 && Object.values(bad).every((v) => v.length > 0),
+    '结构检查：通用项正反都分得清')
+  // E. 本仓库自己：协作表里要能看出「主 Agent 派一个新上下文」。
+  check(/派一个新上下文/.test(contract), '本仓库契约的协作表写明审查怎么派')
+}
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

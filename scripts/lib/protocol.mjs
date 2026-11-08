@@ -10,8 +10,11 @@
  *   - 它们对不上时**不会有任何东西出声**（检查本身就是拿它去比的）；
  *   - 所以只能有一份来源，而这一份不该埋在某个具体工具里。
  *
- * 本模块零副作用、无本地依赖，谁都可以依赖它。
+ * 本模块零副作用；唯一的内部依赖是同样纯函数的 `markdown.mjs`（标题与围栏的扫描只此一份，
+ * 发布说明的结构检查要用到它——再审一遍围栏状态机就是第二份判据）。
  */
+
+import { scanLines } from './markdown.mjs'
 
 /**
  * 内核标记：注入方靠它定位要替换的区间。
@@ -91,6 +94,120 @@ export const INSTRUCTION_BUDGET = 65536
  */
 export function needsSummary(text) {
   return String(text ?? '').includes(SUMMARY_MARKER)
+}
+
+/**
+ * 发布说明的结构检查：**只查任何项目的说明都必须成立的那几条**。
+ *
+ * 为什么不查「分了哪几节」：那是项目自己的决定（不同项目的读者关心的事不同，库的读者
+ * 关心接口、插件的读者关心宿主兼容）。把节名或节数写进检查，等于把一家项目的规范按到
+ * 所有项目头上，而下一个项目只会绕开它。
+ *
+ * 能查的是**与项目无关的那些**：有没有标题、标题是不是这一版、有没有节、节里有没有字、
+ * 有没有两节同名、是不是还留着骨架。这几条一旦不成立，说明在任何项目里都算不上说明——
+ * 它们是「空壳」与「成品」的分界，而发布页的读者是使用者。
+ *
+ * 返回问题清单（人话，逐条可修）；空数组表示没发现问题。**未覆盖之处是「没查」，不是
+ * 「查过没问题」**——写得是否对读者有用，只有人和审查能判。
+ */
+export function lintReleaseNotes(text, tag) {
+  const body = String(text ?? '')
+  const problems = []
+  if (body.trim() === '') return ['正文是空的']
+
+  if (needsSummary(body)) {
+    problems.push(`还留着骨架标记（${SUMMARY_MARKER}）：这一段还没写`)
+  }
+
+  // 结构判据一律跑在「去掉注释之后」的文本上：整份说明被 `<!-- -->` 包起来时，标题在注释里
+  // ——机器若照样数到它，一份读者根本看不到的空壳会被判成合格。围栏里的内容不动：那里面的
+  // `<!--` 是示例，不是注释。
+  const state = { inComment: false }
+  const lines = scanLines(body).map((info) => {
+    if (info.inFence) return info
+    const visible = stripHtmlComments(info.line, state)
+    if (visible === info.line) return info
+    const h = /^(#{1,6})\s+(.+?)\s*$/.exec(visible)
+    return { ...info, line: visible, heading: h === null ? null : { level: h[1].length, title: h[2] } }
+  })
+  const marks = []
+  lines.forEach((info, i) => {
+    if (!info.inFence && info.heading !== null) marks.push({ info, i })
+  })
+
+  const h1 = marks.filter((m) => m.info.heading.level === 1)
+  if (h1.length === 0) {
+    problems.push('缺一级标题：第一行应当是这一版的标签名')
+  } else if (h1.length > 1) {
+    problems.push(`一级标题有 ${h1.length} 个：一份说明只有一个标题`)
+  } else if (typeof tag === 'string' && tag.trim() !== '') {
+    // 判据是「标题里那个号对不对」，不是「标题里只许有号」。所以从整行里取**第一个像版本号
+    // 的东西**再比：`# v1.2.3`、`# v1.2.3 — 首个公开版`、`# v1.2.3：修好导出缺页`、
+    // `# v1.2.3（首个公开版）` 都是同一个号。按空白切词会漏掉后两种——那正是「写得好好的
+    // 说明被拦在门外」，而报错还会说「不是同一个号」，与事实不符。
+    const got = h1[0].info.heading.title.trim()
+    const strip = (s) => s.trim().replace(/^v/i, '')
+    const numLike = (/v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.]+)?/i.exec(got) ?? [])[0] ?? ''
+    const candidate = numLike === '' ? got.split(/\s+/)[0] : numLike
+    if (strip(candidate) !== strip(tag)) {
+      problems.push(`一级标题写的是「${got}」，与标签「${tag}」不是同一个号`)
+    }
+  }
+
+  const h2 = marks.filter((m) => m.info.heading.level === 2)
+  if (h2.length === 0) {
+    problems.push('没有任何二级节：说明至少要有一节，写清这一版变了什么')
+  }
+
+  // 空节：标题之后到下一个「同级或更高级」标题之前，没有实际内容（`line` 已去掉注释，
+  // 所以一句 `<!-- 待补 -->` 不算内容）。
+  for (const { info, i } of h2) {
+    const level = info.heading.level
+    let hasContent = false
+    for (let k = i + 1; k < lines.length; k += 1) {
+      const next = lines[k]
+      if (!next.inFence && next.heading !== null && next.heading.level <= level) break
+      if (next.line.trim() !== '') { hasContent = true; break }
+    }
+    if (!hasContent) {
+      problems.push(`「${info.heading.title}」这一节没有内容：没有内容就整节省略，不要留一个空标题`)
+    }
+  }
+
+  const seen = new Set()
+  for (const { info } of h2) {
+    const title = info.heading.title.trim()
+    if (seen.has(title)) problems.push(`「${title}」出现了两次：同一节只能有一次`)
+    seen.add(title)
+  }
+
+  return problems
+}
+
+/**
+ * 去掉一行里的 HTML 注释，返回「读者真的能看到」的那部分。
+ *
+ * 为什么需要：空节判据若只看「这一行非空」，一句 `<!-- 待补 -->` 就算有内容——而那正是
+ * 要拦的空壳。注释可以跨行，所以状态要带出去（`state.inComment`）。
+ */
+export function stripHtmlComments(line, state) {
+  let out = ''
+  let i = 0
+  while (i < line.length) {
+    if (state.inComment) {
+      const end = line.indexOf('-->', i)
+      if (end < 0) return out
+      i = end + 3
+      state.inComment = false
+    } else {
+      const start = line.indexOf('<!--', i)
+      if (start < 0) { out += line.slice(i); break }
+      out += line.slice(i, start)
+      i = start + 4
+      state.inComment = true
+    }
+  }
+  return out
 }
 /**
  * 「这一行是本 skill 的受管标记吗」的判据：**基于上面那些常量拼出来，不另抄字面量**。

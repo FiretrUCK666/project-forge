@@ -329,6 +329,11 @@ function deriveFacts(target, s = surveyLight(target)) {
     || s.docs?.workflowAutomation?.hasReleaseJob === true
     || s.ecosystem?.kinds?.includes('skill')
     || s.ecosystem?.kinds?.includes('obsidian')
+  // 「发版规范在不在」是独立一格事实：有发布（标签、发布 job、可发布清单、skill 与插件这类
+  // 天然有版本节点的形态）不等于写下了「说明放哪、分几节」。前者决定有没有发版这件事，
+  // 后者决定发版时**有没有权威出处可照**——指着一份不存在的文件写「以它为准」，读者照做
+  // 时才发现没得照。
+  const hasReleaseSpec = s.docs?.releaseSpec !== undefined
 
   const conditions = {
     'has-git': hasGit,
@@ -369,6 +374,8 @@ function deriveFacts(target, s = surveyLight(target)) {
     'no-registry-publish': !hasRegistryPublish,
     'has-release': hasRelease,
     'no-release': !hasRelease,
+    'has-release-spec': hasReleaseSpec,
+    'no-release-spec': !hasReleaseSpec,
   }
 
   // 项目名优先取**项目自己声明的**名字（各生态清单里的 name），没有才退回目录名。
@@ -410,6 +417,10 @@ function deriveFacts(target, s = surveyLight(target)) {
   const tokens = {
     PROJECT_NAME: projectName,
     COMMANDS: renderCommands(commands),
+    // 发版规范的文件名由**勘察**给（`RELEASE.md`、`docs/releasing.md` 都算），不在这里写死
+    // `RELEASING.md`：写死会让「规范在 docs/ 下」的项目读到一个不存在的路径，而路径错的表现
+    // 是「照着做了却读不到文件」，不是报错。它只在 `has-release-spec` 为真时被渲染。
+    RELEASE_SPEC_FILE: s.docs?.releaseSpec?.file ?? '',
   }
 
   // 专属模板段落：段落正文住在生态描述符里，这里只把「命中那个生态」的那份取出来。
@@ -529,8 +540,28 @@ function materialize(template, facts) {
   let m
   MARK_RE.lastIndex = 0
   while ((m = MARK_RE.exec(template)) !== null) {
+    const pushed = out.length
     emit(template.slice(cursor, m.index))
     cursor = m.index + m[0].length
+    // 标记**独占一行**时，连这一行一起吃掉（缩进与换行都不留）。
+    //
+    // 不吃的话，条件块每出现一次就留下一个空行：夹在表格两行之间的条件块会把第二行挤到
+    // 表外（渲染成两张表），夹在有序列表里会把编号拆成两段。这不是排版洁癖——表行落单
+    // 之后，读者看到的是一行不属于任何表格的文字。
+    //
+    // 条件块写在同一行的正文里（模板里有这种写法）时不动：那种位置的空行属于作者。
+    if (/^[ \t]*$/.test(template.slice(template.lastIndexOf('\n', m.index - 1) + 1, m.index))) {
+      const lineEnd = template.indexOf('\n', cursor)
+      const rest = lineEnd < 0 ? template.slice(cursor) : template.slice(cursor, lineEnd)
+      if (/^[ \t]*\r?$/.test(rest)) {
+        if (out.length > pushed) {
+          const last = out[out.length - 1]
+          const indent = template.slice(template.lastIndexOf('\n', m.index - 1) + 1, m.index)
+          if (indent !== '' && last.endsWith(indent)) out[out.length - 1] = last.slice(0, -indent.length)
+        }
+        cursor = lineEnd < 0 ? template.length : lineEnd + 1
+      }
+    }
     const body = m[1]
 
     if (body.startsWith('if ')) {
@@ -706,7 +737,7 @@ function extraLines(oldText, freshText) {
  * 反过来判断（看旧文件有没有 author 标记）是错的：纯生成的小节本来就没有 author 标记，
  * 会被误判成「人已填写」，于是**永远冻结**——「有远端才有」的那几段就再也补不进来。
  */
-function refreshFromTemplate(target, existing, kernel, state, s = surveyLight(target)) {
+function refreshFromTemplate(target, existing, kernel, state, s = surveyLight(target), addMissing = false) {
   const facts = deriveFacts(target, s)
   const rendered = materialize(readUtf8(SKELETON_PATH), facts)
 
@@ -796,12 +827,29 @@ function refreshFromTemplate(target, existing, kernel, state, s = surveyLight(ta
   const head = old.head.trim().length > 0 ? old.head : fresh.head
   const parts = [{ text: head, fresh: old.head.trim().length === 0 }, ...merged]
 
+  // `--upgrade` 的补节通道：**只对受管文件开**。
+  //
+  // 受管文件的结构是模板决定的（带 MANAGED 标记），补一节进去不会灌进「与作者手写内容
+  // 并列的一套样板」；而**必须能补**——否则模板一旦把某一章搬到一个新的二级节里（例如把
+  // 协作那半部分从「版本管理」拆出来），老项目刷新时那一节会被当成「模板里没有」原样留下
+  // 旧的、新的又永远加不进来，等于整章丢失，而报告只会说「缺 1 个节（可由脚本补）」。
+  //
+  // 手写文件不走这里：它们没有 MANAGED 标记，补节会改变作者的组织方式（见上一条注释）。
+  const added = []
+  if (addMissing === true) {
+    for (const section of fresh.sections) {
+      if (oldHeadings.has(section.heading)) continue
+      parts.push({ text: collapseBlankLines(section.lines.join('\n')), fresh: true })
+      added.push(section.heading)
+    }
+  }
+
   let text = collapseJoined(parts)
   text = injectKernel(text, kernel)
   const authors = findAuthors(text)
   text = stripScaffold(text, authors.length)
 
-  const report = { kept, refreshed, missing, authors: authors.length }
+  const report = { kept, refreshed, missing: missing.filter((h) => !added.includes(h)), added, authors: authors.length }
   // `fresh` 一并带出去：账本要按「模板这次求值出什么」判归属，不能在落盘后的成品上
   // 反推——成品里作者手填的节已经不含 pf:author 了，看着就像我生成的。
   const freshRendered = rendered
@@ -1374,6 +1422,11 @@ function reportRefresh(report, stream) {
     stream.write('  - 原有段落全部保留（未删除、未改写、未重排）\n')
     return
   }
+  if (Array.isArray(report.added) && report.added.length > 0) {
+    stream.write(`\n补上了 ${report.added.length} 个模板里有、文件里没有的节（--upgrade，**追加在末尾**）：\n`)
+    for (const a of report.added) stream.write(`  - ${a}\n`)
+    stream.write('  位置在文件末尾而不是模板里的位置：既有文件的顺序以作者为准，脚本只做加法。\n')
+  }
   if (report.refreshed !== undefined && report.refreshed.length > 0) {
     stream.write(`\n按当前项目事实重新求值的节（共 ${report.refreshed.length} 节）：\n`)
     for (const r of report.refreshed) {
@@ -1594,7 +1647,7 @@ function main(argv) {
         refreshReport = { upgradedFrom: 'handwritten', added: upgraded.added, addedHuman: upgraded.addedHuman, kept: [], refreshed: [] }
       } else {
         managedExisting = existing
-        const refreshed = refreshFromTemplate(target, existing, kernel, state, s)
+        const refreshed = refreshFromTemplate(target, existing, kernel, state, s, upgrade === true)
         composed = refreshed.text
         freshForLedger = refreshed.fresh
         refreshReport = refreshed.report

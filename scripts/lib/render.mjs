@@ -414,7 +414,7 @@ export function toMarkdown(s) {
  * 凭据），再报「接上次的活」，最后才是常规的按需文档。三组混在一起平铺，读的人会从中间
  * 随手挑一条做，而第一条才是唯一紧急的那条。
  *
- * 每一组只在**有事实**时出现：没有工作项就不提工作项，没配远端就不提协作模板。空条目会
+ * 每一组只在**有事实**时出现：没有工作记录就不提工作记录，没配远端就不提协作模板。空条目会
  * 稀释真正的警告——一份什么都提一句的报告等于什么都没提。
  */
 export function computeSurveyActionPlan(s) {
@@ -440,10 +440,10 @@ export function computeSurveyActionPlan(s) {
       + '也没入库——现在提交就会把它带上去。先加忽略规则或改成占位值。')
   }
 
-  // ── 第二组：接上次的活。有工作项就说明这件事还没做完 ────────────────────
+  // ── 第二组：接上次的活。有工作记录就说明这件事还没做完 ────────────────────
   if (docs.workItems !== undefined) {
     const w = docs.workItems
-    actions.push(`- **先读工作项断点再动手**：\`${w.dir}/\` 有 ${w.count} 份工作记录`
+    actions.push(`- **先读工作记录断点再动手**：\`${w.dir}/\` 有 ${w.count} 份工作记录`
       + `${w.readable === false ? '（目录读不到，先确认权限）' : ''}——上一个会话留下的接手点在那里，`
       + '别从零重来。')
   }
@@ -467,8 +467,13 @@ export function computeSurveyActionPlan(s) {
     actions.push('- 生成项目契约：`node scripts/compose-agents.mjs .`')
   } else if (typeof git.remote === 'string' && git.remote !== '') {
     // 建好远端之后契约要回刷一次：远端与协作那半部分在首次生成时必然还不存在。
+    //
+    // 判据不能认「工作记录」这类**无条件渲染**的节——那种节什么时候都在，判出来永远为真，
+    // 这条提醒就再也不会出现（契约会一直写着「目前只有本地仓库」）。要认的是**只有有远端
+    // 才会出现**的那几个节：判角色、审查、合并与收尾。作者手写时用「协作」「提案」也认。
+    // 这一条曾经按旧节名匹配，节名一改就恒假——所以它同时靠下面那条 fixture 守着。
     const sections = docs.agentsSections ?? []
-    const hasCollab = sections.some((t) => /协作|任务单|提案/.test(t))
+    const hasCollab = sections.some((t) => /判角色|判性质|审查|合并与收尾|协作|提案/.test(t))
     if (!hasCollab) {
       actions.push('- 契约里还没有协作那半部分（远端与「改动怎么落地」）：建好远端之后必须回跑一次 '
         + '`node scripts/compose-agents.mjs .`，那次回刷才把它们补进去。')

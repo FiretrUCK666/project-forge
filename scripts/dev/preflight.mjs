@@ -114,7 +114,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 570
+export const BEHAVIOR_MIN_PASSED = 660
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2270,6 +2270,71 @@ function checkReleaseNotes() {
 }
 
 /**
+ * 「必须独立审查」这条规则，**三个来源必须说同一件事**。
+ *
+ * 规则本身在 `references/collaboration.md` 第四、五节；本仓库契约在 `AGENTS.md` 的
+ * 「协作」一节；提案模板要有一栏让人填审查记录。三处各写一份，改一处漏两处的后果是：
+ * **规则还在，但照着做的人找不到它**——实测发生过一次，执行者看到 CI 绿就合并，因为
+ * 两份文档都只说「高风险必须人合」，没有一条说「必须有人审」。
+ *
+ * 这里不判措辞，判的是**这三处有没有把同一件事都说到**。判据取关键词而不是原句：
+ * 原句一改（换个说法）就误报，而那会让这条检查被当成噪音关掉。
+ */
+function checkReviewRuleSources() {
+  const sources = [
+    ['references/collaboration.md', join(SKILL_ROOT, 'references', 'collaboration.md')],
+    ['AGENTS.md', join(SKILL_ROOT, 'AGENTS.md')],
+    ['templates/pull-request-template.md', join(SKILL_ROOT, 'templates', 'pull-request-template.md')],
+    ['.github/pull_request_template.md', join(SKILL_ROOT, '.github', 'pull_request_template.md')],
+  ]
+  const read = (p) => (existsSync(p) ? readText(p) : undefined)
+  const missing = []
+
+  // 判据一节：必须同时说清「审不审」与「谁能合」，而不是只有后者。
+  const collab = read(sources[0][1])
+  if (collab === undefined) {
+    missing.push('references/collaboration.md 不存在')
+  } else {
+    if (!/必须独立审查/.test(collab)) missing.push('collaboration.md 没有「必须独立审查」这条判据')
+    if (!/谁\*\*必须审|必须审.*谁能合|先判审不审/.test(collab)) {
+      missing.push('collaboration.md 没有把「审不审」与「谁能合」分成两件事')
+    }
+  }
+
+  // 契约一节：本仓库与落盘模板都要有。模板那份是**别的项目**照着用的，缺了这一栏，
+  // 那个项目就永远不会有这条规则。
+  for (const [label, p] of [sources[1], sources[2]]) {
+    const text = read(p)
+    if (text === undefined) { missing.push(`${label} 不存在`); continue }
+    const hasReview = /审查/.test(text)
+    const hasWhoMerge = /谁能合|人合/.test(text)
+    if (!hasReview || !hasWhoMerge) {
+      missing.push(`${label} 里「审查」与「谁能合」没有同时出现`
+        + `（审查=${hasReview} 谁能合=${hasWhoMerge}）`)
+    }
+  }
+
+  // 提案模板那一栏：没有它，审过与否就只能靠嘴说。
+  const prTpl = read(sources[3][1])
+  if (prTpl === undefined) {
+    missing.push('.github/pull_request_template.md 不存在')
+  } else if (!/^##[ \t]*审查记录/m.test(prTpl)) {
+    missing.push('.github/pull_request_template.md 缺「## 审查记录」一节——'
+      + '审过与否就没有可以填的地方，「我审过了」于是无从核对')
+  }
+
+  if (missing.length > 0) {
+    for (const m of missing) {
+      fail(`${m} —— 「必须独立审查」这条规则要在三处同时成立：判据（references）、`
+        + '本仓库契约（AGENTS.md 与落盘模板）、以及能让人填的提案栏目。缺一处，'
+        + '规则就还在、但照着做的人找不到它。')
+    }
+    return
+  }
+  process.stdout.write('审查规则：判据、契约、模板、提案栏目四处都在且指向同一件事\n')
+}
+
+/**
  * 本仓库的工作记录：**结构与命名是机器能判的那一半**。
  *
  * 状态、决策、断点写得对不对，机器判不了（也不该判——那是意图）；能判的是「这份记录有没有
@@ -2853,6 +2918,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)
   step('本仓库发布说明', checkReleaseNotes)
+  step('审查规则三处一致', checkReviewRuleSources)
   step('本仓库工作记录', checkWorkRecords)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)

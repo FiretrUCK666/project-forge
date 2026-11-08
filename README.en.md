@@ -91,7 +91,7 @@ failures.
 
 **Those four steps set the project up. What follows is a second track: how you use it day to day.**
 A change has to be routed — where it came from (an outside report, an outside pull request, your own
-daily edit), whether it needs a work item, who reviews it, who may merge, and how to clean up
+daily edit), whether it needs a work item, **which changes must be sent for an independent review first**, who may merge, and how to clean up
 afterwards. That track has no stage numbers; read it when you need it, in
 `references/collaboration.md`.
 

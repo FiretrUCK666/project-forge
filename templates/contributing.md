@@ -54,6 +54,8 @@ Issue，避免重复。
 4. 提交拉取请求，按仓库里的[提案模板](.github/pull_request_template.md)填写——
    最重要的一栏是**怎么验证的**：贴实际跑过的命令与结果，不要只写「测试通过」。
    审查的人不会替你重跑一遍，他们看的就是这一栏。
+   模板里还有一栏**审查记录**，那是维护者填的，不是你——不用管它，但你知道它存在，
+   就知道这个项目每个改动都真的过了一遍独立审查，不是「CI 绿了就算」。
 
 第一次提拉取请求、或不确定 fork 怎么用，看 GitHub 官方的[参与项目](https://docs.github.com/zh/get-started/exploring-projects-on-github/contributing-to-a-project)
 （复刻到拉取请求的完整步骤）。fork 落后于正本时，在自己 fork 的页面上点 **Sync fork**

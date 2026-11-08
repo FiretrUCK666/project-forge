@@ -46,3 +46,16 @@ jobs:
         run: |
           git archive --format=tar HEAD | tar -t > package-list.txt
           node scripts/dev/preflight.mjs --package package-list.txt --at HEAD
+
+      # **只在提案上跑**：它判的是「这份提案有没有审查记录」，而推送事件里没有提案正文。
+      # 判据本身与 CI 是两个维度：CI 绿说明现有检查都过了，它**不说明**这次改动有没有让
+      # 检查本身变松——那是审查要回答的问题。这一步把「我审过了」从自述变成可核对的痕迹。
+      - name: 高风险改动必须有审查记录（仅提案）
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}" || true
+          git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt || true
+          printf '%s' "$PR_BODY" > pr-body.md
+          node scripts/dev/review-record.mjs --changed changed.txt --body pr-body.md

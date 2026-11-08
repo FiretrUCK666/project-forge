@@ -23,6 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
+import { isHighRiskPath, highRiskChanged, reviewRecordState } from './review-record.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -473,6 +474,81 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
   report(badName.status === 1 && badHead.status === 1 && emptyBreak.status === 1 && ok.status === 0,
     '工作记录结构：命名、表头、断点、正例四面都分得清')
 }
+group('[40] 审查记录：高风险改动必须有可核对的痕迹')
+{
+  // 1) 高风险路径的判据：**目录前缀**，不是逐文件清单。
+  //    清单要人记得改；目录不会长出新的一处。
+  const high = ['scripts/survey.mjs', 'templates/x.md', '.github/workflows/check.yml', '.gitattributes', 'scripts/lib/text.mjs']
+  const low = ['README.md', 'references/a.md', 'docs/work/x.md', 'scripts-dev/x.mjs']
+  const missed = high.filter((p) => !isHighRiskPath(p))
+  const over = low.filter((p) => isHighRiskPath(p))
+  check(missed.length === 0 && over.length === 0, '高风险路径按目录前缀判，且不误伤同名近似路径',
+    `漏=${missed.join('、') || '无'} 误判=${over.join('、') || '无'}`)
+  report(missed.length === 0 && over.length === 0, '高风险路径：分得清')
+
+  // 反例：`scripts-dev/` 不是 `scripts/` 的子串匹配。前缀判据写错（`includes`）时它会误判。
+  check(!isHighRiskPath('scripts-dev/a.mjs'), '前缀判据不是 includes：scripts-dev 不算 scripts')
+
+  // 2) 改动清单去重、排序、只留高风险。
+  const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'])
+  const okPick = picked.length === 2 && picked[0] === 'scripts/a.mjs' && picked[1] === 'scripts/b.mjs'
+  check(okPick, 'from 一份清单里挑出高风险项：去重且排序', picked.join('、'))
+  report(okPick, '改动清单：挑得对')
+
+  // 3) 审查记录的三种状态必须分得开：没有那一节 / 有但空着 / 填过了。
+  //    「有但空着」是最容易漏判的一种——模板本来就在，注释里还写着怎么填。
+  const bodyMissing = '## 改了什么\n\n改了判定逻辑。\n'
+  const bodyEmpty = '## 改了什么\n\n改。\n\n## 审查记录\n\n'
+    + '<!-- 怎么填：每轮一行 -->\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n|  |  |  |  |\n'
+  const bodyFilled = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n| 1 | sub-audit | 通过 | 0 / 2 |\n'
+  const bodyExempt = '## 审查记录\n\n本档不需要审查（只改了注释）。\n'
+  const sMissing = reviewRecordState(bodyMissing)
+  const sEmpty = reviewRecordState(bodyEmpty)
+  const sFilled = reviewRecordState(bodyFilled)
+  const sExempt = reviewRecordState(bodyExempt)
+  check(sMissing.section === false && sMissing.filled === false, '没有「审查记录」这一节 → 判为缺', JSON.stringify(sMissing))
+  report(sMissing.section === false, '审查记录：连节都没有')
+  check(sEmpty.section === true && sEmpty.filled === false,
+    '有那一节但只有表头空行（模板没填）→ 判为缺 —— 这是最容易漏判的一种', JSON.stringify(sEmpty))
+  report(sEmpty.filled === false, '审查记录：空模板不算填过')
+  check(sFilled.filled === true, '真的填了结论行 → 判为有', JSON.stringify(sFilled))
+  report(sFilled.filled === true, '审查记录：填过就认')
+  check(sExempt.filled === true, '明说「本档不需要审查」→ 判为有（免审与没审要分开）', JSON.stringify(sExempt))
+  report(sExempt.filled === true, '审查记录：免审与没审分开')
+
+  // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。
+  const onlyComment = '## 审查记录\n\n<!-- | 1 | 别人 | 通过 | -->\n'
+  check(reviewRecordState(onlyComment).filled === false,
+    '注释里的示例不算填过（去掉注释这一步不能漏）')
+  report(reviewRecordState(onlyComment).filled === false, '审查记录：注释不算')
+
+  // 4) 端到端：真的跑那个脚本，三种输入三种退出码。
+  const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'dev', 'review-record.mjs'), ...args],
+    { encoding: 'utf8', input })
+  const dir2 = fixture('review-record', {})
+  const bodyPath = join(dir2, 'body.md')
+  writeFileSync(bodyPath, bodyEmpty, 'utf8')
+  const r1 = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
+  check(r1.status === 1 && /审查记录缺失/.test(r1.stderr ?? ''), '脚本：高风险改动 + 空模板 → 退出码 1',
+    `exit=${r1.status} ${(r1.stderr ?? '').slice(0, 120)}`)
+  report(r1.status === 1, '脚本：拦住没填的')
+
+  writeFileSync(bodyPath, bodyFilled, 'utf8')
+  const r2 = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
+  check(r2.status === 0, '脚本：填过 → 退出码 0', `exit=${r2.status} ${(r2.stderr ?? '').slice(0, 120)}`)
+  report(r2.status === 0, '脚本：放行填过的')
+
+  const r3 = cli(['--changed', '-', '--body', bodyPath], 'README.md\n')
+  check(r3.status === 0 && /不需要审查记录/.test(r3.stdout ?? ''), '脚本：只改文档 → 不要求审查记录',
+    `exit=${r3.status} ${(r3.stdout ?? '').slice(0, 120)}`)
+  report(r3.status === 0, '脚本：低档免审')
+
+  const r4 = cli(['--changed'], '')
+  check(r4.status === 2 && /都要给/.test(r4.stderr ?? ''), '脚本：参数不全 → 退出码 2（用法错，不是判定错）',
+    `exit=${r4.status}`)
+  report(r4.status === 2, '脚本：用法错分得开')
+}
+
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

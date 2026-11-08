@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { isHighRiskPath, highRiskChanged, reviewRecordState } from '../review-record.mjs'
+import { isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments } from '../review-record.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -541,6 +541,51 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
     JSON.stringify(reviewRecordState(bodyTwoRounds)))
   report(reviewRecordState(bodyTwoRounds).filled === true, '审查记录：两轮按最后一轮判')
 
+  // 3b) 评论那一层：正文是索引，评论才是痕迹。
+  //
+  // 判据的两半各管一件事：正文说「有哪几轮」，评论说「那些轮次真的发生过」。
+  // 只核正文时，执行者自己写一行就够了——而独立审查的全部意义恰恰是它不是执行者给的。
+  {
+    const state = reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
+      + '| --- | --- | --- | --- |\n| 1 | sub-a | 通过 | 0 / 2 |\n')
+
+    // 没给评论文件 → 不判评论那一层，而且明说「没查」。
+    const none = matchRoundsToComments(state, undefined)
+    check(none.checked === false && none.ok === true,
+      '调用方没提供评论时：不判评论那一层，并标明「没查」——「没查」与「查过没问题」必须分得开',
+      JSON.stringify(none))
+    report(none.checked === false, '评论层：没给就明说没查')
+
+    // 评论里没有那一轮 → 不通过。
+    const miss = matchRoundsToComments(state, ['这条评论只说工作记录更新了，没提轮次与结论'])
+    check(miss.ok === false && miss.problems.length === 1 && /第 1 轮/.test(miss.problems[0]),
+      '正文索引了第 1 轮、评论里找不到 → 不通过，并点名是哪一轮', JSON.stringify(miss.problems))
+    report(miss.ok === false, '评论层：找不到就不通过')
+
+    // 评论里提到了那一轮但只是一句话交差 → 不算。长度下限拦的是「一句话交差」。
+    const tooShort = matchRoundsToComments(state, ['第 1 轮：通过'])
+    check(tooShort.ok === false,
+      '评论里只写「第 1 轮：通过」→ 不算（那连「发现了什么」都没有，核对不了任何东西）',
+      JSON.stringify(tooShort.problems))
+    report(tooShort.ok === false, '评论层：一句话交差不算')
+
+    // 评论里有一轮内容对得上 → 通过。
+    const good = '## 独立审查 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑。逐条：三条建议、'
+      + '零阻塞。文件与行都核过，判定与用例能对上，没有发现门禁被改松的地方。'
+    const ok = matchRoundsToComments(state, [good])
+    check(ok.ok === true && ok.checked === true && ok.matched.length === 1,
+      '评论里找得到那一轮且内容对得上 → 通过', JSON.stringify(ok))
+    report(ok.ok === true, '评论层：对得上就通过')
+
+    // 两轮：第一轮不通过、第二轮通过。评论里只有第一条 → 不通过，因为缺第二轮。
+    const twoRounds = reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
+      + '| --- | --- | --- | --- |\n| 1 | sub-a | 需要返工 | 3 / 1 |\n| 2 | sub-b | 通过 | 0 / 1 |\n')
+    const partial = matchRoundsToComments(twoRounds, [good])
+    check(partial.ok === false && partial.problems.some((p) => /第 2 轮/.test(p)),
+      '两轮里只发了一条评论 → 不通过，缺的那轮要点名', JSON.stringify(partial.problems))
+    report(partial.ok === false, '评论层：缺一轮也算缺')
+  }
+
   // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。
   const onlyComment = '## 审查记录\n\n<!-- | 1 | 别人 | 通过 | -->\n'
   check(reviewRecordState(onlyComment).filled === false,
@@ -559,9 +604,23 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   report(r1.status === 1, '脚本：拦住没填的')
 
   writeFileSync(bodyPath, bodyFilled, 'utf8')
-  const r2 = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
-  check(r2.status === 0, '脚本：填过 → 退出码 0', `exit=${r2.status} ${(r2.stderr ?? '').slice(0, 120)}`)
-  report(r2.status === 0, '脚本：放行填过的')
+  // 给了正文还不算：**评论那一层必须也对得上**。这两条用例成对存在——
+  // 少一条，就等于允许「只填正文、评论一条不发」通过，而那正是这次返工要治的病。
+  const commentsPath = join(dir2, 'comments.md')
+  writeFileSync(commentsPath, '## 独立审查 第 1 轮 —— 通过\n\n'
+    + '审了 scripts/ 下的判定逻辑。逐条：三条建议、零阻塞。文件与行都核过，'
+    + '判定与用例能对上，没有发现门禁被改松的地方。\n', 'utf8')
+
+  const rNoComments = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
+  check(rNoComments.status === 1 && /评论那一层未核对/.test(rNoComments.stderr ?? ''),
+    '脚本：正文填了但没给评论 → 退出码 1（索引对不上评论，不算通过）',
+    `exit=${rNoComments.status} ${(rNoComments.stderr ?? '').slice(0, 120)}`)
+  report(rNoComments.status === 1, '脚本：只填正文不写评论 → 拦住')
+
+  const r2 = cli(['--changed', '-', '--body', bodyPath, '--comments', commentsPath], 'scripts/survey.mjs\n')
+  check(r2.status === 0 && /评论核对/.test(r2.stdout ?? ''), '脚本：正文与评论都对得上 → 退出码 0',
+    `exit=${r2.status} ${(r2.stderr ?? '').slice(0, 120)}`)
+  report(r2.status === 0, '脚本：两层都对上才放行')
 
   const r3 = cli(['--changed', '-', '--body', bodyPath], 'README.md\n')
   check(r3.status === 0 && /不需要审查记录/.test(r3.stdout ?? ''), '脚本：只改文档 → 不要求审查记录',

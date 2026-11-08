@@ -12,6 +12,16 @@
  * 所以这里加一条**机器判据**：动到高风险路径的提案，正文里必须有审查记录。它把
  * 「我审过了」这句话从自述变成一条可核对的痕迹。
  *
+ * ## 两层判据
+ *
+ *   1. **索引层**：提案正文里那一节，写清有哪几轮、每轮谁审的、结论是什么；
+ *   2. **痕迹层**：每一轮的结论都要在**平台评论**里找得到对应的一条。
+ *
+ * 第二层是后补的，补的原因很具体：契约里一直写着「每轮结论写回提案评论」，而判据只看
+ * 正文，于是评论一条不发也能全绿——实测跑了两轮审查、PR 上评论数是 0、门禁全绿。
+ * 正文那一节是索引，评论才是痕迹；只有索引时，「谁审的、发现了什么」这份事后可核对的
+ * 东西，退化成执行者自己写的一行字。
+ *
  * ## 它能证明什么、不能证明什么
  *
  * 能证明：**这一栏填了**，且填的不是空模板。这条已经足够拦住「压根没派审查」——
@@ -188,7 +198,7 @@ export function reviewRecordState(body) {
   const text = String(body ?? '')
   const visible = stripComments(text)
   const head = /^##[ \t]*审查记录[ \t]*$/m.exec(visible)
-  if (head === null) return { filled: false, section: false, why: '正文里没有「## 审查记录」这一节' }
+  if (head === null) return { filled: false, section: false, rows: [], why: '正文里没有「## 审查记录」这一节' }
   const after = visible.slice(head.index + head[0].length)
   const nextHead = /^##[ \t]/m.exec(after)
   const body2 = nextHead === null ? after : after.slice(0, nextHead.index)
@@ -218,13 +228,19 @@ export function reviewRecordState(body) {
     if (c.length < 3) continue
     if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
     if (!roundLike(c[0]) || c[1] === '' || !VERDICT.test(c[2])) continue
-    rows.push({ round: c[0], who: c[1], verdict: VERDICT.exec(c[2])[1], note: c[3] ?? '' })
+    rows.push({
+      round: String(Number(c[0].replace(/[^\d]/g, ''))),
+      who: c[1],
+      verdict: VERDICT.exec(c[2])[1],
+      note: c[3] ?? '',
+    })
   }
 
   if (rows.length === 0) {
     return {
       filled: false,
       section: true,
+      rows,
       why: '「审查记录」里没有一行是有效的审查记录（要轮次 + 审查者 + 结论三样齐全，'
         + '结论写「通过」或「需要返工」）——只写「无」「已审」这类口令不算',
     }
@@ -238,12 +254,65 @@ export function reviewRecordState(body) {
       filled: false,
       section: true,
       rows,
-      why: `最后一轮（${last.round}，${last.who}）的结论是「${last.verdict}」——`
-        + '改完要重新派一个上下文再审一轮，并在表里追加那一行',
+      why: `最后一轮（第 ${last.round} 轮）的结论是「${last.verdict}」——`
+        + '改完要重新派一个上下文再审一轮，并把那一轮的结论也写进表里',
     }
   }
 
   return { filled: true, section: true, rows, why: `${rows.length} 轮审查记录，最后一轮通过` }
+}
+
+/**
+ * 评论里有没有**某一轮**的审查结论。
+ *
+ * 判据分三层，缺一不可：
+ *   1. 评论里出现「第 N 轮」（或「round N」「#N 轮」这些写法）；
+ *   2. 同一段里出现那个结论词（通过 / 需要返工 …）；
+ *   3. 评论长度超过一个下限——「第 1 轮：通过」七个字不算审查结论，
+ *      它连「发现了什么」都没有。下限取得很低（默认 80 字符），只拦「一句话交差」。
+ *
+ * 找到时返回那一段的前 80 个字符，报告里能看出是哪一条。
+ */
+export function findRoundInComments(round, verdict, comments) {
+  const list = Array.isArray(comments) ? comments : []
+  const roundRe = new RegExp(`(?:第\\s*${round}\\s*轮|round\\s*${round}\\b|#${round}\\s*轮)`, 'i')
+  for (const c of list) {
+    const text = typeof c === 'string' ? c : String(c?.body ?? '')
+    if (!roundRe.test(text)) continue
+    if (!new RegExp(verdict).test(text)) continue
+    if (text.trim().length < 80) continue
+    return text.trim().slice(0, 80).replace(/\s+/g, ' ')
+  }
+  return undefined
+}
+
+/**
+ * 把「正文索引」与「平台评论」对起来。
+ *
+ * 这一层是这次返工的核心：契约里写着「每轮结论写回提案评论」，而判据一直只看正文，
+ * 于是**评论一条不发也能全绿**。实测发生过——两轮审查跑完，PR 上评论数是 0。
+ *
+ * 返回 `{ ok, problems, matched }`。`comments` 为 undefined 表示调用方没提供评论
+ * （本地跑就是这样）；此时**不判评论那一层**，并在报告里明说「只核了正文」——
+ * 「没查」与「查过没问题」必须分得开。
+ */
+export function matchRoundsToComments(state, comments) {
+  if (!Array.isArray(comments)) {
+    return { ok: true, checked: false, problems: [], matched: [] }
+  }
+  const problems = []
+  const matched = []
+  for (const row of state.rows ?? []) {
+    const hit = findRoundInComments(row.round, row.verdict, comments)
+    if (hit === undefined) {
+      problems.push(`第 ${row.round} 轮（${row.who}，${row.verdict}）在提案评论里找不到 —— `
+        + '正文里那一行只是索引，结论要作为评论发出去。没有评论就没有可核对的痕迹，'
+        + '而「我审过了」在事后无从核对')
+    } else {
+      matched.push({ round: row.round, sample: hit })
+    }
+  }
+  return { ok: problems.length === 0, checked: true, problems, matched }
 }
 
 function usage() {
@@ -259,6 +328,10 @@ function usage() {
     '  --changed         每行一个改动路径的文件；`-` 表示从 stdin 读（`git diff --name-only` 直接接）',
     '  --body            提案正文（Markdown 文件）',
     '  --root            项目目录；缺省从脚本位置推（本脚本在 <项目>/scripts/ 下，往上一层就是根）',
+    '  --comments        平台上那些评论的正文（一个文件，每条之间用一行 ---COMMENT--- 分隔）。',
+    '                    **提案上必须给**：正文那一节只是索引，每一轮的结论都要能在评论里',
+    '                    找到对应的一条。不给就是「没核对」，按不通过处理——「没查」与',
+    '                    「查过没问题」必须分得开。本地只验索引时可以不给。',
     '  --expect-changes  改动清单**空着就是错**。提案上必须给这个开关：一份提案不可能零改动，',
     '                    清单空只说明那次 diff 没算出来（浅克隆、基线分支名错、fetch 失败），',
     '                    而「没算出来」会被读成「没动高风险路径」——门禁绿着放行，什么都没拦。',
@@ -272,11 +345,13 @@ function main(argv) {
   let changedArg
   let bodyArg
   let rootArg
+  let commentsArg
   let expectChanges = false
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--changed') { changedArg = argv[i + 1]; i += 1; continue }
     if (argv[i] === '--body') { bodyArg = argv[i + 1]; i += 1; continue }
     if (argv[i] === '--root') { rootArg = argv[i + 1]; i += 1; continue }
+    if (argv[i] === '--comments') { commentsArg = argv[i + 1]; i += 1; continue }
     if (argv[i] === '--expect-changes') { expectChanges = true; continue }
     if (argv[i] === '--help' || argv[i] === '-h') { process.stdout.write(`${usage()}\n`); return 0 }
     process.stderr.write(`错误：不认识的参数「${argv[i]}」。\n\n${usage()}\n`)
@@ -353,13 +428,62 @@ function main(argv) {
 
   const body = bodyArg === '-' ? readFileSync(0, 'utf8') : readFileSync(bodyArg, 'utf8')
   const state = reviewRecordState(body)
-  if (state.filled) {
-    process.stdout.write(`审查记录：有（${state.why}）。本次动到 ${high.length} 处高风险路径。\n`)
-    return 0
+  if (!state.filled) {
+    process.stderr.write([
+      `审查记录缺失：这次改到了 ${high.length} 处高风险路径，提案正文里没有可用的审查记录。`,
+      ...missingHelp(high, state),
+    ].join('\n') + '\n')
+    return 1
   }
 
-  process.stderr.write([
-    `审查记录缺失：这次改到了 ${high.length} 处高风险路径，提案正文里没有可用的审查记录。`,
+  // ── 第二层：**每一条索引都要在平台评论里找得到对应的一轮** ──
+  //
+  // 这一层是这次返工的核心。契约里写着「每轮结论写回提案评论」，而判据一直只看正文，
+  // 于是评论一条不发也能全绿——实测跑了两轮审查，PR 上评论数是 0，而门禁全绿。
+  //
+  // 正文那一节是**索引**，评论才是痕迹。只留索引，等于把「谁审的、发现了什么」这份
+  // 事后可核对的东西，退化成执行者自己写的一行字；而一项独立审查的全部意义，
+  // 恰恰在于它不是执行者自己给的。
+  if (commentsArg === undefined) {
+    process.stderr.write([
+      '评论那一层未核对：没有给 --comments。',
+      '',
+      '  正文里的「审查记录」是**索引**，每一条都要在平台评论里找得到对应的一轮。',
+      '  这次只核了索引本身，没有核「那些结论真的发出去过」——所以这条**不算通过**。',
+      '',
+      '  提案上要带 `--comments`：CI 会把评论拉下来拼成一份文件传进来（见工作流里那一步）。',
+    ].join('\n') + '\n')
+    return 1
+  }
+  if (!existsSync(commentsArg)) {
+    process.stderr.write(`错误：评论文件不存在：${commentsArg}\n`)
+    return 2
+  }
+  const comments = readFileSync(commentsArg, 'utf8')
+    .split(/^---COMMENT---\s*$/m).map((s) => s.trim()).filter((s) => s !== '')
+
+  const match = matchRoundsToComments(state, comments)
+  if (!match.ok) {
+    process.stderr.write([
+      `审查记录与评论对不上：正文里索引了 ${(state.rows ?? []).length} 轮，评论里找不到这几轮 ——`,
+      '',
+      ...match.problems.map((p) => `  - ${p}`),
+      '',
+      '  每一轮的结论都要**作为评论发出去**（正文走 `--body-file`，规则见协作判据第九节）：',
+      '  正文那一栏只是索引，评论才是可核对的痕迹。只在正文里写一行，等于执行者自己给自己',
+      '  出证明。',
+    ].join('\n') + '\n')
+    return 1
+  }
+
+  process.stdout.write(`审查记录：有（${state.why}）。本次动到 ${high.length} 处高风险路径。\n`)
+  process.stdout.write(`评论核对：${(state.rows ?? []).length} 轮的结论都在平台评论里找得到\n`)
+  return 0
+}
+
+/** 审查记录缺失时要说的话：为什么、怎么办、以及两件最容易混的事。 */
+function missingHelp(high, state) {
+  return [
     '',
     '  高风险路径（出错不会当场失败，而是让门禁从此少查一项）：',
     ...high.slice(0, 12).map((p) => `    - ${p}`),
@@ -367,17 +491,16 @@ function main(argv) {
     '',
     `  原因：${state.why}`,
     '',
-    '  怎么办：派一个**新上下文**去审（子代理或新会话），只给材料清单、不给执行者思路，',
-    '  然后把它给出的结论行与逐条发现填进「## 审查记录」一节。',
+    '  怎么办：派一个**新上下文**去审（子代理或新会话），只给材料清单、不给执行者思路；',
+    '  把它给出的结论**写成评论发上去**，再把那一行填进「## 审查记录」当索引。',
     '',
     '  **CI 绿不等于审过**：门禁判的是「现有检查有没有过」，审查判的是「这次改动有没有让',
     '  检查本身变松」。这两件事完全正交，前者绿了不代表后者做过。',
     '',
-    '  **一轮不够就再来一轮**：审查结论是「需要返工」时，改完要**重新派一个新的上下文**，',
+    '  **一轮不够就再来一轮**：结论是「需要返工」时，改完要重新派一个新的上下文，',
     '  不要把上一轮的结论喂给它——带着别人的判断去读，读出来的是复核，不是审查。',
-    '  每一轮的结论与发现都补进「## 审查记录」，那一栏是累积的，不是覆盖的。',
-  ].join('\n') + '\n')
-  return 1
+    '  每一轮的结论发一条评论，并在索引表里追加一行（累积，不覆盖）。',
+  ]
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {

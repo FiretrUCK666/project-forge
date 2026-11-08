@@ -30,6 +30,9 @@ on:
   push:
     branches: ['**']
   pull_request:
+    # `edited` 不能漏：审查记录是往**提案正文**里填的，而改正文只会触发这个事件。
+    # 少了它，先开提案（红）、再补记录，那一步检查不会重跑，状态停在上一次。
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   check:
@@ -66,6 +69,10 @@ jobs:
       # 就合了，而「审查」这一步从来没发生过。实测过：34 个文件、动到判定逻辑与模板的
       # 改动就是这么被合进去的。
       #
+      # 它核**两层**：提案正文里那节是索引（有哪几轮、结论是什么），**每一轮的结论还要在
+      # 评论里找得到对应的一条**。只核正文时，评论一条不发也能全绿——实测发生过，跑了两轮
+      # 审查而提案上零评论。索引是执行者自己写的，评论才是别人给的。
+      #
       # 判据来自本项目 AGENTS.md 的「## 高风险路径」表——**那张表填了才有效**，
       # 空表会让这一步明说「这一趟没查」然后放行（不静默，但也拦不住）。
       #
@@ -78,9 +85,32 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
           git fetch --no-tags origin "$BASE_REF"
-          git diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+          # `core.quotepath=false`：默认配置会把中文文件名转义成 "\345\256\241..."，
+          # 前缀判据匹配不上，中文名的风险改动会被判成非高风险、绿着放行。
+          git -c core.quotepath=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
           printf '%s' "$PR_BODY" > pr-body.md
+
+          # 把评论拉下来拼成一份文件（每条之间一行 ---COMMENT---）。
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            | node -e '
+              let raw = ""
+              process.stdin.on("data", (c) => { raw += c })
+              process.stdin.on("end", () => {
+                const list = JSON.parse(raw)
+                if (!Array.isArray(list)) {
+                  process.stderr.write("拉评论失败：" + raw.slice(0, 200) + "\n")
+                  process.exit(3)
+                }
+                process.stdout.write(list.map((c) => c.body ?? "").join("\n---COMMENT---\n"))
+              })
+            ' > comments.txt
+
           # `--expect-changes` 不能省：提案不可能零改动，清单为空只说明 diff 没算出来。
-          node scripts/review-record.mjs --changed changed.txt --body pr-body.md --expect-changes
+          node scripts/review-record.mjs --expect-changes \
+            --changed changed.txt --body pr-body.md --comments comments.txt

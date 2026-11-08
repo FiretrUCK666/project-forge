@@ -23,7 +23,10 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments } from '../review-record.mjs'
+import {
+  isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments,
+  readHighRiskTable, readHighRiskPaths, unquoteGitPath,
+} from '../review-record.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -489,6 +492,51 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
 
   // 反例：`scripts-dev/` 不是 `scripts/` 的子串匹配。前缀判据写错（`includes`）时它会误判。
   check(!isHighRiskPath('scripts-dev/a.mjs', RISK), '前缀判据不是 includes：scripts-dev 不算 scripts')
+
+  // 1b) 契约 → 判据那条**真实链路**：表怎么写才读得出来。
+  //
+  // 这一组之前是缺的：用例只测 `isHighRiskPath`（手写前缀表），从来不测「从 AGENTS.md
+  // 里读」——而后者才是那个门禁真正的输入。三种人类最常写的形状，全都在这里。
+  {
+    const table = (row) => `## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n| ${row} | x |\n`
+
+    // 目录不带尾斜杠 → 补成前缀形式。漏一个斜杠的后果是这条判据对整棵树失效，
+    // 而症状完全不可见——所以它必须被认。
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules`'))) === '["src/rules/"]',
+      '目录不带尾斜杠 → 补成前缀形式（漏个斜杠不该让判据静默失效）',
+      JSON.stringify(readHighRiskPaths(table('`src/rules`'))))
+    // 格子里带说明 → 取反引号里那一段。
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))) === '["src/rules/"]',
+      '格子里带说明 → 取反引号里那一段', JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))))
+    // 一格两个路径 → 全都收。
+    check(JSON.stringify(readHighRiskPaths(table('`a/`,`b/`'))) === '["a/","b/"]',
+      '一格写两个路径 → 全部收下', JSON.stringify(readHighRiskPaths(table('`a/`,`b/`'))))
+    // 单个文件照原样，不补斜杠。
+    check(JSON.stringify(readHighRiskPaths(table('`AGENTS.md`'))) === '["AGENTS.md"]',
+      '单个文件不补斜杠（`AGENTS.md` 不会被写成 `AGENTS.md/`）',
+      JSON.stringify(readHighRiskPaths(table('`AGENTS.md`'))))
+    // 占位符不算路径——模板里那些尖括号占位不该变成判据。
+    check(readHighRiskPaths(table('`<替换成这个项目的第一处>`')).length === 0,
+      '尖括号占位不算路径（模板没填时不该凭空多出一条判据）')
+    // 认不出来的行要单独给出来，让调用方报错——**认不出来不等于没有**。
+    const skipped = readHighRiskTable(table('<替换成第一处>'))
+    check(skipped.paths.length === 0 && skipped.skipped.length === 1,
+      '认不出来的行收进 skipped（由调用方报错，不静默跳过）', JSON.stringify(skipped))
+    // 没有那一节 → found 为 false，调用方才好说「这一趟没查」。
+    check(readHighRiskTable('# 没有那一节\n').found === false,
+      '没有「## 高风险路径」这一节 → found=false（调用方据此报「没查」）')
+    report(true, '契约到判据：五种写法都认，认不出来的会说出来')
+  }
+
+  // 1c) git 的 C 风格转义。中文名的风险改动以前会被判成非高风险、绿着放行。
+  {
+    const esc = '"templates/\\345\\256\\241\\346\\237\\245.md"'
+    check(unquoteGitPath(esc) === 'templates/审查.md', 'C 风格转义还原成真实路径', unquoteGitPath(esc))
+    check(isHighRiskPath(esc, ['templates/']) === true,
+      '转义过的中文路径照样判成高风险（不依赖调用方记得关 core.quotepath）')
+    check(unquoteGitPath('templates/审查.md') === 'templates/审查.md', '没转义的原样返回', '')
+    report(unquoteGitPath(esc) === 'templates/审查.md', '转义还原：中文路径不再漏判')
+  }
 
   // 2) 改动清单去重、排序、只留高风险。
   const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'], RISK)

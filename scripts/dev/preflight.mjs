@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 680
+export const BEHAVIOR_MIN_PASSED = 700
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -581,6 +581,9 @@ function checkDeliveredAttribution() {
   // 「拷进项目的 `scripts/` 之后在那儿跑」——模板里指它是对的，不指才是漏了。
   // 这条例外写成一张显式表，不靠「名字里带某个词」之类的启发式：那种判据在加第二个
   // 脚本时会静默失灵，而失灵的后果是把一条正确的引用判成死链。
+  //
+  // **例外本身也要对账**：表里写一个磁盘上不存在的脚本时，那条例外会把「死链该红」
+  // 变成「归例外管，绿着放行」——失败方向是放过。所以下面单独核一次表项与磁盘。
   const isOurScript = (spec) => spec.startsWith('scripts/')
     && fileExistsLoose(expand(spec))
     && !LANDED_SCRIPTS.includes(expand(spec))
@@ -2736,6 +2739,23 @@ function checkStructuralRulesAgree() {
   }
   process.stdout.write(`结构规则：.gitattributes 与 REPO_ONLY_* 一致`
     + `（${codeDirs.size} 处目录、${codeFiles.size} 个文件）\n`)
+
+  // **例外表本身要对账**：`LANDED_SCRIPTS` 里写一个磁盘上不存在的脚本时，
+  // 那条例外会把「模板里指了一条死链」从「该红」变成「归例外管」，失败方向是放过。
+  // 拼错一个文件名就足够，而症状是模板里那条引用永远绿着。
+  for (const rel of LANDED_SCRIPTS) {
+    if (!existsSync(join(SKILL_ROOT, rel))) {
+      fail(`LANDED_SCRIPTS 里登记了 ${rel}，但磁盘上没有这个文件 —— `
+        + '这条例外的意思是「模板里指它是对的」，表项错了，模板里那条死链就永远绿着。')
+    }
+  }
+  // 反过来也要说清：登记为「要落地的」脚本，必须在落盘那一步真的被拷过去。
+  // 只登记不拷，等于给读者留了一项家务，而忘掉它的症状是 CI 里的 MODULE_NOT_FOUND。
+  const composeSrc = readText(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'))
+  if (!/for \(const rel of LANDED_SCRIPTS\)/.test(composeSrc)) {
+    fail('compose-agents.mjs 里没有「把 LANDED_SCRIPTS 拷到目标项目」那一步 —— '
+      + '模板里写着「先把它拷过去」，但没有任何东西负责拷，忘了拷的症状是 CI 里一句崩溃栈。')
+  }
 }
 
 /**

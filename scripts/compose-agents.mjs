@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url'
 import { listRoot, manifestSection } from './lib/manifest.mjs'
 import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS , LANDED_SCRIPTS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines, splitSections } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment, recordSnapshot, ledgerPath } from './lib/ledger.mjs'
@@ -1865,6 +1865,36 @@ function main(argv) {
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
+
+  // 把要落到这个项目里的脚本一并拷过去（`LANDED_SCRIPTS`，唯一登记处）。
+  //
+  // 为什么归落盘而不是归读者：模板里那句「先把它拷到本项目的 scripts/ 下」是靠人记的，
+  // 而忘了拷的症状是 CI 里一句 MODULE_NOT_FOUND 崩溃栈——离原因很远。落盘是「这个项目
+  // 要用这个工具」的一部分，脚本能做的就不该留成家务。
+  //
+  // 逐字节复制，不生成、不改造：改了就不是同一份，而两份实现迟早给出两个答案。
+  // 已经存在且内容相同时不写（幂等）；内容不同则覆盖，并在输出里说一句——
+  // **不静默改掉用户可能动过的文件**。
+  for (const rel of LANDED_SCRIPTS) {
+    const from = join(SKILL_ROOT, rel)
+    if (!existsSync(from)) {
+      process.stderr.write(`提醒：${rel} 登记为「要落到项目里」，但 skill 里没有这个文件——跳过。\n`)
+      continue
+    }
+    const to = join(target, rel)
+    const payload = readFileSync(from)
+    if (existsSync(to)) {
+      const current = readFileSync(to)
+      if (current.equals(payload)) continue
+      mkdirSync(dirname(to), { recursive: true })
+      writeFileSync(to, payload)
+      process.stdout.write(`已更新：${rel}（与 skill 里那份不一致，按 skill 覆盖）\n`)
+      continue
+    }
+    mkdirSync(dirname(to), { recursive: true })
+    writeFileSync(to, payload)
+    process.stdout.write(`已拷入：${rel}（门禁要用它，随落盘一起过去）\n`)
+  }
   // 落盘之后**立刻记账**：写下「这份文件的内核区、以及每个受管节，各自的字节哈希」。
   //
   // 账本是痕迹判定的唯一依据——有了它，「这段是不是我写的」就从推断变成比对：

@@ -246,7 +246,7 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 | `references/collaboration.md` | Collaboration: where changes come from, who reviews, who may merge, and how to clean up after a merge |
 | `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
 | `templates/release-spec.md` | Release-spec skeleton: where the notes live, which sections they use, the order of operations, how to recover from a failed release |
-| `templates/work-item.md` | Work-item skeleton: status, goal and acceptance, plan, what was abandoned, where to resume |
+| `templates/work-item.md` | Work-record skeleton (file names carry a `YYYY-MM-DD-` prefix): status, dates, linked issues and proposals, goal and acceptance, plan, what was abandoned, where to resume |
 | `templates/pull-request-template.md` | Pull-request skeleton: what changed, why, how it was verified, rollback point, risk and blast radius |
 | `templates/issue-bug-report.md` | Bug-report skeleton: expected, actual, reproduction, environment (all four or it cannot be acted on) |
 | `templates/issue-feature-request.md` | Feature-request skeleton: the problem to solve, the behavior wanted, the blast radius |

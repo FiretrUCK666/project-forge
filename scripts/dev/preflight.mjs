@@ -347,7 +347,7 @@ export function referencedPaths(text) {
  *
  * **`docs/` 里只有 `release-notes/` 不判，不是整个 `docs/`**：发布说明是**历史快照**——它
  * 写的是「那一版的仓库长什么样」，提到某个后来被删掉的文件是**正确**的历史陈述，不是断链。
- * 但同一个 `docs/` 下还有**活文档**（工作项、设计与决策记录）：它们描述的是现在，断链就是
+ * 但同一个 `docs/` 下还有**活文档**（工作记录、设计与决策记录）：它们描述的是现在，断链就是
  * 断链。一刀切豁免整个目录，等于让 `docs/` 变成引用检查的盲区——而那正是 AI 最常去读的
  * 地方之一。两种东西判据相反，判据就必须分开。
  */
@@ -2077,7 +2077,7 @@ function checkOwnTemplates() {
     [/回滚/, '回滚点'],
     [/风险与影响范围/, '风险与影响范围'],
     [/没有弱化任何门禁/, '「没有弱化任何门禁」这条自查'],
-    [/任务单/, '任务单状态与断点'],
+    [/工作记录/, '工作记录状态与断点'],
   ]
   const prGap = prNeed.filter(([re]) => !re.test(prText)).map(([, label]) => label)
   if (prGap.length > 0) {
@@ -2135,10 +2135,10 @@ function checkOwnTemplates() {
  * 判据只有一处实现（`lib/protocol.mjs` 的 `lintReleaseNotes`），发送端与这里共用同一份——
  * 两处各判一次，迟早一处改了一处没改，而那时的表现是「CI 发送时拒绝，本地校验说没问题」。
  *
- * 只查「任何项目都成立」的那几条：有且只有一个标题且与文件名同源、至少一节、没有空节、
- * 没有同名节、没留骨架标记。**不查分了哪几节**：那是每个项目自己的决定。
- *
- * 历史说明是**快照，不随规范改**：所以这里的期望只有文件名与内容自洽，不与今天的规范比。
+ * 只查「任何项目都成立」的那几条：有且只有一个标题、至少一节、没有空节、没有同名节、
+ * 没留骨架标记。**不查分了哪几节**（那是每个项目自己的决定），也**不拿文件名去比标题**
+ * ——历史说明是快照，当年写成「# v1.2.3 — 首次发布」是合法的，而它不许改回来。标题与标签
+ * 同号这件事由**发送端**在发那一份时判（`release-notes.mjs`），那里才有「这一版」的语境。
  */
 function checkReleaseNotes() {
   const dir = join(SKILL_ROOT, 'docs', 'release-notes')
@@ -2151,16 +2151,19 @@ function checkReleaseNotes() {
     fail('docs/release-notes/ 是空的 —— 发过版的仓库至少有一份说明。')
     return
   }
+  let bad = 0
   for (const name of files) {
-    const tag = name.replace(/\.md$/, '')
-    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''), tag)
+    const problems = lintReleaseNotes(readText(join(dir, name)).replace(/^\uFEFF/, ''))
     if (problems.length > 0) {
+      bad += 1
       fail(`docs/release-notes/${name} 不像一份成品：${problems.join('；')}。`
-        + '历史说明是快照、不按今天的规范改——但空壳、错号、空节在任何一版里都不成立，'
+        + '历史说明是快照、不按今天的规范改——但空壳、空节、同名节在任何一版里都不成立，'
         + '按报出的那一条修。')
     }
   }
-  process.stdout.write(`发布说明：${files.length} 份都通过结构检查（标题、分节、无空节）\n`)
+  if (bad === 0) {
+    process.stdout.write(`发布说明：${files.length} 份都通过结构检查（标题、分节、无空节）\n`)
+  }
 }
 
 /**

@@ -2128,20 +2128,24 @@ function detectDocs(root, root_) {
     // 发版规范：项目自己定义「说明写在哪、分哪几节、按什么顺序发」的那一份文件。
     // 它决定发布自动化去哪个路径取说明，所以「有没有」是 `review` 判断
     // 「发布接线完不完整」的输入——缺了它，工作流读的那个路径就没有权威出处。
-    ['releaseSpec', ['RELEASING.md', 'RELEASING.rst']],
+    //
+    // 候选按常见程度排，覆盖大小写与两处常见位置：名字不叫 `RELEASING.md` 的项目很多，
+    // 只探一个名字就会把「没探到」说成「没有」，而那条错话会让 AI 再落一份、覆盖掉
+    // 项目已有的规范。路径解析本身就大小写不敏感（见 lib/manifest 的 listRoot）。
+    ['releaseSpec', ['RELEASING.md', 'RELEASING.rst', 'RELEASE.md', 'docs/RELEASING.md', 'docs/releasing.md']],
   ]) {
     const hit = root_.first(candidates)
     docs[key] = hit === undefined ? undefined : { file: hit, bytes: sizeOf(join(root, hit)) }
   }
 
-  // 工作项目录：项目把「正在进行 / 已完成 / 被放弃」的工作记录放在哪。
+  // 工作记录目录：项目把「正在进行 / 已完成 / 被放弃」的工作记录放在哪。
   //
   // 候选按常见程度排，**只认目录、不认文件名**：只要那个目录在，且里面有 .md，
-  // 就说明这个项目在用工作项。判据是「有没有这个习惯」，不是「某个文件叫什么」——
+  // 就说明这个项目在用工作记录。判据是「有没有这个习惯」，不是「某个文件叫什么」——
   // 把文件清单写死，等于逼所有项目改成我们的命名。
   //
   // 与 `docs/` 下其他东西分开报：`docs/release-notes/` 是**历史快照**（不可改），
-  // 工作项是**活文档**（引用必须能走通）。两种东西的判据相反，合在一个字段里迟早判错。
+  // 工作记录是**活文档**（引用必须能走通）。两种东西的判据相反，合在一个字段里迟早判错。
   {
     const candidates = ['docs/work', 'docs/tasks', 'todo', 'work']
     for (const rel of candidates) {
@@ -2205,7 +2209,7 @@ function detectDocs(root, root_) {
     if (agentsHit !== undefined) {
       docs.agents = { file: agentsHit.file, bytes: agentsHit.bytes }
       // 契约「有哪几节」是一个事实，下游要用它判断「远端与协作那半部分补上没有」。
-      // **收到三级标题**：生成出来的契约把「任务单与协作」放在 `###` 下，只收二级会让这个
+      // **收到三级标题**：生成出来的契约把「工作记录与协作」放在 `###` 下，只收二级会让这个
       // 判断永远为假，于是一条「必须回跑」的提醒变成了每次都喊的噪音。
       const rawAgents = readTextFile(join(root, agentsHit.file))
       if (rawAgents !== undefined) {

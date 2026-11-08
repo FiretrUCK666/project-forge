@@ -38,7 +38,7 @@ metadata:
 
 不必使用的情况：只改代码写法、只回答一个概念问题——都不涉及这几个能力面。**只修一个 bug
 通常也不用**：那属于日常执行，按项目自己的契约与协作协议做即可；只有当这个 bug 牵出一件
-需要长期跟踪、要跨会话接续的事时，才用到本 skill 的任务单与协作判据。
+需要长期跟踪、要跨会话接续的事时，才用到本 skill 的工作记录与协作判据。
 意图里含「生成项目本身」（选技术栈、创建源码与配置文件）时，**先让骨架就绪再走本流程**，
 理由见 `references/survey.md` 第一节「与项目脚手架的分工」。
 
@@ -301,7 +301,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 | `templates/readme.md` | 新建 `README` 时作为骨架 |
 | `templates/contributing.md` | 新建 `CONTRIBUTING` 时作为骨架 |
 | `templates/release-spec.md` | 给要发版的项目落一份发版规范（`RELEASING.md`）：说明写在哪、分哪几节（一节必需 + 按版内容增删）、按什么顺序发、失败了怎么补 |
-| `templates/work-item.md` | 给项目落工作项骨架：状态、目标与验收、计划、放弃过什么、断点 |
+| `templates/work-item.md` | 给项目落工作记录骨架（文件名 `YYYY-MM-DD-主题`）：状态、建单日期与最近更新、关联的问题与提案、目标与验收、计划、放弃过什么、断点 |
 | `templates/pull-request-template.md` | 给项目落改动提案模板：改了什么、为什么、怎么验证、回滚点、风险与影响范围 |
 | `templates/issue-bug-report.md` | 给项目落缺陷报告模板：期望 / 实际 / 复现 / 环境（四件缺一不可） |
 | `templates/issue-feature-request.md` | 给项目落需求模板：要解决什么问题、期望的行为、影响范围 |

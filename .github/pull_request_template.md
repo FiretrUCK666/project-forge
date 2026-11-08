@@ -29,7 +29,7 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 - [ ] 改了 README 的结构的话，重跑过 `sync-toc.mjs`
 - [ ] 行为变了的话，`README` 与 `AGENTS.md` 里失准的地方都同步了
 - [ ] **没有弱化任何门禁**（没跳过测试、没放宽断言、没降低门槛、没动 CI 配置）
-- [ ] 关联的任务单里，**状态与断点已更新**（没有任务单就说明为什么不需要）
+- [ ] 关联的工作记录里，**状态与断点已更新**（没有工作记录就说明为什么不需要）
 
 ## 回滚点
 

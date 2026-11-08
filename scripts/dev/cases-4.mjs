@@ -265,7 +265,7 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
 
   writeFileSync(liveDoc, liveBefore, 'utf8')
 
-  // 第三条：`docs/` 底下**不全是历史快照**。工作项是活文档，它引用的文件必须走得通。
+  // 第三条：`docs/` 底下**不全是历史快照**。工作记录是活文档，它引用的文件必须走得通。
   //
   // 少了这一条，「`docs/` 不判」可以靠「豁免整个目录」满足——而那会让 `docs/` 变成引用
   // 检查的盲区，偏偏那正是 AI 最常去读的地方之一。判据分开，两面都要断言。
@@ -277,9 +277,9 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
 
   const badWork = preflightIn(clone, { only: '引用能否解析' })
   check(badWork.status === 1 && /gone-forever/.test(badWork.out),
-    '工作项（docs/ 下的活文档）引用不存在的文件 → 断链照判',
+    '工作记录（docs/ 下的活文档）引用不存在的文件 → 断链照判',
     badWork.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 200))
-  report(badWork.status === 1, '工作项：照判，不跟着历史快照一起豁免')
+  report(badWork.status === 1, '工作记录：照判，不跟着历史快照一起豁免')
 
   rmSync(workDir, { recursive: true, force: true })
 }
@@ -410,6 +410,28 @@ group('[57] 架构升级与逻辑补全：决策持久化、工具链推导与�
   report(runHandoff.status === 0, '交棒毕业：非阻塞交付物账本')
 }
 
+group('[58] 本仓库发布说明自检：空壳会被拦住，好说明放行')
+{
+  const clone = skillClone('notes-self-check')
+  const notesDir = join(clone, 'docs', 'release-notes')
+  mkdirSync(notesDir, { recursive: true })
+
+  // 空壳：标题在、节在、节里只有一句注释。这种「看着写完了」的最容易被放过。
+  writeFileSync(join(notesDir, 'v9.9.9.md'),
+    '# v9.9.9\n\n## 这一版变了什么\n\n<!-- 待补 -->\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+  const bad = preflightIn(clone, { only: '本仓库发布说明' })
+  check(bad.status === 1 && /不像一份成品/.test(bad.out),
+    '只有注释的空节 → 自检失败', bad.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+
+  // 修好之后必须放行：否则上一条可以靠「永远失败」满足。
+  writeFileSync(join(notesDir, 'v9.9.9.md'),
+    '# v9.9.9\n\n## 这一版变了什么\n\n导出不再缺页。\n', 'utf8')
+  gitIn(clone, 'add', '-A')
+  const good = preflightIn(clone, { only: '本仓库发布说明' })
+  check(good.status === 0, '补上内容之后放行', good.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
+  report(bad.status === 1 && good.status === 0, '发布说明自检：空壳拦得住、成品放得过')
+}
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

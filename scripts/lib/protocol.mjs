@@ -131,29 +131,32 @@ export function lintReleaseNotes(text, tag) {
   } else if (h1.length > 1) {
     problems.push(`一级标题有 ${h1.length} 个：一份说明只有一个标题`)
   } else if (typeof tag === 'string' && tag.trim() !== '') {
+    // 只比**第一个词**，不比整行：`# v1.2.3`、`# v1.2.3 — 首个公开版`、`# 1.2.3` 都是同一个号。
+    // 判据是「读者看到的号对不对」，而不是「标题是不是只写了号」——后者是文风，不是事实，
+    // 拿它当错号会把一份写得好好的说明拦在门外。
     const got = h1[0].info.heading.title.trim()
-    // `v1.2.3` 与 `1.2.3` 是同一个号：标签带不带 `v` 由项目自己的命名规则决定，
-    // 而标题里省掉前缀是常见写法——按去前缀后的字面比，避免把写法差异报成错号。
+    const firstWord = got.split(/\s+/)[0]
     const strip = (s) => s.trim().replace(/^v/i, '')
-    if (strip(got) !== strip(tag)) {
+    if (strip(firstWord) !== strip(tag)) {
       problems.push(`一级标题写的是「${got}」，与标签「${tag}」不是同一个号`)
     }
   }
 
   const h2 = marks.filter((m) => m.info.heading.level === 2)
   if (h2.length === 0) {
-    problems.push('没有任何二级节：至少要有「这一版更新了什么、修复了什么」这一节')
+    problems.push('没有任何二级节：说明至少要有一节，写清这一版变了什么')
   }
 
-  // 空节：标题之后到下一个「同级或更高级」标题之前，一个非空行都没有。
-  // 按层级找边界而不是按「下一个标题」找，是因为节里可能有它自己的小节。
+  // 空节：标题之后到下一个「同级或更高级」标题之前，**去掉注释后**没有实际内容。
+  // 只看「非空行」会把 `<!-- 待补 -->` 当成内容——那正是要拦的空壳。
   for (const { info, i } of h2) {
     const level = info.heading.level
     let hasContent = false
+    const state = { inComment: false }
     for (let k = i + 1; k < lines.length; k += 1) {
       const next = lines[k]
       if (!next.inFence && next.heading !== null && next.heading.level <= level) break
-      if (next.line.trim() !== '') { hasContent = true; break }
+      if (stripHtmlComments(next.line, state).trim() !== '') { hasContent = true; break }
     }
     if (!hasContent) {
       problems.push(`「${info.heading.title}」这一节没有内容：没有内容就整节省略，不要留一个空标题`)
@@ -168,6 +171,32 @@ export function lintReleaseNotes(text, tag) {
   }
 
   return problems
+}
+
+/**
+ * 去掉一行里的 HTML 注释，返回「读者真的能看到」的那部分。
+ *
+ * 为什么需要：空节判据若只看「这一行非空」，一句 `<!-- 待补 -->` 就算有内容——而那正是
+ * 要拦的空壳。注释可以跨行，所以状态要带出去（`state.inComment`）。
+ */
+function stripHtmlComments(line, state) {
+  let out = ''
+  let i = 0
+  while (i < line.length) {
+    if (state.inComment) {
+      const end = line.indexOf('-->', i)
+      if (end < 0) return out
+      i = end + 3
+      state.inComment = false
+    } else {
+      const start = line.indexOf('<!--', i)
+      if (start < 0) { out += line.slice(i); break }
+      out += line.slice(i, start)
+      i = start + 4
+      state.inComment = true
+    }
+  }
+  return out
 }
 /**
  * 「这一行是本 skill 的受管标记吗」的判据：**基于上面那些常量拼出来，不另抄字面量**。

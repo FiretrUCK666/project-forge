@@ -1469,6 +1469,36 @@ group('[30c] 角色与协作模板：从事实判出来，不许猜')
   report(okSingle, '模板：老形态仍认')
 }
 
+group('[57] 行动导航：契约已经带上协作那半部分时不再催回刷')
+{
+  if (!HAS_GIT) {
+    skipGroup('[57] 行动导航', '环境里没有 git')
+  } else {
+    const dir = fixture('action-plan', {
+      'package.json': '{"name":"ap","version":"1.0.0","repository":"https://github.com/acme/ap"}\n',
+    })
+    gitIn(dir, 'init')
+    gitIn(dir, 'remote', 'add', 'origin', 'https://github.com/acme/ap.git')
+    compose(dir)
+    const md = () => spawnSync(process.execPath,
+      [join(SCRIPTS_DIR, 'survey.mjs'), dir, '--markdown'], { encoding: 'utf8' }).stdout ?? ''
+    const withCollab = md()
+    check(!/契约里还没有协作那半部分/.test(withCollab),
+      '生成过的契约不再被催「回刷协作那半部分」',
+      withCollab.split('\n').filter((l) => /协作那半部分/.test(l)).join(' | '))
+
+    // 反侧：把那一节整段删掉，提醒必须回来——否则上一条可以靠「这段永远不输出」满足。
+    const agentsFile = join(dir, 'AGENTS.md')
+    const text = readFileSync(agentsFile, 'utf8')
+    const without = text.replace(/^## 改动怎么落地（日常）[\s\S]*?(?=^## |(?![\s\S]))/m, '')
+    check(without !== text, '前提：成功删掉「改动怎么落地」一节')
+    writeFileSync(agentsFile, without, 'utf8')
+    const stripped = md()
+    check(/契约里还没有协作那半部分/.test(stripped), '少了那一节就重新提醒（判据不是恒假）')
+    report(!/契约里还没有协作那半部分/.test(withCollab)
+      && /契约里还没有协作那半部分/.test(stripped), '行动导航：该提醒时提醒，不该时安静')
+  }
+}
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。

@@ -313,13 +313,46 @@ export function reviewRecordState(body) {
  *
  * 找到时返回那一段的前 80 个字符，报告里能看出是哪一条。
  */
+/**
+ * 结论词表：**长的在前**。
+ *
+ * 顺序不是排版，是判据。中文里「通过」是「不通过」「未通过」的真前缀，用子串搜就会
+ * 让最坏的那个词命中最松的那个——实测：索引写「通过」、评论写「不通过」，门禁判通过。
+ * 按长度降序匹配，「不通过」先吃掉那四个字，「通过」就没有位置可占了。
+ */
+const VERDICT_TOKENS = [
+  ['需要返工', '需要返工'],
+  ['需要修改', '需要返工'],
+  ['需返工', '需要返工'],
+  ['不通过', '不通过'],
+  ['未通过', '不通过'],
+  ['通过', '通过'],
+]
+
+/**
+ * 把一段文字里出现的结论词**全部**找出来，规范化成「通过 / 不通过 / 需要返工」。
+ *
+ * 用一条合并正则一次扫完：交替项按长度降序，所以同一个位置上长的优先。
+ * 这样「不通过」只会产出「不通过」，不会顺带产出一个假的「通过」。
+ */
+export function verdictsIn(text) {
+  const source = VERDICT_TOKENS.map(([word]) => word).join('|')
+  const found = new Set()
+  for (const m of String(text ?? '').matchAll(new RegExp(source, 'g'))) {
+    const hit = VERDICT_TOKENS.find(([word]) => word === m[0])
+    if (hit !== undefined) found.add(hit[1])
+  }
+  return found
+}
+
 export function findRoundInComments(round, verdict, comments) {
   const list = Array.isArray(comments) ? comments : []
   const roundRe = new RegExp(`(?:第\\s*${round}\\s*轮|round\\s*${round}\\b|#${round}\\s*轮)`, 'i')
   for (const c of list) {
     const text = typeof c === 'string' ? c : String(c?.body ?? '')
     if (!roundRe.test(text)) continue
-    if (!new RegExp(verdict).test(text)) continue
+    // **按整词判定，不按子串**。见上面词表那段注释。
+    if (!verdictsIn(text).has(verdict)) continue
     if (text.trim().length < 80) continue
     return text.trim().slice(0, 80).replace(/\s+/g, ' ')
   }

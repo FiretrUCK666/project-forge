@@ -2805,7 +2805,8 @@ function checkPackageBoundary() {
   // 一、不该进包的，一个都不许在。
   for (const f of pkg) {
     if (isRepoOnlyPath(f)) {
-      fail(`实际导出里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+      fail(`实际导出里有 ${f}，而它属于「不进包」的那几处 —— `
+        + '`.gitattributes` 里少了排除它的那条。')
     }
   }
   // 二、受版本控制的文件，要么在包里，要么命中结构规则。第三种状态是「没有归属」。
@@ -2853,7 +2854,8 @@ function checkProducedPackage(listPath, atRef) {
   // 一、不该进包的，一个都不许在。
   for (const f of list) {
     if (isRepoOnlyPath(f)) {
-      complain(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+      complain(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `
+        + '`.gitattributes` 里少了排除它的那条。')
     }
   }
 

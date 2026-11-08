@@ -2500,6 +2500,22 @@ export function tarEntries(buf) {
  * git 不可用、索引里有未合并条目等情况下返回 undefined：**「没比」与「比过且一致」
  * 必须可区分**，读不到就报未核对，不静默放行。
  */
+/**
+ * 某个版本里受版本控制的文件全集（相对仓库根）。取不到返回 undefined。
+ *
+ * 与 `trackedFiles()` 是同一个判据、两个对象：那个看工作区，这个看历史版本。
+ * 产出物核对要的是后者——判据与对象必须同源，拿今天的清单去核那天的包，
+ * 少一个文件永远核不出来。
+ */
+function trackedFilesAt(ref) {
+  const r = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', ref], {
+    cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  })
+  if (r.error !== undefined || r.status !== 0 || typeof r.stdout !== 'string') return undefined
+  const files = r.stdout.split('\0').filter((p) => p !== '')
+  return files.length === 0 ? undefined : files
+}
+
 function packageMembers() {
   const run = (args, encoding) => spawnSync('git', args, {
     cwd: SKILL_ROOT, encoding, windowsHide: true, maxBuffer: 64 * 1024 * 1024,
@@ -2663,12 +2679,13 @@ function checkPackageBoundary() {
         + '要么把它放进已有的那几处自用目录（`scripts/dev/` 一类），或新增一处并登记在 `REPO_ONLY_DIRS`。')
     }
   }
-  if (failures.length === 0) {
-    const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
-    if (failures.length === 0) {
-      process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
-        + `包内 ${links} 处相对引用全部落在包内\n`)
-    }
+  // **包自洽性不看前面那些判据的结果**：它们是「文件集合对不对」，这条是「这些东西放在
+  // 一起能不能用」。用全局 `failures` 当开关的话，前面红一下，这里就静默不跑了。
+  const before = failures.length
+  const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
+  if (failures.length === before) {
+    process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
+      + `包内 ${links} 处相对引用全部落在包内\n`)
   }
 }
 
@@ -2683,23 +2700,48 @@ function checkPackageBoundary() {
  * 「那天的产出物」。
  */
 function checkProducedPackage(listPath, atRef) {
-  if (!existsSync(listPath)) { fail(`找不到产出物清单 ${listPath}。`); return }
+  // **本步骤自己的失败计数**，不读全局 `failures`：读全局的话，前面任何一处红一下，
+  // 这里就整段不跑——报告少查一项，而且不说。
+  let bad = 0
+  const complain = (message) => { fail(message); bad += 1 }
+
+  if (!existsSync(listPath)) { complain(`找不到产出物清单 ${listPath}。`); return }
   const list = readText(listPath).split('\n')
     .map((s) => s.trim())
     .filter((s) => s !== '' && !s.endsWith('/'))
-  if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
+  if (list.length === 0) { complain(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
+
+  // 一、不该进包的，一个都不许在。
   for (const f of list) {
     if (isRepoOnlyPath(f)) {
-      fail(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+      complain(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
     }
   }
-  if (failures.length === 0) {
+
+  // 二、**该在包里的，一个都不许少**。这一半原来被漏掉了，而它才是发版那天真正会出事的
+  // 那一半：产出物少了一整块，上面那条「有没有多余的东西」照样全绿。
+  //
+  // 判据不靠人工清单：受版本控制的文件，要么在产出物里，要么命中「不进包」的结构规则。
+  const tracked = atRef === undefined ? trackedFiles() : trackedFilesAt(atRef)
+  if (tracked === undefined) {
+    warn('产出物缺漏未核对（读不到受版本控制的文件全集）—— 报「未核对」，不放行。')
+  } else {
+    const inList = new Set(list)
+    for (const f of tracked) {
+      if (!inList.has(f) && !isRepoOnlyPath(f)) {
+        complain(`${f} 该在产出物里，却没有出现 —— 这一版发出去的包是残缺的。`
+          + '要么 `.gitattributes` 的排除写宽了，要么生成产出物那一步漏了它。')
+      }
+    }
+  }
+
+  if (bad === 0) {
     const readContent = atRef === undefined
       ? contentFromWorktree
       : (f) => fileFromRef(atRef, f)
     const links = checkPackageSelfConsistency(list, readContent)
-    if (failures.length === 0) {
-      process.stdout.write(`产出物核对：${list.length} 个条目，全部落在「进包」的结构规则里；`
+    if (bad === 0) {
+      process.stdout.write(`产出物核对：${list.length} 个条目，与受版本控制的文件全集一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }
   }

@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 722
+export const BEHAVIOR_MIN_PASSED = 723
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2362,12 +2362,16 @@ function checkReviewRuleSources() {
         if (!table.paths.includes(anchor)) missing.push(why)
       }
       if (missing.length > 0) return false
-      // 二、**没有一条把另一条盖掉**：把 `scripts` 改成 `scripts/dev` 就悄悄丢掉一层，
-      //     而条数不变、关键处也还「被盖住」——上面那条判据看不见这种。
-      //     判据是两个方向都算覆盖：`a/b` 被 `a` 盖住，`a` 也被 `a/b` 盖住（后者意味着
-      //     `a` 这一层不再有单独的一行了）。
-      const covers = (a, b) => a === b || b.startsWith(`${a}/`) || a.startsWith(`${b}/`)
-      return !table.paths.some((a) => table.paths.some((b) => a !== b && covers(a, b)))
+      // **不再判「一条盖住另一条」。**
+      //
+      // 那条判据实测误伤了合法的「加细」：保留 `scripts` 不动、额外补一行 `scripts/dev`
+      // （说明「自检与工具同样是判定逻辑」），会被判成「表被删窄了」。
+      // 而把一整目录拆成「整目录 + 某一个更该单独说明的子目录」是**正常写法**，
+      // 覆盖范围只多不少。
+      //
+      // 真正的缩窄（`scripts` 改成 `scripts/dev`）已由上面那条挡住——
+      // 「覆盖必须是那一层本身」。这一条是多余的，而且方向错。
+      return true
     },
     '「## 高风险路径」表被删窄了，或者有哪一行的「为什么」说不通 —— '
     + '这张表是门禁的判据输入：删掉一行，那一类改动从此不需要审查记录，而门禁全绿。'

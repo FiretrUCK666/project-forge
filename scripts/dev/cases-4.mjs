@@ -27,6 +27,7 @@ import { executorVerdict } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
+  saysSomething, roundMarks, roundVerdict,
 } from '../review-record.mjs'
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
@@ -660,31 +661,13 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       '正文索引了第 1 轮、评论里找不到 → 不通过，并点名是哪一轮', JSON.stringify(miss.problems))
     report(miss.ok === false, '评论层：找不到就不通过')
 
-    // 评论里提到了那一轮、但没有说出**具体的东西** → 不算。
-    //
-    // 判据是「有没有说到文件、行号、或者明确写了零阻塞」，不是「够不够长」。
-    // 下面第二条正是审查报的那一类：字数够、内容空——200 字废话不该放过。
-    const tooShort = matchRoundsToComments(state, ['第 1 轮：通过'])
-    check(tooShort.ok === false,
-      '评论里只写「第 1 轮：通过」→ 不算（那连「发现了什么」都没有，核对不了任何东西）',
-      JSON.stringify(tooShort.problems))
-    report(tooShort.ok === false, '评论层：一句话交差不算')
-
-    const fluffy = matchRoundsToComments(state,
-      ['第 1 轮 —— 通过\n\n审过了，整体没问题，质量不错，继续努力，保持这个水平，'
-        + '大家都辛苦了，这个方向是对的，以后也这么做，没有什么要改的地方。'])
-    check(fluffy.ok === false,
-      '字数够但没说具体东西（「整体没问题、继续努力」）→ 不算（长度不是「说清了」的代理）',
-      JSON.stringify(fluffy.problems))
-    report(fluffy.ok === false, '评论层：废话不算')
-
-    // 反例：审查报的那一条——76 字、但写明了文件与行，是真结论，不该被拒。
-    const terse = matchRoundsToComments(state,
-      ['第 1 轮 —— 通过\n\n审了 review-record.mjs:322 那一处，零阻塞，两条建议。'])
-    check(terse.ok === true,
-      '短但说到了文件与行（76 字那种）→ 算（真结论不该因为短被拒）',
-      JSON.stringify(terse.problems))
-    report(terse.ok === true, '评论层：短而具体也算')
+    // **「写得够不够清楚」不判了**（见 saysSomething 的注释：七种判法都误伤真结论）。
+    // 这里只验「空评论被排掉」——那是这条判据唯一还敢断言的内容质量下限。
+    const empty = matchRoundsToComments(state, [''])
+    check(empty.ok === false,
+      '空评论 → 不算这一轮的痕迹（连「发过」都不算）',
+      JSON.stringify(empty.problems))
+    report(empty.ok === false, '评论层：空评论不算')
 
     // 评论里有一轮内容对得上 → 通过。
     const good = '## 独立审查 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑。逐条：三条建议、'
@@ -701,6 +684,23 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(partial.ok === false && partial.problems.some((p) => /第 2 轮/.test(p)),
       '两轮里只发了一条评论 → 不通过，缺的那轮要点名', JSON.stringify(partial.problems))
     report(partial.ok === false, '评论层：缺一轮也算缺')
+  }
+
+  // 3d) saysSomething：砍到只剩「是不是空的」。
+  //
+  // 这里**故意只留三条**，而且都是**能证伪**的：把实现改成「永远返回 true」，
+  // 第一条就红；改成「永远 false」，后两条就红。
+  //
+  // 为什么不再验「写得够不够清楚」：试过七种判法，每种都误伤真结论。
+  // 边界写在 references/collaboration.md 的判据表里——**这条判据证明「有痕迹」，
+  // 不证明「审得认真」**。用例不该假装它证明了更多。
+  {
+    check(saysSomething('') === false, '空评论 → 不算（连「发过」都不算）')
+    check(saysSomething('   \n  ') === false, '只有空白 → 不算')
+    check(saysSomething('通过') === true,
+      '「通过」两个字 → 放行（写得够不够好不归机器判，见判据表里的边界说明）')
+    report(saysSomething('') === false && saysSomething('通过') === true,
+      'saysSomething：只判空不空，不判内容质量')
   }
 
   // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。

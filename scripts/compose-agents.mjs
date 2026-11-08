@@ -1552,6 +1552,18 @@ function landScripts(target, stream) {
       process.stdout.write(`已拷入：${rel}（门禁要用它，随落盘一起过去）\n`)
     }
 
+  // **拷过去的东西要进账本**，否则它有指纹也撤不干净。账本是「本 skill 落的」唯一
+  // 登记入口，而交棒的痕迹判定「只认证据，不认记忆」。不登记时那份脚本只能落回
+  // 「按形状猜」——与新增落地脚本时说的「脚本能做的就不该留成家务」正好相反。
+  //
+  // 复用 recordWholeFile：它就是给「整份文件由我写下」这条准备的，不另起一套账本写法。
+  // 它自己处理「账本读不出来就拒绝写」与「路径不是文件」，出错时已报过话并返回非 0。
+  const landed = LANDED_SCRIPTS.filter((rel) => existsSync(join(target, rel)))
+  if (landed.length > 0 && recordWholeFile(target, landed) !== 0) {
+    process.stderr.write('提醒：这些落地脚本没能登记进账本（原因见上）：' + landed.join('、') + '\n'
+      + '  交棒时它们会被按「形状相似」判，而不是「确认是我写的」。\n')
+  }
+  void stream
 }
 
 function main(argv) {

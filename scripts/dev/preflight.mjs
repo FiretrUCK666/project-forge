@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 715
+export const BEHAVIOR_MIN_PASSED = 720
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2401,12 +2401,29 @@ export function executorVerdict(text) {
   if (/^(本次会话|本会话|我|AI|ai|助手|assistant|待填|待定|TBD|无|—|-)$/.test(value)) {
     return { verdict: 'pronoun', value }
   }
+
+  // **「取不到」是正当的终态，但必须说明原因。**
+  //
+  // 契约写着「取不到就写「未署名」并说明原因，不要编一个」。判据原先只认「值里有 @」，
+  // 于是照契约做必然红且无合法出路——要么编一个邮箱（契约禁止），要么永远卡在红着。
+  // 那是把人往「编一个」上逼，比放宽一档坏得多。
+  //
+  // 所以：以「未署名」开头、且后面还有话说（解释为什么取不到），算合格。
+  // 光写「未署名」三个字不算——那仍然是零信息，下一个人不知道是不能取还是懒得取。
+  if (/^未署名/.test(value)) {
+    return value.replace(/^未署名/, '').replace(/[（(\s]|[）)]/g, '').length >= 4
+      ? { verdict: 'ok', value }
+      : { verdict: 'no-identity', value }
+  }
+
   if (!/@/.test(value)) return { verdict: 'no-identity', value }
   return { verdict: 'ok', value }
 }
 
 /** 这一格不合格时要说的话（两处共用，避免措辞日后漂移）。 */
-export const EXECUTOR_ADVICE = '这一格的用处是「这件事该找谁问」，代词在这件事上是零信息，'
+export const EXECUTOR_ADVICE = '这一格的用处是「这件事该找谁问」。写**现场取的身份**：提交署名加平台账号；'
+  + '**取不到就写「未署名」并说明原因**（例如「未署名（这个克隆里没有配置提交署名）」），'
+  + '但光写三个字不算——那仍然是零信息。不要编一个。原话：代词在这件事上是零信息。'
   + '换个人打开就找不到人。写**现场取的身份**：提交署名（git config user.name 与 '
   + 'user.email）加平台账号；取不到就写「未署名」并说明原因，不要编一个。'
   + '别人 fork 之后填的是他自己的署名，这也是它必须现场取、不能写死的原因。'
@@ -2437,7 +2454,7 @@ function checkWorkRecords() {
         + '不带编号与状态。已经在用的老文件不强制改名；新建的照这条走。')
       continue
     }
-    const fields = ['状态', '建单日期', '最近更新']
+    const fields = ['状态', '建单日期', '最近更新', '执行者']
     const gap = fields.filter((f) => !new RegExp(`^\\|\\s*${f}\\s*\\|`, 'm').test(text))
     if (gap.length > 0) {
       bad += 1

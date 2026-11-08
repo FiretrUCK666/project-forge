@@ -266,7 +266,15 @@ export function reviewRecordState(body) {
   //   - 审查者那一格非空（它是「另一个上下文」的标识，正是要留档的东西）；
   //   - 结论是「通过」或「需要返工」之一。
   const VERDICT = /^(通过|不通过|需要返工|需要修改|需返工)/
-  const roundLike = (c) => /^(\d+|第\s*\d+\s*轮)$/.test(c)
+  // 轮次认三种写法：阿拉伯数字、阿拉伯数字带「第…轮」、中文数字带「第…轮」。
+  // 认不认一种写法，不该决定一条记录算不算数——那属于误伤正当写法。
+  const roundLike = (c) => /^(\d+|第\s*\d+\s*轮|第\s*[零一二三四五六七八九十]+\s*轮)$/.test(c)
+  const roundNumber = (c) => {
+    const ar = /(\d+)/.exec(c)
+    if (ar !== null) return ar[1]
+    const cn = /[零一二三四五六七八九十]+/.exec(c)
+    return cn === null ? c : (cnNum(cn[0]) ?? c)
+  }
   const rows = []
   for (const line of lines) {
     if (line === '' || isSeparator(line)) continue
@@ -276,7 +284,7 @@ export function reviewRecordState(body) {
     if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
     if (!roundLike(c[0]) || c[1] === '' || !VERDICT.test(c[2])) continue
     rows.push({
-      round: String(Number(c[0].replace(/[^\d]/g, ''))),
+      round: roundNumber(c[0]),
       who: c[1],
       verdict: VERDICT.exec(c[2])[1],
       note: c[3] ?? '',
@@ -327,6 +335,15 @@ export function reviewRecordState(body) {
  * 让最坏的那个词命中最松的那个——实测：索引写「通过」、评论写「不通过」，门禁判通过。
  * 按长度降序匹配，「不通过」先吃掉那四个字，「通过」就没有位置可占了。
  */
+/** 中文数字换算。只用到二十几轮——再往上没人会把轮次写成中文。 */
+const CN_DIGITS = '零一二三四五六七八九十'
+function cnNum(s) {
+  if (s.length === 1) return String(CN_DIGITS.indexOf(s))
+  if (s.startsWith('十')) return String(10 + CN_DIGITS.indexOf(s[1]))
+  const [a, b] = s.split('十')
+  const tens = CN_DIGITS.indexOf(a)
+  return String(tens * 10 + (b === undefined || b === '' ? 0 : CN_DIGITS.indexOf(b)))
+}
 const VERDICT_TOKENS = [
   ['需要返工', '需要返工'],
   ['需要修改', '需要返工'],
@@ -354,7 +371,11 @@ export function verdictsIn(text) {
 
 export function findRoundInComments(round, verdict, comments) {
   const list = Array.isArray(comments) ? comments : []
-  const roundRe = new RegExp(`(?:第\\s*${round}\\s*轮|round\\s*${round}\\b|#${round}\\s*轮)`, 'i')
+  // 轮次的三种写法都要认：阿拉伯数字、第 N 轮、第「中文数字」轮。
+  // 只认一种写法时，错误信息会把人引向「是不是没发评论」，而真原因是写法不认。
+  const cnAlt = `[零一二三四五六七八九十]+`
+  const roundRe = new RegExp(
+    `(?:第\\s*(?:${round}|${cnAlt})\\s*轮|round\\s*${round}\\b|#${round}\\s*轮)`, 'i')
   for (const c of list) {
     const text = typeof c === 'string' ? c : String(c?.body ?? '')
     if (!roundRe.test(text)) continue

@@ -445,7 +445,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 反例一：文件名没带日期（最常见的那种「顺手起个名」）。
   writeFileSync(join(dir, '随手的名字.md'),
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n等审查。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const badName = preflightIn(clone, { only: '本仓库工作记录' })
   check(badName.status === 1 && /YYYY-MM-DD/.test(badName.out),
@@ -463,7 +463,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 反例三：断点被清空、但后面那节有正文。截取范围若只删标题行，这条会误判「非空」。
   writeFileSync(goodName,
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n## 完成后的记录\n\n已经合并，无遗留。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n## 完成后的记录\n\n已经合并，无遗留。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const emptyBreak = preflightIn(clone, { only: '本仓库工作记录' })
   check(emptyBreak.status === 1 && /断点/.test(emptyBreak.out),
@@ -471,7 +471,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 正例：补齐之后放行（同时证明上一条不是「永远失败」）。
   writeFileSync(goodName,
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n等审查。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const ok = preflightIn(clone, { only: '本仓库工作记录' })
   check(ok.status === 0, '补齐之后放行', ok.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
@@ -526,7 +526,18 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
     // 没有那一节 → found 为 false，调用方才好说「这一趟没查」。
     check(readHighRiskTable('# 没有那一节\n').found === false,
       '没有「## 高风险路径」这一节 → found=false（调用方据此报「没查」）')
-    report(true, '契约到判据：五种写法都认，认不出来的会说出来')
+    // 复算一遍再报：把上面几条的关键结论重新算一次，全对才算这组通过。
+    // 传字面量 true 时它永远通过，而它会算进通过总数——那个下限应该度量「有多少条判据
+    // 在守着」，掺进恒真项就失去意义。
+    const tableOk = (row, want) => JSON.stringify(readHighRiskPaths(table(row))) === want
+    const allTable = tableOk('`src/rules`', '["src/rules/"]')
+      && tableOk('`src/rules/` 下的判定', '["src/rules/"]')
+      && tableOk('`a/`,`b/`', '["a/","b/"]')
+      && tableOk('`AGENTS.md`', '["AGENTS.md"]')
+      && readHighRiskPaths(table('`<替换成这个项目的第一处>`')).length === 0
+    const reported = readHighRiskTable(table('<替换成第一处>')).skipped.length === 1
+    const absent = readHighRiskTable('# 没有那一节\n').found === false
+    report(allTable && reported && absent, '契约到判据：五种写法都认，认不出来的会说出来')
   }
 
   // 1c) git 的 C 风格转义。中文名的风险改动以前会被判成非高风险、绿着放行。
@@ -537,6 +548,29 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
       '转义过的中文路径照样判成高风险（不依赖调用方记得关 core.quotepath）')
     check(unquoteGitPath('templates/审查.md') === 'templates/审查.md', '没转义的原样返回', '')
     report(unquoteGitPath(esc) === 'templates/审查.md', '转义还原：中文路径不再漏判')
+  }
+
+  // 1d) 中文数字轮次。契约与示例全是中文，写「第一轮」不该判无效。
+  {
+    const mk = (row) => `## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n| ${row} | s | 通过 | 0 / 1 |\n`
+    const cases = [['1', '1'], ['第 1 轮', '1'], ['第一轮', '1'], ['第九轮', '9'],
+      ['第十轮', '10'], ['第十一轮', '11'], ['第十二轮', '12'], ['第二十轮', '20']]
+    const wrong = cases.filter(([input, want]) => reviewRecordState(mk(input)).rows?.[0]?.round !== want)
+    check(wrong.length === 0, '八种写法都解析成正确的轮次（第一轮 → 1、第十二轮 → 12）',
+      JSON.stringify(wrong))
+
+    const st = reviewRecordState(mk('1'))
+    const cmt = (h) => `${h}\n\n` + '这是一段足够长的说明，读得出发现了什么，文件与行都核过了。'.repeat(3)
+    const heads = ['## 第一轮独立审查 —— 通过', '## 第 1 轮 —— 通过', '## round 1 —— 通过']
+    const missAll = heads.filter((h) => !matchRoundsToComments(st, [cmt(h)]).ok)
+
+    // 反向仍然成立：中文写法不该把「不通过」放过去（整词判定不能被这次改动弄坏）。
+    const stillBlocks = matchRoundsToComments(st, [cmt('## 第一轮 —— 不通过')]).ok === false
+
+    check(missAll.length === 0 && stillBlocks,
+      '评论侧三种写法都认得出「第 1 轮」，而「不通过」仍然被拦住', JSON.stringify(missAll))
+    report(wrong.length === 0 && missAll.length === 0 && stillBlocks,
+      '中文数字轮次：索引侧与评论侧都认，不通过仍拦住')
   }
 
   // 2) 改动清单去重、排序、只留高风险。
@@ -720,8 +754,14 @@ group('[41] 工作记录的「执行者」：写身份，不写代词')
   // 写不出身份（没有 @）：既不是代词，也不是人 —— 仍然不合格。
   check(executorVerdict(rec('小明')).verdict === 'no-identity',
     '写了名字但没有可联系的账号 → 判为「写不出身份」（这一格的用处是找人）')
+
+  // **「取不到就写未署名并说明原因」是契约允许的终态，判据必须认。**
+  // 不认的后果很具体：照契约做必然红，使用者唯一的出路是编一个邮箱（契约禁止）。
+  // 但光写「未署名」三个字仍然是零信息——下一个人不知道是不能取还是懒得取。
   check(executorVerdict(rec('未署名')).verdict === 'no-identity',
-    '写「未署名」→ 也不合格（要么补身份，要么说清为什么取不到）')
+    '光写「未署名」→ 不合格（零信息：不知道是不能取还是懒得取）')
+  check(executorVerdict(rec('未署名（这个克隆里没有配置提交署名）')).verdict === 'ok',
+    '「未署名 + 原因」→ 合格（契约允许的终态，不认就是把人往「编一个」上逼）')
 
   // 有身份：署名 + 邮箱。
   check(executorVerdict(rec('FiretrUCK666 <326200973+FiretrUCK666@users.noreply.github.com>')).verdict === 'ok',
@@ -732,7 +772,15 @@ group('[41] 工作记录的「执行者」：写身份，不写代词')
   check(executorVerdict('# 只有正文\n').verdict === 'absent', '没有这一格 → absent，不重复报')
   check(executorVerdict(rec('<!-- 待填 -->')).verdict === 'absent', '只有注释 → absent（等于没填）')
 
-  report(true, '执行者：代词与写不出身份都拦，有身份就放行')
+  // 复算一遍再报：这一组的结论是「三态都分得开」，把它算成一个布尔再交给 report。
+  // 传字面量 true 时这条永远通过，而它会算进通过总数——那个下限本应是「有多少条判据
+  // 在守着」的度量，掺进恒真项就失去意义。
+  const ev = (v) => executorVerdict(rec(v)).verdict
+  const allExecutor = ev('本次会话') === 'pronoun' && ev('我') === 'pronoun' && ev('AI') === 'pronoun'
+    && ev('小明') === 'no-identity' && ev('未署名') === 'no-identity'
+    && ev('FiretrUCK666 <a@b.c>') === 'ok' && ev('@someone') === 'ok'
+    && ev('未署名（这个克隆里没有配置提交署名）') === 'ok'
+  report(allExecutor, '执行者：代词与光写未署名都拦，有身份与「未署名+原因」都放行')
 }
 
 // ---- 分片收尾 ----

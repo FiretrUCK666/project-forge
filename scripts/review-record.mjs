@@ -118,12 +118,13 @@ export function readHighRiskPaths(agentsText) {
 export function readHighRiskTable(agentsText) {
   const text = String(agentsText ?? '')
   const head = /^##+[ \t]*高风险路径[ \t]*$/m.exec(text)
-  if (head === null) return { paths: [], skipped: [], found: false }
+  if (head === null) return { paths: [], skipped: [], found: false, whyFilled: true }
   const after = text.slice(head.index + head[0].length)
   const nextHead = /^##+[ \t]/m.exec(after)
   const block = nextHead === null ? after : after.slice(0, nextHead.index)
   const out = []
   const skipped = []
+  let whyFilled = true
   for (const line of block.split(/\r?\n/)) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('|')) continue
@@ -134,7 +135,16 @@ export function readHighRiskTable(agentsText) {
 
     const candidates = []
     // 反引号包着的路径优先——那是人明确标出来的「这一格是路径」。
-    for (const m of first.matchAll(/`([^`]+)`/g)) candidates.push(m[1])
+    //
+    // **但反引号是成对写的，一格里的分隔符在反引号外面**：`\`a/\`,\`b/\`` 的反引号内容
+    // 各是一段，中间那个逗号在反引号之外，所以这里拿到的是两段，正确。
+    // 而 `\`a/,b/\`` 是**一整对反引号包着两个路径**——那种写法要按分隔符再拆一次，
+    // 否则整格会被当成一个不存在的路径，两处都静默失效。
+    for (const m of first.matchAll(/`([^`]+)`/g)) {
+      for (const part of m[1].split(/[\s,，、]+/)) {
+        if (part !== '') candidates.push(part)
+      }
+    }
     if (candidates.length === 0) {
       // 没有反引号：取第一个以空白/逗号/顿号切开后像路径的 token。
       for (const tok of first.split(/[\s,，、]+/)) {
@@ -143,19 +153,22 @@ export function readHighRiskTable(agentsText) {
       }
     }
 
+    // 「为什么」那一格：非空、不是占位符。理由空白的一行等于只有路径没有依据。
+    const why = (cells[1] ?? '').replace(/<!--[\s\S]*?-->/g, '').trim()
+    if (why === '' || why.startsWith('<')) whyFilled = false
+
     let took = 0
     for (const raw of candidates) {
       let v = raw.replace(/\\/g, '/').replace(/^\.\//, '').trim()
       if (v === '' || v.startsWith('<')) continue
-      // 没带斜杠、末段也没有扩展名 → 当目录，补成前缀形式。
-      // 判据：末段里没有点，就是目录名（`src/rules` 是目录，`AGENTS.md` 是文件）。
-      if (!v.endsWith('/') && !/\.[^/]+$/.test(v)) v = `${v}/`
-      out.push(v)
+      const spec = normalizeEntry(v)
+      if (spec === undefined) continue
+      out.push(spec.path)
       took += 1
     }
     if (took === 0) skipped.push(trimmed)
   }
-  return { paths: [...new Set(out)], skipped, found: true }
+  return { paths: [...new Set(out)], skipped, found: true, whyFilled }
 }
 
 /**
@@ -196,13 +209,56 @@ export function unquoteGitPath(raw) {
  * 结尾带 `/` 的按目录前缀比；否则按整段相等——这样 `scripts-dev/` 不会被
  * `scripts/` 误伤（用 `includes` 就会，实测过）。
  */
-export function isHighRiskPath(rel, prefixes) {
-  const p = unquoteGitPath(rel).replace(/\\/g, '/').replace(/^\.\//, '')
-  if (p === '') return false
-  const list = Array.isArray(prefixes) ? prefixes : []
-  return list.some((pre) => (pre.endsWith('/') ? p.startsWith(pre) : p === pre))
+/**
+ * 把表里那一格归一成**两种规范形态之一**：目录以 `/` 结尾，文件不以 `/` 结尾。
+ *
+ * **归一化只能有一处。** 实测过的病：把 `| AGENTS.md |` 改成 `| AGENTS.md/ |`——
+ * 一个字符——preflight 自己做了 `replace(/\/$/, '')` 于是通过，而这里按前缀比
+ * `'AGENTS.md'.startsWith('AGENTS.md/')` 为假，那份文件就不再算高风险。
+ * 一个字符让「改契约本身」免审，而另一处判据看不见。两处归一化迟早给出两个答案。
+ *
+ * **尾斜杠不决定这一格是文件还是目录**——它是书写习惯。可光看名字也分不出来：
+ * `.github` 是目录、`.gitattributes` 是文件，而它们的名字都以点开头，长得一模一样。
+ * 靠「有没有扩展名」猜，实测把 `.gitattributes` 判成了目录，那一行从此静默失效。
+ *
+ * 所以归一只做**能确定的那一半**：去掉多余的尾斜杠、`./`、反斜杠，
+ * **然后保留「原样写过尾斜杠」这个事实**。判前缀时两种都认——见 `isHighRiskPath`。
+ * 猜不出来就不猜：判据宁可认两种写法，也不能把一种合法写法判死。
+ *
+ * 返回 `{ path, dir }`：`path` 是去掉尾斜杠的规范形式，`dir` 是「原样带过尾斜杠」。
+ * 调用方只需拼出两种可能的匹配形式，不需要知道它是文件还是目录。
+ */
+export function normalizeEntry(raw) {
+  let v = String(raw ?? '').replace(/\\/g, '/').trim()
+  v = v.replace(/^\.\//, '')
+  if (v === '' || v.startsWith('<') || v.startsWith('/') || /^[A-Za-z]:/.test(v)) return undefined
+  const seg = v.split('/').filter((s) => s !== '').pop() ?? ''
+  if (seg === '' || seg === '.' || seg === '..') return undefined
+  return { path: v.replace(/\/+$/, ''), dir: v.endsWith('/') }
 }
 
+/**
+ * 一个改动路径算不算落在高风险表里。
+ *
+ * 表项在解析时已归一（见 `normalizeEntry`），这里**只做匹配，不再归一**——两处各归一化
+ * 一次迟早给出两个答案，那是实测过的病。
+ *
+ * 匹配认两种：整段相等（文件），或以 `path/` 开头（目录）。**两种都认**，因为
+ * 「这一格是文件还是目录」在名字上看不出来（`.github` 与 `.gitattributes` 长得一样）。
+ * 多认一种写法的代价是可能多要求一次审查；少认一种的代价是**静默失效**——
+ * 前者可接受，后者正是这一整类问题的根。
+ */
+export function isHighRiskPath(rel, prefixes) {
+  const p = String(rel ?? '').replace(/\\/g, '/')
+  for (const pre of prefixes ?? []) {
+    const base = String(pre).replace(/\/+$/, '')
+    if (base === '') continue
+    if (p === base || p.startsWith(`${base}/`)) return true
+  }
+  return false
+}
+
+/**
 /** 从一份改动清单里挑出高风险的那几条（去重、排序，报告里好读）。 */
 export function highRiskChanged(paths, prefixes) {
   return [...new Set(paths.map((x) => unquoteGitPath(x)).filter(Boolean)

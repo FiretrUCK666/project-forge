@@ -175,7 +175,7 @@ group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，�
 // 分成多次调用是账本机制最容易出错的地方：写 README 时记得调、写 CONTRIBUTING 时忘了，
 // 账本就少一条，交棒时那一份退化成按形状猜——而账本存在的唯一理由就是不再猜。
 // 更要紧的是**失败时不能留半套账**：账本看起来有内容，比它空着更坏。
-group('[52] 账本登记：多份一次记，失败时一份都不记')
+group('[65] 账本登记：多份一次记，失败时一份都不记')
 {
   const dir = fixture('ledger-record', {})
   for (const f of ['README.md', 'CONTRIBUTING.md', 'LICENSE']) {
@@ -237,7 +237,7 @@ group('[52] 账本登记：多份一次记，失败时一份都不记')
 //
 // 两面对称才成立：如果只验「docs/ 不算」，判据可能整个失效而没人发现；如果只验「活文档
 // 照判」，docs/ 一旦被加进去就会误红。所以一次验两条，方向相反。
-group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
+group('[66] 引用断链：docs/ 是历史快照不判，活文档照判')
 {
   const clone = skillClone('docs-refs')
   const histDir = join(clone, 'docs', 'release-notes')
@@ -289,7 +289,7 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
   rmSync(workDir, { recursive: true, force: true })
 }
 
-group('[57] 架构升级与逻辑补全：决策持久化、工具链推导与行内反引号隔离')
+group('[67] 架构升级与逻辑补全：决策持久化、工具链推导与行内反引号隔离')
 {
   // 1. markerPositions: 行内反引号内的标记被忽略，独占一行的标记被正确解析
   const sampleDoc = [
@@ -478,7 +478,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
   report(badName.status === 1 && badHead.status === 1 && emptyBreak.status === 1 && ok.status === 0,
     '工作记录结构：命名、表头、断点、正例四面都分得清')
 }
-group('[40] 审查记录：高风险改动必须有可核对的痕迹')
+group('[68] 审查记录：高风险改动必须有可核对的痕迹')
 {
   // 1) 高风险路径的判据：**目录前缀**，不是逐文件清单。
   //    清单要人记得改；目录不会长出新的一处。
@@ -572,7 +572,10 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
       JSON.stringify(wrong))
 
     const st = reviewRecordState(mk('1'))
-    const cmt = (h) => `${h}\n\n` + '这是一段足够长的说明，读得出发现了什么，文件与行都核过了。'.repeat(3)
+    // 判据从「字数 ≥ 80」换成「有没有说到具体东西」，所以这条 fixture 也要说具体东西——
+    // 否则它验的是旧判据，而不是「三种轮次写法都认」这件事。
+    const cmt = (h) => `${h}\n\n审了 \`scripts/review-record.mjs\` 的判定逻辑，零阻塞，`
+      + '两条建议都在 review-record.mjs:322 那一带。'
     const heads = ['## 第一轮独立审查 —— 通过', '## 第 1 轮 —— 通过', '## round 1 —— 通过']
     const missAll = heads.filter((h) => !matchRoundsToComments(st, [cmt(h)]).ok)
 
@@ -657,12 +660,31 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
       '正文索引了第 1 轮、评论里找不到 → 不通过，并点名是哪一轮', JSON.stringify(miss.problems))
     report(miss.ok === false, '评论层：找不到就不通过')
 
-    // 评论里提到了那一轮但只是一句话交差 → 不算。长度下限拦的是「一句话交差」。
+    // 评论里提到了那一轮、但没有说出**具体的东西** → 不算。
+    //
+    // 判据是「有没有说到文件、行号、或者明确写了零阻塞」，不是「够不够长」。
+    // 下面第二条正是审查报的那一类：字数够、内容空——200 字废话不该放过。
     const tooShort = matchRoundsToComments(state, ['第 1 轮：通过'])
     check(tooShort.ok === false,
       '评论里只写「第 1 轮：通过」→ 不算（那连「发现了什么」都没有，核对不了任何东西）',
       JSON.stringify(tooShort.problems))
     report(tooShort.ok === false, '评论层：一句话交差不算')
+
+    const fluffy = matchRoundsToComments(state,
+      ['第 1 轮 —— 通过\n\n审过了，整体没问题，质量不错，继续努力，保持这个水平，'
+        + '大家都辛苦了，这个方向是对的，以后也这么做，没有什么要改的地方。'])
+    check(fluffy.ok === false,
+      '字数够但没说具体东西（「整体没问题、继续努力」）→ 不算（长度不是「说清了」的代理）',
+      JSON.stringify(fluffy.problems))
+    report(fluffy.ok === false, '评论层：废话不算')
+
+    // 反例：审查报的那一条——76 字、但写明了文件与行，是真结论，不该被拒。
+    const terse = matchRoundsToComments(state,
+      ['第 1 轮 —— 通过\n\n审了 review-record.mjs:322 那一处，零阻塞，两条建议。'])
+    check(terse.ok === true,
+      '短但说到了文件与行（76 字那种）→ 算（真结论不该因为短被拒）',
+      JSON.stringify(terse.problems))
+    report(terse.ok === true, '评论层：短而具体也算')
 
     // 评论里有一轮内容对得上 → 通过。
     const good = '## 独立审查 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑。逐条：三条建议、'
@@ -741,7 +763,7 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   report(r6.status === 0, '脚本：本地空清单放行')
 }
 
-group('[41] 工作记录的「执行者」：写身份，不写代词')
+group('[69] 工作记录的「执行者」：写身份，不写代词')
 {
   const rec = (who) => `# 一件事
 

@@ -437,10 +437,38 @@ export function findRoundInComments(round, verdict, comments) {
     if (!roundRe.test(text)) continue
     // **按整词判定，不按子串**。见上面词表那段注释。
     if (!verdictsIn(text).has(verdict)) continue
-    if (text.trim().length < 80) continue
+    if (!saysSomething(text)) continue
     return text.trim().slice(0, 80).replace(/\s+/g, ' ')
   }
   return undefined
+}
+
+/**
+ * 这条评论有没有说出**具体的东西**。
+ *
+ * 原先判的是「字数 ≥ 80」。长度不是「说清了」的代理：一条 76 字、写明了文件与行的
+ * 真结论会被拒，而 200 字「审过了，整体没问题，质量不错，继续努力」会被放过。
+ * 实测过：76 字的完整结论被拒绝，88 字的同一形状放行——差两个字符，判据就翻面。
+ *
+ * 换成判**形状**：审查结论的形状是「说到了具体的地方」。满足任一条就算说清了：
+ *   - 提到文件或路径（带扩展名 / 带斜杠 / 反引号包着的标识符）
+ *   - 提到行号（`L12`、`:34`、「第 5 行」）
+ *   - 明确写了零阻塞（「零阻塞」「没有阻塞」「没发现问题」这类）
+ *
+ * 三条都不是「长」，而是「有内容」。长度下限仍然留一个很低的兜底（12 字），
+ * 拦的是「通过」「第 1 轮：通过」这种一句话交差。
+ */
+export function saysSomething(text) {
+  const t = String(text ?? '')
+  if (t.replace(/\s/g, '').length < 12) return false
+  // 一、提到具体的地方：文件名、路径、行号、反引号里的标识符。
+  if (/`[^`]+`/.test(t)) return true
+  if (/[\w.-]+\.(mjs|js|ts|md|yml|yaml|json|mts|py|go|rs|toml)\b/.test(t)) return true
+  if (/(?:^|[\s(（])(?:\.\/)?[\w.-]+\/[\w./-]+/.test(t)) return true
+  if (/\bL\d+\b|:\d+\b|第\s*\d+\s*行/.test(t)) return true
+  // 二、明确写了「零阻塞 / 没发现问题」——那是一个结论，不是一句口令。
+  if (/(零阻塞|没有阻塞|无阻塞|零\s*\/\s*0|没发现问题|未发现问题|没有发现(?:问题|缺陷))/.test(t)) return true
+  return false
 }
 
 /**

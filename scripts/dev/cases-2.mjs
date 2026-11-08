@@ -1264,7 +1264,7 @@ group('[49] 命令行用法：打错了必须说出来')
 // 本来就该跟着变。判据必须是结构（「行首第 0 列的 `if (isMainModule(`」），不能是
 // 「文件里出现过这个词」——后者会把「拿它做单元断言的测试」和「拿它拼夹具的字符串」
 // 全都算成入口，于是纯模块平白多一条提示，而提示一多就没人读了。
-group('[50] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给真入口')
+group('[61] 脚本层判据：入口形状、lib 覆盖、shebang 提示只给真入口')
 {
   const cases = [
     ['真入口', 'if (isMainModule(import.meta.url, process.argv[1])) {\n  main()\n}\n', true],

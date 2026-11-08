@@ -120,7 +120,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 720
+export const BEHAVIOR_MIN_PASSED = 722
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。

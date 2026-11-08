@@ -37,6 +37,10 @@ jobs:
     steps:
       - name: 检出
         uses: actions/checkout@v4  # 落盘前核对最新大版本
+        with:
+          # **必须全历史**：最后那一步要算基线分支与本次的差异，浅克隆里没有合并基点，
+          # `git diff A...B` 会返回空——而空清单会被读成「没动高风险路径」，门禁绿着放行。
+          fetch-depth: 0
 
       # TODO(1)：按生态只留一块，其余整块删掉。Python 换 setup-python，Rust/Go 换对应
       # setup action，纯文档目录本块整段删掉。未选生态时下面默认块是错的，先选再删注释。
@@ -56,3 +60,27 @@ jobs:
       #   run: |
       #     <重新构建命令>
       #     <比对命令：不一致即失败>
+
+      # 「高风险改动必须有审查记录」。**这一步不要删**：它是「必须独立审查」这条规则
+      # 唯一的机器判据。没有它，那条规则就只是一段文字——改完、门禁全绿、看着没问题，
+      # 就合了，而「审查」这一步从来没发生过。实测过：34 个文件、动到判定逻辑与模板的
+      # 改动就是这么被合进去的。
+      #
+      # 判据来自本项目 AGENTS.md 的「## 高风险路径」表——**那张表填了才有效**，
+      # 空表会让这一步明说「这一趟没查」然后放行（不静默，但也拦不住）。
+      #
+      # 前置：把 `review-record.mjs` 拷到本项目的 `scripts/` 下——从生成这个项目的 skill
+      # 的 `scripts/` 目录原样复制即可，它零依赖、单文件，不需要装任何东西。
+      # 检出必须 `fetch-depth: 0`：算基线差异需要合并基点，浅克隆里 diff 会返回空，
+      # 而空清单会被读成「没动高风险路径」——门禁绿着放行，什么都没拦。
+      - name: 高风险改动必须有审查记录（仅提案）
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          git diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+          printf '%s' "$PR_BODY" > pr-body.md
+          # `--expect-changes` 不能省：提案不可能零改动，清单为空只说明 diff 没算出来。
+          node scripts/review-record.mjs --changed changed.txt --body pr-body.md --expect-changes

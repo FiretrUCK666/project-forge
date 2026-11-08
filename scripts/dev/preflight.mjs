@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments , LANDED_SCRIPTS } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableFirstCells, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
@@ -570,7 +570,14 @@ function checkDeliveredAttribution() {
 
   // `scripts/` 是通用目录名，目标项目也常有，所以这一条必须看本包**真的有**那个脚本：
   // 否则目标项目自己的 `scripts/build.mjs` 会被误判成我们的。
-  const isOurScript = (spec) => spec.startsWith('scripts/') && fileExistsLoose(expand(spec))
+  //
+  // **例外：要落到目标项目里去的那几个脚本**（`LANDED_SCRIPTS`）。它们的用法就是
+  // 「拷进项目的 `scripts/` 之后在那儿跑」——模板里指它是对的，不指才是漏了。
+  // 这条例外写成一张显式表，不靠「名字里带某个词」之类的启发式：那种判据在加第二个
+  // 脚本时会静默失灵，而失灵的后果是把一条正确的引用判成死链。
+  const isOurScript = (spec) => spec.startsWith('scripts/')
+    && fileExistsLoose(expand(spec))
+    && !LANDED_SCRIPTS.includes(expand(spec))
 
   // 围栏代码块：只对 Markdown 生效。行号要与原文对齐，所以按行追踪。
   const fencedLines = (text, isMarkdown) => {

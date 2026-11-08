@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments , LANDED_SCRIPTS } from '../lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments , LANDED_SCRIPTS, REPO_ONLY_DIRS, REPO_ONLY_FILES } from '../lib/protocol.mjs'
 import { skillVersion, skillSource, repoRelation, tableFirstCells, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
@@ -85,8 +85,11 @@ const OWN_AGENTS_WARN_HEADROOM = 1024
  *
  * 这个数字是**量出来的、不是拍的**：按现在的结构（何时使用 / 硬不变量 / 取值从哪来 /
  * 能力矩阵 / 已有基础的项目 / 执行流程 / 硬门控 / 文件地图 / 边界 / 汇报纪律）写完是
- * 二十几 KB，30 KB 留出约 3 KB——够写一条新机制。要再涨，先问「这条能不能并进
+ * 二十几 KB，30 KB 留出一点余量——够写一条新机制。要再涨，先问「这条能不能并进
  * `references/`」，而不是抬这个数。
+ *
+ * **别在这里写「还剩多少」**：余量每天都在变，写进注释就变成下一个会过期的快照。
+ * 想知道余量，看 `SKILL_WARN_HEADROOM` 那条告警——它每次跑都量当前值。
  */
 const SKILL_MAX_BYTES = 30 * 1024
 /** 余量告警线：离上限不足这么多字节时提醒一次。 */
@@ -1366,10 +1369,16 @@ function checkStatedCounts() {
       return false
     }
     for (const rel of onDisk) {
-      // **只查随包分发的脚本**。判据是读者：`scripts/` 顶层与 `lib/` 是拿到包的人会用到、
-      // 或者会被包里其它脚本 import 的；`scripts/dev/` 只服务本仓库，它在副本里根本不存在
-      // （被打包排除了），拿它做可达性检查只会在副本里制造一堆假红。
-      if (isRepoOnlyPath(rel)) continue
+      // **自检分片整片豁免，别的自用脚本照查。**
+      //
+      // 分片（`scripts/dev/cases-N.mjs`）由 `selftest.mjs` 的 `SHARDS` 表按名字调起，
+      // 而在**副本**里 `selftest.mjs` 被换成只打摘要行的替身（否则 preflight 与 selftest
+      // 会互相调用）——那时代码里找不到对它们的引用，是**结构的正常状态**，不是「没人用」。
+      // 所以这里按名字认它们。
+      //
+      // 其余自用脚本一律参与：`scripts/dev/` 曾经整片跳过，后果是「写一个没人用的工具
+      // 永远不会被发现」——而这正是这条判据存在的理由。
+      if (isSelftestCase(rel)) continue
       const base = rel.slice(rel.lastIndexOf('/') + 1)
       const inDoc = docs.some((t) => t.includes(rel) || t.includes(base))
       if (!inDoc && !referencedByCode(rel)) {
@@ -1393,15 +1402,20 @@ function checkStatedCounts() {
   // templates 的全部内容（专章之间互相指是常态，也必须算数）。不取 `docs/`：
   // 那是历史与工作记录，不是读者查找文件的入口。
   {
+    // `docs` 收的是「读者会去查找文件的那几份」：入口、两份 README、本仓库契约，
+    // 外加 references 与 templates 的全部正文（专章之间互相指是常态，也必须算数）。
+    // 每份带**自己的相对路径**，这样自指可以被排掉——见 `mentions`。
     const docs = ['SKILL.md', 'README.md', 'README.en.md', 'AGENTS.md']
-      .map((f) => readText(join(SKILL_ROOT, f)))
+      .map((f) => ({ at: f, text: readText(join(SKILL_ROOT, f)) }))
     for (const sub of ['references', 'templates']) {
       const dir = join(SKILL_ROOT, sub)
       if (!existsSync(dir)) continue
       const walk = (d, prefix) => {
         for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
           if (e.isDirectory()) { walk(join(d, e.name), `${prefix}${e.name}/`); continue }
-          if (e.name.endsWith('.md')) docs.push(readText(join(d, e.name)))
+          if (e.name.endsWith('.md')) {
+            docs.push({ at: `${sub}/${prefix}${e.name}`, text: readText(join(d, e.name)) })
+          }
         }
       }
       walk(dir, '')
@@ -1410,7 +1424,11 @@ function checkStatedCounts() {
       const base = rel.slice(rel.lastIndexOf('/') + 1)
       // 两种写法都算提到：完整相对路径（`references/x.md`）与裸文件名（`x.md`）。
       // 后一种是有意的：专章之间常常只写文件名，因为读者已经在那个目录的语境里。
-      return docs.some((t) => t.includes(rel) || t.includes(base))
+      //
+      // **但不算它自己那一份**：每个文件几乎都会在标题或正文里写一遍自己的名字，
+      // 把自己算进去，这条判据就退化成「文件存在吗」——实测新建一个只写着
+      // `# probe.md` 的模板，它照样放行，而「写了却没人指得到」正是要拦的那件事。
+      return docs.some((d) => d.at !== rel && (d.text.includes(rel) || d.text.includes(base)))
     }
     for (const sub of ['references', 'templates']) {
       const dir = join(SKILL_ROOT, sub)
@@ -1429,27 +1447,47 @@ function checkStatedCounts() {
       walk(dir, '')
     }
   }
-  // README 的「包里有什么」只核**四类东西都在**，不核逐文件清单。
+  // README 的「包里有什么」核**四类东西都在**，不核逐文件清单。
   //
-  // 为什么不再逐文件对账：那样就等于要求 README 维护一份要人记得改的清单，而它的读者
-  // 是「刚拿到这个 skill 的人」——他要判断的是「包里大概有什么」，不是查某一个脚本在不在
+  // 为什么不逐文件对账：那等于要求 README 维护一份要人记得改的清单，而它的读者是
+  // 「刚拿到这个 skill 的人」——他要判断的是「包里大概有什么」，不是查某一个脚本在不在
   // （那件事他直接看目录更快）。逐文件清单漏一行的症状是「读者照着找，找不到」，但同一份
   // 清单**每加一个文件就要改一次**，成本永久高于收益。
   //
-  // 判据落在那四类东西上：入口、判据、骨架、工具。任一类从 README 里消失，读者就再也
+  // 判据落在那四类上：入口、判据、骨架、工具。任一类从 README 里消失，读者就再也
   // 不知道那个目录存在——那才是这条检查真正要防的事。
-  for (const [readme, probe] of [
-    ['README.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
-    ['README.en.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
-  ]) {
+  //
+  // **但「新文件可以永远不列」也是个洞**：README 说的「包里有什么」是读者对包的全部
+  // 预期，而每加一个顶层文件它就可能少说一样（举例：根上多一份 `RELEASING.md` 那样的
+  // 说明文件）。所以四类之外再补一条：**根目录下受版本控制的普通文件**，README 里得
+  // 提到它的名字。判据只覆盖根目录——子目录里的文件由上面那四类代表，逐个数它们
+  // 又会退回成逐文件清单。
+  const rootFiles = (() => {
+    const tracked = trackedFiles()
+    if (tracked === undefined) return undefined
+    return tracked.filter((f) => !f.includes('/'))
+      .filter((f) => !isRepoOnlyPath(f))
+      .filter((f) => !/^(LICENSE|\.gitignore|\.gitattributes)$/.test(f))
+  })()
+  for (const readme of ['README.md', 'README.en.md']) {
     const p = join(SKILL_ROOT, readme)
     if (!existsSync(p)) continue
     const text = readText(p)
-    for (const re of probe) {
+    for (const re of [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]) {
       if (!re.test(text)) {
         fail(`${readme} 里找不到 ${re} —— 「包里有什么」那一段必须让人看得到这一类东西，`
           + '否则读者根本不知道那个目录存在。')
       }
+    }
+    if (rootFiles === undefined) {
+      warn(`${readme} 的根目录文件未逐一核对（git 不可用）—— 报「未核对」，不放行。`)
+      continue
+    }
+    const unnamed = rootFiles.filter((f) => f !== 'README.md' && f !== 'README.en.md'
+      && !text.includes(f))
+    for (const f of unnamed) {
+      fail(`${readme} 没有提到根目录的 ${f} —— 它随包发出去，而读者从 README 里看不到。`
+        + '要么在「包里有什么」那一段补一句，要么它不该在根上（挪进已有的目录）。')
     }
   }
   // 门禁命令表在 AGENTS.md 与 CONTRIBUTING 各写了一份，**两处必须说同一件事**：
@@ -1576,49 +1614,7 @@ function checkStatedCounts() {
         }
       }
     }
-    // 脚本数量：写成「N 个脚本」时核对。
-    //
-    // **「一」在这里不当数量**：中文「一个脚本」是泛指冠词（"a script"），不是「脚本有
-    // 一个」。脚本是通用名词，这个读法极常见；而「一个脚本」这种数量断言本身既罕见、
-    // 错了也没人受害。**代价不对称**：为它误报一次，整道门禁就红一次，而红过一次的门禁
-    // 会被当成坏了——那比漏掉这一条坏得多。
-    //
-    // 硬不变量与硬门控不受这条影响：那两个词是本项目特有的术语，「一条硬不变量」永远
-    // 是数量断言，没有泛指的读法。
-    for (const m of text.matchAll(/(?<!第)([一二三四五六七八九十]+|\d+)\s*个?\s*脚本/g)) {
-      const raw = m[1]
-      const n = cnNumber(raw)
-      if (n === undefined) {
-        fail(`${doc} 写着「${raw}个脚本」，这个数字我核对不了 —— 换成阿拉伯数字，或去掉数量。`)
-        continue
-      }
-      if (n === 1) continue
-      if (n !== actual['脚本']) {
-        fail(`${doc} 写着「${raw}个脚本」，实际是 ${actual['脚本']} 个 —— 数量自称与代码不符。`)
-      }
-    }
   }
-}
-
-/**
- * 在某个二级标题之下，数**登记的路径个数**（去重后），而不是表格行数。
- *
- * 一张表行可以并列多个路径（文件地图里「发布说明那两个脚本」就是一行两路径），
- * 按行数算会把「有多少个文件」数成「有多少行」——那不是同一件事，而数量自称的
- * 判据对象恰恰是文件。
- */
-function countMapPaths(file, headingRe, pathRe) {
-  const p = join(SKILL_ROOT, file)
-  if (!existsSync(p)) return -1
-  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
-  const start = lines.findIndex((l) => headingRe.test(l))
-  if (start < 0) return -1
-  const seen = new Set()
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) break
-    for (const m of lines[i].matchAll(pathRe)) seen.add(m[0])
-  }
-  return seen.size
 }
 
 /** 数某个文件里匹配到的个数。 */
@@ -2543,14 +2539,6 @@ function packageMembers() {
  * 两张表仍然是**同一张图的两半**：门禁把两处合起来读，双向核对照样成立。
  */
 
-/** 当前工作区里的文件地图（两半各取自该去的那份文件）。 */
-function fileMapFromWorktree() {
-  return readFileMap(
-    readText(join(SKILL_ROOT, 'SKILL.md')),
-    readText(join(SKILL_ROOT, 'AGENTS.md')),
-  )
-}
-
 /**
  * 从某个版本读一个文件的内容（`git show <ref>:<路径>`）。读不到返回 undefined。
  *
@@ -2637,6 +2625,61 @@ function checkPackageSelfConsistency(pkg, readContent) {
 function contentFromWorktree(f) {
   const full = join(SKILL_ROOT, f)
   return existsSync(full) ? readText(full) : undefined
+}
+
+/**
+ * 两份结构规则必须说同一件事：`.gitattributes` 的 `export-ignore` 是它的**文本形态**，
+ * `scripts/lib/protocol.mjs` 的 `REPO_ONLY_DIRS` / `REPO_ONLY_FILES` 是它的**代码形态**。
+ *
+ * 为什么要核：契约里写着「新增一处独立目录要两处一起改」，而这句话以前**没有任何检查
+ * 兜底**——实测两个方向都 0 项失败（只改 REPO_ONLY 不改 .gitattributes；只改
+ * `.gitattributes` 不改 REPO_ONLY）。`.gitattributes` 是四个高风险区之一，它的失准
+ * 不会当场报错，只会让「这文件到底进不进包」这个问题从此有两个答案。
+ *
+ * 判据是**两边路径集合相等**，不比顺序、不比注释。`导出结果` 那一层另有判据
+ * （`checkPackageBoundary` 真跑 git archive），这一条只管两份规则之间的自洽。
+ * 为什么两者都要：真导出抓得住「规则写了但 git 没照做」，抓不住「两处规则本身不一致」
+ * ——后者在导出结果里可能恰好一致，直到有人改了其中一份。
+ */
+function checkStructuralRulesAgree() {
+  const p = join(SKILL_ROOT, '.gitattributes')
+  if (!existsSync(p)) { fail('缺少 .gitattributes —— 用户包的边界规则没有文本形态。'); return }
+  const text = readText(p)
+  const attrDirs = new Set()
+  const attrFiles = new Set()
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    if (t === '' || t.startsWith('#')) continue
+    // 形如 `/scripts/dev/     export-ignore` 或 `AGENTS.md export-ignore`
+    const m = /^(\S+)\s+.*\bexport-ignore\b/.exec(t)
+    if (m === null) continue
+    const spec = m[1].replace(/^\//, '')
+    if (spec.endsWith('/')) attrDirs.add(spec)
+    else attrFiles.add(spec)
+  }
+  const codeDirs = new Set(REPO_ONLY_DIRS)
+  const codeFiles = new Set(REPO_ONLY_FILES)
+
+  const onlyAttr = (a, b, label) => [...a].filter((x) => !b.has(x))
+    .map((x) => `.gitattributes 排除了 ${x}，而 REPO_ONLY_${label} 里没有它`)
+  const onlyCode = (a, b, label) => [...b].filter((x) => !a.has(x))
+    .map((x) => `REPO_ONLY_${label} 里有 ${x}，而 .gitattributes 没排除它`)
+
+  const problems = [
+    ...onlyAttr(attrDirs, codeDirs, 'DIRS'),
+    ...onlyCode(attrDirs, codeDirs, 'DIRS'),
+    ...onlyAttr(attrFiles, codeFiles, 'FILES'),
+    ...onlyCode(attrFiles, codeFiles, 'FILES'),
+  ]
+  if (problems.length > 0) {
+    for (const m of problems) {
+      fail(`${m} —— 两份结构规则必须说同一件事：改一处就要改另一处，`
+        + '否则「这个文件进不进包」会有两个答案，而错的那个不会当场报错。')
+    }
+    return
+  }
+  process.stdout.write(`结构规则：.gitattributes 与 REPO_ONLY_* 一致`
+    + `（${codeDirs.size} 处目录、${codeFiles.size} 个文件）\n`)
 }
 
 /**
@@ -2963,6 +3006,7 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('脚本实跑', checkScriptsRun)
   step('数量自称', checkStatedCounts)
   step('卡片断言', checkCardClaims)
+  step('结构规则一致', checkStructuralRulesAgree)
   step('用户包边界', checkPackageBoundary)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)

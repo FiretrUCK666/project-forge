@@ -514,8 +514,32 @@ group('[40] 审查记录：高风险改动必须有可核对的痕迹')
   report(sEmpty.filled === false, '审查记录：空模板不算填过')
   check(sFilled.filled === true, '真的填了结论行 → 判为有', JSON.stringify(sFilled))
   report(sFilled.filled === true, '审查记录：填过就认')
-  check(sExempt.filled === true, '明说「本档不需要审查」→ 判为有（免审与没审要分开）', JSON.stringify(sExempt))
-  report(sExempt.filled === true, '审查记录：免审与没审分开')
+  check(sExempt.filled === false,
+    '只在正文里写「本档不需要审查」→ **不算**有效记录（免审由机器按改动路径自己算，'
+    + '不由人自称；一句话谁都能写，而审查记录的作用是让漏审事后可核对）', JSON.stringify(sExempt))
+  report(sExempt.filled === false, '审查记录：免审不能靠自称')
+
+  // 半空的表格行也不算：只有轮次、审查者与结论都填了才认。
+  const bodyHalf = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
+    + '| 1 |  |  |  |\n'
+  check(reviewRecordState(bodyHalf).filled === false, '只有轮次、审查者与结论空着的行 → 判为缺',
+    JSON.stringify(reviewRecordState(bodyHalf)))
+  report(reviewRecordState(bodyHalf).filled === false, '审查记录：半空的行不算')
+
+  // 结论是「需要返工」而后面没补轮次 → 还没修完，不算通过。
+  const bodyRework = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
+    + '| 1 | sub-a | 需要返工 | 3 / 1 |\n'
+  check(reviewRecordState(bodyRework).filled === false,
+    '最后一轮结论是「需要返工」→ 判为缺（改完要再派一轮并在表里追加）',
+    JSON.stringify(reviewRecordState(bodyRework)))
+  report(reviewRecordState(bodyRework).filled === false, '审查记录：返工未复核不算通过')
+
+  // 两轮：先返工后通过 → 算通过，而且是按**最后一轮**判的。
+  const bodyTwoRounds = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
+    + '| 1 | sub-a | 需要返工 | 3 / 1 |\n| 2 | sub-b | 通过 | 0 / 2 |\n'
+  check(reviewRecordState(bodyTwoRounds).filled === true, '两轮、最后一轮通过 → 判为通过',
+    JSON.stringify(reviewRecordState(bodyTwoRounds)))
+  report(reviewRecordState(bodyTwoRounds).filled === true, '审查记录：两轮按最后一轮判')
 
   // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。
   const onlyComment = '## 审查记录\n\n<!-- | 1 | 别人 | 通过 | -->\n'

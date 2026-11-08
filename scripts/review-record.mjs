@@ -109,6 +109,37 @@ export function readHighRiskPaths(agentsText) {
 }
 
 /**
+ * 把 `git diff --name-only` 的一条输出还原成真实的路径。
+ *
+ * 默认配置下 git 会对含非 ASCII 字符的路径做 C 风格转义并加双引号：
+ * `"templates/\345\256\241..."`。直接拿它去比前缀，中文名的风险改动会被判成
+ * 非高风险——门禁绿着放行，而使用者完全看不出为什么。这个仓库本身就是中文文档项目。
+ *
+ * 两种输入都要能吃：真被转义的就解回来，没转义的原样返回。
+ * 不做「让调用方记得加 `-c core.quotepath=false`」那种约定：那是一条要人记住的规矩，
+ * 而漏记的症状正是静默放行。
+ */
+export function unquoteGitPath(raw) {
+  const s = String(raw ?? '').trim()
+  if (!(s.startsWith('"') && s.endsWith('"')) || s.length < 2) return s
+  const inner = s.slice(1, -1)
+  const bytes = []
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (ch !== '\\') { bytes.push(...Buffer.from(ch, 'utf8')); continue }
+    const next = inner[i + 1]
+    if (next === undefined) break
+    const octal = /^[0-7]{3}/.exec(inner.slice(i + 1))
+    if (octal !== null) { bytes.push(parseInt(octal[0], 8)); i += 3; continue }
+    const map = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 }
+    if (map[next] !== undefined) { bytes.push(map[next]); i += 1; continue }
+    bytes.push(...Buffer.from(next, 'utf8'))
+    i += 1
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/**
  * 这个路径算不算高风险。
  *
  * 判据是**前缀**，不是逐文件清单：清单要人记得改，而目录不会长出新的一处。
@@ -116,7 +147,7 @@ export function readHighRiskPaths(agentsText) {
  * `scripts/` 误伤（用 `includes` 就会，实测过）。
  */
 export function isHighRiskPath(rel, prefixes) {
-  const p = String(rel ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+  const p = unquoteGitPath(rel).replace(/\\/g, '/').replace(/^\.\//, '')
   if (p === '') return false
   const list = Array.isArray(prefixes) ? prefixes : []
   return list.some((pre) => (pre.endsWith('/') ? p.startsWith(pre) : p === pre))
@@ -124,7 +155,7 @@ export function isHighRiskPath(rel, prefixes) {
 
 /** 从一份改动清单里挑出高风险的那几条（去重、排序，报告里好读）。 */
 export function highRiskChanged(paths, prefixes) {
-  return [...new Set(paths.map((x) => String(x).trim()).filter(Boolean)
+  return [...new Set(paths.map((x) => unquoteGitPath(x)).filter(Boolean)
     .filter((p) => isHighRiskPath(p, prefixes)))].sort()
 }
 
@@ -165,19 +196,54 @@ export function reviewRecordState(body) {
 
   const isSeparator = (l) => /^\|[\s:|-]+\|$/.test(l) && l.includes('-')
   const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim())
+
+  // 有效的一行长这样：| 1 | sub-audit-xyz | 通过 | 0 / 2 |
+  //
+  // **判据不是「有字」**。实测三种「填了但没审」都能骗过只看有无的版本：
+  //   |  |  |  |  |            空行
+  //   | 1 |  |  |  |            只有轮次
+  //   审查记录：无              一句口令
+  // 审查记录的作用是让漏审**事后可核对**，一句口令核对不了任何东西——它给了一条
+  // 看起来像保证的假痕迹，比没有更坏。所以这里要求三样同时成立：
+  //   - 轮次是数字或「第 N 轮」；
+  //   - 审查者那一格非空（它是「另一个上下文」的标识，正是要留档的东西）；
+  //   - 结论是「通过」或「需要返工」之一。
+  const VERDICT = /^(通过|不通过|需要返工|需要修改|需返工)/
+  const roundLike = (c) => /^(\d+|第\s*\d+\s*轮)$/.test(c)
+  const rows = []
   for (const line of lines) {
     if (line === '' || isSeparator(line)) continue
-    if (line.startsWith('|')) {
-      const c = cells(line)
-      if (c.length === 0) continue
-      if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
-      if (c.some((x) => x !== '')) return { filled: true, section: true, why: '有审查记录行' }
-      continue
-    }
-    // 非表格的自由文字：明说免审，或者干脆是一段话。
-    if (line !== '') return { filled: true, section: true, why: '有文字记录' }
+    if (!line.startsWith('|')) continue
+    const c = cells(line)
+    if (c.length < 3) continue
+    if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
+    if (!roundLike(c[0]) || c[1] === '' || !VERDICT.test(c[2])) continue
+    rows.push({ round: c[0], who: c[1], verdict: VERDICT.exec(c[2])[1], note: c[3] ?? '' })
   }
-  return { filled: false, section: true, why: '「审查记录」这一节是空的（模板没填）' }
+
+  if (rows.length === 0) {
+    return {
+      filled: false,
+      section: true,
+      why: '「审查记录」里没有一行是有效的审查记录（要轮次 + 审查者 + 结论三样齐全，'
+        + '结论写「通过」或「需要返工」）——只写「无」「已审」这类口令不算',
+    }
+  }
+
+  // **最后一轮必须是「通过」**。前面写着「需要返工」而后来的轮次没补，说明还没修完；
+  // 机器只认最后一条结论，因为那才是当前状态。
+  const last = rows[rows.length - 1]
+  if (!/^通过$/.test(last.verdict)) {
+    return {
+      filled: false,
+      section: true,
+      rows,
+      why: `最后一轮（${last.round}，${last.who}）的结论是「${last.verdict}」——`
+        + '改完要重新派一个上下文再审一轮，并在表里追加那一行',
+    }
+  }
+
+  return { filled: true, section: true, rows, why: `${rows.length} 轮审查记录，最后一轮通过` }
 }
 
 function usage() {

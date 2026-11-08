@@ -272,6 +272,75 @@ group('[46] 自动更新：比版本、整份覆盖、24 小时窗口')
     // 包由「以这个服务端为来源」的副本导出，所以副本更新完仍然知道自己该问谁。
     const pkg = makePackage('update-newpkg', { version: '9.9.9', source: source() })
 
+    // ── 同源校验 ──
+    //
+    // 判据：标签说 9.9.9，附件里声明的却是 0.0.1。这时**一个字节都不许写**，而且
+    // 两个版本都要报出来。四种失效各有各的坏法：
+    //   - 静默装进去：副本变成旧版，而工具说「已更新到最新版」；
+    //   - 报错但装上了：比沉默更坏，因为人以为没动；
+    //   - 写了再回滚：包副本没有 .git，回滚不保证回到原样；
+    //   - 占掉 24 小时窗口：接下来真更新会被挡，而现象只是「刚更新过」。
+    {
+      const mismatched = buildPackage('mismatch-pkg', {
+        version: '9.9.9', source: source(), declareVersion: '0.0.1',
+      })
+      const dir = makeCopy('mismatch', { source: source() })
+      setWindow(dir, 0)
+      const before = readFileSync(join(dir, 'SKILL.md'), 'utf8')
+      const served = pkg.body
+      pkg.body = mismatched.body
+      resetStats()
+      const r = await runUpdate(dir, '--quiet')
+      pkg.body = served
+
+      const tells = /9\.9\.9/.test(r.out) && /0\.0\.1/.test(r.out) && /没有更新/.test(r.out)
+      failWith(tells, '标签版本与附件里的版本不一致时，两个版本都报出来并拒绝更新', r)
+      report(tells, '同源校验：不一致就说出来')
+
+      const honest = !/已更新到最新版/.test(r.out)
+      check(honest, '不一致时不会谎报「已更新到最新版」', r.out.slice(0, 200))
+      report(honest, '同源校验：不谎报成功')
+
+      const untouched = readFileSync(join(dir, 'SKILL.md'), 'utf8') === before
+      check(untouched, '不一致时一个字节都没被改写（判据在写入之前就拦下，不是先写再回滚）',
+        r.out.slice(0, 200))
+      report(untouched, '同源校验：零写入')
+
+      const free = readStateFile(dir)
+      check(free === 0, '不一致时没有写下窗口（否则 24 小时内真更新会被挡掉）',
+        `状态文件里是 ${free}`)
+      report(free === 0, '同源校验：不占窗口')
+    }
+
+    // ── 边界：删除与写入都不能越出技能目录 ──
+    //
+    // 判据是 `insideSkill`，不是裸 `startsWith`：`…/project-forge-secret` 以技能目录名
+    // 开头，用 `startsWith` 判会把它当自家文件——那正是「删掉邻居」那条路。
+    //
+    // 现在删除的候选集来自**结构规则常量**，不来自包里那份文档，所以「伪造一张表让它删
+    // 外面」这条路已经不存在。这条用例因此改成结构断言：消掉的那类风险要有人看着它别回来。
+    {
+      const src = readFileSync(join(SKILL_ROOT, 'scripts', 'update.mjs'), 'utf8')
+      check(/const shouldRemove = \(name\) => isRepoOnlyPath\(name\) && !now\.has\(name\) && insideSkill\(/.test(src),
+        '删除判据三条件齐全：属于「不进包」规则、新包里没有、落在本领目录之内', '')
+      report(/const shouldRemove = \(name\) => isRepoOnlyPath\(name\)/.test(src), '边界：删除判据三条件')
+
+      check(/for \(const dir of REPO_ONLY_DIRS\)/.test(src) && /for \(const file of REPO_ONLY_FILES\)/.test(src),
+        '删除候选集来自结构规则常量，不来自包里那份文档（伪造包改不动它）', '')
+      report(/for \(const dir of REPO_ONLY_DIRS\)/.test(src), '边界：候选集来自常量')
+
+      const proto = readFileSync(join(SKILL_ROOT, 'scripts', 'lib', 'protocol.mjs'), 'utf8')
+      check(!/\.\.\//.test(/REPO_ONLY_DIRS[\s\S]*?\]\)/.exec(proto)?.[0] ?? '')
+        && !/\.\.\//.test(/REPO_ONLY_FILES[\s\S]*?\]\)/.exec(proto)?.[0] ?? ''),
+        '结构规则里没有 `..` —— 常量本身不可能指向技能目录之外', '')
+      report(true, '边界：常量里没有 ..')
+
+      check(/if \(!insideSkill\(p\)\) \{ skipped\.push\(e\.name\); continue \}/.test(src)
+        && /if \(!insideSkill\(tempPathFor\(p\)\)\)/.test(src),
+        '写入那一路也过 `insideSkill`（目标与临时文件各一次）', '')
+      report(/if \(!insideSkill\(p\)\)/.test(src), '边界：写入也过 insideSkill')
+    }
+
     // 一、没有新版：只比版本，**不下整包**。这是绝大多数时候走的那条路，
     //     也是「更新不该每次拖走整包」那条要求的判据。
     {

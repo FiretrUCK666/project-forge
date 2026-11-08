@@ -20,7 +20,17 @@
  * 「哪些包算宿主运行时」由描述符声明（`runtimeScopes` 前缀 + `runtimePackages` 精确名），
  * 这里只做查表——主引擎不认识任何一个具体包名。
  */
-function hostRuntime(pkg, descriptor) {
+function hostRuntime(pkg, descriptor, ctx) {
+  // **依赖清单不一定是身份清单**：Obsidian 的身份在 `manifest.json`，而它的宿主依赖
+  // 声明在 `package.json` 里。按身份清单去读依赖，那一类宿主的锁定版本永远是空——
+  // 症状不是报错，是「兼容范围提示永远不出现」，看起来像「本项目没有可提示的东西」。
+  //
+  // 所以「去哪读依赖」由描述符自己声明（`depsManifest`），缺省与身份清单同一份。
+  if (ctx !== undefined && descriptor.depsManifest !== undefined
+    && descriptor.depsManifest !== descriptor.manifest) {
+    const depPkg = ctx.manifest(descriptor.depsManifest)
+    if (depPkg !== undefined && typeof depPkg === 'object' && depPkg !== null) pkg = depPkg
+  }
   const scopes = descriptor.runtimeScopes ?? []
   const exact = descriptor.runtimePackages ?? []
   const isHost = (name) => scopes.some((s) => name.startsWith(s)) || exact.includes(name)
@@ -124,6 +134,68 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
 产物与分发按消费者判：成品包路线则构建产物可忽略但必须进 \`files\` 并以打包预演为准；源码直装才要求跟踪成品。先抬号再构建。`,
     },
     chapter: 'dsh',
+    /**
+     * 这个生态的专属门禁。判据与**它自己的名词**住在一起：
+     * 发布范围、补丁、三态、发现载体——这些词只在 DSH 里成立，写进 review 的话，
+     * 加第二个生态时就必须回头改主引擎，而漏改的那一次不会出声。
+     */
+    /**
+     * 这个生态贡献给模板的条件（名 → 值）。
+     *
+     * 名字与求值写在一起，因为**它们是同一件事**：模板里 `pf:if has-dsh-bundle` 那一段
+     * 只在这个生态的专章段落里出现，把求值留在主引擎里，就等于让引擎认识这个生态的
+     * 内部字段名（`bundlePatch`、`hasClientDecl`）——加第二个宿主时那段必然被漏掉。
+     */
+    conditions(s) {
+      const d = s.host
+      const isThis = (s.ecosystem?.kinds ?? []).includes(this.id)
+      const toolchain = d?.toolchain
+      return {
+        'is-dsh-plugin': isThis,
+        'has-dsh-client': d?.hasClientEntry === true || d?.hasClientDecl === true,
+        'has-dsh-bundle': d?.bundlePatch !== undefined || d?.patchFile !== undefined,
+        'has-dsh-toolchain': toolchain !== undefined
+          && (toolchain.tsdown === true || toolchain.vitest === true || toolchain.oxlint === true),
+        // 「版本与可复现」这一节恒属于这个生态：版本面（peer 版本、补丁层）是宿主契约的
+        // 一部分，不是「有没有读到某个文件」决定的。
+        //
+        // 判据特意**不**挂在 bundle/client 上：那两个字段为假有两种完全相反的含义——
+        // 「没声明补丁层」和「声明了、但补丁文件不在」。后者恰恰是最需要这一节的破损
+        // 插件；按「文件在不在」决定这一节适不适用，等于把「该报警」变成「静默省略」。
+        'has-dsh-version': isThis,
+        'has-dsh-local-workflow': d?.localWorkflow === true || d?.contractDoc === true,
+      }
+    },
+
+    checks(s) {
+      const d = s.host
+      if (d === undefined) return {}
+      const r = { missing: [], pending: [], ok: [] }
+      if (d.filesHasLib === false) r.missing.push('发布范围缺 lib（成品包路线要求 files 含构建产物，以 pack 清单为准）')
+      if (d.filesHasPatch === false) r.missing.push('发布范围缺补丁（声明 bundle 时 files 应含补丁文件）')
+      if (d.libTracked === true && d.filesHasLib !== true) {
+        r.missing.push('产物跟踪与发布范围矛盾：lib 被跟踪但 files 未含，先定成品还是源码路线')
+      }
+      if (d.hostRuntimeInDeps === true) r.missing.push('依赖放错：宿主运行时进了 dependencies，应为 peer')
+      if (d.discoveryCarrierLikely === false) {
+        r.missing.push('发现载体可能缺失：补丁文本里没有出现包名（补 name 等于包名自身的一行）')
+      }
+      if ((d.hasClientEntry === true) !== (d.hasClientDecl === true)) {
+        r.pending.push('三态不明：exports 与 dsh.client 声明打架，先对齐再定 host-only 还是双面')
+      }
+      return r
+    },
+    /**
+     * 报告里「凭什么认出这一类」那一行。
+     *
+     * 它住在这里，因为**那行字里出现的是这个宿主自己的文件名与字段名**。主引擎里写一句
+     * `pkg.engines.vscode` 就等于让引擎认识那个生态——加第二个宿主时那句一定被漏掉，
+     * 而漏掉的症状是报告里说不出依据，不是报错。
+     */
+    evidenceFor(ctx) {
+      const patch = (this.patchFiles ?? []).find((f) => ctx.exists(f))
+      return patch !== undefined ? patch : '清单里的 dsh.bundle 声明'
+    },
     // 工具链与本地约定是**目录形状**的事实，但它们只对这类宿主有意义，
     // 所以由描述符声明要找什么，而不是让勘察引擎替某个生态写死一串配置名。
     toolchain: {
@@ -181,7 +253,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
 
       // 锁定的宿主版本：依赖段里宿主运行时包的声明值。
       // 宿主运行时放对位置没有：该在 peer，被打进 dependencies 就会随包发出去。
-      const rt = hostRuntime(pkg, this)
+      const rt = hostRuntime(pkg, this, ctx)
       out.pinnedVersions = rt.versions
       out.hostRuntimeInDeps = rt.inDeps
 
@@ -254,6 +326,9 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     runtimeScopes: [],
     runtimePackages: ['vscode', '@types/vscode'],
     chapter: 'vscode',
+    evidenceFor() {
+      return '清单里的 engines.vscode 声明'
+    },
 
     derive(ctx, pkg) {
       const out = {}
@@ -265,7 +340,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
       out.contributesKeys = typeof pkg.contributes === 'object' && pkg.contributes !== null
         ? Object.keys(pkg.contributes) : []
       out.activationEvents = Array.isArray(pkg.activationEvents) ? pkg.activationEvents.map(String) : []
-      const rt = hostRuntime(pkg, this)
+      const rt = hostRuntime(pkg, this, ctx)
       out.pinnedVersions = rt.versions
       out.hostRuntimeInDeps = rt.inDeps
 
@@ -293,7 +368,56 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
     hostInternalKeys: [],
     runtimeScopes: [],
     runtimePackages: ['obsidian'],
+    /** 身份在 `manifest.json`，宿主依赖声明在 `package.json`——两件事在两份文件里。 */
+    depsManifest: 'package.json',
     chapter: 'obsidian',
+    /**
+     * 这个生态的专属门禁。四件事各有各的判据，**不要压成一句「缺 main.js 即断链」**：
+     * 官方模板要求 main.js 只进发布附件、不进库，所以「仓库根无 main.js」不是缺失。
+     * 正确分工：
+     *   缺 = 仓库侧事实缺（manifest id 形状非法——提交审核会被拒）；
+     *   待问 = 附件侧只能人去看发布页（附件齐不齐、tag 与版本三方一致、触发器是不是裸版本）。
+     */
+    checks(s) {
+      const o = s.artifacts?.obsidianArtifacts
+      if (o === undefined) return {}
+      const r = { missing: [], pending: [], ok: [] }
+      if (o.manifestIdShapeOk === false) {
+        r.missing.push(`插件 id 形状非法：${o.manifestId ?? '（读不到）'}（应为小写字母与连字符、不含 obsidian、不以 plugin 结尾，提交审核会被拒）`)
+      } else if (o.manifestId !== undefined) {
+        r.ok.push(`插件 id 形状符合（${o.manifestId}）`)
+      }
+      if (o.mainJs !== true && o.mainJsIgnored !== true) {
+        r.pending.push('main.js 不在仓库根且未被忽略：要么还没构建，要么忽略规则漏了 main.js（官方模板要求它只进发布附件；确认构建与忽略规则后消掉）')
+      } else {
+        r.ok.push(o.mainJs === true
+          ? 'main.js 在仓库根（构建过；发布前确认附件即可）'
+          : 'main.js 被忽略（符合官方模板：只进发布附件）')
+      }
+      if (o.hasVersionsJson !== true) {
+        r.pending.push('缺 versions.json：只在 minAppVersion 变化时才需要；加文件可消（加上它），确认旧宿主无需回退时在汇报里记一笔')
+      }
+      // 附件侧只能人去发布页看，机器只负责把「看什么」列全，不替人下结论。
+      // 无标签、无发布 job 时无 release 可看，不问；一旦开始发版，每版都要看。
+      const hasAnyTag = Array.isArray(s.git?.tags) && s.git.tags.length > 0
+      const hasRelJob = s.docs?.workflowAutomation?.hasReleaseJob === true
+      if (hasAnyTag || hasRelJob) {
+        r.pending.push('发布附件待核：去该版本 Release 页确认 main.js + manifest.json (+styles.css 如有) 都在附件列表，且 tag 与两处 manifest.json 版本三方一致')
+      }
+      // 触发器形状：裸版本（1.2.3）才对；v* 只对 npm 一类成立。
+      // releaseTriggerTags 取的是各工作流 on.push.tags 原文；releaseJobConditionTagsV
+      // 说明条件里写死了 refs/tags/v（裸标签永远进不来）。两者任一命中 v 即问。
+      const trig = s.docs?.workflowAutomation?.releaseTriggerTags ?? []
+      const condV = s.docs?.workflowAutomation?.releaseJobConditionTagsV === true
+      const trigHasV = trig.some((x) => /(^|[^0-9])v\*?/i.test(x) || /^v/i.test(x))
+      if (trigHasV || condV) {
+        r.pending.push(`标签触发器是 v 形状（触发器原文：${trig.join('、') || '未读到'}${condV ? '；条件写死了 refs/tags/v' : ''}）：宿主要求裸版本 tag（如 1.2.3），v* 推上去认不出——按专章第七节改触发器`)
+      }
+      return r
+    },
+    evidenceFor() {
+      return 'manifest.json 里的 minAppVersion 字段'
+    },
 
     derive(ctx, pkg) {
       const out = {}
@@ -302,7 +426,7 @@ Bundle 用 \`dsh.bundle.patch\` 指向已发文件；补丁只做行插入与覆
       out.declaredVersion = typeof pkg.version === 'string' ? pkg.version : undefined
       out.enginesHost = typeof pkg.minAppVersion === 'string' ? pkg.minAppVersion : undefined
       out.isDesktopOnly = pkg.isDesktopOnly === true
-      const rt = hostRuntime(pkg, this)
+      const rt = hostRuntime(pkg, this, ctx)
       out.pinnedVersions = rt.versions
       out.hostRuntimeInDeps = rt.inDeps
 
@@ -337,29 +461,37 @@ export function fieldAt(obj, path) {
 }
 
 /**
- * 判断这个项目是不是某类宿主生态。
+ * 判断这个项目命中了哪些宿主生态，**返回全部命中项**。
  *
  * 判据一律来自**项目自己的声明**（清单字段或补丁文件），不按目录形状猜。
- * 返回命中的描述符，没有则 undefined。
+ *
+ * **为什么返回数组而不是第一个**：一个仓库可以既是 VS Code 扩展又是 Obsidian 插件
+ * （两边各一个子包，或同一份产物两边都用）。只返回第一个，第二个生态的整段事实就静默
+ * 为空——报告看起来一切正常，而那一半从来没被检查过。
  */
-export function detectHost(descriptors, ctx) {
+export function detectHosts(descriptors, ctx) {
+  const hits = []
   for (const d of descriptors) {
     const pkg = ctx.manifest(d.manifest)
     if (pkg !== undefined && typeof pkg === "object" && pkg !== null) {
       // 判据是「清单里有没有那个字段路径」，路径由描述符自己声明。
       // 不能统一按 id 前缀取：不同宿主的身份字段形状差别很大——
-      // dsh 是一个对象（pkg.dsh），VS Code 是 engines.vscode 一个字符串，
-      // Obsidian 插件是 minAppVersion 一个字段。写死取法就只能认其中一种，
-      // 加第二个宿主时必然要改这段——那正是描述符要消灭的事情。
-      const path = d.markerField ?? [d.id.split("-")[0]]
+      // 一个生态的标记是对象、另一个是字符串、第三个是清单里一个普通字段。
+      // 写死取法就只能认其中一种，加第二个宿主时必然要改这段——那正是描述符要消灭的。
+      const path = d.markerField ?? [d.id.split('-')[0]]
       const value = fieldAt(pkg, path)
       // undefined 才算没有；空对象、空串、false 都是「声明了」。
-      if (value !== undefined) return d
+      if (value !== undefined) { hits.push(d); continue }
     }
-    // 有的宿主靠一个承载配置的文件表明身份（补丁文件），没有 JS 清单也算。
-    if (Array.isArray(d.patchFiles) && d.patchFiles.some((f) => ctx.exists(f))) return d
+    // 有的宿主靠一个承载配置的文件表明身份（补丁文件），没有清单也算。
+    if (Array.isArray(d.patchFiles) && d.patchFiles.some((f) => ctx.exists(f))) hits.push(d)
   }
-  return undefined
+  return hits
+}
+
+/** 只要一个（多生态仓库里取第一个）——给「只需要知道是不是插件」的调用方用。 */
+export function detectHost(descriptors, ctx) {
+  return detectHosts(descriptors, ctx)[0]
 }
 
 /**

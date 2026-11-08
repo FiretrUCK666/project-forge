@@ -57,9 +57,13 @@ export function processAlive(pid) {
  * 代价说清楚：进程号会被系统回收。**被回收的那个号**若正好落在一个活着的进程上，
  * 它的残留就清不掉（要等那个进程也退出）。留着比误删好——残留是一个文件，误删是丢数据。
  *
- * 返回 { removed, kept }：removed 是清掉的，kept 是留下的（带原因，交上层报出来）。
+ * `dryRun`：**只判不删**。只读模式（`--check`、`--status`，CI 里跑的就是它们）必须传它，
+ * 否则一个自称「只校验」的命令会在别人的工作区里删文件，而报告只说「校验通过」。
+ * 那时 `removed` 是「本来可以清掉的」，报告措辞也随之变成「发现」而不是「清掉」。
+ *
+ * 返回 { removed, kept }：removed 是清掉的（dryRun 下是能清掉的），kept 是留下的。
  */
-export function clearStaleTemps(path) {
+export function clearStaleTemps(path, { dryRun = false } = {}) {
   const dir = dirname(path)
   const prefix = `${basename(path)}.tmp-`
   const removed = []
@@ -82,6 +86,7 @@ export function clearStaleTemps(path) {
       kept.push({ name, why: '另一个正在运行的进程正在写它' })
       continue
     }
+    if (dryRun) { removed.push(name); continue }
     try {
       unlinkSync(join(dir, name))
       removed.push(name)
@@ -99,10 +104,14 @@ export function clearStaleTemps(path) {
  * 判据与报告是一件事的两半，各写一份报告格式，就会出现同一个残留在一个工具里
  * 报「已清理」、在另一个工具里报「没动」。
  */
-export function reportTemps(file, temps) {
+export function reportTemps(file, temps, { dryRun = false } = {}) {
   if (temps.removed.length === 0 && temps.kept.length === 0) return
   const parts = []
-  if (temps.removed.length > 0) parts.push(`清掉 ${temps.removed.length} 个上次遗留的临时文件`)
+  if (temps.removed.length > 0) {
+    parts.push(dryRun
+      ? `发现 ${temps.removed.length} 个上次遗留的临时文件（只读模式，没有删）`
+      : `清掉 ${temps.removed.length} 个上次遗留的临时文件`)
+  }
   if (temps.kept.length > 0) {
     parts.push(`没动 ${temps.kept.length} 个同前缀但不属于本次运行的文件：`
       + temps.kept.map((k) => `${k.name}（${k.why}）`).join('、'))

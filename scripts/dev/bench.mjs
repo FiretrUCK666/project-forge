@@ -19,6 +19,8 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { isMainModule } from '../lib/text.mjs'
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..', '..')
 
@@ -64,15 +66,15 @@ function main(argv) {
   const rows = []
   for (const c of CASES) {
     const cmd = c.argv.map((a) => (a === '<T>' ? target : a))
-    // 可选命令：不支持就跳过，不报错——bench 不该因为脚本还没这个开关而红。
-    const probe = timeOnce(cmd, SKILL_ROOT)
-    if (c.optional === true && probe.status !== 0) {
-      rows.push({ id: c.id, title: c.title, skipped: true })
-      continue
+    const samples = []
+    let status = 0
+    for (let i = 0; i < ROUNDS; i += 1) {
+      const probe = timeOnce(cmd, SKILL_ROOT)
+      samples.push(probe.ms)
+      // 退出码取第一次的：后面几次重跑同一条命令，结果不会变，而中位数只关心耗时。
+      if (i === 0) status = probe.status
     }
-    const samples = [probe.ms]
-    for (let i = 1; i < ROUNDS; i += 1) samples.push(timeOnce(cmd, SKILL_ROOT).ms)
-    rows.push({ id: c.id, title: c.title, ms: median(samples), status: probe.status })
+    rows.push({ id: c.id, title: c.title, ms: median(samples), status })
   }
 
   if (asJson) {
@@ -83,15 +85,13 @@ function main(argv) {
   process.stdout.write(`基准：${target}\n取 ${ROUNDS} 次的中位数\n\n`)
   const width = Math.max(...rows.map((r) => r.title.length))
   for (const r of rows) {
-    if (r.skipped === true) {
-      process.stdout.write(`  ${r.title.padEnd(width)}  （不支持，跳过）\n`)
-      continue
-    }
     const flag = r.status === 0 ? '' : `  [退出码 ${r.status}]`
     process.stdout.write(`  ${r.title.padEnd(width)}  ${r.ms.toFixed(0).padStart(6)} ms${flag}\n`)
   }
-  process.stdout.write(`\n合计 ${rows.filter((r) => r.skipped !== true).reduce((a, r) => a + r.ms, 0).toFixed(0)} ms\n`)
+  process.stdout.write(`\n合计 ${rows.reduce((a, r) => a + r.ms, 0).toFixed(0)} ms\n`)
   return 0
 }
 
-process.exitCode = main(process.argv.slice(2))
+// 只有直接跑它时才执行：被 import 时（自检核对这张命令表就靠 import）不该顺手跑一轮基准，
+// 那会把「读一下命令表」变成一次几十秒的测量。
+if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main(process.argv.slice(2))

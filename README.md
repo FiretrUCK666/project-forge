@@ -183,12 +183,24 @@ node "<本领目录>/scripts/update.mjs" --check
 它不会一上来就动手。第一步永远是勘察，然后告诉你：这个项目现在是什么状态、准备做哪几件事、
 以及为什么跳过另外几件。
 
+### 什么都不说的时候，它默认做全套
+
+**范围这件事只有两种**：你说了一件具体的事，它就只做那一件；你什么都没说（只丢来一个
+目录，或只说「规范一下 / 整理一下 / 全部补完」），它就**把这个项目该配的全部配齐**。
+
+「全部配齐」不等于「把清单上每条都跑一遍」：该做什么仍由勘察出的事实决定——纯文档目录
+不会有发布流程，已有远端不会重建。它的意思是**该做的一件不漏**。
+
+**已有基础的项目是默认场景，不是特殊场景**：多数项目交到手里时已经有 git、有远端、
+有 README。做法是「先读、再判断、只补缺的」——已有的文件先读后合并，**永不覆盖**，
+已有的结构是权威。只有你明确说「重写」时才整篇替换。
+
 ### 只想让它做一件事
 
 老项目里常常只想补一件东西——配个 CI、补份 LICENSE。这时全套流程会因为你没有 AGENTS.md
 而拦住你，那不是你的任务范围。
 
-交付检查支持按切面验：
+它自己也是这么判的：P0 阶段就记下范围，后面只做那几件。交付检查支持按切面验：
 `node scripts/review.mjs <项目目录> --scope=ci` 只验 CI 那一面，
 其余不查、不报缺。可用切面与用法以
 `node scripts/review.mjs --help` 为准——
@@ -208,65 +220,26 @@ node "<本领目录>/scripts/update.mjs" --check
 
 ## 里面有什么
 
-### 用户包里有
+### 包里有什么
 
-| 路径 | 内容 |
+**不逐文件列表**：那会变成一张要人记得改的清单，漏一行的症状是「文件在包里但没人知道」。
+权威答案来自 `git archive` 那次真导出，`.gitattributes` 的 `export-ignore` 决定哪几处
+不进包。
+
+四类东西：
+
+| 路径 | 是做什么的 |
 | --- | --- |
 | `SKILL.md` | 入口：硬不变量、能力矩阵、执行流程、硬门控 |
-| `references/survey.md` | 勘察协议：读什么、字段什么含义、事实怎么翻译成动作 |
-| `references/version-control.md` | 版本管理全线：产物该不该入库、忽略规则、署名、提交纪律、回滚分档、密钥门控 |
-| `references/remote-github.md` | 远端仓库：通道发现、建仓、推送、元数据、版本节点与发布说明、协作模板、CI |
-| `references/docs-set.md` | 文档套装：各文档的读者是谁、职责、写法与同步纪律 |
-| `references/publish.md`、`references/publish-npm.md`、`references/publish-python.md`、`references/publish-go.md`、`references/publish-rust.md` | 发布总纲与各生态专章：能不能发、发到哪、版本号语义、安全发布、各种既有状态怎么接 |
-| `references/plugin-project.md`、`references/skill-project.md`、`references/plugins/` | 插件类与 skill 类项目的判定协议，以及各生态的专章 |
-| `references/handoff.md` | 交棒：痕迹怎么判、拆什么留什么、拆的顺序、拆完怎么验收 |
-| `references/collaboration.md` | 协作：改动从哪来、谁审、谁能合、合并后怎么收尾（配好之后每天用这条） |
-| `templates/agents-project.md`、`templates/readme.md`、`templates/contributing.md` | 三份可直接落盘的文档骨架（项目契约、说明、贡献指南） |
-| `templates/release-spec.md` | 发版规范骨架：说明写在哪、分哪几节、按什么顺序发、失败了怎么补 |
-| `templates/work-item.md` | 工作记录骨架（文件名带日期前缀 `YYYY-MM-DD-主题`）：状态、日期、关联的问题与提案、目标与验收、计划、放弃过什么、断点（跨会话接续用） |
-| `templates/pull-request-template.md` | 改动提案骨架：改了什么、为什么、怎么验证、回滚点、风险与影响范围 |
-| `templates/issue-bug-report.md` | 缺陷报告骨架：期望、实际、复现、环境（四件缺一不可） |
-| `templates/issue-feature-request.md` | 需求骨架：要解决什么问题、期望的行为、影响范围 |
-| `templates/agents-kernel.md` | 行事总纲内核（逐字注入 `AGENTS.md`，单一真相源） |
-| `templates/ci-check.yml`、`templates/ci-release.yml` | 两份持续集成骨架：检查与发布 |
-| `templates/license-mit.txt`、`templates/license-isc.txt`、`templates/license-unlicense.txt` | 三份宽松许可证的标准全文（MIT、ISC、Unlicense） |
-| `templates/license-bsd-2-clause.txt`、`templates/license-bsd-3-clause.txt` | 两份 BSD 许可证的标准全文（二条款、三条款） |
-| `scripts/update.mjs` | 让这个副本保持最新（见「更新」） |
-| `scripts/survey.mjs` | 只读勘察，输出结构化事实 |
-| `scripts/ecosystems.mjs` | 声明式生态描述符，加一个生态只改这里 |
-| `scripts/zip.mjs` | 解开 zip 包：自更新要读得动下载回来的那份 |
-| `scripts/compose-agents.mjs` | 生成、刷新或升级 `AGENTS.md` |
-| `scripts/review.mjs` | P4/P5 交付门禁：没有缺项、待定事项用选项消掉才算写完 |
-| `scripts/handoff.mjs` | 只读勘察目标项目里这个 skill 留下的痕迹；也能判「已经干净」 |
-| `scripts/lib/` | 公共模块：文本判据、围栏扫描、协议常量、Markdown 呈现、原子写入、账本（`ledger.mjs` 记下写过哪些字节区间，撤除时据此只撤自己写的那部分） |
-| `scripts/release-notes.mjs` | 把一份 UTF-8 说明文件按字节发到发布页，写完回读比对；中文不经 shell |
-| `scripts/check-badges.mjs` | 检查 README 里的徽章是不是真的显示得出来 |
-| `scripts/sync-toc.mjs` | 让 Markdown 的目录与标题保持同步 |
+| `references/` | 判据与方法，按情境读全文：勘察、版本管理、远端、文档、发布、协作、交棒 |
+| `templates/` | 可直接落盘的骨架：项目契约、说明、贡献指南、发版规范、工作记录、提案与问题模板、两份流水线、几份许可证全文 |
+| `scripts/` | 零依赖的工具：自更新、勘察、注入、交付门禁、交棒、发版说明发送、徽章核对、目录同步、解包，以及它们共用的 `lib/` |
 | `README.md`、`README.en.md`、`LICENSE`、`assets/readme/` | 你正在看的这份说明（中英成对，中文是权威版）、许可证全文、README 里的卡片 |
 
-### 仓库里另有
+**仓库自己另有哪些文件**（不进包的那些）写在
+[`AGENTS.md`](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md) 里——
+那是维护这个 skill 时才需要读的东西，不是用这个 skill 的人需要的。
 
-这些不进压缩包。想改这个 skill 的话，从
-[CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md) 开始。
-
-| 路径 | 内容 |
-| --- | --- |
-| `AGENTS.md` | 这个仓库自己的项目契约：机制、不变量、构建与验证、硬性规范 |
-| `CONTRIBUTING.md` | 给外部贡献者的流程：怎么提问、怎么提改动、提交前门禁 |
-| `RELEASING.md` | 发版规范：说明写在哪、分哪几节、按什么顺序发、出错了怎么补 |
-| `docs/` | 发布说明（`release-notes/<标签>.md`）与工作记录（`work/`，跨会话的活记在这里），随仓库走 |
-| `.github/` | 持续集成与协作模板（工作流、Issue 与拉取请求模板） |
-| `.gitattributes`、`.gitignore` | 哪些不进用户包、哪些不进版本库 |
-| `scripts/dev/preflight.mjs` | 结构自检：引用完整、内核一致、硬性规范、用户包边界 |
-| `scripts/dev/selftest.mjs` | 行为自检入口：并行跑下面的分片并合并计数 |
-| `scripts/dev/cases-0.mjs` | 行为自检分片之一，由 `selftest.mjs` 调度 |
-| `scripts/dev/cases-1.mjs` | 同上 |
-| `scripts/dev/cases-2.mjs` | 同上 |
-| `scripts/dev/cases-3.mjs` | 同上 |
-| `scripts/dev/cases-4.mjs` | 同上 |
-| `scripts/dev/lib/harness.mjs` | 分片共用层：fixture 工厂、断言与计数器 |
-| `scripts/dev/render-svg.mjs` | 把 README 的卡片渲染成图并量出留白，改卡片时用它验收 |
-| `scripts/dev/bench.mjs` | 量关键命令的耗时，判断这次改动有没有变慢 |
 
 ## 脚本
 

@@ -25,10 +25,12 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, authorMarkers } from './survey.mjs'
-import { KERNEL_START, KERNEL_END } from './lib/protocol.mjs'
-import { isMainModule } from './lib/text.mjs'
+import { KERNEL_START, KERNEL_END, ecosystemChecks } from './lib/protocol.mjs'
+// 各生态的专属门禁住在描述符里；review 只把它们并进总账，不认识任何一个生态名。
+import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
+import { isMainModule, readUtf8Strict } from './lib/text.mjs'
 import { markerPositions } from './lib/markdown.mjs'
-import { readLedger, writeLedger, getSegment, contentHash, setDecision, forgetDecision, getDecisions, getSnapshot } from './lib/ledger.mjs'
+import { readLedger, writeLedger, getSegment, contentHash, setDecision, forgetDecision, getDecisions, getSnapshot, ledgerPath } from './lib/ledger.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -111,12 +113,30 @@ function ledgerOwnsFile(root, rel, text) {
   return contentHash(text) === seg.mine
 }
 
+/**
+ * 读一份参与判定的文本。**严格 UTF-8**，与写侧（`compose-agents`）同一个读法。
+ *
+ * 为什么不能用 `readFileSync(p,'utf8')`：那是宽松解码，UTF-16 的 `AGENTS.md` 会被解得
+ * NUL 交错、内核标记「找不到」，于是这一面判成「这是一份手写文件」——而真正的原因是
+ * 文件编码坏了。两者处置相反：前者要修编码，后者会让人加 `--handwritten-agents` 把
+ * 一次编码事故盖成放行。实测过这一对：同一份 UTF-16 的 `AGENTS.md`，
+ * `compose-agents --check` 正确报「UTF-16（带 BOM）」，本脚本却报「缺少内核标记」，
+ * 还给出 `--remember --handwritten-agents` 这条固化命令。
+ *
+ * 返回 `{ text }` 或 `{ error }`：**「读不出来」与「内容是空的」是两件事**，
+ * 折叠成 `undefined` 就等于让下游自己去猜原因。
+ */
 function readText(p) {
   try {
-    return readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
-  } catch {
-    return undefined
+    return readUtf8Strict(p)
+  } catch (error) {
+    return { error: `读不出来（${error.code ?? error.message}）` }
   }
+}
+
+/** 只要文本；读不出来时给 `undefined`（调用方本来就有「读不到」分支的那种场景）。 */
+function textOr(p) {
+  return readText(p).text
 }
 
 function parseArgs(argv) {
@@ -413,19 +433,46 @@ function main(argv) {
   const { target, flags, scope, remember, forget } = parsed
   const root = resolve(target)
 
+  // `--remember` / `--forget` 是**写操作**，而门禁本身可以对着一个还不存在的目录跑
+  // （调用方传错路径时那是最容易发生的事）。对着一个不存在的目录写账本，会在磁盘上
+  // **凭空造出一棵目录树 + 一个 `.project-forge/`**，而使用者以为自己只是固化了一个决策。
+  // 判据是「目录在不在」，不是「是不是 git 仓库」——账本落在项目目录里，项目不存在就没地方记。
+  if ((remember || forget) && !existsSync(root)) {
+    process.stderr.write(`错误：目录不存在，没法记决策：${root}\n`
+      + '  检查一下路径。门禁可以对着任意路径跑，但账本要写进项目目录里。\n')
+    return 2
+  }
+
   if (remember) {
     if (!FLAGS.has(remember)) {
       process.stderr.write(`错误：无法识别要固化的决策：${remember}（可用：${[...FLAGS].join('、')}）\n`)
       return 2
     }
-    const { ledger } = readLedger(root)
+    const { ledger, state } = readLedger(root)
+    // **账本读不出来就拒绝写**。读一份坏账本再整份写回去，等于把它记着的所有东西
+    // （谁写过哪些字节、固化过哪些决策）一次性抹成「只有这一条」——而使用者看到的是
+    // 「已记入账本」，完全没有理由怀疑。
+    //
+    // 这条路要「拒绝 + 报出路径」：坏掉的原因可能是权限、可能是文件被截断、可能是
+    // 别的东西占了那个位置，三种的修法完全不同，而不给出路径就一种都没法查。
+    if (state === 'unreadable') {
+      process.stderr.write(`错误：账本读不出来，不能往上写：${ledgerPath(root)}\n`
+        + '  写下去会把它已有的记录整份覆盖掉。先看清那个文件是什么（权限？被截断？'
+        + '不是本工具写的？），修好或删掉它之后再重试。\n')
+      return 2
+    }
     setDecision(ledger, remember, true)
     writeLedger(root, ledger)
     process.stdout.write(`已将决策记入账本：${remember}\n`)
     return 0
   }
   if (forget) {
-    const { ledger } = readLedger(root)
+    const { ledger, state } = readLedger(root)
+    if (state === 'unreadable') {
+      process.stderr.write(`错误：账本读不出来，不能改它：${ledgerPath(root)}\n`
+        + '  理由同 --remember：整份写回会把已有记录抹掉。\n')
+      return 2
+    }
     forgetDecision(ledger, forget)
     writeLedger(root, ledger)
     process.stdout.write(`已从账本清除决策：${forget}\n`)
@@ -468,7 +515,8 @@ function main(argv) {
   const readmes = s.docs?.readme ?? []
   // AGENTS.md 的正文归 agents 面读，发布面要拿它核对「内核之外有没有写清怎么推、怎么发版」。
   const agentsPath = join(root, 'AGENTS.md')
-  const agents = readText(agentsPath)
+  const agentsRead = readText(agentsPath)
+  const agents = agentsRead.text
 
   const missing = []
   const pending = []
@@ -522,7 +570,15 @@ function main(argv) {
   if (wants('agents')) { // scope: agents
   // 1. AGENTS.md：一致性真相源是 compose --check 的字节比对，本门只转述。
   // 自己另起一套“有标记即一致”必然漂移其一，故不自判，只调用。
-  if (agents === undefined) {
+  //
+  // 编码坏了要**先说编码**：这一格如果落进「手写文件」那条分支，用户会被建议用
+  // `--handwritten-agents` 把一个编码事故固化成放行。两者是同一种症状的两个原因，
+  // 而处置正好相反，所以顺序不能反。
+  if (agentsRead.error !== undefined) {
+    missing.push(`AGENTS.md 读不出来（${agentsRead.error}）：这份文件必须是 UTF-8——`
+      + '它每次会话都会被注入，而且要在版本库里长期保存。转存成 UTF-8 后再跑本门禁，'
+      + '**不要**用 --handwritten-agents 盖掉这一条')
+  } else if (agents === undefined) {
     missing.push('AGENTS.md 缺失')
   } else {
     // 待填写的数法**只有一处实现**：survey 导出的 authorMarkers（整篇扫描）。
@@ -557,9 +613,11 @@ function main(argv) {
   if (wants('git')) { // scope: git
   // 2. 提交署名：没有仓库时跳过（P3 建库时再定）；有仓库而署名缺失必须补——
   // 否则首个提交永久带着错误署名。占位值靠人眼（G7），机器只卡缺失。
-  // 目录里没有仓库时，git 面**没有可验的对象**。不能说「齐备」——那是把
-  // 「没查」说成「查过没问题」。报一项待问，让调用方知道这一面没被覆盖。
-  if (git.present !== true && scope !== undefined && scope.has('git')) {
+  //
+  // 目录里没有仓库时，git 面**没有可验的对象**。不能说「齐备」——那是把「没查」
+  // 说成「查过没问题」。**这一条与给不给 --scope 无关**：全量模式下它更该说，
+  // 因为全量模式恰恰是最容易被读成「什么都验过了」的那一次。
+  if (git.present !== true) {
     pending.push('这个目录不是 git 仓库——版本管理这一面没有可验的对象（先 git init，或去掉 --scope=git）')
   }
   if (git.present === true) {
@@ -828,7 +886,7 @@ function main(argv) {
   // 只与项目约定有关的指向（例如 AGENTS.md）降为待问，不当成缺失。
   if (s.docs?.contributing !== undefined) {
     ok.push('CONTRIBUTING 有')
-    const contributing = readText(join(root, s.docs.contributing.file)) ?? ''
+    const contributing = textOr(join(root, s.docs.contributing.file)) ?? ''
     const coreChecks = [
       [/提问|问题|反馈|issue|question|feedback|support|discussion|help/i, '提问与反馈'],
       // 「怎么提交改动」有两条合法路线，硬要 fork 会把私有仓库判成缺：
@@ -851,8 +909,7 @@ function main(argv) {
     }
     const kinds = s.ecosystem?.kinds ?? []
     const isNode = kinds.includes('node')
-    const isPlugin = kinds.some((k) => /plugin|extension/.test(k))
-    const isDsh = kinds.includes('dsh-plugin')
+    const isPlugin = kinds.some((k) => /-(plugin|extension)$/.test(k))
     const isDocsOnly = kinds.includes('docs-only')
     if (isNode && !/(npm|pnpm|yarn|bun|安装依赖|安装|dependenc|install)/i.test(contributing)) {
       missing.push('CONTRIBUTING 缺包管理器或安装说明（node 项目：沿用它自己的包管理器）')
@@ -865,8 +922,11 @@ function main(argv) {
         missing.push('CONTRIBUTING 缺三类越权（不推主干、不打标签、不发布）')
       }
     }
-    if (isDsh && !/(挂载|重启|刷新|分发)/.test(contributing)) {
-      pending.push('CONTRIBUTING 可补本地挂载与生效规则（DSH 插件：两条路差别是最高频问题）')
+    // 「本地挂载与生效规则」不是某个宿主的专属话题：**任何**被宿主加载的扩展都有这条
+    // （装到本地是不是要重启、改了要不要刷新、分发与挂载是不是两条路）。按 `isPlugin`
+    // 问就够，不必点名任何一个宿主——名字写在这里的那一刻，第二个宿主就收不到这条提示了。
+    if (isPlugin && !/(挂载|重启|刷新|分发|install|reload|restart)/i.test(contributing)) {
+      pending.push('CONTRIBUTING 可补本地挂载与生效规则（插件类：装到本地与正式分发的差别是最高频问题）')
     }
     if (isDocsOnly && /```sh[\s\S]*?(npm|pnpm|cargo|pytest|go test)/.test(contributing)) {
       pending.push('纯文档项目的 CONTRIBUTING 含构建命令：确认是否真的需要开发环境节')
@@ -942,64 +1002,29 @@ function main(argv) {
   }
   } // scope: ci
   if (wants('ecosystem')) { // scope: ecosystem
-  const dshKinds = s.ecosystem?.kinds ?? []
-  if (dshKinds.includes('dsh-plugin') && s.host !== undefined) {
-    const d = s.host
-    if (d.filesHasLib === false) missing.push('DSH 发布范围缺 lib（成品包路线要求 files 含构建产物，以 pack 清单为准）')
-    if (d.filesHasPatch === false) missing.push('DSH 发布范围缺补丁（声明 bundle 时 files 应含补丁文件）')
-    if (d.libTracked === true && d.filesHasLib !== true) {
-      missing.push('DSH 产物跟踪与发布范围矛盾：lib 被跟踪但 files 未含，先定成品还是源码路线')
-    }
-    if (d.hostRuntimeInDeps === true) missing.push('DSH 依赖放错：宿主运行时进了 dependencies，应为 peer')
-    if (d.discoveryCarrierLikely === false) {
-      missing.push('DSH 发现载体可能缺失：补丁文本里没有出现包名（补 name 等于包名自身的一行）')
-    }
-    if ((d.hasClientEntry === true) !== (d.hasClientDecl === true)) {
-      pending.push('DSH 三态不明：exports 与 dsh.client 声明打架，先对齐再定 host-only 还是双面')
+  // 各生态的专属门禁**全部由描述符给**（见 ecosystems.mjs 的 `checks(s)`）：
+  // 发布范围、补丁、三态、附件、触发器这些判据里的名词都是那个生态自己的，
+  // 写在这里的后果不是报错，是**加第二个生态时必须回头改这一份**——而漏改的那一次
+  // 不会出声：新生态的专属门禁一条都不跑，报告看起来还是全绿。
+  {
+    const r = ecosystemChecks(HOST_ECOSYSTEMS, s)
+    missing.push(...r.missing)
+    pending.push(...r.pending)
+    ok.push(...r.ok)
+  }
+  // **没有专章的**插件生态：按通用协议核对产物与标识。这一条与具体生态无关——
+  // 它说的是「命中了插件类，却没有专属门禁覆盖它」，所以留在这里。
+  // 判据是「这个 kind 有没有描述符」，不是名字里有没有某个词。
+  {
+    const kinds = s.ecosystem?.kinds ?? []
+    const covered = new Set(HOST_ECOSYSTEMS.filter((d) => typeof d.checks === 'function').map((d) => d.id))
+    const uncovered = kinds.filter((k) => /-(plugin|extension)$/.test(k) && !covered.has(k))
+    if (uncovered.length > 0) {
+      pending.push(`插件类生态 ${uncovered.join('、')} 没有专属门禁：按通用协议核对产物同提交、`
+        + '两标识与挂载分发两条路（见 plugin-project.md）')
     }
   }
-  // 非 DSH 插件：无专属门禁，按通用协议六问核对产物与标识（无专章时现场查宿主文档）。
-  // Obsidian 项目在上面已有附件与触发器两条待问，这里不再重复通用提示。
-  if (dshKinds.some((k) => /plugin|extension/.test(k)) && !dshKinds.includes('dsh-plugin')
-    && !dshKinds.includes('obsidian-plugin')) {
-    pending.push('非 DSH 插件：按通用协议核对产物同提交、两标识与挂载分发两条路（见 plugin-project.md）')
-  }
-  // Obsidian 发布链：四件事各有各的判据，不要压成一句“缺 main.js 即断链”——
-  //   官方模板要求 main.js 只进发布附件、不进库，所以「仓库根无 main.js」不是缺失。正确分工：
-  //   缺 = 仓库侧事实缺（manifest id 形状非法——提交审核会被拒）；
-  //   待问 = 附件侧只能人去看发布页（附件齐不齐、tag 与版本三方一致、触发器是不是裸版本）。
-  if (dshKinds.includes('obsidian-plugin') && s.artifacts?.obsidianArtifacts !== undefined) {
-    const o = s.artifacts.obsidianArtifacts
-    if (o.manifestIdShapeOk === false) {
-      missing.push(`Obsidian 插件 id 形状非法：${o.manifestId ?? '（读不到）'}（应为小写字母与连字符、不含 obsidian、不以 plugin 结尾，提交审核会被拒）`)
-    } else if (o.manifestId !== undefined) {
-      ok.push(`Obsidian 插件 id 形状符合（${o.manifestId}）`)
-    }
-    if (o.mainJs !== true && o.mainJsIgnored !== true) {
-      pending.push('Obsidian main.js 不在仓库根且未被忽略：要么还没构建，要么忽略规则漏了 main.js（官方模板要求它只进发布附件；确认构建与忽略规则后消掉）')
-    } else {
-      ok.push(o.mainJs === true ? 'Obsidian main.js 在仓库根（构建过；发布前确认附件即可）' : 'Obsidian main.js 被忽略（符合官方模板：只进发布附件）')
-    }
-    if (o.hasVersionsJson !== true) {
-      pending.push('Obsidian 缺 versions.json：只在 minAppVersion 变化时才需要；加文件可消（加上它），确认旧宿主无需回退时在汇报里记一笔')
-    }
-    // 附件侧只能人去发布页看，机器只负责把“看什么”列全，不替人下结论。
-    // 无标签、无发布 job 时无 release 可看，不问；一旦开始发版，每版都要看。
-    const hasAnyTag = Array.isArray(s.git?.tags) && s.git.tags.length > 0
-    const hasRelJob = s.docs?.workflowAutomation?.hasReleaseJob === true
-    if (hasAnyTag || hasRelJob) {
-      pending.push('Obsidian 发布附件待核：去该版本 Release 页确认 main.js + manifest.json (+styles.css 如有) 都在附件列表，且 tag 与两处 manifest.json 版本三方一致')
-    }
-    // 触发器形状：裸版本（1.2.3）才对；v* 只对 npm 一类成立。
-    // releaseTriggerTags 取的是各工作流 on.push.tags 原文；releaseJobConditionTagsV
-    // 说明条件里写死了 refs/tags/v（裸标签永远进不来）。两者任一命中 v 即问。
-    const trig = s.docs?.workflowAutomation?.releaseTriggerTags ?? []
-    const condV = s.docs?.workflowAutomation?.releaseJobConditionTagsV === true
-    const trigHasV = trig.some((t) => /(^|[^0-9])v\*?/i.test(t) || /^v/i.test(t))
-    if (trigHasV || condV) {
-      pending.push(`Obsidian 标签触发器是 v 形状（触发器原文：${trig.join('、') || '未读到'}${condV ? '；条件写死了 refs/tags/v' : ''}）：宿主要求裸版本 tag（如 1.2.3），v* 推上去认不出——按专章第七节改触发器`)
-    }
-  }
+
 
   } // scope: ecosystem
   if (wants('ecosystem')) { // scope: ecosystem
@@ -1151,7 +1176,7 @@ function main(argv) {
     // 硬逼存量项目补两栏的后果是可预见的：要么加 `--no-collab-templates` 把整块判据关掉
     // （连"模板缺失"一起关），要么随便补两行应付过去——两种都比待问糟。
     if (s.docs?.prTemplate === true && s.docs?.prTemplateFile !== undefined) {
-      const tpl = readText(join(root, s.docs.prTemplateFile)) ?? ''
+      const tpl = textOr(join(root, s.docs.prTemplateFile)) ?? ''
       const ours = ledgerOwnsFile(root, s.docs.prTemplateFile, tpl)
       // 中英两套词都要认：写的人用哪种语言是他的自由，只认中文会让一份合格的英文模板被判缺。
       const checks = [
@@ -1204,7 +1229,7 @@ function main(argv) {
     const issueFiles = Array.isArray(s.docs?.issueTemplateFiles) ? s.docs.issueTemplateFiles : []
     for (const file of issueFiles) {
       if (!/\.md$/i.test(file)) continue
-      const text = readText(join(root, file)) ?? ''
+      const text = textOr(join(root, file)) ?? ''
       const verdict = issueTemplateGaps(text)
       // 读不出是缺陷还是需求时不判：猜错方向会诱导人去改一份本来合格的模板。
       if (verdict === undefined || verdict.lacking.length === 0) continue
@@ -1220,7 +1245,7 @@ function main(argv) {
     // 在两套说法之间猜。**手写契约不判**——那是作者自己的编排，用 --handwritten-agents 表过
     // 态的就不再问（同一个开关，不新增一个只服务这一条的 flag）。
     if (s.docs?.agents !== undefined && flags.has('--handwritten-agents') !== true) {
-      const agentsText = readText(join(root, s.docs.agents.file)) ?? ''
+      const agentsText = textOr(join(root, s.docs.agents.file)) ?? ''
       if (s.docs.contributing !== undefined && !/CONTRIBUTING/i.test(agentsText)) {
         pending.push('AGENTS.md 没有指向 CONTRIBUTING：读者从契约找不到「怎么参与」，只能去翻目录；'
           + '写一句指针即可（手写契约确认保留原样时加 --handwritten-agents）')

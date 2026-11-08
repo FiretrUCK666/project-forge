@@ -85,7 +85,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - name: 说明文件必须已经在默认分支上
+      - name: 说明文件必须已经在默认分支上，而且不是空壳
         run: |
           # 这一步是整条流水线的门。它拦的正是最常见的那次失败：顺序反了，标签先推、
           # 说明没推。**不要把它删掉换成「找不到就用默认措辞」**——那样发布页上会出现
@@ -97,6 +97,17 @@ jobs:
           fi
           if [ ! -s "$NOTES" ]; then
             echo "::error::$NOTES 是空文件。"
+            exit 1
+          fi
+          # 结构门：**留着骨架标记或没有一级标题的说明发不出去**——一份只有小标题的空壳
+          # 贴到发布页上，比这次发版失败糟。项目自己另有发送工具时，把那边的结构检查
+          # 与这两条对齐（判据是同一条：正文真的写过了）。
+          if grep -q 'pf:needs-summary' "$NOTES"; then
+            echo "::error::$NOTES 还留着骨架标记（pf:needs-summary）：这一段还没写。"
+            exit 1
+          fi
+          if ! grep -qE '^# +[^ ]' "$NOTES"; then
+            echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
             exit 1
           fi
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"

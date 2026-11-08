@@ -37,9 +37,11 @@ import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 import { parseGitHubRepo } from './lib/text.mjs'
-import { lintReleaseNotes } from './lib/protocol.mjs'
+import { lintReleaseNotes, apiBase } from './lib/protocol.mjs'
 
-const API = 'https://api.github.com'
+// 接口基地址的判据住在 lib/protocol.mjs：update.mjs 用的是同一份（`apiTarget`）。
+// 两处各写一遍就会漂成「查得到发布、发不出说明」，而两个脚本各自的测试都过。
+const API = apiBase('https://github.com')
 
 function usage() {
   return [

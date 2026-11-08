@@ -316,7 +316,11 @@ function main() {
     //
     // 清哪些、留哪些由 clearStaleTemps 判（只删「已经死掉的进程」留下的那些），这里把
     // 它的结论说出去——没清掉的文件得让人看见，否则下一次运行还会再遇到它。
-    reportTemps(f, clearStaleTemps(f))
+    //
+    // **`--check` 只判不删**：它是 CI 与「先验一遍」用的只读模式，一个自称只校验的命令
+    // 顺手删文件，会在别人的工作区里制造一个无从解释的变化。
+    const temps = clearStaleTemps(f, { dryRun: check })
+    reportTemps(f, temps, { dryRun: check })
 
     try {
       const items = headings(text, maxLevel)

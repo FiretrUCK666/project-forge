@@ -205,12 +205,27 @@ should this project be published to npm?
 It never starts by writing. The first step is always the survey, and then it tells you what state
 the project is in, what it plans to do, and why it is skipping the rest.
 
+### When you say nothing, the default is the whole project
+
+Scope has exactly two forms. You name one concrete thing and it does only that. You say nothing
+(just hand it a directory, or say "tidy this up" / "finish everything") and it configures
+**everything that project needs**.
+
+"Everything" is not "run every item on a list": what to do is still decided by the facts the
+survey found — a docs-only directory gets no release pipeline, an existing remote is never
+recreated. It means **nothing that should be done gets skipped**.
+
+**An existing project is the normal case, not the special case.** Most projects already have
+git, a remote, a README. The approach is read first, judge second, fill only the gaps — existing
+files are read and merged, **never overwritten**, and the existing structure is authoritative.
+Only an explicit "rewrite it" replaces a file wholesale.
+
 ### When you only want one thing
 
 On an existing project you often just want to add one piece — a CI workflow, a LICENSE. The full
 pipeline would stop you for lacking an AGENTS.md, which is not what you asked for.
 
-The delivery check can be narrowed: 
+It tracks scope from the start and only does those few things. The delivery check can be narrowed: 
 `node scripts/review.mjs <project directory> --scope=ci`
 checks the CI facet only and says nothing about the rest. The available facets and exact usage
 are whatever 
@@ -231,65 +246,26 @@ Without `--scope` the check is still the full one, for the "deliver the whole th
 
 ## What is inside
 
-### In the package
+### What is inside
 
-| Path | Contents |
+**No per-file list here**: it would become a checklist somebody has to remember to update,
+and a missed line shows up as "a file is in the package but nobody knows". The authority is
+the real `git archive` export; `.gitattributes` decides which directories stay out.
+
+Four kinds of thing:
+
+| Path | What it is for |
 | --- | --- |
 | `SKILL.md` | Entry point: hard invariants, capability matrix, execution flow, hard gates |
-| `references/survey.md` | Survey protocol: what to read, what each field means, how facts turn into actions |
-| `references/version-control.md` | Version control: what belongs in the repo, ignore rules, identity, commit discipline, rollback tiers, secret gating |
-| `references/remote-github.md` | Remote repository: channel discovery, creating, pushing, metadata, version nodes and release notes, collaboration templates, CI |
-| `references/docs-set.md` | Documentation set: who reads each document, its job, how to write it, how to keep them in sync |
-| `references/publish.md`, `references/publish-npm.md`, `references/publish-python.md`, `references/publish-go.md`, `references/publish-rust.md` | Release overview and per-ecosystem chapters: can it ship, where, version semantics, safe release, how to join an existing state |
-| `references/plugin-project.md`, `references/skill-project.md`, `references/plugins/` | Decision protocols for plugin and skill projects, plus per-ecosystem chapters |
-| `references/handoff.md` | Hand-off: how a trace is judged, what to remove and what to keep, the order of removal, how to accept the result |
-| `references/collaboration.md` | Collaboration: where changes come from, who reviews, who may merge, and how to clean up after a merge |
-| `templates/agents-project.md`, `templates/readme.md`, `templates/contributing.md` | Three drop-in document skeletons (project contract, README, contributing guide) |
-| `templates/release-spec.md` | Release-spec skeleton: where the notes live, which sections they use, the order of operations, how to recover from a failed release |
-| `templates/work-item.md` | Work-record skeleton (file names carry a `YYYY-MM-DD-` prefix): status, dates, linked issues and proposals, goal and acceptance, plan, what was abandoned, where to resume |
-| `templates/pull-request-template.md` | Pull-request skeleton: what changed, why, how it was verified, rollback point, risk and blast radius |
-| `templates/issue-bug-report.md` | Bug-report skeleton: expected, actual, reproduction, environment (all four or it cannot be acted on) |
-| `templates/issue-feature-request.md` | Feature-request skeleton: the problem to solve, the behavior wanted, the blast radius |
-| `templates/agents-kernel.md` | The operating-principles kernel (injected verbatim into `AGENTS.md`; the single source of truth) |
-| `templates/ci-check.yml`, `templates/ci-release.yml` | Two CI skeletons: checks and release |
-| `templates/license-mit.txt`, `templates/license-isc.txt`, `templates/license-unlicense.txt` | Full standard text of three permissive licenses (MIT, ISC, Unlicense) |
-| `templates/license-bsd-2-clause.txt`, `templates/license-bsd-3-clause.txt` | Full standard text of the two BSD licenses (2-clause, 3-clause) |
-| `scripts/update.mjs` | Keeps this copy current (see Update) |
-| `scripts/survey.mjs` | Read-only survey producing structured facts |
-| `scripts/ecosystems.mjs` | Declarative ecosystem descriptors; adding one touches only this file |
-| `scripts/zip.mjs` | Unzips a package: self-update has to read the one it downloaded |
-| `scripts/compose-agents.mjs` | Generates, refreshes or upgrades `AGENTS.md` |
-| `scripts/review.mjs` | P4/P5 delivery gate: no missing items, and every pending question closed by an explicit option |
-| `scripts/handoff.mjs` | Read-only scan of the traces this skill left in a project; can also judge whether it is already clean |
-| `scripts/lib/` | Shared modules: text criteria, fence scanning, protocol constants, Markdown rendering, atomic writes, ledger (`ledger.mjs` records which byte ranges this skill wrote, so teardown removes exactly its own bytes) |
-| `scripts/release-notes.mjs` | Posts a UTF-8 notes file to the release page byte for byte and reads it back to compare, so Chinese never passes through a shell |
-| `scripts/check-badges.mjs` | Checks that the README badges actually render |
-| `scripts/sync-toc.mjs` | Keeps a Markdown table of contents in sync with its headings |
-| `README.md`, `README.en.md`, `LICENSE`, `assets/readme/` | This documentation (paired, Chinese is authoritative), the license text, and the cards used in the README |
+| `references/` | Criteria and method, read in full per situation: survey, version control, remote, docs, release, collaboration, hand-off |
+| `templates/` | Drop-in skeletons: project contract, README, contributing guide, release spec, work record, pull request and issue templates, two pipelines, several full license texts |
+| `scripts/` | Zero-dependency tools: self-update, survey, inject, delivery gate, hand-off, release-note sender, badge check, TOC sync, unzip, plus the shared `lib/` |
+| `README.md`, `README.en.md`, `LICENSE`, `assets/readme/` | This documentation (paired, Chinese is authoritative), the license text, and the README cards |
 
-### Only in the repo
+**What this repository keeps for itself** (never in the package) is written in
+[`AGENTS.md`](https://github.com/FiretrUCK666/project-forge/blob/main/AGENTS.md) — it is for
+people maintaining this skill, not for people using it.
 
-These never enter the package. To work on this skill, start with
-[CONTRIBUTING.md](https://github.com/FiretrUCK666/project-forge/blob/main/CONTRIBUTING.md).
-
-| Path | Contents |
-| --- | --- |
-| `AGENTS.md` | This repository's own contract: mechanisms, invariants, build and verification, hard rules |
-| `CONTRIBUTING.md` | The flow for outside contributors: how to ask, how to propose a change, the gate before committing |
-| `RELEASING.md` | The release spec: where the notes live, which sections they use, in what order to publish, how to recover |
-| `docs/` | Release notes (`release-notes/<tag>.md`) and work records (`work/`, where work spanning sessions is written down), kept in the repo |
-| `.github/` | CI and collaboration templates (workflows, issue and pull request templates) |
-| `.gitattributes`, `.gitignore` | What stays out of the package, and what stays out of the repository |
-| `scripts/dev/preflight.mjs` | Structural self-check: references, kernel consistency, hard rules, package boundary |
-| `scripts/dev/selftest.mjs` | Behavioural self-check entry point: runs the shards below in parallel and merges their counts |
-| `scripts/dev/cases-0.mjs` | One behavioural-self-check shard, dispatched by `selftest.mjs` |
-| `scripts/dev/cases-1.mjs` | Same as above |
-| `scripts/dev/cases-2.mjs` | Same as above |
-| `scripts/dev/cases-3.mjs` | Same as above |
-| `scripts/dev/cases-4.mjs` | Same as above |
-| `scripts/dev/lib/harness.mjs` | Shared layer for the shards: fixture factory, assertions, counters |
-| `scripts/dev/render-svg.mjs` | Renders the README cards and measures their margins; use it to accept a card change |
-| `scripts/dev/bench.mjs` | Times the key commands so you can tell whether a change made things slower |
 
 ## Scripts
 

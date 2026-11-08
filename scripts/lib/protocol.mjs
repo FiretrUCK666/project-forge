@@ -86,6 +86,119 @@ export const SUMMARY_MARKER = 'pf:needs-summary'
 export const INSTRUCTION_BUDGET = 65536
 
 /**
+ * 用户包**不包含**什么：整目录的排除规则，与 `.gitattributes` 的 `export-ignore` 一一对应。
+ *
+ * 这份常量存在的理由很具体：**「包里有什么」不该由任何一份人写的清单回答。**
+ * 权威答案永远是 `git archive` 的那次真导出——一张需要人记得改的文件表，迟早会漏，
+ * 而漏的症状是「文件在包里但没人知道」或「文件该在却不在」，两种都不会自己出声。
+ *
+ * 所以这里只保留**结构**：哪几个目录整块不进包。它同时服务三个地方：
+ *   - `preflight.mjs` 核对 `.gitattributes` 有没有把这几条都排除掉（两处必须一致）；
+ *   - `update.mjs` 清掉副本里那些「这个包里本来不该有」的目录（下载成 `Source code`
+ *     时它们会一直留着）；
+ *   - 位置判据：只服务本仓库的脚本必须落在 `scripts/dev/` 下——**这条是目录规则，
+ *     所以新增自用脚本不需要改任何清单**。
+ *
+ * **新增自用文件的正确做法是先问「能不能放进已有的那几处」**；确实要新增一处独立目录时，
+ * 加在这里并同步 `.gitattributes`，`preflight.mjs` 会在两处不一致时当场红。
+ *
+ * 顶层单文件（`AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、两个点文件）不在这里：
+ * 它们是**一个文件**，没有目录可以承载，排除规则只能写在 `.gitattributes` 里逐条列。
+ * 它们也永远不会增长成需要人维护的清单——每加一个都是要反复讨论的决定，不是日常动作。
+ */
+export const REPO_ONLY_DIRS = Object.freeze([
+  '.github/',
+  'docs/',
+  'scripts/dev/',
+])
+
+/** 顶层的不进包单文件（与 `.gitattributes` 的逐条规则对应）。 */
+export const REPO_ONLY_FILES = Object.freeze([
+  'AGENTS.md',
+  'CONTRIBUTING.md',
+  'RELEASING.md',
+  '.gitattributes',
+  '.gitignore',
+])
+
+/**
+ * 生态专属门禁的**唯一实现位置**。
+ *
+ * 判据是「这条检查里的名词是不是那个生态自己的」：发布范围含不含 `lib`、补丁文本里
+ * 有没有包名、标签触发器该不该带 `v`——这些词只在描述符里合法。写进 `review.mjs` 的
+ * 后果不是报错，是**加第二个生态时必须回头改主引擎**，而漏改的那一次不会出声：
+ * 新生态的专属门禁一条都不跑，报告看起来还是全绿。
+ *
+ * 描述符在这里声明 `checks(s)`，返回 `{ missing, pending, ok }` 三个数组（缺项 / 待问 /
+ * 合格说明）。review 只负责把它们并进总账——它不认识任何一个生态名。
+ */
+export function ecosystemChecks(descriptors, s) {
+  const kinds = s?.ecosystem?.kinds ?? []
+  const out = { missing: [], pending: [], ok: [] }
+  for (const d of descriptors) {
+    if (!kinds.includes(d.id)) continue
+    if (typeof d.checks !== 'function') continue
+    const r = d.checks(s) ?? {}
+    out.missing.push(...(r.missing ?? []))
+    out.pending.push(...(r.pending ?? []))
+    out.ok.push(...(r.ok ?? []))
+  }
+  return out
+}
+
+/**
+ * 这个路径进不进用户包？
+ *
+ * 判据只有一条：它落不落在 `REPO_ONLY_DIRS` 的目录里，或是 `REPO_ONLY_FILES` 之一。
+ * 刻意**不提供**「把它登记进某张表」这条路——登记表一旦存在，就会有人往里加东西，
+ * 而加漏的那一次没有任何检查盯得住。
+ */
+export function isRepoOnlyPath(rel) {
+  const p = String(rel ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+  if (p === '') return false
+  if (REPO_ONLY_FILES.includes(p)) return true
+  return REPO_ONLY_DIRS.some((d) => p === d.replace(/\/$/, '') || p.startsWith(d))
+}
+
+/**
+ * 托管平台给程序用的那套接口地址，由网页地址推出来。
+ *
+ * 判据是**平台自己公布的地址规律**（网页是 `<主机>/<owner>/<仓库>`，接口是
+ * `api.<主机>/repos/<owner>/<仓库>`），不是猜。认不出来（自建镜像、别的托管平台、
+ * 形状不对的地址）就返回 `undefined`——**不猜**：给一个不会应答的地方硬拼出接口路径，
+ * 换来的是一句看起来像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
+ *
+ * **两条链路共用这一份**：`update.mjs` 拿它问「最新发布是哪个」，`release-notes.mjs`
+ * 拿它发说明。地址规律写在两处就会漂——一处改了 `api.` 前缀、另一处没改，症状是
+ * 「查得到、发不出」，而两个脚本各自的测试都过。
+ */
+export function apiBase(source) {
+  let url
+  try {
+    url = new URL(source)
+  } catch {
+    return undefined
+  }
+  if (url.hostname === 'github.com') return 'https://api.github.com'
+  return undefined
+}
+
+/** 这个来源的 `owner/name` 与接口基地址；任一项认不出来就整个返回 `undefined`。 */
+export function apiTarget(source) {
+  const base = apiBase(source)
+  if (base === undefined) return undefined
+  let url
+  try {
+    url = new URL(source)
+  } catch {
+    return undefined
+  }
+  const segments = url.pathname.split('/').filter((s) => s !== '')
+  if (segments.length !== 2) return undefined
+  return { base, owner: segments[0], name: segments[1] }
+}
+
+/**
  * 这份说明还是骨架吗？判据只看那个标记，不看内容形状。
  *
  * 「还是骨架」与「写得短」是两件事：一篇两百字的说明和一份只有小标题的空壳，

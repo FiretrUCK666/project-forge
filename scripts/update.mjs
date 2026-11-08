@@ -76,8 +76,8 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readFileMap } from './lib/text.mjs'
 import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
+import { REPO_ONLY_DIRS, REPO_ONLY_FILES, isRepoOnlyPath, apiTarget } from './lib/protocol.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
 // 临时文件的**形状与归属判据**只有一份，住在 lib/fs-atomic.mjs：compose-agents.mjs 从那里取，
 // 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
@@ -302,24 +302,16 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
 }
 
 /**
- * 托管平台给程序用的那套接口，地址由网页地址推出来。
+ * 托管平台给程序用的那套接口地址。
  *
- * 判据是**平台自己公布的地址规律**（网页是 `<主机>/<owner>/<仓库>`，接口是
- * `api.<主机>/repos/<owner>/<仓库>`），不是猜。认不出来（自建镜像、别的托管平台、
- * 形状不对的地址）就返回 `undefined`——**不猜**：给一个不会应答的地方硬拼出接口路径，
- * 换来的是一句看起来像事实的「那边没有最新发布」，而正确结论是「这里问不出来」。
+ * 判据（地址规律、认不出就不猜）住在 `lib/protocol.mjs` 的 `apiBase` / `apiTarget` 里：
+ * `release-notes.mjs` 用的是同一份。两处各写一遍的后果很具体——一处改了前缀、
+ * 另一处没改，症状是「查得到最新发布、发不出说明」，而两个脚本各自的测试都过。
  */
 function apiEndpoint(source) {
-  let url
-  try {
-    url = new URL(source)
-  } catch {
-    return undefined
-  }
-  if (url.hostname !== 'github.com') return undefined
-  const segments = url.pathname.split('/').filter((s) => s !== '')
-  if (segments.length !== 2) return undefined
-  return `https://api.github.com/repos/${segments[0]}/${segments[1]}/releases/latest`
+  const target = apiTarget(source)
+  if (target === undefined) return undefined
+  return `${target.base}/repos/${target.owner}/${target.name}/releases/latest`
 }
 
 /**
@@ -623,13 +615,17 @@ function insideSkill(target) {
 /**
  * 把一份包的内容写进本领目录，并清掉包里不该有的东西。
  *
- * 覆盖是**整份**的：先全部写进去，再删掉旧包里已经不存在、以及「仓库自用」那些文件。
- * 后一半是为了「当初下成了 GitHub 的 Source code」那种情况——那些副本里多出
- * `.github/`、`AGENTS.md` 一类只在仓库里存在的文件，留着会一直碍事（宿主可能把它们
- * 当成这个 skill 的项目契约读进去）。判据取自文件地图的排除表，不另抄一份清单。
+ * 覆盖是**整份**的：先全部写进去，再按结构规则收尾。后一半是为了「当初下成了
+ * GitHub 的 `Source code`」那种情况——那些副本里多出 `.github/`、`AGENTS.md` 一类
+ * 只在仓库里存在的文件，留着会一直碍事（宿主可能把它们当成这个 skill 的项目契约读进去）。
+ *
+ * **清理的判据是结构规则，不是一份人写的清单**（`lib/protocol.mjs` 的 `REPO_ONLY_DIRS`
+ * 与 `REPO_ONLY_FILES`）：哪几处目录、哪几个顶层文件不进包，是一年可能都不变一次的决定，
+ * 而不是「每加一个文件就要记得改一行」的流水账。清单会漏，结构规则不会。
  *
  * 顺带说明**什么不动**：使用者放在同一个目录里的其它文件（笔记、自己的临时文件）留着。
  * 覆盖的是「这个 skill 的文件」，不是把整个目录清空——顺手删掉别人的东西，比不更新坏。
+ * 这里靠 `now`（包里真有的条目）与 keep 规则判，判不出来的一律留着并报出来。
  *
  * 顺序是「先写、后删」：写失败时目录还是原来那一份，不会剩下一半新一半旧。
  * **每个文件各自是原子的**（先写同目录的临时文件再改名），所以写到一半被杀留下的是
@@ -638,26 +634,6 @@ function insideSkill(target) {
  * 风险都更大，这里选择这一步，并在下面把没做完的部分照实报出来。
  */
 function applyPackage(entries) {
-  // 判据取自**装进来这一份**的地图，而不是磁盘上旧那一份：
-  //   - 它才是「更新之后应该有什么」的定义，而清理问的正是那个问题；
-  //   - 旧副本的地图读不出来时（被改过、被截断、版本太老），按旧地图清理会**静默做半件事**
-  //     ——包照换、文件照写、报告照说「已更新」，而该清的一个都没清。那时包内这份地图
-  //     仍然在，于是这种情况从根上不发生。
-  const packSkill = entries.find((e) => e.name === 'SKILL.md')?.data.toString('utf8')
-    ?? skillText() ?? ''
-  const map = readFileMap(packSkill)
-  // **旧副本自己那张表也要留一份，而且必须在写盘之前读**：循环里第一个写下去的可能就是
-  // SKILL.md，之后再去读「旧地图」读到的已经是新的了。
-  //
-  // 为什么需要它：只按新包的表删，删得掉的是「新表里没有、磁盘上有」的文件，而**旧版本
-  // 曾经分发过、后来被删掉的文件**恰好不在任何一张新表里——它们既不是新包的内容，也不是
-  // 仓库自用，于是永远没人认领。实测：从 1.0.0 的副本升到 1.2.2，`scripts/ledger.mjs`
-  // 留在原地（1.1.x 起它搬进了 `scripts/lib/`），报告说「已更新到最新版」，副本里却带着
-  // 一个没有任何文件 import 的死模块。
-  //
-  // 边界仍然是「这个 skill 的文件，不是整个目录」：候选集只来自两张表，使用者自己放进去的
-  // 东西不在任何一张表里，不会被碰。
-  const oldMap = readFileMap(skillText() ?? '')
   const removed = []
   const skipped = []
   const keptTemps = []
@@ -675,85 +651,78 @@ function applyPackage(entries) {
     for (const k of clearStaleTemps(p).kept) keptTemps.push(k.name)
     writeAtomic(p, e.data)
   }
-  // 旧包里已被删掉的文件：留着就是一份永远没人读的残留。
-  //
-  // 候选集是**新旧两张表的并集**：新表管「现在该有什么」，旧表管「以前分发过什么」。
-  // 只有并集才覆盖「旧版本有、新版本没有」这一类——那正是升级到新结构时唯一会残留的一类。
-  //
-  // 与下面「仓库自用」那一支的分工要说清：这里删的是**随包分发的普通文件**（旧版有、
-  // 新版没有），它本来就是这份 skill 的文件，删掉不会伤到使用者；那一支删的是
-  // 「这个包里根本不该出现的东西」，权限必须归旧副本自己那张表——两处的授权来源不同，
-  // 不能合成一个循环，否则「新包能删什么」这件事就跟着一起放开了。
-  for (const name of [...new Set([...oldMap.shipped, ...map.shipped])]) {
-    const p = join(SKILL_ROOT, name)
-    if (!insideSkill(p)) { skipped.push(name); continue }
-    if (name.endsWith('/')) {
-      if (!now.has(name) && existsSync(p) && statSync(p).isDirectory()) {
-        try {
-          if (readdirSync(p).length === 0) {
-            rmSync(p, { recursive: true, force: true })
-            removed.push(name)
-            pruneEmptyDirs(dirname(p))
-          }
-        } catch {}
-      }
-      continue
-    }
-    if (now.has(name)) continue
-    if (existsSync(p) && statSync(p).isFile()) {
-      rmSync(p)
-      removed.push(name)
-      pruneEmptyDirs(dirname(p))
-    }
-  }
-  // 仓库自用文件：包里本来就不该有。
-  //
   // 「删掉了」必须**删完再认**：不加这一句，删失败也会被算进清单，报告于是说了一件
   // 没发生的事——而使用者下次看到那些文件还在，只会以为这个工具在瞎报。
   const remove = (p) => {
     rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     return !existsSync(p)
   }
-  // 删除权限只归**旧副本自己那张表**。
-  //
-  // 一张文件地图能陈述的只是一件事：「这份副本当初装进来时应该有什么」。新下载的那份包
-  // 没有资格说「你磁盘上这个文件该删」——它只说得出自己有什么。实测过：在包里把
-  // `my-notes.md`、`references/my-own-note.md` 写进「仓库里另有」表，更新完这三个文件
-  // 全部消失，报告还写着「顺手清掉了 3 个包里不该有的文件」。
-  //
-  // 换成旧表之后，「下成 Source code 的副本」这种情况照样清得掉：那时磁盘上的 SKILL.md
-  // 就是仓库里那一份，它自己就把 `.github/`、`AGENTS.md`、`scripts/dev/` 列在「仓库里另有」。
-  // 而新版本新增的排除项不会被误删——旧版本没分发过它，磁盘上那份只可能是使用者自己的。
-  for (const name of new Set(oldMap.repoOnly)) {
-    // 新版真的带了这个文件：那是刚写下去的，不是残留。
-    if (now.has(name)) continue
-    const p = join(SKILL_ROOT, name)
-    // **边界判据必须在这里，而且是第一句**。`name` 来自包里的表格，不是本地可信数据：
-    // `../victim/` 这样的条目会让 `join` 解析到技能目录之外，而这一支走的是
-    // `rmSync(recursive: true)`——一个伪造的发布包就能删掉使用者磁盘上任意目录，
-    // 报告还会把它写成「顺手清掉了包里不该有的文件」。
-    // 现在只在这里判一次：不合格的条目连 `statSync` 都不碰。
-    if (!insideSkill(p)) { skipped.push(name); continue }
-    try {
-      const kind = name.endsWith('/') ? 'dir' : 'file'
-      const hit = kind === 'dir' ? statSync(p, { throwIfNoEntry: false })?.isDirectory()
-        : statSync(p, { throwIfNoEntry: false })?.isFile()
-      if (hit === true && remove(p)) {
-        removed.push(name)
+  /**
+   * 一个候选路径该不该清掉。三条判据，缺一不可：
+   *   1. **它属于「不进包」的结构规则**（`isRepoOnlyPath`）——这是唯一的授权来源；
+   *   2. **新包里没有它**（`now`）——新版真的带了它，那是刚写下去的，不是残留；
+   *   3. **它落在本领目录之内**（`insideSkill`）。
+   *
+   * 第 3 条必须是第一句：`name` 有一部分来自下载回来的那份包，不是本地可信数据，
+   * 而这一支走的是 `rmSync(recursive: true)`——一个伪造的发布包就能删掉使用者磁盘上
+   * 任意目录，报告还会把它写成「顺手清掉了包里不该有的文件」。
+   *
+   * 授权来源从「旧副本自己那张表」换成了**结构规则**：规则是随代码走的常量，
+   * 它不来自网络上的任何一份文档，所以伪造包改不动它；而它覆盖的情况一样全——
+   * 下成 `Source code` 的副本里那些 `.github/`、`AGENTS.md`、`scripts/dev/`，
+   * 一条规则都不差地命中。
+   */
+  const shouldRemove = (name) => isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
+  // 磁盘上现有的、属于「不进包」结构规则的条目：目录整棵收，单文件逐个收。
+  // 只走这一处，候选集来自**磁盘**而不是任何一张表——少一个来源就少一处会漂的地方。
+  for (const dir of REPO_ONLY_DIRS) {
+    const p = join(SKILL_ROOT, dir)
+    if (!shouldRemove(dir)) continue
+    if (existsSync(p)) {
+      if (remove(p)) {
+        removed.push(dir)
         pruneEmptyDirs(dirname(p))
       }
-    } catch {
-      // 删不掉就**不报**：它不影响使用，为它让整次更新失败不值得，但也不能谎报。
     }
   }
-  // 新包宣称是「仓库里另有」、而旧副本没这么说的那些：不删，但要报出来。
-  // 「不删」是因为权限在旧表；「要报」是因为这多半意味着这一份包不太对劲。
-  for (const name of map.repoOnly) {
-    if (oldMap.repoOnly.includes(name)) continue
-    if (!insideSkill(join(SKILL_ROOT, name))) skipped.push(name)
+  for (const file of REPO_ONLY_FILES) {
+    const p = join(SKILL_ROOT, file)
+    if (!shouldRemove(file)) continue
+    if (existsSync(p) && statSync(p).isFile()) {
+      if (remove(p)) {
+        removed.push(file)
+        pruneEmptyDirs(dirname(p))
+      }
+    }
+  }
+  // 旧版本分发过、新包里已经没有的文件：**只报，不删**。
+  //
+  // 这一类不属于任何结构规则——它是「以前该有、现在没有」的遗留（典型：某个模块从
+  // `scripts/` 搬进了 `scripts/lib/`）。留着它的代价是副本里多一个没人 import 的死文件。
+  //
+  // **但删它的代价更大**：包里的 SKILL.md 只说得出「我现在有什么」，说不出「我以前分发过
+  // 什么」。而使用者自己的笔记完全可能就放在同一个目录里（`references/我的笔记.md` 是
+  // 很自然的选择）。判据分不开这两种，就只能选那个不会造成损失的：
+  // **列出来，让使用者自己决定删不删。**
+  //
+  // 判定范围是包里那三个由这个 skill 拥有的目录（`scripts/`、`references/`、`templates/`）；
+  // 根目录一带不看——使用者放东西最主要的地方就是那里。
+  const staleFiles = []
+  for (const dir of ['scripts/', 'references/', 'templates/']) {
+    const full = join(SKILL_ROOT, dir)
+    if (!existsSync(full)) continue
+    const owned = [...now].filter((n) => n.startsWith(dir))
+    for (const e of readdirSync(full, { withFileTypes: true, encoding: 'utf8' })) {
+      const rel = `${dir}${e.name}`
+      if (isRepoOnlyPath(rel)) continue
+      const hitOwned = owned.some((n) => n === rel || n.startsWith(`${rel}/`))
+      if (!hitOwned) staleFiles.push(rel)
+    }
   }
   // 空目录不再有用（新包里没有它），顺手收掉——只收空的，里面还有东西就留着。
-  for (const entry of map.shipped) {
+  // 候选来自包里的条目：这是「新版本不再需要它」这一类残留，与上面那支的授权来源不同，
+  // 但它只删空目录，删不掉任何有内容的东西。
+  for (const entry of now) {
     if (!entry.endsWith('/')) continue
     const d = join(SKILL_ROOT, entry)
     if (!insideSkill(d)) { skipped.push(entry); continue }
@@ -763,15 +732,7 @@ function applyPackage(entries) {
       // 同上：空目录不影响使用。
     }
   }
-  // 两张表都空 = 地图没读出来（文件地图的小标题被改过、或包里的 SKILL.md 不是这个格式）。
-  // 这时清理**什么都没做**，而「什么都没做」与「确实没东西要清」必须分得开：前者要说出来，
-  // 否则使用者的副本里会一直留着 `.github/`、`AGENTS.md`，而报告说这次更新一切正常。
-  return {
-    removed,
-    skipped,
-    keptTemps: [...new Set(keptTemps)],
-    mapRead: map.shipped.length > 0 || map.repoOnly.length > 0,
-  }
+  return { removed, skipped, keptTemps: [...new Set(keptTemps)], staleFiles, mapRead: true }
 }
 
 /**
@@ -1075,7 +1036,7 @@ async function main(argv) {
   // 写坏了没有 `git checkout` 可退。而「版本号对得上」并不能证明内容完好——一个
   // SKILL.md 被截断、`scripts/` 少了几个文件的包，版本号照样对得上。旧写法在这里
   // 直接把 `localVersion()` 读回来就宣布成功，读不到时甚至用远端版本号顶上。
-  const { removed, skipped, keptTemps, mapRead } = applyPackage(latest.entries)
+  const { removed, skipped, keptTemps, staleFiles } = applyPackage(latest.entries)
   const after = localVersion()
   const health = verifyInstalled(latest.entries, after, remote)
 
@@ -1102,9 +1063,11 @@ async function main(argv) {
     keptTemps.length > 0
       ? `  有 ${keptTemps.length} 个同前缀但不属于本次运行的临时文件，没动（${keptTemps.slice(0, 3).join('、')}${keptTemps.length > 3 ? ' 等' : ''}）。`
       : undefined,
-    mapRead ? undefined
-      : '  这份包里的文件地图读不出来，所以没有清理「包里不该有」的残留文件'
-        + '（`.github/`、`AGENTS.md` 一类会一直留着；下次更新若恢复正常，会自动清掉）。',
+    staleFiles.length > 0
+      ? `  这几个文件在新版包里没有，可能是旧版遗留、也可能是你自己放的：`
+        + `${staleFiles.slice(0, 5).join('、')}${staleFiles.length > 5 ? ' 等' : ''}。`
+        + ' 我没有删——分清它是哪一种要靠你判断。'
+      : undefined,
   ], { quiet, always: true })
   return 0
 }

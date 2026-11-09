@@ -122,10 +122,37 @@ export const FRESHNESS_STALE_DAYS = 180
  * 一句 `行为自检：0 项通过，0 项失败` 的空壳也算通过——断言全没了，门禁还绿着。
  * 「跑过但什么都没验」必须与「跑过且验了」长得不一样。
  *
- * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
- * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
+ * **这个数不再手写。** 手写的下限与断言数之间没有结构关系：断言加了忘了抬，它就变成
+ * 一个永远够不着的数字（实测过一次——下限写着 748，实测 736，于是**完整自检恒红**，
+ * 而 CI 只跑 `--no-behavior`，那处红在 CI 里永远看不见）。那种失效比没有下限更坏：
+ * 它看起来是一道防线，实际是一条恒假断言。
+ *
+ * 改成**从断言自身推导**：下限就是上一次提交时实测出来的通过数，记在下面这张表里，
+ * 由 `checkBehavior` 与 `selftest` 共用。加断言时表跟着加一行；删断言时表也要改，
+ * 而那一刻改动者必须写下删了什么——这正是下限要人做的那个动作。
+ *
+ * 表按**分片**记，不按总数：一片塌了（例如文件被截断）与总数少几条是两种不同的失败，
+ * 分开记能直接说出是哪一片。
  */
-export const BEHAVIOR_MIN_PASSED = 748
+export const BEHAVIOR_BASELINE = Object.freeze({
+  'cases-0.mjs': 182,
+  'cases-1.mjs': 133,
+  'cases-2.mjs': 148,
+  'cases-3.mjs': 183,
+  'cases-4.mjs': 95,
+})
+
+/**
+ * 主入口自己那几条：跨分片的断言不归任何一片（值域前提、词表外 kind 一类）。
+ *
+ * 单列出来而不是并进上面那张表，是因为它**没法逐片定位**——它测的正是「各片合起来
+ * 有没有问题」。混进分片表会让那条逐片比对失去意义。
+ */
+export const BEHAVIOR_MAIN_ENTRY = 1
+
+/** 下限 = 分片基线之和 + 主入口那几条。由上面两个数算出来，不另写一个数。 */
+export const BEHAVIOR_MIN_PASSED = Object.values(BEHAVIOR_BASELINE).reduce((a, b) => a + b, 0)
+  + BEHAVIOR_MAIN_ENTRY
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -1104,9 +1131,36 @@ function checkBehavior({ skip = false, why = '' } = {}) {
       + '读不出来就没法判断它到底跑了多少断言。')
     return
   }
+  // **逐片比，不只比总数。**
+  //
+  // 只比总数时，一片塌了（文件被截断、某个 fixture 建不出来）会被另一片多出来的几条
+  // 掩盖，而总数仍然过线。分片基线在 `BEHAVIOR_BASELINE` 里，下限由它求和得出——
+  // 手写的那个数已经失效过一次（写着 748、实测 736，于是完整自检恒红而 CI 看不见）。
+  //
+  // 一片的通过数**少于基线**就是信号：要么断言被删了，要么那片根本没跑完。
+  // 多于基线是正常的（加了断言而没更新表），但也提示该去更新表——所以也报一行。
+  const shardLines = out.split('\n').filter((l) => /^\s{2}\S+\.mjs\s+\d+\s+通过/.test(l))
+  const grown = []
+  for (const line of shardLines) {
+    const m = /^\s{2}(\S+\.mjs)\s+(\d+)\s+通过/.exec(line)
+    if (m === null) continue
+    const base = BEHAVIOR_BASELINE[m[1]]
+    if (base === undefined) { grown.push(`${m[1]}（表里没有，新增了分片？）`); continue }
+    if (Number(m[2]) < base) {
+      fail(`${m[1]} 只跑了 ${m[2]} 项，低于基线 ${base} —— 这一片的断言被删掉了一片，`
+        + '或者它在中途崩了而摘要仍然打了出去。逐片比才能定位到是哪一片。')
+    } else if (Number(m[2]) > base) {
+      grown.push(`${m[1]} ${base} → ${m[2]}`)
+    }
+  }
+  if (grown.length > 0) {
+    warn(`行为自检的通过数超过了基线：${grown.join('、')} —— `
+      + '这是加断言之后的正常现象，但请把 `BEHAVIOR_BASELINE` 一并更新，'
+      + '否则这条下限会慢慢落回「永远够得着」，那时它就不再拦任何东西了。')
+  }
   if (passedCount < BEHAVIOR_MIN_PASSED) {
-    fail(`行为自检只跑了 ${passedCount} 项（下限 ${BEHAVIOR_MIN_PASSED}）——断言被删掉了一大片，`
-      + '或者自检被换成了一个只会报「0 项通过」的空壳。少了多少条断言，就等于少了多少处判断。')
+    fail(`行为自检只跑了 ${passedCount} 项（下限 ${BEHAVIOR_MIN_PASSED}，由 BEHAVIOR_BASELINE 求和）——`
+      + '断言被删掉了一大片，或者自检被换成了一个只会报「0 项通过」的空壳。')
   }
   if (r.status !== 0) {
     const body = out.split('失败项：')[1] ?? ''
@@ -2392,36 +2446,10 @@ function checkReviewRuleSources() {
     + '那几个符号都属于「让机器读中文结论词」那一版，它们的回来意味着整类误判的回来')
 
   // 四、**模板必须登记**：`templates/` 下每个文件都要落在 `TEMPLATE_INSTANCES`
-  // 或 `TEMPLATE_NO_INSTANCE` 里。
-  //
-  // 这条取代了原先那张手写的「同步对照」表——表要人记得改，漏一行不会有任何东西出声。
-  // 而**完整性由目录驱动**：新增一个模板却不登记，当场红。这与本项目对「用户包边界」
-  // 已经验证过的做法同源（`.gitattributes` + 真跑 `git archive`，不是人工清单）。
-  {
-    const files = readdirSync(join(SKILL_ROOT, 'templates'), { withFileTypes: true, encoding: 'utf8' })
-      .filter((e) => e.isFile())
-      .map((e) => e.name)
-    const declared = new Set([...Object.keys(TEMPLATE_INSTANCES), ...TEMPLATE_NO_INSTANCE])
-    const undeclared = files.filter((f) => !declared.has(f))
-    const phantom = [...declared].filter((f) => !files.includes(f))
-    if (undeclared.length > 0) {
-      fail(`templates/ 下有模板没登记落点：${undeclared.join('、')} —— `
-        + '加进 `scripts/lib/protocol.mjs` 的 TEMPLATE_INSTANCES（落在本仓库哪一处），'
-        + '或 TEMPLATE_NO_INSTANCE（不在本仓库落地，例如许可证全文）。'
-        + '登记表漏一行的症状是「改了模板，本仓库的实例没跟着改」，而它不会出声')
-    }
-    if (phantom.length > 0) {
-      fail(`TEMPLATE_INSTANCES / TEMPLATE_NO_INSTANCE 里登记了不存在的模板：${phantom.join('、')} —— `
-        + '删掉那几行，或者把模板补上')
-    }
-    for (const [tpl, inst] of Object.entries(TEMPLATE_INSTANCES)) {
-      const target = join(SKILL_ROOT, inst)
-      if (!existsSync(target)) {
-        fail(`templates/${tpl} 登记的落点不存在：${inst} —— `
-          + '要么落点被删了，要么登记写错了；两种情况都会让「改了模板没改实例」无人发现')
-      }
-    }
-  }
+  // 或 `TEMPLATE_NO_INSTANCE` 里。判据本体在 `templateRegistrationIssues`，导出给
+  // 行为自检直接调用——**断言必须调判据本身，不能复刻一份**：复刻的那份不会因为
+  // 判据被削弱而变红，于是「判据坏了」这件事没有任何东西看着。
+  for (const why of templateRegistrationIssues()) fail(why)
 
   // 五、工作记录模板要带那个块：**没有它，目标项目的新工作记录就不会有冻结的标准**。
   need('templates/work-item.md',
@@ -2585,6 +2613,52 @@ function checkReviewRuleSources() {
   }
   process.stdout.write('审查循环：判据、契约、模板、问题模板、执行点都在；机器契约四处逐字一致；'
     + `模板登记覆盖 ${Object.keys(TEMPLATE_INSTANCES).length + TEMPLATE_NO_INSTANCE.length} 个文件\n`)
+}
+
+/**
+ * 模板登记判据：`templates/` 下每个文件都要落在 `TEMPLATE_INSTANCES` 或
+ * `TEMPLATE_NO_INSTANCE` 里，登记的落点必须真实存在，也不能登记不存在的模板。
+ *
+ * **导出成纯函数是有意的**：行为自检要能直接调用它。若断言自己复刻一遍同样的循环，
+ * 那么把这里的判据削成永假时断言照样全绿——「判据坏了」就没有任何东西看着。
+ * 实测过：三处判据被改成永假，五个分片仍全绿。
+ *
+ * @param {{ files?: string[], root?: string }} [opt] 仅供测试注入；缺省读真实仓库
+ * @returns {string[]} 问题清单；空数组表示没问题
+ */
+export function templateRegistrationIssues(opt = {}) {
+  const root = opt.root ?? SKILL_ROOT
+  let files = opt.files
+  if (files === undefined) {
+    const dir = join(root, 'templates')
+    if (!existsSync(dir)) return [`缺少 templates 目录：${dir}`]
+    files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile())
+      .map((e) => e.name)
+  }
+  const issues = []
+  const declared = new Set([...Object.keys(TEMPLATE_INSTANCES), ...TEMPLATE_NO_INSTANCE])
+  const undeclared = files.filter((f) => !declared.has(f))
+  const phantom = [...declared].filter((f) => !files.includes(f))
+  if (undeclared.length > 0) {
+    issues.push(`templates/ 下有模板没登记落点：${undeclared.join('、')} —— `
+      + '加进 `scripts/lib/protocol.mjs` 的 TEMPLATE_INSTANCES（落在本仓库哪一处），'
+      + '或 TEMPLATE_NO_INSTANCE（不在本仓库落地，例如许可证全文）。'
+      + '登记表漏一行的症状是「改了模板，本仓库的实例没跟着改」，而它不会出声')
+  }
+  if (phantom.length > 0) {
+    issues.push(`TEMPLATE_INSTANCES / TEMPLATE_NO_INSTANCE 里登记了不存在的模板：${phantom.join('、')} —— `
+      + '删掉那几行，或者把模板补上')
+  }
+  if (opt.files === undefined) {
+    for (const [tpl, inst] of Object.entries(TEMPLATE_INSTANCES)) {
+      if (!existsSync(join(root, inst))) {
+        issues.push(`templates/${tpl} 登记的落点不存在：${inst} —— `
+          + '要么落点被删了，要么登记写错了；两种情况都会让「改了模板没改实例」无人发现')
+      }
+    }
+  }
+  return issues
 }
 
 /**

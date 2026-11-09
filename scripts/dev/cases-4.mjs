@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { executorVerdict } from './preflight.mjs'
+import { executorVerdict, templateRegistrationIssues } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -874,6 +874,67 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(bareRun.status === 0 && /没有做任何审查记录检查/.test(bareRun.stderr ?? ''),
       '高风险表还是占位 → 明说没查，退出码 0', label(bareRun))
     report(bareRun.status === 0, '端到端：空表明说没查')
+
+    // 三种坏指针，**走真实 CLI**（不是复刻判据）。上面那条「陈旧指针」是其中之一，
+    // 这里补齐另外两种：指针压根没写、指针指向的文件不存在。
+    // 三条合起来才叫「三种坏指针都分得开」——少一条，那一类失败就没有东西看着。
+    writeFileSync(join(d, 'body-noptr.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', ''].join('\n'), 'utf8')
+    const noPtr = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-noptr.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(noPtr.status === 1 && /缺少工作记录指针/.test(noPtr.stderr ?? ''), '提案里没有工作记录指针 → 退出码 1', label(noPtr))
+    report(noPtr.status === 1, '端到端：缺指针拦下')
+
+    writeFileSync(join(d, 'body-ghost.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', '',
+        '工作记录: docs/work/2026-11-09-不存在.md', ''].join('\n'), 'utf8')
+    writeFileSync(join(d, 'changed-ghost.txt'), 'scripts/review-record.mjs\ndocs/work/2026-11-09-不存在.md\n', 'utf8')
+    const ghost = cli(['--root', d, '--changed', join(d, 'changed-ghost.txt'), '--body', join(d, 'body-ghost.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(ghost.status === 1 && /工作记录不存在/.test(ghost.stderr ?? ''), '指针指向不存在的文件 → 退出码 1', label(ghost))
+    report(ghost.status === 1, '端到端：幽灵指针拦下')
+
+    // 工作记录存在、但里面没有冻结的标准 → 也是 1。这一条最容易被漏：
+    // 文件在、指针对，但那个块没写，验收标准就无从核对。
+    writeFileSync(join(d, 'docs/work/2026-11-09-空.md'), '# 工作记录\n\n## 目标与验收\n\n还没冻结。\n', 'utf8')
+    writeFileSync(join(d, 'body-empty-rec.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', '',
+        '工作记录: docs/work/2026-11-09-空.md', ''].join('\n'), 'utf8')
+    writeFileSync(join(d, 'changed-empty-rec.txt'),
+      'scripts/review-record.mjs\ndocs/work/2026-11-09-空.md\n', 'utf8')
+    const noDone = cli(['--root', d, '--changed', join(d, 'changed-empty-rec.txt'),
+      '--body', join(d, 'body-empty-rec.md'), '--comments', commentsPath, '--expect-changes'])
+    check(noDone.status === 1 && /没有冻结的验收标准/.test(noDone.stderr ?? ''),
+      '工作记录里没有冻结的 `pf-done` 块 → 退出码 1', label(noDone))
+    report(noDone.status === 1, '端到端：没冻结标准拦下')
+  }
+
+  // 5) **判据本体必须被直接调用，不能复刻。**
+  //
+  // 这一组治的是最隐蔽的一类缺口：断言自己写了一遍「和判据相同的循环」，
+  // 于是把判据削成永假时断言照样全绿——「判据坏了」没有任何东西看着。
+  // 实测过：三处判据被改成永假，五个分片仍全绿。
+  //
+  // 判据必须导出成纯函数，断言直接调它。这样「判据被削弱」与「数据不对」是同一件事，
+  // 都会让断言变红。
+  {
+    // 模板登记：给它一份「多了一个未登记文件」的清单，它必须报出来。
+    const undeclared = templateRegistrationIssues({ files: ['contributing.md', 'zzz-新模板.md'] })
+    check(undeclared.length > 0 && /没登记落点/.test(undeclared[0]),
+      '模板登记判据：注入一个未登记的文件 → 必须报出来', JSON.stringify(undeclared))
+    report(undeclared.length > 0, '判据本体：模板登记会报')
+
+    // 反向：真实仓库那份必须是干净的（否则这条断言恒真、什么也没测）。
+    const real = templateRegistrationIssues()
+    check(Array.isArray(real) && real.length === 0, '模板登记判据：真实仓库当前是干净的',
+      JSON.stringify(real))
+    report(real.length === 0, '判据本体：真实仓库干净')
+
+    // 幻影条目：登记了不存在的模板，同样要报。
+    const phantom = templateRegistrationIssues({ files: [] })
+    check(phantom.length > 0, '模板登记判据：登记了不存在的模板 → 必须报出来',
+      JSON.stringify(phantom))
+    report(phantom.length > 0, '判据本体：幻影条目会报')
   }
 
 }

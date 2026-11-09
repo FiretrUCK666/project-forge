@@ -795,7 +795,27 @@ function checkGlobalRules() {
   for (const entry of entries) {
     if (ALLOWED_TOP_LEVEL.has(entry)) continue
     if (README_NAME_RE.test(entry)) continue
+
+    // **临时产物先判，不看它进没进仓库。**
+    //
+    // 第二半（下面那条 `domainFiles` 检查）判的是「仓库里的文件有没有归属」，
+    // 它看不见被 .gitignore 忽略的东西——而 `*.tmp` / `*.bak` / `*.log` / `*.swp`
+    // 正在忽略清单里，实测放根上一条都不报。
+    //
+    // 而这类文件恰恰最该被扫：它们最容易在根上堆着没人管，也最容易随包发出去。
+    const looksTemporary = /^(?:pf-|tmp-|temp-|scratch-|probe-|zz-)|(?:\.tmp|\.bak|\.orig|\.rej|\.log|\.swp|\.swo|~)$/i.test(entry)
+      // 根上的 .mjs：这个仓库的脚本都在 scripts/ 下，根上出现一个就是跑完没清。
+      || entry.endsWith('.mjs')
+    if (looksTemporary) {
+      fail(`顶层出现临时产物：${entry} —— 根目录不放脚本与草稿。`
+        + '临时文件写系统临时目录、用完即删（见 AGENTS.md 的测试约定）；'
+        + '真要长期留在仓库里，就放进已有的目录（脚本进 scripts/、文档进 docs/），'
+        + '并在 README 的「包里有什么」里说一句。')
+      continue
+    }
+
     if (!domainFiles.some((p) => p === entry || p.startsWith(`${entry}/`))) continue
+
     warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
   }
 }

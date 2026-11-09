@@ -712,6 +712,74 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
         `status=${r.status}`)
       check(/不能同时用/.test(String(r.stderr ?? '')), '  并且说清怎么改', String(r.stderr ?? '').slice(0, 60))
       report(r.status === 2, '命令行：两个 stdin 同时给要拦住')
+
+  // 3e) roundVerdict 的段边界：**回指上一轮不能被切断，也不能被当成本轮结论**。
+  //
+  // 这两条实测都是**假红**（审查给的是通过，机器说没结论/说需要返工）——
+  // 而项目自己写着「留一条会误伤真结论的判据，比没有这条判据坏」。
+  {
+    const rv = roundVerdict
+    check(rv('2', '第 2 轮：第 1 轮那三条已修，通过。') === '通过',
+      '段内回指上一轮 → 不被切断（「第 1 轮那三条已修，通过」）',
+      String(rv('2', '第 2 轮：第 1 轮那三条已修，通过。')))
+    check(rv('2', '第 2 轮 —— 通过。上一轮需要返工的三条已全部修完。') === '通过',
+      '复述上一轮的结论 → 不算本轮结论',
+      String(rv('2', '第 2 轮 —— 通过。上一轮需要返工的三条已全部修完。')))
+    // 反向：真正混合的措辞仍要判红（一句里既说通过又说返工）。
+    check(rv('1', '## 第 1 轮 —— 通过。但第 1 轮又发现需要返工。') === '需要返工',
+      '同一行两个结论 → 取更严的（需要返工）',
+      String(rv('1', '## 第 1 轮 —— 通过。但第 1 轮又发现需要返工。')))
+    // 旧假绿不能回来。
+    check(rv('1', '## 第 1 轮独立审查\n\n上一版修完复核通过。本轮结论：需要返工。') === '需要返工',
+      '标题行没结论词时，不抓正文里先出现的「复核通过」',
+      String(rv('1', '## 第 1 轮独立审查\n\n上一版修完复核通过。本轮结论：需要返工。')))
+    check(rv('2', '第 1 轮 —— 通过。第 2 轮待派。') === undefined,
+      '「待派」的轮次不吃上一轮的结论', String(rv('2', '第 1 轮 —— 通过。第 2 轮待派。')))
+    report(true, 'roundVerdict：段边界与回指都验过')
+  }
+
+  // 3f) 否定写法：**列出来的每一个都要判「不通过」**，而且不能靠枚举——
+  //     每漏一种写法，方向都是「放行」。
+  {
+    const neg = ['不通过', '未通过', '没通过', '没有通过', '无通过', '非通过',
+      '不能通过', '未能通过', '无法通过', '不予通过', '未获通过', '没能通过',
+      '通不过', '拒绝通过']
+    const wrong = neg.filter((w) => roundVerdict('1', `第 1 轮 —— ${w}，三条阻塞。`) !== '不通过')
+    check(wrong.length === 0, `${neg.length} 种否定写法全部判「不通过」`, wrong.join(' / '))
+    const pos = ['通过', '已经通过', '这一版通过', '复核后通过']
+    const wrongPos = pos.filter((w) => roundVerdict('1', `第 1 轮 —— ${w}，零阻塞。`) !== '通过')
+    check(wrongPos.length === 0, `${pos.length} 种肯定写法全部判「通过」`, wrongPos.join(' / '))
+    report(wrong.length === 0 && wrongPos.length === 0, '结论词：否定与肯定两个方向都验过')
+  }
+
+  // 3g) 索引侧与评论侧**共用同一份词表**：索引里写「未通过」，那一行不能被丢掉。
+  {
+    const idx = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
+      + '| --- | --- | --- | --- |\n| 1 | a | 通过 | 0 |\n| 2 | b | 未通过 | 3 / 1 |\n'
+    const st = reviewRecordState(idx)
+    check(st.rows.length === 2, '索引侧认「未通过」，不整行丢弃', `rows=${st.rows.length}`)
+    check(st.filled === false, '  且因此判红（最后一轮不是通过）', String(st.filled))
+    report(st.rows.length === 2 && st.filled === false, '索引侧：词表与评论侧同源')
+  }
+
+  // 3h) 高风险表的四态。
+  {
+    const T = (...rows) => '## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n'
+      + rows.map((r) => `| ${r} | x |`).join('\n') + '\n'
+    const states = [
+      ['没有这一节', readHighRiskTable('# 正文\n').state, 'noTable'],
+      ['全是尖括号占位', readHighRiskTable(T('`<第一处>`', '`<第二处>`')).state, 'notFilled'],
+      ['英文占位 TBD', readHighRiskTable(T('TBD')).state, 'notFilled'],
+      ['中文占位「待定」', readHighRiskTable(T('待定')).state, 'notFilled'],
+      ['一真一占位（混写）', readHighRiskTable(T('`scripts/` 与 `<另一处>/`')).state, 'partialFill'],
+      ['一真一 TBD', readHighRiskTable(T('`scripts/`', 'TBD')).state, 'partialFill'],
+      ['都填了', readHighRiskTable(T('`scripts/`', '`templates/`')).state, 'filled'],
+    ]
+    const wrong = states.filter(([, got, want]) => got !== want)
+    check(wrong.length === 0, '四态：noTable / notFilled / partialFill / filled 都对',
+      wrong.map(([l, g, w]) => `${l}: ${g} 应 ${w}`).join(' / '))
+    report(wrong.length === 0, '高风险表：四态与两种占位写法都验过')
+  }
     }
   }
 

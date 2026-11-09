@@ -178,20 +178,31 @@ export function readHighRiskTable(agentsText) {
     // 分成两种情况：
     //   一、整张表都没填（全是占位或空行）→ 走「还没填」，退出码 0，明说没查；
     //   二、填了但有几行认不出来 → 退出码 1，报出那几行。
-    // 这一行是不是「还没填」的占位（整格都是尖括号包着的占位符）。
-    const placeholderRow = candidates.length > 0 && candidates.every((c) => c.trim().startsWith('<'))
-    if (placeholderRow) placeholders += 1
+    // **逐个候选判占位，不判整行。**
+    //
+    // 判整行会漏两种实测过的写法：
+    //   一、混写：`| `scripts/` 与 `<另一处>/` |` —— 有一个真路径就不算占位，
+    //       占位被静默吞掉，state 报 filled；
+    //   二、英文占位：`| TBD | 待定 |`、`| TODO | 以后再填 |` —— 被当成真实判据，
+    //       整张表看起来配好了，而一条都不保护。
+    const PLACEHOLDER_WORD = /^(?:tbd|todo|fixme|xxx+|待定|待填|以后再填|稍后补|占位|这里填|未定)$/i
+    const isPlaceholderCell = (c) => {
+      const v = c.trim()
+      return v.startsWith('<') || v.endsWith('>') || PLACEHOLDER_WORD.test(v)
+    }
+    const placeholdersInRow = candidates.filter(isPlaceholderCell).length
+    if (placeholdersInRow > 0) placeholders += placeholdersInRow
 
     let took = 0
     for (const raw of candidates) {
       let v = raw.replace(/\\/g, '/').replace(/^\.\//, '').trim()
-      if (v === '' || v.startsWith('<') || v.endsWith('>')) continue
+      if (v === '' || v.startsWith('<') || v.endsWith('>') || /^(?:tbd|todo|fixme|xxx+|待定|待填|以后再填|稍后补|占位|这里填|未定)$/i.test(v)) continue
       const spec = normalizeEntry(v)
       if (spec === undefined) continue
       out.push(spec.path)
       took += 1
     }
-    if (took === 0 && !placeholderRow) skipped.push(trimmed)
+    if (took === 0 && placeholdersInRow === 0) skipped.push(trimmed)
   }
   // **「有没有填」分三态**：
   //   notFilled   —— 有表但一条真路径都没有（整张表是占位或空）
@@ -351,7 +362,15 @@ export function reviewRecordState(body) {
   //   - 轮次是数字或「第 N 轮」；
   //   - 审查者那一格非空（它是「另一个上下文」的标识，正是要留档的东西）；
   //   - 结论是「通过」或「需要返工」之一。
-  const VERDICT = /^(通过|不通过|需要返工|需要修改|需返工)/
+  // **索引侧和评论侧共用同一份词表与同一处归一化。**
+  //
+  // 原先这里是另一条正则，只有五个词，而且认不出就整行丢弃——审查员写「未通过」，
+  // 那一行等于没写，「最后一轮」回落成上一行的「通过」，门禁放行。
+  // 两处各有一份词表，迟早给出两个答案。
+  const firstVerdict = (cell) => {
+    const hits = verdictHits(cell)
+    return hits.length > 0 ? hits[0].verdict : undefined
+  }
   // 轮次认三种写法：阿拉伯数字、阿拉伯数字带「第…轮」、中文数字带「第…轮」。
   // 认不认一种写法，不该决定一条记录算不算数——那属于误伤正当写法。
   const roundLike = (c) => /^(\d+|第\s*\d+\s*轮|第\s*[零一二三四五六七八九十]+\s*轮)$/.test(c)
@@ -368,11 +387,12 @@ export function reviewRecordState(body) {
     const c = cells(line)
     if (c.length < 3) continue
     if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
-    if (!roundLike(c[0]) || c[1] === '' || !VERDICT.test(c[2])) continue
+    const verdict = firstVerdict(c[2] ?? '')
+    if (!roundLike(c[0]) || c[1] === '' || verdict === undefined) continue
     rows.push({
       round: roundNumber(c[0]),
       who: c[1],
-      verdict: VERDICT.exec(c[2])[1],
+      verdict,
       note: c[3] ?? '',
     })
   }
@@ -471,13 +491,34 @@ const VERDICT_TOKENS = [
   ['需要返工', '需要返工'],
   ['需要修改', '需要返工'],
   ['需返工', '需要返工'],
-  ['没有通过', '不通过'],
-  ['未能通过', '不通过'],
-  ['无法通过', '不通过'],
-  ['不通过', '不通过'],
-  ['未通过', '不通过'],
+  ['通不过', '不通过'],
   ['通过', '通过'],
 ]
+
+/**
+ * 「通过」这个词，在这里到底是通过还是不通过。
+ *
+ * **不靠枚举否定词。** 中文里「否定的通过」写法列不完：不通过、未通过、没通过、无通过、
+ * 非通过、不能通过、不予通过、未获通过、没能通过、没有通过、通不过……实测每补一批就漏一批，
+ * 而合并正则里裸「通过」是交替项之一，**每漏一种写法，方向都是放行**。
+ *
+ * 判结构：
+ *   一、**前面紧挨着否定词**（「不」「未」「没」「无」「非」「否」「难」「拒」之一，
+ *       允许中间夹一个「能」「予」「获」「有」这类助词）→ 不通过；
+ *   二、**后面紧跟「不」**（「通不过」）→ 不通过；
+ *   三、其余 → 通过。
+ *
+ * 这样「未能通过」「不能通过」「不予通过」「未获通过」「没能通过」「没有通过」
+ * 全部自动覆盖，不需要逐个登记。
+ */
+function negatedThrough(text, index) {
+  const before = String(text).slice(Math.max(0, index - 4), index)
+  // 一、前面是否定词，允许夹一个助词：不能 / 未能 / 不予 / 未获 / 没能 / 没有 / 无法 / 不
+  if (/(?:不|未|没|无|非|否|难|拒)(?:能|予|获|有|会|得|被|可|法|绝)?$/.test(before)) return true
+  // 二、后面紧跟「不」：通不过
+  if (String(text).slice(index + 2, index + 3) === '不') return true
+  return false
+}
 
 /**
  * 把一段文字里出现的结论词**全部**找出来，规范化成「通过 / 不通过 / 需要返工」。
@@ -495,11 +536,16 @@ const VERDICT_TOKENS = [
  * 在审查意见里极自然，不需要任何人动坏心思。
  */
 export function verdictHits(text) {
+  const s = String(text ?? '')
   const source = VERDICT_TOKENS.map(([word]) => word).join('|')
   const out = []
-  for (const m of String(text ?? '').matchAll(new RegExp(source, 'g'))) {
+  for (const m of s.matchAll(new RegExp(source, 'g'))) {
     const hit = VERDICT_TOKENS.find(([word]) => word === m[0])
-    if (hit !== undefined) out.push({ word: m[0], verdict: hit[1], index: m.index ?? 0 })
+    if (hit === undefined) continue
+    const index = m.index ?? 0
+    // 「通过」要看上下文才能定：前面是否定词、或后面跟「不」，都是不通过。
+    const verdict = m[0] === '通过' && negatedThrough(s, index) ? '不通过' : hit[1]
+    out.push({ word: m[0], verdict, index })
   }
   return out
 }
@@ -532,30 +578,54 @@ export function roundVerdict(round, text) {
 
   const hits = verdictHits(s)
   if (hits.length === 0) return undefined
-  const mostSevere = (list) => list.reduce((a, b) => (SEVERITY[a.verdict] <= SEVERITY[b.verdict] ? a : b)).verdict
 
-  // **每一轮的正文只在自己那一段里找**，而段的边界是**下一个轮次标记**，不是行末。
+  const lineStartOf = (idx) => {
+    const before = s.lastIndexOf('\n', idx)
+    return before < 0 ? 0 : before + 1
+  }
+  const lineEndOf = (idx) => {
+    const after = s.indexOf('\n', idx)
+    return after < 0 ? s.length : after
+  }
+  const atLineStart = (idx) => /^[ \t#>*\-]*$/.test(s.slice(lineStartOf(idx), idx))
+
+  // **时间回指**：被这几个词修饰的结论词，说的是以前的轮次，不是本轮的结论。
   //
-  // 为什么不是行：一行里可以有两个轮次标记（`第 1 轮 —— 通过。第 2 轮待派。`），
-  // 按行取会把两轮的正文混成一段，第 2 轮于是看到属于第 1 轮的「通过」，
-  // 一个「尚未派」的轮次被判成通过。
-  //
-  // 两条边界，各治一种实测过的假绿：
-  //   一、**往前不越界**：段从本轮标记开始，不从「行首」开始。
-  //       否则标题行没结论词时，先出现的「上一版修完复核通过」会被当成这一轮的结论；
-  //   二、**往后不越界**：到下一个轮次标记为止。
-  //       否则第 2 轮会吃到第 1 轮（或第 3 轮）的结论。
-  //
-  // 「这一段里没有任何结论词」就是 undefined —— 这一轮还没结论，而不是「往前找最近的」。
+  // 实测：`第 2 轮 —— 通过。上一轮需要返工的三条已修完。` 里「需要返工」是对
+  // 上一轮的复述，而它是段内更严的那个，于是本轮被判成需要返工——**假红**。
+  // 这不是「否定词枚举」那一类，它是结构信号：那句话在讲过去。
+  const PAST_REF = /(?:上一[轮版次]|上轮|前一轮|前一版|此前|之前|原先|原来|上次)\s*$/
+  const notPastRef = (h) => !PAST_REF.test(s.slice(Math.max(0, h.index - 8), h.index))
+
+  // 段边界只认**行首**的轮次标记：句中的「第 1 轮」是回指，不是一个新段。
+  const boundary = marks.filter((m) => atLineStart(m.index)).map((m) => m.index)
+
   let result
   for (const mark of mine) {
-    const nextMark = marks.map((m) => m.index).filter((x) => x > mark.index)
-    const segEnd = nextMark.length > 0 ? Math.min(...nextMark) : s.length
-    const inSeg = hits.filter((h) => h.index >= mark.index && h.index < segEnd)
+    const declared = atLineStart(mark.index)
+
+    if (declared) {
+      // 一、**轮次 + 结论写在那一行**是最标准的形状，先看这一行。
+      const from = lineStartOf(mark.index)
+      const to = lineEndOf(mark.index)
+      const onLine = hits.filter((h) => h.index >= from && h.index <= to && notPastRef(h))
+      if (onLine.length > 0) {
+        // 同一行里既说通过又说返工时取更严的：一句话里两个结论，唯一安全的读法是
+        // 「它没有明确通过」。
+        const v = onLine.reduce((a, b) => (SEVERITY[a.verdict] <= SEVERITY[b.verdict] ? a : b)).verdict
+        result = result === undefined || SEVERITY[v] < SEVERITY[result] ? v : result
+        continue
+      }
+    }
+
+    // 二、那一行没有（或这个标记在句中）：取**从它到下一个行首标记之前**的第一个结论词。
+    const next = boundary.filter((x) => x > mark.index)
+    const segEnd = next.length > 0 ? Math.min(...next) : s.length
+    const segFrom = declared ? lineEndOf(mark.index) : mark.index
+    const inSeg = hits.filter((h) => h.index > segFrom && h.index < segEnd && notPastRef(h))
     if (inSeg.length === 0) continue
-    // 段内出现多个结论词时取**更严**的：一段里既说通过又说返工，唯一安全的读法是
-    // 「它没有明确通过」。
-    const v = mostSevere(inSeg)
+    // 段内取**最后一个**：结论常常写在解释之后（`……本轮结论：需要返工`）。
+    const v = inSeg[inSeg.length - 1].verdict
     result = result === undefined || SEVERITY[v] < SEVERITY[result] ? v : result
   }
   return result

@@ -1722,7 +1722,16 @@ function main(argv) {
         // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
         // 报错退出**（那会把最常见的场景变成死路），也不能擅自重写（那是覆盖用户的成果）。
         // 默认只做体检并给出下一步；用户明确要升级时才动手，且只做加法。
-        if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check, s)
+        if (!upgrade) {
+          // **落地脚本与「要不要刷新内核」无关。**
+          //
+          // 它是门禁的运行时依赖：只要这个项目要装 CI，`scripts/review-record.mjs` 就得在。
+          // 原先它挂在刷新路径上，而这条路在手写契约（没有内核标记）这里就早退，
+          // 落地脚本从不拷过去；而 `templates/ci-check.yml` 直接执行它，
+          // 提案上那一步必然崩在 MODULE_NOT_FOUND，文档还写着「不用手工拷」。
+          landScripts(target, process.stdout)
+          return reportHandwritten(agentsPath, existing, target, status, check, s)
+        }
         const upgraded = upgradeHandwritten(existing, kernel, target, s)
         composed = upgraded.text
         freshForLedger = upgraded.fresh

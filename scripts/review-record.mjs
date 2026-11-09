@@ -557,12 +557,22 @@ export function findRoundInComments(round, verdict, comments) {
   const list = Array.isArray(comments) ? comments : []
   for (const c of list) {
     const text = typeof c === 'string' ? c : String(c?.body ?? '')
-    const { blocks } = reviewBlocks(text)
-    for (const b of blocks) {
-      if (b.round !== String(Number(round))) continue
-      if (b.verdict !== verdict) continue
-      return text.trim().slice(0, 80).replace(/\s+/g, ' ')
-    }
+    // **注释里的块不算**：注释是给人看的示例，不是结论。
+    // 实测：一条评论只贴了模板示例（「格式是这样：…（我还没审）」）也算痕迹。
+    const visible = text.replace(/<!--[\s\S]*?-->/g, '')
+    const { blocks } = reviewBlocks(visible)
+    const mine = blocks.filter((b) => b.round === String(Number(round)))
+    if (mine.length === 0) continue
+    // **一条评论对某一轮只能有一个结论。**
+    //
+    // 两个都写在同一条评论里时，机器无法判断哪句作废——「取更严」会误伤复述
+    // （「上一轮需要返工的三条已修完」），「取最后一个」会误伤订正（先写错、后写对）。
+    // 唯一不猜的读法是：**不一致就是自相矛盾，不算**。
+    // 要改口就删掉旧的那块，或者发一条新评论。
+    const distinct = [...new Set(mine.map((b) => b.verdict))]
+    if (distinct.length > 1) continue
+    if (distinct[0] !== verdict) continue
+    return text.trim().slice(0, 80).replace(/\s+/g, ' ')
   }
   return undefined
 }

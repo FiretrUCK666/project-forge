@@ -768,7 +768,32 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     report(rv1 !== undefined && rv2 !== undefined && cross === undefined, '评论：一条评论只认领自己那一轮')
   }
 
-  // 3f) 索引表：结论格**只认那两个字**，不从散文里猜。
+  // 3e2) 一条评论对某一轮**只能有一个结论**。
+  //
+  // 两个洞同一个根：原先只问「有没有一块对得上」，不问「这条评论整体说了什么」。
+  //   一、先写「通过」再「订正为需要返工」→ 两块都在，作废的那句继续生效；
+  //   二、只贴模板示例（在 HTML 注释里）→ 连结论都没写也算痕迹。
+  {
+    const blk = (r, v) => ['```pf-review', 'round: ' + r, 'verdict: ' + v, '```'].join('\n')
+    const hit = (round, verdict, cmts) => findRoundInComments(round, verdict, cmts) !== undefined
+
+    const fixed = '## 第 1 轮\n\n' + blk(1, '通过') + '\n\n订正为：\n\n' + blk(1, '需要返工')
+    check(hit('1', '通过', [fixed]) === false, '同一评论里两个结论 → 自相矛盾，找旧的也不命中')
+    check(hit('1', '需要返工', [fixed]) === false, '  找新的同样不命中（要改口就发新评论）')
+
+    const demo = '格式是这样：\n\n<!--\n' + blk(1, '通过') + '\n-->\n\n（我还没审）'
+    check(hit('1', '通过', [demo]) === false, '注释里的块不算痕迹（那是给人看的示例）')
+
+    check(hit('1', '通过', ['## 第 1 轮\n\n' + blk(1, '通过')]) === true, '干净的一块 → 命中')
+    check(hit('1', '通过', [blk(1, '通过') + '\n\n补充：' + blk(1, '通过')]) === true,
+      '两块但结论一致 → 仍命中')
+    check(hit('1', '需要返工', [blk(1, '需要返工') + '\n\n' + blk(2, '通过')]) === true,
+      '两块属于不同轮次 → 各认各的')
+
+    report(true, '评论：一条评论对一轮只能有一个结论，注释不算')
+  }
+
+    // 3f) 索引表：结论格**只认那两个字**，不从散文里猜。
   {
     const st = (c) => reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
       + `| --- | --- | --- | --- |\n| 1 | a | ${c} | 0 |\n`)

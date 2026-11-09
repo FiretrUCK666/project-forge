@@ -32,9 +32,10 @@
  * 退出码 0 = 全绿；1 = 有 FAIL；2 = 脚本自身用法错误。
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
@@ -120,7 +121,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 730
+export const BEHAVIOR_MIN_PASSED = 734
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2545,8 +2546,13 @@ function checkWorkRecords() {
     // 判据取形状而不是取值：要能看出是一个人/一个账号（邮箱、`@`、或平台账号名），
     // 不认具体是谁。写死某个人名就等于「换个人就失准」，与契约里那条「操作者取值
     // 一律现场取」是同一个道理。
+    // **空着与写代词同样拦。**
+    //
+    // 原先 `absent` 被跳过，于是「不写」成了最省事的选择。而这一格的用处是
+    // 「这件事该找谁问」——空着就找不到人。AGENTS.md 写的是「写代词或写不出身份都红」，
+    // 实现只拦了前者；`templates/work-item.md` 又写「没有就留空」。三处说法两两不一致。
     const who = executorVerdict(text)
-    if (who.verdict !== 'absent' && who.verdict !== 'ok') {
+    if (who.verdict !== 'ok') {
       bad += 1
       fail(`${rel} 的「执行者」是「${who.value}」—— ` + EXECUTOR_ADVICE)
     }
@@ -2883,12 +2889,39 @@ function checkStructuralRulesAgree() {
         + '这条例外的意思是「模板里指它是对的」，表项错了，模板里那条死链就永远绿着。')
     }
   }
-  // 反过来也要说清：登记为「要落地的」脚本，必须在落盘那一步真的被拷过去。
-  // 只登记不拷，等于给读者留了一项家务，而忘掉它的症状是 CI 里的 MODULE_NOT_FOUND。
-  const composeSrc = readText(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'))
-  if (!/for \(const rel of LANDED_SCRIPTS\)/.test(composeSrc)) {
-    fail('compose-agents.mjs 里没有「把 LANDED_SCRIPTS 拷到目标项目」那一步 —— '
-      + '模板里写着「先把它拷过去」，但没有任何东西负责拷，忘了拷的症状是 CI 里一句崩溃栈。')
+  // 反过来也要说清：登记为「要落地的」脚本，必须在落盘那一步**真的被拷过去**。
+  //
+  // **不 grep 源码。** 原先的判据是 `/for \(const rel of LANDED_SCRIPTS\)/.test(composeSrc)`，
+  // 实测把 `landScripts` 的函数体换成立刻 return，它照样绿——留一行空 `for` 就过。
+  // 字符串 grep 证明的是「这段字出现过」，不是「这件事会发生」。
+  //
+  // 改成**真的跑一次**：造一个临时项目，compose 一遍，看文件到没到。
+  {
+    const probe = mkdtempSync(join(tmpdir(), 'pf-land-'))
+    try {
+      writeFileSync(join(probe, 'README.md'), '# probe\n')
+      writeFileSync(join(probe, 'package.json'), '{"name":"probe"}\n')
+      const r = spawnSync(process.execPath,
+        [join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), probe],
+        { encoding: 'utf8', windowsHide: true })
+      const missing = LANDED_SCRIPTS.filter((rel) => !existsSync(join(probe, rel)))
+      if (missing.length > 0 || r.status !== 0) {
+        fail('登记为「要落地」的脚本没有真的拷进目标项目：' + missing.join('、')
+          + ' —— 模板里写着「随落盘自动拷过去（不用手工拷）」，而目标项目里没有它，'
+          + 'CI 那一步会崩在 MODULE_NOT_FOUND。')
+      } else {
+        // 再跑一次确认幂等：第二次不该改动内容。
+        const before = LANDED_SCRIPTS.map((rel) => readFileSync(join(probe, rel), 'utf8'))
+        spawnSync(process.execPath, [join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), probe],
+          { encoding: 'utf8', windowsHide: true })
+        const after = LANDED_SCRIPTS.map((rel) => readFileSync(join(probe, rel), 'utf8'))
+        if (before.some((b, i) => b !== after[i])) {
+          fail('落地脚本第二次 compose 之后内容变了 —— 它应当是幂等的。')
+        }
+      }
+    } finally {
+      rmSync(probe, { recursive: true, force: true })
+    }
   }
 }
 

@@ -744,6 +744,14 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     })
     check(badWrong.length === 0, '坏块都报出原因（不静默跳过）',
       badWrong.map(([l]) => l).join(' / '))
+    // **坏块要报「格式不对」，不能折叠成「找不到」。**
+    // 实测 verdict 带中文句号原先得到的是「在评论里找不到」——而真原因是格式。
+    {
+      const dotted = reviewFormatIssue('```pf-review\nround: 1\nverdict: 通过。\n```')
+      check(dotted.ok === false && /verdict/.test(String(dotted.why)),
+        'verdict 带句号 → 报「verdict 只能是…」', String(dotted.why))
+      report(dotted.ok === false, '字段块：坏块报格式，不折叠成找不到')
+    }
     report(badWrong.length === 0 && wrongTricky.length === 0, '字段块：只读字段，不读散文')
   }
 
@@ -772,6 +780,22 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     const bad2 = isVerdict.filter((c) => st(c).rows.length !== 1)
     check(bad2.length === 0, '索引格写那两个词 → 算一行', bad2.join(' / '))
     report(bad.length === 0 && bad2.length === 0, '索引表：结论格只认那两个字')
+
+    // **认不出来的行要报出来，不能静默丢。**
+    //
+    // 实测：| 2 | sub-b | 需要返工（见评论） | 那一行原先被静默丢掉，
+    // 剩下的第 1 轮「通过」当上了最后一轮 → 门禁放行。越认真写备注越容易触发。
+    {
+      const head = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
+      const withNote = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n'
+        + '| 2 | sub-b | 需要返工（见评论） | 3 / 1 |\n')
+      check(withNote.filled === false, '索引行带备注认不出 → 判红，不静默丢', String(withNote.filled))
+      check((withNote.skipped ?? []).length === 1, '  并且点名是那一行', JSON.stringify(withNote.skipped))
+      const clean = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n')
+      check((clean.skipped ?? []).length === 0, '干净的表没有 skipped', JSON.stringify(clean.skipped))
+      report(withNote.filled === false && (withNote.skipped ?? []).length === 1,
+        '索引表：认不出来的行要报，不能静默丢')
+    }
   }
 
   // 3h) 高风险表的四态。

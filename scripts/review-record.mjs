@@ -459,7 +459,7 @@ export function reviewRecordState(body) {
   const text = String(body ?? '')
   const visible = stripComments(text)
   const head = /^##[ \t]*审查记录[ \t]*$/m.exec(visible)
-  if (head === null) return { filled: false, section: false, rows: [], why: '正文里没有「## 审查记录」这一节' }
+  if (head === null) return { filled: false, section: false, rows: [], skipped: [], why: '正文里没有「## 审查记录」这一节' }
   const after = visible.slice(head.index + head[0].length)
   const nextHead = /^##[ \t]/m.exec(after)
   const body2 = nextHead === null ? after : after.slice(0, nextHead.index)
@@ -475,16 +475,46 @@ export function reviewRecordState(body) {
   }
 
   const rows = []
+  const skipped = []
   for (const line of body2.split(/\r?\n/).map((l) => l.trim())) {
     if (line === '' || isSeparator(line)) continue
     if (!line.startsWith('|')) continue
     const c = cells(line)
     if (c.length < 3) continue
     if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
+
     // **结论格只认那两个字。** 表格一格就是一个值，不需要从散文里猜。
-    const verdict = VERDICTS.find((v) => c[2] === v) ?? VERDICTS.find((v) => c[2] === v)
-    if (!roundLike(c[0]) || c[1] === '' || verdict === undefined) continue
+    const verdict = VERDICTS.find((v) => c[2] === v)
+
+    // **认不出来的行要报出来，不能静默丢。**
+    //
+    // 实测：`| 2 | sub-b | 需要返工（见评论） | 3 / 1 |` 那一行认不出结论格，
+    // 被 `continue` 丢掉，剩下的第 1 轮「通过」当上了最后一轮 → 门禁放行。
+    // **越认真地写备注越容易触发。**
+    //
+    // 高风险表那张判据对同样的情况是要报错退出 1 的，注释还写着「认不出来不等于没有，
+    // 静默跳过正是这个 bug 的形状」——同样的形状，这里不能是静默的。
+    if (!roundLike(c[0])) { skipped.push({ line, why: `第一格「${c[0]}」不是轮次（写数字或「第 N 轮」）` }); continue }
+    if (c[1] === '') { skipped.push({ line, why: '第二格（谁审的）是空的' }); continue }
+    if (verdict === undefined) {
+      skipped.push({
+        line,
+        why: '结论格「' + (c[2] ?? '') + '」认不出——只写「' + VERDICTS.join('」或「') + '」，要写备注就放进第四格',
+      })
+      continue
+    }
     rows.push({ round: roundNumber(c[0]), who: c[1], verdict, note: c[3] ?? '' })
+  }
+
+  // 有认不出来的行 → 直接判红。它们是「看起来像一条记录、机器读不到」的那些。
+  if (skipped.length > 0) {
+    return {
+      filled: false,
+      section: true,
+      rows,
+      skipped,
+      why: '「审查记录」里有 ' + skipped.length + ' 行认不出来：' + skipped.map((s) => s.why).join('；'),
+    }
   }
 
   if (rows.length === 0) {
@@ -492,6 +522,7 @@ export function reviewRecordState(body) {
       filled: false,
       section: true,
       rows,
+      skipped,
       why: '「审查记录」里没有一行是有效的（要轮次 + 审查者 + 结论三样齐全，'
         + '结论格只写「' + VERDICTS.join('」或「') + '」）——只写「无」「已审」这类口令不算',
     }
@@ -504,11 +535,12 @@ export function reviewRecordState(body) {
       filled: false,
       section: true,
       rows,
+      skipped,
       why: `最后一轮（第 ${last.round} 轮）的结论是「${last.verdict}」——`
         + '改完要重新派一个上下文再审一轮，并把那一轮的结论也写进表里',
     }
   }
-  return { filled: true, section: true, rows, why: `${rows.length} 轮审查记录，最后一轮通过` }
+  return { filled: true, section: true, rows, skipped, why: `${rows.length} 轮审查记录，最后一轮通过` }
 }
 
 /**
@@ -769,6 +801,33 @@ function main(argv) {
   }
   const comments = readFileSync(commentsArg, 'utf8')
     .split(/^---COMMENT---\s*$/m).map((s) => s.trim()).filter((s) => s !== '')
+
+  // **先看格式**：有字段块但读不出来时，报「格式不对」，不要折叠成「找不到」。
+  //
+  // 实测：`verdict: 通过。`（带中文句号）这种坏块，原先得到的是
+  // 「第 1 轮在提案评论里找不到」——而真原因是格式。报错要能直接照着改。
+  {
+    const seen = []
+    for (const c of comments) {
+      const issue = reviewFormatIssue(c)
+      if (!issue.ok && issue.broken !== undefined && issue.broken.length > 0) seen.push(issue.why)
+    }
+    if (seen.length > 0) {
+      process.stderr.write([
+        '审查记录里那几条评论的字段块格式不对：',
+        ...seen.slice(0, 4).map((w) => '  - ' + w),
+        '',
+        '  格式：',
+        '    \`\`\`pf-review',
+        '    round: 1',
+        '    verdict: 通过',
+        '    \`\`\`',
+        '',
+        '  verdict 只能是「通过」或「需要返工」，不要加句号、括号或别的字。',
+      ].join('\n') + '\n')
+      return 1
+    }
+  }
 
   const match = matchRoundsToComments(state, comments)
   if (!match.ok) {

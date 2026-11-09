@@ -920,10 +920,9 @@ function main(argv) {
   }
 
   const body = bodyArg === '-' ? readFileSync(0, 'utf8') : readFileSync(bodyArg, 'utf8')
-  const issue = readClosingIssue(body)
-  // 有单轨道：验收标准在 issue 正文里，那是别人写的、开工前就存在的。
-  // 但**这份脚本读不到 issue**（零依赖、不联网），所以有单轨道时仍然要求工作记录指针：
-  // 契约里写着「有单轨道也要建工作记录」。少一层间接，比多一条联网路径稳。
+  // 有单轨道时验收标准在 issue 正文里——但**这份脚本读不到 issue**（零依赖、不联网），
+  // 所以两种情况一律要求工作记录指针：契约里写着「有单轨道也要建工作记录」。
+  // 少一层间接，比多一条联网路径稳。
   const ptr = readWorkRecordPointer(body)
 
   const basis = readBasis(body)
@@ -1066,11 +1065,8 @@ function main(argv) {
     return 1
   }
 
-  const waivedNote = waived && outcome.stopLoss === null ? '' : ''
   process.stdout.write(`审查记录：成立（${outcome.why}）。本次动到 ${high.length} 处高风险路径。\n`)
   process.stdout.write(`冻结的标准 ${done.ids.size} 条；审查 ${reviews.rounds.length} 轮${waived ? '（带豁免）' : ''}。\n`)
-  void issue
-  void waivedNote
   return 0
 }
 

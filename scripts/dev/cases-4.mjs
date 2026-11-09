@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { executorVerdict, templateRegistrationIssues } from './preflight.mjs'
+import { executorVerdict, templateRegistrationIssues, contractSnippetIssues } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -754,28 +754,28 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
 
   // 3f) **机器契约逐字一致**：示例由脚本生成，落点必须逐字相同。
   //
-  // 这是本次改动最要紧的一条判据。早先的做法是「在五处各写一遍格式，用正则看每处有没有
-  // 提到关键词」——改字段时改漏一处不会有任何东西出声。现在改的是精确一致性。
+  // **调判据本体，不复刻。**上一版这里自己写了一遍 `filter(...includes(...))` 循环——
+  // 于是把 `preflight.mjs` 里那条判据改成 `() => true` 时，断言照样全绿。
+  // 实例：`templateRegistrationIssues` 当初就是因为这个理由被抽成导出函数的，
+  // 而契约比对这一条漏了，同一个文件里两种做法并存。
   {
-    const doneSnippet = canonicalDoneSnippet()
-    const reviewSnippet = canonicalReviewSnippet(1)
-    const badDone = DONE_SITES.filter((rel) => {
-      const p = join(SKILL_ROOT, rel)
-      return !existsSync(p) || !readFileSync(p, 'utf8').includes(doneSnippet)
-    })
-    check(badDone.length === 0, `冻结块示例在 ${DONE_SITES.length} 处逐字存在`, badDone.join('、'))
-    report(badDone.length === 0, '契约：冻结块示例逐字一致')
+    const real = contractSnippetIssues()
+    check(Array.isArray(real) && real.length === 0,
+      `契约示例在 ${CONTRACT_SITES.length + DONE_SITES.length} 处逐字一致`, JSON.stringify(real))
+    report(real.length === 0, '契约：示例逐字一致')
 
-    const badReview = CONTRACT_SITES.filter((rel) => {
-      const p = join(SKILL_ROOT, rel)
-      return !existsSync(p) || !readFileSync(p, 'utf8').includes(reviewSnippet)
-    })
-    check(badReview.length === 0, `审查块示例在 ${CONTRACT_SITES.length} 处逐字存在`, badReview.join('、'))
-    report(badReview.length === 0, '契约：审查块示例逐字一致')
+    // **正向注入**：给一个「示例被改了一个字」的读法，判据必须报出来。
+    // 反向用例比正向更重要——只有正向时，判据被削成永真也看不出来。
+    const tampered = contractSnippetIssues({ reader: () => 'fail: WRONG（示例被改了）' })
+    check(tampered.length > 0 && /不一致|缺失/.test(tampered[0]),
+      '契约判据：喂一份被改过的落点 → 必须报出来', JSON.stringify(tampered.slice(0, 1)))
+    report(tampered.length > 0, '契约：改过的落点会报')
 
-    // **反例必须真的会翻**：把字段名改一个字，生成的示例就对不上了。
-    const tampered = reviewSnippet.replace('fail:', 'fails:')
-    check(tampered !== reviewSnippet, '示例里改一个字段名，字面就不同（判据能抓住改动）', '')
+    // 落点文件不存在时同样要报（不能因为「读不到」就当「一致」）。
+    const absent = contractSnippetIssues({ reader: () => undefined })
+    check(absent.length > 0 && /不存在/.test(absent[0]),
+      '契约判据：落点文件不存在 → 必须报出来', JSON.stringify(absent.slice(0, 1)))
+    report(absent.length > 0, '契约：缺落点会报')
   }
 
   // 4) 端到端：真的跑那个脚本。**每一条都对应一类必须防住的失败。**

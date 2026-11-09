@@ -2399,37 +2399,13 @@ function checkReviewRuleSources() {
     (x) => /^## 五、能不能合/m.test(x) && /\|\s*必须审\s*\|/.test(x),
     '「## 五、能不能合」那张表没有「必须审」一列 —— 审不审与谁能合又混回一句了')
 
-  // 二、**机器契约逐字一致**。
+  // 二、**机器契约逐字一致**。判据本体在 `contractSnippetIssues`，导出给行为自检
+  // 直接调用——理由与模板登记那条相同：复刻一份的断言不会因为判据被削弱而变红。
   //
-  // 这是这次改动最要紧的一条。早先的做法是「在五处各写一遍格式，用几条正则看每处
-  // 有没有提到关键词」——改字段时改漏一处不会有任何东西出声，直到下一轮审查把它指出来。
-  // 而「下一轮指出上一轮的不一致」正好能让循环永不收敛。
-  //
-  // 现在的判据是**精确一致**：示例由 `review-record.mjs` 生成（格式的唯一来源就是那个
-  // 解析器，它要整个复制进目标项目、必须零依赖单文件），每一处都必须逐字出现。
-  // 改字段却不同步，报的是「示例与实现不符」——一条能照着改的错，不是风格告警。
-  //
-  // **两处的分母不同，这是刻意的**：
-  //   - 审查块（`pf-review`）四本都要有——判据给人读、两份提案模板给人抄、
-  //     落盘契约给目标项目的 AI 读；
-  //   - 冻结块（`pf-done`）只要求判据与落盘契约有它——它住在**工作记录**里，
-  //     提案正文只放指针。要求提案模板里也有，会逼人把「验收标准」抄进提案，
-  //     那正好制造出第二份会漂移的副本。
-  const reviewSnippet = canonicalReviewSnippet(1)
-  for (const rel of CONTRACT_SITES) {
-    need(rel,
-      (x) => x.includes(reviewSnippet),
-      '审查块的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— '
-      + '照着这里抄的人会写出一份机器读不到的东西。'
-      + '示例由 `canonicalReviewSnippet()` 生成，不要手写')
-  }
-  const doneSnippet = canonicalDoneSnippet()
-  for (const rel of DONE_SITES) {
-    need(rel,
-      (x) => x.includes(doneSnippet),
-      '冻结验收标准的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— '
-      + '示例由 `canonicalDoneSnippet()` 生成，不要手写')
-  }
+  // 这条判据自己就吃过一次：作者给 `templateRegistrationIssues` 写明了「断言必须调判据
+  // 本身」，契约比对这一条却漏了，于是同一个文件里两种做法并存，而漏的那条正是最要紧的
+  // 防线（示例与实现不符就是它该拦的）。
+  for (const why of contractSnippetIssues()) fail(why)
 
   // 三、**结论词不得回到判定里**。
   //
@@ -2631,6 +2607,46 @@ function checkReviewRuleSources() {
   }
   process.stdout.write('审查循环：判据、契约、模板、问题模板、执行点都在；机器契约四处逐字一致；'
     + `模板登记覆盖 ${Object.keys(TEMPLATE_INSTANCES).length + TEMPLATE_NO_INSTANCE.length} 个文件\n`)
+}
+
+/**
+ * 机器契约逐字一致的判据：`review-record.mjs` 生成的那几行，必须在每一处落点里逐字出现。
+ *
+ * **为什么必须是导出函数**：行为自检要能直接调它。复刻一份循环的断言，在判据被削成
+ * `() => true` 时照样全绿——「示例与实现不符」就再也没人拦。这条判据自己就吃过一次。
+ *
+ * **两处的分母不同，这是刻意的**：
+ *   - 审查块（`pf-review`）四本都要有——判据给人读、两份提案模板给人抄、
+ *     落盘契约给目标项目的 AI 读；
+ *   - 冻结块（`pf-done`）只要求判据、落盘契约与工作记录模板有它——它住在**工作记录**里，
+ *     提案正文只放指针。要求提案模板里也印一遍，会逼人把验收标准抄进提案，
+ *     那正好造出第二份会漂移的副本。
+ *
+ * @param {{ reader?: (rel: string) => string|undefined }} [opt] 仅供测试注入
+ * @returns {string[]} 问题清单；空数组表示一致
+ */
+export function contractSnippetIssues(opt = {}) {
+  const read = opt.reader ?? ((rel) => {
+    const p = join(SKILL_ROOT, rel)
+    return existsSync(p) ? readText(p) : undefined
+  })
+  const issues = []
+  const reviewSnippet = canonicalReviewSnippet(1)
+  const doneSnippet = canonicalDoneSnippet()
+  const check = (sites, snippet, what, hint) => {
+    for (const rel of sites) {
+      const text = read(rel)
+      if (text === undefined) { issues.push(`${rel} 不存在（机器契约的一处落点）`); continue }
+      if (!text.includes(snippet)) issues.push(`${rel}：${what}${hint}`)
+    }
+  }
+  check(CONTRACT_SITES, reviewSnippet,
+    '审查块的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— ',
+    '照着这里抄的人会写出一份机器读不到的东西。示例由 `canonicalReviewSnippet()` 生成，不要手写')
+  check(DONE_SITES, doneSnippet,
+    '冻结验收标准的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— ',
+    '示例由 `canonicalDoneSnippet()` 生成，不要手写')
+  return issues
 }
 
 /**

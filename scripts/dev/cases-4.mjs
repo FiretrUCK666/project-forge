@@ -27,8 +27,22 @@ import { executorVerdict } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
-  saysSomething, roundMarks, roundVerdict,
+  reviewBlocks, reviewFormatIssue, findRoundInComments,
 } from '../review-record.mjs'
+
+/** 造一条带字段块的审查评论：正文随便写，机器只读字段块。 */
+const reviewComment = (round, verdict, body = '正文：逐条发现写在下面。') => [
+  '## 独立审查 第 ' + String(round) + ' 轮',
+  '',
+  '```pf-review',
+  'round: ' + String(round),
+  'verdict: ' + verdict,
+  'blocking: 0',
+  'suggestions: 1',
+  '```',
+  '',
+  body,
+].join('\n')
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -573,20 +587,18 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       JSON.stringify(wrong))
 
     const st = reviewRecordState(mk('1'))
-    // 判据从「字数 ≥ 80」换成「有没有说到具体东西」，所以这条 fixture 也要说具体东西——
-    // 否则它验的是旧判据，而不是「三种轮次写法都认」这件事。
-    const cmt = (h) => `${h}\n\n审了 \`scripts/review-record.mjs\` 的判定逻辑，零阻塞，`
-      + '两条建议都在 review-record.mjs:322 那一带。'
-    const heads = ['## 第一轮独立审查 —— 通过', '## 第 1 轮 —— 通过', '## round 1 —— 通过']
-    const missAll = heads.filter((h) => !matchRoundsToComments(st, [cmt(h)]).ok)
+    // **轮次的写法不再影响判定**：机器读 `round` 字段，正文标题怎么写都行。
+    // 这一组验的是「三种标题写法下，字段块照样被读到，且结论只由 verdict 决定」。
+    const heads = ['## 第一轮独立审查', '## 第 1 轮', '## round 1']
+    const missAll = heads.filter((h) => matchRoundsToComments(st, [reviewComment(1, '通过', h)]).ok === false)
 
-    // 反向仍然成立：中文写法不该把「不通过」放过去（整词判定不能被这次改动弄坏）。
-    const stillBlocks = matchRoundsToComments(st, [cmt('## 第一轮 —— 不通过')]).ok === false
+    // 反向：**正文里写「不通过」不影响判定**——结论只看字段。
+    // 索引说「通过」、字段块说「需要返工」→ 必须拦住（ok=false）。
+    const crossBlocked = matchRoundsToComments(st, [reviewComment(1, '需要返工', '## 第 1 轮 —— 不通过')]).ok === false
 
-    check(missAll.length === 0 && stillBlocks,
-      '评论侧三种写法都认得出「第 1 轮」，而「不通过」仍然被拦住', JSON.stringify(missAll))
-    report(wrong.length === 0 && missAll.length === 0 && stillBlocks,
-      '中文数字轮次：索引侧与评论侧都认，不通过仍拦住')
+    check(missAll.length === 0 && crossBlocked,
+      '三种标题写法下字段块都读得到；索引与字段对不上要拦住', JSON.stringify(missAll))
+    report(missAll.length === 0 && crossBlocked, '评论：标题怎么写都不影响，结论只看字段')
   }
 
   // 2) 改动清单去重、排序、只留高风险。
@@ -670,8 +682,7 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     report(empty.ok === false, '评论层：空评论不算')
 
     // 评论里有一轮内容对得上 → 通过。
-    const good = '## 独立审查 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑。逐条：三条建议、'
-      + '零阻塞。文件与行都核过，判定与用例能对上，没有发现门禁被改松的地方。'
+    const good = reviewComment(1, '通过', '## 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑，零阻塞。')
     const ok = matchRoundsToComments(state, [good])
     check(ok.ok === true && ok.checked === true && ok.matched.length === 1,
       '评论里找得到那一轮且内容对得上 → 通过', JSON.stringify(ok))
@@ -686,80 +697,81 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     report(partial.ok === false, '评论层：缺一轮也算缺')
   }
 
-  // 3d) saysSomething：砍到只剩「是不是空的」。
+  // 3d) 字段块：**机器只读那几行，不读散文。**
   //
-  // 这里**故意只留三条**，而且都是**能证伪**的：把实现改成「永远返回 true」，
-  // 第一条就红；改成「永远 false」，后两条就红。
-  //
-  // 为什么不再验「写得够不够清楚」：试过七种判法，每种都误伤真结论。
-  // 边界写在 references/collaboration.md 的判据表里——**这条判据证明「有痕迹」，
-  // 不证明「审得认真」**。用例不该假装它证明了更多。
+  // 这一组是整套判据的地基。它要证明的只有一件事：
+  // **正文里怎么写，都不影响判定。**
   {
-    check(saysSomething('') === false, '空评论 → 不算（连「发过」都不算）')
-    check(saysSomething('   \n  ') === false, '只有空白 → 不算')
-    check(saysSomething('通过') === true,
-      '「通过」两个字 → 放行（写得够不够好不归机器判，见判据表里的边界说明）')
-    report(saysSomething('') === false && saysSomething('通过') === true,
-      'saysSomething：只判空不空，不判内容质量')
+    const mk = (o) => [
+      '```pf-review',
+      `round: ${o.round}`,
+      `verdict: ${o.verdict}`,
+      ...(o.blocking === undefined ? [] : [`blocking: ${o.blocking}`]),
+      ...(o.suggestions === undefined ? [] : [`suggestions: ${o.suggestions}`]),
+      '```',
+    ].join('\n')
 
-    // **stdin 只能读一次**：两个 `-` 同时给时当场报错，而不是让它跑出一个
-    // 看起来像真结论的错（「提案正文是空的」→ 判没有审查记录）。
-    {
-      const r = spawnSync(process.execPath, [
-        join(SCRIPTS_DIR, 'review-record.mjs'), '--changed', '-', '--body', '-',
-      ], { input: 'README.md\n', encoding: 'utf8', windowsHide: true })
-      check(r.status === 2, '--changed - 与 --body - 同时给 → 退出码 2（stdin 只能读一次）',
-        `status=${r.status}`)
-      check(/不能同时用/.test(String(r.stderr ?? '')), '  并且说清怎么改', String(r.stderr ?? '').slice(0, 60))
-      report(r.status === 2, '命令行：两个 stdin 同时给要拦住')
+    const one = reviewBlocks('## 独立审查 第 1 轮\n\n' + mk({ round: 1, verdict: '需要返工', blocking: 3 }))
+    check(one.blocks.length === 1 && one.blocks[0].verdict === '需要返工',
+      '正常字段块 → 读出结论', JSON.stringify(one.blocks))
+    check(one.blocks[0].blocking === 3, '  blocking 读成数字', String(one.blocks[0].blocking))
 
-  // 3e) roundVerdict 的段边界：**回指上一轮不能被切断，也不能被当成本轮结论**。
-  //
-  // 这两条实测都是**假红**（审查给的是通过，机器说没结论/说需要返工）——
-  // 而项目自己写着「留一条会误伤真结论的判据，比没有这条判据坏」。
-  {
-    const rv = roundVerdict
-    check(rv('2', '第 2 轮：第 1 轮那三条已修，通过。') === '通过',
-      '段内回指上一轮 → 不被切断（「第 1 轮那三条已修，通过」）',
-      String(rv('2', '第 2 轮：第 1 轮那三条已修，通过。')))
-    check(rv('2', '第 2 轮 —— 通过。上一轮需要返工的三条已全部修完。') === '通过',
-      '复述上一轮的结论 → 不算本轮结论',
-      String(rv('2', '第 2 轮 —— 通过。上一轮需要返工的三条已全部修完。')))
-    // 反向：真正混合的措辞仍要判红（一句里既说通过又说返工）。
-    check(rv('1', '## 第 1 轮 —— 通过。但第 1 轮又发现需要返工。') === '需要返工',
-      '同一行两个结论 → 取更严的（需要返工）',
-      String(rv('1', '## 第 1 轮 —— 通过。但第 1 轮又发现需要返工。')))
-    // 旧假绿不能回来。
-    check(rv('1', '## 第 1 轮独立审查\n\n上一版修完复核通过。本轮结论：需要返工。') === '需要返工',
-      '标题行没结论词时，不抓正文里先出现的「复核通过」',
-      String(rv('1', '## 第 1 轮独立审查\n\n上一版修完复核通过。本轮结论：需要返工。')))
-    check(rv('2', '第 1 轮 —— 通过。第 2 轮待派。') === undefined,
-      '「待派」的轮次不吃上一轮的结论', String(rv('2', '第 1 轮 —— 通过。第 2 轮待派。')))
-    report(true, 'roundVerdict：段边界与回指都验过')
+    // **正文里的措辞一律不影响判定。** 这几句正是之前九轮里每轮都会漏的那些写法。
+    const tricky = [
+      '结论：需要返工。其余 5 项静态检查通过。',
+      '需要返工，但通过不代表没问题。',
+      '需要返工。未正式通过，通不过，通过不了。',
+      '第 1 轮：第 2 轮那三条还没修。',
+      '通过。上一轮需要返工的三条已全部修完。',
+    ]
+    const wrongTricky = tricky.filter((txt) => {
+      const r = reviewBlocks(mk({ round: 1, verdict: '需要返工' }) + '\n\n' + txt)
+      return r.blocks[0]?.verdict !== '需要返工'
+    })
+    check(wrongTricky.length === 0,
+      '正文怎么写都不影响判定（5 种以前会翻面的措辞）', wrongTricky.join(' / '))
+
+    // 缺字段 / 值不对 → 报出来，不静默。
+    const bads = [
+      ['没有块', '审过了，通过。', '没有'],
+      ['verdict 不在表里', mk({ round: 1, verdict: '差不多' }), 'verdict'],
+      ['round 不是数字', mk({ round: '一', verdict: '通过' }), 'round'],
+      ['缺 round', '```pf-review\nverdict: 通过\n```', 'round'],
+    ]
+    const badWrong = bads.filter(([, txt, kw]) => {
+      const r = reviewFormatIssue(txt)
+      return r.ok !== false || !String(r.why).includes(kw)
+    })
+    check(badWrong.length === 0, '坏块都报出原因（不静默跳过）',
+      badWrong.map(([l]) => l).join(' / '))
+    report(badWrong.length === 0 && wrongTricky.length === 0, '字段块：只读字段，不读散文')
   }
 
-  // 3f) 否定写法：**列出来的每一个都要判「不通过」**，而且不能靠枚举——
-  //     每漏一种写法，方向都是「放行」。
+  // 3e) 一轮一条评论：**第 1 轮的块不认领第 2 轮**。
   {
-    const neg = ['不通过', '未通过', '没通过', '没有通过', '无通过', '非通过',
-      '不能通过', '未能通过', '无法通过', '不予通过', '未获通过', '没能通过',
-      '通不过', '拒绝通过']
-    const wrong = neg.filter((w) => roundVerdict('1', `第 1 轮 —— ${w}，三条阻塞。`) !== '不通过')
-    check(wrong.length === 0, `${neg.length} 种否定写法全部判「不通过」`, wrong.join(' / '))
-    const pos = ['通过', '已经通过', '这一版通过', '复核后通过']
-    const wrongPos = pos.filter((w) => roundVerdict('1', `第 1 轮 —— ${w}，零阻塞。`) !== '通过')
-    check(wrongPos.length === 0, `${pos.length} 种肯定写法全部判「通过」`, wrongPos.join(' / '))
-    report(wrong.length === 0 && wrongPos.length === 0, '结论词：否定与肯定两个方向都验过')
+    const cmt = (round, verdict) => ['## 独立审查', '', '```pf-review',
+      'round: ' + round, 'verdict: ' + verdict, '```', '', '正文。'].join('\n')
+    const rv1 = findRoundInComments('1', '需要返工', [cmt(1, '需要返工'), cmt(2, '通过')])
+    const rv2 = findRoundInComments('2', '通过', [cmt(1, '需要返工'), cmt(2, '通过')])
+    const cross = findRoundInComments('1', '通过', [cmt(1, '需要返工'), cmt(2, '通过')])
+    check(rv1 !== undefined, '第 1 轮找得到', String(rv1))
+    check(rv2 !== undefined, '第 2 轮找得到', String(rv2))
+    check(cross === undefined, '拿第 1 轮去找「通过」→ 找不到（不串轮）', String(cross))
+    report(rv1 !== undefined && rv2 !== undefined && cross === undefined, '评论：一条评论只认领自己那一轮')
   }
 
-  // 3g) 索引侧与评论侧**共用同一份词表**：索引里写「未通过」，那一行不能被丢掉。
+  // 3f) 索引表：结论格**只认那两个字**，不从散文里猜。
   {
-    const idx = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
-      + '| --- | --- | --- | --- |\n| 1 | a | 通过 | 0 |\n| 2 | b | 未通过 | 3 / 1 |\n'
-    const st = reviewRecordState(idx)
-    check(st.rows.length === 2, '索引侧认「未通过」，不整行丢弃', `rows=${st.rows.length}`)
-    check(st.filled === false, '  且因此判红（最后一轮不是通过）', String(st.filled))
-    report(st.rows.length === 2 && st.filled === false, '索引侧：词表与评论侧同源')
+    const st = (c) => reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
+      + `| --- | --- | --- | --- |\n| 1 | a | ${c} | 0 |\n`)
+    const notVerdict = ['待 CI 通过', '未复测，等 CI 通过后再定', '未复测（等 CI 通过）',
+      '通过率 80%', '等 CI', '未正式通过', '差不多']
+    const bad = notVerdict.filter((c) => st(c).filled !== false)
+    check(bad.length === 0, '索引格写别的 → 不算一行', bad.join(' / '))
+    const isVerdict = ['通过', '需要返工']
+    const bad2 = isVerdict.filter((c) => st(c).rows.length !== 1)
+    check(bad2.length === 0, '索引格写那两个词 → 算一行', bad2.join(' / '))
+    report(bad.length === 0 && bad2.length === 0, '索引表：结论格只认那两个字')
   }
 
   // 3h) 高风险表的四态。
@@ -779,8 +791,6 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(wrong.length === 0, '四态：noTable / notFilled / partialFill / filled 都对',
       wrong.map(([l, g, w]) => `${l}: ${g} 应 ${w}`).join(' / '))
     report(wrong.length === 0, '高风险表：四态与两种占位写法都验过')
-  }
-    }
   }
 
   // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。
@@ -804,7 +814,7 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
   // 给了正文还不算：**评论那一层必须也对得上**。这两条用例成对存在——
   // 少一条，就等于允许「只填正文、评论一条不发」通过，而那正是这次返工要治的病。
   const commentsPath = join(dir2, 'comments.md')
-  writeFileSync(commentsPath, '## 独立审查 第 1 轮 —— 通过\n\n'
+  writeFileSync(commentsPath, reviewComment(1, '通过', '## 第 1 轮 —— 通过\n\n') + '\n'
     + '审了 scripts/ 下的判定逻辑。逐条：三条建议、零阻塞。文件与行都核过，'
     + '判定与用例能对上，没有发现门禁被改松的地方。\n', 'utf8')
 

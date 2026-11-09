@@ -321,111 +321,6 @@ function stripComments(text) {
   return out
 }
 
-/**
- * 提案正文里有没有**真的填过**的审查记录。
- *
- * 判据是**三样同时成立**：轮次、审查者、结论。
- *
- * 不是「有字就算填过」。实测三种「填了但没审」都能骗过只看有无的版本：
- *   |  |  |  |  |            空行
- *   | 1 |  |  |  |            只有轮次
- *   审查记录：无              一句口令
- *
- * 审查记录的作用是让漏审**事后可核对**，一句口令核对不了任何东西——它给了一条看起来
- * 像保证的假痕迹，比没有更坏。所以「本档不需要审查」这类自称**不算填过**：免审是机器
- * 按改动路径算出来的，不是人写的一句话。
- *
- * 最后一条结论必须是「通过」。前面写着「需要返工」而后来的轮次没补，说明还没修完；
- * 机器只认最后一条结论，因为那才是当前状态。
-  */
-export function reviewRecordState(body) {
-  const text = String(body ?? '')
-  const visible = stripComments(text)
-  const head = /^##[ \t]*审查记录[ \t]*$/m.exec(visible)
-  if (head === null) return { filled: false, section: false, rows: [], why: '正文里没有「## 审查记录」这一节' }
-  const after = visible.slice(head.index + head[0].length)
-  const nextHead = /^##[ \t]/m.exec(after)
-  const body2 = nextHead === null ? after : after.slice(0, nextHead.index)
-  const lines = body2.split(/\r?\n/).map((l) => l.trim())
-
-  const isSeparator = (l) => /^\|[\s:|-]+\|$/.test(l) && l.includes('-')
-  const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim())
-
-  // 有效的一行长这样：| 1 | sub-audit-xyz | 通过 | 0 / 2 |
-  //
-  // **判据不是「有字」**。实测三种「填了但没审」都能骗过只看有无的版本：
-  //   |  |  |  |  |            空行
-  //   | 1 |  |  |  |            只有轮次
-  //   审查记录：无              一句口令
-  // 审查记录的作用是让漏审**事后可核对**，一句口令核对不了任何东西——它给了一条
-  // 看起来像保证的假痕迹，比没有更坏。所以这里要求三样同时成立：
-  //   - 轮次是数字或「第 N 轮」；
-  //   - 审查者那一格非空（它是「另一个上下文」的标识，正是要留档的东西）；
-  //   - 结论是「通过」或「需要返工」之一。
-  // **索引侧和评论侧共用同一份词表与同一处归一化。**
-  //
-  // 原先这里是另一条正则，只有五个词，而且认不出就整行丢弃——审查员写「未通过」，
-  // 那一行等于没写，「最后一轮」回落成上一行的「通过」，门禁放行。
-  // 两处各有一份词表，迟早给出两个答案。
-  const firstVerdict = (cell) => {
-    const hits = verdictHits(cell)
-    return hits.length > 0 ? hits[0].verdict : undefined
-  }
-  // 轮次认三种写法：阿拉伯数字、阿拉伯数字带「第…轮」、中文数字带「第…轮」。
-  // 认不认一种写法，不该决定一条记录算不算数——那属于误伤正当写法。
-  const roundLike = (c) => /^(\d+|第\s*\d+\s*轮|第\s*[零一二三四五六七八九十]+\s*轮)$/.test(c)
-  const roundNumber = (c) => {
-    const ar = /(\d+)/.exec(c)
-    if (ar !== null) return ar[1]
-    const cn = /[零一二三四五六七八九十]+/.exec(c)
-    return cn === null ? c : (cnNum(cn[0]) ?? c)
-  }
-  const rows = []
-  for (const line of lines) {
-    if (line === '' || isSeparator(line)) continue
-    if (!line.startsWith('|')) continue
-    const c = cells(line)
-    if (c.length < 3) continue
-    if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
-    const verdict = firstVerdict(c[2] ?? '')
-    if (!roundLike(c[0]) || c[1] === '' || verdict === undefined) continue
-    rows.push({
-      round: roundNumber(c[0]),
-      who: c[1],
-      verdict,
-      note: c[3] ?? '',
-    })
-  }
-
-  if (rows.length === 0) {
-    return {
-      filled: false,
-      section: true,
-      rows,
-      why: '「审查记录」里没有一行是有效的审查记录（要轮次 + 审查者 + 结论三样齐全，'
-        + '结论写「通过」或「需要返工」）——只写「无」「已审」这类口令不算',
-    }
-  }
-
-  // **最后一轮必须是「通过」**。前面写着「需要返工」而后来的轮次没补，说明还没修完；
-  // 机器只认最后一条结论，因为那才是当前状态。
-  //
-  // **按轮次号取，不按表格行序**：表格行可以写反（先写第 2 轮、后写第 1 轮），
-  // 而行序不代表时间顺序。按行序判会误判方向——执行者已经按轮次修完了，
-  // 却因为行写反了被卡住。
-  const last = [...rows].sort((a, b) => Number(a.round) - Number(b.round)).pop()
-  if (!/^通过$/.test(last.verdict)) {
-    return {
-      filled: false,
-      section: true,
-      rows,
-      why: `最后一轮（第 ${last.round} 轮）的结论是「${last.verdict}」——`
-        + '改完要重新派一个上下文再审一轮，并把那一轮的结论也写进表里',
-    }
-  }
-
-  return { filled: true, section: true, rows, why: `${rows.length} 轮审查记录，最后一轮通过` }
-}
 
 /**
  * 评论里有没有**某一轮**的审查结论。
@@ -451,259 +346,210 @@ export function reviewRecordState(body) {
  * 按长度降序匹配，「不通过」先吃掉那四个字，「通过」就没有位置可占了。
  */
 /** 中文数字换算。只用到二十几轮——再往上没人会把轮次写成中文。 */
+/**
+ * 评论里那段机器读的字段块。
+ *
+ * 形状（围栏语言必须写 `pf-review`，一行一个 `key: value`）：
+ *
+ * ```
+ * ```pf-review
+ * round: 1
+ * verdict: 通过
+ * blocking: 0
+ * suggestions: 2
+ * ```
+ * ```
+ *
+ * **为什么是字段，不是散文。** 九轮审查的严重问题 100% 落在「判断中文结论词」那 247 行里，
+ * 而那块只做一件事：判断「通过」到底是哪个意思。中文里「否定的通过」写法列不完——
+ * 不通过 / 未通过 / 没有通过 / 不能通过 / 通不过 / 通过不了 / 不算通过 / 未正式通过 /
+ * 未能顺利通过 / 尚未通过……每漏一种，方向都是**放行**。
+ *
+ * 那不是在修判据，是在追措辞。**判据的输入形状才是根**：让机器读字段，它就不必理解中文。
+ * 正文照旧随便写，人读人的，机器读机器的。
+ *
+ * 字段缺哪个都算不合格：宁可报「格式不对、按模板写」，也不要猜。
+ */
+
+/** 中文数字换算，只服务索引表格里的轮次格（「第一轮」）。 */
 const CN_DIGITS = '零一二三四五六七八九十'
+
+/**
+ * 中文数字 → 阿拉伯数字。只到「二十几」——再往上没人把轮次写成中文。
+ * 返回 undefined 表示这不是一个能认的中文数字。
+ */
 function cnNum(s) {
-  if (s.length === 1) return String(CN_DIGITS.indexOf(s))
-  if (s.startsWith('十')) return String(10 + CN_DIGITS.indexOf(s[1]))
-  const [a, b] = s.split('十')
-  const tens = CN_DIGITS.indexOf(a)
-  return String(tens * 10 + (b === undefined || b === '' ? 0 : CN_DIGITS.indexOf(b)))
+  const t = String(s ?? '')
+  if (t === '') return undefined
+  const ten = t.indexOf('十')
+  if (ten < 0) {
+    const i = CN_DIGITS.indexOf(t)
+    return i < 0 ? undefined : String(i)
+  }
+  const high = t.slice(0, ten)
+  const low = t.slice(ten + 1)
+  const a = high === '' ? 1 : CN_DIGITS.indexOf(high)
+  const b = low === '' ? 0 : CN_DIGITS.indexOf(low)
+  if (a < 0 || b < 0) return undefined
+  return String(a * 10 + b)
 }
 
+/** 围栏语言。用 `pf-review` 而不是纯 ```，是为了和普通代码块区分开。 */
+const FIELD_FENCE = 'pf-review'
+
+/** 允许的结论词。**只有这两档**——第三档会带来「多严算严」这种没人能判的问题。 */
+const VERDICTS = ['通过', '需要返工']
+
 /**
- * 把一段文字里的**轮次**解析出来，返回 `[{ index, round }]`。
+ * 从一段文字里抠出所有字段块。
  *
- * 宽容的是**写法**（阿拉伯数字、中文数字都认），不宽容的是**语义**——
- * 一条评论写了第 2 轮，它就只认领第 2 轮。
- *
- * 这条函数存在的原因是一条实测过的洞：原先用
- * `第\s*(?:${round}|[零一二三四五六七八九十]+)\s*轮` 这个正则找「第 N 轮」，
- * 而那个中文数字分支是**通配符**——它匹配任意中文数字，于是对任何目标轮次都成立。
- * 结果是一条写「第二轮」的评论同时被算成第 1、2、3 轮的痕迹，
- * 「每一轮都要有痕迹」这条判据退化成「发过任意一条像样的评论」。
+ * 返回 `[{ round, verdict, blocking, suggestions, at, raw }]`，按出现顺序。
+ * 字段不合法（缺 key、结论词不在表里、round 不是正整数）**整个块作废**并计入 `broken`——
+ * 半对的块比没有更坏：它看起来像一条记录。
  */
-export function roundMarks(text) {
+export function reviewBlocks(text) {
   const s = String(text ?? '')
   const out = []
-  // 阿拉伯数字：第 1 轮 / 第1轮 / #1 轮 / round 1
-  for (const m of s.matchAll(/(?:第|#)\s*(\d+)\s*轮|round\s*(\d+)\b/gi)) {
-    const num = m[1] ?? m[2]
-    if (num !== undefined) out.push({ index: m.index ?? 0, round: String(Number(num)) })
-  }
-  // 中文数字：第一轮 / 第十二轮
-  for (const m of s.matchAll(/第\s*([零一二三四五六七八九十]+)\s*轮/g)) {
-    const num = cnNum(m[1])
-    if (num !== undefined) out.push({ index: m.index ?? 0, round: String(Number(num)) })
-  }
-  return out.sort((a, b) => a.index - b.index)
-}
-const VERDICT_TOKENS = [
-  ['需要返工', '需要返工'],
-  ['需要修改', '需要返工'],
-  ['需返工', '需要返工'],
-  ['通不过', '不通过'],
-  ['通过', '通过'],
-]
-
-/**
- * 「通过」这个词，在这里到底是通过还是不通过。
- *
- * **不靠枚举否定词。** 中文里「否定的通过」写法列不完：不通过、未通过、没通过、无通过、
- * 非通过、不能通过、不予通过、未获通过、没能通过、没有通过、通不过……实测每补一批就漏一批，
- * 而合并正则里裸「通过」是交替项之一，**每漏一种写法，方向都是放行**。
- *
- * 判结构：
- *   一、**前面紧挨着否定词**（「不」「未」「没」「无」「非」「否」「难」「拒」之一，
- *       允许中间夹一个「能」「予」「获」「有」这类助词）→ 不通过；
- *   二、**后面紧跟「不」**（「通不过」）→ 不通过；
- *   三、其余 → 通过。
- *
- * 这样「未能通过」「不能通过」「不予通过」「未获通过」「没能通过」「没有通过」
- * 全部自动覆盖，不需要逐个登记。
- */
-function negatedThrough(text, index) {
-  const before = String(text).slice(Math.max(0, index - 4), index)
-  // 一、前面是否定词，允许夹一个助词：不能 / 未能 / 不予 / 未获 / 没能 / 没有 / 无法 / 不
-  if (/(?:不|未|没|无|非|否|难|拒)(?:能|予|获|有|会|得|被|可|法|绝)?$/.test(before)) return true
-  // 二、后面紧跟「不」：通不过
-  if (String(text).slice(index + 2, index + 3) === '不') return true
-  return false
-}
-
-/**
- * 把一段文字里出现的结论词**全部**找出来，规范化成「通过 / 不通过 / 需要返工」。
- *
- * 用一条合并正则一次扫完：交替项按长度降序，所以同一个位置上长的优先。
- * 这样「不通过」只会产出「不通过」，不会顺带产出一个假的「通过」。
- */
-/**
- * 把一段文字里出现的结论词**连同位置**一起找出来。
- *
- * 返回 `[{ word, verdict, index }]`，按出现顺序。
- *
- * **必须带位置。** 只返回「出现过哪些词」的版本实测出过事：一句话里既写「需要返工」
- * 又写「修完再复核通过」，两边都算数，于是索引填「通过」就能骗过这一层。而那种措辞
- * 在审查意见里极自然，不需要任何人动坏心思。
- */
-export function verdictHits(text) {
-  const s = String(text ?? '')
-  const source = VERDICT_TOKENS.map(([word]) => word).join('|')
-  const out = []
-  for (const m of s.matchAll(new RegExp(source, 'g'))) {
-    const hit = VERDICT_TOKENS.find(([word]) => word === m[0])
-    if (hit === undefined) continue
-    const index = m.index ?? 0
-    // 「通过」要看上下文才能定：前面是否定词、或后面跟「不」，都是不通过。
-    const verdict = m[0] === '通过' && negatedThrough(s, index) ? '不通过' : hit[1]
-    out.push({ word: m[0], verdict, index })
-  }
-  return out
-}
-
-/** 这段文字里出现过哪些结论（去重）。给报告与用例用，**判定不用它**。 */
-export function verdictsIn(text) {
-  return new Set(verdictHits(text).map((h) => h.verdict))
-}
-
-/** 越靠前越严。两个词并列时取更严的那个——「一句话里既说通过又说返工」不能读成通过。 */
-const SEVERITY = { '需要返工': 0, '不通过': 1, '通过': 2 }
-
-/**
- * 一条评论里，**关于这一轮**的结论是什么。
- *
- * 判「结论位」不判「出现过」：
- *   1. 找出所有轮次标记的位置；
- *   2. 找出所有结论词的位置；
- *   3. 取**离轮次标记最近**的那个结论词所在的行；该行里若有两个不同的结论词，
- *      取更严的那个（一句话里既说通过又说返工，唯一安全的读法是「没有明确通过」）；
- *   4. 行里没有结论词时，退到「轮次之后最近的那一个」。
- *
- * 返回 undefined 表示这条评论没有针对这一轮给出结论。
- */
-export function roundVerdict(round, text) {
-  const s = String(text ?? '')
-  const marks = roundMarks(s)
-  const mine = marks.filter((m) => m.round === String(Number(round)))
-  if (mine.length === 0) return undefined
-
-  const hits = verdictHits(s)
-  if (hits.length === 0) return undefined
-
-  const lineStartOf = (idx) => {
-    const before = s.lastIndexOf('\n', idx)
-    return before < 0 ? 0 : before + 1
-  }
-  const lineEndOf = (idx) => {
-    const after = s.indexOf('\n', idx)
-    return after < 0 ? s.length : after
-  }
-  const atLineStart = (idx) => /^[ \t#>*\-]*$/.test(s.slice(lineStartOf(idx), idx))
-
-  // **时间回指**：被这几个词修饰的结论词，说的是以前的轮次，不是本轮的结论。
-  //
-  // 实测：`第 2 轮 —— 通过。上一轮需要返工的三条已修完。` 里「需要返工」是对
-  // 上一轮的复述，而它是段内更严的那个，于是本轮被判成需要返工——**假红**。
-  // 这不是「否定词枚举」那一类，它是结构信号：那句话在讲过去。
-  const PAST_REF = /(?:上一[轮版次]|上轮|前一轮|前一版|此前|之前|原先|原来|上次)\s*$/
-  const notPastRef = (h) => !PAST_REF.test(s.slice(Math.max(0, h.index - 8), h.index))
-
-  // 段边界只认**行首**的轮次标记：句中的「第 1 轮」是回指，不是一个新段。
-  const boundary = marks.filter((m) => atLineStart(m.index)).map((m) => m.index)
-
-  let result
-  for (const mark of mine) {
-    const declared = atLineStart(mark.index)
-
-    if (declared) {
-      // 一、**轮次 + 结论写在那一行**是最标准的形状，先看这一行。
-      const from = lineStartOf(mark.index)
-      const to = lineEndOf(mark.index)
-      const onLine = hits.filter((h) => h.index >= from && h.index <= to && notPastRef(h))
-      if (onLine.length > 0) {
-        // 同一行里既说通过又说返工时取更严的：一句话里两个结论，唯一安全的读法是
-        // 「它没有明确通过」。
-        const v = onLine.reduce((a, b) => (SEVERITY[a.verdict] <= SEVERITY[b.verdict] ? a : b)).verdict
-        result = result === undefined || SEVERITY[v] < SEVERITY[result] ? v : result
-        continue
-      }
+  const broken = []
+  const re = new RegExp('```' + FIELD_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
+  for (const m of s.matchAll(re)) {
+    const fields = new Map()
+    for (const line of m[1].split(/\r?\n/)) {
+      const t = line.trim()
+      if (t === '') continue
+      const kv = /^([A-Za-z][A-Za-z0-9_-]*)\s*[:：]\s*(.*)$/.exec(t)
+      if (kv === null) { broken.push({ raw: m[0], why: `这一行不是「键: 值」：${t}` }); continue }
+      fields.set(kv[1].toLowerCase(), kv[2].trim())
     }
-
-    // 二、那一行没有（或这个标记在句中）：取**从它到下一个行首标记之前**的第一个结论词。
-    const next = boundary.filter((x) => x > mark.index)
-    const segEnd = next.length > 0 ? Math.min(...next) : s.length
-    const segFrom = declared ? lineEndOf(mark.index) : mark.index
-    const inSeg = hits.filter((h) => h.index > segFrom && h.index < segEnd && notPastRef(h))
-    if (inSeg.length === 0) continue
-    // 段内取**最后一个**：结论常常写在解释之后（`……本轮结论：需要返工`）。
-    const v = inSeg[inSeg.length - 1].verdict
-    result = result === undefined || SEVERITY[v] < SEVERITY[result] ? v : result
+    const round = fields.get('round')
+    const verdict = fields.get('verdict')
+    if (round === undefined || !/^\d+$/.test(round)) {
+      broken.push({ raw: m[0], why: 'round 缺失或不是数字（要从 1 起）' })
+      continue
+    }
+    if (verdict === undefined || !VERDICTS.includes(verdict)) {
+      broken.push({ raw: m[0], why: `verdict 只能是 ${VERDICTS.join(' / ')}，读到的是「${verdict ?? ''}」` })
+      continue
+    }
+    const num = (k) => {
+      const v = fields.get(k)
+      return v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined
+    }
+    out.push({
+      round: String(Number(round)),
+      verdict,
+      blocking: num('blocking'),
+      suggestions: num('suggestions'),
+      at: fields.get('at'),
+      raw: m[0],
+    })
   }
-  return result
+  return { blocks: out, broken }
 }
 
+/**
+ * 正文「## 审查记录」那一节的索引行。
+ *
+ * 形状：`| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |`，结论格**只认那两个字**。
+ *
+ * 这里不需要猜语义——索引是**表格**，一格就是一个值。散文里那些歧义
+ * （「待 CI 通过」「通过率 80%」）在表格里不存在，因为它们不会出现在「结论」那一格。
+ */
+export function reviewRecordState(body) {
+  const text = String(body ?? '')
+  const visible = stripComments(text)
+  const head = /^##[ \t]*审查记录[ \t]*$/m.exec(visible)
+  if (head === null) return { filled: false, section: false, rows: [], why: '正文里没有「## 审查记录」这一节' }
+  const after = visible.slice(head.index + head[0].length)
+  const nextHead = /^##[ \t]/m.exec(after)
+  const body2 = nextHead === null ? after : after.slice(0, nextHead.index)
+
+  const isSeparator = (l) => /^\|[\s:|-]+\|$/.test(l) && l.includes('-')
+  const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim())
+  const roundLike = (c) => /^(\d+|第\s*\d+\s*轮|第\s*[零一二三四五六七八九十]+\s*轮)$/.test(c)
+  const roundNumber = (c) => {
+    const ar = /(\d+)/.exec(c)
+    if (ar !== null) return ar[1]
+    const cn = /[零一二三四五六七八九十]+/.exec(c)
+    return cn === null ? c : (cnNum(cn[0]) ?? c)
+  }
+
+  const rows = []
+  for (const line of body2.split(/\r?\n/).map((l) => l.trim())) {
+    if (line === '' || isSeparator(line)) continue
+    if (!line.startsWith('|')) continue
+    const c = cells(line)
+    if (c.length < 3) continue
+    if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
+    // **结论格只认那两个字。** 表格一格就是一个值，不需要从散文里猜。
+    const verdict = VERDICTS.find((v) => c[2] === v) ?? VERDICTS.find((v) => c[2] === v)
+    if (!roundLike(c[0]) || c[1] === '' || verdict === undefined) continue
+    rows.push({ round: roundNumber(c[0]), who: c[1], verdict, note: c[3] ?? '' })
+  }
+
+  if (rows.length === 0) {
+    return {
+      filled: false,
+      section: true,
+      rows,
+      why: '「审查记录」里没有一行是有效的（要轮次 + 审查者 + 结论三样齐全，'
+        + '结论格只写「' + VERDICTS.join('」或「') + '」）——只写「无」「已审」这类口令不算',
+    }
+  }
+
+  // 最后一轮必须是「通过」。**按轮次号取**，不按表格行序——行序不代表时间顺序。
+  const last = [...rows].sort((x, y) => Number(x.round) - Number(y.round)).pop()
+  if (last.verdict !== '通过') {
+    return {
+      filled: false,
+      section: true,
+      rows,
+      why: `最后一轮（第 ${last.round} 轮）的结论是「${last.verdict}」——`
+        + '改完要重新派一个上下文再审一轮，并把那一轮的结论也写进表里',
+    }
+  }
+  return { filled: true, section: true, rows, why: `${rows.length} 轮审查记录，最后一轮通过` }
+}
+
+/**
+ * 平台评论里有没有**这一轮**的字段块，结论对不对得上。
+ *
+ * 判据只有两条：
+ *   一、找到 `round: N` 且 N 等于目标轮次的块；
+ *   二、那个块的 `verdict` 等于期望的结论。
+ *
+ * **不读散文。** 评论正文怎么写都行——「需要返工，其余检查通过」这句话里
+ * 机器看到的只有字段块，所以它不会把「通过」认错。
+ */
 export function findRoundInComments(round, verdict, comments) {
   const list = Array.isArray(comments) ? comments : []
   for (const c of list) {
     const text = typeof c === 'string' ? c : String(c?.body ?? '')
-    // **这条评论提到了这一轮吗**——按解析出来的轮次号判，不按通配正则判。
-    if (!roundMarks(text).some((m) => m.round === String(Number(round)))) continue
-    // **判「这一轮的结论是什么」，不判「文中出现过这个词没有」。**
-    // 后者实测能被一句话洗绿：「需要返工……修完之后复核通过再合并」里两个词并存。
-    const conclusion = roundVerdict(round, text)
-    if (conclusion === undefined || conclusion !== verdict) continue
-    if (!saysSomething(text)) continue
-    return text.trim().slice(0, 80).replace(/\s+/g, ' ')
+    const { blocks } = reviewBlocks(text)
+    for (const b of blocks) {
+      if (b.round !== String(Number(round))) continue
+      if (b.verdict !== verdict) continue
+      return text.trim().slice(0, 80).replace(/\s+/g, ' ')
+    }
   }
   return undefined
 }
 
 /**
- * 这条评论有没有说出**具体的东西**。
+ * 这条评论的**格式**对不对——不是「写得好不好」，是「机器能不能读」。
  *
- * 原先判的是「字数 ≥ 80」。长度不是「说清了」的代理：一条 76 字、写明了文件与行的
- * 真结论会被拒，而 200 字「审过了，整体没问题，质量不错，继续努力」会被放过。
- * 实测过：76 字的完整结论被拒绝，88 字的同一形状放行——差两个字符，判据就翻面。
- *
- * 换成判**形状**：审查结论的形状是「说到了具体的地方」。满足任一条就算说清了：
- *   - 提到文件或路径（带扩展名 / 带斜杠 / 反引号包着的标识符）
- *   - 提到行号（`L12`、`:34`、「第 5 行」）
- *   - 明确写了零阻塞（「零阻塞」「没有阻塞」「没发现问题」这类）
- *
- * 三条都不是「长」，而是「有内容」。长度下限仍然留一个很低的兜底（12 字），
- * 拦的是「通过」「第 1 轮：通过」这种一句话交差。
+ * 返回 `{ ok, blocks, broken }`。`broken` 非空时，调用方要把原因报出来：
+ * 半对的块比没有更坏，它看起来像一条记录，而机器读不到。
  */
-/**
- * 这条评论够不够格算一次审查痕迹。
- *
- * ## 这个函数只判一件事：**是不是空的**
- *
- * 「写得够不够清楚」不归它判，理由是试过七种判法都不成立：
- *
- *   一、字数 ≥ 80：76 字的真结论被拒，200 字废话放行。
- *   二、关键词（文件 / 行号 / 零阻塞）：三种「审得认真、只是没点名文件」被误伤。
- *   三、去掉表态词后看剩多少：应放行的是 6～35，应拒绝的是 6～8，**中间交叉**。
- *   四、顿号列举：纯附和（「质量不错，继续努力，保持水平」）也带顿号。
- *   五、两句以上：中文长句用逗号连接，真结论与纯附和**都只有一句**。
- *   六、加排空词：中文没有空格分隔，两边剩余片段数都是 1，分不开。
- *   七、扩展名白名单：漏了 Java / Kotlin / C# / Ruby / PHP / shell / SQL / HTML / C，
- *       而这些正是这个 skill 明写支持的栈。
- *
- * 共同点：都在拿「文本的形状」代理「有没有内容」。纯附和能换个说法，真结论可以很短。
- *
- * ## 为什么砍掉比留着好
- *
- * 留一条会**误伤真结论**的判据，比没有这条判据坏：误伤让人以为自己做错了，
- * 然后去补一条本来就该合格的评论，而真原因（措辞没命中词表）永远不会被发现。
- *
- * 边界写在 项目的协作规范 的判据表里：**这条判据证明「有一轮审查发生过、
- * 结论发成了评论」，不证明「审得认真」。** 后者靠纪律，机器判不了——
- * 同样的话也适用于「审的人不能是执行者」。
- */
-export function saysSomething(text) {
-  // 只排掉**空评论**：那连「发过」都不算。其余一律放行。
-  return String(text ?? '').trim() !== ''
+export function reviewFormatIssue(text) {
+  const { blocks, broken } = reviewBlocks(text)
+  if (broken.length > 0) return { ok: false, blocks, broken, why: broken[0].why }
+  if (blocks.length === 0) {
+    return { ok: false, blocks, broken, why: '没有 ```pf-review 字段块' }
+  }
+  return { ok: true, blocks, broken }
 }
 
-/**
- * 把「正文索引」与「平台评论」对起来。
- *
- * 这一层是这次返工的核心：契约里写着「每轮结论写回提案评论」，而判据一直只看正文，
- * 于是**评论一条不发也能全绿**。实测发生过——两轮审查跑完，PR 上评论数是 0。
- *
- * 返回 `{ ok, problems, matched }`。`comments` 为 undefined 表示调用方没提供评论
- * （本地跑就是这样）；此时**不判评论那一层**，并在报告里明说「只核了正文」——
- * 「没查」与「查过没问题」必须分得开。
- */
 export function matchRoundsToComments(state, comments) {
   if (!Array.isArray(comments)) {
     return { ok: true, checked: false, problems: [], matched: [] }
@@ -714,8 +560,9 @@ export function matchRoundsToComments(state, comments) {
     const hit = findRoundInComments(row.round, row.verdict, comments)
     if (hit === undefined) {
       problems.push(`第 ${row.round} 轮（${row.who}，${row.verdict}）在提案评论里找不到 —— `
-        + '正文里那一行只是索引，结论要作为评论发出去。没有评论就没有可核对的痕迹，'
-        + '而「我审过了」在事后无从核对')
+        + '正文里那一行只是索引，结论要以 ```pf-review 字段块的形式作为评论发出去。'
+        + '没有那个块就没有可核对的痕迹，而「我审过了」在事后无从核对。'
+        + '格式见 references/collaboration.md 的「审查结论怎么写」一节')
     } else {
       matched.push({ round: row.round, sample: hit })
     }
@@ -953,7 +800,18 @@ function missingHelp(high, state) {
     `  原因：${state.why}`,
     '',
     '  怎么办：派一个**新上下文**去审（子代理或新会话），只给材料清单、不给执行者思路；',
-    '  把它给出的结论**写成评论发上去**，再把那一行填进「## 审查记录」当索引。',
+    '  把它给出的结论**按下面的格式写成一条评论发上去**，再把那一行填进「## 审查记录」当索引：',
+    '',
+    '    ```pf-review',
+    '    round: 1',
+    '    verdict: 通过',
+    '    blocking: 0',
+    '    suggestions: 2',
+    '    ```',
+    '',
+    '  **为什么是字段块**：机器只读这几行，正文随便写。中文里「否定的通过」写法列不完',
+    '  （不通过 / 通不过 / 通过不了 / 未正式通过 …），让机器读散文，每漏一种就放行一次。',
+    '  人读正文、机器读字段，两边互不干扰。',
     '',
     '  **CI 绿不等于审过**：门禁判的是「现有检查有没有过」，审查判的是「这次改动有没有让',
     '  检查本身变松」。这两件事完全正交，前者绿了不代表后者做过。',

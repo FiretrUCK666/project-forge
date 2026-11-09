@@ -139,6 +139,60 @@ export const LANDED_SCRIPTS = Object.freeze([
   'scripts/review-record.mjs',
 ])
 
+// ── 模板 ↔ 本仓库实例 ─────────────────────────────────────────────
+//
+// 这一组治的是一种特定的病：**同一段内容写在两处，靠人记得同步**。
+//
+// 病的形状可测量：九对「落盘模板 ↔ 本仓库实例」全都存在，但其中八对没有任何机器检查；
+// 而同一份机制的文字在 `AGENTS.md`、`references/`、`templates/` 里各写了一遍。
+// 结果是每改一次机制就多出一次不一致，而「下一轮审查指出上一轮的不一致」正好能让
+// 任何循环永不收敛——每次修改都在给自己造新问题。
+//
+// **审查循环自己的机器契约不在这里**：它是 `scripts/review-record.mjs`，因为那份文件
+// 要整个复制进目标项目、必须零依赖单文件。格式的东西只有一个来源，就是那个解析器本身。
+
+/**
+ * `templates/` 下的文件落在本仓库的哪一处。
+ *
+ * **完整性由目录驱动，不靠这张表**：`preflight.mjs` 要求 `templates/` 下每个文件
+ * 要么在这里，要么在 `TEMPLATE_NO_INSTANCE` 里。新增模板不登记就红——所以它不可能漏。
+ * 这张表只回答「落在哪」，不负责「有没有漏」。
+ *
+ * 这就是本项目已经验证过两次的做法：用户包边界由 `.gitattributes` + 真跑 `git archive`
+ * 决定，自用脚本位置由 `scripts/dev/` 整目录规则决定。**清单会漏，结构规则不会。**
+ */
+export const TEMPLATE_INSTANCES = Object.freeze({
+  'contributing.md': 'CONTRIBUTING.md',
+  'readme.md': 'README.md',
+  'release-spec.md': 'RELEASING.md',
+  'agents-project.md': 'AGENTS.md',
+  // 内核不是整份对拷：它被注入 `AGENTS.md` 的标记区之间。
+  'agents-kernel.md': 'AGENTS.md',
+  'work-item.md': 'docs/work/',
+  'pull-request-template.md': '.github/pull_request_template.md',
+  'issue-bug-report.md': '.github/ISSUE_TEMPLATE/bug_report.md',
+  'issue-feature-request.md': '.github/ISSUE_TEMPLATE/feature_request.md',
+  'ci-check.yml': '.github/workflows/check.yml',
+  'ci-release.yml': '.github/workflows/release.yml',
+})
+
+/**
+ * 不落在本仓库任何一处的模板：**许可证全文**。
+ *
+ * 它们是给目标项目取用的，本仓库自己的许可证是其中一个的具体实例（年份与持有人已填），
+ * 逐字比对没有意义——占位符本来就要被替换掉。
+ *
+ * 这张表必须显式列出，不靠「没登记就算豁免」：那样新增一个模板忘了登记也会静默通过，
+ * 而这正是要拦的。
+ */
+export const TEMPLATE_NO_INSTANCE = Object.freeze([
+  'license-mit.txt',
+  'license-isc.txt',
+  'license-bsd-2-clause.txt',
+  'license-bsd-3-clause.txt',
+  'license-unlicense.txt',
+])
+
 /**
  * 生态专属门禁的**唯一实现位置**。
  *

@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { executorVerdict, templateRegistrationIssues, contractSnippetIssues } from './preflight.mjs'
+import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -907,6 +907,22 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(noDone.status === 1 && /没有冻结的验收标准/.test(noDone.stderr ?? ''),
       '工作记录里没有冻结的 `pf-done` 块 → 退出码 1', label(noDone))
     report(noDone.status === 1, '端到端：没冻结标准拦下')
+
+    // **两条轨道**：正文里有 `Fixes #N` 时，报告必须点名那个编号，提醒两边都留言。
+    // 没有时不该出现那句——否则它变成每次都说的一句话，说多了就没人读了。
+    writeFileSync(join(d, 'body-issue.md'),
+      ['## 实现依据', '', '无需设计文档：修判定笔误', '', '工作记录: ' + recRel, '', 'Fixes #42', ''].join('\n'), 'utf8')
+    const withIssue = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-issue.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(withIssue.status === 0 && /有单轨道.*#42/.test(withIssue.stdout ?? ''),
+      '正文写了 Fixes #42 → 报告提醒两边都留言，并点名 #42', label(withIssue))
+    report(withIssue.status === 0 && /有单轨道/.test(withIssue.stdout ?? ''), '轨道：有单轨道时提醒')
+
+    const noIssue = cli(['--root', d, '--changed', changedPath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes'])
+    check(!/有单轨道/.test(noIssue.stdout ?? ''),
+      '正文没关联问题时，不该冒出那句提醒（每次都说的提醒等于没说）', label(noIssue))
+    report(!/有单轨道/.test(noIssue.stdout ?? ''), '轨道：无单轨道时安静')
   }
 
   // 5) **判据本体必须被直接调用，不能复刻。**
@@ -935,6 +951,21 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(phantom.length > 0, '模板登记判据：登记了不存在的模板 → 必须报出来',
       JSON.stringify(phantom))
     report(phantom.length > 0, '判据本体：幻影条目会报')
+
+    // 条件块的理由：每个 `pf:if` 上方都要有一句「不适用时不出现……」。
+    // 判据同样导出成函数，断言直接调它——理由与上面两条相同。
+    const tplText = readFileSync(join(SKILL_ROOT, 'templates/agents-project.md'), 'utf8')
+    const short = templateIfReasons(tplText)
+    check(short.length === 0, '条件块理由：模板里每个 pf:if 上方都有 → 空清单',
+      JSON.stringify(short.slice(0, 5)))
+    report(short.length === 0, '条件块：理由都在')
+
+    // 反向：抹掉一条理由，判据必须报出来（且指出是哪一行）。
+    const stripped = tplText.replace(/\n<!-- 为什么有这一条：[^\n]*-->\n/g, '\n')
+    const caught = templateIfReasons(stripped)
+    check(caught.length > 0 && typeof caught[0] === 'number',
+      '条件块理由：抹掉理由 → 必须报出来并给出行号', JSON.stringify(caught.slice(0, 3)))
+    report(caught.length > 0, '条件块：抹掉会报')
   }
 
 }

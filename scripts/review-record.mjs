@@ -1067,6 +1067,18 @@ function main(argv) {
 
   process.stdout.write(`审查记录：成立（${outcome.why}）。本次动到 ${high.length} 处高风险路径。\n`)
   process.stdout.write(`冻结的标准 ${done.ids.size} 条；审查 ${reviews.rounds.length} 轮${waived ? '（带豁免）' : ''}。\n`)
+
+  // **两条轨道**：提案正文里写了 `Fixes #N` / `Closes #N` 的，是替一条问题干活的那条路。
+  // 那种情况下审查结论要在**两边**都留一条——问题那边才是别人看得见的地方，
+  // 只写在提案里，提问题的人读不到你判断过什么。
+  //
+  // 机器判不了「那边到底写没写」（这份脚本不联网、零依赖），所以它做的是**提醒**，
+  // 而不是判据。这一点必须说清楚：假装能判，就会给出一条看起来像保证的假痕迹。
+  const issue = readClosingIssue(body)
+  if (issue !== undefined) {
+    process.stdout.write(`有单轨道：提案关联了 #${issue} —— 审查结论要**同时**写到提案评论和 `
+      + `#${issue} 那条问题上，缺任一侧视为审查未完成。问题那边写一句结论与逐条发现即可。\n`)
+  }
   return 0
 }
 

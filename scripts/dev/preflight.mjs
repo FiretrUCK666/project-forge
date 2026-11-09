@@ -139,7 +139,7 @@ export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-1.mjs': 133,
   'cases-2.mjs': 148,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 95,
+  'cases-4.mjs': 99,
 })
 
 /**
@@ -2578,6 +2578,32 @@ function checkReviewRuleSources() {
       + '规则写着但没有执行点，等于整条门禁不存在，而所有判据仍然全绿')
   }
 
+  // 十、**每个条件块都要回答「不满足时讲的是另一件真事吗」**。
+  //
+  // 这一条治的是「条件块越堆越多」：一个 `pf:if` 写下去很便宜，而它意味着模板里多出
+  // 一条只在某些项目里成立的规则。要判断它该不该存在，唯一的问题是——**它不满足时，
+  // 剩下那一支讲的是同一件事的另一半，还是压根不该说？** 答不上来的，就该并进通用规则，
+  // 而不是再开一个分支。
+  //
+  // 判据刻意**只判「有没有那句话」**，不判「说得对不对」：后者机器判不了，假装能判
+  // 就会给出一条看起来像保证的假痕迹。要求在文件里、紧贴那个条件块，任何人打开都能核——
+  // 这是把「凭印象」变成「可取证」的那一步。
+  need('templates/agents-project.md',
+    (x) => templateIfReasons(x).length === 0,
+    '每个 `pf:if` 上方要有一行 `<!-- 为什么有这一条：不适用时不出现…… -->`，'
+    + '讲清「它不满足时，剩下那一支讲的是另一件真事」。答不上来的条件块，说明它该并进通用规则')
+
+  // **理由注释不许转述正文**。
+  //
+  // 断言常用「生成的契约里有没有出现某句话」判条件段落的取舍，而注释如果引用了那句话，
+  // 断言就会被注释骗到。实测过：三条「不判成不可发布」当场变红，原因是理由里写了
+  // 「读到的会是「不对外发布」」。改断言没用——从字符串上看不出引述与事实的区别；
+  // 约束放在产出一侧，注释只描述意图、不摘抄正文。
+  need('templates/agents-project.md',
+    (x) => reasonQuotesBodyPhrases(x).length === 0,
+    '理由注释里出现了正文里的成句短语 —— 注释只描述意图，不转述正文。'
+    + '断言常用「正文里有没有这句话」判条件段落的取舍，注释里的引述会让它误判')
+
   // 九、**CI 不许跳过行为自检**。
   //
   // `--no-behavior` 是本地提速用的开关。它在 CI 里带来的是一个真实盲区：行为下限的比对
@@ -2647,6 +2673,80 @@ export function contractSnippetIssues(opt = {}) {
     '冻结验收标准的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— ',
     '示例由 `canonicalDoneSnippet()` 生成，不要手写')
   return issues
+}
+
+/**
+ * 每个 `pf:if` 上方的理由注释，缺了哪个。
+ *
+ * 判据只问一件事：**紧贴这个条件块的上一行（跳过空行）是不是一句理由**。
+ * 理由的固定前缀是「为什么有这一条」——它是人能一眼看懂的，也是机器能精确匹配的。
+ *
+ * 不判「说得对不对」：那是判断，机器判不了。但「有没有写、写在哪」是可取证的事实，
+ * 而这一步就已经把「凭印象」变成了「能核对」。
+ *
+ * 导出成纯函数，行为自检直接调它——理由与 `templateRegistrationIssues` 那条相同：
+ * 复刻一份的断言不会因为判据被削弱而变红。
+ *
+ * @param {string} text 模板正文
+ * @returns {number[]} 缺理由的条件块所在行号（从 1 起）；空数组表示都写了
+ */
+export function templateIfReasons(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+  const bad = []
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*<!--\s*pf:if /.test(lines[i])) continue
+    let k = i - 1
+    while (k >= 0 && lines[k].trim() === '') k -= 1
+    const prev = k >= 0 ? lines[k].trim() : ''
+    if (/^<!--\s*为什么有这一条[：:]/.test(prev)) continue
+    // **表格内部的条件块，理由写在表格之前。**
+    //
+    // 有一种正当用法是「条件块只包住表格的一行」（某一行只在特定项目里出现）。那种行
+    // 渲染时整行被吃掉，不会拆表，所以它是合法写法。但理由注释**不能**插在它上方——
+    // 插进去就把表格从中间切开，渲染成两张（实测过）。
+    //
+    // 所以那一种允许把理由放到表格之前，并在理由里注明它管的是哪一行。判据据此放行：
+    // 条件块在表格中间时，要求「表格之前的某条理由提到这一行」。
+    const inTable = prev.startsWith('|') || (k >= 1 && lines[k].trim().startsWith('|'))
+    if (inTable) {
+      // 往上找表格起点，再往上找紧邻的理由注释
+      let t = k
+      while (t >= 0 && lines[t].trim().startsWith('|')) t -= 1
+      let r = t
+      while (r >= 0 && lines[r].trim() === '') r -= 1
+      if (r >= 0 && /^<!--\s*为什么有这一条[：:]/.test(lines[r].trim())) continue
+    }
+    bad.push(i + 1)
+  }
+  return bad
+}
+
+/**
+ * 理由注释里**不许出现**正文里的成句短语。
+ *
+ * 治的是一个很具体的连锁：断言常用「生成的契约里有没有出现某句话」来判条件段落的取舍
+ * （`!/不对外发布/.test(text)`），而理由注释如果引用了那句话，断言就会被注释骗到——
+ * 实测过：三条「不判成不可发布」当场变红，原因是我在理由里写了「读到的会是「不对外发布」」。
+ *
+ * 这不是把断言写得更严就能解决的：断言判的是「正文里有没有这句话」，而注释里的引述
+ * 与正文里的事实，从字符串上看不出来。所以约束放在产出一侧——**注释只描述意图，
+ * 不转述正文**。这条约束同时让注释更好读：读者要的是「为什么有这一条」，不是原文摘抄。
+ *
+ * @returns {Array<{line: number, phrase: string}>}
+ */
+export function reasonQuotesBodyPhrases(text) {
+  const BODY_PHRASES = [
+    '不对外发布', '有版本发布', '目前只有本地仓库', '没有远端', '本 skill 不绑定',
+  ]
+  const out = []
+  const lines = String(text ?? '').split(/\r?\n/)
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*<!--\s*为什么有这一条/.test(lines[i])) continue
+    for (const phrase of BODY_PHRASES) {
+      if (lines[i].includes(phrase)) out.push({ line: i + 1, phrase })
+    }
+  }
+  return out
 }
 
 /**

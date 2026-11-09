@@ -33,14 +33,17 @@ jobs:
         with:
           node-version: '22'
 
-      # 两步职责正交，不要合并：preflight 默认会**自己**跑一遍行为自检（分片并行，约一分钟），
-      # 紧接着再单独跑一次 selftest 就是同一件事做两遍——实测 CI 从约 5 分钟涨到 10 分钟
-      # 以上，覆盖率一点没多。所以这里显式加 --no-behavior，把行为那趟交给下一条。
-      - name: 结构自检（引用、内核、规范、用户包边界）
-        run: node scripts/dev/preflight.mjs --no-behavior
-
-      - name: 行为自检（造 fixture 实跑，断言判定结果）
-        run: node scripts/dev/selftest.mjs
+      # **跑完整的那趟，不加 `--no-behavior`。**
+      #
+      # 这个开关是给本地提速用的：它跳过行为自检，只验结构。CI 里省那两分钟换来的是
+      # 一个真实的盲区——行为下限的比对只在完整那趟里做，跳过它就等于那条下限在 CI 里
+      # 从未生效。实测过：下限写着 748、实测 736，完整自检恒红，而 CI 一路全绿。
+      #
+      # **不再单独跑一次 selftest**：完整 preflight 内部就会跑它（分片并行），并把
+      # 摘要行、耗时与失败清单一起打出来。再跑一次是同一件事做两遍——实测让 CI 从
+      # 约五分钟涨到十分钟以上，覆盖面一点没多。
+      - name: 结构自检 + 行为自检（引用、内核、规范、用户包边界、断言下限）
+        run: node scripts/dev/preflight.mjs
 
       - name: 内核与模板是否逐字一致
         run: node scripts/compose-agents.mjs . --check

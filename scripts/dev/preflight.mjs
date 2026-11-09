@@ -2602,6 +2602,24 @@ function checkReviewRuleSources() {
       + '规则写着但没有执行点，等于整条门禁不存在，而所有判据仍然全绿')
   }
 
+  // 九、**CI 不许跳过行为自检**。
+  //
+  // `--no-behavior` 是本地提速用的开关。它在 CI 里带来的是一个真实盲区：行为下限的比对
+  // 只在完整那趟里做，跳过它，那条下限在 CI 里从未生效。实测过——下限写着 748、实测 736，
+  // 完整自检恒红，而 CI 一路全绿，那个错藏了很久。
+  //
+  // 判据只看本仓库那份工作流：`templates/ci-check.yml` 是给目标项目的骨架，它的门禁
+  // 由那个项目自己定（很多项目没有行为自检这回事），不该被这条约束。
+  need('.github/workflows/check.yml',
+    (x) => {
+      const live = stripYamlComments(x)
+      return !/preflight\.mjs\s+--no-behavior/.test(live)
+    },
+    'CI 里跑 preflight 时加了 `--no-behavior` —— 那会跳过行为自检，'
+    + '而行为下限的比对只在完整那趟里做。跳过它，下限在 CI 里就从未生效；'
+    + '实测过一次：下限写着 748、实测 736，完整自检恒红而 CI 全绿。'
+    + '本地想提速可以加，CI 不行')
+
   if (missing.length > 0) {
     for (const m of missing) {
       fail(m + ' —— 审查循环的每一处落点都要**结构上**能判：判据（references）、'

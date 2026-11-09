@@ -139,7 +139,7 @@ export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-1.mjs': 133,
   'cases-2.mjs': 148,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 99,
+  'cases-4.mjs': 101,
 })
 
 /**
@@ -2603,6 +2603,20 @@ function checkReviewRuleSources() {
     (x) => reasonQuotesBodyPhrases(x).length === 0,
     '理由注释里出现了正文里的成句短语 —— 注释只描述意图，不转述正文。'
     + '断言常用「正文里有没有这句话」判条件段落的取舍，注释里的引述会让它误判')
+
+  // **行尾必须是 LF**。
+  //
+  // 这一条治的不是风格，是一类会静默改变判据结果的差异：`.gitattributes` 声明 `eol=lf`，
+  // 而用脚本批量改这份文件时（`WriteAllLines` 一类）会把它写成 CRLF——文件看上去一样，
+  // 但「机器契约示例逐字一致」那条判据当场对不上，因为它比的是含 `\r` 的字符串。
+  //
+  // 这个错我犯过两次，两次都是「用脚本批量插入行」之后。判据抓到了，但那要让下一次
+  // 全量自检跑一遍才能发现；放在这里，一次结构自检就说得清是哪份文件、什么原因。
+  need('templates/agents-project.md',
+    (x) => !x.includes('\r\n'),
+    '这份文件有 CRLF 行尾 —— `.gitattributes` 声明的是 LF。'
+    + '脚本批量改文件时容易写成 CRLF，而那会让「机器契约示例逐字一致」当场对不上'
+    + '（判据比的是含 \\r 的字符串）。转换：把 \\r\\n 换成 \\n 再提交')
 
   // 九、**CI 不许跳过行为自检**。
   //

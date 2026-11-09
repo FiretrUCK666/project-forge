@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons } from './preflight.mjs'
+import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -966,6 +966,25 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     check(caught.length > 0 && typeof caught[0] === 'number',
       '条件块理由：抹掉理由 → 必须报出来并给出行号', JSON.stringify(caught.slice(0, 3)))
     report(caught.length > 0, '条件块：抹掉会报')
+
+    // 理由注释**不许转述正文短语**。
+    //
+    // 这条判据是「注释别把断言骗了」的那一半：断言常用「正文里有没有某句话」判条件段落，
+    // 而注释里引述那句话会让断言误判（实测过三条「不判成不可发布」当场变红）。
+    // **它自己也要有断言看着**——上一版就是漏了这一条，被审查抓到：
+    // 判据削成永假，preflight 与五个分片双双全绿。
+    const leakReal = reasonQuotesBodyPhrases(tplText)
+    check(leakReal.length === 0, '理由注释没转述正文：真实模板 → 空清单', JSON.stringify(leakReal.slice(0, 3)))
+    report(leakReal.length === 0, '理由：不转述正文')
+
+    const leakInjected = reasonQuotesBodyPhrases(
+      tplText.replace('<!-- 为什么有这一条：',
+        '<!-- 为什么有这一条：正文会写「不对外发布」所以'),
+    )
+    check(leakInjected.length > 0 && typeof leakInjected[0].line === 'number'
+      && leakInjected[0].phrase === '不对外发布',
+      '理由注释转述正文短语 → 必须报出来并指出短语', JSON.stringify(leakInjected.slice(0, 2)))
+    report(leakInjected.length > 0, '理由：转述会报')
   }
 
 }

@@ -23,7 +23,7 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
-import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases } from './preflight.mjs'
+import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases, judgeRegistryIssues } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -985,6 +985,54 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       && leakInjected[0].phrase === '不对外发布',
       '理由注释转述正文短语 → 必须报出来并指出短语', JSON.stringify(leakInjected.slice(0, 2)))
     report(leakInjected.length > 0, '理由：转述会报')
+
+    // 工作记录「执行者」那一格：判据本体是导出的 executorVerdict。
+    //
+    // 它之前只被 import、从没被调用过——一条判据活在生产代码里，而没有任何断言碰它。
+    // 这是「新增判据没有强制配断言」那个病的最干净的例子：判据是对的，防线是空的。
+    const who = (v) => executorVerdict(`| 项 | 值 |\n| --- | --- |\n| 执行者 | ${v} |\n`).verdict
+    const okWho = who('FiretrUCK666 <a@b.c>') === 'ok'
+    const pronoun = ['本次会话', '我', 'AI', '助手'].every((v) => who(v) === 'pronoun')
+    const noId = who('张三') === 'no-identity'
+    const absent = who('') === 'absent'
+    check(okWho && pronoun && noId && absent,
+      '执行者判据：署名算合格、四种代词算代词、没邮箱算无身份、空算缺失',
+      JSON.stringify({ okWho, pronoun, noId, absent }))
+    report(okWho && pronoun && noId && absent, '判据本体：执行者那一格')
+
+    // **「取不到」是正当的终态，但必须说明原因。** 这一条最容易被改坏：
+    // 只认「有 @」会把照契约做的人永远卡在红着，逼他编一个邮箱。
+    const unsignedOk = who('未署名（这个克隆里没有配置提交署名）') === 'ok'
+    const unsignedBad = who('未署名') === 'no-identity'
+    check(unsignedOk && unsignedBad,
+      '执行者判据：写「未署名」并说明原因算合格；光写三个字不算',
+      JSON.stringify({ unsignedOk, unsignedBad }))
+    report(unsignedOk && unsignedBad, '判据本体：未署名要说明原因')
+
+    // **判据注册表**：每个导出的判据都要说明「谁来看着它」。
+    //
+    // 这条判据自己也要有断言看着——否则它就是它要防的那件事本身。
+    const realSrc = readFileSync(join(SKILL_ROOT, 'scripts/dev/preflight.mjs'), 'utf8')
+    const realReg = judgeRegistryIssues(realSrc)
+    check(Array.isArray(realReg) && realReg.length === 0,
+      '判据注册表：真实源码里每个导出判据都登记了', JSON.stringify(realReg.slice(0, 3)))
+    report(realReg.length === 0, '判据注册表：都登记了')
+
+    // 反例一：源码里多一个没登记的导出判据 → 必须报出来，并点名那个函数。
+    const unregistered = judgeRegistryIssues(
+      realSrc + '\nexport function someNewJudge(x) { return x }\n',
+    )
+    check(unregistered.length > 0 && unregistered[0].includes('someNewJudge'),
+      '判据注册表：新加一个导出判据却不登记 → 必须报出来并点名',
+      JSON.stringify(unregistered.slice(0, 1)))
+    report(unregistered.length > 0, '判据注册表：未登记会报')
+
+    // 反例二：登记了但既没 checkedBy 也没 why → 那就是「没有防线」，必须报。
+    const hollowReg = judgeRegistryIssues(realSrc, { listRepoFiles: {} })
+    check(hollowReg.length > 0 && /没有防线|既没写/.test(hollowReg[0]),
+      '判据注册表：登记成空壳（既无 checkedBy 也无 why）→ 必须报出来',
+      JSON.stringify(hollowReg.slice(0, 1)))
+    report(hollowReg.length > 0, '判据注册表：空壳会报')
   }
 
 }

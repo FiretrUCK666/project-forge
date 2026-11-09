@@ -53,7 +53,7 @@ import {
   readHighRiskTable, canonicalDoneSnippet, canonicalReviewSnippet,
   DONE_FENCE, CONTRACT_SITES, DONE_SITES,
 } from '../review-record.mjs'
-import { TEMPLATE_INSTANCES, TEMPLATE_NO_INSTANCE } from '../lib/protocol.mjs'
+import { TEMPLATE_INSTANCES, TEMPLATE_NO_INSTANCE, JUDGE_REGISTRY } from '../lib/protocol.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -139,7 +139,7 @@ export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-1.mjs': 133,
   'cases-2.mjs': 148,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 101,
+  'cases-4.mjs': 106,
 })
 
 /**
@@ -2618,6 +2618,18 @@ function checkReviewRuleSources() {
     + '脚本批量改文件时容易写成 CRLF，而那会让「机器契约示例逐字一致」当场对不上'
     + '（判据比的是含 \\r 的字符串）。转换：把 \\r\\n 换成 \\n 再提交')
 
+  // **判据注册表**：每个导出的判据都要说明「谁来看着它」。
+  //
+  // 这一条治的是这个项目反复踩到的同一个病：判据被写出来、跑起来、看起来在工作，
+  // 而它**被削成恒真也没有任何东西变红**。四轮独立审查里有三轮找到的都是这个病
+  // 在不同位置的新实例——先是契约比对，然后是新加的「理由不许转述正文」，
+  // 再然后是「执行者那一格」只被 import 而从没被调用。
+  //
+  // 根因不是某条判据漏了，是「写判据」与「给它配断言」是两个动作，而只有前一个有推动力。
+  // 所以把它们合成一个：新增判据就必须在注册表里登记，而登记要求你交出一句
+  // 「谁来看着它」。答不上来的当场红。
+  for (const why of judgeRegistryIssues(readText(new URL(import.meta.url)))) fail(why)
+
   // 九、**CI 不许跳过行为自检**。
   //
   // `--no-behavior` 是本地提速用的开关。它在 CI 里带来的是一个真实盲区：行为下限的比对
@@ -2804,6 +2816,46 @@ export function templateRegistrationIssues(opt = {}) {
         issues.push(`templates/${tpl} 登记的落点不存在：${inst} —— `
           + '要么落点被删了，要么登记写错了；两种情况都会让「改了模板没改实例」无人发现')
       }
+    }
+  }
+  return issues
+}
+
+/**
+ * 判据注册表与实际导出对账：每个 `export function` 都要在 `JUDGE_REGISTRY` 里登记。
+ *
+ * **扫磁盘不扫清单**：名字从源码里读出来，与那张表对账。新写一个导出判据却忘了登记，
+ * 一定被抓到——这正是它要拦的：新增判据与「谁来看着它」必须是同一个动作。
+ *
+ * 三种登记（见 `JUDGE_REGISTRY` 的注释）：有断言 `checkedBy` / 判不了 `why` /
+ * 只是工具 `utility`。三者都缺，说明这条判据没有任何防御，而它坏掉时不会报错。
+ *
+ * @param {string} src preflight.mjs 源码
+ * @param {object} [registry] 供测试注入
+ * @returns {string[]} 问题清单
+ */
+export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY) {
+  const issues = []
+  const exported = [...String(src ?? '').matchAll(/^export function (\w+)\s*\(/gm)].map((m) => m[1])
+  if (exported.length === 0) return ['没从源码里读到任何导出的判据函数 —— 抽取规则失效了，这一趟什么也没查']
+  const known = new Set(Object.keys(registry))
+  for (const name of exported) {
+    if (!known.has(name)) {
+      issues.push(`\`${name}\` 是导出的判据，却没在 \`scripts/lib/protocol.mjs\` 的 JUDGE_REGISTRY 里登记 —— `
+        + '新增判据必须同时说明「谁来看着它」：写 `checkedBy`（行为自检里那条断言的名字）、'
+        + '`why`（为什么这条判据没法用断言表达）、或 `utility: true`（它不含判断）。'
+        + '不登记就没人知道它有没有防线，而判据坏掉时不会报错，只会从此少查一项')
+    }
+  }
+  for (const name of known) {
+    const e = registry[name]
+    if (e === undefined || e === null) { issues.push(`JUDGE_REGISTRY 里 \`${name}\` 是空的`); continue }
+    if (e.utility === true && (typeof e.why !== 'string' || e.why.trim() === '')) {
+      issues.push(`JUDGE_REGISTRY 里 \`${name}\` 标了 utility 却没写 why —— 为什么它不含判断，要说出来`)
+    }
+    if (e.utility !== true && typeof e.checkedBy !== 'string' && typeof e.why !== 'string') {
+      issues.push(`JUDGE_REGISTRY 里 \`${name}\` 既没写 checkedBy 也没写 why —— `
+        + '那就是「这条判据没有防线」。有断言就写断言名，判不了就写清为什么')
     }
   }
   return issues

@@ -194,6 +194,61 @@ export const TEMPLATE_NO_INSTANCE = Object.freeze([
 ])
 
 /**
+ * 判据注册表：`preflight.mjs` 里每个**导出的判据函数**，要么被行为自检调用，
+ * 要么在这张表里写明为什么不能。
+ *
+ * ## 它治的是什么
+ *
+ * 这是这个项目反复踩到同一个坑之后才加的东西，坑的形状每次都一样：
+ *
+ *   > 一条判据被写出来、跑起来、看起来在工作，但它**被削成恒真也没有任何东西变红**。
+ *
+ * 于是它对「判据本身坏了」这件事毫无防御——而判据坏掉时不会报错，只会从此少查一项。
+ * 四轮独立审查里有三轮找到的都是这同一个病在**不同位置**的新实例：先是契约比对，
+ * 然后是新加的「理由不许转述正文」，再然后是「执行者那一格」只被 import 而从没被调用。
+ *
+ * ## 为什么不能靠自觉
+ *
+ * 「判据抽成导出纯函数」只解决了**可被调用**，不解决**有没有人调**。上一版把四条老判据
+ * 抽出来了，同时新写的一条照样漏了——因为「写一条新判据」与「给它配断言」是两个动作，
+ * 而只有前一个动作有推动力（它让门禁多拦一件事），后一个没有。
+ *
+ * 所以把两个动作合成一个：**新增判据就必须在注册表里出现**，而注册表要求你交出一句
+ * 「谁来看着它」。答不上来的，就是没有断言；那会被 `preflight.mjs` 当场指出来。
+ *
+ * ## 三种登记
+ *
+ *   - 有断言：写 `checkedBy`，值是行为自检里那条断言的名字（用来在报错里指路）；
+ *   - 判不了：写 `why`，说明为什么这条判据没法用断言表达（例如它读本机环境）；
+ *   - 只是工具：写 `utility: true`，说明它不含判断、只是解析或读取，不是判据。
+ *
+ * 判据实现在 `preflight.mjs` 的 `judgeRegistryIssues`——它扫源码里 `export function`
+ * 的名字，与这张表对账。**扫磁盘不扫清单**：新写一个导出判据却忘了登记，一定被抓到。
+ */
+export const JUDGE_REGISTRY = Object.freeze({
+  listRepoFiles: { utility: true, why: '读目录，不含判断' },
+  referencedPaths: { utility: true, why: '从正文里抽路径，不含判断' },
+  moduleSpecifiers: { utility: true, why: '从源码里抽 import，不含判断' },
+  externalModules: { utility: true, why: '从 import 里挑外部模块，不含判断' },
+  looksLikeEntry: { checkedBy: '入口判定：三种形状分得清' },
+  releaseTokenSpellings: { checkedBy: '发版说明：占位词的几种写法都认' },
+  evalFreshnessMarker: { checkedBy: '保鲜标记：好标记放行、坏日期会报' },
+  freshnessSectionBody: { checkedBy: '事实来源：节正文抽取' },
+  hasActionableSources: { checkedBy: '事实来源：有可用来源才算' },
+  compareHostMarker: { checkedBy: '宿主版本比对：一致/不同/取不到三种' },
+  probeHost: { why: '读本机宿主版本，依赖运行环境；断言只能验它的分支，不能验它读到什么' },
+  hostDateBatchStatus: { checkedBy: '宿主标记：日期与版本必须同批改' },
+  hostMismatchMessage: { checkedBy: '宿主不符时的措辞' },
+  contractSnippetIssues: { checkedBy: '契约：改过的落点会报' },
+  templateIfReasons: { checkedBy: '条件块：抹掉会报' },
+  reasonQuotesBodyPhrases: { checkedBy: '理由：转述会报' },
+  templateRegistrationIssues: { checkedBy: '判据本体：模板登记会报' },
+  executorVerdict: { checkedBy: '判据本体：执行者那一格' },
+  judgeRegistryIssues: { checkedBy: '判据注册表：未登记会报' },
+  tarEntries: { utility: true, why: '解析 tar 字节流，不含判断' },
+})
+
+/**
  * 生态专属门禁的**唯一实现位置**。
  *
  * 判据是「这条检查里的名词是不是那个生态自己的」：发布范围含不含 `lib`、补丁文本里

@@ -198,11 +198,17 @@ export function getSnapshot(ledger) {
 export function recordSegment(ledger, { file, id, landing, content, at }) {
   const fileKey = String(file).replace(/\\/g, '/')
   const segments = ledger.segments[fileKey] ?? (ledger.segments[fileKey] = {})
-  segments[id] = {
-    landing,
-    mine: contentHash(content),
-    at: at ?? new Date().toISOString(),
+  const mine = contentHash(content)
+  const prev = segments[id]
+  // **指纹没变就不动这条账目。**
+  //
+  // 原先每次都刷新 `at`，于是重复执行会留下一个「只改了一个时间戳」的改动，
+  // 与关键不变量「所有脚本重复执行结果相同」直接冲突：交付时每跑一次就脏一次。
+  // `at` 记的是「这段何时被写进来的」——内容没重写，那个时刻就没变。
+  if (prev !== undefined && prev.mine === mine && prev.landing === landing && at === undefined) {
+    return ledger
   }
+  segments[id] = { landing, mine, at: at ?? new Date().toISOString() }
   return ledger
 }
 

@@ -1113,7 +1113,7 @@ group('[11] 本机路径分档：真泄漏要报，测试数据不要误导')
 // `workspace` 这个字段被渲染进报告很久了，却没有任何断言验它——「产出了但没人验」
 // 正是最容易悄悄坏掉的那类。判据同时要有正反两面：多包仓库要认得出（正例），
 // 单包仓库不许凭空造出拓扑（反例，否则 AI 会去读一个不存在的子包）。
-group('[53] 多包仓库：认得出 workspace 拓扑，单包不硬造')
+group('[60] 多包仓库：认得出 workspace 拓扑，单包不硬造')
 {
   const mono = fixture('ws-pnpm', {
     'package.json': JSON.stringify({ name: 'root', private: true, version: '1.0.0' }, null, 2),

@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url'
 import { listRoot, manifestSection } from './lib/manifest.mjs'
 import { HOST_ECOSYSTEMS } from './ecosystems.mjs'
 import { survey, authorMarkers, isNoteKey } from './survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS } from './lib/protocol.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED, UPGRADED, KEEP, INSTRUCTION_BUDGET, COMMAND_KEY_SET as PROTOCOL_COMMAND_KEYS , LANDED_SCRIPTS } from './lib/protocol.mjs'
 import { normVersion, parseMarkerKeys, isMainModule, readTextFile, readUtf8Strict } from './lib/text.mjs'
 import { fencedSpans, markerPositions, scanLines, splitSections } from './lib/markdown.mjs'
 import { readLedger, writeLedger, recordSegment, forgetSegment, recordSnapshot, ledgerPath } from './lib/ledger.mjs'
@@ -1510,6 +1510,62 @@ function assertTemplateConditionsKnown(target, s = surveyLight(target)) {
   }
 }
 
+/**
+ * 把「要落到目标项目里」的脚本拷过去（`LANDED_SCRIPTS`，唯一登记处）。
+ *
+ * **它不看 AGENTS.md 变没变**：工具的版本与契约的内容是两件事。挂在「契约无需改动」
+ * 那条提前 return 之后的话，跑过一次的项目里那份门禁脚本就永远停在旧版——症状是
+ * 「门禁还是老的规矩」，不报错、不提示。实测：把目标项目里那份换成旧版后重跑，
+ * 输出「无需改动」，文件仍不一致。
+ *
+ * 逐字节复制，不生成、不改造：改了就不是同一份，两份实现迟早给出两个答案。
+ * 已存在且内容相同时不写（幂等）；内容不同则覆盖并说一句——**不静默改掉用户动过的文件**。
+ */
+function landScripts(target, stream) {
+    // 把要落到这个项目里的脚本一并拷过去（`LANDED_SCRIPTS`，唯一登记处）。
+    //
+    // 为什么归落盘而不是归读者：模板里那句「先把它拷到本项目的 scripts/ 下」是靠人记的，
+    // 而忘了拷的症状是 CI 里一句 MODULE_NOT_FOUND 崩溃栈——离原因很远。落盘是「这个项目
+    // 要用这个工具」的一部分，脚本能做的就不该留成家务。
+    //
+    // 逐字节复制，不生成、不改造：改了就不是同一份，而两份实现迟早给出两个答案。
+    // 已经存在且内容相同时不写（幂等）；内容不同则覆盖，并在输出里说一句——
+    // **不静默改掉用户可能动过的文件**。
+    for (const rel of LANDED_SCRIPTS) {
+      const from = join(SKILL_ROOT, rel)
+      if (!existsSync(from)) {
+        process.stderr.write(`提醒：${rel} 登记为「要落到项目里」，但 skill 里没有这个文件——跳过。\n`)
+        continue
+      }
+      const to = join(target, rel)
+      const payload = readFileSync(from)
+      if (existsSync(to)) {
+        const current = readFileSync(to)
+        if (current.equals(payload)) continue
+        mkdirSync(dirname(to), { recursive: true })
+        writeFileSync(to, payload)
+        process.stdout.write(`已更新：${rel}（与 skill 里那份不一致，按 skill 覆盖）\n`)
+        continue
+      }
+      mkdirSync(dirname(to), { recursive: true })
+      writeFileSync(to, payload)
+      process.stdout.write(`已拷入：${rel}（门禁要用它，随落盘一起过去）\n`)
+    }
+
+  // **拷过去的东西要进账本**，否则它有指纹也撤不干净。账本是「本 skill 落的」唯一
+  // 登记入口，而交棒的痕迹判定「只认证据，不认记忆」。不登记时那份脚本只能落回
+  // 「按形状猜」——与新增落地脚本时说的「脚本能做的就不该留成家务」正好相反。
+  //
+  // 复用 recordWholeFile：它就是给「整份文件由我写下」这条准备的，不另起一套账本写法。
+  // 它自己处理「账本读不出来就拒绝写」与「路径不是文件」，出错时已报过话并返回非 0。
+  const landed = LANDED_SCRIPTS.filter((rel) => existsSync(join(target, rel)))
+  if (landed.length > 0 && recordWholeFile(target, landed) !== 0) {
+    process.stderr.write('提醒：这些落地脚本没能登记进账本（原因见上）：' + landed.join('、') + '\n'
+      + '  交棒时它们会被按「形状相似」判，而不是「确认是我写的」。\n')
+  }
+  void stream
+}
+
 function main(argv) {
   let parsed
   try {
@@ -1666,7 +1722,17 @@ function main(argv) {
         // 这是「项目已经有一个 AGENTS.md，但写得不好或漏了很多」的常见场景。此时**不能
         // 报错退出**（那会把最常见的场景变成死路），也不能擅自重写（那是覆盖用户的成果）。
         // 默认只做体检并给出下一步；用户明确要升级时才动手，且只做加法。
-        if (!upgrade) return reportHandwritten(agentsPath, existing, target, status, check, s)
+        if (!upgrade) {
+          // **落地脚本与「要不要刷新内核」无关。**
+          //
+          // 它是门禁的运行时依赖：只要这个项目要装 CI，`scripts/review-record.mjs` 就得在。
+          // 原先它挂在刷新路径上，而这条路在手写契约（没有内核标记）这里就早退，
+          // 落地脚本从不拷过去；而 `templates/ci-check.yml` 直接执行它，
+          // 提案上那一步必然崩在 MODULE_NOT_FOUND，文档还写着「不用手工拷」。
+          // `--check` / `--status` 只校验 / 只报告，不写盘——落地脚本也不能拷。
+          if (!status && !check) landScripts(target, process.stdout)
+          return reportHandwritten(agentsPath, existing, target, status, check, s)
+        }
         const upgraded = upgradeHandwritten(existing, kernel, target, s)
         composed = upgraded.text
         freshForLedger = upgraded.fresh
@@ -1819,6 +1885,8 @@ function main(argv) {
   }
 
   const missing = applicableMissingSections(target, composed, s)
+  // 落地脚本先拷：它不看契约变没变（见 landScripts 的注释）。
+  landScripts(resolve(target), process.stdout)
   if (same) {
     process.stdout.write(`无需改动：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`)
     reportRefresh(refreshReport, process.stdout)
@@ -1865,6 +1933,7 @@ function main(argv) {
   process.stdout.write(
     `${exists ? '已刷新' : '已生成'}：${agentsPath}（${bytes} 字节，占预算 ${ratio}%）\n`,
   )
+
   // 落盘之后**立刻记账**：写下「这份文件的内核区、以及每个受管节，各自的字节哈希」。
   //
   // 账本是痕迹判定的唯一依据——有了它，「这段是不是我写的」就从推断变成比对：

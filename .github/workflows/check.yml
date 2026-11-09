@@ -10,6 +10,10 @@ on:
     branches: ['**']
     tags: ['v*']
   pull_request:
+    # `edited` 不能漏：审查记录是往**提案正文**里填的，而改正文只会触发 `edited`。
+    # 少了它，先开提案（红）、再补记录，这步检查不会重跑，状态停在上一次——
+    # 反过来也一样：先填空话让它绿、之后再改正文，没有任何东西会复查。
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   check:
@@ -17,6 +21,12 @@ jobs:
     steps:
       - name: 检出
         uses: actions/checkout@v4
+        with:
+          # **必须取全历史**：下面「高风险改动必须有审查记录」那一步要算基线分支与本次
+          # 的差异，而浅克隆里没有合并基点——`git diff A...B` 会失败或返回空。
+          # 那种失败最坏的地方不是报错，是**静默通过**：空的改动清单等于「没动高风险路径」，
+          # 门禁于是绿着放行，而它本该拦下的东西一件都没拦。
+          fetch-depth: 0
 
       - name: 准备 Node
         uses: actions/setup-node@v4
@@ -46,3 +56,51 @@ jobs:
         run: |
           git archive --format=tar HEAD | tar -t > package-list.txt
           node scripts/dev/preflight.mjs --package package-list.txt --at HEAD
+
+      # **只在提案上跑**：它判的是「这份提案有没有审查记录」，而推送事件里没有提案正文。
+      # 判据本身与 CI 是两个维度：CI 绿说明现有检查都过了，它**不说明**这次改动有没有让
+      # 检查本身变松——那是审查要回答的问题。这一步把「我审过了」从自述变成可核对的痕迹。
+      #
+      # 它核**两层**：提案正文里那节是索引（有哪几轮、结论是什么），**每一轮的结论还要在
+      # 评论里找得到对应的一条**。只核正文时，评论一条不发也能全绿——实测发生过，跑了两轮
+      # 审查而提案上零评论。索引是执行者自己写的，评论才是别人给的。
+      - name: 高风险改动必须有审查记录（仅提案）
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 取基线：全历史已经在手（上面 fetch-depth: 0），这里只需要那个分支的引用。
+          git fetch --no-tags origin "$BASE_REF"
+          # `diff.renames=false`：不带它时，一次改名只报**新路径**——把判定逻辑
+          # `git mv` 到 `scripts/` 之外再改松，门禁会判成「不落在高风险路径」。
+          # 改名挪走判定逻辑是一次实质的风险改动，只是它在 diff 眼里长得像「移动」。
+          # `core.quotepath=false`：默认配置会把中文文件名转义成 "\345\256\241..."，
+          # 前缀判据匹配不上，中文名的风险改动会被判成非高风险、绿着放行。
+          git -c core.quotepath=false -c diff.renames=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+          printf '%s' "$PR_BODY" > pr-body.md
+
+          # 把评论拉下来拼成一份文件。用平台 API 而不是 gh：gh 的 JSON 输出要再解析一层，
+          # 而这里只需要「每条评论之间隔一行 ---COMMENT---」这个形状。
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            | node -e '
+              let raw = ""
+              process.stdin.on("data", (c) => { raw += c })
+              process.stdin.on("end", () => {
+                const list = JSON.parse(raw)
+                if (!Array.isArray(list)) {
+                  process.stderr.write("拉评论失败：" + raw.slice(0, 200) + "\\n")
+                  process.exit(3)
+                }
+                process.stdout.write(list.map((c) => c.body ?? "").join("\n---COMMENT---\n"))
+              })
+            ' > comments.txt
+
+          # **`--expect-changes` 不能省**：提案不可能零改动，清单为空只说明 diff 没算出来。
+          # 不带这个开关时，一次失败的 diff 会被读成「没动高风险路径」，门禁绿着放行。
+          node scripts/review-record.mjs --expect-changes \
+            --changed changed.txt --body pr-body.md --comments comments.txt

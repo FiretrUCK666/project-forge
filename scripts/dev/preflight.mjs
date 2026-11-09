@@ -139,7 +139,7 @@ export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-1.mjs': 133,
   'cases-2.mjs': 148,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 106,
+  'cases-4.mjs': 107,
 })
 
 /**
@@ -2834,10 +2834,28 @@ export function templateRegistrationIssues(opt = {}) {
  * @param {object} [registry] 供测试注入
  * @returns {string[]} 问题清单
  */
-export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY) {
+export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY, casesSrc = undefined) {
   const issues = []
   const exported = [...String(src ?? '').matchAll(/^export function (\w+)\s*\(/gm)].map((m) => m[1])
   if (exported.length === 0) return ['没从源码里读到任何导出的判据函数 —— 抽取规则失效了，这一趟什么也没查']
+
+  // **checkedBy 必须真的能在行为自检里找到。**
+  //
+  // 只判「是不是非空字符串」时，这条注册表就退化成「填一个字符串」，推动力仍只在
+  // 「写判据」那一个动作上——实测过：新增一条判据、`checkedBy` 填一句根本不存在的断言名，
+  // 完整 preflight 照样全绿。那与没有注册表是同一个状态，只是多了一行看起来像保证的字。
+  //
+  // 所以拿值去行为自检的源码里找。找不到就是「这条判据声称有断言看着它，而其实没有」。
+  const cases = casesSrc ?? (() => {
+    const dir = join(SKILL_ROOT, 'scripts', 'dev')
+    if (!existsSync(dir)) return ''
+    return readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile() && /^cases-\d+\.mjs$/.test(e.name))
+      .map((e) => readText(join(dir, e.name)))
+      .join('\n')
+  })()
+  if (cases === '') return ['读不到行为自检的分片源码 —— 无法核对 checkedBy，这一趟什么也没查']
+
   const known = new Set(Object.keys(registry))
   for (const name of exported) {
     if (!known.has(name)) {
@@ -2850,10 +2868,24 @@ export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY) {
   for (const name of known) {
     const e = registry[name]
     if (e === undefined || e === null) { issues.push(`JUDGE_REGISTRY 里 \`${name}\` 是空的`); continue }
-    if (e.utility === true && (typeof e.why !== 'string' || e.why.trim() === '')) {
-      issues.push(`JUDGE_REGISTRY 里 \`${name}\` 标了 utility 却没写 why —— 为什么它不含判断，要说出来`)
+    if (e.utility === true) {
+      if (typeof e.why !== 'string' || e.why.trim() === '') {
+        issues.push(`JUDGE_REGISTRY 里 \`${name}\` 标了 utility 却没写 why —— 为什么它不含判断，要说出来`)
+      }
+      continue
     }
-    if (e.utility !== true && typeof e.checkedBy !== 'string' && typeof e.why !== 'string') {
+    if (typeof e.checkedBy === 'string') {
+      // 断言名要在行为自检里逐字出现。它不是编号，是给报错指路的那句话——
+      // 找不到就说明它指的是一条不存在的断言。
+      if (!cases.includes(e.checkedBy)) {
+        issues.push(`JUDGE_REGISTRY 里 \`${name}\` 的 checkedBy 写着「${e.checkedBy}」，`
+          + '但行为自检里找不到这句话 —— 那说明这条判据**声称**有断言看着它，实际没有。'
+          + '要么把它真的写成一条断言（那句话要与 checkedBy 逐字相同），'
+          + '要么老实写 `why` 说明为什么判不了')
+      }
+      continue
+    }
+    if (typeof e.why !== 'string' || e.why.trim() === '') {
       issues.push(`JUDGE_REGISTRY 里 \`${name}\` 既没写 checkedBy 也没写 why —— `
         + '那就是「这条判据没有防线」。有断言就写断言名，判不了就写清为什么')
     }

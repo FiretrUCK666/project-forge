@@ -24,6 +24,7 @@ import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
 import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases, judgeRegistryIssues } from './preflight.mjs'
+import { JUDGE_REGISTRY } from '../lib/protocol.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -1033,6 +1034,24 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       '判据注册表：登记成空壳（既无 checkedBy 也无 why）→ 必须报出来',
       JSON.stringify(hollowReg.slice(0, 1)))
     report(hollowReg.length > 0, '判据注册表：空壳会报')
+
+    // **反例三：checkedBy 填一个不存在的断言名 → 必须报。**
+    //
+    // 这是「注册表只提升门槛、不验证内容」的那个洞：只判「是不是非空字符串」时，
+    // 填一句根本不存在的断言名照样全绿，那与没有注册表是同一个状态，
+    // 只是多了一行看起来像保证的字。实测过。
+    // 断言名**运行时拼出**，不能写成字面量：判据扫的就是所有分片的源码，
+    // 而这个字符串本身写在分片里，字面量形式会被它自己「找到」，测试就假绿了。
+    const ghostName = String.fromCharCode(36825, 21477, 26029, 35328, 26681, 26412, 19981, 23384, 22312)
+    const fakeAssert = judgeRegistryIssues(realSrc, {
+      ...JUDGE_REGISTRY,
+      looksLikeEntry: { checkedBy: ghostName },
+    })
+    const fakeHit = fakeAssert.find((s) => /找不到这句话/.test(s))
+    check(fakeHit !== undefined,
+      '判据注册表：checkedBy 指向不存在的断言 → 必须报出来',
+      JSON.stringify(fakeAssert.slice(0, 2)))
+    report(fakeHit !== undefined, '判据注册表：假断言名会报')
   }
 
 }

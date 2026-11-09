@@ -160,10 +160,10 @@ export function canonicalReviewPassSnippet(round = 1) {
 }
 
 /**
- * 机器契约必须**逐字出现**的落点。
+ * 审查块必须**逐字出现**的落点。
  *
- * 分母是「谁会照着它写」，不是「谁提到了它」：判据给人读、两份模板给人抄、
- * `templates/agents-project.md` 给目标项目的 AI 读——四处都必须拿到同一份字面，
+ * 分母是「谁会照着它写」，不是「谁提到了它」：判据给人读、两份提案模板给人抄、
+ * `templates/agents-project.md` 给目标项目的 AI 读——每一处都必须拿到同一份字面，
  * 否则照着抄的人会写出一份机器读不到的东西。
  */
 export const CONTRACT_SITES = Object.freeze([
@@ -171,6 +171,19 @@ export const CONTRACT_SITES = Object.freeze([
   'templates/pull-request-template.md',
   '.github/pull_request_template.md',
   'templates/agents-project.md',
+])
+
+/**
+ * 冻结验收标准的示例必须逐字出现的落点。**比审查块少两处，这是刻意的。**
+ *
+ * `pf-done` 住在**工作记录**里，提案正文只放一行指针（`工作记录: <路径>`）。
+ * 要求提案模板里也印一遍，会逼人把验收标准抄进提案——那正好造出第二份会漂移的副本，
+ * 而「同一条标准两处不同步」正是这套机制要消灭的那类故障。
+ */
+export const DONE_SITES = Object.freeze([
+  'references/collaboration.md',
+  'templates/agents-project.md',
+  'templates/work-item.md',
 ])
 
 // ── 契约：高风险路径与参数 ─────────────────────────────────────────

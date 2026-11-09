@@ -1590,7 +1590,8 @@ group('[64] 发版规范可配置、审查怎么派、工作记录怎么放（�
   report(good.length === 0 && bare.length === 0 && Object.values(bad).every((v) => v.length > 0),
     '结构检查：通用项正反都分得清')
   // E. 本仓库自己：协作表里要能看出「主 Agent 派一个新上下文」。
-  check(/派一个新上下文/.test(contract), '本仓库契约的协作表写明审查怎么派')
+  check(/主 Agent 不能自审/.test(contract) && /references\/collaboration\.md/.test(contract),
+    '本仓库契约指向协作判据，并写明主 Agent 不能自审')
 }
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。

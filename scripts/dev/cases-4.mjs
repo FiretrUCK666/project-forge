@@ -25,24 +25,35 @@ import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
 import { executorVerdict } from './preflight.mjs'
 import {
-  isHighRiskPath, highRiskChanged, reviewRecordState, matchRoundsToComments,
+  isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
-  reviewBlocks, reviewFormatIssue, findRoundInComments,
+  readDoneBlock, readReviews, deriveOutcome, readWorkRecordPointer, readBasis,
+  readClosingIssue, readProtocolParams, fieldBlocks,
+  canonicalDoneSnippet, canonicalReviewSnippet,
+  DONE_FENCE, REVIEW_FENCE, CONTRACT_SITES, DONE_SITES,
 } from '../review-record.mjs'
 
-/** 造一条带字段块的审查评论：正文随便写，机器只读字段块。 */
-const reviewComment = (round, verdict, body = '正文：逐条发现写在下面。') => [
+/**
+ * 造一条审查评论：正文随便写，机器只读字段块。
+ *
+ * **没有 verdict 参数**，这是刻意的——结论不由审查者声明。要它「不通过」就给它
+ * 一条没过的标准（`fail`），要它「通过」就把 `fail` 留空并给了 `inject`。
+ */
+const reviewComment = (round, fail, inject = '删掉某处兜底分支 → 3 个用例变红 → 还原全绿', body = '') => [
   '## 独立审查 第 ' + String(round) + ' 轮',
   '',
-  '```pf-review',
+  '```' + REVIEW_FENCE,
   'round: ' + String(round),
-  'verdict: ' + verdict,
-  'blocking: 0',
-  'suggestions: 1',
+  'fail: ' + fail,
+  'inject: ' + inject,
   '```',
   '',
   body,
 ].join('\n')
+
+/** 造一份工作记录的正文：冻结若干条验收标准。 */
+const workRecord = (...lines) => ['# 工作记录：示例', '', '## 目标与验收', '', '```' + DONE_FENCE,
+  ...lines, '```', ''].join('\n')
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -577,425 +588,301 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     report(unquoteGitPath(esc) === 'templates/审查.md', '转义还原：中文路径不再漏判')
   }
 
-  // 1d) 中文数字轮次。契约与示例全是中文，写「第一轮」不该判无效。
-  {
-    const mk = (row) => `## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n| ${row} | s | 通过 | 0 / 1 |\n`
-    const cases = [['1', '1'], ['第 1 轮', '1'], ['第一轮', '1'], ['第九轮', '9'],
-      ['第十轮', '10'], ['第十一轮', '11'], ['第十二轮', '12'], ['第二十轮', '20']]
-    const wrong = cases.filter(([input, want]) => reviewRecordState(mk(input)).rows?.[0]?.round !== want)
-    check(wrong.length === 0, '八种写法都解析成正确的轮次（第一轮 → 1、第十二轮 → 12）',
-      JSON.stringify(wrong))
-
-    const st = reviewRecordState(mk('1'))
-    // **轮次的写法不再影响判定**：机器读 `round` 字段，正文标题怎么写都行。
-    // 这一组验的是「三种标题写法下，字段块照样被读到，且结论只由 verdict 决定」。
-    const heads = ['## 第一轮独立审查', '## 第 1 轮', '## round 1']
-    const missAll = heads.filter((h) => matchRoundsToComments(st, [reviewComment(1, '通过', h)]).ok === false)
-
-    // 反向：**正文里写「不通过」不影响判定**——结论只看字段。
-    // 索引说「通过」、字段块说「需要返工」→ 必须拦住（ok=false）。
-    const crossBlocked = matchRoundsToComments(st, [reviewComment(1, '需要返工', '## 第 1 轮 —— 不通过')]).ok === false
-
-    check(missAll.length === 0 && crossBlocked,
-      '三种标题写法下字段块都读得到；索引与字段对不上要拦住', JSON.stringify(missAll))
-    report(missAll.length === 0 && crossBlocked, '评论：标题怎么写都不影响，结论只看字段')
-  }
-
   // 2) 改动清单去重、排序、只留高风险。
   const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'], RISK)
   const okPick = picked.length === 2 && picked[0] === 'scripts/a.mjs' && picked[1] === 'scripts/b.mjs'
   check(okPick, 'from 一份清单里挑出高风险项：去重且排序', picked.join('、'))
   report(okPick, '改动清单：挑得对')
 
-  // 3) 审查记录的三种状态必须分得开：没有那一节 / 有但空着 / 填过了。
-  //    「有但空着」是最容易漏判的一种——模板本来就在，注释里还写着怎么填。
-  const bodyMissing = '## 改了什么\n\n改了判定逻辑。\n'
-  const bodyEmpty = '## 改了什么\n\n改。\n\n## 审查记录\n\n'
-    + '<!-- 怎么填：每轮一行 -->\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n|  |  |  |  |\n'
-  const bodyFilled = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n| 1 | sub-audit | 通过 | 0 / 2 |\n'
-  const bodyExempt = '## 审查记录\n\n本档不需要审查（只改了注释）。\n'
-  const sMissing = reviewRecordState(bodyMissing)
-  const sEmpty = reviewRecordState(bodyEmpty)
-  const sFilled = reviewRecordState(bodyFilled)
-  const sExempt = reviewRecordState(bodyExempt)
-  check(sMissing.section === false && sMissing.filled === false, '没有「审查记录」这一节 → 判为缺', JSON.stringify(sMissing))
-  report(sMissing.section === false, '审查记录：连节都没有')
-  check(sEmpty.section === true && sEmpty.filled === false,
-    '有那一节但只有表头空行（模板没填）→ 判为缺 —— 这是最容易漏判的一种', JSON.stringify(sEmpty))
-  report(sEmpty.filled === false, '审查记录：空模板不算填过')
-  check(sFilled.filled === true, '真的填了结论行 → 判为有', JSON.stringify(sFilled))
-  report(sFilled.filled === true, '审查记录：填过就认')
-  check(sExempt.filled === false,
-    '只在正文里写「本档不需要审查」→ **不算**有效记录（免审由机器按改动路径自己算，'
-    + '不由人自称；一句话谁都能写，而审查记录的作用是让漏审事后可核对）', JSON.stringify(sExempt))
-  report(sExempt.filled === false, '审查记录：免审不能靠自称')
-
-  // 半空的表格行也不算：只有轮次、审查者与结论都填了才认。
-  const bodyHalf = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
-    + '| 1 |  |  |  |\n'
-  check(reviewRecordState(bodyHalf).filled === false, '只有轮次、审查者与结论空着的行 → 判为缺',
-    JSON.stringify(reviewRecordState(bodyHalf)))
-  report(reviewRecordState(bodyHalf).filled === false, '审查记录：半空的行不算')
-
-  // 结论是「需要返工」而后面没补轮次 → 还没修完，不算通过。
-  const bodyRework = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
-    + '| 1 | sub-a | 需要返工 | 3 / 1 |\n'
-  check(reviewRecordState(bodyRework).filled === false,
-    '最后一轮结论是「需要返工」→ 判为缺（改完要再派一轮并在表里追加）',
-    JSON.stringify(reviewRecordState(bodyRework)))
-  report(reviewRecordState(bodyRework).filled === false, '审查记录：返工未复核不算通过')
-
-  // 两轮：先返工后通过 → 算通过，而且是按**最后一轮**判的。
-  const bodyTwoRounds = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
-    + '| 1 | sub-a | 需要返工 | 3 / 1 |\n| 2 | sub-b | 通过 | 0 / 2 |\n'
-  check(reviewRecordState(bodyTwoRounds).filled === true, '两轮、最后一轮通过 → 判为通过',
-    JSON.stringify(reviewRecordState(bodyTwoRounds)))
-  report(reviewRecordState(bodyTwoRounds).filled === true, '审查记录：两轮按最后一轮判')
-
-  // 3b) 评论那一层：正文是索引，评论才是痕迹。
-  //
-  // 判据的两半各管一件事：正文说「有哪几轮」，评论说「那些轮次真的发生过」。
-  // 只核正文时，执行者自己写一行就够了——而独立审查的全部意义恰恰是它不是执行者给的。
+  // 3) 冻结的验收标准：读得到、注释里不算、空块算未冻结。
   {
-    const state = reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
-      + '| --- | --- | --- | --- |\n| 1 | sub-a | 通过 | 0 / 2 |\n')
+    const good = readDoneBlock(workRecord('C1: preflight 退出码 0', 'C2: selftest 全绿'))
+    check(good.found && good.ids.size === 2 && good.broken.length === 0,
+      '冻结块读得到两条标准', JSON.stringify([...good.ids.keys()]))
+    report(good.found && good.ids.size === 2, '冻结标准：读得到')
 
-    // 没给评论文件 → 不判评论那一层，而且明说「没查」。
-    const none = matchRoundsToComments(state, undefined)
-    check(none.checked === false && none.ok === true,
-      '调用方没提供评论时：不判评论那一层，并标明「没查」——「没查」与「查过没问题」必须分得开',
-      JSON.stringify(none))
-    report(none.checked === false, '评论层：没给就明说没查')
+    // **注释里的块不算**：模板与示例都写在注释里，它们是给人看的，不是记录。
+    const inComment = readDoneBlock('<!--\n' + workRecord('C1: x') + '\n-->')
+    check(inComment.found === false, '块写在 HTML 注释里 → 不算冻结', String(inComment.found))
+    report(inComment.found === false, '冻结标准：注释里不算')
 
-    // 评论里没有那一轮 → 不通过。
-    const miss = matchRoundsToComments(state, ['这条评论只说工作记录更新了，没提轮次与结论'])
-    check(miss.ok === false && miss.problems.length === 1 && /第 1 轮/.test(miss.problems[0]),
-      '正文索引了第 1 轮、评论里找不到 → 不通过，并点名是哪一轮', JSON.stringify(miss.problems))
-    report(miss.ok === false, '评论层：找不到就不通过')
+    // 有块但一条标准都没有 = 还没冻结，不是「通过」。
+    const empty = readDoneBlock('## 目标与验收\n\n```' + DONE_FENCE + '\n```\n')
+    check(empty.found && empty.ids.size === 0, '空块 → 有块但零条标准（未冻结）',
+      JSON.stringify({ found: empty.found, n: empty.ids.size }))
+    report(empty.found && empty.ids.size === 0, '冻结标准：空块算未冻结')
 
-    // **「写得够不够清楚」不判了**（见 saysSomething 的注释：七种判法都误伤真结论）。
-    // 这里只验「空评论被排掉」——那是这条判据唯一还敢断言的内容质量下限。
-    const empty = matchRoundsToComments(state, [''])
-    check(empty.ok === false,
-      '空评论 → 不算这一轮的痕迹（连「发过」都不算）',
-      JSON.stringify(empty.problems))
-    report(empty.ok === false, '评论层：空评论不算')
-
-    // 评论里有一轮内容对得上 → 通过。
-    const good = reviewComment(1, '通过', '## 第 1 轮 —— 通过\n\n审了 scripts/ 下的判定逻辑，零阻塞。')
-    const ok = matchRoundsToComments(state, [good])
-    check(ok.ok === true && ok.checked === true && ok.matched.length === 1,
-      '评论里找得到那一轮且内容对得上 → 通过', JSON.stringify(ok))
-    report(ok.ok === true, '评论层：对得上就通过')
-
-    // 两轮：第一轮不通过、第二轮通过。评论里只有第一条 → 不通过，因为缺第二轮。
-    const twoRounds = reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
-      + '| --- | --- | --- | --- |\n| 1 | sub-a | 需要返工 | 3 / 1 |\n| 2 | sub-b | 通过 | 0 / 1 |\n')
-    const partial = matchRoundsToComments(twoRounds, [good])
-    check(partial.ok === false && partial.problems.some((p) => /第 2 轮/.test(p)),
-      '两轮里只发了一条评论 → 不通过，缺的那轮要点名', JSON.stringify(partial.problems))
-    report(partial.ok === false, '评论层：缺一轮也算缺')
+    // id 大小写不敏感：手写 c1 与 C1 是同一条。审查要按 id 回指，大小写不该成为陷阱。
+    const lower = readDoneBlock(workRecord('c1: 小写写的'))
+    check(lower.ids.has('C1'), '小写 id 归一成大写，查找不分大小写', JSON.stringify([...lower.ids.keys()]))
+    report(lower.ids.has('C1'), '冻结标准：id 不分大小写')
   }
 
-  // 3d) 字段块：**机器只读那几行，不读散文。**
-  //
-  // 这一组是整套判据的地基。它要证明的只有一件事：
-  // **正文里怎么写，都不影响判定。**
+  // 3b) 审查块：只读 fail / inject / escalate，**没有 verdict**。
   {
-    const mk = (o) => [
-      '```pf-review',
-      `round: ${o.round}`,
-      `verdict: ${o.verdict}`,
-      ...(o.blocking === undefined ? [] : [`blocking: ${o.blocking}`]),
-      ...(o.suggestions === undefined ? [] : [`suggestions: ${o.suggestions}`]),
-      '```',
-    ].join('\n')
+    const one = readReviews([reviewComment(1, 'C2')])
+    check(one.rounds.length === 1 && one.rounds[0].fail.join(',') === 'C2' && one.broken.length === 0,
+      '一轮审查读得到 fail', JSON.stringify(one.rounds))
+    report(one.rounds.length === 1, '审查块：读得到')
 
-    const one = reviewBlocks('## 独立审查 第 1 轮\n\n' + mk({ round: 1, verdict: '需要返工', blocking: 3 }))
-    check(one.blocks.length === 1 && one.blocks[0].verdict === '需要返工',
-      '正常字段块 → 读出结论', JSON.stringify(one.blocks))
-    check(one.blocks[0].blocking === 3, '  blocking 读成数字', String(one.blocks[0].blocking))
+    // 同一轮出现两个不同的 fail 集合 → 机器判不了哪个作废，一律算格式错。
+    const two = readReviews([reviewComment(1, 'C1'), reviewComment(1, 'C2')])
+    check(two.broken.length > 0 && /两个不同的 fail 集合/.test(two.broken[0].why),
+      '同一轮两个不同 fail 集合 → 格式错（要改口就删旧的那条）', JSON.stringify(two.broken.map((b) => b.why)))
+    report(two.broken.length > 0, '审查块：同一轮一个说法')
 
-    // **正文里的措辞一律不影响判定。** 这几句正是之前九轮里每轮都会漏的那些写法。
-    const tricky = [
-      '结论：需要返工。其余 5 项静态检查通过。',
-      '需要返工，但通过不代表没问题。',
-      '需要返工。未正式通过，通不过，通过不了。',
-      '第 1 轮：第 2 轮那三条还没修。',
-      '通过。上一轮需要返工的三条已全部修完。',
-    ]
-    const wrongTricky = tricky.filter((txt) => {
-      const r = reviewBlocks(mk({ round: 1, verdict: '需要返工' }) + '\n\n' + txt)
-      return r.blocks[0]?.verdict !== '需要返工'
+    // 同一轮的两个说法完全相同时，不算冲突（重复发一条不该判红）。
+    const same = readReviews([reviewComment(1, 'C1'), reviewComment(1, 'C1')])
+    check(same.broken.length === 0 && same.rounds.length === 1, '同一轮两次说同一件事 → 不算冲突',
+      JSON.stringify(same.rounds.length))
+    report(same.broken.length === 0, '审查块：重复一致不算冲突')
+
+    // 围栏被 `>` 引用的是别人的话，不是本评论的结论。
+    const quoted = readReviews(['> ```' + REVIEW_FENCE + '\n> round: 1\n> fail: C1\n> ```'])
+    check(quoted.rounds.length === 0, '被引用的块不算本评论的结论', JSON.stringify(quoted.rounds.length))
+    report(quoted.rounds.length === 0, '审查块：引用不算')
+  }
+
+  // 3c) 结论由标准推导：**这是整套机制的枢纽**。
+  {
+    const ids = readDoneBlock(workRecord('C1: 第一', 'C2: 第二')).ids
+    const out = (comments, opt = {}) => deriveOutcome({
+      done: ids, rounds: readReviews(comments).rounds,
+      reworkCap: opt.cap ?? 5, waived: opt.waived ?? false,
     })
-    check(wrongTricky.length === 0,
-      '正文怎么写都不影响判定（5 种以前会翻面的措辞）', wrongTricky.join(' / '))
 
-    // 缺字段 / 值不对 → 报出来，不静默。
-    const bads = [
-      ['没有块', '审过了，通过。', '没有'],
-      ['verdict 不在表里', mk({ round: 1, verdict: '差不多' }), 'verdict'],
-      ['round 不是数字', mk({ round: '一', verdict: '通过' }), 'round'],
-      ['缺 round', '```pf-review\nverdict: 通过\n```', 'round'],
-    ]
-    const badWrong = bads.filter(([, txt, kw]) => {
-      const r = reviewFormatIssue(txt)
-      return r.ok !== false || !String(r.why).includes(kw)
-    })
-    check(badWrong.length === 0, '坏块都报出原因（不静默跳过）',
-      badWrong.map(([l]) => l).join(' / '))
-    // **坏块要报「格式不对」，不能折叠成「找不到」。**
-    // 实测 verdict 带中文句号原先得到的是「在评论里找不到」——而真原因是格式。
-    {
-      const dotted = reviewFormatIssue('```pf-review\nround: 1\nverdict: 通过。\n```')
-      check(dotted.ok === false && /verdict/.test(String(dotted.why)),
-        'verdict 带句号 → 报「verdict 只能是…」', String(dotted.why))
-      report(dotted.ok === false, '字段块：坏块报格式，不折叠成找不到')
-    }
-    report(badWrong.length === 0 && wrongTricky.length === 0, '字段块：只读字段，不读散文')
+    // 零轮：高风险改动没有审查记录，直接不成立。
+    check(out([]).pass === false && /没有任何一轮/.test(out([]).why), '零轮 → 不通过', out([]).why)
+    report(out([]).pass === false, '推导：零轮不通过')
+
+    // 引用了清单里没有的标准 → 格式错。**审查不能发明标准。**
+    const unknown = out([reviewComment(1, 'C99')])
+    check(unknown.pass === false && /发明标准/.test(unknown.why), '未知 id → 拦下并说清「不能发明标准」', unknown.why)
+    report(unknown.pass === false, '推导：不许发明标准')
+
+    // fail 空 + 交了 inject → 通过。这是唯一的「通过」路径。
+    const okOut = out([reviewComment(1, '')])
+    check(okOut.pass === true, 'fail 空 + 有 inject → 通过', okOut.why)
+    report(okOut.pass === true, '推导：通过')
+
+    // fail 空但没交 inject → 不通过。「通过」必须交故障注入。
+    const noInject = out([reviewComment(1, '', '')])
+    check(noInject.pass === false && /故障注入/.test(noInject.why),
+      'fail 空但没交 inject → 不通过（通过要交故障注入）', noInject.why)
+    report(noInject.pass === false, '推导：通过要交故障注入')
+
+    // 同一标准连续两轮 → 止损。这是抓「方向错了」的那条。
+    const repeat = out([reviewComment(1, 'C1'), reviewComment(2, 'C1')])
+    check(repeat.stopLoss === 'repeat', '同一标准连续两轮 → 止损', String(repeat.stopLoss))
+    report(repeat.stopLoss === 'repeat', '推导：同标准连续两轮止损')
+
+    // 同一标准隔一轮再出现 → **不**触发止损（否则正常的来回会被误停）。
+    const apart = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, 'C1')])
+    check(apart.stopLoss === null, '同标准隔一轮 → 不触发止损', String(apart.stopLoss))
+    report(apart.stopLoss === null, '推导：隔轮不算止损')
+
+    // 轮次超上限 → 止损 cap。
+    const cap = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, 'C1')], { cap: 2 })
+    check(cap.stopLoss === 'cap', '轮次超过上限 → 止损 cap', String(cap.stopLoss))
+    report(cap.stopLoss === 'cap', '推导：超上限止损')
+
+    // **豁免只免止损，不免「还有标准没过」**。这两条成对存在——
+    // 少一条，就等于允许「带个标签就合」。
+    const waivedFail = out([reviewComment(1, 'C1'), reviewComment(2, 'C1')], { waived: true })
+    check(waivedFail.pass === false && /豁免不了/.test(waivedFail.why),
+      '带豁免但最后一轮仍有标准没过 → 仍然不通过', waivedFail.why)
+    report(waivedFail.pass === false, '推导：豁免不免标准没过')
+
+    const waivedOk = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, '')],
+      { cap: 2, waived: true })
+    check(waivedOk.pass === true && /豁免/.test(waivedOk.why),
+      '带豁免、最后一轮全过 → 通过，并在报告里说明豁免过', waivedOk.why)
+    report(waivedOk.pass === true, '推导：豁免救止损')
+
+    // escalate → 停自动返工交人。
+    const esc = '```' + REVIEW_FENCE + '\nround: 1\nfail: C1\nescalate: 这条标准本身有问题\n```'
+    const escOut = deriveOutcome({ done: ids, rounds: readReviews([esc]).rounds, reworkCap: 5, waived: false })
+    check(escOut.pass === false && /交人/.test(escOut.why), 'escalate → 停自动返工、交人', escOut.why)
+    report(escOut.pass === false, '推导：escalate 交人')
   }
 
-  // 3e) 一轮一条评论：**第 1 轮的块不认领第 2 轮**。
+  // 3d) 提案正文里那几行：工作记录指针、实现依据、关联问题。
   {
-    const cmt = (round, verdict) => ['## 独立审查', '', '```pf-review',
-      'round: ' + round, 'verdict: ' + verdict, '```', '', '正文。'].join('\n')
-    const rv1 = findRoundInComments('1', '需要返工', [cmt(1, '需要返工'), cmt(2, '通过')])
-    const rv2 = findRoundInComments('2', '通过', [cmt(1, '需要返工'), cmt(2, '通过')])
-    const cross = findRoundInComments('1', '通过', [cmt(1, '需要返工'), cmt(2, '通过')])
-    check(rv1 !== undefined, '第 1 轮找得到', String(rv1))
-    check(rv2 !== undefined, '第 2 轮找得到', String(rv2))
-    check(cross === undefined, '拿第 1 轮去找「通过」→ 找不到（不串轮）', String(cross))
-    report(rv1 !== undefined && rv2 !== undefined && cross === undefined, '评论：一条评论只认领自己那一轮')
+    check(readWorkRecordPointer('## 为什么\n\n工作记录: docs/work/a.md\n').path === 'docs/work/a.md',
+      '工作记录指针读得到', '')
+    check(readWorkRecordPointer('工作记录：`docs/work/b.md`').path === 'docs/work/b.md',
+      '指针带反引号也读得到', '')
+    check(readWorkRecordPointer('没有这一行').path === undefined, '没有指针 → undefined', '')
+    report(readWorkRecordPointer('工作记录: x.md').path === 'x.md', '正文：工作记录指针')
+
+    check(readBasis('## 实现依据\n\n无需设计文档：这是修一处判定笔误\n').ok === true,
+      '实现依据写清了 → 通过', '')
+    // **占位写法不认**：这几句共同的特征是「读者读完不知道改动凭什么成立」。
+    const hollow = ['按 issue 实现', '按需求实现', '见 issue', '见需求', 'TBD', 'todo', '无', '同上', '略']
+      .filter((v) => readBasis('## 实现依据\n\n' + v + '\n').ok === true)
+    check(hollow.length === 0, '九种占位写法一个都不认', hollow.join('、'))
+    report(hollow.length === 0, '正文：占位依据不认')
+    check(readBasis('## 改了什么\n\nx').ok === false, '缺「## 实现依据」这一栏 → 不成立', '')
+    report(readBasis('## 改了什么\n\nx').ok === false, '正文：缺栏目不成立')
+
+    check(readClosingIssue('Closes #12') === '12' && readClosingIssue('Fixes #7') === '7'
+      && readClosingIssue('resolve #3') === '3', '三种关联写法都认', '')
+    check(readClosingIssue('没有关联') === undefined, '没有关联 → undefined', '')
+    report(readClosingIssue('Fixes #1') === '1', '正文：关联问题')
   }
 
-  // 3e2) 一条评论对某一轮**只能有一个结论**。
+  // 3e) 协作参数从契约读：**这些是项目的决定，不是工具的默认值**。
+  {
+    const agents = ['## 协作参数', '', '| 参数 | 值 | 含义 |', '| --- | --- | --- |',
+      '| `rework_cap` | 3 | x |', '| `waiver_label` | `pf:ok` | y |', ''].join('\n')
+    const got = readProtocolParams(agents, { rework_cap: 2, waiver_label: 'z' })
+    check(got.rework_cap === 3 && got.waiver_label === 'pf:ok',
+      '参数表覆盖默认值', JSON.stringify(got))
+    report(got.rework_cap === 3, '参数：从契约读')
+
+    const fallback = readProtocolParams('', { rework_cap: 2, waiver_label: 'z' })
+    check(fallback.rework_cap === 2 && fallback.waiver_label === 'z', '没有那张表 → 用默认值',
+      JSON.stringify(fallback))
+    report(fallback.rework_cap === 2, '参数：缺表用默认')
+
+    // 占位行不该被当成取值——否则「还没填」会变成「上限是 <数字>」。
+    const placeholder = readProtocolParams('## 协作参数\n\n| 参数 | 值 | 含义 |\n| --- | --- | --- |\n| `rework_cap` | `<数字>` | x |\n',
+      { rework_cap: 2 })
+    check(placeholder.rework_cap === 2, '占位值不当真 → 落回默认', String(placeholder.rework_cap))
+    report(placeholder.rework_cap === 2, '参数：占位不生效')
+  }
+
+  // 3f) **机器契约逐字一致**：示例由脚本生成，落点必须逐字相同。
   //
-  // 两个洞同一个根：原先只问「有没有一块对得上」，不问「这条评论整体说了什么」。
-  //   一、先写「通过」再「订正为需要返工」→ 两块都在，作废的那句继续生效；
-  //   二、只贴模板示例（在 HTML 注释里）→ 连结论都没写也算痕迹。
+  // 这是本次改动最要紧的一条判据。早先的做法是「在五处各写一遍格式，用正则看每处有没有
+  // 提到关键词」——改字段时改漏一处不会有任何东西出声。现在改的是精确一致性。
   {
-    const blk = (r, v) => ['```pf-review', 'round: ' + r, 'verdict: ' + v, '```'].join('\n')
-    const hit = (round, verdict, cmts) => findRoundInComments(round, verdict, cmts) !== undefined
+    const doneSnippet = canonicalDoneSnippet()
+    const reviewSnippet = canonicalReviewSnippet(1)
+    const badDone = DONE_SITES.filter((rel) => {
+      const p = join(SKILL_ROOT, rel)
+      return !existsSync(p) || !readFileSync(p, 'utf8').includes(doneSnippet)
+    })
+    check(badDone.length === 0, `冻结块示例在 ${DONE_SITES.length} 处逐字存在`, badDone.join('、'))
+    report(badDone.length === 0, '契约：冻结块示例逐字一致')
 
-    const fixed = '## 第 1 轮\n\n' + blk(1, '通过') + '\n\n订正为：\n\n' + blk(1, '需要返工')
-    check(hit('1', '通过', [fixed]) === false, '同一评论里两个结论 → 自相矛盾，找旧的也不命中')
-    check(hit('1', '需要返工', [fixed]) === false, '  找新的同样不命中（要改口就发新评论）')
+    const badReview = CONTRACT_SITES.filter((rel) => {
+      const p = join(SKILL_ROOT, rel)
+      return !existsSync(p) || !readFileSync(p, 'utf8').includes(reviewSnippet)
+    })
+    check(badReview.length === 0, `审查块示例在 ${CONTRACT_SITES.length} 处逐字存在`, badReview.join('、'))
+    report(badReview.length === 0, '契约：审查块示例逐字一致')
 
-    const demo = '格式是这样：\n\n<!--\n' + blk(1, '通过') + '\n-->\n\n（我还没审）'
-    check(hit('1', '通过', [demo]) === false, '注释里的块不算痕迹（那是给人看的示例）')
-
-    check(hit('1', '通过', ['## 第 1 轮\n\n' + blk(1, '通过')]) === true, '干净的一块 → 命中')
-    check(hit('1', '通过', [blk(1, '通过') + '\n\n补充：' + blk(1, '通过')]) === true,
-      '两块但结论一致 → 仍命中')
-    check(hit('1', '需要返工', [blk(1, '需要返工') + '\n\n' + blk(2, '通过')]) === true,
-      '两块属于不同轮次 → 各认各的')
-
-    report(true, '评论：一条评论对一轮只能有一个结论，注释不算')
+    // **反例必须真的会翻**：把字段名改一个字，生成的示例就对不上了。
+    const tampered = reviewSnippet.replace('fail:', 'fails:')
+    check(tampered !== reviewSnippet, '示例里改一个字段名，字面就不同（判据能抓住改动）', '')
   }
 
-    // 3e3) 第十一轮：跨评论改口、引用块、未闭合注释。
+  // 4) 端到端：真的跑那个脚本。**每一条都对应一类必须防住的失败。**
   {
-    const blk = (r, v) => ['```pf-review', 'round: ' + r, 'verdict: ' + v, '```'].join('\n')
-    const hit = (round, verdict, cmts) => findRoundInComments(round, verdict, cmts) !== undefined
+    const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review-record.mjs'), ...args],
+      { encoding: 'utf8', input })
+    const d = fixture('review-record', {})
+    mkdirSync(join(d, 'docs', 'work'), { recursive: true })
+    writeFileSync(join(d, 'AGENTS.md'), [
+      '# 契约', '', '## 高风险路径', '', '| 路径 | 为什么 |', '| --- | --- |',
+      '| `scripts/` | 判定逻辑 |', '', '## 协作参数', '', '| 参数 | 值 | 含义 |',
+      '| --- | --- | --- |', '| `rework_cap` | 2 | x |', '| `waiver_label` | `pf:human-approved` | y |', '',
+    ].join('\n'), 'utf8')
+    const recRel = 'docs/work/2026-11-09-示例.md'
+    writeFileSync(join(d, recRel), workRecord('C1: preflight 退出码 0', 'C2: selftest 全绿'), 'utf8')
 
-    // 跨评论改口：两条并存、结论相反 → 一律不算（要改口就删掉旧的）。
-    const pair = ['## 第 1 轮\n\n' + blk(1, '通过'), '## 订正\n\n' + blk(1, '需要返工')]
-    check(hit('1', '通过', pair) === false, '跨评论结论相反 → 找旧的也不命中')
-    check(hit('1', '需要返工', pair) === false, '  找新的同样不命中（要删掉旧的）')
-    check(hit('1', '需要返工', ['## 订正\n\n' + blk(1, '需要返工')]) === true,
-      '  删掉旧的、只留新的 → 命中')
+    const bodyPath = join(d, 'body.md')
+    const commentsPath = join(d, 'comments.md')
+    const changedPath = join(d, 'changed.txt')
+    const okBody = ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修一处判定笔误', '',
+      '工作记录: ' + recRel, '', '## 怎么验证的', '', '跑过了', ''].join('\n')
+    writeFileSync(bodyPath, okBody, 'utf8')
+    writeFileSync(changedPath, 'scripts/review-record.mjs\n' + recRel + '\n', 'utf8')
+    writeFileSync(commentsPath, reviewComment(1, ''), 'utf8')
 
-    // 引用别人的块：不算本评论的结论，也不该把整条判红。
-    const Q = String.fromCharCode(96, 96, 96) + 'pf-review'
-    const quoted = ['> ' + Q, '> round: 5', '> verdict: 通过', '> ' + String.fromCharCode(96, 96, 96)].join('\n')
-    check(hit('5', '通过', [quoted]) === false, '被 > 引用的块不算本评论的结论')
-    check(reviewBlocks(quoted).broken.length === 0, '  引用块不该被当成「坏块」（会把真结论误判红）')
+    const run = (extra = []) => cli(['--root', d, '--changed', changedPath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes', ...extra])
+    const label = (r) => `exit=${r.status} ${((r.stderr ?? '') + (r.stdout ?? '')).slice(0, 100)}`
 
-    // 未闭合的注释：后面全算注释。
-    check(hit('1', '通过', ['<!-- 下面是模板\n\n' + blk(1, '通过')]) === false,
-      '未闭合注释里的块不算')
-    check(hit('1', '通过', ['<!-- 说明 -->\n\n' + blk(1, '通过')]) === true,
-      '  成对注释外面的块仍算')
+    // 基准：全部成立 → 0。
+    const base = run()
+    check(base.status === 0, '端到端：冻结标准 + 审查通过 + 故障注入 → 退出码 0', label(base))
+    report(base.status === 0, '端到端：通过')
 
-    report(hit('1', '需要返工', pair) === false && hit('1', '通过', [quoted]) === false,
-      '评论：跨评论改口、引用块、未闭合注释都验过')
+    // 只改文档 → 不要求审查记录，且**明说**这一趟没查。
+    const docOnly = cli(['--root', d, '--changed', '-', '--body', bodyPath, '--comments', commentsPath,
+      '--expect-changes'], 'README.md\n')
+    check(docOnly.status === 0 && /不落在高风险路径/.test(docOnly.stdout ?? ''),
+      '只改文档 → 放行并明说不需要', label(docOnly))
+    report(docOnly.status === 0, '端到端：低档免审')
+
+    // 空清单 → 1。**「没算出来」不能读成「没动高风险路径」。**
+    const emptyList = cli(['--root', d, '--changed', '-', '--body', bodyPath, '--comments', commentsPath,
+      '--expect-changes'], '')
+    check(emptyList.status === 1, '空改动清单 + --expect-changes → 退出码 1', label(emptyList))
+    report(emptyList.status === 1, '端到端：空清单不放过')
+
+    // 未知 id → 1。
+    writeFileSync(commentsPath, reviewComment(1, 'C99'), 'utf8')
+    const unknownRun = run()
+    check(unknownRun.status === 1 && /发明标准/.test(unknownRun.stderr ?? ''), '未知 id → 退出码 1', label(unknownRun))
+    report(unknownRun.status === 1, '端到端：未知 id 拦下')
+
+    // 通过但没交故障注入 → 1。
+    writeFileSync(commentsPath, reviewComment(1, '', ''), 'utf8')
+    const noInject = run()
+    check(noInject.status === 1 && /故障注入/.test(noInject.stderr ?? ''), '通过但无故障注入 → 退出码 1', label(noInject))
+    report(noInject.status === 1, '端到端：通过要交注入')
+
+    // 指针指向一个不在改动清单里的文件 → 1。**拿旧标准给新改动背书。**
+    writeFileSync(commentsPath, reviewComment(1, ''), 'utf8')
+    const stalePath = join(d, 'changed-stale.txt')
+    writeFileSync(stalePath, 'scripts/review-record.mjs\n', 'utf8')
+    const stale = cli(['--root', d, '--changed', stalePath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes'])
+    check(stale.status === 1 && /不在本次改动里/.test(stale.stderr ?? ''), '指针指向未改动文件 → 退出码 1', label(stale))
+    report(stale.status === 1, '端到端：陈旧指针拦下')
+
+    // 缺实现依据 → 1。
+    writeFileSync(join(d, 'body-nobasis.md'),
+      ['## 改了什么', '', 'x', '', '工作记录: ' + recRel, ''].join('\n'), 'utf8')
+    const noBasis = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-nobasis.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(noBasis.status === 1 && /实现依据/.test(noBasis.stderr ?? ''), '缺实现依据 → 退出码 1', label(noBasis))
+    report(noBasis.status === 1, '端到端：实现依据必填')
+
+    // 没给 --comments → 1。**「没查」与「查过没问题」必须分得开。**
+    const noComments = cli(['--root', d, '--changed', changedPath, '--body', bodyPath, '--expect-changes'])
+    check(noComments.status === 1 && /未核对/.test(noComments.stderr ?? ''), '没给 --comments → 退出码 1', label(noComments))
+    report(noComments.status === 1, '端到端：没核对不算通过')
+
+    // 参数不全 → 2（用法错，不是判定错）。
+    const misuse = cli(['--changed'], '')
+    check(misuse.status === 2, '参数不全 → 退出码 2（用法错，与判定错分开）', label(misuse))
+    report(misuse.status === 2, '端到端：用法错分开报')
+
+    // 两种 stdin 同时用 → 2，并说清怎么改。
+    const bothStdin = cli(['--changed', '-', '--body', '-'], '')
+    check(bothStdin.status === 2 && /只能读一次/.test(bothStdin.stderr ?? ''), '两个 stdin 同用 → 退出码 2 并说明', label(bothStdin))
+    report(bothStdin.status === 2, '端到端：双 stdin 报清楚')
+
+    // **高风险表是骨架占位时**：明说「这一趟没查」，退出码 0（不卡死新项目）。
+    const bare = fixture('review-record-bare', {})
+    writeFileSync(join(bare, 'AGENTS.md'), '## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n| `<替换成第一处>` | 占位 |\n', 'utf8')
+    const bareRun = cli(['--root', bare, '--changed', '-', '--body', bodyPath, '--comments', commentsPath], 'README.md\n')
+    check(bareRun.status === 0 && /没有做任何审查记录检查/.test(bareRun.stderr ?? ''),
+      '高风险表还是占位 → 明说没查，退出码 0', label(bareRun))
+    report(bareRun.status === 0, '端到端：空表明说没查')
   }
 
-    // 3f) 索引表：结论格**只认那两个字**，不从散文里猜。
-  {
-    const st = (c) => reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
-      + `| --- | --- | --- | --- |\n| 1 | a | ${c} | 0 |\n`)
-    const notVerdict = ['待 CI 通过', '未复测，等 CI 通过后再定', '未复测（等 CI 通过）',
-      '通过率 80%', '等 CI', '未正式通过', '差不多']
-    const bad = notVerdict.filter((c) => st(c).filled !== false)
-    check(bad.length === 0, '索引格写别的 → 不算一行', bad.join(' / '))
-    const isVerdict = ['通过', '需要返工']
-    const bad2 = isVerdict.filter((c) => st(c).rows.length !== 1)
-    check(bad2.length === 0, '索引格写那两个词 → 算一行', bad2.join(' / '))
-    report(bad.length === 0 && bad2.length === 0, '索引表：结论格只认那两个字')
-
-    // **认不出来的行要报出来，不能静默丢。**
-    //
-    // 实测：| 2 | sub-b | 需要返工（见评论） | 那一行原先被静默丢掉，
-    // 剩下的第 1 轮「通过」当上了最后一轮 → 门禁放行。越认真写备注越容易触发。
-    {
-      const head = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
-      const withNote = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n'
-        + '| 2 | sub-b | 需要返工（见评论） | 3 / 1 |\n')
-      // 少一格的行同样是「想做一条记录但写坏了」，也要报。
-    const head2 = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
-    const shortRow = reviewRecordState(head2 + '| 1 | sub-a | 通过 | 0 |\n| 2 | sub-b 需要返工 |\n')
-    check(shortRow.filled === false && (shortRow.skipped ?? []).length === 1,
-      '少一格的行 → 判红并点名', JSON.stringify(shortRow.skipped))
-        check(withNote.filled === false, '索引行带备注认不出 → 判红，不静默丢', String(withNote.filled))
-      check((withNote.skipped ?? []).length === 1, '  并且点名是那一行', JSON.stringify(withNote.skipped))
-      const clean = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n')
-      check((clean.skipped ?? []).length === 0, '干净的表没有 skipped', JSON.stringify(clean.skipped))
-      report(withNote.filled === false && (withNote.skipped ?? []).length === 1,
-        '索引表：认不出来的行要报，不能静默丢')
-    }
-  }
-
-  // 3h) 高风险表的四态。
-  {
-    const T = (...rows) => '## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n'
-      + rows.map((r) => `| ${r} | x |`).join('\n') + '\n'
-    const states = [
-      ['没有这一节', readHighRiskTable('# 正文\n').state, 'noTable'],
-      ['全是尖括号占位', readHighRiskTable(T('`<第一处>`', '`<第二处>`')).state, 'notFilled'],
-      ['英文占位 TBD', readHighRiskTable(T('TBD')).state, 'notFilled'],
-      ['中文占位「待定」', readHighRiskTable(T('待定')).state, 'notFilled'],
-      ['一真一占位（混写）', readHighRiskTable(T('`scripts/` 与 `<另一处>/`')).state, 'partialFill'],
-      ['一真一 TBD', readHighRiskTable(T('`scripts/`', 'TBD')).state, 'partialFill'],
-      ['都填了', readHighRiskTable(T('`scripts/`', '`templates/`')).state, 'filled'],
-    ]
-    const wrong = states.filter(([, got, want]) => got !== want)
-    check(wrong.length === 0, '四态：noTable / notFilled / partialFill / filled 都对',
-      wrong.map(([l, g, w]) => `${l}: ${g} 应 ${w}`).join(' / '))
-    report(wrong.length === 0, '高风险表：四态与两种占位写法都验过')
-  }
-
-  // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。
-  const onlyComment = '## 审查记录\n\n<!-- | 1 | 别人 | 通过 | -->\n'
-  check(reviewRecordState(onlyComment).filled === false,
-    '注释里的示例不算填过（去掉注释这一步不能漏）')
-  report(reviewRecordState(onlyComment).filled === false, '审查记录：注释不算')
-
-  // 4) 端到端：真的跑那个脚本，三种输入三种退出码。
-  const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review-record.mjs'), ...args],
-    { encoding: 'utf8', input })
-  const dir2 = fixture('review-record', {})
-  const bodyPath = join(dir2, 'body.md')
-  writeFileSync(bodyPath, bodyEmpty, 'utf8')
-  const r1 = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
-  check(r1.status === 1 && /审查记录缺失/.test(r1.stderr ?? ''), '脚本：高风险改动 + 空模板 → 退出码 1',
-    `exit=${r1.status} ${(r1.stderr ?? '').slice(0, 120)}`)
-  report(r1.status === 1, '脚本：拦住没填的')
-
-  writeFileSync(bodyPath, bodyFilled, 'utf8')
-  // 给了正文还不算：**评论那一层必须也对得上**。这两条用例成对存在——
-  // 少一条，就等于允许「只填正文、评论一条不发」通过，而那正是这次返工要治的病。
-  const commentsPath = join(dir2, 'comments.md')
-  writeFileSync(commentsPath, reviewComment(1, '通过', '## 第 1 轮 —— 通过\n\n') + '\n'
-    + '审了 scripts/ 下的判定逻辑。逐条：三条建议、零阻塞。文件与行都核过，'
-    + '判定与用例能对上，没有发现门禁被改松的地方。\n', 'utf8')
-
-  const rNoComments = cli(['--changed', '-', '--body', bodyPath], 'scripts/survey.mjs\n')
-  check(rNoComments.status === 1 && /评论那一层未核对/.test(rNoComments.stderr ?? ''),
-    '脚本：正文填了但没给评论 → 退出码 1（索引对不上评论，不算通过）',
-    `exit=${rNoComments.status} ${(rNoComments.stderr ?? '').slice(0, 120)}`)
-  report(rNoComments.status === 1, '脚本：只填正文不写评论 → 拦住')
-
-  const r2 = cli(['--changed', '-', '--body', bodyPath, '--comments', commentsPath], 'scripts/survey.mjs\n')
-  check(r2.status === 0 && /评论核对/.test(r2.stdout ?? ''), '脚本：正文与评论都对得上 → 退出码 0',
-    `exit=${r2.status} ${(r2.stderr ?? '').slice(0, 120)}`)
-  report(r2.status === 0, '脚本：两层都对上才放行')
-
-  const r3 = cli(['--changed', '-', '--body', bodyPath], 'README.md\n')
-  check(r3.status === 0 && /不需要审查记录/.test(r3.stdout ?? ''), '脚本：只改文档 → 不要求审查记录',
-    `exit=${r3.status} ${(r3.stdout ?? '').slice(0, 120)}`)
-  report(r3.status === 0, '脚本：低档免审')
-
-  const r4 = cli(['--changed'], '')
-  check(r4.status === 2 && /都要给/.test(r4.stderr ?? ''), '脚本：参数不全 → 退出码 2（用法错，不是判定错）',
-    `exit=${r4.status}`)
-  report(r4.status === 2, '脚本：用法错分得开')
-
-  // 空清单 + --expect-changes：**空不能被读成「没动高风险路径」**。
-  // 浅克隆里没有合并基点时 diff 会返回空，而那会被读成通过——门禁绿着放行，什么都没拦。
-  const r5 = cli(['--changed', '-', '--body', bodyPath, '--expect-changes'], '')
-  check(r5.status === 1 && /清单是空的/.test(r5.stderr ?? ''),
-    '清单为空 + --expect-changes → 退出码 1（不许把「没算出来」读成「没动高风险路径」）',
-    `exit=${r5.status} ${(r5.stderr ?? '').slice(0, 120)}`)
-  report(r5.status === 1, '脚本：空清单不当通过')
-
-  // 反例：不带那个开关时，空清单是允许的（本地「这轮只改了别处」是正当用法）。
-  const r6 = cli(['--changed', '-', '--body', bodyPath], '')
-  check(r6.status === 0, '不带 --expect-changes 时空清单放行（本地用法不该被绑死）', `exit=${r6.status}`)
-  report(r6.status === 0, '脚本：本地空清单放行')
-}
-
-group('[69] 工作记录的「执行者」：写身份，不写代词')
-{
-  const rec = (who) => `# 一件事
-
-| 项 | 值 |
-| --- | --- |
-| 状态 | 进行中 |
-| 建单日期 | 2026-11-09 |
-| 最近更新 | 2026-11-09 |
-| 执行者 | ${who} |
-
-## 断点
-
-等审查。
-`
-
-  // 代词：这一格的用处是「该找谁问」，代词指不到人。
-  check(executorVerdict(rec('本次会话')).verdict === 'pronoun',
-    '写「本次会话」→ 判为代词（换个人打开就找不到人）')
-  check(executorVerdict(rec('我')).verdict === 'pronoun', '写「我」→ 同样判为代词')
-  check(executorVerdict(rec('AI')).verdict === 'pronoun', '写「AI」→ 同样判为代词')
-
-  // 写不出身份（没有 @）：既不是代词，也不是人 —— 仍然不合格。
-  check(executorVerdict(rec('小明')).verdict === 'no-identity',
-    '写了名字但没有可联系的账号 → 判为「写不出身份」（这一格的用处是找人）')
-
-  // **「取不到就写未署名并说明原因」是契约允许的终态，判据必须认。**
-  // 不认的后果很具体：照契约做必然红，使用者唯一的出路是编一个邮箱（契约禁止）。
-  // 但光写「未署名」三个字仍然是零信息——下一个人不知道是不能取还是懒得取。
-  check(executorVerdict(rec('未署名')).verdict === 'no-identity',
-    '光写「未署名」→ 不合格（零信息：不知道是不能取还是懒得取）')
-  check(executorVerdict(rec('未署名（这个克隆里没有配置提交署名）')).verdict === 'ok',
-    '「未署名 + 原因」→ 合格（契约允许的终态，不认就是把人往「编一个」上逼）')
-
-  // 有身份：署名 + 邮箱。
-  check(executorVerdict(rec('FiretrUCK666 <326200973+FiretrUCK666@users.noreply.github.com>')).verdict === 'ok',
-    '写得出署名与邮箱 → 放行')
-  check(executorVerdict(rec('@someone')).verdict === 'ok', '只写平台账号也算（有 @ 就能找到人）')
-
-  // 反例：整格缺失时**不在这里报**——那是表头缺字段那条判据的事，两件事别混。
-  check(executorVerdict('# 只有正文\n').verdict === 'absent', '没有这一格 → absent，不重复报')
-  check(executorVerdict(rec('<!-- 待填 -->')).verdict === 'absent', '只有注释 → absent（等于没填）')
-
-  // 复算一遍再报：这一组的结论是「三态都分得开」，把它算成一个布尔再交给 report。
-  // 传字面量 true 时这条永远通过，而它会算进通过总数——那个下限本应是「有多少条判据
-  // 在守着」的度量，掺进恒真项就失去意义。
-  const ev = (v) => executorVerdict(rec(v)).verdict
-  const allExecutor = ev('本次会话') === 'pronoun' && ev('我') === 'pronoun' && ev('AI') === 'pronoun'
-    && ev('小明') === 'no-identity' && ev('未署名') === 'no-identity'
-    && ev('FiretrUCK666 <a@b.c>') === 'ok' && ev('@someone') === 'ok'
-    && ev('未署名（这个克隆里没有配置提交署名）') === 'ok'
-  report(allExecutor, '执行者：代词与光写未署名都拦，有身份与「未署名+原因」都放行')
 }
 
 // ---- 分片收尾 ----
-// 主入口靠这一行读计数。格式固定。
+// 主入口靠这一行读计数。格式固定：`行为自检：N 项通过，M 项失败`。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。
 try { cleanupFixtures() } catch { /* 清不掉不算错，主入口兜底 */ }
 process.stdout.write(`行为自检：${passed} 项通过，${failed} 项失败\n`)
-// 本进程观测到的 kind。分片后每片只看到自己那几组，值域判定要靠主入口合并四片。
-process.stdout.write(`OBSERVED_KINDS=${[...observedKinds].join(',')}\n`)
 if (failures.length > 0) {
   process.stdout.write('\n失败项：\n')
   for (const f of failures) process.stdout.write(`  - ${f}\n`)

@@ -49,7 +49,11 @@ import { issueTemplateGaps } from '../review.mjs'
 import { scanLines } from '../lib/markdown.mjs'
 // 高风险表的解析**只有一处实现**：脚本要读它判门禁，自检要读它验「那张表还能不能解析」。
 // 两处各写一份，迟早会给出两个答案——而其中一个是「表看起来在、其实读不出来」。
-import { readHighRiskTable } from '../review-record.mjs'
+import {
+  readHighRiskTable, canonicalDoneSnippet, canonicalReviewSnippet,
+  DONE_FENCE, CONTRACT_SITES, DONE_SITES,
+} from '../review-record.mjs'
+import { TEMPLATE_INSTANCES, TEMPLATE_NO_INSTANCE } from '../lib/protocol.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -2322,20 +2326,127 @@ function checkReviewRuleSources() {
     if (!test(text)) missing.push(rel + '：' + why)
   }
 
-  // 一、判据：要有「审不审」那一节，以及「正文是索引、评论是痕迹」那两层。
+  // 一、判据：要有审查循环的那几节，且**结构上能判**。
   //
   // 判**结构**而不是关键词。原先判的是 `/必须独立审查/` 这类词，而那个词在这份文件里
   // 到处都有——把整节删掉照样绿。一条「判据被删掉也看不出来」的检查，比没有更坏：
-  // 它打印的是「四处都在」。
+  // 它打印的是「都在」。
   need('references/collaboration.md',
-    (x) => /^### 什么时候必须审/m.test(x) && /必须独立审查/.test(x),
-    '缺「### 什么时候必须审」这一节（或节里没有「必须独立审查」）—— 审不审就没有判据了')
+    (x) => /^### 冻结验收标准/m.test(x) && /^### 审查：只回答/m.test(x),
+    '缺「### 冻结验收标准」或「### 审查：只回答「哪几条没过」」这一节 —— '
+    + '没有冻结的标准，审查就只能回答「还能不能再找出一个问题」，而那个问题永远找得到')
   need('references/collaboration.md',
-    (x) => /索引（提案正文）/.test(x) && /痕迹（平台评论）/.test(x),
-    '没有把「正文是索引、评论是痕迹」分成两层 —— 评论一条不发也能全绿')
+    (x) => /^### 什么时候停/m.test(x) && /连续两轮/.test(x),
+    '缺「### 什么时候停：两条止损」或没写「同一标准连续两轮」 —— 循环没有收敛条件')
+  need('references/collaboration.md',
+    (x) => /^### 判通过必须交故障注入/m.test(x),
+    '缺「### 判通过必须交故障注入」 —— 判「通过」的成本会退回成「写一句话」')
   need('references/collaboration.md',
     (x) => /^## 五、能不能合/m.test(x) && /\|\s*必须审\s*\|/.test(x),
     '「## 五、能不能合」那张表没有「必须审」一列 —— 审不审与谁能合又混回一句了')
+
+  // 二、**机器契约逐字一致**。
+  //
+  // 这是这次改动最要紧的一条。早先的做法是「在五处各写一遍格式，用几条正则看每处
+  // 有没有提到关键词」——改字段时改漏一处不会有任何东西出声，直到下一轮审查把它指出来。
+  // 而「下一轮指出上一轮的不一致」正好能让循环永不收敛。
+  //
+  // 现在的判据是**精确一致**：示例由 `review-record.mjs` 生成（格式的唯一来源就是那个
+  // 解析器，它要整个复制进目标项目、必须零依赖单文件），每一处都必须逐字出现。
+  // 改字段却不同步，报的是「示例与实现不符」——一条能照着改的错，不是风格告警。
+  //
+  // **两处的分母不同，这是刻意的**：
+  //   - 审查块（`pf-review`）四本都要有——判据给人读、两份提案模板给人抄、
+  //     落盘契约给目标项目的 AI 读；
+  //   - 冻结块（`pf-done`）只要求判据与落盘契约有它——它住在**工作记录**里，
+  //     提案正文只放指针。要求提案模板里也有，会逼人把「验收标准」抄进提案，
+  //     那正好制造出第二份会漂移的副本。
+  const reviewSnippet = canonicalReviewSnippet(1)
+  for (const rel of CONTRACT_SITES) {
+    need(rel,
+      (x) => x.includes(reviewSnippet),
+      '审查块的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— '
+      + '照着这里抄的人会写出一份机器读不到的东西。'
+      + '示例由 `canonicalReviewSnippet()` 生成，不要手写')
+  }
+  const doneSnippet = canonicalDoneSnippet()
+  for (const rel of DONE_SITES) {
+    need(rel,
+      (x) => x.includes(doneSnippet),
+      '冻结验收标准的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— '
+      + '示例由 `canonicalDoneSnippet()` 生成，不要手写')
+  }
+
+  // 三、**结论词不得回到判定里**。
+  //
+  // `通过` 这个词从机器的输入里消失，是这次改动的核心。重写这段代码的人很容易
+  // 「顺手」再引入一个 verdict 字段——它看起来合理，而它一旦回来，中文里否定的写法
+  // （不通过 / 通不过 / 尚未通过 …）就又成了判定依据，整类误判随之回来。
+  //
+  // 判据是「这些符号不再存在」，不是「不许提通过」——说明文字里提它是必要的
+  // （不然下一个人不知道为什么没有那个字段）。
+  need('scripts/review-record.mjs',
+    (x) => !/\bVERDICTS\b/.test(x) && !/\breviewRecordState\b/.test(x)
+      && !/\bmatchRoundsToComments\b/.test(x) && !/\bcnNum\b/.test(x),
+    '脚本里又出现了 VERDICTS / reviewRecordState / matchRoundsToComments / cnNum —— '
+    + '那几个符号都属于「让机器读中文结论词」那一版，它们的回来意味着整类误判的回来')
+
+  // 四、**模板必须登记**：`templates/` 下每个文件都要落在 `TEMPLATE_INSTANCES`
+  // 或 `TEMPLATE_NO_INSTANCE` 里。
+  //
+  // 这条取代了原先那张手写的「同步对照」表——表要人记得改，漏一行不会有任何东西出声。
+  // 而**完整性由目录驱动**：新增一个模板却不登记，当场红。这与本项目对「用户包边界」
+  // 已经验证过的做法同源（`.gitattributes` + 真跑 `git archive`，不是人工清单）。
+  {
+    const files = readdirSync(join(SKILL_ROOT, 'templates'), { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile())
+      .map((e) => e.name)
+    const declared = new Set([...Object.keys(TEMPLATE_INSTANCES), ...TEMPLATE_NO_INSTANCE])
+    const undeclared = files.filter((f) => !declared.has(f))
+    const phantom = [...declared].filter((f) => !files.includes(f))
+    if (undeclared.length > 0) {
+      fail(`templates/ 下有模板没登记落点：${undeclared.join('、')} —— `
+        + '加进 `scripts/lib/protocol.mjs` 的 TEMPLATE_INSTANCES（落在本仓库哪一处），'
+        + '或 TEMPLATE_NO_INSTANCE（不在本仓库落地，例如许可证全文）。'
+        + '登记表漏一行的症状是「改了模板，本仓库的实例没跟着改」，而它不会出声')
+    }
+    if (phantom.length > 0) {
+      fail(`TEMPLATE_INSTANCES / TEMPLATE_NO_INSTANCE 里登记了不存在的模板：${phantom.join('、')} —— `
+        + '删掉那几行，或者把模板补上')
+    }
+    for (const [tpl, inst] of Object.entries(TEMPLATE_INSTANCES)) {
+      const target = join(SKILL_ROOT, inst)
+      if (!existsSync(target)) {
+        fail(`templates/${tpl} 登记的落点不存在：${inst} —— `
+          + '要么落点被删了，要么登记写错了；两种情况都会让「改了模板没改实例」无人发现')
+      }
+    }
+  }
+
+  // 五、工作记录模板要带那个块：**没有它，目标项目的新工作记录就不会有冻结的标准**。
+  need('templates/work-item.md',
+    (x) => /^### 验收标准/m.test(x) && new RegExp('```' + DONE_FENCE).test(x),
+    '缺「### 验收标准」这一节或 `pf-done` 示例块 —— '
+    + '照着它建的工作记录里没有冻结的验收标准，那条门禁对目标项目就永远不成立')
+
+  // 六、两份问题模板都要有验收标准栏。
+  //
+  // 有单轨道时，验收标准来自问题正文——那是别人写的、开工前就存在的，天然是冻结的。
+  // 缺了这一栏，那条轨道就没有判据来源，只能退回工作记录，而两个人对「算不算过」
+  // 的理解不会一致。
+  for (const rel of ['templates/issue-bug-report.md', 'templates/issue-feature-request.md',
+    '.github/ISSUE_TEMPLATE/bug_report.md', '.github/ISSUE_TEMPLATE/feature_request.md']) {
+    need(rel, (x) => /^## 验收标准/m.test(x),
+      '缺「## 验收标准」这一栏 —— 有单轨道时它是审查的唯一判据来源；'
+      + '没有它，「修成什么样算修好」只能凭感觉')
+  }
+
+  // 七、两份提案模板都要有实现依据那一栏。
+  for (const rel of ['templates/pull-request-template.md', '.github/pull_request_template.md']) {
+    need(rel, (x) => /^## 实现依据/m.test(x),
+      '缺「## 实现依据」这一栏 —— 开工前分流写了也没地方落，读者无从知道这个改动凭什么成立')
+  }
+
 
   // 二、本仓库契约：`## 高风险路径` 那一节要有表，而且要能解析出路径。
   need('AGENTS.md',
@@ -2424,39 +2535,25 @@ function checkReviewRuleSources() {
     '「## 高风险路径」一节缺了、没有 pf:author 标记（重跑一次生成就把整节冲掉）、'
     + '或没有那张表 —— 目标项目会拿到一个空表，而门禁什么都不拦')
 
-  // 四、两份提案模板都要有那一节，**而且表格在注释外面**。
+  // 四、两份提案模板都要有实现依据那一栏（见上面「七」）。
   //
-  // 表格写在 `<!-- -->` 里时，判据（先去注释再看）永远读到空节：目标项目按模板填也过不了，
-  // 只能删掉说明自己重画一张。实测发生过。
-  for (const rel of ['templates/pull-request-template.md', '.github/pull_request_template.md']) {
-    need(rel,
-      (x) => {
-        const head = /^##[ \t]*审查记录[ \t]*$/m.exec(x)
-        if (head === null) return false
-        const after = x.slice(head.index + head[0].length)
-        const next = /^##[ \t]/m.exec(after)
-        const block = next === null ? after : after.slice(0, next.index)
-        const visible = block.replace(/<!--[\s\S]*?-->/g, '')
-        return /\|\s*轮次\s*\|/.test(visible) && /谁审的/.test(visible)
-      },
-      '缺「## 审查记录」这一节，或者表格写在了 HTML 注释里（判据会先去掉注释，'
-      + '那样永远读到空节，照着模板填也过不了）')
-  }
+  // **曾经还有一条「## 审查记录」索引表的判据，它已经删掉了。**
+  // 那一套是「正文放索引、评论放痕迹」两层对账；两层意味着两处必须对上，而对不上
+  // 就是一次故障。索引带来的不是信息，是一个持续的故障源——现在结论只在评论里，
+  // 一份来源，没有「对不上」这回事。
 
-  // 五、**执行点**：这份规则要真的有人跑它。
+  // 八、**执行点**：这份规则要真的有人跑它。
   //
-  // 前四处核对的是「规则写在哪」，这一处核对的是「规则由谁执行」——两件事。
-  // 实测：把两份工作流里「高风险改动必须有审查记录」整段删掉，上面五处照样全绿，
-  // 因为没人核对执行点。规则写着、没人跑，等于没有。
+  // 前面几处核对的是「规则写在哪」，这一处核对的是「规则由谁执行」——两件事。
+  // 实测：把两份工作流里那一段整段删掉，上面几处照样全绿，因为没人核对执行点。
+  // 规则写着、没人跑，等于没有。
   //
   // **判据的输入要去掉注释，不能拿整份原文去找。**
   //
   // 实测三种「停用」手法：整段删掉会红、改成 echo 会红、**整段改成 YAML 注释不会红**
-  // ——因为三条正则在注释文本里照样能匹配到。上一版说「看那一步在不在，不看措辞」，
-  // 但那三个正则本身也是在用字面特征代理「它会不会真的跑」。
-  //
-  // 剥掉 YAML 注释之后，原文里的 `review-record.mjs` 就只剩**可执行的那一处**。
-  // 这比「加更多正则」彻底：改的是判据的输入，不是在被检查的文本上猜。
+  // ——因为正则在注释文本里照样能匹配到。那几条正则本身也是在用字面特征代理
+  // 「它会不会真的跑」。剥掉 YAML 注释之后，原文里的 `review-record.mjs` 就只剩
+  // **可执行的那一处**。这比「加更多正则」彻底：改的是判据的输入。
   const stripYamlComments = (src) => String(src ?? '')
     .split(/\r?\n/)
     .map((line) => {
@@ -2479,14 +2576,15 @@ function checkReviewRuleSources() {
 
   if (missing.length > 0) {
     for (const m of missing) {
-      fail(m + ' —— 「必须独立审查」这条规则要在四处同时成立，而且每一处都要**结构上**能判：'
-        + '判据（references）、本仓库契约（AGENTS.md）、落盘模板（agents-project.md）、'
-        + '两份提案模板。缺一处，规则就还在、但照着做的人找不到它。'
-        + '模板那两处还要求「活过刷新」与「表格在注释外面」—— 那两条都实测出过事。')
+      fail(m + ' —— 审查循环的每一处落点都要**结构上**能判：判据（references）、'
+        + '本仓库契约（AGENTS.md）、落盘模板（agents-project.md）、两份提案模板、'
+        + '两份问题模板、工作记录模板、以及执行点。缺一处，规则就还在、但照着做的人找不到它。'
+        + '机器契约那几处还要求**逐字一致**——那是「改字段时不同步就红」的唯一办法。')
     }
     return
   }
-  process.stdout.write('审查规则：判据、契约、落盘模板、两份提案模板、执行点都在，结构上都能判\n')
+  process.stdout.write('审查循环：判据、契约、模板、问题模板、执行点都在；机器契约四处逐字一致；'
+    + `模板登记覆盖 ${Object.keys(TEMPLATE_INSTANCES).length + TEMPLATE_NO_INSTANCE.length} 个文件\n`)
 }
 
 /**

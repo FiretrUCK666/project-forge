@@ -66,12 +66,15 @@ jobs:
 
       # 「高风险改动必须有审查记录」。**这一步不要删**：它是「必须独立审查」这条规则
       # 唯一的机器判据。没有它，那条规则就只是一段文字——改完、门禁全绿、看着没问题，
-      # 就合了，而「审查」这一步从来没发生过。实测过：34 个文件、动到判定逻辑与模板的
-      # 改动就是这么被合进去的。
+      # 就合了，而「审查」这一步从来没发生过。
       #
-      # 它核**两层**：提案正文里那节是索引（有哪几轮、结论是什么），**每一轮的结论还要在
-      # 评论里找得到对应的一条**。只核正文时，评论一条不发也能全绿——实测发生过，跑了两轮
-      # 审查而提案上零评论。索引是执行者自己写的，评论才是别人给的。
+      # 它核三件事：
+      #   一、提案正文里有 `工作记录: <路径>` 指针，那份文件在本次改动里、且冻结了验收标准；
+      #   二、每轮审查的 `fail` 引用的都是冻结清单里真有的 id（审查不能发明标准）；
+      #   三、最后一轮 `fail` 为空、交了故障注入记录、且没有触发止损。
+      #
+      # **结论由脚本算，审查者不写**：让审查者写结论，机器就得去读那句中文里「通过」
+      # 是肯定还是否定——否定的写法列不完，每漏一种方向都是放行。
       #
       # 判据来自本项目 AGENTS.md 的「## 高风险路径」表——**那张表填了才有效**，
       # 空表会让这一步明说「这一趟没查」然后放行（不静默，但也拦不住）。
@@ -88,11 +91,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          # TODO 豁免标签名与本项目的「## 协作参数」表保持一致（默认 pf:human-approved）。
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           git fetch --no-tags origin "$BASE_REF"
           # `diff.renames=false`：不带它时，一次改名只报**新路径**——把判定逻辑
           # `git mv` 到 `scripts/` 之外再改松，门禁会判成「不落在高风险路径」。
-          # 改名挪走判定逻辑是一次实质的风险改动，只是它在 diff 眼里长得像「移动」。
           # `core.quotepath=false`：默认配置会把中文文件名转义成 "\345\256\241..."，
           # 前缀判据匹配不上，中文名的风险改动会被判成非高风险、绿着放行。
           git -c core.quotepath=false -c diff.renames=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
@@ -114,6 +118,12 @@ jobs:
               })
             ' > comments.txt
 
+          # 豁免标签只豁免**止损**（同标准连续两轮、轮次超上限），不豁免「还有标准没过」。
+          WAIVED=""
+          case ",$PR_LABELS," in
+            *",pf:human-approved,"*) WAIVED="--waived" ;;
+          esac
+
           # `--expect-changes` 不能省：提案不可能零改动，清单为空只说明 diff 没算出来。
-          node scripts/review-record.mjs --expect-changes \
+          node scripts/review-record.mjs --expect-changes $WAIVED \
             --changed changed.txt --body pr-body.md --comments comments.txt

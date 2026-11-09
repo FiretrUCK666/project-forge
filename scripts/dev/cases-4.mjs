@@ -701,6 +701,18 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       '「通过」两个字 → 放行（写得够不够好不归机器判，见判据表里的边界说明）')
     report(saysSomething('') === false && saysSomething('通过') === true,
       'saysSomething：只判空不空，不判内容质量')
+
+    // **stdin 只能读一次**：两个 `-` 同时给时当场报错，而不是让它跑出一个
+    // 看起来像真结论的错（「提案正文是空的」→ 判没有审查记录）。
+    {
+      const r = spawnSync(process.execPath, [
+        join(SCRIPTS_DIR, 'review-record.mjs'), '--changed', '-', '--body', '-',
+      ], { input: 'README.md\n', encoding: 'utf8', windowsHide: true })
+      check(r.status === 2, '--changed - 与 --body - 同时给 → 退出码 2（stdin 只能读一次）',
+        `status=${r.status}`)
+      check(/不能同时用/.test(String(r.stderr ?? '')), '  并且说清怎么改', String(r.stderr ?? '').slice(0, 60))
+      report(r.status === 2, '命令行：两个 stdin 同时给要拦住')
+    }
   }
 
   // 反例：注释里的说明文字不算记录。去掉注释这一步漏了的话，模板自带的例句会让它永远通过。

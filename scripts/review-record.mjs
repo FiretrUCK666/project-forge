@@ -704,6 +704,22 @@ function main(argv) {
     return 2
   }
 
+  // **stdin 只能读一次。**
+  //
+  // `--changed -` 与 `--body -` 同时给时，先读的那个吃光，后读的拿到空字符串——
+  // 症状是「提案正文是空的」，于是判「没有审查记录」，而真原因是读取顺序。
+  // 当场报错，说清怎么改，好过让它跑出一个看起来像真结论的错。
+  if (changedArg === '-' && bodyArg === '-') {
+    process.stderr.write([
+      '错误：--changed - 与 --body - 不能同时用——stdin 只能读一次。',
+      '',
+      '  两个都想从管道喂时，先把其中一个落到文件：',
+      '    git diff --name-only > changed.txt',
+      '    node scripts/review-record.mjs --changed changed.txt --body - < pr-body.md',
+    ].join('\n') + '\n')
+    return 2
+  }
+
   let raw
   if (changedArg === '-') {
     raw = readFileSync(0, 'utf8')

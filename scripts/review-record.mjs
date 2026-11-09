@@ -371,6 +371,30 @@ function stripComments(text) {
  * 字段缺哪个都算不合格：宁可报「格式不对、按模板写」，也不要猜。
  */
 
+/**
+ * 剥掉 HTML 注释，**未闭合的那个也剥**。
+ *
+ * 与 `stripComments` 的区别只在最后一种情况：遇到没有 `-->` 收尾的 `<!--` 时，
+ * 它后面整段都算注释——把块写在那里面不该被当成结论。
+ *
+ * 实测：`<!-- 下面是模板` + 一个合法块、不写 `-->`，原先仍命中（方向是放行）。
+ */
+function stripCommentsLoose(text) {
+  const s = String(text ?? '')
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    const start = s.indexOf('<!--', i)
+    if (start < 0) { out += s.slice(i); break }
+    out += s.slice(i, start)
+    const end = s.indexOf('-->', start + 4)
+    // **没有收尾就到此为止**：后面全在注释里。
+    if (end < 0) break
+    i = end + 3
+  }
+  return out
+}
+
 /** 中文数字换算，只服务索引表格里的轮次格（「第一轮」）。 */
 const CN_DIGITS = '零一二三四五六七八九十'
 
@@ -411,7 +435,9 @@ export function reviewBlocks(text) {
   const s = String(text ?? '')
   const out = []
   const broken = []
-  const re = new RegExp('```' + FIELD_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
+  // **围栏只在行首（允许前导空格）才算。**
+  // 被 `>` 引用的是引用别人的东西，不是本评论的结论；把它当块解析会让整条提案判红。
+  const re = new RegExp('(?:^|\\n)[ \\t]*```' + FIELD_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
   for (const m of s.matchAll(re)) {
     const fields = new Map()
     for (const line of m[1].split(/\r?\n/)) {
@@ -480,7 +506,15 @@ export function reviewRecordState(body) {
     if (line === '' || isSeparator(line)) continue
     if (!line.startsWith('|')) continue
     const c = cells(line)
-    if (c.length < 3) continue
+    // **少一格也要报，不能静默丢。**
+    //
+    // 实测：`| 2 | sub-b 需要返工 |`（少一格）被 `c.length < 3` 静默跳过，
+    // 直接 continue ——与已修的「认不出就丢」是同一个形状。
+    // 只要第一格像轮次，就把它当成「想做一条记录但写坏了」，报出来。
+    if (c.length < 3) {
+      if (roundLike(c[0])) skipped.push({ line, why: '这一行少于三格（要轮次 / 谁审的 / 结论）' })
+      continue
+    }
     if (/^轮次$/.test(c[0]) || /^谁审/.test(c[1] ?? '')) continue
 
     // **结论格只认那两个字。** 表格一格就是一个值，不需要从散文里猜。
@@ -555,26 +589,42 @@ export function reviewRecordState(body) {
  */
 export function findRoundInComments(round, verdict, comments) {
   const list = Array.isArray(comments) ? comments : []
+  const key = String(Number(round))
+
+  // **把所有评论里关于这一轮的说法先汇总，再看一致不一致。**
+  //
+  // 原先按评论逐条找、命中第一条就 return，于是「先发通过、再发订正」时，
+  // 作废的那条继续生效（实测 EXIT=0）。**判据只看局部（一条评论），不看整体。**
+  //
+  // 汇总之后：「发新评论订正」真的成立——但也要求把旧的那条删掉，
+  // 否则两条并存、结论相反，机器无法判断哪个作废。这条与「一条评论内不许有两个结论」
+  // 是同一条规则，只是从「一条评论」放宽到「全部评论」。
+  const found = []
   for (const c of list) {
     const text = typeof c === 'string' ? c : String(c?.body ?? '')
     // **注释里的块不算**：注释是给人看的示例，不是结论。
-    // 实测：一条评论只贴了模板示例（「格式是这样：…（我还没审）」）也算痕迹。
-    const visible = text.replace(/<!--[\s\S]*?-->/g, '')
+    // **成对的注释要剥，未闭合的 `<!--` 之后一律不算。**
+    // 实测：`<!-- 下面是模板` + 合法块、不写 `-->` → 原先仍命中（放行方向）。
+    const visible = stripCommentsLoose(text)
     const { blocks } = reviewBlocks(visible)
-    const mine = blocks.filter((b) => b.round === String(Number(round)))
-    if (mine.length === 0) continue
-    // **一条评论对某一轮只能有一个结论。**
-    //
-    // 两个都写在同一条评论里时，机器无法判断哪句作废——「取更严」会误伤复述
-    // （「上一轮需要返工的三条已修完」），「取最后一个」会误伤订正（先写错、后写对）。
-    // 唯一不猜的读法是：**不一致就是自相矛盾，不算**。
-    // 要改口就删掉旧的那块，或者发一条新评论。
-    const distinct = [...new Set(mine.map((b) => b.verdict))]
-    if (distinct.length > 1) continue
-    if (distinct[0] !== verdict) continue
-    return text.trim().slice(0, 80).replace(/\s+/g, ' ')
+    for (const b of blocks) {
+      if (b.round !== key) continue
+      found.push({ verdict: b.verdict, sample: text.trim().slice(0, 80).replace(/\s+/g, ' ') })
+    }
   }
-  return undefined
+  if (found.length === 0) return undefined
+
+  // 关于这一轮只能有一个结论。两个都写在评论里时，机器无法判断哪句作废——
+  // 「取更严」会误伤复述（「上一轮需要返工的三条已修完」），
+  // 「取最后一个」会误伤订正（先写错、后写对）。唯一不猜的读法是：**不一致就不算**。
+  //
+  // 所以「要改口」的唯一办法是**删掉（或编辑）旧的那条评论**——光发一条新的不够，
+  // 两条并存时机器判不了哪个作废，一律不算。这是有代价的取舍：它要求人做一次删除，
+  // 换来的是「不会把作废的结论当成有效结论」。
+  const distinct = [...new Set(found.map((f) => f.verdict))]
+  if (distinct.length > 1) return undefined
+  if (distinct[0] !== verdict) return undefined
+  return found[0].sample
 }
 
 /**

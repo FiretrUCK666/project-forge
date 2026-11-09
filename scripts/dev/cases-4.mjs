@@ -793,6 +793,34 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
     report(true, '评论：一条评论对一轮只能有一个结论，注释不算')
   }
 
+    // 3e3) 第十一轮：跨评论改口、引用块、未闭合注释。
+  {
+    const blk = (r, v) => ['```pf-review', 'round: ' + r, 'verdict: ' + v, '```'].join('\n')
+    const hit = (round, verdict, cmts) => findRoundInComments(round, verdict, cmts) !== undefined
+
+    // 跨评论改口：两条并存、结论相反 → 一律不算（要改口就删掉旧的）。
+    const pair = ['## 第 1 轮\n\n' + blk(1, '通过'), '## 订正\n\n' + blk(1, '需要返工')]
+    check(hit('1', '通过', pair) === false, '跨评论结论相反 → 找旧的也不命中')
+    check(hit('1', '需要返工', pair) === false, '  找新的同样不命中（要删掉旧的）')
+    check(hit('1', '需要返工', ['## 订正\n\n' + blk(1, '需要返工')]) === true,
+      '  删掉旧的、只留新的 → 命中')
+
+    // 引用别人的块：不算本评论的结论，也不该把整条判红。
+    const Q = String.fromCharCode(96, 96, 96) + 'pf-review'
+    const quoted = ['> ' + Q, '> round: 5', '> verdict: 通过', '> ' + String.fromCharCode(96, 96, 96)].join('\n')
+    check(hit('5', '通过', [quoted]) === false, '被 > 引用的块不算本评论的结论')
+    check(reviewBlocks(quoted).broken.length === 0, '  引用块不该被当成「坏块」（会把真结论误判红）')
+
+    // 未闭合的注释：后面全算注释。
+    check(hit('1', '通过', ['<!-- 下面是模板\n\n' + blk(1, '通过')]) === false,
+      '未闭合注释里的块不算')
+    check(hit('1', '通过', ['<!-- 说明 -->\n\n' + blk(1, '通过')]) === true,
+      '  成对注释外面的块仍算')
+
+    report(hit('1', '需要返工', pair) === false && hit('1', '通过', [quoted]) === false,
+      '评论：跨评论改口、引用块、未闭合注释都验过')
+  }
+
     // 3f) 索引表：结论格**只认那两个字**，不从散文里猜。
   {
     const st = (c) => reviewRecordState('## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n'
@@ -814,7 +842,12 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       const head = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
       const withNote = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n'
         + '| 2 | sub-b | 需要返工（见评论） | 3 / 1 |\n')
-      check(withNote.filled === false, '索引行带备注认不出 → 判红，不静默丢', String(withNote.filled))
+      // 少一格的行同样是「想做一条记录但写坏了」，也要报。
+    const head2 = '## 审查记录\n\n| 轮次 | 谁审的 | 结论 | 阻塞 / 建议 |\n| --- | --- | --- | --- |\n'
+    const shortRow = reviewRecordState(head2 + '| 1 | sub-a | 通过 | 0 |\n| 2 | sub-b 需要返工 |\n')
+    check(shortRow.filled === false && (shortRow.skipped ?? []).length === 1,
+      '少一格的行 → 判红并点名', JSON.stringify(shortRow.skipped))
+        check(withNote.filled === false, '索引行带备注认不出 → 判红，不静默丢', String(withNote.filled))
       check((withNote.skipped ?? []).length === 1, '  并且点名是那一行', JSON.stringify(withNote.skipped))
       const clean = reviewRecordState(head + '| 1 | sub-a | 通过 | 0 / 2 |\n')
       check((clean.skipped ?? []).length === 0, '干净的表没有 skipped', JSON.stringify(clean.skipped))

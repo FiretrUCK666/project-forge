@@ -121,7 +121,7 @@ export const FRESHNESS_STALE_DAYS = 180
  * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
  * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
  */
-export const BEHAVIOR_MIN_PASSED = 740
+export const BEHAVIOR_MIN_PASSED = 748
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -2449,13 +2449,32 @@ function checkReviewRuleSources() {
   // 实测：把两份工作流里「高风险改动必须有审查记录」整段删掉，上面五处照样全绿，
   // 因为没人核对执行点。规则写着、没人跑，等于没有。
   //
-  // 判据看**那一步在不在**（step 名 + 调用 review-record.mjs），不看措辞。
+  // **判据的输入要去掉注释，不能拿整份原文去找。**
+  //
+  // 实测三种「停用」手法：整段删掉会红、改成 echo 会红、**整段改成 YAML 注释不会红**
+  // ——因为三条正则在注释文本里照样能匹配到。上一版说「看那一步在不在，不看措辞」，
+  // 但那三个正则本身也是在用字面特征代理「它会不会真的跑」。
+  //
+  // 剥掉 YAML 注释之后，原文里的 `review-record.mjs` 就只剩**可执行的那一处**。
+  // 这比「加更多正则」彻底：改的是判据的输入，不是在被检查的文本上猜。
+  const stripYamlComments = (src) => String(src ?? '')
+    .split(/\r?\n/)
+    .map((line) => {
+      // YAML 的 # 只有在行首或空白之后才起注释作用（`a#b` 里的 # 是普通字符）。
+      const m = /(^|[ \t])#/.exec(line)
+      return m === null ? line : line.slice(0, m.index + m[1].length)
+    })
+    .join('\n')
+
   for (const rel of ['.github/workflows/check.yml', 'templates/ci-check.yml']) {
     need(rel,
-      (x) => /review-record.mjs/.test(x) && /--comments/.test(x) && /--changed/.test(x),
-      '没有「高风险改动必须有审查记录」那一步（要看到它调 review-record.mjs，'
-      + '并且把 --changed 与 --comments 都传进去）—— 规则写着但没有执行点，'
-      + '等于整条门禁不存在，而所有判据仍然全绿')
+      (x) => {
+        const live = stripYamlComments(x)
+        return /review-record\.mjs/.test(live) && /--comments/.test(live) && /--changed/.test(live)
+      },
+      '没有「高风险改动必须有审查记录」那一步（去掉 YAML 注释之后，要看到它调'
+      + ' review-record.mjs，并且把 --changed 与 --comments 都传进去）—— '
+      + '规则写着但没有执行点，等于整条门禁不存在，而所有判据仍然全绿')
   }
 
   if (missing.length > 0) {
@@ -2467,7 +2486,7 @@ function checkReviewRuleSources() {
     }
     return
   }
-  process.stdout.write('审查规则：判据、契约、落盘模板、两份提案模板五处都在，结构上都能判\n')
+  process.stdout.write('审查规则：判据、契约、落盘模板、两份提案模板、执行点都在，结构上都能判\n')
 }
 
 /**

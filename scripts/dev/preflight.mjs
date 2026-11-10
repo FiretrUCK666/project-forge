@@ -139,7 +139,7 @@ export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-1.mjs': 133,
   'cases-2.mjs': 148,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 107,
+  'cases-4.mjs': 108,
 })
 
 /**
@@ -2857,6 +2857,27 @@ export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY, casesSrc = u
   if (cases === '') return ['读不到行为自检的分片源码 —— 无法核对 checkedBy，这一趟什么也没查']
 
   const known = new Set(Object.keys(registry))
+
+  // **一个断言名只能被一条判据认领。**
+  //
+  // 只验「这句话在分片里出现过」还不够：拿另一条判据的断言名填进来照样能过——
+  // 那句断言确实存在，只是它看着的不是这一条。实测过。
+  //
+  // 一条断言同时看着两条判据是可能的（那样它该真的同时调两个判据），但这条判据
+  // 做不到那么细。所以退一步：**同一句话不许被两条判据同时认领**。撞车的当场红，
+  // 写的人只能改成各说各的——而那一步通常就会让他发现「我这条其实没写断言」。
+  const claim = new Map()
+  for (const name of known) {
+    const e = registry[name]
+    if (e === undefined || e === null || typeof e.checkedBy !== 'string') continue
+    if (claim.has(e.checkedBy)) {
+      issues.push(`JUDGE_REGISTRY 里 \`${claim.get(e.checkedBy)}\` 与 \`${name}\` 用的是同一句断言`
+        + `「${e.checkedBy}」—— 一句断言不可能同时看着两条判据，除非它真的同时调了两个。`
+        + '这多半是「借用了另一条判据的断言名」：那句断言确实存在，但它看着的不是你这条')
+    } else {
+      claim.set(e.checkedBy, name)
+    }
+  }
   for (const name of exported) {
     if (!known.has(name)) {
       issues.push(`\`${name}\` 是导出的判据，却没在 \`scripts/lib/protocol.mjs\` 的 JUDGE_REGISTRY 里登记 —— `

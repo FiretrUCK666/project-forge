@@ -1052,6 +1052,21 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       '判据注册表：checkedBy 指向不存在的断言 → 必须报出来',
       JSON.stringify(fakeAssert.slice(0, 2)))
     report(fakeHit !== undefined, '判据注册表：假断言名会报')
+
+    // **反例四：借用另一条判据的断言名 → 必须报。**
+    //
+    // 这是注册表剩下的那个洞：那句断言确实存在于分片里，但它看着的不是这一条。
+    // 第六轮复核者实测发现——把 executorVerdict 的 checkedBy 换成契约比对的断言名，
+    // 注册表放行。只验「字符串出现过」拦不住这件事。
+    const borrowed = judgeRegistryIssues(realSrc, {
+      ...JUDGE_REGISTRY,
+      executorVerdict: { checkedBy: JUDGE_REGISTRY.contractSnippetIssues.checkedBy },
+    })
+    const borrowHit = borrowed.find((s) => /用的是同一句断言/.test(s))
+    check(borrowHit !== undefined,
+      '判据注册表：借用另一条判据的断言名 → 必须报出来',
+      JSON.stringify(borrowed.slice(0, 2)))
+    report(borrowHit !== undefined, '判据注册表：借用会报')
   }
 
 }

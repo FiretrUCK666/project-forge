@@ -137,9 +137,16 @@ export const FRESHNESS_STALE_DAYS = 180
 export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-0.mjs': 182,
   'cases-1.mjs': 133,
-  'cases-2.mjs': 148,
+  // 这一片的下限**随平台变**：文件系统分不区分大小写，决定「大小写变化」那条断言
+  // 跑不跑。Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条，因为全大写的
+  // 路径在那里是真不存在的，判真才是错的）。
+  //
+  // 写成区间而不是一个数，是因为**两边都是对的**：写死任一个数，另一个平台就恒红。
+  // 实测过——148 写死之后 CI 在 Ubuntu 上报「只跑了 147 项」，而本地 148 全绿。
+  // 那不是断言丢了，是基线把某一个平台的行为当成了所有平台的行为。
+  'cases-2.mjs': { min: 147, max: 148 },
   'cases-3.mjs': 183,
-  'cases-4.mjs': 108,
+  'cases-4.mjs': 111,
 })
 
 /**
@@ -151,8 +158,8 @@ export const BEHAVIOR_BASELINE = Object.freeze({
 export const BEHAVIOR_MAIN_ENTRY = 1
 
 /** 下限 = 分片基线之和 + 主入口那几条。由上面两个数算出来，不另写一个数。 */
-export const BEHAVIOR_MIN_PASSED = Object.values(BEHAVIOR_BASELINE).reduce((a, b) => a + b, 0)
-  + BEHAVIOR_MAIN_ENTRY
+export const BEHAVIOR_MIN_PASSED = Object.values(BEHAVIOR_BASELINE)
+  .reduce((a, b) => a + (typeof b === 'number' ? b : b.min), 0) + BEHAVIOR_MAIN_ENTRY
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -1144,13 +1151,19 @@ function checkBehavior({ skip = false, why = '' } = {}) {
   for (const line of shardLines) {
     const m = /^\s{2}(\S+\.mjs)\s+(\d+)\s+通过/.exec(line)
     if (m === null) continue
-    const base = BEHAVIOR_BASELINE[m[1]]
-    if (base === undefined) { grown.push(`${m[1]}（表里没有，新增了分片？）`); continue }
-    if (Number(m[2]) < base) {
-      fail(`${m[1]} 只跑了 ${m[2]} 项，低于基线 ${base} —— 这一片的断言被删掉了一片，`
+    const entry = BEHAVIOR_BASELINE[m[1]]
+    if (entry === undefined) { grown.push(`${m[1]}（表里没有，新增了分片？）`); continue }
+    // 基线可以是区间：有些分片的断言数随平台变化（见 BEHAVIOR_BASELINE 的注释），
+    // 那时写死任何一个数都会让另一个平台恒红。区间表达的是「这一片该有这么多，
+    // 视环境在 [min, max] 之间」。低于 min 才是断言丢了。
+    const lo = typeof entry === 'number' ? entry : entry.min
+    const hi = typeof entry === 'number' ? entry : entry.max
+    const got = Number(m[2])
+    if (got < lo) {
+      fail(`${m[1]} 只跑了 ${got} 项，低于基线 ${lo} —— 这一片的断言被删掉了一片，`
         + '或者它在中途崩了而摘要仍然打了出去。逐片比才能定位到是哪一片。')
-    } else if (Number(m[2]) > base) {
-      grown.push(`${m[1]} ${base} → ${m[2]}`)
+    } else if (got > hi) {
+      grown.push(`${m[1]} ${hi} → ${got}`)
     }
   }
   if (grown.length > 0) {

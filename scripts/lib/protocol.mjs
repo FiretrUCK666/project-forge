@@ -245,6 +245,7 @@ export const JUDGE_REGISTRY = Object.freeze({
   templateRegistrationIssues: { checkedBy: '判据本体：模板登记会报' },
   executorVerdict: { checkedBy: '判据本体：执行者那一格' },
   judgeRegistryIssues: { checkedBy: '判据注册表：未登记会报' },
+  caseInsensitiveFs: { why: '探测本机文件系统分不区分大小写。它的返回值就是判断本身——断言只能验它读到什么，而它读的是运行环境，写断言等于把某一台机器的答案当标准' },
   tarEntries: { utility: true, why: '解析 tar 字节流，不含判断' },
 })
 

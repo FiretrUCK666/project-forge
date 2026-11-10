@@ -116,6 +116,26 @@ const SKILL_WARN_HEADROOM = 2 * 1024
 export const FRESHNESS_STALE_DAYS = 180
 
 /**
+ * 本机文件系统分不区分大小写。
+ *
+ * 判据与 `cases-2.mjs` 里那条「大小写变化」断言**用同一个探法**——那里决定跑不跑，
+ * 这里决定基线取哪个数。两处必须同源，否则基线与实际断言数会对不上，而那种对不上
+ * 表现为「某个平台恒红」或「某个平台漏报一条」，两种都很难看出来。
+ *
+ * 探法：拿系统临时目录建一个小文件，看大写路径存不存在。**不写字面量常量**——
+ * 同一个仓库在 Windows 上开发、在 Linux 上跑 CI 是常态，写死哪个都会让另一边出错。
+ */
+export function caseInsensitiveFs() {
+  const dir = mkdtempSync(join(tmpdir(), 'pf-fs-probe-'))
+  try {
+    writeFileSync(join(dir, 'probe-case.txt'), 'x')
+    return existsSync(join(dir, 'PROBE-CASE.TXT'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/**
  * 行为自检至少要跑出这么多条通过，少于此数视为「断言被删掉了一大片」。
  *
  * 为什么要这个下限：通过判据原先只看「有摘要行 + 退出码 0」，于是把 selftest.mjs 换成
@@ -137,16 +157,16 @@ export const FRESHNESS_STALE_DAYS = 180
 export const BEHAVIOR_BASELINE = Object.freeze({
   'cases-0.mjs': 182,
   'cases-1.mjs': 133,
-  // 这一片的下限**随平台变**：文件系统分不区分大小写，决定「大小写变化」那条断言
-  // 跑不跑。Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条，因为全大写的
-  // 路径在那里是真不存在的，判真才是错的）。
+  // 这一片的数**随平台变**：文件系统分不区分大小写，决定「大小写变化」那条断言跑不跑。
+  // Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条，因为全大写路径在那里是
+  // 真不存在的，判真才是错的）。
   //
-  // 写成区间而不是一个数，是因为**两边都是对的**：写死任一个数，另一个平台就恒红。
-  // 实测过——148 写死之后 CI 在 Ubuntu 上报「只跑了 147 项」，而本地 148 全绿。
-  // 那不是断言丢了，是基线把某一个平台的行为当成了所有平台的行为。
-  'cases-2.mjs': { min: 147, max: 148 },
+  // **按能力精确取值，不用区间。**区间（147-148）试过，它在上界那一侧必须松一条：
+  // 下限只能取 Linux 的 147，于是 Windows 上删掉一条真实断言仍然全绿——一条会漏报的
+  // 下限，比没有下限更容易骗人。这里用与 cases-2 完全相同的判据取值，两侧都是精确数。
+  'cases-2.mjs': caseInsensitiveFs() ? 148 : 147,
   'cases-3.mjs': 183,
-  'cases-4.mjs': 111,
+  'cases-4.mjs': 110,
 })
 
 /**

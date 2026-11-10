@@ -25,7 +25,7 @@ import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
 import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases, judgeRegistryIssues } from './preflight.mjs'
 import { JUDGE_REGISTRY } from '../lib/protocol.mjs'
-import { BEHAVIOR_BASELINE, BEHAVIOR_MAIN_ENTRY, BEHAVIOR_MIN_PASSED } from './preflight.mjs'
+import { BEHAVIOR_BASELINE, BEHAVIOR_MAIN_ENTRY, BEHAVIOR_MIN_PASSED, caseInsensitiveFs } from './preflight.mjs'
 import {
   isHighRiskPath, highRiskChanged,
   readHighRiskTable, readHighRiskPaths, unquoteGitPath,
@@ -1069,36 +1069,29 @@ group('[68] 审查记录：高风险改动必须有可核对的痕迹')
       JSON.stringify(borrowed.slice(0, 2)))
     report(borrowHit !== undefined, '判据注册表：借用会报')
 
-    // **区间形式的基线：两边的数都是对的。**
+    // **基线按平台能力精确取值，不用区间。**
     //
     // 有些分片的断言数随平台变化——文件系统分不区分大小写，决定「大小写变化」那条跑不跑。
-    // 写死任何一个数，另一个平台就恒红。实测过：148 写死之后 CI 在 Ubuntu 上报
-    // 「cases-2 只跑了 147 项」，而本地 148 全绿。那不是断言丢了，是基线把某一个平台的
-    // 行为当成了所有平台的行为。
+    // Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条）。
     //
-    // 这里验的是「区间语义能同时接住两端、且仍然拦得住真丢」：
+    // 区间（147-148）试过，它在**上界那一侧必须松一条**：下限只能取 Linux 的 147，于是
+    // Windows 上删掉一条真实断言仍然全绿——一条会漏报的下限，比没有下限更容易骗人。
+    // 实测过：删掉 cases-2 的「结尾分隔符」，满门禁全绿。所以改成与 cases-2 同一个探法
+    // 取值，两侧都是精确数。
     {
-      const e = BEHAVIOR_BASELINE['cases-2.mjs']
-      const isRange = typeof e === 'object' && e !== null
-      const lo = typeof e === 'number' ? e : e?.min
-      const hi = typeof e === 'number' ? e : e?.max
-      check(isRange && lo === 147 && hi === 148,
-        '基线：cases-2 是 147-148 的区间（平台差异，不是一个数）',
-        JSON.stringify(e))
-      report(isRange && lo === 147 && hi === 148, '基线：区间表达平台差异')
+      const insensitive = caseInsensitiveFs()
+      const expected = insensitive ? 148 : 147
+      check(BEHAVIOR_BASELINE['cases-2.mjs'] === expected,
+        `基线：cases-2 取 ${expected}（本机文件系统${insensitive ? '不区分' : '区分'}大小写）`,
+        `表里是 ${BEHAVIOR_BASELINE['cases-2.mjs']}`)
+      report(BEHAVIOR_BASELINE['cases-2.mjs'] === expected, '基线：按平台能力取精确值')
 
-      // 两端都要接住，中间也不能报。
-      check(hi - lo === 1 && lo < hi,
-        '基线：区间确实跨了两个值（147 与 148 都在范围内）', `${lo}-${hi}`)
-      report(hi - lo === 1, '基线：两端都在范围内')
-
-      // 下限求和必须取 min：取 max 会让 Linux 恒红。
-      const sumMin = Object.values(BEHAVIOR_BASELINE)
-        .reduce((a, b) => a + (typeof b === 'number' ? b : b.min), 0)
-      check(BEHAVIOR_MIN_PASSED === sumMin + BEHAVIOR_MAIN_ENTRY,
-        '基线：总下限由各片 min 求和（取 max 会让 Linux 恒红）',
-        `${BEHAVIOR_MIN_PASSED} vs ${sumMin + BEHAVIOR_MAIN_ENTRY}`)
-      report(BEHAVIOR_MIN_PASSED === sumMin + BEHAVIOR_MAIN_ENTRY, '基线：下限取 min 求和')
+      // 下限必须由各片求和得出，不手写——手写的那个数已经失效过一次。
+      const sum = Object.values(BEHAVIOR_BASELINE).reduce((a, b) => a + b, 0)
+      check(BEHAVIOR_MIN_PASSED === sum + BEHAVIOR_MAIN_ENTRY,
+        '基线：总下限由各片求和得出（不手写）',
+        `${BEHAVIOR_MIN_PASSED} vs ${sum + BEHAVIOR_MAIN_ENTRY}`)
+      report(BEHAVIOR_MIN_PASSED === sum + BEHAVIOR_MAIN_ENTRY, '基线：下限由求和得出')
     }
   }
 

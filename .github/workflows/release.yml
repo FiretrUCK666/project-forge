@@ -1,22 +1,19 @@
-# 发布说明投递：推 v* 标签即把 docs/release-notes/<标签>.md 原文贴到发布页；
+# 发布说明投递：推 v* 标签就把 docs/release-notes/<标签>.md 原文贴到发布页；
 # 已存在则更新正文，写完回读比对。
 #
 # 说明的唯一来源是那个文件：它在打标签之前就写好、提交、推上来，所以这里只负责投递，
 # 不生成、不改写。取的是**默认分支**而不是标签那棵树——标签不可变，读标签的话漏推说明
-# 就只剩「挪标签」（禁止）或「发新补丁版」两条路；读默认分支时，补推 + workflow_dispatch
-# 重跑一次就修好了。顺序要求一点没松：说明不在默认分支上，这一步直接红。
+# 就只剩「挪标签」（禁止）或「发新补丁版」两条路；读默认分支时，补推 + 重跑一次就修好了。
+# 顺序要求一点没松：说明不在默认分支上，这一步直接红。
 #
 # 重跑会用文件内容覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
-# 标签推得比说明早、或某次失败时，先补推说明，再用 workflow_dispatch 手动触发并填标签名补跑。
 #
 # 同一个 job 还做两件事：
-#   - **发版门禁**：标签与**它里面那份 `SKILL.md`** 的 `metadata.version` 必须同号。
-#     这个字段存在的唯一理由是让没有版本历史的用户包副本知道自己属于哪一版，
-#     对不上就是在说假话。版本从标签里读，不从工作区读——门禁判的是要发出去的那份包，
-#     而补跑时工作区一定已经往前走过；同理这里**不判**「标签是否指向检出的提交」，
-#     那会把本文件第 12 行那条补跑路径整条堵死（补跑时检出的是分支，不是标签）；
+#   - **发版门禁**：标签与 SKILL.md 的 `metadata.version` 必须同号。这个字段存在的
+#     唯一理由是让没有版本历史的副本知道自己属于哪一版，对不上就是在说假话。
 #   - **用户包**：用 `git archive` 按 `.gitattributes` 的排除规则导出，核对条目之后
-#     挂到发布页上。拿到压缩包的人不需要 git，也不需要这份仓库的协作设施。
+#     挂到发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的协作设施。
+
 name: release
 
 on:
@@ -25,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '已存在的标签名（例如 v0.4.1），为空则用当前触发的标签'
+        description: '已存在的标签名（例如 v3.0.0），为空则用当前触发的标签'
         required: false
         default: ''
 
@@ -34,30 +31,38 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # 声明这个 job 会写仓库的发布。凭据优先用 secrets.RELEASE_TOKEN，没配就退回内置令牌；
-    # 两者都靠这一行权限，所以它既不能删，也不能只写在注释里：交付门禁按 contents: write
-    # 判定这一项，删掉它门禁会一直报待问。
+    # 两者都靠这一行权限，所以它既不能删，也不能只写在注释里。
     permissions:
       contents: write
-    # 取值只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
-    # 经 env 传入而不是直接展开进脚本正文——展开的话，输入框里的内容会被当成 shell 语法。
     env:
+      # 取值只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
+      # 经 env 传入而不是直接展开进脚本正文——展开的话输入框里的内容会被当成 shell 语法。
       TAG: ${{ inputs.tag || github.ref_name }}
       REPO: ${{ github.repository }}
-      GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
     steps:
-      - name: 检出（全历史；工具取自默认分支，说明描述的标签由 TAG 指定）
+      - name: 检出（取默认分支；工具与说明永远用最新的那版）
         uses: actions/checkout@v4
         with:
           # 工具取默认分支，**不是**触发时的 ref。推标签时 `github.ref` 就是那个标签，
-          # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面，修不了；
-          # 手动触发时它还是你在界面上选的那个 ref，选标签就同样退回旧提交。
-          # 所以两者都改成默认分支：**工具与说明永远用最新的那版**，被描述的标签由 TAG 指定。
-          # 历史取全量，所以按标签读提交记录、核版本号照样完整。
+          # 而标签里的工具是那一版当时的——用它去补漏，等于拿旧工具修旧页面。
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - name: 发版门禁（标签与它里面那份 SKILL.md 的版本同号、来源对得上）
-        run: node scripts/dev/preflight.mjs --release "$TAG" --repo "$REPO"
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 发版门禁（标签与 SKILL.md 的版本必须同号）
+        run: |
+          # 版本从标签读，不从工作区读——门禁判的是要发出去的那一份。
+          EXPECTED="${TAG#v}"
+          ACTUAL=$(sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' SKILL.md | head -1)
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::标签是 $TAG（对应 $EXPECTED），而 SKILL.md 的 metadata.version 是「$ACTUAL」。两者必须同号。"
+            exit 1
+          fi
+          echo "版本对齐：$TAG"
 
       - name: 说明文件必须已经在默认分支上
         run: |
@@ -69,27 +74,58 @@ jobs:
             echo "::error::找不到 $NOTES。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
             exit 1
           fi
+          if [ ! -s "$NOTES" ]; then
+            echo "::error::$NOTES 是空文件。"
+            exit 1
+          fi
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"
 
-      # 产出物与发布说明的顺序不能反：发布页必须先存在，附件才有地方挂。
-      # 先列条目核对、再打包，是因为核对要对着**这次真正要发出去的那份内容**做；
-      # 打包带 --prefix，用户解压出来就是一个 project-forge-<版本>/ 目录。
       - name: 产出用户包（按 .gitattributes 的排除规则导出，并核对条目）
         run: |
           VERSION="${TAG#v}"
           git archive --format=tar "$TAG" | tar -t > package-list.txt
-          node scripts/dev/preflight.mjs --package package-list.txt --at "$TAG"
-          # 附件名固定不带版本号：这样 `releases/latest/download/project-forge.zip` 永远指向
-          # 最新版——README 用它做「点这里下载」，压缩包副本也用它找新版。要某一版就去点
-          # 发布页上那个标签，文件照样在，只是名字一样。
+          node scripts/dev/preflight.mjs --package package-list.txt
+          # 附件名固定不带版本号：这样 `releases/latest/download/project-forge.zip` 永远
+          # 指向最新版——README 用它做「点这里下载」。要某一版就去点发布页上那个标签。
           git archive --format=zip --prefix="project-forge-${VERSION}/" \
             -o "project-forge.zip" "$TAG"
           echo "ASSET=project-forge.zip" >> "$GITHUB_ENV"
 
-      - name: 写发布说明（建或更新；写完回读比对，不一致即失败）
-        run: node scripts/release-notes.mjs "$TAG" "$NOTES" --repo "$REPO"
+      - name: 写发布说明（建或更新，写完回读比对）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          # **是「建或更新」，不是「已存在就跳过」**：补漏重跑时必须回填正文，跳过会让
+          # 那次发布永远只有一行标签名。代价是重跑会覆盖已有正文。
+          #
+          # --verify-tag 是护栏：标签名打错时它直接失败。没有它，创建命令会拿默认分支的
+          # 状态自动建出一个同名新标签，而这次发版看起来还是绿的。
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES"
+          else
+            gh release create "$TAG" --repo "$REPO" --verify-tag \
+              --title "$TAG" --notes-file "$NOTES"
+          fi
+
+          # 回读比对。上一步返回 0 只说明命令自己认为成功了，不说明页面上的正文是什么样
+          # ——编码层、代理、平台的规范化都可能改写它，而它们都不报错。
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > readback.md
+          # 归一：去行尾空白、去末尾空行。只做这两件，不动正文本身——不归一的话一次纯格式
+          # 差异就会被报成「正文被改写」，而报错本身不能有假警报。
+          norm() {
+            awk '{ sub(/[ \t]+$/, "") } { line[NR] = $0 }
+                 END { n = NR; while (n > 0 && line[n] == "") n -= 1
+                       for (i = 1; i <= n; i += 1) print line[i] }' "$1"
+          }
+          norm "$NOTES" > want.txt
+          norm readback.md > got.txt
+          if ! diff -u want.txt got.txt; then
+            echo "::error::回读的正文与说明文件不一致——正文在传输中被改写了。请打开页面确认实际内容。"
+            exit 1
+          fi
+          echo "回读一致：$TAG 的正文与 $NOTES 逐字相同。"
 
       - name: 把用户包挂到这一版的发布页上
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: gh release upload "$TAG" "$ASSET" --clobber
+        run: gh release upload "$TAG" "$ASSET" --repo "$REPO" --clobber

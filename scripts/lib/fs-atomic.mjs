@@ -1,136 +1,97 @@
 /**
- * fs-atomic.mjs —— 原子写入与临时文件的生命周期。
+ * fs-atomic.mjs —— 临时文件与原子写的唯一实现。
  *
- * 「先写临时文件、再改名」是全仓库所有落盘动作的共同前提：中途失败不能留下半截
- * 文件，否则下一个读它的人拿到的是一份看起来正常、实际残缺的内容。
+ * 只回答一件事：**写到一半被杀，磁盘上会留下什么。** 不留半截文件，也不留无人认领的
+ * 临时文件——两者都会在很久以后才以「某个文件坏了」的形式出现，而那时没人记得是
+ * 哪次运行造成的。
  *
- * 临时文件需要属主，因为**并发是这个工具的常态**（AI 并行、CI 并发、编辑器插件与
- * AI 同时操作）。属主用进程号表达，清理时据此判断那个文件还有没有主人。
- *
- * 这一层**不认识任何业务概念**：它不知道 AGENTS.md、不知道 TOC，只处理「一个路径
- * 与它的临时文件」。任何往这里塞业务判断的改动都放错了地方。
+ * 临时文件名带进程号，判据是「属主还活着吗」。活着的进程可能在用，死掉的那个不会。
  */
 
-import { readdirSync, renameSync, unlinkSync, writeFileSync, existsSync } from 'node:fs'
+import { existsSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
-/**
- * 本工具的临时文件名：**原名 + `.tmp-` + 进程号**。
- *
- * 形状写在两处就一定会漂，所以它只此一份。
- * 进程号是「属主」：清理时靠它判断这个临时文件还有没有主。
- */
-export function tempPathFor(target, pid = process.pid) {
-  return `${target}.tmp-${pid}`
+/** 临时文件名形状的唯一来源：`原名.tmp-<pid>`。 */
+export function tempPathFor(path) {
+  return `${path}.tmp-${process.pid}`
 }
 
-/**
- * 这个进程号还活着吗？
- *
- * 判据用 `process.kill(pid, 0)`：ESRCH = 没有这个进程；其余（例如 EPERM）
- * 说明进程存在、只是问不动它——**问不动不等于不在**，所以那种情况按「还活着」处理。
- * 问不出来（不是合法进程号）一律按「不在」，但那类文件根本进不到这一步。
- */
+/** 这个进程还活着吗。`EPERM` 说明它存在但属于别人，按活着算。 */
 export function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
   } catch (error) {
-    return error?.code !== 'ESRCH'
+    return error.code === 'EPERM'
   }
 }
 
 /**
- * 清掉这个文件此前的临时文件。
+ * 清掉同目录下遗留的临时文件。
  *
- * **只删能证明是「已经死掉的进程」留下的那些**，其余一律留下并报出来。两条判据都要：
+ * 三条保护，每条都对应一类误删：
+ *   - 后缀不是纯数字的**不是我们的**（可能是使用者的 `notes.txt.tmp-backup`）；
+ *   - 本次进程自己的不动（它可能正在用）；
+ *   - 属主还活着的不动（别的实例可能在用）。
  *
- *   - **形状**必须是 `<原名>.tmp-<纯数字>`。纯数字是进程号；同前缀但不是纯数字的
- *     （`README.md.tmp-backup` 这类）是**使用者自己的文件**，不是残留——删掉它就是
- *     悄悄毁掉别人的东西。而且它连残留报告都认不出来（那边用的是同一个形状判据），
- *     于是使用者永远不知道自己被删了。
- *   - **属主还活着吗**：活着说明它是**另一个正在跑的进程**手里的临时文件。删了它，
- *     那次运行的改名会失败（ENOENT），报一句「处理失败」收工——文件没坏，
- *     但那次白跑。
- *
- * 代价说清楚：进程号会被系统回收。**被回收的那个号**若正好落在一个活着的进程上，
- * 它的残留就清不掉（要等那个进程也退出）。留着比误删好——残留是一个文件，误删是丢数据。
- *
- * `dryRun`：**只判不删**。只读模式（`--check`、`--status`，CI 里跑的就是它们）必须传它，
- * 否则一个自称「只校验」的命令会在别人的工作区里删文件，而报告只说「校验通过」。
- * 那时 `removed` 是「本来可以清掉的」，报告措辞也随之变成「发现」而不是「清掉」。
- *
- * 返回 { removed, kept }：removed 是清掉的（dryRun 下是能清掉的），kept 是留下的。
+ * `dryRun` 时只报不删——只读模式下删文件会让「只读」这个承诺变成假话。
  */
-export function clearStaleTemps(path, { dryRun = false } = {}) {
-  const dir = dirname(path)
-  const prefix = `${basename(path)}.tmp-`
+export function clearStaleTemps(dir, { dryRun = false } = {}) {
   const removed = []
-  const kept = []
-  let entries
-  try { entries = readdirSync(dir) } catch { return { removed, kept } }
+  let entries = []
+  try { entries = readdirSync(dir) } catch { return removed }
   for (const name of entries) {
-    if (!name.startsWith(prefix)) continue
-    const suffix = name.slice(prefix.length)
-    if (!/^\d+$/.test(suffix)) {
-      kept.push({ name, why: '不是本工具的临时文件（使用者自己的？）' })
-      continue
-    }
-    const pid = Number(suffix)
-    if (pid === process.pid) {
-      kept.push({ name, why: '本次运行正在写它' })
-      continue
-    }
-    if (processAlive(pid)) {
-      kept.push({ name, why: '另一个正在运行的进程正在写它' })
-      continue
-    }
-    if (dryRun) { removed.push(name); continue }
+    const m = /^(.+)\.tmp-(\d+)$/.exec(name)
+    if (!m) continue
+    const pid = Number(m[2])
+    if (pid === process.pid) continue
+    if (processAlive(pid)) continue
+    const full = join(dir, name)
     try {
-      unlinkSync(join(dir, name))
-      removed.push(name)
-    } catch { /* 清不掉就算了 */ }
+      if (!statSync(full).isFile()) continue
+    } catch { continue }
+    removed.push(full)
+    if (!dryRun) {
+      try { unlinkSync(full) } catch { /* 删不掉就留着，下次还会看到 */ }
+    }
   }
-  return { removed, kept }
+  return removed
 }
 
-/**
- * 临时文件的清理结果要说出来：清了什么、什么没清以及为什么。
+/** 把清理结果说出来。**默默清理等于让使用者以为文件本来就是那样。**
  *
- * 不说就是「静默」：没清掉的文件会一直躺在那儿，而看报告的人无从判断它是残留
- * 还是别人的东西——下一次运行还会再遇到它。
- *
- * 判据与报告是一件事的两半，各写一份报告格式，就会出现同一个残留在一个工具里
- * 报「已清理」、在另一个工具里报「没动」。
+ * 返回值是给人看的一句话（空串表示没什么可说）。调用方自己决定写到哪儿。
  */
-export function reportTemps(file, temps, { dryRun = false } = {}) {
-  if (temps.removed.length === 0 && temps.kept.length === 0) return
-  const parts = []
-  if (temps.removed.length > 0) {
-    parts.push(dryRun
-      ? `发现 ${temps.removed.length} 个上次遗留的临时文件（只读模式，没有删）`
-      : `清掉 ${temps.removed.length} 个上次遗留的临时文件`)
-  }
-  if (temps.kept.length > 0) {
-    parts.push(`没动 ${temps.kept.length} 个同前缀但不属于本次运行的文件：`
-      + temps.kept.map((k) => `${k.name}（${k.why}）`).join('、'))
-  }
-  process.stdout.write(`${file}：${parts.join('；')}\n`)
+export function reportTemps(removed, { dryRun = false } = {}) {
+  if (!Array.isArray(removed) || removed.length === 0) return ''
+  const verb = dryRun ? '发现了遗留的临时文件（未删）' : '清掉了遗留的临时文件'
+  return `${verb}：${removed.map((p) => basename(p)).join('、')}\n`
 }
 
 /**
- * 先写临时文件再改名：中途失败不会留下半截文件。
+ * 原子写：先写临时文件、再改名。
  *
- * 失败时清掉自己的临时文件：它带着 `.tmp-` 后缀留在仓库里，会被结构自检当成无主文件。
+ * 同目录改名在同一个文件系统上是原子的，所以读者要么看到旧内容、要么看到新内容，
+ * 不会看到半截。失败时把临时文件删掉——留着它，下一次运行会把它当成「别人的残留」。
  */
 export function writeAtomic(path, content) {
   const tmp = tempPathFor(path)
+  writeFileSync(tmp, content, 'utf8')
   try {
-    writeFileSync(tmp, content)
     renameSync(tmp, path)
   } catch (error) {
-    try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* 清不掉就算了 */ }
+    try { unlinkSync(tmp) } catch { /* 清不掉就留着 */ }
     throw error
   }
+}
+
+/** 这个路径上有没有东西（文件或目录）。 */
+export function exists(p) {
+  return existsSync(p)
+}
+
+/** 父目录（给 `mkdirSync` 用）。 */
+export function parentOf(p) {
+  return dirname(p)
 }

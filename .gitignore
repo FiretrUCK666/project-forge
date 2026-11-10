@@ -6,7 +6,7 @@ node_modules/
 .yarn/
 bower_components/
 
-# Python（scripts 目前全是 Node，但保留以免将来混入）
+# Python（scripts 目前全是 Node，保留以免将来混入）
 __pycache__/
 *.py[cod]
 .venv/
@@ -28,41 +28,9 @@ desktop.ini
 *.log
 *.tmp
 *.bak
-*.tgz
 coverage/
 .cache/
 
-# 构建产物（Node / 通用）
-dist/
-build/
-out/
-
-# 构建产物（Rust / Java）
-target/
-
-# 依赖兜底（Go / PHP 等 vendored 依赖）
-vendor/
-
-# 前端框架产物（Next.js / Nuxt）
-.next/
-.nuxt/
-
-# 构建缓存（Gradle / Turborepo）
-.gradle/
-.turbo/
-
 # 用户包核对的中间清单：`git archive ... | tar -t > package-list.txt` 的产物。
-# 它必须被忽略，否则这个未跟踪文件会落进自检的检查域（`git ls-files --others`），
-# 让「本地跑一遍等于 CI 过」这个承诺在第二天失效。
+# 必须忽略，否则这个未跟踪文件会落进自检的检查域，让「本地跑一遍等于 CI 过」失效。
 package-list.txt
-
-# 本地工具状态：多智能体协作的团队清单与邮箱，只属于本机，不进版本库。
-# 用 **/ 而非仅根目录：工具可能在子目录里被唤起，何处生成都同样兜住。
-**/.agent-teams/
-
-# 勘察输出的基线快照：只在重构期间用来比对行为有没有变，含本机路径，不入库。
-scripts/dev/.baseline/
-
-# 本 skill 在目标项目里留下的账本目录。它属于**目标项目**、进那个项目的版本库；
-# 本仓库自己是 skill 源码，不该有它。误跑 --record 时兜住。
-.project-forge/

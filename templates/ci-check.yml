@@ -30,6 +30,9 @@ on:
   push:
     branches: ['**']
   pull_request:
+    # `edited` 不能漏：审查记录是往**提案正文**里填的，而改正文只会触发这个事件。
+    # 少了它，先开提案（红）、再补记录，那一步检查不会重跑，状态停在上一次。
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   check:
@@ -37,6 +40,10 @@ jobs:
     steps:
       - name: 检出
         uses: actions/checkout@v4  # 落盘前核对最新大版本
+        with:
+          # **必须全历史**：最后那一步要算基线分支与本次的差异，浅克隆里没有合并基点，
+          # `git diff A...B` 会返回空——而空清单会被读成「没动高风险路径」，门禁绿着放行。
+          fetch-depth: 0
 
       # TODO(1)：按生态只留一块，其余整块删掉。Python 换 setup-python，Rust/Go 换对应
       # setup action，纯文档目录本块整段删掉。未选生态时下面默认块是错的，先选再删注释。
@@ -56,3 +63,67 @@ jobs:
       #   run: |
       #     <重新构建命令>
       #     <比对命令：不一致即失败>
+
+      # 「高风险改动必须有审查记录」。**这一步不要删**：它是「必须独立审查」这条规则
+      # 唯一的机器判据。没有它，那条规则就只是一段文字——改完、门禁全绿、看着没问题，
+      # 就合了，而「审查」这一步从来没发生过。
+      #
+      # 它核三件事：
+      #   一、提案正文里有 `工作记录: <路径>` 指针，那份文件在本次改动里、且冻结了验收标准；
+      #   二、每轮审查的 `fail` 引用的都是冻结清单里真有的 id（审查不能发明标准）；
+      #   三、最后一轮 `fail` 为空、交了故障注入记录、且没有触发止损。
+      #
+      # **结论由脚本算，审查者不写**：让审查者写结论，机器就得去读那句中文里「通过」
+      # 是肯定还是否定——否定的写法列不完，每漏一种方向都是放行。
+      #
+      # 判据来自本项目 AGENTS.md 的「## 高风险路径」表——**那张表填了才有效**，
+      # 空表会让这一步明说「这一趟没查」然后放行（不静默，但也拦不住）。
+      #
+      # 前置：`scripts/review-record.mjs` 随落盘自动拷过来（compose 那一步做的），
+      # 不用手工拷。它零依赖、单文件，不需要装任何东西。
+      # 检出必须 `fetch-depth: 0`：算基线差异需要合并基点，浅克隆里 diff 会返回空，
+      # 而空清单会被读成「没动高风险路径」——门禁绿着放行，什么都没拦。
+      - name: 高风险改动必须有审查记录（仅提案）
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          # TODO 豁免标签名与本项目的「## 协作参数」表保持一致（默认 pf:human-approved）。
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          # `diff.renames=false`：不带它时，一次改名只报**新路径**——把判定逻辑
+          # `git mv` 到 `scripts/` 之外再改松，门禁会判成「不落在高风险路径」。
+          # `core.quotepath=false`：默认配置会把中文文件名转义成 "\345\256\241..."，
+          # 前缀判据匹配不上，中文名的风险改动会被判成非高风险、绿着放行。
+          git -c core.quotepath=false -c diff.renames=false diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+          printf '%s' "$PR_BODY" > pr-body.md
+
+          # 把评论拉下来拼成一份文件（每条之间一行 ---COMMENT---）。
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            | node -e '
+              let raw = ""
+              process.stdin.on("data", (c) => { raw += c })
+              process.stdin.on("end", () => {
+                const list = JSON.parse(raw)
+                if (!Array.isArray(list)) {
+                  process.stderr.write("拉评论失败：" + raw.slice(0, 200) + "\n")
+                  process.exit(3)
+                }
+                process.stdout.write(list.map((c) => c.body ?? "").join("\n---COMMENT---\n"))
+              })
+            ' > comments.txt
+
+          # 豁免标签只豁免**止损**（同标准连续两轮、轮次超上限），不豁免「还有标准没过」。
+          WAIVED=""
+          case ",$PR_LABELS," in
+            *",pf:human-approved,"*) WAIVED="--waived" ;;
+          esac
+
+          # `--expect-changes` 不能省：提案不可能零改动，清单为空只说明 diff 没算出来。
+          node scripts/review-record.mjs --expect-changes $WAIVED \
+            --changed changed.txt --body pr-body.md --comments comments.txt

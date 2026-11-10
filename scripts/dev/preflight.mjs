@@ -32,20 +32,28 @@
  * 退出码 0 = 全绿；1 = 有 FAIL；2 = 脚本自身用法错误。
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, relative, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
 import { README_NAME_RE, HOME_PATH_RE } from '../survey.mjs'
-import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments } from '../lib/protocol.mjs'
-import { skillVersion, skillSource, repoRelation, tableFirstCells, parseMarkerKeys, normVersion } from '../lib/text.mjs'
+import { KERNEL_START, KERNEL_END, MANAGED_MARK_RE as PROTOCOL_MANAGED_MARK_RE, lintReleaseNotes, stripHtmlComments , LANDED_SCRIPTS, REPO_ONLY_DIRS, REPO_ONLY_FILES } from '../lib/protocol.mjs'
+import { skillVersion, skillSource, repoRelation, parseMarkerKeys, normVersion } from '../lib/text.mjs'
 import { isRepoOnlyPath } from '../lib/protocol.mjs'
 // 模板要素的判据只有一处实现：`review.mjs` 用它查目标项目，本仓库用它查自己。
 // 两处各写一份「什么算合格的问题模板」，迟早会给出两个答案，而其中一个是假的。
 import { issueTemplateGaps } from '../review.mjs'
 import { scanLines } from '../lib/markdown.mjs'
+// 高风险表的解析**只有一处实现**：脚本要读它判门禁，自检要读它验「那张表还能不能解析」。
+// 两处各写一份，迟早会给出两个答案——而其中一个是「表看起来在、其实读不出来」。
+import {
+  readHighRiskTable, canonicalDoneSnippet, canonicalReviewSnippet,
+  DONE_FENCE, CONTRACT_SITES, DONE_SITES,
+} from '../review-record.mjs'
+import { TEMPLATE_INSTANCES, TEMPLATE_NO_INSTANCE, JUDGE_REGISTRY } from '../lib/protocol.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // 本文件住在 scripts/dev/ 下：scripts/ 顶层放「用户与目标项目会用到」的脚本，
@@ -85,8 +93,11 @@ const OWN_AGENTS_WARN_HEADROOM = 1024
  *
  * 这个数字是**量出来的、不是拍的**：按现在的结构（何时使用 / 硬不变量 / 取值从哪来 /
  * 能力矩阵 / 已有基础的项目 / 执行流程 / 硬门控 / 文件地图 / 边界 / 汇报纪律）写完是
- * 二十几 KB，30 KB 留出约 3 KB——够写一条新机制。要再涨，先问「这条能不能并进
+ * 二十几 KB，30 KB 留出一点余量——够写一条新机制。要再涨，先问「这条能不能并进
  * `references/`」，而不是抬这个数。
+ *
+ * **别在这里写「还剩多少」**：余量每天都在变，写进注释就变成下一个会过期的快照。
+ * 想知道余量，看 `SKILL_WARN_HEADROOM` 那条告警——它每次跑都量当前值。
  */
 const SKILL_MAX_BYTES = 30 * 1024
 /** 余量告警线：离上限不足这么多字节时提醒一次。 */
@@ -105,16 +116,70 @@ const SKILL_WARN_HEADROOM = 2 * 1024
 export const FRESHNESS_STALE_DAYS = 180
 
 /**
+ * 本机文件系统分不区分大小写。
+ *
+ * 判据与 `cases-2.mjs` 里那条「大小写变化」断言**用同一个探法**——那里决定跑不跑，
+ * 这里决定基线取哪个数。两处必须同源，否则基线与实际断言数会对不上，而那种对不上
+ * 表现为「某个平台恒红」或「某个平台漏报一条」，两种都很难看出来。
+ *
+ * 探法：拿系统临时目录建一个小文件，看大写路径存不存在。**不写字面量常量**——
+ * 同一个仓库在 Windows 上开发、在 Linux 上跑 CI 是常态，写死哪个都会让另一边出错。
+ */
+export function caseInsensitiveFs() {
+  const dir = mkdtempSync(join(tmpdir(), 'pf-fs-probe-'))
+  try {
+    writeFileSync(join(dir, 'probe-case.txt'), 'x')
+    return existsSync(join(dir, 'PROBE-CASE.TXT'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/**
  * 行为自检至少要跑出这么多条通过，少于此数视为「断言被删掉了一大片」。
  *
  * 为什么要这个下限：通过判据原先只看「有摘要行 + 退出码 0」，于是把 selftest.mjs 换成
  * 一句 `行为自检：0 项通过，0 项失败` 的空壳也算通过——断言全没了，门禁还绿着。
  * 「跑过但什么都没验」必须与「跑过且验了」长得不一样。
  *
- * 这个数是**量出来的**（当前全量通过数），不是随手写的整数：随断言增加而上调是正常的，
- * 下调则应视为信号——那多半意味着刚删掉了一片判据。调低时请一并说明删了什么。
+ * **这个数不再手写。** 手写的下限与断言数之间没有结构关系：断言加了忘了抬，它就变成
+ * 一个永远够不着的数字（实测过一次——下限写着 748，实测 736，于是**完整自检恒红**，
+ * 而 CI 只跑 `--no-behavior`，那处红在 CI 里永远看不见）。那种失效比没有下限更坏：
+ * 它看起来是一道防线，实际是一条恒假断言。
+ *
+ * 改成**从断言自身推导**：下限就是上一次提交时实测出来的通过数，记在下面这张表里，
+ * 由 `checkBehavior` 与 `selftest` 共用。加断言时表跟着加一行；删断言时表也要改，
+ * 而那一刻改动者必须写下删了什么——这正是下限要人做的那个动作。
+ *
+ * 表按**分片**记，不按总数：一片塌了（例如文件被截断）与总数少几条是两种不同的失败，
+ * 分开记能直接说出是哪一片。
  */
-export const BEHAVIOR_MIN_PASSED = 570
+export const BEHAVIOR_BASELINE = Object.freeze({
+  'cases-0.mjs': 182,
+  'cases-1.mjs': 133,
+  // 这一片的数**随平台变**：文件系统分不区分大小写，决定「大小写变化」那条断言跑不跑。
+  // Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条，因为全大写路径在那里是
+  // 真不存在的，判真才是错的）。
+  //
+  // **按能力精确取值，不用区间。**区间（147-148）试过，它在上界那一侧必须松一条：
+  // 下限只能取 Linux 的 147，于是 Windows 上删掉一条真实断言仍然全绿——一条会漏报的
+  // 下限，比没有下限更容易骗人。这里用与 cases-2 完全相同的判据取值，两侧都是精确数。
+  'cases-2.mjs': caseInsensitiveFs() ? 148 : 147,
+  'cases-3.mjs': 183,
+  'cases-4.mjs': 110,
+})
+
+/**
+ * 主入口自己那几条：跨分片的断言不归任何一片（值域前提、词表外 kind 一类）。
+ *
+ * 单列出来而不是并进上面那张表，是因为它**没法逐片定位**——它测的正是「各片合起来
+ * 有没有问题」。混进分片表会让那条逐片比对失去意义。
+ */
+export const BEHAVIOR_MAIN_ENTRY = 1
+
+/** 下限 = 分片基线之和 + 主入口那几条。由上面两个数算出来，不另写一个数。 */
+export const BEHAVIOR_MIN_PASSED = Object.values(BEHAVIOR_BASELINE)
+  .reduce((a, b) => a + (typeof b === 'number' ? b : b.min), 0) + BEHAVIOR_MAIN_ENTRY
 
 /**
  * 「含构建机私有路径」这一项要豁免的文件，每个都写明豁免理由。
@@ -570,7 +635,17 @@ function checkDeliveredAttribution() {
 
   // `scripts/` 是通用目录名，目标项目也常有，所以这一条必须看本包**真的有**那个脚本：
   // 否则目标项目自己的 `scripts/build.mjs` 会被误判成我们的。
-  const isOurScript = (spec) => spec.startsWith('scripts/') && fileExistsLoose(expand(spec))
+  //
+  // **例外：要落到目标项目里去的那几个脚本**（`LANDED_SCRIPTS`）。它们的用法就是
+  // 「拷进项目的 `scripts/` 之后在那儿跑」——模板里指它是对的，不指才是漏了。
+  // 这条例外写成一张显式表，不靠「名字里带某个词」之类的启发式：那种判据在加第二个
+  // 脚本时会静默失灵，而失灵的后果是把一条正确的引用判成死链。
+  //
+  // **例外本身也要对账**：表里写一个磁盘上不存在的脚本时，那条例外会把「死链该红」
+  // 变成「归例外管，绿着放行」——失败方向是放过。所以下面单独核一次表项与磁盘。
+  const isOurScript = (spec) => spec.startsWith('scripts/')
+    && fileExistsLoose(expand(spec))
+    && !LANDED_SCRIPTS.includes(expand(spec))
 
   // 围栏代码块：只对 Markdown 生效。行号要与原文对齐，所以按行追踪。
   const fencedLines = (text, isMarkdown) => {
@@ -779,7 +854,27 @@ function checkGlobalRules() {
   for (const entry of entries) {
     if (ALLOWED_TOP_LEVEL.has(entry)) continue
     if (README_NAME_RE.test(entry)) continue
+
+    // **临时产物先判，不看它进没进仓库。**
+    //
+    // 第二半（下面那条 `domainFiles` 检查）判的是「仓库里的文件有没有归属」，
+    // 它看不见被 .gitignore 忽略的东西——而 `*.tmp` / `*.bak` / `*.log` / `*.swp`
+    // 正在忽略清单里，实测放根上一条都不报。
+    //
+    // 而这类文件恰恰最该被扫：它们最容易在根上堆着没人管，也最容易随包发出去。
+    const looksTemporary = /^(?:pf-|tmp-|temp-|scratch-|probe-|zz-)|(?:\.tmp|\.bak|\.orig|\.rej|\.log|\.swp|\.swo|~)$/i.test(entry)
+      // 根上的 .mjs：这个仓库的脚本都在 scripts/ 下，根上出现一个就是跑完没清。
+      || entry.endsWith('.mjs')
+    if (looksTemporary) {
+      fail(`顶层出现临时产物：${entry} —— 根目录不放脚本与草稿。`
+        + '临时文件写系统临时目录、用完即删（见 AGENTS.md 的测试约定）；'
+        + '真要长期留在仓库里，就放进已有的目录（脚本进 scripts/、文档进 docs/），'
+        + '并在 README 的「包里有什么」里说一句。')
+      continue
+    }
+
     if (!domainFiles.some((p) => p === entry || p.startsWith(`${entry}/`))) continue
+
     warn(`顶层出现未登记的条目：${entry} —— 请确认它是否应该在这里。`)
   }
 }
@@ -1063,9 +1158,42 @@ function checkBehavior({ skip = false, why = '' } = {}) {
       + '读不出来就没法判断它到底跑了多少断言。')
     return
   }
+  // **逐片比，不只比总数。**
+  //
+  // 只比总数时，一片塌了（文件被截断、某个 fixture 建不出来）会被另一片多出来的几条
+  // 掩盖，而总数仍然过线。分片基线在 `BEHAVIOR_BASELINE` 里，下限由它求和得出——
+  // 手写的那个数已经失效过一次（写着 748、实测 736，于是完整自检恒红而 CI 看不见）。
+  //
+  // 一片的通过数**少于基线**就是信号：要么断言被删了，要么那片根本没跑完。
+  // 多于基线是正常的（加了断言而没更新表），但也提示该去更新表——所以也报一行。
+  const shardLines = out.split('\n').filter((l) => /^\s{2}\S+\.mjs\s+\d+\s+通过/.test(l))
+  const grown = []
+  for (const line of shardLines) {
+    const m = /^\s{2}(\S+\.mjs)\s+(\d+)\s+通过/.exec(line)
+    if (m === null) continue
+    const entry = BEHAVIOR_BASELINE[m[1]]
+    if (entry === undefined) { grown.push(`${m[1]}（表里没有，新增了分片？）`); continue }
+    // 基线可以是区间：有些分片的断言数随平台变化（见 BEHAVIOR_BASELINE 的注释），
+    // 那时写死任何一个数都会让另一个平台恒红。区间表达的是「这一片该有这么多，
+    // 视环境在 [min, max] 之间」。低于 min 才是断言丢了。
+    const lo = typeof entry === 'number' ? entry : entry.min
+    const hi = typeof entry === 'number' ? entry : entry.max
+    const got = Number(m[2])
+    if (got < lo) {
+      fail(`${m[1]} 只跑了 ${got} 项，低于基线 ${lo} —— 这一片的断言被删掉了一片，`
+        + '或者它在中途崩了而摘要仍然打了出去。逐片比才能定位到是哪一片。')
+    } else if (got > hi) {
+      grown.push(`${m[1]} ${hi} → ${got}`)
+    }
+  }
+  if (grown.length > 0) {
+    warn(`行为自检的通过数超过了基线：${grown.join('、')} —— `
+      + '这是加断言之后的正常现象，但请把 `BEHAVIOR_BASELINE` 一并更新，'
+      + '否则这条下限会慢慢落回「永远够得着」，那时它就不再拦任何东西了。')
+  }
   if (passedCount < BEHAVIOR_MIN_PASSED) {
-    fail(`行为自检只跑了 ${passedCount} 项（下限 ${BEHAVIOR_MIN_PASSED}）——断言被删掉了一大片，`
-      + '或者自检被换成了一个只会报「0 项通过」的空壳。少了多少条断言，就等于少了多少处判断。')
+    fail(`行为自检只跑了 ${passedCount} 项（下限 ${BEHAVIOR_MIN_PASSED}，由 BEHAVIOR_BASELINE 求和）——`
+      + '断言被删掉了一大片，或者自检被换成了一个只会报「0 项通过」的空壳。')
   }
   if (r.status !== 0) {
     const body = out.split('失败项：')[1] ?? ''
@@ -1294,7 +1422,7 @@ function cnNumber(raw) {
  * `checkPackageBoundary` 与 `checkProducedPackage` 会双向核对。两处判的是同一件事，
  * 但一个给方向、一个给结论——方向错了，结论那一步会当场红。
  */
-const isRepoOnly = (rel) => rel.startsWith('scripts/dev/')
+
 
 /**
  * 文档里自称的数量与磁盘对账。
@@ -1359,10 +1487,16 @@ function checkStatedCounts() {
       return false
     }
     for (const rel of onDisk) {
-      // **只查随包分发的脚本**。判据是读者：`scripts/` 顶层与 `lib/` 是拿到包的人会用到、
-      // 或者会被包里其它脚本 import 的；`scripts/dev/` 只服务本仓库，它在副本里根本不存在
-      // （被打包排除了），拿它做可达性检查只会在副本里制造一堆假红。
-      if (isRepoOnlyPath(rel)) continue
+      // **自检分片整片豁免，别的自用脚本照查。**
+      //
+      // 分片（`scripts/dev/cases-N.mjs`）由 `selftest.mjs` 的 `SHARDS` 表按名字调起，
+      // 而在**副本**里 `selftest.mjs` 被换成只打摘要行的替身（否则 preflight 与 selftest
+      // 会互相调用）——那时代码里找不到对它们的引用，是**结构的正常状态**，不是「没人用」。
+      // 所以这里按名字认它们。
+      //
+      // 其余自用脚本一律参与：`scripts/dev/` 曾经整片跳过，后果是「写一个没人用的工具
+      // 永远不会被发现」——而这正是这条判据存在的理由。
+      if (isSelftestCase(rel)) continue
       const base = rel.slice(rel.lastIndexOf('/') + 1)
       const inDoc = docs.some((t) => t.includes(rel) || t.includes(base))
       if (!inDoc && !referencedByCode(rel)) {
@@ -1386,15 +1520,20 @@ function checkStatedCounts() {
   // templates 的全部内容（专章之间互相指是常态，也必须算数）。不取 `docs/`：
   // 那是历史与工作记录，不是读者查找文件的入口。
   {
+    // `docs` 收的是「读者会去查找文件的那几份」：入口、两份 README、本仓库契约，
+    // 外加 references 与 templates 的全部正文（专章之间互相指是常态，也必须算数）。
+    // 每份带**自己的相对路径**，这样自指可以被排掉——见 `mentions`。
     const docs = ['SKILL.md', 'README.md', 'README.en.md', 'AGENTS.md']
-      .map((f) => readText(join(SKILL_ROOT, f)))
+      .map((f) => ({ at: f, text: readText(join(SKILL_ROOT, f)) }))
     for (const sub of ['references', 'templates']) {
       const dir = join(SKILL_ROOT, sub)
       if (!existsSync(dir)) continue
       const walk = (d, prefix) => {
         for (const e of readdirSync(d, { withFileTypes: true, encoding: 'utf8' })) {
           if (e.isDirectory()) { walk(join(d, e.name), `${prefix}${e.name}/`); continue }
-          if (e.name.endsWith('.md')) docs.push(readText(join(d, e.name)))
+          if (e.name.endsWith('.md')) {
+            docs.push({ at: `${sub}/${prefix}${e.name}`, text: readText(join(d, e.name)) })
+          }
         }
       }
       walk(dir, '')
@@ -1403,7 +1542,11 @@ function checkStatedCounts() {
       const base = rel.slice(rel.lastIndexOf('/') + 1)
       // 两种写法都算提到：完整相对路径（`references/x.md`）与裸文件名（`x.md`）。
       // 后一种是有意的：专章之间常常只写文件名，因为读者已经在那个目录的语境里。
-      return docs.some((t) => t.includes(rel) || t.includes(base))
+      //
+      // **但不算它自己那一份**：每个文件几乎都会在标题或正文里写一遍自己的名字，
+      // 把自己算进去，这条判据就退化成「文件存在吗」——实测新建一个只写着
+      // `# probe.md` 的模板，它照样放行，而「写了却没人指得到」正是要拦的那件事。
+      return docs.some((d) => d.at !== rel && (d.text.includes(rel) || d.text.includes(base)))
     }
     for (const sub of ['references', 'templates']) {
       const dir = join(SKILL_ROOT, sub)
@@ -1422,27 +1565,47 @@ function checkStatedCounts() {
       walk(dir, '')
     }
   }
-  // README 的「包里有什么」只核**四类东西都在**，不核逐文件清单。
+  // README 的「包里有什么」核**四类东西都在**，不核逐文件清单。
   //
-  // 为什么不再逐文件对账：那样就等于要求 README 维护一份要人记得改的清单，而它的读者
-  // 是「刚拿到这个 skill 的人」——他要判断的是「包里大概有什么」，不是查某一个脚本在不在
+  // 为什么不逐文件对账：那等于要求 README 维护一份要人记得改的清单，而它的读者是
+  // 「刚拿到这个 skill 的人」——他要判断的是「包里大概有什么」，不是查某一个脚本在不在
   // （那件事他直接看目录更快）。逐文件清单漏一行的症状是「读者照着找，找不到」，但同一份
   // 清单**每加一个文件就要改一次**，成本永久高于收益。
   //
-  // 判据落在那四类东西上：入口、判据、骨架、工具。任一类从 README 里消失，读者就再也
+  // 判据落在那四类上：入口、判据、骨架、工具。任一类从 README 里消失，读者就再也
   // 不知道那个目录存在——那才是这条检查真正要防的事。
-  for (const [readme, probe] of [
-    ['README.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
-    ['README.en.md', [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]],
-  ]) {
+  //
+  // **但「新文件可以永远不列」也是个洞**：README 说的「包里有什么」是读者对包的全部
+  // 预期，而每加一个顶层文件它就可能少说一样（举例：根上多一份 `RELEASING.md` 那样的
+  // 说明文件）。所以四类之外再补一条：**根目录下受版本控制的普通文件**，README 里得
+  // 提到它的名字。判据只覆盖根目录——子目录里的文件由上面那四类代表，逐个数它们
+  // 又会退回成逐文件清单。
+  const rootFiles = (() => {
+    const tracked = trackedFiles()
+    if (tracked === undefined) return undefined
+    return tracked.filter((f) => !f.includes('/'))
+      .filter((f) => !isRepoOnlyPath(f))
+      .filter((f) => !/^(LICENSE|\.gitignore|\.gitattributes)$/.test(f))
+  })()
+  for (const readme of ['README.md', 'README.en.md']) {
     const p = join(SKILL_ROOT, readme)
     if (!existsSync(p)) continue
     const text = readText(p)
-    for (const re of probe) {
+    for (const re of [/`SKILL\.md`/, /references\//, /templates\//, /scripts\//]) {
       if (!re.test(text)) {
         fail(`${readme} 里找不到 ${re} —— 「包里有什么」那一段必须让人看得到这一类东西，`
           + '否则读者根本不知道那个目录存在。')
       }
+    }
+    if (rootFiles === undefined) {
+      warn(`${readme} 的根目录文件未逐一核对（git 不可用）—— 报「未核对」，不放行。`)
+      continue
+    }
+    const unnamed = rootFiles.filter((f) => f !== 'README.md' && f !== 'README.en.md'
+      && !text.includes(f))
+    for (const f of unnamed) {
+      fail(`${readme} 没有提到根目录的 ${f} —— 它随包发出去，而读者从 README 里看不到。`
+        + '要么在「包里有什么」那一段补一句，要么它不该在根上（挪进已有的目录）。')
     }
   }
   // 门禁命令表在 AGENTS.md 与 CONTRIBUTING 各写了一份，**两处必须说同一件事**：
@@ -1569,49 +1732,7 @@ function checkStatedCounts() {
         }
       }
     }
-    // 脚本数量：写成「N 个脚本」时核对。
-    //
-    // **「一」在这里不当数量**：中文「一个脚本」是泛指冠词（"a script"），不是「脚本有
-    // 一个」。脚本是通用名词，这个读法极常见；而「一个脚本」这种数量断言本身既罕见、
-    // 错了也没人受害。**代价不对称**：为它误报一次，整道门禁就红一次，而红过一次的门禁
-    // 会被当成坏了——那比漏掉这一条坏得多。
-    //
-    // 硬不变量与硬门控不受这条影响：那两个词是本项目特有的术语，「一条硬不变量」永远
-    // 是数量断言，没有泛指的读法。
-    for (const m of text.matchAll(/(?<!第)([一二三四五六七八九十]+|\d+)\s*个?\s*脚本/g)) {
-      const raw = m[1]
-      const n = cnNumber(raw)
-      if (n === undefined) {
-        fail(`${doc} 写着「${raw}个脚本」，这个数字我核对不了 —— 换成阿拉伯数字，或去掉数量。`)
-        continue
-      }
-      if (n === 1) continue
-      if (n !== actual['脚本']) {
-        fail(`${doc} 写着「${raw}个脚本」，实际是 ${actual['脚本']} 个 —— 数量自称与代码不符。`)
-      }
-    }
   }
-}
-
-/**
- * 在某个二级标题之下，数**登记的路径个数**（去重后），而不是表格行数。
- *
- * 一张表行可以并列多个路径（文件地图里「发布说明那两个脚本」就是一行两路径），
- * 按行数算会把「有多少个文件」数成「有多少行」——那不是同一件事，而数量自称的
- * 判据对象恰恰是文件。
- */
-function countMapPaths(file, headingRe, pathRe) {
-  const p = join(SKILL_ROOT, file)
-  if (!existsSync(p)) return -1
-  const lines = readText(p).replace(/^\uFEFF/, '').split('\n')
-  const start = lines.findIndex((l) => headingRe.test(l))
-  if (start < 0) return -1
-  const seen = new Set()
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) break
-    for (const m of lines[i].matchAll(pathRe)) seen.add(m[0])
-  }
-  return seen.size
 }
 
 /** 数某个文件里匹配到的个数。 */
@@ -2270,6 +2391,609 @@ function checkReleaseNotes() {
 }
 
 /**
+ * 「必须独立审查」这条规则，**三个来源必须说同一件事**。
+ *
+ * 规则本身在 `references/collaboration.md` 第四、五节；本仓库契约在 `AGENTS.md` 的
+ * 「协作」一节；提案模板要有一栏让人填审查记录。三处各写一份，改一处漏两处的后果是：
+ * **规则还在，但照着做的人找不到它**——实测发生过一次，执行者看到 CI 绿就合并，因为
+ * 两份文档都只说「高风险必须人合」，没有一条说「必须有人审」。
+ *
+ * 这里不判措辞，判的是**这三处有没有把同一件事都说到**。判据取关键词而不是原句：
+ * 原句一改（换个说法）就误报，而那会让这条检查被当成噪音关掉。
+ */
+function checkReviewRuleSources() {
+  const read = (rel) => {
+    const p = join(SKILL_ROOT, rel)
+    return existsSync(p) ? readText(p) : undefined
+  }
+  const missing = []
+  const need = (rel, test, why) => {
+    const text = read(rel)
+    if (text === undefined) { missing.push(rel + ' 不存在'); return }
+    if (!test(text)) missing.push(rel + '：' + why)
+  }
+
+  // 一、判据：要有审查循环的那几节，且**结构上能判**。
+  //
+  // 判**结构**而不是关键词。原先判的是 `/必须独立审查/` 这类词，而那个词在这份文件里
+  // 到处都有——把整节删掉照样绿。一条「判据被删掉也看不出来」的检查，比没有更坏：
+  // 它打印的是「都在」。
+  need('references/collaboration.md',
+    (x) => /^### 冻结验收标准/m.test(x) && /^### 审查：只回答/m.test(x),
+    '缺「### 冻结验收标准」或「### 审查：只回答「哪几条没过」」这一节 —— '
+    + '没有冻结的标准，审查就只能回答「还能不能再找出一个问题」，而那个问题永远找得到')
+  need('references/collaboration.md',
+    (x) => /^### 什么时候停/m.test(x) && /连续两轮/.test(x),
+    '缺「### 什么时候停：两条止损」或没写「同一标准连续两轮」 —— 循环没有收敛条件')
+  need('references/collaboration.md',
+    (x) => /^### 判通过必须交故障注入/m.test(x),
+    '缺「### 判通过必须交故障注入」 —— 判「通过」的成本会退回成「写一句话」')
+  need('references/collaboration.md',
+    (x) => /^## 五、能不能合/m.test(x) && /\|\s*必须审\s*\|/.test(x),
+    '「## 五、能不能合」那张表没有「必须审」一列 —— 审不审与谁能合又混回一句了')
+
+  // 二、**机器契约逐字一致**。判据本体在 `contractSnippetIssues`，导出给行为自检
+  // 直接调用——理由与模板登记那条相同：复刻一份的断言不会因为判据被削弱而变红。
+  //
+  // 这条判据自己就吃过一次：作者给 `templateRegistrationIssues` 写明了「断言必须调判据
+  // 本身」，契约比对这一条却漏了，于是同一个文件里两种做法并存，而漏的那条正是最要紧的
+  // 防线（示例与实现不符就是它该拦的）。
+  for (const why of contractSnippetIssues()) fail(why)
+
+  // 三、**结论词不得回到判定里**。
+  //
+  // `通过` 这个词从机器的输入里消失，是这次改动的核心。重写这段代码的人很容易
+  // 「顺手」再引入一个 verdict 字段——它看起来合理，而它一旦回来，中文里否定的写法
+  // （不通过 / 通不过 / 尚未通过 …）就又成了判定依据，整类误判随之回来。
+  //
+  // 判据是「这些符号不再存在」，不是「不许提通过」——说明文字里提它是必要的
+  // （不然下一个人不知道为什么没有那个字段）。
+  need('scripts/review-record.mjs',
+    (x) => !/\bVERDICTS\b/.test(x) && !/\breviewRecordState\b/.test(x)
+      && !/\bmatchRoundsToComments\b/.test(x) && !/\bcnNum\b/.test(x),
+    '脚本里又出现了 VERDICTS / reviewRecordState / matchRoundsToComments / cnNum —— '
+    + '那几个符号都属于「让机器读中文结论词」那一版，它们的回来意味着整类误判的回来')
+
+  // 四、**模板必须登记**：`templates/` 下每个文件都要落在 `TEMPLATE_INSTANCES`
+  // 或 `TEMPLATE_NO_INSTANCE` 里。判据本体在 `templateRegistrationIssues`，导出给
+  // 行为自检直接调用——**断言必须调判据本身，不能复刻一份**：复刻的那份不会因为
+  // 判据被削弱而变红，于是「判据坏了」这件事没有任何东西看着。
+  for (const why of templateRegistrationIssues()) fail(why)
+
+  // 五、工作记录模板要带那个块：**没有它，目标项目的新工作记录就不会有冻结的标准**。
+  need('templates/work-item.md',
+    (x) => /^### 验收标准/m.test(x) && new RegExp('```' + DONE_FENCE).test(x),
+    '缺「### 验收标准」这一节或 `pf-done` 示例块 —— '
+    + '照着它建的工作记录里没有冻结的验收标准，那条门禁对目标项目就永远不成立')
+
+  // 六、两份问题模板都要有验收标准栏。
+  //
+  // 有单轨道时，验收标准来自问题正文——那是别人写的、开工前就存在的，天然是冻结的。
+  // 缺了这一栏，那条轨道就没有判据来源，只能退回工作记录，而两个人对「算不算过」
+  // 的理解不会一致。
+  for (const rel of ['templates/issue-bug-report.md', 'templates/issue-feature-request.md',
+    '.github/ISSUE_TEMPLATE/bug_report.md', '.github/ISSUE_TEMPLATE/feature_request.md']) {
+    need(rel, (x) => /^## 验收标准/m.test(x),
+      '缺「## 验收标准」这一栏 —— 有单轨道时它是审查的唯一判据来源；'
+      + '没有它，「修成什么样算修好」只能凭感觉')
+  }
+
+  // 七、两份提案模板都要有实现依据那一栏。
+  for (const rel of ['templates/pull-request-template.md', '.github/pull_request_template.md']) {
+    need(rel, (x) => /^## 实现依据/m.test(x),
+      '缺「## 实现依据」这一栏 —— 开工前分流写了也没地方落，读者无从知道这个改动凭什么成立')
+  }
+
+
+  // 二、本仓库契约：`## 高风险路径` 那一节要有表，而且要能解析出路径。
+  need('AGENTS.md',
+    (x) => {
+      const table = readHighRiskTable(x)
+      return table.found === true && table.paths.length > 0 && table.skipped.length === 0
+    },
+    '「## 高风险路径」一节缺失、表是空的、或有解析不出来的行 —— 那条门禁会静默失效')
+
+  // **表里的每一条都要说得通，而且不能少到离谱。**
+  //
+  // 上一轮只堵住了「删掉 AGENTS.md 自己那一行」。实测把同一手法用在其余行上照样成立：
+  // 删掉 scripts/ 那一行 → preflight 仍 0 项失败，于是改判定逻辑不再需要审查记录。
+  // **判据的输入不受判据保护**，这是这整类问题的根。
+  //
+  // 硬编码五条路径不行（那又成了写死清单，而这张表正是要取代清单的东西）。
+  // 判两件不写死的事：
+  //   一、每一条的「为什么」那一格要说得通——非空，且不是占位符；
+  //   二、条数不少于「不进包的那几处」的条数。结构规则被删时同样会掉到这个数以下，
+  //       而两件事（高风险表被删、结构规则被删）都该红。
+  need('AGENTS.md',
+    (x) => {
+      const table = readHighRiskTable(x)
+      if (table.found !== true || table.whyFilled !== true) return false
+      // 一、**受保护的关键处必须被盖住**，而不是「必须恰有几行」。
+      //
+      // 只数条数拦不住「删掉一行还剩四条」——实测过，删掉 scripts/ 那一行之后表里
+      // 还有四条，条数下限照样过，而改判定逻辑从此不需要审查记录。
+      //
+      // 换个问法：删掉一行之后，剩下那几行有什么不对？答：这个仓库里最该受保护的
+      // 那种东西不再被任何一行覆盖。所以判据是「关键处要被盖住」。
+      //
+      // **地方还在、就得被盖住；地方没了，这一条自然不要求**——所以下面每一条都先问
+      // 「这个仓库里还有没有那样东西」，不写死路径名。
+      const missing = []
+      for (const [anchor, why] of [["scripts","判定逻辑所在的目录（有 .mjs 脚本）"],["templates","落盘骨架目录（有 .md 或 .yml 骨架）"],[".github","门禁自身的配置目录（有 workflows 或 ISSUE_TEMPLATE）"],[".gitattributes","包排除规则的文本形态"],["AGENTS.md","这张表本身（契约文件）"]]) {
+        if (!existsSync(join(SKILL_ROOT, anchor))) continue   // 这处已经没了，不要求
+        // **必须是这一行本身，不能是它的子路径。**
+        //
+        // 写成 `v.startsWith(anchor + '/')` 的话，把 `scripts` 改成 `scripts/dev` 仍然
+        // 「盖住 scripts」——而那一层里另外那些文件（`scripts/survey.mjs` 一类）从此
+        // 不再受保护。实测过：条数不变、关键处「看起来还在」，两条判据都放绿。
+        //
+        // 覆盖一个目录的行，必须就是那个目录，不是它下面某一层。
+        if (!table.paths.includes(anchor)) missing.push(why)
+      }
+      if (missing.length > 0) return false
+      // **不再判「一条盖住另一条」。**
+      //
+      // 那条判据实测误伤了合法的「加细」：保留 `scripts` 不动、额外补一行 `scripts/dev`
+      // （说明「自检与工具同样是判定逻辑」），会被判成「表被删窄了」。
+      // 而把一整目录拆成「整目录 + 某一个更该单独说明的子目录」是**正常写法**，
+      // 覆盖范围只多不少。
+      //
+      // 真正的缩窄（`scripts` 改成 `scripts/dev`）已由上面那条挡住——
+      // 「覆盖必须是那一层本身」。这一条是多余的，而且方向错。
+      return true
+    },
+    '「## 高风险路径」表被删窄了，或者有哪一行的「为什么」说不通 —— '
+    + '这张表是门禁的判据输入：删掉一行，那一类改动从此不需要审查记录，而门禁全绿。'
+    + '判据不是「有几行」，是「这个仓库里还在的关键处，必须被某一行盖住」。')
+
+  // **契约文件自己必须在表里**。删掉那一行，改契约本身就不再需要审查记录——而
+  // 「改窄这张表」正是能一次废掉门禁、且自身不受审查的那条路。自指的洞只能靠显式
+  // 列进来堵住，而「显式列进来」这件事本身要有检查看着。
+  need('AGENTS.md',
+    (x) => readHighRiskTable(x).paths.some((v) => v.replace(/\/$/, '') === 'AGENTS.md'),
+    '「## 高风险路径」表里没有 AGENTS.md 自己 —— 这张表就是判据的输入，'
+    + '删掉它、把它改窄都不再需要审查记录，等于一次就能把门禁废掉。'
+    + '判据的输入文件必须在判据的保护范围内。')
+
+  // 三、落盘模板：那一节还要**活过刷新**。
+  //
+  // 这一条是这次审查发现的最重的问题：没有 `pf:author` 时，重跑一次 `compose-agents`
+  // 就把整节冲回占位模板，填好的表一个路径都不剩，而 preflight 与 compose --check 全绿。
+  // 判据落在「这一节带着 author 标记」上——那正是「刷新时保留既有内容」的开关。
+  need('templates/agents-project.md',
+    (x) => {
+      const head = /^## 高风险路径[ \t]*$/m.exec(x)
+      if (head === null) return false
+      const after = x.slice(head.index + head[0].length)
+      const next = /^##[ \t]/m.exec(after)
+      const block = next === null ? after : after.slice(0, next.index)
+      return /pf:author/.test(block) && /\|\s*路径\s*\|/.test(block)
+    },
+    '「## 高风险路径」一节缺了、没有 pf:author 标记（重跑一次生成就把整节冲掉）、'
+    + '或没有那张表 —— 目标项目会拿到一个空表，而门禁什么都不拦')
+
+  // 四、两份提案模板都要有实现依据那一栏（见上面「七」）。
+  //
+  // **曾经还有一条「## 审查记录」索引表的判据，它已经删掉了。**
+  // 那一套是「正文放索引、评论放痕迹」两层对账；两层意味着两处必须对上，而对不上
+  // 就是一次故障。索引带来的不是信息，是一个持续的故障源——现在结论只在评论里，
+  // 一份来源，没有「对不上」这回事。
+
+  // 八、**执行点**：这份规则要真的有人跑它。
+  //
+  // 前面几处核对的是「规则写在哪」，这一处核对的是「规则由谁执行」——两件事。
+  // 实测：把两份工作流里那一段整段删掉，上面几处照样全绿，因为没人核对执行点。
+  // 规则写着、没人跑，等于没有。
+  //
+  // **判据的输入要去掉注释，不能拿整份原文去找。**
+  //
+  // 实测三种「停用」手法：整段删掉会红、改成 echo 会红、**整段改成 YAML 注释不会红**
+  // ——因为正则在注释文本里照样能匹配到。那几条正则本身也是在用字面特征代理
+  // 「它会不会真的跑」。剥掉 YAML 注释之后，原文里的 `review-record.mjs` 就只剩
+  // **可执行的那一处**。这比「加更多正则」彻底：改的是判据的输入。
+  const stripYamlComments = (src) => String(src ?? '')
+    .split(/\r?\n/)
+    .map((line) => {
+      // YAML 的 # 只有在行首或空白之后才起注释作用（`a#b` 里的 # 是普通字符）。
+      const m = /(^|[ \t])#/.exec(line)
+      return m === null ? line : line.slice(0, m.index + m[1].length)
+    })
+    .join('\n')
+
+  for (const rel of ['.github/workflows/check.yml', 'templates/ci-check.yml']) {
+    need(rel,
+      (x) => {
+        const live = stripYamlComments(x)
+        return /review-record\.mjs/.test(live) && /--comments/.test(live) && /--changed/.test(live)
+      },
+      '没有「高风险改动必须有审查记录」那一步（去掉 YAML 注释之后，要看到它调'
+      + ' review-record.mjs，并且把 --changed 与 --comments 都传进去）—— '
+      + '规则写着但没有执行点，等于整条门禁不存在，而所有判据仍然全绿')
+  }
+
+  // 十、**每个条件块都要回答「不满足时讲的是另一件真事吗」**。
+  //
+  // 这一条治的是「条件块越堆越多」：一个 `pf:if` 写下去很便宜，而它意味着模板里多出
+  // 一条只在某些项目里成立的规则。要判断它该不该存在，唯一的问题是——**它不满足时，
+  // 剩下那一支讲的是同一件事的另一半，还是压根不该说？** 答不上来的，就该并进通用规则，
+  // 而不是再开一个分支。
+  //
+  // 判据刻意**只判「有没有那句话」**，不判「说得对不对」：后者机器判不了，假装能判
+  // 就会给出一条看起来像保证的假痕迹。要求在文件里、紧贴那个条件块，任何人打开都能核——
+  // 这是把「凭印象」变成「可取证」的那一步。
+  need('templates/agents-project.md',
+    (x) => templateIfReasons(x).length === 0,
+    '每个 `pf:if` 上方要有一行 `<!-- 为什么有这一条：不适用时不出现…… -->`，'
+    + '讲清「它不满足时，剩下那一支讲的是另一件真事」。答不上来的条件块，说明它该并进通用规则')
+
+  // **理由注释不许转述正文**。
+  //
+  // 断言常用「生成的契约里有没有出现某句话」判条件段落的取舍，而注释如果引用了那句话，
+  // 断言就会被注释骗到。实测过：三条「不判成不可发布」当场变红，原因是理由里写了
+  // 「读到的会是「不对外发布」」。改断言没用——从字符串上看不出引述与事实的区别；
+  // 约束放在产出一侧，注释只描述意图、不摘抄正文。
+  need('templates/agents-project.md',
+    (x) => reasonQuotesBodyPhrases(x).length === 0,
+    '理由注释里出现了正文里的成句短语 —— 注释只描述意图，不转述正文。'
+    + '断言常用「正文里有没有这句话」判条件段落的取舍，注释里的引述会让它误判')
+
+  // **行尾必须是 LF**。
+  //
+  // 这一条治的不是风格，是一类会静默改变判据结果的差异：`.gitattributes` 声明 `eol=lf`，
+  // 而用脚本批量改这份文件时（`WriteAllLines` 一类）会把它写成 CRLF——文件看上去一样，
+  // 但「机器契约示例逐字一致」那条判据当场对不上，因为它比的是含 `\r` 的字符串。
+  //
+  // 这个错我犯过两次，两次都是「用脚本批量插入行」之后。判据抓到了，但那要让下一次
+  // 全量自检跑一遍才能发现；放在这里，一次结构自检就说得清是哪份文件、什么原因。
+  need('templates/agents-project.md',
+    (x) => !x.includes('\r\n'),
+    '这份文件有 CRLF 行尾 —— `.gitattributes` 声明的是 LF。'
+    + '脚本批量改文件时容易写成 CRLF，而那会让「机器契约示例逐字一致」当场对不上'
+    + '（判据比的是含 \\r 的字符串）。转换：把 \\r\\n 换成 \\n 再提交')
+
+  // **判据注册表**：每个导出的判据都要说明「谁来看着它」。
+  //
+  // 这一条治的是这个项目反复踩到的同一个病：判据被写出来、跑起来、看起来在工作，
+  // 而它**被削成恒真也没有任何东西变红**。四轮独立审查里有三轮找到的都是这个病
+  // 在不同位置的新实例——先是契约比对，然后是新加的「理由不许转述正文」，
+  // 再然后是「执行者那一格」只被 import 而从没被调用。
+  //
+  // 根因不是某条判据漏了，是「写判据」与「给它配断言」是两个动作，而只有前一个有推动力。
+  // 所以把它们合成一个：新增判据就必须在注册表里登记，而登记要求你交出一句
+  // 「谁来看着它」。答不上来的当场红。
+  for (const why of judgeRegistryIssues(readText(new URL(import.meta.url)))) fail(why)
+
+  // 九、**CI 不许跳过行为自检**。
+  //
+  // `--no-behavior` 是本地提速用的开关。它在 CI 里带来的是一个真实盲区：行为下限的比对
+  // 只在完整那趟里做，跳过它，那条下限在 CI 里从未生效。实测过——下限写着 748、实测 736，
+  // 完整自检恒红，而 CI 一路全绿，那个错藏了很久。
+  //
+  // 判据只看本仓库那份工作流：`templates/ci-check.yml` 是给目标项目的骨架，它的门禁
+  // 由那个项目自己定（很多项目没有行为自检这回事），不该被这条约束。
+  need('.github/workflows/check.yml',
+    (x) => {
+      const live = stripYamlComments(x)
+      return !/preflight\.mjs\s+--no-behavior/.test(live)
+    },
+    'CI 里跑 preflight 时加了 `--no-behavior` —— 那会跳过行为自检，'
+    + '而行为下限的比对只在完整那趟里做。跳过它，下限在 CI 里就从未生效；'
+    + '实测过一次：下限写着 748、实测 736，完整自检恒红而 CI 全绿。'
+    + '本地想提速可以加，CI 不行')
+
+  if (missing.length > 0) {
+    for (const m of missing) {
+      fail(m + ' —— 审查循环的每一处落点都要**结构上**能判：判据（references）、'
+        + '本仓库契约（AGENTS.md）、落盘模板（agents-project.md）、两份提案模板、'
+        + '两份问题模板、工作记录模板、以及执行点。缺一处，规则就还在、但照着做的人找不到它。'
+        + '机器契约那几处还要求**逐字一致**——那是「改字段时不同步就红」的唯一办法。')
+    }
+    return
+  }
+  process.stdout.write('审查循环：判据、契约、模板、问题模板、执行点都在；机器契约四处逐字一致；'
+    + `模板登记覆盖 ${Object.keys(TEMPLATE_INSTANCES).length + TEMPLATE_NO_INSTANCE.length} 个文件\n`)
+}
+
+/**
+ * 机器契约逐字一致的判据：`review-record.mjs` 生成的那几行，必须在每一处落点里逐字出现。
+ *
+ * **为什么必须是导出函数**：行为自检要能直接调它。复刻一份循环的断言，在判据被削成
+ * `() => true` 时照样全绿——「示例与实现不符」就再也没人拦。这条判据自己就吃过一次。
+ *
+ * **两处的分母不同，这是刻意的**：
+ *   - 审查块（`pf-review`）四本都要有——判据给人读、两份提案模板给人抄、
+ *     落盘契约给目标项目的 AI 读；
+ *   - 冻结块（`pf-done`）只要求判据、落盘契约与工作记录模板有它——它住在**工作记录**里，
+ *     提案正文只放指针。要求提案模板里也印一遍，会逼人把验收标准抄进提案，
+ *     那正好造出第二份会漂移的副本。
+ *
+ * @param {{ reader?: (rel: string) => string|undefined }} [opt] 仅供测试注入
+ * @returns {string[]} 问题清单；空数组表示一致
+ */
+export function contractSnippetIssues(opt = {}) {
+  const read = opt.reader ?? ((rel) => {
+    const p = join(SKILL_ROOT, rel)
+    return existsSync(p) ? readText(p) : undefined
+  })
+  const issues = []
+  const reviewSnippet = canonicalReviewSnippet(1)
+  const doneSnippet = canonicalDoneSnippet()
+  const check = (sites, snippet, what, hint) => {
+    for (const rel of sites) {
+      const text = read(rel)
+      if (text === undefined) { issues.push(`${rel} 不存在（机器契约的一处落点）`); continue }
+      if (!text.includes(snippet)) issues.push(`${rel}：${what}${hint}`)
+    }
+  }
+  check(CONTRACT_SITES, reviewSnippet,
+    '审查块的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— ',
+    '照着这里抄的人会写出一份机器读不到的东西。示例由 `canonicalReviewSnippet()` 生成，不要手写')
+  check(DONE_SITES, doneSnippet,
+    '冻结验收标准的示例与 `scripts/review-record.mjs` 的生成结果不一致（或缺失）—— ',
+    '示例由 `canonicalDoneSnippet()` 生成，不要手写')
+  return issues
+}
+
+/**
+ * 每个 `pf:if` 上方的理由注释，缺了哪个。
+ *
+ * 判据只问一件事：**紧贴这个条件块的上一行（跳过空行）是不是一句理由**。
+ * 理由的固定前缀是「为什么有这一条」——它是人能一眼看懂的，也是机器能精确匹配的。
+ *
+ * 不判「说得对不对」：那是判断，机器判不了。但「有没有写、写在哪」是可取证的事实，
+ * 而这一步就已经把「凭印象」变成了「能核对」。
+ *
+ * 导出成纯函数，行为自检直接调它——理由与 `templateRegistrationIssues` 那条相同：
+ * 复刻一份的断言不会因为判据被削弱而变红。
+ *
+ * @param {string} text 模板正文
+ * @returns {number[]} 缺理由的条件块所在行号（从 1 起）；空数组表示都写了
+ */
+export function templateIfReasons(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+  const bad = []
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*<!--\s*pf:if /.test(lines[i])) continue
+    let k = i - 1
+    while (k >= 0 && lines[k].trim() === '') k -= 1
+    const prev = k >= 0 ? lines[k].trim() : ''
+    if (/^<!--\s*为什么有这一条[：:]/.test(prev)) continue
+    // **表格内部的条件块，理由写在表格之前。**
+    //
+    // 有一种正当用法是「条件块只包住表格的一行」（某一行只在特定项目里出现）。那种行
+    // 渲染时整行被吃掉，不会拆表，所以它是合法写法。但理由注释**不能**插在它上方——
+    // 插进去就把表格从中间切开，渲染成两张（实测过）。
+    //
+    // 所以那一种允许把理由放到表格之前，并在理由里注明它管的是哪一行。判据据此放行：
+    // 条件块在表格中间时，要求「表格之前的某条理由提到这一行」。
+    const inTable = prev.startsWith('|') || (k >= 1 && lines[k].trim().startsWith('|'))
+    if (inTable) {
+      // 往上找表格起点，再往上找紧邻的理由注释
+      let t = k
+      while (t >= 0 && lines[t].trim().startsWith('|')) t -= 1
+      let r = t
+      while (r >= 0 && lines[r].trim() === '') r -= 1
+      if (r >= 0 && /^<!--\s*为什么有这一条[：:]/.test(lines[r].trim())) continue
+    }
+    bad.push(i + 1)
+  }
+  return bad
+}
+
+/**
+ * 理由注释里**不许出现**正文里的成句短语。
+ *
+ * 治的是一个很具体的连锁：断言常用「生成的契约里有没有出现某句话」来判条件段落的取舍
+ * （`!/不对外发布/.test(text)`），而理由注释如果引用了那句话，断言就会被注释骗到——
+ * 实测过：三条「不判成不可发布」当场变红，原因是我在理由里写了「读到的会是「不对外发布」」。
+ *
+ * 这不是把断言写得更严就能解决的：断言判的是「正文里有没有这句话」，而注释里的引述
+ * 与正文里的事实，从字符串上看不出来。所以约束放在产出一侧——**注释只描述意图，
+ * 不转述正文**。这条约束同时让注释更好读：读者要的是「为什么有这一条」，不是原文摘抄。
+ *
+ * @returns {Array<{line: number, phrase: string}>}
+ */
+export function reasonQuotesBodyPhrases(text) {
+  const BODY_PHRASES = [
+    '不对外发布', '有版本发布', '目前只有本地仓库', '没有远端', '本 skill 不绑定',
+  ]
+  const out = []
+  const lines = String(text ?? '').split(/\r?\n/)
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*<!--\s*为什么有这一条/.test(lines[i])) continue
+    for (const phrase of BODY_PHRASES) {
+      if (lines[i].includes(phrase)) out.push({ line: i + 1, phrase })
+    }
+  }
+  return out
+}
+
+/**
+ * 模板登记判据：`templates/` 下每个文件都要落在 `TEMPLATE_INSTANCES` 或
+ * `TEMPLATE_NO_INSTANCE` 里，登记的落点必须真实存在，也不能登记不存在的模板。
+ *
+ * **导出成纯函数是有意的**：行为自检要能直接调用它。若断言自己复刻一遍同样的循环，
+ * 那么把这里的判据削成永假时断言照样全绿——「判据坏了」就没有任何东西看着。
+ * 实测过：三处判据被改成永假，五个分片仍全绿。
+ *
+ * @param {{ files?: string[], root?: string }} [opt] 仅供测试注入；缺省读真实仓库
+ * @returns {string[]} 问题清单；空数组表示没问题
+ */
+export function templateRegistrationIssues(opt = {}) {
+  const root = opt.root ?? SKILL_ROOT
+  let files = opt.files
+  if (files === undefined) {
+    const dir = join(root, 'templates')
+    if (!existsSync(dir)) return [`缺少 templates 目录：${dir}`]
+    files = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile())
+      .map((e) => e.name)
+  }
+  const issues = []
+  const declared = new Set([...Object.keys(TEMPLATE_INSTANCES), ...TEMPLATE_NO_INSTANCE])
+  const undeclared = files.filter((f) => !declared.has(f))
+  const phantom = [...declared].filter((f) => !files.includes(f))
+  if (undeclared.length > 0) {
+    issues.push(`templates/ 下有模板没登记落点：${undeclared.join('、')} —— `
+      + '加进 `scripts/lib/protocol.mjs` 的 TEMPLATE_INSTANCES（落在本仓库哪一处），'
+      + '或 TEMPLATE_NO_INSTANCE（不在本仓库落地，例如许可证全文）。'
+      + '登记表漏一行的症状是「改了模板，本仓库的实例没跟着改」，而它不会出声')
+  }
+  if (phantom.length > 0) {
+    issues.push(`TEMPLATE_INSTANCES / TEMPLATE_NO_INSTANCE 里登记了不存在的模板：${phantom.join('、')} —— `
+      + '删掉那几行，或者把模板补上')
+  }
+  if (opt.files === undefined) {
+    for (const [tpl, inst] of Object.entries(TEMPLATE_INSTANCES)) {
+      if (!existsSync(join(root, inst))) {
+        issues.push(`templates/${tpl} 登记的落点不存在：${inst} —— `
+          + '要么落点被删了，要么登记写错了；两种情况都会让「改了模板没改实例」无人发现')
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * 判据注册表与实际导出对账：每个 `export function` 都要在 `JUDGE_REGISTRY` 里登记。
+ *
+ * **扫磁盘不扫清单**：名字从源码里读出来，与那张表对账。新写一个导出判据却忘了登记，
+ * 一定被抓到——这正是它要拦的：新增判据与「谁来看着它」必须是同一个动作。
+ *
+ * 三种登记（见 `JUDGE_REGISTRY` 的注释）：有断言 `checkedBy` / 判不了 `why` /
+ * 只是工具 `utility`。三者都缺，说明这条判据没有任何防御，而它坏掉时不会报错。
+ *
+ * @param {string} src preflight.mjs 源码
+ * @param {object} [registry] 供测试注入
+ * @returns {string[]} 问题清单
+ */
+export function judgeRegistryIssues(src, registry = JUDGE_REGISTRY, casesSrc = undefined) {
+  const issues = []
+  const exported = [...String(src ?? '').matchAll(/^export function (\w+)\s*\(/gm)].map((m) => m[1])
+  if (exported.length === 0) return ['没从源码里读到任何导出的判据函数 —— 抽取规则失效了，这一趟什么也没查']
+
+  // **checkedBy 必须真的能在行为自检里找到。**
+  //
+  // 只判「是不是非空字符串」时，这条注册表就退化成「填一个字符串」，推动力仍只在
+  // 「写判据」那一个动作上——实测过：新增一条判据、`checkedBy` 填一句根本不存在的断言名，
+  // 完整 preflight 照样全绿。那与没有注册表是同一个状态，只是多了一行看起来像保证的字。
+  //
+  // 所以拿值去行为自检的源码里找。找不到就是「这条判据声称有断言看着它，而其实没有」。
+  const cases = casesSrc ?? (() => {
+    const dir = join(SKILL_ROOT, 'scripts', 'dev')
+    if (!existsSync(dir)) return ''
+    return readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
+      .filter((e) => e.isFile() && /^cases-\d+\.mjs$/.test(e.name))
+      .map((e) => readText(join(dir, e.name)))
+      .join('\n')
+  })()
+  if (cases === '') return ['读不到行为自检的分片源码 —— 无法核对 checkedBy，这一趟什么也没查']
+
+  const known = new Set(Object.keys(registry))
+
+  // **一个断言名只能被一条判据认领。**
+  //
+  // 只验「这句话在分片里出现过」还不够：拿另一条判据的断言名填进来照样能过——
+  // 那句断言确实存在，只是它看着的不是这一条。实测过。
+  //
+  // 一条断言同时看着两条判据是可能的（那样它该真的同时调两个判据），但这条判据
+  // 做不到那么细。所以退一步：**同一句话不许被两条判据同时认领**。撞车的当场红，
+  // 写的人只能改成各说各的——而那一步通常就会让他发现「我这条其实没写断言」。
+  const claim = new Map()
+  for (const name of known) {
+    const e = registry[name]
+    if (e === undefined || e === null || typeof e.checkedBy !== 'string') continue
+    if (claim.has(e.checkedBy)) {
+      issues.push(`JUDGE_REGISTRY 里 \`${claim.get(e.checkedBy)}\` 与 \`${name}\` 用的是同一句断言`
+        + `「${e.checkedBy}」—— 一句断言不可能同时看着两条判据，除非它真的同时调了两个。`
+        + '这多半是「借用了另一条判据的断言名」：那句断言确实存在，但它看着的不是你这条')
+    } else {
+      claim.set(e.checkedBy, name)
+    }
+  }
+  for (const name of exported) {
+    if (!known.has(name)) {
+      issues.push(`\`${name}\` 是导出的判据，却没在 \`scripts/lib/protocol.mjs\` 的 JUDGE_REGISTRY 里登记 —— `
+        + '新增判据必须同时说明「谁来看着它」：写 `checkedBy`（行为自检里那条断言的名字）、'
+        + '`why`（为什么这条判据没法用断言表达）、或 `utility: true`（它不含判断）。'
+        + '不登记就没人知道它有没有防线，而判据坏掉时不会报错，只会从此少查一项')
+    }
+  }
+  for (const name of known) {
+    const e = registry[name]
+    if (e === undefined || e === null) { issues.push(`JUDGE_REGISTRY 里 \`${name}\` 是空的`); continue }
+    if (e.utility === true) {
+      if (typeof e.why !== 'string' || e.why.trim() === '') {
+        issues.push(`JUDGE_REGISTRY 里 \`${name}\` 标了 utility 却没写 why —— 为什么它不含判断，要说出来`)
+      }
+      continue
+    }
+    if (typeof e.checkedBy === 'string') {
+      // 断言名要在行为自检里逐字出现。它不是编号，是给报错指路的那句话——
+      // 找不到就说明它指的是一条不存在的断言。
+      if (!cases.includes(e.checkedBy)) {
+        issues.push(`JUDGE_REGISTRY 里 \`${name}\` 的 checkedBy 写着「${e.checkedBy}」，`
+          + '但行为自检里找不到这句话 —— 那说明这条判据**声称**有断言看着它，实际没有。'
+          + '要么把它真的写成一条断言（那句话要与 checkedBy 逐字相同），'
+          + '要么老实写 `why` 说明为什么判不了')
+      }
+      continue
+    }
+    if (typeof e.why !== 'string' || e.why.trim() === '') {
+      issues.push(`JUDGE_REGISTRY 里 \`${name}\` 既没写 checkedBy 也没写 why —— `
+        + '那就是「这条判据没有防线」。有断言就写断言名，判不了就写清为什么')
+    }
+  }
+  return issues
+}
+
+/**
+ * 工作记录里「执行者」这一格写得能不能找到人。
+ *
+ * 这一格的用处只有一个：**这件事该找谁问**。所以：
+ *   - 代词（「本次会话」「我」「AI」）不行 —— 换个人打开，他不知道那是谁；
+ *   - 写死的固定人名也不行 —— 同一个人换机器、换账号、fork 出去就变了，而记录留在
+ *     版本库里，改动时没人会回来改这一格；
+ *   - 能认出是一个人/一个账号（署名、邮箱、平台账号）才算。
+ *
+ * 返回 `{ verdict, value }`，verdict 取 absent（没这一格或空着）/ pronoun /
+ * no-identity / ok。**absent 不在这里报** —— 那是表头缺字段那条判据的事，两件事别混。
+ */
+export function executorVerdict(text) {
+  const m = /^\|\s*执行者\s*\|\s*(.*?)\s*\|\s*$/m.exec(String(text ?? ''))
+  if (m === null) return { verdict: 'absent', value: '' }
+  const value = m[1].replace(/<!--[\s\S]*?-->/g, '').trim()
+  if (value === '') return { verdict: 'absent', value: '' }
+  if (/^(本次会话|本会话|我|AI|ai|助手|assistant|待填|待定|TBD|无|—|-)$/.test(value)) {
+    return { verdict: 'pronoun', value }
+  }
+
+  // **「取不到」是正当的终态，但必须说明原因。**
+  //
+  // 契约写着「取不到就写「未署名」并说明原因，不要编一个」。判据原先只认「值里有 @」，
+  // 于是照契约做必然红且无合法出路——要么编一个邮箱（契约禁止），要么永远卡在红着。
+  // 那是把人往「编一个」上逼，比放宽一档坏得多。
+  //
+  // 所以：以「未署名」开头、且后面还有话说（解释为什么取不到），算合格。
+  // 光写「未署名」三个字不算——那仍然是零信息，下一个人不知道是不能取还是懒得取。
+  if (/^未署名/.test(value)) {
+    return value.replace(/^未署名/, '').replace(/[（(\s]|[）)]/g, '').length >= 4
+      ? { verdict: 'ok', value }
+      : { verdict: 'no-identity', value }
+  }
+
+  if (!/@/.test(value)) return { verdict: 'no-identity', value }
+  return { verdict: 'ok', value }
+}
+
+/** 这一格不合格时要说的话（两处共用，避免措辞日后漂移）。 */
+export const EXECUTOR_ADVICE = '这一格的用处是「这件事该找谁问」。写**现场取的身份**：提交署名加平台账号；'
+  + '**取不到就写「未署名」并说明原因**（例如「未署名（这个克隆里没有配置提交署名）」），'
+  + '但光写三个字不算——那仍然是零信息。不要编一个。原话：代词在这件事上是零信息。'
+  + '换个人打开就找不到人。写**现场取的身份**：提交署名（git config user.name 与 '
+  + 'user.email）加平台账号；取不到就写「未署名」并说明原因，不要编一个。'
+  + '别人 fork 之后填的是他自己的署名，这也是它必须现场取、不能写死的原因。'
+/**
  * 本仓库的工作记录：**结构与命名是机器能判的那一半**。
  *
  * 状态、决策、断点写得对不对，机器判不了（也不该判——那是意图）；能判的是「这份记录有没有
@@ -2296,13 +3020,33 @@ function checkWorkRecords() {
         + '不带编号与状态。已经在用的老文件不强制改名；新建的照这条走。')
       continue
     }
-    const fields = ['状态', '建单日期', '最近更新']
+    const fields = ['状态', '建单日期', '最近更新', '执行者']
     const gap = fields.filter((f) => !new RegExp(`^\\|\\s*${f}\\s*\\|`, 'm').test(text))
     if (gap.length > 0) {
       bad += 1
       fail(`${rel} 表头缺 ${gap.join('、')} —— 这三行回答「现在什么状态、什么时候建的、`
         + '最近一次动手是什么时候」，缺了换会话就接不上。')
       continue
+    }
+
+    // **执行者要写得能让下一个人找到人。**
+    //
+    // 这一格的用处只有一个：「这件事该找谁问」。所以「本次会话」「我」「AI」这类代词
+    // 等于空话——换个人打开这份记录，他不知道那是谁；而这个库会被 fork、会被别人接手。
+    // 别人克隆之后填的应当是他自己的署名，不是原作者的——所以这一格必须是**现场取的**。
+    //
+    // 判据取形状而不是取值：要能看出是一个人/一个账号（邮箱、`@`、或平台账号名），
+    // 不认具体是谁。写死某个人名就等于「换个人就失准」，与契约里那条「操作者取值
+    // 一律现场取」是同一个道理。
+    // **空着与写代词同样拦。**
+    //
+    // 原先 `absent` 被跳过，于是「不写」成了最省事的选择。而这一格的用处是
+    // 「这件事该找谁问」——空着就找不到人。AGENTS.md 写的是「写代词或写不出身份都红」，
+    // 实现只拦了前者；`templates/work-item.md` 又写「没有就留空」。三处说法两两不一致。
+    const who = executorVerdict(text)
+    if (who.verdict !== 'ok') {
+      bad += 1
+      fail(`${rel} 的「执行者」是「${who.value}」—— ` + EXECUTOR_ADVICE)
     }
     const dates = []
     for (const field of ['建单日期', '最近更新']) {
@@ -2428,6 +3172,37 @@ export function tarEntries(buf) {
  * git 不可用、索引里有未合并条目等情况下返回 undefined：**「没比」与「比过且一致」
  * 必须可区分**，读不到就报未核对，不静默放行。
  */
+/**
+ * 某个版本里受版本控制的文件全集（相对仓库根）。取不到返回 undefined。
+ *
+ * 与 `trackedFiles()` 是同一个判据、两个对象：那个看工作区，这个看历史版本。
+ * 产出物核对要的是后者——判据与对象必须同源，拿今天的清单去核那天的包，
+ * 少一个文件永远核不出来。
+ */
+function trackedFilesAt(ref) {
+  const r = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', ref], {
+    cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  })
+  if (r.error !== undefined || r.status !== 0 || typeof r.stdout !== 'string') return undefined
+  const files = r.stdout.split('\0').filter((p) => p !== '')
+  return files.length === 0 ? undefined : files
+}
+
+/**
+ * 这个版本号读得到吗。
+ *
+ * 用来把「**没查成**」与「**查过没问题**」分开：`--at` 给了一个拼错的标签或一个
+ * 浅克隆里不存在的版本时，后面每一处读文件都会失败、报 47 条 warn，而成功行照样
+ * 打印「与受版本控制的文件全集一致」——那句话是假的，而退出码是 0。
+ * 发版工作流正是用 `--at "$TAG"` 调它。
+ */
+function refExists(ref) {
+  const r = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+    cwd: SKILL_ROOT, encoding: 'utf8', windowsHide: true,
+  })
+  return r.error === undefined && r.status === 0
+}
+
 function packageMembers() {
   const run = (args, encoding) => spawnSync('git', args, {
     cwd: SKILL_ROOT, encoding, windowsHide: true, maxBuffer: 64 * 1024 * 1024,
@@ -2454,14 +3229,6 @@ function packageMembers() {
  *
  * 两张表仍然是**同一张图的两半**：门禁把两处合起来读，双向核对照样成立。
  */
-
-/** 当前工作区里的文件地图（两半各取自该去的那份文件）。 */
-function fileMapFromWorktree() {
-  return readFileMap(
-    readText(join(SKILL_ROOT, 'SKILL.md')),
-    readText(join(SKILL_ROOT, 'AGENTS.md')),
-  )
-}
 
 /**
  * 从某个版本读一个文件的内容（`git show <ref>:<路径>`）。读不到返回 undefined。
@@ -2552,6 +3319,105 @@ function contentFromWorktree(f) {
 }
 
 /**
+ * 两份结构规则必须说同一件事：`.gitattributes` 的 `export-ignore` 是它的**文本形态**，
+ * `scripts/lib/protocol.mjs` 的 `REPO_ONLY_DIRS` / `REPO_ONLY_FILES` 是它的**代码形态**。
+ *
+ * 为什么要核：契约里写着「新增一处独立目录要两处一起改」，而这句话以前**没有任何检查
+ * 兜底**——实测两个方向都 0 项失败（只改 REPO_ONLY 不改 .gitattributes；只改
+ * `.gitattributes` 不改 REPO_ONLY）。`.gitattributes` 是四个高风险区之一，它的失准
+ * 不会当场报错，只会让「这文件到底进不进包」这个问题从此有两个答案。
+ *
+ * 判据是**两边路径集合相等**，不比顺序、不比注释。`导出结果` 那一层另有判据
+ * （`checkPackageBoundary` 真跑 git archive），这一条只管两份规则之间的自洽。
+ * 为什么两者都要：真导出抓得住「规则写了但 git 没照做」，抓不住「两处规则本身不一致」
+ * ——后者在导出结果里可能恰好一致，直到有人改了其中一份。
+ */
+function checkStructuralRulesAgree() {
+  const p = join(SKILL_ROOT, '.gitattributes')
+  if (!existsSync(p)) { fail('缺少 .gitattributes —— 用户包的边界规则没有文本形态。'); return }
+  const text = readText(p)
+  const attrDirs = new Set()
+  const attrFiles = new Set()
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    if (t === '' || t.startsWith('#')) continue
+    // 形如 `/scripts/dev/     export-ignore` 或 `AGENTS.md export-ignore`
+    const m = /^(\S+)\s+.*\bexport-ignore\b/.exec(t)
+    if (m === null) continue
+    const spec = m[1].replace(/^\//, '')
+    if (spec.endsWith('/')) attrDirs.add(spec)
+    else attrFiles.add(spec)
+  }
+  const codeDirs = new Set(REPO_ONLY_DIRS)
+  const codeFiles = new Set(REPO_ONLY_FILES)
+
+  const onlyAttr = (a, b, label) => [...a].filter((x) => !b.has(x))
+    .map((x) => `.gitattributes 排除了 ${x}，而 REPO_ONLY_${label} 里没有它`)
+  const onlyCode = (a, b, label) => [...b].filter((x) => !a.has(x))
+    .map((x) => `REPO_ONLY_${label} 里有 ${x}，而 .gitattributes 没排除它`)
+
+  const problems = [
+    ...onlyAttr(attrDirs, codeDirs, 'DIRS'),
+    ...onlyCode(attrDirs, codeDirs, 'DIRS'),
+    ...onlyAttr(attrFiles, codeFiles, 'FILES'),
+    ...onlyCode(attrFiles, codeFiles, 'FILES'),
+  ]
+  if (problems.length > 0) {
+    for (const m of problems) {
+      fail(`${m} —— 两份结构规则必须说同一件事：改一处就要改另一处，`
+        + '否则「这个文件进不进包」会有两个答案，而错的那个不会当场报错。')
+    }
+    return
+  }
+  process.stdout.write(`结构规则：.gitattributes 与 REPO_ONLY_* 一致`
+    + `（${codeDirs.size} 处目录、${codeFiles.size} 个文件）\n`)
+
+  // **例外表本身要对账**：`LANDED_SCRIPTS` 里写一个磁盘上不存在的脚本时，
+  // 那条例外会把「模板里指了一条死链」从「该红」变成「归例外管」，失败方向是放过。
+  // 拼错一个文件名就足够，而症状是模板里那条引用永远绿着。
+  for (const rel of LANDED_SCRIPTS) {
+    if (!existsSync(join(SKILL_ROOT, rel))) {
+      fail(`LANDED_SCRIPTS 里登记了 ${rel}，但磁盘上没有这个文件 —— `
+        + '这条例外的意思是「模板里指它是对的」，表项错了，模板里那条死链就永远绿着。')
+    }
+  }
+  // 反过来也要说清：登记为「要落地的」脚本，必须在落盘那一步**真的被拷过去**。
+  //
+  // **不 grep 源码。** 原先的判据是 `/for \(const rel of LANDED_SCRIPTS\)/.test(composeSrc)`，
+  // 实测把 `landScripts` 的函数体换成立刻 return，它照样绿——留一行空 `for` 就过。
+  // 字符串 grep 证明的是「这段字出现过」，不是「这件事会发生」。
+  //
+  // 改成**真的跑一次**：造一个临时项目，compose 一遍，看文件到没到。
+  {
+    const probe = mkdtempSync(join(tmpdir(), 'pf-land-'))
+    try {
+      writeFileSync(join(probe, 'README.md'), '# probe\n')
+      writeFileSync(join(probe, 'package.json'), '{"name":"probe"}\n')
+      const r = spawnSync(process.execPath,
+        [join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), probe],
+        { encoding: 'utf8', windowsHide: true })
+      const missing = LANDED_SCRIPTS.filter((rel) => !existsSync(join(probe, rel)))
+      if (missing.length > 0 || r.status !== 0) {
+        fail('登记为「要落地」的脚本没有真的拷进目标项目：' + missing.join('、')
+          + ' —— 模板里写着「随落盘自动拷过去（不用手工拷）」，而目标项目里没有它，'
+          + 'CI 那一步会崩在 MODULE_NOT_FOUND。')
+      } else {
+        // 再跑一次确认幂等：第二次不该改动内容。
+        const before = LANDED_SCRIPTS.map((rel) => readFileSync(join(probe, rel), 'utf8'))
+        spawnSync(process.execPath, [join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), probe],
+          { encoding: 'utf8', windowsHide: true })
+        const after = LANDED_SCRIPTS.map((rel) => readFileSync(join(probe, rel), 'utf8'))
+        if (before.some((b, i) => b !== after[i])) {
+          fail('落地脚本第二次 compose 之后内容变了 —— 它应当是幂等的。')
+        }
+      }
+    } finally {
+      rmSync(probe, { recursive: true, force: true })
+    }
+  }
+}
+
+/**
  * 用户包边界：**包里的东西由结构决定，不由任何一份清单决定。**
  *
  * 判据只有两条，都不需要人登记：
@@ -2569,6 +3435,9 @@ function contentFromWorktree(f) {
  * 的规则另算一遍——后者是近似，而近似在这里正好会放过最该抓的那种错。
  */
 function checkPackageBoundary() {
+  // 这一步的起点。成功行要说「与结构规则一致」时，得连本函数前面那几段的红一起看——
+  // 取在中途的话，「没有归属的文件」那一段红着、成功行照样打印（实测过）。
+  const sectionStart = failures.length
   const pkg = packageMembers()
   if (pkg === undefined) {
     warn('用户包边界未核对（git 不可用，或索引里有未合并的条目）—— 报「未核对」，不放行。')
@@ -2578,7 +3447,8 @@ function checkPackageBoundary() {
   // 一、不该进包的，一个都不许在。
   for (const f of pkg) {
     if (isRepoOnlyPath(f)) {
-      fail(`实际导出里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+      fail(`实际导出里有 ${f}，而它属于「不进包」的那几处 —— `
+        + '`.gitattributes` 里少了排除它的那条。')
     }
   }
   // 二、受版本控制的文件，要么在包里，要么命中结构规则。第三种状态是「没有归属」。
@@ -2591,12 +3461,19 @@ function checkPackageBoundary() {
         + '要么把它放进已有的那几处自用目录（`scripts/dev/` 一类），或新增一处并登记在 `REPO_ONLY_DIRS`。')
     }
   }
-  if (failures.length === 0) {
-    const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
-    if (failures.length === 0) {
-      process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
-        + `包内 ${links} 处相对引用全部落在包内\n`)
-    }
+  // **包自洽性不看前面那些判据的结果**：它们是「文件集合对不对」，这条是「这些东西放在
+  // 一起能不能用」。用全局 `failures` 当开关的话，前面红一下，这里就静默不跑了。
+  const before = failures.length
+  const links = checkPackageSelfConsistency(pkg, contentFromWorktree)
+  // **这句「与结构规则一致」要连本函数前面两段的红一起看。**
+  //
+  // `before` 取在调包自洽性之前，所以「不该进包的」「没有归属的」那两段的红不影响它——
+  // 实测日志里 `用户包边界：63 个文件，与结构规则一致` 与
+  // `FAIL pkgtools/y.txt … 没有归属` 同时出现，扫日志的人会以为归属检查过了。
+  // 判据：这句话只在**这一步整体没有失败**时才说。
+  if (failures.length === before && sectionStart === failures.length) {
+    process.stdout.write(`用户包边界：${pkg.length} 个文件，与结构规则一致；`
+      + `包内 ${links} 处相对引用全部落在包内\n`)
   }
 }
 
@@ -2611,23 +3488,62 @@ function checkPackageBoundary() {
  * 「那天的产出物」。
  */
 function checkProducedPackage(listPath, atRef) {
-  if (!existsSync(listPath)) { fail(`找不到产出物清单 ${listPath}。`); return }
+  // **本步骤自己的失败计数**，不读全局 `failures`：读全局的话，前面任何一处红一下，
+  // 这里就整段不跑——报告少查一项，而且不说。
+  let bad = 0
+  const complain = (message) => { fail(message); bad += 1 }
+
+  if (!existsSync(listPath)) { complain(`找不到产出物清单 ${listPath}。`); return }
   const list = readText(listPath).split('\n')
     .map((s) => s.trim())
     .filter((s) => s !== '' && !s.endsWith('/'))
-  if (list.length === 0) { fail(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
+  if (list.length === 0) { complain(`${listPath} 里一个条目都没有 —— 产出物不可能空。`); return }
+
+  // 一、不该进包的，一个都不许在。
   for (const f of list) {
     if (isRepoOnlyPath(f)) {
-      fail(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `.gitattributes` 里少了排除它的那条。`)
+      complain(`产出物里有 ${f}，而它属于「不进包」的那几处 —— `
+        + '`.gitattributes` 里少了排除它的那条。')
     }
   }
-  if (failures.length === 0) {
+
+  // 二、**该在包里的，一个都不许少**。这一半原来被漏掉了，而它才是发版那天真正会出事的
+  // 那一半：产出物少了一整块，上面那条「有没有多余的东西」照样全绿。
+  //
+  // 判据不靠人工清单：受版本控制的文件，要么在产出物里，要么命中「不进包」的结构规则。
+  const tracked = atRef === undefined ? trackedFiles() : trackedFilesAt(atRef)
+  if (tracked === undefined) {
+    warn('产出物缺漏未核对（读不到受版本控制的文件全集）—— 报「未核对」，不放行。')
+  } else {
+    const inList = new Set(list)
+    for (const f of tracked) {
+      if (!inList.has(f) && !isRepoOnlyPath(f)) {
+        complain(`${f} 该在产出物里，却没有出现 —— 这一版发出去的包是残缺的。`
+          + '要么 `.gitattributes` 的排除写宽了，要么生成产出物那一步漏了它。')
+      }
+    }
+  }
+
+  if (bad === 0) {
+    // **「没查」不能打印成「一致」。**
+    //
+    // `--at` 给了一个读不到的版本（标签拼错、浅克隆里没有）时，后面每一处读文件都失败、
+    // 报几十条 warn，而成功行照样打「与受版本控制的文件全集一致」——那句话是假的，
+    // 退出码还是 0。发版工作流正是用 `--at "$TAG"` 调它。
+    if (atRef !== undefined && !refExists(atRef)) {
+      complain(`读不到 ${atRef} 这个版本，产出物核对没有真正进行 —— 不当作通过。`)
+      return
+    }
     const readContent = atRef === undefined
       ? contentFromWorktree
       : (f) => fileFromRef(atRef, f)
+    // `checkPackageSelfConsistency` 自己会 fail，但 `bad` 是**这一步开头**的快照，
+    // 不会跟着涨。所以取一次失败数再比——不然链接断了照样打印「全部落在包内」，
+    // 日志里成功行与失败行同时出现，看的人会以为链接检查过了。
+    const beforeLinks = failures.length
     const links = checkPackageSelfConsistency(list, readContent)
-    if (failures.length === 0) {
-      process.stdout.write(`产出物核对：${list.length} 个条目，全部落在「进包」的结构规则里；`
+    if (failures.length === beforeLinks) {
+      process.stdout.write(`产出物核对：${list.length} 个条目，与受版本控制的文件全集一致；`
         + `包内 ${links} 处相对引用全部落在包内\n`)
     }
   }
@@ -2849,10 +3765,12 @@ step('落盘族引用归属', checkDeliveredAttribution)
   step('脚本实跑', checkScriptsRun)
   step('数量自称', checkStatedCounts)
   step('卡片断言', checkCardClaims)
+  step('结构规则一致', checkStructuralRulesAgree)
   step('用户包边界', checkPackageBoundary)
   step('插件专章登记', checkPluginChapters)
   step('本仓库协作模板', checkOwnTemplates)
   step('本仓库发布说明', checkReleaseNotes)
+  step('审查规则三处一致', checkReviewRuleSources)
   step('本仓库工作记录', checkWorkRecords)
   step('保鲜标记', checkFreshness)
   step('README 目录', checkReadmeToc)

@@ -122,6 +122,134 @@ export const REPO_ONLY_FILES = Object.freeze([
 ])
 
 /**
+ * **要落到目标项目里去的脚本**：随包分发，并且会被复制进项目的 `scripts/` 下。
+ *
+ * 与普通随包脚本的区别只有一条，但很要紧：模板里**可以**出现它们的路径。
+ * 普通脚本（勘察、注入、自检）是 AI 在本 skill 目录里跑的，模板里一提
+ * `scripts/survey.mjs`，目标项目的读者就会去自己项目里找——那里没有。
+ * 而这一份是「拷过去之后就在那儿」的，所以指它是对的。
+ *
+ * 判据落在**这份代码自己在哪儿**上：写在表里 = 允许出现在模板的引用位置。
+ * 判据实现在 `preflight.mjs` 的 `checkDeliveredAttribution`——反向那条（模板指了
+ * 一个目标项目没有的脚本）才是它要拦的。
+ *
+ * 新增一份要落地的脚本时：加进这张表，并在模板里写清「先拷过去」。
+ */
+export const LANDED_SCRIPTS = Object.freeze([
+  'scripts/review-record.mjs',
+])
+
+// ── 模板 与 本仓库实例 ─────────────────────────────────────────────
+//
+// 这一组治的是一种特定的病：**同一段内容写在两处，靠人记得同步**。
+//
+// 病的形状可测量：九对「落盘模板 与 本仓库实例」全都存在，但其中八对没有任何机器检查；
+// 而同一份机制的文字在 `AGENTS.md`、`references/`、`templates/` 里各写了一遍。
+// 结果是每改一次机制就多出一次不一致，而「下一轮审查指出上一轮的不一致」正好能让
+// 任何循环永不收敛——每次修改都在给自己造新问题。
+//
+// **审查循环自己的机器契约不在这里**：它是 `scripts/review-record.mjs`，因为那份文件
+// 要整个复制进目标项目、必须零依赖单文件。格式的东西只有一个来源，就是那个解析器本身。
+
+/**
+ * `templates/` 下的文件落在本仓库的哪一处。
+ *
+ * **完整性由目录驱动，不靠这张表**：`preflight.mjs` 要求 `templates/` 下每个文件
+ * 要么在这里，要么在 `TEMPLATE_NO_INSTANCE` 里。新增模板不登记就红——所以它不可能漏。
+ * 这张表只回答「落在哪」，不负责「有没有漏」。
+ *
+ * 这就是本项目已经验证过两次的做法：用户包边界由 `.gitattributes` + 真跑 `git archive`
+ * 决定，自用脚本位置由 `scripts/dev/` 整目录规则决定。**清单会漏，结构规则不会。**
+ */
+export const TEMPLATE_INSTANCES = Object.freeze({
+  'contributing.md': 'CONTRIBUTING.md',
+  'readme.md': 'README.md',
+  'release-spec.md': 'RELEASING.md',
+  'agents-project.md': 'AGENTS.md',
+  // 内核不是整份对拷：它被注入 `AGENTS.md` 的标记区之间。
+  'agents-kernel.md': 'AGENTS.md',
+  'work-item.md': 'docs/work/',
+  'pull-request-template.md': '.github/pull_request_template.md',
+  'issue-bug-report.md': '.github/ISSUE_TEMPLATE/bug_report.md',
+  'issue-feature-request.md': '.github/ISSUE_TEMPLATE/feature_request.md',
+  'ci-check.yml': '.github/workflows/check.yml',
+  'ci-release.yml': '.github/workflows/release.yml',
+})
+
+/**
+ * 不落在本仓库任何一处的模板：**许可证全文**。
+ *
+ * 它们是给目标项目取用的，本仓库自己的许可证是其中一个的具体实例（年份与持有人已填），
+ * 逐字比对没有意义——占位符本来就要被替换掉。
+ *
+ * 这张表必须显式列出，不靠「没登记就算豁免」：那样新增一个模板忘了登记也会静默通过，
+ * 而这正是要拦的。
+ */
+export const TEMPLATE_NO_INSTANCE = Object.freeze([
+  'license-mit.txt',
+  'license-isc.txt',
+  'license-bsd-2-clause.txt',
+  'license-bsd-3-clause.txt',
+  'license-unlicense.txt',
+])
+
+/**
+ * 判据注册表：`preflight.mjs` 里每个**导出的判据函数**，要么被行为自检调用，
+ * 要么在这张表里写明为什么不能。
+ *
+ * ## 它治的是什么
+ *
+ * 这是这个项目反复踩到同一个坑之后才加的东西，坑的形状每次都一样：
+ *
+ *   > 一条判据被写出来、跑起来、看起来在工作，但它**被削成恒真也没有任何东西变红**。
+ *
+ * 于是它对「判据本身坏了」这件事毫无防御——而判据坏掉时不会报错，只会从此少查一项。
+ * 四轮独立审查里有三轮找到的都是这同一个病在**不同位置**的新实例：先是契约比对，
+ * 然后是新加的「理由不许转述正文」，再然后是「执行者那一格」只被 import 而从没被调用。
+ *
+ * ## 为什么不能靠自觉
+ *
+ * 「判据抽成导出纯函数」只解决了**可被调用**，不解决**有没有人调**。上一版把四条老判据
+ * 抽出来了，同时新写的一条照样漏了——因为「写一条新判据」与「给它配断言」是两个动作，
+ * 而只有前一个动作有推动力（它让门禁多拦一件事），后一个没有。
+ *
+ * 所以把两个动作合成一个：**新增判据就必须在注册表里出现**，而注册表要求你交出一句
+ * 「谁来看着它」。答不上来的，就是没有断言；那会被 `preflight.mjs` 当场指出来。
+ *
+ * ## 三种登记
+ *
+ *   - 有断言：写 `checkedBy`，值是行为自检里那条断言的名字（用来在报错里指路）；
+ *   - 判不了：写 `why`，说明为什么这条判据没法用断言表达（例如它读本机环境）；
+ *   - 只是工具：写 `utility: true`，说明它不含判断、只是解析或读取，不是判据。
+ *
+ * 判据实现在 `preflight.mjs` 的 `judgeRegistryIssues`——它扫源码里 `export function`
+ * 的名字，与这张表对账。**扫磁盘不扫清单**：新写一个导出判据却忘了登记，一定被抓到。
+ */
+export const JUDGE_REGISTRY = Object.freeze({
+  listRepoFiles: { utility: true, why: '读目录，不含判断' },
+  referencedPaths: { utility: true, why: '从正文里抽路径，不含判断' },
+  moduleSpecifiers: { utility: true, why: '从源码里抽 import，不含判断' },
+  externalModules: { utility: true, why: '从 import 里挑外部模块，不含判断' },
+  looksLikeEntry: { checkedBy: '里有这个词但不判为入口（否则纯模块白白多一条提示）' },
+  releaseTokenSpellings: { checkedBy: '全仓统一 → 只有一种拼写' },
+  evalFreshnessMarker: { checkedBy: '好标记放行且读出 scope/date/age' },
+  freshnessSectionBody: { checkedBy: '只有标题 + 标记的「事实来源」节不通过（判据不再永真）' },
+  hasActionableSources: { checkedBy: '纯套话（无链接、无对象、无查法句式）→ 不通过' },
+  compareHostMarker: { checkedBy: '一致 → match（调用方据此静默）' },
+  probeHost: { why: '读本机宿主版本，依赖运行环境；断言只能验它的分支，不能验它读到什么' },
+  hostDateBatchStatus: { checkedBy: 'host= 变了而 date= 没变 → stale（那条日期不可信）' },
+  hostMismatchMessage: { checkedBy: '提示正文里不出现源码拼接痕迹' },
+  contractSnippetIssues: { checkedBy: '契约：改过的落点会报' },
+  templateIfReasons: { checkedBy: '条件块：抹掉会报' },
+  reasonQuotesBodyPhrases: { checkedBy: '理由：转述会报' },
+  templateRegistrationIssues: { checkedBy: '判据本体：模板登记会报' },
+  executorVerdict: { checkedBy: '判据本体：执行者那一格' },
+  judgeRegistryIssues: { checkedBy: '判据注册表：未登记会报' },
+  caseInsensitiveFs: { why: '探测本机文件系统分不区分大小写。它的返回值就是判断本身——断言只能验它读到什么，而它读的是运行环境，写断言等于把某一台机器的答案当标准' },
+  tarEntries: { utility: true, why: '解析 tar 字节流，不含判断' },
+})
+
+/**
  * 生态专属门禁的**唯一实现位置**。
  *
  * 判据是「这条检查里的名词是不是那个生态自己的」：发布范围含不含 `lib`、补丁文本里

@@ -1057,7 +1057,7 @@ group('[36] 发布自动化接线：动作痕迹无 OIDC 即待问，有 OIDC �
   report(okC1, 'Release 形状：问得住')
 }
 
-group('[54] 发版规范：有发布 job 却没规范时问一句，规范在就不再问')
+group('[62] 发版规范：有发布 job 却没规范时问一句，规范在就不再问')
 {
   // 这条待问的判据是「工作流会去某个固定路径取说明文件」——那个路径总得有个权威出处。
   // 判据挂在「发布 job 存在」上，**不挂在「有没有 RELEASING.md」上**：从没配过自动化的
@@ -1375,7 +1375,7 @@ group('[5] 生态判定：纯文档目录仍要判成 docs-only')
   report(okN, '空目录 → unknown')
 }
 
-group('[56] 协作门禁：模板在不在、模板里有没有验证与回滚、外部贡献的危险形态')
+group('[63] 协作门禁：模板在不在、模板里有没有验证与回滚、外部贡献的危险形态')
 {
   // 三件事合成一组，因为它们判的是同一条链路上的三个点：**有没有模板 → 模板里要素齐不齐
   // → 外部贡献的安全边界**。分开写成三组会重复三次 fixture 搭建，而这三件事共用同一份
@@ -1508,7 +1508,7 @@ group('[55] 自己的源仓库：标识符与占位是应有状态，别处照�
   report(okDirty, '冒名目录：照旧报')
 }
 
-group('[56] 发版规范可配置、审查怎么派、工作记录怎么放（三处判据同一套）')
+group('[64] 发版规范可配置、审查怎么派、工作记录怎么放（三处判据同一套）')
 {
   const template = readSkill('templates/release-spec.md')
   const spec = readSkill('RELEASING.md')
@@ -1590,7 +1590,8 @@ group('[56] 发版规范可配置、审查怎么派、工作记录怎么放（�
   report(good.length === 0 && bare.length === 0 && Object.values(bad).every((v) => v.length > 0),
     '结构检查：通用项正反都分得清')
   // E. 本仓库自己：协作表里要能看出「主 Agent 派一个新上下文」。
-  check(/派一个新上下文/.test(contract), '本仓库契约的协作表写明审查怎么派')
+  check(/主 Agent 不能自审/.test(contract) && /references\/collaboration\.md/.test(contract),
+    '本仓库契约指向协作判据，并写明主 Agent 不能自审')
 }
 // ---- 分片收尾 ----
 // 主入口靠这一行读计数。格式固定。

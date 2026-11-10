@@ -23,6 +23,39 @@ import { clearStaleTemps } from '../lib/fs-atomic.mjs'
 import { badgeVerdict, tierSecrets, unhandledRiskKeys, outsideKernel } from '../review.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
 import { markerPositions } from '../lib/markdown.mjs'
+import { executorVerdict, templateRegistrationIssues, contractSnippetIssues, templateIfReasons, reasonQuotesBodyPhrases, judgeRegistryIssues } from './preflight.mjs'
+import { JUDGE_REGISTRY } from '../lib/protocol.mjs'
+import { BEHAVIOR_BASELINE, BEHAVIOR_MAIN_ENTRY, BEHAVIOR_MIN_PASSED, caseInsensitiveFs } from './preflight.mjs'
+import {
+  isHighRiskPath, highRiskChanged,
+  readHighRiskTable, readHighRiskPaths, unquoteGitPath,
+  readDoneBlock, readReviews, deriveOutcome, readWorkRecordPointer, readBasis,
+  readClosingIssue, readProtocolParams, fieldBlocks,
+  canonicalDoneSnippet, canonicalReviewSnippet,
+  DONE_FENCE, REVIEW_FENCE, CONTRACT_SITES, DONE_SITES,
+} from '../review-record.mjs'
+
+/**
+ * 造一条审查评论：正文随便写，机器只读字段块。
+ *
+ * **没有 verdict 参数**，这是刻意的——结论不由审查者声明。要它「不通过」就给它
+ * 一条没过的标准（`fail`），要它「通过」就把 `fail` 留空并给了 `inject`。
+ */
+const reviewComment = (round, fail, inject = '删掉某处兜底分支 → 3 个用例变红 → 还原全绿', body = '') => [
+  '## 独立审查 第 ' + String(round) + ' 轮',
+  '',
+  '```' + REVIEW_FENCE,
+  'round: ' + String(round),
+  'fail: ' + fail,
+  'inject: ' + inject,
+  '```',
+  '',
+  body,
+].join('\n')
+
+/** 造一份工作记录的正文：冻结若干条验收标准。 */
+const workRecord = (...lines) => ['# 工作记录：示例', '', '## 目标与验收', '', '```' + DONE_FENCE,
+  ...lines, '```', ''].join('\n')
 
 // 工具函数、计数器、fixture 工厂、跨组共用的小工具都住在 harness 里。
 // 分片只 import，不重复实现——两份实现迟早会给出两个答案。
@@ -170,7 +203,7 @@ group('[48b] 落盘族引用归属：模板带了自己的路径就必须红，�
 // 分成多次调用是账本机制最容易出错的地方：写 README 时记得调、写 CONTRIBUTING 时忘了，
 // 账本就少一条，交棒时那一份退化成按形状猜——而账本存在的唯一理由就是不再猜。
 // 更要紧的是**失败时不能留半套账**：账本看起来有内容，比它空着更坏。
-group('[52] 账本登记：多份一次记，失败时一份都不记')
+group('[65] 账本登记：多份一次记，失败时一份都不记')
 {
   const dir = fixture('ledger-record', {})
   for (const f of ['README.md', 'CONTRIBUTING.md', 'LICENSE']) {
@@ -232,7 +265,7 @@ group('[52] 账本登记：多份一次记，失败时一份都不记')
 //
 // 两面对称才成立：如果只验「docs/ 不算」，判据可能整个失效而没人发现；如果只验「活文档
 // 照判」，docs/ 一旦被加进去就会误红。所以一次验两条，方向相反。
-group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
+group('[66] 引用断链：docs/ 是历史快照不判，活文档照判')
 {
   const clone = skillClone('docs-refs')
   const histDir = join(clone, 'docs', 'release-notes')
@@ -284,7 +317,7 @@ group('[55] 引用断链：docs/ 是历史快照不判，活文档照判')
   rmSync(workDir, { recursive: true, force: true })
 }
 
-group('[57] 架构升级与逻辑补全：决策持久化、工具链推导与行内反引号隔离')
+group('[67] 架构升级与逻辑补全：决策持久化、工具链推导与行内反引号隔离')
 {
   // 1. markerPositions: 行内反引号内的标记被忽略，独占一行的标记被正确解析
   const sampleDoc = [
@@ -440,7 +473,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 反例一：文件名没带日期（最常见的那种「顺手起个名」）。
   writeFileSync(join(dir, '随手的名字.md'),
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n等审查。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const badName = preflightIn(clone, { only: '本仓库工作记录' })
   check(badName.status === 1 && /YYYY-MM-DD/.test(badName.out),
@@ -458,7 +491,7 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 反例三：断点被清空、但后面那节有正文。截取范围若只删标题行，这条会误判「非空」。
   writeFileSync(goodName,
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n## 完成后的记录\n\n已经合并，无遗留。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n## 完成后的记录\n\n已经合并，无遗留。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const emptyBreak = preflightIn(clone, { only: '本仓库工作记录' })
   check(emptyBreak.status === 1 && /断点/.test(emptyBreak.out),
@@ -466,20 +499,609 @@ group('[59] 本仓库工作记录：命名、表头、断点各有一条结构�
 
   // 正例：补齐之后放行（同时证明上一条不是「永远失败」）。
   writeFileSync(goodName,
-    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n\n## 断点\n\n等审查。\n', 'utf8')
+    '# 一件事\n\n| 项 | 值 |\n| --- | --- |\n| 状态 | 进行中 |\n| 建单日期 | 2026-11-08 |\n| 最近更新 | 2026-11-08 |\n| 执行者 | test <a@b.c> |\n\n## 断点\n\n等审查。\n', 'utf8')
   gitIn(clone, 'add', '-A')
   const ok = preflightIn(clone, { only: '本仓库工作记录' })
   check(ok.status === 0, '补齐之后放行', ok.out.split('\n').filter((l) => /FAIL/.test(l)).join(' | ').slice(0, 160))
   report(badName.status === 1 && badHead.status === 1 && emptyBreak.status === 1 && ok.status === 0,
     '工作记录结构：命名、表头、断点、正例四面都分得清')
 }
+group('[68] 审查记录：高风险改动必须有可核对的痕迹')
+{
+  // 1) 高风险路径的判据：**目录前缀**，不是逐文件清单。
+  //    清单要人记得改；目录不会长出新的一处。
+  const RISK = ['scripts/', 'templates/', '.github/workflows/', '.gitattributes']
+  const high = ['scripts/survey.mjs', 'templates/x.md', '.github/workflows/check.yml', '.gitattributes', 'scripts/lib/text.mjs']
+  const low = ['README.md', 'references/a.md', 'docs/work/x.md', 'scripts-dev/x.mjs']
+  const missed = high.filter((p) => !isHighRiskPath(p, RISK))
+  const over = low.filter((p) => isHighRiskPath(p, RISK))
+  check(missed.length === 0 && over.length === 0, '高风险路径按目录前缀判，且不误伤同名近似路径',
+    `漏=${missed.join('、') || '无'} 误判=${over.join('、') || '无'}`)
+  report(missed.length === 0 && over.length === 0, '高风险路径：分得清')
+
+  // 反例：`scripts-dev/` 不是 `scripts/` 的子串匹配。前缀判据写错（`includes`）时它会误判。
+  check(!isHighRiskPath('scripts-dev/a.mjs', RISK), '前缀判据不是 includes：scripts-dev 不算 scripts')
+
+  // 1b) 契约 → 判据那条**真实链路**：表怎么写才读得出来。
+  //
+  // 这一组之前是缺的：用例只测 `isHighRiskPath`（手写前缀表），从来不测「从 AGENTS.md
+  // 里读」——而后者才是那个门禁真正的输入。三种人类最常写的形状，全都在这里。
+  {
+    const table = (row) => `## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n| ${row} | x |\n`
+
+    // 目录不带尾斜杠 → 补成前缀形式。漏一个斜杠的后果是这条判据对整棵树失效，
+    // 而症状完全不可见——所以它必须被认。
+    // 归一化不再猜「文件还是目录」，所以这里断言的是「规范形式 + 真的命中」。
+    // 判据变了但强度没降：能命中才是这条用例要证明的东西。
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules`'))) === '["src/rules"]'
+      && isHighRiskPath('src/rules/a.js', readHighRiskPaths(table('`src/rules`'))),
+      '目录不带尾斜杠 → 规范成 src/rules，且改 src/rules/a.js 仍判高风险',
+      JSON.stringify(readHighRiskPaths(table('`src/rules`'))))
+    // 格子里带说明 → 取反引号里那一段。
+    check(JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))) === '["src/rules"]'
+      && isHighRiskPath('src/rules/a.js', readHighRiskPaths(table('`src/rules/` 下的判定'))),
+      '格子里带说明 → 取反引号里那一段，且仍然命中',
+      JSON.stringify(readHighRiskPaths(table('`src/rules/` 下的判定'))))
+    // 一格两个路径 → 全都收。
+    const twoPaths = readHighRiskPaths(table('`a/`,`b/`'))
+    check(JSON.stringify(twoPaths) === '["a","b"]'
+      && isHighRiskPath('a/x', twoPaths) && isHighRiskPath('b/x', twoPaths),
+      '一格写两个路径 → 全部收下，且两个都能命中', JSON.stringify(twoPaths))
+    // 单个文件照原样，不补斜杠。
+    check(JSON.stringify(readHighRiskPaths(table('`AGENTS.md`'))) === '["AGENTS.md"]',
+      '单个文件不补斜杠（`AGENTS.md` 不会被写成 `AGENTS.md/`）',
+      JSON.stringify(readHighRiskPaths(table('`AGENTS.md`'))))
+    // 占位符不算路径——模板里那些尖括号占位不该变成判据。
+    check(readHighRiskPaths(table('`<替换成这个项目的第一处>`')).length === 0,
+      '尖括号占位不算路径（模板没填时不该凭空多出一条判据）')
+    // 认不出来的行要单独给出来，让调用方报错——**认不出来不等于没有**。
+    const skipped = readHighRiskTable(table('<替换成第一处>'))
+    check(skipped.paths.length === 0 && skipped.skipped.length === 1,
+      '认不出来的行收进 skipped（由调用方报错，不静默跳过）', JSON.stringify(skipped))
+    // 没有那一节 → found 为 false，调用方才好说「这一趟没查」。
+    check(readHighRiskTable('# 没有那一节\n').found === false,
+      '没有「## 高风险路径」这一节 → found=false（调用方据此报「没查」）')
+    // 复算一遍再报：把上面几条的关键结论重新算一次，全对才算这组通过。
+    // 传字面量 true 时它永远通过，而它会算进通过总数——那个下限应该度量「有多少条判据
+    // 在守着」，掺进恒真项就失去意义。
+    const tableOk = (row, want) => JSON.stringify(readHighRiskPaths(table(row))) === want
+    const allTable = tableOk('`src/rules`', '["src/rules"]')
+      && tableOk('`src/rules/` 下的判定', '["src/rules"]')
+      && tableOk('`a/`,`b/`', '["a","b"]')
+      && tableOk('`AGENTS.md`', '["AGENTS.md"]')
+      && tableOk('`.github/`', '[".github"]')
+      && readHighRiskPaths(table('`<替换成这个项目的第一处>`')).length === 0
+    const reported = readHighRiskTable(table('<替换成第一处>')).skipped.length === 1
+    const absent = readHighRiskTable('# 没有那一节\n').found === false
+    report(allTable && reported && absent, '契约到判据：五种写法都认，认不出来的会说出来')
+  }
+
+  // 1c) git 的 C 风格转义。中文名的风险改动以前会被判成非高风险、绿着放行。
+  {
+    const esc = '"templates/\\345\\256\\241\\346\\237\\245.md"'
+    check(unquoteGitPath(esc) === 'templates/审查.md', 'C 风格转义还原成真实路径', unquoteGitPath(esc))
+    // **转义还原与「算不算高风险」是两步**，这条要验的是「还原之后仍判高风险」。
+    // 上一版直接把转义原文喂给 isHighRiskPath —— 那一步它不做还原（也不该做：
+    // 还原是 unquoteGitPath 的事，两处各做一次迟早给出两个答案），所以判 false
+    // 不是判据坏了，是断言写错了。`highRiskChanged` 里那两步是这个顺序。
+    check(isHighRiskPath(unquoteGitPath(esc), ['templates']) === true,
+      '转义过的中文路径，还原之后照样判成高风险（不依赖调用方记得关 core.quotepath）')
+    check(unquoteGitPath('templates/审查.md') === 'templates/审查.md', '没转义的原样返回', '')
+    report(unquoteGitPath(esc) === 'templates/审查.md', '转义还原：中文路径不再漏判')
+  }
+
+  // 2) 改动清单去重、排序、只留高风险。
+  const picked = highRiskChanged(['README.md', 'scripts/b.mjs', 'scripts/a.mjs', 'scripts/a.mjs'], RISK)
+  const okPick = picked.length === 2 && picked[0] === 'scripts/a.mjs' && picked[1] === 'scripts/b.mjs'
+  check(okPick, 'from 一份清单里挑出高风险项：去重且排序', picked.join('、'))
+  report(okPick, '改动清单：挑得对')
+
+  // 3) 冻结的验收标准：读得到、注释里不算、空块算未冻结。
+  {
+    const good = readDoneBlock(workRecord('C1: preflight 退出码 0', 'C2: selftest 全绿'))
+    check(good.found && good.ids.size === 2 && good.broken.length === 0,
+      '冻结块读得到两条标准', JSON.stringify([...good.ids.keys()]))
+    report(good.found && good.ids.size === 2, '冻结标准：读得到')
+
+    // **注释里的块不算**：模板与示例都写在注释里，它们是给人看的，不是记录。
+    const inComment = readDoneBlock('<!--\n' + workRecord('C1: x') + '\n-->')
+    check(inComment.found === false, '块写在 HTML 注释里 → 不算冻结', String(inComment.found))
+    report(inComment.found === false, '冻结标准：注释里不算')
+
+    // 有块但一条标准都没有 = 还没冻结，不是「通过」。
+    const empty = readDoneBlock('## 目标与验收\n\n```' + DONE_FENCE + '\n```\n')
+    check(empty.found && empty.ids.size === 0, '空块 → 有块但零条标准（未冻结）',
+      JSON.stringify({ found: empty.found, n: empty.ids.size }))
+    report(empty.found && empty.ids.size === 0, '冻结标准：空块算未冻结')
+
+    // id 大小写不敏感：手写 c1 与 C1 是同一条。审查要按 id 回指，大小写不该成为陷阱。
+    const lower = readDoneBlock(workRecord('c1: 小写写的'))
+    check(lower.ids.has('C1'), '小写 id 归一成大写，查找不分大小写', JSON.stringify([...lower.ids.keys()]))
+    report(lower.ids.has('C1'), '冻结标准：id 不分大小写')
+  }
+
+  // 3b) 审查块：只读 fail / inject / escalate，**没有 verdict**。
+  {
+    const one = readReviews([reviewComment(1, 'C2')])
+    check(one.rounds.length === 1 && one.rounds[0].fail.join(',') === 'C2' && one.broken.length === 0,
+      '一轮审查读得到 fail', JSON.stringify(one.rounds))
+    report(one.rounds.length === 1, '审查块：读得到')
+
+    // 同一轮出现两个不同的 fail 集合 → 机器判不了哪个作废，一律算格式错。
+    const two = readReviews([reviewComment(1, 'C1'), reviewComment(1, 'C2')])
+    check(two.broken.length > 0 && /两个不同的 fail 集合/.test(two.broken[0].why),
+      '同一轮两个不同 fail 集合 → 格式错（要改口就删旧的那条）', JSON.stringify(two.broken.map((b) => b.why)))
+    report(two.broken.length > 0, '审查块：同一轮一个说法')
+
+    // 同一轮的两个说法完全相同时，不算冲突（重复发一条不该判红）。
+    const same = readReviews([reviewComment(1, 'C1'), reviewComment(1, 'C1')])
+    check(same.broken.length === 0 && same.rounds.length === 1, '同一轮两次说同一件事 → 不算冲突',
+      JSON.stringify(same.rounds.length))
+    report(same.broken.length === 0, '审查块：重复一致不算冲突')
+
+    // 围栏被 `>` 引用的是别人的话，不是本评论的结论。
+    const quoted = readReviews(['> ```' + REVIEW_FENCE + '\n> round: 1\n> fail: C1\n> ```'])
+    check(quoted.rounds.length === 0, '被引用的块不算本评论的结论', JSON.stringify(quoted.rounds.length))
+    report(quoted.rounds.length === 0, '审查块：引用不算')
+  }
+
+  // 3c) 结论由标准推导：**这是整套机制的枢纽**。
+  {
+    const ids = readDoneBlock(workRecord('C1: 第一', 'C2: 第二')).ids
+    const out = (comments, opt = {}) => deriveOutcome({
+      done: ids, rounds: readReviews(comments).rounds,
+      reworkCap: opt.cap ?? 5, waived: opt.waived ?? false,
+    })
+
+    // 零轮：高风险改动没有审查记录，直接不成立。
+    check(out([]).pass === false && /没有任何一轮/.test(out([]).why), '零轮 → 不通过', out([]).why)
+    report(out([]).pass === false, '推导：零轮不通过')
+
+    // 引用了清单里没有的标准 → 格式错。**审查不能发明标准。**
+    const unknown = out([reviewComment(1, 'C99')])
+    check(unknown.pass === false && /发明标准/.test(unknown.why), '未知 id → 拦下并说清「不能发明标准」', unknown.why)
+    report(unknown.pass === false, '推导：不许发明标准')
+
+    // fail 空 + 交了 inject → 通过。这是唯一的「通过」路径。
+    const okOut = out([reviewComment(1, '')])
+    check(okOut.pass === true, 'fail 空 + 有 inject → 通过', okOut.why)
+    report(okOut.pass === true, '推导：通过')
+
+    // fail 空但没交 inject → 不通过。「通过」必须交故障注入。
+    const noInject = out([reviewComment(1, '', '')])
+    check(noInject.pass === false && /故障注入/.test(noInject.why),
+      'fail 空但没交 inject → 不通过（通过要交故障注入）', noInject.why)
+    report(noInject.pass === false, '推导：通过要交故障注入')
+
+    // 同一标准连续两轮 → 止损。这是抓「方向错了」的那条。
+    const repeat = out([reviewComment(1, 'C1'), reviewComment(2, 'C1')])
+    check(repeat.stopLoss === 'repeat', '同一标准连续两轮 → 止损', String(repeat.stopLoss))
+    report(repeat.stopLoss === 'repeat', '推导：同标准连续两轮止损')
+
+    // 同一标准隔一轮再出现 → **不**触发止损（否则正常的来回会被误停）。
+    const apart = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, 'C1')])
+    check(apart.stopLoss === null, '同标准隔一轮 → 不触发止损', String(apart.stopLoss))
+    report(apart.stopLoss === null, '推导：隔轮不算止损')
+
+    // 轮次超上限 → 止损 cap。
+    const cap = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, 'C1')], { cap: 2 })
+    check(cap.stopLoss === 'cap', '轮次超过上限 → 止损 cap', String(cap.stopLoss))
+    report(cap.stopLoss === 'cap', '推导：超上限止损')
+
+    // **豁免只免止损，不免「还有标准没过」**。这两条成对存在——
+    // 少一条，就等于允许「带个标签就合」。
+    const waivedFail = out([reviewComment(1, 'C1'), reviewComment(2, 'C1')], { waived: true })
+    check(waivedFail.pass === false && /豁免不了/.test(waivedFail.why),
+      '带豁免但最后一轮仍有标准没过 → 仍然不通过', waivedFail.why)
+    report(waivedFail.pass === false, '推导：豁免不免标准没过')
+
+    const waivedOk = out([reviewComment(1, 'C1'), reviewComment(2, 'C2'), reviewComment(3, '')],
+      { cap: 2, waived: true })
+    check(waivedOk.pass === true && /豁免/.test(waivedOk.why),
+      '带豁免、最后一轮全过 → 通过，并在报告里说明豁免过', waivedOk.why)
+    report(waivedOk.pass === true, '推导：豁免救止损')
+
+    // escalate → 停自动返工交人。
+    const esc = '```' + REVIEW_FENCE + '\nround: 1\nfail: C1\nescalate: 这条标准本身有问题\n```'
+    const escOut = deriveOutcome({ done: ids, rounds: readReviews([esc]).rounds, reworkCap: 5, waived: false })
+    check(escOut.pass === false && /交人/.test(escOut.why), 'escalate → 停自动返工、交人', escOut.why)
+    report(escOut.pass === false, '推导：escalate 交人')
+  }
+
+  // 3d) 提案正文里那几行：工作记录指针、实现依据、关联问题。
+  {
+    check(readWorkRecordPointer('## 为什么\n\n工作记录: docs/work/a.md\n').path === 'docs/work/a.md',
+      '工作记录指针读得到', '')
+    check(readWorkRecordPointer('工作记录：`docs/work/b.md`').path === 'docs/work/b.md',
+      '指针带反引号也读得到', '')
+    check(readWorkRecordPointer('没有这一行').path === undefined, '没有指针 → undefined', '')
+    report(readWorkRecordPointer('工作记录: x.md').path === 'x.md', '正文：工作记录指针')
+
+    check(readBasis('## 实现依据\n\n无需设计文档：这是修一处判定笔误\n').ok === true,
+      '实现依据写清了 → 通过', '')
+    // **占位写法不认**：这几句共同的特征是「读者读完不知道改动凭什么成立」。
+    const hollow = ['按 issue 实现', '按需求实现', '见 issue', '见需求', 'TBD', 'todo', '无', '同上', '略']
+      .filter((v) => readBasis('## 实现依据\n\n' + v + '\n').ok === true)
+    check(hollow.length === 0, '九种占位写法一个都不认', hollow.join('、'))
+    report(hollow.length === 0, '正文：占位依据不认')
+    check(readBasis('## 改了什么\n\nx').ok === false, '缺「## 实现依据」这一栏 → 不成立', '')
+    report(readBasis('## 改了什么\n\nx').ok === false, '正文：缺栏目不成立')
+
+    check(readClosingIssue('Closes #12') === '12' && readClosingIssue('Fixes #7') === '7'
+      && readClosingIssue('resolve #3') === '3', '三种关联写法都认', '')
+    check(readClosingIssue('没有关联') === undefined, '没有关联 → undefined', '')
+    report(readClosingIssue('Fixes #1') === '1', '正文：关联问题')
+  }
+
+  // 3e) 协作参数从契约读：**这些是项目的决定，不是工具的默认值**。
+  {
+    const agents = ['## 协作参数', '', '| 参数 | 值 | 含义 |', '| --- | --- | --- |',
+      '| `rework_cap` | 3 | x |', '| `waiver_label` | `pf:ok` | y |', ''].join('\n')
+    const got = readProtocolParams(agents, { rework_cap: 2, waiver_label: 'z' })
+    check(got.rework_cap === 3 && got.waiver_label === 'pf:ok',
+      '参数表覆盖默认值', JSON.stringify(got))
+    report(got.rework_cap === 3, '参数：从契约读')
+
+    const fallback = readProtocolParams('', { rework_cap: 2, waiver_label: 'z' })
+    check(fallback.rework_cap === 2 && fallback.waiver_label === 'z', '没有那张表 → 用默认值',
+      JSON.stringify(fallback))
+    report(fallback.rework_cap === 2, '参数：缺表用默认')
+
+    // 占位行不该被当成取值——否则「还没填」会变成「上限是 <数字>」。
+    const placeholder = readProtocolParams('## 协作参数\n\n| 参数 | 值 | 含义 |\n| --- | --- | --- |\n| `rework_cap` | `<数字>` | x |\n',
+      { rework_cap: 2 })
+    check(placeholder.rework_cap === 2, '占位值不当真 → 落回默认', String(placeholder.rework_cap))
+    report(placeholder.rework_cap === 2, '参数：占位不生效')
+  }
+
+  // 3f) **机器契约逐字一致**：示例由脚本生成，落点必须逐字相同。
+  //
+  // **调判据本体，不复刻。**上一版这里自己写了一遍 `filter(...includes(...))` 循环——
+  // 于是把 `preflight.mjs` 里那条判据改成 `() => true` 时，断言照样全绿。
+  // 实例：`templateRegistrationIssues` 当初就是因为这个理由被抽成导出函数的，
+  // 而契约比对这一条漏了，同一个文件里两种做法并存。
+  {
+    const real = contractSnippetIssues()
+    check(Array.isArray(real) && real.length === 0,
+      `契约示例在 ${CONTRACT_SITES.length + DONE_SITES.length} 处逐字一致`, JSON.stringify(real))
+    report(real.length === 0, '契约：示例逐字一致')
+
+    // **正向注入**：给一个「示例被改了一个字」的读法，判据必须报出来。
+    // 反向用例比正向更重要——只有正向时，判据被削成永真也看不出来。
+    const tampered = contractSnippetIssues({ reader: () => 'fail: WRONG（示例被改了）' })
+    check(tampered.length > 0 && /不一致|缺失/.test(tampered[0]),
+      '契约判据：喂一份被改过的落点 → 必须报出来', JSON.stringify(tampered.slice(0, 1)))
+    report(tampered.length > 0, '契约：改过的落点会报')
+
+    // 落点文件不存在时同样要报（不能因为「读不到」就当「一致」）。
+    const absent = contractSnippetIssues({ reader: () => undefined })
+    check(absent.length > 0 && /不存在/.test(absent[0]),
+      '契约判据：落点文件不存在 → 必须报出来', JSON.stringify(absent.slice(0, 1)))
+    report(absent.length > 0, '契约：缺落点会报')
+  }
+
+  // 4) 端到端：真的跑那个脚本。**每一条都对应一类必须防住的失败。**
+  {
+    const cli = (args, input) => spawnSync(process.execPath, [join(SCRIPTS_DIR, 'review-record.mjs'), ...args],
+      { encoding: 'utf8', input })
+    const d = fixture('review-record', {})
+    mkdirSync(join(d, 'docs', 'work'), { recursive: true })
+    writeFileSync(join(d, 'AGENTS.md'), [
+      '# 契约', '', '## 高风险路径', '', '| 路径 | 为什么 |', '| --- | --- |',
+      '| `scripts/` | 判定逻辑 |', '', '## 协作参数', '', '| 参数 | 值 | 含义 |',
+      '| --- | --- | --- |', '| `rework_cap` | 2 | x |', '| `waiver_label` | `pf:human-approved` | y |', '',
+    ].join('\n'), 'utf8')
+    const recRel = 'docs/work/2026-11-09-示例.md'
+    writeFileSync(join(d, recRel), workRecord('C1: preflight 退出码 0', 'C2: selftest 全绿'), 'utf8')
+
+    const bodyPath = join(d, 'body.md')
+    const commentsPath = join(d, 'comments.md')
+    const changedPath = join(d, 'changed.txt')
+    const okBody = ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修一处判定笔误', '',
+      '工作记录: ' + recRel, '', '## 怎么验证的', '', '跑过了', ''].join('\n')
+    writeFileSync(bodyPath, okBody, 'utf8')
+    writeFileSync(changedPath, 'scripts/review-record.mjs\n' + recRel + '\n', 'utf8')
+    writeFileSync(commentsPath, reviewComment(1, ''), 'utf8')
+
+    const run = (extra = []) => cli(['--root', d, '--changed', changedPath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes', ...extra])
+    const label = (r) => `exit=${r.status} ${((r.stderr ?? '') + (r.stdout ?? '')).slice(0, 100)}`
+
+    // 基准：全部成立 → 0。
+    const base = run()
+    check(base.status === 0, '端到端：冻结标准 + 审查通过 + 故障注入 → 退出码 0', label(base))
+    report(base.status === 0, '端到端：通过')
+
+    // 只改文档 → 不要求审查记录，且**明说**这一趟没查。
+    const docOnly = cli(['--root', d, '--changed', '-', '--body', bodyPath, '--comments', commentsPath,
+      '--expect-changes'], 'README.md\n')
+    check(docOnly.status === 0 && /不落在高风险路径/.test(docOnly.stdout ?? ''),
+      '只改文档 → 放行并明说不需要', label(docOnly))
+    report(docOnly.status === 0, '端到端：低档免审')
+
+    // 空清单 → 1。**「没算出来」不能读成「没动高风险路径」。**
+    const emptyList = cli(['--root', d, '--changed', '-', '--body', bodyPath, '--comments', commentsPath,
+      '--expect-changes'], '')
+    check(emptyList.status === 1, '空改动清单 + --expect-changes → 退出码 1', label(emptyList))
+    report(emptyList.status === 1, '端到端：空清单不放过')
+
+    // 未知 id → 1。
+    writeFileSync(commentsPath, reviewComment(1, 'C99'), 'utf8')
+    const unknownRun = run()
+    check(unknownRun.status === 1 && /发明标准/.test(unknownRun.stderr ?? ''), '未知 id → 退出码 1', label(unknownRun))
+    report(unknownRun.status === 1, '端到端：未知 id 拦下')
+
+    // 通过但没交故障注入 → 1。
+    writeFileSync(commentsPath, reviewComment(1, '', ''), 'utf8')
+    const noInject = run()
+    check(noInject.status === 1 && /故障注入/.test(noInject.stderr ?? ''), '通过但无故障注入 → 退出码 1', label(noInject))
+    report(noInject.status === 1, '端到端：通过要交注入')
+
+    // 指针指向一个不在改动清单里的文件 → 1。**拿旧标准给新改动背书。**
+    writeFileSync(commentsPath, reviewComment(1, ''), 'utf8')
+    const stalePath = join(d, 'changed-stale.txt')
+    writeFileSync(stalePath, 'scripts/review-record.mjs\n', 'utf8')
+    const stale = cli(['--root', d, '--changed', stalePath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes'])
+    check(stale.status === 1 && /不在本次改动里/.test(stale.stderr ?? ''), '指针指向未改动文件 → 退出码 1', label(stale))
+    report(stale.status === 1, '端到端：陈旧指针拦下')
+
+    // 缺实现依据 → 1。
+    writeFileSync(join(d, 'body-nobasis.md'),
+      ['## 改了什么', '', 'x', '', '工作记录: ' + recRel, ''].join('\n'), 'utf8')
+    const noBasis = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-nobasis.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(noBasis.status === 1 && /实现依据/.test(noBasis.stderr ?? ''), '缺实现依据 → 退出码 1', label(noBasis))
+    report(noBasis.status === 1, '端到端：实现依据必填')
+
+    // 没给 --comments → 1。**「没查」与「查过没问题」必须分得开。**
+    const noComments = cli(['--root', d, '--changed', changedPath, '--body', bodyPath, '--expect-changes'])
+    check(noComments.status === 1 && /未核对/.test(noComments.stderr ?? ''), '没给 --comments → 退出码 1', label(noComments))
+    report(noComments.status === 1, '端到端：没核对不算通过')
+
+    // 参数不全 → 2（用法错，不是判定错）。
+    const misuse = cli(['--changed'], '')
+    check(misuse.status === 2, '参数不全 → 退出码 2（用法错，与判定错分开）', label(misuse))
+    report(misuse.status === 2, '端到端：用法错分开报')
+
+    // 两种 stdin 同时用 → 2，并说清怎么改。
+    const bothStdin = cli(['--changed', '-', '--body', '-'], '')
+    check(bothStdin.status === 2 && /只能读一次/.test(bothStdin.stderr ?? ''), '两个 stdin 同用 → 退出码 2 并说明', label(bothStdin))
+    report(bothStdin.status === 2, '端到端：双 stdin 报清楚')
+
+    // **高风险表是骨架占位时**：明说「这一趟没查」，退出码 0（不卡死新项目）。
+    const bare = fixture('review-record-bare', {})
+    writeFileSync(join(bare, 'AGENTS.md'), '## 高风险路径\n\n| 路径 | 为什么 |\n| --- | --- |\n| `<替换成第一处>` | 占位 |\n', 'utf8')
+    const bareRun = cli(['--root', bare, '--changed', '-', '--body', bodyPath, '--comments', commentsPath], 'README.md\n')
+    check(bareRun.status === 0 && /没有做任何审查记录检查/.test(bareRun.stderr ?? ''),
+      '高风险表还是占位 → 明说没查，退出码 0', label(bareRun))
+    report(bareRun.status === 0, '端到端：空表明说没查')
+
+    // 三种坏指针，**走真实 CLI**（不是复刻判据）。上面那条「陈旧指针」是其中之一，
+    // 这里补齐另外两种：指针压根没写、指针指向的文件不存在。
+    // 三条合起来才叫「三种坏指针都分得开」——少一条，那一类失败就没有东西看着。
+    writeFileSync(join(d, 'body-noptr.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', ''].join('\n'), 'utf8')
+    const noPtr = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-noptr.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(noPtr.status === 1 && /缺少工作记录指针/.test(noPtr.stderr ?? ''), '提案里没有工作记录指针 → 退出码 1', label(noPtr))
+    report(noPtr.status === 1, '端到端：缺指针拦下')
+
+    writeFileSync(join(d, 'body-ghost.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', '',
+        '工作记录: docs/work/2026-11-09-不存在.md', ''].join('\n'), 'utf8')
+    writeFileSync(join(d, 'changed-ghost.txt'), 'scripts/review-record.mjs\ndocs/work/2026-11-09-不存在.md\n', 'utf8')
+    const ghost = cli(['--root', d, '--changed', join(d, 'changed-ghost.txt'), '--body', join(d, 'body-ghost.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(ghost.status === 1 && /工作记录不存在/.test(ghost.stderr ?? ''), '指针指向不存在的文件 → 退出码 1', label(ghost))
+    report(ghost.status === 1, '端到端：幽灵指针拦下')
+
+    // 工作记录存在、但里面没有冻结的标准 → 也是 1。这一条最容易被漏：
+    // 文件在、指针对，但那个块没写，验收标准就无从核对。
+    writeFileSync(join(d, 'docs/work/2026-11-09-空.md'), '# 工作记录\n\n## 目标与验收\n\n还没冻结。\n', 'utf8')
+    writeFileSync(join(d, 'body-empty-rec.md'),
+      ['## 改了什么', '', 'x', '', '## 实现依据', '', '无需设计文档：修判定笔误', '',
+        '工作记录: docs/work/2026-11-09-空.md', ''].join('\n'), 'utf8')
+    writeFileSync(join(d, 'changed-empty-rec.txt'),
+      'scripts/review-record.mjs\ndocs/work/2026-11-09-空.md\n', 'utf8')
+    const noDone = cli(['--root', d, '--changed', join(d, 'changed-empty-rec.txt'),
+      '--body', join(d, 'body-empty-rec.md'), '--comments', commentsPath, '--expect-changes'])
+    check(noDone.status === 1 && /没有冻结的验收标准/.test(noDone.stderr ?? ''),
+      '工作记录里没有冻结的 `pf-done` 块 → 退出码 1', label(noDone))
+    report(noDone.status === 1, '端到端：没冻结标准拦下')
+
+    // **两条轨道**：正文里有 `Fixes #N` 时，报告必须点名那个编号，提醒两边都留言。
+    // 没有时不该出现那句——否则它变成每次都说的一句话，说多了就没人读了。
+    writeFileSync(join(d, 'body-issue.md'),
+      ['## 实现依据', '', '无需设计文档：修判定笔误', '', '工作记录: ' + recRel, '', 'Fixes #42', ''].join('\n'), 'utf8')
+    const withIssue = cli(['--root', d, '--changed', changedPath, '--body', join(d, 'body-issue.md'),
+      '--comments', commentsPath, '--expect-changes'])
+    check(withIssue.status === 0 && /有单轨道.*#42/.test(withIssue.stdout ?? ''),
+      '正文写了 Fixes #42 → 报告提醒两边都留言，并点名 #42', label(withIssue))
+    report(withIssue.status === 0 && /有单轨道/.test(withIssue.stdout ?? ''), '轨道：有单轨道时提醒')
+
+    const noIssue = cli(['--root', d, '--changed', changedPath, '--body', bodyPath,
+      '--comments', commentsPath, '--expect-changes'])
+    check(!/有单轨道/.test(noIssue.stdout ?? ''),
+      '正文没关联问题时，不该冒出那句提醒（每次都说的提醒等于没说）', label(noIssue))
+    report(!/有单轨道/.test(noIssue.stdout ?? ''), '轨道：无单轨道时安静')
+  }
+
+  // 5) **判据本体必须被直接调用，不能复刻。**
+  //
+  // 这一组治的是最隐蔽的一类缺口：断言自己写了一遍「和判据相同的循环」，
+  // 于是把判据削成永假时断言照样全绿——「判据坏了」没有任何东西看着。
+  // 实测过：三处判据被改成永假，五个分片仍全绿。
+  //
+  // 判据必须导出成纯函数，断言直接调它。这样「判据被削弱」与「数据不对」是同一件事，
+  // 都会让断言变红。
+  {
+    // 模板登记：给它一份「多了一个未登记文件」的清单，它必须报出来。
+    const undeclared = templateRegistrationIssues({ files: ['contributing.md', 'zzz-新模板.md'] })
+    check(undeclared.length > 0 && /没登记落点/.test(undeclared[0]),
+      '模板登记判据：注入一个未登记的文件 → 必须报出来', JSON.stringify(undeclared))
+    report(undeclared.length > 0, '判据本体：模板登记会报')
+
+    // 反向：真实仓库那份必须是干净的（否则这条断言恒真、什么也没测）。
+    const real = templateRegistrationIssues()
+    check(Array.isArray(real) && real.length === 0, '模板登记判据：真实仓库当前是干净的',
+      JSON.stringify(real))
+    report(real.length === 0, '判据本体：真实仓库干净')
+
+    // 幻影条目：登记了不存在的模板，同样要报。
+    const phantom = templateRegistrationIssues({ files: [] })
+    check(phantom.length > 0, '模板登记判据：登记了不存在的模板 → 必须报出来',
+      JSON.stringify(phantom))
+    report(phantom.length > 0, '判据本体：幻影条目会报')
+
+    // 条件块的理由：每个 `pf:if` 上方都要有一句「不适用时不出现……」。
+    // 判据同样导出成函数，断言直接调它——理由与上面两条相同。
+    const tplText = readFileSync(join(SKILL_ROOT, 'templates/agents-project.md'), 'utf8')
+    const short = templateIfReasons(tplText)
+    check(short.length === 0, '条件块理由：模板里每个 pf:if 上方都有 → 空清单',
+      JSON.stringify(short.slice(0, 5)))
+    report(short.length === 0, '条件块：理由都在')
+
+    // 反向：抹掉一条理由，判据必须报出来（且指出是哪一行）。
+    const stripped = tplText.replace(/\n<!-- 为什么有这一条：[^\n]*-->\n/g, '\n')
+    const caught = templateIfReasons(stripped)
+    check(caught.length > 0 && typeof caught[0] === 'number',
+      '条件块理由：抹掉理由 → 必须报出来并给出行号', JSON.stringify(caught.slice(0, 3)))
+    report(caught.length > 0, '条件块：抹掉会报')
+
+    // 理由注释**不许转述正文短语**。
+    //
+    // 这条判据是「注释别把断言骗了」的那一半：断言常用「正文里有没有某句话」判条件段落，
+    // 而注释里引述那句话会让断言误判（实测过三条「不判成不可发布」当场变红）。
+    // **它自己也要有断言看着**——上一版就是漏了这一条，被审查抓到：
+    // 判据削成永假，preflight 与五个分片双双全绿。
+    const leakReal = reasonQuotesBodyPhrases(tplText)
+    check(leakReal.length === 0, '理由注释没转述正文：真实模板 → 空清单', JSON.stringify(leakReal.slice(0, 3)))
+    report(leakReal.length === 0, '理由：不转述正文')
+
+    const leakInjected = reasonQuotesBodyPhrases(
+      tplText.replace('<!-- 为什么有这一条：',
+        '<!-- 为什么有这一条：正文会写「不对外发布」所以'),
+    )
+    check(leakInjected.length > 0 && typeof leakInjected[0].line === 'number'
+      && leakInjected[0].phrase === '不对外发布',
+      '理由注释转述正文短语 → 必须报出来并指出短语', JSON.stringify(leakInjected.slice(0, 2)))
+    report(leakInjected.length > 0, '理由：转述会报')
+
+    // 工作记录「执行者」那一格：判据本体是导出的 executorVerdict。
+    //
+    // 它之前只被 import、从没被调用过——一条判据活在生产代码里，而没有任何断言碰它。
+    // 这是「新增判据没有强制配断言」那个病的最干净的例子：判据是对的，防线是空的。
+    const who = (v) => executorVerdict(`| 项 | 值 |\n| --- | --- |\n| 执行者 | ${v} |\n`).verdict
+    const okWho = who('FiretrUCK666 <a@b.c>') === 'ok'
+    const pronoun = ['本次会话', '我', 'AI', '助手'].every((v) => who(v) === 'pronoun')
+    const noId = who('张三') === 'no-identity'
+    const absent = who('') === 'absent'
+    check(okWho && pronoun && noId && absent,
+      '执行者判据：署名算合格、四种代词算代词、没邮箱算无身份、空算缺失',
+      JSON.stringify({ okWho, pronoun, noId, absent }))
+    report(okWho && pronoun && noId && absent, '判据本体：执行者那一格')
+
+    // **「取不到」是正当的终态，但必须说明原因。** 这一条最容易被改坏：
+    // 只认「有 @」会把照契约做的人永远卡在红着，逼他编一个邮箱。
+    const unsignedOk = who('未署名（这个克隆里没有配置提交署名）') === 'ok'
+    const unsignedBad = who('未署名') === 'no-identity'
+    check(unsignedOk && unsignedBad,
+      '执行者判据：写「未署名」并说明原因算合格；光写三个字不算',
+      JSON.stringify({ unsignedOk, unsignedBad }))
+    report(unsignedOk && unsignedBad, '判据本体：未署名要说明原因')
+
+    // **判据注册表**：每个导出的判据都要说明「谁来看着它」。
+    //
+    // 这条判据自己也要有断言看着——否则它就是它要防的那件事本身。
+    const realSrc = readFileSync(join(SKILL_ROOT, 'scripts/dev/preflight.mjs'), 'utf8')
+    const realReg = judgeRegistryIssues(realSrc)
+    check(Array.isArray(realReg) && realReg.length === 0,
+      '判据注册表：真实源码里每个导出判据都登记了', JSON.stringify(realReg.slice(0, 3)))
+    report(realReg.length === 0, '判据注册表：都登记了')
+
+    // 反例一：源码里多一个没登记的导出判据 → 必须报出来，并点名那个函数。
+    const unregistered = judgeRegistryIssues(
+      realSrc + '\nexport function someNewJudge(x) { return x }\n',
+    )
+    check(unregistered.length > 0 && unregistered[0].includes('someNewJudge'),
+      '判据注册表：新加一个导出判据却不登记 → 必须报出来并点名',
+      JSON.stringify(unregistered.slice(0, 1)))
+    report(unregistered.length > 0, '判据注册表：未登记会报')
+
+    // 反例二：登记了但既没 checkedBy 也没 why → 那就是「没有防线」，必须报。
+    const hollowReg = judgeRegistryIssues(realSrc, { listRepoFiles: {} })
+    check(hollowReg.length > 0 && /没有防线|既没写/.test(hollowReg[0]),
+      '判据注册表：登记成空壳（既无 checkedBy 也无 why）→ 必须报出来',
+      JSON.stringify(hollowReg.slice(0, 1)))
+    report(hollowReg.length > 0, '判据注册表：空壳会报')
+
+    // **反例三：checkedBy 填一个不存在的断言名 → 必须报。**
+    //
+    // 这是「注册表只提升门槛、不验证内容」的那个洞：只判「是不是非空字符串」时，
+    // 填一句根本不存在的断言名照样全绿，那与没有注册表是同一个状态，
+    // 只是多了一行看起来像保证的字。实测过。
+    // 断言名**运行时拼出**，不能写成字面量：判据扫的就是所有分片的源码，
+    // 而这个字符串本身写在分片里，字面量形式会被它自己「找到」，测试就假绿了。
+    const ghostName = String.fromCharCode(36825, 21477, 26029, 35328, 26681, 26412, 19981, 23384, 22312)
+    const fakeAssert = judgeRegistryIssues(realSrc, {
+      ...JUDGE_REGISTRY,
+      looksLikeEntry: { checkedBy: ghostName },
+    })
+    const fakeHit = fakeAssert.find((s) => /找不到这句话/.test(s))
+    check(fakeHit !== undefined,
+      '判据注册表：checkedBy 指向不存在的断言 → 必须报出来',
+      JSON.stringify(fakeAssert.slice(0, 2)))
+    report(fakeHit !== undefined, '判据注册表：假断言名会报')
+
+    // **反例四：借用另一条判据的断言名 → 必须报。**
+    //
+    // 这是注册表剩下的那个洞：那句断言确实存在于分片里，但它看着的不是这一条。
+    // 第六轮复核者实测发现——把 executorVerdict 的 checkedBy 换成契约比对的断言名，
+    // 注册表放行。只验「字符串出现过」拦不住这件事。
+    const borrowed = judgeRegistryIssues(realSrc, {
+      ...JUDGE_REGISTRY,
+      executorVerdict: { checkedBy: JUDGE_REGISTRY.contractSnippetIssues.checkedBy },
+    })
+    const borrowHit = borrowed.find((s) => /用的是同一句断言/.test(s))
+    check(borrowHit !== undefined,
+      '判据注册表：借用另一条判据的断言名 → 必须报出来',
+      JSON.stringify(borrowed.slice(0, 2)))
+    report(borrowHit !== undefined, '判据注册表：借用会报')
+
+    // **基线按平台能力精确取值，不用区间。**
+    //
+    // 有些分片的断言数随平台变化——文件系统分不区分大小写，决定「大小写变化」那条跑不跑。
+    // Windows 与 macOS 默认不区分（多一条），Linux 区分（少一条）。
+    //
+    // 区间（147-148）试过，它在**上界那一侧必须松一条**：下限只能取 Linux 的 147，于是
+    // Windows 上删掉一条真实断言仍然全绿——一条会漏报的下限，比没有下限更容易骗人。
+    // 实测过：删掉 cases-2 的「结尾分隔符」，满门禁全绿。所以改成与 cases-2 同一个探法
+    // 取值，两侧都是精确数。
+    {
+      const insensitive = caseInsensitiveFs()
+      const expected = insensitive ? 148 : 147
+      check(BEHAVIOR_BASELINE['cases-2.mjs'] === expected,
+        `基线：cases-2 取 ${expected}（本机文件系统${insensitive ? '不区分' : '区分'}大小写）`,
+        `表里是 ${BEHAVIOR_BASELINE['cases-2.mjs']}`)
+      report(BEHAVIOR_BASELINE['cases-2.mjs'] === expected, '基线：按平台能力取精确值')
+
+      // 下限必须由各片求和得出，不手写——手写的那个数已经失效过一次。
+      const sum = Object.values(BEHAVIOR_BASELINE).reduce((a, b) => a + b, 0)
+      check(BEHAVIOR_MIN_PASSED === sum + BEHAVIOR_MAIN_ENTRY,
+        '基线：总下限由各片求和得出（不手写）',
+        `${BEHAVIOR_MIN_PASSED} vs ${sum + BEHAVIOR_MAIN_ENTRY}`)
+      report(BEHAVIOR_MIN_PASSED === sum + BEHAVIOR_MAIN_ENTRY, '基线：下限由求和得出')
+    }
+  }
+
+}
+
 // ---- 分片收尾 ----
-// 主入口靠这一行读计数。格式固定。
+// 主入口靠这一行读计数。格式固定：`行为自检：N 项通过，M 项失败`。
 // 不输出它，主入口会判「这片没跑完」并以退出码 2 中止——读不到计数不能当 0。
 try { cleanupFixtures() } catch { /* 清不掉不算错，主入口兜底 */ }
 process.stdout.write(`行为自检：${passed} 项通过，${failed} 项失败\n`)
-// 本进程观测到的 kind。分片后每片只看到自己那几组，值域判定要靠主入口合并四片。
-process.stdout.write(`OBSERVED_KINDS=${[...observedKinds].join(',')}\n`)
 if (failures.length > 0) {
   process.stdout.write('\n失败项：\n')
   for (const f of failures) process.stdout.write(`  - ${f}\n`)

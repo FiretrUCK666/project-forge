@@ -130,7 +130,15 @@ function readText(p) {
   try {
     return readUtf8Strict(p)
   } catch (error) {
-    return { error: `读不出来（${error.code ?? error.message}）` }
+    // **「文件不存在」不是「编码坏了」**：两者都会落进 catch，但对使用者说的话完全相反——
+    // 一个该去建文件，一个该去转编码。折叠成同一句的后果实测过：只有 README 的目录，
+    // 报告说「AGENTS.md 必须是 UTF-8，不要用 --handwritten-agents 盖掉」，
+    // 而那份文件根本还没生成。让人去修一个不存在的问题，比不说更坏。
+    const code = error.code ?? ''
+    const why = code === 'ENOENT'
+      ? '文件不存在'
+      : `读不出来（${code === '' ? error.message : code}）`
+    return { error: why, missing: code === 'ENOENT' }
   }
 }
 
@@ -574,7 +582,12 @@ function main(argv) {
   // 编码坏了要**先说编码**：这一格如果落进「手写文件」那条分支，用户会被建议用
   // `--handwritten-agents` 把一个编码事故固化成放行。两者是同一种症状的两个原因，
   // 而处置正好相反，所以顺序不能反。
-  if (agentsRead.error !== undefined) {
+  //
+  // 「文件不存在」单列一支：它不是编码问题，说「转成 UTF-8」等于让人去修一个
+  // 不存在的问题——那份文件根本还没生成，该做的是生成它。
+  if (agentsRead.missing === true) {
+    missing.push('AGENTS.md 缺失 —— 先让本 skill 生成它（勘察后落盘），不要在门禁这一层绕')
+  } else if (agentsRead.error !== undefined) {
     missing.push(`AGENTS.md 读不出来（${agentsRead.error}）：这份文件必须是 UTF-8——`
       + '它每次会话都会被注入，而且要在版本库里长期保存。转存成 UTF-8 后再跑本门禁，'
       + '**不要**用 --handwritten-agents 盖掉这一条')

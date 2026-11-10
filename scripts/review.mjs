@@ -23,10 +23,18 @@
  *
  *   - `missing`：会。凭据进了历史、工作流把密钥交给陌生人、README 都没有。
  *   - `pending`：不会出事，但只有使用者能定（要不要许可、手写的契约留不留）。
- *   - `notice`：不会出事，只是可以更好（单语 README、没有 CI、没有贡献指南）。
+ *   - `notice`：不会出事，只是可以更好（单语 README、没有 CI、本机署名没配）。
  *
  * 把 `notice` 当缺陷，是「每个项目都欠一笔还不完的债」的来源——而还债的方式通常是
- * 加一个 flag 把它压下去。所以它只提示，不拦。`--strict` 留给自己用（把 notice 也升为拦截）。
+ * 加一个 flag 把它压下去。所以它只提示，不拦。`--strict` 留给自己用（把 pending 也拦）。
+ *
+ * ## 户口本还是体检表
+ *
+ * **本机事实进 `notice`，项目事实才进 `missing`。** 判断依据：
+ *
+ *   - 换一台机器就变的东西（提交署名、凭据助手、gh 登录态）→ `notice`。
+ *     它们在干净克隆里必然缺失，判成项目缺陷会让每一次新机器上的检查都红一次。
+ *   - 跟着仓库走的东西（有没有 README、工作流安不安全、凭据进没进历史）→ `missing`。
  *
  * ## 决定写在哪
  *
@@ -35,7 +43,7 @@
  * 决定是项目事实，就该和项目一起被读、被争论、被接手。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -93,16 +101,18 @@ export async function reviewProject(targetDir, { scopes } = {}) {
 
   // ── 版本控制 ──────────────────────────────────────────────────────
   if (facts.git.available === false) {
-    add(finding('missing', 'git', 'git.unavailable', '这台机器上找不到 git'))
+    // git 不在是**这台机器**的事，不是项目的事。项目本身可能完全健康。
+    add(finding('notice', 'git', 'git.unavailable',
+      '这台机器上找不到 git——版本管理这一整条路暂时走不了'))
   } else if (facts.git.present !== true) {
     add(finding('missing', 'git', 'git.absent', '还不是版本库', {
-      ref: { file: 'references/version-control.md', section: '执行顺序（顺序本身就是正确性的一部分）' },
+      ref: { file: 'references/version-control.md', section: '执行顺序（顺序本身就是正确性）' },
     }))
   } else if (facts.git.isRepoRoot === false) {
     add(finding('missing', 'git', 'git.nested',
       `这个目录在外层仓库 \`${facts.git.workTreeRoot}\` 里面，不是仓库根——边界的决定权在用户那里`, {
         decision: 'nested-repo',
-        ref: { file: 'references/version-control.md', section: '目录不在自己的仓库根上时' },
+        ref: { file: 'references/version-control.md', section: '判据：什么该进版本库' },
       }))
   } else {
     add(finding('ok', 'git', 'git.ready',
@@ -113,9 +123,13 @@ export async function reviewProject(targetDir, { scopes } = {}) {
         !facts.git.identity?.name ? '`user.name`' : null,
         !facts.git.identity?.email ? '`user.email`' : null,
       ].filter(Boolean).join(' 与 ')
-      add(finding('missing', 'git', 'git.identity', `提交署名缺 ${missing}——提交记不到人名下`, {
-        ref: { file: 'references/version-control.md', section: '提交署名从哪里取' },
-      }))
+      // 归「可以更好」：它**自己会喊**——没有署名时 `git commit` 当场拒绝并报
+      // `Please tell me who you are`，不会静默做错事。而且它是**本机事实**，
+      // 全新克隆里必然没有它；判成项目缺陷，会让每一次在新机器上跑的检查都红一次。
+      add(finding('notice', 'git', 'git.identity',
+        `这台机器的提交署名没配（缺 ${missing}）——第一次提交会被 git 拒掉`, {
+          ref: { file: 'references/version-control.md', section: '提交署名' },
+        }))
     } else {
       add(finding('ok', 'git', 'git.identity.ok',
         `提交署名是 ${facts.git.identity.name} <${facts.git.identity.email}>（来自 ${facts.git.identity.scope} 层）`))
@@ -146,7 +160,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     if (!facts.ignores.hasGitattributes) {
       add(finding('notice', 'git', 'git.gitattributes',
         '没有 .gitattributes——跨平台协作时行尾会因机器而异，同一份文件在两台机器上算出不同的字节', {
-          ref: { file: 'references/version-control.md', section: '行尾与文本属性' },
+          ref: { file: 'references/version-control.md', section: '文本属性' },
         }))
     }
   }
@@ -164,7 +178,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     ]
     add(finding('missing', 'secrets', 'secrets.tracked',
       `凭据形状的东西已经进了版本库：${where.join('、')}——改文件不管用，要轮换凭据并把历史处理掉`, {
-        ref: { file: 'references/version-control.md', section: '密钥与敏感信息门控' },
+        ref: { file: 'references/version-control.md', section: '凭据门控' },
       }))
   }
   if (exposedFiles.length > 0 || exposedContent.length > 0) {
@@ -172,12 +186,10 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       ...exposedFiles.map((f) => f.file),
       ...exposedContent.map((c) => `${c.file}:${c.line}（${c.kind}）`),
     ]
-    const looksLikePlaceholder = exposedContent.length > 0
-      && exposedContent.every((c) => /test|demo|example|sample|placeholder|xxx/i.test(c.file))
-    add(finding(looksLikePlaceholder ? 'notice' : 'missing', 'secrets', 'secrets.exposed',
+    add(finding('missing', 'secrets', 'secrets.exposed',
       `有未忽略的敏感内容：${where.join('、')}——提交前要么加进忽略规则，要么确认真的是测试数据`, {
         decision: 'secrets-are-placeholders',
-        ref: { file: 'references/version-control.md', section: '密钥与敏感信息门控' },
+        ref: { file: 'references/version-control.md', section: '凭据门控' },
       }))
   }
   if (trackedFiles.length === 0 && trackedContent.length === 0
@@ -192,7 +204,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (facts.risks.largeFiles.length > 0) {
     add(finding('notice', 'secrets', 'secrets.large-files',
       `有大文件没被忽略：${facts.risks.largeFiles.map((f) => `${f.file}（${f.sizeMB} MB）`).join('、')}——它们会永久留在历史里`, {
-        ref: { file: 'references/version-control.md', section: '大文件与体积' },
+        ref: { file: 'references/version-control.md', section: '大文件' },
       }))
   }
 
@@ -200,19 +212,19 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (!facts.docs.agents) {
     add(finding('missing', 'agents', 'agents.absent',
       '没有 AGENTS.md——AI 每次新开会话都要重新摸一遍这个项目', {
-        ref: { file: 'references/docs-set.md', section: 'AGENTS.md' },
+        ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
       }))
   } else if (agentsText === undefined) {
     add(finding('missing', 'agents', 'agents.unreadable',
       `${facts.docs.agents.file} 读不出来（不是 UTF-8 文本？）——这不是「没有」，是「有但读不懂」`, {
-        ref: { file: 'references/docs-set.md', section: 'AGENTS.md' },
+        ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
       }))
   } else {
     const fills = parseMarkers(agentsText, facts.docs.agents.file).filter((m) => m.kind === 'fill')
     if (fills.length > 0) {
       add(finding('missing', 'agents', 'agents.unfilled',
         `${facts.docs.agents.file} 还有 ${fills.length} 处没填：${fills.slice(0, 4).map((f) => `第 ${f.line} 行「${f.what}」`).join('、')}——空着的契约比没有更糟，它看起来像有`, {
-          ref: { file: 'references/docs-set.md', section: 'AGENTS.md' },
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
         }))
     } else {
       add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位`))
@@ -227,14 +239,14 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (!facts.docs.readme) {
     add(finding('missing', 'docs', 'docs.readme',
       '没有 README——别人打开仓库第一眼没有说明', {
-        ref: { file: 'references/docs-set.md', section: 'README' },
+        ref: { file: 'references/docs-set.md', section: '四、`README`' },
       }))
   } else {
     const text = readTextSafe(join(root, facts.docs.readme)) ?? ''
     if (text.trim().length < 30) {
       add(finding('missing', 'docs', 'docs.readme-thin',
         `${facts.docs.readme} 只有 ${text.trim().length} 个字符——等于没有`, {
-          ref: { file: 'references/docs-set.md', section: 'README' },
+          ref: { file: 'references/docs-set.md', section: '四、`README`' },
         }))
     } else {
       add(finding('ok', 'docs', 'docs.readme.ok', `README 有（${facts.docs.readmes.join('、')}）`))
@@ -249,7 +261,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('notice', 'docs', 'docs.contributing',
       '没有 CONTRIBUTING——只有确实要收外部贡献时才需要它；一个人用的项目不加是对的', {
         decision: 'no-contributing',
-        ref: { file: 'references/docs-set.md', section: 'CONTRIBUTING' },
+        ref: { file: 'references/docs-set.md', section: '五、`CONTRIBUTING`' },
       }))
   }
 
@@ -260,13 +272,13 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('missing', 'license', 'license.publishable',
       '清单声明了可发布的包，却没有 LICENSE——下游的合规检查会因为「授权不明」拒绝使用', {
         decision: 'license',
-        ref: { file: 'references/docs-set.md', section: 'LICENSE' },
+        ref: { file: 'references/docs-set.md', section: '六、`LICENSE`' },
       }))
   } else {
     add(finding('pending', 'license', 'license.missing',
       '没有 LICENSE——公开项目需要它；私有项目不放是对的。这一项只有你能定', {
         decision: 'license',
-        ref: { file: 'references/docs-set.md', section: 'LICENSE' },
+        ref: { file: 'references/docs-set.md', section: '六、`LICENSE`' },
       }))
   }
 
@@ -275,7 +287,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('missing', 'ci', 'ci.pwn-request',
       '工作流同时用了 `pull_request_target` 并检出提案那边的代码——这等于让任意陌生人拿你的密钥跑他的代码。'
       + '改成「无特权工作流跑检查 + 有特权工作流只消费产物」，或把触发器换成 `pull_request`', {
-        ref: { file: 'references/remote-github.md', section: '安全红线' },
+        ref: { file: 'references/remote-github.md', section: '七、持续集成' },
       }))
   }
 
@@ -287,7 +299,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('notice', 'ci', 'ci.absent',
       '没有 CI——本机能过不等于换台机器能过。一个人用的小工具不配也是合理的', {
         decision: 'no-ci',
-        ref: { file: 'references/remote-github.md', section: '持续集成' },
+        ref: { file: 'references/remote-github.md', section: '七、持续集成' },
       }))
   }
 
@@ -297,7 +309,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('notice', 'release', 'release.absent',
       '项目有可发布形态，但没有发布自动化——可以手发，也可以让标签触发', {
         decision: 'no-auto-release',
-        ref: { file: 'references/remote-github.md', section: '发布自动化' },
+        ref: { file: 'references/remote-github.md', section: '七、持续集成' },
       }))
   }
 
@@ -305,7 +317,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('notice', 'release', 'release.spec',
       '要发版的项目没有 RELEASING——发布说明写在哪、分哪几节、按什么顺序发，每次都要重新商量', {
         decision: 'no-release-spec',
-        ref: { file: 'references/docs-set.md', section: 'RELEASING' },
+        ref: { file: 'references/docs-set.md', section: '七、`RELEASING`' },
       }))
   }
 
@@ -329,14 +341,14 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {
           decision: 'no-collab-templates',
-          ref: { file: 'references/collaboration.md', section: '收到别人的改动' },
+          ref: { file: 'references/collaboration.md', section: '四、审别人的 PR' },
         }))
     }
     if (!facts.docs.issueTemplates) {
       add(finding('notice', 'collaboration', 'collab.issue-templates',
         '有远端却没有 Issue 模板——每份缺陷报告都要来回追问「环境是什么、怎么复现」', {
           decision: 'no-collab-templates',
-          ref: { file: 'references/collaboration.md', section: '收到别人的改动' },
+          ref: { file: 'references/collaboration.md', section: '三、收到别人的 Issue' },
         }))
     }
     if (facts.docs.workflowFacts.usesPullRequestTarget && !facts.docs.workflowFacts.checkoutsPrHead) {
@@ -351,7 +363,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     if (!meta?.hasValidFrontmatter) {
       add(finding('missing', 'ecosystem', 'ecosystem.skill-frontmatter',
         'SKILL.md 的 frontmatter 缺 `name` 或 `description`——缺任一项，宿主会**整份丢弃**而且不报错', {
-          ref: { file: 'references/skill-project.md', section: '这一类最常见的坑' },
+          ref: { file: 'references/skill-project.md', section: '二、能力目录' },
         }))
     } else {
       add(finding('ok', 'ecosystem', 'ecosystem.skill-frontmatter.ok',
@@ -362,7 +374,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     if (!skill.valid) {
       add(finding('missing', 'ecosystem', 'ecosystem.local-skill-invalid',
         `仓库自带的 skills 里有一份不合法：${skill.path}——宿主会静默丢掉它`, {
-          ref: { file: 'references/skill-project.md', section: '这一类最常见的坑' },
+          ref: { file: 'references/skill-project.md', section: '二、能力目录' },
         }))
     }
   }
@@ -458,7 +470,7 @@ async function main(argv) {
         '',
         '  --scope=git,agents,docs  只验这几面（逗号分隔）',
         `                           可用：${[...SCOPES].join(', ')}`,
-        '  --strict                 把「可以更好」也算没通过（CI 用）',
+        '  --strict                 把「待定」也算没通过（CI 用）',
         '  --json                   输出机器可读的结果',
         '',
         '三档结论：缺（会出事）/ 待定（只有使用者能定）/ 可以更好（不拦）。',

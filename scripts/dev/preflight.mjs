@@ -201,6 +201,41 @@ function checkLinks() {
     fail(`一次全量任务要读 ${fullRead} 行，超过预算 ${FULL_READ_MAX_LINES} 行——注意力被稀释的直接来源`)
   }
   note(`全量必读：${fullRead} 行（预算 ${FULL_READ_MAX_LINES}）`)
+
+  checkReferenceTargets()
+}
+
+/**
+ * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在那份文件真实存在的
+ * `##` 标题上。
+ *
+ * 这一条治的是一个实际发生过的错：指路写「第四节：许可协议」，而那一节实际是 README。
+ * **节号会随增删章节失效，标题不会**——所以指路只写标题，这里核对标题存在。
+ */
+function checkReferenceTargets() {
+  const reviewPath = join(ROOT, 'scripts', 'review.mjs')
+  if (!existsSync(reviewPath)) { fail('缺 scripts/review.mjs'); return }
+  const src = readText(reviewPath)
+  const pairs = [...src.matchAll(/file:\s*'([^']+)',\s*section:\s*'([^']+)'/g)]
+  const headingsCache = new Map()
+  let checked = 0
+
+  for (const [, file, section] of pairs) {
+    const full = join(ROOT, file)
+    if (!existsSync(full)) { fail(`review.mjs 指路指向不存在的文件：${file}`); continue }
+    if (!headingsCache.has(file)) {
+      headingsCache.set(file, new Set(
+        readText(full).replace(/\r\n/g, '\n').split('\n')
+          .map((line) => /^##\s+(.+?)\s*$/.exec(line)?.[1])
+          .filter(Boolean),
+      ))
+    }
+    checked += 1
+    if (!headingsCache.get(file).has(section)) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有这个二级标题——指路会落空`)
+    }
+  }
+  note(`指路核对：${checked} 处都指在真实标题上`)
 }
 
 // ── 3. 零依赖与可解析 ───────────────────────────────────────────────

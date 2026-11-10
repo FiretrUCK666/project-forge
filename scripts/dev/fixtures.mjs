@@ -267,7 +267,9 @@ cases.push(['LICENSE 相关的指路指向 docs-set.md 的「LICENSE」节（章
     const item = data.results.find((x) => x.id === 'license.publishable')
     if (!item) return '没有 license.publishable 这一条'
     if (!item.ref || item.ref.file !== 'references/docs-set.md') return `ref=${JSON.stringify(item.ref)}`
-    if (item.ref.section !== 'LICENSE') return `section=${item.ref.section}`
+    // 断言「指到 LICENSE 那一节」，而不是「指到第几节」：节号会随增删章节失效，
+    // 标题不会。preflight 另有一条判据核对这个标题真的存在。
+    if (!/LICENSE/.test(item.ref.section)) return `section=${item.ref.section}`
     return true
   } finally { rmSync(dir, { recursive: true, force: true }) }
 }])

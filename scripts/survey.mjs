@@ -145,14 +145,14 @@ function tomlString(text, key) {
 // ── 版本控制事实 ────────────────────────────────────────────────────
 
 /**
- * 八次查询全部并发，一次往返拿到全部版本控制事实。
+ * 九次查询全部并发，一次往返拿到全部版本控制事实。
  *
  * 每条查询各自带「读不到」的表示，最终由调用点决定那意味着什么。比如 `commits` 与
  * `commitsState` 是分开的两个字段：读不出来时前者没有值，**不能当成 0**——把已有历史
  * 的仓库读成「零提交」，会把它带向「首次提交」。
  */
 async function detectGit(root, { probeAuth = false } = {}) {
-  const [top, cfg, st, remotes, tagsRes, logRes, lsFiles, checkIgnore] = await Promise.all([
+  const [top, cfg, st, remotes, tagsRes, logRes, lsFiles, checkIgnore, originHead] = await Promise.all([
     git(root, ['rev-parse', '--is-inside-work-tree', '--show-toplevel']),
     git(root, ['config', '--list', '--show-scope', '--show-origin']),
     git(root, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal']),
@@ -161,6 +161,7 @@ async function detectGit(root, { probeAuth = false } = {}) {
     git(root, ['log', '--format=%an <%ae>', '--no-merges', '-n', '200']),
     git(root, ['ls-files', '-z']),
     git(root, ['check-ignore', '-z', '--stdin'], { input: '' }),
+    git(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
   ])
 
   if (top.missing) {
@@ -187,6 +188,13 @@ async function detectGit(root, { probeAuth = false } = {}) {
   const historyAuthors = logRes.ok && logRes.stdout
     ? [...new Set(logRes.stdout.split('\n').filter(Boolean))]
     : []
+
+  // 提交风格：只为一个用途——生成契约时提醒「沿用既有写法，别混第二套」。
+  // 判据是最近 20 条主题的**形状**，读不到就是 undefined，不猜。
+  const recentSubjects = logRes.ok && logRes.stdout
+    ? (await git(root, ['log', '--format=%s', '-n', '20'])).stdout.split('\n').filter(Boolean)
+    : []
+  const commitStyle = detectCommitStyle(recentSubjects)
   const trackedPaths = lsFiles.ok && lsFiles.stdout ? lsFiles.stdout.split('\0').filter(Boolean) : []
 
   const head = statusInfo.oid && statusInfo.oid !== '(initial)' ? statusInfo.oid : undefined
@@ -216,6 +224,8 @@ async function detectGit(root, { probeAuth = false } = {}) {
     workTreeRoot,
     insideWorkTree: insideFlag === 'true',
     branch: statusInfo.head,
+    originHeadBranch: parseOriginHead(originHead),
+    commitStyle,
     upstream: statusInfo.upstream,
     ahead: statusInfo.ahead,
     behind: statusInfo.behind,
@@ -265,6 +275,38 @@ function parseConfigList(text) {
     map.set(body.slice(0, eq).toLowerCase(), { scope, value: body.slice(eq + 1) })
   }
   return map
+}
+
+/**
+ * 解析 `git symbolic-ref --short refs/remotes/origin/HEAD`：`origin/main` → `main`。
+ *
+ * 这一路比「当前分支」权威：当前检出的可能是一个功能分支，而契约里要写的是**默认分支**
+ * ——合并收尾、拉取正本都要回它那儿。读不到返回 undefined，由调用方逐级降级。
+ */
+function parseOriginHead(res) {
+  if (!res?.ok || !res.stdout) return undefined
+  const m = /^origin\/(.+)$/.exec(res.stdout.trim())
+  return m ? m[1] : res.stdout.trim() || undefined
+}
+
+/**
+ * 从最近若干条提交主题判提交风格。`plain` 是默认值，不是「判不出来」——
+ * 三种形状里它最宽松，把它当兜底不会让人写错东西。
+ */
+function detectCommitStyle(subjects) {
+  if (!Array.isArray(subjects) || subjects.length === 0) return 'plain'
+  const conventional = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
+  const gitmoji = /^(?::[a-z_]+:|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}])/u
+  let conv = 0
+  let emoji = 0
+  for (const s of subjects) {
+    if (conventional.test(s)) conv += 1
+    else if (gitmoji.test(s)) emoji += 1
+  }
+  const half = subjects.length / 2
+  if (conv > half) return 'conventional'
+  if (emoji > half) return 'gitmoji'
+  return 'plain'
 }
 
 /** 解析 `git status --porcelain=v2 --branch`：分支、上游、领先落后、脏文件数一次拿到。 */
@@ -541,6 +583,7 @@ function detectEcosystem(root) {
     kinds: [],
     manifests: [],
     commands: {},
+    commandsByEcosystem: {},
     runtimeRequirements: [],
     publishable: false,
     private: false,
@@ -558,7 +601,26 @@ function detectEcosystem(root) {
       const name = row.manifest(root)
       if (name && !s.manifests.includes(name)) s.manifests.push(name)
     }
-    row.read(root, s)
+    // 每个生态的命令先落在它自己那一桶里，再合并进顶层。
+    //
+    // **必须分桶**：一个仓库同时有前端 `package.json` 与后端 `pyproject.toml` 时，
+    // 只有一个顶层 `commands` 会让后读到的生态盖掉先读到的——生成的契约与 CI 于是
+    // 只测其中一半，而它看起来完全正常：测试绿着，另一半一次都没跑过。
+    //
+    // 做法是把 `s.commands` 临时换成一只空桶再交给 `row.read`：那些描述行里写的是
+    // `s.commands.test ??= …`，共用一只桶时第二个生态会被第一个「已经填过了」挡掉。
+    const scoped = {}
+    const merged = s.commands
+    s.commands = scoped
+    try {
+      row.read(root, s)
+    } finally {
+      s.commands = merged
+    }
+    for (const [key, value] of Object.entries(scoped)) {
+      if (merged[key] === undefined) merged[key] = value
+    }
+    if (Object.keys(scoped).length > 0) s.commandsByEcosystem[row.kind] = scoped
   }
 
   for (const hint of PLUGIN_HINTS) {
@@ -627,8 +689,15 @@ async function walkWorkspace(root, gitFacts) {
 
   const files = []
   const dirs = []
+  // 扫描覆盖度：**读过哪些、跳过了哪些**必须能报出来。
+  //
+  // 不报的话，「没扫到」和「没扫」看起来一模一样——报告说「没扫到凭据」，而它实际
+  // 只翻了前两千个文件。这类假绿比不扫更糟：它替一个没做过的检查背书。
+  let depthReached = 0
+  let truncated = false
   const walk = (dir, depth) => {
-    if (depth > 6 || files.length > 20000) return
+    if (depth > 6 || files.length > 20000) { truncated = true; return }
+    if (depth > depthReached) depthReached = depth
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
@@ -663,6 +732,8 @@ async function walkWorkspace(root, gitFacts) {
 
   let codeFiles = 0
   let docFiles = 0
+  let skippedLargeFiles = 0
+  let unreadableFiles = 0
   const secretFiles = []
   const secretContent = []
   const homePathLeaks = []
@@ -691,15 +762,23 @@ async function walkWorkspace(root, gitFacts) {
       // **没有版本库时判不了忽略状态，那是「没查」而不是「没忽略」。** 把这两件事混同，
       // 会让一个刚起步、`.gitignore` 已经写好的项目被报成一堆「未忽略的敏感文件」——
       // 而它其实什么都不缺，只是还没 `git init`。
-      const status = !canAskGit ? 'undetermined' : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
-      secretFiles.push({ file: file.rel, status })
+      //
+      // `unverified-large` 是第五种，也是最容易被误读的一种：文件太大没扫内容，所以
+      // 「里面有没有真凭据」这件事**没有答案**。把它算进 checked 会让报告说「没扫到凭据」，
+      // 而那句话覆盖不到这个文件。它必须单独报出来，由人决定要不要打开看一眼。
+      const tooLarge = st.size > 256 * 1024
+      const status = !canAskGit ? 'undetermined'
+        : tooLarge ? 'unverified-large'
+          : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
+      secretFiles.push({ file: file.rel, status, sizeKB: Math.round(st.size / 1024) })
+      if (tooLarge) skippedLargeFiles += 1
     }
 
     // 内容扫描只做「已跟踪或未忽略」的文本文件：被忽略的本地文件里出现凭据形状是正常的
     // （那正是它该待的地方），报出来只会制造噪音。
     if (ignored || !TEXT_EXT.test(file.name) || st.size > 256 * 1024) continue
     const text = readTextSafe(file.full)
-    if (text === undefined) continue
+    if (text === undefined) { unreadableFiles += 1; continue }
     const lines = text.split('\n')
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]
@@ -708,8 +787,13 @@ async function walkWorkspace(root, gitFacts) {
           secretContent.push({ file: file.rel, line: i + 1, kind: pat.label, status: tracked ? 'tracked' : 'exposed' })
         }
       }
-      if (homeRe && homeRe.test(line) && !file.rel.startsWith('docs/work/')) {
-        homePathLeaks.push({ file: file.rel, line: i + 1 })
+      // 行里的分隔符先归一成 `/` 再比：Windows 上一条本机路径在源码里可以写成
+      // `C:\Users\…`（反斜杠，还得转义）、`C:/Users/…`（正斜杠）或 `C:\\Users\\…`
+      // （字符串字面量里的双反斜杠）。只按一种写法匹配，另外两种就永远扫不到——
+      // 而扫不到的表现是「没有泄露」，不是「没查」。
+      if (homeRe && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
+        const category = classifyHomePath(file.rel, line)
+        if (category) homePathLeaks.push({ file: file.rel, line: i + 1, category })
       }
     }
   }
@@ -724,7 +808,35 @@ async function walkWorkspace(root, gitFacts) {
     secretContent,
     homePathLeaks,
     largeFiles,
+    scanCoverage: { truncated, depthReached, skippedLargeFiles, unreadableFiles },
   }
+}
+
+/**
+ * 一处本机绝对路径意味着什么，取决于它在哪。
+ *
+ * 这一条是从误报里学来的：把测试夹具里的假路径报成「泄露」的结果，是每次体检都红一次，
+ * 而修它的人做的第一件事是**把那一行改掉**——改掉的正好是一份有用的夹具。
+ * 所以分四类，各自处置不同：
+ *
+ *   - `test-data`：测试、规格、夹具、示例目录里的路径。**这一类不许改**，它是数据；
+ *   - `doc-example`：文档正文里的示例路径（`~` 或占位形式）。同理不动；
+ *   - `generated`：工作记录、变更记录这类「本来就该写当时现场」的文档。不动；
+ *   - `leak`：其余全部。**只有这一档要修**——它会被别人照抄去跑，然后失败。
+ */
+export function classifyHomePath(rel, line) {
+  const path = String(rel ?? '').replace(/\\/g, '/')
+  if (/(^|\/)(?:tests?|specs?|__tests__|fixtures?|examples?|__mocks__|testdata)(\/|$)/i.test(path)) return 'test-data'
+  if (/\.(?:test|spec)\.[a-z0-9]+$/i.test(path)) return 'test-data'
+  if (/(^|\/)(?:docs\/work|docs\/tasks|docs\/adr|work)(\/|$)/i.test(path)) return 'generated'
+  if (/^changelog\.md$/i.test(path) || /(^|\/)release-notes\//i.test(path)) return 'generated'
+  if (/\.(?:md|mdx|rst|txt)$/i.test(path)) {
+    // 文档里出现现场路径，多数是「照着我的机器抄了一遍」的示例，加占位符就能修好；
+    // 但它仍然值得看一眼——所以单列一档，不并入 leak 也不并入 test-data。
+    if (/[`'"]|<|>|\bexample\b|示例/i.test(line)) return 'doc-example'
+    return 'leak'
+  }
+  return 'leak'
 }
 
 // ── 文档与自动化 ────────────────────────────────────────────────────
@@ -737,11 +849,17 @@ function detectDocs(root) {
   const readmes = entries.filter((e) => /^readme(?:\.[a-z0-9_-]+)?\.md$/i.test(e))
   const agents = find('AGENTS.md')
   const contributing = find('CONTRIBUTING.md')
-  const releasing = find('RELEASING.md')
+  // 发版规范不止一个名字。只认 `RELEASING.md` 会让一个写着 `RELEASE.md` 或
+  // `docs/releasing.md` 的项目被判成「没有发版规范」，然后被劝去新建一份——
+  // 结果是两份规范并存，改哪一份都有另一半没跟上。
+  const releasing = ['RELEASING.md', 'RELEASE.md', 'RELEASING.rst', 'docs/RELEASING.md', 'docs/releasing.md']
+    .find((rel) => existsSync(join(root, rel)))
+  const changelog = ['CHANGELOG.md', 'CHANGELOG.rst', 'CHANGES.md', 'HISTORY.md']
+    .find((rel) => existsSync(join(root, rel)))
   const license = entries.find((e) => /^licen[cs]e(?:\..+|-.*)?$/i.test(e))
 
   const otherAiConventions = ['CLAUDE.md', '.cursorrules', '.cursor/rules',
-    '.github/copilot-instructions.md', '.windsurfrules']
+    '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md', '.windsurfrules']
     .filter((rel) => existsSync(join(root, rel)))
 
   const wfDir = join(root, '.github', 'workflows')
@@ -794,6 +912,7 @@ function detectDocs(root) {
     agents: agents ? { file: agents } : undefined,
     contributing,
     releasing,
+    changelog,
     license,
     otherAiConventions,
     workflows,
@@ -802,6 +921,48 @@ function detectDocs(root) {
     prTemplateFile: prTemplateFiles[0],
     issueTemplates: issueTemplateFiles.length > 0,
     issueTemplateFiles,
+  }
+}
+
+// ── 既有约定：从项目现状读，不写死 ──────────────────────────────────
+
+const WORK_DIR_CANDIDATES = ['docs/work', 'docs/tasks', 'docs/adr', 'todo', 'work']
+
+/**
+ * 项目自己的既有约定。
+ *
+ * 这些取值**只在两种地方出现**：生成契约时填进去，以及体检时用来核对。把它们写死在
+ * 文档里（「默认分支是 main」「说明放 docs/release-notes/」）的代价是：一份对着存量
+ * 仓库跑的流程，会要求一个把默认分支叫 `trunk`、把变更记录放根目录 `CHANGELOG.md`
+ * 的项目改掉它原本正确的做法。
+ *
+ * 每一条都给「读不到时的默认值」——不是猜，是**新项目的合理起点**。
+ */
+function detectConventions(root, { gitFacts, docs, ecosystem }) {
+  const defaultBranch = gitFacts.originHeadBranch
+    || (gitFacts.branch && gitFacts.branch !== '(detached)' ? gitFacts.branch : undefined)
+    || gitFacts.initDefaultBranch
+    || 'main'
+
+  const releaseNotesMode = docs.changelog ? 'changelog' : 'dir'
+
+  // 标签前缀：默认带 `v`，两个例外把它变成裸版本号。
+  //   - 命中要求裸版本号的生态（Obsidian 一类插件市场）；
+  //   - 历史标签本来就全是裸数字——那是项目已经选定的形状，不该被改。
+  const kinds = ecosystem.kinds ?? []
+  const needsBareTag = kinds.some((k) => k === 'obsidian-plugin')
+  const bareHistory = (gitFacts.tags ?? []).length > 0
+    && (gitFacts.tags ?? []).every((t) => /^\d+\.\d+/.test(t))
+  const tagPrefix = needsBareTag || bareHistory ? '' : 'v'
+
+  const workDir = WORK_DIR_CANDIDATES.find((rel) => existsSync(join(root, rel))) ?? 'docs/work'
+
+  return {
+    defaultBranch,
+    releaseNotesMode,
+    tagPrefix,
+    commitStyle: gitFacts.commitStyle ?? 'plain',
+    workDir,
   }
 }
 
@@ -962,8 +1123,13 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const taskCommands = detectTaskEntries(root)
   const ws = await walkWorkspace(root, gitFacts)
   const docs = detectDocs(root)
+  const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
 
-  const commands = { ...taskCommands, ...ecosystem.commands }
+  // 任务入口先落，生态命令补在它后面：Makefile 里那条 `test` 是这个项目自己写下的，
+  // 比按生态惯例推出来的更贴近事实。
+  const commands = { ...ecosystem.commands, ...taskCommands }
+  const commandsByEcosystem = { ...ecosystem.commandsByEcosystem }
+  if (Object.keys(taskCommands).length > 0) commandsByEcosystem.task = taskCommands
 
   let kinds = ecosystem.kinds
   if (kinds.length === 0) {
@@ -999,6 +1165,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       trackedFiles: gitFacts.trackedFiles ?? 0,
       head: gitFacts.head,
       initDefaultBranch: gitFacts.initDefaultBranch,
+      originHeadBranch: gitFacts.originHeadBranch,
       auth: gitFacts.auth,
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
@@ -1016,6 +1183,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       skillMeta: ecosystem.skillMeta,
     },
     commands,
+    commandsByEcosystem,
+    conventions,
     workspace: detectWorkspace(root),
     artifacts: detectArtifacts(root, ecosystem),
     localSkills: detectLocalSkills(root),
@@ -1035,6 +1204,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       secretContent: ws.secretContent,
       homePathLeaks: ws.homePathLeaks,
       largeFiles: ws.largeFiles,
+      scanCoverage: ws.scanCoverage,
     },
     scale: { totalFiles: ws.totalFiles, codeFiles: ws.codeFiles, docFiles: ws.docFiles },
     gaps: [],

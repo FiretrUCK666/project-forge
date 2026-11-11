@@ -53,18 +53,29 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 发版门禁（标签与 SKILL.md 的版本必须同号）
+      - name: 发版门禁（标签与**它那棵树里**的 SKILL.md 版本必须同号）
         run: |
-          # 版本从标签读，不从工作区读——门禁判的是要发出去的那一份。
+          # 版本从**标签指向的那次提交**里读，不从工作区读。
+          #
+          # 工作区是默认分支，它随时可能已经往前走了：补跑一个旧标签时，工作区的
+          # `metadata.version` 早就升到下一版了，那时候报「对不上」是假警报；
+          # 而更糟的方向是——标签打在旧提交上，工作区是新版号，两者一旦碰巧同号，
+          # 这道门禁就给一份根本不是这个版本的东西背书。
           EXPECTED="${TAG#v}"
-          ACTUAL=$(sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' SKILL.md | head -1)
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::标签是 $TAG（对应 $EXPECTED），而 SKILL.md 的 metadata.version 是「$ACTUAL」。两者必须同号。"
+          ACTUAL=$(git show "$TAG:SKILL.md" \
+            | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+            | head -1)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::在标签 $TAG 的 SKILL.md 里读不到 metadata.version。标签指向的提交里没有这个字段。"
             exit 1
           fi
-          echo "版本对齐：$TAG"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::标签是 $TAG（对应 $EXPECTED），而它那棵树里的 metadata.version 是「$ACTUAL」。两者必须同号。"
+            exit 1
+          fi
+          echo "版本对齐：$TAG 与它那棵树里的 SKILL.md 同号（$ACTUAL）"
 
-      - name: 说明文件必须已经在默认分支上
+      - name: 说明文件必须已经在默认分支上，而且不是空壳
         run: |
           # 这一步拦的正是最常见的那次失败：顺序反了，标签先推、说明没推。
           # **不要把它删掉换成「找不到就用默认措辞」**——那样发布页上会出现一份没人写过
@@ -76,6 +87,11 @@ jobs:
           fi
           if [ ! -s "$NOTES" ]; then
             echo "::error::$NOTES 是空文件。"
+            exit 1
+          fi
+          # 没填完的草稿比没有更糟：它看起来像有内容，而自动化会把它原样贴到发布页上。
+          if grep -qE 'project-forge:[[:space:]]*fill' "$NOTES"; then
+            echo "::error::$NOTES 里还有没填完的 project-forge: fill 占位。填掉它们，删掉标记行，再重跑。"
             exit 1
           fi
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"

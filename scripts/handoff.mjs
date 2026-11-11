@@ -31,15 +31,41 @@ import {
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
-const SCAN_EXT = /\.(?:md|mdx|markdown|yml|yaml|json|toml|txt)$/i
+const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
+const MAX_DEPTH = 6
+const MAX_FILES = 20000
+const MAX_BYTES = 256 * 1024
+
+/**
+ * 本项目自己的文件里**不该出现**的指针：指向本 skill 内部的参考与脚本。
+ *
+ * 交棒之后这些指针全都指空——目标项目没有 `references/` 目录，也没有本 skill 的
+ * `scripts/`。而它们比普通死链更要紧：那些位置上原本写着一条规则，删掉指针就把它
+ * 一起删了。所以扫描时单列一档，提示的是「**先把规则搬进项目自己的文档，再删指针**」。
+ */
+const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|review|handoff|sync-toc|update|zip)\.mjs)/g
+
+/**
+ * 本 skill 自己的那几处：模板与它自己的参考文档。
+ *
+ * 交棒是把**项目**从这套流程里摘出来；模板与技能文档不跟着项目走，也不该被算成
+ * 留在项目里的痕迹。把它们算进去的后果是 `--verify` 永远不干净，而清单上列出的
+ * 每一处都「删了会把技能自己弄坏」——那会让交棒这道门变成一道永远跨不过去的门。
+ */
+function isSkillOwnPath(rel) {
+  const p = String(rel ?? '').replace(/\\/g, '/')
+  return p.startsWith('templates/') || p.startsWith('references/') || p === 'SKILL.md'
+}
 
 function walk(root) {
   const out = []
+  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0 }
   const go = (dir, depth) => {
-    if (depth > 6 || out.length > 20000) return
+    if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
+    if (out.length > MAX_FILES) { state.truncated = true; return }
     let entries
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; return }
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue
       const full = join(dir, entry.name)
@@ -48,19 +74,23 @@ function walk(root) {
         if (SKIP_DIRS.has(entry.name)) continue
         go(full, depth + 1)
       } else if (entry.isFile() && SCAN_EXT.test(entry.name)) {
+        let size = 0
+        try { size = statSync(full).size } catch { state.unreadable += 1; continue }
+        if (size > MAX_BYTES) { state.skippedLarge += 1; state.truncated = true; continue }
         out.push(relative(root, full).split(sep).join('/'))
       }
     }
   }
   go(root, 0)
-  return out
+  return { files: out, scan: state }
 }
 
 /**
  * 扫一遍，返回分类好的痕迹。
  *
- * `clean` 只在「一处痕迹都没有」时为真——含未填占位与旧版残留。
- * 拿它当关卡是安全的：宁可怕多见，也不要让「有痕迹」被读成「干净」。
+ * `clean` 只在「一处痕迹都没有、而且确实扫全了」时为真。这两件事必须分开：
+ * 一个大到扫不完的项目，报出来的是「没找到」，而不是「没有」——把这两句混同，
+ * 等于用一句假话给一次不可逆动作背书。
  */
 export function scan(targetDir) {
   const root = resolve(targetDir)
@@ -69,13 +99,18 @@ export function scan(targetDir) {
   const markers = []
   const placeholders = []
   const legacyMarkers = []
-  const files = walk(root)
+  const danglingPointers = []
+  const { files, scan: coverage } = walk(root)
 
   for (const rel of files) {
     const text = readTextSafe(join(root, rel))
-    if (text === undefined) continue
+    if (text === undefined) { coverage.unreadable += 1; continue }
     if (markerSyntaxFor(rel) !== null) {
       for (const mark of parseMarkers(text, rel)) {
+        // **这一趟扫的是「交棒之后还留在项目里的东西」**，所以 `templates/` 与 `references/`
+        // 下的标记不算：前者是模板（标记就是它的语法），后者是技能自己的文档（会讲解
+        // 标记长什么样）。扫它是为了把它交出去，而这两处永远不会跟着项目走。
+        if (isSkillOwnPath(rel)) continue
         if (mark.kind === 'fill') {
           placeholders.push({ file: rel, line: mark.line, what: mark.what })
         } else {
@@ -83,12 +118,23 @@ export function scan(targetDir) {
         }
       }
     }
-    for (const legacy of LEGACY_MARKERS) {
-      const lines = text.split('\n')
-      for (let i = 0; i < lines.length; i += 1) {
-        if (legacy.re.test(lines[i])) {
+    if (isSkillOwnPath(rel)) continue
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
+      for (const legacy of LEGACY_MARKERS) {
+        if (legacy.re.test(line)) {
           legacyMarkers.push({ file: rel, line: i + 1, what: legacy.what })
         }
+      }
+      // 只关心「项目自己的文件里出现了本 skill 的内部路径」。本 skill 自己的目录里
+      // 出现它们是正常的（那正是它的结构），所以我们跳过它自己的那几处。
+      for (const m of line.matchAll(SKILL_INTERNAL_RE)) {
+        const target = m[0]
+        if (!target.includes('/')) continue
+        // 目标项目里真实存在这个相对路径 → 不是悬空指针，是它自己也有同名文件。
+        if (existsSync(join(root, target))) continue
+        danglingPointers.push({ file: rel, line: i + 1, target })
       }
     }
   }
@@ -104,14 +150,20 @@ export function scan(targetDir) {
 
   const inHandoff = markers.filter((m) => m.kind === 'begin' || m.kind === 'end').length > 0
 
+  const total = markers.length + placeholders.length + legacyMarkers.length
+    + legacyPaths.length + danglingPointers.length
+
   return {
     target: { path: root },
     markers,
     placeholders,
     legacyMarkers,
     legacyPaths,
-    clean: markers.length === 0 && placeholders.length === 0
-      && legacyMarkers.length === 0 && legacyPaths.length === 0,
+    danglingPointers,
+    total,
+    clean: total === 0,
+    truncated: coverage.truncated,
+    scanCoverage: coverage,
     inHandoff,
   }
 }
@@ -170,11 +222,27 @@ export function toText(result) {
     lines.push('')
   }
 
+  if (result.danglingPointers.length > 0) {
+    lines.push('## 指向本 skill 内部的悬空指针（先搬规则，再删指针）')
+    lines.push('')
+    for (const p of result.danglingPointers) {
+      lines.push(`- \`${p.file}:${p.line}\` → \`${p.target}\``)
+    }
+    lines.push('')
+    lines.push('  处置：这些位置上原本写着一条规则。**直接删指针会把规则一起删掉**——')
+    lines.push('  先把那条规则搬进项目自己的文档或脚本，确认搬完再删这一行。')
+    lines.push('')
+  }
+
   lines.push('## 须知')
   lines.push('')
   lines.push('- 上面每一处都是**读出来的事实**，不是猜的：标记就写在文件里。')
   lines.push('- 这个脚本**不会替你删**。删除不可逆，判据与顺序见 `references/handoff.md`。')
   lines.push('- 项目里的 `skills/` 之类的目录是**项目自己的**，不是痕迹——它们是内容，盘点时不要碰。')
+  if (result.truncated) {
+    lines.push('- **这一趟没扫全**：目录太深、文件太多，或有单个文件超过 256 KB 没读。'
+      + '上面列的是「扫到的」，不是「全部的」——`--verify` 会因此返回 3，别把它当成干净。')
+  }
 
   return lines.join('\n')
 }
@@ -190,14 +258,15 @@ function main(argv) {
         '用法：node scripts/handoff.mjs [项目目录] [选项]',
         '',
         '  --scan     列出本 skill 留下的痕迹（默认）',
-        '  --verify   判「已经干净」：干净退出 0，有痕迹退出 1',
+        '  --verify   判「已经干净」：干净退出 0，有痕迹退出 1，**没扫全退出 3**',
         '  --json     输出机器可读结果',
         '',
-        '只读：不删任何东西。',
+        '只读：不删任何东西。退出码 3 的意思是「这一趟没扫完」，不是干净。',
       ].join('\n') + '\n')
       return 0
     }
     if (arg === '--verify') verify = true
+    else if (arg === '--scan') { /* 默认模式，显式写出来是为了让人知道有这个动作 */ }
     else if (arg === '--json') asJson = true
     else if (!arg.startsWith('-')) target = arg
     else {
@@ -211,17 +280,26 @@ function main(argv) {
     if (asJson) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     } else if (verify) {
-      if (result.clean) {
+      if (result.truncated) {
+        process.stdout.write(`没扫全：目录太深、文件太多，或有单个文件超过 256 KB 没读。`
+          + '这一趟的结论只能当「没查到」，不能当「没有」。\n')
+        if (result.total > 0) process.stdout.write(`（已经扫到的部分里还有 ${result.total} 处痕迹，跑 --scan 看清单。）\n`)
+      } else if (result.clean) {
         process.stdout.write('干净：没找到本 skill 留下的任何东西。\n')
       } else {
-        const total = result.markers.length + result.placeholders.length
-          + result.legacyMarkers.length + result.legacyPaths.length
-        process.stdout.write(`不干净：还有 ${total} 处痕迹。跑 --scan 看清单。\n`)
+        process.stdout.write(`不干净：还有 ${result.total} 处痕迹。跑 --scan 看清单。\n`)
       }
     } else {
       process.stdout.write(`${toText(result)}\n`)
     }
-    if (verify) return result.clean ? 0 : 1
+    if (verify) {
+      // 三档退出码：干净 0、还有痕迹 1、**扫不全 3**。
+      // 第三档必须与「有痕迹」分开：拿 3 当 1 会让「扫不完」看起来像「找到了」，
+      // 拿 3 当 0 则正好相反——把一次没做完的检查当成通过的检查，而这是不可逆动作
+      // 的最后一道关。
+      if (result.truncated) return 3
+      return result.clean ? 0 : 1
+    }
     return 0
   } catch (err) {
     process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)

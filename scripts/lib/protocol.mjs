@@ -75,12 +75,26 @@ export function markerBodyOf(line) {
  *
  * 每条形如 `{ body, kind, id, what, line }`：`line` 是从 1 开始的行号，`index` 是从 0
  * 开始的行下标。`kind` 为 `begin`/`end` 时 `id` 是节名，为 `fill` 时 `what` 是待填内容。
+ *
+ * **代码围栏里的东西不算标记。** 一份文档可能正当地引用标记的写法（`references/handoff.md`
+ * 就要解释它长什么样），那些示例是**内容**，不是 markup。把它们当成真标记的后果很具体：
+ * 一份写在代码块里的示例会让「交棒」永远判不干净，而用户看到的是「这里还有痕迹」，
+ * 却找不到任何能删的东西。
  */
 export function parseMarkers(text, file) {
   if (markerSyntaxFor(file) === null) return []
   const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
+  let fence
   for (let i = 0; i < lines.length; i += 1) {
+    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
+    if (fenceMatch) {
+      const mark = fenceMatch[1][0]
+      if (fence === undefined) fence = mark
+      else if (fence === mark) fence = undefined
+      continue
+    }
+    if (fence !== undefined) continue
     const body = markerBodyOf(lines[i])
     if (body === undefined) continue
     const m = /^(generated|begin|end|fill)\b\s*([\s\S]*)$/.exec(body)
@@ -150,11 +164,14 @@ export function markerRegions(text, file) {
  *
  * `SKILL_MAX_LINES` 是入口的上限：入口每多一行，每一次任务都要多付一次。
  * `FULL_READ_MAX_LINES` 是一次全量任务的必读量上限（入口 + 四篇主干参考）。
+ *
+ * 预算定的是**上限**，不是目标。抬上限的唯一正当理由是「新加的那几行改变了判定」；
+ * 仅仅因为写得更啰嗦就越界时，改的是文档，不是这个数。
  */
-export const SKILL_MAX_LINES = 160
-export const SKILL_MAX_BYTES = 12 * 1024
-export const REFS_MAX_LINES = 1300
-export const FULL_READ_MAX_LINES = 850
+export const SKILL_MAX_LINES = 200
+export const SKILL_MAX_BYTES = 16 * 1024
+export const REFS_MAX_LINES = 2400
+export const FULL_READ_MAX_LINES = 1000
 
 /** 一次全量任务必读的那几篇（相对 skill 根）。preflight 用它算预算。 */
 export const FULL_READ_REFS = Object.freeze([
@@ -163,6 +180,88 @@ export const FULL_READ_REFS = Object.freeze([
   'references/docs-set.md',
   'references/remote-github.md',
 ])
+
+// ── 模板语法：只活在 templates/ 里，绝不落进项目文件 ──────────────────
+//
+// 这一节与上面那四类标记**不是同一层东西**，分开定义是刻意的：
+//
+//   - `begin`/`end`/`fill`/`generated` 会**留在项目文件里**，所以 `parseMarkers` 认它们，
+//     `review` 判它们、`handoff` 找它们、`--clean` 剥它们；
+//   - `if`/`endif` 与 `{{VAR}}` 只在**渲染之前**存在。渲染完必须一个都不剩——
+//     项目文件里出现 `project-forge: if` 就说明条件求值漏了一层，`preflight` 会判红。
+//
+// 两者共用同一个「标记正文」提取函数（`markerBodyOf`），所以语法永远只有一份。
+
+/**
+ * 模板里可用的条件名。**只有这七个**，全部来自勘察事实。
+ *
+ * 加一个条件的代价是：它在模板里能改变一份契约的结构，而在每个项目上都要被求值一次。
+ * 所以条件只表达**结构差异**（有没有远端、发不发布、是不是插件），不表达措辞偏好。
+ * `preflight` 核对模板里用的条件名都在这个表里——写错一个字母时，那一整块会被静默丢掉。
+ */
+export const TEMPLATE_CONDITIONS = Object.freeze([
+  'has-commands',
+  'no-commands',
+  'has-remote',
+  'has-release',
+  'is-monorepo',
+  'is-plugin-or-skill',
+  'has-bilingual-docs',
+])
+
+/**
+ * 模板里可用的变量名。**只有这十一个**。
+ *
+ * 未登记的占位符让渲染**直接失败**，而不是原样留在用户文件里：留在文件里的 `{{X}}`
+ * 看起来像「这里本来就该有东西」，而它其实是一个没人填的洞。
+ */
+export const TEMPLATE_VARS = Object.freeze([
+  'PROJECT_NAME',
+  'COMMANDS',
+  'RUNTIME_REQUIREMENTS',
+  'DEFAULT_BRANCH',
+  'VERSION_SOURCE',
+  'RELEASING_DOC',
+  'RELEASE_NOTES_TARGET',
+  'WORK_DIR',
+  'COMMIT_STYLE_HINT',
+  'README_LIST',
+  'WORKSPACE_PACKAGES',
+])
+
+/**
+ * 解析模板里的条件标记，返回按行号排列的 `{ kind, cond, line, index }`。
+ *
+ * `kind` 是 `if` 或 `endif`；`cond` 只有 `if` 有值。**配不上对不是这里的事**——
+ * 求值器负责报「if 没有对应 endif」，这一层只做词法。
+ */
+export function conditionMarkers(text, file = 'template.md') {
+  if (markerSyntaxFor(file) === null) return []
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let fence
+  for (let i = 0; i < lines.length; i += 1) {
+    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
+    if (fenceMatch) {
+      const mark = fenceMatch[1][0]
+      if (fence === undefined) fence = mark
+      else if (fence === mark) fence = undefined
+      continue
+    }
+    if (fence !== undefined) continue
+    const body = markerBodyOf(lines[i])
+    if (body === undefined) continue
+    const m = /^(if|endif)\b\s*([\s\S]*)$/.exec(body)
+    if (!m) continue
+    out.push({ kind: m[1], cond: m[1] === 'if' ? m[2].trim() : undefined, line: i + 1, index: i })
+  }
+  return out
+}
+
+/** 这份文本里出现的全部占位变量名（去重、按出现顺序）。 */
+export function templateVarsOf(text) {
+  return [...new Set([...String(text ?? '').matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
+}
 
 // ── 用户包边界 ──────────────────────────────────────────────────────
 //

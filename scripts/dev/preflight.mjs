@@ -33,7 +33,8 @@ import { fileURLToPath } from 'node:url'
 
 import {
   FULL_READ_MAX_LINES, FULL_READ_REFS, REFS_MAX_LINES, REPO_ONLY_DIRS, REPO_ONLY_FILES,
-  SKILL_MAX_BYTES, SKILL_MAX_LINES, isRepoOnlyPath,
+  SKILL_MAX_BYTES, SKILL_MAX_LINES, TEMPLATE_CONDITIONS, TEMPLATE_VARS,
+  conditionMarkers, isRepoOnlyPath, templateVarsOf,
 } from '../lib/protocol.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -143,6 +144,190 @@ const PATH_RE = /\b((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mj
 function docsToScan() {
   const refs = walk(join(ROOT, 'references'), (f) => f.endsWith('.md'))
   return [join(ROOT, 'SKILL.md'), ...refs]
+}
+
+/**
+ * 模板里**不许**出现的东西。
+ *
+ * 目标项目没有 `references/` 目录，也没有本 skill 的 `scripts/`。模板里写一句
+ * 「详见 `references/xxx.md`」，落到目标项目就是一条**注定指空**的指针——而它指的
+ * 位置上原本写着一条规则。用户会去点它，点不到，然后以为是自己装错了。
+ *
+ * 判据是文本里出现 `references/` 这类前缀，而不是「链接能不能解析」：模板不是给本仓库
+ * 用的，它的相对路径本来就不该按本仓库的结构去解释。
+ */
+const TEMPLATE_FORBIDDEN = [
+  { re: /`?references\//, what: '指向 references/ 的路径（目标项目没有这个目录）' },
+  { re: /\bproject-forge:\s*(?:kernel|managed|upgraded)/, what: '旧版标记语法' },
+]
+
+function checkTemplates() {
+  const templates = walk(join(ROOT, 'templates'), () => true)
+  if (templates.length === 0) { fail('templates/ 下没有任何文件'); return }
+
+  // 许可证全文是**逐字的标准文本**，里面的 `{{YEAR}}` / `{{HOLDER}}` 是让人手工替换的
+  // 占位，不经过渲染器。把它们算进「模板变量」等于让一份法律文本去迁就代码。
+  const rendered = templates.filter((f) => !/^license-.+\.txt$/.test(basename(f)))
+
+  for (const file of templates) {
+    const name = rel(file)
+    const text = readText(file)
+
+    for (const rule of TEMPLATE_FORBIDDEN) {
+      const m = rule.re.exec(text)
+      if (m) {
+        const line = text.slice(0, m.index).split('\n').length
+        fail(`${name} 第 ${line} 行有${rule.what}——它会原样落进目标项目，然后永远指空`)
+      }
+    }
+  }
+
+  for (const file of rendered) {
+    const name = rel(file)
+    const text = readText(file)
+
+    // 条件名与变量名必须是登记过的。写错一个字母的后果不是报错，而是那一整块
+    // 被当成「条件为假」静默消失——读者看到的是一份缺了一节的契约。
+    for (const mark of conditionMarkers(text, 'x.md')) {
+      if (mark.kind === 'if' && !TEMPLATE_CONDITIONS.includes(mark.cond)) {
+        fail(`${name} 第 ${mark.line} 行用了未登记的条件「${mark.cond}」——它会永远求值为假，那一块会静默消失`)
+      }
+    }
+    for (const v of templateVarsOf(text)) {
+      if (!TEMPLATE_VARS.includes(v)) {
+        fail(`${name} 里有未登记的占位符 {{${v}}}——渲染会直接失败`)
+      }
+    }
+  }
+
+  // 反方向：登记了却没人用的条件与变量，会让人以为「有这能力」。
+  const usedConds = new Set()
+  const usedVars = new Set()
+  for (const file of rendered) {
+    const text = readText(file)
+    for (const mark of conditionMarkers(text, 'x.md')) if (mark.kind === 'if') usedConds.add(mark.cond)
+    for (const v of templateVarsOf(text)) usedVars.add(v)
+  }
+  for (const c of TEMPLATE_CONDITIONS) {
+    if (!usedConds.has(c)) fail(`条件「${c}」登记了却没有任何模板用它——要么删掉登记，要么补上模板`)
+  }
+  for (const v of TEMPLATE_VARS) {
+    if (!usedVars.has(v)) fail(`占位符 {{${v}}} 登记了却没有任何模板用它——要么删掉登记，要么补上模板`)
+  }
+
+  note(`模板：${templates.length} 份，无越界指针；条件 ${usedConds.size} 个、变量 ${usedVars.size} 个全部登记且都在用`)
+}
+
+/**
+ * 本仓库实例与模板的同构核对。
+ *
+ * 这条判据治的是一个具体的事故：模板改了，本仓库自己那份没跟上——于是「它教的」
+ * 和「它做的」是两套，而读者照着模板做，维护者照着自己那份做，两边都不报错。
+ *
+ * 判的是**核心二级标题**是否都在，不是逐字相同（实例本来就该有自己独有的节）。
+ */
+const OWN_INSTANCE_CHECKS = [
+  { template: 'templates/pull-request-template.md', instance: '.github/pull_request_template.md' },
+  { template: 'templates/issue-bug-report.md', instance: '.github/ISSUE_TEMPLATE/bug_report.md' },
+  { template: 'templates/issue-feature-request.md', instance: '.github/ISSUE_TEMPLATE/feature_request.md' },
+  { template: 'templates/releasing.md', instance: 'RELEASING.md' },
+  { template: 'templates/contributing.md', instance: 'CONTRIBUTING.md' },
+]
+
+/** 已经删掉的脚本与文件名。任何文件里出现它们，都是没跟上的引用。 */
+const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 'pf-review', 'check-badges.mjs', 'ecosystems.mjs', 'lib/ledger.mjs', 'lib/manifest.mjs', 'task-runners.mjs']
+
+/** 历史记录是**当时的事实**，不改写它。它们记的是那一次改动的现场，不是现行约定。 */
+const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
+
+function headingsOf(text) {
+  return (text.replace(/\r\n/g, '\n').match(/^##\s+.+$/gm) ?? []).map((s) => s.trim())
+}
+
+function checkOwnInstances() {
+  for (const check of OWN_INSTANCE_CHECKS) {
+    const tpl = join(ROOT, check.template)
+    const inst = join(ROOT, check.instance)
+    if (!existsSync(tpl)) { fail(`同构核对：缺模板 ${check.template}`); continue }
+    if (!existsSync(inst)) { fail(`同构核对：缺本仓库实例 ${check.instance}`); continue }
+    const wanted = headingsOf(readText(tpl))
+    const have = new Set(headingsOf(readText(inst)))
+    for (const h of wanted) {
+      if (!have.has(h)) {
+        fail(`${check.instance} 缺模板里的这一节：${h}——模板改了、本仓库自己那份没跟上，两边从此各说各话`)
+      }
+    }
+  }
+  note(`同构核对：${OWN_INSTANCE_CHECKS.length} 组实例与模板的核心章节一致`)
+
+  // 退休名字的残留扫描。**历史记录不扫**：工作记录与发版说明记的是当时的事实，
+  // 把它们按现行约定改写一遍，等于伪造一份从没发生过的历史。
+  const targets = [
+    join(ROOT, 'SKILL.md'), join(ROOT, 'AGENTS.md'), join(ROOT, 'README.md'),
+    join(ROOT, 'README.en.md'), join(ROOT, 'CONTRIBUTING.md'), join(ROOT, 'RELEASING.md'),
+    ...walk(join(ROOT, '.github'), (f) => /\.(?:md|ya?ml)$/i.test(f)),
+    ...walk(join(ROOT, 'templates'), () => true),
+  ]
+  for (const file of targets) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    const text = readText(file)
+    for (const retired of RETIRED_NAMES) {
+      if (!text.includes(retired)) continue
+      fail(`${name} 里还写着 ${retired}——那个脚本已经不存在，照着它做的人会找不到命令`)
+    }
+  }
+}
+
+/**
+ * 渲染一遍模板，确认产物里**一个占位符都不剩**。
+ *
+ * `{{COMMANDS}}` 曾经原样落进过用户的 `AGENTS.md`：它在文件里看起来像「这里本来就该有
+ * 一段命令」，于是没人发现，直到有人照着它去找命令。这一条直接在生成产物上核对，
+ * 而不是在渲染代码里核对——判据要落在「用户拿到什么」上。
+ */
+function checkTemplateRender() {
+  const tmp = mkdtempSync(join(tmpdir(), 'pf-render-'))
+  try {
+    // 一个**没有任何命令**的纯文档项目：这曾经是泄漏最容易发生的那种输入。
+    writeFileSync(join(tmp, 'README.md'), '# demo\n\n一个纯文档项目，用来核对渲染产物。\n')
+    const res = spawnSync(process.execPath, [join(ROOT, 'scripts', 'compose-agents.mjs'), tmp], {
+      encoding: 'utf8', timeout: 60000,
+    })
+    if (res.status !== 0) { fail(`在纯文档项目上渲染 AGENTS.md 失败：${(res.stderr || '').trim()}`); return }
+    const out = join(tmp, 'AGENTS.md')
+    if (!existsSync(out)) { fail('渲染没有产出 AGENTS.md'); return }
+    const text = readFileSync(out, 'utf8')
+
+    const leaked = templateVarsOf(text)
+    if (leaked.length > 0) fail(`渲染产物里还有未替换的占位符：${leaked.map((n) => `{{${n}}}`).join('、')}`)
+    if (conditionMarkers(text, 'x.md').length > 0) fail('渲染产物里还有 if/endif——条件求值漏了一层')
+
+    if (!/project-forge:\s*(?:begin|fill)/.test(text)) fail('渲染产物里没有任何受管标记——它从此没法被刷新')
+    note('渲染：纯文档项目上生成的 AGENTS.md 没有残留占位符、没有残留条件块')
+  } finally {
+    // Windows 上刚被别的进程打开的目录会被锁一小会儿，删不掉不是失败——
+    // 用重试把它让过去，不要让一条清理动作把整趟自检打成崩溃。
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) } catch { /* 留给系统清理 */ }
+  }
+}
+
+/**
+ * 本仓库自己过一遍生成门禁。
+ *
+ * 这个仓库是这套规范的第一个用户：`templates/` 里写的结构，这里必须自己做到。
+ * 自举断了不会报错，只会让「它教的」和「它做的」从此是两套。
+ */
+function checkSelfHost() {
+  const res = spawnSync(process.execPath, [join(ROOT, 'scripts', 'compose-agents.mjs'), ROOT, '--check'], {
+    encoding: 'utf8', timeout: 60000,
+  })
+  if (res.status !== 0) {
+    fail(`本仓库自己的 AGENTS.md 没通过自举校验：${(res.stderr || res.stdout || '').trim().split('\n').slice(0, 6).join(' / ')}`)
+    return
+  }
+  note('自举：本仓库自己的 AGENTS.md 标记成对、没有未填占位、该有的节都在')
 }
 
 function checkLinks() {
@@ -334,7 +519,7 @@ function smoke() {
     const h2 = run('handoff.mjs', [tmp, '--verify'])
     if (h2.status !== 0) fail(`剥掉标记之后 handoff --verify 仍说脏：${(h2.stdout || '').trim()}`)
   } finally {
-    rmSync(tmp, { recursive: true, force: true })
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) } catch { /* 留给系统清理 */ }
   }
   note('端到端：勘察 → 生成（幂等）→ 门禁 → 体检 → 交棒，全跑通')
 }
@@ -373,8 +558,12 @@ function main() {
   checkEntry()
   checkLinks()
   checkScripts()
+  checkTemplates()
   checkStructureRules()
+  checkOwnInstances()
   checkHelps()
+  checkTemplateRender()
+  checkSelfHost()
   smoke()
   checkHygiene()
 

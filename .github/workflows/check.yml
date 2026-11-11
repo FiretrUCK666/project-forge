@@ -1,6 +1,10 @@
 # 持续集成：把「本机能过」变成「换台机器也能过」。
 #
-# 这个项目没有构建步骤，所以检查很轻：自检 + 目录同步 + 用户包内容核对。全程只用 Node。
+# 这个项目没有构建步骤，所以检查很轻：结构自检 + 行为断言 + 契约自举 + 目录同步 +
+# 用户包内容核对 + 交付体检。全程只用 Node。
+#
+# **五道门禁与 AGENTS.md 的「构建与验证」节是同一批命令。** 两处不一致时，本地按一份做、
+# CI 按另一份查，谁都没错，结果对不上。
 
 name: check
 
@@ -18,6 +22,12 @@ jobs:
     steps:
       - name: 检出
         uses: actions/checkout@v4
+        with:
+          # **必须取全历史**：下面「用户包内容」那一步要按标签与提交读文件，
+          # `git archive` 也要能看见历史对象。浅克隆下这些动作会读不到东西，
+          # 而读不到的表现不是报错，是**静默通过**——空清单等于「没越界」，
+          # 门禁于是绿着放行，它本该拦下的一件都没拦。
+          fetch-depth: 0
 
       - name: 准备 Node
         uses: actions/setup-node@v4
@@ -26,6 +36,16 @@ jobs:
 
       - name: 结构自检 + 端到端冒烟
         run: node scripts/dev/preflight.mjs
+
+      # 行为断言与结构自检是两件事，缺一不可：
+      # 结构自检查不出「判定写错了」——勘察把一个 CMake 项目判成纯文档目录时，
+      # 引用与格式全都正常。这类错误只能靠造出能证伪它的 fixture 发现。
+      - name: 行为断言（造临时项目实跑，正反双向）
+        run: node scripts/dev/fixtures.mjs
+
+      # 这个仓库是这套规范的第一个用户：模板改了、自己那份没跟上时，这一条会红。
+      - name: 契约自举（标记成对 / 无未填占位 / 该有的节都在）
+        run: node scripts/compose-agents.mjs . --check
 
       - name: README 的目录与标题是否同步
         run: node scripts/sync-toc.mjs README.md README.en.md --check

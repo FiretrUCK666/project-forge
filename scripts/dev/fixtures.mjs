@@ -9,11 +9,11 @@
  * 只覆盖「判错了会给出错的动作」的那些判定。风格偏好不测。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SCRIPTS = resolve(HERE, '..')
@@ -53,6 +53,11 @@ function rmTree(dir) {
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   } catch { /* 留给系统清理 */ }
+}
+
+/** kept 里有没有「属于某个 pid」的那一项。 */
+function existingKept(result, pid) {
+  return (result.kept ?? []).some((p) => p.endsWith(`.tmp-${pid}`))
 }
 
 function gitInit(dir) {
@@ -838,7 +843,162 @@ cases.push(['契约里明确写了「日常只到推送、说发版才发」', a
   } finally { rmTree(dir) }
 }])
 
-// ── 跑 ──────────────────────────────────────────────────────────────
+// ── W1：lib 契约与围栏状态机 ─────────────────────────────────────────
+
+cases.push(['apiTarget 只交出能直接用的地址；拼错的零件不会漏到调用方', async () => {
+  const { apiTarget } = await import('../lib/protocol.mjs')
+  const { apiEndpoint } = await import('../update.mjs')
+
+  const target = apiTarget('https://github.com/acme/demo')
+  if (!target) return '一个合法的 GitHub 地址却认不出来'
+  if (!/^https:\/\/api\.github\.com\/repos\/acme\/demo\/releases\/latest$/.test(target.latest)) {
+    return `latest 拼错：${target.latest}`
+  }
+
+  // 正面：主路真的拼得出一个完整地址，任何一段都不是 undefined。
+  const endpoint = apiEndpoint('https://github.com/acme/demo')
+  if (!endpoint || /undefined/.test(endpoint)) return `接口地址里有洞：${endpoint}`
+
+  // 反面：不是 GitHub 的来源不猜，宁可让调用方走网页路。
+  if (apiTarget('https://code.example.com/acme/demo') !== undefined) return '非 GitHub 地址也被拼出了接口地址'
+  if (apiTarget('not a url') !== undefined) return '一段乱码被当成了地址'
+
+  // 反面：排路时不能凭空多出接口路。
+  const { routesFor } = await import('../update.mjs')
+  const routes = routesFor('https://mirror.internal:9000')
+  if (routes.some((r) => r.kind === 'api')) return '认不出的来源却排出了接口路'
+  if (!routes.some((r) => r.kind === 'web')) return '网页路这条兜底没了'
+  return true
+}])
+
+cases.push(['临时文件清理：传文件只清这个文件，传目录才扫全部；活的进程的不动', async () => {
+  const { clearStaleTemps } = await import('../lib/fs-atomic.mjs')
+  const d = mkdtempSync(join(tmpdir(), 'pf-temp-'))
+  // 造一个**真的还活着**的别的进程：本进程自己的 pid 挡不住「属主活着」那条判据
+  // （那条判据里另有 `pid === process.pid` 这一半），所以这里必须是一个陌生 pid。
+  const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
+  try {
+    const f = join(d, 'a.md')
+    writeFileSync(f, 'x')
+    writeFileSync(`${f}.tmp-999999`, 'stale')                  // 死进程，该清
+    writeFileSync(join(d, 'b.md.tmp-999998'), 'other stale')    // 别的文件，文件级不该碰
+    writeFileSync(`${f}.tmp-${process.pid}`, 'mine')            // 本进程，不动
+    writeFileSync(`${f}.tmp-${other.pid}`, 'live neighbour')    // 活着的别的进程，不动
+    writeFileSync(`${f}.tmp-backup`, 'not ours')                // 后缀不是数字，不动
+
+    // 正面：返回形状是对象，取 .kept 不抛（旧实现在这里当场 TypeError）。
+    const one = clearStaleTemps(f)
+    if (!Array.isArray(one.removed) || !Array.isArray(one.kept)) return '返回值不是 { removed, kept }'
+    if (one.removed.length !== 1) return `文件级清掉了 ${one.removed.length} 个，应该只有 1 个`
+    if (!one.kept.some((p) => p.endsWith(`.tmp-${process.pid}`))) return '本进程的临时文件没进 kept'
+    // 关键的反面：活着的邻居进程那一份不许动。删掉「属主活着就留」这条判据时，
+    // 唯一能抓到它的就是这个断言。
+    if (!existsSync(`${f}.tmp-${other.pid}`)) return '删掉了另一个仍在运行的进程的临时文件'
+    if (!existingKept(one, other.pid)) return '活进程的临时文件没进 kept，报告会漏说'
+    if (!existsSync(join(d, 'b.md.tmp-999998'))) return '文件级清理越界删了别的文件的临时文件'
+    if (!existsSync(`${f}.tmp-backup`)) return '后缀不是数字的也被删了'
+
+    // 反面：换目录级，那一份就该被清掉。
+    const all = clearStaleTemps(d, { dryRun: true })
+    if (!all.removed.some((p) => p.endsWith('b.md.tmp-999998'))) return '目录级没有扫到别的临时文件'
+    if (!existsSync(join(d, 'b.md.tmp-999998'))) return 'dryRun 模式下删了文件'
+    return true
+  } finally {
+    other.kill()
+    rmTree(d)
+  }
+}])
+
+cases.push(['剥标记不碰围栏里的示例，也不碰行内代码里的举例', async () => {
+  const { stripMarkers, parseMarkers } = await import('../lib/protocol.mjs')
+  const F = '`'.repeat(3)
+  const text = [
+    '<!-- project-forge: begin 真节 -->',
+    '正文。',
+    '<!-- project-forge: end 真节 -->',
+    '',
+    `${F}md`,
+    '<!-- project-forge: begin 示例 -->',
+    F,
+    '',
+    '正文里举例：`<!-- project-forge: fill 行内示例 -->`',
+  ].join('\n')
+
+  // 正面：围栏外的真标记被剥掉。
+  const stripped = stripMarkers(text, 'x.md')
+  if (stripped.includes('begin 真节')) return '围栏外的真标记没被剥'
+  // 反面：围栏里的示例与行内举例必须留着——那是内容，删掉就是删使用者自己的正文。
+  if (!stripped.includes('begin 示例')) return '围栏里的示例被剥掉了'
+  if (!stripped.includes('fill 行内示例')) return '行内代码里的举例被剥掉了'
+  if (!stripped.includes(F)) return '围栏本身被剥掉了'
+
+  // 解析这一侧也要一致：围栏里的不算标记。
+  const kinds = parseMarkers(text, 'x.md').map((m) => `${m.kind}:${m.id ?? m.what}`)
+  if (!kinds.includes('begin:真节')) return `真标记没解析出来：${kinds.join(',')}`
+  if (kinds.some((k) => k.includes('示例'))) return `围栏里的示例被当成了真标记：${kinds.join(',')}`
+  return true
+}])
+
+cases.push(['交棒扫描：行内代码里的路径不算悬空指针，临时文件单列一档', async () => {
+  const d = tmpProject({
+    'README.md': '正文里举例：`` `references/arch.md` `` 这句是示例。\n\n真引用：references/survey.md\n',
+    'AGENTS.md.tmp-999999': 'stale tmp',
+  })
+  try {
+    const r = JSON.parse((await runNode('handoff.mjs', [d, '--json'])).stdout)
+    const targets = r.danglingPointers.map((p) => p.target)
+
+    // 正面：真正的悬空指针还是报。
+    if (!targets.includes('references/survey.md')) return `真悬空指针漏报了：${targets.join(',')}`
+    // 反面：行内代码里举例的那个不许报。
+    if (targets.includes('references/arch.md')) return '行内代码里的举例被当成了悬空指针'
+
+    // 临时文件必须被扫到，而且是可清理的那一档。
+    if (!Array.isArray(r.staleTemps) || r.staleTemps.length === 0) return '临时文件没被扫到'
+    if (r.staleTemps.some((t) => t.alive)) return '把活进程的临时文件也当成了痕迹'
+    if (r.clean) return '还有临时文件却说干净'
+    return true
+  } finally { rmTree(d) }
+}])
+
+cases.push(['compose --clean 顺手清掉自己写到一半留下的临时文件', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const stale = join(dir, 'AGENTS.md.tmp-999999')
+    writeFileSync(stale, 'half written')
+    await runNode('compose-agents.mjs', [dir, '--clean'])
+    if (existsSync(stale)) return '--clean 之后那个临时文件还在'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['入口守卫按真实路径判：经链接调用也真跑', async () => {
+  // 反面（结构）：六个脚本都必须从 lib/text.mjs 取入口判定，不再各写一份。
+  const files = ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs']
+  for (const name of files) {
+    const text = readFileSync(join(SCRIPTS, name), 'utf8')
+    if (!/isMainModule\(/.test(text)) return `${name} 没有用 isMainModule 判入口`
+    if (/process\.argv\[1\]\s*&&\s*samePath/.test(text)) return `${name} 还留着一份自己的入口判定`
+  }
+
+  // 正面：通过一条符号链接调用，脚本必须真的跑。
+  // 字面比较在链接上永远不相等，那种实现在这里是「退出 0、零输出」——而调用方
+  // 会把它读成「检查通过」。这就是这一条要守的东西。
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  const link = join(dir, 'linked-survey.mjs')
+  try {
+    try {
+      symlinkSync(join(SCRIPTS, 'survey.mjs'), link, 'file')
+    } catch {
+      return true  // 限制环境下建不了链接：结构断言已经足够，不把环境限制当成失败
+    }
+    const out = spawnSync(process.execPath, [link, dir], { encoding: 'utf8', timeout: 60000 })
+    if (out.status !== 0) return `经链接调用失败了：${(out.stderr || '').trim().split('\n')[0]}`
+    if (!/"maturity"/.test(out.stdout)) return '经链接调用时什么都没输出——入口判定把它挡在了门外'
+    return true
+  } finally { rmTree(dir) }
+}])
 
 for (const [name, fn] of cases) {
   try {

@@ -288,6 +288,7 @@ export const TEMPLATE_VARS = Object.freeze([
   'COMMIT_STYLE_HINT',
   'README_LIST',
   'WORKSPACE_PACKAGES',
+  'CONVENTIONS_HINT',
 ])
 
 /**

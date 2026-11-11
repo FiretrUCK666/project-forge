@@ -62,6 +62,11 @@ function docsLine(docs) {
     `PR 模板 ${mark(docs.prTemplate)}`,
     `Issue 模板 ${mark(docs.issueTemplates)}`,
   ]
+  // 「别的 AI 约定文件」是一类**必须被看见**的现状：两份约定并存时，改一份另一份不跟，
+  // 而读的人只会看到其中一份。只报「有 / 没有」不够——得把名字列出来，否则没法逐条合流。
+  if ((docs.otherAiConventions ?? []).length > 0) {
+    items.push(`既有 AI 规则文件 **${docs.otherAiConventions.join('、')}**——先读一遍，把其中仍然成立的规则合进 \`AGENTS.md\`，别让两份各说各的`)
+  }
   return items.join(' · ')
 }
 

@@ -822,6 +822,36 @@ export function classifyHomePath(rel, line) {
 
 // ── 文档与自动化 ────────────────────────────────────────────────────
 
+/**
+ * 项目里已有的「别的 AI 约定文件」。
+ *
+ * 存在两份约定（`CLAUDE.md` 与 `AGENTS.md` 各写一套）时，**两份都会漂**——
+ * 而漂的那一份通常是没人读的那一份。所以勘察要把它们全找出来，交给 S2 决定合到哪儿，
+ * 而不是当作没看见。
+ *
+ * 单文件与目录两种形状都要认：`.cursorrules` 是单文件，`.cursor/rules/` 下面是一堆；
+ * 各家扩展名不同（`.mdc`、`.md`、`.txt`），所以目录里按「文本文件」挑，不按固定后缀。
+ */
+function detectOtherAiConventions(root) {
+  const singles = [
+    'CLAUDE.md', '.clinerules', '.cursorrules', '.windsurfrules', 'CONVENTIONS.md',
+    '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md',
+  ].filter((rel) => existsSync(join(root, rel)))
+
+  const dirs = ['.cursor/rules', '.roo/rules', '.github/instructions']
+  const fromDirs = []
+  for (const dir of dirs) {
+    let names = []
+    try { names = readdirSync(join(root, dir), { withFileTypes: true }) } catch { continue }
+    for (const entry of names) {
+      if (!entry.isFile()) continue
+      if (!/\.(?:md|mdc|txt|rules?)$/i.test(entry.name)) continue
+      fromDirs.push(`${dir}/${entry.name}`)
+    }
+  }
+  return [...singles, ...fromDirs]
+}
+
 function detectDocs(root) {
   let entries = []
   try { entries = readdirSync(root) } catch { /* 空目录 */ }
@@ -839,9 +869,12 @@ function detectDocs(root) {
     .find((rel) => existsSync(join(root, rel)))
   const license = entries.find((e) => /^licen[cs]e(?:\..+|-.*)?$/i.test(e))
 
-  const otherAiConventions = ['CLAUDE.md', '.cursorrules', '.cursor/rules',
-    '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md', '.windsurfrules']
-    .filter((rel) => existsSync(join(root, rel)))
+  // 「别的 AI 约定文件」要**展开到具体文件**，不能只报一个目录名。
+  //
+  // 报 `.cursor/rules` 这么个名字，读的人拿不到任何可行动的信息：那个目录里有几条规则、
+  // 讲的是什么，全得自己去看。而合流这件事的第一步恰恰是「逐条读一遍」。
+  // 目录里的规则文件也不止 `.mdc` 一种，各家扩展名不同，所以按「列目录、挑文本文件」处理。
+  const otherAiConventions = detectOtherAiConventions(root)
 
   const wfDir = join(root, '.github', 'workflows')
   const workflows = []
@@ -945,7 +978,32 @@ function detectConventions(root, { gitFacts, docs, ecosystem }) {
     tagPrefix,
     commitStyle: gitFacts.commitStyle ?? 'plain',
     workDir,
+    workflowTooling: detectWorkflowTooling(root),
   }
+}
+
+/**
+ * 项目已经在用的发版与提交工具链。
+ *
+ * 探它只为一件事：**写契约时别跟项目自己的工具打架**。一个用 changesets 的项目，
+ * 发布流程是「改 changeset → 合并 → CI 出 PR」；照着模板默认那句「先写说明、再打标签」
+ * 写，写出来的是一份没人能照做的规范。而工具名一旦写进文档又没人核对，它就会一直错下去。
+ *
+ * 只报**文件名**，不猜它怎么配——判据要人能一眼核。
+ * 这几种形状是各家工具的固定约定文件，不是本项目自定的规矩，所以写死在这里没有问题。
+ */
+function detectWorkflowTooling(root) {
+  const found = []
+  const singles = [
+    'release-please-config.json', '.releaserc', '.releaserc.json', '.releaserc.yml',
+    'commitlint.config.js', 'commitlint.config.cjs', 'commitlint.config.mjs',
+    'lefthook.yml', 'lefthook.yaml',
+  ]
+  for (const rel of singles) if (existsSync(join(root, rel))) found.push(rel)
+  for (const dir of ['.changeset', '.husky']) {
+    if (existsSync(join(root, dir))) found.push(`${dir}/`)
+  }
+  return found
 }
 
 // ── 多包、产物、本地 skills ──────────────────────────────────────────

@@ -136,6 +136,34 @@ function commitStyleHint(facts) {
   return `${observed}——沿用它，不要混用第二套格式，不用内部编号充当说明`
 }
 
+/**
+ * 「修改守则」那一节的 fill 提示：把项目里已有的约定摊开，让填的人知道该合什么。
+ *
+ * 两个来源都必须列出来，因为它们都是**这个项目已经有的规矩**，而契约只有一份：
+ *
+ *   - **别的 AI 约定文件**（`CLAUDE.md`、`.cursor/rules/*.mdc` 一类）：两份约定并存时，
+ *     改一份另一份不跟，而读的人只会看到其中一份；
+ *   - **已有的发版与提交工具链**（changesets、release-please、commitlint 一类）：
+ *     它们定义的流程与模板默认话术往往不同，照着模板写等于让文档和工具打架。
+ *
+ * 提示只**列事实**，不替人决定合不合——那一步要读懂那些文件才能做。
+ */
+function conventionsHint(facts) {
+  const bits = []
+  const others = facts.docs?.otherAiConventions ?? []
+  if (others.length > 0) {
+    bits.push(`项目里已有这些 AI 约定文件：${others.map((f) => `\`${f}\``).join('、')}。`
+      + '逐条读一遍，把其中仍然成立的规则合进本节；合完问用户要不要把旧文件改成'
+      + '指向 `AGENTS.md` 的单行引用——留着两份，迟早各说各的')
+  }
+  const tooling = facts.conventions?.workflowTooling ?? []
+  if (tooling.length > 0) {
+    bits.push(`项目已在用这些发版/提交工具：${tooling.map((f) => `\`${f}\``).join('、')}。`
+      + '本节的发布与提交规则按它们的实际行为写，不要照抄模板默认话术')
+  }
+  return bits.length === 0 ? '' : `\n\n${bits.join('\n\n')}`
+}
+
 /** 十一个变量的取值。 */
 export function buildVars(facts) {
   const conventions = facts.conventions ?? {}
@@ -157,6 +185,7 @@ export function buildVars(facts) {
     COMMIT_STYLE_HINT: commitStyleHint(facts),
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
+    CONVENTIONS_HINT: conventionsHint(facts),
   }
 }
 
@@ -768,8 +797,22 @@ async function main(argv) {
       return 1
     }
     if (info.regions.length === 0) {
-      // 手写文件在 --check 下直接放行：判它「不合规」等于逼人去改手写的东西。
-      process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判，放行。\n')
+      // 手写文件不判「格式」，但**空壳要判**。
+      //
+      // 早先这里一律放行，理由是「手写的契约可能比模板更贴合这个项目」——那个理由
+      // 仍然成立，它管不到的是另一件事：一份只有一行标题的文件，在报告里的表现与
+      // 一份认真写过的契约完全一样。放行它等于替「看起来有、其实是空的」背书。
+      const coverage = handWrittenCoverage(info.text ?? '')
+      if (!coverage.ok) {
+        const why = []
+        if (coverage.chars < 400) why.push(`正文只有 ${coverage.chars} 个字符`)
+        if (coverage.missing.length > 0) why.push(`缺这几类内容：${coverage.missing.join('、')}`)
+        process.stderr.write(`AGENTS.md 是手写的，但它还不算一份契约：${why.join('；')}\n`
+          + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')
+        return 1
+      }
+      process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判格式，只核对过它答了'
+        + '「这是什么项目 / 怎么构建验证 / 改动的边界」这三件事。\n')
       return 0
     }
     let bad = false

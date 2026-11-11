@@ -469,6 +469,8 @@ cases.push(['多生态项目：两套命令都在产物里，不只留一份', a
   const dir = tmpProject({
     'package.json': '{"name":"web","version":"1.0.0","private":true,"scripts":{"test":"node --test"}}',
     'pyproject.toml': '[project]\nname = "api"\nversion = "1.0.0"\n',
+    // 后端也给一份测试证据：命令只按**项目里真实存在的东西**给，不按生态惯例编。
+    'tests/test_api.py': 'def test_ok():\n    assert True\n',
   })
   try {
     const f = await survey(dir)

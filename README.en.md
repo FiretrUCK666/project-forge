@@ -18,9 +18,11 @@ projects, and capability directories (skills) are all judged from surveyed facts
 - [How much it does](#how-much-it-does)
 - [Before you start](#before-you-start)
 - [Install](#install)
+- [Staying up to date](#staying-up-to-date)
 - [Usage](#usage)
 - [Why it stays quiet](#why-it-stays-quiet)
 - [What it will not do](#what-it-will-not-do)
+- [Problems and contributing](#problems-and-contributing)
 - [What is inside](#what-is-inside)
 - [License](#license)
 
@@ -43,6 +45,9 @@ It folds those into four steps:
 | **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
 
 It governs; it does not generate the project. It will not pick your stack or write your source.
+
+The survey report ends by listing **which pages, and which sections, this run should read** —
+computed from what the survey actually found, not a fixed index.
 
 ## How much it does
 
@@ -74,6 +79,42 @@ put it beside them; if not, check your host's documentation. Keep the directory 
 filesystem a different case is a different directory.
 
 No registration or restart: the host discovers it by directory, and `SKILL.md` is the entry.
+
+Two ways to get it, pick one:
+
+| How | What you get | How you learn about a new version | Good for |
+| --- | --- | --- | --- |
+| **Download the release archive** | A standalone copy with no `.git` | It checks by itself (see the next section) | Just using it |
+| **Clone this repository** | Full history and commits | `git pull`; the tool never touches it | Reading changes, contributing, modifying it |
+
+The criterion is one thing: **is there a `.git` directory**. If yes it is a source copy, and
+`update.mjs` treats it as read-only. If no it is a package copy, and `update.mjs` replaces it
+wholesale. That judgement needs no memory and no guessing at intent.
+
+## Staying up to date
+
+Nothing to do after installing: each run checks the remote once first (throttled — no repeated
+request within an hour) and swaps in a newer version if there is one.
+
+To ask for a check on demand, outside the throttle:
+
+```sh
+node "<skill-dir>/scripts/update.mjs" --check
+```
+
+If your host forbids skills from modifying themselves (read-only sandbox, audit rules), or you
+simply do not want the install directory touched this time, one environment variable turns it
+off completely:
+
+```sh
+# any non-empty value works
+export PF_NO_UPDATE=1
+```
+
+Updating is **a wholesale replacement**: it does not ask, compare, or look at local edits — the
+whole point of a package copy is "the latest version when you use it". Conversely, if you have
+edited that copy, do not let it update; or switch to a clone, which the tool treats as
+read-only.
 
 ## Usage
 
@@ -125,16 +166,33 @@ Three things make up most of how it feels to use:
 - Pick a license for you, or invent an identity
 - **Remove anything it left behind without your explicit confirmation**
 
+## Problems and contributing
+
+- **Report a defect** with the repository's [bug template](.github/ISSUE_TEMPLATE/bug_report.md).
+  It asks exactly the four things that make a report locatable — expected, actual, how to
+  reproduce, on what environment. Miss any one and a round trip is guaranteed. If the problem
+  is about a survey judgement, include the surveyed directory's stack and rough structure; that
+  usually points straight at the criterion that missed something.
+- **Ask for a capability, or argue a judgement should differ**, with the
+  [feature template](.github/ISSUE_TEMPLATE/feature_request.md).
+- **Change code**: see [CONTRIBUTING](CONTRIBUTING.md) — how to run it locally, which gates
+  there are, and how to submit a change. Changes on high-risk paths (judgement logic, the gates
+  themselves, package boundaries, the release chain) need an independent review round.
+
 ## What is inside
 
 ```text
-SKILL.md            Entry point: which document to read when
-references/         Eight sets of criteria, read the one this step needs
-templates/          Skeletons that land in the project: contract, docs, licenses, pipelines
-scripts/            Survey, generate, check, hand off, sync table of contents
+SKILL.md            Entry point: which document to read when, and the gate table
+references/         Ten sets of criteria, read the one this step needs
+templates/          Skeletons that land in the project: contract, docs, releasing, licenses, pipelines
+scripts/            Survey, generate, check, hand off, sync table of contents, self-update
 ```
 
 `scripts/dev/` serves this repository's own self-check only and never ships in the user package.
+
+This repository is the first user of its own rules: the root `AGENTS.md` is generated and
+maintained by `compose-agents.mjs`, and `preflight` checks that it stays structurally aligned
+with `templates/`. When that fails, the repository is fixed before the rules are.
 
 ## License
 

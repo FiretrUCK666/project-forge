@@ -43,12 +43,17 @@
  * 决定是项目事实，就该和项目一起被读、被争论、被接手。
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, readTextSafe, samePath } from './survey.mjs'
 import { parseMarkers } from './lib/protocol.mjs'
+
+/** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
+function readdirSyncSafe(dir) {
+  try { return readdirSync(dir) } catch { return [] }
+}
 
 const SCOPES = new Set([
   'git', 'agents', 'docs', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
@@ -197,14 +202,47 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     add(finding('ok', 'secrets', 'secrets.clean', '没扫到凭据形状的文本'))
   }
   if (facts.risks.homePathLeaks.length > 0) {
-    const sample = facts.risks.homePathLeaks.slice(0, 3).map((f) => `${f.file}:${f.line}`).join('、')
-    add(finding('notice', 'secrets', 'secrets.home-paths',
-      `有 ${facts.risks.homePathLeaks.length} 处硬编码的本机绝对路径（${sample}）——换台机器就跑不通`))
+    // 只报真泄露。测试夹具里的假路径、文档里的示例路径、工作记录里当时现场的路径
+    // 都是**数据**，不是缺陷——把它们报出来，修的人第一件事就是把那一行改掉，
+    // 而改掉的正好是一份有用的夹具。
+    const leaks = facts.risks.homePathLeaks.filter((f) => f.category === 'leak' || f.category === undefined)
+    const benign = facts.risks.homePathLeaks.length - leaks.length
+    if (leaks.length > 0) {
+      const sample = leaks.slice(0, 3).map((f) => `${f.file}:${f.line}`).join('、')
+      add(finding('notice', 'secrets', 'secrets.home-paths',
+        `有 ${leaks.length} 处硬编码的本机绝对路径（${sample}）——换台机器就跑不通`, {
+          ref: { file: 'references/docs-set.md', section: '四、`README`' },
+        }))
+    }
+    if (benign > 0) {
+      add(finding('ok', 'secrets', 'secrets.home-paths-benign',
+        `另有 ${benign} 处本机路径属于测试夹具 / 文档示例 / 工作记录——是数据不是缺陷，不要改`))
+    }
+  }
+
+  const unverified = facts.risks.secretFiles.filter((f) => f.status === 'unverified-large')
+  if (unverified.length > 0) {
+    // 「没扫」不是「干净」。这一档之所以判 `missing` 而不是 `notice`：一个叫 `.env` 的
+    // 文件超过 256 KB 没扫内容，它里面有没有真凭据**没有答案**，而报告会替它说「没扫到」。
+    add(finding('missing', 'secrets', 'secrets.unverified-large',
+      `${unverified.length} 个敏感命名的文件超过 256 KB，内容没扫：${unverified.map((f) => f.file).join('、')}——`
+      + '它们的状态是未知，不是干净。打开确认一下，或删掉', {
+        ref: { file: 'references/version-control.md', section: '凭据门控' },
+      }))
   }
   if (facts.risks.largeFiles.length > 0) {
     add(finding('notice', 'secrets', 'secrets.large-files',
       `有大文件没被忽略：${facts.risks.largeFiles.map((f) => `${f.file}（${f.sizeMB} MB）`).join('、')}——它们会永久留在历史里`, {
         ref: { file: 'references/version-control.md', section: '大文件' },
+      }))
+  }
+
+  const coverage = facts.risks.scanCoverage
+  if (coverage?.truncated) {
+    // 截断必须被读成「没查完」，不能读成「查完没发现」。这是这一档存在的全部理由。
+    add(finding('notice', 'secrets', 'secrets.scan-truncated',
+      `扫描被截断（只走到第 ${coverage.depthReached} 层、前 20000 个文件）——上面的「没扫到」覆盖不到更深的地方`, {
+        ref: { file: 'references/survey.md', section: '三、字段含义' },
       }))
   }
 
@@ -321,14 +359,82 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
+  // 发布说明留在工作区里没填完，是「看起来有、其实是空的」最典型的一种。
+  // 它必须在打标签之前被发现——标签一旦推上去，自动化读到这份空壳会照样把它贴在
+  // 发布页上，而这次发版看起来还是绿的。
+  const notesDir = join(root, 'docs', 'release-notes')
+  if (existsSync(notesDir)) {
+    const empty = []
+    for (const name of readdirSyncSafe(notesDir)) {
+      if (!/\.md$/i.test(name)) continue
+      const text = readTextSafe(join(notesDir, name)) ?? ''
+      if (parseMarkers(text, name).some((m) => m.kind === 'fill')) empty.push(`docs/release-notes/${name}`)
+    }
+    if (empty.length > 0) {
+      add(finding('missing', 'release', 'release.notes-unfilled',
+        `发布说明里还有没填完的占位：${empty.join('、')}——打标签时自动化会把它原样贴到发布页上，而且看起来是成功的`, {
+          ref: { file: 'references/docs-set.md', section: '七、`RELEASING`' },
+        }))
+    }
+  }
+
+  // 受管区间的命令与当前事实脱节：契约说一套、项目实际是另一套。
+  //
+  // 这一条只报「可以更好」而不拦，理由是它不会当场出事——但它确实是「AI 照着契约跑
+  // 一条已经改名的命令、失败后以为是代码坏了」的来源。
+  if (agentsText && facts.commands && Object.keys(facts.commands).length > 0) {
+    const declared = Object.values(facts.commands).filter((v) => typeof v === 'string' && v.trim())
+    const missing = declared.filter((cmd) => !agentsText.includes(cmd))
+    if (missing.length > 0) {
+      add(finding('notice', 'agents', 'agents.commands-stale',
+        `${facts.docs.agents.file} 里没提到这些实际存在的命令：${missing.slice(0, 3).join('、')}`
+        + '——契约里的构建与验证节已经和项目现状脱节，照着它跑会漏掉这一步', {
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+        }))
+    }
+  }
+
   // 版本号与标签对不上，是自动化最常翻车的地方。
+  //
+  // 三件事分开判，因为它们各自错法的后果不同：
+  //   一、**标签形状**：插件市场一类要求裸版本号，带了 `v` 前缀用户就装不上——
+  //       这是「立即失败」，而且失败很安静（市场不收录，没有任何报错）；
+  //   二、**版本号与标签对不上**：自动化按标签取版本，对不上就发错东西；
+  //   三、`v` 前缀与裸版本混用：手工发版时最容易积累的一种漂移。
   const version = facts.ecosystem.declaredVersion
-  if (version && facts.git.tags.length > 0) {
-    const numeric = facts.git.tags.map((t) => t.replace(/^v/, ''))
+  const tags = facts.git.tags ?? []
+  const kinds = facts.ecosystem.kinds ?? []
+  const needsBareTag = kinds.some((k) => k === 'obsidian-plugin')
+
+  if (needsBareTag && tags.some((t) => /^v\d/.test(t))) {
+    add(finding('missing', 'release', 'release.observed-v-tag',
+      `插件的 Git 标签带了 \`v\` 前缀（${tags.filter((t) => /^v\d/.test(t)).slice(0, 3).join('、')}）——`
+      + '这个生态要求标签与清单里的版本号逐字相同，带前缀会导致市场不收录、用户装不上。'
+      + '工作流的触发行也要从 `v*` 改成数字开头', {
+        ref: { file: 'references/plugin-ecosystems.md', section: 'Obsidian 插件' },
+      }))
+  }
+
+  if (version && tags.length > 0) {
+    const numeric = tags.map((t) => t.replace(/^v/, ''))
     if (!numeric.includes(version)) {
       add(finding('notice', 'release', 'release.tag-mismatch',
-        `清单版本是 ${version}，而标签里没有它（有 ${facts.git.tags.slice(0, 4).join('、')}）——自动化按标签取版本，对不上就发错东西`))
+        `清单版本是 ${version}，而标签里没有它（有 ${tags.slice(0, 4).join('、')}）——自动化按标签取版本，对不上就发错东西`, {
+          ref: { file: 'references/publish.md', section: '三、版本号语义' },
+        }))
     }
+    const withV = tags.filter((t) => /^v/.test(t)).length
+    if (withV > 0 && withV < tags.length) {
+      add(finding('notice', 'release', 'release.tag-shape-mixed',
+        `标签的写法不统一：${tags.length} 个里有 ${withV} 个带 \`v\` 前缀——混用两套形状时，`
+        + '自动化的触发条件只能覆盖其中一种', {
+          ref: { file: 'references/remote-github.md', section: '六、版本节点与发布说明' },
+        }))
+    }
+  }
+
+  if (facts.docs.releasing && !facts.ecosystem.publishable && kinds.includes('skill')) {
+    add(finding('ok', 'release', 'release.skill-dist', '能力目录靠克隆或复制分发，不经过制品库——这是正常结果'))
   }
 
   // ── 协作基础设施 ──────────────────────────────────────────────────

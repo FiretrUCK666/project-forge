@@ -22,7 +22,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readTextSafe, samePath } from './survey.mjs'
@@ -34,6 +34,8 @@ import {
 const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
 const MAX_DEPTH = 6
+/** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
+const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_FILES = 20000
 const MAX_BYTES = 256 * 1024
 
@@ -47,21 +49,32 @@ const MAX_BYTES = 256 * 1024
 const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|review|handoff|sync-toc|update|zip)\.mjs)/g
 
 /**
- * 这个脚本自己所在的那几处目录名。
+ * 这一趟扫的是不是 **skill 自己的源码仓库**。
  *
- * **判断依据必须是「这一趟扫的是谁」，不能是「路径叫什么」。** 早先按路径前缀跳过
- * `references/` 与 `templates/`，于是目标项目自己的 `references/` 目录里那些标记
- * 一律扫不到，`--verify` 对着一个满是痕迹的目录说「干净」——而它是交棒前唯一一道关。
+ * ## 判据：位置，不是名字
  *
- * 改成：只有当我们扫的**就是这个 skill 自己的目录**时，才把它的产物目录排除。
+ * 早先按「`SKILL.md` 里写着 `name: project-forge`」判断。两个方向都会错：
+ *
+ *   - **漏**：别人 fork 之后改了名字，这条判据立刻失效；
+ *   - **误**：一个被复制走的 skill 副本也写着同一行，于是**它的**痕迹被当成「不适用」跳过。
+ *
+ * 现在改成比位置：正在跑的这个脚本就在 skill 自己的目录里，所以「目标目录等于脚本所在的
+ * skill 根」是一个**结构性事实**，与叫什么名字无关，也不需要任何人维护一份名单。
+ *
+ * ## 为什么这件事必须判准
+ *
+ * 交棒是「把一个项目从这套流程里摘出来」。skill 自己的仓库摘不出来——它就是这套流程。
+ * 对它跑交棒，正确的回答是「不适用」，而不是「干净」（假话）或「还有 14 处痕迹」
+ * （让人去删自己的语法）。
  */
-const SKILL_OWN_MARKER = 'name: project-forge'
-
 function isSelfScan(root) {
-  const skillPath = join(root, 'SKILL.md')
-  if (!existsSync(skillPath)) return false
-  const text = readTextSafe(skillPath)
-  return typeof text === 'string' && text.includes(SKILL_OWN_MARKER)
+  return samePath(resolve(root), SKILL_ROOT)
+}
+
+/** skill 自己的那几处产物目录：它们的标记是语法与讲解，不是留在别人项目里的痕迹。 */
+function isSkillOwnPath(rel) {
+  const p = String(rel ?? '').replace(/\\/g, '/')
+  return p.startsWith('templates/') || p.startsWith('references/') || p === 'SKILL.md'
 }
 
 function walk(root) {
@@ -171,6 +184,7 @@ export function scan(targetDir) {
     danglingPointers,
     total,
     clean: total === 0,
+    selfScan,
     truncated: coverage.truncated,
     scanCoverage: coverage,
     inHandoff,
@@ -189,6 +203,17 @@ export function toText(result) {
   const lines = []
   lines.push(`痕迹勘察：${result.target.path}`)
   lines.push('')
+
+  // 自扫：下面那些清单不是「待清理」，而是这套 skill 自己的语法与讲解。
+  // 不把这句话说在前面，看的人会照着清单去删自己的模板。
+  if (result.selfScan) {
+    lines.push('**这一趟不适用**：目标就是这套 skill 自己的源码仓库。')
+    lines.push('')
+    lines.push('交棒是「把一个项目从这套流程里摘出来」，而它就是这套流程——')
+    lines.push('`templates/` 与 `references/` 里的标记是语法与讲解，删掉会把工具弄坏。')
+    lines.push('下面这份清单只作为「它自己身上有哪些标记」的说明，**不要拿它当清理待办**。')
+    lines.push('')
+  }
 
   if (result.clean) {
     lines.push('没找到任何本 skill 留下的东西。这个项目是干净的。')
@@ -267,10 +292,10 @@ function main(argv) {
         '用法：node scripts/handoff.mjs [项目目录] [选项]',
         '',
         '  --scan     列出本 skill 留下的痕迹（默认）',
-        '  --verify   判「已经干净」：干净退出 0，有痕迹退出 1，**没扫全退出 3**',
+        '  --verify   判「已经干净」：干净 0 / 有痕迹 1 / 没扫全 3 / 不适用（skill 自己的仓库）4',
         '  --json     输出机器可读结果',
         '',
-        '只读：不删任何东西。退出码 3 的意思是「这一趟没扫完」，不是干净。',
+        '只读：不删任何东西。退出码 3 是「这一趟没扫完」、4 是「这一趟不适用」，都不是干净。',
       ].join('\n') + '\n')
       return 0
     }
@@ -289,6 +314,13 @@ function main(argv) {
     if (asJson) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     } else if (verify) {
+      if (result.selfScan) {
+        // 这一档不能给 0：0 的意思是「干净」，而这里的真相是「这一趟不适用」。
+        process.stdout.write('不适用：目标就是这套 skill 自己的源码仓库。\n'
+          + '交棒是「把一个项目从这套流程里摘出来」，而它就是这套流程——\n'
+          + '它的 templates/ 与 references/ 里的标记是语法与讲解，删掉会把工具弄坏。\n')
+        return 4
+      }
       if (result.truncated) {
         process.stdout.write(`没扫全：目录太深、文件太多，或有单个文件超过 256 KB 没读。`
           + '这一趟的结论只能当「没查到」，不能当「没有」。\n')
@@ -302,7 +334,7 @@ function main(argv) {
       process.stdout.write(`${toText(result)}\n`)
     }
     if (verify) {
-      // 三档退出码：干净 0、还有痕迹 1、**扫不全 3**。
+      // 四档退出码：干净 0、还有痕迹 1、**扫不全 3**、**这一趟不适用 4**。
       // 第三档必须与「有痕迹」分开：拿 3 当 1 会让「扫不完」看起来像「找到了」，
       // 拿 3 当 0 则正好相反——把一次没做完的检查当成通过的检查，而这是不可逆动作
       // 的最后一道关。

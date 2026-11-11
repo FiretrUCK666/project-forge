@@ -59,7 +59,7 @@
 | `LICENSE` | 看情况 | 公开项目、可发布项目、用户点名要 | `templates/license-<类型>.txt` |
 | `CONTRIBUTING.md` | 看情况 | 要收外部贡献 | `templates/contributing.md` |
 | `RELEASING.md` | 看情况 | 要发版 | `templates/releasing.md` |
-| `docs/release-notes/<标签>.md` | 看情况 | 每次发版 | `templates/release-notes.md` |
+| `docs/release-notes/<标签>.md` | 看情况 | **明确被要求发版时**，每次发版一份 | `templates/release-notes.md` |
 | Issue 模板 | 看情况 | 要收外部报告 | `templates/issue-bug-report.md`、`templates/issue-feature-request.md` |
 | PR 模板 | 看情况 | 要收外部改动 | `templates/pull-request-template.md` |
 | 工作记录 | 看情况 | 要跨会话 | `templates/work-item.md` |

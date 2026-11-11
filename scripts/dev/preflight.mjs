@@ -345,6 +345,36 @@ function checkPlatformLock() {
 }
 
 /**
+ * 会跑的都真跑——**包括在真项目上跑一遍每一个入口**。
+ *
+ * 这一条是从一次事故里补出来的：`handoff.mjs` 里有个函数被删了，但调用点写成
+ * `selfScan && isSkillOwnPath(rel)`——非自扫时短路，那个未定义的函数压根不会被调用。
+ * 于是 `--help` 通、语法通、端到端冒烟也通（冒烟在临时目录上跑，走的正是短路那一支），
+ * 而**在真实项目上调用它当场 ReferenceError**。
+ *
+ * 判据因此要落在「在真项目上跑一次」而不是「能不能解析」：临时目录里跑得通，只证明了
+ * 一个特定分支。所以这一段拿本仓库自己当靶子——它的目录结构最复杂，走的分支最多。
+ */
+function checkRunsOnRealTarget() {
+  const calls = [
+    { script: 'survey.mjs', args: [ROOT], what: '勘察' },
+    { script: 'handoff.mjs', args: [ROOT, '--json'], what: '交棒扫描' },
+    { script: 'review.mjs', args: [ROOT, '--json'], what: '交付体检' },
+    { script: 'compose-agents.mjs', args: [ROOT, '--status'], what: '契约状态' },
+  ]
+  for (const call of calls) {
+    const res = spawnSync(process.execPath, [join(ROOT, 'scripts', call.script), ...call.args], {
+      encoding: 'utf8', timeout: 120000,
+    })
+    if (res.status !== 0) {
+      const first = (res.stderr || '').trim().split('\n').find((line) => line && !/^\s+at /.test(line)) ?? ''
+      fail(`${call.script} 在真实项目上跑${call.what}失败（退出 ${res.status}）：${first.slice(0, 200)}`)
+    }
+  }
+  note(`真目标：${calls.length} 个入口都在本仓库上跑通（不是只在临时目录里跑）`)
+}
+
+/**
  * 本仓库自己过一遍生成门禁。
  *
  * 这个仓库是这套规范的第一个用户：`templates/` 里写的结构，这里必须自己做到。
@@ -595,6 +625,7 @@ function main() {
   checkOwnInstances()
   checkHelps()
   checkTemplateRender()
+  checkRunsOnRealTarget()
   checkSelfHost()
   smoke()
   checkHygiene()

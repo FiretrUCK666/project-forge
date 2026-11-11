@@ -193,16 +193,22 @@ export const FULL_READ_REFS = Object.freeze([
 // 两者共用同一个「标记正文」提取函数（`markerBodyOf`），所以语法永远只有一份。
 
 /**
- * 模板里可用的条件名。**只有这七个**，全部来自勘察事实。
+ * 模板里可用的条件名。**只有这八个**，全部来自勘察事实。
  *
  * 加一个条件的代价是：它在模板里能改变一份契约的结构，而在每个项目上都要被求值一次。
  * 所以条件只表达**结构差异**（有没有远端、发不发布、是不是插件），不表达措辞偏好。
  * `preflight` 核对模板里用的条件名都在这个表里——写错一个字母时，那一整块会被静默丢掉。
+ *
+ * 成对的条件（`has-commands` / `no-commands`、`has-remote` / `no-remote`）是刻意的：
+ * 一个条件只管「有」的那一侧，另一侧要么靠 `if` 里写否定（模板层多一套语法），要么靠
+ * **把两种情况各自的正文分开写**。选后者，因为两种情况的正文往往不只是措辞差别——
+ * 「有远端」讲的是分支与 PR，「没有远端」讲的是只有本地提交时怎么兜底。
  */
 export const TEMPLATE_CONDITIONS = Object.freeze([
   'has-commands',
   'no-commands',
   'has-remote',
+  'no-remote',
   'has-release',
   'is-monorepo',
   'is-plugin-or-skill',

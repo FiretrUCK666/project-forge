@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SCRIPTS = resolve(HERE, '..')
+const SKILL_ROOT = resolve(HERE, '..', '..')
 
 let passed = 0
 const failures = []
@@ -754,6 +755,85 @@ cases.push(['默认分支名换个环境算出来不一样，不算漂移；真�
     writeFileSync(join(dir, 'AGENTS.md'), drifted)
     const driftCheck = await runNode('compose-agents.mjs', [dir, '--check'])
     if (driftCheck.status === 0) return '真漂移被掩码掩盖了'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['交棒扫到自己家时给「不适用」，既不是「干净」也不是「有痕迹」', async () => {
+  // 交棒是「把一个项目从这套流程里摘出来」。skill 自己的仓库摘不出来——它就是这套流程，
+  // 它的 templates/ 与 references/ 里的标记是语法与讲解，删掉会把工具弄坏。
+  // 这里守的是「这个判断得由代码做，不是靠文档里写一句话」：
+  // 判据是「目标目录等于脚本所在的 skill 根」，一条结构性事实，与它叫什么都无关。
+  const self = SKILL_ROOT
+  const verify = await runNode('handoff.mjs', [self, '--verify'])
+  if (verify.status === 0) return '扫到自己家时说了「干净」——那会让下一个人以为可以删'
+  if (verify.status === 1) return '扫到自己家时说了「还有痕迹」——那会让人去删自己的语法'
+  if (verify.status !== 4) return `退出码应是 4（不适用），实际 ${verify.status}`
+
+  const json = JSON.parse((await runNode('handoff.mjs', [self, '--json'])).stdout)
+  if (json.selfScan !== true) return 'JSON 结果里没标出这是自扫'
+
+  // 反面：换一个普通项目（哪怕它也有一份 SKILL.md），就必须按正常规则扫，不能误判成自扫。
+  const other = tmpProject({
+    'SKILL.md': '---\nname: project-forge\ndescription: 一个长得一样的副本\n---\n\n# 副本\n',
+    'templates/x.md': '<!-- project-forge: begin x -->\n# x\n<!-- project-forge: end x -->\n',
+  })
+  try {
+    const otherJson = JSON.parse((await runNode('handoff.mjs', [other, '--json'])).stdout)
+    if (otherJson.selfScan !== false) return '一个同名的副本被误判成 skill 自己的仓库了'
+    if (otherJson.total === 0) return '副本里的标记没扫到'
+    const otherVerify = await runNode('handoff.mjs', [other, '--verify'])
+    if (otherVerify.status !== 1) return `副本应报「还有痕迹」（1），实际 ${otherVerify.status}`
+    return true
+  } finally { rmTree(other) }
+}])
+
+cases.push(['有远端与没远端拿到的是两段不同的正文，不是同一段加一句', async () => {
+  // 早先模板里写着「没有远端时只有本地提交」，但它不在任何条件块里——于是**有远端**的项目
+  // 也照抄了这一句。读的人会以为自己漏了一步（远端明明配好了）。这类错误不报错，
+  // 只让文档自相矛盾，所以两面都要立夹具。
+  const withRemote = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  const withoutRemote = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: withRemote })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'add', '-A'], { cwd: withRemote })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'init'], { cwd: withRemote })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/a/b.git'], { cwd: withRemote })
+    await runNode('compose-agents.mjs', [withRemote])
+    await runNode('compose-agents.mjs', [withoutRemote])
+
+    const a = readFileSync(join(withRemote, 'AGENTS.md'), 'utf8')
+    const b = readFileSync(join(withoutRemote, 'AGENTS.md'), 'utf8')
+
+    // 有远端：讲分支与 PR，不能出现「还没有远端」
+    if (!a.includes('先核对远端与源仓库')) return '有远端的项目里缺了维护者/贡献者那段'
+    if (a.includes('还没有远端')) return '有远端的项目里出现了「还没有远端」——自相矛盾'
+    // 没远端：反过来，不能出现「从 main 拉新分支」这种要求
+    if (!b.includes('还没有远端')) return '没远端的项目里缺了「只有本地提交」那段'
+    if (b.includes('先核对远端与源仓库')) return '没远端的项目里出现了远端那一段'
+    // 两边都必须保留独立审查这条底线——它不依赖远端
+    if (!a.includes('独立审查') || !b.includes('独立审查')) return '两边都该讲独立审查，其中一边漏了'
+    return true
+  } finally { rmTree(withRemote); rmTree(withoutRemote) }
+}])
+
+cases.push(['契约里明确写了「日常只到推送、说发版才发」', async () => {
+  // 这条守的是一条**行为边界**，不是措辞：默认只做提交 + 推送，发版要人点头。
+  // 它容易在改写时被顺手删掉——因为读起来像一句废话。删掉之后没有东西会报错，
+  // 只会在某一天由执行者自己判断「该发版了」，然后把一个撤不回的版本推出去。
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const need = [
+      ['日常', '不打标签'],
+      ['发版', '明确说'],
+      ['不自己判断'],
+      ['日常到此为止'],
+    ]
+    for (const words of need) {
+      if (!words.every((w) => text.includes(w))) return `契约里缺了「${words.join(' + ')}」这条边界`
+    }
     return true
   } finally { rmTree(dir) }
 }])

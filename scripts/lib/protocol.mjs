@@ -263,6 +263,18 @@ export function templateVarsOf(text) {
   return [...new Set([...String(text ?? '').matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
 }
 
+/**
+ * 常见的默认分支名。
+ *
+ * 两个用途，都在同一处定义：`survey` 拿它当**闸门**（只有当前分支落在这里面，才允许把
+ * 「当前分支」当默认分支用），`compose` 拿它当**掩码**（比对受管区间时把这些名字抹掉，
+ * 免得换台机器跑就报漂移）。
+ *
+ * 它是**一份与环境无关的固定集合**，不是「已知的默认分支清单」——分支叫 `release/x`
+ * 的项目照样是合法项目，只是那个名字不能当默认分支用。
+ */
+export const LIKELY_DEFAULT_BRANCHES = Object.freeze(['main', 'master', 'trunk', 'develop', 'default', 'development'])
+
 // ── 用户包边界 ──────────────────────────────────────────────────────
 //
 // 仓库里的文件分两类：**随包分发**的与**只服务本仓库**的。分野由结构与门禁共同保证，

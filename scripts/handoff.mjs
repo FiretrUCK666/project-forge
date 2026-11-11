@@ -47,15 +47,21 @@ const MAX_BYTES = 256 * 1024
 const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|review|handoff|sync-toc|update|zip)\.mjs)/g
 
 /**
- * 本 skill 自己的那几处：模板与它自己的参考文档。
+ * 这个脚本自己所在的那几处目录名。
  *
- * 交棒是把**项目**从这套流程里摘出来；模板与技能文档不跟着项目走，也不该被算成
- * 留在项目里的痕迹。把它们算进去的后果是 `--verify` 永远不干净，而清单上列出的
- * 每一处都「删了会把技能自己弄坏」——那会让交棒这道门变成一道永远跨不过去的门。
+ * **判断依据必须是「这一趟扫的是谁」，不能是「路径叫什么」。** 早先按路径前缀跳过
+ * `references/` 与 `templates/`，于是目标项目自己的 `references/` 目录里那些标记
+ * 一律扫不到，`--verify` 对着一个满是痕迹的目录说「干净」——而它是交棒前唯一一道关。
+ *
+ * 改成：只有当我们扫的**就是这个 skill 自己的目录**时，才把它的产物目录排除。
  */
-function isSkillOwnPath(rel) {
-  const p = String(rel ?? '').replace(/\\/g, '/')
-  return p.startsWith('templates/') || p.startsWith('references/') || p === 'SKILL.md'
+const SKILL_OWN_MARKER = 'name: project-forge'
+
+function isSelfScan(root) {
+  const skillPath = join(root, 'SKILL.md')
+  if (!existsSync(skillPath)) return false
+  const text = readTextSafe(skillPath)
+  return typeof text === 'string' && text.includes(SKILL_OWN_MARKER)
 }
 
 function walk(root) {
@@ -101,16 +107,19 @@ export function scan(targetDir) {
   const legacyMarkers = []
   const danglingPointers = []
   const { files, scan: coverage } = walk(root)
+  const selfScan = isSelfScan(root)
 
   for (const rel of files) {
     const text = readTextSafe(join(root, rel))
     if (text === undefined) { coverage.unreadable += 1; continue }
-    if (markerSyntaxFor(rel) !== null) {
+
+    // 扫的**就是这个 skill 自己的目录**时，`templates/` 与 `references/` 是它的源码，
+    // 不是留在别人项目里的痕迹——那里面的标记是语法与讲解，不该被当成待清理的东西。
+    // 目标项目自己的同名目录不受这条影响：那是它自己的文档，照常扫。
+    const ownSource = selfScan && isSkillOwnPath(rel)
+
+    if (markerSyntaxFor(rel) !== null && !ownSource) {
       for (const mark of parseMarkers(text, rel)) {
-        // **这一趟扫的是「交棒之后还留在项目里的东西」**，所以 `templates/` 与 `references/`
-        // 下的标记不算：前者是模板（标记就是它的语法），后者是技能自己的文档（会讲解
-        // 标记长什么样）。扫它是为了把它交出去，而这两处永远不会跟着项目走。
-        if (isSkillOwnPath(rel)) continue
         if (mark.kind === 'fill') {
           placeholders.push({ file: rel, line: mark.line, what: mark.what })
         } else {
@@ -118,7 +127,7 @@ export function scan(targetDir) {
         }
       }
     }
-    if (isSkillOwnPath(rel)) continue
+    if (ownSource) continue
     const lines = text.split('\n')
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]

@@ -25,8 +25,8 @@
  * 「让受管区间永远等于模板」听起来更省心，代价是把人填进去的东西冲掉。判据很简单：
  * 一个区间里没有 `fill` 了，说明**有人读过并写过它**——那份内容比模板更值钱。
  *
- * 所以这里只做加法和填空，从不做减法。**「模板更新了而我这份没跟上」由交付体检报**
- * （它比对受管区间的骨架与当前事实），而不是由这里悄悄覆盖。
+ * 所以这里只做加法和填空，从不做减法。**「模板更新了而我这份没跟上」由 `--check` 与交付
+ * 体检报**（它们拿当前渲染结果与文件里的受管区间逐字比），而不是由这里悄悄覆盖。
  *
  * ## 占位符
  *
@@ -42,7 +42,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, readTextSafe, samePath } from './survey.mjs'
-import { markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
+import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -161,23 +161,71 @@ export function renderAgentsTemplate(facts, templateText) {
   return renderTemplate(templateText, buildConditions(facts), buildVars(facts), 'template.md')
 }
 
+/**
+ * 比对受管区间之前，把**由运行环境决定**的取值抹掉。
+ *
+ * 受管区间里有一部分正文来自「跑在哪台机器上」，而不是项目本身：默认分支名就是一个。
+ * 它可能取自 `origin/HEAD`（本地有、浅检出里常常没有），也可能取自 `init.defaultBranch`
+ * （开发机上设了、CI 上没有）。同一个项目在两台机器上渲染出两个不同的分支名，于是
+ * 「内容与模板不一致」这条判据会在 CI 上假红——而它本该守的是「模板加了规则而这份文件
+ * 没跟上」，两件完全不同的事。
+ *
+ * **抹的是「所有可能的默认分支名」，不是「这次算出来的那一个」。** 只抹当前那一个等于
+ * 假设两边算出同一个值，而那正是失效的前提。常见分支名是一份稳定的集合，与环境无关——
+ * 把它整份抹掉，比对才真的与跑在哪里无关。
+ */
+function volatileValues(facts) {
+  const detected = facts.conventions?.defaultBranch
+  const values = [...LIKELY_DEFAULT_BRANCHES]
+  if (typeof detected === 'string' && detected.length >= 2 && !values.includes(detected)) {
+    values.push(detected)
+  }
+  return values
+}
+
 // ── 区间刷新 ────────────────────────────────────────────────────────
 
-function hasFill(bodyLines) {
-  return bodyLines.some((line) => /project-forge:\s*fill\b/.test(line))
+/**
+ * 判断区间里还有没有未填的占位。
+ *
+ * **必须走 `parseMarkers`，不能自己写一条正则。** 两套实现的分歧不是风格问题：
+ * `parseMarkers` 是围栏感知的（代码块里的示例不算标记），而一条裸正则会把它算进来。
+ * 于是同一个区间在「这一趟要不要重渲染」和「交付体检要不要报缺」两个问题上给出相反答案——
+ * 一边认为还没填、于是整段换成模板，把用户刚写进去的内容冲掉；另一边认为没缺、于是放行。
+ * 实测过的现象：用户填好命令、`--check` 也绿了，再跑一次生成就把它冲回占位。
+ */
+function fillLinesOf(text) {
+  return new Set(
+    parseMarkers(text, 'AGENTS.md').filter((m) => m.kind === 'fill').map((m) => m.index),
+  )
 }
 
 /**
- * 刷新受管区间：填空、插入新节，**从不删、从不覆盖人填过的内容**。
+ * 刷新受管区间：填空、跟随模板、插入新节，**从不删、从不覆盖人写过的东西**。
  *
- * 四种动作的先后不能反：先算清「模板里该有哪些」，再逐个决定「换、留、插」，
- * 最后一次性落到行数组上（从后往前，前面的下标才不会因为长度变化而失效）。
+ * ## 哪些段会跟着模板走，哪些段归人
+ *
+ * 判据是**渲染结果里有没有 `fill`**，不是一张名单：
+ *
+ *   - 渲染结果**没有** `fill`：这一节的正文完全由项目事实推出来（命令、分支名、版本来源、
+ *     协作流程）。人没有什么可填的，于是它就该**逐字等于**模板渲染结果。模板改了规则，
+ *     这里跟着改——这才是「受管区间」该有的意思。
+ *   - 渲染结果**有** `fill`：这一节要人读代码来写。只要它身上还挂着 `fill` 就说明还没写、
+ *     可以换成模板；一旦 `fill` 被删掉，说明**有人写过它了**，从此一个字节都不动。
+ *
+ * 用名单（「哪几节自动刷新」）也能表达同一件事，代价是加一节时忘了登记就静默失效——
+ * 而失效的样子是「文件看起来在跟随模板，其实早就停了」，没有任何地方会报。
+ *
+ * ## 插入顺序不能反
+ *
+ * `splice(at, 0, x)` 每插一次就把后面的推后一格，所以在同一个 `at` 上连着插 A、B，
+ * 结果会是 B、A——与模板相反。同一位置的多个操作因此要按模板倒序落。
  */
-export function refreshRegions(existing, rendered) {
+export function refreshRegions(existing, rendered, volatile = []) {
   const current = markerRegions(existing, 'AGENTS.md')
   const fresh = markerRegions(rendered, 'AGENTS.md')
   if (current.broken.length > 0) {
-    return { text: existing, changed: false, broken: current.broken, kept: [], inserted: [], filled: [] }
+    return { text: existing, changed: false, broken: current.broken, kept: [], inserted: [], filled: [], synced: [] }
   }
 
   const lines = existing.split('\n')
@@ -185,25 +233,44 @@ export function refreshRegions(existing, rendered) {
   const freshById = new Map(fresh.regions.map((r) => [r.id, r]))
   const currentById = new Map(current.regions.map((r) => [r.id, r]))
   const renderedOrder = fresh.regions.map((r) => r.id)
+  const fillLines = fillLinesOf(existing)
 
   const ops = []
   const kept = []
   const filled = []
+  const synced = []
 
   for (const region of current.regions) {
     const source = freshById.get(region.id)
     if (!source) { kept.push(region.id); continue }
-    const body = lines.slice(region.start + 1, region.end)
-    if (!hasFill(body)) { kept.push(region.id); continue }
-    filled.push(region.id)
+    const renderedBody = renderedLines.slice(source.start + 1, source.end)
+    const bodyLines = lines.slice(region.start + 1, region.end)
+
+    const renderedHasFill = parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')
+    let bodyHasFill = false
+    for (let i = region.start + 1; i < region.end; i += 1) {
+      if (fillLines.has(i)) { bodyHasFill = true; break }
+    }
+
+    if (renderedHasFill) {
+      // 这一节要人写：还带占位就换成模板，人写过就永久保留。
+      if (!bodyHasFill) { kept.push(region.id); continue }
+      filled.push(region.id)
+    } else {
+      // 这一节完全由事实推出：只要内容与渲染结果不同就跟上。
+      if (normalizeBody(bodyLines, volatile) === normalizeBody(renderedBody, volatile)) { kept.push(region.id); continue }
+      synced.push(region.id)
+    }
+
     ops.push({
       at: region.start + 1,
       remove: region.end - region.start - 1,
-      insert: renderedLines.slice(source.start + 1, source.end),
+      insert: renderedBody,
+      seq: -1,
     })
   }
 
-  // 只在模板里出现、当前文件里还没有的区间：按模板顺序插入。
+  // 只在模板里出现、当前文件里还没有的区间：按模板顺序插进去。
   const inserted = []
   for (let i = 0; i < renderedOrder.length; i += 1) {
     const id = renderedOrder[i]
@@ -231,21 +298,102 @@ export function refreshRegions(existing, rendered) {
     }
     if (position === undefined) position = lines.length
 
-    ops.push({ at: position, remove: 0, insert: ['', ...block] })
+    ops.push({ at: position, remove: 0, insert: ['', ...block], seq: i })
     inserted.push(id)
   }
 
   if (ops.length === 0) {
     return {
-      text: existing, changed: false, broken: [], kept, inserted: [], filled,
+      text: existing, changed: false, broken: [], kept, inserted: [], filled, synced,
     }
   }
 
-  ops.sort((a, b) => b.at - a.at)
+  // 位置从后往前；同一位置上按 seq 从大到小（插入段按模板倒序，替换段 seq 为 -1 排在最后）。
+  ops.sort((a, b) => (b.at - a.at) || (b.seq - a.seq))
   for (const op of ops) lines.splice(op.at, op.remove, ...op.insert)
   return {
-    text: lines.join('\n'), changed: true, broken: [], kept, inserted, filled,
+    text: lines.join('\n'), changed: true, broken: [], kept, inserted, filled, synced,
   }
+}
+
+/**
+ * 找出「模板变了、文件没跟上」的受管区间。
+ *
+ * ## 判据是内容驱动，不是一张名单
+ *
+ * 一个区间里如果渲染结果**没有** `fill`，说明它的正文完全由事实推出来（命令、分支名、
+ * 版本来源），人就没什么可填的——于是「文件里那一份」与「现在渲染出来的那一份」本该
+ * 逐字相同。不同就是漂移：模板加了新规则，而这份文件还停在旧版。
+ *
+ * 反过来，渲染结果里**有** `fill` 的区间是人的地盘（项目定位、关键不变量、高风险路径）。
+ * 那里本来就不该相同，比它没有意义。
+ *
+ * 用名单（「哪几节是自动刷新的」）也能做同一件事，代价是加一节时忘了登记就静默失效——
+ * 而失效的表现是「这份文件看起来在跟随模板，其实早就停了」。
+ *
+ * ## 为什么只报不修
+ *
+ * 漂移只在**没有 fill** 的区间上出现，理论上可以直接覆盖。但不覆盖的理由更硬：
+ * 覆盖是不可逆的写操作，而「模板改了什么、我要不要跟」这个判断该由人做一次。
+ * 报出来、人看一眼、跑一次刷新（或者手改）就好；猜错方向的代价要比多看一眼大得多。
+ */
+export function driftRegions(existing, rendered, volatile = []) {
+  const current = markerRegions(existing, 'AGENTS.md')
+  const fresh = markerRegions(rendered, 'AGENTS.md')
+  if (current.broken.length > 0) return []
+
+  const lines = existing.split('\n')
+  const renderedLines = rendered.split('\n')
+  const freshById = new Map(fresh.regions.map((r) => [r.id, r]))
+  const drifted = []
+
+  for (const region of current.regions) {
+    const source = freshById.get(region.id)
+    if (!source) continue
+    const renderedBody = renderedLines.slice(source.start + 1, source.end)
+    // 渲染结果里还有 fill → 这一节要人写，不比。
+    if (parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')) continue
+
+    const a = normalizeBody(lines.slice(region.start + 1, region.end), volatile)
+    const b = normalizeBody(renderedBody, volatile)
+    if (a !== b) drifted.push(region.id)
+  }
+  return drifted
+}
+
+/**
+ * 阈值：把「由运行环境决定」的取值从比对里抹掉。
+ *
+ * 受管区间里有一部分正文来自**跑在哪台机器上**，而不是项目本身：默认分支名就是一个
+ * ——它可能取自 `origin/HEAD`（本地有、浅检出里常常没有），也可能取自 `init.defaultBranch`
+ * （开发机上设了、CI 上没有）。同一个项目在两台机器上渲染出两个不同的分支名，于是
+ * 「内容与模板不一致」这条判据会在 CI 上假红，而它本该守的是另一件事。
+ *
+ * 判据切分得很清楚：
+ *
+ *   - **要守的**：模板加了规则而这份文件没跟上。那是**项目内容**的漂移。
+ *   - **不守的**：分支名、机器配置这类取值。它们变了不是漂移，是换了个地方跑。
+ *
+ * 所以比对之前，把这一类取值从两边一起抹成同一个记号。抹掉之后仍然不同的，才是真的漂移。
+ */
+function maskVolatile(text, values) {
+  let out = text
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length < 2) continue
+    out = out.split(value).join('\u0000VOLATILE\u0000')
+  }
+  return out
+}
+
+/** 比对前把空白差异抹平：空行的多少不是漂移，内容才是。 */
+function normalizeBody(bodyLines, volatile = []) {
+  return maskVolatile(
+    bodyLines
+      .map((line) => line.replace(/\s+$/, ''))
+      .filter((line) => line.trim() !== '')
+      .join('\n'),
+    volatile,
+  )
 }
 
 /**
@@ -254,21 +402,43 @@ export function refreshRegions(existing, rendered) {
  * 判断「有没有」不靠 id、也不靠标题逐字相等——**靠同义标题**。人手写契约时会把
  * 「构建与验证」写成「构建与测试」或「Commands」；用 `includes` 精确匹配会导致整节
  * 被重复追加一遍，而重复的那一节通常没人读，于是两份内容从此各自漂移。
+ *
+ * 匹配规则的三条约束，每一条都对应一次实测事故：
+ *
+ *   一、**允许编号前缀**（`## 1. 项目定位`）。带编号的契约很常见，认不出来就会把
+ *       已有的节再追加一遍——正是这套同义匹配要消灭的那种重复。
+ *   二、**首词要够专指**。裸的「验证」「规范」太泛：`## 验证流程` 讲的是审查流程，
+ *       把它当成「构建与验证」，用户就永远拿不到那一节命令。
+ *   三、**只认标题行，不认正文**。`includes` 会在正文里偶然命中，于是该补的节被跳过。
  */
+const HEADING_LEAD = '^##\\s+(?:\\d+[.)、]\\s*)?(?:[一二三四五六七八九十]+[、.)]\\s*)?'
+
+// 词尾判据用 `(?![A-Za-z])` 而不是 `\b`：`\b` 只在 ASCII 词字符与非词字符之间成立，
+// 而中文全是非词字符——`定位` 后面跟换行时**不构成词边界**，于是 `\b` 让整条规则
+// 永远匹配不上，该认出来的节一个都认不出。这个坑不报错，只表现为「已有的节被重复追加」。
+const HEADING_TAIL = '(?![A-Za-z])'
+
 const SECTION_SYNONYMS = {
-  项目定位: /^##\s+(?:项目)?(?:定位|简介|概述|Overview)/imu,
-  架构与关键不变量: /^##\s+(?:项目)?(?:架构|结构|目录结构|关键不变量|Architecture)/imu,
-  构建与验证: /^##\s+(?:环境与)?(?:构建|验证|命令|安装与运行|Build|Test|Commands)/imu,
-  修改守则: /^##\s+(?:工程)?(?:修改守则|硬性规范|规范|约定|Rules|Guidelines|Conventions)/imu,
-  版本与发布: /^##\s+(?:版本|发布|发版|Version|Release)/imu,
-  日常协作与风险分流: /^##\s+(?:日常)?(?:协作|改动怎么落地|工作流|Workflow|Collaboration)/imu,
-  高风险路径: /^##\s+高风险/imu,
-  取舍: /^##\s+取舍/imu,
+  项目定位: new RegExp(`${HEADING_LEAD}(?:项目)?(?:定位|简介|概述|Overview)${HEADING_TAIL}`, 'imu'),
+  架构与关键不变量: new RegExp(`${HEADING_LEAD}(?:项目)?(?:架构|结构|目录结构|关键不变量|Architecture)${HEADING_TAIL}`, 'imu'),
+  构建与验证: new RegExp(`${HEADING_LEAD}(?:环境与)?(?:(?:构建|安装|开发)(?:与|和|及)?(?:验证|测试|命令|运行)?|验证与构建|Build|Test|Commands)${HEADING_TAIL}`, 'imu'),
+  修改守则: new RegExp(`${HEADING_LEAD}(?:工程)?(?:修改守则|硬性规范|编码规范|开发规范|约定|Rules|Guidelines|Conventions)${HEADING_TAIL}`, 'imu'),
+  版本与发布: new RegExp(`${HEADING_LEAD}(?:版本|发布|发版|Version|Release)${HEADING_TAIL}`, 'imu'),
+  日常协作与风险分流: new RegExp(`${HEADING_LEAD}(?:日常)?(?:协作|改动怎么落地|工作流|Workflow|Collaboration)${HEADING_TAIL}`, 'imu'),
+  高风险路径: new RegExp(`${HEADING_LEAD}高风险`, 'imu'),
+  取舍: new RegExp(`${HEADING_LEAD}取舍`, 'imu'),
 }
 
 export function collectMissingSections(rendered, existing) {
   const renderedLines = rendered.split('\n')
   const { regions } = markerRegions(rendered, 'AGENTS.md')
+  // 只拿**标题行**去比对。正文里偶然出现「构建与验证」这几个字不该被读成「这一节已经有了」
+  // ——那会让该补的节被跳过，而缺的那一节从此没人发现。
+  const headings = String(existing ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((line) => /^##\s+/.test(line))
+    .join('\n')
   const out = []
   for (const region of regions) {
     const block = [
@@ -278,8 +448,9 @@ export function collectMissingSections(rendered, existing) {
     ]
     const heading = block.find((line) => /^##\s+/.test(line))
     if (!heading) continue
-    const pattern = SECTION_SYNONYMS[region.id] ?? new RegExp(`^##\\s+${escapeRe(heading.replace(/^##\s+/, '').trim())}`, 'imu')
-    if (pattern.test(existing)) continue
+    const pattern = SECTION_SYNONYMS[region.id]
+      ?? new RegExp(`^##\\s+${escapeRe(heading.replace(/^##\s+/, '').trim())}`, 'imu')
+    if (pattern.test(headings)) continue
     out.push(block.join('\n'))
   }
   return out
@@ -437,8 +608,9 @@ async function main(argv) {
 
   // 渲染要勘察事实。`--clean` 之外的模式都需要它：连「该有哪些节」都由事实决定。
   let rendered
+  let facts
   try {
-    const facts = await factsOf(root)
+    facts = await factsOf(root)
     rendered = renderAgentsTemplate(facts, template)
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
@@ -472,8 +644,15 @@ async function main(argv) {
       process.stderr.write(`AGENTS.md 缺 ${info.missingRegions.length} 节（条件为真却没有）：${info.missingRegions.join('、')}\n`)
       bad = true
     }
+    const drifted = driftRegions(existing, rendered, volatileValues(facts))
+    if (drifted.length > 0) {
+      process.stderr.write(`AGENTS.md 有 ${drifted.length} 段与模板不一致：${drifted.join('、')}\n`
+        + '  这几段的内容完全由项目事实决定，本该与模板渲染结果逐字相同。'
+        + '不同说明模板加过规则而这份文件还停在旧版。跑一次不带参数就会刷新。\n')
+      bad = true
+    }
     if (bad) return 1
-    process.stdout.write('AGENTS.md：标记成对、没有未填占位、该有的节都在。\n')
+    process.stdout.write('AGENTS.md：标记成对、没有未填占位、该有的节都在、内容与模板一致。\n')
     return 0
   }
 
@@ -493,17 +672,18 @@ async function main(argv) {
     return 0
   }
 
-  // 默认：有受管标记就刷新（填空 + 插新节），没有就只报。
+  // 默认：有受管标记就刷新（填空 + 跟上模板 + 插新节），没有就只报。
   if (mode === 'default' && info.regions.length > 0 && info.broken.length === 0) {
-    const refreshed = refreshRegions(existing, rendered)
+    const refreshed = refreshRegions(existing, rendered, volatileValues(facts))
     if (refreshed.changed) {
       writeAtomic(agentsPath, refreshed.text)
       const bits = []
       if (refreshed.filled.length > 0) bits.push(`填了 ${refreshed.filled.length} 段（${refreshed.filled.join('、')}）`)
+      if (refreshed.synced.length > 0) bits.push(`跟上模板 ${refreshed.synced.length} 段（${refreshed.synced.join('、')}）`)
       if (refreshed.inserted.length > 0) bits.push(`插入 ${refreshed.inserted.length} 节（${refreshed.inserted.join('、')}）`)
-      process.stdout.write(`已刷新受管区间：${bits.join('，')}。标记之外、以及填过的区间一个字节没动。\n`)
+      process.stdout.write(`已刷新受管区间：${bits.join('，')}。标记之外、以及人写过的区间一个字节没动。\n`)
     } else {
-      process.stdout.write('受管区间都已填过、也没有新增的节，文件未改动。\n')
+      process.stdout.write('受管区间都已填过、也都与模板一致，文件未改动。\n')
     }
     report(agentsPath, inspect(agentsPath, rendered), { verbose })
     return 0

@@ -1149,6 +1149,242 @@ cases.push(['既有 AI 约定文件按文件展开、报告里点名、fill 提�
   } finally { rmTree(dir) }
 }])
 
+// ── W4：场景适配 ────────────────────────────────────────────────────
+
+cases.push(['命令按证据给：没有测试证据就不编一条', async () => {
+  // 只有 requirements.txt 的 Python 项目：既不能 pip install -e .（没有 pyproject），
+  // 也不该给 pytest（没有任何测试证据）。
+  const plain = tmpProject({
+    'README.md': '# d\n\n说明足够长。\n',
+    'main.py': 'print(1)\n',
+    'requirements.txt': 'requests\n',
+  })
+  try {
+    const f = await survey(plain)
+    if (f.commands.install !== 'pip install -r requirements.txt') return `install 是 ${f.commands.install}`
+    if (f.commands.test !== undefined) return `凭空给了测试命令 ${f.commands.test}`
+
+    // 反面（该有时必须有）：有 tests/ 就该给。
+    const tested = tmpProject({
+      'README.md': '# d\n\n说明足够长。\n',
+      'main.py': 'print(1)\n',
+      'requirements.txt': 'requests\n',
+      'tests/test_a.py': 'def test_a():\n    assert True\n',
+    })
+    try {
+      const g = await survey(tested)
+      if (g.commands.test !== 'pytest') return `有 tests/ 却不给 pytest：${g.commands.test}`
+      return true
+    } finally { rmTree(tested) }
+  } finally { rmTree(plain) }
+}])
+
+cases.push(['没有 gradlew 的 Gradle 项目用 gradle，有则用 ./gradlew', async () => {
+  const noWrapper = tmpProject({
+    'README.md': '# d\n\n说明足够长。\n',
+    'build.gradle': 'plugins { id "java" }\n',
+  })
+  try {
+    const f = await survey(noWrapper)
+    if (!String(f.commands.build).startsWith('gradle ')) return `没有 gradlew 却用 ${f.commands.build}`
+    if (String(f.commands.build).includes('./gradlew')) return './gradlew 在没有它的时候被用了'
+
+    const withWrapper = tmpProject({
+      'README.md': '# d\n\n说明足够长。\n',
+      'build.gradle': 'plugins { id "java" }\n',
+      'gradlew': '#!/bin/sh\n',
+      'src/test/java/A.java': 'class A {}\n',
+    })
+    try {
+      const g = await survey(withWrapper)
+      if (!String(g.commands.build).startsWith('./gradlew')) return `有 gradlew 却用 ${g.commands.build}`
+      if (g.commands.test !== './gradlew test') return `有测试证据却不给 test：${g.commands.test}`
+      return true
+    } finally { rmTree(withWrapper) }
+  } finally { rmTree(noWrapper) }
+}])
+
+cases.push(['残缺血库不判 mature；六项齐全才是', async () => {
+  const base = {
+    'README.md': '# d\n\n说明足够长。\n',
+    'index.js': 'console.log(1)\n',
+    '.github/workflows/ci.yml': 'name: ci\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n',
+  }
+  const incomplete = tmpProject(base)
+  const complete = tmpProject({
+    ...base,
+    // 六项齐全 = 有仓库 + README + AGENTS.md + .gitattributes + 远端 + CI。
+    // 许可证不在「成熟度」里：放不放是**只有使用者能定**的事，它归体检的「待定」那一档。
+    'LICENSE': 'MIT\n',
+    'AGENTS.md': [
+      '# d 工程契约', '', '## 定位', '',
+      '这是一个演示项目，只用来跑夹具，不做别的事。', '',
+      '## 构建与验证', '', '```sh', 'npm test', '```', '',
+      '## 修改规范', '', '- 改完跑上面那条命令；', '- 不引入第三方依赖。',
+    ].join('\n'),
+    '.gitattributes': '* text=auto\n',
+  })
+  try {
+    gitInit(incomplete)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: incomplete, stdio: 'ignore' })
+    gitInit(complete)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo2.git'], { cwd: complete, stdio: 'ignore' })
+    // 本机署名是**本机事实**，不参与成熟度判定——但夹具要在两台虚拟机器上都稳定，
+    // 所以给它一份确定的本地配置，免得依赖跑夹具那台机器的全局设置。
+    for (const d of [incomplete, complete]) {
+      spawnSync('git', ['config', 'user.name', 'fixture'], { cwd: d, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'fixture@example.com'], { cwd: d, stdio: 'ignore' })
+    }
+
+    // 正面：缺 AGENTS.md 与 .gitattributes 的仓库，不该被当成「该有的都有」。
+    const a = await survey(incomplete)
+    if (a.maturity === 'mature') return '缺 AGENTS.md 与 .gitattributes 仍被判 mature'
+    if (!a.gaps.some((g) => /AGENTS\.md/.test(g))) return 'gaps 里没有「缺 AGENTS.md」'
+    if (!a.gaps.some((g) => /gitattributes/.test(g))) return 'gaps 里没有「缺 .gitattributes」'
+
+    // 反面：六项齐全时必须是 mature——这条一旦翻车，所有正常项目都会被拖着做一遍多余的事。
+    const b = await survey(complete)
+    if (b.maturity !== 'mature') return `六项齐全却不是 mature（${b.maturity}）：${b.gaps.join(' / ')}`
+    return true
+  } finally { rmTree(incomplete); rmTree(complete) }
+}])
+
+cases.push(['只有系统垃圾文件的目录判 empty，有一个真文件就不是', async () => {
+  const junk = tmpProject({
+    '.DS_Store': 'x',
+    '.vscode/settings.json': '{}',
+    'Thumbs.db': 'x',
+  })
+  const real = tmpProject({ '.DS_Store': 'x', 'notes.md': '# 随手记\n' })
+  try {
+    const a = await survey(junk)
+    if (a.maturity !== 'empty') return `只有垃圾文件却判 ${a.maturity}`
+
+    // 反面：有一个真文件，就不是「空目录」。
+    const b = await survey(real)
+    if (b.maturity === 'empty') return '有一个 .md 还被判成 empty'
+    return true
+  } finally { rmTree(junk); rmTree(real) }
+}])
+
+cases.push(['前后端分离：根目录没有清单时，一阶子目录里的生态要被认出来', async () => {
+  const dir = tmpProject({
+    'README.md': '# split\n\n前后端分离。\n',
+    'frontend/package.json': '{"name":"web","version":"1.0.0","scripts":{"test":"vitest"}}',
+    'backend/pyproject.toml': '[project]\nname = "api"\nversion = "1.0.0"\n',
+    'backend/tests/test_api.py': 'def test_ok():\n    assert True\n',
+  })
+  try {
+    const f = await survey(dir)
+    if (!f.ecosystem.kinds.includes('node')) return `没认出前端：${f.ecosystem.kinds.join(',')}`
+    if (!f.ecosystem.kinds.includes('python')) return `没认出后端：${f.ecosystem.kinds.join(',')}`
+    const dirs = (f.ecosystem.subdirs ?? []).map((s) => s.dir)
+    if (!dirs.includes('frontend') || !dirs.includes('backend')) return `subdirs 不全：${dirs.join(',')}`
+
+    // 反面：根目录已经有清单时不下潜——那里的东西多半是依赖或示例，
+    // 跟着扫会凭空多出几个生态，而多出来的会让 CI 去装根本不需要的工具链。
+    const rooted = tmpProject({
+      'README.md': '# d\n\n说明足够长。\n',
+      'package.json': '{"name":"d","version":"1.0.0"}',
+      'vendor/package.json': '{"name":"v","version":"0.0.1"}',
+    })
+    try {
+      const g = await survey(rooted)
+      if ((g.ecosystem.subdirs ?? []).length > 0) return '根目录已有清单，却还去扫了子目录'
+      return true
+    } finally { rmTree(rooted) }
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['纯 .vue 组件库不是「纯文档项目」', async () => {
+  const dir = tmpProject({
+    'README.md': '# ui\n\n一个组件库。\n',
+    'Button.vue': '<template><button /></template>\n',
+    'Card.svelte': '<div />\n',
+  })
+  try {
+    const f = await survey(dir)
+    if (f.scale.codeFiles === 0) return '.vue / .svelte 没有被算成代码文件'
+    if (f.ecosystem.kinds.includes('docs-only')) return '被判成了纯文档项目'
+
+    // 反面：真的只有 Markdown 时，还得是 docs-only。
+    const docs = tmpProject({ 'README.md': '# 手册\n\n内容。\n', 'guide.md': '# 指南\n' })
+    try {
+      const g = await survey(docs)
+      if (!g.ecosystem.kinds.includes('docs-only')) return `纯 .md 项目不再是 docs-only：${g.ecosystem.kinds.join(',')}`
+      return true
+    } finally { rmTree(docs) }
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['裸仓库判成「裸仓库」，不是「还没有版本库」', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pf-bare-'))
+  try {
+    spawnSync('git', ['init', '-q', '--bare', dir], { stdio: 'ignore' })
+    const f = await survey(dir)
+    if (f.git.isBare !== true) return `isBare 是 ${f.git.isBare}`
+    if (f.git.present !== true) return '裸仓库被判成「没有版本库」'
+    if (!f.gaps.some((g) => /裸仓库/.test(g))) return 'gaps 里没有「裸仓库」这一条'
+    if (f.gaps.some((g) => /还没有版本库/.test(g))) return 'gaps 里还写着「还没有版本库」——照着它会去 git init'
+
+    // 反面：普通仓库的 isBare 必须是假，否则每个项目都会被劝去克隆一遍。
+    const normal = tmpProject({ 'README.md': '# d\n\n说明足够长。\n' })
+    try {
+      gitInit(normal)
+      const g = await survey(normal)
+      if (g.git.isBare !== false) return '普通仓库被标成了裸仓库'
+      return true
+    } finally { rmTree(normal) }
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['子目录里的独立仓库会被点名，并给出边界问题', async () => {
+  const dir = tmpProject({ 'README.md': '# outer\n\n说明足够长。\n' })
+  try {
+    gitInit(dir)
+    mkdirSync(join(dir, 'sub'))
+    spawnSync('git', ['init', '-q'], { cwd: join(dir, 'sub'), stdio: 'ignore' })
+    const f = await survey(dir)
+    if (!(f.git.nestedRepos ?? []).includes('sub')) return `nestedRepos=${JSON.stringify(f.git.nestedRepos)}`
+    if (!f.gaps.some((g) => /独立仓库/.test(g))) return 'gaps 里没有嵌套仓库这一条'
+    if (!f.questions.some((q) => /子模块|并入/.test(q))) return '没问边界怎么处置'
+
+    // 反面：干净的仓库不该凭空报嵌套。
+    const clean = tmpProject({ 'README.md': '# d\n\n说明足够长。\n' })
+    try {
+      gitInit(clean)
+      const g = await survey(clean)
+      if ((g.git.nestedRepos ?? []).length > 0) return '干净仓库报出了嵌套仓库'
+      return true
+    } finally { rmTree(clean) }
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['清单声明了源仓库，角色就判得出来；没声明时提问而不是猜', async () => {
+  const declared = tmpProject({
+    'README.md': '# d\n\n说明足够长。\n',
+    'pyproject.toml': '[project]\nname = "api"\nversion = "1.0.0"\n\n[project.urls]\nRepository = "https://github.com/acme/api"\n',
+  })
+  try {
+    gitInit(declared)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/api.git'], { cwd: declared, stdio: 'ignore' })
+    const f = await survey(declared)
+    if (f.ecosystem.declaredRepo !== 'acme/api') return `declaredRepo=${f.ecosystem.declaredRepo}`
+    if (f.git.role !== 'maintainer') return `role=${f.git.role}（声明与 origin 一致，本该是维护者）`
+
+    // 反面：没声明时不许猜成维护者，而且要把问题问出来。
+    const undeclared = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'main.py': 'print(1)\n' })
+    try {
+      gitInit(undeclared)
+      spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/unknown.git'], { cwd: undeclared, stdio: 'ignore' })
+      const g = await survey(undeclared)
+      if (g.git.role !== 'undetermined') return `role=${g.git.role}（没声明源仓库却判成了别的）`
+      if (!g.questions.some((q) => /正本|源仓库/.test(q))) return '角色比不出来却没有提问'
+      return true
+    } finally { rmTree(undeclared) }
+  } finally { rmTree(declared) }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

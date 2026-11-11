@@ -219,6 +219,81 @@ function checkTemplates() {
 }
 
 /**
+ * 「推到哪一档」的说法必须处处一致。
+ *
+ * ## 这条判据治的是什么
+ *
+ * 「推送」在同一个仓库里被两种口径各说了一遍：入口把它当成**要等人确认的对外动作**，
+ * 协作判据把它当成**日常**。两句话单独看都成立，放在一起就把执行者逼进一个二选一——
+ * 而它选错的那一次，是「明明该开 PR，却停下来问人要批准」。
+ *
+ * 根因不是措辞不统一，是**判据没写死**：分档的判据是「能不能撤回」，而不是「是不是对外」。
+ * 一旦按后者分，推自己的分支（可撤回）就会被错划进「对外动作」那一栏。
+ *
+ * ## 为什么用「必备说法」而不是逐字比对
+ *
+ * 逐字比对会把每一份文档的排版、语气、详略都锁死，改一个词就红——那种检查最后一定会
+ * 被加一个例外表绕过去。这里只断言**判据本身在里面**：同一组语义必须能在每一份讲这件事的
+ * 文件里找到。排版怎么排不管，判据少了就红。
+ */
+const PUSH_TIER_RULE = [
+  {
+    // 说法：分档看「能不能撤回」，不看「是不是对外」。
+    what: '分档判据是能不能撤回',
+    any: [/能不能撤回/, /可撤回|撤得回来/, /can be undone|cannot be undone|whether they can be undone/],
+  },
+  {
+    // 说法：推自己的分支、开 PR 属于日常，不必等人点头。
+    what: '推分支与开 PR 属于日常',
+    any: [/推(?:自己|出)?的?分支|推分支/, /push(?:ing)? (?:your|the) (?:own )?branch|push-a-branch/],
+  },
+  {
+    // 说法：合并才是那一档要人点头的动作。
+    what: '合并要人点头',
+    any: [/合并[^\n]{0,12}(?:交人|人合并|人工|等(?:人|你)|点头)|人工合并|交人/, /merg\w*[^\n]{0,24}(?:by a person|left to a person|person merges|wait for you)/i],
+  },
+]
+
+/** 讲「日常怎么落地」的那几份。缺一份，就有一处会按旧口径行事。 */
+const PUSH_TIER_DOCS = [
+  'SKILL.md',
+  'AGENTS.md',
+  'templates/agents-project.md',
+  'references/collaboration.md',
+  'README.md',
+  'README.en.md',
+  'CONTRIBUTING.md',
+  'templates/contributing.md',
+]
+
+/**
+ * 旧口径：把「提交 + 推送」写成日常的终点。
+ *
+ * 它不是错字，是一个**已经过时的结论**：那句话成立的前提是「推送撤不回来」，
+ * 而推自己的分支恰恰撤得回来。留着它，读的人就会停在推送、不开 PR。
+ */
+const STALE_DAILY_END = /提交\s*[+＋]\s*推送/
+
+function checkPushSemantics() {
+  for (const name of PUSH_TIER_DOCS) {
+    const p = join(ROOT, name)
+    if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
+    const text = readText(p)
+    for (const rule of PUSH_TIER_RULE) {
+      if (!rule.any.some((re) => re.test(text))) {
+        fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
+      }
+    }
+    const stale = STALE_DAILY_END.exec(text)
+    if (stale) {
+      const line = text.slice(0, stale.index).split('\n').length
+      fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
+    }
+  }
+  note(`推送分档：${PUSH_TIER_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，合并要人点头）`)
+}
+
+/**
  * 本仓库实例与模板的同构核对。
  *
  * 这条判据治的是一个具体的事故：模板改了，本仓库自己那份没跟上——于是「它教的」
@@ -622,6 +697,7 @@ function main() {
   checkTemplates()
   checkPlatformLock()
   checkStructureRules()
+  checkPushSemantics()
   checkOwnInstances()
   checkHelps()
   checkTemplateRender()

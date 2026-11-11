@@ -742,7 +742,7 @@ cases.push(['默认分支名换个环境算出来不一样，不算漂移；真�
     if (ok.status !== 0) return `填完之后没过：${(ok.stderr || '').trim().split('\n')[0]}`
 
     // 模拟另一台机器：同一个项目、换一个默认分支名。
-    const renamed = filled.replace(/git checkout main\b/g, 'git checkout trunk')
+    const renamed = filled.replace(/git switch main\b/g, 'git switch trunk')
     if (renamed === filled) return '夹具没找到分支名'
     writeFileSync(join(dir, 'AGENTS.md'), renamed)
     const renamedCheck = await runNode('compose-agents.mjs', [dir, '--check'])

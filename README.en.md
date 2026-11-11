@@ -163,10 +163,22 @@ Three things make up most of how it feels to use:
 
 - Make your private repo public (private by default; going public needs your explicit word)
 - Force-push, rewrite pushed history, or delete a published release
-- **Decide on its own that it is time to release**: day to day it stops at commit + push;
-  tagging, release pages, and registry publishes all need your explicit word
+- **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
+  open a PR; merging is left to a person, and tagging, release pages, and registry publishes
+  all need your explicit word
 - Pick a license for you, or invent an identity
 - **Remove anything it left behind without your explicit confirmation**
+
+It sorts actions by **whether they can be undone**, not by whether they leave the machine:
+pushing your own branch, opening a PR, and editing a PR can all be undone (delete the branch,
+close the PR), so they are ordinary work and need nobody's nod. Merging into the default
+branch, publishing a release, flipping a private repo public, and rewriting history cannot be
+undone — those stop and wait for you. Force-pushing and rewriting pushed history never run
+automatically.
+
+**The same rule governs how this skill is maintained.** It governs other projects and it
+governs itself: branch → gates green → push the branch → open a PR → a person merges. Not one
+more confirmation, not one less independent review.
 
 Daily work and releasing are two different things, and it only does the first by default.
 Not out of caution for its own sake: the two differ in whether they can be undone. A wrong

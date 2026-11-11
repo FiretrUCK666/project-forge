@@ -92,6 +92,9 @@ function run(cmd, args, opts = {}) {
       timeout: opts.timeout ?? 15000,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,
+      // 子进程默认继承环境；`env` 给了就用它叠在继承之上——**不是替换**，
+      // 否则 PATH 没了，连 `git` 都起不来。
+      env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },
     }, (error, stdout, stderr) => {
       done({
         ok: error === null,
@@ -349,15 +352,41 @@ function parsePorcelainV2(text) {
  *
  * 只判退出码，**绝不读密码值、绝不打印**：输入是「要哪一处的凭据」，输出被丢弃。
  * 判据跨平台一致——`git credential fill` 取不到就非零退出。
+ *
+ * ## 三行都得给，`path` 尤其不能漏
+ *
+ * 凭据有两种存法：按主机（`credential.https://github.com`）与按路径
+ * （`credential.https://github.com/owner/repo`）。只给 `host` 时，凭据助手查的是前者，
+ * 而很多人的凭据恰恰是按路径存的——症状是「明明登录了却推不上去」，所有报错都说认证失败。
+ * 这一条是这套流程自己写在参考文档里的硬判据，代码不能比文档松。
+ *
+ * ## 两个环境变量不是可选项
+ *
+ * 没有可用的凭据时，`git credential fill` 会**弹一个图形登录框**等人输入。在桌面环境上
+ * 那会一直卡到超时（或者更糟：卡到人回来点掉），而调用方以为自己在做一次「几百毫秒的探测」。
+ * 两个变量分别关掉终端与图形助手的交互，它才真的是一次探测。
  */
 async function probeCredential(root, remote) {
   const url = /^https?:\/\//i.test(remote) ? remote : 'https://github.com'
   let host = 'github.com'
-  try { host = new URL(url).host } catch { /* 用默认值 */ }
+  let path = ''
+  try {
+    const parsed = new URL(url)
+    host = parsed.host
+    path = parsed.pathname.replace(/^\/+/, '').replace(/\/+$/, '')
+    // 按路径存凭据时，那条路径要带 `.git` 后缀（`owner/repo.git`），
+    // 与 `git remote` 里写的裸路径不是一回事。
+    if (path !== '' && !/\.git$/i.test(path)) path = `${path}.git`
+  } catch { /* 用默认值：认不出就按主机问，那仍然比不问强 */ }
+
+  const lines = [`protocol=https`, `host=${host}`]
+  if (path !== '') lines.push(`path=${path}`)
   const res = await run('git', ['credential', 'fill'], {
     cwd: root,
-    input: `protocol=https\nhost=${host}\n\n`,
+    input: `${lines.join('\n')}\n\n`,
     timeout: 5000,
+    // 关掉交互：没有凭据时助手会弹窗等人，而探测不能等人。
+    env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
   })
   if (res.missing) return { state: 'undetermined', reason: '这台机器上找不到 git' }
   if (res.ok) return { state: 'available', reason: '凭据助手取到了凭据' }
@@ -418,6 +447,21 @@ const ECOSYSTEMS = [
         if (/\[build-system\]/.test(text) && name) s.publishable = true
         const requires = tomlString(text, 'requires-python')
         if (requires) s.runtimeRequirements.push(`Python ${requires}`)
+        // 声明的源仓库：`[project.urls]` 里的 Repository / Homepage。
+        // 读不到就留空——角色判定宁可报「比不出来」，也不要拿一个猜出来的仓库去比。
+        const urls = /\[project\.urls\]([\s\S]*?)(?:\n\[|$)/.exec(text)?.[1] ?? ''
+        if (!s.declaredRepo) {
+          for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
+            const value = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)?.[1]
+            const repo = githubRepoPath(value)
+            if (repo) { s.declaredRepo = repo; break }
+          }
+        }
+      }
+      // `setup.py` 里偶尔也写着 url，读得到就用——它比「没有」强，但只作兜底。
+      if (!s.declaredRepo && existsSync(join(root, 'setup.py'))) {
+        const text = readTextSafe(join(root, 'setup.py')) ?? ''
+        s.declaredRepo = githubRepoPath(/url\s*=\s*["']([^"']+)["']/.exec(text)?.[1])
       }
       // 安装命令按**项目里真实存在的文件**选，不按生态惯例编。
       // `pip install -e .` 要求有 pyproject.toml / setup.py；只有 requirements.txt 时
@@ -448,6 +492,9 @@ const ECOSYSTEMS = [
       else if (name && version) s.publishable = true
       const rustVersion = tomlString(text, 'rust-version')
       if (rustVersion) s.runtimeRequirements.push(`Rust ${rustVersion}`)
+      // `repository` 字段就是 Cargo 的「源仓库」声明。它读得到，角色就判得出来；
+      // 读不到时角色停在 undetermined，那一条会在 questions 里问清楚。
+      if (!s.declaredRepo) s.declaredRepo = githubRepoPath(tomlString(text, 'repository'))
       s.commands.build ??= 'cargo build'
       s.commands.test ??= 'cargo test'
       s.commands.lint ??= 'cargo clippy -- -D warnings'
@@ -517,6 +564,18 @@ const ECOSYSTEMS = [
       if (c?.name) s.projectName = c.name
       s.commands.install ??= 'composer install'
       if (c?.name) s.publishable = true
+      // composer 的 `repository` 可能是字符串，也可能是 `{ url: … }`；
+      // `homepage` 里也常写着源码地址。三个都试一遍，认不出就留空。
+      const candidates = [
+        typeof c?.repository === 'string' ? c.repository : c?.repository?.url,
+        typeof c?.homepage === 'string' ? c.homepage : undefined,
+      ]
+      if (!s.declaredRepo) {
+        for (const candidate of candidates) {
+          const repo = githubRepoPath(candidate)
+          if (repo) { s.declaredRepo = repo; break }
+        }
+      }
     },
   },
   {
@@ -1427,6 +1486,13 @@ function judgeGaps(facts) {
   }
   if (facts.ecosystem.kinds.includes('unknown')) {
     questions.push('认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？')
+  }
+  // 角色比不出来时，把问题问清楚。这一条不是格式检查，是**权限问题**：
+  // 判不出「这是不是正本」，下一步该推主干还是开 PR 就没有依据。
+  if (facts.git.present === true && typeof facts.git.remote === 'string' && facts.git.remote.length > 0
+    && facts.git.role === 'undetermined') {
+    questions.push('本地远端是不是这个项目的正本？项目里没有声明源仓库（清单的 repository 一类），'
+      + '所以比不出来——说不清的话，按贡献者处置（拉分支、开 PR），不推主干、不打标签')
   }
 
   // 被算进成熟度的那一部分：**跟着仓库走**的东西。本机事实（署名、凭据助手、

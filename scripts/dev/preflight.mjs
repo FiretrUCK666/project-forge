@@ -314,6 +314,37 @@ function checkTemplateRender() {
 }
 
 /**
+ * 平台锁定：产物层只提 GitHub，不提别的托管平台。
+ *
+ * **只扫产品层**（入口、判据、落盘骨架、脚本）。历史记录（`docs/work/`、`docs/release-notes/`）
+ * 不扫：那里记的是当时的事实，把「清掉了哪些平台的提及」这句话本身也改掉，等于伪造历史。
+ *
+ * 判据是「出现了别的平台名」，不是「提到了托管平台这个词」——后者在描述清理动作时正当。
+ */
+const FOREIGN_PLATFORMS = [/\bGitLab\b/i, /\bGitee\b/i, /\bBitbucket\b/i, /\bsvn\b/i]
+
+function checkPlatformLock() {
+  const targets = [
+    join(ROOT, 'SKILL.md'),
+    ...walk(join(ROOT, 'references'), (f) => f.endsWith('.md')),
+    ...walk(join(ROOT, 'templates'), () => true),
+    ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
+  ]
+  for (const file of targets) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    const text = readText(file)
+    for (const re of FOREIGN_PLATFORMS) {
+      const m = re.exec(text)
+      if (!m) continue
+      const line = text.slice(0, m.index).split('\n').length
+      fail(`${name} 第 ${line} 行提到了「${m[0]}」——这个 skill 只针对 GitHub，别的托管平台不进产物层`)
+    }
+  }
+  note(`平台锁定：${targets.length} 个产物层文件里没有提及其他托管平台`)
+}
+
+/**
  * 本仓库自己过一遍生成门禁。
  *
  * 这个仓库是这套规范的第一个用户：`templates/` 里写的结构，这里必须自己做到。
@@ -559,6 +590,7 @@ function main() {
   checkLinks()
   checkScripts()
   checkTemplates()
+  checkPlatformLock()
   checkStructureRules()
   checkOwnInstances()
   checkHelps()

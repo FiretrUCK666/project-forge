@@ -592,6 +592,140 @@ cases.push(['handoff 的 --verify 干净退出 0，有痕迹退出 1', async () 
   } finally { rmTree(dir) }
 }])
 
+// ── 围栏里的标记：不能当标记，也不能当「已填」 ────────────────────
+
+cases.push(['围栏里的 fill 不算数：--check 与 handoff 数到的一样多，且不会冲掉人填的内容', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n纯文档项目，说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+
+    // 三处必须给出同一个数：文件里肉眼能数到的、--check 报的、handoff 认到的。
+    // 三处不一致的后果是这一条：用户填完之后 --check 绿了，再跑一次生成又被冲回占位。
+    const rawCount = (agents.match(/project-forge:\s*fill/g) ?? []).length
+    const check = await runNode('compose-agents.mjs', [dir, '--check'])
+    const checkCount = Number((/还有 (\d+) 处未填/.exec(check.stderr) ?? [])[1])
+    const handoff = JSON.parse((await runNode('handoff.mjs', [dir, '--json'])).stdout)
+    if (checkCount !== rawCount) return `--check 报 ${checkCount} 处，文件里有 ${rawCount} 处`
+    if (handoff.placeholders.length !== rawCount) return `handoff 认到 ${handoff.placeholders.length} 处，文件里有 ${rawCount} 处`
+
+    // 用真实的填法：删掉整行 fill 标记，在代码块里写命令。再跑一次不能把它冲掉。
+    const filled = agents.replace(
+      /^<!-- project-forge: fill 构建与验证命令[^\n]*-->$/m,
+      'node --test  # 测试',
+    )
+    writeFileSync(join(dir, 'AGENTS.md'), filled)
+    await runNode('compose-agents.mjs', [dir])
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    if (!after.includes('node --test  # 测试')) return '人填的命令被刷新冲掉了'
+    if (after.includes('填这个项目真实的构建')) return '该节被冲回了占位'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['插入的新节按模板顺序排，不颠倒', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    // 把前两节删掉，模拟一份来自更早模板的文件。
+    let text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    for (const id of ['项目定位', '架构与关键不变量']) {
+      text = text.replace(new RegExp(`<!-- project-forge: begin ${id} -->[\\s\\S]*?<!-- project-forge: end ${id} -->\\n*`), '')
+    }
+    writeFileSync(join(dir, 'AGENTS.md'), text)
+    await runNode('compose-agents.mjs', [dir])
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const order = [...after.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1])
+    const posProject = order.findIndex((h) => h.includes('项目定位'))
+    const posArch = order.findIndex((h) => h.includes('架构'))
+    if (posProject < 0 || posArch < 0) return `补回来的节不齐：${order.join(' | ')}`
+    if (posProject > posArch) return `顺序反了：项目定位在第 ${posProject} 位，架构在第 ${posArch} 位`
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['同义标题：带编号的认得出、泛指的「验证流程」不算构建节、正文里提到也不算已有', async () => {
+  const dir = tmpProject({ 'package.json': '{"name":"a","version":"1.0.0"}' })
+  try {
+    const cases = [
+      // 带编号的标题必须认出来，否则已有节会被重复追加
+      { body: '# a\n\n## 1. 项目定位\n\n手写。\n\n## 2. 构建与验证\n\n手写命令。\n', expect: 'no-dup-build' },
+      // 「验证流程」讲的是审查流程，不是构建命令；构建节必须补进来
+      { body: '# a\n\n## 项目定位\n\n手写。\n\n## 验证流程\n\n讲审查流程的。\n', expect: 'need-build' },
+      // 正文里偶然提到那几个字，不等于已经有那一节
+      { body: '# a\n\n## 项目定位\n\n手写。\n\n正文里顺口提到一句构建与验证的事。\n', expect: 'need-build' },
+    ]
+    for (const c of cases) {
+      writeFileSync(join(dir, 'AGENTS.md'), c.body)
+      await runNode('compose-agents.mjs', [dir, '--upgrade'])
+      const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      // 构建节的标题可能叫「构建与验证」或「环境与构建验证」，判据是它同时含这两个词。
+      const buildHits = [...after.matchAll(/^##\s+.*$/gm)]
+        .map((m) => m[0])
+        .filter((h) => h.includes('构建') && h.includes('验证')).length
+      if (c.expect === 'need-build' && buildHits === 0) return `该补的构建节没补：${c.body.slice(0, 30)}`
+      if (c.expect === 'no-dup-build' && buildHits > 1) return `构建节被重复追加了 ${buildHits} 份`
+      const projectHits = (after.match(/^##\s+.*项目定位/gm) ?? []).length
+      if (projectHits > 1) return `项目定位被重复追加了 ${projectHits} 份`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['目标项目自带 references/ 时，里面的标记照样扫得到', async () => {
+  const dir = tmpProject({
+    'README.md': '# a\n',
+    'references/arch.md': '<!-- project-forge: begin 架构 -->\n# arch\n<!-- project-forge: end 架构 -->\n',
+  })
+  try {
+    // 这条治的是一个假「干净」：把 references/ 一律当成 skill 自己的目录跳过，
+    // 于是目标项目自己的 references/ 里那些标记永远扫不到，而 --verify 是交棒前唯一一道关。
+    const r = await runNode('handoff.mjs', [dir, '--verify'])
+    if (r.status === 0) return '目标项目 references/ 里有标记，--verify 却说干净'
+    const j = JSON.parse((await runNode('handoff.mjs', [dir, '--json'])).stdout)
+    if (!j.markers.some((m) => m.file === 'references/arch.md')) return '没扫到 references/ 里的标记'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['模板改了而本仓库实例没跟上时，--check 会红；刷新能把规则带回来', async () => {
+  // 这一条守的是「自举只有结构、没有内容」：受管区间里没有 fill 的那几段，正文完全由事实
+  // 推出来，本该与模板渲染结果逐字相同。模板加了规则而实例没跟上，必须有东西报出来，
+  // 否则「它教别人做、自己没做到」会一路绿着过去。
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+
+    // 先把所有占位填掉：漂移判据只在「已经填完」的契约上才有意义。
+    const filled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    writeFileSync(join(dir, 'AGENTS.md'), filled)
+    const good = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (good.status !== 0) return `填完之后就没过 --check：${(good.stderr || '').trim().split('\n')[0]}`
+
+    // 模拟「模板加了规则、实例还停在旧版」：往受管区间里塞一条模板没有的内容。
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const tampered = text.replace(
+      /(- \*\*一票否决红线\*\*)/,
+      '- 这是实例里多出来的一条，模板里没有。\n\n$1',
+    )
+    if (tampered === text) return '夹具没找到可以插入的位置'
+    writeFileSync(join(dir, 'AGENTS.md'), tampered)
+
+    const drifted = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (drifted.status === 0) return '内容与模板不一致，--check 却放行了'
+    if (!/与模板不一致/.test(drifted.stderr || '')) return `报错了但不是漂移那条判据：${(drifted.stderr || '').trim().split('\n')[0]}`
+
+    await runNode('compose-agents.mjs', [dir])
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    if (after.includes('实例里多出来的一条')) return '刷新没有把实例拉回模板（多出来的内容还在）'
+    if (!after.includes('一票否决红线')) return '刷新把模板里的规则弄丢了'
+    const again = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (again.status !== 0) return `刷新之后 --check 仍然红：${(again.stderr || '').trim().split('\n')[0]}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
 // ── 跑 ──────────────────────────────────────────────────────────────
 
 for (const [name, fn] of cases) {

@@ -28,7 +28,17 @@ export function processAlive(pid) {
 }
 
 /**
- * 清掉同目录下遗留的临时文件。
+ * 清掉遗留的临时文件。**传文件或目录都行**，返回 `{ removed, kept }`。
+ *
+ * 两种调用方各有所需，而它们的差别不是风格：
+ *
+ *   - 传**目录**（`sync-toc` 那种「扫一遍工作区」）：清这个目录下所有 `*.tmp-<pid>`；
+ *   - 传**文件**（`update` 那种「我要写这个路径」）：只清 `basename.tmp-<pid>` 这一族，
+ *     同一目录里别人的临时文件不归它管。
+ *
+ * 返回值分两组、不再只给一个数组：**「没动的那些」也是结论**。使用者有权知道
+ * 「有两个临时文件是活的进程留下的」，而不是只看到「清掉了 0 个」。
+ * 只返回数组时，调用方想拿到 `kept` 只能自己再扫一遍——那就会出现两份扫法。
  *
  * 三条保护，每条都对应一类误删：
  *   - 后缀不是纯数字的**不是我们的**（可能是使用者的 `notes.txt.tmp-backup`）；
@@ -37,16 +47,31 @@ export function processAlive(pid) {
  *
  * `dryRun` 时只报不删——只读模式下删文件会让「只读」这个承诺变成假话。
  */
-export function clearStaleTemps(dir, { dryRun = false } = {}) {
+export function clearStaleTemps(targetPath, { dryRun = false } = {}) {
   const removed = []
+  const kept = []
+  let dir = targetPath
+  let onlyBase = null
+  try {
+    if (!statSync(targetPath).isDirectory()) {
+      dir = dirname(targetPath)
+      onlyBase = basename(targetPath)
+    }
+  } catch {
+    // 目标还不存在：按文件路径处理，扫它所在目录里同名前缀的残留。
+    dir = dirname(targetPath)
+    onlyBase = basename(targetPath)
+  }
+
   let entries = []
-  try { entries = readdirSync(dir) } catch { return removed }
+  try { entries = readdirSync(dir) } catch { return { removed, kept } }
   for (const name of entries) {
     const m = /^(.+)\.tmp-(\d+)$/.exec(name)
     if (!m) continue
+    // 只清「这个文件的」临时文件时，前缀必须逐字对上。
+    if (onlyBase !== null && m[1] !== onlyBase) continue
     const pid = Number(m[2])
-    if (pid === process.pid) continue
-    if (processAlive(pid)) continue
+    if (pid === process.pid || processAlive(pid)) { kept.push(join(dir, name)); continue }
     const full = join(dir, name)
     try {
       if (!statSync(full).isFile()) continue
@@ -56,17 +81,24 @@ export function clearStaleTemps(dir, { dryRun = false } = {}) {
       try { unlinkSync(full) } catch { /* 删不掉就留着，下次还会看到 */ }
     }
   }
-  return removed
+  return { removed, kept }
 }
 
 /** 把清理结果说出来。**默默清理等于让使用者以为文件本来就是那样。**
  *
  * 返回值是给人看的一句话（空串表示没什么可说）。调用方自己决定写到哪儿。
+ * 两类都要说：清掉的，以及**看见了但没动的**——后者常被读成「没有残留」。
  */
-export function reportTemps(removed, { dryRun = false } = {}) {
-  if (!Array.isArray(removed) || removed.length === 0) return ''
-  const verb = dryRun ? '发现了遗留的临时文件（未删）' : '清掉了遗留的临时文件'
-  return `${verb}：${removed.map((p) => basename(p)).join('、')}\n`
+export function reportTemps({ removed = [], kept = [] } = {}, { dryRun = false } = {}) {
+  const bits = []
+  if (removed.length > 0) {
+    const verb = dryRun ? '发现了遗留的临时文件（未删）' : '清掉了遗留的临时文件'
+    bits.push(`${verb}：${removed.map((p) => basename(p)).join('、')}`)
+  }
+  if (kept.length > 0) {
+    bits.push(`另有 ${kept.length} 个临时文件属于仍在运行的进程，没动：${kept.map((p) => basename(p)).join('、')}`)
+  }
+  return bits.length === 0 ? '' : `${bits.join('\n')}\n`
 }
 
 /**

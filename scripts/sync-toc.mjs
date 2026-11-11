@@ -320,7 +320,8 @@ function main() {
     // **`--check` 只判不删**：它是 CI 与「先验一遍」用的只读模式，一个自称只校验的命令
     // 顺手删文件，会在别人的工作区里制造一个无从解释的变化。
     const temps = clearStaleTemps(f, { dryRun: check })
-    reportTemps(f, temps, { dryRun: check })
+    const tempNote = reportTemps(temps, { dryRun: check })
+    if (tempNote !== '') process.stdout.write(tempNote)
 
     try {
       const items = headings(text, maxLevel)

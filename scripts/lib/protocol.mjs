@@ -10,6 +10,8 @@
  * 而失效的表现是「明明有标记却说干净」——那会把不可逆动作变成默认动作。
  */
 
+import { scanLines } from './markdown.mjs'
+
 /** 标记里的命名空间。所有标记都以它开头。 */
 export const NS = 'project-forge'
 
@@ -80,22 +82,24 @@ export function markerBodyOf(line) {
  * 就要解释它长什么样），那些示例是**内容**，不是 markup。把它们当成真标记的后果很具体：
  * 一份写在代码块里的示例会让「交棒」永远判不干净，而用户看到的是「这里还有痕迹」，
  * 却找不到任何能删的东西。
+ *
+ * ## 围栏判定只有一份实现
+ *
+ * 走 `markdown.scanLines`，不在这里手写状态机。手写那一版有两个具体错法，都实测过：
+ *
+ *   - **不校验闭合长度**：` ```` ` 开的块会被 ` ``` ` 关掉，于是围栏分界与读者看到的不一样，
+ *     后面的正文被当成代码、或者代码被当成正文；
+ *   - **不看行尾字符**：` ```js ` 这种带语言标记的起始行会被当成「闭合」，一开一关只隔一行，
+ *     后面整段正文于是落到围栏「之外」——示例里的标记被当成真标记。
+ *
+ * 两处各写一份，同一个文件、同一种损坏会得到两个答案，而错的那一个通常是静默的。
  */
 export function parseMarkers(text, file) {
   if (markerSyntaxFor(file) === null) return []
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
-  let fence
-  for (let i = 0; i < lines.length; i += 1) {
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
-    if (fenceMatch) {
-      const mark = fenceMatch[1][0]
-      if (fence === undefined) fence = mark
-      else if (fence === mark) fence = undefined
-      continue
-    }
-    if (fence !== undefined) continue
-    const body = markerBodyOf(lines[i])
+  for (const info of scanLines(String(text ?? '').replace(/\r\n/g, '\n'))) {
+    if (info.inFence) continue
+    const body = markerBodyOf(info.line)
     if (body === undefined) continue
     const m = /^(generated|begin|end|fill)\b\s*([\s\S]*)$/.exec(body)
     if (!m) continue
@@ -106,8 +110,8 @@ export function parseMarkers(text, file) {
       kind,
       id: kind === 'begin' || kind === 'end' ? rest : undefined,
       what: kind === 'fill' ? rest : undefined,
-      line: i + 1,
-      index: i,
+      line: info.index + 1,
+      index: info.index,
     })
   }
   return out
@@ -123,13 +127,37 @@ export function hasMarkers(text, file) {
  *
  * 用于 `--clean`：把 `generated` 标记与 `fill` 占位符去掉，文件和正文都保留。
  * **不处理 begin/end 的配对**——那是 compose 的事，它比这里更清楚该留下哪一段。
+ *
+ * **围栏里的与行内反引号里的都不碰。** 这条不是洁癖：一份文档完全可能**正当地把标记
+ * 写进示例**（`references/handoff.md` 就在讲它长什么样，README 里也会举一个填好的样子）。
+ * 把那些一起剥掉，等于替使用者删掉了他自己的正文——而命令还报「已剥掉全部标记」。
+ * 行内反引号那一档同理：`<!-- project-forge: begin X -->` 写在行内当例子，也是内容。
  */
 export function stripMarkers(text, file) {
   if (markerSyntaxFor(file) === null) return text
-  const eol = String(text ?? '').includes('\r\n') ? '\r\n' : '\n'
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  const kept = lines.filter((line) => markerBodyOf(line) === undefined)
+  const source = String(text ?? '')
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
+  const kept = scanLines(source.replace(/\r\n/g, '\n'))
+    // 只删「围栏之外、又不是行内举例」的标记行。围栏本身与围栏里的内容原样留下——
+    // 围栏是结构的骨架，删掉它等于把这门示例变成正文。
+    .filter((info) => info.inFence || insideInlineCode(info.line)
+      || markerBodyOf(info.line) === undefined)
+    .map((info) => info.raw)
   return kept.join(eol)
+}
+
+/**
+ * 这一行里，紧贴行首/行尾的标记是不是被反引号包着。
+ *
+ * 判据刻意放松：只要这一行**同时含有**反引号与标记，就当成「举例」而不剥。
+ * 收紧一点（精确配对反引号区间、判断标记落在哪一对之间）当然做得到，但那需要一套
+ * 行内代码解析器；而这里要防的是「把示例当标记删掉」，误判的代价只是**少删一行**
+ * ——用户看到它还留着，手工删掉即可。反过来误删是**删掉正文**，不可逆。
+ * 两个方向的代价不对称，所以选宽松的那一侧。
+ */
+function insideInlineCode(line) {
+  if (!line.includes('`')) return false
+  return /`[^`]*<!--|<!--[^>]*-->`/.test(line) || /`[^`]*#\s*project-forge:/.test(line)
 }
 
 /**
@@ -243,23 +271,14 @@ export const TEMPLATE_VARS = Object.freeze([
  */
 export function conditionMarkers(text, file = 'template.md') {
   if (markerSyntaxFor(file) === null) return []
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
-  let fence
-  for (let i = 0; i < lines.length; i += 1) {
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
-    if (fenceMatch) {
-      const mark = fenceMatch[1][0]
-      if (fence === undefined) fence = mark
-      else if (fence === mark) fence = undefined
-      continue
-    }
-    if (fence !== undefined) continue
-    const body = markerBodyOf(lines[i])
+  for (const info of scanLines(String(text ?? '').replace(/\r\n/g, '\n'))) {
+    if (info.inFence) continue
+    const body = markerBodyOf(info.line)
     if (body === undefined) continue
     const m = /^(if|endif)\b\s*([\s\S]*)$/.exec(body)
     if (!m) continue
-    out.push({ kind: m[1], cond: m[1] === 'if' ? m[2].trim() : undefined, line: i + 1, index: i })
+    out.push({ kind: m[1], cond: m[1] === 'if' ? m[2].trim() : undefined, line: info.index + 1, index: info.index })
   }
   return out
 }
@@ -318,15 +337,25 @@ export function isRepoOnlyPath(rel) {
  *
  * 两条路：先试接口路（一次请求同时给出标签与附件位置，不碰网页主机），
  * 猜不出就返回 undefined，由调用方退回网页路。
+ *
+ * ## 返回值只给**能直接用的地址**
+ *
+ * `latest` 是拼好的完整地址，调用方原样拿去请求。这一点是刻意的：接口地址由三段
+ * 常量与两个路径段组成，任何一段拼错都得到一个**看起来合法、实际 404** 的地址，
+ * 而 404 在调用方那里的含义是「那边没有最新发布」——一个看起来像事实的错误结论。
+ * 所以拼装只在这里做一次，调用方不碰 `owner` / `name` / `base` 这些零件。
+ *
+ * `repo` 是归一后的 `owner/name`，只用于**比对**（这个地址是不是同一个仓库），
+ * 不用于拼地址。
  */
 export function apiTarget(source) {
   if (typeof source !== 'string') return undefined
   const m = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i.exec(source.trim())
   if (!m) return undefined
+  const repo = `${m[1]}/${m[2]}`
   return {
     kind: 'github',
-    base: 'https://api.github.com',
-    latest: `https://api.github.com/repos/${m[1]}/${m[2]}/releases/latest`,
-    repo: `${m[1]}/${m[2]}`,
+    latest: `https://api.github.com/repos/${repo}/releases/latest`,
+    repo,
   }
 }

@@ -302,16 +302,17 @@ function download(url, { redirects = 5, accept = '*/*', final } = {}) {
 }
 
 /**
- * GitHub 给程序用的那套接口地址（pi.github.com）。
+ * GitHub 给程序用的那套接口地址（`api.github.com`）。
  *
- * 判据（地址规律、认不出就不猜）住在 `lib/protocol.mjs` 的 `apiBase` / `apiTarget` 里：
- * `release-notes.mjs` 用的是同一份。两处各写一遍的后果很具体——一处改了前缀、
- * 另一处没改，症状是「查得到最新发布、发不出说明」，而两个脚本各自的测试都过。
+ * 判据（地址规律、认不出就不猜）住在 `lib/protocol.mjs` 的 `apiTarget` 里，
+ * 而**拼装也只在那里做一次**：这里只把 `latest` 原样取走。
+ *
+ * 早先这里是自己拿 `target.owner` / `target.name` 拼的，而 `apiTarget` 根本不返回
+ * 那两个字段——拼出来的是 `.../repos/undefined/undefined/releases/latest`。症状很隐蔽：
+ * 接口返回 404，被读成「那边没有最新发布」，于是每次都掉进兜底、下整包。
  */
 function apiEndpoint(source) {
-  const target = apiTarget(source)
-  if (target === undefined) return undefined
-  return `${target.base}/repos/${target.owner}/${target.name}/releases/latest`
+  return apiTarget(source)?.latest
 }
 
 /**
@@ -648,7 +649,7 @@ function applyPackage(entries) {
     mkdirSync(dirname(p), { recursive: true })
     // 清掉这个文件此前的临时文件（上次被杀进程留下的）：判据与 lib/fs-atomic.mjs 共用一份，
     // 两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉、另一个清不掉」。
-    for (const k of clearStaleTemps(p).kept) keptTemps.push(k.name)
+    for (const k of clearStaleTemps(p).kept) keptTemps.push(basename(k))
     writeAtomic(p, e.data)
   }
   // 「删掉了」必须**删完再认**：不加这一句，删失败也会被算进清单，报告于是说了一件
@@ -915,15 +916,22 @@ async function main(argv) {
   }
 
   // ── 一：比版本 ────────────────────────────────────────────────────────────
-  // 两条路按顺序试。**只有「这条路这次没走通」才换下一条**：「那边没有最新发布」是
-  // 结论，换个地方再问一遍问不出不同的答案，白白多等一个超时。
+  // 两条路按顺序试。**只有「这条路这次没走通」才换下一条**——但「那边没有最新发布」
+  // 也要继续试：两条路问的是同一个问题，接口路 404 可能只是这个地址不对（来源被转发过、
+  // 或仓库换了名字），而网页路往往问得出来。早先的写法是「404 也算有结论、直接跳出」，
+  // 结果是一次接口地址拼错就让整条更新链路退化成「每次都下整包」。
   let found = { state: 'unreachable' }
+  let absent = false
   for (const route of routesFor(source)) {
-    found = route.kind === 'api'
+    const probe = route.kind === 'api'
       ? await probeApi(route.endpoint, source)
       : await probeWeb(route.endpoint, source)
-    if (found.state !== 'unreachable') break
+    if (probe.state === 'ok') { found = probe; break }
+    if (probe.state === 'absent') absent = true
   }
+  // 两条路都没问到标签、但至少有一条明确说过「那边没有最新发布」：这才是结论。
+  // 反过来，两条都只是连不上，那属于「这次没能核对」，与「没有发布」是两件事。
+  if (found.state !== 'ok' && absent) found = { state: 'absent' }
 
   if (found.state === 'unreachable') {
     // 没连上不是「已是最新」。**偶尔一次不吭声**——下次再用就自己好了；但隔久了还没能

@@ -37,12 +37,13 @@
  * 产物里出现它们，说明求值漏了一层，`preflight` 会判红。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
+import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 
@@ -464,17 +465,20 @@ function escapeRe(text) {
 }
 
 // ── 文件操作 ────────────────────────────────────────────────────────
+//
+// 原子写与临时文件清理都从 `lib/fs-atomic.mjs` 取。**这个文件不再自己实现一份**：
+// 同一份「先写临时文件再改名」的逻辑在这里和那里各写一遍时，两处的失败处理会慢慢分叉
+// （一处删临时文件、一处留），而分叉的表现是「有的路径留下的残留，别的路径看不见」。
 
-/** 原子写：先写同目录临时文件再改名，中途被杀不会留下半截文件。 */
-function writeAtomic(path, content) {
-  const tmp = `${path}.tmp-${process.pid}`
-  writeFileSync(tmp, content, 'utf8')
-  try {
-    renameSync(tmp, path)
-  } catch (error) {
-    try { unlinkSync(tmp) } catch { /* 清不掉就留着，下次运行会看到 */ }
-    throw error
-  }
+/**
+ * 剥标记之前先把同名的临时文件收掉。
+ *
+ * 为什么在 `--clean` 里做：`--clean` 是「把这个 skill 留下的东西拿掉」那条命令，
+ * 而临时文件恰恰是它自己留下的。交棒扫描看不看得见它另说（那边另有判据），
+ * 但一条自称「清干净」的命令没有理由把它留着。
+ */
+function clearTempsBeside(agentsPath, { dryRun = false } = {}) {
+  return clearStaleTemps(agentsPath, { dryRun })
 }
 
 /** 只读体检：告诉人这份文件现在什么状态。 */
@@ -599,6 +603,12 @@ async function main(argv) {
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
 
   if (mode === 'clean') {
+    // 先收临时文件再说剥标记：`--clean` 是「把它留下的东西拿掉」那条命令，
+    // 而 `.tmp-<pid>` 恰恰是它自己留下的。清理只删「属主已经不在」的那些。
+    const temps = clearTempsBeside(agentsPath)
+    if (temps.removed.length > 0) {
+      process.stdout.write(`清掉了 ${temps.removed.length} 个上次写到一半留下的临时文件。\n`)
+    }
     const cleaned = stripMarkers(existing, 'AGENTS.md')
     if (cleaned === existing) {
       process.stdout.write('没有标记可剥，文件未改动。\n')

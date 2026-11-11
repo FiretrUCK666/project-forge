@@ -26,13 +26,36 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule, readTextSafe, samePath } from './lib/text.mjs'
+import { scanLines } from './lib/markdown.mjs'
+import { processAlive } from './lib/fs-atomic.mjs'
 import {
   LEGACY_MARKERS, LEGACY_PATH_SPECS, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
 const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
+
+/**
+ * 临时文件名：`原名.tmp-<pid>`。
+ *
+ * 它们必须**也被扫到**，否则「交棒时先清干净本工具留下的临时文件」这条承诺就是假话：
+ * 这个形状的扩展名是 `.tmp-12345`，上面那条 `SCAN_EXT` 一个都不匹配，于是
+ * `--scan` 与 `--verify` 全都看不见它——而它恰恰是这套工具唯一会**主动留下**的东西
+ * （写文件写到一半被杀的时候）。
+ */
+const TEMP_RE = /\.tmp-(\d+)$/
+
+/**
+ * 把一行里的行内代码挖掉，剩下的才是「正文」。
+ *
+ * 判据只处理成对的反引号（`…`），不处理多反引号与转义——那是完整 Markdown 解析的活，
+ * 而这里要防的是一件很具体的事：**正文里举例提到一个路径**，不该被当成真的引用。
+ * 少挖一处（例如 ``…`` 包着的）最坏结果是多报一次，人看一眼就明白了；
+ * 挖多一处是漏报，而漏报在交棒里意味着「以为干净，其实没清」。
+ */
+function stripInlineCode(line) {
+  return String(line ?? '').replace(/`[^`]*`/g, '')
+}const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
 const MAX_DEPTH = 6
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -92,7 +115,7 @@ function walk(root) {
         if (entry.name === '.git') continue
         if (SKIP_DIRS.has(entry.name)) continue
         go(full, depth + 1)
-      } else if (entry.isFile() && SCAN_EXT.test(entry.name)) {
+      } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
         let size = 0
         try { size = statSync(full).size } catch { state.unreadable += 1; continue }
         if (size > MAX_BYTES) { state.skippedLarge += 1; state.truncated = true; continue }
@@ -119,10 +142,18 @@ export function scan(targetDir) {
   const placeholders = []
   const legacyMarkers = []
   const danglingPointers = []
+  const staleTemps = []
   const { files, scan: coverage } = walk(root)
   const selfScan = isSelfScan(root)
 
   for (const rel of files) {
+    // 临时文件不读内容：它的存在本身就是结论，读它只是白花时间。
+    const tempPid = TEMP_RE.exec(rel)?.[1]
+    if (tempPid !== undefined) {
+      const alive = processAlive(Number(tempPid))
+      staleTemps.push({ file: rel, pid: Number(tempPid), alive })
+      continue
+    }
     const text = readTextSafe(join(root, rel))
     if (text === undefined) { coverage.unreadable += 1; continue }
 
@@ -141,12 +172,18 @@ export function scan(targetDir) {
       }
     }
     if (ownSource) continue
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
+    // 悬空指针与旧版标记都只在**围栏之外、且不在行内代码里**才算。
+    //
+    // 这条判据来自一次真实的误报：一份工作记录在正文里写着「目标项目自带
+    // `` `references/arch.md` `` 且里面有标记」，那句话是**举例**，而扫描把它当成了
+    // 一处指向本 skill 内部的悬空指针。交棒时照着处置表去「搬规则、删指针」，
+    // 搬的是一句说明里的示例——而示例删掉之后那句话就读不通了。
+    for (const info of scanLines(text)) {
+      if (info.inFence) continue
+      const line = stripInlineCode(info.line)
       for (const legacy of LEGACY_MARKERS) {
         if (legacy.re.test(line)) {
-          legacyMarkers.push({ file: rel, line: i + 1, what: legacy.what })
+          legacyMarkers.push({ file: rel, line: info.index + 1, what: legacy.what })
         }
       }
       // 只关心「项目自己的文件里出现了本 skill 的内部路径」。本 skill 自己的目录里
@@ -156,7 +193,7 @@ export function scan(targetDir) {
         if (!target.includes('/')) continue
         // 目标项目里真实存在这个相对路径 → 不是悬空指针，是它自己也有同名文件。
         if (existsSync(join(root, target))) continue
-        danglingPointers.push({ file: rel, line: i + 1, target })
+        danglingPointers.push({ file: rel, line: info.index + 1, target })
       }
     }
   }
@@ -172,8 +209,12 @@ export function scan(targetDir) {
 
   const inHandoff = markers.filter((m) => m.kind === 'begin' || m.kind === 'end').length > 0
 
+  // 「属主已经不在」的临时文件才算痕迹。属主还活着的那些属于**正在写文件的那个进程**，
+  // 报成待清理会让人去删别的会话正在用的东西。
+  const deletableTemps = staleTemps.filter((t) => !t.alive)
+
   const total = markers.length + placeholders.length + legacyMarkers.length
-    + legacyPaths.length + danglingPointers.length
+    + legacyPaths.length + danglingPointers.length + deletableTemps.length
 
   return {
     target: { path: root },
@@ -182,6 +223,7 @@ export function scan(targetDir) {
     legacyMarkers,
     legacyPaths,
     danglingPointers,
+    staleTemps,
     total,
     clean: total === 0,
     selfScan,
@@ -265,6 +307,21 @@ export function toText(result) {
     lines.push('')
     lines.push('  处置：这些位置上原本写着一条规则。**直接删指针会把规则一起删掉**——')
     lines.push('  先把那条规则搬进项目自己的文档或脚本，确认搬完再删这一行。')
+    lines.push('')
+  }
+
+  // 临时文件单独一档：它们不含内容，删掉不损失任何东西；而它们恰恰是**本工具自己留下**的，
+  // 交棒时不报，就等于留了一堆没人知道来历的文件在别人的项目里。
+  const temps = (result.staleTemps ?? []).filter((t) => !t.alive)
+  if (temps.length > 0) {
+    lines.push('## 写到一半留下的临时文件（直接删）')
+    lines.push('')
+    for (const t of temps) {
+      lines.push(`- \`${t.file}\`（进程 ${t.pid} 已经不在了）`)
+    }
+    lines.push('')
+    lines.push('  处置：直接删。它们没有正文，是上次写文件被中断时留下的半成品。')
+    lines.push('  一条命令全删：`node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目>" --clean`')
     lines.push('')
   }
 

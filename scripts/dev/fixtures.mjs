@@ -1385,6 +1385,130 @@ cases.push(['清单声明了源仓库，角色就判得出来；没声明时提�
   } finally { rmTree(declared) }
 }])
 
+// ── W5：导航与交付体检 ──────────────────────────────────────────────
+
+cases.push(['导航：缺文档推 docs-set，缺远端推 remote-github，skill 不推插件', async () => {
+  // 正面：一份什么都没有的项目，导航必须把「写文档」与「建远端」这两件事的判据指出来。
+  const bare = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'index.js': 'console.log(1)\n' })
+  try {
+    const f = await survey(bare)
+    const nav = f.navigation ?? []
+    if (nav.length === 0) return 'JSON 里没有 navigation 字段'
+    if (!nav.some((x) => x.includes('docs-set.md'))) return '缺文档却没推 docs-set.md'
+    if (!nav.some((x) => x.includes('version-control.md'))) return '缺 .gitattributes / 没版本库，却没推 version-control.md'
+
+    gitInit(bare)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: bare, stdio: 'ignore' })
+    const g = await survey(bare)
+    const nav2 = g.navigation ?? []
+    if (!nav2.some((x) => x.includes('remote-github.md'))) return '没有 CI / PR 模板，却没推 remote-github.md'
+
+    // JSON 与 Markdown 必须是同一份：两条路各算一遍迟早分叉。
+    const md = (await runNode('survey.mjs', [bare, '--markdown'])).stdout
+    for (const item of nav2) {
+      const head = item.split('——')[0].replace(/^\*\*/, '').slice(0, 20)
+      if (!md.includes(head)) return `Markdown 报告里少了一条导航：${head}`
+    }
+    return true
+  } finally { rmTree(bare) }
+}])
+
+cases.push(['导航：能力目录只推 skill 那一份，不推插件与制品库', async () => {
+  const skill = tmpProject({
+    'SKILL.md': '---\nname: demo\ndescription: 一个示例能力目录。\n---\n\n# demo\n',
+    'README.md': '# d\n\n说明足够长。\n',
+  })
+  try {
+    const f = await survey(skill)
+    const nav = f.navigation ?? []
+    if (!nav.some((x) => x.includes('skill-project.md'))) return 'skill 项目没推 skill-project.md'
+    // 反面：能力目录靠克隆分发，插件与制品库那两套判据对它不成立。
+    if (nav.some((x) => x.includes('plugin-ecosystems.md'))) return '把插件判据推给了能力目录'
+    if (nav.some((x) => x.includes('publish.md'))) return '把制品库判据推给了能力目录'
+
+    // 另一面：真插件项目必须推插件那一份。
+    const plugin = tmpProject({
+      'README.md': '# p\n\n说明足够长。\n',
+      'manifest.json': '{"id":"demo","minAppVersion":"1.0.0"}',
+      'main.js': 'module.exports = {}\n',
+    })
+    try {
+      const g = await survey(plugin)
+      if (!(g.navigation ?? []).some((x) => x.includes('plugin-ecosystems.md'))) return '插件项目没推插件判据'
+      return true
+    } finally { rmTree(plugin) }
+  } finally { rmTree(skill) }
+}])
+
+cases.push(['Markdown 报告带上运行环境、多生态命令与既有约定，不写成 undefined', async () => {
+  const dir = tmpProject({
+    'README.md': '# d\n\n说明足够长。\n',
+    'package.json': '{"name":"web","version":"1.0.0","engines":{"node":">=20"},"scripts":{"test":"node --test"}}',
+    'pyproject.toml': '[project]\nname = "api"\nversion = "1.0.0"\nrequires-python = ">=3.11"\n',
+    'tests/test_api.py': 'def test_ok():\n    assert True\n',
+  })
+  try {
+    const md = (await runNode('survey.mjs', [dir, '--markdown'])).stdout
+    if (!/运行环境要求/.test(md)) return '报告里没有运行环境要求'
+    if (!md.includes('Node >=20') && !md.includes('>=20')) return '运行环境没写出具体版本'
+    if (!/按生态分开的命令/.test(md)) return '多生态项目没有逐生态列命令'
+    if (!/项目已有的约定/.test(md)) return '报告里没有「已有约定」这一节'
+    if (md.includes('undefined')) return '报告里出现了 undefined'
+
+    // 反面：纯文档项目没有这些内容时，不许留空标题或 undefined。
+    const docs = tmpProject({ 'README.md': '# 手册\n\n内容。\n', 'guide.md': '# 指南\n' })
+    try {
+      const md2 = (await runNode('survey.mjs', [docs, '--markdown'])).stdout
+      if (md2.includes('undefined')) return '纯文档项目的报告里出现了 undefined'
+      return true
+    } finally { rmTree(docs) }
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['体检拦下结构坏掉的契约', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    // 正面：标记不成对时，体检必须报缺——只看「有没有未填的 fill」是看不出来的。
+    await runNode('compose-agents.mjs', [dir])
+    const fillAll = (text) => text.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    const good = fillAll(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+    writeFileSync(join(dir, 'AGENTS.md'), good)
+
+    // 基线：一把修好的契约必须是「齐」，否则下面那条判据永远红、也证明不了什么。
+    const clean = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
+    if (clean.results.some((x) => x.id === 'agents.broken')) return '一份完好的契约被报成了「标记不成对」'
+
+    const broken = good.replace('<!-- project-forge: end 项目定位 -->\n', '')
+    writeFileSync(join(dir, 'AGENTS.md'), broken)
+    const r = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
+    const hit = r.results.find((x) => x.id === 'agents.broken')
+    if (!hit) return '标记不成对，体检没报出来'
+    if (hit.level !== 'missing') return `标记不成对报成了 ${hit.level}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['体检把系统占位署名判成缺，正常署名判成齐', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    gitInit(dir)
+    spawnSync('git', ['config', 'user.name', 'Administrator'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'admin@localhost'], { cwd: dir, stdio: 'ignore' })
+    const r = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
+    const bad = r.results.find((x) => x.id === 'git.identity.placeholder')
+    if (!bad) return 'Administrator / admin@localhost 被当成了合法署名'
+    if (bad.level !== 'missing') return `占位署名报成了 ${bad.level}`
+
+    // 反面：正常署名不许被误伤。
+    spawnSync('git', ['config', 'user.name', 'Dev Person'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'dev@example.com'], { cwd: dir, stdio: 'ignore' })
+    const r2 = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
+    if (r2.results.some((x) => x.id === 'git.identity.placeholder')) return '正常署名被当成了占位'
+    if (!r2.results.some((x) => x.id === 'git.identity.ok')) return '正常署名没有被判成齐'
+    return true
+  } finally { rmTree(dir) }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

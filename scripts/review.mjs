@@ -80,6 +80,47 @@ function finding(level, scope, id, title, extra = {}) {
 }
 
 /**
+ * 契约的结构健康度：标记成对、该有的节都在、内容与模板一致。
+ *
+ * **不在这里重算**：三项判据都住在 `compose-agents.mjs` 里（`inspect` 与
+ * `driftRegions`），这里只把它的结论取过来。两处各写一份的话，`--check` 说红、
+ * 体检说绿的那种事迟早发生，而信哪一个都不对。
+ *
+ * 渲染失败（模板有洞、勘察出错）时返回「都空」并附一句原因：体检不该因为
+ * 契约那一面算不出来就整个崩掉，那一面本来只是它的一项。
+ */
+async function inspectContract(root) {
+  try {
+    const { contractHealth } = await import('./compose-agents.mjs')
+    return await contractHealth(root)
+  } catch (error) {
+    return {
+      broken: [], missing: [], drifted: [], error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+/**
+ * 系统占位署名：推上去之后历史里的提交追溯不到人。
+ *
+ * 判据分两半——名字是这一组系统默认值之一，**或**邮箱落在本地无效域名上。
+ * 两半都要查：只查名字会漏掉 `dev@localhost` 这类「名字像人、邮箱是假的」；
+ * 只查邮箱会漏掉 `Administrator <real@company.com>` 这类「邮箱真、署名是系统装出来的」。
+ *
+ * 为什么这不是 `notice` 而是 `missing`：它不会当场报错（推得上去），但**推上去就撤不回**，
+ * 而且清起来要重写历史。这是「坏了看着还是一片绿」的典型形状。
+ */
+const PLACEHOLDER_NAME = /^(?:administrator|admin|root|user|default|ubuntu|ec2-user|vagrant|runner|builder)$/i
+const PLACEHOLDER_EMAIL_DOMAIN = /@(?:localhost|.*\.local|.*\.localdomain|.*\.internal)$/i
+
+function placeholderIdentity(name, email) {
+  const hits = []
+  if (typeof name === 'string' && PLACEHOLDER_NAME.test(name.trim())) hits.push(`署名是系统默认值「${name.trim()}」`)
+  if (typeof email === 'string' && PLACEHOLDER_EMAIL_DOMAIN.test(email.trim())) hits.push(`邮箱落在本地无效域名上（${email.trim()}）`)
+  return hits
+}
+
+/**
  * 走一遍全部判据，返回扁平的结果记录。
  *
  * 每条判据都必须给 `id` 与 `scope`——`id` 是「决定写在哪」的键，`scope` 是
@@ -136,8 +177,18 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           ref: { file: 'references/version-control.md', section: '提交署名' },
         }))
     } else {
-      add(finding('ok', 'git', 'git.identity.ok',
-        `提交署名是 ${facts.git.identity.name} <${facts.git.identity.email}>（来自 ${facts.git.identity.scope} 层）`))
+      const placeholder = placeholderIdentity(facts.git.identity.name, facts.git.identity.email)
+      if (placeholder.length > 0) {
+        // 报 `missing` 而不报「齐」，也不报「可以更好」：这类署名推上去之后
+        // 历史里的提交追溯不到人，而写下来的动作收不回来。确认是本人之后补上真署名即可。
+        add(finding('missing', 'git', 'git.identity.placeholder',
+          `${placeholder.join('；')}——推上去之后历史里的提交追溯不到人，而写下来就撤不回来。先确认这是谁`, {
+            ref: { file: 'references/version-control.md', section: '提交署名' },
+          }))
+      } else {
+        add(finding('ok', 'git', 'git.identity.ok',
+          `提交署名是 ${facts.git.identity.name} <${facts.git.identity.email}>（来自 ${facts.git.identity.scope} 层）`))
+      }
     }
 
     if (facts.git.role === 'undetermined') {
@@ -265,7 +316,31 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
         }))
     } else {
-      add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位`))
+      // **光「没有未填的占位」不代表契约完好。**
+      //
+      // 三种坏法都不带 fill，却都让这份契约不再可用：标记没成对（有人手改坏了）、
+      // 缺了本该有的节（建好远端之后没重跑生成）、内容与模板脱节（模板加了规则而
+      // 这份还停在旧版）。只查 fill 那一档，这三种会一起报「已就绪」——而它是假绿。
+      // 判据直接取 `compose-agents` 的，不在这里重算一遍。
+      const health = await inspectContract(root)
+      if (health.broken.length > 0) {
+        add(finding('missing', 'agents', 'agents.broken',
+          `${facts.docs.agents.file} 的受管标记没成对：${health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
+      } else if (health.missing.length > 0) {
+        add(finding('missing', 'agents', 'agents.missing-sections',
+          `${facts.docs.agents.file} 缺 ${health.missing.length} 节（条件为真却没有）：${health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
+      } else if (health.drifted.length > 0) {
+        add(finding('missing', 'agents', 'agents.drifted',
+          `${facts.docs.agents.file} 有 ${health.drifted.length} 段与模板不一致：${health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
+      } else {
+        add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位，结构也完整`))
+      }
     }
     if (facts.docs.otherAiConventions.length > 0) {
       add(finding('notice', 'agents', 'agents.other-conventions',

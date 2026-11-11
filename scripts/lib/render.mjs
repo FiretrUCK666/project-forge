@@ -87,23 +87,75 @@ export function toMarkdown(facts) {
   if (facts.workspace.declared) {
     lines.push(`- **多包仓库**：是${facts.workspace.packages.length ? `（${facts.workspace.packages.length} 个子包）` : ''}`)
   }
+  // 运行环境要求来自清单声明，不是猜的：写 README 的那一节要用它，
+  // 而「Node 18 或更高」这种写法正是 `templates/readme.md` 明令禁止的。
+  const runtime = facts.artifacts?.runtimeRequirements ?? []
+  if (runtime.length > 0) lines.push(`- **运行环境要求**（清单里写的）：${runtime.join('、')}`)
   lines.push('')
 
   const cmdEntries = Object.entries(facts.commands)
   lines.push('## 探测到的命令')
   lines.push('')
+  const label = {
+    install: '安装', build: '构建', typecheck: '类型检查', lint: '静态检查',
+    test: '测试', verify: '综合验证',
+  }
   if (cmdEntries.length === 0) {
     lines.push('一个都没探到。纯文档项目属正常；其他情况要读源码补充，**不要凭生态惯例编一个**。')
   } else {
-    const label = {
-      install: '安装', build: '构建', typecheck: '类型检查', lint: '静态检查',
-      test: '测试', verify: '综合验证',
-    }
     for (const [key, value] of cmdEntries) {
       lines.push(`- **${label[key] ?? key}**：\`${value}\``)
     }
   }
+
+  // 多生态并存时**逐生态全量列出**。只给顶层那几张表，写文档与配 CI 的人会以为
+  // 后端没有命令——而只测一半的 CI 看起来完全正常：测试绿着，另一半一次没跑过。
+  const byEco = facts.commandsByEcosystem ?? {}
+  const ecoKeys = Object.keys(byEco).filter((k) => Object.keys(byEco[k] ?? {}).length > 0)
+  if (ecoKeys.length > 1) {
+    lines.push('')
+    lines.push('**按生态分开的命令**（每个都要出现在契约与 CI 里，别只取一份）：')
+    for (const kind of ecoKeys) {
+      const pairs = Object.entries(byEco[kind]).map(([k, v]) => `${label[k] ?? k} \`${v}\``)
+      lines.push(`- **${kind}**：${pairs.join('；')}`)
+    }
+  }
+
+  // 子目录里的生态（前后端分离那种布局）：根目录没有清单，命令藏在子目录里。
+  const subdirs = facts.ecosystem?.subdirs ?? []
+  if (subdirs.length > 0) {
+    lines.push('')
+    lines.push('**根目录没有清单，命令在子目录里**：' + subdirs.map((s) => `\`${s.dir}/\`（${s.kinds.join('、')}）`).join('、')
+      + '——写契约与 CI 时要带上目录前缀，否则命令在仓库根跑不起来')
+  }
   lines.push('')
+
+  // 既有约定：默认分支、标签形状、提交风格、工作记录目录。
+  // 这几项决定了契约里写什么，写错的表现是每条命令都指向不存在的东西。
+  const conv = facts.conventions ?? {}
+  const convBits = []
+  if (conv.defaultBranch) convBits.push(`默认分支 \`${conv.defaultBranch}\``)
+  if (conv.tagPrefix !== undefined) convBits.push(`标签${conv.tagPrefix === '' ? '**不带** `v` 前缀' : '带 `v` 前缀'}`)
+  if (conv.commitStyle) convBits.push(`提交风格 \`${conv.commitStyle}\``)
+  if (conv.workDir) convBits.push(`工作记录放 \`${conv.workDir}/\``)
+  if ((conv.workflowTooling ?? []).length > 0) convBits.push(`已在用的发版/提交工具 ${conv.workflowTooling.join('、')}`)
+  if (convBits.length > 0) {
+    lines.push('## 项目已有的约定（写契约时照它，别按默认值写）')
+    lines.push('')
+    lines.push(`- ${convBits.join('；')}`)
+    lines.push('')
+  }
+
+  // 仓库自带的 skills：它们是**项目的一部分**，不是痕迹，交棒时不要碰。
+  const localSkills = facts.localSkills ?? []
+  if (localSkills.length > 0) {
+    lines.push('## 仓库自带的 skills（是内容，不是痕迹）')
+    lines.push('')
+    for (const s of localSkills) {
+      lines.push(`- \`${s.path}\`${s.valid ? '' : ' —— **入口声明不合法**，宿主会静默丢掉它'}`)
+    }
+    lines.push('')
+  }
 
   if (facts.gaps.length > 0) {
     lines.push('## 缺口')
@@ -188,35 +240,121 @@ export function toMarkdown(facts) {
 }
 
 /**
- * 报告末尾的「下一步读哪一份」。
+ * 报告末尾的「下一步读哪一份」。**纯函数**：给一份事实，回一组条目。
  *
  * 这一段存在的理由只有一个：**AI 读完报告就直接动手**。它此刻的注意力全在这个函数的
  * 返回值上，而「去读 references/xxx.md」写在入口文件的第三屏，那时已经不在它的注意力里。
  * 把它放在**工具输出里**，并且按本次命中的事实精确到「哪一份、哪一节」，读它就成了
  * 下一步最省力的动作——省力的那一条才会被走。
  *
- * 内容是**由事实推出来的**，不是固定文案：没命中插件就不会有人说「去读插件契约」。
+ * ## 为什么必须是纯函数、而且挂在 facts 上
+ *
+ * 两条输出路径（`--json` 给程序、`--markdown` 给人）各算一遍导航，迟早会分叉：
+ * 实测过一次——JSON 那条路**压根没有导航字段**，于是照着 JSON 往下走的 AI
+ * 一条必读清单都拿不到，而它以为自己已经看全了。算一次、两边共用，这种分叉就不存在。
+ *
+ * ## 触发条件是「这次要动手的事」，不是「这个项目长什么样」
+ *
+ * 每一条都对着一个**具体的、不读就会踩坑的动作**：没 README 就要写文档、没远端就要建仓库、
+ * 有未填的 fill 就要先读完代码再填。项目里没有这件事时，多派一份文档只是在稀释注意力。
  */
-function appendNavigation(lines, facts) {
+export function computeNavigation(facts) {
   const items = []
   const kinds = facts.ecosystem?.kinds ?? []
   const hasCommands = Object.keys(facts.commands ?? {}).length > 0
-  const isPluginOrSkill = kinds.some((k) => k === 'skill' || k.endsWith('-plugin') || k.endsWith('-extension'))
+  const git = facts.git ?? {}
+  const docs = facts.docs ?? {}
+  const risks = facts.risks ?? {}
+  const ignores = facts.ignores ?? {}
+  const secrets = risks.secretFiles ?? []
+  const isPlugin = kinds.some((k) => k.endsWith('-plugin') || k.endsWith('-extension'))
+  const isSkill = kinds.includes('skill')
 
-  if (facts.git?.present !== true || facts.git?.isRepoRoot === false
-    || facts.ignores?.unignoredOutputDirs?.length > 0
-    || (facts.risks?.secretFiles ?? []).some((f) => f.status === 'tracked' || f.status === 'exposed')) {
+  // ── 版本控制：只要这次可能动 git，就必须先读 ──────────────────────
+  //
+  // 触发条件列全了，因为漏掉任何一条，对应的那个动作就会在没有判据的情况下发生：
+  // 一条已入库的凭据、一处没忽略的产物目录、一个浅克隆，都不是「看起来没问题」的事。
+  const gitTriggers = [
+    git.present !== true,
+    git.isRepoRoot === false,
+    git.isBare === true,
+    git.isShallow === true,
+    (git.nestedRepos ?? []).length > 0,
+    ignores.unignoredOutputDirs?.length > 0,
+    (ignores.ignoredButTracked ?? []).length > 0,
+    !ignores.hasGitattributes && (git.trackedFiles ?? 0) > 0,
+    secrets.some((f) => f.status === 'tracked' || f.status === 'exposed'),
+    (risks.secretContent ?? []).length > 0,
+    (risks.largeFiles ?? []).length > 0,
+    git.commitsState === 'unreadable',
+  ]
+  if (gitTriggers.some(Boolean)) {
     items.push('`references/version-control.md` 全文——**未读之前不要执行 `git init` / `git add` / `git commit`**。'
-      + '里面有几条靠常识推不出来的判据：`.gitattributes` 的行尾清单、worktree 的识别方式、'
+      + '里面有几条靠常识推不出来的判据：`.gitattributes` 的行尾清单、worktree 与裸仓库的识别方式、'
       + '占位署名（`Administrator` 一类）未确认前严禁推送、已推送与未推送凭据的处置完全不同')
   }
 
-  if (isPluginOrSkill) {
-    items.push('`references/skill-project.md` + `references/plugin-ecosystems.md` 里对应宿主那一节——'
+  // ── 文档套装：缺文档、或有没填完的契约时 ──────────────────────────
+  const agentFills = docs.agentsMarkers?.fills ?? []
+  const docsTriggers = [
+    !docs.readme,
+    !docs.agents,
+    agentFills.length > 0,
+    !docs.license,
+    (docs.otherAiConventions ?? []).length > 0,
+  ]
+  if (docsTriggers.some(Boolean)) {
+    const why = []
+    if (!docs.readme) why.push('没有 README')
+    if (!docs.agents) why.push('没有 AGENTS.md')
+    if (agentFills.length > 0) why.push(`AGENTS.md 还有 ${agentFills.length} 处没填`)
+    if (!docs.license) why.push('没有 LICENSE')
+    if ((docs.otherAiConventions ?? []).length > 0) why.push(`另有 ${(docs.otherAiConventions).length} 份 AI 约定文件要合流`)
+    items.push(`\`references/docs-set.md\`（${why.join('、')}）——`
+      + '里面写的是「哪些文件必须有、哪些只有该出现时才出现」，以及各篇该写什么、不该写什么。'
+      + '凭常识写出来的 README 会承诺兑现不了的东西，AI 契约会把机制写两遍')
+  }
+
+  // ── 远端：要建仓库、要接 CI、或工作流有风险的形状时 ────────────────
+  const wf = docs.workflowFacts ?? {}
+  const remoteTriggers = [
+    (git.remotes ?? []).length === 0,
+    !wf.hasCheck,
+    wf.usesPullRequestTarget && wf.checkoutsPrHead,
+    !docs.prTemplate,
+  ]
+  if (remoteTriggers.some(Boolean) && git.present === true) {
+    items.push('`references/remote-github.md`——'
+      + '建仓库、首次推送、CI 与发布自动化的顺序与判据都在这里；'
+      + '`pull_request_target` 那一条尤其要读：写错等于让陌生人拿你的密钥跑他的代码')
+  }
+
+  // ── 协作协议：有远端、且这次要落地改动时 ──────────────────────────
+  if ((git.remotes ?? []).length > 0 && git.present === true) {
+    items.push('`references/collaboration.md`——判角色（维护者还是 Fork）、五档分流、谁审谁能合、合并后怎么收尾。'
+      + '凭常识判断「这次改动大不大」是最容易出错的一步')
+  }
+
+  // ── 清理痕迹：只在真的要清的时候 ──────────────────────────────────
+  // （这一段由 `handoff.mjs` 自己带，勘察阶段不推——没说要清痕迹时读它是浪费时间。）
+
+  // ── 生态专属 ──────────────────────────────────────────────────────
+  //
+  // **skill 与 plugin 要分开**：能力目录靠克隆分发、根本没有构建产物，把插件那一套
+  // （产物入不入库、宿主侧标识）推给它，读到的是完全不适用的判据；而插件项目恰好相反。
+  if (isSkill) {
+    items.push('`references/skill-project.md`——能力目录的入口声明、分发方式与版本来源。'
+      + '它不经过制品库，别把「没发布」读成「没做完」')
+  }
+  if (isPlugin) {
+    items.push('`references/plugin-ecosystems.md` 里对应宿主那一节——'
       + '产物入不入库、宿主侧标识改不得、标签要不要带前缀，这三件每错一件都是用户装不上')
   }
 
-  if (facts.ecosystem?.publishable || facts.ecosystem?.registryFree) {
+  // 发布文档只在**真的有制品库形态**时推。「不需要制品库」恰恰是反例：
+  // 能力目录靠克隆分发、Go 的「发布」就是打标签——推一份讲 registry 的文档，
+  // 读到的是完全不适用的判据。打标签那件事在 `remote-github.md` 里。
+  if (facts.ecosystem?.publishable) {
     items.push('`references/publish.md` + `references/publish-ecosystems.md` 里对应生态那一节——'
       + '预演命令、可信发布的三个逐字对齐项、坏版本怎么修正，都不在常识里')
   }
@@ -226,6 +364,11 @@ function appendNavigation(lines, facts) {
       + '不要按生态惯例编一条——编出来的会在 CI 里失败，而那条失败看起来像「代码坏了」')
   }
 
+  return items
+}
+
+function appendNavigation(lines, facts) {
+  const items = facts.navigation ?? computeNavigation(facts)
   if (items.length === 0) return
   lines.push('## 下一步必读（按本次勘察到的事实生成）')
   lines.push('')

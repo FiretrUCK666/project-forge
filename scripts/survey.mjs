@@ -23,8 +23,8 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 
-import { toMarkdown } from './lib/render.mjs'
-import { LIKELY_DEFAULT_BRANCHES } from './lib/protocol.mjs'
+import { computeNavigation, toMarkdown } from './lib/render.mjs'
+import { LIKELY_DEFAULT_BRANCHES, parseMarkers } from './lib/protocol.mjs'
 import {
   githubRepoPath, isMainModule, readJsonSafe, readTextSafe, samePath,
 } from './lib/text.mjs'
@@ -1150,6 +1150,31 @@ function detectOtherAiConventions(root) {
   return [...singles, ...fromDirs]
 }
 
+/** 一眼就能看出是「写给人看的说明」那几个文件名——不算「别的 AI 约定」。 */
+function isAiConventionFile(name) {
+  return /^(?:AGENTS|CLAUDE|GEMINI|CONVENTIONS)\.md$/i.test(name)
+    || /\.(?:cursorrules|clinerules|windsurfrules|mdc)$/i.test(name)
+    || /^copilot-instructions\.md$/i.test(name)
+}
+
+/**
+ * 已有的 AI 约定文件里，还有几处没填的占位。
+ *
+ * 导航要推 `docs-set.md` 的判据之一是「AGENTS.md 还有没填的 fill」——那个数由
+ * `parseMarkers` 给，而它只在 `AGENTS.md` 上跑过。这里给的是同一个答案的**另一条来路**：
+ * 勘察时顺手把 `AGENTS.md` 的标记解析一遍，把 fill 数挂到 `docs.agentsMarkers` 上。
+ * 两条来路必须给同一个数——它们用的是同一个 `parseMarkers`，所以不会分叉。
+ */
+function parseAgentMarkers(root, agents) {
+  if (!agents) return { marks: 0, fills: [] }
+  const text = readTextSafe(join(root, agents)) ?? ''
+  const markers = parseMarkers(text, agents)
+  return {
+    marks: markers.length,
+    fills: markers.filter((m) => m.kind === 'fill').map((m) => ({ line: m.line, what: m.what })),
+  }
+}
+
 function detectDocs(root) {
   let entries = []
   try { entries = readdirSync(root) } catch { /* 空目录 */ }
@@ -1222,6 +1247,8 @@ function detectDocs(root) {
     readme: readmes[0],
     readmePair: readmes.length > 1,
     agents: agents ? { file: agents } : undefined,
+    // 契约里还有几处没填——导航与体检都要这个数，取一次挂在这里，别处不再各算一遍。
+    agentsMarkers: parseAgentMarkers(root, agents),
     contributing,
     releasing,
     changelog,
@@ -1627,6 +1654,10 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.projectGaps = verdict.projectGaps
   facts.projectGapsComputed = true
   facts.maturity = judgeMaturity(facts)
+  // 导航算一次、挂在事实顶层：--json 与 --markdown 共用同一份。
+  // 两条路各算一遍迟早会分叉——实测过 JSON 那条根本没有导航字段，
+  // 照着它往下走的 AI 一条必读清单都拿不到，却以为自己已经看全了。
+  facts.navigation = computeNavigation(facts)
 
   delete gitFacts._hasGit
   delete gitFacts._ignoreProbeOk

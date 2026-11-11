@@ -910,6 +910,30 @@ async function generate(root, agentsPath, template) {
   return 0
 }
 
+/**
+ * 契约的结构健康度：标记成对、该有的节都在、内容与模板一致。
+ *
+ * 这三项判据都住在这里，因为渲染与比对都在这儿。交付体检要判同一件事时**从这里取**，
+ * 不自己再算一遍——两处各算一份，`--check` 说红而体检说绿的那种事迟早发生。
+ *
+ * 只看结构，不判「填得好不好」：那要读代码，脚本给不出答案。
+ */
+export async function contractHealth(root) {
+  const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
+  const facts = await factsOf(root)
+  const rendered = renderAgentsTemplate(facts, template)
+  const agentsPath = join(root, 'AGENTS.md')
+  const info = inspect(agentsPath, rendered)
+  const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
+  return {
+    broken: info.broken ?? [],
+    missing: info.regions.length === 0 ? [] : info.missingRegions ?? [],
+    drifted: info.broken.length > 0 ? [] : driftRegions(existing, rendered, volatileValues(facts)),
+    customized: info.customized ?? [],
+    handWritten: info.regions.length === 0,
+  }
+}
+
 export { TemplateError }
 
 if (isMainModule(import.meta.url, process.argv[1])) {

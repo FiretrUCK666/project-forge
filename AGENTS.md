@@ -185,6 +185,19 @@ git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/pr
 | `.gitattributes` | 它决定用户包里有什么；与 `protocol.mjs` 的 `REPO_ONLY_*` 必须一致 |
 <!-- project-forge: end 高风险路径 -->
 
+<!-- project-forge: begin 取舍 -->
+## 取舍
+
+这一节由维护者手写，脚本不碰。**只有使用者能定的那几件事**记在这里，交付体检会把记下的项当作已表态：
+
+```text
+- `license`：不放，因为这是个人项目
+- `no-ci`：不配，本地跑就够了
+```
+
+可用的键名会在交付体检的「待定」项里逐条给出；删掉某一项就等于重新待定。
+<!-- project-forge: end 取舍 -->
+
 ## 外部易变事实保鲜
 
 `references/` 里有一部分内容会随平台改版过期：字段上限、OIDC 登记窗口、附件要求、

@@ -245,6 +245,9 @@ export function refreshRegions(existing, rendered, volatile = []) {
   const synced = []
 
   for (const region of current.regions) {
+    // 人接管了的段：一个字节不动，也不进 filled / synced。它现在归项目，
+    // 模板以后加什么规则都进不来——这是这个标记的**全部语义**，不再有第二层判断。
+    if (region.customized) { kept.push(region.id); continue }
     const source = freshById.get(region.id)
     if (!source) { kept.push(region.id); continue }
     const renderedBody = renderedLines.slice(source.start + 1, source.end)
@@ -275,10 +278,18 @@ export function refreshRegions(existing, rendered, volatile = []) {
   }
 
   // 只在模板里出现、当前文件里还没有的区间：按模板顺序插进去。
+  //
+  // **「还没有」判两次**：文件里没有这个 id 的标记，**且**也没有同义标题。
+  // 只判前者时，一个把标记删掉、把手写小节留下的人会看到同一节被追插一遍——
+  // 而重复的那一份通常没人读，从此两份各自漂移。
   const inserted = []
+  const existingHeadings = headingLines(existing)
+  const takenSections = new Set(
+    renderedOrder.filter((id) => currentById.has(id) || sectionAlreadyPresent(id, existingHeadings, rendered)),
+  )
   for (let i = 0; i < renderedOrder.length; i += 1) {
     const id = renderedOrder[i]
-    if (currentById.has(id)) continue
+    if (takenSections.has(id)) continue
     if (!freshById.has(id)) continue
     const source = freshById.get(id)
     const block = [
@@ -352,6 +363,9 @@ export function driftRegions(existing, rendered, volatile = []) {
   const drifted = []
 
   for (const region of current.regions) {
+    // 人接管了的段：不比。这一段的内容现在由项目自己的规矩决定，与模板不同是**预期**，
+    // 把它报成漂移只会逼人二选一——改回去丢项目规则，或者把检查关掉。
+    if (region.customized) continue
     const source = freshById.get(region.id)
     if (!source) continue
     const renderedBody = renderedLines.slice(source.start + 1, source.end)
@@ -415,22 +429,80 @@ function normalizeBody(bodyLines, volatile = []) {
  *       把它当成「构建与验证」，用户就永远拿不到那一节命令。
  *   三、**只认标题行，不认正文**。`includes` 会在正文里偶然命中，于是该补的节被跳过。
  */
-const HEADING_LEAD = '^##\\s+(?:\\d+[.)、]\\s*)?(?:[一二三四五六七八九十]+[、.)]\\s*)?'
+const HEADING_PREFIX = /^#{2,3}\s+(?:\d+[.)、]\s*)?(?:[一二三四五六七八九十]+[、.)]\s*)?/
 
-// 词尾判据用 `(?![A-Za-z])` 而不是 `\b`：`\b` 只在 ASCII 词字符与非词字符之间成立，
-// 而中文全是非词字符——`定位` 后面跟换行时**不构成词边界**，于是 `\b` 让整条规则
-// 永远匹配不上，该认出来的节一个都认不出。这个坑不报错，只表现为「已有的节被重复追加」。
-const HEADING_TAIL = '(?![A-Za-z])'
+/**
+ * 受管区间的同义标题词表。
+ *
+ * ## 为什么要有它
+ *
+ * 「这一节已经有了吗」不能用标题逐字相等来答。人会把它写成 `## 构建与测试`、
+ * `## 1. 项目定位`、`## Project Overview`、`## Testing`——**那都是同一节**。
+ * 认不出来就把已有的节再追加一遍，于是两份同名内容从此各自漂移，
+ * 而追加进去的那一份通常没人读。
+ *
+ * ## 判据为什么是「标题里含这个词」而不是正则套住整行
+ *
+ * 英文标题的修饰语没有固定位置：`Overview` 单独出现，也可能写成
+ * `Project Overview`、`Tech Stack & Directory Structure`。用一条「开头必须是这个词」
+ * 的正则不覆盖这些形状，而漏认的代价是**整段中文被追加到一份全英文契约的末尾**——
+ * 那是这份工具在别人项目里留下的最刺眼的东西。
+ *
+ * 判据只在**标题行**上跑（`##` / `###` 开头的行），所以「正文里正好提到这个词」
+ * 不会造成误判；而在标题上多认一节，最坏结果是少追加一节——比多追加一节安全得多。
+ */
+const SECTION_KEYWORDS = {
+  项目定位: { words: ['定位', '简介', '概述', '说明', 'Overview', 'Introduction', 'About'] },
+  架构与关键不变量: { words: ['架构', '结构', '关键不变量', 'Architecture', 'Structure', 'Layout', 'Invariants'] },
+  // 「验证」这个词本身不够专指：`## 验证流程` 讲的是审查流程，不是构建命令。
+  // 把审查、流程一类词排掉，那一节才真的算「还没有」，也才会被补上。
+  构建与验证: {
+    words: ['构建', '验证', '环境', '安装', '开发', '测试', '命令', '运行',
+      'Setup', 'Install', 'Build', 'Test', 'Verif', 'Commands', 'Development', 'Environment'],
+    exclude: ['审查', '流程', '审核', '评审', 'review'],
+  },
+  修改守则: {
+    words: ['修改守则', '硬性规范', '编码规范', '开发规范', '约定', '红线',
+      'Rules', 'Guidelines', 'Conventions', 'Standards', 'Coding', 'Style'],
+  },
+  版本与发布: { words: ['版本', '发布', '发版', 'Version', 'Release', 'Publish'] },
+  日常协作与风险分流: {
+    words: ['协作', '改动怎么落地', '工作流', '分支', '提交',
+      'Workflow', 'Collaboration', 'Contributing', 'Pull Request', 'Branch', 'Commit'],
+  },
+  高风险路径: { words: ['高风险', '风险', 'Risk', 'Sensitive'] },
+  取舍: { words: ['取舍', '决定', '选型', 'Decisions', 'Trade-off', 'Tradeoff'] },
+}
 
-const SECTION_SYNONYMS = {
-  项目定位: new RegExp(`${HEADING_LEAD}(?:项目)?(?:定位|简介|概述|Overview)${HEADING_TAIL}`, 'imu'),
-  架构与关键不变量: new RegExp(`${HEADING_LEAD}(?:项目)?(?:架构|结构|目录结构|关键不变量|Architecture)${HEADING_TAIL}`, 'imu'),
-  构建与验证: new RegExp(`${HEADING_LEAD}(?:环境与)?(?:(?:构建|安装|开发)(?:与|和|及)?(?:验证|测试|命令|运行)?|验证与构建|Build|Test|Commands)${HEADING_TAIL}`, 'imu'),
-  修改守则: new RegExp(`${HEADING_LEAD}(?:工程)?(?:修改守则|硬性规范|编码规范|开发规范|约定|Rules|Guidelines|Conventions)${HEADING_TAIL}`, 'imu'),
-  版本与发布: new RegExp(`${HEADING_LEAD}(?:版本|发布|发版|Version|Release)${HEADING_TAIL}`, 'imu'),
-  日常协作与风险分流: new RegExp(`${HEADING_LEAD}(?:日常)?(?:协作|改动怎么落地|工作流|Workflow|Collaboration)${HEADING_TAIL}`, 'imu'),
-  高风险路径: new RegExp(`${HEADING_LEAD}高风险`, 'imu'),
-  取舍: new RegExp(`${HEADING_LEAD}取舍`, 'imu'),
+/**
+ * 某一节的标题是不是已经在文档里了。
+ *
+ * 注册过的按词表判（含排除词）；渲染结果里新出现、还没登记的节，退回「用渲染出来的
+ * 那个标题逐字找」——不退回就等于「这一节永远算缺」，每跑一次多插一份。
+ */
+function sectionAlreadyPresent(id, headingsText, rendered) {
+  const rule = SECTION_KEYWORDS[id]
+  if (rule !== undefined) {
+    const titles = headingsText.split('\n').map((line) => line.replace(HEADING_PREFIX, '').trim())
+    return titles.some((title) => {
+      const lower = title.toLowerCase()
+      if ((rule.exclude ?? []).some((w) => lower.includes(w.toLowerCase()))) return false
+      return rule.words.some((w) => lower.includes(w.toLowerCase()))
+    })
+  }
+  const normal = renderedTitleOf(id, rendered)
+  if (normal === undefined) return false
+  return headingsText.split('\n')
+    .some((line) => line.replace(HEADING_PREFIX, '').trim() === normal)
+}
+
+/** 渲染结果里某一节的可见标题（去掉 `##` 与首尾空白）。 */
+function renderedTitleOf(id, rendered) {
+  const lines = String(rendered ?? '').replace(/\r\n/g, '\n').split('\n')
+  const region = markerRegions(rendered, 'AGENTS.md').regions.find((r) => r.id === id)
+  if (region === undefined) return undefined
+  const heading = lines.slice(region.start + 1, region.end).find((line) => /^##\s+/.test(line))
+  return heading === undefined ? undefined : heading.replace(/^##\s+/, '').trim()
 }
 
 export function collectMissingSections(rendered, existing) {
@@ -438,11 +510,7 @@ export function collectMissingSections(rendered, existing) {
   const { regions } = markerRegions(rendered, 'AGENTS.md')
   // 只拿**标题行**去比对。正文里偶然出现「构建与验证」这几个字不该被读成「这一节已经有了」
   // ——那会让该补的节被跳过，而缺的那一节从此没人发现。
-  const headings = String(existing ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .filter((line) => /^##\s+/.test(line))
-    .join('\n')
+  const headings = headingLines(existing)
   const out = []
   for (const region of regions) {
     const block = [
@@ -452,12 +520,34 @@ export function collectMissingSections(rendered, existing) {
     ]
     const heading = block.find((line) => /^##\s+/.test(line))
     if (!heading) continue
-    const pattern = SECTION_SYNONYMS[region.id]
-      ?? new RegExp(`^##\\s+${escapeRe(heading.replace(/^##\s+/, '').trim())}`, 'imu')
-    if (pattern.test(headings)) continue
+    if (sectionAlreadyPresent(region.id, headings, rendered)) continue
     out.push(block.join('\n'))
   }
   return out
+}
+
+/**
+ * 手写契约的**最小覆盖检查**。
+ *
+ * `--check` 早先对「没有任何受管标记」的文件一律放行，理由是「手写的契约可能比模板更
+ * 贴合这个项目」。那个理由仍然成立，但它管不到另一种情况：**一份只有一行标题的空壳**。
+ * 空壳在报告里的表现与一份认真写过的契约完全一样——都是「已就绪」——而这正是
+ * 「看起来有、其实是空的」最典型的一例。
+ *
+ * 判据取得很松，只问三件事有没有被回答：**这是什么项目**、**怎么构建和验证**、
+ * **改动的边界在哪**。三者齐全且正文有实质内容，就认为它是认真的手写契约；
+ * 缺任何一项，报告里说的是「建议 `--upgrade` 补齐」，不是「你还得重写」。
+ */
+export function handWrittenCoverage(text) {
+  const body = String(text ?? '').replace(/\r\n/g, '\n')
+  const contentLines = body.split('\n').filter((line) => line.trim() !== '' && !/^#/.test(line))
+  const chars = contentLines.join('').replace(/\s/g, '').length
+  const has = (words) => words.some((w) => body.includes(w))
+  const missing = []
+  if (!has(['定位', '简介', '概述', '做什么', 'Overview', 'About', 'Introduction'])) missing.push('项目定位')
+  if (!has(['构建', '安装', '运行', '测试', '命令', 'Setup', 'Install', 'Build', 'Test', 'Commands'])) missing.push('构建与验证')
+  if (!has(['守则', '规范', '约定', '红线', '高风险', 'Rules', 'Guidelines', 'Conventions', 'Standards'])) missing.push('修改边界')
+  return { chars, missing, ok: chars >= 400 && missing.length === 0 }
 }
 
 function escapeRe(text) {
@@ -481,24 +571,53 @@ function clearTempsBeside(agentsPath, { dryRun = false } = {}) {
   return clearStaleTemps(agentsPath, { dryRun })
 }
 
+/**
+ * 模板要、文件里却没有的节。
+ *
+ * 判据有三层，缺一层就会出现「补了不该补的」或「没补该补的」：
+ *
+ *   一、**文件里有没有这个 id 的标记**——最直接的那一层；
+ *   二、**有没有同义标题**——人删掉标记去自己接管某一节时，标题还在。这时候再追插
+ *       一份同名章节，结果就是文档里两节讲同一件事，而其中一节从此没人读；
+ *   三、**模板里这一节的标题是否真的存在**——渲染结果没有这一节（条件为假）时不该报缺。
+ */
+function missingRegionsOf(presentIds, rendered, existingText) {
+  const wanted = markerRegions(rendered, 'AGENTS.md').regions.map((r) => r.id)
+  const headings = headingLines(existingText)
+  return wanted.filter((id) => !presentIds.has(id) && !sectionAlreadyPresent(id, headings, rendered))
+}
+
+/** 文档里所有 `##` / `###` 标题行拼起来。比对只在这上面做，正文里偶然出现不算。 */
+function headingLines(text) {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((line) => /^#{2,3}\s+/.test(line))
+    .join('\n')
+}
+
 /** 只读体检：告诉人这份文件现在什么状态。 */
 function inspect(agentsPath, rendered) {
   const text = readTextSafe(agentsPath)
   if (text === undefined) {
-    return { state: 'unreadable', fills: [], regions: [], broken: [], missingRegions: [] }
+    return {
+      state: 'unreadable', fills: [], regions: [], broken: [], missingRegions: [], customized: [],
+    }
   }
   const markers = parseMarkers(text, 'AGENTS.md')
   const fills = markers.filter((m) => m.kind === 'fill')
   const regions = markerRegions(text, 'AGENTS.md')
   const present = new Set(regions.regions.map((r) => r.id))
-  const wanted = markerRegions(rendered, 'AGENTS.md').regions.map((r) => r.id)
-  const missingRegions = wanted.filter((id) => !present.has(id))
+  // 定制过的段单独列出来：它们在 `--check` 里既不报漂移、也不会被刷新，
+  // 使用者有权知道「这几段脚本不再管」。
+  const customized = regions.regions.filter((r) => r.customized).map((r) => r.id)
   return {
     state: fills.length > 0 ? 'has-fills' : 'ok',
     fills,
     regions: regions.regions,
     broken: regions.broken,
-    missingRegions,
+    customized,
+    missingRegions: missingRegionsOf(present, rendered, text),
     text,
   }
 }
@@ -526,6 +645,12 @@ function report(agentsPath, info, { verbose = false } = {}) {
     return
   }
   process.stdout.write(`${name}：${info.regions.length} 段受管内容（${info.regions.map((r) => r.id).join('、')}）\n`)
+  if (info.customized && info.customized.length > 0) {
+    // 这一段是使用者自己的：脚本不再改它，也不再拿它跟模板比。说清这一点的用处很具体——
+    // 否则「模板更新了而这一节没变」看起来像漏刷新，人会去手改一个本该由他自己维护的段。
+    process.stdout.write(`${info.customized.length} 段已由你接管、脚本不再改动：${info.customized.join('、')}`
+      + '（标记里带 `customized`；想交回去就删掉那个词）\n')
+  }
   if (info.missingRegions.length > 0) {
     process.stdout.write(`还有 ${info.missingRegions.length} 节该有却没有：${info.missingRegions.join('、')}\n`
       + '（模板里的条件现在为真，所以这一节该在。跑一次不带参数就会补上，已有内容不动。）\n')

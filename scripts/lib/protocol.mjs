@@ -161,11 +161,28 @@ function insideInlineCode(line) {
 }
 
 /**
- * 找出文本里的 `begin <id>` / `end <id>` 配对区间，返回 `[{ id, start, end }]`。
+ * 找出文本里的 `begin <id>` / `end <id>` 配对区间，返回 `[{ id, start, end, customized }]`。
  *
  * `start`/`end` 都是标记行本身的下标，**区间内容不含这两行**。配不上对的区间不返回，
  * 而是在 `broken` 里报出——半对锚点意味着文件被手工改坏了，此时正确动作是报出来让人看，
  * 不是猜一个位置去覆盖。
+ *
+ * ## `customized`：这一段归人了
+ *
+ * 模板里的受管区间分两种：**由事实推出来的**（命令、分支名、协作流程）与**要人写的**
+ * （项目定位、关键不变量）。前者一个字节都不该跟模板不同，后者一旦填过就不该再动。
+ *
+ * 但还有第三种情况，它本来无处安放：**人把项目自己的规矩融合进了事实推出的那一段**。
+ * 例如这个项目用 changesets 发版、用 GitFlow 切分支——模板那套默认话术对它是错的，
+ * 而改写之后本该保留。用「有没有 `fill`」判不出来（那一节没有 fill），于是：
+ *
+ *   - 改写它 → `--check` 报漂移；
+ *   - 不跑刷新 → 模板以后加的规则永远进不来；
+ *   - 跑一次刷新 → 改写被冲掉。
+ *
+ * `begin <id> customized` 把这一段的归属明确成「人接管了」：刷新不碰、漂移不比、
+ * 报告里点名。它的语义只有这一条，不引入新的标记类别——`end` 只按 id 配，
+ * 不看这个 flag。
  */
 export function markerRegions(text, file) {
   const markers = parseMarkers(text, file)
@@ -174,17 +191,27 @@ export function markerRegions(text, file) {
   const open = new Map()
   for (const mark of markers) {
     if (mark.kind === 'begin') {
-      if (open.has(mark.id)) broken.push(mark.id)
-      open.set(mark.id, mark.index)
+      const { id, customized } = parseBeginMark(mark.id)
+      if (open.has(id)) broken.push(id)
+      open.set(id, { index: mark.index, customized })
     } else if (mark.kind === 'end') {
-      const start = open.get(mark.id)
-      if (start === undefined) { broken.push(mark.id); continue }
-      open.delete(mark.id)
-      regions.push({ id: mark.id, start, end: mark.index })
+      const { id } = parseBeginMark(mark.id)
+      const opened = open.get(id)
+      if (opened === undefined) { broken.push(id); continue }
+      open.delete(id)
+      regions.push({ id, start: opened.index, end: mark.index, customized: opened.customized })
     }
   }
   for (const id of open.keys()) broken.push(id)
   return { regions, broken }
+}
+
+/** `begin` 那一行正文的解析：`<id>` 后面可以跟一个 `customized`。**只有这一处**。 */
+export function parseBeginMark(rest) {
+  const text = String(rest ?? '').trim()
+  const m = /^(.*?)\s+customized$/.exec(text)
+  if (m === null) return { id: text, customized: false }
+  return { id: m[1].trim(), customized: true }
 }
 
 /**

@@ -42,7 +42,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { survey, readTextSafe, samePath } from './survey.mjs'
-import { markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
+import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -161,6 +161,28 @@ export function renderAgentsTemplate(facts, templateText) {
   return renderTemplate(templateText, buildConditions(facts), buildVars(facts), 'template.md')
 }
 
+/**
+ * 比对受管区间之前，把**由运行环境决定**的取值抹掉。
+ *
+ * 受管区间里有一部分正文来自「跑在哪台机器上」，而不是项目本身：默认分支名就是一个。
+ * 它可能取自 `origin/HEAD`（本地有、浅检出里常常没有），也可能取自 `init.defaultBranch`
+ * （开发机上设了、CI 上没有）。同一个项目在两台机器上渲染出两个不同的分支名，于是
+ * 「内容与模板不一致」这条判据会在 CI 上假红——而它本该守的是「模板加了规则而这份文件
+ * 没跟上」，两件完全不同的事。
+ *
+ * **抹的是「所有可能的默认分支名」，不是「这次算出来的那一个」。** 只抹当前那一个等于
+ * 假设两边算出同一个值，而那正是失效的前提。常见分支名是一份稳定的集合，与环境无关——
+ * 把它整份抹掉，比对才真的与跑在哪里无关。
+ */
+function volatileValues(facts) {
+  const detected = facts.conventions?.defaultBranch
+  const values = [...LIKELY_DEFAULT_BRANCHES]
+  if (typeof detected === 'string' && detected.length >= 2 && !values.includes(detected)) {
+    values.push(detected)
+  }
+  return values
+}
+
 // ── 区间刷新 ────────────────────────────────────────────────────────
 
 /**
@@ -199,7 +221,7 @@ function fillLinesOf(text) {
  * `splice(at, 0, x)` 每插一次就把后面的推后一格，所以在同一个 `at` 上连着插 A、B，
  * 结果会是 B、A——与模板相反。同一位置的多个操作因此要按模板倒序落。
  */
-export function refreshRegions(existing, rendered) {
+export function refreshRegions(existing, rendered, volatile = []) {
   const current = markerRegions(existing, 'AGENTS.md')
   const fresh = markerRegions(rendered, 'AGENTS.md')
   if (current.broken.length > 0) {
@@ -236,7 +258,7 @@ export function refreshRegions(existing, rendered) {
       filled.push(region.id)
     } else {
       // 这一节完全由事实推出：只要内容与渲染结果不同就跟上。
-      if (normalizeBody(bodyLines) === normalizeBody(renderedBody)) { kept.push(region.id); continue }
+      if (normalizeBody(bodyLines, volatile) === normalizeBody(renderedBody, volatile)) { kept.push(region.id); continue }
       synced.push(region.id)
     }
 
@@ -315,7 +337,7 @@ export function refreshRegions(existing, rendered) {
  * 覆盖是不可逆的写操作，而「模板改了什么、我要不要跟」这个判断该由人做一次。
  * 报出来、人看一眼、跑一次刷新（或者手改）就好；猜错方向的代价要比多看一眼大得多。
  */
-export function driftRegions(existing, rendered) {
+export function driftRegions(existing, rendered, volatile = []) {
   const current = markerRegions(existing, 'AGENTS.md')
   const fresh = markerRegions(rendered, 'AGENTS.md')
   if (current.broken.length > 0) return []
@@ -332,19 +354,46 @@ export function driftRegions(existing, rendered) {
     // 渲染结果里还有 fill → 这一节要人写，不比。
     if (parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')) continue
 
-    const a = normalizeBody(lines.slice(region.start + 1, region.end))
-    const b = normalizeBody(renderedBody)
+    const a = normalizeBody(lines.slice(region.start + 1, region.end), volatile)
+    const b = normalizeBody(renderedBody, volatile)
     if (a !== b) drifted.push(region.id)
   }
   return drifted
 }
 
+/**
+ * 阈值：把「由运行环境决定」的取值从比对里抹掉。
+ *
+ * 受管区间里有一部分正文来自**跑在哪台机器上**，而不是项目本身：默认分支名就是一个
+ * ——它可能取自 `origin/HEAD`（本地有、浅检出里常常没有），也可能取自 `init.defaultBranch`
+ * （开发机上设了、CI 上没有）。同一个项目在两台机器上渲染出两个不同的分支名，于是
+ * 「内容与模板不一致」这条判据会在 CI 上假红，而它本该守的是另一件事。
+ *
+ * 判据切分得很清楚：
+ *
+ *   - **要守的**：模板加了规则而这份文件没跟上。那是**项目内容**的漂移。
+ *   - **不守的**：分支名、机器配置这类取值。它们变了不是漂移，是换了个地方跑。
+ *
+ * 所以比对之前，把这一类取值从两边一起抹成同一个记号。抹掉之后仍然不同的，才是真的漂移。
+ */
+function maskVolatile(text, values) {
+  let out = text
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length < 2) continue
+    out = out.split(value).join('\u0000VOLATILE\u0000')
+  }
+  return out
+}
+
 /** 比对前把空白差异抹平：空行的多少不是漂移，内容才是。 */
-function normalizeBody(bodyLines) {
-  return bodyLines
-    .map((line) => line.replace(/\s+$/, ''))
-    .filter((line) => line.trim() !== '')
-    .join('\n')
+function normalizeBody(bodyLines, volatile = []) {
+  return maskVolatile(
+    bodyLines
+      .map((line) => line.replace(/\s+$/, ''))
+      .filter((line) => line.trim() !== '')
+      .join('\n'),
+    volatile,
+  )
 }
 
 /**
@@ -559,8 +608,9 @@ async function main(argv) {
 
   // 渲染要勘察事实。`--clean` 之外的模式都需要它：连「该有哪些节」都由事实决定。
   let rendered
+  let facts
   try {
-    const facts = await factsOf(root)
+    facts = await factsOf(root)
     rendered = renderAgentsTemplate(facts, template)
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
@@ -594,7 +644,7 @@ async function main(argv) {
       process.stderr.write(`AGENTS.md 缺 ${info.missingRegions.length} 节（条件为真却没有）：${info.missingRegions.join('、')}\n`)
       bad = true
     }
-    const drifted = driftRegions(existing, rendered)
+    const drifted = driftRegions(existing, rendered, volatileValues(facts))
     if (drifted.length > 0) {
       process.stderr.write(`AGENTS.md 有 ${drifted.length} 段与模板不一致：${drifted.join('、')}\n`
         + '  这几段的内容完全由项目事实决定，本该与模板渲染结果逐字相同。'
@@ -624,7 +674,7 @@ async function main(argv) {
 
   // 默认：有受管标记就刷新（填空 + 跟上模板 + 插新节），没有就只报。
   if (mode === 'default' && info.regions.length > 0 && info.broken.length === 0) {
-    const refreshed = refreshRegions(existing, rendered)
+    const refreshed = refreshRegions(existing, rendered, volatileValues(facts))
     if (refreshed.changed) {
       writeAtomic(agentsPath, refreshed.text)
       const bits = []

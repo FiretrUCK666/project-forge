@@ -726,6 +726,38 @@ cases.push(['模板改了而本仓库实例没跟上时，--check 会红；刷�
   } finally { rmTree(dir) }
 }])
 
+cases.push(['默认分支名换个环境算出来不一样，不算漂移；真加了规则才算', async () => {
+  // 受管区间里有一部分正文来自「跑在哪台机器上」：默认分支名可能取自 origin/HEAD（本地有、
+  // 浅检出里常常没有），也可能取自 init.defaultBranch（开发机设了、CI 上没有）。同一个项目
+  // 在两台机器上渲染出两个不同的分支名——那是换了个地方跑，不是模板变了。
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const filled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    writeFileSync(join(dir, 'AGENTS.md'), filled)
+
+    const ok = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (ok.status !== 0) return `填完之后没过：${(ok.stderr || '').trim().split('\n')[0]}`
+
+    // 模拟另一台机器：同一个项目、换一个默认分支名。
+    const renamed = filled.replace(/git checkout main\b/g, 'git checkout trunk')
+    if (renamed === filled) return '夹具没找到分支名'
+    writeFileSync(join(dir, 'AGENTS.md'), renamed)
+    const renamedCheck = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (renamedCheck.status !== 0) {
+      return `换个分支名就被判成漂移了：${(renamedCheck.stderr || '').trim().split('\n')[0]}`
+    }
+
+    // 但真的多了一条模板里没有的规则，必须报。
+    const drifted = renamed.replace(/(- \*\*一票否决红线\*\*)/, '- 实例里多出来的一条。\n\n$1')
+    writeFileSync(join(dir, 'AGENTS.md'), drifted)
+    const driftCheck = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (driftCheck.status === 0) return '真漂移被掩码掩盖了'
+    return true
+  } finally { rmTree(dir) }
+}])
+
 // ── 跑 ──────────────────────────────────────────────────────────────
 
 for (const [name, fn] of cases) {

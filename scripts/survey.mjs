@@ -25,6 +25,7 @@ import { basename, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { toMarkdown } from './lib/render.mjs'
+import { LIKELY_DEFAULT_BRANCHES } from './lib/protocol.mjs'
 
 // ── 扫描时跳过的目录 ────────────────────────────────────────────────
 // 这些目录里的文件对治理没有意义，读它们只会拖慢。它们共同的特点是「可以用一条标准
@@ -939,8 +940,9 @@ const WORK_DIR_CANDIDATES = ['docs/work', 'docs/tasks', 'docs/adr', 'todo', 'wor
  * 每一条都给「读不到时的默认值」——不是猜，是**新项目的合理起点**。
  */
 function detectConventions(root, { gitFacts, docs, ecosystem }) {
+  const currentBranch = gitFacts.branch && gitFacts.branch !== '(detached)' ? gitFacts.branch : undefined
   const defaultBranch = gitFacts.originHeadBranch
-    || (gitFacts.branch && gitFacts.branch !== '(detached)' ? gitFacts.branch : undefined)
+    || (currentBranch && LIKELY_DEFAULT_BRANCHES.includes(currentBranch) ? currentBranch : undefined)
     || gitFacts.initDefaultBranch
     || 'main'
 

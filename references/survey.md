@@ -89,7 +89,7 @@ node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
 | 字段 | 取值顺序 | 易错点 |
 | --- | --- | --- |
-| `defaultBranch` | `origin/HEAD` 去掉前缀 → 当前分支 → `init.defaultBranch` → `main` | **永不写死 main**。写死之后，在默认分支叫 `master` 或 `trunk` 的仓库上每条命令都指向不存在的分支 |
+| `defaultBranch` | `origin/HEAD` 去掉前缀 → **当前分支为默认分支名之一**（`main` / `master` / `trunk` / `develop`）时取它 → `init.defaultBranch` → `main` | **永不写死 main**。写死之后，在默认分支叫 `master` 或 `trunk` 的仓库上每条命令都指向不存在的分支。**中间那条的限定词不能省**：CI 推一个特性分支时检出的就是那条分支，`origin/HEAD` 往往不存在，无条件取当前分支会把特性分支名写进契约 |
 | `releaseNotesMode` | `dir`（说明按标签分文件）或 `changelog`（单文件） | 它由项目现状决定，不由你的偏好决定 |
 | `tagPrefix` | `v` 或空串 | 插件市场一类要求裸版本号。前缀与工作流触发行不匹配，工作流永不触发 |
 | `commitStyle` | `conventional` / `gitmoji` / `plain` | 只从最近 20 条提交主题判，不要从别人的习惯判 |

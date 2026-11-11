@@ -90,6 +90,15 @@ function run(cmd, args, opts = {}) {
         stderr: (stderr ?? '').trim(),
       })
     })
+
+    // **给 stdin 挂一个 error 监听器，不然写进一个已经退出的进程会把整个脚本带崩。**
+    // 这不是罕见情况：`git check-ignore --stdin` 在候选路径一条都不匹配时可能先退出，
+    // 那时再往里写就是一个 EPIPE，而它抛在 stream 上、不在 Promise 里，`try` 拦不住——
+    // 症状是整趟勘察带着栈死掉，报的还是个与判定毫无关系的错误。
+    //
+    // 吞掉它是对的：命令的结论由退出码与 stdout 给出，写失败这件事不影响那个结论。
+    if (child.stdin) child.stdin.on('error', () => { /* 子进程提前退出，结论仍由退出码给出 */ })
+
     if (opts.input !== undefined && child.stdin) {
       child.stdin.end(opts.input)
     } else if (child.stdin) {

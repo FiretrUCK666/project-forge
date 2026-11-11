@@ -163,8 +163,16 @@ Three things make up most of how it feels to use:
 
 - Make your private repo public (private by default; going public needs your explicit word)
 - Force-push, rewrite pushed history, or delete a published release
+- **Decide on its own that it is time to release**: day to day it stops at commit + push;
+  tagging, release pages, and registry publishes all need your explicit word
 - Pick a license for you, or invent an identity
 - **Remove anything it left behind without your explicit confirmation**
+
+Daily work and releasing are two different things, and it only does the first by default.
+Not out of caution for its own sake: the two differ in whether they can be undone. A wrong
+push can be reverted with a follow-up commit; a published version cannot be taken back —
+people have already installed it. "Several changes piled up" or "the version number looks
+due for a bump" are not reasons to release.
 
 ## Problems and contributing
 

@@ -58,7 +58,7 @@ const COMMAND_LABEL = {
 // ── 从勘察事实到渲染输入 ────────────────────────────────────────────
 
 /**
- * 七个条件，全部来自勘察事实。
+ * 八个条件，全部来自勘察事实。
  *
  * 每个条件都必须**可由事实算出**，而且是保守方向：算不准时算「没有」。多一节不适用
  * 的内容会让读者照着执行一件对他不存在的事；少一节只是缺，交付体检会报。
@@ -69,11 +69,13 @@ export function buildConditions(facts) {
   const kinds = facts.ecosystem?.kinds ?? []
   const tags = facts.git?.tags ?? []
   const conventions = facts.conventions ?? {}
+  const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false
 
   return {
     'has-commands': hasCommands,
     'no-commands': !hasCommands,
-    'has-remote': Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false,
+    'has-remote': hasRemote,
+    'no-remote': !hasRemote,
     'has-release': Boolean(
       facts.ecosystem?.publishable
       || facts.ecosystem?.registryFree

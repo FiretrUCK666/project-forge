@@ -45,9 +45,9 @@
 
 import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-import { survey, readTextSafe, samePath } from './survey.mjs'
+import { survey } from './survey.mjs'
+import { isMainModule, readTextSafe } from './lib/text.mjs'
 import { parseMarkers } from './lib/protocol.mjs'
 
 /** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
@@ -623,6 +623,6 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code))
 }

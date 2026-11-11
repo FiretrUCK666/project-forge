@@ -19,13 +19,15 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { toMarkdown } from './lib/render.mjs'
 import { LIKELY_DEFAULT_BRANCHES } from './lib/protocol.mjs'
+import {
+  githubRepoPath, isMainModule, readJsonSafe, readTextSafe, samePath,
+} from './lib/text.mjs'
 
 // ── 扫描时跳过的目录 ────────────────────────────────────────────────
 // 这些目录里的文件对治理没有意义，读它们只会拖慢。它们共同的特点是「可以用一条标准
@@ -112,42 +114,11 @@ function git(cwd, args, opts = {}) {
 }
 
 // ── 文件读取 ────────────────────────────────────────────────────────
+//
+// 三个都从 `lib/text.mjs` 取，本文件不再各写一份：`readTextSafe` 的「多大算太大、
+// 含 NUL 就不读」、`samePath` 的「按真实路径归一」，都是别处也要用的判据。
+// 同一件事两处各写一遍，迟早给出两个答案，而那种分歧出现在「读文件」上时是静默损坏。
 
-function readTextSafe(filePath, maxBytes = 256 * 1024) {
-  try {
-    const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
-    const buf = readFileSync(filePath)
-    if (buf.subarray(0, 4096).includes(0)) return undefined
-    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return undefined
-  }
-}
-
-function readJsonSafe(filePath) {
-  const text = readTextSafe(filePath)
-  if (text === undefined) return undefined
-  try { return JSON.parse(text) } catch { return undefined }
-}
-
-function samePath(a, b) {
-  try {
-    return realpathSync.native(resolve(a)) === realpathSync.native(resolve(b))
-  } catch {
-    return resolve(a).toLowerCase() === resolve(b).toLowerCase()
-  }
-}
-
-/** 把 GitHub 远端地址归一成 `owner/repo`。认不出返回 undefined，不猜。 */
-function githubRepoOf(url) {
-  if (typeof url !== 'string' || url.trim() === '') return undefined
-  const s = url.trim().replace(/^git\+/, '').replace(/\.git$/i, '').replace(/\/+$/, '')
-  const m = /(?:github\.com[:/])([^/]+\/[^/#?]+)/i.exec(s)
-  return m ? m[1].toLowerCase() : undefined
-}
-
-/** 从 TOML 里读一个字符串字段。只为拿几个值，不为此引一个解析器。 */
 function tomlString(text, key) {
   return new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'm').exec(text)?.[1]
 }
@@ -370,7 +341,7 @@ const ECOSYSTEMS = [
       if (typeof pkg.version === 'string') s.declaredVersion = pkg.version.trim()
       if (pkg.private === true) s.private = true
       const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
-      if (repo) s.declaredRepo = githubRepoOf(repo)
+      if (repo) s.declaredRepo = githubRepoPath(repo)
       s.packageManager = existsSync(join(root, 'pnpm-lock.yaml')) ? 'pnpm'
         : existsSync(join(root, 'yarn.lock')) ? 'yarn'
           : (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) ? 'bun'
@@ -441,7 +412,7 @@ const ECOSYSTEMS = [
       const mod = /^module\s+(\S+)/m.exec(text)?.[1]
       if (mod) {
         s.projectName = mod.split('/').pop() || s.projectName
-        s.declaredRepo ??= githubRepoOf(mod)
+        s.declaredRepo ??= githubRepoPath(mod)
         // Go 的「发布」就是打标签，没有上传动作——所以它是「不需要制品库」而不是「不可发布」。
         s.registryFree = true
       }
@@ -646,7 +617,7 @@ function detectEcosystem(root) {
     if (!s.manifests.includes(skill.skillMeta.entry)) s.manifests.push(skill.skillMeta.entry)
     if (skill.skillMeta.version && !s.declaredVersion) s.declaredVersion = skill.skillMeta.version
     if (skill.skillMeta.source && !s.declaredRepo) {
-      s.declaredRepo = githubRepoOf(skill.skillMeta.source)
+      s.declaredRepo = githubRepoPath(skill.skillMeta.source)
     }
     // 能力目录靠克隆或复制分发，不经过制品库——「发布」这个动作对它不成立，不是被禁止。
     s.registryFree = true
@@ -1241,8 +1212,8 @@ function judgeRole(gitFacts, declaredRepo) {
   if (gitFacts.present !== true || !gitFacts.remote) {
     return { role: 'maintainer', reason: '没有远端：本地提交不涉及别人的仓库' }
   }
-  const origin = githubRepoOf(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
-  const upstream = githubRepoOf(gitFacts.remoteUrls?.upstream)
+  const origin = githubRepoPath(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
+  const upstream = githubRepoPath(gitFacts.remoteUrls?.upstream)
   if (!origin) return { role: 'undetermined', reason: '远端不是能认出来的 GitHub 地址，比不了' }
   if (upstream && upstream !== origin) {
     return { role: 'contributor-fork', reason: `origin 指向 ${origin}，而 upstream 指向 ${upstream}` }
@@ -1256,7 +1227,7 @@ function judgeRole(gitFacts, declaredRepo) {
   return { role: 'maintainer', reason: `origin 就是项目声明的源仓库 ${origin}` }
 }
 
-export { readTextSafe, readJsonSafe, samePath, githubRepoOf }
+export { readTextSafe, readJsonSafe, samePath, githubRepoPath }
 
 // ── 命令行 ──────────────────────────────────────────────────────────
 
@@ -1299,6 +1270,6 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code))
 }

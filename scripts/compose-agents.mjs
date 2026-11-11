@@ -41,7 +41,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { survey, readTextSafe, samePath } from './survey.mjs'
+import { survey } from './survey.mjs'
+import { isMainModule, readTextSafe } from './lib/text.mjs'
 import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 
@@ -730,6 +731,6 @@ async function generate(root, agentsPath, template) {
 
 export { TemplateError }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   Promise.resolve(main(process.argv.slice(2))).then((code) => process.exit(code))
 }

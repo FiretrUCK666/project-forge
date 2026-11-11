@@ -25,7 +25,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readTextSafe, samePath } from './survey.mjs'
+import { isMainModule, readTextSafe, samePath } from './lib/text.mjs'
 import {
   LEGACY_MARKERS, LEGACY_PATH_SPECS, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
@@ -348,6 +348,6 @@ function main(argv) {
   }
 }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   process.exit(main(process.argv.slice(2)))
 }

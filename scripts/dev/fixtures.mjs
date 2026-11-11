@@ -1000,6 +1000,153 @@ cases.push(['入口守卫按真实路径判：经链接调用也真跑', async (
   } finally { rmTree(dir) }
 }])
 
+// ── W3：存量项目融合 ────────────────────────────────────────────────
+
+cases.push(['受管区间标 customized 之后，改它不报漂移、刷新也不冲掉', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const fillAll = (text) => text.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+
+    // 正面：把「版本与发布」标成 customized，再塞一条项目自己的规矩。
+    const customized = fillAll(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+      .replace('<!-- project-forge: begin 版本与发布 -->', '<!-- project-forge: begin 版本与发布 customized -->')
+      .replace('## 版本管理与回滚底线\n', '## 版本管理与回滚底线\n\n- 本项目用 changesets 发版，发布由 CI 完成。\n')
+    writeFileSync(join(dir, 'AGENTS.md'), customized)
+
+    const ok = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (ok.status !== 0) return `标了 customized 还被判漂移：${(ok.stderr || '').trim().split('\n')[0]}`
+
+    await runNode('compose-agents.mjs', [dir])
+    if (!readFileSync(join(dir, 'AGENTS.md'), 'utf8').includes('changesets')) return '刷新把定制的那一段冲掉了'
+
+    // 反面：把 flag 去掉，同一条定制必须重新算漂移——否则这个标记就成了「免检章」。
+    const plain = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      .replace('<!-- project-forge: begin 版本与发布 customized -->', '<!-- project-forge: begin 版本与发布 -->')
+    writeFileSync(join(dir, 'AGENTS.md'), plain)
+    const bad = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (bad.status === 0) return '去掉 customized 之后，定制内容仍被当成合格——那这条判据等于没有'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['手写契约删掉某一节的标记、留下同名小节时，不再追插一份', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      // 模拟「人把它接管了」：删掉这一对标记，正文原样留下。
+      .replace('<!-- project-forge: begin 高风险路径 -->\n', '')
+      .replace('<!-- project-forge: end 高风险路径 -->\n', '')
+    writeFileSync(join(dir, 'AGENTS.md'), text)
+
+    await runNode('compose-agents.mjs', [dir])
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const hits = (after.match(/^## 高风险路径.*$/gm) ?? []).length
+
+    // 正面：标题还在，就不该插第二份。
+    if (hits > 1) return `同一节被插了两份（${hits} 份）——接管过的节被追插了`
+    if (hits === 0) return '正文被一起删掉了，那是另一回事'
+
+    // 反面：连正文一起删掉时，照常补回来。
+    const gone = after.replace(/^## 高风险路径[\s\S]*?(?=\n## |\n<!-- project-forge: begin |$)/m, '')
+    writeFileSync(join(dir, 'AGENTS.md'), gone)
+    await runNode('compose-agents.mjs', [dir])
+    const restored = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    if (!/^## 高风险路径/m.test(restored)) return '整节被删掉之后没有补回来'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['空壳手写 AGENTS.md 不放行；内容充实的仍放行', async () => {
+  const shell = tmpProject({
+    'README.md': '# d\n\n说明足够长以通过长度检查。\n',
+    'AGENTS.md': '# AGENTS\n\n一句话。\n',
+  })
+  try {
+    // 正面：一行标题的空壳必须被拦下——它看起来像有契约，实际什么都没有。
+    const bad = await runNode('compose-agents.mjs', [shell, '--check'])
+    if (bad.status === 0) return '空壳手写契约被放行了'
+    if (!/不算一份契约/.test(bad.stderr || '')) return `报错了但不是空壳那条判据：${(bad.stderr || '').trim().split('\n')[0]}`
+
+    // 反面：一份认真的手写契约不许被误伤。
+    const real = tmpProject({
+      'README.md': '# d\n\n说明足够长以通过长度检查。\n',
+      'AGENTS.md': [
+        '# demo 工程契约',
+        '',
+        '## 定位',
+        '',
+        '这是一个命令行工具，负责把目录整理成规范项目。不做部署、不做选型。',
+        '',
+        '## 构建与测试',
+        '',
+        '```sh',
+        'npm ci',
+        'npm test',
+        '```',
+        '',
+        '## 修改规范',
+        '',
+        '- 先看再动，贴合既有结构；',
+        '- 改完跑一遍上面两条命令，全绿才算完成；',
+        '- 不引入第三方依赖。',
+        '',
+        '这几条合起来讲清了「这是什么、怎么验、改动边界在哪」，长度也够。',
+      ].join('\n'),
+    })
+    try {
+      const ok = await runNode('compose-agents.mjs', [real, '--check'])
+      if (ok.status !== 0) return `内容充实的手写契约被拦下了：${(ok.stderr || '').trim().split('\n')[0]}`
+      return true
+    } finally { rmTree(real) }
+  } finally { rmTree(shell) }
+}])
+
+cases.push(['既有 AI 约定文件按文件展开、报告里点名、fill 提示列出', async () => {
+  const dir = tmpProject({
+    'README.md': '# d\n\n说明足够长以通过长度检查。\n',
+    'package.json': '{"name":"d","version":"1.0.0","scripts":{"test":"node --test"}}',
+    'CLAUDE.md': '# claude\n',
+    '.clinerules': 'rule\n',
+    '.cursor/rules/a.mdc': 'rule a\n',
+    '.cursor/rules/b.mdc': 'rule b\n',
+    '.changeset/config.json': '{}\n',
+    'commitlint.config.js': 'module.exports = {}\n',
+  })
+  try {
+    const f = await survey(dir)
+    const others = f.docs.otherAiConventions
+    // 正面：目录要展开成具体文件，不能只报一个目录名。
+    if (!others.includes('.cursor/rules/a.mdc') || !others.includes('.cursor/rules/b.mdc')) {
+      return `目录没展开：${others.join('、')}`
+    }
+    if (!others.includes('.clinerules')) return '漏了 .clinerules'
+    if (!f.conventions.workflowTooling.includes('.changeset/')) return '没探到 .changeset/'
+    if (!f.conventions.workflowTooling.includes('commitlint.config.js')) return '没探到 commitlint'
+
+    // 报告里必须点名，否则读报告的人不知道项目里还有另一份约定。
+    const md = (await runNode('survey.mjs', [dir, '--markdown'])).stdout
+    if (!/既有 AI 规则文件/.test(md)) return 'Markdown 报告里没提别的 AI 约定文件'
+    if (!md.includes('.cursor/rules/a.mdc')) return '报告里没列出具体文件'
+
+    // fill 提示里也要列出来，AI 才有机会去合流。
+    await runNode('compose-agents.mjs', [dir])
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    if (!agents.includes('CLAUDE.md')) return 'fill 提示里没列出现有的约定文件'
+    if (!agents.includes('.changeset/')) return 'fill 提示里没列出发版工具链'
+
+    // 反面：一个干净的目录不该凭空多出这两项。
+    const clean = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+    try {
+      const g = await survey(clean)
+      if (g.docs.otherAiConventions.length > 0) return '干净目录里凭空报出了别的约定文件'
+      if (g.conventions.workflowTooling.length > 0) return '干净目录里凭空报出了发版工具链'
+      return true
+    } finally { rmTree(clean) }
+  } finally { rmTree(dir) }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

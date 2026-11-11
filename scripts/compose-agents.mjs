@@ -576,7 +576,10 @@ export function handWrittenCoverage(text) {
   if (!has(['定位', '简介', '概述', '做什么', 'Overview', 'About', 'Introduction'])) missing.push('项目定位')
   if (!has(['构建', '安装', '运行', '测试', '命令', 'Setup', 'Install', 'Build', 'Test', 'Commands'])) missing.push('构建与验证')
   if (!has(['守则', '规范', '约定', '红线', '高风险', 'Rules', 'Guidelines', 'Conventions', 'Standards'])) missing.push('修改边界')
-  return { chars, missing, ok: chars >= 400 && missing.length === 0 }
+  // 阈值只用来分「写了一段」与「只写了一句话」。定在 80 是因为实测里两者的距离很大：
+  // 一份只有一行标题的「契约」正文 4 个字符，而一份短短四节的手写契约也有 100 出头。
+  // 取中间值，两边都留出余量——把阈值定高换不来安全，只会开始误伤写得短但合格的契约。
+  return { chars, missing, ok: chars >= 80 && missing.length === 0 }
 }
 
 function escapeRe(text) {

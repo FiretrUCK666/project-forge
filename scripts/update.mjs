@@ -673,7 +673,22 @@ function applyPackage(entries) {
    * 下成 `Source code` 的副本里那些 `.github/`、`AGENTS.md`、`scripts/dev/`，
    * 一条规则都不差地命中。
    */
-  const shouldRemove = (name) => isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
+  // 第 2 条（`!now.has(name)`）在这两条路上一律成立，它挡不住误删：
+  // zip 解压阶段就丢掉了目录条目（`zip.mjs` 的 `name.endsWith('/') → continue`），
+  // 那五个顶层文件又都被 `export-ignore` 排除在包外——所以「新包里没有它」永远为真。
+  //
+  // 因此**能不能删，最终由「这份副本是不是只由包内容组成」决定**：包副本（没有 `.git`）
+  // 里出现 `docs/`、`scripts/dev/`，只可能来自「下成了 Source code」那一种情况，
+  // 删掉正是要收拾的残渣。而源码副本有 `.git`，那几处是**仓库自己的东西**，
+  // 删掉等于把开发者的工作记录与自用脚本一起清空。
+  //
+  // 这一层不能省：`applyPackage` 只在包副本上被调用，但它是个独立的函数，
+  // 判据写在调用点之外的任何地方，都会在下一次有人复用它时失效。
+  const isPackageCopy = !existsSync(join(SKILL_ROOT, '.git'))
+  // 三条判据缺一不可，第 0 条是「这不是源码副本」——没有它，一次误调用就会把开发者的
+  // `docs/` 与 `scripts/dev/` 整棵删掉，而那两处正是这个仓库最贵的东西。
+  const shouldRemove = (name) => isPackageCopy
+    && isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
   // 磁盘上现有的、属于「不进包」结构规则的条目：目录整棵收，单文件逐个收。
   // 只走这一处，候选集来自**磁盘**而不是任何一张表——少一个来源就少一处会漂的地方。
   for (const dir of REPO_ONLY_DIRS) {
@@ -1062,7 +1077,9 @@ async function main(argv) {
       : `  你这份副本可能已经不可用。${health.hint ?? ''}`,
     health.ok ? undefined : '  重新跑一次更新可以再试；仍然不行就手工下载后覆盖整个目录。',
     removed.length > 0
-      ? `  顺手清掉了 ${removed.length} 个包里不该有的文件（${removed.slice(0, 3).join('、')}${removed.length > 3 ? ' 等' : ''}）。`
+      ? `  清掉了 ${removed.length} 处只属于仓库的东西（${removed.slice(0, 3).join('、')}${removed.length > 3 ? ' 等' : ''}）`
+        + '——那些是「下成 Source code」时多出来的，用户包里本来没有它们。'
+        + '如果你在那些地方放过自己的东西，现在去回收站或 git 历史里找。'
       : undefined,
     skipped.length > 0
       ? `  有 ${skipped.length} 个条目指向本领目录之外，已跳过（${skipped.slice(0, 3).join('、')}）`

@@ -1573,6 +1573,74 @@ cases.push(['许可证不是缺口：不可发布的项目缺许可证照样能 
   } finally { rmTree(dir) }
 }])
 
+cases.push(['「不进包」的目录规则只排除目录里的东西，不排除同名的普通文件', async () => {
+  // `.gitattributes` 里写的是 `/docs/`，git 只排除那个目录**里面**的东西。
+  // 实测过：仓库里放一个名为 docs 的普通文件，它照样进用户包。
+  // 所以这条判据必须与 git 一致——它不只影响「包里有啥」，`update.mjs` 会照着它**删文件**：
+  // 判错一次，用户一个叫 docs 的文件就没了，而报告说「顺手清掉了包里不该有的文件」。
+  const cases = [
+    { path: 'docs', expect: false, why: '一个叫 docs 的普通文件不在排除规则里' },
+    { path: 'scripts/dev', expect: false, why: '裸目录名不等于目录里的东西' },
+    { path: 'docs/x.md', expect: true, why: '目录里的文件确实要排除' },
+    { path: 'scripts/dev/a.mjs', expect: true, why: '自用脚本目录里的文件要排除' },
+    { path: 'AGENTS.md', expect: true, why: '顶层自用文件逐条列在名单里' },
+    { path: 'SKILL.md', expect: false, why: '产品层的文件不许被误判' },
+  ]
+  const { isRepoOnlyPath } = await import('../lib/protocol.mjs')
+  for (const c of cases) {
+    const got = isRepoOnlyPath(c.path)
+    if (got !== c.expect) return `isRepoOnlyPath('${c.path}') 是 ${got}，应为 ${c.expect}——${c.why}`
+  }
+  return true
+}])
+
+cases.push(['交棒扫不全时必须给 3，不许给 0', async () => {
+  // 0 的意思是「干净」，而干净是不可逆动作前的通行证。任何一处「没看见」都不能发这张证：
+  // 读不到的目录、读不到的文件、超大的文件、跳过不跟的符号链接——它们都可能藏着一条标记，
+  // 而报告会说「一处都没有」。
+  const clean = tmpProject({ 'README.md': '# d\n\n干净项目。\n' })
+  const withLink = tmpProject({ 'README.md': '# d\n\n干净项目。\n' })
+  try {
+    // 正面：真干净就给 0。
+    const ok = await runNode('handoff.mjs', [clean, '--verify'])
+    if (ok.status !== 0) return `干净项目给了 ${ok.status}，应为 0：${(ok.stdout || '').trim().split('\n')[0]}`
+
+    // 反面：有一处没扫完，就必须给 3 而不是 0。用符号链接造这个情形——
+    // 链接不跟（跟进去会绕成环），但跳过它意味着那棵子树一个文件都没看。
+    try {
+      symlinkSync(join(withLink, 'README.md'), join(withLink, 'link.md'), 'file')
+    } catch {
+      return true  // 限制环境建不了链接：上面那条正面用例已经验过了
+    }
+    const bad = await runNode('handoff.mjs', [withLink, '--verify'])
+    if (bad.status === 0) return '跳过了符号链接却仍报「干净」——那是一条没做完的检查在替不可逆动作背书'
+    if (bad.status !== 3) return `没扫全给的是 ${bad.status}，应为 3（3 与 1 的区别是「没查到」与「查到了」）`
+    return true
+  } finally { rmTree(clean); rmTree(withLink) }
+}])
+
+cases.push(['自更新的删除判据里有「这不是源码副本」这一道', async () => {
+  // `applyPackage` 会 `rmSync(recursive)` 掉 `docs/`、`scripts/dev/` 这几处。
+  // 它在包副本上跑是对的（那些是「下成 Source code」时多出来的残渣），
+  // 但同一个函数被复用到源码副本上时，删掉的会是这个仓库最贵的两处东西。
+  //
+  // 「新包里没有它」这条挡不住：目录条目在解压阶段就被丢了，顶层那几个文件本来就被
+  // `export-ignore` 排除——所以 `!now.has(name)` 永远为真。
+  // 唯一能挡的是「这份副本是不是只由包内容组成」。这条判据必须在，且必须在 `shouldRemove` 里。
+  const src = readFileSync(join(SCRIPTS, 'update.mjs'), 'utf8')
+  if (!/isPackageCopy\s*=\s*!existsSync\(join\(SKILL_ROOT, '\.git'\)\)/.test(src)) {
+    return '找不到「这不是源码副本」的判据（isPackageCopy）'
+  }
+  const guard = /shouldRemove\s*=\s*\(name\)\s*=>\s*isPackageCopy[\s\S]{0,120}isRepoOnlyPath[\s\S]{0,80}insideSkill/.exec(src)
+  if (guard === null) return 'shouldRemove 没有把 isPackageCopy 作为前置条件——一次误调用就会删掉源码副本的 docs/ 与 scripts/dev/'
+
+  // 反面：`applyPackage` 必须在源码副本上根本不被调用（调用点在 main 那条路上有 .git 分支）。
+  if (!/源码副本（目录里有 \.git），不自动更新/.test(src)) {
+    return '找不到「源码副本不自动更新」那条早退——那条才是第一道闸'
+  }
+  return true
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

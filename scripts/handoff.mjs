@@ -102,14 +102,18 @@ function isSkillOwnPath(rel) {
 
 function walk(root) {
   const out = []
-  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0 }
+  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0, symlinks: 0 }
   const go = (dir, depth) => {
     if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
     if (out.length > MAX_FILES) { state.truncated = true; return }
     let entries
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; return }
+    // 读不到这一层：它**下面**有多少东西我们一个都不知道。这不是「没有痕迹」，
+    // 是「没看见」——所以也算没扫全，不能让结论落到「干净」上。
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; state.truncated = true; return }
     for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue
+      // 符号链接不跟：跟进去会绕成环，也会跑到目录之外。但**必须记一笔**——
+      // 跳过一棵链接过来的目录，里面的东西一个都没看，而结论仍会说「干净」。
+      if (entry.isSymbolicLink()) { state.symlinks += 1; state.truncated = true; continue }
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         if (entry.name === '.git') continue
@@ -117,7 +121,7 @@ function walk(root) {
         go(full, depth + 1)
       } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
         let size = 0
-        try { size = statSync(full).size } catch { state.unreadable += 1; continue }
+        try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; continue }
         if (size > MAX_BYTES) { state.skippedLarge += 1; state.truncated = true; continue }
         out.push(relative(root, full).split(sep).join('/'))
       }
@@ -154,8 +158,10 @@ export function scan(targetDir) {
       staleTemps.push({ file: rel, pid: Number(tempPid), alive })
       continue
     }
+    // 读不出来的文件同样算「没看见」，不算「干净」：内容里可能正藏着一条标记，
+    // 而报告说「一处都没有」。这条与上面那几条是同一个道理——不知道，就别替我担保。
     const text = readTextSafe(join(root, rel))
-    if (text === undefined) { coverage.unreadable += 1; continue }
+    if (text === undefined) { coverage.unreadable += 1; coverage.truncated = true; continue }
 
     // 扫的**就是这个 skill 自己的目录**时，`templates/` 与 `references/` 是它的源码，
     // 不是留在别人项目里的痕迹——那里面的标记是语法与讲解，不该被当成待清理的东西。

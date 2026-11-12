@@ -1703,6 +1703,142 @@ cases.push(['围栏里的同名标题不算「这一节已经有了」', async (
   } finally { rmTree(dir) }
 }])
 
+// ── 审查栏与收尾步骤：判据本体（不是复刻一份循环） ──────────────────────
+//
+// 这几条 import `preflight.mjs` 里的**判据本体**来验。复刻一份循环的断言不会因为判据被
+// 削弱而变红，于是「判据坏了」这件事没有任何东西看着——那正是这次要消灭的形状。
+// 反面用例同样重要：判据如果会误伤正常写法，修的人第一件事是把判据放宽，而放宽之后
+// 它就再也拦不住真问题了。
+
+let preflightLib
+
+async function loadPreflight() {
+  if (preflightLib === undefined) preflightLib = await import('./preflight.mjs')
+  return preflightLib
+}
+
+cases.push(['审查栏：四个字段必须排在同一段里', async () => {
+  const { reviewBlockMissing } = await loadPreflight()
+  const block = [
+    '- **审查来源**：子代理',
+    '- **逐条标准状态**：fail: 无',
+    '- **故障注入记录**：删了一行，红了',
+    '- **止损记录**：未触发',
+  ].join('\n')
+  if (reviewBlockMissing(block).length !== 0) return '四行排在一起却仍报缺'
+
+  // 正面：删掉一行，那一块就不完整了。
+  for (const drop of [0, 1, 2, 3]) {
+    const lines = block.split('\n')
+    lines.splice(drop, 1)
+    if (reviewBlockMissing(lines.join('\n')).length === 0) return `删掉第 ${drop + 1} 行仍被判成完整`
+  }
+
+  // 正面（这是这次修的形状）：同样的四个词散落在不相邻的段落里，不算一块。
+  // 「出现过就算」的判据在这里会假绿——而正文里解释这些字段时本来就会用到这些词。
+  const scattered = [
+    '- **审查来源**：子代理',
+    '',
+    '这段正文解释什么叫逐条标准状态。',
+    '',
+    '这段正文又提到故障注入记录。',
+    '',
+    '- **止损记录**：未触发',
+  ].join('\n')
+  if (reviewBlockMissing(scattered).length === 0) {
+    return '分散在正文里的同名文字被当成了一个字段块——这正是「出现过就算」的假绿形状'
+  }
+
+  // 反面：一条都没有时，四项全报，不许说齐了。
+  if (reviewBlockMissing('## 独立审查\n\n什么都没写\n').length !== 4) return '一条都没有时应当四项全缺'
+  return true
+}])
+
+cases.push(['验收标准编号：可勾选那一行必须是 C 加数字', async () => {
+  const { acceptanceIdMissing } = await loadPreflight()
+  if (acceptanceIdMissing('- [ ] C1: 能跑通')) return '`C1` 这种形状被误判成缺编号'
+  if (acceptanceIdMissing('- [ ] C12: 也是合法编号')) return '两位数字被误判'
+  if (acceptanceIdMissing('- [x] C3: 勾掉的也算')) return '已勾选的那一行被误判'
+
+  // 正面：三种常见的「看起来像编号」都不是判据认的形状。
+  for (const bad of ['- [ ] 1. 能跑通', '- [ ] 第一条能跑通', '- [ ] (C) 能跑通']) {
+    if (!acceptanceIdMissing(bad)) return `${bad} 这种写法被当成了合法编号`
+  }
+
+  // 反面：**别处的举例不算数。** 填写指引里本来就举了个 `C1` 的例子；按「文里出现过」判
+  // 的话，清单被改成 `1.` 也照样绿——判据被那句举例削成了恒真。
+  const withExample = [
+    '<!-- 写法：一条一行，id 用 `C1`、`C2` 这样的短标识 -->',
+    '',
+    '- [ ] 1. 清单本身已经改成序号了',
+  ].join('\n')
+  if (!acceptanceIdMissing(withExample)) return '指引里的举例把判据撑成了恒真'
+  return true
+}])
+
+cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要报', async () => {
+  const { finishStepsState } = await loadPreflight()
+  const line = (n) => `  ${n}. `
+  const body = [
+    line(1) + '合并 PR（**不勾选自动删分支**）；',
+    line(2) + '回读确认 `state=MERGED`；',
+    line(3) + '更新工作记录与 Issue；',
+    line(4) + '`git switch main && git pull`；',
+    line(5) + '`git worktree remove <路径>`；',
+    line(6) + '`git branch -d <分支>`；',
+    line(7) + '`git push origin --delete <分支>`。',
+  ]
+  const wrap = (steps) => ['## 日常协作', '', '- **第四步：合并收尾与平台交互防乱码**——固定 7 步：', ...steps, '', '- **日常到此为止**'].join('\n')
+
+  const good = finishStepsState(wrap(body))
+  if (good.missing.length !== 0) return `七步齐全却报缺：${good.missing.map(String).join('、')}`
+  if (good.outOfOrder) return '七步按顺序写却报顺序错'
+
+  // 正面一：缺一步。
+  const missingOne = finishStepsState(wrap(body.filter((s) => !s.includes('worktree remove'))))
+  if (missingOne.missing.length !== 1) return `删掉 worktree remove 后应报缺 1 步，实际 ${missingOne.missing.length}`
+
+  // 正面二：worktree remove 与 branch -d 对调——这是真实会犯的错，报错还会说「未合并」。
+  const swapped = [...body]
+  const i5 = swapped.findIndex((s) => s.includes('worktree remove'))
+  const i6 = swapped.findIndex((s) => s.includes('git branch -d'))
+  ;[swapped[i5], swapped[i6]] = [swapped[i6], swapped[i5]]
+  const bad = finishStepsState(wrap(swapped))
+  if (bad.missing.length !== 0) return '对调两步不应报缺'
+  if (!bad.outOfOrder) return 'worktree remove 与 branch -d 对调没有被判成顺序错'
+
+  // 反面：整份文档里别处提到某一步，不算数——判据只看那一段的行范围。
+  const noise = ['七步之外的正文里提到 git worktree remove 与 git branch -d。', '', wrap(body.slice(0, 2))].join('\n')
+  const partial = finishStepsState(noise)
+  if (partial.missing.length !== 5) return `正文里的提及被算成了步骤（应缺 5 步，实际 ${partial.missing.length}）`
+  return true
+}])
+
+cases.push(['收尾清单没有锚点时报「七步全缺」，不是静默通过', async () => {
+  const { finishStepsState } = await loadPreflight()
+  // 一条判据在锚点找不到时静默返回「没问题」，等于它被削成了恒真。
+  const state = finishStepsState('## 别的节\n\n- 什么也没有\n')
+  if (state.missing.length !== 7) return `没有锚点时应报缺 7 步，实际 ${state.missing.length}`
+  return true
+}])
+
+cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真实存在', async () => {
+  // 判据改了文档结构之后，`ref` 指路会变成死指针——而它不会报错，只会让人点进去找不到那一节。
+  // 这条断言读的是**真实文件**，不是夹具：指路的目标本来就在这个仓库里。
+  const text = readFileSync(join(SKILL_ROOT, 'scripts', 'review.mjs'), 'utf8')
+  const pairs = [...text.matchAll(/ref:\s*\{\s*file:\s*'(references\/[^']+)',\s*section:\s*'([^']+)'/g)]
+  if (pairs.length === 0) return '没有从 review.mjs 里读出任何 ref 指路'
+  for (const [, file, section] of pairs) {
+    const target = join(SKILL_ROOT, file)
+    if (!existsSync(target)) return `指路指向不存在的文件：${file}`
+    // 小节名里的反引号与全角标点在标题里是原样的，只去掉包裹用的反引号。
+    const wanted = section.replace(/`/g, '')
+    const have = readFileSync(target, 'utf8').replace(/`/g, '')
+    if (!have.includes(wanted)) return `${file} 里找不到小节「${section}」——指路是死的，点进去什么也没有`
+  }
+  return true
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

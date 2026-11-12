@@ -37,6 +37,7 @@ import {
   conditionMarkers, isRepoOnlyPath, templateVarsOf,
 } from '../lib/protocol.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
+import { isMainModule } from '../lib/text.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -316,8 +317,184 @@ const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 
 /** 历史记录是**当时的事实**，不改写它。它们记的是那一次改动的现场，不是现行约定。 */
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
 
+/**
+ * 审查栏的四个字段名。**这是唯一一份**——模板、本仓库实例、判据三处都从这里取。
+ *
+ * 为什么它必须是一份常量：这四个词同时要出现在「发给用户的 PR 模板」「本仓库自己的 PR 模板」
+ * 「`references/collaboration.md` 第五节」三处。三处各写一遍，改一处就会有两处说旧话，
+ * 而症状是「填了审查栏，但没人按它判」——没有任何东西会因此报错。
+ *
+ * 字段名本身就是判据：它们分别对应「谁审的」「判了哪几条」「测试是不是空的」「循环有没有停」。
+ * 少一个，那一项就没人填；改一个名字，审查报告与模板就对不上。
+ */
+const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']
+
+/**
+ * 验收标准的编号形状。**这是一条规则，不是一个快照**：可勾选的一行，编号是 `C` 加数字。
+ *
+ * 「编号长什么样」看起来像格式洁癖，实际是**审查栏能不能对上标准**的前提：审查写的是
+ * `fail: C4`，标准那一节写成 `1.` 或 `-`，两处就永远对不起来，而人只会以为「审查漏看了 C4」。
+ *
+ * 判据盯的是**可勾选那一行**，不是「文里出现过 C1」：`work-item.md` 的填写指引里本来就
+ * 举了个 `C1` 的例子，按「出现过」判的话，清单被改成 `1.` 也照样绿——判据就被那句举例
+ * 削成了恒真。
+ */
+const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
+const ACCEPTANCE_ID_SITES = ['templates/work-item.md']
+
+/**
+ * 审查栏那四行必须**排在一起形成一块**，不是「文件里出现过这四个词」。
+ *
+ * 按「出现过」判会让两个字段完全失守：`references/collaboration.md` 讲那两个字段的正文里本来就有
+ * 这些词，于是把字段块里的某一行改名或整行删掉，判据照样绿——它验的是「这个词在这份文件里
+ * 存在」，而要求是「三处列出同一批字段名」。两个字之差，两个字段就完全没人看守。
+ *
+ * 块的定义：**空行分隔的一个连续段落**。四行列表、四行围栏代码块里的内容，都是块；
+ * 一处出现在段首、另一处出现在三段之后，不算。
+ */
+export function reviewBlockMissing(text) {
+  const blocks = String(text ?? '').replace(/\r\n/g, '\n').split(/\n\s*\n/)
+  const complete = blocks.some((block) => REVIEW_FIELDS.every((field) => block.includes(field)))
+  return complete ? [] : REVIEW_FIELDS
+}
+
+/** 这份文本里的验收标准编号是不是 `C<数字>` 的形状。缺了返回 true。**纯函数**。 */
+export function acceptanceIdMissing(text) {
+  return !ACCEPTANCE_ID_RE.test(String(text ?? ''))
+}
+
+/**
+ * 收尾清单的步骤。**数字与顺序都是判据**：`worktree remove` 在 `branch -d` 之前，
+ * 因为分支还被某个 worktree 检出着时 `git branch -d` 一定失败，而它报的原因是「未合并」。
+ * 顺序反了，人就会去用 `-D` 强删，而那会把没合进去的东西一起删掉。
+ *
+ * 锚点见下面的 `FINISH_ANCHOR`：收尾清单不是独立一节，它是「日常协作」里的第四步。
+ */
+const FINISH_ANCHOR = /第四步：合并收尾/
+const FINISH_STEPS = [
+  /合并 PR/,
+  /回读确认/,
+  /更新工作记录与 Issue/,
+  /git switch/,
+  /git worktree remove/,
+  /git branch -d/,
+  /git push origin --delete/,
+]
+
+const FINISH_SITES = ['templates/agents-project.md', 'AGENTS.md']
+
+/**
+ * 找出收尾清单的行范围，返回 `{ start, end }`；没有那一段返回 `undefined`。
+ *
+ * 锚在**那一行**而不是某个标题：收尾清单本来就不是独立一节，它是第四步的正文。
+ * 按标题锚会找不到，于是判据永远报「缺七步」——一条永远为真的判据比没有更坏。
+ *
+ * 结束位置是下一个同级条目或标题（`- **` 开头的新条目、任何 `#` 标题、或受管区间标记）。
+ * 判据按结构写，不写死行号：清单上下挪几行、多写一段说明，范围跟着走。
+ */
+export function finishSectionRange(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const start = lines.findIndex((line) => FINISH_ANCHOR.test(line))
+  if (start === -1) return undefined
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#+\s+/.test(lines[i]) || /^- \*\*/.test(lines[i]) || /^<!--\s*project-forge:/.test(lines[i])) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/**
+ * 收尾七步在这一节里是否齐、是否按顺序。
+ *
+ * 返回 `{ missing, outOfOrder }`：`missing` 是缺掉的步骤正则，`outOfOrder` 指示顺序。
+ * **纯函数**，供门禁与行为断言共用——断言要调判据本体，不要复刻一份循环：
+ * 复刻的那份不会因为判据被削弱而变红，于是「判据坏了」这件事没有任何东西看着。
+ */
+export function finishStepsState(text) {
+  const range = finishSectionRange(text)
+  if (range === undefined) return { missing: FINISH_STEPS, outOfOrder: false }
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const section = lines.slice(range.start, range.end)
+  const positions = FINISH_STEPS.map((re) => {
+    const index = section.findIndex((line) => re.test(line))
+    return index
+  })
+  const missing = FINISH_STEPS.filter((_, i) => positions[i] === -1)
+  let outOfOrder = false
+  for (let i = 1; i < positions.length; i += 1) {
+    if (positions[i] === -1 || positions[i - 1] === -1) continue
+    if (positions[i] < positions[i - 1]) { outOfOrder = true; break }
+  }
+  return { missing, outOfOrder }
+}
+
 function headingsOf(text) {
   return (text.replace(/\r\n/g, '\n').match(/^##\s+.+$/gm) ?? []).map((s) => s.trim())
+}
+
+/**
+ * 跨文件对拍：同一件事在三处的说法必须逐字一致。
+ *
+ * 这一类漂移现在没有任何东西看着：模板、实例、判据是三个人分别维护的，而它们要求的是同一批词。
+ * 不一致时的表现不是报错，是「按模板填了，判据不认」或者反过来。
+ *
+ * ## 判的是「四行排在一起」，不是「四个词出现在这份文件里」
+ *
+ * 后者看起来一样，实际差两个字：`references/collaboration.md` 讲这两个字段的正文里本来
+ * 就带着这些词，于是字段块里删掉两行，判据照样绿。改成「某一段里四个都在」之后，删一行
+ * 那一块就不完整，红。
+ */
+function checkReviewContract() {
+  const sites = [
+    'templates/pull-request-template.md',
+    '.github/pull_request_template.md',
+    'references/collaboration.md',
+  ]
+  for (const site of sites) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`审查栏对拍：缺 ${site}`); continue }
+    const missing = reviewBlockMissing(readText(path))
+    if (missing.length === REVIEW_FIELDS.length) {
+      fail(`${site} 里没有一块同时排着审查栏的这四个字段——模板、实例、判据三处必须是同一批词，`
+        + `否则填了也没人按它判。字段表在 scripts/dev/preflight.mjs 的 REVIEW_FIELDS`)
+    } else if (missing.length > 0 && missing.length < REVIEW_FIELDS.length) {
+      fail(`${site} 的审查栏字段块不完整，缺「${missing.join('、')}」——`
+        + '四个字段要排在同一段里；分散在正文各处的同名文字不算')
+    }
+  }
+  note(`审查栏对拍：${REVIEW_FIELDS.length} 个字段在三处各排成一块`)
+
+  // 验收标准的编号形状：审查写 `fail: C4`，标准那节写成 `1.` 就对不上。
+  //
+  // **逐处各判一次，不是「有一处有就算过」。** 判据是「每一处都能对上编号」；把两处合成
+  // 一次判定的话，其中一处被改坏时另一处还在，整条判据就永远绿——那正是它要防的形状。
+  for (const site of ACCEPTANCE_ID_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`验收标准编号：缺 ${site}`); continue }
+    if (acceptanceIdMissing(readText(path))) {
+      fail(`${site} 里没有 \`C1\`/\`C2\` 形状的验收标准编号——审查栏写的是 \`fail: C4\`，`
+        + '编号形状一变，两处就永远对不起来，而人只会以为审查漏看了那一条')
+    }
+  }
+  note(`验收标准编号：${ACCEPTANCE_ID_SITES.length} 处都是 \`C<数字>\` 形状`)
+
+  // 收尾步骤：两边都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
+  // 顺序不能：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」上卡住。
+  for (const site of FINISH_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
+    const state = finishStepsState(readText(path))
+    if (state.missing.length > 0) {
+      fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
+    } else if (state.outOfOrder) {
+      fail(`${site} 的合并收尾步骤顺序不对——顺序是判据不是排版，`
+        + 'worktree 没卸就删分支会失败，而报错说的是「未合并」')
+    }
+  }
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在模板与实例里顺序一致`)
 }
 
 function checkOwnInstances() {
@@ -861,6 +1038,7 @@ function main() {
   checkPushSemantics()
   checkSingleSources()
   checkOwnInstances()
+  checkReviewContract()
   checkHelps()
   checkTemplateRender()
   checkRunsOnRealTarget()
@@ -988,4 +1166,8 @@ function isProductLayerPath(rel) {
   return /^(?:references|templates|scripts)\//.test(p)
 }
 
-process.exit(main())
+// **只有自己被运行时才跑主流程。** 行为断言要 import 上面的 `finishStepsState` 来验判据本体
+// （复刻一份循环的断言不会因为判据被削弱而变红），而 import 时不该顺手跑一遍全量自检。
+if (isMainModule(import.meta.url, process.argv[1])) {
+  process.exit(main())
+}

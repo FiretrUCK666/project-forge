@@ -522,7 +522,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {
           decision: 'no-collab-templates',
-          ref: { file: 'references/collaboration.md', section: '四、审别人的 PR' },
+          ref: { file: 'references/collaboration.md', section: '六、谁能合：按「收不收得回来」分档' },
         }))
     }
     if (!facts.docs.issueTemplates) {

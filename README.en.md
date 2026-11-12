@@ -198,7 +198,9 @@ due for a bump" are not reasons to release.
   [feature template](.github/ISSUE_TEMPLATE/feature_request.md).
 - **Change code**: see [CONTRIBUTING](CONTRIBUTING.md) — how to run it locally, which gates
   there are, and how to submit a change. Changes on high-risk paths (judgement logic, the gates
-  themselves, package boundaries, the release chain) need an independent review round.
+  themselves, package boundaries, the release chain) need an independent review round, and that
+  review reports per acceptance criterion frozen before the work started — see
+  `references/collaboration.md` section 5 for the criteria and the stop rules.
 
 ## What is inside
 

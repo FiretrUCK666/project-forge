@@ -68,6 +68,9 @@ fork 落后于正本时，在自己 fork 的页面上点 **Sync fork** 更新即
   （`scripts/dev/preflight.mjs`、`.github/workflows/`）、包边界（`.gitattributes`、
   `REPO_ONLY_*`）、`templates/`、`SKILL.md`。改动落在这几处时，在提案里写清审查来自哪个独立
   上下文，以及故障注入的实际输出。
+- **审查结论按「冻结的验收标准逐条过没过」给**，不给「整体不错」这类评价。有效意见指向具体标准，
+  感受型意见是讨论不是审查；拿它当阻塞理由，循环永远收敛不了。判据与止损见
+  [`references/collaboration.md`](references/collaboration.md) 第五节。
 
 ## 开发环境
 

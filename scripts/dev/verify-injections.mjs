@@ -66,6 +66,39 @@ const INJECTIONS = [
     to: 'Repo → remote → docs → automation',
     expect: 'S3 落盘顺序',
   },
+  {
+    id: 'I7',
+    what: '审查栏的四个字段表里删掉「止损记录」',
+    file: 'scripts/dev/preflight.mjs',
+    from: "const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']",
+    to: "const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录']",
+    expect: '审查栏',
+  },
+  {
+    id: 'I8',
+    what: '模板里把「止损记录」改名成「止损」，三处说法不再一致',
+    file: 'templates/pull-request-template.md',
+    from: '- **止损记录**：触发过哪条止损',
+    to: '- **止损**：触发过哪条止损',
+    expect: '审查栏',
+  },
+  {
+    id: 'I9',
+    what: '合并收尾把第 5、6 步对调（先删分支再卸 worktree）',
+    file: 'templates/agents-project.md',
+    from: '  5. **先卸 worktree**：`git worktree remove <路径>`（分支还被 worktree 检出着时，下一步一定失败，而报错说的是「未合并」）；\n  6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；',
+    to: '  5. **先删本地分支**：`git branch -d <分支>`（不是 `-D`）；\n  6. **再卸 worktree**：`git worktree remove <路径>`；',
+    expect: '合并收尾',
+  },
+  {
+    id: 'I10',
+    what: '验收标准的编号形状从 `C1` 改成 `1.`',
+    file: 'templates/work-item.md',
+    // 两条一起改：只改第一条的话，第二条 `C2` 还在，判据仍然看得到合法编号。
+    from: '- [ ] C1: <第一条可判定的标准>\n- [ ] C2: <第二条>',
+    to: '- [ ] 1. <第一条可判定的标准>\n- [ ] 2. <第二条>',
+    expect: '验收标准编号',
+  },
 ]
 
 function runFixtures() {
@@ -87,6 +120,17 @@ function runPreflight() {
   return { failed: all.split('\n').filter((l) => l.startsWith('FAIL')) }
 }
 
+/**
+ * 这一处注入该由哪套门禁核对。
+ *
+ * **答案是「两套都跑」。** 按路径前缀分派会让一部分注入永远不会红——不是因为判据不灵，
+ * 是因为跑错了那一套，而「没红」会被当成一条结论。判据只有一条：**拆掉一处之后，只要有
+ * 任何一道门禁报出来，就算有人看着它**。猜哪一套会看，是这套复验里最容易出错的一步。
+ */
+function runBoth() {
+  return { failed: [...runPreflight().failed, ...runFixtures().failed] }
+}
+
 let bad = 0
 for (const inj of INJECTIONS) {
   const full = join(ROOT, inj.file)
@@ -98,8 +142,10 @@ for (const inj of INJECTIONS) {
   }
   writeFileSync(full, original.replace(inj.from, inj.to), 'utf8')
   try {
-    const result = inj.file.startsWith('README') || inj.file.startsWith('scripts/dev')
-      ? runPreflight() : runFixtures()
+    // **两套门禁都跑。** 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人
+    // 看着它。按路径前缀猜「该由谁看」，猜错的那次注入就不会红，而「没红」会被读成
+    // 「判据不灵」——那是把一次跑错当成了一条结论。
+    const result = runBoth()
     const hit = result.failed.some((line) => line.includes(inj.expect))
     if (hit) {
       const sample = result.failed.find((line) => line.includes(inj.expect))

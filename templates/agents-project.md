@@ -80,9 +80,13 @@
 <!-- project-forge: if has-bilingual-docs -->
 - **多语文档成对同步**：本仓库有 {{README_LIST}}，改任一语言版本必须同步另一份，并保持双向互指链接有效。
 <!-- project-forge: endif -->
+<!-- project-forge: end 修改守则 -->
+
+<!-- project-forge: begin 修改守则补充 -->
+## 项目特有红线
 
 <!-- project-forge: fill 项目特有红线：补充本项目特有的硬性规范（如兼容性下限、接口路径不可改、性能预算等）；无额外规范可直接删掉本行{{CONVENTIONS_HINT}} -->
-<!-- project-forge: end 修改守则 -->
+<!-- project-forge: end 修改守则补充 -->
 
 <!-- project-forge: begin 版本与发布 -->
 ## 版本管理与回滚底线

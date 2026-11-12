@@ -66,7 +66,8 @@ as defects leaves every project owing a debt it can never pay off.
 
 ## Before you start
 
-One requirement: **Node.js 18 or newer**. Nothing to install, no build step.
+One requirement: **verified on Node 18**; newer versions are expected to work but have not
+been checked one by one. Nothing to install, no build step, no third-party dependencies.
 
 `git` is optional. Capabilities that need it report honestly and skip; they never pretend to
 have succeeded.

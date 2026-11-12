@@ -19,13 +19,15 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-import { toMarkdown } from './lib/render.mjs'
-import { LIKELY_DEFAULT_BRANCHES } from './lib/protocol.mjs'
+import { computeNavigation, toMarkdown } from './lib/render.mjs'
+import { LIKELY_DEFAULT_BRANCHES, parseMarkers } from './lib/protocol.mjs'
+import {
+  githubRepoPath, isMainModule, readJsonSafe, readTextSafe, samePath,
+} from './lib/text.mjs'
 
 // ── 扫描时跳过的目录 ────────────────────────────────────────────────
 // 这些目录里的文件对治理没有意义，读它们只会拖慢。它们共同的特点是「可以用一条标准
@@ -63,8 +65,17 @@ const SECRET_CONTENT_PATTERNS = [
   { label: '私钥块', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
 ]
 
-const TEXT_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|py|rs|go|java|kt|c|h|cpp|hpp|cs|rb|php|sh|bash|zsh|ps1|md|mdx|txt|rst|ya?ml|json|toml|html|css|scss|svg)$/i
-const CODE_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|py|rs|go|java|kt|c|cpp|h|hpp|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl)$/i
+// 认得出来的源码扩展名。**这张表决定「这是什么项目」**，所以它必须涵盖真实世界里
+// 常见的写法，而不只是几家大厂的主语言。
+//
+// 一个 `.vue` 组件库被漏在这里时，它的代码文件数是 0，于是整仓被判成 `docs-only`
+// ——「纯文档项目」，接下来该做的几件事全都不做。而它看起来完全正常：README 有、
+// 文件数不为零、判断还给出了一个说得通的理由。
+const CODE_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|c|cc|cpp|h|hpp|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|sol|sql|proto)$/i
+
+// 能按文本读的扩展名。内容扫描（凭据、本机路径）只在这类文件上做。
+const TEXT_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|c|cc|cpp|h|hpp|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|sol|sql|proto|md|mdx|txt|rst|ya?ml|json|toml|html|css|scss|svg)$/i
+
 const DOC_EXT = /\.(?:md|mdx|txt|rst)$/i
 
 // ── 子进程 ──────────────────────────────────────────────────────────
@@ -81,6 +92,9 @@ function run(cmd, args, opts = {}) {
       timeout: opts.timeout ?? 15000,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,
+      // 子进程默认继承环境；`env` 给了就用它叠在继承之上——**不是替换**，
+      // 否则 PATH 没了，连 `git` 都起不来。
+      env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },
     }, (error, stdout, stderr) => {
       done({
         ok: error === null,
@@ -112,42 +126,11 @@ function git(cwd, args, opts = {}) {
 }
 
 // ── 文件读取 ────────────────────────────────────────────────────────
+//
+// 三个都从 `lib/text.mjs` 取，本文件不再各写一份：`readTextSafe` 的「多大算太大、
+// 含 NUL 就不读」、`samePath` 的「按真实路径归一」，都是别处也要用的判据。
+// 同一件事两处各写一遍，迟早给出两个答案，而那种分歧出现在「读文件」上时是静默损坏。
 
-function readTextSafe(filePath, maxBytes = 256 * 1024) {
-  try {
-    const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
-    const buf = readFileSync(filePath)
-    if (buf.subarray(0, 4096).includes(0)) return undefined
-    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return undefined
-  }
-}
-
-function readJsonSafe(filePath) {
-  const text = readTextSafe(filePath)
-  if (text === undefined) return undefined
-  try { return JSON.parse(text) } catch { return undefined }
-}
-
-function samePath(a, b) {
-  try {
-    return realpathSync.native(resolve(a)) === realpathSync.native(resolve(b))
-  } catch {
-    return resolve(a).toLowerCase() === resolve(b).toLowerCase()
-  }
-}
-
-/** 把 GitHub 远端地址归一成 `owner/repo`。认不出返回 undefined，不猜。 */
-function githubRepoOf(url) {
-  if (typeof url !== 'string' || url.trim() === '') return undefined
-  const s = url.trim().replace(/^git\+/, '').replace(/\.git$/i, '').replace(/\/+$/, '')
-  const m = /(?:github\.com[:/])([^/]+\/[^/#?]+)/i.exec(s)
-  return m ? m[1].toLowerCase() : undefined
-}
-
-/** 从 TOML 里读一个字符串字段。只为拿几个值，不为此引一个解析器。 */
 function tomlString(text, key) {
   return new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'm').exec(text)?.[1]
 }
@@ -162,7 +145,7 @@ function tomlString(text, key) {
  * 的仓库读成「零提交」，会把它带向「首次提交」。
  */
 async function detectGit(root, { probeAuth = false } = {}) {
-  const [top, cfg, st, remotes, tagsRes, logRes, lsFiles, checkIgnore, originHead] = await Promise.all([
+  const [top, cfg, st, remotes, tagsRes, logRes, lsFiles, checkIgnore, originHead, bare, shallow] = await Promise.all([
     git(root, ['rev-parse', '--is-inside-work-tree', '--show-toplevel']),
     git(root, ['config', '--list', '--show-scope', '--show-origin']),
     git(root, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal']),
@@ -172,14 +155,42 @@ async function detectGit(root, { probeAuth = false } = {}) {
     git(root, ['ls-files', '-z']),
     git(root, ['check-ignore', '-z', '--stdin'], { input: '' }),
     git(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
+    git(root, ['rev-parse', '--is-bare-repository']),
+    git(root, ['rev-parse', '--is-shallow-repository']),
   ])
 
   if (top.missing) {
     return { available: false, present: false, auth: { https: 'n/a', network: 'n/a' } }
   }
+  // **裸仓库要先判，再判工作区。** `--is-inside-work-tree` 在裸仓库上是 false，
+  // 照它判会得到「这不是仓库」——下一步就会有人在这里 `git init`，而它明明已经是仓库。
+  const isBare = bare.ok && bare.stdout === 'true'
+  if (isBare) {
+    return {
+      available: true,
+      present: true,
+      isBare: true,
+      isShallow: false,
+      isRepoRoot: true,
+      workTreeRoot: root,
+      barePath: root,
+      branch: undefined,
+      remote: undefined,
+      remotes: [],
+      remoteUrls: {},
+      identity: { name: undefined, email: undefined, scope: 'unset' },
+      commits: undefined,
+      commitsState: 'unreadable',
+      trackedPaths: [],
+      trackedFiles: 0,
+      nestedRepos: [],
+      auth: { https: 'n/a', network: 'n/a', reason: '裸仓库没有工作区' },
+    }
+  }
   if (!top.ok || !top.stdout) {
     return { available: true, present: false, auth: { https: 'n/a', network: 'n/a' } }
   }
+  const isShallow = shallow.ok && shallow.stdout === 'true'
   const [insideFlag, workTreeRoot] = top.stdout.split('\n')
   const isRepoRoot = samePath(root, workTreeRoot)
 
@@ -231,6 +242,8 @@ async function detectGit(root, { probeAuth = false } = {}) {
     available: true,
     present: true,
     isRepoRoot,
+    isBare: false,
+    isShallow,
     workTreeRoot,
     insideWorkTree: insideFlag === 'true',
     branch: statusInfo.head,
@@ -339,15 +352,41 @@ function parsePorcelainV2(text) {
  *
  * 只判退出码，**绝不读密码值、绝不打印**：输入是「要哪一处的凭据」，输出被丢弃。
  * 判据跨平台一致——`git credential fill` 取不到就非零退出。
+ *
+ * ## 三行都得给，`path` 尤其不能漏
+ *
+ * 凭据有两种存法：按主机（`credential.https://github.com`）与按路径
+ * （`credential.https://github.com/owner/repo`）。只给 `host` 时，凭据助手查的是前者，
+ * 而很多人的凭据恰恰是按路径存的——症状是「明明登录了却推不上去」，所有报错都说认证失败。
+ * 这一条是这套流程自己写在参考文档里的硬判据，代码不能比文档松。
+ *
+ * ## 两个环境变量不是可选项
+ *
+ * 没有可用的凭据时，`git credential fill` 会**弹一个图形登录框**等人输入。在桌面环境上
+ * 那会一直卡到超时（或者更糟：卡到人回来点掉），而调用方以为自己在做一次「几百毫秒的探测」。
+ * 两个变量分别关掉终端与图形助手的交互，它才真的是一次探测。
  */
 async function probeCredential(root, remote) {
   const url = /^https?:\/\//i.test(remote) ? remote : 'https://github.com'
   let host = 'github.com'
-  try { host = new URL(url).host } catch { /* 用默认值 */ }
+  let path = ''
+  try {
+    const parsed = new URL(url)
+    host = parsed.host
+    path = parsed.pathname.replace(/^\/+/, '').replace(/\/+$/, '')
+    // 按路径存凭据时，那条路径要带 `.git` 后缀（`owner/repo.git`），
+    // 与 `git remote` 里写的裸路径不是一回事。
+    if (path !== '' && !/\.git$/i.test(path)) path = `${path}.git`
+  } catch { /* 用默认值：认不出就按主机问，那仍然比不问强 */ }
+
+  const lines = [`protocol=https`, `host=${host}`]
+  if (path !== '') lines.push(`path=${path}`)
   const res = await run('git', ['credential', 'fill'], {
     cwd: root,
-    input: `protocol=https\nhost=${host}\n\n`,
+    input: `${lines.join('\n')}\n\n`,
     timeout: 5000,
+    // 关掉交互：没有凭据时助手会弹窗等人，而探测不能等人。
+    env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
   })
   if (res.missing) return { state: 'undetermined', reason: '这台机器上找不到 git' }
   if (res.ok) return { state: 'available', reason: '凭据助手取到了凭据' }
@@ -370,7 +409,7 @@ const ECOSYSTEMS = [
       if (typeof pkg.version === 'string') s.declaredVersion = pkg.version.trim()
       if (pkg.private === true) s.private = true
       const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
-      if (repo) s.declaredRepo = githubRepoOf(repo)
+      if (repo) s.declaredRepo = githubRepoPath(repo)
       s.packageManager = existsSync(join(root, 'pnpm-lock.yaml')) ? 'pnpm'
         : existsSync(join(root, 'yarn.lock')) ? 'yarn'
           : (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) ? 'bun'
@@ -408,9 +447,35 @@ const ECOSYSTEMS = [
         if (/\[build-system\]/.test(text) && name) s.publishable = true
         const requires = tomlString(text, 'requires-python')
         if (requires) s.runtimeRequirements.push(`Python ${requires}`)
+        // 声明的源仓库：`[project.urls]` 里的 Repository / Homepage。
+        // 读不到就留空——角色判定宁可报「比不出来」，也不要拿一个猜出来的仓库去比。
+        const urls = /\[project\.urls\]([\s\S]*?)(?:\n\[|$)/.exec(text)?.[1] ?? ''
+        if (!s.declaredRepo) {
+          for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
+            const value = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)?.[1]
+            const repo = githubRepoPath(value)
+            if (repo) { s.declaredRepo = repo; break }
+          }
+        }
       }
-      s.commands.install ??= existsSync(join(root, 'uv.lock')) ? 'uv sync' : 'pip install -e .'
-      s.commands.test ??= 'pytest'
+      // `setup.py` 里偶尔也写着 url，读得到就用——它比「没有」强，但只作兜底。
+      if (!s.declaredRepo && existsSync(join(root, 'setup.py'))) {
+        const text = readTextSafe(join(root, 'setup.py')) ?? ''
+        s.declaredRepo = githubRepoPath(/url\s*=\s*["']([^"']+)["']/.exec(text)?.[1])
+      }
+      // 安装命令按**项目里真实存在的文件**选，不按生态惯例编。
+      // `pip install -e .` 要求有 pyproject.toml / setup.py；只有 requirements.txt 时
+      // 用它会在 CI 里当场失败，而那条失败看起来像「代码坏了」。
+      if (existsSync(join(root, 'uv.lock'))) s.commands.install ??= 'uv sync'
+      else if (existsSync(join(root, 'pyproject.toml')) || existsSync(join(root, 'setup.py'))) {
+        s.commands.install ??= 'pip install -e .'
+      } else if (existsSync(join(root, 'requirements.txt'))) {
+        s.commands.install ??= 'pip install -r requirements.txt'
+      }
+      // 测试命令要有**测试存在的证据**：一个配置文件、或者一个测试目录。
+      // 两样都没有的项目跑 pytest 会得到「collected 0 items」再以非零退出，
+      // 而那在 CI 里就是一条红——红的原因却不是代码坏了。
+      if (hasPytestEvidence(root)) s.commands.test ??= 'pytest'
     },
   },
   {
@@ -427,6 +492,9 @@ const ECOSYSTEMS = [
       else if (name && version) s.publishable = true
       const rustVersion = tomlString(text, 'rust-version')
       if (rustVersion) s.runtimeRequirements.push(`Rust ${rustVersion}`)
+      // `repository` 字段就是 Cargo 的「源仓库」声明。它读得到，角色就判得出来；
+      // 读不到时角色停在 undetermined，那一条会在 questions 里问清楚。
+      if (!s.declaredRepo) s.declaredRepo = githubRepoPath(tomlString(text, 'repository'))
       s.commands.build ??= 'cargo build'
       s.commands.test ??= 'cargo test'
       s.commands.lint ??= 'cargo clippy -- -D warnings'
@@ -441,7 +509,7 @@ const ECOSYSTEMS = [
       const mod = /^module\s+(\S+)/m.exec(text)?.[1]
       if (mod) {
         s.projectName = mod.split('/').pop() || s.projectName
-        s.declaredRepo ??= githubRepoOf(mod)
+        s.declaredRepo ??= githubRepoPath(mod)
         // Go 的「发布」就是打标签，没有上传动作——所以它是「不需要制品库」而不是「不可发布」。
         s.registryFree = true
       }
@@ -457,10 +525,18 @@ const ECOSYSTEMS = [
     detect: (root) => existsSync(join(root, 'pom.xml')) || existsSync(join(root, 'build.gradle'))
       || existsSync(join(root, 'build.gradle.kts')),
     read: (root, s) => {
-      const maven = existsSync(join(root, 'pom.xml'))
-      s.commands.build ??= maven ? 'mvn -B package' : './gradlew build'
-      s.commands.test ??= maven ? 'mvn -B test' : './gradlew test'
-      if (maven) s.publishable = true
+      if (existsSync(join(root, 'pom.xml'))) {
+        s.commands.build ??= 'mvn -B package'
+        if (hasSuffix(root, '.java')) s.commands.test ??= 'mvn -B test'
+        s.publishable = true
+        return
+      }
+      // gradlew 是**提交进仓库的脚本**，不是「装了 Gradle 就有」。没提交它时
+      // `./gradlew` 在 CI 里是「找不到文件」，而错误信息看起来像仓库缺了个东西。
+      const wrapper = existsSync(join(root, 'gradlew')) || existsSync(join(root, 'gradlew.bat'))
+      const gradle = wrapper ? './gradlew' : 'gradle'
+      s.commands.build ??= `${gradle} build`
+      if (gradleTestEvidence(root)) s.commands.test ??= `${gradle} test`
     },
   },
   {
@@ -469,7 +545,13 @@ const ECOSYSTEMS = [
     detect: (root) => existsSync(join(root, 'Gemfile')) || hasSuffix(root, '.gemspec'),
     read: (root, s) => {
       s.commands.install ??= 'bundle install'
-      s.commands.test ??= 'bundle exec rake test'
+      // `bundle exec rake test` 要求有 Rakefile 且里面真有 test 任务。
+      // 两者缺一时跑到的是「不知道 test 这个任务」，而它看起来像测试坏了。
+      if (existsSync(join(root, 'Rakefile')) && hasRakeTestTarget(root)) {
+        s.commands.test ??= 'bundle exec rake test'
+      } else if (existsSync(join(root, 'spec')) || hasSuffix(root, '_spec.rb')) {
+        s.commands.test ??= 'bundle exec rspec'
+      }
       if (hasSuffix(root, '.gemspec')) s.publishable = true
     },
   },
@@ -482,6 +564,18 @@ const ECOSYSTEMS = [
       if (c?.name) s.projectName = c.name
       s.commands.install ??= 'composer install'
       if (c?.name) s.publishable = true
+      // composer 的 `repository` 可能是字符串，也可能是 `{ url: … }`；
+      // `homepage` 里也常写着源码地址。三个都试一遍，认不出就留空。
+      const candidates = [
+        typeof c?.repository === 'string' ? c.repository : c?.repository?.url,
+        typeof c?.homepage === 'string' ? c.homepage : undefined,
+      ]
+      if (!s.declaredRepo) {
+        for (const candidate of candidates) {
+          const repo = githubRepoPath(candidate)
+          if (repo) { s.declaredRepo = repo; break }
+        }
+      }
     },
   },
   {
@@ -490,7 +584,9 @@ const ECOSYSTEMS = [
     detect: (root) => hasSuffix(root, '.csproj') || hasSuffix(root, '.sln'),
     read: (root, s) => {
       s.commands.build ??= 'dotnet build'
-      s.commands.test ??= 'dotnet test'
+      if (hasSuffix(root, 'Tests.csproj') || hasSuffix(root, '.Tests.csproj')) {
+        s.commands.test ??= 'dotnet test'
+      }
     },
   },
   {
@@ -500,10 +596,14 @@ const ECOSYSTEMS = [
     read: (root, s) => {
       if (existsSync(join(root, 'CMakeLists.txt'))) {
         s.commands.build ??= 'cmake -B build && cmake --build build'
-        s.commands.test ??= 'ctest --test-dir build'
+        // `ctest` 要求 CMake 里**登记过测试**（enable_testing / add_test）。
+        // 没登记时它跑到的是「No tests were found」，退出码非零。
+        if (cmakeHasTests(root)) s.commands.test ??= 'ctest --test-dir build --output-on-failure'
       } else {
         s.commands.build ??= 'meson compile -C build'
-        s.commands.test ??= 'meson test -C build'
+        if (existsSync(join(root, 'test')) || existsSync(join(root, 'tests'))) {
+          s.commands.test ??= 'meson test -C build'
+        }
       }
     },
   },
@@ -513,7 +613,7 @@ const ECOSYSTEMS = [
     detect: (root) => existsSync(join(root, 'pubspec.yaml')),
     read: (root, s) => {
       s.commands.install ??= 'dart pub get'
-      s.commands.test ??= 'dart test'
+      if (existsSync(join(root, 'test'))) s.commands.test ??= 'dart test'
       s.publishable = true
     },
   },
@@ -523,7 +623,9 @@ const ECOSYSTEMS = [
     detect: (root) => existsSync(join(root, 'Package.swift')),
     read: (root, s) => {
       s.commands.build ??= 'swift build'
-      s.commands.test ??= 'swift test'
+      if (existsSync(join(root, 'Tests')) || existsSync(join(root, 'Tests.swift'))) {
+        s.commands.test ??= 'swift test'
+      }
     },
   },
   {
@@ -532,13 +634,99 @@ const ECOSYSTEMS = [
     detect: (root) => existsSync(join(root, 'mix.exs')),
     read: (root, s) => {
       s.commands.install ??= 'mix deps.get'
-      s.commands.test ??= 'mix test'
+      if (existsSync(join(root, 'test'))) s.commands.test ??= 'mix test'
     },
   },
 ]
 
+/**
+ * Gradle 项目里有没有测试的证据。
+ *
+ * 三种：`src/test/` 目录、构建脚本里出现 `useJUnit` / `test {` 、或根目录里放着测试源。
+ * 三样都没有时 `gradle test` 是「NO-SOURCE」——它会**成功退出**，看起来像跑过了。
+ * 那比失败更糟：报告里会有一行「测试通过」，而那行什么都没有验。
+ */
+function gradleTestEvidence(root) {
+  if (existsSync(join(root, 'src', 'test'))) return true
+  for (const rel of ['build.gradle', 'build.gradle.kts']) {
+    const text = readTextSafe(join(root, rel)) ?? ''
+    if (/useJUnit|useTestNG|enableTest|tasks\.test|test\s*\{/.test(text)) return true
+  }
+  return false
+}
+
+/** CMake 里有没有登记过测试。 */
+function cmakeHasTests(root) {
+  const text = readTextSafe(join(root, 'CMakeLists.txt')) ?? ''
+  if (/enable_testing\s*\(|add_test\s*\(|include\s*\(\s*CTest/.test(text)) return true
+  return existsSync(join(root, 'tests')) || existsSync(join(root, 'test'))
+}
+
+/** Rakefile 里有没有 test 任务。 */
+function hasRakeTestTarget(root) {
+  const text = readTextSafe(join(root, 'Rakefile')) ?? ''
+  return /^\s*task\s+:test\b|^\s*desc\s+.{0,80}\btest\b/m.test(text) || /^\s*task\s+default:/m.test(text)
+}
+
+/**
+ * 这一条算不算「有效文件」。
+ *
+ * 判据是**它是不是操作系统或编辑器自动生成的垃圾**，而不是「它小不小」。
+ * 一个只有 `.DS_Store` 与 `.vscode/settings.json` 的目录，实际上什么都没开始写；
+ * 把它算成「有文件」会让成熟度从 `empty` 跳到 `greenfield`，而那一步的差别是
+ * 「先让项目存在」与「该做的一次配齐」。
+ */
+function isJunkFile(rel) {
+  const p = String(rel ?? '').replace(/\\/g, '/')
+  if (/(^|\/)\.DS_Store$/.test(p)) return true
+  if (/(^|\/)Thumbs\.db$/i.test(p)) return true
+  if (/(^|\/)desktop\.ini$/i.test(p)) return true
+  if (/(^|\/)\.(vscode|idea|fleet)\//.test(p)) return true
+  return false
+}
+
+/** 一次 `git config` 列表里某个键的值。 */
+function escapeRe(text) {
+  return String(text ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+
+/**
+ * 这个仓库里有没有「能跑 pytest」的证据。
+ *
+ * 判据是**证据**，不是惯例：一个 `pytest.ini`、`[tool.pytest.ini_options]` 段、
+ * `tests/` 目录，或者任何 `test_*.py` / `*_test.py`。四样都没有时跑 `pytest` 的结果是
+ * 「collected 0 items」加非零退出——一条看起来像代码坏了的红。
+ */
+function hasPytestEvidence(root) {
+  for (const rel of ['pytest.ini', 'tox.ini', 'conftest.py']) {
+    if (existsSync(join(root, rel))) return true
+  }
+  for (const rel of ['pyproject.toml', 'setup.cfg']) {
+    const text = readTextSafe(join(root, rel)) ?? ''
+    if (/\[tool\.pytest|\[tool:pytest\]/.test(text)) return true
+  }
+  for (const dir of ['tests', 'test']) {
+    if (existsSync(join(root, dir))) return true
+  }
+  return hasSuffix(root, '_test.py') || hasPrefix(root, 'test_', '.py')
+}
+
+/**
+ * 目录里有没有以某个后缀结尾的文件。
+ *
+ * 「这个项目有 `.csproj` 吗」这类问题用它——**看文件名，不看固定路径**，
+ * 因为各家把清单放在哪里是人的习惯，不是事实。
+ */
 function hasSuffix(root, suffix) {
   try { return readdirSync(root).some((name) => name.endsWith(suffix)) } catch { return false }
+}
+
+/** 目录里有没有以某个前缀开头、某个后缀结尾的文件。 */
+function hasPrefix(root, prefix, suffix) {
+  try {
+    return readdirSync(root).some((name) => name.startsWith(prefix) && name.endsWith(suffix))
+  } catch { return false }
 }
 
 /**
@@ -588,8 +776,37 @@ function detectSkillKind(root) {
 }
 
 function detectEcosystem(root) {
-  const s = {
-    projectName: basename(root),
+  const s = newEcosystemState()
+  scanEcosystemAt(root, s)
+  scanSubdirectories(root, s)
+  for (const hint of PLUGIN_HINTS) {
+    if (!hint.test(root)) continue
+    if (!s.kinds.includes(hint.kind)) s.kinds.push(hint.kind)
+    if (!s.manifests.includes(hint.marker)) s.manifests.push(hint.marker)
+  }
+
+  const skill = detectSkillKind(root)
+  if (skill) {
+    s.kinds.push('skill')
+    s.skillMeta = skill.skillMeta
+    if (!s.manifests.includes(skill.skillMeta.entry)) s.manifests.push(skill.skillMeta.entry)
+    if (skill.skillMeta.version && !s.declaredVersion) s.declaredVersion = skill.skillMeta.version
+    if (skill.skillMeta.source && !s.declaredRepo) {
+      s.declaredRepo = githubRepoPath(skill.skillMeta.source)
+    }
+    // 能力目录靠克隆或复制分发，不经过制品库——「发布」这个动作对它不成立，不是被禁止。
+    s.registryFree = true
+  }
+
+  return s
+}
+
+/** 一阶子目录里值得看一眼的那几个名字。前后端分离、monorepo 的常见布局。 */
+const SUBDIR_CANDIDATES = ['frontend', 'backend', 'client', 'server', 'web', 'api', 'app', 'apps', 'packages', 'services', 'libs']
+
+function newEcosystemState() {
+  return {
+    projectName: undefined,
     kinds: [],
     manifests: [],
     commands: {},
@@ -602,14 +819,54 @@ function detectEcosystem(root) {
     declaredRepo: undefined,
     packageManager: undefined,
     skillMeta: undefined,
+    subdirs: [],
   }
+}
 
+/**
+ * 根目录一个生态都没命中时，往**一阶子目录**看一层。
+ *
+ * 前后端分离的项目太常见了：根下只有 `frontend/` 与 `backend/`，各自的清单都在自己目录里。
+ * 只看根目录会把整仓判成 `unknown`，而 `unknown` 那一行的处置是「先问用户」——
+ * 于是一个结构清清楚楚的仓库被挡在了门外。
+ *
+ * **只在根目录没命中时下潜**：根上已经有清单的项目，子目录里多半是依赖或示例，
+ * 跟着扫会凭空多出几个生态，而多出来的那些会让 CI 去装根本不需要的工具链。
+ */
+function scanSubdirectories(root, s) {
+  if (s.kinds.length > 0) return
+  for (const dir of SUBDIR_CANDIDATES) {
+    const full = join(root, dir)
+    if (!existsSync(full)) continue
+    const sub = newEcosystemState()
+    scanEcosystemAt(full, sub, { name: dir })
+    if (sub.kinds.length === 0) continue
+    for (const kind of sub.kinds) if (!s.kinds.includes(kind)) s.kinds.push(kind)
+    for (const name of sub.manifests) if (!s.manifests.includes(name)) s.manifests.push(name)
+    if (sub.publishable) s.publishable = true
+    if (sub.private) s.private = true
+    for (const req of sub.runtimeRequirements) {
+      if (!s.runtimeRequirements.includes(req)) s.runtimeRequirements.push(req)
+    }
+    s.subdirs.push({ dir, kinds: sub.kinds, commands: sub.commands })
+    for (const [key, value] of Object.entries(sub.commands)) {
+      if (s.commands[key] === undefined) s.commands[key] = value
+    }
+    // 顶层 `commands` 只留先填上的那一份；子目录各自那一份按目录名分桶，
+    // 与「多生态必须分桶」是同一条理由。
+    if (Object.keys(sub.commands).length > 0) s.commandsByEcosystem[dir] = sub.commands
+  }
+}
+
+/** 在给定的一个目录上跑一遍生态表。**只看这一层**，不递归。 */
+function scanEcosystemAt(root, s, { name } = {}) {
+  if (s.projectName === undefined) s.projectName = name ?? basename(root)
   for (const row of ECOSYSTEMS) {
     if (!row.detect(root)) continue
     s.kinds.push(row.kind)
     if (row.manifest) {
-      const name = row.manifest(root)
-      if (name && !s.manifests.includes(name)) s.manifests.push(name)
+      const manifest = row.manifest(root)
+      if (manifest && !s.manifests.includes(manifest)) s.manifests.push(manifest)
     }
     // 每个生态的命令先落在它自己那一桶里，再合并进顶层。
     //
@@ -632,27 +889,6 @@ function detectEcosystem(root) {
     }
     if (Object.keys(scoped).length > 0) s.commandsByEcosystem[row.kind] = scoped
   }
-
-  for (const hint of PLUGIN_HINTS) {
-    if (!hint.test(root)) continue
-    if (!s.kinds.includes(hint.kind)) s.kinds.push(hint.kind)
-    if (!s.manifests.includes(hint.marker)) s.manifests.push(hint.marker)
-  }
-
-  const skill = detectSkillKind(root)
-  if (skill) {
-    s.kinds.push('skill')
-    s.skillMeta = skill.skillMeta
-    if (!s.manifests.includes(skill.skillMeta.entry)) s.manifests.push(skill.skillMeta.entry)
-    if (skill.skillMeta.version && !s.declaredVersion) s.declaredVersion = skill.skillMeta.version
-    if (skill.skillMeta.source && !s.declaredRepo) {
-      s.declaredRepo = githubRepoOf(skill.skillMeta.source)
-    }
-    // 能力目录靠克隆或复制分发，不经过制品库——「发布」这个动作对它不成立，不是被禁止。
-    s.registryFree = true
-  }
-
-  return s
 }
 
 /**
@@ -693,8 +929,18 @@ async function walkWorkspace(root, gitFacts) {
   const trackedSet = new Set(canAskGit ? gitFacts.trackedPaths : [])
 
   const homeNorm = homedir().replace(/\\/g, '/')
+  // 家目录出现在正文里时，判据要**两边都卡边界**。
+  //
+  // 只卡一边（`^C:/Users/x`）会漏掉 `--home=C:/Users/x` 这种写法；只卡另一边会误报
+  // `/root/theme` 这类源码路径。两头都要求「前面不是路径字符、后面不是名字字符」，
+  // 才是真的「这里硬编码了一个本机绝对路径」。
+  //
+  // `/root` 这类**短路径**（容器里以 root 运行时 `homedir()` 就是它）单独处理：它太短、
+  // 太容易与别的东西撞（前端路由 `/root`、CSS 的 `:root` 变量），所以额外要求后面
+  // 紧跟一段真实路径。宁可漏报一处，也不要把一堆样式表报成「本机路径泄露」——
+  // 那种报告会让人去改一行完全正确的代码。
   const homeRe = homeNorm.length > 4
-    ? new RegExp(homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+    ? new RegExp(`(?<![\\w.\\-/:])${homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
     : undefined
 
   const files = []
@@ -713,17 +959,29 @@ async function walkWorkspace(root, gitFacts) {
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue
       const full = join(dir, entry.name)
+      const rel = relative(root, full).replace(/\\/g, '/')
       if (entry.isDirectory()) {
-        if (entry.name === '.git') continue
-        dirs.push(relative(root, full).replace(/\\/g, '/'))
+        if (entry.name === '.git') {
+          // 根上的 `.git` 是这个仓库自己；子目录里的同一个名字是**另一个仓库**。
+          if (rel !== '.git') nestedRepos.push(rel)
+          continue
+        }
+        dirs.push(rel)
         if (SKIP_DIRS.has(entry.name)) continue
         walk(full, depth + 1)
       } else if (entry.isFile()) {
-        files.push({ rel: relative(root, full).replace(/\\/g, '/'), name: entry.name, full })
+        // 子模块的 `.git` 是**文件**（一行 `gitdir: …`），不是目录——上面那个分支抓不到它。
+        if (entry.name === '.git') { nestedRepos.push(rel); continue }
+        if (entry.name === '.gitmodules') nestedRepos.push(rel)
+        files.push({ rel, name: entry.name, full })
       }
     }
   }
+  const nestedRepos = []
   walk(root, 0)
+  // `.gitmodules` 与 `.git` 可能指向同一处，去重之后才是一份可读的清单。
+  const nestedUnique = [...new Set(nestedRepos.map((p) => p.replace(/\/?\.gitmodules$/, '').replace(/\/?\.git$/, '') || '.'))]
+    .filter((p) => p !== '.')
 
   const ignoredSet = new Set()
   const ignoredTracked = []
@@ -742,6 +1000,7 @@ async function walkWorkspace(root, gitFacts) {
 
   let codeFiles = 0
   let docFiles = 0
+  let effectiveFiles = 0
   let skippedLargeFiles = 0
   let unreadableFiles = 0
   const secretFiles = []
@@ -756,8 +1015,16 @@ async function walkWorkspace(root, gitFacts) {
   }
 
   for (const file of files) {
-    if (CODE_EXT.test(file.name)) codeFiles += 1
-    else if (DOC_EXT.test(file.name)) docFiles += 1
+    // 「有效文件」：一个目录里只有 `.DS_Store`、`Thumbs.db`、`.vscode/settings.json`
+    // 时，它是**空目录**，不是「白纸项目」。这两档的处置完全不同——empty 是
+    // 「先让项目存在」，greenfield 是「该做的一次配齐」。
+    if (isJunkFile(file.rel)) {
+      // 算进总数（它确实在磁盘上），但不算「有效」。
+    } else {
+      effectiveFiles += 1
+      if (CODE_EXT.test(file.name)) codeFiles += 1
+      else if (DOC_EXT.test(file.name)) docFiles += 1
+    }
 
     const tracked = trackedSet.has(file.rel)
     const ignored = ignoredSet.has(file.rel)
@@ -810,6 +1077,7 @@ async function walkWorkspace(root, gitFacts) {
 
   return {
     totalFiles: files.length,
+    effectiveFiles,
     codeFiles,
     docFiles,
     unignoredOutputDirs,
@@ -819,6 +1087,7 @@ async function walkWorkspace(root, gitFacts) {
     homePathLeaks,
     largeFiles,
     scanCoverage: { truncated, depthReached, skippedLargeFiles, unreadableFiles },
+    nestedRepos: nestedUnique,
   }
 }
 
@@ -851,6 +1120,61 @@ export function classifyHomePath(rel, line) {
 
 // ── 文档与自动化 ────────────────────────────────────────────────────
 
+/**
+ * 项目里已有的「别的 AI 约定文件」。
+ *
+ * 存在两份约定（`CLAUDE.md` 与 `AGENTS.md` 各写一套）时，**两份都会漂**——
+ * 而漂的那一份通常是没人读的那一份。所以勘察要把它们全找出来，交给 S2 决定合到哪儿，
+ * 而不是当作没看见。
+ *
+ * 单文件与目录两种形状都要认：`.cursorrules` 是单文件，`.cursor/rules/` 下面是一堆；
+ * 各家扩展名不同（`.mdc`、`.md`、`.txt`），所以目录里按「文本文件」挑，不按固定后缀。
+ */
+function detectOtherAiConventions(root) {
+  const singles = [
+    'CLAUDE.md', '.clinerules', '.cursorrules', '.windsurfrules', 'CONVENTIONS.md',
+    '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md',
+  ].filter((rel) => existsSync(join(root, rel)))
+
+  const dirs = ['.cursor/rules', '.roo/rules', '.github/instructions']
+  const fromDirs = []
+  for (const dir of dirs) {
+    let names = []
+    try { names = readdirSync(join(root, dir), { withFileTypes: true }) } catch { continue }
+    for (const entry of names) {
+      if (!entry.isFile()) continue
+      if (!/\.(?:md|mdc|txt|rules?)$/i.test(entry.name)) continue
+      fromDirs.push(`${dir}/${entry.name}`)
+    }
+  }
+  return [...singles, ...fromDirs]
+}
+
+/** 一眼就能看出是「写给人看的说明」那几个文件名——不算「别的 AI 约定」。 */
+function isAiConventionFile(name) {
+  return /^(?:AGENTS|CLAUDE|GEMINI|CONVENTIONS)\.md$/i.test(name)
+    || /\.(?:cursorrules|clinerules|windsurfrules|mdc)$/i.test(name)
+    || /^copilot-instructions\.md$/i.test(name)
+}
+
+/**
+ * 已有的 AI 约定文件里，还有几处没填的占位。
+ *
+ * 导航要推 `docs-set.md` 的判据之一是「AGENTS.md 还有没填的 fill」——那个数由
+ * `parseMarkers` 给，而它只在 `AGENTS.md` 上跑过。这里给的是同一个答案的**另一条来路**：
+ * 勘察时顺手把 `AGENTS.md` 的标记解析一遍，把 fill 数挂到 `docs.agentsMarkers` 上。
+ * 两条来路必须给同一个数——它们用的是同一个 `parseMarkers`，所以不会分叉。
+ */
+function parseAgentMarkers(root, agents) {
+  if (!agents) return { marks: 0, fills: [] }
+  const text = readTextSafe(join(root, agents)) ?? ''
+  const markers = parseMarkers(text, agents)
+  return {
+    marks: markers.length,
+    fills: markers.filter((m) => m.kind === 'fill').map((m) => ({ line: m.line, what: m.what })),
+  }
+}
+
 function detectDocs(root) {
   let entries = []
   try { entries = readdirSync(root) } catch { /* 空目录 */ }
@@ -868,9 +1192,12 @@ function detectDocs(root) {
     .find((rel) => existsSync(join(root, rel)))
   const license = entries.find((e) => /^licen[cs]e(?:\..+|-.*)?$/i.test(e))
 
-  const otherAiConventions = ['CLAUDE.md', '.cursorrules', '.cursor/rules',
-    '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md', '.windsurfrules']
-    .filter((rel) => existsSync(join(root, rel)))
+  // 「别的 AI 约定文件」要**展开到具体文件**，不能只报一个目录名。
+  //
+  // 报 `.cursor/rules` 这么个名字，读的人拿不到任何可行动的信息：那个目录里有几条规则、
+  // 讲的是什么，全得自己去看。而合流这件事的第一步恰恰是「逐条读一遍」。
+  // 目录里的规则文件也不止 `.mdc` 一种，各家扩展名不同，所以按「列目录、挑文本文件」处理。
+  const otherAiConventions = detectOtherAiConventions(root)
 
   const wfDir = join(root, '.github', 'workflows')
   const workflows = []
@@ -920,6 +1247,8 @@ function detectDocs(root) {
     readme: readmes[0],
     readmePair: readmes.length > 1,
     agents: agents ? { file: agents } : undefined,
+    // 契约里还有几处没填——导航与体检都要这个数，取一次挂在这里，别处不再各算一遍。
+    agentsMarkers: parseAgentMarkers(root, agents),
     contributing,
     releasing,
     changelog,
@@ -974,7 +1303,32 @@ function detectConventions(root, { gitFacts, docs, ecosystem }) {
     tagPrefix,
     commitStyle: gitFacts.commitStyle ?? 'plain',
     workDir,
+    workflowTooling: detectWorkflowTooling(root),
   }
+}
+
+/**
+ * 项目已经在用的发版与提交工具链。
+ *
+ * 探它只为一件事：**写契约时别跟项目自己的工具打架**。一个用 changesets 的项目，
+ * 发布流程是「改 changeset → 合并 → CI 出 PR」；照着模板默认那句「先写说明、再打标签」
+ * 写，写出来的是一份没人能照做的规范。而工具名一旦写进文档又没人核对，它就会一直错下去。
+ *
+ * 只报**文件名**，不猜它怎么配——判据要人能一眼核。
+ * 这几种形状是各家工具的固定约定文件，不是本项目自定的规矩，所以写死在这里没有问题。
+ */
+function detectWorkflowTooling(root) {
+  const found = []
+  const singles = [
+    'release-please-config.json', '.releaserc', '.releaserc.json', '.releaserc.yml',
+    'commitlint.config.js', 'commitlint.config.cjs', 'commitlint.config.mjs',
+    'lefthook.yml', 'lefthook.yaml',
+  ]
+  for (const rel of singles) if (existsSync(join(root, rel))) found.push(rel)
+  for (const dir of ['.changeset', '.husky']) {
+    if (existsSync(join(root, dir))) found.push(`${dir}/`)
+  }
+  return found
 }
 
 // ── 多包、产物、本地 skills ──────────────────────────────────────────
@@ -1049,14 +1403,34 @@ function detectLocalSkills(root) {
  * 成熟度是**一个值**，不是评分。它回答「这次该用多大的力气」。
  * 分成四档而不是打分，是因为打分要维护权重，而权重没有事实来源；
  * 四档各自对应一套动作，读的人一眼知道下一步。
+ *
+ * ## `mature` 意味着「这次只体检」，所以它的门槛必须高
+ *
+ * 早先的判据是「有 git + 有 README 或 AGENTS.md + 有远端 + 有 CI」。那个条件放过了
+ * 一类仓库：有 README、有远端、有 CI，但**完全没有 AGENTS.md**、没有 `.gitattributes`，
+ * 甚至带着未忽略的产物目录或已入库的凭据。它们被报成 `mature`，于是这次治理只跑体检，
+ * 而缺的那几件事一件都没做——`mature` 的定义是「该有的都有，只体检」，缺东西就不是它。
+ *
+ * 现在的判据是**项目类缺口为空**：本机事实（署名、凭据助手、gh 登录态）不算——
+ * 那些换台机器就变，把它们算进去会让每一次全新克隆都判不成 mature。
  */
 function judgeMaturity(facts) {
-  if (facts.scale.totalFiles === 0) return 'empty'
+  if (facts.scale.effectiveFiles === 0 && facts.scale.totalFiles === 0) return 'empty'
+  // 只有 `.DS_Store`、`.vscode/settings.json` 这类文件的目录，是**空目录**而不是白纸项目：
+  // 判成 greenfield 会让人以为「这里已经有东西了，只差配工程设施」。
+  if (facts.scale.effectiveFiles === 0 && (facts.git.commits ?? 0) === 0) return 'empty'
+
   const hasGit = facts.git.present === true && facts.git.isRepoRoot !== false
+  // 「起步了没有」只要有一份就够。缺另一份是**缺口**，由 `projectGaps` 负责挡住
+  // `mature`，不该把整档打到 greenfield——那是「白纸」的意思，而它显然不是白纸。
   const hasDocs = Boolean(facts.docs.agents || facts.docs.readme)
   if (!hasGit || !hasDocs) return 'greenfield'
+
+  const projectGaps = facts.projectGaps ?? []
   const hasRemote = typeof facts.git.remote === 'string' && facts.git.remote.length > 0
-  if (hasRemote && facts.docs.workflowFacts.hasCheck) return 'mature'
+  if (hasRemote && facts.projectGapsComputed
+    && facts.docs.workflowFacts.hasCheck && facts.ignores.hasGitattributes
+    && projectGaps.length === 0) return 'mature'
   return 'partial'
 }
 
@@ -1071,6 +1445,10 @@ function judgeGaps(facts) {
 
   if (facts.git.available === false) {
     gaps.push('这台机器上找不到 git —— 版本管理这一整条路暂时走不了')
+  } else if (facts.git.isBare === true) {
+    // 裸仓库没有工作区。早先它被判成 present:false，于是缺口写着「还没有版本库」，
+    // 下一步就会有人在这里 `git init` —— 而它明明已经是一个仓库。
+    gaps.push('这是一个**裸仓库**：没有工作区，改文件的地方根本不存在。要先克隆出工作区再改')
   } else if (facts.git.present === true && facts.git.isRepoRoot === false) {
     gaps.push(`这个目录在外层仓库 \`${facts.git.workTreeRoot}\` 里面，不是仓库根 —— 边界没说清之前不能提交或推送`)
     questions.push('这个目录该并入外层仓库，还是在这里单独建一个仓库？')
@@ -1078,9 +1456,17 @@ function judgeGaps(facts) {
     gaps.push('还没有版本库')
   }
 
+  if ((facts.git.nestedRepos ?? []).length > 0) {
+    gaps.push(`子目录里还有独立仓库（${facts.git.nestedRepos.slice(0, 3).join('、')}）—— 父目录建库会把它们变成「看着像目录、其实是独立仓库」的东西，两边的提交互不可见`)
+    questions.push('这些子仓库该当子模块、各自独立，还是并入父仓库？三种处置互相不兼容，选错要拆历史')
+  }
+
   if (facts.git.present === true) {
     if (!facts.git.identity?.name) gaps.push('提交署名缺 `user.name`')
     if (!facts.git.identity?.email) gaps.push('提交署名缺 `user.email`')
+    if (facts.git.isShallow === true) {
+      gaps.push('这是**浅克隆**（`--depth`）—— 扫历史找凭据会漏，而漏的方式是「看起来干净」')
+    }
   }
 
   for (const dir of facts.ignores.unignoredOutputDirs) {
@@ -1105,8 +1491,25 @@ function judgeGaps(facts) {
   }
 
   if (!facts.docs.readme) gaps.push('没有 README —— 别人打开仓库第一眼没有说明')
+  // AGENTS.md 不是「偏好」：没有它，AI 每次新开会话都要重新摸一遍这个项目，
+  // 而摸出来的结论每次都可能不同。有仓库、有 README、却没有契约，是一处真缺口。
+  if (!facts.docs.agents && facts.scale.effectiveFiles > 0) {
+    gaps.push('没有 AGENTS.md —— AI 每次新开会话都要重新摸一遍这个项目，摸出来的结论每次可能不同')
+  }
+  // `.gitattributes` 也一樣：它必须在**首次提交之前**就位，晚了要重新规范化整个工作区。
+  if (facts.git.present === true && !facts.ignores.hasGitattributes && (facts.git.trackedFiles ?? 0) > 0) {
+    gaps.push('没有 `.gitattributes` —— 跨平台协作时同一份文件在两台机器上算出不同的字节，而已经入库的文件要重新规范化')
+  }
+  // LICENSE 不是缺口，是**待表态**。
+  //
+  // 私有项目不放许可证是对的，公开项目才需要它——而「这个项目要不要公开」只有使用者能定。
+  // 早先它被无条件写进 gaps，于是私有仓库永远凑不齐「项目类缺口为空」，一辈子卡在
+  // `partial`，而它其实没有任何该修的东西。判据与 `review.mjs` 对齐：可发布的包没有
+  // 许可证才算真缺口（下游合规检查会拒），其余一律进 questions。
   if (!facts.docs.license) {
-    gaps.push('没有 LICENSE')
+    if (facts.ecosystem.publishable) {
+      gaps.push('清单声明了可发布的包，却没有 LICENSE —— 下游的合规检查会因为「授权不明」拒绝使用')
+    }
     questions.push('这个项目要不要公开授权？要的话选哪个许可证（MIT / Apache-2.0 / BSD-3-Clause）；不要就明确不放')
   }
   if (facts.docs.workflowFacts.usesPullRequestTarget && facts.docs.workflowFacts.checkoutsPrHead) {
@@ -1119,8 +1522,24 @@ function judgeGaps(facts) {
   if (facts.ecosystem.kinds.includes('unknown')) {
     questions.push('认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？')
   }
+  // 角色比不出来时，把问题问清楚。这一条不是格式检查，是**权限问题**：
+  // 判不出「这是不是正本」，下一步该推主干还是开 PR 就没有依据。
+  if (facts.git.present === true && typeof facts.git.remote === 'string' && facts.git.remote.length > 0
+    && facts.git.role === 'undetermined') {
+    questions.push('本地远端是不是这个项目的正本？项目里没有声明源仓库（清单的 repository 一类），'
+      + '所以比不出来——说不清的话，按贡献者处置（拉分支、开 PR），不推主干、不打标签')
+  }
 
-  return { gaps, questions }
+  // 被算进成熟度的那一部分：**跟着仓库走**的东西。本机事实（署名、凭据助手、
+  // gh 登录态）不进来——它们在干净克隆里必然缺失，判进去会让每次新机器上的检查都红一次。
+  const machineLocal = [
+    '提交署名缺 `user.name`',
+    '提交署名缺 `user.email`',
+    '这台机器上找不到 git —— 版本管理这一整条路暂时走不了',
+  ]
+  const projectGaps = gaps.filter((g) => !machineLocal.includes(g))
+
+  return { gaps, questions, projectGaps }
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────
@@ -1158,6 +1577,9 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       available: gitFacts.available,
       present: gitFacts.present,
       isRepoRoot: gitFacts.isRepoRoot,
+      isBare: gitFacts.isBare ?? false,
+      isShallow: gitFacts.isShallow ?? false,
+      nestedRepos: gitFacts.present === true ? (gitFacts.nestedRepos ?? ws.nestedRepos ?? []) : [],
       workTreeRoot: gitFacts.workTreeRoot,
       branch: gitFacts.branch,
       upstream: gitFacts.upstream,
@@ -1192,6 +1614,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       declaredVersion: ecosystem.declaredVersion,
       declaredRepo: ecosystem.declaredRepo,
       skillMeta: ecosystem.skillMeta,
+      subdirs: ecosystem.subdirs,
     },
     commands,
     commandsByEcosystem,
@@ -1217,16 +1640,32 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       largeFiles: ws.largeFiles,
       scanCoverage: ws.scanCoverage,
     },
-    scale: { totalFiles: ws.totalFiles, codeFiles: ws.codeFiles, docFiles: ws.docFiles },
+    scale: {
+      totalFiles: ws.totalFiles,
+      effectiveFiles: ws.effectiveFiles,
+      codeFiles: ws.codeFiles,
+      docFiles: ws.docFiles,
+    },
     gaps: [],
     questions: [],
   }
   facts.outputs.heavyDirsPresent = facts.artifacts.heavyDirsPresent
 
-  facts.maturity = judgeMaturity(facts)
+  // 项目类缺口与「本机事实」分开记：成熟度只由前者决定，后者换台机器就变。
+  // 混在一起时，一次全新克隆会因为「署名没配」被判成不够成熟——而项目本身完全健康。
+  //
+  // **顺序不能反**：先算缺口，再定成熟度。`projectGaps` 为空这件事本身就是 `mature`
+  // 的一个条件，先算成熟度会拿一个还没算出来的值去判。
   const verdict = judgeGaps(facts)
   facts.gaps = verdict.gaps
   facts.questions = verdict.questions
+  facts.projectGaps = verdict.projectGaps
+  facts.projectGapsComputed = true
+  facts.maturity = judgeMaturity(facts)
+  // 导航算一次、挂在事实顶层：--json 与 --markdown 共用同一份。
+  // 两条路各算一遍迟早会分叉——实测过 JSON 那条根本没有导航字段，
+  // 照着它往下走的 AI 一条必读清单都拿不到，却以为自己已经看全了。
+  facts.navigation = computeNavigation(facts)
 
   delete gitFacts._hasGit
   delete gitFacts._ignoreProbeOk
@@ -1241,8 +1680,8 @@ function judgeRole(gitFacts, declaredRepo) {
   if (gitFacts.present !== true || !gitFacts.remote) {
     return { role: 'maintainer', reason: '没有远端：本地提交不涉及别人的仓库' }
   }
-  const origin = githubRepoOf(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
-  const upstream = githubRepoOf(gitFacts.remoteUrls?.upstream)
+  const origin = githubRepoPath(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
+  const upstream = githubRepoPath(gitFacts.remoteUrls?.upstream)
   if (!origin) return { role: 'undetermined', reason: '远端不是能认出来的 GitHub 地址，比不了' }
   if (upstream && upstream !== origin) {
     return { role: 'contributor-fork', reason: `origin 指向 ${origin}，而 upstream 指向 ${upstream}` }
@@ -1256,7 +1695,7 @@ function judgeRole(gitFacts, declaredRepo) {
   return { role: 'maintainer', reason: `origin 就是项目声明的源仓库 ${origin}` }
 }
 
-export { readTextSafe, readJsonSafe, samePath, githubRepoOf }
+export { readTextSafe, readJsonSafe, samePath, githubRepoPath }
 
 // ── 命令行 ──────────────────────────────────────────────────────────
 
@@ -1299,6 +1738,6 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code))
 }

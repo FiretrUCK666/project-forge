@@ -24,6 +24,7 @@ export function scanLines(text) {
   const out = []
   let fence = null // { marker: '`' | '~', len: n }
   let offset = 0
+  let i = 0
   for (const raw of text.split('\n')) {
     const start = offset
     offset = Math.min(start + raw.length + 1, text.length)
@@ -31,12 +32,14 @@ export function scanLines(text) {
     const info = {
       line,
       raw,
+      index: i,
       start,
       end: offset,
       inFence: fence !== null,
       fenceEvent: null,
       heading: null,
     }
+    i += 1
     const m = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line)
     if (m !== null && (fence === null || m[1][0] === fence.marker)) {
       if (fence === null) { fence = { marker: m[1][0], len: m[1].length }; info.fenceEvent = 'open' }

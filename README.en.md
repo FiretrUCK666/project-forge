@@ -41,7 +41,7 @@ It folds those into four steps:
 | --- | --- |
 | **S1 Survey** | A read-only scan returns a `maturity` and a list of `gaps` |
 | **S2 Scope** | Decide what this run covers, and say it in one sentence |
-| **S3 Land** | Repo → remote → docs → automation. Read existing files first, fill only what is missing |
+| **S3 Land** | Repo → docs → remote → automation. Read existing files first, fill only what is missing |
 | **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
 
 It governs; it does not generate the project. It will not pick your stack or write your source.
@@ -66,7 +66,8 @@ as defects leaves every project owing a debt it can never pay off.
 
 ## Before you start
 
-One requirement: **Node.js 18 or newer**. Nothing to install, no build step.
+One requirement: **verified on Node 18**; newer versions are expected to work but have not
+been checked one by one. Nothing to install, no build step, no third-party dependencies.
 
 `git` is optional. Capabilities that need it report honestly and skip; they never pretend to
 have succeeded.
@@ -163,10 +164,22 @@ Three things make up most of how it feels to use:
 
 - Make your private repo public (private by default; going public needs your explicit word)
 - Force-push, rewrite pushed history, or delete a published release
-- **Decide on its own that it is time to release**: day to day it stops at commit + push;
-  tagging, release pages, and registry publishes all need your explicit word
+- **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
+  open a PR; merging is left to a person, and tagging, release pages, and registry publishes
+  all need your explicit word
 - Pick a license for you, or invent an identity
 - **Remove anything it left behind without your explicit confirmation**
+
+It sorts actions by **whether they can be undone**, not by whether they leave the machine:
+pushing your own branch, opening a PR, and editing a PR can all be undone (delete the branch,
+close the PR), so they are ordinary work and need nobody's nod. Merging into the default
+branch, publishing a release, flipping a private repo public, and rewriting history cannot be
+undone — those stop and wait for you. Force-pushing and rewriting pushed history never run
+automatically.
+
+**The same rule governs how this skill is maintained.** It governs other projects and it
+governs itself: branch → gates green → push the branch → open a PR → a person merges. Not one
+more confirmation, not one less independent review.
 
 Daily work and releasing are two different things, and it only does the first by default.
 Not out of caution for its own sake: the two differ in whether they can be undone. A wrong

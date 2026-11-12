@@ -116,13 +116,16 @@ jobs:
             echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
             exit 1
           fi
-          if grep -q 'project-forge: fill' "$NOTES"; then
-            echo "::error::$NOTES 里还留着未填的占位标记——说明没写完。补完再发。"
-            exit 1
-          fi
           BODY_LINES=$(awk '!/^[[:space:]]*$/ && !/^#/ { n += 1 } END { print n + 0 }' "$NOTES")
           if [ "$BODY_LINES" -eq 0 ]; then
             echo "::error::$NOTES 除了标题之外没有正文。"
+            exit 1
+          fi
+          # **判据是「独立成行的注释标记」，不是全文含这几个字。**
+          # 说明正文里完全可能正当地提到 `project-forge: fill`（RELEASING.md 就在讲它）；
+          # 按全文扫的话，一份提到这件事的正确说明会被判红，而红灯说的是它没写完。
+          if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
+            echo "::error::$NOTES 里还留着未填的占位标记——说明没写完。补完再发。"
             exit 1
           fi
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"

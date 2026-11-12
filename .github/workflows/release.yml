@@ -89,8 +89,22 @@ jobs:
             echo "::error::$NOTES 是空文件。"
             exit 1
           fi
+          # 第一行必须是这一版的标签名。只有标题没有正文的说明，贴到发布页上等于什么都没说。
+          if ! grep -qE '^# +[^ ]' "$NOTES"; then
+            echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
+            exit 1
+          fi
+          BODY_LINES=$(awk '!/^[[:space:]]*$/ && !/^#/ { n += 1 } END { print n + 0 }' "$NOTES")
+          if [ "$BODY_LINES" -eq 0 ]; then
+            echo "::error::$NOTES 除了标题之外没有正文。"
+            exit 1
+          fi
           # 没填完的草稿比没有更糟：它看起来像有内容，而自动化会把它原样贴到发布页上。
-          if grep -qE 'project-forge:[[:space:]]*fill' "$NOTES"; then
+          #
+          # **判据必须是「独立成行的注释标记」**，不是全文含这几个字：说明正文里完全可能
+          # 正当地提到 `project-forge: fill`（`RELEASING.md` 就在讲它）。按全文扫，
+          # 一份提到这件事的正确说明会被判红，而红灯说的是它没写完。
+          if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
             echo "::error::$NOTES 里还有没填完的 project-forge: fill 占位。填掉它们，删掉标记行，再重跑。"
             exit 1
           fi

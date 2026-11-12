@@ -25,14 +25,37 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readTextSafe, samePath } from './survey.mjs'
+import { isMainModule, readTextSafe, samePath } from './lib/text.mjs'
+import { scanLines } from './lib/markdown.mjs'
+import { processAlive } from './lib/fs-atomic.mjs'
 import {
   LEGACY_MARKERS, LEGACY_PATH_SPECS, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
 const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
+
+/**
+ * 临时文件名：`原名.tmp-<pid>`。
+ *
+ * 它们必须**也被扫到**，否则「交棒时先清干净本工具留下的临时文件」这条承诺就是假话：
+ * 这个形状的扩展名是 `.tmp-12345`，上面那条 `SCAN_EXT` 一个都不匹配，于是
+ * `--scan` 与 `--verify` 全都看不见它——而它恰恰是这套工具唯一会**主动留下**的东西
+ * （写文件写到一半被杀的时候）。
+ */
+const TEMP_RE = /\.tmp-(\d+)$/
+
+/**
+ * 把一行里的行内代码挖掉，剩下的才是「正文」。
+ *
+ * 判据只处理成对的反引号（`…`），不处理多反引号与转义——那是完整 Markdown 解析的活，
+ * 而这里要防的是一件很具体的事：**正文里举例提到一个路径**，不该被当成真的引用。
+ * 少挖一处（例如 ``…`` 包着的）最坏结果是多报一次，人看一眼就明白了；
+ * 挖多一处是漏报，而漏报在交棒里意味着「以为干净，其实没清」。
+ */
+function stripInlineCode(line) {
+  return String(line ?? '').replace(/`[^`]*`/g, '')
+}const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
 const MAX_DEPTH = 6
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -79,22 +102,26 @@ function isSkillOwnPath(rel) {
 
 function walk(root) {
   const out = []
-  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0 }
+  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0, symlinks: 0 }
   const go = (dir, depth) => {
     if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
     if (out.length > MAX_FILES) { state.truncated = true; return }
     let entries
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; return }
+    // 读不到这一层：它**下面**有多少东西我们一个都不知道。这不是「没有痕迹」，
+    // 是「没看见」——所以也算没扫全，不能让结论落到「干净」上。
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; state.truncated = true; return }
     for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue
+      // 符号链接不跟：跟进去会绕成环，也会跑到目录之外。但**必须记一笔**——
+      // 跳过一棵链接过来的目录，里面的东西一个都没看，而结论仍会说「干净」。
+      if (entry.isSymbolicLink()) { state.symlinks += 1; state.truncated = true; continue }
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         if (entry.name === '.git') continue
         if (SKIP_DIRS.has(entry.name)) continue
         go(full, depth + 1)
-      } else if (entry.isFile() && SCAN_EXT.test(entry.name)) {
+      } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
         let size = 0
-        try { size = statSync(full).size } catch { state.unreadable += 1; continue }
+        try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; continue }
         if (size > MAX_BYTES) { state.skippedLarge += 1; state.truncated = true; continue }
         out.push(relative(root, full).split(sep).join('/'))
       }
@@ -119,12 +146,22 @@ export function scan(targetDir) {
   const placeholders = []
   const legacyMarkers = []
   const danglingPointers = []
+  const staleTemps = []
   const { files, scan: coverage } = walk(root)
   const selfScan = isSelfScan(root)
 
   for (const rel of files) {
+    // 临时文件不读内容：它的存在本身就是结论，读它只是白花时间。
+    const tempPid = TEMP_RE.exec(rel)?.[1]
+    if (tempPid !== undefined) {
+      const alive = processAlive(Number(tempPid))
+      staleTemps.push({ file: rel, pid: Number(tempPid), alive })
+      continue
+    }
+    // 读不出来的文件同样算「没看见」，不算「干净」：内容里可能正藏着一条标记，
+    // 而报告说「一处都没有」。这条与上面那几条是同一个道理——不知道，就别替我担保。
     const text = readTextSafe(join(root, rel))
-    if (text === undefined) { coverage.unreadable += 1; continue }
+    if (text === undefined) { coverage.unreadable += 1; coverage.truncated = true; continue }
 
     // 扫的**就是这个 skill 自己的目录**时，`templates/` 与 `references/` 是它的源码，
     // 不是留在别人项目里的痕迹——那里面的标记是语法与讲解，不该被当成待清理的东西。
@@ -141,12 +178,18 @@ export function scan(targetDir) {
       }
     }
     if (ownSource) continue
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
+    // 悬空指针与旧版标记都只在**围栏之外、且不在行内代码里**才算。
+    //
+    // 这条判据来自一次真实的误报：一份工作记录在正文里写着「目标项目自带
+    // `` `references/arch.md` `` 且里面有标记」，那句话是**举例**，而扫描把它当成了
+    // 一处指向本 skill 内部的悬空指针。交棒时照着处置表去「搬规则、删指针」，
+    // 搬的是一句说明里的示例——而示例删掉之后那句话就读不通了。
+    for (const info of scanLines(text)) {
+      if (info.inFence) continue
+      const line = stripInlineCode(info.line)
       for (const legacy of LEGACY_MARKERS) {
         if (legacy.re.test(line)) {
-          legacyMarkers.push({ file: rel, line: i + 1, what: legacy.what })
+          legacyMarkers.push({ file: rel, line: info.index + 1, what: legacy.what })
         }
       }
       // 只关心「项目自己的文件里出现了本 skill 的内部路径」。本 skill 自己的目录里
@@ -156,7 +199,7 @@ export function scan(targetDir) {
         if (!target.includes('/')) continue
         // 目标项目里真实存在这个相对路径 → 不是悬空指针，是它自己也有同名文件。
         if (existsSync(join(root, target))) continue
-        danglingPointers.push({ file: rel, line: i + 1, target })
+        danglingPointers.push({ file: rel, line: info.index + 1, target })
       }
     }
   }
@@ -172,8 +215,12 @@ export function scan(targetDir) {
 
   const inHandoff = markers.filter((m) => m.kind === 'begin' || m.kind === 'end').length > 0
 
+  // 「属主已经不在」的临时文件才算痕迹。属主还活着的那些属于**正在写文件的那个进程**，
+  // 报成待清理会让人去删别的会话正在用的东西。
+  const deletableTemps = staleTemps.filter((t) => !t.alive)
+
   const total = markers.length + placeholders.length + legacyMarkers.length
-    + legacyPaths.length + danglingPointers.length
+    + legacyPaths.length + danglingPointers.length + deletableTemps.length
 
   return {
     target: { path: root },
@@ -182,6 +229,7 @@ export function scan(targetDir) {
     legacyMarkers,
     legacyPaths,
     danglingPointers,
+    staleTemps,
     total,
     clean: total === 0,
     selfScan,
@@ -268,6 +316,21 @@ export function toText(result) {
     lines.push('')
   }
 
+  // 临时文件单独一档：它们不含内容，删掉不损失任何东西；而它们恰恰是**本工具自己留下**的，
+  // 交棒时不报，就等于留了一堆没人知道来历的文件在别人的项目里。
+  const temps = (result.staleTemps ?? []).filter((t) => !t.alive)
+  if (temps.length > 0) {
+    lines.push('## 写到一半留下的临时文件（直接删）')
+    lines.push('')
+    for (const t of temps) {
+      lines.push(`- \`${t.file}\`（进程 ${t.pid} 已经不在了）`)
+    }
+    lines.push('')
+    lines.push('  处置：直接删。它们没有正文，是上次写文件被中断时留下的半成品。')
+    lines.push('  一条命令全删：`node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目>" --clean`')
+    lines.push('')
+  }
+
   lines.push('## 须知')
   lines.push('')
   lines.push('- 上面每一处都是**读出来的事实**，不是猜的：标记就写在文件里。')
@@ -281,6 +344,21 @@ export function toText(result) {
   return lines.join('\n')
 }
 
+/**
+ * `--verify` 的退出码。**这是唯一一处定义**——帮助文本、`SKILL.md` 与
+ * `references/handoff.md` 里的那几行都对着它，`preflight` 会核对三处说的是不是同一批码。
+ *
+ * 为什么值得单独立成常量：四个码里有两个是**非零但不代表「有痕迹」**的特殊档
+ * （没扫全、这一趟不适用）。少一档、改一个数字，症状都是「一次没做完或不适用的检查
+ * 被读成了通过」——而那正是不可逆动作前的最后一道关。
+ */
+export const VERIFY_EXIT = Object.freeze({
+  clean: 0,
+  dirty: 1,
+  truncated: 3,
+  notApplicable: 4,
+})
+
 function main(argv) {
   let target = process.cwd()
   let asJson = false
@@ -292,10 +370,12 @@ function main(argv) {
         '用法：node scripts/handoff.mjs [项目目录] [选项]',
         '',
         '  --scan     列出本 skill 留下的痕迹（默认）',
-        '  --verify   判「已经干净」：干净 0 / 有痕迹 1 / 没扫全 3 / 不适用（skill 自己的仓库）4',
+        `  --verify   判「已经干净」：干净 ${VERIFY_EXIT.clean} / 有痕迹 ${VERIFY_EXIT.dirty}`
+          + ` / 没扫全 ${VERIFY_EXIT.truncated} / 不适用（skill 自己的仓库）${VERIFY_EXIT.notApplicable}`,
         '  --json     输出机器可读结果',
         '',
-        '只读：不删任何东西。退出码 3 是「这一趟没扫完」、4 是「这一趟不适用」，都不是干净。',
+        `只读：不删任何东西。退出码 ${VERIFY_EXIT.truncated} 是「这一趟没扫完」、`
+          + `${VERIFY_EXIT.notApplicable} 是「这一趟不适用」，都不是干净。`,
       ].join('\n') + '\n')
       return 0
     }
@@ -319,7 +399,7 @@ function main(argv) {
         process.stdout.write('不适用：目标就是这套 skill 自己的源码仓库。\n'
           + '交棒是「把一个项目从这套流程里摘出来」，而它就是这套流程——\n'
           + '它的 templates/ 与 references/ 里的标记是语法与讲解，删掉会把工具弄坏。\n')
-        return 4
+        return VERIFY_EXIT.notApplicable
       }
       if (result.truncated) {
         process.stdout.write(`没扫全：目录太深、文件太多，或有单个文件超过 256 KB 没读。`
@@ -338,8 +418,8 @@ function main(argv) {
       // 第三档必须与「有痕迹」分开：拿 3 当 1 会让「扫不完」看起来像「找到了」，
       // 拿 3 当 0 则正好相反——把一次没做完的检查当成通过的检查，而这是不可逆动作
       // 的最后一道关。
-      if (result.truncated) return 3
-      return result.clean ? 0 : 1
+      if (result.truncated) return VERIFY_EXIT.truncated
+      return result.clean ? VERIFY_EXIT.clean : VERIFY_EXIT.dirty
     }
     return 0
   } catch (err) {
@@ -348,6 +428,6 @@ function main(argv) {
   }
 }
 
-if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   process.exit(main(process.argv.slice(2)))
 }

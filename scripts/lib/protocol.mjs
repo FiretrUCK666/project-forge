@@ -10,7 +10,9 @@
  * 而失效的表现是「明明有标记却说干净」——那会把不可逆动作变成默认动作。
  */
 
-/** 标记里的命名空间。所有标记都以它开头。 */
+import { scanLines } from './markdown.mjs'
+
+/** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
 
 /**
@@ -22,8 +24,17 @@ export const NS = 'project-forge'
  * - `begin <id>` / `end <id>`：一段由本 skill 维护的内容。`id` 取 `file`（整份文件）
  *   或一个节名（如 `构建与验证`）。刷新时只动这一段。
  * - `fill <what>`：本 skill 填不出来的东西，必须由读代码的人补。
+ *
+ * 这是**唯一一份**类型清单：下面 `parseMarkers` 的正则从它拼出来，而不是另抄一遍。
+ * 抄一遍的后果是「加了一类但解析不认」，而它不会有任何报错——那一类标记会被静默忽略。
  */
 export const MARKER_KINDS = Object.freeze(['generated', 'begin', 'end', 'fill'])
+
+/** 按 `MARKER_KINDS` 拼出的「标记正文开头」正则。加一类只需要改上面那个数组。 */
+const MARKER_KIND_RE = new RegExp(`^(${MARKER_KINDS.join('|')})\\b\\s*([\\s\\S]*)$`)
+
+/** 转义成正则字面量，供下面按 `NS` 拼出的两条解析正则使用。 */
+const NS_RE = NS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 旧版留下的标记。只用于报告，不解释、不生成。 */
 export const LEGACY_MARKERS = Object.freeze([
@@ -63,9 +74,9 @@ export function emitMarker(file, body) {
 
 /** 从一行里取出标记正文；不是标记行返回 undefined。 */
 export function markerBodyOf(line) {
-  const html = /^\s*<!--\s*project-forge:\s*([\s\S]*?)\s*-->\s*$/.exec(line)
+  const html = new RegExp(`^\\s*<!--\\s*${NS_RE}:\\s*([\\s\\S]*?)\\s*-->\\s*$`).exec(line)
   if (html) return html[1].trim()
-  const hash = /^\s*#\s*project-forge:\s*(.*?)\s*$/.exec(line)
+  const hash = new RegExp(`^\\s*#\\s*${NS_RE}:\\s*(.*?)\\s*$`).exec(line)
   if (hash) return hash[1].trim()
   return undefined
 }
@@ -73,31 +84,33 @@ export function markerBodyOf(line) {
 /**
  * 解析一份文本里的全部标记，返回按行号排列的记录。
  *
- * 每条形如 `{ body, kind, id, what, line }`：`line` 是从 1 开始的行号，`index` 是从 0
- * 开始的行下标。`kind` 为 `begin`/`end` 时 `id` 是节名，为 `fill` 时 `what` 是待填内容。
+ * 每条形如 `{ body, kind, id, what, line, index }`：`line` 是从 1 开始的行号，`index`
+ * 是从 0 开始的行下标。`kind` 为 `begin`/`end` 时 `id` 是节名，为 `fill` 时 `what` 是待填内容。
  *
  * **代码围栏里的东西不算标记。** 一份文档可能正当地引用标记的写法（`references/handoff.md`
  * 就要解释它长什么样），那些示例是**内容**，不是 markup。把它们当成真标记的后果很具体：
  * 一份写在代码块里的示例会让「交棒」永远判不干净，而用户看到的是「这里还有痕迹」，
  * 却找不到任何能删的东西。
+ *
+ * ## 围栏判定只有一份实现
+ *
+ * 走 `markdown.scanLines`，不在这里手写状态机。手写那一版有两个具体错法，都实测过：
+ *
+ *   - **不校验闭合长度**：` ```` ` 开的块会被 ` ``` ` 关掉，于是围栏分界与读者看到的不一样，
+ *     后面的正文被当成代码、或者代码被当成正文；
+ *   - **不看行尾字符**：` ```js ` 这种带语言标记的起始行会被当成「闭合」，一开一关只隔一行，
+ *     后面整段正文于是落到围栏「之外」——示例里的标记被当成真标记。
+ *
+ * 两处各写一份，同一个文件、同一种损坏会得到两个答案，而错的那一个通常是静默的。
  */
 export function parseMarkers(text, file) {
   if (markerSyntaxFor(file) === null) return []
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
-  let fence
-  for (let i = 0; i < lines.length; i += 1) {
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
-    if (fenceMatch) {
-      const mark = fenceMatch[1][0]
-      if (fence === undefined) fence = mark
-      else if (fence === mark) fence = undefined
-      continue
-    }
-    if (fence !== undefined) continue
-    const body = markerBodyOf(lines[i])
+  for (const info of scanLines(String(text ?? '').replace(/\r\n/g, '\n'))) {
+    if (info.inFence) continue
+    const body = markerBodyOf(info.line)
     if (body === undefined) continue
-    const m = /^(generated|begin|end|fill)\b\s*([\s\S]*)$/.exec(body)
+    const m = MARKER_KIND_RE.exec(body)
     if (!m) continue
     const kind = m[1]
     const rest = m[2].trim()
@@ -106,8 +119,8 @@ export function parseMarkers(text, file) {
       kind,
       id: kind === 'begin' || kind === 'end' ? rest : undefined,
       what: kind === 'fill' ? rest : undefined,
-      line: i + 1,
-      index: i,
+      line: info.index + 1,
+      index: info.index,
     })
   }
   return out
@@ -121,23 +134,68 @@ export function hasMarkers(text, file) {
 /**
  * 剥掉所有标记行，其余字节一个不动。
  *
- * 用于 `--clean`：把 `generated` 标记与 `fill` 占位符去掉，文件和正文都保留。
- * **不处理 begin/end 的配对**——那是 compose 的事，它比这里更清楚该留下哪一段。
+ * 用于 `--clean`：围栏之外、又不是行内举例的标记行**全部**去掉——`generated`、`fill`、
+ * `begin`、`end` 一视同仁。这么做是因为 `--clean` 的承诺是「把痕迹清干净」：
+ * 留下孤零零的 begin/end 等于把「这里曾经被脚本管过」写进用户文件，
+ * 而配对关系已经随命令一起消失了。**配对判断不在这一步**——那是 compose 的事，
+ * 它比这里更清楚该留下哪一段正文。
+ *
+ * **围栏里的与行内反引号里的都不碰。** 这条不是洁癖：一份文档完全可能**正当地把标记
+ * 写进示例**（`references/handoff.md` 就在讲它长什么样，README 里也会举一个填好的样子）。
+ * 把那些一起剥掉，等于替使用者删掉了他自己的正文——而命令还报「已剥掉全部标记」。
+ * 行内反引号那一档同理：`<!-- project-forge: begin X -->` 写在行内当例子，也是内容。
  */
 export function stripMarkers(text, file) {
   if (markerSyntaxFor(file) === null) return text
-  const eol = String(text ?? '').includes('\r\n') ? '\r\n' : '\n'
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  const kept = lines.filter((line) => markerBodyOf(line) === undefined)
+  const source = String(text ?? '')
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
+  const kept = scanLines(source.replace(/\r\n/g, '\n'))
+    // 只删「围栏之外、又不是行内举例」的标记行。围栏本身与围栏里的内容原样留下——
+    // 围栏是结构的骨架，删掉它等于把这门示例变成正文。
+    .filter((info) => info.inFence || insideInlineCode(info.line)
+      || markerBodyOf(info.line) === undefined)
+    .map((info) => info.raw)
   return kept.join(eol)
 }
 
 /**
- * 找出文本里的 `begin <id>` / `end <id>` 配对区间，返回 `[{ id, start, end }]`。
+ * 这一行里，紧贴行首/行尾的标记是不是被反引号包着。
+ *
+ * 判据刻意放松：只要这一行**同时含有**反引号与标记，就当成「举例」而不剥。
+ * 收紧一点（精确配对反引号区间、判断标记落在哪一对之间）当然做得到，但那需要一套
+ * 行内代码解析器；而这里要防的是「把示例当标记删掉」，误判的代价只是**少删一行**
+ * ——用户看到它还留着，手工删掉即可。反过来误删是**删掉正文**，不可逆。
+ * 两个方向的代价不对称，所以选宽松的那一侧。
+ */
+function insideInlineCode(line) {
+  if (!line.includes('`')) return false
+  return new RegExp('`[^`]*<!--|<!--[^>]*-->`').test(line)
+    || new RegExp('`[^`]*#\\s*' + NS_RE + ':').test(line)
+}
+
+/**
+ * 找出文本里的 `begin <id>` / `end <id>` 配对区间，返回 `[{ id, start, end, customized }]`。
  *
  * `start`/`end` 都是标记行本身的下标，**区间内容不含这两行**。配不上对的区间不返回，
  * 而是在 `broken` 里报出——半对锚点意味着文件被手工改坏了，此时正确动作是报出来让人看，
  * 不是猜一个位置去覆盖。
+ *
+ * ## `customized`：这一段归人了
+ *
+ * 模板里的受管区间分两种：**由事实推出来的**（命令、分支名、协作流程）与**要人写的**
+ * （项目定位、关键不变量）。前者一个字节都不该跟模板不同，后者一旦填过就不该再动。
+ *
+ * 但还有第三种情况，它本来无处安放：**人把项目自己的规矩融合进了事实推出的那一段**。
+ * 例如这个项目用 changesets 发版、用 GitFlow 切分支——模板那套默认话术对它是错的，
+ * 而改写之后本该保留。用「有没有 `fill`」判不出来（那一节没有 fill），于是：
+ *
+ *   - 改写它 → `--check` 报漂移；
+ *   - 不跑刷新 → 模板以后加的规则永远进不来；
+ *   - 跑一次刷新 → 改写被冲掉。
+ *
+ * `begin <id> customized` 把这一段的归属明确成「人接管了」：刷新不碰、漂移不比、
+ * 报告里点名。它的语义只有这一条，不引入新的标记类别——`end` 只按 id 配，
+ * 不看这个 flag。
  */
 export function markerRegions(text, file) {
   const markers = parseMarkers(text, file)
@@ -146,17 +204,27 @@ export function markerRegions(text, file) {
   const open = new Map()
   for (const mark of markers) {
     if (mark.kind === 'begin') {
-      if (open.has(mark.id)) broken.push(mark.id)
-      open.set(mark.id, mark.index)
+      const { id, customized } = parseBeginMark(mark.id)
+      if (open.has(id)) broken.push(id)
+      open.set(id, { index: mark.index, customized })
     } else if (mark.kind === 'end') {
-      const start = open.get(mark.id)
-      if (start === undefined) { broken.push(mark.id); continue }
-      open.delete(mark.id)
-      regions.push({ id: mark.id, start, end: mark.index })
+      const { id } = parseBeginMark(mark.id)
+      const opened = open.get(id)
+      if (opened === undefined) { broken.push(id); continue }
+      open.delete(id)
+      regions.push({ id, start: opened.index, end: mark.index, customized: opened.customized })
     }
   }
   for (const id of open.keys()) broken.push(id)
   return { regions, broken }
+}
+
+/** `begin` 那一行正文的解析：`<id>` 后面可以跟一个 `customized`。**只有这一处**。 */
+export function parseBeginMark(rest) {
+  const text = String(rest ?? '').trim()
+  const m = /^(.*?)\s+customized$/.exec(text)
+  if (m === null) return { id: text, customized: false }
+  return { id: m[1].trim(), customized: true }
 }
 
 /**
@@ -216,10 +284,13 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
 ])
 
 /**
- * 模板里可用的变量名。**只有这十一个**。
+ * 模板里可用的变量名。**只有这一份清单说了算**。
  *
  * 未登记的占位符让渲染**直接失败**，而不是原样留在用户文件里：留在文件里的 `{{X}}`
  * 看起来像「这里本来就该有东西」，而它其实是一个没人填的洞。
+ *
+ * 不写「共几个」：数量写在注释里时，加一个变量就变成一句假话，而没有任何东西会因此报错。
+ * 要知道数量，数这个数组——`preflight` 也会在渲染核对时把没登记的占位符点出来。
  */
 export const TEMPLATE_VARS = Object.freeze([
   'PROJECT_NAME',
@@ -233,6 +304,7 @@ export const TEMPLATE_VARS = Object.freeze([
   'COMMIT_STYLE_HINT',
   'README_LIST',
   'WORKSPACE_PACKAGES',
+  'CONVENTIONS_HINT',
 ])
 
 /**
@@ -243,23 +315,14 @@ export const TEMPLATE_VARS = Object.freeze([
  */
 export function conditionMarkers(text, file = 'template.md') {
   if (markerSyntaxFor(file) === null) return []
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
-  let fence
-  for (let i = 0; i < lines.length; i += 1) {
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
-    if (fenceMatch) {
-      const mark = fenceMatch[1][0]
-      if (fence === undefined) fence = mark
-      else if (fence === mark) fence = undefined
-      continue
-    }
-    if (fence !== undefined) continue
-    const body = markerBodyOf(lines[i])
+  for (const info of scanLines(String(text ?? '').replace(/\r\n/g, '\n'))) {
+    if (info.inFence) continue
+    const body = markerBodyOf(info.line)
     if (body === undefined) continue
     const m = /^(if|endif)\b\s*([\s\S]*)$/.exec(body)
     if (!m) continue
-    out.push({ kind: m[1], cond: m[1] === 'if' ? m[2].trim() : undefined, line: i + 1, index: i })
+    out.push({ kind: m[1], cond: m[1] === 'if' ? m[2].trim() : undefined, line: info.index + 1, index: info.index })
   }
   return out
 }
@@ -306,11 +369,27 @@ export const REPO_ONLY_FILES = Object.freeze([
   '.gitignore',
 ])
 
-/** 这个相对路径属不属于「只服务本仓库」。 */
+/**
+ * 这个相对路径属不属于「只服务本仓库」。
+ *
+ * ## 判据必须与 git 自己的语义一致
+ *
+ * `.gitattributes` 里写的是 `/docs/` 这样的**目录规则**：git 只排除那个目录**里面**的东西，
+ * 不排除一个恰好叫 `docs` 的普通文件。这一点实测过：仓库里放一个名为 `docs` 的文本文件，
+ * 它照样进用户包。
+ *
+ * 所以这里**只做前缀匹配**，不接受裸名。早先那种「`p === 'docs'` 也算命中」的写法会与 git
+ * 分叉，而分叉的那一侧不是多报一条，是 `update.mjs` 会**删掉用户一个叫 docs 的文件**——
+ * 依据是一条它根本不满足的规则。
+ *
+ * 大小写按字面比：git 在 Windows 上默认不区分，所以 `DOCS/x.md` 这个写法在这里判不出来。
+ * 那个方向的错是**漏判**，由 `preflight` 的产品层白名单兜住——它会报「这个条目没有归属」
+ * 让人来看，不会静默放行。
+ */
 export function isRepoOnlyPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (REPO_ONLY_FILES.includes(p)) return true
-  return REPO_ONLY_DIRS.some((d) => p === d.replace(/\/$/, '') || p.startsWith(d))
+  return REPO_ONLY_DIRS.some((d) => p.startsWith(d))
 }
 
 /**
@@ -318,15 +397,25 @@ export function isRepoOnlyPath(rel) {
  *
  * 两条路：先试接口路（一次请求同时给出标签与附件位置，不碰网页主机），
  * 猜不出就返回 undefined，由调用方退回网页路。
+ *
+ * ## 返回值只给**能直接用的地址**
+ *
+ * `latest` 是拼好的完整地址，调用方原样拿去请求。这一点是刻意的：接口地址由三段
+ * 常量与两个路径段组成，任何一段拼错都得到一个**看起来合法、实际 404** 的地址，
+ * 而 404 在调用方那里的含义是「那边没有最新发布」——一个看起来像事实的错误结论。
+ * 所以拼装只在这里做一次，调用方不碰 `owner` / `name` / `base` 这些零件。
+ *
+ * `repo` 是归一后的 `owner/name`，只用于**比对**（这个地址是不是同一个仓库），
+ * 不用于拼地址。
  */
 export function apiTarget(source) {
   if (typeof source !== 'string') return undefined
   const m = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i.exec(source.trim())
   if (!m) return undefined
+  const repo = `${m[1]}/${m[2]}`
   return {
     kind: 'github',
-    base: 'https://api.github.com',
-    latest: `https://api.github.com/repos/${m[1]}/${m[2]}/releases/latest`,
-    repo: `${m[1]}/${m[2]}`,
+    latest: `https://api.github.com/repos/${repo}/releases/latest`,
+    repo,
   }
 }

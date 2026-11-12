@@ -49,6 +49,20 @@ export function evaluateConditions(text, condMap = {}, file = 'template.md') {
 
   let lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
 
+  // **模板正文里用到的条件名也要校验。**
+  //
+  // 早先只校验调用方传进来的那张表，于是 `if has-cmnds` 这种拼写错误会被当成「条件为假」
+  // 整块删掉——不报错、退出码 0、产出一份少了整节却看不出任何异常的契约。而唯一的守卫
+  // 在 `scripts/dev/preflight.mjs` 里，那目录不进用户包，所以拿到包的人撞上时没有救。
+  //
+  // 判据放在这里而不是放在门禁里：这是求值器的输入校验，它必须随这份代码走。
+  const declared = new Set(conditionMarkers(lines.join('\n'), file).filter((m) => m.kind === 'if').map((m) => m.cond))
+  const badConds = [...declared].filter((c) => !TEMPLATE_CONDITIONS.includes(c))
+  if (badConds.length > 0) {
+    throw new TemplateError(`${file} 里用了未登记的条件名：${badConds.join('、')}`
+      + '——它会被当成「条件为假」整块删掉，不报错也不留痕（见 lib/protocol.mjs 的 TEMPLATE_CONDITIONS）')
+  }
+
   for (;;) {
     const marks = conditionMarkers(lines.join('\n'), file)
     if (marks.length === 0) break
@@ -90,7 +104,8 @@ export function evaluateConditions(text, condMap = {}, file = 'template.md') {
  * （同上，只是错在另一头）。
  */
 export function renderVars(text, vars = {}) {
-  const used = [...new Set([...String(text ?? '').matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
+  const source = String(text ?? '')
+  const used = [...new Set([...source.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
   const unknown = used.filter((name) => !TEMPLATE_VARS.includes(name))
   if (unknown.length > 0) {
     throw new TemplateError(`模板里有未登记的占位符：${unknown.map((n) => `{{${n}}}`).join('、')}（见 lib/protocol.mjs 的 TEMPLATE_VARS）`)
@@ -99,8 +114,26 @@ export function renderVars(text, vars = {}) {
   if (missing.length > 0) {
     throw new TemplateError(`这些占位符没有对应的取值：${missing.map((n) => `{{${n}}}`).join('、')}`)
   }
-  let out = String(text ?? '')
+  let out = source
   for (const name of used) out = out.split(`{{${name}}}`).join(String(vars[name]))
+
+  // **任何形状的 `{{…}}` 都不许留在产物里。**
+  //
+  // 上面那条正则只认全大写的名字，所以 `{{release_doc}}`、`{{ PROJECT_NAME }}`、
+  // `{{PROJECT-NAME}}` 一律匹配不上：它们既不会被替换，也不会被报出来，就那么原样躺在
+  // 用户的 `AGENTS.md` 里。而那正是「渲染产物零残留」这条不变量要防的东西——
+  // 一个 `{{COMMANDS}}` 看起来像「这里本来就该有东西」，没人会去处理它。
+  //
+  // 判据是「替换完还剩什么」，不是「名字登不登记」：`{{ PROJECT_NAME }}` 里面那个名字
+  // 是登记过的，带空格之后却替换不到——按名字放行就正好漏掉这一种。
+  //
+  // 校验放在这里，不放在门禁里：门禁那套正则与这里同源，同样的盲区会一起瞎。
+  const leftovers = [...new Set([...out.matchAll(/\{\{[^}]*\}\}/g)].map((m) => m[0]))]
+  if (leftovers.length > 0) {
+    throw new TemplateError(`渲染之后还剩这些占位符：${leftovers.join('、')}`
+      + '——占位符必须是全大写的已登记名字、且前后紧贴大括号（`{{NAME}}` 而不是 `{{ NAME }}`）；'
+      + '写成别的形状既不会被替换，也不会有人发现')
+  }
   return out
 }
 

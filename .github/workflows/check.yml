@@ -16,9 +16,23 @@ on:
     # `edited` 不能漏：提案正文会被改动，而改正文只触发这个事件。
     types: [opened, synchronize, reopened, edited]
 
+# 只读权限：这个工作流从不写仓库。声明出来不只是「最小权限」的礼貌——
+# 不声明时拿到的是仓库默认设置，而默认被改成可写时，这套检查就悄悄多了一份写权限。
+permissions:
+  contents: read
+
 jobs:
-  check:
+  # 真正干活的那一组。**它的名字会带上矩阵后缀**（`gates (18)`、`gates (22)`），
+  # 所以它不能是分支保护里那个必需检查——见下面 `check` 那个 job 的说明。
+  gates:
     runs-on: ubuntu-latest
+    # **跑两个版本，不只是最新的那个。** README 承诺「在 Node 18 上验证通过」，
+    # 而只跑 22 时那句话没有任何东西在支撑它——真到 18 上跑不起来也不会有人知道，
+    # 直到用户报「装完跑不动」。上界跑最新 LTS，下界跑承诺的那个版本。
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '22']
     steps:
       - name: 检出
         uses: actions/checkout@v4
@@ -32,7 +46,7 @@ jobs:
       - name: 准备 Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
 
       - name: 结构自检 + 端到端冒烟
         run: node scripts/dev/preflight.mjs
@@ -67,3 +81,18 @@ jobs:
             echo "::error::这个仓库自己的交付体检没过。报了 [缺] 就改真东西，不要加 flag 把它压下去。"
             exit 1
           }
+
+  # ── 分支保护要的那个检查 ─────────────────────────────────────────────
+  #
+  # 分支保护里写的是**检查名 `check`**，而矩阵里每个 job 报上来的名字都带后缀
+  # （`gates (18)`、`gates (22)`）。名字对不上，那个「必需检查」就永远不会出现，
+  # 提案会一直停在 `BLOCKED` ——而它看起来像「还在跑」，不像「永远跑不完」。
+  #
+  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面两队都成功。
+  # 这样「两个版本都必须过」这条要求才真的成立——只留一个名字，等于只要求其中一个版本。
+  check:
+    needs: gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: 两个版本的门禁都过了
+        run: echo "gates 在 Node 18 与 22 上都已经通过。"

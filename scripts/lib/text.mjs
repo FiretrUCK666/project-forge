@@ -8,9 +8,57 @@
  * 而那种分歧出现在「读文件」上时，症状通常是**静默损坏**。
  */
 
-import { readFileSync, realpathSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+/**
+ * 读一个文本文件，**读不到就返回 undefined**（不是空串）。
+ *
+ * 这是全仓唯一的「安全读」。两条边界由它一处定义，别处只能依赖它：
+ *
+ *   - **超过上限的文件不读**：`256 KB` 是按「一个清单文件、一份文档」定的量级。
+ *     超过它的多半是数据文件（`package-lock.json` 之外的东西、导出的表格），
+ *     读进来只会占内存，而不读它也不影响任何判定——判定要的是结构，不是全文。
+ *   - **含 NUL 字节的不读**：那是二进制。按 UTF-8 读出来是一串替换字符，
+ *     后续所有正则都在那串垃圾上跑，报出来的结论会像真的。
+ *
+ * 行尾统一成 `\n`、去掉 BOM：调用方拿到的文本与它写回去时用的文本是同一份形状，
+ * 否则「读了再写」会在 Windows 上悄悄改掉整个文件的行尾。
+ */
+export function readTextSafe(filePath, maxBytes = 256 * 1024) {
+  try {
+    const st = statSync(filePath)
+    if (!st.isFile() || st.size > maxBytes) return undefined
+    const buf = readFileSync(filePath)
+    if (buf.subarray(0, 4096).includes(0)) return undefined
+    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  } catch {
+    return undefined
+  }
+}
+
+/** 读一个 JSON 文件。读不到或不是合法 JSON 都返回 undefined——**不抛**。 */
+export function readJsonSafe(filePath) {
+  const text = readTextSafe(filePath)
+  if (text === undefined) return undefined
+  try { return JSON.parse(text) } catch { return undefined }
+}
+
+/**
+ * 两个路径是不是同一个位置。
+ *
+ * 判据按**真实路径**归一：`process.argv[1]` 保留调用方写下的写法，而 `import.meta.url`
+ * 已被 Node 解析成真实路径。经符号链接或 junction 调用时两者永不相等，于是脚本
+ * **什么都不做并返回 0**——而调用方会把它读成「检查通过」。这个坑不报错，只让门禁变绿。
+ */
+export function samePath(a, b) {
+  try {
+    return realpathSync.native(resolve(a)) === realpathSync.native(resolve(b))
+  } catch {
+    return resolve(a).toLowerCase() === resolve(b).toLowerCase()
+  }
+}
 
 /** 路径归一化成正斜杠。进出集合都过这一层，别各写各的。 */
 export function posixPath(p) {
@@ -173,6 +221,23 @@ export function repoPath(value) {
 }
 
 /**
+ * 把一个**GitHub** 地址归一成 `owner/name`。不是 GitHub 的地址返回 undefined。
+ *
+ * 为什么要这一层，而不是直接用上面的 `repoPath`：`repoPath` 只管「这个地址里的
+ * 仓库路径是什么」，它不认识主机。而几乎所有用到它的地方，判据都不是「路径一样吗」，
+ * 是「**同一个 GitHub 仓库吗**」——角色判定（origin 是不是正本）、远端正不正、包边界。
+ * 拿一个别处托管平台的地址喂进去也得到 `owner/name`，再拿去和 GitHub 的比，就得到
+ * 「同一个仓库」这个假结论，而它会让一次本该走 fork 流程的改动被当成维护者直推。
+ *
+ * 归一化本身仍然只有 `repoPath` 一份，这里只加一道主机闸门。
+ */
+export function githubRepoPath(value) {
+  const s = String(value ?? '').trim()
+  if (!/github\.com[:/]/i.test(s)) return undefined
+  return repoPath(s)
+}
+
+/**
  * 两个仓库地址的关系：`same` / `different` / `unknown`。
  *
  * **存在的理由就是那个 `unknown`**：把「认不出」压进 undefined 之后，`a !== b` 在两个都
@@ -198,51 +263,4 @@ export function normVersion(value) {
     .replace(/^[\^~>=<\s]+/, '')
     .replace(/^[vV](?=\d)/, '')
     .toLowerCase()
-}
-
-/**
- * 已认领的标记键：含义与形状**只在这里定义一次**。
- *
- * 没认领的键不是错误（可扩展），但要按「未核对」提示出来——它不会被校验、也不参与比对。
- * 值一律要求非空且单行（标记解析按空白切分，值里带空白本身就写不成单行）。
- */
-export const CLAIMED_MARKER_KEYS = {
-  date: { note: '核对日期' },
-  host: { reject: /[,\s]/, note: '上次核对时本机实际运行的那套宿主版本' },
-}
-
-/** 解析标记里的 key=value，返回 `{ keys, errors, notes }`。纯函数，直接可证伪。 */
-export function parseMarkerKeys(raw) {
-  const errors = []
-  const notes = []
-  const keys = {}
-  for (const part of String(raw ?? '').trim().split(/\s+/).filter(Boolean)) {
-    const eq = part.indexOf('=')
-    if (eq <= 0) {
-      errors.push(`核对标记里的「${part}」不是 key=value 形状——每个键写成 key=value，值不许含空白。`)
-      continue
-    }
-    const name = part.slice(0, eq)
-    const value = part.slice(eq + 1)
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
-      errors.push(`核对标记的键名「${name}」形状非法——用字母开头，其后是字母、数字、下划线或连字符。`)
-      continue
-    }
-    if (value === '') {
-      errors.push(`核对标记的「${name}=」值是空的——值必须非空且单行。`)
-      continue
-    }
-    if (keys[name] !== undefined) {
-      errors.push(`核对标记里「${name}」出现了多次——每个键只写一次。`)
-      continue
-    }
-    const claimed = CLAIMED_MARKER_KEYS[name]
-    if (claimed === undefined) {
-      notes.push(`核对标记里的「${name}=」没有认领的含义——它不会被校验，也不能参与比对。`)
-    } else if (claimed.reject !== undefined && claimed.reject.test(value)) {
-      errors.push(`核对标记的「${name}=${value}」格式非法——${name} 应是单个不含空白与逗号的值。`)
-    }
-    keys[name] = value
-  }
-  return { keys, errors, notes }
 }

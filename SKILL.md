@@ -12,7 +12,7 @@ description: |
   只读勘察先行，按事实判定该做与不该做；幂等、可重复执行；默认私有仓库。
   不用于：只改代码写法、只回答概念问题，也不替项目选型或生成骨架。
 metadata:
-  version: "3.1.1"
+  version: "4.0.0"
   source: "https://github.com/FiretrUCK666/project-forge"
 ---
 

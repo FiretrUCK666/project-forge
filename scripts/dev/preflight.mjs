@@ -663,6 +663,21 @@ function smoke() {
 // ── 6. 卫生 ─────────────────────────────────────────────────────────
 
 /**
+ * 提交前门禁的**命令清单**。这是唯一一份，两份文档都必须逐条对得上。
+ *
+ * 为什么放在这里：`AGENTS.md` 那一节由模板生成、`CONTRIBUTING.md` 那一节是人手写的，
+ * 两边各自维护一份清单时，「加了一道门禁但只写进一处」不会报错——直到有人照着少的那份
+ * 跑，然后宣布「全绿」。
+ */
+const GATE_COMMANDS = [
+  'node scripts/dev/preflight.mjs',
+  'node scripts/dev/fixtures.mjs',
+  'node scripts/compose-agents.mjs . --check',
+  'node scripts/review.mjs .',
+  'node scripts/sync-toc.mjs README.md README.en.md --check',
+]
+
+/**
  * 同一件事在几份文件里说法必须一致的那几组判据。
  *
  * 每一组都治一次**真实发生过的漂移**：两处各自写一遍时，改一处而漏另一处不会报错，
@@ -717,6 +732,22 @@ function checkSingleSources() {
     if (!existsSync(p)) continue
     if (FORBIDDEN_IN_RELEASE_NOTES.test(readText(p))) {
       fail(`${file} 提到了 scripts/dev/——那几处不进用户包，照着跑的人会得到「找不到模块」`)
+    }
+  }
+
+  // 提交前门禁的命令清单：两份文档都要逐条在场。
+  //
+  // 判据是「这条命令的**可执行形态**出现了」，不是逐字相同——注释、对齐的空格、行尾说明
+  // 都可以不同，但命令本身少一条就不行。少那一条的症状是：有人照着少的那份跑完，
+  // 宣布全绿，而那道门禁一次都没跑过。
+  for (const file of ['AGENTS.md', 'CONTRIBUTING.md']) {
+    const p = join(ROOT, file)
+    if (!existsSync(p)) { fail(`门禁清单核对：缺 ${file}`); continue }
+    const text = readText(p)
+    for (const cmd of GATE_COMMANDS) {
+      if (!text.includes(cmd)) {
+        fail(`${file} 的门禁清单里少一条：${cmd}——两份文档列的不是同一批命令，照少的那份跑会漏掉它`)
+      }
     }
   }
 

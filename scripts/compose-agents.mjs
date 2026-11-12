@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url'
 
 import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
+import { scanLines } from './lib/markdown.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
@@ -619,12 +620,19 @@ function missingRegionsOf(presentIds, rendered, existingText) {
   return wanted.filter((id) => !presentIds.has(id) && !sectionAlreadyPresent(id, headings, rendered))
 }
 
-/** 文档里所有 `##` / `###` 标题行拼起来。比对只在这上面做，正文里偶然出现不算。 */
+/**
+ * 文档里所有 `##` / `###` 标题行拼起来。比对只在这上面做，正文里偶然出现不算。
+ *
+ * **代码围栏里的不算。** 一份 `AGENTS.md` 完全可能把某个标题写进示例或命令输出里，
+ * 那是内容不是结构。把它算成「这一节已经有了」的后果很具体：该补的节永远补不上，
+ * 而人看到的是「生成器说都齐了」，那份契约里却真的缺着一节。
+ *
+ * 一级标题也不算：`# 高风险路径` 与 `## 高风险路径` 是两种东西，前者是文档大标题。
+ */
 function headingLines(text) {
-  return String(text ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .filter((line) => /^#{2,3}\s+/.test(line))
+  return scanLines(String(text ?? '').replace(/\r\n/g, '\n'))
+    .filter((info) => !info.inFence && /^#{2,3}\s+/.test(info.line))
+    .map((info) => info.line)
     .join('\n')
 }
 

@@ -1641,6 +1641,68 @@ cases.push(['自更新的删除判据里有「这不是源码副本」这一道'
   return true
 }])
 
+// ── 模板渲染的静默失效 ─────────────────────────────────────────────
+
+cases.push(['条件名拼错要报错，不许当成「条件为假」整块删掉', async () => {
+  const { evaluateConditions, evaluateConditions: evalCond, renderVars } = await import('../lib/template.mjs')
+
+  // 正面：拼错的条件名必须抛错。以前它被读成「假」，整块安静消失、退出码 0，
+  // 产出一份少了整整一节却看不出任何异常的契约。
+  let threw = false
+  try {
+    evalCond('A\n<!-- project-forge: if has-cmnds -->\nB\n<!-- project-forge: endif -->\nC\n', { 'has-commands': true })
+  } catch (error) {
+    threw = /未登记的条件名/.test(error.message)
+  }
+  if (!threw) return '拼错的条件名没有报错——那一整节会安静消失'
+
+  // 反面：正常条件照旧，不许被误伤。
+  const ok = evaluateConditions('A\n<!-- project-forge: if has-commands -->\nB\n<!-- project-forge: endif -->\nC\n', { 'has-commands': true })
+  if (!ok.includes('B')) return `正常条件被误伤：${JSON.stringify(ok)}`
+  const off = evaluateConditions('A\n<!-- project-forge: if has-commands -->\nB\n<!-- project-forge: endif -->\nC\n', { 'has-commands': false })
+  if (off.includes('B')) return '条件为假时内容没被裁掉'
+
+  // 第二面：形状不对的占位符必须报错。小写、带空格、带连字符都不匹配那条正则，
+  // 于是既不替换也不报错，原样躺在用户的 AGENTS.md 里。
+  const bad = ['{{release_doc}}', '{{ PROJECT_NAME }}', '{{PROJECT-NAME}}']
+  for (const token of bad) {
+    let hit = false
+    try { renderVars(`x ${token} y`, { PROJECT_NAME: 'demo' }) } catch (error) { hit = /还剩这些占位符/.test(error.message) }
+    if (!hit) return `${token} 这种形状的占位符没有被拦下——它会原样留在产物里`
+  }
+
+  // 反面：正常占位符照旧替换。
+  if (renderVars('B {{PROJECT_NAME}}', { PROJECT_NAME: 'demo' }) !== 'B demo') return '正常占位符没被替换'
+  return true
+}])
+
+cases.push(['围栏里的同名标题不算「这一节已经有了」', async () => {
+  const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
+  try {
+    await runNode('compose-agents.mjs', [dir])
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const fillAll = (s) => s.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    // 整节删掉（连标记一起），再在别处放一个**围栏里的**同名标题。
+    // 围栏里的是内容不是结构——把它当成「这一节已经有了」，该补的节就永远补不上，
+    // 而生成器会说「都齐了」。
+    const gone = fillAll(text).replace(/<!-- project-forge: begin 高风险路径 -->[\s\S]*?<!-- project-forge: end 高风险路径 -->\n?/m, '')
+    if (gone.includes('## 高风险路径')) return '夹具没删干净'
+    const withFenced = gone.replace('## 取舍', '```text\n## 高风险路径\n```\n\n## 取舍')
+    writeFileSync(join(dir, 'AGENTS.md'), withFenced)
+
+    await runNode('compose-agents.mjs', [dir])
+    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const real = (after.match(/^## 高风险路径/mg) ?? []).length
+    if (real === 0) return '围栏里的同名标题被当成了「已有」，该补的节永远补不上'
+
+    // 反面：再跑一遍不许插第二份。
+    await runNode('compose-agents.mjs', [dir])
+    const twice = (readFileSync(join(dir, 'AGENTS.md'), 'utf8').match(/^## 高风险路径/mg) ?? []).length
+    if (twice > 1) return `同一节被插了两份（${twice} 份）`
+    return true
+  } finally { rmTree(dir) }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

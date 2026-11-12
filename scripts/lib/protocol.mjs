@@ -12,7 +12,7 @@
 
 import { scanLines } from './markdown.mjs'
 
-/** 标记里的命名空间。所有标记都以它开头。 */
+/** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
 
 /**
@@ -24,8 +24,17 @@ export const NS = 'project-forge'
  * - `begin <id>` / `end <id>`：一段由本 skill 维护的内容。`id` 取 `file`（整份文件）
  *   或一个节名（如 `构建与验证`）。刷新时只动这一段。
  * - `fill <what>`：本 skill 填不出来的东西，必须由读代码的人补。
+ *
+ * 这是**唯一一份**类型清单：下面 `parseMarkers` 的正则从它拼出来，而不是另抄一遍。
+ * 抄一遍的后果是「加了一类但解析不认」，而它不会有任何报错——那一类标记会被静默忽略。
  */
 export const MARKER_KINDS = Object.freeze(['generated', 'begin', 'end', 'fill'])
+
+/** 按 `MARKER_KINDS` 拼出的「标记正文开头」正则。加一类只需要改上面那个数组。 */
+const MARKER_KIND_RE = new RegExp(`^(${MARKER_KINDS.join('|')})\\b\\s*([\\s\\S]*)$`)
+
+/** 转义成正则字面量，供下面按 `NS` 拼出的两条解析正则使用。 */
+const NS_RE = NS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 旧版留下的标记。只用于报告，不解释、不生成。 */
 export const LEGACY_MARKERS = Object.freeze([
@@ -65,9 +74,9 @@ export function emitMarker(file, body) {
 
 /** 从一行里取出标记正文；不是标记行返回 undefined。 */
 export function markerBodyOf(line) {
-  const html = /^\s*<!--\s*project-forge:\s*([\s\S]*?)\s*-->\s*$/.exec(line)
+  const html = new RegExp(`^\\s*<!--\\s*${NS_RE}:\\s*([\\s\\S]*?)\\s*-->\\s*$`).exec(line)
   if (html) return html[1].trim()
-  const hash = /^\s*#\s*project-forge:\s*(.*?)\s*$/.exec(line)
+  const hash = new RegExp(`^\\s*#\\s*${NS_RE}:\\s*(.*?)\\s*$`).exec(line)
   if (hash) return hash[1].trim()
   return undefined
 }
@@ -75,8 +84,8 @@ export function markerBodyOf(line) {
 /**
  * 解析一份文本里的全部标记，返回按行号排列的记录。
  *
- * 每条形如 `{ body, kind, id, what, line }`：`line` 是从 1 开始的行号，`index` 是从 0
- * 开始的行下标。`kind` 为 `begin`/`end` 时 `id` 是节名，为 `fill` 时 `what` 是待填内容。
+ * 每条形如 `{ body, kind, id, what, line, index }`：`line` 是从 1 开始的行号，`index`
+ * 是从 0 开始的行下标。`kind` 为 `begin`/`end` 时 `id` 是节名，为 `fill` 时 `what` 是待填内容。
  *
  * **代码围栏里的东西不算标记。** 一份文档可能正当地引用标记的写法（`references/handoff.md`
  * 就要解释它长什么样），那些示例是**内容**，不是 markup。把它们当成真标记的后果很具体：
@@ -101,7 +110,7 @@ export function parseMarkers(text, file) {
     if (info.inFence) continue
     const body = markerBodyOf(info.line)
     if (body === undefined) continue
-    const m = /^(generated|begin|end|fill)\b\s*([\s\S]*)$/.exec(body)
+    const m = MARKER_KIND_RE.exec(body)
     if (!m) continue
     const kind = m[1]
     const rest = m[2].trim()
@@ -125,8 +134,11 @@ export function hasMarkers(text, file) {
 /**
  * 剥掉所有标记行，其余字节一个不动。
  *
- * 用于 `--clean`：把 `generated` 标记与 `fill` 占位符去掉，文件和正文都保留。
- * **不处理 begin/end 的配对**——那是 compose 的事，它比这里更清楚该留下哪一段。
+ * 用于 `--clean`：围栏之外、又不是行内举例的标记行**全部**去掉——`generated`、`fill`、
+ * `begin`、`end` 一视同仁。这么做是因为 `--clean` 的承诺是「把痕迹清干净」：
+ * 留下孤零零的 begin/end 等于把「这里曾经被脚本管过」写进用户文件，
+ * 而配对关系已经随命令一起消失了。**配对判断不在这一步**——那是 compose 的事，
+ * 它比这里更清楚该留下哪一段正文。
  *
  * **围栏里的与行内反引号里的都不碰。** 这条不是洁癖：一份文档完全可能**正当地把标记
  * 写进示例**（`references/handoff.md` 就在讲它长什么样，README 里也会举一个填好的样子）。
@@ -157,7 +169,8 @@ export function stripMarkers(text, file) {
  */
 function insideInlineCode(line) {
   if (!line.includes('`')) return false
-  return /`[^`]*<!--|<!--[^>]*-->`/.test(line) || /`[^`]*#\s*project-forge:/.test(line)
+  return new RegExp('`[^`]*<!--|<!--[^>]*-->`').test(line)
+    || new RegExp('`[^`]*#\\s*' + NS_RE + ':').test(line)
 }
 
 /**
@@ -271,10 +284,13 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
 ])
 
 /**
- * 模板里可用的变量名。**只有这十一个**。
+ * 模板里可用的变量名。**只有这一份清单说了算**。
  *
  * 未登记的占位符让渲染**直接失败**，而不是原样留在用户文件里：留在文件里的 `{{X}}`
  * 看起来像「这里本来就该有东西」，而它其实是一个没人填的洞。
+ *
+ * 不写「共几个」：数量写在注释里时，加一个变量就变成一句假话，而没有任何东西会因此报错。
+ * 要知道数量，数这个数组——`preflight` 也会在渲染核对时把没登记的占位符点出来。
  */
 export const TEMPLATE_VARS = Object.freeze([
   'PROJECT_NAME',

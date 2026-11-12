@@ -884,8 +884,9 @@ function checkStructureRules() {
  *       这几处之外的东西进了包，就是「一个没人认领的目录被顺手打进用户手里」。
  *       只查黑名单时，一个新增的顶层目录会静默跟着发出去。
  *
- * 结构规则在 `lib/protocol.mjs` 里（与 `.gitattributes` 同源）。这里不自己翻译
- * `.gitattributes`：那等于维护第二份真相。
+ * 结构规则在 `lib/protocol.mjs` 里（与 `.gitattributes` 同源）。这个函数**不翻译**
+ * `.gitattributes`——那份翻译工作在 `checkStructureRules` 里做一次，做的是「两处说法
+ * 是否一致」这件事。这里只问一个问题：拿到包的人是不是收到了不该给他的东西。
  */
 function checkPackage(listPath) {
   if (!existsSync(listPath)) {
@@ -898,11 +899,13 @@ function checkPackage(listPath) {
     return 1
   }
   // 目录项单独数：`git archive | tar -t` 会把目录也列出来，而「包里有多少文件」问的是文件。
-  // 两个数混在一起时，同一份包在两处会报出 57 与 49 两个不同的答案。
+  // 两个数混在一起时，同一份包在两处会报出两个不同的答案。
   const entries = all.filter((e) => !e.endsWith('/'))
   const dirs = all.length - entries.length
 
-  const leaked = entries.filter((e) => isRepoOnlyPath(e) || e.startsWith('.github/'))
+  // 越界判定只问 `isRepoOnlyPath`。再加一个 `startsWith('.github/')` 是多余的：
+  // `.github/` 本来就在 `REPO_ONLY_DIRS` 里，写两遍只会在改名单时留下一个不同步的地方。
+  const leaked = entries.filter((e) => isRepoOnlyPath(e))
   if (leaked.length > 0) {
     for (const e of leaked) process.stderr.write(`FAIL  ${e} 属于「不进包」的结构规则，却出现在用户包里\n`)
     process.stderr.write(`\n用户包核对未通过：${leaked.length} 个条目不该在包里。\n`)

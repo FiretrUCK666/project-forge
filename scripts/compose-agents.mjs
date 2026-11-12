@@ -164,7 +164,7 @@ function conventionsHint(facts) {
   return bits.length === 0 ? '' : `\n\n${bits.join('\n\n')}`
 }
 
-/** 十一个变量的取值。 */
+/** 全部模板变量的取值。清单本身在 `protocol.mjs` 的 `TEMPLATE_VARS` 里。 */
 export function buildVars(facts) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'

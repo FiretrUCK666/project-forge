@@ -41,7 +41,7 @@ It folds those into four steps:
 | --- | --- |
 | **S1 Survey** | A read-only scan returns a `maturity` and a list of `gaps` |
 | **S2 Scope** | Decide what this run covers, and say it in one sentence |
-| **S3 Land** | Repo → remote → docs → automation. Read existing files first, fill only what is missing |
+| **S3 Land** | Repo → docs → remote → automation. Read existing files first, fill only what is missing |
 | **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
 
 It governs; it does not generate the project. It will not pick your stack or write your source.

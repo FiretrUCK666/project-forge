@@ -16,9 +16,21 @@ on:
     # `edited` 不能漏：提案正文会被改动，而改正文只触发这个事件。
     types: [opened, synchronize, reopened, edited]
 
+# 只读权限：这个工作流从不写仓库。声明出来不只是「最小权限」的礼貌——
+# 不声明时拿到的是仓库默认设置，而默认被改成可写时，这套检查就悄悄多了一份写权限。
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    # **跑两个版本，不只是最新的那个。** README 承诺「在 Node 18 上验证通过」，
+    # 而只跑 22 时那句话没有任何东西在支撑它——真到 18 上跑不起来也不会有人知道，
+    # 直到用户报「装完跑不动」。上界跑最新 LTS，下界跑承诺的那个版本。
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '22']
     steps:
       - name: 检出
         uses: actions/checkout@v4
@@ -32,7 +44,7 @@ jobs:
       - name: 准备 Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
 
       - name: 结构自检 + 端到端冒烟
         run: node scripts/dev/preflight.mjs

@@ -106,6 +106,15 @@ node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的
 git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt
 ```
 
+**动了判定逻辑时，还要再跑一次故障注入复验**：
+
+```sh
+node scripts/dev/verify-injections.mjs   # 逐条拆掉判据，确认对应断言真的变红，再还原确认变绿
+```
+
+它和上面五条不是一回事。五条回答「现在是不是绿的」，这一条回答**「绿是不是真的」**——
+测试全绿有两种可能：代码对了，或者测试什么都没测。只有亲眼看到它红过，才排除后一种。
+
 **它绿了才算改完。** 只改文档也要跑——引用断了它才会说话。拿不出实际运行通过的输出，
 不得声称「已验证」。
 

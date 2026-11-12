@@ -78,6 +78,12 @@ node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的
 git archive --format=tar HEAD | tar -t > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt
 ```
 
+动过判定逻辑时再加一条——它验的不是「现在绿不绿」，是**「绿是不是真的」**：
+
+```sh
+node scripts/dev/verify-injections.mjs
+```
+
 **跑出来的才算做完**——拿不出实际运行通过的输出，不得声称「已验证」。
 <!-- project-forge: end 构建与验证 -->
 

@@ -310,7 +310,7 @@ const OWN_INSTANCE_CHECKS = [
 ]
 
 /** 已经删掉的脚本与文件名。任何文件里出现它们，都是没跟上的引用。 */
-const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 'pf-review', 'check-badges.mjs', 'ecosystems.mjs', 'lib/ledger.mjs', 'lib/manifest.mjs', 'task-runners.mjs']
+const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 'pf-review', 'check-badges.mjs', 'ecosystems.mjs', 'lib/ledger.mjs', 'lib/manifest.mjs', 'task-runners.mjs', 'release-notes.mjs', 'render-svg.mjs', 'release-spec.md']
 
 /** 历史记录是**当时的事实**，不改写它。它们记的是那一次改动的现场，不是现行约定。 */
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
@@ -584,7 +584,7 @@ function checkScripts() {
 // ── 4. 会跑的都真跑 ─────────────────────────────────────────────────
 
 function checkHelps() {
-  for (const name of ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs']) {
+  for (const name of ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs']) {
     const p = join(ROOT, 'scripts', name)
     if (!existsSync(p)) { fail(`缺脚本 ${name}`); continue }
     const res = spawnSync(process.execPath, [p, '--help'], { encoding: 'utf8', timeout: 20000 })
@@ -662,6 +662,98 @@ function smoke() {
 
 // ── 6. 卫生 ─────────────────────────────────────────────────────────
 
+/**
+ * 同一件事在几份文件里说法必须一致的那几组判据。
+ *
+ * 每一组都治一次**真实发生过的漂移**：两处各自写一遍时，改一处而漏另一处不会报错，
+ * 只会在某一天由读者发现「文档说的和做的不一样」。这里不追求逐字相同（那会把排版
+ * 与语气锁死，改个词就红，最后一定会被加一个例外绕过去），只断言**判据本身在场**。
+ */
+const SINGLE_SOURCE_RULES = [
+  {
+    what: 'S3 落盘顺序：版本控制 → 文档 → 远端 → 自动化',
+    // 文档里能承载这个顺序的写法：箭头式或顿号式，顺序必须一致。
+    tests: [
+      { file: 'README.md', re: /版本库\s*→\s*文档\s*→\s*远端\s*→\s*自动化/ },
+      { file: 'README.en.md', re: /Repo\s*→\s*docs\s*→\s*remote\s*→\s*automation/ },
+      { file: 'SKILL.md', re: /版本控制\s*→\s*文档\s*→\s*远端\s*→\s*自动化/ },
+    ],
+  },
+  {
+    what: '交棒的退出码档数（四档：0/1/3/4）',
+    tests: [
+      { file: 'SKILL.md', re: /--verify\s*四档退出码/ },
+      { file: 'references/handoff.md', re: /四档退出码/ },
+    ],
+  },
+  {
+    what: '发版说明的「怎么升级」只能给包里真有的命令',
+    // 用户包按 `.gitattributes` 排除 `scripts/dev/`，所以它不存在于用户手里。
+    // 发版说明是**给拿到包的人**看的，里面出现那两条命令等于教人跑一条必失败的命令。
+    tests: [
+      { file: 'docs/release-notes/v3.0.0.md', re: /scripts\/update\.mjs/ },
+      { file: 'docs/release-notes/v3.1.0.md', re: /scripts\/update\.mjs/ },
+      { file: 'docs/release-notes/v3.1.1.md', re: /scripts\/update\.mjs/ },
+    ],
+  },
+]
+
+/** 这几份文件里**不许**出现的东西。 */
+const FORBIDDEN_IN_RELEASE_NOTES = /scripts\/dev\//
+
+function checkSingleSources() {
+  for (const rule of SINGLE_SOURCE_RULES) {
+    for (const test of rule.tests) {
+      const p = join(ROOT, test.file)
+      if (!existsSync(p)) { fail(`单一真相源核对：缺 ${test.file}`); continue }
+      if (!test.re.test(readText(p))) {
+        fail(`${test.file} 里对不上「${rule.what}」——同一件事在两份文件里说了两样，读的人会按错的那一份做`)
+      }
+    }
+  }
+
+  for (const file of ['docs/release-notes/v3.0.0.md', 'docs/release-notes/v3.1.0.md', 'docs/release-notes/v3.1.1.md']) {
+    const p = join(ROOT, file)
+    if (!existsSync(p)) continue
+    if (FORBIDDEN_IN_RELEASE_NOTES.test(readText(p))) {
+      fail(`${file} 提到了 scripts/dev/——那几处不进用户包，照着跑的人会得到「找不到模块」`)
+    }
+  }
+
+  // 工作流那一对：模板与本仓库实例都在校验同一批东西。
+  // 模板改了实例没跟上（或反过来）时，CI 里跑的和本仓库做的是两套门。
+  const workflowPair = [
+    { file: 'templates/ci-release.yml', label: '模板' },
+    { file: '.github/workflows/release.yml', label: '本仓库实例' },
+  ]
+  const mustHave = [
+    { what: '一级标题校验', re: /grep -qE '\^# \+\[\^ \]'/ },
+    { what: '正文行数校验', re: /BODY_LINES/ },
+    { what: '未填占位判据（独立注释行）', re: /<!--\[\[:space:\]\]\*project-forge/ },
+  ]
+  for (const pair of workflowPair) {
+    const p = join(ROOT, pair.file)
+    if (!existsSync(p)) { fail(`工作流对拍：缺 ${pair.file}`); continue }
+    const text = readText(p)
+    for (const rule of mustHave) {
+      if (!rule.re.test(text)) fail(`${pair.file}（${pair.label}）缺${rule.what}——两份工作流检查的东西不一样，CI 会放过模板能拦下的那种说明`)
+    }
+  }
+
+  // CI 的权限声明：不写时拿到的是仓库默认设置，默认被改成可写时它就悄悄多了一份写权限。
+  const checks = [
+    { file: 'templates/ci-check.yml', re: /permissions:\s*\n\s*contents:\s*read/ },
+    { file: '.github/workflows/check.yml', re: /permissions:\s*\n\s*contents:\s*read/ },
+  ]
+  for (const c of checks) {
+    const p = join(ROOT, c.file)
+    if (!existsSync(p)) continue
+    if (!c.re.test(readText(p))) fail(`${c.file} 没有声明 permissions: contents: read——检查类工作流不该带写权限`)
+  }
+
+  note(`单一真相源：${SINGLE_SOURCE_RULES.length} 组跨文件判据 + 工作流对拍 + 权限声明，全部一致`)
+}
+
 const EMOJI_RE = /\p{Extended_Pictographic}/u
 
 function checkHygiene() {
@@ -698,6 +790,7 @@ function main() {
   checkPlatformLock()
   checkStructureRules()
   checkPushSemantics()
+  checkSingleSources()
   checkOwnInstances()
   checkHelps()
   checkTemplateRender()
@@ -752,28 +845,44 @@ function checkStructureRules() {
 /**
  * 核对真跑出来的那份用户包。
  *
- * 条目清单来自 `git archive`（CI 里生成），这里只做一件事：**每个条目要么属于产品层，
- * 要么命中「不进包」的结构规则**。两处都不占的那个条目就是「没有归属」——它出现在包里
- * 但没人知道该不该在，而这一条抓的正是「清单漏一行」那类问题。
+ * 条目清单来自 `git archive`（CI 里生成），这里做两件事：
  *
- * 结构规则在 `lib/protocol.mjs` 里（与 `.gitattributes` 同源，`checkLinks` 之外的
- * 一条独立判据）。这里不自己翻译 `.gitattributes`：那等于维护第二份真相。
+ *   一、**每个条目要么属于产品层，要么命中「不进包」的结构规则**。两处都不占的那个条目
+ *       就是「没有归属」——它出现在包里但没人知道该不该在。
+ *   二、**产品层白名单也要核**：`SKILL.md`、`references/`、`templates/`、`scripts/`
+ *       这几处之外的东西进了包，就是「一个没人认领的目录被顺手打进用户手里」。
+ *       只查黑名单时，一个新增的顶层目录会静默跟着发出去。
+ *
+ * 结构规则在 `lib/protocol.mjs` 里（与 `.gitattributes` 同源）。这里不自己翻译
+ * `.gitattributes`：那等于维护第二份真相。
  */
 function checkPackage(listPath) {
   if (!existsSync(listPath)) {
     process.stderr.write(`找不到条目清单：${listPath}\n`)
     return 2
   }
-  const entries = readFileSync(listPath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
-  if (entries.length === 0) {
+  const all = readFileSync(listPath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
+  if (all.length === 0) {
     process.stderr.write('条目清单是空的——`git archive` 那一步失败时，空清单会被读成「没漏」，那是假绿。\n')
     return 1
   }
+  // 目录项单独数：`git archive | tar -t` 会把目录也列出来，而「包里有多少文件」问的是文件。
+  // 两个数混在一起时，同一份包在两处会报出 57 与 49 两个不同的答案。
+  const entries = all.filter((e) => !e.endsWith('/'))
+  const dirs = all.length - entries.length
 
   const leaked = entries.filter((e) => isRepoOnlyPath(e) || e.startsWith('.github/'))
   if (leaked.length > 0) {
     for (const e of leaked) process.stderr.write(`FAIL  ${e} 属于「不进包」的结构规则，却出现在用户包里\n`)
     process.stderr.write(`\n用户包核对未通过：${leaked.length} 个条目不该在包里。\n`)
+    return 1
+  }
+
+  // 产品层：拿到包的人需要的只有这几处。其余一律要问「它凭什么在包里」。
+  const unclaimed = entries.filter((e) => !isProductLayerPath(e))
+  if (unclaimed.length > 0) {
+    for (const e of unclaimed) process.stderr.write(`FAIL  ${e} 不在产品层（SKILL.md / references/ / templates/ / scripts/），也没被排除——它凭什么在用户包里？\n`)
+    process.stderr.write(`\n用户包核对未通过：${unclaimed.length} 个条目没有归属。要发就归进产品层，不发就写进 .gitattributes 的 export-ignore。\n`)
     return 1
   }
 
@@ -790,8 +899,21 @@ function checkPackage(listPath) {
     process.stderr.write(`\n用户包核对未通过：缺 ${missingRequired} 个必需项。\n`)
     return 1
   }
-  process.stdout.write(`用户包：${entries.length} 个条目，没有越界，必需项齐全。\n`)
+  process.stdout.write(`用户包：${entries.length} 个文件（另有 ${dirs} 个目录项），没有越界，没有无归属条目，必需项齐全。\n`)
   return 0
+}
+
+/**
+ * 这个相对路径是不是「产品层」——拿到包的人真正需要的那几处。
+ *
+ * 判据是**位置**，不是逐文件列表：新加一个文件只要放进这几处，就自动算产品层；
+ * 放进别处，就会被下面那条「没有归属」的判据拦下。清单会漏，位置不会。
+ */
+function isProductLayerPath(rel) {
+  const p = String(rel ?? '').replace(/\\/g, '/')
+  if (p === 'SKILL.md' || p === 'README.md' || p === 'LICENSE') return true
+  if (/^README\.[a-z0-9_-]+\.md$/i.test(p)) return true
+  return /^(?:references|templates|scripts)\//.test(p)
 }
 
 process.exit(main())

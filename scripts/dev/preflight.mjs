@@ -36,6 +36,7 @@ import {
   SKILL_MAX_BYTES, SKILL_MAX_LINES, TEMPLATE_CONDITIONS, TEMPLATE_VARS,
   conditionMarkers, isRepoOnlyPath, templateVarsOf,
 } from '../lib/protocol.mjs'
+import { VERIFY_EXIT } from '../handoff.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -695,39 +696,76 @@ const SINGLE_SOURCE_RULES = [
     ],
   },
   {
-    what: '交棒的退出码档数（四档：0/1/3/4）',
+    what: '交棒的退出码（四个码必须与 handoff.mjs 的 VERIFY_EXIT 逐个相等）',
+    // **只看「四档退出码」这几个字是不够的。** 把文档里的码改成 0/1/2/5，那句话仍然命中，
+    // 而代码返回的是 0/1/3/4——文档于是承诺了一个永远不会出现的码，还漏掉了真的会出现的
+    // 那个。判据必须是**码本身**：把命中段落里的单数字提出来，与常量逐个比。
     tests: [
-      { file: 'SKILL.md', re: /--verify\s*四档退出码/ },
-      { file: 'references/handoff.md', re: /四档退出码/ },
+      // SKILL.md 那一行逐字列出四个码，用 `--verify` 定位到行尾。
+      { file: 'SKILL.md', re: /--verify[^\n]*/, exitCodes: true },
+      // 参考文档是一张表：从「四档退出码」一直取到表末那几行。
+      { file: 'references/handoff.md', re: /四档退出码[\s\S]{0,400}/, exitCodes: true },
     ],
   },
   {
     what: '发版说明的「怎么升级」只能给包里真有的命令',
     // 用户包按 `.gitattributes` 排除 `scripts/dev/`，所以它不存在于用户手里。
     // 发版说明是**给拿到包的人**看的，里面出现那两条命令等于教人跑一条必失败的命令。
-    tests: [
-      { file: 'docs/release-notes/v3.0.0.md', re: /scripts\/update\.mjs/ },
-      { file: 'docs/release-notes/v3.1.0.md', re: /scripts\/update\.mjs/ },
-      { file: 'docs/release-notes/v3.1.1.md', re: /scripts\/update\.mjs/ },
-    ],
+    //
+    // 名单**不写死**：扫 `docs/release-notes/` 下所有说明。写死三份时，第四份说明
+    // 写错命令不会有任何东西碰到它。
+    releaseNotes: true,
   },
 ]
 
-/** 这几份文件里**不许**出现的东西。 */
+/** 这三份文件里**不许**出现的东西。 */
 const FORBIDDEN_IN_RELEASE_NOTES = /scripts\/dev\//
+
+/**
+ * 发版说明的名单**从磁盘上取**，不写死。
+ *
+ * 写死三份时，第四份说明写错命令不会有任何东西碰到它——而它正是最新那一份，
+ * 也就是最多人照着跑的那一份。
+ */
+function releaseNoteFiles() {
+  const dir = join(ROOT, 'docs', 'release-notes')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((n) => /\.md$/i.test(n))
+    .sort()
+    .map((n) => `docs/release-notes/${n}`)
+}
 
 function checkSingleSources() {
   for (const rule of SINGLE_SOURCE_RULES) {
+    // 「发版说明」那一组没有固定文件，单独走下面那段。
+    if (rule.releaseNotes === true) continue
     for (const test of rule.tests) {
       const p = join(ROOT, test.file)
       if (!existsSync(p)) { fail(`单一真相源核对：缺 ${test.file}`); continue }
-      if (!test.re.test(readText(p))) {
+      const text = readText(p)
+      const hit = test.re.exec(text)
+      if (hit === null) {
         fail(`${test.file} 里对不上「${rule.what}」——同一件事在两份文件里说了两样，读的人会按错的那一份做`)
+        continue
+      }
+      // 需要比对具体数字的那几组：把命中段落里的单数字提出来，与代码里的常量逐个比。
+      // 只断言「这句话在」是不够的——把四个码改成另一批数字，那句话照样在。
+      // 反引号先抹成空格：`3` 这种写法里的数字同样是「文档承诺的码」，不能因为被括起来就漏掉。
+      if (test.exitCodes === true) {
+        const nums = [...new Set((hit[0].replace(/`/g, ' ').match(/(?<![\w.])\d(?![\w.])/g) ?? []))]
+          .map(Number)
+          .sort((a, b) => a - b)
+        const expect = Object.values(VERIFY_EXIT).sort((a, b) => a - b)
+        if (nums.join(',') !== expect.join(',')) {
+          fail(`${test.file} 里写的退出码是 ${nums.join('/')}，而 handoff.mjs 实际返回 ${expect.join('/')}`
+            + '——文档承诺了一个不会出现的码，还漏掉了真的会出现的那个')
+        }
       }
     }
   }
 
-  for (const file of ['docs/release-notes/v3.0.0.md', 'docs/release-notes/v3.1.0.md', 'docs/release-notes/v3.1.1.md']) {
+  for (const file of releaseNoteFiles()) {
     const p = join(ROOT, file)
     if (!existsSync(p)) continue
     if (FORBIDDEN_IN_RELEASE_NOTES.test(readText(p))) {

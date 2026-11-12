@@ -338,6 +338,21 @@ export function toText(result) {
   return lines.join('\n')
 }
 
+/**
+ * `--verify` 的退出码。**这是唯一一处定义**——帮助文本、`SKILL.md` 与
+ * `references/handoff.md` 里的那几行都对着它，`preflight` 会核对三处说的是不是同一批码。
+ *
+ * 为什么值得单独立成常量：四个码里有两个是**非零但不代表「有痕迹」**的特殊档
+ * （没扫全、这一趟不适用）。少一档、改一个数字，症状都是「一次没做完或不适用的检查
+ * 被读成了通过」——而那正是不可逆动作前的最后一道关。
+ */
+export const VERIFY_EXIT = Object.freeze({
+  clean: 0,
+  dirty: 1,
+  truncated: 3,
+  notApplicable: 4,
+})
+
 function main(argv) {
   let target = process.cwd()
   let asJson = false
@@ -349,10 +364,12 @@ function main(argv) {
         '用法：node scripts/handoff.mjs [项目目录] [选项]',
         '',
         '  --scan     列出本 skill 留下的痕迹（默认）',
-        '  --verify   判「已经干净」：干净 0 / 有痕迹 1 / 没扫全 3 / 不适用（skill 自己的仓库）4',
+        `  --verify   判「已经干净」：干净 ${VERIFY_EXIT.clean} / 有痕迹 ${VERIFY_EXIT.dirty}`
+          + ` / 没扫全 ${VERIFY_EXIT.truncated} / 不适用（skill 自己的仓库）${VERIFY_EXIT.notApplicable}`,
         '  --json     输出机器可读结果',
         '',
-        '只读：不删任何东西。退出码 3 是「这一趟没扫完」、4 是「这一趟不适用」，都不是干净。',
+        `只读：不删任何东西。退出码 ${VERIFY_EXIT.truncated} 是「这一趟没扫完」、`
+          + `${VERIFY_EXIT.notApplicable} 是「这一趟不适用」，都不是干净。`,
       ].join('\n') + '\n')
       return 0
     }
@@ -376,7 +393,7 @@ function main(argv) {
         process.stdout.write('不适用：目标就是这套 skill 自己的源码仓库。\n'
           + '交棒是「把一个项目从这套流程里摘出来」，而它就是这套流程——\n'
           + '它的 templates/ 与 references/ 里的标记是语法与讲解，删掉会把工具弄坏。\n')
-        return 4
+        return VERIFY_EXIT.notApplicable
       }
       if (result.truncated) {
         process.stdout.write(`没扫全：目录太深、文件太多，或有单个文件超过 256 KB 没读。`
@@ -395,8 +412,8 @@ function main(argv) {
       // 第三档必须与「有痕迹」分开：拿 3 当 1 会让「扫不完」看起来像「找到了」，
       // 拿 3 当 0 则正好相反——把一次没做完的检查当成通过的检查，而这是不可逆动作
       // 的最后一道关。
-      if (result.truncated) return 3
-      return result.clean ? 0 : 1
+      if (result.truncated) return VERIFY_EXIT.truncated
+      return result.clean ? VERIFY_EXIT.clean : VERIFY_EXIT.dirty
     }
     return 0
   } catch (err) {

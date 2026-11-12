@@ -1509,6 +1509,70 @@ cases.push(['体检把系统占位署名判成缺，正常署名判成齐', asyn
   } finally { rmTree(dir) }
 }])
 
+cases.push(['远端不在 GitHub 上时，导航给「不适用」而不是塞一份 GitHub 文档', async () => {
+  const elsewhere = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'index.js': 'console.log(1)\n' })
+  const onGithub = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'index.js': 'console.log(1)\n' })
+  try {
+    gitInit(elsewhere)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://git.example.com/team/demo.git'], { cwd: elsewhere, stdio: 'ignore' })
+    gitInit(onGithub)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: onGithub, stdio: 'ignore' })
+
+    // 正面：非 GitHub 远端时，不推那份通篇 `gh` / Actions 的文档，改成一句「不适用」。
+    const a = await survey(elsewhere)
+    const navA = a.navigation ?? []
+    if (navA.some((x) => x.includes('remote-github.md') && x.includes('建仓库'))) {
+      return '远端不在 GitHub 上，却推了通篇讲 gh 与 Actions 的文档'
+    }
+    if (!navA.some((x) => x.includes('远端不在 GitHub 上'))) return '既没推文档也没说明不适用，读的人会以为这项没事'
+
+    // 反面：GitHub 远端时该推还得推，且不许误报「不适用」。
+    const b = await survey(onGithub)
+    const navB = b.navigation ?? []
+    if (!navB.some((x) => x.includes('remote-github.md'))) return 'GitHub 远端却没推那份文档'
+    if (navB.some((x) => x.includes('远端不在 GitHub 上'))) return 'GitHub 远端被误报成「不在 GitHub 上」'
+    return true
+  } finally { rmTree(elsewhere); rmTree(onGithub) }
+}])
+
+cases.push(['许可证不是缺口：不可发布的项目缺许可证照样能 mature', async () => {
+  const dir = tmpProject({
+    'README.md': '# demo\n\n私有工具，说明足够长。\n',
+    'index.js': 'console.log(1)\n',
+    'package.json': '{"name":"demo","version":"1.0.0","private":true}',
+    '.gitattributes': '* text=auto\n',
+    '.github/workflows/ci.yml': 'name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node index.js\n',
+    'AGENTS.md': [
+      '# d 工程契约', '', '## 定位', '',
+      '私有工具，只在本机跑，不对外发布，也不做部署与选型。', '',
+      '## 构建与验证', '', '```sh', 'node index.js', '```', '',
+      '## 修改规范', '', '- 先看再动；', '- 改完跑上面那条命令；', '- 不引入第三方依赖。',
+    ].join('\n'),
+  })
+  try {
+    gitInit(dir)
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/privdemo.git'], { cwd: dir, stdio: 'ignore' })
+    const f = await survey(dir)
+    // 正面：私有项目不放许可证是对的，它不该被算成「该修的东西」，也不该把 maturity 拖下来。
+    if ((f.projectGaps ?? []).some((g) => /LICENSE/.test(g))) return '不可发布的项目缺许可证被写成了缺口'
+    if (f.maturity !== 'mature') return `私有项目六项齐全却是 ${f.maturity}：${(f.gaps ?? []).join(' / ')}`
+    // 该问的还是要问：放不放是使用者的事。
+    if (!(f.questions ?? []).some((q) => /授权|许可证/.test(q))) return '没有把「要不要授权」问出来'
+
+    // 反面：声明了可发布的包却没许可证时，它确实是缺口——下游合规检查会拒。
+    const pub = tmpProject({
+      'README.md': '# lib\n\n一个要发出去的库。\n',
+      'index.js': 'module.exports = {}\n',
+      'package.json': '{"name":"mylib","version":"1.0.0"}',
+    })
+    try {
+      const g = await survey(pub)
+      if (!(g.gaps ?? []).some((x) => /LICENSE/.test(x))) return '可发布的包缺许可证却没报缺口'
+      return true
+    } finally { rmTree(pub) }
+  } finally { rmTree(dir) }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

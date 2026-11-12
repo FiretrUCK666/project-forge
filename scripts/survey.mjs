@@ -1500,8 +1500,16 @@ function judgeGaps(facts) {
   if (facts.git.present === true && !facts.ignores.hasGitattributes && (facts.git.trackedFiles ?? 0) > 0) {
     gaps.push('没有 `.gitattributes` —— 跨平台协作时同一份文件在两台机器上算出不同的字节，而已经入库的文件要重新规范化')
   }
+  // LICENSE 不是缺口，是**待表态**。
+  //
+  // 私有项目不放许可证是对的，公开项目才需要它——而「这个项目要不要公开」只有使用者能定。
+  // 早先它被无条件写进 gaps，于是私有仓库永远凑不齐「项目类缺口为空」，一辈子卡在
+  // `partial`，而它其实没有任何该修的东西。判据与 `review.mjs` 对齐：可发布的包没有
+  // 许可证才算真缺口（下游合规检查会拒），其余一律进 questions。
   if (!facts.docs.license) {
-    gaps.push('没有 LICENSE')
+    if (facts.ecosystem.publishable) {
+      gaps.push('清单声明了可发布的包，却没有 LICENSE —— 下游的合规检查会因为「授权不明」拒绝使用')
+    }
     questions.push('这个项目要不要公开授权？要的话选哪个许可证（MIT / Apache-2.0 / BSD-3-Clause）；不要就明确不放')
   }
   if (facts.docs.workflowFacts.usesPullRequestTarget && facts.docs.workflowFacts.checkoutsPrHead) {

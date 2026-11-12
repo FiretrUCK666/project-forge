@@ -316,17 +316,31 @@ export function computeNavigation(facts) {
   }
 
   // ── 远端：要建仓库、要接 CI、或工作流有风险的形状时 ────────────────
+  //
+  // 只在**远端就在 GitHub 上**时推这一份。那份参考通篇是 `gh`、Actions、GitHub API，
+  // 推给一个用别的托管平台、或者根本不用平台的仓库，读到的是完全不适用的判据——
+  // 而它看起来像一条待办。
   const wf = docs.workflowFacts ?? {}
+  const onGithub = typeof git.remote === 'string' && /github\.com/i.test(git.remote)
   const remoteTriggers = [
     (git.remotes ?? []).length === 0,
     !wf.hasCheck,
     wf.usesPullRequestTarget && wf.checkoutsPrHead,
+    // 没有 PR 模板本身不是缺口（自用项目永远不收外部提案时，它是多余的一份文件）。
+    // 但**有远端、又缺模板**时，提案会以一张没有栏目约束的空白页进来——
+    // 这一条只在真的有远端时算数，下面那个 onGithub 已经保证了这一点。
     !docs.prTemplate,
   ]
-  if (remoteTriggers.some(Boolean) && git.present === true) {
+  if (remoteTriggers.some(Boolean) && git.present === true && (onGithub || (git.remotes ?? []).length === 0)) {
     items.push('`references/remote-github.md`——'
       + '建仓库、首次推送、CI 与发布自动化的顺序与判据都在这里；'
       + '`pull_request_target` 那一条尤其要读：写错等于让陌生人拿你的密钥跑他的代码')
+  }
+  // 远端不在 GitHub 上时，说明一件**这件事说不清**的事实，而不是塞一份 GitHub 文档。
+  if (git.present === true && (git.remotes ?? []).length > 0 && !onGithub) {
+    items.push('**远端不在 GitHub 上**：`references/remote-github.md` 里的 `gh`、Actions 与 API '
+      + '对这套托管平台不适用。CI 与发布自动化要按那个平台自己的机制配，'
+      + '本文档里只有「什么该有」这一半还能参考')
   }
 
   // ── 协作协议：有远端、且这次要落地改动时 ──────────────────────────

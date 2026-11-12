@@ -369,11 +369,27 @@ export const REPO_ONLY_FILES = Object.freeze([
   '.gitignore',
 ])
 
-/** 这个相对路径属不属于「只服务本仓库」。 */
+/**
+ * 这个相对路径属不属于「只服务本仓库」。
+ *
+ * ## 判据必须与 git 自己的语义一致
+ *
+ * `.gitattributes` 里写的是 `/docs/` 这样的**目录规则**：git 只排除那个目录**里面**的东西，
+ * 不排除一个恰好叫 `docs` 的普通文件。这一点实测过：仓库里放一个名为 `docs` 的文本文件，
+ * 它照样进用户包。
+ *
+ * 所以这里**只做前缀匹配**，不接受裸名。早先那种「`p === 'docs'` 也算命中」的写法会与 git
+ * 分叉，而分叉的那一侧不是多报一条，是 `update.mjs` 会**删掉用户一个叫 docs 的文件**——
+ * 依据是一条它根本不满足的规则。
+ *
+ * 大小写按字面比：git 在 Windows 上默认不区分，所以 `DOCS/x.md` 这个写法在这里判不出来。
+ * 那个方向的错是**漏判**，由 `preflight` 的产品层白名单兜住——它会报「这个条目没有归属」
+ * 让人来看，不会静默放行。
+ */
 export function isRepoOnlyPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (REPO_ONLY_FILES.includes(p)) return true
-  return REPO_ONLY_DIRS.some((d) => p === d.replace(/\/$/, '') || p.startsWith(d))
+  return REPO_ONLY_DIRS.some((d) => p.startsWith(d))
 }
 
 /**

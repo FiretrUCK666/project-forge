@@ -160,7 +160,7 @@ export function toMarkdown(facts) {
   if (facts.gaps.length > 0) {
     lines.push('## 缺口')
     lines.push('')
-    for (const gap of facts.gaps) lines.push(`- ${gap}`)
+    for (const gap of facts.gaps) lines.push(`- ${gap.text}`)
     lines.push('')
   } else {
     lines.push('## 缺口')
@@ -172,7 +172,7 @@ export function toMarkdown(facts) {
   if (facts.questions.length > 0) {
     lines.push('## 要问用户的事')
     lines.push('')
-    for (const q of facts.questions) lines.push(`- ${q}`)
+    for (const q of facts.questions) lines.push(`- ${q.text}`)
     lines.push('')
   }
 
@@ -345,7 +345,8 @@ export function computeNavigation(facts) {
 
   // ── 协作协议：有远端、且这次要落地改动时 ──────────────────────────
   if ((git.remotes ?? []).length > 0 && git.present === true) {
-    items.push('`references/collaboration.md`——判角色（维护者还是 Fork）、五档分流、谁审谁能合、合并后怎么收尾。'
+    items.push('`references/collaboration.md`——判角色（维护者 / 贡献者 / 处理外来提案）、五档分流、'
+      + '审查循环怎么才会停、谁审谁能合、合并后七步收尾。'
       + '凭常识判断「这次改动大不大」是最容易出错的一步')
   }
 

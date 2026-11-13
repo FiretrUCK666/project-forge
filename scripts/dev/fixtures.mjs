@@ -9,7 +9,7 @@
  * 只覆盖「判错了会给出错的动作」的那些判定。风格偏好不测。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -72,6 +72,22 @@ async function survey(dir) {
   return run(dir)
 }
 
+/**
+ * 缺口与提问是 `{id, text}` 而不是纯字符串：断言要读**文字**时用这个。
+ *
+ * 直接对本体的 `text` 跑正则，复刻的是「缺口的形状」，判据一改（比如换成
+ * id 表达）这里就全部失效，而失效的样子是「断言红了，判据其实没坏」。
+ */
+const { textsOf } = await import('../survey.mjs')
+
+/** 某个目录下的 `.md` 文件名（相对 skill 根）。给「全仓库扫一遍」那类断言用。 */
+function readDirRefs(dir) {
+  const prefix = dir.slice(SKILL_ROOT.length + 1).replace(/\\/g, '/')
+  try {
+    return readdirSync(dir).filter((n) => n.endsWith('.md')).map((n) => `${prefix}/${n}`)
+  } catch { return [] }
+}
+
 async function runNode(script, args) {
   return spawnSync(process.execPath, [join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000 })
 }
@@ -107,7 +123,7 @@ cases.push(['纯 md 但没 README 判成 unknown，不是 docs-only', async () =
     const f = await survey(dir)
     if (f.ecosystem.kinds.includes('docs-only')) return '被误判成 docs-only'
     if (!f.ecosystem.kinds.includes('unknown')) return `kinds=${f.ecosystem.kinds}`
-    if (!f.questions.some((q) => /什么项目/.test(q))) return '没问用户这是什么项目'
+    if (!textsOf(f.questions).some((q) => /什么项目/.test(q))) return '没问用户这是什么项目'
     return true
   } finally { rmTree(dir) }
 }])
@@ -151,8 +167,8 @@ cases.push(['isRepoRoot 为假时停下并问边界', async () => {
   try {
     const f = await survey(join(outer, 'sub'))
     if (f.git.isRepoRoot !== false) return 'isRepoRoot 没判成假'
-    if (!f.gaps.some((g) => /不是仓库根|外层仓库/.test(g))) return `gaps=${JSON.stringify(f.gaps)}`
-    if (!f.questions.some((q) => /并入|单独/.test(q))) return '没问边界'
+    if (!textsOf(f.gaps).some((g) => /不是仓库根|外层仓库/.test(g))) return `gaps=${JSON.stringify(f.gaps)}`
+    if (!textsOf(f.questions).some((q) => /并入|单独/.test(q))) return '没问边界'
     return true
   } finally { rmTree(outer) }
 }])
@@ -215,7 +231,7 @@ cases.push(['没有版本库时敏感文件判 undetermined（没查，不是没
     const hit = f.risks.secretFiles.find((x) => x.file === '.env.local')
     if (!hit) return '没扫到这个文件'
     if (hit.status !== 'undetermined') return `status=${hit.status}`
-    if (f.gaps.some((g) => /未忽略的敏感文件/.test(g))) return '把它报成了未忽略的缺口'
+    if (textsOf(f.gaps).some((g) => /未忽略的敏感文件/.test(g))) return '把它报成了未忽略的缺口'
     return true
   } finally { rmTree(dir) }
 }])
@@ -713,8 +729,11 @@ cases.push(['模板改了而本仓库实例没跟上时，--check 会红；刷�
 
     // 模拟「模板加了规则、实例还停在旧版」：往受管区间里塞一条模板没有的内容。
     const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    // 锚在「同步不变量」那一行：它是这一段里最后一条固定规则，模板里一直有它。
+    // 绑在别的行上时，那条规则一改名夹具就失效——而失效的样子是「夹具找不到插入点」，
+    // 看起来像夹具坏了，实际是它依赖了一个会动的东西。
     const tampered = text.replace(
-      /(- \*\*一票否决红线\*\*)/,
+      /(- \*\*同步不变量\*\*)/,
       '- 这是实例里多出来的一条，模板里没有。\n\n$1',
     )
     if (tampered === text) return '夹具没找到可以插入的位置'
@@ -727,7 +746,7 @@ cases.push(['模板改了而本仓库实例没跟上时，--check 会红；刷�
     await runNode('compose-agents.mjs', [dir])
     const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     if (after.includes('实例里多出来的一条')) return '刷新没有把实例拉回模板（多出来的内容还在）'
-    if (!after.includes('一票否决红线')) return '刷新把模板里的规则弄丢了'
+    if (!after.includes('同步不变量')) return '刷新把模板里的规则弄丢了'
     const again = await runNode('compose-agents.mjs', [dir, '--check'])
     if (again.status !== 0) return `刷新之后 --check 仍然红：${(again.stderr || '').trim().split('\n')[0]}`
     return true
@@ -758,7 +777,10 @@ cases.push(['默认分支名换个环境算出来不一样，不算漂移；真�
     }
 
     // 但真的多了一条模板里没有的规则，必须报。
-    const drifted = renamed.replace(/(- \*\*一票否决红线\*\*)/, '- 实例里多出来的一条。\n\n$1')
+    // 锚在「同步不变量」那一行——它是受管区间里最后一条固定规则，模板一直有它。
+    // 绑在会随文档演进而改名的行上时，注入点失效，这条反面用例就悄悄变成了空跑。
+    const drifted = renamed.replace(/(- \*\*同步不变量\*\*)/, '- 实例里多出来的一条。\n\n$1')
+    if (drifted === renamed) return '夹具没找到可以插入的位置'
     writeFileSync(join(dir, 'AGENTS.md'), drifted)
     const driftCheck = await runNode('compose-agents.mjs', [dir, '--check'])
     if (driftCheck.status === 0) return '真漂移被掩码掩盖了'
@@ -1239,12 +1261,12 @@ cases.push(['残缺血库不判 mature；六项齐全才是', async () => {
     // 正面：缺 AGENTS.md 与 .gitattributes 的仓库，不该被当成「该有的都有」。
     const a = await survey(incomplete)
     if (a.maturity === 'mature') return '缺 AGENTS.md 与 .gitattributes 仍被判 mature'
-    if (!a.gaps.some((g) => /AGENTS\.md/.test(g))) return 'gaps 里没有「缺 AGENTS.md」'
-    if (!a.gaps.some((g) => /gitattributes/.test(g))) return 'gaps 里没有「缺 .gitattributes」'
+    if (!textsOf(a.gaps).some((g) => /AGENTS\.md/.test(g))) return 'gaps 里没有「缺 AGENTS.md」'
+    if (!textsOf(a.gaps).some((g) => /gitattributes/.test(g))) return 'gaps 里没有「缺 .gitattributes」'
 
     // 反面：六项齐全时必须是 mature——这条一旦翻车，所有正常项目都会被拖着做一遍多余的事。
     const b = await survey(complete)
-    if (b.maturity !== 'mature') return `六项齐全却不是 mature（${b.maturity}）：${b.gaps.join(' / ')}`
+    if (b.maturity !== 'mature') return `六项齐全却不是 mature（${b.maturity}）：${textsOf(b.gaps).join(' / ')}`
     return true
   } finally { rmTree(incomplete); rmTree(complete) }
 }])
@@ -1324,8 +1346,8 @@ cases.push(['裸仓库判成「裸仓库」，不是「还没有版本库」', a
     const f = await survey(dir)
     if (f.git.isBare !== true) return `isBare 是 ${f.git.isBare}`
     if (f.git.present !== true) return '裸仓库被判成「没有版本库」'
-    if (!f.gaps.some((g) => /裸仓库/.test(g))) return 'gaps 里没有「裸仓库」这一条'
-    if (f.gaps.some((g) => /还没有版本库/.test(g))) return 'gaps 里还写着「还没有版本库」——照着它会去 git init'
+    if (!textsOf(f.gaps).some((g) => /裸仓库/.test(g))) return 'gaps 里没有「裸仓库」这一条'
+    if (textsOf(f.gaps).some((g) => /还没有版本库/.test(g))) return 'gaps 里还写着「还没有版本库」——照着它会去 git init'
 
     // 反面：普通仓库的 isBare 必须是假，否则每个项目都会被劝去克隆一遍。
     const normal = tmpProject({ 'README.md': '# d\n\n说明足够长。\n' })
@@ -1346,8 +1368,8 @@ cases.push(['子目录里的独立仓库会被点名，并给出边界问题', a
     spawnSync('git', ['init', '-q'], { cwd: join(dir, 'sub'), stdio: 'ignore' })
     const f = await survey(dir)
     if (!(f.git.nestedRepos ?? []).includes('sub')) return `nestedRepos=${JSON.stringify(f.git.nestedRepos)}`
-    if (!f.gaps.some((g) => /独立仓库/.test(g))) return 'gaps 里没有嵌套仓库这一条'
-    if (!f.questions.some((q) => /子模块|并入/.test(q))) return '没问边界怎么处置'
+    if (!textsOf(f.gaps).some((g) => /独立仓库/.test(g))) return 'gaps 里没有嵌套仓库这一条'
+    if (!textsOf(f.questions).some((q) => /子模块|并入/.test(q))) return '没问边界怎么处置'
 
     // 反面：干净的仓库不该凭空报嵌套。
     const clean = tmpProject({ 'README.md': '# d\n\n说明足够长。\n' })
@@ -1379,7 +1401,7 @@ cases.push(['清单声明了源仓库，角色就判得出来；没声明时提�
       spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/unknown.git'], { cwd: undeclared, stdio: 'ignore' })
       const g = await survey(undeclared)
       if (g.git.role !== 'undetermined') return `role=${g.git.role}（没声明源仓库却判成了别的）`
-      if (!g.questions.some((q) => /正本|源仓库/.test(q))) return '角色比不出来却没有提问'
+      if (!textsOf(g.questions).some((q) => /正本|源仓库/.test(q))) return '角色比不出来却没有提问'
       return true
     } finally { rmTree(undeclared) }
   } finally { rmTree(declared) }
@@ -1554,10 +1576,10 @@ cases.push(['许可证不是缺口：不可发布的项目缺许可证照样能 
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/privdemo.git'], { cwd: dir, stdio: 'ignore' })
     const f = await survey(dir)
     // 正面：私有项目不放许可证是对的，它不该被算成「该修的东西」，也不该把 maturity 拖下来。
-    if ((f.projectGaps ?? []).some((g) => /LICENSE/.test(g))) return '不可发布的项目缺许可证被写成了缺口'
-    if (f.maturity !== 'mature') return `私有项目六项齐全却是 ${f.maturity}：${(f.gaps ?? []).join(' / ')}`
+    if (textsOf(f.projectGaps).some((g) => /LICENSE/.test(g))) return '不可发布的项目缺许可证被写成了缺口'
+    if (f.maturity !== 'mature') return `私有项目六项齐全却是 ${f.maturity}：${textsOf(f.gaps).join(' / ')}`
     // 该问的还是要问：放不放是使用者的事。
-    if (!(f.questions ?? []).some((q) => /授权|许可证/.test(q))) return '没有把「要不要授权」问出来'
+    if (!textsOf(f.questions).some((q) => /授权|许可证/.test(q))) return '没有把「要不要授权」问出来'
 
     // 反面：声明了可发布的包却没许可证时，它确实是缺口——下游合规检查会拒。
     const pub = tmpProject({
@@ -1567,7 +1589,7 @@ cases.push(['许可证不是缺口：不可发布的项目缺许可证照样能 
     })
     try {
       const g = await survey(pub)
-      if (!(g.gaps ?? []).some((x) => /LICENSE/.test(x))) return '可发布的包缺许可证却没报缺口'
+      if (!textsOf(g.gaps).some((x) => /LICENSE/.test(x))) return '可发布的包缺许可证却没报缺口'
       return true
     } finally { rmTree(pub) }
   } finally { rmTree(dir) }
@@ -1701,6 +1723,281 @@ cases.push(['围栏里的同名标题不算「这一节已经有了」', async (
     if (twice > 1) return `同一节被插了两份（${twice} 份）`
     return true
   } finally { rmTree(dir) }
+}])
+
+// ── 审查栏与收尾步骤：判据本体（不是复刻一份循环） ──────────────────────
+//
+// 这几条 import `preflight.mjs` 里的**判据本体**来验。复刻一份循环的断言不会因为判据被
+// 削弱而变红，于是「判据坏了」这件事没有任何东西看着——那正是这次要消灭的形状。
+// 反面用例同样重要：判据如果会误伤正常写法，修的人第一件事是把判据放宽，而放宽之后
+// 它就再也拦不住真问题了。
+
+let preflightLib
+
+async function loadPreflight() {
+  if (preflightLib === undefined) preflightLib = await import('./preflight.mjs')
+  return preflightLib
+}
+
+cases.push(['审查栏：四个字段必须排在同一段里', async () => {
+  const { reviewBlockMissing } = await loadPreflight()
+  const block = [
+    '- **审查来源**：子代理',
+    '- **逐条标准状态**：fail: 无',
+    '- **故障注入记录**：删了一行，红了',
+    '- **止损记录**：未触发',
+  ].join('\n')
+  if (reviewBlockMissing(block).length !== 0) return '四行排在一起却仍报缺'
+
+  // 正面：删掉一行，那一块就不完整了。
+  for (const drop of [0, 1, 2, 3]) {
+    const lines = block.split('\n')
+    lines.splice(drop, 1)
+    if (reviewBlockMissing(lines.join('\n')).length === 0) return `删掉第 ${drop + 1} 行仍被判成完整`
+  }
+
+  // 正面（这是这次修的形状）：同样的四个词散落在不相邻的段落里，不算一块。
+  // 「出现过就算」的判据在这里会假绿——而正文里解释这些字段时本来就会用到这些词。
+  const scattered = [
+    '- **审查来源**：子代理',
+    '',
+    '这段正文解释什么叫逐条标准状态。',
+    '',
+    '这段正文又提到故障注入记录。',
+    '',
+    '- **止损记录**：未触发',
+  ].join('\n')
+  if (reviewBlockMissing(scattered).length === 0) {
+    return '分散在正文里的同名文字被当成了一个字段块——这正是「出现过就算」的假绿形状'
+  }
+
+  // 反面：一条都没有时，四项全报，不许说齐了。
+  if (reviewBlockMissing('## 独立审查\n\n什么都没写\n').length !== 4) return '一条都没有时应当四项全缺'
+  return true
+}])
+
+cases.push(['验收标准编号：可勾选那一行必须是 C 加数字', async () => {
+  const { acceptanceIdMissing } = await loadPreflight()
+  if (acceptanceIdMissing('- [ ] C1: 能跑通')) return '`C1` 这种形状被误判成缺编号'
+  if (acceptanceIdMissing('- [ ] C12: 也是合法编号')) return '两位数字被误判'
+  if (acceptanceIdMissing('- [x] C3: 勾掉的也算')) return '已勾选的那一行被误判'
+
+  // 正面：三种常见的「看起来像编号」都不是判据认的形状。
+  for (const bad of ['- [ ] 1. 能跑通', '- [ ] 第一条能跑通', '- [ ] (C) 能跑通']) {
+    if (!acceptanceIdMissing(bad)) return `${bad} 这种写法被当成了合法编号`
+  }
+
+  // 反面：**别处的举例不算数。** 填写指引里本来就举了个 `C1` 的例子；按「文里出现过」判
+  // 的话，清单被改成 `1.` 也照样绿——判据被那句举例削成了恒真。
+  const withExample = [
+    '<!-- 写法：一条一行，id 用 `C1`、`C2` 这样的短标识 -->',
+    '',
+    '- [ ] 1. 清单本身已经改成序号了',
+  ].join('\n')
+  if (!acceptanceIdMissing(withExample)) return '指引里的举例把判据撑成了恒真'
+  return true
+}])
+
+cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要报', async () => {
+  const { finishStepsState } = await loadPreflight()
+  const line = (n) => `  ${n}. `
+  const body = [
+    line(1) + '合并 PR（**不勾选自动删分支**）；',
+    line(2) + '回读确认 `state=MERGED`；',
+    line(3) + '更新工作记录与 Issue；',
+    line(4) + '`git switch main && git pull`；',
+    line(5) + '`git worktree remove <路径>`；',
+    line(6) + '`git branch -d <分支>`；',
+    line(7) + '`git push origin --delete <分支>`。',
+  ]
+  const wrap = (steps) => ['## 日常协作', '', '- **第四步：合并收尾与平台交互防乱码**——固定 7 步：', ...steps, '', '- **日常到此为止**'].join('\n')
+
+  const good = finishStepsState(wrap(body))
+  if (good.missing.length !== 0) return `七步齐全却报缺：${good.missing.map(String).join('、')}`
+  if (good.outOfOrder) return '七步按顺序写却报顺序错'
+
+  // 正面一：缺一步。
+  const missingOne = finishStepsState(wrap(body.filter((s) => !s.includes('worktree remove'))))
+  if (missingOne.missing.length !== 1) return `删掉 worktree remove 后应报缺 1 步，实际 ${missingOne.missing.length}`
+
+  // 正面二：worktree remove 与 branch -d 对调——这是真实会犯的错，报错还会说「未合并」。
+  const swapped = [...body]
+  const i5 = swapped.findIndex((s) => s.includes('worktree remove'))
+  const i6 = swapped.findIndex((s) => s.includes('git branch -d'))
+  ;[swapped[i5], swapped[i6]] = [swapped[i6], swapped[i5]]
+  const bad = finishStepsState(wrap(swapped))
+  if (bad.missing.length !== 0) return '对调两步不应报缺'
+  if (!bad.outOfOrder) return 'worktree remove 与 branch -d 对调没有被判成顺序错'
+
+  // 反面：整份文档里别处提到某一步，不算数——判据只看那一段的行范围。
+  const noise = ['七步之外的正文里提到 git worktree remove 与 git branch -d。', '', wrap(body.slice(0, 2))].join('\n')
+  const partial = finishStepsState(noise)
+  if (partial.missing.length !== 5) return `正文里的提及被算成了步骤（应缺 5 步，实际 ${partial.missing.length}）`
+  return true
+}])
+
+cases.push(['收尾清单没有锚点时报「七步全缺」，不是静默通过', async () => {
+  const { finishStepsState } = await loadPreflight()
+  // 一条判据在锚点找不到时静默返回「没问题」，等于它被削成了恒真。
+  const state = finishStepsState('## 别的节\n\n- 什么也没有\n')
+  if (state.missing.length !== 7) return `没有锚点时应报缺 7 步，实际 ${state.missing.length}`
+  return true
+}])
+
+cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真实存在', async () => {
+  // 判据改了文档结构之后，`ref` 指路会变成死指针——而它不会报错，只会让人点进去找不到那一节。
+  // 这条断言读的是**真实文件**，不是夹具：指路的目标本来就在这个仓库里。
+  const text = readFileSync(join(SKILL_ROOT, 'scripts', 'review.mjs'), 'utf8')
+  const pairs = [...text.matchAll(/ref:\s*\{\s*file:\s*'(references\/[^']+)',\s*section:\s*'([^']+)'/g)]
+  if (pairs.length === 0) return '没有从 review.mjs 里读出任何 ref 指路'
+  for (const [, file, section] of pairs) {
+    const target = join(SKILL_ROOT, file)
+    if (!existsSync(target)) return `指路指向不存在的文件：${file}`
+    // 小节名里的反引号与全角标点在标题里是原样的，只去掉包裹用的反引号。
+    const wanted = section.replace(/`/g, '')
+    const have = readFileSync(target, 'utf8').replace(/`/g, '')
+    if (!have.includes(wanted)) return `${file} 里找不到小节「${section}」——指路是死的，点进去什么也没有`
+  }
+  return true
+}])
+
+// ── 契约回查与锚点：两条新判据各自的正面与反面 ──────────────────────────
+
+cases.push(['契约回查：分支名变了要报，路径没了要报', async () => {
+  const { verifyClaims, claimsOf } = await import('../lib/claims.mjs')
+  const text = [
+    '从 `main` 拉分支。',
+    '',
+    '```sh',
+    'git switch main',
+    'node scripts/example.mjs',
+    '```',
+  ].join('\n')
+
+  const claims = claimsOf(text)
+  if (!claims.branches.includes('main')) return `没抽出分支名：${JSON.stringify(claims.branches)}`
+  if (!claims.paths.includes('scripts/example.mjs')) return `没抽出路径：${JSON.stringify(claims.paths)}`
+
+  // 正面：分支名对得上、路径都在 → 全绿
+  const ok = verifyClaims(text, { conventions: { defaultBranch: 'main' } }, () => true)
+  if (ok.some((r) => !r.ok)) return `正面用例被误报：${JSON.stringify(ok)}`
+
+  // 反面一：默认分支改名了 → 必须报，而且要说清是哪一条
+  const stale = verifyClaims(text, { conventions: { defaultBranch: 'trunk' } }, () => true)
+  const branchHit = stale.find((r) => r.id === 'claim.branch')
+  if (!branchHit || branchHit.ok) return '分支改名了却没报——契约里的分支名会指到不存在的地方'
+
+  // 反面二：点名的路径被删了 → 必须报
+  const gone = verifyClaims(text, { conventions: { defaultBranch: 'main' } }, () => false)
+  const pathHit = gone.find((r) => r.id === 'claim.path')
+  if (!pathHit || pathHit.ok) return '路径没了却没报——照着契约做的人会找不到文件'
+  return true
+}])
+
+cases.push(['契约回查：没有承诺可查时不出结论，不伪造一条「通过」', async () => {
+  const { verifyClaims } = await import('../lib/claims.mjs')
+  // 一条恒真的判据看起来在工作，实际什么都没验——这类检查最容易这样退化。
+  const empty = verifyClaims('没有任何路径与分支名的纯文字。', { conventions: { defaultBranch: 'main' } }, () => true)
+  if (empty.length !== 0) return `没有承诺时不该出结论，实际出了 ${empty.length} 条`
+  return true
+}])
+
+cases.push(['契约回查：正文里的「像路径的词」不算承诺，只有反引号与代码块里的才算', async () => {
+  const { claimsOf } = await import('../lib/claims.mjs')
+  // 假阳性一多，这条判据就会被关掉——而它一关，真正该报的那些也跟着没了。
+  const prose = '文档里常常随口提到 scripts/whatever.mjs 这样的例子，那是叙述，不是承诺。'
+  const claims = claimsOf(prose)
+  if (claims.paths.length !== 0) return `散文里的词被当成了承诺：${JSON.stringify(claims.paths)}`
+  return true
+}])
+
+cases.push(['锚点：前缀能命中，重名要报，落空要报', async () => {
+  const { matchHeadings } = await loadPreflight()
+  const headings = new Set(['七、审查循环：怎么才会停', '七、审查循环的补充', '八、谁能合：按「收不收得回来」分档'])
+
+  // 正面：只写「七、审查循环」能同时命中两个 → 报重名（这正是要的：逼指路写得更具体）
+  const ambiguous = matchHeadings(headings, '七、审查循环')
+  if (ambiguous.length !== 2) return `同前缀两节应报 2 个命中，实际 ${ambiguous.length}`
+
+  // 正面：写全了一个 → 唯一命中
+  const exact = matchHeadings(headings, '七、审查循环：怎么才会停')
+  if (exact.length !== 1) return `写全了应唯一命中，实际 ${exact.length}`
+
+  // 正面：标题里带反引号也能比
+  if (matchHeadings(new Set(['三、`AGENTS.md`']), '三、AGENTS.md').length !== 1) return '反引号差异没被抹平'
+
+  // 反面：完全不存在的节 → 0 个命中
+  if (matchHeadings(headings, '九、根本没有这一节').length !== 0) return '不存在的节被命中了'
+  return true
+}])
+
+cases.push(['缺口覆盖：没登记处置的缺口要报，悬空映射要报', async () => {
+  const { coverageOf } = await import('./gap-coverage.mjs')
+  const known = new Set(['git.absent'])
+
+  // 正面：每一条都选了一档且映射真实存在
+  const good = coverageOf([
+    { id: 'a', review: 'git.absent' },
+    { id: 'b', decision: 'some-key' },
+    { id: 'c', surveyOnly: '只有勘察能判' },
+  ], known, ['a', 'b', 'c'])
+  if (good.ok.length !== 3 || good.unclaimed.length !== 0 || good.dangling.length !== 0) {
+    return `正面用例被误报：${JSON.stringify(good)}`
+  }
+
+  // 反面一：三档都没选 → 必须报「没人接」
+  const unclaimed = coverageOf([{ id: 'x' }], known, ['x'])
+  if (unclaimed.unclaimed.length !== 1) return '没登记处置的缺口没有被报出来'
+
+  // 反面二：映射写了个不存在的 id → 必须报悬空
+  const dangling = coverageOf([{ id: 'y', review: 'git.typo' }], known, ['y'])
+  if (dangling.dangling.length !== 1) return '映射指向不存在的结论时没有报出来——它看起来配好了，实际永远不触发'
+
+  // 反面三：同时写两档 → 必须报重复
+  const dup = coverageOf([{ id: 'z', review: 'git.absent', decision: 'k' }], known, ['z'])
+  if (dup.duplicated.length !== 1) return '一条缺口写了两档时没有报出来——同一件事会有两个结论'
+
+  // 反面四：**一条都没读出来** → 必须报「读不出来」，不能静默通过。
+  // 这是这套检查最容易退化的形状：词法切块一失灵，读出来就是空数组，
+  // 而空数组让前面三条全过——「0 条各有处置，退出码 0」，看起来比 17 条还干净。
+  const empty = coverageOf([], known, ['git.absent'])
+  if (empty.missing.length !== 1) return '一条都没读出来时没有报「读不出来」——判据被削成恒真了'
+  if (empty.ok.length !== 0) return `空输入不该产出「通过」条目，实际 ${empty.ok.length} 条`
+
+  // 反面五：源码里有、登记名单里没有 → 必须报
+  const unknown = coverageOf([{ id: 'w', review: 'git.absent' }], known, ['git.absent'])
+  if (unknown.unknown.length !== 1) return '源码里有却没登记的缺口没有被报出来'
+  return true
+}])
+
+cases.push(['本仓库：勘察的每条缺口在体检里都有人接，且映射不悬空', async () => {
+  const { checkGapCoverage } = await import('./gap-coverage.mjs')
+  // 读真实源码，不是夹具：这条判据防的正是「这个仓库自己漏了一条」。
+  const state = await checkGapCoverage(SKILL_ROOT)
+  if (state.unclaimed.length > 0) return `没人接的缺口：${state.unclaimed.join('、')}`
+  if (state.dangling.length > 0) return `悬空映射：${state.dangling.join('、')}`
+  if (state.duplicated.length > 0) return `重复处置：${state.duplicated.join('、')}`
+  // 读出来 0 条时，前三条全是空数组——这个检查会静默通过。这正是「恒真」的形状。
+  if (state.missing.length > 0) return `读不出来的缺口：${state.missing.join('、')}`
+  if (state.unknown.length > 0) return `源码里有却没登记的缺口：${state.unknown.join('、')}`
+  return true
+}])
+
+cases.push(['本仓库：正文里没有节号指针', async () => {
+  // 节号会随重排失效——一次插入就让十几处指路同时指错，而它们不会报错。
+  const files = ['SKILL.md', 'AGENTS.md', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'RELEASING.md',
+    ...readDirRefs(join(SKILL_ROOT, 'references')), ...readDirRefs(join(SKILL_ROOT, 'templates'))]
+  const hit = []
+  for (const name of files) {
+    const full = join(SKILL_ROOT, name)
+    if (!existsSync(full)) continue
+    const lines = readFileSync(full, 'utf8').replace(/\r\n/g, '\n').split('\n')
+    for (const [i, line] of lines.entries()) {
+      if (/第[一二三四五六七八九十]+节/.test(line)) hit.push(`${name}:${i + 1}`)
+    }
+  }
+  if (hit.length > 0) return `这些地方还在用节号指针：${hit.slice(0, 5).join('、')}`
+  return true
 }])
 
 for (const [name, fn] of cases) {

@@ -31,6 +31,10 @@ desktop.ini
 coverage/
 .cache/
 
+# 并行开发与独立审查用的 worktree：它检出的是同一条历史，不该进版本库。
+# 建之前必须确认这条规则在，否则 `.worktrees/` 会被当成待提交的新文件。
+.worktrees/
+
 # 用户包核对的中间清单：`git archive ... | tar -t > package-list.txt` 的产物。
 # 必须忽略，否则这个未跟踪文件会落进自检的检查域，让「本地跑一遍等于 CI 过」失效。
 package-list.txt

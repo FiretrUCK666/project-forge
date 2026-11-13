@@ -37,6 +37,8 @@ import {
   conditionMarkers, isRepoOnlyPath, templateVarsOf,
 } from '../lib/protocol.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
+import { isMainModule } from '../lib/text.mjs'
+import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -48,6 +50,24 @@ const note = (msg) => notes.push(msg)
 
 function rel(p) {
   return relative(ROOT, p).split('\\').join('/')
+}
+
+/**
+ * 这个目录是不是 `git worktree add` 建出来的检出。
+ *
+ * 判据是**结构事实**：worktree 里的 `.git` 是一个文件（内容是一行 `gitdir: <路径>`），
+ * 普通仓库里它是一个目录。不看目录叫什么——名字是给人看的，结构才是事实。
+ *
+ * 这个判断只服务于「哪些判据在临时检出里不适用」：目录名与 `name` 一致、安装位置这些
+ * 概念只对真正的安装副本成立。把临时检出判成缺陷，等于让每个审查者先撞一次假故障。
+ */
+function isWorktreeCheckout(dir) {
+  const dotGit = join(dir, '.git')
+  try {
+    return statSync(dotGit).isFile()
+  } catch {
+    return false
+  }
 }
 
 function readText(p) {
@@ -125,8 +145,21 @@ function checkEntry() {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
       fail(`frontmatter 的 name「${name}」不合法：只能小写字母、数字、连字符`)
     }
+    // **在 worktree 里这一条不成立，且不是缺陷。**
+    //
+    // 宿主按目录名发现能力目录，所以安装位置里 `name` 必须等于目录名。而审查位是
+    // `.worktrees/review-<短SHA>/`——那是**临时检出**，目录名是给隔离用的，不是安装位置。
+    // 在这一条上判红，会让审查者花一轮排查一个假故障；而假装它通过，又等于把判据悄悄关掉。
+    //
+    // 所以：认得出是 worktree 时**换一种说法**（note，说明它在这里不适用），认不出时照旧判红。
+    // 判据用结构事实（`.git` 是文件而不是目录，即被 `git worktree add` 建出来的），不看目录叫什么。
     if (name !== basename(ROOT)) {
-      fail(`frontmatter 的 name「${name}」与目录名「${basename(ROOT)}」不一致——宿主按目录名发现它`)
+      if (isWorktreeCheckout(ROOT)) {
+        note(`入口：name「${name}」与目录名「${basename(ROOT)}」不同——这是 worktree 检出，`
+          + '目录名是隔离用的临时名字，不是安装位置，这一条在这里不适用')
+      } else {
+        fail(`frontmatter 的 name「${name}」与目录名「${basename(ROOT)}」不一致——宿主按目录名发现它`)
+      }
     }
   }
   if (!desc || desc.length < 20) fail('frontmatter 缺 description，或它太短（宿主靠它决定要不要加载）')
@@ -249,9 +282,19 @@ const PUSH_TIER_RULE = [
     any: [/推(?:自己|出)?的?分支|推分支/, /push(?:ing)? (?:your|the) (?:own )?branch|push-a-branch/],
   },
   {
-    // 说法：合并才是那一档要人点头的动作。
-    what: '合并要人点头',
-    any: [/合并[^\n]{0,12}(?:交人|人合并|人工|等(?:人|你)|点头)|人工合并|交人/, /merg\w*[^\n]{0,24}(?:by a person|left to a person|person merges|wait for you)/i],
+    // 说法：合并由审查者做完，不再往人手里递一道。
+    what: '审查通过就由审查者合',
+    any: [/审查者(?:直接)?(?:合|合并)|审查通过[^\n]{0,20}(?:合|闭环)|由(?:那个)?审查/,
+      /reviewer merges|merges? (?:it )?(?:directly|right away)|the reviewer finishes/i],
+    // 提案模板也要讲这一条：作者读到的就是它。但前两条（撤回性、推分支属日常）是给
+    // 实现者看的流程说明，塞进模板只会让填表的人多读一段与填表无关的话。
+    everywhere: true,
+  },
+  {
+    // 说法：唯一必须人点头的一类是弱化门禁。
+    what: '弱化门禁必须人点头',
+    any: [/弱化门禁/, /weaken\w* (?:a )?gate|loosen\w* (?:a )?gate|relax\w* (?:the )?gate/i],
+    everywhere: true,
   },
 ]
 
@@ -268,6 +311,20 @@ const PUSH_TIER_DOCS = [
 ]
 
 /**
+ * 只讲「谁能合」的那几份。
+ *
+ * 两份提案模板会落进用户项目，作者读到的就是它们——所以 `everywhere: true` 那两条必须
+ * 也在里面。但「能不能撤回」「推分支属日常」是实现流程，不是填表要读的东西，只在上面那批。
+ *
+ * 少列它们的后果是实测过的：模板里还写着被废弃的旧口径（高风险与人合、外部 PR 人合），
+ * 而上面八份文件全都对——**冲突发生在清单之外，没有门禁看得到**。
+ */
+const MERGE_AUTHORITY_DOCS = [
+  'templates/pull-request-template.md',
+  '.github/pull_request_template.md',
+]
+
+/**
  * 旧口径：把「提交 + 推送」写成日常的终点。
  *
  * 它不是错字，是一个**已经过时的结论**：那句话成立的前提是「推送撤不回来」，
@@ -276,22 +333,30 @@ const PUSH_TIER_DOCS = [
 const STALE_DAILY_END = /提交\s*[+＋]\s*推送/
 
 function checkPushSemantics() {
-  for (const name of PUSH_TIER_DOCS) {
-    const p = join(ROOT, name)
-    if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
-    const text = readText(p)
-    for (const rule of PUSH_TIER_RULE) {
-      if (!rule.any.some((re) => re.test(text))) {
-        fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
+  const groups = [
+    { docs: PUSH_TIER_DOCS, label: '日常流程' },
+    { docs: MERGE_AUTHORITY_DOCS, label: '提单模板' },
+  ]
+  for (const group of groups) {
+    for (const name of group.docs) {
+      const p = join(ROOT, name)
+      if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
+      const text = readText(p)
+      for (const rule of PUSH_TIER_RULE) {
+        if (group.label === '提单模板' && rule.everywhere !== true) continue
+        if (!rule.any.some((re) => re.test(text))) {
+          fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
+        }
+      }
+      const stale = STALE_DAILY_END.exec(text)
+      if (stale) {
+        const line = text.slice(0, stale.index).split('\n').length
+        fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
       }
     }
-    const stale = STALE_DAILY_END.exec(text)
-    if (stale) {
-      const line = text.slice(0, stale.index).split('\n').length
-      fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
-    }
   }
-  note(`推送分档：${PUSH_TIER_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，合并要人点头）`)
+  const total = PUSH_TIER_DOCS.length + MERGE_AUTHORITY_DOCS.length
+  note(`推送分档：${total} 份文件说法一致（分档看可撤回性，推分支属日常，审查通过由审查者合，只有弱化门禁要人点头）`)
 }
 
 /**
@@ -316,8 +381,187 @@ const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 
 /** 历史记录是**当时的事实**，不改写它。它们记的是那一次改动的现场，不是现行约定。 */
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
 
+/**
+ * 审查栏的四个字段名。**这是唯一一份**——模板、本仓库实例、判据三处都从这里取。
+ *
+ * 为什么它必须是一份常量：这四个词同时要出现在「发给用户的 PR 模板」「本仓库自己的 PR 模板」
+ * 「`references/collaboration.md` 的『七、审查循环』」三处。三处各写一遍，改一处就会有两处说旧话，
+ * 而症状是「填了审查栏，但没人按它判」——没有任何东西会因此报错。
+ *
+ * 字段名本身就是判据：它们分别对应「谁审的」「判了哪几条」「测试是不是空的」「循环有没有停」。
+ * 少一个，那一项就没人填；改一个名字，审查报告与模板就对不上。
+ */
+const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']
+
+/**
+ * 验收标准的编号形状。**这是一条规则，不是一个快照**：可勾选的一行，编号是 `C` 加数字。
+ *
+ * 「编号长什么样」看起来像格式洁癖，实际是**审查栏能不能对上标准**的前提：审查写的是
+ * `fail: C4`，标准那一节写成 `1.` 或 `-`，两处就永远对不起来，而人只会以为「审查漏看了 C4」。
+ *
+ * 判据盯的是**可勾选那一行**，不是「文里出现过 C1」：`work-item.md` 的填写指引里本来就
+ * 举了个 `C1` 的例子，按「出现过」判的话，清单被改成 `1.` 也照样绿——判据就被那句举例
+ * 削成了恒真。
+ */
+const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
+const ACCEPTANCE_ID_SITES = ['templates/work-item.md']
+
+/**
+ * 审查栏那四行必须**排在一起形成一块**，不是「文件里出现过这四个词」。
+ *
+ * 按「出现过」判会让两个字段完全失守：`references/collaboration.md` 讲那两个字段的正文里本来就有
+ * 这些词，于是把字段块里的某一行改名或整行删掉，判据照样绿——它验的是「这个词在这份文件里
+ * 存在」，而要求是「三处列出同一批字段名」。两个字之差，两个字段就完全没人看守。
+ *
+ * 块的定义：**空行分隔的一个连续段落**。四行列表、四行围栏代码块里的内容，都是块；
+ * 一处出现在段首、另一处出现在三段之后，不算。
+ */
+export function reviewBlockMissing(text) {
+  const blocks = String(text ?? '').replace(/\r\n/g, '\n').split(/\n\s*\n/)
+  const complete = blocks.some((block) => REVIEW_FIELDS.every((field) => block.includes(field)))
+  return complete ? [] : REVIEW_FIELDS
+}
+
+/** 这份文本里的验收标准编号是不是 `C<数字>` 的形状。缺了返回 true。**纯函数**。 */
+export function acceptanceIdMissing(text) {
+  return !ACCEPTANCE_ID_RE.test(String(text ?? ''))
+}
+
+/**
+ * 收尾清单的步骤。**数字与顺序都是判据**：`worktree remove` 在 `branch -d` 之前，
+ * 因为分支还被某个 worktree 检出着时 `git branch -d` 一定失败，而它报的原因是「未合并」。
+ * 顺序反了，人就会去用 `-D` 强删，而那会把没合进去的东西一起删掉。
+ *
+ * ## 锚点是「合并收尾」四个字，不是「第几步：合并收尾」
+ *
+ * 章节编号会随文档增删而变，绑在编号上的锚点一重排就找不到——找不到时的表现是
+ * 「七步全缺」，一条**永远为真**的判据，比没有更坏。这里只认那句话本身。
+ */
+const FINISH_ANCHOR = /合并收尾/
+const FINISH_STEPS = [
+  /合并 PR/,
+  /回读确认/,
+  /更新工作记录与 Issue/,
+  /git switch/,
+  /git worktree remove/,
+  /git branch -d/,
+  /git push origin --delete/,
+]
+
+const FINISH_SITES = ['templates/agents-project.md', 'AGENTS.md']
+
+/**
+ * 找出收尾清单的行范围，返回 `{ start, end }`；没有那一段返回 `undefined`。
+ *
+ * 锚在**那一行**而不是某个标题：收尾清单本来就不是独立一节，它是第四步的正文。
+ * 按标题锚会找不到，于是判据永远报「缺七步」——一条永远为真的判据比没有更坏。
+ *
+ * 结束位置是下一个同级条目或标题（`- **` 开头的新条目、任何 `#` 标题、或受管区间标记）。
+ * 判据按结构写，不写死行号：清单上下挪几行、多写一段说明，范围跟着走。
+ */
+export function finishSectionRange(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const start = lines.findIndex((line) => FINISH_ANCHOR.test(line))
+  if (start === -1) return undefined
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#+\s+/.test(lines[i]) || /^- \*\*/.test(lines[i]) || /^<!--\s*project-forge:/.test(lines[i])) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/**
+ * 收尾七步在这一节里是否齐、是否按顺序。
+ *
+ * 返回 `{ missing, outOfOrder }`：`missing` 是缺掉的步骤正则，`outOfOrder` 指示顺序。
+ * **纯函数**，供门禁与行为断言共用——断言要调判据本体，不要复刻一份循环：
+ * 复刻的那份不会因为判据被削弱而变红，于是「判据坏了」这件事没有任何东西看着。
+ */
+export function finishStepsState(text) {
+  const range = finishSectionRange(text)
+  if (range === undefined) return { missing: FINISH_STEPS, outOfOrder: false }
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const section = lines.slice(range.start, range.end)
+  const positions = FINISH_STEPS.map((re) => {
+    const index = section.findIndex((line) => re.test(line))
+    return index
+  })
+  const missing = FINISH_STEPS.filter((_, i) => positions[i] === -1)
+  let outOfOrder = false
+  for (let i = 1; i < positions.length; i += 1) {
+    if (positions[i] === -1 || positions[i - 1] === -1) continue
+    if (positions[i] < positions[i - 1]) { outOfOrder = true; break }
+  }
+  return { missing, outOfOrder }
+}
+
 function headingsOf(text) {
   return (text.replace(/\r\n/g, '\n').match(/^##\s+.+$/gm) ?? []).map((s) => s.trim())
+}
+
+/**
+ * 跨文件对拍：同一件事在三处的说法必须逐字一致。
+ *
+ * 这一类漂移现在没有任何东西看着：模板、实例、判据是三个人分别维护的，而它们要求的是同一批词。
+ * 不一致时的表现不是报错，是「按模板填了，判据不认」或者反过来。
+ *
+ * ## 判的是「四行排在一起」，不是「四个词出现在这份文件里」
+ *
+ * 后者看起来一样，实际差两个字：`references/collaboration.md` 讲这两个字段的正文里本来
+ * 就带着这些词，于是字段块里删掉两行，判据照样绿。改成「某一段里四个都在」之后，删一行
+ * 那一块就不完整，红。
+ */
+function checkReviewContract() {
+  const sites = [
+    'templates/pull-request-template.md',
+    '.github/pull_request_template.md',
+    'references/collaboration.md',
+  ]
+  for (const site of sites) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`审查栏对拍：缺 ${site}`); continue }
+    const missing = reviewBlockMissing(readText(path))
+    if (missing.length === REVIEW_FIELDS.length) {
+      fail(`${site} 里没有一块同时排着审查栏的这四个字段——模板、实例、判据三处必须是同一批词，`
+        + `否则填了也没人按它判。字段表在 scripts/dev/preflight.mjs 的 REVIEW_FIELDS`)
+    } else if (missing.length > 0 && missing.length < REVIEW_FIELDS.length) {
+      fail(`${site} 的审查栏字段块不完整，缺「${missing.join('、')}」——`
+        + '四个字段要排在同一段里；分散在正文各处的同名文字不算')
+    }
+  }
+  note(`审查栏对拍：${REVIEW_FIELDS.length} 个字段在三处各排成一块`)
+
+  // 验收标准的编号形状：审查写 `fail: C4`，标准那节写成 `1.` 就对不上。
+  //
+  // **逐处各判一次，不是「有一处有就算过」。** 判据是「每一处都能对上编号」；把两处合成
+  // 一次判定的话，其中一处被改坏时另一处还在，整条判据就永远绿——那正是它要防的形状。
+  for (const site of ACCEPTANCE_ID_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`验收标准编号：缺 ${site}`); continue }
+    if (acceptanceIdMissing(readText(path))) {
+      fail(`${site} 里没有 \`C1\`/\`C2\` 形状的验收标准编号——审查栏写的是 \`fail: C4\`，`
+        + '编号形状一变，两处就永远对不起来，而人只会以为审查漏看了那一条')
+    }
+  }
+  note(`验收标准编号：${ACCEPTANCE_ID_SITES.length} 处都是 \`C<数字>\` 形状`)
+
+  // 收尾步骤：两边都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
+  // 顺序不能：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」上卡住。
+  for (const site of FINISH_SITES) {
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
+    const state = finishStepsState(readText(path))
+    if (state.missing.length > 0) {
+      fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
+    } else if (state.outOfOrder) {
+      fail(`${site} 的合并收尾步骤顺序不对——顺序是判据不是排版，`
+        + 'worktree 没卸就删分支会失败，而报错说的是「未合并」')
+    }
+  }
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在模板与实例里顺序一致`)
 }
 
 function checkOwnInstances() {
@@ -528,11 +772,157 @@ function checkLinks() {
 }
 
 /**
- * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在那份文件真实存在的
- * `##` 标题上。
+ * 全仓库不许出现节号指针，并且每一处「指路」都真的落在目标文件的二级标题上。
  *
- * 这一条治的是一个实际发生过的错：指路写「第四节：许可协议」，而那一节实际是 README。
+ * ## 两条判据，治的是同一件事：指针绑在会动的东西上
+ *
+ * **节号会随重排失效，标题不会。** 一份文档插进一节，后面全部节号加一——十几处指路同时
+ * 指错，而它们不会报错，只会让人点进去发现「这一节讲的是别的事」。所以节号一律不许出现，
+ * 指路只写标题，并由这里核对标题真的在。
+ *
+ * 光禁节号不够：改成标题之后，标题也可能被改名。两种错法的表现一样（指路落空），
+ * 所以放在同一个检查里，一次说清。
+ */
+function checkAnchors() {
+  // 一、不许有「第 N 节」。
+  //
+  // ## 扫的是「会被读者照着做的地方」，不是一份挑出来的文件名单
+  //
+  // 判据是**这一处文字会不会被谁读到并照它跳转**。`scripts/` 下的注释也算：维护者看着
+  // 注释去找某一节，找错了就把另一节改错。早先只扫文档，于是同一个仓库里同时存在
+  // 两种口径——门禁报「全仓库没有节号指针」，而它只数了自己认识的那几份。
+  //
+  // 扫的范围因此是**整个版本库**，减去两类**历史记录**（它们记的是当时的事实，不改写）。
+  // `walk` 自己跳过 `.git` 与 `node_modules`，所以不必在这里再滤一遍。
+  const scanned = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml)$/i.test(f))
+  const SECTION_PTR = /第[一二三四五六七八九十]+节/
+  let sectionHits = 0
+  let scannedFiles = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    scannedFiles += 1
+    const lines = readText(file).replace(/\r\n/g, '\n').split('\n')
+    for (const [i, line] of lines.entries()) {
+      if (!SECTION_PTR.test(line)) continue
+      sectionHits += 1
+      fail(`${name} 第 ${i + 1} 行用了节号指针——重排一次就全部指错，而它不会报错；改写成「标题名」`)
+    }
+  }
+  if (sectionHits === 0) {
+    note(`指路形状：${scannedFiles} 份文件里没有节号指针，指路一律用标题名`)
+  }
+
+  // 二、每一处「反引号里的 references 文件 + 「标题」」都要解析到真实的二级标题。
+  const headingsCache = new Map()
+  const headingsOfFile = (file) => {
+    if (!headingsCache.has(file)) {
+      const full = join(ROOT, file)
+      headingsCache.set(file, existsSync(full)
+        ? new Set(readText(full).replace(/\r\n/g, '\n').split('\n')
+          .map((l) => /^##\s+(.+?)\s*$/.exec(l)?.[1]).filter(Boolean))
+        : null)
+    }
+    return headingsCache.get(file)
+  }
+
+  let checked = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    const text = readText(file).replace(/\r\n/g, '\n')
+    // 两种写法都认：带反引号的文件名 + 「标题」，以及同文件内的「N、标题」简写不算。
+    for (const m of text.matchAll(/`(references\/[A-Za-z0-9_.-]+\.md)`\s*的?\s*「([^」]+)」/g)) {
+      const [, refFile, section] = m
+      const have = headingsOfFile(refFile)
+      if (have === null) { fail(`${name} 指向不存在的文件 ${refFile}`); continue }
+      checked += 1
+      const hits = matchHeadings(have, section)
+      if (hits.length === 0) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，但那份文件里没有以它开头的二级标题——指路落空`)
+      } else if (hits.length > 1) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——`
+          + '指路要多写几个字让它唯一')
+      }
+    }
+  }
+  note(`指路核对：review.mjs 与正文共 ${checked} 处命名锚点都落在真实标题上`)
+}
+
+/**
+ * 勘察报的每条缺口，体检那边都必须有人接。
+ *
+ * 判据在 `scripts/dev/gap-coverage.mjs` 里（它是唯一实现，执行器与断言共用）。
+ * 这一条治的是「勘察说了、没人管」：加了一条新缺口却忘了接线，报告里会永远挂着一条
+ * 悬空结论，而没有任何东西报错。
+ *
+ * ## 五类都要报，包括「一条都没读出来」
+ *
+ * 只报 `unclaimed` / `dangling` / `duplicated` 三类是不够的：词法切块失灵时读出来是空数组，
+ * 那三类全空，检查静默通过——「0 条各有处置」。`missing`（登记了却没读出来）与
+ * `unknown`（读出来了却没登记）才守得住这一层。
+ */
+async function checkGapCoverage() {
+  // **崩了也要变成一行 FAIL。**
+  //
+  // `gap-coverage.mjs` 里有一条「登记的 id 名单必填、不给就抛错」的判断。它抛出来时，
+  // 如果没人接，preflight 会带着几十行调用栈退出——而调用栈不叫「失败」，它叫
+  // 「不知道算不算失败」：按 `FAIL` 开头的行判红的那些地方，一行都匹配不上，于是
+  // 一次正确的崩溃会被记成「判据被拆掉却没人报」，把失守误读成失守的反面。
+  //
+  // 崩溃是一种失败，而且是最该被看见的那种：它意味着这一整条判据没跑。
+  let state
+  try {
+    state = await gapCoverage(ROOT)
+  } catch (error) {
+    fail(`缺口覆盖：这条判据没跑成——${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+  for (const one of state.duplicated) {
+    fail(`缺口覆盖：${one}——一条缺口只能落一档，写两档会让结论出现两个版本`)
+  }
+  for (const one of state.dangling) {
+    fail(`缺口覆盖：${one} 在体检里没有这个 id——映射看着配好，实际指向一条永远不会出现的结论`)
+  }
+  for (const id of state.unknown) {
+    fail(`缺口覆盖：${id} 出现在源码里却不在登记名单里——源码与导出名单对不上`)
+  }
+  for (const id of state.missing) {
+    fail(`缺口覆盖：${id} 登记了却没能从源码里读出来——词法切块失灵，这一条从此没人查`)
+  }
+  for (const id of state.unclaimed) {
+    fail(`缺口覆盖：${id} 体检那边没人接——勘察报了、没人管；给 survey.mjs 那条规则补 `
+      + "review / decision / surveyOnly 三选一")
+  }
+  if (state.ok.length > 0) note(`缺口覆盖：${state.ok.length} 条各有处置（体检 / 表态 / 仅勘察）`)
+}
+
+/**
+ * 一处指路能不能落在那份文件的某个二级标题上。**纯函数**，两处调用者共用。
+ *
+ * ## 前缀匹配，不是逐字相同
+ *
+ * 指路可以只写「七、审查循环」，不必抄全那个长标题。要求逐字相同会把标题锁死——改一个
+ * 副标题就红，最后一定会被加一个例外表绕过去。
+ *
+ * 前缀够用是因为**唯一性由下面那条判据保证**：两节同前缀时返回多个命中，调用方报红。
+ * 于是「写得短」与「指得准」两件事同时成立，而代价只是多写几个字。
+ */
+export function matchHeadings(headings, section) {
+  const wanted = String(section).replace(/`/g, '')
+  return [...headings].filter((h) => h.replace(/`/g, '').startsWith(wanted))
+}
+
+/**
+ * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在真实存在的二级标题上。
+ *
+ * 这一条治的是一个实际发生过的错：指路写「许可协议那一节」，而那一节实际讲的是 README。
  * **节号会随增删章节失效，标题不会**——所以指路只写标题，这里核对标题存在。
+ *
+ * 比对规则与 `checkAnchors` 共用 `matchHeadings`：一处指路在两处判据下得到两个答案是
+ * 最坏的情况——修了一个还红着，而红的原因看起来像「指路写错了」。
  */
 function checkReferenceTargets() {
   const reviewPath = join(ROOT, 'scripts', 'review.mjs')
@@ -553,8 +943,11 @@ function checkReferenceTargets() {
       ))
     }
     checked += 1
-    if (!headingsCache.get(file).has(section)) {
-      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有这个二级标题——指路会落空`)
+    const hits = matchHeadings(headingsCache.get(file), section)
+    if (hits.length === 0) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有以它开头的二级标题——指路会落空`)
+    } else if (hits.length > 1) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——指路要多写几个字让它唯一`)
     }
   }
   note(`指路核对：${checked} 处都指在真实标题上`)
@@ -840,7 +1233,7 @@ function checkHygiene() {
 
 // ── 主流程 ──────────────────────────────────────────────────────────
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2)
   const pkgIndex = argv.indexOf('--package')
   if (pkgIndex >= 0) {
@@ -854,6 +1247,9 @@ function main() {
 
   checkEntry()
   checkLinks()
+  checkReferenceTargets()
+  checkAnchors()
+  await checkGapCoverage()
   checkScripts()
   checkTemplates()
   checkPlatformLock()
@@ -861,6 +1257,7 @@ function main() {
   checkPushSemantics()
   checkSingleSources()
   checkOwnInstances()
+  checkReviewContract()
   checkHelps()
   checkTemplateRender()
   checkRunsOnRealTarget()
@@ -988,4 +1385,8 @@ function isProductLayerPath(rel) {
   return /^(?:references|templates|scripts)\//.test(p)
 }
 
-process.exit(main())
+// **只有自己被运行时才跑主流程。** 行为断言要 import 上面的 `finishStepsState` 来验判据本体
+// （复刻一份循环的断言不会因为判据被削弱而变红），而 import 时不该顺手跑一遍全量自检。
+if (isMainModule(import.meta.url, process.argv[1])) {
+  Promise.resolve(main()).then((code) => process.exit(code))
+}

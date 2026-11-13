@@ -41,7 +41,7 @@ node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
 | 字段 | 用途与易错点 |
 | --- | --- |
-| `isRepoRoot` | 这个目录本身是不是仓库根。**为假必须停**，见第四节 |
+| `isRepoRoot` | 这个目录本身是不是仓库根。**为假必须停**，见「四、这几种形态要停下来」 |
 | `workTreeRoot` | 实际工作区根。`isRepoRoot` 为假时，用它说明「你在哪个仓库里」 |
 | `role` / `roleReason` | `maintainer` / `contributor-fork` / `undetermined`——决定能不能推主干、打标签。`undetermined` 按贡献者处置，不按维护者 |
 | `branch` / `upstream` / `ahead` / `behind` / `dirty` | 推送与回滚的判断依据。`dirty` 非 0 时先提交一个存档点再动 |

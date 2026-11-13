@@ -48,8 +48,21 @@ const INLINE_CODE = /`([^`\n]+)`/g
 /** 围栏代码块里的正文。 */
 const FENCE_BLOCK = /```[a-zA-Z]*\n([\s\S]*?)```/g
 
-/** `git switch <名>` / `git checkout <名>`。 */
-const BRANCH_CMD = /\bgit\s+(?:switch|checkout)\s+(?:-c\s+)?([A-Za-z0-9._/-]+)/g
+/**
+ * `git switch <名>` / `git checkout <名>`。
+ *
+ * ## 只认「切到哪条已有分支」，不认「新建一条分支」
+ *
+ * 契约里写 `git switch main` 是承诺「主干叫 main」——这条能被项目现状核对，改了就报。
+ * 而 `git checkout -b feat/x main` 是**流程说明**（从 main 起一条特性分支），不是承诺：
+ * `feat/x` 是这次要造出来的名字，本来就不该在项目里存在。把它也当承诺，每个文档化了
+ * 分支流程的项目都会收到一条「照它跑会切到一条不存在的分支」的假警报；假警报一多，
+ * 这条判据就会被关掉——它一关，真正该报的那些也跟着没了。
+ *
+ * 正则只收「紧跟一个普通分支名」的情形：`-c` / `-b` / `-C` / `--detach` 后面跟的都不是
+ * 已有分支，而 `-` 不是合法的分支首字符，所以它们天然匹配不上。
+ */
+const BRANCH_CMD = /\bgit\s+(?:switch|checkout)\s+([A-Za-z0-9][A-Za-z0-9._/-]*)/g
 
 /** 一个 token 看起来是不是本仓库里的相对路径。 */
 function looksLikeRepoPath(token) {

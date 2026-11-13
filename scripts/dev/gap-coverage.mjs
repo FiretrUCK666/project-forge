@@ -30,7 +30,7 @@
 
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -43,6 +43,16 @@ const ROOT = resolve(HERE, '..', '..')
  *
  * 这一层只做词法，不做语义——`id` / `review` / `decision` / `surveyOnly` 四个键各出现
  * 几次、配没配上对，由下面的 `coverageOf` 判。
+ *
+ * ## 切块不依赖缩进
+ *
+ * 早先按 `\n  {\n` 切（写死两空格缩进）。换一次格式化器、或者有人把那一节整体多缩两格，
+ * 切出来就是空数组——**语义一个字都没变，17 条缺口全部静默消失**，而退出码仍是 0。
+ * 那是一条被削成恒真的判据，比没有更坏。
+ *
+ * 现在按「每个 `id:` 之前的那一段」切：只要 `id:` 还在，缩进、空行、注释怎么排都不影响。
+ * 万一一条都读不出来，`coverageOf` 会把它当成「和导出的 id 名单对不上」报红——见那里的
+ * `expected` 比对。
  */
 export function gapDeclarations(source) {
   const text = String(source ?? '').replace(/\r\n/g, '\n')
@@ -56,11 +66,16 @@ export function gapDeclarations(source) {
   const stop = tail.slice('const GAP_RULES = ['.length).search(/\n(?:const|export|function) /)
   const body = stop === -1 ? tail : tail.slice(0, stop + 'const GAP_RULES = ['.length)
 
-  for (const chunk of body.split(/\n  \{\n/).slice(1)) {
-    const id = /\bid:\s*'([^']+)'/.exec(chunk)?.[1]
-    if (id === undefined) continue
+  // 每个规则以一行 `id: '...'` 起头；整张表就是这些行之间的片段。
+  const idLines = [...body.matchAll(/^\s*id:\s*'([^']+)'\s*,\s*$/gm)]
+  if (idLines.length === 0) return out
+
+  for (const [i, hit] of idLines.entries()) {
+    const from = hit.index
+    const to = i + 1 < idLines.length ? idLines[i + 1].index : body.length
+    const chunk = body.slice(from, to)
     out.push({
-      id,
+      id: hit[1],
       review: /\breview:\s*'([^']+)'/.exec(chunk)?.[1],
       decision: /\bdecision:\s*'([^']+)'/.exec(chunk)?.[1],
       surveyOnly: /\bsurveyOnly:\s*'([^']+)'/.exec(chunk)?.[1],
@@ -86,11 +101,21 @@ export function reviewIds(source) {
 /**
  * 每一条缺口落在哪一档。
  *
- * 返回 `{ ok, unclaimed, duplicated, dangling }`：
+ * 返回 `{ ok, unclaimed, duplicated, dangling, missing, unknown }`：
  * 三档都没选的是 `unclaimed`；选了不止一档的是 `duplicated`（两处都管，结论会变成两个）；
  * `review` 指向一个 `review.mjs` 里不存在的 id 的是 `dangling`（映射看着有，实际空指）。
+ *
+ * ## `expected` 是这个检查的第二道命
+ *
+ * 只判「读出来的那些都配好了」是不够的：读出来的可能是**零条**。词法切块一旦失灵
+ * （换格式化器、整体多缩两格），`declarations` 就成了空数组，而空数组让所有检查都通过
+ * ——「0 条各有处置，退出码 0」，看起来比 17 条还干净。
+ *
+ * 所以传入登记的 id 名单（`survey.mjs` 导出的 `GAP_RULE_IDS`）做双向比对：
+ * 读出来却没有名字的进 `unknown`，有名字却没读出来的进 `missing`。两边都必须为空。
+ * 「一条都没读出来」于是变成 17 条 `missing`，红。
  */
-export function coverageOf(declarations, knownReviewIds = null) {
+export function coverageOf(declarations, knownReviewIds = null, expected = null) {
   const ok = []
   const unclaimed = []
   const duplicated = []
@@ -104,18 +129,34 @@ export function coverageOf(declarations, knownReviewIds = null) {
       dangling.push(`${d.id} → ${d.review}`)
     }
   }
-  return { ok, unclaimed, duplicated, dangling }
+
+  let missing = []
+  let unknown = []
+  if (Array.isArray(expected)) {
+    const got = new Set(declarations.map((d) => d.id))
+    const want = new Set(expected)
+    missing = [...want].filter((id) => !got.has(id))
+    unknown = [...got].filter((id) => !want.has(id))
+  }
+
+  return { ok, unclaimed, duplicated, dangling, missing, unknown }
 }
 
 /** 读真实源码跑一遍。门禁与行为断言共用这一个入口。 */
-export function checkGapCoverage(root = ROOT) {
+export async function checkGapCoverage(root = ROOT) {
   const source = readFileSync(join(root, 'scripts', 'survey.mjs'), 'utf8')
   const reviewSource = readFileSync(join(root, 'scripts', 'review.mjs'), 'utf8')
-  return coverageOf(gapDeclarations(source), reviewIds(reviewSource))
+  // 登记的 id 名单从模块里取，不从源码里再解析一遍：两份解析器会给出两个答案，
+  // 而其中一个答案决定了这个检查本身是否在工作。
+  //
+  // Windows 上绝对路径不能直接 import，要先转成 file:// URL——否则报的是一条
+  // 与这里的判断毫无关系的加载错误，而它看起来像「检查坏了」。
+  const { GAP_RULE_IDS } = await import(pathToFileURL(join(root, 'scripts', 'survey.mjs')).href)
+  return coverageOf(gapDeclarations(source), reviewIds(reviewSource), GAP_RULE_IDS)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { ok, unclaimed, duplicated, dangling } = checkGapCoverage()
+  const { ok, unclaimed, duplicated, dangling, missing, unknown } = await checkGapCoverage()
   let bad = 0
   for (const one of duplicated) {
     process.stderr.write(`FAIL  ${one}——一条缺口只能落一档，写两档会让结论出现两个版本\n`)
@@ -123,6 +164,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   for (const one of dangling) {
     process.stderr.write(`FAIL  ${one}：体检那边没有这个 id——映射看着配好了，实际指向一条永远不会出现的结论\n`)
+    bad += 1
+  }
+  for (const id of unknown) {
+    process.stderr.write(`FAIL  ${id} 出现在源码里，却不在登记的 id 名单里——源码与导出名单对不上\n`)
+    bad += 1
+  }
+  for (const id of missing) {
+    process.stderr.write(`FAIL  ${id} 在登记的 id 名单里，却没能从源码里读出来——`
+      + '词法切块失灵了，这一条从此没人查（这正是「0 条各有处置却退出 0」的来源）\n')
     bad += 1
   }
   for (const id of unclaimed) {

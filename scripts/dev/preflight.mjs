@@ -52,6 +52,24 @@ function rel(p) {
   return relative(ROOT, p).split('\\').join('/')
 }
 
+/**
+ * 这个目录是不是 `git worktree add` 建出来的检出。
+ *
+ * 判据是**结构事实**：worktree 里的 `.git` 是一个文件（内容是一行 `gitdir: <路径>`），
+ * 普通仓库里它是一个目录。不看目录叫什么——名字是给人看的，结构才是事实。
+ *
+ * 这个判断只服务于「哪些判据在临时检出里不适用」：目录名与 `name` 一致、安装位置这些
+ * 概念只对真正的安装副本成立。把临时检出判成缺陷，等于让每个审查者先撞一次假故障。
+ */
+function isWorktreeCheckout(dir) {
+  const dotGit = join(dir, '.git')
+  try {
+    return statSync(dotGit).isFile()
+  } catch {
+    return false
+  }
+}
+
 function readText(p) {
   return readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
 }
@@ -127,8 +145,21 @@ function checkEntry() {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
       fail(`frontmatter 的 name「${name}」不合法：只能小写字母、数字、连字符`)
     }
+    // **在 worktree 里这一条不成立，且不是缺陷。**
+    //
+    // 宿主按目录名发现能力目录，所以安装位置里 `name` 必须等于目录名。而审查位是
+    // `.worktrees/review-<短SHA>/`——那是**临时检出**，目录名是给隔离用的，不是安装位置。
+    // 在这一条上判红，会让审查者花一轮排查一个假故障；而假装它通过，又等于把判据悄悄关掉。
+    //
+    // 所以：认得出是 worktree 时**换一种说法**（note，说明它在这里不适用），认不出时照旧判红。
+    // 判据用结构事实（`.git` 是文件而不是目录，即被 `git worktree add` 建出来的），不看目录叫什么。
     if (name !== basename(ROOT)) {
-      fail(`frontmatter 的 name「${name}」与目录名「${basename(ROOT)}」不一致——宿主按目录名发现它`)
+      if (isWorktreeCheckout(ROOT)) {
+        note(`入口：name「${name}」与目录名「${basename(ROOT)}」不同——这是 worktree 检出，`
+          + '目录名是隔离用的临时名字，不是安装位置，这一条在这里不适用')
+      } else {
+        fail(`frontmatter 的 name「${name}」与目录名「${basename(ROOT)}」不一致——宿主按目录名发现它`)
+      }
     }
   }
   if (!desc || desc.length < 20) fail('frontmatter 缺 description，或它太短（宿主靠它决定要不要加载）')
@@ -255,11 +286,15 @@ const PUSH_TIER_RULE = [
     what: '审查通过就由审查者合',
     any: [/审查者(?:直接)?(?:合|合并)|审查通过[^\n]{0,20}(?:合|闭环)|由(?:那个)?审查/,
       /reviewer merges|merges? (?:it )?(?:directly|right away)|the reviewer finishes/i],
+    // 提案模板也要讲这一条：作者读到的就是它。但前两条（撤回性、推分支属日常）是给
+    // 实现者看的流程说明，塞进模板只会让填表的人多读一段与填表无关的话。
+    everywhere: true,
   },
   {
     // 说法：唯一必须人点头的一类是弱化门禁。
     what: '弱化门禁必须人点头',
     any: [/弱化门禁/, /weaken\w* (?:a )?gate|loosen\w* (?:a )?gate|relax\w* (?:the )?gate/i],
+    everywhere: true,
   },
 ]
 
@@ -276,6 +311,20 @@ const PUSH_TIER_DOCS = [
 ]
 
 /**
+ * 只讲「谁能合」的那几份。
+ *
+ * 两份提案模板会落进用户项目，作者读到的就是它们——所以 `everywhere: true` 那两条必须
+ * 也在里面。但「能不能撤回」「推分支属日常」是实现流程，不是填表要读的东西，只在上面那批。
+ *
+ * 少列它们的后果是实测过的：模板里还写着被废弃的旧口径（高风险与人合、外部 PR 人合），
+ * 而上面八份文件全都对——**冲突发生在清单之外，没有门禁看得到**。
+ */
+const MERGE_AUTHORITY_DOCS = [
+  'templates/pull-request-template.md',
+  '.github/pull_request_template.md',
+]
+
+/**
  * 旧口径：把「提交 + 推送」写成日常的终点。
  *
  * 它不是错字，是一个**已经过时的结论**：那句话成立的前提是「推送撤不回来」，
@@ -284,22 +333,30 @@ const PUSH_TIER_DOCS = [
 const STALE_DAILY_END = /提交\s*[+＋]\s*推送/
 
 function checkPushSemantics() {
-  for (const name of PUSH_TIER_DOCS) {
-    const p = join(ROOT, name)
-    if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
-    const text = readText(p)
-    for (const rule of PUSH_TIER_RULE) {
-      if (!rule.any.some((re) => re.test(text))) {
-        fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
+  const groups = [
+    { docs: PUSH_TIER_DOCS, label: '日常流程' },
+    { docs: MERGE_AUTHORITY_DOCS, label: '提单模板' },
+  ]
+  for (const group of groups) {
+    for (const name of group.docs) {
+      const p = join(ROOT, name)
+      if (!existsSync(p)) { fail(`推送分档核对：缺 ${name}`); continue }
+      const text = readText(p)
+      for (const rule of PUSH_TIER_RULE) {
+        if (group.label === '提单模板' && rule.everywhere !== true) continue
+        if (!rule.any.some((re) => re.test(text))) {
+          fail(`${name} 里缺「${rule.what}」这条说法——同一件事在不同文件里说法不一，执行者会按错的那一份行事`)
+        }
+      }
+      const stale = STALE_DAILY_END.exec(text)
+      if (stale) {
+        const line = text.slice(0, stale.index).split('\n').length
+        fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
       }
     }
-    const stale = STALE_DAILY_END.exec(text)
-    if (stale) {
-      const line = text.slice(0, stale.index).split('\n').length
-      fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
-    }
   }
-  note(`推送分档：${PUSH_TIER_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，审查通过由审查者合，只有弱化门禁要人点头）`)
+  const total = PUSH_TIER_DOCS.length + MERGE_AUTHORITY_DOCS.length
+  note(`推送分档：${total} 份文件说法一致（分档看可撤回性，推分支属日常，审查通过由审查者合，只有弱化门禁要人点头）`)
 }
 
 /**
@@ -328,7 +385,7 @@ const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
  * 审查栏的四个字段名。**这是唯一一份**——模板、本仓库实例、判据三处都从这里取。
  *
  * 为什么它必须是一份常量：这四个词同时要出现在「发给用户的 PR 模板」「本仓库自己的 PR 模板」
- * 「`references/collaboration.md` 第五节」三处。三处各写一遍，改一处就会有两处说旧话，
+ * 「`references/collaboration.md` 的『七、审查循环』」三处。三处各写一遍，改一处就会有两处说旧话，
  * 而症状是「填了审查栏，但没人按它判」——没有任何东西会因此报错。
  *
  * 字段名本身就是判据：它们分别对应「谁审的」「判了哪几条」「测试是不是空的」「循环有没有停」。
@@ -795,14 +852,26 @@ function checkAnchors() {
  * 判据在 `scripts/dev/gap-coverage.mjs` 里（它是唯一实现，执行器与断言共用）。
  * 这一条治的是「勘察说了、没人管」：加了一条新缺口却忘了接线，报告里会永远挂着一条
  * 悬空结论，而没有任何东西报错。
+ *
+ * ## 五类都要报，包括「一条都没读出来」
+ *
+ * 只报 `unclaimed` / `dangling` / `duplicated` 三类是不够的：词法切块失灵时读出来是空数组，
+ * 那三类全空，检查静默通过——「0 条各有处置」。`missing`（登记了却没读出来）与
+ * `unknown`（读出来了却没登记）才守得住这一层。
  */
-function checkGapCoverage() {
-  const state = gapCoverage(ROOT)
+async function checkGapCoverage() {
+  const state = await gapCoverage(ROOT)
   for (const one of state.duplicated) {
     fail(`缺口覆盖：${one}——一条缺口只能落一档，写两档会让结论出现两个版本`)
   }
   for (const one of state.dangling) {
     fail(`缺口覆盖：${one} 在体检里没有这个 id——映射看着配好，实际指向一条永远不会出现的结论`)
+  }
+  for (const id of state.unknown) {
+    fail(`缺口覆盖：${id} 出现在源码里却不在登记名单里——源码与导出名单对不上`)
+  }
+  for (const id of state.missing) {
+    fail(`缺口覆盖：${id} 登记了却没能从源码里读出来——词法切块失灵，这一条从此没人查`)
   }
   for (const id of state.unclaimed) {
     fail(`缺口覆盖：${id} 体检那边没人接——勘察报了、没人管；给 survey.mjs 那条规则补 `
@@ -1145,7 +1214,7 @@ function checkHygiene() {
 
 // ── 主流程 ──────────────────────────────────────────────────────────
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2)
   const pkgIndex = argv.indexOf('--package')
   if (pkgIndex >= 0) {
@@ -1161,7 +1230,7 @@ function main() {
   checkLinks()
   checkReferenceTargets()
   checkAnchors()
-  checkGapCoverage()
+  await checkGapCoverage()
   checkScripts()
   checkTemplates()
   checkPlatformLock()
@@ -1300,5 +1369,5 @@ function isProductLayerPath(rel) {
 // **只有自己被运行时才跑主流程。** 行为断言要 import 上面的 `finishStepsState` 来验判据本体
 // （复刻一份循环的断言不会因为判据被削弱而变红），而 import 时不该顺手跑一遍全量自检。
 if (isMainModule(import.meta.url, process.argv[1])) {
-  process.exit(main())
+  Promise.resolve(main()).then((code) => process.exit(code))
 }

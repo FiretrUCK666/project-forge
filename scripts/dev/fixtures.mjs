@@ -1956,16 +1956,30 @@ cases.push(['缺口覆盖：没登记处置的缺口要报，悬空映射要报'
   // 反面三：同时写两档 → 必须报重复
   const dup = coverageOf([{ id: 'z', review: 'git.absent', decision: 'k' }], known)
   if (dup.duplicated.length !== 1) return '一条缺口写了两档时没有报出来——同一件事会有两个结论'
+
+  // 反面四：**一条都没读出来** → 必须报「读不出来」，不能静默通过。
+  // 这是这套检查最容易退化的形状：词法切块一失灵，读出来就是空数组，
+  // 而空数组让前面三条全过——「0 条各有处置，退出码 0」，看起来比 17 条还干净。
+  const empty = coverageOf([], known, ['git.absent'])
+  if (empty.missing.length !== 1) return '一条都没读出来时没有报「读不出来」——判据被削成恒真了'
+  if (empty.ok.length !== 0) return `空输入不该产出「通过」条目，实际 ${empty.ok.length} 条`
+
+  // 反面五：源码里有、登记名单里没有 → 必须报
+  const unknown = coverageOf([{ id: 'w', review: 'git.absent' }], known, ['git.absent'])
+  if (unknown.unknown.length !== 1) return '源码里有却没登记的缺口没有被报出来'
   return true
 }])
 
 cases.push(['本仓库：勘察的每条缺口在体检里都有人接，且映射不悬空', async () => {
   const { checkGapCoverage } = await import('./gap-coverage.mjs')
   // 读真实源码，不是夹具：这条判据防的正是「这个仓库自己漏了一条」。
-  const state = checkGapCoverage(SKILL_ROOT)
+  const state = await checkGapCoverage(SKILL_ROOT)
   if (state.unclaimed.length > 0) return `没人接的缺口：${state.unclaimed.join('、')}`
   if (state.dangling.length > 0) return `悬空映射：${state.dangling.join('、')}`
   if (state.duplicated.length > 0) return `重复处置：${state.duplicated.join('、')}`
+  // 读出来 0 条时，前三条全是空数组——这个检查会静默通过。这正是「恒真」的形状。
+  if (state.missing.length > 0) return `读不出来的缺口：${state.missing.join('、')}`
+  if (state.unknown.length > 0) return `源码里有却没登记的缺口：${state.unknown.join('、')}`
   return true
 }])
 

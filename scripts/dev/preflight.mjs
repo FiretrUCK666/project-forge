@@ -518,6 +518,50 @@ export function finishSiteRolesMissing(sites) {
 }
 
 /**
+ * 收尾七步的**正文**（含每步的续行），按编号切成七块。
+ *
+ * 只取编号开头的行和它的续行，不取这一节里的解释段落：解释是写给某一处的读者看的，
+ * 允许各写各的；**步骤正文是给人照着敲的**，那里不能分叉。
+ */
+function finishStepBodies(text) {
+  const range = finishSectionRange(text)
+  if (range === undefined) return undefined
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n').slice(range.start, range.end)
+  const bodies = []
+  let current = null
+  for (const line of lines) {
+    if (/^\s*\d+\.\s/.test(line)) {
+      if (current !== null) bodies.push(current)
+      current = line
+      continue
+    }
+    if (current !== null) current += '\n' + line
+  }
+  if (current !== null) bodies.push(current)
+  return bodies
+}
+
+/**
+ * 七步里出现的 `git` 子命令集合。
+ *
+ * ## 为什么比这个，而不比措辞
+ *
+ * 措辞是给人读的，同一个意思可以写成「先卸 worktree」或「`git worktree remove`」；
+ * 但**命令是给人敲的**，同一步在三处教人敲不同的命令，就是三处会分叉的地方。
+ *
+ * 这不是抽象担忧：实测过一次——第 7 步在模板里写「先查有没有下游堆叠 PR」，
+ * 在参考文档里写「`git ls-remote` 查远端分支还在不在」，两句话讲的是同一件事的两半，
+ * 而顺序判据只看「`git push origin --delete` 排在哪」，所以两份可以长期各说各的。
+ * 把「这一步该敲哪些命令」也比一遍，这种半句话分叉就藏不住了。
+ */
+export function finishCommandsOf(text) {
+  const bodies = finishStepBodies(text)
+  if (bodies === undefined) return undefined
+  const found = bodies.join('\n').match(/\bgit\s+([a-z][a-z-]*)/g) ?? []
+  return [...new Set(found.map((one) => one.replace(/\s+/g, ' ')))].sort()
+}
+
+/**
  * 找出收尾清单的行范围，返回 `{ start, end }`；没有那一段返回 `undefined`。
  *
  * 锚在**那一行**而不是某个标题：收尾清单本来就不是独立一节，它是第四步的正文。
@@ -630,24 +674,45 @@ function checkReviewContract() {
   }
   note('完成后记录：模板要求「在合并之前写完」')
 
-  // 收尾步骤：三处都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
-  // 顺序不能：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」上卡住。
+  // 收尾步骤：三处都要有，顺序要一致，**每一步教人敲的命令也要一致**。
+  //
+  // 顺序是判据不是排版：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」
+  // 上卡住。命令同理，而且更隐蔽——两处写的是同一件事的两半时，读起来都没错，照着做会漏一半。
   //
   // 三处不是随意挑的：`templates/agents-project.md` 是写给别的项目的骨架，
   // `AGENTS.md` 是本仓库照着它生成的实例，`references/collaboration.md` 是判据源头。
   // **判据源头不在核对清单里时，它改了没有任何东西会报**——那是最坏的一处漏网：
   // 其余两处都跟着它走，源头漂了却要等别人发现。
   let siteCount = 0
+  let baseline = null
   for (const site of FINISH_SITES) {
     const path = join(ROOT, site)
     if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
     siteCount += 1
-    const state = finishStepsState(readText(path))
+    const text = readText(path)
+    const state = finishStepsState(text)
     if (state.missing.length > 0) {
       fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
     } else if (state.outOfOrder) {
       fail(`${site} 的合并收尾步骤顺序不对——顺序是判据不是排版，`
         + 'worktree 没卸就删分支会失败，而报错说的是「未合并」')
+    }
+
+    // 命令对拍：以第一处（模板）为基准，其余每一处都必须与它一致。
+    const commands = finishCommandsOf(text)
+    if (commands === undefined) continue
+    if (baseline === null) {
+      baseline = { site, commands }
+      continue
+    }
+    const extra = commands.filter((c) => !baseline.commands.includes(c))
+    const absent = baseline.commands.filter((c) => !commands.includes(c))
+    if (extra.length > 0 || absent.length > 0) {
+      const parts = []
+      if (absent.length > 0) parts.push(`${site} 少了 ${absent.join('、')}`)
+      if (extra.length > 0) parts.push(`${site} 多了 ${extra.join('、')}`)
+      fail(`收尾步骤对拍：${baseline.site} 与 ${site} 教人敲的命令不一致——${parts.join('；')}。`
+        + '措辞可以各写各的，命令不行：同一件事在三处教人敲不同的东西，照着做会漏一半')
     }
   }
   // **角色也要齐。** 「个数等于列表长度」是恒真的——列表被删短，两个数一起变小。
@@ -656,7 +721,7 @@ function checkReviewContract() {
     fail(`收尾步骤对拍：${role}这一处不在核对清单里——`
       + '它改了不会有任何东西报错，而其余几处都跟着它走')
   }
-  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序一致`)
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序与命令一致`)
 }
 
 function checkOwnInstances() {

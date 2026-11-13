@@ -112,6 +112,15 @@ const INJECTIONS = [
     expect: '判据源头',
   },
   {
+    // 同一件事在三处教人敲不同的命令，照着做会漏一半。顺序判据看不见这一类。
+    id: 'I9d',
+    what: '某一处的第 7 步少敲一条命令（命令对拍）',
+    file: 'references/collaboration.md',
+    from: '：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR',
+    to: '：远端还在不在、有没有下游堆叠 PR',
+    expect: '教人敲的命令不一致',
+  },
+  {
     id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
     file: 'templates/work-item.md',

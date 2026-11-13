@@ -218,7 +218,7 @@ node scripts/dev/verify-injections.mjs
   4. `git switch main && git pull`；
   5. **先卸 worktree**：`git worktree remove <路径>`（分支还被 worktree 检出着时，下一步一定失败，而报错说的是「未合并」）；
   6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；
-  7. **先查有没有未合并的下游堆叠 PR 以该分支为 base，确认没有才** `git push origin --delete <分支>`。
+  7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base；**两件都清了才** `git push origin --delete <分支>`。
 
   **第 1 步为什么在合并之前**：工作记录是仓库里的文件，合并之后改它，平台会拒掉直接推主干，
   于是只能另开一个只改记录的提案。**这不是纪律问题，是顺序问题**——把「写记录」放在「合并」

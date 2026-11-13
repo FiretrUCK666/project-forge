@@ -1882,6 +1882,54 @@ cases.push(['收尾步骤核对清单：三种角色一个都不能少', async (
   return true
 }])
 
+cases.push(['收尾七步：三处教人敲的命令必须一致，措辞可以不同', async () => {
+  // 顺序判据看不见「同一件事的两半各写一处」：第 7 步一边写「查下游堆叠 PR」、
+  // 一边写「git ls-remote」，两句话读起来都对，照着做会漏一半。这条断言盯命令，不盯措辞。
+  const { finishCommandsOf } = await loadPreflight()
+
+  const base = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
+    '  7. 先查（`git ls-remote --heads origin <分支>`）再 `git push origin --delete <分支>`。',
+    '',
+  ].join('\n')
+
+  const want = finishCommandsOf(base)
+  // 粒度是**子命令**（`git branch`、`git worktree`），不带后面的参数：
+  // 参数在一处写成 `<路径>`、另一处写成 `<worktree 路径>`，那是措辞差异，不该报。
+  // 带不带 `-d` 这类真正的参数差异，由七步的存在性判据（`FINISH_STEPS` 里的 `/git branch -d/`）管。
+  if (!want || want.length !== 6) {
+    return `七步里应读出 6 条 git 子命令，实际：${want ? want.join('、') : 'undefined'}`
+  }
+  for (const cmd of ['git switch', 'git pull', 'git worktree', 'git branch', 'git ls-remote', 'git push']) {
+    if (!want.includes(cmd)) return `漏了 ${cmd}，实际：${want.join('、')}`
+  }
+
+  // 正面：换措辞但命令不变——不该被判成不一致。
+  const reworded = base
+    .replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在，确认之后')
+  const rew = finishCommandsOf(reworded)
+  if (!rew || rew.length !== 5) {
+    return `换措辞后应少一条 git ls-remote（6 → 5），实际：${rew ? rew.join('、') : 'undefined'}`
+  }
+
+  // 反面：连命令一起删——这才是不一致。
+  if (rew.includes('git ls-remote')) return '删掉 ls-remote 之后仍然读得到它'
+
+  // 反面：同一份文件里没有七步锚点时，返回 undefined 而不是空数组——
+  // 空数组会被上层当成「没有命令」，于是「找不到」和「一个都没写」长得一样。
+  if (finishCommandsOf('## 别的节\n\n什么也没有\n') !== undefined) {
+    return '没有锚点时应返回 undefined，不能返回空数组'
+  }
+  return true
+}])
+
 cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真实存在', async () => {
   // 判据改了文档结构之后，`ref` 指路会变成死指针——而它不会报错，只会让人点进去找不到那一节。
   // 这条断言读的是**真实文件**，不是夹具：指路的目标本来就在这个仓库里。

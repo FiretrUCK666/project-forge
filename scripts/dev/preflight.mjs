@@ -428,9 +428,17 @@ export function acceptanceIdMissing(text) {
 }
 
 /**
- * 收尾清单的步骤。**数字与顺序都是判据**：`worktree remove` 在 `branch -d` 之前，
- * 因为分支还被某个 worktree 检出着时 `git branch -d` 一定失败，而它报的原因是「未合并」。
- * 顺序反了，人就会去用 `-D` 强删，而那会把没合进去的东西一起删掉。
+ * 收尾清单的步骤。**数字与顺序都是判据。**
+ *
+ * 两条顺序都不是排版偏好，各自对着一处会真出事的地方：
+ *
+ *   - **第 1 步（把要写的东西写完并纳入本次 PR）在合并之前**：工作记录是仓库里的文件。
+ *     合并之后再改它，平台会拒掉直接推主干，执行者只能另开一个只改记录的提案——那一个
+ *     没人审、也没和原提案绑在一起，而它看起来像「又提了一个提案」。把「写记录」放在
+ *     「合并」之后，等于要求每件事都多出一个 PR。
+ *   - **`worktree remove` 在 `branch -d` 之前**：分支还被某个 worktree 检出着时，
+ *     `git branch -d` 一定失败，而报错说的是「未合并」。顺序反了，人就会去用 `-D` 强删，
+ *     而那会把没合进去的东西一起删掉。
  *
  * ## 锚点是「合并收尾」四个字，不是「第几步：合并收尾」
  *
@@ -439,9 +447,9 @@ export function acceptanceIdMissing(text) {
  */
 const FINISH_ANCHOR = /合并收尾/
 const FINISH_STEPS = [
+  /把要写的东西写完/,
   /合并 PR/,
   /回读确认/,
-  /更新工作记录与 Issue/,
   /git switch/,
   /git worktree remove/,
   /git branch -d/,

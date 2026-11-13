@@ -1802,9 +1802,9 @@ cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要�
   const { finishStepsState } = await loadPreflight()
   const line = (n) => `  ${n}. `
   const body = [
-    line(1) + '合并 PR（**不勾选自动删分支**）；',
-    line(2) + '回读确认 `state=MERGED`；',
-    line(3) + '更新工作记录与 Issue；',
+    line(1) + '把要写的东西写完，并纳入这次 PR：工作记录的「完成后的记录」、验收标准勾选；',
+    line(2) + '合并 PR（**不勾选自动删分支**）；',
+    line(3) + '回读确认 `state=MERGED`；',
     line(4) + '`git switch main && git pull`；',
     line(5) + '`git worktree remove <路径>`；',
     line(6) + '`git branch -d <分支>`；',
@@ -1828,6 +1828,13 @@ cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要�
   const bad = finishStepsState(wrap(swapped))
   if (bad.missing.length !== 0) return '对调两步不应报缺'
   if (!bad.outOfOrder) return 'worktree remove 与 branch -d 对调没有被判成顺序错'
+
+  // 正面三：**把「写记录」挪到合并之后**——这正是逼出多余 PR 的那个顺序。
+  const recordLate = [
+    body[1], body[2], body[0], body[3], body[4], body[5], body[6],
+  ]
+  const late = finishStepsState(wrap(recordLate))
+  if (!late.outOfOrder) return '把「写记录」挪到合并之后没有被判成顺序错——那正是逼出多余 PR 的顺序'
 
   // 反面：整份文档里别处提到某一步，不算数——判据只看那一段的行范围。
   const noise = ['七步之外的正文里提到 git worktree remove 与 git branch -d。', '', wrap(body.slice(0, 2))].join('\n')

@@ -105,17 +105,21 @@ export function reviewIds(source) {
  * 三档都没选的是 `unclaimed`；选了不止一档的是 `duplicated`（两处都管，结论会变成两个）；
  * `review` 指向一个 `review.mjs` 里不存在的 id 的是 `dangling`（映射看着有，实际空指）。
  *
- * ## `expected` 是这个检查的第二道命
+ * ## `expected` 是必填的，不是可选的
  *
  * 只判「读出来的那些都配好了」是不够的：读出来的可能是**零条**。词法切块一旦失灵
  * （换格式化器、整体多缩两格），`declarations` 就成了空数组，而空数组让所有检查都通过
  * ——「0 条各有处置，退出码 0」，看起来比 17 条还干净。
  *
- * 所以传入登记的 id 名单（`survey.mjs` 导出的 `GAP_RULE_IDS`）做双向比对：
- * 读出来却没有名字的进 `unknown`，有名字却没读出来的进 `missing`。两边都必须为空。
- * 「一条都没读出来」于是变成 17 条 `missing`，红。
+ * 所以登记的 id 名单是**必填参数**：不给就抛错。这是刻意的——一个可选参数被摘掉时
+ * 什么都没发生，而一个必填参数被摘掉时程序当场崩，崩溃比静默通过好。
+ * 早先它是可选的，于是「把第三个参数改成 null」这个动作能把整条双向比对削掉而不留痕。
  */
-export function coverageOf(declarations, knownReviewIds = null, expected = null) {
+export function coverageOf(declarations, knownReviewIds, expected) {
+  if (!Array.isArray(expected) || expected.length === 0) {
+    throw new Error('coverageOf 需要登记的 id 名单（第三参）。不给名单就无法判断「一条都没读出来」'
+      + '这种情况——那时的结论会是「0 条各有处置」，看起来比实际还干净')
+  }
   const ok = []
   const unclaimed = []
   const duplicated = []
@@ -130,16 +134,43 @@ export function coverageOf(declarations, knownReviewIds = null, expected = null)
     }
   }
 
-  let missing = []
-  let unknown = []
-  if (Array.isArray(expected)) {
-    const got = new Set(declarations.map((d) => d.id))
-    const want = new Set(expected)
-    missing = [...want].filter((id) => !got.has(id))
-    unknown = [...got].filter((id) => !want.has(id))
-  }
+  const got = new Set(declarations.map((d) => d.id))
+  const want = new Set(expected)
+  const missing = [...want].filter((id) => !got.has(id))
+  const unknown = [...got].filter((id) => !want.has(id))
 
   return { ok, unclaimed, duplicated, dangling, missing, unknown }
+}
+
+/**
+ * 这个检查自己有多少条载荷？**这是它的自检。**
+ *
+ * 上一轮暴露的是一个更深的形状：`coverageOf` 的双向比对确实能抓住「读出来 0 条」，
+ * 但**它自己被摘掉时没有人看守**——把第三个参数改成 `null`，17 条照样读出来、全部配好、
+ * 全绿通过，而守卫已经不在。判据的守卫本身没有守卫，这是判据退化的最后一条路。
+ *
+ * 所以再加一层：**能读出的条数必须等于登记名单的条数，且不为零**。这个计算不依赖
+ * `coverageOf` 的任何参数——它直接数 `GAP_RULE_IDS` 与词法结果，两者都从源码来。
+ * 于是「比对被摘掉」不再是一种能悄悄发生的事：摘掉它，这一层仍然报数。
+ *
+ * @returns {{ declared: number, parsed: number, ok: boolean, detail: string }}
+ */
+export function selfCheck(source, expected) {
+  const declared = Array.isArray(expected) ? expected.length : -1
+  const parsed = gapDeclarations(source).length
+  if (declared <= 0) {
+    return { declared, parsed, ok: false, detail: '登记的 id 名单是空的——名单没导出，或导出写错了' }
+  }
+  if (parsed !== declared) {
+    return {
+      declared,
+      parsed,
+      ok: false,
+      detail: `登记 ${declared} 条，只从源码里读出 ${parsed} 条——`
+        + '词法切块与声明的形状对不上，缺的那几条从此没人查',
+    }
+  }
+  return { declared, parsed, ok: true, detail: `${declared} 条缺口全部读出，条数与登记名单一致` }
 }
 
 /** 读真实源码跑一遍。门禁与行为断言共用这一个入口。 */
@@ -152,12 +183,34 @@ export async function checkGapCoverage(root = ROOT) {
   // Windows 上绝对路径不能直接 import，要先转成 file:// URL——否则报的是一条
   // 与这里的判断毫无关系的加载错误，而它看起来像「检查坏了」。
   const { GAP_RULE_IDS } = await import(pathToFileURL(join(root, 'scripts', 'survey.mjs')).href)
-  return coverageOf(gapDeclarations(source), reviewIds(reviewSource), GAP_RULE_IDS)
+  const counts = selfCheck(source, GAP_RULE_IDS)
+  return { ...coverageOf(gapDeclarations(source), reviewIds(reviewSource), GAP_RULE_IDS), counts }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { ok, unclaimed, duplicated, dangling, missing, unknown } = await checkGapCoverage()
+  // ## 崩了也要说人话
+  //
+  // 这个检查里有一条「必填参数不给就抛错」的判断（`coverageOf` 的第三参）。它抛出来时，
+  // 如果没人接，看到的是几十行调用栈——而调用栈不叫「失败」，它叫「不知道算不算失败」。
+  // `verify-injections.mjs` 是按 `FAIL` 开头的行判的，堆栈一行都不匹配，于是那次注入会
+  // 被记成「判据被拆掉却没人报」——把一次正确的崩溃误读成一条失守的判据。
+  //
+  // 所以把异常收成一行 `FAIL`：崩溃是一种失败，而且是最该被看见的那种。
+  let state
+  try {
+    state = await checkGapCoverage()
+  } catch (error) {
+    process.stderr.write(`FAIL  缺口覆盖：这条判据没跑成——${error instanceof Error ? error.message : String(error)}\n`)
+    process.stderr.write('缺口覆盖未通过：1 处有问题。\n')
+    process.exit(1)
+  }
+  const { ok, unclaimed, duplicated, dangling, missing, unknown, counts } = state
   let bad = 0
+  // 先报条数：这一层不依赖下面任何一档，所以它在「全都被摘掉」时仍然说话。
+  if (!counts.ok) {
+    process.stderr.write(`FAIL  条数自检：${counts.detail}\n`)
+    bad += 1
+  }
   for (const one of duplicated) {
     process.stderr.write(`FAIL  ${one}——一条缺口只能落一档，写两档会让结论出现两个版本\n`)
     bad += 1

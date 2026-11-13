@@ -139,6 +139,32 @@ const INJECTIONS = [
     to: "  return [...headings].filter((h) => h.replace(/`/g, '') === wanted)",
     expect: '指路落空',
   },
+  {
+    id: 'I16',
+    what: '缺口覆盖把登记的 id 名单摘掉（双向比对被削成可选）',
+    file: 'scripts/dev/gap-coverage.mjs',
+    from: 'return { ...coverageOf(gapDeclarations(source), reviewIds(reviewSource), GAP_RULE_IDS), counts }',
+    to: 'return { ...coverageOf(gapDeclarations(source), reviewIds(reviewSource), null), counts }',
+    expect: '缺口覆盖',
+  },
+  {
+    id: 'I17',
+    what: '缺口表整段改名（词法切块彻底失灵，一条都读不出来）',
+    file: 'scripts/survey.mjs',
+    from: 'const GAP_RULES = [',
+    to: 'const GAP_RULES_RENAMED = [',
+    expect: '缺口覆盖',
+  },
+  {
+    id: 'I18',
+    what: '节号指针塞进 scripts/ 下的注释（门禁只扫文档就会漏掉）',
+    file: 'scripts/lib/text.mjs',
+    from: 'export ',
+    // 用拼接构造那句指针：这个文件本身也要过「全仓库无节号指针」那条判据，
+    // 直接写出来的话，注入还没跑，门禁先在检查器自己身上红了。
+    to: `// 详见第` + `四` + `节。\nexport `,
+    expect: '节号指针',
+  },
 ]
 
 function runFixtures() {

@@ -1940,21 +1940,21 @@ cases.push(['缺口覆盖：没登记处置的缺口要报，悬空映射要报'
     { id: 'a', review: 'git.absent' },
     { id: 'b', decision: 'some-key' },
     { id: 'c', surveyOnly: '只有勘察能判' },
-  ], known)
+  ], known, ['a', 'b', 'c'])
   if (good.ok.length !== 3 || good.unclaimed.length !== 0 || good.dangling.length !== 0) {
     return `正面用例被误报：${JSON.stringify(good)}`
   }
 
   // 反面一：三档都没选 → 必须报「没人接」
-  const unclaimed = coverageOf([{ id: 'x' }], known)
+  const unclaimed = coverageOf([{ id: 'x' }], known, ['x'])
   if (unclaimed.unclaimed.length !== 1) return '没登记处置的缺口没有被报出来'
 
   // 反面二：映射写了个不存在的 id → 必须报悬空
-  const dangling = coverageOf([{ id: 'y', review: 'git.typo' }], known)
+  const dangling = coverageOf([{ id: 'y', review: 'git.typo' }], known, ['y'])
   if (dangling.dangling.length !== 1) return '映射指向不存在的结论时没有报出来——它看起来配好了，实际永远不触发'
 
   // 反面三：同时写两档 → 必须报重复
-  const dup = coverageOf([{ id: 'z', review: 'git.absent', decision: 'k' }], known)
+  const dup = coverageOf([{ id: 'z', review: 'git.absent', decision: 'k' }], known, ['z'])
   if (dup.duplicated.length !== 1) return '一条缺口写了两档时没有报出来——同一件事会有两个结论'
 
   // 反面四：**一条都没读出来** → 必须报「读不出来」，不能静默通过。

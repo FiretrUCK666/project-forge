@@ -772,7 +772,7 @@ function checkLinks() {
 }
 
 /**
- * 全仓库不许出现「第 N 节」这种指针，并且所有「`references/x.md`「标题」」都真的存在。
+ * 全仓库不许出现节号指针，并且每一处「指路」都真的落在目标文件的二级标题上。
  *
  * ## 两条判据，治的是同一件事：指针绑在会动的东西上
  *
@@ -784,32 +784,37 @@ function checkLinks() {
  * 所以放在同一个检查里，一次说清。
  */
 function checkAnchors() {
-  // 一、不许有「第 N 节」。例外是那几份**本身就在讲章节结构**的文档（本文件的判据说明、
-  //     历史记录），它们在 `HISTORY_PATHS` 里已经排除了。
-  const scanned = [
-    'SKILL.md', 'AGENTS.md', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'RELEASING.md',
-    ...walk(join(ROOT, 'references'), (f) => f.endsWith('.md')),
-    ...walk(join(ROOT, 'templates'), (f) => f.endsWith('.md')),
-    ...walk(join(ROOT, '.github'), (f) => f.endsWith('.md')),
-  ]
+  // 一、不许有「第 N 节」。
+  //
+  // ## 扫的是「会被读者照着做的地方」，不是一份挑出来的文件名单
+  //
+  // 判据是**这一处文字会不会被谁读到并照它跳转**。`scripts/` 下的注释也算：维护者看着
+  // 注释去找某一节，找错了就把另一节改错。早先只扫文档，于是同一个仓库里同时存在
+  // 两种口径——门禁报「全仓库没有节号指针」，而它只数了自己认识的那几份。
+  //
+  // 扫的范围因此是**整个版本库**，减去两类**历史记录**（它们记的是当时的事实，不改写）。
+  // `walk` 自己跳过 `.git` 与 `node_modules`，所以不必在这里再滤一遍。
+  const scanned = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml)$/i.test(f))
   const SECTION_PTR = /第[一二三四五六七八九十]+节/
   let sectionHits = 0
+  let scannedFiles = 0
   for (const file of scanned) {
     if (!existsSync(file)) continue
     const name = rel(file)
     if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    scannedFiles += 1
     const lines = readText(file).replace(/\r\n/g, '\n').split('\n')
     for (const [i, line] of lines.entries()) {
       if (!SECTION_PTR.test(line)) continue
-      // 本检查自己的说明文字里会引用这个形状，标出来跳过。
-      if (line.includes('section-pointer-ok')) continue
       sectionHits += 1
       fail(`${name} 第 ${i + 1} 行用了节号指针——重排一次就全部指错，而它不会报错；改写成「标题名」`)
     }
   }
-  if (sectionHits === 0) note('指路形状：全仓库没有节号指针，指路一律用标题名')
+  if (sectionHits === 0) {
+    note(`指路形状：${scannedFiles} 份文件里没有节号指针，指路一律用标题名`)
+  }
 
-  // 二、每一处「`references/x.md`「标题」」都要解析到真实的二级标题。
+  // 二、每一处「反引号里的 references 文件 + 「标题」」都要解析到真实的二级标题。
   const headingsCache = new Map()
   const headingsOfFile = (file) => {
     if (!headingsCache.has(file)) {
@@ -860,7 +865,21 @@ function checkAnchors() {
  * `unknown`（读出来了却没登记）才守得住这一层。
  */
 async function checkGapCoverage() {
-  const state = await gapCoverage(ROOT)
+  // **崩了也要变成一行 FAIL。**
+  //
+  // `gap-coverage.mjs` 里有一条「登记的 id 名单必填、不给就抛错」的判断。它抛出来时，
+  // 如果没人接，preflight 会带着几十行调用栈退出——而调用栈不叫「失败」，它叫
+  // 「不知道算不算失败」：按 `FAIL` 开头的行判红的那些地方，一行都匹配不上，于是
+  // 一次正确的崩溃会被记成「判据被拆掉却没人报」，把失守误读成失守的反面。
+  //
+  // 崩溃是一种失败，而且是最该被看见的那种：它意味着这一整条判据没跑。
+  let state
+  try {
+    state = await gapCoverage(ROOT)
+  } catch (error) {
+    fail(`缺口覆盖：这条判据没跑成——${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
   for (const one of state.duplicated) {
     fail(`缺口覆盖：${one}——一条缺口只能落一档，写两档会让结论出现两个版本`)
   }
@@ -899,7 +918,7 @@ export function matchHeadings(headings, section) {
 /**
  * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在真实存在的二级标题上。
  *
- * 这一条治的是一个实际发生过的错：指路写「第四节：许可协议」，而那一节实际是 README。
+ * 这一条治的是一个实际发生过的错：指路写「许可协议那一节」，而那一节实际讲的是 README。
  * **节号会随增删章节失效，标题不会**——所以指路只写标题，这里核对标题存在。
  *
  * 比对规则与 `checkAnchors` 共用 `matchHeadings`：一处指路在两处判据下得到两个答案是

@@ -103,6 +103,15 @@ const INJECTIONS = [
     expect: '合并收尾',
   },
   {
+    // 判据源头那一份不在核对清单里时，它改了没有任何东西会报——而其余两处都跟着它走。
+    id: 'I9c',
+    what: '收尾步骤核对清单里删掉判据源头（references/ 那一份）',
+    file: 'scripts/dev/preflight.mjs',
+    from: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n  'references/collaboration.md',\n]",
+    to: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n]",
+    expect: '判据源头',
+  },
+  {
     id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
     file: 'templates/work-item.md',
@@ -110,6 +119,16 @@ const INJECTIONS = [
     from: '- [ ] C1: <第一条可判定的标准>\n- [ ] C2: <第二条>',
     to: '- [ ] 1. <第一条可判定的标准>\n- [ ] 2. <第二条>',
     expect: '验收标准编号',
+  },
+  {
+    // 「完成后的记录」现在要求在合并之前写完。没有判据守着的话，把措辞改回「合并之后补」
+    // 不会有任何信号——而那句话一改，第二个 PR 就又回来了。
+    id: 'I10b',
+    what: '工作记录模板把「在合并之前写完」改回「合并之后补」',
+    file: 'templates/work-item.md',
+    from: '**在合并之前写完，随这次改动一起提交。**',
+    to: '**合并之后补。**',
+    expect: '完成后的记录',
   },
   {
     id: 'I11',

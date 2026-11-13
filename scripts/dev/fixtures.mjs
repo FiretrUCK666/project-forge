@@ -1851,6 +1851,37 @@ cases.push(['收尾清单没有锚点时报「七步全缺」，不是静默通�
   return true
 }])
 
+cases.push(['收尾步骤核对清单：三种角色一个都不能少', async () => {
+  // 「个数等于列表长度」是恒真的：列表删短，两个数一起变小。所以判据按**角色**查。
+  // 这条断言调的是判据本体——复刻一份循环的话，判据被改松时复制品不会红。
+  const { finishSiteRolesMissing } = await loadPreflight()
+
+  const full = ['templates/agents-project.md', 'AGENTS.md', 'references/collaboration.md']
+  if (finishSiteRolesMissing(full).length !== 0) {
+    return `三处都在却报缺角色：${finishSiteRolesMissing(full).join('、')}`
+  }
+
+  const cases = [
+    ['删掉判据源头', full.filter((s) => s !== 'references/collaboration.md'), '判据源头'],
+    ['删掉实例', full.filter((s) => s !== 'AGENTS.md'), '实例'],
+    ['删掉骨架', full.filter((s) => s !== 'templates/agents-project.md'), '骨架'],
+  ]
+  for (const [name, sites, want] of cases) {
+    const missing = finishSiteRolesMissing(sites)
+    if (!missing.some((role) => role.includes(want))) {
+      return `${name}后没有报缺「${want}」，实际：${missing.join('、') || '（空）'}——`
+        + '那一处从此没人查，而它会一直显示「一致」'
+    }
+  }
+
+  // 反面：把三处换成别的文件，角色对不上就该报，避免判据退化成「非空即过」。
+  const wrong = ['README.md', 'CONTRIBUTING.md', 'SKILL.md']
+  if (finishSiteRolesMissing(wrong).length !== 3) {
+    return `换成不承担这三种角色的文件后，应报缺 3 个角色，实际 ${finishSiteRolesMissing(wrong).length}`
+  }
+  return true
+}])
+
 cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真实存在', async () => {
   // 判据改了文档结构之后，`ref` 指路会变成死指针——而它不会报错，只会让人点进去找不到那一节。
   // 这条断言读的是**真实文件**，不是夹具：指路的目标本来就在这个仓库里。

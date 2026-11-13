@@ -407,6 +407,30 @@ const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
 const ACCEPTANCE_ID_SITES = ['templates/work-item.md']
 
 /**
+ * 工作记录模板里，「完成后的记录」是不是**要求合并之前写完**。
+ *
+ * 这句话没有判据守着时，改回「合并之后补」不会有任何信号——而那句话一改，第二个 PR 就又
+ * 回来了：合并之后再改这份文件，平台会拒掉直接推主干，只能另开一个只改记录的提案。
+ *
+ * 判据盯的是「那一节里的那句话」，不是「文里出现过『合并之前』」：同一份模板的别处、
+ * 以及其他文档，都会自然提到这两个词，按「出现过」判等于恒真。
+ */
+export function completionRecordBeforeMerge(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const start = lines.findIndex((line) => /^##\s+完成后的记录\s*$/.test(line))
+  if (start === -1) return { ok: false, why: '没有「完成后的记录」这一节' }
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s+/.test(lines[i])) { end = i; break }
+  }
+  const section = lines.slice(start, end).join('\n')
+  if (!/合并之前写完/.test(section)) {
+    return { ok: false, why: '「完成后的记录」里没有要求「在合并之前写完」' }
+  }
+  return { ok: true, why: '' }
+}
+
+/**
  * 审查栏那四行必须**排在一起形成一块**，不是「文件里出现过这四个词」。
  *
  * 按「出现过」判会让两个字段完全失守：`references/collaboration.md` 讲那两个字段的正文里本来就有
@@ -428,9 +452,17 @@ export function acceptanceIdMissing(text) {
 }
 
 /**
- * 收尾清单的步骤。**数字与顺序都是判据**：`worktree remove` 在 `branch -d` 之前，
- * 因为分支还被某个 worktree 检出着时 `git branch -d` 一定失败，而它报的原因是「未合并」。
- * 顺序反了，人就会去用 `-D` 强删，而那会把没合进去的东西一起删掉。
+ * 收尾清单的步骤。**数字与顺序都是判据。**
+ *
+ * 两条顺序都不是排版偏好，各自对着一处会真出事的地方：
+ *
+ *   - **第 1 步（把要写的东西写完并纳入本次 PR）在合并之前**：工作记录是仓库里的文件。
+ *     合并之后再改它，平台会拒掉直接推主干，执行者只能另开一个只改记录的提案——那一个
+ *     没人审、也没和原提案绑在一起，而它看起来像「又提了一个提案」。把「写记录」放在
+ *     「合并」之后，等于要求每件事都多出一个 PR。
+ *   - **`worktree remove` 在 `branch -d` 之前**：分支还被某个 worktree 检出着时，
+ *     `git branch -d` 一定失败，而报错说的是「未合并」。顺序反了，人就会去用 `-D` 强删，
+ *     而那会把没合进去的东西一起删掉。
  *
  * ## 锚点是「合并收尾」四个字，不是「第几步：合并收尾」
  *
@@ -439,16 +471,51 @@ export function acceptanceIdMissing(text) {
  */
 const FINISH_ANCHOR = /合并收尾/
 const FINISH_STEPS = [
+  /把要写的东西写完/,
   /合并 PR/,
   /回读确认/,
-  /更新工作记录与 Issue/,
   /git switch/,
   /git worktree remove/,
   /git branch -d/,
   /git push origin --delete/,
 ]
 
-const FINISH_SITES = ['templates/agents-project.md', 'AGENTS.md']
+const FINISH_SITES = [
+  'templates/agents-project.md',
+  'AGENTS.md',
+  'references/collaboration.md',
+]
+
+/**
+ * 这三处不是「顺手挑的三份文件」，而是**三种角色**，各缺一不可：
+ *
+ *   - **骨架**：写给别的项目的模板（`templates/` 下）。
+ *   - **实例**：本仓库照着骨架生成的那一份（`AGENTS.md`）。
+ *   - **判据源头**：讲清「为什么是这七步」的那份参考（`references/` 下）。
+ *
+ * ## 为什么按角色判，不按个数判
+ *
+ * 「个数必须等于 3」这种写法**自己就是恒真的**：`FINISH_SITES` 删掉一个元素时，
+ * 循环里核对的个数和列表长度一起变小，两边永远相等。实测过——删到只剩一项，
+ * 门禁照样绿。这就是「判据的守卫自己没人守」又一次长出来。
+ *
+ * 角色不会跟着列表缩水：删掉哪一份，对应的那个角色就没人填，当场红。
+ */
+const FINISH_SITE_ROLES = [
+  { role: '骨架（templates/ 下）', test: (s) => s.startsWith('templates/') },
+  { role: '实例（AGENTS.md）', test: (s) => s === 'AGENTS.md' },
+  { role: '判据源头（references/ 下）', test: (s) => s.startsWith('references/') },
+]
+
+/**
+ * 核对清单里缺了哪些角色。**纯函数**，供门禁与行为断言共用。
+ *
+ * 单独抽出来是为了让行为断言能调判据本体：断言里复刻一份循环的话，判据被削弱时
+ * 复制品不会红，「判据坏了」这件事就又没人看着了。
+ */
+export function finishSiteRolesMissing(sites) {
+  return FINISH_SITE_ROLES.filter(({ test }) => !sites.some(test)).map(({ role }) => role)
+}
 
 /**
  * 找出收尾清单的行范围，返回 `{ start, end }`；没有那一段返回 `undefined`。
@@ -548,11 +615,33 @@ function checkReviewContract() {
   }
   note(`验收标准编号：${ACCEPTANCE_ID_SITES.length} 处都是 \`C<数字>\` 形状`)
 
-  // 收尾步骤：两边都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
+  // 「完成后的记录」必须在合并之前写完。这句话一松，第二个 PR 就回来了。
+  {
+    const site = 'templates/work-item.md'
+    const path = join(ROOT, site)
+    if (!existsSync(path)) { fail(`完成后记录：缺 ${site}`) }
+    else {
+      const { ok, why } = completionRecordBeforeMerge(readText(path))
+      if (!ok) {
+        fail(`${site}：${why}——这句一改，合并之后就得再开一个只改记录的提案，`
+          + '而那个提案没人审、也没和这件事绑在一起')
+      }
+    }
+  }
+  note('完成后记录：模板要求「在合并之前写完」')
+
+  // 收尾步骤：三处都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
   // 顺序不能：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」上卡住。
+  //
+  // 三处不是随意挑的：`templates/agents-project.md` 是写给别的项目的骨架，
+  // `AGENTS.md` 是本仓库照着它生成的实例，`references/collaboration.md` 是判据源头。
+  // **判据源头不在核对清单里时，它改了没有任何东西会报**——那是最坏的一处漏网：
+  // 其余两处都跟着它走，源头漂了却要等别人发现。
+  let siteCount = 0
   for (const site of FINISH_SITES) {
     const path = join(ROOT, site)
     if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
+    siteCount += 1
     const state = finishStepsState(readText(path))
     if (state.missing.length > 0) {
       fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
@@ -561,7 +650,13 @@ function checkReviewContract() {
         + 'worktree 没卸就删分支会失败，而报错说的是「未合并」')
     }
   }
-  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在模板与实例里顺序一致`)
+  // **角色也要齐。** 「个数等于列表长度」是恒真的——列表被删短，两个数一起变小。
+  // 按角色判才真正看得见：删掉哪一份，对应的角色就没人填。
+  for (const role of finishSiteRolesMissing(FINISH_SITES)) {
+    fail(`收尾步骤对拍：${role}这一处不在核对清单里——`
+      + '它改了不会有任何东西报错，而其余几处都跟着它走')
+  }
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序一致`)
 }
 
 function checkOwnInstances() {

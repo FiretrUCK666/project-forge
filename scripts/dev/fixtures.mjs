@@ -1802,9 +1802,9 @@ cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要�
   const { finishStepsState } = await loadPreflight()
   const line = (n) => `  ${n}. `
   const body = [
-    line(1) + '合并 PR（**不勾选自动删分支**）；',
-    line(2) + '回读确认 `state=MERGED`；',
-    line(3) + '更新工作记录与 Issue；',
+    line(1) + '把要写的东西写完，并纳入这次 PR：工作记录的「完成后的记录」、验收标准勾选；',
+    line(2) + '合并 PR（**不勾选自动删分支**）；',
+    line(3) + '回读确认 `state=MERGED`；',
     line(4) + '`git switch main && git pull`；',
     line(5) + '`git worktree remove <路径>`；',
     line(6) + '`git branch -d <分支>`；',
@@ -1829,6 +1829,13 @@ cases.push(['收尾七步：齐且有序才通过，缺一步或顺序乱都要�
   if (bad.missing.length !== 0) return '对调两步不应报缺'
   if (!bad.outOfOrder) return 'worktree remove 与 branch -d 对调没有被判成顺序错'
 
+  // 正面三：**把「写记录」挪到合并之后**——这正是逼出多余 PR 的那个顺序。
+  const recordLate = [
+    body[1], body[2], body[0], body[3], body[4], body[5], body[6],
+  ]
+  const late = finishStepsState(wrap(recordLate))
+  if (!late.outOfOrder) return '把「写记录」挪到合并之后没有被判成顺序错——那正是逼出多余 PR 的顺序'
+
   // 反面：整份文档里别处提到某一步，不算数——判据只看那一段的行范围。
   const noise = ['七步之外的正文里提到 git worktree remove 与 git branch -d。', '', wrap(body.slice(0, 2))].join('\n')
   const partial = finishStepsState(noise)
@@ -1841,6 +1848,37 @@ cases.push(['收尾清单没有锚点时报「七步全缺」，不是静默通�
   // 一条判据在锚点找不到时静默返回「没问题」，等于它被削成了恒真。
   const state = finishStepsState('## 别的节\n\n- 什么也没有\n')
   if (state.missing.length !== 7) return `没有锚点时应报缺 7 步，实际 ${state.missing.length}`
+  return true
+}])
+
+cases.push(['收尾步骤核对清单：三种角色一个都不能少', async () => {
+  // 「个数等于列表长度」是恒真的：列表删短，两个数一起变小。所以判据按**角色**查。
+  // 这条断言调的是判据本体——复刻一份循环的话，判据被改松时复制品不会红。
+  const { finishSiteRolesMissing } = await loadPreflight()
+
+  const full = ['templates/agents-project.md', 'AGENTS.md', 'references/collaboration.md']
+  if (finishSiteRolesMissing(full).length !== 0) {
+    return `三处都在却报缺角色：${finishSiteRolesMissing(full).join('、')}`
+  }
+
+  const cases = [
+    ['删掉判据源头', full.filter((s) => s !== 'references/collaboration.md'), '判据源头'],
+    ['删掉实例', full.filter((s) => s !== 'AGENTS.md'), '实例'],
+    ['删掉骨架', full.filter((s) => s !== 'templates/agents-project.md'), '骨架'],
+  ]
+  for (const [name, sites, want] of cases) {
+    const missing = finishSiteRolesMissing(sites)
+    if (!missing.some((role) => role.includes(want))) {
+      return `${name}后没有报缺「${want}」，实际：${missing.join('、') || '（空）'}——`
+        + '那一处从此没人查，而它会一直显示「一致」'
+    }
+  }
+
+  // 反面：把三处换成别的文件，角色对不上就该报，避免判据退化成「非空即过」。
+  const wrong = ['README.md', 'CONTRIBUTING.md', 'SKILL.md']
+  if (finishSiteRolesMissing(wrong).length !== 3) {
+    return `换成不承担这三种角色的文件后，应报缺 3 个角色，实际 ${finishSiteRolesMissing(wrong).length}`
+  }
   return true
 }])
 

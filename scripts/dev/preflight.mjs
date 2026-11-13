@@ -480,6 +480,40 @@ const FINISH_STEPS = [
   /git push origin --delete/,
 ]
 
+/**
+ * 收尾那一节里**必须出现的东西**，与「三处是否一致」无关。
+ *
+ * ## 为什么「互相比对」不够
+ *
+ * 三处对拍只有**相对下限**，没有**绝对下限**：三处一起删掉一条命令，对拍永远说「一致」。
+ * 实测过——三处同时删掉 `git ls-remote`，门禁全绿。**集体遗忘比单点漂移更常见**：
+ * 改规则的人会同时改三处，改错了也同时改错。
+ *
+ * 更要紧的是**语义要素**：第 7 步要求「查两件事」，而对拍只认命令，所以把「有没有下游堆叠
+ * PR」换成一句别的话，三处仍然一致、仍然绿。这就是为什么光有对拍，等于把「同一件事的两半
+ * 各写一处」从打击面里摘出去了——它只是不再误伤措辞，并没有守住内容。
+ *
+ * 所以这里列的是**内容**，不是措辞：每一条是一个「这一节必须交代清楚的东西」。
+ * 判定用宽正则，容得下各种说法；但**不能一条都不说**。
+ */
+const FINISH_REQUIRED = [
+  {
+    id: 'remote-probe',
+    label: '删远端分支之前要先查远端还在不在',
+    re: /ls-remote/,
+  },
+  {
+    id: 'downstream-check',
+    label: '删远端分支之前要先查有没有下游堆叠 PR 以它为 base',
+    re: /(下游|堆叠)/,
+  },
+  {
+    id: 'ask-before-delete',
+    label: '删任何东西之前先把清单列出来问一次',
+    re: /(问人|问一次|点头)/,
+  },
+]
+
 const FINISH_SITES = [
   'templates/agents-project.md',
   'AGENTS.md',
@@ -559,6 +593,38 @@ export function finishCommandsOf(text) {
   if (bodies === undefined) return undefined
   const found = bodies.join('\n').match(/\bgit\s+([a-z][a-z-]*)/g) ?? []
   return [...new Set(found.map((one) => one.replace(/\s+/g, ' ')))].sort()
+}
+
+/**
+ * 收尾那一节里缺了哪些「必须交代清楚的东西」。**纯函数**，供门禁与行为断言共用。
+ *
+ * ## 范围是「整章」，比七步那一小段宽
+ *
+ * 七步的**顺序**只该在那一小段里判：同一句话在别处提到，不算步骤。
+ * 但「这一章有没有交代清楚」要按整章判——因为两份文档的组织方式本来就不同：
+ * 模板把「删之前先问」写成七步下面的一段，参考文档把它写成同一章里的一个小标题。
+ * 按小段判的话，后者会被判成「没交代」，而它就在下面三行。
+ *
+ * 这也是「判据要按结构写，不按位置写」的具体落法：**顺序看小段，内容看整章**。
+ */
+export function finishRequiredMissing(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const anchorAt = lines.findIndex((line) => FINISH_ANCHOR.test(line))
+  if (anchorAt === -1) return FINISH_REQUIRED.map((one) => one.label)
+
+  // 往回找所属的二级标题；找不到就从锚点那行起算。
+  let start = anchorAt
+  for (let i = anchorAt; i >= 0; i -= 1) {
+    if (/^##\s+/.test(lines[i])) { start = i; break }
+  }
+  // 往后到下一个二级标题为止。
+  let end = lines.length
+  for (let i = anchorAt + 1; i < lines.length; i += 1) {
+    if (/^##\s+/.test(lines[i])) { end = i; break }
+  }
+
+  const chapter = lines.slice(start, end).join('\n')
+  return FINISH_REQUIRED.filter((one) => !one.re.test(chapter)).map((one) => one.label)
 }
 
 /**
@@ -713,6 +779,16 @@ function checkReviewContract() {
       if (extra.length > 0) parts.push(`${site} 多了 ${extra.join('、')}`)
       fail(`收尾步骤对拍：${baseline.site} 与 ${site} 教人敲的命令不一致——${parts.join('；')}。`
         + '措辞可以各写各的，命令不行：同一件事在三处教人敲不同的东西，照着做会漏一半')
+    }
+
+    // **内容**对拍：这一节必须交代清楚的几件事，一处都不能少。
+    //
+    // 前面那条是「三处互相比对」，只有相对下限——三处一起删掉一条命令，它永远说一致。
+    // 实测过：三处同时删掉 `git ls-remote`，全绿。而改规则的人恰恰会同时改三处。
+    // 所以这里是**绝对下限**：不管几处一致，这一节都得把这几件事说到。
+    for (const label of finishRequiredMissing(text)) {
+      fail(`${site} 的合并收尾没有交代「${label}」——`
+        + '三处一起漏掉时，互相比对永远说「一致」；只有拿内容去对，才看得见集体遗忘')
     }
   }
   // **角色也要齐。** 「个数等于列表长度」是恒真的——列表被删短，两个数一起变小。

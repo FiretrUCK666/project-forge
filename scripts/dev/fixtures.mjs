@@ -1911,22 +1911,92 @@ cases.push(['收尾七步：三处教人敲的命令必须一致，措辞可以�
     if (!want.includes(cmd)) return `漏了 ${cmd}，实际：${want.join('、')}`
   }
 
-  // 正面：换措辞但命令不变——不该被判成不一致。
+  // **正面：只改白话，六条命令一字不动**——必须判成一致。
+  //
+  // 这一面是判据的全部价值所在：如果「说法不同」也报，两份文档就被焊死了，以后想给不同
+  // 读者写不同的话都不行。所以样本得**保留每一条行内代码**，只换外面的字。
   const reworded = base
-    .replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在，确认之后')
+    .replace('1. 把要写的东西写完；', '1. 该写的先写完，跟着这次改动一起提交；')
+    .replace('2. 合并 PR；', '2. 把 PR 合掉；')
+    .replace('3. 回读确认 `state=MERGED`；', '3. 回去看一眼，状态得是 `state=MERGED`；')
+    .replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在（`git ls-remote --heads origin <分支>`），确认了再')
   const rew = finishCommandsOf(reworded)
-  if (!rew || rew.length !== 5) {
-    return `换措辞后应少一条 git ls-remote（6 → 5），实际：${rew ? rew.join('、') : 'undefined'}`
+  if (!rew || rew.length !== 6) {
+    return `只改白话时命令数应保持 6 条，实际：${rew ? rew.join('、') : 'undefined'}`
+  }
+  if (rew.join('|') !== want.join('|')) {
+    return `只改白话却读出了不同的命令集：${want.join('、')} → ${rew.join('、')}`
   }
 
-  // 反面：连命令一起删——这才是不一致。
-  if (rew.includes('git ls-remote')) return '删掉 ls-remote 之后仍然读得到它'
+  // **反面一：连命令一起删**——这才是不一致。
+  const dropOne = base.replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在，确认之后再')
+  const dropped = finishCommandsOf(dropOne)
+  if (!dropped) return '删掉 ls-remote 那条命令后读不出命令集'
+  if (dropped.includes('git ls-remote')) return '删掉 ls-remote 之后仍然读得到它'
+  if (dropped.length !== 5) return `删掉一条命令后应剩 5 条，实际 ${dropped.length}`
 
-  // 反面：同一份文件里没有七步锚点时，返回 undefined 而不是空数组——
+  // **反面二：没有七步锚点时返回 undefined，不是空数组**——
   // 空数组会被上层当成「没有命令」，于是「找不到」和「一个都没写」长得一样。
   if (finishCommandsOf('## 别的节\n\n什么也没有\n') !== undefined) {
     return '没有锚点时应返回 undefined，不能返回空数组'
   }
+  return true
+}])
+
+cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () => {
+  // 三处互相比对只有**相对下限**：三处一起删掉一条命令，对拍永远说「一致」。
+  // 而改规则的人恰恰会同时改三处——集体遗忘比单点漂移更常见。这条断言盯的是绝对下限。
+  const { finishRequiredMissing } = await loadPreflight()
+
+  const full = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：问到人点头才删。',
+    '',
+  ].join('\n')
+
+  if (finishRequiredMissing(full).length !== 0) {
+    return `要素齐全却报缺：${finishRequiredMissing(full).join('、')}`
+  }
+
+  // 反面一：删掉「下游堆叠 PR」那半句。
+  const noDownstream = full.replace('、有没有下游堆叠 PR 以该分支为 base', '')
+  if (!finishRequiredMissing(noDownstream).some((l) => l.includes('下游堆叠'))) {
+    return '删掉「下游堆叠 PR」之后没有报缺——这一半又没有守卫了'
+  }
+
+  // 反面二：删掉 ls-remote。
+  const noProbe = full.replace('（`git ls-remote --heads origin <分支>`）', '')
+  if (!finishRequiredMissing(noProbe).some((l) => l.includes('远端还在不在'))) {
+    return '删掉 ls-remote 之后没有报缺'
+  }
+
+  // 反面三：删掉「删之前先问」。
+  const noAsk = full.replace('  **第 5 步之前先把要删的清单列出来问一次**：问到人点头才删。\n', '')
+  if (!finishRequiredMissing(noAsk).some((l) => l.includes('问一次'))) {
+    return '删掉「删之前先问」之后没有报缺'
+  }
+
+  // 反面四：**同一个词出现在章外的别处，不算交代**——
+  // 这正是先前那类「话说得比扫过的范围大」的毛病。范围是本章，不是全文。
+  const outside = [
+    '## 别的节', '',
+    '这里顺嘴提到 git ls-remote、下游堆叠 PR、问人点头。', '',
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '',
+    '## 下一节', '',
+    '什么也没有。', '',
+  ].join('\n')
+  if (finishRequiredMissing(outside).length !== 3) {
+    return `章外提到不算交代：应报缺 3 项，实际 ${finishRequiredMissing(outside).length} 项`
+  }
+
   return true
 }])
 

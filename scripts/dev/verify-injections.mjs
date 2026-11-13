@@ -121,6 +121,17 @@ const INJECTIONS = [
     expect: '教人敲的命令不一致',
   },
   {
+    // **三处一起漏**——这是互相比对永远抓不到的形状：对拍只有相对下限，三处一致就通过。
+    // 而改规则的人恰恰会同时改三处，改错了也同时改错。内容下限是绝对下限。
+    id: 'I9e',
+    what: '三处一起删掉「下游堆叠 PR」这半句（集体遗忘）',
+    file: 'references/collaboration.md',
+    from: '、有没有下游堆叠 PR 以该分支为 base',
+    to: '',
+    expect: '没有交代',
+    alsoDropIn: ['templates/agents-project.md', 'AGENTS.md'],
+  },
+  {
     id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
     file: 'templates/work-item.md',
@@ -247,6 +258,24 @@ for (const inj of INJECTIONS) {
     continue
   }
   writeFileSync(full, original.replace(inj.from, inj.to), 'utf8')
+
+  // 有些形状只有在**多处同时改**时才成立（集体遗忘）。它们额外带一份清单，
+  // 把同一处改动也施加到别的文件上——只改一处的注入，抓不到「三处一起错」这一类。
+  const extras = []
+  if (Array.isArray(inj.alsoDropIn)) {
+    for (const other of inj.alsoDropIn) {
+      const otherPath = join(ROOT, other)
+      const otherText = readFileSync(otherPath, 'utf8')
+      if (!otherText.includes(inj.from)) {
+        process.stdout.write(`${inj.id} 跳过：${other} 里找不到要替换的那一段\n`)
+        bad += 1
+        continue
+      }
+      extras.push([otherPath, otherText])
+      writeFileSync(otherPath, otherText.replace(inj.from, inj.to), 'utf8')
+    }
+  }
+
   try {
     // **两套门禁都跑。** 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人
     // 看着它。按路径前缀猜「该由谁看」，猜错的那次注入就不会红，而「没红」会被读成
@@ -262,6 +291,7 @@ for (const inj of INJECTIONS) {
     }
   } finally {
     writeFileSync(full, original, 'utf8')
+    for (const [path, text] of extras) writeFileSync(path, text, 'utf8')
   }
 }
 

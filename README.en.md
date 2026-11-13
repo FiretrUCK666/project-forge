@@ -165,27 +165,45 @@ Three things make up most of how it feels to use:
 - Make your private repo public (private by default; going public needs your explicit word)
 - Force-push, rewrite pushed history, or delete a published release
 - **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
-  open a PR; merging is left to a person, and tagging, release pages, and registry publishes
-  all need your explicit word
+  open a PR → independent review → merge; tagging, release pages, and registry publishes all
+  need your explicit word
 - Pick a license for you, or invent an identity
 - **Remove anything it left behind without your explicit confirmation**
 
 It sorts actions by **whether they can be undone**, not by whether they leave the machine:
 pushing your own branch, opening a PR, and editing a PR can all be undone (delete the branch,
-close the PR), so they are ordinary work and need nobody's nod. Merging into the default
-branch, publishing a release, flipping a private repo public, and rewriting history cannot be
-undone — those stop and wait for you. Force-pushing and rewriting pushed history never run
-automatically.
+close the PR), so they are ordinary work and need nobody's nod. Publishing a release, flipping
+a private repo public, and rewriting history cannot be undone — those stop and wait for you.
+Force-pushing and rewriting pushed history never run automatically.
+
+**The reviewer finishes the merge.** Once the independent review passes, that same reviewer
+merges — it is not handed back to a person for one more click. People do not read the code; a
+merge gate in human hands becomes a rubber stamp that adds waiting and no judgement. The
+judgement already happened in the review, which had the frozen acceptance criteria, the diff,
+the raw gate output, and a fault injection. Proposals from outside contributors work the same
+way; the protection against strangers sits **before** the review (read the diff first, disable
+lifecycle scripts when running gates).
+
+**Only one class needs a human nod: weakening a gate.** Deleting tests, relaxing assertions,
+adding skip markers, turning a check into a warning, loosening CI — an ordinary change that goes
+wrong turns the next gate red; this one goes wrong and **no gate will ever turn red again,
+including this time**, while looking like "the build is green". Want to be more conservative?
+Write `merge-authority: human` in the project's `AGENTS.md` under `## 取舍`.
 
 **The same rule governs how this skill is maintained.** It governs other projects and it
-governs itself: branch → gates green → push the branch → open a PR → a person merges. Not one
-more confirmation, not one less independent review.
+governs itself: branch → gates green → push the branch → open a PR → independent review →
+merge. Not one more confirmation, not one less review.
 
 Daily work and releasing are two different things, and it only does the first by default.
 Not out of caution for its own sake: the two differ in whether they can be undone. A wrong
 push can be reverted with a follow-up commit; a published version cannot be taken back —
 people have already installed it. "Several changes piled up" or "the version number looks
 due for a bump" are not reasons to release.
+
+**It always asks before clearing traces.** Branches, worktrees and remote branches belong to
+someone's machine, and deleting them cannot be undone. It lists exactly what would go (which
+worktree, which local branch, which remote branch) and waits for your word. When it cannot reach
+you, that list goes into the report and nothing is deleted — no answer is not consent.
 
 ## Problems and contributing
 
@@ -200,7 +218,7 @@ due for a bump" are not reasons to release.
   there are, and how to submit a change. Changes on high-risk paths (judgement logic, the gates
   themselves, package boundaries, the release chain) need an independent review round, and that
   review reports per acceptance criterion frozen before the work started — see
-  `references/collaboration.md` section 5 for the criteria and the stop rules.
+  the "Seven, the review loop" section of `references/collaboration.md` for the criteria and the stop rules.
 
 ## What is inside
 

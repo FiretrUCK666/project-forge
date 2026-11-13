@@ -49,6 +49,7 @@ import { join, resolve } from 'node:path'
 import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
 import { parseMarkers } from './lib/protocol.mjs'
+import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 
 /** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
 function readdirSyncSafe(dir) {
@@ -348,6 +349,20 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     }
   }
 
+  // ── 契约回查：已经写下的那句话现在还成立吗 ──────────────────────────
+  //
+  // `agents.*` 那半段判的是「这份文件与**这次渲染**是否一致」——它拿同一批事实
+  // 两头各算一次，两边一起错时比出来的结果是「一致」。这一半换方向：从**文字本身**
+  // 读出它承诺了什么，再拿项目现状核对。判据在 `lib/claims.mjs`，这里只接线。
+  if (agentsText) {
+    const existsRel = (rel) => existsSync(join(root, rel))
+    for (const item of verifyClaims(agentsText, facts, existsRel)) {
+      add(finding(item.ok ? 'ok' : 'missing', 'agents', item.id, item.detail, {
+        ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+      }))
+    }
+  }
+
   // ── 文档 ──────────────────────────────────────────────────────────
   if (!facts.docs.readme) {
     add(finding('missing', 'docs', 'docs.readme',
@@ -522,14 +537,14 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {
           decision: 'no-collab-templates',
-          ref: { file: 'references/collaboration.md', section: '六、谁能合：按「收不收得回来」分档' },
+          ref: { file: 'references/collaboration.md', section: '八、谁能合' },
         }))
     }
     if (!facts.docs.issueTemplates) {
       add(finding('notice', 'collaboration', 'collab.issue-templates',
         '有远端却没有 Issue 模板——每份缺陷报告都要来回追问「环境是什么、怎么复现」', {
           decision: 'no-collab-templates',
-          ref: { file: 'references/collaboration.md', section: '三、收到别人的 Issue' },
+          ref: { file: 'references/collaboration.md', section: '五、收到别人的 Issue' },
         }))
     }
     if (facts.docs.workflowFacts.usesPullRequestTarget && !facts.docs.workflowFacts.checkoutsPrHead) {

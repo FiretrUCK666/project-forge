@@ -160,7 +160,7 @@ export function toMarkdown(facts) {
   if (facts.gaps.length > 0) {
     lines.push('## 缺口')
     lines.push('')
-    for (const gap of facts.gaps) lines.push(`- ${gap}`)
+    for (const gap of facts.gaps) lines.push(`- ${gap.text}`)
     lines.push('')
   } else {
     lines.push('## 缺口')
@@ -172,7 +172,7 @@ export function toMarkdown(facts) {
   if (facts.questions.length > 0) {
     lines.push('## 要问用户的事')
     lines.push('')
-    for (const q of facts.questions) lines.push(`- ${q}`)
+    for (const q of facts.questions) lines.push(`- ${q.text}`)
     lines.push('')
   }
 

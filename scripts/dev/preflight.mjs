@@ -38,6 +38,7 @@ import {
 } from '../lib/protocol.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
 import { isMainModule } from '../lib/text.mjs'
+import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -250,9 +251,15 @@ const PUSH_TIER_RULE = [
     any: [/推(?:自己|出)?的?分支|推分支/, /push(?:ing)? (?:your|the) (?:own )?branch|push-a-branch/],
   },
   {
-    // 说法：合并才是那一档要人点头的动作。
-    what: '合并要人点头',
-    any: [/合并[^\n]{0,12}(?:交人|人合并|人工|等(?:人|你)|点头)|人工合并|交人/, /merg\w*[^\n]{0,24}(?:by a person|left to a person|person merges|wait for you)/i],
+    // 说法：合并由审查者做完，不再往人手里递一道。
+    what: '审查通过就由审查者合',
+    any: [/审查者(?:直接)?(?:合|合并)|审查通过[^\n]{0,20}(?:合|闭环)|由(?:那个)?审查/,
+      /reviewer merges|merges? (?:it )?(?:directly|right away)|the reviewer finishes/i],
+  },
+  {
+    // 说法：唯一必须人点头的一类是弱化门禁。
+    what: '弱化门禁必须人点头',
+    any: [/弱化门禁/, /weaken\w* (?:a )?gate|loosen\w* (?:a )?gate|relax\w* (?:the )?gate/i],
   },
 ]
 
@@ -292,7 +299,7 @@ function checkPushSemantics() {
       fail(`${name} 第 ${line} 行还把「提交 + 推送」当作日常的终点——推自己的分支撤得回来，那一档的终点是合并`)
     }
   }
-  note(`推送分档：${PUSH_TIER_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，合并要人点头）`)
+  note(`推送分档：${PUSH_TIER_DOCS.length} 份文件说法一致（分档看可撤回性，推分支属日常，审查通过由审查者合，只有弱化门禁要人点头）`)
 }
 
 /**
@@ -368,9 +375,12 @@ export function acceptanceIdMissing(text) {
  * 因为分支还被某个 worktree 检出着时 `git branch -d` 一定失败，而它报的原因是「未合并」。
  * 顺序反了，人就会去用 `-D` 强删，而那会把没合进去的东西一起删掉。
  *
- * 锚点见下面的 `FINISH_ANCHOR`：收尾清单不是独立一节，它是「日常协作」里的第四步。
+ * ## 锚点是「合并收尾」四个字，不是「第几步：合并收尾」
+ *
+ * 章节编号会随文档增删而变，绑在编号上的锚点一重排就找不到——找不到时的表现是
+ * 「七步全缺」，一条**永远为真**的判据，比没有更坏。这里只认那句话本身。
  */
-const FINISH_ANCHOR = /第四步：合并收尾/
+const FINISH_ANCHOR = /合并收尾/
 const FINISH_STEPS = [
   /合并 PR/,
   /回读确认/,
@@ -705,11 +715,126 @@ function checkLinks() {
 }
 
 /**
- * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在那份文件真实存在的
- * `##` 标题上。
+ * 全仓库不许出现「第 N 节」这种指针，并且所有「`references/x.md`「标题」」都真的存在。
+ *
+ * ## 两条判据，治的是同一件事：指针绑在会动的东西上
+ *
+ * **节号会随重排失效，标题不会。** 一份文档插进一节，后面全部节号加一——十几处指路同时
+ * 指错，而它们不会报错，只会让人点进去发现「这一节讲的是别的事」。所以节号一律不许出现，
+ * 指路只写标题，并由这里核对标题真的在。
+ *
+ * 光禁节号不够：改成标题之后，标题也可能被改名。两种错法的表现一样（指路落空），
+ * 所以放在同一个检查里，一次说清。
+ */
+function checkAnchors() {
+  // 一、不许有「第 N 节」。例外是那几份**本身就在讲章节结构**的文档（本文件的判据说明、
+  //     历史记录），它们在 `HISTORY_PATHS` 里已经排除了。
+  const scanned = [
+    'SKILL.md', 'AGENTS.md', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'RELEASING.md',
+    ...walk(join(ROOT, 'references'), (f) => f.endsWith('.md')),
+    ...walk(join(ROOT, 'templates'), (f) => f.endsWith('.md')),
+    ...walk(join(ROOT, '.github'), (f) => f.endsWith('.md')),
+  ]
+  const SECTION_PTR = /第[一二三四五六七八九十]+节/
+  let sectionHits = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    const lines = readText(file).replace(/\r\n/g, '\n').split('\n')
+    for (const [i, line] of lines.entries()) {
+      if (!SECTION_PTR.test(line)) continue
+      // 本检查自己的说明文字里会引用这个形状，标出来跳过。
+      if (line.includes('section-pointer-ok')) continue
+      sectionHits += 1
+      fail(`${name} 第 ${i + 1} 行用了节号指针——重排一次就全部指错，而它不会报错；改写成「标题名」`)
+    }
+  }
+  if (sectionHits === 0) note('指路形状：全仓库没有节号指针，指路一律用标题名')
+
+  // 二、每一处「`references/x.md`「标题」」都要解析到真实的二级标题。
+  const headingsCache = new Map()
+  const headingsOfFile = (file) => {
+    if (!headingsCache.has(file)) {
+      const full = join(ROOT, file)
+      headingsCache.set(file, existsSync(full)
+        ? new Set(readText(full).replace(/\r\n/g, '\n').split('\n')
+          .map((l) => /^##\s+(.+?)\s*$/.exec(l)?.[1]).filter(Boolean))
+        : null)
+    }
+    return headingsCache.get(file)
+  }
+
+  let checked = 0
+  for (const file of scanned) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    if (HISTORY_PATHS.some((re) => re.test(name))) continue
+    const text = readText(file).replace(/\r\n/g, '\n')
+    // 两种写法都认：带反引号的文件名 + 「标题」，以及同文件内的「N、标题」简写不算。
+    for (const m of text.matchAll(/`(references\/[A-Za-z0-9_.-]+\.md)`\s*的?\s*「([^」]+)」/g)) {
+      const [, refFile, section] = m
+      const have = headingsOfFile(refFile)
+      if (have === null) { fail(`${name} 指向不存在的文件 ${refFile}`); continue }
+      checked += 1
+      const hits = matchHeadings(have, section)
+      if (hits.length === 0) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，但那份文件里没有以它开头的二级标题——指路落空`)
+      } else if (hits.length > 1) {
+        fail(`${name} 指向 ${refFile} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——`
+          + '指路要多写几个字让它唯一')
+      }
+    }
+  }
+  note(`指路核对：review.mjs 与正文共 ${checked} 处命名锚点都落在真实标题上`)
+}
+
+/**
+ * 勘察报的每条缺口，体检那边都必须有人接。
+ *
+ * 判据在 `scripts/dev/gap-coverage.mjs` 里（它是唯一实现，执行器与断言共用）。
+ * 这一条治的是「勘察说了、没人管」：加了一条新缺口却忘了接线，报告里会永远挂着一条
+ * 悬空结论，而没有任何东西报错。
+ */
+function checkGapCoverage() {
+  const state = gapCoverage(ROOT)
+  for (const one of state.duplicated) {
+    fail(`缺口覆盖：${one}——一条缺口只能落一档，写两档会让结论出现两个版本`)
+  }
+  for (const one of state.dangling) {
+    fail(`缺口覆盖：${one} 在体检里没有这个 id——映射看着配好，实际指向一条永远不会出现的结论`)
+  }
+  for (const id of state.unclaimed) {
+    fail(`缺口覆盖：${id} 体检那边没人接——勘察报了、没人管；给 survey.mjs 那条规则补 `
+      + "review / decision / surveyOnly 三选一")
+  }
+  if (state.ok.length > 0) note(`缺口覆盖：${state.ok.length} 条各有处置（体检 / 表态 / 仅勘察）`)
+}
+
+/**
+ * 一处指路能不能落在那份文件的某个二级标题上。**纯函数**，两处调用者共用。
+ *
+ * ## 前缀匹配，不是逐字相同
+ *
+ * 指路可以只写「七、审查循环」，不必抄全那个长标题。要求逐字相同会把标题锁死——改一个
+ * 副标题就红，最后一定会被加一个例外表绕过去。
+ *
+ * 前缀够用是因为**唯一性由下面那条判据保证**：两节同前缀时返回多个命中，调用方报红。
+ * 于是「写得短」与「指得准」两件事同时成立，而代价只是多写几个字。
+ */
+export function matchHeadings(headings, section) {
+  const wanted = String(section).replace(/`/g, '')
+  return [...headings].filter((h) => h.replace(/`/g, '').startsWith(wanted))
+}
+
+/**
+ * `review.mjs` 里每条指路（`file:` + `section:`）都必须落在真实存在的二级标题上。
  *
  * 这一条治的是一个实际发生过的错：指路写「第四节：许可协议」，而那一节实际是 README。
  * **节号会随增删章节失效，标题不会**——所以指路只写标题，这里核对标题存在。
+ *
+ * 比对规则与 `checkAnchors` 共用 `matchHeadings`：一处指路在两处判据下得到两个答案是
+ * 最坏的情况——修了一个还红着，而红的原因看起来像「指路写错了」。
  */
 function checkReferenceTargets() {
   const reviewPath = join(ROOT, 'scripts', 'review.mjs')
@@ -730,8 +855,11 @@ function checkReferenceTargets() {
       ))
     }
     checked += 1
-    if (!headingsCache.get(file).has(section)) {
-      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有这个二级标题——指路会落空`)
+    const hits = matchHeadings(headingsCache.get(file), section)
+    if (hits.length === 0) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，但那份文件里没有以它开头的二级标题——指路会落空`)
+    } else if (hits.length > 1) {
+      fail(`review.mjs 指向 ${file} 的「${section}」，对上了 ${hits.length} 个标题（${hits.join(' ／ ')}）——指路要多写几个字让它唯一`)
     }
   }
   note(`指路核对：${checked} 处都指在真实标题上`)
@@ -1031,6 +1159,9 @@ function main() {
 
   checkEntry()
   checkLinks()
+  checkReferenceTargets()
+  checkAnchors()
+  checkGapCoverage()
   checkScripts()
   checkTemplates()
   checkPlatformLock()

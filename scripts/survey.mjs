@@ -1435,6 +1435,205 @@ function judgeMaturity(facts) {
 }
 
 /**
+ * 缺口与提问的**声明表**。每一条都有稳定 id。
+ *
+ * ## 为什么必须有 id
+ *
+ * 缺口原本只是一句话。两件事因此做不到：
+ *
+ *   一、**对拍**——`review.mjs` 报的结论要能与勘察的缺口一一对上，靠措辞对不上：
+ *       改一个字就断。断掉之后，一条缺口可以永远没人处理，而没有任何东西会发现。
+ *   二、**覆盖核对**——新增一条缺口时，没人知道「体检那边要不要也加一条」。
+ *
+ * id 是判据，措辞是排版。表里每一行都是 `{ id, when, text, machineLocal?, question? }`。
+ *
+ * `machineLocal` 的条目不计入成熟度：它们在干净克隆里必然缺失（署名没配、机器上没有 git），
+ * 判进去会让每台新机器都红一次，而项目本身完全健康。
+ *
+ * `question` 是「这条缺口对应的、只有使用者能定的那个问题」。缺口与提问成对写在一起，
+ * 而不是散落在两个 if 里——散着写的时候，加了一条缺口却忘了加那个问题，没有任何东西会报。
+ */
+const GAP_RULES = [
+  {
+    id: 'git.unavailable',
+    when: (f) => f.git.available === false,
+    text: '这台机器上找不到 git —— 版本管理这一整条路暂时走不了',
+    machineLocal: true,
+    review: 'git.unavailable',
+  },
+  {
+    // 裸仓库没有工作区。早先它被判成 present:false，于是缺口写着「还没有版本库」，
+    // 下一步就会有人在这里 `git init` —— 而它明明已经是一个仓库。
+    id: 'git.bare',
+    when: (f) => f.git.available !== false && f.git.isBare === true,
+    text: '这是一个**裸仓库**：没有工作区，改文件的地方根本不存在。要先克隆出工作区再改',
+    surveyOnly: '裸仓库没有工作区，体检的「版本库就绪」那一条只看 present，判不出这一档',
+  },
+  {
+    id: 'git.not-repo-root',
+    when: (f) => f.git.available !== false && f.git.isBare !== true
+      && f.git.present === true && f.git.isRepoRoot === false,
+    text: (f) => `这个目录在外层仓库 \`${f.git.workTreeRoot}\` 里面，不是仓库根 —— 边界没说清之前不能提交或推送`,
+    question: '这个目录该并入外层仓库，还是在这里单独建一个仓库？',
+    review: 'git.nested',
+  },
+  {
+    id: 'git.absent',
+    when: (f) => f.git.available !== false && f.git.isBare !== true && f.git.present !== true,
+    text: '还没有版本库',
+    review: 'git.absent',
+  },
+  {
+    id: 'git.nested-repos',
+    when: (f) => (f.git.nestedRepos ?? []).length > 0,
+    text: (f) => `子目录里还有独立仓库（${f.git.nestedRepos.slice(0, 3).join('、')}）—— 父目录建库会把它们变成「看着像目录、其实是独立仓库」的东西，两边的提交互不可见`,
+    question: '这些子仓库该当子模块、各自独立，还是并入父仓库？三种处置互相不兼容，选错要拆历史',
+    surveyOnly: '嵌套仓库要递归扫子目录才知道，体检不重扫——它读的是勘察给的 facts.git.nestedRepos',
+  },
+  {
+    id: 'git.identity-name',
+    when: (f) => f.git.present === true && !f.git.identity?.name,
+    text: '提交署名缺 `user.name`',
+    machineLocal: true,
+    review: 'git.identity',
+  },
+  {
+    id: 'git.identity-email',
+    when: (f) => f.git.present === true && !f.git.identity?.email,
+    text: '提交署名缺 `user.email`',
+    machineLocal: true,
+    review: 'git.identity',
+  },
+  {
+    id: 'git.shallow',
+    when: (f) => f.git.present === true && f.git.isShallow === true,
+    text: '这是**浅克隆**（`--depth`）—— 扫历史找凭据会漏，而漏的方式是「看起来干净」',
+    surveyOnly: '浅克隆只影响「扫历史找凭据」的完整性，体检那边由 secrets.scan-truncated 单独报「没扫全」——两处都报会让同一件事出现两条结论',
+  },
+  {
+    id: 'ignores.output-dirs',
+    when: (f) => (f.ignores.unignoredOutputDirs ?? []).length > 0,
+    each: (f) => f.ignores.unignoredOutputDirs.map((dir) => ({
+      text: `依赖或产物目录没有被忽略：\`${dir}\``,
+    })),
+    review: 'git.output-dirs',
+  },
+  {
+    id: 'ignores.ignored-but-tracked',
+    when: (f) => (f.ignores.ignoredButTracked ?? []).length > 0,
+    text: (f) => `有 ${f.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则 —— 忽略规则对已入库的文件无效`,
+    review: 'git.ignored-tracked',
+  },
+  {
+    id: 'secrets.tracked',
+    when: (f) => f.risks.secretFiles.some((x) => x.status === 'tracked')
+      || f.risks.secretContent.some((c) => c.status === 'tracked'),
+    text: (f) => {
+      const where = [
+        ...f.risks.secretFiles.filter((x) => x.status === 'tracked').map((x) => x.file),
+        ...f.risks.secretContent.filter((c) => c.status === 'tracked').map((c) => `${c.file}:${c.line}`),
+      ]
+      return `凭据形状的东西已经在版本库里了（${where.join('、')}）—— 改文件不够，要轮换并把历史处理掉`
+    },
+    review: 'secrets.tracked',
+  },
+  {
+    id: 'secrets.exposed',
+    when: (f) => f.risks.secretFiles.some((x) => x.status === 'exposed'),
+    text: (f) => `有未忽略的敏感文件：${f.risks.secretFiles.filter((x) => x.status === 'exposed').map((x) => x.file).join('、')}`,
+    review: 'secrets.exposed',
+  },
+  {
+    id: 'docs.readme',
+    when: (f) => !f.docs.readme,
+    text: '没有 README —— 别人打开仓库第一眼没有说明',
+    review: 'docs.readme',
+  },
+  {
+    // AGENTS.md 不是「偏好」：没有它，AI 每次新开会话都要重新摸一遍这个项目，
+    // 而摸出来的结论每次都可能不同。有仓库、有 README、却没有契约，是一处真缺口。
+    id: 'docs.agents',
+    when: (f) => !f.docs.agents && f.scale.effectiveFiles > 0,
+    text: '没有 AGENTS.md —— AI 每次新开会话都要重新摸一遍这个项目，摸出来的结论每次可能不同',
+    review: 'agents.absent',
+  },
+  {
+    // `.gitattributes` 必须在**首次提交之前**就位，晚了要重新规范化整个工作区。
+    id: 'ignores.gitattributes',
+    when: (f) => f.git.present === true && !f.ignores.hasGitattributes && (f.git.trackedFiles ?? 0) > 0,
+    text: '没有 `.gitattributes` —— 跨平台协作时同一份文件在两台机器上算出不同的字节，而已经入库的文件要重新规范化',
+    review: 'git.gitattributes',
+  },
+  {
+    // LICENSE 不是缺口，是**待表态**——除非这个包要发布：下游合规检查会因为「授权不明」拒绝它。
+    id: 'docs.license-publishable',
+    when: (f) => !f.docs.license && f.ecosystem.publishable === true,
+    text: '清单声明了可发布的包，却没有 LICENSE —— 下游的合规检查会因为「授权不明」拒绝使用',
+    review: 'license.publishable',
+  },
+  {
+    id: 'ci.pull-request-target',
+    when: (f) => f.docs.workflowFacts?.usesPullRequestTarget === true
+      && f.docs.workflowFacts?.checkoutsPrHead === true,
+    text: '工作流用了 `pull_request_target` 又检出了提案那边的代码 —— 这等于让任意陌生人拿你的密钥跑他的代码',
+    review: 'ci.pwn-request',
+  },
+]
+
+/**
+ * 只有使用者能定的问题。每条也带 id——它和缺口一样要能被对拍。
+ *
+ * 缺口与提问分开列，是因为它们的处置不同：缺口是「不做会出事」，提问是「不做也行，
+ * 但要你表态」。混成一列时，私有项目会被永远报「缺许可证」，而它其实没有任何该修的东西。
+ */
+const QUESTION_RULES = [
+  {
+    id: 'q.license',
+    when: (f) => !f.docs.license,
+    text: '这个项目要不要公开授权？要的话选哪个许可证（MIT / Apache-2.0 / BSD-3-Clause）；不要就明确不放',
+  },
+  {
+    id: 'q.npm',
+    when: (f) => f.ecosystem.publishable === true && (f.ecosystem.kinds ?? []).includes('node'),
+    text: '这个项目要不要发到 npm？不发就补上 `private: true` 防误发',
+  },
+  {
+    id: 'q.unknown-ecosystem',
+    when: (f) => (f.ecosystem.kinds ?? []).includes('unknown'),
+    text: '认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？',
+  },
+  {
+    // 这一条不是格式检查，是**权限问题**：判不出「这是不是正本」，
+    // 下一步该推主干还是开 PR 就没有依据。
+    id: 'q.role',
+    when: (f) => f.git.present === true && typeof f.git.remote === 'string' && f.git.remote.length > 0
+      && f.git.role === 'undetermined',
+    text: '本地远端是不是这个项目的正本？项目里没有声明源仓库（清单的 repository 一类），'
+      + '所以比不出来——说不清的话，按贡献者处置（拉分支、开 PR），不推主干、不打标签',
+  },
+]
+
+/** 缺口 / 提问的文字，按原顺序。人读的报告与 JSON 的 `text` 都是这一份。 */
+export function textsOf(items) {
+  return (items ?? []).map((one) => (typeof one === 'string' ? one : one.text))
+}
+
+/** 这条规则在这份事实上命中了吗。`each` 的规则见一条展开一次。 */
+function expandRule(rule, facts) {
+  if (typeof rule.each === 'function') {
+    if (!rule.when(facts)) return []
+    return rule.each(facts).map((one) => ({ id: rule.id, text: one.text }))
+  }
+  if (!rule.when(facts)) return []
+  const text = typeof rule.text === 'function' ? rule.text(facts) : rule.text
+  return [{ id: rule.id, text }]
+}
+
+/** 缺口与提问的全部 id。门禁用它核对「每个 id 都被体检覆盖」。 */
+export const GAP_RULE_IDS = Object.freeze(GAP_RULES.map((r) => r.id))
+export const QUESTION_RULE_IDS = Object.freeze(QUESTION_RULES.map((r) => r.id))
+
+/**
  * 缺口清单只放「不做就会出事」的东西，**不放偏好**。
  * 单语 README、没有贡献指南、没有 CI 都不是缺口——把偏好写成缺口，
  * 会让每个项目都欠一笔永远还不完的债，而还的方式是加 flag 把它压下去。
@@ -1442,102 +1641,20 @@ function judgeMaturity(facts) {
 function judgeGaps(facts) {
   const gaps = []
   const questions = []
+  const projectGaps = []
 
-  if (facts.git.available === false) {
-    gaps.push('这台机器上找不到 git —— 版本管理这一整条路暂时走不了')
-  } else if (facts.git.isBare === true) {
-    // 裸仓库没有工作区。早先它被判成 present:false，于是缺口写着「还没有版本库」，
-    // 下一步就会有人在这里 `git init` —— 而它明明已经是一个仓库。
-    gaps.push('这是一个**裸仓库**：没有工作区，改文件的地方根本不存在。要先克隆出工作区再改')
-  } else if (facts.git.present === true && facts.git.isRepoRoot === false) {
-    gaps.push(`这个目录在外层仓库 \`${facts.git.workTreeRoot}\` 里面，不是仓库根 —— 边界没说清之前不能提交或推送`)
-    questions.push('这个目录该并入外层仓库，还是在这里单独建一个仓库？')
-  } else if (facts.git.present !== true) {
-    gaps.push('还没有版本库')
-  }
-
-  if ((facts.git.nestedRepos ?? []).length > 0) {
-    gaps.push(`子目录里还有独立仓库（${facts.git.nestedRepos.slice(0, 3).join('、')}）—— 父目录建库会把它们变成「看着像目录、其实是独立仓库」的东西，两边的提交互不可见`)
-    questions.push('这些子仓库该当子模块、各自独立，还是并入父仓库？三种处置互相不兼容，选错要拆历史')
-  }
-
-  if (facts.git.present === true) {
-    if (!facts.git.identity?.name) gaps.push('提交署名缺 `user.name`')
-    if (!facts.git.identity?.email) gaps.push('提交署名缺 `user.email`')
-    if (facts.git.isShallow === true) {
-      gaps.push('这是**浅克隆**（`--depth`）—— 扫历史找凭据会漏，而漏的方式是「看起来干净」')
+  for (const rule of GAP_RULES) {
+    for (const item of expandRule(rule, facts)) {
+      gaps.push(item)
+      if (rule.machineLocal !== true) projectGaps.push(item)
+    }
+    if (rule.question !== undefined && rule.when(facts)) {
+      questions.push({ id: `${rule.id}.question`, text: rule.question })
     }
   }
-
-  for (const dir of facts.ignores.unignoredOutputDirs) {
-    gaps.push(`依赖或产物目录没有被忽略：\`${dir}\``)
+  for (const rule of QUESTION_RULES) {
+    for (const item of expandRule(rule, facts)) questions.push(item)
   }
-  if (facts.ignores.ignoredButTracked.length > 0) {
-    gaps.push(`有 ${facts.ignores.ignoredButTracked.length} 个已入库文件同时命中忽略规则 —— 忽略规则对已入库的文件无效`)
-  }
-
-  const trackedFiles = facts.risks.secretFiles.filter((f) => f.status === 'tracked')
-  const exposedFiles = facts.risks.secretFiles.filter((f) => f.status === 'exposed')
-  const trackedContent = facts.risks.secretContent.filter((c) => c.status === 'tracked')
-  if (trackedFiles.length > 0 || trackedContent.length > 0) {
-    const where = [
-      ...trackedFiles.map((f) => f.file),
-      ...trackedContent.map((c) => `${c.file}:${c.line}`),
-    ]
-    gaps.push(`凭据形状的东西已经在版本库里了（${where.join('、')}）—— 改文件不够，要轮换并把历史处理掉`)
-  }
-  if (exposedFiles.length > 0) {
-    gaps.push(`有未忽略的敏感文件：${exposedFiles.map((f) => f.file).join('、')}`)
-  }
-
-  if (!facts.docs.readme) gaps.push('没有 README —— 别人打开仓库第一眼没有说明')
-  // AGENTS.md 不是「偏好」：没有它，AI 每次新开会话都要重新摸一遍这个项目，
-  // 而摸出来的结论每次都可能不同。有仓库、有 README、却没有契约，是一处真缺口。
-  if (!facts.docs.agents && facts.scale.effectiveFiles > 0) {
-    gaps.push('没有 AGENTS.md —— AI 每次新开会话都要重新摸一遍这个项目，摸出来的结论每次可能不同')
-  }
-  // `.gitattributes` 也一樣：它必须在**首次提交之前**就位，晚了要重新规范化整个工作区。
-  if (facts.git.present === true && !facts.ignores.hasGitattributes && (facts.git.trackedFiles ?? 0) > 0) {
-    gaps.push('没有 `.gitattributes` —— 跨平台协作时同一份文件在两台机器上算出不同的字节，而已经入库的文件要重新规范化')
-  }
-  // LICENSE 不是缺口，是**待表态**。
-  //
-  // 私有项目不放许可证是对的，公开项目才需要它——而「这个项目要不要公开」只有使用者能定。
-  // 早先它被无条件写进 gaps，于是私有仓库永远凑不齐「项目类缺口为空」，一辈子卡在
-  // `partial`，而它其实没有任何该修的东西。判据与 `review.mjs` 对齐：可发布的包没有
-  // 许可证才算真缺口（下游合规检查会拒），其余一律进 questions。
-  if (!facts.docs.license) {
-    if (facts.ecosystem.publishable) {
-      gaps.push('清单声明了可发布的包，却没有 LICENSE —— 下游的合规检查会因为「授权不明」拒绝使用')
-    }
-    questions.push('这个项目要不要公开授权？要的话选哪个许可证（MIT / Apache-2.0 / BSD-3-Clause）；不要就明确不放')
-  }
-  if (facts.docs.workflowFacts.usesPullRequestTarget && facts.docs.workflowFacts.checkoutsPrHead) {
-    gaps.push('工作流用了 `pull_request_target` 又检出了提案那边的代码 —— 这等于让任意陌生人拿你的密钥跑他的代码')
-  }
-
-  if (facts.ecosystem.publishable && facts.ecosystem.kinds.includes('node')) {
-    questions.push('这个项目要不要发到 npm？不发就补上 `private: true` 防误发')
-  }
-  if (facts.ecosystem.kinds.includes('unknown')) {
-    questions.push('认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？')
-  }
-  // 角色比不出来时，把问题问清楚。这一条不是格式检查，是**权限问题**：
-  // 判不出「这是不是正本」，下一步该推主干还是开 PR 就没有依据。
-  if (facts.git.present === true && typeof facts.git.remote === 'string' && facts.git.remote.length > 0
-    && facts.git.role === 'undetermined') {
-    questions.push('本地远端是不是这个项目的正本？项目里没有声明源仓库（清单的 repository 一类），'
-      + '所以比不出来——说不清的话，按贡献者处置（拉分支、开 PR），不推主干、不打标签')
-  }
-
-  // 被算进成熟度的那一部分：**跟着仓库走**的东西。本机事实（署名、凭据助手、
-  // gh 登录态）不进来——它们在干净克隆里必然缺失，判进去会让每次新机器上的检查都红一次。
-  const machineLocal = [
-    '提交署名缺 `user.name`',
-    '提交署名缺 `user.email`',
-    '这台机器上找不到 git —— 版本管理这一整条路暂时走不了',
-  ]
-  const projectGaps = gaps.filter((g) => !machineLocal.includes(g))
 
   return { gaps, questions, projectGaps }
 }

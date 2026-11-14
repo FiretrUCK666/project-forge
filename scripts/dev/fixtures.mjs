@@ -67,9 +67,9 @@ function gitInit(dir) {
   spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'init'], opts)
 }
 
-async function survey(dir) {
+async function survey(dir, opts) {
   const { survey: run } = await import('../survey.mjs')
-  return run(dir)
+  return run(dir, opts)
 }
 
 /**
@@ -3900,6 +3900,241 @@ cases.push(['govern-audit.mjs release-prep Wave 4 (C22)：多版本跳号采集�
     rmTree(multiDir)
     rmTree(changelogDir)
     rmTree(nonGitDir)
+  }
+}])
+
+cases.push(['多维护者团队协同 Wave 5 (C23)：team-collaborator 与 owner 区分、C4 防误判底线、零提交/外部 Fork 与离线 teamProbeHint', async () => {
+  const { classifyWorkspaceIdentity } = await import('../lib/platform/github.mjs')
+  const { resolveWorkspaceIdentity } = await import('../../kit/skills/lib/shared.mjs')
+  const { toMarkdown } = await import('../lib/render.mjs')
+
+  const baseGitFacts = {
+    present: true,
+    remote: 'https://github.com/org-a/team-app.git',
+    remoteUrls: { origin: 'https://github.com/org-a/team-app.git' },
+    commitCount: 3,
+    historyAuthors: ['Lead <lead@org-a.example>'],
+    userName: 'NewMember',
+    userEmail: 'new@org-a.example',
+  }
+
+  // 1. 正面（团队写权限协作者）：origin === declaredRepo 且登录账号不同于 originOwner -> maintainer + team-collaborator，无 teamProbeHint
+  const ghTeam = classifyWorkspaceIdentity({
+    gitFacts: baseGitFacts,
+    declaredRepo: 'org-a/team-app',
+    probeApi: { canPush: true, viewerPermission: 'WRITE', login: 'teammate-dev' },
+  })
+  if (ghTeam.role !== 'maintainer' || ghTeam.collaborationScope !== 'team-collaborator' || ghTeam.teamProbeHint) {
+    return `github.mjs 未将写权限团队协作者判为 team-collaborator：${JSON.stringify(ghTeam)}`
+  }
+  const shTeam = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+    apiProbe: { canPush: true, viewerPermission: 'WRITE', viewerLogin: 'teammate-dev' },
+  })
+  if (shTeam.role !== 'maintainer' || shTeam.collaborationScope !== 'team-collaborator' || shTeam.teamProbeHint) {
+    return `shared.mjs 未将写权限团队协作者判为 team-collaborator：${JSON.stringify(shTeam)}`
+  }
+
+  // 2. 正面（所有者）：账号与 originOwner 同名 -> owner
+  const ghOwner = classifyWorkspaceIdentity({
+    gitFacts: { ...baseGitFacts, remote: 'https://github.com/alice/my-app.git', remoteUrls: { origin: 'https://github.com/alice/my-app.git' } },
+    declaredRepo: 'alice/my-app',
+    probeApi: { canPush: true, viewerPermission: 'ADMIN', login: 'alice' },
+  })
+  const shOwner = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/alice/my-app.git' },
+    declaredRepo: 'alice/my-app',
+    apiProbe: { canPush: true, viewerPermission: 'ADMIN', viewerLogin: 'alice' },
+  })
+  if (ghOwner.role !== 'maintainer' || ghOwner.collaborationScope !== 'owner' || shOwner.role !== 'maintainer' || shOwner.collaborationScope !== 'owner') {
+    return `owner 判定异常：gh=${JSON.stringify(ghOwner)}, sh=${JSON.stringify(shOwner)}`
+  }
+
+  // 3. 反面（C4 底线 + 离线 teamProbeHint）：同源无探针且历史作者非本机 -> 保守 clone-readonly + 带 teamProbeHint
+  const ghOffline = classifyWorkspaceIdentity({ gitFacts: baseGitFacts, declaredRepo: 'org-a/team-app' })
+  const shOffline = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+  })
+  if (ghOffline.role !== 'clone-readonly' || !ghOffline.teamProbeHint?.includes('--probe-auth')) {
+    return `github.mjs 离线同源未保留 clone-readonly + teamProbeHint：${JSON.stringify(ghOffline)}`
+  }
+  if (shOffline.role !== 'clone-readonly' || !shOffline.teamProbeHint?.includes('--probe-auth')) {
+    return `shared.mjs 离线同源未保留 clone-readonly + teamProbeHint：${JSON.stringify(shOffline)}`
+  }
+
+  // 4. 零提交同源无写证明 -> 保守 undetermined + 带 teamProbeHint
+  const ghZero = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/org-a/empty-repo.git',
+      remoteUrls: { origin: 'https://github.com/org-a/empty-repo.git' },
+      commitCount: 0,
+      historyAuthors: [],
+      userName: 'NewMember',
+      userEmail: 'new@org-a.example',
+    },
+    declaredRepo: 'org-a/empty-repo',
+  })
+  const shZero = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/org-a/empty-repo.git' },
+    declaredRepo: 'org-a/empty-repo',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: [],
+    commits: 0,
+  })
+  if (ghZero.role !== 'undetermined' || !ghZero.teamProbeHint || shZero.role !== 'undetermined' || !shZero.teamProbeHint) {
+    return `零提交同源未保守归入 undetermined + teamProbeHint：gh=${JSON.stringify(ghZero)}, sh=${JSON.stringify(shZero)}`
+  }
+
+  // 5. 外部 Fork（origin !== declaredRepo 或 upstream !== origin）与已确认只读 API -> 不应误出 teamProbeHint
+  const ghFork = classifyWorkspaceIdentity({
+    gitFacts: {
+      ...baseGitFacts,
+      remote: 'https://github.com/contrib/team-app.git',
+      remoteUrls: { origin: 'https://github.com/contrib/team-app.git', upstream: 'https://github.com/org-a/team-app.git' },
+    },
+    declaredRepo: 'org-a/team-app',
+  })
+  const shFork = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/contrib/team-app.git' },
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+  })
+  if (ghFork.role !== 'contributor-fork' || ghFork.teamProbeHint || shFork.role !== 'contributor-fork' || shFork.teamProbeHint) {
+    return `外部 Fork 异常或误出 teamProbeHint：gh=${JSON.stringify(ghFork)}, sh=${JSON.stringify(shFork)}`
+  }
+
+  const ghApiRead = classifyWorkspaceIdentity({
+    gitFacts: baseGitFacts,
+    declaredRepo: 'org-a/team-app',
+    probeApi: { canPush: false, viewerPermission: 'READ', login: 'outsider' },
+  })
+  const shApiRead = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+    apiProbe: { canPush: false, viewerPermission: 'READ', viewerLogin: 'outsider' },
+  })
+  if (ghApiRead.role !== 'clone-readonly' || ghApiRead.teamProbeHint || shApiRead.role !== 'clone-readonly' || shApiRead.teamProbeHint) {
+    return `已确认 API 只读不应再输出 teamProbeHint：gh=${JSON.stringify(ghApiRead)}, sh=${JSON.stringify(shApiRead)}`
+  }
+
+  // 6. 临时仓联动：flow.mjs inspect（离线带 teamProbeHint）与 survey.mjs + render.mjs
+  const teamDir = tmpProject({
+    'package.json': `${JSON.stringify({ name: 'team-app', version: '1.0.0', repository: 'org-a/team-app', scripts: { test: 'node --test' } }, null, 2)}\n`,
+    'README.md': '# team-app\n',
+    'src/index.mjs': 'export const ok = true\n',
+  })
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'add', '-A'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'commit', '-qm', 'init by lead'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'NewTeammate'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'new@org-a.example'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/org-a/team-app.git'], { cwd: teamDir, stdio: 'ignore' })
+
+    const flowJsonRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--json'], { cwd: teamDir })
+    if (flowJsonRes.status !== 0) return `flow.mjs inspect --json 失败：${flowJsonRes.stderr}`
+    const flowJson = JSON.parse(flowJsonRes.stdout)
+    if (flowJson.identity?.role !== 'clone-readonly' || !flowJson.identity?.teamProbeHint?.includes('--probe-auth')) {
+      return `flow.mjs inspect --json 离线同源未给出 teamProbeHint：${JSON.stringify(flowJson.identity)}`
+    }
+
+    const flowTextRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect'], { cwd: teamDir })
+    if (flowTextRes.status !== 0 || !flowTextRes.stdout.includes('团队权限提示') || !flowTextRes.stdout.includes('--probe-auth')) {
+      return `flow.mjs inspect 文本缺少团队权限提示：\n${flowTextRes.stdout}`
+    }
+
+    const sOff = await survey(teamDir)
+    const mdOff = toMarkdown(sOff)
+    if (sOff.git?.role !== 'clone-readonly' || !sOff.git?.teamProbeHint || !mdOff.includes('协同提示：') || !mdOff.includes('团队/组织协作者写权限')) {
+      return `survey + render 离线未展现 teamProbeHint：\n${mdOff}`
+    }
+
+    const sTeam = await survey(teamDir, { probeApi: { canPush: true, viewerPermission: 'WRITE', login: 'new-teammate' } })
+    const mdTeam = toMarkdown(sTeam)
+    if (sTeam.git?.role !== 'maintainer' || sTeam.git?.collaborationScope !== 'team-collaborator' || sTeam.git?.teamProbeHint || !mdTeam.includes('角色 `maintainer`（团队协作者）')) {
+      return `survey + render 团队协作者展示异常：${JSON.stringify(sTeam.git)}\n${mdTeam}`
+    }
+    return true
+  } finally {
+    rmTree(teamDir)
+  }
+}])
+
+cases.push(['通用自适应 TDD 与本仓 docs/TDD.md 重塑 Wave 5 (C24)：目录锚点、Mermaid/arch-rules/FeatureMap 与漂移拦截', async () => {
+  const { validateDocTocAnchors } = await import('./preflight.mjs')
+  const { templateVarsOf } = await import('../lib/protocol.mjs')
+
+  const tddRaw = readFileSync(join(SKILL_ROOT, 'docs/TDD.md'), 'utf8')
+  const tddErrors = validateDocTocAnchors(tddRaw)
+  if (tddErrors.length > 0) return `docs/TDD.md 目录锚点有误：${tddErrors.join('；')}`
+
+  const mermaidCount = (tddRaw.match(/```mermaid\b/g) ?? []).length
+  if (mermaidCount < 2 || !tddRaw.includes('flowchart') || !tddRaw.includes('stateDiagram-v2')) {
+    return `docs/TDD.md Mermaid 架构/状态图缺失（count=${mermaidCount}）`
+  }
+  if (!/```yaml[\s\S]*?\barch-rules:[\s\S]*?->[\s\S]*?```/.test(tddRaw)) {
+    return 'docs/TDD.md 缺少可执行 arch-rules yaml 块'
+  }
+
+  const mapRes = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [SKILL_ROOT, '--json'])
+  if (mapRes.status !== 0) return `repo-map.mjs --json 失败：${mapRes.stderr}`
+  const mapJson = JSON.parse(mapRes.stdout)
+  const tddFeatures = (mapJson.featureMap ?? []).filter((x) => x.origin === 'docs/TDD.md')
+  if (tddFeatures.length < 10 || !tddFeatures.every((x) => Boolean(x.source))) {
+    return `repo-map.mjs 未从 docs/TDD.md 解析出完整 Feature Map：${JSON.stringify(mapJson.featureMap)}`
+  }
+
+  const sSelf = await survey(SKILL_ROOT)
+  if ((sSelf.reentry?.staleTddPaths?.length ?? 0) > 0) {
+    return `本仓 docs/TDD.md 存在失效路径：${JSON.stringify(sSelf.reentry.staleTddPaths)}`
+  }
+
+  const tplRaw = readFileSync(join(SKILL_ROOT, 'templates/docs-tdd.md'), 'utf8')
+  const tplErrors = validateDocTocAnchors(tplRaw)
+  if (tplErrors.length > 0) return `templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
+  if (!tplRaw.includes('[按需保留，不适用整节删除]') || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
+    return 'templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
+  }
+
+  // 反面 1：validateDocTocAnchors 必须抓出悬空锚点
+  const brokenErrors = validateDocTocAnchors('## 目录\n\n- [幽灵章节](#missing-anchor)\n\n## 真实章节\n')
+  if (brokenErrors.length === 0) return 'validateDocTocAnchors 未拦截失效目录锚点'
+
+  // 反面 2：docs/TDD.md 注入幽灵路径后，survey 与 govern-audit 必须共同抓出
+  const ghostDir = tmpProject({
+    'package.json': '{"name":"tdd-ghost","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'README.md': '# tdd-ghost\n',
+    'src/ok.mjs': 'export const ok = true\n',
+    'docs/TDD.md': '# tdd-ghost TDD\n\n## 目录\n\n- [模块](#模块)\n\n## 模块\n\n正常入口：`src/ok.mjs`，幽灵路径：`src/ghost-nonexistent-module.mjs`。\n',
+  })
+  try {
+    gitInit(ghostDir)
+    const sGhost = await survey(ghostDir)
+    if (!sGhost.reentry?.drifted || !sGhost.reentry?.staleTddPaths?.includes('src/ghost-nonexistent-module.mjs') || sGhost.reentry?.staleTddPaths?.includes('src/ok.mjs')) {
+      return `survey 未准确识别 TDD 幽灵路径：${JSON.stringify(sGhost.reentry)}`
+    }
+    const auditRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', ghostDir, '--json'])
+    if (auditRes.status !== 0) return `govern-audit 失败：${auditRes.stderr}`
+    const auditJson = JSON.parse(auditRes.stdout)
+    const hit = (auditJson.findings ?? []).some((f) => f.id === 'docs.tdd-stale-path.src/ghost-nonexistent-module.mjs')
+    if (!hit) return `govern-audit 未报出 docs.tdd-stale-path：${JSON.stringify(auditJson.findings?.map((f) => f.id))}`
+    return true
+  } finally {
+    rmTree(ghostDir)
   }
 }])
 

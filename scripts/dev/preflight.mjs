@@ -40,6 +40,7 @@ import {
 import { checkEquip } from '../equip.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
 import { isMainModule } from '../lib/text.mjs'
+import { markdownHeadings } from '../sync-toc.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -1756,6 +1757,87 @@ function checkDevProfileParity() {
   note(`Dev Profile：4 处（模板 / shared / review-pack / govern-audit）7 键全对齐`)
 }
 
+/**
+ * 校验 Markdown 文档顶部的 `## 目录` 中每个 `#anchor` 是否能解析到文内真实标题。
+ */
+export function validateDocTocAnchors(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  const tocStart = /^##\s+目录\s*$/m.exec(normalized)
+  if (!tocStart) return ['缺少 `## 目录` 章节']
+  const afterStart = normalized.slice(tocStart.index + tocStart[0].length)
+  const nextH2 = /\n##\s+/.exec(afterStart)
+  const tocBody = nextH2 ? afterStart.slice(0, nextH2.index) : afterStart
+  const links = [...tocBody.matchAll(/\[([^\]]+)\]\(#([^)\s]+)\)/g)]
+  if (links.length === 0) return ['`## 目录` 内没有任何 `#anchor` 链接']
+
+  const validIds = new Set(markdownHeadings(normalized, 6).map((h) => h.id))
+  const errors = []
+  for (const [, label, rawAnchor] of links) {
+    let decoded = rawAnchor
+    try { decoded = decodeURIComponent(rawAnchor) } catch { /* 保持原串 */ }
+    if (!validIds.has(rawAnchor) && !validIds.has(decoded)) {
+      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)
+    }
+  }
+  return errors
+}
+
+function checkTeamAndTddContracts() {
+  const teamFiles = [
+    'references/collaboration.md',
+    'templates/agents-project.md',
+    'templates/contributing.md',
+    'CONTRIBUTING.md',
+  ]
+  for (const relPath of teamFiles) {
+    const p = join(ROOT, relPath)
+    if (!existsSync(p)) { fail(`团队协同核对：缺 ${relPath}`); continue }
+    const text = readText(p)
+    const missing = ['团队', '协作者', '--probe-auth', '接管', 'CODEOWNERS'].filter((k) => !text.includes(k))
+    if (missing.length > 0) {
+      fail(`${relPath} 缺少多维护者团队协同要素：${missing.join('、')}`)
+    }
+  }
+
+  for (const docPath of ['docs/TDD.md', 'templates/docs-tdd.md']) {
+    const p = join(ROOT, docPath)
+    if (!existsSync(p)) { fail(`TDD 契约核对：缺 ${docPath}`); continue }
+    const text = readText(p)
+    for (const err of validateDocTocAnchors(text)) {
+      fail(`${docPath}：${err}`)
+    }
+    if (docPath === 'docs/TDD.md') {
+      if (!/```mermaid\b/.test(text)) fail('docs/TDD.md 缺少 mermaid 架构或状态图')
+      if (!/\barch-rules\s*:/.test(text)) fail('docs/TDD.md 缺少 arch-rules 校验块')
+      if (!text.includes('Feature Map')) fail('docs/TDD.md 缺少 Feature Map 功能入口地图')
+    } else {
+      if (!text.includes('[按需保留，不适用整节删除]')) {
+        fail('templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
+      }
+      if (text.includes('references/')) {
+        fail('templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
+      }
+      if (templateVarsOf(text).length > 0) {
+        fail('templates/docs-tdd.md 存在未登记模板变量占位')
+      }
+    }
+  }
+
+  const synergyFiles = ['SKILL.md', 'references/docs-set.md', 'kit/skills/dev-explore/SKILL.md']
+  for (const relPath of synergyFiles) {
+    const p = join(ROOT, relPath)
+    if (!existsSync(p)) { fail(`TDD 三场景协同核对：缺 ${relPath}`); continue }
+    const text = readText(p)
+    if (!text.includes('--bootstrap-empty')) fail(`${relPath} 缺少 --bootstrap-empty 起步协同说明`)
+    if (!text.includes('explorationStrategy.tier')) fail(`${relPath} 缺少 explorationStrategy.tier 档位协同说明`)
+    if (!/(?:不派[^\n]*子代理|禁止派发子代理)/.test(text)) {
+      fail(`${relPath} 未明确声明空白目录起步禁止派发探索子代理`)
+    }
+  }
+
+  note('协同与 TDD 契约：4 处团队多维护者口径、TDD 双份目录锚点与三场景无冲突协同全部对齐')
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────
 
 async function main() {
@@ -1778,6 +1860,7 @@ async function main() {
   checkScripts()
   checkArchBoundaries()
   checkDevProfileParity()
+  checkTeamAndTddContracts()
   checkTemplates()
   checkPlatformLock()
   checkStructureRules()

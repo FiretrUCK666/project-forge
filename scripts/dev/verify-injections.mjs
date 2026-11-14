@@ -380,6 +380,30 @@ const INJECTIONS = [
     to: "  if (false && allInternalFiles) {\n    return { filtered: true, reason: 'tests-ci-or-worktree-only' }\n  }",
     expect: 'release-prep 未过滤纯测试或配置噪音提交',
   },
+  {
+    id: 'I37',
+    what: '破坏 github.mjs 写权限协作者判为 team-collaborator 的逻辑',
+    file: 'scripts/lib/platform/github.mjs',
+    from: 'if (apiWrite) {\n    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)',
+    to: 'if (apiWrite) {\n    const isTeamCollaborator = false',
+    expect: 'github.mjs 未将写权限团队协作者判为 team-collaborator',
+  },
+  {
+    id: 'I38',
+    what: '移除 shared.mjs 离线同源 clone-readonly 分支的 teamProbeHint 提示',
+    file: 'kit/skills/lib/shared.mjs',
+    from: "role: 'clone-readonly',\n      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,\n      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),",
+    to: "role: 'clone-readonly',\n      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,\n      // disabled teamProbeHint",
+    expect: 'shared.mjs 离线同源未保留 clone-readonly + teamProbeHint',
+  },
+  {
+    id: 'I39',
+    what: '禁用 preflight.mjs validateDocTocAnchors 对失效目录锚点的拦截',
+    file: 'scripts/dev/preflight.mjs',
+    from: 'if (!validIds.has(rawAnchor) && !validIds.has(decoded)) {\n      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)',
+    to: 'if (false && !validIds.has(rawAnchor) && !validIds.has(decoded)) {\n      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)',
+    expect: 'validateDocTocAnchors 未拦截失效目录锚点',
+  },
 ]
 
 function runFixtures(expect = '') {

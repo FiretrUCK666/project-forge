@@ -56,22 +56,24 @@ v5 架构升级围绕上述问题完成双层同构工程化重构，并在 Wave
 - [x] C20: **通用模块化 README 母版与跨版本发版指南对齐** — `templates/readme.md`、`templates/releasing.md`、`templates/release-notes.md` 与 `references/` 对齐模块化 README 骨架、存量融合不覆盖铁律、合并权限与 `dev-govern` 发版筹备衔接。
 - [x] C21: **双语视觉 README 与 SVG 安全包白名单门禁** — 重构 `README.md` / `README.en.md`（同步 8 项双语目录）并嵌入 6 张手写 SVG（`assets/readme/*.svg`）；`preflight.mjs` `isProductLayerPath` 严格放行 `assets/readme/*.svg` 并校验 SVG 安全标签、HYGIENE、平台锁、外链存在性与 `--package` 入包一致性。
 - [x] C22: **`dev-govern release-prep` 发版筹备工具与 Wave 4 门禁实证** — `kit/skills/dev-govern/scripts/release-prep-lib.mjs` 与 `govern-audit.mjs release-prep` 实现标签区间与自定义跳号采集、兼容下限预警（`breakingSignals`）、内部噪音过滤、公开入口未交代变更追溯（`unaccountedPublicFiles`）与规范/归档摘要收集；同步 `docs/TDD.md` 零过时路径，补全 `fixtures.mjs` `C19..C22` 双向实跑与 `verify-injections.mjs` `I33..I36` 故障注入，全部 12 项实证命令退出码 `0`。
+- [x] C23: **同源多维护者团队协同（`team-collaborator`）与离线 `teamProbeHint` 全链路打通** — `scripts/lib/platform/github.mjs`（`classifyWorkspaceIdentity`）与 `kit/skills/lib/shared.mjs`（`resolveWorkspaceIdentity` / `probeGitHubEnv` / `createGitHubClient`）区分 `collaborationScope`（`'owner'` vs `'team-collaborator'`），同源离线或零提交无写权证明保留保守 `clone-readonly`/`undetermined`（`C4` 底线零退化）并输出 `teamProbeHint`（外部 Fork 与已确认只读不误出）；`survey.mjs`、`render.mjs` 与 `flow.mjs`（`inspect` / `start --probe-auth`）全链路透传与渲染；同步更新 `references/collaboration.md`、`templates/agents-project.md`、`AGENTS.md`、`templates/contributing.md`、`CONTRIBUTING.md` 团队协同四条规则。
+- [x] C24: **通用自适应 TDD 母版、三场景无冲突协同与本仓 `docs/TDD.md` 重塑** — 重塑 `templates/docs-tdd.md`（目录锚点、背景与非目标、术语表、Mermaid 拓扑/流程/按需 ER/时序图、`arch-rules`、`Feature Map` 与 `[按需保留，不适用整节删除]`）；打通 `SKILL.md`、`references/docs-set.md` 与 `kit/skills/dev-explore/SKILL.md` 三场景（空白 `--bootstrap-empty` 不派子代理、存量/重入按 `explorationStrategy.tier` 分片勘察后写 `TDD`、`finalize`/`govern-audit`/`staleTddPaths` 持续校准）；按 `oil-tone` 文风重塑本仓 8 节 `docs/TDD.md`（零失效路径、零门禁漂移），补齐 `preflight.mjs` 协同与锚点校验、`fixtures.mjs` `C23..C24` 双向实跑及 `verify-injections.mjs` `I37..I39` 故障注入，全套 13 项实证命令退出码 `0`。
 
 ## 模块化设计与实现边界
 
 ### 核心底座与安装装备（`scripts/lib/` & `scripts/`）
 
 - `scripts/lib/protocol.mjs`：集中维护 `AGENTS_MAX_BYTES = 30720`、`AGENTS_WARN_BYTES = 24576`、`KIT_SKILL_MAX_LINES = 180`、`KIT_SKILLS`、`FORBIDDEN_PLATFORM_RE`、`PF_MANIFEST_REL`、`WORKTREES_STATE_REL` 及 `REPO_ONLY_DIRS`（纳入 `.agents/` 与 `docs/`）。
-- `scripts/lib/platform/github.mjs` & `scripts/lib/platform/index.mjs`：提供非交互探测、双轨四级 API 封装与双轴五态纯函数判定，支持测试环境变量与探测桩注入。
+- `scripts/lib/platform/github.mjs` & `scripts/lib/platform/index.mjs`：提供非交互探测、双轨四级 API 封装与双轴五态纯函数判定，区分同源所有者与 `team-collaborator` 并为离线同源保守状态提供 `teamProbeHint`，支持测试环境变量与探测桩注入。
 - `scripts/backup.mjs` & `scripts/equip.mjs`：提供跨平台 POSIX USTAR/PAX `.tar.gz` 仓外写前备份（`ensurePreWriteBackup`）、`kit/skills/` 三态账本同步、`--check` 字节比对与 `--bootstrap-empty` 五语言起步闭环骨架（`starterTemplates`）。
-- `scripts/survey.mjs` / `scripts/lib/render.mjs` / `scripts/review.mjs` / `scripts/compose-agents.mjs` / `scripts/handoff.mjs` / `scripts/update.mjs`：打通五态身份、`--probe-auth`、`docs/todo` 优先探测、10 项 `computeArtifactPlan` 与 Markdown 渲染、`AGENTS.md` 字节门禁与 `backup.mjs` 写前保护，同时保持 `scripts/dev/gap-coverage.mjs` 100% 映射闭环。
+- `scripts/survey.mjs` / `scripts/lib/render.mjs` / `scripts/review.mjs` / `scripts/compose-agents.mjs` / `scripts/handoff.mjs` / `scripts/update.mjs` / `scripts/sync-toc.mjs`：打通五态身份、`collaborationScope`/`teamProbeHint`、`--probe-auth`、`docs/todo` 优先探测、10 项 `computeArtifactPlan` 与 Markdown 渲染、`AGENTS.md` 字节门禁与 `backup.mjs` 写前保护，同时导出通用 GitHub 锚点解析供门禁复用并保持 `scripts/dev/gap-coverage.mjs` 100% 映射闭环。
 
 ### 内置研发 Skill 套件（`kit/skills/`）
 
-- `kit/skills/lib/shared.mjs`：纯 `node:*` 工具集，包含 `AGENTS.md` Dev Profile 解析、原子文件操作、任务账本读写、四级 GitHub 客户端与 `printNextStep`。
-- `dev-explore` / `dev-plan` / `dev-flow` / `dev-review` / `dev-govern`（含 `release-prep-lib.mjs`）：严格控制在每份 `SKILL.md <= 180` 行、无 `kit/skills/` 外部 `import`、无本仓私有路径引用。
+- `kit/skills/lib/shared.mjs`：纯 `node:*` 工具集，包含 `AGENTS.md` Dev Profile 解析、原子文件操作、任务账本读写、四级 GitHub 客户端（含 `viewerLogin` 与团队协作者识别）与 `printNextStep`。
+- `dev-explore` / `dev-plan` / `dev-flow` / `dev-review` / `dev-govern`（含 `release-prep-lib.mjs`）：严格控制在每份 `SKILL.md <= 180` 行、无 `kit/skills/` 外部 `import`、无本仓私有路径引用；`dev-explore` 对齐 `none` / `quick` / `medium` / `thorough` 与 `docs/TDD.md` 只读勘察分工，`dev-flow` `inspect` / `start --probe-auth` 打通协同范围与权限提示。
 
 ### 门禁与双层自举治理（`scripts/dev/` & `docs/` & `assets/`）
 
-- 本仓自举运行 `equip.mjs .` 生成受 `.gitattributes` 保护不进用户包的 `.agents/skills/**` 与 `.pf-manifest.json`，并通过 `preflight.mjs` 强制核对 `kit/skills/` 与 `.agents/skills/` 字节级同构；`assets/readme/*.svg` 经 `isProductLayerPath` 白名单纳入用户包并接受 SVG 安全/无障碍/平台/断链门禁检验。
+- 本仓自举运行 `equip.mjs .` 生成受 `.gitattributes` 保护不进用户包的 `.agents/skills/**` 与 `.pf-manifest.json`，并通过 `preflight.mjs` 强制核对 `kit/skills/` 与 `.agents/skills/` 字节级同构；`assets/readme/*.svg` 经 `isProductLayerPath` 白名单纳入用户包并接受 SVG 安全/无障碍/平台/断链门禁检验；`docs/TDD.md` 作为常青架构契约与 `templates/docs-tdd.md` 同接受目录锚点与零幽灵路径校验。
 - `preflight.mjs`、`fixtures.mjs`、`verify-injections.mjs` 与 `.github/workflows/check.yml` 保持全口径一致，对核心判据实现正反双向证伪与故障注入自证。

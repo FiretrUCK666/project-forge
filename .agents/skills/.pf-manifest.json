@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "forgeVersion": "5.0.0",
-  "installedAt": "2026-11-14T12:15:50.493Z",
+  "installedAt": "2026-11-14T13:10:28.144Z",
   "files": {
     "dev-explore/SKILL.md": {
-      "sha256": "a59bf649a601642d5fb80916cc65645a29ebc55a9957f2aa1c98c2e38e876f94"
+      "sha256": "df1d62e131168c199c5ef3d548274a1fcad1d121d5023f6943eef6d90251fbeb"
     },
     "dev-explore/scripts/repo-map.mjs": {
       "sha256": "3c86e34ba688059dec3e24ec243f0bf6302993ea4373ff829eb868a1791ab0c1"
@@ -13,7 +13,7 @@
       "sha256": "80a81b7aa4cc2c5c9c165351cde1c0f529e3183442ee1ba521e88a62ebf35442"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "f77135b3eb19d3e105f20102428d6ed4f7e7c279d48d2f5f1055fb5dd51e3211"
+      "sha256": "cd91353276c15a5e12c0d89f528230eab097b3df2cb47305acd3570f13a84580"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
@@ -40,7 +40,7 @@
       "sha256": "d1ba77c8bf77dda5882351a6da194726c41b31ec64b60aa8d4fbf873b9f6a6df"
     },
     "lib/shared.mjs": {
-      "sha256": "97854bdf917e9f7d7150e9ada59c8c57b89ba27b6c0fe1d007f9202bf5f9c8c5"
+      "sha256": "4ccef561c6454a7986185d11ddf3c38a67f6ee7a48271699fdddcdb51c77eca3"
     }
   },
   "agentsRegions": {
@@ -75,7 +75,7 @@
       "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
     },
     "日常协作与风险分流": {
-      "sha256": "1e1f65d75083ffb3576c2b3c9db19107ba483aef5b5da3aadd8bbc0e72781bf8"
+      "sha256": "d05fa1b9edb22531434602d11c7ae6b88bc67e4d4c24e8889b04dc393068219d"
     },
     "高风险路径": {
       "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"

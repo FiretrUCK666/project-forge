@@ -19,11 +19,18 @@ description: |
 
 ## 三级探索策略（按复杂度选档，不浪费上下文）
 
-| 档位 | 适用场景 | 执行动作 | 明确禁止 |
+| 档位 | 适用场景（与 `survey` / 日常对齐） | 执行动作 | 明确禁止 |
 | --- | --- | --- | --- |
+| **none（跳过）** | 空白目录 0 业务文件起步（`explorationStrategy.tier: none`） | 直接交给 `--bootstrap-empty` 生成起步工程与初始 `docs/TDD.md` | **禁止派发子代理或运行全量探索** |
 | **quick** | 目标文件或符号已明确，只查 1–3 处 | 直接按路径精读或文本检索 1–3 处源码 | **不跑全量脚本、不派只读子代理** |
-| **medium** | 需摸清单一模块的完整调用链与测试 | 跑 `repo-map.mjs --focus <subdir>` + 沿调用链精读上下游、公共基建与局部测试命令 | 不跨到无关目录乱翻 |
-| **thorough** | 陌生仓库、跨模块改造或全局体检前 | 先跑全量 `repo-map.mjs` 拿 `Feature Map`、CI 步骤与热点，再按**互不重叠的目录边界**并行派 2–3 个只读子代理深挖后汇总 | 禁止多个子代理扫描同一目录导致重复消耗 |
+| **medium** | 单一模块调用链、或 `explorationStrategy.tier: single-pass` 小型仓初始化 | 跑 `repo-map.mjs [--focus <subdir>]` + 单路通读上下游、复用基建与测试命令 | 不跨到无关目录乱翻 |
+| **thorough** | `explorationStrategy.tier: parallel-subagents` 存量/重入仓、大型陌生仓或跨模块体检 | 先跑全量 `repo-map.mjs` 拿 `Feature Map`、CI 步骤与热点，再按**互不重叠 `shards` 目录边界**并行派 2–4 个只读子代理分片深挖入口、模块边界、数据流与状态机后汇总 | 禁止多个子代理扫描同一目录或直接修改任何文件 |
+
+## 与 `docs/TDD.md` 的读写边界分工
+
+- **`dev-explore` 负责只读勘察与证据汇总**：输出真实文件入口、模块依赖方向、主数据流、状态迁移、CI 命令与可复用基建；**绝不越权写文件**。
+- **治理初始化与跨月重入写入**：空白仓由 `--bootstrap-empty` 一步落盘初始 `docs/TDD.md`；存量接入在装配套件后用本技能输出写入或校准 `docs/TDD.md`（保留人工决策，按需删去不适用的可选节）。
+- **日常迭代持续校准**：日常改动在 `finalize`、`govern-audit.mjs` 与 `reentry.staleTddPaths` 发现模块或路径漂移时调用本技能定向重扫漂移目录并同步修订 `docs/TDD.md`。
 
 ## 脚本命令（只读）
 

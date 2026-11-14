@@ -71,7 +71,7 @@ const MAX_BYTES = 256 * 1024
  * `scripts/`。而它们比普通死链更要紧：那些位置上原本写着一条规则，删掉指针就把它
  * 一起删了。所以扫描时单列一档，提示的是「**先把规则搬进项目自己的文档，再删指针**」。
  */
-const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|equip|review|handoff|sync-toc|update|zip)\.mjs)/g
+const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|equip|backup|review|handoff|sync-toc|update|zip)\.mjs)/g
 
 /**
  * 这一趟扫的是不是 **skill 自己的源码仓库**。

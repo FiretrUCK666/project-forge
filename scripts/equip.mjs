@@ -13,6 +13,7 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { ensurePreWriteBackup } from './backup.mjs'
 import { writeAtomic } from './lib/fs-atomic.mjs'
 import { KIT_SKILLS, PF_MANIFEST_REL } from './lib/protocol.mjs'
 import { isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
@@ -219,6 +220,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
 export function equip(targetDir, {
   kitDir = DEFAULT_KIT_SKILLS_DIR,
   dryRun = false,
+  noBackup = false,
   forgeVersion = skillVersion(readTextSafe(join(SKILL_ROOT, 'SKILL.md'))) || '0.0.0',
   now = new Date().toISOString(),
 } = {}) {
@@ -240,6 +242,8 @@ export function equip(targetDir, {
   const retired = []
   const orphanedModified = []
   const nextFiles = {}
+  const pendingWrites = []
+  const pendingDeletes = []
 
   const kitKeys = [...kitFiles.keys()].sort()
   for (const rel of kitKeys) {
@@ -248,10 +252,7 @@ export function equip(targetDir, {
     const oldHash = prevFiles.get(rel)
 
     if (!existsSync(dest)) {
-      if (!dryRun) {
-        mkdirSync(dirname(dest), { recursive: true })
-        writeAtomic(dest, src.buf)
-      }
+      pendingWrites.push({ dest, buf: src.buf })
       nextFiles[rel] = { sha256: src.sha256 }
       added.push(rel)
       continue
@@ -280,10 +281,7 @@ export function equip(targetDir, {
         nextFiles[rel] = { sha256: src.sha256 }
         unchanged.push(rel)
       } else {
-        if (!dryRun) {
-          mkdirSync(dirname(dest), { recursive: true })
-          writeAtomic(dest, src.buf)
-        }
+        pendingWrites.push({ dest, buf: src.buf })
         nextFiles[rel] = { sha256: src.sha256 }
         upgraded.push(rel)
       }
@@ -310,10 +308,7 @@ export function equip(targetDir, {
     }
     const diskHash = sha256Buffer(readFileSync(dest))
     if (diskHash === oldHash) {
-      if (!dryRun) {
-        unlinkSync(dest)
-        pruneEmptyParents(dest, skillsDir)
-      }
+      pendingDeletes.push(dest)
       retired.push(rel)
     } else {
       orphanedModified.push({
@@ -339,14 +334,38 @@ export function equip(targetDir, {
       : {},
   }
 
-  if (manifestChanged && !dryRun) {
-    mkdirSync(dirname(manifestPath), { recursive: true })
-    writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
+  const hasPendingChanges = pendingWrites.length > 0 || pendingDeletes.length > 0 || manifestChanged
+
+  let backup
+  if (dryRun) {
+    backup = { created: false, skippedReason: 'dry-run' }
+  } else if (noBackup) {
+    backup = { created: false, skippedReason: 'disabled' }
+  } else if (!hasPendingChanges) {
+    backup = { created: false, skippedReason: 'no-pending-changes' }
+  } else {
+    backup = ensurePreWriteBackup(root, { label: 'equip', hasPendingChanges: true })
+  }
+
+  if (!dryRun) {
+    for (const item of pendingWrites) {
+      mkdirSync(dirname(item.dest), { recursive: true })
+      writeAtomic(item.dest, item.buf)
+    }
+    for (const dest of pendingDeletes) {
+      unlinkSync(dest)
+      pruneEmptyParents(dest, skillsDir)
+    }
+    if (manifestChanged) {
+      mkdirSync(dirname(manifestPath), { recursive: true })
+      writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
+    }
   }
 
   return {
     target: root,
     dryRun,
+    backup,
     manifestPath: PF_MANIFEST_REL,
     manifestUpdated: manifestChanged,
     added,
@@ -390,6 +409,18 @@ function starterTemplates({ lang, names }) {
     '## 目录结构',
     '',
     '- 源码与冒烟测试分离，保持最小可运行与零第三方依赖基线。',
+    '',
+    '## 模块分层与禁引规则（arch-rules）',
+    '',
+    '<!-- 仅在存在跨层约束时填写；纯脚本或单模块项目保持简化即可 -->',
+    '- 分层：`<入口层>` -> `<领域层>` -> `<基础工具层>`。',
+    '- 禁引：`<下层>` 不反向导入 `<上层>`。',
+    '',
+    '## 功能与入口地图（Feature Map）',
+    '',
+    '| 功能 / 能力 | 入口文件或符号 | 验证命令 |',
+    '| --- | --- | --- |',
+    '| `<待补充>` | `<待补充>` | `<待补充>` |',
     '',
   ].join('\n')
 
@@ -625,6 +656,7 @@ async function main(argv) {
   let targetSpecified = false
   let check = false
   let dryRun = false
+  let noBackup = false
   let doBootstrap = false
   let lang
   let name
@@ -638,6 +670,7 @@ async function main(argv) {
         '',
         '  --check                  只读字节级校验，不一致退出码 1',
         '  --dry-run                仅打印将执行的操作，不写文件',
+        '  --no-backup              写入前不自动创建增量保护快照',
         '  --bootstrap-empty        为空目录生成最小可运行骨架与初始 docs/TDD.md',
         '  --lang <lang>            骨架语言：node | python | go | rust | docs',
         '  --name <name>            项目名称（默认取目录名）',
@@ -647,6 +680,7 @@ async function main(argv) {
     }
     if (arg === '--check') check = true
     else if (arg === '--dry-run') dryRun = true
+    else if (arg === '--no-backup') noBackup = true
     else if (arg === '--bootstrap-empty') doBootstrap = true
     else if (arg === '--lang') lang = argv[++i]
     else if (arg.startsWith('--lang=')) lang = arg.slice('--lang='.length)
@@ -683,7 +717,7 @@ async function main(argv) {
       }
     }
 
-    const equipResult = equip(target, { kitDir, dryRun })
+    const equipResult = equip(target, { kitDir, dryRun, noBackup })
     process.stdout.write(`${JSON.stringify({
       ...(bootstrapResult ? { bootstrap: bootstrapResult } : {}),
       equip: equipResult,

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="1200" height="440" role="img" aria-labelledby="wf-en-title wf-en-desc">
+  <title id="wf-en-title">project-forge Onboarding Workflow: Three Starting Points to One Four-Step Path</title>
+  <desc id="wf-en-desc">Shows Fresh Empty Folder, Partial Setup Repo, and Active Team Repo converging into four sequential steps: Survey, Scaffold, Remote and CI, Review, producing an Evolvable GitHub Repo.</desc>
+  <defs>
+    <style>
+      .sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+      .mono { font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace; }
+    </style>
+  </defs>
+
+  <!-- Stone paper outer card -->
+  <rect x="1" y="1" width="1198" height="438" rx="18" fill="#F5F3EE" stroke="#DFDBD2" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="56" y="54" class="mono" font-size="16" font-weight="600" letter-spacing="1.8" fill="#526075">ONBOARDING · CONVERGENCE</text>
+  <text x="56" y="92" class="sans" font-size="26" font-weight="700" fill="#172033">Three starting points converge into one four-step path</text>
+
+  <!-- Convergence cubic Bezier curves -->
+  <path d="M 284 171 C 326 171, 328 255, 364 255" fill="none" stroke="#4E7496" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M 284 255 L 364 255" fill="none" stroke="#D96B27" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M 284 339 C 326 339, 328 255, 364 255" fill="none" stroke="#1F6F5B" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Horizontal pipeline spine -->
+  <line x1="364" y1="255" x2="984" y2="255" stroke="#B7B0A4" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="364" cy="255" r="5.5" fill="#F5F3EE" stroke="#172033" stroke-width="2.5"/>
+
+  <!-- Left: 3 entry scenarios -->
+  <g>
+    <rect x="56" y="142" width="228" height="58" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="78" cy="171" r="5" fill="#4E7496"/>
+    <text x="178" y="177" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Fresh Empty Folder</text>
+
+    <rect x="56" y="226" width="228" height="58" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="78" cy="255" r="5" fill="#D96B27"/>
+    <text x="178" y="261" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Partial Setup Repo</text>
+
+    <rect x="56" y="310" width="228" height="58" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="78" cy="339" r="5" fill="#1F6F5B"/>
+    <text x="178" y="345" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Active Team Repo</text>
+  </g>
+
+  <!-- Right: 4 steps + final outcome -->
+  <g>
+    <rect x="392" y="214" width="116" height="82" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <text x="450" y="244" class="mono" font-size="16" font-weight="700" fill="#4E7496" text-anchor="middle">01</text>
+    <text x="450" y="274" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Survey</text>
+
+    <rect x="528" y="214" width="126" height="82" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <text x="591" y="244" class="mono" font-size="16" font-weight="700" fill="#4E7496" text-anchor="middle">02</text>
+    <text x="591" y="274" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Scaffold</text>
+
+    <rect x="674" y="214" width="150" height="82" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <text x="749" y="244" class="mono" font-size="16" font-weight="700" fill="#D96B27" text-anchor="middle">03</text>
+    <text x="749" y="274" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Remote &amp; CI</text>
+
+    <rect x="844" y="214" width="120" height="82" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <text x="904" y="244" class="mono" font-size="16" font-weight="700" fill="#1F6F5B" text-anchor="middle">04</text>
+    <text x="904" y="274" class="sans" font-size="17" font-weight="600" fill="#172033" text-anchor="middle">Review</text>
+
+    <rect x="984" y="214" width="160" height="82" rx="14" fill="#1F6F5B"/>
+    <text x="1064" y="248" class="sans" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">Evolvable</text>
+    <text x="1064" y="276" class="sans" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">GitHub Repo</text>
+  </g>
+
+  <!-- Safety reassurance footer -->
+  <text x="392" y="352" class="mono" font-size="16" font-weight="500" fill="#526075">Read-only check first, snapshot backup before edits, handwritten docs kept</text>
+</svg>

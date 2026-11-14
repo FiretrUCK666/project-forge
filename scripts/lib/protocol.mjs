@@ -249,6 +249,35 @@ export const FULL_READ_REFS = Object.freeze([
   'references/remote-github.md',
 ])
 
+/** 契约与工程套件预算上限（单一真相源）。 */
+export const AGENTS_MAX_BYTES = 30720
+export const AGENTS_WARN_BYTES = 24576
+export const KIT_SKILL_MAX_LINES = 180
+export const KIT_SKILLS = Object.freeze([
+  'dev-explore',
+  'dev-plan',
+  'dev-flow',
+  'dev-review',
+  'dev-govern',
+])
+
+/** 受管套件清单与工作区状态相对路径。 */
+export const PF_MANIFEST_REL = '.agents/skills/.pf-manifest.json'
+export const WORKTREES_STATE_REL = '.worktrees/.state'
+
+/** 对外产物层严禁出现的非 GitHub 托管平台或旧式版本库字样。 */
+export const FORBIDDEN_PLATFORM_RE = new RegExp(
+  '\\b(?:' + [
+    'Git' + 'Lab',
+    'Git' + 'ee',
+    'Bit' + 'bucket',
+    'Code' + 'berg',
+    'Sub' + 'version',
+    'S' + 'VN',
+  ].join('|') + ')\\b',
+  'i',
+)
+
 // ── 模板语法：只活在 templates/ 里，绝不落进项目文件 ──────────────────
 //
 // 这一节与上面那四类标记**不是同一层东西**，分开定义是刻意的：
@@ -261,10 +290,10 @@ export const FULL_READ_REFS = Object.freeze([
 // 两者共用同一个「标记正文」提取函数（`markerBodyOf`），所以语法永远只有一份。
 
 /**
- * 模板里可用的条件名。**只有这八个**，全部来自勘察事实。
+ * 模板里可用的条件名，全部来自勘察事实。
  *
  * 加一个条件的代价是：它在模板里能改变一份契约的结构，而在每个项目上都要被求值一次。
- * 所以条件只表达**结构差异**（有没有远端、发不发布、是不是插件），不表达措辞偏好。
+ * 所以条件只表达**结构差异**（有没有远端、发不发布、是不是插件、有没有自有技能），不表达措辞偏好。
  * `preflight` 核对模板里用的条件名都在这个表里——写错一个字母时，那一整块会被静默丢掉。
  *
  * 成对的条件（`has-commands` / `no-commands`、`has-remote` / `no-remote`）是刻意的：
@@ -281,6 +310,7 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
   'is-monorepo',
   'is-plugin-or-skill',
   'has-bilingual-docs',
+  'has-custom-skills',
 ])
 
 /**
@@ -305,6 +335,7 @@ export const TEMPLATE_VARS = Object.freeze([
   'README_LIST',
   'WORKSPACE_PACKAGES',
   'CONVENTIONS_HINT',
+  'CUSTOM_SKILLS_BLOCK',
 ])
 
 /**
@@ -353,12 +384,16 @@ export const LIKELY_DEFAULT_BRANCHES = Object.freeze(['main', 'master', 'trunk',
 // 新增自用文件只做一件事：放进已有的那几处（自用脚本进 `scripts/dev/`、工作记录进
 // `docs/work/`、协作设施进 `.github/`）——那一整目录本来就不进包，不用改任何清单。
 
-/** 不进包的目录（与 `.gitattributes` 的 `export-ignore` 对应）。 */
+/** 不进包的目录（与 `.gitattributes` 的 `export-ignore` 对应；`kit/` 保留进用户包）。 */
 export const REPO_ONLY_DIRS = Object.freeze([
+  '.agents/',
   '.github/',
   'docs/',
   'scripts/dev/',
 ])
+
+/** 不进包的所有目录前缀（与 `REPO_ONLY_DIRS` 同源）。 */
+export const REPO_ONLY_PREFIXES = REPO_ONLY_DIRS
 
 /** 不进包的顶层单文件。它们没有目录可以承载，只能逐条列。 */
 export const REPO_ONLY_FILES = Object.freeze([
@@ -389,7 +424,7 @@ export const REPO_ONLY_FILES = Object.freeze([
 export function isRepoOnlyPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (REPO_ONLY_FILES.includes(p)) return true
-  return REPO_ONLY_DIRS.some((d) => p.startsWith(d))
+  return REPO_ONLY_PREFIXES.some((d) => p.startsWith(d))
 }
 
 /**

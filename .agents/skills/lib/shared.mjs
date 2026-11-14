@@ -1,0 +1,2465 @@
+/**
+ * shared.mjs —— 研发工作流内置技能套件的自包含基础设施。
+ *
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-explore、dev-plan、dev-flow 共用。
+ * 不引用套件目录之外的任何仓库文件。
+ */
+
+import { execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
+  renameSync, statSync, unlinkSync, writeFileSync,
+} from 'node:fs'
+import https from 'node:https'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, posix as pathPosix, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const LIKELY_DEFAULT_BRANCHES = Object.freeze([
+  'main', 'master', 'trunk', 'develop', 'default', 'development',
+])
+
+export const PACKAGE_LOCKFILES = Object.freeze([
+  'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+  'bun.lock', 'bun.lockb', 'poetry.lock', 'uv.lock', 'Cargo.lock',
+])
+
+export const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
+
+let atomicCounter = 0
+
+// ── 基础路径与文件工具 ────────────────────────────────────────────────
+
+/** 路径统一归一化为正斜杠，避免跨平台集合比对失配。 */
+export function posixPath(p) {
+  return String(p ?? '').replace(/\\/g, '/')
+}
+
+/** 比较两个路径是否指向同一位置（优先使用真实路径）。 */
+export function samePath(a, b) {
+  try {
+    return realpathSync.native(resolve(a)) === realpathSync.native(resolve(b))
+  } catch {
+    return resolve(a).toLowerCase() === resolve(b).toLowerCase()
+  }
+}
+
+/** 判断当前模块是否作为 CLI 入口直接执行（兼容 symlink 与 junction）。 */
+export function isMainModule(metaUrl, argv1) {
+  if (typeof argv1 !== 'string' || argv1 === '') return false
+  const target = fileURLToPath(metaUrl)
+  try {
+    if (resolve(argv1) === resolve(target)) return true
+  } catch { /* 路径非法时转入真实路径比较 */ }
+  const real = (p) => {
+    try { return realpathSync.native(p) } catch { return undefined }
+  }
+  const a = real(argv1)
+  const b = real(target)
+  return a !== undefined && b !== undefined && a === b
+}
+
+/** 安全读取 UTF-8 文本文件（去掉 BOM、统一换行）；不可读或二进制返回 undefined。 */
+export function readTextSafe(filePath, maxBytes = 512 * 1024) {
+  try {
+    const st = statSync(filePath)
+    if (!st.isFile() || st.size > maxBytes) return undefined
+    const buf = readFileSync(filePath)
+    if (buf.subarray(0, 4096).includes(0)) return undefined
+    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  } catch {
+    return undefined
+  }
+}
+
+/** 安全读取 JSON 文件；失败返回 undefined。 */
+export function readJsonSafe(filePath) {
+  const text = readTextSafe(filePath)
+  if (text === undefined) return undefined
+  try { return JSON.parse(text) } catch { return undefined }
+}
+
+/** 原子写入文本文件：先写同目录临时文件再改名，失败清理残留。 */
+export function writeAtomic(filePath, content) {
+  const abs = resolve(filePath)
+  mkdirSync(dirname(abs), { recursive: true })
+  atomicCounter += 1
+  const tmp = `${abs}.tmp-${process.pid}-${Date.now()}-${atomicCounter}`
+  writeFileSync(tmp, String(content ?? ''), 'utf8')
+  try {
+    renameSync(tmp, abs)
+  } catch (error) {
+    try { unlinkSync(tmp) } catch { /* 清理失败不影响抛出原始异常 */ }
+    throw error
+  }
+}
+
+/** 原子写入格式化 JSON 文件。 */
+export function writeJsonAtomic(filePath, data) {
+  writeAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`)
+}
+
+/** 计算文本 SHA256（hex）。 */
+export function sha256Text(text) {
+  return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex')
+}
+
+/** 计算文件 SHA256（hex）；不存在或不可读返回 null。 */
+export function sha256File(filePath) {
+  try {
+    const st = statSync(filePath)
+    if (!st.isFile()) return null
+    return createHash('sha256').update(readFileSync(filePath)).digest('hex')
+  } catch {
+    return null
+  }
+}
+
+// ── 安全子进程封装 ────────────────────────────────────────────────────
+
+/**
+ * 使用 execFile 安全执行命令（不经过 shell），并注入防凭据弹窗环境变量。
+ * 返回 { ok, code, missing, timedOut, stdout, stderr }，永不抛出未捕获异常。
+ */
+export function execSafe(cmd, args = [], opts = {}) {
+  return new Promise((done) => {
+    const env = {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      ...(opts.env ?? {}),
+    }
+    const child = execFile(cmd, args, {
+      cwd: opts.cwd,
+      encoding: 'utf8',
+      timeout: opts.timeout ?? 15000,
+      maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
+      windowsHide: true,
+      env,
+    }, (error, stdout, stderr) => {
+      const code = error === null
+        ? 0
+        : (typeof error.code === 'number' ? error.code : 1)
+      done({
+        ok: error === null,
+        code,
+        missing: error?.code === 'ENOENT',
+        timedOut: Boolean(error?.killed),
+        stdout: (stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
+        stderr: (stderr ?? '').replace(/\r\n/g, '\n').trim(),
+      })
+    })
+
+    // 防止子进程提前退出导致 stdin.end 触发未捕获 EPIPE
+    if (child.stdin) child.stdin.on('error', () => {})
+    if (opts.input !== undefined && child.stdin) {
+      child.stdin.end(opts.input)
+    } else if (child.stdin) {
+      child.stdin.end()
+    }
+  })
+}
+
+/** 安全执行 git 命令（保留路径 UTF-8 输出）。 */
+export function gitRun(cwd, args, opts = {}) {
+  return execSafe('git', ['-c', 'core.quotepath=false', ...args], { ...opts, cwd })
+}
+
+/**
+ * 执行项目自备验证命令字符串（来自 Dev Profile 或用户 --cmd）。
+ * 返回 { ok, code, stdout, stderr, timedOut }。
+ */
+export function execShellCommand(commandStr, cwd, opts = {}) {
+  return new Promise((done) => {
+    const env = {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      ...(opts.env ?? {}),
+    }
+    const child = spawn(commandStr, {
+      cwd,
+      shell: true,
+      windowsHide: true,
+      env,
+    })
+    const outChunks = []
+    const errChunks = []
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { child.kill('SIGTERM') } catch { /* 进程可能已退出 */ }
+    }, opts.timeout ?? 120000)
+
+    child.stdout?.on('data', (d) => outChunks.push(d))
+    child.stderr?.on('data', (d) => errChunks.push(d))
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      done({
+        ok: false,
+        code: 1,
+        timedOut,
+        stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
+        stderr: err.message,
+      })
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      const exitCode = timedOut ? 124 : (typeof code === 'number' ? code : 1)
+      done({
+        ok: exitCode === 0,
+        code: exitCode,
+        timedOut,
+        stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
+        stderr: Buffer.concat(errChunks).toString('utf8').trimEnd(),
+      })
+    })
+  })
+}
+
+// ── 仓库根与跨分支共享账本 ─────────────────────────────────────────────
+
+/**
+ * 解析当前目录所属的 Git 仓库边界。
+ * 无论在主仓根还是在 .worktrees/impl-* 中调用，mainRoot 永远指向主仓根，
+ * 确保 .worktrees/.state/ 账本跨分支与跨工作树共用。
+ */
+export async function resolveRepoRoots(cwd = process.cwd()) {
+  const absCwd = resolve(cwd)
+  const res = await gitRun(absCwd, [
+    'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--is-bare-repository',
+  ])
+  if (!res.ok || !res.stdout) {
+    return {
+      isGit: false,
+      cwd: absCwd,
+      mainRoot: absCwd,
+      workTreeRoot: absCwd,
+      gitDir: null,
+      isWorktree: false,
+      isBare: false,
+    }
+  }
+  const lines = res.stdout.split('\n').map((l) => l.trim())
+  const inside = lines[0] === 'true'
+  const topLevel = lines[1] ? resolve(lines[1]) : absCwd
+  const commonDir = lines[2] ? resolve(absCwd, lines[2]) : join(topLevel, '.git')
+  const isBare = lines[3] === 'true'
+  if (!inside || isBare) {
+    return {
+      isGit: isBare,
+      cwd: absCwd,
+      mainRoot: absCwd,
+      workTreeRoot: absCwd,
+      gitDir: commonDir,
+      isWorktree: false,
+      isBare,
+    }
+  }
+  const mainRoot = basename(commonDir).toLowerCase() === '.git' ? dirname(commonDir) : topLevel
+  return {
+    isGit: true,
+    cwd: absCwd,
+    mainRoot,
+    workTreeRoot: topLevel,
+    gitDir: commonDir,
+    isWorktree: !samePath(mainRoot, topLevel),
+    isBare: false,
+  }
+}
+
+/** 确保 .worktrees/ 已被 Git 忽略（不触碰已跟踪的 .gitignore，优先写本地 .git/info/exclude）。 */
+export async function ensureWorktreesIgnored(mainRoot, gitDir) {
+  const check = await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])
+  if (check.ok) return { ok: true, method: 'existing' }
+  const actualGitDir = gitDir ?? join(mainRoot, '.git')
+  const excludeFile = join(actualGitDir, 'info', 'exclude')
+  try {
+    mkdirSync(dirname(excludeFile), { recursive: true })
+    const cur = readTextSafe(excludeFile) ?? ''
+    const hasRule = cur.split('\n').some((l) => l.trim() === '.worktrees' || l.trim() === '.worktrees/')
+    if (!hasRule) {
+      const next = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n.worktrees/\n` : `${cur}.worktrees/\n`
+      writeAtomic(excludeFile, next)
+    }
+    return { ok: true, method: 'git-info-exclude' }
+  } catch {
+    return { ok: false, method: 'unignored' }
+  }
+}
+
+/** 校验并清洗 taskId，防止路径穿越。 */
+export function sanitizeTaskId(taskId) {
+  const raw = String(taskId ?? '').trim()
+  if (!raw || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(raw) || raw.includes('..')) {
+    throw new Error(`非法的 taskId：「${raw}」（仅允许字母、数字、点、下划线、连字符）`)
+  }
+  return raw
+}
+
+/** 将输入文本规范化为 kebab-case slug。 */
+export function slugify(text, fallback = 'task') {
+  const cleaned = String(text ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+  return cleaned || fallback
+}
+
+/** 返回任务账本绝对路径：.worktrees/.state/tasks/<taskId>.json */
+export function taskLedgerPath(mainRoot, taskId) {
+  return join(mainRoot, '.worktrees', '.state', 'tasks', `${sanitizeTaskId(taskId)}.json`)
+}
+
+/** 构建符合跨模块统一契约的默认任务账本结构。 */
+export function createDefaultLedger(partial = {}) {
+  const taskId = sanitizeTaskId(partial.taskId)
+  return {
+    taskId,
+    slug: partial.slug ?? slugify(taskId),
+    caseType: partial.caseType ?? 3,
+    tier: partial.tier ?? 2,
+    isolation: partial.isolation ?? 'worktree',
+    role: partial.role ?? 'local-only',
+    branch: partial.branch ?? null,
+    baseBranch: partial.baseBranch ?? 'main',
+    baseSha: partial.baseSha ?? null,
+    worktreePath: partial.worktreePath ?? null,
+    reviewWorktreePath: partial.reviewWorktreePath ?? null,
+    todoFile: partial.todoFile ?? null,
+    specFile: partial.specFile ?? null,
+    prdFile: partial.prdFile ?? null,
+    linkedIssues: Array.isArray(partial.linkedIssues) ? partial.linkedIssues : [],
+    prNumber: partial.prNumber ?? null,
+    finalized: Boolean(partial.finalized),
+    finalizedHead: partial.finalizedHead ?? null,
+    verifiedHead: partial.verifiedHead ?? null,
+    verifiedCmd: partial.verifiedCmd ?? null,
+    visualFilesChanged: Array.isArray(partial.visualFilesChanged) ? partial.visualFilesChanged : [],
+    empiricalVisualCheckRequired: Boolean(partial.empiricalVisualCheckRequired),
+    visualVerifiedHead: partial.visualVerifiedHead ?? null,
+    visualCheckEvidence: partial.visualCheckEvidence ?? null,
+    implementerId: partial.implementerId ?? null,
+    reviewerId: partial.reviewerId ?? null,
+    rounds: Array.isArray(partial.rounds) ? partial.rounds : [],
+    status: partial.status ?? 'started',
+    ...partial,
+    taskId,
+  }
+}
+
+export function readTaskLedger(mainRoot, taskId) {
+  return readJsonSafe(taskLedgerPath(mainRoot, taskId))
+}
+
+export function writeTaskLedger(mainRoot, ledger) {
+  const p = taskLedgerPath(mainRoot, ledger.taskId)
+  const stamped = {
+    ...createDefaultLedger(ledger),
+    updatedAt: new Date().toISOString(),
+  }
+  if (!stamped.createdAt) stamped.createdAt = stamped.updatedAt
+  writeJsonAtomic(p, stamped)
+  return p
+}
+
+export function listTaskLedgers(mainRoot) {
+  const dir = join(mainRoot, '.worktrees', '.state', 'tasks')
+  if (!existsSync(dir)) return []
+  const out = []
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json')) continue
+      const data = readJsonSafe(join(dir, name))
+      if (data && data.taskId) out.push(data)
+    }
+  } catch { /* 读取失败返回已收集部分 */ }
+  return out
+}
+
+// ── AGENTS.md Dev Profile 与项目风格解析 ───────────────────────────────
+
+function stripWrapQuotes(val) {
+  const s = String(val ?? '').trim()
+  if ((s.startsWith('`') && s.endsWith('`'))
+    || (s.startsWith('"') && s.endsWith('"'))
+    || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1).trim()
+  }
+  return s
+}
+
+function isPlaceholderVal(val) {
+  const s = stripWrapQuotes(String(val ?? ''))
+  if (!s || /^<[^>]+>$/.test(s) || /^#/.test(s)) return true
+  return /^(?:none|n\/a|null|无|暂无|-)$/i.test(s)
+}
+
+function parseListValue(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s || /^\[?\s*\]?$/.test(s)) return []
+  const inner = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s
+  return inner.split(',')
+    .map((x) => stripWrapQuotes(x))
+    .filter((x) => x && !isPlaceholderVal(x))
+}
+
+function parseArchRuleItem(rawRule) {
+  if (rawRule && typeof rawRule === 'object') {
+    const rawFrom = rawRule.fromGlob ?? rawRule.from
+    const rawTo = rawRule.toGlob ?? rawRule.to
+    if (!rawFrom || !rawTo) return null
+    const from = stripWrapQuotes(rawFrom)
+    const to = stripWrapQuotes(rawTo)
+    if (isPlaceholderVal(from) || isPlaceholderVal(to)) return null
+    return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
+  }
+  const s = stripWrapQuotes(String(rawRule ?? ''))
+  if (!s || isPlaceholderVal(s)) return null
+  const m = /^(.+?)\s*(?:->|→)\s*(.+)$/.exec(s)
+  if (!m) return null
+  const from = stripWrapQuotes(m[1])
+  const to = stripWrapQuotes(m[2])
+  if (isPlaceholderVal(from) || isPlaceholderVal(to)) return null
+  return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
+}
+
+/**
+ * 解析 AGENTS.md 中的 Dev Profile（quick-test / full-test / smoke-verify / merge-gate / arch-rules / high-risk / do-not-edit），
+ * 同时兼容从「高风险路径」表格与项目清单提取兜底值。
+ */
+export function parseAgentsProfile(repoRoot) {
+  const agentsPath = join(repoRoot, 'AGENTS.md')
+  const text = readTextSafe(agentsPath)
+  const profile = {
+    hasAgents: text !== undefined,
+    quickTest: undefined,
+    fullTest: undefined,
+    smokeVerify: undefined,
+    mergeGate: undefined,
+    archRules: [],
+    highRisk: [],
+    doNotEdit: [],
+    mergeAuthority: 'reviewer',
+  }
+
+  if (text !== undefined) {
+    const lines = text.split('\n')
+    let activeListKey = null
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
+      const trimmed = line.trim()
+
+      // 若处于多行 YAML 列表下，吸收缩进列表项
+      if (activeListKey) {
+        if (/^[-*]\s+/.test(trimmed) && /^\s+[-*]/.test(line)) {
+          const item = stripWrapQuotes(trimmed.replace(/^[-*]\s+/, '').replace(/\s+#.*$/, ''))
+          if (item && !isPlaceholderVal(item)) {
+            if (activeListKey === 'archRules') {
+              const parsed = parseArchRuleItem(item)
+              if (parsed) profile.archRules.push(parsed)
+            } else {
+              profile[activeListKey].push(item)
+            }
+          }
+          continue
+        }
+        if (trimmed !== '' && !trimmed.startsWith('#')) {
+          activeListKey = null
+        } else {
+          continue
+        }
+      }
+
+      const kv = /^(?:[-*]\s+)?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)\s*:\s*(.*)$/i.exec(trimmed)
+      if (!kv) continue
+      const key = kv[1].toLowerCase()
+      const rawVal = kv[2].replace(/\s+#[^`"'"]*$/, '').trim()
+
+      if (key === 'quick-test' || key === 'full-test' || key === 'smoke-verify' || key === 'merge-gate') {
+        const cleaned = stripWrapQuotes(rawVal)
+        if (!isPlaceholderVal(cleaned)) {
+          if (key === 'quick-test') profile.quickTest = cleaned
+          else if (key === 'full-test') profile.fullTest = cleaned
+          else if (key === 'smoke-verify') profile.smokeVerify = cleaned
+          else profile.mergeGate = cleaned
+        }
+        continue
+      }
+
+      const targetProp = key === 'high-risk' ? 'highRisk' : key === 'do-not-edit' ? 'doNotEdit' : 'archRules'
+      if (rawVal === '') {
+        activeListKey = targetProp
+      } else if (targetProp === 'archRules') {
+        for (const item of parseListValue(rawVal)) {
+          const parsed = parseArchRuleItem(item)
+          if (parsed) profile.archRules.push(parsed)
+        }
+      } else {
+        for (const item of parseListValue(rawVal)) {
+          profile[targetProp].push(item)
+        }
+      }
+    }
+
+    // 兜底解析「高风险路径」Markdown 表格第一列
+    if (profile.highRisk.length === 0) {
+      const hrStart = lines.findIndex((l) => /^##\s+高风险路径/.test(l))
+      if (hrStart >= 0) {
+        for (let i = hrStart + 1; i < lines.length; i += 1) {
+          if (/^##\s+/.test(lines[i])) break
+          const row = /^\|\s*`([^`]+)`\s*\|/.exec(lines[i].trim())
+          if (row && !isPlaceholderVal(row[1])) profile.highRisk.push(row[1].trim())
+        }
+      }
+    }
+
+    if (/merge-authority\s*:\s*human/i.test(text)) {
+      profile.mergeAuthority = 'human'
+    }
+  }
+
+  profile.highRisk = [...new Set(profile.highRisk)]
+  profile.doNotEdit = [...new Set(profile.doNotEdit)]
+  const seenRules = new Set()
+  profile.archRules = profile.archRules.filter((r) => {
+    if (seenRules.has(r.raw)) return false
+    seenRules.add(r.raw)
+    return true
+  })
+  if (profile.highRisk.length === 0) {
+    profile.highRisk = ['.github/workflows/', 'AGENTS.md']
+  }
+
+  const fallback = detectEcosystemCommands(repoRoot)
+  if (!profile.quickTest) profile.quickTest = fallback.quickTest
+  if (!profile.fullTest) profile.fullTest = fallback.fullTest ?? fallback.quickTest
+  if (!profile.mergeGate) profile.mergeGate = profile.fullTest ?? profile.quickTest
+  profile.detectedCommands = fallback
+  return profile
+}
+
+// ── 架构边界静态校验与单/双向门评估 ────────────────────────────────────
+
+/** 通用路径 glob 匹配（支持 *、**、? 及目录前缀斜杠）。 */
+export function matchGlob(filePath, pattern) {
+  const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '')
+  const p = posixPath(pattern).replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!f || !p) return false
+  if (p.endsWith('/')) return f.startsWith(p)
+  if (!/[*?]/.test(p)) return f === p || f.startsWith(`${p}/`)
+
+  // 将 glob 转为正则，保持 **/* 与 **/ 语义准确
+  let reStr = '^'
+  for (let i = 0; i < p.length; i += 1) {
+    if (p[i] === '*') {
+      if (p[i + 1] === '*') {
+        if (p[i + 2] === '/') {
+          reStr += '(?:.*/)?'
+          i += 2
+        } else {
+          reStr += '.*'
+          i += 1
+        }
+      } else {
+        reStr += '[^/]*'
+      }
+    } else if (p[i] === '?') {
+      reStr += '[^/]'
+    } else {
+      reStr += p[i].replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  reStr += '$'
+  return new RegExp(reStr).test(f)
+}
+
+function stripBlockCommentsPreservingLines(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+}
+
+function indexToLine(text, idx) {
+  let line = 1
+  for (let i = 0; i < idx; i += 1) {
+    if (text.charCodeAt(i) === 10) line += 1
+  }
+  return line
+}
+
+function extractImportsForArch(relFile, text, goModule) {
+  const results = []
+  const ext = relFile.toLowerCase().split('.').pop() ?? ''
+
+  if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'mts', 'cts'].includes(ext)) {
+    const noBlock = stripBlockCommentsPreservingLines(text)
+    const stripped = noBlock.split('\n').map((l) => {
+      const m = /^([^'"`]*?)\/\/.*$/.exec(l)
+      return m ? m[1] : l
+    }).join('\n')
+
+    const patterns = [
+      /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+      /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    ]
+    for (const re of patterns) {
+      for (const m of stripped.matchAll(re)) {
+        const spec = m[1].trim()
+        if (!spec) continue
+        const line = indexToLine(stripped, m.index ?? 0)
+        const cands = []
+        if (spec.startsWith('.')) {
+          const base = pathPosix.normalize(pathPosix.join(pathPosix.dirname(relFile), spec))
+          cands.push(base, `${base}.js`, `${base}.mjs`, `${base}.ts`, `${base}.tsx`, `${base}/index.js`, `${base}/index.mjs`, `${base}/index.ts`)
+        } else {
+          cands.push(spec)
+          if (spec.startsWith('@/')) cands.push(`src/${spec.slice(2)}`)
+        }
+        results.push({ line, specifier: spec, candidates: cands })
+      }
+    }
+    return results
+  }
+
+  if (ext === 'py') {
+    const lines = text.split('\n')
+    const curDir = pathPosix.dirname(relFile)
+    for (let i = 0; i < lines.length; i += 1) {
+      const code = lines[i].replace(/#.*$/, '')
+      const fromM = /^\s*from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\b/.exec(code)
+      if (fromM) {
+        const mod = fromM[1]
+        const cands = []
+        const dotM = /^(\.+)(.*)$/.exec(mod)
+        if (dotM) {
+          let base = curDir
+          for (let up = 1; up < dotM[1].length; up += 1) base = pathPosix.dirname(base)
+          const sub = dotM[2].replace(/\./g, '/')
+          const joined = sub ? pathPosix.normalize(base === '.' ? sub : pathPosix.join(base, sub)) : base
+          cands.push(joined, `${joined}.py`, `${joined}/__init__.py`)
+        } else {
+          const slash = mod.replace(/\./g, '/')
+          cands.push(slash, `${slash}.py`, `${slash}/__init__.py`)
+        }
+        results.push({ line: i + 1, specifier: mod, candidates: cands })
+        continue
+      }
+      const impM = /^\s*import\s+([A-Za-z0-9_.,\s]+)$/.exec(code)
+      if (impM) {
+        for (const seg of impM[1].split(',')) {
+          const mod = seg.trim().split(/\s+as\s+/i)[0].trim()
+          if (!mod) continue
+          const slash = mod.replace(/\./g, '/')
+          results.push({ line: i + 1, specifier: mod, candidates: [slash, `${slash}.py`, `${slash}/__init__.py`] })
+        }
+      }
+    }
+    return results
+  }
+
+  if (ext === 'go') {
+    const stripped = stripBlockCommentsPreservingLines(text)
+    const lines = stripped.split('\n')
+    let inImportBlock = false
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i].replace(/\/\/.*$/, '').trim()
+      if (!line) continue
+      if (/^import\s*\($/.test(line)) { inImportBlock = true; continue }
+      if (inImportBlock && line === ')') { inImportBlock = false; continue }
+      const m = inImportBlock
+        ? /^(?:[A-Za-z0-9_.]+\s+)?"([^"]+)"/.exec(line)
+        : /^import\s+(?:[A-Za-z0-9_.]+\s+)?"([^"]+)"/.exec(line)
+      if (m) {
+        const spec = m[1].trim()
+        const cands = [spec, `${spec}/_.go`]
+        if (goModule && spec.startsWith(`${goModule}/`)) {
+          const localPkg = spec.slice(goModule.length + 1)
+          cands.unshift(localPkg, `${localPkg}/_.go`)
+        } else if (!goModule && /^[^/]+\.[^/]+\/[^/]+\/.+/.test(spec)) {
+          const segs = spec.split('/')
+          if (segs.length >= 3) {
+            const s2 = segs.slice(2).join('/')
+            cands.unshift(s2, `${s2}/_.go`)
+          }
+          if (segs.length >= 4) {
+            const s3 = segs.slice(3).join('/')
+            cands.unshift(s3, `${s3}/_.go`)
+          }
+        }
+        results.push({ line: i + 1, specifier: spec, candidates: cands })
+      }
+    }
+  }
+  return results
+}
+
+/**
+ * 依据 Dev Profile 中的 arch-rules（fromGlob -> toGlob）静态解析改动文件引用边界，
+ * 命中的违规附带根因定位与架构解耦修法提示。
+ */
+export function evaluateArchRules(repoRoot, fileRelList = [], archRules = []) {
+  const rules = (Array.isArray(archRules) ? archRules : [])
+    .map(parseArchRuleItem)
+    .filter(Boolean)
+  if (rules.length === 0 || !Array.isArray(fileRelList) || fileRelList.length === 0) {
+    return { ok: true, checkedFiles: 0, ruleCount: rules.length, violations: [] }
+  }
+
+  const gomod = readTextSafe(join(repoRoot, 'go.mod'))
+  const goModule = gomod ? /^module\s+(\S+)/m.exec(gomod)?.[1]?.trim() : undefined
+
+  const violations = []
+  let checkedFiles = 0
+
+  for (const rawFile of fileRelList) {
+    const rel = posixPath(rawFile).replace(/^\.\//, '').replace(/^\/+/, '')
+    if (!rel) continue
+    const matchedRules = rules.filter((r) => matchGlob(rel, r.from))
+    if (matchedRules.length === 0) continue
+
+    const text = readTextSafe(join(repoRoot, rel))
+    if (text === undefined) continue
+    checkedFiles += 1
+
+    const imports = extractImportsForArch(rel, text, goModule)
+    for (const imp of imports) {
+      for (const rule of matchedRules) {
+        const hit = imp.candidates.find((c) => matchGlob(c, rule.to))
+        if (hit) {
+          violations.push({
+            file: rel,
+            line: imp.line,
+            rule: rule.raw,
+            specifier: imp.specifier,
+            target: hit,
+            message: `架构禁引违规 [${rule.raw}]：${rel}:${imp.line} 引用了 ${imp.specifier}（命中禁止目标 ${hit}）`,
+            fixHint: `根因修法：勿让 ${rule.from} 直接依赖 ${rule.to}；请将公共契约/工具下沉至允许共享的基础层，或通过依赖注入/接口回调反转依赖方向。`,
+          })
+        }
+      }
+    }
+  }
+
+  return {
+    ok: violations.length === 0,
+    checkedFiles,
+    ruleCount: rules.length,
+    violations,
+  }
+}
+
+/** 判定变更属于双向门（two-way，可逆）还是单向门（one-way，不可逆/触及边界与门禁）。 */
+export function classifyDoorType({
+  changedFiles = [],
+  summary = '',
+  touchesContract = false,
+  highRisk = [],
+  gateWeakened = false,
+} = {}) {
+  const files = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(f).replace(/^\.\//, ''))
+  const riskPatterns = [...new Set([...(Array.isArray(highRisk) ? highRisk : []), '.github/workflows/', 'AGENTS.md', '.gitattributes'])]
+  const signals = []
+
+  if (gateWeakened) {
+    signals.push('检测到弱化/放宽测试或 CI 门禁检查（必须人工拍板）')
+  }
+  if (highRisk === true) {
+    signals.push('已标记触碰高风险路径')
+  }
+  const highRiskHits = files.filter((f) => riskPatterns.some((pat) => matchGlob(f, pat)))
+  if (highRiskHits.length > 0) {
+    signals.push(`触碰高风险路径：${highRiskHits.slice(0, 5).join(', ')}`)
+  }
+  if (touchesContract) {
+    signals.push('涉及跨模块或外部对外契约变更')
+  }
+  const infraHits = files.filter((f) => /(?:^|\/)(?:migrations?|migrate)\/|\.sql$|^(?:SKILL\.md|LICENSE|package-lock\.json)$/i.test(f))
+  if (infraHits.length > 0) {
+    signals.push(`触碰不可逆迁移或分发根契约：${infraHits.slice(0, 5).join(', ')}`)
+  }
+  const summaryText = String(summary ?? '')
+  if (/(?:breaking\s+change|外部契约|跨模块|数据迁移|schema\s*变更|数据库迁移|不可逆|权限模型|协议变更|弱化门禁|publish|release|改可见性)/i.test(summaryText)) {
+    signals.push('任务语义涉及外部契约、权限、发布或不可逆数据迁移')
+  }
+
+  const isOneWay = signals.length > 0
+  return {
+    doorType: isOneWay ? 'one-way' : 'two-way',
+    requiresHumanApproval: Boolean(gateWeakened),
+    signals,
+    reason: isOneWay ? signals.join('；') : '局部可逆改动（未触碰高风险路径、外部契约或门禁定义，可无损回滚）',
+    rollbackPath: isOneWay
+      ? '单向门回退：已合并远端须发反向提交或递增版本修复（禁止改写历史）；若含数据库/Schema 迁移须附带显式降级步骤；弱化门禁改动未获 --human-approved 前阻断合并。'
+      : '双向门回退：未提交变更可直接重置工作区；已开分支未合并直接关闭 PR 并删除临时分支；已合入则一键 git revert。',
+  }
+}
+
+/** 从项目清单嗅探测试与门禁命令，作为 Dev Profile 缺失时的安全兜底。 */
+export function detectEcosystemCommands(repoRoot) {
+  const cmds = { quickTest: undefined, fullTest: undefined, lint: undefined, build: undefined, kinds: [] }
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  if (pkg) {
+    cmds.kinds.push('node')
+    const pm = existsSync(join(repoRoot, 'pnpm-lock.yaml')) ? 'pnpm'
+      : existsSync(join(repoRoot, 'yarn.lock')) ? 'yarn'
+        : existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb')) ? 'bun' : 'npm'
+    const run = pm === 'npm' ? 'npm run' : pm
+    const scripts = pkg.scripts ?? {}
+    if (scripts.test && !/no test specified/i.test(String(scripts.test))) {
+      cmds.quickTest = pm === 'npm' ? 'npm test' : `${pm} test`
+    }
+    if (scripts.check) cmds.fullTest = `${run} check`
+    else if (scripts.verify) cmds.fullTest = `${run} verify`
+    else if (scripts.ci) cmds.fullTest = `${run} ci`
+    if (scripts.lint) cmds.lint = `${run} lint`
+    if (scripts.build) cmds.build = `${run} build`
+  }
+  if (existsSync(join(repoRoot, 'pyproject.toml')) || existsSync(join(repoRoot, 'pytest.ini'))) {
+    cmds.kinds.push('python')
+    if (existsSync(join(repoRoot, 'tests')) || existsSync(join(repoRoot, 'test'))
+      || existsSync(join(repoRoot, 'pytest.ini'))) {
+      cmds.quickTest ??= 'pytest'
+    }
+  }
+  if (existsSync(join(repoRoot, 'Cargo.toml'))) {
+    cmds.kinds.push('rust')
+    cmds.quickTest ??= 'cargo test'
+    cmds.build ??= 'cargo build'
+  }
+  if (existsSync(join(repoRoot, 'go.mod'))) {
+    cmds.kinds.push('go')
+    cmds.quickTest ??= 'go test ./...'
+    cmds.build ??= 'go build ./...'
+  }
+  const makefile = readTextSafe(join(repoRoot, 'Makefile'))
+  if (makefile) {
+    if (/^test:/m.test(makefile)) cmds.quickTest ??= 'make test'
+    if (/^check:/m.test(makefile)) cmds.fullTest ??= 'make check'
+  }
+  // 兜底探测 Node 内置 test 目录
+  if (!cmds.quickTest && existsSync(join(repoRoot, 'test'))) {
+    cmds.quickTest = 'node --test'
+  }
+  return cmds
+}
+
+/** 探测项目格式、默认分支、提交风格与是否启用了四层 docs/ 体系。 */
+export async function detectProjectConventions(repoRoot) {
+  const [originHeadRes, branchRes, initDefRes, logRes] = await Promise.all([
+    gitRun(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
+    gitRun(repoRoot, ['symbolic-ref', '--short', 'HEAD']),
+    gitRun(repoRoot, ['config', '--get', 'init.defaultbranch']),
+    gitRun(repoRoot, ['log', '--format=%s', '-n', '20']),
+  ])
+
+  let originHead
+  if (originHeadRes.ok && originHeadRes.stdout) {
+    const m = /^origin\/(.+)$/.exec(originHeadRes.stdout.trim())
+    originHead = m ? m[1] : originHeadRes.stdout.trim()
+  }
+  const curBranch = branchRes.ok ? branchRes.stdout.trim() : undefined
+  const initDef = initDefRes.ok ? initDefRes.stdout.trim() : undefined
+  const defaultBranch = originHead
+    || (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch) ? curBranch : undefined)
+    || initDef
+    || 'main'
+
+  const subjects = logRes.ok && logRes.stdout
+    ? logRes.stdout.split('\n').filter(Boolean)
+    : []
+  const convRe = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
+  const convCount = subjects.filter((s) => convRe.test(s)).length
+  const commitStyle = subjects.length > 0 && convCount > subjects.length / 2 ? 'conventional' : 'plain'
+
+  const hasDocsSystem = existsSync(join(repoRoot, 'docs', 'TDD.md'))
+    || existsSync(join(repoRoot, 'docs', 'specs'))
+    || existsSync(join(repoRoot, 'docs', 'todo'))
+    || existsSync(join(repoRoot, 'docs', 'prd'))
+
+  return { defaultBranch, commitStyle, hasDocsSystem }
+}
+
+// ── GitHub 仓库归一化与五态身份判定 ────────────────────────────────────
+
+/** 将 GitHub 地址归一为保留原始大小写的 owner/name（用于 API 调用）。 */
+export function githubRepoFull(value) {
+  const s = String(value ?? '').trim()
+  if (!/github\.com[:/]/i.test(s)) return undefined
+  let norm = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+  norm = norm.replace(/^[^@/]*@/, '')
+  norm = norm.replace(/^[^/:]+:/, '')
+  norm = norm.replace(/^[^/]*\.[^/]*\//, '')
+  norm = norm.replace(/\.git$/i, '').replace(/\/+$/, '')
+  return /^[^/\s]+\/[^/\s]+$/.test(norm) ? norm : undefined
+}
+
+/** 将 GitHub 地址归一为小写 owner/name（用于等价比较）。 */
+export function githubRepoPath(value) {
+  const full = githubRepoFull(value)
+  return full ? full.toLowerCase() : undefined
+}
+
+/** 从项目清单提取声明的源仓库（owner/name）。 */
+export function detectDeclaredRepo(repoRoot) {
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  if (pkg) {
+    const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
+    const gh = githubRepoPath(repo)
+    if (gh) return gh
+  }
+  const skillMd = readTextSafe(join(repoRoot, 'SKILL.md'))
+  if (skillMd) {
+    const m = /^[ \t]+source:[ \t]*["']?([^"'\n]+?)["']?[ \t]*$/m.exec(skillMd)
+    const gh = githubRepoPath(m?.[1])
+    if (gh) return gh
+  }
+  const cargo = readTextSafe(join(repoRoot, 'Cargo.toml'))
+  if (cargo) {
+    const m = /^\s*repository\s*=\s*["']([^"']+)["']/m.exec(cargo)
+    const gh = githubRepoPath(m?.[1])
+    if (gh) return gh
+  }
+  const pyproject = readTextSafe(join(repoRoot, 'pyproject.toml'))
+  if (pyproject) {
+    const urls = /\[project\.urls\]([\s\S]*?)(?:\n\[|$)/.exec(pyproject)?.[1] ?? ''
+    for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
+      const m = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)
+      const gh = githubRepoPath(m?.[1])
+      if (gh) return gh
+    }
+  }
+  const gomod = readTextSafe(join(repoRoot, 'go.mod'))
+  if (gomod) {
+    const m = /^module\s+(\S+)/m.exec(gomod)
+    const gh = githubRepoPath(m?.[1])
+    if (gh) return gh
+  }
+  return undefined
+}
+
+/**
+ * 双轴五态工作区身份判定（纯逻辑，支持注入外部 API 与本地标志）：
+ * local-only | maintainer | contributor-fork | clone-readonly | inbound-external-pr | undetermined
+ */
+export function resolveWorkspaceIdentity({
+  gitDir,
+  remoteUrls = {},
+  declaredRepo,
+  gitIdentity = {},
+  historyAuthors = [],
+  commits = 0,
+  externalPr,
+  apiProbe,
+} = {}) {
+  const TEAM_PROBE_HINT = '如你是仓库团队或组织协作者且尚未提交过代码，可追加 --probe-auth（或运行 flow.mjs inspect --probe-auth）探测 GitHub 写权限以确认 maintainer'
+
+  if (externalPr) {
+    return {
+      role: 'inbound-external-pr',
+      reason: `审阅外部传入 PR #${externalPr}`,
+    }
+  }
+
+  if (gitDir && existsSync(join(gitDir, 'pf-local-mode'))) {
+    return { role: 'local-only', reason: '已显式启用本地模式（.git/pf-local-mode）' }
+  }
+
+  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  if (!originRaw) {
+    return { role: 'local-only', reason: '仓库没有配置任何远端' }
+  }
+
+  if (gitDir && existsSync(join(gitDir, 'pf-fork-mode'))) {
+    return { role: 'contributor-fork', reason: '已选择 Fork 协作模式（.git/pf-fork-mode）' }
+  }
+  if (gitDir && existsSync(join(gitDir, 'pf-standalone-mode'))) {
+    return {
+      role: 'maintainer',
+      collaborationScope: 'owner',
+      reason: '已选择独立项目模式（.git/pf-standalone-mode）',
+    }
+  }
+
+  const origin = githubRepoPath(originRaw)
+  const upstream = githubRepoPath(remoteUrls.upstream)
+  const originLow = origin?.toLowerCase()
+  const upstreamLow = upstream?.toLowerCase()
+  const declaredLow = declaredRepo?.toLowerCase()
+  const isLocalRemote = (u) => Boolean(u) && (
+    /^file:\/\//i.test(u.trim())
+    || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u.trim()) && !/^[^@/]+@[^:]+:/i.test(u.trim()))
+  )
+
+  if (!origin) {
+    if (isLocalRemote(originRaw)) {
+      if (remoteUrls.upstream && remoteUrls.upstream !== originRaw) {
+        return { role: 'contributor-fork', reason: '本地测试远端存在独立的 upstream 与 origin' }
+      }
+      const localEmail = (gitIdentity.email ?? '').trim().toLowerCase()
+      const localName = (gitIdentity.name ?? '').trim().toLowerCase()
+      const matched = historyAuthors.some((a) => {
+        const lower = a.toLowerCase()
+        return (localEmail && lower.includes(`<${localEmail}>`)) || (localName && lower.startsWith(`${localName} <`))
+      })
+      if (commits > 0 && historyAuthors.length > 0 && !matched) {
+        return { role: 'clone-readonly', reason: '克隆仓历史作者与当前配置署名不匹配' }
+      }
+      return { role: 'maintainer', collaborationScope: 'owner', reason: '本地测试远端且属主匹配' }
+    }
+    return { role: 'undetermined', reason: '远端地址无法识别为 GitHub 仓库' }
+  }
+
+  const apiWrite = /^(ADMIN|MAINTAIN|WRITE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === true
+  const apiReadOnly = /^(READ|TRIAGE|NONE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === false
+  const apiProbed = Boolean(apiProbe && (apiWrite || apiReadOnly || apiProbe.viewerPermission))
+  const canEmitTeamProbeHint = !apiProbed && !apiProbe?.isFork
+
+  if (upstreamLow && upstreamLow !== originLow) {
+    if (apiReadOnly) {
+      return {
+        role: 'clone-readonly',
+        reason: `upstream 指向 ${upstream}，但对 origin（${origin}）只有只读权限`,
+      }
+    }
+    return { role: 'contributor-fork', reason: `origin (${origin}) 与 upstream (${upstream}) 不同` }
+  }
+
+  if (apiProbe?.isFork === true && (!declaredLow || !apiProbe.parent || apiProbe.parent.toLowerCase() === declaredLow || declaredLow !== originLow)) {
+    if (apiReadOnly) {
+      return { role: 'clone-readonly', reason: `origin（${origin}）是他人 Fork 且当前账号无写入权限` }
+    }
+    return { role: 'contributor-fork', reason: `API 探测表明 ${origin} 是 Fork 仓库` }
+  }
+
+  if (declaredLow && declaredLow !== originLow) {
+    if (apiReadOnly) {
+      return { role: 'clone-readonly', reason: `对声明的远端 ${origin} 无写权限（${apiProbe.viewerPermission ?? 'READ'}）` }
+    }
+    return { role: 'contributor-fork', reason: `项目声明源仓库为 ${declaredRepo}，当前 origin 为 ${origin}` }
+  }
+
+  // origin 与 declaredRepo 一致或未声明源仓库：校验是否拥有维护者写权限或本机作者归属
+  const originOwnerLow = origin.split('/')[0].toLowerCase()
+  const viewerLogin = apiProbe?.viewerLogin || apiProbe?.login
+  if (apiReadOnly) {
+    return {
+      role: 'clone-readonly',
+      reason: `对 ${origin} 仅具备只读权限（${apiProbe?.viewerPermission ?? 'READ'}）`,
+    }
+  }
+  if (apiWrite) {
+    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+    const collaborationScope = isTeamCollaborator ? 'team-collaborator' : 'owner'
+    const permLabel = apiProbe?.viewerPermission ?? 'WRITE'
+    const reason = isTeamCollaborator
+      ? `当前账号 ${viewerLogin} 具备同源仓库 ${origin} 的组织/团队写权限（${permLabel}，团队协作者）`
+      : `拥有 ${origin} 写权限（${permLabel}）`
+    return { role: 'maintainer', collaborationScope, reason }
+  }
+
+  if (viewerLogin && String(viewerLogin).toLowerCase() === originOwnerLow) {
+    return {
+      role: 'maintainer',
+      collaborationScope: 'owner',
+      reason: `当前登录账号 ${viewerLogin} 与仓库属主一致`,
+    }
+  }
+
+  // 离线判据：若已有提交历史，核对本地 git 署名是否在提交作者之中，防止把他人克隆仓误判为维护者
+  const localEmail = (gitIdentity.email ?? '').trim().toLowerCase()
+  const localName = (gitIdentity.name ?? '').trim().toLowerCase()
+  const authorMatched = historyAuthors.some((a) => {
+    const lower = a.toLowerCase()
+    if (localEmail && lower.includes(`<${localEmail}>`)) return true
+    if (localName && lower.startsWith(`${localName} <`)) return true
+    return false
+  })
+
+  if (commits > 0 && historyAuthors.length > 0 && !authorMatched) {
+    return {
+      role: 'clone-readonly',
+      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,
+      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
+    }
+  }
+
+  if (declaredLow && declaredLow === originLow) {
+    if (authorMatched) {
+      const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+      return {
+        role: 'maintainer',
+        collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+        reason: `origin 与项目声明源仓库 ${origin} 一致且本机提交归属吻合`,
+      }
+    }
+    return {
+      role: 'undetermined',
+      reason: `origin 与项目声明源仓库 ${origin} 一致，但缺少写入权限与提交作者证据，保守按贡献者处置`,
+      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
+    }
+  }
+
+  if (authorMatched) {
+    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+    return {
+      role: 'maintainer',
+      collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+      reason: '自有仓库且本机署名匹配历史提交作者',
+    }
+  }
+
+  return {
+    role: 'undetermined',
+    reason: '缺乏源仓库声明与远端写权限证明，按保守贡献者处置',
+    ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
+  }
+}
+
+// ── 双轨四级内置轻量 GitHub 客户端（绝不落盘/打印 token） ─────────────
+
+function parseGitHubUrlParts(remoteUrl) {
+  const full = githubRepoFull(remoteUrl)
+  if (!full) return null
+  const isSsh = /^git@|^ssh:\/\//i.test(String(remoteUrl ?? '').trim())
+  return { full, lower: full.toLowerCase(), protocol: isSsh ? 'ssh' : 'https' }
+}
+
+/** 探测 git credential fill（仅保留内存令牌给闭包客户端，绝不写入返回对象）。 */
+async function probeHttpsCredential(cwd, remoteUrl) {
+  const parts = parseGitHubUrlParts(remoteUrl)
+  const pathPart = parts ? `${parts.full}.git` : ''
+  const lines = ['protocol=https', 'host=github.com']
+  if (pathPart) lines.push(`path=${pathPart}`)
+  const res = await execSafe('git', ['credential', 'fill'], {
+    cwd,
+    input: `${lines.join('\n')}\n\n`,
+    timeout: 3000,
+  })
+  if (!res.ok || !res.stdout) return { available: false, token: null }
+  let token = null
+  for (const line of res.stdout.split('\n')) {
+    const m = /^password=(.+)$/.exec(line.trim())
+    if (m && m[1]) { token = m[1]; break }
+  }
+  return { available: Boolean(token), token }
+}
+
+async function probeSshAuth(cwd) {
+  const r22 = await execSafe('ssh', [
+    '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=2', '-o', 'StrictHostKeyChecking=accept-new',
+    'git@github.com',
+  ], { cwd, timeout: 3500 })
+  if (/successfully authenticated/i.test(r22.stderr + r22.stdout)) {
+    return { available: true, port: 22 }
+  }
+  const r443 = await execSafe('ssh', [
+    '-T', '-p', '443', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=2', '-o', 'StrictHostKeyChecking=accept-new',
+    'git@ssh.github.com',
+  ], { cwd, timeout: 3500 })
+  if (/successfully authenticated/i.test(r443.stderr + r443.stdout)) {
+    return { available: true, port: 443 }
+  }
+  return { available: false, port: null }
+}
+
+/**
+ * 并发探测双轨四级 GitHub 环境，并返回自包含客户端实例（token 仅保存在闭包内）。
+ */
+export async function probeGitHubEnv({ cwd = process.cwd(), remoteUrls = {}, probeNetwork = false } = {}) {
+  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  const parsedOrigin = originRaw ? parseGitHubUrlParts(originRaw) : null
+
+  if (!originRaw) {
+    return {
+      env: {
+        hasRemote: false,
+        protocol: null,
+        trackA: { ssh: 'n/a', https: 'n/a', remediationCmd: null },
+        trackB: { tier: 'offline', ghCli: false, hasToken: false },
+      },
+      client: createGitHubClient({ tier: 'offline', cwd }),
+    }
+  }
+
+  const envToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || null
+  const [ghStatus, credResult] = await Promise.all([
+    execSafe('gh', ['auth', 'status'], { cwd, timeout: 3000 }),
+    probeHttpsCredential(cwd, originRaw),
+  ])
+  const sshResult = probeNetwork && (parsedOrigin?.protocol === 'ssh' || (!credResult.available && !envToken))
+    ? await probeSshAuth(cwd)
+    : { available: null, port: null }
+
+  const ghOk = !ghStatus.missing && ghStatus.ok
+  const ghLoginMatch = ghOk
+    ? /Logged in to [^\s]+ (?:account|as)\s+([^\s(]+)/i.exec(`${ghStatus.stdout ?? ''}\n${ghStatus.stderr ?? ''}`)
+    : null
+  const ghLogin = ghLoginMatch ? ghLoginMatch[1].trim() : null
+  const token = envToken || credResult.token || null
+  const hasHttps = credResult.available || Boolean(envToken)
+
+  let sshState = 'unprobed'
+  if (sshResult.available === true) sshState = `available:${sshResult.port}`
+  else if (sshResult.available === false) sshState = 'unavailable'
+
+  let remediationCmd = null
+  if (parsedOrigin?.protocol === 'https' && !hasHttps && sshResult.available === true) {
+    remediationCmd = `git remote set-url origin git@github.com:${parsedOrigin.full}.git`
+  } else if (parsedOrigin?.protocol === 'https' && !hasHttps && ghOk) {
+    remediationCmd = 'gh auth setup-git'
+  } else if (parsedOrigin?.protocol === 'ssh' && sshResult.available === false && hasHttps) {
+    remediationCmd = `git remote set-url origin https://github.com/${parsedOrigin.full}.git`
+  }
+
+  let tier = 'mcp-delegate'
+  if (ghOk) tier = 'gh-cli'
+  else if (token) tier = 'node-https-token'
+  else if (parsedOrigin?.protocol === 'ssh' && sshResult.available === true) tier = 'half-duplex'
+  else if (!probeNetwork && parsedOrigin) tier = 'mcp-delegate'
+
+  const env = {
+    hasRemote: true,
+    origin: parsedOrigin?.full ?? null,
+    protocol: parsedOrigin?.protocol ?? null,
+    trackA: {
+      ssh: sshState,
+      https: hasHttps ? 'available' : 'no-credential',
+      remediationCmd,
+    },
+    trackB: {
+      tier,
+      ghCli: ghOk,
+      ...(ghLogin ? { login: ghLogin } : {}),
+      // 布尔标示，绝不暴露或序列化令牌值
+      hasToken: Boolean(token),
+    },
+  }
+
+  return {
+    env,
+    client: createGitHubClient({ tier, cwd, token, login: ghLogin }),
+  }
+}
+
+/** 构造 GitHub 原生 REST 请求（node:https），仅在内存中携带 token。 */
+function githubHttpsRequest(method, apiPath, token, bodyObj) {
+  return new Promise((done) => {
+    const payload = bodyObj === undefined ? null : Buffer.from(JSON.stringify(bodyObj), 'utf8')
+    const headers = {
+      'User-Agent': 'dev-flow-kit',
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    }
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (payload) {
+      headers['Content-Type'] = 'application/json; charset=utf-8'
+      headers['Content-Length'] = String(payload.length)
+    }
+
+    const req = https.request({
+      hostname: 'api.github.com',
+      path: apiPath,
+      method,
+      headers,
+      timeout: 10000,
+    }, (res) => {
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8')
+        let data = null
+        try { data = raw ? JSON.parse(raw) : null } catch { data = raw }
+        done({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode ?? 0,
+          data,
+        })
+      })
+    })
+    req.on('timeout', () => {
+      req.destroy()
+      done({ ok: false, status: 408, data: { message: 'GitHub API timeout' } })
+    })
+    req.on('error', (err) => {
+      done({ ok: false, status: 0, data: { message: err.message } })
+    })
+    if (payload) req.write(payload)
+    req.end()
+  })
+}
+
+/** 写 UTF-8 临时文件，执行回调后必定清理，严禁命令行直接拼非 ASCII 正文。 */
+async function withUtf8TempFile(prefix, content, fn) {
+  atomicCounter += 1
+  const tmpFile = join(tmpdir(), `${prefix}-${process.pid}-${Date.now()}-${atomicCounter}.md`)
+  writeFileSync(tmpFile, String(content ?? ''), 'utf8')
+  try {
+    return await fn(tmpFile)
+  } finally {
+    try { unlinkSync(tmpFile) } catch { /* 临时文件清理失败不掩盖主流程 */ }
+  }
+}
+
+/** 解析 Issue / PR 正文中的依赖与引用关系（忽略代码块）。 */
+export function parseBodyRelations(body) {
+  const text = String(body ?? '')
+  const out = { dependsOn: [], blocks: [], partOf: [], fixes: [], refs: [] }
+  const cleanLines = []
+  let inFence = false
+  for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
+    if (!inFence) cleanLines.push(line)
+  }
+  const clean = cleanLines.join('\n')
+
+  const extractNums = (re, bucket) => {
+    for (const m of clean.matchAll(re)) {
+      for (const numMatch of m[1].matchAll(/#(\d+)/g)) {
+        const n = Number(numMatch[1])
+        if (Number.isInteger(n) && !bucket.includes(n)) bucket.push(n)
+      }
+    }
+  }
+
+  extractNums(/\bdepends\s+on\s*:?\s*([^\n.;]+)/gi, out.dependsOn)
+  extractNums(/\bblocks\s*:?\s*([^\n.;]+)/gi, out.blocks)
+  extractNums(/\bpart\s+of\s*:?\s*([^\n.;]+)/gi, out.partOf)
+  extractNums(/\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s*:?\s*([^\n.;]+)/gi, out.fixes)
+  extractNums(/\brefs?\s*:?\s*([^\n.;]+)/gi, out.refs)
+  return out
+}
+
+/**
+ * 解析混合输入列表（Issue URL / PR URL / #N / issue#N / pr#N）。
+ */
+export function parseFlowInputs(inputs = [], defaultRepo = null) {
+  const issues = []
+  const prs = []
+  const unknown = []
+
+  for (const raw of inputs) {
+    const s = String(raw ?? '').trim()
+    if (!s) continue
+    let m = /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/i.exec(s)
+    if (m) { issues.push({ repo: m[1], number: Number(m[2]), raw: s }); continue }
+
+    m = /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/i.exec(s)
+    if (m) { prs.push({ repo: m[1], number: Number(m[2]), raw: s }); continue }
+
+    m = /^pr#(\d+)$/i.exec(s)
+    if (m) { prs.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
+
+    m = /^(?:issue)?#(\d+)$/i.exec(s)
+    if (m) { issues.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
+
+    unknown.push(s)
+  }
+  return { issues, prs, unknown }
+}
+
+/**
+ * 构造四级降级 GitHub 客户端。
+ */
+export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(), token = null, login = null } = {}) {
+  let cachedLogin = login || null
+  const makeMcpDelegate = (action, params, statePayload = {}) => {
+    const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
+    const bodyWithTag = params.body ? `${params.body}\n\n${tag}` : undefined
+    return {
+      ok: false,
+      delegated: true,
+      tier: tier === 'offline' || tier === 'half-duplex' ? tier : 'mcp-delegate',
+      action,
+      jsonPayload: {
+        action,
+        ...params,
+        ...(bodyWithTag !== undefined ? { body: bodyWithTag } : {}),
+        stateTag: tag,
+      },
+      stateTag: tag,
+    }
+  }
+
+  return {
+    tier,
+
+    async getRepoMeta(repo) {
+      if (!repo) return { ok: false, reason: 'missing-repo' }
+      if (tier === 'gh-cli') {
+        const [res, userRes] = await Promise.all([
+          execSafe('gh', ['api', `repos/${repo}`], { cwd }),
+          cachedLogin ? Promise.resolve(null) : execSafe('gh', ['api', 'user', '--jq', '.login'], { cwd }),
+        ])
+        if (userRes?.ok && userRes.stdout?.trim()) {
+          cachedLogin = userRes.stdout.trim()
+        }
+        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
+        try {
+          const data = JSON.parse(res.stdout)
+          const perms = data.permissions
+          return {
+            ok: true,
+            isFork: Boolean(data.fork),
+            parent: data.parent?.full_name?.toLowerCase() ?? null,
+            defaultBranch: data.default_branch ?? 'main',
+            viewerLogin: cachedLogin,
+            viewerPermission: perms?.admin ? 'ADMIN'
+              : perms?.maintain ? 'MAINTAIN'
+                : perms?.push ? 'WRITE'
+                  : (perms?.pull || !perms ? 'READ' : 'NONE'),
+          }
+        } catch { return { ok: false, error: 'invalid-json' } }
+      }
+      if (tier === 'node-https-token') {
+        const [res, userRes] = await Promise.all([
+          githubHttpsRequest('GET', `/repos/${repo}`, token),
+          !cachedLogin && token ? githubHttpsRequest('GET', '/user', token) : Promise.resolve(null),
+        ])
+        if (userRes?.ok && userRes.data?.login) {
+          cachedLogin = userRes.data.login
+        }
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const data = res.data ?? {}
+        const perms = data.permissions
+        return {
+          ok: true,
+          isFork: Boolean(data.fork),
+          parent: data.parent?.full_name?.toLowerCase() ?? null,
+          defaultBranch: data.default_branch ?? 'main',
+          viewerLogin: cachedLogin,
+          viewerPermission: perms?.admin ? 'ADMIN'
+            : perms?.maintain ? 'MAINTAIN'
+              : perms?.push ? 'WRITE'
+                : (perms?.pull || !perms ? 'READ' : 'NONE'),
+        }
+      }
+      return makeMcpDelegate('get_repo', { repo })
+    },
+
+    async getIssue(repo, number) {
+      if (tier === 'gh-cli') {
+        const res = await execSafe('gh', [
+          'issue', 'view', String(number), '--repo', repo,
+          '--json', 'number,title,state,body,url,labels',
+        ], { cwd })
+        if (!res.ok) return { ok: false, error: res.stderr }
+        try {
+          const d = JSON.parse(res.stdout)
+          return { ok: true, ...d, relations: parseBodyRelations(d.body) }
+        } catch { return { ok: false, error: 'invalid-json' } }
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest('GET', `/repos/${repo}/issues/${number}`, token)
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const d = res.data
+        return {
+          ok: true,
+          number: d.number,
+          title: d.title,
+          state: String(d.state ?? '').toUpperCase(),
+          body: d.body ?? '',
+          url: d.html_url,
+          labels: (d.labels ?? []).map((l) => l.name),
+          relations: parseBodyRelations(d.body),
+        }
+      }
+      return makeMcpDelegate('get_issue', { repo, number })
+    },
+
+    async getPr(repo, number) {
+      if (tier === 'gh-cli') {
+        const res = await execSafe('gh', [
+          'pr', 'view', String(number), '--repo', repo,
+          '--json', 'number,title,state,body,url,headRefName,baseRefName,headRepository,headRepositoryOwner,mergedAt,author',
+        ], { cwd })
+        if (!res.ok) return { ok: false, error: res.stderr }
+        try {
+          const d = JSON.parse(res.stdout)
+          const headRepo = d.headRepositoryOwner?.login && d.headRepository?.name
+            ? `${d.headRepositoryOwner.login}/${d.headRepository.name}` : null
+          return {
+            ok: true,
+            number: d.number,
+            title: d.title,
+            state: String(d.state ?? '').toUpperCase(),
+            body: d.body ?? '',
+            url: d.url,
+            headBranch: d.headRefName,
+            baseBranch: d.baseRefName,
+            headRepo,
+            merged: Boolean(d.mergedAt) || String(d.state ?? '').toUpperCase() === 'MERGED',
+            author: d.author?.login ?? null,
+            relations: parseBodyRelations(d.body),
+          }
+        } catch { return { ok: false, error: 'invalid-json' } }
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest('GET', `/repos/${repo}/pulls/${number}`, token)
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const d = res.data
+        const state = d.merged ? 'MERGED' : String(d.state ?? '').toUpperCase()
+        return {
+          ok: true,
+          number: d.number,
+          title: d.title,
+          state,
+          body: d.body ?? '',
+          url: d.html_url,
+          headBranch: d.head?.ref ?? null,
+          baseBranch: d.base?.ref ?? null,
+          headRepo: d.head?.repo?.full_name ?? null,
+          merged: Boolean(d.merged),
+          author: d.user?.login ?? null,
+          relations: parseBodyRelations(d.body),
+        }
+      }
+      return makeMcpDelegate('get_pr', { repo, number })
+    },
+
+    async listOpenPrsByBase(repo, baseBranch) {
+      if (!repo || !baseBranch) return { ok: true, prs: [], skipped: true }
+      if (tier === 'gh-cli') {
+        const res = await execSafe('gh', [
+          'pr', 'list', '--repo', repo, '--base', baseBranch, '--state', 'open',
+          '--json', 'number,title,headRefName,url',
+        ], { cwd })
+        if (!res.ok) return { ok: false, prs: [], error: res.stderr }
+        try {
+          return { ok: true, prs: JSON.parse(res.stdout) }
+        } catch { return { ok: false, prs: [] } }
+      }
+      if (tier === 'node-https-token') {
+        const q = encodeURIComponent(baseBranch)
+        const res = await githubHttpsRequest('GET', `/repos/${repo}/pulls?state=open&base=${q}`, token)
+        if (!res.ok) return { ok: false, prs: [], error: res.data?.message }
+        return {
+          ok: true,
+          prs: (res.data ?? []).map((p) => ({
+            number: p.number, title: p.title, headRefName: p.head?.ref, url: p.html_url,
+          })),
+        }
+      }
+      return { ok: true, prs: [], skipped: true, reason: tier }
+    },
+
+    async findOpenPrForBranch(repo, headBranch) {
+      if (!repo || !headBranch) return { ok: false, prs: [] }
+      if (tier === 'gh-cli') {
+        const res = await execSafe('gh', [
+          'pr', 'list', '--repo', repo, '--head', headBranch, '--state', 'open',
+          '--json', 'number,title,headRefName,baseRefName,url,state',
+        ], { cwd })
+        if (!res.ok) return { ok: false, prs: [] }
+        try { return { ok: true, prs: JSON.parse(res.stdout) } } catch { return { ok: false, prs: [] } }
+      }
+      if (tier === 'node-https-token') {
+        const owner = repo.split('/')[0]
+        const headParam = headBranch.includes(':') ? headBranch : `${owner}:${headBranch}`
+        const res = await githubHttpsRequest(
+          'GET',
+          `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}`,
+          token,
+        )
+        if (!res.ok) return { ok: false, prs: [] }
+        return {
+          ok: true,
+          prs: (res.data ?? []).map((p) => ({
+            number: p.number, title: p.title, headRefName: p.head?.ref, baseRefName: p.base?.ref, url: p.html_url,
+          })),
+        }
+      }
+      return { ok: false, prs: [], reason: tier }
+    },
+
+    async postComment({ repo, number, body, statePayload = {} }) {
+      const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
+      const fullBody = Object.keys(statePayload).length > 0 ? `${normalizedBody}\n\n${tag}` : normalizedBody
+
+      if (tier === 'gh-cli') {
+        return withUtf8TempFile('pf-comment', fullBody, async (tmpFile) => {
+          const res = await execSafe('gh', [
+            'api', `repos/${repo}/issues/${number}/comments`,
+            '-X', 'POST', '-F', `body=@${tmpFile}`,
+          ], { cwd })
+          if (!res.ok) return { ok: false, error: res.stderr }
+          let created = null
+          try { created = JSON.parse(res.stdout) } catch { /* 忽略解析失败 */ }
+          // 回读校验，防编码层静默截断
+          const readback = String(created?.body ?? '').replace(/\r\n/g, '\n').trim()
+          return {
+            ok: true,
+            id: created?.id ?? null,
+            url: created?.html_url ?? null,
+            verifiedReadback: readback === fullBody,
+          }
+        })
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest(
+          'POST',
+          `/repos/${repo}/issues/${number}/comments`,
+          token,
+          { body: fullBody },
+        )
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const readback = String(res.data?.body ?? '').replace(/\r\n/g, '\n').trim()
+        return {
+          ok: true,
+          id: res.data?.id ?? null,
+          url: res.data?.html_url ?? null,
+          verifiedReadback: readback === fullBody,
+        }
+      }
+      return makeMcpDelegate('post_comment', { repo, number, body: normalizedBody }, statePayload)
+    },
+
+    async addLabels({ repo, number, labels = [] }) {
+      if (labels.length === 0) return { ok: true, skipped: true }
+      if (tier === 'gh-cli') {
+        const args = ['issue', 'edit', String(number), '--repo', repo]
+        for (const l of labels) { args.push('--add-label', l) }
+        const res = await execSafe('gh', args, { cwd })
+        if (!res.ok) {
+          if (/403|forbidden|permission|not authorized/i.test(res.stderr)) {
+            return { ok: false, skipped: true, reason: 'forbidden-403' }
+          }
+          return { ok: false, skipped: true, reason: res.stderr }
+        }
+        return { ok: true }
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest(
+          'POST',
+          `/repos/${repo}/issues/${number}/labels`,
+          token,
+          { labels },
+        )
+        if (res.status === 403 || res.status === 404) {
+          return { ok: false, skipped: true, reason: `http-${res.status}` }
+        }
+        if (!res.ok) return { ok: false, skipped: true, reason: res.data?.message }
+        return { ok: true }
+      }
+      return makeMcpDelegate('add_labels', { repo, number, labels })
+    },
+
+    async createPr({ targetRepo, head, base, title, body, draft = false }) {
+      const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      if (tier === 'gh-cli') {
+        return withUtf8TempFile('pf-pr-body', normalizedBody, async (tmpFile) => {
+          const args = [
+            'pr', 'create', '--repo', targetRepo, '--head', head, '--base', base,
+            '--title', title, '--body-file', tmpFile,
+          ]
+          if (draft) args.push('--draft')
+          const res = await execSafe('gh', args, { cwd })
+          if (!res.ok) return { ok: false, error: res.stderr }
+          const url = res.stdout.trim().split('\n').pop()
+          const numMatch = /\/pull\/(\d+)$/.exec(url ?? '')
+          return { ok: true, url, number: numMatch ? Number(numMatch[1]) : null }
+        })
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest('POST', `/repos/${targetRepo}/pulls`, token, {
+          title, body: normalizedBody, head, base, draft,
+        })
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        return { ok: true, number: res.data?.number ?? null, url: res.data?.html_url ?? null }
+      }
+      const oneClickUrl = `https://github.com/${targetRepo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`
+      if (tier === 'half-duplex') {
+        return {
+          ok: false,
+          halfDuplex: true,
+          tier: 'half-duplex',
+          oneClickPrUrl: oneClickUrl,
+          title,
+          body: normalizedBody,
+        }
+      }
+      return {
+        ...makeMcpDelegate('create_pr', {
+          repo: targetRepo, head, base, title, body: normalizedBody, draft,
+        }, { action: 'create_pr', head, base }),
+        oneClickPrUrl: oneClickUrl,
+      }
+    },
+
+    async mergePr({ repo, number, method = 'merge' }) {
+      // 严禁传 --delete-branch；删分支必须由收尾人类确认后单独走 cleanup
+      if (tier === 'gh-cli') {
+        const flag = method === 'squash' ? '--squash' : method === 'rebase' ? '--rebase' : '--merge'
+        const res = await execSafe('gh', ['pr', 'merge', String(number), '--repo', repo, flag], { cwd })
+        if (!res.ok) return { ok: false, error: res.stderr }
+        const readback = await this.getPr(repo, number)
+        return {
+          ok: readback.ok && readback.merged === true,
+          merged: Boolean(readback.merged),
+          state: readback.state ?? 'UNKNOWN',
+        }
+      }
+      if (tier === 'node-https-token') {
+        const res = await githubHttpsRequest('PUT', `/repos/${repo}/pulls/${number}/merge`, token, {
+          merge_method: method,
+        })
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const readback = await this.getPr(repo, number)
+        return {
+          ok: readback.ok && readback.merged === true,
+          merged: Boolean(readback.merged),
+          state: readback.state ?? 'UNKNOWN',
+        }
+      }
+      return makeMcpDelegate('merge_pr', { repo, number, method })
+    },
+  }
+}
+
+// ── 弱模型防呆导航输出 ────────────────────────────────────────────────
+
+/** 在每个 CLI 输出末尾打印清晰的下一步唯一合法动作卡片。 */
+export function printNextStep(lines, { jsonMode = false } = {}) {
+  if (jsonMode) return
+  const items = Array.isArray(lines) ? lines.filter(Boolean) : [String(lines ?? '')]
+  if (items.length === 0) return
+  process.stdout.write('\n[NEXT STEP]\n')
+  for (const line of items) {
+    process.stdout.write(`  - ${line}\n`)
+  }
+}
+
+// ── C29: 联动同步门禁（AGENTS.md ## 改哪看哪）────────────────────────
+
+const COUPLED_ROOT_FILENAMES = new Set([
+  'AGENTS.md', 'SKILL.md', 'README.md', 'README.en.md',
+  'CONTRIBUTING.md', 'RELEASING.md', 'CHANGELOG.md',
+  'Makefile', 'justfile', '.gitattributes', '.gitignore',
+])
+
+function isPathLikeToken(rawToken) {
+  const s = posixPath(String(rawToken ?? '').trim()).replace(/^\.\//, '')
+  if (!s || /\s/.test(s) || /^https?:|^file:|^mailto:/i.test(s)) return false
+  if (/[*?<>{};|$]/.test(s)) return false
+  if (s.includes('/')) return true
+  if (COUPLED_ROOT_FILENAMES.has(s)) return true
+  return /^[A-Za-z0-9_.-]+\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(s)
+}
+
+function extractCoupledPathTokens(cellText) {
+  const tokens = []
+  const seen = new Set()
+  for (const m of String(cellText ?? '').matchAll(/`([^`\n]+)`/g)) {
+    const raw = m[1].trim()
+    if (!isPathLikeToken(raw)) continue
+    const norm = posixPath(raw).replace(/^\.\//, '')
+    if (!seen.has(norm)) {
+      seen.add(norm)
+      tokens.push(norm)
+    }
+  }
+  return tokens
+}
+
+function splitMarkdownTableRow(rawLine) {
+  const trimmed = rawLine.trim()
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return null
+  const inner = trimmed.slice(1, -1)
+  const cells = []
+  let cur = ''
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (ch === '\\' && inner[i + 1] === '|') {
+      cur += '|'
+      i += 1
+    } else if (ch === '|') {
+      cells.push(cur.trim())
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  cells.push(cur.trim())
+  return cells
+}
+
+/** 从 AGENTS.md「## 改哪看哪」章节表格解析文件联动触发与伴随同步规则。 */
+export function parseCoupledSyncRules(agentsText) {
+  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inSection = false
+  let inFence = false
+  const tableRows = []
+
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+
+    if (/^##\s+改哪看哪(?:\s|$)/.test(line.trim())) {
+      inSection = true
+      continue
+    }
+    if (inSection && (/^##\s+/.test(line.trim()) || /^<!--\s*project-forge:\s*end\b/.test(line.trim()))) {
+      break
+    }
+    if (!inSection) continue
+
+    const cells = splitMarkdownTableRow(line)
+    if (cells && cells.length >= 2) {
+      tableRows.push({ rawRow: line.trim(), cells })
+    }
+  }
+
+  const rules = []
+  for (let i = 0; i < tableRows.length; i += 1) {
+    const { rawRow, cells } = tableRows[i]
+    const isDivider = cells.every((c) => /^:?-+:?$/.test(c.trim()))
+    if (isDivider) continue
+    // 跳过紧邻表头分隔线前的表头行
+    const nextRow = tableRows[i + 1]
+    if (nextRow && nextRow.cells.every((c) => /^:?-+:?$/.test(c.trim()))) continue
+
+    const triggers = extractCoupledPathTokens(cells[0])
+    const companions = extractCoupledPathTokens(cells[1])
+    if (triggers.length === 0 || companions.length === 0) continue
+    rules.push({ triggers, companions, rawRow })
+  }
+  return rules
+}
+
+function matchesCoupledPath(filePath, ruleToken, repoRoot) {
+  const normTok = posixPath(ruleToken).replace(/^\.\//, '')
+  if (!normTok) return false
+  if (normTok.endsWith('/')) {
+    const dirNoSlash = normTok.slice(0, -1)
+    return filePath.startsWith(normTok) || filePath === dirNoSlash
+  }
+  if (filePath === normTok) return true
+  if (repoRoot) {
+    const abs = join(repoRoot, normTok)
+    try {
+      if (existsSync(abs) && statSync(abs).isDirectory()) {
+        return filePath.startsWith(`${normTok}/`)
+      }
+    } catch { /* ignore */ }
+  }
+  return false
+}
+
+/**
+ * 对照「改哪看哪」规则校验变更文件清单，过滤目标仓不存在的可选伴随文件以避免误报。
+ */
+export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
+  const normalizedChanged = [...new Set(
+    (Array.isArray(changedFiles) ? changedFiles : [])
+      .map((f) => posixPath(f).replace(/^\.\//, '').trim())
+      .filter(Boolean),
+  )]
+  if (normalizedChanged.length === 0 || !Array.isArray(rules) || rules.length === 0) {
+    return []
+  }
+
+  const warnings = []
+  for (const rule of rules) {
+    const touchedTriggers = (rule.triggers ?? []).filter((t) =>
+      normalizedChanged.some((f) => matchesCoupledPath(f, t, repoRoot)),
+    )
+    if (touchedTriggers.length === 0) continue
+
+    const existingCompanions = (rule.companions ?? []).filter((c) => {
+      if (!repoRoot) return true
+      const clean = posixPath(c).replace(/^\.\//, '').replace(/\/+$/, '')
+      return Boolean(clean) && existsSync(join(repoRoot, clean))
+    })
+    if (existingCompanions.length === 0) continue
+
+    const companionSynced = existingCompanions.some((c) =>
+      normalizedChanged.some((f) => matchesCoupledPath(f, c, repoRoot)),
+    )
+    if (!companionSynced) {
+      warnings.push({
+        triggers: rule.triggers,
+        touchedTriggers,
+        expectedCompanions: existingCompanions,
+        rawRow: rule.rawRow,
+      })
+    }
+  }
+  return warnings
+}
+
+// ── C30: YAML Frontmatter 与文档全生命周期同步 ──────────────────────────
+
+const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9][a-z0-9-]*)-(prd|spec|todo)\.md$/
+const DOC_LEGACY_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9][a-z0-9-]*)\.md$/
+
+export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'related_prd', 'related_todo', 'high_risk_paths'],
+  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'done_at', 'related_prd', 'related_spec'],
+})
+
+function splitInlineArrayItems(inner) {
+  const items = []
+  let cur = ''
+  let quote = null
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < inner.length) {
+        cur += ch + inner[i + 1]
+        i += 1
+        continue
+      }
+      if (ch === quote) {
+        if (quote === '\'' && inner[i + 1] === '\'') {
+          cur += '\'\''
+          i += 1
+          continue
+        }
+        quote = null
+      }
+      cur += ch
+    } else if (ch === '"' || ch === '\'') {
+      quote = ch
+      cur += ch
+    } else if (ch === ',') {
+      if (cur.trim()) items.push(cur.trim())
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  if (cur.trim()) items.push(cur.trim())
+  return items
+}
+
+function parseYamlScalar(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s || s === 'null' || s === '~') return null
+  if (s === 'true') return true
+  if (s === 'false') return false
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) return Number(s)
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    return s.slice(1, -1)
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+  }
+  if (s.startsWith('\'') && s.endsWith('\'') && s.length >= 2) {
+    return s.slice(1, -1).replace(/''/g, '\'')
+  }
+  if (s.startsWith('[') && s.endsWith(']')) {
+    const inner = s.slice(1, -1).trim()
+    if (!inner) return []
+    return splitInlineArrayItems(inner).map((item) => parseYamlScalar(item))
+  }
+  return s
+}
+
+function formatYamlScalar(val) {
+  if (val === null || val === undefined) return 'null'
+  if (typeof val === 'boolean' || typeof val === 'number') return String(val)
+  if (Array.isArray(val)) {
+    return `[${val.map((item) => formatYamlScalar(item)).join(', ')}]`
+  }
+  const s = String(val)
+  const needsQuote = s === ''
+    || /^\s|\s$/.test(s)
+    || /^(?:true|false|null|~)$/i.test(s)
+    || /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)
+    || /[\n\r"':#\[\]{},&*!|>@`]/.test(s)
+    || s.startsWith('- ')
+  if (!needsQuote) return s
+  const escaped = s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+  return `"${escaped}"`
+}
+
+/**
+ * 零依赖解析文档头部 YAML Frontmatter，兼容读取旧式列表元数据（`> **状态**：` / `- Status:`）。
+ */
+export function parseDocFrontmatter(text) {
+  const norm = String(text ?? '').replace(/\r\n/g, '\n')
+  if (norm.startsWith('---\n') || norm === '---') {
+    const fmMatch = /^---\n([\s\S]*?)\n---(?:\n([\s\S]*))?$/.exec(norm)
+      ?? /^---\n---(?:\n([\s\S]*))?$/.exec(norm)
+    if (!fmMatch) {
+      return {
+        hasFrontmatter: false,
+        malformedFrontmatter: true,
+        data: {},
+        keyOrder: [],
+        body: norm,
+        legacy: false,
+        syntaxErrors: ['Frontmatter 缺少闭合的 `---` 分隔行'],
+      }
+    }
+    const fmRaw = fmMatch.length === 3 ? fmMatch[1] : ''
+    const body = fmMatch.length === 3 ? (fmMatch[2] ?? '') : (fmMatch[1] ?? '')
+    const data = {}
+    const keyOrder = []
+    const syntaxErrors = []
+    const fmLines = fmRaw ? fmRaw.split('\n') : []
+    for (let i = 0; i < fmLines.length; i += 1) {
+      const rawLine = fmLines[i]
+      if (!rawLine.trim() || /^\s*#/.test(rawLine)) continue
+      const kv = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(rawLine)
+      if (!kv) {
+        syntaxErrors.push(`Frontmatter 第 ${i + 2} 行格式无效：${rawLine}`)
+        continue
+      }
+      const key = kv[1]
+      const tail = kv[2].trim()
+      if (!keyOrder.includes(key)) keyOrder.push(key)
+      if (!tail) {
+        const blockItems = []
+        let j = i + 1
+        while (j < fmLines.length && /^\s+-\s+(.*)$/.test(fmLines[j])) {
+          const itemRaw = /^\s+-\s+(.*)$/.exec(fmLines[j])[1]
+          blockItems.push(parseYamlScalar(itemRaw))
+          j += 1
+        }
+        if (blockItems.length > 0) {
+          data[key] = blockItems
+          i = j - 1
+        } else {
+          data[key] = null
+        }
+      } else {
+        data[key] = parseYamlScalar(tail)
+      }
+    }
+    return {
+      hasFrontmatter: true,
+      malformedFrontmatter: syntaxErrors.length > 0,
+      data,
+      keyOrder,
+      body,
+      legacy: false,
+      syntaxErrors,
+    }
+  }
+
+  // 向后兼容旧版列表 / 引用头解析
+  const headerChunk = norm.split(/\n##\s+/)[0]
+  const data = {}
+  const keyOrder = []
+  const pushField = (k, v) => {
+    if (v === undefined) return
+    if (!keyOrder.includes(k)) keyOrder.push(k)
+    data[k] = v
+  }
+  const titleMatch = /^#\s+(.+)$/m.exec(headerChunk)
+  if (titleMatch) pushField('title', titleMatch[1].replace(/^(?:PRD|SPEC|Todo)\s*[:：]\s*/i, '').trim())
+  const statusMatch = /^(?:>\s*\*\*状态\*\*\s*[:：]|-\s*\*\*状态\*\*\s*[:：]|(?:-\s+)?Status\s*:)\s*`?([A-Za-z0-9_-]+)`?/mi.exec(headerChunk)
+  if (statusMatch) pushField('status', statusMatch[1].toLowerCase())
+  const critiqueMatch = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(headerChunk)
+  if (critiqueMatch) pushField('plan_critique', critiqueMatch[1].trim())
+  const createdMatch = /^(?:-\s+)?(?:Created|Date):\s*([0-9-]+)/mi.exec(headerChunk)
+  if (createdMatch) pushField('created', createdMatch[1].trim())
+  const plannedMatch = /^(?:-\s+)?(?:\*\*)?Planned at(?:\*\*)?[:：]\s*`?([^`\n]+)`?/mi.exec(headerChunk)
+  if (plannedMatch) pushField('planned_at', plannedMatch[1].trim())
+  const ownerMatch = /^(?:-\s+)?(?:\*\*)?(?:Owner|提出方)(?:\*\*)?[:：]\s*(.+)$/mi.exec(headerChunk)
+  if (ownerMatch) pushField('owner', ownerMatch[1].trim())
+  const relSpecMatch = /^(?:-\s+)?Related SPEC:\s*(.+)$/mi.exec(headerChunk)
+  if (relSpecMatch && !/^(?:无|none)$/i.test(relSpecMatch[1].trim())) pushField('related_spec', relSpecMatch[1].trim())
+  const relPrdMatch = /^(?:-\s+)?Related PRD:\s*(.+)$/mi.exec(headerChunk)
+  if (relPrdMatch && !/^(?:无|none)$/i.test(relPrdMatch[1].trim())) pushField('related_prd', relPrdMatch[1].trim())
+
+  return {
+    hasFrontmatter: false,
+    malformedFrontmatter: false,
+    data,
+    keyOrder,
+    body: norm,
+    legacy: true,
+    syntaxErrors: [],
+  }
+}
+
+/** 将结构化 Frontmatter 键按顺序序列化为干净 YAML `--- ... ---` 块。 */
+export function serializeDocFrontmatter(data, keyOrder = []) {
+  const ordered = []
+  const seen = new Set()
+  for (const k of keyOrder) {
+    if (!seen.has(k) && Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined) {
+      seen.add(k)
+      ordered.push(k)
+    }
+  }
+  for (const k of Object.keys(data ?? {})) {
+    if (!seen.has(k) && data[k] !== undefined) {
+      seen.add(k)
+      ordered.push(k)
+    }
+  }
+  const lines = ['---']
+  for (const k of ordered) {
+    lines.push(`${k}: ${formatYamlScalar(data[k])}`)
+  }
+  lines.push('---')
+  return `${lines.join('\n')}\n`
+}
+
+/** 原位更新或补齐文档 YAML Frontmatter 字段并原子写回。 */
+export function updateDocFrontmatter(filePath, patch = {}, { defaultKeyOrder = [] } = {}) {
+  const raw = readTextSafe(filePath)
+  if (raw === undefined) {
+    throw new Error(`无法读取文档文件：${filePath}`)
+  }
+  const parsed = parseDocFrontmatter(raw)
+  const merged = { ...parsed.data }
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    if (v !== undefined) merged[k] = v
+  }
+  const keyOrder = [
+    ...defaultKeyOrder,
+    ...parsed.keyOrder,
+    ...Object.keys(merged),
+  ]
+  const cleanBody = parsed.body.replace(/^\n+/, '')
+  const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
+  writeAtomic(filePath, nextText)
+  return { file: filePath, data: merged }
+}
+
+function docDateTag(date = new Date()) {
+  const yy = String(date.getFullYear()).slice(-2)
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yy}${mm}${dd}`
+}
+
+function docIsoDate(date = new Date()) {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/** 构造规范文档文件名：`YYMMDD-[issue<N>-]<slug>-{prd,spec,todo}.md`。 */
+export function buildDocFilename({ date, issue, slug, kind }) {
+  if (!['prd', 'spec', 'todo'].includes(kind)) {
+    throw new Error(`无效文档 kind：${kind}（仅支持 prd | spec | todo）`)
+  }
+  const dateTag = date && /^\d{6}$/.test(String(date)) ? String(date) : docDateTag()
+  const safeSlug = slugify(slug)
+  const issueNum = issue !== undefined && issue !== null && String(issue).trim() !== ''
+    ? Number(String(issue).replace(/^#/, '').trim())
+    : null
+  const issueSeg = Number.isInteger(issueNum) && issueNum > 0 ? `-issue${issueNum}` : ''
+  return `${dateTag}${issueSeg}-${safeSlug}-${kind}.md`
+}
+
+/** 解析规范或兼容历史工程文档文件名，提取 date / issue / slug / kind。 */
+export function parseDocFilename(name) {
+  const base = basename(String(name ?? '').trim())
+  const std = DOC_STANDARD_NAME_RE.exec(base)
+  if (std) {
+    return {
+      date: std[1],
+      issue: std[2] ? Number(std[2]) : null,
+      slug: std[3],
+      kind: std[4],
+      legacy: false,
+    }
+  }
+  const leg = DOC_LEGACY_NAME_RE.exec(base)
+  if (leg) {
+    return {
+      date: leg[1],
+      issue: leg[2] ? Number(leg[2]) : null,
+      slug: leg[3],
+      kind: null,
+      legacy: true,
+    }
+  }
+  return null
+}
+
+function inferDocKindFromPath(relPath, fmData) {
+  const k = fmData?.kind
+  if (k === 'prd' || k === 'spec' || k === 'todo') return k
+  const p = posixPath(relPath).toLowerCase()
+  if (p.startsWith('docs/prd/')) return 'prd'
+  if (p.startsWith('docs/specs/')) return 'spec'
+  if (p.startsWith('docs/todo/') || p.startsWith('docs/archive/todo/')) return 'todo'
+  return parseDocFilename(p)?.kind ?? null
+}
+
+function listDocsInFolder(repoRoot, folderRel) {
+  const absDir = join(repoRoot, folderRel)
+  if (!existsSync(absDir)) return []
+  try {
+    return readdirSync(absDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => `${folderRel}/${e.name}`)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+function escapeRegExpStr(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * 同步 PRD / SPEC / Todo 生命周期：按 Issue 号原子重命名同组文档、重写 `related_*` 相对链接、
+ * 更新 YAML Frontmatter 并刷新 `docs/todo/` 索引与任务账本路径。
+ */
+export async function syncDocsLifecycle(repoRoot, {
+  slugOrPath,
+  issue,
+  pr,
+  branch,
+  owner,
+  status,
+  approved,
+  implemented,
+  doneAt,
+  planCritique,
+  preserveTerminalStatus = false,
+} = {}) {
+  const allActive = [
+    ...listDocsInFolder(repoRoot, 'docs/prd'),
+    ...listDocsInFolder(repoRoot, 'docs/specs'),
+    ...listDocsInFolder(repoRoot, 'docs/todo'),
+  ]
+  const archivedTodos = listDocsInFolder(repoRoot, 'docs/archive/todo')
+  const allCandidates = [...allActive, ...archivedTodos]
+
+  let seedRel = null
+  if (slugOrPath) {
+    const candidateAbs = resolve(repoRoot, slugOrPath)
+    const candidateRel = posixPath(relative(repoRoot, candidateAbs))
+    if (existsSync(candidateAbs) && candidateRel.startsWith('docs/')) {
+      seedRel = candidateRel
+    }
+  }
+
+  let targetDate = null
+  let targetSlug = null
+  if (seedRel) {
+    const fn = parseDocFilename(seedRel)
+    if (fn) {
+      targetDate = fn.date
+      targetSlug = fn.slug
+    } else {
+      targetSlug = slugify(basename(seedRel, '.md'))
+    }
+  } else if (slugOrPath) {
+    const fn = parseDocFilename(slugOrPath)
+    if (fn) {
+      targetDate = fn.date
+      targetSlug = fn.slug
+    } else {
+      targetSlug = slugify(String(slugOrPath).replace(/^#/, ''))
+    }
+  }
+
+  const siblingSet = new Set()
+  if (seedRel && !seedRel.startsWith('docs/archive/')) siblingSet.add(seedRel)
+
+  for (const rel of allActive) {
+    const fn = parseDocFilename(rel)
+    if (fn && targetSlug && fn.slug === targetSlug && (!targetDate || fn.date === targetDate)) {
+      siblingSet.add(rel)
+    } else if (!fn && targetSlug && basename(rel, '.md').includes(targetSlug)) {
+      siblingSet.add(rel)
+    }
+  }
+
+  // 也沿着种子文档与同组文档的 related_* 引用回收关联兄弟文档
+  const queue = [...siblingSet]
+  const seenFollow = new Set(queue)
+  while (queue.length > 0) {
+    const curRel = queue.shift()
+    const raw = readTextSafe(join(repoRoot, curRel))
+    if (!raw) continue
+    const fm = parseDocFrontmatter(raw)
+    for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+      const rv = fm.data?.[rk]
+      if (!rv || typeof rv !== 'string' || /^(?:无|none)$/i.test(rv.trim())) continue
+      const resolvedAbs = resolve(dirname(join(repoRoot, curRel)), rv)
+      const resolvedRel = posixPath(relative(repoRoot, resolvedAbs))
+      if (existsSync(resolvedAbs) && resolvedRel.startsWith('docs/') && !resolvedRel.startsWith('docs/archive/') && !seenFollow.has(resolvedRel)) {
+        seenFollow.add(resolvedRel)
+        siblingSet.add(resolvedRel)
+        queue.push(resolvedRel)
+      }
+    }
+  }
+
+  const normalizedIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
+    ? Number(String(issue).replace(/^#/, '').trim())
+    : undefined
+  let effectiveIssue = Number.isInteger(normalizedIssue) && normalizedIssue > 0 ? normalizedIssue : undefined
+
+  if (effectiveIssue === undefined) {
+    for (const rel of siblingSet) {
+      const fn = parseDocFilename(rel)
+      if (fn?.issue) { effectiveIssue = fn.issue; break }
+      const raw = readTextSafe(join(repoRoot, rel))
+      const fm = raw ? parseDocFrontmatter(raw) : null
+      if (Number.isInteger(fm?.data?.issue) && fm.data.issue > 0) {
+        effectiveIssue = fm.data.issue
+        break
+      }
+    }
+  }
+
+  const renameMap = new Map()
+  const renamed = []
+  const finalSiblings = []
+
+  for (const oldRel of [...siblingSet].sort()) {
+    const raw = readTextSafe(join(repoRoot, oldRel)) ?? ''
+    const fm = parseDocFrontmatter(raw)
+    const fn = parseDocFilename(oldRel)
+    const kind = inferDocKindFromPath(oldRel, fm.data)
+    const dateFromCreated = typeof fm.data?.created === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fm.data.created)
+      ? `${fm.data.created.slice(2, 4)}${fm.data.created.slice(5, 7)}${fm.data.created.slice(8, 10)}`
+      : null
+    const docDate = fn?.date ?? targetDate ?? dateFromCreated ?? docDateTag()
+    const docSlug = fn?.slug ?? targetSlug
+    let currentRel = oldRel
+
+    if (effectiveIssue && kind && docSlug) {
+      const needsRename = !fn || fn.legacy || fn.issue !== effectiveIssue || fn.kind !== kind
+      if (needsRename) {
+        const dirRel = posixPath(dirname(oldRel))
+        const targetRel = `${dirRel}/${buildDocFilename({ date: docDate, issue: effectiveIssue, slug: docSlug, kind })}`
+        if (targetRel !== oldRel) {
+          const tracked = await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])
+          if (tracked.ok) {
+            const mv = await gitRun(repoRoot, ['mv', oldRel, targetRel])
+            if (!mv.ok) throw new Error(`重命名文档失败（${oldRel} -> ${targetRel}）：${mv.stderr}`)
+          } else {
+            renameSync(join(repoRoot, oldRel), join(repoRoot, targetRel))
+          }
+          renameMap.set(oldRel, targetRel)
+          renamed.push({ from: oldRel, to: targetRel, kind })
+          currentRel = targetRel
+        }
+      }
+    }
+
+    finalSiblings.push({ oldRel, rel: currentRel, kind, date: docDate, slug: docSlug })
+  }
+
+  // 解析各类型当前目标位置（含已归档 Todo）以回填 related_*
+  const byKind = { prd: null, spec: null, todo: null }
+  for (const s of finalSiblings) {
+    if (s.kind && !byKind[s.kind]) byKind[s.kind] = s.rel
+  }
+  if (!byKind.todo && targetSlug) {
+    const archivedMatch = archivedTodos.find((rel) => {
+      const fn = parseDocFilename(rel)
+      return fn ? (fn.slug === targetSlug && (!targetDate || fn.date === targetDate)) : basename(rel, '.md').includes(targetSlug)
+    })
+    if (archivedMatch) byKind.todo = archivedMatch
+  }
+  // 同时保留原 seed 若在 archive 中
+  if (seedRel && seedRel.startsWith('docs/archive/todo/') && !byKind.todo) {
+    byKind.todo = seedRel
+  }
+
+  const updated = []
+  const today = docIsoDate()
+  for (const sib of finalSiblings) {
+    const abs = join(repoRoot, sib.rel)
+    let raw = readTextSafe(abs) ?? ''
+
+    // 重写正文中的相对路径或文件名引用
+    for (const [oldRel, newRel] of renameMap.entries()) {
+      const oldBase = basename(oldRel)
+      const newBase = basename(newRel)
+      raw = raw.replace(new RegExp(escapeRegExpStr(oldRel), 'g'), newRel)
+      raw = raw.replace(new RegExp(escapeRegExpStr(oldBase), 'g'), newBase)
+    }
+    const fm = parseDocFrontmatter(raw)
+    const patch = { updated: today }
+    if (sib.kind && !fm.data.kind) patch.kind = sib.kind
+    if (effectiveIssue !== undefined) patch.issue = effectiveIssue
+    if (pr !== undefined) patch.pr = pr === null ? null : Number(pr)
+    if (branch !== undefined) patch.branch = branch
+    if (owner !== undefined) patch.owner = owner
+    if (status !== undefined) {
+      const curSt = String(fm.data?.status ?? '').toLowerCase()
+      const isTerminal = ['done', 'implemented', 'superseded', 'archived'].includes(curSt)
+      if (!preserveTerminalStatus || !isTerminal) patch.status = status
+    }
+    if (approved !== undefined) patch.approved = Boolean(approved)
+    if (implemented !== undefined && sib.kind === 'spec') patch.implemented = Boolean(implemented)
+    if (doneAt !== undefined && sib.kind === 'todo') patch.done_at = doneAt
+    if (planCritique !== undefined) patch.plan_critique = planCritique
+
+    for (const [rk, targetKind] of [['related_prd', 'prd'], ['related_spec', 'spec'], ['related_todo', 'todo']]) {
+      if (sib.kind === targetKind) continue
+      const targetRel = byKind[targetKind]
+      if (targetRel) {
+        patch[rk] = posixPath(relative(dirname(abs), join(repoRoot, targetRel)))
+      }
+    }
+
+    const merged = { ...fm.data }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) merged[k] = v
+    }
+    const defaultOrder = DOC_FRONTMATTER_KEY_ORDER[sib.kind] ?? []
+    const keyOrder = [...defaultOrder, ...fm.keyOrder, ...Object.keys(merged)]
+    const cleanBody = fm.body.replace(/^\n+/, '')
+    const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
+    writeAtomic(abs, nextText)
+    updated.push({ file: sib.rel, kind: sib.kind, data: merged })
+  }
+
+  // 若存在 docs/todo/ 索引或目录说明文件，同步改名后的链接
+  if (renameMap.size > 0) {
+    for (const todoDoc of allCandidates.filter((p) => p.startsWith('docs/todo/'))) {
+      const resolvedTodo = renameMap.get(todoDoc) ?? todoDoc
+      if (finalSiblings.some((s) => s.rel === resolvedTodo)) continue
+      const absTodo = join(repoRoot, resolvedTodo)
+      const txt = readTextSafe(absTodo)
+      if (!txt) continue
+      let nextTxt = txt
+      for (const [oldRel, newRel] of renameMap.entries()) {
+        nextTxt = nextTxt
+          .replace(new RegExp(escapeRegExpStr(oldRel), 'g'), newRel)
+          .replace(new RegExp(escapeRegExpStr(basename(oldRel)), 'g'), basename(newRel))
+      }
+      if (nextTxt !== txt) writeAtomic(absTodo, nextTxt)
+    }
+
+    // 同步更新 .worktrees/.state/tasks/*.json 账本里的文件路径与关联 Issue
+    for (const ledger of listTaskLedgers(repoRoot)) {
+      let dirty = false
+      for (const field of ['prdFile', 'specFile', 'todoFile', 'archivedTodoFile']) {
+        if (ledger[field] && renameMap.has(ledger[field])) {
+          ledger[field] = renameMap.get(ledger[field])
+          dirty = true
+        }
+      }
+      if (effectiveIssue && (!targetSlug || ledger.slug === targetSlug) && Array.isArray(ledger.linkedIssues) && !ledger.linkedIssues.includes(effectiveIssue)) {
+        const referencesThisSet = ['prdFile', 'specFile', 'todoFile'].some((f) => finalSiblings.some((s) => s.rel === ledger[f]))
+        if (referencesThisSet) {
+          ledger.linkedIssues = [...ledger.linkedIssues, effectiveIssue]
+          dirty = true
+        }
+      }
+      if (dirty) writeTaskLedger(repoRoot, ledger)
+    }
+  }
+
+  return { renamed, updated, byKind, issue: effectiveIssue ?? null }
+}

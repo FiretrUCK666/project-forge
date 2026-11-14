@@ -77,7 +77,10 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
-import { REPO_ONLY_DIRS, REPO_ONLY_FILES, isRepoOnlyPath, apiTarget } from './lib/protocol.mjs'
+import {
+  PF_MANIFEST_REL, REPO_ONLY_FILES, REPO_ONLY_PREFIXES, isRepoOnlyPath, apiTarget,
+} from './lib/protocol.mjs'
+import { equip } from './equip.mjs'
 import { readZip, stripCommonPrefix } from './zip.mjs'
 // 临时文件的**形状与归属判据**只有一份，住在 lib/fs-atomic.mjs：compose-agents.mjs 从那里取，
 // 本文件也取。两处各写一份就会漂——而漂出来的后果是「一个脚本清得掉残留、另一个把
@@ -137,15 +140,16 @@ const STATE_PATH = join(tmpdir(),
 
 function usage() {
   return [
-    '用法：node scripts/update.mjs [--quiet] [--check]',
+    '用法：node scripts/update.mjs [--quiet] [--check] [--equip <目录>]',
     '',
     '  检查这个 skill 的副本有没有新版；有就整份换成新版。',
     '',
     '  有 .git 的副本是源码副本：只读报告，一个字节都不写（更新请自己 git pull）。',
-    '  没有 .git 的是包副本：比版本、下载新版、整份覆盖。',
+    '  没有 .git 的是包副本：比版本、下载新版、整份覆盖，并可顺带无损刷新目标项目的 `.agents/skills/`。',
     '',
-    '  --quiet   只在「真的更新了」时输出',
-    '  --check   只报告不更新，也不受节流与 24 小时窗口限制',
+    '  --quiet          只在「真的更新了」时输出',
+    '  --check          只报告不更新，也不受节流与 24 小时窗口限制',
+    '  --equip <目录>   更新完顺带刷新指定项目里的 `.agents/skills/`（按 `.pf-manifest.json` 三态无损升级）',
     '',
     '  来源：优先用副本自己记的那个（SKILL.md 的 metadata.source）；读不到时用兜底地址，',
     '  可用环境变量 PF_UPDATE_SOURCE 改（转发的副本、内网发布用）——它只在副本没记来源时生效。',
@@ -691,7 +695,7 @@ function applyPackage(entries) {
     && isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
   // 磁盘上现有的、属于「不进包」结构规则的条目：目录整棵收，单文件逐个收。
   // 只走这一处，候选集来自**磁盘**而不是任何一张表——少一个来源就少一处会漂的地方。
-  for (const dir of REPO_ONLY_DIRS) {
+  for (const dir of REPO_ONLY_PREFIXES) {
     const p = join(SKILL_ROOT, dir)
     if (!shouldRemove(dir)) continue
     if (existsSync(p)) {
@@ -724,7 +728,7 @@ function applyPackage(entries) {
   // 判定范围是包里那三个由这个 skill 拥有的目录（`scripts/`、`references/`、`templates/`）；
   // 根目录一带不看——使用者放东西最主要的地方就是那里。
   const staleFiles = []
-  for (const dir of ['scripts/', 'references/', 'templates/']) {
+  for (const dir of ['scripts/', 'references/', 'templates/', 'kit/']) {
     const full = join(SKILL_ROOT, dir)
     if (!existsSync(full)) continue
     const owned = [...now].filter((n) => n.startsWith(dir))
@@ -789,7 +793,7 @@ function verifyInstalled(entries, after, remote) {
 
   const expectScripts = (entries ?? [])
     .map((e) => String(e.name).replace(/\\/g, '/'))
-    .filter((n) => /^scripts\/(?:lib\/)?[^/]+\.mjs$/.test(n))
+    .filter((n) => /^scripts\/(?:lib\/(?:[^/]+\/)*)?[^/]+\.mjs$/.test(n))
   const missing = expectScripts.filter((rel) => !existsSync(join(root, rel)))
   if (missing.length > 0) {
     return {
@@ -871,16 +875,71 @@ function reportUnverifiable(facts, { quiet }) {
   return 0
 }
 
+/**
+ * 更新完 toolset 后，若目标工作区配备了 `.agents/skills/.pf-manifest.json`，
+ * 顺带调用 equip 做三态无损刷新；失败不覆盖更新结论。
+ */
+function refreshEquippedWorkspace(targetDir, { explicit = false, quiet = false } = {}) {
+  if (!targetDir) return { skipped: true, reason: 'no-target' }
+  const root = resolve(targetDir)
+  const kitDir = join(SKILL_ROOT, 'kit', 'skills')
+  if (!existsSync(kitDir)) return { skipped: true, reason: 'no-kit-source' }
+  if (!explicit) {
+    if (root === SKILL_ROOT) return { skipped: true, reason: 'self-root' }
+    if (!existsSync(join(root, PF_MANIFEST_REL))) return { skipped: true, reason: 'no-manifest' }
+  }
+  try {
+    const res = equip(root, { kitDir })
+    const summary = []
+    if (res.added.length > 0) summary.push(`新增 ${res.added.length}`)
+    if (res.upgraded.length > 0) summary.push(`升级 ${res.upgraded.length}`)
+    if (res.retired.length > 0) summary.push(`退役清理 ${res.retired.length}`)
+    if (res.conflicts.length > 0) summary.push(`保留魔改 ${res.conflicts.length}`)
+    if (res.orphanedModified.length > 0) summary.push(`保留退役魔改 ${res.orphanedModified.length}`)
+    if (summary.length > 0 || explicit) {
+      report([
+        `  已顺带检查/刷新 ${root} 的 .agents/skills/：${summary.length > 0 ? summary.join('、') : '已是最新（幂等跳过）'}。`,
+      ], { quiet, always: summary.length > 0 })
+    }
+    return { skipped: false, result: res }
+  } catch (err) {
+    report([
+      `  顺带刷新 .agents/skills/ 未成功（${err instanceof Error ? err.message : String(err)}），请稍后手动运行 equip.mjs。`,
+    ], { quiet, always: true })
+    return { skipped: true, reason: 'error' }
+  }
+}
+
 async function main(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(usage()); return 0 }
-  const unknown = argv.filter((a) => a !== '--quiet' && a !== '--check')
+  let checkOnly = false
+  let quietFlag = false
+  let equipTarget
+  const unknown = []
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--quiet') quietFlag = true
+    else if (arg === '--check') checkOnly = true
+    else if (arg === '--equip') {
+      const next = argv[++i]
+      if (!next) { unknown.push('--equip'); break }
+      equipTarget = next
+    } else if (arg.startsWith('--equip=')) {
+      const val = arg.slice('--equip='.length)
+      if (!val) { unknown.push(arg); break }
+      equipTarget = val
+    } else {
+      unknown.push(arg)
+    }
+  }
+
   if (unknown.length > 0) {
     process.stderr.write(`错误：未知参数 ${unknown.join(' ')}\n\n${usage()}`)
     return 2
   }
-  const checkOnly = argv.includes('--check')
   // --check 是人主动问的，它要看到全部状态；与 --quiet 同时给时以 --check 为准。
-  const quiet = argv.includes('--quiet') && !checkOnly
+  const quiet = quietFlag && !checkOnly
 
   // 宿主或流水线可以整个关掉自动更新：`PF_NO_UPDATE` 有值就不联网、不写盘、不出声。
   //
@@ -897,7 +956,11 @@ async function main(argv) {
   const tag = facts.version === undefined ? '（版本读不到）' : facts.version
 
   // 源码副本：只读报告，到此为止。这条不联网，也就没有窗口的理由。
-  if (facts.hasGit) return reportSourceCopy(facts, { quiet })
+  if (facts.hasGit) {
+    const code = reportSourceCopy(facts, { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
+    return code
+  }
 
   // 来源**先看副本自己记的那个**：fork 出去自己发版的人写了自己的地址，就该更新他自己的；
   // 读不到或不成地址时退回兜底地址（`PF_UPDATE_SOURCE`，没设就是这段代码自己写着的那个）。
@@ -1094,12 +1157,15 @@ async function main(argv) {
         + ' 我没有删——分清它是哪一种要靠你判断。'
       : undefined,
   ], { quiet, always: true })
+  if (health.ok) {
+    refreshEquippedWorkspace(equipTarget || process.cwd(), { explicit: Boolean(equipTarget), quiet })
+  }
   return 0
 }
 
 // 分成两块顺手带出一个可测性：文件被 import 时只交出判据，与它被当成脚本跑时一样的东西。
 // 自检就靠这个核对「兜底地址」「静默期」「提醒节奏」没有另抄一份值，并直接验排路的规则。
-export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor }
+export { UPSTREAM, UPDATE_INTERVAL_MS, STALE_CHECK_MS, apiEndpoint, routesFor, refreshEquippedWorkspace }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2))

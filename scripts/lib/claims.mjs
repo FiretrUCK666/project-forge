@@ -73,27 +73,135 @@ function looksLikeRepoPath(token) {
   return PATH_EXT.test(raw)
 }
 
+/** 可选设施目录（由协作/CI 工具按需启用，不把其缺席误报为目录失踪）。 */
+const OPTIONAL_INFRA_DIRS = new Set(['.github', '.github/workflows', '.worktrees', '.git'])
+
+/** 判定目录项是不是具体可核验的相对目录前缀（排除占位符、通配符、可选设施与文件）。 */
+function normalizeProfileDir(token) {
+  let raw = String(token ?? '').trim().replace(/^[`'"]+|[`'"]+$/g, '').trim()
+  while (raw.startsWith('./') || raw.startsWith('.\\')) raw = raw.slice(2)
+  raw = raw.trim()
+  if (!raw) return undefined
+  if (/^(?:none|none>|无|n\/a)$/i.test(raw)) return undefined
+  if (/[<>*?{}\s]/.test(raw)) return undefined
+  if (/^(?:https?:|mailto:|git@|ssh:)/i.test(raw)) return undefined
+  if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.includes('..')) return undefined
+
+  const hasTrailingSlash = raw.endsWith('/')
+  const stripped = raw.replace(/\/+$/, '')
+  if (!stripped || OPTIONAL_INFRA_DIRS.has(stripped)) return undefined
+
+  // 单文件已在 `paths` 里按扩展名检查；目录前缀要么以 `/` 结尾，要么不含 `PATH_EXT` 且含 `/`。
+  if (!hasTrailingSlash && (!stripped.includes('/') || PATH_EXT.test(stripped))) return undefined
+  return hasTrailingSlash ? `${stripped}/` : `${stripped}/`
+}
+
+/** 从文本中切出某个 `## <heading>` 段落正文（直到下一个 `## ` 二级标题）。 */
+function extractSectionBody(source, headingPrefix) {
+  const lines = source.split('\n')
+  const escaped = headingPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`^##\\s+${escaped}(?:$|[\\s（(:：])`)
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (re.test(lines[i])) { start = i + 1; break }
+  }
+  if (start === -1) return ''
+  let end = lines.length
+  for (let i = start; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i])) { end = i; break }
+  }
+  return lines.slice(start, end).join('\n')
+}
+
+/** 从 YAML 代码块中提取 `high-risk` 与 `do-not-edit` 声明的具体相对目录前缀。 */
+function extractProfileDirs(source, dirs) {
+  const profileSection = extractSectionBody(source, 'Dev Profile')
+  const scopeText = profileSection || source
+  for (const m of scopeText.matchAll(/```ya?ml\n([\s\S]*?)```/gi)) {
+    for (const line of m[1].split('\n')) {
+      const code = line.replace(/(?:^|\s)#.*$/, '').trim()
+      const kv = /^(?:high-risk|do-not-edit):\s*(.+)$/i.exec(code)
+      if (!kv) continue
+      for (const part of kv[1].split(',')) {
+        const dir = normalizeProfileDir(part)
+        if (dir) dirs.add(dir)
+      }
+    }
+  }
+}
+
+/** 从 `## 高风险路径` Markdown 表格第一列提取反引号包裹的具体相对目录前缀。 */
+function extractHighRiskTableDirs(source, dirs) {
+  const body = extractSectionBody(source, '高风险路径')
+  if (!body) return
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('|')) continue
+    if (/^\|\s*-+/.test(trimmed)) continue
+    const cells = trimmed.split('|').slice(1, -1)
+    if (cells.length === 0) continue
+    const first = cells[0].trim()
+    const tick = /^`([^`\n]+)`$/.exec(first)
+    if (!tick) continue
+    const raw = tick[1].trim()
+    if (!raw.endsWith('/')) continue
+    const dir = normalizeProfileDir(raw)
+    if (dir) dirs.add(dir)
+  }
+}
+
+/** 从 `Dev Profile` 与 `## 环境与构建验证` 代码围栏提取显式调用的包管理器脚本。 */
+function extractPackageScripts(source, scripts) {
+  const devProfile = extractSectionBody(source, 'Dev Profile')
+  const buildSection = extractSectionBody(source, '环境与构建验证')
+  const hasHeadings = /^##\s+/m.test(source)
+  const targetSections = []
+  if (devProfile) targetSections.push(devProfile)
+  if (buildSection) targetSections.push(buildSection)
+  if (targetSections.length === 0 && !hasHeadings) targetSections.push(source)
+
+  for (const sec of targetSections) {
+    for (const block of sec.matchAll(FENCE_BLOCK)) {
+      for (const rawLine of block[1].split('\n')) {
+        const code = rawLine.replace(/(?:^|\s)#.*$/, '').trim()
+        if (!code || code.startsWith('#')) continue
+        for (const m of code.matchAll(/\b(?:npm|pnpm|yarn|bun)\s+run\s+([A-Za-z0-9:._-]+)/g)) {
+          const name = m[1]
+          if (name && !/[<>]/.test(name)) scripts.add(name)
+        }
+        for (const _m of code.matchAll(/\b(?:npm|pnpm|yarn|bun)\s+test(?=\s|$|&&|\|\||;)/g)) {
+          scripts.add('test')
+        }
+      }
+    }
+  }
+}
+
 /**
- * 把文中出现的路径与分支名抽出来。
+ * 把文中出现的路径、目录前缀、脚本与分支名抽出来。
  *
- * 只看**两处**：反引号里的行内代码，与围栏代码块里的整行。正文散文里出现的「像路径的词」
- * 不算——那是叙述，不是承诺；把叙述也算进来，报出来的会是满屏假阳性，而假阳性多了
- * 这条判据就会被关掉。
+ * 只看**两处**：反引号里的行内代码，与围栏代码块里的整行（以及 `Dev Profile` / `高风险路径` 表）。
+ * 正文散文里出现的「像路径的词」不算——那是叙述，不是承诺；把叙述也算进来，
+ * 报出来的会是满屏假阳性，而假阳性多了这条判据就会被关掉。
  *
- * @returns {{ paths: string[], branches: string[] }}
+ * @returns {{ paths: string[], dirs: string[], branches: string[], scripts: string[] }}
  */
 export function claimsOf(text) {
   const source = String(text ?? '').replace(/\r\n/g, '\n')
   const paths = new Set()
+  const dirs = new Set()
   const branches = new Set()
+  const scripts = new Set()
 
   const fenceBodies = []
   for (const block of source.matchAll(FENCE_BLOCK)) fenceBodies.push(block[1])
 
-  // 行内代码里也可能是 `git switch main`
+  // 行内代码里也可能是 `git switch main` 或 `node scripts/x.mjs`
   for (const m of source.matchAll(INLINE_CODE)) {
     const token = m[1].trim()
-    if (looksLikeRepoPath(token)) paths.add(token)
+    for (const word of token.split(/\s+/)) {
+      if (looksLikeRepoPath(word)) paths.add(word.replace(/^['"]|['"]$/g, ''))
+    }
     for (const b of token.matchAll(BRANCH_CMD)) branches.add(b[1])
   }
 
@@ -109,7 +217,16 @@ export function claimsOf(text) {
     }
   }
 
-  return { paths: [...paths].sort(), branches: [...branches].sort() }
+  extractProfileDirs(source, dirs)
+  extractHighRiskTableDirs(source, dirs)
+  extractPackageScripts(source, scripts)
+
+  return {
+    paths: [...paths].sort(),
+    dirs: [...dirs].sort(),
+    branches: [...branches].sort(),
+    scripts: [...scripts].sort(),
+  }
 }
 
 /**
@@ -128,7 +245,7 @@ export function claimsOf(text) {
  */
 export function verifyClaims(text, facts, exists) {
   const out = []
-  const { paths, branches } = claimsOf(text)
+  const { paths, dirs, branches, scripts } = claimsOf(text)
 
   const actual = facts?.conventions?.defaultBranch ?? facts?.git?.originHeadBranch
   if (branches.length > 0 && actual) {
@@ -142,14 +259,31 @@ export function verifyClaims(text, facts, exists) {
     })
   }
 
-  if (paths.length > 0) {
-    const missing = paths.filter((p) => !exists(p))
+  const allPaths = [...new Set([
+    ...paths,
+    ...dirs.map((d) => d.replace(/\/+$/, '')),
+  ])].sort()
+
+  if (allPaths.length > 0) {
+    const missing = allPaths.filter((p) => !exists(p))
     out.push({
       id: 'claim.path',
       ok: missing.length === 0,
       detail: missing.length === 0
-        ? `${paths.length} 个契约里点名的路径都还在`
+        ? `${allPaths.length} 个契约里点名的路径都还在`
         : `契约里点名的这些路径已经不在了：${missing.join('、')}——照着它做的人会找不到东西`,
+    })
+  }
+
+  if (scripts.length > 0 && Array.isArray(facts?.ecosystem?.packageScripts)) {
+    const pkgScripts = new Set(facts.ecosystem.packageScripts)
+    const missingScripts = scripts.filter((s) => !pkgScripts.has(s))
+    out.push({
+      id: 'claim.script',
+      ok: missingScripts.length === 0,
+      detail: missingScripts.length === 0
+        ? `契约里引用的 ${scripts.length} 个脚本都在 package.json 中`
+        : `契约里引用的这些包管理器脚本已不在 package.json 中：${missingScripts.join('、')}——照它跑会报脚本不存在`,
     })
   }
 
@@ -157,4 +291,4 @@ export function verifyClaims(text, facts, exists) {
 }
 
 /** 这条承诺可能产出哪些 id。供 `review.mjs` 与门禁共用，免得两边各写一份。 */
-export const CLAIM_IDS = Object.freeze(['claim.branch', 'claim.path'])
+export const CLAIM_IDS = Object.freeze(['claim.branch', 'claim.path', 'claim.script'])

@@ -1,240 +1,126 @@
-# project-forge
+<p align="center">
+  <img src="assets/readme/hero-en.svg" alt="project-forge workflow diagram showing a setup branch turning a folder into a documented GitHub repo" width="100%">
+</p>
 
-English | [中文](README.md)
+<p align="center">
+  <a href="README.md">简体中文</a> | <strong>English</strong>
+</p>
 
-Give it a project directory. It surveys the project read-only first, works out what this
-project actually needs, then does it: version control, a GitHub remote, the documentation
-set, a release channel — plus the protocol for how work lands after that. At the end it asks
-whether you want the traces it left behind cleaned up.
+<p align="center">
+  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v5.0.0-4E7496?style=flat-square" alt="Version v5.0.0"></a>
+  <a href="#install-and-get-started"><img src="https://img.shields.io/badge/node-%3E%3D18-1F6F5B?style=flat-square" alt="Node.js 18 or newer"></a>
+  <a href="SKILL.md"><img src="https://img.shields.io/badge/dependencies-0-1F6F5B?style=flat-square" alt="Zero third-party dependencies"></a>
+  <a href="#using-the-5-everyday-skills"><img src="https://img.shields.io/badge/kit-5%20skills-D96B27?style=flat-square" alt="Five bundled local dev skills"></a>
+  <a href="#how-it-gets-a-repo-in-shape"><img src="https://img.shields.io/badge/platform-GitHub-172033?style=flat-square" alt="Designed for GitHub workflows"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-526075?style=flat-square" alt="MIT License"></a>
+</p>
 
-No tech stack is assumed. Node, Python, Rust, Go, Java, pure-docs directories, plugin
-projects, and capability directories (skills) are all judged from surveyed facts.
+Starting a fresh directory or stepping into a repository that has grown over months usually stalls on surrounding engineering setup rather than product code: `.gitignore` misses local secrets, design notes drift away from implementation, branches land without real test output, and edits break companion files without warning.
+
+**project-forge** puts that surrounding structure in order in one pass. It surveys your directory read-only first, then fills in missing Git baselines, architecture docs, `AGENTS.md`, GitHub checks, and five everyday development skills without overwriting what you wrote by hand.
+
+## Five Everyday Mistakes It Prevents
+
+- **Existing docs and CI stay untouched**: Handwritten `README.md`, `CONTRIBUTING.md`, workflows, and custom local skills remain intact. Before writing managed files into a non-empty repository, it creates a tar snapshot outside the repo directory so rolling back is trivial.
+- **PRDs, specs, and checklists track branch state**: Planning docs in `docs/prd/`, `docs/specs/`, and `docs/todo/` share structured YAML frontmatter and `YYMMDD-issue<N>-<slug>-{prd,spec,todo}.md` naming so documentation moves in step with issues and pull requests.
+- **Require real command output instead of guesswork**: Changes cannot merge into the default branch on self-reported code reading alone; they need passing contract checks, real execution suites, and an independent context review.
+- **Reminders when coupled files need syncing**: A dependency table inside `AGENTS.md` links templates, libraries, and companion docs so modifying one file surfaces every sibling file that must be checked together.
+- **Tiered test checks keep suites fast**: Built-in `dev-govern` separates verification into quick tests, full fixtures, and merge gates while flagging oversized files or slow mock-heavy tests.
 
 ## Contents
 
 <!-- toc:start -->
 
-- [What it does](#what-it-does)
-- [How much it does](#how-much-it-does)
-- [Before you start](#before-you-start)
-- [Install](#install)
-- [Staying up to date](#staying-up-to-date)
-- [Usage](#usage)
-- [Why it stays quiet](#why-it-stays-quiet)
-- [What it will not do](#what-it-will-not-do)
-- [Problems and contributing](#problems-and-contributing)
-- [What is inside](#what-is-inside)
+- [Five Everyday Mistakes It Prevents](#five-everyday-mistakes-it-prevents)
+- [How It Gets a Repo in Shape](#how-it-gets-a-repo-in-shape)
+- [Using the 5 Everyday Skills](#using-the-5-everyday-skills)
+- [Install and Get Started](#install-and-get-started)
+- [Guardrails](#guardrails)
+- [Script Reference](#script-reference)
 - [License](#license)
 
 <!-- toc:end -->
 
-## What it does
+## How It Gets a Repo in Shape
 
-Going from "it runs" to "it looks like a real project" is a pile of small, easy-to-get-wrong
-things: are the ignore rules right, should build output be committed, is the commit identity
-set, do the promises in the README hold, will the release pipeline leak a credential. None is
-hard; together they are a lot, and mistakes usually surface much later.
+<p align="center">
+  <img src="assets/readme/workflow-en.svg" alt="Onboarding convergence flow from three repository starting points into four setup steps" width="100%">
+</p>
 
-It folds those into four steps:
+Whether you start from an empty folder, a half-configured side project, or an active team repository, **project-forge** follows the same four-step path and leaves handwritten content intact:
 
-| Step | What happens |
-| --- | --- |
-| **S1 Survey** | A read-only scan returns a `maturity` and a list of `gaps` |
-| **S2 Scope** | Decide what this run covers, and say it in one sentence |
-| **S3 Land** | Repo → docs → remote → automation. Read existing files first, fill only what is missing |
-| **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
+1. **Read-only survey**: Inspects existing files, Git baseline, configured remotes, and account permissions without changing anything. On a blank folder, answering three or four short questions generates the starter baseline.
+2. **Plan from observed facts**: Preserves handwritten READMEs, non-standard directories, and existing custom skills, filling only missing items and asking before making choices like license selection.
+3. **Snapshot and scaffold in sequence**: Saves an external tar backup of non-empty repositories, then builds strictly in order: **Repo → docs → remote → automation**. After setting up Git and installing the five everyday skills, `dev-explore` inspects real module boundaries to generate a concise `AGENTS.md` (under 30KB) and `docs/TDD.md`, followed by GitHub remotes and checks.
+4. **Verify and hand off**: Re-checks consistency and cross-links across generated files, and lists any temporary helper markers for explicit confirmation before cleaning them up.
 
-It governs; it does not generate the project. It will not pick your stack or write your source.
+## Using the 5 Everyday Skills
 
-The survey report ends by listing **which pages, and which sections, this run should read** —
-computed from what the survey actually found, not a fixed index.
+<p align="center">
+  <img src="assets/readme/architecture-en.svg" alt="Five bundled local skills connected to the four merge gate checks" width="100%">
+</p>
 
-## How much it does
+Once installed under `.agents/skills/`, these five skills work from plain requests—you do not need to memorize script flags. `AGENTS.md` maps natural intent to the matching skill and helper script automatically.
 
-The survey returns a maturity level, and that sets how heavy this run is:
-
-| Maturity | Meaning | What happens |
+| What you ask in plain words | Skill | What it handles |
 | --- | --- | --- |
-| `empty` | Nothing there | No governance; let the project exist first |
-| `greenfield` | Source but no repo, or no docs | Build it all |
-| `partial` | Repo and some docs, with gaps | Fill the gaps, touch nothing that exists |
-| `mature` | Everything is there | Inspect only |
+| "Map the entrypoints and module boundaries first" | `dev-explore` | Read-only scan of codebase structure, boundaries, and check commands without editing files |
+| "Draft a spec and task list for this change" | `dev-plan` | Writes and audits `docs/prd/`, `docs/specs/`, and `docs/todo/` with clear scope and risk level |
+| "Pick up this issue, work on a branch, and open a PR" | `dev-flow` | Creates an isolated branch or worktree, runs local gates, submits PRs, and updates doc status |
+| "Review this PR from an independent angle" | `dev-review` | Spawns an isolated review context to check criteria line by line and test failure cases |
+| "Audit stale docs, duplication, or slow tests" | `dev-govern` | Checks contract sync, spots oversized modules or low-value tests, and prepares releases |
 
-The same survey returns `gaps`, which lists **only things that will cause trouble**. A
-single-language README, no CONTRIBUTING, no CI — none of those are gaps. Treating preferences
-as defects leaves every project owing a debt it can never pay off.
+A typical day follows four simple prompts:
 
-## Before you start
+1. Ask to `"Explore how the config parser routes errors"` so `dev-explore` returns real entrypoints and test commands.
+2. Ask to `"Create a spec and checklist for adding validation"` so `dev-plan` prepares frontmatter docs and freezes acceptance criteria.
+3. Ask to `"Implement this on a new branch, run local checks, and open a PR"` so `dev-flow` handles isolation, checks, and submission.
+4. Ask to `"Run an independent review on the PR, then merge and clean up"` so `dev-review` and `dev-flow` verify, merge, and tidy up the branch.
 
-One requirement: **verified on Node 18**; newer versions are expected to work but have not
-been checked one by one. Nothing to install, no build step, no third-party dependencies.
+Evidence always follows a strict hierarchy: **static and contract checks outrank runtime smoke tests, runtime output outranks code reading, and independent review completes before doc archiving**.
 
-`git` is optional. Capabilities that need it report honestly and skip; they never pretend to
-have succeeded.
+## Install and Get Started
 
-## Install
+- **Runtime**: Node.js 18 or newer (`>= 18`).
+- **Zero external dependencies**: Every script uses only Node built-in modules (`node:*`).
 
-Unpack into **your host's user-level skill root**. If you already have other skills installed,
-put it beside them; if not, check your host's documentation. Keep the directory name
-`project-forge` — it must match `name` in the `SKILL.md` frontmatter, and on a case-sensitive
-filesystem a different case is a different directory.
-
-No registration or restart: the host discovers it by directory, and `SKILL.md` is the entry.
-
-Two ways to get it, pick one:
-
-| How | What you get | How you learn about a new version | Good for |
-| --- | --- | --- | --- |
-| **Download the release archive** | A standalone copy with no `.git` | It checks by itself (see the next section) | Just using it |
-| **Clone this repository** | Full history and commits | `git pull`; the tool never touches it | Reading changes, contributing, modifying it |
-
-The criterion is one thing: **is there a `.git` directory**. If yes it is a source copy, and
-`update.mjs` treats it as read-only. If no it is a package copy, and `update.mjs` replaces it
-wholesale. That judgement needs no memory and no guessing at intent.
-
-## Staying up to date
-
-Nothing to do after installing: each run checks the remote once first (throttled — no repeated
-request within an hour) and swaps in a newer version if there is one.
-
-To ask for a check on demand, outside the throttle:
-
-```sh
-node "<skill-dir>/scripts/update.mjs" --check
-```
-
-If your host forbids skills from modifying themselves (read-only sandbox, audit rules), or you
-simply do not want the install directory touched this time, one environment variable turns it
-off completely:
-
-```sh
-# any non-empty value works
-export PF_NO_UPDATE=1
-```
-
-Updating is **a wholesale replacement**: it does not ask, compare, or look at local edits — the
-whole point of a package copy is "the latest version when you use it". Conversely, if you have
-edited that copy, do not let it update; or switch to a clone, which the tool treats as
-read-only.
-
-## Usage
-
-Just talk to it in plain language. You do not need to name it:
+Clone or place `project-forge` in your skills folder, open your target project directory, and start with a plain request:
 
 ```text
-Clean this project up for me
-Give this project a GitHub remote and CI
-Check for leaked credentials and write me an AGENTS.md
+Survey this project directory first,
+and list what setup items are missing.
 ```
 
-Name one thing and it does only that thing.
+Empty folders prompt three or four brief questions about stack and license; existing repositories keep handwritten docs and working workflows untouched.
 
-It prints a few commands; `<skill-dir>` is where this skill lives and `<project-dir>` is the
-project being worked on:
+## Guardrails
 
-```sh
-# Read-only survey (--markdown gives a human-readable report)
-node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown
+To protect published history and prevent skipped checks, actions are separated into routine branch work and human-confirmed operations:
 
-# Create or refresh AGENTS.md
-node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
+- **Boundaries depend on whether they can be undone**: Routine work covers actions like pushing your own branch and opening or updating a PR because both can be reverted. Merging directly into the default branch outside normal review, tagging a release, publishing artifacts, or changing repository visibility cannot be undone and require explicit confirmation first.
+- **Clear separation between routine merges and gate changes**: When an independent review passes with zero open failures, the reviewer merges directly; any change involving **weakening a gate**—removing tests, loosening assertions, skipping checks, or relaxing CI—always requires human confirmation.
+- **Never rewrite pushed history, always verify after writes**: Force-pushing and rewriting published commits never run automatically. After pushing branches, opening PRs, or publishing releases, the scripts read back live GitHub state to verify everything landed accurately.
 
-# Delivery check (--scope limits it to specific faces)
-node "<skill-dir>/scripts/review.mjs" "<project-dir>"
+## Script Reference
 
-# Handoff: see what is left behind (read-only, deletes nothing)
-node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --scan
-```
+Normal work routes through `AGENTS.md` automatically. Expand below if you want to invoke individual checks manually or wire them into CI:
 
-## Why it stays quiet
+<details>
+<summary>Inspect underlying CLI scripts</summary>
 
-Three things make up most of how it feels to use:
+| Script | Purpose |
+| --- | --- |
+| `node scripts/survey.mjs <dir>` | Read-only scan of repository layout, docs, remotes, and gaps |
+| `node scripts/backup.mjs create <dir>` | Create an external tar snapshot before modifying an existing repo |
+| `node scripts/equip.mjs <dir>` | Install and verify the five bundled `.agents/skills/` kits |
+| `node scripts/compose-agents.mjs <dir>` | Build or safely refresh a `<= 30KB` `AGENTS.md` contract |
+| `node scripts/review.mjs <dir>` | Audit repository readiness against project contracts |
+| `node scripts/handoff.mjs <dir>` | List and remove temporary forge markers when stepping back |
+| `node scripts/sync-toc.mjs README.md README.en.md` | Keep bilingual README tables of contents synchronized |
+| `node scripts/update.mjs` | Check and sync local toolkit updates |
 
-1. **It does not check harmless preferences.** A single-language README, no CI on a personal
-   tool, not publishing — none of those are defects. The only question that matters: **will
-   this cause trouble?** Only that blocks.
-2. **Decisions live in the project, not in flags.** Choices only you can make ("this project
-   ships no LICENSE") go into the `## 取舍` section of `AGENTS.md`. No twelve flags to
-   remember, no hidden state file.
-3. **Traces are visible.** Everything it leaves behind carries a `project-forge:` marker,
-   right in the text. Both people and agents can grep for it, and delete it by hand. One
-   command removes it all when you no longer need it.
-
-## What it will not do
-
-- Make your private repo public (private by default; going public needs your explicit word)
-- Force-push, rewrite pushed history, or delete a published release
-- **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
-  open a PR → independent review → merge; tagging, release pages, and registry publishes all
-  need your explicit word
-- Pick a license for you, or invent an identity
-- **Remove anything it left behind without your explicit confirmation**
-
-It sorts actions by **whether they can be undone**, not by whether they leave the machine:
-pushing your own branch, opening a PR, and editing a PR can all be undone (delete the branch,
-close the PR), so they are ordinary work and need nobody's nod. Publishing a release, flipping
-a private repo public, and rewriting history cannot be undone — those stop and wait for you.
-Force-pushing and rewriting pushed history never run automatically.
-
-**The reviewer finishes the merge.** Once the independent review passes, that same reviewer
-merges — it is not handed back to a person for one more click. People do not read the code; a
-merge gate in human hands becomes a rubber stamp that adds waiting and no judgement. The
-judgement already happened in the review, which had the frozen acceptance criteria, the diff,
-the raw gate output, and a fault injection. Proposals from outside contributors work the same
-way; the protection against strangers sits **before** the review (read the diff first, disable
-lifecycle scripts when running gates).
-
-**Only one class needs a human nod: weakening a gate.** Deleting tests, relaxing assertions,
-adding skip markers, turning a check into a warning, loosening CI — an ordinary change that goes
-wrong turns the next gate red; this one goes wrong and **no gate will ever turn red again,
-including this time**, while looking like "the build is green". Want to be more conservative?
-Write `merge-authority: human` in the project's `AGENTS.md` under `## 取舍`.
-
-**The same rule governs how this skill is maintained.** It governs other projects and it
-governs itself: branch → gates green → push the branch → open a PR → independent review →
-merge. Not one more confirmation, not one less review.
-
-Daily work and releasing are two different things, and it only does the first by default.
-Not out of caution for its own sake: the two differ in whether they can be undone. A wrong
-push can be reverted with a follow-up commit; a published version cannot be taken back —
-people have already installed it. "Several changes piled up" or "the version number looks
-due for a bump" are not reasons to release.
-
-**It always asks before clearing traces.** Branches, worktrees and remote branches belong to
-someone's machine, and deleting them cannot be undone. It lists exactly what would go (which
-worktree, which local branch, which remote branch) and waits for your word. When it cannot reach
-you, that list goes into the report and nothing is deleted — no answer is not consent.
-
-## Problems and contributing
-
-- **Report a defect** with the repository's [bug template](.github/ISSUE_TEMPLATE/bug_report.md).
-  It asks exactly the four things that make a report locatable — expected, actual, how to
-  reproduce, on what environment. Miss any one and a round trip is guaranteed. If the problem
-  is about a survey judgement, include the surveyed directory's stack and rough structure; that
-  usually points straight at the criterion that missed something.
-- **Ask for a capability, or argue a judgement should differ**, with the
-  [feature template](.github/ISSUE_TEMPLATE/feature_request.md).
-- **Change code**: see [CONTRIBUTING](CONTRIBUTING.md) — how to run it locally, which gates
-  there are, and how to submit a change. Changes on high-risk paths (judgement logic, the gates
-  themselves, package boundaries, the release chain) need an independent review round, and that
-  review reports per acceptance criterion frozen before the work started — see
-  the "Seven, the review loop" section of `references/collaboration.md` for the criteria and the stop rules.
-
-## What is inside
-
-```text
-SKILL.md            Entry point: which document to read when, and the gate table
-references/         Ten sets of criteria, read the one this step needs
-templates/          Skeletons that land in the project: contract, docs, releasing, licenses, pipelines
-scripts/            Survey, generate, check, hand off, sync table of contents, self-update
-```
-
-`scripts/dev/` serves this repository's own self-check only and never ships in the user package.
-
-This repository is the first user of its own rules: the root `AGENTS.md` is generated and
-maintained by `compose-agents.mjs`, and `preflight` checks that it stays structurally aligned
-with `templates/`. When that fails, the repository is fixed before the rules are.
+</details>
 
 ## License
 
-[MIT](LICENSE)
+Released under the [MIT](LICENSE) License. See [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md) for collaboration and release details.

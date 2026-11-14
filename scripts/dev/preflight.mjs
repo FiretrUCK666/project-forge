@@ -32,16 +32,30 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  FULL_READ_MAX_LINES, FULL_READ_REFS, REFS_MAX_LINES, REPO_ONLY_DIRS, REPO_ONLY_FILES,
-  SKILL_MAX_BYTES, SKILL_MAX_LINES, TEMPLATE_CONDITIONS, TEMPLATE_VARS,
+  AGENTS_MAX_BYTES, FORBIDDEN_PLATFORM_RE, FULL_READ_MAX_LINES, FULL_READ_REFS,
+  KIT_SKILL_MAX_LINES, KIT_SKILLS, PF_MANIFEST_REL, REFS_MAX_LINES, REPO_ONLY_DIRS,
+  REPO_ONLY_FILES, SKILL_MAX_BYTES, SKILL_MAX_LINES, TEMPLATE_CONDITIONS, TEMPLATE_VARS,
   conditionMarkers, isRepoOnlyPath, templateVarsOf,
 } from '../lib/protocol.mjs'
+import { checkEquip } from '../equip.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
 import { isMainModule } from '../lib/text.mjs'
+import { markdownHeadings } from '../sync-toc.mjs'
+import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
+
+if (isMainModule(import.meta.url, process.argv[1]) && !String(process.env.PF_BACKUP_DIR ?? '').trim()) {
+  const testBackupRoot = mkdtempSync(join(tmpdir(), 'pf-test-bk-'))
+  process.env.PF_BACKUP_DIR = testBackupRoot
+  process.on('exit', () => {
+    try {
+      rmSync(testBackupRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch { /* 留给系统清理 */ }
+  })
+}
 
 const failures = []
 const notes = []
@@ -376,10 +390,10 @@ const OWN_INSTANCE_CHECKS = [
 ]
 
 /** 已经删掉的脚本与文件名。任何文件里出现它们，都是没跟上的引用。 */
-const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 'pf-review', 'check-badges.mjs', 'ecosystems.mjs', 'lib/ledger.mjs', 'lib/manifest.mjs', 'task-runners.mjs', 'release-notes.mjs', 'render-svg.mjs', 'release-spec.md']
+const RETIRED_NAMES = ['selftest.mjs', 'review-record.mjs', 'agents-kernel.md', 'pf-review', 'check-badges.mjs', 'ecosystems.mjs', 'lib/ledger.mjs', 'lib/manifest.mjs', 'task-runners.mjs', 'release-notes.mjs', 'render-svg.mjs', 'release-spec.md', 'work-item.md']
 
 /** 历史记录是**当时的事实**，不改写它。它们记的是那一次改动的现场，不是现行约定。 */
-const HISTORY_PATHS = [/^docs\/work\//, /^docs\/release-notes\//]
+const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 
 /**
  * 审查栏的四个字段名。**这是唯一一份**——模板、本仓库实例、判据三处都从这里取。
@@ -399,12 +413,11 @@ const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录
  * 「编号长什么样」看起来像格式洁癖，实际是**审查栏能不能对上标准**的前提：审查写的是
  * `fail: C4`，标准那一节写成 `1.` 或 `-`，两处就永远对不起来，而人只会以为「审查漏看了 C4」。
  *
- * 判据盯的是**可勾选那一行**，不是「文里出现过 C1」：`work-item.md` 的填写指引里本来就
- * 举了个 `C1` 的例子，按「出现过」判的话，清单被改成 `1.` 也照样绿——判据就被那句举例
- * 削成了恒真。
+ * 判据盯的是**可勾选那一行**，不是「文里出现过 C1」：`docs-todo.md` / `docs-spec.md` 的注释举例里
+ * 本来就带着 `C1`，按「出现过」判的话，清单被改成 `1.` 也照样绿——判据就被那句举例削成了恒真。
  */
 const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
-const ACCEPTANCE_ID_SITES = ['templates/work-item.md']
+const ACCEPTANCE_ID_SITES = ['templates/docs-todo.md', 'templates/docs-spec.md']
 
 /**
  * 工作记录模板里，「完成后的记录」是不是**要求合并之前写完**。
@@ -483,31 +496,16 @@ const FINISH_STEPS = [
 /**
  * 收尾那一章里缺了哪些「必须交代清楚的东西」。
  *
- * ## 两种范围：有的要素绑在步骤正文里，有的只能整章查
+ * ## 两种范围：有的要素绑在步骤正文里，有的在非步骤散文段里查
  *
  * 第 7 步要求的两个要素（查远端、查下游堆叠 PR）只在那一步的正文里查——正文是切好的独立块，
  * 一句话说的就是那一件事。`where.stepMatching` 按**内容**认那一步（谁教
  * `git push origin --delete`，谁就是它），不按编号认：写死步号会让「插入一步」变成假红，
  * 而假红比漏检更耗人——它把人引去改判据，判据本来是对的。
  *
- * 「删之前先问」在文档里没有位置（模板写成七步下面一段，参考文档写成同一章的小标题），
- * 所以只能整章查。
- *
- * ## 已知限制：`ask-before-delete` 判不出「那一段被整段删掉」
- *
- * 它的判定是「相邻几段里同时出现 worktree / 本地分支 / 远端分支 / 征询词」。而七步那一段
- * 本身就必然写全这三类对象（第 5 步 worktree、第 6 步本地分支、第 7 步远端分支），
- * 第 3 步的「回读确认」又提供了征询词——**四个条件自己凑齐了**。
- *
- * 后果：把「先把要删的清单列出来问一次」整段删掉，这条判据不会报。实测确认过。
- *
- * 根因不在正则写得松紧，在于**这件事没有结构位置**：七步能被稳定判，靠的是「编号」这个
- * 锚点；这一段是散文，没有锚点，判据就只能靠词面碰撞去猜它像不像在说这件事，于是每换一种
- * 写法就漏一种。
- *
- * 治本的做法是给它一个位置——把它提成七步里的一个编号步骤（或独立成「前置」编号块），
- * 判据就能像其余步骤一样按结构判，不需要征询词，也不会被七步自身的用词污染。
- * **这一版没做这个改动**，代价记在这里，不假装它不存在。
+ * 「删之前先问」在文档里位于七步之外的独立散文段，按 `where: { chapterNonStep: true }`
+ * 在章内**剔除编号步骤正文之后**的段落滑窗里检查：第 3 步的「回读确认」与第 5/6/7 步的
+ * `worktree` / `本地分支` / `远端分支` 不能自己凑齐这四个条件，删掉「列清单问一次」整段时必然报缺。
  */
 const FINISH_REQUIRED = [
   {
@@ -528,24 +526,7 @@ const FINISH_REQUIRED = [
   {
     id: 'ask-before-delete',
     label: '删任何东西之前先把要删的清单列出来问一次',
-    where: { chapter: true },
-    // ## 判「一段话里同时出现了这四件事」，不判字面顺序和排版
-    //
-    // 先说走过的弯路。先后试过：绑「问人」（被「卸之前先问人」蒙混）、加删除动词（仍被那句
-    // 蒙混，它同时有「卸」和「问」）、绑「清单 + 问」（被「产物清单」和一句举例蒙混）。
-    // **拿正则去读散文的语义，这件事本身不成立**——散文的写法是无穷的，堵一个它换一个。
-    //
-    // 于是换思路：判**具体产物的形状**。要删的东西固定是三类（worktree、本地分支、远端分支），
-    // 「先问」固定是一个征询词。四个条件在**同一段**里同时成立，就是这件事发生了。
-    //
-    // 不判顺序、不判是否同一行——那都是排版，不是判据。早先的正则要求三项按
-    // worktree→本地分支→远端分支 同行排列，换序或改成分行就假红，而「清单长这样」那种写法
-    // 本来就是分行的。
-    // **这条判据有已知漏检**：七步那一段自己就能凑齐下面这四个条件（第 5 步 worktree、
-    // 第 6 步本地分支、第 7 步远端分支、第 3 步「回读确认」的征询词），所以把
-    // 「列清单问一次」整段删掉不会报。实测确认过。
-    // 「换序、分行不误报」与「删掉不报警」目前只能二选一——选前者，把后者记成已知限制。
-    // 治本方向写在上面的文件注释里。
+    where: { chapterNonStep: true },
     test: (block) => /(worktree|工作树)/.test(block)
       && /本地分支/.test(block)
       && /远端分支/.test(block)
@@ -700,9 +681,22 @@ export function finishRequiredMissing(text) {
   //
   // 折中是滑动窗口：连着的一小块里凑齐那几件事就算。窗口给 3 段，够容纳「一句引导 + 一张清单」。
   const paragraphs = chapter.split(/\n\s*\n/)
-  const windowHit = (test) => {
-    for (let i = 0; i < paragraphs.length; i += 1) {
-      if (test(paragraphs.slice(i, i + 3).join('\n'))) return true
+  const nonStepLines = []
+  let inStepItem = false
+  for (const line of chapter.split('\n')) {
+    if (/^\s*\d+\.\s/.test(line)) { inStepItem = true; continue }
+    if (line.trim() === '' || /^#/.test(line) || /^\s*[-*]\s/.test(line) || /^<!--/.test(line)) {
+      inStepItem = false
+      nonStepLines.push(line)
+      continue
+    }
+    if (inStepItem) continue
+    nonStepLines.push(line)
+  }
+  const nonStepParagraphs = nonStepLines.join('\n').split(/\n\s*\n/)
+  const windowHit = (paras, test) => {
+    for (let i = 0; i < paras.length; i += 1) {
+      if (test(paras.slice(i, i + 3).join('\n'))) return true
     }
     return false
   }
@@ -713,8 +707,10 @@ export function finishRequiredMissing(text) {
     if (one.where.stepMatching !== undefined) {
       const body = stepBody(one.where.stepMatching)
       ok = body !== undefined && one.re.test(body)
+    } else if (one.where.chapterNonStep) {
+      ok = windowHit(nonStepParagraphs, one.test)
     } else if (one.test !== undefined) {
-      ok = windowHit(one.test)
+      ok = windowHit(paragraphs, one.test)
     } else {
       ok = one.re.test(chapter)
     }
@@ -823,7 +819,7 @@ function checkReviewContract() {
 
   // 「完成后的记录」必须在合并之前写完。这句话一松，第二个 PR 就回来了。
   {
-    const site = 'templates/work-item.md'
+    const site = 'templates/docs-todo.md'
     const path = join(ROOT, site)
     if (!existsSync(path)) { fail(`完成后记录：缺 ${site}`) }
     else {
@@ -964,7 +960,9 @@ function checkTemplateRender() {
     if (conditionMarkers(text, 'x.md').length > 0) fail('渲染产物里还有 if/endif——条件求值漏了一层')
 
     if (!/project-forge:\s*(?:begin|fill)/.test(text)) fail('渲染产物里没有任何受管标记——它从此没法被刷新')
-    note('渲染：纯文档项目上生成的 AGENTS.md 没有残留占位符、没有残留条件块')
+    const bytes = Buffer.byteLength(text, 'utf8')
+    if (bytes > AGENTS_MAX_BYTES) fail(`纯文档项目渲染生成的 AGENTS.md 体积 ${bytes} 字节超过上限 ${AGENTS_MAX_BYTES}`)
+    note(`渲染：纯文档项目上生成的 AGENTS.md（${bytes} 字节 <= ${AGENTS_MAX_BYTES}）没有残留占位符、没有残留条件块`)
   } finally {
     // Windows 上刚被别的进程打开的目录会被锁一小会儿，删不掉不是失败——
     // 用重试把它让过去，不要让一条清理动作把整趟自检打成崩溃。
@@ -975,30 +973,31 @@ function checkTemplateRender() {
 /**
  * 平台锁定：产物层只提 GitHub，不提别的托管平台。
  *
- * **只扫产品层**（入口、判据、落盘骨架、脚本）。历史记录（`docs/work/`、`docs/release-notes/`）
- * 不扫：那里记的是当时的事实，把「清掉了哪些平台的提及」这句话本身也改掉，等于伪造历史。
+ * **只扫产品层**（入口、判据、落盘骨架、非 dev 脚本、工程套件、双语 README）。
+ * 历史记录（`docs/work/`、`docs/archive/`、`docs/release-notes/`）与 `scripts/dev/` 不扫：
+ * 历史记的是当时的事实，`scripts/dev/` 需要构造测试/故障注入文本。
  *
- * 判据是「出现了别的平台名」，不是「提到了托管平台这个词」——后者在描述清理动作时正当。
+ * 判据直接复用 `scripts/lib/protocol.mjs` 的 `FORBIDDEN_PLATFORM_RE` 单一真相源。
  */
-const FOREIGN_PLATFORMS = [/\bGitLab\b/i, /\bGitee\b/i, /\bBitbucket\b/i, /\bsvn\b/i]
-
 function checkPlatformLock() {
   const targets = [
     join(ROOT, 'SKILL.md'),
+    join(ROOT, 'README.md'),
+    join(ROOT, 'README.en.md'),
     ...walk(join(ROOT, 'references'), (f) => f.endsWith('.md')),
     ...walk(join(ROOT, 'templates'), () => true),
-    ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
+    ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs') && !rel(f).startsWith('scripts/dev/')),
+    ...walk(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f)),
+    ...walk(join(ROOT, 'assets'), (f) => /\.svg$/i.test(f)),
   ]
   for (const file of targets) {
     if (!existsSync(file)) continue
     const name = rel(file)
     const text = readText(file)
-    for (const re of FOREIGN_PLATFORMS) {
-      const m = re.exec(text)
-      if (!m) continue
-      const line = text.slice(0, m.index).split('\n').length
-      fail(`${name} 第 ${line} 行提到了「${m[0]}」——这个 skill 只针对 GitHub，别的托管平台不进产物层`)
-    }
+    const m = FORBIDDEN_PLATFORM_RE.exec(text)
+    if (!m) continue
+    const line = text.slice(0, m.index).split('\n').length
+    fail(`${name} 第 ${line} 行提到了「${m[0]}」——这个 skill 只针对 GitHub，别的托管平台不进产物层`)
   }
   note(`平台锁定：${targets.length} 个产物层文件里没有提及其他托管平台`)
 }
@@ -1047,7 +1046,84 @@ function checkSelfHost() {
     fail(`本仓库自己的 AGENTS.md 没通过自举校验：${(res.stderr || res.stdout || '').trim().split('\n').slice(0, 6).join(' / ')}`)
     return
   }
-  note('自举：本仓库自己的 AGENTS.md 标记成对、没有未填占位、该有的节都在')
+  const agentsBytes = Buffer.byteLength(readText(join(ROOT, 'AGENTS.md')), 'utf8')
+  if (agentsBytes > AGENTS_MAX_BYTES) {
+    fail(`本仓库自己的 AGENTS.md 体积 ${agentsBytes} 字节超过上限 ${AGENTS_MAX_BYTES}`)
+    return
+  }
+  note(`自举：本仓库自己的 AGENTS.md（${agentsBytes} 字节 <= ${AGENTS_MAX_BYTES}）标记成对、没有未填占位、该有的节都在`)
+}
+
+/**
+ * 工程套件同构与自包含校验：
+ *   1. `kit/skills/` 与 `.agents/skills/` 必须逐文件字节级一致（直接复用 `equip.mjs` 的 `checkEquip`）；
+ *   2. `SKILL.md` 与 `kit/` 零本仓私有开发路径泄露（如 `docs/work`、`scripts/dev`、`docs/release-notes`）；
+ *   3. `kit/skills/<name>/SKILL.md` 均存在且 `<= KIT_SKILL_MAX_LINES` 行，套件内脚本零第三方依赖、不越界引用外部模块且语法可解析。
+ */
+function checkKitSuite() {
+  const eq = checkEquip(ROOT)
+  if (!eq.ok) {
+    const details = [
+      eq.reason,
+      ...eq.missing.map((p) => `缺失：${p}`),
+      ...eq.drifted.map((p) => `字节不一致：${p}`),
+      ...eq.unregistered.map((p) => `未登记哈希：${p}`),
+      ...eq.extraManaged.map((p) => `多余托管文件：${p}`),
+    ].filter(Boolean)
+    fail(`内置套件一致性失败（${PF_MANIFEST_REL}）：${details.slice(0, 6).join('；')}`)
+  }
+
+  const privatePathRe = /\b(?:docs\/work|scripts\/dev|docs\/release-notes)\b/
+  const kitAndEntry = [
+    join(ROOT, 'SKILL.md'),
+    ...walk(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f)),
+    ...walk(join(ROOT, 'assets'), (f) => /\.svg$/i.test(f)),
+  ]
+  for (const file of kitAndEntry) {
+    if (!existsSync(file)) continue
+    const name = rel(file)
+    const lines = readText(file).replace(/\r\n/g, '\n').split('\n')
+    for (const [i, line] of lines.entries()) {
+      const m = privatePathRe.exec(line)
+      if (m) fail(`${name} 第 ${i + 1} 行泄露了本仓私有路径「${m[0]}」——用户包里不存在该路径`)
+    }
+  }
+
+  const kitSkillsRoot = join(ROOT, 'kit', 'skills')
+  for (const skill of KIT_SKILLS) {
+    const entry = join(kitSkillsRoot, skill, 'SKILL.md')
+    if (!existsSync(entry)) {
+      fail(`kit/skills 缺必需内置 Skill：kit/skills/${skill}/SKILL.md`)
+      continue
+    }
+    const lineCount = countLines(readText(entry))
+    if (lineCount > KIT_SKILL_MAX_LINES) {
+      fail(`kit/skills/${skill}/SKILL.md 有 ${lineCount} 行，超过上限 ${KIT_SKILL_MAX_LINES} 行`)
+    }
+  }
+
+  const kitScripts = walk(kitSkillsRoot, (f) => f.endsWith('.mjs'))
+  for (const file of kitScripts) {
+    const name = rel(file)
+    const text = readText(file)
+    for (const m of text.matchAll(/^\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/gm)) {
+      const spec = m[1]
+      if (spec.startsWith('node:')) continue
+      if (!spec.startsWith('./') && !spec.startsWith('../')) {
+        fail(`${name} 引入了非内置模块「${spec}」——必须保持零第三方依赖`)
+        continue
+      }
+      const targetAbs = resolve(dirname(file), spec)
+      if (!rel(targetAbs).startsWith('kit/skills/')) {
+        fail(`${name} 越界引用了套件外部模块「${spec}」——kit/skills/ 必须自包含，否则复制到目标仓后无法运行`)
+      }
+    }
+    const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
+    if (syntax.status !== 0) {
+      fail(`${name} 语法错误：${(syntax.stderr || '').split('\n').slice(0, 3).join(' ')}`)
+    }
+  }
+  note(`工程套件：${KIT_SKILLS.length} 个 Skill（<= ${KIT_SKILL_MAX_LINES} 行）、${kitScripts.length} 个脚本自包含，与 .agents/skills/ 字节级一致`)
 }
 
 function checkLinks() {
@@ -1069,12 +1145,31 @@ function checkLinks() {
     if (!existsSync(doc)) continue
     const name = rel(doc)
     const text = readText(doc)
+    if (/\bexplorationStrategy\.mode\b/.test(text)) {
+      fail(`${name} 仍使用过期字段 explorationStrategy.mode，必须改为 explorationStrategy.tier`)
+    }
     for (const m of text.matchAll(PATH_RE)) {
       const target = m[1]
       if (target.includes('*')) continue
       seen.add(target)
       if (!existsSync(join(ROOT, target))) {
         fail(`${name} 引用了不存在的路径：${target}`)
+      }
+    }
+  }
+
+  for (const readmeName of ['README.md', 'README.en.md']) {
+    const p = join(ROOT, readmeName)
+    if (!existsSync(p)) continue
+    const text = readText(p)
+    for (const m of text.matchAll(/\b(assets\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b/g)) {
+      const target = m[1]
+      if (!existsSync(join(ROOT, target))) {
+        fail(`${readmeName} 引用的视觉资源不存在：${target}`)
+        continue
+      }
+      if (isRepoOnlyPath(target) || !isProductLayerPath(target)) {
+        fail(`${readmeName} 引用的视觉资源未纳入产品层用户包：${target}`)
       }
     }
   }
@@ -1106,8 +1201,6 @@ function checkLinks() {
     fail(`一次全量任务要读 ${fullRead} 行，超过预算 ${FULL_READ_MAX_LINES} 行——注意力被稀释的直接来源`)
   }
   note(`全量必读：${fullRead} 行（预算 ${FULL_READ_MAX_LINES}）`)
-
-  checkReferenceTargets()
 }
 
 /**
@@ -1317,7 +1410,7 @@ function checkScripts() {
 // ── 4. 会跑的都真跑 ─────────────────────────────────────────────────
 
 function checkHelps() {
-  for (const name of ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs']) {
+  for (const name of ['survey.mjs', 'backup.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs', 'equip.mjs']) {
     const p = join(ROOT, 'scripts', name)
     if (!existsSync(p)) { fail(`缺脚本 ${name}`); continue }
     const res = spawnSync(process.execPath, [p, '--help'], { encoding: 'utf8', timeout: 20000 })
@@ -1404,8 +1497,10 @@ function smoke() {
  */
 const GATE_COMMANDS = [
   'node scripts/dev/preflight.mjs',
+  'node scripts/dev/gap-coverage.mjs',
   'node scripts/dev/fixtures.mjs',
   'node scripts/compose-agents.mjs . --check',
+  'node scripts/equip.mjs . --check',
   'node scripts/review.mjs .',
   'node scripts/sync-toc.mjs README.md README.en.md --check',
 ]
@@ -1557,8 +1652,99 @@ function checkSingleSources() {
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u
 
+const SVG_BANNED_JARGON_RE = /(?:FORGE\s+SPECIMEN|存量无损融合|跨月重入校准)/
+const SVG_TINY_FONT_RE = /\bfont-size\s*=\s*["']\s*(?:[0-9]|1[0-5])(?:\.\d+)?(?:px)?\s*["']/i
+
+function checkSvgAssetSafety(name, raw) {
+  if (!/<svg\b/i.test(raw) || !/<\/svg>/i.test(raw)) fail(`${name} 缺少完整的 <svg>...</svg> 根结构`)
+  if (!/\bviewBox\s*=\s*["'][^"']+["']/i.test(raw)) fail(`${name} 缺少 viewBox 属性`)
+  if (!/<title\b[^>]*>[\s\S]*?<\/title>/i.test(raw)) fail(`${name} 缺少 <title> 无障碍标题`)
+  if (/<script\b|<foreignObject\b|<image\b/i.test(raw)) {
+    fail(`${name} 包含禁止的 SVG 元素（script / foreignObject / image）`)
+  }
+  const stripped = raw.replace(/\bxmlns(?::[a-z0-9_-]+)?\s*=\s*["']http:\/\/www\.w3\.org\/[^"']*["']/gi, '')
+  if (/https?:\/\//i.test(stripped)) {
+    fail(`${name} 包含非标准外部 http(s) 资源引用——SVG 卡片必须 100% 自包含`)
+  }
+  const tinyFont = SVG_TINY_FONT_RE.exec(raw)
+  if (tinyFont) {
+    fail(`${name} 包含低于 16 的禁止微小字号（${tinyFont[0]}）`)
+  }
+  const banned = SVG_BANNED_JARGON_RE.exec(raw)
+  if (banned) {
+    fail(`${name} 包含禁止的内部黑话「${banned[0]}」`)
+  }
+}
+
+function checkReadmeVisualsAndDocFrontmatter() {
+  const requiredSvgs = [
+    'assets/readme/hero.svg',
+    'assets/readme/hero-en.svg',
+    'assets/readme/workflow.svg',
+    'assets/readme/workflow-en.svg',
+    'assets/readme/architecture.svg',
+    'assets/readme/architecture-en.svg',
+  ]
+  const heights = new Set()
+  for (const relPath of requiredSvgs) {
+    const abs = join(ROOT, relPath)
+    if (!existsSync(abs)) {
+      fail(`缺少 README 图解资产：${relPath}`)
+      continue
+    }
+    const raw = readText(abs)
+    const vb = /\bviewBox\s*=\s*["']\s*0\s+0\s+\d+(?:\.\d+)?\s+(\d+(?:\.\d+)?)\s*["']/i.exec(raw)
+    if (vb) heights.add(vb[1])
+    else fail(`${relPath} 缺少标准 0 0 W H viewBox 尺寸`)
+  }
+  if (heights.size < 2) {
+    fail(`README SVG 图解高度过于单一（仅检测到 ${heights.size} 种高度），不同图表须按内容采用区分度明显的独立高度`)
+  }
+
+  for (const readmeRel of ['README.md', 'README.en.md']) {
+    const text = readText(join(ROOT, readmeRel))
+    if (!/https:\/\/img\.shields\.io\/badge\//i.test(text)) {
+      fail(`${readmeRel} 缺少 shields.io 事实徽章行`)
+    }
+  }
+
+  const requiredDocTemplates = [
+    ['templates/docs-prd.md', 'prd'],
+    ['templates/docs-spec.md', 'spec'],
+    ['templates/docs-todo.md', 'todo'],
+  ]
+  const requiredKeys = ['kind', 'status', 'created', 'updated', 'issue', 'pr', 'owner']
+  for (const [tplRel, expectedKind] of requiredDocTemplates) {
+    const raw = readText(join(ROOT, tplRel))
+    const fm = parseDocFrontmatter(raw)
+    if (!fm.hasFrontmatter) {
+      fail(`${tplRel} 缺少 YAML Frontmatter（首行 --- ... ---）`)
+      continue
+    }
+    if (fm.malformedFrontmatter) {
+      fail(`${tplRel} YAML Frontmatter 格式错误：${fm.syntaxErrors.join('；')}`)
+      continue
+    }
+    if (fm.data.kind !== expectedKind) {
+      fail(`${tplRel} YAML Frontmatter \`kind\` 应为「${expectedKind}」，实为「${fm.data.kind ?? ''}」`)
+    }
+    for (const k of requiredKeys) {
+      if (!Object.prototype.hasOwnProperty.call(fm.data, k)) {
+        fail(`${tplRel} YAML Frontmatter 缺少必需字段「${k}」`)
+      }
+    }
+    for (const k of ['kind', 'status', 'created', 'updated', 'owner']) {
+      if (typeof fm.data[k] !== 'string' || !fm.data[k].trim()) {
+        fail(`${tplRel} YAML Frontmatter 字段「${k}」不可为空`)
+      }
+    }
+  }
+
+  note(`视觉与文档前导：6 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
+}
+
 function checkHygiene() {
-  const files = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml|json|txt)$/i.test(f))
+  const files = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml|json|txt|svg)$/i.test(f))
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
   for (const file of files) {
@@ -1567,7 +1753,178 @@ function checkHygiene() {
     if (raw.startsWith('\uFEFF')) fail(`${name} 有 UTF-8 BOM`)
     if (EMOJI_RE.test(raw)) fail(`${name} 有 emoji 字符`)
     if (homeRe && homeRe.test(raw)) fail(`${name} 里有本机绝对路径`)
+    if (/^assets\/readme\/.+\.svg$/i.test(name)) checkSvgAssetSafety(name, raw)
   }
+}
+
+const EXPECTED_DEV_PROFILE_KEYS = [
+  'quick-test',
+  'full-test',
+  'smoke-verify',
+  'merge-gate',
+  'arch-rules',
+  'high-risk',
+  'do-not-edit',
+]
+
+function checkArchBoundaries() {
+  const productScripts = [
+    ...readdirSync(join(ROOT, 'scripts'), { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith('.mjs'))
+      .map((d) => join(ROOT, 'scripts', d.name)),
+    ...walk(join(ROOT, 'scripts', 'lib'), (f) => f.endsWith('.mjs')),
+    ...walk(join(ROOT, 'kit'), (f) => f.endsWith('.mjs')),
+  ]
+
+  const importSpecRe = /(?:^\s*(?:import|export)[\s\S]*?from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/gm
+  for (const file of productScripts) {
+    const name = rel(file)
+    const text = readText(file)
+    for (const m of text.matchAll(importSpecRe)) {
+      const spec = m[1].trim()
+      if (spec.startsWith('node:')) continue
+      let pointsToDev = /(?:^|\/)scripts\/dev(?:\/|$)/.test(spec)
+      if (!pointsToDev && (spec.startsWith('./') || spec.startsWith('../'))) {
+        const targetRel = rel(resolve(dirname(file), spec))
+        pointsToDev = targetRel === 'scripts/dev' || targetRel.startsWith('scripts/dev/')
+      }
+      if (pointsToDev) {
+        fail(`产品层架构越界：${name} 引用了开发门禁层「${spec}」（违反 kit/**、scripts/*.mjs、scripts/lib/** -> scripts/dev/** 禁引规则）`)
+      }
+    }
+  }
+  note(`架构边界：${productScripts.length} 个产品层脚本均未逆向引用 scripts/dev/`)
+}
+
+function sameKeyList(a, b) {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((k, i) => k === sb[i])
+}
+
+function checkDevProfileParity() {
+  const expected = [...EXPECTED_DEV_PROFILE_KEYS]
+
+  const tplText = readText(join(ROOT, 'templates', 'agents-project.md'))
+  const tplBlock = /<!--\s*project-forge:\s*begin\s+Dev Profile\s*-->[\s\S]*?```yaml\n([\s\S]*?)```[\s\S]*?<!--\s*project-forge:\s*end\s+Dev Profile\s*-->/.exec(tplText)
+  if (!tplBlock) {
+    fail('Dev Profile 键集核对：templates/agents-project.md 缺少 Dev Profile yaml 块')
+  } else {
+    const tplKeys = tplBlock[1].split('\n').map((l) => /^([a-z-]+)\s*:/.exec(l.trim())?.[1]).filter(Boolean)
+    if (!sameKeyList(tplKeys, expected)) {
+      fail(`Dev Profile 键集核对：templates/agents-project.md 键集 [${tplKeys.join(', ')}] 与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  const sharedText = readText(join(ROOT, 'kit', 'skills', 'lib', 'shared.mjs'))
+  const sharedKv = /export function parseAgentsProfile[\s\S]*?\((quick-test\|[^)]+)\)\\s\*:/m.exec(sharedText)
+  if (!sharedKv) {
+    fail('Dev Profile 键集核对：kit/skills/lib/shared.mjs 找不到 parseAgentsProfile 键集正则')
+  } else {
+    const sharedKeys = sharedKv[1].split('|').map((s) => s.trim()).filter(Boolean)
+    if (!sameKeyList(sharedKeys, expected)) {
+      fail(`Dev Profile 键集核对：shared.mjs 键集 [${sharedKeys.join(', ')}] 与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  for (const relPath of ['kit/skills/dev-review/scripts/review-pack.mjs', 'kit/skills/dev-govern/scripts/govern-audit.mjs']) {
+    const text = readText(join(ROOT, relPath))
+    const arrMatch = /const DEV_PROFILE_KEYS\s*=\s*\[([^\]]+)\]/.exec(text)
+    const reMatch = /function parseDevProfile[\s\S]*?`?\((quick-test\|[^)]+)\)`\?\s*\\s\*:/m.exec(text)
+    if (!arrMatch || !reMatch) {
+      fail(`Dev Profile 键集核对：${relPath} 缺少 DEV_PROFILE_KEYS 或 parseDevProfile 键集正则`)
+      continue
+    }
+    const arrKeys = [...arrMatch[1].matchAll(/['"]([a-z-]+)['"]/g)].map((m) => m[1])
+    const reKeys = reMatch[1].split('|').map((s) => s.trim()).filter(Boolean)
+    if (!sameKeyList(arrKeys, expected) || !sameKeyList(reKeys, expected)) {
+      fail(`Dev Profile 键集核对：${relPath} 键集（const=[${arrKeys.join(', ')}], regex=[${reKeys.join(', ')}]）与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  note(`Dev Profile：4 处（模板 / shared / review-pack / govern-audit）7 键全对齐`)
+}
+
+/**
+ * 校验 Markdown 文档顶部的 `## 目录` 中每个 `#anchor` 是否能解析到文内真实标题。
+ */
+export function validateDocTocAnchors(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  const tocStart = /^##\s+目录\s*$/m.exec(normalized)
+  if (!tocStart) return ['缺少 `## 目录` 章节']
+  const afterStart = normalized.slice(tocStart.index + tocStart[0].length)
+  const nextH2 = /\n##\s+/.exec(afterStart)
+  const tocBody = nextH2 ? afterStart.slice(0, nextH2.index) : afterStart
+  const links = [...tocBody.matchAll(/\[([^\]]+)\]\(#([^)\s]+)\)/g)]
+  if (links.length === 0) return ['`## 目录` 内没有任何 `#anchor` 链接']
+
+  const validIds = new Set(markdownHeadings(normalized, 6).map((h) => h.id))
+  const errors = []
+  for (const [, label, rawAnchor] of links) {
+    let decoded = rawAnchor
+    try { decoded = decodeURIComponent(rawAnchor) } catch { /* 保持原串 */ }
+    if (!validIds.has(rawAnchor) && !validIds.has(decoded)) {
+      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)
+    }
+  }
+  return errors
+}
+
+function checkTeamAndTddContracts() {
+  const teamFiles = [
+    'references/collaboration.md',
+    'templates/agents-project.md',
+    'templates/contributing.md',
+    'CONTRIBUTING.md',
+  ]
+  for (const relPath of teamFiles) {
+    const p = join(ROOT, relPath)
+    if (!existsSync(p)) { fail(`团队协同核对：缺 ${relPath}`); continue }
+    const text = readText(p)
+    const missing = ['团队', '协作者', '--probe-auth', '接管', 'CODEOWNERS'].filter((k) => !text.includes(k))
+    if (missing.length > 0) {
+      fail(`${relPath} 缺少多维护者团队协同要素：${missing.join('、')}`)
+    }
+  }
+
+  for (const docPath of ['docs/TDD.md', 'templates/docs-tdd.md']) {
+    const p = join(ROOT, docPath)
+    if (!existsSync(p)) { fail(`TDD 契约核对：缺 ${docPath}`); continue }
+    const text = readText(p)
+    for (const err of validateDocTocAnchors(text)) {
+      fail(`${docPath}：${err}`)
+    }
+    if (docPath === 'docs/TDD.md') {
+      if (!/```mermaid\b/.test(text)) fail('docs/TDD.md 缺少 mermaid 架构或状态图')
+      if (!/\barch-rules\s*:/.test(text)) fail('docs/TDD.md 缺少 arch-rules 校验块')
+      if (!text.includes('Feature Map')) fail('docs/TDD.md 缺少 Feature Map 功能入口地图')
+    } else {
+      if (!text.includes('[按需保留，不适用整节删除]')) {
+        fail('templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
+      }
+      if (text.includes('references/')) {
+        fail('templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
+      }
+      if (templateVarsOf(text).length > 0) {
+        fail('templates/docs-tdd.md 存在未登记模板变量占位')
+      }
+    }
+  }
+
+  const synergyFiles = ['SKILL.md', 'references/docs-set.md', 'kit/skills/dev-explore/SKILL.md']
+  for (const relPath of synergyFiles) {
+    const p = join(ROOT, relPath)
+    if (!existsSync(p)) { fail(`TDD 三场景协同核对：缺 ${relPath}`); continue }
+    const text = readText(p)
+    if (!text.includes('--bootstrap-empty')) fail(`${relPath} 缺少 --bootstrap-empty 起步协同说明`)
+    if (!text.includes('explorationStrategy.tier')) fail(`${relPath} 缺少 explorationStrategy.tier 档位协同说明`)
+    if (!/(?:不派[^\n]*子代理|禁止派发子代理)/.test(text)) {
+      fail(`${relPath} 未明确声明空白目录起步禁止派发探索子代理`)
+    }
+  }
+
+  note('协同与 TDD 契约：4 处团队多维护者口径、TDD 双份目录锚点与三场景无冲突协同全部对齐')
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────
@@ -1590,6 +1947,10 @@ async function main() {
   checkAnchors()
   await checkGapCoverage()
   checkScripts()
+  checkArchBoundaries()
+  checkDevProfileParity()
+  checkTeamAndTddContracts()
+  checkReadmeVisualsAndDocFrontmatter()
   checkTemplates()
   checkPlatformLock()
   checkStructureRules()
@@ -1601,6 +1962,7 @@ async function main() {
   checkTemplateRender()
   checkRunsOnRealTarget()
   checkSelfHost()
+  checkKitSuite()
   smoke()
   checkHygiene()
 
@@ -1689,7 +2051,7 @@ function checkPackage(listPath) {
   // 产品层：拿到包的人需要的只有这几处。其余一律要问「它凭什么在包里」。
   const unclaimed = entries.filter((e) => !isProductLayerPath(e))
   if (unclaimed.length > 0) {
-    for (const e of unclaimed) process.stderr.write(`FAIL  ${e} 不在产品层（SKILL.md / references/ / templates/ / scripts/），也没被排除——它凭什么在用户包里？\n`)
+    for (const e of unclaimed) process.stderr.write(`FAIL  ${e} 不在产品层（SKILL.md / references/ / templates/ / scripts/ / kit/ / assets/readme/*.svg），也没被排除——它凭什么在用户包里？\n`)
     process.stderr.write(`\n用户包核对未通过：${unclaimed.length} 个条目没有归属。要发就归进产品层，不发就写进 .gitattributes 的 export-ignore。\n`)
     return 1
   }
@@ -1717,11 +2079,12 @@ function checkPackage(listPath) {
  * 判据是**位置**，不是逐文件列表：新加一个文件只要放进这几处，就自动算产品层；
  * 放进别处，就会被下面那条「没有归属」的判据拦下。清单会漏，位置不会。
  */
-function isProductLayerPath(rel) {
+export function isProductLayerPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (p === 'SKILL.md' || p === 'README.md' || p === 'LICENSE') return true
   if (/^README\.[a-z0-9_-]+\.md$/i.test(p)) return true
-  return /^(?:references|templates|scripts)\//.test(p)
+  if (/^assets\/readme\/[a-z0-9_-]+\.svg$/i.test(p)) return true
+  return /^(?:references|templates|scripts|kit)\//.test(p)
 }
 
 // **只有自己被运行时才跑主流程。** 行为断言要 import 上面的 `finishStepsState` 来验判据本体

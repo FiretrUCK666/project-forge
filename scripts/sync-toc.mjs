@@ -424,6 +424,8 @@ function main() {
   return 0
 }
 
+export { headings as markdownHeadings, slug as githubSlug }
+
 // 入口守卫：本文件被别的脚本引入时不能顺带跑一遍。
 //
 // 判据按**真实路径**归一（survey.mjs 的 isMainModule，全仓只此一份）：字面比较在经

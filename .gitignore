@@ -28,6 +28,8 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+*.tar
+tmp/
 coverage/
 .cache/
 

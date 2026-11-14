@@ -29,7 +29,13 @@ function gitLine(git) {
   const parts = [`分支 \`${git.branch ?? '未知'}\``]
   if (git.remote) {
     parts.push(`远端 \`${git.remote}\``)
-    parts.push(`角色 \`${git.role}\``)
+    const scope = git.collaborationScope ?? git.identity?.collaborationScope
+    if (git.role === 'maintainer' && scope) {
+      const scopeLabel = scope === 'team-collaborator' ? '团队协作者' : '所有者'
+      parts.push(`角色 \`${git.role}\`（${scopeLabel}）`)
+    } else {
+      parts.push(`角色 \`${git.role}\``)
+    }
   } else {
     parts.push('没有远端')
   }
@@ -37,6 +43,8 @@ function gitLine(git) {
   else if (git.commits !== undefined) parts.push(`${git.commits} 个提交`)
   if (git.dirty > 0) parts.push(`${git.dirty} 处未提交改动`)
   if (git.ahead > 0) parts.push(`领先上游 ${git.ahead} 个提交`)
+  const teamHint = git.teamProbeHint ?? git.identity?.teamProbeHint
+  if (teamHint) parts.push(`协同提示：${teamHint}`)
   return parts.join('，')
 }
 
@@ -148,11 +156,56 @@ export function toMarkdown(facts) {
 
   // 仓库自带的 skills：它们是**项目的一部分**，不是痕迹，交棒时不要碰。
   const localSkills = facts.localSkills ?? []
-  if (localSkills.length > 0) {
+  const customSkills = facts.kit?.customSkills ?? []
+  if (localSkills.length > 0 || customSkills.length > 0) {
     lines.push('## 仓库自带的 skills（是内容，不是痕迹）')
     lines.push('')
     for (const s of localSkills) {
-      lines.push(`- \`${s.path}\`${s.valid ? '' : ' —— **入口声明不合法**，宿主会静默丢掉它'}`)
+      const desc = s.summary ? `（${s.summary}）` : ''
+      lines.push(`- \`${s.path}\`${desc}${s.valid ? '' : ' —— **入口声明不合法**，宿主会静默丢掉它'}`)
+    }
+    if (customSkills.length > 0) {
+      lines.push(`- **自有扩展技能（equip 与 handoff 原样保留）**：${customSkills.map((s) => `\`${s.path}\`${s.summary ? `（${s.summary}）` : ''}`).join('、')}`)
+    }
+    lines.push('')
+  }
+
+  if (facts.explorationStrategy) {
+    lines.push('## 探索与接入策略')
+    lines.push('')
+    lines.push(`- **策略级别**：\`${facts.explorationStrategy.tier}\` —— ${facts.explorationStrategy.reason}`)
+    for (const shard of facts.explorationStrategy.shards ?? []) {
+      const targets = (shard.targets ?? []).length > 0
+        ? `（目标：${shard.targets.map((t) => `\`${t}\``).join('、')}）`
+        : ''
+      lines.push(`  - 分片 \`${shard.id}\`（${shard.scope}）：${shard.focus}${targets}`)
+    }
+    lines.push('')
+  }
+
+  const re = facts.reentry
+  if (re?.isReentry && (re.drifted || (re.unregisteredTopDirs?.length ?? 0) > 0)) {
+    lines.push('## 跨月重入失步校准摘要（保留手写规则与自有技能，仅定向修复下列条目）')
+    lines.push('')
+    if (re.staleAgentPaths.length > 0) lines.push(`- **AGENTS.md 失效路径**：${re.staleAgentPaths.join('、')}`)
+    if (re.staleAgentScripts.length > 0) lines.push(`- **AGENTS.md 失效脚本**：${re.staleAgentScripts.join('、')}`)
+    if (re.staleTddPaths.length > 0) lines.push(`- **docs/TDD.md 失效路径**：${re.staleTddPaths.join('、')}`)
+    if (re.unregisteredTopDirs.length > 0) lines.push(`- **未登记模块目录**：${re.unregisteredTopDirs.join('、')}`)
+    if (facts.kit?.drifted || facts.kit?.versionMismatch) {
+      lines.push('- **受管套件漂移**：运行 `node scripts/equip.mjs <目标>` 无损升级并保留自定义修改')
+    }
+    lines.push('')
+  }
+
+  const plan = facts.artifactPlan ?? []
+  if (plan.length > 0) {
+    lines.push('## 逐项处置计划（存量只融合不覆盖，缺项按事实补齐）')
+    lines.push('')
+    lines.push('| 产物 | 现状 | 处置动作 | 执行要点 |')
+    lines.push('| --- | --- | --- | --- |')
+    const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+    for (const item of plan) {
+      lines.push(`| ${cell(item.artifact)} | ${cell(item.status)} | \`${cell(item.action)}\` | ${cell(item.detail)} |`)
     }
     lines.push('')
   }
@@ -217,9 +270,13 @@ export function toMarkdown(facts) {
   lines.push('')
 
   const coverage = facts.risks.scanCoverage
+  const teamHint = facts.git?.teamProbeHint ?? facts.git?.identity?.teamProbeHint
   lines.push('## 这次没查的')
   lines.push('')
   lines.push(`- **能不能推代码**：${facts.git.auth?.https === 'undetermined' ? '没探测（默认不联网、不问凭据助手）。需要时加 `--probe-auth`' : facts.git.auth?.https}`)
+  if (teamHint) {
+    lines.push(`- **团队/组织协作者写权限**：${teamHint}`)
+  }
   lines.push('- **远端可达性**：没探测。它会等满一次网络超时，而勘察要能随便调用')
   lines.push('- **仓库设置**（分支保护、可见性、Actions 开关）：脚本读不到，在 GitHub 上看')
   if (coverage?.truncated) {
@@ -336,11 +393,10 @@ export function computeNavigation(facts) {
       + '建仓库、首次推送、CI 与发布自动化的顺序与判据都在这里；'
       + '`pull_request_target` 那一条尤其要读：写错等于让陌生人拿你的密钥跑他的代码')
   }
-  // 远端不在 GitHub 上时，说明一件**这件事说不清**的事实，而不是塞一份 GitHub 文档。
+  // 远端不在 GitHub 上时，明确跳过 GitHub 远端与平台流水线配置，仅治理本地仓库与文档。
   if (git.present === true && (git.remotes ?? []).length > 0 && !onGithub) {
-    items.push('**远端不在 GitHub 上**：`references/remote-github.md` 里的 `gh`、Actions 与 API '
-      + '对这套托管平台不适用。CI 与发布自动化要按那个平台自己的机制配，'
-      + '本文档里只有「什么该有」这一半还能参考')
+    items.push('**远端不在 GitHub 上**：本工具的远端/CI/发布自动化仅面向 GitHub——'
+      + '当前远端不适用平台流水线配置，仅执行本地 Git、`docs/`、`AGENTS.md` 与 `.agents/skills/` 治理')
   }
 
   // ── 协作协议：有远端、且这次要落地改动时 ──────────────────────────
@@ -377,6 +433,30 @@ export function computeNavigation(facts) {
   if (!hasCommands) {
     items.push('**这个项目没有探到任何构建或测试命令**：读源码补齐，或者如实写「本项目无构建与测试步骤」。'
       + '不要按生态惯例编一条——编出来的会在 CI 里失败，而那条失败看起来像「代码坏了」')
+  }
+
+  const strategy = facts.explorationStrategy
+  if (strategy?.tier === 'parallel-subagents' && (strategy.shards?.length ?? 0) > 0) {
+    const shardList = strategy.shards
+      .map((s) => `\`${s.id}\`（${s.focus}${(s.targets?.length ?? 0) > 0 ? `；目标：${s.targets.join('、')}` : ''}）`)
+      .join('；')
+    items.push(`**并行只读探索（${strategy.reason}）**：在定范围与落盘前先并行派 ${strategy.shards.length} 个互不重叠的只读子 Agent 摸底——${shardList}`)
+  }
+
+  const customSkills = facts.kit?.customSkills ?? []
+  if (customSkills.length > 0) {
+    items.push(`**保留并挂载自有扩展技能（${customSkills.length} 个）**：${customSkills.map((s) => `\`${s.path}\``).join('、')}——写入 \`AGENTS.md\` 路由表共存，\`equip\` 与 \`handoff\` 原样保留不覆写`)
+  }
+
+  const re = facts.reentry
+  if (re?.isReentry && (re.drifted || (re.unregisteredTopDirs?.length ?? 0) > 0)) {
+    const driftParts = []
+    if (re.staleAgentPaths.length > 0) driftParts.push(`契约失效路径 ${re.staleAgentPaths.length} 处（${re.staleAgentPaths.slice(0, 3).join('、')}）`)
+    if (re.staleAgentScripts.length > 0) driftParts.push(`契约失效脚本 ${re.staleAgentScripts.join('、')}`)
+    if (re.staleTddPaths.length > 0) driftParts.push(`TDD 失效路径 ${re.staleTddPaths.slice(0, 3).join('、')}`)
+    if (re.unregisteredTopDirs.length > 0) driftParts.push(`未登记模块目录 ${re.unregisteredTopDirs.slice(0, 4).join('、')}`)
+    if (facts.kit?.drifted || facts.kit?.versionMismatch) driftParts.push('受管技能套件版本或文件漂移')
+    items.push(`**跨月重入失步校准**：检测到 ${driftParts.join('、')}——保留手写规则与自有技能，按诊断定向刷新失效条目与新增模块，修改前先打仓外快照`)
   }
 
   return items

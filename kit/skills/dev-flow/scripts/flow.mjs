@@ -7,7 +7,7 @@
  *   start    --task <id> [--slug <slug>] [--case <1..5>] [--files <n>] [--parallel] [--external-pr <M>] [--pr <M>] [--issue <N>] [--branch <name>] [--clone-choice <fork|standalone|local>] [--json]
  *   claim    --task <id> [--issue <N>] [--agent <id>] [--json]
  *   finalize --task <id> [--note <text>] [--json]
- *   verify   --task <id> [--mode quick|full|gate] [--cmd <custom>] [--json]
+ *   verify   --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--json]
  *   submit   --task <id> [--draft] [--rework] [--title <title>] [--body <text>] [--json]
  *   rework   --task <id> [--rebut "<findingId>: <reason>"] [--json]
  *   merge    --task <id> [--method merge|squash|rebase] [--human-approved] [--json]
@@ -20,9 +20,9 @@ import {
 import { basename, join, relative, resolve } from 'node:path'
 
 import {
-  createDefaultLedger, detectDeclaredRepo, detectProjectConventions,
+  classifyDoorType, createDefaultLedger, detectDeclaredRepo, detectProjectConventions,
   ensureWorktreesIgnored, execShellCommand, githubRepoFull, githubRepoPath,
-  gitRun, isMainModule, listTaskLedgers, parseAgentsProfile, parseBodyRelations, parseFlowInputs,
+  gitRun, isMainModule, listTaskLedgers, matchGlob, parseAgentsProfile, parseBodyRelations, parseFlowInputs,
   posixPath, printNextStep, probeGitHubEnv, readTaskLedger, readTextSafe,
   resolveRepoRoots, resolveWorkspaceIdentity, samePath, sanitizeTaskId,
   sha256Text, slugify, writeAtomic, writeTaskLedger,
@@ -155,16 +155,128 @@ export function analyzeIssueDependencies(issueItems = []) {
   }
 }
 
-function matchPattern(filePath, pattern) {
-  const f = posixPath(filePath).replace(/^\.\//, '')
-  const p = posixPath(pattern).replace(/^\.\//, '')
-  if (!p) return false
-  if (p.endsWith('/')) return f.startsWith(p)
-  if (p.includes('*')) {
-    const esc = p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
-    return new RegExp(`^${esc}$`).test(f)
+const GATE_TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs)\/|(?:\.(?:test|spec)\.[^.]+$)|(?:^|\/)test_[^/]+\.py$|_test\.go$/i
+const GATE_WORKFLOW_FILE_RE = /(?:^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i
+const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/workflows\/[^/]+\.ya?ml|package\.json|Makefile|justfile)$|\.(?:sh|bash|ps1)$/i
+const GATE_SKIP_RE = /(?:^|[^\w.])(?:(?:it|test|describe|context|suite)\.(?:skip|only)|(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@pytest\.mark\.skip\b|@unittest\.skip\b|\bt\.Skip\s*\(|#\[ignore\])|\{\s*(?:skip|only)\s*:\s*true\b/
+const GATE_ASSERTION_RE = /\b(?:assert\w*|expect|should)\s*[.(]|\bassert\s+|\bpytest\.raises\b|\bt\.(?:Error|Errorf|Fatal|Fatalf|Fail)\b|\bassert_(?:eq|ne|matches)?!\s*\(|\b(?:strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match)\s*\(/
+const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-events|actions|pull-requests|checks|deployments|issues)\s*:\s*write\b/i
+const GATE_SHELL_BYPASS_RE = /(?:^|[\s;|&"'])\|\|\s*true(?:\s|$|["';&|])/
+
+function isCommentLine(line) {
+  const t = line.trim()
+  return t === '' || t.startsWith('//') || t.startsWith('#') || t.startsWith('/*') || t.startsWith('*')
+}
+
+/** 扫描 diff 中可能弱化验证门禁的改动，返回精确命中列表。 */
+export async function detectGateWeakening(implRoot, baseRef, baseBranch) {
+  let ref = baseRef
+  const headRes = await gitRun(implRoot, ['rev-parse', 'HEAD'])
+  const headSha = headRes.ok ? headRes.stdout.trim() : null
+
+  if (!ref && baseBranch) {
+    const brRes = await gitRun(implRoot, ['rev-parse', '--verify', baseBranch])
+    if (brRes.ok && brRes.stdout.trim() !== headSha) ref = baseBranch
   }
-  return f === p || f.startsWith(`${p}/`)
+  if (!ref) return []
+
+  const diffRes = await gitRun(implRoot, ['diff', '--unified=3', '--no-color', `${ref}..HEAD`])
+  if (!diffRes.ok || !diffRes.stdout) return []
+
+  const findings = []
+  let currentFile = ''
+  let hunkRemovedAssertions = 0
+  let hunkAddedAssertions = 0
+  let hunkHasLines = false
+  let permIndent = -1
+
+  const flushHunk = () => {
+    if (!hunkHasLines) return
+    if (currentFile && GATE_TEST_FILE_RE.test(currentFile) && hunkRemovedAssertions > hunkAddedAssertions) {
+      findings.push({
+        type: 'deleted-assertion',
+        file: currentFile,
+        detail: `测试断言净减少（-${hunkRemovedAssertions} / +${hunkAddedAssertions}）`,
+      })
+    }
+    hunkRemovedAssertions = 0
+    hunkAddedAssertions = 0
+    hunkHasLines = false
+    permIndent = -1
+  }
+
+  for (const rawLine of diffRes.stdout.split('\n')) {
+    if (rawLine.startsWith('diff --git ')) {
+      flushHunk()
+      const m = /^diff --git a\/.+ b\/(.+)$/.exec(rawLine)
+      currentFile = m ? posixPath(m[1].trim()) : ''
+      continue
+    }
+    if (rawLine.startsWith('+++ b/')) {
+      currentFile = posixPath(rawLine.slice(6).trim())
+      continue
+    }
+    if (rawLine.startsWith('--- ') || rawLine.startsWith('index ') || rawLine.startsWith('new file ') || rawLine.startsWith('deleted file ')) {
+      continue
+    }
+    if (rawLine.startsWith('@@')) {
+      flushHunk()
+      continue
+    }
+
+    const prefix = rawLine[0]
+    if (prefix !== ' ' && prefix !== '-' && prefix !== '+') continue
+    const body = rawLine.slice(1)
+    hunkHasLines = true
+
+    const isWorkflow = GATE_WORKFLOW_FILE_RE.test(currentFile)
+    if (isWorkflow && prefix !== '-') {
+      const trimmed = body.trim()
+      const indent = body.length - body.trimStart().length
+      if (permIndent >= 0 && trimmed !== '' && !trimmed.startsWith('#') && indent <= permIndent) {
+        permIndent = -1
+      }
+      if (/^permissions\s*:/i.test(trimmed)) {
+        permIndent = indent
+      }
+    }
+
+    const isTest = GATE_TEST_FILE_RE.test(currentFile)
+    if (prefix === '-') {
+      if (isTest && !isCommentLine(body) && GATE_ASSERTION_RE.test(body)) {
+        hunkRemovedAssertions += 1
+      }
+      continue
+    }
+
+    if (prefix === '+') {
+      if (isTest && !isCommentLine(body)) {
+        if (GATE_ASSERTION_RE.test(body)) hunkAddedAssertions += 1
+        if (GATE_SKIP_RE.test(body)) {
+          findings.push({ type: 'test-skip-or-only', file: currentFile, detail: body.trim().slice(0, 120) })
+        }
+      }
+      if (isWorkflow && !isCommentLine(body)) {
+        if (/\bcontinue-on-error\s*:\s*true\b/i.test(body)) {
+          findings.push({ type: 'ci-continue-on-error', file: currentFile, detail: body.trim().slice(0, 120) })
+        }
+        if (/^\s*(?:-\s*)?if\s*:\s*(?:false\b|\$\{\{\s*false\s*\}\})/i.test(body)) {
+          findings.push({ type: 'ci-disabled-step', file: currentFile, detail: body.trim().slice(0, 120) })
+        }
+        if (/\bpermissions\s*:\s*write-all\b/i.test(body)
+          || ((/\bpermissions\s*:/i.test(body) || permIndent >= 0) && GATE_CI_PERM_WRITE_RE.test(body))) {
+          findings.push({ type: 'ci-loosened-permissions', file: currentFile, detail: body.trim().slice(0, 120) })
+        }
+      }
+      if (GATE_SHELL_OR_SCRIPT_RE.test(currentFile) && !isCommentLine(body) && GATE_SHELL_BYPASS_RE.test(body)) {
+        findings.push({ type: 'shell-or-true', file: currentFile, detail: body.trim().slice(0, 120) })
+      } else if (!isCommentLine(body) && /\b(?:exec|spawn|execSync|execFileSync|run)\w*\s*\([^)\n]*\|\|\s*true\b/.test(body)) {
+        findings.push({ type: 'shell-or-true', file: currentFile, detail: body.trim().slice(0, 120) })
+      }
+    }
+  }
+  flushHunk()
+  return findings
 }
 
 async function getChangedFiles(cwd, baseRef) {
@@ -358,7 +470,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
       hasAgents: profile.hasAgents,
       quickTest: profile.quickTest ?? null,
       fullTest: profile.fullTest ?? null,
+      smokeVerify: profile.smokeVerify ?? null,
       mergeGate: profile.mergeGate ?? null,
+      archRules: profile.archRules,
       highRisk: profile.highRisk,
       doNotEdit: profile.doNotEdit,
       mergeAuthority: profile.mergeAuthority,
@@ -477,9 +591,10 @@ async function handleStart(opts, roots) {
   const implementerId = opts.implementer
     ?? (state.gitIdentity.name ? `${state.gitIdentity.name}${state.gitIdentity.email ? ` <${state.gitIdentity.email}>` : ''}` : 'implementer')
 
+  await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
+
   // 第 3 档：外部 PR 只读隔离审阅
   if (externalPr) {
-    await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
     const reviewRel = `.worktrees/review-pr-${externalPr}`
     const reviewAbs = join(roots.mainRoot, reviewRel)
     let targetSha = opts['pr-ref'] ?? null
@@ -586,7 +701,6 @@ async function handleStart(opts, roots) {
   }
 
   // 第 2 档：Worktree 隔离 + 秒挂共享依赖 + 预分配 review 复用槽
-  await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
   const implRel = `.worktrees/impl-${taskId}`
   const reviewRel = `.worktrees/review-${taskId}`
   const implAbs = join(roots.mainRoot, implRel)
@@ -906,15 +1020,36 @@ async function handleVerify(opts, roots) {
 
   const profile = parseAgentsProfile(implRoot)
   const mode = opts.mode ?? 'quick'
+  if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
+    process.stderr.write(`INVALID_VERIFY_MODE: --mode 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
+    return { exitCode: 1 }
+  }
+  let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
+  if (rawTarget !== null) {
+    if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
+      process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
+      return { exitCode: 1 }
+    }
+    rawTarget = posixPath(rawTarget)
+  }
+
   let cmd = opts.cmd
   if (!cmd) {
     if (mode === 'gate') cmd = profile.mergeGate ?? profile.fullTest ?? profile.quickTest
     else if (mode === 'full') cmd = profile.fullTest ?? profile.quickTest
+    else if (mode === 'smoke') cmd = profile.smokeVerify
     else cmd = profile.quickTest
   }
   if (!cmd) {
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入。\n`)
     return { exitCode: 1 }
+  }
+  if (cmd.includes('{target}')) {
+    if (!rawTarget) {
+      process.stderr.write(`MISSING_TARGET_ARG: 验证命令 "${cmd}" 含 {target} 占位符，请追加 --target <file> 指定单测文件或用例。\n`)
+      return { exitCode: 1 }
+    }
+    cmd = cmd.replace(/\{target\}/g, rawTarget)
   }
 
   const runRes = await execShellCommand(cmd, implRoot)
@@ -926,6 +1061,8 @@ async function handleVerify(opts, roots) {
 
   ledger.verifiedHead = runRes.ok ? currentHead : null
   ledger.verifiedCmd = cmd
+  ledger.verifiedMode = mode
+  ledger.verifiedTarget = rawTarget
   ledger.verifiedDirtyHash = sha256Text(stRes.stdout)
   ledger.lastVerifyExitCode = runRes.code
   ledger.status = runRes.ok ? 'verified' : 'verify-failed'
@@ -935,6 +1072,7 @@ async function handleVerify(opts, roots) {
     process.stdout.write(`${JSON.stringify({
       taskId,
       mode,
+      target: rawTarget,
       cmd,
       ok: runRes.ok,
       exitCode: runRes.code,
@@ -945,7 +1083,7 @@ async function handleVerify(opts, roots) {
   } else {
     if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
     if (runRes.stderr) process.stderr.write(`${runRes.stderr}\n`)
-    process.stdout.write(`verify (${mode}): cmd="${cmd}" exit=${runRes.code} HEAD=${currentHead ?? 'none'}\n`)
+    process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${runRes.code} HEAD=${currentHead ?? 'none'}\n`)
     if (runRes.ok) {
       printNextStep([
         `证据已绑定到 HEAD ${currentHead?.slice(0, 7)}，可提交评审：node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}`,
@@ -1144,7 +1282,7 @@ async function handleRework(opts, roots) {
   const profile = parseAgentsProfile(implRoot)
   const changed = await getChangedFiles(implRoot, ledger.baseSha)
 
-  const forbiddenTouched = changed.filter((f) => profile.doNotEdit.some((pat) => matchPattern(f, pat)))
+  const forbiddenTouched = changed.filter((f) => profile.doNotEdit.some((pat) => matchGlob(f, pat)))
   const rebutsInput = Array.isArray(opts.rebut) ? opts.rebut : (opts.rebut ? [opts.rebut] : [])
   const addedRebuts = []
 
@@ -1210,10 +1348,37 @@ async function handleMerge(opts, roots) {
 
   const profile = parseAgentsProfile(roots.mainRoot)
   const changed = await getChangedFiles(implRoot, ledger.baseSha)
-  const highRiskHits = changed.filter((f) => profile.highRisk.some((pat) => matchPattern(f, pat)))
+  const highRiskHits = changed.filter((f) => profile.highRisk.some((pat) => matchGlob(f, pat)))
   const rounds = ledger.rounds ?? []
   const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
   const effectiveReviewer = lastRound?.reviewerId ?? ledger.reviewerId
+
+  const gateFindings = await detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch)
+  if (gateFindings.length > 0 && !opts['human-approved']) {
+    const doorInfo = classifyDoorType({
+      changedFiles: changed,
+      highRisk: profile.highRisk,
+      gateWeakened: true,
+    })
+    const summary = gateFindings.map((f) => `[${f.type}] ${f.file}: ${f.detail}`).join('; ')
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_GATE_WEAKENING',
+        doorType: doorInfo.doorType,
+        findings: gateFindings,
+        nextStep: `请向人类报告上述门禁弱化发现，获准后再附 --human-approved 重试 merge`,
+      }, null, 2)}\n`)
+    } else {
+      process.stderr.write(`BLOCKED_GATE_WEAKENING (one-way door): 检测到门禁弱化改动，须人类确认：${summary}\n`)
+      printNextStep([
+        '请向人类说明上述每一处门禁弱化理由与风险，取得明确同意后重新运行：',
+        `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved`,
+      ])
+    }
+    return { exitCode: EXIT_ACTION_REQUIRED }
+  }
 
   if (highRiskHits.length > 0 || rounds.length > 0 || ledger.caseType >= 3) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
@@ -1514,10 +1679,10 @@ function printHelp() {
     '  start     --task <id> [--slug <slug>] [--case <1..5>] [--parallel] [--external-pr <M>] [--clone-choice <fork|standalone|local>] [--json]',
     '  claim     --task <id> [--issue <N>] [--agent <id>] [--json]',
     '  finalize  --task <id> [--note <text>] [--json]',
-    '  verify    --task <id> [--mode quick|full|gate] [--cmd <custom>] [--json]',
+    '  verify    --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--json]',
     '  submit    --task <id> [--draft] [--rework] [--json]',
     '  rework    --task <id> [--rebut "<findingId>: <reason>"] [--json]',
-    '  merge     --task <id> [--method merge|squash|rebase] [--json]',
+    '  merge     --task <id> [--method merge|squash|rebase] [--human-approved] [--json]',
     '  cleanup   --task <id> [--confirm] [--keep-branch] [--json]',
   ].join('\n') + '\n')
 }

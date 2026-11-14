@@ -1,10 +1,10 @@
 ---
 name: dev-govern
 description: |
-  代码体检、清技术债、安全与规范审计、重构治理、同步 AGENTS/TDD、reconcile、规则下沉、园艺聚类与 sample 事后抽检。
+  代码体检、清技术债、安全与规范审计、重构治理、同步 AGENTS/TDD、reconcile、规则下沉、园艺聚类、sample 事后抽检与跨多版本发版筹备（release-prep）。
   触发词：代码体检、清技术债、审计、重构治理、同步 AGENTS/TDD、reconcile、仓库巡检、
   清理过期 worktree、检查 deadcode、安全扫描、治理计划、批量提 Issue、技术债盘点、
-  规则下沉、园艺聚类、sample 抽检、arch-rules 检查。
+  规则下沉、园艺聚类、sample 抽检、arch-rules 检查、release-prep、发版筹备、汇总更新日志。
 ---
 
 # dev-govern
@@ -29,7 +29,19 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs --issues [--apply-issues
 node .agents/skills/dev-govern/scripts/govern-audit.mjs record --pattern <key> --message "<text>" [--module <dir>] [--file <path>]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs cluster [--signals-only]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs sample [--commits 30]
+
+# 4. 跨多版本人类可读发版筹备（支持跳跃自定义号如 --version 3.0.0）
+node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <tag|rev>] [--to HEAD] [--version <ver>] [--json]
 ```
+
+## 跨多版本发版筹备（release-prep）
+
+只读采集并净化任意发版区间的变更事实，适配发版说明目录或 `CHANGELOG.md`（支持自由定制章节、不留空节）：
+
+- **区间与自定义定号**：自动探测 `--to` 之前最新可达标签（无标签仓库则追溯至根提交覆盖全史；传 `--from` 时严格尊重基线），继承现有标签 `v` 前缀，支持 `--version` 跳跃升级（如 `v1.0.0` 直跳 `3.0.0` / `v4.0.0`）。
+- **权威版本与下限预警**：汇总 `SKILL.md`、`package.json`、`pyproject.toml`、`Cargo.toml`、`manifest.json` 版本源，并提取 `engines` / `requires-python` / `rust-version` / `go` / `minAppVersion` 等最低运行版本变更写入 `breakingSignals`。
+- **双源降噪与防漏交叉核对**：过滤纯测试/夹具、CI 内部、`.worktrees`、纯错字/排版及未触及公开入口的内部重构提交；清洗去掉内部编号进入 `userFacingCandidates`，同步采集合规规格（`implemented`）与归档成果；标出 `publicSurfaceTouched` 及仅落在含糊提交里的 `unaccountedPublicFiles`。
+- **发版纪律**：只写最终用户可感知变化与升级步骤，绝不照抄内部提交流水账；未经人明令严禁打标签或改写已发历史。
 
 ## 工程契约巡检（reconcile）
 
@@ -62,6 +74,6 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 
 ## 执行与安全护栏
 
-- **只读先行与不擅自删目录**：`--audit-only`、`--plan-only`、`reconcile`、`cluster`、`sample` 与不带 `--apply-issues` 的 `--issues` 均为只读；清理任何 `.worktrees/`（尤其 `no_own_commits`）前必须列清单请人确认并先解绑依赖链接。
+- **只读先行与不擅自删目录**：`--audit-only`、`--plan-only`、`reconcile`、`cluster`、`sample`、`release-prep` 与不带 `--apply-issues` 的 `--issues` 均为只读；清理任何 `.worktrees/`（尤其 `no_own_commits`）前必须列清单请人确认并先解绑依赖链接。
 - **Issue UTF-8 安全提交**：带 `--apply-issues` 时一律写系统临时目录 UTF-8 文件配合 `gh issue create --body-file` 提交并删除临时文件。
 - **验证闭环**：修复完成后跑通 `AGENTS.md` 验证命令，再使用 `dev-review`（`review-pack.mjs --local`）收尾确认。

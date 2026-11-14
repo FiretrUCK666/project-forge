@@ -348,6 +348,38 @@ const INJECTIONS = [
     to: "    'has-custom-skills': false,",
     expect: 'AGENTS.md 未包含项目自有扩展技能路由块',
   },
+  {
+    id: 'I33',
+    what: '破坏 survey.mjs computeArtifactPlan 对已有 README 的 preserve 保护判据',
+    file: 'scripts/survey.mjs',
+    from: "    ? { id: 'readme', artifact: 'README.md', status: `已存在（${(docs.readmes ?? [docs.readme]).join('、')}）`, action: 'preserve', detail: '保留原有排版、文风与结构，严禁套模板重写，仅在命令或入口失真时做最小校准' }",
+    to: "    ? { id: 'readme', artifact: 'README.md', status: '缺失', action: 'create', detail: '覆盖重写' }",
+    expect: 'computeArtifactPlan 未将已有 README 标为 preserve',
+  },
+  {
+    id: 'I34',
+    what: '关闭 preflight.mjs isProductLayerPath 对 assets/readme/*.svg 的白名单放行',
+    file: 'scripts/dev/preflight.mjs',
+    from: '  if (/^assets\\/readme\\/[a-z0-9_-]+\\.svg$/i.test(p)) return true',
+    to: '  if (/^assets\\/readme\\/[a-z0-9_-]+\\.svg$/i.test(p)) return false',
+    expect: 'isProductLayerPath 拒绝了 assets/readme',
+  },
+  {
+    id: 'I35',
+    what: '关闭 release-prep-lib.mjs 对含糊修改公开入口（unaccountedPublicFiles）的拦截提示',
+    file: 'kit/skills/dev-govern/scripts/release-prep-lib.mjs',
+    from: '    if (!hasClearUserCommit && !mentionedInSpecOrTodo && !hasMinRuntimeDiff) {',
+    to: '    if (false && !hasClearUserCommit && !mentionedInSpecOrTodo && !hasMinRuntimeDiff) {',
+    expect: 'unaccountedPublicFiles 未检出含糊公开入口',
+  },
+  {
+    id: 'I36',
+    what: '关闭 release-prep-lib.mjs 对纯测试/配置噪音提交的过滤',
+    file: 'kit/skills/dev-govern/scripts/release-prep-lib.mjs',
+    from: "  if (allInternalFiles) {\n    return { filtered: true, reason: 'tests-ci-or-worktree-only' }\n  }",
+    to: "  if (false && allInternalFiles) {\n    return { filtered: true, reason: 'tests-ci-or-worktree-only' }\n  }",
+    expect: 'release-prep 未过滤纯测试或配置噪音提交',
+  },
 ]
 
 function runFixtures(expect = '') {

@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realp
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, posix, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { handleReleasePrep } from './release-prep-lib.mjs'
 
 const AGENTS_WARN_BYTES = 24576
 const AGENTS_MAX_BYTES = 30720
@@ -2264,7 +2265,7 @@ function formatTextReport(result) {
 
 function printHelp() {
   process.stdout.write([
-    '用法：node govern-audit.mjs [reconcile|audit|record|cluster|sample] [targetDir] [options]',
+    '用法：node govern-audit.mjs [reconcile|audit|record|cluster|sample|release-prep] [targetDir] [options]',
     '',
     'Modes & Subcommands:',
     '  --audit-only                 Read-only audit outputting findings + [GAP_SCAN] (default)',
@@ -2275,6 +2276,7 @@ function printHelp() {
     '  record                       Append governance signal into <gitCommonDir>/project-forge-govern/signals.jsonl',
     '  cluster                      Group signals & findings by module+pattern, flagging >= 2 repeat rule-sink candidates',
     '  sample [--commits 30]        Inspect git Revert rate, 48h same-file rework hotspots, and rule-sinking actions',
+    '  release-prep                 Collect noise-filtered multi-version release-prep brief and public-surface checks',
     '',
     'Options:',
     '  --dir <path>                 Repository directory (defaults to cwd or positional targetDir)',
@@ -2283,6 +2285,9 @@ function printHelp() {
     '  --cluster                    Attach module+pattern deduplicated clusters to audit output',
     '  --signals-only               For `cluster`, read signals.jsonl only without running full live audit',
     '  --commits <N>                Commit window size for `sample` (default: 30)',
+    '  --from <tag|rev>             Base tag/commit for `release-prep` (default: latest reachable tag before --to, or root)',
+    '  --to <rev>                   Target revision for `release-prep` (default: HEAD)',
+    '  --version <ver>              Target release version override for `release-prep` (e.g. 3.0.0 or v4.0.0)',
     '  --loop                       Include/track multi-round governance convergence state',
     '  --issues                     Generate UTF-8 GitHub Issue payloads (dry-run by default)',
     '  --apply-issues               Actually invoke `gh issue create --body-file` (requires --issues and gh auth)',
@@ -2308,6 +2313,9 @@ function parseArgs(argv) {
     cluster: false,
     signalsOnly: false,
     commits: 30,
+    from: undefined,
+    to: 'HEAD',
+    version: undefined,
     scope: '',
     categories: null,
     loop: false,
@@ -2334,7 +2342,7 @@ function parseArgs(argv) {
 
   let i = 0
   if (argv[0] && !argv[0].startsWith('-')) {
-    if (['reconcile', 'audit', 'record', 'cluster', 'sample'].includes(argv[0])) {
+    if (['reconcile', 'audit', 'record', 'cluster', 'sample', 'release-prep'].includes(argv[0])) {
       opts.subcommand = argv[0]
       if (argv[0] === 'reconcile') opts.reconcile = true
       if (argv[0] === 'audit') opts.auditOnly = true
@@ -2361,6 +2369,9 @@ function parseArgs(argv) {
     else if (a === '--dir' || a === '--repo') { opts.dir = nextVal(i, a); opts.dirSet = true; i += 1 }
     else if (a === '--scope') { opts.scope = nextVal(i, a); i += 1 }
     else if (a === '--commits') { opts.commits = Number(nextVal(i, a)); i += 1 }
+    else if (a === '--from') { opts.from = nextVal(i, a); i += 1 }
+    else if (a === '--to') { opts.to = nextVal(i, a); i += 1 }
+    else if (a === '--version') { opts.version = nextVal(i, a); i += 1 }
     else if (a === '--category') { opts.category = nextVal(i, a); i += 1 }
     else if (a === '--pattern' || a === '--rule') { opts.pattern = nextVal(i, a); i += 1 }
     else if (a === '--module') { opts.module = nextVal(i, a); i += 1 }
@@ -2413,6 +2424,9 @@ function main() {
   }
   if (opts.subcommand === 'sample') {
     return handleSampleCommits(repoRoot, isGit, opts)
+  }
+  if (opts.subcommand === 'release-prep') {
+    return handleReleasePrep(repoRoot, isGit, opts)
   }
 
   let scopeRel = ''

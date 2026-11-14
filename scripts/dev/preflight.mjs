@@ -976,6 +976,7 @@ function checkPlatformLock() {
     ...walk(join(ROOT, 'templates'), () => true),
     ...walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs') && !rel(f).startsWith('scripts/dev/')),
     ...walk(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f)),
+    ...walk(join(ROOT, 'assets'), (f) => /\.svg$/i.test(f)),
   ]
   for (const file of targets) {
     if (!existsSync(file)) continue
@@ -1064,6 +1065,7 @@ function checkKitSuite() {
   const kitAndEntry = [
     join(ROOT, 'SKILL.md'),
     ...walk(join(ROOT, 'kit'), (f) => /\.(?:md|mjs)$/i.test(f)),
+    ...walk(join(ROOT, 'assets'), (f) => /\.svg$/i.test(f)),
   ]
   for (const file of kitAndEntry) {
     if (!existsSync(file)) continue
@@ -1131,12 +1133,31 @@ function checkLinks() {
     if (!existsSync(doc)) continue
     const name = rel(doc)
     const text = readText(doc)
+    if (/\bexplorationStrategy\.mode\b/.test(text)) {
+      fail(`${name} 仍使用过期字段 explorationStrategy.mode，必须改为 explorationStrategy.tier`)
+    }
     for (const m of text.matchAll(PATH_RE)) {
       const target = m[1]
       if (target.includes('*')) continue
       seen.add(target)
       if (!existsSync(join(ROOT, target))) {
         fail(`${name} 引用了不存在的路径：${target}`)
+      }
+    }
+  }
+
+  for (const readmeName of ['README.md', 'README.en.md']) {
+    const p = join(ROOT, readmeName)
+    if (!existsSync(p)) continue
+    const text = readText(p)
+    for (const m of text.matchAll(/\b(assets\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b/g)) {
+      const target = m[1]
+      if (!existsSync(join(ROOT, target))) {
+        fail(`${readmeName} 引用的视觉资源不存在：${target}`)
+        continue
+      }
+      if (isRepoOnlyPath(target) || !isProductLayerPath(target)) {
+        fail(`${readmeName} 引用的视觉资源未纳入产品层用户包：${target}`)
       }
     }
   }
@@ -1619,8 +1640,21 @@ function checkSingleSources() {
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u
 
+function checkSvgAssetSafety(name, raw) {
+  if (!/<svg\b/i.test(raw) || !/<\/svg>/i.test(raw)) fail(`${name} 缺少完整的 <svg>...</svg> 根结构`)
+  if (!/\bviewBox\s*=\s*["'][^"']+["']/i.test(raw)) fail(`${name} 缺少 viewBox 属性`)
+  if (!/<title\b[^>]*>[\s\S]*?<\/title>/i.test(raw)) fail(`${name} 缺少 <title> 无障碍标题`)
+  if (/<script\b|<foreignObject\b|<image\b/i.test(raw)) {
+    fail(`${name} 包含禁止的 SVG 元素（script / foreignObject / image）`)
+  }
+  const stripped = raw.replace(/\bxmlns(?::[a-z0-9_-]+)?\s*=\s*["']http:\/\/www\.w3\.org\/[^"']*["']/gi, '')
+  if (/https?:\/\//i.test(stripped)) {
+    fail(`${name} 包含非标准外部 http(s) 资源引用——SVG 卡片必须 100% 自包含`)
+  }
+}
+
 function checkHygiene() {
-  const files = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml|json|txt)$/i.test(f))
+  const files = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml|json|txt|svg)$/i.test(f))
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
   for (const file of files) {
@@ -1629,6 +1663,7 @@ function checkHygiene() {
     if (raw.startsWith('\uFEFF')) fail(`${name} 有 UTF-8 BOM`)
     if (EMOJI_RE.test(raw)) fail(`${name} 有 emoji 字符`)
     if (homeRe && homeRe.test(raw)) fail(`${name} 里有本机绝对路径`)
+    if (/^assets\/readme\/.+\.svg$/i.test(name)) checkSvgAssetSafety(name, raw)
   }
 }
 
@@ -1843,7 +1878,7 @@ function checkPackage(listPath) {
   // 产品层：拿到包的人需要的只有这几处。其余一律要问「它凭什么在包里」。
   const unclaimed = entries.filter((e) => !isProductLayerPath(e))
   if (unclaimed.length > 0) {
-    for (const e of unclaimed) process.stderr.write(`FAIL  ${e} 不在产品层（SKILL.md / references/ / templates/ / scripts/ / kit/），也没被排除——它凭什么在用户包里？\n`)
+    for (const e of unclaimed) process.stderr.write(`FAIL  ${e} 不在产品层（SKILL.md / references/ / templates/ / scripts/ / kit/ / assets/readme/*.svg），也没被排除——它凭什么在用户包里？\n`)
     process.stderr.write(`\n用户包核对未通过：${unclaimed.length} 个条目没有归属。要发就归进产品层，不发就写进 .gitattributes 的 export-ignore。\n`)
     return 1
   }
@@ -1871,10 +1906,11 @@ function checkPackage(listPath) {
  * 判据是**位置**，不是逐文件列表：新加一个文件只要放进这几处，就自动算产品层；
  * 放进别处，就会被下面那条「没有归属」的判据拦下。清单会漏，位置不会。
  */
-function isProductLayerPath(rel) {
+export function isProductLayerPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (p === 'SKILL.md' || p === 'README.md' || p === 'LICENSE') return true
   if (/^README\.[a-z0-9_-]+\.md$/i.test(p)) return true
+  if (/^assets\/readme\/[a-z0-9_-]+\.svg$/i.test(p)) return true
   return /^(?:references|templates|scripts|kit)\//.test(p)
 }
 

@@ -10,7 +10,7 @@
 
 | 平面 | 目录与文件 | 职责与分发边界 |
 | --- | --- | --- |
-| 产品层（进用户包） | `SKILL.md`、`references/`、`templates/`、`scripts/`（顶层与 `lib/`）、`kit/skills/`、`README*.md`、`LICENSE` | 必须对任意外部项目成立；严禁包含特定 AI 宿主路径、非 GitHub 托管平台名称或本仓库内部开发路径 |
+| 产品层（进用户包） | `SKILL.md`、`references/`、`templates/`、`scripts/`（顶层与 `lib/`）、`kit/skills/`、`assets/readme/*.svg`、`README*.md`、`LICENSE` | 必须对任意外部项目成立；严禁包含特定 AI 宿主路径、非 GitHub 托管平台名称或本仓库内部开发路径 |
 | 自用层（`export-ignore` 排除） | `AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`.github/`、`.gitattributes`、`.gitignore`、`scripts/dev/`、`docs/`、`.agents/` | 只服务本仓库自身治理、测试门禁与研发留痕；通过 `.gitattributes` 与 `protocol.mjs` 双处对齐，在导出用户包时整体剔除 |
 
 双层同构体现为「工具即样板」：本仓根目录的 `.agents/skills/` 由 `kit/skills/` 通过 `scripts/equip.mjs .` 单向同步生成；根目录的 `AGENTS.md` 由 `templates/agents-project.md` 通过 `scripts/compose-agents.mjs .` 渲染并维护，且始终受交付门禁核对。
@@ -24,7 +24,7 @@
    - `dev-plan`（`kit/skills/dev-plan/scripts/doc-plan.mjs`）：五档分流裁决（Case 1 至 Case 5）、`doorType` 与分级内审级别判定、模板初始化、规划自净化 `audit`、独立 `critique-pass` 防篡改校验及审批流转。
    - `dev-flow`（`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/worktree-deps.mjs`）：任务全链路状态机、Worktree 隔离与共享依赖零拷贝挂载、`verify --mode smoke --target` 运行实证、PR 合并弱化门禁检测（退出码 `4` 阻断）与四态安全清理。
    - `dev-review`（`kit/skills/dev-review/scripts/review-pack.mjs`）：不可信外部 PR 投毒预检（`--untrusted-scan`）、`behavioralGate` + `structuralGate` 双门评估（含 `smoke-verify` 实证、墓碑/借口注释、超大文件与 `arch-rules` 检查）、`doorAssessment` 评估与六锁防死循环审查收口。
-   - `dev-govern`（`kit/skills/dev-govern/scripts/govern-audit.mjs`）：代码/文档/卫生 8 项深化审计（Git 演进温差、围栏感知死链、死代码块与借口/墓碑注释、神文件、`arch-rules`、孤儿测试、4 态 Worktree 判别）、修复计划生成、`record`/`cluster`/`sample` 规则下沉抽检与 `reconcile` 巡检对齐。
+   - `dev-govern`（`kit/skills/dev-govern/scripts/govern-audit.mjs`、`kit/skills/dev-govern/scripts/release-prep-lib.mjs`）：代码/文档/卫生 8 项深化审计（Git 演进温差、围栏感知死链、死代码块与借口/墓碑注释、神文件、`arch-rules`、孤儿测试、4 态 Worktree 判别）、修复计划生成、`record`/`cluster`/`sample` 规则下沉抽检、`reconcile` 巡检对齐，以及 `release-prep` 跨多版本人类可读发版筹备采集（`--from`/`--to`/`--version`/`--json`，支持跳版本、版本源与最低运行环境变化探测、内部噪音提交过滤、已实现规格与归档任务成果汇总、`unaccountedPublicFiles` 防漏交叉核对）。
    - 共享内核 `kit/skills/lib/shared.mjs` 与 `kit/skills/**` 严格遵守 **100% 目录自包含铁律**：副本复制到任意外部项目的 `.agents/skills/` 后必须独立运行，严禁 `import` `kit/skills/` 之外的任何仓库模块（包括 `scripts/dev/`）；且每个内置 Skill 的 `SKILL.md` 严格控制在 `KIT_SKILL_MAX_LINES`（180 行）以内。
 2. **SHA256 三态账本（`.agents/skills/.pf-manifest.json`）**：
    - 账本结构记录 `schemaVersion`、`forgeVersion`、`installedAt`、`files["<relPath>"].sha256` 与 `agentsRegions["<regionId>"].sha256`。
@@ -34,7 +34,7 @@
      - 旧账本存在但新版 `kit/skills/` 已删除该文件（退役文件）：若磁盘内容哈希仍与旧账本一致，物理删除文件并清理账本记录实现自净化；若用户曾改过则保留并标记为 `orphaned-modified`。
    - `node scripts/equip.mjs <target> --check` 执行零写入字节级一致性校验，不一致即以非零退出码阻断。
 3. **空白目录起步与写前增量快照（`--bootstrap-empty` / `scripts/backup.mjs`）**：
-   - 针对 `empty` 零文件目录，按指定语言（`node`、`python`、`go`、`rust`、`docs`）生成最小可运行、内置可测试骨架与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map` 骨架），随后接入 `.agents/skills/` 装配，全程零第三方依赖。
+   - 针对 `empty` 零文件目录，`starterTemplates(lang, rawName, description)` 与 `bootstrapEmpty` 为全部 5 种语言栈（`node`、`python`、`go`、`rust`、`docs`）统一生成 `.gitattributes`、`.gitignore`、真实初始 `README.md`、最小可运行源码与测试，以及填实 `Feature Map` 与 `arch-rules: none` 的初始 `docs/TDD.md`（零 `<待补充>` 占位且存在即跳过不覆盖），随后接入 `.agents/skills/` 装配，全程零第三方依赖。
    - `scripts/backup.mjs` 基于纯 `node:zlib` 与 POSIX USTAR/PAX tar 打包实现跨平台零外部命令写前快照（`create`/`list`/`restore`/`ensurePreWriteBackup`）。`createBackup` 为工作区文件列表计算确定性 `treeSha256` 并记录在 `index.json`，未传 `--force` 且与最新快照完全一致时直接返回 `skippedReason: 'unchanged-since-latest'`（避免 `S3` 第 0 步整仓快照与后续 `equip`/`compose-agents` 重复占满 5 份保留窗口）；其余变更写入仓外存储（`PF_BACKUP_DIR/<slug>-<hash8>/` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>/`），自动跳过 `.git`/`.worktrees`/`node_modules`/构建目录与 `>20MB` 单文件，`restore` 会清理快照后新增的无主文件；零变动与 `--no-backup` 不写入冗余包。
 4. **自有扩展技能共存（`has-custom-skills` / `CUSTOM_SKILLS_BLOCK`）**：
    - `survey.mjs` 扫描 `.agents/skills/*` 与 `.claude/skills/*` 并按 `KIT_SKILLS` 拆分为 `kit.managedSkills` 与 `kit.customSkills`（含从 `SKILL.md` frontmatter `description` 提取的单行摘要 `summary`）；`compose-agents.mjs` 将自有技能动态渲染进 `AGENTS.md` 意图路由的「项目自有技能」条件块，保证与五套托管 Skill 零 `--check` 冲突共存且在升级与交棒时原样保留。
@@ -47,9 +47,9 @@
 | --- | --- | --- |
 | `scripts/lib/protocol.mjs` | 标记语法、预算常数与包边界 | `AGENTS_MAX_BYTES`（30720）、`AGENTS_WARN_BYTES`（24576）、`KIT_SKILL_MAX_LINES`（180）、`KIT_SKILLS`、`FORBIDDEN_PLATFORM_RE`、`PF_MANIFEST_REL`、`WORKTREES_STATE_REL`、`REPO_ONLY_DIRS`、`REPO_ONLY_FILES`、`FULL_READ_REFS`、`apiTarget`、`parseBeginMark` |
 | `scripts/lib/template.mjs` | 模板条件求值与变量替换 | `evaluateConditions`、`renderVars`、`renderTemplate`、`residualConditionMarkers`；要求目标 `AGENTS.md` 渲染瞬间完成求值，零残留占位符或条件标记 |
-| `scripts/lib/render.mjs` | 勘察报告排版与阅读导航 | `MATURITY_TEXT`、`toMarkdown`、`computeNavigation`（含非 GitHub 纯本地治理提示） |
-| `scripts/survey.mjs` | 只读项目勘察、重入校准与五态身份评估 | 只读扫描、`kit.customSkills`、`facts.reentry` 漂移检测、`computeExplorationStrategy`（`none`/`single-pass`/`parallel-subagents`）、`--probe-auth` 双轨探测 |
-| `scripts/equip.mjs` | 内置套件三态账本装配与空项目起步 | `checkEquip`、`equip`、`bootstrapEmpty`、写前调 `backup.mjs` |
+| `scripts/lib/render.mjs` | 勘察报告排版与阅读导航 | `MATURITY_TEXT`、`toMarkdown`、`computeNavigation`（纯渲染 `facts.artifactPlan` 10 项处置表与非 GitHub 纯本地治理提示） |
+| `scripts/survey.mjs` | 只读项目勘察、重入校准与五态身份评估 | 只读扫描、优先探测 `docs/todo`、`kit.customSkills`、`facts.reentry` 漂移检测、`computeExplorationStrategy`（`tier`: `none`/`single-pass`/`parallel-subagents`）、`computeArtifactPlan`（10 项确定性处置计划）、`--probe-auth` 双轨探测 |
+| `scripts/equip.mjs` | 内置套件三态账本装配与空项目起步 | `checkEquip`、`equip`、`starterTemplates`、`bootstrapEmpty`、写前调 `backup.mjs` |
 | `scripts/backup.mjs` | 纯内置 `.tar.gz` 写前快照引擎 | `createBackup`、`listBackups`、`restoreBackup`、`ensurePreWriteBackup`、`treeSha256` 去重与 `--force` |
 | `scripts/compose-agents.mjs` | `AGENTS.md` 生成、刷新、保护与剥离 | 30KB/24KB 门禁、`agentsRegions` 防覆盖、`has-custom-skills`/`CUSTOM_SKILLS_BLOCK`、调 `backup.mjs` |
 | `scripts/review.mjs` | 交付体检与成熟度结论报告 | 成熟度/缺失项判定、契约回查（`claim.branch`/`claim.path`/`claim.script`）、`docs.tdd-stale-paths` 与建议指路 |
@@ -75,7 +75,8 @@ arch-rules: kit/** -> scripts/dev/**, scripts/*.mjs -> scripts/dev/**, scripts/l
 | 写前增量快照与回滚 | `scripts/backup.mjs` | `node scripts/backup.mjs list .` |
 | 契约生成与预算门禁 | `scripts/compose-agents.mjs` | `node scripts/compose-agents.mjs . --check` |
 | 交付体检与交棒扫描 | `scripts/review.mjs`、`scripts/handoff.mjs` | `node scripts/review.mjs .` |
-| 探索、规划、流转、审查、治理套件 | `.agents/skills/dev-*/scripts/*.mjs` | `scripts/dev/preflight.mjs`、`scripts/dev/fixtures.mjs` |
+| 探索、规划、流转、审查、治理套件 | `.agents/skills/dev-*/scripts/*.mjs`、`kit/skills/dev-govern/scripts/release-prep-lib.mjs` | `scripts/dev/preflight.mjs`、`scripts/dev/fixtures.mjs` |
+| 双语门面与蓝图视觉卡片 | `README.md`、`README.en.md`、`assets/readme/hero.svg`、`assets/readme/workflow.svg`、`assets/readme/architecture.svg` | `scripts/sync-toc.mjs`、`scripts/dev/preflight.mjs` |
 
 ## 双轴五态身份判定引擎
 

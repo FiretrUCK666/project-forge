@@ -3610,6 +3610,299 @@ cases.push(['survey.mjs + compose-agents.mjs Wave 3：自有技能共存路由�
   }
 }])
 
+cases.push(['equip.mjs + survey.mjs Wave 4 (C19)：五语言空目录闭环、computeArtifactPlan 与 docs/todo 优先探测', async () => {
+  const { toMarkdown } = await import('../lib/render.mjs')
+  const { computeArtifactPlan } = await import('../survey.mjs')
+
+  const langs = [
+    { lang: 'node', name: 'demo-node', expected: ['package.json', 'src/index.mjs', 'test/smoke.test.mjs'], entry: 'src/index.mjs' },
+    { lang: 'python', name: 'demo-py', expected: ['pyproject.toml', 'src/demo_py/__init__.py', 'tests/test_smoke.py'], entry: 'src/demo_py/__init__.py' },
+    { lang: 'go', name: 'demo-go', expected: ['go.mod', 'hello.go', 'hello_test.go'], entry: 'hello.go' },
+    { lang: 'rust', name: 'demo-rust', expected: ['Cargo.toml', 'src/lib.rs'], entry: 'src/lib.rs' },
+    { lang: 'docs', name: 'demo-docs', expected: ['docs/guide.md'], entry: 'README.md' },
+  ]
+  const dirs = []
+  try {
+    for (const item of langs) {
+      const dir = tmpProject({})
+      dirs.push(dir)
+      const res = runAbs('scripts/equip.mjs', [dir, '--bootstrap-empty', '--lang', item.lang, '--name', item.name, '--description', `Desc ${item.lang}`])
+      if (res.status !== 0) return `bootstrap-empty(${item.lang}) 失败：${res.stderr}`
+      for (const reqRel of ['.gitattributes', '.gitignore', 'README.md', 'docs/TDD.md', ...item.expected]) {
+        if (!existsSync(join(dir, reqRel))) return `bootstrap-empty(${item.lang}) 缺文件：${reqRel}`
+      }
+      if (!readFileSync(join(dir, '.gitattributes'), 'utf8').includes('* text=auto eol=lf')) {
+        return `bootstrap-empty(${item.lang}) .gitattributes 缺 eol=lf`
+      }
+      if (!readFileSync(join(dir, '.gitignore'), 'utf8').includes('.worktrees/')) {
+        return `bootstrap-empty(${item.lang}) .gitignore 缺 .worktrees/`
+      }
+      const readme = readFileSync(join(dir, 'README.md'), 'utf8')
+      if (readme.includes('project-forge: fill') || readme.includes('img.shields.io')) {
+        return `bootstrap-empty(${item.lang}) README 含占位或假徽章`
+      }
+      const tdd = readFileSync(join(dir, 'docs/TDD.md'), 'utf8')
+      if (tdd.includes('<待补充>') || !tdd.includes(item.entry) || !tdd.includes('arch-rules: none')) {
+        return `bootstrap-empty(${item.lang}) docs/TDD.md 未填实：${tdd}`
+      }
+      if (item.lang === 'node') {
+        const nt = spawnSync(process.execPath, ['--test'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
+        if (nt.status !== 0) return `bootstrap-empty(node) 单测未过：${nt.stderr || nt.stdout}`
+      }
+      if (item.lang === 'python') {
+        const pyBin = ['python3', 'python'].find((b) => spawnSync(b, ['--version'], { stdio: 'ignore' }).status === 0)
+        if (pyBin) {
+          const pt = spawnSync(pyBin, ['-m', 'unittest', 'discover', '-s', 'tests'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
+          if (pt.status !== 0) return `bootstrap-empty(python) unittest 未过：${pt.stderr || pt.stdout}`
+        }
+      }
+      if (item.lang === 'node' || item.lang === 'python') {
+        const sBoot = await survey(dir)
+        if ((sBoot.reentry?.staleTddPaths?.length ?? 0) > 0) {
+          return `bootstrap-empty(${item.lang}) TDD 存在失效路径：${JSON.stringify(sBoot.reentry.staleTddPaths)}`
+        }
+      }
+    }
+
+    // 反面与保护：已有 .agents 自有技能时允许起步且保留；已有 README.md 时拒绝执行且不覆盖
+    const withCustomAgentDir = tmpProject({
+      '.agents/skills/keep-me/SKILL.md': '---\nname: keep-me\ndescription: Custom keep skill.\n---\n# keep-me\n',
+    })
+    dirs.push(withCustomAgentDir)
+    const keepRes = runAbs('scripts/equip.mjs', [withCustomAgentDir, '--bootstrap-empty', '--lang', 'node', '--name', 'keep-demo'])
+    if (keepRes.status !== 0) return `含 .agents 自有技能的空目录拒绝起步：${keepRes.stderr}`
+    if (!readFileSync(join(withCustomAgentDir, '.agents/skills/keep-me/SKILL.md'), 'utf8').includes('Custom keep skill.')) {
+      return 'bootstrap-empty 破坏了既有自有技能文件'
+    }
+
+    const nonEmptyDir = tmpProject({ 'README.md': '# Custom Handcrafted README\n' })
+    dirs.push(nonEmptyDir)
+    const blockRes = runAbs('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--lang', 'node', '--name', 'block-demo'])
+    if (blockRes.status === 0) return '非空目录存在 README.md 时未拒绝 --bootstrap-empty'
+    if (readFileSync(join(nonEmptyDir, 'README.md'), 'utf8') !== '# Custom Handcrafted README\n') {
+      return '被拒绝的 --bootstrap-empty 意外修改了既有 README.md'
+    }
+
+    // computeArtifactPlan 空白仓 vs 异构存量仓 + docs/todo 优先于 docs/work
+    const blankDir = tmpProject({})
+    dirs.push(blankDir)
+    const sBlank = await survey(blankDir)
+    const blankPlan = Object.fromEntries((sBlank.artifactPlan ?? []).map((x) => [x.id, x]))
+    if (blankPlan['pre-backup']?.action !== 'skip' || blankPlan['docs-tdd']?.action !== 'skip' || blankPlan['agents-contract']?.action !== 'skip') {
+      return `空白仓 artifactPlan 不符：${JSON.stringify(sBlank.artifactPlan)}`
+    }
+
+    const heteroDir = tmpProject({
+      '.gitattributes': '* text=auto eol=lf\n',
+      '.gitignore': '.worktrees/\nnode_modules/\n',
+      'package.json': '{"name":"hetero","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+      'src/index.mjs': 'export const ok = true\n',
+      'README.md': '# Custom Legacy README\n',
+      'CONTRIBUTING.md': '# Contributing\n',
+      'LICENSE': 'Dual License (MIT OR Apache-2.0)\n',
+      'docs/TDD.md': '# TDD\n\n入口 `src/index.mjs`。\n',
+      'docs/todo/261114-item.md': '# Todo\n',
+      '.agents/skills/custom-ops/SKILL.md': '---\nname: custom-ops\ndescription: Custom ops skill.\n---\n# custom-ops\n',
+      '.github/workflows/ci.yml': 'name: ci\non: [push]\njobs: {}\n',
+    })
+    dirs.push(heteroDir)
+    gitInit(heteroDir)
+    const sHetero = await survey(heteroDir)
+    if (sHetero.conventions?.workDir !== 'docs/todo') {
+      return `存在 docs/todo 时 workDir 未优先选用 docs/todo：${sHetero.conventions?.workDir}`
+    }
+    const planMap = Object.fromEntries((sHetero.artifactPlan ?? []).map((x) => [x.id, x]))
+    if (planMap.readme?.action !== 'preserve') {
+      return `computeArtifactPlan 未将已有 README 标为 preserve：${JSON.stringify(planMap.readme)}`
+    }
+    if (planMap['pre-backup']?.action !== 'snapshot' || planMap.contributing?.action !== 'preserve' || planMap.license?.action !== 'preserve') {
+      return `异构存量仓 artifactPlan 关键动作错误：${JSON.stringify(sHetero.artifactPlan)}`
+    }
+    if (planMap['kit-skills']?.action !== 'equip' || !planMap['kit-skills'].detail.includes('custom-ops')) {
+      return `kit-skills 处置计划未提示保留自有技能：${JSON.stringify(planMap['kit-skills'])}`
+    }
+    const purePlan = computeArtifactPlan(sHetero)
+    if ((purePlan?.length ?? 0) < 10) return 'computeArtifactPlan 导出项数不足 10 项'
+    const mdHetero = toMarkdown(sHetero)
+    if (!mdHetero.includes('## 逐项处置计划') || !mdHetero.includes('preserve')) {
+      return `render.mjs 未输出逐项处置计划表格：\n${mdHetero}`
+    }
+
+    const legacyWorkDir = tmpProject({ 'README.md': '# legacy\n', 'docs/work/01-task.md': '# Task\n' })
+    dirs.push(legacyWorkDir)
+    const sLegacy = await survey(legacyWorkDir)
+    if (sLegacy.conventions?.workDir !== 'docs/work') {
+      return `仅存在存量 docs/work 时未兼容保留：${sLegacy.conventions?.workDir}`
+    }
+
+    return true
+  } finally {
+    for (const d of dirs) rmTree(d)
+  }
+}])
+
+cases.push(['templates/readme.md 与文档口径 Wave 4 (C20)：HTML 注释配对、零残留占位与 tier 对齐', async () => {
+  const { residualConditionMarkers } = await import('../lib/template.mjs')
+  for (const relPath of ['templates/readme.md', 'templates/releasing.md', 'templates/release-notes.md']) {
+    const raw = readFileSync(join(SKILL_ROOT, relPath), 'utf8')
+    const opens = (raw.match(/<!--/g) ?? []).length
+    const closes = (raw.match(/-->/g) ?? []).length
+    if (opens === 0 || opens !== closes) return `${relPath} HTML 注释未成对闭合（open=${opens}, close=${closes}）`
+  }
+  const readmeTpl = readFileSync(join(SKILL_ROOT, 'templates/readme.md'), 'utf8')
+  const residual = residualConditionMarkers(readmeTpl)
+  const vars = [...new Set([...readmeTpl.matchAll(/\{\{[^}]*\}\}/g)].map((m) => m[0]))]
+  if (residual.length > 0 || vars.length > 0) {
+    return `templates/readme.md 残留条件或未求值变量：${JSON.stringify({ residual, vars })}`
+  }
+  if (!readmeTpl.includes('存量仓库严禁重写覆盖')) return 'templates/readme.md 缺少存量防覆盖约束'
+
+  const skillMd = readFileSync(join(SKILL_ROOT, 'SKILL.md'), 'utf8')
+  const surveyMd = readFileSync(join(SKILL_ROOT, 'references/survey.md'), 'utf8')
+  if (/\bexplorationStrategy\.mode\b/.test(skillMd) || /\bexplorationStrategy\.mode\b/.test(surveyMd)) {
+    return 'SKILL.md 或 references/survey.md 仍残留过期字段 explorationStrategy.mode'
+  }
+  if (!skillMd.includes('explorationStrategy.tier') || !surveyMd.includes('explorationStrategy.tier')) {
+    return 'SKILL.md 或 references/survey.md 缺少 explorationStrategy.tier'
+  }
+  return true
+}])
+
+cases.push(['assets/readme/*.svg 与打包边界 Wave 4 (C21)：SVG 安全结构与 isProductLayerPath 正反双向', async () => {
+  const { isProductLayerPath } = await import('./preflight.mjs')
+  const { FORBIDDEN_PLATFORM_RE } = await import('../lib/protocol.mjs')
+  const EMOJI_RE = /\p{Extended_Pictographic}/u
+
+  const expectedSvgs = [
+    'assets/readme/hero.svg',
+    'assets/readme/hero-en.svg',
+    'assets/readme/workflow.svg',
+    'assets/readme/workflow-en.svg',
+    'assets/readme/architecture.svg',
+    'assets/readme/architecture-en.svg',
+  ]
+  for (const relPath of expectedSvgs) {
+    if (!existsSync(join(SKILL_ROOT, relPath))) return `缺少视觉 SVG 卡片：${relPath}`
+    if (!isProductLayerPath(relPath)) return `isProductLayerPath 拒绝了 assets/readme 资产：${relPath}`
+    const raw = readFileSync(join(SKILL_ROOT, relPath), 'utf8')
+    if (!/<svg\b/i.test(raw) || !/<\/svg>/i.test(raw) || !/\bviewBox\s*=\s*["'][^"']+["']/i.test(raw) || !/<title\b/i.test(raw)) {
+      return `SVG 结构或无障碍标签不完整：${relPath}`
+    }
+    if (/<script\b|<foreignObject\b|<image\b/i.test(raw)) return `SVG 含禁用元素：${relPath}`
+    const stripped = raw.replace(/\bxmlns(?::[a-z0-9_-]+)?\s*=\s*["']http:\/\/www\.w3\.org\/[^"']*["']/gi, '')
+    if (/https?:\/\//i.test(stripped)) return `SVG 含非标准外链 URL：${relPath}`
+    if (EMOJI_RE.test(raw) || FORBIDDEN_PLATFORM_RE.test(raw)) return `SVG 含 Emoji 或禁用平台词：${relPath}`
+  }
+
+  for (const bad of ['assets/other/junk.bin', 'assets/readme/nested/a.svg', 'assets/readme/hero.png', 'docs/TDD.md']) {
+    if (isProductLayerPath(bad)) return `isProductLayerPath 误放行了非法路径：${bad}`
+  }
+  return true
+}])
+
+cases.push(['govern-audit.mjs release-prep Wave 4 (C22)：多版本跳号采集、噪音过滤、unaccountedPublicFiles 与单提交冷启动', async () => {
+  const multiDir = tmpProject({
+    '.gitignore': 'node_modules/\n',
+    'package.json': `${JSON.stringify({
+      name: 'demo-cli',
+      version: '1.0.0',
+      bin: { demo: 'bin/cli.mjs' },
+      engines: { node: '>=16' },
+    }, null, 2)}\n`,
+    'SKILL.md': '---\nname: demo-cli\nmetadata:\n  version: "1.0.0"\n---\n# demo-cli\n',
+    'README.md': '# demo-cli\n',
+    'bin/cli.mjs': 'export function runCli() { return 1 }\n',
+    'src/core.mjs': 'export const core = 1\n',
+    'test/core.test.mjs': 'export const t = 1\n',
+  })
+  gitInit(multiDir)
+  const tagRes = spawnSync('git', ['tag', 'v1.0.0'], { cwd: multiDir, encoding: 'utf8' })
+  if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`)
+
+  const commitIn = (dir, files, msg) => {
+    for (const [r, c] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, r)), { recursive: true })
+      writeFileSync(join(dir, r), c)
+    }
+    const opts = { cwd: dir, encoding: 'utf8' }
+    const addRes = spawnSync('git', ['add', '-A'], opts)
+    if (addRes.status !== 0) throw new Error(`git add failed: ${addRes.stderr}`)
+    const cRes = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', msg], opts)
+    if (cRes.status !== 0) throw new Error(`git commit failed (${msg}): ${cRes.stderr}`)
+  }
+
+  commitIn(multiDir, { 'src/core.mjs': 'export const core = 2\n' }, 'feat: C9 Wave 4 support streaming exports')
+  commitIn(multiDir, {
+    'package.json': `${JSON.stringify({
+      name: 'demo-cli',
+      version: '1.0.0',
+      bin: { demo: 'bin/cli.mjs' },
+      engines: { node: '>=18' },
+    }, null, 2)}\n`,
+  }, 'feat!: raise minimum Node version to 18')
+  commitIn(multiDir, {
+    'docs/specs/261114-stream.md': '# 流式导出规范\n\nStatus: implemented\n\n支持大文件流式导出输出。\n',
+    'docs/archive/todo/261114-stream.md': '# 任务单：流式导出\n\n## 完成后的记录\n\n已完成流式导出并同步文档。\n',
+  }, 'docs: record stream spec and archive todo')
+  commitIn(multiDir, { 'test/core.test.mjs': 'export const t = 2\n' }, 'test: add streaming assertions')
+  commitIn(multiDir, { '.gitignore': 'node_modules/\ntmp/\n' }, 'chore: ignore tmp files')
+  commitIn(multiDir, { 'bin/cli.mjs': 'export function runCli() { return 2 }\n' }, 'update')
+
+  const changelogDir = tmpProject({
+    'pyproject.toml': '[project]\nname = "py-app"\nversion = "0.2.0"\nrequires-python = ">=3.11"\n',
+    'CHANGELOG.md': '# Changelog\n',
+    'README.md': '# py-app\n',
+  })
+  gitInit(changelogDir)
+
+  const nonGitDir = tmpProject({ 'README.md': '# plain\n' })
+
+  try {
+    const prepJsonRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0', '--json'])
+    if (prepJsonRes.status !== 0) return `release-prep 多标签跳版本失败：${prepJsonRes.stderr}`
+    const parsed = JSON.parse(prepJsonRes.stdout)
+    if (parsed.range?.from !== 'v1.0.0' || parsed.version?.targetTag !== 'v3.0.0') {
+      return `release-prep 区间或跳版本解析错误：${JSON.stringify({ range: parsed.range, version: parsed.version })}`
+    }
+    if ((parsed.stats?.filteredInternalCount ?? 0) < 2) {
+      return `release-prep 未过滤纯测试或配置噪音提交：${JSON.stringify(parsed.stats)}`
+    }
+    if (!parsed.userFacingCandidates?.some((c) => c.summary === 'support streaming exports')) {
+      return `release-prep 未清洗内部前缀或漏掉功能提交：${JSON.stringify(parsed.userFacingCandidates)}`
+    }
+    if (!parsed.breakingSignals?.some((b) => b.field === 'engines.node')) {
+      return `release-prep 未探测 engines.node 下限变化：${JSON.stringify(parsed.breakingSignals)}`
+    }
+    if ((parsed.implementedSpecs?.length ?? 0) !== 1 || (parsed.archivedOutcomes?.length ?? 0) !== 1) {
+      return `release-prep 未采集已实现规格或归档任务摘要：${JSON.stringify({ specs: parsed.implementedSpecs, todos: parsed.archivedOutcomes })}`
+    }
+    if (!parsed.unaccountedPublicFiles?.some((u) => u.file === 'bin/cli.mjs')) {
+      return `unaccountedPublicFiles 未检出含糊公开入口 bin/cli.mjs：${JSON.stringify(parsed.unaccountedPublicFiles)}`
+    }
+
+    const prepTextRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0'])
+    if (prepTextRes.status !== 0 || !prepTextRes.stdout.includes('v3.0.0') || !prepTextRes.stdout.includes('[AUDIT_ALERT]') || !prepTextRes.stdout.includes('[NEXT STEP]')) {
+      return `release-prep 文本输出缺失关键字段：exit=${prepTextRes.status}\n${prepTextRes.stdout}`
+    }
+
+    const chgRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', changelogDir, '--version', '1.0.0', '--json'])
+    if (chgRes.status !== 0) return `release-prep 无标签 CHANGELOG 仓失败：${chgRes.stderr}`
+    const chgJson = JSON.parse(chgRes.stdout)
+    if (!chgJson.range?.isInitialRelease || chgJson.notesMode?.mode !== 'changelog' || !chgJson.breakingSignals?.some((b) => b.field === 'requires-python')) {
+      return `无标签 CHANGELOG 仓结果异常：${JSON.stringify({ range: chgJson.range, notesMode: chgJson.notesMode, breaking: chgJson.breakingSignals })}`
+    }
+
+    const nonGitRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', nonGitDir])
+    if (nonGitRes.status === 0) return '非 Git 目录运行 release-prep 未拦截'
+
+    return true
+  } finally {
+    rmTree(multiDir)
+    rmTree(changelogDir)
+    rmTree(nonGitDir)
+  }
+}])
+
 function parseCliFlags(argv) {
   let prefer = ''
   let bailOn = ''

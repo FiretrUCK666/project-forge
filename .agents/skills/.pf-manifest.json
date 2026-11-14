@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "forgeVersion": "5.0.0",
-  "installedAt": "2026-11-14T10:16:47.117Z",
+  "installedAt": "2026-11-14T12:15:50.493Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "a59bf649a601642d5fb80916cc65645a29ebc55a9957f2aa1c98c2e38e876f94"
@@ -19,10 +19,13 @@
       "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "50105e9b82c5b3ea7cd67356a19094b4134fc4daf59121a4295e5d688c8a5f1c"
+      "sha256": "2749dfd53daa1a9e29b0080ad0d9954897d186400c0890b2e764111c349c4ef4"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "009d6dc0d2dbba146b34a1c4ed0dcd9bb3346faa8181c287e4c31897094ec2ce"
+      "sha256": "0f2359e537cbea69e28532889822b31bf822e07eae5b0ca5908457561c0a4223"
+    },
+    "dev-govern/scripts/release-prep-lib.mjs": {
+      "sha256": "748f59e73d9bceaeceeadd64c63c1dd402b3b09cee5ca8358c3574bf3d35874f"
     },
     "dev-plan/SKILL.md": {
       "sha256": "ab72b7e246a8ba835eeb78cd89d48f1286b06ce5365a6a33685d49a0cac52924"

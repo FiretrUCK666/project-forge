@@ -51,6 +51,9 @@ jobs:
       - name: 结构自检 + 端到端冒烟
         run: node scripts/dev/preflight.mjs
 
+      - name: 勘察缺口与体检结论覆盖
+        run: node scripts/dev/gap-coverage.mjs
+
       # 行为断言与结构自检是两件事，缺一不可：
       # 结构自检查不出「判定写错了」——勘察把一个 CMake 项目判成纯文档目录时，
       # 引用与格式全都正常。这类错误只能靠造出能证伪它的 fixture 发现。
@@ -60,6 +63,9 @@ jobs:
       # 这个仓库是这套规范的第一个用户：模板改了、自己那份没跟上时，这一条会红。
       - name: 契约自举（标记成对 / 无未填占位 / 该有的节都在）
         run: node scripts/compose-agents.mjs . --check
+
+      - name: 内置套件字节级一致性
+        run: node scripts/equip.mjs . --check
 
       - name: README 的目录与标题是否同步
         run: node scripts/sync-toc.mjs README.md README.en.md --check
@@ -81,6 +87,9 @@ jobs:
             echo "::error::这个仓库自己的交付体检没过。报了 [缺] 就改真东西，不要加 flag 把它压下去。"
             exit 1
           }
+
+      - name: 治理巡检审计
+        run: node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
 
   # ── 分支保护要的那个检查 ─────────────────────────────────────────────
   #

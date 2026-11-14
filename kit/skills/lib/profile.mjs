@@ -96,20 +96,122 @@ function parseArchRuleItem(rawRule) {
   return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
 }
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
-export function readDecisions(agentsText) {
-  const decisions = new Set()
-  if (typeof agentsText !== 'string') return decisions
+/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`。 */
+export function readDecisionMap(agentsText) {
+  const map = new Map()
+  if (typeof agentsText !== 'string') return map
   const lines = agentsText.replace(/\r\n/g, '\n').split('\n')
   let inSection = false
   for (const line of lines) {
-    if (/^##\s+取舍\s*$/.test(line.trim())) { inSection = true; continue }
+    if (/^##\s+取舍(?:\s|$|[（(:：])/.test(line.trim())) { inSection = true; continue }
     if (inSection && /^#{1,2}\s+/.test(line)) break
     if (!inSection) continue
-    const m = /^\s*[-*]\s*`?([a-z][a-z0-9._-]*)`?\s*[:：]/.exec(line)
-    if (m) decisions.add(m[1])
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('>') || trimmed.startsWith('```')) continue
+    const m = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*[:：]\s*(.*)$/.exec(line)
+    if (m) map.set(m[1], m[2].trim())
   }
-  return decisions
+  return map
+}
+
+/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
+export function readDecisions(agentsText) {
+  return new Set(readDecisionMap(agentsText).keys())
+}
+
+function hasDecisionKey(decisions, agentsText, key) {
+  if (decisions instanceof Set) return decisions.has(key)
+  if (decisions instanceof Map) return decisions.has(key)
+  if (Array.isArray(decisions)) return decisions.includes(key)
+  if (typeof decisions === 'string') return readDecisions(decisions).has(key)
+  if (agentsText) return readDecisions(agentsText).has(key)
+  return false
+}
+
+function resolveDecisionValue(decisions, agentsText, key) {
+  if (decisions instanceof Map) return decisions.get(key) ?? null
+  if (typeof decisions === 'string') return readDecisionMap(decisions).get(key) ?? null
+  if (agentsText) return readDecisionMap(agentsText).get(key) ?? null
+  return null
+}
+
+/**
+ * 按项目实际优先识别权威架构文档路径：
+ *   1. `AGENTS.md`「## 取舍」显式声明的 `tdd-authority`（且文件真实存在）；
+ *   2. 声明 `no-tdd` 时返回 `null`（合法豁免）；
+ *   3. 依次检查 `docs/TDD.md`、`*-TDD.md`、`ARCHITECTURE.md`、`docs/architecture.md`、
+ *      `docs/design/README.md` 等既有架构文档。
+ */
+export function resolveAuthoritativeTddPath(repoRoot, decisions = null) {
+  const agentsText = (decisions instanceof Map || typeof decisions === 'string')
+    ? (typeof decisions === 'string' ? decisions : null)
+    : readTextSafe(join(repoRoot, 'AGENTS.md'))
+
+  if (hasDecisionKey(decisions, agentsText, 'tdd-authority')) {
+    const rawVal = resolveDecisionValue(decisions, agentsText ?? readTextSafe(join(repoRoot, 'AGENTS.md')), 'tdd-authority')
+    if (typeof rawVal === 'string' && rawVal.trim()) {
+      const m = /`([^`\n]+\.mdx?)`/i.exec(rawVal)
+        ?? /(?:^|\s)([A-Za-z0-9_./-]+\.mdx?)(?=\s|$|[，。；,;])/i.exec(rawVal)
+      if (m) {
+        const rel = posixPath(m[1].trim()).replace(/^\.\//, '')
+        if (rel && !rel.includes('..') && existsSync(join(repoRoot, rel))) return rel
+      }
+    }
+  }
+
+  if (hasDecisionKey(decisions, agentsText, 'no-tdd')) return null
+
+  const fixedCandidates = [
+    'docs/TDD.md',
+    'docs/tdd.md',
+    'TDD.md',
+    'tdd.md',
+  ]
+  for (const rel of fixedCandidates) {
+    if (existsSync(join(repoRoot, rel))) return rel
+  }
+
+  for (const dirRel of ['', 'docs']) {
+    const absDir = dirRel ? join(repoRoot, dirRel) : repoRoot
+    if (!existsSync(absDir)) continue
+    let names = []
+    try { names = readdirSync(absDir).filter((n) => !isMacOsJunkPath(n)).sort() } catch { continue }
+    for (const name of names) {
+      if (/(?:-|_)tdd\.md$/i.test(name)) {
+        return dirRel ? `${dirRel}/${name}` : name
+      }
+    }
+  }
+
+  const archCandidates = [
+    'ARCHITECTURE.md',
+    'architecture.md',
+    'docs/ARCHITECTURE.md',
+    'docs/architecture.md',
+    'DESIGN.md',
+    'design.md',
+    'docs/DESIGN.md',
+    'docs/design.md',
+    'docs/architecture/README.md',
+    'docs/design/README.md',
+  ]
+  for (const rel of archCandidates) {
+    if (existsSync(join(repoRoot, rel))) return rel
+  }
+
+  for (const subRel of ['docs/architecture', 'docs/design']) {
+    const subAbs = join(repoRoot, subRel)
+    if (!existsSync(subAbs)) continue
+    try {
+      const md = readdirSync(subAbs, { withFileTypes: true })
+        .filter((e) => e.isFile() && !isMacOsJunkPath(e.name) && /\.(?:md|mdx)$/i.test(e.name))
+        .map((e) => e.name)
+        .sort()
+      if (md.length > 0) return `${subRel}/${md[0]}`
+    } catch { /* ignore */ }
+  }
+
+  return null
 }
 
 function extractDevProfileLines(agentsText) {

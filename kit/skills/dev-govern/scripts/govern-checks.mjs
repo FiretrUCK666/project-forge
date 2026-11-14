@@ -163,7 +163,10 @@ export function auditSecurity(files, trackedSet, findings) {
             title: `TLS verification disabled in ${f.rel}:${idx + 1}`,
             action: 'Remove NODE_TLS_REJECT_UNAUTHORIZED=0 and configure proper CA trust.',
           })
-        } else if (/\bexec(?:Sync)?\s*\(\s*`[^`]*\$\{/.test(line) || /\bnew\s+Function\s*\(/.test(line)) {
+        } else if (
+          (/\bexec(?:Sync)?\s*\(\s*`[^`]*\$\{/.test(line) && !/\/[gimsuy]*\.exec\s*\(/.test(line))
+          || /\bnew\s+Function\s*\(/.test(line)
+        ) {
           addFinding(findings, {
             id: `sec.dynamic-exec.${f.rel}:${idx + 1}`,
             category: 'security',

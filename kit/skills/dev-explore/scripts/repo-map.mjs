@@ -227,7 +227,8 @@ function extractTaskRunners(root, packages) {
   for (const tfName of ['Taskfile.yml', 'Taskfile.yaml']) {
     const tfText = readTextSafe(join(root, tfName))
     if (!tfText) continue
-    const tasksSec = /\ntasks:\s*\n([\s\S]*?)(?:\n[a-z]+:|\s*$)/.exec(`\n${tfText}`)
+    const paddedTf = `\n${tfText}`
+    const tasksSec = /\ntasks:\s*\n([\s\S]*?)(?:\n[a-z]+:|\s*$)/.exec(paddedTf)
     if (tasksSec) {
       for (const m of tasksSec[1].matchAll(/^ {2}([A-Za-z0-9_.-]+)\s*:/gm)) {
         if (!runners.taskfile.includes(m[1])) runners.taskfile.push(m[1])

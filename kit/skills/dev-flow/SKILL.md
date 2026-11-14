@@ -33,12 +33,13 @@ description: |
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...] [--probe-auth]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 
-# 2. 启动或放弃任务工作位（start 保留并迁入已有 doc-plan 文档）
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N>] [--external-pr <M>]
+# 2. 启动或放弃任务工作位（start 保留并迁入已有 doc-plan 文档；--create-issue 可由 maintainer 自动建单并联动改名）
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N>] [--create-issue --title "<标题>"] [--external-pr <M>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm]
 
-# 3. 认领、成对归档文档锁与分层实证（--tier 等价 --mode；可自动推断 --task）
-node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N>]
+# 3. 认领（远程自动查 pf-state 防撞车，接管须带 --takeover --reason 双写 Issue+PR）/ 释放认领 / 文档锁与实证
+node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N>] [--takeover --reason "<接管原因>"]
+node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <file>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke

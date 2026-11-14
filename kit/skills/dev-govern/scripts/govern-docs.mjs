@@ -13,7 +13,7 @@ import {
   parseDocFrontmatter, renderStandardDocTemplate,
 } from '../../lib/docs.mjs'
 import { gitRun, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
-import { readDecisions } from '../../lib/profile.mjs'
+import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE, matchGlob } from '../../lib/static-gates.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -184,7 +184,7 @@ function checkMarkdownDeadLinks(repoRoot, files, findings) {
   }
 }
 
-async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings) {
+async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, authoritativeTddPath = null) {
   if (!isGit || !(await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok) return
   const logRes = await gitRun(repoRoot, ['log', '-n', '80', '--name-only', '--format=__COMMIT__%ct'])
   if (!logRes.ok || !logRes.stdout) return
@@ -203,12 +203,13 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings) {
   if (cur) commits.push(cur)
   if (commits.length < 8) return
 
-  const hasTdd = existsSync(join(repoRoot, 'docs', 'TDD.md'))
-  const targetDoc = hasTdd ? 'docs/TDD.md' : existsSync(join(repoRoot, 'README.md')) ? 'README.md' : ''
+  const targetDoc = authoritativeTddPath
+    || (existsSync(join(repoRoot, 'docs', 'TDD.md')) ? 'docs/TDD.md' : existsSync(join(repoRoot, 'README.md')) ? 'README.md' : '')
   if (!targetDoc) return
 
   const isDocUpdate = (rel, codeDir) => {
     if (rel === 'AGENTS.md' || rel === 'docs/TDD.md' || rel === 'README.md' || rel === 'README.en.md' || rel === 'ARCHITECTURE.md') return true
+    if (authoritativeTddPath && rel === authoritativeTddPath) return true
     if (codeDir && rel === `${codeDir}/AGENTS.md`) return true
     if (rel.startsWith('docs/') && rel.endsWith('.md') && !rel.startsWith('docs/todo/') && !rel.startsWith('docs/archive/')) return true
     return false
@@ -250,17 +251,32 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings) {
   }
 }
 
-function hasExistingArchitectureDocs(repoRoot) {
-  if (existsSync(join(repoRoot, 'ARCHITECTURE.md'))) return true
-  try {
-    for (const name of readdirSync(repoRoot)) {
-      if (/-TDD\.md$/i.test(name)) return true
+function extractTddBacktickPaths(rawTok) {
+  const tok = String(rawTok ?? '').trim()
+  if (!tok || /^(?:https?:|mailto:|git@|ssh:|\/|[A-Za-z]:|<)/.test(tok)) return []
+  if (/[\s;|&]/.test(tok)) {
+    const out = []
+    for (const word of tok.split(/[\s,;()'"`]+/)) {
+      const clean = word.trim().replace(/^\.\//, '')
+      if (!clean || !clean.includes('/') || clean.endsWith('/')) continue
+      if (clean.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(clean)) continue
+      if (/^(?:https?:|mailto:|git@|ssh:|\/|[A-Za-z]:|<)/.test(clean)) continue
+      if (/[<>*?{}$]/.test(clean) || clean.includes('..')) continue
+      if (!REPO_PATH_EXT_RE.test(clean)) continue
+      out.push(clean)
     }
-  } catch { /* ignore */ }
-  for (const sub of ['docs/architecture', 'docs/design', 'docs/adr']) {
-    if (existsSync(join(repoRoot, sub))) return true
+    return out
   }
-  return false
+  const clean = tok.replace(/^\.\//, '')
+  if (!clean.includes('/') || clean.endsWith('/')) return []
+  if (/[<>*?{}$]/.test(clean) || clean.includes('..')) return []
+  if (!REPO_PATH_EXT_RE.test(clean)) return []
+  return [clean]
+}
+
+function hasExistingArchitectureDocs(repoRoot) {
+  if (resolveAuthoritativeTddPath(repoRoot)) return true
+  return existsSync(join(repoRoot, 'docs', 'adr'))
 }
 
 export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, findings) {
@@ -329,8 +345,8 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
     }
   }
 
-  const tddPath = join(repoRoot, 'docs', 'TDD.md')
-  const tddInfo = readTextStrictInfo(tddPath)
+  const authoritativeTddPath = resolveAuthoritativeTddPath(repoRoot, decisions)
+  const tddInfo = authoritativeTddPath ? readTextStrictInfo(join(repoRoot, authoritativeTddPath)) : undefined
   if (hasCode && !tddInfo?.text) {
     if (!decisions.has('no-tdd') && !decisions.has('existing-docs') && !hasExistingArchitectureDocs(repoRoot)) {
       addFinding(findings, {
@@ -339,36 +355,41 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
         severity: 'medium',
         file: 'docs/TDD.md',
         title: 'Missing docs/TDD.md technical architecture authority',
-        action: 'Create docs/TDD.md documenting modules, data flows, and invariants (or record `no-tdd` in AGENTS.md ## 取舍).',
+        action: 'Create docs/TDD.md documenting modules, data flows, and invariants (or record `no-tdd` / `tdd-authority` in AGENTS.md ## 取舍).',
       })
     }
-  } else if (tddInfo?.text) {
-    const allMods = discoverCodeModules(repoRoot)
-    const mods = scopeRel ? allMods.filter((m) => m.path === scopeRel || m.path.startsWith(`${scopeRel}/`)) : allMods
-    const undocumented = mods.filter((m) => !tddInfo.text.includes(m.name) && !tddInfo.text.includes(m.path))
-    if (undocumented.length > 0) {
-      addFinding(findings, {
-        id: 'docs.tdd-module-drift',
-        category: 'docs',
-        severity: 'medium',
-        file: 'docs/TDD.md',
-        title: `docs/TDD.md omits ${undocumented.length} module(s): ${undocumented.slice(0, 6).map((m) => m.path).join(', ')}`,
-        action: 'Update docs/TDD.md module table to match current source layout.',
-      })
-    }
-    for (const m of tddInfo.text.matchAll(/`([^`\n]+)`/g)) {
-      const tok = m[1].trim()
-      if (!tok.includes('/') || /^(?:https?:|\/|[A-Za-z]:|<)/.test(tok) || /[<>*?]/.test(tok) || tok.endsWith('/')) continue
-      if (!REPO_PATH_EXT_RE.test(tok)) continue
-      if (!existsSync(join(repoRoot, tok))) {
+  } else if (tddInfo?.text && authoritativeTddPath) {
+    const isTddDocFormat = /(?:^|\/).*tdd\.md$/i.test(authoritativeTddPath)
+    if (isTddDocFormat && !decisions.has('existing-docs') && !decisions.has('no-tdd')) {
+      const allMods = discoverCodeModules(repoRoot)
+      const mods = scopeRel ? allMods.filter((m) => m.path === scopeRel || m.path.startsWith(`${scopeRel}/`)) : allMods
+      const undocumented = mods.filter((m) => !tddInfo.text.includes(m.name) && !tddInfo.text.includes(m.path))
+      if (undocumented.length > 0) {
         addFinding(findings, {
-          id: `docs.tdd-stale-path.${tok}`,
+          id: 'docs.tdd-module-drift',
           category: 'docs',
           severity: 'medium',
-          file: 'docs/TDD.md',
-          title: `Stale path referenced in docs/TDD.md: ${tok}`,
-          action: `Update or remove "${tok}" in docs/TDD.md.`,
+          file: authoritativeTddPath,
+          title: `${authoritativeTddPath} omits ${undocumented.length} module(s): ${undocumented.slice(0, 6).map((m) => m.path).join(', ')}`,
+          action: `Update ${authoritativeTddPath} module table to match current source layout.`,
         })
+      }
+    }
+    const checkedPaths = new Set()
+    for (const m of tddInfo.text.matchAll(/`([^`\n]+)`/g)) {
+      for (const cand of extractTddBacktickPaths(m[1])) {
+        if (checkedPaths.has(cand)) continue
+        checkedPaths.add(cand)
+        if (!existsSync(join(repoRoot, cand))) {
+          addFinding(findings, {
+            id: `docs.tdd-stale-path.${cand}`,
+            category: 'docs',
+            severity: 'medium',
+            file: authoritativeTddPath,
+            title: `Stale path referenced in ${authoritativeTddPath}: ${cand}`,
+            action: `Update or remove "${cand}" in ${authoritativeTddPath}.`,
+          })
+        }
       }
     }
   }
@@ -393,7 +414,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
   }
 
   checkMarkdownDeadLinks(repoRoot, files, findings)
-  await checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings)
+  await checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, authoritativeTddPath)
 
   const todoDir = join(repoRoot, 'docs', 'todo')
   if (existsSync(todoDir)) {

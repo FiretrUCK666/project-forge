@@ -17,7 +17,8 @@ import {
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseBodyRelations, parseFlowInputs,
-  parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveWorkspaceIdentity,
+  parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv,
+  resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
@@ -304,9 +305,14 @@ export async function handleStart(opts, roots) {
   const linkedIssues = opts.issue || opts.issues
     ? String(opts.issues ?? opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
     : []
-  const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : null))
-  if (!rawTaskId) throw new Error('start 需要传 --task <taskId>（或提供 --slug / --issue）')
-  const taskId = sanitizeTaskId(rawTaskId)
+  const wantCreateIssue = Boolean(opts['create-issue'])
+  const prelimTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : null))
+  if (!prelimTaskId && !wantCreateIssue) {
+    throw new Error('start 需要传 --task <taskId>（或提供 --slug / --issue / --create-issue）')
+  }
+  if (wantCreateIssue && !opts.task && !opts.slug && !opts.title) {
+    throw new Error('start --create-issue 需要至少提供 --title "<标题>"、--slug <slug> 或 --task <taskId>')
+  }
 
   const caseType = opts.case !== undefined ? Number(opts.case) : 3
   if (caseType === 5) {
@@ -314,7 +320,6 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  const slug = slugify(opts.slug ?? taskId)
   const externalPr = opts['external-pr'] ? Number(opts['external-pr']) : null
   const prNumber = externalPr ?? (opts.pr ? Number(opts.pr) : null)
   const state = await inspectWorkspace(roots.mainRoot, { externalPr, pr: prNumber, probeAuth: Boolean(opts['probe-auth']) })
@@ -324,6 +329,7 @@ export async function handleStart(opts, roots) {
   if (role === 'clone-readonly' && !externalPr) {
     const choice = opts['clone-choice']
     if (!choice) {
+      const hintTask = sanitizeTaskId(prelimTaskId ?? slugify(opts.title))
       const guidance = {
         blocked: true, code: 'ACTION_REQUIRED_CLONE_CHOICE', reason: state.identity.reason,
         ...(state.identity.teamProbeHint ? { teamProbeHint: state.identity.teamProbeHint } : {}),
@@ -337,7 +343,7 @@ export async function handleStart(opts, roots) {
       else {
         process.stdout.write(`停下确认：检测到当前仓库为只读克隆（${state.identity.reason}）。请选择协作方式：\n`)
         for (const c of guidance.choices) process.stdout.write(`  --clone-choice ${c.choice.padEnd(10)} : ${c.desc}\n`)
-        printNextStep([`重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId} --clone-choice <fork|standalone|local>`], { repoRoot: roots.mainRoot })
+        printNextStep([`重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${hintTask} --clone-choice <fork|standalone|local>`], { repoRoot: roots.mainRoot })
       }
       return { exitCode: EXIT_ACTION_REQUIRED }
     }
@@ -353,6 +359,50 @@ export async function handleStart(opts, roots) {
     } else throw new Error(`--clone-choice 仅支持 fork | standalone | local，收到：${choice}`)
   }
 
+  let createdIssue = null
+  if (wantCreateIssue && linkedIssues.length === 0) {
+    if (role !== 'maintainer') {
+      process.stderr.write(`BLOCKED_CREATE_ISSUE_ROLE: --create-issue 仅支持 maintainer 在 GitHub 仓创建新 Issue（当前 role=${role}）。\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
+    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls, state.declaredRepo)
+    if (!targetRepo || providerId !== 'github') {
+      throw new Error('--create-issue 需要配置有效的 GitHub 远端仓库')
+    }
+    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
+    const ghClient = opts._ghClient ?? ghProbe.client
+    const issueTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
+    const issueBody = String(opts.body ?? [
+      `## 任务追踪`,
+      `- Slug: \`${slugify(opts.slug ?? issueTitle)}\``,
+      `- Case: Case ${caseType}`,
+      opts.task ? `- Task ID: \`${opts.task}\`` : null,
+    ].filter(Boolean).join('\n')).trim()
+    const issueLabels = opts.labels
+      ? String(opts.labels).split(',').map((s) => s.trim()).filter(Boolean)
+      : []
+    const createRes = await ghClient.createIssue({
+      repo: targetRepo,
+      title: issueTitle,
+      body: issueBody,
+      labels: issueLabels,
+    })
+    if (createRes.delegated) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...createRes }, null, 2)}\n`)
+      else process.stdout.write(`无直连 GitHub 凭据，已生成创建 Issue 代理载荷：${JSON.stringify(createRes.jsonPayload)}\n`)
+      return { exitCode: EXIT_ACTION_REQUIRED }
+    }
+    if (!createRes.ok || !createRes.number) {
+      throw new Error(`创建 GitHub Issue 失败：${createRes.error ?? '未返回有效 Issue 编号'}`)
+    }
+    createdIssue = createRes
+    linkedIssues.push(createRes.number)
+  }
+
+  const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : slugify(opts.title)))
+  const taskId = sanitizeTaskId(rawTaskId)
+  const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
+
   const existing = readTaskLedger(roots.mainRoot, taskId)
   if (existing && existing.status !== 'cleaned' && existing.status !== 'aborted' && (
     (existing.worktreePath && existsSync(join(roots.mainRoot, existing.worktreePath)))
@@ -363,9 +413,14 @@ export async function handleStart(opts, roots) {
     if (opts.prd) existing.prdFile = opts.prd
     if (linkedIssues.length > 0) existing.linkedIssues = [...new Set([...(existing.linkedIssues ?? []), ...linkedIssues])]
     if (prNumber && !existing.prNumber) existing.prNumber = prNumber
+    const existingWorkRoot = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
+    if ((existing.linkedIssues ?? []).length > 0 && existsSync(existingWorkRoot)) {
+      await syncTaskDocsSafe(existingWorkRoot, existing)
+    }
     writeTaskLedger(roots.mainRoot, existing)
-    if (opts.json) process.stdout.write(`${JSON.stringify(existing, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
+      if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已存在（幂等复用）：isolation=${existing.isolation}, branch=${existing.branch ?? 'detached'}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
@@ -434,8 +489,9 @@ export async function handleStart(opts, roots) {
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
     writeTaskLedger(roots.mainRoot, ledger)
-    if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
+      if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 分支模式）：branch=${branch}, role=${role}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
@@ -470,8 +526,9 @@ export async function handleStart(opts, roots) {
   writeTaskLedger(roots.mainRoot, ledger)
 
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
   } else {
+    if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
     process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式）：\n`)
     process.stdout.write(`- 实施位: ${implRel}（分支: ${branch}，依赖模式: ${depMount.mode}）\n`)
     if (migratedDocs.length > 0) process.stdout.write(`- 已迁入规划文档: ${migratedDocs.join(', ')}\n`)
@@ -485,6 +542,51 @@ export async function handleStart(opts, roots) {
   return { exitCode: 0 }
 }
 
+/** 解析 Issue 评论流中的最新有效认领状态（claim/takeover 激活，release 释放）。 */
+export function analyzeIssueClaimState(comments = []) {
+  let activeClaim = null
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const states = Array.isArray(c?.pfStates) && c.pfStates.length > 0
+      ? c.pfStates
+      : (c?.pfState ? [c.pfState] : parsePfStateTags(c?.body ?? ''))
+    for (const st of states) {
+      const action = String(st?.action ?? '').toLowerCase()
+      if (action === 'claim' || action === 'takeover') {
+        activeClaim = {
+          action,
+          actor: st.agent || st.actor || st.owner || c?.author || null,
+          login: c?.author ?? null,
+          taskId: st.taskId ?? null,
+          branch: st.branch ?? null,
+          reason: st.reason ?? null,
+          commentId: c?.id ?? null,
+          createdAt: c?.createdAt ?? null,
+        }
+      } else if (action === 'release') {
+        const relActor = st.agent || st.actor || c?.author || null
+        if (!activeClaim || !relActor || !activeClaim.actor
+          || String(relActor).toLowerCase() === String(activeClaim.actor).toLowerCase()
+          || (c?.author && activeClaim.login && c.author.toLowerCase() === activeClaim.login.toLowerCase())
+          || (st.taskId && activeClaim.taskId && st.taskId === activeClaim.taskId)) {
+          activeClaim = null
+        }
+      }
+    }
+  }
+  return activeClaim
+}
+
+function isSameClaimant(activeClaim, actor, viewerLogin) {
+  if (!activeClaim) return true
+  const aNorm = String(actor ?? '').trim().toLowerCase()
+  const cNorm = String(activeClaim.actor ?? '').trim().toLowerCase()
+  if (cNorm && aNorm) return cNorm === aNorm
+  if (viewerLogin && activeClaim.login) {
+    return String(viewerLogin).trim().toLowerCase() === String(activeClaim.login).trim().toLowerCase()
+  }
+  return false
+}
+
 export async function handleClaim(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
@@ -492,8 +594,20 @@ export async function handleClaim(opts, roots) {
     const extra = String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
     ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extra])]
   }
+  if (opts.pr) {
+    const prNum = Number(String(opts.pr).replace(/^#/, '').trim())
+    if (Number.isInteger(prNum) && prNum > 0) ledger.prNumber = prNum
+  }
+
+  const isTakeover = Boolean(opts.takeover)
+  const takeoverReason = String(opts.reason ?? '').trim()
+  if (isTakeover && !takeoverReason) {
+    process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
+    return { exitCode: EXIT_POLICY_BLOCK }
+  }
+
   const actor = opts.agent ?? ledger.implementerId ?? 'local-agent'
-  if (!ledger.implementerId) ledger.implementerId = actor
+  ledger.implementerId = actor
   const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
 
@@ -506,8 +620,12 @@ export async function handleClaim(opts, roots) {
   if (skipApi) {
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
+    if (isTakeover) {
+      ledger.takeoverReason = takeoverReason
+      ledger.takenOverAt = ledger.claimedAt
+    }
     writeTaskLedger(roots.mainRoot, ledger)
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status }, null, 2)}\n`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
@@ -515,24 +633,92 @@ export async function handleClaim(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const ghProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+  const ghClient = opts._ghClient ?? ghProbe.client
+  const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
+  const activeClaimsByIssue = new Map()
+  if (canQueryComments) {
+    for (const num of ledger.linkedIssues) {
+      const listRes = await ghClient.listComments({ repo: targetRepo, number: num })
+      if (!listRes.ok) continue
+      const activeClaim = analyzeIssueClaimState(listRes.comments)
+      if (activeClaim && !isSameClaimant(activeClaim, actor, ghProbe.env.trackB.login)) {
+        if (!isTakeover) {
+          if (opts.json) {
+            process.stdout.write(`${JSON.stringify({
+              blocked: true,
+              code: 'BLOCKED_ISSUE_ALREADY_CLAIMED',
+              taskId,
+              issue: num,
+              activeClaim,
+              nextStep: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`,
+            }, null, 2)}\n`)
+          }
+          process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
+          return { exitCode: EXIT_POLICY_BLOCK }
+        }
+        activeClaimsByIssue.set(num, activeClaim)
+      }
+    }
+  }
+
   const claimResults = []
   for (const num of ledger.linkedIssues) {
-    const commentRes = await ghProbe.client.postComment({
-      repo: targetRepo, number: num,
-      body: `认领：由 ${actor} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
-      statePayload: { taskId, action: 'claim', branch: ledger.branch },
+    const prevClaim = activeClaimsByIssue.get(num)
+    const commentRes = isTakeover
+      ? await ghClient.postComment({
+          repo: targetRepo,
+          number: num,
+          body: `接管认领：由 ${actor} 接管任务 \`${taskId}\`（分支 \`${ledger.branch}\`，原认领人：${prevClaim?.actor ?? prevClaim?.login ?? '无/未知'}），原因：${takeoverReason}。`,
+          statePayload: {
+            taskId,
+            action: 'takeover',
+            agent: actor,
+            previousAgent: prevClaim?.actor ?? prevClaim?.login ?? null,
+            branch: ledger.branch,
+            reason: takeoverReason,
+          },
+        })
+      : await ghClient.postComment({
+          repo: targetRepo,
+          number: num,
+          body: `认领：由 ${actor} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
+          statePayload: { taskId, action: 'claim', agent: actor, branch: ledger.branch },
+        })
+    const labelRes = await ghClient.addLabels({ repo: targetRepo, number: num, labels: ['in-progress'] })
+    claimResults.push({ issue: num, action: isTakeover ? 'takeover' : 'claim', comment: commentRes, label: labelRes })
+  }
+
+  let prTakeoverResult = null
+  if (isTakeover && ledger.prNumber) {
+    const prevActors = [...activeClaimsByIssue.values()].map((c) => c.actor ?? c.login).filter(Boolean)
+    prTakeoverResult = await ghClient.postComment({
+      repo: targetRepo,
+      number: ledger.prNumber,
+      body: `接管认领：由 ${actor} 接管关联 PR #${ledger.prNumber}（分支 \`${ledger.branch}\`，关联 Issue：${ledger.linkedIssues.map((n) => `#${n}`).join(', ')}），原因：${takeoverReason}。`,
+      statePayload: {
+        taskId,
+        action: 'takeover',
+        agent: actor,
+        previousAgent: prevActors[0] ?? null,
+        branch: ledger.branch,
+        prNumber: ledger.prNumber,
+        reason: takeoverReason,
+      },
     })
-    const labelRes = await ghProbe.client.addLabels({ repo: targetRepo, number: num, labels: ['in-progress'] })
-    claimResults.push({ issue: num, comment: commentRes, label: labelRes })
   }
 
   ledger.status = 'claimed'
   ledger.claimedAt = new Date().toISOString()
+  if (isTakeover) {
+    ledger.takeoverReason = takeoverReason
+    ledger.takenOverAt = ledger.claimedAt
+  }
   writeTaskLedger(roots.mainRoot, ledger)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, claimResults }, null, 2)}\n`)
-  else {
-    process.stdout.write(`任务 ${taskId} 已认领（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
+  } else {
+    process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }

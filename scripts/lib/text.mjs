@@ -308,8 +308,15 @@ export function parseSshConfigHostMap(input) {
 /** 按大小写不敏感查找 SSH Host 别名映射到的目标主机名。 */
 export function lookupSshHost(sshHostMap, host) {
   if (!sshHostMap || typeof sshHostMap !== 'object' || !host) return undefined
-  if (Object.prototype.hasOwnProperty.call(sshHostMap, host)) return sshHostMap[host]
   const low = String(host).toLowerCase()
+  if (sshHostMap instanceof Map) {
+    if (sshHostMap.has(host)) return sshHostMap.get(host)
+    for (const [k, v] of sshHostMap.entries()) {
+      if (String(k).toLowerCase() === low) return v
+    }
+    return undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(sshHostMap, host)) return sshHostMap[host]
   for (const [k, v] of Object.entries(sshHostMap)) {
     if (String(k).toLowerCase() === low) return v
   }

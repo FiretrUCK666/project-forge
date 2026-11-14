@@ -14,20 +14,21 @@ import { resolveRepoRoots } from '../../lib/git.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
 import { analyzeIssueDependencies, handleClaim, handleStart, inspectWorkspace } from './flow-inspect.mjs'
 import { handleFinalize, handleRework, handleSubmit, handleVerify } from './flow-lifecycle.mjs'
-import { handleAbort, handleCleanup, handleMerge, handleStatus } from './flow-merge.mjs'
+import { handleAbort, handleCleanup, handleMerge, handleRelease, handleStatus } from './flow-merge.mjs'
 
 export { analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'start', 'claim', 'finalize', 'verify', 'submit', 'rework', 'merge', 'cleanup', 'status', 'abort']
+const SUBCOMMANDS = ['inspect', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'merge', 'cleanup', 'status', 'abort']
 
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-flow/scripts/flow.mjs <子命令> [选项]',
     '',
-    '子命令（claim/finalize/verify/submit/rework/merge/cleanup/status/abort 支持自动推断 --task）：',
+    '子命令（claim/release/finalize/verify/submit/rework/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
-    '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--json]',
-    '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--json]',
+    '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--json]',
+    '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
+    '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--json]',
     '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--json]',
     '  submit    [--task <id>] [--draft] [--rework] [--json]',
@@ -49,15 +50,16 @@ async function main(argv) {
       booleanFlags: [
         'probe-auth', 'parallel', 'draft', 'rework', 'confirm', 'force',
         'keep-branch', 'human-approved', 'visual-checked', 'strict-sync',
+        'create-issue', 'takeover',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'note', 'mode', 'tier', 'target', 'cmd', 'visual-evidence', 'title', 'body',
-        'method', 'reason',
+        'labels', 'method', 'reason',
       ],
       multiFlags: ['rebut'],
-      usageHint: 'flow.mjs <inspect|start|claim|finalize|verify|submit|rework|merge|cleanup|status|abort>',
+      usageHint: 'flow.mjs <inspect|start|claim|release|finalize|verify|submit|rework|merge|cleanup|status|abort>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -103,6 +105,7 @@ async function main(argv) {
 
     if (sub === 'start') return (await handleStart(opts, roots)).exitCode
     if (sub === 'claim') return (await handleClaim(opts, roots)).exitCode
+    if (sub === 'release') return (await handleRelease(opts, roots)).exitCode
     if (sub === 'finalize') return (await handleFinalize(opts, roots)).exitCode
     if (sub === 'verify') return (await handleVerify(opts, roots)).exitCode
     if (sub === 'submit') return (await handleSubmit(opts, roots)).exitCode

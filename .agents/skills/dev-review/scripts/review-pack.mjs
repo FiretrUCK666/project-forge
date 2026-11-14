@@ -3,1894 +3,390 @@
  * review-pack.mjs -- Context-isolated review pack builder, untrusted PR scanner,
  * doc-code parity checker, and 6-lock convergence ledger recorder.
  *
- * Self-contained module: uses Node 18+ built-in `node:*` modules only.
+ * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, posix, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/shared.mjs'
-
-const EXIT = Object.freeze({
-  OK: 0,
-  ERROR: 1,
-  USAGE_OR_POLICY: 2,
-  UNTRUSTED_HAZARD: 3,
-  STOP_LOSS: 4,
-})
-
-const DEV_PROFILE_KEYS = ['quick-test', 'full-test', 'smoke-verify', 'merge-gate', 'arch-rules', 'high-risk', 'do-not-edit']
-const GOD_FILE_WARN_LINES = 800
-const GOD_FILE_HIGH_LINES = 1500
-
-const LOCKFILE_NAMES = new Set([
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lock',
-  'bun.lockb',
-  'poetry.lock',
-  'uv.lock',
-  'pipfile.lock',
-  'cargo.lock',
-  'go.sum',
-  'gemfile.lock',
-  'composer.lock',
-  'flake.lock',
-])
-
-const LIFECYCLE_HOOK_RE = /"(?:preinstall|install|postinstall|preuninstall|uninstall|postuninstall|prepublish|prepublishOnly|preprepare|prepare|postprepare|prepack|postpack)"\s*:/
-
-const BUILD_SCRIPT_RE = /(?:^|\/)(?:Makefile|GNUmakefile|makefile|justfile|Taskfile\.ya?ml|build\.rs|setup\.py)$|\.(?:mk)$|(?:^|\/)(?:preinstall|install|postinstall|bootstrap)\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$|(?:^|\/)(?:scripts?|tools?|build)\/[^/]*(?:build|install|setup|bootstrap|hook)[^/]*\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$/i
-
-const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs)\/|\.(?:test|spec)\.[^/]+$|_test\.[^/]+$|test_[^/]+\.py$/i
-
-const TEST_SKIP_RE = /\b(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip|pytest\.mark\.skipif|unittest\.skip)|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(/
-
-const ASSERTION_RE = /\b(?:assert(?:\.\w+)?|expect|should|t\.(?:Error|Errorf|Fatal|Fatalf)|assertRaises|pytest\.raises|assert_eq!|assert!)\b|\b(?:it|test)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]/
-
-const CODE_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|rs|go|java|kt|rb|php|cs|c|cpp|h|hpp|sh|bash|ps1)$/i
-const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
-const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
-const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
-const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)|(?:以前是|原先是|原本是|之前是|旧版是|后来改成|后来改为|历史兼容保留)/i
-const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
-const EXCUSE_TEMP_RE = /\bTEMP\b/
-const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
-const CI_LOOSEN_RE = /\bpermissions:\s*write-all\b|\bpull_request_target\b/
-
-function isMainModule(metaUrl, argv1) {
-  if (typeof argv1 !== 'string' || argv1 === '') return false
-  const target = fileURLToPath(metaUrl)
-  try {
-    if (resolve(argv1) === resolve(target)) return true
-  } catch { /* fall through */ }
-  const real = (p) => {
-    try { return realpathSync.native(p) } catch { return undefined }
-  }
-  const a = real(argv1)
-  const b = real(target)
-  return a !== undefined && b !== undefined && a === b
-}
-
-function posixPath(p) {
-  return String(p ?? '').replace(/\\/g, '/')
-}
-
-function readTextSafe(filePath, maxBytes = 512 * 1024) {
-  try {
-    const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
-    const buf = readFileSync(filePath)
-    if (buf.subarray(0, 4096).includes(0)) return undefined
-    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return undefined
-  }
-}
-
-function readJsonSafe(filePath) {
-  const txt = readTextSafe(filePath)
-  if (txt === undefined) return undefined
-  try { return JSON.parse(txt) } catch { return undefined }
-}
-
-function writeAtomic(filePath, content) {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
-  try {
-    writeFileSync(tmp, content, 'utf8')
-    renameSync(tmp, filePath)
-  } finally {
-    try { if (existsSync(tmp)) rmSync(tmp, { force: true }) } catch { /* ignore */ }
-  }
-}
-
-function runGit(cwd, args, opts = {}) {
-  const fullArgs = ['-c', 'core.quotepath=false', ...args]
-  try {
-    const out = execFileSync('git', fullArgs, {
-      cwd,
-      encoding: opts.buffer ? 'buffer' : 'utf8',
-      timeout: opts.timeout ?? 20000,
-      maxBuffer: 64 * 1024 * 1024,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GCM_INTERACTIVE: 'never',
-      },
-    })
-    return {
-      ok: true,
-      status: 0,
-      stdout: opts.buffer ? out : String(out).replace(/\r\n/g, '\n').trimEnd(),
-      stderr: '',
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      status: typeof err?.status === 'number' ? err.status : 1,
-      stdout: opts.buffer ? (err?.stdout ?? Buffer.alloc(0)) : String(err?.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-      stderr: String(err?.stderr ?? err?.message ?? '').replace(/\r\n/g, '\n').trim(),
-    }
-  }
-}
-
-function findRepoRoots(startDir) {
-  const target = resolve(startDir)
-  const top = runGit(target, ['rev-parse', '--show-toplevel'])
-  if (!top.ok || !top.stdout) return undefined
-  const worktreeRoot = resolve(top.stdout.trim())
-  const common = runGit(worktreeRoot, ['rev-parse', '--git-common-dir'])
-  let mainRoot = worktreeRoot
-  if (common.ok && common.stdout) {
-    const commonAbs = resolve(worktreeRoot, common.stdout.trim())
-    const parent = dirname(commonAbs)
-    if (existsSync(parent)) mainRoot = parent
-  }
-  return { worktreeRoot, mainRoot }
-}
-
-function isProfilePlaceholder(val) {
-  const s = String(val ?? '').replace(/^`+|`+$/g, '').trim()
-  if (!s || /^<!--/.test(s)) return true
-  if (/^(?:none|n\/a|无|\(none\)|\(无\)|暂无)$/i.test(s)) return true
-  if (/^<[^>\n]+>$/.test(s)) return true
-  return false
-}
-
-function parseDevProfile(repoRoot) {
-  const profile = {
-    'quick-test': [],
-    'full-test': [],
-    'smoke-verify': [],
-    'merge-gate': [],
-    'arch-rules': [],
-    'high-risk': [],
-    'do-not-edit': [],
-  }
-  const text = readTextSafe(join(repoRoot, 'AGENTS.md'))
-  if (!text) return profile
-  for (const line of text.split('\n')) {
-    const m = /^\s*(?:[-*]\s*)?`?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)`?\s*:\s*(.+?)\s*$/.exec(line)
-    if (!m) continue
-    const key = m[1]
-    const val = m[2].replace(/^`+|`+$/g, '').trim()
-    if (isProfilePlaceholder(val)) continue
-    if (key === 'arch-rules' && /^<[^>\n]+>\s*(?:->|→)\s*<[^>\n]+>$/.test(val)) continue
-    if (key === 'high-risk' || key === 'do-not-edit' || key === 'arch-rules') {
-      const items = val
-        .split(/[,，]/)
-        .map((s) => s.trim().replace(/^`+|`+$/g, ''))
-        .filter((s) => !isProfilePlaceholder(s) && !(key === 'arch-rules' && /^<[^>\n]+>\s*(?:->|→)\s*<[^>\n]+>$/.test(s)))
-      profile[key].push(...items)
-    } else {
-      profile[key].push(val)
-    }
-  }
-  return profile
-}
-
-function hasCommits(repoRoot) {
-  return runGit(repoRoot, ['rev-parse', '--verify', 'HEAD']).ok
-}
-
-function resolveDefaultBaseRef(repoRoot) {
-  const sym = runGit(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-  if (sym.ok && sym.stdout.trim()) {
-    const ref = sym.stdout.trim()
-    if (runGit(repoRoot, ['rev-parse', '--verify', ref]).ok) return ref
-  }
-  for (const cand of ['main', 'master', 'origin/main', 'origin/master', 'trunk']) {
-    if (runGit(repoRoot, ['rev-parse', '--verify', cand]).ok) return cand
-  }
-  return undefined
-}
-
-function computeDiffRange(repoRoot, baseRef, headRef) {
-  const mb = runGit(repoRoot, ['merge-base', baseRef, headRef])
-  if (mb.ok && mb.stdout.trim()) return `${mb.stdout.trim()}..${headRef}`
-  return `${baseRef}..${headRef}`
-}
-
-function collectDiff(repoRoot, spec) {
-  const argsBase = ['diff', '--no-ext-diff', '--no-color']
-  let diffArgs
-  let nameStatusArgs
-  if (spec.mode === 'local') {
-    if (hasCommits(repoRoot)) {
-      diffArgs = [...argsBase, 'HEAD']
-      nameStatusArgs = ['diff', '--name-status', 'HEAD']
-    } else {
-      diffArgs = [...argsBase, '--cached']
-      nameStatusArgs = ['diff', '--name-status', '--cached']
-    }
-  } else if (spec.mode === 'staged') {
-    diffArgs = [...argsBase, '--cached']
-    nameStatusArgs = ['diff', '--name-status', '--cached']
-  } else {
-    diffArgs = [...argsBase, spec.range]
-    nameStatusArgs = ['diff', '--name-status', spec.range]
-  }
-
-  const rawBufRes = runGit(repoRoot, diffArgs, { buffer: true })
-  const rawBuf = Buffer.isBuffer(rawBufRes.stdout) ? rawBufRes.stdout : Buffer.from('')
-  const sha256 = createHash('sha256').update(rawBuf).digest('hex')
-  const bytes = rawBuf.length
-  const text = rawBuf.toString('utf8').replace(/\r\n/g, '\n')
-
-  const ns = runGit(repoRoot, nameStatusArgs)
-  const files = []
-  if (ns.ok && ns.stdout) {
-    for (const line of ns.stdout.split('\n')) {
-      if (!line.trim()) continue
-      const parts = line.split('\t')
-      const status = parts[0].trim()
-      const file = posixPath(parts[parts.length - 1].trim())
-      files.push({ status, file, oldFile: parts.length > 2 ? posixPath(parts[1].trim()) : undefined })
-    }
-  }
-
-  const untracked = []
-  if (spec.mode === 'local') {
-    const st = runGit(repoRoot, ['ls-files', '--others', '--exclude-standard'])
-    if (st.ok && st.stdout) {
-      for (const f of st.stdout.split('\n')) {
-        if (f.trim()) untracked.push(posixPath(f.trim()))
-      }
-    }
-  }
-
-  return { sha256, bytes, text, files, untracked }
-}
-
-function splitDiffByFile(diffText) {
-  const chunks = new Map()
-  const lines = String(diffText ?? '').split('\n')
-  let currentFile = null
-  let buf = []
-  const flush = () => {
-    if (currentFile !== null) chunks.set(currentFile, buf.join('\n'))
-  }
-  for (const line of lines) {
-    if (line.startsWith('diff --git ')) {
-      flush()
-      const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line)
-      currentFile = m ? posixPath(m[2]) : null
-      buf = [line]
-    } else if (currentFile !== null) {
-      if (line.startsWith('+++ b/')) currentFile = posixPath(line.slice(6).trim())
-      else if (line.startsWith('--- a/') && currentFile === null) currentFile = posixPath(line.slice(6).trim())
-      buf.push(line)
-    }
-  }
-  flush()
-  return chunks
-}
-
-function summarizeHunkChanges(fileDiff) {
-  const added = []
-  const removed = []
-  for (const line of String(fileDiff ?? '').split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) continue
-    if (line.startsWith('+')) added.push(line.slice(1))
-    else if (line.startsWith('-')) removed.push(line.slice(1))
-  }
-  return { added, removed }
-}
-
-/**
- * Static supply-chain and gate-weakening scanner for untrusted diffs.
- * Scans changed file paths + added/removed hunk lines BEFORE running any code.
- */
-function scanUntrustedDiff(diff, repoRoot) {
-  const hazards = []
-  const chunks = splitDiffByFile(diff.text)
-  const allFiles = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
-
-  for (const entry of allFiles) {
-    const f = entry.file
-    const base = f.split('/').pop()?.toLowerCase() ?? ''
-    const fileDiff = chunks.get(f) ?? ''
-    let { added, removed } = summarizeHunkChanges(fileDiff)
-    if (entry.status === '?' && added.length === 0 && repoRoot) {
-      const raw = readTextSafe(join(repoRoot, f))
-      if (raw) added = raw.split('\n')
-    }
-    const excerpt = [...added.slice(0, 4).map((l) => `+ ${l}`), ...removed.slice(0, 2).map((l) => `- ${l}`)]
-
-    if (f.startsWith('.github/workflows/') || f.startsWith('.github/actions/')) {
-      hazards.push({
-        category: 'workflow',
-        file: f,
-        reason: 'Modifies CI/workflow automation (privileged execution surface)',
-        excerpt,
-      })
-      continue
-    }
-
-    if (f.startsWith('.husky/') || f.startsWith('.githooks/') || f.startsWith('.git/hooks/')) {
-      hazards.push({
-        category: 'git-hook',
-        file: f,
-        reason: 'Modifies local git hooks that run automatically on git commands',
-        excerpt,
-      })
-      continue
-    }
-
-    if (f.startsWith('.agents/skills/')) {
-      hazards.push({
-        category: 'agent-skills',
-        file: f,
-        reason: 'Modifies local agent skills / executable skill scripts',
-        excerpt,
-      })
-      continue
-    }
-
-    if (f === '.gitattributes') {
-      hazards.push({
-        category: 'gitattributes',
-        file: f,
-        reason: 'Modifies .gitattributes (package boundaries / filter / diff attributes)',
-        excerpt,
-      })
-      continue
-    }
-
-    if (LOCKFILE_NAMES.has(base)) {
-      hazards.push({
-        category: 'lockfile',
-        file: f,
-        reason: 'Modifies dependency lockfile (check for registry/tarball/git URL tampering)',
-        excerpt,
-      })
-      continue
-    }
-
-    if (base === 'package.json') {
-      const hookLines = added.filter((l) => LIFECYCLE_HOOK_RE.test(l))
-      if (hookLines.length > 0) {
-        hazards.push({
-          category: 'lifecycle-hook',
-          file: f,
-          reason: 'Adds or modifies npm lifecycle hook script (preinstall/install/postinstall/prepare)',
-          excerpt: hookLines.slice(0, 5).map((l) => `+ ${l}`),
-        })
-      }
-    } else if (BUILD_SCRIPT_RE.test(f)) {
-      hazards.push({
-        category: 'build-script',
-        file: f,
-        reason: 'Modifies Makefile or build/install script',
-        excerpt,
-      })
-    }
-
-    hazards.push(...detectGateWeakeningInEntry({ file: f, status: entry.status, added, removed }))
-  }
-
-  return hazards
-}
-
-function detectGateWeakeningInEntry({ file, status, added, removed }) {
-  const hits = []
-  if (/\.mdx?$|\.txt$/i.test(file)) return hits
-  if (status === 'D' && TEST_FILE_RE.test(file)) {
-    hits.push({
-      category: 'gate-weakening',
-      file,
-      reason: 'Deletes test file (weakens regression gate)',
-      excerpt: [`- deleted ${file}`],
-    })
-  }
-  const isRegexLine = (l) => /^\s*(?:const|let|var|if|else\s+if|return)\b.*\/[^/]+\//.test(l)
-  const skipHits = added.filter((l) => TEST_SKIP_RE.test(l) && !isRegexLine(l))
-  if (skipHits.length > 0) {
-    hits.push({
-      category: 'gate-weakening',
-      file,
-      reason: 'Adds test skip/only/ignore marker',
-      excerpt: skipHits.slice(0, 4).map((l) => `+ ${l}`),
-    })
-  }
-  const weakenHits = added.filter((l) => {
-    if (/\|\|\s*true\b|continue-on-error:\s*true\b|--no-verify\b|--passWithNoTests\b/.test(l)) {
-      return !isRegexLine(l)
-    }
-    const { commentText } = extractLineCommentInfo(l, false)
-    return Boolean(commentText && /(?:eslint-disable(?:-next-line)?|@ts-nocheck)\b/.test(commentText))
-  })
-  if (weakenHits.length > 0) {
-    hits.push({
-      category: 'gate-weakening',
-      file,
-      reason: 'Adds gate-bypass or error-suppression directive',
-      excerpt: weakenHits.slice(0, 4).map((l) => `+ ${l}`),
-    })
-  }
-  if ((file.startsWith('.github/workflows/') || file.startsWith('.github/actions/')) && added.some((l) => CI_LOOSEN_RE.test(l))) {
-    const ciHits = added.filter((l) => CI_LOOSEN_RE.test(l))
-    hits.push({
-      category: 'gate-weakening',
-      file,
-      reason: 'Loosens CI workflow permissions or trigger trust boundary',
-      excerpt: ciHits.slice(0, 4).map((l) => `+ ${l}`),
-    })
-  }
-  if (TEST_FILE_RE.test(file)) {
-    const removedAssertions = removed.filter((l) => ASSERTION_RE.test(l))
-    const addedAssertions = added.filter((l) => ASSERTION_RE.test(l))
-    if (removedAssertions.length > 0 && addedAssertions.length < removedAssertions.length) {
-      hits.push({
-        category: 'gate-weakening',
-        file,
-        reason: `Removes ${removedAssertions.length} assertion/test line(s) with only ${addedAssertions.length} replacement(s)`,
-        excerpt: removedAssertions.slice(0, 4).map((l) => `- ${l}`),
-      })
-    }
-  }
-  return hits
-}
-
-/**
- * Checks whether code surface changes (exported API, CLI flags, module structure,
- * runtime requirements, or high-risk files) lack corresponding doc updates,
- * and checks open [ ] checkboxes or unarchived docs/todo/ files.
- */
-function checkDocCodeParity(repoRoot, mainRoot, diff, devProfile, task) {
-  const changedFiles = new Set(diff.files.map((f) => f.file))
-  for (const u of diff.untracked) changedFiles.add(u)
-  const chunks = splitDiffByFile(diff.text)
-
-  const docCandidates = ['docs/TDD.md', 'README.md', 'README.en.md', 'AGENTS.md']
-  const existingDocs = docCandidates.filter((d) => existsSync(join(repoRoot, d)))
-  const docsTouched = [...changedFiles].filter((f) =>
-    f === 'docs/TDD.md' || /^README(?:\.[^/]+)?\.md$/i.test(f) || f === 'AGENTS.md' || f.endsWith('/AGENTS.md'),
-  )
-
-  const triggers = []
-  const inspectParityFile = (f, status, lines) => {
-    if (f.startsWith('docs/') || f.endsWith('.md')) return
-    if (status.startsWith('A') || status.startsWith('D') || status.startsWith('R') || status === '?') {
-      if (CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f)) {
-        triggers.push({ type: 'module-structure', file: f, detail: `File ${status} changes module layout` })
-      }
-    }
-    if (CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f)) {
-      if (lines.some((l) => EXPORT_API_RE.test(l))) {
-        triggers.push({ type: 'exported-api', file: f, detail: 'Exported API signature touched' })
-      }
-      if (lines.some((l) => CLI_FLAG_RE.test(l))) {
-        triggers.push({ type: 'cli-options', file: f, detail: 'CLI option/argument handling touched' })
-      }
-    }
-    const base = f.split('/').pop()
-    if (['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', '.nvmrc', '.python-version'].includes(base)) {
-      if (lines.some((l) => /engines|requires-python|rust-version|^go\s+/i.test(l)) || base === '.nvmrc' || base === '.python-version') {
-        triggers.push({ type: 'runtime-req', file: f, detail: 'Environment/runtime requirements touched' })
-      }
-    }
-    for (const hr of devProfile['high-risk']) {
-      const norm = hr.replace(/^\.\//, '')
-      if (norm && (f === norm || (norm.endsWith('/') && f.startsWith(norm)) || f.startsWith(`${norm}/`))) {
-        triggers.push({ type: 'high-risk-path', file: f, detail: `Matches high-risk rule "${hr}"` })
-      }
-    }
-  }
-
-  for (const entry of diff.files) {
-    const fileDiff = chunks.get(entry.file) ?? ''
-    const { added, removed } = summarizeHunkChanges(fileDiff)
-    inspectParityFile(entry.file, entry.status, [...added, ...removed])
-  }
-  for (const u of diff.untracked) {
-    const raw = readTextSafe(join(repoRoot, u))
-    inspectParityFile(u, '?', raw ? raw.split('\n') : [])
-  }
-
-  const todoIssues = []
-  const todoDir = join(repoRoot, 'docs', 'todo')
-  const checkTodoFile = (relPath) => {
-    let normRel = posixPath(relPath)
-    let abs = join(repoRoot, normRel)
-    if (!existsSync(abs) && normRel.startsWith('docs/todo/')) {
-      const archivedRel = `docs/archive/todo/${normRel.slice('docs/todo/'.length)}`
-      const archivedAbs = join(repoRoot, archivedRel)
-      if (existsSync(archivedAbs)) {
-        normRel = archivedRel
-        abs = archivedAbs
-      }
-    }
-    const txt = readTextSafe(abs)
-    if (!txt) return
-    const unchecked = (txt.match(/^- \[ \]\s+.+$/gm) ?? []).length
-    const isArchived = normRel.startsWith('docs/archive/todo/')
-    if (unchecked > 0 || !isArchived) {
-      todoIssues.push({
-        file: normRel,
-        unchecked,
-        unarchived: !isArchived,
-      })
-    }
-  }
-
-  if (task?.todoFile) checkTodoFile(task.todoFile)
-  for (const f of changedFiles) {
-    if (f.startsWith('docs/todo/') && f.endsWith('.md')) {
-      if (!todoIssues.some((t) => t.file === f)) checkTodoFile(f)
-    }
-  }
-  if (task && existsSync(todoDir)) {
-    try {
-      for (const name of readdirSync(todoDir)) {
-        if (!name.endsWith('.md')) continue
-        const rel = `docs/todo/${name}`
-        if (!todoIssues.some((t) => t.file === rel) && (!task.slug || name.includes(task.slug))) {
-          checkTodoFile(rel)
-        }
-      }
-    } catch { /* ignore */ }
-  }
-
-  const parityMissingDocs = triggers.length > 0 && existingDocs.length > 0 && docsTouched.length === 0
-  return {
-    triggers,
-    existingDocs,
-    docsTouched,
-    parityMissingDocs,
-    todoIssues,
-  }
-}
-
-function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
-  const criteria = []
-  const seen = new Set()
-  const readFrom = (relPath) => {
-    if (!relPath) return
-    const p1 = join(repoRoot, relPath)
-    const p2 = join(mainRoot, relPath)
-    const txt = readTextSafe(p1) ?? readTextSafe(p2)
-    if (!txt) return
-    for (const line of txt.split('\n')) {
-      const m = /^- \[([ xX])\]\s+(C\d+)\s*:\s*(.+)$/.exec(line.trim())
-      if (!m) continue
-      const id = m[2]
-      if (seen.has(id)) continue
-      seen.add(id)
-      criteria.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: posixPath(relPath) })
-    }
-  }
-  readFrom(task?.specFile)
-  readFrom(task?.todoFile)
-  return criteria
-}
-
-function taskFilePath(mainRoot, taskId) {
-  return join(mainRoot, '.worktrees', '.state', 'tasks', `${taskId}.json`)
-}
-
-function findTaskByPr(mainRoot, prNumber) {
-  const dir = join(mainRoot, '.worktrees', '.state', 'tasks')
-  if (!existsSync(dir)) return undefined
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.json')) continue
-    const data = readJsonSafe(join(dir, name))
-    if (data && String(data.prNumber) === String(prNumber)) return data
-  }
-  return undefined
-}
-
-function parseMustFixItem(raw, idx) {
-  if (typeof raw === 'string' && raw.trim().startsWith('{')) {
-    try {
-      const obj = JSON.parse(raw)
-      return normalizeMustFixObj(obj, idx)
-    } catch { /* fall back to text */ }
-  }
-  const text = String(raw ?? '').trim()
-  const cMatch = /^(C\d+)\s*[:：-]\s*(.+)$/i.exec(text)
-  const criterion = cMatch ? cMatch[1].toUpperCase() : undefined
-  const body = cMatch ? cMatch[2].trim() : text
-  const fp = computeFingerprint(criterion, '', body)
-  return {
-    id: criterion ?? `MF-${idx + 1}`,
-    criterion,
-    file: '',
-    summary: text,
-    fingerprint: fp,
-    status: 'open',
-  }
-}
-
-function normalizeMustFixObj(obj, idx) {
-  const criterion = obj.criterion || (/^C\d+$/i.test(String(obj.id ?? '')) ? String(obj.id).toUpperCase() : undefined)
-  const file = posixPath(obj.file ?? '')
-  const summary = String(obj.summary ?? obj.message ?? obj.text ?? obj.id ?? '').trim()
-  const fp = obj.fingerprint ? String(obj.fingerprint).trim() : computeFingerprint(criterion, file, summary)
-  return {
-    id: String(obj.id ?? criterion ?? `MF-${idx + 1}`),
-    criterion,
-    file,
-    summary,
-    fingerprint: fp,
-    status: obj.status ?? 'open',
-  }
-}
-
-function computeFingerprint(criterion, file, summary) {
-  const normSummary = String(summary ?? '')
-    .toLowerCase()
-    .replace(/:\d+(?::\d+)?/g, '')
-    .replace(/\bline\s+\d+\b/g, '')
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
-    .trim()
-  const key = [criterion ? criterion.toUpperCase() : '', posixPath(file).toLowerCase(), normSummary]
-    .filter(Boolean)
-    .join('|')
-  return createHash('sha1').update(key || 'empty').digest('hex').slice(0, 12)
-}
-
-function resolveReviewWorktree(mainRoot, worktreeRoot, opts, task) {
-  if (opts.worktree) return resolve(opts.worktree)
-  if (task?.reviewWorktreePath) {
-    const cand = resolve(mainRoot, task.reviewWorktreePath)
-    if (existsSync(cand)) return cand
-  }
-  if (opts.task) {
-    const cand = join(mainRoot, '.worktrees', `review-${opts.task}`)
-    if (existsSync(cand)) return cand
-  }
-  if (opts.pr) {
-    const cand = join(mainRoot, '.worktrees', `review-pr-${opts.pr}`)
-    if (existsSync(cand)) return cand
-  }
-  if (task?.worktreePath) {
-    const cand = resolve(mainRoot, task.worktreePath)
-    if (existsSync(cand)) return cand
-  }
-  return worktreeRoot
-}
-
-function highRiskHits(diff, devProfile) {
-  const hits = []
-  const rules = devProfile['high-risk']
-  const allEntries = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
-  for (const entry of allEntries) {
-    for (const rule of rules) {
-      const clean = posixPath(rule).replace(/^\.\//, '')
-      if (!clean) continue
-      if (entry.file === clean || (clean.endsWith('/') && entry.file.startsWith(clean)) || entry.file.startsWith(`${clean}/`)) {
-        hits.push({ file: entry.file, rule })
-      }
-    }
-  }
-  return hits
-}
-
-function extractLineCommentInfo(line, inBlock = false) {
-  const s = String(line ?? '')
-  const commentParts = []
-  let i = 0
-  let block = inBlock
-  let quote = ''
-  let prevSig = ''
-
-  if (block) {
-    const end = s.indexOf('*/')
-    if (end === -1) return { commentText: s.trim(), nextInBlock: true }
-    commentParts.push(s.slice(0, end))
-    block = false
-    i = end + 2
-  }
-
-  while (i < s.length) {
-    const ch = s[i]
-    const next = s[i + 1]
-    if (quote) {
-      if (ch === '\\') { i += 2; continue }
-      if (ch === quote) quote = ''
-      i += 1
-      continue
-    }
-    if (ch === '\'' || ch === '"' || ch === '`') {
-      quote = ch
-      prevSig = ch
-      i += 1
-      continue
-    }
-    if (ch === '/' && next === '/') {
-      commentParts.push(s.slice(i + 2))
-      break
-    }
-    if (ch === '/' && next === '*') {
-      const end = s.indexOf('*/', i + 2)
-      if (end === -1) {
-        commentParts.push(s.slice(i + 2))
-        block = true
-        break
-      }
-      commentParts.push(s.slice(i + 2, end))
-      i = end + 2
-      continue
-    }
-    if (ch === '/') {
-      const canRegex = !prevSig || '=(:,?[!&|;{}~^+-*'.includes(prevSig)
-        || /\b(?:return|case|throw|typeof|await|yield)$/.test(s.slice(0, i).trimEnd())
-      if (canRegex) {
-        let j = i + 1
-        let inClass = false
-        let closed = false
-        while (j < s.length) {
-          const rc = s[j]
-          if (rc === '\\') { j += 2; continue }
-          if (rc === '[') inClass = true
-          else if (rc === ']' && inClass) inClass = false
-          else if (rc === '/' && !inClass) { closed = true; break }
-          j += 1
-        }
-        if (closed) {
-          prevSig = '/'
-          i = j + 1
-          continue
-        }
-      }
-    }
-    if (ch === '#') {
-      const prevCh = i > 0 ? s[i - 1] : ''
-      if ((i === 0 || /\s/.test(prevCh)) && next !== '!' && next !== '[') {
-        commentParts.push(s.slice(i + 1))
-        break
-      }
-    }
-    if (!/\s/.test(ch)) prevSig = ch
-    i += 1
-  }
-
-  return { commentText: commentParts.join(' ').trim(), nextInBlock: block }
-}
-
-function globToRegExp(rawGlob) {
-  const g = posixPath(rawGlob).trim().replace(/^`+|`+$/g, '').replace(/^\.\//, '').replace(/\/+$/, '')
-  if (!g) return null
-  if (g.endsWith('/**') && !g.slice(0, -3).includes('*') && !g.slice(0, -3).includes('?')) {
-    const base = g.slice(0, -3).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return new RegExp(`^${base}(?:/.*)?$`)
-  }
-  const hasWild = /[*?]/.test(g)
-  let expr = ''
-  for (let i = 0; i < g.length; i += 1) {
-    const ch = g[i]
-    if (ch === '*') {
-      if (g[i + 1] === '*') {
-        if (g[i + 2] === '/') {
-          expr += '(?:.+/)?'
-          i += 2
-        } else {
-          expr += '.*'
-          i += 1
-        }
-      } else {
-        expr += '[^/]*'
-      }
-    } else if (ch === '?') {
-      expr += '[^/]'
-    } else {
-      expr += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    }
-  }
-  if (!hasWild) expr = `${expr}(?:/.*)?`
-  return new RegExp(`^${expr}$`)
-}
-
-function parseArchRules(ruleList) {
-  const parsed = []
-  for (const raw of ruleList ?? []) {
-    const m = /^(.+?)\s*(?:->|→)\s*(.+)$/.exec(String(raw ?? '').trim())
-    if (!m) continue
-    const fromGlob = m[1].trim()
-    const toGlob = m[2].trim()
-    if (isProfilePlaceholder(fromGlob) || isProfilePlaceholder(toGlob)) continue
-    const fromRe = globToRegExp(fromGlob)
-    const toRe = globToRegExp(toGlob)
-    if (fromRe && toRe) parsed.push({ raw: `${fromGlob} -> ${toGlob}`, fromGlob, toGlob, fromRe, toRe })
-  }
-  return parsed
-}
-
-function extractImportsFromCode(relFile, text) {
-  const ext = posixPath(relFile).split('.').pop()?.toLowerCase() ?? ''
-  const imports = []
-  const lines = text.split('\n')
-
-  if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx'].includes(ext)) {
-    let inBlock = false
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
-      const trimmed = line.trim()
-      if (inBlock) {
-        if (trimmed.includes('*/')) inBlock = false
-        continue
-      }
-      if (trimmed.startsWith('/*') && !trimmed.includes('*/')) { inBlock = true; continue }
-      if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue
-      for (const re of [
-        /(?:^|\b)(?:import|export)\s+(?:[^'"\n]*?\bfrom\s+)?['"]([^'"\n]+)['"]/g,
-        /\bimport\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g,
-        /\brequire\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g,
-      ]) {
-        for (const m of line.matchAll(re)) {
-          imports.push({ line: i + 1, specifier: m[1], kind: 'js' })
-        }
-      }
-    }
-  } else if (ext === 'py') {
-    for (let i = 0; i < lines.length; i += 1) {
-      const trimmed = lines[i].trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const fm = /^from\s+(\.{0,3}[A-Za-z0-9_.]*)\s+import\b/.exec(trimmed)
-      if (fm) {
-        imports.push({ line: i + 1, specifier: fm[1], kind: 'py' })
-        continue
-      }
-      const im = /^import\s+([A-Za-z0-9_.]+(?:\s*,\s*[A-Za-z0-9_.]+)*)/.exec(trimmed)
-      if (im) {
-        for (const part of im[1].split(',')) {
-          const mod = part.trim().split(/\s+/)[0]
-          if (mod) imports.push({ line: i + 1, specifier: mod, kind: 'py' })
-        }
-      }
-    }
-  } else if (ext === 'go') {
-    let inImportBlock = false
-    for (let i = 0; i < lines.length; i += 1) {
-      const trimmed = lines[i].trim()
-      if (!trimmed || trimmed.startsWith('//')) continue
-      if (/^import\s*\(/.test(trimmed)) { inImportBlock = true; continue }
-      if (inImportBlock) {
-        if (trimmed.startsWith(')')) { inImportBlock = false; continue }
-        const gm = /"([^"]+)"/.exec(trimmed)
-        if (gm) imports.push({ line: i + 1, specifier: gm[1], kind: 'go' })
-        continue
-      }
-      const sm = /^import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+|_\s+|\.\s+)?"([^"]+)"/.exec(trimmed)
-      if (sm) imports.push({ line: i + 1, specifier: sm[1], kind: 'go' })
-    }
-  }
-  return imports
-}
-
-function resolveImportCandidates(fromFile, specifier, kind, repoRoot = null) {
-  const fromDir = posix.dirname(posixPath(fromFile))
-  const cands = new Set()
-  const addWithExts = (base) => {
-    const norm = posix.normalize(base).replace(/^\.\//, '')
-    cands.add(norm)
-    for (const ext of ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.jsx', '.py']) {
-      cands.add(`${norm}${ext}`)
-    }
-    for (const idx of ['index.mjs', 'index.js', 'index.ts', 'index.tsx', '__init__.py']) {
-      cands.add(posix.join(norm, idx))
-    }
-  }
-  const ancestorPrefixes = () => {
-    const parts = fromDir === '.' ? [] : fromDir.split('/').filter(Boolean)
-    const out = []
-    for (let k = 1; k < parts.length; k += 1) out.push(parts.slice(0, k).join('/'))
-    return out
-  }
-  const addAnchoredVariants = (sub, withExts = true) => {
-    if (!repoRoot || !sub || sub.includes(':')) return
-    const firstSeg = sub.split('/')[0]
-    if (!firstSeg || firstSeg === '.' || firstSeg === '..') return
-    for (const anc of ancestorPrefixes()) {
-      const probeBase = join(repoRoot, anc, firstSeg)
-      const existsInRepo = existsSync(probeBase)
-        || ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.jsx', '.py'].some((ext) => existsSync(`${probeBase}${ext}`))
-      if (existsInRepo) {
-        const joined = posix.join(anc, sub)
-        if (withExts) addWithExts(joined)
-        else cands.add(joined)
-      }
-    }
-  }
-
-  if (kind === 'py') {
-    const dotLead = /^(\.+)(.*)$/.exec(specifier)
-    if (dotLead) {
-      const ups = dotLead[1].length - 1
-      let baseDir = fromDir === '.' ? '' : fromDir
-      for (let u = 0; u < ups; u += 1) baseDir = posix.dirname(baseDir)
-      const rest = dotLead[2].replace(/\./g, '/')
-      addWithExts(baseDir && baseDir !== '.' ? (rest ? posix.join(baseDir, rest) : baseDir) : rest)
-    } else {
-      const specPath = specifier.replace(/\./g, '/')
-      addWithExts(specPath)
-      addAnchoredVariants(specPath, true)
-    }
-  } else if (specifier.startsWith('./') || specifier.startsWith('../')) {
-    addWithExts(posix.join(fromDir === '.' ? '' : fromDir, specifier))
-  } else if (specifier.startsWith('/')) {
-    addWithExts(specifier.slice(1))
-  } else {
-    const clean = specifier.replace(/^(?:@\/|~\/)/, '')
-    addWithExts(clean)
-    addAnchoredVariants(clean, true)
-    if (kind === 'go') {
-      const parts = clean.split('/')
-      for (let k = 1; k < parts.length; k += 1) {
-        const sub = parts.slice(k).join('/')
-        cands.add(sub)
-        addAnchoredVariants(sub, false)
-      }
-    }
-  }
-  return [...cands]
-}
-
-function evaluateArchRules(repoRoot, fileRelList, rawRules) {
-  const rules = parseArchRules(rawRules)
-  if (rules.length === 0) return []
-  const violations = []
-  for (const rel of fileRelList) {
-    const relPosix = posixPath(rel)
-    const matching = rules.filter((r) => r.fromRe.test(relPosix))
-    if (matching.length === 0) continue
-    const text = readTextSafe(join(repoRoot, relPosix))
-    if (!text) continue
-    const lines = text.split('\n')
-    const imports = extractImportsFromCode(relPosix, text)
-    for (const imp of imports) {
-      const cands = resolveImportCandidates(relPosix, imp.specifier, imp.kind, repoRoot)
-      for (const rule of matching) {
-        const hitTarget = cands.find((c) => rule.toRe.test(c))
-        if (hitTarget) {
-          violations.push({
-            file: relPosix,
-            line: imp.line,
-            rule: rule.raw,
-            specifier: imp.specifier,
-            resolvedTarget: hitTarget,
-            lineText: (lines[imp.line - 1] ?? '').trim().slice(0, 120),
-            fixHint: `Root-cause fix: invert dependency or extract shared interface/port outside "${rule.toGlob}" instead of bypassing "${rule.raw}".`,
-          })
-        }
-      }
-    }
-  }
-  return violations
-}
-
-function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHits, parity }) {
-  const runtimeFilesTouched = [...diff.files.map((f) => f.file), ...diff.untracked]
-    .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
-  const visualFilesChanged = [...new Set([
-    ...diff.files.map((f) => f.file),
-    ...diff.untracked,
-  ])]
-    .map((f) => f.replace(/\\/g, '/'))
-    .filter((f) => UI_VISUAL_EXT_RE.test(f))
-    .sort()
-  const empiricalVisualCheckRequired = visualFilesChanged.length > 0
-  const smokeCommands = devProfile['smoke-verify'] ?? []
-  const testCommands = [
-    ...(devProfile['quick-test'] ?? []),
-    ...(devProfile['full-test'] ?? []),
-    ...(devProfile['merge-gate'] ?? []),
-  ]
-  const smokeRequired = runtimeFilesTouched.length > 0 && smokeCommands.length > 0
-  const headMatchesVerified = task?.verifiedHead
-    ? (headSha !== 'UNBORN' && task.verifiedHead === headSha)
-    : null
-  const visualVerifiedOnHead = Boolean(
-    empiricalVisualCheckRequired
-    && task?.visualVerifiedHead
-    && headSha !== 'UNBORN'
-    && task.visualVerifiedHead === headSha,
-  )
-  const warnings = []
-  if (headMatchesVerified === false) {
-    warnings.push(`verifiedHead (${task.verifiedHead.slice(0, 8)}) != HEAD (${headSha.slice(0, 8)}); re-verify required`)
-  }
-  if (gateWeakenedHits.length > 0) {
-    warnings.push(...gateWeakenedHits.map((h) => `Gate weakening in ${h.file}: ${h.reason}`))
-  }
-  if (smokeRequired) {
-    warnings.push('Runtime code touched and smoke-verify configured: run smoke-verify locally and confirm real behavior before approval.')
-  } else if (runtimeFilesTouched.length > 0 && smokeCommands.length === 0 && parity.triggers.some((t) => t.type === 'cli-surface')) {
-    warnings.push('CLI/entrypoint code touched without `smoke-verify:` in AGENTS.md Dev Profile; exercise real CLI path manually.')
-  }
-  if (empiricalVisualCheckRequired && !visualVerifiedOnHead) {
-    warnings.push(
-      `UI/visual files changed (${visualFilesChanged.length}: ${visualFilesChanged.slice(0, 5).join(', ')}): open actual rendered page/asset, walk through user interactions end-to-end, and check Light/Dark screenshots rather than relying on source reading alone.`,
-    )
-  }
-
-  let status = 'verify-required'
-  if (gateWeakenedHits.length > 0) status = 'gate-weakened'
-  else if (headMatchesVerified === false) status = 'needs-reverify'
-  else if (headMatchesVerified === true && !smokeRequired && (!empiricalVisualCheckRequired || visualVerifiedOnHead)) {
-    status = 'verified-on-head'
-  }
-
-  return {
-    status,
-    verifiedHead: task?.verifiedHead ?? null,
-    visualVerifiedHead: task?.visualVerifiedHead ?? null,
-    visualVerifiedOnHead,
-    headSha,
-    headMatchesVerified,
-    smokeVerifyCommands: smokeCommands,
-    testCommands,
-    runtimeFilesTouched,
-    visualFilesChanged,
-    empiricalVisualCheckRequired,
-    smokeRequired,
-    verificationHierarchy: 'Formal deterministic checks + empirical runtime/UI verification > adversarial code reading',
-    antiHumanProxyNote: smokeRequired
-      ? 'Execute smoke-verify locally in detached review worktree and verify stdout/exit behavior (never outsource initial runtime verification to humans).'
-      : 'Run formal & empirical checks locally before judging; Must Fix requires a violated frozen C*, failed formal gate, or reproducible empirical failure.',
-    warnings,
-  }
-}
-
-function assessStructuralGate({ reviewRoot, diff, devProfile }) {
-  const chunks = splitDiffByFile(diff.text)
-  const tombstoneComments = []
-  const excuseSuppressions = []
-  const godFiles = []
-  const codeFilesOnDisk = []
-
-  const allEntries = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
-  for (const entry of allEntries) {
-    const f = entry.file
-    if (entry.status === 'D') continue
-    if (!CODE_EXT_RE.test(f)) continue
-    codeFilesOnDisk.push(f)
-
-    let added = []
-    if (entry.status === '?') {
-      const raw = readTextSafe(join(reviewRoot, f))
-      if (raw) added = raw.split('\n')
-    } else {
-      added = summarizeHunkChanges(chunks.get(f) ?? '').added
-    }
-
-    let inBlock = false
-    for (const line of added) {
-      const { commentText, nextInBlock } = extractLineCommentInfo(line, inBlock)
-      inBlock = nextInBlock
-      if (commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
-        tombstoneComments.push({
-          file: f,
-          excerpt: line.trim().slice(0, 120),
-          hint: 'Remove historical evolution commentary; comments should describe current invariants only.',
-        })
-      }
-      if ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(line)) {
-        excuseSuppressions.push({
-          file: f,
-          excerpt: line.trim().slice(0, 120),
-          hint: 'Fix the underlying type/lint/architecture issue rather than silencing checks with suppression pragmas or workaround markers.',
-        })
-      }
-    }
-
-    if (!TEST_FILE_RE.test(f)) {
-      const fullText = readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024)
-      if (fullText) {
-        const lineCount = fullText.split('\n').length
-        if (lineCount > GOD_FILE_WARN_LINES) {
-          godFiles.push({
-            file: f,
-            lines: lineCount,
-            severity: lineCount > GOD_FILE_HIGH_LINES ? 'high' : 'warn',
-            hint: `File exceeds ${GOD_FILE_WARN_LINES} lines (${lineCount}); extract cohesive modules instead of expanding a god file.`,
-          })
-        }
-      }
-    }
-  }
-
-  const archViolations = evaluateArchRules(reviewRoot, codeFilesOnDisk, devProfile['arch-rules'])
-  const issueCount = tombstoneComments.length + excuseSuppressions.length + archViolations.length + godFiles.length
-  return {
-    status: archViolations.length > 0 || excuseSuppressions.length > 0 ? 'attention-required' : issueCount > 0 ? 'warn' : 'clean',
-    tombstoneComments,
-    excuseSuppressions,
-    archViolations,
-    godFiles,
-  }
-}
-
-function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, parity, task, gateWeakenedHits }) {
-  const gateWeakened = gateWeakenedHits.length > 0
-  const agentsText = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
-  const hasHumanMergeAuthority = /^\s*(?:[-*]\s*)?`?merge-authority`?\s*[:：]\s*human\b/im.test(agentsText)
-  const allFiles = [...diff.files.map((f) => f.file), ...diff.untracked]
-  const totalFiles = allFiles.length
-  const doNotEdit = devProfile['do-not-edit'] ?? []
-
-  const oneWayReasons = []
-  let untrustedSurface = false
-  if (gateWeakened) oneWayReasons.push('Weakens test assertions, skips tests, or loosens CI/lint/type gates')
-  if (hasHumanMergeAuthority) oneWayReasons.push('AGENTS.md specifies merge-authority: human')
-  if (task?.doorType === 'one-way') oneWayReasons.push('Task metadata declares doorType=one-way')
-
-  for (const f of allFiles) {
-    const base = f.split('/').pop()?.toLowerCase() ?? ''
-    if (f.startsWith('.github/workflows/') || f.startsWith('.github/actions/') || f.startsWith('.husky/') || f.startsWith('.agents/skills/')) {
-      untrustedSurface = true
-      if (!oneWayReasons.includes('Modifies CI workflow, git hook, or agent skill entrypoint')) {
-        oneWayReasons.push('Modifies CI workflow, git hook, or agent skill entrypoint')
-      }
-    }
-    if (base === 'package.json' || base === '.gitattributes' || LOCKFILE_NAMES.has(base) || base === 'releasing.md') {
-      if (!oneWayReasons.includes('Modifies packaging, lockfile, or release contract boundary')) {
-        oneWayReasons.push('Modifies packaging, lockfile, or release contract boundary')
-      }
-    }
-    if (/(?:^|\/)(?:migrations?|schema|auth|rbac|acl|security|secrets?)(?:\/|\.)/i.test(f)) {
-      if (!oneWayReasons.includes('Modifies schema/migration or security/auth boundary')) {
-        oneWayReasons.push('Modifies schema/migration or security/auth boundary')
-      }
-    }
-    if (doNotEdit.some((d) => { const clean = posixPath(d).replace(/^\.\//, ''); return clean && (f === clean || f.startsWith(`${clean}/`)) })) {
-      if (!oneWayReasons.includes('Modifies path listed in do-not-edit')) {
-        oneWayReasons.push('Modifies path listed in do-not-edit')
-      }
-    }
-  }
-
-  const doorType = oneWayReasons.length > 0 ? 'one-way' : 'two-way'
-  let blastRadius = 'low'
-  if (gateWeakened || hrHits.length >= 2 || oneWayReasons.length >= 2 || totalFiles >= 10 || diff.bytes >= 40000) {
-    blastRadius = 'high'
-  } else if (oneWayReasons.length === 1 || hrHits.length === 1 || parity.triggers.length > 0 || totalFiles >= 4) {
-    blastRadius = 'medium'
-  }
-
-  let mergeAuthority = 'reviewer-direct'
-  if (gateWeakened || hasHumanMergeAuthority || untrustedSurface || doorType === 'one-way') {
-    mergeAuthority = 'human-required'
-  } else if (hrHits.length > 0) {
-    mergeAuthority = 'reviewer-with-fault-injection'
-  }
-
-  return {
-    doorType,
-    gateWeakened,
-    gateWeakenedReasons: gateWeakenedHits.map((h) => `${h.file}: ${h.reason}`),
-    blastRadius,
-    mergeAuthority,
-    reasons: oneWayReasons.length > 0 ? oneWayReasons : ['Localized reversible code/test/doc change'],
-    rollbackPath: doorType === 'one-way'
-      ? 'Irreversible or high-cost rollback; require explicit human sign-off and staged rollback plan before merge.'
-      : 'Two-way door: cleanly reversible via `git revert <merge-commit>`.',
-  }
-}
-
-function formatPackText(pack) {
-  const lines = []
-  lines.push(`=== DEV-REVIEW PACK (${pack.mode.toUpperCase()}) ===`)
-  lines.push(`Worktree : ${pack.worktreeRoot}`)
-  lines.push(`Round    : ${pack.round}${pack.roundLockNote ? ` (${pack.roundLockNote})` : ''}`)
-  lines.push(`Scope    : ${pack.diffScope}`)
-  lines.push(`Head SHA : ${pack.headSha}`)
-  lines.push(`Diff Hash: sha256:${pack.diff.sha256} (${pack.diff.bytes} bytes, ${pack.diff.files.length} changed, ${pack.diff.untracked.length} untracked)`)
-  if (pack.task) {
-    lines.push(`Task     : ${pack.task.taskId} | role=${pack.task.role ?? 'unknown'} | finalized=${Boolean(pack.task.finalized)} | verifiedHead=${pack.task.verifiedHead ?? 'none'}`)
-    if (pack.headMismatchWarning) lines.push(`WARNING  : ${pack.headMismatchWarning}`)
-  }
-
-  if (pack.criteria.length > 0) {
-    lines.push('')
-    lines.push('--- Frozen Acceptance Criteria ---')
-    for (const c of pack.criteria) {
-      lines.push(`  [${c.checked ? 'x' : ' '}] ${c.id}: ${c.text} (${c.source})`)
-    }
-  }
-
-  if (pack.priorOpenMustFix.length > 0 || pack.rebuts.length > 0) {
-    lines.push('')
-    lines.push('--- Prior Round Open Must-Fix & Rebuts ---')
-    for (const mf of pack.priorOpenMustFix) {
-      lines.push(`  - [${mf.id}] (fp:${mf.fingerprint}) ${mf.summary}`)
-    }
-    for (const rb of pack.rebuts) {
-      lines.push(`  * Rebut: ${typeof rb === 'string' ? rb : JSON.stringify(rb)}`)
-    }
-  }
-
-  lines.push('')
-  lines.push('--- Changed Files ---')
-  if (pack.diff.files.length === 0 && pack.diff.untracked.length === 0) {
-    lines.push('  (no changes in scope)')
-  } else {
-    for (const f of pack.diff.files) lines.push(`  ${f.status}\t${f.file}`)
-    for (const u of pack.diff.untracked) lines.push(`  ?\t${u}`)
-  }
-
-  lines.push('')
-  lines.push('--- Doc-Code Parity Gate ---')
-  if (pack.parity.triggers.length === 0 && pack.parity.todoIssues.length === 0) {
-    lines.push('  OK: No unaddressed API/CLI/module doc parity drift or open Todo detected.')
-  } else {
-    if (pack.parity.parityMissingDocs) {
-      lines.push(`  ${pack.isFlowMode ? '[MUST_FIX_CANDIDATE]' : '[PARITY_WARN]'} Code surface changed without updating docs (${pack.parity.existingDocs.join(', ')}):`)
-    } else if (pack.parity.triggers.length > 0) {
-      lines.push('  Parity triggers (docs also touched in diff — verify accuracy):')
-    }
-    for (const t of pack.parity.triggers.slice(0, 12)) {
-      lines.push(`    - [${t.type}] ${t.file}: ${t.detail}`)
-    }
-    for (const td of pack.parity.todoIssues) {
-      lines.push(`    - ${pack.isFlowMode ? '[MUST_FIX_CANDIDATE]' : '[TODO_WARN]'} ${td.file}: unchecked=${td.unchecked}, unarchived=${td.unarchived}`)
-    }
-  }
-
-  lines.push('')
-  lines.push('## 联动同步核对（改哪看哪）')
-  const syncWarnings = pack.coupledSyncWarnings ?? []
-  if (syncWarnings.length === 0) {
-    lines.push('  OK: 未触发 AGENTS.md「改哪看哪」缺漏项。')
-  } else {
-    for (const sw of syncWarnings) {
-      lines.push(`  - [COUPLED_SYNC_WARN] 触及 ${sw.touchedTriggers.join(', ')} -> 需检查伴随更新: ${sw.expectedCompanions.join(', ')}`)
-    }
-  }
-
-  lines.push('')
-  lines.push('--- Behavioral Gate (Empirical & Smoke-Verify) ---')
-  const bg = pack.behavioralGate
-  lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired} | empiricalVisualCheckRequired=${bg.empiricalVisualCheckRequired}`)
-  if (bg.visualFilesChanged.length > 0) {
-    lines.push(`  Visual/UI Files (${bg.visualFilesChanged.length}): ${bg.visualFilesChanged.slice(0, 12).join(', ')}`)
-  }
-  if (bg.smokeVerifyCommands.length > 0) {
-    lines.push('  Smoke-Verify Commands (anti-human-proxy: run locally and observe real runtime):')
-    for (const sc of bg.smokeVerifyCommands) lines.push(`    $ ${sc}`)
-  }
-  for (const w of bg.warnings) lines.push(`  - WARN: ${w}`)
-
-  lines.push('')
-  lines.push('--- Structural Gate (Comments, Suppressions, Arch Rules, Size) ---')
-  const sg = pack.structuralGate
-  lines.push(`  Status     : ${sg.status} | tombstones=${sg.tombstoneComments.length}, excuses=${sg.excuseSuppressions.length}, archViolations=${sg.archViolations.length}, godFiles=${sg.godFiles.length}`)
-  for (const tc of sg.tombstoneComments.slice(0, 8)) lines.push(`  - [TOMBSTONE] ${tc.file}: ${tc.excerpt}`)
-  for (const ex of sg.excuseSuppressions.slice(0, 8)) lines.push(`  - [EXCUSE_SUPPRESS] ${ex.file}: ${ex.excerpt}`)
-  for (const av of sg.archViolations.slice(0, 8)) lines.push(`  - [ARCH_VIOLATION] ${av.file}:${av.line} (${av.rule}) -> "${av.specifier}" | ${av.fixHint}`)
-  for (const gf of sg.godFiles) lines.push(`  - [GOD_FILE:${gf.severity.toUpperCase()}] ${gf.file} (${gf.lines} lines): ${gf.hint}`)
-
-  lines.push('')
-  lines.push('--- Door & Blast Radius Assessment ---')
-  const da = pack.doorAssessment
-  lines.push(`  Door Type  : ${da.doorType} | gateWeakened=${da.gateWeakened} | blastRadius=${da.blastRadius} | mergeAuthority=${da.mergeAuthority}`)
-  for (const r of da.reasons) lines.push(`  - Reason   : ${r}`)
-  lines.push(`  - Rollback : ${da.rollbackPath}`)
-
-  lines.push('')
-  lines.push('--- Empirical Test & Fault Injection Checklist ---')
-  const cmds = [
-    ...pack.devProfile['quick-test'],
-    ...pack.devProfile['smoke-verify'],
-    ...pack.devProfile['full-test'],
-    ...pack.devProfile['merge-gate'],
-  ]
-  if (cmds.length > 0) {
-    lines.push('  Run project verification commands (do not guess pass/fail):')
-    for (const cmd of cmds) lines.push(`    $ ${cmd}`)
-  } else {
-    lines.push('  No Dev Profile test commands in AGENTS.md; run repository test suite manually.')
-  }
-  if (pack.highRiskHits.length > 0) {
-    lines.push('  HIGH-RISK PATHS TOUCHED (mandatory fault injection in detached review worktree):')
-    for (const h of pack.highRiskHits) lines.push(`    - ${h.file} (rule: ${h.rule})`)
-  }
-  lines.push('  Verification Precedence: Formal static gates + empirical execution/render checks > adversarial code reading.')
-  if (bg.empiricalVisualCheckRequired) {
-    lines.push('  Visual / UI Empirical Checklist (actual render + interaction + screenshots; never judge from reading code alone):')
-    lines.push('    - [ ] Open the actual rendered page, component, or SVG in a live browser/renderer (confirm clean render, no 404 or console errors)')
-    lines.push('    - [ ] Walk through interactive user flows end-to-end (clicks, form inputs, state transitions, error/empty states)')
-    lines.push('    - [ ] Capture and inspect Light & Dark theme screenshots for contrast, clipping, text overlap, and legibility')
-  }
-  lines.push('  Fault Injection Protocol (Must Fix requires violated frozen C*, failed formal gate, or reproducible empirical failure; NO subjective code-reading nitpicks):')
-  lines.push('    1. Temporarily break 1 core branch/guard in the review worktree and run test -> MUST FAIL.')
-  lines.push('    2. Restore cleanly (`git checkout -- .`) and re-run test -> MUST PASS.')
-  lines.push('    3. Classify findings strictly: Must Fix / Should Fix / Pre-existing (list all R1 locations at once).')
-
-  if (pack.untrustedWarnings.length > 0) {
-    lines.push('')
-    lines.push('--- [APPROVED_EXEC_WITH_WARNINGS] ---')
-    lines.push('  Human execution approval active. Use `--ignore-scripts` for dependency install.')
-    for (const h of pack.untrustedWarnings) {
-      lines.push(`  - [${h.category}] ${h.file}: ${h.reason}`)
-    }
-  }
-
-  if (pack.diffText) {
-    const diffLines = pack.diffText.split('\n')
-    const maxLines = 240
-    lines.push('')
-    lines.push('--- Diff Patch (Context-Isolated) ---')
-    lines.push(...diffLines.slice(0, maxLines))
-    if (diffLines.length > maxLines) {
-      lines.push(`... (truncated ${diffLines.length - maxLines} more lines; run git diff ${pack.diffScope} to inspect full patch)`)
-    }
-  }
-
-  lines.push('')
-  lines.push('[NEXT STEP]')
-  for (const step of pack.nextSteps) lines.push(`  ${step}`)
-  return lines.join('\n')
-}
-
-function handleRecord(args, roots) {
-  const { worktreeRoot, mainRoot } = roots
-  const taskId = args.task
-  if (!taskId) {
-    process.stderr.write('Error: record requires --task <id>\n')
-    return EXIT.USAGE_OR_POLICY
-  }
-  const round = Number(args.round)
-  if (!Number.isInteger(round) || round < 1) {
-    process.stderr.write('Error: record requires integer --round <1|2|3...>\n')
-    return EXIT.USAGE_OR_POLICY
-  }
-  const verdict = String(args.verdict ?? '').toLowerCase()
-  if (verdict !== 'pass' && verdict !== 'changes') {
-    process.stderr.write('Error: record requires --verdict pass|changes\n')
-    return EXIT.USAGE_OR_POLICY
-  }
-  const reviewerId = String(args.reviewerId ?? '').trim()
-  if (!reviewerId) {
-    process.stderr.write('Error: record requires non-empty --reviewer-id <id>\n')
-    return EXIT.USAGE_OR_POLICY
-  }
-
-  const tPath = taskFilePath(mainRoot, taskId)
-  const existing = readJsonSafe(tPath) ?? {
-    taskId,
-    rounds: [],
-    implementerId: args.implementerId ?? undefined,
-  }
-  const implementerId = String(args.implementerId ?? existing.implementerId ?? '').trim()
-
-  if (implementerId && reviewerId === implementerId) {
-    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${implementerId}). Independent review requires a distinct reviewer.`
-    if (args.json) {
-      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId }, null, 2)}\n`)
-    } else {
-      process.stdout.write(`${msg}\n`)
-    }
-    process.stderr.write(`${msg}\n`)
-    return EXIT.USAGE_OR_POLICY
-  }
-
-  const mustFixList = []
-  for (let i = 0; i < args.mustFix.length; i += 1) {
-    const raw = args.mustFix[i]
-    if (typeof raw === 'string' && raw.trim().startsWith('[')) {
-      try {
-        const arr = JSON.parse(raw)
-        if (Array.isArray(arr)) {
-          arr.forEach((item, j) => mustFixList.push(normalizeMustFixObj(item, mustFixList.length + j)))
-          continue
-        }
-      } catch { /* fallback */ }
-    }
-    mustFixList.push(parseMustFixItem(raw, i))
-  }
-
-  if (verdict === 'pass' && mustFixList.length > 0) {
-    process.stderr.write('Error: cannot record --verdict pass when --must-fix items are present.\n')
-    return EXIT.USAGE_OR_POLICY
-  }
-
-  const shouldFixList = args.shouldFix.map((s) => String(s).trim()).filter(Boolean)
-  const rebutAccepted = new Set(args.rebutAccepted.map((s) => String(s).trim().toLowerCase()).filter(Boolean))
-
-  const prevRounds = Array.isArray(existing.rounds) ? [...existing.rounds] : []
-  const prevRound = prevRounds.find((r) => r.round === round - 1) ?? prevRounds[prevRounds.length - 1]
-  const prevOpen = prevRound
-    ? (prevRound.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved')
-    : []
-
-  // Mark rebutted items if reviewer explicitly accepted rebuts
-  const remainingFromPrev = []
-  for (const pm of prevOpen) {
-    const matchesRebut = rebutAccepted.has(String(pm.id).toLowerCase())
-      || rebutAccepted.has(String(pm.fingerprint).toLowerCase())
-      || (pm.criterion && rebutAccepted.has(pm.criterion.toLowerCase()))
-    if (!matchesRebut) remainingFromPrev.push(pm)
-  }
-
-  // Detect repeated fingerprint across consecutive rounds
-  const prevFps = new Set(remainingFromPrev.map((m) => m.fingerprint))
-  const prevCriteria = new Set(remainingFromPrev.map((m) => m.criterion).filter(Boolean))
-  const repeatedItems = mustFixList.filter((m) =>
-    prevFps.has(m.fingerprint) || (m.criterion && prevCriteria.has(m.criterion)),
-  )
-
-  const headRes = runGit(worktreeRoot, ['rev-parse', 'HEAD'])
-  const headSha = args.head || (headRes.ok ? headRes.stdout.trim() : 'unknown')
-
-  const openCount = mustFixList.length
-  const maxRoundsExceeded = round >= 3 && (verdict === 'changes' || openCount > 0)
-  const repeatedTrigger = round >= 2 && repeatedItems.length > 0
-  const stopLoss = maxRoundsExceeded || repeatedTrigger
-
-  const stopReasons = []
-  if (maxRoundsExceeded) stopReasons.push(`round ${round} >= 3 with unresolved verdict/blockers`)
-  if (repeatedTrigger) stopReasons.push(`repeated blocker fingerprint across consecutive rounds: ${repeatedItems.map((i) => `${i.id}(${i.fingerprint})`).join(', ')}`)
-
-  const roundEntry = {
-    round,
-    headSha,
-    reviewerId,
-    verdict,
-    blockers: mustFixList.map((m) => m.summary),
-    mustFix: mustFixList,
-    shouldFix: shouldFixList,
-    rebuts: prevRound?.rebuts ?? [],
-    rebutAccepted: [...rebutAccepted],
-    faultInjection: args.faultInjection ?? '',
-    stopLossTriggered: stopLoss,
-    stopLossReasons: stopReasons,
-    recordedAt: new Date().toISOString(),
-  }
-
-  const filteredRounds = prevRounds.filter((r) => r.round !== round)
-  filteredRounds.push(roundEntry)
-  filteredRounds.sort((a, b) => a.round - b.round)
-
-  const updated = {
-    ...existing,
-    taskId,
-    implementerId: implementerId || existing.implementerId,
-    reviewerId,
-    rounds: filteredRounds,
-    lastReview: {
-      round,
-      verdict,
-      headSha,
-      reviewerId,
-      stopLossTriggered: stopLoss,
-      stopLossReasons: stopReasons,
-    },
-  }
-  if (verdict === 'pass' && !stopLoss) {
-    updated.reviewPassed = true
-    updated.reviewPassedHead = headSha
-  } else {
-    updated.reviewPassed = false
-  }
-
-  writeAtomic(tPath, `${JSON.stringify(updated, null, 2)}\n`)
-
-  if (stopLoss) {
-    const payload = {
-      status: 'STOP_LOSS_ESCALATE',
-      exitCode: EXIT.STOP_LOSS,
-      taskId,
-      round,
-      reasons: stopReasons,
-      unresolvedMustFix: mustFixList,
-      ledgerPath: posixPath(tPath),
-      nextStep: 'Halt automated review-rework loop. Escalate to human maintainer with remaining blockers and root-cause analysis.',
-    }
-    if (args.json) {
-      process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-    } else {
-      const out = [
-        'STOP_LOSS_ESCALATE',
-        `Task     : ${taskId}`,
-        `Round    : ${round}`,
-        `Exit Code: ${EXIT.STOP_LOSS} (escalate to human maintainer)`,
-        `Reasons  : ${stopReasons.join('; ')}`,
-        'Remaining Must-Fix:',
-        ...(mustFixList.length > 0 ? mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`) : ['  - (verdict=changes at round >= 3)']),
-        '',
-        '[NEXT STEP]',
-        '  Stop the automated review loop and hand this report + ledger to the human maintainer to decide scope/direction.',
-      ].join('\n')
-      process.stdout.write(`${out}\n`)
-    }
-    process.stderr.write(`STOP_LOSS_ESCALATE: ${stopReasons.join('; ')} (exit ${EXIT.STOP_LOSS})\n`)
-    return EXIT.STOP_LOSS
-  }
-
-  if (args.json) {
-    process.stdout.write(`${JSON.stringify({
-      status: verdict === 'pass' ? 'REVIEW_PASSED' : 'CHANGES_REQUESTED',
-      taskId,
-      round,
-      headSha,
-      reviewerId,
-      mustFixCount: mustFixList.length,
-      ledgerPath: posixPath(tPath),
-    }, null, 2)}\n`)
-  } else {
-    const lines = [
-      verdict === 'pass' ? 'REVIEW_PASSED' : 'CHANGES_REQUESTED',
-      `Task     : ${taskId} | Round ${round} | HEAD ${headSha}`,
-      `Reviewer : ${reviewerId}`,
-      `Ledger   : ${posixPath(tPath)}`,
-      ...(mustFixList.length > 0 ? ['Open Must-Fix:', ...mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`)] : []),
-      '',
-      '[NEXT STEP]',
-      verdict === 'pass'
-        ? '  Proceed to merge step via dev-flow (`merge --task ' + taskId + '`), respecting repo merge authority rules.'
-        : '  Implementer: fix Must-Fix items on the SAME branch (`rework --task ' + taskId + '`), re-run `verify`, update PR, then invoke Round ' + (round + 1) + '.',
-    ]
-    process.stdout.write(`${lines.join('\n')}\n`)
-  }
-  return EXIT.OK
-}
+import { existsSync, statSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+
+import { parseStandardCli } from '../../lib/cli.mjs'
+import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
+import {
+  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
+} from '../../lib/git.mjs'
+import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId } from '../../lib/ledger.mjs'
+import { parseDevProfile } from '../../lib/profile.mjs'
+import {
+  EXIT, collectDiff, computeDiffRange, hasCommits, resolveReviewWorktree,
+  scanUntrustedDiff, syncTier2ReviewSlotIfNeeded,
+} from './review-diff.mjs'
+import {
+  assessBehavioralGate, assessDoor, assessStructuralGate, checkDocCodeParity,
+  collectGateWeakeningHits, collectHighRiskHits, parseAcceptanceCriteria,
+} from './review-gates.mjs'
+import { buildPackNextSteps, formatPackText, handleOverride, handleRecord } from './review-ledger.mjs'
+
+const SUBCOMMANDS = ['pack', 'record', 'override']
 
 function printHelp() {
   process.stdout.write([
-    '用法：node review-pack.mjs [mode/options]',
+    '用法：node review-pack.mjs [pack|record|override] [dir] [options]',
     '',
     'Modes:',
     '  --local                       Review working tree + staged uncommitted changes',
     '  --staged                      Review staged changes only',
     '  --base <ref>                  Review HEAD against <ref> (base...HEAD)',
-    '  --task <id> [--round <1|2|3>] Build flow review pack from .worktrees/.state/tasks/<id>.json',
+    '  --task <id|auto> [--round N]  Build flow review pack (auto-syncs Tier 2 review-{id})',
     '  --pr <M>                      Build external/internal PR review pack (auto-runs untrusted scan)',
-    '  record                        Record round verdict & trigger 6-lock stop-loss if needed',
+    '  record                        Record round verdict & track rebutted/resolved/stop-loss',
+    '  override                      Unlock STOP_LOSS_ESCALATE with --human-approved --reason',
     '',
     'Options:',
     '  --worktree <path>             Explicit review worktree path',
-    '  --dir <path>                  Repository directory (defaults to cwd)',
+    '  --dir <path>                  Repository directory (or pass positional <dir>)',
     '  --head <ref>                  Override head ref (default HEAD)',
     '  --untrusted-scan              Run static supply-chain & gate-weakening scan before execution',
-    '  --human-approved-exec         Allow continuing past untrusted hazard gate (recommends --ignore-scripts)',
+    '  --human-approved-exec         Allow continuing past untrusted hazard gate (use --ignore-scripts)',
+    '  --include-diff                Embed full diffText inside --json output (default: hunk summary only)',
     '  --json                        Emit machine-readable JSON',
     '',
-    'Record Options:',
+    'Record / Override Options:',
     '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id>',
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
-    '  [--rebut-accepted <idOrFp>...] [--fault-injection <text>] [--head <sha>]',
+    '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
+    '  [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
     '',
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
     '',
   ].join('\n'))
 }
 
-function parseArgs(argv) {
-  const opts = {
-    subcommand: null,
-    dir: process.cwd(),
-    worktree: undefined,
-    local: false,
-    staged: false,
-    base: undefined,
-    head: undefined,
-    task: undefined,
-    pr: undefined,
-    round: undefined,
-    untrustedScan: false,
-    humanApprovedExec: false,
-    json: false,
-    verdict: undefined,
-    reviewerId: undefined,
-    implementerId: undefined,
-    mustFix: [],
-    shouldFix: [],
-    rebutAccepted: [],
-    faultInjection: undefined,
-    help: false,
+async function resolveDefaultBaseRef(repoRoot, headRef) {
+  const sym = await gitRun(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+  if (sym.ok && sym.stdout.trim()) {
+    const ref = sym.stdout.trim()
+    if ((await gitRun(repoRoot, ['rev-parse', '--verify', ref])).ok) return ref
   }
-
-  let i = 0
-  if (argv[0] && !argv[0].startsWith('-')) {
-    if (argv[0] === 'record' || argv[0] === 'pack') {
-      opts.subcommand = argv[0]
-      i = 1
-    }
+  const def = await resolveDefaultBranch(repoRoot)
+  for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
+    if ((await gitRun(repoRoot, ['rev-parse', '--verify', cand])).ok) return cand
   }
-
-  const nextVal = (flag) => {
-    if (i + 1 >= argv.length) throw new Error(`Missing value for ${flag}`)
-    i += 1
-    return argv[i]
-  }
-
-  for (; i < argv.length; i += 1) {
-    const a = argv[i]
-    if (a === '--help' || a === '-h') opts.help = true
-    else if (a === '--dir' || a === '--repo') opts.dir = nextVal(a)
-    else if (a === '--worktree') opts.worktree = nextVal(a)
-    else if (a === '--local') opts.local = true
-    else if (a === '--staged') opts.staged = true
-    else if (a === '--base') opts.base = nextVal(a)
-    else if (a === '--head') opts.head = nextVal(a)
-    else if (a === '--task') opts.task = nextVal(a)
-    else if (a === '--pr') opts.pr = nextVal(a)
-    else if (a === '--round') opts.round = nextVal(a)
-    else if (a === '--untrusted-scan') opts.untrustedScan = true
-    else if (a === '--human-approved-exec') opts.humanApprovedExec = true
-    else if (a === '--json') opts.json = true
-    else if (a === '--verdict') opts.verdict = nextVal(a)
-    else if (a === '--reviewer-id') opts.reviewerId = nextVal(a)
-    else if (a === '--implementer-id') opts.implementerId = nextVal(a)
-    else if (a === '--must-fix') opts.mustFix.push(nextVal(a))
-    else if (a === '--should-fix') opts.shouldFix.push(nextVal(a))
-    else if (a === '--rebut-accepted') opts.rebutAccepted.push(nextVal(a))
-    else if (a === '--fault-injection') opts.faultInjection = nextVal(a)
-    else throw new Error(`Unknown option: ${a}`)
-  }
-  return opts
+  if ((await gitRun(repoRoot, ['rev-parse', '--verify', `${headRef}~1`])).ok) return `${headRef}~1`
+  return undefined
 }
 
-function main() {
-  let opts
+function validateCliArgs(cli) {
+  const { sub, opts } = cli
+  if (opts._.length > 1) {
+    throw new Error(`多余的位置参数：${opts._.slice(1).join(' ')}`)
+  }
+  if (opts._.length === 1) {
+    const cand = resolve(String(opts._[0]))
+    if (opts.dir !== undefined) {
+      throw new Error(`未知参数或重复目录：${opts._[0]}`)
+    }
+    if (!existsSync(cand) || !statSync(cand).isDirectory()) {
+      throw new Error(`未知子命令或不存在的目录：${opts._[0]}`)
+    }
+  }
+  if (sub && !SUBCOMMANDS.includes(sub)) {
+    throw new Error(`未知子命令：${sub}`)
+  }
+
+  const hasLocal = Boolean(opts.local)
+  const hasStaged = Boolean(opts.staged)
+  const hasTask = opts.task !== undefined
+  const hasPr = opts.pr !== undefined || opts['external-pr'] !== undefined
+  const hasBase = opts.base !== undefined
+
+  if (hasLocal && (hasStaged || hasTask || hasPr || hasBase)) {
+    throw new Error('--local 与 --staged/--task/--pr/--base 互斥，不能同时指定')
+  }
+  if (hasStaged && (hasTask || hasPr || hasBase)) {
+    throw new Error('--staged 与 --task/--pr/--base 互斥，不能同时指定')
+  }
+}
+
+async function resolveTaskForPack(roots, opts) {
+  const { mainRoot } = roots
+  const prVal = opts.pr ?? opts['external-pr']
+  if (opts.task === 'auto' || (!opts.task && !opts.local && !opts.staged && !opts.base && !prVal && basename(roots.workTreeRoot).startsWith('review-'))) {
+    try {
+      const ctx = await resolveTaskContext(roots, { ...opts, task: undefined }, { requireExisting: true })
+      return { taskId: ctx.taskId, task: ctx.ledger, mode: 'task' }
+    } catch (err) {
+      if (opts.task === 'auto') throw err
+      return { taskId: null, task: null, mode: null }
+    }
+  }
+  if (opts.task) {
+    const taskId = sanitizeTaskId(opts.task)
+    const ledger = readTaskLedger(mainRoot, taskId)
+    if (!ledger) {
+      throw new Error(`task ledger not found for "${taskId}" in ${posixPath(mainRoot)}/.worktrees/.state/tasks/`)
+    }
+    return { taskId, task: ledger, mode: 'task' }
+  }
+  if (prVal !== undefined) {
+    const cleanPr = String(prVal).replace(/^#/, '').trim()
+    const match = listTaskLedgers(mainRoot, { includeTerminal: true }).find((t) => String(t.prNumber) === cleanPr)
+    return { taskId: match?.taskId ?? null, task: match ?? null, mode: 'pr' }
+  }
+  return { taskId: null, task: null, mode: null }
+}
+
+async function main() {
+  const argv = process.argv.slice(2)
+  if (argv.includes('--help') || argv.includes('-h')) {
+    printHelp()
+    return EXIT.OK
+  }
+
+  let cli
   try {
-    opts = parseArgs(process.argv.slice(2))
+    cli = parseStandardCli(argv, {
+      subcommands: SUBCOMMANDS,
+      allowPositionalWithoutSubcommand: true,
+      positionalDir: 'auto',
+      booleanFlags: [
+        'local', 'staged', 'untrusted-scan', 'human-approved-exec',
+        'human-approved', 'include-diff', 'visual-checked',
+      ],
+      valueFlags: [
+        'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
+        'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
+        'reason', 'visual-evidence', 'agent',
+      ],
+      multiFlags: ['must-fix', 'should-fix', 'rebut-accepted', 'resolved'],
+      usageHint: 'review-pack.mjs [pack|record|override] [dir] [options]',
+    })
+    validateCliArgs(cli)
   } catch (err) {
     process.stderr.write(`Error: ${err.message}\n`)
     return EXIT.USAGE_OR_POLICY
   }
 
-  if (opts.help) {
-    printHelp()
-    return EXIT.OK
-  }
-
-  const startDir = opts.worktree ? resolve(opts.worktree) : resolve(opts.dir)
-  const roots = findRepoRoots(startDir)
-  if (!roots) {
+  const { sub, opts } = cli
+  opts.humanApprovedExec = Boolean(opts['human-approved-exec'])
+  const startDir = opts.worktree ? resolve(String(opts.worktree)) : cli.targetDir
+  const roots = await resolveRepoRoots(startDir)
+  if (!roots.isGit) {
     process.stderr.write(`Error: not inside a git repository: ${startDir}\n`)
     return EXIT.ERROR
   }
 
-  if (opts.subcommand === 'record') {
-    return handleRecord(opts, roots)
-  }
+  try {
+    if (sub === 'record') return await handleRecord(opts, roots)
+    if (sub === 'override') return await handleOverride(opts, roots)
 
-  const { mainRoot } = roots
-  let task = opts.task ? readJsonSafe(taskFilePath(mainRoot, opts.task)) : undefined
-  if (opts.task && !task) {
-    process.stderr.write(`Error: task ledger not found at ${posixPath(taskFilePath(mainRoot, opts.task))}\n`)
+    const { mainRoot } = roots
+    const resolvedTask = await resolveTaskForPack(roots, opts)
+    const task = resolvedTask.task
+    const mode = opts.staged ? 'staged'
+      : opts.local ? 'local'
+        : resolvedTask.mode ? resolvedTask.mode
+          : opts.base ? 'base' : 'local'
+    const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
+
+    const slotSyncRes = await syncTier2ReviewSlotIfNeeded({
+      mainRoot,
+      worktreeRoot: roots.workTreeRoot,
+      opts,
+      task,
+      mode,
+    })
+
+    const reviewRoot = await resolveReviewWorktree(mainRoot, roots.workTreeRoot, opts, task)
+
+    let round = opts.round ? Number(opts.round) : 1
+    if (!opts.round && task?.rounds?.length) {
+      round = Math.max(...task.rounds.map((r) => Number(r.round) || 1)) + 1
+    }
+    if (!Number.isInteger(round) || round < 1) round = 1
+
+    const headRef = opts.head ?? 'HEAD'
+    const commitsExist = await hasCommits(reviewRoot)
+    const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
+    if (commitsExist && opts.head && !headRes.ok) {
+      process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
+      return EXIT.ERROR
+    }
+    const headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
+
+    let diffSpec
+    let diffScope
+    let roundLockNote = ''
+    let priorOpenMustFix = []
+    let rebuts = []
+
+    if (mode === 'local' || mode === 'staged') {
+      diffSpec = { mode }
+      diffScope = mode === 'staged' ? 'staged index' : 'working tree + staged index'
+    } else {
+      const baseRef = opts.base ?? task?.baseSha ?? task?.baseBranch ?? (await resolveDefaultBaseRef(reviewRoot, headRef))
+      if (mode === 'task' && round >= 2 && Array.isArray(task?.rounds) && task.rounds.length > 0) {
+        const targetPrevRound = round === 2 ? 1 : round - 1
+        const prev = task.rounds.find((r) => r.round === targetPrevRound) ?? task.rounds[task.rounds.length - 1]
+        priorOpenMustFix = prev ? (prev.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved') : []
+        rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
+        const prevHead = prev?.headSha
+        if (prevHead && (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok) {
+          diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
+          diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
+          roundLockNote = round === 2
+            ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
+            : `R${targetPrevRound}_HEAD..HEAD binary Pass/Fail verification only; no new findings`
+        } else if (baseRef) {
+          diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
+          diffScope = `${baseRef}...${headRef}`
+          roundLockNote = `Round ${round} (prior head unavailable; fell back to base diff)`
+        }
+      }
+      if (!diffSpec) {
+        if (!baseRef) {
+          process.stderr.write('Error: cannot resolve base ref (unborn or single-commit repo); pass --base <ref>.\n')
+          return EXIT.ERROR
+        }
+        diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
+        diffScope = `${baseRef}...${headRef}`
+        if (mode === 'task') roundLockNote = 'Round 1 full diff'
+      }
+    }
+
+    const diff = await collectDiff(reviewRoot, diffSpec)
+    const reviewProfile = parseDevProfile(reviewRoot)
+    const effectiveProfile = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewProfile : parseDevProfile(mainRoot)
+
+    const shouldScanUntrusted = Boolean(opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || task?.role === 'inbound-external-pr')
+    let untrustedWarnings = []
+    let untrustedAdvisories = []
+    if (shouldScanUntrusted) {
+      const scanRes = scanUntrustedDiff(diff, reviewRoot)
+      const hazards = scanRes.hazards
+      untrustedAdvisories = scanRes.advisories
+      if (hazards.length > 0 && !opts.humanApprovedExec) {
+        const payload = {
+          status: 'BLOCKED_UNTRUSTED_HAZARD',
+          exitCode: EXIT.UNTRUSTED_HAZARD,
+          diffScope,
+          headSha,
+          hazards,
+          advisories: untrustedAdvisories,
+          nextStep: 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec (and use --ignore-scripts) after explicit approval.',
+        }
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+        } else {
+          const lines = [
+            'BLOCKED_UNTRUSTED_HAZARD',
+            `Scope    : ${diffScope} (HEAD ${headSha})`,
+            `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`,
+            'High-risk / supply-chain or gate-weakening changes detected before execution:',
+            ...hazards.flatMap((h) => [
+              `  - [${h.category}] ${h.file}: ${h.reason}`,
+              ...h.excerpt.map((e) => `      ${e}`),
+            ]),
+            '',
+            '[NEXT STEP]',
+            '  1. Read-only inspect the flagged diff above; DO NOT mount deps or execute tests/scripts.',
+            '  2. Ask a human maintainer for explicit sign-off.',
+            '  3. Only if approved, re-run with `--human-approved-exec` and isolate installs using `--ignore-scripts`.',
+          ]
+          process.stdout.write(`${lines.join('\n')}\n`)
+        }
+        process.stderr.write(`BLOCKED_UNTRUSTED_HAZARD: ${hazards.length} high-risk change(s) detected (exit ${EXIT.UNTRUSTED_HAZARD})\n`)
+        return EXIT.UNTRUSTED_HAZARD
+      }
+      untrustedWarnings = hazards
+    }
+
+    const parity = checkDocCodeParity(reviewRoot, mainRoot, diff, effectiveProfile, task)
+    const agentsForSync = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+    const syncRoot = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewRoot : mainRoot
+    const coupledSyncWarnings = agentsForSync
+      ? evaluateCoupledSync([...diff.files.map((f) => f.file), ...diff.untracked], parseCoupledSyncRules(agentsForSync), syncRoot)
+      : []
+    const criteria = parseAcceptanceCriteria(reviewRoot, mainRoot, task)
+    const hrHits = collectHighRiskHits(diff, effectiveProfile)
+    const gateWeakenedHits = collectGateWeakeningHits(reviewRoot, diff)
+
+    const behavioralGate = assessBehavioralGate({
+      diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories,
+    })
+    const structuralGate = assessStructuralGate({ reviewRoot, diff, devProfile: effectiveProfile, parity })
+    const doorAssessment = assessDoor({
+      reviewRoot, mainRoot, diff, devProfile: effectiveProfile, hrHits, parity, task, gateWeakenedHits,
+    })
+
+    let headMismatchWarning = ''
+    if (task) {
+      if (task.verifiedHead && headSha !== 'UNBORN' && task.verifiedHead !== headSha) {
+        headMismatchWarning = `verifiedHead (${task.verifiedHead.slice(0, 8)}) != review HEAD (${headSha.slice(0, 8)}); re-verify required!`
+      }
+      if (mode === 'task' && round >= 2 && task.rounds?.length) {
+        const prev = task.rounds[task.rounds.length - 1]
+        if (prev?.headSha && prev.headSha === headSha) {
+          headMismatchWarning = `HEAD (${headSha.slice(0, 8)}) has not advanced since Round ${prev.round}; reject re-review until implementer adds a fix commit.`
+        }
+      }
+    }
+
+    const nextSteps = buildPackNextSteps({
+      opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate,
+    })
+
+    const includeDiff = Boolean(opts['include-diff'])
+    const pack = {
+      status: opts['untrusted-scan'] && untrustedWarnings.length === 0 ? 'UNTRUSTED_SCAN_PASS' : 'PACK_READY',
+      mode,
+      isFlowMode,
+      worktreeRoot: posixPath(reviewRoot),
+      mainRoot: posixPath(mainRoot),
+      round,
+      roundLockNote,
+      diffScope,
+      headSha,
+      ...(slotSyncRes ? { reviewSlotSync: slotSyncRes } : {}),
+      ...(includeDiff ? { diffText: diff.text } : {}),
+      diff: {
+        sha256: diff.sha256,
+        bytes: diff.bytes,
+        files: diff.files,
+        untracked: diff.untracked,
+        hunkIndex: diff.hunkIndex,
+        summary: diff.summary,
+        diffIncluded: includeDiff,
+        ...(!includeDiff ? { includeDiffHint: 'Pass --include-diff to embed full diffText in JSON' } : {}),
+      },
+      task: task ?? null,
+      criteria,
+      priorOpenMustFix,
+      rebuts,
+      parity,
+      coupledSyncWarnings,
+      devProfile: effectiveProfile,
+      highRiskHits: hrHits,
+      behavioralGate,
+      structuralGate,
+      doorAssessment,
+      untrustedWarnings,
+      untrustedAdvisories,
+      headMismatchWarning,
+      nextSteps,
+    }
+
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${formatPackText(pack, diff.text, includeDiff)}\n`)
+    }
+    return EXIT.OK
+  } catch (err) {
+    process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`)
     return EXIT.ERROR
   }
-  if (!task && opts.pr) {
-    task = findTaskByPr(mainRoot, opts.pr)
-  }
-
-  const reviewRoot = resolveReviewWorktree(mainRoot, roots.worktreeRoot, opts, task)
-  const isFlowMode = Boolean(opts.task || opts.pr)
-  const mode = opts.staged ? 'staged' : opts.local ? 'local' : opts.task ? 'task' : opts.pr ? 'pr' : opts.base ? 'base' : 'local'
-
-  // Determine round & diff range
-  let round = opts.round ? Number(opts.round) : 1
-  if (!opts.round && task?.rounds?.length) {
-    round = Math.min(3, Math.max(...task.rounds.map((r) => Number(r.round) || 1)) + 1)
-  }
-  if (!Number.isInteger(round) || round < 1) round = 1
-
-  const headRef = opts.head ?? 'HEAD'
-  const headRes = hasCommits(reviewRoot) ? runGit(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
-  const headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
-
-  let diffSpec
-  let diffScope
-  let roundLockNote = ''
-  let priorOpenMustFix = []
-  let rebuts = []
-
-  if (mode === 'local' || mode === 'staged') {
-    diffSpec = { mode }
-    diffScope = mode === 'staged' ? 'staged index' : 'working tree + staged index'
-  } else {
-    let baseRef = opts.base ?? task?.baseSha ?? task?.baseBranch ?? resolveDefaultBaseRef(reviewRoot)
-    if (!baseRef && hasCommits(reviewRoot)) {
-      if (runGit(reviewRoot, ['rev-parse', '--verify', `${headRef}~1`]).ok) baseRef = `${headRef}~1`
-    }
-
-    if (mode === 'task' && round >= 2 && Array.isArray(task?.rounds)) {
-      const targetPrevRound = round === 2 ? 1 : 2
-      const prev = task.rounds.find((r) => r.round === targetPrevRound) ?? task.rounds[task.rounds.length - 1]
-      priorOpenMustFix = prev ? (prev.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved') : []
-      rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
-      const prevHead = prev?.headSha
-      if (prevHead && runGit(reviewRoot, ['rev-parse', '--verify', prevHead]).ok) {
-        diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
-        diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
-        roundLockNote = round === 2
-          ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
-          : 'R2_HEAD..HEAD binary Pass/Fail verification only; no new findings'
-      } else if (baseRef) {
-        diffSpec = { mode: 'range', range: computeDiffRange(reviewRoot, baseRef, headRef) }
-        diffScope = `${baseRef}...${headRef}`
-        roundLockNote = `Round ${round} (prior head unavailable; fell back to base diff)`
-      }
-    }
-
-    if (!diffSpec) {
-      if (!baseRef) {
-        process.stderr.write('Error: cannot resolve base ref; pass --base <ref>.\n')
-        return EXIT.ERROR
-      }
-      diffSpec = { mode: 'range', range: computeDiffRange(reviewRoot, baseRef, headRef) }
-      diffScope = `${baseRef}...${headRef}`
-      if (mode === 'task') roundLockNote = 'Round 1 full diff'
-    }
-  }
-
-  const diff = collectDiff(reviewRoot, diffSpec)
-  const devProfile = parseDevProfile(reviewRoot)
-  const effectiveProfile = Object.values(devProfile).some((v) => v.length > 0) ? devProfile : parseDevProfile(mainRoot)
-
-  // Untrusted PR / static supply-chain hazard scan
-  const shouldScanUntrusted = opts.untrustedScan || opts.pr !== undefined || task?.role === 'inbound-external-pr'
-  let untrustedWarnings = []
-  if (shouldScanUntrusted) {
-    const hazards = scanUntrustedDiff(diff, reviewRoot)
-    if (hazards.length > 0 && !opts.humanApprovedExec) {
-      const payload = {
-        status: 'BLOCKED_UNTRUSTED_HAZARD',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        diffScope,
-        headSha,
-        hazards,
-        nextStep: 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec (and use --ignore-scripts) after explicit approval.',
-      }
-      if (opts.json) {
-        process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-      } else {
-        const lines = [
-          'BLOCKED_UNTRUSTED_HAZARD',
-          `Scope    : ${diffScope} (HEAD ${headSha})`,
-          `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`,
-          'High-risk / supply-chain or gate-weakening changes detected before execution:',
-          ...hazards.flatMap((h) => [
-            `  - [${h.category}] ${h.file}: ${h.reason}`,
-            ...h.excerpt.map((e) => `      ${e}`),
-          ]),
-          '',
-          '[NEXT STEP]',
-          '  1. Read-only inspect the flagged diff above; DO NOT mount deps or execute tests/scripts.',
-          '  2. Ask a human maintainer for explicit sign-off.',
-          '  3. Only if approved, re-run with `--human-approved-exec` and isolate installs using `--ignore-scripts`.',
-        ]
-        process.stdout.write(`${lines.join('\n')}\n`)
-      }
-      process.stderr.write(`BLOCKED_UNTRUSTED_HAZARD: ${hazards.length} high-risk change(s) detected (exit ${EXIT.UNTRUSTED_HAZARD})\n`)
-      return EXIT.UNTRUSTED_HAZARD
-    }
-    untrustedWarnings = hazards
-  }
-
-  const parity = checkDocCodeParity(reviewRoot, mainRoot, diff, effectiveProfile, task)
-  const agentsForSync = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
-  const syncRoot = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewRoot : mainRoot
-  const coupledSyncWarnings = agentsForSync
-    ? evaluateCoupledSync(
-      [...diff.files.map((f) => f.file), ...diff.untracked],
-      parseCoupledSyncRules(agentsForSync),
-      syncRoot,
-    )
-    : []
-  const criteria = parseAcceptanceCriteria(reviewRoot, mainRoot, task)
-  const hrHits = highRiskHits(diff, effectiveProfile)
-
-  const diffChunks = splitDiffByFile(diff.text)
-  const gateWeakenedHits = []
-  for (const entry of [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]) {
-    let { added, removed } = summarizeHunkChanges(diffChunks.get(entry.file) ?? '')
-    if (entry.status === '?' && added.length === 0) {
-      const raw = readTextSafe(join(reviewRoot, entry.file))
-      if (raw) added = raw.split('\n')
-    }
-    gateWeakenedHits.push(...detectGateWeakeningInEntry({ file: entry.file, status: entry.status, added, removed }))
-  }
-
-  const behavioralGate = assessBehavioralGate({
-    diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity,
-  })
-  const structuralGate = assessStructuralGate({
-    reviewRoot, diff, devProfile: effectiveProfile,
-  })
-  const doorAssessment = assessDoor({
-    reviewRoot, mainRoot, diff, devProfile: effectiveProfile, hrHits, parity, task, gateWeakenedHits,
-  })
-
-  let headMismatchWarning = ''
-  if (task) {
-    if (task.verifiedHead && headSha !== 'UNBORN' && task.verifiedHead !== headSha) {
-      headMismatchWarning = `verifiedHead (${task.verifiedHead.slice(0, 8)}) != review HEAD (${headSha.slice(0, 8)}); re-verify required!`
-    }
-    if (mode === 'task' && round >= 2 && task.rounds?.length) {
-      const prev = task.rounds[task.rounds.length - 1]
-      if (prev?.headSha && prev.headSha === headSha) {
-        headMismatchWarning = `HEAD (${headSha.slice(0, 8)}) has not advanced since Round ${prev.round}; reject re-review until implementer adds a fix commit.`
-      }
-    }
-  }
-
-  const nextSteps = []
-  if (opts.untrustedScan && untrustedWarnings.length === 0) {
-    nextSteps.push('Untrusted static scan clean (UNTRUSTED_SCAN_PASS). Safe to proceed with isolated review worktree checks.')
-  }
-  if (doorAssessment.gateWeakened) {
-    nextSteps.push('GATE_WEAKENED detected: escalate to human maintainer for explicit sign-off (mergeAuthority=human-required).')
-  }
-  if (structuralGate.archViolations.length > 0) {
-    nextSteps.push(`Fix ${structuralGate.archViolations.length} architecture boundary violation(s) at root cause before passing review.`)
-  }
-  if (mode === 'local' || mode === 'staged' || mode === 'base') {
-    nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
-  } else if (opts.task) {
-    nextSteps.push(`Review independently against criteria C1..Cn, run tests + fault injection, then record verdict:`)
-    nextSteps.push(`  node .agents/skills/dev-review/scripts/review-pack.mjs record --task ${opts.task} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id>`)
-  } else if (opts.pr) {
-    nextSteps.push('Complete independent review using the diff hash, dual gates, and empirical tests above before posting PR review.')
-  }
-
-  const pack = {
-    status: opts.untrustedScan && untrustedWarnings.length === 0 ? 'UNTRUSTED_SCAN_PASS' : 'PACK_READY',
-    mode,
-    isFlowMode,
-    worktreeRoot: posixPath(reviewRoot),
-    mainRoot: posixPath(mainRoot),
-    round,
-    roundLockNote,
-    diffScope,
-    headSha,
-    diffText: diff.text,
-    diff: { sha256: diff.sha256, bytes: diff.bytes, files: diff.files, untracked: diff.untracked },
-    task: task ?? null,
-    criteria,
-    priorOpenMustFix,
-    rebuts,
-    parity,
-    coupledSyncWarnings,
-    devProfile: effectiveProfile,
-    highRiskHits: hrHits,
-    behavioralGate,
-    structuralGate,
-    doorAssessment,
-    untrustedWarnings,
-    headMismatchWarning,
-    nextSteps,
-  }
-
-  if (opts.json) {
-    process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`)
-  } else {
-    process.stdout.write(`${formatPackText(pack)}\n`)
-  }
-  return EXIT.OK
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  process.exit(main())
+  main().then((code) => process.exit(code))
 }

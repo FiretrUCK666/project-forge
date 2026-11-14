@@ -101,14 +101,14 @@ flowchart TB
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（`reviewProject`、`readDecisions`）与交棒扫描（`VERIFY_EXIT` 0/1/3/4） |
 | `scripts/update.mjs`、`scripts/zip.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 原子自更新、zip 只读解包检验与双语 README 目录同步 |
 | `scripts/lib/` | 产品层 | 14 个核心子模块与 `scripts/lib/platform/` 平台探针层（见下表） |
-| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总重导出各领域子模块），随套件复制进目标项目 |
+| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`platform.mjs`、`github-client.mjs`），随套件复制进目标项目 |
 | `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs`、`doc-audit.mjs`、`checkMermaidLabelWidth`） |
-| `kit/skills/dev-flow/` | 产品层 | 隔离流转与安全清理（`flow.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`worktree-deps.mjs`） |
-| `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步与双门六锁评估（入口 `kit/skills/dev-review/scripts/review-pack.mjs` 及同级子模块） |
-| `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层与跨版本采集（入口 `kit/skills/dev-govern/scripts/govern-audit.mjs`、`release-prep-lib.mjs` 及同级子模块） |
+| `kit/skills/dev-flow/` | 产品层 | 隔离流转与实时认领（`flow.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`worktree-deps.mjs`） |
+| `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-ledger.mjs`） |
+| `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层与跨版本采集（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
+| `scripts/dev/` | 自用层 | `preflight.mjs`（含 `contracts`/`suite`/`e2e` 子模块）、`gap-coverage.mjs`、`fixtures.mjs`（含 9 个领域夹具模块）、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 
@@ -283,12 +283,13 @@ flowchart LR
 - **`dev-explore`（`repo-map.mjs`）**：Git 仓库采用 `git ls-files -z` 与前 4KB NUL 字节探测（无深度限制，完整覆盖深层包目录与前后端分离仓库），提取带 `working-directory` 的多行 CI 验证步骤与多生态包清单，输出 `reusableModules`、`featureMap` 与热点文件。
 - **`dev-plan`（`doc-plan.mjs`、`doc-audit.mjs`）**：判定 Case 1–5 与 `doorType`（`two-way` / `one-way`），统一调用 `renderStandardDocTemplate`（`docs.mjs` / `doc-templates.mjs`）生成含 YAML Frontmatter 与顶部可见元信息表的工程文档；`auditDoc` 执行两遍 `(new)` 路径收集、`checkMermaidLabelWidth`（`16/12` 与禁用 HTML）、`VAGUE_CRITERION` 及 `coupledSyncWarnings` 核对；支持 `archive` 与 `supersede` 成对归档与替代状态管理。
 - **`dev-flow`（`flow.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`worktree-deps.mjs`）**：
-  - 统一通过 `ledger.mjs`（`resolveTaskContext`）从当前 worktree、分支或唯一活跃任务自动推断 `--task`，新增 `status` 与 `abort`；自动检测 `MERGE_HEAD`/`REBASE_HEAD`/`CHERRY_PICK_HEAD` 冲突态与 unborn HEAD。
+  - 统一通过 `ledger.mjs`（`resolveTaskContext`）从当前 worktree、分支或唯一活跃任务自动推断 `--task`，支持 `status`、`abort`、`release` 及 `start --create-issue` 自动建单联动重命名文档；自动检测 `MERGE_HEAD`/`REBASE_HEAD`/`CHERRY_PICK_HEAD` 冲突态与 unborn HEAD。
+  - `claim` 在远端模式先调用 `listComments` 检查 `pf-state` 认领互斥（未传 `--takeover --reason` 时阻断防撞车；带接管参数时双写 Issue 与关联 PR）；`release` 在放弃认领时写释放评论并卸除 `in-progress` 标签。
   - `start` 保留并迁入 `doc-plan` 匹配文档；`submit` 与 `review-pack` 自动通过 `syncDetachedWorktree` 将干净 `.worktrees/review-<taskId>/` 推进到待审分支最新 `HEAD` 并挂载依赖，彻底消除 `baseSha...baseSha` 空 Diff 断链。
   - `worktree-deps.mjs` 按子包独立比对锁文件 SHA256，探测到 Workspace 本地包软链或 Python editable `.venv` 指回主仓时自动隔离；清理前检验 `samePath(mainAbs, wtAbs)` 并对链接执行 `unlinkSync` 解绑；`cleanup` 复用 `git cherry` + `git patch-id` 四态判定兼容 Squash/Rebase 合入分支。
-  - `finalize` 执行 `archiveCompletedDocsGroup` 成对归档并检查源码模块边界变动时 `docs/TDD.md` 是否同步更新日期；`verify` 严格尊重 `Dev Profile` 中的显式 `none` 禁用态；`merge` 强制核对 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered` 且 `implRoot` 干净，支持触发 `STOP_LOSS_ESCALATE` 后经人类明确批准放行，检测到弱化门禁仍以退出码 `4` 阻断。
-- **`dev-review`（`kit/skills/dev-review/`）**：`review-pack.mjs` 与同级子模块共用 `static-gates.mjs` 词法剥离器（消除 C 宏 `#define TEMP` 与 Rust 生命周期误报），修复 `--untrusted-scan` 死代码与双斜杠 `do-not-edit` 匹配，`--json` 默认输出 diff 摘要（传 `--include-diff` 可选全文），`record` 记入 `rebutted`/`resolved` 状态与 `--visual-checked`，支持人工解锁停损并接入 `checkMermaidLabelWidth`。
-- **`dev-govern`（`kit/skills/dev-govern/`）**：`govern-audit.mjs` 与同级子模块、`release-prep-lib.mjs` 支持纯子命令与向下兼容 flag，基于 `<mainRoot>/.worktrees/.state/govern-baseline.json` 与 `--changed` 实现存量零噪音增量审计，修复 worktree 状态根写回、跳过 macOS 元数据、`it.skip`/`it.only` 统计与 `--write-todo` 标准格式对齐，并接入 `checkMermaidLabelWidth`；`release-prep` 兼容浅克隆警告并聚合多子包版本采集。
+  - `finalize` 执行 `archiveCompletedDocsGroup` 成对归档并检查源码模块边界变动时权威架构文档（`resolveAuthoritativeTddPath`）是否同步更新日期；`verify` 严格尊重 `Dev Profile` 中的显式 `none` 禁用态；`merge` 强制核对 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered` 且 `implRoot` 干净，支持触发 `STOP_LOSS_ESCALATE` 后经人类明确批准放行，检测到弱化门禁仍以退出码 `4` 阻断。
+- **`dev-review`（`kit/skills/dev-review/`）**：`review-pack.mjs` 与同级子模块（`review-diff.mjs`、`review-gates.mjs`、`review-ledger.mjs`）共用 `static-gates.mjs` 词法剥离器（消除 C 宏与 Rust 生命周期误报），修复 `--untrusted-scan` 死代码与双斜杠 `do-not-edit` 匹配，`--json` 默认输出 diff 摘要（传 `--include-diff` 可选全文），`record` 记入 `rebutted`/`resolved` 状态与 `--visual-checked`、在关联 PR/Issue 且非离线时自动拼装四字段审查评论实时双写 PR 与 Issue 并贴 `changes-requested` / `reviewed` 标签（403 自动降级，离线静默写本地账本不阻塞），支持人工解锁停损并接入 `checkMermaidLabelWidth`。
+- **`dev-govern`（`kit/skills/dev-govern/`）**：`govern-audit.mjs` 与同级子模块、`release-prep-lib.mjs` 支持纯子命令与向下兼容 flag，基于 `<mainRoot>/.worktrees/.state/govern-baseline.json` 与 `--changed` 实现存量零噪音增量审计；通过 `resolveAuthoritativeTddPath` 识别异构权威架构文档、将 `Dev Profile`/CI 实测命令计入 `testInventory`、区分 TDD CLI 命令串与裸文件路径；修复 worktree 状态根写回、跳过 macOS 元数据、`it.skip`/`it.only` 统计与 `--write-todo` 标准格式对齐，并接入 `checkMermaidLabelWidth`。
 
 ## 6. 文档四层体系、成对归档与图表规范
 
@@ -317,7 +318,7 @@ flowchart LR
 
 | 验证脚本 | 检查覆盖面 | 触发时机与预期标准 |
 | --- | --- | --- |
-| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、7 步收尾/4 字段对拍、自有实例同构、平台锁定、包自包含、Mermaid 宽度与端到端冒烟 | 每次提交前；退出码 `0`，`0` 项失败 |
+| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、孤儿脚本传递可达性、平台语义对齐、7 步/4 字段对拍、Mermaid `16/12`、套件 `<= 800` 行与端到端冒烟 | 每次提交前；退出码 `0`，`0` 项失败 |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 条遗漏或悬空 |
 | `scripts/dev/fixtures.mjs` | 身份判定、两档装配、v2 墓碑/定制、`HostingProvider` 降级、六栈起步、工作流状态机与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
 | `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |

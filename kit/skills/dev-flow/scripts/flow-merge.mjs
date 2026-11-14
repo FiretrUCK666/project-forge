@@ -356,6 +356,7 @@ export async function handleStatus(opts, roots) {
 
   let nextAction
   if (op.inProgress) nextAction = `先解决当前 ${op.op} 冲突，再继续流转`
+  else if (ledger.status === 'released') nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}`
   else if (stZ.entries.length > 0) nextAction = '工作区有未提交改动，完成后 git add -A && git commit 再 verify'
   else if ((ledger.caseType >= 3 || ledger.todoFile || ledger.specFile) && !ledger.finalized) nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
   else if (!ledger.verifiedHead || (head && ledger.verifiedHead !== head) || ledger.lastVerifyExitCode !== 0) nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}`
@@ -400,5 +401,74 @@ export async function handleAbort(opts, roots) {
   writeTaskLedger(roots.mainRoot, ledger)
   if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted' }, null, 2)}\n`)
   else process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)
+  return { exitCode: 0 }
+}
+
+export async function handleRelease(opts, roots) {
+  const ctx = await resolveTaskContext(roots, opts)
+  const { taskId, ledger } = ctx
+  if (opts.issue) {
+    const extra = String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
+    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extra])]
+  }
+
+  const actor = opts.agent ?? ledger.implementerId ?? 'local-agent'
+  const reason = String(opts.reason ?? '').trim()
+  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
+  const declaredRepo = detectDeclaredRepo(roots.mainRoot)
+  const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
+
+  const skipApi = ledger.role === 'local-only'
+    || ledger.role === 'generic-git'
+    || ledger.providerId === 'generic-git'
+    || (ledger.linkedIssues ?? []).length === 0
+    || !targetRepo
+
+  const releaseResults = []
+  if (!skipApi) {
+    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+    const ghClient = opts._ghClient ?? ghProbe.client
+    for (const num of ledger.linkedIssues) {
+      const commentRes = await ghClient.postComment({
+        repo: targetRepo,
+        number: num,
+        body: `释放认领：${actor} 放弃任务 \`${taskId}\`（分支 \`${ledger.branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`,
+        statePayload: {
+          taskId,
+          action: 'release',
+          agent: actor,
+          branch: ledger.branch ?? null,
+          ...(reason ? { reason } : {}),
+        },
+      })
+      const labelRes = await ghClient.removeLabel({ repo: targetRepo, number: num, label: 'in-progress' })
+      releaseResults.push({ issue: num, comment: commentRes, labelRemoved: labelRes })
+    }
+  }
+
+  ledger.status = 'released'
+  ledger.releasedAt = new Date().toISOString()
+  ledger.releaseReason = reason || null
+  ledger.claimedAt = null
+  writeTaskLedger(roots.mainRoot, ledger)
+
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      taskId,
+      role: ledger.role,
+      mode: skipApi ? 'local-ledger-only' : 'remote-synced',
+      status: ledger.status,
+      reason: ledger.releaseReason,
+      releaseResults,
+    }, null, 2)}\n`)
+  } else {
+    process.stdout.write(`任务 ${taskId} 已释放认领（status=released${skipApi ? '，仅本地账本' : `, issues=${ledger.linkedIssues.join(',')}`}）。\n`)
+    printNextStep([
+      { skill: 'dev-flow', text: `如需由其他人接手：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --agent <agent>` },
+      { skill: 'dev-flow', text: `或安全放弃任务与工作区：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` },
+    ], { repoRoot: roots.mainRoot })
+  }
   return { exitCode: 0 }
 }

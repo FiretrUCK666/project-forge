@@ -9,12 +9,16 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
-import { posixPath } from '../../lib/git.mjs'
+import { gitRun, posixPath } from '../../lib/git.mjs'
 import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId,
   taskLedgerPath, writeTaskLedger,
 } from '../../lib/ledger.mjs'
+import {
+  detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeGitHubEnv,
+} from '../../lib/platform.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
+import { parseAcceptanceCriteria } from './review-gates.mjs'
 
 function computeFingerprint(criterion, file, summary) {
   const normSummary = String(summary ?? '')
@@ -92,6 +96,154 @@ function resolveRecordNextSteps({ taskId, verdict, round, role, mainRoot }) {
   return [
     `Implementer: fix Must-Fix items on the SAME branch, re-run tests and commit, then invoke review Round ${round + 1}.`,
   ]
+}
+
+function buildCriteriaStatusSummary({ workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList, explicitStatus }) {
+  if (explicitStatus && String(explicitStatus).trim()) return String(explicitStatus).trim()
+  const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
+  const allIds = criteria.map((c) => c.id)
+  if (verdict === 'pass') {
+    return allIds.length > 0
+      ? `fail: 无 / pass: ${allIds.join(', ')}`
+      : `fail: 无 / pass: 全部已核验项 (HEAD ${String(headSha ?? '').slice(0, 7)})`
+  }
+  const failIds = new Set()
+  for (const m of mustFixList) {
+    if (m.criterion) failIds.add(m.criterion.toUpperCase())
+    else {
+      for (const cm of String(m.summary ?? '').matchAll(/\b(C\d+)\b/gi)) {
+        failIds.add(cm[1].toUpperCase())
+      }
+    }
+  }
+  const passIds = allIds.filter((id) => !failIds.has(id))
+  const failList = failIds.size > 0
+    ? [...failIds]
+    : (mustFixList.length > 0 ? mustFixList.map((m) => m.id) : ['未满足全部验收条件'])
+  return `fail: ${failList.join(', ')}${passIds.length > 0 ? ` / pass: ${passIds.join(', ')}` : ''}`
+}
+
+async function syncReviewToGitHub({
+  mainRoot, workTreeRoot, ledger, round, verdict, headSha, reviewerId, implementerId,
+  stopLoss, stopReasons, mustFixList, shouldFixList, opts,
+}) {
+  const prNum = Number.isInteger(Number(ledger.prNumber)) && Number(ledger.prNumber) > 0 ? Number(ledger.prNumber) : null
+  const issueNums = Array.isArray(ledger.linkedIssues)
+    ? [...new Set(ledger.linkedIssues.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))]
+    : []
+
+  if (!prNum && issueNums.length === 0) {
+    return { synced: false, skipped: true, reason: 'no-linked-pr-or-issue' }
+  }
+  if (ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || ledger.providerId === 'none') {
+    return { synced: false, skipped: true, reason: `role-${ledger.role ?? 'local'}` }
+  }
+
+  try {
+    const remoteRes = await gitRun(mainRoot, ['remote', '-v'])
+    if (!remoteRes.ok || !remoteRes.stdout.trim()) {
+      return { synced: false, offlineOrNoCreds: true, reason: 'no-remote', hint: '未配置远端，审查结论已安全保存至本地账本（不阻塞离线使用）。' }
+    }
+    const remoteUrls = parseRemoteUrls(remoteRes.stdout)
+    const declaredRepo = detectDeclaredRepo(mainRoot)
+    const originFull = githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0])
+    const upstreamFull = githubRepoFull(remoteUrls.upstream)
+    const targetRepo = ledger.role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : originFull
+    if (!targetRepo) {
+      return { synced: false, skipped: true, reason: 'no-github-repo', hint: '非 GitHub 远端，审查结论已写入本地账本。' }
+    }
+
+    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls }))
+    const ghClient = opts._ghClient ?? ghProbe.client
+    const tier = ghClient?.tier ?? ghProbe.env?.trackB?.tier ?? 'offline'
+    if ((!opts._ghClient && ghProbe.env?.providerId !== 'github') || (tier !== 'gh-cli' && tier !== 'node-https-token')) {
+      return {
+        synced: false,
+        offlineOrNoCreds: true,
+        tier,
+        targetRepo,
+        reason: `offline-or-no-credentials(${tier})`,
+        hint: `离线或无可用 GitHub 凭据（tier=${tier}），已静默写入本地账本，未阻塞评审流程。`,
+      }
+    }
+
+    const criteriaStatusText = buildCriteriaStatusSummary({
+      workTreeRoot,
+      mainRoot,
+      ledger,
+      verdict,
+      headSha,
+      mustFixList,
+      explicitStatus: opts['criteria-status'],
+    })
+    const faultInjectionText = String(opts['fault-injection'] ?? '').trim() || '未触及高风险路径或未附额外故障注入摘要'
+    const stopLossText = stopLoss ? `已触发（${stopReasons.join('；')}）` : '未触发'
+
+    const bodyLines = [
+      `### 独立审查 Round ${round}（${verdict === 'pass' ? 'PASS' : 'CHANGES_REQUESTED'} @ \`${String(headSha ?? '').slice(0, 7)}\`）`,
+      '',
+      `- **审查来源**：\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`,
+      `- **逐条标准状态**：${criteriaStatusText}`,
+      `- **故障注入记录**：${faultInjectionText}`,
+      `- **止损记录**：${stopLossText}`,
+    ]
+    if (mustFixList.length > 0) {
+      bodyLines.push('', '**Must Fix**：', ...mustFixList.map((m) => `- [${m.id}] ${m.summary}`))
+    }
+    if (shouldFixList.length > 0) {
+      bodyLines.push('', '**Should Fix**：', ...shouldFixList.map((s) => `- ${s}`))
+    }
+    const commentBody = bodyLines.join('\n')
+    const statePayload = {
+      taskId: ledger.taskId,
+      action: 'review',
+      round,
+      verdict,
+      headSha,
+      reviewerId,
+      stopLossTriggered: stopLoss,
+    }
+
+    const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
+    const targets = [
+      ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
+      ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
+    ]
+    const results = []
+    for (const t of targets) {
+      const commentRes = await ghClient.postComment({
+        repo: targetRepo,
+        number: t.number,
+        body: commentBody,
+        statePayload,
+      })
+      const labelRes = await ghClient.addLabels({
+        repo: targetRepo,
+        number: t.number,
+        labels: [labelName],
+      })
+      results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
+    }
+
+    const synced = results.some((r) => r.comment?.ok)
+    return {
+      synced,
+      targetRepo,
+      label: labelName,
+      results,
+      ...(!synced ? {
+        offlineOrNoCreds: true,
+        hint: '远端评论同步未成功（可能处于离线或无写权限环境），审查结论已写入本地账本。',
+      } : {}),
+    }
+  } catch (err) {
+    return {
+      synced: false,
+      offlineOrNoCreds: true,
+      error: err instanceof Error ? err.message : String(err),
+      hint: '远端同步异常（可能离线），已安全写入本地账本，绝不阻塞审查流转。',
+    }
+  }
 }
 
 export async function handleRecord(opts, roots) {
@@ -263,6 +415,13 @@ export async function handleRecord(opts, roots) {
   const updated = {
     ...baseLedger,
     taskId,
+    ...(opts.pr && Number.isInteger(Number(String(opts.pr).replace(/^#/, ''))) ? { prNumber: Number(String(opts.pr).replace(/^#/, '')) } : {}),
+    ...(opts.issue ? {
+      linkedIssues: [...new Set([
+        ...(baseLedger.linkedIssues ?? []),
+        ...String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger),
+      ])],
+    } : {}),
     implementerId: implementerId || baseLedger.implementerId,
     reviewerId,
     rounds: filteredRounds,
@@ -292,6 +451,21 @@ export async function handleRecord(opts, roots) {
   }
 
   const tPath = writeTaskLedger(mainRoot, updated)
+  const githubSync = await syncReviewToGitHub({
+    mainRoot,
+    workTreeRoot,
+    ledger: updated,
+    round,
+    verdict,
+    headSha,
+    reviewerId,
+    implementerId,
+    stopLoss,
+    stopReasons,
+    mustFixList,
+    shouldFixList,
+    opts,
+  })
   const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, mainRoot })
 
   if (stopLoss) {
@@ -306,6 +480,7 @@ export async function handleRecord(opts, roots) {
       rebuttedItems,
       resolvedItems,
       ledgerPath: posixPath(tPath),
+      githubSync,
       nextStep: `Halt automated review loop. Escalate to human maintainer; unlock only via \`review-pack.mjs override --task ${taskId} --human-approved --reason "..."\`.`,
     }
     if (opts.json) {
@@ -317,6 +492,8 @@ export async function handleRecord(opts, roots) {
         `Round    : ${round} | HEAD ${headSha}`,
         `Exit Code: ${EXIT.STOP_LOSS} (escalate to human maintainer)`,
         `Reasons  : ${stopReasons.join('; ')}`,
+        ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
+        ...(githubSync.hint ? [`Hint     : ${githubSync.hint}`] : []),
         'Remaining Must-Fix:',
         ...(mustFixList.length > 0 ? mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`) : ['  - (verdict=changes at round >= 3)']),
       ].join('\n')
@@ -344,6 +521,7 @@ export async function handleRecord(opts, roots) {
       rebuttedItems,
       resolvedItems,
       ledgerPath: posixPath(tPath),
+      githubSync,
       nextSteps,
     }, null, 2)}\n`)
   } else {
@@ -352,6 +530,8 @@ export async function handleRecord(opts, roots) {
       `Task     : ${taskId} | Round ${round} | HEAD ${headSha}`,
       `Reviewer : ${reviewerId}`,
       `Ledger   : ${posixPath(tPath)}`,
+      ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
+      ...(githubSync.hint ? [`Hint     : ${githubSync.hint}`] : []),
       ...(rebuttedItems.length > 0 ? [`Rebutted : ${rebuttedItems.join(', ')}`] : []),
       ...(resolvedItems.length > 0 ? [`Resolved : ${resolvedItems.join(', ')}`] : []),
       ...(mustFixList.length > 0 ? ['Open Must-Fix:', ...mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`)] : []),

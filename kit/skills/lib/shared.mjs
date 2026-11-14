@@ -52,7 +52,9 @@ export {
   parseAgentsProfile,
   parseDevProfile,
   parseYamlWorkspaceGlobs,
+  readDecisionMap,
   readDecisions,
+  resolveAuthoritativeTddPath,
 } from './profile.mjs'
 
 export {
@@ -121,21 +123,26 @@ export {
 
 export {
   createGitHubClient,
+  createIssue,
   DEFAULT_PROBE_TIMEOUT_MS,
   detectDeclaredRepo,
   GENERIC_GIT_PROVIDER,
   getHostingProvider,
+  githubHttpsRequest,
   githubRepoFull,
   githubRepoPath,
   hasLocalOnlyMarker,
+  listComments,
   listHostingProviders,
   parseBodyRelations,
   parseFlowInputs,
+  parsePfStateTags,
   parseRemotesTopology,
   parseRemoteUrls,
   parseSshConfigHostMap,
   probeGitHubEnv,
   registerHostingProvider,
+  removeLabel,
   resolveRemoteDescriptor,
   resolveWorkspaceIdentity,
 } from './platform.mjs'

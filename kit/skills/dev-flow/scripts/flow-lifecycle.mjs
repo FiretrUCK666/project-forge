@@ -18,7 +18,7 @@ import {
 } from '../../lib/git.mjs'
 import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
-import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles, syncTaskDocsSafe } from './flow-inspect.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
@@ -71,7 +71,9 @@ function findStrictDocBySlug(root, dirRel, ledger) {
 }
 
 async function checkTddSyncParity(implRoot, changed, ledger) {
-  const tddPath = join(implRoot, 'docs', 'TDD.md')
+  const profile = parseAgentsProfile(implRoot)
+  const tddRel = resolveAuthoritativeTddPath(implRoot, profile.decisions)
+  const tddPath = tddRel ? join(implRoot, tddRel) : null
   const changedEntries = ledger.baseSha ? (await gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`])).entries : []
   const st = await gitStatusPorcelainZ(implRoot)
   const touchedBoundary = changedEntries.some((e) =>
@@ -79,19 +81,23 @@ async function checkTddSyncParity(implRoot, changed, ledger) {
     || /^(?:package\.json|Cargo\.toml|pyproject\.toml|go\.mod|go\.work|pom\.xml|build\.gradle(?:\.kts)?)$/i.test(basename(e.file)))
     || st.entries.some((e) => e.xy === '??' && /^(?:src|lib|scripts|kit|packages|apps|services|backend|frontend)\//i.test(e.file))
     || changed.some((f) => /^(?:src|lib|scripts|kit|bin|cmd)\/|package\.json$|Cargo\.toml$|pyproject\.toml$|go\.mod$|pom\.xml$/i.test(f))
-  const touchedAnyDoc = changed.some((f) => /^(?:docs\/TDD\.md|README(?:\.[a-z0-9_-]+)?\.md|AGENTS\.md)$/i.test(f))
+  const touchedAnyDoc = changed.some((f) =>
+    (tddRel && f === tddRel)
+    || /^(?:docs\/TDD\.md|ARCHITECTURE\.md|README(?:\.[a-z0-9_-]+)?\.md|AGENTS\.md)$/i.test(f))
   let tddDateStale = false
-  if (touchedBoundary && existsSync(tddPath)) {
+  if (touchedBoundary && tddPath && existsSync(tddPath)) {
     const tddText = readTextSafe(tddPath) ?? ''
     const today = docIsoDate()
     const hasMetaDate = /最近更新[^\n]*\d{4}-\d{2}-\d{2}/.test(tddText)
-    if (hasMetaDate && !changed.includes('docs/TDD.md') && !tddText.includes(today)) tddDateStale = true
+    if (hasMetaDate && !changed.includes(tddRel) && !tddText.includes(today)) tddDateStale = true
   }
+  const hasTddMissingUpdate = Boolean(tddRel && touchedBoundary && (!changed.includes(tddRel) || tddDateStale))
   return {
     docParityReminder: touchedBoundary && !touchedAnyDoc,
     tddDateStale,
-    tddSyncWarning: (touchedBoundary && !changed.includes('docs/TDD.md')) || tddDateStale
-      ? '本次改动涉及模块目录边界或对外清单，请核对 docs/TDD.md 的最近更新日期与模块职责表并随本次提交更新。'
+    authoritativeTddPath: tddRel,
+    tddSyncWarning: hasTddMissingUpdate
+      ? `本次改动涉及模块目录边界或对外清单，请核对 ${tddRel} 的最近更新日期与模块职责表并随本次提交更新。`
       : null,
   }
 }

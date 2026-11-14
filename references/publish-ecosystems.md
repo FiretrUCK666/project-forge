@@ -4,159 +4,49 @@
 
 `references/publish.md` 判定「该不该发、发到哪、发什么号」之后，要真正动手发时读。
 这里只有会在发布时**拦住你或悄悄发错东西**的硬判据，没有概念解释。遇到本文件没覆盖的生态，
-回 `publish.md` 的「未知生态怎么办」现场核查 6 问。
+回 `publish.md` 的「七、失败与中断」及「六、怎么安全地发」现场核查。
 
 ## Node / npm
 
 1. **`@scope/pkg` 默认私有。** 公开包必须显式写 `"publishConfig": { "access": "public" }`。
-   漏了的表现是「发布成功，但别人装不到」，报权限错误。
-
-2. **`files` 白名单优先于 `.npmignore`**，两者同时存在时只认 `files`。而且白名单**对从 Git 仓库
-   直装同样生效**——仓库里有某个文件，不代表安装方拿得到它。判断依据是「打包清单里有没有」。
-
-3. **依赖边界**：安装方运行时用到的进 `dependencies`；只在构建、测试、类型检查时用的进
-   `devDependencies`；**由宿主或使用方提供的进 `peerDependencies`**（宿主框架、React 一类）。
-   放错到 `dependencies` 的后果是装出第二份副本，两个实例互相打架，而症状出现在使用者那边。
-
-4. **OIDC 登记有有效期，必须在有效期内完成第一次成功发布**，否则登记作废，报 `ENEEDAUTH`；
-   过期只能删掉重建。新包还没有真版本可发时，**先发一个分阶段占位版本**（`0.0.0-stage` 一类）
-   把线打通。
-
-5. **`package.json` 的 `repository` 必须与平台仓库大小写逐字一致。** 不一致时 OIDC 的登记匹配
-   失败，而报错只说「未授权」——看起来像权限问题，其实是拼写问题。
-
-6. **发布 job 必须关掉 CI 缓存。** 缓存跨运行复用，而发布 job 手里有发布身份：一份中毒的缓存
-   就能把短时身份令牌暴露给攻击者代码。这是发布链路里最容易被忽略的一条。
-
-7. **预演 `npm pack --dry-run`，再做一次隔离安装验证**：把打出来的包装进一个空目录，跑一遍入口。
-   **禁用本地链接（`npm link`、路径依赖）代替**——链接绕过打包，白名单错了也验不出来。
-
-8. **坏版本优先 `npm deprecate`。** 撤销发布有很窄的时间窗口，且**永久烧掉那个版本号**；
-   超过窗口就只能发新版。
-
-9. **在核对登记项之前，「这个包不存在」这个结论不成立。** 平台**不区分「无权」与「不存在」**，
-   两者报同一个错。先查登记项，再下结论。
-
-10. **`bin` 指向的文件必须存在且带 shebang**，否则 Unix 上直接执行会失败，而 `npm pack
-   --dry-run` 不拦它。`engines` 只是建议，不拦安装；想真拦要配 `engine-strict`。
-
-11. **主入口要在 `exports` 里显式声明。** 只写 `main` 时，用 ESM 方式导入的安装方拿不到它，
-    而报错是「找不到模块」，不是「入口没声明」。
+2. **`files` 白名单优先于 `.npmignore`**，两者同时存在时只认 `files`，且对从 Git 直装同样生效。
+3. **依赖边界**：运行时用的进 `dependencies`；构建与测试用的进 `devDependencies`；**由宿主或使用方提供的进 `peerDependencies`**。
+4. **OIDC / Trusted Publishing 接线**：在 npm 包 Settings -> Publishing access 绑定当前 GitHub 仓库 `<owner>/<repo>`、工作流文件名（如 `release.yml`）与可选 `environment`；工作流 job 声明 `permissions: id-token: write` 并使用 Node 22+（内置足够新版 npm 支持 `--provenance`）；**发布 job 必须关闭依赖缓存**，且 `package.json` 的 `repository` URL 大小写必须与仓库逐字一致。若尚在登记有效期内且未发过真版本，可先发占位版本或按新版 npm Trusted Publisher 登记核对报错。
+5. **预演 `npm pack --dry-run`，再做一次隔离安装验证**：把打出来的包装进空目录跑一遍入口；**禁用 `npm link` 或本地路径依赖代替**。
+6. **坏版本优先 `npm deprecate`**；撤销发布窗口窄且永久烧号。
+7. **`bin` 指向的文件必须存在且带 shebang**；**主入口要在 `exports` 里显式声明**。
 
 ## Python / PyPI
 
-1. **`pyproject.toml` 三张表分工**：`[build-system]` 说怎么构建，`[project]` 说这个包是什么，
-   `[project.optional-dependencies]` 说额外依赖。缺 `[build-system]` 时构建器只能靠猜。
-
-2. **`license` 要写 SPDX 字符串**（如 `MIT`）**配 `license-files`** 列许可证文件。旧的
-   `license = { file = "..." }` 写法在现行元数据规范下报类型错误，而不是警告。
-
-3. **`readme` 必填**，指向的文件要真实存在。缺它的表现是发布页空白，而上传本身可能成功。
-
-4. **`requires-python` 是唯一真正约束安装的下限。** 分类标签（`Programming Language :: Python
-   :: 3.x`）只是展示，装的时候没人看它。两者不一致时，用户会被装到一个跑不起来的版本上。
-
-5. **禁用 `dynamic = ["name"]`。** 名字必须是静态字面量——构建系统拿不到名字就无法归档。
-   `version` 则常在 `dynamic` 里：此时标签与文件名里的版本按**后端实际取值**算，不要照抄
-   `pyproject.toml` 里的字面量（它可能根本不在文件里，或在别的文件里）。
-
-6. **预演 `python -m build && twine check dist/*`。** `twine check` 查的是元数据能不能被索引
-   接受——跳过它，等于把「上传之后才报错」当成第一道检查。
-
-7. **TestPyPI 是独立世界。** 账号、令牌、包名空间都不通用。在 TestPyPI 上成功，
-   不代表正式源上任何一个字段是对的。
-
-8. **OIDC 支持 Pending Publisher**（首版还没发过也能直接走 OIDC），但要求**构建 job 与发布 job
-   分离**：构建在无特权环境产出文件，发布只消费那些文件。合成一个 job 就失去了分开的意义。
-
-9. **禁用本地版本号**（`1.0.0+local`）。索引不接受它。
-
-10. **轮子与源码分发包是两份产物，都要检查。** 只验轮子时，`sdist` 里漏了文件不会被发现，
-    而从 `sdist` 安装的人会装到一个缺文件的包。
-
-11. **同名文件一旦上传就永久烧号**：删项目、重建项目都不能复用那个文件名与版本。
-
-12. **正式源禁用「跳过已存在」一类参数。** 它会把「这次其实没发上去」变成一条绿色的日志。
-
-13. **防依赖混淆劫持**：内部包名要么在公网索引上占位，要么明确配私有源与索引优先级。
-    否则别人可以在公网发一个同名的高版本，安装方按「取最新」就会装到他的代码。
+1. **`pyproject.toml` 三张表分工**：`[build-system]`、`[project]`、`[project.optional-dependencies]`。缺 `[build-system]` 时构建器只能靠猜。
+2. **`license` 写 SPDX 字符串**（如 `MIT`）配 `license-files`。
+3. **`readme` 必填**且指向真实文件。
+4. **`requires-python` 是唯一真正约束安装的下限**；分类标签只作展示。
+5. **禁用 `dynamic = ["name"]`**；`version` 在 `dynamic` 里时按后端实际取值与标签对齐。
+6. **预演 `python -m build && twine check dist/*`**，轮子与 `sdist` 源码分发包都要核对文件清单。
+7. **TestPyPI 与正式 PyPI 完全独立**；Pending Publisher 支持首版直接走 OIDC，但要求**构建 job（无特权）与发布 job（仅含 `id-token: write` 与 `environment: pypi`）分离**，通过上传/下载 artifact 传递 `dist/*`；PyPI 侧填写的 `Owner`、`Repository name`、`Workflow name`、`Environment name` 四项必须与工作流逐字一致。
+8. **禁用本地版本号**（`1.0.0+local`）；同名文件一旦上传永久烧号；正式源禁用跳过已存在参数；内部包名注意防依赖混淆劫持。
 
 ## Rust / crates.io
 
-1. **`Cargo.toml` 必填项**：`[package]` 下的 `name`、`version`、`edition`、`description`、
-   `license`（或 `license-file`）、`repository`。缺 `description` 或 `license` 直接被拒。
-
-2. **三个硬上限**：`keywords` 最多 5 个；`categories` 最多 5 个且**必须命中官方 slug 列表**
-   （自造词不算分类）；包体积上限 10MB。超了报错，不会替你截断。
-
-3. **`publish = false` 是防误发开关。** 工作区里该关的子 crate 全关掉——一次顺手 `cargo publish`
-   就会把内部 crate 永久发到公网，而它撤不回来。
-
-4. **`include` 一旦声明就完全覆盖 `exclude` 与忽略规则。** 两者同时写时只有 `include` 生效，
-   且是白名单语义：没列的文件一个都不进包。
-
-5. **本地路径依赖发包时必须带版本号**：`{ path = "../core", version = "1.2" }`。
-   只写 `path` 的依赖在别人机器上解析不到，而 `cargo publish` 会在最后一步才拒。
-
-6. **双步预演**：`cargo package --list` 看文件清单，`cargo publish --dry-run` 走完整校验。
-   **正式发布禁用 `--no-verify` 与 `--allow-dirty`**：前者跳过构建校验，后者把没提交的改动一起
-   打包——两者都让「本地能过」与「发出去的」变成两回事。
-
-7. **版本号必须写足三段**（`0.1.0`，不是 `0.1`）。索引按语义化版本解析，两段的写法直接拒收，
-   而本地构建完全不介意。
-
-8. **`[patch]` 段不会随包发布。** 它只在本地工作区生效，用来临时覆盖依赖。指望它替下游修依赖
-   的人，会在别人机器上得到一个解析失败的构建。
-
-9. **工作区多包要逐包发**（`cargo publish -p <name>`），顺序按依赖从底往上。发晚了的表现是
-   上层 crate 的校验找不到刚声明的那个依赖版本。
-
-10. **包名在索引里不区分大小写与连字符**（`my-crate` 与 `my_crate` 视作同一个）。先查占用，
-    再定名字——撞名时你改的是 module 名与全部 import，不是改一个字段。
-
-11. **发布轮询超时不等于失败。** 多半已经成功了。**先查库里有没有那个版本**，再决定要不要重发。
-
-12. **OIDC 的硬前提：该 crate 必须已经手动成功发过至少一版。** 没有任何版本的新 crate 走不通
-    可信发布——先用令牌发第一版。
-
-13. **修正顺序：先发一个兼容的新版，再 `cargo yank` 坏版本。** yank 本身可逆，
-    但顺序反了下游会全断：旧版被 yank 之后，锁文件指向它的构建立刻解析不到。
+1. **`Cargo.toml` 必填项**：`[package]` 下的 `name`、`version`（必须写足三段 `0.1.0`）、`edition`、`description`、`license`（或 `license-file`）、`repository`。
+2. **三个硬上限**：`keywords` 最多 5 个、`categories` 最多 5 个且须命中官方 slug、单 crate 包体积上限 10MB。
+3. **工作区内部 crate 写 `publish = false`** 防误发；`include` 会完全覆盖 `exclude` 与 `.gitignore`；本地路径依赖发包时必须附带 `version`（`[patch]` 段不随包发布）。
+4. **双步预演**：`cargo package --list` + `cargo publish --dry-run`；正式发布禁用 `--no-verify` 与 `--allow-dirty`；工作区多包按依赖从底向上逐包 `cargo publish -p <name>`。
+5. **OIDC 硬前提**：crates.io 可信发布要求该 crate 已存在至少一个已发布版本（首版先用令牌发布，或按 crates.io 最新 Trusted Publishing 策略在 Crate Settings 登记仓库/工作流/环境并在工作流配 `id-token: write`）；包名在索引里不区分大小写与连字符；修正坏版先发兼容新版再 `cargo yank`。
 
 ## Go Modules
 
-1. **没有上传动作。** 流程是 `go mod tidy` → `go test ./...` → **推标签** → 等模块代理收录。
-   找上传命令是在找一个不存在的东西。
+1. **没有上传动作**：`go mod tidy` → `go test ./...` → **推标签** → 等模块代理收录。
+2. **标签形状三条铁律**：单模块 `vX.Y.Z`；子目录模块 `subdir/vX.Y.Z`；**v2 及以上大版本必须在 `go.mod` module 路径与全部 import 路径末尾同步加 `/v2`**。
+3. **`go` 指令是强制编译下限**（Go 1.21+）；`replace` 与 `go.work` 仅本地生效；`go.sum` 只许经命令改；私有模块配 `GOPRIVATE`。
+4. **已发布标签绝不可挪动**；撤回在 `go.mod` 写 `retract vX.Y.Z` 并**再发更高正式版本**；确认收录以 `go mod download <module>@<version>` 拉取成功为准。
 
-2. **标签形状三条铁律**：单模块 `vX.Y.Z`；子目录模块 `subdir/vX.Y.Z`（且必须指向那个子目录的
-   当前提交，不是「仓库最新」）；**v2 及以上的大版本必须在 `go.mod` 的 module 路径与全部 import
-   路径末尾同步加 `/v2`**。加错一处，那个版本谁都解析不到。
+## Java / Maven & Gradle
 
-3. **Go 1.21+ 的 `go` 指令是强制编译下限**，低于它的工具链直接拒绝构建。它不再是建议值。
-
-4. **撤回机制**：在 `go.mod` 里写 `retract vX.Y.Z`（可带范围），**必须再发一个更高的正式版本**
-   才能让代理侧生效——撤回信息本身也要靠一个新版本才被看见。
-
-5. **已发布的标签绝不可挪动。** 重打一个同名标签指向新提交，会让所有下游的 `go.sum` 校验失败，
-   而那个报错看起来像缓存问题，于是人会反复清缓存。
-
-6. **确认收录的方式是「按版本拉取成功」**（`go mod download <module>@<version>`），
-   **不是看命令退出码**。代理有缓存与延迟，推送成功不代表别人现在就拿得到。
-
-7. **`go.sum` 只许经命令改。** 手工编辑它等于伪造校验记录，而校验失败时的报错不会指向这里。
-
-8. **私有模块配 `GOPRIVATE`**（或等价的「不走公网校验库」配置）。不配的后果是代理去公网索引查
-   一个它本来就取不到的模块，然后把失败报成「不存在」——排查方向从一开始就错了。
-
-9. **`replace` 与 `go.work` 只作用于本地**，不会替代下游的依赖解析。指望它们替别人指向另一个版本，
-    换来的是一个完全不同的依赖图，而两边都没有报错。
-
-10. **预发布版本用 `-rc.1` / `-beta.1` 这类后缀。** 模块代理按语义化版本排序，`v1.0.0-rc.1`
-    不会被 `go get <module>` 的默认行为选中——这是它该起的作用。
-
-11. **`go.mod` 与标签同一次推送。** 先推一个再推另一个会留下窗口，在那段时间拉取的人拿到改了一半
-    的模块，而 `go.sum` 会把这个结果记下来。**`retract` 也不是删标签**：包仍可下载，只是默认解析
-    绕开它；删标签会毁掉所有下游的校验。
+1. **唯一版本号来源**：Maven 读根 `pom.xml` `<version>`（多模块聚合同步各子模块），Gradle 读 `gradle.properties` 或 `build.gradle(.kts)` `version`（剔除 `-SNAPSHOT` 后与标签对齐）。
+2. **发布认证**：Maven Central Portal / Gradle Plugin Portal 需配置签名私钥（GPG 密钥存入仓库 Secrets，绝不入库）与门户令牌（或对应 OIDC 通道），并在发布前用 `./mvnw verify` / `./gradlew check` 完成打包与签名校验。
 
 ## 事实来源
 
-本文件涉及的外部事实会随平台/宿主版本变化，动手前查官方文档，本文件写的是判定流程而不是字段快照。
+本文件涉及的外部事实（各制品库 OIDC 界面字段、Supported Runners 与 Action 版本）会随平台演进，动手前查官方文档，本文件写的是判定流程而不是字段快照。

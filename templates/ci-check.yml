@@ -21,7 +21,7 @@
 #   **跨文件不能写 needs。** 那种依赖关系写成同一文件里的两个 job 更可靠；分成两个
 #   文件时只能靠事件触发，而先后顺序没有保证。
 #
-# TODO(1) 运行环境：按命中的生态只留一块（Node / Python / Rust / Go），
+# TODO(1) 运行环境：按命中的生态只留一块（Node / Python / Rust / Go / Java），
 #   版本取清单声明的那个；纯文档目录把整块删掉。落盘前核对所用 Action 的最新大版本
 #   （不要照抄这里的 vN）。
 # TODO(2) 门禁命令：从 AGENTS.md 的「构建与验证」节逐条搬过来，一行一条。
@@ -51,6 +51,12 @@
 #     - uses: actions/setup-go@v5            # 落盘前核对最新大版本
 #       with:
 #         go-version-file: 'go.mod'
+#
+#     # Java
+#     - uses: actions/setup-java@v4          # 落盘前核对最新大版本
+#       with:
+#         distribution: 'temurin'
+#         java-version: '<清单声明的版本>'
 #
 # 跨平台矩阵（项目在多个系统上表现不一样时才开，其余情况不要开——两倍等待换不到判据）：
 #

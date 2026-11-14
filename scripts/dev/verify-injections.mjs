@@ -404,6 +404,38 @@ const INJECTIONS = [
     to: 'if (false && !validIds.has(rawAnchor) && !validIds.has(decoded)) {\n      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)',
     expect: 'validateDocTocAnchors 未拦截失效目录锚点',
   },
+  {
+    id: 'I40',
+    what: '向 assets/readme/hero.svg 注入低于 16 的微小字号',
+    file: 'assets/readme/hero.svg',
+    from: '<text x="64" y="68" class="mono" font-size="16" font-weight="600" letter-spacing="2" fill="#526075">GIT WORKFLOW HARNESS · GITHUB</text>',
+    to: '<text x="64" y="68" class="mono" font-size="11" font-weight="600" letter-spacing="2" fill="#526075">GIT WORKFLOW HARNESS · GITHUB</text>',
+    expect: '禁止微小字号',
+  },
+  {
+    id: 'I41',
+    what: '架空 shared.mjs evaluateCoupledSync 的改哪看哪联动同步检查',
+    file: 'kit/skills/lib/shared.mjs',
+    from: 'if (normalizedChanged.length === 0 || !Array.isArray(rules) || rules.length === 0) {',
+    to: 'if (true || normalizedChanged.length === 0 || !Array.isArray(rules) || rules.length === 0) {',
+    expect: 'evaluateCoupledSync 单边修改未命中 docs/api.md',
+  },
+  {
+    id: 'I42',
+    what: '剥除 templates/docs-spec.md 头部 YAML Frontmatter 分隔符',
+    file: 'templates/docs-spec.md',
+    from: '---\nkind: spec',
+    to: 'kind: spec',
+    expect: '缺少 YAML Frontmatter',
+  },
+  {
+    id: 'I43',
+    what: '禁用 govern-audit.mjs 对单测硬编码长 sleep 的检查',
+    file: 'kit/skills/dev-govern/scripts/govern-audit.mjs',
+    from: 'if (HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {',
+    to: 'if (false && HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {',
+    expect: '未检出 tests.hard-sleep',
+  },
 ]
 
 function runFixtures(expect = '') {

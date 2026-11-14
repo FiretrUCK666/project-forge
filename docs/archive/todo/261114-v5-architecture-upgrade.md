@@ -1,6 +1,6 @@
 # 任务单：project-forge v5 双层同构与研发闭环升级
 
-关联规范：[v5 架构升级设计规范](../../specs/261114-v5-architecture-upgrade.md)
+关联规范：[v5 架构升级设计规范](../../specs/261114-v5-architecture-upgrade-spec.md)
 目标分支：`feat/v5-harness-upgrade`
 执行角色：协调与多模块并行实施 + 独立集成验证（无外部远端直推，经独立审查收口）
 
@@ -23,5 +23,5 @@
 
 **在合并之前写完，随这次改动一起提交。**
 
-- 交付物总览：`.gitattributes`、`.gitignore`、`docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）、`docs/specs/261114-v5-architecture-upgrade.md`、`docs/archive/todo/`（含历史归档与脱敏修复）、`README.md`、`README.en.md`、`CONTRIBUTING.md`、核心脚本（含新增 `scripts/backup.mjs` 写前快照引擎）与平台模块、五套自包含内置研发 Skill（`kit/skills/`）、新版 `SKILL.md` / `references/` / `templates/`、本仓自举 `.agents/skills/` 与 `AGENTS.md`，以及增强版 `scripts/dev/` 门禁与注入校验。
+- 交付物总览：`.gitattributes`、`.gitignore`、`docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）、`docs/specs/261114-v5-architecture-upgrade-spec.md`、`docs/archive/todo/`（含历史归档与脱敏修复）、`README.md`、`README.en.md`、`CONTRIBUTING.md`、核心脚本（含新增 `scripts/backup.mjs` 写前快照引擎）与平台模块、五套自包含内置研发 Skill（`kit/skills/`）、新版 `SKILL.md` / `references/` / `templates/`、本仓自举 `.agents/skills/` 与 `AGENTS.md`，以及增强版 `scripts/dev/` 门禁与注入校验。
 - 遗留与后续：无遗留项，随 `feat/v5-harness-upgrade` 合入主干后归档。

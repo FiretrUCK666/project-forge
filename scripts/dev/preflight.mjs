@@ -41,6 +41,7 @@ import { checkEquip } from '../equip.mjs'
 import { VERIFY_EXIT } from '../handoff.mjs'
 import { isMainModule } from '../lib/text.mjs'
 import { markdownHeadings } from '../sync-toc.mjs'
+import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -1641,6 +1642,9 @@ function checkSingleSources() {
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u
 
+const SVG_BANNED_JARGON_RE = /(?:FORGE\s+SPECIMEN|存量无损融合|跨月重入校准)/
+const SVG_TINY_FONT_RE = /\bfont-size\s*=\s*["']\s*(?:[0-9]|1[0-5])(?:\.\d+)?(?:px)?\s*["']/i
+
 function checkSvgAssetSafety(name, raw) {
   if (!/<svg\b/i.test(raw) || !/<\/svg>/i.test(raw)) fail(`${name} 缺少完整的 <svg>...</svg> 根结构`)
   if (!/\bviewBox\s*=\s*["'][^"']+["']/i.test(raw)) fail(`${name} 缺少 viewBox 属性`)
@@ -1652,6 +1656,81 @@ function checkSvgAssetSafety(name, raw) {
   if (/https?:\/\//i.test(stripped)) {
     fail(`${name} 包含非标准外部 http(s) 资源引用——SVG 卡片必须 100% 自包含`)
   }
+  const tinyFont = SVG_TINY_FONT_RE.exec(raw)
+  if (tinyFont) {
+    fail(`${name} 包含低于 16 的禁止微小字号（${tinyFont[0]}）`)
+  }
+  const banned = SVG_BANNED_JARGON_RE.exec(raw)
+  if (banned) {
+    fail(`${name} 包含禁止的内部黑话「${banned[0]}」`)
+  }
+}
+
+function checkReadmeVisualsAndDocFrontmatter() {
+  const requiredSvgs = [
+    'assets/readme/hero.svg',
+    'assets/readme/hero-en.svg',
+    'assets/readme/workflow.svg',
+    'assets/readme/workflow-en.svg',
+    'assets/readme/architecture.svg',
+    'assets/readme/architecture-en.svg',
+  ]
+  const heights = new Set()
+  for (const relPath of requiredSvgs) {
+    const abs = join(ROOT, relPath)
+    if (!existsSync(abs)) {
+      fail(`缺少 README 图解资产：${relPath}`)
+      continue
+    }
+    const raw = readText(abs)
+    const vb = /\bviewBox\s*=\s*["']\s*0\s+0\s+\d+(?:\.\d+)?\s+(\d+(?:\.\d+)?)\s*["']/i.exec(raw)
+    if (vb) heights.add(vb[1])
+    else fail(`${relPath} 缺少标准 0 0 W H viewBox 尺寸`)
+  }
+  if (heights.size < 2) {
+    fail(`README SVG 图解高度过于单一（仅检测到 ${heights.size} 种高度），不同图表须按内容采用区分度明显的独立高度`)
+  }
+
+  for (const readmeRel of ['README.md', 'README.en.md']) {
+    const text = readText(join(ROOT, readmeRel))
+    if (!/https:\/\/img\.shields\.io\/badge\//i.test(text)) {
+      fail(`${readmeRel} 缺少 shields.io 事实徽章行`)
+    }
+  }
+
+  const requiredDocTemplates = [
+    ['templates/docs-prd.md', 'prd'],
+    ['templates/docs-spec.md', 'spec'],
+    ['templates/docs-todo.md', 'todo'],
+  ]
+  const requiredKeys = ['kind', 'status', 'created', 'updated', 'issue', 'pr', 'owner']
+  for (const [tplRel, expectedKind] of requiredDocTemplates) {
+    const raw = readText(join(ROOT, tplRel))
+    const fm = parseDocFrontmatter(raw)
+    if (!fm.hasFrontmatter) {
+      fail(`${tplRel} 缺少 YAML Frontmatter（首行 --- ... ---）`)
+      continue
+    }
+    if (fm.malformedFrontmatter) {
+      fail(`${tplRel} YAML Frontmatter 格式错误：${fm.syntaxErrors.join('；')}`)
+      continue
+    }
+    if (fm.data.kind !== expectedKind) {
+      fail(`${tplRel} YAML Frontmatter \`kind\` 应为「${expectedKind}」，实为「${fm.data.kind ?? ''}」`)
+    }
+    for (const k of requiredKeys) {
+      if (!Object.prototype.hasOwnProperty.call(fm.data, k)) {
+        fail(`${tplRel} YAML Frontmatter 缺少必需字段「${k}」`)
+      }
+    }
+    for (const k of ['kind', 'status', 'created', 'updated', 'owner']) {
+      if (typeof fm.data[k] !== 'string' || !fm.data[k].trim()) {
+        fail(`${tplRel} YAML Frontmatter 字段「${k}」不可为空`)
+      }
+    }
+  }
+
+  note(`视觉与文档前导：6 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
 }
 
 function checkHygiene() {
@@ -1861,6 +1940,7 @@ async function main() {
   checkArchBoundaries()
   checkDevProfileParity()
   checkTeamAndTddContracts()
+  checkReadmeVisualsAndDocFrontmatter()
   checkTemplates()
   checkPlatformLock()
   checkStructureRules()

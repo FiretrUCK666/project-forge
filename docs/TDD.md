@@ -301,14 +301,14 @@ flowchart LR
 
 | 验证脚本 | 检查覆盖面 | 触发时机与预期标准 |
 | --- | --- | --- |
-| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、7 步收尾/4 字段对拍、自有实例同构、平台锁定、包自包含与端到端冒烟（27 项读数） | 每次提交前；退出码 `0`，`0` 项失败 |
+| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、7 步收尾/4 字段对拍、自有实例同构、平台锁定、包自包含与端到端冒烟（28 项读数） | 每次提交前；退出码 `0`，`0` 项失败 |
 | `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 条遗漏或悬空 |
 | `scripts/dev/fixtures.mjs` | 身份判定、Track A/B 降级、空目录 5 栈起步、`reentry`、`backup`、`dev-flow`、`dev-review`、`dev-govern` 与 `release-prep` 双向正反断言 | 每次改动判定或工作流后；`0` 项失败 |
 | `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及 `<= 30KB` 预算（`--check`） | 修改契约或模板后；退出码 `0` |
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
 | `scripts/sync-toc.mjs` | 双语门面目录标题与 GitHub 锚点双向一致性（`README.md README.en.md --check`） | 修改 README 结构后；退出码 `0` |
-| `scripts/dev/verify-injections.mjs` | 在临时隔离副本上逐条注入 46 类人为退化故障（削弱门禁、破坏指针、删去关键路径检测），验证对应检查必红且还原后全绿 | 合流与发版前；全部故障可捕获且还原后全绿 |
+| `scripts/dev/verify-injections.mjs` | 在临时隔离副本上逐条注入 50 类人为退化故障（削弱门禁、破坏指针、删去关键路径检测），验证对应检查必红且还原后全绿 | 合流与发版前；全部故障可捕获且还原后全绿 |
 | `scripts/dev/bench.mjs` | 300 文件基准仓库下 `survey.mjs` 耗时低于 `BUDGET_MS`（3000ms） | 修改扫描逻辑后；防止线性退化 |
 | `scripts/dev/evidence.mjs` | 清点当前导出包 `skillVersion`、`skillSource`、条目列表与文件哈希（只读） | 发版前核对制品证据 |
 

@@ -48,7 +48,7 @@ import { join, resolve } from 'node:path'
 
 import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
-import { parseMarkers } from './lib/protocol.mjs'
+import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protocol.mjs'
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 
 /** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
@@ -57,7 +57,7 @@ function readdirSyncSafe(dir) {
 }
 
 const SCOPES = new Set([
-  'git', 'agents', 'docs', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
+  'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
 /** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
@@ -198,6 +198,12 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     } else if (facts.git.role === 'contributor-fork') {
       add(finding('notice', 'git', 'git.role.fork',
         `这是别人的仓库的 fork（${facts.git.roleReason}）——拉分支、推自己的分支、开 PR，不推主干、不打标签`))
+    } else if (facts.git.role === 'clone-readonly') {
+      add(finding('notice', 'git', 'git.role.readonly',
+        `这是只读克隆的仓库（${facts.git.roleReason}）——不能直接向源仓库推送或打标签；如需贡献应先 Fork 再开 PR`))
+    } else if (facts.git.role === 'local-only' && facts.git.remote) {
+      add(finding('ok', 'git', 'git.role.local',
+        '已启用纯本地模式（.git/pf-local-mode），按纯本地工作区处置'))
     }
   }
 
@@ -310,6 +316,18 @@ export async function reviewProject(targetDir, { scopes } = {}) {
         ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
       }))
   } else {
+    const agentsBytes = facts.docs.agentsBytes ?? Buffer.byteLength(agentsText, 'utf8')
+    const oversize = agentsBytes > AGENTS_MAX_BYTES
+    if (oversize) {
+      add(finding('missing', 'agents', 'agents.oversize',
+        `${facts.docs.agents.file} 体积超过 ${AGENTS_MAX_BYTES} 字节上限（当前 ${agentsBytes} 字节）——请将长篇架构设计与细节外置到 docs/TDD.md`, {
+          ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+        }))
+    } else if (agentsBytes > AGENTS_WARN_BYTES) {
+      add(finding('notice', 'agents', 'agents.near-limit',
+        `${facts.docs.agents.file} 体积已接近上限（当前 ${agentsBytes} / ${AGENTS_MAX_BYTES} 字节）——新增内容请优先外置到 docs/TDD.md`))
+    }
+
     const fills = parseMarkers(agentsText, facts.docs.agents.file).filter((m) => m.kind === 'fill')
     if (fills.length > 0) {
       add(finding('missing', 'agents', 'agents.unfilled',
@@ -339,7 +357,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           `${facts.docs.agents.file} 有 ${health.drifted.length} 段与模板不一致：${health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else {
+      } else if (!oversize) {
         add(finding('ok', 'agents', 'agents.ready', `${facts.docs.agents.file} 已就绪，没有未填的占位，结构也完整`))
       }
     }
@@ -391,6 +409,46 @@ export async function reviewProject(targetDir, { scopes } = {}) {
         decision: 'no-contributing',
         ref: { file: 'references/docs-set.md', section: '五、`CONTRIBUTING`' },
       }))
+  }
+
+  const needsTdd = (facts.scale.codeFiles ?? 0) > 0 && !(facts.ecosystem.kinds ?? []).includes('docs-only')
+  if (needsTdd) {
+    if (facts.docs.tdd) {
+      add(finding('ok', 'docs', 'docs.tdd.ok', `技术设计文档已就绪（${facts.docs.tdd}）`))
+    } else if (!decisions.has('no-tdd')) {
+      add(finding('notice', 'docs', 'docs.tddMissing',
+        '代码项目缺少 `docs/TDD.md`——将长篇设计决策外置到 TDD.md 可防止 AGENTS.md 超过上下文预算', {
+          decision: 'no-tdd',
+        }))
+    }
+  }
+
+  // ── 工程套件（.agents/skills/）────────────────────────────────────
+  if ((facts.scale.effectiveFiles ?? 0) > 0 && !decisions.has('no-kit')) {
+    const kit = facts.kit
+    if (!kit?.manifestExists) {
+      add(finding('notice', 'kit', 'kit.missing',
+        '还没有配备 `.agents/skills/` 开发技能套件——可运行 `node scripts/equip.mjs .` 装配并跟踪清单', {
+          decision: 'no-kit',
+        }))
+    } else if (kit.corrupted || (kit.missingFiles?.length ?? 0) > 0) {
+      const detail = kit.corrupted
+        ? `${kit.manifestPath} JSON 损坏或结构无效`
+        : `缺失托管文件：${kit.missingFiles.slice(0, 4).join('、')}`
+      add(finding('missing', 'kit', 'kit.drifted',
+        `受管 \`.agents/skills/\` 套件异常（${detail}）——请运行 \`node scripts/equip.mjs .\` 修复`))
+    } else if ((kit.modifiedFiles?.length ?? 0) > 0 || kit.versionMismatch) {
+      const reasons = []
+      if (kit.versionMismatch) reasons.push(`清单版本 ${kit.forgeVersion} 与当前工具版本不一致`)
+      if ((kit.modifiedFiles?.length ?? 0) > 0) {
+        reasons.push(`${kit.modifiedFiles.length} 个文件被本地修改（${kit.modifiedFiles.slice(0, 3).join('、')}）`)
+      }
+      add(finding('notice', 'kit', 'kit.drifted',
+        `受管 \`.agents/skills/\` 存在漂移（${reasons.join('；')}）——可运行 \`node scripts/equip.mjs .\` 做无损升级`))
+    } else {
+      add(finding('ok', 'kit', 'kit.ready',
+        `受管 \`.agents/skills/\` 套件已就绪（${kit.filesCount} 个托管文件，版本 ${kit.forgeVersion ?? '未知'}）`))
+    }
   }
 
   // ── 许可证 ────────────────────────────────────────────────────────
@@ -617,7 +675,7 @@ function render(result, strict) {
   lines.push(`交付体检：${result.target.name}（成熟度 ${result.maturity}）`)
   lines.push('')
 
-  const order = ['git', 'secrets', 'agents', 'docs', 'license', 'ci', 'release', 'collaboration', 'ecosystem']
+  const order = ['git', 'secrets', 'agents', 'docs', 'kit', 'license', 'ci', 'release', 'collaboration', 'ecosystem']
   const label = { missing: '缺', pending: '待定', notice: '可以更好', ok: '齐' }
 
   for (const scope of order) {

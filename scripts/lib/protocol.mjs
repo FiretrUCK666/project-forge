@@ -249,6 +249,35 @@ export const FULL_READ_REFS = Object.freeze([
   'references/remote-github.md',
 ])
 
+/** 契约与工程套件预算上限（单一真相源）。 */
+export const AGENTS_MAX_BYTES = 30720
+export const AGENTS_WARN_BYTES = 24576
+export const KIT_SKILL_MAX_LINES = 180
+export const KIT_SKILLS = Object.freeze([
+  'dev-explore',
+  'dev-plan',
+  'dev-flow',
+  'dev-review',
+  'dev-govern',
+])
+
+/** 受管套件清单与工作区状态相对路径。 */
+export const PF_MANIFEST_REL = '.agents/skills/.pf-manifest.json'
+export const WORKTREES_STATE_REL = '.worktrees/.state'
+
+/** 对外产物层严禁出现的非 GitHub 托管平台或旧式版本库字样。 */
+export const FORBIDDEN_PLATFORM_RE = new RegExp(
+  '\\b(?:' + [
+    'Git' + 'Lab',
+    'Git' + 'ee',
+    'Bit' + 'bucket',
+    'Code' + 'berg',
+    'Sub' + 'version',
+    'S' + 'VN',
+  ].join('|') + ')\\b',
+  'i',
+)
+
 // ── 模板语法：只活在 templates/ 里，绝不落进项目文件 ──────────────────
 //
 // 这一节与上面那四类标记**不是同一层东西**，分开定义是刻意的：
@@ -360,6 +389,12 @@ export const REPO_ONLY_DIRS = Object.freeze([
   'scripts/dev/',
 ])
 
+/** 不进包的所有目录前缀（包含 `.agents/` 与 `docs/`；`kit/` 保留进用户包）。 */
+export const REPO_ONLY_PREFIXES = Object.freeze([
+  ...REPO_ONLY_DIRS,
+  '.agents/',
+])
+
 /** 不进包的顶层单文件。它们没有目录可以承载，只能逐条列。 */
 export const REPO_ONLY_FILES = Object.freeze([
   'AGENTS.md',
@@ -389,7 +424,7 @@ export const REPO_ONLY_FILES = Object.freeze([
 export function isRepoOnlyPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (REPO_ONLY_FILES.includes(p)) return true
-  return REPO_ONLY_DIRS.some((d) => p.startsWith(d))
+  return REPO_ONLY_PREFIXES.some((d) => p.startsWith(d))
 }
 
 /**

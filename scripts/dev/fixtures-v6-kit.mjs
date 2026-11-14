@@ -622,6 +622,32 @@ export function registerV6KitCases(cases) {
       const finOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'note-case'], { cwd: urlDir })
       if (finOk.status !== 0) return `finalize 误拦合法 Todo 实现说明：${finOk.stderr}`
 
+      // submit 创建 PR 后回填 archived SPEC/Todo 的 pr 字段（不再抛 today is not defined）
+      const bareRem = tmpProject({})
+      spawnSync('git', ['init', '--bare', bareRem], { stdio: 'ignore' })
+      const bareUrl = bareRem.replace(/\\/g, '/')
+      try {
+        const implNote = join(urlDir, '.worktrees/impl-note-case')
+        spawnSync('git', ['config', `url.${bareUrl}.insteadOf`, 'https://github.com/acme/demo.git'], { cwd: urlDir, stdio: 'ignore' })
+        spawnSync('git', ['add', '-A'], { cwd: implNote, stdio: 'ignore' })
+        spawnSync('git', ['commit', '-qm', 'archive spec'], { cwd: implNote, stdio: 'ignore' })
+        const verOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'note-case', '--cmd', 'node -e "process.exit(0)"'], { cwd: implNote })
+        if (verOk.status !== 0) return `note-case verify 失败：${verOk.stderr}`
+        const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+        const { resolveRepoRoots: resRoots } = await import('../../kit/skills/lib/shared.mjs')
+        const postedComments = []
+        const mockSubmitClient = {
+          tier: 'gh-cli',
+          async createPr({ title }) { return { ok: true, number: 99, url: 'https://github.com/acme/demo/pull/99', title } },
+          async postComment(p) { postedComments.push(p); return { ok: true, id: postedComments.length, verifiedReadback: true } },
+        }
+        const subRes = await handleSubmit({ task: 'note-case', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, await resRoots(urlDir))
+        const archivedSpecTxt = readFileSync(join(implNote, 'docs/archive/specs/261115-note-case-spec.md'), 'utf8')
+        if (subRes.exitCode !== 0 || !/^pr:\s*99\b/m.test(archivedSpecTxt) || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev'))) {
+          return `handleSubmit archived pr 回填或首提 PR 评论失败：code=${subRes.exitCode}, spec=${archivedSpecTxt.slice(0, 260)}`
+        }
+      } finally { rmTree(bareRem) }
+
       // doc-plan approve 自动提示移交 dev-flow start
       const apInit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'app-next', '--title', 'Approve Next', '--issue', '55', '--json',

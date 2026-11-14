@@ -498,7 +498,7 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const ghProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
   const submitActor = resolveContributorIdentity({ explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login, ledgerActor: ledger.implementerId })
   const isRework = Boolean(opts.rework) || Boolean(ledger.prNumber)
   const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
@@ -557,11 +557,18 @@ export async function handleSubmit(opts, roots) {
 
   if (ledger.prNumber) {
     await syncTaskDocsSafe(implRoot, ledger, { pr: ledger.prNumber, status: 'in_review', preserveTerminalStatus: true })
-    const archRel = ledger.archivedTodoFile || (ledger.todoFile?.startsWith('docs/archive/') ? ledger.todoFile : null)
-    if (archRel && existsSync(join(implRoot, archRel))) {
-      const archRaw = readTextSafe(join(implRoot, archRel)) ?? ''
-      if (parseDocFrontmatter(archRaw).hasFrontmatter) {
-        updateDocFrontmatter(join(implRoot, archRel), { pr: ledger.prNumber, updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.todo })
+    const submitDate = docIsoDate()
+    const archTargets = [
+      ['todo', ledger.archivedTodoFile || (ledger.todoFile?.startsWith('docs/archive/') ? ledger.todoFile : null)],
+      ['spec', ledger.archivedSpecFile || (ledger.specFile?.startsWith('docs/archive/') ? ledger.specFile : null)],
+      ['prd', ledger.archivedPrdFile || (ledger.prdFile?.startsWith('docs/archive/') ? ledger.prdFile : null)],
+    ]
+    for (const [kind, archRel] of archTargets) {
+      if (archRel && existsSync(join(implRoot, archRel))) {
+        const archRaw = readTextSafe(join(implRoot, archRel)) ?? ''
+        if (parseDocFrontmatter(archRaw).hasFrontmatter) {
+          updateDocFrontmatter(join(implRoot, archRel), { pr: ledger.prNumber, updated: submitDate }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[kind] })
+        }
       }
     }
   }

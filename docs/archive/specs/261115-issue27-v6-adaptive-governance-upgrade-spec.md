@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-15
 updated: 2026-11-15
 issue: 27
-pr: null
+pr: 28
 branch: feat/v6-adaptive-governance
 owner: FiretrUCK666
 approved: true

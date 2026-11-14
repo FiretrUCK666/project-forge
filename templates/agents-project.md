@@ -23,6 +23,26 @@
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
 
+<!-- project-forge: begin 行事总纲 -->
+## 行事总纲与决策准则
+
+- **四条准则**：
+  1. **治本不治标**：先查根因再改，不用补丁或盲目重试遮掩问题；
+  2. **写原则不写死**：提炼可迁移原则，禁把偶然个案过度泛化；
+  3. **融入结构**：先查复用与现成基建，合入既有主干，不留双轨；
+  4. **保持清朗**：及时清理废弃路径与冗余分支，控制认知复杂度。
+- **信任倒金字塔与规则下沉**：
+  - 保障效力：`静态与类型门禁 > 测试与冒烟实证 > 独立审查 > 文档约定`；
+  - 同类纠偏**满 2 次**沉入脚本或静态检查，报错直接指明根因与修法。
+- **最优解与取舍**：
+  - 先给出无历史包袱的最干净解法，再拆渐进步骤；
+  - 权衡用户易用（UX）、维护顺手（DX）与 AI 可控（AX）。
+- **动手前后四问**：
+  - 改前：有无现成模块可复用？属可局部回退 `two-way` 还是不可逆 `one-way` 门？
+  - 改后：拿到本地真实运行证据了吗？是否引入死代码或借口注释？
+- **不当人肉代理**：凡可由 CLI、接口或 `smoke-verify` 自跑取证的链路，必须本地实测拿输出，不让用户替自己手工验收。
+<!-- project-forge: end 行事总纲 -->
+
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位
 
@@ -37,12 +57,14 @@
 ```yaml
 quick-test: <单文件或快测命令>
 full-test: <全量构建与测试命令>
+smoke-verify: <运行时端到端冒烟验证命令，或 none>
 merge-gate: <合并前必跑完整门禁命令>
+arch-rules: <跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>
 high-risk: <高风险路径前缀或文件，逗号分隔>
 do-not-edit: <禁止自动修改的路径，逗号分隔>
 ```
 
-<!-- project-forge: fill Dev Profile：核对并补齐上方 quick-test / full-test / merge-gate / high-risk / do-not-edit 真实取值后删掉本行 -->
+<!-- project-forge: fill Dev Profile：核对并补齐上方 quick-test / full-test / smoke-verify / merge-gate / arch-rules / high-risk / do-not-edit 真实取值后删掉本行 -->
 <!-- project-forge: end Dev Profile -->
 
 <!-- project-forge: begin 上下文阅读护栏 -->
@@ -103,11 +125,10 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: begin 修改守则 -->
 ## 工程修改守则与硬性规范
 
-- **先看再动，贴合既有结构**：先读现有实现与相邻代码，能并入现成机制就不另起炉灶。
-- **治本不治标，不留双轨**：先查清根因再动手，被替换掉的旧逻辑一并清干净，不留新旧双轨并存。
-- **小步验证，严控依赖**：不擅自引入第三方依赖，确需引入时先说明理由并取得确认。
-- **测试正反双向**：修缺陷先写稳定复现的失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判的反面用例。
-- **不写履历，文档同步**：只描述当前状态；改动代码导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
+- **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
+- **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
+- **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**（「以前……后来改成……」）、**禁死代码注释块**（废弃代码直接删，不留连续注释块）、**禁借口注释与擅自压制检查**（严禁未说明理由写 `HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
+- **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
 - {{COMMIT_STYLE_HINT}}
 <!-- project-forge: if has-bilingual-docs -->
 - **多语文档成对同步**：本仓库有 {{README_LIST}}，改任一语言版本必须同步另一份，并保持双向互指链接有效。
@@ -154,17 +175,17 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   这个项目还没有远端，所以眼下只有本地提交。**但落在高风险路径上的改动仍然要有一次独立审查**，结论写进本地任务单——审查不依赖远端存在，它依赖「这处改坏了不会当场失败」。
   <!-- project-forge: endif -->
 
-- **第二步：五档开工分流（Case 1..5）**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）：
+- **第二步：五档开工分流（Case 1..5）、门型与分级内审**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`），判定档位与门型（`two-way` 可局部回退 vs `one-way` 不可逆契约/数据/发布改动）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
   | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑相关校验 |
   | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写稳定复现失败测试再修（Red-Green）** |
-  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `{{WORK_DIR}}` 建 Todo，冻结 `C1`、`C2`… |
-  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/`（`Status: approved`）+ `{{WORK_DIR}}` Todo |
-  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，人拍板后再继续 |
+  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `{{WORK_DIR}}` 建 Todo，冻结 `C1`、`C2`…；跑 `doc-plan.mjs audit` 自修直通 |
+  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/` + `{{WORK_DIR}}` Todo；经 `audit` + 1–2 轮独立 Plan Critique -> `critique-pass` 后交人 `approve` |
+  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，同级内审并经人拍板后再继续 |
 
-  外加一条硬规则：**触碰下方「高风险路径」任一处 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
+  外加一条硬规则：**触碰下方「高风险路径」或 `one-way` 变更 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
 
 - **第三步：三档隔离与 Worktree 共享依赖**——
 
@@ -174,7 +195,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   | 第 2 档：`L2`/`L3`、接 Issue、脏主仓或并行 | `.worktrees/impl-<taskId>/`（新分支）+ `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；独立审查者在 `review-*` 做故障注入，用完即弃 |
   | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危变更，禁用生命周期脚本经人确认后再跑门禁 |
 
-  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**。`.worktrees/` 必须已忽略；卸前先问人。
+  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**（先辨识 `merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged` 四态并问人确认）。`.worktrees/` 必须已忽略；卸前先问人。
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 

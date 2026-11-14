@@ -36,11 +36,11 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 | 新版已移除的退役托管文件 | 当前哈希未改 -> **自动物理删除并移出 manifest（自净化）**；用户改过 -> 保留并标 `orphaned-modified` | 绝不误删用户手改资产 |
 | 用户自建的 `.agents/skills/<custom>/` | **永远不碰、不扫进清理名单** | 严守边界，不侵占项目私有扩展 |
 
-注：`compose-agents.mjs` 刷新 `AGENTS.md` 时同样核对 `.pf-manifest.json` 的 `agentsRegions` 基线——用户未加 `customized` 但直接改写了受管区间时自动保护跳过，不静默覆盖跨月手工维护的条款。
+注：`equip.mjs` 与 `compose-agents.mjs` 在修改已有非空文件前均动态通过 `scripts/backup.mjs` 在仓外（`<gitCommonDir>/project-forge-backups/`、`PF_BACKUP_DIR` 或 `~/.project-forge/backups/`）保留最多 5 份 `.tar.gz` 快照（`--no-backup` 可跳过，零变动时不冗余备份，可用 `backup.mjs restore` 回滚且零污染工作区）。`compose-agents.mjs` 同样核对 `.pf-manifest.json` 的 `agentsRegions` 基线，未加 `customized` 但被手改过的受管区间自动保护跳过。
 
 ## 四、交棒前四步清单
 
-1. **契约与装配自检**：确认 `compose-agents.mjs <项目> --check`、`equip.mjs <项目> --check` 与 `review.mjs <项目>` 均达标，且 `AGENTS.md <= 30KB`；
-2. **清理临时标记（可选）**：若不再保留 `AGENTS.md` 上的受管引导注释，跑 `compose-agents.mjs <项目> --clean`（只剥标记行、正文一字不动）；
-3. **验证无残留**：跑 `handoff.mjs <项目> --verify` 确认退出码为 `0` 或 `4`；
-4. **遗留工作树提示**：若 `.worktrees/` 下仍有已合任务的残留目录，**只列出清单请人确认后通过 `flow.mjs cleanup --confirm` 先解绑共享依赖再卸除**，绝不擅自硬删。
+1. **契约、装配与治理自检**：确认 `compose-agents.mjs <项目> --check`、`equip.mjs <项目> --check`、`review.mjs <项目>` 与按需 `govern-audit.mjs`（含 `cluster` / `sample` 规则下沉抽检与死链/注释扫描）均达标，且 `AGENTS.md <= 30KB`；
+2. **清理临时标记（可选）**：若不再保留 `AGENTS.md` 上的受管引导注释，跑 `compose-agents.mjs <项目> --clean`（写前先经 `backup.mjs` 快照，只剥标记行、正文一字不动）；
+3. **验证无残留**：跑 `handoff.mjs <项目> --verify` 确认退出码为 `0` 或 `4`（仓外备份目录 `.git/project-forge-backups/` 不触发痕迹误报）；
+4. **遗留工作树提示**：若 `.worktrees/` 下仍有已合任务的残留目录，**按 `merged` / `squash_or_rebase_merged` / `no_own_commits` / `unmerged` 四态列出清单并请人确认后通过 `flow.mjs cleanup --confirm` 先解绑共享依赖再卸除**，绝不擅自硬删。

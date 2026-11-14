@@ -30,7 +30,7 @@
 
 ## 三、仓库设置与分支保护
 
-- 对齐 `DEFAULT_BRANCH`（通常 `main`）；开启合并策略与必要的状态检查。
+- 对齐 `DEFAULT_BRANCH`（通常 `main`）；开启合并策略与必要的状态检查。按**单向门/双向门**划分：推自己分支与开/改 PR 属 `two-way` 可逆日常；合并默认分支、发版与改可见性属 `one-way` 不可逆操作。
 - **不要勾选自动删远端分支**——合并收尾须按顺序先检下游堆叠 PR 与 Fork PR 状态，经人点头再删。
 - 若存在已保护默认分支，维护者同样走分支与 PR，不绕过门禁强推主干。
 
@@ -52,7 +52,7 @@
 ## 七、持续集成
 
 - 门禁骨架 `templates/ci-check.yml`（Push / PR 时跑构建、静态检查、测试与契约校验）与发版骨架 `templates/ci-release.yml`（Tag 推送触发，校验发布说明正文并上传附件）。
-- **外部 PR 供应链防线**：外来 Fork 提进来的 PR 在触碰工作流、锁文件、包生命周期脚本（`preinstall`/`postinstall`/`prepare`）或构建脚本时，必须先静态审查并在隔离/禁脚本条件下经人工确认再运行测试。
+- **外部 PR 供应链与弱化门禁防线**：外来 Fork PR 触碰工作流、锁文件或包生命周期脚本时必须先只读扫描并经人工确认才运行；本地 `flow.mjs merge` 检测到 diff 删断言、加 `.skip`/`.only`、加 `continue-on-error: true`/`|| true` 或改松 CI 权限时直接以退出码 `4` 阻断，必须 `--human-approved` 方可放行；`govern-audit.mjs` 亦解析 `.github/workflows/*.{yml,yaml}` 比对孤儿测试套。
 
 ## 事实来源
 

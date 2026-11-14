@@ -22,7 +22,7 @@
 | `AGENTS.md`、`README*`、`CONTRIBUTING.md`、`docs/` 四层文档 | 本地运行目录与任务状态账本（`.worktrees/`、`.worktrees/.state/`） |
 | `.agents/skills/`（用户项目运行期研发技能与 `.pf-manifest.json`） | `.env*`、私钥（`*.pem`/`*.key`）、凭据令牌与本机用户绝对路径 |
 
-注：本工具源码中的 `kit/` 随分发包带给使用者，而使用该项目自身装配的 `.agents/skills/` 与 `docs/` 不应混入他人项目导出包时按对应打包忽略规则隔离。
+注：本工具源码中的 `kit/` 随分发包带给使用者，而使用该项目自身装配的 `.agents/skills/` 与 `docs/` 不应混入他人项目导出包时按对应打包忽略规则隔离。写前备份快照由 `scripts/backup.mjs` 存入 `<gitCommonDir>/project-forge-backups/`、`PF_BACKUP_DIR` 或 `~/.project-forge/backups/`，零污染工作区 `git status`。
 
 ## 忽略规则
 
@@ -57,4 +57,4 @@
 ## Worktree 共享依赖与防删穿规则
 
 - 锁定文件（`package-lock.json`、`pnpm-lock.yaml`、`yarn.lock`、`poetry.lock`、`uv.lock`、`Cargo.lock` 等）SHA256 与主仓一致时，`dev-flow` 内的 `worktree-deps.mjs` 在 Windows 用目录 Junction、POSIX 用目录 symlink 秒级挂载 `node_modules` / `.venv`；锁文件变更则自动降级为独立隔离目录，禁止跨不兼容锁文件强行共享。
-- **清理顺序红线**：拆卸任何 worktree 之前，**必须先对挂载的 junction/symlink 本身执行 `unlinkSync` 解绑**，校验主仓依赖目录完好后再执行 `git worktree remove`；严禁未解绑就直接对 `.worktrees/*` 执行递归强制删除。
+- **四态归属核验与清理顺序红线**：清理前通过 `govern-audit.mjs`（基于 `git cherry` / `git patch-id`）区分 `merged`（正常可清理）、`squash_or_rebase_merged`（压缩/变基合入）、`no_own_commits`（无独立提交，先问人再清防误删）与 `unmerged`（仍阻断）；拆卸任何 worktree 之前，**必须先对挂载的 junction/symlink 本身执行 `unlinkSync` 解绑**，校验主仓依赖目录完好并请人确认后再执行 `git worktree remove`，严禁未解绑就直接递归强删 `.worktrees/*`。

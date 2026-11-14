@@ -25,9 +25,9 @@ metadata:
 
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
-| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth`；若目录几乎空白（0 业务文件），停下问 3–4 个简明问题（形态语言、包名描述、许可、远端意向）后跑 `equip.mjs --bootstrap-empty` 搭最小可跑工程与初始 `docs/TDD.md` | `references/survey.md` |
+| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth`；若目录几乎空白（0 业务文件），停下问 3–4 个简明问题（形态语言、包名描述、许可、远端意向）后跑 `equip.mjs --bootstrap-empty` 搭最小可跑工程与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map`） | `references/survey.md` |
 | **S2 定范围** | 对照能力矩阵逐行求值；存量仓「先读后合不覆盖」；重入升级由 `equip.mjs` 核对 `.agents/skills/.pf-manifest.json` 哈希，无损升级未改文件并自净化退役旧文件 | 本文件 |
-| **S3 落盘** | 严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；建 `docs/TDD.md` 与按需 `prd`/`specs`/`todo`；生成/无损刷新 `AGENTS.md`（`<= 30KB`）；**全量装配全套 5 个 `.agents/skills/`（纯本地亦全量装齐不阉割）**；按五态身份与轨道 A/B 配 GitHub 远端与模板 | 见门控表 |
+| **S3 落盘** | 严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；建 `docs/TDD.md` 与按需 `prd`/`specs`/`todo`；`equip.mjs` 与 `compose-agents.mjs` 写前经 `backup.mjs` 自动打 `.tar.gz` 快照；生成/无损刷新 `AGENTS.md`（`<= 30KB`，含 `行事总纲` 与 7 键 `Dev Profile`）；**全量装配全套 5 个 `.agents/skills/`**；按五态身份与轨道 A/B 配 GitHub 远端与模板 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check` + `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记 | `references/handoff.md` |
 
 **S3 顺序不可逆**：`.gitattributes` 与 `.gitignore` 必须在首次提交之前落盘；文档与地址须在推送之前就绪；自动化跑的命令与 `AGENTS.md` / `README.md` 必须一致。
@@ -51,12 +51,12 @@ metadata:
 | 日常场景 | 权威协作判据（按标题名直达） |
 | --- | --- |
 | 判身份与防只读误推 | `references/collaboration.md`「一、先判角色」：五态表与 `clone-readonly` 三选一阻断 |
-| 决定写哪些文档（Case 1..5） | `references/collaboration.md`「二、五档开工分流」：何时不建单 / 只建 Todo / 建 approved SPEC / 先改 TDD |
-| 开分支、建 Worktree 与共享依赖 | `references/collaboration.md`「三、三档隔离」：实施位 + detached 审查位 + Junction 先解绑规则 |
+| 定门型、写规划与分级内审 | `references/collaboration.md`「二、五档开工分流」：`two-way`/`one-way` 判定、Case 1..5、规划 `audit` 与 Plan Critique |
+| 开分支、建 Worktree 与共享依赖 | `references/collaboration.md`「三、三档隔离」：实施位 + detached 审查位、Junction 先解绑与 4 态清理判定 |
 | 认领、PR 前归档与双写节点 | `references/collaboration.md`「四、认领、PR 前文档同步」：`finalize` 归档 Todo 至 `docs/archive/todo/` |
 | 收 Issue 与审外部 PR | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」：先扫供应链高危改动 |
-| 派独立审查与收敛熔断 | `references/collaboration.md`「七、审查循环：怎么才会停」：四字段块、六锁收敛与 3 轮熔断 |
-| 合并授权与收尾清理七步 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」：先列待删清单问点头再清理 |
+| 双门独立审查、园艺治理与熔断 | `references/collaboration.md`「七、审查循环：怎么才会停」：`smoke-verify`/`arch-rules` 双门、6 锁收敛与园艺聚类 |
+| 合并授权与收尾清理七步 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」：弱化门禁必拦（退出码 4）与先问再清理 |
 
 ## 能力矩阵与默认范围
 
@@ -77,7 +77,7 @@ metadata:
 3. **凭据零入库与跨平台安全**：扫描拦截密钥与大文件；探测防弹窗；含中文/非 ASCII 正文一律经临时 UTF-8 文件按 `--body-file` / API JSON 提交并回读，绝不命令行拼正文。
 4. **按能不能撤回分档（日常与发版分开）**：提交、推自己的分支、开/改 PR 都能撤回，属于日常，不打标签不发版；合并默认分支、发版、改可见性、改写历史撤不回来，发版只由人明令触发，**强推与改写已推历史永不自动**。
 5. **合并由审查者收尾、弱化门禁必问**：独立审查 `fail` 为空由审查者直接合（`contributor-fork` 交上游合）；**删测试、放宽断言、加跳过或改松 CI 等弱化门禁必须人点头**。`取舍` 中写 `merge-authority: human` 时收回人工确认。
-6. **体积与自净底线**：`AGENTS.md` 上限 `30KB`（`24KB` 预警）；交棒只清临时痕迹，删任何文件/分支/worktree 前必先列清单问人点头，永不越权自删。
+6. **体积、自净与信任倒金字塔**：`AGENTS.md` 上限 `30KB`（`24KB` 预警）；机械门禁 > 运行冒烟实证（拒绝人肉代理）> 审查 > 文档，同类纠偏满 2 次沉入静态规则；写前快照存于仓外且交棒只清临时痕迹，删文件/分支/worktree 前必先列清单问人点头。
 
 ## 核心脚本（零第三方依赖，Node 18+）
 
@@ -86,9 +86,11 @@ metadata:
 node "<本 skill 目录>/scripts/update.mjs" --quiet
 # S1 只读勘察（--probe-auth 并发探测 GitHub 轨道 A/B）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe-auth
+# 写前零污染 .tar.gz 快照管理（equip / compose-agents 修改前自动调用；支持 list / restore）
+node "<本 skill 目录>/scripts/backup.mjs" "<项目目录>" list
 # S3 全量装配 / 升级 5 个研发技能（空目录加 --bootstrap-empty --lang <lang> --name <name>）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
-# S3 生成或无损刷新 AGENTS.md（<= 30KB；--check / --upgrade / --clean）
+# S3 生成或无损刷新 AGENTS.md（<= 30KB；--check / --upgrade / --clean / --no-backup）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 # S4 交付体检
 node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"

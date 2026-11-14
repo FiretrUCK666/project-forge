@@ -19,17 +19,17 @@
 
 ## 二、五档开工分流与三问定档
 
-动手前调用 `.agents/skills/dev-plan/` 内的 `doc-plan.mjs triage` 与三问自查：
+动手前先由 `dev-explore`（按需走 `quick` / `medium` / `thorough`）产出 `reusableModules` 与 `featureMap` 核实复用基建，再跑 `doc-plan.mjs triage` 判定档位与**门型（`two-way` 可局部回退 vs `one-way` 不可逆契约/数据/发布）**及分级规划内审级别：
 
-| 档位 | 适用场景 | 强制产物与执行门槛 |
+| 档位 | 适用场景 | 强制产物、分级内审与测试控频 |
 | --- | --- | --- |
 | **Case 1** | 纯问答 / 错别字 / 单行格式 | **0 文档**，直接改，跑相关校验 |
-| **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，强制先写能稳定复现失败的回归测试再修复（Red-Green） |
-| **Case 3** | `L2` 局部功能或内部调整，不改外部契约 | 按 `templates/docs-todo.md` 在 `docs/todo/` 建单，冻结 `C1`、`C2`… |
-| **Case 4** | `L3` 跨模块、接口/契约变更或高风险路径 | 先按 `templates/docs-spec.md` 建 `docs/specs/`（须人确认 **`Status: approved`** 才准编码）+ `docs/todo/` Todo |
-| **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，必须先退回更新 `docs/TDD.md`** 并取得确认后重启流程 |
+| **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，先写稳定复现失败回归测试再修复（Red-Green） |
+| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `templates/docs-todo.md` 建单（含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
+| **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit` + 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 **`Status: approved`**） |
+| **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，先退回更新 `docs/TDD.md`**，同级内审获批后重启 |
 
-**独立审查与三问留痕**：只要涉及跨上下文验收、存在待拍板设计选择、工作区有他人改动或**触碰 `AGENTS.md`「高风险路径」任一处**，就必须走独立审查并建实施位；结论写入首次回复、Issue 评论或 `templates/pull-request-template.md` 的「实现依据」栏。任务状态统一落于 `.worktrees/.state/tasks/<taskId>.json`。
+**测试控频与拒绝人肉代理**：编码期每轮只跑 `{target}` 快测，涉及运行时入口加跑 `flow.mjs verify --mode smoke` 拿端到端证据（结合 `Feature Map` 与 `smoke-verify` 杜绝让用户替 AI 手测），全量 `merge-gate` 仅提交 PR 与合并前跑 1 次；中途触碰高危自动升级。独立审查与三问留痕写入首次回复、Issue 评论或 `templates/pull-request-template.md`「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
 ## 三、三档隔离与 Worktree 共享依赖
 
@@ -39,7 +39,7 @@
 | **第 2 档** | `L2`/`L3`、接 Issue、脏主仓或并行任务 | 建 `.worktrees/impl-<taskId>/`（新分支）并预留审查槽 `.worktrees/review-<taskId>/`（**detached 检出待审 SHA**，用完即弃，**故障注入只在审查位做**） |
 | **第 3 档** | `inbound-external-pr` 外来提案 | 建 `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`），先过安全扫描 |
 
-**共享依赖与防删穿红线**：锁文件 SHA256 与主仓一致时，通过 `.agents/skills/dev-flow/` 内的 `worktree-deps.mjs` 以 Windows Junction / POSIX Symlink 挂载 `node_modules` / `.venv`；锁文件变更则降级独立安装。**卸载或清理 worktree 前，必须先仅对挂载链接执行 `unlinkSync` 解绑并确认主仓依赖完好，再 `git worktree remove`**，绝不未解绑就递归删目录。`.worktrees/` 须已忽略，卸前先问人。
+**共享依赖、四态判定与防删穿红线**：锁文件 SHA256 与主仓一致时，通过 `.agents/skills/dev-flow/` 内的 `worktree-deps.mjs` 以 Windows Junction / POSIX Symlink 挂载依赖；锁文件变更降级独立安装。清理前用 `govern-audit.mjs`（基于 `git cherry` / `git patch-id`）辨识 `merged`、`squash_or_rebase_merged`、`no_own_commits`（先问再清防误删）与 `unmerged` 四态；**拆卸 worktree 前必须先仅对链接执行 `unlinkSync` 解绑并问人点头，再 `git worktree remove`**。`.worktrees/` 须已忽略。
 
 ## 四、认领、PR 前文档同步与双写节点
 
@@ -73,24 +73,24 @@
 止损记录: <触发了哪条，或「未触发」>
 ```
 
-- **diff 绑定**：审查前按固定格式导出（`git diff <基线>...<HEAD> > d.txt`）并核对 SHA256 与字节数，避免中间经过改写换行/编码的工具导致结论脱钩。
-- **六锁防死循环收敛机制（`review-pack.mjs` 驱动）**：
+- **diff 绑定与双门评估（`review-pack.mjs` 驱动）**：按 `git diff <基线>...<HEAD> > d.txt` 导出并核对 SHA256；材料包输出 **`behavioralGate`**（测试 + `smoke-verify` 运行实证，杜绝人肉代理）、**`structuralGate`**（扫描 diff 新增行中的立碑履历注释、连续死代码块、`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`/HACK/WORKAROUND/TEMP、`arch-rules` 跨层逆引违规与 `>800` 行超大文件）及 **`doorAssessment`**（`doorType`/`gateWeakened`/`blastRadius`/`mergeAuthority`）。
+- **六锁防死循环与园艺规则下沉**：
   1. **实证优先**：附可执行命令与高风险故障注入清单，严禁未验证臆测挑刺；
   2. **上下文隔离**：审查上下文只收 `C*`、diff、门禁证据与文档对齐单，隔离实施过程闲聊；
   3. **三级分级与全量首轮**：问题分 `Must Fix` / `Should Fix` / `Pre-existing`；**第 1 轮必须一次指出全部同类问题**；
   4. **轮次视野收窄**：第 1 轮看全量 diff -> 第 2 轮仅核 R1 未闭环 `Must Fix`、增量 diff 与 `rebuts`（锁定未改旧块禁提新刺）-> 第 3 轮只对增量修复行做二元 Pass/Fail 核对；
   5. **防越界返工**：HEAD 未前进的重提直接拒绝；返工支持 `--rebut` 记有据反驳；
-  6. **停损熔断（`STOP_LOSS_ESCALATE`）**：同一 `Must Fix` 连续两轮未闭环，或轮次达到上限（**3 轮**）仍然 `fail` 时，立即熔断停损转交人类维护者裁决。
+  6. **停损熔断与园艺聚类**：同一 `Must Fix` 连续两轮未闭环或达 **3 轮**上限触发 `STOP_LOSS_ESCALATE`；顽固缺陷遵守 3 步止损；日常经 `dev-govern`（`record` / `cluster` 归并 `>= 2` 次重复根因并下沉为静态门禁 / `sample --commits 30` 抽检回滚与 48h 返工热点）持续压低熵增。
 
 ## 八、谁能合
 
-按**能不能撤回**分档，不按「是不是对外」一刀切：**推自己的分支与开 PR 都能撤回，属于日常**；合并默认分支、发版、改可见性、改写历史撤不回来，严格按以下规则执行：
+按**能不能撤回（双向门 `two-way` vs 单向门 `one-way`）**分档，不按「是不是对外」一刀切：**推自己的分支与开 PR 都能撤回，属于日常**；合并默认分支、发版、改可见性、改写历史撤不回来，严格按以下规则执行：
 
 | 改动类型 | 合并权限 | 前置条件 |
 | --- | --- | --- |
-| 普通改动 / 外部 PR | **审查者直接合**（`contributor-fork` 等上游维护者合） | 独立审查 `fail` 为空 + 门禁实测证据；外部 PR 先过 `--untrusted-scan` |
+| 普通改动 / 外部 PR | **审查者直接合**（`contributor-fork` 等上游维护者合） | 独立审查 `fail` 为空 + `behavioralGate`/`structuralGate` 实测证据；外部 PR 先过 `--untrusted-scan` |
 | 触碰「高风险路径」任一处 | **审查者直接合** | 独立上下文审查（`reviewerId !== implementerId`）+ 真实故障注入记录 |
-| **弱化门禁**（删测试、放宽断言、加跳过、改松 CI） | **必须人点头** | 它坏了会让后续所有门禁失效且外观仍绿，永不自动合 |
+| **弱化门禁**（删测试、放宽断言、加跳过、改松 CI） | **必须人点头** | `flow.mjs merge` 检测到弱化门禁默认以退出码 `4` 阻断，必须明确传 `--human-approved` |
 
 注：发版、改仓库可见性与改写已推送历史永不自动；若项目 `AGENTS.md`「## 取舍」写明 `merge-authority: human`，则全部 PR 的最终合并均收回人手。
 

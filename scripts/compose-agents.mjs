@@ -40,7 +40,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
@@ -57,6 +57,15 @@ const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATE_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
+
+async function maybePreWriteBackup(root, existingText, noBackup) {
+  if (noBackup || !String(existingText ?? '').trim()) return null
+  const backupScript = join(HERE, 'backup.mjs')
+  if (!existsSync(backupScript)) return null
+  const mod = await import(pathToFileURL(backupScript).href)
+  if (typeof mod?.ensurePreWriteBackup !== 'function') return null
+  return await mod.ensurePreWriteBackup(root, { label: 'compose-agents' })
+}
 
 function sha256Of(text) {
   return createHash('sha256').update(String(text ?? '').replace(/\r\n/g, '\n'), 'utf8').digest('hex')
@@ -367,13 +376,14 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
     }
 
     if (renderedHasFill) {
-      // 这一节要人写：还带占位就换成模板，人写过就永久保留。
+      // 这一节要人写：还带占位且内容与当前渲染有差异时换成模板，人写过就永久保留。
       if (!bodyHasFill) { kept.push(region.id); continue }
       if (baselineSha && diskSha !== baselineSha) {
         protectedRegions.push(region.id)
         kept.push(region.id)
         continue
       }
+      if (bodyLines.join('\n') === renderedBody.join('\n')) { kept.push(region.id); continue }
       filled.push(region.id)
     } else {
       // 这一节完全由事实推出：若磁盘相对 manifest 记录的旧基线曾被手改，绝不静默覆盖。
@@ -443,8 +453,9 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
   // 位置从后往前；同一位置上按 seq 从大到小（插入段按模板倒序，替换段 seq 为 -1 排在最后）。
   ops.sort((a, b) => (b.at - a.at) || (b.seq - a.seq))
   for (const op of ops) lines.splice(op.at, op.remove, ...op.insert)
+  const nextText = lines.join('\n')
   return {
-    text: lines.join('\n'), changed: true, broken: [], kept, inserted, filled, synced, protectedRegions,
+    text: nextText, changed: nextText !== existing, broken: [], kept, inserted, filled, synced, protectedRegions,
   }
 }
 
@@ -570,6 +581,7 @@ const HEADING_PREFIX = /^#{2,3}\s+(?:\d+[.)、]\s*)?(?:[一二三四五六七八
  */
 const SECTION_KEYWORDS = {
   意图路由: { words: ['意图路由', '路由', 'Intent Routing', 'Routing'] },
+  行事总纲: { words: ['行事总纲', '决策准则', '总纲', 'Operating Principles', 'Core Principles'] },
   项目定位: { words: ['定位', '简介', '概述', '说明', 'Overview', 'Introduction', 'About'] },
   'Dev Profile': { words: ['Dev Profile', 'Profile'] },
   上下文阅读护栏: { words: ['上下文阅读护栏', '阅读护栏', 'Context Reading', 'Reading Guardrails'] },
@@ -806,6 +818,7 @@ async function main(argv) {
   let target = process.cwd()
   let mode = 'default'
   let verbose = false
+  let noBackup = false
 
   for (const arg of argv) {
     if (arg === '--help' || arg === '-h') {
@@ -817,6 +830,7 @@ async function main(argv) {
         '  --upgrade     向手写文件追加缺失的节，每节带自己的标记，已有内容不动',
         '  --check       门禁：标记成对、没有未填占位、该有的节都在时退出 0',
         '  --clean       剥掉本 skill 留下的全部标记，正文保留',
+        '  --no-backup   改写已有非空 AGENTS.md 前跳过自动快照备份',
         '  --verbose     多说一点',
         '',
         '只碰 AGENTS.md 一个文件。',
@@ -827,6 +841,7 @@ async function main(argv) {
     else if (arg === '--upgrade') mode = 'upgrade'
     else if (arg === '--check') mode = 'check'
     else if (arg === '--clean') mode = 'clean'
+    else if (arg === '--no-backup') noBackup = true
     else if (arg === '--verbose') verbose = true
     else if (!arg.startsWith('-')) target = arg
     else {
@@ -858,13 +873,16 @@ async function main(argv) {
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
 
   if (mode === 'clean') {
+    const cleaned = stripMarkers(existing, 'AGENTS.md')
+    if (cleaned !== existing) {
+      await maybePreWriteBackup(root, existing, noBackup)
+    }
     // 先收临时文件再说剥标记：`--clean` 是「把它留下的东西拿掉」那条命令，
     // 而 `.tmp-<pid>` 恰恰是它自己留下的。清理只删「属主已经不在」的那些。
     const temps = clearTempsBeside(agentsPath)
     if (temps.removed.length > 0) {
       process.stdout.write(`清掉了 ${temps.removed.length} 个上次写到一半留下的临时文件。\n`)
     }
-    const cleaned = stripMarkers(existing, 'AGENTS.md')
     if (cleaned === existing) {
       process.stdout.write('没有标记可剥，文件未改动。\n')
       return 0
@@ -978,6 +996,7 @@ async function main(argv) {
     if (sizeInfo.warn) {
       process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
     }
+    await maybePreWriteBackup(root, existing, noBackup)
     writeAtomic(agentsPath, nextText)
     writeManifestRegions(root, nextText)
     process.stdout.write(`已追加 ${additions.length} 节：只加不改，原有内容一个字节没动。\n`)
@@ -1000,6 +1019,7 @@ async function main(argv) {
       process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
     }
     if (refreshed.changed) {
+      await maybePreWriteBackup(root, existing, noBackup)
       writeAtomic(agentsPath, refreshed.text)
       const bits = []
       if (refreshed.filled.length > 0) bits.push(`填了 ${refreshed.filled.length} 段（${refreshed.filled.join('、')}）`)

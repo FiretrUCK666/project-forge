@@ -253,6 +253,13 @@ export const FULL_READ_REFS = Object.freeze([
 export const AGENTS_MAX_BYTES = 30720
 export const AGENTS_WARN_BYTES = 24576
 export const KIT_SKILL_MAX_LINES = 180
+export const PF_MANIFEST_SCHEMA_VERSION = 2
+export const EQUIP_TIERS = Object.freeze(['lightweight', 'full'])
+export const LIGHTWEIGHT_KIT_SKILLS = Object.freeze([
+  'dev-explore',
+  'dev-plan',
+  'dev-flow',
+])
 export const KIT_SKILLS = Object.freeze([
   'dev-explore',
   'dev-plan',
@@ -260,6 +267,28 @@ export const KIT_SKILLS = Object.freeze([
   'dev-review',
   'dev-govern',
 ])
+
+/** macOS Finder / 归档器常见元数据条目名，跨全链路扫描与打包校验统一过滤。 */
+export const MACOS_METADATA_NAMES = Object.freeze([
+  '.DS_Store',
+  '__MACOSX',
+  '.Spotlight-V100',
+  '.Trashes',
+  '.fseventsd',
+  '.AppleDouble',
+  '.TemporaryItems',
+])
+
+export function isMacOsMetadata(name) {
+  const base = String(name ?? '')
+  if (!base) return false
+  if (base.startsWith('._')) return true
+  return MACOS_METADATA_NAMES.includes(base)
+}
+
+export function isMacOsMetadataPath(rel) {
+  return String(rel ?? '').replace(/\\/g, '/').split('/').some((seg) => isMacOsMetadata(seg))
+}
 
 /** 受管套件清单与工作区状态相对路径。 */
 export const PF_MANIFEST_REL = '.agents/skills/.pf-manifest.json'
@@ -311,6 +340,8 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
   'is-plugin-or-skill',
   'has-bilingual-docs',
   'has-custom-skills',
+  'is-lightweight',
+  'is-full',
 ])
 
 /**

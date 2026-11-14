@@ -35,7 +35,7 @@
    - **有写权限（同源所有者与团队/组织多位写权限协作者，`maintainer`）**：公开与私有仓均直接从同源 `main` 拉出个人独立分支并向正本开拉取请求（无需 Fork），分支名沿用既有习惯（`fix/xxx`、`feat/xxx`、`docs/xxx`）；尚无本地历史提交的新成员先跑 `survey.mjs --probe-auth`（或 `flow.mjs inspect --probe-auth`）确认写权限；开工经 `flow.mjs claim` 写清人+分支，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；PR 前同步默认分支最新提交，遵守 `CODEOWNERS` 与 Merge Queue（若启用），严禁直推受保护主干；团队内坚持另一位协作者或独立上下文执行 `reviewerId !== implementerId` 互审（保守仓库可在 `AGENTS.md`「## 取舍」设 `merge-authority: human`）；
    - **只改文字**（错别字、文档表述）：在网页上点开文件、点铅笔图标改完提交即可，GitHub 会
      替你建好分支与拉取请求——**这条路跑不了下面的提交前门禁，别用它改代码**。
-   - **涉及规格或跨模块改动时先定文档**：遵循五档分流与 `docs/` 四层体系（常青架构 `docs/TDD.md`、产品基线 `docs/prd/`、冻结规范 `docs/specs/`、任务单 `docs/todo/`）；任务完成合流前需在同一个分支上完成 `[x]` 勾选并将任务单归档进 `docs/archive/todo/`。
+   - **涉及规格或跨模块改动时先定文档**：遵循五档分流与 `docs/` 四层体系（常青架构 `docs/TDD.md`、产品基线 `docs/prd/`、冻结规范 `docs/specs/`、任务单 `docs/todo/`，Mermaid 节点单行 `<= 16` / 菱形与边 `<= 12`）；任务完成合流前需在同一个分支上完成 `[x]` 勾选并经 `flow.mjs finalize` 将关联 `PRD`/`SPEC`/`Todo` 成对归档进 `docs/archive/{prd,specs,todo}/`。
 3. 跑完提交前门禁（见下），全绿再提交；发 PR、写评论或建 Issue 若含非 ASCII 内容，先写入系统临时目录 UTF-8 文件再通过 `--body-file` 传入，防止命令行编码损坏。
 4. 提交拉取请求，按仓库里的[提案模板](.github/pull_request_template.md)填写。
    最重要的一栏是**怎么验证的**：贴实际跑过的命令与结果，不要只写「门禁通过」。
@@ -107,6 +107,7 @@ node scripts/review.mjs .                                   # 交付体检，预
 node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
 node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 检查项 100% 配对
 node scripts/equip.mjs . --check                            # kit/skills 与本仓 .agents/skills 字节级一致
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
 ```
 
 用户包内容要真跑一次导出再核对（用完删掉 `package-list.txt`）：
@@ -147,8 +148,8 @@ node scripts/dev/verify-injections.mjs   # 逐条拆掉判据，确认对应断�
 - **内置 Skill 100% 目录自包含与双层同构**：`kit/skills/**` 复制到目标项目的 `.agents/skills/**` 后独立运行，
   **严禁**在 `kit/skills/` 中 `import` `kit/skills/` 之外的仓库模块；修改 `kit/skills/**` 后必须通过
   `node scripts/equip.mjs .` 同步更新本仓库 `.agents/skills/` 并在同一次提交入库。
-- **`AGENTS.md` 硬上限与无损保护**：根 `AGENTS.md` 严禁超过 30KB（30720 字节）；刷新受管区间时借助
-  `.agents/skills/.pf-manifest.json` 保护未标 `customized` 的用户手工改动不被静默覆盖。
+- **`AGENTS.md` 硬上限与 v2 无损保护**：根 `AGENTS.md` 严禁超过 30KB（30720 字节；`lightweight` 档 `< 14KB`）；刷新受管区间与装配套件时借助
+  `.agents/skills/.pf-manifest.json`（v2 账本）保护未标 `customized` 的用户手改与删除墓碑不被静默覆盖。
 - **禁 emoji**：代码、注释、文档、提交信息一律禁止 emoji，条目符号用 `-`。
 
 ### 两层结构，互不越界

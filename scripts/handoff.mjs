@@ -29,7 +29,8 @@ import { isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.m
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import {
-  KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL, markerSyntaxFor, parseMarkers,
+  KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
+  isMacOsMetadata, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
@@ -57,7 +58,11 @@ function stripInlineCode(line) {
   return String(line ?? '').replace(/`[^`]*`/g, '')
 }
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
+const SKIP_DIRS = new Set([
+  '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn',
+  '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
+  'dist', 'build', 'target', 'coverage', '.gradle', '.next', '.nuxt', '.cache',
+])
 const MAX_DEPTH = 6
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -113,13 +118,11 @@ function walk(root) {
     // 是「没看见」——所以也算没扫全，不能让结论落到「干净」上。
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { state.unreadable += 1; state.truncated = true; return }
     for (const entry of entries) {
-      // 符号链接不跟：跟进去会绕成环，也会跑到目录之外。但**必须记一笔**——
-      // 跳过一棵链接过来的目录，里面的东西一个都没看，而结论仍会说「干净」。
+      if (isMacOsMetadata(entry.name) || SKIP_DIRS.has(entry.name)) continue
+      // 合法依赖目录与 .worktrees 已在上方跳过；其余未识别符号链接不跟入并记为未扫全。
       if (entry.isSymbolicLink()) { state.symlinks += 1; state.truncated = true; continue }
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (entry.name === '.git') continue
-        if (SKIP_DIRS.has(entry.name)) continue
         go(full, depth + 1)
       } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
         let size = 0
@@ -234,7 +237,7 @@ export function scan(targetDir) {
     if (existsSync(skillsDir)) {
       try {
         for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue
+          if (isMacOsMetadata(entry.name) || !entry.isDirectory()) continue
           if (KIT_SKILLS.includes(entry.name) || managedTopDirs.has(entry.name)) continue
           const sub = join(skillsDir, entry.name)
           if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) {
@@ -245,16 +248,27 @@ export function scan(targetDir) {
     }
     kitManifest = {
       path: PF_MANIFEST_REL,
-      valid: Boolean(manifest && manifest.schemaVersion === 1),
+      valid: Boolean(
+        manifest
+        && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2)
+        && manifest.files
+        && typeof manifest.files === 'object'
+        && !Array.isArray(manifest.files),
+      ),
+      schemaVersion: manifest?.schemaVersion,
+      tier: manifest?.tier,
       forgeVersion: manifest?.forgeVersion,
       managedFiles,
+      disabledSkills: Array.isArray(manifest?.disabledSkills) ? manifest.disabledSkills : [],
+      customizedFiles: manifest?.customizedFiles && typeof manifest.customizedFiles === 'object'
+        ? Object.keys(manifest.customizedFiles).sort()
+        : [],
       customSkills: customSkills.sort(),
     }
   }
 
   const total = markers.length + placeholders.length + legacyMarkers.length
     + legacyPaths.length + danglingPointers.length + deletableTemps.length
-    + (kitManifest ? 1 : 0)
 
   return {
     target: { path: root },
@@ -300,6 +314,14 @@ export function toText(result) {
 
   if (result.clean) {
     lines.push('没找到任何本 skill 留下的东西。这个项目是干净的。')
+    if (result.kitManifest) {
+      const km = result.kitManifest
+      lines.push('')
+      lines.push(`已保留 \`.agents/skills/\` 本地研发套件（清单 \`${km.path}\` v${km.schemaVersion ?? 1}${km.tier ? ` / ${km.tier}` : ''}，不计入残留痕迹）。`)
+      if (km.customSkills.length > 0) {
+        lines.push(`检测到项目自定义技能（已完整保留）：${km.customSkills.join('、')}`)
+      }
+    }
     return lines.join('\n')
   }
 

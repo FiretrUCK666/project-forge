@@ -1,54 +1,118 @@
 {
-  "schemaVersion": 1,
-  "forgeVersion": "5.0.0",
-  "installedAt": "2026-11-14T15:45:37.417Z",
+  "schemaVersion": 2,
+  "tier": "full",
+  "forgeVersion": "6.0.0",
+  "installedAt": "2026-11-14T22:11:04.364Z",
   "files": {
     "dev-explore/SKILL.md": {
-      "sha256": "df1d62e131168c199c5ef3d548274a1fcad1d121d5023f6943eef6d90251fbeb"
+      "sha256": "5d863f7c6333958eb5786cb3cefef82993144669bba91f2b2a7d4302b23802f6"
     },
     "dev-explore/scripts/repo-map.mjs": {
-      "sha256": "3c86e34ba688059dec3e24ec243f0bf6302993ea4373ff829eb868a1791ab0c1"
+      "sha256": "52f7ed44b0da0d9130267731f316564030dbcd6c34ec40c2b3a5449d1a7062bc"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "494b7b07f9de5d693344e3aaf9d986989fb1498116c92444e4ec231a1a7b0aef"
+      "sha256": "4fbd8a358fb9b706730bf67e9fdc198fc010eb412fca92ade682173f20267956"
+    },
+    "dev-flow/scripts/flow-inspect.mjs": {
+      "sha256": "945f18d55062564f9ec2b7b03d8ec4b0ed31ba13351a675638806d3e4bbec2ea"
+    },
+    "dev-flow/scripts/flow-lifecycle.mjs": {
+      "sha256": "dead0d9453085f42ca02d36f358fd8c071ef6a8b2a5fe1acd008fd312b73ab83"
+    },
+    "dev-flow/scripts/flow-merge.mjs": {
+      "sha256": "2c934b5d8adaac99cf600110fae578d96234fd5bfa04c2fe2a2fc4454e3400a1"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "8c98e3e010ecf812a6a1c1a7a062a88c2f3f10efe1884cd9298eaa050bd8dd30"
+      "sha256": "4684c4a158316cf30eb1aea2b2e346d55042ca39c71044e767ac87756887dcd8"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
-      "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
+      "sha256": "bc7b77486bbe8feb461058c675a5a3a97b049ed44ff22b2773d47fc11685620f"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "6930062424414be1018b26820d9bff02167d3eeb2ec40e910e2f6f4d25e016fb"
+      "sha256": "0ca802e57d4f655c47212b84dc84b7bcfb7cef2c793e9b367cb13a0418c88589"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "95b44ac70676cb4398eac30c61d233985a42b472a34f6a5e058129970f6425e5"
+      "sha256": "8dc6f0a22ab3c035c954bfe3e23646eba2dbbdd8ddd848181d7a28f34ed76a44"
+    },
+    "dev-govern/scripts/govern-checks.mjs": {
+      "sha256": "f700ad12d943103c105cb03614d470264edda71e2f0ee77abff61db45b7689c8"
+    },
+    "dev-govern/scripts/govern-docs.mjs": {
+      "sha256": "cf89790c7f8261087789b3fcf0479216a442eb97d8826e9a4ff31952436556a6"
+    },
+    "dev-govern/scripts/govern-state.mjs": {
+      "sha256": "439ad52d61c6dbf685f654e80be50dba8fd20103380a2c3479fe16741ca5b72a"
+    },
+    "dev-govern/scripts/govern-tests.mjs": {
+      "sha256": "41f337e4eb935ddf5c2171e18c24e8fe82bfb3cba8b44b20dc491eaca706c131"
     },
     "dev-govern/scripts/release-prep-lib.mjs": {
-      "sha256": "748f59e73d9bceaeceeadd64c63c1dd402b3b09cee5ca8358c3574bf3d35874f"
+      "sha256": "57fad9ddcd14b3d0ea531aae9014050ad04e27b5f8d265f8fa0bfe3e6bf8468f"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "b2fdc0b3aea13e5369d2ca89afcd74ff932e999691678c86c78f1bd726c65e85"
+      "sha256": "c46e787b43c88c05d26fc457fcc0941c9a40f0abb82d0b7e077be3ad8d9422f6"
+    },
+    "dev-plan/scripts/doc-audit.mjs": {
+      "sha256": "ef949451dfcd9a30d74c04462338d075336061fd9a12b33e9c15f11a1df9e155"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "ae5ce528f644be73c2068c32b8d200c605b3fa34b1ea3b3a622934ba0102380e"
+      "sha256": "488efd1e5c067b7e890b668fbab9db674d3ca5d3721fb97560dd025deda78d2c"
     },
     "dev-review/SKILL.md": {
-      "sha256": "0d982af442cccc7df17362335b2ecba5de004903a2116b04e9186bded8e527ad"
+      "sha256": "cd83e48008451bb0a0378e0fb93349691064a055110aed2953980b2e07216c43"
+    },
+    "dev-review/scripts/review-diff.mjs": {
+      "sha256": "888b2c95fc6acabbf7bcff448cedd70481e53483e9c0f87a1bed436ca83e80f5"
+    },
+    "dev-review/scripts/review-gates.mjs": {
+      "sha256": "4c5cb49ce7b303ef0011fd394766f5f6a79b80881790c31689d2c0a8e135d0b4"
+    },
+    "dev-review/scripts/review-ledger.mjs": {
+      "sha256": "5d9a02b860d2eb63f81c249df5a8c20b2ebf8d0934f731ed3cf5a9071d0a958c"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "55612422fb911ce9810e0df8cb49798489f7edec763350b08bcac102b56e6d87"
+      "sha256": "dc6eb1103022934fa0cc19a15272bb6c30e0a091e6236ccd562a63b17ad2485d"
+    },
+    "lib/cli.mjs": {
+      "sha256": "0c9a22a10344093eea03d116811354f6d8a38672dc2aeecef0b3217f98fe2831"
+    },
+    "lib/doc-templates.mjs": {
+      "sha256": "a8b03e40cd0ca35304c90dd66189ff9bfd1f29ee80d349f6dae8a521a150e528"
+    },
+    "lib/docs.mjs": {
+      "sha256": "d1af9f2f161575fd1710127a1d95fac1e5dce8892cca5837003f84f5f7d252fd"
+    },
+    "lib/git.mjs": {
+      "sha256": "7f045b5f8d004662d8a6bde5a7ec2cf2e169fc30433c6145e660f5c4177c295f"
+    },
+    "lib/github-client.mjs": {
+      "sha256": "aecf8b8304abafa60578623573551f9f729869f80253634091a91eda73166604"
+    },
+    "lib/ledger.mjs": {
+      "sha256": "feeb443df1087d25383765796ea1657c57fdaa840db6d6b2430a949ac2f737c2"
+    },
+    "lib/platform.mjs": {
+      "sha256": "3727fd1356925293adfab6b1b39eddf4334ad5c9fa88dfce504836a5e78cd873"
+    },
+    "lib/profile.mjs": {
+      "sha256": "9c9feff42e7f1f6c085444987b5bbc0df3fe052c5b093d22c6de893e2ee14df0"
     },
     "lib/shared.mjs": {
-      "sha256": "a1992cf34d19f2d23db33d03e6854684295c727964a67785666d41d874d1b009"
+      "sha256": "dc74cdf5de537c84d621f3a321cced8d71f8c5c9fc0ef18b744afbdb38c660ac"
+    },
+    "lib/static-gates.mjs": {
+      "sha256": "6eb6926d48b9d85ec4874753b4e1b54d1c63ebf3b5f3120f0a1d65e8725772e9"
     }
   },
+  "disabledSkills": [],
+  "removedFiles": {},
+  "customizedFiles": {},
   "agentsRegions": {
     "意图路由": {
       "sha256": "34a88224404f61fa9e42e420fbdcfdd616d86a8afc63a74b6bcf1f015c750d87"
     },
     "行事总纲": {
-      "sha256": "e2e67aa3b34c9d51a44f3d4e3c45467c7f533e10d7ee6f45f5daad271d67affa"
+      "sha256": "164024dcbca04a149a206b9d7c2ba9a82202f70da54ed631e0696205832d801b"
     },
     "项目定位": {
       "sha256": "a10dae3b061bb1df152c456f3587e95e37d53d51f6b927fd03f1619ae4a273db"
@@ -57,16 +121,16 @@
       "sha256": "c7e9c0ff070d29114dc1c8bc2a236faef33ae88e1eb4c21a561350a4123fa1e5"
     },
     "上下文阅读护栏": {
-      "sha256": "fadf8808931d7587584db8a2f378da7b5b1e7c8d4e7de7c2ca7ebf7553c1e08c"
+      "sha256": "c9a6206dd51278faa19786462f6e44ccf52a9aa1b0e44ca70f8c2b46da9e7869"
     },
     "架构与关键不变量": {
       "sha256": "b5238091eec48fb86d6308d3e4ad8c372a5d566e4a8bac1a7c136614ddac0f88"
     },
     "构建与验证": {
-      "sha256": "ebf26aaa7d6ac072659e240f8c9275a3e32b86877770336b0f826ffa6163b965"
+      "sha256": "b3fd6d6e14d990ad1e8390327508e43e692ada92115e2af053b54b23930ab653"
     },
     "修改守则": {
-      "sha256": "4b5696a62ddbad2ac224a820679dbc37fd3e2b71935fa69b52b14eae50a7e50a"
+      "sha256": "068eb63bbce02d202a2b144a9a6929eba400d5391141b4b81c205bac12eebe62"
     },
     "修改守则补充": {
       "sha256": "b1d816bc3b3737ecd81fad0854859c68ffd108c059e6273230a71aca7bbb8201"
@@ -75,7 +139,7 @@
       "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
     },
     "日常协作与风险分流": {
-      "sha256": "d05fa1b9edb22531434602d11c7ae6b88bc67e4d4c24e8889b04dc393068219d"
+      "sha256": "f5130d2d283ac34ef66ecff9c57a645f863184c5ee7e83affb891b2dfc1242e3"
     },
     "高风险路径": {
       "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"
@@ -83,5 +147,6 @@
     "改哪看哪": {
       "sha256": "5939c85e363296a262d263978bd59a721a65fc6052a00df0f12c500b7fc10e6b"
     }
-  }
+  },
+  "removedAgentsRegions": []
 }

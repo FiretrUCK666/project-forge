@@ -47,5 +47,5 @@
   </g>
 
   <!-- Repository artifacts cue -->
-  <text x="600" y="446" class="mono" font-size="16" font-weight="500" fill="#526075" text-anchor="middle">AGENTS.md  ·  docs/{prd,spec,todo}  ·  .agents/skills/  ·  GitHub CI</text>
+  <text x="600" y="446" class="mono" font-size="16" font-weight="500" fill="#526075" text-anchor="middle">AGENTS.md  ·  docs/TDD.md  ·  docs/{prd,specs,todo}  ·  .agents/skills/  ·  GitHub CI</text>
 </svg>

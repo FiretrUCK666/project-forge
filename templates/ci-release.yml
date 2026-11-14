@@ -6,9 +6,8 @@
 #
 # ---
 #
-# 它只做一件事：**把版本库里那份说明文件原样搬到发布页**。它不生成说明、不改写说明
-# ——「这一版更新了什么」这件事在打标签之前就已经由人写好了，写在哪、写成什么样，
-# 由项目自己的 RELEASING.md 定义。
+# 它只做两件事：**校验标签与清单版本号同号**，并**把版本库里那份说明文件原样搬到发布页**。
+# 它不生成说明、不改写说明——「这一版更新了什么」在打标签之前就已经由人写好。
 #
 # 原理（配之前先读）
 #
@@ -16,28 +15,32 @@
 #   工作流读不到说明文件，会直接失败——这是设计如此，好过发一份空说明出去。
 #
 #   **为什么检出默认分支而不是触发时的 ref**：workflow_dispatch 补漏时，界面上选的那个
-#   ref 可能还是旧的；说明文件在默认分支上才有意义。
+#   ref 可能还是旧的；说明文件在默认分支上才有意义。而版本号门禁读取 `git show "$TAG:..."`
+#   那棵树里的清单，避免补跑旧标签或错打旧提交时出现假对比。
 #
 #   **为什么每个变量都经 env 传入**：直接展开进脚本正文的话，输入框里的内容会被当成
 #   shell 语法执行。
 #
 #   **跨文件不能写 needs。** 想表达「检查跑完才发版」这种依赖关系，写成同一文件里的
-#   两个 job 更可靠；拆成两个文件之后只能靠事件触发，先后顺序没有保证。
+#   两个 job 更可靠；拆成两个文件时只能靠事件触发，先后顺序没有保证。
 #
 # TODO(1) 标签形状：按发布链路决定，只留一个。
 #
-#   - npm 一类的生态惯例是带 v 前缀（v*），下面的 on.push.tags 与 job 级 if 都按 v 写；
+#   - 多数生态惯例是带 v 前缀（v*），下面的 on.push.tags 与 job 级 if 都按 v 写；
 #   - 插件市场一类要求**不带前缀的裸版本号**（如 1.2.3）。此时 on.push.tags 与 job 级
-#     if 必须**一起**改成 [0-9]* 形态——只改一处的话，工作流**永远不触发**，而它不报错，
-#     看起来就像「还没到发版的时候」。
+#     if 必须**一起**改成 [0-9]* 形态——只改一处的话，工作流**永远不触发**，而它不报错。
 #
-# TODO(2) 说明文件目录：换成本项目的实际目录。若项目用单文件 CHANGELOG.md 存变更记录，
-#         下面的兜底逻辑会自己找过去，NOTES_DIR 保持默认即可。
+# TODO(2) 说明文件目录与权威清单文件：
 #
-# 前置（可以不做）：这套流程默认用平台内置令牌，只要下面的 job 声明了 contents: write
-# 就能建 Release，普通项目零配置即可发版。只有两种情况才需要额外建一个细粒度令牌：
-# （1）要让这次发版继续触发下游工作流——内置令牌触发的事件不连锁；
-# （2）保护规则要求以特定身份操作。要用时放进仓库的 Secrets，不进仓库、不进聊天。
+#   - NOTES_DIR 默认 'docs/release-notes'；若项目用单文件 CHANGELOG.md（兼容 `## [v1.2.3]`
+#     与 Keep a Changelog `## [1.2.3]`），下面的兜底逻辑会自动识别。
+#   - VERSION_MANIFEST 换成项目唯一权威版本号所在清单（如 package.json / pyproject.toml /
+#     Cargo.toml / manifest.json），并在下方版本校验步骤按对应生态启用解析命令。
+#
+# 前置（默认零额外 Secret）：这套流程默认使用平台内置 `GITHUB_TOKEN`，只要下方 job 声明
+# `permissions: contents: write` 就能建 Release，普通项目零配置即可发版。仅当需要联动触发
+# 下游工作流、回写受保护分支或发布到制品库时，才在仓库 Settings -> Secrets and variables
+# -> Actions 配置最小权限 Fine-grained PAT（命名为 `RELEASE_TOKEN`）或各生态 OIDC 可信发布。
 
 name: release
 
@@ -47,60 +50,93 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '已存在的标签名（补漏用），为空则用当前触发的标签'
-        required: false
+        description: '已存在的标签名（例如 v1.2.3；手动触发必填）'
+        required: true
         default: ''
 
 jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # 建 Release 要写权限。内置令牌的初始权限取仓库默认设置，受限默认下这里会 403，
-    # 所以显式声明。凭据优先用 secrets.RELEASE_TOKEN，没配就退回内置令牌——两者都靠这一行。
+    # 建 Release 要写权限。默认直接使用内置 GITHUB_TOKEN；若配置了 secrets.RELEASE_TOKEN 则优先使用。
     permissions:
       contents: write
     env:
-      # 标签名只在这里求值一次，每个步骤引用同一个名字，不会算出两个不同的值。
-      # 经 env 传入而不是直接展开进脚本正文——展开的话输入框里的内容会被当成 shell 语法。
-      TAG: ${{ inputs.tag || github.ref_name }}
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_TAG: ${{ inputs.tag }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       NOTES_DIR: 'docs/release-notes'  # TODO(2)
+      VERSION_MANIFEST: 'package.json'  # TODO(2)
     steps:
+      - name: 校验触发标签非空（防 workflow_dispatch 落回默认分支名）
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$INPUT_TAG" ]; then
+            echo "::error::手动触发（workflow_dispatch）必须填写 tag 参数（例如 v1.2.3），不可留空。"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::未能解析目标标签名。"
+            exit 1
+          fi
+
       - name: 检出默认分支（读说明文件；工具永远用最新那一版）
         uses: actions/checkout@v4  # 落盘前核对最新大版本
         with:
-          # 取默认分支而不是触发时的 ref：说明文件必须能从默认分支读到，
-          # 而 workflow_dispatch 补漏时它还是界面上选的那个 ref。
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
+      - name: 发版门禁（标签与目标树内清单版本号必须同号）
+        run: |
+          # 使用 POSIX/macOS BSD 兼容 shell，不依赖 GNU 专有参数。
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::仓库中找不到标签 $TAG。请先推送标签后再运行。"
+            exit 1
+          fi
+          EXPECTED="${TAG#v}"
+          if [ ! -f "$VERSION_MANIFEST" ] && ! git cat-file -e "$TAG:$VERSION_MANIFEST" 2>/dev/null; then
+            echo "::error::标签 $TAG 中找不到清单文件 $VERSION_MANIFEST（请调整 TODO(2) VERSION_MANIFEST）。"
+            exit 1
+          fi
+          # 示例 1（Node / 插件 manifest.json）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+          # 示例 2（Python pyproject.toml / Rust Cargo.toml）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+          # 示例 3（SKILL.md metadata.version）：
+          # ACTUAL=$(git show "$TAG:SKILL.md" | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' | head -1)
+          ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" \
+            | sed -n 's/^[[:space:]]*"\{0,1\}version"\{0,1\}[[:space:]]*[:=][[:space:]]*"\{0,1\}\([^",]*\)"\{0,1\}.*/\1/p' \
+            | head -1)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::在标签 $TAG 的 $VERSION_MANIFEST 中读不到版本号。"
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::标签是 $TAG（期望版本 $EXPECTED），而标签树内 $VERSION_MANIFEST 版本是「$ACTUAL」。两者必须同号。"
+            exit 1
+          fi
+          echo "版本对齐：$TAG 与 $VERSION_MANIFEST 同号（$ACTUAL）"
+
       - name: 说明文件必须已经在默认分支上，而且不是空壳
         run: |
-          # 这一步是整条流水线的门。它拦的正是最常见的那次失败：顺序反了，标签先推、
-          # 说明没推。**不要把它删掉换成「找不到就用默认措辞」**——那样发布页上会出现
-          # 一份没人写过的说明，而这次发版看起来还是绿的。
-          #
-          # 两种模式：默认一份说明一个文件（docs/release-notes/<标签>.md）；存量项目已经
-          # 在用单文件变更记录的，从 CHANGELOG.md 里截取 ## [<标签>] 那一节。
-          #
-          # 两条路都在这一步收敛成**同一种形状**：一个以 `# <标签>` 开头的独立文件。
-          # 下面的检查只写一遍，两种模式都不会漏检。
+          # 两种模式：默认一版一文件（docs/release-notes/<标签>.md）；
+          # 存量项目使用单文件 CHANGELOG.md 时，同时兼容 `## [v1.2.3]` 与 Keep a Changelog `## [1.2.3]`。
           TAG_FILE="$NOTES_DIR/$TAG.md"
           if [ -f "$TAG_FILE" ]; then
             NOTES="$TAG_FILE"
             echo "说明文件模式：$NOTES"
           elif [ -f CHANGELOG.md ]; then
             NOTES="$RUNNER_TEMP/$TAG.md"
-            awk -v tag="$TAG" '
-              BEGIN { want = "## [" tag "]" }
-              index($0, want) == 1 { inside = 1; print "# " tag; next }
+            BARE_TAG="${TAG#v}"
+            awk -v tag="$TAG" -v bare="$BARE_TAG" '
+              index($0, "## [" tag "]") == 1 || index($0, "## [" bare "]") == 1 { inside = 1; print "# " tag; next }
               inside && /^## / { exit }
               inside { print }
             ' CHANGELOG.md > "$NOTES"
             if [ ! -s "$NOTES" ]; then
-              echo "::error::CHANGELOG.md 里找不到「## [$TAG]」这一节。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+              echo "::error::CHANGELOG.md 里找不到「## [$TAG]」或「## [$BARE_TAG]」这一节。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
               exit 1
             fi
-            echo "变更记录模式：从 CHANGELOG.md 截取了「## [$TAG]」一节，转成本次发布说明"
+            echo "变更记录模式：从 CHANGELOG.md 截取了 $TAG 对应小节，转成本次发布说明"
           else
             echo "::error::找不到 $TAG_FILE，仓库根也没有 CHANGELOG.md。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
             exit 1
@@ -110,8 +146,6 @@ jobs:
             echo "::error::$NOTES 是空文件。"
             exit 1
           fi
-          # 提取结果为空、或只剩标题、或还留着未填的占位标记，一律拦下：
-          # 发布页上出现一份没人写过的说明，比这次发版失败更糟——它看起来是成功的。
           if ! grep -qE '^# +[^ ]' "$NOTES"; then
             echo "::error::$NOTES 缺一级标题：第一行应当是这一版的标签名。"
             exit 1
@@ -122,8 +156,6 @@ jobs:
             exit 1
           fi
           # **判据是「独立成行的注释标记」，不是全文含这几个字。**
-          # 说明正文里完全可能正当地提到 `project-forge: fill`（RELEASING.md 就在讲它）；
-          # 按全文扫的话，一份提到这件事的正确说明会被判红，而红灯说的是它没写完。
           if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
             echo "::error::$NOTES 里还留着未填的占位标记——说明没写完。补完再发。"
             exit 1
@@ -134,24 +166,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
-          # **是「建或更新」，不是「已存在就跳过」**：补漏重跑时必须回填正文，跳过会让
-          # 那次发布永远只有一行标签名。代价是重跑会覆盖已有正文——发布页上有人工改写时
-          # 不要重跑。
-          #
-          # --verify-tag 是护栏：标签名打错时它直接失败。没有它，创建命令会拿默认分支的
-          # 状态自动建出一个同名新标签，而这次发版看起来还是绿的。
+          run_gh() {
+            OUT=$("$@" 2>&1) || {
+              CODE=$?
+              printf '%s\n' "$OUT" >&2
+              if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+                echo "::error::GitHub Release API 返回 401/403 权限或令牌失效错误：若配置了 secrets.RELEASE_TOKEN，请到仓库 Settings -> Secrets and variables -> Actions 刷新令牌并确认具备 Contents 读写权限；若使用内置 GITHUB_TOKEN，请检查工作流 permissions: contents: write 与仓库 Actions 权限设置。"
+              fi
+              return "$CODE"
+            }
+            printf '%s\n' "$OUT"
+          }
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES"
+            run_gh gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES"
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            run_gh gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "$TAG" --notes-file "$NOTES"
           fi
 
-          # 回读比对。上一步返回 0 只说明命令自己认为成功了，不说明页面上的正文是什么样
-          # ——编码层、代理、平台侧的规范化都可能改写它，而它们都不报错。
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > readback.md
-          # 归一：去行尾空白、去末尾空行。只做这两件，不动正文本身——不归一的话一次纯格式
-          # 差异就会被报成「正文被改写」，而报错本身不能有假警报。
           norm() {
             awk '{ sub(/[ \t]+$/, "") } { line[NR] = $0 }
                  END { n = NR; while (n > 0 && line[n] == "") n -= 1
@@ -164,3 +198,6 @@ jobs:
             exit 1
           fi
           echo "回读一致：$TAG 的正文与 $NOTES 逐字相同。"
+
+      # TODO(3)：若分发通道要求在发布页挂产物附件（如独立构建包或插件三件套），在回读一致后追加上传步骤，
+      # 并将对应产物加入 .gitignore（禁止与库内分发混用）。

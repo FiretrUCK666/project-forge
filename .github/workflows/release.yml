@@ -9,10 +9,9 @@
 # 重跑会用文件内容覆盖正文——要保留发布页面上的手工改写，就不要重跑这个工作流。
 #
 # 同一个 job 还做两件事：
-#   - **发版门禁**：标签与 SKILL.md 的 `metadata.version` 必须同号。这个字段存在的
-#     唯一理由是让没有版本历史的副本知道自己属于哪一版，对不上就是在说假话。
-#   - **用户包**：用 `git archive` 按 `.gitattributes` 的排除规则导出，核对条目之后
-#     挂到发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的协作设施。
+#   - **发版门禁**：标签与 SKILL.md 的 `metadata.version` 必须同号。
+#   - **用户包**：用 `git archive` 按 `.gitattributes` 的排除规则导出（固定根目录 `project-forge/`），
+#     核对条目之后挂到发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的协作设施。
 
 name: release
 
@@ -22,8 +21,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '已存在的标签名（例如 v3.0.0），为空则用当前触发的标签'
-        required: false
+        description: '已存在的标签名（例如 v6.0.0；手动触发必填）'
+        required: true
         default: ''
 
 jobs:
@@ -35,11 +34,22 @@ jobs:
     permissions:
       contents: write
     env:
-      # 取值只在这里求值一次：run 与 with 引用同一个名字，不会算出两个不同的值。
-      # 经 env 传入而不是直接展开进脚本正文——展开的话输入框里的内容会被当成 shell 语法。
-      TAG: ${{ inputs.tag || github.ref_name }}
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_TAG: ${{ inputs.tag }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       REPO: ${{ github.repository }}
     steps:
+      - name: 校验触发标签非空（防 workflow_dispatch 落回默认分支名）
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "$INPUT_TAG" ]; then
+            echo "::error::手动触发（workflow_dispatch）必须填写 tag 参数（例如 v6.0.0），不可留空。"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::未能解析目标标签名。"
+            exit 1
+          fi
+
       - name: 检出（取默认分支；工具与说明永远用最新的那版）
         uses: actions/checkout@v4
         with:
@@ -56,11 +66,10 @@ jobs:
       - name: 发版门禁（标签与**它那棵树里**的 SKILL.md 版本必须同号）
         run: |
           # 版本从**标签指向的那次提交**里读，不从工作区读。
-          #
-          # 工作区是默认分支，它随时可能已经往前走了：补跑一个旧标签时，工作区的
-          # `metadata.version` 早就升到下一版了，那时候报「对不上」是假警报；
-          # 而更糟的方向是——标签打在旧提交上，工作区是新版号，两者一旦碰巧同号，
-          # 这道门禁就给一份根本不是这个版本的东西背书。
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::仓库中找不到标签 $TAG。请先确认标签已推送。"
+            exit 1
+          fi
           EXPECTED="${TAG#v}"
           ACTUAL=$(git show "$TAG:SKILL.md" \
             | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
@@ -78,11 +87,25 @@ jobs:
       - name: 说明文件必须已经在默认分支上，而且不是空壳
         run: |
           # 这一步拦的正是最常见的那次失败：顺序反了，标签先推、说明没推。
-          # **不要把它删掉换成「找不到就用默认措辞」**——那样发布页上会出现一份没人写过
-          # 的说明，而这次发版看起来还是绿的。
-          NOTES="docs/release-notes/$TAG.md"
-          if [ ! -f "$NOTES" ]; then
-            echo "::error::找不到 $NOTES。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+          TAG_FILE="docs/release-notes/$TAG.md"
+          if [ -f "$TAG_FILE" ]; then
+            NOTES="$TAG_FILE"
+            echo "说明文件模式：$NOTES"
+          elif [ -f CHANGELOG.md ]; then
+            NOTES="$RUNNER_TEMP/$TAG.md"
+            BARE_TAG="${TAG#v}"
+            awk -v tag="$TAG" -v bare="$BARE_TAG" '
+              index($0, "## [" tag "]") == 1 || index($0, "## [" bare "]") == 1 { inside = 1; print "# " tag; next }
+              inside && /^## / { exit }
+              inside { print }
+            ' CHANGELOG.md > "$NOTES"
+            if [ ! -s "$NOTES" ]; then
+              echo "::error::CHANGELOG.md 里找不到「## [$TAG]」或「## [$BARE_TAG]」这一节。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
+              exit 1
+            fi
+            echo "变更记录模式：从 CHANGELOG.md 截取了 $TAG 对应小节"
+          else
+            echo "::error::找不到 $TAG_FILE（且仓库根无 CHANGELOG.md）。发版顺序反了：说明要先提交并推送到默认分支，再打标签。"
             exit 1
           fi
           if [ ! -s "$NOTES" ]; then
@@ -99,11 +122,7 @@ jobs:
             echo "::error::$NOTES 除了标题之外没有正文。"
             exit 1
           fi
-          # 没填完的草稿比没有更糟：它看起来像有内容，而自动化会把它原样贴到发布页上。
-          #
-          # **判据必须是「独立成行的注释标记」**，不是全文含这几个字：说明正文里完全可能
-          # 正当地提到 `project-forge: fill`（`RELEASING.md` 就在讲它）。按全文扫，
-          # 一份提到这件事的正确说明会被判红，而红灯说的是它没写完。
+          # **判据必须是「独立成行的注释标记」**，不是全文含这几个字。
           if grep -qE '^[[:space:]]*<!--[[:space:]]*project-forge:[[:space:]]*fill\b' "$NOTES"; then
             echo "::error::$NOTES 里还有没填完的 project-forge: fill 占位。填掉它们，删掉标记行，再重跑。"
             exit 1
@@ -112,12 +131,10 @@ jobs:
 
       - name: 产出用户包（按 .gitattributes 的排除规则导出，并核对条目）
         run: |
-          VERSION="${TAG#v}"
           git archive --format=tar "$TAG" | tar -t > package-list.txt
           node scripts/dev/preflight.mjs --package package-list.txt
-          # 附件名固定不带版本号：这样 `releases/latest/download/project-forge.zip` 永远
-          # 指向最新版——README 用它做「点这里下载」。要某一版就去点发布页上那个标签。
-          git archive --format=zip --prefix="project-forge-${VERSION}/" \
+          # 附件名与解压前缀固定为 project-forge/（不带版本号），确保解压后目录名与 SKILL.md 的 name 一致。
+          git archive --format=zip --prefix="project-forge/" \
             -o "project-forge.zip" "$TAG"
           echo "ASSET=project-forge.zip" >> "$GITHUB_ENV"
 
@@ -125,23 +142,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
-          # **是「建或更新」，不是「已存在就跳过」**：补漏重跑时必须回填正文，跳过会让
-          # 那次发布永远只有一行标签名。代价是重跑会覆盖已有正文。
-          #
-          # --verify-tag 是护栏：标签名打错时它直接失败。没有它，创建命令会拿默认分支的
-          # 状态自动建出一个同名新标签，而这次发版看起来还是绿的。
+          run_gh() {
+            OUT=$("$@" 2>&1) || {
+              CODE=$?
+              printf '%s\n' "$OUT" >&2
+              if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+                echo "::error::GitHub Release 接口返回 401/403：若仓库配置了 secrets.RELEASE_TOKEN，说明令牌已过期或缺少 Contents 写权限，请在仓库 Settings -> Secrets and variables -> Actions 立即刷新；未配置时请检查工作流 permissions: contents: write。"
+              fi
+              return "$CODE"
+            }
+            printf '%s\n' "$OUT"
+          }
+
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES"
+            run_gh gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES"
           else
-            gh release create "$TAG" --repo "$REPO" --verify-tag \
+            run_gh gh release create "$TAG" --repo "$REPO" --verify-tag \
               --title "$TAG" --notes-file "$NOTES"
           fi
 
-          # 回读比对。上一步返回 0 只说明命令自己认为成功了，不说明页面上的正文是什么样
-          # ——编码层、代理、平台的规范化都可能改写它，而它们都不报错。
+          # 回读比对。
           gh release view "$TAG" --repo "$REPO" --json body --jq .body > readback.md
-          # 归一：去行尾空白、去末尾空行。只做这两件，不动正文本身——不归一的话一次纯格式
-          # 差异就会被报成「正文被改写」，而报错本身不能有假警报。
           norm() {
             awk '{ sub(/[ \t]+$/, "") } { line[NR] = $0 }
                  END { n = NR; while (n > 0 && line[n] == "") n -= 1
@@ -158,4 +179,13 @@ jobs:
       - name: 把用户包挂到这一版的发布页上
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: gh release upload "$TAG" "$ASSET" --repo "$REPO" --clobber
+        run: |
+          OUT=$(gh release upload "$TAG" "$ASSET" --repo "$REPO" --clobber 2>&1) || {
+            CODE=$?
+            printf '%s\n' "$OUT" >&2
+            if printf '%s' "$OUT" | grep -qiE '\b(401|403)\b|Bad credentials|Resource not accessible'; then
+              echo "::error::上传发布附件返回 401/403：请检查并刷新仓库 Actions Secret 中的 RELEASE_TOKEN（需目标仓库 Contents 读写权限）。"
+            fi
+            exit "$CODE"
+          }
+          printf '%s\n' "$OUT"

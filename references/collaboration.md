@@ -405,7 +405,7 @@ diff、门禁原始输出，并且做过故障注入。**让它把最后一步�
 4. 切回默认分支并取回合并提交：`git switch <默认分支> && git pull`
 5. **先卸 worktree**：`git worktree remove <worktree 路径>`
 6. **再删本地分支**：`git branch -d <分支>`（不是 `-D`）
-7. 查远端分支还在不在（`git ls-remote --heads origin <分支>`），**确认之后才** `git push origin --delete <分支>`
+7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base；**两件都清了才** `git push origin --delete <分支>`
 
 `<默认分支>` 现场取（勘察的 `git.originHeadBranch`），不写死 `main`。分支名同理。
 

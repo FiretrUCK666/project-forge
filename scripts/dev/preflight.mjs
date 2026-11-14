@@ -480,6 +480,79 @@ const FINISH_STEPS = [
   /git push origin --delete/,
 ]
 
+/**
+ * 收尾那一章里缺了哪些「必须交代清楚的东西」。
+ *
+ * ## 两种范围：有的要素绑在步骤正文里，有的只能整章查
+ *
+ * 第 7 步要求的两个要素（查远端、查下游堆叠 PR）只在那一步的正文里查——正文是切好的独立块，
+ * 一句话说的就是那一件事。`where.stepMatching` 按**内容**认那一步（谁教
+ * `git push origin --delete`，谁就是它），不按编号认：写死步号会让「插入一步」变成假红，
+ * 而假红比漏检更耗人——它把人引去改判据，判据本来是对的。
+ *
+ * 「删之前先问」在文档里没有位置（模板写成七步下面一段，参考文档写成同一章的小标题），
+ * 所以只能整章查。
+ *
+ * ## 已知限制：`ask-before-delete` 判不出「那一段被整段删掉」
+ *
+ * 它的判定是「相邻几段里同时出现 worktree / 本地分支 / 远端分支 / 征询词」。而七步那一段
+ * 本身就必然写全这三类对象（第 5 步 worktree、第 6 步本地分支、第 7 步远端分支），
+ * 第 3 步的「回读确认」又提供了征询词——**四个条件自己凑齐了**。
+ *
+ * 后果：把「先把要删的清单列出来问一次」整段删掉，这条判据不会报。实测确认过。
+ *
+ * 根因不在正则写得松紧，在于**这件事没有结构位置**：七步能被稳定判，靠的是「编号」这个
+ * 锚点；这一段是散文，没有锚点，判据就只能靠词面碰撞去猜它像不像在说这件事，于是每换一种
+ * 写法就漏一种。
+ *
+ * 治本的做法是给它一个位置——把它提成七步里的一个编号步骤（或独立成「前置」编号块），
+ * 判据就能像其余步骤一样按结构判，不需要征询词，也不会被七步自身的用词污染。
+ * **这一版没做这个改动**，代价记在这里，不假装它不存在。
+ */
+const FINISH_REQUIRED = [
+  {
+    id: 'remote-probe',
+    label: '删远端分支之前要先查远端还在不在',
+    // **认那条命令，不认那句白话。** 早先为了迁就一处措辞把它放宽成 `/ls-remote|远端还在不在/`，
+    // 结果是「三处一起删掉 `git ls-remote`、只留散文」从红变绿——那正是内容下限当初要治的形状。
+    // 放宽断言就是弱化门禁，哪怕出发点是为了少一次假红。
+    where: { stepMatching: /git push origin --delete/ },
+    re: /ls-remote/,
+  },
+  {
+    id: 'downstream-check',
+    label: '删远端分支之前要先查有没有下游堆叠 PR 以它为 base',
+    where: { stepMatching: /git push origin --delete/ },
+    re: /(下游|堆叠)[^。；\n]*PR/,
+  },
+  {
+    id: 'ask-before-delete',
+    label: '删任何东西之前先把要删的清单列出来问一次',
+    where: { chapter: true },
+    // ## 判「一段话里同时出现了这四件事」，不判字面顺序和排版
+    //
+    // 先说走过的弯路。先后试过：绑「问人」（被「卸之前先问人」蒙混）、加删除动词（仍被那句
+    // 蒙混，它同时有「卸」和「问」）、绑「清单 + 问」（被「产物清单」和一句举例蒙混）。
+    // **拿正则去读散文的语义，这件事本身不成立**——散文的写法是无穷的，堵一个它换一个。
+    //
+    // 于是换思路：判**具体产物的形状**。要删的东西固定是三类（worktree、本地分支、远端分支），
+    // 「先问」固定是一个征询词。四个条件在**同一段**里同时成立，就是这件事发生了。
+    //
+    // 不判顺序、不判是否同一行——那都是排版，不是判据。早先的正则要求三项按
+    // worktree→本地分支→远端分支 同行排列，换序或改成分行就假红，而「清单长这样」那种写法
+    // 本来就是分行的。
+    // **这条判据有已知漏检**：七步那一段自己就能凑齐下面这四个条件（第 5 步 worktree、
+    // 第 6 步本地分支、第 7 步远端分支、第 3 步「回读确认」的征询词），所以把
+    // 「列清单问一次」整段删掉不会报。实测确认过。
+    // 「换序、分行不误报」与「删掉不报警」目前只能二选一——选前者，把后者记成已知限制。
+    // 治本方向写在上面的文件注释里。
+    test: (block) => /(worktree|工作树)/.test(block)
+      && /本地分支/.test(block)
+      && /远端分支/.test(block)
+      && /(问|点头|确认)/.test(block),
+  },
+]
+
 const FINISH_SITES = [
   'templates/agents-project.md',
   'AGENTS.md',
@@ -515,6 +588,139 @@ const FINISH_SITE_ROLES = [
  */
 export function finishSiteRolesMissing(sites) {
   return FINISH_SITE_ROLES.filter(({ test }) => !sites.some(test)).map(({ role }) => role)
+}
+
+/**
+ * 收尾七步的**正文**（含每步的续行），按编号切成七块。
+ *
+ * 只取编号开头的行和它的续行，**空行处收口**：空行是段落的边界，一个步骤的正文到空行就结束，
+ * 后面那些是解释，不是步骤。不收口的话最后一步会把本章余下的全部内容吞进去——实测第 7 步
+ * 的 body 有 11 行，含「第 1 步为什么在合并之前」两段、清单句、防乱码段，于是
+ * `where: { step: 7 }` 实际等于「第 7 步之后的所有内容」，范围宣告与实现不符。
+ *
+ * 前六步看不出这个毛病（下一行编号自然会切断），偏偏被 scope 的那一步是坏的——这类
+ * 「只在最后一格失灵」的错最不容易被发现。
+ */
+export function finishStepBodies(text) {
+  const range = finishSectionRange(text)
+  if (range === undefined) return undefined
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n').slice(range.start, range.end)
+  const bodies = []
+  let current = null
+  for (const line of lines) {
+    if (/^\s*\d+\.\s/.test(line)) {
+      if (current !== null) bodies.push(current)
+      current = line
+      continue
+    }
+    // 空行收口：步骤正文到段落边界为止。
+    if (line.trim() === '') {
+      if (current !== null) { bodies.push(current); current = null }
+      continue
+    }
+    // 顶格的标题或新条目也是边界（步骤正文都有缩进）。
+    if (/^(#|- \*\*|<!--)/.test(line)) {
+      if (current !== null) { bodies.push(current); current = null }
+      continue
+    }
+    if (current !== null) current += '\n' + line
+  }
+  if (current !== null) bodies.push(current)
+  return bodies
+}
+
+/**
+ * 七步里出现的 `git` 子命令集合。
+ *
+ * ## 为什么比这个，而不比措辞
+ *
+ * 措辞是给人读的，同一个意思可以写成「先卸 worktree」或「`git worktree remove`」；
+ * 但**命令是给人敲的**，同一步在三处教人敲不同的命令，就是三处会分叉的地方。
+ *
+ * 这不是抽象担忧：实测过一次——第 7 步在模板里写「先查有没有下游堆叠 PR」，
+ * 在参考文档里写「`git ls-remote` 查远端分支还在不在」，两句话讲的是同一件事的两半，
+ * 而顺序判据只看「`git push origin --delete` 排在哪」，所以两份可以长期各说各的。
+ * 把「这一步该敲哪些命令」也比一遍，这种半句话分叉就藏不住了。
+ */
+export function finishCommandsOf(text) {
+  const bodies = finishStepBodies(text)
+  if (bodies === undefined) return undefined
+  const found = bodies.join('\n').match(/\bgit\s+([a-z][a-z-]*)/g) ?? []
+  return [...new Set(found.map((one) => one.replace(/\s+/g, ' ')))].sort()
+}
+
+/**
+ * 收尾那一节里缺了哪些「必须交代清楚的东西」。**纯函数**，供门禁与行为断言共用。
+ *
+ * ## 范围是「整章」，比七步那一小段宽
+ *
+ * 七步的**顺序**只该在那一小段里判：同一句话在别处提到，不算步骤。
+ * 但「这一章有没有交代清楚」要按整章判——因为两份文档的组织方式本来就不同：
+ * 模板把「删之前先问」写成七步下面的一段，参考文档把它写成同一章里的一个小标题。
+ * 按小段判的话，后者会被判成「没交代」，而它就在下面三行。
+ *
+ * 这也是「判据要按结构写，不按位置写」的具体落法：**顺序看小段，内容看整章**。
+ */
+export function finishRequiredMissing(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const anchorAt = lines.findIndex((line) => FINISH_ANCHOR.test(line))
+  if (anchorAt === -1) return FINISH_REQUIRED.map((one) => one.label)
+
+  // 往回找所属的二级标题；找不到就从锚点那行起算。
+  let start = anchorAt
+  for (let i = anchorAt; i >= 0; i -= 1) {
+    if (/^##\s+/.test(lines[i])) { start = i; break }
+  }
+  // 往后到下一个二级标题为止。
+  let end = lines.length
+  for (let i = anchorAt + 1; i < lines.length; i += 1) {
+    if (/^##\s+/.test(lines[i])) { end = i; break }
+  }
+  const chapter = lines.slice(start, end).join('\n')
+
+  // **按内容找那一步，不按编号。**
+  //
+  // 早先写的是 `where: { step: 7 }` —— 六个字的问题是：插入一步就取到错的那一步，
+  // 判据以「没交代」的形式假红，而真正的错是「有人加了一步」。假红比漏检更耗人：
+  // 它把人引去改判据，而判据本来是对的。
+  //
+  // 换成按那句话本身认：谁教 `git push origin --delete`，谁就是这一步。
+  // 和 `FINISH_ANCHOR` 认「合并收尾」四个字是同一种做法——认语义，不认位置。
+  const stepBody = (pattern) => {
+    const bodies = finishStepBodies(text)
+    if (bodies === undefined) return undefined
+    return bodies.find((body) => pattern.test(body))
+  }
+
+  // 段落（空行分隔）。章内判定按**连续的几段**给，不按单段也不按整章：
+  //
+  //   - 按单段：写成「引导句 + 下面的项目列表」就假红——那正是这份文档自己
+  //     「清单长这样」的形态（三行分列的代码块）。
+  //   - 按整章：又回到最初那个「被同一章里别处的词蒙混」的坑。
+  //
+  // 折中是滑动窗口：连着的一小块里凑齐那几件事就算。窗口给 3 段，够容纳「一句引导 + 一张清单」。
+  const paragraphs = chapter.split(/\n\s*\n/)
+  const windowHit = (test) => {
+    for (let i = 0; i < paragraphs.length; i += 1) {
+      if (test(paragraphs.slice(i, i + 3).join('\n'))) return true
+    }
+    return false
+  }
+
+  const missing = []
+  for (const one of FINISH_REQUIRED) {
+    let ok = false
+    if (one.where.stepMatching !== undefined) {
+      const body = stepBody(one.where.stepMatching)
+      ok = body !== undefined && one.re.test(body)
+    } else if (one.test !== undefined) {
+      ok = windowHit(one.test)
+    } else {
+      ok = one.re.test(chapter)
+    }
+    if (!ok) missing.push(one.label)
+  }
+  return missing
 }
 
 /**
@@ -630,24 +836,62 @@ function checkReviewContract() {
   }
   note('完成后记录：模板要求「在合并之前写完」')
 
-  // 收尾步骤：三处都要有，且顺序必须一致。**只比顺序，不比措辞**——措辞可以随项目改，
-  // 顺序不能：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」上卡住。
+  // 收尾步骤：三处都要有，顺序要一致，**每一步教人敲的命令也要一致**。
+  //
+  // 顺序是判据不是排版：`worktree remove` 挪到 `branch -d` 后面，那段流程就会在「分支被占用」
+  // 上卡住。命令同理，而且更隐蔽——两处写的是同一件事的两半时，读起来都没错，照着做会漏一半。
   //
   // 三处不是随意挑的：`templates/agents-project.md` 是写给别的项目的骨架，
   // `AGENTS.md` 是本仓库照着它生成的实例，`references/collaboration.md` 是判据源头。
   // **判据源头不在核对清单里时，它改了没有任何东西会报**——那是最坏的一处漏网：
   // 其余两处都跟着它走，源头漂了却要等别人发现。
   let siteCount = 0
+  let baseline = null
   for (const site of FINISH_SITES) {
     const path = join(ROOT, site)
     if (!existsSync(path)) { fail(`收尾步骤对拍：缺 ${site}`); continue }
     siteCount += 1
-    const state = finishStepsState(readText(path))
+    const text = readText(path)
+    const state = finishStepsState(text)
     if (state.missing.length > 0) {
       fail(`${site} 的合并收尾缺这几步：${state.missing.join('、')}——七步固定，少一步就会有人漏做`)
     } else if (state.outOfOrder) {
       fail(`${site} 的合并收尾步骤顺序不对——顺序是判据不是排版，`
         + 'worktree 没卸就删分支会失败，而报错说的是「未合并」')
+    }
+
+    // **内容**对拍：这一章必须交代清楚的几件事，一处都不能少。
+    //
+    // 前面那条命令对拍是「三处互相比对」，只有相对下限——三处一起删掉一条命令，它永远说
+    // 一致。实测过：三处同时删掉 `git ls-remote`，全绿。而改规则的人恰恰会同时改三处。
+    // 所以这里是**绝对下限**：不管几处一致，这一章都得把这几个要素说到。
+    //
+    // **每一处都查，包括基准那一处。** 早先这段写在 `baseline === null` 的 `continue` 之后，
+    // 于是首处（模板）永远不查内容——那正是「判据本身少查一处」的形状，而它不报错。
+    for (const label of finishRequiredMissing(text)) {
+      fail(`${site} 的合并收尾没有交代「${label}」——`
+        + '三处一起漏掉时，互相比对永远说「一致」；只有拿内容去对，才看得见集体遗忘')
+    }
+
+    // 命令对拍：以第一处（模板）为基准，其余每一处都必须与它一致。
+    const commands = finishCommandsOf(text)
+    if (commands === undefined) {
+      fail(`${site} 的合并收尾读不出命令集——七步要写成编号行（数字加点开头），`
+        + '叙述体里「第一步，…」这种写法读不到，对拍就静默通过')
+      continue
+    }
+    if (baseline === null) {
+      baseline = { site, commands }
+      continue
+    }
+    const extra = commands.filter((c) => !baseline.commands.includes(c))
+    const absent = baseline.commands.filter((c) => !commands.includes(c))
+    if (extra.length > 0 || absent.length > 0) {
+      const parts = []
+      if (absent.length > 0) parts.push(`${site} 少了 ${absent.join('、')}`)
+      if (extra.length > 0) parts.push(`${site} 多了 ${extra.join('、')}`)
+      fail(`收尾步骤对拍：${baseline.site} 与 ${site} 教人敲的命令不一致——${parts.join('；')}。`
+        + '措辞可以各写各的，命令不行：同一件事在三处教人敲不同的东西，照着做会漏一半')
     }
   }
   // **角色也要齐。** 「个数等于列表长度」是恒真的——列表被删短，两个数一起变小。
@@ -656,7 +900,7 @@ function checkReviewContract() {
     fail(`收尾步骤对拍：${role}这一处不在核对清单里——`
       + '它改了不会有任何东西报错，而其余几处都跟着它走')
   }
-  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序一致`)
+  note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序与命令一致`)
 }
 
 function checkOwnInstances() {

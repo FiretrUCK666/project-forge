@@ -1882,6 +1882,235 @@ cases.push(['收尾步骤核对清单：三种角色一个都不能少', async (
   return true
 }])
 
+cases.push(['收尾七步：插入一步不该让内容下限假红', async () => {
+  // 早先 `where: { step: 7 }` 写死步号，插入一步就取到错的那一步，判据以「没交代」的形式假红。
+  // **假红比漏检更耗人**：它把人引去改判据，而判据本来是对的。
+  // 这条断言就是给那个修法配的常驻守卫——没有它，把「按内容认步骤」改回「按编号认」，
+  // 今天正好七步，取第 7 块取对了，全部门禁照样绿。
+  const { finishRequiredMissing } = await loadPreflight()
+
+  const steps = (extra) => [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
+    ...extra,
+    '  删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '',
+  ].join('\n')
+
+  const seven = steps(['  7. '])
+  if (finishRequiredMissing(seven).length !== 0) {
+    return `标准七步却报缺：${finishRequiredMissing(seven).join('、')}`
+  }
+
+  // 插入一步：原来教 `git push origin --delete` 的那一步变成第 8 步。
+  const eight = steps(['  7. `git status` 看一眼；', '  8. '])
+  const missing = finishRequiredMissing(eight)
+  if (missing.length !== 0) {
+    return `插入一步后假红：${missing.join('、')}——判据按编号认步骤，不是按内容认`
+  }
+
+  // 反面：把教 `git push origin --delete` 的那一步整条删掉，必须报（说明它是真的在认内容）。
+  const noPush = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '',
+  ].join('\n')
+  if (!finishRequiredMissing(noPush).some((l) => l.includes('远端还在不在'))) {
+    return '把教 push --delete 的那一步删掉之后没有报缺'
+  }
+
+  return true
+}])
+
+cases.push(['收尾七步：三处教人敲的命令必须一致，措辞可以不同', async () => {
+  // 顺序判据看不见「同一件事的两半各写一处」：第 7 步一边写「查下游堆叠 PR」、
+  // 一边写「git ls-remote」，两句话读起来都对，照着做会漏一半。这条断言盯命令，不盯措辞。
+  const { finishCommandsOf } = await loadPreflight()
+
+  const base = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
+    '  7. 先查（`git ls-remote --heads origin <分支>`）再 `git push origin --delete <分支>`。',
+    '',
+  ].join('\n')
+
+  const want = finishCommandsOf(base)
+  // 粒度是**子命令**（`git branch`、`git worktree`），不带后面的参数：
+  // 参数在一处写成 `<路径>`、另一处写成 `<worktree 路径>`，那是措辞差异，不该报。
+  // 带不带 `-d` 这类真正的参数差异，由七步的存在性判据（`FINISH_STEPS` 里的 `/git branch -d/`）管。
+  if (!want || want.length !== 6) {
+    return `七步里应读出 6 条 git 子命令，实际：${want ? want.join('、') : 'undefined'}`
+  }
+  for (const cmd of ['git switch', 'git pull', 'git worktree', 'git branch', 'git ls-remote', 'git push']) {
+    if (!want.includes(cmd)) return `漏了 ${cmd}，实际：${want.join('、')}`
+  }
+
+  // **正面：只改白话，六条命令一字不动**——必须判成一致。
+  //
+  // 这一面是判据的全部价值所在：如果「说法不同」也报，两份文档就被焊死了，以后想给不同
+  // 读者写不同的话都不行。所以样本得**保留每一条行内代码**，只换外面的字。
+  const reworded = base
+    .replace('1. 把要写的东西写完；', '1. 该写的先写完，跟着这次改动一起提交；')
+    .replace('2. 合并 PR；', '2. 把 PR 合掉；')
+    .replace('3. 回读确认 `state=MERGED`；', '3. 回去看一眼，状态得是 `state=MERGED`；')
+    .replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在（`git ls-remote --heads origin <分支>`），确认了再')
+  const rew = finishCommandsOf(reworded)
+  if (!rew || rew.length !== 6) {
+    return `只改白话时命令数应保持 6 条，实际：${rew ? rew.join('、') : 'undefined'}`
+  }
+  if (rew.join('|') !== want.join('|')) {
+    return `只改白话却读出了不同的命令集：${want.join('、')} → ${rew.join('、')}`
+  }
+
+  // **反面一：连命令一起删**——这才是不一致。
+  const dropOne = base.replace('先查（`git ls-remote --heads origin <分支>`）再', '先看远端还在不在，确认之后再')
+  const dropped = finishCommandsOf(dropOne)
+  if (!dropped) return '删掉 ls-remote 那条命令后读不出命令集'
+  if (dropped.includes('git ls-remote')) return '删掉 ls-remote 之后仍然读得到它'
+  if (dropped.length !== 5) return `删掉一条命令后应剩 5 条，实际 ${dropped.length}`
+
+  // **反面二：没有七步锚点时返回 undefined，不是空数组**——
+  // 空数组会被上层当成「没有命令」，于是「找不到」和「一个都没写」长得一样。
+  if (finishCommandsOf('## 别的节\n\n什么也没有\n') !== undefined) {
+    return '没有锚点时应返回 undefined，不能返回空数组'
+  }
+  return true
+}])
+
+cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () => {
+  // 三处互相比对只有**相对下限**：三处一起删掉一条命令，对拍永远说「一致」。
+  // 而改规则的人恰恰会同时改三处——集体遗忘比单点漂移更常见。这条断言盯的是绝对下限。
+  const { finishRequiredMissing } = await loadPreflight()
+
+  const full = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
+    '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '',
+  ].join('\n')
+
+  if (finishRequiredMissing(full).length !== 0) {
+    return `要素齐全却报缺：${finishRequiredMissing(full).join('、')}`
+  }
+
+  // 反面一：删掉「下游堆叠 PR」那半句。
+  const noDownstream = full.replace('、有没有下游堆叠 PR 以该分支为 base', '')
+  if (!finishRequiredMissing(noDownstream).some((l) => l.includes('下游堆叠'))) {
+    return '删掉「下游堆叠 PR」之后没有报缺——这一半又没有守卫了'
+  }
+
+  // 反面二：把「查远端」这一整半删掉（命令和白话一起删）。
+  const noProbe = full
+    .replace('远端还在不在（`git ls-remote --heads origin <分支>`）、', '')
+  if (!finishRequiredMissing(noProbe).some((l) => l.includes('远端还在不在'))) {
+    return '删掉「查远端」这一整半之后没有报缺'
+  }
+
+  // 反面二之二：**只删命令、留着那句白话，也必须报。**
+  // 这一面治的是「把断言放宽成认白话」——那样一来「三处一起删掉命令」就静默通过了。
+  const cmdGone = full.replace('`git ls-remote --heads origin <分支>`', '')
+  if (!finishRequiredMissing(cmdGone).some((l) => l.includes('远端还在不在'))) {
+    return '只删 ls-remote 命令、留白话，仍然算交代——断言被放宽了'
+  }
+
+  // 反面三：删掉「删之前先问」那一整段。
+  const noAsk = full.replace('  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。\n', '')
+  if (!finishRequiredMissing(noAsk).some((l) => l.includes('问一次'))) {
+    return '删掉「删之前先问」之后没有报缺'
+  }
+
+  // 反面四：**同一章里别处的正常用法不能算交代**——
+  // 「产物清单」「卸之前先问人」「弱化门禁要人点头」都在这一章里，但都不是这条要求。
+  const decoys = full.replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。\n',
+    '  这一章别处还会说「产物清单」「卸之前先问人」「弱化门禁必须人点头」。\n',
+  )
+  if (!finishRequiredMissing(decoys).some((l) => l.includes('问一次'))) {
+    return '别处的「产物清单 / 卸之前先问人 / 要人点头」被当成了交代——这一条又被蒙混了'
+  }
+
+  // 反面四：**同一个词出现在章外的别处，不算交代**——
+  // 这正是先前那类「话说得比扫过的范围大」的毛病。范围是本章，不是全文。
+  const outside = [
+    '## 别的节', '',
+    '这里顺嘴提到 git ls-remote、下游堆叠 PR、问人点头。', '',
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '',
+    '## 下一节', '',
+    '什么也没有。', '',
+  ].join('\n')
+  if (finishRequiredMissing(outside).length !== 3) {
+    return `章外提到不算交代：应报缺 3 项，实际 ${finishRequiredMissing(outside).length} 项`
+  }
+
+  // 反面五：**要素挪到第 7 步之后的解释段，不算第 7 步交代过。**
+  // 这一条治的是「步正文切片不收口」：早先最后一步会吞掉本章余下全部内容，
+  // 于是要素挪到哪都算数，范围宣告与实现不符。
+  const stepScoped = full.replace(
+    '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '  7. 删远端分支之前查有没有下游堆叠 PR；两件都清了才 `git push origin --delete <分支>`。',
+  ).replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**',
+    '  解释段：远端用 `git ls-remote --heads origin <分支>` 查一下。\n\n  **第 5 步之前先把要删的清单列出来问一次**',
+  )
+  if (!finishRequiredMissing(stepScoped).some((l) => l.includes('远端还在不在'))) {
+    return '要素挪到第 7 步之后的解释段仍然算数——步正文没有收口'
+  }
+
+  // **正面：换序、改成分行，都不该报。**
+  // 排版不是判据。早先的正则要求三项同行按固定顺序出现，而这份文档自己的「清单长这样」
+  // 就是分行的——那会把正确写法判成错的。
+  const reordered = full.replace(
+    '  哪个 worktree、哪条本地分支、哪条远端分支。',
+    '  哪条本地分支、哪个 worktree、哪条远端分支。',
+  )
+  if (finishRequiredMissing(reordered).length !== 0) {
+    return `清单换序被误报：${finishRequiredMissing(reordered).join('、')}`
+  }
+
+  const multiline = full.replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '  **第 5 步之前先把要删的清单列出来问一次**：\n\n```text\n- worktree\n- 本地分支\n- 远端分支\n```',
+  )
+  if (finishRequiredMissing(multiline).length !== 0) {
+    return `清单改成分行被误报：${finishRequiredMissing(multiline).join('、')}`
+  }
+
+  return true
+}])
+
 cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真实存在', async () => {
   // 判据改了文档结构之后，`ref` 指路会变成死指针——而它不会报错，只会让人点进去找不到那一节。
   // 这条断言读的是**真实文件**，不是夹具：指路的目标本来就在这个仓库里。

@@ -51,12 +51,19 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <ta
 node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ```
 
-- **契约体积与失效引用**：`AGENTS.md` 达 `24576` 字节预警、超 `30720` 字节报危，校验反引号路径、默认分支与 `Dev Profile`（`quick-test`/`full-test`/`smoke-verify`/`merge-gate`/`arch-rules`）。
-- **文档温差与相对死链**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），围栏感知扫描 Markdown 相对死链（`docs.dead-link`）与 `docs/TDD.md` 模块漂移。
+- **契约体积与失效引用**：`AGENTS.md` 达 `24576` 字节预警、超 `30720` 字节报危，校验反引号路径、默认分支与 `Dev Profile`（含过期 `high-risk:` 零匹配检查 `docs.devprofile-unmatched-high-risk`）。
+- **文档温差、相对死链与活跃 Frontmatter**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），扫描 Markdown 相对死链（`docs.dead-link`）、`docs/TDD.md` 模块漂移，以及 `docs/{prd,specs,todo}/` 活跃文档的 YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链（`docs.frontmatter-invalid`、`docs.broken-related-link`、`docs.filename-issue-mismatch`）。
 - **结构腐化与跨层边界**：识别墓碑履历注释（`hygiene.tombstone-comment`）、借口/压制标记（`hygiene.excuse-suppression`）、连续注释死代码块（`deadcode.commented-block`）、`>800`/`>1500` 行超大源码（`hygiene.god-file`）与 `arch-rules:` 跨层禁引违规（`hygiene.arch-boundary`）。
-- **测试覆盖与 CI 对齐**：解析 `.github/workflows/*.{yml,yaml}` `ciRunSteps` 与 `Dev Profile`，揪出零断言测试、全跳过测试与孤儿测试套件（`tests.orphan-suite`）。
+- **测试覆盖与 CI 对齐**：解析 `package.json`、`Makefile`、`justfile`、`scripts/`、`.github/workflows/*.{yml,yaml}` `ciRunSteps` 与 `Dev Profile` 输出 `testInventory`，揪出零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
 - **Worktree 四态精细判定**：结合 `git cherry` 与 `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`（**仅报告并要求先问人核对未提交改动，绝不误删**）与 `unmerged`。
 - **清单与仓库卫生**：校验 `.agents/skills/.pf-manifest.json` 完整性、明文凭据、`>1MB` 大文件及未忽略输出目录。
+
+## 测试分层、控频与质量治理
+
+- **客观盘点与无 CI 诚实汇报**：汇总多构建工具脚本与测试目录生成 `testInventory`；无 `.github/workflows` 等 CI 配置且存在测试时发出 `tests.no-ci-config`（`low`），明示仅核对本地 `Dev Profile` 与脚本目录。
+- **分层分离与 `{target}` 窄化**：拦截 `quick-test` 与 `full-test`/`merge-gate` 合并或混入 Playwright/Cypress/Puppeteer/Selenium/Testcontainers/Docker Compose（`tests.collapsed-tiers`），以及测试文件 `>= 5` 却未配置 `{target}`/`--filter`/`--changed` 的无过滤快测（`tests.unfiltered-quick-test`）。
+- **三段测试控频**：编码中只做语法/类型/单文件检查；一轮改动后跑 `flow.mjs verify --tier quick --target <path>`；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
+- **反膨胀与假测审计**：剥离注释并跳过元夹具生成器后，识别非 E2E 单测硬编码 `>=1s` sleep（`tests.hard-sleep`）、单测混入浏览器/容器重依赖（`tests.heavy-in-unit`）、`>=5` mock 且仅断言调用次数而 0 真实值断言的纯 Mock 自证（`tests.mock-tautology`）、`>800` 行超大单测（`tests.oversized-file`）与无环境变量隔离的非无头配置（`tests.non-headless`）；重组或拆分测试目录前须先请人类确认。
 
 ## 信任倒金字塔与规则下沉阶梯
 

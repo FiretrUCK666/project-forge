@@ -6,8 +6,8 @@
  *   inspect  [inputs...] [--probe-auth] [--external-pr <M>] [--json]
  *   start    --task <id> [--slug <slug>] [--case <1..5>] [--files <n>] [--parallel] [--external-pr <M>] [--pr <M>] [--issue <N>] [--branch <name>] [--clone-choice <fork|standalone|local>] [--json]
  *   claim    --task <id> [--issue <N>] [--agent <id>] [--json]
- *   finalize --task <id> [--note <text>] [--json]
- *   verify   --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]
+ *   finalize --task <id> [--note <text>] [--strict-sync] [--json]
+ *   verify   --task <id> [--mode|--tier quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]
  *   submit   --task <id> [--draft] [--rework] [--title <title>] [--body <text>] [--json]
  *   rework   --task <id> [--rebut "<findingId>: <reason>"] [--json]
  *   merge    --task <id> [--method merge|squash|rebase] [--human-approved] [--json]
@@ -21,16 +21,59 @@ import { basename, join, relative, resolve } from 'node:path'
 
 import {
   classifyDoorType, createDefaultLedger, detectDeclaredRepo, detectProjectConventions,
-  ensureWorktreesIgnored, execShellCommand, githubRepoFull, githubRepoPath,
-  gitRun, isMainModule, listTaskLedgers, matchGlob, parseAgentsProfile, parseBodyRelations, parseFlowInputs,
+  DOC_FRONTMATTER_KEY_ORDER, ensureWorktreesIgnored, evaluateCoupledSync, execShellCommand, githubRepoFull, githubRepoPath,
+  gitRun, isMainModule, listTaskLedgers, matchGlob, parseAgentsProfile, parseBodyRelations, parseCoupledSyncRules, parseDocFrontmatter, parseFlowInputs,
   posixPath, printNextStep, probeGitHubEnv, readTaskLedger, readTextSafe,
   resolveRepoRoots, resolveWorkspaceIdentity, samePath, sanitizeTaskId,
-  sha256Text, slugify, UI_VISUAL_EXT_RE, writeAtomic, writeTaskLedger,
+  sha256Text, slugify, syncDocsLifecycle, UI_VISUAL_EXT_RE, updateDocFrontmatter, writeAtomic, writeTaskLedger,
 } from '../../lib/shared.mjs'
 import { unmountSharedDeps, mountSharedDeps } from './worktree-deps.mjs'
 
 const EXIT_POLICY_BLOCK = 3
 const EXIT_ACTION_REQUIRED = 4
+
+function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
+  const agentsRoot = existsSync(join(implRoot, 'AGENTS.md')) ? implRoot : mainRoot
+  const agentsText = readTextSafe(join(agentsRoot, 'AGENTS.md'))
+  if (!agentsText) return []
+  const rules = parseCoupledSyncRules(agentsText)
+  if (rules.length === 0) return []
+  return evaluateCoupledSync(changedFiles, rules, agentsRoot)
+}
+
+async function collectFinalizeChangedFiles(implRoot, ledger) {
+  const merged = new Set(await getChangedFiles(implRoot, ledger.baseSha))
+  const candidates = [...new Set([ledger.baseBranch, 'main', 'master'].filter(Boolean))]
+  for (const baseRef of candidates) {
+    const mb = await gitRun(implRoot, ['merge-base', baseRef, 'HEAD'])
+    if (mb.ok && mb.stdout?.trim()) {
+      for (const f of await getChangedFiles(implRoot, mb.stdout.trim())) merged.add(f)
+      break
+    }
+  }
+  return [...merged].sort()
+}
+
+async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
+  const seed = ledger.specFile ?? ledger.todoFile ?? ledger.prdFile ?? ledger.slug
+  if (!seed) return null
+  try {
+    const res = await syncDocsLifecycle(workRoot, {
+      slugOrPath: seed,
+      issue: ledger.linkedIssues?.[0],
+      pr: ledger.prNumber ?? undefined,
+      branch: ledger.branch,
+      owner: ledger.implementerId ?? undefined,
+      ...overrides,
+    })
+    if (res.byKind?.prd) ledger.prdFile = res.byKind.prd
+    if (res.byKind?.spec) ledger.specFile = res.byKind.spec
+    if (res.byKind?.todo) ledger.todoFile = res.byKind.todo
+    return res
+  } catch {
+    return null
+  }
+}
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────
 
@@ -697,6 +740,9 @@ async function handleStart(opts, roots) {
       implementerId,
       status: 'started',
     })
+    if (linkedIssues.length > 0) {
+      await syncTaskDocsSafe(roots.mainRoot, ledger)
+    }
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
     else {
@@ -754,6 +800,9 @@ async function handleStart(opts, roots) {
     implementerId,
     status: 'started',
   })
+  if (linkedIssues.length > 0) {
+    await syncTaskDocsSafe(implAbs, ledger)
+  }
   writeTaskLedger(roots.mainRoot, ledger)
 
   if (opts.json) {
@@ -785,6 +834,11 @@ async function handleClaim(opts, roots) {
   }
   const actor = opts.agent ?? ledger.implementerId ?? 'local-agent'
   if (!ledger.implementerId) ledger.implementerId = actor
+
+  const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
+  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
+    await syncTaskDocsSafe(claimRoot, ledger)
+  }
 
   const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
@@ -894,6 +948,8 @@ async function handleFinalize(opts, roots) {
         relocated.push(relDoc)
       }
 
+      const changedFork = await collectFinalizeChangedFiles(implRoot, ledger)
+      const coupledSyncWarnings = computeFlowCoupledSync(implRoot, roots.mainRoot, changedFork)
       ledger.finalized = true
       ledger.finalizedHead = currentHead
       ledger.status = 'finalized'
@@ -905,15 +961,25 @@ async function handleFinalize(opts, roots) {
         privateDocsIsolated: true,
         relocatedPrivateDocs: relocated,
         finalizedHead: currentHead,
+        coupledSyncWarnings,
       }
       if (opts.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Fork finalize 完成（上游未接入 docs/，已确保不污染 PR diff）。\n`)
+        for (const w of coupledSyncWarnings) {
+          process.stdout.write(`[COUPLED SYNC]: 触及 ${w.touchedTriggers.join(', ')} -> 需检查伴随更新 ${w.expectedCompanions.join(', ')}\n`)
+        }
         printNextStep([`运行验证锁定 HEAD：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}`])
+      }
+      if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
+        process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则且未更新伴随文件（共 ${coupledSyncWarnings.length} 组）。\n`)
+        return { exitCode: 1 }
       }
       return { exitCode: 0 }
     }
   }
+
+  const today = new Date().toISOString().slice(0, 10)
 
   // 检查并归档 Todo
   let todoRel = ledger.todoFile || findMatchingDoc(implRoot, 'docs/todo', ledger)
@@ -940,6 +1006,19 @@ async function handleFinalize(opts, roots) {
       ledger.todoFile = archiveRel
       ledger.archivedTodoFile = archiveRel
     }
+
+    const archivedAbs = join(implRoot, todoRel)
+    const archivedRaw = readTextSafe(archivedAbs) ?? ''
+    if (parseDocFrontmatter(archivedRaw).hasFrontmatter) {
+      updateDocFrontmatter(archivedAbs, {
+        status: 'done',
+        done_at: today,
+        updated: today,
+        branch: ledger.branch,
+        ...(ledger.linkedIssues?.[0] ? { issue: ledger.linkedIssues[0] } : {}),
+        ...(ledger.prNumber ? { pr: ledger.prNumber } : {}),
+      }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.todo })
+    }
   }
 
   // 检查并更新 SPEC 为 implemented + 核验「实现说明」
@@ -954,7 +1033,10 @@ async function handleFinalize(opts, roots) {
       return { exitCode: 1 }
     }
 
-    specText = specText.replace(/^(-\s+Status:\s*)(?:draft|approved|implemented)(\s*)$/mi, '$1implemented$2')
+    const specFm = parseDocFrontmatter(specText)
+    if (!specFm.hasFrontmatter) {
+      specText = specText.replace(/^(-\s+Status:\s*)(?:draft|approved|implemented)(\s*)$/mi, '$1implemented$2')
+    }
     if (!/^##\s+实现说明\s*$/m.test(specText)) {
       specText = `${specText.trimEnd()}\n\n## 实现说明\n\n`
     }
@@ -982,14 +1064,27 @@ async function handleFinalize(opts, roots) {
       )
     }
     writeAtomic(specAbs, specText)
+    if (specFm.hasFrontmatter) {
+      updateDocFrontmatter(specAbs, {
+        status: 'implemented',
+        implemented: true,
+        updated: today,
+        branch: ledger.branch,
+        ...(ledger.linkedIssues?.[0] ? { issue: ledger.linkedIssues[0] } : {}),
+        ...(ledger.prNumber ? { pr: ledger.prNumber } : {}),
+      }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.spec })
+    }
     ledger.specFile = specRel
   }
 
-  // 代码-文档一致性强提醒
-  const changed = await getChangedFiles(implRoot, ledger.baseSha)
+  await syncTaskDocsSafe(implRoot, ledger, { doneAt: today })
+
+  // 代码-文档一致性与 AGENTS.md「改哪看哪」联动同步核查
+  const changed = await collectFinalizeChangedFiles(implRoot, ledger)
   const touchedCodeEntry = changed.some((f) => /^(?:src|lib|scripts|kit|bin|cmd)\/|package\.json$|Cargo\.toml$|pyproject\.toml$|go\.mod$|index\./i.test(f))
   const touchedAnyDoc = changed.some((f) => /^(?:docs\/TDD\.md|README(?:\.[a-z0-9_-]+)?\.md|AGENTS\.md)$/i.test(f))
   const docParityReminder = touchedCodeEntry && !touchedAnyDoc
+  const coupledSyncWarnings = computeFlowCoupledSync(implRoot, roots.mainRoot, changed)
 
   ledger.finalized = true
   ledger.finalizedHead = currentHead
@@ -1003,6 +1098,7 @@ async function handleFinalize(opts, roots) {
     todoFile: ledger.todoFile,
     specFile: ledger.specFile,
     docParityReminder,
+    coupledSyncWarnings,
   }
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
@@ -1011,10 +1107,17 @@ async function handleFinalize(opts, roots) {
     if (docParityReminder) {
       process.stdout.write('[DOC PARITY REMINDER]: 本次改动涉及代码入口/导出/清单，但未见 docs/TDD.md、README.md 或 AGENTS.md 同步更新，请确认文档是否需要一起补齐。\n')
     }
+    for (const w of coupledSyncWarnings) {
+      process.stdout.write(`[COUPLED SYNC]: 触及 ${w.touchedTriggers.join(', ')} -> 需检查伴随更新 ${w.expectedCompanions.join(', ')}\n`)
+    }
     printNextStep([
       '1. 若 finalize 移动或更新了文档，先在工作区提交变更：git add -A && git commit -m "..."',
       `2. 运行实证门禁锁定 HEAD：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}`,
     ])
+  }
+  if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
+    process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则且未更新伴随文件（共 ${coupledSyncWarnings.length} 组）。\n`)
+    return { exitCode: 1 }
   }
   return { exitCode: 0 }
 }
@@ -1030,9 +1133,9 @@ async function handleVerify(opts, roots) {
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
 
   const profile = parseAgentsProfile(implRoot)
-  const mode = opts.mode ?? 'quick'
+  const mode = opts.tier ?? opts.mode ?? 'quick'
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
-    process.stderr.write(`INVALID_VERIFY_MODE: --mode 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
+    process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
     return { exitCode: 1 }
   }
   let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
@@ -1055,12 +1158,17 @@ async function handleVerify(opts, roots) {
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入。\n`)
     return { exitCode: 1 }
   }
+  let targetTip = null
   if (cmd.includes('{target}')) {
-    if (!rawTarget) {
+    if (rawTarget) {
+      cmd = cmd.replace(/\{target\}/g, rawTarget)
+    } else if (mode === 'quick') {
+      cmd = cmd.replace(/\s*(?:--[A-Za-z0-9_-]+=)?\{target\}\s*/g, ' ').replace(/\s+/g, ' ').trim()
+      targetTip = '提示：quick 分层未传入 --target <path>，已省略 {target} 执行；单测迭代建议传 --target <path> 缩窄范围。'
+    } else {
       process.stderr.write(`MISSING_TARGET_ARG: 验证命令 "${cmd}" 含 {target} 占位符，请追加 --target <file> 指定单测文件或用例。\n`)
       return { exitCode: 1 }
     }
-    cmd = cmd.replace(/\{target\}/g, rawTarget)
   }
 
   const runRes = await execShellCommand(cmd, implRoot)
@@ -1099,6 +1207,7 @@ async function handleVerify(opts, roots) {
       mode,
       target: rawTarget,
       cmd,
+      ...(targetTip ? { targetTip } : {}),
       ok: runRes.ok,
       exitCode: runRes.code,
       verifiedHead: ledger.verifiedHead,
@@ -1112,6 +1221,7 @@ async function handleVerify(opts, roots) {
   } else {
     if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
     if (runRes.stderr) process.stderr.write(`${runRes.stderr}\n`)
+    if (targetTip) process.stdout.write(`${targetTip}\n`)
     process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${runRes.code} HEAD=${currentHead ?? 'none'}${empiricalVisualCheckRequired ? ` visualFiles=${visualFilesChanged.length}` : ''}\n`)
     if (runRes.ok) {
       const next = [
@@ -1293,6 +1403,24 @@ async function handleSubmit(opts, roots) {
             statePayload: { taskId, action: 'pr-created', prNumber: prResult.number },
           }),
         })
+      }
+    }
+  }
+
+  if (ledger.prNumber) {
+    await syncTaskDocsSafe(implRoot, ledger, {
+      pr: ledger.prNumber,
+      status: 'in_review',
+      preserveTerminalStatus: true,
+    })
+    const archRel = ledger.archivedTodoFile || (ledger.todoFile?.startsWith('docs/archive/todo/') ? ledger.todoFile : null)
+    if (archRel && existsSync(join(implRoot, archRel))) {
+      const archRaw = readTextSafe(join(implRoot, archRel)) ?? ''
+      if (parseDocFrontmatter(archRaw).hasFrontmatter) {
+        updateDocFrontmatter(join(implRoot, archRel), {
+          pr: ledger.prNumber,
+          updated: new Date().toISOString().slice(0, 10),
+        }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.todo })
       }
     }
   }
@@ -1699,6 +1827,7 @@ function parseCli(argv) {
     else if (a === '--keep-branch') opts['keep-branch'] = true
     else if (a === '--human-approved') opts['human-approved'] = true
     else if (a === '--visual-checked') opts['visual-checked'] = true
+    else if (a === '--strict-sync') opts['strict-sync'] = true
     else if (a.startsWith('--')) {
       const eq = a.indexOf('=')
       const k = eq > 0 ? a.slice(2, eq) : a.slice(2)
@@ -1723,8 +1852,8 @@ function printHelp() {
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  start     --task <id> [--slug <slug>] [--case <1..5>] [--parallel] [--external-pr <M>] [--clone-choice <fork|standalone|local>] [--json]',
     '  claim     --task <id> [--issue <N>] [--agent <id>] [--json]',
-    '  finalize  --task <id> [--note <text>] [--json]',
-    '  verify    --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]',
+    '  finalize  --task <id> [--note <text>] [--strict-sync] [--json]',
+    '  verify    --task <id> [--mode|--tier quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]',
     '  submit    --task <id> [--draft] [--rework] [--json]',
     '  rework    --task <id> [--rebut "<findingId>: <reason>"] [--json]',
     '  merge     --task <id> [--method merge|squash|rebase] [--human-approved] [--json]',

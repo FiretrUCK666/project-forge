@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "forgeVersion": "5.0.0",
-  "installedAt": "2026-11-14T14:51:07.934Z",
+  "installedAt": "2026-11-14T15:45:37.417Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "df1d62e131168c199c5ef3d548274a1fcad1d121d5023f6943eef6d90251fbeb"
@@ -10,37 +10,37 @@
       "sha256": "3c86e34ba688059dec3e24ec243f0bf6302993ea4373ff829eb868a1791ab0c1"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "b427aaec3de361806baf986cc78220acd11b4c724a9ed5bf589099da33b75c4c"
+      "sha256": "494b7b07f9de5d693344e3aaf9d986989fb1498116c92444e4ec231a1a7b0aef"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "7479a58e1298835f378126396ca59a3d0f7ba140672e3f79d34051f14c78046f"
+      "sha256": "8c98e3e010ecf812a6a1c1a7a062a88c2f3f10efe1884cd9298eaa050bd8dd30"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "81e62a54ab00b1bf2889b7b328f1eefdb998a1b8e8610c5027fe416c39211a8f"
+      "sha256": "6930062424414be1018b26820d9bff02167d3eeb2ec40e910e2f6f4d25e016fb"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "0f2359e537cbea69e28532889822b31bf822e07eae5b0ca5908457561c0a4223"
+      "sha256": "95b44ac70676cb4398eac30c61d233985a42b472a34f6a5e058129970f6425e5"
     },
     "dev-govern/scripts/release-prep-lib.mjs": {
       "sha256": "748f59e73d9bceaeceeadd64c63c1dd402b3b09cee5ca8358c3574bf3d35874f"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "50c4d734330b6a9764a78ec03c99f09636be1ee869ee5bceafd0248147f7de17"
+      "sha256": "b2fdc0b3aea13e5369d2ca89afcd74ff932e999691678c86c78f1bd726c65e85"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "efb6c670fe8631d8d04cc3aa7502c26fbf40d4de164d10a339e9e5ee118137b5"
+      "sha256": "ae5ce528f644be73c2068c32b8d200c605b3fa34b1ea3b3a622934ba0102380e"
     },
     "dev-review/SKILL.md": {
-      "sha256": "8cafe1722207cd272939ebf5e7cd0555679b176789e8fe5e98f9c4cae33d3144"
+      "sha256": "0d982af442cccc7df17362335b2ecba5de004903a2116b04e9186bded8e527ad"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "60d5917996f075bcbbbfd1bbd0ea714bf860add096723d43a7b05e7574b0cf44"
+      "sha256": "55612422fb911ce9810e0df8cb49798489f7edec763350b08bcac102b56e6d87"
     },
     "lib/shared.mjs": {
-      "sha256": "2bfdc964d536ce99328bfd962528fa1d1bda85f77a21060ac8118fa20c3d5747"
+      "sha256": "a1992cf34d19f2d23db33d03e6854684295c727964a67785666d41d874d1b009"
     }
   },
   "agentsRegions": {
@@ -66,7 +66,7 @@
       "sha256": "ebf26aaa7d6ac072659e240f8c9275a3e32b86877770336b0f826ffa6163b965"
     },
     "修改守则": {
-      "sha256": "f7a1d6bc5dff77431936f60674e772ff2633462e265b519c857a7188a15db74f"
+      "sha256": "4b5696a62ddbad2ac224a820679dbc37fd3e2b71935fa69b52b14eae50a7e50a"
     },
     "修改守则补充": {
       "sha256": "b1d816bc3b3737ecd81fad0854859c68ffd108c059e6273230a71aca7bbb8201"
@@ -79,6 +79,9 @@
     },
     "高风险路径": {
       "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"
+    },
+    "改哪看哪": {
+      "sha256": "5939c85e363296a262d263978bd59a721a65fc6052a00df0f12c500b7fc10e6b"
     }
   }
 }

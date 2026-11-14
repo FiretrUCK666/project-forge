@@ -134,6 +134,9 @@ node scripts/dev/verify-injections.mjs
 
 - **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
 - **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
+- **测试分层与控频**：
+  - 编码中只跑语法/类型检查，禁频繁跑全量或 E2E；每轮改完按 `--tier quick --target <path>` 跑对应单测；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
+  - 禁写零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测内硬编码 `>=1s` sleep / 浏览器容器或非无头测试；单测文件超 800 行应按模块拆分。
 - **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**（「以前……后来改成……」）、**禁死代码注释块**（废弃代码直接删，不留连续注释块）、**禁借口注释与擅自压制检查**（严禁未说明理由写 `HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
 - **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
 - 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
@@ -266,19 +269,22 @@ node scripts/dev/verify-injections.mjs
 - 稳定决策链直写 `references/`，易变平台事实（上限、权限、版本号）只写查法与官方文档节位。
 - 各篇末尾均含 `## 事实来源`：落盘/发版前及遇「字段非法」「无权」时回查重核，平时不追新制造无效提交。
 
+<!-- project-forge: begin 改哪看哪 -->
 ## 改哪看哪
 
 | 这次动了 | 必须一起看 |
 | --- | --- |
-| `scripts/lib/protocol.mjs` | `scripts/lib/template.mjs`、`compose-agents.mjs`、`handoff.mjs`、`review.mjs`、`references/handoff.md` |
+| `scripts/lib/protocol.mjs` | `scripts/lib/template.mjs`、`scripts/compose-agents.mjs`、`scripts/handoff.mjs`、`scripts/review.mjs`、`references/handoff.md` |
 | `scripts/lib/template.mjs` | `templates/agents-project.md` 条件块、`scripts/dev/preflight.mjs` |
+| `references/collaboration.md` | `templates/agents-project.md`、`AGENTS.md` |
 | `references/` 任一判据 | `SKILL.md` 指向行、`scripts/review.mjs` `ref` 指路 |
+| `templates/agents-project.md` | `AGENTS.md`（跑 `node scripts/compose-agents.mjs .`） |
 | `templates/` 骨架 | 本仓实例（`AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`.github/`） |
-| `templates/agents-project.md` | 本仓 `AGENTS.md`（须由 `compose-agents.mjs` 同步） |
-| `kit/skills/` | 重跑 `node scripts/equip.mjs .` 同步 `.agents/skills/` 并过 `--check` |
+| `kit/skills/` | `.agents/skills/`（跑 `node scripts/equip.mjs .`）、`scripts/equip.mjs` |
 | `scripts/` 任一脚本 | `SKILL.md`「核心脚本」、`scripts/dev/fixtures.mjs` 正反用例 |
-| `README.md` 结构/能力 | `README.en.md` 成对改并跑 `sync-toc` |
+| `README.md` | `README.en.md`（成对同步并跑 `node scripts/sync-toc.mjs`） |
 | 发布链路 | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` |
+<!-- project-forge: end 改哪看哪 -->
 
 ## 取舍
 

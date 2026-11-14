@@ -1730,3 +1730,736 @@ export function printNextStep(lines, { jsonMode = false } = {}) {
     process.stdout.write(`  - ${line}\n`)
   }
 }
+
+// ── C29: 联动同步门禁（AGENTS.md ## 改哪看哪）────────────────────────
+
+const COUPLED_ROOT_FILENAMES = new Set([
+  'AGENTS.md', 'SKILL.md', 'README.md', 'README.en.md',
+  'CONTRIBUTING.md', 'RELEASING.md', 'CHANGELOG.md',
+  'Makefile', 'justfile', '.gitattributes', '.gitignore',
+])
+
+function isPathLikeToken(rawToken) {
+  const s = posixPath(String(rawToken ?? '').trim()).replace(/^\.\//, '')
+  if (!s || /\s/.test(s) || /^https?:|^file:|^mailto:/i.test(s)) return false
+  if (/[*?<>{};|$]/.test(s)) return false
+  if (s.includes('/')) return true
+  if (COUPLED_ROOT_FILENAMES.has(s)) return true
+  return /^[A-Za-z0-9_.-]+\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(s)
+}
+
+function extractCoupledPathTokens(cellText) {
+  const tokens = []
+  const seen = new Set()
+  for (const m of String(cellText ?? '').matchAll(/`([^`\n]+)`/g)) {
+    const raw = m[1].trim()
+    if (!isPathLikeToken(raw)) continue
+    const norm = posixPath(raw).replace(/^\.\//, '')
+    if (!seen.has(norm)) {
+      seen.add(norm)
+      tokens.push(norm)
+    }
+  }
+  return tokens
+}
+
+function splitMarkdownTableRow(rawLine) {
+  const trimmed = rawLine.trim()
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return null
+  const inner = trimmed.slice(1, -1)
+  const cells = []
+  let cur = ''
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (ch === '\\' && inner[i + 1] === '|') {
+      cur += '|'
+      i += 1
+    } else if (ch === '|') {
+      cells.push(cur.trim())
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  cells.push(cur.trim())
+  return cells
+}
+
+/** 从 AGENTS.md「## 改哪看哪」章节表格解析文件联动触发与伴随同步规则。 */
+export function parseCoupledSyncRules(agentsText) {
+  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inSection = false
+  let inFence = false
+  const tableRows = []
+
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+
+    if (/^##\s+改哪看哪(?:\s|$)/.test(line.trim())) {
+      inSection = true
+      continue
+    }
+    if (inSection && (/^##\s+/.test(line.trim()) || /^<!--\s*project-forge:\s*end\b/.test(line.trim()))) {
+      break
+    }
+    if (!inSection) continue
+
+    const cells = splitMarkdownTableRow(line)
+    if (cells && cells.length >= 2) {
+      tableRows.push({ rawRow: line.trim(), cells })
+    }
+  }
+
+  const rules = []
+  for (let i = 0; i < tableRows.length; i += 1) {
+    const { rawRow, cells } = tableRows[i]
+    const isDivider = cells.every((c) => /^:?-+:?$/.test(c.trim()))
+    if (isDivider) continue
+    // 跳过紧邻表头分隔线前的表头行
+    const nextRow = tableRows[i + 1]
+    if (nextRow && nextRow.cells.every((c) => /^:?-+:?$/.test(c.trim()))) continue
+
+    const triggers = extractCoupledPathTokens(cells[0])
+    const companions = extractCoupledPathTokens(cells[1])
+    if (triggers.length === 0 || companions.length === 0) continue
+    rules.push({ triggers, companions, rawRow })
+  }
+  return rules
+}
+
+function matchesCoupledPath(filePath, ruleToken, repoRoot) {
+  const normTok = posixPath(ruleToken).replace(/^\.\//, '')
+  if (!normTok) return false
+  if (normTok.endsWith('/')) {
+    const dirNoSlash = normTok.slice(0, -1)
+    return filePath.startsWith(normTok) || filePath === dirNoSlash
+  }
+  if (filePath === normTok) return true
+  if (repoRoot) {
+    const abs = join(repoRoot, normTok)
+    try {
+      if (existsSync(abs) && statSync(abs).isDirectory()) {
+        return filePath.startsWith(`${normTok}/`)
+      }
+    } catch { /* ignore */ }
+  }
+  return false
+}
+
+/**
+ * 对照「改哪看哪」规则校验变更文件清单，过滤目标仓不存在的可选伴随文件以避免误报。
+ */
+export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
+  const normalizedChanged = [...new Set(
+    (Array.isArray(changedFiles) ? changedFiles : [])
+      .map((f) => posixPath(f).replace(/^\.\//, '').trim())
+      .filter(Boolean),
+  )]
+  if (normalizedChanged.length === 0 || !Array.isArray(rules) || rules.length === 0) {
+    return []
+  }
+
+  const warnings = []
+  for (const rule of rules) {
+    const touchedTriggers = (rule.triggers ?? []).filter((t) =>
+      normalizedChanged.some((f) => matchesCoupledPath(f, t, repoRoot)),
+    )
+    if (touchedTriggers.length === 0) continue
+
+    const existingCompanions = (rule.companions ?? []).filter((c) => {
+      if (!repoRoot) return true
+      const clean = posixPath(c).replace(/^\.\//, '').replace(/\/+$/, '')
+      return Boolean(clean) && existsSync(join(repoRoot, clean))
+    })
+    if (existingCompanions.length === 0) continue
+
+    const companionSynced = existingCompanions.some((c) =>
+      normalizedChanged.some((f) => matchesCoupledPath(f, c, repoRoot)),
+    )
+    if (!companionSynced) {
+      warnings.push({
+        triggers: rule.triggers,
+        touchedTriggers,
+        expectedCompanions: existingCompanions,
+        rawRow: rule.rawRow,
+      })
+    }
+  }
+  return warnings
+}
+
+// ── C30: YAML Frontmatter 与文档全生命周期同步 ──────────────────────────
+
+const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9][a-z0-9-]*)-(prd|spec|todo)\.md$/
+const DOC_LEGACY_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9][a-z0-9-]*)\.md$/
+
+export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'related_prd', 'related_todo', 'high_risk_paths'],
+  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'done_at', 'related_prd', 'related_spec'],
+})
+
+function splitInlineArrayItems(inner) {
+  const items = []
+  let cur = ''
+  let quote = null
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < inner.length) {
+        cur += ch + inner[i + 1]
+        i += 1
+        continue
+      }
+      if (ch === quote) {
+        if (quote === '\'' && inner[i + 1] === '\'') {
+          cur += '\'\''
+          i += 1
+          continue
+        }
+        quote = null
+      }
+      cur += ch
+    } else if (ch === '"' || ch === '\'') {
+      quote = ch
+      cur += ch
+    } else if (ch === ',') {
+      if (cur.trim()) items.push(cur.trim())
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  if (cur.trim()) items.push(cur.trim())
+  return items
+}
+
+function parseYamlScalar(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s || s === 'null' || s === '~') return null
+  if (s === 'true') return true
+  if (s === 'false') return false
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) return Number(s)
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    return s.slice(1, -1)
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+  }
+  if (s.startsWith('\'') && s.endsWith('\'') && s.length >= 2) {
+    return s.slice(1, -1).replace(/''/g, '\'')
+  }
+  if (s.startsWith('[') && s.endsWith(']')) {
+    const inner = s.slice(1, -1).trim()
+    if (!inner) return []
+    return splitInlineArrayItems(inner).map((item) => parseYamlScalar(item))
+  }
+  return s
+}
+
+function formatYamlScalar(val) {
+  if (val === null || val === undefined) return 'null'
+  if (typeof val === 'boolean' || typeof val === 'number') return String(val)
+  if (Array.isArray(val)) {
+    return `[${val.map((item) => formatYamlScalar(item)).join(', ')}]`
+  }
+  const s = String(val)
+  const needsQuote = s === ''
+    || /^\s|\s$/.test(s)
+    || /^(?:true|false|null|~)$/i.test(s)
+    || /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)
+    || /[\n\r"':#\[\]{},&*!|>@`]/.test(s)
+    || s.startsWith('- ')
+  if (!needsQuote) return s
+  const escaped = s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+  return `"${escaped}"`
+}
+
+/**
+ * 零依赖解析文档头部 YAML Frontmatter，兼容读取旧式列表元数据（`> **状态**：` / `- Status:`）。
+ */
+export function parseDocFrontmatter(text) {
+  const norm = String(text ?? '').replace(/\r\n/g, '\n')
+  if (norm.startsWith('---\n') || norm === '---') {
+    const fmMatch = /^---\n([\s\S]*?)\n---(?:\n([\s\S]*))?$/.exec(norm)
+      ?? /^---\n---(?:\n([\s\S]*))?$/.exec(norm)
+    if (!fmMatch) {
+      return {
+        hasFrontmatter: false,
+        malformedFrontmatter: true,
+        data: {},
+        keyOrder: [],
+        body: norm,
+        legacy: false,
+        syntaxErrors: ['Frontmatter 缺少闭合的 `---` 分隔行'],
+      }
+    }
+    const fmRaw = fmMatch.length === 3 ? fmMatch[1] : ''
+    const body = fmMatch.length === 3 ? (fmMatch[2] ?? '') : (fmMatch[1] ?? '')
+    const data = {}
+    const keyOrder = []
+    const syntaxErrors = []
+    const fmLines = fmRaw ? fmRaw.split('\n') : []
+    for (let i = 0; i < fmLines.length; i += 1) {
+      const rawLine = fmLines[i]
+      if (!rawLine.trim() || /^\s*#/.test(rawLine)) continue
+      const kv = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(rawLine)
+      if (!kv) {
+        syntaxErrors.push(`Frontmatter 第 ${i + 2} 行格式无效：${rawLine}`)
+        continue
+      }
+      const key = kv[1]
+      const tail = kv[2].trim()
+      if (!keyOrder.includes(key)) keyOrder.push(key)
+      if (!tail) {
+        const blockItems = []
+        let j = i + 1
+        while (j < fmLines.length && /^\s+-\s+(.*)$/.test(fmLines[j])) {
+          const itemRaw = /^\s+-\s+(.*)$/.exec(fmLines[j])[1]
+          blockItems.push(parseYamlScalar(itemRaw))
+          j += 1
+        }
+        if (blockItems.length > 0) {
+          data[key] = blockItems
+          i = j - 1
+        } else {
+          data[key] = null
+        }
+      } else {
+        data[key] = parseYamlScalar(tail)
+      }
+    }
+    return {
+      hasFrontmatter: true,
+      malformedFrontmatter: syntaxErrors.length > 0,
+      data,
+      keyOrder,
+      body,
+      legacy: false,
+      syntaxErrors,
+    }
+  }
+
+  // 向后兼容旧版列表 / 引用头解析
+  const headerChunk = norm.split(/\n##\s+/)[0]
+  const data = {}
+  const keyOrder = []
+  const pushField = (k, v) => {
+    if (v === undefined) return
+    if (!keyOrder.includes(k)) keyOrder.push(k)
+    data[k] = v
+  }
+  const titleMatch = /^#\s+(.+)$/m.exec(headerChunk)
+  if (titleMatch) pushField('title', titleMatch[1].replace(/^(?:PRD|SPEC|Todo)\s*[:：]\s*/i, '').trim())
+  const statusMatch = /^(?:>\s*\*\*状态\*\*\s*[:：]|-\s*\*\*状态\*\*\s*[:：]|(?:-\s+)?Status\s*:)\s*`?([A-Za-z0-9_-]+)`?/mi.exec(headerChunk)
+  if (statusMatch) pushField('status', statusMatch[1].toLowerCase())
+  const critiqueMatch = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(headerChunk)
+  if (critiqueMatch) pushField('plan_critique', critiqueMatch[1].trim())
+  const createdMatch = /^(?:-\s+)?(?:Created|Date):\s*([0-9-]+)/mi.exec(headerChunk)
+  if (createdMatch) pushField('created', createdMatch[1].trim())
+  const plannedMatch = /^(?:-\s+)?(?:\*\*)?Planned at(?:\*\*)?[:：]\s*`?([^`\n]+)`?/mi.exec(headerChunk)
+  if (plannedMatch) pushField('planned_at', plannedMatch[1].trim())
+  const ownerMatch = /^(?:-\s+)?(?:\*\*)?(?:Owner|提出方)(?:\*\*)?[:：]\s*(.+)$/mi.exec(headerChunk)
+  if (ownerMatch) pushField('owner', ownerMatch[1].trim())
+  const relSpecMatch = /^(?:-\s+)?Related SPEC:\s*(.+)$/mi.exec(headerChunk)
+  if (relSpecMatch && !/^(?:无|none)$/i.test(relSpecMatch[1].trim())) pushField('related_spec', relSpecMatch[1].trim())
+  const relPrdMatch = /^(?:-\s+)?Related PRD:\s*(.+)$/mi.exec(headerChunk)
+  if (relPrdMatch && !/^(?:无|none)$/i.test(relPrdMatch[1].trim())) pushField('related_prd', relPrdMatch[1].trim())
+
+  return {
+    hasFrontmatter: false,
+    malformedFrontmatter: false,
+    data,
+    keyOrder,
+    body: norm,
+    legacy: true,
+    syntaxErrors: [],
+  }
+}
+
+/** 将结构化 Frontmatter 键按顺序序列化为干净 YAML `--- ... ---` 块。 */
+export function serializeDocFrontmatter(data, keyOrder = []) {
+  const ordered = []
+  const seen = new Set()
+  for (const k of keyOrder) {
+    if (!seen.has(k) && Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined) {
+      seen.add(k)
+      ordered.push(k)
+    }
+  }
+  for (const k of Object.keys(data ?? {})) {
+    if (!seen.has(k) && data[k] !== undefined) {
+      seen.add(k)
+      ordered.push(k)
+    }
+  }
+  const lines = ['---']
+  for (const k of ordered) {
+    lines.push(`${k}: ${formatYamlScalar(data[k])}`)
+  }
+  lines.push('---')
+  return `${lines.join('\n')}\n`
+}
+
+/** 原位更新或补齐文档 YAML Frontmatter 字段并原子写回。 */
+export function updateDocFrontmatter(filePath, patch = {}, { defaultKeyOrder = [] } = {}) {
+  const raw = readTextSafe(filePath)
+  if (raw === undefined) {
+    throw new Error(`无法读取文档文件：${filePath}`)
+  }
+  const parsed = parseDocFrontmatter(raw)
+  const merged = { ...parsed.data }
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    if (v !== undefined) merged[k] = v
+  }
+  const keyOrder = [
+    ...defaultKeyOrder,
+    ...parsed.keyOrder,
+    ...Object.keys(merged),
+  ]
+  const cleanBody = parsed.body.replace(/^\n+/, '')
+  const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
+  writeAtomic(filePath, nextText)
+  return { file: filePath, data: merged }
+}
+
+function docDateTag(date = new Date()) {
+  const yy = String(date.getFullYear()).slice(-2)
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yy}${mm}${dd}`
+}
+
+function docIsoDate(date = new Date()) {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/** 构造规范文档文件名：`YYMMDD-[issue<N>-]<slug>-{prd,spec,todo}.md`。 */
+export function buildDocFilename({ date, issue, slug, kind }) {
+  if (!['prd', 'spec', 'todo'].includes(kind)) {
+    throw new Error(`无效文档 kind：${kind}（仅支持 prd | spec | todo）`)
+  }
+  const dateTag = date && /^\d{6}$/.test(String(date)) ? String(date) : docDateTag()
+  const safeSlug = slugify(slug)
+  const issueNum = issue !== undefined && issue !== null && String(issue).trim() !== ''
+    ? Number(String(issue).replace(/^#/, '').trim())
+    : null
+  const issueSeg = Number.isInteger(issueNum) && issueNum > 0 ? `-issue${issueNum}` : ''
+  return `${dateTag}${issueSeg}-${safeSlug}-${kind}.md`
+}
+
+/** 解析规范或兼容历史工程文档文件名，提取 date / issue / slug / kind。 */
+export function parseDocFilename(name) {
+  const base = basename(String(name ?? '').trim())
+  const std = DOC_STANDARD_NAME_RE.exec(base)
+  if (std) {
+    return {
+      date: std[1],
+      issue: std[2] ? Number(std[2]) : null,
+      slug: std[3],
+      kind: std[4],
+      legacy: false,
+    }
+  }
+  const leg = DOC_LEGACY_NAME_RE.exec(base)
+  if (leg) {
+    return {
+      date: leg[1],
+      issue: leg[2] ? Number(leg[2]) : null,
+      slug: leg[3],
+      kind: null,
+      legacy: true,
+    }
+  }
+  return null
+}
+
+function inferDocKindFromPath(relPath, fmData) {
+  const k = fmData?.kind
+  if (k === 'prd' || k === 'spec' || k === 'todo') return k
+  const p = posixPath(relPath).toLowerCase()
+  if (p.startsWith('docs/prd/')) return 'prd'
+  if (p.startsWith('docs/specs/')) return 'spec'
+  if (p.startsWith('docs/todo/') || p.startsWith('docs/archive/todo/')) return 'todo'
+  return parseDocFilename(p)?.kind ?? null
+}
+
+function listDocsInFolder(repoRoot, folderRel) {
+  const absDir = join(repoRoot, folderRel)
+  if (!existsSync(absDir)) return []
+  try {
+    return readdirSync(absDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => `${folderRel}/${e.name}`)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+function escapeRegExpStr(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * 同步 PRD / SPEC / Todo 生命周期：按 Issue 号原子重命名同组文档、重写 `related_*` 相对链接、
+ * 更新 YAML Frontmatter 并刷新 `docs/todo/` 索引与任务账本路径。
+ */
+export async function syncDocsLifecycle(repoRoot, {
+  slugOrPath,
+  issue,
+  pr,
+  branch,
+  owner,
+  status,
+  approved,
+  implemented,
+  doneAt,
+  planCritique,
+  preserveTerminalStatus = false,
+} = {}) {
+  const allActive = [
+    ...listDocsInFolder(repoRoot, 'docs/prd'),
+    ...listDocsInFolder(repoRoot, 'docs/specs'),
+    ...listDocsInFolder(repoRoot, 'docs/todo'),
+  ]
+  const archivedTodos = listDocsInFolder(repoRoot, 'docs/archive/todo')
+  const allCandidates = [...allActive, ...archivedTodos]
+
+  let seedRel = null
+  if (slugOrPath) {
+    const candidateAbs = resolve(repoRoot, slugOrPath)
+    const candidateRel = posixPath(relative(repoRoot, candidateAbs))
+    if (existsSync(candidateAbs) && candidateRel.startsWith('docs/')) {
+      seedRel = candidateRel
+    }
+  }
+
+  let targetDate = null
+  let targetSlug = null
+  if (seedRel) {
+    const fn = parseDocFilename(seedRel)
+    if (fn) {
+      targetDate = fn.date
+      targetSlug = fn.slug
+    } else {
+      targetSlug = slugify(basename(seedRel, '.md'))
+    }
+  } else if (slugOrPath) {
+    const fn = parseDocFilename(slugOrPath)
+    if (fn) {
+      targetDate = fn.date
+      targetSlug = fn.slug
+    } else {
+      targetSlug = slugify(String(slugOrPath).replace(/^#/, ''))
+    }
+  }
+
+  const siblingSet = new Set()
+  if (seedRel && !seedRel.startsWith('docs/archive/')) siblingSet.add(seedRel)
+
+  for (const rel of allActive) {
+    const fn = parseDocFilename(rel)
+    if (fn && targetSlug && fn.slug === targetSlug && (!targetDate || fn.date === targetDate)) {
+      siblingSet.add(rel)
+    } else if (!fn && targetSlug && basename(rel, '.md').includes(targetSlug)) {
+      siblingSet.add(rel)
+    }
+  }
+
+  // 也沿着种子文档与同组文档的 related_* 引用回收关联兄弟文档
+  const queue = [...siblingSet]
+  const seenFollow = new Set(queue)
+  while (queue.length > 0) {
+    const curRel = queue.shift()
+    const raw = readTextSafe(join(repoRoot, curRel))
+    if (!raw) continue
+    const fm = parseDocFrontmatter(raw)
+    for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+      const rv = fm.data?.[rk]
+      if (!rv || typeof rv !== 'string' || /^(?:无|none)$/i.test(rv.trim())) continue
+      const resolvedAbs = resolve(dirname(join(repoRoot, curRel)), rv)
+      const resolvedRel = posixPath(relative(repoRoot, resolvedAbs))
+      if (existsSync(resolvedAbs) && resolvedRel.startsWith('docs/') && !resolvedRel.startsWith('docs/archive/') && !seenFollow.has(resolvedRel)) {
+        seenFollow.add(resolvedRel)
+        siblingSet.add(resolvedRel)
+        queue.push(resolvedRel)
+      }
+    }
+  }
+
+  const normalizedIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
+    ? Number(String(issue).replace(/^#/, '').trim())
+    : undefined
+  let effectiveIssue = Number.isInteger(normalizedIssue) && normalizedIssue > 0 ? normalizedIssue : undefined
+
+  if (effectiveIssue === undefined) {
+    for (const rel of siblingSet) {
+      const fn = parseDocFilename(rel)
+      if (fn?.issue) { effectiveIssue = fn.issue; break }
+      const raw = readTextSafe(join(repoRoot, rel))
+      const fm = raw ? parseDocFrontmatter(raw) : null
+      if (Number.isInteger(fm?.data?.issue) && fm.data.issue > 0) {
+        effectiveIssue = fm.data.issue
+        break
+      }
+    }
+  }
+
+  const renameMap = new Map()
+  const renamed = []
+  const finalSiblings = []
+
+  for (const oldRel of [...siblingSet].sort()) {
+    const raw = readTextSafe(join(repoRoot, oldRel)) ?? ''
+    const fm = parseDocFrontmatter(raw)
+    const fn = parseDocFilename(oldRel)
+    const kind = inferDocKindFromPath(oldRel, fm.data)
+    const dateFromCreated = typeof fm.data?.created === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fm.data.created)
+      ? `${fm.data.created.slice(2, 4)}${fm.data.created.slice(5, 7)}${fm.data.created.slice(8, 10)}`
+      : null
+    const docDate = fn?.date ?? targetDate ?? dateFromCreated ?? docDateTag()
+    const docSlug = fn?.slug ?? targetSlug
+    let currentRel = oldRel
+
+    if (effectiveIssue && kind && docSlug) {
+      const needsRename = !fn || fn.legacy || fn.issue !== effectiveIssue || fn.kind !== kind
+      if (needsRename) {
+        const dirRel = posixPath(dirname(oldRel))
+        const targetRel = `${dirRel}/${buildDocFilename({ date: docDate, issue: effectiveIssue, slug: docSlug, kind })}`
+        if (targetRel !== oldRel) {
+          const tracked = await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])
+          if (tracked.ok) {
+            const mv = await gitRun(repoRoot, ['mv', oldRel, targetRel])
+            if (!mv.ok) throw new Error(`重命名文档失败（${oldRel} -> ${targetRel}）：${mv.stderr}`)
+          } else {
+            renameSync(join(repoRoot, oldRel), join(repoRoot, targetRel))
+          }
+          renameMap.set(oldRel, targetRel)
+          renamed.push({ from: oldRel, to: targetRel, kind })
+          currentRel = targetRel
+        }
+      }
+    }
+
+    finalSiblings.push({ oldRel, rel: currentRel, kind, date: docDate, slug: docSlug })
+  }
+
+  // 解析各类型当前目标位置（含已归档 Todo）以回填 related_*
+  const byKind = { prd: null, spec: null, todo: null }
+  for (const s of finalSiblings) {
+    if (s.kind && !byKind[s.kind]) byKind[s.kind] = s.rel
+  }
+  if (!byKind.todo && targetSlug) {
+    const archivedMatch = archivedTodos.find((rel) => {
+      const fn = parseDocFilename(rel)
+      return fn ? (fn.slug === targetSlug && (!targetDate || fn.date === targetDate)) : basename(rel, '.md').includes(targetSlug)
+    })
+    if (archivedMatch) byKind.todo = archivedMatch
+  }
+  // 同时保留原 seed 若在 archive 中
+  if (seedRel && seedRel.startsWith('docs/archive/todo/') && !byKind.todo) {
+    byKind.todo = seedRel
+  }
+
+  const updated = []
+  const today = docIsoDate()
+  for (const sib of finalSiblings) {
+    const abs = join(repoRoot, sib.rel)
+    let raw = readTextSafe(abs) ?? ''
+
+    // 重写正文中的相对路径或文件名引用
+    for (const [oldRel, newRel] of renameMap.entries()) {
+      const oldBase = basename(oldRel)
+      const newBase = basename(newRel)
+      raw = raw.replace(new RegExp(escapeRegExpStr(oldRel), 'g'), newRel)
+      raw = raw.replace(new RegExp(escapeRegExpStr(oldBase), 'g'), newBase)
+    }
+    const fm = parseDocFrontmatter(raw)
+    const patch = { updated: today }
+    if (sib.kind && !fm.data.kind) patch.kind = sib.kind
+    if (effectiveIssue !== undefined) patch.issue = effectiveIssue
+    if (pr !== undefined) patch.pr = pr === null ? null : Number(pr)
+    if (branch !== undefined) patch.branch = branch
+    if (owner !== undefined) patch.owner = owner
+    if (status !== undefined) {
+      const curSt = String(fm.data?.status ?? '').toLowerCase()
+      const isTerminal = ['done', 'implemented', 'superseded', 'archived'].includes(curSt)
+      if (!preserveTerminalStatus || !isTerminal) patch.status = status
+    }
+    if (approved !== undefined) patch.approved = Boolean(approved)
+    if (implemented !== undefined && sib.kind === 'spec') patch.implemented = Boolean(implemented)
+    if (doneAt !== undefined && sib.kind === 'todo') patch.done_at = doneAt
+    if (planCritique !== undefined) patch.plan_critique = planCritique
+
+    for (const [rk, targetKind] of [['related_prd', 'prd'], ['related_spec', 'spec'], ['related_todo', 'todo']]) {
+      if (sib.kind === targetKind) continue
+      const targetRel = byKind[targetKind]
+      if (targetRel) {
+        patch[rk] = posixPath(relative(dirname(abs), join(repoRoot, targetRel)))
+      }
+    }
+
+    const merged = { ...fm.data }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) merged[k] = v
+    }
+    const defaultOrder = DOC_FRONTMATTER_KEY_ORDER[sib.kind] ?? []
+    const keyOrder = [...defaultOrder, ...fm.keyOrder, ...Object.keys(merged)]
+    const cleanBody = fm.body.replace(/^\n+/, '')
+    const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
+    writeAtomic(abs, nextText)
+    updated.push({ file: sib.rel, kind: sib.kind, data: merged })
+  }
+
+  // 若存在 docs/todo/ 索引或目录说明文件，同步改名后的链接
+  if (renameMap.size > 0) {
+    for (const todoDoc of allCandidates.filter((p) => p.startsWith('docs/todo/'))) {
+      const resolvedTodo = renameMap.get(todoDoc) ?? todoDoc
+      if (finalSiblings.some((s) => s.rel === resolvedTodo)) continue
+      const absTodo = join(repoRoot, resolvedTodo)
+      const txt = readTextSafe(absTodo)
+      if (!txt) continue
+      let nextTxt = txt
+      for (const [oldRel, newRel] of renameMap.entries()) {
+        nextTxt = nextTxt
+          .replace(new RegExp(escapeRegExpStr(oldRel), 'g'), newRel)
+          .replace(new RegExp(escapeRegExpStr(basename(oldRel)), 'g'), basename(newRel))
+      }
+      if (nextTxt !== txt) writeAtomic(absTodo, nextTxt)
+    }
+
+    // 同步更新 .worktrees/.state/tasks/*.json 账本里的文件路径与关联 Issue
+    for (const ledger of listTaskLedgers(repoRoot)) {
+      let dirty = false
+      for (const field of ['prdFile', 'specFile', 'todoFile', 'archivedTodoFile']) {
+        if (ledger[field] && renameMap.has(ledger[field])) {
+          ledger[field] = renameMap.get(ledger[field])
+          dirty = true
+        }
+      }
+      if (effectiveIssue && (!targetSlug || ledger.slug === targetSlug) && Array.isArray(ledger.linkedIssues) && !ledger.linkedIssues.includes(effectiveIssue)) {
+        const referencesThisSet = ['prdFile', 'specFile', 'todoFile'].some((f) => finalSiblings.some((s) => s.rel === ledger[f]))
+        if (referencesThisSet) {
+          ledger.linkedIssues = [...ledger.linkedIssues, effectiveIssue]
+          dirty = true
+        }
+      }
+      if (dirty) writeTaskLedger(repoRoot, ledger)
+    }
+  }
+
+  return { renamed, updated, byKind, issue: effectiveIssue ?? null }
+}

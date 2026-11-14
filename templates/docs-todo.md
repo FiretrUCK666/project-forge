@@ -1,8 +1,26 @@
+---
+kind: todo
+title: "<任务标题>"
+status: active
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+issue: null
+pr: null
+branch: "<branch>"
+owner: "<负责人>"
+approved: false
+done_at: null
+task_id: "<taskId>"
+planned_at: "<HEAD SHA>"
+related_prd: null
+related_spec: null
+---
+
 # <任务标题>
 
-- **Task ID**：`<taskId>`
-- **Planned at**：`<HEAD SHA>`
-- **关联**：Spec `<docs/specs/... 或 无>` ｜ Issue `#<N>` ｜ 分支 `<branch>`
+> 状态枚举：`draft | active | in_review | done | archived | dropped`。
+
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
 ## 任务范围与验证基准
 

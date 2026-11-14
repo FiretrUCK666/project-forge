@@ -1,11 +1,25 @@
+---
+kind: spec
+title: "<功能/变更标题>"
+status: draft
+tier: L3
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+issue: null
+pr: null
+branch: null
+owner: "<负责人>"
+approved: false
+implemented: false
+plan_critique: pending
+related_prd: null
+related_todo: null
+high_risk_paths: []
+---
+
 # <功能/变更标题> — 功能设计规范（SPEC）
 
-Status: draft
-- Plan Critique: pending
-<!-- 状态枚举：draft | approved | implemented | superseded；未 approved 前不进入代码实现 -->
-
-- **关联**：PRD `<docs/prd/... 或 无>` ｜ Todo `<docs/todo/...>` ｜ Issue `#<N>`
-- **适用条件**：Case 4（L3 跨模块重构、接口/契约变更或存在高风险边界调整）
+> 状态枚举：`draft | approved | implementing | in_review | implemented | superseded`；未 `approved` 前不进入代码实现。适用 Case 4（L3 跨模块重构、接口/契约变更或存在高风险边界调整）。
 
 ## 一、背景与边界声明
 

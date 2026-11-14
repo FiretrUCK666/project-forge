@@ -19,9 +19,10 @@ description: |
    - 第 1 档：`L1` 且主仓干净且无并行需求 -> 切分支开发。
    - 第 2 档：`L2/L3` / 关联 Issue / 脏主仓 / 并行 -> `.worktrees/impl-<id>` + 预分配审查槽 `.worktrees/review-<id>`，锁文件 SHA256 一致时自动挂载 `node_modules` / `.venv` junction，不一致时自动隔离。
    - 第 3 档：外部 PR (`--external-pr <M>`) -> `.worktrees/review-pr-<M>` detached 隔离，**未通过静态投毒扫描前绝不挂载依赖或跑脚本**。
-4. **提交 PR 前双锁与验证节奏**：
-   - Case 3/4 必须先 `finalize`（核验 `[x]`、归档 Todo 到 `docs/archive/todo/`、SPEC 标 `implemented`，且 Fork 对外部仓绝不泄漏私有 `docs/` 草稿），且每次改代码后必须重跑 `verify` 使 `verifiedHead === HEAD` 才允许 `submit`。
-   - **分级验证节奏**：坚持形式验证与运行/渲染实证优先于静态读代码——内循环改完即运行 `verify --mode quick --target <file>`；涉及真实运行时/CLI/服务时必须运行 `verify --mode smoke` 拿真实输入输出证据（禁止拿纯单元测试替代真实链路验证）；涉及 UI/视觉文件（`.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`）时须实际打开渲染画面、走通交互并查看浅深色截图后追加 `--visual-checked`；提 PR 与合并前运行一次 `verify --mode gate`（或 `full`）。
+4. **提交 PR 前双锁、生命周期联动与验证节奏**：
+   - `start`/`claim --issue <N>` 自动同步关联文档 `-issue<N>-` 命名、YAML Frontmatter 与 `related_*` 互链；`submit` 自动回写 `pr` 与 `in_review`。
+   - Case 3/4 必须先 `finalize`（核验 `[x]`、更新文档 `done`/`implemented`/`done_at`、归档 Todo 到 `docs/archive/todo/` 并扫描 `AGENTS.md` `## 改哪看哪` 输出 `coupledSyncWarnings`，传 `--strict-sync` 时有漏同步即阻断；Fork 对外部仓不泄漏私有 `docs/`），且改代码后重跑 `verify` 使 `verifiedHead === HEAD` 才允许 `submit`。
+   - **分级验证节奏**：坚持形式与实证优先于静态读代码——内循环改完即运行 `verify --tier quick [--target <file>]`（缺省 `--target` 时剥离 `{target}` 并提示窄化）；涉及运行时/CLI/服务必跑 `verify --mode smoke` 拿真实输出证据；涉及 UI/视觉（`.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`）须实测渲染交互与浅深色截图并记 `--visual-checked`；合前集中跑 1 次 `verify --mode gate`（或 `full`）。
 5. **门禁弱化阻断（单向门退出码 4）与 Fork/清理硬锁**：
    - `merge` 自动扫描 diff 中是否删减测试断言、新增 `.skip`/`.only`、在 workflow 加入 `continue-on-error: true` / 放宽 `permissions`、或命令追加失效旁路；一旦命中，按单向门（`one-way`）以**退出码 `4`** 阻断，必须由人类明确同意后带 `--human-approved` 方可合并。
    - `contributor-fork` 永不推 `upstream`、禁止调 `merge`，且上游 PR 仍为 `OPEN` 时 `cleanup --confirm` 硬锁拒删分支；任何清理不传 `--confirm` 一律只列清单不删；卸载 worktree 必定先 `unlinkSync` 解绑依赖再移除 worktree，再 `git branch -d`（绝不用 `-D`）。
@@ -32,13 +33,13 @@ description: |
 # 1. 环境与输入解析
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...]
 
-# 2. 启动工作位（若遇 clone-readonly 按用户选择补充 --clone-choice）
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--external-pr <M>]
+# 2. 启动工作位（支持 --issue <N> 自动对齐文档；clone-readonly 补 --clone-choice）
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N>] [--external-pr <M>]
 
-# 3. 认领、锁定文档与分层实证（--target 替换 {target}；运行时改动补跑 smoke；提交前跑 gate）
+# 3. 认领、锁定文档、联动校验与分层实证（--tier 等价 --mode）
 node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task <id> [--issue <N>]
-node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task <id>
-node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode quick [--target <file>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task <id> [--strict-sync]
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --tier quick [--target <file>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode smoke
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode gate
 

@@ -32,7 +32,7 @@ description: |
 
 说明：若当前为 `contributor-fork` 且外部上游仓库未使用 `docs/`，本地草案绝不混入 PR diff。
 
-## 标准命令流与分级自净化闭环
+## 标准命令流与分级自净化全流程
 
 ```sh
 # 1. 五档分流 + 门型判断（返回 caseType / doorType / critiqueTier）

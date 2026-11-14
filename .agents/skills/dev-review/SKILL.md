@@ -47,10 +47,12 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 审查包按固定框架拆出三段评估（`--json` 与文本输出同步提供）：
 
 1. **Behavioral Gate（行为与运行时实证门）**：
+   - **验证优先级**：形式验证（确定性静态检查：类型、Schema、`arch-rules`、静态规则门禁）与实证验证（真实启动运行、端到端操作、界面/网页/视觉资产实际打开渲染并截图检查交互与浅深色排版、CLI/接口真实输入输出核验）**优先于纯对抗式静态读代码挑刺**。
    - 核对 `verifiedHead === HEAD` 与 `AGENTS.md` Dev Profile 中的
      `quick-test` / `smoke-verify` / `full-test` / `merge-gate`。
    - 若本次改动涉及运行态代码且配置了 `smoke-verify`，审查员必须在独立审查
-     worktree 本地实跑 `smoke-verify` 并核验真实输出，**严禁把未验证的运行路径转交人肉代测**。
+     worktree 本地运行 `smoke-verify` 并核验真实输出，**严禁把未验证的运行路径转交人肉代测**。
+   - 若 `behavioralGate.empiricalVisualCheckRequired === true`（变更含 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`），必须实际打开渲染界面或视觉资产、走通核心用户交互流程并核对浅色/深色主题截图，**不得仅凭静态读代码下结论**。
 2. **Structural Gate（结构与边界门）**：
    - 扫描 diff 新增行中的**履历墓碑注释**（如记录“以前是/后来改成/deprecated since”）与
      **借口/压制标记**（`@ts-ignore`、`@ts-nocheck`、`eslint-disable`、`# noqa`、`# type: ignore`、
@@ -70,16 +72,16 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 ## 六锁防死循环收敛协议
 
-1. **实证优先与故障注入**：在独立审查 worktree 实跑测试；触碰高风险路径时做故障注入
-   （改坏一处核心判定 -> 确认测试变红 -> `git checkout -- .` 还原 -> 确认复绿）。**严禁臆测挑刺。**
+1. **实证优先与故障注入**：在独立审查 worktree 运行测试；触碰高风险路径时做故障注入
+   （改坏一处核心判定 -> 确认测试变红 -> `git checkout -- .` 还原 -> 确认复绿）。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
 2. **上下文隔离**：只读冻结验收标准 `C1..Cn`、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
-   Round 1 必须一次性列全同类问题全部位置。
+   `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
 4. **轮次视野动态收窄**：Round 1 审全量 `base...head`；Round 2 只读 R1 未关 `Must Fix` +
    `R1_HEAD..HEAD` + `rebuts`（锁定未改动旧 hunks，禁发新挑刺）；Round 3 只对 `R2_HEAD..HEAD`
    做二元 Pass/Fail 核对。
 5. **独立性硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）。
-6. **停损熔断**：轮次 `>= 3` 仍有未闭环 `Must Fix`，或同一指纹连续 2 轮重复时，
+6. **停损熔断**：轮次 `>= 3` 仍有未收口 `Must Fix`，或同一指纹连续 2 轮重复时，
    输出 `STOP_LOSS_ESCALATE` 并以退出码 `4` 转交人类维护者裁决：
 
 ```sh

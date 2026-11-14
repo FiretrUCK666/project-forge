@@ -25,6 +25,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { claimsOf } from './lib/claims.mjs'
 import { computeNavigation, toMarkdown } from './lib/render.mjs'
 import {
   AGENTS_MAX_BYTES,
@@ -399,7 +400,8 @@ const ECOSYSTEMS = [
         : existsSync(join(root, 'yarn.lock')) ? 'yarn'
           : (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) ? 'bun'
             : 'npm'
-      const scripts = pkg.scripts ?? {}
+      const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
+      s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...Object.keys(scripts)])]
       const runPrefix = s.packageManager === 'npm' ? 'npm run' : s.packageManager
       s.commands.install = s.packageManager === 'npm' && existsSync(join(root, 'package-lock.json'))
         ? 'npm ci' : `${s.packageManager} install`
@@ -733,16 +735,47 @@ const PLUGIN_HINTS = [
   } },
 ]
 
+function extractSkillDescription(fmBody) {
+  const lines = String(fmBody ?? '').replace(/\r\n/g, '\n').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^description:\s*(.*)$/.exec(lines[i])
+    if (!m) continue
+    const rest = m[1].trim()
+    if (/^[|>][+-]?$/.test(rest) || rest === '') {
+      const collected = []
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^[A-Za-z0-9_-]+:\s*/.test(lines[j])) break
+        if (!/^\s+/.test(lines[j]) && lines[j].trim() !== '') break
+        const t = lines[j].trim()
+        if (t) collected.push(t)
+      }
+      return collected.join(' ').trim() || undefined
+    }
+    return rest.replace(/^['"]|['"]$/g, '').trim() || undefined
+  }
+  return undefined
+}
+
+function summarizeSkillDescription(desc) {
+  if (!desc) return undefined
+  const collapsed = String(desc).replace(/\s+/g, ' ').trim()
+  if (!collapsed) return undefined
+  const sentence = collapsed.split(/[。！？!?]|(?<=\.)\s+/)[0].trim() || collapsed
+  if (sentence.length <= 80) return sentence
+  return `${sentence.slice(0, 77).trimEnd()}...`
+}
+
 /** 能力目录：宿主加载的是指令而不是代码。判据是入口文件里那两项必修声明。 */
 function detectSkillKind(root) {
   for (const name of ['SKILL.md', 'skill.md']) {
     const p = join(root, name)
     if (!existsSync(p)) continue
     const text = readTextSafe(p) ?? ''
-    const fm = /^---\n([\s\S]*?)\n---/.exec(text)
+    const fm = /^---\n([\s\S]*?)\n---/.exec(text.replace(/\r\n/g, '\n'))
     if (!fm) return { skillMeta: { hasValidFrontmatter: false, entry: name } }
     const nameValue = /^name:\s*(.+)$/m.exec(fm[1])?.[1]?.trim()
-    const descValue = /^description:\s*(?:[|>]\s*)?(.+)$/m.exec(fm[1])?.[1]?.trim()
+    const descValue = extractSkillDescription(fm[1])
+    const summary = summarizeSkillDescription(descValue)
     const verValue = /^[ \t]+version:[ \t]*["']?([^"'\n]+?)["']?[ \t]*$/m.exec(fm[1])?.[1]?.trim()
     // `metadata.source` 是这个能力目录声明的来处。它决定「origin 是不是正本」——
     // 读不到它，角色就永远停在 `undetermined`，而这个字段本来就是为这个判定存在的。
@@ -752,6 +785,7 @@ function detectSkillKind(root) {
         hasValidFrontmatter: Boolean(nameValue && descValue),
         entry: name,
         name: nameValue,
+        summary,
         version: verValue,
         source: srcValue,
       },
@@ -803,6 +837,7 @@ function newEcosystemState() {
     declaredVersion: undefined,
     declaredRepo: undefined,
     packageManager: undefined,
+    packageScripts: undefined,
     skillMeta: undefined,
     subdirs: [],
   }
@@ -830,6 +865,9 @@ function scanSubdirectories(root, s) {
     for (const name of sub.manifests) if (!s.manifests.includes(name)) s.manifests.push(name)
     if (sub.publishable) s.publishable = true
     if (sub.private) s.private = true
+    if (Array.isArray(sub.packageScripts)) {
+      s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...sub.packageScripts])]
+    }
     for (const req of sub.runtimeRequirements) {
       if (!s.runtimeRequirements.includes(req)) s.runtimeRequirements.push(req)
     }
@@ -1380,7 +1418,9 @@ function detectLocalSkills(root) {
     const full = join(root, dir)
     if (!existsSync(full)) continue
     let entries = []
-    try { entries = readdirSync(full, { withFileTypes: true }) } catch { continue }
+    try {
+      entries = readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    } catch { continue }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const sub = join(full, entry.name)
@@ -1390,11 +1430,36 @@ function detectLocalSkills(root) {
       found.push({
         path: `${dir}/${entry.name}`,
         name: meta?.skillMeta?.name,
+        ...(meta?.skillMeta?.summary ? { summary: meta.skillMeta.summary } : {}),
         valid: meta?.skillMeta?.hasValidFrontmatter === true,
       })
     }
   }
   return found
+}
+
+function scanManagedSkillDir(baseRel, root) {
+  const full = join(root, baseRel)
+  if (!existsSync(full)) return []
+  let entries = []
+  try {
+    entries = readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  } catch { return [] }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const sub = join(full, entry.name)
+    if (!existsSync(join(sub, 'SKILL.md')) && !existsSync(join(sub, 'skill.md'))) continue
+    const meta = detectSkillKind(sub)
+    out.push({
+      dirName: entry.name,
+      name: meta?.skillMeta?.name || entry.name,
+      path: `${baseRel}/${entry.name}`,
+      ...(meta?.skillMeta?.summary ? { summary: meta.skillMeta.summary } : {}),
+      valid: meta?.skillMeta?.hasValidFrontmatter === true,
+    })
+  }
+  return out
 }
 
 function sha256File(filePath) {
@@ -1405,19 +1470,19 @@ function detectKit(root) {
   const skillsRoot = join(root, '.agents', 'skills')
   const manifestFull = join(root, PF_MANIFEST_REL)
   const manifestExists = existsSync(manifestFull)
-  const installedSkills = []
-
-  if (existsSync(skillsRoot)) {
-    try {
-      for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue
-        const sub = join(skillsRoot, entry.name)
-        if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) {
-          installedSkills.push(entry.name)
-        }
-      }
-    } catch { /* ignore */ }
-  }
+  const agentsSkills = scanManagedSkillDir('.agents/skills', root)
+  const claudeSkills = scanManagedSkillDir('.claude/skills', root)
+  const installedSkills = agentsSkills.map((s) => s.dirName)
+  const managedSkills = KIT_SKILLS.filter((k) => installedSkills.includes(k))
+  const customSkills = [...agentsSkills, ...claudeSkills]
+    .filter((s) => !KIT_SKILLS.includes(s.dirName))
+    .map(({ name, path, summary, valid }) => ({
+      name,
+      path,
+      ...(summary ? { summary } : {}),
+      valid,
+    }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   if (!manifestExists) {
     return {
@@ -1435,7 +1500,9 @@ function detectKit(root) {
       versionMismatch: false,
       drifted: false,
       installedSkills,
-      kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+      managedSkills,
+      customSkills,
+      kitSkillsCovered: managedSkills,
       agentsRegions: [],
     }
   }
@@ -1468,7 +1535,9 @@ function detectKit(root) {
       versionMismatch: false,
       drifted: true,
       installedSkills,
-      kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+      managedSkills,
+      customSkills,
+      kitSkillsCovered: managedSkills,
       agentsRegions: [],
     }
   }
@@ -1522,8 +1591,252 @@ function detectKit(root) {
     versionMismatch,
     drifted: missingFiles.length > 0 || modifiedFiles.length > 0 || versionMismatch,
     installedSkills,
-    kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+    managedSkills,
+    customSkills,
+    kitSkillsCovered: managedSkills,
     agentsRegions,
+  }
+}
+
+const TDD_SOURCE_PATH_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|mts|cts|py|go|rs|java|kt|kts|rb|php|cs|c|cpp|cc|h|hpp|sh|ps1|json|ya?ml|toml|sql|vue|svelte)$/i
+const TDD_IGNORED_PREFIXES = ['docs/', 'node_modules/', '.worktrees/', '.git/']
+const UNREGISTERED_SKIP_TOP_DIRS = new Set([
+  ...SKIP_DIRS,
+  '.git', '.agents', '.github', '.claude', '.dsh', '.vscode', '.worktrees', '.husky', '.changeset',
+  'docs', 'scripts', 'tests', 'test', '__tests__',
+])
+
+function detectTddStalePaths(root, tddRel) {
+  if (!tddRel) return []
+  const text = readTextSafe(join(root, tddRel))
+  if (!text) return []
+  const source = text.replace(/\r\n/g, '\n')
+  const snippets = []
+  for (const m of source.matchAll(/`([^`\n]+)`/g)) snippets.push(m[1])
+  for (const block of source.matchAll(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/g)) {
+    for (const line of block[1].split('\n')) {
+      snippets.push(line.replace(/(?:^|\s)#.*$/, ''))
+    }
+  }
+  const stale = new Set()
+  for (const chunk of snippets) {
+    for (const rawToken of chunk.split(/[\s,;()]+/)) {
+      const clean = rawToken.trim().replace(/^['"]|['"]$/g, '').replace(/^\.\//, '')
+      if (!clean || clean.endsWith('/')) continue
+      if (!clean.includes('/')) continue
+      if (/^(?:https?:|mailto:|git@|ssh:|~\/)/i.test(clean)) continue
+      if (/^[A-Za-z]:[\\/]/.test(clean) || clean.startsWith('/')) continue
+      if (clean.includes('..') || /[<>*?{}$]/.test(clean)) continue
+      if (TDD_IGNORED_PREFIXES.some((p) => clean.startsWith(p))) continue
+      if (!TDD_SOURCE_PATH_EXT.test(clean)) continue
+      if (!existsSync(join(root, clean))) stale.add(clean)
+    }
+  }
+  return [...stale].sort()
+}
+
+function dirContainsFiles(root, dir, { codeOnly = false, depth = 0 } = {}) {
+  if (depth > 4) return false
+  let entries = []
+  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return false }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name) || entry.name === '.git') continue
+      if (dirContainsFiles(root, full, { codeOnly, depth: depth + 1 })) return true
+    } else if (entry.isFile()) {
+      const rel = relative(root, full).replace(/\\/g, '/')
+      if (codeOnly ? CODE_EXT.test(entry.name) : !isJunkFile(rel)) return true
+    }
+  }
+  return false
+}
+
+function collectTopModuleDirs(root, workspace) {
+  const candidates = []
+  if (workspace?.declared && (workspace.packages?.length ?? 0) > 0) {
+    for (const p of workspace.packages) candidates.push(p)
+  } else {
+    if (existsSync(join(root, 'src'))) {
+      let entries = []
+      try { entries = readdirSync(join(root, 'src'), { withFileTypes: true }) } catch { /* ignore */ }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue
+        const full = join(root, 'src', entry.name)
+        if (dirContainsFiles(root, full, { codeOnly: true })) candidates.push(`src/${entry.name}`)
+      }
+    }
+    let entries = []
+    try { entries = readdirSync(root, { withFileTypes: true }) } catch { /* ignore */ }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === 'src' || UNREGISTERED_SKIP_TOP_DIRS.has(entry.name)) continue
+      const full = join(root, entry.name)
+      if (dirContainsFiles(root, full, { codeOnly: true })) candidates.push(entry.name)
+    }
+  }
+  return [...new Set(candidates)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+function detectReentry(root, { docs, kit, ecosystem, workspace, ws }) {
+  const isReentry = Boolean(docs?.agents || kit?.manifestExists || docs?.tdd)
+  const agentsText = docs?.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
+  const tddText = docs?.tdd ? (readTextSafe(join(root, docs.tdd)) ?? '') : ''
+
+  let staleAgentPaths = []
+  let staleAgentScripts = []
+  let agentClaims
+  if (agentsText) {
+    agentClaims = claimsOf(agentsText)
+    const combinedRefs = [...new Set([
+      ...(agentClaims.paths ?? []),
+      ...(agentClaims.dirs ?? []).map((d) => d.replace(/\/+$/, '')),
+    ])].sort()
+    staleAgentPaths = combinedRefs.filter((p) => !existsSync(join(root, p)))
+    if (Array.isArray(ecosystem?.packageScripts)) {
+      const pkgSet = new Set(ecosystem.packageScripts)
+      staleAgentScripts = (agentClaims.scripts ?? []).filter((name) => !pkgSet.has(name))
+    }
+  }
+
+  const staleTddPaths = detectTddStalePaths(root, docs?.tdd)
+
+  let unregisteredTopDirs = []
+  if (docs?.agents && (docs.agentsMarkers?.fills?.length ?? 0) === 0 && (ws?.codeFiles ?? 0) > 0) {
+    const combinedDocText = `${agentsText}\n${tddText}`
+    for (const candidate of collectTopModuleDirs(root, workspace)) {
+      const leaf = candidate.includes('/') ? candidate.split('/').pop() : candidate
+      const leafPrefixRe = leaf
+        ? new RegExp(`(?<![A-Za-z0-9_-])${leaf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`)
+        : undefined
+      const mentioned = combinedDocText.includes(candidate)
+        || (leafPrefixRe ? leafPrefixRe.test(combinedDocText) : false)
+      if (!mentioned) unregisteredTopDirs.push(candidate)
+    }
+  }
+
+  const drifted = Boolean(
+    staleAgentPaths.length
+    || staleAgentScripts.length
+    || staleTddPaths.length
+    || kit?.drifted
+    || kit?.versionMismatch,
+  )
+
+  return {
+    isReentry,
+    staleAgentPaths,
+    staleAgentScripts,
+    staleTddPaths,
+    unregisteredTopDirs,
+    drifted,
+  }
+}
+
+export function computeExplorationStrategy(facts) {
+  const maturity = facts?.maturity
+  if (maturity === 'empty') {
+    return {
+      tier: 'none',
+      reason: '空目录先问 3-4 个起步问题，不派深挖探索',
+      shards: [],
+    }
+  }
+
+  const codeFiles = facts?.scale?.codeFiles ?? 0
+  const workspaceDeclared = Boolean(facts?.workspace?.declared)
+  const subdirCount = facts?.ecosystem?.subdirs?.length ?? 0
+  const kindCount = facts?.ecosystem?.kinds?.length ?? 0
+  const reentry = facts?.reentry ?? {}
+  const otherConventionsCount = facts?.docs?.otherAiConventions?.length ?? 0
+
+  const isLarge = codeFiles > 80
+  const isPolyglotOrMonorepo = workspaceDeclared || subdirCount > 1 || kindCount > 1
+  const isReentryComplex = Boolean(
+    reentry.isReentry
+    && (reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0 || otherConventionsCount > 0),
+  )
+
+  if (!isLarge && !isPolyglotOrMonorepo && !isReentryComplex) {
+    return {
+      tier: 'single-pass',
+      reason: '小型单仓结构清晰，单 Agent 通读即可',
+      shards: [],
+    }
+  }
+
+  const reasons = []
+  if (isLarge) reasons.push(`代码文件 ${codeFiles} 个`)
+  if (isPolyglotOrMonorepo) reasons.push('存在多包或多生态/子目录布局')
+  if (isReentryComplex) reasons.push('重入存在契约漂移、未登记模块或既有 AI 约定')
+
+  const archTargets = [...new Set([
+    ...(reentry.unregisteredTopDirs ?? []),
+    ...(reentry.staleTddPaths ?? []),
+    ...(facts?.workspace?.packages ?? []).slice(0, 6),
+    ...(facts?.ecosystem?.subdirs ?? []).map((s) => `${s.dir}/`),
+  ])].slice(0, 8)
+  if (archTargets.length === 0) archTargets.push('.')
+
+  const verifyTargets = [...new Set([
+    ...(facts?.ecosystem?.manifests ?? []),
+    ...(facts?.docs?.workflows ?? []).map((w) => `.github/workflows/${w}`),
+    ...(reentry.staleAgentScripts ?? []),
+  ])].slice(0, 8)
+  if (verifyTargets.length === 0) verifyTargets.push('README.md')
+
+  const shards = [
+    {
+      id: 'architecture-boundaries',
+      scope: '模块边界、顶层目录与可复用基础设施',
+      focus: '梳理核心入口、单向依赖、可复用模块及高风险/禁改目录边界',
+      targets: archTargets,
+    },
+    {
+      id: 'verification-runtime',
+      scope: '构建、测试、冒烟验证与发布命令',
+      focus: '核实清单脚本、CI 运行链、真实 smoke-verify 与过时命令声明',
+      targets: verifyTargets,
+    },
+  ]
+
+  const customSkills = facts?.kit?.customSkills ?? []
+  if (customSkills.length > 0 || otherConventionsCount > 0 || reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+    const convTargets = [...new Set([
+      ...(facts?.docs?.agents ? [facts.docs.agents.file] : []),
+      ...(facts?.docs?.tdd ? [facts.docs.tdd] : []),
+      ...(facts?.docs?.otherAiConventions ?? []),
+      ...customSkills.map((s) => `${s.path}/SKILL.md`),
+      ...(reentry.staleAgentPaths ?? []),
+    ])].slice(0, 8)
+    if (convTargets.length === 0) convTargets.push('AGENTS.md')
+    shards.push({
+      id: 'conventions-and-skills',
+      scope: '既有 AI 约定、自有扩展技能与重入失步校准',
+      focus: '盘点必须保留的自有技能与人工规则，定位失效路径/脚本以定向校准',
+      targets: convTargets,
+    })
+  }
+
+  if (isPolyglotOrMonorepo) {
+    const pkgTargets = [...new Set([
+      ...(facts?.workspace?.packages ?? []),
+      ...(facts?.ecosystem?.subdirs ?? []).map((s) => `${s.dir}/`),
+      ...(facts?.ecosystem?.manifests ?? []),
+    ])].slice(0, 8)
+    if (pkgTargets.length === 0) pkgTargets.push('.')
+    shards.push({
+      id: 'polyglot-or-packages',
+      scope: '多包与多语言子目录边界',
+      focus: '确认各子包或子目录独立测试/构建命令、入口文件与跨包隔离约束',
+      targets: pkgTargets,
+    })
+  }
+
+  return {
+    tier: 'parallel-subagents',
+    reason: reasons.join('；'),
+    shards,
   }
 }
 
@@ -1851,6 +2164,10 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     delete gitFacts.auth._probeResult
   }
 
+  const workspace = detectWorkspace(root)
+  const kit = detectKit(root)
+  const reentry = detectReentry(root, { docs, kit, ecosystem, workspace, ws })
+
   const facts = {
     target: { path: root, name: ecosystem.projectName, dirName: basename(root) },
     maturity: 'partial',
@@ -1889,6 +2206,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       kinds,
       manifests: ecosystem.manifests,
       packageManager: ecosystem.packageManager,
+      packageScripts: ecosystem.packageScripts,
       publishable: ecosystem.publishable && !ecosystem.private,
       private: ecosystem.private,
       registryFree: ecosystem.registryFree,
@@ -1900,11 +2218,12 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     commands,
     commandsByEcosystem,
     conventions,
-    workspace: detectWorkspace(root),
+    workspace,
     artifacts: detectArtifacts(root, ecosystem),
     localSkills: detectLocalSkills(root),
-    kit: detectKit(root),
+    kit,
     docs,
+    reentry,
     ignores: {
       hasGitignore: existsSync(join(root, '.gitignore')),
       hasGitattributes: existsSync(join(root, '.gitattributes')),
@@ -1944,6 +2263,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.projectGaps = verdict.projectGaps
   facts.projectGapsComputed = true
   facts.maturity = judgeMaturity(facts)
+  facts.explorationStrategy = computeExplorationStrategy(facts)
   // 导航算一次、挂在事实顶层：--json 与 --markdown 共用同一份。
   // 两条路各算一遍迟早会分叉——实测过 JSON 那条根本没有导航字段，
   // 照着它往下走的 AI 一条必读清单都拿不到，却以为自己已经看全了。

@@ -412,7 +412,13 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   }
 
   const needsTdd = (facts.scale.codeFiles ?? 0) > 0 && !(facts.ecosystem.kinds ?? []).includes('docs-only')
-  if (needsTdd) {
+  const staleTddPaths = facts.reentry?.staleTddPaths ?? []
+  if (staleTddPaths.length > 0) {
+    add(finding('missing', 'docs', 'docs.tdd-stale-paths',
+      `技术设计文档 \`${facts.docs.tdd || 'docs/TDD.md'}\` 中以下源码路径已不存在：${staleTddPaths.slice(0, 6).join('、')}——请随重构同步校准`, {
+        ref: { file: 'references/docs-set.md', section: '二、四层设计文档体系' },
+      }))
+  } else if (needsTdd) {
     if (facts.docs.tdd) {
       add(finding('ok', 'docs', 'docs.tdd.ok', `技术设计文档已就绪（${facts.docs.tdd}）`))
     } else if (!decisions.has('no-tdd')) {

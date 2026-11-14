@@ -430,6 +430,15 @@ function pruneEmptyParentsWithin(filePath, rootDir) {
   }
 }
 
+function computeTreeSha256(entries) {
+  const h = createHash('sha256')
+  for (const entry of entries) {
+    const dataSha = createHash('sha256').update(entry.data).digest('hex')
+    h.update(`${entry.relPath}\0${entry.size}\0${dataSha}\0`)
+  }
+  return h.digest('hex')
+}
+
 /**
  * 为 `<targetDir>` 创建一份滚动 `.tar.gz` 快照并更新 `index.json`。
  */
@@ -438,6 +447,7 @@ export function createBackup(targetDir, {
   maxKeep = DEFAULT_MAX_KEEP,
   dryRun = false,
   hasPendingChanges = true,
+  force = false,
   env = process.env,
 } = {}) {
   const root = resolve(targetDir)
@@ -450,9 +460,28 @@ export function createBackup(targetDir, {
     return { created: false, skippedReason: 'empty-target', backupDir }
   }
 
-  const { entries, skippedLarge } = collectEligibleWorkspaceFiles(root, backupDir, { readData: !dryRun })
+  const indexPath = join(backupDir, 'index.json')
+  const index = readIndex(indexPath, root)
+  const latest = index.backups.length > 0 ? index.backups[index.backups.length - 1] : undefined
+  const needHashes = !dryRun || (!force && Boolean(latest?.treeSha256))
+
+  const { entries, skippedLarge } = collectEligibleWorkspaceFiles(root, backupDir, { readData: needHashes })
   if (entries.length === 0) {
     return { created: false, skippedReason: 'empty-target', backupDir }
+  }
+
+  const treeSha256 = needHashes ? computeTreeSha256(entries) : undefined
+  if (!force && latest && latest.treeSha256 && treeSha256 && latest.treeSha256 === treeSha256) {
+    const latestArchivePath = join(backupDir, latest.archive)
+    if (existsSync(latestArchivePath)) {
+      return {
+        created: false,
+        skippedReason: 'unchanged-since-latest',
+        id: latest.id,
+        backupDir,
+        archivePath: latestArchivePath,
+      }
+    }
   }
 
   const existingPaths = entries.map((e) => e.relPath)
@@ -480,8 +509,6 @@ export function createBackup(targetDir, {
   const gzBuf = gzipSync(packTar(entries), { level: 6 })
   writeAtomicBinary(archivePath, gzBuf)
 
-  const indexPath = join(backupDir, 'index.json')
-  const index = readIndex(indexPath, root)
   index.backups.push({
     id,
     label,
@@ -489,6 +516,7 @@ export function createBackup(targetDir, {
     archive: archiveName,
     fileCount: entries.length,
     totalBytes,
+    treeSha256,
     existingPaths,
     ...(skippedLarge.length > 0 ? { skippedLarge } : {}),
   })
@@ -515,6 +543,7 @@ export function createBackup(targetDir, {
     archivePath,
     count: entries.length,
     totalBytes,
+    treeSha256,
     pruned,
     skippedLarge,
   }
@@ -528,6 +557,7 @@ export function ensurePreWriteBackup(targetDir, {
   maxKeep = DEFAULT_MAX_KEEP,
   hasPendingChanges = true,
   dryRun = false,
+  force = false,
   env = process.env,
 } = {}) {
   if (hasPendingChanges === false) {
@@ -542,6 +572,7 @@ export function ensurePreWriteBackup(targetDir, {
     maxKeep,
     dryRun,
     hasPendingChanges,
+    force,
     env,
   })
 }
@@ -645,6 +676,7 @@ function usage() {
     '  --label <op>             快照标签（默认 manual）',
     '  --id <id|latest>         要恢复的快照 ID（默认 latest）',
     `  --max-keep <n>           最多保留快照份数（默认 ${DEFAULT_MAX_KEEP}）`,
+    '  --force                  即使工作区内容与最新快照一致也强制写入新快照',
     '  --dry-run                仅模拟不写盘',
     '  --json                   输出 JSON 格式结果',
     '',
@@ -669,11 +701,13 @@ async function main(argv) {
   let id = 'latest'
   let maxKeep = DEFAULT_MAX_KEEP
   let dryRun = false
+  let force = false
   let asJson = false
 
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--dry-run') dryRun = true
+    else if (arg === '--force') force = true
     else if (arg === '--json') asJson = true
     else if (arg === '--label') label = argv[++i] ?? label
     else if (arg.startsWith('--label=')) label = arg.slice('--label='.length)
@@ -692,7 +726,7 @@ async function main(argv) {
 
   try {
     if (command === 'create') {
-      const res = createBackup(target, { label, maxKeep, dryRun })
+      const res = createBackup(target, { label, maxKeep, dryRun, force })
       if (asJson) {
         process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       } else if (res.created) {

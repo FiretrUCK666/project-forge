@@ -1,136 +1,126 @@
 <p align="center">
-  <img src="assets/readme/hero.svg" alt="project-forge overview" width="100%">
+  <img src="assets/readme/hero.svg" alt="project-forge：从零散目录到规范 GitHub 仓库的流程示意" width="100%">
 </p>
 
 <p align="center">
-  <a href="README.en.md">English</a> · <strong>简体中文</strong>
+  <strong>简体中文</strong> | <a href="README.en.md">English</a>
 </p>
 
-**project-forge** 是一个面向 GitHub 仓库的工程治理与 AI 协作底座（Zero-dependency Node 18+ Skill）。它坚持**只读勘察先行、写入前全量快照、存量无损融合、实证门禁验收**：无论是空目录冷启动、结构各异的存量仓库，还是隔了数月出现规则漂移的老项目，都能按同一条幂等流水线配齐版本管理、GitHub 远端与 CI、四层设计文档、受管契约 `AGENTS.md` 以及 5 个本地研发技能，把工程判断从人肉口述变成脚本可验证的闭环。
+<p align="center">
+  <a href="RELEASING.md"><img src="https://img.shields.io/badge/version-v5.0.0-4E7496?style=flat-square" alt="版本 v5.0.0"></a>
+  <a href="#安装与上手"><img src="https://img.shields.io/badge/node-%3E%3D18-1F6F5B?style=flat-square" alt="Node.js 18 及以上"></a>
+  <a href="SKILL.md"><img src="https://img.shields.io/badge/dependencies-0-1F6F5B?style=flat-square" alt="零第三方依赖"></a>
+  <a href="#配齐后的-5-个日常技能怎么用"><img src="https://img.shields.io/badge/kit-5%20skills-D96B27?style=flat-square" alt="内置 5 个日常研发技能"></a>
+  <a href="#它怎么把项目理顺"><img src="https://img.shields.io/badge/platform-GitHub-172033?style=flat-square" alt="面向 GitHub 协作工作流"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-526075?style=flat-square" alt="MIT 许可协议"></a>
+</p>
+
+启动一个新项目，或者接手一个已经维护了几个月的老仓库，真正消耗精力的往往不是功能代码本身，而是周边容易出岔子的工程杂事：`.gitignore` 漏掉本地密钥、文档描述与最新代码脱节、分支合入前缺乏实测证明、修改牵连邻近模块却无人提醒。
+
+**project-forge** 用来把这类工程规范一次整理清楚。它先以只读方式盘点目录现状，再在不覆盖手写内容的前提下，按需补齐 Git 基线、设计文档、`AGENTS.md`、GitHub 检查流以及 5 个本地研发技能，让后续每次改动都有明确依据。
+
+## 它拦住的 5 类常见失误
+
+- **老项目接入不覆盖手写文档**：仓库里原有的手写 `README.md`、`CONTRIBUTING.md`、CI 工作流或自定义技能都会原样保留；修改任何文件之前，先在仓库外部目录打包保存完整快照，方便随时还原。
+- **需求、规格与任务单跟着分支走**：`docs/prd/`、`docs/specs/` 与 `docs/todo/` 统一使用结构化 YAML frontmatter 与 `YYMMDD-issue<N>-<slug>-{prd,spec,todo}.md` 命名，分支推进到哪一步、关联哪个 Issue，对应文件同步更新。
+- **用真实运行输出证明完成**：每项改动合入默认分支前，都要求拿到静态契约检查、真实功能测试以及独立上下文审查的实际输出，不凭口头判断交差。
+- **关联文件改动有明确提醒**：生成在 `AGENTS.md` 里的联动对照表会把模板、库文件与文档绑定在一起，修改其中一处时直接提示需要同步检查的邻近文件。
+- **测试分层与库容巡检防膨胀**：内置的 `dev-govern` 会把检查拆成快速测试、完整测试与合并门禁三层，按触发频率运行，并及时发现臃肿文档与低效慢测试。
 
 ## 目录
 
 <!-- toc:start -->
 
-- [为什么需要 project-forge](#为什么需要-project-forge)
-- [四步工作流](#四步工作流)
-- [架构与本地研发技能](#架构与本地研发技能)
-- [三类接入场景对照](#三类接入场景对照)
-- [安装与快速上手](#安装与快速上手)
-- [日常协作与可逆发版](#日常协作与可逆发版)
-- [核心脚本速查](#核心脚本速查)
-- [环境要求、边界与许可](#环境要求边界与许可)
+- [它拦住的 5 类常见失误](#它拦住的-5-类常见失误)
+- [它怎么把项目理顺](#它怎么把项目理顺)
+- [配齐后的 5 个日常技能怎么用](#配齐后的-5-个日常技能怎么用)
+- [安装与上手](#安装与上手)
+- [日常安全边界](#日常安全边界)
+- [脚本速查](#脚本速查)
+- [许可协议](#许可协议)
 
 <!-- toc:end -->
 
-## 为什么需要 project-forge
-
-工程治理最常见的问题不是"缺模板"，而是模板覆盖了项目原本有效的规则、脚本与文档各说各话、AI 每次新开会话都要重新摸索规矩。`project-forge` 围绕四个具体痛点设计：
-
-- **空目录闭环起步**：针对 `node`、`python`、`go`、`rust`、`docs` 五种栈，`--bootstrap-empty` 一次性落盘 `.gitattributes`、`.gitignore`、`README.md`、可运行源码与测试以及结构化 `docs/TDD.md`，起手就有可跑的基准工程与测试。
-- **存量异构仓库无损融合**：先用 `survey.mjs` 只读扫描 Git、文档、CI、协议与现有本地技能并输出 10 项 `artifactPlan`，已合规项直接保留，已有 `README.md`、`CONTRIBUTING.md`、`LICENSE` 或项目自有技能不覆盖重写，只在缺失或过期处增量补齐。
-- **跨月漂移重入校准**：仓库演进几个月后随时可重跑 `survey`、`compose-agents --upgrade` 与 `review.mjs`，对齐模板升级、收口 `AGENTS.md` 受管区间、排查脚本与文档漂移，同时保留维护者手写的「取舍」段落。
-- **去人肉代理的实证闭环**：任何断言都要经过可执行的静态门禁、临时目录冒烟与双门独立审查；信任遵循倒金字塔（静态门禁优先于运行冒烟实证，高于双门独立审查与契约文档），不以口头汇报代替运行输出。
-
-## 四步工作流
+## 它怎么把项目理顺
 
 <p align="center">
-  <img src="assets/readme/workflow.svg" alt="project-forge 四步幂等工作流：空目录、存量融合与跨月重入三条路径汇入 S1 到 S4 流水线" width="100%">
+  <img src="assets/readme/workflow.svg" alt="project-forge 接入流程：三类起点收敛到四步理顺" width="100%">
 </p>
 
-三条入口最终都汇入同一条幂等流水线，第二遍执行产出与第一遍字节一致：
+不管是刚建好的空目录、配置了一半的个人项目，还是多人协作中的活跃仓库，**project-forge** 都按同一套四步顺序推进，不直接覆盖你已经写好的内容：
 
-1. **S1 只读勘察**：执行 `survey.mjs --probe-auth` 只读判定仓库所处状态与 10 项 `artifactPlan`（保留 / 补齐 / 跳过 / 需决策），在勘察完成前不向目标项目写入任何文件。
-2. **S2 逐项定界**：只对事实缺失或待定项向维护者确认边界（如开源协议、仓库可见性、协作模板与 CI 取舍），把决定落成可机读记录。
-3. **S3 写前快照与按序落盘**：先由 `backup.mjs` 生成 `.tar.gz` 写前快照（支持按 ID 回滚），再严格按 **版本库 → 文档 → 远端 → 自动化** 顺序落盘，并由 `equip.mjs` 与 `compose-agents.mjs` 装配技能与受管 `AGENTS.md`。
-4. **S4 实证体检与交棒**：运行 `review.mjs` 做全量交付体检（覆盖 10 个核对域），并用 `handoff.mjs` 核验与清理会话痕迹；可逆收尾动作在取得人确认后执行。
+1. **先只读盘点**：扫描目录结构、已有配置、Git 远端地址与当前账号权限。面对空白目录，只需确认 3 到 4 个基本问题即可生成起始设计文档。
+2. **按事实确定修改清单**：已有手写文档、自有目录结构与自定义技能一律原样保留，仅针对缺失项目规划补齐动作；遇到开源协议缺失或权限不明等关键决策时，先停下来询问确认。
+3. **备份后按顺序生成**：对非空仓库先在仓外目录创建快照备份，再严格按照 **版本库 → 文档 → 远端 → 自动化** 的顺序生成：先配齐 Git 基线与 5 个本地研发技能，再借助 `dev-explore` 深入理解源码结构，编写精简的 `AGENTS.md`（控制在 30KB 以内）与 `docs/TDD.md`，最后配置 GitHub 远端与自动检查流程。
+4. **体检收尾并交棒**：全部生成后重新核对文件一致性与链接有效性；如果只需要一次性整理而不想长期保留辅助工具，会先列出待清理清单，获得确认后再移除。
 
-## 架构与本地研发技能
+## 配齐后的 5 个日常技能怎么用
 
 <p align="center">
-  <img src="assets/readme/architecture.svg" alt="project-forge 双层架构：上层治理底座与下层 5 个本地研发技能及信任倒金字塔" width="100%">
+  <img src="assets/readme/architecture.svg" alt="5 个日常技能与合并前实证面板" width="100%">
 </p>
 
-治理底座负责把仓库规则、快照与四层设计文档（`docs/TDD.md` 架构契约、`docs/prd/` 产品目标、`docs/specs/` 变更规格、`docs/todo/` 追踪待办）配齐并守住 `AGENTS.md <= 30KB` 上限；日常研发由装入目标仓库 `.agents/skills/`（由 `.pf-manifest.json` 校验版本与完整性）的 5 个本地研发技能接管：
+仓库配置好之后，这 5 个日常技能会被安装到 `.agents/skills/` 中。你不需要记住任何命令行参数：`AGENTS.md` 里的意图路由表会根据你的自然语言直接对应到相应的技能与底层脚本。
 
-| 本地技能 | 核心脚本 | 职责与产出 |
+| 你平时这样说 | 对应技能 | 它负责什么 |
 | --- | --- | --- |
-| `dev-explore` | `repo-map.mjs` | 三档（`quick`/`medium`/`thorough`）只读勘察代码结构、调用链与改动影响面 |
-| `dev-plan` | `doc-plan.mjs` | 按改动等级在四层设计文档间分诊，生成架构、规格或工作追踪草稿（人批后生效） |
-| `dev-flow` | `flow.mjs` | 驱动 Worktree 隔离工作流：开分支、认领、构建验证、提 PR、返工、合入与清理 |
-| `dev-review` | `review-pack.mjs` | 组装隔离审查上下文与故障注入证据包，附带外源 PR 防投毒只读预检 |
-| `dev-govern` | `govern-audit.mjs` | 巡检文档与代码对齐漂移，并提供 `release-prep` 多版本发版前核对 |
+| 「先帮我理清这个模块的入口和边界」 | `dev-explore` | 只读扫描源码结构、模块边界与校验命令，不修改工作区文件 |
+| 「针对这个需求整理规格和任务拆解」 | `dev-plan` | 生成并校验 `docs/prd/`、`docs/specs/` 与 `docs/todo/`，明确影响范围与风险级别 |
+| 「接手这个 Issue，在分支上完成改动并提交 PR」 | `dev-flow` | 创建独立分支或 worktree，执行本地验证、提交 PR 并同步更新关联文档 |
+| 「用独立视角检查这个 PR 有没有漏掉边界」 | `dev-review` | 启动独立上下文逐条核对验收标准并实施故障注入，确保改动真正可运行 |
+| 「排查一下过期文档、重复逻辑或慢测试」 | `dev-govern` | 审计契约与文档同步状态、识别过长文件或假测试，并汇总发布准备事项 |
 
-所有研发验证均按**信任倒金字塔**自上而下采信：`1. 静态门禁`（规则扫描与结构校验） > `2. 运行冒烟实证`（临时目录实跑与正反双向断言） > `3. 双门独立审查`（独立上下文逐条核对冻结标准） > `4. 契约文档`（文字描述只在被前三层印证时有效）。
+一个常见需求的日常流转大致如下：
 
-## 三类接入场景对照
+1. 说一句「先检查一下配置解析模块的调用路径」，`dev-explore` 会给出只读结构与测试命令，方便直接定位改动点。
+2. 说一句「按这个改动整理一份任务单」，`dev-plan` 会按规则建好带 frontmatter 的文档并冻结验收条件。
+3. 说一句「新建分支实现并通过全部本地测试后发起 PR」，`dev-flow` 会隔离修改、运行门禁并提交到远端分支。
+4. 说一句「请独立审查当前 PR，通过后直接合并并清理分支」，`dev-review` 与 `dev-flow` 会完成独立验证、合并与分支收尾。
 
-| 接入场景 | 起步状态 | `project-forge` 处理策略 | 典型入口命令 |
-| --- | --- | --- | --- |
-| **空目录闭环起步** | 空白目录或仅含空目录结构 | `--bootstrap-empty` 为 5 类栈生成源码、测试、`.gitignore`、`.gitattributes` 与文档底座 | `node "<skill-dir>/scripts/equip.mjs" "<repo>" --bootstrap-empty --lang node --name my-app` |
-| **存量异构融合** | 已有业务代码、原有 README/CONTRIBUTING/LICENSE 或自有技能 | 只读识别 `artifactPlan`，原样保留有效资产，增量补齐缺失门禁、契约与本地技能 | `node "<skill-dir>/scripts/survey.mjs" "<repo>" --markdown --probe-auth` |
-| **跨月漂移重入** | 已锻造数月后新增模块、升级底座或文档过期 | 无损重跑升级受管区间、核对 `.pf-manifest.json` 校验和并用 `govern-audit` 审计漂移 | `node "<skill-dir>/scripts/compose-agents.mjs" "<repo>" --upgrade` |
+这里的验收顺序始终固定：**静态与契约门禁高于真实运行实证，真实运行实证高于独立标准审查，文档与归档收尾紧随其后**。每一步都要看到实际命令通过的记录。
 
-## 安装与快速上手
+## 安装与上手
 
-本工具集零第三方运行时依赖，仅需 **Node.js 18+** 与 **Git**，不绑定任何特定 AI 宿主。获取仓库后即可将其作为通用技能或本地命令集使用：
+- **运行环境**：Node.js 18 及以上版本（`>= 18`）。
+- **零外部依赖**：全部脚本仅调用 Node 内置模块（`node:*`），无需额外安装依赖包。
 
-```sh
-git clone <project-forge-repo-url> project-forge
+获取或将本仓库放入你的技能目录后，打开需要整理的项目目录，直接用自然语言开始即可：
+
+```text
+请先帮我勘察当前目录现状，
+列出缺失的配置与安全整理方案。
 ```
 
-对任意目标仓库执行一轮"只读勘察 -> 写前备份 -> 装配与生成 -> 实证体检"：
+如果是空目录，只需回答语言栈、项目用途、开源协议等 3 到 4 个问题；如果是已有仓库，现有手写说明文档与可用工作流都会得到保留。
 
-```sh
-# 1. 只读勘察目标仓库（不写入任何文件），输出 10 项 artifactPlan 与 GitHub 认证探测
-node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown --probe-auth
+## 日常安全边界
 
-# 2. 写入前生成全量 .tar.gz 安全快照（支持随时按快照 ID 回滚）
-node "<skill-dir>/scripts/backup.mjs" create "<project-dir>" --label pre-forge
+为了避免误操作破坏已发布历史或绕过检查，仓库围绕三个原则划分自动动作与人工确认边界：
 
-# 3. 装配 5 个本地研发技能与受管 AGENTS.md（如已有则会增量融合或升级受管区间）
-node "<skill-dir>/scripts/equip.mjs" "<project-dir>"
-node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
+- **按「能不能撤回」划分日常边界**：推自己的分支和开启或更新 PR 都可以随时撤回，因此属于日常动作；合并默认分支（若需绕过常规审查）、打版本标签、正式发版或更改仓库公开状态无法撤回，执行前必须先向人展示清单并获得明确批准。
+- **正常合并与人工放行分离**：当独立上下文审查全部通过且无未决问题时，由审查者直接合并；只要改动涉及**弱化门禁**（例如删减测试用例、放宽断言、增加跳过标记或调低 CI 严格度），必须由人确认后才能放行。
+- **不自动改写已推送历史，写入后必做回读**：任何情况下都不自动执行强推或重写已推送的提交历史；推送分支、创建 PR 或发布版本后，都会回读远端实际信息，确认标题、正文和标签完整就位。
 
-# 4. 运行 10 域实证体检与交棒痕迹核查
-node "<skill-dir>/scripts/review.mjs" "<project-dir>"
-node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --verify
-```
+## 脚本速查
 
-当你把它交给 AI 助手执行时，直接给出类似提示词即可：`用 project-forge 检查这个仓库的工程规范、远端发布链路与本地研发技能，按只读勘察先行并补齐缺失项。`
+所有操作默认通过 `AGENTS.md` 自然语言路由触发，无需记忆命令；需要手动排查或集成 CI 时，可展开查看各入口脚本：
 
-需要同步技能本身的新版本时，运行 `node "<skill-dir>/scripts/update.mjs" --check` 查看远端状态；在离线或受限环境中，可设置环境变量 `PF_NO_UPDATE=1` 关闭联网检查。
+<details>
+<summary>查看底层脚本与职责</summary>
 
-## 日常协作与可逆发版
+| 脚本 | 主要用途 |
+| --- | --- |
+| `node scripts/survey.mjs <目录>` | 只读盘点仓库结构、文档、远端状态与缺失清单 |
+| `node scripts/backup.mjs create <目录>` | 在仓库外部创建压缩快照备份，写入前保护现场 |
+| `node scripts/equip.mjs <目录>` | 装配并核对 5 个本地研发技能包（`.agents/skills/`） |
+| `node scripts/compose-agents.mjs <目录>` | 生成或无损刷新 `<= 30KB` 的 `AGENTS.md` 契约 |
+| `node scripts/review.mjs <目录>` | 运行交付体检，检查规范齐备度与常见遗漏 |
+| `node scripts/handoff.mjs <目录>` | 清理仓库内的辅助标记与临时配置以便交棒 |
+| `node scripts/sync-toc.mjs README.md README.en.md` | 同步双语 README 目录锚点 |
+| `node scripts/update.mjs` | 检查并同步本地工具包版本 |
 
-锻造完成后的日常开发遵循**可撤回分档**原则，判断动作属于日常还是高风险不靠直觉，而看**能不能撤回**：
+</details>
 
-- **日常（可撤回）**：本地改动 → 跑通门禁 → 提交 → **推自己的分支** → 开 Pull Request → 独立上下文按冻结标准审查。删分支、关 PR 都可撤回，因此推分支与开 PR 属于日常动作。
-- **审查即闭环**：独立审查输出 `fail` 为空且附带故障注入验证记录时，由**审查者直接合并**（若在维护者「取舍」段显式设置更保守策略除外）。
-- **必须人拍板**：**弱化门禁**（删测试、放宽断言、加跳过标记、降级 CI 报错）会永久破坏后续每次校验的真实性，一律先停下由人点头；合并默认分支（未授权时）、对外发版、修改仓库可见性与改写历史同样不得擅自执行。
+## 许可协议
 
-当人明确要求发版（支持跨多版本区间与自定义目标版本号）时，先通过本地技能的发布前核对整理区间变更并交叉验证影响面，再按 [RELEASING.md](RELEASING.md) 先提交发布说明到默认分支、后推标签并回读确认发布页与附件就绪：
-
-```sh
-node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep --from v4.0.0 --to HEAD --version v5.0.0
-```
-
-## 核心脚本速查
-
-| 脚本 | 常用参数 | 用途 |
-| --- | --- | --- |
-| [scripts/survey.mjs](scripts/survey.mjs) | `--markdown`, `--probe-auth` | 只读勘察仓库现状、识别栈类型、探测 GitHub 认证并输出 10 项 `artifactPlan` |
-| [scripts/backup.mjs](scripts/backup.mjs) | `create\|list\|restore`, `--label`, `--id`, `--dry-run`, `--json` | 写入前生成并管理 `.tar.gz` 安全快照 |
-| [scripts/equip.mjs](scripts/equip.mjs) | `--check`, `--dry-run`, `--bootstrap-empty --lang ... --name ...` | 向目标项目装配/校验 5 个本地研发技能，或对空目录冷启动闭环工程 |
-| [scripts/compose-agents.mjs](scripts/compose-agents.mjs) | `--status`, `--upgrade`, `--check`, `--clean` | 幂等生成或升级目标仓 `AGENTS.md` 受管区间并守住 30KB 预算上限 |
-| [scripts/review.mjs](scripts/review.mjs) | `--scope=...`, `--strict`, `--json` | 按 10 个核心域做交付前逐项体检 |
-| [scripts/handoff.mjs](scripts/handoff.mjs) | `--scan`, `--verify`, `--json` | 交棒前核查与清理过程临时痕迹 |
-| [scripts/sync-toc.mjs](scripts/sync-toc.mjs) | `--check`, `--max-level`, `--min-sections` | 生成并校验双语 Markdown 目录 |
-| [scripts/update.mjs](scripts/update.mjs) | `--check`, `--quiet`, `--equip <dir>` | 检查并更新本地 `project-forge` 能力包 |
-
-## 环境要求、边界与许可
-
-- **运行环境**：Node.js 18 及以上版本（`scripts/` 全部使用 `node:` 内置模块，无第三方依赖）、Git；如需自动配齐 GitHub 远端与发布保护，另需 GitHub CLI（`gh`）或已配置认证凭据。
-- **能力边界**：`project-forge` 只负责仓库工程治理、协作契约、工作流底座与实证门禁，**不生成业务代码，也不替项目选型技术栈**；产品层仅面向 GitHub 生态。
-- **延伸文档**：入口与门控调度见 [SKILL.md](SKILL.md)，本仓库工程契约见 [AGENTS.md](AGENTS.md)，贡献与 PR 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，发版流程见 [RELEASING.md](RELEASING.md)。
-- **开源许可**：采用 [MIT License](LICENSE) 发布。
+本项目采用 [MIT](LICENSE) 许可协议。欢迎阅读 [贡献指南](CONTRIBUTING.md) 与 [发版说明](RELEASING.md)。

@@ -37,6 +37,7 @@
  * 产物里出现它们，说明求值漏了一层，`preflight` 会判红。
  */
 
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,12 +46,77 @@ import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
-import { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } from './lib/protocol.mjs'
+import * as protocol from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
+
+const { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
+const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
+const AGENTS_WARN_BYTES = protocol.AGENTS_WARN_BYTES ?? 24576
+const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = resolve(HERE, '..')
 const TEMPLATE_PATH = join(SKILL_ROOT, 'templates', 'agents-project.md')
+
+function sha256Of(text) {
+  return createHash('sha256').update(String(text ?? '').replace(/\r\n/g, '\n'), 'utf8').digest('hex')
+}
+
+function regionBodySha(lines) {
+  return sha256Of(lines.join('\n'))
+}
+
+function checkAgentsBytes(text) {
+  const bytes = Buffer.byteLength(String(text ?? ''), 'utf8')
+  return {
+    bytes,
+    oversize: bytes > AGENTS_MAX_BYTES,
+    warn: bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
+  }
+}
+
+function readManifestSafe(root) {
+  const manifestPath = join(root, PF_MANIFEST_REL)
+  if (!existsSync(manifestPath)) return null
+  const raw = readTextSafe(manifestPath)
+  if (raw === undefined) return { path: manifestPath, raw: '', data: {}, invalid: true }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { path: manifestPath, raw, data: {}, invalid: true }
+    }
+    return { path: manifestPath, raw, data: parsed, invalid: false }
+  } catch {
+    return { path: manifestPath, raw, data: {}, invalid: true }
+  }
+}
+
+function writeManifestRegions(root, agentsText, protectedIds = []) {
+  const manifest = readManifestSafe(root)
+  if (!manifest || manifest.invalid) return false
+  const prevRegions = manifest.data.agentsRegions && typeof manifest.data.agentsRegions === 'object'
+    ? manifest.data.agentsRegions
+    : {}
+  const protectedSet = new Set(protectedIds)
+  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
+  const { regions, broken } = markerRegions(agentsText, 'AGENTS.md')
+  if (broken.length > 0) return false
+
+  const nextRegions = {}
+  for (const region of regions) {
+    if (protectedSet.has(region.id) && prevRegions[region.id]?.sha256) {
+      nextRegions[region.id] = prevRegions[region.id]
+    } else {
+      const bodyLines = lines.slice(region.start + 1, region.end)
+      nextRegions[region.id] = { sha256: regionBodySha(bodyLines) }
+    }
+  }
+  const nextData = { ...manifest.data, agentsRegions: nextRegions }
+  const nextRaw = `${JSON.stringify(nextData, null, 2)}\n`
+  if (nextRaw === manifest.raw.replace(/\r\n/g, '\n')) return false
+  writeAtomic(manifest.path, nextRaw)
+  return true
+}
 
 const COMMAND_ORDER = ['install', 'build', 'typecheck', 'lint', 'test', 'verify']
 const COMMAND_LABEL = {
@@ -166,13 +232,18 @@ function conventionsHint(facts) {
 }
 
 /** 全部模板变量的取值。清单本身在 `protocol.mjs` 的 `TEMPLATE_VARS` 里。 */
-export function buildVars(facts) {
+export function buildVars(facts, root) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'
     ? 'CHANGELOG.md 的对应版本节'
     : 'docs/release-notes/<标签>.md'
   const readmes = facts.docs?.readmes ?? []
   const packages = facts.workspace?.packages ?? []
+  const targetRoot = root || facts.target?.path
+  const legacyWorkExists = Boolean(targetRoot && existsSync(join(targetRoot, 'docs', 'work')) && !existsSync(join(targetRoot, 'docs', 'todo')))
+  const resolvedWorkDir = conventions.workDir && conventions.workDir !== 'docs/work'
+    ? conventions.workDir
+    : (legacyWorkExists ? 'docs/work' : 'docs/todo')
 
   return {
     PROJECT_NAME: facts.target?.name ?? '这个项目',
@@ -182,7 +253,7 @@ export function buildVars(facts) {
     VERSION_SOURCE: facts.ecosystem?.manifests?.[0] ?? '清单文件',
     RELEASING_DOC: facts.docs?.releasing ?? 'RELEASING.md',
     RELEASE_NOTES_TARGET: releaseNotesTarget,
-    WORK_DIR: `${conventions.workDir || 'docs/work'}/`,
+    WORK_DIR: `${resolvedWorkDir}/`,
     COMMIT_STYLE_HINT: commitStyleHint(facts),
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
@@ -191,8 +262,8 @@ export function buildVars(facts) {
 }
 
 /** 渲染模板：条件求值 → 变量替换。任何一处不成立都抛，绝不把洞留在产物里。 */
-export function renderAgentsTemplate(facts, templateText) {
-  return renderTemplate(templateText, buildConditions(facts), buildVars(facts), 'template.md')
+export function renderAgentsTemplate(facts, templateText, root) {
+  return renderTemplate(templateText, buildConditions(facts), buildVars(facts, root), 'template.md')
 }
 
 /**
@@ -255,11 +326,14 @@ function fillLinesOf(text) {
  * `splice(at, 0, x)` 每插一次就把后面的推后一格，所以在同一个 `at` 上连着插 A、B，
  * 结果会是 B、A——与模板相反。同一位置的多个操作因此要按模板倒序落。
  */
-export function refreshRegions(existing, rendered, volatile = []) {
+export function refreshRegions(existing, rendered, volatile = [], baselineRegions = null) {
   const current = markerRegions(existing, 'AGENTS.md')
   const fresh = markerRegions(rendered, 'AGENTS.md')
   if (current.broken.length > 0) {
-    return { text: existing, changed: false, broken: current.broken, kept: [], inserted: [], filled: [], synced: [] }
+    return {
+      text: existing, changed: false, broken: current.broken,
+      kept: [], inserted: [], filled: [], synced: [], protectedRegions: [],
+    }
   }
 
   const lines = existing.split('\n')
@@ -273,6 +347,7 @@ export function refreshRegions(existing, rendered, volatile = []) {
   const kept = []
   const filled = []
   const synced = []
+  const protectedRegions = []
 
   for (const region of current.regions) {
     // 人接管了的段：一个字节不动，也不进 filled / synced。它现在归项目，
@@ -282,6 +357,8 @@ export function refreshRegions(existing, rendered, volatile = []) {
     if (!source) { kept.push(region.id); continue }
     const renderedBody = renderedLines.slice(source.start + 1, source.end)
     const bodyLines = lines.slice(region.start + 1, region.end)
+    const baselineSha = baselineRegions?.[region.id]?.sha256
+    const diskSha = baselineSha ? regionBodySha(bodyLines) : undefined
 
     const renderedHasFill = parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')
     let bodyHasFill = false
@@ -292,10 +369,20 @@ export function refreshRegions(existing, rendered, volatile = []) {
     if (renderedHasFill) {
       // 这一节要人写：还带占位就换成模板，人写过就永久保留。
       if (!bodyHasFill) { kept.push(region.id); continue }
+      if (baselineSha && diskSha !== baselineSha) {
+        protectedRegions.push(region.id)
+        kept.push(region.id)
+        continue
+      }
       filled.push(region.id)
     } else {
-      // 这一节完全由事实推出：只要内容与渲染结果不同就跟上。
+      // 这一节完全由事实推出：若磁盘相对 manifest 记录的旧基线曾被手改，绝不静默覆盖。
       if (normalizeBody(bodyLines, volatile) === normalizeBody(renderedBody, volatile)) { kept.push(region.id); continue }
+      if (baselineSha && diskSha !== baselineSha) {
+        protectedRegions.push(region.id)
+        kept.push(region.id)
+        continue
+      }
       synced.push(region.id)
     }
 
@@ -349,7 +436,7 @@ export function refreshRegions(existing, rendered, volatile = []) {
 
   if (ops.length === 0) {
     return {
-      text: existing, changed: false, broken: [], kept, inserted: [], filled, synced,
+      text: existing, changed: false, broken: [], kept, inserted: [], filled, synced, protectedRegions,
     }
   }
 
@@ -357,7 +444,7 @@ export function refreshRegions(existing, rendered, volatile = []) {
   ops.sort((a, b) => (b.at - a.at) || (b.seq - a.seq))
   for (const op of ops) lines.splice(op.at, op.remove, ...op.insert)
   return {
-    text: lines.join('\n'), changed: true, broken: [], kept, inserted, filled, synced,
+    text: lines.join('\n'), changed: true, broken: [], kept, inserted, filled, synced, protectedRegions,
   }
 }
 
@@ -482,7 +569,10 @@ const HEADING_PREFIX = /^#{2,3}\s+(?:\d+[.)、]\s*)?(?:[一二三四五六七八
  * 不会造成误判；而在标题上多认一节，最坏结果是少追加一节——比多追加一节安全得多。
  */
 const SECTION_KEYWORDS = {
+  意图路由: { words: ['意图路由', '路由', 'Intent Routing', 'Routing'] },
   项目定位: { words: ['定位', '简介', '概述', '说明', 'Overview', 'Introduction', 'About'] },
+  'Dev Profile': { words: ['Dev Profile', 'Profile'] },
+  上下文阅读护栏: { words: ['上下文阅读护栏', '阅读护栏', 'Context Reading', 'Reading Guardrails'] },
   架构与关键不变量: { words: ['架构', '结构', '关键不变量', 'Architecture', 'Structure', 'Layout', 'Invariants'] },
   // 「验证」这个词本身不够专指：`## 验证流程` 讲的是审查流程，不是构建命令。
   // 把审查、流程一类词排掉，那一节才真的算「还没有」，也才会被补上。
@@ -789,7 +879,7 @@ async function main(argv) {
   let facts
   try {
     facts = await factsOf(root)
-    rendered = renderAgentsTemplate(facts, template)
+    rendered = renderAgentsTemplate(facts, template, root)
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
@@ -803,16 +893,15 @@ async function main(argv) {
       process.stderr.write('AGENTS.md 读不出来（不是 UTF-8 文本？）\n')
       return 1
     }
+    const sizeInfo = checkAgentsBytes(info.text)
+    if (sizeInfo.warn) {
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节，接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
+    }
     if (info.broken && info.broken.length > 0) {
       process.stderr.write(`AGENTS.md 的标记没成对：${info.broken.join('、')}\n`)
       return 1
     }
     if (info.regions.length === 0) {
-      // 手写文件不判「格式」，但**空壳要判**。
-      //
-      // 早先这里一律放行，理由是「手写的契约可能比模板更贴合这个项目」——那个理由
-      // 仍然成立，它管不到的是另一件事：一份只有一行标题的文件，在报告里的表现与
-      // 一份认真写过的契约完全一样。放行它等于替「看起来有、其实是空的」背书。
       const coverage = handWrittenCoverage(info.text ?? '')
       if (!coverage.ok) {
         const why = []
@@ -822,11 +911,19 @@ async function main(argv) {
           + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')
         return 1
       }
+      if (sizeInfo.oversize) {
+        process.stderr.write(`AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），请精简或拆至子目录契约。\n`)
+        return 1
+      }
       process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判格式，只核对过它答了'
         + '「这是什么项目 / 怎么构建验证 / 改动的边界」这三件事。\n')
       return 0
     }
     let bad = false
+    if (sizeInfo.oversize) {
+      process.stderr.write(`AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），请精简过时条款或拆出细节至 docs/。\n`)
+      bad = true
+    }
     if (info.fills.length > 0) {
       process.stderr.write(`AGENTS.md 还有 ${info.fills.length} 处未填的占位\n`)
       for (const fill of info.fills) process.stderr.write(`  第 ${fill.line} 行：${fill.what}\n`)
@@ -841,6 +938,20 @@ async function main(argv) {
       process.stderr.write(`AGENTS.md 有 ${drifted.length} 段与模板不一致：${drifted.join('、')}\n`
         + '  这几段的内容完全由项目事实决定，本该与模板渲染结果逐字相同。'
         + '不同说明模板加过规则而这份文件还停在旧版。跑一次不带参数就会刷新。\n')
+      const manifest = readManifestSafe(root)
+      const baselineRegions = manifest && !manifest.invalid ? manifest.data.agentsRegions : null
+      if (baselineRegions) {
+        const existingLines = existing.split('\n')
+        const modifiedByUser = drifted.filter((id) => {
+          const region = info.regions.find((r) => r.id === id)
+          const baseSha = baselineRegions[id]?.sha256
+          if (!region || !baseSha) return false
+          return regionBodySha(existingLines.slice(region.start + 1, region.end)) !== baseSha
+        })
+        if (modifiedByUser.length > 0) {
+          process.stderr.write(`  [冲突提示] ${modifiedByUser.join('、')} 与 ${PF_MANIFEST_REL} 记录的旧基线不符：若有意保留手改请在 begin 行追加 customized，否则还原后重跑。\n`)
+        }
+      }
       bad = true
     }
     if (bad) return 1
@@ -858,7 +969,17 @@ async function main(argv) {
       process.stdout.write('模板里的节都已在文件中，无需追加。\n')
       return 0
     }
-    writeAtomic(agentsPath, `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`)
+    const nextText = `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`
+    const sizeInfo = checkAgentsBytes(nextText)
+    if (sizeInfo.oversize) {
+      process.stderr.write(`追加后 AGENTS.md 体积将达 ${sizeInfo.bytes} 字节，超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+      return 1
+    }
+    if (sizeInfo.warn) {
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
+    }
+    writeAtomic(agentsPath, nextText)
+    writeManifestRegions(root, nextText)
     process.stdout.write(`已追加 ${additions.length} 节：只加不改，原有内容一个字节没动。\n`)
     process.stdout.write('接下来读代码填掉里面的「fill」标记，填完把标记行删掉。\n')
     return 0
@@ -866,7 +987,18 @@ async function main(argv) {
 
   // 默认：有受管标记就刷新（填空 + 跟上模板 + 插新节），没有就只报。
   if (mode === 'default' && info.regions.length > 0 && info.broken.length === 0) {
-    const refreshed = refreshRegions(existing, rendered, volatileValues(facts))
+    const manifest = readManifestSafe(root)
+    const baselineRegions = manifest && !manifest.invalid ? (manifest.data.agentsRegions ?? {}) : null
+    const refreshed = refreshRegions(existing, rendered, volatileValues(facts), baselineRegions)
+    const nextText = refreshed.changed ? refreshed.text : existing
+    const sizeInfo = checkAgentsBytes(nextText)
+    if (sizeInfo.oversize) {
+      process.stderr.write(`刷新后 AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+      return 1
+    }
+    if (sizeInfo.warn) {
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
+    }
     if (refreshed.changed) {
       writeAtomic(agentsPath, refreshed.text)
       const bits = []
@@ -874,9 +1006,13 @@ async function main(argv) {
       if (refreshed.synced.length > 0) bits.push(`跟上模板 ${refreshed.synced.length} 段（${refreshed.synced.join('、')}）`)
       if (refreshed.inserted.length > 0) bits.push(`插入 ${refreshed.inserted.length} 节（${refreshed.inserted.join('、')}）`)
       process.stdout.write(`已刷新受管区间：${bits.join('，')}。标记之外、以及人写过的区间一个字节没动。\n`)
-    } else {
+    } else if (refreshed.protectedRegions.length === 0) {
       process.stdout.write('受管区间都已填过、也都与模板一致，文件未改动。\n')
     }
+    if (refreshed.protectedRegions.length > 0) {
+      process.stderr.write(`[保护跳过] 以下区间曾被手工修改（与 ${PF_MANIFEST_REL} 基线不符且未标 customized），已保留你的改动未覆盖：${refreshed.protectedRegions.join('、')}。如需持久保留请在 begin 行追加 customized；如需跟随新版请还原后重跑。\n`)
+    }
+    writeManifestRegions(root, nextText, refreshed.protectedRegions)
     report(agentsPath, inspect(agentsPath, rendered), { verbose })
     return 0
   }
@@ -901,13 +1037,22 @@ async function generate(root, agentsPath, template) {
   let content
   try {
     const facts = await factsOf(root)
-    content = renderAgentsTemplate(facts, template)
+    content = renderAgentsTemplate(facts, template, root)
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
   }
+  const sizeInfo = checkAgentsBytes(content)
+  if (sizeInfo.oversize) {
+    process.stderr.write(`生成的 AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+    return 1
+  }
+  if (sizeInfo.warn) {
+    process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
+  }
   mkdirSync(dirname(agentsPath), { recursive: true })
   writeAtomic(agentsPath, content)
+  writeManifestRegions(root, content)
   const fills = parseMarkers(content, 'AGENTS.md').filter((m) => m.kind === 'fill')
   process.stdout.write('已生成 AGENTS.md（按勘察到的事实填了一部分）。\n')
   if (fills.length > 0) {
@@ -929,16 +1074,19 @@ async function generate(root, agentsPath, template) {
 export async function contractHealth(root) {
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
   const facts = await factsOf(root)
-  const rendered = renderAgentsTemplate(facts, template)
+  const rendered = renderAgentsTemplate(facts, template, root)
   const agentsPath = join(root, 'AGENTS.md')
   const info = inspect(agentsPath, rendered)
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
+  const { bytes, oversize } = checkAgentsBytes(existing)
   return {
     broken: info.broken ?? [],
     missing: info.regions.length === 0 ? [] : info.missingRegions ?? [],
     drifted: info.broken.length > 0 ? [] : driftRegions(existing, rendered, volatileValues(facts)),
     customized: info.customized ?? [],
     handWritten: info.regions.length === 0,
+    bytes,
+    oversize,
   }
 }
 

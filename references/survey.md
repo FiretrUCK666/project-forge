@@ -1,174 +1,41 @@
-# 勘察
+# 只读勘察与状态判定
 
 ## 何时读本文件
 
-每次任务开始时读。它回答三件事：怎么跑勘察、读回来的每个字段是什么意思、从事实到动作怎么判。勘察只读，所以读本文件之前就可以先跑一遍。
+在改写任何文件、初始化版本库或创建文档之前，先读完勘察输出并对照本文判读状态。尤其是碰到空目录、`isRepoRoot === false`、`commitsState === 'unreadable'`、`git.role` 或 `git.auth` 未明时必读。
 
-## 一、为什么必须先勘察
-
-同一个动作在不同项目上后果不同。`git init` 在空目录里是起步，在别人仓库的子目录里是长出一个嵌套仓库。这类错误的共同点是：做的时候不报错，很久以后才发现。顺序是死的：先读事实，再判断，最后动手。
-
-| `maturity` | 含义 | 这次用多大劲 |
-| --- | --- | --- |
-| `empty` | 一个文件都没有 | **不做治理**，先让项目存在（选技术栈、写源码） |
-| `greenfield` | 有源码但没版本库，或没有任何文档 | 从零配齐 |
-| `partial` | 有版本库、有部分文档，缺东西 | 补齐缺口，已有的一个字节都不动 |
-| `mature` | 版本库、远端、文档、CI 都在 | 只体检，不重建 |
-
-成熟度是一个值，不是评分：它只回答「这次该用多大劲」，不回答「这个项目好不好」。
-
-## 二、怎么勘察
+## 一、勘察命令（只读、并发、无交互）
 
 ```sh
-node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
+node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--json]
 ```
 
-`<本 skill 目录>` 是 `SKILL.md` 所在目录，`<项目目录>` 是被处理的项目——两者通常不同。命令可在任意工作目录下执行，路径都是显式传入的。
+- 默认纯只读扫描文件系统与本地 Git 状态；加 `--probe-auth` 后注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`BatchMode=yes`，并发探测 GitHub Track A（SSH 22 / 443 端口、HTTPS Credential Helper、`gh auth setup-git` 桥接、协议错配修复命令）与 Track B（`gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex`/`offline`），绝不挂起弹窗或泄露令牌。
+- 扫描结果末尾自带基于唯一判据生成的「下一步必读参考」，不靠人工记忆决定要读哪几份。
 
-| 参数 | 输出 | 什么时候用 |
-| --- | --- | --- |
-| 默认 | JSON | 做判定用这一份：按字段名取值，不要从报告的自然语言里猜 |
-| `--markdown` | 人读的报告 | 要把结论原样给人看时 |
-| `--probe-auth` | 多问一次凭据助手 | 推送前确认凭据。它慢几百毫秒，默认关闭 |
+## 二、必须立即拦截的三类现场
 
-**它不联网。** 远端可达性、仓库设置这类要联网的事不在勘察里——否则「反复调用勘察」会变成奢侈，而勘察必须能随手跑、随手重跑。
-
-**脚本读不到的东西自己补。** 脚本读不出「这个目录是干什么的」，所以勘察分两步：脚本给事实，你读关键文件（主说明、清单、既有约定）补齐意图。只看脚本输出就下结论，等于拿体检报告猜职业。
+1. **`isRepoRoot === false`（落在上级仓库子目录里）**：
+   子目录本身无独立 `.git`，而父目录已有仓库。直接执行初始化或提交会把项目塞进毫不相干的父仓；必须先确认应独立建仓还是本就属于父仓单包模块。
+2. **`commitsState === 'unreadable'`（仓库损坏或无权访问）**：
+   不要把读不出提交误当成「零提交新仓库」，更不许直接重跑 `git init`；先排查工作树指针、`.git` 权限或对象损坏。
+3. **空目录或近空目录起步（`effectiveFiles === 0`）**：
+   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次搭出最小可跑工程、冒烟测试、初始 `docs/TDD.md` 与 `.agents/skills/`。
 
 ## 三、字段含义
 
-### `git`
-
-| 字段 | 用途与易错点 |
+| 字段 | 含义与行动影响 |
 | --- | --- |
-| `isRepoRoot` | 这个目录本身是不是仓库根。**为假必须停**，见「四、这几种形态要停下来」 |
-| `workTreeRoot` | 实际工作区根。`isRepoRoot` 为假时，用它说明「你在哪个仓库里」 |
-| `role` / `roleReason` | `maintainer` / `contributor-fork` / `undetermined`——决定能不能推主干、打标签。`undetermined` 按贡献者处置，不按维护者 |
-| `branch` / `upstream` / `ahead` / `behind` / `dirty` | 推送与回滚的判断依据。`dirty` 非 0 时先提交一个存档点再动 |
-| `commits` / `commitsState` | 提交数。`unreadable` 是**没读到**，**不许当 0**——那会把有历史的仓库带向「首次提交」 |
-| `identity` / `identity.scope` | 提交署名与它来自哪一层。四档见下 |
-| `auth` | 推送认证现状。四档见下 |
-| `declaredRepo` | 清单或入口声明的源仓库。与 `role` 一起判「origin 是不是正本」 |
-| `initDefaultBranch` | 配置里的 `init.defaultbranch`，是 `conventions.defaultBranch` 的兜底之一 |
-| `remoteProtocol` | `ssh` 或 `https`。排障先看它：两种协议的失败信息完全不同 |
-| `tags` | 已有标签。与清单版本对照，对不上说明自动化会取到错的东西 |
-| `historyAuthors` | 历史上出现过的署名。多于一种说明换过人，而「这些提交还能不能追溯到人」是接手的前提 |
-
-**`identity.scope` 是四档，不是两档**：`local` / `global` / `system` / `unset`。最常见的误判是 `~/.gitconfig` 不存在就以为「这台机器没配过」——全局工具的安装器常把配置写在 `system` 层，凭据助手就是典型。**看 `scope`，不要用「某个文件在不在」推断。**
-
-| `auth` 取值 | 该做什么 |
-| --- | --- |
-| `available` | 直接推。不要建议重新登录，那是让人做无用功 |
-| `no-credential` | 唯一需要用户动手的一档，并且只说这一件事 |
-| `undetermined` | 说「未确认」。**不许翻译成「没有凭据」**——两者的后续动作相反 |
-| `n/a` | 没有远端，谈不上推送认证 |
-
-### `ecosystem`
-
-| 字段 | 用途与易错点 |
-| --- | --- |
-| `kinds` | **数组，可命中多项**。多生态并存是常态，不要只按第一个做判断 |
-| `publishable` / `private` | 判能不能发。`private` 为真时按不可发处理 |
-| `registryFree` | 分发不经过制品库（Go 靠标签、能力目录靠克隆）。这是「不需要制品库」，不是「不能发布」 |
-| `declaredVersion` | 清单声明的版本。发版时版本号只能从这里来，标签是它的副本 |
-| `declaredRepo` | 声明的源仓库，喂给 `role` |
-| `skillMeta` | 能力目录入口的 `name` / `version` / `source` / `hasValidFrontmatter`。最后一项为假意味着宿主会静默丢掉整份 |
-
-两个最容易看错的：
-
-- **`docs-only`** 有两个前提：有 README，且除 Markdown 外没有源码或构建描述文件。「一堆 `.md` 但没有 README」判成 `unknown`——问一句比猜成文档项目稳妥。
-- **`skill`** 指被宿主加载的能力目录。它与插件的分野见 `references/skill-project.md`：插件把代码加载进宿主进程，能力目录把指令加载进上下文，两边没有一条判据相同。
-
-### `commands`
-
-键是 `install` / `build` / `typecheck` / `lint` / `test` / `verify`。**读不到就是读不到**：没有 `test` 就没有，不要按生态惯例编一个——编出来的命令会在 CI 里失败，而那条失败看起来像「代码坏了」。
-
-**`commandsByEcosystem` 必须全量读。** 每个命中的生态各有一份命令表，顶层 `commands` 每个键只保留**最先填上的那一份**，其余生态的同名命令不会覆盖它。前后端混合仓库照顶层写文档与 CI，结果只测了其中一侧，另一侧从来没跑过——绿的是那半边。写文档、配 CI、填 `AGENTS.md` 时，按每个命中的生态各取一遍。
-
-### `conventions`
-
-| 字段 | 取值顺序 | 易错点 |
-| --- | --- | --- |
-| `defaultBranch` | `origin/HEAD` 去掉前缀 → **当前分支为默认分支名之一**（`main` / `master` / `trunk` / `develop`）时取它 → `init.defaultBranch` → `main` | **永不写死 main**。写死之后，在默认分支叫 `master` 或 `trunk` 的仓库上每条命令都指向不存在的分支。**中间那条的限定词不能省**：CI 推一个特性分支时检出的就是那条分支，`origin/HEAD` 往往不存在，无条件取当前分支会把特性分支名写进契约 |
-| `releaseNotesMode` | `dir`（说明按标签分文件）或 `changelog`（单文件） | 它由项目现状决定，不由你的偏好决定 |
-| `tagPrefix` | `v` 或空串 | 插件市场一类要求裸版本号。前缀与工作流触发行不匹配，工作流永不触发 |
-| `commitStyle` | `conventional` / `gitmoji` / `plain` | 只从最近 20 条提交主题判，不要从别人的习惯判 |
-| `workDir` | 按 `docs/work`、`docs/tasks`、`docs/adr`、`todo`、`work` 顺序探，都无才默认 `docs/work` | 已有目录就沿用它，不要新建第二处放工作记录 |
-
-### `docs`
-
-| 字段 | 用途与易错点 |
-| --- | --- |
-| `readmes` / `readmePair` | 已有的 README 清单。`readmePair` 为真说明项目本来就是多语言 |
-| `agents` | `AGENTS.md` 在不在。存在时先读，再决定生成还是刷新 |
-| `contributing` / `releasing` / `license` | 三个协作文件的现状。没有不等于缺，见 `references/docs-set.md` |
-| `otherAiConventions` | 别的 AI 约定文件（`CLAUDE.md`、`.cursorrules`、`.github/copilot-instructions.md` 一类）。**非空时，生成 `AGENTS.md` 时必须先把它们的定位、架构不变量、命令与红线提取进来**——那是用户已经写下的心血，丢弃它比不生成更糟 |
-| `workflows` / `workflowFacts` | 工作流文件与四个判定：有没有检查、有没有发布、`pull_request_target` 与检出提案代码是否**同时**成立、有没有 `contents: write` |
-| `prTemplate` / `issueTemplates` | 协作模板现状。有远端却没有它们时，每份报告都要多追问一轮 |
-
-### `workspace`、`artifacts`、`localSkills`
-
-| 字段 | 用途与易错点 |
-| --- | --- |
-| `workspace.declared` / `packages` | 多包仓库。真则文档写清根与子包分工、CI 在根层跑；假则别去找子包。`packages` 是候选，不是全部 |
-| `artifacts.runtimeRequirements` | 运行环境下限，从清单声明里读。**README 与 `AGENTS.md` 直接照抄它；读不到就整节不写，严禁问用户要版本号**——用户随口报的和清单里的对不上，两处就永久漂移 |
-| `localSkills` | 仓库自带的 skills。盘点是为了**不误删**；`valid` 为假意味着宿主会静默丢掉它 |
-
-### `risks`
-
-| 字段 | 用途 |
-| --- | --- |
-| `secretFiles[].status` | 敏感文件的位置与状态，五档见下 |
-| `secretContent` | 文件内命中凭据形状的位置，精确到行 |
-| `largeFiles` | 超过阈值且没被忽略的文件 |
-| `homePathLeaks[].category` | 硬编码本机路径的位置，四分类见下 |
-| `scanCoverage` | 扫描覆盖。`truncated` 为真或 `skippedLargeFiles` 非空时，报告里**必须如实说「没扫全」** |
-
-| `secretFiles[].status` | 处置 |
-| --- | --- |
-| `tracked` | **最要紧**：已经在历史里。改文件不管用，要轮换凭据再清历史 |
-| `exposed` | 未忽略且未入库。提交前加进忽略规则，或脱敏 |
-| `ignored` | 安全，不要打扰用户 |
-| `undetermined` | 没有版本库可查。那是「没查」，不是「没忽略」 |
-| `unverified-large` | 体量过大没做内容校验。写「未核实」，不写「干净」 |
-
-| `homePathLeaks[].category` | 处置 |
-| --- | --- |
-| `leak` | **必改**。换台机器就断 |
-| `test-data` | 测试夹具里的假路径，**严禁改**——改了测试就失去意义 |
-| `doc-example` | 文档里的示例路径。改成占位写法，不要换成另一台机器的路径 |
-| `generated` | 工作记录与发版说明里的路径，记录的是当时那台机器，**不要改** |
-| 缺失或其他取值 | 一律按 `leak` 处理——没分类的路径，唯一安全的假设是它是真的 |
-
-**判据是形状，所以它知道的是「像凭据」，不知道「是不是真的」。** 报告里写「待确认」，不写「已泄露」；`scanCoverage` 没扫全时，一句「没扫到」就是假话。
-
-## 四、这几种形态要停下来
-
-| 形态 | 为什么不能照单收 | 正确动作 |
-| --- | --- | --- |
-| `isRepoRoot` 为假 | git 报的远端、分支、提交数**全部属于外层仓库**，看起来完全正常，却与你要处理的目录无关 | 停下报告，问清是并入外层仓库还是单独建库；答复之前不提交、不推送 |
-| 目录体量异常大（数万文件或 GB 级） | 扫描会被截断，`scanCoverage` 说的就是这件事；整根纳入版本库可能几十分钟起步，还会把别人的数据搬走 | 先确认根边界与要纳入的子目录，再建库 |
-| 里面嵌着别的仓库 | 子目录有自己的 `.git`，父目录建库会把它变成「看着像目录、其实是独立仓库」的东西，两边的提交互不可见 | 停下问边界：子模块、各自独立、还是并入 |
-| 裸仓库 | 没有工作区，要改文件的地方根本不存在 | 不在这里改文件。要改先克隆出工作区，改完再推回 |
-
-四种的共同后果一样：**做的时候不报错**，等发现时已经推进了别人的仓库，或者已经进了历史。
-
-## 五、从事实到动作
-
-判定表在 `SKILL.md` 的能力矩阵，按行逐条求值。这里只补它不写的两条。
-
-**保守优先**：同一行多列冲突时按更保守的那一列执行。既 `docs-only` 又有远端时，远端只补缺、不重建，发布仍不做。**「不发布」是正常结果，不是失败**：纯文档、明确私有、能力目录、内部工具都不经过制品库，把「没发布」说成「没做完」，会让用户去追一个根本不存在的缺口。
-
-## 六、接着上次做
-
-用户说「继续」时，不要把「做到哪一步」交给回忆。三个机器载体，按这个顺序看：
-
-- **重跑勘察**：只读、几百毫秒，`maturity` 与 `gaps` 就是「还剩什么」，比翻记录快。**它永远是第一步。**
-- **`conventions.workDir` 下的工作记录**（模板里写作 `{{WORK_DIR}}`）：有就读它写的下一步；没有就说明这件事本来不需要跨会话。
-- **`AGENTS.md` 的「## 取舍」节**：已经表态的决定都在这里，不要再问一遍。
-
-没有工作记录时按当前 `gaps` 直接做。**不要为了「显得有条理」凭空建一份**——它的成本是以后有人要读它、维护它。
-
-## 事实来源
-
-本文件涉及的外部事实会随平台变化，动手前拿不准就查官方文档，本文件写的是判定流程而不是字段快照。
+| `target` | 目标目录、规范名、是否可写；所有产物路径相对此根目录计算 |
+| `scale` | `effectiveFiles`（排除忽略与构建目录后的真实文件数）；为 0 时触发空目录起步流程 |
+| `git` | `isRepoRoot`、`isWorktree`（区分独立 worktree 与损坏 `.git`）、`worktreeParent`、`commitsState`、`defaultBranch`、`submodules` |
+| `git.role` | 双轴五态身份：`local-only`（无远端或 `.git/pf-local-mode`）、`maintainer`（与声明源一致且有写权限或自有确认）、`contributor-fork`（存在不同 `upstream` 或 Fork 仓）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
+| `git.auth` | `https`、`ssh`（含 443 回退结果）、`apiChannel`、`details`、`remediationCmd`（协议错配可执行修复命令；SSH-only 仓不再误报无凭据） |
+| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`（`docs/TDD.md`）、`prdDir`、`specsDir`、`todoDir`、`contributing`、`releasing`、`license`、`releaseNotesMode`；缺项决策口径见 `references/docs-set.md` |
+| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并读取 `.agents/skills/.pf-manifest.json` 哈希账本状态 |
+| `ecosystem` / `workspace` | 语言生态、入口清单、`packageManager`、多包目录列表（驱动 `AGENTS.md` 多包边界与忽略规则） |
+| `artifacts` | 运行环境下限（`runtimeRequirements`）与从配置提取的标准命令 |
+| `ci` / `publish` | 现有 GitHub Actions 流水线与发布通道线索 |
+| `risks` | `credentialFindings`（硬编码密钥/令牌）、`homePathLeaks`（严格区分 `test-data` 夹具与真实源码 `leak`）、`largeFiles`、未忽略的构建产物 |
+| `gaps` / `decisions` / `questions` | 缺口清单（对应 `review.mjs` 体检规则）、需人拍板的取舍项、精简提问列表 |
+| `navigation` | 按当前现场算出的必读参考列表，读完对应文档前不进入写入阶段 |

@@ -90,10 +90,12 @@ export function claimsOf(text) {
   const fenceBodies = []
   for (const block of source.matchAll(FENCE_BLOCK)) fenceBodies.push(block[1])
 
-  // 行内代码里也可能是 `git switch main`
+  // 行内代码里也可能是 `git switch main` 或 `node scripts/x.mjs`
   for (const m of source.matchAll(INLINE_CODE)) {
     const token = m[1].trim()
-    if (looksLikeRepoPath(token)) paths.add(token)
+    for (const word of token.split(/\s+/)) {
+      if (looksLikeRepoPath(word)) paths.add(word.replace(/^['"]|['"]$/g, ''))
+    }
     for (const b of token.matchAll(BRANCH_CMD)) branches.add(b[1])
   }
 

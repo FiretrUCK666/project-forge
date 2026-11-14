@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "forgeVersion": "5.0.0",
+  "installedAt": "2026-11-14T08:38:39.159Z",
+  "files": {
+    "dev-explore/SKILL.md": {
+      "sha256": "e2f89532042ac4926f6728993bc56ebbb52ad247ac9be21e1f9771774faae2dd"
+    },
+    "dev-explore/scripts/repo-map.mjs": {
+      "sha256": "8743ba8cf4e452f604237220e365d7be2c37329e6a564240da4f2cadfd508dc8"
+    },
+    "dev-flow/SKILL.md": {
+      "sha256": "660e3b5ce6e3c54b06b42742153f69df416d9a4f610e4a6a12e6089d42efeb62"
+    },
+    "dev-flow/scripts/flow.mjs": {
+      "sha256": "7a8e8c254c507c4a94115b0e86c4e0f739910e51d76ee75a7b0b27a5d3d70310"
+    },
+    "dev-flow/scripts/worktree-deps.mjs": {
+      "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
+    },
+    "dev-govern/SKILL.md": {
+      "sha256": "33f02e6febb94826bc935c259da3d08c7574e609891a7bc7a142131bbe42379e"
+    },
+    "dev-govern/scripts/govern-audit.mjs": {
+      "sha256": "bebe6dbb83ccb8d200b053f56ee25eb6dd0c27006b653ac37b8a5e1175fcf759"
+    },
+    "dev-plan/SKILL.md": {
+      "sha256": "3bfee3258dfd29a300779954ca9ba886fa644a3617c1163574789891a19b1771"
+    },
+    "dev-plan/scripts/doc-plan.mjs": {
+      "sha256": "576fecfbf880c6a97f41fc74e02f44fab48480250558e9d84040735479808702"
+    },
+    "dev-review/SKILL.md": {
+      "sha256": "64b744a355d053d1b89f7256be1dde70c76b957d1571ba76bd5e001e7a85ff47"
+    },
+    "dev-review/scripts/review-pack.mjs": {
+      "sha256": "d95e66e1dbcd6681a6c0eccd609a6dc00f0dcba54dade42f54117d358a7d1950"
+    },
+    "lib/shared.mjs": {
+      "sha256": "53b64e750f0f0db3b0761ed9ecc1e5990e3164e4e94ddf63bb43af2d6f83f591"
+    }
+  },
+  "agentsRegions": {
+    "意图路由": {
+      "sha256": "34a88224404f61fa9e42e420fbdcfdd616d86a8afc63a74b6bcf1f015c750d87"
+    },
+    "项目定位": {
+      "sha256": "a10dae3b061bb1df152c456f3587e95e37d53d51f6b927fd03f1619ae4a273db"
+    },
+    "Dev Profile": {
+      "sha256": "da4322f8bd9e37d818d4a17367a2c4ce0c7c0c9bf866f8981b928ef6d10198d7"
+    },
+    "上下文阅读护栏": {
+      "sha256": "fadf8808931d7587584db8a2f378da7b5b1e7c8d4e7de7c2ca7ebf7553c1e08c"
+    },
+    "架构与关键不变量": {
+      "sha256": "969a59b7b30166f198342d7caa6dd8ef3ad614e37a2640ab0817c5048111cb4a"
+    },
+    "构建与验证": {
+      "sha256": "176f8ae021936609dfe0a40a6606425307b15bec20ac946401cb00b151a22147"
+    },
+    "修改守则": {
+      "sha256": "2a0477d34e8c26bd17e096596bf4c1971900b4563b1b1269226294b78be0df56"
+    },
+    "修改守则补充": {
+      "sha256": "beb8b1c67540d0de5e98cef39912bc4e9544c302234b5e6f04dd6ad2c8bba9ab"
+    },
+    "版本与发布": {
+      "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
+    },
+    "日常协作与风险分流": {
+      "sha256": "b9a913cff04c79b7f786196435e024cbe5c07517f900a5d6a820d21d96463a8d"
+    },
+    "高风险路径": {
+      "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"
+    }
+  }
+}

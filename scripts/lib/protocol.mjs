@@ -382,18 +382,16 @@ export const LIKELY_DEFAULT_BRANCHES = Object.freeze(['main', 'master', 'trunk',
 // 新增自用文件只做一件事：放进已有的那几处（自用脚本进 `scripts/dev/`、工作记录进
 // `docs/work/`、协作设施进 `.github/`）——那一整目录本来就不进包，不用改任何清单。
 
-/** 不进包的目录（与 `.gitattributes` 的 `export-ignore` 对应）。 */
+/** 不进包的目录（与 `.gitattributes` 的 `export-ignore` 对应；`kit/` 保留进用户包）。 */
 export const REPO_ONLY_DIRS = Object.freeze([
+  '.agents/',
   '.github/',
   'docs/',
   'scripts/dev/',
 ])
 
-/** 不进包的所有目录前缀（包含 `.agents/` 与 `docs/`；`kit/` 保留进用户包）。 */
-export const REPO_ONLY_PREFIXES = Object.freeze([
-  ...REPO_ONLY_DIRS,
-  '.agents/',
-])
+/** 不进包的所有目录前缀（与 `REPO_ONLY_DIRS` 同源）。 */
+export const REPO_ONLY_PREFIXES = REPO_ONLY_DIRS
 
 /** 不进包的顶层单文件。它们没有目录可以承载，只能逐条列。 */
 export const REPO_ONLY_FILES = Object.freeze([

@@ -10,6 +10,23 @@
 - **AI 自维护授权**：项目架构、命令或约定发生实质变更导致本文件失准时，直接更新本文并
   随代码一同提交；涉及用户可见行为或命令变化时，必须同步更新 `README.md`。
 
+
+<!-- project-forge: begin 意图路由 -->
+## 意图路由（静默触发，不反问）
+
+收到用户自然语言需求时，**不要反问「要不要调用某 skill」或要求输入 `/skill`**，直接静默加载对应 `SKILL.md` 并先执行对应引擎脚本：
+
+| 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
+| --- | --- | --- |
+| 理解项目 / 梳理架构 / 找模块入口 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/repo-map.mjs` |
+| 写需求 / 定方案 / 拆任务 / 查文档全景 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs` |
+| 做功能 / 修缺陷 / 接 Issue / 改 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect` |
+| 提交 / 推分支 / 开或更新 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
+| 本地预审 / 独立审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
+| 合并 PR / 清理本地分支与 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+| 代码体检 / 清技术债 / 对齐契约与文档 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
+| 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
+<!-- project-forge: end 意图路由 -->
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位
 
@@ -21,6 +38,27 @@
 做不到时**先改自己，再改规范**。
 <!-- project-forge: end 项目定位 -->
 
+
+<!-- project-forge: begin Dev Profile -->
+## Dev Profile
+
+以下键值由研发流脚本自动读取，核对后替换为真实值（无对应项填 `none`）：
+
+```yaml
+quick-test: node scripts/dev/preflight.mjs
+full-test: node scripts/dev/fixtures.mjs
+merge-gate: node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs
+high-risk: scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes
+do-not-edit: docs/archive/, docs/release-notes/
+```
+<!-- project-forge: end Dev Profile -->
+
+<!-- project-forge: begin 上下文阅读护栏 -->
+## 上下文阅读护栏
+
+- **按序读取**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `repo-map.mjs` 定位源码；修改前先跑 `flow.mjs inspect` 拿当前角色与任务状态。
+- **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建产物缓存（仅当任务显式命中时定向查阅）。
+<!-- project-forge: end 上下文阅读护栏 -->
 <!-- project-forge: begin 架构与关键不变量 -->
 ## 架构与关键不变量
 
@@ -31,11 +69,10 @@
 | 入口 | `SKILL.md` | 调度与红线：四步、门控表、能力矩阵、硬不变量。**不写判据** |
 | 决策 | `references/` | 每份回答一类问题；动手前读完全文，读的是反直觉的那几条 |
 | 落盘骨架 | `templates/` | 写进被治理项目的文件母版；条件块与占位符在生成时求值 |
-| 引擎 | `scripts/` | `survey` 勘察、`compose-agents` 生成、`review` 体检、`handoff` 交棒、`sync-toc` 目录同步、`update` 自更新 |
+| 内置技能 | `kit/skills/` -> `.agents/skills/` | 五套自包含研发 Skill 单源；通过 `equip.mjs` 同步生成 `.agents/skills/` 与 `.pf-manifest.json` |
+| 引擎 | `scripts/` | `survey` 勘察、`equip` 装备、`compose-agents` 生成、`review` 体检、`handoff` 交棒、`sync-toc` 目录同步、`update` 自更新 |
 
-`scripts/lib/` 是三个单一真相源：`protocol.mjs`（标记语法、预算、包边界）、
-`template.mjs`（条件求值、变量替换）、`render.mjs`（报告排版）。`scripts/dev/` 只服务本仓库，
-不进用户包。
+`scripts/lib/` 收敛标记与预算（`protocol.mjs`）、模板求值（`template.mjs`）、报告排版（`render.mjs`）、契约回查（`claims.mjs`）与平台探针（`platform/`）。完整架构与不变量见 `docs/TDD.md`；`scripts/dev/` 与 `.agents/` 只服务本仓库，不进用户包。
 
 ### 关键不变量（破坏即事故）
 
@@ -67,8 +104,10 @@
 
 ```sh
 node scripts/dev/preflight.mjs                              # 结构 + 引用 + 模板 + 自举 + 端到端冒烟
+node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 结论配对检查
 node scripts/dev/fixtures.mjs                               # 行为断言：造临时项目实跑，正反双向
-node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、该有的节都在
+node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、体积 <= 30KB
+node scripts/equip.mjs . --check                            # kit/skills 与 .agents/skills 字节级一致
 node scripts/review.mjs .                                   # 交付体检，预期 0 个「缺」
 node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
 ```
@@ -91,11 +130,11 @@ node scripts/dev/verify-injections.mjs
 <!-- project-forge: begin 修改守则 -->
 ## 工程修改守则与硬性规范
 
-- **先看再动，贴合既有结构**：改之前先读现有实现、依赖与相邻代码，摸清这个项目已经怎么做事；能并入现成机制的就别另起炉灶，改动范围尽量小。
-- **治本不治标，不留双轨**：先查清故障为什么发生再动手，不用「加个判断挡住它」「出错就重试一次」把症状往后推；被替换掉的旧逻辑一并清干净，不让新旧两套做法并存。
-- **小步验证，严控依赖**：每改一处就确认跟它相关的地方还正常；不擅自引入第三方依赖，确需引入时先说明理由并取得确认。
-- **测试正反双向**：修缺陷先写一个能稳定复现的失败测试；新增判定或解析逻辑必须同时覆盖正面用例与易误判的反面用例。
-- **不写履历，文档同步**：代码、注释与文档只描述当前状态，不写「以前是……后来改成……」；凡涉及用户可见行为、命令或配置的变化，必须同一次提交更新 `README.md`。
+- **先看再动，贴合既有结构**：先读现有实现与相邻代码，能并入现成机制就不另起炉灶。
+- **治本不治标，不留双轨**：先查清根因再动手，被替换掉的旧逻辑一并清干净，不留新旧双轨并存。
+- **小步验证，严控依赖**：不擅自引入第三方依赖，确需引入时先说明理由并取得确认。
+- **测试正反双向**：修缺陷先写稳定复现的失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判的反面用例。
+- **不写履历，文档同步**：只描述当前状态；改动代码导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
 - 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
 - **多语文档成对同步**：本仓库有 `README.en.md`、`README.md`，改任一语言版本必须同步另一份，并保持双向互指链接有效。
 <!-- project-forge: end 修改守则 -->
@@ -111,87 +150,70 @@ node scripts/dev/verify-injections.mjs
 <!-- project-forge: begin 版本与发布 -->
 ## 版本管理与回滚底线
 
-- **提交纪律**：一次实质变更一个独立提交，提交信息说清「改了什么、为什么」，不用内部编号充当说明；大改动或高风险操作前先提交一个干净存档点；项目若有入库的构建产物、锁文件或自动生成目录，必须与源码改动在同一次提交中更新。
-- **回滚四档**：
-  - 未提交 → 丢弃工作区改动；
-  - 已提交未推送 → 回退到存档点；
-  - **已推送到远端 → 一律用反向提交，严禁强制推送或改写已推送历史**；
-  - 已发布版本 → 只能发新版本修正（版本号单调递增，**永不复用或删除已发布版本**）。
+- **提交纪律**：一次实质变更一个独立提交，提交信息说清「改了什么、为什么」，不用内部编号充当说明；大改动或高风险操作前先留干净存档点；有入库构建产物或锁文件须同提交更新。
+- **回滚四档**：未提交 -> 丢弃工作区；已提交未推 -> 回退存档点；**已推送远端 -> 一律反向提交，严禁强推或改写已推送历史**；已发布版本 -> 只能发递增的新版本（永不复用或删旧版）。
 
 ### 版本号与发版死锁防护
 
-版本号以 `SKILL.md` 为唯一权威来源；**兼容性下限（最低支持版本）只上移、不下移、默认不动**（上移须同步修改清单与 `README.md` 的环境要求节）。
+版本号以 `SKILL.md` 为唯一权威来源；**兼容性下限只上移、不下移、默认不动**（上移须同步修改清单与 `README.md` 环境要求节）。
 
 **日常与发版是两件事，默认只做前一件：**
 
-- **日常**：改完 → 跑门禁 → 提交 → **推自己的分支 → 开 PR → 独立审查 → 合并**。**不打标签、不建发布页、不发制品库。**
+- **日常**：改完 -> 跑门禁 -> 提交 -> **推自己的分支 -> 开 PR -> 独立审查 -> 合并**。**不打标签、不建发布页、不发制品库。**
 
-  **推到哪一档由「能不能撤回」决定，不由「是不是对外」决定**：推自己的分支、开 PR、
-  改 PR 都能撤回（删分支、关 PR），属于日常；合并默认分支、发布、改可见性、改写历史
-  撤不回来，要先给人看清单。**强制推送与改写已推送历史永不自动执行。**
-- **发版**：只有明确说要「发版」时才做，顺序严格按 `RELEASING.md`——先提交并推送发布说明（`docs/release-notes/<标签>.md`）到默认分支 `main`，确认就绪后再打标签推送（反过来会让远端自动化因读不到说明文件直接失败）。
-- **不自己判断「该发版了」**：攒了几个改动、版本号看着该抬了、上一个标签隔得有点久了——都不是发版理由。发版是一个对外动作，要人点头。
-- **回读才算发完**：标签推上去之后要确认发布页正文与说明逐字一致、附件在、制品库版本已就位。命令返回 0 只说明它自己认为成功了。
+  **推到哪一档由「能不能撤回」决定，不由「是不是对外」决定**：推自己的分支、开 PR、改 PR 都能撤回，属于日常；合并默认分支、发布、改可见性、改写历史撤不回来，要先给人看清单。**强制推送与改写已推送历史永不自动执行。**
+- **发版**：只有明确说要「发版」时才做，顺序严格按 `RELEASING.md`——先提交并推送发布说明（`docs/release-notes/<标签>.md`）到默认分支 `main`，再打标签推送。
+- **不自己判断「该发版了」**：攒了几个改动或隔了一阵都不是理由，发版必须人点头。
+- **回读才算发完**：标签推上后回读发布页正文、附件与制品库版本均已就位才算完成。
 <!-- project-forge: end 版本与发布 -->
 
 <!-- project-forge: begin 日常协作与风险分流 -->
 ## 日常协作：改动怎么落地
 
-- **第一步：先判角色（不靠猜）**。
+- **第一步：双轴五态身份判定（不靠猜）**。
 
-  先核对远端与源仓库：`origin` 与项目声明的源仓库一致，你就是**维护者**；不一致（或存在不同的 upstream、或未声明源仓库没法比对）一律按**贡献者（Fork）**处置——从 `main` 拉新分支 → 门禁全绿 → 推自己的分支 → 开 Pull Request（详见 `CONTRIBUTING.md`），**严禁直接推正本主干、打标签或发版**。
+  先核对远端与源仓库：`origin` 与项目声明的源仓库一致且本机有写权限时为 **maintainer**（走分支 -> 门禁 -> 推自己分支 -> 开 PR -> 独立审查 -> 合并，严禁直推主干）；存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
 
-- **第二步：三问定档（先问，不要查表）**——
+- **第二步：五档开工分流（Case 1..5）**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）：
 
-  | 问 | 是 → 开工前必须有什么 |
-  | --- | --- |
-  | **要过独立审查吗？** | 动手前冻结验收标准：`C1`、`C2`…，每条能被一条命令或一条断言证明 |
-  | **会跨会话、或存在需要人拍板的设计选择吗？** | 在 `docs/work/` 建工作记录（含验收标准与「产物清单」）；**AI 只写草稿，不能自己批准** |
-  | **在这个工作区里改，会动到不属于这次改动的东西吗？** | 建实施位（见下）。改坏了不会当场红的，另加：派实现子代理 |
+  | 档位 | 触发特征 | 文档与检查动作 |
+  | --- | --- | --- |
+  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑相关校验 |
+  | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写稳定复现失败测试再修（Red-Green）** |
+  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `docs/todo/` 建 Todo，冻结 `C1`、`C2`… |
+  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/`（`Status: approved`）+ `docs/todo/` Todo |
+  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，人拍板后再继续 |
 
-  外加一条不参与组合的硬规则：**碰下方「高风险路径」表里的任何一处 → 必须有独立审查**。
+  外加一条硬规则：**触碰下方「高风险路径」任一处 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
 
-  **第三问覆盖「改动大不大」这类模糊判断**：脏工作区、两件事并行、别人的改动正在这里——都是同一个问题的实例，即「切分支会不会把不属于这次的东西卷进来」。会就隔离，不会就就地改。
+- **第三步：三档隔离与 Worktree 共享依赖**——
 
-  三问的结论要留痕：写进首次回复、Issue 评论或 PR 的「实现依据」栏，说清走了哪几条、为什么其余不需要。
+  | 档位 / 场景 | 隔离策略 | 谁能动 / 怎么用 |
+  | --- | --- | --- |
+  | 第 1 档：`L1` 且主仓工作区干净 | 本地新建特性分支 | 就地开发，不建多余 worktree |
+  | 第 2 档：`L2`/`L3`、接 Issue、脏主仓或并行 | `.worktrees/impl-<taskId>/`（新分支）+ `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；独立审查者在 `review-*` 做故障注入，用完即弃 |
+  | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危变更，禁用生命周期脚本经人确认后再跑门禁 |
 
-- **第三步：隔离到什么程度——两个工作位**——
+  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**。`.worktrees/` 必须已忽略；卸前先问人。
 
-  | 位 | 路径 | 检出什么 | 谁能动 | 做什么 |
-  | --- | --- | --- | --- | --- |
-  | **实施位** | `.worktrees/impl-<短标识>/` | **一条新建的分支** | 实施者，同一时刻只有一个 | 改代码、提交、推送、开或更新 PR |
-  | **审查位** | `.worktrees/review-<短SHA>/` | **detached 检出实施 HEAD 那个 SHA** | 审查者（独立上下文），用完即弃 | 故障注入、跑测试、改坏再还原 |
+- **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
-  三条规矩是这个模型自己长出来的：**实施位里一定是新建分支**（detached 上的提交没有引用，切走就成悬空提交）；**审查位永远不检出分支**，所以它提交不了、推不了、碰不到实施位——它中途断了，损失的只是一个临时目录；**故障注入只在审查位做**，在实施位做就得还原，而还原本身会失败。
-
-  `.worktrees/` 必须已被忽略。建之前确认目标路径没被占用；**卸之前先问人**，那是别人的机器。
-
-- **第四步：认领与六个评论节点（有远端时适用）**——
-
-  **谁改，谁先认领**：在 Issue 留一条评论写明账号与分支，然后才动手。**一次改动 = 一个分支 = 一个 PR**；返工永远在原分支追加提交、更新**同一个** PR，不新建分支、不新开第二个 PR、不强推。
+  **谁改，谁先认领**（`flow.mjs claim`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]` 并归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented` 补实现说明、确认代码-文档对齐。
 
   | 节点 | 留在哪 | 说什么 |
   | --- | --- | --- |
   | 认领 | Issue | 谁认领、用哪条分支 |
   | 已提 PR | Issue | PR 链接，以及 `Fixes #N` / `refs #N` |
-  | 审查退回 | PR **和** Issue | 哪几条标准没过、故障注入记录、这是第几轮 |
+  | 审查退回 | PR **和** Issue | 哪几条标准没过、故障注入记录、第几轮 |
   | 审查通过 | PR **和** Issue | `fail` 为空、下一棒是谁 |
   | 返工已提交 | PR **和** Issue | 新 HEAD 短哈希、门禁已重跑、请重新审核 |
-  | 已合并 | Issue | 合并到哪、这一条关掉了哪几个 Issue |
+  | 已合并 | Issue | 合并到哪、关掉了哪几个 Issue |
 
-  **「返工已提交」必须在 PR 里留**：审查者靠它知道该复审了，靠里面的 HEAD 知道该 detach 哪个 SHA。审查退回与通过两边都要留——只留一侧时，两边各自以为自己看到的是全貌。
-
-  没有远端时整节跳过：不认领、不开 PR，执行者写在工作记录表头。
+  没有远端时跳过平台动作，在任务账本记录执行者与结论。
 
 - **第五步：独立审查与合并**——
 
-  **独立审查通过之后，由那个审查者直接合。** 不按风险高低分层，也不因为提案来自外部就拦下来：
-  人是不会去读代码的，把合并挂在人身上，实际发生的是「点一下同意」，只增加等待，没增加判断。
-  真正做判断的是审查——它拿到冻结的验收标准、diff、门禁原始输出，并且做过故障注入。
-  外部 PR 同样如此，防陌生人的那一层在**审查之前**（先只读审 diff，跑门禁时关掉生命周期脚本）。
-
-  **唯一必须人点头的一类：弱化门禁。** 删测试、放宽断言、加跳过标记、把检查改成警告、改松 CI
-  —— 别的改动做错了下一次门禁会红；它做错了**以后每一次都不会红，包括这一次**，而外观是「构建绿了」。
+  **独立审查通过之后，由那个审查者直接合。** 外部 PR 同理，安全防线在审查前（只读扫描与禁用生命周期脚本）。**唯一必须人点头的一类：弱化门禁**（删测试、放宽断言、加跳过标记、改警告、改松 CI）。
 
   | 改动 | 谁能合 |
   | --- | --- |
@@ -199,41 +221,26 @@ node scripts/dev/verify-injections.mjs
   | 触碰下方「高风险路径」任一处 | 审查者合，但审查必须是独立上下文 + 故障注入 |
   | **弱化门禁** | **必须人点头** |
 
-  发版、改可见性、改写历史这三件与谁审无关，永远不自动（见上面「版本管理与回滚底线」）。
-  要更保守时，在「## 取舍」里写 `merge-authority: human`，把「审查者直接合」也收回人手。
-
-  **审查只判冻结的验收标准，不判「还能不能更好」。** 结论按 `fail: C1, C4` / `pass: C2` 给，
-  不写「整体不错」这类评价；「通过」是 `fail` 为空加一份故障注入记录算出来的，不是审查者的一句话。
-  四条收敛规则、两条止损、轮次上限的具体数字，**只在协作判据里写一份**，本节不抄——
-  抄一份就多一处会漂，而漂的那一份看起来同样权威。
-  打回后在**原分支**追加提交、重跑门禁、更新**同一个** PR；HEAD 没前进的重提直接拒绝；
-  已合并的 PR 不再打回，之后才发现的问题按新 Issue 处理。
+  `contributor-fork` 严禁自合正本 PR，提交后等待上游维护者处理。在「## 取舍」写 `merge-authority: human` 时收回人工确认；发版、改可见性、改写历史永不自动。审查只判冻结标准 `C*`（`fail:`/`pass:` + 故障注入记录），六锁收敛与停损熔断规则只在协作判据写一份，不在本节复抄。
 
 - **第六步：合并收尾与平台交互防乱码**——固定 7 步，顺序不能调：
-  1. **把要写的东西写完，并纳入这次 PR**：工作记录的「完成后的记录」、验收标准的勾选、
-     断点写成「已完成，无遗留」。**提交进同一个分支**——合并之后再改仓库文件，就得再开一个
-     只改记录的 PR，而那个 PR 没人审、也没和这件事绑在一起；
+  1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；
   2. 合并 PR（**不勾选自动删分支**）；
   3. 回读确认 `state=MERGED`；
   4. `git switch main && git pull`；
-  5. **先卸 worktree**：`git worktree remove <路径>`（分支还被 worktree 检出着时，下一步一定失败，而报错说的是「未合并」）；
+  5. **先卸 worktree**：`git worktree remove <路径>`（先用 `worktree-deps` 解绑共享依赖链接再删；分支被 worktree 检出时下一步必败）；
   6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；
-  7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base；**两件都清了才** `git push origin --delete <分支>`。
+  7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base（Fork 场景另查上游 PR 非 `OPEN`）；**两件都清了才** `git push origin --delete <分支>`。
 
-  **第 1 步为什么在合并之前**：工作记录是仓库里的文件，合并之后改它，平台会拒掉直接推主干，
-  于是只能另开一个只改记录的提案。**这不是纪律问题，是顺序问题**——把「写记录」放在「合并」
-  之后，等于要求每件事都多出一个 PR。只在平台上说话的 Issue 回写（评论、状态）合并之后做没关系，
-  它不产生提交，也就不产生提案。
+  **第 1 步为什么在合并之前**：文档与任务单是库内文件，合并后主干拒推会迫使每件事多出一个只改记录的 PR。
 
-  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支，以及「干净的」是哪几项。**问到人点头才删**；没问到人就写进汇报，不自己动手——问不到人与他同意是两件事。
+  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支，以及「干净的」是哪几项。**问到人点头才删**（对应 `flow.mjs cleanup --confirm`）；没问到人只汇报，不自己动手。
 
-  通过平台命令创建或更新 Issue、PR、Release、评论时，**含中文或非 ASCII 的正文一律先写入系统临时目录的 UTF-8 文件，用 `--body-file` / `--notes-file` 提交**，提交后回读比对并删掉临时文件；**严禁在命令行直接拼接正文字符串**。
+  通过平台命令创建或更新 Issue、PR、Release、评论时，**含中文或非 ASCII 的正文一律先写入系统临时目录的 UTF-8 文件，用 `--body-file` / `--notes-file` 提交**并回读删临时文件；**严禁命令行直接拼接正文字符串**。
 
-- **日常到此为止**：合并就是一次改动的终点。**发版是另一件事**，要人明确说才做
-  ——见上面「版本管理与回滚底线」那一节。别把「这条改完了」顺势读成「该发版了」。
+- **日常到此为止**：合并就是一次改动的终点。**发版是另一件事**，要人明确说才做——见上面「版本管理与回滚底线」。
 
-- **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；
-  指路一律用标题名，不用节号——重排一次，节号就废了，而它不会报错。
+- **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；指路一律用标题名，不用节号。
 <!-- project-forge: end 日常协作与风险分流 -->
 
 <!-- project-forge: begin 高风险路径 -->
@@ -246,6 +253,7 @@ node scripts/dev/verify-injections.mjs
 | `scripts/lib/` | 标记语法、条件求值、报告排版的单一真相源；错一处，四条路径同时静默失效 |
 | `scripts/dev/preflight.mjs` | 门禁本身。它被改松时没有任何东西会报错，包括它自己 |
 | `templates/` | 写进别人项目里的骨架；条件写错一整块会静默消失 |
+| `kit/` | 随包分发且同步进 `.agents/skills/` 的五套研发 Skill；改后须重跑 `equip.mjs .` |
 | `SKILL.md` | 入口。删掉一条门控，等于让后面每一步都失去前置检查 |
 | `AGENTS.md` | 本文件。它是受管区间的容器，改坏了刷新就再也对不上 |
 | `.github/workflows/` | 发布链路的门；门被改松，下一次发版就没人拦 |
@@ -273,7 +281,8 @@ node scripts/dev/verify-injections.mjs
 | `references/` 里任一判据 | `SKILL.md` 里指向它的那一行（能指就不抄）、`scripts/review.mjs` 的 `ref` 指路 |
 | `templates/` 里任一骨架 | 本仓库对应的实例文件（`AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`.github/` 下那几份） |
 | `templates/agents-project.md` | 本仓库的 `AGENTS.md`——它必须由 `compose-agents.mjs` 生成，不许手写后放着不管 |
-| `scripts/` 里任一脚本 | `SKILL.md` 的「有一段代码要跑到」那节、`scripts/dev/fixtures.mjs` 的正反用例 |
+| `kit/skills/` | 重跑 `node scripts/equip.mjs .` 同步 `.agents/skills/` 并保持 `--check` 通过 |
+| `scripts/` 里任一脚本 | `SKILL.md` 的「核心脚本」那节、`scripts/dev/fixtures.mjs` 的正反用例 |
 | `README.md` 的结构或能力 | `README.en.md` 成对改，并重跑 `sync-toc` |
 | 发布链路的任何一处 | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` |
 

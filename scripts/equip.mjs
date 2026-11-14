@@ -219,7 +219,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) 
 export function equip(targetDir, {
   kitDir = DEFAULT_KIT_SKILLS_DIR,
   dryRun = false,
-  forgeVersion = skillVersion(SKILL_ROOT) || '0.0.0',
+  forgeVersion = skillVersion(readTextSafe(join(SKILL_ROOT, 'SKILL.md'))) || '0.0.0',
   now = new Date().toISOString(),
 } = {}) {
   const root = resolve(targetDir)

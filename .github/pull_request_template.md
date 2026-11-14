@@ -21,16 +21,16 @@
 
 <!-- 改动本身的理由。关联 Issue 不代表理由：Issue 说「哪里不对」，这里说「为什么这么改」。 -->
 
-工作记录: <!-- docs/work/YYYY-MM-DD-主题.md；没建单时写「无（并说明为什么不需要）」，不要留空 -->
+关联文档: <!-- Case 3/4 填本次同步提交或已归档的路径（如 docs/archive/todo/YYMMDD-主题.md 或 docs/specs/YYMMDD-主题.md）；Case 1/2 或外部贡献者写「无（说明原因）」，不要留空 -->
 
 ## 实现依据
 
 <!--
-**这个改动凭什么成立。** 按 `AGENTS.md`「日常协作」里的三问逐条回答，答「是」的说清产物在哪：
+**这个改动凭什么成立。** 说明本改动走哪一档及对应产物位置：
 
-1. 要过独立审查吗（是 → 冻结的验收标准在哪一份工作记录里）；
-2. 会跨会话或有人拍板的设计选择吗（是 → 工作记录路径）；
-3. 在这个工作区里改会动到别人吗（是 → 实施位路径与分支名）。
+1. 五档分流判据（Case 1 文档问答 / Case 2 局部修复附回归测试 / Case 3 内部任务 Todo / Case 4 跨模块 SPEC+Todo / Case 5 先更新 TDD）；外部贡献者仅需说明改动依据与边界，无需内部 Todo；
+2. 是否需要独立审查（是 → 冻结的验收标准 C1..Cn 在何处）；
+3. 开发隔离位与分支名（或单独的 worktree 路径）。
 
 「按问题实现」「见需求」「TBD」「先这样，回头补」这类写法不认：写了等于没写。
 -->
@@ -44,9 +44,10 @@
 
 ```sh
 node scripts/dev/preflight.mjs
-node scripts/dev/fixtures.mjs
 node scripts/dev/gap-coverage.mjs
+node scripts/dev/fixtures.mjs
 node scripts/compose-agents.mjs . --check
+node scripts/equip.mjs . --check
 node scripts/review.mjs .
 node scripts/sync-toc.mjs README.md README.en.md --check
 ```
@@ -72,12 +73,12 @@ git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg
 
 <!--
 改动落在哪些路径、有没有碰到收不回来的地方。碰到下面任何一处就是高风险改动：不能只看门禁
-绿，必须有一轮独立审查，并且由维护者人工合并。
+绿，必须有一轮独立审查（含故障注入）：
 
 - `SKILL.md`、`AGENTS.md`——入口与契约。删掉一条门控，等于让后面每一步都失去前置检查；
-- `scripts/`，尤其 `scripts/lib/protocol.mjs`（标记语法、预算、包边界的单一真相源）、
-  `scripts/lib/claims.mjs`（契约回查）与 `scripts/dev/preflight.mjs`（门禁本身，它被改松时
-  没有任何东西会报错，包括它自己）；
+- `kit/`（`kit/skills/`）与 `scripts/`，尤其 `scripts/lib/protocol.mjs`（标记语法、预算、包边界的单一真相源）、
+  `scripts/lib/claims.mjs`（契约回查）、`scripts/equip.mjs`（三态同步与清空）与 `scripts/dev/preflight.mjs`（门禁本身，
+  它被改松时没有任何东西会报错，包括它自己）；
 - `templates/`——写进别人项目里的骨架，条件写错一整块会静默消失；
 - `.github/`——持续集成与发布链路的门；
 - `.gitattributes`——它决定用户包里有什么。
@@ -88,11 +89,12 @@ git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg
 ## 合并授权
 
 <!--
-谁按最后那个按钮。判据见 `AGENTS.md`「日常协作」的第五步：
+谁按最后那个按钮。判据见 `AGENTS.md`「日常协作：改动怎么落地」的第五步：
 
 - 独立审查 `fail` 为空 → **审查者直接合**。人的手不参与代码判断，递给人只会多一次「点同意」。
-- 外部贡献者的提案 → 同上。防陌生人的那一层在**审查之前**（先只读审 diff，跑门禁时关掉
-  生命周期脚本），不在合并这一步。
+- 外部贡献者的提案（`contributor-fork`）→ 同上。防陌生人的那一层在**审查之前**（先只读审 diff +
+  `review-pack.mjs --untrusted-scan`，跑门禁时关掉生命周期脚本），不在合并这一步；`contributor-fork`
+  角色禁止直接合并或越权操作上游。
 - 碰 `AGENTS.md`「高风险路径」任一处 → 审查者合，但审查必须是独立上下文加故障注入。
 - **弱化门禁**（删测试、放宽断言、加跳过标记、改松 CI）→ **必须人点头**。它坏掉之后每一次
   门禁都不会红，而外观是「构建绿了」。
@@ -135,4 +137,4 @@ git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg
 - [ ] 新增或修改勘察 / 门禁判定逻辑时，同一次提交在 `scripts/dev/fixtures.mjs` 里补了正反双向用例
 - [ ] 新增缺口判定时，在 `scripts/dev/gap-coverage.mjs` 那边登记了处置（体检 / 表态 / 仅勘察）
 - [ ] 没有引入硬编码的本机路径或任何凭据
-- [ ] 关联的工作记录里，状态与断点已更新（没建单的写清了为什么不需要）
+- [ ] 代码导出、CLI 或用户可见行为改变时，已同步更新 `docs/TDD.md` / `README` / `AGENTS.md`，且 `docs/todo/` 与 `docs/specs/` 状态已于合并前更新归档（或写清为什么不需要）

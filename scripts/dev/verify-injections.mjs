@@ -86,7 +86,7 @@ const INJECTIONS = [
     id: 'I9',
     what: '合并收尾把第 5、6 步对调（先删分支再卸 worktree）',
     file: 'templates/agents-project.md',
-    from: '  5. **先卸 worktree**：`git worktree remove <路径>`（分支还被 worktree 检出着时，下一步一定失败，而报错说的是「未合并」）；\n  6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；',
+    from: '  5. **先卸 worktree**：`git worktree remove <路径>`（先用 `worktree-deps` 解绑共享依赖链接再删；分支被 worktree 检出时下一步必败）；\n  6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；',
     to: '  5. **先删本地分支**：`git branch -d <分支>`（不是 `-D`）；\n  6. **再卸 worktree**：`git worktree remove <路径>`；',
     expect: '合并收尾',
   },
@@ -98,8 +98,8 @@ const INJECTIONS = [
     id: 'I9b',
     what: '合并收尾把「写记录」整块挪到合并之后（逼出多余 PR 的那个顺序）',
     file: 'templates/agents-project.md',
-    from: '  1. **把要写的东西写完，并纳入这次 PR**：工作记录的「完成后的记录」、验收标准的勾选、\n     断点写成「已完成，无遗留」。**提交进同一个分支**——合并之后再改仓库文件，就得再开一个\n     只改记录的 PR，而那个 PR 没人审、也没和这件事绑在一起；\n  2. 合并 PR（**不勾选自动删分支**）；',
-    to: '  1. 合并 PR（**不勾选自动删分支**）；\n  2. **把要写的东西写完，并纳入这次 PR**：工作记录的「完成后的记录」、验收标准的勾选、\n     断点写成「已完成，无遗留」。**提交进同一个分支**——合并之后再改仓库文件，就得再开一个\n     只改记录的 PR，而那个 PR 没人审、也没和这件事绑在一起；',
+    from: '  1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；\n  2. 合并 PR（**不勾选自动删分支**）；',
+    to: '  1. 合并 PR（**不勾选自动删分支**）；\n  2. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；',
     expect: '合并收尾',
   },
   {
@@ -154,7 +154,7 @@ const INJECTIONS = [
   {
     id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
-    file: 'templates/work-item.md',
+    file: 'templates/docs-todo.md',
     // 两条一起改：只改第一条的话，第二条 `C2` 还在，判据仍然看得到合法编号。
     from: '- [ ] C1: <第一条可判定的标准>\n- [ ] C2: <第二条>',
     to: '- [ ] 1. <第一条可判定的标准>\n- [ ] 2. <第二条>',
@@ -165,7 +165,7 @@ const INJECTIONS = [
     // 不会有任何信号——而那句话一改，第二个 PR 就又回来了。
     id: 'I10b',
     what: '工作记录模板把「在合并之前写完」改回「合并之后补」',
-    file: 'templates/work-item.md',
+    file: 'templates/docs-todo.md',
     from: '**在合并之前写完，随这次改动一起提交。**',
     to: '**合并之后补。**',
     expect: '完成后的记录',
@@ -236,6 +236,54 @@ const INJECTIONS = [
     to: `// 详见第` + `四` + `节。\nexport `,
     expect: '节号指针',
   },
+  {
+    id: 'I19',
+    what: '破坏 .agents/skills/ 与 kit/skills/ 的字节级一致性',
+    file: '.agents/skills/dev-flow/SKILL.md',
+    from: 'name: dev-flow',
+    to: 'name: dev-flow-drifted',
+    expect: '内置套件一致性失败',
+  },
+  {
+    id: 'I20',
+    what: '把非 GitHub 平台词塞进 kit/ 产物层（验证双层平台禁词扫描）',
+    file: 'kit/skills/dev-flow/SKILL.md',
+    from: 'name: dev-flow',
+    to: 'name: dev-flow\n# ' + 'Git' + 'Lab',
+    expect: '别的托管平台不进产物层',
+  },
+  {
+    id: 'I21',
+    what: '拆掉 clone-readonly 防误判分支（他人公开仓退化成 maintainer）',
+    file: 'scripts/lib/platform/github.mjs',
+    from: `      return {\n        role: 'clone-readonly',\n        reason: \`origin 与 \${origin} 一致，但历史提交非本机作者且无写权限证明（按只读克隆处置）\`,\n      }`,
+    to: `      return {\n        role: 'maintainer',\n        reason: \`origin 与 \${origin} 一致\`,\n      }`,
+    expect: '他人公开仓被误判成',
+  },
+  {
+    id: 'I22',
+    what: '跳过 worktree-deps unmountSharedDeps 的 unlinkSync 解绑',
+    file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs',
+    from: `      // 关键安全操作：只对符号链接/junction 本身调用 unlinkSync，绝不触碰目标目录内容\n      unlinkSync(dst)\n\n      if (lstatSafe(dst) !== null) {\n        throw new Error(\`解绑依赖链接失败，路径仍然存在：\${dst}\`)\n      }`,
+    to: '      // 安全操作被跳过（未执行 unlinkSync 解绑）',
+    expect: 'unmount 后 worktree node_modules 依然存在',
+  },
+  {
+    id: 'I23',
+    what: '放行外部 PR --untrusted-scan 高危 workflow/postinstall 拦截',
+    file: 'kit/skills/dev-review/scripts/review-pack.mjs',
+    from: '    if (hazards.length > 0 && !opts.humanApprovedExec) {',
+    to: '    if (false && hazards.length > 0 && !opts.humanApprovedExec) {',
+    expect: '高危 workflow/postinstall 未拦截',
+  },
+  {
+    id: 'I24',
+    what: '关闭 compose-agents.mjs 30720 字节上限阻断门禁',
+    file: 'scripts/compose-agents.mjs',
+    from: '    oversize: bytes > AGENTS_MAX_BYTES,',
+    to: '    oversize: false,',
+    expect: '30720',
+  },
 ]
 
 function runFixtures() {
@@ -264,8 +312,10 @@ function runPreflight() {
  * 是因为跑错了那一套，而「没红」会被当成一条结论。判据只有一条：**拆掉一处之后，只要有
  * 任何一道门禁报出来，就算有人看着它**。猜哪一套会看，是这套复验里最容易出错的一步。
  */
-function runBoth() {
-  return { failed: [...runPreflight().failed, ...runFixtures().failed] }
+function runBoth(expect) {
+  const pre = runPreflight()
+  if (expect && pre.failed.some((line) => line.includes(expect))) return pre
+  return { failed: [...pre.failed, ...runFixtures().failed] }
 }
 
 let bad = 0
@@ -300,7 +350,7 @@ for (const inj of INJECTIONS) {
     // **两套门禁都跑。** 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人
     // 看着它。按路径前缀猜「该由谁看」，猜错的那次注入就不会红，而「没红」会被读成
     // 「判据不灵」——那是把一次跑错当成了一条结论。
-    const result = runBoth()
+    const result = runBoth(inj.expect)
     const hit = result.failed.some((line) => line.includes(inj.expect))
     if (hit) {
       const sample = result.failed.find((line) => line.includes(inj.expect))

@@ -516,7 +516,11 @@ async function handleStart(opts, roots) {
     ? String(opts.issues ?? opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
     : []
 
-  const state = await inspectWorkspace(roots.mainRoot, { externalPr, pr: prNumber })
+  const state = await inspectWorkspace(roots.mainRoot, {
+    externalPr,
+    pr: prNumber,
+    probeAuth: Boolean(opts.probeAuth),
+  })
   let role = state.identity.role
 
   // clone-readonly 必须停下给三选一或接收 --clone-choice 迁移状态
@@ -527,6 +531,7 @@ async function handleStart(opts, roots) {
         blocked: true,
         code: 'ACTION_REQUIRED_CLONE_CHOICE',
         reason: state.identity.reason,
+        ...(state.identity.teamProbeHint ? { teamProbeHint: state.identity.teamProbeHint } : {}),
         choices: [
           { choice: 'fork', desc: '作为贡献者 Fork 协同：配置 upstream 与个人 Fork origin，按 contributor-fork 开跨仓 PR' },
           { choice: 'standalone', desc: '作为独立个人仓库继续：写入 .git/pf-standalone-mode，按 maintainer 运作' },
@@ -537,10 +542,16 @@ async function handleStart(opts, roots) {
         process.stdout.write(`${JSON.stringify(guidance, null, 2)}\n`)
       } else {
         process.stdout.write(`停下确认：检测到当前仓库为只读克隆（${state.identity.reason}）。请选择协作方式：\n`)
+        if (state.identity.teamProbeHint) {
+          process.stdout.write(`团队协作者提示：${state.identity.teamProbeHint}\n`)
+        }
         for (const c of guidance.choices) {
           process.stdout.write(`  --clone-choice ${c.choice.padEnd(10)} : ${c.desc}\n`)
         }
         printNextStep([
+          ...(state.identity.teamProbeHint
+            ? [`若确认你是团队写权限协作者，先运行：node ".agents/skills/dev-flow/scripts/flow.mjs" inspect --probe-auth，或带上 --probe-auth 重新运行 start`]
+            : []),
           `重新运行带上选择：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId} --clone-choice <fork|standalone|local>`,
         ])
       }
@@ -1710,8 +1721,14 @@ async function main(argv) {
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(data, null, 2)}\n`)
       } else {
+        const scopeLabel = data.identity.collaborationScope === 'team-collaborator'
+          ? ' | 协同范围: 团队协作者'
+          : (data.identity.collaborationScope === 'owner' ? ' | 协同范围: 所有者' : '')
         process.stdout.write(`# 工作区探测：${basename(data.mainRoot)}\n`)
-        process.stdout.write(`- 身份: ${data.identity.role} (${data.identity.reason})\n`)
+        process.stdout.write(`- 身份: ${data.identity.role}${scopeLabel} (${data.identity.reason})\n`)
+        if (data.identity.teamProbeHint) {
+          process.stdout.write(`- 团队权限提示: ${data.identity.teamProbeHint}\n`)
+        }
         process.stdout.write(`- 分支: ${data.branch ?? 'detached'} @ ${(data.head ?? 'unborn').slice(0, 7)} | 默认基线: ${data.defaultBranch} | 脏文件: ${data.dirty}\n`)
         process.stdout.write(`- GitHub 通道: TrackB=${data.github.trackB.tier}, https=${data.github.trackA.https}, ssh=${data.github.trackA.ssh}\n`)
         if (data.github.trackA.remediationCmd) {
@@ -1725,7 +1742,9 @@ async function main(argv) {
         }
         printNextStep([
           data.identity.role === 'clone-readonly'
-            ? '只读克隆仓，请先向用户确认 --clone-choice <fork|standalone|local> 再运行 flow.mjs start'
+            ? (data.identity.teamProbeHint
+              ? '若是组织/团队协作者，可先运行 flow.mjs inspect --probe-auth 验证写权限；若确认为只读克隆，再向用户确认 --clone-choice <fork|standalone|local> 后运行 flow.mjs start'
+              : '只读克隆仓，请先向用户确认 --clone-choice <fork|standalone|local> 再运行 flow.mjs start')
             : '1. 按任务规模运行 doc-plan.mjs triage；2. 执行 flow.mjs start --task <id>',
         ])
       }

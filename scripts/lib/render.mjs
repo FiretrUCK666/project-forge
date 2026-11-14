@@ -29,7 +29,13 @@ function gitLine(git) {
   const parts = [`分支 \`${git.branch ?? '未知'}\``]
   if (git.remote) {
     parts.push(`远端 \`${git.remote}\``)
-    parts.push(`角色 \`${git.role}\``)
+    const scope = git.collaborationScope ?? git.identity?.collaborationScope
+    if (git.role === 'maintainer' && scope) {
+      const scopeLabel = scope === 'team-collaborator' ? '团队协作者' : '所有者'
+      parts.push(`角色 \`${git.role}\`（${scopeLabel}）`)
+    } else {
+      parts.push(`角色 \`${git.role}\``)
+    }
   } else {
     parts.push('没有远端')
   }
@@ -37,6 +43,8 @@ function gitLine(git) {
   else if (git.commits !== undefined) parts.push(`${git.commits} 个提交`)
   if (git.dirty > 0) parts.push(`${git.dirty} 处未提交改动`)
   if (git.ahead > 0) parts.push(`领先上游 ${git.ahead} 个提交`)
+  const teamHint = git.teamProbeHint ?? git.identity?.teamProbeHint
+  if (teamHint) parts.push(`协同提示：${teamHint}`)
   return parts.join('，')
 }
 
@@ -262,9 +270,13 @@ export function toMarkdown(facts) {
   lines.push('')
 
   const coverage = facts.risks.scanCoverage
+  const teamHint = facts.git?.teamProbeHint ?? facts.git?.identity?.teamProbeHint
   lines.push('## 这次没查的')
   lines.push('')
   lines.push(`- **能不能推代码**：${facts.git.auth?.https === 'undetermined' ? '没探测（默认不联网、不问凭据助手）。需要时加 `--probe-auth`' : facts.git.auth?.https}`)
+  if (teamHint) {
+    lines.push(`- **团队/组织协作者写权限**：${teamHint}`)
+  }
   lines.push('- **远端可达性**：没探测。它会等满一次网络超时，而勘察要能随便调用')
   lines.push('- **仓库设置**（分支保护、可见性、Actions 开关）：脚本读不到，在 GitHub 上看')
   if (coverage?.truncated) {

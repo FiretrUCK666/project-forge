@@ -731,7 +731,9 @@ function matchAuthorsHistory(authors, { userName, userEmail }) {
  *
  * 五态：`local-only` | `contributor-fork` | `clone-readonly` | `maintainer` | `undetermined`
  */
-export function classifyWorkspaceIdentity({
+const TEAM_PROBE_HINT = '如你是仓库团队或组织协作者且尚未提交过代码，可追加 --probe-auth（或运行 flow.mjs inspect --probe-auth）探测 GitHub 写权限以确认 maintainer'
+
+function classifyWorkspaceIdentityCore({
   gitFacts = {},
   declaredRepo,
   probeApi,
@@ -766,6 +768,7 @@ export function classifyWorkspaceIdentity({
   const userName = localIdentity.userName ?? gitFacts.userName ?? gitFacts.identity?.name
   const userEmail = localIdentity.userEmail ?? gitFacts.userEmail ?? gitFacts.identity?.email
   const credLogin = probeApi?.login
+    || probeApi?.viewerLogin
     || localIdentity.githubLogin
     || gitFacts.auth?.apiChannel?.login
     || gitFacts.auth?.ssh?.login
@@ -839,17 +842,25 @@ export function classifyWorkspaceIdentity({
   }
 
   if (apiWrite) {
+    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
+    const collaborationScope = isTeamCollaborator ? 'team-collaborator' : 'owner'
     return {
       role: 'maintainer',
-      reason: declared
-        ? `origin 与声明源仓库 ${origin} 一致且具备写入权限`
-        : `探测到对仓库 ${origin} 具备写入权限`,
+      collaborationScope,
+      reason: isTeamCollaborator
+        ? (declared
+            ? `origin 与声明源仓库 ${origin} 一致，且当前账号 ${credLogin} 为同源组织/团队写入协作者`
+            : `当前账号 ${credLogin} 对同源仓库 ${origin} 具备组织/团队协作者写入权限`)
+        : (declared
+            ? `origin 与声明源仓库 ${origin} 一致且具备写入权限`
+            : `探测到对仓库 ${origin} 具备写入权限`),
     }
   }
 
   if (isOwnerByCred) {
     return {
       role: 'maintainer',
+      collaborationScope: 'owner',
       reason: `本机认证账号 ${credLogin} 与仓库所属者 ${origin.split('/')[0]} 一致`,
     }
   }
@@ -857,15 +868,20 @@ export function classifyWorkspaceIdentity({
   if (!declaredLow && gitUserMatchesOwner && (!hasHistory || hist.anyMatch)) {
     return {
       role: 'maintainer',
+      collaborationScope: 'owner',
       reason: `未声明源仓库，但本机 git user（${userName}）指向自有仓库 ${origin}`,
     }
   }
 
   if (declaredLow && declaredLow === originLow) {
     if (hist.anyMatch) {
+      const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
       return {
         role: 'maintainer',
-        reason: `origin 与声明源仓库 ${origin} 一致，且提交历史作者与当前 Git 身份匹配`,
+        collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+        reason: isTeamCollaborator
+          ? `origin 与声明源仓库 ${origin} 一致，且提交历史作者与团队协作者（${credLogin}）匹配`
+          : `origin 与声明源仓库 ${origin} 一致，且提交历史作者与当前 Git 身份匹配`,
       }
     }
     if (hasHistory && authors.length > 0) {
@@ -889,8 +905,10 @@ export function classifyWorkspaceIdentity({
   }
 
   if (hist.hasHistory && hist.allMatch) {
+    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
     return {
       role: 'maintainer',
+      collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
       reason: `未声明源仓库，但全部采样提交均由本机 Git 身份完成`,
     }
   }
@@ -899,6 +917,29 @@ export function classifyWorkspaceIdentity({
     role: 'undetermined',
     reason: '缺少源仓库声明或仓库写权限证据，无法确认是否为维护者',
   }
+}
+
+/**
+ * 纯函数：双轴五态工作区身份判定。
+ * 便于单测注入 mocked `probeApi` / `localIdentity` 覆盖全部 5 种角色。
+ *
+ * 五态：`local-only` | `contributor-fork` | `clone-readonly` | `maintainer` | `undetermined`
+ */
+export function classifyWorkspaceIdentity(opts = {}) {
+  const res = classifyWorkspaceIdentityCore(opts)
+  if (res.role !== 'clone-readonly' && res.role !== 'undetermined') return res
+  const { gitFacts = {}, declaredRepo, probeApi, localMode = false } = opts
+  if (localMode === true || gitFacts.present !== true || !gitFacts.remote) return res
+  const originLow = normalizeGitHubRepo(gitFacts.remoteUrls?.origin ?? gitFacts.remote)?.toLowerCase()
+  if (!originLow) return res
+  const upstreamLow = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream)?.toLowerCase()
+  if (upstreamLow && upstreamLow !== originLow) return res
+  if (probeApi?.isFork === true) return res
+  const declaredLow = normalizeGitHubRepo(declaredRepo)?.toLowerCase()
+  if (declaredLow && declaredLow !== originLow) return res
+  const apiProbed = Boolean(probeApi && (hasWritePerm(probeApi) || hasReadOnlyPerm(probeApi) || probeApi.viewerPermission))
+  if (apiProbed) return res
+  return { ...res, teamProbeHint: TEAM_PROBE_HINT }
 }
 
 /**
@@ -1138,6 +1179,7 @@ export function createGitHubClient({
     }
 
     const data = await rest('GET', `/repos/${norm}`)
+    if (!login) login = await getAuthenticatedLogin()
     const perms = data?.permissions ?? {}
     const canPush = perms.push === true || perms.maintain === true || perms.admin === true
     viewerPermission = perms.admin ? 'ADMIN' : (perms.maintain ? 'MAINTAIN' : (perms.push ? 'WRITE' : (perms.pull ? 'READ' : 'NONE')))

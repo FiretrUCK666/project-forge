@@ -2283,6 +2283,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       gitFacts,
       declaredRepo: ecosystem.declaredRepo,
       probeEnvResult: gitFacts.auth?._probeResult,
+      client: opts.client,
       localIdentity: opts.localIdentity,
       localMode: opts.localMode,
       fetchApi: true,
@@ -2302,6 +2303,12 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const workspace = detectWorkspace(root)
   const kit = detectKit(root)
   const reentry = detectReentry(root, { docs, kit, ecosystem, workspace, ws })
+
+  const gitIdentityOut = {
+    ...gitFacts.identity,
+    ...(role.collaborationScope ? { collaborationScope: role.collaborationScope } : {}),
+    ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
+  }
 
   const facts = {
     target: { path: root, name: ecosystem.projectName, dirName: basename(root) },
@@ -2323,7 +2330,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       remotes: gitFacts.remotes ?? [],
       remoteUrls: gitFacts.remoteUrls ?? {},
       remoteProtocol: gitFacts.remoteProtocol,
-      identity: gitFacts.identity,
+      identity: gitIdentityOut,
       tags: gitFacts.tags ?? [],
       historyAuthors: gitFacts.historyAuthors ?? [],
       commits: gitFacts.commits,
@@ -2336,6 +2343,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
       roleReason: role.reason,
+      ...(role.collaborationScope ? { collaborationScope: role.collaborationScope } : {}),
+      ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
     },
     ecosystem: {
       kinds,

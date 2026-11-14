@@ -947,6 +947,8 @@ export function resolveWorkspaceIdentity({
   externalPr,
   apiProbe,
 } = {}) {
+  const TEAM_PROBE_HINT = '如你是仓库团队或组织协作者且尚未提交过代码，可追加 --probe-auth（或运行 flow.mjs inspect --probe-auth）探测 GitHub 写权限以确认 maintainer'
+
   if (externalPr) {
     return {
       role: 'inbound-external-pr',
@@ -967,11 +969,18 @@ export function resolveWorkspaceIdentity({
     return { role: 'contributor-fork', reason: '已选择 Fork 协作模式（.git/pf-fork-mode）' }
   }
   if (gitDir && existsSync(join(gitDir, 'pf-standalone-mode'))) {
-    return { role: 'maintainer', reason: '已选择独立项目模式（.git/pf-standalone-mode）' }
+    return {
+      role: 'maintainer',
+      collaborationScope: 'owner',
+      reason: '已选择独立项目模式（.git/pf-standalone-mode）',
+    }
   }
 
   const origin = githubRepoPath(originRaw)
   const upstream = githubRepoPath(remoteUrls.upstream)
+  const originLow = origin?.toLowerCase()
+  const upstreamLow = upstream?.toLowerCase()
+  const declaredLow = declaredRepo?.toLowerCase()
   const isLocalRemote = (u) => Boolean(u) && (
     /^file:\/\//i.test(u.trim())
     || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u.trim()) && !/^[^@/]+@[^:]+:/i.test(u.trim()))
@@ -991,39 +1000,65 @@ export function resolveWorkspaceIdentity({
       if (commits > 0 && historyAuthors.length > 0 && !matched) {
         return { role: 'clone-readonly', reason: '克隆仓历史作者与当前配置署名不匹配' }
       }
-      return { role: 'maintainer', reason: '本地测试远端且属主匹配' }
+      return { role: 'maintainer', collaborationScope: 'owner', reason: '本地测试远端且属主匹配' }
     }
     return { role: 'undetermined', reason: '远端地址无法识别为 GitHub 仓库' }
   }
 
-  if (upstream && upstream !== origin) {
+  const apiWrite = /^(ADMIN|MAINTAIN|WRITE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === true
+  const apiReadOnly = /^(READ|TRIAGE|NONE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === false
+  const apiProbed = Boolean(apiProbe && (apiWrite || apiReadOnly || apiProbe.viewerPermission))
+  const canEmitTeamProbeHint = !apiProbed && !apiProbe?.isFork
+
+  if (upstreamLow && upstreamLow !== originLow) {
+    if (apiReadOnly) {
+      return {
+        role: 'clone-readonly',
+        reason: `upstream 指向 ${upstream}，但对 origin（${origin}）只有只读权限`,
+      }
+    }
     return { role: 'contributor-fork', reason: `origin (${origin}) 与 upstream (${upstream}) 不同` }
   }
 
-  if (apiProbe?.isFork === true && (!declaredRepo || !apiProbe.parent || apiProbe.parent === declaredRepo)) {
+  if (apiProbe?.isFork === true && (!declaredLow || !apiProbe.parent || apiProbe.parent.toLowerCase() === declaredLow || declaredLow !== originLow)) {
+    if (apiReadOnly) {
+      return { role: 'clone-readonly', reason: `origin（${origin}）是他人 Fork 且当前账号无写入权限` }
+    }
     return { role: 'contributor-fork', reason: `API 探测表明 ${origin} 是 Fork 仓库` }
   }
 
-  if (declaredRepo && declaredRepo !== origin) {
-    if (apiProbe?.viewerPermission && /^(READ|NONE)$/i.test(apiProbe.viewerPermission)) {
-      return { role: 'clone-readonly', reason: `对声明的远端 ${origin} 无写权限（${apiProbe.viewerPermission}）` }
+  if (declaredLow && declaredLow !== originLow) {
+    if (apiReadOnly) {
+      return { role: 'clone-readonly', reason: `对声明的远端 ${origin} 无写权限（${apiProbe.viewerPermission ?? 'READ'}）` }
     }
     return { role: 'contributor-fork', reason: `项目声明源仓库为 ${declaredRepo}，当前 origin 为 ${origin}` }
   }
 
   // origin 与 declaredRepo 一致或未声明源仓库：校验是否拥有维护者写权限或本机作者归属
-  if (apiProbe?.viewerPermission) {
-    if (/^(ADMIN|MAINTAIN|WRITE)$/i.test(apiProbe.viewerPermission)) {
-      return { role: 'maintainer', reason: `拥有 ${origin} 写权限（${apiProbe.viewerPermission}）` }
-    }
-    if (/^(READ|NONE)$/i.test(apiProbe.viewerPermission)) {
-      return { role: 'clone-readonly', reason: `对 ${origin} 仅具备只读权限（${apiProbe.viewerPermission}）` }
+  const originOwnerLow = origin.split('/')[0].toLowerCase()
+  const viewerLogin = apiProbe?.viewerLogin || apiProbe?.login
+  if (apiReadOnly) {
+    return {
+      role: 'clone-readonly',
+      reason: `对 ${origin} 仅具备只读权限（${apiProbe?.viewerPermission ?? 'READ'}）`,
     }
   }
+  if (apiWrite) {
+    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+    const collaborationScope = isTeamCollaborator ? 'team-collaborator' : 'owner'
+    const permLabel = apiProbe?.viewerPermission ?? 'WRITE'
+    const reason = isTeamCollaborator
+      ? `当前账号 ${viewerLogin} 具备同源仓库 ${origin} 的组织/团队写权限（${permLabel}，团队协作者）`
+      : `拥有 ${origin} 写权限（${permLabel}）`
+    return { role: 'maintainer', collaborationScope, reason }
+  }
 
-  const originOwner = origin.split('/')[0]
-  if (apiProbe?.viewerLogin && apiProbe.viewerLogin.toLowerCase() === originOwner) {
-    return { role: 'maintainer', reason: `当前登录账号 ${apiProbe.viewerLogin} 与仓库属主一致` }
+  if (viewerLogin && String(viewerLogin).toLowerCase() === originOwnerLow) {
+    return {
+      role: 'maintainer',
+      collaborationScope: 'owner',
+      reason: `当前登录账号 ${viewerLogin} 与仓库属主一致`,
+    }
   }
 
   // 离线判据：若已有提交历史，核对本地 git 署名是否在提交作者之中，防止把他人克隆仓误判为维护者
@@ -1040,18 +1075,40 @@ export function resolveWorkspaceIdentity({
     return {
       role: 'clone-readonly',
       reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,
+      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
     }
   }
 
-  if (declaredRepo && declaredRepo === origin) {
-    return { role: 'maintainer', reason: `origin 与项目声明源仓库 ${origin} 一致且本机提交归属吻合` }
+  if (declaredLow && declaredLow === originLow) {
+    if (authorMatched) {
+      const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+      return {
+        role: 'maintainer',
+        collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+        reason: `origin 与项目声明源仓库 ${origin} 一致且本机提交归属吻合`,
+      }
+    }
+    return {
+      role: 'undetermined',
+      reason: `origin 与项目声明源仓库 ${origin} 一致，但缺少写入权限与提交作者证据，保守按贡献者处置`,
+      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
+    }
   }
 
   if (authorMatched) {
-    return { role: 'maintainer', reason: '自有仓库且本机署名匹配历史提交作者' }
+    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
+    return {
+      role: 'maintainer',
+      collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+      reason: '自有仓库且本机署名匹配历史提交作者',
+    }
   }
 
-  return { role: 'undetermined', reason: '缺乏源仓库声明与远端写权限证明，按保守贡献者处置' }
+  return {
+    role: 'undetermined',
+    reason: '缺乏源仓库声明与远端写权限证明，按保守贡献者处置',
+    ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
+  }
 }
 
 // ── 双轨四级内置轻量 GitHub 客户端（绝不落盘/打印 token） ─────────────
@@ -1130,6 +1187,10 @@ export async function probeGitHubEnv({ cwd = process.cwd(), remoteUrls = {}, pro
     : { available: null, port: null }
 
   const ghOk = !ghStatus.missing && ghStatus.ok
+  const ghLoginMatch = ghOk
+    ? /Logged in to [^\s]+ (?:account|as)\s+([^\s(]+)/i.exec(`${ghStatus.stdout ?? ''}\n${ghStatus.stderr ?? ''}`)
+    : null
+  const ghLogin = ghLoginMatch ? ghLoginMatch[1].trim() : null
   const token = envToken || credResult.token || null
   const hasHttps = credResult.available || Boolean(envToken)
 
@@ -1164,6 +1225,7 @@ export async function probeGitHubEnv({ cwd = process.cwd(), remoteUrls = {}, pro
     trackB: {
       tier,
       ghCli: ghOk,
+      ...(ghLogin ? { login: ghLogin } : {}),
       // 布尔标示，绝不暴露或序列化令牌值
       hasToken: Boolean(token),
     },
@@ -1171,7 +1233,7 @@ export async function probeGitHubEnv({ cwd = process.cwd(), remoteUrls = {}, pro
 
   return {
     env,
-    client: createGitHubClient({ tier, cwd, token }),
+    client: createGitHubClient({ tier, cwd, token, login: ghLogin }),
   }
 }
 
@@ -1294,7 +1356,8 @@ export function parseFlowInputs(inputs = [], defaultRepo = null) {
 /**
  * 构造四级降级 GitHub 客户端。
  */
-export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(), token = null } = {}) {
+export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(), token = null, login = null } = {}) {
+  let cachedLogin = login || null
   const makeMcpDelegate = (action, params, statePayload = {}) => {
     const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
     const bodyWithTag = params.body ? `${params.body}\n\n${tag}` : undefined
@@ -1319,35 +1382,51 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
     async getRepoMeta(repo) {
       if (!repo) return { ok: false, reason: 'missing-repo' }
       if (tier === 'gh-cli') {
-        const res = await execSafe('gh', [
-          'api', `repos/${repo}`,
-        ], { cwd })
+        const [res, userRes] = await Promise.all([
+          execSafe('gh', ['api', `repos/${repo}`], { cwd }),
+          cachedLogin ? Promise.resolve(null) : execSafe('gh', ['api', 'user', '--jq', '.login'], { cwd }),
+        ])
+        if (userRes?.ok && userRes.stdout?.trim()) {
+          cachedLogin = userRes.stdout.trim()
+        }
         if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
         try {
           const data = JSON.parse(res.stdout)
+          const perms = data.permissions
           return {
             ok: true,
             isFork: Boolean(data.fork),
             parent: data.parent?.full_name?.toLowerCase() ?? null,
             defaultBranch: data.default_branch ?? 'main',
-            viewerPermission: data.permissions?.admin ? 'ADMIN'
-              : data.permissions?.maintain ? 'MAINTAIN'
-                : data.permissions?.push ? 'WRITE' : 'READ',
+            viewerLogin: cachedLogin,
+            viewerPermission: perms?.admin ? 'ADMIN'
+              : perms?.maintain ? 'MAINTAIN'
+                : perms?.push ? 'WRITE'
+                  : (perms?.pull || !perms ? 'READ' : 'NONE'),
           }
         } catch { return { ok: false, error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('GET', `/repos/${repo}`, token)
+        const [res, userRes] = await Promise.all([
+          githubHttpsRequest('GET', `/repos/${repo}`, token),
+          !cachedLogin && token ? githubHttpsRequest('GET', '/user', token) : Promise.resolve(null),
+        ])
+        if (userRes?.ok && userRes.data?.login) {
+          cachedLogin = userRes.data.login
+        }
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         const data = res.data ?? {}
+        const perms = data.permissions
         return {
           ok: true,
           isFork: Boolean(data.fork),
           parent: data.parent?.full_name?.toLowerCase() ?? null,
           defaultBranch: data.default_branch ?? 'main',
-          viewerPermission: data.permissions?.admin ? 'ADMIN'
-            : data.permissions?.maintain ? 'MAINTAIN'
-              : data.permissions?.push ? 'WRITE' : 'READ',
+          viewerLogin: cachedLogin,
+          viewerPermission: perms?.admin ? 'ADMIN'
+            : perms?.maintain ? 'MAINTAIN'
+              : perms?.push ? 'WRITE'
+                : (perms?.pull || !perms ? 'READ' : 'NONE'),
         }
       }
       return makeMcpDelegate('get_repo', { repo })

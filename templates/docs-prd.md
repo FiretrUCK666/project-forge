@@ -1,8 +1,21 @@
+---
+kind: prd
+title: "<需求主题>"
+status: draft
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+issue: null
+pr: null
+owner: "<提出方或负责人>"
+plan_critique: pending
+related_spec: null
+related_todo: null
+---
+
 # <需求主题> — 产品需求说明（PRD）
 
-- **状态**：`draft`（可选：`draft | active | done | dropped`）
-- Plan Critique: pending
-- **提出方**：<人或来源 Issue>
+> 状态枚举：`draft | active | in_review | done | dropped`。
+
 - **目标读者**：实现者、审查者与后续接手人
 
 ## 一、要解决的问题

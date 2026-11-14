@@ -68,7 +68,8 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 审查包自动检测是否改动了导出 API、CLI 参数、模块增删、环境要求或 `high-risk:` 路径，
 却未同步更新 `docs/TDD.md`、`README*.md` 或 `AGENTS.md`；同时检查关联 `docs/todo/`
-是否存在未勾选 `- [ ]` 或未归档至 `docs/archive/todo/`。流程模式下未说明的漂移列为 `Must Fix` 候选。
+是否存在未勾选 `- [ ]` 或未归档至 `docs/archive/todo/`，并对照 `AGENTS.md`「## 改哪看哪」生成
+`coupledSyncWarnings` 与「联动同步核对（改哪看哪）」章节（触发路径改动却漏同步伴随文件时重点核验）。流程模式下未说明的漂移列为 `Must Fix` 候选。
 
 ## 六锁防死循环收敛协议
 

@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/shared.mjs'
 
 const EXIT = Object.freeze({
   OK: 0,
@@ -1255,6 +1256,17 @@ function formatPackText(pack) {
   }
 
   lines.push('')
+  lines.push('## 联动同步核对（改哪看哪）')
+  const syncWarnings = pack.coupledSyncWarnings ?? []
+  if (syncWarnings.length === 0) {
+    lines.push('  OK: 未触发 AGENTS.md「改哪看哪」缺漏项。')
+  } else {
+    for (const sw of syncWarnings) {
+      lines.push(`  - [COUPLED_SYNC_WARN] 触及 ${sw.touchedTriggers.join(', ')} -> 需检查伴随更新: ${sw.expectedCompanions.join(', ')}`)
+    }
+  }
+
+  lines.push('')
   lines.push('--- Behavioral Gate (Empirical & Smoke-Verify) ---')
   const bg = pack.behavioralGate
   lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired} | empiricalVisualCheckRequired=${bg.empiricalVisualCheckRequired}`)
@@ -1778,6 +1790,15 @@ function main() {
   }
 
   const parity = checkDocCodeParity(reviewRoot, mainRoot, diff, effectiveProfile, task)
+  const agentsForSync = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+  const syncRoot = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewRoot : mainRoot
+  const coupledSyncWarnings = agentsForSync
+    ? evaluateCoupledSync(
+      [...diff.files.map((f) => f.file), ...diff.untracked],
+      parseCoupledSyncRules(agentsForSync),
+      syncRoot,
+    )
+    : []
   const criteria = parseAcceptanceCriteria(reviewRoot, mainRoot, task)
   const hrHits = highRiskHits(diff, effectiveProfile)
 
@@ -1851,6 +1872,7 @@ function main() {
     priorOpenMustFix,
     rebuts,
     parity,
+    coupledSyncWarnings,
     devProfile: effectiveProfile,
     highRiskHits: hrHits,
     behavioralGate,

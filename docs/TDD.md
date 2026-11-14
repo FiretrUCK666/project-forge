@@ -260,27 +260,27 @@ flowchart LR
 | --- | --- | --- |
 | `Case 1` | 纯问答、错别字或单行格式微调 | 零文档直接响应（`critiqueTier: none`） |
 | `Case 2` | 边界清晰的局部缺陷，不改对外契约 | 零设计文档，强制先写复现失败测试再修复（Red-Green） |
-| `Case 3` | 不改外部契约的中等增量功能 | 建 `docs/todo/` 冻结 `C1/C2...`，运行 `doc-plan.mjs audit` 自修直通 |
-| `Case 4` | 跨模块改造、改契约或 `one-way` 高风险 | 建 `docs/specs/` + `docs/todo/`，先 `audit` 再经独立 `critique-pass`（SHA256 锁定）后 `approve` |
+| `Case 3` | 不改外部契约的中等增量功能 | 建 `docs/todo/` 冻结 `C1/C2...`，运行 `doc-plan.mjs audit` 自修直通；支持 `--paths` 检查 `coupledSyncWarnings` |
+| `Case 4` | 跨模块改造、改契约或 `one-way` 高风险 | 建 `docs/specs/` + `docs/todo/`（`init --kind pair\|all --issue <N>`），先 `audit` 再经独立 `critique-pass`（SHA256 锁定）后 `approve`；支持 `link` 全生命周期改名与互链同步 |
 | `Case 5` | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | 输出 `BLOCKED_CASE_5_TDD_CONFLICT` 硬阻断实现，先升级常青架构并获拍板 |
 - **`dev-flow`（隔离、依赖零拷贝与提交门锁）**：
-  - 任务账本存于 `.worktrees/.state/tasks/<taskId>.json`（经 `createDefaultLedger` / `writeTaskLedger` 维护），串起 `claim` -> `finalize` -> `verify` -> `submit` -> `merge` -> `cleanup` 不可跳过迁移：`finalizedHead` 须与当前提交同步，`verifiedHead === HEAD`。
+  - 任务账本存于 `.worktrees/.state/tasks/<taskId>.json`（经 `createDefaultLedger` / `writeTaskLedger` 维护），串起 `claim` -> `finalize` -> `verify` -> `submit` -> `merge` -> `cleanup` 不可跳过迁移：`start`/`claim --issue <N>` 触发 `syncDocsLifecycle` 自动补 `-issue<N>-` 与互链，`submit` 回写 `pr` 与 `in_review`，`finalizedHead` 须与当前提交同步，`verifiedHead === HEAD`。
   - `worktree-deps.mjs` 比对主仓与工作树锁文件 SHA256，一致时在 Windows 创建 Directory Junction、在 POSIX 创建 Symlink 零拷贝复用依赖；卸载时先显式调用 `fs.unlinkSync` 摘除挂载入口再执行 `git worktree remove`，严禁直接递归删除未解绑目录。
-  - `submit` 前强校验工作区干净（`BLOCKED_DIRTY_WORKTREE`）、`finalize` 已完成且归档（Case 3/4 Todo 全勾 `[x]` 并 `git mv` 入 `docs/archive/todo/`，`SPEC` 标 `implemented`）以及 `verifiedHead === HEAD`（`BLOCKED_STALE_VERIFICATION`）。
-  - `verify` / `submit` 同步记录 `visualFilesChanged` 与 `empiricalVisualCheckRequired`（识别 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`），支持 `--visual-checked` 与 `--visual-evidence` 绑定实际渲染与浅深色截图证据。
+  - `submit` 前强校验工作区干净（`BLOCKED_DIRTY_WORKTREE`）、`finalize` 已完成且归档（Case 3/4 Todo 全勾 `[x]`、写回 `done`/`done_at` 并 `git mv` 入 `docs/archive/todo/`，`SPEC` 标 `implemented`；检查 `AGENTS.md` `## 改哪看哪` 输出 `coupledSyncWarnings`，传 `--strict-sync` 即阻断）以及 `verifiedHead === HEAD`（`BLOCKED_STALE_VERIFICATION`）。
+  - `verify` 支持 `--tier quick|smoke|gate|full`（等价 `--mode`），`quick` 传入 `--target` 时替换 `{target}`、缺省时洁净剥离并提示窄化，同时记录 `visualFilesChanged` 与 `empiricalVisualCheckRequired`（识别 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`）绑定实际渲染与浅深色截图证据。
   - `merge` 检测到删减断言、新增 `.skip`/`.only`、`continue-on-error: true`、`|| true` 或改松 CI 权限时以退出码 `4`（`BLOCKED_GATE_WEAKENING`）阻断；`contributor-fork` 硬禁止执行合并（`BLOCKED_FORK_CANNOT_MERGE`）。
   - `cleanup` 未传 `--confirm` 时返回待删清单并拒删（`BLOCKED_CONFIRMATION_REQUIRED`）；Fork 上游 PR 仍 `OPEN`（`BLOCKED_OPEN_FORK_PR`）或存在下游堆叠 PR（`BLOCKED_STACKED_PR`）时拒绝删除分支。
-- **`dev-review`（供应链防线、验证优先级与六锁收口）**：`review-pack.mjs --untrusted-scan` 扫描 `.github/workflows/`、生命周期钩子、构建脚本、`.husky/`、`.agents/skills/`、`.gitattributes` 与锁文件变动，命中即报错 `BLOCKED_UNTRUSTED_HAZARD`（需 `--human-approved-exec` 放行）；确立**形式验证与运行/渲染实证优先于纯对抗式静态读代码挑刺**原则，`behavioralGate` 输出 `visualFilesChanged` 与 `empiricalVisualCheckRequired`，触发时要求实际打开渲染界面、走通交互并查验浅深色截图；`Must Fix` 严格限于违反冻结 `C*`、确定性形式门禁失败或可复现运行/渲染实证失败（拒绝主观读代码挑刺阻塞合入），强校验 `reviewerId !== implementerId`，第 2 轮锁定未改动旧块仅审增量与 `rebuts`，第 3 轮未收敛或同指纹连续出现 2 轮触发 `STOP_LOSS_ESCALATE`。
-- **`dev-govern`（8 维审计、规则下沉与发版筹备）**：`govern-audit.mjs` 检查安全（凭据与 `pull_request_target`）、死代码/注释坏味（墓碑履历、未解释借口或压制注释）、测试覆盖、文档漂移与围栏感知死链（`docs.tdd-module-drift`、`docs.tdd-stale-path`、`docs.dead-link`）、Worktree 四态（`git cherry` / `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`、`unmerged`）、`arch-rules`、`> 800` 行文件与性能风险；支持 `record`（写 `<gitCommonDir>/project-forge-govern/signals.jsonl` 零工作区污染）、`cluster`（将真实审查漏出或运行时复发满 2 次的同类根因下沉为确定性形式检查并持续清理冗余退化代码）与 `sample`（回滚率与 48h 返工热点抽检）；`release-prep-lib.mjs`（`handleReleasePrep`）采集上个标签至 `HEAD` 的全部用户可见改动，支持跳版本、环境阈值变化探测与 `unaccountedPublicFiles` 交叉防漏。
+- **`dev-review`（供应链防线、验证优先级与六锁收口）**：`review-pack.mjs --untrusted-scan` 扫描 `.github/workflows/`、生命周期钩子、构建脚本、`.husky/`、`.agents/skills/`、`.gitattributes` 与锁文件变动，命中即报错 `BLOCKED_UNTRUSTED_HAZARD`（需 `--human-approved-exec` 放行）；输出 `coupledSyncWarnings` 与 `联动同步核对（改哪看哪）` 核查伴随文件同步；确立**形式验证与运行/渲染实证优先于纯对抗式静态读代码挑刺**原则，`behavioralGate` 输出 `visualFilesChanged` 与 `empiricalVisualCheckRequired`，触发时要求实际打开渲染界面、走通交互并查验浅深色截图；`Must Fix` 严格限于违反冻结 `C*`、确定性形式门禁失败或可复现运行/渲染实证失败（拒绝主观读代码挑刺阻塞合入），强校验 `reviewerId !== implementerId`，第 2 轮锁定未改动旧块仅审增量与 `rebuts`，第 3 轮未收敛或同指纹连续出现 2 轮触发 `STOP_LOSS_ESCALATE`。
+- **`dev-govern`（多维审计、测试分层控频与发版筹备）**：`govern-audit.mjs` 检查安全（凭据与 `pull_request_target`）、死代码/注释坏味（墓碑履历、未解释借口或压制注释）、多构建工具测试盘点（`testInventory` 与无 CI 诚实报告 `tests.no-ci-config`）、测试分层与反膨胀门禁（`tests.collapsed-tiers`、`tests.unfiltered-quick-test`、`tests.hard-sleep`、`tests.heavy-in-unit`、`tests.mock-tautology`、`tests.oversized-file`、`tests.non-headless`）、文档漂移与围栏感知死链（`docs.tdd-module-drift`、`docs.tdd-stale-path`、`docs.dead-link`、`docs.devprofile-unmatched-high-risk`、`docs.frontmatter-invalid`、`docs.broken-related-link`、`docs.filename-issue-mismatch`）、Worktree 四态（`git cherry` / `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`、`unmerged`）、`arch-rules`、`> 800` 行文件与性能风险；支持 `record`（写 `<gitCommonDir>/project-forge-govern/signals.jsonl` 零工作区污染）、`cluster`（将真实审查漏出或运行时复发满 2 次的同类根因下沉为确定性形式检查并持续清理冗余退化代码）与 `sample`（回滚率与 48h 返工热点抽检）；`release-prep-lib.mjs`（`handleReleasePrep`）采集上个标签至 `HEAD` 的全部用户可见改动，支持跳版本、环境阈值变化探测与 `unaccountedPublicFiles` 交叉防漏。
 
 ## 6. 文档四层体系与上下文护栏
 
 | 层级 | 路径或母版载体 | 定位与生命周期控制 |
 | --- | --- | --- |
-| 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 仅放当前机制、总纲、7 键 `Dev Profile`、上下文护栏与静默路由；受 `AGENTS_MAX_BYTES = 30720` 与 `AGENTS_WARN_BYTES = 24576` 约束 |
+| 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 仅放当前机制、总纲、7 键 `Dev Profile`、`改哪看哪` 联动表、测试分层与控频、上下文护栏与静默路由；受 `AGENTS_MAX_BYTES = 30720` 与 `AGENTS_WARN_BYTES = 24576` 约束 |
 | 常青架构层 | `docs/TDD.md`、`templates/docs-tdd.md` | 当前系统全景、模块职责、`arch-rules`、`Feature Map` 与安全不变量；按需章节不适用即整节删除 |
-| 需求基线层 | `templates/docs-prd.md`、`docs/prd/` | 跨周期需求范围、In/Non-Goals、复用评估与 `- Plan Critique: pending` 审批链 |
-| 规格与任务单层 | `templates/docs-spec.md`、`docs/specs/`、`templates/docs-todo.md`、`docs/todo/` | `SPEC` 合入后标 `implemented` 长留作边界参考；`Todo` 随 PR 在同一分支全勾并 `git mv` 至 `docs/archive/todo/` |
+| 需求基线层 | `templates/docs-prd.md`、`docs/prd/` | `YYMMDD-[issue<N>-]<slug>-prd.md` 与 YAML Frontmatter（`kind`/`status`/`issue`/`pr`/`related_*`/`plan_critique`） |
+| 规格与任务单层 | `templates/docs-spec.md`、`docs/specs/`、`templates/docs-todo.md`、`docs/todo/` | `YYMMDD-[issue<N>-]<slug>-{spec,todo}.md` 与 YAML Frontmatter；认领或 assoc Issue 时自动重命名 `-issue<N>-` 并同步 `related_*`；`SPEC` 合入后标 `implemented` 长留作边界参考，`Todo` 随 PR 在同一分支全勾并 `git mv` 至 `docs/archive/todo/` |
 
 ### `Dev Profile` 7 键机读契约与全局索引约定
 

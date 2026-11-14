@@ -135,6 +135,9 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 
 - **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
 - **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
+- **测试分层与控频**：
+  - 编码中只跑语法/类型检查，禁频繁跑全量或 E2E；每轮改完按 `--tier quick --target <path>` 跑对应单测；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
+  - 禁写零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测内硬编码 `>=1s` sleep / 浏览器容器或非无头测试；单测文件超 800 行应按模块拆分。
 - **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**（「以前……后来改成……」）、**禁死代码注释块**（废弃代码直接删，不留连续注释块）、**禁借口注释与擅自压制检查**（严禁未说明理由写 `HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
 - **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
 - {{COMMIT_STYLE_HINT}}
@@ -261,6 +264,19 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 
 写目录时结尾带 `/`，写单个文件时不要带。默认至少包含 `.github/`、`AGENTS.md` 与 `Dev Profile` 中的 `high-risk` 路径。
 <!-- project-forge: end 高风险路径 -->
+
+<!-- project-forge: begin 改哪看哪 -->
+## 改哪看哪
+
+| 这次动了 | 必须一起看 |
+| --- | --- |
+| `<核心模块或公开契约>` | `docs/TDD.md`、`<对应测试与 README>` |
+<!-- project-forge: if has-bilingual-docs -->
+| `README.md` | {{README_LIST}}（成对同步） |
+<!-- project-forge: endif -->
+
+<!-- project-forge: fill 改哪看哪：替换为本项目真实「改动路径与联动文件」映射（至少含反引号相对路径，无则删去示例行） -->
+<!-- project-forge: end 改哪看哪 -->
 
 <!-- project-forge: begin 取舍 -->
 ## 取舍

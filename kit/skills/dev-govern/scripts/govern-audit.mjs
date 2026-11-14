@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realp
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, posix, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { matchGlob, parseDocFilename, parseDocFrontmatter } from '../../lib/shared.mjs'
 import { handleReleasePrep } from './release-prep-lib.mjs'
 
 const AGENTS_WARN_BYTES = 24576
@@ -736,7 +737,7 @@ function parseWorkflowCiSteps(repoRoot) {
           blockLines.push(raw.slice(blockIndent))
           i = j
         }
-        const cmd = blockLines.join('\n').trim()
+        const cmd = blockLines.filter((l) => !l.trim().startsWith('#')).join('\n').trim()
         if (cmd) steps.push({ file: `.github/workflows/${name}`, cmd })
       } else {
         const clean = tail.replace(/\s+#.*$/, '').trim()
@@ -747,9 +748,146 @@ function parseWorkflowCiSteps(repoRoot) {
   return steps
 }
 
+const PRIORITY_SCRIPT_HINTS = ['test', 'spec', 'e2e', 'lint', 'check', 'type', 'build', 'verify', 'ci']
+const JUST_RECIPE_RE = /^@?([A-Za-z_][A-Za-z0-9_-]*)(?:\s+[^:\n]*)?:(?!=)/gm
+const HEAVY_E2E_TOOL_RE = /\b(?:playwright|cypress|puppeteer|selenium|testcontainers|docker(?:\s+|-)compose)\b/i
+const TARGET_FILTER_RE = /\{target\}|--changed|--related|--filter|-k\b|--grep\b|--testNamePattern|-t\b|--run\b/
+
+function collectMakefileTargets(repoRoot) {
+  const mkInfo = readTextStrictInfo(join(repoRoot, 'Makefile'))
+  if (!mkInfo?.text) return { targets: [], recipes: new Map() }
+  const targets = []
+  const recipes = new Map()
+  const lines = mkInfo.text.split('\n')
+  let curTarget = null
+  for (const line of lines) {
+    const hdr = /^([A-Za-z0-9_.-]+)\s*:(?!=)/.exec(line)
+    if (hdr && !hdr[1].startsWith('.')) {
+      curTarget = hdr[1]
+      if (!targets.includes(curTarget)) targets.push(curTarget)
+      if (!recipes.has(curTarget)) recipes.set(curTarget, [])
+    } else if (curTarget && line.startsWith('\t')) {
+      const cmd = line.trim().replace(/^[@+-]+/, '').trim()
+      if (cmd && !cmd.startsWith('#')) recipes.get(curTarget).push(cmd)
+    } else if (line.trim() && !line.startsWith('#')) {
+      curTarget = null
+    }
+  }
+  return { targets: targets.slice(0, 30), recipes }
+}
+
+function collectJustfileRecipes(repoRoot) {
+  for (const name of ['justfile', 'Justfile', '.justfile']) {
+    const info = readTextStrictInfo(join(repoRoot, name))
+    if (!info?.text) continue
+    const list = []
+    for (const m of info.text.matchAll(JUST_RECIPE_RE)) {
+      if (!list.includes(m[1])) list.push(m[1])
+      if (list.length >= 30) break
+    }
+    return list
+  }
+  return []
+}
+
+function stripCodeCommentsLines(text) {
+  const rawLines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let inBlock = false
+
+  for (const s of rawLines) {
+    let i = 0
+    let quote = ''
+    let prevSig = ''
+    let keep = ''
+    let segStart = 0
+
+    if (inBlock) {
+      const end = s.indexOf('*/')
+      if (end === -1) {
+        out.push('')
+        continue
+      }
+      inBlock = false
+      i = end + 2
+      segStart = i
+    }
+
+    while (i < s.length) {
+      const ch = s[i]
+      const next = s[i + 1]
+      if (quote) {
+        if (ch === '\\') { i += 2; continue }
+        if (ch === quote) quote = ''
+        i += 1
+        continue
+      }
+      if (ch === '\'' || ch === '"' || ch === '`') {
+        quote = ch
+        prevSig = ch
+        i += 1
+        continue
+      }
+      if (ch === '/' && next === '/') {
+        keep += s.slice(segStart, i)
+        segStart = s.length
+        break
+      }
+      if (ch === '/' && next === '*') {
+        keep += s.slice(segStart, i)
+        const end = s.indexOf('*/', i + 2)
+        if (end === -1) {
+          inBlock = true
+          segStart = s.length
+          break
+        }
+        i = end + 2
+        segStart = i
+        continue
+      }
+      if (ch === '/') {
+        const canRegex = !prevSig || '=(:,?[!&|;{}~^+-*'.includes(prevSig)
+          || /\b(?:return|case|throw|typeof|await|yield)$/.test(s.slice(0, i).trimEnd())
+        if (canRegex) {
+          let j = i + 1
+          let inClass = false
+          let closed = false
+          while (j < s.length) {
+            const rc = s[j]
+            if (rc === '\\') { j += 2; continue }
+            if (rc === '[') inClass = true
+            else if (rc === ']' && inClass) inClass = false
+            else if (rc === '/' && !inClass) { closed = true; break }
+            j += 1
+          }
+          if (closed) {
+            prevSig = '/'
+            i = j + 1
+            continue
+          }
+        }
+      }
+      if (ch === '#') {
+        const prevCh = i > 0 ? s[i - 1] : ''
+        if ((i === 0 || /\s/.test(prevCh)) && next !== '!' && next !== '[') {
+          keep += s.slice(segStart, i)
+          segStart = s.length
+          break
+        }
+      }
+      if (!/\s/.test(ch)) prevSig = ch
+      i += 1
+    }
+    if (segStart < s.length) keep += s.slice(segStart)
+    out.push(keep)
+  }
+  return out
+}
+
 function expandVerificationCommands(repoRoot, ciSteps, devProfile) {
   const pkg = readJsonSafe(join(repoRoot, 'package.json'))
   const scripts = (pkg && typeof pkg.scripts === 'object' && pkg.scripts) ? pkg.scripts : {}
+  const makeInfo = collectMakefileTargets(repoRoot)
   const seeds = [
     ...ciSteps.map((s) => s.cmd),
     ...(devProfile['quick-test'] ?? []),
@@ -765,6 +903,7 @@ function expandVerificationCommands(repoRoot, ciSteps, devProfile) {
       const clean = part.trim()
       if (!clean) continue
       const pkgSingle = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)(?:\s+--.*)?$/.exec(clean)
+      const makeSingle = /^make\s+([A-Za-z0-9_.-]+)(?:\s|$)/.exec(clean)
       let expandedPureScript = false
       if (depth < 3) {
         const pkgRuns = [
@@ -782,6 +921,16 @@ function expandVerificationCommands(repoRoot, ciSteps, devProfile) {
                 visitedScripts.add(sName)
                 visitCmd(scripts[sName], depth + 1)
               }
+            }
+          }
+        }
+        if (makeSingle && makeInfo.recipes.has(makeSingle[1])) {
+          const mkKey = `make:${makeSingle[1]}`
+          expandedPureScript = true
+          if (!visitedScripts.has(mkKey)) {
+            visitedScripts.add(mkKey)
+            for (const subCmd of makeInfo.recipes.get(makeSingle[1])) {
+              visitCmd(subCmd, depth + 1)
             }
           }
         }
@@ -826,6 +975,75 @@ function cmdCoversTestFile(commands, testRel) {
   return false
 }
 
+function collectTestInventory(repoRoot, files, testFiles, ciSteps, devProfile) {
+  const definedScripts = {}
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  if (pkg && typeof pkg.scripts === 'object' && pkg.scripts) {
+    const entries = Object.entries(pkg.scripts).filter(([k]) => typeof k === 'string')
+    const prio = entries.filter(([k]) => PRIORITY_SCRIPT_HINTS.some((h) => k.toLowerCase().includes(h)))
+    const rest = entries.filter((kv) => !prio.includes(kv))
+    const formatted = [...prio, ...rest].slice(0, 20).map(([k, v]) => `${k}: ${v}`)
+    if (formatted.length > 0) definedScripts.packageJson = formatted
+  }
+
+  const makeInfo = collectMakefileTargets(repoRoot)
+  if (makeInfo.targets.length > 0) definedScripts.makefile = makeInfo.targets
+
+  const justRecipes = collectJustfileRecipes(repoRoot)
+  if (justRecipes.length > 0) definedScripts.justfile = justRecipes
+
+  const scriptsDirFiles = files
+    .filter((f) => f.rel.startsWith('scripts/') && /\.(?:sh|py|mjs|cjs|js|ts|ps1)$/i.test(f.name))
+    .map((f) => f.rel)
+    .slice(0, 25)
+  if (scriptsDirFiles.length > 0) definedScripts.scriptsDir = scriptsDirFiles
+
+  const profileCmds = []
+  for (const k of ['quick-test', 'full-test', 'smoke-verify', 'merge-gate']) {
+    for (const c of devProfile[k] ?? []) profileCmds.push(`${k}: ${c}`)
+  }
+  if (profileCmds.length > 0) definedScripts.devProfile = profileCmds
+  if (ciSteps.length > 0) definedScripts.ciRunSteps = ciSteps.slice(0, 30).map((s) => `${s.file}: ${s.cmd}`)
+
+  const dirCounts = new Map()
+  for (const tf of testFiles) {
+    const parts = tf.rel.split('/').filter(Boolean)
+    const bucket = parts.length >= 2 ? parts.slice(0, Math.min(2, parts.length - 1)).join('/') : '.'
+    dirCounts.set(bucket, (dirCounts.get(bucket) ?? 0) + 1)
+  }
+  const testDirectories = [...dirCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 15)
+    .map(([dir, count]) => ({ dir, files: count }))
+
+  const hasCiConfig = ciSteps.length > 0 || (() => {
+    const wfDir = join(repoRoot, '.github', 'workflows')
+    if (!existsSync(wfDir)) return false
+    try { return readdirSync(wfDir).some((n) => /\.ya?ml$/i.test(n)) } catch { return false }
+  })()
+
+  return {
+    totalTestFiles: testFiles.length,
+    testDirectories,
+    definedScripts,
+    hasCiConfig,
+  }
+}
+
+const HARD_SLEEP_RULES = [
+  /\bsetTimeout\s*\([^,\n]+,\s*(?:[1-9]\d{3,})\s*\)/,
+  /\b(?:sleep|delay|waitForTimeout)\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
+  /\b(?:time|asyncio)\.sleep\s*\(\s*(?:[1-9]\d*(?:\.\d+)?)\s*\)/,
+  /^\s*sleep\s+(?:[1-9]\d*(?:\.\d+)?)(?:\s|$)/,
+  /\btime\.Sleep\s*\(\s*(?:[1-9]\d*\s*\*\s*time\.(?:Second|Minute)|(?:[1-9]\d{3,})\s*\*\s*time\.Millisecond)/,
+  /\bthread::sleep\s*\(\s*Duration::(?:from_secs\s*\(\s*[1-9]|from_millis\s*\(\s*(?:[1-9]\d{3,}))/,
+  /\bThread\.sleep\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
+]
+const MOCK_SETUP_RE = /\b(?:vi\.fn|vi\.spyOn|jest\.fn|jest\.spyOn|mock\.fn|sinon\.(?:stub|spy|mock)|unittest\.mock|MagicMock|patch\.object|mock\.patch|mockReturnValue|mockResolvedValue|when\([^\n]+\)\.thenReturn)\b|\bpatch\s*\(/g
+const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?:\.\s*not)?\s*\.\s*toHaveBeenCalled\w*\s*\([^)\n]*\)|[A-Za-z0-9_$.]+\s*\.\s*assert_(?:not_)?called(?:_once|_with|_once_with)?\s*\([^)\n]*\)|\bassert\s+[A-Za-z0-9_$.]+\s*\.\s*(?:called|calledOnce|calledTwice|calledThrice|call_count)\b[^\n]*|[A-Za-z0-9_$.]+\s*\.\s*(?:calledOnce|calledTwice|calledThrice|verify)\b(?:\s*\([^)\n]*\))?/
+const UNIT_HEAVY_RE = /\b(?:playwright\.launch|chromium\.launch|firefox\.launch|webkit\.launch|puppeteer\.launch|ffmpeg|ffprobe|docker(?:\s+compose|\s+build|\s+run)|testcontainers)\b|['"](?:@playwright\/test|playwright|puppeteer|cypress|selenium-webdriver|testcontainers)['"]|(?:for\s*\([^;\n]*;\s*[^;\n]*<\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|1e[5-9])|for\s+\w+\s+in\s+range\(\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|100_000))/i
+const NON_UNIT_TEST_RE = /(?:^|\/)(?:e2e|integration|browser|perf|benchmark|benchmarks|load|stress)\/|(?:\.(?:e2e|int|integration|perf|bench)\.[^/]+$)/i
+
 function auditTests(repoRoot, files, devProfile, findings) {
   const codeFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && !TEST_FILE_RE.test(f.rel))
   const testFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && TEST_FILE_RE.test(f.rel))
@@ -841,6 +1059,7 @@ function auditTests(repoRoot, files, devProfile, findings) {
   }
 
   const ciSteps = parseWorkflowCiSteps(repoRoot)
+  const testInventory = collectTestInventory(repoRoot, files, testFiles, ciSteps, devProfile)
   const hasProfileRunners = (devProfile['quick-test']?.length ?? 0) > 0
     || (devProfile['full-test']?.length ?? 0) > 0
     || (devProfile['smoke-verify']?.length ?? 0) > 0
@@ -848,16 +1067,61 @@ function auditTests(repoRoot, files, devProfile, findings) {
   const hasRunnerConfig = ciSteps.length > 0 || hasProfileRunners
   const expandedCommands = hasRunnerConfig ? expandVerificationCommands(repoRoot, ciSteps, devProfile) : []
 
+  if (!testInventory.hasCiConfig && testFiles.length > 0) {
+    addFinding(findings, {
+      id: 'tests.no-ci-config',
+      category: 'tests',
+      severity: 'low',
+      title: 'No CI workflow config (.github/workflows/*.yml) found; orphan analysis checked local Dev Profile and scripts only',
+      action: 'Add CI workflow running merge-gate/full-test so test execution is objectively enforced.',
+    })
+  }
+
+  const normCmd = (c) => String(c ?? '').trim().replace(/\s+/g, ' ')
+  const quickCmds = (devProfile['quick-test'] ?? []).map(normCmd).filter(Boolean)
+  const fullCmds = (devProfile['full-test'] ?? []).map(normCmd).filter(Boolean)
+  const gateCmds = (devProfile['merge-gate'] ?? []).map(normCmd).filter(Boolean)
+
+  if (
+    quickCmds.some((q) => HEAVY_E2E_TOOL_RE.test(q))
+    || (testFiles.length >= 3 && quickCmds.length > 0 && quickCmds.some((q) => fullCmds.includes(q) || gateCmds.includes(q)))
+  ) {
+    addFinding(findings, {
+      id: 'tests.collapsed-tiers',
+      category: 'tests',
+      severity: 'medium',
+      file: 'AGENTS.md',
+      title: 'Dev Profile quick-test collapses slow full-test/E2E into routine fast iteration',
+      action: 'Separate quick-test (second-level unit filter with {target}) from heavy full-test / E2E / merge-gate.',
+    })
+  }
+
+  if (testFiles.length >= 5 && quickCmds.length > 0 && !quickCmds.some((q) => TARGET_FILTER_RE.test(q))) {
+    addFinding(findings, {
+      id: 'tests.unfiltered-quick-test',
+      category: 'tests',
+      severity: 'low',
+      file: 'AGENTS.md',
+      title: `quick-test runs across ${testFiles.length} test files without {target} or changed/filter narrowing`,
+      action: 'Parameterize quick-test with {target} (or --filter/--changed) so each edit round only runs related unit tests.',
+    })
+  }
+
   for (const f of testFiles) {
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const lines = info.text.split('\n')
+    const codeLines = stripCodeCommentsLines(info.text)
+    const codeOnlyText = codeLines.join('\n')
+    const isMetaFixtureHarness = /(?:^|\/)(?:fixtures|preflight|verify-injections|gap-coverage)\.[^/]+$/i.test(f.rel)
+      || /\bfunction\s+tmpProject\s*\(/.test(info.text)
+
     let skipCount = 0
     let testDeclCount = 0
 
     for (let i = 0; i < lines.length; i += 1) {
-      if (TEST_CASE_RE.test(lines[i])) testDeclCount += 1
-      if (TEST_SKIP_RE.test(lines[i])) {
+      if (TEST_CASE_RE.test(codeLines[i])) testDeclCount += 1
+      if (TEST_SKIP_RE.test(codeLines[i])) {
         skipCount += 1
         addFinding(findings, {
           id: `tests.skip.${f.rel}:${i + 1}`,
@@ -884,7 +1148,7 @@ function auditTests(repoRoot, files, devProfile, findings) {
     }
 
     const isExplicitTestFile = /\.(?:test|spec)\.[^/]+$|_test\.[^/]+$|^test_[^/]+\.py$/i.test(f.name) || testDeclCount > 0
-    if (isExplicitTestFile && !ASSERTION_RE.test(info.text)) {
+    if (isExplicitTestFile && !ASSERTION_RE.test(codeOnlyText)) {
       addFinding(findings, {
         id: `tests.zero-assertion.${f.rel}`,
         category: 'tests',
@@ -905,6 +1169,106 @@ function auditTests(repoRoot, files, devProfile, findings) {
         action: `Wire "${f.rel}" into CI workflow steps or AGENTS.md quick-test/full-test/merge-gate.`,
       })
     }
+
+    if (isMetaFixtureHarness) continue
+
+    // 硬编码长 sleep (>= 1s)
+    if (!NON_UNIT_TEST_RE.test(f.rel)) {
+      for (let i = 0; i < codeLines.length; i += 1) {
+        if (HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {
+          addFinding(findings, {
+            id: `tests.hard-sleep.${f.rel}`,
+            category: 'tests',
+            severity: 'medium',
+            file: f.rel,
+            line: i + 1,
+            title: `Hard-coded sleep >= 1s in unit test ${f.rel}:${i + 1}`,
+            detail: codeLines[i].trim().slice(0, 100),
+            action: 'Replace fixed long sleeps with event/condition polling or fake timers.',
+          })
+          break
+        }
+      }
+    }
+
+    // 单元层混入重计算 / 浏览器 / 容器启动
+    if (isExplicitTestFile && !NON_UNIT_TEST_RE.test(f.rel)) {
+      let heavyLine = -1
+      for (let i = 0; i < codeLines.length; i += 1) {
+        if (UNIT_HEAVY_RE.test(codeLines[i])) {
+          heavyLine = i + 1
+          break
+        }
+        if (/for\s*\(/.test(codeLines[i]) && /\b(?:height|rows|img)\b/i.test(codeLines[i])) {
+          const nearby = codeLines.slice(i + 1, i + 4).join('\n')
+          if (/for\s*\(/.test(nearby) && /\b(?:width|cols|pixel)\b/i.test(nearby)) {
+            heavyLine = i + 1
+            break
+          }
+        }
+      }
+      if (heavyLine > 0) {
+        addFinding(findings, {
+          id: `tests.heavy-in-unit.${f.rel}`,
+          category: 'tests',
+          severity: 'medium',
+          file: f.rel,
+          line: heavyLine,
+          title: `Heavy loop or browser/container launch inside unit-tier test: ${f.rel}:${heavyLine}`,
+          action: 'Move heavy E2E/container/pixel workloads to full-test/e2e or shrink fixture dimensions.',
+        })
+      }
+    }
+
+    // 纯 Mock 自证（>=5 个 mock/spy 断言调用且无真实值/状态断言）
+    if (isExplicitTestFile) {
+      const mockCount = (codeOnlyText.match(MOCK_SETUP_RE) ?? []).length
+      const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
+      const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
+      const hasRealAssertion = ASSERTION_RE.test(nonSpyCode)
+      if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
+        addFinding(findings, {
+          id: `tests.mock-tautology.${f.rel}`,
+          category: 'tests',
+          severity: 'medium',
+          file: f.rel,
+          title: `Mock-tautology test with ${mockCount} mock setups and 0 behavioral SUT assertions: ${f.rel}`,
+          action: 'Test real module outputs/state transitions instead of verifying mock call plumbing or mocked return values.',
+        })
+      }
+    }
+
+    // 超大单体单元测试文件 (> 800 行)
+    if (!NON_UNIT_TEST_RE.test(f.rel) && lines.length > 800) {
+      addFinding(findings, {
+        id: `tests.oversized-file.${f.rel}`,
+        category: 'tests',
+        severity: 'low',
+        file: f.rel,
+        title: `Oversized unit test file (${lines.length} lines > 800): ${f.rel}`,
+        action: 'Split oversized test file by feature/module so quick-test {target} stays fast.',
+      })
+    }
+
+    // 非无头 / 抢焦点 / 污染用户真实 Home 配置
+    const hasHeadlessOrTempGuard = /\bprocess\.env\.(?:CI|HEADLESS|DISPLAY)|os\.environ|headless\s*:\s*(?:true|Boolean|process\.env)/i.test(codeOnlyText)
+    const hasTempHomeGuard = /\b(?:mkdtemp|tmpdir|tmp_path|tempdir|HOME\s*=|USERPROFILE\s*=)\b/i.test(codeOnlyText)
+    const explicitHeaded = (/\bheadless\s*:\s*false\b|--headed\b/i.test(codeOnlyText) && !hasHeadlessOrTempGuard)
+      || (/\b(?:pyautogui|pynput|NSApplication\.shared|robot\.mouseClick|osascript)\b/i.test(codeOnlyText) && !hasHeadlessOrTempGuard)
+    const touchesRealHome = /(?:\b(?:os\.homedir\(\)|Path\.home\(\)|expanduser\(["']~)|["']~\/\.(?:config|local|ssh|aws|kube|gemini|claude))/i.test(codeOnlyText)
+      && !hasTempHomeGuard
+    if (explicitHeaded || touchesRealHome) {
+      addFinding(findings, {
+        id: `tests.non-headless.${f.rel}`,
+        category: 'tests',
+        severity: 'medium',
+        file: f.rel,
+        title: explicitHeaded
+          ? `Non-headless GUI or headed browser test without headless/CI guard: ${f.rel}`
+          : `Test accesses user home config directly without temp dir / HOME isolation: ${f.rel}`,
+        action: 'Run tests headlessly and isolate config/filesystem state in temp directories.',
+      })
+    }
   }
 
   if (existsSync(join(repoRoot, 'AGENTS.md')) && devProfile['quick-test'].length === 0 && devProfile['full-test'].length === 0) {
@@ -918,7 +1282,7 @@ function auditTests(repoRoot, files, devProfile, findings) {
     })
   }
 
-  return { ciRunSteps: ciSteps }
+  return { ciRunSteps: ciSteps, testInventory }
 }
 
 function checkAgentsPathsAndRefs(repoRoot, agentsText, devProfile, defaultBranch, findings) {
@@ -1209,6 +1573,24 @@ function auditDocs(repoRoot, isGit, files, devProfile, defaultBranch, scopeRel, 
       })
     }
     checkAgentsPathsAndRefs(repoRoot, agentsInfo.text, devProfile, defaultBranch, findings)
+    if (!scopeRel && Array.isArray(devProfile['high-risk']) && devProfile['high-risk'].length > 0) {
+      for (const rawPat of devProfile['high-risk']) {
+        const pat = String(rawPat ?? '').trim()
+        if (!pat) continue
+        const matched = files.some((f) => matchGlob(f.rel, pat))
+          || (!/[*?]/.test(pat) && existsSync(join(repoRoot, pat.replace(/\/+$/, ''))))
+        if (!matched) {
+          addFinding(findings, {
+            id: `docs.devprofile-unmatched-high-risk.${pat}`,
+            category: 'docs',
+            severity: 'medium',
+            file: 'AGENTS.md',
+            title: `Dev Profile high-risk pattern "${pat}" matched 0 files in repository`,
+            action: 'Update or remove stale high-risk pattern in AGENTS.md.',
+          })
+        }
+      }
+    }
   }
 
   const tddPath = join(repoRoot, 'docs', 'TDD.md')
@@ -1278,6 +1660,104 @@ function auditDocs(repoRoot, isGit, files, devProfile, defaultBranch, scopeRel, 
         }
       }
     } catch { /* ignore */ }
+  }
+
+  const activeDocStatus = {
+    prd: new Set(['draft', 'active', 'in_review', 'done', 'dropped']),
+    spec: new Set(['draft', 'approved', 'implementing', 'in_review', 'implemented', 'superseded']),
+    todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
+  }
+  for (const [subDir, expectedKind] of [['prd', 'prd'], ['specs', 'spec'], ['todo', 'todo']]) {
+    const dirRel = `docs/${subDir}`
+    if (scopeRel && scopeRel !== dirRel && !scopeRel.startsWith(`${dirRel}/`) && !dirRel.startsWith(`${scopeRel}/`)) continue
+    const dirAbs = join(repoRoot, 'docs', subDir)
+    if (!existsSync(dirAbs)) continue
+    let entries = []
+    try { entries = readdirSync(dirAbs, { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (!ent.isFile() || !ent.name.endsWith('.md')) continue
+      const relDoc = `${dirRel}/${ent.name}`
+      const fullDoc = join(dirAbs, ent.name)
+      const info = readTextStrictInfo(fullDoc)
+      if (!info?.text) continue
+      const fm = parseDocFrontmatter(info.text)
+      const fn = parseDocFilename(ent.name)
+
+      if (fm.malformedFrontmatter) {
+        addFinding(findings, {
+          id: `docs.frontmatter-invalid.${relDoc}`,
+          category: 'docs',
+          severity: 'medium',
+          file: relDoc,
+          title: `Invalid YAML frontmatter in ${relDoc}: ${fm.syntaxErrors[0] ?? 'syntax error'}`,
+          action: 'Fix YAML frontmatter header (`--- ... ---`) or regenerate via `doc-plan.mjs`.',
+        })
+        continue
+      }
+
+      if (fm.hasFrontmatter) {
+        const kindVal = fm.data.kind
+        const statusVal = typeof fm.data.status === 'string' ? fm.data.status.toLowerCase() : ''
+        const rawIssue = fm.data.issue
+        let issueNum = null
+        let issueInvalid = false
+        if (rawIssue !== undefined && rawIssue !== null && rawIssue !== '') {
+          if (typeof rawIssue === 'number') {
+            if (Number.isInteger(rawIssue) && rawIssue > 0) issueNum = rawIssue
+            else issueInvalid = true
+          } else {
+            const s = String(rawIssue).trim()
+            if (/^#?\d+$/.test(s)) {
+              issueNum = Number(s.replace(/^#/, ''))
+              if (issueNum <= 0) issueInvalid = true
+            } else {
+              const um = /\/issues\/(\d+)(?:[/?#]|$)/.exec(s)
+              if (um) issueNum = Number(um[1])
+              else issueInvalid = true
+            }
+          }
+        }
+
+        if (!kindVal || kindVal !== expectedKind || !statusVal || !activeDocStatus[expectedKind].has(statusVal) || issueInvalid) {
+          addFinding(findings, {
+            id: `docs.frontmatter-invalid.${relDoc}`,
+            category: 'docs',
+            severity: 'medium',
+            file: relDoc,
+            title: `Invalid frontmatter metadata in ${relDoc} (check kind=${expectedKind}, status, or issue)`,
+            action: `Ensure YAML frontmatter specifies \`kind: ${expectedKind}\`, valid \`status\`, and valid \`issue\` (integer or null).`,
+          })
+        }
+
+        if (!issueInvalid && fn && ((issueNum && fn.issue !== issueNum) || (fn.issue && issueNum !== fn.issue))) {
+          addFinding(findings, {
+            id: `docs.filename-issue-mismatch.${relDoc}`,
+            category: 'docs',
+            severity: 'medium',
+            file: relDoc,
+            title: `Frontmatter issue (${issueNum ?? 'null'}) mismatches filename ${ent.name}`,
+            action: `Run \`doc-plan.mjs link ${relDoc} --issue ${issueNum ?? fn.issue}\` to synchronize filename and frontmatter.`,
+          })
+        }
+
+        for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+          const rv = fm.data[rk]
+          if (typeof rv === 'string' && rv.trim() && !/^(?:无|none|null)$/i.test(rv.trim())) {
+            const targetAbs = resolve(dirname(fullDoc), rv.trim())
+            if (!existsSync(targetAbs)) {
+              addFinding(findings, {
+                id: `docs.broken-related-link.${relDoc}.${rk}`,
+                category: 'docs',
+                severity: 'medium',
+                file: relDoc,
+                title: `Broken frontmatter link \`${rk}: ${rv.trim()}\` in ${relDoc}`,
+                action: 'Fix the relative path or run `doc-plan.mjs link` to resync sibling links.',
+              })
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -2196,6 +2676,17 @@ function formatTextReport(result) {
     lines.push(`  Skill Manifest  : ${r.manifest.status}${r.manifest.checkedFiles !== undefined ? ` (${r.manifest.checkedFiles} managed files checked)` : ''}`)
   }
 
+  if (result.testInventory) {
+    const ti = result.testInventory
+    const dirs = (ti.testDirectories ?? []).slice(0, 6).map((d) => `${d.dir}(${d.files})`).join(', ') || 'none'
+    const scriptBuckets = Object.keys(ti.definedScripts ?? {}).join(', ') || 'none'
+    lines.push('')
+    lines.push('[TEST_INVENTORY]')
+    lines.push(`  Test Files      : ${ti.totalTestFiles} | Dirs: ${dirs}`)
+    lines.push(`  CI Config       : ${ti.hasCiConfig ? 'present' : 'none (local-only profile/scripts)'}`)
+    lines.push(`  Defined Scripts : ${scriptBuckets}`)
+  }
+
   lines.push('')
   lines.push('[GAP_SCAN]')
   lines.push(`  total=${result.findings.length} critical=${counts.critical} high=${counts.high} medium=${counts.medium} low=${counts.low} info=${counts.info}`)
@@ -2470,7 +2961,7 @@ function main() {
 
   const devProfile = parseDevProfile(repoRoot)
   const findings = []
-  let testsMeta = { ciRunSteps: [] }
+  let testsMeta = { ciRunSteps: [], testInventory: null }
 
   if (runLiveAudit) {
     if (catSet.has('security')) auditSecurity(repoRoot, files, trackedSet, findings)
@@ -2561,6 +3052,7 @@ function main() {
     categories,
     counts,
     findings,
+    testInventory: testsMeta.testInventory,
     ciRunSteps: testsMeta.ciRunSteps,
     cluster,
     signalsPath,

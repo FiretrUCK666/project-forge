@@ -3,21 +3,25 @@
  * doc-plan.mjs —— 五档需求分流、四层工程文档生成、规划自审净化、Critique 记账与 SPEC 批准。
  *
  * 子命令：
- *   triage         --summary <text> [--files <n>] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
- *   init           --type prd|spec|todo --slug <slug> --title <title> [--task <id>] [--spec <path>] [--force] [--json]
- *   audit          --file <docPath> [--json]
+ *   triage         --summary <text> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
+ *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
+ *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name>] [--status <s>] [--approve] [--json]
+ *   audit          [--file <docPath> | .] [--json]
  *   critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <text>] [--json]
  *   approve        --file <specPath> [--skip-critique-reason <text>] [--json]
  *   list           [--json]
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import {
-  classifyDoorType, createDefaultLedger, ensureWorktreesIgnored, gitRun, isMainModule,
-  parseAgentsProfile, posixPath, printNextStep, readTaskLedger, readTextSafe,
-  resolveRepoRoots, sanitizeTaskId, sha256Text, slugify, writeAtomic, writeTaskLedger,
+  buildDocFilename, classifyDoorType, createDefaultLedger, DOC_FRONTMATTER_KEY_ORDER,
+  ensureWorktreesIgnored, evaluateCoupledSync, gitRun, isMainModule,
+  parseAgentsProfile, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter,
+  posixPath, printNextStep, readTaskLedger, readTextSafe, resolveRepoRoots,
+  sanitizeTaskId, serializeDocFrontmatter, sha256Text, slugify, syncDocsLifecycle,
+  updateDocFrontmatter, writeAtomic, writeTaskLedger,
 } from '../../lib/shared.mjs'
 
 function yymmdd(date = new Date()) {
@@ -41,8 +45,9 @@ function scanActiveContracts(root) {
   try {
     for (const name of readdirSync(specsDir).filter((n) => n.endsWith('.md')).sort()) {
       const text = readTextSafe(join(specsDir, name)) ?? ''
-      const status = /^(?:-\s+)?Status:\s*`?(\S+?)`?$/mi.exec(text)?.[1]?.toLowerCase() ?? 'unknown'
-      if (status === 'approved' || status === 'implemented') {
+      const fm = parseDocFrontmatter(text)
+      const status = String(fm.data?.status ?? 'unknown').toLowerCase()
+      if (status === 'approved' || status === 'implementing' || status === 'implemented') {
         contracts.activeSpecs.push({ file: `docs/specs/${name}`, status })
       }
     }
@@ -50,7 +55,16 @@ function scanActiveContracts(root) {
   return contracts
 }
 
-/** 严格五档分流判定逻辑，同步输出 doorType 与 critiqueTier。 */
+function computeCoupledSyncWarnings(repoRoot, paths) {
+  if (!repoRoot || !Array.isArray(paths) || paths.length === 0) return []
+  const agentsText = readTextSafe(join(repoRoot, 'AGENTS.md'))
+  if (!agentsText) return []
+  const rules = parseCoupledSyncRules(agentsText)
+  if (rules.length === 0) return []
+  return evaluateCoupledSync(paths, rules, repoRoot)
+}
+
+/** 严格五档分流判定逻辑，同步输出 doorType、critiqueTier 与改哪看哪联动提醒。 */
 export function triageTask({
   summary = '',
   files,
@@ -58,12 +72,14 @@ export function triageTask({
   conflictsTdd = false,
   docOnly = false,
   bugfix = false,
+  paths = [],
   repoRoot,
 } = {}) {
   const text = String(summary ?? '').trim()
   const fileCount = Number.isFinite(files) ? Number(files) : undefined
   const activeContracts = repoRoot ? scanActiveContracts(repoRoot) : { tdd: false, activeSpecs: [] }
   const profile = repoRoot ? parseAgentsProfile(repoRoot) : null
+  const coupledSyncWarnings = computeCoupledSyncWarnings(repoRoot, paths)
 
   const conflictRe = /(?:conflicts?\s+(?:with\s+)?tdd|与\s*tdd\s*冲突|打破\s*tdd|推翻.*(?:架构|契约|spec)|违背.*(?:tdd|spec))/i
   const contractRe = /(?:跨模块|cross[- ]?module|external\s+contract|breaking\s+change|外部契约|接口变更|协议变更|schema\s*变更|架构重构|新增命令|新增子命令|api\s*契约|refactor\s+architecture)/i
@@ -101,6 +117,7 @@ export function triageTask({
       needsReview: true,
       specApprovalRequired: true,
       activeContracts,
+      coupledSyncWarnings,
     }
   }
 
@@ -120,6 +137,7 @@ export function triageTask({
       needsReview: true,
       specApprovalRequired: true,
       activeContracts,
+      coupledSyncWarnings,
     }
   }
 
@@ -138,6 +156,7 @@ export function triageTask({
       needsReview: false,
       specApprovalRequired: false,
       activeContracts,
+      coupledSyncWarnings,
     }
   }
 
@@ -156,6 +175,7 @@ export function triageTask({
       needsReview: false,
       specApprovalRequired: false,
       activeContracts,
+      coupledSyncWarnings,
     }
   }
 
@@ -173,49 +193,50 @@ export function triageTask({
     needsReview: true,
     specApprovalRequired: false,
     activeContracts,
+    coupledSyncWarnings,
   }
 }
 
-async function initDoc({
-  repoRoot,
-  mainRoot,
-  gitDir,
-  isGit,
-  type,
-  slug,
+function parseIssueArg(rawIssue) {
+  if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
+  const num = Number(String(rawIssue).replace(/^#/, '').trim())
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error(`--issue 必须为正整数（如 278），收到：${rawIssue}`)
+  }
+  return num
+}
+
+function renderSingleDocContent({
+  kind,
   title,
+  safeSlug,
+  today,
+  headSha,
+  headBranch,
   taskId,
-  relatedSpec,
-  force = false,
+  issueNum,
+  owner,
+  quickCmd,
+  relatedSpecRel,
 }) {
-  if (!['prd', 'spec', 'todo'].includes(type)) {
-    throw new Error(`--type 必须是 prd、spec 或 todo，收到：${type}`)
-  }
-  const safeSlug = slugify(slug)
-  const dateTag = yymmdd()
-  const today = isoDate()
-  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo' }
-  const relFile = `${dirMap[type]}/${dateTag}-${safeSlug}.md`
-  const absFile = join(repoRoot, relFile)
-
-  if (existsSync(absFile) && !force) {
-    throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
-  }
-
-  const headRes = await gitRun(repoRoot, ['rev-parse', 'HEAD'])
-  const headSha = headRes.ok && headRes.stdout ? headRes.stdout.trim() : 'uncommitted'
-  const profile = parseAgentsProfile(repoRoot)
-  const quickCmd = profile.quickTest ?? '<填写项目快测命令>'
-
-  let content = ''
-  if (type === 'prd') {
-    content = [
-      `# PRD: ${title}`,
+  if (kind === 'prd') {
+    const fm = serializeDocFrontmatter({
+      kind: 'prd',
+      title,
+      status: 'draft',
+      created: today,
+      updated: today,
+      issue: issueNum,
+      pr: null,
+      owner: owner ?? null,
+      plan_critique: 'pending',
+      related_spec: null,
+      related_todo: null,
+    }, DOC_FRONTMATTER_KEY_ORDER.prd)
+    return [
+      fm.trimEnd(),
       '',
-      `- Created: ${today}`,
-      `- Slug: ${safeSlug}`,
-      '- Status: draft',
-      '- Plan Critique: pending',
+      `# PRD: ${title}`,
       '',
       '## 背景与目标',
       '',
@@ -240,15 +261,31 @@ async function initDoc({
       '- [ ] C2: <第二条>',
       '',
     ].join('\n')
-  } else if (type === 'spec') {
-    content = [
-      `# SPEC: ${title}`,
+  }
+
+  if (kind === 'spec') {
+    const fm = serializeDocFrontmatter({
+      kind: 'spec',
+      title,
+      status: 'draft',
+      tier: 'L3',
+      created: today,
+      updated: today,
+      issue: issueNum,
+      pr: null,
+      branch: headBranch,
+      owner: owner ?? null,
+      approved: false,
+      implemented: false,
+      plan_critique: 'pending',
+      related_prd: null,
+      related_todo: null,
+      high_risk_paths: [],
+    }, DOC_FRONTMATTER_KEY_ORDER.spec)
+    return [
+      fm.trimEnd(),
       '',
-      `- Created: ${today}`,
-      `- Slug: ${safeSlug}`,
-      '- Status: draft',
-      '- Plan Critique: pending',
-      '- Related PRD: 无',
+      `# SPEC: ${title}`,
       '',
       '## 目标与约束',
       '',
@@ -285,56 +322,146 @@ async function initDoc({
       '<!-- 在合并之前补齐真实实现摘要与验证结果 -->',
       '',
     ].join('\n')
-  } else {
-    content = [
-      `# Todo: ${title}`,
-      '',
-      `- Task: ${taskId ?? safeSlug}`,
-      `- Created: ${today}`,
-      `- Planned at: ${headSha}`,
-      '- Status: pending',
-      `- Related SPEC: ${relatedSpec ?? '无'}`,
-      '',
-      '## 影响范围',
-      '',
-      '- 预计改动文件：<待核实真实路径，新建文件标 (new)>',
-      `- 快测命令：\`${quickCmd}\``,
-      '',
-      '## 复用既有模块',
-      '',
-      '- <待核实填写：准备复用的现成函数、库或脚本>',
-      '',
-      '## 本期不做',
-      '',
-      '- <明确排除本次不顺手重构的无关事项>',
-      '',
-      '## 门型与回滚路径',
-      '',
-      '- 门型：two-way',
-      '- 回滚路径：局部可逆改动，直接 git revert 或删除临时分支即可回退。',
-      '',
-      '## 验收标准（动手之前冻结）',
-      '',
-      '- [ ] C1: <第一条可判定的标准>',
-      '- [ ] C2: <第二条>',
-      '',
-      '## 执行步骤',
-      '',
-      `1. 先补齐复现或验收测试 —— 验证：\`${quickCmd}\``,
-      `2. 实现核心改动并补齐反面用例 —— 验证：\`${quickCmd}\``,
-      '',
-      '## 完成后的记录',
-      '',
-      '**在合并之前写完，随这次改动一起提交。**',
-      '',
-      '- 验证命令与结果：',
-      '- 遇到的问题与回避方式：',
-      '',
-    ].join('\n')
   }
 
-  mkdirSync(dirname(absFile), { recursive: true })
-  writeAtomic(absFile, content)
+  const fm = serializeDocFrontmatter({
+    kind: 'todo',
+    title,
+    status: 'active',
+    created: today,
+    updated: today,
+    issue: issueNum,
+    pr: null,
+    branch: headBranch,
+    owner: owner ?? null,
+    approved: false,
+    done_at: null,
+    task_id: taskId ?? safeSlug,
+    planned_at: headSha,
+    related_prd: null,
+    related_spec: relatedSpecRel ?? null,
+  }, DOC_FRONTMATTER_KEY_ORDER.todo)
+  return [
+    fm.trimEnd(),
+    '',
+    `# Todo: ${title}`,
+    '',
+    '## 影响范围',
+    '',
+    '- 预计改动文件：<待核实真实路径，新建文件标 (new)>',
+    `- 快测命令：\`${quickCmd}\``,
+    '',
+    '## 复用既有模块',
+    '',
+    '- <待核实填写：准备复用的现成函数、库或脚本>',
+    '',
+    '## 本期不做',
+    '',
+    '- <明确排除本次不顺手重构的无关事项>',
+    '',
+    '## 门型与回滚路径',
+    '',
+    '- 门型：two-way',
+    '- 回滚路径：局部可逆改动，直接 git revert 或删除临时分支即可回退。',
+    '',
+    '## 验收标准（动手之前冻结）',
+    '',
+    '- [ ] C1: <第一条可判定的标准>',
+    '- [ ] C2: <第二条>',
+    '',
+    '## 执行步骤',
+    '',
+    `1. 先补齐复现或验收测试 —— 验证：\`${quickCmd}\``,
+    `2. 实现核心改动并补齐反面用例 —— 验证：\`${quickCmd}\``,
+    '',
+    '## 完成后的记录',
+    '',
+    '**在合并之前写完，随这次改动一起提交。**',
+    '',
+    '- 验证命令与结果：',
+    '- 遇到的问题与回避方式：',
+    '',
+  ].join('\n')
+}
+
+async function initDoc({
+  repoRoot,
+  mainRoot,
+  gitDir,
+  isGit,
+  type,
+  kind,
+  slug,
+  title,
+  taskId,
+  issue,
+  owner,
+  branch,
+  relatedSpec,
+  force = false,
+}) {
+  const effectiveKind = kind ?? type
+  if (!['prd', 'spec', 'todo', 'pair', 'all'].includes(effectiveKind)) {
+    throw new Error(`--kind / --type 必须是 prd、spec、todo、pair 或 all，收到：${effectiveKind}`)
+  }
+  const safeSlug = slugify(slug)
+  const issueNum = parseIssueArg(issue)
+  const dateTag = yymmdd()
+  const today = isoDate()
+  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo' }
+  const kindsToCreate = effectiveKind === 'pair'
+    ? ['spec', 'todo']
+    : effectiveKind === 'all'
+      ? ['prd', 'spec', 'todo']
+      : [effectiveKind]
+
+  const headRes = isGit ? await gitRun(repoRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' }
+  const headSha = headRes.ok && headRes.stdout ? headRes.stdout.trim() : 'uncommitted'
+  const brRes = !branch && isGit ? await gitRun(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']) : { ok: false, stdout: '' }
+  const headBranch = branch ?? (brRes.ok && brRes.stdout && brRes.stdout.trim() !== 'HEAD' ? brRes.stdout.trim() : null)
+  const profile = parseAgentsProfile(repoRoot)
+  const quickCmd = profile.quickTest ?? '<填写项目快测命令>'
+
+  const planned = []
+  for (const k of kindsToCreate) {
+    const fileName = buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
+    const relFile = `${dirMap[k]}/${fileName}`
+    const absFile = join(repoRoot, relFile)
+    if (existsSync(absFile) && !force) {
+      throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
+    }
+    planned.push({ kind: k, file: relFile, absFile })
+  }
+
+  for (const item of planned) {
+    const relatedSpecRel = item.kind === 'todo' && relatedSpec
+      ? posixPath(relative(dirname(item.absFile), resolve(repoRoot, relatedSpec)))
+      : null
+    const content = renderSingleDocContent({
+      kind: item.kind,
+      title,
+      safeSlug,
+      today,
+      headSha,
+      headBranch,
+      taskId,
+      issueNum,
+      owner,
+      quickCmd,
+      relatedSpecRel,
+    })
+    mkdirSync(dirname(item.absFile), { recursive: true })
+    writeAtomic(item.absFile, content)
+  }
+
+  if (planned.length > 1) {
+    await syncDocsLifecycle(repoRoot, {
+      slugOrPath: planned[0].file,
+      issue: issueNum ?? undefined,
+      branch: headBranch ?? undefined,
+      owner: owner ?? undefined,
+    })
+  }
 
   let ledgerUpdated = false
   if (taskId) {
@@ -346,23 +473,46 @@ async function initDoc({
       isolation: null,
       status: 'planned',
     })
-    if (type === 'prd') ledger.prdFile = relFile
-    else if (type === 'spec') ledger.specFile = relFile
-    else ledger.todoFile = relFile
+    for (const item of planned) {
+      if (item.kind === 'prd') ledger.prdFile = item.file
+      else if (item.kind === 'spec') ledger.specFile = item.file
+      else if (item.kind === 'todo') ledger.todoFile = item.file
+    }
+    if (issueNum && Array.isArray(ledger.linkedIssues) && !ledger.linkedIssues.includes(issueNum)) {
+      ledger.linkedIssues = [...ledger.linkedIssues, issueNum]
+    }
     writeTaskLedger(mainRoot, ledger)
     ledgerUpdated = true
   }
 
-  return { type, file: relFile, absFile, plannedAt: headSha, ledgerUpdated }
+  const primary = planned[planned.length - 1]
+  return {
+    type: effectiveKind,
+    kind: effectiveKind,
+    file: primary.file,
+    absFile: primary.absFile,
+    files: planned.map((p) => p.file),
+    created: planned.map((p) => ({ kind: p.kind, file: p.file })),
+    issue: issueNum,
+    plannedAt: headSha,
+    ledgerUpdated,
+  }
 }
 
 function stripCritiqueMeta(text) {
   return String(text ?? '')
     .replace(/\r\n/g, '\n')
     .replace(/^-\s+Plan Critique:.*\n?/gmi, '')
+    .replace(/^plan_critique:.*\n?/gmi, '')
+    .replace(/^updated:.*\n?/gmi, '')
 }
 
 function detectDocType(relPath, text) {
+  const fm = parseDocFrontmatter(text)
+  const fn = parseDocFilename(relPath)
+  const fmKind = fm.data?.kind
+  if (fmKind === 'prd' || fmKind === 'spec' || fmKind === 'todo') return fmKind
+  if (fn?.kind) return fn.kind
   const rel = posixPath(relPath).toLowerCase()
   if (rel.startsWith('docs/specs/') || /^#\s*SPEC:/mi.test(text)) return 'spec'
   if (rel.startsWith('docs/prd/') || /^#\s*PRD:/mi.test(text)) return 'prd'
@@ -408,8 +558,63 @@ const PLACEHOLDER_TEXT_RE = /(?:待补充|待填写|待核实|\bTBD\b|\bFIXME\b|
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,50})>/g
 const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
 
+const VALID_STATUS_BY_TYPE = Object.freeze({
+  prd: new Set(['draft', 'active', 'in_review', 'done', 'dropped']),
+  spec: new Set(['draft', 'approved', 'implementing', 'in_review', 'implemented', 'superseded']),
+  todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
+})
+
+const CONVENTION_DOC_DIRS = new Set(['docs/prd', 'docs/specs', 'docs/todo', 'docs/archive', 'docs/archive/todo'])
+
+function findFmKeyLine(lines, fmEndIdx, key) {
+  if (fmEndIdx < 0) return 1
+  const re = new RegExp(`^${key}\\s*:`)
+  for (let idx = 1; idx < fmEndIdx; idx += 1) {
+    if (re.test(lines[idx])) return idx + 1
+  }
+  return 1
+}
+
+function extractFrontmatterIssueInt(val) {
+  if (val === undefined || val === null || val === '') return null
+  if (typeof val === 'number') return Number.isInteger(val) && val > 0 ? val : NaN
+  const s = String(val).trim()
+  if (!s) return null
+  if (/^#?\d+$/.test(s)) {
+    const n = Number(s.replace(/^#/, ''))
+    return n > 0 ? n : NaN
+  }
+  const urlMatch = /\/issues\/(\d+)(?:[/?#]|$)/.exec(s)
+  return urlMatch ? Number(urlMatch[1]) : NaN
+}
+
+function collectPlaceholderErrors(text, lineNo, errors) {
+  if (PLACEHOLDER_TEXT_RE.test(text)) {
+    errors.push({
+      code: 'UNRESOLVED_PLACEHOLDER',
+      line: lineNo,
+      message: `第 ${lineNo} 行包含未清理占位符文本`,
+      fixHint: '请将「待补充/TBD/FIXME/fill」替换为真实结论、路径或可运行验证命令。',
+    })
+  }
+  for (const am of text.matchAll(ANGLE_PLACEHOLDER_RE)) {
+    const inner = am[1].trim()
+    if (!inner || /@/.test(inner) || /^https?:\/\//i.test(inner)) continue
+    const looksPlaceholder = /[\u4e00-\u9fa5]|\||^(?:todo|tbd|path|file|cmd|slug|title|id|N|target|module|name|reason|owner|status|branch|spec|prd|placeholder|example|two-way\s*\|\s*one-way)/i.test(inner)
+      || /(?:^|[:：]\s*|-+\s+)<[^>]+>/.test(text)
+    if (looksPlaceholder) {
+      errors.push({
+        code: 'UNRESOLVED_ANGLE_PLACEHOLDER',
+        line: lineNo,
+        message: `第 ${lineNo} 行存在模板尖括号占位 <${inner}>`,
+        fixHint: `请将 <${inner}> 替换为真实具体内容。`,
+      })
+    }
+  }
+}
+
 /**
- * 规划文档静态自净化审计：拦截未填占位、空泛套话、缺非目标/门型、及未核实的假路径。
+ * 规划文档静态自净化审计：拦截 Frontmatter/互链/占位/套话/缺非目标/门型及未核实路径。
  */
 export function auditDoc({ repoRoot, file }) {
   const abs = resolve(repoRoot, file)
@@ -423,14 +628,137 @@ export function auditDoc({ repoRoot, file }) {
   const docType = detectDocType(relDoc, rawText)
   const errors = []
   const warnings = []
-  const lines = rawText.replace(/\r\n/g, '\n').split('\n')
+  const normRaw = rawText.replace(/\r\n/g, '\n')
+  const lines = normRaw.split('\n')
+
+  const fm = parseDocFrontmatter(normRaw)
+  let fmEndIdx = -1
+  if (normRaw.startsWith('---\n')) {
+    for (let idx = 1; idx < lines.length; idx += 1) {
+      if (lines[idx].trim() === '---') {
+        fmEndIdx = idx
+        break
+      }
+    }
+  }
+
+  if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
+    if (fm.malformedFrontmatter) {
+      for (const se of fm.syntaxErrors) {
+        errors.push({
+          code: 'FRONTMATTER_INVALID',
+          line: 1,
+          message: se,
+          fixHint: '请修复头部 YAML Frontmatter（`--- ... ---` 与 `key: value` 语法）。',
+        })
+      }
+    } else if (fm.hasFrontmatter) {
+      for (const [k, v] of Object.entries(fm.data)) {
+        if (typeof v === 'string') {
+          collectPlaceholderErrors(v, findFmKeyLine(lines, fmEndIdx, k), errors)
+        }
+      }
+      if (!fm.data.kind) {
+        errors.push({
+          code: 'FRONTMATTER_INVALID',
+          line: 1,
+          message: 'YAML Frontmatter 缺少 `kind` 字段（prd | spec | todo）',
+          fixHint: `请在头部 Frontmatter 补充 \`kind: ${docType}\`。`,
+        })
+      } else if (fm.data.kind !== docType) {
+        errors.push({
+          code: 'FRONTMATTER_INVALID',
+          line: findFmKeyLine(lines, fmEndIdx, 'kind'),
+          message: `Frontmatter \`kind: ${fm.data.kind}\` 与文档目录类型 \`${docType}\` 不一致`,
+          fixHint: `请确认文件路径与 \`kind: ${docType}\` 对齐。`,
+        })
+      }
+
+      const st = typeof fm.data.status === 'string' ? fm.data.status.toLowerCase() : ''
+      if (!st) {
+        errors.push({
+          code: 'FRONTMATTER_INVALID',
+          line: 1,
+          message: 'YAML Frontmatter 缺少 `status` 字段',
+          fixHint: `请补充合法 status（${[...VALID_STATUS_BY_TYPE[docType]].join(' | ')}）。`,
+        })
+      } else if (!VALID_STATUS_BY_TYPE[docType].has(st)) {
+        errors.push({
+          code: 'INVALID_STATUS',
+          line: findFmKeyLine(lines, fmEndIdx, 'status'),
+          message: `Frontmatter \`status: ${fm.data.status}\` 不在 ${docType} 允许枚举中`,
+          fixHint: `请改用：${[...VALID_STATUS_BY_TYPE[docType]].join(' | ')}。`,
+        })
+      }
+
+      const fmIssue = extractFrontmatterIssueInt(fm.data.issue)
+      if (Number.isNaN(fmIssue)) {
+        errors.push({
+          code: 'FRONTMATTER_INVALID',
+          line: findFmKeyLine(lines, fmEndIdx, 'issue'),
+          message: `Frontmatter \`issue\` 值格式无效：${fm.data.issue}`,
+          fixHint: '请填写正整数 Issue 编号（如 `278`）或 `null`。',
+        })
+      } else {
+        const fn = parseDocFilename(relDoc)
+        if (fn && ((fmIssue && fn.issue !== fmIssue) || (fn.issue && fmIssue !== fn.issue))) {
+          errors.push({
+            code: 'ISSUE_FILENAME_MISMATCH',
+            line: findFmKeyLine(lines, fmEndIdx, 'issue'),
+            message: `Frontmatter issue (${fmIssue ?? 'null'}) 与文件名 (${relDoc}) 的 -issue<N>- 不一致`,
+            fixHint: '运行 `doc-plan.mjs link <file> --issue <N>` 对齐文件名与 Frontmatter。',
+          })
+        }
+      }
+
+      for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+        const rv = fm.data[rk]
+        if (typeof rv === 'string' && rv.trim() && !/^(?:无|none)$/i.test(rv.trim())) {
+          const targetAbs = resolve(dirname(abs), rv.trim())
+          if (!existsSync(targetAbs)) {
+            errors.push({
+              code: 'BROKEN_RELATED_LINK',
+              line: findFmKeyLine(lines, fmEndIdx, rk),
+              path: rv.trim(),
+              message: `Frontmatter \`${rk}: ${rv.trim()}\` 指向不存在的目标文件`,
+              fixHint: '请核实相对路径或运行 `doc-plan.mjs link` 重新同步互链。',
+            })
+          }
+        }
+      }
+    } else if (fm.data.status) {
+      warnings.push({
+        code: 'LEGACY_HEADER_FORMAT',
+        line: 1,
+        message: '仍使用旧式列表头部元数据，建议通过 `doc-plan.mjs link` 升级为 YAML Frontmatter',
+      })
+      const st = String(fm.data.status).toLowerCase()
+      if (!VALID_STATUS_BY_TYPE[docType].has(st)) {
+        errors.push({
+          code: 'INVALID_STATUS',
+          line: 1,
+          message: `Status "${fm.data.status}" 不在 ${docType} 允许枚举中`,
+          fixHint: `请改用：${[...VALID_STATUS_BY_TYPE[docType]].join(' | ')}。`,
+        })
+      }
+    } else {
+      errors.push({
+        code: 'FRONTMATTER_INVALID',
+        line: 1,
+        message: '缺少 YAML Frontmatter（`--- ... ---`）及 status 元数据',
+        fixHint: '请补齐标准 YAML Frontmatter（`kind`, `title`, `status`, `created`, `updated`）。',
+      })
+    }
+  }
 
   let inFence = false
   let curSection = '_top'
   const declaredNewDirs = new Set()
   const declaredNewFiles = new Set()
+  const docsFolderExists = existsSync(join(repoRoot, 'docs'))
+  const startBodyLine = fmEndIdx >= 0 ? fmEndIdx + 1 : 0
 
-  for (let i = 0; i < lines.length; i += 1) {
+  for (let i = startBodyLine; i < lines.length; i += 1) {
     const lineNo = i + 1
     const rawLine = lines[i]
     if (/^\s*(?:```|~~~)/.test(rawLine)) {
@@ -446,30 +774,7 @@ export function auditDoc({ repoRoot, file }) {
     const strippedLine = rawLine.replace(/<!--[\s\S]*?-->/g, '')
 
     // 1. 占位符检查
-    if (PLACEHOLDER_TEXT_RE.test(rawLine)) {
-      errors.push({
-        code: 'UNRESOLVED_PLACEHOLDER',
-        line: lineNo,
-        message: `第 ${lineNo} 行包含未清理占位符文本`,
-        fixHint: '请将「待补充/TBD/FIXME/fill」替换为真实结论、路径或可运行验证命令。',
-      })
-    }
-    for (const am of strippedLine.matchAll(ANGLE_PLACEHOLDER_RE)) {
-      const inner = am[1].trim()
-      if (!inner) continue
-      // 跳过邮箱地址与明显泛型写法
-      if (/@/.test(inner) || /^https?:\/\//i.test(inner)) continue
-      const looksPlaceholder = /[\u4e00-\u9fa5]|\||^(?:todo|tbd|path|file|cmd|slug|title|id|N|target|module|name|reason|owner|status|branch|spec|prd|placeholder|example|two-way\s*\|\s*one-way)/i.test(inner)
-        || /(?:^|[:：]\s*|-+\s+)<[^>]+>/.test(strippedLine)
-      if (looksPlaceholder) {
-        errors.push({
-          code: 'UNRESOLVED_ANGLE_PLACEHOLDER',
-          line: lineNo,
-          message: `第 ${lineNo} 行存在模板尖括号占位 <${inner}>`,
-          fixHint: `请将 <${inner}> 替换为真实具体内容。`,
-        })
-      }
-    }
+    collectPlaceholderErrors(strippedLine, lineNo, errors)
 
     // 2. 空泛套话验收检查
     const isCriterion = /^- \[[ xX]\]\s+C\d+\b/.test(rawLine)
@@ -505,6 +810,7 @@ export function auditDoc({ repoRoot, file }) {
 
         const cleanRel = rawCand.replace(/^\.\//, '').replace(/\/+$/, '')
         if (!cleanRel || cleanRel === relDoc) continue
+        if (docsFolderExists && CONVENTION_DOC_DIRS.has(cleanRel)) continue
         const absCand = join(repoRoot, cleanRel)
 
         // 按候选路径邻近上下文判断是否标为新建（避免同一行中另写一个虚假旧路径也被当作新建放行）
@@ -545,9 +851,10 @@ export function auditDoc({ repoRoot, file }) {
   }
 
   // 4. 关键节完整性校验（本期不做、门型与回滚、C1 标准）
-  const sections = extractSections(rawText)
+  const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
+  const sections = extractSections(bodyForSections)
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
-    if (!/^- \[[ xX]\]\s+C1\b/m.test(rawText)) {
+    if (!/^- \[[ xX]\]\s+C1\b/m.test(normRaw)) {
       errors.push({
         code: 'MISSING_ACCEPTANCE_CRITERIA',
         line: 1,
@@ -578,14 +885,40 @@ export function auditDoc({ repoRoot, file }) {
     }
   }
 
-  const critiqueRaw = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(rawText)?.[1]?.trim() ?? null
+  const legacyCritique = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(normRaw)?.[1]?.trim() ?? null
+  const critiqueStatus = (typeof fm.data?.plan_critique === 'string' ? fm.data.plan_critique : null) ?? legacyCritique
   return {
     ok: errors.length === 0,
     file: relDoc,
     docType,
-    critiqueStatus: critiqueRaw,
+    critiqueStatus,
     errors,
     warnings,
+  }
+}
+
+export function auditRepoDocs(repoRoot, scope = '.') {
+  const scopeAbs = resolve(repoRoot, scope)
+  const scopeRel = posixPath(relative(repoRoot, scopeAbs))
+  const dirs = ['docs/prd', 'docs/specs', 'docs/todo']
+  const targets = []
+  for (const d of dirs) {
+    const dirAbs = join(repoRoot, d)
+    if (!existsSync(dirAbs)) continue
+    for (const item of collectMarkdownFiles(dirAbs, repoRoot)) {
+      if (!scopeRel || scopeRel === '.' || item.rel === scopeRel || item.rel.startsWith(`${scopeRel}/`)) {
+        targets.push(item.rel)
+      }
+    }
+  }
+  const results = targets.map((file) => auditDoc({ repoRoot, file }))
+  const failedCount = results.filter((r) => !r.ok).length
+  return {
+    ok: failedCount === 0,
+    scope: scopeRel || '.',
+    auditedCount: results.length,
+    failedCount,
+    results,
   }
 }
 
@@ -605,22 +938,33 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) 
 
   const text = readTextSafe(abs)
   if (text === undefined) throw new Error(`无法读取文本文件：${file}`)
+  const fm = parseDocFrontmatter(text)
+  const relDoc = posixPath(relative(repoRoot, abs))
+  const docType = detectDocType(relDoc, text)
   const digest = sha256Text(stripCritiqueMeta(text)).slice(0, 12)
   const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
-  const stampLine = `- Plan Critique: passed (reviewer=${String(reviewer).trim()}, round=${round}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
+  const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${round}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
 
-  let updated
-  if (/^(?:-\s+)?Plan Critique:.*$/mi.test(text)) {
-    updated = text.replace(/^(?:-\s+)?Plan Critique:.*$/mi, stampLine)
-  } else if (/^(?:-\s+)?Status:.*$/mi.test(text)) {
-    updated = text.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${stampLine}`)
+  if (fm.hasFrontmatter) {
+    updateDocFrontmatter(abs, {
+      plan_critique: stampValue,
+      updated: isoDate(),
+    }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   } else {
-    updated = text.replace(/^(#[^\n]*\n)/, `$1\n${stampLine}\n`)
+    const stampLine = `- Plan Critique: ${stampValue}`
+    let updated
+    if (/^(?:-\s+)?Plan Critique:.*$/mi.test(text)) {
+      updated = text.replace(/^(?:-\s+)?Plan Critique:.*$/mi, stampLine)
+    } else if (/^(?:-\s+)?Status:.*$/mi.test(text)) {
+      updated = text.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${stampLine}`)
+    } else {
+      updated = text.replace(/^(#[^\n]*\n)/, `$1\n${stampLine}\n`)
+    }
+    writeAtomic(abs, updated)
   }
-  writeAtomic(abs, updated)
 
   return {
-    file: posixPath(relative(repoRoot, abs)),
+    file: relDoc,
     reviewer: String(reviewer).trim(),
     round: Number(round),
     sha: digest,
@@ -644,11 +988,13 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     throw err
   }
 
-  const statusMatch = /^((?:-\s+)?Status:\s*)(\S+)(\s*)$/mi.exec(text)
-  if (!statusMatch) {
-    throw new Error(`${file} 缺少「- Status: draft」或「Status: draft」字段，无法切换状态`)
+  const fm = parseDocFrontmatter(text)
+  const legacyStatusMatch = /^((?:-\s+)?Status:\s*)(\S+)(\s*)$/mi.exec(text)
+  const curStatusRaw = fm.hasFrontmatter ? fm.data?.status : (fm.data?.status ?? legacyStatusMatch?.[2])
+  if (!curStatusRaw) {
+    throw new Error(`${file} 缺少 status（YAML Frontmatter 或「- Status: draft」）字段，无法切换状态`)
   }
-  const curStatus = statusMatch[2].toLowerCase()
+  const curStatus = String(curStatusRaw).toLowerCase()
   if (curStatus === 'superseded' || curStatus === 'implemented') {
     throw new Error(`${file} 当前状态为 ${curStatus}，不允许直接 approve`)
   }
@@ -660,23 +1006,27 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
   const docType = detectDocType(audit.file, text)
   let workingText = text
   let critiqueSkipped = false
+  let skippedCritiqueValue = null
 
   if (docType === 'spec' || docType === 'prd') {
-    const critiqueVal = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1]?.trim() ?? ''
+    const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
     const isPassed = /^passed\b/i.test(critiqueVal)
     if (!isPassed) {
       if (skipCritiqueReason && String(skipCritiqueReason).trim()) {
-        const skipLine = `- Plan Critique: skipped (reason=${String(skipCritiqueReason).trim()})`
-        if (/^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)) {
-          workingText = workingText.replace(/^(?:-\s+)?Plan Critique:.*$/mi, skipLine)
-        } else {
-          workingText = workingText.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${skipLine}`)
+        skippedCritiqueValue = `skipped (reason=${String(skipCritiqueReason).trim()})`
+        if (!fm.hasFrontmatter) {
+          const skipLine = `- Plan Critique: ${skippedCritiqueValue}`
+          if (/^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)) {
+            workingText = workingText.replace(/^(?:-\s+)?Plan Critique:.*$/mi, skipLine)
+          } else {
+            workingText = workingText.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${skipLine}`)
+          }
         }
         critiqueSkipped = true
       } else {
         throw new Error(
           `BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先经独立只读 Plan Critique 通过并运行 critique-pass`
-          + '（使头部为 - Plan Critique: passed），或由维护者显式传入 --skip-critique-reason "<原因>" 豁免',
+          + '（使头部为 plan_critique: passed），或由维护者显式传入 --skip-critique-reason "<原因>" 豁免',
         )
       }
     } else {
@@ -694,11 +1044,18 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
   }
 
   const hasPlaceholder = /^- \[[ xX]\] C\d+:\s*<[^>]+>/m.test(workingText)
-  const updated = workingText.replace(
-    /^((?:-\s+)?Status:\s*)\S+(\s*)$/mi,
-    '$1approved$2',
-  )
-  writeAtomic(abs, updated)
+  if (fm.hasFrontmatter) {
+    const patch = { status: 'approved', updated: isoDate() }
+    if (docType === 'spec' || docType === 'todo') patch.approved = true
+    if (skippedCritiqueValue) patch.plan_critique = skippedCritiqueValue
+    updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
+  } else {
+    const updated = workingText.replace(
+      /^((?:-\s+)?Status:\s*)\S+(\s*)$/mi,
+      '$1approved$2',
+    )
+    writeAtomic(abs, updated)
+  }
 
   return {
     file: posixPath(relative(repoRoot, abs)),
@@ -724,13 +1081,16 @@ function collectMarkdownFiles(dir, root) {
 
 function summarizeDoc(item) {
   const text = readTextSafe(item.abs) ?? ''
-  const title = /^#\s+(.+)$/m.exec(text)?.[1]?.trim() ?? basename(item.rel)
-  const status = /^(?:-\s+)?Status:\s*(\S+)/mi.exec(text)?.[1]?.trim() ?? null
-  const created = /^(?:-\s+)?Created:\s*(\S+)/mi.exec(text)?.[1]?.trim() ?? null
-  const plannedAt = /^(?:-\s+)?Planned at:\s*(\S+)/mi.exec(text)?.[1]?.trim() ?? null
+  const fm = parseDocFrontmatter(text)
+  const title = /^#\s+(.+)$/m.exec(fm.body || text)?.[1]?.trim() ?? fm.data?.title ?? basename(item.rel)
+  const status = fm.data?.status ?? null
+  const created = fm.data?.created ?? null
+  const plannedAt = fm.data?.planned_at ?? null
+  const issue = fm.data?.issue ?? null
+  const pr = fm.data?.pr ?? null
   const totalChecks = (text.match(/^- \[[ xX]\]/gm) ?? []).length
   const doneChecks = (text.match(/^- \[[xX]\]/gm) ?? []).length
-  return { file: item.rel, title, status, created, plannedAt, totalChecks, doneChecks }
+  return { file: item.rel, title, status, created, plannedAt, issue, pr, totalChecks, doneChecks }
 }
 
 export function listDocs(repoRoot) {
@@ -757,6 +1117,8 @@ function parseCli(argv) {
     else if (a === '--doc-only') opts.docOnly = true
     else if (a === '--bugfix') opts.bugfix = true
     else if (a === '--force') opts.force = true
+    else if (a === '--approve') opts.approve = true
+    else if (a === '--implemented') opts.implemented = true
     else if (a.startsWith('--')) {
       const eq = a.indexOf('=')
       if (eq > 0) {
@@ -777,13 +1139,24 @@ function printHelp() {
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
-    '  triage         --summary <文本> [--files <n>] [--touches-contract] [--conflicts-tdd] [--json]',
-    '  init           --type <prd|spec|todo> --slug <slug> --title <标题> [--task <id>] [--json]',
-    '  audit          --file <docPath> [--json]',
+    '  triage         --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--json]',
+    '  init           --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--json]',
+    '  link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--approve] [--json]',
+    '  audit          [--file <docPath> | .] [--json]',
     '  critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
     '  approve        --file <specPath> [--skip-critique-reason <文本>] [--json]',
     '  list           [--json]',
   ].join('\n') + '\n')
+}
+
+async function collectWorkingTreePaths(repoRoot) {
+  const st = await gitRun(repoRoot, ['status', '--porcelain', '-u'])
+  if (!st.ok || !st.stdout) return []
+  return st.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.slice(3).trim().split(' -> ').pop().trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean)
 }
 
 async function main(argv) {
@@ -805,6 +1178,9 @@ async function main(argv) {
       const summary = opts.summary ?? opts._.join(' ')
       if (!summary) throw new Error('triage 需要传入 --summary "<需求描述>"')
       const filesNum = opts.files !== undefined ? Number(opts.files) : undefined
+      const triagePaths = opts.paths !== undefined
+        ? String(opts.paths).split(',').map((s) => s.trim()).filter(Boolean)
+        : (roots.isGit ? await collectWorkingTreePaths(repoRoot) : [])
       const result = triageTask({
         summary,
         files: filesNum,
@@ -812,6 +1188,7 @@ async function main(argv) {
         conflictsTdd: Boolean(opts.conflictsTdd),
         docOnly: Boolean(opts.docOnly),
         bugfix: Boolean(opts.bugfix),
+        paths: triagePaths,
         repoRoot,
       })
       if (opts.json) {
@@ -822,20 +1199,26 @@ async function main(argv) {
         process.stdout.write(`- 理由: ${result.reason}\n`)
         process.stdout.write(`- 必建文档: ${result.docsRequired.join(', ') || '无 (0 文档)'}\n`)
         process.stdout.write(`- Red-Green 回归测试: ${result.redGreenRequired ? '强制' : '不需要'} | 独立审查: ${result.needsReview ? '需要' : '低风险免除'}\n`)
+        if (result.coupledSyncWarnings?.length > 0) {
+          process.stdout.write(`- 联动同步提醒（改哪看哪）:\n`)
+          for (const w of result.coupledSyncWarnings) {
+            process.stdout.write(`  * 触及 ${w.touchedTriggers.join(', ')} -> 需检查同步 ${w.expectedCompanions.join(', ')}\n`)
+          }
+        }
         if (result.caseType === 5) {
           printNextStep([
             '已阻断直接拆解！请先更新 docs/TDD.md 解决冲突并经独立确认，然后再重新分流。',
           ])
         } else if (result.caseType === 4) {
           printNextStep([
-            '1. 创建 SPEC: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --type spec --slug <slug> --title "<标题>"',
+            '1. 创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>"',
             '2. 自检净化: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file <specPath>',
             '3. 派独立只读 Critique 通过后执行 critique-pass，再由人执行 approve',
           ])
         } else if (result.caseType === 3) {
           printNextStep([
             '1. 启动任务隔离：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 3 --slug <slug>',
-            '2. 生成 Todo 并跑 audit 自净化：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --type todo --slug <slug> --title "<标题>" --task <id>',
+            '2. 生成 Todo 并跑 audit 自净化：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind todo --slug <slug> --title "<标题>" --task <id>',
           ])
         } else {
           printNextStep([
@@ -847,8 +1230,9 @@ async function main(argv) {
     }
 
     if (sub === 'init') {
-      if (!opts.type || !opts.slug || !opts.title) {
-        throw new Error('init 需要 --type <prd|spec|todo>、--slug <slug> 与 --title <title>')
+      const initKind = opts.kind ?? opts.type
+      if (!initKind || !opts.slug || !opts.title) {
+        throw new Error('init 需要 --kind <prd|spec|todo|pair|all>、--slug <slug> 与 --title <title>')
       }
       const res = await initDoc({
         repoRoot,
@@ -856,16 +1240,20 @@ async function main(argv) {
         gitDir: roots.gitDir,
         isGit: roots.isGit,
         type: opts.type,
+        kind: opts.kind,
         slug: opts.slug,
         title: opts.title,
         taskId: opts.task,
+        issue: opts.issue,
+        owner: opts.owner,
+        branch: opts.branch,
         relatedSpec: opts.spec,
         force: Boolean(opts.force),
       })
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       } else {
-        process.stdout.write(`已生成 ${res.type.toUpperCase()}：${res.file}（Planned at: ${res.plannedAt}）\n`)
+        process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}）\n`)
         printNextStep([
           `写完真实内容、可复用模块与 C1..Cn 后运行内审自检：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${res.file}"`,
         ])
@@ -873,9 +1261,61 @@ async function main(argv) {
       return 0
     }
 
+    if (sub === 'link') {
+      const target = opts._[0] ?? opts.file ?? opts.slug
+      if (!target) {
+        throw new Error('link 需要传入 <slug-or-path>（如 261114-my-feature 或 docs/specs/...）')
+      }
+      const issueVal = opts.issue !== undefined ? parseIssueArg(opts.issue) : undefined
+      const prVal = opts.pr !== undefined ? Number(String(opts.pr).replace(/^#/, '').trim()) : undefined
+      if (prVal !== undefined && (!Number.isInteger(prVal) || prVal <= 0)) {
+        throw new Error(`--pr 必须为正整数，收到：${opts.pr}`)
+      }
+      const res = await syncDocsLifecycle(repoRoot, {
+        slugOrPath: target,
+        issue: issueVal,
+        pr: prVal,
+        branch: opts.branch,
+        owner: opts.owner,
+        status: opts.status,
+        approved: opts.approve ? true : undefined,
+        implemented: opts.implemented ? true : undefined,
+        doneAt: opts['done-at'],
+      })
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+      } else {
+        process.stdout.write(`文档生命周期同步完成（issue=${res.issue ?? '无'}，重命名 ${res.renamed.length} 个，更新 ${res.updated.length} 个）\n`)
+        for (const r of res.renamed) {
+          process.stdout.write(`- 重命名 [${r.kind}]: ${r.from} -> ${r.to}\n`)
+        }
+        for (const u of res.updated) {
+          process.stdout.write(`- 已同步 [${u.kind ?? 'doc'}]: ${u.file}（status=${u.data.status ?? '-'}）\n`)
+        }
+      }
+      return 0
+    }
+
     if (sub === 'audit') {
-      if (!opts.file) throw new Error('audit 需要 --file <docPath>')
-      const res = auditDoc({ repoRoot, file: opts.file })
+      const target = opts.file ?? opts._[0] ?? '.'
+      const targetAbs = resolve(repoRoot, target)
+      const isDirScope = target === '.' || (existsSync(targetAbs) && statSync(targetAbs).isDirectory())
+      if (isDirScope) {
+        const batch = auditRepoDocs(repoRoot, target)
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(batch, null, 2)}\n`)
+        } else {
+          process.stdout.write(`仓库工程文档审计（${batch.scope}，共 ${batch.auditedCount} 份）：${batch.ok ? '全部通过' : `${batch.failedCount} 份失败`}\n`)
+          for (const r of batch.results) {
+            process.stdout.write(`- ${r.file} (${r.docType}): ${r.ok ? '通过' : `失败 (${r.errors.length})`}\n`)
+            for (const e of r.errors) {
+              process.stdout.write(`  * [${e.code}] L${e.line}: ${e.message}\n    修法: ${e.fixHint}\n`)
+            }
+          }
+        }
+        return batch.ok ? 0 : 1
+      }
+      const res = auditDoc({ repoRoot, file: target })
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       } else {
@@ -965,7 +1405,7 @@ async function main(argv) {
       return 0
     }
 
-    throw new Error(`未知子命令：${sub}（支持 triage / init / audit / critique-pass / approve / list）`)
+    throw new Error(`未知子命令：${sub}（支持 triage / init / link / audit / critique-pass / approve / list）`)
   } catch (err) {
     if (opts.json && err?.audit) {
       process.stdout.write(`${JSON.stringify({ ok: false, error: err.message, audit: err.audit }, null, 2)}\n`)

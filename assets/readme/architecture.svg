@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-labelledby="title desc">
+  <title id="title">project-forge 双层架构与可信实证闭环</title>
+  <desc id="desc">上层为治理底座（survey artifactPlan、backup .tar.gz、AGENTS.md 不超 30KB、四层设计文档 docs/{TDD,prd,specs,todo}）；下层左侧为装入目标仓库的 5 个本地研发技能（dev-explore、dev-plan、dev-flow、dev-review、dev-govern 含 release-prep），右侧为信任倒金字塔（静态门禁优先于运行冒烟实证、双门独立审查与契约文档）。</desc>
+  <defs>
+    <pattern id="bp-grid-arch" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1E293B" stroke-width="0.75" opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1200" height="400" rx="16" fill="#0B111E"/>
+  <rect x="24" y="18" width="1152" height="364" rx="12" fill="url(#bp-grid-arch)" opacity="0.55"/>
+  <rect x="1" y="1" width="1198" height="398" rx="15" fill="none" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- Section Header -->
+  <text x="48" y="52" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="700">双层架构与可信实证闭环</text>
+  <text x="1152" y="51" text-anchor="end" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="500">治理底座装配规范，5 个本地技能驱动日常研发</text>
+  <line x1="48" y1="68" x2="1152" y2="68" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Upper Layer: Governance Base -->
+  <text x="48" y="96" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600">上层治理底座 // 勘察、写前备份、契约与四层设计文档</text>
+
+  <rect x="48" y="110" width="264" height="74" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="180" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">survey artifactPlan</text>
+  <text x="180" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">10 项产物只读定界</text>
+
+  <rect x="330" y="110" width="212" height="74" rx="10" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="436" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">backup .tar.gz</text>
+  <text x="436" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">写入前安全快照</text>
+
+  <rect x="560" y="110" width="246" height="74" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="683" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">AGENTS.md &lt;= 30KB</text>
+  <text x="683" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">受管契约硬门限</text>
+
+  <rect x="824" y="110" width="328" height="74" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="988" y="140" text-anchor="middle" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700">docs/{TDD,prd,specs,todo}</text>
+  <text x="988" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">四层设计文档底座</text>
+
+  <!-- Layer Separator -->
+  <line x1="48" y1="198" x2="1152" y2="198" stroke="#334155" stroke-width="1" stroke-dasharray="6 4"/>
+
+  <!-- Lower Left: 5 Local Dev Skills -->
+  <text x="48" y="222" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600">下层研发技能 // .agents/skills/ + .pf-manifest.json</text>
+
+  <!-- Row 1 of Skills -->
+  <rect x="48" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="66" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-explore</text>
+  <text x="66" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">只读地图与影响面</text>
+
+  <rect x="294" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="312" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-plan</text>
+  <text x="312" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">三档四层文档规划</text>
+
+  <rect x="540" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="558" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-flow</text>
+  <text x="558" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">Worktree 隔离主流程</text>
+
+  <!-- Row 2 of Skills -->
+  <rect x="48" y="314" width="351" height="66" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="66" y="342" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-review</text>
+  <text x="66" y="367" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">双门证据包与外源防投毒</text>
+
+  <rect x="417" y="314" width="351" height="66" rx="10" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="435" y="342" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-govern</text>
+  <text x="576" y="341" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">release-prep</text>
+  <text x="435" y="367" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18">文档对齐巡检与多版本发版核对</text>
+
+  <!-- Lower Right: Trust Inverted Pyramid -->
+  <text x="792" y="222" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600">信任倒金字塔（上强下弱）</text>
+
+  <rect x="792" y="234" width="360" height="33" rx="6" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="972" y="259" text-anchor="middle" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700">1. 静态门禁</text>
+
+  <rect x="810" y="272" width="324" height="33" rx="6" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="972" y="297" text-anchor="middle" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700">2. 运行冒烟实证</text>
+
+  <rect x="828" y="310" width="288" height="33" rx="6" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="972" y="335" text-anchor="middle" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700">3. 双门独立审查</text>
+
+  <rect x="846" y="348" width="252" height="33" rx="6" fill="#111827" stroke="#475569" stroke-width="1.5"/>
+  <text x="972" y="373" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600">4. 契约文档</text>
+</svg>

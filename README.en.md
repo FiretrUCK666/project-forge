@@ -1,259 +1,136 @@
-# project-forge
+<p align="center">
+  <img src="assets/readme/hero-en.svg" alt="project-forge overview" width="100%">
+</p>
 
-English | [中文](README.md)
+<p align="center">
+  <strong>English</strong> · <a href="README.md">简体中文</a>
+</p>
 
-Give it a project directory. It surveys the project read-only first, works out what this
-project actually needs, then does it: version control, a GitHub remote, the documentation
-set, a release channel — plus the protocol for how work lands after that. At the end it asks
-whether you want the traces it left behind cleaned up.
-
-No tech stack is assumed. Node, Python, Rust, Go, Java, pure-docs directories, plugin
-projects, and capability directories (skills) are all judged from surveyed facts.
+**project-forge** is a zero-dependency Node 18+ governance and AI-collaboration foundation kit for GitHub repositories. It enforces **read-only survey first, pre-write snapshots, lossless merging for existing conventions, and empirical verification**. Whether bootstrapping an empty directory, onboarding a heterogeneous legacy repository, or recalibrating a codebase months later, the same idempotent pipeline equips version-control discipline, GitHub remote and CI automation, a four-layer documentation model, a bounded `AGENTS.md` contract, and five local dev skills.
 
 ## Contents
 
 <!-- toc:start -->
 
-- [What it does](#what-it-does)
-- [How much it does](#how-much-it-does)
-- [Before you start](#before-you-start)
-- [Install](#install)
-- [Staying up to date](#staying-up-to-date)
-- [Usage](#usage)
-- [Why it stays quiet](#why-it-stays-quiet)
-- [What it will not do](#what-it-will-not-do)
-- [Problems and contributing](#problems-and-contributing)
-- [What is inside](#what-is-inside)
-- [License](#license)
+- [Why project-forge](#why-project-forge)
+- [How the Four-Step Workflow Works](#how-the-four-step-workflow-works)
+- [Architecture and Local Dev Skills](#architecture-and-local-dev-skills)
+- [Three Onboarding Scenarios](#three-onboarding-scenarios)
+- [Install and Quick Start](#install-and-quick-start)
+- [Daily Collaboration and Release Flow](#daily-collaboration-and-release-flow)
+- [Core Scripts Reference](#core-scripts-reference)
+- [Requirements, Boundaries, and License](#requirements-boundaries-and-license)
 
 <!-- toc:end -->
 
-## What it does
+## Why project-forge
 
-Going from "it runs" to "it looks like a real project" is a pile of small, easy-to-get-wrong
-things: are the ignore rules right, should build output be committed, is the commit identity
-set, do the promises in the README hold, will the release pipeline leak a credential. None is
-hard; together they are a lot, and mistakes usually surface much later.
+Engineering governance rarely fails from a lack of templates. It fails when templates overwrite working conventions, docs drift away from scripts, and every fresh AI session has to re-discover project rules. `project-forge` targets four concrete failure modes:
 
-It folds those into four steps:
+- **Closed-loop empty directory start**: For five stacks (`node`, `python`, `go`, `rust`, `docs`), `--bootstrap-empty` generates `.gitattributes`, `.gitignore`, `README.md`, runnable code with working tests, and structured `docs/TDD.md` from day one.
+- **Lossless merge for heterogeneous repos**: `survey.mjs` inspects Git, docs, CI, licensing, and existing local skills without touching disk, emitting a 10-item `artifactPlan`. Compliant files stay intact, and custom `README.md`, `CONTRIBUTING.md`, `LICENSE`, or homegrown skills are preserved rather than blindly overwritten.
+- **Cross-month drift calibration**: Re-run `survey.mjs`, `compose-agents.mjs --upgrade`, and `review.mjs` at any later date to upgrade managed contract sections, verify checksums, and detect script-to-doc drift without erasing maintainer trade-off notes.
+- **Empirical loop without human-proxy claims**: Claims follow a strict Trust Inverted Pyramid where executable static gates, runtime smoke checks, and independent dual-gate reviews outrank prose contracts.
 
-| Step | What happens |
-| --- | --- |
-| **S1 Survey** | Run a read-only scan returning `maturity`, `gaps`, and `explorationStrategy` (dispatches disjoint parallel read-only subagent shards on large, monorepo, or drifted reentry repos) |
-| **S2 Scope** | Decide what this run covers (on reentry, keep handwritten rules and custom skills intact while targeting `reentry` drift diagnostics) |
-| **S3 Land** | Take a `pre-forge` external snapshot first on non-empty repos (content-deduplicated), then follow Repo → docs → remote → automation |
-| **S4 Verify and hand off** | Run the project's own gates plus delivery check (`claim.script` and `TDD` path checks), report, ask about cleanup |
+## How the Four-Step Workflow Works
 
-It governs and wires up daily engineering workflows rather than inventing arbitrary app code: for zero-file directories it can scaffold a minimal runnable and tested skeleton via `equip.mjs --bootstrap-empty` after a short confirmation; for existing codebases it fills missing contracts, four-layer docs, and built-in dev skills (`kit/skills/` -> `.agents/skills/`).
+<p align="center">
+  <img src="assets/readme/workflow-en.svg" alt="project-forge four-step idempotent workflow showing empty directory, existing repo merge, and monthly calibration converging into S1 through S4" width="100%">
+</p>
 
-The survey report ends by listing **which pages, and which sections, this run should read** —
-computed from what the survey actually found, not a fixed index.
+All three entry paths feed into the same repeatable four-step engine, where a second run produces byte-identical outputs:
 
-## How much it does
+1. **S1 Read-only Survey**: Run `survey.mjs --probe-auth` to classify repository state and compute the 10-item `artifactPlan` (`keep`, `add`, `upgrade`, `skip`) without modifying any target file.
+2. **S2 Scope Decisions**: Confirm only undecided maintainer choices (license, repository visibility, contributor templates, CI preferences) rather than prompting over facts already present on disk.
+3. **S3 Snapshot and Ordered Apply**: Capture a `.tar.gz` pre-write snapshot via `backup.mjs`, then apply changes strictly in **Repo → docs → remote → automation** order while equipping local skills and managed `AGENTS.md`.
+4. **S4 Empirical Review and Handoff**: Run `review.mjs` across all 10 verification scopes, check temporary traces with `handoff.mjs`, and ask the maintainer before cleaning up any reversible workspace state.
 
-The survey returns a maturity level, and that sets how heavy this run is:
+## Architecture and Local Dev Skills
 
-| Maturity | Meaning | What happens |
+<p align="center">
+  <img src="assets/readme/architecture-en.svg" alt="project-forge dual-layer architecture showing the governance foundation above five local dev skills and the trust inverted pyramid" width="100%">
+</p>
+
+The governance foundation maintains repository boundaries, backups, a capped `AGENTS.md <= 30KB` contract, and four-layer design docs (`docs/TDD.md` architecture contracts, `docs/prd/` product goals, `docs/specs/` change specs, and `docs/todo/` work tracking). Daily engineering execution is handled inside the target repo under `.agents/skills/` (integrity-tracked in `.pf-manifest.json`) by five local dev skills:
+
+| Local Skill | Primary Script | Responsibility and Output |
 | --- | --- | --- |
-| `empty` | Nothing there | Ask briefly, bootstrap a minimal runnable + tested skeleton and initial `docs/TDD.md` (`--bootstrap-empty`), then govern |
-| `greenfield` | Source but no repo, or no docs | Build it all and equip the full `.agents/skills/` suite |
-| `partial` | Repo and some docs, with gaps | Fill the gaps, leave existing or user-edited bytes untouched |
-| `mature` | Everything is there | Inspect only, and losslessly refresh untouched managed files via SHA256 ledger |
+| `dev-explore` | `repo-map.mjs` | Three-depth (`quick`/`medium`/`thorough`) read-only repo map and change impact analysis |
+| `dev-plan` | `doc-plan.mjs` | Three-tier triage across the four-layer doc model (drafted by AI, approved by maintainer) |
+| `dev-flow` | `flow.mjs` | Worktree-isolated task flow: branch, claim, verify, submit PR, rework, merge, cleanup |
+| `dev-review` | `review-pack.mjs` | Isolated review pack with fault injection and untrusted external PR static pre-scan |
+| `dev-govern` | `govern-audit.mjs` | Code-to-doc drift audit and `release-prep` multi-version release readiness verification |
 
-The same survey returns `gaps`, which lists **only things that will cause trouble**. A
-single-language README, no CONTRIBUTING, no CI — none of those are gaps. Treating preferences
-as defects leaves every project owing a debt it can never pay off.
+Every verification claim follows the **Trust Inverted Pyramid** from strongest to weakest: `1. Static gates` > `2. Runtime smoke` > `3. Dual-gate review` > `4. Contract docs`.
 
-## Before you start
+## Three Onboarding Scenarios
 
-One requirement: **verified on Node 18**; newer versions are expected to work but have not
-been checked one by one. Nothing to install, no build step, no third-party dependencies.
-
-`git` is optional. Capabilities that need it report honestly and skip; they never pretend to
-have succeeded.
-
-## Install
-
-Unpack into **your host's user-level skill root**. If you already have other skills installed,
-put it beside them; if not, check your host's documentation. Keep the directory name
-`project-forge` — it must match `name` in the `SKILL.md` frontmatter, and on a case-sensitive
-filesystem a different case is a different directory.
-
-No registration or restart: the host discovers it by directory, and `SKILL.md` is the entry.
-
-Two ways to get it, pick one:
-
-| How | What you get | How you learn about a new version | Good for |
+| Scenario | Starting State | `project-forge` Strategy | Entry Command |
 | --- | --- | --- | --- |
-| **Download the release archive** | A standalone copy with no `.git` | It checks by itself (see the next section) | Just using it |
-| **Clone this repository** | Full history and commits | `git pull`; the tool never touches it | Reading changes, contributing, modifying it |
+| **Empty directory start** | Blank folder or empty workspace | `--bootstrap-empty` scaffolds source, runnable tests, ignore rules, and design docs for 5 stacks | `node "<skill-dir>/scripts/equip.mjs" "<repo>" --bootstrap-empty --lang node --name my-app` |
+| **Existing repo merge** | Active codebase with existing README, LICENSE, or custom skills | Read-only `artifactPlan` keeps healthy assets intact and adds only missing gates and local skills | `node "<skill-dir>/scripts/survey.mjs" "<repo>" --markdown --probe-auth` |
+| **Monthly calibration** | Previously forged repo after months of feature drift | Upgrades managed contract blocks idempotently, checks `.pf-manifest.json`, and audits drift | `node "<skill-dir>/scripts/compose-agents.mjs" "<repo>" --upgrade` |
 
-The criterion is one thing: **is there a `.git` directory**. If yes it is a source copy, and
-`update.mjs` treats it as read-only. If no it is a package copy, and `update.mjs` replaces it
-wholesale. That judgement needs no memory and no guessing at intent.
+## Install and Quick Start
 
-## Staying up to date
-
-Nothing to do after installing: each run checks the remote once first (throttled — no repeated
-request within an hour) and swaps in a newer version if there is one.
-
-To ask for a check on demand, outside the throttle:
+`project-forge` uses only **Node.js 18+** built-ins and **Git**, with zero third-party runtime dependencies and zero AI-host lock-in:
 
 ```sh
-node "<skill-dir>/scripts/update.mjs" --check
+git clone <project-forge-repo-url> project-forge
 ```
 
-If your host forbids skills from modifying themselves (read-only sandbox, audit rules), or you
-simply do not want the install directory touched this time, one environment variable turns it
-off completely:
+Run the standard four-step onboarding sequence against any repository:
 
 ```sh
-# any non-empty value works
-export PF_NO_UPDATE=1
-```
+# 1. Read-only survey with 10-item artifactPlan and GitHub auth probe
+node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown --probe-auth
 
-Updating is **a wholesale replacement**: it does not ask, compare, or look at local edits — the
-whole point of a package copy is "the latest version when you use it". Conversely, if you have
-edited that copy, do not let it update; or switch to a clone, which the tool treats as
-read-only.
+# 2. Create a pre-write .tar.gz safety snapshot before making edits
+node "<skill-dir>/scripts/backup.mjs" create "<project-dir>" --label pre-forge
 
-## Usage
-
-Just talk to it in plain language. You do not need to name it:
-
-```text
-Clean this project up for me
-Give this project a GitHub remote and CI
-Check for leaked credentials and write me an AGENTS.md
-```
-
-Name one thing and it does only that thing.
-
-It prints a few commands; `<skill-dir>` is where this skill lives and `<project-dir>` is the
-project being worked on:
-
-```sh
-# Read-only survey (--markdown for human report, --probe-auth for dual-track GitHub probe)
-node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown
-
-# Equip or losslessly refresh the 5 built-in dev skills (--bootstrap-empty / --check / pre-write backup)
+# 3. Equip the 5 local dev skills and compose/upgrade managed AGENTS.md
 node "<skill-dir>/scripts/equip.mjs" "<project-dir>"
-
-# Manage off-repo pre-write .tar.gz snapshots (auto-created before equip / compose-agents edits, max 5 kept)
-node "<skill-dir>/scripts/backup.mjs" list "<project-dir>"
-
-# Create or refresh AGENTS.md (<= 30KB budget + SHA256 lossless region protection)
 node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
 
-# Delivery check (--scope limits it to specific faces)
+# 4. Run 10-scope delivery review and verify clean handoff traces
 node "<skill-dir>/scripts/review.mjs" "<project-dir>"
-
-# Handoff: see what is left behind (read-only, deletes nothing)
-node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --scan
+node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --verify
 ```
 
-Once equipped, `.agents/skills/` provides five self-contained dev skills guided by the top routing table and core operating principles (`行事总纲`) in `AGENTS.md`:
+Prompting an AI assistant works with a single direct instruction: `Use project-forge to inspect this repository's governance, GitHub workflow, and local dev skills; survey read-only first and fill only verified gaps.`
 
-- **Built-in Dev Suite (`kit/skills/` -> `.agents/skills/`)**:
-  - `dev-explore` (`repo-map.mjs`): `quick` / `medium` / `thorough` read-only exploration extracting `ciRunSteps`, `reusableModules`, and `featureMap` to prevent human-proxy guessing;
-  - `dev-plan` (`doc-plan.mjs`): 5-tier triage (`Case 1`..`Case 5`), `two-way`/`one-way` door classification, self-purifying `audit`, and tiered independent `critique-pass` lock;
-  - `dev-flow` (`flow.mjs`, `worktree-deps.mjs`): task ledger, zero-copy Junction/Symlink shared dependencies with `unlinkSync`-before-remove protection, 4-state worktree checks, `verify --mode smoke`, and exit-code `4` blocking when `merge` detects gate weakening;
-  - `dev-review` (`review-pack.mjs`): external PR `--untrusted-scan` poison gate, `behavioralGate` (including `smoke-verify`) + `structuralGate` (tombstone/excuse comments, god files, and `arch-rules`) + `doorAssessment` dual gates, and 6-lock stop-loss review loop;
-  - `dev-govern` (`govern-audit.mjs`): 8 audit upgrades (evolution churn, fence-aware dead-link checks, commented dead code & excuse/tombstone scans, god-file warnings, `arch-rules`, orphan tests, 4-state worktree detection) plus `record`, `cluster`, and `sample`.
-- **Four-Layer Docs and Pre-Write Snapshots**: `AGENTS.md` (entry contract, 30KB hard cap / 24KB warn, 7-key `Dev Profile`: `quick-test`, `full-test`, `smoke-verify`, `merge-gate`, `arch-rules`, `high-risk`, `do-not-edit`) + `docs/TDD.md` (evergreen architecture and `Feature Map`) + `docs/prd/` + `docs/specs/` and `docs/todo/` (archived into `docs/archive/todo/` before merge). `scripts/backup.mjs` automatically stores rolling `.tar.gz` off-repo snapshots before modifying non-empty files (zero `git status` pollution, `--no-backup` to skip, `restore` reverts files and removes orphan additions).
-- **2-Axis 5-State Identity and Dual-Track 4-Tier GitHub Engine**: distinguishes `local-only`, `maintainer`, `contributor-fork`, `clone-readonly`, and `undetermined` (preventing clones of someone else's repo from being misclassified as maintainer); Transport Track probes SSH (22/443) and HTTPS credential helper with exact protocol-mismatch `remediationCmd`, while API Track degrades cleanly across `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` without interactive prompts or token leaks.
+Check for upstream skill updates with `node "<skill-dir>/scripts/update.mjs" --check`, or disable network checks cleanly in offline environments with `PF_NO_UPDATE=1`.
 
-## Why it stays quiet
+## Daily Collaboration and Release Flow
 
-Three things make up most of how it feels to use:
+Daily delivery tiers are divided strictly by **whether they can be undone**, never by guesswork:
 
-1. **It does not check harmless preferences.** A single-language README, no CI on a personal
-   tool, local-only repos without a remote — none of those are defects. The only question that
-   matters: **will this cause trouble?** Only that blocks.
-2. **Decisions live in the project, not in flags.** Choices only you can make ("this project
-   ships no LICENSE") go into the `## 取舍` section of `AGENTS.md`. No twelve flags to
-   remember, no hidden state file.
-3. **Traces are visible and customizations stay safe.** `AGENTS.md` carries `project-forge:` markers,
-   and `.agents/skills/.pf-manifest.json` tracks SHA256 hashes for both kit files and managed
-   `AGENTS.md` regions: untouched files upgrade cleanly, retired files self-clean automatically,
-   and user-modified files or custom skills stay 100% untouched. One command scans or removes traces on handoff.
+- **Daily actions (reversible)**: Edit locally → pass all gates → commit → **pushing your own branch** → open a Pull Request → independent review. Branches and PRs can be deleted or closed without harm.
+- **Reviewer closes the loop**: When an independent reviewer confirms `fail` is empty with fault-injection evidence against frozen acceptance criteria, the **reviewer merges directly** (unless the maintainer explicitly sets a stricter policy in `AGENTS.md`).
+- **Human nod required**: **Weakening a gate** (deleting tests, relaxing assertions, adding skip markers, downgrading CI failures to warnings) masks future regressions and always stops for explicit human approval. Merging without review policy, publishing releases, changing repo visibility, and rewriting pushed history never happen automatically.
 
-## What it will not do
+When a maintainer explicitly requests a release (including multi-version jumps or custom version targets), verify the commit range and public-surface impact first, then follow [RELEASING.md](RELEASING.md) by committing release notes to the default branch before pushing the tag and reading back the live release page:
 
-- Make your private repo public (private by default; going public needs your explicit word)
-- Force-push, rewrite pushed history, or delete a published release
-- Misclassify a read-only clone as maintainer, merge an upstream PR on behalf of a `contributor-fork`, or delete its branch while the PR is still open
-- Execute external PR workflows or lifecycle scripts without explicit human approval (statically blocked by `--untrusted-scan`)
-- **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
-  open a PR → independent review → merge; tagging, release pages, and registry publishes all
-  need your explicit word
-- Pick a license for you, or invent an identity
-- **Remove anything it left behind without your explicit confirmation**
-
-It sorts actions by **whether they can be undone**, not by whether they leave the machine:
-pushing your own branch, opening a PR, and editing a PR can all be undone (delete the branch,
-close the PR), so they are ordinary work and need nobody's nod. Publishing a release, flipping
-a private repo public, and rewriting history cannot be undone — those stop and wait for you.
-Force-pushing and rewriting pushed history never run automatically.
-
-**The reviewer finishes the merge.** Once the independent review passes, that same reviewer
-merges — it is not handed back to a person for one more click. People do not read the code; a
-merge gate in human hands becomes a rubber stamp that adds waiting and no judgement. The
-judgement already happened in the review, which had the frozen acceptance criteria, the diff,
-the raw gate output, and a fault injection. Proposals from outside contributors work the same
-way; the protection against strangers sits **before** the review (read the diff first, disable
-lifecycle scripts when running gates).
-
-**Only one class needs a human nod: weakening a gate.** Deleting tests, relaxing assertions,
-adding skip markers, turning a check into a warning, loosening CI — `flow.mjs merge`
-blocks detected gate-weakening diffs with exit code `4` unless explicitly approved with
-`--human-approved`. Want to be more conservative? Write `merge-authority: human` in the
-project's `AGENTS.md` under `## 取舍`.
-
-**The same rule governs how this skill is maintained.** It governs other projects and it
-governs itself: branch → gates green → push the branch → open a PR → independent review →
-merge. Not one more confirmation, not one less review.
-
-Daily work and releasing are two different things, and it only does the first by default.
-Not out of caution for its own sake: the two differ in whether they can be undone. A wrong
-push can be reverted with a follow-up commit; a published version cannot be taken back —
-people have already installed it. "Several changes piled up" or "the version number looks
-due for a bump" are not reasons to release.
-
-**It always asks before clearing traces.** Branches, worktrees and remote branches belong to
-someone's machine, and deleting them cannot be undone. It lists exactly what would go (which
-worktree, which local branch, which remote branch) and waits for your word. When it cannot reach
-you, that list goes into the report and nothing is deleted — no answer is not consent.
-
-## Problems and contributing
-
-- **Report a defect** with the repository's [bug template](.github/ISSUE_TEMPLATE/bug_report.md).
-  It asks exactly the four things that make a report locatable — expected, actual, how to
-  reproduce, on what environment. Miss any one and a round trip is guaranteed. If the problem
-  is about a survey judgement, include the surveyed directory's stack and rough structure; that
-  usually points straight at the criterion that missed something.
-- **Ask for a capability, or argue a judgement should differ**, with the
-  [feature template](.github/ISSUE_TEMPLATE/feature_request.md).
-- **Change code**: see [CONTRIBUTING](CONTRIBUTING.md) — how to run it locally, which gates
-  there are, and how to submit a change. Changes on high-risk paths (judgement logic, the gates
-  themselves, package boundaries, the release chain) need an independent review round, and that
-  review reports per acceptance criterion frozen before the work started — see
-  the "Seven, the review loop" section of `references/collaboration.md` for the criteria and the stop rules.
-
-## What is inside
-
-```text
-SKILL.md            Entry point: which document to read when, and the gate table
-references/         Criteria pages, read the one this step needs
-templates/          Skeletons that land in the project: AGENTS contract, 4-layer docs, contributing/releasing, licenses, pipelines
-kit/skills/         Five self-contained built-in dev skills shipped with the package (dev-explore/plan/flow/review/govern)
-scripts/            Survey, equip, backup, compose-agents, review, handoff, sync-toc, self-update
+```sh
+node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep --from v4.0.0 --to HEAD --version v5.0.0
 ```
 
-`scripts/dev/`, `.agents/`, and `docs/` serve this repository's own self-checks, dogfooding, and records only, and are excluded from the user archive via `.gitattributes`.
+## Core Scripts Reference
 
-This repository is the first user of its own rules: root `.agents/skills/` is synced from single-source `kit/skills/` via `equip.mjs .`, and root `AGENTS.md` is generated by `compose-agents.mjs .` and checked for structural alignment by `preflight`. When that fails, the repository is fixed before the rules are.
+| Script | Key Flags | Purpose |
+| --- | --- | --- |
+| [scripts/survey.mjs](scripts/survey.mjs) | `--markdown`, `--probe-auth` | Read-only repo classification, GitHub auth probe, and 10-item `artifactPlan` |
+| [scripts/backup.mjs](scripts/backup.mjs) | `create\|list\|restore`, `--label`, `--id`, `--dry-run`, `--json` | Create, inspect, and restore pre-write `.tar.gz` snapshots |
+| [scripts/equip.mjs](scripts/equip.mjs) | `--check`, `--dry-run`, `--bootstrap-empty --lang ... --name ...` | Install or verify the 5 local dev skills, or bootstrap an empty project |
+| [scripts/compose-agents.mjs](scripts/compose-agents.mjs) | `--status`, `--upgrade`, `--check`, `--clean` | Idempotently compose/upgrade managed `AGENTS.md` under the 30KB cap |
+| [scripts/review.mjs](scripts/review.mjs) | `--scope=...`, `--strict`, `--json` | 10-scope pre-delivery governance and evidence check |
+| [scripts/handoff.mjs](scripts/handoff.mjs) | `--scan`, `--verify`, `--json` | Detect and verify removal of temporary forge traces |
+| [scripts/sync-toc.mjs](scripts/sync-toc.mjs) | `--check`, `--max-level`, `--min-sections` | Generate and verify synchronized Markdown TOC blocks |
+| [scripts/update.mjs](scripts/update.mjs) | `--check`, `--quiet`, `--equip <dir>` | Check and apply upstream `project-forge` skill updates |
 
-## License
+## Requirements, Boundaries, and License
 
-[MIT](LICENSE)
+- **Runtime**: Node.js 18+ (`scripts/` uses `node:` built-ins exclusively with zero third-party dependencies) and Git; GitHub CLI (`gh`) or configured GitHub credentials are required when automating remote setup and branch protections.
+- **Scope boundaries**: `project-forge` governs engineering workflows, contracts, docs, and verification gates—it **does not generate application business logic or pick tech stacks**, and its product layer targets GitHub exclusively.
+- **Further reading**: Orchestration entry and gate matrix in [SKILL.md](SKILL.md), repository contract in [AGENTS.md](AGENTS.md), contributor workflow in [CONTRIBUTING.md](CONTRIBUTING.md), and release runbook in [RELEASING.md](RELEASING.md).
+- **License**: Released under the [MIT License](LICENSE).

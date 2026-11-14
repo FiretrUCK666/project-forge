@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-labelledby="title desc">
+  <title id="title">project-forge Dual-Layer Architecture and Trust Pyramid</title>
+  <desc id="desc">Upper governance foundation holds survey artifactPlan, backup .tar.gz, AGENTS.md under 30KB, and four-layer docs/{TDD,prd,specs,todo}. Lower left shows the 5 local dev skills installed into the repo (dev-explore, dev-plan, dev-flow, dev-review, dev-govern with release-prep); lower right shows the Trust Inverted Pyramid: static gates over runtime smoke, dual-gate review, and contract docs.</desc>
+  <defs>
+    <pattern id="bp-grid-arch-en" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1E293B" stroke-width="0.75" opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1200" height="400" rx="16" fill="#0B111E"/>
+  <rect x="24" y="18" width="1152" height="364" rx="12" fill="url(#bp-grid-arch-en)" opacity="0.55"/>
+  <rect x="1" y="1" width="1198" height="398" rx="15" fill="none" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- Section Header -->
+  <text x="48" y="52" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700">Dual-Layer Architecture &amp; Trust Pyramid</text>
+  <text x="1152" y="51" text-anchor="end" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="500">Governance foundation equips 5 local skills for daily delivery</text>
+  <line x1="48" y1="68" x2="1152" y2="68" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Upper Layer: Governance Base -->
+  <text x="48" y="96" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">GOVERNANCE BASE // SURVEY, SNAPSHOTS, CONTRACTS &amp; 4-LAYER DOCS</text>
+
+  <rect x="48" y="110" width="264" height="74" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="180" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">survey artifactPlan</text>
+  <text x="180" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">10-item read-only plan</text>
+
+  <rect x="330" y="110" width="212" height="74" rx="10" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="436" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">backup .tar.gz</text>
+  <text x="436" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Pre-write snapshot</text>
+
+  <rect x="560" y="110" width="246" height="74" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="683" y="140" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">AGENTS.md &lt;= 30KB</text>
+  <text x="683" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Managed contract cap</text>
+
+  <rect x="824" y="110" width="328" height="74" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="988" y="140" text-anchor="middle" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700">docs/{TDD,prd,specs,todo}</text>
+  <text x="988" y="169" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Four-layer doc model</text>
+
+  <!-- Layer Separator -->
+  <line x1="48" y1="198" x2="1152" y2="198" stroke="#334155" stroke-width="1" stroke-dasharray="6 4"/>
+
+  <!-- Lower Left: 5 Local Dev Skills -->
+  <text x="48" y="222" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">5 LOCAL DEV SKILLS // .agents/skills/ + .pf-manifest.json</text>
+
+  <!-- Row 1 of Skills -->
+  <rect x="48" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="66" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-explore</text>
+  <text x="66" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Repo map &amp; impact</text>
+
+  <rect x="294" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="312" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-plan</text>
+  <text x="312" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">3-tier doc plans</text>
+
+  <rect x="540" y="234" width="228" height="66" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="558" y="262" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-flow</text>
+  <text x="558" y="287" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Worktree task flow</text>
+
+  <!-- Row 2 of Skills -->
+  <rect x="48" y="314" width="351" height="66" rx="10" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="66" y="342" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-review</text>
+  <text x="66" y="367" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Evidence pack &amp; untrusted scan</text>
+
+  <rect x="417" y="314" width="351" height="66" rx="10" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="435" y="342" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">dev-govern</text>
+  <text x="576" y="341" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">release-prep</text>
+  <text x="435" y="367" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Drift audit &amp; release-prep check</text>
+
+  <!-- Lower Right: Trust Inverted Pyramid -->
+  <text x="792" y="222" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">TRUST PYRAMID (STRONGEST FIRST)</text>
+
+  <rect x="792" y="234" width="360" height="33" rx="6" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="972" y="259" text-anchor="middle" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700">1. Static gates</text>
+
+  <rect x="810" y="272" width="324" height="33" rx="6" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="972" y="297" text-anchor="middle" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700">2. Runtime smoke</text>
+
+  <rect x="828" y="310" width="288" height="33" rx="6" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="972" y="335" text-anchor="middle" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700">3. Dual-gate review</text>
+
+  <rect x="846" y="348" width="252" height="33" rx="6" fill="#111827" stroke="#475569" stroke-width="1.5"/>
+  <text x="972" y="373" text-anchor="middle" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600">4. Contract docs</text>
+</svg>

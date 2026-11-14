@@ -1,16 +1,16 @@
 ---
 kind: spec
 title: v5 架构升级设计规范
-status: implementing
+status: implemented
 tier: full
 created: 2026-11-14
-updated: 2026-11-14
+updated: 2026-11-15
 issue: null
 pr: null
-branch: feat/w7-kit-and-contracts
+branch: feat/v5-harness-upgrade
 owner: project-forge 维护协作编排组
 approved: true
-implemented: false
+implemented: true
 plan_critique: passed
 related_prd: null
 related_todo: ../archive/todo/261114-v5-architecture-upgrade.md
@@ -19,7 +19,7 @@ high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKI
 
 # v5 架构升级设计规范
 
-> Plan Critique：passed（reviewer=independent-wave2, round=1, sha=90206642c1d6，已覆盖双层架构、`backup.mjs`、audit/critique 门禁、`review-pack` 双门与 `govern` 聚类；Wave 7 新增 `C29..C31` 正在收口）。
+> Plan Critique：passed（reviewer=independent-wave2, round=1, sha=90206642c1d6，已覆盖双层架构、`backup.mjs`、audit/critique 门禁、`review-pack` 双门与 `govern` 聚类；Wave 7 新增 `C25..C31` 已全部落地并通过独立审查）。
 
 ## 背景与目标
 
@@ -48,7 +48,7 @@ v5 架构升级围绕上述问题完成双层同构工程化重构，并在 Wave
 - 门型：`two-way`（仓库内版本化重构与多模块治理脚本升级，所有产物均受 `.git` 历史、`.agents/skills/.pf-manifest.json` 账本及 `scripts/backup.mjs` 仓外 `.tar.gz` 快照保护）。
 - 回滚路径：未提交改动可直接丢弃或运行 `node scripts/backup.mjs restore` 回退；已合并提交可通过 `git revert` 反向提交还原，不改写已推送历史。
 
-## 冻结验收标准（C1..C22）
+## 冻结验收标准（C1..C31）
 
 - [x] C1: **双层同构与包边界隔离** — `kit/skills/` 纳入用户包；`.agents/` 与 `docs/` 对齐 `.gitattributes` `export-ignore` 与 `protocol.mjs` `REPO_ONLY_*` 排除列表；`SKILL.md`（`<= 185` 行、`< 18432` 字节、`version: 5.0.0`）与 `kit/` 不含本仓私有路径（如 `scripts/dev`、`docs/release-notes`）及非 GitHub 平台词；产品层禁引 `scripts/dev/` 经 `preflight.mjs` 与 `arch-rules` 双重校验。
 - [x] C2: **三态 SHA256 账本、幂等装配与写前快照** — `scripts/equip.mjs` 将 `kit/skills/**` 同步到 `.agents/skills/**` 并维护 `.agents/skills/.pf-manifest.json`；写前由 `scripts/backup.mjs` 在仓外创建滚动 5 份的 `.tar.gz` 快照（支持 `create`/`list`/`restore` 与 `--no-backup`，零变更不冗余备份，还原清理无主文件）。
@@ -77,6 +77,11 @@ v5 架构升级围绕上述问题完成双层同构工程化重构，并在 Wave
 - [x] C26b: **目标项目 README 规范升级** — 在 `templates/readme.md` 与 `references/docs-set.md` 固化按项目形态选配的 3–6 枚已验证徽章分类、朴实直白 `oil-tone` 写法、浅深色视觉图解可读性（`#F5F3EE`/`#1A1D24` 高对比或双主题样式与 SVG `title`/`desc` 无障碍标签）以及 `.agents/skills/` 协作入口指引，并严格保持存量 `README` 的 `preserve` 不覆盖原则。
 - [x] C27: **形式与实证验证优先于对抗式读代码及自演进收敛** — 在 `SKILL.md`、`templates/agents-project.md`、`references/collaboration.md`、PR 模板、`docs/TDD.md`、`dev-flow`、`dev-review` 与 `dev-govern` 中确立「形式验证与运行/渲染实证 > 对抗式读代码挑刺」优先级；`review-pack.mjs` 自动识别 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg` 并输出 `behavioralGate.visualFilesChanged`、`empiricalVisualCheckRequired` 及实际渲染/交互/浅深色截图检查清单；`flow.mjs verify` 支持 `--visual-checked`/`--visual-evidence` 跟踪 UI 实证；收紧 `Must Fix` 门槛禁止主观读代码挑刺阻塞合入，并要求 `dev-govern` 将满 2 次的真实逃逸下沉为形式静态门禁且持续清理过期代码。
 - [x] C28: **全仓 `oil-tone` 表达清扫** — 使用 `tone_lint.py` 清除全仓核心文档与脚本文案中的失败项与冗余警示，同时保持所有预算、锚点与包边界门禁全绿。
+- [x] C25: **石质蓝图双语 SVG 门面图解与安全门禁** — `assets/readme/{hero,hero-en,workflow,workflow-en,architecture,architecture-en}.svg` 全部采用 `#F5F3EE`/`#DFDBD2` 自框卡片与 `#172033` 门禁面板、3 组不同 `viewBox` 高度（`500`/`440`/`580`）与全文字 `font-size >= 16`，零危险标签、外链与禁用术语，并纳入 `preflight.mjs` 门禁校验。
+- [x] C26: **人话双语 `README` 重构与徽章目录同步** — `README.md` 与 `README.en.md` 采用 `oil-tone` 风格重写，含 6 枚 `shields.io` `flat-square` 徽章、5 技能日常路由表、折叠脚本速查表、`版本库 → 文档 → 远端 → 自动化` 顺序与 `sync-toc.mjs` 7 项目录同步。
+- [x] C29: **「改哪看哪」机械联动同步检查** — `kit/skills/lib/shared.mjs` 中的 `parseCoupledSyncRules` 与 `evaluateCoupledSync` 解析 `AGENTS.md` 联动表，并接入 `doc-plan.mjs triage`、`flow.mjs finalize`（`--strict-sync`）与 `review-pack.mjs`。
+- [x] C30: **四层文档统一 YAML Frontmatter 与 Issue 编号生命周期联动** — `templates/docs-{prd,spec,todo}.md` 与本仓 specs 统一使用 `--- ... ---` Frontmatter，`kit/skills/dev-plan/scripts/doc-plan.mjs` `link` 与 `kit/skills/dev-flow/scripts/flow.mjs` `start` 原子重命名同组文档并加入 Issue 编号前缀（`YYMMDD-issueN-slug-{prd,spec,todo}.md`）且同步 `related_*`，`doc-plan.mjs audit` 拦截非法枚举、断链与文件名不一致。
+- [x] C31: **测试分层控频与反膨胀治理全量对齐** — `kit/skills/dev-govern/scripts/govern-audit.mjs` 实现 `testInventory`、`tests.*` 巡检与 `docs.devprofile-unmatched-high-risk`，`kit/skills/dev-flow/scripts/flow.mjs` `verify --tier quick --target` 支持目标测试路径替换，并在 `templates/agents-project.md`、`AGENTS.md`、`kit/skills/dev-govern/SKILL.md` 与 `kit/skills/dev-flow/SKILL.md` 固化三阶测试控频纪律。
 
 ## 模块化设计与实现边界
 

@@ -10,14 +10,24 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SCRIPTS = resolve(HERE, '..')
 const SKILL_ROOT = resolve(HERE, '..', '..')
+
+if (!String(process.env.PF_BACKUP_DIR ?? '').trim()) {
+  const testBackupRoot = mkdtempSync(join(tmpdir(), 'pf-test-bk-'))
+  process.env.PF_BACKUP_DIR = testBackupRoot
+  process.on('exit', () => {
+    try {
+      rmSync(testBackupRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch { /* 留给系统清理 */ }
+  })
+}
 
 let passed = 0
 const failures = []
@@ -2913,6 +2923,14 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
     if (caCheck.status !== 0) return `compose-agents --check 失败：${caCheck.stderr}`
     const bkCountAfterCheck = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout).backups.length
     if (bkCountAfterCheck !== 2) return `--check 只读检查意外生成了快照：count=${bkCountAfterCheck}`
+
+    // 5. 纯路径断言：无 .git 且未设 PF_BACKUP_DIR 时仍回退到 ~/.project-forge/backups/
+    const { resolveBackupDir } = await import('../backup.mjs')
+    const fallbackDir = resolveBackupDir(dir, { env: {} })
+    const expectedHomeBackups = join(homedir(), '.project-forge', 'backups')
+    if (!fallbackDir.startsWith(`${expectedHomeBackups}${sep}`) || !basename(fallbackDir).startsWith(`${basename(dir).toLowerCase()}-`)) {
+      return `未设 PF_BACKUP_DIR 且无 .git 时 resolveBackupDir 未回退到 ~/.project-forge/backups/：${fallbackDir}`
+    }
 
     return true
   } finally {

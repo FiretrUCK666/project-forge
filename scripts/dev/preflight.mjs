@@ -47,6 +47,16 @@ import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
 
+if (isMainModule(import.meta.url, process.argv[1]) && !String(process.env.PF_BACKUP_DIR ?? '').trim()) {
+  const testBackupRoot = mkdtempSync(join(tmpdir(), 'pf-test-bk-'))
+  process.env.PF_BACKUP_DIR = testBackupRoot
+  process.on('exit', () => {
+    try {
+      rmSync(testBackupRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch { /* 留给系统清理 */ }
+  })
+}
+
 const failures = []
 const notes = []
 const fail = (msg) => failures.push(msg)

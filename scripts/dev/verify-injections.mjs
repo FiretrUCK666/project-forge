@@ -190,7 +190,7 @@ const INJECTIONS = [
     id: 'I13',
     what: '契约回查把「路径还在吗」削成恒真',
     file: 'scripts/lib/claims.mjs',
-    from: '    const missing = paths.filter((p) => !exists(p))',
+    from: '    const missing = allPaths.filter((p) => !exists(p))',
     to: '    const missing = []',
     expect: '契约回查',
   },
@@ -350,8 +350,10 @@ const INJECTIONS = [
   },
 ]
 
-function runFixtures() {
-  const res = spawnSync(process.execPath, [join(HERE, 'fixtures.mjs')], {
+function runFixtures(expect = '') {
+  const args = [join(HERE, 'fixtures.mjs')]
+  if (expect) args.push('--prefer', expect, '--bail-on', expect)
+  const res = spawnSync(process.execPath, args, {
     encoding: 'utf8', timeout: 300000,
   })
   const all = `${res.stdout ?? ''}\n${res.stderr ?? ''}`
@@ -379,7 +381,7 @@ function runPreflight() {
 function runBoth(expect) {
   const pre = runPreflight()
   if (expect && pre.failed.some((line) => line.includes(expect))) return pre
-  return { failed: [...pre.failed, ...runFixtures().failed] }
+  return { failed: [...pre.failed, ...runFixtures(expect).failed] }
 }
 
 let bad = 0

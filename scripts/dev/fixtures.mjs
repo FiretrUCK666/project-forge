@@ -3610,14 +3610,38 @@ cases.push(['survey.mjs + compose-agents.mjs Wave 3：自有技能共存路由�
   }
 }])
 
-for (const [name, fn] of cases) {
+function parseCliFlags(argv) {
+  let prefer = ''
+  let bailOn = ''
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--prefer' && i + 1 < argv.length) { prefer = argv[++i]; continue }
+    if (arg.startsWith('--prefer=')) { prefer = arg.slice('--prefer='.length); continue }
+    if (arg === '--bail-on' && i + 1 < argv.length) { bailOn = argv[++i]; continue }
+    if (arg.startsWith('--bail-on=')) { bailOn = arg.slice('--bail-on='.length); continue }
+  }
+  return { prefer, bailOn }
+}
+
+const { prefer, bailOn } = parseCliFlags(process.argv.slice(2))
+const orderedCases = prefer
+  ? [
+      ...cases.filter(([name, fn]) => name.includes(prefer) || fn.toString().includes(prefer)),
+      ...cases.filter(([name, fn]) => !name.includes(prefer) && !fn.toString().includes(prefer)),
+    ]
+  : cases
+
+for (const [name, fn] of orderedCases) {
+  let entry = ''
   try {
     const outcome = await fn()
     if (outcome === true) { passed += 1; continue }
-    failures.push(`${name} —— ${outcome}`)
+    entry = `${name} —— ${outcome}`
   } catch (error) {
-    failures.push(`${name} —— 抛异常：${error instanceof Error ? error.message : String(error)}`)
+    entry = `${name} —— 抛异常：${error instanceof Error ? error.message : String(error)}`
   }
+  failures.push(entry)
+  if (bailOn && `FAIL  ${entry}`.includes(bailOn)) break
 }
 
 if (failures.length === 0) {

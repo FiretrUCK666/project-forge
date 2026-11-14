@@ -21,12 +21,15 @@
 
 | 层级与路径 | 模板骨架 | 生命周期与分工 |
 | --- | --- | --- |
-| **技术设计契约**：`docs/TDD.md` | `templates/docs-tdd.md` | **常青权威**。模块拓扑、主数据流、**`arch-rules` 分层禁引**、**`Feature Map -> smoke-verify`**、核心不变量与高风险同步边界；有代码仓必配，契约变更必须同提交更新 |
+| **技术设计契约**：`docs/TDD.md` | `templates/docs-tdd.md` | **常青权威**。含目录、背景与非目标、术语表、架构全景（Mermaid `flowchart TB`+模块表+`arch-rules`+`Feature Map`）、核心流程与安全不变量；`[按需保留，不适用整节删除]` 节不用即删，不留空壳占位 |
 | **产品需求说明**：`docs/prd/YYMMDD-<slug>.md` | `templates/docs-prd.md` | **按需创建**。痛点、In/Non-Goals、**复用既有模块**、**门型与回滚路径**及头部 `- Plan Critique: pending`，须经内审与 `critique-pass` 方可 `approve` |
 | **功能设计规范**：`docs/specs/YYMMDD-<slug>.md` | `templates/docs-spec.md` | **Case 4 专用**。头部 `Status: draft \| approved \| implemented \| superseded` 与 `- Plan Critique: pending`；含**复用既有模块**、**门型与回滚路径**与冻结 `C1/C2...`；合入后标 `implemented` 并**长留作边界参考** |
 | **任务执行单**：`docs/todo/YYMMDD-<slug>.md` | `templates/docs-todo.md` | **Case 3/4 执行清单**。含 `Planned at: <HEAD SHA>`、**复用既有模块**、**本期不做**、**门型与回滚路径**、`- [ ] C1: ...`、`## 完成后的记录`（**在合并之前写完，随这次改动一起提交**）。PR 提交前由 `flow.mjs finalize` 核验全勾并 `git mv` 归档至 `docs/archive/todo/` |
 
-- **`docs/TDD.md` 重入校准**：跨月重入或存量补齐时，依据勘察输出 `reentry.staleTddPaths` 与 `reentry.unregisteredTopDirs` 局部校准——**保留既有模块约束与人工架构决断，仅清理失效路径并补齐新增顶层模块、`arch-rules` 与 `Feature Map` 映射**。
+- **`docs/TDD.md` 三场景生成与持续校准（与 `S1` / `--bootstrap-empty` / `dev-explore` 协同）**：
+  1. **空白目录起步（`maturity: 'empty'`，`explorationStrategy.tier: 'none'`）**：走 `equip.mjs --bootstrap-empty` 直接落盘可运行骨架与填实 `Feature Map`、`arch-rules: none` 的初始 `docs/TDD.md`，**不派 `dev-explore` 子代理**；待后续模块扩展后再按通用骨架扩充。
+  2. **存量仓库接入（`single-pass` / `parallel-subagents`）**：`S1` 由 `survey.mjs` 计算 `explorationStrategy.tier` 与分片；`S3` 先跑 `backup.mjs` 与 `equip.mjs` 装配 `.agents/skills/`，再调用 `.agents/skills/dev-explore/` 内的 `repo-map.mjs`（`parallel-subagents` 时按不重叠 `shards` 并行派发只读子代理勘察入口、模块边界、主数据流与状态机）汇总真实事实，以 `templates/docs-tdd.md` 为骨架编写 `docs/TDD.md` 并整节删去不适用的 `[按需保留，不适用整节删除]` 章节，先于 `compose-agents.mjs` 写入。
+  3. **日常迭代与跨月重入校准**：日常提交经 `flow.mjs finalize` 与 `.agents/skills/dev-govern/` 下的 `govern-audit.mjs` 检查 `docs.tdd-module-drift` 与失效路径；跨月重入依 `survey.mjs` 输出的 `reentry.staleTddPaths` 与 `unregisteredTopDirs` 局部校准——**保留既有架构决断与人工取舍，仅清理失效路径、补齐新增模块与 `Feature Map` 映射、整节删去已废弃或空壳章节**。
 
 ## 三、`AGENTS.md`：给 AI 看的契约（<= 30KB，严进常删）
 

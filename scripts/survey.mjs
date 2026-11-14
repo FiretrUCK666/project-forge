@@ -1302,7 +1302,7 @@ function detectDocs(root) {
 
 // ── 既有约定：从项目现状读，不写死 ──────────────────────────────────
 
-const WORK_DIR_CANDIDATES = ['docs/work', 'docs/tasks', 'docs/adr', 'todo', 'work']
+const WORK_DIR_CANDIDATES = ['docs/todo', 'docs/work', 'docs/tasks', 'docs/adr', 'todo', 'work']
 
 /**
  * 项目自己的既有约定。
@@ -1332,7 +1332,7 @@ function detectConventions(root, { gitFacts, docs, ecosystem }) {
     && (gitFacts.tags ?? []).every((t) => /^\d+\.\d+/.test(t))
   const tagPrefix = needsBareTag || bareHistory ? '' : 'v'
 
-  const workDir = WORK_DIR_CANDIDATES.find((rel) => existsSync(join(root, rel))) ?? 'docs/work'
+  const workDir = WORK_DIR_CANDIDATES.find((rel) => existsSync(join(root, rel))) ?? 'docs/todo'
 
   return {
     defaultBranch,
@@ -1840,6 +1840,141 @@ export function computeExplorationStrategy(facts) {
   }
 }
 
+export function computeArtifactPlan(facts) {
+  const maturity = facts?.maturity ?? 'partial'
+  const scale = facts?.scale ?? {}
+  const git = facts?.git ?? {}
+  const ignores = facts?.ignores ?? {}
+  const docs = facts?.docs ?? {}
+  const ecosystem = facts?.ecosystem ?? {}
+  const commands = facts?.commands ?? {}
+  const kit = facts?.kit ?? {}
+  const reentry = facts?.reentry ?? {}
+  const isEmpty = maturity === 'empty' || ((scale.totalFiles ?? 0) === 0 && (git.commits ?? 0) === 0)
+  const items = []
+
+  // 1. 写前仓外快照
+  items.push(isEmpty
+    ? { id: 'pre-backup', artifact: '写前仓外 .tar.gz 快照', status: '空目录（无需快照）', action: 'skip', detail: '空白目录无现有文件，直接初始化即可' }
+    : { id: 'pre-backup', artifact: '写前仓外 .tar.gz 快照', status: '待创建', action: 'snapshot', detail: '写任何治理文件前先执行 `node scripts/backup.mjs create <目录> --label pre-forge`' })
+
+  // 2. Git 基线
+  if (git.available === false) {
+    items.push({ id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '未找到 git 命令', action: 'skip', detail: '本机缺少 git 可执行程序，先安装后再初始化版本控制' })
+  } else if (git.isBare === true) {
+    items.push({ id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '裸仓库（无工作区）', action: 'ask-human', detail: '先克隆出普通工作区，再执行治理与提交' })
+  } else if (git.present === true && git.isRepoRoot === false) {
+    items.push({ id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '外层仓库子目录', action: 'ask-human', detail: '确认并入外层仓库还是单独建库，边界明确前不改动历史' })
+  } else if (git.present !== true) {
+    items.push({ id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '未建版本库', action: 'create', detail: '按 version-control 判据先补齐 .gitattributes、.gitignore 再初始化仓库与首次提交' })
+  } else {
+    const missingIgnores = []
+    if (!ignores.hasGitattributes) missingIgnores.push('.gitattributes')
+    if (!ignores.hasGitignore) missingIgnores.push('.gitignore')
+    if ((ignores.unignoredOutputDirs?.length ?? 0) > 0) missingIgnores.push('未忽略产物目录')
+    if ((ignores.ignoredButTracked?.length ?? 0) > 0) missingIgnores.push('已入库忽略文件')
+    items.push(missingIgnores.length > 0
+      ? { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: `待补齐（${missingIgnores.join('、')}）`, action: 'calibrate', detail: '保留既有提交历史与规则，仅追加缺失的换行/忽略条目或清理误跟踪产物' }
+      : { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '已就绪', action: 'preserve', detail: '版本库、.gitattributes 与 .gitignore 均已到位，保持现状' })
+  }
+
+  // 3. 受管 .agents/skills/ 与自有扩展技能
+  const customSkills = kit.customSkills ?? []
+  const customNote = customSkills.length > 0
+    ? `；原样保留自有扩展技能（${customSkills.map((s) => s.path).join('、')}）`
+    : ''
+  if (!kit.manifestExists) {
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '未装配受管套件', action: 'equip', detail: `运行 equip.mjs 写入受管 5 技能并生成 .pf-manifest.json${customNote}` })
+  } else if (kit.corrupted || kit.drifted || kit.versionMismatch || (kit.missingFiles?.length ?? 0) > 0) {
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已装配（需无损升级/修复）', action: 'upgrade', detail: `运行 equip.mjs 三态升级：未改文件升新、用户魔改 100% 保留、退役文件自净化${customNote}` })
+  } else {
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `已就绪（${kit.managedSkills?.length ?? 0} 个受管技能）`, action: 'preserve', detail: `与当前版本字节级一致${customNote}` })
+  }
+
+  // 4. docs/TDD.md
+  const isDocsOnly = (ecosystem.kinds ?? []).includes('docs-only')
+  if (isDocsOnly && !docs.tdd) {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '纯文档项目（按需跳过）', action: 'skip', detail: '纯文档目录无需技术设计文档' })
+  } else if (!docs.tdd && (isEmpty || (scale.codeFiles ?? 0) === 0)) {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '暂无源码（待起步后生成）', action: 'skip', detail: '先选技术栈生成最小源码或使用 --bootstrap-empty 一并落盘 docs/TDD.md' })
+  } else if (!docs.tdd) {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '缺失', action: 'create', detail: '创建 docs/TDD.md 记录核心模块边界、arch-rules 与真实 Feature Map' })
+  } else if ((reentry.staleTddPaths?.length ?? 0) > 0 || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '存在失效路径或未登记模块', action: 'calibrate', detail: '保留原有设计决策正文，仅校准失效源码路径并增补新模块入口' })
+  } else {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '已就绪', action: 'preserve', detail: '保留现有架构与模块边界说明' })
+  }
+
+  // 5. AGENTS.md
+  const otherAi = docs.otherAiConventions ?? []
+  const otherNote = otherAi.length > 0 ? `；先读取并吸收既有 AI 规则（${otherAi.join('、')}）` : ''
+  if (!docs.agents && isEmpty) {
+    items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: '空目录（待项目起步后生成）', action: 'skip', detail: '先完成空目录起步骨架与源码后，再运行 compose-agents.mjs 合成契约' })
+  } else if (!docs.agents) {
+    items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: '缺失', action: 'create', detail: `运行 compose-agents.mjs 生成受管区间并按真实事实填实空白位${otherNote}` })
+  } else {
+    const driftReasons = []
+    if ((reentry.staleAgentPaths?.length ?? 0) > 0) driftReasons.push('失效路径')
+    if ((reentry.staleAgentScripts?.length ?? 0) > 0) driftReasons.push('失效脚本')
+    if ((docs.agentsBytes ?? 0) > AGENTS_MAX_BYTES) driftReasons.push('超过 30KB 上限')
+    if ((docs.agentsMarkers?.fills?.length ?? 0) > 0) driftReasons.push('未填占位')
+    if (otherAi.length > 0) driftReasons.push('待合流其他 AI 规则')
+    items.push(driftReasons.length > 0
+      ? { id: 'agents-contract', artifact: 'AGENTS.md', status: `待校准（${driftReasons.join('、')}）`, action: 'calibrate', detail: `保留手写规则与「取舍」区，定向修复失效条目或外置超长设计到 docs/TDD.md${otherNote}` }
+      : { id: 'agents-contract', artifact: 'AGENTS.md', status: '已就绪', action: 'preserve', detail: '受管区间完整、无失效引用且处于体积预算内' })
+  }
+
+  // 6. README.md
+  items.push(docs.readme
+    ? { id: 'readme', artifact: 'README.md', status: `已存在（${(docs.readmes ?? [docs.readme]).join('、')}）`, action: 'preserve', detail: '保留原有排版、文风与结构，严禁套模板重写，仅在命令或入口失真时做最小校准' }
+    : { id: 'readme', artifact: 'README.md', status: '缺失', action: 'create', detail: '基于真实入口与探测到的命令编写初始 README.md（不编造运行环境要求与假徽章）' })
+
+  // 7. CONTRIBUTING.md
+  if (docs.contributing) {
+    items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: `已存在（${docs.contributing}）`, action: 'preserve', detail: '保留既有贡献约定，不强改文风与结构' })
+  } else if (git.role === 'maintainer' && Boolean(git.remote)) {
+    items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: '缺失（可选）', action: 'optional', detail: '仅在计划接收外部贡献时新建；单人自用仓库可跳过' })
+  } else {
+    items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: '缺失', action: 'skip', detail: '非维护者或无远端仓库，无需补充贡献指南' })
+  }
+
+  // 8. LICENSE
+  items.push(docs.license
+    ? { id: 'license', artifact: 'LICENSE', status: `已存在（${docs.license}）`, action: 'preserve', detail: '保留既有授权文本（含双许可等自定义声明，绝不覆盖）' }
+    : { id: 'license', artifact: 'LICENSE', status: ecosystem.publishable ? '缺失（可发布包需立即定夺）' : '缺失', action: 'ask-human', detail: '授权必须由人拍板：选定具体开源协议或明确不对外授权' })
+
+  // 9. RELEASING.md 与发版说明
+  const hasReleaseEvidence = Boolean(ecosystem.publishable || (git.tags?.length ?? 0) > 0 || docs.workflowFacts?.hasRelease)
+  if (docs.releasing) {
+    items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: `已存在（${docs.releasing}）`, action: 'preserve', detail: '保留现有发版流程与约定（目录或 CHANGELOG 模式），仅在命令失真时最小微调' })
+  } else if (hasReleaseEvidence) {
+    items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: '缺失', action: 'create', detail: '项目具备可发布形态、已有版本标签或发布工作流，按实测命令补充发版说明' })
+  } else if (docs.changelog) {
+    items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: `已存在（${docs.changelog}）`, action: 'preserve', detail: '保留既有变更日志，不强行改换结构' })
+  } else {
+    items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: '暂不需要', action: 'skip', detail: '非可发布包且无版本标签/发布工作流，跳过发版文档' })
+  }
+
+  // 10. .github/workflows/
+  const wf = docs.workflowFacts ?? {}
+  const onGithub = typeof git.remote === 'string' && /github\.com/i.test(git.remote)
+  if (wf.hasCheck) {
+    items.push(wf.usesPullRequestTarget && wf.checkoutsPrHead
+      ? { id: 'ci-workflows', artifact: '.github/workflows/', status: '已有检查流（含高危 pull_request_target）', action: 'calibrate', detail: '保留既有流水线结构，立即解除 pull_request_target 检出外部提案代码的高危组合' }
+      : { id: 'ci-workflows', artifact: '.github/workflows/', status: `已存在（${(docs.workflows ?? []).join('、')}）`, action: 'preserve', detail: '保留现有 CI 工作流，仅在命令失真时最小校准' })
+  } else if (git.role === 'contributor-fork') {
+    items.push({ id: 'ci-workflows', artifact: '.github/workflows/', status: 'Fork 贡献者仓', action: 'skip', detail: 'Fork 贡献者不擅自改动或新增上游 CI 工作流' })
+  } else if (Boolean(git.remote) && !onGithub) {
+    items.push({ id: 'ci-workflows', artifact: '.github/workflows/', status: '非 GitHub 远端', action: 'skip', detail: '远端不在 GitHub 上，跳过 GitHub Actions 工作流配置' })
+  } else if (Boolean(git.remote) && Object.keys(commands).length > 0) {
+    items.push({ id: 'ci-workflows', artifact: '.github/workflows/', status: '缺失', action: 'create', detail: '有远端且已探测到可执行校验命令，补充最小检查工作流' })
+  } else {
+    items.push({ id: 'ci-workflows', artifact: '.github/workflows/', status: Boolean(git.remote) ? '缺失（暂无可运行命令）' : '无远端', action: 'skip', detail: '无远端或尚未探测到可运行校验命令，先补齐后按需接入' })
+  }
+
+  return items
+}
+
 // ── 成熟度与缺口 ────────────────────────────────────────────────────
 
 /**
@@ -2264,6 +2399,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.projectGapsComputed = true
   facts.maturity = judgeMaturity(facts)
   facts.explorationStrategy = computeExplorationStrategy(facts)
+  facts.artifactPlan = computeArtifactPlan(facts)
   // 导航算一次、挂在事实顶层：--json 与 --markdown 共用同一份。
   // 两条路各算一遍迟早会分叉——实测过 JSON 那条根本没有导航字段，
   // 照着它往下走的 AI 一条必读清单都拿不到，却以为自己已经看全了。

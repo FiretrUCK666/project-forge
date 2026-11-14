@@ -398,37 +398,121 @@ function sanitizeNames(rawName, targetDir) {
   return { display: base, kebab, ident: safeIdent }
 }
 
-function starterTemplates({ lang, names }) {
-  const tddDoc = [
+const BASE_GITATTRIBUTES = [
+  '# 统一文本行尾与常见二进制规则（需在首次提交前就位）',
+  '* text=auto eol=lf',
+  '',
+  '*.bat text eol=crlf',
+  '*.cmd text eol=crlf',
+  '*.ps1 text eol=crlf',
+  '',
+  '*.png binary',
+  '*.jpg binary',
+  '*.jpeg binary',
+  '*.gif binary',
+  '*.ico binary',
+  '*.webp binary',
+  '*.pdf binary',
+  '*.zip binary',
+  '*.gz binary',
+  '*.tgz binary',
+  '*.7z binary',
+  '*.woff binary',
+  '*.woff2 binary',
+  '*.ttf binary',
+  '',
+].join('\n')
+
+const BASE_GITIGNORE = [
+  '# Worktree、系统杂项与本地环境变量',
+  '.worktrees/',
+  '.DS_Store',
+  'Thumbs.db',
+  'desktop.ini',
+  '.env',
+  '.env.*',
+  '!.env.example',
+  '*.log',
+  'tmp/',
+  '.cache/',
+]
+
+function buildGitignore(langEntries = []) {
+  return [...BASE_GITIGNORE, '', ...langEntries, ''].join('\n')
+}
+
+function starterReadme({ names, summary, quickstartLines, treeLines }) {
+  return [
+    `# ${names.display}`,
+    '',
+    summary,
+    '',
+    '## 快速开始',
+    '',
+    '```sh',
+    ...quickstartLines,
+    '```',
+    '',
+    '## 目录结构',
+    '',
+    ...treeLines,
+    '',
+    '## 工程与协作说明',
+    '',
+    '- 架构与模块边界见 [docs/TDD.md](docs/TDD.md)。',
+    '- 若项目已生成 `AGENTS.md`，日常研发契约与验证命令以它为准。',
+    '',
+  ].join('\n')
+}
+
+function starterTdd({ names, summary, treeLines, featureName, entryFile, testCmd }) {
+  return [
     `# ${names.display} 技术设计说明（TDD）`,
     '',
     '## 目标与边界',
     '',
-    '- 在此处记录核心模块边界、对外接口与关键不变量。',
+    `- ${summary}`,
+    '- 在此补充核心模块边界、对外接口与关键不变量。',
     '',
     '## 目录结构',
     '',
-    '- 源码与冒烟测试分离，保持最小可运行与零第三方依赖基线。',
+    ...treeLines,
     '',
     '## 模块分层与禁引规则（arch-rules）',
     '',
-    '<!-- 仅在存在跨层约束时填写；纯脚本或单模块项目保持简化即可 -->',
-    '- 分层：`<入口层>` -> `<领域层>` -> `<基础工具层>`。',
-    '- 禁引：`<下层>` 不反向导入 `<上层>`。',
+    '<!-- 无明显跨层禁引时 AGENTS.md 中 arch-rules 保持 none；拆出分层后再在此补充单向依赖约束 -->',
+    '- 当前为单层起步结构，暂无跨层禁引规则（`arch-rules: none`）。',
     '',
     '## 功能与入口地图（Feature Map）',
     '',
     '| 功能 / 能力 | 入口文件或符号 | 验证命令 |',
     '| --- | --- | --- |',
-    '| `<待补充>` | `<待补充>` | `<待补充>` |',
+    `| ${featureName} | \`${entryFile}\` | \`${testCmd}\` |`,
     '',
   ].join('\n')
+}
+
+export function starterTemplates(lang, rawName, description = '') {
+  const names = sanitizeNames(rawName, process.cwd())
+  const summary = String(description ?? '').trim() || `${names.display} 最小可运行工程骨架。`
+
+  const gitBase = (extraIgnore) => ({
+    '.gitattributes': BASE_GITATTRIBUTES,
+    '.gitignore': buildGitignore(extraIgnore),
+  })
 
   if (lang === 'node') {
+    const treeLines = [
+      '- `src/index.mjs`：核心入口模块',
+      '- `test/smoke.test.mjs`：内置 `node --test` 冒烟测试',
+      '- `docs/TDD.md`：技术设计文档与 Feature Map',
+    ]
     return {
+      ...gitBase(['node_modules/', '.pnpm-store/', 'dist/', 'build/', 'coverage/']),
       'package.json': `${JSON.stringify({
         name: names.kebab,
         version: '0.1.0',
+        description: summary,
         private: true,
         type: 'module',
         scripts: {
@@ -461,12 +545,35 @@ function starterTemplates({ lang, names }) {
         '})',
         '',
       ].join('\n'),
-      'docs/TDD.md': tddDoc,
+      'README.md': starterReadme({
+        names,
+        summary,
+        quickstartLines: ['npm test', 'npm start'],
+        treeLines,
+      }),
+      'docs/TDD.md': starterTdd({
+        names,
+        summary,
+        treeLines,
+        featureName: '基础问候与 CLI 入口（`greet`）',
+        entryFile: 'src/index.mjs',
+        testCmd: 'npm test',
+      }),
     }
   }
 
   if (lang === 'python') {
+    const pkgEntry = `src/${names.ident}/__init__.py`
+    const treeLines = [
+      `- \`${pkgEntry}\`：Python 包核心入口`,
+      '- `tests/test_smoke.py`：标准库 `unittest` 冒烟测试',
+      '- `docs/TDD.md`：技术设计文档与 Feature Map',
+    ]
     return {
+      ...gitBase([
+        '__pycache__/', '*.py[cod]', '.venv/', 'venv/',
+        '.pytest_cache/', '.mypy_cache/', '.ruff_cache/', 'dist/', 'build/', '*.egg-info/',
+      ]),
       'pyproject.toml': [
         '[build-system]',
         'requires = ["setuptools>=68"]',
@@ -475,12 +582,12 @@ function starterTemplates({ lang, names }) {
         '[project]',
         `name = "${names.kebab}"`,
         'version = "0.1.0"',
-        'description = "Starter project"',
+        `description = ${JSON.stringify(summary)}`,
         'requires-python = ">=3.10"',
         'dependencies = []',
         '',
       ].join('\n'),
-      [`src/${names.ident}/__init__.py`]: [
+      [pkgEntry]: [
         'def greet(name: str = "world") -> str:',
         '    clean = (name or "").strip() or "world"',
         '    return f"hello, {clean}"',
@@ -506,20 +613,36 @@ function starterTemplates({ lang, names }) {
         '    unittest.main()',
         '',
       ].join('\n'),
-      'docs/TDD.md': tddDoc,
+      'README.md': starterReadme({
+        names,
+        summary,
+        quickstartLines: ['python3 -m unittest discover -s tests'],
+        treeLines,
+      }),
+      'docs/TDD.md': starterTdd({
+        names,
+        summary,
+        treeLines,
+        featureName: '基础问候接口（`greet`）',
+        entryFile: pkgEntry,
+        testCmd: 'python3 -m unittest discover -s tests',
+      }),
     }
   }
 
   if (lang === 'go') {
+    const treeLines = [
+      '- `hello.go`：核心包入口函数',
+      '- `hello_test.go`：标准库 `testing` 冒烟测试',
+      '- `docs/TDD.md`：技术设计文档与 Feature Map',
+    ]
     return {
+      ...gitBase(['bin/', 'dist/', 'coverage.out', '*.exe']),
       'go.mod': `module example.com/${names.kebab}\n\ngo 1.21\n`,
-      'main.go': [
-        'package main',
+      'hello.go': [
+        'package hello',
         '',
-        'import (',
-        '\t"fmt"',
-        '\t"strings"',
-        ')',
+        'import "strings"',
         '',
         'func Greet(name string) string {',
         '\tclean := strings.TrimSpace(name)',
@@ -529,13 +652,9 @@ function starterTemplates({ lang, names }) {
         '\treturn "hello, " + clean',
         '}',
         '',
-        'func main() {',
-        '\tfmt.Println(Greet("world"))',
-        '}',
-        '',
       ].join('\n'),
-      'main_test.go': [
-        'package main',
+      'hello_test.go': [
+        'package hello',
         '',
         'import "testing"',
         '',
@@ -549,12 +668,30 @@ function starterTemplates({ lang, names }) {
         '}',
         '',
       ].join('\n'),
-      'docs/TDD.md': tddDoc,
+      'README.md': starterReadme({
+        names,
+        summary,
+        quickstartLines: ['go test ./...'],
+        treeLines,
+      }),
+      'docs/TDD.md': starterTdd({
+        names,
+        summary,
+        treeLines,
+        featureName: '基础问候接口（`Greet`）',
+        entryFile: 'hello.go',
+        testCmd: 'go test ./...',
+      }),
     }
   }
 
   if (lang === 'rust') {
+    const treeLines = [
+      '- `src/lib.rs`：核心库入口与内联单元测试',
+      '- `docs/TDD.md`：技术设计文档与 Feature Map',
+    ]
     return {
+      ...gitBase(['target/']),
       'Cargo.toml': [
         '[package]',
         `name = "${names.ident}"`,
@@ -564,15 +701,11 @@ function starterTemplates({ lang, names }) {
         '[dependencies]',
         '',
       ].join('\n'),
-      'src/main.rs': [
+      'src/lib.rs': [
         'pub fn greet(name: &str) -> String {',
         '    let clean = name.trim();',
         '    let target = if clean.is_empty() { "world" } else { clean };',
         '    format!("hello, {}", target)',
-        '}',
-        '',
-        'fn main() {',
-        '    println!("{}", greet("world"));',
         '}',
         '',
         '#[cfg(test)]',
@@ -587,24 +720,51 @@ function starterTemplates({ lang, names }) {
         '}',
         '',
       ].join('\n'),
-      'docs/TDD.md': tddDoc,
+      'README.md': starterReadme({
+        names,
+        summary,
+        quickstartLines: ['cargo test'],
+        treeLines,
+      }),
+      'docs/TDD.md': starterTdd({
+        names,
+        summary,
+        treeLines,
+        featureName: '基础问候接口（`greet`）',
+        entryFile: 'src/lib.rs',
+        testCmd: 'cargo test',
+      }),
     }
   }
 
+  const docsSummary = String(description ?? '').trim() || '项目说明与结构化文档入口。'
+  const docTree = [
+    '- `README.md`：项目门面与阅读入口',
+    '- `docs/guide.md`：结构化使用指南',
+    '- `docs/TDD.md`：目录边界与维护约定',
+  ]
   return {
-    'README.md': [
-      `# ${names.display}`,
-      '',
-      '项目说明与文档入口。',
-      '',
-    ].join('\n'),
+    ...gitBase(['dist/', 'build/', '_site/']),
+    'README.md': starterReadme({
+      names,
+      summary: docsSummary,
+      quickstartLines: ['# 纯文档目录，按 docs/guide.md 与 README.md 导航阅读并核对链接有效性'],
+      treeLines: docTree,
+    }),
     'docs/guide.md': [
       `# ${names.display} 使用指南`,
       '',
       '在此编写结构化的面向读者文档。',
       '',
     ].join('\n'),
-    'docs/TDD.md': tddDoc,
+    'docs/TDD.md': starterTdd({
+      names,
+      summary: docsSummary,
+      treeLines: docTree,
+      featureName: '项目总览与文档索引',
+      entryFile: 'README.md',
+      testCmd: '人工核对文档结构与相对链接可达性',
+    }),
   }
 }
 
@@ -614,6 +774,7 @@ function starterTemplates({ lang, names }) {
 export function bootstrapEmpty(targetDir, {
   lang,
   name,
+  description = '',
   dryRun = false,
 } = {}) {
   const root = resolve(targetDir)
@@ -626,11 +787,16 @@ export function bootstrapEmpty(targetDir, {
   }
 
   const names = sanitizeNames(name, root)
-  const files = starterTemplates({ lang, names })
+  const files = starterTemplates(lang, names.display, description)
   const created = []
+  const skipped = []
 
   for (const [rel, content] of Object.entries(files)) {
     const dest = join(root, rel)
+    if (existsSync(dest)) {
+      skipped.push(rel)
+      continue
+    }
     created.push(rel)
     if (!dryRun) {
       mkdirSync(dirname(dest), { recursive: true })
@@ -638,7 +804,7 @@ export function bootstrapEmpty(targetDir, {
     }
   }
 
-  return { target: root, lang, name: names.kebab, dryRun, created }
+  return { target: root, lang, name: names.kebab, dryRun, created, ...(skipped.length > 0 ? { skipped } : {}) }
 }
 
 function formatCheckReport(res) {
@@ -660,6 +826,7 @@ async function main(argv) {
   let doBootstrap = false
   let lang
   let name
+  let description = ''
   let kitDir = DEFAULT_KIT_SKILLS_DIR
 
   for (let i = 0; i < argv.length; i++) {
@@ -674,6 +841,7 @@ async function main(argv) {
         '  --bootstrap-empty        为空目录生成最小可运行骨架与初始 docs/TDD.md',
         '  --lang <lang>            骨架语言：node | python | go | rust | docs',
         '  --name <name>            项目名称（默认取目录名）',
+        '  --description <text>     项目一句话简介（仅 --bootstrap-empty 时生效）',
         '',
       ].join('\n'))
       return 0
@@ -686,6 +854,8 @@ async function main(argv) {
     else if (arg.startsWith('--lang=')) lang = arg.slice('--lang='.length)
     else if (arg === '--name') name = argv[++i]
     else if (arg.startsWith('--name=')) name = arg.slice('--name='.length)
+    else if (arg === '--description') description = argv[++i] ?? ''
+    else if (arg.startsWith('--description=')) description = arg.slice('--description='.length)
     else if (arg === '--kit-dir') kitDir = resolve(argv[++i] || '')
     else if (arg.startsWith('--kit-dir=')) kitDir = resolve(arg.slice('--kit-dir='.length))
     else if (!arg.startsWith('-') && !targetSpecified) {
@@ -710,7 +880,7 @@ async function main(argv) {
 
     let bootstrapResult
     if (doBootstrap) {
-      bootstrapResult = bootstrapEmpty(target, { lang, name, dryRun })
+      bootstrapResult = bootstrapEmpty(target, { lang, name, description, dryRun })
       if (!existsSync(kitDir)) {
         process.stdout.write(`${JSON.stringify({ bootstrap: bootstrapResult, equip: null }, null, 2)}\n`)
         return 0

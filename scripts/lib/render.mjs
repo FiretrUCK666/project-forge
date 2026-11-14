@@ -189,6 +189,19 @@ export function toMarkdown(facts) {
     lines.push('')
   }
 
+  const plan = facts.artifactPlan ?? []
+  if (plan.length > 0) {
+    lines.push('## 逐项处置计划（存量只融合不覆盖，缺项按事实补齐）')
+    lines.push('')
+    lines.push('| 产物 | 现状 | 处置动作 | 执行要点 |')
+    lines.push('| --- | --- | --- | --- |')
+    const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+    for (const item of plan) {
+      lines.push(`| ${cell(item.artifact)} | ${cell(item.status)} | \`${cell(item.action)}\` | ${cell(item.detail)} |`)
+    }
+    lines.push('')
+  }
+
   if (facts.gaps.length > 0) {
     lines.push('## 缺口')
     lines.push('')

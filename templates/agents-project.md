@@ -1,10 +1,15 @@
 # {{PROJECT_NAME}} — 项目工程契约（每次会话自动读）
 
+<!-- project-forge: if is-full -->
 本文件是本项目的工程入口契约：AI 每次新开会话先读它，确认项目定位、模块入口、边界、命令与协作流程。**只描述现在是什么样，不写变更履历。**
 
 - **读者分流**：本文件面向 AI（配合 `docs/TDD.md`、`docs/specs/`、`docs/todo/`）；面向人的命令与说明在 `README.md`、`CONTRIBUTING.md`、`{{RELEASING_DOC}}`。
 - **取值不写快照**：账号、远端、当前分支与版本号一律现场读清单与版本控制配置，不写死在本文件。
 - **持续自演进铁律（严进常删，总长 <= 30KB）**：架构、命令或边界实质变化时须随该次提交同步更新本文并对齐 `README.md`；**24KB 起预警、禁止超过 30KB**——凡能 10 秒从源码直读的细节或已过时条目立即删出，子目录专属约束放 `<subdir>/AGENTS.md`（开头指回根契约，仅写特例，不抄通用规则）。
+<!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+本文件是轻量工程契约（`lightweight` 档，目标 `< 14KB`）：只描述当前机制、命令与红线，不写变更履历；面向人的说明在 `README.md` 与 `{{RELEASING_DOC}}`。
+<!-- project-forge: endif -->
 
 <!-- project-forge: begin 意图路由 -->
 ## 意图路由（静默触发，不反问）
@@ -34,21 +39,24 @@
 <!-- project-forge: begin 行事总纲 -->
 ## 行事总纲与决策准则
 
+<!-- project-forge: if is-full -->
 - **四条准则**：
   1. **治本不治标**：先查根因再改，不用补丁或盲目重试遮掩问题；
   2. **写原则不写死**：提炼可迁移原则，禁把偶然个案过度泛化；
   3. **融入结构**：先查复用与现成基建，合入既有主干，不留双轨；
   4. **保持清朗**：及时清理废弃路径与冗余分支，控制认知复杂度。
 - **信任倒金字塔与验证优先级**：
-  - **形式与实证优先于读代码**：`确定性静态与类型门禁（类型 / Schema / arch-rules） > 真实启动运行与端到端实证（测试 / smoke-verify / UI 视觉实际打开渲染交互与浅深色截图 / CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未经实证的读代码挑刺不得阻塞合入；
+  - **形式与实证优先于读代码**：`确定性静态与类型门禁（类型 / Schema / arch-rules） > 真实启动运行与端到端实证（测试 / smoke-verify / UI 视觉交互与浅深色截图 / CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未实证的读代码挑刺不得阻塞合入；
   - 同类审查漏出或运行时复发**满 2 次**沉入确定性形式检查，报错直指根因并清理过期冗余代码。
-- **最优解与取舍**：
-  - 先给出无历史包袱的最干净解法，再拆渐进步骤；
-  - 权衡用户易用（UX）、维护顺手（DX）与 AI 可控（AX）。
-- **动手前后四问**：
-  - 改前：有无现成模块可复用？属可局部回退 `two-way` 还是不可逆 `one-way` 门？
-  - 改后：拿到本地真实运行或渲染截图证据了吗？是否引入死代码或借口注释？
-- **不当人肉代理**：CLI、接口与 UI/视觉改动必须本地启动运行、实测输入输出并打开实际渲染走通交互、核对浅深色截图，不让用户替 AI 手工验收。
+- **最优解与取舍**：先给无历史包袱的最干净解法再拆步骤；兼顾用户易用（UX）、维护顺手（DX）与 AI 可控（AX）。
+- **动手前后**：改前查复用并判 `two-way`/`one-way` 门型；改后拿实测或渲染截图证据、清死代码与借口注释。
+- **不当人肉代理**：CLI、接口与 UI 改动必须本地运行实测、走通渲染交互并核对浅深色截图，不让用户代劳验收。
+<!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+- **四条准则**：治本不治标、写原则不写死、先查复用融入主干、及时清理废弃代码。
+- **验证优先级**：确定性静态门禁（类型/Schema/`arch-rules`）> 真实启动运行与 UI 渲染截图实证 > 静态读代码 > 文档约定；同类问题复发满 2 次沉入静态规则，不当人肉代理。
+- **改前改后**：改前查复用并判 `two-way` / `one-way` 门型；改后拿实测或渲染证据再汇报。
+<!-- project-forge: endif -->
 <!-- project-forge: end 行事总纲 -->
 
 <!-- project-forge: begin 项目定位 -->
@@ -79,7 +87,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 ## 上下文阅读护栏
 
 - **按序读取**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `repo-map.mjs` 定位源码；修改前先跑 `flow.mjs inspect` 拿当前角色与任务状态。
-- **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建产物缓存（仅当任务显式命中时定向查阅）。
+- **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（仅按需定向查阅；`do-not-edit` 仅禁手工改历史归档，允许 `finalize`/`archive` 合法归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
 
 <!-- project-forge: begin 架构与关键不变量 -->
@@ -133,13 +141,20 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: begin 修改守则 -->
 ## 工程修改守则与硬性规范
 
+<!-- project-forge: if is-full -->
 - **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
 - **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
 - **测试分层与控频**：
   - 编码中只跑语法/类型检查，禁频繁跑全量或 E2E；每轮改完按 `--tier quick --target <path>` 跑对应单测；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
   - 禁写零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测内硬编码 `>=1s` sleep / 浏览器容器或非无头测试；单测文件超 800 行应按模块拆分。
-- **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**（「以前……后来改成……」）、**禁死代码注释块**（废弃代码直接删，不留连续注释块）、**禁借口注释与擅自压制检查**（严禁未说明理由写 `HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
+- **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**、**禁死代码注释块**（废弃代码直接删）及无故压制检查（`HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
 - **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
+<!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+- **范围与依赖**：改前读邻近实现、清净旧逻辑；不擅自引入第三方依赖。
+- **测试与分层**：修缺陷先写复现失败测试（Red-Green），新判定须有正反双向用例；改完跑 `--tier quick --target <path>`，合前跑 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证、单测 `>=1s` sleep 与弱化门禁。
+- **注释与文档同步**：禁立碑履历、死代码注释块及无故 `HACK`/`@ts-ignore`/`eslint-disable`；改导出、CLI 或模块边界时同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`。
+<!-- project-forge: endif -->
 - {{COMMIT_STYLE_HINT}}
 <!-- project-forge: if has-bilingual-docs -->
 - **多语文档成对同步**：本仓库有 {{README_LIST}}，改任一语言版本必须同步另一份，并保持双向互指链接有效。
@@ -165,6 +180,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 
 **日常与发版是两件事，默认只做前一件：**
 
+<!-- project-forge: if is-full -->
 - **日常**：改完 -> 跑门禁 -> 提交 -> **推自己的分支 -> 开 PR -> 独立审查 -> 合并**。**不打标签、不建发布页、不发制品库。**
 
   **推到哪一档由「能不能撤回」决定，不由「是不是对外」决定**：推自己的分支、开 PR、改 PR 都能撤回，属于日常；合并默认分支、发布、改可见性、改写历史撤不回来，要先给人看清单。**强制推送与改写已推送历史永不自动执行。**
@@ -172,15 +188,32 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **不自己判断「该发版了」**：攒了几个改动或隔了一阵都不是理由，发版必须人点头。
 - **回读才算发完**：标签推上后回读发布页正文、附件与制品库版本均已就位才算完成。
 <!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+- **日常**：按能不能撤回分档——推自己的分支、开 PR 可撤回属日常（不打标签不发制品库）；合并默认分支、发版、改写历史撤不回来。
+- **发版**：不自己判断该发版，仅在人明确说要发版时按 `{{RELEASING_DOC}}` 先提交推送说明（`{{RELEASE_NOTES_TARGET}}`）到 `{{DEFAULT_BRANCH}}`，再打标签并回读确认。
+<!-- project-forge: endif -->
+<!-- project-forge: endif -->
 <!-- project-forge: end 版本与发布 -->
 
 <!-- project-forge: begin 日常协作与风险分流 -->
 ## 日常协作：改动怎么落地
 
+<!-- project-forge: if is-lightweight -->
+- **身份与远端**：
+  <!-- project-forge: if has-remote -->
+  先核对远端与源仓库：`origin` 与声明源一致且有写权限为 `maintainer`（独立分支开 PR，禁直推主干；未匹配注册平台远端退化为 `generic-git` 走本地全流程）；Fork 为 `contributor-fork`（只推自己 `origin` 开 PR，禁自合与提前删分支）；只读克隆停下三选一（Fork/新建/`.git/pf-local-mode`）。
+  <!-- project-forge: endif -->
+  <!-- project-forge: if no-remote -->
+  项目还没有远端，仅本地提交；碰「高风险路径」或 `one-way` 变更仍须独立审查并记录。
+  <!-- project-forge: endif -->
+- **五档分流与文档归档**：改前跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）定 Case 1–5 与门型（`two-way`/`one-way`）：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 并经 Critique 后 `approve`；Case 5 先更新 `docs/TDD.md`。PR 前跑 `flow.mjs finalize` 将关联 `PRD`/`SPEC`/`Todo` 一并 `git mv` 成对归档至 `docs/archive/{prd,specs,todo}/`。
+- **分档推送、审查与清理**：能不能撤回决定分档——推自己的分支与开 PR 属日常；审查通过由审查者直接合（`contributor-fork` 等上游合），**弱化门禁必须人点头**。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再列清单问人确认后清理；非 ASCII 平台正文先写 UTF-8 临时文件经 `--body-file` 提交。升级完整协作设施可随时重跑 `equip.mjs --tier full` 与 `compose-agents.mjs --tier full`。
+<!-- project-forge: endif -->
+<!-- project-forge: if is-full -->
 - **第一步：双轴五态身份判定（不靠猜）**。
 
   <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
+  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人（自动查防撞车），接手未合分支须带 `--takeover --reason` 在 Issue 与 PR 双写接管（弃领用 `flow.mjs release`）；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；非注册平台远端退化为 `generic-git` 放行本地全流程；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
   <!-- project-forge: endif -->
   <!-- project-forge: if no-remote -->
   这个项目还没有远端，所以眼下只有本地提交。**但落在高风险路径上的改动仍然要有一次独立审查**，结论写进本地任务单——审查不依赖远端存在，它依赖「这处改坏了不会当场失败」。
@@ -206,18 +239,18 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   | 第 2 档：`L2`/`L3`、接 Issue、脏主仓或并行 | `.worktrees/impl-<taskId>/`（新分支）+ `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；独立审查者在 `review-*` 做故障注入，用完即弃 |
   | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危变更，禁用生命周期脚本经人确认后再跑门禁 |
 
-  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**（先辨识 `merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged` 四态并问人确认）。`.worktrees/` 必须已忽略；卸前先问人。
+  按子包锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink；Workspace/editable 指向主仓时自动隔离）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**（先辨识 `merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged` 四态并问人确认）。`.worktrees/` 必须已忽略；卸前先问人。
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
-  **谁改，谁先认领**（`flow.mjs claim`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]` 并归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented` 补实现说明、确认代码-文档对齐。
+  **谁改，谁先认领**（`flow.mjs claim`，`start --create-issue` 可建单联动命名，弃领用 `release`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]`，将关联 `PRD`（`done`）、`SPEC`（`implemented` 补实现说明）与 `Todo` 成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/` 并同步互链（`do-not-edit` 允许工具合法归档），确认代码-文档对齐。
 
   | 节点 | 留在哪 | 说什么 |
   | --- | --- | --- |
-  | 认领 | Issue | 谁认领、用哪条分支 |
+  | 认领 / 释放 | Issue | 谁认领或释放、用哪条分支（`pf-state` 标记） |
   | 已提 PR | Issue | PR 链接，以及 `Fixes #N` / `refs #N` |
-  | 审查退回 | PR **和** Issue | 哪几条标准没过、故障注入记录、第几轮 |
-  | 审查通过 | PR **和** Issue | `fail` 为空、下一棒是谁 |
+  | 审查退回 | PR **和** Issue | `record` 自动双写四字段与 `changes-requested` 标签 |
+  | 审查通过 | PR **和** Issue | `record` 自动双写四字段与 `reviewed` 标签（离线不阻塞） |
   | 返工已提交 | PR **和** Issue | 新 HEAD 短哈希、门禁已重跑、请重新审核 |
   | 已合并 | Issue | 合并到哪、关掉了哪几个 Issue |
 
@@ -253,6 +286,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **日常到此为止**：合并就是一次改动的终点。**发版是另一件事**，要人明确说才做——见上面「版本管理与回滚底线」。
 
 - **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；指路一律用标题名，不用节号。
+<!-- project-forge: endif -->
 <!-- project-forge: end 日常协作与风险分流 -->
 
 <!-- project-forge: begin 高风险路径 -->

@@ -7,10 +7,10 @@
 ## 一、勘察命令（只读、并发、无交互）
 
 ```sh
-node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--json]
+node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--verify-token] [--json]
 ```
 
-- 默认纯只读扫描文件系统与本地 Git 状态；加 `--probe-auth` 后注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`BatchMode=yes`，并发探测 GitHub Track A（SSH 22 / 443 端口、HTTPS Credential Helper、`gh auth setup-git` 桥接、协议错配修复命令）与 Track B（`gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex`/`offline`），绝不挂起弹窗或泄露令牌。
+- 默认纯只读扫描文件系统与本地 Git 状态（忽略 `.DS_Store`、`._*`、`__MACOSX`、`.Spotlight-V100`、`.Trashes`、`.fseventsd` 等 macOS Finder 元数据）；加 `--probe-auth` 后注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`SSH_ASKPASS_REQUIRE=never`、`GH_PROMPT_DISABLED=1`，并发探测 Track A（SSH 密钥就绪度 + `StrictHostKeyChecking=yes` 22/443、`git credential fill` 5s 硬超时、`gh auth setup-git`、`~/.ssh/config` 别名映射）与 Track B（`gh-cli` -> `node-https-token` -> 仅确认宿主能力时 `mcp-delegate` -> `half-duplex`/`offline`/`none`）。**即使尚未配置远端或处于空目录，传 `--probe-auth` 同样探测本机建仓凭据**；附加 `--verify-token` 可对本地令牌发一次轻量验活请求。
 - 扫描结果末尾自带基于唯一判据生成的「下一步必读参考」，不靠人工记忆决定要读哪几份。
 
 ## 二、必须立即拦截的三类现场
@@ -20,28 +20,25 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 2. **`commitsState === 'unreadable'`（仓库损坏或无权访问）**：
    不要把读不出提交误当成「零提交新仓库」，更不许直接重跑 `git init`；先排查工作树指针、`.git` 权限或对象损坏。
 3. **空目录或近空目录起步（`effectiveFiles === 0`）**：
-   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次生成完整最小可运行工程基础：`.gitattributes`、`.gitignore`、初始 `README.md`、真实可运行源码与冒烟测试、填实 `Feature Map` 的 `docs/TDD.md`（不留空洞）及全套 5 个 `.agents/skills/`（已有文件跳过不覆盖；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.tar.gz` 快照）。
+   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / Java / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次生成完整最小可运行工程基础：`.gitattributes`、`.gitignore`、初始 `README.md`、真实可运行源码与冒烟测试、填实 `Feature Map` 的 `docs/TDD.md`（不留空洞）及按档位装配的 `.agents/skills/`（已有文件跳过不覆盖；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.tar.gz` 快照）。
 
 ## 三、字段含义
 
 | 字段 | 含义与行动影响 |
 | --- | --- |
 | `target` | 目标目录、规范名、是否可写；所有产物路径相对此根目录计算 |
-| `scale` | `effectiveFiles`（排除忽略与构建目录后的真实文件数）；为 0 时触发空目录起步流程 |
-| `git` | `isRepoRoot`、`isWorktree`（区分独立 worktree 与损坏 `.git`）、`worktreeParent`、`commitsState`、`defaultBranch`、`submodules` |
-| `git.role` | 双轴五态身份：`local-only`（无远端或 `.git/pf-local-mode`）、`maintainer`（与声明源一致且有写权限或自有确认）、`contributor-fork`（存在不同 `upstream` 或 Fork 仓）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
-| `git.auth` | `https`、`ssh`（含 443 回退结果）、`apiChannel`、`details`、`remediationCmd`（协议错配可执行修复命令；SSH-only 仓不再误报无凭据） |
-| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警；含 `行事总纲` 与 7 键 `Dev Profile`）、`tdd`（`docs/TDD.md`）、`prdDir`、`specsDir`、`todoDir`、`contributing`、`releasing`、`license`、`releaseNotesMode`；缺项决策口径见 `references/docs-set.md` |
-| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并分离内置 5 技能与项目自有 `kit.customSkills`（含 `name`、`path`、`summary`、`valid`），同时读取 `.agents/skills/.pf-manifest.json` 哈希账本状态；后续探索由 `repo-map.mjs` 提取 `reusableModules`、`featureMap` 与 CI 步骤 |
-| `explorationStrategy` | 依据 `effectiveFiles`、顶层代码目录与已有治理标记输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–4 个不重叠 `shards` 分片） |
-| `artifactPlan` | 由 `computeArtifactPlan` 产出的 10 项治理产物确定性处置列表（`{ id, artifact, status, action, detail }`），直接指明每一项应 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
-| `reentry` | 跨月重入或存量接入时的漂移快照：`staleAgentPaths`（`AGENTS.md` 提及但磁盘已删的路径）、`staleAgentScripts`（声明的脚本或命令已不存在）、`staleTddPaths`（`docs/TDD.md` 中的失效路径）、`unregisteredTopDirs`（新增但未登记的顶层模块目录） |
-| `ecosystem` / `workspace` | 语言生态、入口清单、`packageManager`、多包目录列表（驱动 `AGENTS.md` 多包边界与忽略规则） |
-| `artifacts` | 运行环境下限（`runtimeRequirements`）与从配置提取的标准命令 |
-| `ci` / `publish` | 现有 GitHub Actions 流水线与发布通道线索 |
-| `risks` | `credentialFindings`（硬编码密钥/令牌）、`homePathLeaks`（严格区分 `test-data` 夹具与真实源码 `leak`）、`largeFiles`、未忽略的构建产物 |
-| `gaps` / `decisions` / `questions` | 缺口清单（对应 `review.mjs` 体检规则）、需人拍板的取舍项、精简提问列表 |
-| `navigation` | 按当前现场算出的必读参考列表，读完对应文档前不进入写入阶段 |
+| `scale` | `effectiveFiles`（排除忽略与系统杂项后的真实文件数）；为 0 时触发空目录起步流程 |
+| `recommendedTier` | 依据代码规模、多包布局与协作信号给出的推荐装配档位（`lightweight` \| `full`），供用户确认后传给 `equip.mjs` / `compose-agents.mjs --tier` |
+| `git` | `isRepoRoot`、`isBare`、`isShallow`、`commitsState`、`providerId`（`github` 或降级 `generic-git`）、`topology`（`0`/单/Fork/多远端 `remotes[]` 模型）与 `.git/pf-{local,fork,standalone}-mode` 标志 |
+| `git.role` | 双轴五态身份：`local-only`（无远端或 `pf-local-mode`）、`maintainer`（与声明源一致且有写权限，或 `generic-git` 通用降级放行本地全流程）、`contributor-fork`（存在不同 `upstream` / Fork 仓 / `pf-fork-mode`）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
+| `git.auth` | `https`、`ssh`（含 443 回退与指纹未收录提示）、`apiChannel`、`details`、`remediationCmd`（协议错配修复命令；缺凭据时渲染三路线认证指引） |
+| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`、`existingDesignDocs`（识别 `ARCHITECTURE.md` / `*-TDD.md` / `docs/{design,architecture,adr}/` 避免双轨）、`workflowFacts`（明确拆分 `checkWorkflows` 与 `releaseWorkflows`，覆盖主流发布 Action）、`contributing`、`releasing`、`license` |
+| `kit` | 扫描 `skills/<name>/SKILL.md` 及任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2，保留 `tier`、`disabledSkills`、`removedFiles`、`customizedFiles`） |
+| `explorationStrategy` | 依据 `effectiveFiles`、多包/多生态与重入状态输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–4 个不重叠 `shards` 分片） |
+| `artifactPlan` | 由 `computeArtifactPlan` 产出的 11 项治理产物确定性处置列表（含拆分的 `ci-check` 与 `ci-release`），直接指明 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
+| `reentry` | 仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入（不误判存量手写 `AGENTS.md`）；输出 `staleAgentPaths`、`staleAgentScripts`（按 `commandsByEcosystem` 逐栈校验）、`staleTddPaths` 与 `unregisteredTopDirs` |
+| `ecosystem` / `workspace` | 识别 Node、Python、Rust、Go、Java、Swift/Apple（`Package.swift` / `*.xcodeproj` / `*.xcworkspace`）等生态、入口清单与多包布局 |
+| `risks` / `gaps` / `questions` / `navigation` | 凭据/路径/大文件风险、结构缺口、待拍板问题（含无远端建仓 3 路决策与 5 选 1 发版策略）及必读参考列表 |
 
 ### 并行只读分片探索规范（大型与重入仓写前前置）
 
@@ -54,11 +51,16 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 | --- | --- | --- |
 | `pre-backup` | `snapshot` / `skip` | 非空目录写前必先 `backup.mjs create <目录> --label pre-forge`；空目录跳过 |
 | `git-baseline` | `create` / `calibrate` / `preserve` | 已存在 `.gitignore`/`.gitattributes` 仅增补缺失安全/二进制规则，不清空已有规则 |
-| `kit-skills` | `equip` / `upgrade` / `preserve` | 全量装配或无损升级 5 个内置技能；**原样保留 `.agents/skills/<custom>/`** |
-| `docs-tdd` | `create` / `calibrate` / `preserve` / `skip` | 纯文档仓可省；命中 `staleTddPaths`/`unregisteredTopDirs` 仅局部校准，保留既有决断 |
+| `kit-skills` | `equip` / `upgrade` / `preserve` | 按 `recommendedTier`（`lightweight` \| `full`）装配或无损升级；尊重 v2 墓碑/定制并原样保留自有扩展技能 |
+| `docs-tdd` | `create` / `calibrate` / `preserve` / `skip` | 纯文档仓可省；已有存量架构设计文档时优先 `preserve` 防双轨；漂移时仅局部校准 |
 | `agents-contract` | `create` / `calibrate` / `preserve` | 缺失时先吸收既有 AI 约定（`otherAiConventions`）；漂移时保留手写规则，只刷新失效项 |
 | `readme` | `preserve` / `create` | **已有 README 强制 `preserve`**：严禁套模板重写样式，仅失效命令/入口做最小校准 |
 | `contributing` | `preserve` / `optional` / `skip` | 已存在原样保留；仅维护者且有远端时按需补齐 |
 | `license` | `preserve` / `ask-human` | 已有单/双许可或私有声明强制保留；缺失一律由人拍板，绝不代选 |
 | `releasing` | `preserve` / `create` / `skip` | 已有 `RELEASING.md`/变更记录保留；可发版或有发布流/tag 时建齐 |
-| `ci-workflows` | `preserve` / `create` / `skip` | 已有检查流保留；`contributor-fork` 跳过；非标目录布局原样尊重不强改结构 |
+| `ci-check` | `preserve` / `calibrate` / `create` / `skip` | 已有检查流保留；`contributor-fork` 与 `generic-git` 跳过；发现高危 `pull_request_target` 立即校准 |
+| `ci-release` | `preserve` / `ask-human` / `skip` | 已有发布工作流或工具链保留；待配发版通道时走 5 选 1 决策，默认零额外 Secret 路线 |
+
+## 事实来源
+
+Git 与系统底层行为（如 macOS APFS 大小写与符号链接、OpenSSH `StrictHostKeyChecking` 参数语义）以当前操作系统、Git 官方文档与 Node.js 标准库行为为准。

@@ -63,5 +63,5 @@
   </g>
 
   <!-- Safety reassurance footer -->
-  <text x="392" y="352" class="mono" font-size="16" font-weight="500" fill="#526075">先只读盘点，写前留仓外备份，手写文档与 CI 原样保留</text>
+  <text x="392" y="352" class="mono" font-size="16" font-weight="500" fill="#526075">先只读盘点 · 按需分档装配 · 写前留仓外备份 · 手写与 CI 原样保留</text>
 </svg>

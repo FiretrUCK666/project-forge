@@ -49,7 +49,7 @@
 | 兼容性、运行环境下限变化与按顺序升级动作 | 文件搬移流水账、内部编号、分支名或晦涩源码符号 |
 | 同主题多笔提交合并概括后的简洁人话 | 提交记录流水账或「优化了体验」类无法判定空话 |
 
-内部设计边界与任务演进记录留在 `docs/specs/` 与 `docs/todo/`（归档于 `docs/archive/todo/`），那是给维护者的，不进发布页。
+内部设计边界与任务演进记录留在 `docs/specs/` 与 `docs/todo/`（完成后随 `PRD`/`SPEC`/`Todo` 成对归档于 `docs/archive/`），那是给维护者的，不进发布页。
 
 判据只有一条：**不熟悉这个仓库内部结构的人读完，能不能说出哪一处变化影响他、该怎么升。** 答不上来就重写。
 
@@ -106,8 +106,9 @@
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| 自动化说找不到说明文件 | 说明没推，或标签先推了。补推说明，再用 `workflow_dispatch` 手动触发并填标签名；**严禁挪动已推送的标签** |
+| 自动化说找不到说明文件 | 说明没推，或标签先推了。补推说明，再用 `workflow_dispatch` 手动触发并**必填标签名**（空 tag 会被直接拦截）；**严禁挪动已推送的标签** |
 | 自动化说版本号不匹配 | 标签指向的那棵树里 `metadata.version` 与标签不同号。**已推送的标签不能挪**——改工作区再推 `main` 也改不了它（门禁读的是标签那棵树）。正确做法是**发一个新的补丁版**：改号、写说明、提交推送、打新标签 |
+| 发布接口返回 401 / 403 | 若配置了 `secrets.RELEASE_TOKEN`，请到仓库 Settings -> Secrets and variables -> Actions 检查并刷新令牌（需目标仓库 Contents 读写权限）；未配置时检查 `permissions: contents: write` |
 | 发布页正文被人工改过 | **不要重跑工作流**——重跑会用文件内容覆盖，抹掉人的编辑 |
 | 说明是空的，或还留着没填的 `project-forge: fill` 占位标记 | 说明没写完。空文件与未填占位都会被工作流直接判红，**那是设计**：一份带空占位的说明比没有更糟，它看起来像有内容，而它会被原样贴到发布页上。补完、删掉标记行，再重跑 |
 
@@ -115,12 +116,9 @@
 
 ## 发布页上的附件
 
-`release.yml` 用 `git archive` 按 `.gitattributes` 的排除规则导出用户包，核对条目之后挂到
-发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的自用设施。
+`release.yml` 用 `git archive` 按 `.gitattributes` 的排除规则导出用户包（`--prefix="project-forge/"`），核对条目之后挂到发布页上。拿到压缩包的人不需要 git，也不需要这个仓库的自用设施。
 
-**附件名固定 `project-forge.zip`，不带版本号**：这样
-`releases/latest/download/project-forge.zip` 永远指向最新版，写文档时可以直接拿它当下载入口；
-要某一版就去点发布页上那个标签。
+**附件名与解压目录固定为 `project-forge.zip` 与 `project-forge/`（均不带版本号）**：这样 `releases/latest/download/project-forge.zip` 永远指向最新版，解压后文件夹名直接对齐 `SKILL.md` 的 `name: project-forge`；要某一版就去点发布页上那个标签。
 
 **排除规则只有一处**：`.gitattributes` 的 `export-ignore`，与 `scripts/lib/protocol.mjs` 的
 `REPO_ONLY_*` 两处必须说同一件事——`preflight` 会核对。两处不一致的症状是：某个只服务本仓库

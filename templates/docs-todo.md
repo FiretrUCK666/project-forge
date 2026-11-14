@@ -18,7 +18,16 @@ related_spec: null
 
 # <任务标题>
 
-> 状态枚举：`draft | active | in_review | done | archived | dropped`。
+## 文档信息与范围概览
+
+| 项目 | 内容 |
+| --- | --- |
+| 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
+| 建单 / 更新 | `YYYY-MM-DD` / `YYYY-MM-DD` |
+| 分支 / 基线 | `<branch>` @ `<HEAD SHA>` |
+| 任务编号 | `<taskId>` |
+| 负责人 / 审批 | `<负责人>` / `false` |
+| 关联 Issue / PR / SPEC | 未关联 / 未关联 / 按需关联 |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交。
 
@@ -45,7 +54,7 @@ related_spec: null
 
 ## 完成后的记录
 
-**在合并之前写完，随这次改动一起提交。**（有 PR 时随功能代码并入 `docs/archive/todo/`，不另开只改记录的 PR）
+**在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：<命令 + 退出码 + 关键输出>
 - **文档同步检查**：<已确认 `docs/TDD.md` / `README*.md` / `AGENTS.md` 是否需同步并随本次提交更新>

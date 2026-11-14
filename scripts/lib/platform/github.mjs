@@ -1,668 +1,93 @@
 /**
- * GitHub 平台探测、双轴五态身份判定与 REST/GraphQL 双通道封装。
+ * github.mjs —— GitHub 平台模式标志、双轴五态身份判定、HostingProvider 适配器及统一对外出口。
  *
- * 全程禁交互（`GIT_TERMINAL_PROMPT=0` / `GCM_INTERACTIVE=never` / `BatchMode=yes`），
- * 零第三方依赖，且严禁将任何凭据或令牌写入返回值、磁盘或标准输出。
+ * 全程禁交互（`GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=echo` / `SSH_ASKPASS_REQUIRE=never` /
+ * `GCM_INTERACTIVE=never` / `GH_PROMPT_DISABLED=1`），零第三方依赖。
  */
 
-import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import https from 'node:https'
-import { tmpdir } from 'node:os'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
-import { githubRepoPath } from '../text.mjs'
+import { githubRepoPath, parseSshConfigHostMap } from '../text.mjs'
+import {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  buildNonInteractiveEnv,
+  buildOneClickPrUrl,
+  createGitHubClient,
+  defaultRunCommand,
+  detectRemoteProtocol,
+  normalizeGitHubRepo,
+} from './github-client.mjs'
+import { probeGitHubEnv, probeSshTransport } from './github-probe.mjs'
 
-export const DEFAULT_PROBE_TIMEOUT_MS = 5000
-
-/** 内存令牌保险箱：按探测结果对象弱引用保存令牌，严禁序列化或暴露到返回值。 */
-const TOKEN_VAULT = new WeakMap()
-
-/** 构造禁止一切交互提示的子进程环境变量。 */
-export function buildNonInteractiveEnv(baseEnv = process.env) {
-  return {
-    ...baseEnv,
-    GIT_TERMINAL_PROMPT: '0',
-    GCM_INTERACTIVE: 'never',
-    GH_PROMPT_DISABLED: '1',
-    SSH_ASKPASS_REQUIRE: 'never',
-  }
+export {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  buildNonInteractiveEnv,
+  buildOneClickPrUrl,
+  createGitHubClient,
+  detectRemoteProtocol,
+  normalizeGitHubRepo,
+  probeGitHubEnv,
 }
 
 /**
- * 归一 GitHub 仓库标识为 `owner/name`；同时兼容完整 URL 与裸 `owner/name`。
- * 认不出返回 `undefined`。
+ * 解析当前目录对应的 `.git` 实际目录与公共目录（兼容普通仓库与 worktree）。
  */
-export function normalizeGitHubRepo(value) {
-  if (typeof value !== 'string') return undefined
-  const s = value.trim()
-  if (!s) return undefined
-  const fromUrl = githubRepoPath(s)
-  if (fromUrl) return fromUrl
-  const bare = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(s)
-  if (bare && bare[1] !== '.' && bare[1] !== '..') {
-    return `${bare[1]}/${bare[2]}`
-  }
-  return undefined
-}
-
-/**
- * 识别单个 Git 远端地址使用的传输协议。
- * @returns {'ssh' | 'https' | 'unknown'}
- */
-export function detectRemoteProtocol(url) {
-  if (typeof url !== 'string' || !url.trim()) return 'unknown'
-  const s = url.trim()
-  if (/^https?:\/\//i.test(s)) return 'https'
-  if (/^(?:ssh:\/\/|git@)/i.test(s)) return 'ssh'
-  if (/^[^/:@\s]+@[^:\s]+:.+/.test(s)) return 'ssh'
-  return 'unknown'
-}
-
-/**
- * 生成 1-click GitHub Pull Request 创建链接（half-duplex 降级输出）。
- */
-export function buildOneClickPrUrl({
-  targetRepo,
-  baseBranch = 'main',
-  headOwner,
-  headBranch,
-} = {}) {
-  const repo = normalizeGitHubRepo(targetRepo)
-  if (!repo) return undefined
-  const base = encodeURIComponent(baseBranch || 'main')
-  if (!headBranch || headBranch === baseBranch || headBranch === 'HEAD') {
-    return `https://github.com/${repo}/compare?expand=1`
-  }
-  const repoOwner = repo.split('/')[0]
-  const branchEnc = encodeURIComponent(headBranch)
-  const headSpec = headOwner && headOwner.toLowerCase() !== repoOwner.toLowerCase()
-    ? `${encodeURIComponent(headOwner)}:${branchEnc}`
-    : branchEnc
-  return `https://github.com/${repo}/compare/${base}...${headSpec}?expand=1`
-}
-
-/**
- * 检查目标仓库是否存在 `.git/pf-local-mode` 强制纯本地标记。
- * 兼容普通仓库与 worktree（`.git` 为指向 `gitdir:` 的文件）。
- */
-export function hasLocalOnlyMarker(cwd) {
-  if (!cwd) return false
+function resolveGitDirs(cwd) {
+  if (!cwd) return []
   const dotGit = join(cwd, '.git')
-  if (!existsSync(dotGit)) return false
+  if (!existsSync(dotGit)) return []
   try {
     const st = statSync(dotGit)
-    if (st.isDirectory()) {
-      return existsSync(join(dotGit, 'pf-local-mode'))
-    }
+    if (st.isDirectory()) return [dotGit]
     if (st.isFile()) {
       const content = readFileSync(dotGit, 'utf8')
       const m = /^gitdir:\s*(.+)$/im.exec(content)
-      if (!m) return false
+      if (!m) return []
       const rawDir = m[1].trim()
       const gitDir = isAbsolute(rawDir) ? rawDir : resolve(cwd, rawDir)
-      if (existsSync(join(gitDir, 'pf-local-mode'))) return true
+      const dirs = [gitDir]
       const commondirFile = join(gitDir, 'commondir')
       if (existsSync(commondirFile)) {
         const relCommon = readFileSync(commondirFile, 'utf8').trim()
         const commonDir = isAbsolute(relCommon) ? relCommon : resolve(gitDir, relCommon)
-        if (existsSync(join(commonDir, 'pf-local-mode'))) return true
+        if (commonDir !== gitDir) dirs.push(commonDir)
       }
+      return dirs
     }
   } catch {
-    return false
+    return []
   }
-  return false
+  return []
 }
 
-function defaultRunCommand(cmd, args, { cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, input } = {}) {
-  return new Promise((resolvePromise) => {
-    let settled = false
-    const done = (result) => {
-      if (settled) return
-      settled = true
-      resolvePromise(result)
-    }
-
-    let child
-    try {
-      child = spawn(cmd, args, {
-        cwd: cwd || process.cwd(),
-        env: buildNonInteractiveEnv(env),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        shell: false,
-      })
-    } catch (err) {
-      done({ code: null, stdout: '', stderr: err.message, timedOut: false, errorCode: err.code })
-      return
-    }
-
-    const outChunks = []
-    const errChunks = []
-    child.stdout?.on('data', (c) => outChunks.push(c))
-    child.stderr?.on('data', (c) => errChunks.push(c))
-
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      try { child.kill('SIGKILL') } catch {}
-    }, timeoutMs)
-
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      done({
-        code: null,
-        stdout: Buffer.concat(outChunks).toString('utf8'),
-        stderr: Buffer.concat(errChunks).toString('utf8') || err.message,
-        timedOut,
-        errorCode: err.code,
-      })
-    })
-
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      done({
-        code: typeof code === 'number' ? code : null,
-        stdout: Buffer.concat(outChunks).toString('utf8'),
-        stderr: Buffer.concat(errChunks).toString('utf8'),
-        timedOut,
-      })
-    })
-
-    if (typeof input === 'string') {
-      try {
-        child.stdin.write(input)
-        child.stdin.end()
-      } catch {
-        try { child.stdin.end() } catch {}
-      }
-    } else {
-      try { child.stdin.end() } catch {}
-    }
-  })
+function hasGitModeMarker(cwd, markerName) {
+  return resolveGitDirs(cwd).some((dir) => existsSync(join(dir, markerName)))
 }
 
-function defaultHttpsRequest({
-  method = 'GET',
-  url,
-  headers = {},
-  body,
-  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
-}) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const parsed = new URL(url)
-    const req = https.request({
-      protocol: parsed.protocol,
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: `${parsed.pathname}${parsed.search}`,
-      method,
-      headers: {
-        'User-Agent': 'project-forge',
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...headers,
-      },
-      timeout: timeoutMs,
-    }, (res) => {
-      const chunks = []
-      res.on('data', (d) => chunks.push(d))
-      res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8')
-        let data
-        try { data = text ? JSON.parse(text) : undefined } catch { data = undefined }
-        resolvePromise({
-          status: res.statusCode ?? 0,
-          headers: res.headers,
-          text,
-          data,
-        })
-      })
-    })
-
-    req.on('timeout', () => {
-      req.destroy(Object.assign(new Error('GitHub API 请求超时'), { code: 'ETIMEDOUT' }))
-    })
-    req.on('error', (err) => rejectPromise(err))
-
-    if (body !== undefined && body !== null) {
-      const payload = typeof body === 'string' ? body : JSON.stringify(body)
-      req.setHeader('Content-Type', 'application/json; charset=utf-8')
-      req.setHeader('Content-Length', Buffer.byteLength(payload, 'utf8'))
-      req.write(payload)
-    }
-    req.end()
-  })
+/** 检查目标仓库是否存在 `.git/pf-local-mode` 强制纯本地标记。 */
+export function hasLocalOnlyMarker(cwd) {
+  return hasGitModeMarker(cwd, 'pf-local-mode')
 }
 
-function parseSshAuthOutput(combined) {
-  const m = /Hi\s+([^!\s]+)!\s+You(?:'ve| have)\s+successfully\s+authenticated/i.exec(combined)
-  if (m) return { ok: true, login: m[1] }
-  if (/permission denied\s*\(publickey\)/i.test(combined)) {
-    return { ok: false, kind: 'no-key' }
-  }
-  if (/could not resolve hostname|connection timed out|operation timed out|connection refused|network is unreachable|no route to host|banner exchange/i.test(combined)) {
-    return { ok: false, kind: 'unreachable' }
-  }
-  return { ok: false, kind: 'unknown' }
+/** 检查目标仓库是否存在 `.git/pf-fork-mode` 强制 Fork 协作标记。 */
+export function hasForkModeMarker(cwd) {
+  return hasGitModeMarker(cwd, 'pf-fork-mode')
 }
 
-async function probeSshTransport({ cwd, env, timeoutMs, runner }) {
-  const connectSec = Math.max(1, Math.ceil(timeoutMs / 1000))
-  const baseArgs = [
-    '-o', 'BatchMode=yes',
-    '-o', 'StrictHostKeyChecking=accept-new',
-    '-o', `ConnectTimeout=${connectSec}`,
-    '-T',
-  ]
+/** 检查目标仓库是否存在 `.git/pf-standalone-mode` 强制独立项目维护者标记。 */
+export function hasStandaloneModeMarker(cwd) {
+  return hasGitModeMarker(cwd, 'pf-standalone-mode')
+}
 
-  const res22 = await runner('ssh', [...baseArgs, 'git@github.com'], { cwd, env, timeoutMs })
-  if (res22.errorCode === 'ENOENT') {
-    return { state: 'unavailable', port: 22, host: 'github.com', reason: '系统未安装 ssh 客户端' }
-  }
-  const combined22 = `${res22.stdout}\n${res22.stderr}`
-  const parsed22 = parseSshAuthOutput(combined22)
-  if (parsed22.ok) {
-    return {
-      state: 'available',
-      port: 22,
-      host: 'github.com',
-      login: parsed22.login,
-      reason: `SSH 端口 22 已就绪（${parsed22.login}）`,
-    }
-  }
-  if (parsed22.kind === 'no-key') {
-    return {
-      state: 'no-key',
-      port: 22,
-      host: 'github.com',
-      reason: 'SSH 公钥认证被拒绝（Permission denied）',
-    }
-  }
-
-  // 端口 22 超时或被阻断时自动回退测试 ssh.github.com:443
-  if (res22.timedOut || parsed22.kind === 'unreachable' || res22.code !== 0) {
-    const res443 = await runner(
-      'ssh',
-      [...baseArgs, '-p', '443', 'git@ssh.github.com'],
-      { cwd, env, timeoutMs },
-    )
-    const combined443 = `${res443.stdout}\n${res443.stderr}`
-    const parsed443 = parseSshAuthOutput(combined443)
-    if (parsed443.ok) {
-      return {
-        state: 'port443-only',
-        port: 443,
-        host: 'ssh.github.com:443',
-        login: parsed443.login,
-        reason: `SSH 端口 22 不通，已自动探通 ssh.github.com:443（${parsed443.login}）`,
-      }
-    }
-    if (parsed443.kind === 'no-key') {
-      return {
-        state: 'no-key',
-        port: 443,
-        host: 'ssh.github.com:443',
-        reason: 'SSH 443 端口可达但公钥认证被拒绝（Permission denied）',
-      }
-    }
-    if (res22.timedOut || res443.timedOut || parsed22.kind === 'unreachable' || parsed443.kind === 'unreachable') {
-      return {
-        state: 'unreachable',
-        port: 22,
-        host: 'github.com',
-        reason: 'SSH 端口 22 与 443 均不可达或超时',
-      }
-    }
-  }
-
+/** 读取 `.git/pf-{local,fork,standalone}-mode` 三类本地模式标志。 */
+export function detectGitModeMarkers(cwd) {
+  const dirs = resolveGitDirs(cwd)
   return {
-    state: 'undetermined',
-    port: 22,
-    host: 'github.com',
-    reason: '未能确认 SSH 认证状态',
+    localMode: dirs.some((d) => existsSync(join(d, 'pf-local-mode'))),
+    forkMode: dirs.some((d) => existsSync(join(d, 'pf-fork-mode'))),
+    standaloneMode: dirs.some((d) => existsSync(join(d, 'pf-standalone-mode'))),
   }
-}
-
-async function probeHttpsCredential({ cwd, env, repo, timeoutMs, runner }) {
-  const inputLines = ['protocol=https', 'host=github.com']
-  if (repo) inputLines.push(`path=${repo}.git`)
-  inputLines.push('', '')
-
-  const res = await runner('git', ['credential', 'fill'], {
-    cwd,
-    env,
-    timeoutMs,
-    input: inputLines.join('\n'),
-  })
-
-  if (res.errorCode === 'ENOENT') {
-    return { state: 'undetermined', hasToken: false, token: undefined, reason: '系统未安装 git' }
-  }
-  if (res.timedOut) {
-    return { state: 'undetermined', hasToken: false, token: undefined, reason: 'git credential fill 超时' }
-  }
-  if (res.code !== 0) {
-    return { state: 'no-credential', hasToken: false, token: undefined, reason: 'git credential helper 未返回可用凭据' }
-  }
-
-  let username
-  let password
-  for (const rawLine of res.stdout.split(/\r?\n/)) {
-    const eq = rawLine.indexOf('=')
-    if (eq <= 0) continue
-    const k = rawLine.slice(0, eq).trim()
-    const v = rawLine.slice(eq + 1)
-    if (k === 'username' && v) username = v.trim()
-    if (k === 'password' && v) password = v.trim()
-  }
-
-  if (!password) {
-    return { state: 'no-credential', hasToken: false, token: undefined, reason: 'git credential fill 未返回密码或令牌' }
-  }
-
-  const publicUsername = username && !/^(?:x-access-token|oauth2|token|git)$/i.test(username)
-    ? username
-    : undefined
-
-  return {
-    state: 'available',
-    hasToken: true,
-    username: publicUsername,
-    token: password,
-    reason: 'HTTPS 凭据助手已返回可用凭据',
-  }
-}
-
-async function probeGhBridge({ cwd, env, timeoutMs, runner }) {
-  const [hostRes, globalRes] = await Promise.all([
-    runner('git', ['config', '--get-all', 'credential.https://github.com.helper'], { cwd, env, timeoutMs }),
-    runner('git', ['config', '--get-all', 'credential.helper'], { cwd, env, timeoutMs }),
-  ])
-  const lines = `${hostRes.stdout}\n${globalRes.stdout}`
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const configured = lines.some((l) => /\bgh\b.*git-credential/i.test(l))
-  return {
-    configured,
-    reason: configured ? '已配置 gh auth setup-git 桥接' : '未配置 gh auth setup-git 桥接',
-  }
-}
-
-async function probeGhCliAuth({ cwd, env, timeoutMs, runner }) {
-  const res = await runner('gh', ['auth', 'status', '--hostname', 'github.com'], {
-    cwd,
-    env,
-    timeoutMs,
-  })
-  if (res.errorCode === 'ENOENT') {
-    return { installed: false, authenticated: false, reason: '未安装 gh CLI' }
-  }
-  if (res.timedOut) {
-    return { installed: true, authenticated: false, reason: 'gh auth status 超时' }
-  }
-  const combined = `${res.stdout}\n${res.stderr}`
-  if (res.code !== 0) {
-    return { installed: true, authenticated: false, reason: 'gh CLI 未登录 GitHub' }
-  }
-  const userMatch = /Logged in to [^\s]+ account ([^\s(]+)|Logged in to [^\s]+ as ([^\s(]+)/i.exec(combined)
-  const login = userMatch ? (userMatch[1] || userMatch[2]) : undefined
-  const scopeMatch = /Token scopes:\s*([^\r\n]+)/i.exec(combined)
-  const scopes = scopeMatch
-    ? scopeMatch[1].replace(/['"]/g, '').split(',').map((s) => s.trim()).filter(Boolean)
-    : undefined
-  return {
-    installed: true,
-    authenticated: true,
-    login,
-    scopes,
-    reason: login ? `gh CLI 已登录（${login}）` : 'gh CLI 已登录',
-  }
-}
-
-function computeProtocolRemediation({
-  originUrl,
-  originRepo,
-  ssh,
-  httpsCred,
-  ghCli,
-  ghBridge,
-}) {
-  const originProto = detectRemoteProtocol(originUrl)
-  const sshWorks = ssh.state === 'available' || ssh.state === 'port443-only'
-  const httpsWorks = httpsCred.state === 'available' || (ghCli.authenticated && ghBridge.configured)
-
-  if (!originRepo || originProto === 'unknown') {
-    return { mismatch: false, remediationCmd: undefined }
-  }
-
-  if (originProto === 'https' && !httpsWorks) {
-    if (ssh.state === 'available') {
-      return {
-        mismatch: true,
-        remediationCmd: `git remote set-url origin git@github.com:${originRepo}.git`,
-      }
-    }
-    if (ssh.state === 'port443-only') {
-      return {
-        mismatch: true,
-        remediationCmd: `git remote set-url origin ssh://git@ssh.github.com:443/${originRepo}.git`,
-      }
-    }
-    if (ghCli.authenticated && !ghBridge.configured) {
-      return {
-        mismatch: false,
-        remediationCmd: 'gh auth setup-git',
-      }
-    }
-  }
-
-  if (originProto === 'ssh') {
-    const uses443Url = /^ssh:\/\/git@ssh\.github\.com:443\//i.test(originUrl ?? '')
-    if (ssh.state === 'port443-only' && !uses443Url) {
-      return {
-        mismatch: true,
-        remediationCmd: `git remote set-url origin ssh://git@ssh.github.com:443/${originRepo}.git`,
-      }
-    }
-    if (!sshWorks && httpsCred.state === 'available') {
-      return {
-        mismatch: true,
-        remediationCmd: `git remote set-url origin https://github.com/${originRepo}.git`,
-      }
-    }
-    if (!sshWorks && ghCli.authenticated) {
-      return {
-        mismatch: true,
-        remediationCmd: ghBridge.configured
-          ? `git remote set-url origin https://github.com/${originRepo}.git`
-          : `gh auth setup-git && git remote set-url origin https://github.com/${originRepo}.git`,
-      }
-    }
-  }
-
-  return { mismatch: false, remediationCmd: undefined }
-}
-
-/**
- * 并发双轨探测本机 GitHub 传输（Track A）与 API 四级降级通道（Track B）。
- */
-export async function probeGitHubEnv({
-  cwd = process.cwd(),
-  remoteUrls = {},
-  branch,
-  defaultBranch = 'main',
-  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
-  mcpAvailable,
-  verifyToken = false,
-  offline,
-  runner = defaultRunCommand,
-  httpRequest = defaultHttpsRequest,
-  env = process.env,
-} = {}) {
-  const safeEnv = buildNonInteractiveEnv(env)
-  const originUrl = typeof remoteUrls === 'string' ? remoteUrls : remoteUrls?.origin
-  const upstreamUrl = typeof remoteUrls === 'object' ? remoteUrls?.upstream : undefined
-  const originRepo = normalizeGitHubRepo(originUrl)
-  const upstreamRepo = normalizeGitHubRepo(upstreamUrl)
-  const targetRepo = upstreamRepo || originRepo
-
-  if (!originUrl && !upstreamUrl) {
-    return {
-      https: { state: 'n/a', hasToken: false, reason: '没有远端' },
-      ssh: { state: 'n/a', reason: '没有远端' },
-      ghBridge: { configured: false, reason: '没有远端' },
-      originProtocol: 'unknown',
-      protocolMismatch: false,
-      remediationCmd: undefined,
-      apiChannel: {
-        tier: 'offline',
-        delegateToHostMcp: false,
-        reason: '没有远端',
-      },
-      details: { originRepo: undefined, upstreamRepo: undefined },
-    }
-  }
-
-  const [ssh, httpsRaw, ghBridge, ghCli] = await Promise.all([
-    probeSshTransport({ cwd, env: safeEnv, timeoutMs, runner }),
-    probeHttpsCredential({ cwd, env: safeEnv, repo: originRepo || targetRepo, timeoutMs, runner }),
-    probeGhBridge({ cwd, env: safeEnv, timeoutMs, runner }),
-    probeGhCliAuth({ cwd, env: safeEnv, timeoutMs, runner }),
-  ])
-
-  const envToken = (typeof env?.GH_TOKEN === 'string' && env.GH_TOKEN.trim())
-    || (typeof env?.GITHUB_TOKEN === 'string' && env.GITHUB_TOKEN.trim())
-    || undefined
-  const memoryToken = envToken || httpsRaw.token
-
-  // 对外返回的 https 对象严格脱敏，只保留状态与非涉密公开用户名
-  const httpsPublic = {
-    state: httpsRaw.state,
-    hasToken: httpsRaw.hasToken,
-    ...(httpsRaw.username ? { username: httpsRaw.username } : {}),
-    reason: httpsRaw.reason,
-  }
-
-  const { mismatch, remediationCmd } = computeProtocolRemediation({
-    originUrl,
-    originRepo,
-    ssh,
-    httpsCred: httpsPublic,
-    ghCli,
-    ghBridge,
-  })
-
-  const sshWorks = ssh.state === 'available' || ssh.state === 'port443-only'
-  const headOwner = originRepo ? originRepo.split('/')[0] : undefined
-  const oneClickPrUrl = sshWorks && targetRepo
-    ? buildOneClickPrUrl({
-        targetRepo,
-        baseBranch: defaultBranch || 'main',
-        headOwner,
-        headBranch: branch,
-      })
-    : undefined
-
-  let tokenLogin
-  let tokenVerified = Boolean(memoryToken)
-  let tokenNetworkOffline = false
-  if (!ghCli.authenticated && memoryToken && verifyToken) {
-    try {
-      const resp = await httpRequest({
-        method: 'GET',
-        url: 'https://api.github.com/user',
-        headers: { Authorization: `Bearer ${memoryToken}` },
-        timeoutMs,
-      })
-      if (resp.status >= 200 && resp.status < 300 && resp.data?.login) {
-        tokenLogin = resp.data.login
-        tokenVerified = true
-      } else if (resp.status === 401) {
-        tokenVerified = false
-      }
-    } catch {
-      tokenNetworkOffline = true
-    }
-  }
-
-  let apiChannel
-  if (ghCli.authenticated) {
-    apiChannel = {
-      tier: 'gh-cli',
-      login: ghCli.login,
-      ...(ghCli.scopes ? { scopes: ghCli.scopes } : {}),
-      delegateToHostMcp: false,
-      reason: ghCli.reason,
-    }
-  } else if (memoryToken && tokenVerified && !tokenNetworkOffline) {
-    apiChannel = {
-      tier: 'node-https-token',
-      source: envToken ? 'env' : 'git-credential',
-      ...(tokenLogin || httpsPublic.username ? { login: tokenLogin || httpsPublic.username } : {}),
-      delegateToHostMcp: false,
-      reason: envToken
-        ? '已检测到环境变量令牌，使用原生 node:https 客户端调用 GitHub API'
-        : '已在内存复用 git credential fill 凭据，使用原生 node:https 客户端调用 GitHub API',
-    }
-  } else if (offline === true || (ssh.state === 'unreachable' && !mcpAvailable)) {
-    apiChannel = {
-      tier: 'offline',
-      delegateToHostMcp: false,
-      reason: '离线或网络不可达，无法访问 GitHub API',
-    }
-  } else if (mcpAvailable === true) {
-    apiChannel = {
-      tier: 'mcp-delegate',
-      delegateToHostMcp: true,
-      ...(oneClickPrUrl ? { oneClickPrUrl } : {}),
-      reason: '未配置 gh CLI 与 API 令牌，可委托宿主 GitHub MCP 执行平台操作',
-    }
-  } else if (sshWorks) {
-    apiChannel = {
-      tier: 'half-duplex',
-      delegateToHostMcp: true,
-      oneClickPrUrl,
-      reason: '仅 SSH 推送可用且无本地 API 凭据：已生成 1-click PR 链接（若宿主支持 GitHub MCP 亦可代劳）',
-    }
-  } else {
-    apiChannel = {
-      tier: 'mcp-delegate',
-      delegateToHostMcp: true,
-      reason: '未配置本地 GitHub CLI 与 API 令牌，需要由宿主 MCP 代理执行或先完成授权',
-    }
-  }
-
-  const result = {
-    https: httpsPublic,
-    ssh,
-    ghBridge,
-    ghCli: {
-      installed: ghCli.installed,
-      authenticated: ghCli.authenticated,
-      ...(ghCli.login ? { login: ghCli.login } : {}),
-      reason: ghCli.reason,
-    },
-    originProtocol: detectRemoteProtocol(originUrl),
-    protocolMismatch: mismatch,
-    remediationCmd,
-    apiChannel,
-    details: {
-      originRepo,
-      upstreamRepo,
-      targetRepo,
-      canPushSsh: sshWorks,
-      canPushHttps: httpsPublic.state === 'available' || (ghCli.authenticated && ghBridge.configured),
-    },
-  }
-
-  if (memoryToken && tokenVerified) {
-    TOKEN_VAULT.set(result, memoryToken)
-  }
-
-  return result
 }
 
 function hasWritePerm(probeApi) {
@@ -725,12 +150,6 @@ function matchAuthorsHistory(authors, { userName, userEmail }) {
   }
 }
 
-/**
- * 纯函数：双轴五态工作区身份判定。
- * 便于单测注入 mocked `probeApi` / `localIdentity` 覆盖全部 5 种角色。
- *
- * 五态：`local-only` | `contributor-fork` | `clone-readonly` | `maintainer` | `undetermined`
- */
 const TEAM_PROBE_HINT = '如你是仓库团队或组织协作者且尚未提交过代码，可追加 --probe-auth（或运行 flow.mjs inspect --probe-auth）探测 GitHub 写权限以确认 maintainer'
 
 function classifyWorkspaceIdentityCore({
@@ -739,17 +158,34 @@ function classifyWorkspaceIdentityCore({
   probeApi,
   localIdentity = {},
   localMode = false,
+  forkMode = false,
+  standaloneMode = false,
+  sshHostMap,
 } = {}) {
   if (localMode === true) {
     return { role: 'local-only', reason: '存在 .git/pf-local-mode 标记：按纯本地项目处置' }
   }
-  if (gitFacts.present !== true || !gitFacts.remote) {
+  const primaryRemoteUrl = gitFacts.remoteUrls?.origin
+    ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
+    ?? gitFacts.remote
+  if (gitFacts.present !== true || !primaryRemoteUrl) {
     return { role: 'local-only', reason: '还没有配置远端仓库：按纯本地工作区处置' }
   }
+  if (forkMode === true) {
+    return { role: 'contributor-fork', reason: '存在 .git/pf-fork-mode 标记：按贡献者 Fork 协作处置' }
+  }
+  if (standaloneMode === true) {
+    return {
+      role: 'maintainer',
+      collaborationScope: 'owner',
+      reason: '存在 .git/pf-standalone-mode 标记：按独立个人项目维护者处置',
+    }
+  }
 
-  const origin = normalizeGitHubRepo(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
-  const upstream = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream)
-  const declared = normalizeGitHubRepo(declaredRepo)
+  const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const origin = normalizeGitHubRepo(primaryRemoteUrl, effectiveHostMap)
+  const upstream = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream, effectiveHostMap)
+  const declared = normalizeGitHubRepo(declaredRepo, effectiveHostMap)
 
   if (!origin) {
     return { role: 'undetermined', reason: '远端不是可识别的 GitHub 地址，无法核对归属' }
@@ -763,7 +199,7 @@ function classifyWorkspaceIdentityCore({
   const apiWrite = hasWritePerm(probeApi)
   const apiReadOnly = hasReadOnlyPerm(probeApi)
   const apiIsFork = probeApi?.isFork === true
-  const apiParent = normalizeGitHubRepo(probeApi?.parent ?? probeApi?.parentRepo)
+  const apiParent = normalizeGitHubRepo(probeApi?.parent ?? probeApi?.parentRepo, effectiveHostMap)
 
   const userName = localIdentity.userName ?? gitFacts.userName ?? gitFacts.identity?.name
   const userEmail = localIdentity.userEmail ?? gitFacts.userEmail ?? gitFacts.identity?.email
@@ -921,21 +357,23 @@ function classifyWorkspaceIdentityCore({
 
 /**
  * 纯函数：双轴五态工作区身份判定。
- * 便于单测注入 mocked `probeApi` / `localIdentity` 覆盖全部 5 种角色。
- *
  * 五态：`local-only` | `contributor-fork` | `clone-readonly` | `maintainer` | `undetermined`
  */
 export function classifyWorkspaceIdentity(opts = {}) {
   const res = classifyWorkspaceIdentityCore(opts)
   if (res.role !== 'clone-readonly' && res.role !== 'undetermined') return res
-  const { gitFacts = {}, declaredRepo, probeApi, localMode = false } = opts
-  if (localMode === true || gitFacts.present !== true || !gitFacts.remote) return res
-  const originLow = normalizeGitHubRepo(gitFacts.remoteUrls?.origin ?? gitFacts.remote)?.toLowerCase()
+  const { gitFacts = {}, declaredRepo, probeApi, localMode = false, forkMode = false, standaloneMode = false, sshHostMap } = opts
+  const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const primaryRemoteUrl = gitFacts.remoteUrls?.origin
+    ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
+    ?? gitFacts.remote
+  if (localMode === true || forkMode === true || standaloneMode === true || gitFacts.present !== true || !primaryRemoteUrl) return res
+  const originLow = normalizeGitHubRepo(primaryRemoteUrl, effectiveHostMap)?.toLowerCase()
   if (!originLow) return res
-  const upstreamLow = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream)?.toLowerCase()
+  const upstreamLow = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream, effectiveHostMap)?.toLowerCase()
   if (upstreamLow && upstreamLow !== originLow) return res
   if (probeApi?.isFork === true) return res
-  const declaredLow = normalizeGitHubRepo(declaredRepo)?.toLowerCase()
+  const declaredLow = normalizeGitHubRepo(declaredRepo, effectiveHostMap)?.toLowerCase()
   if (declaredLow && declaredLow !== originLow) return res
   const apiProbed = Boolean(probeApi && (hasWritePerm(probeApi) || hasReadOnlyPerm(probeApi) || probeApi.viewerPermission))
   if (apiProbed) return res
@@ -943,7 +381,7 @@ export function classifyWorkspaceIdentity(opts = {}) {
 }
 
 /**
- * 解析当前工作区身份（先读 `.git/pf-local-mode`，可选查询 API 权限，再做双轴五态分类）。
+ * 解析当前工作区身份（先读 `.git/pf-{local,fork,standalone}-mode`，可选查询 API 权限，再做双轴五态分类）。
  */
 export async function resolveWorkspaceIdentity({
   cwd,
@@ -954,25 +392,36 @@ export async function resolveWorkspaceIdentity({
   client,
   localIdentity,
   localMode,
+  forkMode,
+  standaloneMode,
+  sshHostMap,
   fetchApi = false,
 } = {}) {
-  const effectiveLocalMode = typeof localMode === 'boolean'
-    ? localMode
-    : hasLocalOnlyMarker(cwd)
+  const markers = cwd ? detectGitModeMarkers(cwd) : { localMode: false, forkMode: false, standaloneMode: false }
+  const effectiveLocalMode = typeof localMode === 'boolean' ? localMode : markers.localMode
+  const effectiveForkMode = typeof forkMode === 'boolean' ? forkMode : markers.forkMode
+  const effectiveStandaloneMode = typeof standaloneMode === 'boolean' ? standaloneMode : markers.standaloneMode
+  const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const primaryRemoteUrl = gitFacts.remoteUrls?.origin
+    ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
+    ?? gitFacts.remote
 
-  if (effectiveLocalMode || gitFacts.present !== true || !gitFacts.remote) {
+  if (effectiveLocalMode || gitFacts.present !== true || !primaryRemoteUrl) {
     return classifyWorkspaceIdentity({
       gitFacts,
       declaredRepo,
       probeApi,
       localIdentity,
       localMode: effectiveLocalMode,
+      forkMode: effectiveForkMode,
+      standaloneMode: effectiveStandaloneMode,
+      sshHostMap: effectiveHostMap,
     })
   }
 
   let resolvedProbeApi = probeApi
-  if (!resolvedProbeApi && fetchApi) {
-    const originRepo = normalizeGitHubRepo(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
+  if (!resolvedProbeApi && fetchApi && !effectiveForkMode && !effectiveStandaloneMode) {
+    const originRepo = normalizeGitHubRepo(primaryRemoteUrl, effectiveHostMap)
     if (originRepo) {
       const ghClient = client || createGitHubClient({ cwd, probeResult: probeEnvResult })
       if (ghClient.channel !== 'none') {
@@ -995,362 +444,46 @@ export async function resolveWorkspaceIdentity({
     probeApi: resolvedProbeApi,
     localIdentity,
     localMode: effectiveLocalMode,
+    forkMode: effectiveForkMode,
+    standaloneMode: effectiveStandaloneMode,
+    sshHostMap: effectiveHostMap,
   })
 }
 
-function makeHttpError(status, message, data) {
-  const err = new Error(message || `GitHub API 错误（HTTP ${status}）`)
-  err.status = status
-  if (data !== undefined) err.data = data
-  return err
-}
-
-function isPermissionError(err) {
-  if (!err) return false
-  if (err.status === 403 || err.status === 401) return true
-  const msg = String(err.message ?? '')
-  return /403|forbidden|resource not accessible|must have (?:triage|write|admin) access|permission/i.test(msg)
-}
-
-function withTempUtf8File(content, fn) {
-  const file = join(
-    tmpdir(),
-    `pf-gh-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
-  )
-  writeFileSync(file, String(content ?? ''), 'utf8')
-  return Promise.resolve()
-    .then(() => fn(file))
-    .finally(() => {
-      try { unlinkSync(file) } catch {}
+/** 标准 HostingProvider 接口实现：GitHub 适配器（产品层唯一注册的托管平台）。 */
+export const GITHUB_PROVIDER = Object.freeze({
+  id: 'github',
+  label: 'GitHub',
+  capabilities: Object.freeze({
+    api: true,
+    pr: true,
+    issues: true,
+    releases: true,
+    labels: true,
+  }),
+  matchRemote(remoteUrl, sshHostMap) {
+    return Boolean(githubRepoPath(remoteUrl, sshHostMap))
+  },
+  normalizeRepo(remoteUrl, sshHostMap) {
+    return normalizeGitHubRepo(remoteUrl, sshHostMap)
+  },
+  async probeTransport(ctx = {}) {
+    const safeEnv = buildNonInteractiveEnv(ctx.env ?? process.env)
+    return probeSshTransport({
+      cwd: ctx.cwd ?? process.cwd(),
+      env: safeEnv,
+      timeoutMs: ctx.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
+      runner: ctx.runner ?? defaultRunCommand,
+      sshTargetHost: ctx.sshTargetHost ?? 'github.com',
     })
-}
-
-/**
- * 创建原生 GitHub REST/GraphQL 双通道客户端（`gh` CLI 与 `node:https`）。
- */
-export function createGitHubClient({
-  cwd = process.cwd(),
-  probeResult,
-  channel,
-  env = process.env,
-  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
-  runner = defaultRunCommand,
-  httpRequest = defaultHttpsRequest,
-} = {}) {
-  const safeEnv = buildNonInteractiveEnv(env)
-  const vaultToken = probeResult && TOKEN_VAULT.has(probeResult)
-    ? TOKEN_VAULT.get(probeResult)
-    : undefined
-  const envToken = (typeof safeEnv?.GH_TOKEN === 'string' && safeEnv.GH_TOKEN.trim())
-    || (typeof safeEnv?.GITHUB_TOKEN === 'string' && safeEnv.GITHUB_TOKEN.trim())
-    || undefined
-  const token = vaultToken || envToken
-
-  let resolvedChannel = channel
-  if (!resolvedChannel) {
-    const tier = probeResult?.apiChannel?.tier
-    if (tier === 'gh-cli') resolvedChannel = 'gh-cli'
-    else if (tier === 'node-https-token' || token) resolvedChannel = 'node-https-token'
-    else if (tier === 'mcp-delegate' || tier === 'half-duplex' || tier === 'offline') resolvedChannel = 'none'
-    else resolvedChannel = token ? 'node-https-token' : 'gh-cli'
-  }
-
-  async function rest(method, path, { query, body, headers = {} } = {}) {
-    const cleanPath = path.startsWith('/') ? path : `/${path}`
-    const urlObj = new URL(`https://api.github.com${cleanPath}`)
-    if (query && typeof query === 'object') {
-      for (const [k, v] of Object.entries(query)) {
-        if (v !== undefined && v !== null) urlObj.searchParams.set(k, String(v))
-      }
-    }
-
-    if (resolvedChannel === 'none') {
-      throw makeHttpError(0, '当前无本地 GitHub API 通道（请使用宿主 MCP 代理或配置凭据）')
-    }
-
-    if (resolvedChannel === 'gh-cli') {
-      const apiPath = `${urlObj.pathname}${urlObj.search}`
-      const execWithInput = async (inputFile) => {
-        const args = ['api', apiPath, '--method', method.toUpperCase()]
-        for (const [k, v] of Object.entries(headers)) {
-          args.push('-H', `${k}: ${v}`)
-        }
-        if (inputFile) args.push('--input', inputFile)
-        const res = await runner('gh', args, { cwd, env: safeEnv, timeoutMs: Math.max(timeoutMs, 10000) })
-        if (res.code !== 0) {
-          let parsed
-          try { parsed = res.stdout ? JSON.parse(res.stdout) : undefined } catch {}
-          const status = parsed?.status ? Number(parsed.status) : (/HTTP 403|403 Forbidden/i.test(res.stderr) ? 403 : (/HTTP 404|404 Not Found/i.test(res.stderr) ? 404 : 0))
-          throw makeHttpError(status, res.stderr.trim() || parsed?.message || 'gh api 调用失败', parsed)
-        }
-        if (!res.stdout.trim()) return undefined
-        try { return JSON.parse(res.stdout) } catch { return res.stdout }
-      }
-      if (body !== undefined && body !== null) {
-        return withTempUtf8File(JSON.stringify(body), (file) => execWithInput(file))
-      }
-      return execWithInput(undefined)
-    }
-
-    if (!token) {
-      throw makeHttpError(401, '未找到有效的 GitHub API 令牌')
-    }
-    const resp = await httpRequest({
-      method: method.toUpperCase(),
-      url: urlObj.toString(),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...headers,
-      },
-      body,
-      timeoutMs: Math.max(timeoutMs, 10000),
-    })
-    if (resp.status >= 400) {
-      throw makeHttpError(resp.status, resp.data?.message || `GitHub API 返回 HTTP ${resp.status}`, resp.data)
-    }
-    return resp.data !== undefined ? resp.data : resp.text
-  }
-
-  async function graphql(query, variables = {}) {
-    const payload = { query, variables }
-    if (resolvedChannel === 'none') {
-      throw makeHttpError(0, '当前无本地 GitHub GraphQL 通道')
-    }
-    const data = await rest('POST', '/graphql', { body: payload })
-    if (Array.isArray(data?.errors) && data.errors.length > 0) {
-      const msg = data.errors.map((e) => e.message).join('; ')
-      const isForbidden = data.errors.some((e) => e.type === 'FORBIDDEN' || /forbidden|permission/i.test(e.message ?? ''))
-      throw makeHttpError(isForbidden ? 403 : 422, msg, data)
-    }
-    return data?.data
-  }
-
-  async function getAuthenticatedLogin() {
-    if (probeResult?.apiChannel?.login) return probeResult.apiChannel.login
-    try {
-      const user = await rest('GET', '/user')
-      return user?.login
-    } catch {
-      return undefined
-    }
-  }
-
-  async function getRepoPermissions(repo) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    const [owner, name] = norm.split('/')
-    let viewerPermission
-    let login = probeResult?.apiChannel?.login
-    try {
-      const gql = await graphql(
-        `query($owner: String!, $name: String!) {
-          viewer { login }
-          repository(owner: $owner, name: $name) {
-            viewerPermission
-            isFork
-            parent { nameWithOwner }
-            defaultBranchRef { name }
-            isPrivate
-            owner { login }
-          }
-        }`,
-        { owner, name },
-      )
-      const repoNode = gql?.repository
-      if (repoNode) {
-        viewerPermission = repoNode.viewerPermission
-        login = gql?.viewer?.login || login
-        const permUpper = String(viewerPermission ?? '').toUpperCase()
-        const canPush = permUpper === 'ADMIN' || permUpper === 'MAINTAIN' || permUpper === 'WRITE'
-        return {
-          repo: norm,
-          viewerPermission,
-          canPush,
-          isFork: repoNode.isFork === true,
-          parent: repoNode.parent?.nameWithOwner,
-          defaultBranch: repoNode.defaultBranchRef?.name,
-          private: repoNode.isPrivate === true,
-          owner: repoNode.owner?.login,
-          login,
-        }
-      }
-    } catch {
-      // GraphQL 不可用或受限时回退 REST /repos/{owner}/{name}
-    }
-
-    const data = await rest('GET', `/repos/${norm}`)
-    if (!login) login = await getAuthenticatedLogin()
-    const perms = data?.permissions ?? {}
-    const canPush = perms.push === true || perms.maintain === true || perms.admin === true
-    viewerPermission = perms.admin ? 'ADMIN' : (perms.maintain ? 'MAINTAIN' : (perms.push ? 'WRITE' : (perms.pull ? 'READ' : 'NONE')))
-    return {
-      repo: norm,
-      viewerPermission,
-      canPush,
-      isFork: data?.fork === true,
-      parent: data?.parent?.full_name,
-      defaultBranch: data?.default_branch,
-      private: data?.private === true,
-      owner: data?.owner?.login,
-      login,
-    }
-  }
-
-  async function getIssue(repo, number) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    return rest('GET', `/repos/${norm}/issues/${Number(number)}`)
-  }
-
-  async function getPullRequest(repo, number) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    return rest('GET', `/repos/${norm}/pulls/${Number(number)}`)
-  }
-
-  async function listOpenPullRequests(repo, { base, head, state = 'open', perPage = 30 } = {}) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    return rest('GET', `/repos/${norm}/pulls`, {
-      query: { state, base, head, per_page: perPage },
-    })
-  }
-
-  async function checkStackedPullRequests(repo, branch) {
-    const prs = await listOpenPullRequests(repo, { base: branch, state: 'open' })
-    const list = Array.isArray(prs) ? prs : []
-    return {
-      hasStacked: list.length > 0,
-      count: list.length,
-      prs: list.map((p) => ({
-        number: p.number,
-        title: p.title,
-        url: p.html_url,
-        head: p.head?.ref,
-        base: p.base?.ref,
-      })),
-    }
-  }
-
-  async function checkBranch(repo, branch) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    try {
-      const data = await rest('GET', `/repos/${norm}/branches/${encodeURIComponent(branch)}`)
-      return {
-        exists: true,
-        name: data?.name ?? branch,
-        protected: data?.protected === true,
-        sha: data?.commit?.sha,
-      }
-    } catch (err) {
-      if (err.status === 404) return { exists: false, name: branch }
-      throw err
-    }
-  }
-
-  async function checkFork(upstreamRepo, owner) {
-    const norm = normalizeGitHubRepo(upstreamRepo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${upstreamRepo}`)
-    const targetOwner = owner || (await getAuthenticatedLogin())
-    const repoName = norm.split('/')[1]
-    if (targetOwner) {
-      try {
-        const candidate = await rest('GET', `/repos/${targetOwner}/${repoName}`)
-        if (candidate?.fork === true && candidate?.parent?.full_name?.toLowerCase() === norm.toLowerCase()) {
-          return {
-            exists: true,
-            repo: candidate.full_name,
-            cloneUrl: candidate.clone_url,
-            sshUrl: candidate.ssh_url,
-          }
-        }
-      } catch (err) {
-        if (err.status !== 404) throw err
-      }
-    }
-    return { exists: false }
-  }
-
-  async function ensureFork(upstreamRepo, { create = false } = {}) {
-    const existing = await checkFork(upstreamRepo)
-    if (existing.exists || !create) return existing
-    const norm = normalizeGitHubRepo(upstreamRepo)
-    const created = await rest('POST', `/repos/${norm}/forks`, { body: {} })
-    return {
-      exists: true,
-      created: true,
-      repo: created?.full_name,
-      cloneUrl: created?.clone_url,
-      sshUrl: created?.ssh_url,
-    }
-  }
-
-  async function postComment(repo, number, body, { kind = 'issue' } = {}) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    const num = Number(number)
-    if (resolvedChannel === 'gh-cli') {
-      return withTempUtf8File(String(body ?? ''), async (file) => {
-        const subCmd = kind === 'pr' ? 'pr' : 'issue'
-        const res = await runner(
-          'gh',
-          [subCmd, 'comment', String(num), '--repo', norm, '--body-file', file],
-          { cwd, env: safeEnv, timeoutMs: Math.max(timeoutMs, 10000) },
-        )
-        if (res.code !== 0) {
-          throw makeHttpError(
-            /403|forbidden/i.test(res.stderr) ? 403 : 0,
-            res.stderr.trim() || 'gh 评论发表失败',
-          )
-        }
-        return { ok: true, channel: 'gh-cli', url: res.stdout.trim() || undefined }
-      })
-    }
-
-    const created = await rest('POST', `/repos/${norm}/issues/${num}/comments`, {
-      body: { body: String(body ?? '') },
-    })
-    return {
-      ok: true,
-      channel: resolvedChannel,
-      id: created?.id,
-      url: created?.html_url,
-    }
-  }
-
-  async function addLabels(repo, number, labels) {
-    const norm = normalizeGitHubRepo(repo)
-    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
-    const list = Array.isArray(labels) ? labels.filter(Boolean).map(String) : [String(labels)].filter(Boolean)
-    if (list.length === 0) return { ok: true, labels: [] }
-    try {
-      const updated = await rest('POST', `/repos/${norm}/issues/${Number(number)}/labels`, {
-        body: { labels: list },
-      })
-      return { ok: true, labels: Array.isArray(updated) ? updated.map((l) => l.name) : list }
-    } catch (err) {
-      if (isPermissionError(err)) {
-        return { skipped: true, reason: 'no-permission' }
-      }
-      throw err
-    }
-  }
-
-  return {
-    channel: resolvedChannel,
-    rest,
-    graphql,
-    getAuthenticatedLogin,
-    getRepoPermissions,
-    getIssue,
-    getPullRequest,
-    listOpenPullRequests,
-    checkStackedPullRequests,
-    checkBranch,
-    checkFork,
-    ensureFork,
-    postComment,
-    addLabels,
-  }
-}
+  },
+  probeAuth(ctx = {}) {
+    return probeGitHubEnv(ctx)
+  },
+  classifyIdentity(facts = {}) {
+    return classifyWorkspaceIdentity(facts)
+  },
+  createClient(authCtx = {}) {
+    return createGitHubClient(authCtx)
+  },
+})

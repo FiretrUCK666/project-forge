@@ -1,8 +1,33 @@
-# 任务单：project-forge v5 双层同构与研发闭环升级
+---
+kind: todo
+title: project-forge v5 双层架构与全流程研发升级任务单
+status: archived
+created: 2026-11-14
+updated: 2026-11-15
+issue: null
+pr: 26
+branch: feat/v5-harness-upgrade
+owner: FiretrUCK666
+approved: true
+done_at: 2026-11-15
+task_id: 261114-v5-architecture-upgrade
+planned_at: d061758
+related_prd: null
+related_spec: ../specs/261114-v5-architecture-upgrade-spec.md
+---
 
-关联规范：[v5 架构升级设计规范](../../specs/261114-v5-architecture-upgrade-spec.md)
-目标分支：`feat/v5-harness-upgrade`
-执行角色：协调与多模块并行实施 + 独立集成验证（无外部远端直推，经独立审查收口）
+# 任务单：project-forge v5 双层同构与全流程研发升级
+
+## 文档信息与范围概览
+
+| 项目 | 内容 |
+| --- | --- |
+| 任务状态 | `archived`（随 PR #26 合入归档） |
+| 建单 / 完成日期 | `2026-11-14` / `2026-11-15` |
+| 关联 PR / 分支 | PR `#26` / `feat/v5-harness-upgrade` |
+| 关联规范 | [261114-v5-architecture-upgrade-spec.md](../specs/261114-v5-architecture-upgrade-spec.md) |
+| 门型判定 | `two-way` |
+| 执行角色 | 协调与多模块并行实施 + 独立集成验证 |
 
 ## 验收标准（动手之前冻结）
 
@@ -23,5 +48,5 @@
 
 **在合并之前写完，随这次改动一起提交。**
 
-- 交付物总览：`.gitattributes`、`.gitignore`、`docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）、`docs/specs/261114-v5-architecture-upgrade-spec.md`、`docs/archive/todo/`（含历史归档与脱敏修复）、`README.md`、`README.en.md`、`CONTRIBUTING.md`、核心脚本（含新增 `scripts/backup.mjs` 写前快照引擎）与平台模块、五套自包含内置研发 Skill（`kit/skills/`）、新版 `SKILL.md` / `references/` / `templates/`、本仓自举 `.agents/skills/` 与 `AGENTS.md`，以及增强版 `scripts/dev/` 门禁与注入校验。
+- 交付物总览：`.gitattributes`、`.gitignore`、`docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）、[261114-v5-architecture-upgrade-spec.md](../specs/261114-v5-architecture-upgrade-spec.md)、`docs/archive/todo/`（含历史归档与脱敏修复）、`README.md`、`README.en.md`、`CONTRIBUTING.md`、核心脚本（含新增 `scripts/backup.mjs` 写前快照引擎）与平台模块、五套自包含内置研发 Skill（`kit/skills/`）、新版 `SKILL.md` / `references/` / `templates/`、本仓自举 `.agents/skills/` 与 `AGENTS.md`，以及增强版 `scripts/dev/` 门禁与注入校验。
 - 遗留与后续：无遗留项，随 `feat/v5-harness-upgrade` 合入主干后归档。

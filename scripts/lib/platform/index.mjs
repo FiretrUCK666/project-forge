@@ -1,19 +1,33 @@
 /**
- * 平台适配入口（当前唯一支持并锁定为 GitHub）。
- * 统一对外暴露环境探测、双轴五态工作区身份判定与平台客户端封装。
+ * 平台适配入口。
+ * 产品层唯一注册并导出 GitHub 适配器，同时经注册表提供 `generic-git` 安全降级与多远端拓扑解析。
  */
 
 export {
   DEFAULT_PROBE_TIMEOUT_MS,
+  GITHUB_PROVIDER,
   buildNonInteractiveEnv,
   buildOneClickPrUrl,
-  classifyWorkspaceIdentity,
   createGitHubClient,
   createGitHubClient as createPlatformClient,
+  detectGitModeMarkers,
   detectRemoteProtocol,
+  hasForkModeMarker,
   hasLocalOnlyMarker,
+  hasStandaloneModeMarker,
   normalizeGitHubRepo,
   probeGitHubEnv,
-  probeGitHubEnv as probePlatformEnv,
-  resolveWorkspaceIdentity,
 } from './github.mjs'
+
+export {
+  GENERIC_GIT_PROVIDER,
+  classifyTopologyIdentity as classifyWorkspaceIdentity,
+  getHostingProvider,
+  listHostingProviders,
+  parseSshConfigHostMap,
+  probeTopologyEnv as probePlatformEnv,
+  registerHostingProvider,
+  resolveRemoteDescriptor,
+  resolveRemotesTopology,
+  resolveTopologyIdentity as resolveWorkspaceIdentity,
+} from './registry.mjs'

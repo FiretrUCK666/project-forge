@@ -21,7 +21,7 @@
 
 <!-- 改动本身的理由。关联 Issue 不代表理由：Issue 说「哪里不对」，这里说「为什么这么改」。 -->
 
-关联文档: <!-- Case 3/4 填本次同步提交或已归档的路径（如 docs/archive/todo/YYMMDD-主题.md 或 docs/specs/YYMMDD-主题.md）；Case 1/2 或外部贡献者写「无（说明原因）」，不要留空 -->
+关联文档: <!-- Case 3/4 填本次同步提交或已成对归档至 docs/archive/{prd,specs,todo}/ 的路径；Case 1/2 或外部贡献者写「无（说明原因）」，不要留空 -->
 
 ## 实现依据
 
@@ -138,4 +138,4 @@ git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg
 - [ ] 新增或修改勘察 / 门禁判定逻辑时，同一次提交在 `scripts/dev/fixtures.mjs` 里补了正反双向用例
 - [ ] 新增缺口判定时，在 `scripts/dev/gap-coverage.mjs` 那边登记了处置（体检 / 表态 / 仅勘察）
 - [ ] 没有引入硬编码的本机路径或任何凭据
-- [ ] 代码导出、CLI 或用户可见行为改变时，已同步更新 `docs/TDD.md` / `README` / `AGENTS.md`，且 `docs/todo/` 与 `docs/specs/` 状态已于合并前更新归档（或写清为什么不需要）
+- [ ] 代码导出、CLI 或用户可见行为改变时，已同步更新 `docs/TDD.md` / `README` / `AGENTS.md`，且关联 `PRD`/`SPEC`/`Todo` 已于合并前成对归档至 `docs/archive/`（或写清为什么不需要）

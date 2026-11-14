@@ -8,11 +8,11 @@
 
 严格按以下次序执行，颠倒任何两步都会把脏产物、换行错误或密钥钉进首次提交：
 
-1. 核对 `isRepoRoot` 与 `commitsState`（存在 `.git` 文件指针属于正常 Worktree，**禁止重跑 `git init`**）；
-2. 生成并核对 `.gitattributes`（文本换行与二进制标记）与 `.gitignore`（构建输出、缓存、`.worktrees/`、本机凭据）；
+1. 核对 `isRepoRoot`、`commitsState` 与进行中冲突态（存在 `.git` 文件指针属于正常 Worktree，**禁止重跑 `git init`**；检测到 `MERGE_HEAD`、`REBASE_HEAD`、`CHERRY_PICK_HEAD` 时先中止操作并提示解冲突）；
+2. 生成并核对 `.gitattributes`（文本换行与二进制标记）与 `.gitignore`（构建输出、缓存、`.worktrees/`、Apple/系统杂项、本机凭据）；
 3. 核对提交署名（拦截系统占位名与默认本机邮箱）；
 4. 执行凭据与大文件扫描（拦截未脱敏密钥与超限二进制）；
-5. 仅在全部通过后 `git add` 并提交；建立或移除 Worktree 时遵守共享依赖解绑次序。
+5. 仅在全部通过后 `git add` 并提交；建立或移除 Worktree 时遵守分包依赖隔离与解绑次序。
 
 ## 判据：什么该进版本库
 
@@ -26,8 +26,8 @@
 
 ## 忽略规则
 
-- **必须兜底包含**：`.worktrees/`、`.env`、`.env.*`（不含明确样本文件 `.env.example`）、`*.pem`、`*.key`、常见操作系统垃圾文件（`.DS_Store`、`Thumbs.db`）以及临时产物（`*.tmp-*`）。
-- **按真实技术栈追加**：Node（`node_modules/`、`dist/`、`coverage/`）、Python（`__pycache__/`、`.venv/`、`*.egg-info/`）、Go（编译二进制、`bin/`）、Rust（`target/`）。
+- **必须兜底包含**：`.worktrees/`、`.env`、`.env.*`（不含明确样本文件 `.env.example`）、`*.pem`、`*.key`、常见操作系统与 Apple 元数据（`._*`、`.DS_Store`、`__MACOSX/`、`.Spotlight-V100`、`.Trashes`、`.fseventsd`、`Thumbs.db`、`desktop.ini`）以及临时产物（`*.tmp-*`）。
+- **按真实技术栈追加**：Node（`node_modules/`、`dist/`、`coverage/`）、Python（`__pycache__/`、`.venv/`、`*.egg-info/`）、Go（`bin/`、`coverage.out`）、Rust（`target/`）、Java（`out/`、`target/`、`build/`、`*.class`、`.gradle/`）。
 - 若某个本应忽略的文件已被早期提交跟踪，`git add` 前必须先执行 `git rm --cached <路径>` 撤出跟踪后再更新 `.gitignore`。
 
 ## 文本属性
@@ -36,6 +36,7 @@
 
 - 通用基线：`* text=auto eol=lf`；显式声明代码与脚本（如 `*.mjs`、`*.js`、`*.ts`、`*.py`、`*.sh`、`*.yml`、`*.json`、`*.md` `text eol=lf`），批处理脚本按平台要求设 `eol=crlf`。
 - 二进制强制锁定：`*.png`、`*.jpg`、`*.webp`、`*.gif`、`*.ico`、`*.woff2`、`*.pdf`、`*.tar`、`*.gz`、`*.zip`、`*.wasm` 一律标注 `binary`（`-text -diff`）。
+- macOS / 跨平台路径编码：脚本内置 `core.precomposeunicode=true`、`-z` NUL 分隔、`canonicalPath` 与 Unicode `NFC` 归一，防止 APFS NFD 文件名或含空格/中文路径在 Git 状态与 diff 中误判。
 
 ## 提交署名
 
@@ -44,7 +45,7 @@
 
 ## 凭据门控
 
-1. **防弹窗挂起**：运行任何探测或 Git 命令统一注入 `GIT_TERMINAL_PROMPT=0` 与 `GCM_INTERACTIVE=never`。
+1. **防弹窗挂起**：运行任何探测或 Git 命令统一注入 `GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`SSH_ASKPASS_REQUIRE=never` 与 `GH_PROMPT_DISABLED=1`。
 2. **未推送 vs 已推送完全相反**：
    - **仅在本地、尚未推上远端**：可用反向修正或交互重置把密钥彻底从本地提交历史中剥除；
    - **已经推送到公开或共享远端**：仅改后续提交毫无意义，历史仍然泄露；**必须优先通知维护者立即吊销并轮换凭据**，再决定是否做历史重写，严禁自动对已推分支强推。
@@ -56,5 +57,5 @@
 
 ## Worktree 共享依赖与防删穿规则
 
-- 锁定文件（`package-lock.json`、`pnpm-lock.yaml`、`yarn.lock`、`poetry.lock`、`uv.lock`、`Cargo.lock` 等）SHA256 与主仓一致时，`dev-flow` 内的 `worktree-deps.mjs` 在 Windows 用目录 Junction、POSIX 用目录 symlink 秒级挂载 `node_modules` / `.venv`；锁文件变更则自动降级为独立隔离目录，禁止跨不兼容锁文件强行共享。
-- **四态归属核验与清理顺序红线**：清理前通过 `govern-audit.mjs`（基于 `git cherry` / `git patch-id`）区分 `merged`（正常可清理）、`squash_or_rebase_merged`（压缩/变基合入）、`no_own_commits`（无独立提交，先问人再清防误删）与 `unmerged`（仍阻断）；拆卸任何 worktree 之前，**必须先对挂载的 junction/symlink 本身执行 `unlinkSync` 解绑**，校验主仓依赖目录完好并请人确认后再执行 `git worktree remove`，严禁未解绑就直接递归强删 `.worktrees/*`。
+- **按子包独立比对与防毒化隔离**：`dev-flow` 内的 `worktree-deps.mjs` 按子包根目录独立比对锁定文件（`package-lock.json`、`pnpm-lock.yaml`、`yarn.lock`、`poetry.lock`、`uv.lock`、`Cargo.lock`、`go.sum`、`requirements*.txt`、`Pipfile.lock`、`gradle.lockfile` 等）SHA256；当检测到 Monorepo Workspace 本地包软链或 Python 可编辑安装（`.venv` 内 `.pth`/路径指向主仓）时，自动拒绝共享并切换为局部隔离兼给出原因说明，绝不让 worktree 静默跑主仓旧代码。
+- **四态归属核验与清理顺序红线**：清理前通过 `git cherry` 与 `git patch-id` 区分 `merged`（正常可清理）、`squash_or_rebase_merged`（压缩/变基合入）、`no_own_commits`（无独立提交，先问人再清防误删）与 `unmerged`（仍阻断）；挂载与卸载前均校验 `samePath(mainAbs, wtAbs)` 防护，拆卸任何 worktree 之前，**必须先对挂载的 junction/symlink 本身执行 `unlinkSync` 解绑**，校验主仓依赖目录完好并请人确认后再执行 `git worktree remove`，严禁未解绑就直接递归强删 `.worktrees/*`。

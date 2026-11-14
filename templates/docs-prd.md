@@ -14,7 +14,15 @@ related_todo: null
 
 # <需求主题> — 产品需求说明（PRD）
 
-> 状态枚举：`draft | active | in_review | done | dropped`。
+## 文档信息
+
+| 项目 | 内容 |
+| --- | --- |
+| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| dropped`） |
+| 创建 / 更新 | `YYYY-MM-DD` / `YYYY-MM-DD` |
+| 关联 Issue / PR | 未关联 / 未关联 |
+| 提出方 / 负责人 | `<提出方或负责人>` |
+| 关联设计 / 任务单 | 按需补齐 `related_spec` / `related_todo` |
 
 - **目标读者**：实现者、审查者与后续接手人
 
@@ -46,8 +54,8 @@ related_todo: null
 
 ## 五、验收标准
 
-- <站在使用者视角可观测的验收结果 1>
-- <站在使用者视角可观测的验收结果 2>
+- [ ] C1: <第一条可判定的产品结果（附具体命令、界面响应或可观测输出）>
+- [ ] C2: <第二条>
 
 ## 六、门型与回滚路径
 
@@ -58,4 +66,4 @@ related_todo: null
 
 - [ ] <设计取舍点：选项 A 与选项 B 及各自代价>
 
-> 确认需调整系统模块或对外契约时，以此 PRD 为依据补充 `docs/specs/` 后再进入实现。
+> 确认需调整系统模块或对外契约时，以此 PRD 为依据补充 `docs/specs/` 后再进入实现；需求全部交付后随同关联 `SPEC`/`Todo` 成对归档至 `docs/archive/prd/`。

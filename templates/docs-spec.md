@@ -19,12 +19,34 @@ high_risk_paths: []
 
 # <功能/变更标题> — 功能设计规范（SPEC）
 
-> 状态枚举：`draft | approved | implementing | in_review | implemented | superseded`；未 `approved` 前不进入代码实现。适用 Case 4（L3 跨模块重构、接口/契约变更或存在高风险边界调整）。
+## 文档信息与变更概览
+
+| 项目 | 内容 |
+| --- | --- |
+| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 规划级别 | `L3`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
+| 创建 / 更新 | `YYYY-MM-DD` / `YYYY-MM-DD` |
+| 分支 / Issue / PR | `<branch>` / 未关联 / 未关联 |
+| 负责人 / 内审状态 | `<负责人>` / `pending` |
+| 关联 PRD / Todo | 按需补齐 `related_prd` / `related_todo` |
+
+## 系统变更全景
+
+```mermaid
+flowchart LR
+  In["请求输入"] --> Core["核心改动"]
+  Core --> Gate["门禁验证"]
+```
+
+| 模块 / 文件 | 变更性质 | 核心职责 |
+| --- | --- | --- |
+| `<真实文件路径，新建文件标 (new)>` | 改造 / 新增 | <受影响的模块、协议或对外契约> |
 
 ## 一、背景与边界声明
 
 - **要改什么**：<受影响的模块、协议或对外契约>
 - **不改什么**：<明确保持兼容或本次不触碰的模块>
+- **本期不做**：<明确本期排除或故意延后的范围，防止顺手改造>
 - **复用既有模块**：<先经 `dev-explore` 核实的可复用现有函数、协议或脚本入口；禁止另起炉灶>
 - **与 `docs/TDD.md` 的关系**：<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs/TDD.md`>
 
@@ -54,7 +76,7 @@ high_risk_paths: []
 
 ## 实现说明
 
-> 代码合入前补齐，随功能 PR 一同提交；后续长期保留本文件作为已实现行为的边界参考。
+> 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
 - **实际落地摘要**：<最终采用方案及与 `draft` 阶段方案的差异（如有）>
 - **关联同步文件**：<同步更新的 `docs/TDD.md` / `README.md` / `AGENTS.md` 节点>

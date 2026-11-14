@@ -2,45 +2,10 @@
 /**
  * review.mjs —— 目标项目的交付体检。
  *
- * 它回答一个问题：**这个项目现在拿去交，会在哪里出事？**
- *
- * ## 为什么结论是记录，不是字符串
- *
- * 早先版本里每条结论都是一句话，然后「下一步该做什么」那个函数回头去 `includes`
- * 这些句子里有没有某个词。结果是：改一个字的措辞，路由就静默失效——实测有三处已经
- * 永远匹配不上了（CI 缺失给错了 flag、提案模板缺失给错了 flag、参考章节号指错）。
- *
- * 那不是三个 bug，是同一个结构病的三个实例。所以这里的每条结论是一个记录：
- *
- *     { id, scope, level, title, decision?, ref? }
- *
- * 渲染与「下一步」读的是**同一个对象**，物理上不可能漂移。`ref` 里的节标题由
- * `preflight.mjs` 机器核对它真的存在于那份文件里，所以指路也不会过期。
- *
- * ## 三档，而不是一档
- *
- * 判据只有一条：**不说会出事吗？**
- *
- *   - `missing`：会。凭据进了历史、工作流把密钥交给陌生人、README 都没有。
- *   - `pending`：不会出事，但只有使用者能定（要不要许可、手写的契约留不留）。
- *   - `notice`：不会出事，只是可以更好（单语 README、没有 CI、本机署名没配）。
- *
- * 把 `notice` 当缺陷，是「每个项目都欠一笔还不完的债」的来源——而还债的方式通常是
- * 加一个 flag 把它压下去。所以它只提示，不拦。`--strict` 留给自己用（把 pending 也拦）。
- *
- * ## 户口本还是体检表
- *
- * **本机事实进 `notice`，项目事实才进 `missing`。** 判断依据：
- *
- *   - 换一台机器就变的东西（提交署名、凭据助手、gh 登录态）→ `notice`。
- *     它们在干净克隆里必然缺失，判成项目缺陷会让每一次新机器上的检查都红一次。
- *   - 跟着仓库走的东西（有没有 README、工作流安不安全、凭据进没进历史）→ `missing`。
- *
- * ## 决定写在哪
- *
- * `pending` 的答案写进项目自己的 `AGENTS.md` 的「## 取舍」节，形如
- * `- \`license\`：不放许可证（个人项目）`。**没有 flag、没有隐藏状态**：
- * 决定是项目事实，就该和项目一起被读、被争论、被接手。
+ * 每条结论是一个结构化记录 `{ id, scope, level, title, decision?, ref? }`：
+ *   - `missing`：会出事（凭据入史、高危工作流、缺 README、托管套件残缺）；
+ *   - `pending`：只有使用者能定（写进 AGENTS.md「## 取舍」后消掉）；
+ *   - `notice`：本机事实或可选项（署名、单语、没有 CI），不拦交付。
  */
 
 import { existsSync, readdirSync } from 'node:fs'
@@ -50,6 +15,7 @@ import { survey } from './survey.mjs'
 import { isMainModule, readTextSafe } from './lib/text.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protocol.mjs'
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
+import { inspectKitManifestForReview } from './lib/agents-sections.mjs'
 
 /** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
 function readdirSyncSafe(dir) {
@@ -60,20 +26,27 @@ const SCOPES = new Set([
   'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
-export function readDecisions(agentsText) {
-  const decisions = new Set()
-  if (typeof agentsText !== 'string') return decisions
+/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`。 */
+export function readDecisionMap(agentsText) {
+  const map = new Map()
+  if (typeof agentsText !== 'string') return map
   const lines = agentsText.replace(/\r\n/g, '\n').split('\n')
   let inSection = false
   for (const line of lines) {
-    if (/^##\s+取舍\s*$/.test(line.trim())) { inSection = true; continue }
+    if (/^##\s+取舍(?:\s|$|[（(:：])/.test(line.trim())) { inSection = true; continue }
     if (inSection && /^#{1,2}\s+/.test(line)) break
     if (!inSection) continue
-    const m = /^\s*[-*]\s*`?([a-z][a-z0-9._-]*)`?\s*[:：]/.exec(line)
-    if (m) decisions.add(m[1])
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('>') || trimmed.startsWith('```')) continue
+    const m = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*[:：]\s*(.*)$/.exec(line)
+    if (m) map.set(m[1], m[2].trim())
   }
-  return decisions
+  return map
+}
+
+/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
+export function readDecisions(agentsText) {
+  return new Set(readDecisionMap(agentsText).keys())
 }
 
 function finding(level, scope, id, title, extra = {}) {
@@ -413,6 +386,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
 
   const needsTdd = (facts.scale.codeFiles ?? 0) > 0 && !(facts.ecosystem.kinds ?? []).includes('docs-only')
   const staleTddPaths = facts.reentry?.staleTddPaths ?? []
+  const existingArchDocs = facts.docs.archDocs ?? facts.docs.designDocs ?? facts.docs.existingArchDocs ?? []
   if (staleTddPaths.length > 0) {
     add(finding('missing', 'docs', 'docs.tdd-stale-paths',
       `技术设计文档 \`${facts.docs.tdd || 'docs/TDD.md'}\` 中以下源码路径已不存在：${staleTddPaths.slice(0, 6).join('、')}——请随重构同步校准`, {
@@ -421,6 +395,8 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   } else if (needsTdd) {
     if (facts.docs.tdd) {
       add(finding('ok', 'docs', 'docs.tdd.ok', `技术设计文档已就绪（${facts.docs.tdd}）`))
+    } else if (existingArchDocs.length > 0) {
+      add(finding('ok', 'docs', 'docs.tdd.ok', `已存在存量架构设计文档（${existingArchDocs.slice(0, 3).join('、')}）`))
     } else if (!decisions.has('no-tdd')) {
       add(finding('notice', 'docs', 'docs.tddMissing',
         '代码项目缺少 `docs/TDD.md`——将长篇设计决策外置到 TDD.md 可防止 AGENTS.md 超过上下文预算', {
@@ -429,31 +405,32 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     }
   }
 
-  // ── 工程套件（.agents/skills/）────────────────────────────────────
+  // ── 工程套件（.agents/skills/，兼容 v1/v2 manifest）─────────────────
   if ((facts.scale.effectiveFiles ?? 0) > 0 && !decisions.has('no-kit')) {
     const kit = facts.kit
-    if (!kit?.manifestExists) {
+    const kState = inspectKitManifestForReview(root, kit)
+    if (kState.state === 'absent') {
       add(finding('notice', 'kit', 'kit.missing',
         '还没有配备 `.agents/skills/` 开发技能套件——可运行 `node scripts/equip.mjs .` 装配并跟踪清单', {
           decision: 'no-kit',
         }))
-    } else if (kit.corrupted || (kit.missingFiles?.length ?? 0) > 0) {
-      const detail = kit.corrupted
-        ? `${kit.manifestPath} JSON 损坏或结构无效`
-        : `缺失托管文件：${kit.missingFiles.slice(0, 4).join('、')}`
+    } else if (kState.state === 'corrupted') {
       add(finding('missing', 'kit', 'kit.drifted',
-        `受管 \`.agents/skills/\` 套件异常（${detail}）——请运行 \`node scripts/equip.mjs .\` 修复`))
-    } else if ((kit.modifiedFiles?.length ?? 0) > 0 || kit.versionMismatch) {
+        `受管 \`.agents/skills/\` 套件异常（${kit.manifestPath} JSON 损坏或结构无效）——请运行 \`node scripts/equip.mjs .\` 修复`))
+    } else if (kState.missingFiles.length > 0) {
+      add(finding('missing', 'kit', 'kit.drifted',
+        `受管 \`.agents/skills/\` 套件异常（缺失托管文件：${kState.missingFiles.slice(0, 4).join('、')}）——请运行 \`node scripts/equip.mjs .\` 修复`))
+    } else if (kState.modifiedFiles.length > 0 || kState.versionMismatch) {
       const reasons = []
-      if (kit.versionMismatch) reasons.push(`清单版本 ${kit.forgeVersion} 与当前工具版本不一致`)
-      if ((kit.modifiedFiles?.length ?? 0) > 0) {
-        reasons.push(`${kit.modifiedFiles.length} 个文件被本地修改（${kit.modifiedFiles.slice(0, 3).join('、')}）`)
-      }
+      if (kState.versionMismatch) reasons.push(`清单版本 ${kState.forgeVersion} 与当前工具版本不一致`)
+      if (kState.modifiedFiles.length > 0) reasons.push(`${kState.modifiedFiles.length} 个文件被本地修改（${kState.modifiedFiles.slice(0, 3).join('、')}）`)
       add(finding('notice', 'kit', 'kit.drifted',
-        `受管 \`.agents/skills/\` 存在漂移（${reasons.join('；')}）——可运行 \`node scripts/equip.mjs .\` 做无损升级`))
+        `受管 \`.agents/skills/\` 存在漂移（${reasons.join('；')}）——可运行 \`node scripts/equip.mjs .\` 做无损升级或 \`--adopt-custom\` 豁免`))
     } else {
+      const tierLabel = kState.tier ? `${kState.tier} 档，` : ''
+      const extraNote = kState.customCount > 0 ? `，已豁免定制 ${kState.customCount} 项` : ''
       add(finding('ok', 'kit', 'kit.ready',
-        `受管 \`.agents/skills/\` 套件已就绪（${kit.filesCount} 个托管文件，版本 ${kit.forgeVersion ?? '未知'}）`))
+        `受管 \`.agents/skills/\` 套件已就绪（${tierLabel}${kState.filesCount} 个托管文件，版本 ${kState.forgeVersion ?? '未知'}${extraNote}）`))
     }
   }
 
@@ -483,10 +460,13 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
+  const checkWorkflows = facts.docs.workflowFacts.checkWorkflows?.length
+    ? facts.docs.workflowFacts.checkWorkflows
+    : facts.docs.workflows
   if (facts.ecosystem.kinds.includes('docs-only')) {
     add(finding('ok', 'ci', 'ci.docs-only', '纯文档项目不需要跑构建的 CI'))
   } else if (facts.docs.workflowFacts.hasCheck) {
-    add(finding('ok', 'ci', 'ci.present', `CI 有（${facts.docs.workflows.join('、')}）`))
+    add(finding('ok', 'ci', 'ci.present', `CI 有（${checkWorkflows.join('、')}）`))
   } else {
     add(finding('notice', 'ci', 'ci.absent',
       '没有 CI——本机能过不等于换台机器能过。一个人用的小工具不配也是合理的', {
@@ -495,9 +475,11 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
+  const releaseWorkflows = facts.docs.workflowFacts.releaseWorkflows ?? []
   if (facts.docs.workflowFacts.hasRelease) {
-    add(finding('ok', 'release', 'release.present', '发布自动化有'))
-  } else if (facts.ecosystem.publishable && !facts.ecosystem.private) {
+    add(finding('ok', 'release', 'release.present',
+      releaseWorkflows.length > 0 ? `发布自动化有（${releaseWorkflows.join('、')}）` : '发布自动化有'))
+  } else if (facts.ecosystem.publishable && !facts.ecosystem.private && !decisions.has('no-release')) {
     add(finding('notice', 'release', 'release.absent',
       '项目有可发布形态，但没有发布自动化——可以手发，也可以让标签触发', {
         decision: 'no-auto-release',

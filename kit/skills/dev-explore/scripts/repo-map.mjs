@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * repo-map.mjs —— 只读探索仓库结构、入口、测试分布、Dev Profile 与 git 热点文件。
+ * repo-map.mjs —— 只读探索仓库结构、入口、CI 步骤、可复用模块、Feature Map 与 git 热点。
  *
  * 用法：
  *   node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--json]
@@ -11,7 +11,7 @@ import { basename, join, relative, resolve } from 'node:path'
 
 import {
   gitRun, isMainModule, parseAgentsProfile, posixPath,
-  printNextStep, readJsonSafe, resolveRepoRoots,
+  printNextStep, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/shared.mjs'
 
 const SKIP_DIRS = new Set([
@@ -21,7 +21,7 @@ const SKIP_DIRS = new Set([
 ])
 
 const CODE_RE = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|rb|php|cs|c|cpp|h|hpp|swift|dart|ex|exs|sh|ps1)$/i
-const TEST_FILE_RE = /(?:^|\/)(?:tests?|__tests__|spec)\/|(?:\.test\.|\.spec\.|_test\.|^test_)/i
+const TEST_FILE_RE = /(?:^|\/)(?:tests?|__tests__|spec|specs)\/|(?:\.test\.|\.spec\.|_test\.|^test_)/i
 const ENTRY_NAMES = new Set([
   'index.js', 'index.mjs', 'index.ts', 'main.js', 'main.mjs', 'main.ts',
   'app.js', 'app.ts', 'server.js', 'server.ts', 'cli.js', 'cli.mjs', 'cli.ts',
@@ -65,15 +65,15 @@ function detectEntrypoints(root, files) {
   const entries = new Set()
   const pkg = readJsonSafe(join(root, 'package.json'))
   if (pkg) {
-    if (typeof pkg.main === 'string') entries.add(posixPath(pkg.main.replace(/^\.\//, '')))
-    if (typeof pkg.module === 'string') entries.add(posixPath(pkg.module.replace(/^\.\//, '')))
+    for (const field of [pkg.main, pkg.module, pkg.exports]) {
+      if (typeof field === 'string') entries.add(posixPath(field.replace(/^\.\//, '')))
+    }
     if (typeof pkg.bin === 'string') entries.add(posixPath(pkg.bin.replace(/^\.\//, '')))
     else if (pkg.bin && typeof pkg.bin === 'object') {
       for (const v of Object.values(pkg.bin)) {
         if (typeof v === 'string') entries.add(posixPath(v.replace(/^\.\//, '')))
       }
     }
-    if (typeof pkg.exports === 'string') entries.add(posixPath(pkg.exports.replace(/^\.\//, '')))
   }
 
   for (const f of files) {
@@ -81,7 +81,7 @@ function detectEntrypoints(root, files) {
       entries.add(f.rel)
     }
   }
-  return [...entries].slice(0, 20)
+  return [...entries].slice(0, 25)
 }
 
 function detectDocsPresence(root) {
@@ -100,6 +100,191 @@ function detectDocsPresence(root) {
     todo: scanDir('docs/todo'),
     prd: scanDir('docs/prd'),
   }
+}
+
+/** 解析 .github/workflows/*.{yml,yaml} 中的 job 与 run 步骤。 */
+function extractCiRunSteps(root) {
+  const wfDir = join(root, '.github', 'workflows')
+  if (!existsSync(wfDir)) return []
+  let entries = []
+  try {
+    entries = readdirSync(wfDir).filter((n) => /\.(?:yml|yaml)$/i.test(n)).sort()
+  } catch { return [] }
+
+  const steps = []
+  for (const file of entries) {
+    const rel = `.github/workflows/${file}`
+    const text = readTextSafe(join(wfDir, file))
+    if (!text) continue
+    const wfName = /^name:\s*["']?([^"'\n]+)["']?/m.exec(text)?.[1]?.trim() ?? file
+    const lines = text.split('\n')
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(lines[i])
+      if (!m) continue
+      const baseIndent = m[1].length + (lines[i].includes('- run:') ? 2 : 0)
+      const rhs = m[2].trim()
+
+      let cmdLines = []
+      if (rhs === '|' || rhs === '|-' || rhs === '>' || rhs === '>-') {
+        for (let j = i + 1; j < lines.length; j += 1) {
+          const cur = lines[j]
+          if (cur.trim() === '') continue
+          const curIndent = /^(\s*)/.exec(cur)?.[1].length ?? 0
+          if (curIndent <= baseIndent) break
+          const cleaned = cur.trim()
+          if (cleaned && !cleaned.startsWith('#')) cmdLines.push(cleaned)
+        }
+      } else if (rhs) {
+        cmdLines.push(rhs)
+      }
+
+      if (cmdLines.length > 0) {
+        steps.push({
+          workflow: wfName,
+          file: rel,
+          command: cmdLines.join(' && '),
+        })
+      }
+    }
+  }
+  return steps.slice(0, 40)
+}
+
+/** 提取 Makefile / justfile / package.json 中的可运行任务入口。 */
+function extractTaskRunners(root) {
+  const runners = { makefile: [], justfile: [], npmScripts: [] }
+
+  for (const mkName of ['Makefile', 'GNUmakefile', 'makefile']) {
+    const mkText = readTextSafe(join(root, mkName))
+    if (!mkText) continue
+    for (const m of mkText.matchAll(/^([A-Za-z0-9_.-]+):(?!=)/gm)) {
+      const target = m[1]
+      if (target.startsWith('.')) continue
+      if (!runners.makefile.includes(target)) runners.makefile.push(target)
+    }
+    break
+  }
+
+  for (const jfName of ['justfile', 'Justfile']) {
+    const jfText = readTextSafe(join(root, jfName))
+    if (!jfText) continue
+    for (const m of jfText.matchAll(/^([A-Za-z0-9_-]+)(?:\s+[^:]*)?:/gm)) {
+      const target = m[1]
+      if (!runners.justfile.includes(target)) runners.justfile.push(target)
+    }
+    break
+  }
+
+  const pkg = readJsonSafe(join(root, 'package.json'))
+  if (pkg?.scripts && typeof pkg.scripts === 'object') {
+    for (const [k, v] of Object.entries(pkg.scripts)) {
+      runners.npmScripts.push({ name: k, command: String(v) })
+    }
+  }
+  return runners
+}
+
+/** 扫描潜在可复用共享模块与公开导出符号，抑制重复造轮子。 */
+function extractReusableModules(root, files) {
+  const candidates = files.filter((f) => {
+    if (!CODE_RE.test(f.name) || TEST_FILE_RE.test(f.rel)) return false
+    return /(?:^|\/)(?:lib|shared|utils?|helpers?|common|core)\//i.test(f.rel)
+      || /(?:shared|utils?|helpers?|common|protocol|template|render)\.[^/]+$/i.test(f.name)
+  })
+
+  const out = []
+  for (const item of candidates.slice(0, 60)) {
+    const text = readTextSafe(item.full, 256 * 1024)
+    if (!text) continue
+    const exportsList = []
+    for (const m of text.matchAll(/^(?:export\s+(?:async\s+)?(?:function|const|class)|pub\s+(?:fn|struct)|func|def)\s+([A-Za-z_][A-Za-z0-9_]*)/gm)) {
+      if (!m[1].startsWith('_') && !exportsList.includes(m[1])) exportsList.push(m[1])
+    }
+    if (exportsList.length > 0 || /(?:^|\/)lib\//.test(item.rel)) {
+      out.push({
+        file: item.rel,
+        exports: exportsList.slice(0, 12),
+        exportCount: exportsList.length,
+      })
+    }
+  }
+  return out.sort((a, b) => b.exportCount - a.exportCount || a.file.localeCompare(b.file)).slice(0, 20)
+}
+
+/** 构造 Feature Map：整合 docs/TDD.md 现有映射 + 自动嗅探到的入口/脚本到测试/冒烟命令映射。 */
+function buildFeatureMap(root, entrypoints, testFiles, profile, runners) {
+  const features = []
+  const seen = new Set()
+
+  // 1. 优先读取 docs/TDD.md 中声明的 Feature Map 表格行
+  const tddText = readTextSafe(join(root, 'docs', 'TDD.md'))
+  if (tddText) {
+    const fmIdx = tddText.search(/^##.*(?:Feature\s*Map|功能与入口地图|模块拓扑)/mi)
+    if (fmIdx >= 0) {
+      const slice = tddText.slice(fmIdx)
+      for (const line of slice.split('\n').slice(1, 35)) {
+        if (/^##\s+/.test(line)) break
+        const row = /^\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|/.exec(line.trim())
+        if (!row) continue
+        const c1 = row[1].trim().replace(/`/g, '')
+        const c2 = row[2].trim().replace(/`/g, '')
+        const c3 = row[3].trim().replace(/`/g, '')
+        if (!c1 || /^[-:]+$/.test(c1) || /功能|模块|Feature|Entry/i.test(c1) || /^<.*>$/.test(c1)) continue
+        const key = `${c1}=>${c2}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          features.push({ feature: c1, source: c2, verifyCmd: c3 || profile.smokeVerify || profile.quickTest || '待补充', origin: 'docs/TDD.md' })
+        }
+      }
+    }
+  }
+
+  // 2. 自动为入口文件配对最相近的测试文件或验证命令
+  for (const ep of entrypoints.slice(0, 15)) {
+    const epBase = basename(ep).replace(/\.[^.]+$/, '')
+    const matchedTest = testFiles.find((t) => t.toLowerCase().includes(epBase.toLowerCase()))
+    const verifyCmd = matchedTest
+      ? (profile.quickTest?.includes('{target}') ? profile.quickTest.replace(/\{target\}/g, matchedTest) : `${matchedTest} (或 ${profile.quickTest ?? '项目单测'})`)
+      : (profile.smokeVerify ?? profile.quickTest ?? (runners.npmScripts[0]?.name ? `npm run ${runners.npmScripts[0].name}` : null))
+    const key = `${epBase}=>${ep}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      features.push({
+        feature: epBase,
+        source: ep,
+        verifyCmd: verifyCmd ?? '未配置（建议补充 smoke-verify）',
+        origin: 'detected-entry',
+      })
+    }
+  }
+
+  return features.slice(0, 20)
+}
+
+function buildPreferredVerifyCommands(profile, ciRunSteps, runners) {
+  const list = []
+  const add = (role, cmd, source) => {
+    if (!cmd) return
+    if (list.some((x) => x.command === cmd && x.role === role)) return
+    list.push({ role, command: cmd, source })
+  }
+  add('quick-test', profile.quickTest, profile.hasAgents ? 'AGENTS.md/auto' : 'auto')
+  add('smoke-verify', profile.smokeVerify, 'AGENTS.md')
+  add('full-test', profile.fullTest, 'AGENTS.md/auto')
+  add('merge-gate', profile.mergeGate, 'AGENTS.md/auto')
+  for (const step of ciRunSteps) {
+    if (/\b(?:test|check|verify|lint|smoke|preflight|build)\b/i.test(step.command)) {
+      add('ci-check', step.command, step.file)
+    }
+  }
+  for (const mk of runners.makefile) {
+    if (/^(?:test|check|smoke|lint|verify|build)$/i.test(mk)) add('make-target', `make ${mk}`, 'Makefile')
+  }
+  for (const jf of runners.justfile) {
+    if (/^(?:test|check|smoke|lint|verify|build)$/i.test(jf)) add('just-target', `just ${jf}`, 'justfile')
+  }
+  return list.slice(0, 15)
 }
 
 async function detectHotspots(root, focus) {
@@ -143,6 +328,11 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
   const testFiles = files.filter((f) => TEST_FILE_RE.test(f.rel)).map((f) => f.rel)
   const entrypoints = detectEntrypoints(root, files)
   const docs = detectDocsPresence(root)
+  const ciRunSteps = extractCiRunSteps(root)
+  const taskRunners = extractTaskRunners(root)
+  const reusableModules = extractReusableModules(root, files)
+  const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners)
+  const preferredVerifyCommands = buildPreferredVerifyCommands(profile, ciRunSteps, taskRunners)
 
   const focusAgents = focusRel && existsSync(join(root, focusRel, 'AGENTS.md'))
     ? `${focusRel}/AGENTS.md` : null
@@ -168,11 +358,18 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     devProfile: {
       quickTest: profile.quickTest ?? null,
       fullTest: profile.fullTest ?? null,
+      smokeVerify: profile.smokeVerify ?? null,
       mergeGate: profile.mergeGate ?? null,
+      archRules: profile.archRules,
       highRisk: profile.highRisk,
       doNotEdit: profile.doNotEdit,
       ecosystems: profile.detectedCommands?.kinds ?? [],
     },
+    ciRunSteps,
+    taskRunners,
+    preferredVerifyCommands,
+    reusableModules,
+    featureMap,
     docs,
     hotspots,
   }
@@ -185,23 +382,49 @@ function formatText(map) {
   lines.push(`- Git: ${map.isGit ? `是（分支: ${map.branch ?? 'detached'}）` : '否'} | 生态: ${map.devProfile.ecosystems.join(', ') || '未识别'}`)
   lines.push(`- 文件统计: 共 ${map.totalFiles}${map.truncated ? '+' : ''} 个（源码 ${map.codeFileCount}，测试 ${map.testFileCount}）`)
   lines.push('')
-  lines.push('## Dev Profile 与验证命令')
+  lines.push('## Dev Profile 与优先验证入口')
   lines.push(`- quick-test: ${map.devProfile.quickTest ?? '未配置'}`)
+  lines.push(`- smoke-verify: ${map.devProfile.smokeVerify ?? '未配置'}`)
   lines.push(`- full-test: ${map.devProfile.fullTest ?? '未配置'}`)
   lines.push(`- merge-gate: ${map.devProfile.mergeGate ?? '未配置'}`)
   lines.push(`- high-risk: ${map.devProfile.highRisk.join(', ') || '无'}`)
+  if (map.devProfile.archRules.length > 0) {
+    lines.push(`- arch-rules: ${map.devProfile.archRules.map((r) => r.raw).join('; ')}`)
+  }
   if (map.devProfile.doNotEdit.length > 0) {
     lines.push(`- do-not-edit: ${map.devProfile.doNotEdit.join(', ')}`)
+  }
+  if (map.ciRunSteps.length > 0) {
+    lines.push('')
+    lines.push('## CI 工作流验证步骤（.github/workflows）')
+    for (const s of map.ciRunSteps.slice(0, 12)) {
+      lines.push(`- [${s.file}] ${s.command}`)
+    }
+  }
+  if (map.taskRunners.makefile.length > 0 || map.taskRunners.justfile.length > 0) {
+    lines.push('')
+    lines.push('## 任务脚本入口（Makefile / justfile）')
+    if (map.taskRunners.makefile.length > 0) lines.push(`- Makefile: ${map.taskRunners.makefile.join(', ')}`)
+    if (map.taskRunners.justfile.length > 0) lines.push(`- justfile: ${map.taskRunners.justfile.join(', ')}`)
   }
   lines.push('')
   lines.push('## 顶层目录分布')
   for (const d of map.topDirectories) {
     lines.push(`- ${d.dir}: ${d.count} 个文件`)
   }
-  if (map.entrypoints.length > 0) {
+  if (map.reusableModules.length > 0) {
     lines.push('')
-    lines.push('## 探测到的入口文件')
-    for (const e of map.entrypoints) lines.push(`- ${e}`)
+    lines.push('## 可复用现成模块清单（先复用，不重复造轮子）')
+    for (const m of map.reusableModules) {
+      lines.push(`- ${m.file}${m.exports.length > 0 ? ` [导出: ${m.exports.join(', ')}]` : ''}`)
+    }
+  }
+  if (map.featureMap.length > 0) {
+    lines.push('')
+    lines.push('## Feature Map（入口 -> 源码 -> 验证）')
+    for (const fm of map.featureMap) {
+      lines.push(`- ${fm.feature}: ${fm.source} -> ${fm.verifyCmd}`)
+    }
   }
   if (map.focus) {
     lines.push('')
@@ -255,7 +478,7 @@ async function main(argv) {
     process.stdout.write([
       '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--json]',
       '',
-      '只读输出仓库目录结构、入口、Dev Profile 命令、测试分布与近期修改热点。',
+      '只读输出仓库目录结构、入口、Dev Profile 命令、CI 步骤、可复用模块、Feature Map 与热点文件。',
     ].join('\n') + '\n')
     return 0
   }

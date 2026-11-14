@@ -39,10 +39,10 @@ It folds those into four steps:
 
 | Step | What happens |
 | --- | --- |
-| **S1 Survey** | A read-only scan returns a `maturity` and a list of `gaps` |
-| **S2 Scope** | Decide what this run covers, and say it in one sentence |
-| **S3 Land** | Repo → docs → remote → automation. Read existing files first, fill only what is missing |
-| **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
+| **S1 Survey** | Run a read-only scan returning `maturity`, `gaps`, and `explorationStrategy` (dispatches disjoint parallel read-only subagent shards on large, monorepo, or drifted reentry repos) |
+| **S2 Scope** | Decide what this run covers (on reentry, keep handwritten rules and custom skills intact while targeting `reentry` drift diagnostics) |
+| **S3 Land** | Take a `pre-forge` external snapshot first on non-empty repos (content-deduplicated), then follow Repo → docs → remote → automation |
+| **S4 Verify and hand off** | Run the project's own gates plus delivery check (`claim.script` and `TDD` path checks), report, ask about cleanup |
 
 It governs and wires up daily engineering workflows rather than inventing arbitrary app code: for zero-file directories it can scaffold a minimal runnable and tested skeleton via `equip.mjs --bootstrap-empty` after a short confirmation; for existing codebases it fills missing contracts, four-layer docs, and built-in dev skills (`kit/skills/` -> `.agents/skills/`).
 

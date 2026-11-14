@@ -316,6 +316,38 @@ const INJECTIONS = [
     to: '      if (false && fenceChar) continue',
     expect: '围栏代码块内相对链接被误判为死链接',
   },
+  {
+    id: 'I29',
+    what: '关闭 backup.mjs treeSha256 同内容快照防重跳过逻辑',
+    file: 'scripts/backup.mjs',
+    from: '  if (!force && latest && latest.treeSha256 && treeSha256 && latest.treeSha256 === treeSha256) {',
+    to: '  if (false && !force && latest && latest.treeSha256 && treeSha256 && latest.treeSha256 === treeSha256) {',
+    expect: '相同工作区二次快照未触发 unchanged-since-latest 去重',
+  },
+  {
+    id: 'I30',
+    what: '关闭 claims.mjs verifyClaims 对 package.json 脚本的核对（claim.script）',
+    file: 'scripts/lib/claims.mjs',
+    from: '  if (scripts.length > 0 && Array.isArray(facts?.ecosystem?.packageScripts)) {',
+    to: '  if (false && scripts.length > 0 && Array.isArray(facts?.ecosystem?.packageScripts)) {',
+    expect: 'review.mjs 未拦截失效 package.json 脚本',
+  },
+  {
+    id: 'I31',
+    what: '置空 survey.mjs detectReentry 对 docs/TDD.md 失效源码路径的检测',
+    file: 'scripts/survey.mjs',
+    from: '  const staleTddPaths = detectTddStalePaths(root, docs?.tdd)',
+    to: '  const staleTddPaths = []',
+    expect: 'reentry.staleTddPaths 未检出失效 TDD 路径',
+  },
+  {
+    id: 'I32',
+    what: '关闭 compose-agents.mjs buildConditions 的 has-custom-skills 自有技能路由条件',
+    file: 'scripts/compose-agents.mjs',
+    from: "    'has-custom-skills': hasCustomSkills,",
+    to: "    'has-custom-skills': false,",
+    expect: 'AGENTS.md 未包含项目自有扩展技能路由块',
+  },
 ]
 
 function runFixtures() {

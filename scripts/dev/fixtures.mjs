@@ -3346,6 +3346,270 @@ cases.push(['govern-audit.mjs Wave 2 扩展：fence-aware 死链接、注释死�
   }
 }])
 
+cases.push(['backup.mjs Wave 3 去重：treeSha256 同内容跳过 unchanged-since-latest、--force 强制与变更重建', async () => {
+  const backupStore = mkdtempSync(join(tmpdir(), 'pf-bk3-'))
+  const bkEnv = { ...process.env, PF_BACKUP_DIR: backupStore }
+  const dir = tmpProject({
+    'package.json': '{"name":"bk-w3","version":"1.0.0"}\n',
+    'src/index.mjs': 'export const v = 1\n',
+  })
+
+  try {
+    const c1 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'pre-forge', '--json'], { env: bkEnv })
+    if (c1.status !== 0) return `pre-forge backup 失败：${c1.stderr}`
+    const j1 = JSON.parse(c1.stdout)
+    if (!j1.created || !j1.treeSha256) return `首次快照缺少 treeSha256：${c1.stdout}`
+
+    // 工作区未变动时立即再次调用 -> 命中 unchanged-since-latest 且不增加快照数
+    const c2 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--json'], { env: bkEnv })
+    if (c2.status !== 0) return `二次去重调用失败：${c2.stderr}`
+    const j2 = JSON.parse(c2.stdout)
+    if (j2.created || j2.skippedReason !== 'unchanged-since-latest' || j2.id !== j1.id) {
+      return `相同工作区二次快照未触发 unchanged-since-latest 去重：${c2.stdout}`
+    }
+
+    // 传 --force 必须无视去重写入新快照
+    const c3 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--force', '--json'], { env: bkEnv })
+    if (c3.status !== 0) return `--force backup 失败：${c3.stderr}`
+    const j3 = JSON.parse(c3.stdout)
+    if (!j3.created || j3.id === j1.id) return `--force 未生成新快照：${c3.stdout}`
+
+    // 修改文件内容 -> treeSha256 变化并写入新快照
+    writeFileSync(join(dir, 'src/index.mjs'), 'export const v = 2\n')
+    const c4 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'edit', '--json'], { env: bkEnv })
+    if (c4.status !== 0) return `变更后 backup 失败：${c4.stderr}`
+    const j4 = JSON.parse(c4.stdout)
+    if (!j4.created || !j4.treeSha256 || j4.treeSha256 === j1.treeSha256) {
+      return `文件变更后未生成新 treeSha256 快照：${c4.stdout}`
+    }
+
+    const ls = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout)
+    if ((ls.backups?.length ?? 0) !== 3) return `预期保留 3 份快照，实际：${ls.backups?.length}`
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(backupStore)
+  }
+}])
+
+cases.push(['claims.mjs + review.mjs Wave 3：dirs 并入 claim.path、claim.script 核对与零误报防线', async () => {
+  const { claimsOf, verifyClaims } = await import('../lib/claims.mjs')
+  const { reviewProject } = await import('../review.mjs')
+
+  const dir = tmpProject({
+    'package.json': JSON.stringify({
+      name: 'claims-w3',
+      version: '1.0.0',
+      scripts: { test: 'node --test', lint: 'echo ok' },
+    }),
+    'README.md': '# claims-w3\n\n测试契约脚本与目录前缀核对的仓库说明。\n',
+    'docs/TDD.md': '# TDD\n',
+    'src/core/app.mjs': 'export const app = 1\n',
+    'AGENTS.md': [
+      '# claims-w3',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: npm test',
+      'full-test: npm run nonexistent-full',
+      'high-risk: src/core/, src/payments/, src/legacy/**, .github/workflows/, none',
+      'do-not-edit: docs/missing-archive/, .worktrees/',
+      '```',
+      '',
+      '## 环境与构建验证',
+      '',
+      '```sh',
+      'npm run lint',
+      'pnpm run nonexistent-check',
+      'npm test # 注释里带 npm run <placeholder> 不应提取',
+      '```',
+      '',
+      '## 高风险路径',
+      '',
+      '| 路径 | 原因 |',
+      '| --- | --- |',
+      '| `src/core/` | 核心目录存在 |',
+      '| `src/removed-dir/` | 已删除目录 |',
+      '',
+    ].join('\n'),
+  })
+  gitInit(dir)
+
+  try {
+    const agentsText = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const c = claimsOf(agentsText)
+    for (const expectedDir of ['src/core/', 'src/payments/', 'src/removed-dir/', 'docs/missing-archive/']) {
+      if (!c.dirs.includes(expectedDir)) return `claimsOf 未提取目录前缀 ${expectedDir}：${JSON.stringify(c.dirs)}`
+    }
+    if (c.dirs.some((d) => d.includes('legacy') || d.includes('.github') || d.includes('.worktrees'))) {
+      return `claimsOf 误把通配符或可选设施列入 dirs：${JSON.stringify(c.dirs)}`
+    }
+    for (const expectedScript of ['test', 'lint', 'nonexistent-full', 'nonexistent-check']) {
+      if (!c.scripts.includes(expectedScript)) return `claimsOf 未提取脚本 ${expectedScript}：${JSON.stringify(c.scripts)}`
+    }
+    if (c.scripts.some((s) => s.includes('placeholder'))) return `claimsOf 误从注释提取脚本：${JSON.stringify(c.scripts)}`
+
+    const rev = await reviewProject(dir)
+    const missingIds = new Set(rev.missing.map((f) => f.id))
+    if (!missingIds.has('claim.path')) return `review.mjs 未把失效目录前缀报进 claim.path：${JSON.stringify([...missingIds])}`
+    if (!missingIds.has('claim.script')) return `review.mjs 未拦截失效 package.json 脚本：${JSON.stringify([...missingIds])}`
+
+    // 反面防误报：无 packageScripts 时不输出假绿也不误报；本仓自身 0 缺失项
+    const noPkgClaims = verifyClaims(agentsText, { conventions: { defaultBranch: 'main' }, ecosystem: {} }, () => true)
+    if (noPkgClaims.some((x) => x.id === 'claim.script')) {
+      return `无 package.json 脚本清单时不应产生 claim.script 条目：${JSON.stringify(noPkgClaims)}`
+    }
+    const selfRev = await reviewProject(SKILL_ROOT)
+    if (selfRev.missing.length > 0) return `本仓库自身 review 存在误报缺失项：${JSON.stringify(selfRev.missing)}`
+    return true
+  } finally {
+    rmTree(dir)
+  }
+}])
+
+cases.push(['survey.mjs + compose-agents.mjs Wave 3：自有技能共存路由、reentry 漂移校准、explorationStrategy 与纯本地非 GitHub 提示', async () => {
+  const { toMarkdown } = await import('../lib/render.mjs')
+  const { FORBIDDEN_PLATFORM_RE } = await import('../lib/protocol.mjs')
+  const { equip } = await import('../equip.mjs')
+
+  // 1. 自有扩展技能（.agents/skills + .claude/skills）自动进入 AGENTS.md 意图路由且与 --check / equip 共存
+  const customDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'custom-sk', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# custom-sk\n\n自有扩展技能并存与重入测试项目。\n',
+    'src/app.mjs': 'export const ok = 1\n',
+    '.agents/skills/my-billing/SKILL.md': [
+      '---',
+      'name: my-billing',
+      'description: Reconcile invoices and ledger entries cleanly. Ignore second sentence details.',
+      '---',
+      '# my-billing',
+    ].join('\n'),
+    '.claude/skills/deploy-guard/SKILL.md': [
+      '---',
+      'name: deploy-guard',
+      'description: Pre-deploy verification checklist for production releases',
+      '---',
+      '# deploy-guard',
+    ].join('\n'),
+  })
+  gitInit(customDir)
+
+  // 2. 跨月重入漂移仓（AGENTS 失效路径+脚本、TDD 失效路径、未登记 src/new-module、非 GitHub 远端）
+  const reentryDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'reentry-demo', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# reentry-demo\n\n跨月重入校准与非 GitHub 远端导航测试仓。\n',
+    'src/existing.mjs': 'export const e = 1\n',
+    'src/new-module/service.mjs': 'export const s = 2\n',
+    'docs/TDD.md': [
+      '# TDD',
+      '',
+      '现有模块 `src/existing.mjs`，已删源码 `src/deleted-tdd.mjs`。',
+      '未来规划示例 `docs/future/plan.md` 与外链 `https://example.com/a.js` 不应误报。',
+    ].join('\n'),
+    'AGENTS.md': [
+      '# reentry-demo',
+      '',
+      '## Dev Profile',
+      '```yaml',
+      'quick-test: npm test',
+      'full-test: npm run removed-script',
+      '```',
+      '',
+      '## 架构',
+      '核心文件：`src/existing.mjs`、`src/old/deleted.mjs`。',
+    ].join('\n'),
+  })
+  gitInit(reentryDir)
+  spawnSync('git', ['remote', 'add', 'origin', 'https://code.example.org/org/reentry-demo.git'], { cwd: reentryDir, stdio: 'ignore' })
+
+  // 3. 空目录与小型干净仓 vs 大仓（> 80 代码文件）explorationStrategy 分级
+  const emptyDir = tmpProject({})
+  const smallCleanDir = tmpProject({
+    'package.json': JSON.stringify({ name: 'small-clean', version: '1.0.0', scripts: { test: 'node --test' } }),
+    'README.md': '# small-clean\n\n小型干净单仓。\n',
+    'src/only.mjs': 'export const a = 1\n',
+  })
+  gitInit(smallCleanDir)
+  const largeFiles = { 'README.md': '# large-repo\n\n大仓多文件分片探索测试。\n', 'package.json': '{"name":"large-repo","version":"1.0.0"}\n' }
+  for (let i = 0; i < 85; i += 1) largeFiles[`src/m${i}.mjs`] = `export const v${i} = ${i}\n`
+  const largeDir = tmpProject(largeFiles)
+
+  try {
+    // 验证自有技能装配、渲染共存与卸载恢复
+    equip(customDir, { noBackup: true })
+    const gen1 = runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    if (gen1.status !== 0) return `compose-agents customDir 失败：${gen1.stderr}`
+    const filledCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
+      .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
+    writeFileSync(join(customDir, 'AGENTS.md'), filledCustom)
+
+    const agentsCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
+    if (!agentsCustom.includes('### 项目自有技能（自动识别，与上方研发流并存）') || !agentsCustom.includes('.agents/skills/my-billing/SKILL.md') || !agentsCustom.includes('.claude/skills/deploy-guard/SKILL.md')) {
+      return `AGENTS.md 未包含项目自有扩展技能路由块：\n${agentsCustom.slice(0, 1200)}`
+    }
+    const chkCustom = runAbs('scripts/compose-agents.mjs', [customDir, '--check'])
+    if (chkCustom.status !== 0) return `含自有技能的 AGENTS.md --check 失败：${chkCustom.stderr}`
+
+    const sCustom = await survey(customDir)
+    if ((sCustom.kit?.customSkills?.length ?? 0) !== 2 || !sCustom.kit.customSkills.some((s) => s.name === 'my-billing' && s.summary)) {
+      return `survey customSkills 识别不对：${JSON.stringify(sCustom.kit?.customSkills)}`
+    }
+
+    // 删掉自有技能 -> 重跑 compose-agents 后自有技能区块消失
+    rmTree(join(customDir, '.agents/skills/my-billing'))
+    rmTree(join(customDir, '.claude/skills/deploy-guard'))
+    runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    if (readFileSync(join(customDir, 'AGENTS.md'), 'utf8').includes('### 项目自有技能')) {
+      return '移除自有技能后 AGENTS.md 未清理自有技能条件块'
+    }
+
+    // 验证重入漂移、docs.tdd-stale-paths 与非 GitHub 远端无禁词渲染
+    const sRe = await survey(reentryDir)
+    if (!sRe.reentry?.isReentry || !sRe.reentry?.drifted) return `重入仓未检出 drifted：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleAgentPaths.includes('src/old/deleted.mjs')) return `staleAgentPaths 漏检：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleAgentScripts.includes('removed-script')) return `staleAgentScripts 漏检：${JSON.stringify(sRe.reentry)}`
+    if (!sRe.reentry.staleTddPaths.includes('src/deleted-tdd.mjs')) return `reentry.staleTddPaths 未检出失效 TDD 路径：${JSON.stringify(sRe.reentry)}`
+    if (sRe.reentry.staleTddPaths.some((p) => p.includes('docs/future') || p.includes('example.com'))) {
+      return `staleTddPaths 误报了未来路径或 URL：${JSON.stringify(sRe.reentry.staleTddPaths)}`
+    }
+    if (!sRe.reentry.unregisteredTopDirs.includes('src/new-module')) {
+      return `unregisteredTopDirs 未检出新增顶层目录：${JSON.stringify(sRe.reentry.unregisteredTopDirs)}`
+    }
+    if (sRe.explorationStrategy?.tier !== 'parallel-subagents' || !sRe.explorationStrategy.shards.some((s) => s.id === 'conventions-and-skills')) {
+      return `重入漂移仓未切换 parallel-subagents：${JSON.stringify(sRe.explorationStrategy)}`
+    }
+
+    const mdRe = toMarkdown(sRe)
+    if (FORBIDDEN_PLATFORM_RE.test(mdRe)) return '非 GitHub 远端导航或 Markdown 渲染输出了受限平台词汇'
+    if (!mdRe.includes('远端不在 GitHub 上') || !mdRe.includes('跨月重入失步校准')) {
+      return `toMarkdown 缺少非 GitHub 声明或重入校准摘要：\n${mdRe}`
+    }
+
+    const revRe = runAbs('scripts/review.mjs', [reentryDir])
+    if (revRe.status !== 0 && !revRe.stdout) return `review.mjs reentryDir 异常退出：${revRe.stderr}`
+    const { reviewProject } = await import('../review.mjs')
+    const revReObj = await reviewProject(reentryDir)
+    if (!revReObj.missing.some((f) => f.id === 'docs.tdd-stale-paths')) {
+      return `review.mjs 未产出 docs.tdd-stale-paths：${JSON.stringify(revReObj.missing)}`
+    }
+
+    // 验证 explorationStrategy 三档分级：empty -> none、small -> single-pass、>80 files -> parallel-subagents
+    const [sEmpty, sSmall, sLarge] = await Promise.all([survey(emptyDir), survey(smallCleanDir), survey(largeDir)])
+    if (sEmpty.explorationStrategy?.tier !== 'none') return `empty 目录探索策略错误：${JSON.stringify(sEmpty.explorationStrategy)}`
+    if (sSmall.explorationStrategy?.tier !== 'single-pass') return `小型干净仓探索策略错误：${JSON.stringify(sSmall.explorationStrategy)}`
+    if (sLarge.explorationStrategy?.tier !== 'parallel-subagents') return `大型仓未触发 parallel-subagents：${JSON.stringify(sLarge.explorationStrategy)}`
+
+    return true
+  } finally {
+    rmTree(customDir)
+    rmTree(reentryDir)
+    rmTree(emptyDir)
+    rmTree(smallCleanDir)
+    rmTree(largeDir)
+  }
+}])
+
 for (const [name, fn] of cases) {
   try {
     const outcome = await fn()

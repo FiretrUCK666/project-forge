@@ -35,7 +35,9 @@
    - `node scripts/equip.mjs <target> --check` 执行零写入字节级一致性校验，不一致即以非零退出码阻断。
 3. **空白目录起步与写前增量快照（`--bootstrap-empty` / `scripts/backup.mjs`）**：
    - 针对 `empty` 零文件目录，按指定语言（`node`、`python`、`go`、`rust`、`docs`）生成最小可运行、内置可测试骨架与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map` 骨架），随后接入 `.agents/skills/` 装配，全程零第三方依赖。
-   - `scripts/backup.mjs` 基于纯 `node:zlib` 与 POSIX USTAR/PAX tar 打包实现跨平台零外部命令写前快照（`create`/`list`/`restore`/`ensurePreWriteBackup`）。`scripts/equip.mjs` 与 `scripts/compose-agents.mjs` 在修改已有非空目标且实际存在待写变更前自动调用并写入仓外存储（`PF_BACKUP_DIR/<slug>-<hash8>/` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>/`），自动跳过 `.git`/`.worktrees`/`node_modules`/构建目录与 `>20MB` 单文件，最多滚动保留 5 份且 `restore` 会清理快照后新增的无主文件；零变动与 `--no-backup` 不写入冗余包。
+   - `scripts/backup.mjs` 基于纯 `node:zlib` 与 POSIX USTAR/PAX tar 打包实现跨平台零外部命令写前快照（`create`/`list`/`restore`/`ensurePreWriteBackup`）。`createBackup` 为工作区文件列表计算确定性 `treeSha256` 并记录在 `index.json`，未传 `--force` 且与最新快照完全一致时直接返回 `skippedReason: 'unchanged-since-latest'`（避免 `S3` 第 0 步整仓快照与后续 `equip`/`compose-agents` 重复占满 5 份保留窗口）；其余变更写入仓外存储（`PF_BACKUP_DIR/<slug>-<hash8>/` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>/`），自动跳过 `.git`/`.worktrees`/`node_modules`/构建目录与 `>20MB` 单文件，`restore` 会清理快照后新增的无主文件；零变动与 `--no-backup` 不写入冗余包。
+4. **自有扩展技能共存（`has-custom-skills` / `CUSTOM_SKILLS_BLOCK`）**：
+   - `survey.mjs` 扫描 `.agents/skills/*` 与 `.claude/skills/*` 并按 `KIT_SKILLS` 拆分为 `kit.managedSkills` 与 `kit.customSkills`（含从 `SKILL.md` frontmatter `description` 提取的单行摘要 `summary`）；`compose-agents.mjs` 将自有技能动态渲染进 `AGENTS.md` 意图路由的「项目自有技能」条件块，保证与五套托管 Skill 零 `--check` 冲突共存且在升级与交棒时原样保留。
 
 ## `scripts/lib/` 三真相源
 
@@ -45,16 +47,16 @@
 | --- | --- | --- |
 | `scripts/lib/protocol.mjs` | 标记语法、预算常数与包边界 | `AGENTS_MAX_BYTES`（30720）、`AGENTS_WARN_BYTES`（24576）、`KIT_SKILL_MAX_LINES`（180）、`KIT_SKILLS`、`FORBIDDEN_PLATFORM_RE`、`PF_MANIFEST_REL`、`WORKTREES_STATE_REL`、`REPO_ONLY_DIRS`、`REPO_ONLY_FILES`、`FULL_READ_REFS`、`apiTarget`、`parseBeginMark` |
 | `scripts/lib/template.mjs` | 模板条件求值与变量替换 | `evaluateConditions`、`renderVars`、`renderTemplate`、`residualConditionMarkers`；要求目标 `AGENTS.md` 渲染瞬间完成求值，零残留占位符或条件标记 |
-| `scripts/lib/render.mjs` | 勘察报告排版与阅读导航 | `MATURITY_TEXT`、`toMarkdown`、`computeNavigation` |
-| `scripts/survey.mjs` | 只读项目勘察与五态身份评估 | 只读扫描、结构与缺口识别、`--probe-auth` 双轨探测 |
+| `scripts/lib/render.mjs` | 勘察报告排版与阅读导航 | `MATURITY_TEXT`、`toMarkdown`、`computeNavigation`（含非 GitHub 纯本地治理提示） |
+| `scripts/survey.mjs` | 只读项目勘察、重入校准与五态身份评估 | 只读扫描、`kit.customSkills`、`facts.reentry` 漂移检测、`computeExplorationStrategy`（`none`/`single-pass`/`parallel-subagents`）、`--probe-auth` 双轨探测 |
 | `scripts/equip.mjs` | 内置套件三态账本装配与空项目起步 | `checkEquip`、`equip`、`bootstrapEmpty`、写前调 `backup.mjs` |
-| `scripts/backup.mjs` | 纯内置 `.tar.gz` 写前快照引擎 | `createBackup`、`listBackups`、`restoreBackup`、`ensurePreWriteBackup` |
-| `scripts/compose-agents.mjs` | `AGENTS.md` 生成、刷新、保护与剥离 | 30KB/24KB 门禁、`agentsRegions` 防覆盖、调 `backup.mjs` |
-| `scripts/review.mjs` | 交付体检与成熟度结论报告 | 成熟度/缺失项判定、契约回查与建议指路 |
+| `scripts/backup.mjs` | 纯内置 `.tar.gz` 写前快照引擎 | `createBackup`、`listBackups`、`restoreBackup`、`ensurePreWriteBackup`、`treeSha256` 去重与 `--force` |
+| `scripts/compose-agents.mjs` | `AGENTS.md` 生成、刷新、保护与剥离 | 30KB/24KB 门禁、`agentsRegions` 防覆盖、`has-custom-skills`/`CUSTOM_SKILLS_BLOCK`、调 `backup.mjs` |
+| `scripts/review.mjs` | 交付体检与成熟度结论报告 | 成熟度/缺失项判定、契约回查（`claim.branch`/`claim.path`/`claim.script`）、`docs.tdd-stale-paths` 与建议指路 |
 | `scripts/handoff.mjs` | 交棒扫描与净度核验 | `--scan`/`--verify` 四档退出码（`0`/`1`/`3`/`4`） |
 | `scripts/sync-toc.mjs` / `scripts/update.mjs` / `scripts/zip.mjs` | README 目录同步、包副本自更新与导出归档 | 双语目录一致性、非 `.git` 包覆盖升级、纯内置打包辅助 |
 
-辅助校对模块 `scripts/lib/claims.mjs` 负责对生成的文档、反引号路径和分支指针做真实存在性验证；平台集成层收敛于 `scripts/lib/platform/`（`github.mjs` 与 `index.mjs`）。
+辅助校对模块 `scripts/lib/claims.mjs` 负责对生成的文档、反引号路径、Dev Profile/高风险目录前缀（`dirs`）、包管理器脚本引用（`scripts`）与分支指针做真实存在性验证（导出 `CLAIM_IDS`）；平台集成层收敛于 `scripts/lib/platform/`（`github.mjs` 与 `index.mjs`）。
 
 ## 模块分层与禁引规则（arch-rules）
 

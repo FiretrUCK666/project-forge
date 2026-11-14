@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="title desc">
+  <title id="title">project-forge — GitHub Repository Governance and AI Collaboration Kit</title>
+  <desc id="desc">project-forge overview card: left side displays identity, positioning, and three core capabilities (Zero-dep Node 18+, Lossless Repo Merge, 5 Local Dev Skills); right side displays the four-step idempotent pipeline and empirical telemetry.</desc>
+  <defs>
+    <pattern id="blueprint-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1E293B" stroke-width="0.75" opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1200" height="420" rx="16" fill="#0B111E"/>
+  <rect x="24" y="24" width="1152" height="372" rx="12" fill="url(#blueprint-grid)" opacity="0.6"/>
+  <rect x="1" y="1" width="1198" height="418" rx="15" fill="none" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- Subtle corner calibration ticks -->
+  <path d="M 28 48 L 28 28 L 48 28 M 1152 28 L 1172 28 L 1172 48 M 28 372 L 28 392 L 48 392 M 1152 392 L 1172 392 L 1172 372" fill="none" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- Left column: Identity & Value -->
+  <rect x="52" y="64" width="28" height="4" rx="2" fill="#F59E0B"/>
+  <text x="92" y="72" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600" letter-spacing="0.4">GITHUB REPO GOVERNANCE KIT</text>
+
+  <text x="52" y="142" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="52" font-weight="700" letter-spacing="-0.5">project-forge</text>
+
+  <text x="52" y="192" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="400">Read-only survey, lossless repo forging,</text>
+  <text x="52" y="226" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="400">and evidence-backed GitHub collaboration.</text>
+
+  <!-- 3 Capability Pills -->
+  <rect x="52" y="264" width="234" height="42" rx="8" fill="#111827" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="169" y="291" text-anchor="middle" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">Zero-dep Node 18+</text>
+
+  <rect x="302" y="264" width="252" height="42" rx="8" fill="#111827" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="428" y="291" text-anchor="middle" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">Lossless Repo Merge</text>
+
+  <rect x="52" y="322" width="248" height="42" rx="8" fill="#111827" stroke="#10B981" stroke-width="1.5"/>
+  <text x="176" y="349" text-anchor="middle" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">5 Local Dev Skills</text>
+
+  <!-- Right column: Pipeline Verification Panel -->
+  <rect x="596" y="36" width="556" height="348" rx="14" fill="#111827" stroke="#1E293B" stroke-width="2"/>
+  <line x1="596" y1="84" x2="1152" y2="84" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Panel Header -->
+  <circle cx="622" cy="60" r="5" fill="#F59E0B"/>
+  <circle cx="640" cy="60" r="5" fill="#38BDF8"/>
+  <circle cx="658" cy="60" r="5" fill="#10B981"/>
+  <text x="680" y="66" fill="#CBD5E1" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">forge-pipeline // idempotent</text>
+
+  <!-- Step 1 -->
+  <text x="622" y="122" fill="#38BDF8" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">01</text>
+  <text x="664" y="122" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="500">survey.mjs --probe-auth</text>
+  <text x="1126" y="122" text-anchor="end" fill="#38BDF8" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">S1 READ</text>
+  <line x1="634" y1="132" x2="634" y2="148" stroke="#334155" stroke-width="2"/>
+
+  <!-- Step 2 -->
+  <text x="622" y="168" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">02</text>
+  <text x="664" y="168" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="500">backup.mjs pre-forge</text>
+  <text x="1126" y="168" text-anchor="end" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">S3 SNAP</text>
+  <line x1="634" y1="178" x2="634" y2="194" stroke="#334155" stroke-width="2"/>
+
+  <!-- Step 3 -->
+  <text x="622" y="214" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">03</text>
+  <text x="664" y="214" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="500">equip &amp; compose</text>
+  <text x="1126" y="214" text-anchor="end" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">S3 FORGE</text>
+  <line x1="634" y1="224" x2="634" y2="240" stroke="#334155" stroke-width="2"/>
+
+  <!-- Step 4 -->
+  <text x="622" y="260" fill="#10B981" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="700">04</text>
+  <text x="664" y="260" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="20" font-weight="500">review.mjs</text>
+  <text x="1126" y="260" text-anchor="end" fill="#10B981" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">S4 PASS</text>
+
+  <!-- Telemetry Divider & Readouts -->
+  <line x1="620" y1="292" x2="1128" y2="292" stroke="#1E293B" stroke-width="1.5"/>
+
+  <text x="622" y="326" fill="#CBD5E1" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="500">.pf-manifest.json</text>
+  <text x="1126" y="326" text-anchor="end" fill="#38BDF8" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">AGENTS.md &lt;= 30KB</text>
+
+  <circle cx="628" cy="356" r="5" fill="#10B981"/>
+  <text x="642" y="362" fill="#10B981" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="600">10 gates verified</text>
+  <text x="1126" y="362" text-anchor="end" fill="#CBD5E1" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="500">4-layer docs</text>
+</svg>

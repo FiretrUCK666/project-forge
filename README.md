@@ -1,225 +1,136 @@
-# project-forge
+<p align="center">
+  <img src="assets/readme/hero.svg" alt="project-forge overview" width="100%">
+</p>
 
-[English](README.en.md) | 中文
+<p align="center">
+  <a href="README.en.md">English</a> · <strong>简体中文</strong>
+</p>
 
-给一个项目目录，它先只读勘察，看清这个项目现在是什么样，再自己判断这次该做哪几件事：
-版本管理、GitHub 远端、文档套装、发布通道，以及配好之后每天怎么干活的协作协议。
-收尾时问你要不要把它留下的痕迹清干净。
-
-不预设技术栈。Node、Python、Rust、Go、Java、纯文档目录，插件类项目，以及能力目录类项目，
-判断依据都是勘察出来的事实。
+**project-forge** 是一个面向 GitHub 仓库的工程治理与 AI 协作底座（Zero-dependency Node 18+ Skill）。它坚持**只读勘察先行、写入前全量快照、存量无损融合、实证门禁验收**：无论是空目录冷启动、结构各异的存量仓库，还是隔了数月出现规则漂移的老项目，都能按同一条幂等流水线配齐版本管理、GitHub 远端与 CI、四层设计文档、受管契约 `AGENTS.md` 以及 5 个本地研发技能，把工程判断从人肉口述变成脚本可验证的闭环。
 
 ## 目录
 
 <!-- toc:start -->
 
-- [它做什么](#它做什么)
-- [怎么判断该做多少](#怎么判断该做多少)
-- [开始之前](#开始之前)
-- [安装](#安装)
-- [怎么更新](#怎么更新)
-- [使用](#使用)
-- [它怎么做到不吵人](#它怎么做到不吵人)
-- [它不会做的事](#它不会做的事)
-- [遇到问题与参与贡献](#遇到问题与参与贡献)
-- [里面有什么](#里面有什么)
-- [许可](#许可)
+- [为什么需要 project-forge](#为什么需要-project-forge)
+- [四步工作流](#四步工作流)
+- [架构与本地研发技能](#架构与本地研发技能)
+- [三类接入场景对照](#三类接入场景对照)
+- [安装与快速上手](#安装与快速上手)
+- [日常协作与可逆发版](#日常协作与可逆发版)
+- [核心脚本速查](#核心脚本速查)
+- [环境要求、边界与许可](#环境要求边界与许可)
 
 <!-- toc:end -->
 
-## 它做什么
+## 为什么需要 project-forge
 
-一个项目从「能跑」到「像个正经项目」，中间隔着一堆琐碎但容易出错的事：忽略规则写对了没、
-产物该不该入库、提交署名配了没、README 里承诺的东西能不能兑现、发布流程会不会把密钥发出去。
-每件都不难，加起来很多，而且做错往往很久以后才发现。
+工程治理最常见的问题不是"缺模板"，而是模板覆盖了项目原本有效的规则、脚本与文档各说各话、AI 每次新开会话都要重新摸索规矩。`project-forge` 围绕四个具体痛点设计：
 
-它把这几件事收敛成四步：
+- **空目录闭环起步**：针对 `node`、`python`、`go`、`rust`、`docs` 五种栈，`--bootstrap-empty` 一次性落盘 `.gitattributes`、`.gitignore`、`README.md`、可运行源码与测试以及结构化 `docs/TDD.md`，起手就有可跑的基准工程与测试。
+- **存量异构仓库无损融合**：先用 `survey.mjs` 只读扫描 Git、文档、CI、协议与现有本地技能并输出 10 项 `artifactPlan`，已合规项直接保留，已有 `README.md`、`CONTRIBUTING.md`、`LICENSE` 或项目自有技能不覆盖重写，只在缺失或过期处增量补齐。
+- **跨月漂移重入校准**：仓库演进几个月后随时可重跑 `survey`、`compose-agents --upgrade` 与 `review.mjs`，对齐模板升级、收口 `AGENTS.md` 受管区间、排查脚本与文档漂移，同时保留维护者手写的「取舍」段落。
+- **去人肉代理的实证闭环**：任何断言都要经过可执行的静态门禁、临时目录冒烟与双门独立审查；信任遵循倒金字塔（静态门禁优先于运行冒烟实证，高于双门独立审查与契约文档），不以口头汇报代替运行输出。
 
-| 步 | 做什么 |
-| --- | --- |
-| **S1 勘察** | 跑一次只读扫描，得到 `maturity`、`gaps` 与 `explorationStrategy`（中大型/多包/跨月漂移重入仓按 `shards` 并行只读分片摸底） |
-| **S2 定范围** | 按事实算出这次做哪几件（重入时原样保留手写规则与自有技能，按 `reentry` 诊断定向校准失效条目） |
-| **S3 落盘** | 非空存量仓先打 `pre-forge` 仓外快照（内容未变自动去重），再按「版本库 → 文档 → 远端 → 自动化」落盘 |
-| **S4 验收交棒** | 跑目标项目自己的门禁 + 交付体检（含 `claim.script` 与 `TDD` 路径回查），汇报，问要不要清痕迹 |
+## 四步工作流
 
-它只做治理与研发工作流装配，不凭空编造业务代码：对于 0 文件的空白目录，可经简短确认后通过 `equip.mjs --bootstrap-empty` 生成最小可运行工程骨架；对于已有项目，则按事实补全契约、四层文档与内置研发 Skill 套件（`kit/skills/` -> `.agents/skills/`）。
+<p align="center">
+  <img src="assets/readme/workflow.svg" alt="project-forge 四步幂等工作流：空目录、存量融合与跨月重入三条路径汇入 S1 到 S4 流水线" width="100%">
+</p>
 
-勘察报告的最后会直接列出「这次该读哪几页、哪一节」——那是按本次勘察到的事实算出来的，
-不是一张固定目录。
+三条入口最终都汇入同一条幂等流水线，第二遍执行产出与第一遍字节一致：
 
-## 怎么判断该做多少
+1. **S1 只读勘察**：执行 `survey.mjs --probe-auth` 只读判定仓库所处状态与 10 项 `artifactPlan`（保留 / 补齐 / 跳过 / 需决策），在勘察完成前不向目标项目写入任何文件。
+2. **S2 逐项定界**：只对事实缺失或待定项向维护者确认边界（如开源协议、仓库可见性、协作模板与 CI 取舍），把决定落成可机读记录。
+3. **S3 写前快照与按序落盘**：先由 `backup.mjs` 生成 `.tar.gz` 写前快照（支持按 ID 回滚），再严格按 **版本库 → 文档 → 远端 → 自动化** 顺序落盘，并由 `equip.mjs` 与 `compose-agents.mjs` 装配技能与受管 `AGENTS.md`。
+4. **S4 实证体检与交棒**：运行 `review.mjs` 做全量交付体检（覆盖 10 个核对域），并用 `handoff.mjs` 核验与清理会话痕迹；可逆收尾动作在取得人确认后执行。
 
-勘察会给出一个成熟度，它决定这次用多大劲：
+## 架构与本地研发技能
 
-| 成熟度 | 含义 | 做什么 |
+<p align="center">
+  <img src="assets/readme/architecture.svg" alt="project-forge 双层架构：上层治理底座与下层 5 个本地研发技能及信任倒金字塔" width="100%">
+</p>
+
+治理底座负责把仓库规则、快照与四层设计文档（`docs/TDD.md` 架构契约、`docs/prd/` 产品目标、`docs/specs/` 变更规格、`docs/todo/` 追踪待办）配齐并守住 `AGENTS.md <= 30KB` 上限；日常研发由装入目标仓库 `.agents/skills/`（由 `.pf-manifest.json` 校验版本与完整性）的 5 个本地研发技能接管：
+
+| 本地技能 | 核心脚本 | 职责与产出 |
 | --- | --- | --- |
-| `empty` | 什么都没有 | 先经简短确认生成最小可运行 + 可测试骨架与初始 `docs/TDD.md`（`--bootstrap-empty`），再入治理 |
-| `greenfield` | 有源码但没版本库，或没文档 | 从零配齐，并装配全套 `.agents/skills/` |
-| `partial` | 有版本库和部分文档，缺东西 | 补齐缺口，已有的或用户手改的部分一个字节不动 |
-| `mature` | 该有的都有 | 只体检，并按 SHA256 账本无损刷新未定制文件 |
+| `dev-explore` | `repo-map.mjs` | 三档（`quick`/`medium`/`thorough`）只读勘察代码结构、调用链与改动影响面 |
+| `dev-plan` | `doc-plan.mjs` | 按改动等级在四层设计文档间分诊，生成架构、规格或工作追踪草稿（人批后生效） |
+| `dev-flow` | `flow.mjs` | 驱动 Worktree 隔离工作流：开分支、认领、构建验证、提 PR、返工、合入与清理 |
+| `dev-review` | `review-pack.mjs` | 组装隔离审查上下文与故障注入证据包，附带外源 PR 防投毒只读预检 |
+| `dev-govern` | `govern-audit.mjs` | 巡检文档与代码对齐漂移，并提供 `release-prep` 多版本发版前核对 |
 
-同一份勘察还给出 `gaps`：**只列「不做就会出事」的东西**。单语 README、没有贡献指南、
-没有 CI 都不算缺口——把偏好写成缺口，会让每个项目都欠一笔还不完的债。
+所有研发验证均按**信任倒金字塔**自上而下采信：`1. 静态门禁`（规则扫描与结构校验） > `2. 运行冒烟实证`（临时目录实跑与正反双向断言） > `3. 双门独立审查`（独立上下文逐条核对冻结标准） > `4. 契约文档`（文字描述只在被前三层印证时有效）。
 
-## 开始之前
+## 三类接入场景对照
 
-运行要求只有一项：**在 Node 18 上验证通过**；更新的版本预期可用，但没有逐一验证。
-不装任何东西，没有构建步骤，不引入第三方依赖。
-
-`git` 可选：没有它的能力会如实报告并跳过，不会假装成功。
-
-## 安装
-
-解压到**你所用宿主的用户级 skill 根**。已经装过别的 skill 就放到它们所在的目录，
-一个都没有就查该宿主的文档。目录名保持 `project-forge`——它必须与 `SKILL.md` 里
-frontmatter 的 `name` 一致，区分大小写的系统上大小写不同就是另一个目录。
-
-放好不需要注册或重启：宿主按目录发现，`SKILL.md` 就是入口。
-
-两种拿法，选一种即可：
-
-| 拿法 | 拿到什么 | 怎么知道有新版 | 适合 |
+| 接入场景 | 起步状态 | `project-forge` 处理策略 | 典型入口命令 |
 | --- | --- | --- | --- |
-| **下载发布页的压缩包** | 一份可以独立运行的副本，不带 `.git` | 它自己会核对（见下一节 `update.mjs`） | 只是拿来用 |
-| **克隆这个仓库** | 完整历史与提交记录 | `git pull`，工具不会碰它一个字节 | 想读改动、想提贡献、想改它 |
+| **空目录闭环起步** | 空白目录或仅含空目录结构 | `--bootstrap-empty` 为 5 类栈生成源码、测试、`.gitignore`、`.gitattributes` 与文档底座 | `node "<skill-dir>/scripts/equip.mjs" "<repo>" --bootstrap-empty --lang node --name my-app` |
+| **存量异构融合** | 已有业务代码、原有 README/CONTRIBUTING/LICENSE 或自有技能 | 只读识别 `artifactPlan`，原样保留有效资产，增量补齐缺失门禁、契约与本地技能 | `node "<skill-dir>/scripts/survey.mjs" "<repo>" --markdown --probe-auth` |
+| **跨月漂移重入** | 已锻造数月后新增模块、升级底座或文档过期 | 无损重跑升级受管区间、核对 `.pf-manifest.json` 校验和并用 `govern-audit` 审计漂移 | `node "<skill-dir>/scripts/compose-agents.mjs" "<repo>" --upgrade` |
 
-判据只有一条：**目录里有没有 `.git`**。有，就是源码副本，`update.mjs` 对它只读；
-没有，就是包副本，它靠 `update.mjs` 整份覆盖更新。这个判断不靠记性，也不靠猜意图。
+## 安装与快速上手
 
-## 怎么更新
-
-安装之后不用管它：每次任务开头会先核对一次远端版本（受节流，一小时内不重复请求），
-有新版就在后台换掉。
-
-要主动查一次，不受节流限制：
+本工具集零第三方运行时依赖，仅需 **Node.js 18+** 与 **Git**，不绑定任何特定 AI 宿主。获取仓库后即可将其作为通用技能或本地命令集使用：
 
 ```sh
-node "<本 skill 目录>/scripts/update.mjs" --check
+git clone <project-forge-repo-url> project-forge
 ```
 
-宿主禁止 skill 自改（沙箱只读、审计要求），或者你这次不想让它动安装目录时，设一个环境变量
-就整个关掉：
+对任意目标仓库执行一轮"只读勘察 -> 写前备份 -> 装配与生成 -> 实证体检"：
 
 ```sh
-# 任意非空值即可
-export PF_NO_UPDATE=1
+# 1. 只读勘察目标仓库（不写入任何文件），输出 10 项 artifactPlan 与 GitHub 认证探测
+node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown --probe-auth
+
+# 2. 写入前生成全量 .tar.gz 安全快照（支持随时按快照 ID 回滚）
+node "<skill-dir>/scripts/backup.mjs" create "<project-dir>" --label pre-forge
+
+# 3. 装配 5 个本地研发技能与受管 AGENTS.md（如已有则会增量融合或升级受管区间）
+node "<skill-dir>/scripts/equip.mjs" "<project-dir>"
+node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
+
+# 4. 运行 10 域实证体检与交棒痕迹核查
+node "<skill-dir>/scripts/review.mjs" "<project-dir>"
+node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --verify
 ```
 
-更新是**整份覆盖**，不问、不比、不看本地有没有改动——包副本要做的事就是「用的时候是最新版」。
-反过来说，如果你改过那份副本，就别让它更新；或者干脆改成克隆仓库，工具对源码副本只读。
+当你把它交给 AI 助手执行时，直接给出类似提示词即可：`用 project-forge 检查这个仓库的工程规范、远端发布链路与本地研发技能，按只读勘察先行并补齐缺失项。`
 
-## 使用
+需要同步技能本身的新版本时，运行 `node "<skill-dir>/scripts/update.mjs" --check` 查看远端状态；在离线或受限环境中，可设置环境变量 `PF_NO_UPDATE=1` 关闭联网检查。
 
-直接用自然语言说就行，不需要说出它的名字：
+## 日常协作与可逆发版
 
-```text
-帮我把这个项目规范一下
-给当前项目配上 GitHub 远端和 CI
-检查一下有没有密钥泄露风险，顺便写个 AGENTS.md
-```
+锻造完成后的日常开发遵循**可撤回分档**原则，判断动作属于日常还是高风险不靠直觉，而看**能不能撤回**：
 
-点名某一件事时它就只做那件事，其余不碰。
+- **日常（可撤回）**：本地改动 → 跑通门禁 → 提交 → **推自己的分支** → 开 Pull Request → 独立上下文按冻结标准审查。删分支、关 PR 都可撤回，因此推分支与开 PR 属于日常动作。
+- **审查即闭环**：独立审查输出 `fail` 为空且附带故障注入验证记录时，由**审查者直接合并**（若在维护者「取舍」段显式设置更保守策略除外）。
+- **必须人拍板**：**弱化门禁**（删测试、放宽断言、加跳过标记、降级 CI 报错）会永久破坏后续每次校验的真实性，一律先停下由人点头；合并默认分支（未授权时）、对外发版、修改仓库可见性与改写历史同样不得擅自执行。
 
-它会打印几条命令，`<本 skill 目录>` 指这个 skill 自己的位置，`<项目目录>` 指被处理的项目：
+当人明确要求发版（支持跨多版本区间与自定义目标版本号）时，先通过本地技能的发布前核对整理区间变更并交叉验证影响面，再按 [RELEASING.md](RELEASING.md) 先提交发布说明到默认分支、后推标签并回读确认发布页与附件就绪：
 
 ```sh
-# 只读勘察（--markdown 出给人读的报告，--probe-auth 双轨探测 GitHub 凭据）
-node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
-
-# 装配或无损刷新五套内置研发 Skill（支持 --bootstrap-empty 空目录起步、--check 校验与写前快照）
-node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
-
-# 管理写前零污染 .tar.gz 保护快照（equip 与 compose-agents 写入前自动生成，最多保留 5 份）
-node "<本 skill 目录>/scripts/backup.mjs" list "<项目目录>"
-
-# 生成或刷新 AGENTS.md（<= 30KB 上限 + SHA256 未定制区无损保护）
-node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
-
-# 交付体检（--scope 只验几面）
-node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"
-
-# 交棒：先看留了什么（只读，不删）
-node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
+node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep --from v4.0.0 --to HEAD --version v5.0.0
 ```
 
-装配之后，目标项目的 `.agents/skills/` 拥有五套自包含研发 Skill，并由 `AGENTS.md` 顶部路由表与「行事总纲」引导日常工作流：
+## 核心脚本速查
 
-- **内置研发套件（`kit/skills/` -> `.agents/skills/`）**：
-  - `dev-explore`（`repo-map.mjs`）：`quick` / `medium` / `thorough` 三级探索，提取 `ciRunSteps`、`reusableModules` 与 `featureMap` 消除人肉代理；
-  - `dev-plan`（`doc-plan.mjs`）：五档分流（`Case 1` 至 `Case 5`）、`two-way`/`one-way` 门型判定、规划自净化 `audit` 与分级独立 `critique-pass` 锁定；
-  - `dev-flow`（`flow.mjs`、`worktree-deps.mjs`）：任务账本、Junction/Symlink 共享依赖挂载与先 `unlinkSync` 解绑、四态 Worktree 判别、`verify --mode smoke` 运行实证，以及 `merge` 检测到弱化门禁时以退出码 `4` 阻断；
-  - `dev-review`（`review-pack.mjs`）：外部 PR `--untrusted-scan` 投毒拦截、`behavioralGate`（含 `smoke-verify`）+ `structuralGate`（墓碑/借口注释、超大文件与 `arch-rules`）+ `doorAssessment` 双门评估，以及六锁防死循环审查；
-  - `dev-govern`（`govern-audit.mjs`）：演进温差、围栏感知死链、借口/墓碑/死代码块、神文件、`arch-rules`、孤儿测试与 4 态 Worktree 审计，并支持 `record`/`cluster`/`sample` 规则下沉抽检。
-- **四层文档与写前快照保护**：`AGENTS.md`（入口契约，硬上限 30KB / 24KB 预警，含 7 键 `Dev Profile`：`quick-test`、`full-test`、`smoke-verify`、`merge-gate`、`arch-rules`、`high-risk`、`do-not-edit`）+ `docs/TDD.md`（常青架构与 `Feature Map`）+ `docs/prd/` + `docs/specs/` 与 `docs/todo/`（PR 合流前归档进 `docs/archive/todo/`）；`scripts/backup.mjs` 在修改非空工作区前自动于仓外保存 `.tar.gz` 增量快照（零污染 `git status`，`--no-backup` 可跳过，支持 `restore` 还原并清理无主新增文件）。
-- **双轴五态身份与双轨四级 GitHub 引擎**：严格区分 `local-only`、`maintainer`、`contributor-fork`、`clone-readonly` 与 `undetermined`（杜绝他人仓库 `git clone` 误判为维护者）；传输轨并发探测 SSH（22/443）与 HTTPS credential helper 并给出协议错配修复命令，API 轨按 `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` 四级自动降级，全程无弹窗且令牌不落盘、不输出。
+| 脚本 | 常用参数 | 用途 |
+| --- | --- | --- |
+| [scripts/survey.mjs](scripts/survey.mjs) | `--markdown`, `--probe-auth` | 只读勘察仓库现状、识别栈类型、探测 GitHub 认证并输出 10 项 `artifactPlan` |
+| [scripts/backup.mjs](scripts/backup.mjs) | `create\|list\|restore`, `--label`, `--id`, `--dry-run`, `--json` | 写入前生成并管理 `.tar.gz` 安全快照 |
+| [scripts/equip.mjs](scripts/equip.mjs) | `--check`, `--dry-run`, `--bootstrap-empty --lang ... --name ...` | 向目标项目装配/校验 5 个本地研发技能，或对空目录冷启动闭环工程 |
+| [scripts/compose-agents.mjs](scripts/compose-agents.mjs) | `--status`, `--upgrade`, `--check`, `--clean` | 幂等生成或升级目标仓 `AGENTS.md` 受管区间并守住 30KB 预算上限 |
+| [scripts/review.mjs](scripts/review.mjs) | `--scope=...`, `--strict`, `--json` | 按 10 个核心域做交付前逐项体检 |
+| [scripts/handoff.mjs](scripts/handoff.mjs) | `--scan`, `--verify`, `--json` | 交棒前核查与清理过程临时痕迹 |
+| [scripts/sync-toc.mjs](scripts/sync-toc.mjs) | `--check`, `--max-level`, `--min-sections` | 生成并校验双语 Markdown 目录 |
+| [scripts/update.mjs](scripts/update.mjs) | `--check`, `--quiet`, `--equip <dir>` | 检查并更新本地 `project-forge` 能力包 |
 
-## 它怎么做到不吵人
+## 环境要求、边界与许可
 
-三件事值得单独说，因为它们是这个工具「用起来顺不顺」的全部：
-
-1. **免责的判据不查。** 单语 README、个人项目没有 CI、纯本地无远端——这些都不是缺陷。
-   判断依据只有一条：**不说会出事吗？** 会出事的才拦。
-2. **决定写进项目，不藏在开关里。** 「这个项目不放许可证」这类只有你能定的事，
-   写进 `AGENTS.md` 的「## 取舍」节。没有要记的 12 个 flag，也没有隐藏的状态文件。
-3. **痕迹看得见，升级不伤手改。** `AGENTS.md` 留有 `project-forge:` 标记，`.agents/skills/.pf-manifest.json` 维护每个内置文件与受管区间的 SHA256 三态账本：未改动的静默升级、新版退役文件自动清理，用户魔改的文件与自定义 Skill 则 100% 原样保留；不需要时跑一次即可交棒清理。
-
-## 它不会做的事
-
-- 不公开你的私有仓库（默认私有，改成公开要你明确说）
-- 不强推、不改写已推送的历史、不删已发布的版本
-- 不把只读克隆误判为维护者直推主干，也不替 `contributor-fork` 自动合并上游 PR 或在 PR 仍开放时删其分支
-- 不在未获人类批准前执行触碰工作流或生命周期钩子的外来外部 PR 脚本（`--untrusted-scan` 静态拦截）
-- **不自己决定发版**：日常只到「推分支 + 开 PR → 独立审查 → 合并」，打标签、建发布页、发制品库都要你明确说
-- 不替你选许可证、不替你编造署名或账号
-- **未经你明确确认，不拆掉自己留下的任何东西**
-
-它按**能不能撤回**分档，不按「是不是对外」分档：推自己的分支、开 PR、改 PR 都能撤回
-（删分支、关 PR），属于日常，不必等谁点头；发版、把私有仓库转公开、改写历史撤不回来，
-这几件才停下来给人看。强制推送与改写已推送历史永不自动执行。
-
-**合并这一步默认由审查者做完。** 独立审查通过之后就地合，不再往人手里递一道——
-人是不会去读代码的，把合并挂在人身上，实际发生的是「点一下同意」，只增加等待，没增加判断。
-真正做判断的是审查：它拿到冻结的验收标准、diff、门禁原始输出，并且做过故障注入。
-外部贡献者的提案也一样，防陌生人的那一层在**审查之前**（先只读审 diff，跑门禁时关掉生命周期脚本）。
-
-- **核心脚手架扩展**：`scripts/backup.mjs`（仓外写前 `.tar.gz` 快照与还原）、`scripts/handoff.mjs` 与 `scripts/sync-toc.mjs`。
-- **只有一类必须人点头：弱化门禁的改动。** 删测试、放宽断言、加跳过标记、把检查改成警告、改松 CI——`flow.mjs merge` 检测到这类变更时直接以退出码 `4` 阻断，必须由人点头加 `--human-approved`。想更保守，在项目 `AGENTS.md` 的「取舍」里写 `merge-authority: human`。
-
-**这条判据对维护本 skill 自己也一样。** 它治理别人的项目，也治理自己——这里同样是
-拉分支 → 门禁全绿 → 推分支 → 开 PR → 独立审查 → 合并，不多一步确认，也不少一步审查。
-
-日常与发版是两件事，它默认只做前一件。这不是保守，是因为两者能不能撤回完全不同：
-推送错了可以反向提交，发出去的版本收不回来——装走它的人已经在用了。
-所以「攒了几个改动」「版本号看着该抬了」都不构成发版理由。
-
-**清掉痕迹之前一定先问。** 分支、worktree、远端分支都是别人机器上的东西，删了不可逆；
-它会把清单列出来（哪个 worktree、哪条本地分支、哪条远端分支），等你点头才动手。
-问不到人时写进汇报，不自己动手——问不到人与他同意是两件事。
-
-## 遇到问题与参与贡献
-
-- **报缺陷**用仓库里的[缺陷模板](.github/ISSUE_TEMPLATE/bug_report.md)。它问的正是能定位
-  问题的那四件事——期望什么、实际什么、怎么复现、什么环境。少了任何一件，都得先回来问一轮。
-  如果问题与勘察判定有关，请附上被勘察目录的技术栈与大致结构，那往往直接指出判据漏了什么。
-- **提需求或改判定**用[需求模板](.github/ISSUE_TEMPLATE/feature_request.md)。
-- **改代码**看[贡献指南](CONTRIBUTING.md)：本地怎么跑、门禁是哪几条、改动怎么提。
-  高风险路径上（判定逻辑、门禁本身、包边界、发布链路）的改动需要一轮独立审查，
-  审查按动手前冻结的验收标准逐条给结论——判据与止损见 `references/collaboration.md` 的「七、审查循环」。
-
-## 里面有什么
-
-```text
-SKILL.md            入口：什么时候读哪一份，以及不读不许动手的门控表
-references/         判据文档，按当前这一步需要的那份读
-templates/          落盘骨架：AGENTS 契约、四层 docs 模板、贡献/发版规范、许可证、流水线
-kit/skills/         随包分发的五套自包含内置研发 Skill（dev-explore/plan/flow/review/govern）
-scripts/            勘察、装备（equip）、快照（backup）、生成（compose-agents）、体检、交棒、同步、自更新
-```
-
-`scripts/dev/`、`.agents/` 与 `docs/` 只服务这个仓库自己的自检、自举与归档，均通过 `.gitattributes` 排除，不进用户包。
-
-这个仓库是它自己那套规范的第一个用户：根目录的 `.agents/skills/` 由 `equip.mjs .` 从 `kit/skills/` 单源同步生成，根目录的 `AGENTS.md` 由 `compose-agents.mjs .` 生成并受 `preflight` 同构核对。做不到时先改自己，再改规范。
-
-## 许可
-
-[MIT](LICENSE)
+- **运行环境**：Node.js 18 及以上版本（`scripts/` 全部使用 `node:` 内置模块，无第三方依赖）、Git；如需自动配齐 GitHub 远端与发布保护，另需 GitHub CLI（`gh`）或已配置认证凭据。
+- **能力边界**：`project-forge` 只负责仓库工程治理、协作契约、工作流底座与实证门禁，**不生成业务代码，也不替项目选型技术栈**；产品层仅面向 GitHub 生态。
+- **延伸文档**：入口与门控调度见 [SKILL.md](SKILL.md)，本仓库工程契约见 [AGENTS.md](AGENTS.md)，贡献与 PR 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，发版流程见 [RELEASING.md](RELEASING.md)。
+- **开源许可**：采用 [MIT License](LICENSE) 发布。

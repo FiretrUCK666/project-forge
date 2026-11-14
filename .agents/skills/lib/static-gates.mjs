@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join, posix as pathPosix } from 'node:path'
 
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
+import { hasHumanMergeAuthority } from './profile.mjs'
 
 export const PACKAGE_LOCKFILES = Object.freeze([
   'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
@@ -468,7 +469,8 @@ export function classifyDoorType({
   if (highRiskHits.length > 0) signals.push(`触碰高风险路径：${highRiskHits.slice(0, 5).join(', ')}`)
   if (touchesContract) signals.push('涉及跨模块或外部对外契约变更')
   if (task?.doorType === 'one-way') signals.push('任务元数据已声明 doorType=one-way')
-  if (agentsText && /^\s*(?:[-*]\s*)?`?merge-authority`?\s*[:：]\s*human\b/im.test(agentsText)) {
+  const humanAuth = hasHumanMergeAuthority(agentsText)
+  if (humanAuth) {
     signals.push('AGENTS.md 声明了 merge-authority: human')
   }
   const doNotEditList = Array.isArray(doNotEdit) ? doNotEdit : []
@@ -489,7 +491,7 @@ export function classifyDoorType({
   } else if (isOneWay || highRiskHits.length === 1 || files.length >= 4) {
     blastRadius = 'medium'
   }
-  const hasHumanAuth = Boolean(gateWeakened) || (agentsText && /merge-authority\s*:\s*human/i.test(agentsText))
+  const hasHumanAuth = Boolean(gateWeakened) || humanAuth
   const mergeAuthority = hasHumanAuth || isOneWay ? 'human-required' : (highRiskHits.length > 0 ? 'reviewer-with-fault-injection' : 'reviewer-direct')
 
   return {
@@ -569,7 +571,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
   const isTest = TEST_FILE_RE.test(rel)
   const isWorkflow = GATE_WORKFLOW_FILE_RE.test(rel)
   const isScriptOrCi = GATE_SHELL_OR_SCRIPT_RE.test(rel)
-  const isRegexLine = (l) => /^\s*(?:const|let|var|if|else\s+if|return)\b.*\/[^/]+\//.test(l)
+  const isRegexLine = (l) => /^\s*(?:(?:export\s+)?(?:const|let|var)|if|else\s+if|return|\|\||&&|\?|:)\b.*\/[^/]+\//.test(l)
 
   if (status === 'D' && isTest) {
     hits.push({
@@ -585,6 +587,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
 
   let inBlock = false
   let permIndent = -1
+  let runBlockIndent = -1
   for (const line of added) {
     const { commentText, codeText, nextInBlock } = extractLineCommentInfo(line, inBlock, ext)
     inBlock = nextInBlock
@@ -604,18 +607,25 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
 
     if (isWorkflow) {
       const indent = line.length - line.trimStart().length
-      if (permIndent >= 0 && trimmed !== '' && !trimmed.startsWith('#') && indent <= permIndent) permIndent = -1
-      if (/^permissions\s*:/i.test(trimmed)) permIndent = indent
-      if (!commentText || codeText.trim()) {
-        if (/\bcontinue-on-error\s*:\s*true\b/i.test(codeText)) {
-          hits.push({ type: 'ci-continue-on-error', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '工作流步骤设置 continue-on-error: true', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
-        }
-        if (/^\s*(?:-\s*)?if\s*:\s*(?:false\b|\$\{\{\s*false\s*\}\})/i.test(codeText)) {
-          hits.push({ type: 'ci-disabled-step', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '工作流禁用检查步骤 (if: false)', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
-        }
-        if (/\bpermissions\s*:\s*write-all\b|\bpull_request_target\b/i.test(codeText)
-          || ((/\bpermissions\s*:/i.test(codeText) || permIndent >= 0) && GATE_CI_PERM_WRITE_RE.test(codeText))) {
-          hits.push({ type: 'ci-loosened-permissions', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '放宽 CI 工作流写权限或触发边界', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
+      if (runBlockIndent >= 0 && trimmed !== '' && !trimmed.startsWith('#') && indent <= runBlockIndent) runBlockIndent = -1
+      const isRunHeader = /^(?:-\s*)?(?:run|script)\s*:\s*[|>][-+]?(?:\s+#.*)?$/i.test(trimmed)
+      const isInlineRun = !isRunHeader && /^(?:-\s*)?(?:run|script)\s*:\s*\S/i.test(trimmed)
+      if (isRunHeader) runBlockIndent = indent
+      const inShellBody = (runBlockIndent >= 0 && indent > runBlockIndent) || isInlineRun
+      if (!inShellBody) {
+        if (permIndent >= 0 && trimmed !== '' && !trimmed.startsWith('#') && indent <= permIndent) permIndent = -1
+        if (/^permissions\s*:/i.test(trimmed)) permIndent = indent
+        if (!commentText || codeText.trim()) {
+          if (/^\s*continue-on-error\s*:\s*true\b/i.test(codeText)) {
+            hits.push({ type: 'ci-continue-on-error', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '工作流步骤设置 continue-on-error: true', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
+          }
+          if (/^\s*(?:-\s*)?if\s*:\s*(?:false\b|\$\{\{\s*false\s*\}\})/i.test(codeText)) {
+            hits.push({ type: 'ci-disabled-step', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '工作流禁用检查步骤 (if: false)', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
+          }
+          if (/^\s*permissions\s*:\s*write-all\b|\bpull_request_target\b/i.test(codeText)
+            || ((/^\s*permissions\s*:/i.test(codeText) || permIndent >= 0) && GATE_CI_PERM_WRITE_RE.test(codeText))) {
+            hits.push({ type: 'ci-loosened-permissions', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '放宽 CI 工作流写权限或触发边界', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
+          }
         }
       }
     }
@@ -624,8 +634,11 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       hits.push({ type: 'error-suppression', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '新增静态检查屏蔽注释', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
     }
 
-    if (!isRegexLine(line) && codeText.trim()) {
-      const hasBypassFlag = /--no-verify\b|--passWithNoTests\b/.test(codeText)
+    const isEchoLine = /^\s*(?:echo|printf)\b/.test(trimmed)
+    if (!isRegexLine(line) && !isEchoLine && codeText.trim()) {
+      const hasBypassFlag = isScriptOrCi
+        ? /--no-verify\b|--passWithNoTests\b/.test(codeText)
+        : /\b(?:exec|spawn|run|gitRun)\w*\s*\([^)\n]*(?:--no-verify|--passWithNoTests)\b/.test(codeText)
       const hasOrTrue = (isScriptOrCi && GATE_SHELL_BYPASS_RE.test(codeText))
         || /\b(?:exec|spawn|execSync|execFileSync|run)\w*\s*\([^)\n]*\|\|\s*true\b/.test(codeText)
       if (hasBypassFlag || hasOrTrue) {

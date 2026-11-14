@@ -675,6 +675,39 @@ export function registerV6KitCases(cases) {
         return `cleanup --only-review-worktree 未按粒度保留：${clOnlyRev.stdout} ${clOnlyRev.stderr}`
       }
 
+      // Round 1 审查发现的正反双向回归：AGENTS.md 正文提及 merge-authority 不误判、static-gates 不自误报、workflow run: echo 不误触发权限放宽
+      const { parseAgentsProfile, hasHumanMergeAuthority, detectGateWeakeningInEntry } = await import('../../kit/skills/lib/shared.mjs')
+      const repoProf = parseAgentsProfile(SKILL_ROOT)
+      if (repoProf.mergeAuthority !== 'reviewer') {
+        return `AGENTS.md 协作说明正文误触发 mergeAuthority=${repoProf.mergeAuthority}`
+      }
+      if (!hasHumanMergeAuthority('## 取舍\n- `merge-authority`: human\n') || hasHumanMergeAuthority('## 协作\n保守仓写 `merge-authority: human`。\n')) {
+        return 'hasHumanMergeAuthority 区间判定正反异常'
+      }
+      const fpStatic = detectGateWeakeningInEntry({
+        file: 'kit/skills/lib/static-gates.mjs',
+        status: 'A',
+        added: ["  reason: '新增校验旁路标记（--no-verify / || true）'"],
+      })
+      const fpWorkflow = detectGateWeakeningInEntry({
+        file: '.github/workflows/release.yml',
+        status: 'M',
+        added: ['        run: |', '          echo "::error::请检查工作流 permissions: contents: write"'],
+      })
+      const tpWorkflow = detectGateWeakeningInEntry({
+        file: '.github/workflows/check.yml',
+        status: 'M',
+        added: ['    permissions:', '      contents: write'],
+      })
+      const tpPkg = detectGateWeakeningInEntry({
+        file: 'package.json',
+        status: 'M',
+        added: ['    "test": "vitest --passWithNoTests"'],
+      })
+      if (fpStatic.length > 0 || fpWorkflow.length > 0 || tpWorkflow.length === 0 || tpPkg.length === 0) {
+        return `detectGateWeakeningInEntry 正反断言异常：fpS=${fpStatic.length}, fpW=${fpWorkflow.length}, tpW=${tpWorkflow.length}, tpP=${tpPkg.length}`
+      }
+
       return true
     } finally {
       for (const wt of ['.worktrees/impl-pr-88', '.worktrees/review-pr-89', '.worktrees/impl-note-case', '.worktrees/review-note-case']) {

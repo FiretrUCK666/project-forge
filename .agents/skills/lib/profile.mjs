@@ -114,6 +114,15 @@ export function readDecisionMap(agentsText) {
   return map
 }
 
+/** 仅从 `AGENTS.md`「## 取舍」或「## Dev Profile」区间判断是否显式声明 `merge-authority: human`。 */
+export function hasHumanMergeAuthority(agentsText) {
+  if (typeof agentsText !== 'string' || !agentsText) return false
+  const decVal = readDecisionMap(agentsText).get('merge-authority')
+  if (decVal && /^`?human`?(?:\s|$|[，。；,;（(])/i.test(decVal.trim())) return true
+  const scoped = extractDevProfileLines(agentsText).join('\n')
+  return /^\s*(?:[-*]\s*)?`?merge-authority`?\s*[:：]\s*`?human`?\b/im.test(scoped)
+}
+
 /** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
 export function readDecisions(agentsText) {
   return new Set(readDecisionMap(agentsText).keys())
@@ -679,7 +688,7 @@ export function parseAgentsProfile(repoRoot) {
       }
     }
 
-    if (/merge-authority\s*:\s*human/i.test(text)) {
+    if (hasHumanMergeAuthority(text)) {
       profile.mergeAuthority = 'human'
     }
   }

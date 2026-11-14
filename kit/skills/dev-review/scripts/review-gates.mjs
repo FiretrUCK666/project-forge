@@ -10,6 +10,7 @@ import { join } from 'node:path'
 
 import { checkMermaidLabelWidth } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
+import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
   CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE,
   classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, matchGlob,
@@ -366,7 +367,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
   const deterministicHits = gateWeakenedHits.filter((h) => h.severity !== 'advisory')
   const gateWeakened = deterministicHits.length > 0
   const agentsText = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
-  const hasHumanMergeAuthority = /^\s*(?:[-*]\s*)?`?merge-authority`?\s*[:：]\s*human\b/im.test(agentsText)
+  const hasHumanMergeAuthority = checkHumanMergeAuthority(agentsText)
   const allFiles = [...diff.files.map((f) => f.file), ...diff.untracked]
   const totalFiles = allFiles.length
   const doNotEdit = devProfile['do-not-edit'] ?? []

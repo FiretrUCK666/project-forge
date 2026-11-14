@@ -48,6 +48,7 @@ export {
   detectEcosystemCommands,
   DEV_PROFILE_KEYS,
   discoverWorkspacePackages,
+  hasHumanMergeAuthority,
   isProfileExplicitNone,
   parseAgentsProfile,
   parseDevProfile,

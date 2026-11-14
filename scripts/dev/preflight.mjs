@@ -507,29 +507,38 @@ const FINISH_REQUIRED = [
   {
     id: 'remote-probe',
     label: '删远端分支之前要先查远端还在不在',
-    where: { step: 7 },
-    re: /ls-remote|远端还在不在/,
+    // **认那条命令，不认那句白话。** 早先为了迁就一处措辞把它放宽成 `/ls-remote|远端还在不在/`，
+    // 结果是「三处一起删掉 `git ls-remote`、只留散文」从红变绿——那正是内容下限当初要治的形状。
+    // 放宽断言就是弱化门禁，哪怕出发点是为了少一次假红。
+    where: { stepMatching: /git push origin --delete/ },
+    re: /ls-remote/,
   },
   {
     id: 'downstream-check',
     label: '删远端分支之前要先查有没有下游堆叠 PR 以它为 base',
-    where: { step: 7 },
+    where: { stepMatching: /git push origin --delete/ },
     re: /(下游|堆叠)[^。；\n]*PR/,
   },
   {
     id: 'ask-before-delete',
     label: '删任何东西之前先把要删的清单列出来问一次',
     where: { chapter: true },
-    // 判的是**清单这个产物本身**，不是「问」这个动词。
+    // ## 判「一段话里同时出现了这四件事」，不判字面顺序和排版
     //
-    // 一路试过三种写法，都被蒙混：绑「问人」被「卸之前先问人」蒙混；加删除动词仍被那句蒙混
-    // （它同时有「卸」和「问」）；绑「清单 + 问」又被三问表里的「产物清单」和一句举例蒙混。
-    // **拿正则去读散文的语义，这件事本身就不成立**——散文的写法是无穷的，我堵一个它换一个。
+    // 先说走过的弯路。先后试过：绑「问人」（被「卸之前先问人」蒙混）、加删除动词（仍被那句
+    // 蒙混，它同时有「卸」和「问」）、绑「清单 + 问」（被「产物清单」和一句举例蒙混）。
+    // **拿正则去读散文的语义，这件事本身不成立**——散文的写法是无穷的，堵一个它换一个。
     //
-    // 换成查具体产物：一句话里同时列出「worktree」「本地分支」「远端分支」——那就是
-    // 「先把要删的东西列出来」这件事的可见形态。别处那几句都不这么列，也不该这么列。
-    // 判据因此从「猜它是不是在讲这件事」变成「它有没有把这件事做出来」。
-    re: /(worktree|工作树|工作区)[^。\n]*本地分支[^。\n]*远端分支/,
+    // 于是换思路：判**具体产物的形状**。要删的东西固定是三类（worktree、本地分支、远端分支），
+    // 「先问」固定是一个征询词。四个条件在**同一段**里同时成立，就是这件事发生了。
+    //
+    // 不判顺序、不判是否同一行——那都是排版，不是判据。早先的正则要求三项按
+    // worktree→本地分支→远端分支 同行排列，换序或改成分行就假红，而「清单长这样」那种写法
+    // 本来就是分行的。
+    test: (block) => /(worktree|工作树)/.test(block)
+      && /本地分支/.test(block)
+      && /远端分支/.test(block)
+      && /(问|点头|确认)/.test(block),
   },
 ]
 
@@ -573,10 +582,15 @@ export function finishSiteRolesMissing(sites) {
 /**
  * 收尾七步的**正文**（含每步的续行），按编号切成七块。
  *
- * 只取编号开头的行和它的续行，不取这一节里的解释段落：解释是写给某一处的读者看的，
- * 允许各写各的；**步骤正文是给人照着敲的**，那里不能分叉。
+ * 只取编号开头的行和它的续行，**空行处收口**：空行是段落的边界，一个步骤的正文到空行就结束，
+ * 后面那些是解释，不是步骤。不收口的话最后一步会把本章余下的全部内容吞进去——实测第 7 步
+ * 的 body 有 11 行，含「第 1 步为什么在合并之前」两段、清单句、防乱码段，于是
+ * `where: { step: 7 }` 实际等于「第 7 步之后的所有内容」，范围宣告与实现不符。
+ *
+ * 前六步看不出这个毛病（下一行编号自然会切断），偏偏被 scope 的那一步是坏的——这类
+ * 「只在最后一格失灵」的错最不容易被发现。
  */
-function finishStepBodies(text) {
+export function finishStepBodies(text) {
   const range = finishSectionRange(text)
   if (range === undefined) return undefined
   const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n').slice(range.start, range.end)
@@ -586,6 +600,16 @@ function finishStepBodies(text) {
     if (/^\s*\d+\.\s/.test(line)) {
       if (current !== null) bodies.push(current)
       current = line
+      continue
+    }
+    // 空行收口：步骤正文到段落边界为止。
+    if (line.trim() === '') {
+      if (current !== null) { bodies.push(current); current = null }
+      continue
+    }
+    // 顶格的标题或新条目也是边界（步骤正文都有缩进）。
+    if (/^(#|- \*\*|<!--)/.test(line)) {
+      if (current !== null) { bodies.push(current); current = null }
       continue
     }
     if (current !== null) current += '\n' + line
@@ -643,16 +667,47 @@ export function finishRequiredMissing(text) {
   }
   const chapter = lines.slice(start, end).join('\n')
 
-  // 第 N 步的正文（含续行）——按结构切，不靠猜语义。
-  const stepBody = (n) => {
+  // **按内容找那一步，不按编号。**
+  //
+  // 早先写的是 `where: { step: 7 }` —— 六个字的问题是：插入一步就取到错的那一步，
+  // 判据以「没交代」的形式假红，而真正的错是「有人加了一步」。假红比漏检更耗人：
+  // 它把人引去改判据，而判据本来是对的。
+  //
+  // 换成按那句话本身认：谁教 `git push origin --delete`，谁就是这一步。
+  // 和 `FINISH_ANCHOR` 认「合并收尾」四个字是同一种做法——认语义，不认位置。
+  const stepBody = (pattern) => {
     const bodies = finishStepBodies(text)
-    return bodies === undefined ? undefined : (bodies[n - 1] ?? '')
+    if (bodies === undefined) return undefined
+    return bodies.find((body) => pattern.test(body))
+  }
+
+  // 段落（空行分隔）。章内判定按**连续的几段**给，不按单段也不按整章：
+  //
+  //   - 按单段：写成「引导句 + 下面的项目列表」就假红——那正是这份文档自己
+  //     「清单长这样」的形态（三行分列的代码块）。
+  //   - 按整章：又回到最初那个「被同一章里别处的词蒙混」的坑。
+  //
+  // 折中是滑动窗口：连着的一小块里凑齐那几件事就算。窗口给 3 段，够容纳「一句引导 + 一张清单」。
+  const paragraphs = chapter.split(/\n\s*\n/)
+  const windowHit = (test) => {
+    for (let i = 0; i < paragraphs.length; i += 1) {
+      if (test(paragraphs.slice(i, i + 3).join('\n'))) return true
+    }
+    return false
   }
 
   const missing = []
   for (const one of FINISH_REQUIRED) {
-    const scope = one.where.step !== undefined ? stepBody(one.where.step) : chapter
-    if (scope === undefined || !one.re.test(scope)) missing.push(one.label)
+    let ok = false
+    if (one.where.stepMatching !== undefined) {
+      const body = stepBody(one.where.stepMatching)
+      ok = body !== undefined && one.re.test(body)
+    } else if (one.test !== undefined) {
+      ok = windowHit(one.test)
+    } else {
+      ok = one.re.test(chapter)
+    }
+    if (!ok) missing.push(one.label)
   }
   return missing
 }

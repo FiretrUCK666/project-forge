@@ -2015,6 +2015,40 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return `章外提到不算交代：应报缺 3 项，实际 ${finishRequiredMissing(outside).length} 项`
   }
 
+  // 反面五：**要素挪到第 7 步之后的解释段，不算第 7 步交代过。**
+  // 这一条治的是「步正文切片不收口」：早先最后一步会吞掉本章余下全部内容，
+  // 于是要素挪到哪都算数，范围宣告与实现不符。
+  const stepScoped = full.replace(
+    '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '  7. 删远端分支之前查有没有下游堆叠 PR；两件都清了才 `git push origin --delete <分支>`。',
+  ).replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**',
+    '  解释段：远端用 `git ls-remote --heads origin <分支>` 查一下。\n\n  **第 5 步之前先把要删的清单列出来问一次**',
+  )
+  if (!finishRequiredMissing(stepScoped).some((l) => l.includes('远端还在不在'))) {
+    return '要素挪到第 7 步之后的解释段仍然算数——步正文没有收口'
+  }
+
+  // **正面：换序、改成分行，都不该报。**
+  // 排版不是判据。早先的正则要求三项同行按固定顺序出现，而这份文档自己的「清单长这样」
+  // 就是分行的——那会把正确写法判成错的。
+  const reordered = full.replace(
+    '  哪个 worktree、哪条本地分支、哪条远端分支。',
+    '  哪条本地分支、哪个 worktree、哪条远端分支。',
+  )
+  if (finishRequiredMissing(reordered).length !== 0) {
+    return `清单换序被误报：${finishRequiredMissing(reordered).join('、')}`
+  }
+
+  const multiline = full.replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '  **第 5 步之前先把要删的清单列出来问一次**：\n\n```text\n- worktree\n- 本地分支\n- 远端分支\n```',
+  )
+  if (finishRequiredMissing(multiline).length !== 0) {
+    return `清单改成分行被误报：${finishRequiredMissing(multiline).join('、')}`
+  }
+
   return true
 }])
 

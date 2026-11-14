@@ -142,6 +142,17 @@ const INJECTIONS = [
     expect: 'templates/agents-project.md 的合并收尾没有交代',
   },
   {
+    // 步正文切片不收口时，最后一步会吞掉本章余下内容，要素挪到哪都算数。
+    // 这类毛病只在「最后一格」出现，前面的步骤看不出问题。
+    id: 'I9f',
+    what: '步正文切片不收口（最后一步吞掉整章余下内容）',
+    file: 'scripts/dev/preflight.mjs',
+    from: '      if (current !== null) { bodies.push(current); current = null }\n      continue\n    }\n    // 顶格的标题或新条目也是边界',
+    to: '      continue\n    }\n    // 顶格的标题或新条目也是边界',
+    expect: '步正文',
+  },
+  {
+    id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
     file: 'templates/work-item.md',
     // 两条一起改：只改第一条的话，第二条 `C2` 还在，判据仍然看得到合法编号。

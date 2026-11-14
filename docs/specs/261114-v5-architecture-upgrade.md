@@ -1,6 +1,7 @@
 # v5 架构升级设计规范
 
 Status: implemented
+- Plan Critique: passed (reviewer=independent-wave2, round=1, sha=90206642c1d6, summary=Wave 2 dual-layer architecture, backup.mjs, audit/critique gates, smoke/dual-gate review, and govern clustering verified.)
 Date: 2026-11-14
 Owner: project-forge 维护协作编排组
 
@@ -13,31 +14,47 @@ Owner: project-forge 维护协作编排组
 3. **跨月升级覆盖与退役残留风险**：目标项目手改 `AGENTS.md` 受管区间或定制内置 Skill 后，缺少基于 SHA256 基线的无损防覆盖保护，且旧版移除文件无法自动清理。
 4. **并行 Worktree 与外部 PR 安全隐患**：多分支并发开发缺少零拷贝依赖共享与防删穿卸载保护；外部 PR 缺少供应链投毒静态拦截，多轮审查缺少强制防死循环止损，且历史门禁 `ask-before-delete` 与 `homePathLeaks` 存在遗留隐患。
 
-v5 架构升级围绕上述问题完成双层同构工程化重构。
+v5 架构升级围绕上述问题完成双层同构工程化重构，并在 Wave 2 增量补强写前增量 `.tar.gz` 快照（`scripts/backup.mjs`）、`行事总纲`、7 键 `Dev Profile`（新增 `smoke-verify` 与 `arch-rules`）、`dev-explore` 三级探索与 `Feature Map`、分级规划自净化（`audit`/`critique-pass`）、`dev-flow` 冒烟实证与弱化门禁退出码 `4` 阻断、`review-pack` 行为/结构双门与门型评估，以及 `govern-audit` 8 项深度审计与 `record`/`cluster`/`sample` 规则下沉抽检。
+
+## 复用既有模块
+
+- 复用 `scripts/lib/protocol.mjs`（标记与预算常数）、`scripts/lib/template.mjs`（条件与变量求值）、`scripts/lib/render.mjs`（勘察报告与导航）、`scripts/lib/claims.mjs`（路径与分支回查）与 `scripts/lib/platform/github.mjs`（双轨四级 GitHub 客户端）。
+- 复用 `kit/skills/lib/shared.mjs` 作为内置 5 套 Skill 的唯一零依赖自包含共享内核，并在其中集中实现 `evaluateArchRules` 与 `classifyDoorType`。
+
+## 本期不做
+
+- 不引入任何第三方 npm 依赖或二进制构建步骤，保持纯 Node 18+ `node:*` 内置模块运行。
+- 不支持非 GitHub 托管平台或绑定特定宿主私有路径与环境变量。
+- 不在未经人类明确确认的情况下自动执行发版、强推、修改仓库可见性或删除本地/远端分支与 Worktree。
+
+## 门型与回滚路径
+
+- 门型：`two-way`（仓库内版本化重构与多模块治理脚本升级，所有产物均受 `.git` 历史、`.agents/skills/.pf-manifest.json` 账本及 `scripts/backup.mjs` 仓外 `.tar.gz` 快照保护）。
+- 回滚路径：未提交改动可直接丢弃或运行 `node scripts/backup.mjs restore` 回退；已合并提交可通过 `git revert` 反向提交还原，不改写已推送历史。
 
 ## 冻结验收标准（C1..C12）
 
-- [x] C1: **双层同构与包边界隔离** — `kit/skills/` 纳入用户包；`.agents/` 与 `docs/` 对齐 `.gitattributes` `export-ignore` 与 `protocol.mjs` `REPO_ONLY_*` 排除列表；`SKILL.md`（`<= 185` 行、`< 18432` 字节、`version: 5.0.0`）与 `kit/` 不含本仓私有路径（如 `docs/work`、`scripts/dev`、`docs/release-notes`）及非 GitHub 平台词。
-- [x] C2: **三态 SHA256 账本与幂等装配** — `scripts/equip.mjs` 将 `kit/skills/**` 同步到 `.agents/skills/**` 并维护 `.agents/skills/.pf-manifest.json`（含 `files` 与 `agentsRegions` SHA256）；实现幂等覆盖、未改自动升级、退役文件物理自净化与用户定制 100% 保留；`--check` 零写入执行字节级校验。
-- [x] C3: **空白项目 0 文件起步** — `scripts/equip.mjs --bootstrap-empty --lang <node|python|go|rust|docs> --name <name>` 为空目录生成零第三方依赖的可运行骨架、冒烟测试与初始 `docs/TDD.md`，且生成项目可实际跑通冒烟测试。
-- [x] C4: **双轴五态身份判定与防误判修复** — `scripts/lib/platform/index.mjs` 与 `survey.mjs` 联合远端拓扑与写权限/所有权证据判定 `local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `undetermined`；修复 `git clone` 他人仓误判为 `maintainer` 的缺陷，同时正确识别缺 `declaredRepo` 的自有仓库与 `contributor-fork` 的 `upstream`。
-- [x] C5: **双轨四级 GitHub 引擎与脱敏安全** — `probeGitHubEnv` 强制无交互环境变量（`GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`BatchMode=yes`）；Track A 探测 SSH 22/443 与 HTTPS credential helper 并给出协议错配 `remediationCmd`（纯 SSH 不误报 `no-credential`）；Track B 支持 `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` 四级降级；token 不进返回值/stdout/JSON；403 设标签降级为 `{ skipped: true }`。
-- [x] C6: **文档四层体系与 `AGENTS.md <= 30KB` 无损演进** — 建立 `AGENTS.md` + `docs/TDD.md` + `docs/prd/` + `docs/specs/` + `docs/todo/`（PR 前归档至 `docs/archive/todo/`）模板体系并清理 `templates/work-item.md`；`templates/agents-project.md` 增加静默路由表、Dev Profile 与同步合并收尾 7 步；`compose-agents.mjs` 强制 `AGENTS_MAX_BYTES = 30720`（`24576` 预警）与 `agentsRegions` SHA256 防覆盖保护。
-- [x] C7: **目录自包含探索与五档分流规划** — `kit/skills/lib/shared.mjs` 与 `dev-explore`/`dev-plan` 100% 自包含；`repo-map.mjs` 只读生成结构与热点地图；`doc-plan.mjs` 实现 Case 1..5 五档分流、`init`/`approve`/`list` 及 `[NEXT STEP]` 导航。
-- [x] C8: **Worktree 共享依赖零拷贝挂载与防删穿** — `worktree-deps.mjs` 在锁文件一致时挂载 Directory Junction（Windows）或 Symlink（类 Unix），不一致时退回隔离；`unmountSharedDeps` 先执行 `fs.unlinkSync()` 解绑再删 worktree，主仓库共享依赖目录完好无损。
-- [x] C9: **全流程任务状态机与安全防误删锁** — `flow.mjs` 基于 `.worktrees/.state/tasks/<taskId>.json` 跟踪状态；`inspect` 支持已有 Issue+PR 接管复用并解析多 Issue 依赖边；未 `finalize` 或 `verifiedHead !== HEAD` 时阻断 `submit`；`contributor-fork` 禁止 `merge`；PR `OPEN` 或缺乏 `--confirm` 时 `cleanup` 硬阻断删除分支。
-- [x] C10: **外部 PR 供应链拦截与六锁审查收口** — `review-pack.mjs --untrusted-scan` 对触碰工作流、生命周期脚本（如 `postinstall`）等的 diff 输出 `BLOCKED_UNTRUSTED_HAZARD` 非零阻断，普通业务 diff 放行；`record` 拒绝 `reviewerId === implementerId`；轮次 `>= 3` 或连续 2 轮同指纹未收口触发 `STOP_LOSS_ESCALATE`。
-- [x] C11: **全量技术债治理与对齐巡检** — `govern-audit.mjs` 实现 `--audit-only`、`--plan-only`、`--execute`、`--scope`、`--categories`、`--loop`、`--issues`/`--apply-issues` 及 `reconcile`（巡检 `AGENTS.md` 体积/路径、`docs/TDD.md` 漂移、陈旧 worktree、`.pf-manifest.json` 与卫生项）。
-- [x] C12: **全仓自举、门禁补强与故障注入实证** — 迁移 `docs/work/` 至 `docs/archive/todo/` 并消除本机路径泄露使 `homePathLeaks` 归零；完成本仓 `equip.mjs .`、`compose-agents.mjs .` 与 `sync-toc.mjs` 自举；升级 `preflight.mjs`（修复「删前必问」假阴性、去掉重复调用、新增一致性/路径泄露/平台词/30KB/180 行校验）、`fixtures.mjs`（补齐 `C1..C11` 双向实跑）与 `verify-injections.mjs`（对齐新模板并新增 `I19..I24`），全部 9 条验证命令退出码为 0。
+- [x] C1: **双层同构与包边界隔离** — `kit/skills/` 纳入用户包；`.agents/` 与 `docs/` 对齐 `.gitattributes` `export-ignore` 与 `protocol.mjs` `REPO_ONLY_*` 排除列表；`SKILL.md`（`<= 185` 行、`< 18432` 字节、`version: 5.0.0`）与 `kit/` 不含本仓私有路径（如 `scripts/dev`、`docs/release-notes`）及非 GitHub 平台词；产品层禁引 `scripts/dev/` 经 `preflight.mjs` 与 `arch-rules` 双重校验。
+- [x] C2: **三态 SHA256 账本、幂等装配与写前快照** — `scripts/equip.mjs` 将 `kit/skills/**` 同步到 `.agents/skills/**` 并维护 `.agents/skills/.pf-manifest.json`；写前由 `scripts/backup.mjs` 在仓外创建滚动 5 份的 `.tar.gz` 快照（支持 `create`/`list`/`restore` 与 `--no-backup`，零变更不冗余备份，还原清理无主文件）。
+- [x] C3: **空白项目 0 文件起步** — `scripts/equip.mjs --bootstrap-empty --lang node/python/go/rust/docs` 为空目录生成零第三方依赖的可运行骨架、冒烟测试与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map` 骨架），且生成项目可实际跑通冒烟测试。
+- [x] C4: **双轴五态身份判定与防误判修复** — `scripts/lib/platform/index.mjs` 与 `scripts/survey.mjs` 联合远端拓扑与写权限/所有权证据判定 `local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `undetermined`；修复 `git clone` 他人仓误判为 `maintainer` 的缺陷，同时正确识别缺 `declaredRepo` 的自有仓库与 `contributor-fork` 的 `upstream`。
+- [x] C5: **双轨四级 GitHub 引擎与脱敏安全** — `probeGitHubEnv` 强制无交互环境变量（`GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`BatchMode=yes`）；Track A 探测 SSH 22/443 与 HTTPS credential helper 并给出协议错配 `remediationCmd`；Track B 支持 `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` 四级降级；token 不进返回值/stdout/JSON；403 设标签降级为 `{ skipped: true }`。
+- [x] C6: **文档四层体系与 `AGENTS.md <= 30KB` 无损演进** — 建立 `templates/agents-project.md`、`templates/docs-tdd.md`、`templates/docs-prd.md`、`templates/docs-spec.md` 与 `templates/docs-todo.md` 四层模板体系（PR 前归档至 `docs/archive/todo/`）；`templates/agents-project.md` 纳入 `行事总纲`、7 键 `Dev Profile`、`two-way`/`one-way` 门型分流与同步合并收尾 7 步；`compose-agents.mjs` 强制 `AGENTS_MAX_BYTES = 30720`（`24576` 预警）、`agentsRegions` SHA256 防覆盖保护与写前 `backup.mjs` 快照，本仓 `AGENTS.md` 压至 `24576` 字节以内。
+- [x] C7: **目录自包含探索与五档分流规划内审** — `kit/skills/lib/shared.mjs` 新增 `evaluateArchRules` 与 `classifyDoorType`；`kit/skills/dev-explore/scripts/repo-map.mjs` 提取 `ciRunSteps`、`taskRunners`、`reusableModules`、`featureMap`；`kit/skills/dev-plan/scripts/doc-plan.mjs` 实现 Case 1..5 分流、`audit` 占位/套话/路径审查、`critique-pass` 防篡改锁定与分级 `approve`。
+- [x] C8: **Worktree 共享依赖零拷贝挂载与防删穿** — `kit/skills/dev-flow/scripts/worktree-deps.mjs` 在锁文件一致时挂载 Directory Junction（Windows）或 Symlink（类 Unix），不一致时退回隔离；`unmountSharedDeps` 先执行 `fs.unlinkSync()` 解绑再删 worktree，主仓库共享依赖目录完好无损。
+- [x] C9: **全流程任务状态机、冒烟实证与门禁阻断** — `kit/skills/dev-flow/scripts/flow.mjs` 支持接管、依赖解析、`verify --mode smoke --target`、`verifiedHead === HEAD` 校验、`merge` 检测 diff 弱化门禁以退出码 `4` 阻断（需 `--human-approved`）、`contributor-fork` 禁合并、`OPEN` PR 防删锁与无 `--confirm` 只列清单。
+- [x] C10: **外部 PR 投毒拦截与双门六锁审查收口** — `kit/skills/dev-review/scripts/review-pack.mjs --untrusted-scan` 拦截工作流/钩子投毒（`BLOCKED_UNTRUSTED_HAZARD`）；输出 `behavioralGate`、`structuralGate`（墓碑/借口压制/神文件/`arch-rules`）与 `doorAssessment`；禁止自审；轮次 `>= 3` 或连续 2 轮同指纹未收口触发 `STOP_LOSS_ESCALATE`。
+- [x] C11: **全量技术债治理、四态 Worktree 与规则下沉** — `kit/skills/dev-govern/scripts/govern-audit.mjs` 实现演进温差、围栏死链、死代码块与借口/墓碑注释、神文件、`arch-rules`、孤儿测试、4 态 Worktree 判定（`merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged`），以及 `record`、`cluster`、`sample` 与 `reconcile`。
+- [x] C12: **全仓自举、门禁补强与故障注入实证** — 迁移历史任务单至 `docs/archive/todo/` 并清零 `homePathLeaks`；完成本仓 `equip.mjs .`、`compose-agents.mjs .` 与 `sync-toc.mjs` 自举；升级 `preflight.mjs`、`fixtures.mjs` 与 `verify-injections.mjs`（含 `I19..I28`），全部 10 道门禁退出码为 0。
 
 ## 模块化设计与实现边界
 
 ### 核心底座与安装装备（`scripts/lib/` & `scripts/`）
 
-- `scripts/lib/protocol.mjs`：集中维护 `AGENTS_MAX_BYTES = 30720`、`AGENTS_WARN_BYTES = 24576`、`KIT_SKILL_MAX_LINES = 180`、`KIT_SKILLS`、`FORBIDDEN_PLATFORM_RE`、`PF_MANIFEST_REL`、`WORKTREES_STATE_REL` 及更新后的 `REPO_ONLY_DIRS`（纳入 `.agents/` 与 `docs/`）。
-- `scripts/lib/platform/github.mjs` & `index.mjs`：提供非交互探测、双轨四级 API 封装与双轴五态纯函数判定，支持测试环境变量与探测桩注入。
-- `scripts/equip.mjs`：负责同步 `kit/skills/**`、三态账本维护、`--check` 字节比对以及 `--bootstrap-empty` 五语言工程生成。
-- `scripts/survey.mjs` / `review.mjs` / `compose-agents.mjs` / `handoff.mjs` / `update.mjs`：打通新五态身份、`--probe-auth`、`docs/` 四层探测、`AGENTS.md` 字节门禁与受管区间哈希保护，同时保持 `gap-coverage.mjs` 100% 映射闭环。
+- `scripts/lib/protocol.mjs`：集中维护 `AGENTS_MAX_BYTES = 30720`、`AGENTS_WARN_BYTES = 24576`、`KIT_SKILL_MAX_LINES = 180`、`KIT_SKILLS`、`FORBIDDEN_PLATFORM_RE`、`PF_MANIFEST_REL`、`WORKTREES_STATE_REL` 及 `REPO_ONLY_DIRS`（纳入 `.agents/` 与 `docs/`）。
+- `scripts/lib/platform/github.mjs` & `scripts/lib/platform/index.mjs`：提供非交互探测、双轨四级 API 封装与双轴五态纯函数判定，支持测试环境变量与探测桩注入。
+- `scripts/backup.mjs` & `scripts/equip.mjs`：提供跨平台 POSIX USTAR/PAX `.tar.gz` 仓外写前备份（`ensurePreWriteBackup`）、`kit/skills/` 三态账本同步、`--check` 字节比对与 `--bootstrap-empty` 五语言起步。
+- `scripts/survey.mjs` / `scripts/review.mjs` / `scripts/compose-agents.mjs` / `scripts/handoff.mjs` / `scripts/update.mjs`：打通新五态身份、`--probe-auth`、`docs/` 四层探测、`AGENTS.md` 字节门禁与 `backup.mjs` 写前保护，同时保持 `scripts/dev/gap-coverage.mjs` 100% 映射闭环。
 
 ### 内置研发 Skill 套件（`kit/skills/`）
 

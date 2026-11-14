@@ -284,6 +284,38 @@ const INJECTIONS = [
     to: '    oversize: false,',
     expect: '30720',
   },
+  {
+    id: 'I25',
+    what: '跳过 backup.mjs restoreBackup 对新增多余孤儿文件的 unlinkSync 清理',
+    file: 'scripts/backup.mjs',
+    from: '        unlinkSync(orphanAbs)',
+    to: '        /* skip unlink */ void orphanAbs',
+    expect: 'restore 未清理多余文件',
+  },
+  {
+    id: 'I26',
+    what: '废除 doc-plan.mjs approveSpec 的独立 Plan Critique 阻断门槛',
+    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
+    from: '    if (!isPassed) {',
+    to: '    if (false && !isPassed) {',
+    expect: '未 critique-pass 的 SPEC 竟被 approve 放行',
+  },
+  {
+    id: 'I27',
+    what: '跳过 flow.mjs merge 的 detectGateWeakening 门禁弱化阻断检查',
+    file: 'kit/skills/dev-flow/scripts/flow.mjs',
+    from: '  const gateFindings = await detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch)',
+    to: '  const gateFindings = []',
+    expect: '门禁弱化改动未被 merge 拦截',
+  },
+  {
+    id: 'I28',
+    what: '关闭 govern-audit.mjs checkMarkdownDeadLinks 的围栏代码块跳过判定',
+    file: 'kit/skills/dev-govern/scripts/govern-audit.mjs',
+    from: '      if (fenceChar) continue',
+    to: '      if (false && fenceChar) continue',
+    expect: '围栏代码块内相对链接被误判为死链接',
+  },
 ]
 
 function runFixtures() {

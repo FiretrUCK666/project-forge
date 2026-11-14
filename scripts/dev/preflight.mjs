@@ -1377,7 +1377,7 @@ function checkScripts() {
 // ── 4. 会跑的都真跑 ─────────────────────────────────────────────────
 
 function checkHelps() {
-  for (const name of ['survey.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs', 'equip.mjs']) {
+  for (const name of ['survey.mjs', 'backup.mjs', 'compose-agents.mjs', 'review.mjs', 'handoff.mjs', 'sync-toc.mjs', 'update.mjs', 'equip.mjs']) {
     const p = join(ROOT, 'scripts', name)
     if (!existsSync(p)) { fail(`缺脚本 ${name}`); continue }
     const res = spawnSync(process.execPath, [p, '--help'], { encoding: 'utf8', timeout: 20000 })
@@ -1632,6 +1632,95 @@ function checkHygiene() {
   }
 }
 
+const EXPECTED_DEV_PROFILE_KEYS = [
+  'quick-test',
+  'full-test',
+  'smoke-verify',
+  'merge-gate',
+  'arch-rules',
+  'high-risk',
+  'do-not-edit',
+]
+
+function checkArchBoundaries() {
+  const productScripts = [
+    ...readdirSync(join(ROOT, 'scripts'), { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith('.mjs'))
+      .map((d) => join(ROOT, 'scripts', d.name)),
+    ...walk(join(ROOT, 'scripts', 'lib'), (f) => f.endsWith('.mjs')),
+    ...walk(join(ROOT, 'kit'), (f) => f.endsWith('.mjs')),
+  ]
+
+  const importSpecRe = /(?:^\s*(?:import|export)[\s\S]*?from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/gm
+  for (const file of productScripts) {
+    const name = rel(file)
+    const text = readText(file)
+    for (const m of text.matchAll(importSpecRe)) {
+      const spec = m[1].trim()
+      if (spec.startsWith('node:')) continue
+      let pointsToDev = /(?:^|\/)scripts\/dev(?:\/|$)/.test(spec)
+      if (!pointsToDev && (spec.startsWith('./') || spec.startsWith('../'))) {
+        const targetRel = rel(resolve(dirname(file), spec))
+        pointsToDev = targetRel === 'scripts/dev' || targetRel.startsWith('scripts/dev/')
+      }
+      if (pointsToDev) {
+        fail(`产品层架构越界：${name} 引用了开发门禁层「${spec}」（违反 kit/**、scripts/*.mjs、scripts/lib/** -> scripts/dev/** 禁引规则）`)
+      }
+    }
+  }
+  note(`架构边界：${productScripts.length} 个产品层脚本均未逆向引用 scripts/dev/`)
+}
+
+function sameKeyList(a, b) {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((k, i) => k === sb[i])
+}
+
+function checkDevProfileParity() {
+  const expected = [...EXPECTED_DEV_PROFILE_KEYS]
+
+  const tplText = readText(join(ROOT, 'templates', 'agents-project.md'))
+  const tplBlock = /<!--\s*project-forge:\s*begin\s+Dev Profile\s*-->[\s\S]*?```yaml\n([\s\S]*?)```[\s\S]*?<!--\s*project-forge:\s*end\s+Dev Profile\s*-->/.exec(tplText)
+  if (!tplBlock) {
+    fail('Dev Profile 键集核对：templates/agents-project.md 缺少 Dev Profile yaml 块')
+  } else {
+    const tplKeys = tplBlock[1].split('\n').map((l) => /^([a-z-]+)\s*:/.exec(l.trim())?.[1]).filter(Boolean)
+    if (!sameKeyList(tplKeys, expected)) {
+      fail(`Dev Profile 键集核对：templates/agents-project.md 键集 [${tplKeys.join(', ')}] 与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  const sharedText = readText(join(ROOT, 'kit', 'skills', 'lib', 'shared.mjs'))
+  const sharedKv = /export function parseAgentsProfile[\s\S]*?\((quick-test\|[^)]+)\)\\s\*:/m.exec(sharedText)
+  if (!sharedKv) {
+    fail('Dev Profile 键集核对：kit/skills/lib/shared.mjs 找不到 parseAgentsProfile 键集正则')
+  } else {
+    const sharedKeys = sharedKv[1].split('|').map((s) => s.trim()).filter(Boolean)
+    if (!sameKeyList(sharedKeys, expected)) {
+      fail(`Dev Profile 键集核对：shared.mjs 键集 [${sharedKeys.join(', ')}] 与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  for (const relPath of ['kit/skills/dev-review/scripts/review-pack.mjs', 'kit/skills/dev-govern/scripts/govern-audit.mjs']) {
+    const text = readText(join(ROOT, relPath))
+    const arrMatch = /const DEV_PROFILE_KEYS\s*=\s*\[([^\]]+)\]/.exec(text)
+    const reMatch = /function parseDevProfile[\s\S]*?`?\((quick-test\|[^)]+)\)`\?\s*\\s\*:/m.exec(text)
+    if (!arrMatch || !reMatch) {
+      fail(`Dev Profile 键集核对：${relPath} 缺少 DEV_PROFILE_KEYS 或 parseDevProfile 键集正则`)
+      continue
+    }
+    const arrKeys = [...arrMatch[1].matchAll(/['"]([a-z-]+)['"]/g)].map((m) => m[1])
+    const reKeys = reMatch[1].split('|').map((s) => s.trim()).filter(Boolean)
+    if (!sameKeyList(arrKeys, expected) || !sameKeyList(reKeys, expected)) {
+      fail(`Dev Profile 键集核对：${relPath} 键集（const=[${arrKeys.join(', ')}], regex=[${reKeys.join(', ')}]）与基准 [${expected.join(', ')}] 不一致`)
+    }
+  }
+
+  note(`Dev Profile：4 处（模板 / shared / review-pack / govern-audit）7 键全对齐`)
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────
 
 async function main() {
@@ -1652,6 +1741,8 @@ async function main() {
   checkAnchors()
   await checkGapCoverage()
   checkScripts()
+  checkArchBoundaries()
+  checkDevProfileParity()
   checkTemplates()
   checkPlatformLock()
   checkStructureRules()

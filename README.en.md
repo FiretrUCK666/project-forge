@@ -136,8 +136,11 @@ project being worked on:
 # Read-only survey (--markdown for human report, --probe-auth for dual-track GitHub probe)
 node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown
 
-# Equip or losslessly refresh the 5 built-in dev skills (--bootstrap-empty / --check)
+# Equip or losslessly refresh the 5 built-in dev skills (--bootstrap-empty / --check / pre-write backup)
 node "<skill-dir>/scripts/equip.mjs" "<project-dir>"
+
+# Manage off-repo pre-write .tar.gz snapshots (auto-created before equip / compose-agents edits, max 5 kept)
+node "<skill-dir>/scripts/backup.mjs" list "<project-dir>"
 
 # Create or refresh AGENTS.md (<= 30KB budget + SHA256 lossless region protection)
 node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
@@ -149,10 +152,15 @@ node "<skill-dir>/scripts/review.mjs" "<project-dir>"
 node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --scan
 ```
 
-Once equipped, `.agents/skills/` provides five self-contained dev skills routed silently from natural language via the top routing table in `AGENTS.md`:
+Once equipped, `.agents/skills/` provides five self-contained dev skills guided by the top routing table and core operating principles (`行事总纲`) in `AGENTS.md`:
 
-- **Built-in Dev Suite (`kit/skills/` -> `.agents/skills/`)**: `dev-explore` (code map and hotspots), `dev-plan` (5-tier triage `Case 1`..`Case 5` choosing 0 docs, `docs/todo/`, or `docs/specs/`), `dev-flow` (task ledger, zero-copy Worktree Junction/Symlink shared dependencies with `unlinkSync` unlink-before-remove protection), `dev-review` (external PR `--untrusted-scan` poison gate and 6-lock stop-loss review loop), and `dev-govern` (tech-debt audit and `reconcile`).
-- **Four-Layer Docs and Budget**: `AGENTS.md` (entry contract, 30KB hard cap / 24KB warn) + `docs/TDD.md` (evergreen architecture) + `docs/prd/` (on-demand baseline) + `docs/specs/` and `docs/todo/` (archived into `docs/archive/todo/` in the same branch before merge).
+- **Built-in Dev Suite (`kit/skills/` -> `.agents/skills/`)**:
+  - `dev-explore` (`repo-map.mjs`): `quick` / `medium` / `thorough` read-only exploration extracting `ciRunSteps`, `reusableModules`, and `featureMap` to prevent human-proxy guessing;
+  - `dev-plan` (`doc-plan.mjs`): 5-tier triage (`Case 1`..`Case 5`), `two-way`/`one-way` door classification, self-purifying `audit`, and tiered independent `critique-pass` lock;
+  - `dev-flow` (`flow.mjs`, `worktree-deps.mjs`): task ledger, zero-copy Junction/Symlink shared dependencies with `unlinkSync`-before-remove protection, 4-state worktree checks, `verify --mode smoke`, and exit-code `4` blocking when `merge` detects gate weakening;
+  - `dev-review` (`review-pack.mjs`): external PR `--untrusted-scan` poison gate, `behavioralGate` (including `smoke-verify`) + `structuralGate` (tombstone/excuse comments, god files, and `arch-rules`) + `doorAssessment` dual gates, and 6-lock stop-loss review loop;
+  - `dev-govern` (`govern-audit.mjs`): 8 audit upgrades (evolution churn, fence-aware dead-link checks, commented dead code & excuse/tombstone scans, god-file warnings, `arch-rules`, orphan tests, 4-state worktree detection) plus `record`, `cluster`, and `sample`.
+- **Four-Layer Docs and Pre-Write Snapshots**: `AGENTS.md` (entry contract, 30KB hard cap / 24KB warn, 7-key `Dev Profile`: `quick-test`, `full-test`, `smoke-verify`, `merge-gate`, `arch-rules`, `high-risk`, `do-not-edit`) + `docs/TDD.md` (evergreen architecture and `Feature Map`) + `docs/prd/` + `docs/specs/` and `docs/todo/` (archived into `docs/archive/todo/` before merge). `scripts/backup.mjs` automatically stores rolling `.tar.gz` off-repo snapshots before modifying non-empty files (zero `git status` pollution, `--no-backup` to skip, `restore` reverts files and removes orphan additions).
 - **2-Axis 5-State Identity and Dual-Track 4-Tier GitHub Engine**: distinguishes `local-only`, `maintainer`, `contributor-fork`, `clone-readonly`, and `undetermined` (preventing clones of someone else's repo from being misclassified as maintainer); Transport Track probes SSH (22/443) and HTTPS credential helper with exact protocol-mismatch `remediationCmd`, while API Track degrades cleanly across `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` without interactive prompts or token leaks.
 
 ## Why it stays quiet
@@ -197,10 +205,10 @@ way; the protection against strangers sits **before** the review (read the diff 
 lifecycle scripts when running gates).
 
 **Only one class needs a human nod: weakening a gate.** Deleting tests, relaxing assertions,
-adding skip markers, turning a check into a warning, loosening CI — an ordinary change that goes
-wrong turns the next gate red; this one goes wrong and **no gate will ever turn red again,
-including this time**, while looking like "the build is green". Want to be more conservative?
-Write `merge-authority: human` in the project's `AGENTS.md` under `## 取舍`.
+adding skip markers, turning a check into a warning, loosening CI — `flow.mjs merge`
+blocks detected gate-weakening diffs with exit code `4` unless explicitly approved with
+`--human-approved`. Want to be more conservative? Write `merge-authority: human` in the
+project's `AGENTS.md` under `## 取舍`.
 
 **The same rule governs how this skill is maintained.** It governs other projects and it
 governs itself: branch → gates green → push the branch → open a PR → independent review →
@@ -239,7 +247,7 @@ SKILL.md            Entry point: which document to read when, and the gate table
 references/         Criteria pages, read the one this step needs
 templates/          Skeletons that land in the project: AGENTS contract, 4-layer docs, contributing/releasing, licenses, pipelines
 kit/skills/         Five self-contained built-in dev skills shipped with the package (dev-explore/plan/flow/review/govern)
-scripts/            Survey, equip, compose-agents, review, handoff, sync-toc, self-update
+scripts/            Survey, equip, backup, compose-agents, review, handoff, sync-toc, self-update
 ```
 
 `scripts/dev/`, `.agents/`, and `docs/` serve this repository's own self-checks, dogfooding, and records only, and are excluded from the user archive via `.gitattributes`.

@@ -1,75 +1,78 @@
 {
   "schemaVersion": 1,
   "forgeVersion": "5.0.0",
-  "installedAt": "2026-11-14T08:38:39.159Z",
+  "installedAt": "2026-11-14T10:16:47.117Z",
   "files": {
     "dev-explore/SKILL.md": {
-      "sha256": "e2f89532042ac4926f6728993bc56ebbb52ad247ac9be21e1f9771774faae2dd"
+      "sha256": "a59bf649a601642d5fb80916cc65645a29ebc55a9957f2aa1c98c2e38e876f94"
     },
     "dev-explore/scripts/repo-map.mjs": {
-      "sha256": "8743ba8cf4e452f604237220e365d7be2c37329e6a564240da4f2cadfd508dc8"
+      "sha256": "3c86e34ba688059dec3e24ec243f0bf6302993ea4373ff829eb868a1791ab0c1"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "660e3b5ce6e3c54b06b42742153f69df416d9a4f610e4a6a12e6089d42efeb62"
+      "sha256": "80a81b7aa4cc2c5c9c165351cde1c0f529e3183442ee1ba521e88a62ebf35442"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "7a8e8c254c507c4a94115b0e86c4e0f739910e51d76ee75a7b0b27a5d3d70310"
+      "sha256": "f77135b3eb19d3e105f20102428d6ed4f7e7c279d48d2f5f1055fb5dd51e3211"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "e386f2e706ad8c4803a6263bb023a4ac69131fd0de3365b2bf19926c4494a0e1"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "33f02e6febb94826bc935c259da3d08c7574e609891a7bc7a142131bbe42379e"
+      "sha256": "50105e9b82c5b3ea7cd67356a19094b4134fc4daf59121a4295e5d688c8a5f1c"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "bebe6dbb83ccb8d200b053f56ee25eb6dd0c27006b653ac37b8a5e1175fcf759"
+      "sha256": "009d6dc0d2dbba146b34a1c4ed0dcd9bb3346faa8181c287e4c31897094ec2ce"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "3bfee3258dfd29a300779954ca9ba886fa644a3617c1163574789891a19b1771"
+      "sha256": "ab72b7e246a8ba835eeb78cd89d48f1286b06ce5365a6a33685d49a0cac52924"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "576fecfbf880c6a97f41fc74e02f44fab48480250558e9d84040735479808702"
+      "sha256": "efb6c670fe8631d8d04cc3aa7502c26fbf40d4de164d10a339e9e5ee118137b5"
     },
     "dev-review/SKILL.md": {
-      "sha256": "64b744a355d053d1b89f7256be1dde70c76b957d1571ba76bd5e001e7a85ff47"
+      "sha256": "7bb9c7600a01eadf08f45945ed62ed828c4bdf6680b0a6f3075e6edc2443b30b"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "d95e66e1dbcd6681a6c0eccd609a6dc00f0dcba54dade42f54117d358a7d1950"
+      "sha256": "d1ba77c8bf77dda5882351a6da194726c41b31ec64b60aa8d4fbf873b9f6a6df"
     },
     "lib/shared.mjs": {
-      "sha256": "53b64e750f0f0db3b0761ed9ecc1e5990e3164e4e94ddf63bb43af2d6f83f591"
+      "sha256": "97854bdf917e9f7d7150e9ada59c8c57b89ba27b6c0fe1d007f9202bf5f9c8c5"
     }
   },
   "agentsRegions": {
     "意图路由": {
       "sha256": "34a88224404f61fa9e42e420fbdcfdd616d86a8afc63a74b6bcf1f015c750d87"
     },
+    "行事总纲": {
+      "sha256": "09b80ae939721bab1e03cf8512719664c2d0975df40fb3b7650dce77d2cdd952"
+    },
     "项目定位": {
       "sha256": "a10dae3b061bb1df152c456f3587e95e37d53d51f6b927fd03f1619ae4a273db"
     },
     "Dev Profile": {
-      "sha256": "da4322f8bd9e37d818d4a17367a2c4ce0c7c0c9bf866f8981b928ef6d10198d7"
+      "sha256": "c7e9c0ff070d29114dc1c8bc2a236faef33ae88e1eb4c21a561350a4123fa1e5"
     },
     "上下文阅读护栏": {
       "sha256": "fadf8808931d7587584db8a2f378da7b5b1e7c8d4e7de7c2ca7ebf7553c1e08c"
     },
     "架构与关键不变量": {
-      "sha256": "969a59b7b30166f198342d7caa6dd8ef3ad614e37a2640ab0817c5048111cb4a"
+      "sha256": "b5238091eec48fb86d6308d3e4ad8c372a5d566e4a8bac1a7c136614ddac0f88"
     },
     "构建与验证": {
-      "sha256": "176f8ae021936609dfe0a40a6606425307b15bec20ac946401cb00b151a22147"
+      "sha256": "ebf26aaa7d6ac072659e240f8c9275a3e32b86877770336b0f826ffa6163b965"
     },
     "修改守则": {
-      "sha256": "2a0477d34e8c26bd17e096596bf4c1971900b4563b1b1269226294b78be0df56"
+      "sha256": "f7a1d6bc5dff77431936f60674e772ff2633462e265b519c857a7188a15db74f"
     },
     "修改守则补充": {
-      "sha256": "beb8b1c67540d0de5e98cef39912bc4e9544c302234b5e6f04dd6ad2c8bba9ab"
+      "sha256": "b1d816bc3b3737ecd81fad0854859c68ffd108c059e6273230a71aca7bbb8201"
     },
     "版本与发布": {
       "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
     },
     "日常协作与风险分流": {
-      "sha256": "b9a913cff04c79b7f786196435e024cbe5c07517f900a5d6a820d21d96463a8d"
+      "sha256": "1e1f65d75083ffb3576c2b3c9db19107ba483aef5b5da3aadd8bbc0e72781bf8"
     },
     "高风险路径": {
       "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"

@@ -19,8 +19,12 @@ description: |
    - 第 1 档：`L1` 且主仓干净且无并行需求 -> 切分支开发。
    - 第 2 档：`L2/L3` / 关联 Issue / 脏主仓 / 并行 -> `.worktrees/impl-<id>` + 预分配审查槽 `.worktrees/review-<id>`，锁文件 SHA256 一致时自动挂载 `node_modules` / `.venv` junction，不一致时自动隔离。
    - 第 3 档：外部 PR (`--external-pr <M>`) -> `.worktrees/review-pr-<M>` detached 隔离，**未通过静态投毒扫描前绝不挂载依赖或跑脚本**。
-4. **提交 PR 前双锁拦截**：Case 3/4 必须先 `finalize`（核验 `[x]`、归档 Todo 到 `docs/archive/todo/`、SPEC 标 `implemented`，且 Fork 对外部仓绝不泄漏私有 `docs/` 草稿），且每次改代码后必须重跑 `verify` 使 `verifiedHead === HEAD` 才允许 `submit`。
-5. **Fork 硬锁与人类确认清理**：`contributor-fork` 永不推 `upstream`、禁止调 `merge`，且上游 PR 仍为 `OPEN` 时 `cleanup --confirm` 硬锁拒删分支；任何清理不传 `--confirm` 一律只列清单不删；卸载 worktree 必定先 `unlinkSync` 解绑依赖再移除 worktree，再 `git branch -d`（绝不用 `-D`）。
+4. **提交 PR 前双锁与验证节奏**：
+   - Case 3/4 必须先 `finalize`（核验 `[x]`、归档 Todo 到 `docs/archive/todo/`、SPEC 标 `implemented`，且 Fork 对外部仓绝不泄漏私有 `docs/` 草稿），且每次改代码后必须重跑 `verify` 使 `verifiedHead === HEAD` 才允许 `submit`。
+   - **分级验证节奏**：内循环改完即跑 `verify --mode quick --target <file>`；涉及真实运行时/CLI/服务/UI 时必须实跑 `verify --mode smoke`（禁止拿纯单元测试替代真实链路验证）；提 PR 与合并前跑一次 `verify --mode gate`（或 `full`）。
+5. **门禁弱化阻断（单向门退出码 4）与 Fork/清理硬锁**：
+   - `merge` 自动扫描 diff 中是否删减测试断言、新增 `.skip`/`.only`、在 workflow 加入 `continue-on-error: true` / 放宽 `permissions`、或命令追加失效旁路；一旦命中，按单向门（`one-way`）以**退出码 `4`** 阻断，必须由人类明确同意后带 `--human-approved` 方可合并。
+   - `contributor-fork` 永不推 `upstream`、禁止调 `merge`，且上游 PR 仍为 `OPEN` 时 `cleanup --confirm` 硬锁拒删分支；任何清理不传 `--confirm` 一律只列清单不删；卸载 worktree 必定先 `unlinkSync` 解绑依赖再移除 worktree，再 `git branch -d`（绝不用 `-D`）。
 
 ## 标准命令流
 
@@ -31,14 +35,16 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...]
 # 2. 启动工作位（若遇 clone-readonly 按用户选择补充 --clone-choice）
 node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--external-pr <M>]
 
-# 3. 认领与锁定文档及验证证据
+# 3. 认领、锁定文档与分层实证（--target 替换 {target}；运行时改动补跑 smoke；提交前跑 gate）
 node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task <id> [--issue <N>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task <id>
-node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> [--mode quick|full|gate]
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode quick [--target <file>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode smoke
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task <id> --mode gate
 
 # 4. 推送与提 PR / 返工 / 合并 / 人类确认后清理
 node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task <id> [--rework]
 node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task <id> [--rebut "<findingId>: <reason>"]
-node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task <id>
+node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task <id> [--human-approved]
 node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task <id> [--confirm]
 ```

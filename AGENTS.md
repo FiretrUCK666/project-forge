@@ -1,14 +1,6 @@
 # project-forge — 项目工程契约（每次会话自动读）
 
-本文件是这个项目的接口契约：AI 每次新开会话先读它，就知道这是什么项目、机制怎么运转、
-命令怎么跑、哪些地方不能改坏。**它描述现在是什么样，不描述改过什么。**
-
-- **读者分流**：本文件面向 AI，写机制、边界与判据；面向人的命令与地址在 `README.md`、
-  `CONTRIBUTING.md`、`RELEASING.md` 里，不复述。
-- **取值不写快照**：账号、邮箱、远端地址、当前分支、当前版本号一律现场读（清单文件、
-  版本控制配置、账号查询命令）。Fork 易主后这份文件仍然成立。
-- **AI 自维护授权**：项目架构、命令或约定发生实质变更导致本文件失准时，直接更新本文并
-  随代码一同提交；涉及用户可见行为或命令变化时，必须同步更新 `README.md`。
+本文件面向 AI 会话，写机制、边界与判据；面向人的命令见 `README.md`、`CONTRIBUTING.md`、`RELEASING.md`。**只写当前现状，不写变更履历；取值一律现场读清单与 Git 配置；架构/命令变更须随同提交并对齐 `README.md`。**
 
 
 <!-- project-forge: begin 意图路由 -->
@@ -27,6 +19,26 @@
 | 代码体检 / 清技术债 / 对齐契约与文档 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
+
+<!-- project-forge: begin 行事总纲 -->
+## 行事总纲与决策准则
+
+- **四条准则**：
+  1. **治本不治标**：先查根因再改，不用补丁或盲目重试遮掩问题；
+  2. **写原则不写死**：提炼可迁移原则，禁把偶然个案过度泛化；
+  3. **融入结构**：先查复用与现成基建，合入既有主干，不留双轨；
+  4. **保持清朗**：及时清理废弃路径与冗余分支，控制认知复杂度。
+- **信任倒金字塔与规则下沉**：
+  - 保障效力：`静态与类型门禁 > 测试与冒烟实证 > 独立审查 > 文档约定`；
+  - 同类纠偏**满 2 次**沉入脚本或静态检查，报错直接指明根因与修法。
+- **最优解与取舍**：
+  - 先给出无历史包袱的最干净解法，再拆渐进步骤；
+  - 权衡用户易用（UX）、维护顺手（DX）与 AI 可控（AX）。
+- **动手前后四问**：
+  - 改前：有无现成模块可复用？属可局部回退 `two-way` 还是不可逆 `one-way` 门？
+  - 改后：拿到本地真实运行证据了吗？是否引入死代码或借口注释？
+- **不当人肉代理**：凡可由 CLI、接口或 `smoke-verify` 自跑取证的链路，必须本地实测拿输出，不让用户替自己手工验收。
+<!-- project-forge: end 行事总纲 -->
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位
 
@@ -47,7 +59,9 @@
 ```yaml
 quick-test: node scripts/dev/preflight.mjs
 full-test: node scripts/dev/fixtures.mjs
+smoke-verify: node scripts/dev/preflight.mjs
 merge-gate: node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs
+arch-rules: kit/** -> scripts/dev/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
 high-risk: scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes
 do-not-edit: docs/archive/, docs/release-notes/
 ```
@@ -66,75 +80,62 @@ do-not-edit: docs/archive/, docs/release-notes/
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 入口 | `SKILL.md` | 调度与红线：四步、门控表、能力矩阵、硬不变量。**不写判据** |
-| 决策 | `references/` | 每份回答一类问题；动手前读完全文，读的是反直觉的那几条 |
-| 落盘骨架 | `templates/` | 写进被治理项目的文件母版；条件块与占位符在生成时求值 |
-| 内置技能 | `kit/skills/` -> `.agents/skills/` | 五套自包含研发 Skill 单源；通过 `equip.mjs` 同步生成 `.agents/skills/` 与 `.pf-manifest.json` |
-| 引擎 | `scripts/` | `survey` 勘察、`equip` 装备、`compose-agents` 生成、`review` 体检、`handoff` 交棒、`sync-toc` 目录同步、`update` 自更新 |
+| 入口 | `SKILL.md` | 调度与红线：四步、门控表、能力矩阵（**不写判据**） |
+| 决策 | `references/` | 每份回答一类问题；动手前读完全文 |
+| 落盘骨架 | `templates/` | 被治理项目母版；生成时求值条件块与占位符 |
+| 内置技能 | `kit/skills/` -> `.agents/skills/` | 五套自包含研发 Skill 单源；经 `equip.mjs` 生成与 `.pf-manifest.json` 校验 |
+| 引擎 | `scripts/` | `survey`、`equip`、`backup`、`compose-agents`、`review`、`handoff`、`sync-toc`、`update` |
 
-`scripts/lib/` 收敛标记与预算（`protocol.mjs`）、模板求值（`template.mjs`）、报告排版（`render.mjs`）、契约回查（`claims.mjs`）与平台探针（`platform/`）。完整架构与不变量见 `docs/TDD.md`；`scripts/dev/` 与 `.agents/` 只服务本仓库，不进用户包。
+`scripts/lib/` 收敛标记与预算（`protocol.mjs`）、模板求值（`template.mjs`）、报告排版（`render.mjs`）、契约回查（`claims.mjs`）与平台探针（`platform/`）。完整架构与双层平面细节见 `docs/TDD.md`；`scripts/dev/` 与 `.agents/` 仅自用不进用户包。
 
 ### 关键不变量（破坏即事故）
 
-1. **零第三方依赖**：`scripts/` 只用 `node:` 内置模块，只用 JavaScript。`preflight` 扫磁盘检查。
-2. **入口不复述判据**：`SKILL.md` 只写「什么时候读哪一份」。两处都写机制，一定有一处先过期。
-3. **不写死取值**：账号、路径、版本号、仓库地址、默认分支一律写「从哪里取」。
-4. **单一真相源**：标记语法只在 `protocol.mjs`；条件与变量只在 `template.mjs`；
-   报告排版只在 `render.mjs`。同一件事两个实现，迟早给出两个答案。
-5. **幂等**：所有脚本重复执行结果相同。判据是第二遍的字节与第一遍相同。
-6. **只读先行**：勘察完成之前不写任何文件。
-7. **预算门禁**：入口行数与字节、参考文档合计行数、一次全量必读行数三个上限，
-   **数字只写在 `scripts/lib/protocol.mjs` 的四个常量里**，`preflight` 读它们来判并喊。
-   本文不复述具体数值——复述的那一份不会跟着常量变，而它看起来像权威。
-8. **渲染产物零残留**：目标项目的 `AGENTS.md` 里不许出现 `{{占位符}}` 与 `if/endif`——
-   它们必须在渲染那一刻求值完。留一个 `{{COMMANDS}}` 在用户文件里，看起来像「这里本来就该
-   有一段命令」，没人会发现，直到有人照着它去找命令。
+1. **零第三方依赖**：`scripts/` 与 `kit/` 仅用 Node 18+ `node:*` 内置模块（`preflight` 扫描）。
+2. **入口不复述判据**：`SKILL.md` 只指「何时读哪份」，判据细节归 `references/`。
+3. **不写死取值**：账号、路径、版本号、仓库地址、默认分支一律现场读取。
+4. **单一真相源**：标记与预算只在 `protocol.mjs`、模板求值只在 `template.mjs`、报告排版只在 `render.mjs`。
+5. **幂等与只读先行**：勘察前零写入；重复运行字节一致，`equip`/`compose-agents` 写前经 `backup.mjs` 打仓外 `.tar.gz` 快照。
+6. **预算与零残留**：入口/参考预算常量只在 `protocol.mjs` 定义；渲染产物严禁残留 `{{VAR}}` 或 `if/endif`。
 
 ## 宿主加载与分发边界
 
-- **身份标识零容错**：宿主清单或 `SKILL.md` frontmatter 的必填字段必须与规范严格对齐，缺失或类型错误会让宿主**静默丢弃且不报错**；宿主侧的 ID 是数据存储地址，改名即丢用户数据，与分发侧的包名严格区分，**绝不混改**。
-- **产物与分发通道对齐**：宿主直接从仓库或制品库加载编译产物、安装方不构建的，源码修改后必须**在同一次提交里重建产物**；宿主从发布页附件下载产物的，编译产物**绝不进版本库**，只在发版时挂成附件。
-- **严禁用本地开发挂载（符号链接）代替正式分发包的隔离安装验收**。
+- **身份标识零容错**：宿主清单或 `SKILL.md` frontmatter 必填字段必须严格对齐规范，缺失或类型错误会让宿主静默丢弃；宿主侧 ID 与分发包名严格区分，**绝不混改**。
+- **产物与分发通道对齐**：宿主直读仓库/制品库编译产物时源码改动须同提交重建；从发布页附件下载时编译产物绝不入库。**严禁用本地挂载（符号链接）代替隔离安装验收**。
 <!-- project-forge: end 架构与关键不变量 -->
 
 <!-- project-forge: begin 构建与验证 -->
 ## 环境与构建验证（改完必跑，全绿才算完成）
 
-- **运行环境要求**：Node 18 以上。没有构建步骤，没有需要安装的依赖。
+- **运行环境**：Node 18+，无构建步骤与外部依赖。
 
 ```sh
 node scripts/dev/preflight.mjs                              # 结构 + 引用 + 模板 + 自举 + 端到端冒烟
 node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 结论配对检查
-node scripts/dev/fixtures.mjs                               # 行为断言：造临时项目实跑，正反双向
-node scripts/compose-agents.mjs . --check                   # 本仓库契约：标记成对、无未填占位、体积 <= 30KB
+node scripts/dev/fixtures.mjs                               # 正反双向行为断言
+node scripts/compose-agents.mjs . --check                   # 本仓契约校验（<= 30KB，建议 < 24KB）
 node scripts/equip.mjs . --check                            # kit/skills 与 .agents/skills 字节级一致
 node scripts/review.mjs .                                   # 交付体检，预期 0 个「缺」
-node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 的目录同步
+node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 目录同步
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
 ```
 
-用户包内容要真跑一次导出再核对（用完删掉 `package-list.txt`）：
+导出包与注入验证（用完删临时文件）：
 
 ```sh
 git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg.tar" > package-list.txt && node scripts/dev/preflight.mjs --package package-list.txt
-```
-
-动过判定逻辑时再加一条——它验的不是「现在绿不绿」，是**「绿是不是真的」**：
-
-```sh
 node scripts/dev/verify-injections.mjs
 ```
 
-**跑出来的才算做完**——拿不出实际运行通过的输出，不得声称「已验证」。
+**跑出来的才算做完**——未拿到实际通过输出，不得声称「已验证」。
 <!-- project-forge: end 构建与验证 -->
 
 <!-- project-forge: begin 修改守则 -->
 ## 工程修改守则与硬性规范
 
-- **先看再动，贴合既有结构**：先读现有实现与相邻代码，能并入现成机制就不另起炉灶。
-- **治本不治标，不留双轨**：先查清根因再动手，被替换掉的旧逻辑一并清干净，不留新旧双轨并存。
-- **小步验证，严控依赖**：不擅自引入第三方依赖，确需引入时先说明理由并取得确认。
-- **测试正反双向**：修缺陷先写稳定复现的失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判的反面用例。
-- **不写履历，文档同步**：只描述当前状态；改动代码导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
+- **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
+- **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
+- **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**（「以前……后来改成……」）、**禁死代码注释块**（废弃代码直接删，不留连续注释块）、**禁借口注释与擅自压制检查**（严禁未说明理由写 `HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
+- **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
 - 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
 - **多语文档成对同步**：本仓库有 `README.en.md`、`README.md`，改任一语言版本必须同步另一份，并保持双向互指链接有效。
 <!-- project-forge: end 修改守则 -->
@@ -143,9 +144,9 @@ node scripts/dev/verify-injections.mjs
 <!-- project-forge: begin 修改守则补充 -->
 ## 项目特有红线
 
-- **禁 emoji**：代码、注释、文档、提交信息一律禁止。这条由 `preflight` 扫磁盘检查。
-- **不绑定具体 AI 宿主**：面向使用者的文件里不出现任何特定宿主的名字、环境变量或私有路径；宿主兼容由 `SKILL.md` 的通用规范保证（`name` 与 `description` 必需、相对路径引用）。
-- **双向证伪 fixture 铁律**：新增或修改任何勘察 / 门禁判定逻辑时，必须在 `scripts/dev/fixtures.mjs` 里同时补齐「该命中的正面用例」与「易误判的反面用例」。只测正面等于没测——它只证明了这个判据会命中，没证明它不会误伤。
+- **禁 emoji**：代码、注释、文档、提交信息一律禁止（`preflight` 扫描）。
+- **不绑定具体 AI 宿主**：产品层不得出现特定宿主名称、环境变量或私有路径；兼容性由 `SKILL.md` 标准 frontmatter 保证。
+- **双向证伪 fixture 铁律**：勘察或门禁判定变更必须在 `scripts/dev/fixtures.mjs` 同补正面用例与易误判反面用例。
 <!-- project-forge: end 修改守则补充 -->
 <!-- project-forge: begin 版本与发布 -->
 ## 版本管理与回滚底线
@@ -174,17 +175,17 @@ node scripts/dev/verify-injections.mjs
 
   先核对远端与源仓库：`origin` 与项目声明的源仓库一致且本机有写权限时为 **maintainer**（走分支 -> 门禁 -> 推自己分支 -> 开 PR -> 独立审查 -> 合并，严禁直推主干）；存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
 
-- **第二步：五档开工分流（Case 1..5）**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）：
+- **第二步：五档开工分流（Case 1..5）、门型与分级内审**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`），判定档位与门型（`two-way` 可局部回退 vs `one-way` 不可逆契约/数据/发布改动）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
   | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑相关校验 |
   | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写稳定复现失败测试再修（Red-Green）** |
-  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `docs/todo/` 建 Todo，冻结 `C1`、`C2`… |
-  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/`（`Status: approved`）+ `docs/todo/` Todo |
-  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，人拍板后再继续 |
+  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `docs/todo/` 建 Todo，冻结 `C1`、`C2`…；跑 `doc-plan.mjs audit` 自修直通 |
+  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/` + `docs/todo/` Todo；经 `audit` + 1–2 轮独立 Plan Critique -> `critique-pass` 后交人 `approve` |
+  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，同级内审并经人拍板后再继续 |
 
-  外加一条硬规则：**触碰下方「高风险路径」任一处 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
+  外加一条硬规则：**触碰下方「高风险路径」或 `one-way` 变更 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
 
 - **第三步：三档隔离与 Worktree 共享依赖**——
 
@@ -194,7 +195,7 @@ node scripts/dev/verify-injections.mjs
   | 第 2 档：`L2`/`L3`、接 Issue、脏主仓或并行 | `.worktrees/impl-<taskId>/`（新分支）+ `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；独立审查者在 `review-*` 做故障注入，用完即弃 |
   | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危变更，禁用生命周期脚本经人确认后再跑门禁 |
 
-  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**。`.worktrees/` 必须已忽略；卸前先问人。
+  锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**（先辨识 `merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged` 四态并问人确认）。`.worktrees/` 必须已忽略；卸前先问人。
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
@@ -262,39 +263,32 @@ node scripts/dev/verify-injections.mjs
 
 ## 外部易变事实保鲜
 
-`references/` 里有一部分内容会随平台改版过期：字段上限、OIDC 登记窗口、附件要求、
-动作版本号。处理方式是**稳定知识与易变知识分开**：
-
-- **稳定的决策链**（什么该做、按什么顺序、失败怎么判）直接写，它不会因为平台改版失效；
-- **易变的平台事实**只写「查法 + 官方文档在哪一节」，**不写具体数值快照**。
-
-每一篇参考的末尾都有 `## 事实来源` 一节，说明这份文件里哪些东西会过期、动手前该去哪查。
-**用时看一眼**（落盘与发布之前回查官方文档）、**失败驱动**（遇到「字段非法」「无权」时
-先回去重核，不要直接重试）、**平时不管**（不要为了追新而制造无意义提交）。
+- 稳定决策链直写 `references/`，易变平台事实（上限、权限、版本号）只写查法与官方文档节位。
+- 各篇末尾均含 `## 事实来源`：落盘/发版前及遇「字段非法」「无权」时回查重核，平时不追新制造无效提交。
 
 ## 改哪看哪
 
 | 这次动了 | 必须一起看 |
 | --- | --- |
-| `scripts/lib/protocol.mjs` 的标记语法或条件名 | `scripts/lib/template.mjs`、`compose-agents.mjs`、`handoff.mjs`、`review.mjs`、`references/handoff.md` |
-| `scripts/lib/template.mjs` 的求值规则 | `templates/agents-project.md` 里每一处 `if`、`scripts/dev/preflight.mjs` 的模板核对 |
-| `references/` 里任一判据 | `SKILL.md` 里指向它的那一行（能指就不抄）、`scripts/review.mjs` 的 `ref` 指路 |
-| `templates/` 里任一骨架 | 本仓库对应的实例文件（`AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`.github/` 下那几份） |
-| `templates/agents-project.md` | 本仓库的 `AGENTS.md`——它必须由 `compose-agents.mjs` 生成，不许手写后放着不管 |
-| `kit/skills/` | 重跑 `node scripts/equip.mjs .` 同步 `.agents/skills/` 并保持 `--check` 通过 |
-| `scripts/` 里任一脚本 | `SKILL.md` 的「核心脚本」那节、`scripts/dev/fixtures.mjs` 的正反用例 |
-| `README.md` 的结构或能力 | `README.en.md` 成对改，并重跑 `sync-toc` |
-| 发布链路的任何一处 | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` |
+| `scripts/lib/protocol.mjs` | `scripts/lib/template.mjs`、`compose-agents.mjs`、`handoff.mjs`、`review.mjs`、`references/handoff.md` |
+| `scripts/lib/template.mjs` | `templates/agents-project.md` 条件块、`scripts/dev/preflight.mjs` |
+| `references/` 任一判据 | `SKILL.md` 指向行、`scripts/review.mjs` `ref` 指路 |
+| `templates/` 骨架 | 本仓实例（`AGENTS.md`、`CONTRIBUTING.md`、`RELEASING.md`、`.github/`） |
+| `templates/agents-project.md` | 本仓 `AGENTS.md`（须由 `compose-agents.mjs` 同步） |
+| `kit/skills/` | 重跑 `node scripts/equip.mjs .` 同步 `.agents/skills/` 并过 `--check` |
+| `scripts/` 任一脚本 | `SKILL.md`「核心脚本」、`scripts/dev/fixtures.mjs` 正反用例 |
+| `README.md` 结构/能力 | `README.en.md` 成对改并跑 `sync-toc` |
+| 发布链路 | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml` |
 
 ## 取舍
 
-这一节由维护者手写，脚本不碰。**只有使用者能定的那几件事**记在这里，交付体检会把记下的项当作已表态：
+由维护者手写，脚本不碰：
 
 ```text
-- `license`：MIT。这是一个希望被广泛拿来用的工具，宽松授权最省事
-- `no-ci`：不适用，本仓库配了 check 与 release 两条流水线
-- `no-collab-templates`：不适用，本仓库收外部贡献，模板齐全
-- `private`：不适用，本仓库是公开仓库
+- `license`：MIT。希望被广泛拿来用的工具，宽松授权最省事
+- `no-ci`：不适用，本仓配了 check 与 release 两条流水线
+- `no-collab-templates`：不适用，本仓收外部贡献，模板齐全
+- `private`：不适用，本仓是公开仓库
 ```
 
-可用的键名会在交付体检的「待定」项里逐条给出；删掉某一项就等于重新待定。
+可用键名见体检「待定」项；删项即重新待定。

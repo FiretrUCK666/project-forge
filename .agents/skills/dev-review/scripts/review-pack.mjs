@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const EXIT = Object.freeze({
@@ -20,7 +20,9 @@ const EXIT = Object.freeze({
   STOP_LOSS: 4,
 })
 
-const DEV_PROFILE_KEYS = ['quick-test', 'full-test', 'merge-gate', 'high-risk', 'do-not-edit']
+const DEV_PROFILE_KEYS = ['quick-test', 'full-test', 'smoke-verify', 'merge-gate', 'arch-rules', 'high-risk', 'do-not-edit']
+const GOD_FILE_WARN_LINES = 800
+const GOD_FILE_HIGH_LINES = 1500
 
 const LOCKFILE_NAMES = new Set([
   'package-lock.json',
@@ -47,13 +49,16 @@ const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs)\/|\.(?:test|sp
 
 const TEST_SKIP_RE = /\b(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip|pytest\.mark\.skipif|unittest\.skip)|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(/
 
-const GATE_WEAKEN_RE = /\|\|\s*true\b|continue-on-error:\s*true\b|--no-verify\b|--passWithNoTests\b|\beslint-disable(?:-next-line)?\b|@ts-nocheck\b/
-
 const ASSERTION_RE = /\b(?:assert(?:\.\w+)?|expect|should|t\.(?:Error|Errorf|Fatal|Fatalf)|assertRaises|pytest\.raises|assert_eq!|assert!)\b|\b(?:it|test)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]/
 
 const CODE_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|rs|go|java|kt|rb|php|cs|c|cpp|h|hpp|sh|bash|ps1)$/i
 const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
 const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
+const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)|(?:以前是|原先是|原本是|之前是|旧版是|后来改成|后来改为|历史兼容保留)/i
+const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
+const EXCUSE_TEMP_RE = /\bTEMP\b/
+const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
+const CI_LOOSEN_RE = /\bpermissions:\s*write-all\b|\bpull_request_target\b/
 
 function isMainModule(metaUrl, argv1) {
   if (typeof argv1 !== 'string' || argv1 === '') return false
@@ -149,24 +154,38 @@ function findRepoRoots(startDir) {
   return { worktreeRoot, mainRoot }
 }
 
+function isProfilePlaceholder(val) {
+  const s = String(val ?? '').replace(/^`+|`+$/g, '').trim()
+  if (!s || /^<!--/.test(s)) return true
+  if (/^(?:none|n\/a|无|\(none\)|\(无\)|暂无)$/i.test(s)) return true
+  if (/^<[^>\n]+>$/.test(s)) return true
+  return false
+}
+
 function parseDevProfile(repoRoot) {
   const profile = {
     'quick-test': [],
     'full-test': [],
+    'smoke-verify': [],
     'merge-gate': [],
+    'arch-rules': [],
     'high-risk': [],
     'do-not-edit': [],
   }
   const text = readTextSafe(join(repoRoot, 'AGENTS.md'))
   if (!text) return profile
   for (const line of text.split('\n')) {
-    const m = /^\s*(?:[-*]\s*)?`?(quick-test|full-test|merge-gate|high-risk|do-not-edit)`?\s*:\s*(.+?)\s*$/.exec(line)
+    const m = /^\s*(?:[-*]\s*)?`?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)`?\s*:\s*(.+?)\s*$/.exec(line)
     if (!m) continue
     const key = m[1]
     const val = m[2].replace(/^`+|`+$/g, '').trim()
-    if (!val || /^<!--/.test(val)) continue
-    if (key === 'high-risk' || key === 'do-not-edit') {
-      const items = val.split(/[,，]/).map((s) => s.trim().replace(/^`+|`+$/g, '')).filter(Boolean)
+    if (isProfilePlaceholder(val)) continue
+    if (key === 'arch-rules' && /^<[^>\n]+>\s*(?:->|→)\s*<[^>\n]+>$/.test(val)) continue
+    if (key === 'high-risk' || key === 'do-not-edit' || key === 'arch-rules') {
+      const items = val
+        .split(/[,，]/)
+        .map((s) => s.trim().replace(/^`+|`+$/g, ''))
+        .filter((s) => !isProfilePlaceholder(s) && !(key === 'arch-rules' && /^<[^>\n]+>\s*(?:->|→)\s*<[^>\n]+>$/.test(s)))
       profile[key].push(...items)
     } else {
       profile[key].push(val)
@@ -372,42 +391,70 @@ function scanUntrustedDiff(diff, repoRoot) {
       })
     }
 
-    // Gate-weakening heuristics on code/test/config files
-    const skipHits = added.filter((l) => TEST_SKIP_RE.test(l))
-    if (skipHits.length > 0) {
-      hazards.push({
-        category: 'gate-weakening',
-        file: f,
-        reason: 'Adds test skip/only/ignore marker',
-        excerpt: skipHits.slice(0, 4).map((l) => `+ ${l}`),
-      })
-    }
-
-    const weakenHits = added.filter((l) => GATE_WEAKEN_RE.test(l))
-    if (weakenHits.length > 0) {
-      hazards.push({
-        category: 'gate-weakening',
-        file: f,
-        reason: 'Adds gate-bypass or error-suppression directive',
-        excerpt: weakenHits.slice(0, 4).map((l) => `+ ${l}`),
-      })
-    }
-
-    if (TEST_FILE_RE.test(f)) {
-      const removedAssertions = removed.filter((l) => ASSERTION_RE.test(l))
-      const addedAssertions = added.filter((l) => ASSERTION_RE.test(l))
-      if (removedAssertions.length > 0 && addedAssertions.length < removedAssertions.length) {
-        hazards.push({
-          category: 'gate-weakening',
-          file: f,
-          reason: `Removes ${removedAssertions.length} assertion/test line(s) with only ${addedAssertions.length} replacement(s)`,
-          excerpt: removedAssertions.slice(0, 4).map((l) => `- ${l}`),
-        })
-      }
-    }
+    hazards.push(...detectGateWeakeningInEntry({ file: f, status: entry.status, added, removed }))
   }
 
   return hazards
+}
+
+function detectGateWeakeningInEntry({ file, status, added, removed }) {
+  const hits = []
+  if (/\.mdx?$|\.txt$/i.test(file)) return hits
+  if (status === 'D' && TEST_FILE_RE.test(file)) {
+    hits.push({
+      category: 'gate-weakening',
+      file,
+      reason: 'Deletes test file (weakens regression gate)',
+      excerpt: [`- deleted ${file}`],
+    })
+  }
+  const isRegexLine = (l) => /^\s*(?:const|let|var|if|else\s+if|return)\b.*\/[^/]+\//.test(l)
+  const skipHits = added.filter((l) => TEST_SKIP_RE.test(l) && !isRegexLine(l))
+  if (skipHits.length > 0) {
+    hits.push({
+      category: 'gate-weakening',
+      file,
+      reason: 'Adds test skip/only/ignore marker',
+      excerpt: skipHits.slice(0, 4).map((l) => `+ ${l}`),
+    })
+  }
+  const weakenHits = added.filter((l) => {
+    if (/\|\|\s*true\b|continue-on-error:\s*true\b|--no-verify\b|--passWithNoTests\b/.test(l)) {
+      return !isRegexLine(l)
+    }
+    const { commentText } = extractLineCommentInfo(l, false)
+    return Boolean(commentText && /(?:eslint-disable(?:-next-line)?|@ts-nocheck)\b/.test(commentText))
+  })
+  if (weakenHits.length > 0) {
+    hits.push({
+      category: 'gate-weakening',
+      file,
+      reason: 'Adds gate-bypass or error-suppression directive',
+      excerpt: weakenHits.slice(0, 4).map((l) => `+ ${l}`),
+    })
+  }
+  if ((file.startsWith('.github/workflows/') || file.startsWith('.github/actions/')) && added.some((l) => CI_LOOSEN_RE.test(l))) {
+    const ciHits = added.filter((l) => CI_LOOSEN_RE.test(l))
+    hits.push({
+      category: 'gate-weakening',
+      file,
+      reason: 'Loosens CI workflow permissions or trigger trust boundary',
+      excerpt: ciHits.slice(0, 4).map((l) => `+ ${l}`),
+    })
+  }
+  if (TEST_FILE_RE.test(file)) {
+    const removedAssertions = removed.filter((l) => ASSERTION_RE.test(l))
+    const addedAssertions = added.filter((l) => ASSERTION_RE.test(l))
+    if (removedAssertions.length > 0 && addedAssertions.length < removedAssertions.length) {
+      hits.push({
+        category: 'gate-weakening',
+        file,
+        reason: `Removes ${removedAssertions.length} assertion/test line(s) with only ${addedAssertions.length} replacement(s)`,
+        excerpt: removedAssertions.slice(0, 4).map((l) => `- ${l}`),
+      })
+    }
+  }
+  return hits
 }
 
 /**
@@ -632,7 +679,8 @@ function resolveReviewWorktree(mainRoot, worktreeRoot, opts, task) {
 function highRiskHits(diff, devProfile) {
   const hits = []
   const rules = devProfile['high-risk']
-  for (const entry of diff.files) {
+  const allEntries = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
+  for (const entry of allEntries) {
     for (const rule of rules) {
       const clean = posixPath(rule).replace(/^\.\//, '')
       if (!clean) continue
@@ -642,6 +690,482 @@ function highRiskHits(diff, devProfile) {
     }
   }
   return hits
+}
+
+function extractLineCommentInfo(line, inBlock = false) {
+  const s = String(line ?? '')
+  const commentParts = []
+  let i = 0
+  let block = inBlock
+  let quote = ''
+  let prevSig = ''
+
+  if (block) {
+    const end = s.indexOf('*/')
+    if (end === -1) return { commentText: s.trim(), nextInBlock: true }
+    commentParts.push(s.slice(0, end))
+    block = false
+    i = end + 2
+  }
+
+  while (i < s.length) {
+    const ch = s[i]
+    const next = s[i + 1]
+    if (quote) {
+      if (ch === '\\') { i += 2; continue }
+      if (ch === quote) quote = ''
+      i += 1
+      continue
+    }
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      quote = ch
+      prevSig = ch
+      i += 1
+      continue
+    }
+    if (ch === '/' && next === '/') {
+      commentParts.push(s.slice(i + 2))
+      break
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', i + 2)
+      if (end === -1) {
+        commentParts.push(s.slice(i + 2))
+        block = true
+        break
+      }
+      commentParts.push(s.slice(i + 2, end))
+      i = end + 2
+      continue
+    }
+    if (ch === '/') {
+      const canRegex = !prevSig || '=(:,?[!&|;{}~^+-*'.includes(prevSig)
+        || /\b(?:return|case|throw|typeof|await|yield)$/.test(s.slice(0, i).trimEnd())
+      if (canRegex) {
+        let j = i + 1
+        let inClass = false
+        let closed = false
+        while (j < s.length) {
+          const rc = s[j]
+          if (rc === '\\') { j += 2; continue }
+          if (rc === '[') inClass = true
+          else if (rc === ']' && inClass) inClass = false
+          else if (rc === '/' && !inClass) { closed = true; break }
+          j += 1
+        }
+        if (closed) {
+          prevSig = '/'
+          i = j + 1
+          continue
+        }
+      }
+    }
+    if (ch === '#') {
+      const prevCh = i > 0 ? s[i - 1] : ''
+      if ((i === 0 || /\s/.test(prevCh)) && next !== '!' && next !== '[') {
+        commentParts.push(s.slice(i + 1))
+        break
+      }
+    }
+    if (!/\s/.test(ch)) prevSig = ch
+    i += 1
+  }
+
+  return { commentText: commentParts.join(' ').trim(), nextInBlock: block }
+}
+
+function globToRegExp(rawGlob) {
+  const g = posixPath(rawGlob).trim().replace(/^`+|`+$/g, '').replace(/^\.\//, '').replace(/\/+$/, '')
+  if (!g) return null
+  if (g.endsWith('/**') && !g.slice(0, -3).includes('*') && !g.slice(0, -3).includes('?')) {
+    const base = g.slice(0, -3).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`^${base}(?:/.*)?$`)
+  }
+  const hasWild = /[*?]/.test(g)
+  let expr = ''
+  for (let i = 0; i < g.length; i += 1) {
+    const ch = g[i]
+    if (ch === '*') {
+      if (g[i + 1] === '*') {
+        if (g[i + 2] === '/') {
+          expr += '(?:.+/)?'
+          i += 2
+        } else {
+          expr += '.*'
+          i += 1
+        }
+      } else {
+        expr += '[^/]*'
+      }
+    } else if (ch === '?') {
+      expr += '[^/]'
+    } else {
+      expr += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  if (!hasWild) expr = `${expr}(?:/.*)?`
+  return new RegExp(`^${expr}$`)
+}
+
+function parseArchRules(ruleList) {
+  const parsed = []
+  for (const raw of ruleList ?? []) {
+    const m = /^(.+?)\s*(?:->|→)\s*(.+)$/.exec(String(raw ?? '').trim())
+    if (!m) continue
+    const fromGlob = m[1].trim()
+    const toGlob = m[2].trim()
+    if (isProfilePlaceholder(fromGlob) || isProfilePlaceholder(toGlob)) continue
+    const fromRe = globToRegExp(fromGlob)
+    const toRe = globToRegExp(toGlob)
+    if (fromRe && toRe) parsed.push({ raw: `${fromGlob} -> ${toGlob}`, fromGlob, toGlob, fromRe, toRe })
+  }
+  return parsed
+}
+
+function extractImportsFromCode(relFile, text) {
+  const ext = posixPath(relFile).split('.').pop()?.toLowerCase() ?? ''
+  const imports = []
+  const lines = text.split('\n')
+
+  if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx'].includes(ext)) {
+    let inBlock = false
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
+      const trimmed = line.trim()
+      if (inBlock) {
+        if (trimmed.includes('*/')) inBlock = false
+        continue
+      }
+      if (trimmed.startsWith('/*') && !trimmed.includes('*/')) { inBlock = true; continue }
+      if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue
+      for (const re of [
+        /(?:^|\b)(?:import|export)\s+(?:[^'"\n]*?\bfrom\s+)?['"]([^'"\n]+)['"]/g,
+        /\bimport\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g,
+        /\brequire\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g,
+      ]) {
+        for (const m of line.matchAll(re)) {
+          imports.push({ line: i + 1, specifier: m[1], kind: 'js' })
+        }
+      }
+    }
+  } else if (ext === 'py') {
+    for (let i = 0; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const fm = /^from\s+(\.{0,3}[A-Za-z0-9_.]*)\s+import\b/.exec(trimmed)
+      if (fm) {
+        imports.push({ line: i + 1, specifier: fm[1], kind: 'py' })
+        continue
+      }
+      const im = /^import\s+([A-Za-z0-9_.]+(?:\s*,\s*[A-Za-z0-9_.]+)*)/.exec(trimmed)
+      if (im) {
+        for (const part of im[1].split(',')) {
+          const mod = part.trim().split(/\s+/)[0]
+          if (mod) imports.push({ line: i + 1, specifier: mod, kind: 'py' })
+        }
+      }
+    }
+  } else if (ext === 'go') {
+    let inImportBlock = false
+    for (let i = 0; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim()
+      if (!trimmed || trimmed.startsWith('//')) continue
+      if (/^import\s*\(/.test(trimmed)) { inImportBlock = true; continue }
+      if (inImportBlock) {
+        if (trimmed.startsWith(')')) { inImportBlock = false; continue }
+        const gm = /"([^"]+)"/.exec(trimmed)
+        if (gm) imports.push({ line: i + 1, specifier: gm[1], kind: 'go' })
+        continue
+      }
+      const sm = /^import\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+|_\s+|\.\s+)?"([^"]+)"/.exec(trimmed)
+      if (sm) imports.push({ line: i + 1, specifier: sm[1], kind: 'go' })
+    }
+  }
+  return imports
+}
+
+function resolveImportCandidates(fromFile, specifier, kind, repoRoot = null) {
+  const fromDir = posix.dirname(posixPath(fromFile))
+  const cands = new Set()
+  const addWithExts = (base) => {
+    const norm = posix.normalize(base).replace(/^\.\//, '')
+    cands.add(norm)
+    for (const ext of ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.jsx', '.py']) {
+      cands.add(`${norm}${ext}`)
+    }
+    for (const idx of ['index.mjs', 'index.js', 'index.ts', 'index.tsx', '__init__.py']) {
+      cands.add(posix.join(norm, idx))
+    }
+  }
+  const ancestorPrefixes = () => {
+    const parts = fromDir === '.' ? [] : fromDir.split('/').filter(Boolean)
+    const out = []
+    for (let k = 1; k < parts.length; k += 1) out.push(parts.slice(0, k).join('/'))
+    return out
+  }
+  const addAnchoredVariants = (sub, withExts = true) => {
+    if (!repoRoot || !sub || sub.includes(':')) return
+    const firstSeg = sub.split('/')[0]
+    if (!firstSeg || firstSeg === '.' || firstSeg === '..') return
+    for (const anc of ancestorPrefixes()) {
+      const probeBase = join(repoRoot, anc, firstSeg)
+      const existsInRepo = existsSync(probeBase)
+        || ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.jsx', '.py'].some((ext) => existsSync(`${probeBase}${ext}`))
+      if (existsInRepo) {
+        const joined = posix.join(anc, sub)
+        if (withExts) addWithExts(joined)
+        else cands.add(joined)
+      }
+    }
+  }
+
+  if (kind === 'py') {
+    const dotLead = /^(\.+)(.*)$/.exec(specifier)
+    if (dotLead) {
+      const ups = dotLead[1].length - 1
+      let baseDir = fromDir === '.' ? '' : fromDir
+      for (let u = 0; u < ups; u += 1) baseDir = posix.dirname(baseDir)
+      const rest = dotLead[2].replace(/\./g, '/')
+      addWithExts(baseDir && baseDir !== '.' ? (rest ? posix.join(baseDir, rest) : baseDir) : rest)
+    } else {
+      const specPath = specifier.replace(/\./g, '/')
+      addWithExts(specPath)
+      addAnchoredVariants(specPath, true)
+    }
+  } else if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    addWithExts(posix.join(fromDir === '.' ? '' : fromDir, specifier))
+  } else if (specifier.startsWith('/')) {
+    addWithExts(specifier.slice(1))
+  } else {
+    const clean = specifier.replace(/^(?:@\/|~\/)/, '')
+    addWithExts(clean)
+    addAnchoredVariants(clean, true)
+    if (kind === 'go') {
+      const parts = clean.split('/')
+      for (let k = 1; k < parts.length; k += 1) {
+        const sub = parts.slice(k).join('/')
+        cands.add(sub)
+        addAnchoredVariants(sub, false)
+      }
+    }
+  }
+  return [...cands]
+}
+
+function evaluateArchRules(repoRoot, fileRelList, rawRules) {
+  const rules = parseArchRules(rawRules)
+  if (rules.length === 0) return []
+  const violations = []
+  for (const rel of fileRelList) {
+    const relPosix = posixPath(rel)
+    const matching = rules.filter((r) => r.fromRe.test(relPosix))
+    if (matching.length === 0) continue
+    const text = readTextSafe(join(repoRoot, relPosix))
+    if (!text) continue
+    const lines = text.split('\n')
+    const imports = extractImportsFromCode(relPosix, text)
+    for (const imp of imports) {
+      const cands = resolveImportCandidates(relPosix, imp.specifier, imp.kind, repoRoot)
+      for (const rule of matching) {
+        const hitTarget = cands.find((c) => rule.toRe.test(c))
+        if (hitTarget) {
+          violations.push({
+            file: relPosix,
+            line: imp.line,
+            rule: rule.raw,
+            specifier: imp.specifier,
+            resolvedTarget: hitTarget,
+            lineText: (lines[imp.line - 1] ?? '').trim().slice(0, 120),
+            fixHint: `Root-cause fix: invert dependency or extract shared interface/port outside "${rule.toGlob}" instead of bypassing "${rule.raw}".`,
+          })
+        }
+      }
+    }
+  }
+  return violations
+}
+
+function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHits, parity }) {
+  const runtimeFilesTouched = [...diff.files.map((f) => f.file), ...diff.untracked]
+    .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
+  const smokeCommands = devProfile['smoke-verify'] ?? []
+  const testCommands = [
+    ...(devProfile['quick-test'] ?? []),
+    ...(devProfile['full-test'] ?? []),
+    ...(devProfile['merge-gate'] ?? []),
+  ]
+  const smokeRequired = runtimeFilesTouched.length > 0 && smokeCommands.length > 0
+  const headMatchesVerified = task?.verifiedHead
+    ? (headSha !== 'UNBORN' && task.verifiedHead === headSha)
+    : null
+  const warnings = []
+  if (headMatchesVerified === false) {
+    warnings.push(`verifiedHead (${task.verifiedHead.slice(0, 8)}) != HEAD (${headSha.slice(0, 8)}); re-verify required`)
+  }
+  if (gateWeakenedHits.length > 0) {
+    warnings.push(...gateWeakenedHits.map((h) => `Gate weakening in ${h.file}: ${h.reason}`))
+  }
+  if (smokeRequired) {
+    warnings.push('Runtime code touched and smoke-verify configured: run smoke-verify locally and confirm real behavior before approval.')
+  } else if (runtimeFilesTouched.length > 0 && smokeCommands.length === 0 && parity.triggers.some((t) => t.type === 'cli-surface')) {
+    warnings.push('CLI/entrypoint code touched without `smoke-verify:` in AGENTS.md Dev Profile; exercise real CLI path manually.')
+  }
+
+  let status = 'verify-required'
+  if (gateWeakenedHits.length > 0) status = 'gate-weakened'
+  else if (headMatchesVerified === false) status = 'needs-reverify'
+  else if (headMatchesVerified === true && !smokeRequired) status = 'verified-on-head'
+
+  return {
+    status,
+    verifiedHead: task?.verifiedHead ?? null,
+    headSha,
+    headMatchesVerified,
+    smokeVerifyCommands: smokeCommands,
+    testCommands,
+    runtimeFilesTouched,
+    smokeRequired,
+    antiHumanProxyNote: smokeRequired
+      ? 'Execute smoke-verify locally in detached review worktree and verify stdout/exit behavior (never outsource initial runtime verification to humans).'
+      : 'Run test commands in detached review worktree and observe real test output before judging.',
+    warnings,
+  }
+}
+
+function assessStructuralGate({ reviewRoot, diff, devProfile }) {
+  const chunks = splitDiffByFile(diff.text)
+  const tombstoneComments = []
+  const excuseSuppressions = []
+  const godFiles = []
+  const codeFilesOnDisk = []
+
+  const allEntries = [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]
+  for (const entry of allEntries) {
+    const f = entry.file
+    if (entry.status === 'D') continue
+    if (!CODE_EXT_RE.test(f)) continue
+    codeFilesOnDisk.push(f)
+
+    let added = []
+    if (entry.status === '?') {
+      const raw = readTextSafe(join(reviewRoot, f))
+      if (raw) added = raw.split('\n')
+    } else {
+      added = summarizeHunkChanges(chunks.get(f) ?? '').added
+    }
+
+    let inBlock = false
+    for (const line of added) {
+      const { commentText, nextInBlock } = extractLineCommentInfo(line, inBlock)
+      inBlock = nextInBlock
+      if (commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
+        tombstoneComments.push({
+          file: f,
+          excerpt: line.trim().slice(0, 120),
+          hint: 'Remove historical evolution commentary; comments should describe current invariants only.',
+        })
+      }
+      if ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(line)) {
+        excuseSuppressions.push({
+          file: f,
+          excerpt: line.trim().slice(0, 120),
+          hint: 'Fix the underlying type/lint/architecture issue rather than silencing checks with suppression pragmas or workaround markers.',
+        })
+      }
+    }
+
+    if (!TEST_FILE_RE.test(f)) {
+      const fullText = readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024)
+      if (fullText) {
+        const lineCount = fullText.split('\n').length
+        if (lineCount > GOD_FILE_WARN_LINES) {
+          godFiles.push({
+            file: f,
+            lines: lineCount,
+            severity: lineCount > GOD_FILE_HIGH_LINES ? 'high' : 'warn',
+            hint: `File exceeds ${GOD_FILE_WARN_LINES} lines (${lineCount}); extract cohesive modules instead of expanding a god file.`,
+          })
+        }
+      }
+    }
+  }
+
+  const archViolations = evaluateArchRules(reviewRoot, codeFilesOnDisk, devProfile['arch-rules'])
+  const issueCount = tombstoneComments.length + excuseSuppressions.length + archViolations.length + godFiles.length
+  return {
+    status: archViolations.length > 0 || excuseSuppressions.length > 0 ? 'attention-required' : issueCount > 0 ? 'warn' : 'clean',
+    tombstoneComments,
+    excuseSuppressions,
+    archViolations,
+    godFiles,
+  }
+}
+
+function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, parity, task, gateWeakenedHits }) {
+  const gateWeakened = gateWeakenedHits.length > 0
+  const agentsText = readTextSafe(join(reviewRoot, 'AGENTS.md')) ?? readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+  const hasHumanMergeAuthority = /^\s*(?:[-*]\s*)?`?merge-authority`?\s*[:：]\s*human\b/im.test(agentsText)
+  const allFiles = [...diff.files.map((f) => f.file), ...diff.untracked]
+  const totalFiles = allFiles.length
+  const doNotEdit = devProfile['do-not-edit'] ?? []
+
+  const oneWayReasons = []
+  let untrustedSurface = false
+  if (gateWeakened) oneWayReasons.push('Weakens test assertions, skips tests, or loosens CI/lint/type gates')
+  if (hasHumanMergeAuthority) oneWayReasons.push('AGENTS.md specifies merge-authority: human')
+  if (task?.doorType === 'one-way') oneWayReasons.push('Task metadata declares doorType=one-way')
+
+  for (const f of allFiles) {
+    const base = f.split('/').pop()?.toLowerCase() ?? ''
+    if (f.startsWith('.github/workflows/') || f.startsWith('.github/actions/') || f.startsWith('.husky/') || f.startsWith('.agents/skills/')) {
+      untrustedSurface = true
+      if (!oneWayReasons.includes('Modifies CI workflow, git hook, or agent skill entrypoint')) {
+        oneWayReasons.push('Modifies CI workflow, git hook, or agent skill entrypoint')
+      }
+    }
+    if (base === 'package.json' || base === '.gitattributes' || LOCKFILE_NAMES.has(base) || base === 'releasing.md') {
+      if (!oneWayReasons.includes('Modifies packaging, lockfile, or release contract boundary')) {
+        oneWayReasons.push('Modifies packaging, lockfile, or release contract boundary')
+      }
+    }
+    if (/(?:^|\/)(?:migrations?|schema|auth|rbac|acl|security|secrets?)(?:\/|\.)/i.test(f)) {
+      if (!oneWayReasons.includes('Modifies schema/migration or security/auth boundary')) {
+        oneWayReasons.push('Modifies schema/migration or security/auth boundary')
+      }
+    }
+    if (doNotEdit.some((d) => { const clean = posixPath(d).replace(/^\.\//, ''); return clean && (f === clean || f.startsWith(`${clean}/`)) })) {
+      if (!oneWayReasons.includes('Modifies path listed in do-not-edit')) {
+        oneWayReasons.push('Modifies path listed in do-not-edit')
+      }
+    }
+  }
+
+  const doorType = oneWayReasons.length > 0 ? 'one-way' : 'two-way'
+  let blastRadius = 'low'
+  if (gateWeakened || hrHits.length >= 2 || oneWayReasons.length >= 2 || totalFiles >= 10 || diff.bytes >= 40000) {
+    blastRadius = 'high'
+  } else if (oneWayReasons.length === 1 || hrHits.length === 1 || parity.triggers.length > 0 || totalFiles >= 4) {
+    blastRadius = 'medium'
+  }
+
+  let mergeAuthority = 'reviewer-direct'
+  if (gateWeakened || hasHumanMergeAuthority || untrustedSurface || doorType === 'one-way') {
+    mergeAuthority = 'human-required'
+  } else if (hrHits.length > 0) {
+    mergeAuthority = 'reviewer-with-fault-injection'
+  }
+
+  return {
+    doorType,
+    gateWeakened,
+    gateWeakenedReasons: gateWeakenedHits.map((h) => `${h.file}: ${h.reason}`),
+    blastRadius,
+    mergeAuthority,
+    reasons: oneWayReasons.length > 0 ? oneWayReasons : ['Localized reversible code/test/doc change'],
+    rollbackPath: doorType === 'one-way'
+      ? 'Irreversible or high-cost rollback; require explicit human sign-off and staged rollback plan before merge.'
+      : 'Two-way door: cleanly reversible via `git revert <merge-commit>`.',
+  }
 }
 
 function formatPackText(pack) {
@@ -704,9 +1228,36 @@ function formatPackText(pack) {
   }
 
   lines.push('')
+  lines.push('--- Behavioral Gate (Empirical & Smoke-Verify) ---')
+  const bg = pack.behavioralGate
+  lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired}`)
+  if (bg.smokeVerifyCommands.length > 0) {
+    lines.push('  Smoke-Verify Commands (anti-human-proxy: run locally and observe real runtime):')
+    for (const sc of bg.smokeVerifyCommands) lines.push(`    $ ${sc}`)
+  }
+  for (const w of bg.warnings) lines.push(`  - WARN: ${w}`)
+
+  lines.push('')
+  lines.push('--- Structural Gate (Comments, Suppressions, Arch Rules, Size) ---')
+  const sg = pack.structuralGate
+  lines.push(`  Status     : ${sg.status} | tombstones=${sg.tombstoneComments.length}, excuses=${sg.excuseSuppressions.length}, archViolations=${sg.archViolations.length}, godFiles=${sg.godFiles.length}`)
+  for (const tc of sg.tombstoneComments.slice(0, 8)) lines.push(`  - [TOMBSTONE] ${tc.file}: ${tc.excerpt}`)
+  for (const ex of sg.excuseSuppressions.slice(0, 8)) lines.push(`  - [EXCUSE_SUPPRESS] ${ex.file}: ${ex.excerpt}`)
+  for (const av of sg.archViolations.slice(0, 8)) lines.push(`  - [ARCH_VIOLATION] ${av.file}:${av.line} (${av.rule}) -> "${av.specifier}" | ${av.fixHint}`)
+  for (const gf of sg.godFiles) lines.push(`  - [GOD_FILE:${gf.severity.toUpperCase()}] ${gf.file} (${gf.lines} lines): ${gf.hint}`)
+
+  lines.push('')
+  lines.push('--- Door & Blast Radius Assessment ---')
+  const da = pack.doorAssessment
+  lines.push(`  Door Type  : ${da.doorType} | gateWeakened=${da.gateWeakened} | blastRadius=${da.blastRadius} | mergeAuthority=${da.mergeAuthority}`)
+  for (const r of da.reasons) lines.push(`  - Reason   : ${r}`)
+  lines.push(`  - Rollback : ${da.rollbackPath}`)
+
+  lines.push('')
   lines.push('--- Empirical Test & Fault Injection Checklist ---')
   const cmds = [
     ...pack.devProfile['quick-test'],
+    ...pack.devProfile['smoke-verify'],
     ...pack.devProfile['full-test'],
     ...pack.devProfile['merge-gate'],
   ]
@@ -1193,6 +1744,27 @@ function main() {
   const criteria = parseAcceptanceCriteria(reviewRoot, mainRoot, task)
   const hrHits = highRiskHits(diff, effectiveProfile)
 
+  const diffChunks = splitDiffByFile(diff.text)
+  const gateWeakenedHits = []
+  for (const entry of [...diff.files, ...diff.untracked.map((file) => ({ status: '?', file }))]) {
+    let { added, removed } = summarizeHunkChanges(diffChunks.get(entry.file) ?? '')
+    if (entry.status === '?' && added.length === 0) {
+      const raw = readTextSafe(join(reviewRoot, entry.file))
+      if (raw) added = raw.split('\n')
+    }
+    gateWeakenedHits.push(...detectGateWeakeningInEntry({ file: entry.file, status: entry.status, added, removed }))
+  }
+
+  const behavioralGate = assessBehavioralGate({
+    diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity,
+  })
+  const structuralGate = assessStructuralGate({
+    reviewRoot, diff, devProfile: effectiveProfile,
+  })
+  const doorAssessment = assessDoor({
+    reviewRoot, mainRoot, diff, devProfile: effectiveProfile, hrHits, parity, task, gateWeakenedHits,
+  })
+
   let headMismatchWarning = ''
   if (task) {
     if (task.verifiedHead && headSha !== 'UNBORN' && task.verifiedHead !== headSha) {
@@ -1210,13 +1782,19 @@ function main() {
   if (opts.untrustedScan && untrustedWarnings.length === 0) {
     nextSteps.push('Untrusted static scan clean (UNTRUSTED_SCAN_PASS). Safe to proceed with isolated review worktree checks.')
   }
+  if (doorAssessment.gateWeakened) {
+    nextSteps.push('GATE_WEAKENED detected: escalate to human maintainer for explicit sign-off (mergeAuthority=human-required).')
+  }
+  if (structuralGate.archViolations.length > 0) {
+    nextSteps.push(`Fix ${structuralGate.archViolations.length} architecture boundary violation(s) at root cause before passing review.`)
+  }
   if (mode === 'local' || mode === 'staged' || mode === 'base') {
-    nextSteps.push('Fix any [PARITY_WARN] / test issues locally before creating a commit or opening a PR.')
+    nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
   } else if (opts.task) {
     nextSteps.push(`Review independently against criteria C1..Cn, run tests + fault injection, then record verdict:`)
     nextSteps.push(`  node .agents/skills/dev-review/scripts/review-pack.mjs record --task ${opts.task} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id>`)
   } else if (opts.pr) {
-    nextSteps.push('Complete independent review using the diff hash, parity check, and empirical tests above before posting PR review.')
+    nextSteps.push('Complete independent review using the diff hash, dual gates, and empirical tests above before posting PR review.')
   }
 
   const pack = {
@@ -1238,6 +1816,9 @@ function main() {
     parity,
     devProfile: effectiveProfile,
     highRiskHits: hrHits,
+    behavioralGate,
+    structuralGate,
+    doorAssessment,
     untrustedWarnings,
     headMismatchWarning,
     nextSteps,

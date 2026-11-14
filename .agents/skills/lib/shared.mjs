@@ -13,7 +13,7 @@ import {
 } from 'node:fs'
 import https from 'node:https'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, posix as pathPosix, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const LIKELY_DEFAULT_BRANCHES = Object.freeze([
@@ -386,23 +386,44 @@ function stripWrapQuotes(val) {
   return s
 }
 
+function isPlaceholderVal(val) {
+  const s = stripWrapQuotes(String(val ?? ''))
+  if (!s || /^<[^>]+>$/.test(s) || /^#/.test(s)) return true
+  return /^(?:none|n\/a|null|无|暂无|-)$/i.test(s)
+}
+
 function parseListValue(raw) {
   const s = String(raw ?? '').trim()
   if (!s || /^\[?\s*\]?$/.test(s)) return []
   const inner = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s
   return inner.split(',')
     .map((x) => stripWrapQuotes(x))
-    .filter((x) => x && !/^<.*>$/.test(x))
+    .filter((x) => x && !isPlaceholderVal(x))
 }
 
-function isPlaceholderVal(val) {
-  const s = String(val ?? '').trim()
-  return !s || /^<[^>]+>$/.test(s) || /^#/.test(s)
+function parseArchRuleItem(rawRule) {
+  if (rawRule && typeof rawRule === 'object') {
+    const rawFrom = rawRule.fromGlob ?? rawRule.from
+    const rawTo = rawRule.toGlob ?? rawRule.to
+    if (!rawFrom || !rawTo) return null
+    const from = stripWrapQuotes(rawFrom)
+    const to = stripWrapQuotes(rawTo)
+    if (isPlaceholderVal(from) || isPlaceholderVal(to)) return null
+    return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
+  }
+  const s = stripWrapQuotes(String(rawRule ?? ''))
+  if (!s || isPlaceholderVal(s)) return null
+  const m = /^(.+?)\s*(?:->|→)\s*(.+)$/.exec(s)
+  if (!m) return null
+  const from = stripWrapQuotes(m[1])
+  const to = stripWrapQuotes(m[2])
+  if (isPlaceholderVal(from) || isPlaceholderVal(to)) return null
+  return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
 }
 
 /**
- * 解析 AGENTS.md 中的 Dev Profile（quick-test / full-test / merge-gate / high-risk / do-not-edit），
- * 同时兼容从「高风险路径」表格、「构建与验证」代码块与项目清单提取兜底值。
+ * 解析 AGENTS.md 中的 Dev Profile（quick-test / full-test / smoke-verify / merge-gate / arch-rules / high-risk / do-not-edit），
+ * 同时兼容从「高风险路径」表格与项目清单提取兜底值。
  */
 export function parseAgentsProfile(repoRoot) {
   const agentsPath = join(repoRoot, 'AGENTS.md')
@@ -411,7 +432,9 @@ export function parseAgentsProfile(repoRoot) {
     hasAgents: text !== undefined,
     quickTest: undefined,
     fullTest: undefined,
+    smokeVerify: undefined,
     mergeGate: undefined,
+    archRules: [],
     highRisk: [],
     doNotEdit: [],
     mergeAuthority: 'reviewer',
@@ -428,7 +451,14 @@ export function parseAgentsProfile(repoRoot) {
       if (activeListKey) {
         if (/^[-*]\s+/.test(trimmed) && /^\s+[-*]/.test(line)) {
           const item = stripWrapQuotes(trimmed.replace(/^[-*]\s+/, '').replace(/\s+#.*$/, ''))
-          if (item && !isPlaceholderVal(item)) profile[activeListKey].push(item)
+          if (item && !isPlaceholderVal(item)) {
+            if (activeListKey === 'archRules') {
+              const parsed = parseArchRuleItem(item)
+              if (parsed) profile.archRules.push(parsed)
+            } else {
+              profile[activeListKey].push(item)
+            }
+          }
           continue
         }
         if (trimmed !== '' && !trimmed.startsWith('#')) {
@@ -438,24 +468,30 @@ export function parseAgentsProfile(repoRoot) {
         }
       }
 
-      const kv = /^(?:[-*]\s+)?(quick-test|full-test|merge-gate|high-risk|do-not-edit)\s*:\s*(.*)$/i.exec(trimmed)
+      const kv = /^(?:[-*]\s+)?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)\s*:\s*(.*)$/i.exec(trimmed)
       if (!kv) continue
       const key = kv[1].toLowerCase()
       const rawVal = kv[2].replace(/\s+#[^`"'"]*$/, '').trim()
 
-      if (key === 'quick-test' || key === 'full-test' || key === 'merge-gate') {
+      if (key === 'quick-test' || key === 'full-test' || key === 'smoke-verify' || key === 'merge-gate') {
         const cleaned = stripWrapQuotes(rawVal)
         if (!isPlaceholderVal(cleaned)) {
           if (key === 'quick-test') profile.quickTest = cleaned
           else if (key === 'full-test') profile.fullTest = cleaned
+          else if (key === 'smoke-verify') profile.smokeVerify = cleaned
           else profile.mergeGate = cleaned
         }
         continue
       }
 
-      const targetProp = key === 'high-risk' ? 'highRisk' : 'doNotEdit'
+      const targetProp = key === 'high-risk' ? 'highRisk' : key === 'do-not-edit' ? 'doNotEdit' : 'archRules'
       if (rawVal === '') {
         activeListKey = targetProp
+      } else if (targetProp === 'archRules') {
+        for (const item of parseListValue(rawVal)) {
+          const parsed = parseArchRuleItem(item)
+          if (parsed) profile.archRules.push(parsed)
+        }
       } else {
         for (const item of parseListValue(rawVal)) {
           profile[targetProp].push(item)
@@ -482,6 +518,12 @@ export function parseAgentsProfile(repoRoot) {
 
   profile.highRisk = [...new Set(profile.highRisk)]
   profile.doNotEdit = [...new Set(profile.doNotEdit)]
+  const seenRules = new Set()
+  profile.archRules = profile.archRules.filter((r) => {
+    if (seenRules.has(r.raw)) return false
+    seenRules.add(r.raw)
+    return true
+  })
   if (profile.highRisk.length === 0) {
     profile.highRisk = ['.github/workflows/', 'AGENTS.md']
   }
@@ -492,6 +534,260 @@ export function parseAgentsProfile(repoRoot) {
   if (!profile.mergeGate) profile.mergeGate = profile.fullTest ?? profile.quickTest
   profile.detectedCommands = fallback
   return profile
+}
+
+// ── 架构边界静态校验与单/双向门评估 ────────────────────────────────────
+
+/** 通用路径 glob 匹配（支持 *、**、? 及目录前缀斜杠）。 */
+export function matchGlob(filePath, pattern) {
+  const f = posixPath(filePath).replace(/^\.\//, '').replace(/^\/+/, '')
+  const p = posixPath(pattern).replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!f || !p) return false
+  if (p.endsWith('/')) return f.startsWith(p)
+  if (!/[*?]/.test(p)) return f === p || f.startsWith(`${p}/`)
+
+  // 将 glob 转为正则，保持 **/* 与 **/ 语义准确
+  let reStr = '^'
+  for (let i = 0; i < p.length; i += 1) {
+    if (p[i] === '*') {
+      if (p[i + 1] === '*') {
+        if (p[i + 2] === '/') {
+          reStr += '(?:.*/)?'
+          i += 2
+        } else {
+          reStr += '.*'
+          i += 1
+        }
+      } else {
+        reStr += '[^/]*'
+      }
+    } else if (p[i] === '?') {
+      reStr += '[^/]'
+    } else {
+      reStr += p[i].replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  reStr += '$'
+  return new RegExp(reStr).test(f)
+}
+
+function stripBlockCommentsPreservingLines(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+}
+
+function indexToLine(text, idx) {
+  let line = 1
+  for (let i = 0; i < idx; i += 1) {
+    if (text.charCodeAt(i) === 10) line += 1
+  }
+  return line
+}
+
+function extractImportsForArch(relFile, text, goModule) {
+  const results = []
+  const ext = relFile.toLowerCase().split('.').pop() ?? ''
+
+  if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'mts', 'cts'].includes(ext)) {
+    const noBlock = stripBlockCommentsPreservingLines(text)
+    const stripped = noBlock.split('\n').map((l) => {
+      const m = /^([^'"`]*?)\/\/.*$/.exec(l)
+      return m ? m[1] : l
+    }).join('\n')
+
+    const patterns = [
+      /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+      /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    ]
+    for (const re of patterns) {
+      for (const m of stripped.matchAll(re)) {
+        const spec = m[1].trim()
+        if (!spec) continue
+        const line = indexToLine(stripped, m.index ?? 0)
+        const cands = []
+        if (spec.startsWith('.')) {
+          const base = pathPosix.normalize(pathPosix.join(pathPosix.dirname(relFile), spec))
+          cands.push(base, `${base}.js`, `${base}.mjs`, `${base}.ts`, `${base}.tsx`, `${base}/index.js`, `${base}/index.mjs`, `${base}/index.ts`)
+        } else {
+          cands.push(spec)
+          if (spec.startsWith('@/')) cands.push(`src/${spec.slice(2)}`)
+        }
+        results.push({ line, specifier: spec, candidates: cands })
+      }
+    }
+    return results
+  }
+
+  if (ext === 'py') {
+    const lines = text.split('\n')
+    const curDir = pathPosix.dirname(relFile)
+    for (let i = 0; i < lines.length; i += 1) {
+      const code = lines[i].replace(/#.*$/, '')
+      const fromM = /^\s*from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\b/.exec(code)
+      if (fromM) {
+        const mod = fromM[1]
+        const cands = []
+        const dotM = /^(\.+)(.*)$/.exec(mod)
+        if (dotM) {
+          let base = curDir
+          for (let up = 1; up < dotM[1].length; up += 1) base = pathPosix.dirname(base)
+          const sub = dotM[2].replace(/\./g, '/')
+          const joined = sub ? pathPosix.normalize(base === '.' ? sub : pathPosix.join(base, sub)) : base
+          cands.push(joined, `${joined}.py`, `${joined}/__init__.py`)
+        } else {
+          const slash = mod.replace(/\./g, '/')
+          cands.push(slash, `${slash}.py`, `${slash}/__init__.py`)
+        }
+        results.push({ line: i + 1, specifier: mod, candidates: cands })
+        continue
+      }
+      const impM = /^\s*import\s+([A-Za-z0-9_.,\s]+)$/.exec(code)
+      if (impM) {
+        for (const seg of impM[1].split(',')) {
+          const mod = seg.trim().split(/\s+as\s+/i)[0].trim()
+          if (!mod) continue
+          const slash = mod.replace(/\./g, '/')
+          results.push({ line: i + 1, specifier: mod, candidates: [slash, `${slash}.py`, `${slash}/__init__.py`] })
+        }
+      }
+    }
+    return results
+  }
+
+  if (ext === 'go') {
+    const stripped = stripBlockCommentsPreservingLines(text)
+    const lines = stripped.split('\n')
+    let inImportBlock = false
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i].replace(/\/\/.*$/, '').trim()
+      if (!line) continue
+      if (/^import\s*\($/.test(line)) { inImportBlock = true; continue }
+      if (inImportBlock && line === ')') { inImportBlock = false; continue }
+      const m = inImportBlock
+        ? /^(?:[A-Za-z0-9_.]+\s+)?"([^"]+)"/.exec(line)
+        : /^import\s+(?:[A-Za-z0-9_.]+\s+)?"([^"]+)"/.exec(line)
+      if (m) {
+        const spec = m[1].trim()
+        const cands = [spec, `${spec}/_.go`]
+        if (goModule && spec.startsWith(`${goModule}/`)) {
+          const localPkg = spec.slice(goModule.length + 1)
+          cands.unshift(localPkg, `${localPkg}/_.go`)
+        } else if (!goModule && /^[^/]+\.[^/]+\/[^/]+\/.+/.test(spec)) {
+          const segs = spec.split('/')
+          if (segs.length >= 3) {
+            const s2 = segs.slice(2).join('/')
+            cands.unshift(s2, `${s2}/_.go`)
+          }
+          if (segs.length >= 4) {
+            const s3 = segs.slice(3).join('/')
+            cands.unshift(s3, `${s3}/_.go`)
+          }
+        }
+        results.push({ line: i + 1, specifier: spec, candidates: cands })
+      }
+    }
+  }
+  return results
+}
+
+/**
+ * 依据 Dev Profile 中的 arch-rules（fromGlob -> toGlob）静态解析改动文件引用边界，
+ * 命中的违规附带根因定位与架构解耦修法提示。
+ */
+export function evaluateArchRules(repoRoot, fileRelList = [], archRules = []) {
+  const rules = (Array.isArray(archRules) ? archRules : [])
+    .map(parseArchRuleItem)
+    .filter(Boolean)
+  if (rules.length === 0 || !Array.isArray(fileRelList) || fileRelList.length === 0) {
+    return { ok: true, checkedFiles: 0, ruleCount: rules.length, violations: [] }
+  }
+
+  const gomod = readTextSafe(join(repoRoot, 'go.mod'))
+  const goModule = gomod ? /^module\s+(\S+)/m.exec(gomod)?.[1]?.trim() : undefined
+
+  const violations = []
+  let checkedFiles = 0
+
+  for (const rawFile of fileRelList) {
+    const rel = posixPath(rawFile).replace(/^\.\//, '').replace(/^\/+/, '')
+    if (!rel) continue
+    const matchedRules = rules.filter((r) => matchGlob(rel, r.from))
+    if (matchedRules.length === 0) continue
+
+    const text = readTextSafe(join(repoRoot, rel))
+    if (text === undefined) continue
+    checkedFiles += 1
+
+    const imports = extractImportsForArch(rel, text, goModule)
+    for (const imp of imports) {
+      for (const rule of matchedRules) {
+        const hit = imp.candidates.find((c) => matchGlob(c, rule.to))
+        if (hit) {
+          violations.push({
+            file: rel,
+            line: imp.line,
+            rule: rule.raw,
+            specifier: imp.specifier,
+            target: hit,
+            message: `架构禁引违规 [${rule.raw}]：${rel}:${imp.line} 引用了 ${imp.specifier}（命中禁止目标 ${hit}）`,
+            fixHint: `根因修法：勿让 ${rule.from} 直接依赖 ${rule.to}；请将公共契约/工具下沉至允许共享的基础层，或通过依赖注入/接口回调反转依赖方向。`,
+          })
+        }
+      }
+    }
+  }
+
+  return {
+    ok: violations.length === 0,
+    checkedFiles,
+    ruleCount: rules.length,
+    violations,
+  }
+}
+
+/** 判定变更属于双向门（two-way，可逆）还是单向门（one-way，不可逆/触及边界与门禁）。 */
+export function classifyDoorType({
+  changedFiles = [],
+  summary = '',
+  touchesContract = false,
+  highRisk = [],
+  gateWeakened = false,
+} = {}) {
+  const files = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(f).replace(/^\.\//, ''))
+  const riskPatterns = [...new Set([...(Array.isArray(highRisk) ? highRisk : []), '.github/workflows/', 'AGENTS.md', '.gitattributes'])]
+  const signals = []
+
+  if (gateWeakened) {
+    signals.push('检测到弱化/放宽测试或 CI 门禁检查（必须人工拍板）')
+  }
+  if (highRisk === true) {
+    signals.push('已标记触碰高风险路径')
+  }
+  const highRiskHits = files.filter((f) => riskPatterns.some((pat) => matchGlob(f, pat)))
+  if (highRiskHits.length > 0) {
+    signals.push(`触碰高风险路径：${highRiskHits.slice(0, 5).join(', ')}`)
+  }
+  if (touchesContract) {
+    signals.push('涉及跨模块或外部对外契约变更')
+  }
+  const infraHits = files.filter((f) => /(?:^|\/)(?:migrations?|migrate)\/|\.sql$|^(?:SKILL\.md|LICENSE|package-lock\.json)$/i.test(f))
+  if (infraHits.length > 0) {
+    signals.push(`触碰不可逆迁移或分发根契约：${infraHits.slice(0, 5).join(', ')}`)
+  }
+  const summaryText = String(summary ?? '')
+  if (/(?:breaking\s+change|外部契约|跨模块|数据迁移|schema\s*变更|数据库迁移|不可逆|权限模型|协议变更|弱化门禁|publish|release|改可见性)/i.test(summaryText)) {
+    signals.push('任务语义涉及外部契约、权限、发布或不可逆数据迁移')
+  }
+
+  const isOneWay = signals.length > 0
+  return {
+    doorType: isOneWay ? 'one-way' : 'two-way',
+    requiresHumanApproval: Boolean(gateWeakened),
+    signals,
+    reason: isOneWay ? signals.join('；') : '局部可逆改动（未触碰高风险路径、外部契约或门禁定义，可无损回滚）',
+    rollbackPath: isOneWay
+      ? '单向门回退：已合并远端须发反向提交或递增版本修复（禁止改写历史）；若含数据库/Schema 迁移须附带显式降级步骤；弱化门禁改动未获 --human-approved 前阻断合并。'
+      : '双向门回退：未提交变更可直接重置工作区；已开分支未合并直接关闭 PR 并删除临时分支；已合入则一键 git revert。',
+  }
 }
 
 /** 从项目清单嗅探测试与门禁命令，作为 Dev Profile 缺失时的安全兜底。 */

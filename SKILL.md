@@ -87,7 +87,7 @@ node "<本 skill 目录>/scripts/update.mjs" --quiet
 # S1 只读勘察（--probe-auth 并发探测 GitHub 轨道 A/B）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe-auth
 # 写前零污染 .tar.gz 快照管理（equip / compose-agents 修改前自动调用；支持 list / restore）
-node "<本 skill 目录>/scripts/backup.mjs" "<项目目录>" list
+node "<本 skill 目录>/scripts/backup.mjs" list "<项目目录>"
 # S3 全量装配 / 升级 5 个研发技能（空目录加 --bootstrap-empty --lang <lang> --name <name>）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
 # S3 生成或无损刷新 AGENTS.md（<= 30KB；--check / --upgrade / --clean / --no-backup）

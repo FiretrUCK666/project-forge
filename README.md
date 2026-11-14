@@ -126,8 +126,11 @@ export PF_NO_UPDATE=1
 # 只读勘察（--markdown 出给人读的报告，--probe-auth 双轨探测 GitHub 凭据）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
-# 装配或无损刷新五套内置研发 Skill（支持 --bootstrap-empty 空目录起步与 --check 一致性校验）
+# 装配或无损刷新五套内置研发 Skill（支持 --bootstrap-empty 空目录起步、--check 校验与写前快照）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
+
+# 管理写前零污染 .tar.gz 保护快照（equip 与 compose-agents 写入前自动生成，最多保留 5 份）
+node "<本 skill 目录>/scripts/backup.mjs" list "<项目目录>"
 
 # 生成或刷新 AGENTS.md（<= 30KB 上限 + SHA256 未定制区无损保护）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
@@ -139,10 +142,15 @@ node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 ```
 
-装配之后，目标项目的 `.agents/skills/` 拥有五套自包含研发 Skill，并由 `AGENTS.md` 顶部路由表根据自然语言静默触发：
+装配之后，目标项目的 `.agents/skills/` 拥有五套自包含研发 Skill，并由 `AGENTS.md` 顶部路由表与「行事总纲」引导日常工作流：
 
-- **内置研发套件（`kit/skills/` -> `.agents/skills/`）**：`dev-explore`（代码结构与热点地图）、`dev-plan`（五档分流：`Case 1` 至 `Case 5` 决定写 0 文档、`docs/todo/` 或 `docs/specs/`）、`dev-flow`（任务账本、Worktree 共享依赖 Junction/Symlink 零拷贝挂载与先 `unlinkSync` 解绑防删穿）、`dev-review`（外部 PR `--untrusted-scan` 投毒拦截与六锁防死循环审查）、`dev-govern`（技术债扫描与 `reconcile` 巡检）。
-- **四层文档与预算**：`AGENTS.md`（入口契约，硬上限 30KB / 24KB 预警）+ `docs/TDD.md`（常青架构）+ `docs/prd/`（按需需求基线）+ `docs/specs/` 与 `docs/todo/`（PR 合流前于同分支归档进 `docs/archive/todo/`）。
+- **内置研发套件（`kit/skills/` -> `.agents/skills/`）**：
+  - `dev-explore`（`repo-map.mjs`）：`quick` / `medium` / `thorough` 三级探索，提取 `ciRunSteps`、`reusableModules` 与 `featureMap` 消除人肉代理；
+  - `dev-plan`（`doc-plan.mjs`）：五档分流（`Case 1` 至 `Case 5`）、`two-way`/`one-way` 门型判定、规划自净化 `audit` 与分级独立 `critique-pass` 锁定；
+  - `dev-flow`（`flow.mjs`、`worktree-deps.mjs`）：任务账本、Junction/Symlink 共享依赖挂载与先 `unlinkSync` 解绑、四态 Worktree 判别、`verify --mode smoke` 运行实证，以及 `merge` 检测到弱化门禁时以退出码 `4` 阻断；
+  - `dev-review`（`review-pack.mjs`）：外部 PR `--untrusted-scan` 投毒拦截、`behavioralGate`（含 `smoke-verify`）+ `structuralGate`（墓碑/借口注释、超大文件与 `arch-rules`）+ `doorAssessment` 双门评估，以及六锁防死循环审查；
+  - `dev-govern`（`govern-audit.mjs`）：演进温差、围栏感知死链、借口/墓碑/死代码块、神文件、`arch-rules`、孤儿测试与 4 态 Worktree 审计，并支持 `record`/`cluster`/`sample` 规则下沉抽检。
+- **四层文档与写前快照保护**：`AGENTS.md`（入口契约，硬上限 30KB / 24KB 预警，含 7 键 `Dev Profile`：`quick-test`、`full-test`、`smoke-verify`、`merge-gate`、`arch-rules`、`high-risk`、`do-not-edit`）+ `docs/TDD.md`（常青架构与 `Feature Map`）+ `docs/prd/` + `docs/specs/` 与 `docs/todo/`（PR 合流前归档进 `docs/archive/todo/`）；`scripts/backup.mjs` 在修改非空工作区前自动于仓外保存 `.tar.gz` 增量快照（零污染 `git status`，`--no-backup` 可跳过，支持 `restore` 还原并清理无主新增文件）。
 - **双轴五态身份与双轨四级 GitHub 引擎**：严格区分 `local-only`、`maintainer`、`contributor-fork`、`clone-readonly` 与 `undetermined`（杜绝他人仓库 `git clone` 误判为维护者）；传输轨并发探测 SSH（22/443）与 HTTPS credential helper 并给出协议错配修复命令，API 轨按 `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` 四级自动降级，全程无弹窗且令牌不落盘、不输出。
 
 ## 它怎么做到不吵人
@@ -174,9 +182,8 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 真正做判断的是审查：它拿到冻结的验收标准、diff、门禁原始输出，并且做过故障注入。
 外部贡献者的提案也一样，防陌生人的那一层在**审查之前**（先只读审 diff，跑门禁时关掉生命周期脚本）。
 
-**只有一类必须人点头：弱化门禁的改动。** 删测试、放宽断言、加跳过标记、把检查改成警告、改松 CI
-——别的改动做错了，下一次门禁会红；它做错了，**以后每一次都不会红，包括这一次**，
-而它的外观是「构建绿了」。想更保守，在项目 `AGENTS.md` 的「取舍」里写 `merge-authority: human`。
+- **核心脚手架扩展**：`scripts/backup.mjs`（仓外写前 `.tar.gz` 快照与还原）、`scripts/handoff.mjs` 与 `scripts/sync-toc.mjs`。
+- **只有一类必须人点头：弱化门禁的改动。** 删测试、放宽断言、加跳过标记、把检查改成警告、改松 CI——`flow.mjs merge` 检测到这类变更时直接以退出码 `4` 阻断，必须由人点头加 `--human-approved`。想更保守，在项目 `AGENTS.md` 的「取舍」里写 `merge-authority: human`。
 
 **这条判据对维护本 skill 自己也一样。** 它治理别人的项目，也治理自己——这里同样是
 拉分支 → 门禁全绿 → 推分支 → 开 PR → 独立审查 → 合并，不多一步确认，也不少一步审查。
@@ -206,7 +213,7 @@ SKILL.md            入口：什么时候读哪一份，以及不读不许动手
 references/         判据文档，按当前这一步需要的那份读
 templates/          落盘骨架：AGENTS 契约、四层 docs 模板、贡献/发版规范、许可证、流水线
 kit/skills/         随包分发的五套自包含内置研发 Skill（dev-explore/plan/flow/review/govern）
-scripts/            勘察、装备（equip）、生成（compose-agents）、体检、交棒、目录同步、自更新
+scripts/            勘察、装备（equip）、快照（backup）、生成（compose-agents）、体检、交棒、同步、自更新
 ```
 
 `scripts/dev/`、`.agents/` 与 `docs/` 只服务这个仓库自己的自检、自举与归档，均通过 `.gitattributes` 排除，不进用户包。

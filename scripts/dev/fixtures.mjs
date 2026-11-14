@@ -3844,7 +3844,7 @@ cases.push(['govern-audit.mjs release-prep Wave 4 (C22)：多版本跳号采集�
     'docs/specs/261114-stream.md': '# 流式导出规范\n\nStatus: implemented\n\n支持大文件流式导出输出。\n',
     'docs/archive/todo/261114-stream.md': '# 任务单：流式导出\n\n## 完成后的记录\n\n已完成流式导出并同步文档。\n',
   }, 'docs: record stream spec and archive todo')
-  commitIn(multiDir, { 'test/core.test.mjs': 'export const t = 2\n' }, 'test: add streaming assertions')
+  commitIn(multiDir, { 'test/core.test.mjs': 'export const t = 2\n' }, 'feat: add test assertions for streaming')
   commitIn(multiDir, { '.gitignore': 'node_modules/\ntmp/\n' }, 'chore: ignore tmp files')
   commitIn(multiDir, { 'bin/cli.mjs': 'export function runCli() { return 2 }\n' }, 'update')
 

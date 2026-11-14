@@ -1951,10 +1951,16 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
   const full = [
     '## 日常协作', '',
     '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
     '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
       + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
     '',
-    '  **第 5 步之前先把要删的清单列出来问一次**：问到人点头才删。',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
     '',
   ].join('\n')
 
@@ -1968,16 +1974,28 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return '删掉「下游堆叠 PR」之后没有报缺——这一半又没有守卫了'
   }
 
-  // 反面二：删掉 ls-remote。
-  const noProbe = full.replace('（`git ls-remote --heads origin <分支>`）', '')
+  // 反面二：删掉 ls-remote 这条命令**连同「远端」这个词**——
+  // 只删行内代码而留着「远端还在不在」，判据仍算交代过（它说的是同一件事），这是刻意的。
+  const noProbe = full
+    .replace('远端还在不在（`git ls-remote --heads origin <分支>`）、', '')
   if (!finishRequiredMissing(noProbe).some((l) => l.includes('远端还在不在'))) {
-    return '删掉 ls-remote 之后没有报缺'
+    return '删掉「查远端」这一整半之后没有报缺'
   }
 
-  // 反面三：删掉「删之前先问」。
-  const noAsk = full.replace('  **第 5 步之前先把要删的清单列出来问一次**：问到人点头才删。\n', '')
+  // 反面三：删掉「删之前先问」那一整段。
+  const noAsk = full.replace('  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。\n', '')
   if (!finishRequiredMissing(noAsk).some((l) => l.includes('问一次'))) {
     return '删掉「删之前先问」之后没有报缺'
+  }
+
+  // 反面四：**同一章里别处的正常用法不能算交代**——
+  // 「产物清单」「卸之前先问人」「弱化门禁要人点头」都在这一章里，但都不是这条要求。
+  const decoys = full.replace(
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。\n',
+    '  这一章别处还会说「产物清单」「卸之前先问人」「弱化门禁必须人点头」。\n',
+  )
+  if (!finishRequiredMissing(decoys).some((l) => l.includes('问一次'))) {
+    return '别处的「产物清单 / 卸之前先问人 / 要人点头」被当成了交代——这一条又被蒙混了'
   }
 
   // 反面四：**同一个词出现在章外的别处，不算交代**——

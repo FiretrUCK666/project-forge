@@ -132,7 +132,16 @@ const INJECTIONS = [
     alsoDropIn: ['templates/agents-project.md', 'AGENTS.md'],
   },
   {
-    id: 'I10',
+    // 判据自己少查一处——模板那一处曾被 `continue` 提前跳过，只有实例被查。
+    // 这类毛病不报错，它只是安静地少查一处，所以必须有一条注入盯着。
+    id: 'I9e2',
+    what: '三处一起删掉「下游堆叠 PR」时，模板那一处也必须被报',
+    file: 'templates/agents-project.md',
+    from: '、有没有下游堆叠 PR 以该分支为 base',
+    to: '',
+    expect: 'templates/agents-project.md 的合并收尾没有交代',
+  },
+  {
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
     file: 'templates/work-item.md',
     // 两条一起改：只改第一条的话，第二条 `C2` 还在，判据仍然看得到合法编号。

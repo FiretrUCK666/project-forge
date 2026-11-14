@@ -19,21 +19,20 @@
 
 | 层级与路径 | 模板骨架 | 生命周期与分工 |
 | --- | --- | --- |
-| **技术设计契约**：`docs/TDD.md` | `templates/docs-tdd.md` | **常青权威**。模块拓扑、主数据流、核心不变量、对外契约与高风险同步边界；有代码仓必配，契约变更必须同提交更新 |
-| **产品需求说明**：`docs/prd/YYMMDD-<slug>.md` | `templates/docs-prd.md` | **按需创建**。解决什么痛点、In/Non-Goals、关键用户路径与待拍板项 |
-| **功能设计规范**：`docs/specs/YYMMDD-<slug>.md` | `templates/docs-spec.md` | **Case 4 专用**。头部 `Status: draft \| approved \| implemented \| superseded`；含冻结 `C1/C2...`；合入后更新为 `implemented` 与「实现说明」，**长留作已实现行为边界参考** |
-| **任务执行单**：`docs/todo/YYMMDD-<slug>.md` | `templates/docs-todo.md` | **Case 3/4 执行清单**。含 `Planned at: <HEAD SHA>`、快测命令、`- [ ] C1: ...`、`## 完成后的记录`（**在合并之前写完，随这次改动一起提交**）。PR 提交前由 `flow.mjs finalize` 核验全勾并 `git mv` 归档至 `docs/archive/todo/` |
+| **技术设计契约**：`docs/TDD.md` | `templates/docs-tdd.md` | **常青权威**。模块拓扑、主数据流、**`arch-rules` 分层禁引**、**`Feature Map -> smoke-verify`**、核心不变量与高风险同步边界；有代码仓必配，契约变更必须同提交更新 |
+| **产品需求说明**：`docs/prd/YYMMDD-<slug>.md` | `templates/docs-prd.md` | **按需创建**。痛点、In/Non-Goals、**复用既有模块**、**门型与回滚路径**及头部 `- Plan Critique: pending`，须经内审与 `critique-pass` 方可 `approve` |
+| **功能设计规范**：`docs/specs/YYMMDD-<slug>.md` | `templates/docs-spec.md` | **Case 4 专用**。头部 `Status: draft \| approved \| implemented \| superseded` 与 `- Plan Critique: pending`；含**复用既有模块**、**门型与回滚路径**与冻结 `C1/C2...`；合入后标 `implemented` 并**长留作边界参考** |
+| **任务执行单**：`docs/todo/YYMMDD-<slug>.md` | `templates/docs-todo.md` | **Case 3/4 执行清单**。含 `Planned at: <HEAD SHA>`、**复用既有模块**、**本期不做**、**门型与回滚路径**、`- [ ] C1: ...`、`## 完成后的记录`（**在合并之前写完，随这次改动一起提交**）。PR 提交前由 `flow.mjs finalize` 核验全勾并 `git mv` 归档至 `docs/archive/todo/` |
 
 ## 三、`AGENTS.md`：给 AI 看的契约（<= 30KB，严进常删）
 
-- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录>`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`。
+- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录>`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`；改写已有非空 `AGENTS.md` 前（含默认刷新、`--upgrade` 与有变化的 `--clean`）自动经 `scripts/backup.mjs` 创建 `.tar.gz` 快照（`--no-backup` 可跳过，`--check` 严格零写入）。
 - **核心构成**：
   1. 顶部 **8 行自然语言静默意图路由表**（直载 `.agents/skills/dev-{explore,plan,flow,review,govern}/SKILL.md` 并先跑对应 `.mjs`，绝不要求 `/skill` 或反问）；
-  2. 受管 **`Dev Profile`**（`quick-test` / `full-test` / `merge-gate` / `high-risk` / `do-not-edit` 供引擎读取）；
-  3. **上下文阅读护栏**（按序读取与默认跳过目录）；
-  4. 五档分流、双轴五态身份、三档隔离与合并收尾七步、`取舍` 人工手写节。
-- **体积与演进红线**：硬上限 **`30KB`（30720 字节）**，**`24KB`（24576 字节）起预警**；超限会阻断生成与 `--check`。遵循**严进常删**：能在源码 10 秒看出的细节不写入，长篇原理下沉 `docs/TDD.md`，子目录特例写入 `<subdir>/AGENTS.md`（首行指回根契约，仅记局部例外）。
-- **无损保护升级**：有 `fill` 标记的段落一旦人写过并删去 `fill` 就永久不动；加 `customized` 标记的段不覆盖；当目标库存在 `.agents/skills/.pf-manifest.json` 的 `agentsRegions` 基线时，未标 `customized` 但磁盘 SHA256 与基线不符的受管区间**自动保护跳过并告警**，绝不静默冲掉用户跨月手改。
+  2. **`行事总纲与决策准则`**（四条准则、信任倒金字塔与同类纠偏满 2 次下沉脚本、最优解与 UX/DX/AX 取舍、动手前后四问、不当人肉代理）；
+  3. 受管 **`Dev Profile`**（`quick-test` / `full-test` / `smoke-verify` / `merge-gate` / `arch-rules` / `high-risk` / `do-not-edit` 供引擎读取，忽略 `none`/`<...>`）；
+  4. **上下文阅读护栏**、五档分流与分级内审、双轴五态身份、三档隔离、合并收尾七步及 `取舍` 人工手写节。
+- **体积、反腐与保护升级**：硬上限 **`30KB`（30720 字节）**，**`24KB`（24576 字节）起预警**；遵循**严进常删**与子目录就近 `<subdir>/AGENTS.md`；结合 `govern-audit.mjs` 检查演进温差（`docs.stale-vs-churn`）、围栏感知死链（`docs.dead-link`）、立碑/借口注释与 >800 行神文件，绝不静默覆盖无 `customized` 但相对 `.pf-manifest.json` `agentsRegions` 基线改写过的区段。
 
 ## 四、`README`：给人看的门面
 

@@ -20,7 +20,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 2. **`commitsState === 'unreadable'`（仓库损坏或无权访问）**：
    不要把读不出提交误当成「零提交新仓库」，更不许直接重跑 `git init`；先排查工作树指针、`.git` 权限或对象损坏。
 3. **空目录或近空目录起步（`effectiveFiles === 0`）**：
-   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次搭出最小可跑工程、冒烟测试、初始 `docs/TDD.md` 与 `.agents/skills/`。
+   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次搭出最小可跑工程、冒烟测试、初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map` 骨架）与 `.agents/skills/`（对非空目录写入前会经 `scripts/backup.mjs` 自动拍仓外 `.tar.gz` 快照）。
 
 ## 三、字段含义
 
@@ -31,8 +31,8 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 | `git` | `isRepoRoot`、`isWorktree`（区分独立 worktree 与损坏 `.git`）、`worktreeParent`、`commitsState`、`defaultBranch`、`submodules` |
 | `git.role` | 双轴五态身份：`local-only`（无远端或 `.git/pf-local-mode`）、`maintainer`（与声明源一致且有写权限或自有确认）、`contributor-fork`（存在不同 `upstream` 或 Fork 仓）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
 | `git.auth` | `https`、`ssh`（含 443 回退结果）、`apiChannel`、`details`、`remediationCmd`（协议错配可执行修复命令；SSH-only 仓不再误报无凭据） |
-| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`（`docs/TDD.md`）、`prdDir`、`specsDir`、`todoDir`、`contributing`、`releasing`、`license`、`releaseNotesMode`；缺项决策口径见 `references/docs-set.md` |
-| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并读取 `.agents/skills/.pf-manifest.json` 哈希账本状态 |
+| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警；含 `行事总纲` 与 7 键 `Dev Profile`）、`tdd`（`docs/TDD.md`）、`prdDir`、`specsDir`、`todoDir`、`contributing`、`releasing`、`license`、`releaseNotesMode`；缺项决策口径见 `references/docs-set.md` |
+| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并读取 `.agents/skills/.pf-manifest.json` 哈希账本状态；后续探索由 `repo-map.mjs` 提取 `reusableModules`、`featureMap` 与 CI 步骤 |
 | `ecosystem` / `workspace` | 语言生态、入口清单、`packageManager`、多包目录列表（驱动 `AGENTS.md` 多包边界与忽略规则） |
 | `artifacts` | 运行环境下限（`runtimeRequirements`）与从配置提取的标准命令 |
 | `ci` / `publish` | 现有 GitHub Actions 流水线与发布通道线索 |

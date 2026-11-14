@@ -11,7 +11,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import {
-  chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync,
+  chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync,
   statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
@@ -19,7 +19,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { tempPathFor, writeAtomic } from './lib/fs-atomic.mjs'
-import { isMainModule, posixPath, readJsonSafe, samePath } from './lib/text.mjs'
+import { isMacOsMetadata } from './lib/protocol.mjs'
+import { isMainModule, posixPath, readJsonSafe } from './lib/text.mjs'
 
 export const DEFAULT_MAX_KEEP = 5
 export const MAX_BACKUP_FILE_BYTES = 20 * 1024 * 1024
@@ -88,9 +89,27 @@ export function findGitCommonDir(startDir) {
   }
 }
 
+/** 对目标路径按最深存在祖先 realpathSync.native + NFC 归一，消除软链与大小写/编码差异。 */
+export function canonicalBackupPath(p) {
+  const abs = resolve(String(p ?? ''))
+  let head = abs
+  const tail = []
+  for (;;) {
+    try {
+      const real = realpathSync.native(head)
+      return (tail.length > 0 ? join(real, ...tail.reverse()) : real).normalize('NFC')
+    } catch {
+      const up = dirname(head)
+      if (up === head) return abs.normalize('NFC')
+      tail.push(basename(head))
+      head = up
+    }
+  }
+}
+
 /** 计算目标项目的零污染快照目录路径。 */
 export function resolveBackupDir(targetDir, { env = process.env } = {}) {
-  const root = resolve(targetDir)
+  const root = canonicalBackupPath(targetDir)
   const hashInput = process.platform === 'win32' ? root.toLowerCase() : root
   const hash8 = createHash('sha256').update(hashInput).digest('hex').slice(0, 8)
   const slug = basename(root)
@@ -345,9 +364,11 @@ function collectEligibleWorkspaceFiles(root, backupDir, { readData = true } = {}
   const entries = []
   const skippedLarge = []
   if (!existsSync(root)) return { entries, skippedLarge }
+  const canonBackupDir = backupDir ? canonicalBackupPath(backupDir) : ''
 
   function visit(dir) {
-    if (backupDir && (samePath(dir, backupDir) || resolve(dir).startsWith(resolve(backupDir) + sep))) {
+    const canonDir = canonicalBackupPath(dir)
+    if (canonBackupDir && (canonDir === canonBackupDir || canonDir.startsWith(canonBackupDir + sep))) {
       return
     }
     let dirEntries = []
@@ -358,9 +379,10 @@ function collectEligibleWorkspaceFiles(root, backupDir, { readData = true } = {}
     }
     for (const d of dirEntries) {
       if (d.isSymbolicLink()) continue
-      if (d.name === '.git') continue
+      if (d.name === '.git' || isMacOsMetadata(d.name)) continue
       const abs = join(dir, d.name)
-      if (backupDir && (samePath(abs, backupDir) || resolve(abs).startsWith(resolve(backupDir) + sep))) {
+      const canonAbs = canonicalBackupPath(abs)
+      if (canonBackupDir && (canonAbs === canonBackupDir || canonAbs.startsWith(canonBackupDir + sep))) {
         continue
       }
       if (d.isDirectory()) {
@@ -450,7 +472,7 @@ export function createBackup(targetDir, {
   force = false,
   env = process.env,
 } = {}) {
-  const root = resolve(targetDir)
+  const root = canonicalBackupPath(targetDir)
   const backupDir = resolveBackupDir(root, { env })
 
   if (hasPendingChanges === false) {
@@ -524,7 +546,21 @@ export function createBackup(targetDir, {
   const pruned = []
   const keepLimit = Number.isInteger(maxKeep) && maxKeep > 0 ? maxKeep : DEFAULT_MAX_KEEP
   while (index.backups.length > keepLimit) {
-    const oldest = index.backups.shift()
+    let pinnedIdx = -1
+    for (let i = index.backups.length - 1; i >= 0; i -= 1) {
+      if (index.backups[i]?.label === 'pre-forge') {
+        pinnedIdx = i
+        break
+      }
+    }
+    let evictIdx = -1
+    for (let i = 0; i < index.backups.length - 1; i += 1) {
+      if (i === pinnedIdx) continue
+      evictIdx = i
+      break
+    }
+    if (evictIdx === -1) break
+    const [oldest] = index.backups.splice(evictIdx, 1)
     if (!oldest) break
     pruned.push(oldest.id)
     const oldArchive = join(backupDir, oldest.archive)
@@ -549,40 +585,20 @@ export function createBackup(targetDir, {
   }
 }
 
-/**
- * 写前防呆快照封装：无待写变动或空目录时静默跳过，绝不写冗余空包。
- */
-export function ensurePreWriteBackup(targetDir, {
-  label = 'write',
-  maxKeep = DEFAULT_MAX_KEEP,
-  hasPendingChanges = true,
-  dryRun = false,
-  force = false,
-  env = process.env,
-} = {}) {
+/** 写前防呆快照封装：无待写变动或空目录时静默跳过，绝不写冗余空包。 */
+export function ensurePreWriteBackup(targetDir, opts = {}) {
+  const { label = 'write', maxKeep = DEFAULT_MAX_KEEP, hasPendingChanges = true, dryRun = false, force = false, env = process.env } = opts
   if (hasPendingChanges === false) {
-    return {
-      created: false,
-      skippedReason: 'no-pending-changes',
-      backupDir: resolveBackupDir(resolve(targetDir), { env }),
-    }
+    return { created: false, skippedReason: 'no-pending-changes', backupDir: resolveBackupDir(targetDir, { env }) }
   }
-  return createBackup(targetDir, {
-    label,
-    maxKeep,
-    dryRun,
-    hasPendingChanges,
-    force,
-    env,
-  })
+  return createBackup(targetDir, { label, maxKeep, dryRun, hasPendingChanges, force, env })
 }
 
 /** 列出指定工作区已有快照（按最新在前顺序）。 */
 export function listBackups(targetDir, { env = process.env } = {}) {
-  const root = resolve(targetDir)
+  const root = canonicalBackupPath(targetDir)
   const backupDir = resolveBackupDir(root, { env })
-  const indexPath = join(backupDir, 'index.json')
-  const index = readIndex(indexPath, root)
+  const index = readIndex(join(backupDir, 'index.json'), root)
   const backups = [...index.backups].reverse().map((b) => ({
     ...b,
     archivePath: join(backupDir, b.archive),
@@ -597,10 +613,9 @@ export function restoreBackup(targetDir, {
   dryRun = false,
   env = process.env,
 } = {}) {
-  const root = resolve(targetDir)
+  const root = canonicalBackupPath(targetDir)
   const backupDir = resolveBackupDir(root, { env })
-  const indexPath = join(backupDir, 'index.json')
-  const index = readIndex(indexPath, root)
+  const index = readIndex(join(backupDir, 'index.json'), root)
 
   if (index.backups.length === 0) {
     throw new Error(`找不到任何可恢复快照：${backupDir}`)

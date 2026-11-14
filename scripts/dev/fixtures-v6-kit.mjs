@@ -628,7 +628,7 @@ export function registerV6KitCases(cases) {
       const bareUrl = bareRem.replace(/\\/g, '/')
       try {
         const implNote = join(urlDir, '.worktrees/impl-note-case')
-        spawnSync('git', ['config', `url.${bareUrl}.insteadOf`, 'https://github.com/acme/demo.git'], { cwd: urlDir, stdio: 'ignore' })
+        spawnSync('git', ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/demo.git'], { cwd: urlDir, stdio: 'ignore' })
         spawnSync('git', ['add', '-A'], { cwd: implNote, stdio: 'ignore' })
         spawnSync('git', ['commit', '-qm', 'archive spec'], { cwd: implNote, stdio: 'ignore' })
         const verOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'note-case', '--cmd', 'node -e "process.exit(0)"'], { cwd: implNote })

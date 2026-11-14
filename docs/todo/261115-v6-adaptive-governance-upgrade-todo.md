@@ -67,44 +67,44 @@ related_spec: ../specs/261115-v6-adaptive-governance-upgrade-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: 建齐 `docs/prd/.gitkeep`、`docs/specs/.gitkeep`、`docs/todo/.gitkeep`，统一 `templates/docs-*.md` 与 `doc-plan`/`govern-audit --write-todo` 元信息表与格式，通过 `node scripts/dev/preflight.mjs` 退出码 `0`。
-- [ ] C2: `flow.mjs finalize` 与 `doc-plan.mjs archive` 支持 `PRD`/`SPEC`/`Todo` 成对归档至 `docs/archive/` 对应目录并更新互链，`do-not-edit` 与双斜杠匹配无冲突。
-- [ ] C3: 修复 `doc-plan.mjs` `approveSpec` 状态写入、critique 误失效、`auditDoc` 单趟路径误报及中文 slug 重命名重复拼接缺陷。
-- [ ] C4: `templates/docs-tdd.md`、`docs/TDD.md` 与 `scripts/equip.mjs`（`starterTdd`）补齐 `## 文档信息` 表格并按短名拓扑重绘；`kit/skills/lib/docs.mjs` (new) 落地 Mermaid `16/12` 显示宽度静态校验（禁用节点内 HTML），接入 `preflight.mjs` 与 `doc-plan.mjs audit` 退出码 `0`。
-- [ ] C5: `.github/workflows/release.yml` 固定 `project-forge/` 前缀；双语 `README.md` / `README.en.md` 补齐一键 zip 下载链接、对照表及自更新机制说明，通过 `sync-toc.mjs --check` 且正文中不含模板套话与推广黑话。
-- [ ] C6: 6 张双语 SVG（`assets/readme/hero.svg`、`hero-en.svg`、`workflow.svg`、`workflow-en.svg`、`architecture.svg`、`architecture-en.svg`）同步文档结构与通用目标命令，通过 `preflight.mjs` SVG 安全校验。
-- [ ] C7: `scripts/update.mjs` 实现同盘 staging、最后原子写 `SKILL.md`、中断回滚、全深度清退役、15 分钟失败冷却及移除 S1 前隐式 `equip` 写入。
-- [ ] C8: `scripts/equip.mjs`、`scripts/survey.mjs` 与 `scripts/compose-agents.mjs` 支持 `--tier lightweight|full` 与无损升档。
-- [ ] C9: `.pf-manifest.json` 升级 `schemaVersion: 2`（删除墓碑不回写、`--adopt-custom` 绿灯豁免、基线自动收敛、LF 写入与换行兼容防 macOS/Win 误漂移），`scripts/backup.mjs` 钉住首份 `pre-forge` 快照。
-- [ ] C10: 无远端目录 `--probe-auth` 探测本机凭据不写 `~/.ssh/known_hosts`；`git credential fill` 加硬超时与 askpass 屏蔽防 macOS 钥匙串弹窗挂死；解析 `~/.ssh/config` 别名（含 `--apple-use-keychain` 文档）；Token 轻量验活防假绿。
-- [ ] C11: 补齐远端 3 路决策与 `gh CLI` / `SSH Ed25519` / `HTTPS PAT + GCM` 分步指引及 GitHub 仓库治理对齐提示。
-- [ ] C12: 修复 `has-release` 恒真漏洞；拆分 `ci-check`/`ci-release` 探测；落地 5 选 1 发版策略且仅按需指引 `RELEASE_TOKEN` / OIDC。
-- [ ] C13: `templates/ci-release.yml` 与 `.github/workflows/release.yml` 兼容无 `v` CHANGELOG 标题并补齐单源版本门禁与空 tag 防呆。
-- [ ] C14: 新增 `scripts/lib/platform/registry.mjs` (new) `HostingProvider` 与 `remotes[]` 拓扑抽象（产品层仅注册 `github`），未知主机降级 `generic-git` 不误阻 `merge`。
-- [ ] C15: 识别存量架构文档防双轨；修复 `adr` 目录误绑；精确区分首次接入与跨月重入（`detectReentry` 与多生态 `staleAgentScripts`）；全链路忽略 macOS 元数据（`._*`/`__MACOSX` 等）并识别 `Package.swift`/`xcodeproj`；清除特定宿主目录硬编码并兼容通用技能容器探测；补齐 `equip.mjs --bootstrap-empty --lang java`。
-- [ ] C16: 拆解 `kit/skills/lib/` 正交模块与三套大脚本内部子模块（单文件不超过 `800` 行，零 `>1500` 神文件），统一 `Dev Profile` / `arch-rules` / `resolveRepoRoots` / `detectGateWeakening` / `classifyDoorType` / `parseCoupledSyncRules` / `readDecisions`，通过 `preflight.mjs` `checkKitSuite()`。
-- [ ] C17: `repo-map.mjs` 改用 `git ls-files -z` + 4KB NUL 探测与多包发现，验证 8 层深 Java + 前端分离夹具完整识出源码与验证步骤。
-- [ ] C18: `Dev Profile` 显式 `none` 原样尊重；纯文档仓 `quick-test: none` 跑通 `flow verify` 与 `submit`。
-- [ ] C19: `kit/skills/lib/git.mjs` (new) 与 `scripts/lib/text.mjs` 统一 `-z`、`precomposeunicode`、`canonicalPath`/`samePath()`（兼容 macOS `/private/var` 与 APFS NFC）、冲突态拦截、unborn HEAD、POSIX `detached: true` 进程组强杀及 BSD 工具兼容。
-- [ ] C20: 统一 5 套脚本 CLI 参数契约、自动推断 `--task`/`--round`、新增 `flow status`/`abort` 与动态技能感知 `[NEXT STEP]`。
-- [ ] C21: 修复 Tier 2 `review-{taskId}` 同步检出防空 Diff、`flow start` 保留并迁入 `doc-plan` 文档以及 Fork 私有文档读取路径。
-- [ ] C22: `flow merge` 强校 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered`（`changes` 重置 `reviewPassedHead: null`）；补齐 `STOP_LOSS_ESCALATE` 人工放行；`cleanup` 兼容 Squash/Rebase 四态清理。
-- [ ] C23: `worktree-deps.mjs` 实现按子包锁比对、Workspace/editable 软链隔离保护、`samePath` 防护与安全回滚卸载。
-- [ ] C24: 修复 `review-pack.mjs` 静态门禁死代码与多语言词法误报；`govern-audit.mjs` 实现基线增量与 `--changed` 降噪并对齐 `--write-todo`，且两者接入 Mermaid `16/12` 宽度防截断检查。
-- [ ] C25: 修复 `scripts/handoff.mjs` 豁免 `.pf-manifest.json`、跳过 `.worktrees/` 与对齐退出码 `4` 文档，带共享依赖目标仓 `--verify` 退出码 `0`。
-- [ ] C26: 同步适配 `scripts/dev/preflight.mjs`、`scripts/dev/gap-coverage.mjs`、`scripts/dev/fixtures.mjs` 与 `scripts/dev/verify-injections.mjs`（含同步 `I9b`），补齐 `C1..C25` 全部正反双向夹具与故障注入断言。
-- [ ] C27: 全仓自举与全套门禁（`preflight`、`gap-coverage`、`fixtures`、`verify-injections`、`review`、`govern-audit`、导出包校验）全绿退出码 `0`。
-- [ ] C28: 补齐规范 `## 实现说明` 与本单 `## 完成后的记录`，完成 `SPEC` 与 `Todo` 成对归档准备。
+- [x] C1: 建齐 `docs/prd/.gitkeep`、`docs/specs/.gitkeep`、`docs/todo/.gitkeep`，统一 `templates/docs-*.md` 与 `doc-plan`/`govern-audit --write-todo` 元信息表与格式，通过 `node scripts/dev/preflight.mjs` 退出码 `0`。
+- [x] C2: `flow.mjs finalize` 与 `doc-plan.mjs archive` 支持 `PRD`/`SPEC`/`Todo` 成对归档至 `docs/archive/` 对应目录并更新互链，`do-not-edit` 与双斜杠匹配无冲突。
+- [x] C3: 修复 `doc-plan.mjs` `approveSpec` 状态写入、critique 误失效、`auditDoc` 单趟路径误报及中文 slug 重命名重复拼接缺陷。
+- [x] C4: `templates/docs-tdd.md`、`docs/TDD.md` 与 `scripts/equip.mjs`（`starterTdd`）补齐 `## 文档信息` 表格并按短名拓扑重绘；`kit/skills/lib/docs.mjs` (new) 落地 Mermaid `16/12` 显示宽度静态校验（禁用节点内 HTML），接入 `preflight.mjs` 与 `doc-plan.mjs audit` 退出码 `0`。
+- [x] C5: `.github/workflows/release.yml` 固定 `project-forge/` 前缀；双语 `README.md` / `README.en.md` 补齐一键 zip 下载链接、对照表及自更新机制说明，通过 `sync-toc.mjs --check` 且正文中不含模板套话与推广黑话。
+- [x] C6: 6 张双语 SVG（`assets/readme/hero.svg`、`hero-en.svg`、`workflow.svg`、`workflow-en.svg`、`architecture.svg`、`architecture-en.svg`）同步文档结构与通用目标命令，通过 `preflight.mjs` SVG 安全校验。
+- [x] C7: `scripts/update.mjs` 实现同盘 staging、最后原子写 `SKILL.md`、中断回滚、全深度清退役、15 分钟失败冷却及移除 S1 前隐式 `equip` 写入。
+- [x] C8: `scripts/equip.mjs`、`scripts/survey.mjs` 与 `scripts/compose-agents.mjs` 支持 `--tier lightweight|full` 与无损升档。
+- [x] C9: `.pf-manifest.json` 升级 `schemaVersion: 2`（删除墓碑不回写、`--adopt-custom` 绿灯豁免、基线自动收敛、LF 写入与换行兼容防 macOS/Win 误漂移），`scripts/backup.mjs` 钉住首份 `pre-forge` 快照。
+- [x] C10: 无远端目录 `--probe-auth` 探测本机凭据不写 `~/.ssh/known_hosts`；`git credential fill` 加硬超时与 askpass 屏蔽防 macOS 钥匙串弹窗挂死；解析 `~/.ssh/config` 别名（含 `--apple-use-keychain` 文档）；Token 轻量验活防假绿。
+- [x] C11: 补齐远端 3 路决策与 `gh CLI` / `SSH Ed25519` / `HTTPS PAT + GCM` 分步指引及 GitHub 仓库治理对齐提示。
+- [x] C12: 修复 `has-release` 恒真漏洞；拆分 `ci-check`/`ci-release` 探测；落地 5 选 1 发版策略且仅按需指引 `RELEASE_TOKEN` / OIDC。
+- [x] C13: `templates/ci-release.yml` 与 `.github/workflows/release.yml` 兼容无 `v` CHANGELOG 标题并补齐单源版本门禁与空 tag 防呆。
+- [x] C14: 新增 `scripts/lib/platform/registry.mjs` (new) `HostingProvider` 与 `remotes[]` 拓扑抽象（产品层仅注册 `github`），未知主机降级 `generic-git` 不误阻 `merge`。
+- [x] C15: 识别存量架构文档防双轨；修复 `adr` 目录误绑；精确区分首次接入与跨月重入（`detectReentry` 与多生态 `staleAgentScripts`）；全链路忽略 macOS 元数据（`._*`/`__MACOSX` 等）并识别 `Package.swift`/`xcodeproj`；清除特定宿主目录硬编码并兼容通用技能容器探测；补齐 `equip.mjs --bootstrap-empty --lang java`。
+- [x] C16: 拆解 `kit/skills/lib/` 正交模块与三套大脚本内部子模块（单文件不超过 `800` 行，零 `>1500` 神文件），统一 `Dev Profile` / `arch-rules` / `resolveRepoRoots` / `detectGateWeakening` / `classifyDoorType` / `parseCoupledSyncRules` / `readDecisions`，通过 `preflight.mjs` `checkKitSuite()`。
+- [x] C17: `repo-map.mjs` 改用 `git ls-files -z` + 4KB NUL 探测与多包发现，验证 8 层深 Java + 前端分离夹具完整识出源码与验证步骤。
+- [x] C18: `Dev Profile` 显式 `none` 原样尊重；纯文档仓 `quick-test: none` 跑通 `flow verify` 与 `submit`。
+- [x] C19: `kit/skills/lib/git.mjs` (new) 与 `scripts/lib/text.mjs` 统一 `-z`、`precomposeunicode`、`canonicalPath`/`samePath()`（兼容 macOS `/private/var` 与 APFS NFC）、冲突态拦截、unborn HEAD、POSIX `detached: true` 进程组强杀及 BSD 工具兼容。
+- [x] C20: 统一 5 套脚本 CLI 参数契约、自动推断 `--task`/`--round`、新增 `flow status`/`abort` 与动态技能感知 `[NEXT STEP]`。
+- [x] C21: 修复 Tier 2 `review-{taskId}` 同步检出防空 Diff、`flow start` 保留并迁入 `doc-plan` 文档以及 Fork 私有文档读取路径。
+- [x] C22: `flow merge` 强校 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered`（`changes` 重置 `reviewPassedHead: null`）；补齐 `STOP_LOSS_ESCALATE` 人工放行；`cleanup` 兼容 Squash/Rebase 四态清理。
+- [x] C23: `worktree-deps.mjs` 实现按子包锁比对、Workspace/editable 软链隔离保护、`samePath` 防护与安全回滚卸载。
+- [x] C24: 修复 `review-pack.mjs` 静态门禁死代码与多语言词法误报；`govern-audit.mjs` 实现基线增量与 `--changed` 降噪并对齐 `--write-todo`，且两者接入 Mermaid `16/12` 宽度防截断检查。
+- [x] C25: 修复 `scripts/handoff.mjs` 豁免 `.pf-manifest.json`、跳过 `.worktrees/` 与对齐退出码 `4` 文档，带共享依赖目标仓 `--verify` 退出码 `0`。
+- [x] C26: 同步适配 `scripts/dev/preflight.mjs`、`scripts/dev/gap-coverage.mjs`、`scripts/dev/fixtures.mjs` 与 `scripts/dev/verify-injections.mjs`（含同步 `I9b`），补齐 `C1..C25` 全部正反双向夹具与故障注入断言。
+- [x] C27: 全仓自举与全套门禁（`preflight`、`gap-coverage`、`fixtures`、`verify-injections`、`review`、`govern-audit`、导出包校验）全绿退出码 `0`。
+- [x] C28: 补齐规范 `## 实现说明` 与本单 `## 完成后的记录`，完成 `SPEC` 与 `Todo` 成对归档准备。
 
 ## 断点与遗留决策
 
-- **当前状态**：规划落盘阶段完成；待独立 Plan Critique（`Gemini 4 Hydrogen XHigh`）通过后呈交人类维护者确认 `approved` 并启动 Swarm 并行实施。
-- **待拍板事项**：请审阅 [261115-v6-adaptive-governance-upgrade-spec.md](../specs/261115-v6-adaptive-governance-upgrade-spec.md) 中的十个改造域、五选一发版默认值与两档默认边界，确认后下令开始实施。
+- **当前状态**：Wave A–C 合流、Trust Gateway 实时 Issue/PR 闭环、四处异构误报根除及 `scripts/dev/` 模块化拆分均已完成实施，进入 Wave D 独立审查与收尾归档阶段。
+- **待拍板事项**：由 Wave D `independent-reviewer` 在独立干净 detached `review` worktree 复核并给出审查裁决，合入前运行 `flow.mjs finalize` 完成 `SPEC` 与 `Todo` 成对归档。
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：实施收尾合入前将写入全量门禁与故障注入的实际运行退出码与摘要。
-- **文档同步检查**：实施收尾合入前逐项核对 `docs/TDD.md`、`AGENTS.md`、`README.md`、`README.en.md`、`SKILL.md`、`references/` 与 `assets/readme/` 门面 SVG。
+- **实际验证命令与结果**：完成自举（`equip.mjs .`、`compose-agents.mjs .`、`sync-toc.mjs README.md README.en.md`），并执行全套 12 项门禁命令（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`bench.mjs`、`equip.mjs . --check`、`compose-agents.mjs . --check`、`review.mjs .`、`sync-toc.mjs README.md README.en.md --check`、`govern-audit.mjs audit . --all`、`govern-audit.mjs reconcile .` 及 `git archive` `--package` 校验）按最终工作区基线实跑验绿；完整退出码与读数见合流汇报。
+- **文档同步检查**：已同步 `docs/TDD.md`、`AGENTS.md`（<= 24576 B）、`README.md`、`README.en.md`、`CONTRIBUTING.md`、`RELEASING.md`、`SKILL.md`、`references/`、`kit/skills/*/SKILL.md`、`templates/` 及 `assets/readme/` 门面 SVG。
 - **遗留问题**：无。

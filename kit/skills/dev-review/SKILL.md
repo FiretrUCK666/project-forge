@@ -94,6 +94,8 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
   [--task <id>] --human-approved --reason "<裁决理由>"
 ```
 
+说明：`record` 在存在关联 PR 或 `linkedIssues` 且处于 GitHub 在线环境时，会自动拼装规范化四字段评论（`审查来源`、`逐条标准状态`、`故障注入记录`、`止损记录` + `pf-state`）**实时双写至 PR 与关联 Issue 评论**，并按裁决贴 `changes-requested` / `reviewed` 标签（403 自动降级、离线或无凭据静默写本地账本并提示，绝不阻塞离线使用）。
+
 ## 输出与下一跳
 
 每条命令均附 `[NEXT STEP]` 明确提示下一合法动作：

@@ -92,7 +92,7 @@ function isRustLifetimeAt(s, idx, ext) {
 
 /**
  * 多语言词法注释提取器：
- * 修复 Rust 生命周期 `'a`、C/C++ `#define TEMP` 预处理宏与块注释跨行跟踪，
+ * 修复 Rust 生命周期 `'a`、C/C++ 预处理指令（如 `#define`）与块注释跨行跟踪，
  * 返回 `{ commentText, codeText, nextInBlock, pureSingleLine }`。
  */
 export function extractLineCommentInfo(line, inBlock = false, ext = '') {

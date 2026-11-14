@@ -274,7 +274,29 @@ function cmdCoversTestFile(commands, testRel) {
   return false
 }
 
-function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles, devProfile, discovery) {
+function collectConfiguredTestEntries(repoRoot, files, expandedCommands) {
+  const codeRelSet = new Set(files.filter((f) => CODE_EXT_RE.test(f.name)).map((f) => f.rel))
+  const entries = new Set()
+  let hasExecutableRunner = false
+  const runnerRe = /\b(?:node\s+--test|vitest|jest|mocha|ava|tap|bun\s+test|pytest|uv\s+run\s+pytest|poetry\s+run\s+pytest|python3?\s+-m\s+(?:pytest|unittest)|go\s+test|cargo\s+test|mvn\b[^\n]*\b(?:test|verify)|\.?\/?mvnw\b[^\n]*\b(?:test|verify)|gradle\b[^\n]*\b(?:test|check)|\.?\/?gradlew\b[^\n]*\b(?:test|check)|dotnet\s+test|swift\s+test|ctest|meson\s+test|dart\s+test|mix\s+test|bundle\s+exec\s+(?:rspec|rake\s+test))\b/
+
+  for (const rawCmd of expandedCommands) {
+    const cmd = String(rawCmd ?? '').trim()
+    if (!cmd || /no test specified/i.test(cmd)) continue
+    if (runnerRe.test(cmd)) hasExecutableRunner = true
+    for (const tok of cmd.split(/[\s"'`;|&()]+/)) {
+      const clean = posixPath(tok).replace(/^\.\//, '')
+      if (!clean || clean.startsWith('-') || !CODE_EXT_RE.test(clean)) continue
+      if (codeRelSet.has(clean) || existsSync(join(repoRoot, clean))) {
+        entries.add(clean)
+        hasExecutableRunner = true
+      }
+    }
+  }
+  return { configuredTestEntries: [...entries].sort(), hasExecutableRunner }
+}
+
+function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles, devProfile, discovery, configuredTestEntries = []) {
   const definedScripts = {}
   const pkg = readJsonSafe(join(repoRoot, 'package.json'))
   if (pkg && typeof pkg.scripts === 'object' && pkg.scripts) {
@@ -312,6 +334,7 @@ function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles
   }
   if (profileCmds.length > 0) definedScripts.devProfile = profileCmds
   if (ciSteps.length > 0) definedScripts.ciRunSteps = ciSteps.slice(0, 30).map((s) => `${s.file}: ${s.cmd}`)
+  if (configuredTestEntries.length > 0) definedScripts.configuredTestEntries = configuredTestEntries
 
   const dirCounts = new Map()
   for (const tf of testFiles) {
@@ -326,6 +349,8 @@ function collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles
 
   return {
     totalTestFiles: testFiles.length,
+    configuredTestEntries,
+    totalTestEntries: new Set([...testFiles.map((f) => f.rel), ...configuredTestEntries]).size,
     testDirectories,
     definedScripts,
     ciConfigFiles,
@@ -338,26 +363,27 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
   const testFiles = files.filter((f) => CODE_EXT_RE.test(f.name) && TEST_FILE_RE.test(f.rel))
   const discovery = discoverWorkspacePackages(repoRoot, files.map((f) => f.rel))
 
-  if (codeFiles.length > 0 && testFiles.length === 0) {
-    addFinding(findings, {
-      id: 'tests.missing-suite',
-      category: 'tests',
-      severity: 'medium',
-      title: `Found ${codeFiles.length} code file(s) but no test files in scope`,
-      action: 'Add unit or smoke tests covering core behavior and failure cases.',
-    })
-  }
-
   const { steps: ciSteps, ciConfigFiles } = parseWorkflowCiSteps(repoRoot)
-  const testInventory = collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles, devProfile, discovery)
   const hasProfileRunners = (devProfile['quick-test']?.length ?? 0) > 0
     || (devProfile['full-test']?.length ?? 0) > 0
     || (devProfile['smoke-verify']?.length ?? 0) > 0
     || (devProfile['merge-gate']?.length ?? 0) > 0
   const hasRunnerConfig = ciSteps.length > 0 || hasProfileRunners
   const expandedCommands = hasRunnerConfig ? expandVerificationCommands(repoRoot, ciSteps, devProfile, discovery) : []
+  const { configuredTestEntries, hasExecutableRunner } = collectConfiguredTestEntries(repoRoot, files, expandedCommands)
+  const testInventory = collectTestInventory(repoRoot, files, testFiles, ciSteps, ciConfigFiles, devProfile, discovery, configuredTestEntries)
 
-  if (!testInventory.hasCiConfig && testFiles.length > 0) {
+  if (codeFiles.length > 0 && testFiles.length === 0 && configuredTestEntries.length === 0 && !hasExecutableRunner) {
+    addFinding(findings, {
+      id: 'tests.missing-suite',
+      category: 'tests',
+      severity: 'medium',
+      title: `Found ${codeFiles.length} code file(s) but no test files or configured Dev Profile / CI test runners in scope`,
+      action: 'Add unit or smoke tests covering core behavior and failure cases.',
+    })
+  }
+
+  if (!testInventory.hasCiConfig && (testFiles.length > 0 || configuredTestEntries.length > 0)) {
     addFinding(findings, {
       id: 'tests.no-ci-config',
       category: 'tests',

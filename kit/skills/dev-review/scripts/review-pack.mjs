@@ -153,8 +153,8 @@ async function main() {
         'human-approved', 'include-diff', 'visual-checked',
       ],
       valueFlags: [
-        'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'round',
-        'verdict', 'reviewer-id', 'implementer-id', 'fault-injection',
+        'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
+        'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
         'reason', 'visual-evidence', 'agent',
       ],
       multiFlags: ['must-fix', 'should-fix', 'rebut-accepted', 'resolved'],

@@ -213,7 +213,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **第一步：双轴五态身份判定（不靠猜）**。
 
   <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；非注册平台远端退化为 `generic-git` 放行本地全流程；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
+  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人（自动查防撞车），接手未合分支须带 `--takeover --reason` 在 Issue 与 PR 双写接管（弃领用 `flow.mjs release`）；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；非注册平台远端退化为 `generic-git` 放行本地全流程；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
   <!-- project-forge: endif -->
   <!-- project-forge: if no-remote -->
   这个项目还没有远端，所以眼下只有本地提交。**但落在高风险路径上的改动仍然要有一次独立审查**，结论写进本地任务单——审查不依赖远端存在，它依赖「这处改坏了不会当场失败」。
@@ -243,14 +243,14 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
-  **谁改，谁先认领**（`flow.mjs claim`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]`，将关联 `PRD`（`done`）、`SPEC`（`implemented` 补实现说明）与 `Todo` 成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/` 并同步互链（`do-not-edit` 允许工具合法归档），确认代码-文档对齐。
+  **谁改，谁先认领**（`flow.mjs claim`，`start --create-issue` 可建单联动命名，弃领用 `release`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]`，将关联 `PRD`（`done`）、`SPEC`（`implemented` 补实现说明）与 `Todo` 成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/` 并同步互链（`do-not-edit` 允许工具合法归档），确认代码-文档对齐。
 
   | 节点 | 留在哪 | 说什么 |
   | --- | --- | --- |
-  | 认领 | Issue | 谁认领、用哪条分支 |
+  | 认领 / 释放 | Issue | 谁认领或释放、用哪条分支（`pf-state` 标记） |
   | 已提 PR | Issue | PR 链接，以及 `Fixes #N` / `refs #N` |
-  | 审查退回 | PR **和** Issue | 哪几条标准没过、故障注入记录、第几轮 |
-  | 审查通过 | PR **和** Issue | `fail` 为空、下一棒是谁 |
+  | 审查退回 | PR **和** Issue | `record` 自动双写四字段与 `changes-requested` 标签 |
+  | 审查通过 | PR **和** Issue | `record` 自动双写四字段与 `reviewed` 标签（离线不阻塞） |
   | 返工已提交 | PR **和** Issue | 新 HEAD 短哈希、门禁已重跑、请重新审核 |
   | 已合并 | Issue | 合并到哪、关掉了哪几个 Issue |
 

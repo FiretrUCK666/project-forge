@@ -9,7 +9,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
-import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
@@ -26,7 +26,7 @@ const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pk
 const CONVENTION_DOC_DIRS = new Set(['docs/prd', 'docs/specs', 'docs/todo', 'docs/archive', 'docs/archive/prd', 'docs/archive/specs', 'docs/archive/todo'])
 
 function scanActiveContracts(root) {
-  const contracts = { tdd: existsSync(join(root, 'docs', 'TDD.md')), activeSpecs: [] }
+  const contracts = { tdd: Boolean(resolveAuthoritativeTddPath(root)), activeSpecs: [] }
   const specsDir = join(root, 'docs', 'specs')
   if (!existsSync(specsDir)) return contracts
   try {

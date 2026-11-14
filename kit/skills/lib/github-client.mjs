@@ -13,8 +13,14 @@ import { execSafe } from './git.mjs'
 
 let ghTmpCounter = 0
 
-export function githubHttpsRequest(method, apiPath, token, bodyObj) {
+export function githubHttpsRequest(method, apiPath, token, bodyObj, { timeoutMs = 10000 } = {}) {
   return new Promise((done) => {
+    let settled = false
+    const finish = (res) => {
+      if (settled) return
+      settled = true
+      done(res)
+    }
     const payload = bodyObj === undefined ? null : Buffer.from(JSON.stringify(bodyObj), 'utf8')
     const headers = {
       'User-Agent': 'dev-flow-kit',
@@ -26,13 +32,17 @@ export function githubHttpsRequest(method, apiPath, token, bodyObj) {
       headers['Content-Type'] = 'application/json; charset=utf-8'
       headers['Content-Length'] = String(payload.length)
     }
+    const signal = timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined
 
     const req = https.request({
       hostname: 'api.github.com',
       path: apiPath,
       method,
       headers,
-      timeout: 10000,
+      timeout: timeoutMs,
+      ...(signal ? { signal } : {}),
     }, (res) => {
       const chunks = []
       res.on('data', (c) => chunks.push(c))
@@ -40,19 +50,33 @@ export function githubHttpsRequest(method, apiPath, token, bodyObj) {
         const raw = Buffer.concat(chunks).toString('utf8')
         let data = null
         try { data = raw ? JSON.parse(raw) : null } catch { data = raw }
-        done({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode ?? 0, data })
+        finish({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode ?? 0, data })
       })
     })
     req.on('timeout', () => {
       req.destroy()
-      done({ ok: false, status: 408, data: { message: 'GitHub API timeout' } })
+      finish({ ok: false, status: 408, data: { message: 'GitHub API timeout' } })
     })
     req.on('error', (err) => {
-      done({ ok: false, status: 0, data: { message: err.message } })
+      const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      const safeMsg = String(err?.message ?? 'request-error').replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
+      finish({ ok: false, status: isAbort ? 408 : 0, data: { message: safeMsg } })
     })
     if (payload) req.write(payload)
     req.end()
   })
+}
+
+/** 解析评论正文中的所有 `<!-- pf-state:{...} -->` 状态标签。 */
+export function parsePfStateTags(body) {
+  const tags = []
+  for (const m of String(body ?? '').matchAll(/<!--\s*pf-state:(\{[\s\S]*?\})\s*-->/g)) {
+    try {
+      const parsed = JSON.parse(m[1])
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) tags.push(parsed)
+    } catch { /* ignore malformed tag */ }
+  }
+  return tags
 }
 
 async function withUtf8TempFile(prefix, content, fn) {
@@ -115,7 +139,14 @@ export function parseFlowInputs(inputs = [], defaultRepo = null) {
 }
 
 /** 构造四级降级 GitHub 客户端。 */
-export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(), token = null, login = null } = {}) {
+export function createGitHubClient({
+  tier = 'mcp-delegate',
+  cwd = process.cwd(),
+  token = null,
+  login = null,
+  runner = execSafe,
+  httpsRequest = githubHttpsRequest,
+} = {}) {
   let cachedLogin = login || null
   const makeMcpDelegate = (action, params, statePayload = {}) => {
     const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
@@ -136,8 +167,8 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
       if (!repo) return { ok: false, reason: 'missing-repo' }
       if (tier === 'gh-cli') {
         const [res, userRes] = await Promise.all([
-          execSafe('gh', ['api', `repos/${repo}`], { cwd }),
-          cachedLogin ? Promise.resolve(null) : execSafe('gh', ['api', 'user', '--jq', '.login'], { cwd }),
+          runner('gh', ['api', `repos/${repo}`], { cwd }),
+          cachedLogin ? Promise.resolve(null) : runner('gh', ['api', 'user', '--jq', '.login'], { cwd }),
         ])
         if (userRes?.ok && userRes.stdout?.trim()) cachedLogin = userRes.stdout.trim()
         if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
@@ -153,8 +184,8 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
       }
       if (tier === 'node-https-token') {
         const [res, userRes] = await Promise.all([
-          githubHttpsRequest('GET', `/repos/${repo}`, token),
-          !cachedLogin && token ? githubHttpsRequest('GET', '/user', token) : Promise.resolve(null),
+          httpsRequest('GET', `/repos/${repo}`, token),
+          !cachedLogin && token ? httpsRequest('GET', '/user', token) : Promise.resolve(null),
         ])
         if (userRes?.ok && userRes.data?.login) cachedLogin = userRes.data.login
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
@@ -171,7 +202,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
 
     async getIssue(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await execSafe('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'], { cwd })
+        const res = await runner('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'], { cwd })
         if (!res.ok) return { ok: false, error: res.stderr }
         try {
           const d = JSON.parse(res.stdout)
@@ -179,7 +210,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         } catch { return { ok: false, error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('GET', `/repos/${repo}/issues/${number}`, token)
+        const res = await httpsRequest('GET', `/repos/${repo}/issues/${number}`, token)
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         const d = res.data
         return {
@@ -192,7 +223,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
 
     async getPr(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await execSafe('gh', ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRepository,headRepositoryOwner,mergedAt,author'], { cwd })
+        const res = await runner('gh', ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRepository,headRepositoryOwner,mergedAt,author'], { cwd })
         if (!res.ok) return { ok: false, error: res.stderr }
         try {
           const d = JSON.parse(res.stdout)
@@ -206,7 +237,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         } catch { return { ok: false, error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('GET', `/repos/${repo}/pulls/${number}`, token)
+        const res = await httpsRequest('GET', `/repos/${repo}/pulls/${number}`, token)
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         const d = res.data
         return {
@@ -222,12 +253,12 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
     async listOpenPrsByBase(repo, baseBranch) {
       if (!repo || !baseBranch) return { ok: true, prs: [], skipped: true }
       if (tier === 'gh-cli') {
-        const res = await execSafe('gh', ['pr', 'list', '--repo', repo, '--base', baseBranch, '--state', 'open', '--json', 'number,title,headRefName,url'], { cwd })
+        const res = await runner('gh', ['pr', 'list', '--repo', repo, '--base', baseBranch, '--state', 'open', '--json', 'number,title,headRefName,url'], { cwd })
         if (!res.ok) return { ok: false, prs: [], error: res.stderr }
         try { return { ok: true, prs: JSON.parse(res.stdout) } } catch { return { ok: false, prs: [] } }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('GET', `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}`, token)
+        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}`, token)
         if (!res.ok) return { ok: false, prs: [], error: res.data?.message }
         return { ok: true, prs: (res.data ?? []).map((p) => ({ number: p.number, title: p.title, headRefName: p.head?.ref, url: p.html_url })) }
       }
@@ -238,14 +269,14 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
       if (!repo || !headBranch) return { ok: false, prs: [] }
       if (tier === 'gh-cli') {
         const headArg = headOwner ? `${headOwner}:${headBranch}` : headBranch
-        const res = await execSafe('gh', ['pr', 'list', '--repo', repo, '--head', headArg, '--state', 'open', '--json', 'number,title,headRefName,baseRefName,url,state'], { cwd })
+        const res = await runner('gh', ['pr', 'list', '--repo', repo, '--head', headArg, '--state', 'open', '--json', 'number,title,headRefName,baseRefName,url,state'], { cwd })
         if (!res.ok) return { ok: false, prs: [] }
         try { return { ok: true, prs: JSON.parse(res.stdout) } } catch { return { ok: false, prs: [] } }
       }
       if (tier === 'node-https-token') {
         const owner = headOwner || repo.split('/')[0]
         const headParam = headBranch.includes(':') ? headBranch : `${owner}:${headBranch}`
-        const res = await githubHttpsRequest('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}`, token)
+        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}`, token)
         if (!res.ok) return { ok: false, prs: [] }
         return { ok: true, prs: (res.data ?? []).map((p) => ({ number: p.number, title: p.title, headRefName: p.head?.ref, baseRefName: p.base?.ref, url: p.html_url })) }
       }
@@ -258,7 +289,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
       const fullBody = Object.keys(statePayload).length > 0 ? `${normalizedBody}\n\n${tag}` : normalizedBody
       if (tier === 'gh-cli') {
         return withUtf8TempFile('pf-comment', fullBody, async (tmpFile) => {
-          const res = await execSafe('gh', ['api', `repos/${repo}/issues/${number}/comments`, '-X', 'POST', '-F', `body=@${tmpFile}`], { cwd })
+          const res = await runner('gh', ['api', `repos/${repo}/issues/${number}/comments`, '-X', 'POST', '-F', `body=@${tmpFile}`], { cwd })
           if (!res.ok) return { ok: false, error: res.stderr }
           let created = null
           try { created = JSON.parse(res.stdout) } catch { /* ignore */ }
@@ -267,7 +298,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         })
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('POST', `/repos/${repo}/issues/${number}/comments`, token, { body: fullBody })
+        const res = await httpsRequest('POST', `/repos/${repo}/issues/${number}/comments`, token, { body: fullBody })
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         const readback = String(res.data?.body ?? '').replace(/\r\n/g, '\n').trim()
         return { ok: true, id: res.data?.id ?? null, url: res.data?.html_url ?? null, verifiedReadback: readback === fullBody }
@@ -280,7 +311,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
       if (tier === 'gh-cli') {
         const args = ['issue', 'edit', String(number), '--repo', repo]
         for (const l of labels) args.push('--add-label', l)
-        const res = await execSafe('gh', args, { cwd })
+        const res = await runner('gh', args, { cwd })
         if (!res.ok) {
           return /403|forbidden|permission|not authorized/i.test(res.stderr)
             ? { ok: false, skipped: true, reason: 'forbidden-403' }
@@ -289,7 +320,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         return { ok: true }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('POST', `/repos/${repo}/issues/${number}/labels`, token, { labels })
+        const res = await httpsRequest('POST', `/repos/${repo}/issues/${number}/labels`, token, { labels })
         if (res.status === 403 || res.status === 404) return { ok: false, skipped: true, reason: `http-${res.status}` }
         if (!res.ok) return { ok: false, skipped: true, reason: res.data?.message }
         return { ok: true }
@@ -303,7 +334,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         return withUtf8TempFile('pf-pr-body', normalizedBody, async (tmpFile) => {
           const args = ['pr', 'create', '--repo', targetRepo, '--head', head, '--base', base, '--title', title, '--body-file', tmpFile]
           if (draft) args.push('--draft')
-          const res = await execSafe('gh', args, { cwd })
+          const res = await runner('gh', args, { cwd })
           if (!res.ok) return { ok: false, error: res.stderr }
           const url = res.stdout.trim().split('\n').pop()
           const numMatch = /\/pull\/(\d+)$/.exec(url ?? '')
@@ -311,7 +342,7 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
         })
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('POST', `/repos/${targetRepo}/pulls`, token, { title, body: normalizedBody, head, base, draft })
+        const res = await httpsRequest('POST', `/repos/${targetRepo}/pulls`, token, { title, body: normalizedBody, head, base, draft })
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         return { ok: true, number: res.data?.number ?? null, url: res.data?.html_url ?? null }
       }
@@ -326,18 +357,163 @@ export function createGitHubClient({ tier = 'mcp-delegate', cwd = process.cwd(),
     async mergePr({ repo, number, method = 'merge' }) {
       if (tier === 'gh-cli') {
         const flag = method === 'squash' ? '--squash' : method === 'rebase' ? '--rebase' : '--merge'
-        const res = await execSafe('gh', ['pr', 'merge', String(number), '--repo', repo, flag], { cwd })
+        const res = await runner('gh', ['pr', 'merge', String(number), '--repo', repo, flag], { cwd })
         if (!res.ok) return { ok: false, error: res.stderr }
         const readback = await this.getPr(repo, number)
         return { ok: readback.ok && readback.merged === true, merged: Boolean(readback.merged), state: readback.state ?? 'UNKNOWN' }
       }
       if (tier === 'node-https-token') {
-        const res = await githubHttpsRequest('PUT', `/repos/${repo}/pulls/${number}/merge`, token, { merge_method: method })
+        const res = await httpsRequest('PUT', `/repos/${repo}/pulls/${number}/merge`, token, { merge_method: method })
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
         const readback = await this.getPr(repo, number)
         return { ok: readback.ok && readback.merged === true, merged: Boolean(readback.merged), state: readback.state ?? 'UNKNOWN' }
       }
       return makeMcpDelegate('merge_pr', { repo, number, method })
     },
+
+    async createIssue({ repo, title, body = '', labels = [] } = {}) {
+      const cleanTitle = String(title ?? '').trim()
+      if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }
+      const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      const cleanLabels = Array.isArray(labels)
+        ? labels.map((l) => String(l ?? '').trim()).filter(Boolean)
+        : []
+
+      if (tier === 'gh-cli') {
+        return withUtf8TempFile('pf-issue-body', normalizedBody, async (tmpFile) => {
+          const args = ['issue', 'create', '--repo', repo, '--title', cleanTitle, '--body-file', tmpFile]
+          for (const lbl of cleanLabels) args.push('--label', lbl)
+          const res = await runner('gh', args, { cwd })
+          if (!res.ok) return { ok: false, error: res.stderr }
+          const url = res.stdout.trim().split('\n').pop()
+          const numMatch = /\/issues\/(\d+)$/.exec(url ?? '')
+          return {
+            ok: true,
+            url: url || null,
+            number: numMatch ? Number(numMatch[1]) : null,
+            title: cleanTitle,
+            labels: cleanLabels,
+          }
+        })
+      }
+      if (tier === 'node-https-token') {
+        const payload = { title: cleanTitle, body: normalizedBody }
+        if (cleanLabels.length > 0) payload.labels = cleanLabels
+        const res = await httpsRequest('POST', `/repos/${repo}/issues`, token, payload)
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'create-issue-failed' }
+        return {
+          ok: true,
+          number: res.data?.number ?? null,
+          url: res.data?.html_url ?? null,
+          title: res.data?.title ?? cleanTitle,
+          labels: (res.data?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean),
+        }
+      }
+      return makeMcpDelegate('create_issue', {
+        repo,
+        title: cleanTitle,
+        body: normalizedBody,
+        ...(cleanLabels.length > 0 ? { labels: cleanLabels } : {}),
+      }, { action: 'create_issue' })
+    },
+
+    async listComments(arg, maybeNumber) {
+      const { repo, number, perPage = 100 } = (typeof arg === 'object' && arg !== null)
+        ? arg
+        : { repo: arg, number: maybeNumber }
+      if (!repo || number === undefined || number === null) {
+        return { ok: false, comments: [], error: 'missing-repo-or-number' }
+      }
+      const normalizeList = (rawList) => (Array.isArray(rawList) ? rawList : []).map((c) => {
+        const body = String(c?.body ?? '')
+        const pfStates = parsePfStateTags(body)
+        return {
+          id: c?.id ?? null,
+          author: c?.user?.login ?? c?.author?.login ?? null,
+          body,
+          createdAt: c?.created_at ?? c?.createdAt ?? null,
+          updatedAt: c?.updated_at ?? c?.updatedAt ?? null,
+          url: c?.html_url ?? c?.url ?? null,
+          pfState: pfStates.length > 0 ? pfStates[pfStates.length - 1] : null,
+          pfStates,
+        }
+      })
+
+      if (tier === 'gh-cli') {
+        const collected = []
+        for (let page = 1; page <= 5; page += 1) {
+          const res = await runner('gh', ['api', `repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`], { cwd })
+          if (!res.ok) {
+            if (page === 1) return { ok: false, comments: [], error: res.stderr }
+            break
+          }
+          let batch
+          try { batch = JSON.parse(res.stdout) } catch {
+            if (page === 1) return { ok: false, comments: [], error: 'invalid-json' }
+            break
+          }
+          if (!Array.isArray(batch)) break
+          collected.push(...normalizeList(batch))
+          if (batch.length < perPage) break
+        }
+        return { ok: true, comments: collected }
+      }
+      if (tier === 'node-https-token') {
+        const collected = []
+        for (let page = 1; page <= 5; page += 1) {
+          const res = await httpsRequest('GET', `/repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`, token)
+          if (!res.ok) {
+            if (page === 1) return { ok: false, status: res.status, comments: [], error: res.data?.message }
+            break
+          }
+          const batch = Array.isArray(res.data) ? res.data : []
+          collected.push(...normalizeList(batch))
+          if (batch.length < perPage) break
+        }
+        return { ok: true, comments: collected }
+      }
+      return { ...makeMcpDelegate('list_comments', { repo, number }), comments: [] }
+    },
+
+    async removeLabel({ repo, number, label } = {}) {
+      const cleanLabel = String(label ?? '').trim()
+      if (!repo || number === undefined || number === null || !cleanLabel) return { ok: true, skipped: true }
+      if (tier === 'gh-cli') {
+        const res = await runner('gh', ['issue', 'edit', String(number), '--repo', repo, '--remove-label', cleanLabel], { cwd })
+        if (!res.ok) {
+          if (/403|forbidden|permission|not authorized/i.test(res.stderr)) {
+            return { ok: false, skipped: true, reason: 'forbidden-403' }
+          }
+          if (/404|not found|does not have/i.test(res.stderr)) {
+            return { ok: true, skipped: true, reason: 'label-absent' }
+          }
+          return { ok: false, skipped: true, reason: res.stderr }
+        }
+        return { ok: true }
+      }
+      if (tier === 'node-https-token') {
+        const res = await httpsRequest('DELETE', `/repos/${repo}/issues/${number}/labels/${encodeURIComponent(cleanLabel)}`, token)
+        if (res.status === 404) return { ok: true, skipped: true, reason: 'label-absent' }
+        if (res.status === 403) return { ok: false, skipped: true, reason: 'http-403' }
+        if (!res.ok) return { ok: false, skipped: true, reason: res.data?.message }
+        return { ok: true }
+      }
+      return makeMcpDelegate('remove_label', { repo, number, label: cleanLabel })
+    },
   }
+}
+
+export async function createIssue({ repo, title, body = '', labels = [], client, ...clientOpts } = {}) {
+  const c = client ?? createGitHubClient(clientOpts)
+  return c.createIssue({ repo, title, body, labels })
+}
+
+export async function listComments({ repo, number, perPage = 100, client, ...clientOpts } = {}) {
+  const c = client ?? createGitHubClient(clientOpts)
+  return c.listComments({ repo, number, perPage })
+}
+
+export async function removeLabel({ repo, number, label, client, ...clientOpts } = {}) {
+  const c = client ?? createGitHubClient(clientOpts)
+  return c.removeLabel({ repo, number, label })
 }

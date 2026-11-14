@@ -10,9 +10,15 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { execSafe, readJsonSafe, readTextSafe } from './git.mjs'
-import { createGitHubClient, githubHttpsRequest, parseBodyRelations, parseFlowInputs } from './github-client.mjs'
+import {
+  createGitHubClient, createIssue, githubHttpsRequest, listComments,
+  parseBodyRelations, parseFlowInputs, parsePfStateTags, removeLabel,
+} from './github-client.mjs'
 
-export { createGitHubClient, parseBodyRelations, parseFlowInputs }
+export {
+  createGitHubClient, createIssue, githubHttpsRequest, listComments,
+  parseBodyRelations, parseFlowInputs, parsePfStateTags, removeLabel,
+}
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 5000
 

@@ -19,7 +19,7 @@
 
 - **多维护者团队协同（`team-collaborator`）四条规则**：
   1. **零历史新成员验权**：刚加入组织/团队、本地尚无提交历史的成员先跑 `survey.mjs --probe-auth` 或 `flow.mjs inspect --probe-auth` 验证写权限并确认 `maintainer`（`collaborationScope: team-collaborator`），避免离线回退保守状态。
-  2. **认领与分支接管双写**：开工跑 `flow.mjs claim` 写清认领人与分支；接手同事未合分支前须在 Issue 与 PR 双写「接管」评论（注明接手人、分支与 HEAD）。
+  2. **认领防撞车与接管/释放双写**：开工跑 `flow.mjs claim`（自动调用 `listComments` 核对无他人有效 `pf-state` `claim`）写清认领人与分支；接手同事未合分支必须带 `--takeover --reason` 在 Issue 与 PR 双写「接管」评论；放弃认领用 `flow.mjs release --reason` 写释放评论并卸除 `in-progress` 标签。`flow.mjs start --create-issue --title "..."` 可由维护者建单并联动重命名关联文档。
   3. **独立分支与合前同步**：每人保持独立分支，开 PR 前同步默认分支最新提交，遵守 `CODEOWNERS` 与 Merge Queue（若启用），严禁直推主干。
   4. **团队互审**：坚持 `reviewerId !== implementerId` 由同事或独立上下文执行双门与故障注入审查；保守仓可在 `AGENTS.md`「## 取舍」设 `merge-authority: human`。
 
@@ -49,12 +49,12 @@
 
 ## 四、认领、PR 前文档同步与双写节点
 
-- **谁改谁认领、一任务一 PR**：执行 `flow.mjs claim` 在 Issue 留账号与分支。若同一任务已有对应 Issue 与 OPEN PR 直接复用，不开第二条；多 Issue 联做先解 `Depends on` / `Blocks` 依赖序；返工永远在原分支追加提交更新同一个 PR，不重排无关文件。
+- **谁改谁认领、一任务一 PR**：`maintainer` 可用 `flow.mjs start --create-issue --title "..."` 自动建单并联动 `syncDocsLifecycle` 重命名文档；开工执行 `flow.mjs claim` 先查远程评论防撞车并在 Issue 留账号与分支（接管须带 `--takeover --reason` 双写 Issue+PR，放弃用 `flow.mjs release` 写 `release` 评论并卸标签）。若同一任务已有对应 Issue 与 OPEN PR 直接复用，不开第二条；多 Issue 联做先解 `Depends on` / `Blocks` 依赖序；返工永远在原分支追加提交更新同一个 PR，不重排无关文件。
 - **PR 提交前文档同步锁（`flow.mjs finalize`）**：
   1. 核对关联 Todo 所有 `[ ]` 已完成勾选 `[x]`、填写「完成后的记录」，将关联 `PRD`（`done`）、`SPEC`（`implemented` 并补全「实现说明」）与 `Todo`（`done`/`archived`）一并 `git mv` **成对归档**进 `docs/archive/{prd,specs,todo}/` 并重算 `related_*` 互链（`do-not-edit: docs/archive/` 允许工具执行此合法归档）；
-  2. 检查源码模块边界、对外 CLI 或契约变更是否同步更新 `docs/TDD.md`（日期与模块表）/ `README*.md` / `AGENTS.md`；
+  2. 检查源码模块边界、对外 CLI 或契约变更是否同步更新 `docs/TDD.md`（或项目权威架构文档 `ARCHITECTURE.md` 等）与 `README*.md` / `AGENTS.md`；
   3. **外部 Fork 防污染**：若自身为 `contributor-fork` 且上游未接入 `docs/`，本地私有规划文档存于 `.worktrees/.state/private-docs/<taskId>/` 供 `review-pack` 按账本路径读取，绝不混入 PR diff。
-- **六个双写节点**：认领（Issue）、已提 PR（Issue + `Fixes #N`/`refs #N`）、审查退回（PR 与 Issue）、审查通过（PR 与 Issue）、返工已提交（PR 与 Issue，附新 HEAD 短哈希）、已合并（Issue）；`contributor-fork` 设标签遇 403 自动降级仅发评论。含中文/非 ASCII 正文一律先写系统临时目录 UTF-8 文件再以 `--body-file` / JSON 体提交并回读删除临时文件，绝不在命令行直接拼接中文。
+- **六个双写节点**：认领/释放（Issue）、已提 PR（Issue + `Fixes #N`/`refs #N`）、审查退回（PR 与 Issue）、审查通过（PR 与 Issue）、返工已提交（PR 与 Issue，附新 HEAD 短哈希）、已合并（Issue）。`review-pack.mjs record` 在关联 PR/Issue 且在线时自动拼装四字段审查评论（附 `pf-state`）**实时双写到 PR 与 Issue** 并按裁决贴 `changes-requested` / `reviewed` 标签；`contributor-fork` 设标签遇 403 自动降级仅发评论，离线或无凭据静默写本地账本并提示绝不阻塞。含中文/非 ASCII 正文一律先写系统临时目录 UTF-8 文件再以 `--body-file` / JSON 体提交并回读删除临时文件，绝不在命令行直接拼接中文。
 
 ## 五、收到别人的 Issue
 

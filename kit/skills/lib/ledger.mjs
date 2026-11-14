@@ -13,7 +13,7 @@ import {
 } from './git.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
-const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
+const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
 
 /** 校验并清洗 taskId，兼容 ASCII 与中文字符，防止路径穿越。 */
 export function sanitizeTaskId(taskId) {

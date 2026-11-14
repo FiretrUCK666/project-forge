@@ -18,7 +18,7 @@ import { createDefaultLedger, listTaskLedgers, readTaskLedger, resolveTaskContex
 import {
   detectDeclaredRepo, githubRepoFull, parseBodyRelations, parseFlowInputs,
   parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeGitHubEnv, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
@@ -452,8 +452,9 @@ export async function handleStart(opts, roots) {
 
   const baseBranch = state.defaultBranch || 'main'
   const baseSha = state.head
-  const implementerId = opts.implementer
-    ?? (state.gitIdentity.name ? `${state.gitIdentity.name}${state.gitIdentity.email ? ` <${state.gitIdentity.email}>` : ''}` : 'implementer')
+  const implementerId = resolveContributorIdentity({
+    explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
+  }).actor
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
@@ -639,7 +640,10 @@ export async function handleClaim(opts, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  const actor = opts.agent ?? ledger.implementerId ?? 'local-agent'
+  const initContrib = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
+  const prevImpl = ledger.implementerId
+  let actor = initContrib.actor
+  let actorDisplay = initContrib.display
   ledger.implementerId = actor
   const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
@@ -668,6 +672,15 @@ export async function handleClaim(opts, roots) {
 
   const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
+  const onlineContrib = resolveContributorIdentity({
+    explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: prevImpl,
+  })
+  if (onlineContrib.actor !== actor) {
+    actor = onlineContrib.actor
+    actorDisplay = onlineContrib.display
+    ledger.implementerId = actor
+    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
+  }
   const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
   const activeClaimsByIssue = new Map()
   if (canQueryComments) {
@@ -702,7 +715,7 @@ export async function handleClaim(opts, roots) {
       ? await ghClient.postComment({
           repo: targetRepo,
           number: num,
-          body: `接管认领：由 ${actor} 接管任务 \`${taskId}\`（分支 \`${ledger.branch}\`，原认领人：${prevClaim?.actor ?? prevClaim?.login ?? '无/未知'}），原因：${takeoverReason}。`,
+          body: `接管认领：由 ${actorDisplay} 接管任务 \`${taskId}\`（分支 \`${ledger.branch}\`，原认领人：${prevClaim?.actor ?? prevClaim?.login ?? '无/未知'}），原因：${takeoverReason}。`,
           statePayload: {
             taskId,
             action: 'takeover',
@@ -715,7 +728,7 @@ export async function handleClaim(opts, roots) {
       : await ghClient.postComment({
           repo: targetRepo,
           number: num,
-          body: `认领：由 ${actor} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
+          body: `认领：由 ${actorDisplay} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
           statePayload: { taskId, action: 'claim', agent: actor, branch: ledger.branch },
         })
     const labelRes = await ghClient.addLabels({ repo: targetRepo, number: num, labels: ['in-progress'] })
@@ -728,7 +741,7 @@ export async function handleClaim(opts, roots) {
     prTakeoverResult = await ghClient.postComment({
       repo: targetRepo,
       number: ledger.prNumber,
-      body: `接管认领：由 ${actor} 接管关联 PR #${ledger.prNumber}（分支 \`${ledger.branch}\`，关联 Issue：${ledger.linkedIssues.map((n) => `#${n}`).join(', ')}），原因：${takeoverReason}。`,
+      body: `接管认领：由 ${actorDisplay} 接管关联 PR #${ledger.prNumber}（分支 \`${ledger.branch}\`，关联 Issue：${ledger.linkedIssues.map((n) => `#${n}`).join(', ')}），原因：${takeoverReason}。`,
       statePayload: {
         taskId,
         action: 'takeover',

@@ -17,7 +17,7 @@ import {
   gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic,
 } from '../../lib/git.mjs'
 import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles, syncTaskDocsSafe } from './flow-inspect.mjs'
@@ -336,7 +336,13 @@ export async function handleVerify(opts, roots) {
     }
   }
 
-  const runRes = await execShellCommand(cmd, implRoot)
+  const defaultTimeout = mode === 'gate' ? 600000 : mode === 'full' ? 300000 : 120000
+  const timeoutMs = opts.timeout !== undefined ? Number(opts.timeout) : defaultTimeout
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
+    process.stderr.write(`INVALID_TIMEOUT_ARG: --timeout 须为 >= 1000 的毫秒数，收到：${opts.timeout}\n`)
+    return { exitCode: 1 }
+  }
+  const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs })
   const [headRes, stRes, changedFiles] = await Promise.all([
     gitRun(implRoot, ['rev-parse', 'HEAD']),
     gitRun(implRoot, ['status', '--porcelain']),
@@ -493,6 +499,7 @@ export async function handleSubmit(opts, roots) {
   }
 
   const ghProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+  const submitActor = resolveContributorIdentity({ explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login, ledgerActor: ledger.implementerId })
   const isRework = Boolean(opts.rework) || Boolean(ledger.prNumber)
   const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
   const fixesLine = (ledger.linkedIssues ?? []).map((n) => `Fixes #${n}`).join('\n')
@@ -502,22 +509,28 @@ export async function handleSubmit(opts, roots) {
   let prResult = null
   const commentResults = []
   if (isRework && ledger.prNumber) {
-    const reworkMsg = [`返工已提交：新 HEAD \`${shortHead}\``, `- 验证命令：\`${ledger.verifiedCmd}\`（退出码 0）`, '- 请重新审核（更新同一 PR）。'].join('\n')
+    const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
+    const reworkMsg = [
+      `返工已提交（Round ${nextRound} @ \`${shortHead}\`）：由 ${submitActor.display} 更新分支 \`${ledger.branch}\``,
+      `- 验证命令：\`${ledger.verifiedCmd}\`（退出码 0）`,
+      recentRebuts ? `- 反驳与说明：${recentRebuts}` : null,
+      '- 请独立审查复核（更新同一 PR）。',
+    ].filter(Boolean).join('\n')
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
     commentResults.push({
       target: `PR #${ledger.prNumber}`,
-      res: await ghProbe.client.postComment({ repo: targetRepo, number: ledger.prNumber, body: reworkMsg, statePayload: { taskId, action: 'rework-submitted', headSha: currentHead } }),
+      res: await ghProbe.client.postComment({ repo: targetRepo, number: ledger.prNumber, body: reworkMsg, statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, headSha: currentHead } }),
     })
     for (const iss of ledger.linkedIssues ?? []) {
       commentResults.push({
         target: `Issue #${iss}`,
-        res: await ghProbe.client.postComment({ repo: targetRepo, number: iss, body: `${reworkMsg}\n- 关联 PR: #${ledger.prNumber}`, statePayload: { taskId, action: 'rework-submitted', prNumber: ledger.prNumber, headSha: currentHead } }),
+        res: await ghProbe.client.postComment({ repo: targetRepo, number: iss, body: `${reworkMsg}\n- 关联 PR: #${ledger.prNumber}`, statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, prNumber: ledger.prNumber, headSha: currentHead } }),
       })
     }
   } else {
     const title = opts.title ?? `${ledger.caseType === 2 ? 'fix' : 'feat'}: ${ledger.slug}`
     const body = opts.body ?? [
-      '## 改动说明', `- 任务编号：\`${taskId}\``, `- 验证命令：\`${ledger.verifiedCmd}\` @ \`${shortHead}\``,
+      '## 改动说明', `- 任务编号：\`${taskId}\``, `- 提交人：${submitActor.display}`, `- 验证命令：\`${ledger.verifiedCmd}\` @ \`${shortHead}\``,
       ledger.empiricalVisualCheckRequired
         ? `- 视觉与交互实证：${visualVerifiedOnHead ? `已核验（${ledger.visualCheckEvidence ?? 'confirmed'}）` : `涉及 UI/视觉文件（${visualFilesChanged.slice(0, 5).join(', ')}），审查须核对实际渲染与浅深色截图`}`
         : null,
@@ -528,10 +541,15 @@ export async function handleSubmit(opts, roots) {
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number
       ledger.prUrl = prResult.url ?? null
+      const submitPrMsg = `提交待审（Round 1 @ \`${shortHead}\`）：由 ${submitActor.display} 完成门禁实证（\`${ledger.verifiedCmd}\`）并推送分支 \`${ledger.branch}\`，请独立审查复核。`
+      commentResults.push({
+        target: `PR #${prResult.number}`,
+        res: await ghProbe.client.postComment({ repo: targetRepo, number: prResult.number, body: submitPrMsg, statePayload: { taskId, action: 'pr-submitted', round: 1, agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }),
+      })
       for (const iss of ledger.linkedIssues ?? []) {
         commentResults.push({
           target: `Issue #${iss}`,
-          res: await ghProbe.client.postComment({ repo: targetRepo, number: iss, body: `已提 PR：#${prResult.number}${prResult.url ? ` (${prResult.url})` : ''}\nFixes #${iss}`, statePayload: { taskId, action: 'pr-created', prNumber: prResult.number } }),
+          res: await ghProbe.client.postComment({ repo: targetRepo, number: iss, body: `已提 PR：#${prResult.number}${prResult.url ? ` (${prResult.url})` : ''}（提交人：${submitActor.display}）\nFixes #${iss}`, statePayload: { taskId, action: 'pr-created', agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }),
         })
       }
     }

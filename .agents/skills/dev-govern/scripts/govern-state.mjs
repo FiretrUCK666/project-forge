@@ -6,17 +6,17 @@
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { appendFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import {
-  canonicalPath, ensureWorktreesIgnored, execSafe, gitDiffNameStatusZ,
+  canonicalPath, ensureWorktreesIgnored, gitDiffNameStatusZ,
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
   sha256Text, writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
-import { parseRemoteUrls, parseRemotesTopology, probeGitHubEnv } from '../../lib/platform.mjs'
+import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeGitHubEnv } from '../../lib/platform.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
 
 const SEVERITY_RANK = Object.freeze({ info: 0, low: 1, medium: 2, high: 3, critical: 4 })
@@ -553,28 +553,25 @@ export async function applyGitHubIssues(repoRoot, issues) {
   const remotes = await gitRun(repoRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remotes.stdout)
   const topology = parseRemotesTopology(remotes.stdout)
-  if (!remotes.ok || topology.providerId !== 'github') {
+  const originUrl = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  const targetRepo = githubRepoFull(originUrl)
+  if (!remotes.ok || topology.providerId !== 'github' || !targetRepo) {
     return { applied: [], error: 'No GitHub remote found (generic-git / local-only mode); cannot create GitHub issues.' }
   }
   const probe = await probeGitHubEnv({ cwd: repoRoot, remoteUrls })
-  if (probe.env.trackB.tier !== 'gh-cli') {
-    const auth = await execSafe('gh', ['auth', 'status'], { cwd: repoRoot, timeout: 4000 })
-    if (auth.missing || !auth.ok) {
-      return { applied: [], error: auth.missing ? '`gh` CLI is not installed.' : '`gh auth status` failed; sign in to GitHub first.' }
-    }
+  if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
+    return { applied: [], error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.' }
   }
   const created = []
-  for (let i = 0; i < issues.length; i += 1) {
-    const iss = issues[i]
-    const tmpFile = join(tmpdir(), `govern-issue-${process.pid}-${Date.now()}-${i}.md`)
-    try {
-      writeFileSync(tmpFile, iss.body, 'utf8')
-      const res = await execSafe('gh', ['issue', 'create', '--title', iss.title, '--body-file', tmpFile], { cwd: repoRoot, timeout: 15000 })
-      if (!res.ok) return { applied: created, error: `gh issue create failed: ${res.stderr}` }
-      created.push({ title: iss.title, url: res.stdout.trim() })
-    } finally {
-      try { if (existsSync(tmpFile)) unlinkSync(tmpFile) } catch { /* ignore */ }
-    }
+  for (const iss of issues) {
+    const res = await probe.client.createIssue({
+      repo: targetRepo,
+      title: iss.title,
+      body: iss.body,
+      labels: iss.labels ?? [],
+    })
+    if (!res.ok) return { applied: created, error: `GitHub issue create failed: ${res.error ?? 'unknown error'}` }
+    created.push({ title: iss.title, url: res.url, number: res.number })
   }
   return { applied: created, error: undefined }
 }

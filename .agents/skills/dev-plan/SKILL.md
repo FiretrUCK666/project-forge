@@ -32,6 +32,11 @@ description: |
 
 说明：若当前为 `contributor-fork` 且外部上游仓库未使用 `docs/`，本地草案绝不混入 PR diff。
 
+## 与 `dev-flow` 及兄弟技能的职责边界与衔接
+
+- **单源分工不重复**：`dev-plan` 只负责五档分流、四层文档生成/自审净化与内审批准，**绝不单独重写分支隔离或 Issue/PR 评论逻辑**；`link` 与 `archive` 共用 `kit/skills/lib/docs.mjs` 同一实现。
+- **前后衔接链路**：先用 `dev-explore`（`repo-map.mjs`）查清入口与复用设施再动笔；`audit` / `approve` 通过后经 `[NEXT STEP]` 直接移交 `dev-flow`（`flow.mjs start` 建隔离工作树/分支、`--create-issue` 建单改名、`claim` 真实 Contributor 认领、`finalize` 成对归档、`submit` 提 PR 双写评论）；`lightweight` 或未装 `dev-flow` 时自动降级为原生 Git 指引。
+
 ## 标准命令流与分级自净化全流程
 
 ```sh

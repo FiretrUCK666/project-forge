@@ -51,4 +51,4 @@ node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --json
 1. **真实入口与 Feature Map**：功能/入口名 -> 源码文件路径 -> 可执行的测试或 `smoke-verify` 验证命令。
 2. **可复用现成模块清单**：已存在的共享库、辅助函数、契约类型与现成脚本（标注文件路径与导出符号）。
 3. **验证与架构边界**：`Dev Profile`（`quick-test`、`smoke-verify`、`merge-gate`、`arch-rules`）以及 CI 实际运行命令与 `working-directory`。
-4. **交棒判断**：只查问题直接回复；需要改代码或立项规划时，转交规划或流转技能接手。
+4. **交棒判断**：只查问题直接回复；需要立项规划时转交 `dev-plan`（`doc-plan.mjs triage`），需改代码/建隔离工作树时转交 `dev-flow`（`flow.mjs inspect` / `start`）。

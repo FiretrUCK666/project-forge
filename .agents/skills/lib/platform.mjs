@@ -11,15 +11,15 @@ import { isAbsolute, join, resolve } from 'node:path'
 
 import { execSafe, readJsonSafe, readTextSafe } from './git.mjs'
 import {
-  createGitHubClient, createIssue, githubHttpsRequest, listComments,
-  parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePfStateTags,
-  parsePrNumber, removeLabel,
+  createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
 } from './github-client.mjs'
 
 export {
-  createGitHubClient, createIssue, githubHttpsRequest, listComments,
-  parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePfStateTags,
-  parsePrNumber, removeLabel,
+  createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
 }
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 5000

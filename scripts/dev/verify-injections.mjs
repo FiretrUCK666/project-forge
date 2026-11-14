@@ -8,7 +8,7 @@
  * 用法：node scripts/dev/verify-injections.mjs
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -506,7 +506,21 @@ function runPreflight() {
  * 是因为跑错了那一套，而「没红」会被当成一条结论。判据只有一条：**拆掉一处之后，只要有
  * 任何一道门禁报出来，就算有人看着它**。猜哪一套会看，是这套复验里最容易出错的一步。
  */
+const FIXTURES_SOURCE = readdirSync(HERE)
+  .filter((n) => n.startsWith('fixtures') && n.endsWith('.mjs'))
+  .map((n) => readFileSync(join(HERE, n), 'utf8'))
+  .join('\n')
+const PREFLIGHT_SOURCE = readdirSync(HERE)
+  .filter((n) => n.startsWith('preflight') && n.endsWith('.mjs'))
+  .map((n) => readFileSync(join(HERE, n), 'utf8'))
+  .join('\n')
+
 function runBoth(expect) {
+  if (expect && FIXTURES_SOURCE.includes(expect) && !PREFLIGHT_SOURCE.includes(expect)) {
+    const fix = runFixtures(expect)
+    if (fix.failed.some((line) => line.includes(expect))) return fix
+    return { failed: [...fix.failed, ...runPreflight().failed] }
+  }
   const pre = runPreflight()
   if (expect && pre.failed.some((line) => line.includes(expect))) return pre
   return { failed: [...pre.failed, ...runFixtures(expect).failed] }

@@ -15,8 +15,8 @@ import {
   taskLedgerPath, writeTaskLedger,
 } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseIssueNumbers, parsePrNumber,
-  parseRemoteUrls, probeGitHubEnv,
+  detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
+  parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
@@ -180,10 +180,16 @@ async function syncReviewToGitHub({
     const faultInjectionText = String(opts['fault-injection'] ?? '').trim() || '未触及高风险路径或未附额外故障注入摘要'
     const stopLossText = stopLoss ? `已触发（${stopReasons.join('；')}）` : '未触发'
 
+    const ghLogin = ghProbe.env?.trackB?.login
+    const implDisplay = resolveContributorIdentity({ ghLogin, ledgerActor: implementerId }).display
+    const sourceLine = isInternalAgentSlug(reviewerId) && ghLogin
+      ? `@${ghLogin}（独立审查子代理 \`${reviewerId}\`，隔离 worktree 复核，实施人：${implDisplay}）`
+      : `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`
+
     const bodyLines = [
       `### 独立审查 Round ${round}（${verdict === 'pass' ? 'PASS' : 'CHANGES_REQUESTED'} @ \`${String(headSha ?? '').slice(0, 7)}\`）`,
       '',
-      `- **审查来源**：\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`,
+      `- **审查来源**：${sourceLine}`,
       `- **逐条标准状态**：${criteriaStatusText}`,
       `- **故障注入记录**：${faultInjectionText}`,
       `- **止损记录**：${stopLossText}`,
@@ -206,6 +212,7 @@ async function syncReviewToGitHub({
     }
 
     const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
+    const staleLabel = verdict === 'changes' ? 'reviewed' : 'changes-requested'
     const targets = [
       ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
       ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
@@ -223,6 +230,7 @@ async function syncReviewToGitHub({
         number: t.number,
         labels: [labelName],
       })
+      await ghClient.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
       results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
     }
 

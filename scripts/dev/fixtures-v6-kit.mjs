@@ -464,6 +464,16 @@ export function registerV6KitCases(cases) {
       if (offlineRec.status !== 0 || !JSON.parse(offlineRec.stdout).githubSync) {
         return `离线 record 阻塞或缺少 githubSync 提示：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
       }
+
+      // 传内部调度代号（如 coordinator-hydrogen-xhigh）认领时必须自动解析为真实 GitHub 协作者账号
+      const sanitizeClaim = await handleClaim({
+        task: 'gw-feat', agent: 'coordinator-hydrogen-xhigh', takeover: true, reason: '调度代号纠偏', json: true,
+        _ghClient: client, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'real-alice' } }, client },
+      }, roots)
+      const sanitizeBody = commentsByNum.get(77)?.at(-1)?.body ?? ''
+      if (sanitizeClaim.exitCode !== 0 || !sanitizeBody.includes('@real-alice') || sanitizeBody.includes('coordinator-hydrogen-xhigh')) {
+        return `handleClaim 未过滤内部子代理代号：${sanitizeBody}`
+      }
       return true
     } finally {
       const wtAbs = join(dir, '.worktrees/impl-gw-feat')
@@ -585,18 +595,18 @@ export function registerV6KitCases(cases) {
       ], { cwd: urlDir })
       if (rpBad.status !== 2) return `review-pack --pr 未拒绝 Issue URL：status=${rpBad.status}`
 
-      // finalize 实现说明：大写 TODO 阻断，合法 Todo / docs/todo/ 放行
+      // finalize 实现说明：大写占位词阻断，合法 Todo / docs/todo/ 放行
       const spInit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--json',
       ], { cwd: urlDir })
       const spRel = JSON.parse(spInit.stdout).file
       const placeholderTodo = `${'TO'}DO: fill later`
       let spTxt = readFileSync(join(urlDir, spRel), 'utf8')
+        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', `- ${placeholderTodo}`)
         .replace('<two-way | one-way>', 'two-way')
         .replace(/<[^>]+>/g, '真实值')
         .replace('- [ ] C1: 真实值', '- [x] C1: verified')
         .replace('- [ ] C2: 真实值', '- [x] C2: verified')
-        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', `- ${placeholderTodo}`)
       writeFileSync(join(urlDir, spRel), spTxt)
       spawnSync('git', ['add', spRel], { cwd: urlDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-qm', 'spec todo'], { cwd: urlDir, stdio: 'ignore' })
@@ -612,9 +622,36 @@ export function registerV6KitCases(cases) {
       const finOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'note-case'], { cwd: urlDir })
       if (finOk.status !== 0) return `finalize 误拦合法 Todo 实现说明：${finOk.stderr}`
 
+      // doc-plan approve 自动提示移交 dev-flow start
+      const apInit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+        'init', '--kind', 'spec', '--slug', 'app-next', '--title', 'Approve Next', '--issue', '55', '--json',
+      ], { cwd: urlDir })
+      const apRel = JSON.parse(apInit.stdout).file
+      writeFileSync(join(urlDir, apRel), readFileSync(join(urlDir, apRel), 'utf8')
+        .replace('<two-way | one-way>', 'two-way')
+        .replace(/<[^>]+>/g, '真实值')
+        .replace('- [ ] C1: 真实值', '- [x] C1: verified')
+        .replace('- [ ] C2: 真实值', '- [x] C2: verified'))
+      runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', apRel, '--reviewer', 'critic-next'], { cwd: urlDir })
+      const apRes = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', apRel, '--json'], { cwd: urlDir })
+      const apJson = apRes.status === 0 ? JSON.parse(apRes.stdout) : null
+      if (!apJson?.nextStep?.includes('flow.mjs" start') || !apJson?.nextStep?.includes('--issue 55')) {
+        return `doc-plan approve 缺少移交 flow start 提示：${apRes.stdout} ${apRes.stderr}`
+      }
+
+      // flow cleanup 细粒度保留：仅删 review worktree，保留 impl worktree 与本地分支
+      spawnSync('git', ['worktree', 'add', '--detach', join(urlDir, '.worktrees/review-note-case'), 'HEAD'], { cwd: urlDir, stdio: 'ignore' })
+      const clOnlyRev = runAbs('kit/skills/dev-flow/scripts/flow.mjs', [
+        'cleanup', '--task', 'note-case', '--confirm', '--only-review-worktree', '--json',
+      ], { cwd: urlDir })
+      const clj = clOnlyRev.status === 0 ? JSON.parse(clOnlyRev.stdout) : null
+      if (!clj || existsSync(join(urlDir, '.worktrees/review-note-case')) || !existsSync(join(urlDir, '.worktrees/impl-note-case')) || clj.deletedLocalBranch) {
+        return `cleanup --only-review-worktree 未按粒度保留：${clOnlyRev.stdout} ${clOnlyRev.stderr}`
+      }
+
       return true
     } finally {
-      for (const wt of ['.worktrees/impl-pr-88', '.worktrees/review-pr-89', '.worktrees/impl-note-case']) {
+      for (const wt of ['.worktrees/impl-pr-88', '.worktrees/review-pr-89', '.worktrees/impl-note-case', '.worktrees/review-note-case']) {
         spawnSync('git', ['worktree', 'remove', '--force', join(urlDir, wt)], { cwd: urlDir, stdio: 'ignore' })
       }
       rmTree(urlDir)

@@ -132,6 +132,7 @@ export {
   githubRepoFull,
   githubRepoPath,
   hasLocalOnlyMarker,
+  isInternalAgentSlug,
   listComments,
   listHostingProviders,
   parseBodyRelations,
@@ -145,6 +146,7 @@ export {
   probeGitHubEnv,
   registerHostingProvider,
   removeLabel,
+  resolveContributorIdentity,
   resolveRemoteDescriptor,
   resolveWorkspaceIdentity,
 } from './platform.mjs'

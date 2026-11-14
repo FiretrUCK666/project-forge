@@ -37,17 +37,17 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--create-issue --title "<标题>"] [--external-pr <M|URL>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm]
 
-# 3. 认领（远程自动查 pf-state 防撞车，接管须带 --takeover --reason 双写 Issue+PR）/ 释放认领 / 文档锁与实证
-node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N>] [--takeover --reason "<接管原因>"]
+# 3. 认领（自动绑定真实 GitHub/Git 协作者署名，严禁传内部 AI 代号；接管须带 --takeover --reason 双写 Issue+PR）/ 释放认领 / 文档锁与实证
+node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N|URL>] [--takeover --reason "<接管原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <file>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode gate
 
-# 4. 推送并同步审查槽 / 返工 / 合并 / 人类确认后清理
+# 4. 推送并同步审查槽 / 返工 / 最终审查者 PASS 后直接合并 / 人类自选粒度清理
 node ".agents/skills/dev-flow/scripts/flow.mjs" submit [--rework]
 node ".agents/skills/dev-flow/scripts/flow.mjs" rework [--rebut "<findingId>: <reason>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" merge [--human-approved] [--reason "<原因>"]
-node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --confirm
+node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --confirm [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch]
 ```

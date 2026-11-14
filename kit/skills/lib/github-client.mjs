@@ -117,6 +117,29 @@ export function parseBodyRelations(body) {
   return out
 }
 
+const INTERNAL_AGENT_SLUG_RE = /^(?:local-agent|implementer|coordinator(?:-|$)|swarm(?:-|$)|worker(?:-|$)|subagent(?:-|$)|independent-review(?:er)?(?:-|$)|critic(?:-|$)|integrator(?:-|$)|agent-\d+|claude(?:-|$)|gemini(?:-|$)|gpt(?:-|$)|codex(?:-|$))/i
+
+/** 判断标识是否为内部 AI 角色/调度代号而非真实仓库协作者账号。 */
+export function isInternalAgentSlug(val) {
+  const clean = String(val ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
+  return clean ? INTERNAL_AGENT_SLUG_RE.test(clean) : true
+}
+
+/** 优先解析真实 GitHub/Git 协作者署名（过滤内部子代理代号与冗余邮箱后缀），返回 `{ actor, display }`。 */
+export function resolveContributorIdentity({ explicitActor, ghLogin, gitName, ledgerActor } = {}) {
+  const clean = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
+  const exp = clean(explicitActor)
+  const picks = [
+    exp && !isInternalAgentSlug(exp) ? exp : '',
+    clean(ghLogin),
+    clean(gitName),
+    clean(ledgerActor),
+  ].filter((x) => x && !isInternalAgentSlug(x))
+  const actor = picks[0] || (!exp || isInternalAgentSlug(exp) ? 'maintainer' : exp)
+  const display = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(actor) ? `@${actor}` : actor
+  return { actor, display }
+}
+
 /** 解析单个 PR 引用（正整数、#M、pr#M 或 GitHub Pull Request URL）。 */
 export function parsePrNumber(raw, { strict = false } = {}) {
   if (raw === undefined || raw === null || raw === '') return null

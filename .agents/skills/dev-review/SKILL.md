@@ -99,6 +99,6 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
 ## 输出与下一跳
 
 每条命令均附 `[NEXT STEP]` 明确提示下一合法动作：
-- `REVIEW_PASSED`：按 `doorAssessment.mergeAuthority` 进入合并或转交维护者批准；
-- `CHANGES_REQUESTED`：实施者在原分支追加修复、重跑验证并更新同一个 PR；
+- `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 cleanup 清理范围；
+- `CHANGES_REQUESTED`：实施者在原分支追加修复（`flow.mjs rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由独立审查复核；
 - `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：立即停循环转交人类。

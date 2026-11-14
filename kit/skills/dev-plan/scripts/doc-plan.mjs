@@ -20,8 +20,8 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
   archiveCompletedDocsGroup, buildDocFilename, DOC_FRONTMATTER_KEY_ORDER,
-  docDateTag, docIsoDate, parseDocFrontmatter, renderStandardDocTemplate,
-  slugify, syncDocsLifecycle, updateDocFrontmatter,
+  docDateTag, docIsoDate, parseDocFilename, parseDocFrontmatter,
+  renderStandardDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
@@ -391,6 +391,16 @@ async function main(argv) {
       else {
         process.stdout.write(`文档审计（${res.file}，type=${res.docType}）：${res.ok ? '通过' : `失败（${res.errors.length} 项错误）`}\n`)
         for (const e of res.errors) process.stdout.write(`- [${e.code}] L${e.line}: ${e.message}\n  修法: ${e.fixHint}\n`)
+        if (res.ok) {
+          const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
+          const fn = parseDocFilename(res.file)
+          const slugVal = fn?.slug ?? 'task'
+          if (res.docType === 'todo' && !fm.data?.related_spec) {
+            printNextStep([{ skill: 'dev-flow', text: `Todo 自审通过，移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` }], { repoRoot: mainRoot })
+          } else if (res.docType === 'spec' && String(fm.data?.status ?? '').toLowerCase() !== 'approved') {
+            printNextStep([{ skill: 'dev-plan', text: `独立只读 Critique 通过后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+          }
+        }
       }
       return res.ok ? 0 : 1
     }
@@ -409,10 +419,17 @@ async function main(argv) {
     if (sub === 'approve') {
       if (!opts.file) throw new Error('approve 需要 --file <specPath>')
       const res = approveSpec({ repoRoot, file: opts.file, skipCritiqueReason: opts['skip-critique-reason'] })
+      const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
+      const fn = parseDocFilename(res.file)
+      const slugVal = fn?.slug ?? 'task'
+      const issueNum = Number.isInteger(Number(fm.data?.issue)) && Number(fm.data.issue) > 0 ? Number(fm.data.issue) : (fn?.issue ?? null)
+      const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'}`
+      if (res.status === 'approved' || res.status === 'active') res.nextStep = startHint
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`文档已切换为 ${res.status}：${res.file}（原状态：${res.previousStatus}）\n`)
         if (res.warning) process.stdout.write(`提示：${res.warning}\n`)
+        if (res.nextStep) printNextStep([{ skill: 'dev-flow', text: `规划已批准，移交 dev-flow 启动隔离工作区：${startHint}` }], { repoRoot: mainRoot })
       }
       return 0
     }

@@ -7,7 +7,7 @@ updated: 2026-11-15
 issue: 27
 pr: null
 branch: feat/v6-adaptive-governance
-owner: coordinator-hydrogen-xhigh
+owner: FiretrUCK666
 approved: true
 done_at: 2026-11-15
 task_id: 261115-v6-adaptive-governance-upgrade

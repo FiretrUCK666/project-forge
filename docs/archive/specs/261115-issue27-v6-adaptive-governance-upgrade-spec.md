@@ -8,7 +8,7 @@ updated: 2026-11-15
 issue: 27
 pr: null
 branch: feat/v6-adaptive-governance
-owner: coordinator-hydrogen-xhigh
+owner: FiretrUCK666
 approved: true
 implemented: true
 plan_critique: "passed (reviewer=plan-critic-gemini-4-hydrogen-xhigh, round=2, sha=4b9e3471163a, summary=Round 2 passed + macOS darwin full-chain adaptation added)"

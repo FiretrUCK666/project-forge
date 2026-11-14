@@ -25,8 +25,8 @@ metadata:
 
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
-| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth`；若目录几乎空白（0 业务文件 / `none`），停下问 3–4 个简明问题（形态语言、包名描述、许可、远端意向）后跑 `equip.mjs --bootstrap-empty` 搭最小可跑工程与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）；若 `explorationStrategy.mode` 为 `parallel-subagents`（大型或重入仓），**写前先按 `shards` 并行派发 2–4 个不重叠只读子代理**汇总现状后再进 `S2`/`S3`（中小仓 `single-pass` 单路通读） | `references/survey.md` |
-| **S2 定范围** | 对照能力矩阵逐行求值；存量仓「先读后合不覆盖」；跨月重入按 `reentry` 校准：**保留 `.agents/skills/<custom>/` 与手写规则，仅刷新失效路径、失效脚本、新顶层模块与滞后 `TDD`**，并由 `equip.mjs` 核对 `.agents/skills/.pf-manifest.json` 哈希无损升级未改文件、自净化退役旧文件 | 本文件 |
+| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth` 获取 `explorationStrategy.tier` 与逐项 `artifactPlan`；若目录几乎空白（`none` / 0 业务文件），停下问 3–4 个简明问题后跑 `equip.mjs --bootstrap-empty` 搭完整最小可跑闭环（`.gitattributes`、`.gitignore`、`README.md`、可跑测试与填实 `Feature Map` 的 `docs/TDD.md`）；若 `explorationStrategy.tier` 为 `parallel-subagents`（大型或重入仓），**写前先按 `shards` 并行派发 2–4 个不重叠只读子代理**汇总后再进 `S2`/`S3`（中小仓 `single-pass` 单路通读） | `references/survey.md` |
+| **S2 定范围** | 逐项按 `facts.artifactPlan` 与能力矩阵确定性落地：**存量 `README`/`CONTRIBUTING`/双许可或自有 `LICENSE`/`.agents/skills/<custom>/` 与非标目录一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`（只修失效路径、失效脚本、新顶层模块与滞后 `TDD`），并由 `equip.mjs` 核对 `.agents/skills/.pf-manifest.json` 无损升级、自净化退役旧文件 | 本文件 |
 | **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（后续按 `treeSha256` 自动去重）；再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；建 `docs/TDD.md` 与按需 `prd`/`specs`/`todo`；生成/无损刷新 `AGENTS.md`（`<= 30KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；**全量装配全套 5 个 `.agents/skills/`**；按五态身份与轨道 A/B 配 GitHub 远端与模板 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check` + `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记 | `references/handoff.md` |
 
@@ -62,7 +62,7 @@ metadata:
 
 | 事实 | 版本控制 | 文档与 `AGENTS` | `.agents/skills/` | 远端与自动化 |
 | --- | --- | --- | --- | --- |
-| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左生成初始 `TDD` | 全量装齐 5 个 | 按意向可选 |
+| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左生成基线、`README`、可跑测试与实填 `TDD` | 全量装齐 5 个 | 按意向可选 |
 | `docs-only` | 做 | 做（无代码可省 `TDD`） | 全量装齐 5 个 | 视远端（不发包） |
 | 已识别代码生态 / 插件 / 能力目录 | 做 | 做 | 全量装齐 5 个 | 按声明；克隆类不走制品库 |
 | `isRepoRoot` 为假 / `unknown` | **先停下问清** | 同左 | 暂缓 | 暂缓 |

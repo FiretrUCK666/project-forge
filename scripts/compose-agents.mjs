@@ -50,6 +50,7 @@ import * as protocol from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
+const KIT_SKILLS = protocol.KIT_SKILLS ?? ['dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern']
 const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
 const AGENTS_WARN_BYTES = protocol.AGENTS_WARN_BYTES ?? 24576
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
@@ -141,6 +142,37 @@ const COMMAND_LABEL = {
  * 每个条件都必须**可由事实算出**，而且是保守方向：算不准时算「没有」。多一节不适用
  * 的内容会让读者照着执行一件对他不存在的事；少一节只是缺，交付体检会报。
  */
+function customSkillsOf(facts) {
+  const kitSet = new Set(KIT_SKILLS)
+  const raw = Array.isArray(facts?.kit?.customSkills)
+    ? facts.kit.customSkills
+    : (Array.isArray(facts?.localSkills) ? facts.localSkills : []).filter((s) => {
+        const p = String(s?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+        return p.startsWith('.agents/skills/') || p.startsWith('.claude/skills/')
+      })
+
+  const seen = new Set()
+  const result = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || item.valid === false) continue
+    const rawPath = String(item.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+    const rawName = String(item.name ?? '').trim()
+    const normPath = rawPath || (rawName ? `.agents/skills/${rawName}` : '')
+    if (!normPath) continue
+    const dirName = normPath.split('/').pop()
+    const displayName = rawName || dirName
+    if (kitSet.has(dirName) || kitSet.has(displayName)) continue
+    if (seen.has(normPath)) continue
+    seen.add(normPath)
+    result.push({
+      path: normPath,
+      name: displayName,
+      summary: String(item.summary ?? '').replace(/\s+/g, ' ').trim(),
+    })
+  }
+  return result.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+}
+
 export function buildConditions(facts) {
   const commands = facts.commands ?? {}
   const hasCommands = COMMAND_ORDER.some((k) => typeof commands[k] === 'string' && commands[k].trim())
@@ -148,6 +180,7 @@ export function buildConditions(facts) {
   const tags = facts.git?.tags ?? []
   const conventions = facts.conventions ?? {}
   const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false
+  const hasCustomSkills = customSkillsOf(facts).length > 0
 
   return {
     'has-commands': hasCommands,
@@ -165,6 +198,7 @@ export function buildConditions(facts) {
     'is-monorepo': Boolean(facts.workspace?.declared),
     'is-plugin-or-skill': kinds.some((k) => k === 'skill' || k.endsWith('-plugin') || k.endsWith('-extension')),
     'has-bilingual-docs': Boolean(facts.docs?.readmePair),
+    'has-custom-skills': hasCustomSkills,
   }
 }
 
@@ -241,6 +275,16 @@ function conventionsHint(facts) {
 }
 
 /** 全部模板变量的取值。清单本身在 `protocol.mjs` 的 `TEMPLATE_VARS` 里。 */
+function customSkillsBlock(facts) {
+  const custom = customSkillsOf(facts)
+  if (custom.length === 0) return ''
+  return custom
+    .map((s) => (s.summary
+      ? `- \`${s.path}/SKILL.md\`（\`${s.name}\`）：${s.summary}`
+      : `- \`${s.path}/SKILL.md\`（\`${s.name}\`）`))
+    .join('\n')
+}
+
 export function buildVars(facts, root) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'
@@ -267,6 +311,7 @@ export function buildVars(facts, root) {
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
     CONVENTIONS_HINT: conventionsHint(facts),
+    CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),
   }
 }
 

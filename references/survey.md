@@ -32,10 +32,17 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 | `git.role` | 双轴五态身份：`local-only`（无远端或 `.git/pf-local-mode`）、`maintainer`（与声明源一致且有写权限或自有确认）、`contributor-fork`（存在不同 `upstream` 或 Fork 仓）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
 | `git.auth` | `https`、`ssh`（含 443 回退结果）、`apiChannel`、`details`、`remediationCmd`（协议错配可执行修复命令；SSH-only 仓不再误报无凭据） |
 | `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警；含 `行事总纲` 与 7 键 `Dev Profile`）、`tdd`（`docs/TDD.md`）、`prdDir`、`specsDir`、`todoDir`、`contributing`、`releasing`、`license`、`releaseNotesMode`；缺项决策口径见 `references/docs-set.md` |
-| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并读取 `.agents/skills/.pf-manifest.json` 哈希账本状态；后续探索由 `repo-map.mjs` 提取 `reusableModules`、`featureMap` 与 CI 步骤 |
+| `kit` | 扫描 `.agents/skills/`（仅计含 `SKILL.md` 的合法技能目录）并分离内置 5 技能与项目自有 `kit.customSkills`（含 `name`、`path`、`summary`、`valid`），同时读取 `.agents/skills/.pf-manifest.json` 哈希账本状态；后续探索由 `repo-map.mjs` 提取 `reusableModules`、`featureMap` 与 CI 步骤 |
+| `explorationStrategy` | 依据 `effectiveFiles`、顶层代码目录与已有治理标记划分勘察模式：`none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–4 个不重叠 `shards` 分片） |
+| `reentry` | 跨月重入或存量接入时的漂移快照：`staleAgentPaths`（`AGENTS.md` 提及但磁盘已删的路径）、`staleAgentScripts`（声明的脚本或命令已不存在）、`staleTddPaths`（`docs/TDD.md` 中的失效路径）、`unregisteredTopDirs`（新增但未登记的顶层模块目录） |
 | `ecosystem` / `workspace` | 语言生态、入口清单、`packageManager`、多包目录列表（驱动 `AGENTS.md` 多包边界与忽略规则） |
 | `artifacts` | 运行环境下限（`runtimeRequirements`）与从配置提取的标准命令 |
 | `ci` / `publish` | 现有 GitHub Actions 流水线与发布通道线索 |
 | `risks` | `credentialFindings`（硬编码密钥/令牌）、`homePathLeaks`（严格区分 `test-data` 夹具与真实源码 `leak`）、`largeFiles`、未忽略的构建产物 |
 | `gaps` / `decisions` / `questions` | 缺口清单（对应 `review.mjs` 体检规则）、需人拍板的取舍项、精简提问列表 |
 | `navigation` | 按当前现场算出的必读参考列表，读完对应文档前不进入写入阶段 |
+
+### 并行只读分片探索规范（大型与重入仓写前前置）
+
+- 当 `explorationStrategy.mode === 'parallel-subagents'` 时，**进入写入或生成阶段前必须先完成并行只读勘察**：按 `explorationStrategy.shards` 并发派发 2–4 个纯只读子代理，每人只负责互不重叠的分片（如顶层模块与架构入口、既有 `.agents/skills/` 与 `AGENTS.md` 规则、文档/测试/CI 现状）。
+- **分片汇总规范**：子代理严禁修改任何文件、严禁越界重复扫描他人分片，只回传**真实存在路径 + 关键事实摘要 + 发现的漂移/风险**；主代理收齐后与 `reentry` 四个漂移列表交叉核对，再敲定校准与落盘范围。

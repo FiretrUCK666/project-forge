@@ -21,6 +21,14 @@
 | 合并 PR / 清理本地分支与 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 | 代码体检 / 清技术债 / 对齐契约与文档 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
+<!-- project-forge: if has-custom-skills -->
+
+### 项目自有技能（自动识别，与上方研发流并存）
+
+以下技能位于仓库自有技能目录，命中对应场景时同样静默读取其 `SKILL.md` 并执行；`compose-agents.mjs` 与 `equip.mjs` 会完整保留它们，不与内置研发流冲突：
+
+{{CUSTOM_SKILLS_BLOCK}}
+<!-- project-forge: endif -->
 <!-- project-forge: end 意图路由 -->
 
 <!-- project-forge: begin 行事总纲 -->

@@ -25,9 +25,9 @@ metadata:
 
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
-| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth`；若目录几乎空白（0 业务文件），停下问 3–4 个简明问题（形态语言、包名描述、许可、远端意向）后跑 `equip.mjs --bootstrap-empty` 搭最小可跑工程与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map`） | `references/survey.md` |
-| **S2 定范围** | 对照能力矩阵逐行求值；存量仓「先读后合不覆盖」；重入升级由 `equip.mjs` 核对 `.agents/skills/.pf-manifest.json` 哈希，无损升级未改文件并自净化退役旧文件 | 本文件 |
-| **S3 落盘** | 严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；建 `docs/TDD.md` 与按需 `prd`/`specs`/`todo`；`equip.mjs` 与 `compose-agents.mjs` 写前经 `backup.mjs` 自动打 `.tar.gz` 快照；生成/无损刷新 `AGENTS.md`（`<= 30KB`，含 `行事总纲` 与 7 键 `Dev Profile`）；**全量装配全套 5 个 `.agents/skills/`**；按五态身份与轨道 A/B 配 GitHub 远端与模板 | 见门控表 |
+| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth`；若目录几乎空白（0 业务文件 / `none`），停下问 3–4 个简明问题（形态语言、包名描述、许可、远端意向）后跑 `equip.mjs --bootstrap-empty` 搭最小可跑工程与初始 `docs/TDD.md`（含 `arch-rules` 与 `Feature Map`）；若 `explorationStrategy.mode` 为 `parallel-subagents`（大型或重入仓），**写前先按 `shards` 并行派发 2–4 个不重叠只读子代理**汇总现状后再进 `S2`/`S3`（中小仓 `single-pass` 单路通读） | `references/survey.md` |
+| **S2 定范围** | 对照能力矩阵逐行求值；存量仓「先读后合不覆盖」；跨月重入按 `reentry` 校准：**保留 `.agents/skills/<custom>/` 与手写规则，仅刷新失效路径、失效脚本、新顶层模块与滞后 `TDD`**，并由 `equip.mjs` 核对 `.agents/skills/.pf-manifest.json` 哈希无损升级未改文件、自净化退役旧文件 | 本文件 |
+| **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（后续按 `treeSha256` 自动去重）；再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；建 `docs/TDD.md` 与按需 `prd`/`specs`/`todo`；生成/无损刷新 `AGENTS.md`（`<= 30KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；**全量装配全套 5 个 `.agents/skills/`**；按五态身份与轨道 A/B 配 GitHub 远端与模板 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check` + `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记 | `references/handoff.md` |
 
 **S3 顺序不可逆**：`.gitattributes` 与 `.gitignore` 必须在首次提交之前落盘；文档与地址须在推送之前就绪；自动化跑的命令与 `AGENTS.md` / `README.md` 必须一致。
@@ -86,8 +86,8 @@ metadata:
 node "<本 skill 目录>/scripts/update.mjs" --quiet
 # S1 只读勘察（--probe-auth 并发探测 GitHub 轨道 A/B）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe-auth
-# 写前零污染 .tar.gz 快照管理（equip / compose-agents 修改前自动调用；支持 list / restore）
-node "<本 skill 目录>/scripts/backup.mjs" list "<项目目录>"
+# S3 第 0 步：非空存量仓写前全仓 .tar.gz 快照（按 treeSha256 自动去重；亦支持 list / restore）
+node "<本 skill 目录>/scripts/backup.mjs" create "<项目目录>" --label pre-forge
 # S3 全量装配 / 升级 5 个研发技能（空目录加 --bootstrap-empty --lang <lang> --name <name>）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
 # S3 生成或无损刷新 AGENTS.md（<= 30KB；--check / --upgrade / --clean / --no-backup）

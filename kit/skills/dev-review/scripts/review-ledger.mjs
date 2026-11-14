@@ -15,7 +15,8 @@ import {
   taskLedgerPath, writeTaskLedger,
 } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeGitHubEnv,
+  detectDeclaredRepo, githubRepoFull, parseIssueNumbers, parsePrNumber,
+  parseRemoteUrls, probeGitHubEnv,
 } from '../../lib/platform.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
@@ -412,14 +413,16 @@ export async function handleRecord(opts, roots) {
   filteredRounds.push(roundEntry)
   filteredRounds.sort((a, b) => a.round - b.round)
 
+  const prOptNum = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : null
+  const issueOptNums = opts.issue !== undefined ? parseIssueNumbers(opts.issue, { strict: true }) : []
   const updated = {
     ...baseLedger,
     taskId,
-    ...(opts.pr && Number.isInteger(Number(String(opts.pr).replace(/^#/, ''))) ? { prNumber: Number(String(opts.pr).replace(/^#/, '')) } : {}),
-    ...(opts.issue ? {
+    ...(prOptNum ? { prNumber: prOptNum } : {}),
+    ...(issueOptNums.length > 0 ? {
       linkedIssues: [...new Set([
         ...(baseLedger.linkedIssues ?? []),
-        ...String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger),
+        ...issueOptNums,
       ])],
     } : {}),
     implementerId: implementerId || baseLedger.implementerId,

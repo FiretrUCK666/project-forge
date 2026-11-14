@@ -13,7 +13,10 @@ import {
   inspectBranchMergeState, samePath,
 } from '../../lib/git.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import {
+  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parseRemotesTopology,
+  parseRemoteUrls, probeGitHubEnv,
+} from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, matchGlob } from '../../lib/static-gates.mjs'
 import { buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
@@ -407,9 +410,13 @@ export async function handleAbort(opts, roots) {
 export async function handleRelease(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
-  if (opts.issue) {
-    const extra = String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
-    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extra])]
+  const parsedPos = parseFlowInputs(opts._ ?? [])
+  const extraIssues = [
+    ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
+    ...parsedPos.issues.map((i) => i.number),
+  ]
+  if (extraIssues.length > 0) {
+    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
   }
 
   const actor = opts.agent ?? ledger.implementerId ?? 'local-agent'

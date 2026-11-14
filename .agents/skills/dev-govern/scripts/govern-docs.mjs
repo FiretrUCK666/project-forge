@@ -8,6 +8,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+import { resolveAvailableSkills } from '../../lib/cli.mjs'
 import {
   buildDocFilename, checkMermaidLabelWidth, docDateTag, parseDocFilename,
   parseDocFrontmatter, renderStandardDocTemplate,
@@ -245,7 +246,7 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, autho
         severity: 'medium',
         file: targetDoc,
         title: `Doc staleness vs git churn: "${dir}/" has ${stats.sinceDoc} commit(s) in last 80 without "${targetDoc}"/doc update`,
-        action: `Review recent changes in "${dir}/" and sync "${targetDoc}" / AGENTS.md if architecture or interfaces changed.`,
+        action: `Run dev-explore (\`repo-map.mjs --focus ${dir}\`) to inspect recent interface/entrypoint changes and sync "${targetDoc}" / AGENTS.md.`,
       })
     }
   }
@@ -355,7 +356,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
         severity: 'medium',
         file: 'docs/TDD.md',
         title: 'Missing docs/TDD.md technical architecture authority',
-        action: 'Create docs/TDD.md documenting modules, data flows, and invariants (or record `no-tdd` / `tdd-authority` in AGENTS.md ## 取舍).',
+        action: 'Run dev-explore (`repo-map.mjs`) first, then create docs/TDD.md documenting modules, data flows, and invariants (or record `no-tdd` / `tdd-authority` in AGENTS.md ## 取舍).',
       })
     }
   } else if (tddInfo?.text && authoritativeTddPath) {
@@ -371,7 +372,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
           severity: 'medium',
           file: authoritativeTddPath,
           title: `${authoritativeTddPath} omits ${undocumented.length} module(s): ${undocumented.slice(0, 6).map((m) => m.path).join(', ')}`,
-          action: `Update ${authoritativeTddPath} module table to match current source layout.`,
+          action: `Run dev-explore (\`repo-map.mjs\`) and update ${authoritativeTddPath} module table to match current source layout.`,
         })
       }
     }
@@ -537,6 +538,15 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
   }
 }
 
+function sanitizeCriterionText(raw, repoRoot) {
+  let s = String(raw ?? '')
+    .replace(/<([^>\n]+)>/g, '{$1}')
+    .replace(/\b(?:TBD|TODO|FIXME)\b/gi, '待清理标记')
+    .replace(/待补充|待填写|待核实/g, '待治理项')
+  s = s.replace(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)\b/g, (m, p) => (existsSync(join(repoRoot, p)) ? m : `${p}（旧路径不存在 / removed）`))
+  return s.replace(/\s+/g, ' ').trim()
+}
+
 export async function buildPlan(findings, repoRoot, devProfile, isGit) {
   const order = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
   const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9))
@@ -551,6 +561,7 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
   ].filter((b) => b.items.length > 0)
 
   const dateTag = docDateTag()
+  const taskId = `govern-${dateTag}`
   const todoFilename = buildDocFilename({ date: dateTag, slug: 'govern-remediation', kind: 'todo' })
   const todoRel = `docs/todo/${todoFilename}`
 
@@ -571,14 +582,20 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
   }
   const scopePaths = scopeSet.size > 0 ? [...scopeSet] : [existsSync(join(repoRoot, 'AGENTS.md')) ? 'AGENTS.md' : 'README.md']
   const quickCmd = devProfile?.['quick-test']?.[0] || devProfile?.['full-test']?.[0] || '按项目验证脚本执行检查'
-  const hasGovernSkill = existsSync(join(repoRoot, '.agents', 'skills', 'dev-govern', 'scripts', 'govern-audit.mjs'))
+  const skills = resolveAvailableSkills(repoRoot)
+  const exploreRef = ['.agents/skills/dev-explore/scripts/repo-map.mjs', '.agents/skills/dev-explore/SKILL.md'].find((p) => existsSync(join(repoRoot, p)))
+  const governRef = ['.agents/skills/dev-govern/scripts/govern-audit.mjs', '.agents/skills/dev-govern/SKILL.md'].find((p) => existsSync(join(repoRoot, p)))
   const reusableModules = [
-    hasGovernSkill ? '`.agents/skills/dev-govern/scripts/govern-audit.mjs`（只读审计与治理复核）' : '项目既有验证与构建脚本',
+    ...(skills.has('dev-explore') && exploreRef ? [`\`${exploreRef}\`（只读梳理模块入口与可复用基建）`] : []),
+    ...(governRef ? [`\`${governRef}\`（只读审计与治理复核）`] : ['项目既有验证与构建脚本']),
   ]
 
+  const hasExploreTargets = sorted.some((f) => /^(?:docs\.(?:missing-tdd|tdd-module-drift|tdd-stale-path|stale-vs-churn)|hygiene\.(?:god-file|arch-boundary))/.test(String(f.id ?? '')))
+  const hasL3Debt = sorted.some((f) => /^(?:hygiene\.(?:arch-boundary|god-file)|docs\.agents-over-30kb)/.test(String(f.id ?? '')))
+
   const criteria = sorted.length > 0
-    ? sorted.slice(0, 10).map((f) => `[${f.severity}] ${f.title}`)
-    : ['Verify repository remains clean with zero critical/high gaps']
+    ? sorted.slice(0, 10).map((f) => `[${f.severity}] ${sanitizeCriterionText(f.title, repoRoot)}（复跑 govern-audit 确认 \`${f.id}\` 归零，退出码 0）`)
+    : ['复跑 govern-audit 确认仓库维持 0 个 critical/high 缺陷（退出码 0）']
 
   const todoDraft = renderStandardDocTemplate({
     kind: 'todo',
@@ -586,7 +603,7 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
     safeSlug: 'govern-remediation',
     headSha,
     headBranch,
-    taskId: `govern-${dateTag}`,
+    taskId,
     quickCmd,
     scopePaths,
     reusableModules,
@@ -596,5 +613,5 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
     criteria,
   })
 
-  return { batches, todoRel, todoDraft }
+  return { batches, taskId, todoRel, todoDraft, hasExploreTargets, hasL3Debt }
 }

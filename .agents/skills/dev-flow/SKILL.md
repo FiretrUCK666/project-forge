@@ -33,8 +33,8 @@ description: |
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...] [--probe-auth]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 
-# 2. 启动或放弃任务工作位（start 保留并迁入已有 doc-plan 文档；--create-issue 可由 maintainer 自动建单并联动改名）
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N>] [--create-issue --title "<标题>"] [--external-pr <M>]
+# 2. 启动或放弃任务工作位（支持直接贴 Issue/PR URL，自动分流外部 PR 隔离或复用同仓 PR 原分支；--create-issue 可由 maintainer 自动建单）
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--create-issue --title "<标题>"] [--external-pr <M|URL>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm]
 
 # 3. 认领（远程自动查 pf-state 防撞车，接管须带 --takeover --reason 双写 Issue+PR）/ 释放认领 / 文档锁与实证

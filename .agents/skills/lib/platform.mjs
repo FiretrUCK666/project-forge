@@ -12,12 +12,14 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { execSafe, readJsonSafe, readTextSafe } from './git.mjs'
 import {
   createGitHubClient, createIssue, githubHttpsRequest, listComments,
-  parseBodyRelations, parseFlowInputs, parsePfStateTags, removeLabel,
+  parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePfStateTags,
+  parsePrNumber, removeLabel,
 } from './github-client.mjs'
 
 export {
   createGitHubClient, createIssue, githubHttpsRequest, listComments,
-  parseBodyRelations, parseFlowInputs, parsePfStateTags, removeLabel,
+  parseBodyRelations, parseFlowInputs, parseIssueNumbers, parsePfStateTags,
+  parsePrNumber, removeLabel,
 }
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 5000

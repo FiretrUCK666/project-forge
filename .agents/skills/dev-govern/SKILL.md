@@ -81,6 +81,13 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 - **事后历史抽检（`sample`）**：定期运行 `sample --commits 30`，统计 `Revert` 回滚率与 48 小时同文件反复返工热点，输出需要补建测试或 `smoke-verify` 的规则下沉建议。
 - **顽固 Bug 三步止损**：同一模块或同一缺陷连续尝试修复 **3 次仍复发或退回**时，立即停手止损，禁止继续试错打补丁；用 `sample` 与 `cluster` 复盘架构边界与回归测试缺口，交由人类维护者拍板方案后再动。
 
+## 与其余四套研发技能的联动
+
+- **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift` 或 `hygiene.god-file`/`arch-boundary` 时，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 摸清真实模块入口与 `reusableModules`，再落笔治理或修订 `docs/TDD.md`。
+- **`dev-plan`**：`govern-audit.mjs plan --write-todo` 生成符合统一模板的标准 Todo 并可直接通过 `doc-plan.mjs audit`；命中跨模块/架构边界债时，自动指引先走 `doc-plan.mjs triage`（L3 建 `SPEC + Todo`）。
+- **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理（`lightweight` 档缺省兄弟技能时自动降级为原生 Git 指引）。
+- **`dev-review`**：每轮整改与规则下沉后运行 `AGENTS.md` 全部验证命令，再用 `review-pack.mjs --local` 收口确认。
+
 ## 执行与安全护栏
 
 - **只读先行与不擅自删目录**：`--audit-only`、`--plan-only`、`reconcile`、`cluster`、`sample`、`release-prep` 与不带 `--apply-issues` 的 `--issues` 均为只读；清理任何 `.worktrees/`（尤其 `no_own_commits`）前必须列清单请人确认并先解绑依赖链接。

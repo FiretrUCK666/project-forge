@@ -117,6 +117,47 @@ export function parseBodyRelations(body) {
   return out
 }
 
+/** 解析单个 PR 引用（正整数、#M、pr#M 或 GitHub Pull Request URL）。 */
+export function parsePrNumber(raw, { strict = false } = {}) {
+  if (raw === undefined || raw === null || raw === '') return null
+  if (typeof raw === 'number') {
+    if (Number.isInteger(raw) && raw > 0) return raw
+    if (strict) throw new Error(`PR 编号必须为正整数，收到：${raw}`)
+    return null
+  }
+  const s = String(raw).trim()
+  if (!s) return null
+  let m = /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#]|$)/i.exec(s)
+  if (m) return Number(m[1])
+  m = /^(?:pr)?#?(\d+)$/i.exec(s)
+  if (m) {
+    const n = Number(m[1])
+    if (Number.isInteger(n) && n > 0) return n
+  }
+  if (strict) throw new Error(`PR 引用格式无效（支持编号、#M、pr#M 或 GitHub PR URL）：${raw}`)
+  return null
+}
+
+/** 解析 Issue 引用或列表（正整数、#N、issue#N 或 GitHub Issue URL，支持逗号/空格分隔）。 */
+export function parseIssueNumbers(rawOrList, { strict = false } = {}) {
+  const tokens = (Array.isArray(rawOrList) ? rawOrList : [rawOrList])
+    .flatMap((v) => (v === undefined || v === null ? [] : String(v).split(/[\s,]+/)))
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const nums = []
+  for (const tok of tokens) {
+    let m = /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)(?:[/?#]|$)/i.exec(tok)
+    if (!m) m = /^(?:issue)?#?(\d+)$/i.exec(tok)
+    if (m) {
+      const n = Number(m[1])
+      if (Number.isInteger(n) && n > 0 && !nums.includes(n)) nums.push(n)
+    } else if (strict) {
+      throw new Error(`Issue 引用格式无效（支持正整数、#N、issue#N 或 GitHub Issue URL）：${tok}`)
+    }
+  }
+  return nums
+}
+
 /** 解析混合输入列表（Issue URL / PR URL / #N / issue#N / pr#N）。 */
 export function parseFlowInputs(inputs = [], defaultRepo = null) {
   const issues = []

@@ -16,6 +16,7 @@ import {
 } from '../../lib/git.mjs'
 import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
+import { parsePrNumber } from '../../lib/platform.mjs'
 import {
   EXIT, collectDiff, computeDiffRange, hasCommits, resolveReviewWorktree,
   scanUntrustedDiff, syncTier2ReviewSlotIfNeeded,
@@ -77,6 +78,21 @@ async function resolveDefaultBaseRef(repoRoot, headRef) {
 
 function validateCliArgs(cli) {
   const { sub, opts } = cli
+  if (!sub && opts._.length === 1) {
+    const posPr = parsePrNumber(String(opts._[0]).trim())
+    if (posPr !== null && opts.pr === undefined && opts['external-pr'] === undefined) {
+      opts.pr = String(posPr)
+      opts._.shift()
+    }
+  }
+  if (opts.pr !== undefined) {
+    const prNum = parsePrNumber(opts.pr, { strict: true })
+    if (prNum !== null) opts.pr = String(prNum)
+  }
+  if (opts['external-pr'] !== undefined) {
+    const extNum = parsePrNumber(opts['external-pr'], { strict: true })
+    if (extNum !== null) opts['external-pr'] = String(extNum)
+  }
   if (opts._.length > 1) {
     throw new Error(`多余的位置参数：${opts._.slice(1).join(' ')}`)
   }

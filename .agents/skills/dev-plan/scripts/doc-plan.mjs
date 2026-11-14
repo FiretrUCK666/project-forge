@@ -31,15 +31,16 @@ import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
 } from '../../lib/ledger.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, detectDocType, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 
 function parseIssueArg(rawIssue) {
   if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
-  const num = Number(String(rawIssue).replace(/^#/, '').trim())
-  if (!Number.isInteger(num) || num <= 0) throw new Error(`--issue 必须为正整数（如 278），收到：${rawIssue}`)
-  return num
+  const nums = parseIssueNumbers(rawIssue, { strict: true })
+  if (nums.length !== 1) throw new Error(`--issue 需要 1 个正整数 Issue 编号或 URL，收到：${rawIssue}`)
+  return nums[0]
 }
 
 async function initDoc({
@@ -358,8 +359,7 @@ async function main(argv) {
     if (sub === 'link') {
       const target = opts._[0] ?? opts.file ?? opts.slug
       if (!target) throw new Error('link 需要传入 <slug-or-path>（如 261115-my-feature 或 docs/specs/...）')
-      const prVal = opts.pr !== undefined ? Number(String(opts.pr).replace(/^#/, '').trim()) : undefined
-      if (prVal !== undefined && (!Number.isInteger(prVal) || prVal <= 0)) throw new Error(`--pr 必须为正整数，收到：${opts.pr}`)
+      const prVal = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : undefined
       const res = await syncDocsLifecycle(repoRoot, {
         slugOrPath: target, issue: opts.issue !== undefined ? parseIssueArg(opts.issue) : undefined, pr: prVal,
         branch: opts.branch, owner: opts.owner, status: opts.status,

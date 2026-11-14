@@ -471,4 +471,126 @@ export function registerV6KitCases(cases) {
       rmTree(dir)
     }
   }])
+
+  cases.push(['v6 五套技能全场景联通：dev-govern 联动 explore/plan/flow 且产出 0 错 Todo + URL 直传正反双向', async () => {
+    const { mkdirSync: mkd, rmSync: rmf } = await import('node:fs')
+    // 1. dev-govern plan --write-todo 联动 dev-explore / dev-plan / dev-flow，并按需在 lightweight 降级
+    const govDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'README.md': '# gov-link\n',
+      'AGENTS.md': [
+        '# Gov Link',
+        '',
+        '## 项目定位',
+        'Gov test',
+        '',
+        '## Dev Profile',
+        '```yaml',
+        'quick-test: node -e "process.exit(0)"',
+        'arch-rules: src/ui/** -> src/db/**',
+        '```',
+        '',
+        '- Old ref: `src/missing-old.mjs`',
+      ].join('\n'),
+      'src/db/conn.mjs': 'export const db = 1\n',
+      'src/ui/app.mjs': "import { db } from '../db/conn.mjs'\n// TODO: clean me\nexport const ui = db\n",
+      '.agents/skills/dev-explore/SKILL.md': '---\nname: dev-explore\ndescription: explore\n---\n',
+      '.agents/skills/dev-plan/SKILL.md': '---\nname: dev-plan\ndescription: plan\n---\n',
+      '.agents/skills/dev-flow/SKILL.md': '---\nname: dev-flow\ndescription: flow\n---\n',
+      '.agents/skills/dev-govern/SKILL.md': '---\nname: dev-govern\ndescription: govern\n---\n',
+    })
+    gitInit(govDir)
+    spawnSync('git', ['branch', '-M', 'main'], { cwd: govDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 't'], { cwd: govDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: govDir, stdio: 'ignore' })
+    try {
+      const govRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--write-todo', '--json'], { cwd: govDir })
+      if (govRes.status !== 0) return `govern-audit plan --write-todo 失败：${govRes.stderr}`
+      const gj = JSON.parse(govRes.stdout)
+      const todoRel = gj.plan?.todoRel
+      if (!todoRel || !existsSync(join(govDir, todoRel))) {
+        return `govern-audit --write-todo 未写出 Todo：${JSON.stringify(gj.plan)}`
+      }
+      const nsText = (gj.nextSteps ?? []).join('\n')
+      if (!nsText.includes('repo-map.mjs') || !nsText.includes('doc-plan.mjs" audit') || !nsText.includes('doc-plan.mjs" triage') || !nsText.includes('flow.mjs" start')) {
+        return `govern-audit nextSteps 缺少兄弟技能联动：${nsText}`
+      }
+      const audTodo = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', todoRel, '--json'], { cwd: govDir })
+      if (audTodo.status !== 0) {
+        return `govern 生成的 Todo 未通过 doc-plan audit：${audTodo.stdout} ${audTodo.stderr}`
+      }
+
+      // 缺少兄弟技能时应优雅降级为纯 Git 指引
+      for (const sk of ['dev-explore', 'dev-plan', 'dev-flow']) {
+        rmf(join(govDir, '.agents', 'skills', sk), { recursive: true, force: true })
+      }
+      const govMin = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['plan', '--json'], { cwd: govDir })
+      const gmj = JSON.parse(govMin.stdout)
+      const gmText = (gmj.nextSteps ?? []).join('\n')
+      if (gmText.includes('repo-map.mjs') || gmText.includes('doc-plan.mjs') || gmText.includes('flow.mjs start') || !gmText.includes('git switch -c')) {
+        return `缺省兄弟技能时 govern nextSteps 未降级：${gmText}`
+      }
+    } finally { rmTree(govDir) }
+
+    // 2. 全链路直接粘贴 Issue/PR URL（正反双向）
+    const urlDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'README.md': '# url-test\n',
+      'src/app.mjs': 'export const u = 1\n',
+    })
+    gitInit(urlDir)
+    spawnSync('git', ['branch', '-M', 'main'], { cwd: urlDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'u'], { cwd: urlDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'u@u.u'], { cwd: urlDir, stdio: 'ignore' })
+    spawnSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: urlDir, stdio: 'ignore' })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: urlDir, stdio: 'ignore' })
+    mkd(join(urlDir, '.worktrees'), { recursive: true })
+    try {
+      const dpOk = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+        'init', '--kind', 'todo', '--slug', 'url-test', '--title', 'URL 测试',
+        '--issue', 'https://github.com/acme/demo/issues/42', '--json',
+      ], { cwd: urlDir })
+      if (dpOk.status !== 0 || !JSON.parse(dpOk.stdout).file?.includes('-issue42-')) {
+        return `doc-plan --issue URL 失败：${dpOk.stdout} ${dpOk.stderr}`
+      }
+      const dpBad = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+        'init', '--kind', 'todo', '--slug', 'bad-url', '--title', 'Bad URL',
+        '--issue', 'https://github.com/acme/demo/pull/88',
+      ], { cwd: urlDir })
+      if (dpBad.status === 0) return 'doc-plan --issue 误放行了 PR URL'
+
+      const stPrPos = runAbs('kit/skills/dev-flow/scripts/flow.mjs', [
+        'start', 'https://github.com/acme/demo/pull/88', '--pr-ref', 'HEAD', '--json',
+      ], { cwd: urlDir })
+      if (stPrPos.status !== 0 || JSON.parse(stPrPos.stdout).prNumber !== 88) {
+        return `flow start 位置 PR URL 失败：${stPrPos.stdout} ${stPrPos.stderr}`
+      }
+
+      const stExt = runAbs('kit/skills/dev-flow/scripts/flow.mjs', [
+        'start', '--external-pr', 'https://github.com/acme/demo/pull/89', '--pr-ref', 'HEAD', '--json',
+      ], { cwd: urlDir })
+      if (stExt.status !== 0 || JSON.parse(stExt.stdout).role !== 'inbound-external-pr') {
+        return `flow start --external-pr URL 失败：${stExt.stdout} ${stExt.stderr}`
+      }
+
+      const rpPos = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+        'https://github.com/acme/demo/pull/89', '--json',
+      ], { cwd: urlDir })
+      if (rpPos.status !== 0 || !JSON.parse(rpPos.stdout).worktreeRoot?.endsWith('.worktrees/review-pr-89')) {
+        return `review-pack 位置 PR URL 失败：${rpPos.stdout} ${rpPos.stderr}`
+      }
+
+      const rpBad = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+        '--pr', 'https://github.com/acme/demo/issues/42',
+      ], { cwd: urlDir })
+      if (rpBad.status !== 2) return `review-pack --pr 未拒绝 Issue URL：status=${rpBad.status}`
+
+      return true
+    } finally {
+      for (const wt of ['.worktrees/impl-pr-88', '.worktrees/review-pr-89']) {
+        spawnSync('git', ['worktree', 'remove', '--force', join(urlDir, wt)], { cwd: urlDir, stdio: 'ignore' })
+      }
+      rmTree(urlDir)
+    }
+  }])
 }

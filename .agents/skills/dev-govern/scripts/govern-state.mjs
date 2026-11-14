@@ -579,18 +579,38 @@ export async function applyGitHubIssues(repoRoot, issues) {
   return { applied: created, error: undefined }
 }
 
-export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile, findingsCount }) {
+export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile, findings = [], plan, reconcileSummary, findingsCount }) {
   const skills = resolveAvailableSkills(mainRoot)
   const nextSteps = []
+  const count = findingsCount ?? findings.length
+  const hasExploreDebt = (Array.isArray(findings) && findings.some((f) =>
+    /^(?:docs\.(?:missing-tdd|tdd-module-drift|tdd-stale-path|stale-vs-churn)|hygiene\.(?:god-file|arch-boundary))/.test(String(f.id ?? ''))))
+    || Boolean(reconcileSummary && !reconcileSummary.tddPresent)
+    || Boolean(plan?.hasExploreTargets)
+
+  if (hasExploreDebt && skills.has('dev-explore')) {
+    nextSteps.push('Explore module entrypoints & reusable infra before editing: `node ".agents/skills/dev-explore/scripts/repo-map.mjs"`')
+  }
+
   if (mode === 'cluster') {
     nextSteps.push(cluster.sinkCandidateCount > 0
       ? `Promote ${cluster.sinkCandidateCount} repeated cluster(s) (>=2) into static rules, arch-rules, or Dev Profile commands.`
       : 'No pattern has reached >=2 repeats yet; keep recording governance signals via `record`.')
   } else if (mode === 'reconcile') {
+    if ((reconcileSummary?.worktrees?.stale?.length ?? 0) > 0 && skills.has('dev-flow')) {
+      nextSteps.push('List stale worktrees and ask user before cleanup: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task <taskId>`')
+    }
     nextSteps.push('Review [RECONCILE] findings: keep AGENTS.md <= 30720 bytes, update docs/TDD.md drift, and ask user before cleaning stale worktrees.')
-  } else if (opts.planOnly || mode === 'plan') {
+  } else if (opts.planOnly || mode === 'plan' || mode === 'plan-only' || opts.writeTodo) {
+    if (opts.writeTodo && plan?.todoRel && skills.has('dev-plan')) {
+      nextSteps.push(`Audit generated remediation Todo: \`node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${plan.todoRel}"\``)
+    }
+    if (plan?.hasL3Debt && skills.has('dev-plan')) {
+      nextSteps.push('L3 cross-module/boundary debt detected: run `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --touches-contract --summary "Governance L3 refactor"` before structural split.')
+    }
     if (skills.has('dev-flow')) {
-      nextSteps.push('Review remediation batches above; run `--execute` or start a `dev-flow` task with the generated `-todo.md`.')
+      const todoFlag = opts.writeTodo && plan?.todoRel ? ` --todo "${plan.todoRel}"` : ''
+      nextSteps.push(`Review remediation batches above; run \`--execute\` or start an isolated flow task: \`node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${plan?.taskId ?? 'govern-remediation'} --case ${plan?.hasL3Debt ? 4 : 3} --slug govern-remediation${todoFlag}\``)
     } else {
       nextSteps.push('Review remediation batches above; create a feature branch (`git switch -c fix/govern`) and resolve batch by batch.')
     }
@@ -606,7 +626,7 @@ export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile
     nextSteps.push(opts.applyIssues ? 'GitHub issues created safely via UTF-8 --body-file.' : 'Review generated payloads; pass `--apply-issues` after confirming with user to create on GitHub.')
   } else {
     nextSteps.push('Run `plan` (`--plan-only`), `reconcile`, `audit --cluster`, or `sample` for rule-sinking.')
-    if (findingsCount > 0 && !opts.baselineApplied && !opts.baselineSaved) {
+    if (count > 0 && !opts.baselineApplied && !opts.baselineSaved) {
       nextSteps.push('Legacy repo tip: run with `--save-baseline` to snapshot existing gaps, then use default/incremental `--changed` mode to focus on new regressions.')
     }
   }

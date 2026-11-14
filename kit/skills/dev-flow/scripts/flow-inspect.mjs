@@ -17,8 +17,8 @@ import {
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseBodyRelations, parseFlowInputs,
-  parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv,
-  resolveWorkspaceIdentity,
+  parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology,
+  parseRemoteUrls, probeGitHubEnv, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
@@ -154,15 +154,23 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const ghProbe = await probeGitHubEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) })
   const originFull = githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0])
   const parsedInputs = parseFlowInputs(opts.inputs ?? [], originFull)
-  if (opts.issue) {
-    for (const n of String(opts.issue).split(',').filter(Boolean)) {
-      const num = Number(n.replace(/^#/, ''))
-      if (Number.isInteger(num)) parsedInputs.issues.push({ repo: originFull, number: num, raw: `#${num}` })
+  const addUnique = (bucket, item) => {
+    if (item && Number.isInteger(item.number) && !bucket.some((x) => x.number === item.number && (x.repo ?? originFull) === (item.repo ?? originFull))) {
+      bucket.push(item)
     }
   }
-  if (opts.pr) {
-    const num = Number(String(opts.pr).replace(/^#/, ''))
-    if (Number.isInteger(num)) parsedInputs.prs.push({ repo: originFull, number: num, raw: `pr#${num}` })
+  if (opts.issue) {
+    for (const it of parseFlowInputs(String(opts.issue).split(/[\s,]+/), originFull).issues) addUnique(parsedInputs.issues, it)
+    for (const num of parseIssueNumbers(opts.issue)) addUnique(parsedInputs.issues, { repo: originFull, number: num, raw: `#${num}` })
+  }
+  const prRawFlag = opts.pr ?? opts.externalPr
+  if (prRawFlag) {
+    const rawPr = parseFlowInputs([String(prRawFlag)], originFull)
+    if (rawPr.prs.length > 0) rawPr.prs.forEach((it) => addUnique(parsedInputs.prs, it))
+    else {
+      const num = parsePrNumber(prRawFlag)
+      if (num) addUnique(parsedInputs.prs, { repo: originFull, number: num, raw: `pr#${num}` })
+    }
   }
 
   const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && (ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token')
@@ -187,7 +195,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     })),
   ])
 
-  let externalPr = opts.externalPr ? Number(opts.externalPr) : null
+  let externalPr = opts.externalPr ? parsePrNumber(opts.externalPr) : null
   if (!externalPr && fetchedPrs.length === 1 && fetchedPrs[0].fetched) {
     const p = fetchedPrs[0]
     if (p.headRepo && originFull && p.headRepo.toLowerCase() !== originFull.toLowerCase()) externalPr = p.number
@@ -302,13 +310,18 @@ export async function handleStart(opts, roots) {
   const op = await detectInProgressGitOp(roots.mainRoot)
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 仓库正处于 ${op.op} 状态，请先解决冲突再执行 start`)
 
-  const linkedIssues = opts.issue || opts.issues
-    ? String(opts.issues ?? opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
-    : []
+  const parsedPos = parseFlowInputs(opts._ ?? [])
+  const linkedIssues = [...new Set([
+    ...parseIssueNumbers([opts.issues, opts.issue], { strict: true }),
+    ...parsedPos.issues.map((i) => i.number),
+  ])]
+  const externalPr = opts['external-pr'] !== undefined ? parsePrNumber(opts['external-pr'], { strict: true }) : null
+  const prFromFlag = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : (parsedPos.prs[0]?.number ?? null)
+  let prNumber = externalPr ?? prFromFlag
   const wantCreateIssue = Boolean(opts['create-issue'])
-  const prelimTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : null))
+  const prelimTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (prNumber ? `pr-${prNumber}` : null)))
   if (!prelimTaskId && !wantCreateIssue) {
-    throw new Error('start 需要传 --task <taskId>（或提供 --slug / --issue / --create-issue）')
+    throw new Error('start 需要传 --task <taskId>（或提供 --slug / --issue / --pr / --external-pr / --create-issue）')
   }
   if (wantCreateIssue && !opts.task && !opts.slug && !opts.title) {
     throw new Error('start --create-issue 需要至少提供 --title "<标题>"、--slug <slug> 或 --task <taskId>')
@@ -320,13 +333,22 @@ export async function handleStart(opts, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  const externalPr = opts['external-pr'] ? Number(opts['external-pr']) : null
-  const prNumber = externalPr ?? (opts.pr ? Number(opts.pr) : null)
-  const state = await inspectWorkspace(roots.mainRoot, { externalPr, pr: prNumber, probeAuth: Boolean(opts['probe-auth']) })
+  const state = await inspectWorkspace(roots.mainRoot, {
+    inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
+    issue: linkedIssues.join(','), probeAuth: Boolean(opts['probe-auth']),
+  })
+  const effectiveExternalPr = externalPr
+    ?? (state.identity.role === 'inbound-external-pr' ? (prNumber ?? state.inputs.prs[0]?.number ?? null) : null)
+  if (effectiveExternalPr && !prNumber) prNumber = effectiveExternalPr
+  if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
+    for (const iss of [...(state.inputs.reuseExistingPr.linkedIssues ?? []), ...(state.inputs.prs[0]?.relations?.fixes ?? [])]) {
+      if (Number.isInteger(iss) && !linkedIssues.includes(iss)) linkedIssues.push(iss)
+    }
+  }
   let role = state.identity.role
   const providerId = state.identity.providerId ?? 'github'
 
-  if (role === 'clone-readonly' && !externalPr) {
+  if (role === 'clone-readonly' && !effectiveExternalPr) {
     const choice = opts['clone-choice']
     if (!choice) {
       const hintTask = sanitizeTaskId(prelimTaskId ?? slugify(opts.title))
@@ -399,7 +421,8 @@ export async function handleStart(opts, roots) {
     linkedIssues.push(createRes.number)
   }
 
-  const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : slugify(opts.title)))
+  const defaultPrTask = effectiveExternalPr ? `review-pr-${effectiveExternalPr}` : (prNumber ? `pr-${prNumber}` : null)
+  const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (defaultPrTask ?? (opts.title ? slugify(opts.title) : prelimTaskId))))
   const taskId = sanitizeTaskId(rawTaskId)
   const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
 
@@ -433,22 +456,22 @@ export async function handleStart(opts, roots) {
     ?? (state.gitIdentity.name ? `${state.gitIdentity.name}${state.gitIdentity.email ? ` <${state.gitIdentity.email}>` : ''}` : 'implementer')
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
-  if (externalPr) {
-    const reviewRel = `.worktrees/review-pr-${externalPr}`
+  if (effectiveExternalPr) {
+    const reviewRel = `.worktrees/review-pr-${effectiveExternalPr}`
     const reviewAbs = join(roots.mainRoot, reviewRel)
     let targetSha = opts['pr-ref'] ?? null
     if (!targetSha) {
       const fetchRemote = state.remotesTopology?.find((r) => r.providerId === 'github')?.name ?? 'origin'
-      const fetchRes = await gitRun(roots.mainRoot, ['fetch', fetchRemote, `pull/${externalPr}/head`])
+      const fetchRes = await gitRun(roots.mainRoot, ['fetch', fetchRemote, `pull/${effectiveExternalPr}/head`])
       if (fetchRes.ok) {
         const fh = await gitRun(roots.mainRoot, ['rev-parse', 'FETCH_HEAD'])
         if (fh.ok) targetSha = fh.stdout.trim()
       } else {
-        const localRef = await gitRun(roots.mainRoot, ['rev-parse', '--verify', `refs/pull/${externalPr}/head`])
+        const localRef = await gitRun(roots.mainRoot, ['rev-parse', '--verify', `refs/pull/${effectiveExternalPr}/head`])
         if (localRef.ok) targetSha = localRef.stdout.trim()
       }
     }
-    if (!targetSha) throw new Error(`无法拉取外部 PR #${externalPr} 的提交（可传入 --pr-ref 指定本地测试 ref）`)
+    if (!targetSha) throw new Error(`无法拉取外部 PR #${effectiveExternalPr} 的提交（可传入 --pr-ref 指定本地测试 ref）`)
     if (!existsSync(reviewAbs)) {
       const wtAdd = await gitRun(roots.mainRoot, ['worktree', 'add', '--detach', reviewAbs, targetSha])
       if (!wtAdd.ok) throw new Error(`创建外部 PR 审查位失败：${wtAdd.stderr}`)
@@ -456,21 +479,29 @@ export async function handleStart(opts, roots) {
     const ledger = createDefaultLedger({
       taskId, slug, caseType, tier: 3, isolation: 'review-pr', role: 'inbound-external-pr', providerId: 'github',
       branch: null, baseBranch, baseSha: baseSha ?? targetSha, worktreePath: null, reviewWorktreePath: reviewRel,
-      linkedIssues, prNumber: externalPr, implementerId: `external-pr-${externalPr}`, status: 'review-ready',
+      linkedIssues, prNumber: effectiveExternalPr, implementerId: `external-pr-${effectiveExternalPr}`, status: 'review-ready',
     })
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
     else {
       process.stdout.write(`已建立外部 PR 审查隔离位：${reviewRel}（detached @ ${targetSha.slice(0, 7)}，未挂载依赖）\n`)
-      printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${externalPr} --untrusted-scan` }], { repoRoot: roots.mainRoot })
+      printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${effectiveExternalPr} --untrusted-scan` }], { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
 
   const branchPrefix = caseType === 2 ? 'fix' : caseType === 1 ? 'docs' : 'feat'
-  const branch = opts.branch || `${branchPrefix}/${slug}`
+  const reusedPrBranch = state.inputs.reuseExistingPr?.branch ?? null
+  const branch = opts.branch || reusedPrBranch || `${branchPrefix}/${slug}`
   const filesCount = opts.files !== undefined ? Number(opts.files) : undefined
   const forceWorktree = Boolean(opts.parallel) || caseType >= 3 || linkedIssues.length > 0 || state.dirty > 0 || (filesCount !== undefined && filesCount >= 4)
+
+  const resolveLocalBranchRef = async () => {
+    const has = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+    if (has.ok || !reusedPrBranch || branch !== reusedPrBranch || !state.remoteUrls.origin) return has
+    await gitRun(roots.mainRoot, ['fetch', 'origin', `${branch}:${branch}`])
+    return await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+  }
 
   const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId)
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
@@ -478,7 +509,7 @@ export async function handleStart(opts, roots) {
 
   if (!forceWorktree || state.commits === 0) {
     if (Boolean(opts.parallel) && state.commits === 0) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
-    const hasBranch = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+    const hasBranch = await resolveLocalBranchRef()
     const sw = hasBranch.ok ? await gitRun(roots.mainRoot, ['switch', branch]) : await gitRun(roots.mainRoot, ['switch', '-c', branch])
     if (!sw.ok) throw new Error(`切换分支 ${branch} 失败：${sw.stderr}`)
     const ledger = createDefaultLedger({
@@ -504,7 +535,7 @@ export async function handleStart(opts, roots) {
   const implAbs = join(roots.mainRoot, implRel)
 
   if (!existsSync(implAbs)) {
-    const hasBranch = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+    const hasBranch = await resolveLocalBranchRef()
     const addArgs = hasBranch.ok ? ['worktree', 'add', implAbs, branch] : ['worktree', 'add', '-b', branch, implAbs, baseSha]
     const wtRes = await gitRun(roots.mainRoot, addArgs)
     if (!wtRes.ok) throw new Error(`创建实施 worktree 失败：${wtRes.stderr}`)
@@ -590,14 +621,16 @@ function isSameClaimant(activeClaim, actor, viewerLogin) {
 export async function handleClaim(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
-  if (opts.issue) {
-    const extra = String(opts.issue).split(',').map((s) => Number(s.replace(/^#/, '').trim())).filter(Number.isInteger)
-    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extra])]
+  const parsedPos = parseFlowInputs(opts._ ?? [])
+  const extraIssues = [
+    ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
+    ...parsedPos.issues.map((i) => i.number),
+  ]
+  if (extraIssues.length > 0) {
+    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
   }
-  if (opts.pr) {
-    const prNum = Number(String(opts.pr).replace(/^#/, '').trim())
-    if (Number.isInteger(prNum) && prNum > 0) ledger.prNumber = prNum
-  }
+  const claimPr = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : (parsedPos.prs[0]?.number ?? null)
+  if (claimPr) ledger.prNumber = claimPr
 
   const isTakeover = Boolean(opts.takeover)
   const takeoverReason = String(opts.reason ?? '').trim()

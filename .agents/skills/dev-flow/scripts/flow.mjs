@@ -9,8 +9,8 @@
 import { basename } from 'node:path'
 
 import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
-import { isMainModule } from '../../lib/git.mjs'
-import { resolveRepoRoots } from '../../lib/git.mjs'
+import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
+import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
 import { analyzeIssueDependencies, handleClaim, handleStart, inspectWorkspace } from './flow-inspect.mjs'
 import { handleFinalize, handleRework, handleSubmit, handleVerify } from './flow-lifecycle.mjs'
@@ -76,7 +76,7 @@ async function main(argv) {
         inputs: opts._,
         probeAuth: Boolean(opts['probe-auth']),
         externalPr: opts['external-pr'],
-        issue: opts.issue,
+        issue: opts.issue ?? opts.issues,
         pr: opts.pr,
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(data, null, 2)}\n`)
@@ -92,13 +92,27 @@ async function main(argv) {
         if (data.github.trackA.remediationCmd) process.stdout.write(`- 协议修复建议: ${data.github.trackA.remediationCmd}\n`)
         if (data.inputs.reuseExistingPr) process.stdout.write(`- 复用已有 PR: #${data.inputs.reuseExistingPr.prNumber} (${data.inputs.reuseExistingPr.note})\n`)
         if (data.inputs.issues.length > 1) process.stdout.write(`- 多 Issue 拓扑排序: ${data.inputs.issueGraph.orderedIssues.map((n) => `#${n}`).join(' -> ')}\n`)
-        printNextStep([
-          data.identity.role === 'clone-readonly'
-            ? (data.identity.teamProbeHint
-              ? '若是组织/团队协作者，可先运行 flow.mjs inspect --probe-auth 验证写权限；若确认为只读克隆，再带 --clone-choice 运行 start'
-              : '只读克隆仓，请先向用户确认 --clone-choice <fork|standalone|local> 再运行 flow.mjs start')
-            : { skill: 'dev-plan', text: '1. 按任务规模运行 doc-plan.mjs triage；2. 执行 flow.mjs start --task <id>' },
-        ], { repoRoot: data.mainRoot })
+        const extPrNum = data.identity.role === 'inbound-external-pr'
+          ? (data.inputs.prs[0]?.number ?? parsePrNumber(opts['external-pr']))
+          : null
+        const nextSteps = extPrNum
+          ? [
+              { skill: 'dev-flow', text: `1. 建立只读隔离审查位（不挂载依赖）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --external-pr ${extPrNum}` },
+              { skill: 'dev-review', text: `2. 先跑不可信供应链静态扫描：node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${extPrNum} --untrusted-scan` },
+            ]
+          : data.inputs.reuseExistingPr
+            ? [
+                { skill: 'dev-flow', text: `1. 接手/返工该已有 PR（复用原分支，禁止新开第二个 PR）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --pr ${data.inputs.reuseExistingPr.prNumber}` },
+                { skill: 'dev-flow', text: `2. 若仅独立审查该 PR：node ".agents/skills/dev-flow/scripts/flow.mjs" start --external-pr ${data.inputs.reuseExistingPr.prNumber} 后运行 review-pack.mjs --pr ${data.inputs.reuseExistingPr.prNumber}` },
+              ]
+            : [
+                data.identity.role === 'clone-readonly'
+                  ? (data.identity.teamProbeHint
+                    ? '若是组织/团队协作者，可先运行 flow.mjs inspect --probe-auth 验证写权限；若确认为只读克隆，再带 --clone-choice 运行 start'
+                    : '只读克隆仓，请先向用户确认 --clone-choice <fork|standalone|local> 再运行 flow.mjs start')
+                  : { skill: 'dev-plan', text: '1. 按任务规模运行 doc-plan.mjs triage；2. 执行 flow.mjs start --task <id>' },
+              ]
+        printNextStep(nextSteps, { repoRoot: data.mainRoot })
       }
       return 0
     }

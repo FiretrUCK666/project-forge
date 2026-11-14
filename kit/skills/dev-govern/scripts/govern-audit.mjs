@@ -6,8 +6,8 @@
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { existsSync, statSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { parseStandardCli } from '../../lib/cli.mjs'
 import {
@@ -297,8 +297,10 @@ async function main() {
         : opts.planOnly ? 'plan-only'
           : opts.issues ? 'issues' : 'audit-only'
 
-  const plan = (opts.planOnly || opts.execute) ? await buildPlan(findings, workTreeRoot, devProfile, isGit) : undefined
-  if (opts.planOnly && opts.writeTodo && plan) {
+  const needPlan = opts.planOnly || opts.execute || opts.writeTodo
+  const plan = needPlan ? await buildPlan(findings, workTreeRoot, devProfile, isGit) : undefined
+  if (opts.writeTodo && plan) {
+    mkdirSync(dirname(join(workTreeRoot, plan.todoRel)), { recursive: true })
     writeAtomic(join(workTreeRoot, plan.todoRel), plan.todoDraft)
   }
 
@@ -320,6 +322,9 @@ async function main() {
     mainRoot,
     cluster,
     devProfile,
+    findings,
+    plan,
+    reconcileSummary,
     findingsCount: findings.length,
   })
 

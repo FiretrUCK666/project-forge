@@ -11,6 +11,7 @@ import { basename, join } from 'node:path'
 import {
   canonicalPath, gitRun, posixPath, readJsonSafe, samePath, writeJsonAtomic,
 } from './git.mjs'
+import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
@@ -193,13 +194,15 @@ export async function resolveTaskContext(roots, opts = {}, { requireExisting = t
 
   // 4. --pr or --issue match
   if (opts.pr !== undefined && String(opts.pr).trim() !== '') {
-    const prNum = Number(String(opts.pr).replace(/^#/, '').trim())
-    const prMatch = active.find((t) => Number(t.prNumber) === prNum)
+    const prNum = parsePrNumber(opts.pr)
+    const prMatch = prNum ? active.find((t) => Number(t.prNumber) === prNum) : null
     if (prMatch) return { taskId: prMatch.taskId, ledger: prMatch, source: 'pr', activeTasks: active }
   }
   if (opts.issue !== undefined && String(opts.issue).trim() !== '') {
-    const issNum = Number(String(opts.issue).replace(/^#/, '').trim())
-    const issMatches = active.filter((t) => Array.isArray(t.linkedIssues) && t.linkedIssues.includes(issNum))
+    const issNums = parseIssueNumbers(opts.issue)
+    const issMatches = issNums.length > 0
+      ? active.filter((t) => Array.isArray(t.linkedIssues) && issNums.some((n) => t.linkedIssues.includes(n)))
+      : []
     if (issMatches.length === 1) {
       return { taskId: issMatches[0].taskId, ledger: issMatches[0], source: 'issue', activeTasks: active }
     }

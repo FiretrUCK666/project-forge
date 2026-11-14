@@ -366,7 +366,7 @@ export function auditDoc({ repoRoot, file }) {
       strippedLine: rawLine.replace(/<!--[\s\S]*?-->/g, ''),
       skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals)/i.test(curSection)
         || rawLine.includes('...')
-        || /(?:已删除|删掉|不再使用|旧路径|不存在|deleted|removed)\b/i.test(rawLine),
+        || /(?:已删除|删掉|不再使用|旧路径|不存在|\b(?:deleted|removed)\b)/i.test(rawLine),
     })
   }
 

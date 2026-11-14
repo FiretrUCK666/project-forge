@@ -42,7 +42,7 @@
 | **S3 落盘** | 按「版本库 → 文档 → 远端 → 自动化」的顺序做；已有的先读后合，只补缺的 |
 | **S4 验收交棒** | 跑目标项目自己的门禁 + 交付体检，汇报，问要不要清痕迹 |
 
-它只做治理，不生成项目本身：不替你选技术栈，也不创建源码和框架配置。治理跑在骨架就绪之后。
+它只做治理与研发工作流装配，不凭空编造业务代码：对于 0 文件的空白目录，可经简短确认后通过 `equip.mjs --bootstrap-empty` 生成最小可运行工程骨架；对于已有项目，则按事实补全契约、四层文档与内置研发 Skill 套件（`kit/skills/` -> `.agents/skills/`）。
 
 勘察报告的最后会直接列出「这次该读哪几页、哪一节」——那是按本次勘察到的事实算出来的，
 不是一张固定目录。
@@ -53,10 +53,10 @@
 
 | 成熟度 | 含义 | 做什么 |
 | --- | --- | --- |
-| `empty` | 什么都没有 | 不做治理，先让项目存在 |
-| `greenfield` | 有源码但没版本库，或没文档 | 从零配齐 |
-| `partial` | 有版本库和部分文档，缺东西 | 补齐缺口，已有的一个字节不动 |
-| `mature` | 该有的都有 | 只体检 |
+| `empty` | 什么都没有 | 先经简短确认生成最小可运行 + 可测试骨架与初始 `docs/TDD.md`（`--bootstrap-empty`），再入治理 |
+| `greenfield` | 有源码但没版本库，或没文档 | 从零配齐，并装配全套 `.agents/skills/` |
+| `partial` | 有版本库和部分文档，缺东西 | 补齐缺口，已有的或用户手改的部分一个字节不动 |
+| `mature` | 该有的都有 | 只体检，并按 SHA256 账本无损刷新未定制文件 |
 
 同一份勘察还给出 `gaps`：**只列「不做就会出事」的东西**。单语 README、没有贡献指南、
 没有 CI 都不算缺口——把偏好写成缺口，会让每个项目都欠一笔还不完的债。
@@ -123,10 +123,13 @@ export PF_NO_UPDATE=1
 它会打印几条命令，`<本 skill 目录>` 指这个 skill 自己的位置，`<项目目录>` 指被处理的项目：
 
 ```sh
-# 只读勘察（--markdown 出给人读的报告）
+# 只读勘察（--markdown 出给人读的报告，--probe-auth 双轨探测 GitHub 凭据）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown
 
-# 生成或刷新 AGENTS.md
+# 装配或无损刷新五套内置研发 Skill（支持 --bootstrap-empty 空目录起步与 --check 一致性校验）
+node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>"
+
+# 生成或刷新 AGENTS.md（<= 30KB 上限 + SHA256 未定制区无损保护）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>"
 
 # 交付体检（--scope 只验几面）
@@ -136,21 +139,28 @@ node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 ```
 
+装配之后，目标项目的 `.agents/skills/` 拥有五套自包含研发 Skill，并由 `AGENTS.md` 顶部路由表根据自然语言静默触发：
+
+- **内置研发套件（`kit/skills/` -> `.agents/skills/`）**：`dev-explore`（代码结构与热点地图）、`dev-plan`（五档分流：`Case 1` 至 `Case 5` 决定写 0 文档、`docs/todo/` 或 `docs/specs/`）、`dev-flow`（任务账本、Worktree 共享依赖 Junction/Symlink 零拷贝挂载与先 `unlinkSync` 解绑防删穿）、`dev-review`（外部 PR `--untrusted-scan` 投毒拦截与六锁防死循环审查）、`dev-govern`（技术债扫描与 `reconcile` 巡检）。
+- **四层文档与预算**：`AGENTS.md`（入口契约，硬上限 30KB / 24KB 预警）+ `docs/TDD.md`（常青架构）+ `docs/prd/`（按需需求基线）+ `docs/specs/` 与 `docs/todo/`（PR 合流前于同分支归档进 `docs/archive/todo/`）。
+- **双轴五态身份与双轨四级 GitHub 引擎**：严格区分 `local-only`、`maintainer`、`contributor-fork`、`clone-readonly` 与 `undetermined`（杜绝他人仓库 `git clone` 误判为维护者）；传输轨并发探测 SSH（22/443）与 HTTPS credential helper 并给出协议错配修复命令，API 轨按 `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` 四级自动降级，全程无弹窗且令牌不落盘、不输出。
+
 ## 它怎么做到不吵人
 
 三件事值得单独说，因为它们是这个工具「用起来顺不顺」的全部：
 
-1. **免责的判据不查。** 单语 README、个人项目没有 CI、不发布——这些都不是缺陷。
+1. **免责的判据不查。** 单语 README、个人项目没有 CI、纯本地无远端——这些都不是缺陷。
    判断依据只有一条：**不说会出事吗？** 会出事的才拦。
 2. **决定写进项目，不藏在开关里。** 「这个项目不放许可证」这类只有你能定的事，
    写进 `AGENTS.md` 的「## 取舍」节。没有要记的 12 个 flag，也没有隐藏的状态文件。
-3. **痕迹看得见。** 它在文件里留下的每一处都带 `project-forge:` 标记，就写在正文里。
-   人和 AI 都能 grep 到，也能手工删掉。不需要它时跑一次就能清干净。
+3. **痕迹看得见，升级不伤手改。** `AGENTS.md` 留有 `project-forge:` 标记，`.agents/skills/.pf-manifest.json` 维护每个内置文件与受管区间的 SHA256 三态账本：未改动的静默升级、新版退役文件自动清理，用户魔改的文件与自定义 Skill 则 100% 原样保留；不需要时跑一次即可交棒清理。
 
 ## 它不会做的事
 
 - 不公开你的私有仓库（默认私有，改成公开要你明确说）
 - 不强推、不改写已推送的历史、不删已发布的版本
+- 不把只读克隆误判为维护者直推主干，也不替 `contributor-fork` 自动合并上游 PR 或在 PR 仍开放时删其分支
+- 不在未获人类批准前执行触碰工作流或生命周期钩子的外来外部 PR 脚本（`--untrusted-scan` 静态拦截）
 - **不自己决定发版**：日常只到「推分支 + 开 PR → 独立审查 → 合并」，打标签、建发布页、发制品库都要你明确说
 - 不替你选许可证、不替你编造署名或账号
 - **未经你明确确认，不拆掉自己留下的任何东西**
@@ -193,15 +203,15 @@ node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan
 
 ```text
 SKILL.md            入口：什么时候读哪一份，以及不读不许动手的门控表
-references/         十份判据，按当前这一步需要的那份读
-templates/          落盘骨架：契约、说明、贡献指南、发版规范、许可证、流水线
-scripts/            勘察、生成、体检、交棒、目录同步、自更新
+references/         判据文档，按当前这一步需要的那份读
+templates/          落盘骨架：AGENTS 契约、四层 docs 模板、贡献/发版规范、许可证、流水线
+kit/skills/         随包分发的五套自包含内置研发 Skill（dev-explore/plan/flow/review/govern）
+scripts/            勘察、装备（equip）、生成（compose-agents）、体检、交棒、目录同步、自更新
 ```
 
-`scripts/dev/` 只服务这个仓库自己的自检，不进用户包。
+`scripts/dev/`、`.agents/` 与 `docs/` 只服务这个仓库自己的自检、自举与归档，均通过 `.gitattributes` 排除，不进用户包。
 
-这个仓库是它自己那套规范的第一个用户：根目录的 `AGENTS.md` 由 `compose-agents.mjs` 生成
-并维护，`preflight` 会核对它和 `templates/` 同构。做不到时先改自己，再改规范。
+这个仓库是它自己那套规范的第一个用户：根目录的 `.agents/skills/` 由 `equip.mjs .` 从 `kit/skills/` 单源同步生成，根目录的 `AGENTS.md` 由 `compose-agents.mjs .` 生成并受 `preflight` 同构核对。做不到时先改自己，再改规范。
 
 ## 许可
 

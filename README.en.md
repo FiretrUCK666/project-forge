@@ -44,7 +44,7 @@ It folds those into four steps:
 | **S3 Land** | Repo → docs → remote → automation. Read existing files first, fill only what is missing |
 | **S4 Verify and hand off** | Run the project's own gates plus the delivery check, report, ask about cleanup |
 
-It governs; it does not generate the project. It will not pick your stack or write your source.
+It governs and wires up daily engineering workflows rather than inventing arbitrary app code: for zero-file directories it can scaffold a minimal runnable and tested skeleton via `equip.mjs --bootstrap-empty` after a short confirmation; for existing codebases it fills missing contracts, four-layer docs, and built-in dev skills (`kit/skills/` -> `.agents/skills/`).
 
 The survey report ends by listing **which pages, and which sections, this run should read** —
 computed from what the survey actually found, not a fixed index.
@@ -55,10 +55,10 @@ The survey returns a maturity level, and that sets how heavy this run is:
 
 | Maturity | Meaning | What happens |
 | --- | --- | --- |
-| `empty` | Nothing there | No governance; let the project exist first |
-| `greenfield` | Source but no repo, or no docs | Build it all |
-| `partial` | Repo and some docs, with gaps | Fill the gaps, touch nothing that exists |
-| `mature` | Everything is there | Inspect only |
+| `empty` | Nothing there | Ask briefly, bootstrap a minimal runnable + tested skeleton and initial `docs/TDD.md` (`--bootstrap-empty`), then govern |
+| `greenfield` | Source but no repo, or no docs | Build it all and equip the full `.agents/skills/` suite |
+| `partial` | Repo and some docs, with gaps | Fill the gaps, leave existing or user-edited bytes untouched |
+| `mature` | Everything is there | Inspect only, and losslessly refresh untouched managed files via SHA256 ledger |
 
 The same survey returns `gaps`, which lists **only things that will cause trouble**. A
 single-language README, no CONTRIBUTING, no CI — none of those are gaps. Treating preferences
@@ -133,10 +133,13 @@ It prints a few commands; `<skill-dir>` is where this skill lives and `<project-
 project being worked on:
 
 ```sh
-# Read-only survey (--markdown gives a human-readable report)
+# Read-only survey (--markdown for human report, --probe-auth for dual-track GitHub probe)
 node "<skill-dir>/scripts/survey.mjs" "<project-dir>" --markdown
 
-# Create or refresh AGENTS.md
+# Equip or losslessly refresh the 5 built-in dev skills (--bootstrap-empty / --check)
+node "<skill-dir>/scripts/equip.mjs" "<project-dir>"
+
+# Create or refresh AGENTS.md (<= 30KB budget + SHA256 lossless region protection)
 node "<skill-dir>/scripts/compose-agents.mjs" "<project-dir>"
 
 # Delivery check (--scope limits it to specific faces)
@@ -146,24 +149,33 @@ node "<skill-dir>/scripts/review.mjs" "<project-dir>"
 node "<skill-dir>/scripts/handoff.mjs" "<project-dir>" --scan
 ```
 
+Once equipped, `.agents/skills/` provides five self-contained dev skills routed silently from natural language via the top routing table in `AGENTS.md`:
+
+- **Built-in Dev Suite (`kit/skills/` -> `.agents/skills/`)**: `dev-explore` (code map and hotspots), `dev-plan` (5-tier triage `Case 1`..`Case 5` choosing 0 docs, `docs/todo/`, or `docs/specs/`), `dev-flow` (task ledger, zero-copy Worktree Junction/Symlink shared dependencies with `unlinkSync` unlink-before-remove protection), `dev-review` (external PR `--untrusted-scan` poison gate and 6-lock stop-loss review loop), and `dev-govern` (tech-debt audit and `reconcile`).
+- **Four-Layer Docs and Budget**: `AGENTS.md` (entry contract, 30KB hard cap / 24KB warn) + `docs/TDD.md` (evergreen architecture) + `docs/prd/` (on-demand baseline) + `docs/specs/` and `docs/todo/` (archived into `docs/archive/todo/` in the same branch before merge).
+- **2-Axis 5-State Identity and Dual-Track 4-Tier GitHub Engine**: distinguishes `local-only`, `maintainer`, `contributor-fork`, `clone-readonly`, and `undetermined` (preventing clones of someone else's repo from being misclassified as maintainer); Transport Track probes SSH (22/443) and HTTPS credential helper with exact protocol-mismatch `remediationCmd`, while API Track degrades cleanly across `gh-cli` -> `node-https-token` -> `mcp-delegate` -> `half-duplex` / `offline` without interactive prompts or token leaks.
+
 ## Why it stays quiet
 
 Three things make up most of how it feels to use:
 
 1. **It does not check harmless preferences.** A single-language README, no CI on a personal
-   tool, not publishing — none of those are defects. The only question that matters: **will
-   this cause trouble?** Only that blocks.
+   tool, local-only repos without a remote — none of those are defects. The only question that
+   matters: **will this cause trouble?** Only that blocks.
 2. **Decisions live in the project, not in flags.** Choices only you can make ("this project
    ships no LICENSE") go into the `## 取舍` section of `AGENTS.md`. No twelve flags to
    remember, no hidden state file.
-3. **Traces are visible.** Everything it leaves behind carries a `project-forge:` marker,
-   right in the text. Both people and agents can grep for it, and delete it by hand. One
-   command removes it all when you no longer need it.
+3. **Traces are visible and customizations stay safe.** `AGENTS.md` carries `project-forge:` markers,
+   and `.agents/skills/.pf-manifest.json` tracks SHA256 hashes for both kit files and managed
+   `AGENTS.md` regions: untouched files upgrade cleanly, retired files self-clean automatically,
+   and user-modified files or custom skills stay 100% untouched. One command scans or removes traces on handoff.
 
 ## What it will not do
 
 - Make your private repo public (private by default; going public needs your explicit word)
 - Force-push, rewrite pushed history, or delete a published release
+- Misclassify a read-only clone as maintainer, merge an upstream PR on behalf of a `contributor-fork`, or delete its branch while the PR is still open
+- Execute external PR workflows or lifecycle scripts without explicit human approval (statically blocked by `--untrusted-scan`)
 - **Decide on its own that it is time to release**: day to day it stops at push-a-branch +
   open a PR → independent review → merge; tagging, release pages, and registry publishes all
   need your explicit word
@@ -224,16 +236,15 @@ you, that list goes into the report and nothing is deleted — no answer is not 
 
 ```text
 SKILL.md            Entry point: which document to read when, and the gate table
-references/         Ten sets of criteria, read the one this step needs
-templates/          Skeletons that land in the project: contract, docs, releasing, licenses, pipelines
-scripts/            Survey, generate, check, hand off, sync table of contents, self-update
+references/         Criteria pages, read the one this step needs
+templates/          Skeletons that land in the project: AGENTS contract, 4-layer docs, contributing/releasing, licenses, pipelines
+kit/skills/         Five self-contained built-in dev skills shipped with the package (dev-explore/plan/flow/review/govern)
+scripts/            Survey, equip, compose-agents, review, handoff, sync-toc, self-update
 ```
 
-`scripts/dev/` serves this repository's own self-check only and never ships in the user package.
+`scripts/dev/`, `.agents/`, and `docs/` serve this repository's own self-checks, dogfooding, and records only, and are excluded from the user archive via `.gitattributes`.
 
-This repository is the first user of its own rules: the root `AGENTS.md` is generated and
-maintained by `compose-agents.mjs`, and `preflight` checks that it stays structurally aligned
-with `templates/`. When that fails, the repository is fixed before the rules are.
+This repository is the first user of its own rules: root `.agents/skills/` is synced from single-source `kit/skills/` via `equip.mjs .`, and root `AGENTS.md` is generated by `compose-agents.mjs .` and checked for structural alignment by `preflight`. When that fails, the repository is fixed before the rules are.
 
 ## License
 

@@ -40,8 +40,8 @@
 #
 # 下面这些只服务本仓库（协作设施、项目契约、自用脚本），拿到包的人不需要它们。
 # 结构规则的另一半在 scripts/lib/protocol.mjs 的 REPO_ONLY_DIRS / REPO_ONLY_FILES 里，
-# 两处由 preflight 核对一致。**新增自用文件放进 scripts/dev/ 或 docs/**——
-# 那两处整目录排除，不必逐个登记。
+# 两处由 preflight 核对一致。**新增自用文件放进 scripts/dev/、docs/ 或 .agents/**——
+# 那几处整目录排除，不必逐个登记；`kit/` 属于用户安装包，绝不排进这里。
 /AGENTS.md        export-ignore
 /CONTRIBUTING.md  export-ignore
 /RELEASING.md     export-ignore
@@ -50,3 +50,4 @@
 /.gitignore       export-ignore
 /scripts/dev/     export-ignore
 /docs/            export-ignore
+/.agents/         export-ignore

@@ -16,15 +16,17 @@ description: |
 先运行打包脚本生成上下文隔离的审查包，再开始判读与测试：
 
 ```sh
-# 模式 A：flow 独立审查子代理 / 外部 PR
-node .agents/skills/dev-review/scripts/review-pack.mjs --task <id> [--round <1|2|3>] [--worktree <path>]
+# 模式 A：flow 独立审查子代理 / 外部 PR（支持自动推断 --task 与下一 --round，Tier 2 自动同步 review-<id> 并挂载依赖）
+node .agents/skills/dev-review/scripts/review-pack.mjs --task <id|auto> [--round <1|2|3>] [--include-diff]
 node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> [--untrusted-scan] [--worktree <path>]
 
-# 模式 B：开发者本地日常预审（不提 PR 也可随时运行）
+# 模式 B：开发者本地日常预审（支持位置目录 / --dir；--local 与 --task/--pr/--base 互斥）
 node .agents/skills/dev-review/scripts/review-pack.mjs --local
 node .agents/skills/dev-review/scripts/review-pack.mjs --staged
 node .agents/skills/dev-review/scripts/review-pack.mjs --base <ref>
 ```
+
+注：`--json` 默认输出精简的 `diff.hunkIndex` 与统计摘要（仅传 `--include-diff` 时内嵌全文），防止大补丁撑爆上下文；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
 
 ## 不可信外部 PR 供应链门禁
 
@@ -66,10 +68,8 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 ## 代码与文档对齐核验（Doc-Code Parity）
 
-审查包自动检测是否改动了导出 API、CLI 参数、模块增删、环境要求或 `high-risk:` 路径，
-却未同步更新 `docs/TDD.md`、`README*.md` 或 `AGENTS.md`；同时检查关联 `docs/todo/`
-是否存在未勾选 `- [ ]` 或未归档至 `docs/archive/todo/`，并对照 `AGENTS.md`「## 改哪看哪」生成
-`coupledSyncWarnings` 与「联动同步核对（改哪看哪）」章节（触发路径改动却漏同步伴随文件时重点核验）。流程模式下未说明的漂移列为 `Must Fix` 候选。
+审查包自动检测是否改动了导出 API、CLI 参数（`cli-surface`）、模块增删、环境要求或 `high-risk:` 路径，
+却未同步更新 `docs/TDD.md`、`README*.md` 或 `AGENTS.md`；校验改动 Markdown 中的 Mermaid `16/12` 防截断宽度；同时检查关联 `docs/todo/`（含 `contributor-fork` 私有隔离目录）是否存在未勾选 `- [ ]` 或未归档至 `docs/archive/todo/`，并对照 `AGENTS.md`「## 改哪看哪」生成 `coupledSyncWarnings` 与「联动同步核对（改哪看哪）」章节。流程模式下未说明的漂移列为 `Must Fix` 候选。
 
 ## 六锁防死循环收敛协议
 
@@ -82,13 +82,16 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
    `R1_HEAD..HEAD` + `rebuts`（锁定未改动旧 hunks，禁发新挑刺）；Round 3 只对 `R2_HEAD..HEAD`
    做二元 Pass/Fail 核对。
 5. **独立性硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）。
-6. **停损熔断**：轮次 `>= 3` 仍有未收口 `Must Fix`，或同一指纹连续 2 轮重复时，
-   输出 `STOP_LOSS_ESCALATE` 并以退出码 `4` 转交人类维护者裁决：
+6. **停损熔断与人工解锁**：轮次 `>= 3` 仍有未收口 `Must Fix`，或同一指纹连续 2 轮重复时，
+   输出 `STOP_LOSS_ESCALATE` 并以退出码 `4` 转交人类维护者裁决；人类拍板放行后用 `override` 解锁：
 
 ```sh
 node .agents/skills/dev-review/scripts/review-pack.mjs record \
-  --task <id> --round <1|2|3> --verdict pass|changes \
-  --reviewer-id <id> [--must-fix <textOrJson>...] [--rebut-accepted <idOrFp>...]
+  [--task <id>] [--round <N>] --verdict pass|changes --reviewer-id <id> \
+  [--must-fix <textOrJson>...] [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--visual-checked]
+
+node .agents/skills/dev-review/scripts/review-pack.mjs override \
+  [--task <id>] --human-approved --reason "<裁决理由>"
 ```
 
 ## 输出与下一跳

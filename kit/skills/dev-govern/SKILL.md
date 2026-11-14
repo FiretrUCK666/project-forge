@@ -17,20 +17,22 @@ description: |
 默认只读，先出事实与 `[GAP_SCAN]`，再按需出计划、聚类、抽检或生成 Issue：
 
 ```sh
-# 1. 只读审计与模块聚类（支持 security,deadcode,tests,docs,hygiene,perf）
-node .agents/skills/dev-govern/scripts/govern-audit.mjs --audit-only [--scope src] [--categories security,tests,docs] [--cluster]
+# 1. 只读审计、基线增量与模块聚类（支持 security,deadcode,tests,docs,hygiene,perf）
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit [--scope src] [--categories security,tests,docs] [--cluster]
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --save-baseline   # 快照存量基线至 <mainRoot>/.worktrees/.state/govern-baseline.json
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --changed         # 增量只报改动文件或新增/恶化项（--all 强制全量）
 
-# 2. 分批计划 / 多轮自动收敛 / 安全生成 GitHub Issue
-node .agents/skills/dev-govern/scripts/govern-audit.mjs --plan-only [--write-todo]
-node .agents/skills/dev-govern/scripts/govern-audit.mjs --execute --loop
-node .agents/skills/dev-govern/scripts/govern-audit.mjs --issues [--apply-issues]
+# 2. 分批计划（--write-todo 生成标准 Frontmatter `-todo.md`）/ 多轮收敛 / 安全生成 GitHub Issue
+node .agents/skills/dev-govern/scripts/govern-audit.mjs plan [--write-todo]     # 兼容 --plan-only
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --execute --loop
+node .agents/skills/dev-govern/scripts/govern-audit.mjs issues [--apply-issues] # 兼容 --issues
 
 # 3. 园艺信号记录、聚类与事后历史抽检
 node .agents/skills/dev-govern/scripts/govern-audit.mjs record --pattern <key> --message "<text>" [--module <dir>] [--file <path>]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs cluster [--signals-only]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs sample [--commits 30]
 
-# 4. 跨多版本人类可读发版筹备（支持跳跃自定义号如 --version 3.0.0）
+# 4. 跨多版本人类可读发版筹备（支持跳跃自定义号、浅克隆警告与多子包版本聚合）
 node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <tag|rev>] [--to HEAD] [--version <ver>] [--json]
 ```
 
@@ -52,11 +54,11 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ```
 
 - **契约体积与失效引用**：`AGENTS.md` 达 `24576` 字节预警、超 `30720` 字节报危，校验反引号路径、默认分支与 `Dev Profile`（含过期 `high-risk:` 零匹配检查 `docs.devprofile-unmatched-high-risk`）。
-- **文档温差、相对死链与活跃 Frontmatter**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），扫描 Markdown 相对死链（`docs.dead-link`）、`docs/TDD.md` 模块漂移，以及 `docs/{prd,specs,todo}/` 活跃文档的 YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链（`docs.frontmatter-invalid`、`docs.broken-related-link`、`docs.filename-issue-mismatch`）。
+- **文档温差、相对死链、Mermaid 与活跃 Frontmatter**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），扫描 Markdown 相对死链（`docs.dead-link`）、Mermaid `16/12` 防截断宽度（`docs.mermaid-label-width`）、`docs/TDD.md` 模块漂移（遵循 `readDecisions` 的 `no-tdd` / 既有架构文档豁免），以及 `docs/{prd,specs,todo}/` 活跃文档的 YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链。
 - **结构腐化与跨层边界**：识别墓碑履历注释（`hygiene.tombstone-comment`）、借口/压制标记（`hygiene.excuse-suppression`）、连续注释死代码块（`deadcode.commented-block`）、`>800`/`>1500` 行超大源码（`hygiene.god-file`）与 `arch-rules:` 跨层禁引违规（`hygiene.arch-boundary`）。
-- **测试覆盖与 CI 对齐**：解析 `package.json`、`Makefile`、`justfile`、`scripts/`、`.github/workflows/*.{yml,yaml}` `ciRunSteps` 与 `Dev Profile` 输出 `testInventory`，揪出零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
-- **Worktree 四态精细判定**：结合 `git cherry` 与 `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`（**仅报告并要求先问人核对未提交改动，绝不误删**）与 `unmerged`。
-- **清单与仓库卫生**：校验 `.agents/skills/.pf-manifest.json` 完整性、明文凭据、`>1MB` 大文件及未忽略输出目录。
+- **测试覆盖与 CI 对齐**：聚合根与多子包脚本（`package.json`、`Makefile`、`justfile`、`pom.xml`、`Cargo.toml` 等）、`.github/workflows/` 及中性 CI 配置（`.circleci/config.yml`、`azure-pipelines.yml`、`Jenkinsfile` 等）与 `Dev Profile` 输出 `testInventory`，揪出零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
+- **Worktree 四态精细判定**：在 worktree 内运行同样以 `<mainRoot>/.worktrees/` 为基准，结合 `git cherry` 与 `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`（**仅报告并要求先问人核对未提交改动，绝不误删**）与 `unmerged`。
+- **清单与仓库卫生**：校验 `.agents/skills/.pf-manifest.json`（兼容 v2 定制豁免与跨系统换行）、明文凭据、`>1MB` 大文件、macOS 元数据过滤及未忽略输出目录。
 
 ## 测试分层、控频与质量治理
 

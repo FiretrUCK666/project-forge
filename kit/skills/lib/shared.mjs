@@ -25,6 +25,8 @@ export const PACKAGE_LOCKFILES = Object.freeze([
   'bun.lock', 'bun.lockb', 'poetry.lock', 'uv.lock', 'Cargo.lock',
 ])
 
+export const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
+
 let atomicCounter = 0
 
 // ── 基础路径与文件工具 ────────────────────────────────────────────────
@@ -336,6 +338,10 @@ export function createDefaultLedger(partial = {}) {
     finalizedHead: partial.finalizedHead ?? null,
     verifiedHead: partial.verifiedHead ?? null,
     verifiedCmd: partial.verifiedCmd ?? null,
+    visualFilesChanged: Array.isArray(partial.visualFilesChanged) ? partial.visualFilesChanged : [],
+    empiricalVisualCheckRequired: Boolean(partial.empiricalVisualCheckRequired),
+    visualVerifiedHead: partial.visualVerifiedHead ?? null,
+    visualCheckEvidence: partial.visualCheckEvidence ?? null,
     implementerId: partial.implementerId ?? null,
     reviewerId: partial.reviewerId ?? null,
     rounds: Array.isArray(partial.rounds) ? partial.rounds : [],

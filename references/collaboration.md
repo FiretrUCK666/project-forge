@@ -35,7 +35,7 @@
 | **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit` + 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 **`Status: approved`**） |
 | **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，先退回更新 `docs/TDD.md`**，同级内审获批后重启 |
 
-**测试控频与拒绝人肉代理**：编码期每轮只跑 `{target}` 快测，涉及运行时入口加跑 `flow.mjs verify --mode smoke` 拿端到端证据（结合 `Feature Map` 与 `smoke-verify` 杜绝让用户替 AI 手测），全量 `merge-gate` 仅提交 PR 与合并前跑 1 次；中途触碰高危自动升级。独立审查与三问留痕写入首次回复、Issue 评论或 `templates/pull-request-template.md`「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`。
+**验证优先级、实证取证与拒绝人肉代理**：坚持形式验证（确定性静态检查：类型、Schema、`arch-rules`、静态规则门禁）与实证验证（真实启动运行、CLI/接口实测、UI/视觉改动实际打开渲染走通交互并核对浅深色截图）**优先于纯对抗式静态读代码挑刺**。编码期每轮运行 `{target}` 快测，涉及运行时入口追加 `flow.mjs verify --mode smoke` 拿端到端证据（涉及 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg` 时补充真实渲染交互与浅深色截图核验并记 `--visual-checked`），全量 `merge-gate` 仅提交 PR 与合并前运行 1 次；中途触碰高危自动升级。独立审查与三问留痕写入首次回复、Issue 评论或 `templates/pull-request-template.md`「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
 ## 三、三档隔离与 Worktree 共享依赖
 
@@ -79,14 +79,14 @@
 止损记录: <触发了哪条，或「未触发」>
 ```
 
-- **diff 绑定与双门评估（`review-pack.mjs` 驱动）**：按 `git diff <基线>...<HEAD> > d.txt` 导出并核对 SHA256；材料包输出 **`behavioralGate`**（测试 + `smoke-verify` 运行实证，杜绝人肉代理）、**`structuralGate`**（扫描 diff 新增行中的立碑履历注释、连续死代码块、`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`/HACK/WORKAROUND/TEMP、`arch-rules` 跨层逆引违规与 `>800` 行超大文件）及 **`doorAssessment`**（`doorType`/`gateWeakened`/`blastRadius`/`mergeAuthority`）。
+- **diff 绑定与双门评估（`review-pack.mjs` 驱动）**：按 `git diff <基线>...<HEAD> > d.txt` 导出并核对 SHA256；材料包输出 **`behavioralGate`**（测试 + `smoke-verify` 运行实证，以及 UI/视觉文件变更时触发 `visualFilesChanged` 与 `empiricalVisualCheckRequired` 强制核对真实渲染交互与浅深色截图，杜绝人肉代理）、**`structuralGate`**（扫描 diff 新增行中的立碑履历注释、连续死代码块、`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`/HACK/WORKAROUND/TEMP、`arch-rules` 跨层逆引违规与 `>800` 行超大文件）及 **`doorAssessment`**（`doorType`/`gateWeakened`/`blastRadius`/`mergeAuthority`）。
 - **六锁防死循环与园艺规则下沉**：
-  1. **实证优先**：附可执行命令与高风险故障注入清单，严禁未验证臆测挑刺；
+  1. **实证优先**：形式静态门禁与运行/渲染/交互实证优先于纯静态读代码挑刺；附可执行命令与高风险故障注入清单，严禁未验证臆测挑刺；
   2. **上下文隔离**：审查上下文只收 `C*`、diff、门禁证据与文档对齐单，隔离实施过程闲聊；
-  3. **三级分级与全量首轮**：问题分 `Must Fix` / `Should Fix` / `Pre-existing`；**第 1 轮必须一次指出全部同类问题**；
-  4. **轮次视野收窄**：第 1 轮看全量 diff -> 第 2 轮仅核 R1 未闭环 `Must Fix`、增量 diff 与 `rebuts`（锁定未改旧块禁提新刺）-> 第 3 轮只对增量修复行做二元 Pass/Fail 核对；
+  3. **三级分级与全量首轮**：问题分 `Must Fix` / `Should Fix` / `Pre-existing`；**`Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败，主观偏好或未实证的静态读代码挑刺不得阻塞合入**；第 1 轮必须一次指出全部同类问题；
+  4. **轮次视野收窄**：第 1 轮看全量 diff -> 第 2 轮仅核 R1 未收口 `Must Fix`、增量 diff 与 `rebuts`（锁定未改旧块禁提新刺）-> 第 3 轮只对增量修复行做二元 Pass/Fail 核对；
   5. **防越界返工**：HEAD 未前进的重提直接拒绝；返工支持 `--rebut` 记有据反驳；
-  6. **停损熔断与园艺聚类**：同一 `Must Fix` 连续两轮未闭环或达 **3 轮**上限触发 `STOP_LOSS_ESCALATE`；顽固缺陷遵守 3 步止损；日常经 `dev-govern`（`record` / `cluster` 归并 `>= 2` 次重复根因并下沉为静态门禁 / `sample --commits 30` 抽检回滚与 48h 返工热点）持续压低熵增。
+  6. **停损熔断与园艺聚类**：同一 `Must Fix` 连续两轮未收口或达 **3 轮**上限触发 `STOP_LOSS_ESCALATE`；顽固缺陷遵守 3 步止损；日常经 `dev-govern`（`record` / `cluster` 将真实审查漏出或运行时复发满 `2` 次的同类根因下沉为确定性形式静态门禁 / `sample --commits 30` 抽检回滚与 48h 返工热点，并持续清理过期代码）持续压低熵增。
 
 ## 八、谁能合
 

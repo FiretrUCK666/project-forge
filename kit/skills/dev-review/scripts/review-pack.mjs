@@ -52,6 +52,7 @@ const TEST_SKIP_RE = /\b(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|\
 const ASSERTION_RE = /\b(?:assert(?:\.\w+)?|expect|should|t\.(?:Error|Errorf|Fatal|Fatalf)|assertRaises|pytest\.raises|assert_eq!|assert!)\b|\b(?:it|test)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]/
 
 const CODE_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|rs|go|java|kt|rb|php|cs|c|cpp|h|hpp|sh|bash|ps1)$/i
+const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
 const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
 const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
 const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)|(?:以前是|原先是|原本是|之前是|旧版是|后来改成|后来改为|历史兼容保留)/i
@@ -988,6 +989,14 @@ function evaluateArchRules(repoRoot, fileRelList, rawRules) {
 function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHits, parity }) {
   const runtimeFilesTouched = [...diff.files.map((f) => f.file), ...diff.untracked]
     .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
+  const visualFilesChanged = [...new Set([
+    ...diff.files.map((f) => f.file),
+    ...diff.untracked,
+  ])]
+    .map((f) => f.replace(/\\/g, '/'))
+    .filter((f) => UI_VISUAL_EXT_RE.test(f))
+    .sort()
+  const empiricalVisualCheckRequired = visualFilesChanged.length > 0
   const smokeCommands = devProfile['smoke-verify'] ?? []
   const testCommands = [
     ...(devProfile['quick-test'] ?? []),
@@ -998,6 +1007,12 @@ function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHit
   const headMatchesVerified = task?.verifiedHead
     ? (headSha !== 'UNBORN' && task.verifiedHead === headSha)
     : null
+  const visualVerifiedOnHead = Boolean(
+    empiricalVisualCheckRequired
+    && task?.visualVerifiedHead
+    && headSha !== 'UNBORN'
+    && task.visualVerifiedHead === headSha,
+  )
   const warnings = []
   if (headMatchesVerified === false) {
     warnings.push(`verifiedHead (${task.verifiedHead.slice(0, 8)}) != HEAD (${headSha.slice(0, 8)}); re-verify required`)
@@ -1010,24 +1025,36 @@ function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHit
   } else if (runtimeFilesTouched.length > 0 && smokeCommands.length === 0 && parity.triggers.some((t) => t.type === 'cli-surface')) {
     warnings.push('CLI/entrypoint code touched without `smoke-verify:` in AGENTS.md Dev Profile; exercise real CLI path manually.')
   }
+  if (empiricalVisualCheckRequired && !visualVerifiedOnHead) {
+    warnings.push(
+      `UI/visual files changed (${visualFilesChanged.length}: ${visualFilesChanged.slice(0, 5).join(', ')}): open actual rendered page/asset, walk through user interactions end-to-end, and check Light/Dark screenshots rather than relying on source reading alone.`,
+    )
+  }
 
   let status = 'verify-required'
   if (gateWeakenedHits.length > 0) status = 'gate-weakened'
   else if (headMatchesVerified === false) status = 'needs-reverify'
-  else if (headMatchesVerified === true && !smokeRequired) status = 'verified-on-head'
+  else if (headMatchesVerified === true && !smokeRequired && (!empiricalVisualCheckRequired || visualVerifiedOnHead)) {
+    status = 'verified-on-head'
+  }
 
   return {
     status,
     verifiedHead: task?.verifiedHead ?? null,
+    visualVerifiedHead: task?.visualVerifiedHead ?? null,
+    visualVerifiedOnHead,
     headSha,
     headMatchesVerified,
     smokeVerifyCommands: smokeCommands,
     testCommands,
     runtimeFilesTouched,
+    visualFilesChanged,
+    empiricalVisualCheckRequired,
     smokeRequired,
+    verificationHierarchy: 'Formal deterministic checks + empirical runtime/UI verification > adversarial code reading',
     antiHumanProxyNote: smokeRequired
       ? 'Execute smoke-verify locally in detached review worktree and verify stdout/exit behavior (never outsource initial runtime verification to humans).'
-      : 'Run test commands in detached review worktree and observe real test output before judging.',
+      : 'Run formal & empirical checks locally before judging; Must Fix requires a violated frozen C*, failed formal gate, or reproducible empirical failure.',
     warnings,
   }
 }
@@ -1230,7 +1257,10 @@ function formatPackText(pack) {
   lines.push('')
   lines.push('--- Behavioral Gate (Empirical & Smoke-Verify) ---')
   const bg = pack.behavioralGate
-  lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired}`)
+  lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired} | empiricalVisualCheckRequired=${bg.empiricalVisualCheckRequired}`)
+  if (bg.visualFilesChanged.length > 0) {
+    lines.push(`  Visual/UI Files (${bg.visualFilesChanged.length}): ${bg.visualFilesChanged.slice(0, 12).join(', ')}`)
+  }
   if (bg.smokeVerifyCommands.length > 0) {
     lines.push('  Smoke-Verify Commands (anti-human-proxy: run locally and observe real runtime):')
     for (const sc of bg.smokeVerifyCommands) lines.push(`    $ ${sc}`)
@@ -1271,7 +1301,14 @@ function formatPackText(pack) {
     lines.push('  HIGH-RISK PATHS TOUCHED (mandatory fault injection in detached review worktree):')
     for (const h of pack.highRiskHits) lines.push(`    - ${h.file} (rule: ${h.rule})`)
   }
-  lines.push('  Fault Injection Protocol (NO speculative nitpicks allowed):')
+  lines.push('  Verification Precedence: Formal static gates + empirical execution/render checks > adversarial code reading.')
+  if (bg.empiricalVisualCheckRequired) {
+    lines.push('  Visual / UI Empirical Checklist (actual render + interaction + screenshots; never judge from reading code alone):')
+    lines.push('    - [ ] Open the actual rendered page, component, or SVG in a live browser/renderer (confirm clean render, no 404 or console errors)')
+    lines.push('    - [ ] Walk through interactive user flows end-to-end (clicks, form inputs, state transitions, error/empty states)')
+    lines.push('    - [ ] Capture and inspect Light & Dark theme screenshots for contrast, clipping, text overlap, and legibility')
+  }
+  lines.push('  Fault Injection Protocol (Must Fix requires violated frozen C*, failed formal gate, or reproducible empirical failure; NO subjective code-reading nitpicks):')
   lines.push('    1. Temporarily break 1 core branch/guard in the review worktree and run test -> MUST FAIL.')
   lines.push('    2. Restore cleanly (`git checkout -- .`) and re-run test -> MUST PASS.')
   lines.push('    3. Classify findings strictly: Must Fix / Should Fix / Pre-existing (list all R1 locations at once).')

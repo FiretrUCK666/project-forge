@@ -5,7 +5,7 @@ description: |
   GitHub 双轨远端、四层设计文档（docs/TDD.md 与 prd/specs/todo）、<= 30KB 的 AGENTS.md、
   全套 5 个本地研发技能（.agents/skills/）与 CI/发布通道一次配齐，并给出日常无感路由与收尾协议。
   触发词：弄版本管理、配 git、上仓库、建仓库、推到 GitHub、初始化项目、项目起步、空项目起步、
-  新项目配置、标准化项目、规范项目、整理项目、给项目弄好、写 AGENTS.md、写 README、
+  新项目配置、标准化项目、规范项目、整理项目、项目规范配置、写 AGENTS.md、写 README、
   写贡献指南、配 LICENSE、配 CI、发版配置、交棒、升级工具包、把痕迹清干净。
   支持 Node、Python、Rust、Go、Java、纯文档目录及插件与能力目录；只读勘察先行，幂等不覆盖，
   纯本地无远端照样全量装配 5 个研发技能；默认私有仓库。
@@ -26,7 +26,7 @@ metadata:
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
 | **S1 勘察** | 先更新再只读扫：`update.mjs --quiet` 后跑 `survey.mjs --markdown --probe-auth` 获取 `explorationStrategy.tier` 与 `artifactPlan`；若目录空白（`none` / 0 业务文件），停下问 3–4 个简明问题后走 `--bootstrap-empty` 直接落盘起步 `docs/TDD.md`，**不派只读子代理**；存量或重入仓记下 `tier` 与 `shards` 供 `S3` 深度建构与校准 | `references/survey.md` |
-| **S2 定范围** | 逐项按 `facts.artifactPlan` 与能力矩阵确定性落地：**存量 `README`/`CONTRIBUTING`/双许可或自有 `LICENSE`/`.agents/skills/<custom>/` 与非标目录一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`（只修失效路径、失效脚本、新顶层模块与滞后 `TDD`），并由 `equip.mjs` 核对 `.pf-manifest.json` 无损升级、自净化退役旧文件 | 本文件 |
+| **S2 定范围** | 逐项按 `facts.artifactPlan` 与能力矩阵确定性推进：**存量 `README`/`CONTRIBUTING`/双许可或自有 `LICENSE`/`.agents/skills/<custom>/` 与非标目录一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`（只修失效路径、失效脚本、新顶层模块与滞后 `TDD`），并由 `equip.mjs` 核对 `.pf-manifest.json` 无损升级、自净化退役旧文件 | 本文件 |
 | **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（按 `treeSha256` 去重）；再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；全量装配 5 个 `.agents/skills/` 后，存量/重入仓依 `S1` `tier` 调 `.agents/skills/dev-explore/`（`parallel-subagents` 时按 `shards` 并行只读深挖，否则 `single-pass`）编写或校准 `docs/TDD.md`（按需删空节）与 `prd`/`specs`/`todo`，生成/无损刷新 `AGENTS.md`（`<= 30KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；按五态身份与轨道 A/B 配 GitHub 远端与自动化 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check` + `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记 | `references/handoff.md` |
 
@@ -62,7 +62,7 @@ metadata:
 
 | 事实 | 版本控制 | 文档与 `AGENTS` | `.agents/skills/` | 远端与自动化 |
 | --- | --- | --- | --- | --- |
-| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左生成基线、`README`、可跑测试与实填 `TDD` | 全量装齐 5 个 | 按意向可选 |
+| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左生成基线、`README`、可执行测试与实填 `TDD` | 全量装齐 5 个 | 按意向可选 |
 | `docs-only` | 做 | 做（无代码可省 `TDD`） | 全量装齐 5 个 | 视远端（不发包） |
 | 已识别代码生态 / 插件 / 能力目录 | 做 | 做 | 全量装齐 5 个 | 按声明；克隆类不走制品库 |
 | `isRepoRoot` 为假 / `unknown` | **先停下问清** | 同左 | 暂缓 | 暂缓 |
@@ -77,7 +77,7 @@ metadata:
 3. **凭据零入库与跨平台安全**：扫描拦截密钥与大文件；探测防弹窗；含中文/非 ASCII 正文一律经临时 UTF-8 文件按 `--body-file` / API JSON 提交并回读，绝不命令行拼正文。
 4. **按能不能撤回分档（日常与发版分开）**：提交、推自己的分支、开/改 PR 都能撤回，属于日常，不打标签不发版；合并默认分支、发版、改可见性、改写历史撤不回来，发版只由人明令触发，**强推与改写已推历史永不自动**。
 5. **合并由审查者收尾、弱化门禁必问**：独立审查 `fail` 为空由审查者直接合（`contributor-fork` 交上游合）；**删测试、放宽断言、加跳过或改松 CI 等弱化门禁必须人点头**。`取舍` 中写 `merge-authority: human` 时收回人工确认。
-6. **体积、自净与信任倒金字塔**：`AGENTS.md` 上限 `30KB`（`24KB` 预警）；机械门禁 > 运行冒烟实证（拒绝人肉代理）> 审查 > 文档，同类纠偏满 2 次沉入静态规则；写前快照存于仓外且交棒只清临时痕迹，删文件/分支/worktree 前必先列清单问人点头。
+6. **体积、自净与信任倒金字塔**：`AGENTS.md` 上限 `30KB`（`24KB` 预警）；**形式验证（类型/Schema/`arch-rules`/静态门禁）与实证验证（真实启动运行、CLI 实测、UI/视觉实际渲染截图与端到端交互）优先于对抗式读代码挑刺**（拒绝人肉代理），同类问题满 2 次沉入静态规则并清理死代码；写前快照存于仓外且交棒只清临时痕迹，删文件/分支/worktree 前必先列清单问人点头。
 
 ## 核心脚本（零第三方依赖，Node 18+）
 

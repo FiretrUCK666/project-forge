@@ -222,7 +222,7 @@ flowchart TD
 | `maintainer`（`team-collaborator`） | 公开/私有仓均走同源独立分支开 PR（非 Fork） | 零历史新成员先 `--probe-auth`；`claim` + 接管双写；遵循 `CODEOWNERS` / Merge Queue；`reviewerId !== implementerId` |
 | `contributor-fork` | 仅推个人 `origin` Fork 分支 -> 向 `upstream` 开 PR | 硬禁止 `merge`；上游 PR `OPEN` 时硬禁止删 Fork 分支；标签 403 自动降级 |
 | `clone-readonly` / `undetermined` | 先由人三选一（建 Fork / 新建仓 / `.git/pf-local-mode`） | 阻断推送与合并；同源离线场景输出 `teamProbeHint` 引导验权 |
-| `inbound-external-pr` | 只读审查工作树隔离检出 `FETCH_HEAD` | 必先过 `--untrusted-scan` 再经人类放行跑测试 |
+| `inbound-external-pr` | 只读审查工作树隔离检出 `FETCH_HEAD` | 必先过 `--untrusted-scan` 再经人类放行运行测试 |
 
 ### GitHub 双轨四级传输与 API 通道
 
@@ -267,10 +267,11 @@ flowchart LR
   - 任务账本存于 `.worktrees/.state/tasks/<taskId>.json`（经 `createDefaultLedger` / `writeTaskLedger` 维护），串起 `claim` -> `finalize` -> `verify` -> `submit` -> `merge` -> `cleanup` 不可跳过迁移：`finalizedHead` 须与当前提交同步，`verifiedHead === HEAD`。
   - `worktree-deps.mjs` 比对主仓与工作树锁文件 SHA256，一致时在 Windows 创建 Directory Junction、在 POSIX 创建 Symlink 零拷贝复用依赖；卸载时先显式调用 `fs.unlinkSync` 摘除挂载入口再执行 `git worktree remove`，严禁直接递归删除未解绑目录。
   - `submit` 前强校验工作区干净（`BLOCKED_DIRTY_WORKTREE`）、`finalize` 已完成且归档（Case 3/4 Todo 全勾 `[x]` 并 `git mv` 入 `docs/archive/todo/`，`SPEC` 标 `implemented`）以及 `verifiedHead === HEAD`（`BLOCKED_STALE_VERIFICATION`）。
+  - `verify` / `submit` 同步记录 `visualFilesChanged` 与 `empiricalVisualCheckRequired`（识别 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`），支持 `--visual-checked` 与 `--visual-evidence` 绑定实际渲染与浅深色截图证据。
   - `merge` 检测到删减断言、新增 `.skip`/`.only`、`continue-on-error: true`、`|| true` 或改松 CI 权限时以退出码 `4`（`BLOCKED_GATE_WEAKENING`）阻断；`contributor-fork` 硬禁止执行合并（`BLOCKED_FORK_CANNOT_MERGE`）。
   - `cleanup` 未传 `--confirm` 时返回待删清单并拒删（`BLOCKED_CONFIRMATION_REQUIRED`）；Fork 上游 PR 仍 `OPEN`（`BLOCKED_OPEN_FORK_PR`）或存在下游堆叠 PR（`BLOCKED_STACKED_PR`）时拒绝删除分支。
-- **`dev-review`（供应链防线与六锁收口）**：`review-pack.mjs --untrusted-scan` 扫描 `.github/workflows/`、生命周期钩子、构建脚本、`.husky/`、`.agents/skills/`、`.gitattributes` 与锁文件变动，命中即报错 `BLOCKED_UNTRUSTED_HAZARD`（需 `--human-approved-exec` 放行）；输出 `behavioralGate` 与 `structuralGate`，强校验 `reviewerId !== implementerId`，第 2 轮锁定未改动旧块仅审增量与 `rebuts`，第 3 轮未收敛或同指纹连续出现 2 轮触发 `STOP_LOSS_ESCALATE`。
-- **`dev-govern`（8 维审计、规则下沉与发版筹备）**：`govern-audit.mjs` 检查安全（凭据与 `pull_request_target`）、死代码/注释坏味（墓碑履历、未解释借口或压制注释）、测试覆盖、文档漂移与围栏感知死链（`docs.tdd-module-drift`、`docs.tdd-stale-path`、`docs.dead-link`）、Worktree 四态（`git cherry` / `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`、`unmerged`）、`arch-rules`、`> 800` 行文件与性能风险；支持 `record`（写 `<gitCommonDir>/project-forge-govern/signals.jsonl` 零工作区污染）、`cluster`（同类纠偏满 2 次下沉检查）与 `sample`（回滚率与 48h 返工热点抽检）；`release-prep-lib.mjs`（`handleReleasePrep`）采集上个标签至 `HEAD` 的全部用户可见改动，支持跳版本、环境阈值变化探测与 `unaccountedPublicFiles` 交叉防漏。
+- **`dev-review`（供应链防线、验证优先级与六锁收口）**：`review-pack.mjs --untrusted-scan` 扫描 `.github/workflows/`、生命周期钩子、构建脚本、`.husky/`、`.agents/skills/`、`.gitattributes` 与锁文件变动，命中即报错 `BLOCKED_UNTRUSTED_HAZARD`（需 `--human-approved-exec` 放行）；确立**形式验证与运行/渲染实证优先于纯对抗式静态读代码挑刺**原则，`behavioralGate` 输出 `visualFilesChanged` 与 `empiricalVisualCheckRequired`，触发时要求实际打开渲染界面、走通交互并查验浅深色截图；`Must Fix` 严格限于违反冻结 `C*`、确定性形式门禁失败或可复现运行/渲染实证失败（拒绝主观读代码挑刺阻塞合入），强校验 `reviewerId !== implementerId`，第 2 轮锁定未改动旧块仅审增量与 `rebuts`，第 3 轮未收敛或同指纹连续出现 2 轮触发 `STOP_LOSS_ESCALATE`。
+- **`dev-govern`（8 维审计、规则下沉与发版筹备）**：`govern-audit.mjs` 检查安全（凭据与 `pull_request_target`）、死代码/注释坏味（墓碑履历、未解释借口或压制注释）、测试覆盖、文档漂移与围栏感知死链（`docs.tdd-module-drift`、`docs.tdd-stale-path`、`docs.dead-link`）、Worktree 四态（`git cherry` / `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`、`unmerged`）、`arch-rules`、`> 800` 行文件与性能风险；支持 `record`（写 `<gitCommonDir>/project-forge-govern/signals.jsonl` 零工作区污染）、`cluster`（将真实审查漏出或运行时复发满 2 次的同类根因下沉为确定性形式检查并持续清理冗余退化代码）与 `sample`（回滚率与 48h 返工热点抽检）；`release-prep-lib.mjs`（`handleReleasePrep`）采集上个标签至 `HEAD` 的全部用户可见改动，支持跳版本、环境阈值变化探测与 `unaccountedPublicFiles` 交叉防漏。
 
 ## 6. 文档四层体系与上下文护栏
 
@@ -293,7 +294,8 @@ flowchart LR
 2. **只读勘察先行与凭据零落盘**：`survey.mjs` 与 `dev-explore` 全程不修改目标目录；所有 GitHub 令牌只在内存短暂使用，绝不进入返回值、错误栈、日志、stdout 或磁盘快照。
 3. **非交互进程隔离与跨平台安全编码**：Git 与网络探针强制关闭交互提示；所有跨平台含非 ASCII 正文先落系统临时文件再经 `--body-file` 或 API JSON 提交并清理临时文件。
 4. **不可逆边界与弱化门禁人审**：推送分档依据「是否可撤回」而非「是否对外」——推个人分支与开 PR 属日常可逆操作，合并主干、发版、改可见性与强推不可逆；任何弱化测试/断言/CI 门禁的操作必须获得人工确认。
-5. **文本清洁与指路稳定**：全仓严禁 Emoji 与非 GitHub 平台词；文档互指一律使用完整章节标题名而非易因重排失效的「第几节」指针；所有脚本写入一律使用 `scripts/lib/fs-atomic.mjs` 或 `writeJsonAtomic` 保证异常中断不损坏原文件。
+5. **文本清洁与指路稳定**：全仓严禁 Emoji 与非 GitHub 平台词；文档写作遵守朴实直白表达（`oil-tone`）；互指一律使用完整章节标题名而非易因重排失效的「第几节」指针；所有脚本写入一律使用 `scripts/lib/fs-atomic.mjs` 或 `writeJsonAtomic` 保证异常中断不损坏原文件。
+6. **形式验证与实证验证优先于对抗式读代码**：确定性静态检查（类型、Schema、`arch-rules`、静态规则门禁）与真实运行/UI 渲染交互及浅深色截图实证优先于静态读代码挑刺；主观未经实证的读代码意见不构成 `Must Fix` 阻塞项。
 
 ## 8. 门禁矩阵与故障注入自证
 

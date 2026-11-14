@@ -7,7 +7,7 @@
  *   start    --task <id> [--slug <slug>] [--case <1..5>] [--files <n>] [--parallel] [--external-pr <M>] [--pr <M>] [--issue <N>] [--branch <name>] [--clone-choice <fork|standalone|local>] [--json]
  *   claim    --task <id> [--issue <N>] [--agent <id>] [--json]
  *   finalize --task <id> [--note <text>] [--json]
- *   verify   --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--json]
+ *   verify   --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]
  *   submit   --task <id> [--draft] [--rework] [--title <title>] [--body <text>] [--json]
  *   rework   --task <id> [--rebut "<findingId>: <reason>"] [--json]
  *   merge    --task <id> [--method merge|squash|rebase] [--human-approved] [--json]
@@ -25,7 +25,7 @@ import {
   gitRun, isMainModule, listTaskLedgers, matchGlob, parseAgentsProfile, parseBodyRelations, parseFlowInputs,
   posixPath, printNextStep, probeGitHubEnv, readTaskLedger, readTextSafe,
   resolveRepoRoots, resolveWorkspaceIdentity, samePath, sanitizeTaskId,
-  sha256Text, slugify, writeAtomic, writeTaskLedger,
+  sha256Text, slugify, UI_VISUAL_EXT_RE, writeAtomic, writeTaskLedger,
 } from '../../lib/shared.mjs'
 import { unmountSharedDeps, mountSharedDeps } from './worktree-deps.mjs'
 
@@ -1064,11 +1064,15 @@ async function handleVerify(opts, roots) {
   }
 
   const runRes = await execShellCommand(cmd, implRoot)
-  const [headRes, stRes] = await Promise.all([
+  const [headRes, stRes, changedFiles] = await Promise.all([
     gitRun(implRoot, ['rev-parse', 'HEAD']),
     gitRun(implRoot, ['status', '--porcelain']),
+    getChangedFiles(implRoot, ledger.baseSha),
   ])
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
+  const visualFilesChanged = changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f))
+  const empiricalVisualCheckRequired = visualFilesChanged.length > 0
+  const hasVisualCheckFlag = Boolean(opts['visual-checked'] || opts['visual-evidence'])
 
   ledger.verifiedHead = runRes.ok ? currentHead : null
   ledger.verifiedCmd = cmd
@@ -1076,8 +1080,18 @@ async function handleVerify(opts, roots) {
   ledger.verifiedTarget = rawTarget
   ledger.verifiedDirtyHash = sha256Text(stRes.stdout)
   ledger.lastVerifyExitCode = runRes.code
+  ledger.visualFilesChanged = visualFilesChanged
+  ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
+  if (runRes.ok && hasVisualCheckFlag) {
+    ledger.visualVerifiedHead = currentHead
+    ledger.visualCheckEvidence = typeof opts['visual-evidence'] === 'string'
+      ? opts['visual-evidence']
+      : (ledger.visualCheckEvidence ?? '实际渲染、端到端交互与浅深色截图核验已确认')
+  }
   ledger.status = runRes.ok ? 'verified' : 'verify-failed'
   writeTaskLedger(roots.mainRoot, ledger)
+
+  const visualNeedsEmpiricalCheck = empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({
@@ -1088,17 +1102,27 @@ async function handleVerify(opts, roots) {
       ok: runRes.ok,
       exitCode: runRes.code,
       verifiedHead: ledger.verifiedHead,
+      visualFilesChanged,
+      empiricalVisualCheckRequired,
+      visualVerifiedHead: ledger.visualVerifiedHead,
+      visualCheckEvidence: ledger.visualCheckEvidence,
       stdout: runRes.stdout,
       stderr: runRes.stderr,
     }, null, 2)}\n`)
   } else {
     if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
     if (runRes.stderr) process.stderr.write(`${runRes.stderr}\n`)
-    process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${runRes.code} HEAD=${currentHead ?? 'none'}\n`)
+    process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${runRes.code} HEAD=${currentHead ?? 'none'}${empiricalVisualCheckRequired ? ` visualFiles=${visualFilesChanged.length}` : ''}\n`)
     if (runRes.ok) {
-      printNextStep([
+      const next = [
         `证据已绑定到 HEAD ${currentHead?.slice(0, 7)}，可提交评审：node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}`,
-      ])
+      ]
+      if (visualNeedsEmpiricalCheck) {
+        next.unshift(
+          `检测到 UI/视觉文件改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请实际打开渲染画面、走通交互并截取浅深色主题截图，再带 --visual-checked（或 --visual-evidence "..."）复核；形式检查与实证运行优先于静态读代码。`,
+        )
+      }
+      printNextStep(next)
     } else {
       printNextStep([
         `验证未通过（exit=${runRes.code}），请修复后重新运行 verify。`,
@@ -1153,6 +1177,12 @@ async function handleSubmit(opts, roots) {
     process.stderr.write(`BLOCKED_STALE_VERIFICATION: 代码已变更（verifiedHead=${ledger.verifiedHead.slice(0, 7)} !== HEAD=${currentHead?.slice(0, 7)}），必须重跑 verify。\n`)
     return { exitCode: EXIT_POLICY_BLOCK }
   }
+
+  const changedForVisual = await getChangedFiles(implRoot, ledger.baseSha)
+  const visualFilesChanged = changedForVisual.filter((f) => UI_VISUAL_EXT_RE.test(f))
+  ledger.visualFilesChanged = visualFilesChanged
+  ledger.empiricalVisualCheckRequired = visualFilesChanged.length > 0
+  const visualVerifiedOnHead = ledger.empiricalVisualCheckRequired && ledger.visualVerifiedHead === currentHead
 
   if (ledger.role === 'clone-readonly') {
     process.stderr.write('BLOCKED_CLONE_READONLY: 当前身份为只读克隆，禁止推送；请先走 Fork 或本地模式。\n')
@@ -1233,6 +1263,9 @@ async function handleSubmit(opts, roots) {
       '## 改动说明',
       `- 任务编号：\`${taskId}\``,
       `- 验证命令：\`${ledger.verifiedCmd}\` @ \`${shortHead}\``,
+      ledger.empiricalVisualCheckRequired
+        ? `- 视觉与交互实证：${visualVerifiedOnHead ? `已核验（${ledger.visualCheckEvidence ?? 'confirmed'}）` : `涉及 UI/视觉文件（${visualFilesChanged.slice(0, 5).join(', ')}），审查须核对实际渲染、端到端交互与浅深色截图`}`
+        : null,
       fixesLine ? `\n${fixesLine}` : null,
       '',
       '## 实现依据',
@@ -1457,7 +1490,7 @@ async function handleMerge(opts, roots) {
       }
     }
   } else if (ledger.branch) {
-    // local-only 或离线/本地裸仓验证闭环：在主工作区显式并入基线分支，确保后续 git branch -d 安全通过
+    // local-only 或离线/本地裸仓合并收口：在主工作区显式并入基线分支，确保后续 git branch -d 安全通过
     const mainSt = await gitRun(roots.mainRoot, ['status', '--porcelain'])
     if (!mainSt.ok || mainSt.stdout.trim() !== '') {
       process.stderr.write('BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。\n')
@@ -1643,7 +1676,7 @@ async function handleCleanup(opts, roots) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   } else {
     process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个，本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
-    printNextStep(['任务闭环已完成，工作区与账本均保持干净状态。'])
+    printNextStep(['任务全流程已完成，工作区与账本均保持干净状态。'])
   }
   return { exitCode: 0 }
 }
@@ -1665,6 +1698,7 @@ function parseCli(argv) {
     else if (a === '--force') opts.force = true
     else if (a === '--keep-branch') opts['keep-branch'] = true
     else if (a === '--human-approved') opts['human-approved'] = true
+    else if (a === '--visual-checked') opts['visual-checked'] = true
     else if (a.startsWith('--')) {
       const eq = a.indexOf('=')
       const k = eq > 0 ? a.slice(2, eq) : a.slice(2)
@@ -1690,7 +1724,7 @@ function printHelp() {
     '  start     --task <id> [--slug <slug>] [--case <1..5>] [--parallel] [--external-pr <M>] [--clone-choice <fork|standalone|local>] [--json]',
     '  claim     --task <id> [--issue <N>] [--agent <id>] [--json]',
     '  finalize  --task <id> [--note <text>] [--json]',
-    '  verify    --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--json]',
+    '  verify    --task <id> [--mode quick|smoke|full|gate] [--target <file>] [--cmd <custom>] [--visual-checked] [--visual-evidence <text>] [--json]',
     '  submit    --task <id> [--draft] [--rework] [--json]',
     '  rework    --task <id> [--rebut "<findingId>: <reason>"] [--json]',
     '  merge     --task <id> [--method merge|squash|rebase] [--human-approved] [--json]',

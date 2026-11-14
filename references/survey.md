@@ -20,7 +20,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--js
 2. **`commitsState === 'unreadable'`（仓库损坏或无权访问）**：
    不要把读不出提交误当成「零提交新仓库」，更不许直接重跑 `git init`；先排查工作树指针、`.git` 权限或对象损坏。
 3. **空目录或近空目录起步（`effectiveFiles === 0`）**：
-   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次生成完整最小可跑工程闭环：`.gitattributes`、`.gitignore`、初始 `README.md`、真实可跑源码与冒烟测试、填实 `Feature Map` 的 `docs/TDD.md`（不留空洞）及全套 5 个 `.agents/skills/`（已有文件跳过不覆盖；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.tar.gz` 快照）。
+   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次生成完整最小可运行工程基础：`.gitattributes`、`.gitignore`、初始 `README.md`、真实可运行源码与冒烟测试、填实 `Feature Map` 的 `docs/TDD.md`（不留空洞）及全套 5 个 `.agents/skills/`（已有文件跳过不覆盖；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.tar.gz` 快照）。
 
 ## 三、字段含义
 

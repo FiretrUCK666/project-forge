@@ -8,8 +8,9 @@
  * 而那种分歧出现在「读文件」上时，症状通常是**静默损坏**。
  */
 
-import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -46,23 +47,70 @@ export function readJsonSafe(filePath) {
 }
 
 /**
+ * 将路径归一为跨平台真实规范路径：
+ * 从目标路径向上寻找最深已存在祖先目录调用 `realpathSync.native`（解析 macOS `/var` -> `/private/var`
+ * 与 Windows Junction），再拼回尚未存在的尾部相对段并做 Unicode NFC 归一（消除 APFS NFD 差异）。
+ */
+export function canonicalPath(p) {
+  if (p === undefined || p === null) return ''
+  const raw = String(p)
+  if (raw.trim() === '') return ''
+  let cur = resolve(raw)
+  const tail = []
+  while (true) {
+    try {
+      const real = realpathSync.native(cur)
+      const joined = tail.length > 0 ? join(real, ...tail.reverse()) : real
+      return joined.normalize('NFC')
+    } catch {
+      const parent = dirname(cur)
+      if (parent === cur) {
+        return resolve(raw).normalize('NFC')
+      }
+      tail.push(basename(cur))
+      cur = parent
+    }
+  }
+}
+
+/**
  * 两个路径是不是同一个位置。
  *
- * 判据按**真实路径**归一：`process.argv[1]` 保留调用方写下的写法，而 `import.meta.url`
- * 已被 Node 解析成真实路径。经符号链接或 junction 调用时两者永不相等，于是脚本
- * **什么都不做并返回 0**——而调用方会把它读成「检查通过」。这个坑不报错，只让门禁变绿。
+ * 判据按 `canonicalPath` 归一（支持不存在尾部路径、macOS `/var` vs `/private/var` 与 APFS NFD）；
+ * 仅在 Windows（`win32`）按大小写不敏感比对，不在 Linux 上错误 `.toLowerCase()`。
  */
 export function samePath(a, b) {
-  try {
-    return realpathSync.native(resolve(a)) === realpathSync.native(resolve(b))
-  } catch {
-    return resolve(a).toLowerCase() === resolve(b).toLowerCase()
+  if (a === undefined || a === null || b === undefined || b === null) return false
+  if (String(a).trim() === '' || String(b).trim() === '') return false
+  const ca = canonicalPath(a)
+  const cb = canonicalPath(b)
+  if (!ca || !cb) return false
+  if (ca === cb) return true
+  if (process.platform === 'win32') {
+    return ca.toLowerCase() === cb.toLowerCase()
   }
+  return false
 }
 
 /** 路径归一化成正斜杠。进出集合都过这一层，别各写各的。 */
 export function posixPath(p) {
   return String(p ?? '').replace(/\\/g, '/')
+}
+
+/** 判断单个路径段是否为 macOS Finder / AppleDouble 元数据文件或目录。 */
+export function isMacMetadataName(name) {
+  const base = String(name ?? '')
+  return base === '.DS_Store'
+    || base.startsWith('._')
+    || base === '__MACOSX'
+    || base === '.Spotlight-V100'
+    || base === '.Trashes'
+    || base === '.fseventsd'
+}
+
+/** 判断相对路径任意层级是否命中 macOS 元数据条目。 */
+export function isMacMetadataPath(rel) {
+  return posixPath(rel).split('/').some((seg) => seg && isMacMetadataName(seg))
 }
 
 /**
@@ -197,11 +245,105 @@ export function skillSource(text) {
 }
 
 /**
+ * 解析 OpenSSH 配置文件（默认 `~/.ssh/config`），提取 `Host` 别名到 `HostName` 的只读映射。
+ * 忽略通配符模式（`*` / `?` / `!`）与 `Match` 块；同一别名按 OpenSSH 规则先出现者优先。
+ */
+export function parseSshConfigHostMap(input) {
+  let text = ''
+  if (typeof input === 'string') {
+    const looksInline = input.includes('\n') || input.includes('\r')
+      || /^\s*(?:Host|HostName|User|Port|IdentityFile)\b/im.test(input)
+    if (looksInline) {
+      text = input
+    } else if (input.trim() && existsSync(input.trim())) {
+      text = readTextSafe(input.trim()) ?? ''
+    } else {
+      text = input
+    }
+  } else if (input && typeof input === 'object') {
+    if (typeof input.configText === 'string') text = input.configText
+    else if (typeof input.text === 'string') text = input.text
+    else {
+      const cfgPath = input.configPath || input.path || join(homedir(), '.ssh', 'config')
+      text = existsSync(cfgPath) ? (readTextSafe(cfgPath) ?? '') : ''
+    }
+  } else {
+    const cfgPath = join(homedir(), '.ssh', 'config')
+    text = existsSync(cfgPath) ? (readTextSafe(cfgPath) ?? '') : ''
+  }
+
+  const hostMap = {}
+  let currentHosts = []
+  for (const rawLine of String(text).replace(/\r\n/g, '\n').split('\n')) {
+    const stripped = rawLine.replace(/(?:^|\s)#.*$/, '').trim()
+    if (!stripped) continue
+    const m = /^([A-Za-z0-9_-]+)\s*(?:=|\s)\s*(.+)$/.exec(stripped)
+    if (!m) continue
+    const key = m[1].toLowerCase()
+    const val = m[2].trim()
+    if (key === 'match') {
+      currentHosts = []
+      continue
+    }
+    if (key === 'host') {
+      currentHosts = val
+        .split(/\s+/)
+        .map((h) => h.replace(/^['"]|['"]$/g, '').trim())
+        .filter((h) => h && !/[*?![\]]/.test(h))
+      continue
+    }
+    if (key === 'hostname' && currentHosts.length > 0) {
+      const targetHost = val.replace(/^['"]|['"]$/g, '').trim()
+      if (!targetHost) continue
+      for (const alias of currentHosts) {
+        if (!Object.prototype.hasOwnProperty.call(hostMap, alias)) {
+          hostMap[alias] = targetHost
+        }
+      }
+    }
+  }
+  return hostMap
+}
+
+/** 按大小写不敏感查找 SSH Host 别名映射到的目标主机名。 */
+export function lookupSshHost(sshHostMap, host) {
+  if (!sshHostMap || typeof sshHostMap !== 'object' || !host) return undefined
+  if (Object.prototype.hasOwnProperty.call(sshHostMap, host)) return sshHostMap[host]
+  const low = String(host).toLowerCase()
+  for (const [k, v] of Object.entries(sshHostMap)) {
+    if (String(k).toLowerCase() === low) return v
+  }
+  return undefined
+}
+
+/** 提取 Git 远端地址的主机名与协议（不依赖平台）。 */
+export function parseRemoteUrlHost(value) {
+  const s = String(value ?? '').trim()
+  if (!s) return { protocol: 'unknown', host: undefined }
+  if (/^file:\/\//i.test(s)) return { protocol: 'file', host: undefined }
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\/(?:[^/@]+@)?([^/:?#]+)(?::\d+)?(?:\/|$)/i.exec(s)
+  if (schemeMatch) {
+    const proto = schemeMatch[1].toLowerCase()
+    const protocol = proto === 'ssh' ? 'ssh' : (proto === 'http' || proto === 'https' ? 'https' : proto)
+    return { protocol, host: schemeMatch[2].toLowerCase() }
+  }
+  const scpMatch = /^(?:[^/:@\s]+@)?([^/:@\s]+):(.+)$/.exec(s)
+  if (scpMatch && !/^[A-Za-z]:\\/.test(s) && !/^[A-Za-z]:\//.test(s)) {
+    return { protocol: 'ssh', host: scpMatch[1].toLowerCase() }
+  }
+  const bareHostMatch = /^([^/\s]+\.[^/\s]+)\/(.+)$/.exec(s)
+  if (bareHostMatch) {
+    return { protocol: 'unknown', host: bareHostMatch[1].toLowerCase() }
+  }
+  return { protocol: 'unknown', host: undefined }
+}
+
+/**
  * 把仓库地址归一成 `owner/name`。
  *
- * 同一个仓库有好几种写法（完整网址、带 `.git`、`git@host:owner/name` 的 scp 写法、
- * 检出时内嵌凭据的地址），比对要认得出它们是同一个，否则判据会在换一种检出方式时
- * 开始误报。
+ * 同一个仓库有好几种写法（完整网址、带端口 `ssh://git@host:port/owner/name`、带 `.git`、
+ * `git@host:owner/name` 的 scp 写法、检出时内嵌凭据的地址），比对要认得出它们是同一个，
+ * 否则判据会在换一种检出方式时开始误报。
  *
  * **认不出来时返回 undefined，而两个 undefined 相等**——这是它唯一危险的用法：
  * 拿它做等值比较却不管 undefined，就是「两个都认不出 → 判成一样 → 放行」。
@@ -210,30 +352,41 @@ export function skillSource(text) {
 export function repoPath(value) {
   let s = String(value ?? '').trim().toLowerCase()
   if (s === '') return undefined
-  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')   // 协议头
-  s = s.replace(/^[^@/]*@/, '')                  // 内嵌凭据或用户名
-  // scp 写法 `host:owner/name`：主机名后面跟的是**冒号**，不是斜杠。
-  // 只认斜杠时这一整类都归一不出结果，而那正是 git 最常见的克隆写法之一。
-  s = s.replace(/^[^/:]+:/, '')
-  s = s.replace(/^[^/]*\.[^/]*\//, '')           // 含点的主机名
-  s = s.replace(/\.git$/, '').replace(/\/+$/, '')
+  const hadScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(s)
+  if (hadScheme) {
+    if (/^file:\/\//.test(s)) return undefined
+    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    s = s.replace(/^[^@/]*@/, '')
+    s = s.replace(/^[^/]+\//, '')
+  } else {
+    s = s.replace(/^[^@/]*@/, '')
+    if (/^[^/:]+:/.test(s)) {
+      s = s.replace(/^[^/:]+:/, '')
+    } else {
+      s = s.replace(/^[^/]*\.[^/]*\//, '')
+    }
+  }
+  s = s.replace(/\.git$/, '').replace(/^\/+/, '').replace(/\/+$/, '')
   return /^[^/\s]+\/[^/\s]+$/.test(s) ? s : undefined
 }
 
+const GITHUB_HOST_RE = /^(?:www\.|ssh\.)?github\.com$/i
+
 /**
- * 把一个**GitHub** 地址归一成 `owner/name`。不是 GitHub 的地址返回 undefined。
- *
- * 为什么要这一层，而不是直接用上面的 `repoPath`：`repoPath` 只管「这个地址里的
- * 仓库路径是什么」，它不认识主机。而几乎所有用到它的地方，判据都不是「路径一样吗」，
- * 是「**同一个 GitHub 仓库吗**」——角色判定（origin 是不是正本）、远端正不正、包边界。
- * 拿一个别处托管平台的地址喂进去也得到 `owner/name`，再拿去和 GitHub 的比，就得到
- * 「同一个仓库」这个假结论，而它会让一次本该走 fork 流程的改动被当成维护者直推。
- *
- * 归一化本身仍然只有 `repoPath` 一份，这里只加一道主机闸门。
+ * 把一个 **GitHub** 地址归一成 `owner/name`（支持 `~/.ssh/config` SSH 别名映射与 `ssh.github.com:443`）。
+ * 不是 GitHub 的地址返回 undefined。
  */
-export function githubRepoPath(value) {
+export function githubRepoPath(value, sshHostMap) {
   const s = String(value ?? '').trim()
-  if (!/github\.com[:/]/i.test(s)) return undefined
+  if (!s) return undefined
+  const { protocol, host } = parseRemoteUrlHost(s)
+  if (!host) return undefined
+  let effectiveHost = host
+  if (protocol === 'ssh' && sshHostMap) {
+    const mapped = lookupSshHost(sshHostMap, host)
+    if (mapped) effectiveHost = mapped.toLowerCase()
+  }
+  if (!GITHUB_HOST_RE.test(effectiveHost)) return undefined
   return repoPath(s)
 }
 

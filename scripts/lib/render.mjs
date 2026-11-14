@@ -29,6 +29,8 @@ function gitLine(git) {
   const parts = [`分支 \`${git.branch ?? '未知'}\``]
   if (git.remote) {
     parts.push(`远端 \`${git.remote}\``)
+    if (git.providerId === 'generic-git') parts.push('通用 Git（`generic-git`）')
+    if (git.topology?.hasMultiRemotes) parts.push(`共 ${git.topology.remotes.length} 个远端`)
     const scope = git.collaborationScope ?? git.identity?.collaborationScope
     if (git.role === 'maintainer' && scope) {
       const scopeLabel = scope === 'team-collaborator' ? '团队协作者' : '所有者'
@@ -60,18 +62,23 @@ function ecosystemLine(eco) {
 
 function docsLine(docs) {
   const mark = (ok) => (ok ? '有' : '**没有**')
+  const checkNames = docs.workflowFacts?.checkWorkflows?.length
+    ? docs.workflowFacts.checkWorkflows
+    : (docs.workflows ?? [])
+  const releaseNames = docs.workflowFacts?.releaseWorkflows ?? []
   const items = [
     `README ${mark(Boolean(docs.readme))}${docs.readme ? `（${docs.readmes.join('、')}）` : ''}`,
     `AGENTS.md ${mark(Boolean(docs.agents))}`,
     `CONTRIBUTING ${mark(Boolean(docs.contributing))}`,
     `LICENSE ${mark(Boolean(docs.license))}`,
-    `CI ${mark(docs.workflowFacts.hasCheck)}${docs.workflows.length ? `（${docs.workflows.join('、')}）` : ''}`,
-    `发布自动化 ${mark(docs.workflowFacts.hasRelease)}`,
+    `CI 检查 ${mark(docs.workflowFacts.hasCheck)}${checkNames.length ? `（${checkNames.join('、')}）` : ''}`,
+    `发布自动化 ${mark(docs.workflowFacts.hasRelease)}${releaseNames.length ? `（${releaseNames.join('、')}）` : ''}`,
     `PR 模板 ${mark(docs.prTemplate)}`,
     `Issue 模板 ${mark(docs.issueTemplates)}`,
   ]
-  // 「别的 AI 约定文件」是一类**必须被看见**的现状：两份约定并存时，改一份另一份不跟，
-  // 而读的人只会看到其中一份。只报「有 / 没有」不够——得把名字列出来，否则没法逐条合流。
+  if ((docs.existingDesignDocs ?? []).length > 0) {
+    items.push(`存量设计文档（${docs.existingDesignDocs.join('、')}）`)
+  }
   if ((docs.otherAiConventions ?? []).length > 0) {
     items.push(`既有 AI 规则文件 **${docs.otherAiConventions.join('、')}**——先读一遍，把其中仍然成立的规则合进 \`AGENTS.md\`，别让两份各说各的`)
   }
@@ -92,6 +99,18 @@ export function toMarkdown(facts) {
   lines.push(`- **版本控制**：${gitLine(facts.git)}`)
   lines.push(`- **文档与自动化**：${docsLine(facts.docs)}`)
   lines.push(`- **规模**：${facts.scale.totalFiles} 个文件（代码 ${facts.scale.codeFiles}，文档 ${facts.scale.docFiles}）`)
+  if (facts.recommendedTier) {
+    const reasonText = facts.recommendedTierReason ? ` —— ${facts.recommendedTierReason}` : ''
+    lines.push(`- **推荐装配档位**：\`${facts.recommendedTier}\`${reasonText}`)
+  }
+  if (facts.kit?.manifestExists) {
+    const k = facts.kit
+    const kitParts = [`schema v${k.schemaVersion ?? 1}`]
+    if (k.tier) kitParts.push(`档位 \`${k.tier}\``)
+    if ((k.disabledSkills?.length ?? 0) > 0) kitParts.push(`已禁用技能：${k.disabledSkills.join('、')}`)
+    if ((k.customizedFiles?.length ?? 0) > 0) kitParts.push(`已豁免定制 ${k.customizedFiles.length} 个`)
+    lines.push(`- **工程套件清单**：${kitParts.join('；')}`)
+  }
   if (facts.workspace.declared) {
     lines.push(`- **多包仓库**：是${facts.workspace.packages.length ? `（${facts.workspace.packages.length} 个子包）` : ''}`)
   }
@@ -271,9 +290,10 @@ export function toMarkdown(facts) {
 
   const coverage = facts.risks.scanCoverage
   const teamHint = facts.git?.teamProbeHint ?? facts.git?.identity?.teamProbeHint
+  const auth = facts.git?.auth ?? {}
   lines.push('## 这次没查的')
   lines.push('')
-  lines.push(`- **能不能推代码**：${facts.git.auth?.https === 'undetermined' ? '没探测（默认不联网、不问凭据助手）。需要时加 `--probe-auth`' : facts.git.auth?.https}`)
+  lines.push(`- **能不能推代码**：${auth.https === 'undetermined' && !auth.probed ? '没探测（默认不联网、不问凭据助手）。需要时加 `--probe-auth`' : (auth.reason || auth.https || '未探测')}`)
   if (teamHint) {
     lines.push(`- **团队/组织协作者写权限**：${teamHint}`)
   }
@@ -291,9 +311,52 @@ export function toMarkdown(facts) {
   }
   lines.push('')
 
+  appendRemoteAndAuthWizard(lines, facts)
   appendNavigation(lines, facts)
 
   return lines.join('\n')
+}
+
+function appendRemoteAndAuthWizard(lines, facts) {
+  const git = facts.git ?? {}
+  const auth = git.auth ?? {}
+  const noRemote = (git.remotes ?? []).length === 0 && !git.localMode && facts.maturity !== 'empty'
+  const isGeneric = git.providerId === 'generic-git'
+  const hasAnyGithubAuth = Boolean(
+    auth.ghCli?.authenticated
+    || auth.details?.canPushHttps
+    || auth.details?.canPushSsh
+    || auth.apiChannel?.tier === 'gh-cli'
+    || auth.apiChannel?.tier === 'node-https-token'
+    || auth.apiChannel?.tier === 'half-duplex',
+  )
+  const needsAuthWizard = Boolean(auth.probed && !isGeneric && !hasAnyGithubAuth)
+  const needsHostKeyHint = auth.ssh?.state === 'host-key-unverified'
+  const hasRemediation = Boolean(auth.remediationCmd)
+
+  if (!noRemote && !needsAuthWizard && !needsHostKeyHint && !hasRemediation) return
+
+  lines.push('## 远端建仓与认证指引')
+  lines.push('')
+  if (noRemote) {
+    lines.push('- **无远端三路决策**：')
+    lines.push('  1. **暂不配远端（纯本地）**：在 `.git/` 创建 `pf-local-mode` 标记；')
+    lines.push('  2. **绑定已有 GitHub 仓库**：`git remote add origin <仓库地址>`；')
+    lines.push('  3. **新建 GitHub 仓库**：默认设 `private`（或按需 `public`）并确认个人/组织归属，再运行 `gh repo create <owner>/<name> --private --source=. --push`。')
+  }
+  if (hasRemediation) {
+    lines.push(`- **协议错配自愈命令**：\`${auth.remediationCmd}\``)
+  }
+  if (needsHostKeyHint) {
+    lines.push(`- **SSH 主机指纹尚未收录**：只读探测不改写 \`~/.ssh/known_hosts\`；请人工核对 GitHub 指纹后运行 \`${auth.ssh.fingerprintCmd || 'ssh -T git@github.com'}\`。`)
+  }
+  if (needsAuthWizard) {
+    lines.push('- **未检测到可用 GitHub 凭据，按偏好选一条路线完成认证**：')
+    lines.push('  1. **`gh CLI` 路线**：安装后依次运行 `gh auth login` -> `gh auth setup-git` -> `gh repo create <name> --private --source=. --push`。')
+    lines.push('  2. **`SSH Ed25519` 路线**：`ssh-keygen -t ed25519 -C "<你的邮箱>"`（macOS 可执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 并配置 `UseKeychain yes`）-> 将 `~/.ssh/id_ed25519.pub` 写入 GitHub SSH Keys -> `ssh -T git@github.com` 校验 -> `git remote add origin git@github.com:<owner>/<repo>.git`。')
+    lines.push('  3. **`HTTPS + Fine-grained PAT + GCM` 路线**：创建仅勾选 `Contents` / `Pull requests` 最小权限的 Fine-grained PAT，通过系统凭据管理器保存（macOS Keychain / Windows GCM），**严禁把令牌写进 `.git/config` 远端 URL**。')
+  }
+  lines.push('')
 }
 
 /**
@@ -378,7 +441,9 @@ export function computeNavigation(facts) {
   // 推给一个用别的托管平台、或者根本不用平台的仓库，读到的是完全不适用的判据——
   // 而它看起来像一条待办。
   const wf = docs.workflowFacts ?? {}
-  const onGithub = typeof git.remote === 'string' && /github\.com/i.test(git.remote)
+  const onGithub = git.providerId
+    ? (git.providerId === 'github' || Boolean(git.topology?.providerIds?.includes('github')))
+    : (typeof git.remote === 'string' && /github\.com/i.test(git.remote))
   const remoteTriggers = [
     (git.remotes ?? []).length === 0,
     !wf.hasCheck,

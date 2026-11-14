@@ -1882,6 +1882,59 @@ cases.push(['收尾步骤核对清单：三种角色一个都不能少', async (
   return true
 }])
 
+cases.push(['收尾七步：插入一步不该让内容下限假红', async () => {
+  // 早先 `where: { step: 7 }` 写死步号，插入一步就取到错的那一步，判据以「没交代」的形式假红。
+  // **假红比漏检更耗人**：它把人引去改判据，而判据本来是对的。
+  // 这条断言就是给那个修法配的常驻守卫——没有它，把「按内容认步骤」改回「按编号认」，
+  // 今天正好七步，取第 7 块取对了，全部门禁照样绿。
+  const { finishRequiredMissing } = await loadPreflight()
+
+  const steps = (extra) => [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '  3. 回读确认 `state=MERGED`；',
+    '  4. `git switch main && git pull`；',
+    '  5. `git worktree remove <路径>`；',
+    '  6. `git branch -d <分支>`；',
+    ...extra,
+    '  删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
+      + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '',
+  ].join('\n')
+
+  const seven = steps(['  7. '])
+  if (finishRequiredMissing(seven).length !== 0) {
+    return `标准七步却报缺：${finishRequiredMissing(seven).join('、')}`
+  }
+
+  // 插入一步：原来教 `git push origin --delete` 的那一步变成第 8 步。
+  const eight = steps(['  7. `git status` 看一眼；', '  8. '])
+  const missing = finishRequiredMissing(eight)
+  if (missing.length !== 0) {
+    return `插入一步后假红：${missing.join('、')}——判据按编号认步骤，不是按内容认`
+  }
+
+  // 反面：把教 `git push origin --delete` 的那一步整条删掉，必须报（说明它是真的在认内容）。
+  const noPush = [
+    '## 日常协作', '',
+    '- **第四步：合并收尾**——固定 7 步：',
+    '  1. 把要写的东西写完；',
+    '  2. 合并 PR；',
+    '',
+    '  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支。',
+    '',
+  ].join('\n')
+  if (!finishRequiredMissing(noPush).some((l) => l.includes('远端还在不在'))) {
+    return '把教 push --delete 的那一步删掉之后没有报缺'
+  }
+
+  return true
+}])
+
 cases.push(['收尾七步：三处教人敲的命令必须一致，措辞可以不同', async () => {
   // 顺序判据看不见「同一件事的两半各写一处」：第 7 步一边写「查下游堆叠 PR」、
   // 一边写「git ls-remote」，两句话读起来都对，照着做会漏一半。这条断言盯命令，不盯措辞。
@@ -1974,12 +2027,18 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return '删掉「下游堆叠 PR」之后没有报缺——这一半又没有守卫了'
   }
 
-  // 反面二：删掉 ls-remote 这条命令**连同「远端」这个词**——
-  // 只删行内代码而留着「远端还在不在」，判据仍算交代过（它说的是同一件事），这是刻意的。
+  // 反面二：把「查远端」这一整半删掉（命令和白话一起删）。
   const noProbe = full
     .replace('远端还在不在（`git ls-remote --heads origin <分支>`）、', '')
   if (!finishRequiredMissing(noProbe).some((l) => l.includes('远端还在不在'))) {
     return '删掉「查远端」这一整半之后没有报缺'
+  }
+
+  // 反面二之二：**只删命令、留着那句白话，也必须报。**
+  // 这一面治的是「把断言放宽成认白话」——那样一来「三处一起删掉命令」就静默通过了。
+  const cmdGone = full.replace('`git ls-remote --heads origin <分支>`', '')
+  if (!finishRequiredMissing(cmdGone).some((l) => l.includes('远端还在不在'))) {
+    return '只删 ls-remote 命令、留白话，仍然算交代——断言被放宽了'
   }
 
   // 反面三：删掉「删之前先问」那一整段。

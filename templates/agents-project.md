@@ -177,7 +177,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **第一步：双轴五态身份判定（不靠猜）**。
 
   <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与项目声明的源仓库一致且本机有写权限时为 **maintainer**（走分支 -> 门禁 -> 推自己分支 -> 开 PR -> 独立审查 -> 合并，严禁直推主干）；存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
+  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
   <!-- project-forge: endif -->
   <!-- project-forge: if no-remote -->
   这个项目还没有远端，所以眼下只有本地提交。**但落在高风险路径上的改动仍然要有一次独立审查**，结论写进本地任务单——审查不依赖远端存在，它依赖「这处改坏了不会当场失败」。

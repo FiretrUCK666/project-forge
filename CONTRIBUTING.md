@@ -32,8 +32,7 @@
    复现信息时才成立，那是提问，不是门槛。
 2. 按工作区真实身份走对应协作轨道（由 `survey.mjs` 双轴五态判定区分 `local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `undetermined`），在分支上开发并开拉取请求：
    - **没有本仓库写权限**（大多数外部贡献者，`contributor-fork` / `clone-readonly`）：先 **fork** 到你自己的账号，克隆或切换 `origin` 到 fork，在分支上开发，推回你自己的 fork，再从那个分支开拉取请求（不得调用合并，PR 仍开放时不要删除远端 fork 分支）；
-   - **有写权限**（维护者，`maintainer`）：直接从 `main` 拉一个分支即可，分支名沿用既有习惯
-     （`fix/xxx`、`feat/xxx`、`docs/xxx`）；
+   - **有写权限（同源所有者与团队/组织多位写权限协作者，`maintainer`）**：公开与私有仓均直接从同源 `main` 拉出个人独立分支并向正本开拉取请求（无需 Fork），分支名沿用既有习惯（`fix/xxx`、`feat/xxx`、`docs/xxx`）；尚无本地历史提交的新成员先跑 `survey.mjs --probe-auth`（或 `flow.mjs inspect --probe-auth`）确认写权限；开工经 `flow.mjs claim` 写清人+分支，接手同事未合分支须在 Issue 与 PR 双写「接管」评论；PR 前同步默认分支最新提交，遵守 `CODEOWNERS` 与 Merge Queue（若启用），严禁直推受保护主干；团队内坚持另一位协作者或独立上下文执行 `reviewerId !== implementerId` 互审（保守仓库可在 `AGENTS.md`「## 取舍」设 `merge-authority: human`）；
    - **只改文字**（错别字、文档表述）：在网页上点开文件、点铅笔图标改完提交即可，GitHub 会
      替你建好分支与拉取请求——**这条路跑不了下面的提交前门禁，别用它改代码**。
    - **涉及规格或跨模块改动时先定文档**：遵循五档分流与 `docs/` 四层体系（常青架构 `docs/TDD.md`、产品基线 `docs/prd/`、冻结规范 `docs/specs/`、任务单 `docs/todo/`）；任务完成合流前需在同一个分支上完成 `[x]` 勾选并将任务单归档进 `docs/archive/todo/`。

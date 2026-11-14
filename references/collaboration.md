@@ -11,11 +11,17 @@
 | 身份状态 | 判定事实 | 推送目标与 PR 规则 | 禁止与降级行为 |
 | --- | --- | --- | --- |
 | `local-only` | 无远端或存在 `.git/pf-local-mode` | 本地分支提交，高风险改动照样走独立审查与本地 Todo | 跳过平台认领/PR/远端清理，账本记本地 |
-| `maintainer` | `origin` 与声明源一致且拥有写权限 | 特性分支 -> 门禁 -> 推自己分支 -> 开 PR -> 独立审查 -> 合并 | **严禁直推主干、严禁私自打标签或发版** |
+| `maintainer` | `origin` 与声明源一致且拥有写权限（含单人所有者与同源团队/组织多位写权限协作者） | 公开/私有仓均直接同源独立特性分支 -> 门禁 -> 推自己分支 -> 开 PR（非 Fork） -> 独立审查 -> 合并 | **严禁直推受保护主干、严禁私自打标签或发版** |
 | `contributor-fork` | 存在不同 `upstream` 或 `origin` 为自身 Fork | **只推自己 `origin`**，向 `upstream` 开跨仓 PR；合并前不删 Fork 分支 | **严禁推 `upstream`、严禁自合/打标签/发版**；写标签遇 403 自动降级为评论/本地账本 |
 | `clone-readonly` | 克隆他人正本且无写权限（防误判维护者） | **未选定去向前先停下**：提示人三选一（建 Fork 贡献 / 独立新建项目 / 写 `.git/pf-local-mode` 转纯本地） | **严禁尝试推送或伪装成维护者** |
 | `undetermined` | 缺权限/API 探测依据 | 保守按 `contributor-fork` 安全边界处置 | 不直推主干、不自动发版或改写远端 |
 | `inbound-external-pr` | 在维护者仓中审查外部贡献者提进来的 PR | 建只读安全审查位，先过供应链静态扫描再人工确认跑门禁 | 未经人工确认禁用生命周期脚本并阻断自动执行 |
+
+- **多维护者团队协同（`team-collaborator`）四条规则**：
+  1. **零历史新成员验权**：刚加入组织/团队、本地尚无提交历史的成员先跑 `survey.mjs --probe-auth` 或 `flow.mjs inspect --probe-auth` 验证写权限并确认 `maintainer`（`collaborationScope: team-collaborator`），避免离线回退保守状态。
+  2. **认领与分支接管双写**：开工跑 `flow.mjs claim` 写清认领人与分支；接手同事未合分支前须在 Issue 与 PR 双写「接管」评论（注明接手人、分支与 HEAD）。
+  3. **独立分支与合前同步**：每人保持独立分支，开 PR 前同步默认分支最新提交，遵守 `CODEOWNERS` 与 Merge Queue（若启用），严禁直推主干。
+  4. **团队互审**：坚持 `reviewerId !== implementerId` 由同事或独立上下文执行双门与故障注入审查；保守仓可在 `AGENTS.md`「## 取舍」设 `merge-authority: human`。
 
 ## 二、五档开工分流与三问定档
 

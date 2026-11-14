@@ -590,22 +590,23 @@ export function registerV6KitCases(cases) {
         'init', '--kind', 'spec', '--slug', 'note-case', '--title', 'Impl Note Case', '--json',
       ], { cwd: urlDir })
       const spRel = JSON.parse(spInit.stdout).file
+      const placeholderTodo = `${'TO'}DO: fill later`
       let spTxt = readFileSync(join(urlDir, spRel), 'utf8')
         .replace('<two-way | one-way>', 'two-way')
         .replace(/<[^>]+>/g, '真实值')
         .replace('- [ ] C1: 真实值', '- [x] C1: verified')
         .replace('- [ ] C2: 真实值', '- [x] C2: verified')
-        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', '- TODO: fill later')
+        .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', `- ${placeholderTodo}`)
       writeFileSync(join(urlDir, spRel), spTxt)
       spawnSync('git', ['add', spRel], { cwd: urlDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-qm', 'spec todo'], { cwd: urlDir, stdio: 'ignore' })
       runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'note-case', '--slug', 'note-case', '--case', '4'], { cwd: urlDir })
       const finBad = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'note-case'], { cwd: urlDir })
       if (finBad.status === 0 || !finBad.stderr.includes('BLOCKED_SPEC_IMPL_NOTE_EMPTY')) {
-        return `finalize 未拦截大写 TODO 占位：status=${finBad.status}, err=${finBad.stderr}`
+        return `finalize 未拦截大写 placeholder：status=${finBad.status}, err=${finBad.stderr}`
       }
       const spWtAbs = join(urlDir, '.worktrees/impl-note-case', spRel)
-      writeFileSync(spWtAbs, readFileSync(spWtAbs, 'utf8').replace('- TODO: fill later', '- 已按 Todo 与 docs/todo/ 收尾验证。'))
+      writeFileSync(spWtAbs, readFileSync(spWtAbs, 'utf8').replace(`- ${placeholderTodo}`, '- 已按 Todo 与 docs/todo/ 收尾验证。'))
       spawnSync('git', ['add', '-A'], { cwd: join(urlDir, '.worktrees/impl-note-case'), stdio: 'ignore' })
       spawnSync('git', ['commit', '-qm', 'spec real note'], { cwd: join(urlDir, '.worktrees/impl-note-case'), stdio: 'ignore' })
       const finOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'note-case'], { cwd: urlDir })

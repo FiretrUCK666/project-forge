@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: v6 全域稳健性、渐进装配与平台抽象架构升级规范
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-15
 updated: 2026-11-15
-issue: null
+issue: 27
 pr: null
 branch: feat/v6-adaptive-governance
-owner: FiretrUCK666
+owner: coordinator-hydrogen-xhigh
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=plan-critic-gemini-4-hydrogen-xhigh, round=2, sha=4b9e3471163a, summary=Round 2 passed + macOS darwin full-chain adaptation added)"
 related_prd: null
-related_todo: ../todo/261115-v6-adaptive-governance-upgrade-todo.md
+related_todo: ../todo/261115-issue27-v6-adaptive-governance-upgrade-todo.md
 high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes]
 ---
 
@@ -28,7 +28,7 @@ high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKI
 | 规划级别 | `L3`（跨核心引擎、五套技能套件、文档模板与发布链路升级） |
 | 门型判定 | `two-way`（版本库分支隔离、仓外快照备份与 manifest 双轨可逆） |
 | 创建 / 更新日期 | `2026-11-15` / `2026-11-15` |
-| 配套任务单 | [261115-v6-adaptive-governance-upgrade-todo.md](../todo/261115-v6-adaptive-governance-upgrade-todo.md) |
+| 配套任务单 | [261115-issue27-v6-adaptive-governance-upgrade-todo.md](../todo/261115-issue27-v6-adaptive-governance-upgrade-todo.md) |
 | 目标分支 | `feat/v6-adaptive-governance` |
 | 后续实施模型要求 | Swarm 全部子 Agent 与独立审查员统一使用 `gemini-4-hydrogen-xhigh`（Gemini 4 Hydrogen XHigh） |
 

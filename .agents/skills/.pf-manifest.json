@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-14T21:12:09.278Z",
+  "installedAt": "2026-11-14T21:18:58.324Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "c19888c3307c087a353376b6e8e1ca7b863f6b84ce059266642b388d89609e5d"
@@ -17,7 +17,7 @@
       "sha256": "82973c96bd1b99d9c598857966084f6ecf161fa6d91266f1618c321383ac760f"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "29147c9e70baefcc3c6f32484faba510778d3229d3f5aec651061086032e4a39"
+      "sha256": "f0c273569f48f3f77cfbc9ac552387be038fa186df63b297510201b08fed2519"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "f6b368e817584693bdc4b74deca140ff7f883a35bbc7b2aee106144c6285bf12"

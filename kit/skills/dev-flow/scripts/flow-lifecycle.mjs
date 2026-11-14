@@ -197,7 +197,7 @@ export async function handleFinalize(opts, roots) {
     const afterSec = specText.slice(secStart)
     const nextH2 = afterSec.slice(1).search(/\n##\s+/)
     const secBody = (nextH2 > 0 ? afterSec.slice(0, nextH2 + 1) : afterSec).replace(/^##\s+实现说明\s*\n?/, '')
-    if (/<!--\s*project-forge:\s*fill|\b(?:TBD|TODO|FIXME)\b/i.test(secBody)) {
+    if (/<!--\s*project-forge:\s*fill|\b(?:TBD|FIXME)\b/i.test(secBody) || /\bTODO\b/.test(secBody)) {
       process.stderr.write(`BLOCKED_SPEC_IMPL_NOTE_EMPTY: ${specRel} 的「实现说明」仍含未填占位，请补齐真实说明后再 finalize。\n`)
       return { exitCode: 1 }
     }

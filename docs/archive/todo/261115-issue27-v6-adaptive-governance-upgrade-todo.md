@@ -1,19 +1,19 @@
 ---
 kind: todo
 title: v6 全域稳健性、渐进装配与平台抽象升级执行任务单
-status: active
+status: done
 created: 2026-11-15
 updated: 2026-11-15
-issue: null
+issue: 27
 pr: null
 branch: feat/v6-adaptive-governance
-owner: FiretrUCK666
+owner: coordinator-hydrogen-xhigh
 approved: true
-done_at: null
+done_at: 2026-11-15
 task_id: 261115-v6-adaptive-governance-upgrade
 planned_at: ae34a79
 related_prd: null
-related_spec: ../specs/261115-v6-adaptive-governance-upgrade-spec.md
+related_spec: ../specs/261115-issue27-v6-adaptive-governance-upgrade-spec.md
 ---
 
 # v6 全域稳健性、渐进装配与平台抽象升级执行任务单
@@ -24,7 +24,7 @@ related_spec: ../specs/261115-v6-adaptive-governance-upgrade-spec.md
 | --- | --- |
 | 当前状态 | `active`（已批准，按 Wave A–D 推进实施） |
 | 建单 / 更新日期 | `2026-11-15` / `2026-11-15` |
-| 关联规范 | [261115-v6-adaptive-governance-upgrade-spec.md](../specs/261115-v6-adaptive-governance-upgrade-spec.md) |
+| 关联规范 | [261115-issue27-v6-adaptive-governance-upgrade-spec.md](../specs/261115-issue27-v6-adaptive-governance-upgrade-spec.md) |
 | 目标分支 | `feat/v6-adaptive-governance` |
 | 门型判定 | `two-way`（分支隔离 + 仓外 `.tar.gz` 快照可回退） |
 | 断点恢复 | 核对 Frontmatter `status`/`branch` 与关联规范 `approved` 标记；审核通过后按下方 Swarm 分片推进 |

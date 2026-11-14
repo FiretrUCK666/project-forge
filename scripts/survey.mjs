@@ -19,14 +19,28 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { computeNavigation, toMarkdown } from './lib/render.mjs'
-import { LIKELY_DEFAULT_BRANCHES, parseMarkers } from './lib/protocol.mjs'
 import {
-  githubRepoPath, isMainModule, readJsonSafe, readTextSafe, samePath,
+  AGENTS_MAX_BYTES,
+  KIT_SKILLS,
+  LIKELY_DEFAULT_BRANCHES,
+  PF_MANIFEST_REL,
+  parseMarkers,
+} from './lib/protocol.mjs'
+import {
+  classifyWorkspaceIdentity,
+  hasLocalOnlyMarker,
+  probeGitHubEnv,
+  resolveWorkspaceIdentity,
+} from './lib/platform/index.mjs'
+import {
+  githubRepoPath, isMainModule, readJsonSafe, readTextSafe, samePath, skillVersion,
 } from './lib/text.mjs'
 
 // ── 扫描时跳过的目录 ────────────────────────────────────────────────
@@ -233,9 +247,26 @@ async function detectGit(root, { probeAuth = false } = {}) {
     auth.network = 'n/a'
     auth.reason = '没有远端'
   } else if (probeAuth) {
-    const probe = await probeCredential(root, remote)
-    auth.https = probe.state
-    auth.reason = probe.reason
+    const probe = await probeGitHubEnv({
+      cwd: root,
+      remoteUrls,
+      branch: statusInfo.head,
+      defaultBranch: parseOriginHead(originHead) || 'main',
+    })
+    auth.https = probe.https.state
+    auth.ssh = probe.ssh
+    auth.apiChannel = probe.apiChannel
+    auth.ghBridge = probe.ghBridge
+    auth.protocolMismatch = probe.protocolMismatch
+    auth.remediationCmd = probe.remediationCmd
+    auth.details = probe.details
+    auth.network = probe.apiChannel?.tier === 'offline' ? 'offline' : 'reachable'
+    auth.reason = probe.apiChannel?.reason || probe.https.reason
+    Object.defineProperty(auth, '_probeResult', {
+      value: probe,
+      enumerable: false,
+      configurable: true,
+    })
   }
 
   return {
@@ -345,52 +376,6 @@ function parsePorcelainV2(text) {
     } else if (line.trim() !== '') out.dirty += 1
   }
   return out
-}
-
-/**
- * 问一次凭据助手有没有 HTTPS 凭据。
- *
- * 只判退出码，**绝不读密码值、绝不打印**：输入是「要哪一处的凭据」，输出被丢弃。
- * 判据跨平台一致——`git credential fill` 取不到就非零退出。
- *
- * ## 三行都得给，`path` 尤其不能漏
- *
- * 凭据有两种存法：按主机（`credential.https://github.com`）与按路径
- * （`credential.https://github.com/owner/repo`）。只给 `host` 时，凭据助手查的是前者，
- * 而很多人的凭据恰恰是按路径存的——症状是「明明登录了却推不上去」，所有报错都说认证失败。
- * 这一条是这套流程自己写在参考文档里的硬判据，代码不能比文档松。
- *
- * ## 两个环境变量不是可选项
- *
- * 没有可用的凭据时，`git credential fill` 会**弹一个图形登录框**等人输入。在桌面环境上
- * 那会一直卡到超时（或者更糟：卡到人回来点掉），而调用方以为自己在做一次「几百毫秒的探测」。
- * 两个变量分别关掉终端与图形助手的交互，它才真的是一次探测。
- */
-async function probeCredential(root, remote) {
-  const url = /^https?:\/\//i.test(remote) ? remote : 'https://github.com'
-  let host = 'github.com'
-  let path = ''
-  try {
-    const parsed = new URL(url)
-    host = parsed.host
-    path = parsed.pathname.replace(/^\/+/, '').replace(/\/+$/, '')
-    // 按路径存凭据时，那条路径要带 `.git` 后缀（`owner/repo.git`），
-    // 与 `git remote` 里写的裸路径不是一回事。
-    if (path !== '' && !/\.git$/i.test(path)) path = `${path}.git`
-  } catch { /* 用默认值：认不出就按主机问，那仍然比不问强 */ }
-
-  const lines = [`protocol=https`, `host=${host}`]
-  if (path !== '') lines.push(`path=${path}`)
-  const res = await run('git', ['credential', 'fill'], {
-    cwd: root,
-    input: `${lines.join('\n')}\n\n`,
-    timeout: 5000,
-    // 关掉交互：没有凭据时助手会弹窗等人，而探测不能等人。
-    env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-  })
-  if (res.missing) return { state: 'undetermined', reason: '这台机器上找不到 git' }
-  if (res.ok) return { state: 'available', reason: '凭据助手取到了凭据' }
-  return { state: 'no-credential', reason: '凭据助手没取到凭据' }
 }
 
 // ── 生态判定 ────────────────────────────────────────────────────────
@@ -1242,17 +1227,31 @@ function detectDocs(root) {
     } catch { /* 读不到 */ }
   }
 
+  const tdd = existsSync(join(root, 'docs', 'TDD.md')) ? 'docs/TDD.md' : undefined
+  const specsDir = existsSync(join(root, 'docs', 'specs'))
+  const todoDir = existsSync(join(root, 'docs', 'todo'))
+  const prdDir = existsSync(join(root, 'docs', 'prd'))
+  let agentsBytes = 0
+  if (agents) {
+    try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 }
+  }
+
   return {
     readmes,
     readme: readmes[0],
     readmePair: readmes.length > 1,
     agents: agents ? { file: agents } : undefined,
+    agentsBytes,
     // 契约里还有几处没填——导航与体检都要这个数，取一次挂在这里，别处不再各算一遍。
     agentsMarkers: parseAgentMarkers(root, agents),
     contributing,
     releasing,
     changelog,
     license,
+    tdd,
+    specsDir,
+    todoDir,
+    prdDir,
     otherAiConventions,
     workflows,
     workflowFacts,
@@ -1377,7 +1376,7 @@ function detectArtifacts(root, ecosystem) {
 /** 仓库自带的本地 skills。盘点它们是为了**不误删**——它们是项目的一部分，不是痕迹。 */
 function detectLocalSkills(root) {
   const found = []
-  for (const dir of ['.dsh/skills', 'skills', '.claude/skills', '.github/skills']) {
+  for (const dir of ['.agents/skills', '.dsh/skills', 'skills', '.claude/skills', '.github/skills']) {
     const full = join(root, dir)
     if (!existsSync(full)) continue
     let entries = []
@@ -1385,6 +1384,7 @@ function detectLocalSkills(root) {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const sub = join(full, entry.name)
+      // 只把包含 SKILL.md 的子目录视作 Skill，跳过 `.agents/skills/lib` 等共享库目录。
       if (!existsSync(join(sub, 'SKILL.md')) && !existsSync(join(sub, 'skill.md'))) continue
       const meta = detectSkillKind(sub)
       found.push({
@@ -1395,6 +1395,136 @@ function detectLocalSkills(root) {
     }
   }
   return found
+}
+
+function sha256File(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex')
+}
+
+function detectKit(root) {
+  const skillsRoot = join(root, '.agents', 'skills')
+  const manifestFull = join(root, PF_MANIFEST_REL)
+  const manifestExists = existsSync(manifestFull)
+  const installedSkills = []
+
+  if (existsSync(skillsRoot)) {
+    try {
+      for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const sub = join(skillsRoot, entry.name)
+        if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) {
+          installedSkills.push(entry.name)
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!manifestExists) {
+    return {
+      present: installedSkills.length > 0,
+      manifestExists: false,
+      manifestValid: false,
+      corrupted: false,
+      manifestPath: undefined,
+      schemaVersion: undefined,
+      forgeVersion: undefined,
+      installedAt: undefined,
+      filesCount: 0,
+      missingFiles: [],
+      modifiedFiles: [],
+      versionMismatch: false,
+      drifted: false,
+      installedSkills,
+      kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+      agentsRegions: [],
+    }
+  }
+
+  const rawText = readTextSafe(manifestFull)
+  let manifest
+  try { manifest = rawText ? JSON.parse(rawText) : null } catch { manifest = null }
+  const manifestValid = Boolean(
+    manifest
+    && typeof manifest === 'object'
+    && manifest.schemaVersion === 1
+    && manifest.files
+    && typeof manifest.files === 'object'
+    && !Array.isArray(manifest.files),
+  )
+
+  if (!manifestValid) {
+    return {
+      present: true,
+      manifestExists: true,
+      manifestValid: false,
+      corrupted: true,
+      manifestPath: PF_MANIFEST_REL,
+      schemaVersion: manifest?.schemaVersion,
+      forgeVersion: manifest?.forgeVersion,
+      installedAt: manifest?.installedAt,
+      filesCount: 0,
+      missingFiles: [],
+      modifiedFiles: [],
+      versionMismatch: false,
+      drifted: true,
+      installedSkills,
+      kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+      agentsRegions: [],
+    }
+  }
+
+  const missingFiles = []
+  const modifiedFiles = []
+  const fileKeys = Object.keys(manifest.files)
+  for (const rel of fileKeys) {
+    const entry = manifest.files[rel]
+    const normRel = String(rel).replace(/\\/g, '/')
+    const abs = normRel.startsWith('.agents/skills/')
+      ? join(root, normRel)
+      : join(skillsRoot, normRel)
+    if (!existsSync(abs)) {
+      missingFiles.push(normRel)
+      continue
+    }
+    const expectedHash = typeof entry === 'string' ? entry : entry?.sha256
+    if (expectedHash) {
+      try {
+        if (sha256File(abs) !== expectedHash) modifiedFiles.push(normRel)
+      } catch {
+        modifiedFiles.push(normRel)
+      }
+    }
+  }
+
+  const skillRootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+  const expectedForgeVersion = skillVersion(skillRootDir)
+  const versionMismatch = Boolean(
+    expectedForgeVersion
+    && manifest.forgeVersion
+    && manifest.forgeVersion !== expectedForgeVersion,
+  )
+  const agentsRegions = manifest.agentsRegions && typeof manifest.agentsRegions === 'object'
+    ? Object.keys(manifest.agentsRegions)
+    : []
+
+  return {
+    present: true,
+    manifestExists: true,
+    manifestValid: true,
+    corrupted: false,
+    manifestPath: PF_MANIFEST_REL,
+    schemaVersion: manifest.schemaVersion,
+    forgeVersion: manifest.forgeVersion,
+    installedAt: manifest.installedAt,
+    filesCount: fileKeys.length,
+    missingFiles,
+    modifiedFiles,
+    versionMismatch,
+    drifted: missingFiles.length > 0 || modifiedFiles.length > 0 || versionMismatch,
+    installedSkills,
+    kitSkillsCovered: KIT_SKILLS.filter((k) => installedSkills.includes(k)),
+    agentsRegions,
+  }
 }
 
 // ── 成熟度与缺口 ────────────────────────────────────────────────────
@@ -1578,6 +1708,19 @@ const GAP_RULES = [
     text: '工作流用了 `pull_request_target` 又检出了提案那边的代码 —— 这等于让任意陌生人拿你的密钥跑他的代码',
     review: 'ci.pwn-request',
   },
+  {
+    id: 'docs.agents-oversize',
+    when: (f) => (f.docs.agentsBytes ?? 0) > AGENTS_MAX_BYTES,
+    text: (f) => `AGENTS.md 体积超过 ${AGENTS_MAX_BYTES} 字节上限（当前 ${f.docs.agentsBytes} 字节）—— 请将长篇设计与实施细节外置到 docs/TDD.md`,
+    review: 'agents.oversize',
+  },
+  {
+    id: 'kit.drifted',
+    when: (f) => f.kit?.manifestExists === true
+      && (f.kit?.corrupted === true || (f.kit?.missingFiles?.length ?? 0) > 0),
+    text: '受管 .agents/skills/ 清单损坏或缺少托管文件 —— 运行 equip.mjs 可恢复完整套件',
+    review: 'kit.drifted',
+  },
 ]
 
 /**
@@ -1685,7 +1828,28 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     else kinds = ['unknown']
   }
 
-  const role = judgeRole(gitFacts, ecosystem.declaredRepo)
+  let role
+  if (opts.probeAuth === true && opts.fetchApi !== false && gitFacts.present === true && gitFacts.remote && !opts.probeApi) {
+    role = await resolveWorkspaceIdentity({
+      cwd: root,
+      gitFacts,
+      declaredRepo: ecosystem.declaredRepo,
+      probeEnvResult: gitFacts.auth?._probeResult,
+      localIdentity: opts.localIdentity,
+      localMode: opts.localMode,
+      fetchApi: true,
+    })
+  } else {
+    role = judgeRole(gitFacts, ecosystem.declaredRepo, {
+      cwd: root,
+      probeApi: opts.probeApi,
+      localIdentity: opts.localIdentity,
+      localMode: opts.localMode,
+    })
+  }
+  if (gitFacts.auth && '_probeResult' in gitFacts.auth) {
+    delete gitFacts.auth._probeResult
+  }
 
   const facts = {
     target: { path: root, name: ecosystem.projectName, dirName: basename(root) },
@@ -1739,6 +1903,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     workspace: detectWorkspace(root),
     artifacts: detectArtifacts(root, ecosystem),
     localSkills: detectLocalSkills(root),
+    kit: detectKit(root),
     docs,
     ignores: {
       hasGitignore: existsSync(join(root, '.gitignore')),
@@ -1790,26 +1955,20 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
 }
 
 /**
- * 角色决定「能做到哪一步」，所以默认值必须是保守的那一档。
- * `undetermined` 不是「维护者」——它的意思是「比不出来」，按贡献者处置。
+ * 角色决定「能做到哪一步」，通过双轴五态分类器得出：
+ * `local-only` / `contributor-fork` / `clone-readonly` / `maintainer` / `undetermined`。
  */
-function judgeRole(gitFacts, declaredRepo) {
-  if (gitFacts.present !== true || !gitFacts.remote) {
-    return { role: 'maintainer', reason: '没有远端：本地提交不涉及别人的仓库' }
-  }
-  const origin = githubRepoPath(gitFacts.remoteUrls?.origin ?? gitFacts.remote)
-  const upstream = githubRepoPath(gitFacts.remoteUrls?.upstream)
-  if (!origin) return { role: 'undetermined', reason: '远端不是能认出来的 GitHub 地址，比不了' }
-  if (upstream && upstream !== origin) {
-    return { role: 'contributor-fork', reason: `origin 指向 ${origin}，而 upstream 指向 ${upstream}` }
-  }
-  if (declaredRepo && declaredRepo !== origin) {
-    return { role: 'contributor-fork', reason: `项目声明的源仓库是 ${declaredRepo}，而 origin 是 ${origin}` }
-  }
-  if (!declaredRepo) {
-    return { role: 'undetermined', reason: '项目没有声明源仓库，比不出 origin 是不是正本' }
-  }
-  return { role: 'maintainer', reason: `origin 就是项目声明的源仓库 ${origin}` }
+export function judgeRole(gitFacts, declaredRepo, opts = {}) {
+  const localMode = typeof opts.localMode === 'boolean'
+    ? opts.localMode
+    : (opts.cwd ? hasLocalOnlyMarker(opts.cwd) : false)
+  return classifyWorkspaceIdentity({
+    gitFacts,
+    declaredRepo,
+    probeApi: opts.probeApi,
+    localIdentity: opts.localIdentity,
+    localMode,
+  })
 }
 
 export { readTextSafe, readJsonSafe, samePath, githubRepoPath }

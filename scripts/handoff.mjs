@@ -25,11 +25,11 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, readTextSafe, samePath } from './lib/text.mjs'
+import { isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import {
-  LEGACY_MARKERS, LEGACY_PATH_SPECS, markerSyntaxFor, parseMarkers,
+  KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
@@ -55,7 +55,9 @@ const TEMP_RE = /\.tmp-(\d+)$/
  */
 function stripInlineCode(line) {
   return String(line ?? '').replace(/`[^`]*`/g, '')
-}const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
+}
+
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', 'coverage'])
 const MAX_DEPTH = 6
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -69,7 +71,7 @@ const MAX_BYTES = 256 * 1024
  * `scripts/`。而它们比普通死链更要紧：那些位置上原本写着一条规则，删掉指针就把它
  * 一起删了。所以扫描时单列一档，提示的是「**先把规则搬进项目自己的文档，再删指针**」。
  */
-const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|review|handoff|sync-toc|update|zip)\.mjs)/g
+const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|equip|review|handoff|sync-toc|update|zip)\.mjs)/g
 
 /**
  * 这一趟扫的是不是 **skill 自己的源码仓库**。
@@ -219,8 +221,40 @@ export function scan(targetDir) {
   // 报成待清理会让人去删别的会话正在用的东西。
   const deletableTemps = staleTemps.filter((t) => !t.alive)
 
+  let kitManifest
+  const kitManifestFull = join(root, PF_MANIFEST_REL)
+  if (!selfScan && existsSync(kitManifestFull)) {
+    const manifest = readJsonSafe(kitManifestFull)
+    const managedFiles = manifest?.files && typeof manifest.files === 'object' && !Array.isArray(manifest.files)
+      ? Object.keys(manifest.files).sort()
+      : []
+    const managedTopDirs = new Set(managedFiles.map((f) => f.split('/')[0]).filter(Boolean))
+    const customSkills = []
+    const skillsDir = join(root, '.agents', 'skills')
+    if (existsSync(skillsDir)) {
+      try {
+        for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue
+          if (KIT_SKILLS.includes(entry.name) || managedTopDirs.has(entry.name)) continue
+          const sub = join(skillsDir, entry.name)
+          if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) {
+            customSkills.push(entry.name)
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    kitManifest = {
+      path: PF_MANIFEST_REL,
+      valid: Boolean(manifest && manifest.schemaVersion === 1),
+      forgeVersion: manifest?.forgeVersion,
+      managedFiles,
+      customSkills: customSkills.sort(),
+    }
+  }
+
   const total = markers.length + placeholders.length + legacyMarkers.length
     + legacyPaths.length + danglingPointers.length + deletableTemps.length
+    + (kitManifest ? 1 : 0)
 
   return {
     target: { path: root },
@@ -230,6 +264,7 @@ export function scan(targetDir) {
     legacyPaths,
     danglingPointers,
     staleTemps,
+    ...(kitManifest ? { kitManifest } : {}),
     total,
     clean: total === 0,
     selfScan,
@@ -328,6 +363,17 @@ export function toText(result) {
     lines.push('')
     lines.push('  处置：直接删。它们没有正文，是上次写文件被中断时留下的半成品。')
     lines.push('  一条命令全删：`node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目>" --clean`')
+    lines.push('')
+  }
+
+  if (result.kitManifest) {
+    lines.push('## 受管技能套件清单元信息（按需保留或清出）')
+    lines.push('')
+    lines.push(`- \`${result.kitManifest.path}\`（forge ${result.kitManifest.forgeVersion ?? '未知'}，登记 ${result.kitManifest.managedFiles.length} 个托管文件）`)
+    if (result.kitManifest.customSkills.length > 0) {
+      lines.push(`  检测到项目自定义技能（不得删除）：${result.kitManifest.customSkills.join('、')}`)
+    }
+    lines.push('  处置：`.agents/skills/` 中的技能本身可按需留在项目里日常使用；若要彻底脱离本工具追踪，删除清单文件即可。')
     lines.push('')
   }
 

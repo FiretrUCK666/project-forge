@@ -215,6 +215,10 @@ export function registerV6KitCases(cases) {
       if (!existsSync(join(implAbs, 'frontend/node_modules/pkg/i.js')) || !existsSync(join(implAbs, 'backend/node_modules/pkg/i.js'))) {
         return '子包独立锁比对未挂载子包共享依赖'
       }
+      const excludeTxt = readFileSync(join(dir, '.git/info/exclude'), 'utf8')
+      if (!excludeTxt.split('\n').some((line) => line.trim() === '/backend/node_modules')) {
+        return `mountSharedDeps 未写入无尾斜杠软链忽略规则：${excludeTxt}`
+      }
       unmountSharedDeps(dir, implAbs)
       writeFileSync(join(implAbs, 'frontend/package-lock.json'), '{"lockfileVersion":3,"changed":1}\n')
       const mPartial = mountSharedDeps(dir, implAbs)
@@ -229,6 +233,8 @@ export function registerV6KitCases(cases) {
         readFileSync(join(implAbs, l.todoFile), 'utf8').replace('<two-way | one-way>', 'two-way').replace(/<[^>]+>/g, '`src/app.mjs`').replace(/- \[ \]/g, '- [x]'),
       )
       spawnSync('git', ['add', '-A'], { cwd: implAbs, stdio: 'ignore' })
+      const stagedDeps = spawnSync('git', ['ls-files', '--', 'backend/node_modules'], { cwd: implAbs, encoding: 'utf8' })
+      if ((stagedDeps.stdout ?? '').trim()) return `挂载软链误被 git 跟踪：${stagedDeps.stdout}`
       spawnSync('git', ['commit', '-qm', 'feat: v2'], { cwd: implAbs, stdio: 'ignore' })
       runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-t2'], { cwd: implAbs })
       spawnSync('git', ['add', '-A'], { cwd: implAbs, stdio: 'ignore' })
@@ -642,7 +648,8 @@ export function registerV6KitCases(cases) {
           async postComment(p) { postedComments.push(p); return { ok: true, id: postedComments.length, verifiedReadback: true } },
         }
         const subRes = await handleSubmit({ task: 'note-case', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, await resRoots(urlDir))
-        const archivedSpecTxt = readFileSync(join(implNote, 'docs/archive/specs/261115-note-case-spec.md'), 'utf8')
+        const archivedSpecRel = spRel.replace(/^docs\/specs\//, 'docs/archive/specs/')
+        const archivedSpecTxt = readFileSync(join(implNote, archivedSpecRel), 'utf8')
         if (subRes.exitCode !== 0 || !/^pr:\s*99\b/m.test(archivedSpecTxt) || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev'))) {
           return `handleSubmit archived pr 回填或首提 PR 评论失败：code=${subRes.exitCode}, spec=${archivedSpecTxt.slice(0, 260)}`
         }
@@ -715,5 +722,71 @@ export function registerV6KitCases(cases) {
       }
       rmTree(urlDir)
     }
+  }])
+
+  cases.push(['v6 远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全绿放行与无工作流跳过正反双向', async () => {
+    const ciDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# ci-gate\n\n```yaml\nquick-test: node -e "process.exit(0)"\n```\n',
+      'src/app.mjs': 'export const c = 1\n',
+    })
+    gitInit(ciDir)
+    spawnSync('git', ['branch', '-M', 'main'], { cwd: ciDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 't'], { cwd: ciDir, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: ciDir, stdio: 'ignore' })
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/ci-demo.git'], { cwd: ciDir, stdio: 'ignore' })
+    try {
+      const st = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'ci-t', '--case', '2', '--slug', 'ci-t', '--clone-choice', 'standalone'], { cwd: ciDir })
+      if (st.status !== 0) return `ciDir start 失败：${st.stderr}`
+      const { readTaskLedger, writeTaskLedger, resolveRepoRoots: resRoots, summarizeCommitChecks } = await import('../../kit/skills/lib/shared.mjs')
+      const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+      let mergeCalls = 0
+      const makeProbe = (checksRes) => ({
+        env: { trackB: { tier: 'gh-cli', login: 'rev-ci' } },
+        client: {
+          tier: 'gh-cli',
+          async getCommitChecks() { return checksRes },
+          async mergePr() { mergeCalls += 1; return { ok: true, merged: true, state: 'MERGED' } },
+          async postComment() { return { ok: true, id: 1, verifiedReadback: true } },
+          async removeLabel() { return { ok: true } },
+        },
+      })
+      const prepHead = () => {
+        const ver = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'ci-t'], { cwd: ciDir })
+        if (ver.status !== 0) throw new Error(`verify 失败：${ver.stderr}`)
+        const curSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ciDir, encoding: 'utf8' }).stdout.trim()
+        const rec = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 'ci-t', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-ci'], { cwd: ciDir })
+        if (rec.status !== 0) throw new Error(`record 失败：${rec.stderr}`)
+        const led = readTaskLedger(ciDir, 'ci-t')
+        writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })
+      }
+      writeFileSync(join(ciDir, 'src/app.mjs'), 'export const c = 2\n')
+      spawnSync('git', ['add', '-A'], { cwd: ciDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-qm', 'feat: c2'], { cwd: ciDir, stdio: 'ignore' })
+      prepHead()
+      const roots = await resRoots(ciDir)
+      const rNoWf = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([], [])) }, roots)
+      if (rNoWf.exitCode !== 0 || mergeCalls !== 1) return `无检查工作流时 bucket=none 未放行合并：code=${rNoWf.exitCode}, calls=${mergeCalls}`
+
+      mkdirSync(join(ciDir, '.github/workflows'), { recursive: true })
+      writeFileSync(join(ciDir, '.github/workflows/check.yml'), 'name: check\non:\n  pull_request:\njobs:\n  check:\n    runs-on: ubuntu-latest\n')
+      spawnSync('git', ['add', '-A'], { cwd: ciDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-qm', 'ci: add check workflow'], { cwd: ciDir, stdio: 'ignore' })
+      prepHead()
+      const rPend = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'in_progress', conclusion: null }], [])) }, roots)
+      const rFail = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'completed', conclusion: 'failure' }, { id: 2, name: 'check', status: 'completed', conclusion: 'skipped' }], [])) }, roots)
+      const rNone = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([], [])) }, roots)
+      if (rPend.exitCode === 0 || rFail.exitCode === 0 || rNone.exitCode === 0 || mergeCalls !== 1) {
+        return `远端 CI 失败未阻断合并：pend=${rPend.exitCode}, fail=${rFail.exitCode}, none=${rNone.exitCode}, mergeCalls=${mergeCalls}`
+      }
+      const rerunChecks = summarizeCommitChecks([
+        { id: 1, name: 'gates (18)', status: 'completed', conclusion: 'failure' },
+        { id: 3, name: 'gates (18)', status: 'completed', conclusion: 'success' },
+        { id: 4, name: 'check', status: 'completed', conclusion: 'success' },
+      ], [{ context: 'ext/lint', state: 'success' }])
+      const rPass = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(rerunChecks) }, roots)
+      if (rPass.exitCode !== 0 || mergeCalls !== 2) return `远端 CI 重跑全绿后未放行合并：code=${rPass.exitCode}, calls=${mergeCalls}`
+      return true
+    } finally { rmTree(ciDir) }
   }])
 }

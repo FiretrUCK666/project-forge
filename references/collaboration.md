@@ -93,8 +93,8 @@
 
 | 改动类型 | 合并权限 | 前置条件 |
 | --- | --- | --- |
-| 普通改动 / 外部 PR | **审查者直接合**（`contributor-fork` 等上游维护者合） | 独立审查 `fail` 为空 + `reviewPassedHead === HEAD` + 双门实测证据；外部 PR 先过 `--untrusted-scan` |
-| 触碰「高风险路径」任一处 | **审查者直接合** | 独立上下文审查（`reviewerId !== implementerId`）+ 真实故障注入记录 |
+| 普通改动 / 外部 PR | **审查者直接合**（`contributor-fork` 等上游维护者合） | 独立审查 `fail` 为空 + `reviewPassedHead === HEAD` + 远端 CI checks 变绿（若有）+ 双门实测证据；外部 PR 先过 `--untrusted-scan` |
+| 触碰「高风险路径」任一处 | **审查者直接合** | 独立上下文审查（`reviewerId !== implementerId`）+ 远端 CI checks 变绿（若有）+ 真实故障注入记录 |
 | **弱化门禁**（删测试、放宽断言、加跳过、改松 CI）或解锁停损 | **必须人点头** | `flow.mjs merge` 检测到弱化门禁默认以退出码 `4` 阻断，必须明确传 `--human-approved` |
 
 注：发版、改仓库可见性与改写已推送历史永不自动；若项目 `AGENTS.md`「## 取舍」写明 `merge-authority: human`，则全部 PR 的最终合并均收回人手。

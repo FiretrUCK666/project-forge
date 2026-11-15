@@ -476,6 +476,22 @@ const INJECTIONS = [
     to: '        if (false && !isTakeover) {',
     expect: '他人重复 claim 未阻断',
   },
+  {
+    id: 'I49',
+    what: '移除 .github/workflows/check.yml 汇总 job check 的 if: always() 防止假绿',
+    file: '.github/workflows/check.yml',
+    from: '  check:\n    needs: gates\n    if: always()',
+    to: '  check:\n    needs: gates',
+    expect: '汇总 job `check` 缺少 `if: always()`',
+  },
+  {
+    id: 'I50',
+    what: '禁用 flow-merge.mjs 对远端 CI fail 状态的合并阻断',
+    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
+    from: "        if (checks.bucket === 'fail' && !opts['human-approved']) {",
+    to: "        if (false && checks.bucket === 'fail' && !opts['human-approved']) {",
+    expect: '远端 CI 失败未阻断合并',
+  },
 ]
 
 function runFixtures(expect = '') {

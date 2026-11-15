@@ -9,6 +9,7 @@
  *   4. 清理前强制第一件事只对 junction/symlink 执行 `unlinkSync` 并校验主仓依赖完好。
  */
 
+import { spawnSync } from 'node:child_process'
 import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, statSync, symlinkSync, unlinkSync,
@@ -16,7 +17,7 @@ import {
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
-import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text } from '../../lib/git.mjs'
+import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 
 const NODE_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
@@ -301,6 +302,9 @@ export function mountSharedDeps(mainRoot, wtRoot) {
     throw err
   }
 
+  const mountedRelPaths = [...mounted, ...alreadyMounted].map((item) => item.path)
+  if (mountedRelPaths.length > 0) ensureMountedDepsExcluded(mainAbs, mountedRelPaths)
+
   const hasShared = mounted.length > 0 || alreadyMounted.length > 0
   let mode = 'none'
   let reason = 'no-main-deps'
@@ -324,6 +328,41 @@ export function mountSharedDeps(mainRoot, wtRoot) {
   }
 }
 
+function resolveCommonGitDir(mainAbs) {
+  const dotGit = join(mainAbs, '.git')
+  const st = statSafe(dotGit)
+  if (!st) return null
+  if (st.isDirectory()) return dotGit
+  if (st.isFile()) {
+    const m = /^gitdir:\s*(.+)$/mi.exec(readTextSafe(dotGit) ?? '')
+    if (!m) return null
+    const actualGitDir = resolve(mainAbs, m[1].trim())
+    const commonRef = readTextSafe(join(actualGitDir, 'commondir'))
+    return commonRef?.trim() ? resolve(actualGitDir, commonRef.trim()) : actualGitDir
+  }
+  return null
+}
+
+function ensureMountedDepsExcluded(mainAbs, relPaths) {
+  if (!relPaths || relPaths.length === 0) return
+  const commonGitDir = resolveCommonGitDir(mainAbs)
+  if (!commonGitDir) return
+  const excludeFile = join(commonGitDir, 'info', 'exclude')
+  try {
+    mkdirSync(dirname(excludeFile), { recursive: true })
+    const cur = readTextSafe(excludeFile) ?? ''
+    const existing = new Set(cur.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')))
+    const toAdd = []
+    for (const rel of relPaths) {
+      const rule = `/${posixPath(rel).replace(/^\/+|\/+$/g, '')}`
+      if (rule.length > 1 && !existing.has(rule) && !toAdd.includes(rule)) toAdd.push(rule)
+    }
+    if (toAdd.length === 0) return
+    const prefix = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n` : cur
+    writeAtomic(excludeFile, `${prefix}${toAdd.join('\n')}\n`)
+  } catch { /* ignore non-writable exclude */ }
+}
+
 /** 清理 worktree 前先仅对 junction/symlink 调用 `unlinkSync` 解绑，并校验主仓依赖完好。 */
 export function unmountSharedDeps(mainRoot, wtRoot) {
   const mainAbs = canonicalPath(mainRoot)
@@ -333,6 +372,7 @@ export function unmountSharedDeps(mainRoot, wtRoot) {
 
   const dirs = new Set([...collectCandidatePackageDirs(mainAbs), ...collectCandidatePackageDirs(wtAbs)])
   const unmounted = []
+  const skipped = []
   const mainExpected = []
 
   for (const dirRel of [...dirs].sort()) {
@@ -345,11 +385,22 @@ export function unmountSharedDeps(mainRoot, wtRoot) {
       const st = lstatSafe(dst)
       if (!st || !st.isSymbolicLink()) continue
 
+      const relPosix = posixPath(rel)
+      const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', relPosix], {
+        cwd: wtAbs,
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      if (tracked.status === 0) {
+        skipped.push({ path: relPosix, reason: 'tracked-in-git' })
+        continue
+      }
+
       let targetBefore = null
       try { targetBefore = readlinkSync(dst) } catch { /* ignore */ }
       unlinkSync(dst)
       if (lstatSafe(dst) !== null) throw new Error(`解绑依赖链接失败，路径仍然存在：${dst}`)
-      unmounted.push({ path: posixPath(rel), target: targetBefore })
+      unmounted.push({ path: relPosix, target: targetBefore })
     }
   }
 
@@ -357,7 +408,7 @@ export function unmountSharedDeps(mainRoot, wtRoot) {
   if (missingMain.length > 0) {
     throw new Error(`安全校验失败：主仓依赖目录异常缺失（${missingMain.map((m) => m.path).join(', ')}）`)
   }
-  return { ok: true, unmounted, mainDepsIntact: true }
+  return { ok: true, unmounted, skipped, mainDepsIntact: true }
 }
 
 function printHelp() {

@@ -4,13 +4,13 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
-import { existsSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
   canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
-  inspectBranchMergeState, samePath,
+  inspectBranchMergeState, readTextSafe, samePath,
 } from '../../lib/git.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
@@ -28,6 +28,21 @@ function isCwdInside(wtAbs) {
   if (samePath(cwd, wt)) return true
   const rel = relative(wt, cwd)
   return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function hasRepoCiWorkflow(repoRoot) {
+  const wfDir = join(repoRoot, '.github', 'workflows')
+  if (!existsSync(wfDir)) return false
+  try {
+    for (const name of readdirSync(wfDir)) {
+      if (!/\.(?:yml|yaml)$/i.test(name)) continue
+      const txt = (readTextSafe(join(wfDir, name)) ?? '').replace(/#[^\n]*/g, '').slice(0, 2000)
+      if (!/\bon\s*:/i.test(txt)) continue
+      if (/\bpull_request\b/i.test(txt)) return true
+      if (/\bpush\b/i.test(txt) && !(/\btags\s*:/i.test(txt) && !/\bbranches\s*:/i.test(txt))) return true
+    }
+  } catch { /* ignore */ }
+  return false
 }
 
 async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin') {
@@ -186,7 +201,31 @@ export async function handleMerge(opts, roots) {
   const baseBranch = ledger.baseBranch || 'main'
   const canUseGhMerge = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && ledger.prNumber && originFull
   if (canUseGhMerge) {
-    const ghProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+    if (currentHead && typeof ghProbe.client?.getCommitChecks === 'function') {
+      const checks = await ghProbe.client.getCommitChecks({ repo: originFull, ref: currentHead })
+      const ciRequired = hasRepoCiWorkflow(implRoot)
+      const ciBlock = (code, msg) => {
+        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code, head: currentHead, checks }, null, 2)}\n`)
+        process.stderr.write(`${msg}\n`)
+        return { exitCode: EXIT_POLICY_BLOCK }
+      }
+      if (checks?.ok) {
+        if (checks.bucket === 'fail' && !opts['human-approved']) {
+          const list = checks.failed.map((c) => `${c.name}[${c.state}]`).join(', ')
+          return ciBlock('BLOCKED_CI_FAILED', `BLOCKED_CI_FAILED: 当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 检查未通过（${list}），禁止带病合并。`)
+        }
+        if (checks.bucket === 'pending' && !opts['human-approved']) {
+          const list = checks.pending.map((c) => `${c.name}[${c.state}]`).join(', ')
+          return ciBlock('BLOCKED_CI_PENDING', `BLOCKED_CI_PENDING: 当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 仍在运行或排队（${list}），请等待全部变绿后再执行 merge。`)
+        }
+        if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
+          return ciBlock('BLOCKED_CI_PENDING', `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。`)
+        }
+      } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
+        return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`)
+      }
+    }
     mergeRes = await ghProbe.client.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
     if (mergeRes.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, mergeDelegated: mergeRes }, null, 2)}\n`)
@@ -210,7 +249,7 @@ export async function handleMerge(opts, roots) {
       await ghProbe.client.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
     }
     const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
-    if (mainSt.ok && mainSt.entries.length === 0) {
+    if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
       await gitRun(roots.mainRoot, ['fetch', pushRemote, baseBranch])
       const curMainBr = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
       if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {

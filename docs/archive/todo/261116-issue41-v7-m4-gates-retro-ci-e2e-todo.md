@@ -56,7 +56,7 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2–5 跨平台排障 + Round 6 消除 macOS Node 18 detached fork() 死锁根治均已落盘，提交后锁定 finalize + verify --mode gate 并发起 Round 6 复审）`
+- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2–6 跨平台排障 + Round 7 execSafe spawn/stdin 隔离与 fixtures 纯 NDJSON 协议/trace 心跳根治均已落盘，提交后锁定 finalize + verify --mode gate 并发起 Round 7 复审）`
 - **待拍板事项**：无
 
 ## 完成后的记录
@@ -79,6 +79,9 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 - **Round 6 消除 macOS Node 18 `detached: true` `fork()` 死锁根因**：
   - `kit/skills/lib/exec.mjs`：新增并导出 `supportsSafeDetachedSpawn()`（对 `win32` 与 `darwin` Node `< 20` / `libuv < 1.45` 返回 `false`，规避多线程进程下 `detached: true` 退回裸 `fork()` 触发 `malloc`/`dyld` 死锁）；`killProcessTree(child, useProcessGroup = true)` 按是否进程组启动条件发 `-pgid`；`execShellCommand` 使用 `detached: canUseDetached` 与 `killProcessTree(child, canUseDetached)`，同步重跑 `equip.mjs .`。
   - `scripts/dev/fixtures.mjs` & `scripts/dev/verify-injections.mjs`：`fixtures.mjs` 移除 `--worker` `detached` 并传 `killProcessTree(..., false)`；`verify-injections.mjs` `runNodeAsync` 复用 `supportsSafeDetachedSpawn()`；`fixtures-m4.mjs` 补齐 `supportsSafeDetachedSpawn` 正反版本与 `killProcessTree(child, false)` 断言。
+- **Round 7 `execSafe` 彻底重构与 `fixtures` 纯 NDJSON/trace 心跳根治**：
+  - `kit/skills/lib/exec.mjs`（同步 `equip.mjs .`）：将 `execSafe` 从 `execFile` 改用 `spawn(..., { detached: false, stdio: hasInput ? ['pipe','pipe','pipe'] : ['ignore','pipe','pipe'] })`，无 `input` 时直接 `'ignore'` 不建 `stdin` 管道；超时调用 `killProcessTree(child, false)` 并接入 `1500ms` `.unref()` `closeGraceTimer` 与 `maxBuffer` 超限强杀；`fixtures-m4.mjs` 补齐 `execSafe` 无 `input` `EOF`、`ENOENT` 与超时实测。
+  - `scripts/dev/fixtures.mjs` & `scripts/dev/fixtures-helpers.mjs`：移除 `--worker` `'ipc'` socketpair 改为基于 `RAW_STDOUT_WRITE` 的纯 `stdin`/`stdout` NDJSON 行协议（`__PF_W__:`），并接入 `PF_TRACE_FILE` 阶段心跳定位任意超时精确卡点；`darwin && Node < 20` 并发限 `2`，`>= 12` 核主机默认并发设 `Math.min(9, cpus)`，同时静默 worker 非协议 `stdout` 并精确命中 `HEAVY_CASE_HINTS` 首项。
 - **实际验证命令清单**：提交后于最新 `HEAD` 跑通 `flow.mjs verify --mode gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`verify-injections.mjs`）、`bench.mjs`、`e2e-zip-harness.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
 - **文档同步检查**：已同步更新 `docs/TDD.md`（收窄第 218–219 行状态图边标签并登记 M4 新增模块表与门禁矩阵）、`references/plugin-ecosystems.md`、`references/skill-project.md`、`kit/skills/dev-govern/SKILL.md` 及 `.agents/skills/`；总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` 按 1:N 保护保持 `active` 未动。
 - **遗留问题**：无（M5 全盘精简对齐与总控 PRD 归档留待后续里程碑）。

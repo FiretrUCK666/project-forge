@@ -279,56 +279,129 @@ export function execSafe(cmd, args = [], opts = {}) {
     const env = buildNonInteractiveEnv(process.env, opts.env ?? {})
     const isBuffer = Boolean(opts.buffer)
     const timeoutMs = opts.timeout ?? 15000
+    const maxBuffer = opts.maxBuffer ?? 16 * 1024 * 1024
     const inv = prepareExecInvocation(cmd, args, { cwd: opts.cwd, env })
     const execCmd = inv.cmd
     const execArgs = inv.args
-    const execOpts = {
-      cwd: opts.cwd,
-      encoding: isBuffer ? 'buffer' : 'utf8',
-      timeout: timeoutMs,
-      maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
-      windowsHide: true,
-      env: inv.env,
-      ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+    const hasInput = opts.input !== undefined
+
+    let child
+    try {
+      child = spawn(execCmd, execArgs, {
+        cwd: opts.cwd,
+        env: inv.env,
+        windowsHide: true,
+        detached: false,
+        stdio: hasInput ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
+        ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      })
+    } catch (err) {
+      done({
+        ok: false,
+        code: 1,
+        missing: err?.code === 'ENOENT',
+        timedOut: false,
+        stdout: isBuffer ? Buffer.alloc(0) : '',
+        stderr: err instanceof Error ? err.message : String(err),
+      })
+      return
     }
 
+    const outChunks = []
+    const errChunks = []
+    let outBytes = 0
+    let errBytes = 0
     let forcedTimeout = false
-    let treeTimer
-    const child = execFile(execCmd, execArgs, execOpts, (error, stdout, stderr) => {
+    let forcedOverflow = false
+    let settled = false
+    let exitedCode = null
+    let spawnErr = null
+    let treeTimer = null
+    let closeGraceTimer = null
+
+    const armCloseGrace = (fallbackCode) => {
+      if (settled || closeGraceTimer) return
+      closeGraceTimer = setTimeout(() => {
+        try { child.stdout?.destroy() } catch { /* ignore */ }
+        try { child.stderr?.destroy() } catch { /* ignore */ }
+        finish(fallbackCode)
+      }, 1500)
+      closeGraceTimer.unref?.()
+    }
+
+    const finish = (code) => {
+      if (settled) return
+      settled = true
       if (treeTimer) clearTimeout(treeTimer)
-      const timedOut = forcedTimeout || Boolean(error?.killed)
-      const code = timedOut
-        ? (typeof error?.code === 'number' ? error.code : 1)
-        : (error === null ? 0 : (typeof error.code === 'number' ? error.code : 1))
+      if (closeGraceTimer) clearTimeout(closeGraceTimer)
+      const timedOut = forcedTimeout
+      const effectiveCode = timedOut
+        ? 1
+        : (typeof code === 'number' ? code : (spawnErr ? 1 : 1))
+      const outRaw = Buffer.concat(outChunks)
       const outVal = isBuffer
-        ? (Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? ''))
-        : (stdout ?? '').replace(/\r\n/g, '\n').trimEnd()
-      const errVal = (Buffer.isBuffer(stderr) ? stderr.toString('utf8') : (stderr ?? ''))
-        .replace(/\r\n/g, '\n')
-        .trim()
+        ? outRaw
+        : outRaw.toString('utf8').replace(/\r\n/g, '\n').trimEnd()
+      const errRaw = Buffer.concat(errChunks).toString('utf8').replace(/\r\n/g, '\n').trim()
+      const errVal = errRaw || (spawnErr ? spawnErr.message : (forcedOverflow ? 'maxBuffer exceeded' : ''))
       done({
-        ok: !timedOut && error === null,
-        code,
-        missing: error?.code === 'ENOENT',
+        ok: !timedOut && !forcedOverflow && !spawnErr && effectiveCode === 0,
+        code: (forcedOverflow && effectiveCode === 0) ? 1 : effectiveCode,
+        missing: spawnErr?.code === 'ENOENT',
         timedOut,
         stdout: outVal,
         stderr: errVal,
       })
+    }
+
+    child.stdout?.on('data', (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      if (maxBuffer > 0 && outBytes + buf.length > maxBuffer) {
+        forcedOverflow = true
+        killProcessTree(child, false)
+        armCloseGrace(1)
+        return
+      }
+      outBytes += buf.length
+      outChunks.push(buf)
+    })
+
+    child.stderr?.on('data', (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      if (maxBuffer > 0 && errBytes + buf.length > maxBuffer) {
+        forcedOverflow = true
+        killProcessTree(child, false)
+        armCloseGrace(1)
+        return
+      }
+      errBytes += buf.length
+      errChunks.push(buf)
     })
 
     if (timeoutMs > 0) {
       treeTimer = setTimeout(() => {
         forcedTimeout = true
-        killProcessTree(child)
+        killProcessTree(child, false)
+        armCloseGrace(1)
       }, timeoutMs)
       if (typeof treeTimer.unref === 'function') treeTimer.unref()
     }
 
-    if (child.stdin) child.stdin.on('error', () => {})
-    if (opts.input !== undefined && child.stdin) {
+    child.on('exit', (code) => {
+      exitedCode = code
+      armCloseGrace(code)
+    })
+    child.on('error', (err) => {
+      spawnErr = err
+      finish(1)
+    })
+    child.on('close', (code) => {
+      finish(typeof code === 'number' ? code : exitedCode)
+    })
+
+    if (hasInput && child.stdin) {
+      child.stdin.on('error', () => {})
       child.stdin.end(opts.input)
-    } else if (child.stdin) {
-      child.stdin.end()
     }
   })
 }

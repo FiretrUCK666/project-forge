@@ -190,8 +190,8 @@ export function registerM4Cases(cases) {
       return `flushAndExit 大 JSON 管道输出被截断：${e.message}`
     }
 
-    // 5. execShellCommand closes stdin (EOF immediate), supportsSafeDetachedSpawn skips macOS Node <20 detached fork() deadlock, and killProcessTree(..., false) cleanly terminates
-    const { execShellCommand, killProcessTree, supportsSafeDetachedSpawn } = await import('../../kit/skills/lib/exec.mjs')
+    // 5. execShellCommand & execSafe close stdin (EOF immediate), handle ENOENT/timeout safely, supportsSafeDetachedSpawn skips macOS Node <20 detached fork() deadlock, and killProcessTree(..., false) cleanly terminates
+    const { execSafe, execShellCommand, killProcessTree, supportsSafeDetachedSpawn } = await import('../../kit/skills/lib/exec.mjs')
     if (supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '18.20.4' }) !== false
       || supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '19.9.0' }) !== false
       || supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '20.0.0' }) !== true
@@ -208,6 +208,18 @@ export function registerM4Cases(cases) {
     const resFail = await execShellCommand(`${JSON.stringify(process.execPath)} -e "process.exit(2)"`, FIXTURES_M4_ROOT, { timeout: 6000 })
     if (resFail.ok || resFail.code !== 2 || resFail.timedOut) {
       return `execShellCommand 负退出码异常：${JSON.stringify(resFail)}`
+    }
+    const safeEof = await execSafe(process.execPath, ['-e', "const t=setTimeout(()=>process.exit(3),5000);process.stdin.resume();process.stdin.on('end',()=>{clearTimeout(t);process.stdout.write('safe-eof');});"], { cwd: FIXTURES_M4_ROOT, timeout: 6000 })
+    if (!safeEof.ok || safeEof.code !== 0 || safeEof.timedOut || safeEof.stdout !== 'safe-eof') {
+      return `execSafe 无 input 时未关闭 stdin 导致挂起或异常：${JSON.stringify(safeEof)}`
+    }
+    const safeEnoent = await execSafe('definitely-nonexistent-cmd-pf-m4-xyz', [], { cwd: FIXTURES_M4_ROOT, timeout: 3000 })
+    if (safeEnoent.ok || !safeEnoent.missing || safeEnoent.timedOut) {
+      return `execSafe ENOENT 未正确标记 missing=true：${JSON.stringify(safeEnoent)}`
+    }
+    const safeTimeout = await execSafe(process.execPath, ['-e', 'setInterval(() => {}, 100)'], { cwd: FIXTURES_M4_ROOT, timeout: 150 })
+    if (safeTimeout.ok || !safeTimeout.timedOut) {
+      return `execSafe 超时强杀未正确触发 timedOut=true：${JSON.stringify(safeTimeout)}`
     }
     const directKillOk = await new Promise((done) => {
       const sleeper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true })

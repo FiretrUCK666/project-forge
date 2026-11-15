@@ -22,8 +22,8 @@ description: |
 4. **提交前双锁、成对归档与严格验证**：
    - `finalize` 检查未勾选条目并调用成对归档将 `PRD/SPEC/Todo` 移入 `docs/archive/{prd,specs,todo}/`，同时核对模块边界改动是否同步更新 `docs/TDD.md` 最近更新日期；`contributor-fork` 若上游不用 `docs/` 则自动隔离到 `.worktrees/.state/private-docs/`。
    - `verify` 尊重 `Dev Profile` 显式 `none`（纯文档仓可直接通过并绑定 `HEAD`）。
-5. **审查 HEAD 闭环、门禁弱化阻断与 Squash 清理**：
-   - `merge` 强制校验 `implRoot` 干净、`verifiedHead === HEAD`、且需独立审查时校验 `reviewPassed === true && reviewPassedHead === HEAD && lastReview?.headSha === HEAD && !lastReview?.stopLossTriggered`；触发 `STOP_LOSS_ESCALATE` 或门禁弱化（退出码 `4`）必须带 `--human-approved [--reason "..."]` 解锁；放行 `generic-git` 本地合并。
+5. **审查 HEAD 闭环、远端 CI 变绿、门禁弱化阻断与 Squash 清理**：
+   - `merge` 强制校验 `implRoot` 干净、`verifiedHead === HEAD`、远程 PR 合并前校验 `HEAD` 远端 CI 全部通过（失败报 `BLOCKED_CI_FAILED`、运行中报 `BLOCKED_CI_PENDING`），且需独立审查时校验 `reviewPassed === true && reviewPassedHead === HEAD && lastReview?.headSha === HEAD && !lastReview?.stopLossTriggered`；触发 `STOP_LOSS_ESCALATE` 或门禁弱化（退出码 `4`）必须带 `--human-approved [--reason "..."]` 解锁；放行 `generic-git` 本地合并。
    - `cleanup` 兼容 Squash/Rebase 合入四态判定，必须先 `unlinkSync` 解绑共享依赖再移除 worktree。
 
 ## 标准命令流

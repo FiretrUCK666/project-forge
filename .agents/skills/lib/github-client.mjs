@@ -202,6 +202,61 @@ export function parseFlowInputs(inputs = [], defaultRepo = null) {
   return { issues, prs, unknown }
 }
 
+/** 解析并按同名/上下文去重汇总提交的 GitHub check-runs 与 commit statuses。 */
+export function summarizeCommitChecks(checkRunsRaw, combinedStatusRaw) {
+  const crList = Array.isArray(checkRunsRaw) ? checkRunsRaw : (Array.isArray(checkRunsRaw?.check_runs) ? checkRunsRaw.check_runs : [])
+  const stList = Array.isArray(combinedStatusRaw) ? combinedStatusRaw : (Array.isArray(combinedStatusRaw?.statuses) ? combinedStatusRaw.statuses : [])
+
+  const latestRuns = new Map()
+  for (const cr of crList) {
+    const name = String(cr?.name ?? '').trim()
+    if (!name) continue
+    const prev = latestRuns.get(name)
+    if (!prev) { latestRuns.set(name, cr); continue }
+    const idCur = Number(cr?.id) || 0
+    const idPrev = Number(prev?.id) || 0
+    if (idCur > idPrev || (idCur === idPrev && String(cr?.started_at ?? '') > String(prev?.started_at ?? ''))) {
+      latestRuns.set(name, cr)
+    }
+  }
+
+  const passed = []
+  const pending = []
+  const failed = []
+
+  for (const cr of latestRuns.values()) {
+    const name = String(cr?.name ?? '').trim()
+    const status = String(cr?.status ?? '').toLowerCase()
+    const conclusion = cr?.conclusion ? String(cr.conclusion).toLowerCase() : null
+    const url = cr?.details_url ?? cr?.html_url ?? null
+    if (status !== 'completed') {
+      pending.push({ kind: 'check-run', name, state: status || 'queued', url })
+    } else if (conclusion && ['success', 'neutral', 'skipped'].includes(conclusion)) {
+      passed.push({ kind: 'check-run', name, state: conclusion, url })
+    } else {
+      failed.push({ kind: 'check-run', name, state: conclusion || 'failure', url })
+    }
+  }
+
+  const seenCtx = new Set()
+  for (const st of stList) {
+    const ctx = String(st?.context ?? '').trim()
+    if (!ctx || seenCtx.has(ctx)) continue
+    seenCtx.add(ctx)
+    const state = String(st?.state ?? '').toLowerCase()
+    const url = st?.target_url ?? null
+    if (state === 'pending') pending.push({ kind: 'status', name: ctx, state, url })
+    else if (state === 'success') passed.push({ kind: 'status', name: ctx, state, url })
+    else failed.push({ kind: 'status', name: ctx, state: state || 'failure', url })
+  }
+
+  const total = passed.length + pending.length + failed.length
+  const bucket = failed.length > 0 ? 'fail'
+    : pending.length > 0 ? 'pending'
+      : passed.length > 0 ? 'pass' : 'none'
+  return { ok: true, bucket, total, passed, pending, failed }
+}
+
 /** 构造四级降级 GitHub 客户端。 */
 export function createGitHubClient({
   tier = 'mcp-delegate',
@@ -563,6 +618,36 @@ export function createGitHubClient({
         return { ok: true }
       }
       return makeMcpDelegate('remove_label', { repo, number, label: cleanLabel })
+    },
+
+    async getCommitChecks({ repo, ref } = {}) {
+      const cleanRepo = String(repo ?? '').trim()
+      const cleanRef = String(ref ?? '').trim()
+      if (!cleanRepo || !cleanRef) return { ok: false, error: 'missing-repo-or-ref' }
+      const encRef = encodeURIComponent(cleanRef)
+      if (tier === 'gh-cli') {
+        const [crRes, stRes] = await Promise.all([
+          runner('gh', ['api', `repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`], { cwd }),
+          runner('gh', ['api', `repos/${cleanRepo}/commits/${encRef}/status`], { cwd }),
+        ])
+        if (!crRes.ok) return { ok: false, error: crRes.stderr || 'check-runs-api-failed' }
+        let crJson = null
+        let stJson = null
+        try { crJson = JSON.parse(crRes.stdout) } catch { return { ok: false, error: 'invalid-check-runs-json' } }
+        if (stRes.ok && stRes.stdout) {
+          try { stJson = JSON.parse(stRes.stdout) } catch { stJson = null }
+        }
+        return summarizeCommitChecks(crJson, stJson)
+      }
+      if (tier === 'node-https-token') {
+        const [crRes, stRes] = await Promise.all([
+          httpsRequest('GET', `/repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`, token),
+          httpsRequest('GET', `/repos/${cleanRepo}/commits/${encRef}/status`, token),
+        ])
+        if (!crRes.ok) return { ok: false, status: crRes.status, error: crRes.data?.message ?? 'check-runs-api-failed' }
+        return summarizeCommitChecks(crRes.data, stRes.ok ? stRes.data : null)
+      }
+      return { ...makeMcpDelegate('get_commit_checks', { repo: cleanRepo, ref: cleanRef }), skipped: true, reason: tier }
     },
   }
 }

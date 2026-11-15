@@ -631,6 +631,16 @@ function checkSingleSources({ ROOT, readText, fail, note }) {
       fail(`${c.file} 没有声明 permissions: contents: read——检查类工作流不该带写权限`)
     }
   }
+  const ownCheckPath = join(ROOT, '.github/workflows/check.yml')
+  if (existsSync(ownCheckPath)) {
+    const wfText = readText(ownCheckPath)
+    const aggMatch = /\n {2}check:\s*\n([\s\S]*?)(?=\n {2}[A-Za-z0-9_-]+:|\n*$)/.exec(wfText)
+    if (aggMatch && /\bneeds:\s*gates\b/.test(aggMatch[1])) {
+      if (!/^\s*if:\s*always\(\)/m.test(aggMatch[1]) || !/needs\.gates\.result/.test(aggMatch[1])) {
+        fail('.github/workflows/check.yml 的汇总 job `check` 缺少 `if: always()` 或 `needs.gates.result` 校验——上游 gates 失败时汇总 job 会变成 skipped 被分支保护假绿放行')
+      }
+    }
+  }
   note(`单一真相源：${SINGLE_SOURCE_RULES.length} 组跨文件判据 + 工作流对拍 + 权限声明，全部一致`)
 }
 

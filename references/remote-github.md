@@ -34,7 +34,7 @@
 ## 三、仓库设置、Rulesets 与分支保护
 
 - 对齐 `DEFAULT_BRANCH`（通常 `main`）；推自己分支与开/改 PR 属 `two-way` 可逆日常，合并默认分支、发版与改可见性属 `one-way` 不可逆操作。
-- **Rulesets / 分支保护 Required Check 对齐**：规则里登记的状态检查名必须与 `ci-check.yml` 中 `jobs.<jobId>.name`（开启 `matrix` 时带 `(<matrix值>)` 后缀）逐字一致。
+- **Rulesets / 分支保护 Required Check 对齐**：规则里登记的状态检查名必须与 `ci-check.yml` 中 `jobs.<jobId>.name`（开启 `matrix` 时带 `(<matrix值>)` 后缀）逐字一致；若使用无矩阵汇总 job（如 `check` `needs: gates`），该 job 必须配置 `if: always()` 并校验 `needs.<job>.result == 'success'`（非 `success` 时 `exit 1`），防止上游失败导致汇总 job 被标成 `skipped` 而被分支保护误放行。
 - **`delete_branch_on_merge` 冲突提示**：若平台开启合并后自动删分支，手工合并收尾的第 7 步 `git ls-remote` 会看到远端分支已消失；存在下游堆叠 PR 时谨慎开启自动删分支。
 - **团队协作可选设施**：按团队人数与协作者规模按需配置 `CODEOWNERS`、Dependabot 与基础 Issue/PR 标签。
 

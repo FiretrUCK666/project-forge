@@ -150,4 +150,5 @@ export {
   resolveContributorIdentity,
   resolveRemoteDescriptor,
   resolveWorkspaceIdentity,
+  summarizeCommitChecks,
 } from './platform.mjs'

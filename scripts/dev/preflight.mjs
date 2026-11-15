@@ -77,7 +77,7 @@ function walk(dir, pred) {
   const out = []
   if (!existsSync(dir)) return out
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '.git' || entry.name === 'node_modules') continue
+    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '.worktrees') continue
     const full = join(dir, entry.name)
     if (entry.isDirectory()) out.push(...walk(full, pred))
     else if (entry.isFile() && (pred === undefined || pred(full))) out.push(full)

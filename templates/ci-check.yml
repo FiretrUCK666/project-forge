@@ -75,8 +75,9 @@
 #
 #   - 分支保护里**把三个带后缀的名字都加进去**（名字逐字填，别凭印象）；
 #   - 或者把干活的那个 job 改名（例如 `gates`），再另设一个**不带矩阵**的 `check`
-#     用 `needs: gates` 等它——这样「全部取值都必须过」这条要求才真的成立，
-#     而只留一个名字等于只要求其中一个取值。
+#     用 `needs: gates` + `if: always()` 等它，并在 step 里校验
+#     `[ "${{ needs.gates.result }}" = "success" ]`（否则 `exit 1`）——若不加 `if: always()`，
+#     上游失败时 `check` 会变成 `skipped`，而分支保护会把 `skipped` 当成放行（假绿）。
 
 name: check
 

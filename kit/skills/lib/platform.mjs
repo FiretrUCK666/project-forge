@@ -14,12 +14,14 @@ import {
   createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
   listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
+  summarizeCommitChecks,
 } from './github-client.mjs'
 
 export {
   createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
   listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
+  summarizeCommitChecks,
 }
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 5000

@@ -97,11 +97,18 @@ jobs:
   # （`gates (18)`、`gates (22)`）。名字对不上，那个「必需检查」就永远不会出现，
   # 提案会一直停在 `BLOCKED` ——而它看起来像「还在跑」，不像「永远跑不完」。
   #
-  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面两队都成功。
-  # 这样「两个版本都必须过」这条要求才真的成立——只留一个名字，等于只要求其中一个版本。
+  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面两队都结束。
+  # 必须带 `if: always()` 并显式校验 `needs.gates.result == 'success'`；否则上游一旦失败，
+  # 汇总 job 会被标成 `skipped`，而 GitHub 分支保护把 `skipped` 当成放行（假绿）。
   check:
     needs: gates
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: 两个版本的门禁都过了
-        run: echo "gates 在 Node 18 与 22 上都已经通过。"
+        run: |
+          if [ "${{ needs.gates.result }}" != "success" ]; then
+            echo "::error::gates 未通过（result=${{ needs.gates.result }}），拒绝假绿放行。"
+            exit 1
+          fi
+          echo "gates 在 Node 18 与 22 上都已经通过。"

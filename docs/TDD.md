@@ -1,34 +1,34 @@
 # project-forge 技术设计与架构契约（TDD）
 
-本文档是 `project-forge` 仓库的常青技术设计与架构权威，面向维护者与 AI 会话。内容只陈述当前真实结构、数据流向、模块边界与核心不变量，不记录历史变更流水；代码结构或对外契约改动时随同一提交同步更新。
+本文档是 `project-forge` 仓库的常青技术设计与架构权威，面向维护者与 AI 会话。内容只陈述当前真实结构、数据流向、模块边界与核心不变量，不记录历史变更流水；**对正在推进中的 v7 架构演进目标均以 `[v7 规划 M1–M5]` 明确标注（对应总控需求见 `docs/prd/261115-v7-workflow-architecture-prd.md`）**，各切片代码落地时同步去掉规划标签并写入真实文件路径。
 
 ## 文档信息
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | `v6.0.0` |
+| 文档版本 | `v6.0.0`（当前实装基线；含 `[v7 规划 M1–M5]` 架构校准） |
 | 编制 / 最近更新日期 | `2026-11-15` / `2026-11-15` |
-| 基线依据 | 仓库源码与 `scripts/`、`kit/skills/`、`templates/`、`references/` 当前实现 |
+| 基线依据 | 仓库源码与 v7 总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
-| 托管平台适配范围 | 产品层注册表仅注册 `github`；未匹配托管远端退化为 `generic-git` 本地全流程 |
+| 托管平台适配范围 | 产品层注册表当前仅注册 `github`；未匹配托管远端退化为 `generic-git`（`[v7 规划 M3]` 补齐 `TaskBackend` 统一三态） |
 | 关联工程契约 | `AGENTS.md`、`SKILL.md` |
 
 ## 目录
 
 - [文档信息](#文档信息)
 - [1. 背景、非目标与术语表](#1-背景非目标与术语表)
-- [2. 系统架构全景（双平面与自举拓扑）](#2-系统架构全景双平面与自举拓扑)
+- [2. 系统架构全景（双平面、四层正交与自举拓扑）](#2-系统架构全景双平面四层正交与自举拓扑)
 - [3. 项目锻造与重入流水线（S1-S4 与 v2 账本）](#3-项目锻造与重入流水线s1-s4-与-v2-账本)
 - [4. 双轴五态身份、平台抽象与双轨通道](#4-双轴五态身份平台抽象与双轨通道)
-- [5. 内置研发工作流套件（五套 Skill 日常流转）](#5-内置研发工作流套件五套-skill-日常流转)
+- [5. 内置研发工作流套件（五套 Skill 日常流转与 v7 演进）](#5-内置研发工作流套件五套-skill-日常流转与-v7-演进)
 - [6. 文档四层体系、成对归档与图表规范](#6-文档四层体系成对归档与图表规范)
 - [7. 安全防线与核心不变量](#7-安全防线与核心不变量)
-- [8. 门禁矩阵与故障注入自证](#8-门禁矩阵与故障注入自证)
+- [8. 门禁矩阵与三位一体自证](#8-门禁矩阵与三位一体自证)
 
 ## 1. 背景、非目标与术语表
 
-`project-forge` 面向任意外部项目提供只读勘察、写前备份、分档契约生成、GitHub 远端配置与本地研发技能装配，同时以自身仓库作为规范的第一个使用方完成自举校验。
+`project-forge` 面向任意外部项目提供只读勘察、写前备份、分档契约生成、远端/纯本地协同配置与本地研发技能装配，同时以自身仓库作为规范的第一个使用方完成自举校验。
 
 ### 技术基线与运行约束
 
@@ -36,40 +36,48 @@
 | --- | --- | --- |
 | 运行时下限 | `Node.js 18+`（纯 ESM `.mjs`，零第三方 npm 依赖） | 下限只上移不动；上移须同步修改清单与 `README` |
 | 路径与编码 | `canonicalPath` / `samePath` 处理 Win32 大小写、macOS `/private/var` 与 APFS NFC 归一；无 BOM UTF-8 | 跨平台正文一律先落系统临时文件再经 `--body-file` 传入 |
-| macOS 与杂项过滤 | `isMacOsMetadata` 过滤 `.DS_Store`、`._*`、`__MACOSX`、`.Spotlight-V100` 等条目 | 全仓扫描、备份、打包与 `handoff` 共用同一过滤名单 |
-| 平台边界 | `HostingProvider` 注册表产品层仅注册 `github`，未匹配远端降级 `generic-git` | 产品层严禁出现非 GitHub 托管平台名称与专属接口 |
+| macOS 与杂项过滤 | `isMacOsMetadata` 过滤 `.DS_Store`、`._*`、`__MACOSX`、`.Spotlight-V100` 等条目（`[v7 规划 M1]` 全链路统一共享缓存目录跳过清单） | 全仓扫描、备份、打包与 `handoff` 共用同一过滤名单 |
+| 宿主与平台边界 | 产品层严禁出现特定 AI 宿主、IDE 或具体团队工具名；`HostingProvider` 保持协议中立，当前仅注册 `github` 并在未匹配主机降级 `generic-git` | 新增平台接口不破坏核心零依赖与协议中立约束 |
 
 ### 明确非目标（Non-Goals）
 
-- 不生成业务应用逻辑，不替项目选定技术栈、版本号或开源许可证。
+- 不生成业务应用逻辑，不替项目选定技术栈、版本号或开源许可证（`[v7 规划 M3]` 废除空白起步硬编码 6 栈玩具代码）。
 - 不执行服务器运维部署、云资源开通或依赖包安装决策。
 - 不绑定特定 AI 宿主名称、私有环境变量或私有路径；不覆盖既有手写规范、双许可声明与项目自有扩展技能。
+- 不为压缩体积而删除 `AGENTS.md` 中的高信号协作防呆守则（始终保留自动路由、工程原则、协作全链路、双写、七步收尾与防乱码规范）。
 
 ### 术语表
 
 | 术语 | 系统内语义 | 对应代码与数据载体 |
 | --- | --- | --- |
 | 产品层与自用层 | 分发给用户的工具包文件与仅限本仓内部开发自用的门禁/治理文件 | `.gitattributes`、`scripts/lib/protocol.mjs`（`isRepoOnlyPath`） |
-| 两档渐进装配 | `lightweight`（`< 14KB` 契约 + 3 核心技能）与 `full`（全套 5 技能 + 协作/发版骨架） | `scripts/equip.mjs`、`scripts/compose-agents.mjs` |
-| v2 账本与墓碑 | 记录托管文件哈希、档位、`disabledSkills`、`removedFiles`、`customizedFiles` 与区间基线 | `.agents/skills/.pf-manifest.json` |
-| `HostingProvider` | 平台抽象注册契约与多远端 `remotes[]` 拓扑模型，未匹配主机退化为 `generic-git` | `scripts/lib/platform/registry.mjs`、`kit/skills/lib/platform.mjs` |
-| 双轴五态身份 | 结合「远端拓扑」与「认证写权限」判定的工作区协作角色，另有外部 PR 审校轨 | `scripts/lib/platform/github.mjs`、`kit/skills/lib/platform.mjs` |
-| 写前增量快照 | 写前在仓外创建的 `.tar.gz` 备份包，按 `treeSha256` 去重并保留初始 `pre-forge` 基线 | `scripts/backup.mjs` |
-| 成对归档 | 需求完结后将关联 `PRD`、`SPEC`、`Todo` 一并 `git mv` 至归档目录并重算 `related_*` 互链 | `kit/skills/lib/docs.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` |
-| 双门与六锁收口 | 独立审查的运行实证门、结构 hygiene 门以及防死循环停损机制 | `kit/skills/dev-review/scripts/review-pack.mjs` |
+| 共享运行时 vs 安装器边界 | `kit/skills/lib/` 仅承载被治理项目日常流转与顶层脚本共用的运行时原语；`scripts/lib/` 保留首次锻造/升级/交棒专用逻辑，防止将安装器内部代码打入目标仓 | `kit/skills/lib/shared.mjs`、`scripts/lib/protocol.mjs` |
+| 两档渐进装配 | `lightweight`（`< 14KB` 契约 + 3 核心技能）与 `full`（`<= 30KB` 契约 + 全套 5 技能与协作骨架）；`[v7 规划 M3]` 保护项目自有大篇幅规则不被受管模板预算挤爆与误阻断 | `scripts/equip.mjs`、`scripts/compose-agents.mjs` |
+| v2 账本与墓碑 | 记录托管文件哈希、档位、`disabledSkills`、`removedFiles`、`customizedFiles` 与区间基线（`[v7 规划 M3]` 修复定制区与 `--check` 冲突） | `.agents/skills/.pf-manifest.json` |
+| `HostingProvider` | 平台抽象注册契约与多远端 `remotes[]` 拓扑模型，未匹配主机退化为 `generic-git`（`[v7 规划 M3]` 统一 `TaskBackend` 抽象） | `scripts/lib/platform/registry.mjs`、`kit/skills/lib/platform.mjs` |
+| 双轴五态身份 | 结合「远端拓扑」与「认证写权限」判定的工作区协作角色，另有外部 PR 审校轨（`[v7 规划 M3]` 扩充互链/堆叠图谱） | `scripts/lib/platform/github.mjs`、`kit/skills/lib/platform.mjs` |
+| 写前增量快照 | 写前在仓外创建的 `.tar.gz` 备份包（`[v7 规划 M1]` 演进为纯 JS `.zip` 默认输出并向下兼容恢复历史 `.tar.gz`），按 `treeSha256` 去重并钉住 `pre-forge` 基线 | `scripts/backup.mjs`、`scripts/zip.mjs` |
+| 成对归档与 1:N PRD | 需求完结后将关联 `PRD`/`SPEC`/`Todo` 一并 `git mv` 至归档目录（`[v7 规划 M2]` 支持多切片总控 PRD 等子切片全部完结后再归档） | `kit/skills/lib/docs.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` |
+| 双门与六锁收口 | 独立审查的运行实证门、结构 hygiene 门以及防死循环停损机制（`[v7 规划 M2/M3]` 落为代码层 Round 2+ 视野硬锁与 `roundBaseSha` 支持） | `kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-review/scripts/review-ledger.mjs` |
 
-## 2. 系统架构全景（双平面与自举拓扑）
+## 2. 系统架构全景（双平面、四层正交与自举拓扑）
 
-仓库严格划分为**产品层**与**自用层**两个平面，通过 `.gitattributes`（`export-ignore`）与 `scripts/lib/protocol.mjs`（`REPO_ONLY_DIRS`、`REPO_ONLY_FILES`）双端对齐，确保打包导出时完整剔除内部门禁与治理记录，同时在本仓通过 `scripts/equip.mjs` 与 `scripts/compose-agents.mjs` 完成同构自举。
+仓库严格划分为**产品层**与**自用层**两个平面，通过 `.gitattributes`（`export-ignore`）与 `scripts/lib/protocol.mjs`（`REPO_ONLY_DIRS`、`REPO_ONLY_FILES`）双端对齐。在产品层内部，按以下四层正交边界收敛演进：
+
+1. **L1 基础原语层（`kit/skills/lib/git.mjs`、跨平台命令执行、`scripts/zip.mjs` 等）**：无弹窗进程执行（`[v7 规划 M1]` 补齐 Windows `.cmd` 解析、`[v7 规划 M3]` 补齐 `gitCommonDir` 互斥锁与 `.git/*.lock` 退避）、Worktree 共享路径与纯 JS 归档。
+2. **L2 环境与拓扑抽象层（`kit/skills/lib/platform.mjs`、`github-client.mjs`、`profile.mjs`、`docs.mjs` 等）**：`[v7 规划 M1/M3]` 收敛双端平台探测与项目三层嗅探、统一 `TaskBackend`、以及外部互链/堆叠 Issue-PR 图谱。
+3. **L3 纯策略与状态机引擎层（`kit/skills/lib/static-gates.mjs`、`ledger.mjs` 等）**：`[v7 规划 M2]` 抽离无副作用纯函数，确定性输出阻塞器、`next` 单入口动作与三正交分级审查策略。
+4. **L4 薄 CLI 入口层与安装器层（`kit/skills/*/scripts/` 与 `scripts/*.mjs`）**：调用 L3 决策与 L1/L2 副作用，首次锻造专用逻辑留驻 `scripts/lib/` 绝不反向进入 `kit/skills/lib/`。
 
 ```mermaid
 flowchart TB
   subgraph Product["产品层（用户包）"]
     Entry["入口与参考判据"]
     Tpl["模板母版骨架"]
-    CLI["顶层引擎脚本"]
-    Libs["共享内核与探针"]
-    Kit["内置研发套件源"]
+    CLI["顶层锻造脚本"]
+    ForgeLib["scripts 安装库"]
+    KitLib["kit 运行时内核"]
+    Kit["内置研发五套件"]
     Assets["门面与矢量图"]
   end
 
@@ -82,7 +90,9 @@ flowchart TB
 
   Entry --> CLI
   Tpl --> CLI
-  CLI --> Libs
+  CLI --> ForgeLib
+  CLI --> KitLib
+  Kit --> KitLib
   Kit -- "单向生成" --> Equipped
   Tpl -- "渲染契约" --> HostCfg
   DevSuite -- "核验一致性" --> CLI
@@ -94,21 +104,21 @@ flowchart TB
 | 模块 / 目录 | 层级 | 核心职责与入口文件 |
 | --- | --- | --- |
 | `SKILL.md`、`references/`、`templates/` | 产品层 | 调度总纲、分域权威判据与无条件残留渲染母版 |
-| `scripts/survey.mjs` | 产品层 | 只读勘察入口（`survey`、`computeArtifactPlan`、`judgeRole`、`detectReentry`） |
-| `scripts/equip.mjs` | 产品层 | 两档五技能 v2 账本装配、墓碑保护与六栈空目录起步（`equip`、`checkEquip`） |
-| `scripts/backup.mjs` | 产品层 | 纯内置 `node:zlib` tar.gz 写前快照与还原，钉住首份 `pre-forge` 基线 |
-| `scripts/compose-agents.mjs` | 产品层 | 受管 `AGENTS.md` 按档渲染、增量刷新、`removedAgentsRegions` 尊重与 30KB 校验 |
+| `scripts/survey.mjs` | 产品层 | 只读勘察入口（`survey`、`computeArtifactPlan`、`judgeRole`） |
+| `scripts/equip.mjs` | 产品层 | 两档五技能 v2 账本装配、墓碑保护与空仓起步（`equip`、`checkEquip`） |
+| `scripts/backup.mjs`、`scripts/zip.mjs` | 产品层 | 纯内置 `node:zlib` 仓外快照与还原（当前 `.tar.gz`；`[v7 规划 M1]` 切为 `.zip` 主格式并兼容恢复 `.tar.gz`） |
+| `scripts/compose-agents.mjs` | 产品层 | 受管 `AGENTS.md` 按档渲染、增量刷新、`removedAgentsRegions` 尊重与预算校验 |
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（`reviewProject`、`readDecisions`）与交棒扫描（`VERIFY_EXIT` 0/1/3/4） |
-| `scripts/update.mjs`、`scripts/zip.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 原子自更新、zip 只读解包检验与双语 README 目录同步 |
-| `scripts/lib/` | 产品层 | 14 个核心子模块与 `scripts/lib/platform/` 平台探针层（见下表） |
-| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`platform.mjs`、`github-client.mjs`），随套件复制进目标项目 |
+| `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 原子自更新与双语 README 目录同步 |
+| `scripts/lib/` | 产品层 | 首次锻造/升级/交棒专用库（当前含 `14` 模块及 `scripts/lib/platform/`；`[v7 规划 M1]` 将双端共用平台探测收敛入 `kit/skills/lib/`） |
+| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`（含 `checkMermaidLabelWidth`）、`platform.mjs`、`github-client.mjs`） |
 | `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
-| `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs`、`doc-audit.mjs`、`checkMermaidLabelWidth`） |
+| `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs`，配合 `doc-audit.mjs`） |
 | `kit/skills/dev-flow/` | 产品层 | 隔离流转与实时认领（`flow.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`worktree-deps.mjs`） |
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层与跨版本采集（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | `preflight.mjs`（含 `contracts`/`suite`/`e2e` 子模块）、`gap-coverage.mjs`、`fixtures.mjs`（含 9 个领域夹具模块，支持 `--only` 定向与 `--jobs` 并发）、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
+| `scripts/dev/` | 自用层 | `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 
@@ -122,16 +132,16 @@ flowchart TB
 | `scripts/lib/text.mjs` | UTF-8 严读、路径归一与 SSH 别名 | `readUtf8Strict`、`canonicalPath`、`samePath`、`parseSshConfigHostMap`、`githubRepoPath` |
 | `scripts/lib/fs-atomic.mjs` | 进程安全临时文件与原子写回 | `tempPathFor`、`clearStaleTemps`、`writeAtomic` |
 | `scripts/lib/update-ops.mjs` | 原子更新暂存校验与冷却状态 | 同盘 `stageAndValidatePackage`、写前备份与原地回滚、全深度退役清理、`FAILURE_COOLDOWN_MS`（15 分钟） |
-| `scripts/lib/starter-templates.mjs` | 空白目录六栈起步与初始 TDD | 支持 `node`、`python`、`go`、`rust`、`java`、`docs` 起步骨架及标准化 `starterTdd` |
+| `scripts/lib/starter-templates.mjs` | 空白目录起步与初始 TDD | `bootstrapEmpty`、`starterTemplates`（当前支持 6 栈；`[v7 规划 M3]` 转为通用治理基线） |
 | `scripts/lib/agents-sections.mjs` | `AGENTS.md` 区间刷新与 v2 兼容检查 | `filterIntentRouting`、`refreshRegions`、`driftRegions`、`inspectKitManifestForReview` |
-| `scripts/lib/survey-ecosystem.mjs` | 生态、命令、工作区与制品探测 | 多包清单与任务入口提取、`detectUniversalCommands`（清单外语言从 CI 的 `run` 块与 Makefile/justfile 读取已被真实执行的命令）、运行环境要求探测 |
+| `scripts/lib/survey-ecosystem.mjs` | 生态、命令、工作区与制品探测 | 多包清单与任务入口提取、`detectUniversalCommands` |
 | `scripts/lib/survey-workspace.mjs` | 工作区遍历、Git 事态、文档与凭据扫描 | `walkWorkspace`、`detectGit`、`detectDocs`、`detectConventions` |
 | `scripts/lib/survey-reentry.mjs` | 套件现状、自有技能与重入漂移检测 | `isReentryProject`、`detectKit`、`detectLocalSkills`、`detectTddStalePaths`、`detectStaleAgentScripts` |
 | `scripts/lib/survey-plan.mjs` | 探索分片策略与装配档位推荐 | `computeExplorationStrategy`、`computeRecommendedTier` |
-| `scripts/lib/survey-gap-rules.mjs` | 勘察的缺口判据表（条件、面向用户的说明、体检处置映射） | `GAP_RULES`；由 `survey.mjs` 的 `judgeGaps` 展开，`gap-coverage.mjs` 按源码核对处置覆盖 |
+| `scripts/lib/survey-gap-rules.mjs` | 勘察的缺口判据表 | `GAP_RULES`；由 `survey.mjs` 的 `judgeGaps` 展开，`gap-coverage.mjs` 核对覆盖 |
 | `scripts/lib/platform/registry.mjs` | 平台抽象注册表与多远端拓扑模型 | `registerHostingProvider`、`resolveRemotesTopology`、`GENERIC_GIT_PROVIDER`、`classifyTopologyIdentity` |
-| `scripts/lib/platform/github.mjs` | GitHub 适配器入口（配合 `github-client.mjs`、`github-probe.mjs`、`index.mjs`） | `GITHUB_PROVIDER`、`probeGitHubEnv`、`resolveWorkspaceIdentity`、`createGitHubClient` |
-| `kit/skills/lib/shared.mjs` | 套件统一兼容导出出口 | 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`platform.mjs`、`github-client.mjs` |
+| `scripts/lib/platform/github.mjs` | GitHub 适配器入口 | `GITHUB_PROVIDER`、`probeGitHubEnv`、`resolveWorkspaceIdentity`、`createGitHubClient` |
+| `kit/skills/lib/shared.mjs` | 套件统一兼容导出出口 | 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`（`checkMermaidLabelWidth`）、`platform.mjs`、`github-client.mjs` |
 
 ### 模块分层与禁引规则（`arch-rules`）
 
@@ -139,7 +149,7 @@ flowchart TB
 arch-rules: kit/** -> scripts/dev/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
 ```
 
-- **单向依赖边界**：`kit/skills/` 只允许引用 `kit/skills/lib/` 与 `node:*`；顶层 `scripts/*.mjs` 只允许依赖 `scripts/lib/` 与同级运行时模块（如 `scripts/backup.mjs`）；`scripts/lib/` 保持无环纯函数与平台探针职责；只有 `scripts/dev/` 允许跨平面读取产品层进行验证，反向依赖一概阻断。
+- **单向依赖边界**：`kit/skills/` 只允许引用 `kit/skills/lib/` 与 `node:*`（由 `preflight-suite.mjs` 强制禁止 `kit/** -> scripts/**`，`[v7 规划 M1]` 同步写入上方 `arch-rules` 声明）；顶层 `scripts/*.mjs` 只允许依赖 `scripts/lib/`、`kit/skills/lib/` 与同级运行时模块；`scripts/dev/` 允许跨平面读取产品层进行验证。
 
 ### 功能与入口地图（Feature Map）
 
@@ -166,8 +176,8 @@ arch-rules: kit/** -> scripts/dev/**, scripts/*.mjs -> scripts/dev/**, scripts/l
 ```mermaid
 flowchart TD
   S1["S1 只读勘察"] --> Branch{"目录状态"}
-  Branch -- "空白起步" --> Ask["询问起步三四问"]
-  Ask --> Boot["生成六栈起步"]
+  Branch -- "空白起步" --> Ask["询问栈与意向"]
+  Ask --> Boot["生成起步基线"]
   Boot --> S3Kit["按档位装配套件"]
 
   Branch -- "存量重入" --> Plan["S2 制品处置定界"]
@@ -186,25 +196,11 @@ flowchart TD
 
 ### 三场景调度与 `computeArtifactPlan` 十一项定界
 
-1. **空白目录（`maturity: 'empty'`）**：`computeExplorationStrategy` 输出 `tier: 'none'`，跳过探索子代理开销，经 `bootstrapEmpty` 为 `node`、`python`、`go`、`rust`、`java` 或 `docs` 六类项目写入 `.gitattributes`、`.gitignore`、`README.md`、可运行起点代码与测试、初始 `docs/TDD.md` 及 `docs/{prd,specs,todo}/.gitkeep`。
-2. **存量项目接入与两档推荐**：`computeRecommendedTier` 按有效文件数、多包布局与协作信号推荐 `lightweight` 或 `full`；当代码文件数 `> 80`、多生态多子包或重入存在漂移时，`computeExplorationStrategy` 升级为 `parallel-subagents` 并输出互不重叠的 `shards` 供 S3 并行只读探索；若已有 `ARCHITECTURE.md`、`*-TDD.md`、`docs/{design,architecture,adr}/` 等存量架构文档，`artifactPlan` 对 `docs-tdd` 输出 `preserve` 防双轨冲突。
-3. **跨月重入校准**：仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入（不误判存量手写 `AGENTS.md`）；`detectReentry` 检测 `staleTddPaths`、`staleAgentPaths`、按 `commandsByEcosystem` 逐栈校验的 `staleAgentScripts` 与 `unregisteredTopDirs`，仅定点校准失效引用与新增模块。
+1. **空白目录（`maturity: 'empty'`）**：`computeExplorationStrategy` 输出 `tier: 'none'`，跳过探索子代理；当前通过 `bootstrapEmpty` 生成 6 栈起步（`[v7 规划 M3]` 演进为通用治理基线 + 放行已有 `README`/`LICENSE`，由用户选任意栈后反推 `Dev Profile` 且初装即过 `--check`）。
+2. **存量项目接入与两档推荐**：`computeRecommendedTier` 按有效文件数、多包布局与协作信号推荐 `lightweight` 或 `full`；当代码文件数 `> 80`、多生态多子包或重入存在漂移时，升级为 `parallel-subagents` 并输出 `shards`；`[v7 规划 M3]` 统一为三层优先级命令嗅探。
+3. **跨月重入校准与仓外备份解析**：仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入。`scripts/backup.mjs` 按优先顺序解析仓外备份根路径：`PF_BACKUP_DIR/<slug>-<hash8>` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>`，滚动清理时永久钉住最新一份 `pre-forge` 基线。
 
-| `artifactPlan` 项 | 覆盖对象 | 关键判定与不覆写边界 |
-| --- | --- | --- |
-| `pre-backup` | 写前仓外快照 | 非空目录写前必先 `snapshot`（空目录 `skip`），由 `treeSha256` 阻止重复包 |
-| `git-baseline` | `.git`、`.gitattributes`、`.gitignore` | 识别裸仓与非根子目录（`ask-human`），补齐忽略项并保留已有历史 |
-| `kit-skills` | `.agents/skills/` 与自有技能 | 按 `recommendedTier` 与 v2 墓碑/定制状态升级，原样保留自有扩展技能 |
-| `docs-tdd` | `docs/TDD.md` | 纯文档或 0 源码 `skip`；已有存量设计文档 `preserve`；缺则 `create`；漂移 `calibrate` |
-| `agents-contract` | `AGENTS.md` | 吸收既有 AI 约定，检测失效引用与 30KB 上限；按档生成或无损刷新 |
-| `readme` | `README.md` 与多语版本 | 已有 `README` 严格 `preserve`，严禁拿模板全篇重写 |
-| `contributing` | `CONTRIBUTING.md` | 仅维护者有远端时提示可选，纯本地或 Fork 贡献仓自动 `skip` |
-| `license` | `LICENSE`（含双许可） | 已有许可一律 `preserve`；缺失时归类 `ask-human`，AI 不擅自代选 |
-| `releasing` | `RELEASING.md` 与发版说明 | 仅可发布包、已有标签或已有发布流时 `create`，不强改既有 `CHANGELOG` |
-| `ci-check` | `.github/workflows/check.yml` | 仅 GitHub 远端且有可执行命令时补齐；`contributor-fork` 与 `generic-git` 跳过；拦截高危 `pull_request_target` |
-| `ci-release` | `.github/workflows/release.yml` | 识别既有工具链 `preserve`，否则走 5 选 1 发版策略（默认零额外 Secret） |
-
-### `.pf-manifest.json` v2 账本状态机与写前备份
+### `.pf-manifest.json` v2 账本状态机与仓外备份
 
 ```mermaid
 stateDiagram-v2
@@ -225,12 +221,23 @@ stateDiagram-v2
   Retired --> Orphaned: "曾改则保留"
 ```
 
-- **跨平台文本归一与无损升档**：`equip.mjs` 写入文本文件统一采用 LF，比对 SHA256 时对 CRLF/LF 做归一等价以消除跨系统误报漂移；`diskHash === src.sha256` 自动收敛新基线；随时可运行 `--tier full` 无损补齐缺项；`--adopt-custom` 将手改文件登记至 `customizedFiles` 使 `--check` 返回 0 并提示上游变化。
-- **仓外备份基线钉住**：`scripts/backup.mjs` 按优先顺序解析仓外备份根路径（`PF_BACKUP_DIR/<slug>-<hash8>` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>`），滚动清理时永久钉住最新一份 `pre-forge` 基线快照不被挤出。
+| `artifactPlan` 项 | 覆盖对象 | 关键判定与不覆写边界 |
+| --- | --- | --- |
+| `pre-backup` | 写前仓外快照 | 非空目录写前必先 `snapshot`（空目录 `skip`），由 `treeSha256` 阻止重复包 |
+| `git-baseline` | `.git`、`.gitattributes`、`.gitignore` | 识别裸仓与非根子目录（`ask-human`），补齐忽略项并保留已有历史 |
+| `kit-skills` | `.agents/skills/` 与自有技能 | 按 `recommendedTier` 与 v2 墓碑/定制状态升级，原样保留自有扩展技能（`[v7 规划 M3]` 修复降档误删） |
+| `docs-tdd` | `docs/TDD.md` | 纯文档或 0 源码 `skip`；已有存量设计文档 `preserve`；缺则 `create`；漂移 `calibrate` |
+| `agents-contract` | `AGENTS.md` | 完整保留全部会话必注高信号防呆守则；吸收既有 AI 约定（`[v7 规划 M3]` 修复定制区 `--check` 死结与多行注释劈断） |
+| `readme` | `README.md` 与多语版本 | 已有 `README` 严格 `preserve`，严禁拿模板全篇重写 |
+| `contributing` | `CONTRIBUTING.md` | 仅维护者有远端时提示可选，纯本地或 Fork 贡献仓自动 `skip` |
+| `license` | `LICENSE`（含双许可） | 已有许可一律 `preserve`；缺失时归类 `ask-human`，AI 不擅自代选 |
+| `releasing` | `RELEASING.md` 与发版说明 | 仅可发布包、已有标签或已有发布流时 `create`，不强改既有 `CHANGELOG` |
+| `ci-check` | 检查工作流 | 仅 GitHub 远端且有可执行命令时补齐；`contributor-fork` 与 `generic-git` 跳过；拦截高危 `pull_request_target` |
+| `ci-release` | 发布工作流 | 识别既有工具链 `preserve`，否则走 5 选 1 发版策略（默认零额外 Secret） |
 
 ## 4. 双轴五态身份、平台抽象与双轨通道
 
-`scripts/lib/platform/registry.mjs` 定义标准 `HostingProvider` 契约与多远端 `remotes[]` 拓扑模型（产品层注册表仅注册 `github`），`kit/skills/lib/platform.mjs` 与之保持相同判定语义；未匹配已注册主机的远端退化为 `GENERIC_GIT_PROVIDER`（`generic-git`），放行本地分支、Worktree 隔离与独立审查全流程，不因未识别托管域名而误判 `undetermined` 阻断工作流。
+`scripts/lib/platform/registry.mjs` 定义标准 `HostingProvider` 契约与多远端 `remotes[]` 拓扑模型（当前产品层仅注册 `github`），`kit/skills/lib/platform.mjs` 与之保持相同判定语义；未匹配已注册主机的远端退化为 `GENERIC_GIT_PROVIDER`（`generic-git`）。
 
 ```mermaid
 flowchart TD
@@ -248,32 +255,30 @@ flowchart TD
   Probe -- "离线" --> Fallback["离线保守判定"]
 ```
 
-### 五态权限边界表
+### 五态权限边界与关键锁
 
-| 身份与范围 | 推送分支与 PR 轨道 | 合并与清理约束 |
-| --- | --- | --- |
-| `local-only` / `generic-git` | 本地分支提交、三档隔离与测试审查 | 跳过平台接口调用；`generic-git` 允许正常推远端并由人工自建 MR |
-| `maintainer`（`owner`） | 同源独立特性分支 -> 推 `origin` -> 开 PR | 独立审查通过后由审查者合并；禁直推主干与私自发版 |
-| `maintainer`（`team-collaborator`） | 公开/私有仓均走同源独立分支开 PR（非 Fork） | 零历史新成员先 `--probe-auth`；`claim` + 接管双写；遵守 `CODEOWNERS` / Merge Queue；`reviewerId !== implementerId` |
-| `contributor-fork` | 仅推个人 `origin` Fork 分支 -> 向 `upstream` 开 PR | 硬禁止 `merge`；上游 PR `OPEN` 时硬禁止删 Fork 分支；标签 403 自动降级 |
-| `clone-readonly` / `undetermined` | 先由人三选一（建 Fork / 新建仓 / `.git/pf-local-mode`） | 阻断推送与合并；同源离线场景输出 `teamProbeHint` 引导验权 |
-| `inbound-external-pr` | 只读审查工作树隔离检出 `FETCH_HEAD` | 必先过 `--untrusted-scan` 再经人类放行运行测试 |
+- `maintainer`（`owner` / `team-collaborator`）：同源独立分支开 PR，禁直推主干；零历史成员先 `--probe-auth`，`claim` + `--takeover` 双写，遵守 `CODEOWNERS` 与 Merge Queue；若 `AGENTS.md`「## 取舍」写 `merge-authority: human` 则全部 PR 合并收回人工。
+- `contributor-fork`：只推个人 `origin` Fork 分支向 `upstream` 开 PR；硬禁止 `merge` 与上游 PR 仍 `OPEN` 时删 Fork 分支；写标签遇 403 自动降级。
+- `clone-readonly` / `undetermined`：停下由人选 `--clone-choice fork|standalone|local`；`inbound-external-pr` 必先过 `--untrusted-scan` 再经人类确认运行测试。
+- `local-only` / `generic-git`：`local-only` 走本地分支与审查全流程；`[v7 规划 M2]` 修复 `generic-git` 有远端时不越权本地强行 `git merge` 进主干。
 
 ### 双轨四级传输与 API 通道
 
-- **Track A（Git 传输与无远端探测）**：所有子进程注入 `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=echo`、`SSH_ASKPASS=''`、`SSH_ASKPASS_REQUIRE=never`、`GCM_INTERACTIVE=never` 与 `GH_PROMPT_DISABLED=1`，`git credential fill` 设 `5000ms` 硬超时；SSH 探测使用 `StrictHostKeyChecking=yes`（不自动写 `~/.ssh/known_hosts`）并解析 `~/.ssh/config` `Host -> HostName` 别名；传入 `--probe-auth` 时无远端目录同样只读探测本机可用凭据以引导建仓。
-- **Track B（GitHub API 四级降级）**：`gh-cli` -> `node-https-token`（令牌锁在 `WeakMap` 内存，可选 `GET /user` 轻量验活淘汰过期凭据）-> `mcp-delegate`（仅当 `mcpAvailable` 为真时委托宿主）-> `half-duplex` / `offline`（生成一键开 PR 链接或写本地账本）。
+- **Track A（Git 传输与惰性鉴权）**：所有子进程注入无弹窗环境变量、`5000ms` 超时且不写 `~/.ssh/known_hosts`，解析 `~/.ssh/config` `Host -> HostName` 别名。`[v7 规划 M1]` 严格执行惰性探测：未传 `--probe-auth` 时严禁调用外部 `gh` / `git credential fill` / SSH 网络探测。
+- **Track B（GitHub API 四级降级）**：`gh-cli` -> `node-https-token`（令牌锁在 `WeakMap` 内存）-> `mcp-delegate`（仅当 `mcpAvailable` 为真）-> `half-duplex` / `offline`。
 
-## 5. 内置研发工作流套件（五套 Skill 日常流转）
+## 5. 内置研发工作流套件（五套 Skill 日常流转与 v7 演进）
 
-日常改动通过 `AGENTS.md` 顶部的静默自然语言路由直接调度 `.agents/skills/` 内已装配的技能（`lightweight` 档装配前 3 套，`full` 档装配全套 5 套；`[NEXT STEP]` 现场探测磁盘已安装技能动态调整输出）。五套脚本共用 `kit/skills/lib/` 正交模块与标准 CLI 解析器（`parseStandardCli`），支持位置目录 / `--dir` / `--k=v`、未知参数拦截与零记忆自动推断 `--task` / `--round`。
+日常改动通过 `AGENTS.md` 顶部的静默自然语言路由直接调度 `.agents/skills/` 内已装配的技能（`lightweight` 档装配前 3 套，`full` 档装配全套 5 套；不绑定任何特定宿主或工具名）。
+
+### 当前实现基线与 `[v7 规划 M2–M4]` 演进方向
 
 ```mermaid
 flowchart LR
   Explore["dev-explore"] --> Plan["dev-plan"]
   Plan --> FlowStart["dev-flow 认领"]
-  FlowStart --> Code["实施与快测验证"]
-  Code --> Finalize["归档与 verify"]
+  FlowStart --> Code["实施与分层实证"]
+  Code --> Finalize["同步与 verify"]
   Finalize --> Review["dev-review 审查"]
   Review -- "未过返工" --> Code
   Review -- "触发停损" --> Human["人类维护者裁决"]
@@ -281,71 +286,49 @@ flowchart LR
   Merge --> Govern["dev-govern"]
 ```
 
-- **`dev-explore`（`repo-map.mjs`）**：Git 仓库采用 `git ls-files -z` 与前 4KB NUL 字节探测（无深度限制，完整覆盖深层包目录与前后端分离仓库），提取带 `working-directory` 的多行 CI 验证步骤与多生态包清单，输出 `reusableModules`、`featureMap` 与热点文件。
-- **`dev-plan`（`doc-plan.mjs`、`doc-audit.mjs`）**：判定 Case 1–5 与 `doorType`（`two-way` / `one-way`），统一调用 `renderStandardDocTemplate`（`docs.mjs` / `doc-templates.mjs`）生成含 YAML Frontmatter 与顶部可见元信息表的工程文档；`auditDoc` 执行两遍 `(new)` 路径收集、`checkMermaidLabelWidth`（`16/12` 与禁用 HTML）、`VAGUE_CRITERION` 及 `coupledSyncWarnings` 核对；支持 `archive` 与 `supersede` 成对归档与替代状态管理。
-- **`dev-flow`（`flow.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`worktree-deps.mjs`）**：
-  - 统一通过 `ledger.mjs`（`resolveTaskContext`）从当前 worktree、分支或唯一活跃任务自动推断 `--task`，支持 `status`、`abort`、`release` 及 `start --create-issue` 自动建单联动重命名文档；自动检测 `MERGE_HEAD`/`REBASE_HEAD`/`CHERRY_PICK_HEAD` 冲突态与 unborn HEAD。
-  - `claim` 在远端模式先调用 `listComments` 检查 `pf-state` 认领互斥（未传 `--takeover --reason` 时阻断防撞车；带接管参数时双写 Issue 与关联 PR）；`release` 在放弃认领时写释放评论并卸除 `in-progress` 标签。
-  - `start` 保留并迁入 `doc-plan` 匹配文档；`submit` 与 `review-pack` 自动通过 `syncDetachedWorktree` 将干净 `.worktrees/review-<taskId>/` 推进到待审分支最新 `HEAD` 并挂载依赖，彻底消除 `baseSha...baseSha` 空 Diff 断链。
-  - `worktree-deps.mjs` 按子包独立比对锁文件 SHA256，探测到 Workspace 本地包软链或 Python editable `.venv` 指回主仓时自动隔离；清理前检验 `samePath(mainAbs, wtAbs)` 并对链接执行 `unlinkSync` 解绑；`cleanup` 复用 `git cherry` + `git patch-id` 四态判定兼容 Squash/Rebase 合入分支。
-  - `finalize` 执行 `archiveCompletedDocsGroup` 成对归档并检查源码模块边界变动时权威架构文档（`resolveAuthoritativeTddPath`）是否同步更新日期；`verify` 严格尊重 `Dev Profile` 中的显式 `none` 禁用态；`merge` 强制核对 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered` 且 `implRoot` 干净，支持触发 `STOP_LOSS_ESCALATE` 后经人类明确批准放行，检测到弱化门禁仍以退出码 `4` 阻断。
-- **`dev-review`（`kit/skills/dev-review/`）**：`review-pack.mjs` 与同级子模块（`review-diff.mjs`、`review-gates.mjs`、`review-ledger.mjs`）共用 `static-gates.mjs` 词法剥离器（消除 C 宏与 Rust 生命周期误报），修复 `--untrusted-scan` 死代码与双斜杠 `do-not-edit` 匹配，`--json` 默认输出 diff 摘要（传 `--include-diff` 可选全文），`record` 记入 `rebutted`/`resolved` 状态与 `--visual-checked`、在关联 PR/Issue 且非离线时自动拼装四字段审查评论实时双写 PR 与 Issue 并贴 `changes-requested` / `reviewed` 标签（403 自动降级，离线静默写本地账本不阻塞），支持人工解锁停损并接入 `checkMermaidLabelWidth`。
-- **`dev-govern`（`kit/skills/dev-govern/`）**：`govern-audit.mjs` 与同级子模块、`release-prep-lib.mjs` 支持纯子命令与向下兼容 flag，基于 `<mainRoot>/.worktrees/.state/govern-baseline.json` 与 `--changed` 实现存量零噪音增量审计；通过 `resolveAuthoritativeTddPath` 识别异构权威架构文档、将 `Dev Profile`/CI 实测命令计入 `testInventory`、区分 TDD CLI 命令串与裸文件路径；修复 worktree 状态根写回、跳过 macOS 元数据、`it.skip`/`it.only` 统计与 `--write-todo` 标准格式对齐，并接入 `checkMermaidLabelWidth`。
+- **Worktree 隔离与成对复用**：当前 `flow-inspect.mjs` 分 Tier 1（主仓切分支）与 Tier 2（`.worktrees/impl-*` + `.worktrees/review-*`）；`[v7 规划 M2]` 废除 `mainRoot` 原地切分支，有提交仓一律落入 `impl-*` 并按任务复用至多 1 个 `impl` + 1 个 `review`（返工改锁文件自动解绑旧 Junction），且本地合入全部改在临时 `--detach` worktree 试合复测后推进干净 `mainRoot`。
+- **单入口路由与三正交策略**：`[v7 规划 M2]` 在 `flow.mjs` 新增 `next` 单入口并结合远端全部 `pf-state` 标记做跨会话重建；在 `verify`/`submit`/`merge` 现场依完整 `diff` 判定 `low`/`medium`/`high` 三档策略与严格分层 `evidence.json`（修净 `submit` 推后改文档脏区、`generic-git` 越权强合、`verify --tier quick --target` 旁路等问题）。
+- **外部图谱、并行调度与收敛硬锁**：`[v7 规划 M2/M3]` 把六锁 + 收敛四律（超过 3 轮停思、Round 2+ 硬拒未改旧行新刺、Round 1 列全、不重提）+ `findingsBlocker` + 4 类反误报统计落入 `review-ledger.mjs` 硬拦截；补齐外部 Issue–PR 互链防重、堆叠 PR 增量与 `sync`（含 `roundBaseSha` / `range-diff`）、以及宿主无关的并行多 Worktree 波次规划、`withLock` 与串行 FIFO 合并队列。
+- **治理与死检测修复**：`[v7 规划 M4]` 修复 `static-gates.mjs` + `govern-tests.mjs` 中因 `ASSERTION_RE` 误匹配导致失效的零断言与纯 Mock 检测，打通 `signals.jsonl` 自动沉淀与建议补丁闭环。
 
 ## 6. 文档四层体系、成对归档与图表规范
 
 | 层级 | 路径或母版载体 | 定位与生命周期控制 |
 | --- | --- | --- |
-| 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 仅放当前机制、总纲、7 键 `Dev Profile`、`改哪看哪` 联动表与静默路由；`lightweight` 目标 `< 14KB`，`full` 上限 `30720`（`24576` 预警） |
-| 常青架构层 | `docs/TDD.md`、`templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图；按需章节不用整节删除 |
-| 需求基线层 | `templates/docs-prd.md`、`docs/prd/` | YAML Frontmatter + 顶部元信息表 + 冻结 `C1/C2`；与关联文档成对归档至 `docs/archive/prd/` |
-| 规格与任务单层 | `templates/docs-spec.md`、`docs/specs/`、`templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表（`SPEC` 含短名 Mermaid 图与模块变更对照表）；认领或关联 Issue 自动同步 `-issue<N>-` 与 `related_*`；随 `finalize` / `archive` 成对 `git mv` 归档至 `docs/archive/specs/` 与 `docs/archive/todo/` |
+| 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 完整保留自动意图路由、总纲、7 键 `Dev Profile`、高风险/联动表与日常协作全套防呆细则（`lightweight < 14KB`，`full <= 30KB`） |
+| 常青架构层 | `docs/TDD.md`、`templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图 |
+| 需求基线层 | `templates/docs-prd.md`、`docs/prd/` | YAML Frontmatter + 顶部元信息表 + 冻结 `C1/C2`；`[v7 规划 M2]` 增强 `docs.mjs` 支持多切片总控 PRD 维持 `active` 直至关联子 SPEC 全部完结才归档 |
+| 规格与任务单层 | `templates/docs-spec.md`、`docs/specs/`、`templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表；`[v7 规划 M2]` 合并 `doc-templates.mjs` 与 `templates/` 单一结构（补回 `## 断点与遗留决策`），随 `finalize` / `archive` 成对归档 |
 
-### Mermaid 防截断规范与预算单一真相源
-
-- **Mermaid 纯字符显示宽度硬上限**（全角/汉字计 `2` 单位、半角 ASCII 计 `1` 单位）：普通矩形节点与分组标题单行 `<= 16` 单位，菱形判断节点与边标签 `<= 12` 单位，严禁在节点或边标签内使用 `<br/>` 等 HTML 标签；详细路径与职责一律放在图表下方对照表。校验逻辑集中于 `kit/skills/lib/doc-templates.mjs`（经 `docs.mjs` 导出 `checkMermaidLabelWidth`）。
-- **预算与渲染单源**：入口与参考文档预算定义在 `scripts/lib/protocol.mjs`（`SKILL_MAX_LINES = 200`、`SKILL_MAX_BYTES = 16384`、`REFS_MAX_LINES = 2400`、`FULL_READ_MAX_LINES = 1000`、`KIT_SKILL_MAX_LINES = 180`）；条件块（`TEMPLATE_CONDITIONS` 含 `is-lightweight` / `is-full`）与占位变量（`TEMPLATE_VARS`）经 `scripts/lib/template.mjs` 一次性求值。
+- **Mermaid 纯字符显示宽度硬上限**：普通矩形与分组标题单行 `<= 16` 单位，菱形与边标签 `<= 12` 单位，严禁 HTML 标签；校验集中于 `kit/skills/lib/doc-templates.mjs`（经 `docs.mjs` 与 `shared.mjs` 导出 `checkMermaidLabelWidth`；`[v7 规划 M4]` 扩展至 `sequenceDiagram`/`stateDiagram`/`erDiagram`）。
 
 ## 7. 安全防线与核心不变量
 
-1. **零第三方运行时依赖**：`scripts/` 与 `kit/` 所有 `.mjs` 模块仅用 `node:*` 内置模块与包内相对路径。
-2. **只读勘察先行与凭据零落盘**：`survey.mjs` 与 `dev-explore` 全程不修改目标目录；所有 GitHub 令牌锁在 `WeakMap` 内存，绝不落盘或进入日志、stdout 与返回值。
-3. **原子更新与异常回滚**：`scripts/update.mjs` 在同盘 staging 校验整包结构与版本号后，先备份并更新业务文件、最后原子写入 `SKILL.md`；任何写入失败原地恢复旧版且不留下半新半旧损坏态。
-4. **不可逆边界与弱化门禁人审**：推送分档依据「是否可撤回」而非「是否对外」——推自己分支与开 PR 属日常可逆操作，合并默认分支、发版、改可见性与强推不可逆；任何弱化测试/断言/CI 门禁的操作必须人工确认。
-5. **文本清洁与指路稳定**：全仓严禁 Emoji 与非 GitHub 平台词；文档遵循 `oil-tone` 朴实直白文风；互指一律使用完整章节标题名而非易因重排失效的「第几节」指针；写入一律走 `writeAtomic` / `writeJsonAtomic`。
-6. **形式验证与实证验证优先于对抗式读代码**：确定性静态门禁与真实运行/UI 渲染交互及浅深色截图实证优先于静态读代码挑刺；主观未经实证的读代码意见不构成 `Must Fix` 阻塞项。
+1. **零第三方运行时依赖**：`scripts/` 与 `kit/` 所有 `.mjs` 模块仅用 `node:*` 内置模块。
+2. **只读勘察先行与凭据零落盘**：`survey.mjs` 与 `dev-explore` 全程不修改业务源码；令牌锁在 `WeakMap` 内存绝不落盘。
+3. **原子更新与异常回滚**：`scripts/update.mjs` 在同盘 staging 校验整包结构后原子替换（`[v7 规划 M1]` 补齐 `--check` 纯只读、`verifyInstalled` 全目录校验失败原子回滚与代理支持）。
+4. **不可逆边界与弱化门禁人审**：推送分档依据是否可撤回；任何弱化测试/断言/CI 门禁的操作强制人类确认（退出码 `4`）；删除工作树或分支前必须展示清单并经人类 `--confirm`。
+5. **文本清洁与三位一体优先级**：全仓严禁 Emoji 与非 GitHub 平台词（以及特定宿主耦合词）；坚持**形式验证与实证验证优先于纯静态读代码挑刺**；`[v7 规划 M2]` 在代码层落实防无限审查硬锁与停损保护。
 
-## 8. 门禁矩阵与故障注入自证
+## 8. 门禁矩阵与三位一体自证
+
+贯彻「**形式验证（静态不变量/规则图谱/故障注入必红） + 实证验证（真实运行与打包产物 E2E/跨平台 CI/性能基准） + 对抗性独立上下文审查（收敛硬锁下验证结构与边界）**」三位一体检验：
 
 | 验证脚本 | 检查覆盖面 | 触发时机与预期标准 |
 | --- | --- | --- |
-| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、孤儿脚本传递可达性、平台语义对齐、7 步/4 字段对拍、Mermaid `16/12`、套件 `<= 800` 行与端到端冒烟 | 每次提交前；退出码 `0`，`0` 项失败 |
-| `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 条遗漏或悬空 |
-| `scripts/dev/fixtures.mjs` | 身份判定、两档装配、v2 墓碑/定制、`HostingProvider` 降级、六栈起步、工作流状态机与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
+| `scripts/dev/preflight.mjs` | 入口预算、引用不断链、模板零残留、`Dev Profile` 单源、传递可达性、Mermaid 宽度、套件行数与端到端冒烟 | 每次提交前；退出码 `0` |
+| `scripts/dev/gap-coverage.mjs` | `survey` 全部 `GAP_RULE_IDS` 在 `review.mjs` 与文档指引中的配对覆盖率 | 每次改动勘察/体检规则后；`0` 项遗漏 |
+| `scripts/dev/fixtures.mjs` | 身份判定、两档装配、v2 墓碑/定制、`HostingProvider` 降级、工作流状态机与增量审计正反断言 | 每次改动判定或工作流后；`0` 项失败 |
 | `scripts/compose-agents.mjs` | 本仓 `AGENTS.md` 与 `templates/agents-project.md` 同步度及字节预算校验（`--check`） | 修改契约或模板后；退出码 `0` |
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
-| `scripts/sync-toc.mjs` | 双语 README 目录标题与 GitHub 锚点双向一致性（`README.md README.en.md --check`） | 修改 README 结构后；退出码 `0` |
-| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（削弱门禁、破坏指针、删去关键检测），每条注入独占一份副本并行验证对应检查必红；主工作区全程不被触碰 | 合流与发版前；全部故障可捕获 |
-| `scripts/dev/bench.mjs` | 300 文件基准仓库下 `survey.mjs` 耗时低于 `BUDGET_MS`（3000ms） | 修改扫描逻辑后；防止线性退化 |
+| `scripts/sync-toc.mjs` | 双语 README 目录标题与 GitHub 锚点双向一致性 | 修改 README 结构后；退出码 `0` |
+| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障验证对应检查必红 | 合流与发版前；全部故障可捕获 |
+| `scripts/dev/bench.mjs` | 300 文件基准仓库下 `survey.mjs` 耗时低于 `BUDGET_MS`（`3000ms`）（`[v7 规划 M1/M4]` 扩充 `flow`/`review`/`backup` 性能回归基线） | 修改扫描或流转逻辑后；防止退化 |
 | `scripts/dev/evidence.mjs` | 清点当前导出包 `skillVersion`、`skillSource`、条目列表与文件哈希（只读） | 发版前核对制品证据 |
 
-### 交棒退出码契约（`VERIFY_EXIT`）与回滚验证
+### 交棒退出码契约（`VERIFY_EXIT`）与跨文件对拍约定
 
-| 状态码 / 常量 | `handoff.mjs --verify` 语义 | 处理约定 |
-| --- | --- | --- |
-| `clean`（`0`） | 扫描完整且无任何受管标记或旧版残留 | 允许进入纯手动维护状态（保留 `.agents/skills/` 时保留 `.pf-manifest.json`） |
-| `dirty`（`1`） | 发现受管标记、待填 `fill` 或旧版路径残留 | 仅在维护者确认清场后剥除标记（不删业务内容与 `.agents/skills/`） |
-| `truncated`（`3`） | 扫描文件数或符号链接导致未扫全 | 禁止视为干净，必须核查剩余目录（已自动跳过 `.worktrees/` 与合法依赖链接） |
-| `notApplicable`（`4`） | 当前目标是 `project-forge` 自身仓库 | 本仓需要保留受管标记与校验链路，跳过剥除动作 |
-
-### 跨文件对拍与高风险路径复核约定
-
-| 同步链 | 对拍对象 | 防漏目标 |
-| --- | --- | --- |
-| 推送分档判据 | `SKILL.md`、`AGENTS.md`、`templates/agents-project.md`、`references/collaboration.md`、`README.md`、`README.en.md`、`CONTRIBUTING.md`、`templates/contributing.md`、`templates/pull-request-template.md` | 确保分支推送属日常可逆操作、审查者合并、仅弱化门禁须人工点头 |
-| 收尾七步命令链 | `templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md`、`kit/skills/dev-flow/scripts/flow.mjs` | 确保删前先询问确认、先卸 Worktree 再删分支，以及删远端前检查下游堆叠 PR 与 Fork 上游状态 |
-| 四字段审查与验收 | `templates/pull-request-template.md`、`references/collaboration.md`、`templates/docs-todo.md`、`templates/docs-spec.md` | 保证 `审查来源`/`逐条标准状态`/`故障注入记录`/`止损记录`、`C1`/`C2` 编号与「合并前写完」契约逐字对齐 |
-| 发版与包产物分离 | `RELEASING.md`、`docs/release-notes/`、`.github/workflows/release.yml`、`git archive` 清单 | 禁止发版说明引用自用脚本；固定压缩包根目录 `project-forge/`；兼容 `## [v1.2.3]` 与 `## [1.2.3]` |
-
-触碰 `AGENTS.md` `Dev Profile` 中标记为 `high-risk` 的目录或文件（`scripts/lib/`、`scripts/dev/preflight.mjs`、`templates/`、`kit/`、`SKILL.md`、`AGENTS.md`、`.github/workflows/`、`.gitattributes`）时，故障往往静默放过一类缺陷，因此必须由独立上下文审查并补齐正反夹具与故障注入用例后再行合入。
+- `handoff.mjs --verify` 返回四档退出码：`0`（`clean`）、`1`（`dirty`）、`3`（`truncated`）、`4`（`notApplicable` 本仓源码不适用）。
+- `scripts/dev/preflight-contracts.mjs` 与 `scripts/dev/verify-injections.mjs` 持续对拍推送分档判据、收尾七步命令链、四字段审查记录与发版包产物分离。
+- 触碰 `AGENTS.md` `Dev Profile` 中标记为 `high-risk` 的目录或文件时，必须经独立上下文审查并补齐正反夹具与故障注入用例后再行合入。

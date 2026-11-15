@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Milestone 2：L3 状态机、全 Worktree 隔离、三正交策略与六锁防死循环硬拦截
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-16
 updated: 2026-11-16
@@ -10,9 +10,9 @@ pr: null
 branch: feat/v7-m2-state-policy-locks
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=independent-plan-critic-m2, round=2, sha=01098c07606e, summary=Round 2 verified all 6 Must-Fix and 5 Should-Fix notes resolved cleanly)"
-related_prd: ../prd/261115-v7-workflow-architecture-prd.md
+related_prd: ../../prd/261115-v7-workflow-architecture-prd.md
 related_todo: ../todo/261116-issue37-v7-m2-state-policy-locks-todo.md
 high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md]
 ---
@@ -28,7 +28,7 @@ high_risk_paths: [scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKI
 | 创建 / 更新 | `2026-11-16` / `2026-11-16` |
 | 分支 / Issue / PR | `feat/v7-m2-state-policy-locks` / #37 / 提交后更新 |
 | 负责人 / 内审状态 | FiretrUCK666 / `passed` |
-| 关联总控 PRD / Todo | [总控 PRD](../prd/261115-v7-workflow-architecture-prd.md) / [Todo](../todo/261116-issue37-v7-m2-state-policy-locks-todo.md) |
+| 关联总控 PRD / Todo | [总控 PRD](../../prd/261115-v7-workflow-architecture-prd.md) / [Todo](../todo/261116-issue37-v7-m2-state-policy-locks-todo.md) |
 
 ## 系统变更全景
 

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: Milestone 2：L3 状态机、全 Worktree 隔离、三正交策略与六锁防死循环硬拦截
-status: active
+status: done
 created: 2026-11-16
 updated: 2026-11-16
 issue: 37
@@ -9,10 +9,10 @@ pr: null
 branch: feat/v7-m2-state-policy-locks
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-16
 task_id: m2-state-policy-locks
 planned_at: b6a787d286aa674beb0b7e2dc4d5f1920b734536
-related_prd: ../prd/261115-v7-workflow-architecture-prd.md
+related_prd: ../../prd/261115-v7-workflow-architecture-prd.md
 related_spec: ../specs/261116-issue37-v7-m2-state-policy-locks-spec.md
 ---
 
@@ -26,7 +26,7 @@ related_spec: ../specs/261116-issue37-v7-m2-state-policy-locks-spec.md
 | 建单 / 更新 | `2026-11-16` / `2026-11-16` |
 | 分支 / 基线 | `feat/v7-m2-state-policy-locks` @ `b6a787d` |
 | 任务编号 | `m2-state-policy-locks` |
-| 关联 Issue / SPEC / 总控 PRD | #37 / [SPEC](../specs/261116-issue37-v7-m2-state-policy-locks-spec.md) / [PRD](../prd/261115-v7-workflow-architecture-prd.md) |
+| 关联 Issue / SPEC / 总控 PRD | #37 / [SPEC](../specs/261116-issue37-v7-m2-state-policy-locks-spec.md) / [PRD](../../prd/261115-v7-workflow-architecture-prd.md) |
 
 ## 任务范围与验证基准
 

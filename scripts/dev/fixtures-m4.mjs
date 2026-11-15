@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readZip, stripCommonPrefix, writeZip } from '../zip.mjs'
-import { gitInit, gitSync, rmTree, runAbsAsync, runNode, tmpProject } from './fixtures-helpers.mjs'
+import { gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerM4Cases(cases) {
   cases.push(['M4-C1a：救活 zero-assertion/mock-tautology 死检查与纯 ASSERTION_RE 大小写敏感(I70)', async () => {
@@ -271,6 +271,27 @@ export function registerM4Cases(cases) {
       const noTdd = await checkTddSyncParity(dir, ['src/billing.mjs'], { baseSha })
       if (noTdd.authoritativeTddPath !== null || noTdd.tddSyncWarning !== null || noTdd.missingModulesInTdd.length !== 0) {
         return `no-tdd 豁免未返回空结构：${JSON.stringify(noTdd)}`
+      }
+
+      // 5. Detached HEAD + init.defaultbranch=master with refs/heads/main -> must resolve 'main' (and reverse 'master' when only master exists)
+      gitSync(dir, ['checkout', '--detach', '-q', 'HEAD'])
+      gitSync(dir, ['config', '--local', 'init.defaultbranch', 'master'])
+      const detMain = await survey(dir)
+      if (detMain.conventions?.defaultBranch !== 'main') {
+        return `detached HEAD + init.defaultbranch=master 未优先识别真实 refs/heads/main：${detMain.conventions?.defaultBranch}`
+      }
+      gitSync(dir, ['branch', '-m', 'main', 'master'])
+      gitSync(dir, ['config', '--local', 'init.defaultbranch', 'main'])
+      const detMaster = await survey(dir)
+      if (detMaster.conventions?.defaultBranch !== 'master') {
+        return `detached HEAD 仅有 refs/heads/master 时被误判为 ${detMaster.conventions?.defaultBranch}`
+      }
+      gitSync(dir, ['branch', '-D', 'master'])
+      gitSync(dir, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+      gitSync(dir, ['config', '--local', 'init.defaultbranch', 'master'])
+      const detOriginMain = await survey(dir)
+      if (detOriginMain.conventions?.defaultBranch !== 'main') {
+        return `detached HEAD 仅有 refs/remotes/origin/main 且 init.defaultbranch=master 时被误判为 ${detOriginMain.conventions?.defaultBranch}`
       }
       return true
     } finally { rmTree(dir) }

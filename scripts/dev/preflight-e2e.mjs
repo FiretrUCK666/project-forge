@@ -106,8 +106,18 @@ async function checkRunsOnRealTarget({ ROOT, readText, fail, note }) {
   ]
   for (const call of calls) {
     if (call.res.status !== 0) {
-      const first = (call.res.stderr || '').trim().split('\n').find((line) => line && !/^\s+at /.test(line)) ?? ''
-      fail(`${call.script} 在真实项目上跑${call.what}失败（退出 ${call.res.status}）：${first.slice(0, 200)}`)
+      let detail = (call.res.stderr || '').trim().split('\n').find((line) => line && !/^\s+at /.test(line)) ?? ''
+      if (!detail && call.res.stdout) {
+        try {
+          const parsed = JSON.parse(call.res.stdout)
+          const miss = Array.isArray(parsed?.missing)
+            ? parsed.missing
+            : (Array.isArray(parsed?.results) ? parsed.results.filter((r) => r.level === 'missing') : [])
+          if (miss.length > 0) detail = miss.slice(0, 3).map((m) => `${m.id}: ${m.summary}`).join('；')
+        } catch { /* not json */ }
+        if (!detail) detail = call.res.stdout.trim().split('\n').find((l) => l.trim()) ?? ''
+      }
+      fail(`${call.script} 在真实项目上跑${call.what}失败（退出 ${call.res.status}）：${detail.slice(0, 200)}`)
     }
   }
   note(`真目标：${calls.length} 个入口都在本仓库上跑通（不是只在临时目录里跑）`)

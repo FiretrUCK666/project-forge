@@ -517,5 +517,5 @@ async function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code })
 }

@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-16
 updated: 2026-11-16
 issue: 41
-pr: null
+pr: 42
 branch: feat/v7-m4-gates-retro-ci-e2e
 owner: FiretrUCK666
 approved: true

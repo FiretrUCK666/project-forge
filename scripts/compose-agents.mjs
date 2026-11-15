@@ -788,5 +788,10 @@ export async function contractHealth(root, { tier, facts: precomputedFacts } = {
 export { main as runCli, TemplateError, refreshRegions, driftRegions, collectMissingSections, handWrittenCoverage }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  Promise.resolve(main(process.argv.slice(2))).then((code) => process.exit(code))
+  Promise.resolve(main(process.argv.slice(2)))
+    .then((code) => { process.exitCode = code })
+    .catch((err) => {
+      process.stderr.write(`compose-agents 失败：${err instanceof Error ? err.message : String(err)}\n`)
+      process.exitCode = 1
+    })
 }

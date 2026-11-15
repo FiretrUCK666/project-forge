@@ -655,14 +655,21 @@ cases.push(['M1 update.mjs 6 项修复：--check 只读、--equip 冷却期刷�
     if (chkRun.status !== 0 || !chkRun.stdout.includes('9.9.9')) {
       return `update.mjs --check 执行失败：${chkRun.stdout} ${chkRun.stderr}`
     }
-    const chkState = existsSync(join(cacheHome, 'project-forge', 'cache')) || existsSync(join(cacheHome, 'project-forge'))
-    if (chkState) {
-      // 检查缓存目录内所有 json 的 lastOkAt 是否被写入
-      const findStates = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? findStates(join(d, e.name)) : [join(d, e.name)])
-      const stateFiles = findStates(cacheHome).filter((f) => f.endsWith('.json'))
-      if (stateFiles.some((sf) => JSON.parse(readFileSync(sf, 'utf8')).lastOkAt > 0)) {
-        return 'update.mjs --check 篡改了节流状态'
-      }
+    const cacheDirs = [
+      join(cacheHome, 'project-forge', 'cache'),
+      join(cacheHome, 'project-forge'),
+      join(cacheHome, 'Library', 'Caches', 'project-forge'),
+      join(cacheHome, '.cache', 'project-forge'),
+    ]
+    const findStates = (d) => existsSync(d)
+      ? readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? findStates(join(d, e.name)) : [join(d, e.name)])
+      : []
+    const stateFiles = [...new Set([
+      ...cacheDirs.flatMap((d) => findStates(d)),
+      ...findStates(cacheHome),
+    ])].filter((f) => f.endsWith('.json'))
+    if (stateFiles.some((sf) => JSON.parse(readFileSync(sf, 'utf8')).lastOkAt > 0)) {
+      return 'update.mjs --check 篡改了节流状态'
     }
     void resolveStatePath
 

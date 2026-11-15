@@ -605,5 +605,10 @@ async function main(argv) {
 export { main as runCli, bootstrapEmpty, starterTemplates }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => { process.exitCode = code })
+    .catch((err) => {
+      process.stderr.write(`equip 失败：${err instanceof Error ? err.message : String(err)}\n`)
+      process.exitCode = 2
+    })
 }

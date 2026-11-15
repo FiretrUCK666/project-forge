@@ -5,7 +5,7 @@ status: done
 created: 2026-11-16
 updated: 2026-11-16
 issue: 41
-pr: null
+pr: 42
 branch: feat/v7-m4-gates-retro-ci-e2e
 owner: FiretrUCK666
 approved: false
@@ -56,13 +56,17 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留（全部 M4 交付项已实现，提交后于 HEAD 上锁定 verify --mode gate 并发起独立审查与 PR）`
+- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI 3 项 MUST-FIX 返工均已落盘，提交后于 HEAD 上锁定 finalize + verify --mode gate 并发起 Round 2 独立审查）`
 - **待拍板事项**：无
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：完成全量实现并在提交后 `HEAD` 跑通 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（`< 30,000 ms`）、`bench.mjs`（6/6）、`e2e-zip-harness.mjs`（7 场景全过）、`verify-injections.mjs`（`I1..I75` 全红拦截）、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
+- **Round 2 跨平台返工修复**：
+  - `MUST-FIX 1`（`scripts/lib/survey-workspace.mjs`、`scripts/dev/preflight-e2e.mjs`、`scripts/dev/fixtures-m4.mjs`）：detached `HEAD` 且无 `origin/HEAD` 时，优先核对 `refs/heads/*` 与 `refs/remotes/origin/*` 真实存在的候选默认分支再回退 `init.defaultbranch`；`preflight-e2e.mjs` 失败时同步回显 `stdout` 首要 `missing`；`fixtures-m4.mjs` 补齐正反与仅远端引用测试。
+  - `MUST-FIX 2`（`scripts/dev/fixtures-equip.mjs`）：扫描缓存目录纳入 macOS `Library/Caches/project-forge` 与 `.cache/project-forge` 并直接遍历 `cacheHome` 校验节流状态不被 `--check` 篡改。
+  - `MUST-FIX 3`（`scripts/*.mjs` 与 `kit/skills/**/scripts/*.mjs` 顶层 CLI 入口）：移除异步输出后的 `process.exit(code)`，统一改用 `process.exitCode = code` 等事件循环/管道自然刷新退出，根治 macOS Node 18 `stdout` 截断并同步重跑 `equip.mjs .`。
+- **实际验证命令清单**：提交后于最新 `HEAD` 跑通 `flow.mjs verify --mode gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`verify-injections.mjs`）、`bench.mjs`、`e2e-zip-harness.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
 - **文档同步检查**：已同步更新 `docs/TDD.md`（收窄第 218–219 行状态图边标签并登记 M4 新增模块表与门禁矩阵）、`references/plugin-ecosystems.md`、`references/skill-project.md`、`kit/skills/dev-govern/SKILL.md` 及 `.agents/skills/`；总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` 按 1:N 保护保持 `active` 未动。
 - **遗留问题**：无（M5 全盘精简对齐与总控 PRD 归档留待后续里程碑）。

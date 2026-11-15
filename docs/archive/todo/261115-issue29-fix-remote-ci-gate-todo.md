@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 补齐合并前远端 CI 变绿硬门禁并修复 Linux 与 UTC 行为断言
-status: active
+status: done
 created: 2026-11-15
 updated: 2026-11-15
 issue: 29
@@ -9,7 +9,7 @@ pr: null
 branch: fix/remote-ci-merge-gate
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-15
 task_id: fix-remote-ci-gate
 planned_at: 7ea1acccfe80a013cccd755f6d46c50aea5e1dd8
 related_prd: null
@@ -55,7 +55,7 @@ related_spec: null
 
 ## 执行步骤
 
-1. 先核实 Issue #29 认领评论归属并冻结上述 Todo —— 验证：`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit --file docs/todo/261115-issue29-fix-remote-ci-gate-todo.md`
+1. 先核实 Issue #29 认领评论归属并冻结上述 Todo —— 验证：`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit --file docs/archive/todo/261115-issue29-fix-remote-ci-gate-todo.md`
 2. 补齐远端 CI 合并门禁、`.github/workflows/check.yml` `if: always()` 防假绿、`worktree-deps.mjs` POSIX 软链忽略与 UTC/CI 行为断言 —— 验证：`node scripts/dev/preflight.mjs && node scripts/dev/fixtures.mjs`
 3. 同步 `.agents/skills/`、归档 Todo 并提 PR，等待远端 Actions 全绿后由独立 `swarm` 审查合并 —— 验证：`gh pr checks --watch` 全绿且 `merge-gate` 全通
 

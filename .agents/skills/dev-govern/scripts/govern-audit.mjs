@@ -16,7 +16,8 @@ import {
 } from '../../lib/git.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import {
-  auditDeadcode, auditHygiene, auditPerf, auditSecurity, readTextStrictInfo, walkFiles,
+  auditDeadcode, auditHygiene, auditPerf, auditSecurity,
+  createFileContentCache, readTextStrictInfo, setActiveFileCache, walkFiles,
 } from './govern-checks.mjs'
 import {
   buildClusterReport, buildGovernNextSteps, buildIssues, applyGitHubIssues,
@@ -153,8 +154,7 @@ function normalizeParsedArgs(cli) {
   }
 }
 
-async function main() {
-  const argv = process.argv.slice(2)
+async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help') || argv.includes('-h')) {
     printHelp()
     return 0
@@ -222,36 +222,62 @@ async function main() {
   let defaultBranch = null
   let headSha = null
   if (isGit) {
-    if (runLiveAudit) {
-      const ls = await gitRunBuffer(workTreeRoot, ['ls-files', '-z'])
-      if (ls.ok) {
-        for (const p of ls.stdout.toString('utf8').split('\0')) {
-          const clean = posixPath(p)
-          if (clean && !isMacOsJunkPath(clean)) trackedSet.add(clean)
-        }
+    const [ls, defBr, hr] = await Promise.all([
+      runLiveAudit ? gitRunBuffer(workTreeRoot, ['ls-files', '-z']) : Promise.resolve(null),
+      resolveDefaultBranch(workTreeRoot),
+      gitRun(workTreeRoot, ['rev-parse', 'HEAD']),
+    ])
+    if (ls?.ok) {
+      for (const p of ls.stdout.toString('utf8').split('\0')) {
+        const clean = posixPath(p)
+        if (clean && !isMacOsJunkPath(clean)) trackedSet.add(clean)
       }
     }
-    defaultBranch = await resolveDefaultBranch(workTreeRoot)
-    const hr = await gitRun(workTreeRoot, ['rev-parse', 'HEAD'])
+    defaultBranch = defBr
     if (hr.ok && hr.stdout.trim()) headSha = hr.stdout.trim()
   }
 
-  const devProfile = parseDevProfile(workTreeRoot)
-  const rawAgentsMeta = parseRawAgentsMeta(workTreeRoot)
-  const rawFindings = []
-  let testsMeta = { ciRunSteps: [], testInventory: null }
+  const fileCache = createFileContentCache()
+  setActiveFileCache(fileCache)
+  try {
+    const devProfile = parseDevProfile(workTreeRoot)
+    const rawAgentsMeta = parseRawAgentsMeta(workTreeRoot)
+    const rawFindings = []
+    let testsMeta = { ciRunSteps: [], testInventory: null }
 
-  if (runLiveAudit) {
-    if (catSet.has('security')) auditSecurity(files, trackedSet, rawFindings)
-    if (catSet.has('deadcode')) auditDeadcode(files, rawFindings)
-    if (catSet.has('tests')) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
-    if (catSet.has('docs')) await auditDocs(workTreeRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, rawFindings)
+    if (runLiveAudit) {
+      if (catSet.has('security')) auditSecurity(files, trackedSet, rawFindings)
+      if (catSet.has('deadcode')) auditDeadcode(files, rawFindings)
+      if (catSet.has('tests')) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
+      if (catSet.has('perf')) auditPerf(workTreeRoot, files, rawFindings)
+    }
+    let hygieneMeta = { worktrees: { total: 0, counts: {}, entries: [], stale: [] }, manifest: { present: false, status: 'not-checked', issues: [] }, archViolations: [] }
+    if (runLiveAudit) {
+      const [, hygRes] = await Promise.all([
+        catSet.has('docs')
+          ? auditDocs(workTreeRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, rawFindings)
+          : Promise.resolve(),
+        catSet.has('hygiene')
+          ? auditHygiene(workTreeRoot, mainRoot, isGit, files, defaultBranch, devProfile, rawFindings)
+          : Promise.resolve(hygieneMeta),
+      ])
+      hygieneMeta = hygRes
+    }
+
+    return await finishAudit({
+      opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
+      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta,
+    })
+  } finally {
+    setActiveFileCache(null)
+    fileCache.clear()
   }
-  let hygieneMeta = { worktrees: { total: 0, counts: {}, entries: [], stale: [] }, manifest: { present: false, status: 'not-checked', issues: [] }, archViolations: [] }
-  if (runLiveAudit && catSet.has('hygiene')) {
-    hygieneMeta = await auditHygiene(workTreeRoot, mainRoot, isGit, files, defaultBranch, devProfile, rawFindings)
-  }
-  if (runLiveAudit && catSet.has('perf')) auditPerf(workTreeRoot, files, rawFindings)
+}
+
+async function finishAudit({
+  opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
+  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta,
+}) {
 
   let baselineSavedInfo = null
   if (opts.saveBaseline && runLiveAudit) {
@@ -360,6 +386,8 @@ async function main() {
   if (opts.strict && (counts.critical > 0 || counts.high > 0)) return 1
   return 0
 }
+
+export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main().then((code) => process.exit(code))

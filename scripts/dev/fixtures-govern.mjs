@@ -4,8 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { SKILL_ROOT, gitInit, rmTree, runAbs, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerGovernCases(cases) {
 cases.push(['review-pack.mjs：双轨门禁、arch-rules、tombstone/excuse 检出与 two-way/one-way 误伤防线', async () => {
@@ -23,13 +22,12 @@ cases.push(['review-pack.mjs：双轨门禁、arch-rules、tombstone/excuse 检�
     'src/shared/fmt.mjs': 'export const fmt = (v) => String(v)\n',
     'src/ui/good.mjs': 'import { fmt } from "../shared/fmt.mjs"\nexport const render = (v) => fmt(v)\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main' })
 
   try {
     // 1. 正向干净改动（正常注释 + 合法跨模块引用）-> structural clean & two-way & behavioral smokeRequired
     writeFileSync(join(dir, 'src/ui/good.mjs'), '// Format user value safely\nimport { fmt } from "../shared/fmt.mjs"\nexport const render = (v) => fmt(v)\n')
-    const pClean = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
+    const pClean = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
     if (pClean.status !== 0) return `review-pack --local 干净改动失败：${pClean.stderr}`
     const cj = JSON.parse(pClean.stdout)
     if (!cj.behavioralGate?.smokeRequired || !cj.behavioralGate.runtimeFilesTouched.includes('src/ui/good.mjs')) {
@@ -52,7 +50,7 @@ cases.push(['review-pack.mjs：双轨门禁、arch-rules、tombstone/excuse 检�
     mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
     writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), 'name: CI\non: push\n')
 
-    const pBad = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
+    const pBad = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--json'], { cwd: dir })
     if (pBad.status !== 0) return `review-pack --local 坏改动运行失败：${pBad.stderr}`
     const bj = JSON.parse(pBad.stdout)
     if ((bj.structuralGate?.archViolations?.length ?? 0) < 1) return `未检出 arch-rules 违例：${JSON.stringify(bj.structuralGate)}`
@@ -104,10 +102,7 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     'src/big.mjs': godLines,
     'src/hot.mjs': 'export const h = 0\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
 
   const wtMerged = join(dir, '.worktrees', 'wt-merged')
   const wtSquash = join(dir, '.worktrees', 'wt-squash')
@@ -116,47 +111,47 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
 
   try {
     // 构造 4 态 worktree + 1 个 Revert 与 3 次高频修改提交给 sample
-    spawnSync('git', ['checkout', '-qb', 'wt-merged'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['checkout', '-qb', 'wt-merged'])
     writeFileSync(join(dir, 'src/merged.mjs'), 'export const m = 1\n')
-    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'merged commit'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['checkout', '-q', 'main'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['merge', '--no-ff', 'wt-merged', '-qm', 'merge wt-merged'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', '-A'])
+    gitSync(dir, ['commit', '-qm', 'merged commit'])
+    gitSync(dir, ['checkout', '-q', 'main'])
+    gitSync(dir, ['merge', '--no-ff', 'wt-merged', '-qm', 'merge wt-merged'])
 
-    spawnSync('git', ['checkout', '-qb', 'wt-squash'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['checkout', '-qb', 'wt-squash'])
     writeFileSync(join(dir, 'src/sq.mjs'), 'export const sq = 1\n')
-    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'squash feat'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['checkout', '-q', 'main'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['merge', '--squash', '-q', 'wt-squash'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'squash feat onto main'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', '-A'])
+    gitSync(dir, ['commit', '-qm', 'squash feat'])
+    gitSync(dir, ['checkout', '-q', 'main'])
+    gitSync(dir, ['merge', '--squash', '-q', 'wt-squash'])
+    gitSync(dir, ['commit', '-qm', 'squash feat onto main'])
 
     for (let k = 1; k <= 3; k += 1) {
       writeFileSync(join(dir, 'src/hot.mjs'), `export const h = ${k}\n`)
-      spawnSync('git', ['add', 'src/hot.mjs'], { cwd: dir, stdio: 'ignore' })
-      spawnSync('git', ['commit', '-qm', `touch hot ${k}`], { cwd: dir, stdio: 'ignore' })
+      gitSync(dir, ['add', 'src/hot.mjs'])
+      gitSync(dir, ['commit', '-qm', `touch hot ${k}`])
     }
     writeFileSync(join(dir, 'src/hot.mjs'), 'export const h = 2\n')
-    spawnSync('git', ['add', 'src/hot.mjs'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'Revert "touch hot 3"'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', 'src/hot.mjs'])
+    gitSync(dir, ['commit', '-qm', 'Revert "touch hot 3"'])
 
-    spawnSync('git', ['branch', 'wt-no-own', 'main'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['branch', 'wt-unmerged', 'main'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['worktree', 'add', '-q', wtMerged, 'wt-merged'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['worktree', 'add', '-q', wtSquash, 'wt-squash'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['worktree', 'add', '-q', wtNoOwn, 'wt-no-own'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['branch', 'wt-no-own', 'main'])
+    gitSync(dir, ['branch', 'wt-unmerged', 'main'])
+    gitSync(dir, ['worktree', 'add', '-q', wtMerged, 'wt-merged'])
+    gitSync(dir, ['worktree', 'add', '-q', wtSquash, 'wt-squash'])
+    gitSync(dir, ['worktree', 'add', '-q', wtNoOwn, 'wt-no-own'])
     writeFileSync(join(wtNoOwn, 'wip.txt'), 'uncommitted note\n')
-    spawnSync('git', ['worktree', 'add', '-q', wtUnmerged, 'wt-unmerged'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['worktree', 'add', '-q', wtUnmerged, 'wt-unmerged'])
     writeFileSync(join(wtUnmerged, 'src/unmerged.mjs'), 'export const u = 1\n')
-    spawnSync('git', ['add', '-A'], { cwd: wtUnmerged, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'unique unmerged commit'], { cwd: wtUnmerged, stdio: 'ignore' })
+    gitSync(wtUnmerged, ['add', '-A'])
+    gitSync(wtUnmerged, ['commit', '-qm', 'unique unmerged commit'])
 
     // 1. reconcile（4 态 worktree）+ audit 全类别扫描验证
-    const rec = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', dir, '--json'])
+    const rec = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', dir, '--json'])
     if (rec.status !== 0) return `govern-audit reconcile 失败：${rec.stderr}`
     const rj = JSON.parse(rec.stdout)
 
-    const aud = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--json'])
+    const aud = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--json'])
     if (aud.status !== 0) return `govern-audit audit 失败：${aud.stderr}`
     const aj = JSON.parse(aud.stdout)
     const ids = aj.findings.map((f) => f.id)
@@ -181,19 +176,19 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     }
 
     // 2. record -> cluster -> sample
-    const r1 = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'direct db import', '--json'])
+    const r1 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'direct db import', '--json'])
     if (r1.status !== 0 || JSON.parse(r1.stdout).ruleSinkCandidate !== false) return `首次 record 判据有误：${r1.stdout}`
-    const r2 = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'second db import', '--json'])
+    const r2 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'second db import', '--json'])
     if (r2.status !== 0 || JSON.parse(r2.stdout).ruleSinkCandidate !== true || JSON.parse(r2.stdout).modulePatternCount !== 2) {
       return `二次 record 未触发下沉候选：${r2.stdout}`
     }
 
-    const cl = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['cluster', dir, '--signals-only', '--json'])
+    const cl = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['cluster', dir, '--signals-only', '--json'])
     if (cl.status !== 0) return `cluster 失败：${cl.stderr}`
     const clj = JSON.parse(cl.stdout)
     if ((clj.cluster?.sinkCandidateCount ?? 0) < 1) return `cluster 未识别下沉候选：${cl.stdout}`
 
-    const smp = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['sample', dir, '--commits', '20', '--json'])
+    const smp = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['sample', dir, '--commits', '20', '--json'])
     if (smp.status !== 0) return `sample 失败：${smp.stderr}`
     const sj = JSON.parse(smp.stdout)
     if (sj.revertCount < 1 || !sj.reworkHotspots?.some((h) => h.file === 'src/hot.mjs')) {
@@ -202,7 +197,7 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     return true
   } finally {
     for (const wt of [wtMerged, wtSquash, wtNoOwn, wtUnmerged]) {
-      spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: dir, stdio: 'ignore' })
+      gitSync(dir, ['worktree', 'remove', '--force', wt])
     }
     rmTree(dir)
   }
@@ -224,7 +219,7 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
     'test/core.test.mjs': 'export const t = 1\n',
   })
   gitInit(multiDir)
-  const tagRes = spawnSync('git', ['tag', 'v1.0.0'], { cwd: multiDir, encoding: 'utf8' })
+  const tagRes = gitSync(multiDir, ['tag', 'v1.0.0'], { encoding: 'utf8' })
   if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`)
 
   const commitIn = (dir, files, msg) => {
@@ -233,9 +228,9 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
       writeFileSync(join(dir, r), c)
     }
     const opts = { cwd: dir, encoding: 'utf8' }
-    const addRes = spawnSync('git', ['add', '-A'], opts)
+    const addRes = gitSync(undefined, ['add', '-A'], opts)
     if (addRes.status !== 0) throw new Error(`git add failed: ${addRes.stderr}`)
-    const cRes = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', msg], opts)
+    const cRes = gitSync(undefined, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', msg], opts)
     if (cRes.status !== 0) throw new Error(`git commit failed (${msg}): ${cRes.stderr}`)
   }
 
@@ -266,7 +261,7 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
   const nonGitDir = tmpProject({ 'README.md': '# plain\n' })
 
   try {
-    const prepJsonRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0', '--json'])
+    const prepJsonRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0', '--json'])
     if (prepJsonRes.status !== 0) return `release-prep 多标签跳版本失败：${prepJsonRes.stderr}`
     const parsed = JSON.parse(prepJsonRes.stdout)
     if (parsed.range?.from !== 'v1.0.0' || parsed.version?.targetTag !== 'v3.0.0') {
@@ -288,19 +283,19 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
       return `unaccountedPublicFiles 未检出含糊公开入口 bin/cli.mjs：${JSON.stringify(parsed.unaccountedPublicFiles)}`
     }
 
-    const prepTextRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0'])
+    const prepTextRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0'])
     if (prepTextRes.status !== 0 || !prepTextRes.stdout.includes('v3.0.0') || !prepTextRes.stdout.includes('[AUDIT_ALERT]') || !prepTextRes.stdout.includes('[NEXT STEP]')) {
       return `release-prep 文本输出缺失关键字段：exit=${prepTextRes.status}\n${prepTextRes.stdout}`
     }
 
-    const chgRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', changelogDir, '--version', '1.0.0', '--json'])
+    const chgRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', changelogDir, '--version', '1.0.0', '--json'])
     if (chgRes.status !== 0) return `release-prep 无标签 CHANGELOG 仓失败：${chgRes.stderr}`
     const chgJson = JSON.parse(chgRes.stdout)
     if (!chgJson.range?.isInitialRelease || chgJson.notesMode?.mode !== 'changelog' || !chgJson.breakingSignals?.some((b) => b.field === 'requires-python')) {
       return `无标签 CHANGELOG 仓结果异常：${JSON.stringify({ range: chgJson.range, notesMode: chgJson.notesMode, breaking: chgJson.breakingSignals })}`
     }
 
-    const nonGitRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', nonGitDir])
+    const nonGitRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', nonGitDir])
     if (nonGitRes.status === 0) return '非 Git 目录运行 release-prep 未拦截'
 
     return true
@@ -390,7 +385,7 @@ cases.push(['测试分层控频与反膨胀治理：tests.* 正反双向检出�
 
   try {
     gitInit(posDir)
-    const posRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', posDir, '--json'])
+    const posRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', posDir, '--json'])
     if (posRes.status !== 0) return `govern-audit posDir 失败：${posRes.stderr}`
     const posJson = JSON.parse(posRes.stdout)
     const posIds = (posJson.findings ?? []).map((f) => f.id)
@@ -423,18 +418,18 @@ cases.push(['测试分层控频与反膨胀治理：tests.* 正反双向检出�
       '```',
       '',
     ].join('\n'))
-    spawnSync('git', ['add', 'AGENTS.md'], { cwd: posDir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add quick-test target'], { cwd: posDir, stdio: 'ignore' })
-    const startVerify = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c31-v1', '--case', '1', '--slug', 'verify-target', '--dir', posDir])
+    gitSync(posDir, ['add', 'AGENTS.md'])
+    gitSync(posDir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add quick-test target'])
+    const startVerify = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c31-v1', '--case', '1', '--slug', 'verify-target', '--dir', posDir])
     if (startVerify.status !== 0) return `flow start c31-v1 失败：${startVerify.stderr}`
-    const verTargetRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c31-v1', '--tier', 'quick', '--target', 'test/sub.test.mjs', '--dir', posDir])
+    const verTargetRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c31-v1', '--tier', 'quick', '--target', 'test/sub.test.mjs', '--dir', posDir])
     if (verTargetRes.status !== 0 || !verTargetRes.stdout.includes('TARGET_INTERPOLATED_OK')) {
       return `flow verify --tier quick --target 未替换执行 {target}：exit=${verTargetRes.status}, out=${verTargetRes.stdout}, err=${verTargetRes.stderr}`
     }
 
     // 反面：干净分层仓应零 tests.* 与零 high-risk 误报
     gitInit(negDir)
-    const negRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', negDir, '--json'])
+    const negRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', negDir, '--json'])
     if (negRes.status !== 0) return `govern-audit negDir 失败：${negRes.stderr}`
     const negIds = (JSON.parse(negRes.stdout).findings ?? []).map((f) => f.id)
     const badNeg = negIds.filter((id) => id.startsWith('tests.') || id.startsWith('docs.devprofile-unmatched-high-risk.'))
@@ -476,10 +471,7 @@ cases.push(['异构项目四处误报根除：权威架构文档识别、Dev Pro
     'scripts/run-tests.mjs': "import assert from 'node:assert/strict'\nassert.ok(true)\n",
     'src/parser.mjs': "const s = 'x'; export const r = /a/.exec(`\\n${s}`)\n",
   })
-  gitInit(archDir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: archDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: archDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: archDir, stdio: 'ignore' })
+  gitInit(archDir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
     if (resolveAuthoritativeTddPath(archDir) !== 'ARCHITECTURE.md') {
       return `未识别 ARCHITECTURE.md：${resolveAuthoritativeTddPath(archDir)}`
@@ -489,7 +481,7 @@ cases.push(['异构项目四处误报根除：权威架构文档识别、Dev Pro
       return '声明 no-tdd 时未返回 null'
     }
 
-    const aud = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', archDir, '--all', '--json'])
+    const aud = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', archDir, '--all', '--json'])
     if (aud.status !== 0) return `govern-audit 失败：${aud.stderr}`
     const aj = JSON.parse(aud.stdout)
     const ids = aj.findings.map((f) => f.id)
@@ -503,7 +495,7 @@ cases.push(['异构项目四处误报根除：权威架构文档识别、Dev Pro
     // 反面：真正不存在的命令脚本路径必须报 docs.tdd-stale-path.scripts/ghost.mjs；真无测试入口必须报 tests.missing-suite
     writeFileSync(join(archDir, 'ARCHITECTURE.md'), '# Arch\n\n`node scripts/ghost.mjs` 与 `src/missing.mjs`。\n')
     writeFileSync(join(archDir, 'AGENTS.md'), '# arch-demo\n\n## Dev Profile\n```yaml\nquick-test: none\n```\n')
-    const audBad = JSON.parse(runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', archDir, '--all', '--json']).stdout)
+    const audBad = JSON.parse((await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', archDir, '--all', '--json'])).stdout)
     const badIds = audBad.findings.map((f) => f.id)
     if (!badIds.includes('docs.tdd-stale-path.scripts/ghost.mjs') || !badIds.includes('tests.missing-suite')) {
       return `反面校验漏报真实缺陷：${JSON.stringify(badIds)}`

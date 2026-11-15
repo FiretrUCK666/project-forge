@@ -3,9 +3,11 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, basename, resolve } from 'node:path'
+
+import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 
 import {
   detectGitModeMarkers,
@@ -53,13 +55,18 @@ const SECRET_CONTENT_PATTERNS = [
 
 export function runCmd(cmd, args, opts = {}) {
   return new Promise((done) => {
-    const child = execFile(cmd, args, {
+    const baseEnv = opts.env === undefined ? process.env : { ...process.env, ...opts.env }
+    const inv = process.platform === 'win32'
+      ? prepareExecInvocation(cmd, args, { cwd: opts.cwd, env: baseEnv })
+      : { cmd, args, env: baseEnv, windowsVerbatimArguments: false }
+    const child = execFile(inv.cmd, inv.args, {
       cwd: opts.cwd,
       encoding: 'utf8',
       timeout: opts.timeout ?? 15000,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,
-      env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },
+      env: inv.env,
+      ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     }, (error, stdout, stderr) => {
       done({
         ok: error === null,
@@ -76,7 +83,7 @@ export function runCmd(cmd, args, opts = {}) {
 }
 
 export function git(cwd, args, opts = {}) {
-  return runCmd('git', ['-c', 'core.quotepath=false', ...args], { ...opts, cwd })
+  return runCmd('git', ['-c', 'core.quotepath=false', '--no-optional-locks', ...args], { ...opts, cwd })
 }
 
 function parseConfigList(text) {
@@ -117,7 +124,7 @@ function detectCommitStyle(subjects) {
 }
 
 function parsePorcelainV2(text) {
-  const out = { head: undefined, oid: undefined, upstream: undefined, ahead: 0, behind: 0, dirty: 0 }
+  const out = { head: undefined, oid: undefined, upstream: undefined, ahead: 0, behind: 0, dirty: 0, ignored: [] }
   for (const line of String(text ?? '').split('\n')) {
     if (line.startsWith('# branch.head ')) out.head = line.slice(14).trim()
     else if (line.startsWith('# branch.oid ')) out.oid = line.slice(13).trim()
@@ -125,9 +132,151 @@ function parsePorcelainV2(text) {
     else if (line.startsWith('# branch.ab ')) {
       const m = /\+(\d+)\s+-(\d+)/.exec(line)
       if (m) { out.ahead = Number(m[1]); out.behind = Number(m[2]) }
+    } else if (line.startsWith('! ')) {
+      out.ignored.push(line.slice(2).trim().replace(/\/$/, ''))
     } else if (line.trim() !== '') out.dirty += 1
   }
   return out
+}
+
+function inspectDotGitFast(root) {
+  const dotGit = join(root, '.git')
+  if (!existsSync(dotGit)) return null
+  try {
+    const st = statSync(dotGit)
+    let workGitDir = dotGit
+    let commonDir = dotGit
+    if (st.isFile()) {
+      const m = /^gitdir:\s*(.+)$/im.exec(readTextSafe(dotGit) ?? '')
+      if (!m) return null
+      workGitDir = resolve(root, m[1].trim())
+      const commondirTxt = readTextSafe(join(workGitDir, 'commondir'))
+      commonDir = commondirTxt ? resolve(workGitDir, commondirTxt.trim()) : workGitDir
+    } else if (!st.isDirectory()) {
+      return null
+    }
+    if (!existsSync(join(workGitDir, 'HEAD'))) return null
+    const cfgText = readTextSafe(join(commonDir, 'config')) ?? ''
+    if (/^\s*bare\s*=\s*true\b/im.test(cfgText)) return null
+    const isSha256 = /^\s*objectformat\s*=\s*sha256\b/im.test(cfgText)
+    const isShallow = existsSync(join(commonDir, 'shallow'))
+    const hasRewrite = /^\s*\[url\b/im.test(cfgText) || /^\s*\[include(?:if)?\b/im.test(cfgText)
+    let remoteText = null
+    if (!hasRewrite) {
+      const remotes = new Map()
+      let curRemote = null
+      for (const rawLine of cfgText.split('\n')) {
+        const line = rawLine.replace(/(?:^|\s)[;#].*$/, '').trim()
+        const sec = /^\[remote\s+"([^"]+)"\]$/i.exec(line)
+        if (sec) {
+          curRemote = sec[1]
+          if (!remotes.has(curRemote)) remotes.set(curRemote, { u: [], p: [] })
+          continue
+        }
+        if (line.startsWith('[')) { curRemote = null; continue }
+        if (!curRemote) continue
+        const eq = line.indexOf('=')
+        if (eq <= 0) continue
+        const k = line.slice(0, eq).trim().toLowerCase()
+        const v = line.slice(eq + 1).trim()
+        if (k === 'url' && v) remotes.get(curRemote).u.push(v)
+        else if (k === 'pushurl' && v) remotes.get(curRemote).p.push(v)
+      }
+      const lines = []
+      for (const [name, entry] of remotes.entries()) {
+        const f = entry.u[0]
+        const p = entry.p[0] ?? f
+        if (f) lines.push(`${name}\t${f} (fetch)`)
+        if (p) lines.push(`${name}\t${p} (push)`)
+      }
+      remoteText = lines.join('\n')
+    }
+
+    let originHeadBranch
+    const origHead = readTextSafe(join(commonDir, 'refs', 'remotes', 'origin', 'HEAD'))
+    if (origHead) {
+      const m = /^ref:\s*refs\/remotes\/origin\/(.+)$/im.exec(origHead.trim())
+      if (m) originHeadBranch = m[1].trim()
+    }
+    const packed = readTextSafe(join(commonDir, 'packed-refs')) ?? ''
+    if (!originHeadBranch && packed) {
+      const sym = /^ref:\s*refs\/remotes\/origin\/([^\s]+)\s+refs\/remotes\/origin\/HEAD$/m.exec(packed)
+      if (sym) originHeadBranch = sym[1].trim()
+    }
+    const useReftable = existsSync(join(commonDir, 'reftable'))
+    let fastTags = null
+    if (!useReftable) {
+      const tagSet = new Set()
+      if (packed) {
+        for (const line of packed.split('\n')) {
+          if (!line || line.startsWith('#') || line.startsWith('^')) continue
+          const sp = line.indexOf(' ')
+          if (sp <= 0) continue
+          const refName = line.slice(sp + 1).trim()
+          if (refName.startsWith('refs/tags/')) tagSet.add(refName.slice(10))
+        }
+      }
+      const tagsDir = join(commonDir, 'refs', 'tags')
+      if (existsSync(tagsDir)) {
+        const stack = [{ abs: tagsDir, rel: '' }]
+        while (stack.length > 0) {
+          const cur = stack.pop()
+          let entries = []
+          try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
+          for (const e of entries) {
+            if (isMacMetadataName(e.name)) continue
+            const subRel = cur.rel ? `${cur.rel}/${e.name}` : e.name
+            if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: subRel })
+            else if (e.isFile()) tagSet.add(subRel)
+          }
+        }
+      }
+      fastTags = [...tagSet].sort()
+    }
+    return { isRepoRoot: true, workTreeRoot: root, workGitDir, commonDir, isShallow, isSha256, remoteText, originHeadBranch, fastTags, useReftable }
+  } catch {
+    return null
+  }
+}
+
+/** 直接解析 Git index v2/v3 二进制条目列表，避免派生 `git ls-files -z`。 */
+function readGitIndexFast(workGitDir, isSha256 = false) {
+  if (!workGitDir || isSha256) return null
+  const idxPath = join(workGitDir, 'index')
+  if (!existsSync(idxPath)) return null
+  let buf
+  try { buf = readFileSync(idxPath) } catch { return null }
+  if (buf.length < 32 || buf.toString('ascii', 0, 4) !== 'DIRC') return null
+  const ver = buf.readUInt32BE(4)
+  if (ver !== 2 && ver !== 3) return null
+  const count = buf.readUInt32BE(8)
+  let off = 12
+  const paths = []
+  for (let i = 0; i < count; i += 1) {
+    if (off + 62 >= buf.length) return null
+    const flags = buf.readUInt16BE(off + 60)
+    if ((flags & 0x3000) !== 0) return null
+    let nameOff = off + 62
+    if (ver >= 3 && (flags & 0x4000) !== 0) {
+      if (nameOff + 2 >= buf.length) return null
+      nameOff += 2
+    }
+    const nul = buf.indexOf(0, nameOff)
+    if (nul < 0) return null
+    paths.push(buf.toString('utf8', nameOff, nul))
+    const len = nul - off + 1
+    off += (len + 7) & ~7
+  }
+  if (off > buf.length - 20) return null
+  while (off + 8 <= buf.length - 20) {
+    const sig = buf.toString('ascii', off, off + 4)
+    if (!/^[A-Za-z]{4}$/.test(sig)) return null
+    if (sig === 'link' || sig === 'sdir') return null
+    const sz = buf.readUInt32BE(off + 4)
+    off += 8 + sz
+  }
+  if (off !== buf.length - 20) return null
+  return paths
 }
 
 function mapProbeToAuth(probe) {
@@ -153,71 +302,123 @@ function mapProbeToAuth(probe) {
   return auth
 }
 
+function parseTagsAndOriginHead(forEachRefOut) {
+  const tags = []
+  let originHeadBranch
+  for (const rawLine of String(forEachRefOut ?? '').split('\n')) {
+    if (!rawLine) continue
+    const [refName, symTarget = ''] = rawLine.split('\t')
+    if (refName === 'refs/remotes/origin/HEAD') {
+      const target = symTarget.trim()
+      if (target) originHeadBranch = target.replace(/^origin\//, '')
+    } else if (refName.startsWith('refs/tags/')) {
+      tags.push(refName.slice(10))
+    }
+  }
+  return { tags, originHeadBranch }
+}
+
+function readScopeConfigFast(commonDir) {
+  if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
+  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  const globalPath = existsSync(join(homedir(), '.gitconfig'))
+    ? join(homedir(), '.gitconfig')
+    : (existsSync(join(xdg, 'git', 'config')) ? join(xdg, 'git', 'config') : null)
+  const localPath = join(commonDir, 'config')
+  const sources = []
+  if (globalPath) sources.push({ scope: 'global', text: readTextSafe(globalPath) ?? '' })
+  if (existsSync(localPath)) sources.push({ scope: 'local', text: readTextSafe(localPath) ?? '' })
+  if (sources.length === 0) return null
+  for (const s of sources) {
+    if (/^\s*\[include(?:if)?\b/im.test(s.text)) return null
+  }
+  const map = new Map()
+  for (const { scope, text } of sources) {
+    let curSection = ''
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.replace(/(?:^|\s)[;#].*$/, '').trim()
+      if (!line) continue
+      const sec = /^\[([a-z0-9-]+)(?:\s+"([^"]*)")?\]$/i.exec(line)
+      if (sec) { curSection = sec[1].toLowerCase(); continue }
+      const eq = line.indexOf('=')
+      if (eq <= 0) continue
+      const k = line.slice(0, eq).trim().toLowerCase()
+      const v = line.slice(eq + 1).trim()
+      if (curSection === 'user' || curSection === 'credential' || curSection === 'init') {
+        map.set(`${curSection}.${k}`, { scope, value: v })
+      }
+    }
+  }
+  if (!map.get('user.name')?.value || !map.get('user.email')?.value) return null
+  return map
+}
+
 export async function detectGit(root, opts = {}) {
   const { probeAuth = false, verifyToken = false, sshHostMap, mcpAvailable, offline } = opts
   const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const dotFast = inspectDotGitFast(root)
 
-  const [top, cfg, st, remotes, tagsRes, logRes, lsFiles, checkIgnore, originHead, bare, shallow] = await Promise.all([
-    git(root, ['rev-parse', '--is-inside-work-tree', '--show-toplevel']),
-    git(root, ['config', '--list', '--show-scope', '--show-origin']),
-    git(root, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal']),
-    git(root, ['remote', '-v']),
-    git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags']),
-    git(root, ['log', '--format=%an <%ae>', '--no-merges', '-n', '200']),
-    git(root, ['ls-files', '-z']),
-    git(root, ['check-ignore', '-z', '--stdin'], { input: '' }),
-    git(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
-    git(root, ['rev-parse', '--is-bare-repository']),
-    git(root, ['rev-parse', '--is-shallow-repository']),
-  ])
-
-  if (top.missing) {
-    return { available: false, present: false, auth: { https: 'n/a', network: 'n/a' } }
+  // 非根目录且无直属 .git 时先用单次 rev-parse 确认是否处于版本库内，避免在纯目录上并发空跑必败 git 子进程
+  // 注意：不可将 --show-toplevel 与裸仓检测合并，否则裸仓会直接报错退出 128
+  let top
+  let isBare = false
+  let isShallow = false
+  let insideFlag = 'false'
+  let workTreeRoot = root
+  if (dotFast) {
+    insideFlag = 'true'
+    isShallow = dotFast.isShallow
+  } else {
+    top = await git(root, ['rev-parse', '--is-inside-work-tree', '--is-bare-repository', '--is-shallow-repository', '--git-dir'])
+    if (top.missing) {
+      return { available: false, present: false, auth: { https: 'n/a', network: 'n/a' } }
+    }
+    if (!top.ok || !top.stdout) {
+      let auth = { https: 'n/a', network: 'n/a' }
+      if (probeAuth) {
+        const probe = await probeGitHubEnv({
+          cwd: root, remoteUrls: {}, verifyToken, mcpAvailable, offline, sshHostMap: effectiveHostMap,
+        })
+        auth = mapProbeToAuth(probe)
+      }
+      return { available: true, present: false, auth }
+    }
+    const topLines = top.stdout.split('\n').map((l) => l.trim())
+    insideFlag = topLines[0] || 'false'
+    isBare = topLines[1] === 'true'
+    isShallow = topLines[2] === 'true'
+    if (!isBare && insideFlag === 'true') {
+      const toplevelRes = await git(root, ['rev-parse', '--show-toplevel'])
+      workTreeRoot = toplevelRes.ok && toplevelRes.stdout ? toplevelRes.stdout : root
+    }
   }
-  const isBare = bare.ok && bare.stdout === 'true'
   if (isBare) {
     return {
-      available: true,
-      present: true,
-      isBare: true,
-      isShallow: false,
-      isRepoRoot: true,
-      workTreeRoot: root,
-      barePath: root,
-      branch: undefined,
-      remote: undefined,
-      remotes: [],
-      remoteUrls: {},
-      identity: { name: undefined, email: undefined, scope: 'unset' },
-      commits: undefined,
-      commitsState: 'unreadable',
-      trackedPaths: [],
-      trackedFiles: 0,
-      nestedRepos: [],
-      auth: { https: 'n/a', network: 'n/a', reason: '裸仓库没有工作区' },
+      available: true, present: true, isBare: true, isShallow: false, isRepoRoot: true,
+      workTreeRoot: root, barePath: root, branch: undefined, remote: undefined, remotes: [],
+      remoteUrls: {}, identity: { name: undefined, email: undefined, scope: 'unset' },
+      commits: undefined, commitsState: 'unreadable', trackedPaths: [], trackedFiles: 0,
+      nestedRepos: [], auth: { https: 'n/a', network: 'n/a', reason: '裸仓库没有工作区' },
     }
   }
-  if (!top.ok || !top.stdout) {
-    let auth = { https: 'n/a', network: 'n/a' }
-    if (probeAuth) {
-      const probe = await probeGitHubEnv({
-        cwd: root,
-        remoteUrls: {},
-        verifyToken,
-        mcpAvailable,
-        offline,
-        sshHostMap: effectiveHostMap,
-      })
-      auth = mapProbeToAuth(probe)
-    }
-    return { available: true, present: false, auth }
-  }
 
-  const isShallow = shallow.ok && shallow.stdout === 'true'
-  const [insideFlag, workTreeRoot] = top.stdout.split('\n')
-  const isRepoRoot = samePath(root, workTreeRoot)
+  const fastConfigMap = dotFast ? readScopeConfigFast(dotFast.commonDir) : null
+  const fastTrackedPaths = dotFast ? readGitIndexFast(dotFast.workGitDir, dotFast.isSha256) : null
+  const [cfg, st, remotes, refsRes, logRes, lsFiles, lsIgnoredRes] = await Promise.all([
+    fastConfigMap ? Promise.resolve(null) : git(root, ['config', '--list', '--show-scope', '--show-origin']),
+    git(root, ['status', '--porcelain=v2', '--branch', '--ignored=matching', '--untracked-files=normal']),
+    dotFast && dotFast.remoteText !== null ? Promise.resolve({ ok: true, stdout: dotFast.remoteText }) : git(root, ['remote', '-v']),
+    dotFast && !dotFast.useReftable && dotFast.fastTags !== null
+      ? Promise.resolve(null)
+      : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/remotes/origin/HEAD']),
+    git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '500']),
+    fastTrackedPaths ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
+    git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z']),
+  ])
 
-  const config = parseConfigList(cfg.ok ? cfg.stdout : '')
+  const isRepoRoot = dotFast ? true : samePath(root, workTreeRoot)
+
+  const config = fastConfigMap ?? parseConfigList(cfg?.ok ? cfg.stdout : '')
   const statusInfo = parsePorcelainV2(st.ok ? st.stdout : '')
 
   const topology = resolveRemotesTopology(remotes.stdout || '', { sshHostMap: effectiveHostMap })
@@ -231,23 +432,36 @@ export async function detectGit(root, opts = {}) {
   const remote = topology.primary?.fetchUrl
   const modeMarkers = detectGitModeMarkers(root)
 
-  const tags = tagsRes.ok && tagsRes.stdout ? tagsRes.stdout.split('\n').filter(Boolean) : []
-  const historyAuthors = logRes.ok && logRes.stdout
-    ? [...new Set(logRes.stdout.split('\n').filter(Boolean))]
-    : []
-  const recentSubjects = logRes.ok && logRes.stdout
-    ? (await git(root, ['log', '--format=%s', '-n', '20'])).stdout.split('\n').filter(Boolean)
-    : []
+  const parsedRefs = refsRes ? parseTagsAndOriginHead(refsRes.ok ? refsRes.stdout : '') : { tags: dotFast?.fastTags ?? [], originHeadBranch: dotFast?.originHeadBranch }
+  const tags = parsedRefs.tags
+  const originHeadBranch = parsedRefs.originHeadBranch
+  const rawLogLines = logRes.ok && logRes.stdout ? logRes.stdout.split('\n').filter(Boolean) : []
+  const historyAuthorsSet = new Set()
+  const recentSubjects = []
+  for (const line of rawLogLines) {
+    const parts = line.split('\x1f')
+    const author = parts[0] ?? ''
+    const parents = (parts[1] ?? '').trim()
+    const subj = parts[2] ?? ''
+    if (!parents.includes(' ') && author) historyAuthorsSet.add(author)
+    if (subj && recentSubjects.length < 20) recentSubjects.push(subj)
+  }
+  const historyAuthors = [...historyAuthorsSet]
   const commitStyle = detectCommitStyle(recentSubjects)
-  const trackedPaths = lsFiles.ok && lsFiles.stdout ? lsFiles.stdout.split('\0').filter(Boolean) : []
+  const trackedPaths = fastTrackedPaths ?? (lsFiles?.ok && lsFiles.stdout ? lsFiles.stdout.split('\0').filter(Boolean) : [])
+  const ignoredTracked = lsIgnoredRes.ok && lsIgnoredRes.stdout ? lsIgnoredRes.stdout.split('\0').filter(Boolean) : []
 
   const head = statusInfo.oid && statusInfo.oid !== '(initial)' ? statusInfo.oid : undefined
   let commits = 0
   let commitsState = 'ok'
   if (head !== undefined) {
-    const count = await git(root, ['rev-list', '--count', 'HEAD'])
-    if (count.ok && /^\d+$/.test(count.stdout)) commits = Number(count.stdout)
-    else commitsState = 'unreadable'
+    if (rawLogLines.length < 500) {
+      commits = rawLogLines.length
+    } else {
+      const count = await git(root, ['rev-list', '--count', 'HEAD'])
+      if (count.ok && /^\d+$/.test(count.stdout)) commits = Number(count.stdout)
+      else commitsState = 'unreadable'
+    }
   }
 
   let auth = { https: 'undetermined', network: 'undetermined', reason: '默认不联网、不问凭据助手' }
@@ -259,7 +473,7 @@ export async function detectGit(root, opts = {}) {
       remoteUrls,
       topology,
       branch: statusInfo.head,
-      defaultBranch: parseOriginHead(originHead) || 'main',
+      defaultBranch: originHeadBranch || 'main',
       verifyToken,
       mcpAvailable,
       offline,
@@ -277,7 +491,7 @@ export async function detectGit(root, opts = {}) {
     workTreeRoot,
     insideWorkTree: insideFlag === 'true',
     branch: statusInfo.head,
-    originHeadBranch: parseOriginHead(originHead),
+    originHeadBranch: originHeadBranch ?? dotFast?.originHeadBranch,
     commitStyle,
     upstream: statusInfo.upstream,
     ahead: statusInfo.ahead,
@@ -321,7 +535,8 @@ export async function detectGit(root, opts = {}) {
     auth,
     _sshHostMap: effectiveHostMap,
     _hasGit: true,
-    _ignoreProbeOk: checkIgnore.ok || checkIgnore.status === 1,
+    _ignoredTracked: ignoredTracked,
+    _statusIgnored: statusInfo.ignored,
   }
 }
 
@@ -338,11 +553,11 @@ export function classifyHomePath(rel, line) {
   return 'leak'
 }
 
-export async function walkWorkspace(root, gitFacts) {
-  const canAskGit = gitFacts.present === true && gitFacts.isRepoRoot !== false
-  const trackedSet = new Set(canAskGit ? gitFacts.trackedPaths : [])
+const SECRET_FAST_PRECHECK_RE = /(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-(?:proj-)?|AKIA|-----BEGIN\s+(?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)/
 
+export function scanWorkspaceRaw(root) {
   const homeNorm = homedir().replace(/\\/g, '/')
+  const homeLeaf = homeNorm.length > 4 ? basename(homeNorm).toLowerCase() : ''
   const homeRe = homeNorm.length > 4
     ? new RegExp(`(?<![\\w.\\-/:])${homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
     : undefined
@@ -374,7 +589,48 @@ export async function walkWorkspace(root, gitFacts) {
       } else if (entry.isFile()) {
         if (entry.name === '.git') { nestedRepos.push(rel); continue }
         if (entry.name === '.gitmodules') nestedRepos.push(rel)
-        files.push({ rel, name: entry.name, full })
+        let st
+        try { st = statSync(full) } catch { continue }
+        const rec = {
+          rel,
+          name: entry.name,
+          full,
+          size: st.size,
+          textSecrets: null,
+          textLeaks: null,
+          unreadable: false,
+        }
+        if (TEXT_EXT.test(entry.name) && st.size <= 256 * 1024) {
+          const text = readTextSafe(full)
+          if (text === undefined) {
+            rec.unreadable = true
+          } else {
+            const mightHaveSecret = SECRET_FAST_PRECHECK_RE.test(text)
+            const mightHaveHome = Boolean(homeLeaf && text.toLowerCase().includes(homeLeaf))
+            if (mightHaveSecret || mightHaveHome) {
+              const lines = text.split('\n')
+              for (let i = 0; i < lines.length; i += 1) {
+                const line = lines[i]
+                if (mightHaveSecret) {
+                  for (const pat of SECRET_CONTENT_PATTERNS) {
+                    if (pat.re.test(line)) {
+                      if (!rec.textSecrets) rec.textSecrets = []
+                      rec.textSecrets.push({ file: rel, line: i + 1, kind: pat.label })
+                    }
+                  }
+                }
+                if (mightHaveHome && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
+                  const category = classifyHomePath(rel, line)
+                  if (category) {
+                    if (!rec.textLeaks) rec.textLeaks = []
+                    rec.textLeaks.push({ file: rel, line: i + 1, category })
+                  }
+                }
+              }
+            }
+          }
+        }
+        files.push(rec)
       }
     }
   }
@@ -382,17 +638,53 @@ export async function walkWorkspace(root, gitFacts) {
   const nestedUnique = [...new Set(nestedRepos.map((p) => p.replace(/\/?\.gitmodules$/, '').replace(/\/?\.git$/, '') || '.'))]
     .filter((p) => p !== '.')
 
-  const ignoredSet = new Set()
-  const ignoredTracked = []
+  return { files, dirs, nestedUnique, depthReached, truncated }
+}
+
+export async function finalizeWalkWorkspace(root, raw, gitFacts) {
+  const { files, dirs, nestedUnique, depthReached, truncated } = raw
+  const canAskGit = gitFacts.present === true && gitFacts.isRepoRoot !== false
+  const trackedSet = new Set(canAskGit ? gitFacts.trackedPaths : [])
+
+  const ignoredSet = new Set(canAskGit ? (gitFacts._statusIgnored ?? []) : [])
+  const ignoredTracked = canAskGit && Array.isArray(gitFacts._ignoredTracked)
+    ? [...gitFacts._ignoredTracked]
+    : []
+  for (const p of ignoredTracked) ignoredSet.add(p)
+
+  const hasIgnoredPrefix = (rel) => {
+    if (ignoredSet.has(rel)) return true
+    let slash = rel.indexOf('/')
+    while (slash > 0) {
+      if (ignoredSet.has(rel.slice(0, slash))) return true
+      slash = rel.indexOf('/', slash + 1)
+    }
+    return false
+  }
+
   if (canAskGit) {
-    const candidates = [...dirs, ...files.map((f) => f.rel)]
-    if (candidates.length > 0) {
-      const res = await git(root, ['check-ignore', '-z', '--stdin'], { input: `${candidates.join('\0')}\0` })
-      if (res.ok || res.status === 1) {
-        for (const item of res.stdout.split('\0')) if (item) ignoredSet.add(item)
+    const checkList = []
+    for (const d of dirs) {
+      const leaf = d.split('/').pop()
+      if (OUTPUT_DIRS.has(leaf) && !hasIgnoredPrefix(d)) checkList.push(d)
+    }
+    for (const f of files) {
+      if (!trackedSet.has(f.rel) && !hasIgnoredPrefix(f.rel)) {
+        const isSecret = SECRET_FILE_PATTERNS.some((re) => re.test(f.name)) && !SAFE_ENV_EXAMPLES.test(f.name)
+        if (isSecret || OUTPUT_DIRS.has(f.rel.split('/')[0])) checkList.push(f.rel)
       }
     }
-    for (const p of trackedSet) if (ignoredSet.has(p)) ignoredTracked.push(p)
+    if (checkList.length > 0) {
+      const res = await git(root, ['check-ignore', '-z', '--stdin'], { input: `${checkList.join('\0')}\0` })
+      if (res.ok || res.status === 1) {
+        for (const item of res.stdout.split('\0')) {
+          if (item) ignoredSet.add(item.replace(/\/$/, ''))
+        }
+      }
+    }
+    if (!Array.isArray(gitFacts._ignoredTracked)) {
+      for (const p of trackedSet) if (ignoredSet.has(p)) ignoredTracked.push(p)
+    }
   }
 
   let codeFiles = 0
@@ -408,7 +700,7 @@ export async function walkWorkspace(root, gitFacts) {
 
   for (const dir of dirs) {
     const leaf = dir.split('/').pop()
-    if (OUTPUT_DIRS.has(leaf) && !ignoredSet.has(dir)) unignoredOutputDirs.push(dir)
+    if (OUTPUT_DIRS.has(leaf) && !hasIgnoredPrefix(dir)) unignoredOutputDirs.push(dir)
   }
 
   for (const file of files) {
@@ -419,38 +711,31 @@ export async function walkWorkspace(root, gitFacts) {
     }
 
     const tracked = trackedSet.has(file.rel)
-    const ignored = ignoredSet.has(file.rel)
+    const ignored = hasIgnoredPrefix(file.rel)
+    const fileSize = file.size
 
-    let st
-    try { st = statSync(file.full) } catch { continue }
-    if (st.size >= 20 * 1024 * 1024 && !ignored) {
-      largeFiles.push({ file: file.rel, sizeMB: Math.round(st.size / (1024 * 1024)), tracked })
+    if (fileSize >= 20 * 1024 * 1024 && !ignored) {
+      largeFiles.push({ file: file.rel, sizeMB: Math.round(fileSize / (1024 * 1024)), tracked })
     }
 
     if (SECRET_FILE_PATTERNS.some((re) => re.test(file.name)) && !SAFE_ENV_EXAMPLES.test(file.name)) {
-      const tooLarge = st.size > 256 * 1024
+      const tooLarge = fileSize > 256 * 1024
       const status = !canAskGit ? 'undetermined'
         : tooLarge ? 'unverified-large'
           : tracked ? 'tracked' : (ignored ? 'ignored' : 'exposed')
-      secretFiles.push({ file: file.rel, status, sizeKB: Math.round(st.size / 1024) })
+      secretFiles.push({ file: file.rel, status, sizeKB: Math.round(fileSize / 1024) })
       if (tooLarge) skippedLargeFiles += 1
     }
 
-    if (ignored || !TEXT_EXT.test(file.name) || st.size > 256 * 1024) continue
-    const text = readTextSafe(file.full)
-    if (text === undefined) { unreadableFiles += 1; continue }
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
-      for (const pat of SECRET_CONTENT_PATTERNS) {
-        if (pat.re.test(line)) {
-          secretContent.push({ file: file.rel, line: i + 1, kind: pat.label, status: tracked ? 'tracked' : 'exposed' })
-        }
+    if (ignored || !TEXT_EXT.test(file.name) || fileSize > 256 * 1024) continue
+    if (file.unreadable) { unreadableFiles += 1; continue }
+    if (file.textSecrets) {
+      for (const s of file.textSecrets) {
+        secretContent.push({ ...s, status: tracked ? 'tracked' : 'exposed' })
       }
-      if (homeRe && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
-        const category = classifyHomePath(file.rel, line)
-        if (category) homePathLeaks.push({ file: file.rel, line: i + 1, category })
-      }
+    }
+    if (file.textLeaks) {
+      homePathLeaks.push(...file.textLeaks)
     }
   }
 
@@ -468,6 +753,10 @@ export async function walkWorkspace(root, gitFacts) {
     scanCoverage: { truncated, depthReached, skippedLargeFiles, unreadableFiles },
     nestedRepos: nestedUnique,
   }
+}
+
+export async function walkWorkspace(root, gitFacts) {
+  return finalizeWalkWorkspace(root, scanWorkspaceRaw(root), gitFacts)
 }
 
 const RELEASE_WORKFLOW_PATTERNS = [

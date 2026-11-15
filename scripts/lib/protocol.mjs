@@ -10,7 +10,10 @@
  * 而失效的表现是「明明有标记却说干净」——那会把不可逆动作变成默认动作。
  */
 
+import { COMMON_SKIP_DIRS } from '../../kit/skills/lib/git.mjs'
 import { scanLines } from './markdown.mjs'
+
+export { COMMON_SKIP_DIRS }
 
 /** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'

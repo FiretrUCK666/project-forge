@@ -57,7 +57,7 @@ quick-test: node scripts/dev/preflight.mjs
 full-test: node scripts/dev/fixtures.mjs
 smoke-verify: node scripts/dev/preflight.mjs
 merge-gate: node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs
-arch-rules: kit/** -> scripts/dev/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
+arch-rules: kit/** -> scripts/dev/**, kit/** -> scripts/lib/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
 high-risk: scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes
 do-not-edit: docs/archive/, docs/release-notes/
 ```
@@ -90,7 +90,7 @@ do-not-edit: docs/archive/, docs/release-notes/
 2. **入口不复述判据**：`SKILL.md` 只指「何时读哪份」，判据细节归 `references/`。
 3. **不写死取值**：账号、路径、版本号、仓库地址、默认分支一律现场读取。
 4. **单一真相源**：标记与预算只在 `protocol.mjs`、模板求值只在 `template.mjs`、报告排版只在 `render.mjs`。
-5. **幂等与只读先行**：勘察前零写入；重复运行字节一致，`equip`/`compose-agents` 写前经 `backup.mjs` 打仓外 `.tar.gz` 快照。
+5. **幂等与只读先行**：勘察前零写入；重复运行字节一致，`equip`/`compose-agents` 写前经 `backup.mjs` 打仓外 `.zip` 快照（兼容恢复 `.tar.gz`）。
 6. **预算与零残留**：入口/参考预算常量只在 `protocol.mjs` 定义；渲染产物严禁残留 `{{VAR}}` 或 `if/endif`。
 
 ## 宿主加载与分发边界

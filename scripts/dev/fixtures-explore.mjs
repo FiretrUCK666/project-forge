@@ -4,8 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { gitInit, rmTree, runAbs, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitInit, gitSync, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerExploreCases(cases) {
 cases.push(['repo-map.mjs：CI run、Makefile/justfile、reusableModules、Feature Map 正反双向', async () => {
@@ -25,7 +24,7 @@ cases.push(['repo-map.mjs：CI run、Makefile/justfile、reusableModules、Featu
   })
 
   try {
-    const pos = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [posDir, '--json'])
+    const pos = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', [posDir, '--json'])
     if (pos.status !== 0) return `repo-map 正面运行失败：${pos.stderr}`
     const pj = JSON.parse(pos.stdout)
     if (!pj.ciRunSteps?.some((s) => s.command.includes('npm test'))) return `未提取 CI run 步骤：${JSON.stringify(pj.ciRunSteps)}`
@@ -41,7 +40,7 @@ cases.push(['repo-map.mjs：CI run、Makefile/justfile、reusableModules、Featu
     }
     if ((pj.featureMap?.length ?? 0) === 0) return 'featureMap 为空'
 
-    const neg = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [negDir, '--json'])
+    const neg = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', [negDir, '--json'])
     if (neg.status !== 0) return `repo-map 反面运行失败：${neg.stderr}`
     const nj = JSON.parse(neg.stdout)
     if ((nj.ciRunSteps?.length ?? 0) !== 0 || (nj.taskRunners?.makefile?.length ?? 0) !== 0 || (nj.taskRunners?.justfile?.length ?? 0) !== 0) {
@@ -82,13 +81,10 @@ cases.push(['8 层深 Java+React repo-map、Dev Profile 显式 none 与未知 fl
     'frontend/src/App.tsx': 'export const App = () => null\n',
     '.agents/skills/dev-flow/SKILL.md': '---\nname: dev-flow\ndescription: flow\n---\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
     // 1. 8 层深 Java + 前端分离 repo-map，保留 working-directory 与多行 if/fi
-    const mapRes = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [dir, '--json'])
+    const mapRes = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', [dir, '--json'])
     if (mapRes.status !== 0) return `repo-map 失败：${mapRes.stderr}`
     const mj = JSON.parse(mapRes.stdout)
     if (!mj.testFiles?.some((f) => f.includes('AppTest.java'))
@@ -102,25 +98,25 @@ cases.push(['8 层深 Java+React repo-map、Dev Profile 显式 none 与未知 fl
     }
 
     // 2. 未知 flag 报错退出 2；resolveAvailableSkills 感知缺失技能
-    const badFlag = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--no-such-flag', dir])
+    const badFlag = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--no-such-flag', dir])
     if (badFlag.status !== 2) return `未知 flag 未退出 2：status=${badFlag.status}`
     const avail = resolveAvailableSkills(dir)
     if (!avail.has('dev-flow') || avail.has('dev-review')) return `resolveAvailableSkills 探测错误：${avail.skills}`
 
     // 3. Dev Profile 显式 none -> flow verify 与 submit 正常放行 + status/abort 可用
-    const st = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-none', '--case', '1', '--slug', 'none-ok', '--json'], { cwd: dir })
+    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-none', '--case', '1', '--slug', 'none-ok', '--json'], { cwd: dir })
     if (st.status !== 0) return `start 失败：${st.stderr}`
-    const ver = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--json'], { cwd: dir })
+    const ver = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--json'], { cwd: dir })
     if (ver.status !== 0) return `Dev Profile quick-test: none 时 verify 失败：${ver.stderr}`
-    const sub = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--json'], { cwd: dir })
+    const sub = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--json'], { cwd: dir })
     if (sub.status !== 0) return `submit 失败：${sub.stderr}`
-    const stat = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['status', '--json'], { cwd: dir })
+    const stat = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['status', '--json'], { cwd: dir })
     if (stat.status !== 0 || JSON.parse(stat.stdout).taskId !== 't-none') return `status 自动推断失败：${stat.stdout}`
 
     // 4. MERGE_HEAD 冲突态自动阻断 verify 与 review-pack
     writeFileSync(join(dir, '.git', 'MERGE_HEAD'), '0'.repeat(40) + '\n')
-    const verConflict = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify'], { cwd: dir })
-    const revConflict = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local'], { cwd: dir })
+    const verConflict = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify'], { cwd: dir })
+    const revConflict = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local'], { cwd: dir })
     rmTree(join(dir, '.git', 'MERGE_HEAD'))
     if (verConflict.status === 0 || !/BLOCKED_GIT_CONFLICT_IN_PROGRESS/.test(verConflict.stderr)) {
       return `MERGE_HEAD 未阻断 verify：${verConflict.stderr}`
@@ -184,8 +180,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
       '核心文件：`src/existing.mjs`、`src/old/deleted.mjs`。',
     ].join('\n'),
   })
-  gitInit(reentryDir)
-  spawnSync('git', ['remote', 'add', 'origin', 'https://code.example.org/org/reentry-demo.git'], { cwd: reentryDir, stdio: 'ignore' })
+  gitInit(reentryDir, { origin: 'https://code.example.org/org/reentry-demo.git' })
 
   // 3. 空目录与小型干净仓 vs 大仓（> 80 代码文件）explorationStrategy 分级
   const emptyDir = tmpProject({})
@@ -202,7 +197,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
   try {
     // 验证自有技能装配、渲染共存与卸载恢复
     equip(customDir, { noBackup: true })
-    const gen1 = runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    const gen1 = await runAbsAsync('scripts/compose-agents.mjs', [customDir, '--no-backup'])
     if (gen1.status !== 0) return `compose-agents customDir 失败：${gen1.stderr}`
     const filledCustom = readFileSync(join(customDir, 'AGENTS.md'), 'utf8')
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
@@ -212,7 +207,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
     if (!agentsCustom.includes('### 项目自有技能（自动识别，与上方研发流并存）') || !agentsCustom.includes('.agents/skills/my-billing/SKILL.md') || !agentsCustom.includes('.claude/skills/deploy-guard/SKILL.md')) {
       return `AGENTS.md 未包含项目自有扩展技能路由块：\n${agentsCustom.slice(0, 1200)}`
     }
-    const chkCustom = runAbs('scripts/compose-agents.mjs', [customDir, '--check'])
+    const chkCustom = await runAbsAsync('scripts/compose-agents.mjs', [customDir, '--check'])
     if (chkCustom.status !== 0) return `含自有技能的 AGENTS.md --check 失败：${chkCustom.stderr}`
 
     const sCustom = await survey(customDir)
@@ -223,7 +218,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
     // 删掉自有技能 -> 重跑 compose-agents 后自有技能区块消失
     rmTree(join(customDir, '.agents/skills/my-billing'))
     rmTree(join(customDir, '.claude/skills/deploy-guard'))
-    runAbs('scripts/compose-agents.mjs', [customDir, '--no-backup'])
+    await runAbsAsync('scripts/compose-agents.mjs', [customDir, '--no-backup'])
     if (readFileSync(join(customDir, 'AGENTS.md'), 'utf8').includes('### 项目自有技能')) {
       return '移除自有技能后 AGENTS.md 未清理自有技能条件块'
     }
@@ -250,7 +245,7 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
       return `toMarkdown 缺少非 GitHub 声明或重入校准摘要：\n${mdRe}`
     }
 
-    const revRe = runAbs('scripts/review.mjs', [reentryDir])
+    const revRe = await runAbsAsync('scripts/review.mjs', [reentryDir])
     if (revRe.status !== 0 && !revRe.stdout) return `review.mjs reentryDir 异常退出：${revRe.stderr}`
     const { reviewProject } = await import('../review.mjs')
     const revReObj = await reviewProject(reentryDir)

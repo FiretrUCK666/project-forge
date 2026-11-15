@@ -21,6 +21,22 @@ import { frontmatterBlock, posixPath, skillVersion } from './text.mjs'
 /** 离线或核对失败后的短冷却时间：防止离线环境每次启动重复等满网络超时。 */
 export const FAILURE_COOLDOWN_MS = 15 * 60 * 1000
 
+/** 已知历史发版曾随包分发的顶层退役文件路径（兼容没有 prevManagedFiles 基线的旧副本升级）。 */
+export const KNOWN_RETIRED_PACKAGE_ASSETS = new Set([
+  'scripts/selftest.mjs',
+  'scripts/review-record.mjs',
+  'scripts/check-badges.mjs',
+  'scripts/ecosystems.mjs',
+  'scripts/task-runners.mjs',
+  'scripts/release-notes.mjs',
+  'scripts/render-svg.mjs',
+  'scripts/lib/ledger.mjs',
+  'scripts/lib/manifest.mjs',
+  'templates/agents-kernel.md',
+  'templates/release-spec.md',
+  'templates/work-item.md',
+])
+
 /** 对路径按最深存在祖先做 realpathSync.native + NFC 归一，避免软链/NFD 导致键分裂。 */
 export function canonicalRealPath(p) {
   const abs = resolve(String(p ?? ''))
@@ -101,11 +117,15 @@ function sanitizeTimestamp(value, now) {
 export function readStateFrom(statePath, now = Date.now()) {
   try {
     const raw = JSON.parse(readFileSync(statePath, 'utf8').replace(/^\uFEFF/, ''))
+    const managedFiles = Array.isArray(raw?.managedFiles)
+      ? raw.managedFiles.filter((x) => typeof x === 'string' && x.trim())
+      : undefined
     return {
       lastUpdateAt: sanitizeTimestamp(raw?.lastUpdateAt, now),
       lastOkAt: sanitizeTimestamp(raw?.lastOkAt, now),
       lastNoticeAt: sanitizeTimestamp(raw?.lastNoticeAt, now),
       lastFailAt: sanitizeTimestamp(raw?.lastFailAt, now),
+      ...(managedFiles ? { managedFiles } : {}),
     }
   } catch {
     return { lastUpdateAt: 0, lastOkAt: 0, lastNoticeAt: 0, lastFailAt: 0 }
@@ -270,8 +290,8 @@ export function stageAndValidatePackage(entries, skillRoot, {
   }
 }
 
-/** 写前读取现有目标字节，以便中途异常时原地恢复。 */
-export function snapshotTargetBackups(stagedEntries, skillRoot) {
+/** 写前读取现有目标字节（及拟退役删档路径），以便中途异常或验收失败时全量原地恢复。 */
+export function snapshotTargetBackups(stagedEntries, skillRoot, extraPaths = []) {
   const backups = new Map()
   for (const item of stagedEntries) {
     const dest = join(skillRoot, item.rel)
@@ -287,6 +307,16 @@ export function snapshotTargetBackups(stagedEntries, skillRoot) {
     } else {
       backups.set(dest, { dest, existed: false })
     }
+  }
+  for (const relOrAbs of extraPaths) {
+    const full = isInsideDir(skillRoot, relOrAbs) ? resolve(relOrAbs) : join(skillRoot, relOrAbs)
+    if (backups.has(full) || !existsSync(full)) continue
+    try {
+      const st = statSync(full)
+      if (st.isFile()) {
+        backups.set(full, { dest: full, existed: true, data: readFileSync(full) })
+      }
+    } catch { /* ignore */ }
   }
   return backups
 }
@@ -311,6 +341,22 @@ export function rollbackAppliedWrites(appliedDests, backups, pruneDirFn) {
     } catch {
       // 尽力恢复其余文件
     }
+  }
+}
+
+/** 恢复更新过程中已物理删除的退役/专属文件（用于原子验收失败回滚闭环）。 */
+export function restoreRemovedFiles(removedAbsPaths, backups) {
+  for (const absPath of removedAbsPaths ?? []) {
+    const rec = backups.get(absPath)
+    if (!rec?.existed || !rec.data) continue
+    try {
+      mkdirSync(dirname(absPath), { recursive: true })
+      try {
+        writeAtomic(absPath, rec.data)
+      } catch {
+        writeFileSync(absPath, rec.data)
+      }
+    } catch { /* 尽力恢复 */ }
   }
 }
 
@@ -341,34 +387,79 @@ function walkFilesRecursive(dir) {
   return out.sort()
 }
 
+function isRetiredTopLevelAsset(rel, prevManagedSet) {
+  const isTopScript = /^scripts\/[^/]+\.mjs$/.test(rel)
+  const isTopTemplate = /^templates\/[^/]+$/.test(rel)
+  const isTopRef = /^references\/[^/]+$/.test(rel)
+  if (!isTopScript && !isTopTemplate && !isTopRef) return false
+  return KNOWN_RETIRED_PACKAGE_ASSETS.has(rel) || Boolean(prevManagedSet?.has(rel))
+}
+
+/**
+ * 列出将被本次包副本清理的退役/仓库专属路径（供写入前读取原字节快照备份）。
+ */
+export function collectDeletionCandidates(skillRoot, nowSet, {
+  isPackageCopy,
+  prevManagedFiles,
+} = {}) {
+  if (!isPackageCopy) return []
+  const prevSet = Array.isArray(prevManagedFiles) ? new Set(prevManagedFiles) : null
+  const out = []
+  for (const managedDir of ['kit/skills', 'scripts/lib']) {
+    for (const full of walkFilesRecursive(join(skillRoot, managedDir))) {
+      const rel = posixPath(relative(skillRoot, full))
+      if (isRepoOnlyPath(rel) || nowSet.has(rel)) continue
+      out.push(full)
+    }
+  }
+  for (const dir of ['scripts', 'references', 'templates']) {
+    for (const full of walkFilesRecursive(join(skillRoot, dir))) {
+      const rel = posixPath(relative(skillRoot, full))
+      if (isRepoOnlyPath(rel) || nowSet.has(rel)) continue
+      if (rel.startsWith('scripts/lib/')) continue
+      if (isRetiredTopLevelAsset(rel, prevSet)) out.push(full)
+    }
+  }
+  return out
+}
+
 /**
  * 全深度递归比对退役文件：
- * - `kit/skills/**` 与 `scripts/lib/**` 在包副本下物理删除并上报 `retiredFiles`；
- * - 其余托管根目录下未在包内出现的文件仅上报 `staleFiles` 不擅删（保护用户手记）。
+ * - 包副本下物理删除 `kit/skills/**`、`scripts/lib/**` 及确认属于包内已退役的顶层
+ *   `scripts/*.mjs`/`templates/*`/`references/*`；
+ * - 用户自建未托管文件（既不在旧版包清单中、也非已知退役资产）只上报 `staleFiles` 绝不误删。
  */
 export function collectDeepStaleAndRetired(skillRoot, nowSet, {
   isPackageCopy,
   insideSkillFn,
   pruneDirFn,
+  prevManagedFiles,
 } = {}) {
   const retiredFiles = []
+  const retiredAbsPaths = []
   const staleFiles = []
+  const prevSet = Array.isArray(prevManagedFiles) ? new Set(prevManagedFiles) : null
+
+  const tryRetire = (full, rel) => {
+    if (typeof insideSkillFn === 'function' && !insideSkillFn(full)) return
+    try {
+      rmSync(full, { force: true, maxRetries: 5, retryDelay: 50 })
+      if (!existsSync(full)) {
+        retiredFiles.push(rel)
+        retiredAbsPaths.push(full)
+        if (typeof pruneDirFn === 'function') pruneDirFn(dirname(full))
+      }
+    } catch {
+      staleFiles.push(rel)
+    }
+  }
 
   if (isPackageCopy) {
     for (const managedDir of ['kit/skills', 'scripts/lib']) {
       for (const full of walkFilesRecursive(join(skillRoot, managedDir))) {
         const rel = posixPath(relative(skillRoot, full))
         if (isRepoOnlyPath(rel) || nowSet.has(rel)) continue
-        if (typeof insideSkillFn === 'function' && !insideSkillFn(full)) continue
-        try {
-          rmSync(full, { force: true, maxRetries: 5, retryDelay: 50 })
-          if (!existsSync(full)) {
-            retiredFiles.push(rel)
-            if (typeof pruneDirFn === 'function') pruneDirFn(dirname(full))
-          }
-        } catch {
-          staleFiles.push(rel)
-        }
+        tryRetire(full, rel)
       }
     }
   }
@@ -378,11 +469,15 @@ export function collectDeepStaleAndRetired(skillRoot, nowSet, {
       const rel = posixPath(relative(skillRoot, full))
       if (isRepoOnlyPath(rel) || nowSet.has(rel)) continue
       if (rel.startsWith('kit/skills/') || rel.startsWith('scripts/lib/')) continue
-      staleFiles.push(rel)
+      if (isPackageCopy && isRetiredTopLevelAsset(rel, prevSet)) {
+        tryRetire(full, rel)
+      } else {
+        staleFiles.push(rel)
+      }
     }
   }
 
-  return { retiredFiles, staleFiles }
+  return { retiredFiles, retiredAbsPaths, staleFiles }
 }
 
 /** 版本号归一化（去掉前导 `v`）。 */

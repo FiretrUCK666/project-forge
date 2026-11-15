@@ -45,7 +45,52 @@ const SECRET_PATTERNS = [
 
 const BACKUP_FILE_RE = /\.(?:bak|orig|old|tmp)$|~$/i
 
-export function readTextStrictInfo(filePath) {
+/** 创建单遍审计文件与词法缓存，避免多轮重复读盘与行分割。 */
+export function createFileContentCache() {
+  const entries = new Map()
+  return {
+    getInfo(filePath) {
+      const key = String(filePath)
+      if (entries.has(key)) return entries.get(key)
+      const val = readTextStrictInfoUncached(filePath)
+      entries.set(key, val)
+      return val
+    },
+    getLines(filePath) {
+      const info = this.getInfo(filePath)
+      if (!info?.text) return undefined
+      if (!info._lines) info._lines = info.text.split('\n')
+      return info._lines
+    },
+    getCommentLines(filePath, ext) {
+      const info = this.getInfo(filePath)
+      if (!info?.text) return undefined
+      if (!info._commentsByExt) info._commentsByExt = new Map()
+      if (info._commentsByExt.has(ext)) return info._commentsByExt.get(ext)
+      const lines = this.getLines(filePath)
+      const parsed = new Array(lines.length)
+      let inBlock = false
+      for (let i = 0; i < lines.length; i += 1) {
+        const res = extractLineCommentInfo(lines[i], inBlock, ext)
+        inBlock = res.nextInBlock
+        parsed[i] = res
+      }
+      info._commentsByExt.set(ext, parsed)
+      return parsed
+    },
+    clear() {
+      entries.clear()
+    },
+  }
+}
+
+let activeReadCache = null
+
+export function setActiveFileCache(cache) {
+  activeReadCache = cache
+}
+
+function readTextStrictInfoUncached(filePath) {
   try {
     const st = statSync(filePath)
     if (!st.isFile()) return undefined
@@ -61,6 +106,27 @@ export function readTextStrictInfo(filePath) {
   } catch {
     return undefined
   }
+}
+
+export function readTextStrictInfo(filePath, cache = activeReadCache) {
+  return cache ? cache.getInfo(filePath) : readTextStrictInfoUncached(filePath)
+}
+
+function getLinesCached(filePath, info) {
+  if (activeReadCache) return activeReadCache.getLines(filePath)
+  return info?.text ? info.text.split('\n') : undefined
+}
+
+function getCommentLinesCached(filePath, lines, ext) {
+  if (activeReadCache) return activeReadCache.getCommentLines(filePath, ext)
+  const parsed = new Array(lines.length)
+  let inBlock = false
+  for (let i = 0; i < lines.length; i += 1) {
+    const res = extractLineCommentInfo(lines[i], inBlock, ext)
+    inBlock = res.nextInBlock
+    parsed[i] = res
+  }
+  return parsed
 }
 
 export function addFinding(findings, item) {
@@ -134,7 +200,7 @@ export function auditSecurity(files, trackedSet, findings) {
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
 
-    const lines = info.text.split('\n')
+    const lines = getLinesCached(f.full, info) ?? []
     for (let idx = 0; idx < lines.length; idx += 1) {
       const line = lines[idx]
       for (const pat of SECRET_PATTERNS) {
@@ -222,9 +288,9 @@ export function auditDeadcode(files, findings) {
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-    const lines = info.text.split('\n')
+    const lines = getLinesCached(f.full, info) ?? []
+    const parsedComments = getCommentLinesCached(f.full, lines, ext)
     let todoCount = 0
-    let inBlock = false
     let commentRun = []
 
     const flushCommentRun = () => {
@@ -250,8 +316,7 @@ export function auditDeadcode(files, findings) {
     }
 
     for (let i = 0; i < lines.length; i += 1) {
-      const { commentText, nextInBlock, pureSingleLine } = extractLineCommentInfo(lines[i], inBlock, ext)
-      inBlock = nextInBlock
+      const { commentText, pureSingleLine } = parsedComments[i]
 
       if (pureSingleLine && commentText) commentRun.push({ line: i + 1, body: commentText })
       else flushCommentRun()
@@ -293,7 +358,7 @@ export function auditPerf(repoRoot, files, findings) {
     if (!CODE_EXT_RE.test(f.name) || TEST_FILE_RE.test(f.rel)) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
-    const lines = info.text.split('\n')
+    const lines = getLinesCached(f.full, info) ?? []
     for (let i = 0; i < lines.length; i += 1) {
       if (/\/.*\/[gimsuy]*\.test\(/.test(lines[i])) continue
       if (/\b(?:fetch|https\.request|http\.request)\s*\(/.test(lines[i])) {
@@ -327,31 +392,34 @@ export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
   const registeredPaths = []
   let registeredInDotWorktrees = 0
 
-  for (const e of rawEntries) {
+  const dotWorktreeEntries = rawEntries.filter((e) => {
     registeredPaths.push(e.path)
-    if (samePath(e.path, mainCanon)) continue
+    if (samePath(e.path, mainCanon)) return false
     const rel = posixPath(relative(mainCanon, e.path))
-    if (!rel.startsWith('.worktrees/')) continue
-    registeredInDotWorktrees += 1
+    return rel.startsWith('.worktrees/')
+  })
+  registeredInDotWorktrees = dotWorktreeEntries.length
 
+  const inspected = await Promise.all(dotWorktreeEntries.map(async (e) => {
+    const rel = posixPath(relative(mainCanon, e.path))
     if (e.prunable) {
-      counts.prunable += 1
-      const item = { path: rel, branch: e.branch, headSha: e.head, state: 'prunable', dirty: false, reason: `prunable (${e.prunable})` }
-      worktreeEntries.push(item)
-      stale.push(item)
-      continue
+      return {
+        stateKey: 'prunable',
+        item: { path: rel, branch: e.branch, headSha: e.head, state: 'prunable', dirty: false, reason: `prunable (${e.prunable})` },
+        isStale: true,
+      }
     }
-
-    const stRes = existsSync(e.path) ? await gitRun(e.path, ['status', '--porcelain']) : { ok: false, stdout: '' }
+    const [stRes, mergeInfo] = await Promise.all([
+      existsSync(e.path) ? gitRun(e.path, ['status', '--porcelain']) : Promise.resolve({ ok: false, stdout: '' }),
+      inspectBranchMergeState(mainRoot, {
+        branch: e.branch,
+        headSha: e.head,
+        defaultBranch: defaultBranch || 'main',
+      }),
+    ])
     const dirty = Boolean(stRes.ok && stRes.stdout.trim())
-    const mergeInfo = await inspectBranchMergeState(mainRoot, {
-      branch: e.branch,
-      headSha: e.head,
-      defaultBranch: defaultBranch || 'main',
-    })
     const st = mergeInfo.state
-    counts[st] = (counts[st] ?? 0) + 1
-    const baseItem = {
+    const item = {
       path: rel,
       branch: e.branch,
       headSha: e.head,
@@ -363,8 +431,13 @@ export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
         ? `no_own_commits: no unique commits ahead of ${defaultBranch || 'main'} (dirty=${dirty}; ask human before cleaning)`
         : `${st}: ${mergeInfo.reason}`,
     }
-    worktreeEntries.push(baseItem)
-    if (st !== 'unmerged') stale.push(baseItem)
+    return { stateKey: st, item, isStale: st !== 'unmerged' }
+  }))
+
+  for (const res of inspected) {
+    counts[res.stateKey] = (counts[res.stateKey] ?? 0) + 1
+    worktreeEntries.push(res.item)
+    if (res.isStale) stale.push(res.item)
   }
 
   const wtContainer = join(mainRoot, '.worktrees')
@@ -503,7 +576,8 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     if (CODE_EXT_RE.test(f.name)) {
       codeRelList.push(f.rel)
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-      const lines = info.text.split('\n')
+      const lines = getLinesCached(f.full, info) ?? []
+      const parsedComments = getCommentLinesCached(f.full, lines, ext)
       if (!TEST_FILE_RE.test(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
         const isHigh = lines.length > GOD_FILE_HIGH_LINES
         addFinding(findings, {
@@ -516,12 +590,10 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
         })
       }
 
-      let inBlock = false
       let tombCount = 0
       let excuseCount = 0
       for (let i = 0; i < lines.length; i += 1) {
-        const { commentText, nextInBlock } = extractLineCommentInfo(lines[i], inBlock, ext)
-        inBlock = nextInBlock
+        const { commentText } = parsedComments[i]
         if (commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
           tombCount += 1
           if (tombCount <= 5) {

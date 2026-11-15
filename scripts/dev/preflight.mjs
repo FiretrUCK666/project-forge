@@ -163,9 +163,11 @@ async function main() {
     note,
   }
 
-  await runContractChecks(ctx)
-  await runSuiteChecks(ctx)
-  runE2eChecks(ctx)
+  await Promise.all([
+    runContractChecks(ctx),
+    runSuiteChecks(ctx),
+    runE2eChecks(ctx),
+  ])
 
   for (const n of notes) process.stdout.write(`  ${n}\n`)
   if (failures.length === 0) {

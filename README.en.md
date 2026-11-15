@@ -22,7 +22,7 @@ A brand-new folder, or a repository that has been maintained for months, usually
 
 | Capability | What that means |
 | --- | --- |
-| **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, CI workflows, and custom skills stay exactly as they are. A `.tar.gz` snapshot is saved outside the repository before any file is written |
+| **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, CI workflows, and custom skills stay exactly as they are. A `.zip` snapshot is saved outside the repository before any file is written |
 | **Docs travel with the branch** | `docs/prd/`, `docs/specs/`, and `docs/todo/` share one YAML frontmatter format and `YYMMDD-issue<N>-<slug>-{prd,spec,todo}.md` naming; `flow.mjs finalize` archives them together into `docs/archive/` when the work is done |
 | **Nothing merges without evidence** | A change needs passing static gates, real command output, and an independent-context review. Mermaid diagram widths and document anchors are checked before every commit |
 | **Editing one side warns about the other** | A dependency table inside `AGENTS.md` records which templates and docs to check when source changes, and which source entry points to verify when docs change |

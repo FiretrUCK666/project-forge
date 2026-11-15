@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * flow.mjs —— Git 协同流转状态机总入口（零记忆自动推断 --task，统一 CLI 解析）。
+ * flow.mjs —— Git 协同流转状态机总入口（零记忆自动推断 --task，按子命令按需加载减少启动耗时）。
  *
  * 子命令：
  *   inspect | start | claim | finalize | verify | submit | rework | merge | cleanup | status | abort
@@ -12,11 +12,9 @@ import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
-import { analyzeIssueDependencies, handleClaim, handleStart, inspectWorkspace } from './flow-inspect.mjs'
-import { handleFinalize, handleRework, handleSubmit, handleVerify } from './flow-lifecycle.mjs'
-import { handleAbort, handleCleanup, handleMerge, handleRelease, handleStatus } from './flow-merge.mjs'
+import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
-export { analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
+export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
 const SUBCOMMANDS = ['inspect', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'merge', 'cleanup', 'status', 'abort']
 
@@ -34,7 +32,7 @@ function printHelp() {
     '  submit    [--task <id>] [--draft] [--rework] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  merge     [--task <id>] [--method merge|squash|rebase] [--human-approved] [--reason <text>] [--json]',
-    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree] [--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--json]',
+    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--json]',
     '  status    [--task <id>] [--json]',
     '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--json]',
   ].join('\n') + '\n')
@@ -74,6 +72,7 @@ async function main(argv) {
   try {
     if (sub === 'inspect') {
       const data = await inspectWorkspace(cli.targetDir, {
+        roots,
         inputs: opts._,
         probeAuth: Boolean(opts['probe-auth']),
         externalPr: opts['external-pr'],
@@ -118,17 +117,26 @@ async function main(argv) {
       return 0
     }
 
-    if (sub === 'start') return (await handleStart(opts, roots)).exitCode
-    if (sub === 'claim') return (await handleClaim(opts, roots)).exitCode
-    if (sub === 'release') return (await handleRelease(opts, roots)).exitCode
-    if (sub === 'finalize') return (await handleFinalize(opts, roots)).exitCode
-    if (sub === 'verify') return (await handleVerify(opts, roots)).exitCode
-    if (sub === 'submit') return (await handleSubmit(opts, roots)).exitCode
-    if (sub === 'rework') return (await handleRework(opts, roots)).exitCode
-    if (sub === 'merge') return (await handleMerge(opts, roots)).exitCode
-    if (sub === 'cleanup') return (await handleCleanup(opts, roots)).exitCode
-    if (sub === 'status') return (await handleStatus(opts, roots)).exitCode
-    if (sub === 'abort') return (await handleAbort(opts, roots)).exitCode
+    if (sub === 'start') {
+      const { handleStart } = await import('./flow-inspect.mjs')
+      return (await handleStart(opts, roots)).exitCode
+    }
+    if (sub === 'claim' || sub === 'release' || sub === 'merge' || sub === 'cleanup' || sub === 'status' || sub === 'abort') {
+      const { handleClaim, handleRelease, handleMerge, handleCleanup, handleStatus, handleAbort } = await import('./flow-merge.mjs')
+      if (sub === 'claim') return (await handleClaim(opts, roots)).exitCode
+      if (sub === 'release') return (await handleRelease(opts, roots)).exitCode
+      if (sub === 'merge') return (await handleMerge(opts, roots)).exitCode
+      if (sub === 'cleanup') return (await handleCleanup(opts, roots)).exitCode
+      if (sub === 'status') return (await handleStatus(opts, roots)).exitCode
+      return (await handleAbort(opts, roots)).exitCode
+    }
+    if (sub === 'finalize' || sub === 'verify' || sub === 'submit' || sub === 'rework') {
+      const { handleFinalize, handleVerify, handleSubmit, handleRework } = await import('./flow-lifecycle.mjs')
+      if (sub === 'finalize') return (await handleFinalize(opts, roots)).exitCode
+      if (sub === 'verify') return (await handleVerify(opts, roots)).exitCode
+      if (sub === 'submit') return (await handleSubmit(opts, roots)).exitCode
+      return (await handleRework(opts, roots)).exitCode
+    }
 
     throw new Error(`未知子命令：${sub}`)
   } catch (err) {

@@ -705,7 +705,11 @@ export function parseAgentsProfile(repoRoot) {
     profile.highRisk = ['.github/workflows/', 'AGENTS.md']
   }
 
-  const fallback = detectEcosystemCommands(repoRoot)
+  const needFallback = (!profile.quickTest && !explicitNone.has('quick-test'))
+    || (!profile.fullTest && !explicitNone.has('full-test'))
+    || (!profile.mergeGate && !explicitNone.has('merge-gate'))
+  const fallback = needFallback ? detectEcosystemCommands(repoRoot) : undefined
+  if (!fallback) return profile
   if (!profile.quickTest && !explicitNone.has('quick-test')) profile.quickTest = fallback.quickTest
   if (!profile.fullTest && !explicitNone.has('full-test')) {
     profile.fullTest = fallback.fullTest ?? (!explicitNone.has('quick-test') ? fallback.quickTest : undefined)

@@ -35,8 +35,11 @@ async function collectFinalizeChangedFiles(implRoot, ledger) {
   const merged = new Set(await getChangedFiles(implRoot, ledger.baseSha))
   for (const baseRef of [...new Set([ledger.baseBranch, 'main', 'master'].filter(Boolean))]) {
     const mb = await gitRun(implRoot, ['merge-base', baseRef, 'HEAD'])
-    if (mb.ok && mb.stdout?.trim()) {
-      for (const f of await getChangedFiles(implRoot, mb.stdout.trim())) merged.add(f)
+    const mbSha = mb.ok ? mb.stdout?.trim() : ''
+    if (mbSha) {
+      if (mbSha !== ledger.baseSha) {
+        for (const f of await getChangedFiles(implRoot, mbSha)) merged.add(f)
+      }
       break
     }
   }

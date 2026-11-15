@@ -333,40 +333,58 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
       cwd,
       shell: true,
       detached: useDetached,
+      stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env,
     })
     const outChunks = []
     const errChunks = []
     let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      killProcessTree(child)
-    }, opts.timeout ?? 120000)
-
-    child.stdout?.on('data', (d) => outChunks.push(d))
-    child.stderr?.on('data', (d) => errChunks.push(d))
-    child.on('error', (err) => {
+    let settled = false
+    let exitedCode = null
+    let closeGraceTimer = null
+    const finish = (code, extraStderr = '') => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      done({
-        ok: false,
-        code: 1,
-        timedOut,
-        stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
-        stderr: err.message,
-      })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
+      if (closeGraceTimer) clearTimeout(closeGraceTimer)
       const exitCode = timedOut ? 124 : (typeof code === 'number' ? code : 1)
+      const errBuf = Buffer.concat(errChunks).toString('utf8').trimEnd()
+      const stderr = extraStderr ? (errBuf ? `${errBuf}\n${extraStderr}` : extraStderr) : errBuf
       done({
         ok: exitCode === 0,
         code: exitCode,
         timedOut,
         stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
-        stderr: Buffer.concat(errChunks).toString('utf8').trimEnd(),
+        stderr,
       })
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      killProcessTree(child)
+      closeGraceTimer = setTimeout(() => {
+        try { child.stdout?.destroy() } catch { /* ignore */ }
+        try { child.stderr?.destroy() } catch { /* ignore */ }
+        finish(124)
+      }, 1500)
+      closeGraceTimer.unref?.()
+    }, opts.timeout ?? 120000)
+    timer.unref?.()
+
+    child.stdout?.on('data', (d) => outChunks.push(d))
+    child.stderr?.on('data', (d) => errChunks.push(d))
+    child.on('exit', (code) => {
+      exitedCode = code
+      if (settled || closeGraceTimer) return
+      closeGraceTimer = setTimeout(() => {
+        try { child.stdout?.destroy() } catch { /* ignore */ }
+        try { child.stderr?.destroy() } catch { /* ignore */ }
+        finish(exitedCode)
+      }, 1500)
+      closeGraceTimer.unref?.()
     })
+    child.on('error', (err) => finish(1, err.message))
+    child.on('close', (code) => finish(typeof code === 'number' ? code : exitedCode))
   })
 }
 

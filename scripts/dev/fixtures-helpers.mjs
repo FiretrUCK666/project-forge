@@ -60,6 +60,7 @@ export function gitSync(cwd, args, opts = {}) {
     cwd: targetCwd,
     encoding: 'utf8',
     stdio: opts.stdio ?? (opts.encoding ? 'pipe' : 'ignore'),
+    timeout: opts.timeout ?? 30000,
     windowsHide: true,
     ...opts,
     env: inv.env,

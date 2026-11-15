@@ -56,7 +56,7 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI + Round 3 flushAndExit 与看门狗 + Round 4 I10b/preflight 收敛与长尾排期均已落盘，提交后锁定 finalize + verify --mode gate 并发起 Round 4 复审）`
+- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI + Round 3 flushAndExit 与看门狗 + Round 4 I10b 收敛 + Round 5 execShellCommand stdio/exit 护栏均已落盘，提交后锁定 finalize + verify --mode gate 并发起 Round 5 复审）`
 - **待拍板事项**：无
 
 ## 完成后的记录
@@ -74,6 +74,9 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 - **Round 4 `I10b` 收敛与调度裕量优化**：
   - `scripts/dev/injections-data.mjs` + `scripts/dev/verify-injections.mjs`：将 `I10b.expect` 收敛为 `'「完成后的记录」里没有要求「在合并之前写完」'`（零匹配重型 `fixtures-*.mjs`），并支持 `runner: 'preflight'`（优先跑 `preflight` 再兜底 `fixtures`，保持任一道捕获语义不削弱），`I10b` 单跑降至 `3.25s`；
   - `scripts/dev/fixtures.mjs`：按实测 `--profile` 真实耗时倒序重排 `HEAVY_CASE_HINTS` 并调整 `defaultJobs` 上限为 `Math.min(9, ...)`，消除重型长尾倾斜。
+- **Round 5 `execShellCommand` 与剩余 `spawn`/`gitSync` 根治**：
+  - `kit/skills/lib/exec.mjs` + `scripts/dev/fixtures-m4.mjs`：`execShellCommand` 显式设置 `stdio: ['ignore', 'pipe', 'pipe']` 并补充 `exit` 事件 `1500ms` `.unref()` 宽限收口护栏，彻底避免 macOS Node 18 `detached + shell: true` 开放 `stdin` 与延迟 `'close'` 挂死；在 `fixtures-m4.mjs` 新增 `stdio` 关闭即时 EOF 与正反退出码实测，重跑 `equip.mjs .` 同步 `.agents/skills/lib/exec.mjs`。
+  - `scripts/dev/preflight-e2e.mjs` + `scripts/dev/fixtures-helpers.mjs`：`runAsync` 显式加 `stdio: ['ignore', 'pipe', 'pipe']` 与 `.unref()`，`gitSync` 设默认 `timeout: 30000`。
 - **实际验证命令清单**：提交后于最新 `HEAD` 跑通 `flow.mjs verify --mode gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`verify-injections.mjs`）、`bench.mjs`、`e2e-zip-harness.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
 - **文档同步检查**：已同步更新 `docs/TDD.md`（收窄第 218–219 行状态图边标签并登记 M4 新增模块表与门禁矩阵）、`references/plugin-ecosystems.md`、`references/skill-project.md`、`kit/skills/dev-govern/SKILL.md` 及 `.agents/skills/`；总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` 按 1:N 保护保持 `active` 未动。
 - **遗留问题**：无（M5 全盘精简对齐与总控 PRD 归档留待后续里程碑）。

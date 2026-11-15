@@ -189,6 +189,18 @@ export function registerM4Cases(cases) {
     } catch (e) {
       return `flushAndExit 大 JSON 管道输出被截断：${e.message}`
     }
+
+    // 5. execShellCommand closes stdin (EOF immediate) and preserves positive/negative exit codes
+    const { execShellCommand } = await import('../../kit/skills/lib/exec.mjs')
+    const stdinCmd = `${JSON.stringify(process.execPath)} -e "const t=setTimeout(()=>process.exit(3),5000);process.stdin.resume();process.stdin.on('end',()=>{clearTimeout(t);process.stdout.write('eof');});"`
+    const resZero = await execShellCommand(stdinCmd, FIXTURES_M4_ROOT, { timeout: 6000 })
+    if (!resZero.ok || resZero.code !== 0 || resZero.timedOut || resZero.stdout !== 'eof') {
+      return `execShellCommand stdio 关闭或正退出异常：${JSON.stringify(resZero)}`
+    }
+    const resFail = await execShellCommand(`${JSON.stringify(process.execPath)} -e "process.exit(2)"`, FIXTURES_M4_ROOT, { timeout: 6000 })
+    if (resFail.ok || resFail.code !== 2 || resFail.timedOut) {
+      return `execShellCommand 负退出码异常：${JSON.stringify(resFail)}`
+    }
     return true
   }])
 

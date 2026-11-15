@@ -30,6 +30,7 @@ function loadE2eDeps() {
 function runAsync(ROOT, script, args, opts = {}) {
   return new Promise((done) => {
     const child = spawn(process.execPath, [join(ROOT, 'scripts', script), ...args], {
+      stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       ...opts,
     })
@@ -38,6 +39,7 @@ function runAsync(ROOT, script, args, opts = {}) {
     const timer = setTimeout(() => {
       try { child.kill() } catch { /* ignore */ }
     }, opts.timeout ?? 120000)
+    timer.unref?.()
     child.stdout?.on('data', (c) => out.push(c))
     child.stderr?.on('data', (c) => err.push(c))
     child.on('close', (code) => {

@@ -7,7 +7,7 @@ updated: 2026-11-15
 issue: null
 pr: null
 owner: FiretrUCK666
-plan_critique: "passed (reviewer=independent-plan-critic-r2, round=2, sha=16e616f6eb39, summary=Round 2 verified all 5 blocking defects resolved and final shorthand fixed)"
+plan_critique: "passed (reviewer=independent-plan-critic-r2, round=2, sha=4f8a5bfc3a04, summary=Refreshed hash after syncing M0 archived todo path and table status)"
 related_spec: null
 related_todo: null
 ---
@@ -18,11 +18,11 @@ related_todo: null
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（独立 Plan Critique 并批准后置 `active`，跨 M1–M5 持续追踪，M5 终态归档） |
+| 当前状态 | `active`（独立 Plan Critique 并批准后置 `active`，跨 M1–M5 持续追踪，M5 终态归档） |
 | 创建 / 更新 | `2026-11-15` / `2026-11-15` |
-| 关联 Issue / PR | M0 校准单 #33（M1–M5 各自建单并提交独立 SPEC + Todo + PR） |
+| 关联 Issue / PR | M0 校准单 #33 / PR #34（M1–M5 各自建单并提交独立 SPEC + Todo + PR） |
 | 提出方 / 负责人 | FiretrUCK666 |
-| 关联设计 / 任务单 | 常青架构契约 `docs/TDD.md`；M0 任务单 `docs/todo/261115-issue33-v7-prd-tdd-todo.md` |
+| 关联设计 / 任务单 | 常青架构契约 `docs/TDD.md`；M0 任务单 `docs/archive/todo/261115-issue33-v7-prd-tdd-todo.md` |
 
 - **文档关系说明**：本 PRD 是 v7 全量升级的**总产品需求汇总**，统领全量需求、7 大使用场景、五切片路线图（含各切片内同步更新对拍契约要求）与冻结验收标准 `C1..C12`。各阶段具体技术方案与代码级变更范围，由后续 M1–M5 五份独立 `docs/specs/` 与配套 `docs/todo/` 分别落地并互链追溯。
 

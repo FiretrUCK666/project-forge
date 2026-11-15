@@ -22,11 +22,11 @@ related_spec: null
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（`draft \| active \| in_review \| done \| archived \| dropped`） |
+| 当前状态 | `done`（`draft \| active \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-15` / `2026-11-15` |
 | 分支 / 基线 | `feat/v7-prd-tdd` @ `7dbc719` |
 | 任务编号 | `m0-v7-prd-tdd` |
-| 关联 Issue | #33 |
+| 关联 Issue / PR | #33 / #34 |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交；总控 PRD 为跨 M1–M5 长期活跃文档，**本任务仅归档本 Todo，不归档 `docs/prd/261115-v7-workflow-architecture-prd.md`**。
 

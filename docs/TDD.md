@@ -110,7 +110,7 @@ flowchart TB
 | `scripts/compose-agents.mjs` | 产品层 | 受管 `AGENTS.md` 按档渲染、增量刷新、`removedAgentsRegions` 尊重与预算校验 |
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（`reviewProject`、`readDecisions`）与交棒扫描（`VERIFY_EXIT` 0/1/3/4） |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 原子自更新与双语 README 目录同步 |
-| `scripts/lib/` | 产品层 | 首次锻造/升级/交棒专用库（当前含 `14` 模块及 `scripts/lib/platform/`；`[v7 规划 M1]` 将双端共用平台探测收敛入 `kit/skills/lib/`） |
+| `scripts/lib/` | 产品层 | 首次锻造/升级/交棒专用库（当前含 `15` 模块及 `scripts/lib/platform/`；`[v7 规划 M1]` 将双端共用平台探测收敛入 `kit/skills/lib/`） |
 | `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`（含 `checkMermaidLabelWidth`）、`platform.mjs`、`github-client.mjs`） |
 | `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs`，配合 `doc-audit.mjs`） |

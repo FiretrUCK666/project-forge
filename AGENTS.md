@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 理解项目 / 梳理架构 / 找模块入口 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/repo-map.mjs` |
 | 写需求 / 定方案 / 拆任务 / 查文档全景 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs` |
-| 做功能 / 修缺陷 / 接 Issue / 改 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect` |
+| 做功能 / 修缺陷 / 接 Issue / 改 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
 | 提交 / 推分支 / 开或更新 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
 | 本地预审 / 独立审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
 | 合并 PR / 清理本地分支与 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
@@ -23,17 +23,9 @@
 <!-- project-forge: begin 行事总纲 -->
 ## 行事总纲与决策准则
 
-- **四条准则**：
-  1. **治本不治标**：先查根因再改，不用补丁或盲目重试遮掩问题；
-  2. **写原则不写死**：提炼可迁移原则，禁把偶然个案过度泛化；
-  3. **融入结构**：先查复用与现成基建，合入既有主干，不留双轨；
-  4. **保持清朗**：及时清理废弃路径与冗余分支，控制认知复杂度。
-- **信任倒金字塔与验证优先级**：
-  - **形式与实证优先于读代码**：`确定性静态与类型门禁（类型 / Schema / arch-rules） > 真实启动运行与端到端实证（测试 / smoke-verify / UI 视觉交互与浅深色截图 / CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未实证的读代码挑刺不得阻塞合入；
-  - 同类审查漏出或运行时复发**满 2 次**沉入确定性形式检查，报错直指根因并清理过期冗余代码。
-- **最优解与取舍**：先给无历史包袱的最干净解法再拆步骤；兼顾用户易用（UX）、维护顺手（DX）与 AI 可控（AX）。
-- **动手前后**：改前查复用并判 `two-way`/`one-way` 门型；改后拿实测或渲染截图证据、清死代码与借口注释。
-- **不当人肉代理**：CLI、接口与 UI 改动必须本地运行实测、走通渲染交互并核对浅深色截图，不让用户代劳验收。
+- **四条准则**：1. **治本不治标**（查根因，不用补丁遮掩）；2. **写原则不写死**（提炼可迁移原则）；3. **融入结构**（查复用合入主干，不留双轨）；4. **保持清朗**（清废弃路径与冗余分支）。
+- **信任倒金字塔**：`确定性静态与类型门禁（类型/Schema/arch-rules） > 真实启动运行与端到端实证（测试/smoke-verify/UI 渲染交互与浅深色截图/CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未实证挑刺不阻塞合入；同类纠偏复发**满 2 次**沉入确定性静态检查并清理死代码。
+- **动手前后与人肉禁令**：先给无历史包袱最优解（兼顾 UX/DX/AX）；改前查复用并判 `two-way`/`one-way` 门型；改后拿实测或渲染交互/浅深色截图证据再汇报，清死代码与借口注释，不让用户代劳验收。
 <!-- project-forge: end 行事总纲 -->
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位
@@ -128,13 +120,9 @@ node scripts/dev/verify-injections.mjs
 <!-- project-forge: begin 修改守则 -->
 ## 工程修改守则与硬性规范
 
-- **严控范围与依赖**：改动前先读邻近实现，被替换的旧逻辑一并清净；不擅自引入第三方依赖，确需引入须先说明理由并取得确认。
-- **测试正反双向**：修缺陷先写稳定复现失败测试（Red-Green）；新增判定或解析逻辑须同时覆盖正面用例与易误判反面用例，禁止跳过或虚高凑数测试。
-- **测试分层与控频**：
-  - 编码中只跑语法/类型检查，禁频繁跑全量或 E2E；每轮改完按 `--tier quick --target <path>` 跑对应单测；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
-  - 禁写零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测内硬编码 `>=1s` sleep / 浏览器容器或非无头测试；单测文件超 800 行应按模块拆分。
-- **禁坏味与履历注释**：只描述当前状态——**禁立碑履历注释**、**禁死代码注释块**（废弃代码直接删）及无故压制检查（`HACK`/`WORKAROUND`/`TEMP` 或 `@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）。
-- **文档同步**：改动对外导出、CLI、模块边界或核心契约时，**必须在提交前同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`**。
+- **严控范围与依赖**：改前先读邻近实现，清净被替换旧逻辑；不擅自引入第三方依赖，确需引入须先说明理由并获确认。
+- **测试正反双向与分层控频**：修缺陷先写稳定复现失败测试（Red-Green）；新判定或解析逻辑须覆正反双向用例，禁跳过或凑数。编码中只跑语法/类型检查与 `--tier quick --target <path>`；合前跑 1 次 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测硬编码 `>=1s` sleep/非无头测试；单测超 800 行按模块拆分。
+- **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时提交前同步 `docs/TDD.md` / `README.md` / `AGENTS.md`。
 - 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
 - **多语文档成对同步**：本仓库有 `README.en.md`、`README.md`，改任一语言版本必须同步另一份，并保持双向互指链接有效。
 <!-- project-forge: end 修改守则 -->
@@ -172,73 +160,62 @@ node scripts/dev/verify-injections.mjs
 
 - **第一步：双轴五态身份判定（不靠猜）**。
 
-  先核对远端与源仓库：`origin` 与声明源仓库一致且本机有写权限时为 **maintainer**（含单人所有者与同源团队/组织多位写权限协作者；公开/私有仓均直接同源独立分支开 PR，非 Fork，严禁直推主干）。团队协同遵循：① 零提交历史新成员先跑 `--probe-auth`（或 `flow.mjs inspect --probe-auth`）验写权限；② 开工 `flow.mjs claim` 标明认领人（自动查防撞车），接手未合分支须带 `--takeover --reason` 在 Issue 与 PR 双写接管（弃领用 `flow.mjs release`）；③ 每人独立分支，PR 前同步默认分支并遵守 `CODEOWNERS` 与 Merge Queue（若有）；④ 坚持 `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。存在不同 `upstream` 或 Fork 时为 **contributor-fork**（**只推自己的 `origin` fork**、向 `upstream` 开 PR，严禁推正本、打标签、发版或提前删 Fork 分支；标签 403 自动降级）；克隆他人正本且无写权限时为 **clone-readonly**（先停下由人选 Fork / 独立新建 / `.git/pf-local-mode` 纯本地）；非注册平台远端退化为 `generic-git` 放行本地全流程；信息不足按 **undetermined** 保守处理；审外来 PR 为 **inbound-external-pr**（详见 `CONTRIBUTING.md`）。
+  先核对远端与源仓库：`origin` 与声明源一致且有写权限为 **maintainer**（公开/私有仓均同源独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先跑 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 独立分支、合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁推正本/打标/发版/提前删分支，标签 403 降级）；只读为 **clone-readonly**（停下选 Fork/独立新建/`.git/pf-local-mode`）；未匹配注册主机退化 `generic-git`（需远端合 MR 后带 `--remote-merged`）；外来 PR 为 **inbound-external-pr**（见 `CONTRIBUTING.md`）。
 
-- **第二步：五档开工分流（Case 1..5）、门型与分级内审**——动手前先跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`），判定档位与门型（`two-way` 可局部回退 vs `one-way` 不可逆契约/数据/发布改动）：
+- **第二步：状态路由、五档分流与三正交策略**——先跑 `flow.mjs next`（或 `doc-plan.mjs triage`）判档位与门型（`two-way` vs `one-way`）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
-  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑相关校验 |
-  | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写稳定复现失败测试再修（Red-Green）** |
-  | **Case 3** | `L2` 功能或局部调整，不改外部契约 | 在 `docs/todo/` 建 Todo，冻结 `C1`、`C2`…；跑 `doc-plan.mjs audit` 自修直通 |
-  | **Case 4** | `L3` 跨模块重构、接口/契约变更或高风险 | 先建 `docs/specs/` + `docs/todo/` Todo；经 `audit` + 1–2 轮独立 Plan Critique -> `critique-pass` 后交人 `approve` |
-  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，同级内审并经人拍板后再继续 |
+  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑对应检验 |
+  | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写复现失败测试再修（Red-Green）** |
+  | **Case 3** | `L2` 功能调整，不改外部契约 | 在 `docs/todo/` 建 Todo 冻结 `C1`..`Cn`；跑 `doc-plan.mjs audit` 直通 |
+  | **Case 4** | `L3` 跨模块/契约变更或高风险 | 先建 `docs/specs/` + `docs/todo/` Todo；经 `audit` + Critique -> `critique-pass` 后交人 `approve` |
+  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，内审获批后再继续 |
 
-  外加一条硬规则：**触碰下方「高风险路径」或 `one-way` 变更 -> 必须有独立审查**。任务账本存于 `.worktrees/.state/tasks/<taskId>.json`；结论写进首次回复、Issue 评论或 PR「实现依据」栏。
+  按三正交策略定级：`low`（纯非可执行文本白名单；无 CI 时强制 `verify` 静态必检）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量。Case 2/3/4 单任务在隔离 `impl` 位派 `impl` 子代理；账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
-- **第三步：三档隔离与 Worktree 共享依赖**——
+- **第三步：全量 Worktree 隔离、跨轮复用与共享依赖**——
 
   | 档位 / 场景 | 隔离策略 | 谁能动 / 怎么用 |
   | --- | --- | --- |
-  | 第 1 档：`L1` 且主仓工作区干净 | 本地新建特性分支 | 就地开发，不建多余 worktree |
-  | 第 2 档：`L2`/`L3`、接 Issue、脏主仓或并行 | `.worktrees/impl-<taskId>/`（新分支）+ `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；独立审查者在 `review-*` 做故障注入，用完即弃 |
-  | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危变更，禁用生命周期脚本经人确认后再跑门禁 |
+  | 第 1 档：`commits === 0` 且非 `--parallel` | 本地新建特性分支 | 仅 0 提交仓原地开发 |
+  | 第 2 档：**所有有提交历史仓（`commits > 0`）**或并行 | `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；跨轮复用并自动解绑重挂载依赖（支持 `--reset-review-slot`）；本地合入经 `.worktrees/.tmp-merge-*` 试合后推进干净主干 |
+  | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危，禁生命周期脚本经人确认后再测 |
 
-  按子包锁文件一致时用 `worktree-deps.mjs` 挂载共享依赖（Windows Junction / POSIX Symlink；Workspace/editable 指向主仓时自动隔离）；**清理 worktree 前必须先仅对链接执行 `unlinkSync` 解绑，严禁直接递归删目录**（先辨识 `merged`/`squash_or_rebase_merged`/`no_own_commits`/`unmerged` 四态并问人确认）。`.worktrees/` 必须已忽略；卸前先问人。
+  锁一致时用 `worktree-deps.mjs` 挂载（Workspace/editable 指回主仓自动隔离）；**卸 worktree 前先仅对链接 `unlinkSync` 解绑，严禁直接递归删目录**，列清 4 态后问人再删（`.worktrees/` 须忽略）。
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
-  **谁改，谁先认领**（`flow.mjs claim`，`start --create-issue` 可建单联动命名，弃领用 `release`）。**一次改动 = 一个分支 = 一个 PR**（已有对应 Issue + OPEN PR 时直接复用，不开第二条）；返工在原分支追加提交、更新同一个 PR，不重排无关文件。**PR 提交前必须跑 `flow.mjs finalize`**：核对 Todo 全勾 `[x]`，将关联 `PRD`（`done`）、`SPEC`（`implemented` 补实现说明）与 `Todo` 成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/` 并同步互链（`do-not-edit` 允许工具合法归档），确认代码-文档对齐。
-
-  | 节点 | 留在哪 | 说什么 |
-  | --- | --- | --- |
-  | 认领 / 释放 | Issue | 谁认领或释放、用哪条分支（`pf-state` 标记） |
-  | 已提 PR | Issue | PR 链接，以及 `Fixes #N` / `refs #N` |
-  | 审查退回 | PR **和** Issue | `record` 自动双写四字段与 `changes-requested` 标签 |
-  | 审查通过 | PR **和** Issue | `record` 自动双写四字段与 `reviewed` 标签（离线不阻塞） |
-  | 返工已提交 | PR **和** Issue | 新 HEAD 短哈希、门禁已重跑、请重新审核 |
-  | 已合并 | Issue | 合并到哪、关掉了哪几个 Issue |
-
-  没有远端时跳过平台动作，在任务账本记录执行者与结论。
+  **谁改谁先认领**（`flow.mjs claim`，弃领 `release`）；**一任务一分支一 PR**（复用已有 OPEN PR，返工原分支追加）。**PR 前跑 `flow.mjs finalize`**：全勾 `[x]`，成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`（`1:N` 总控 PRD 自动保留于 `docs/prd/` 维持 `active` 且不写脏）；`submit` 推后**零跟踪文件写回**、查重 PR 并套用 `.github/pull_request_template.md`。双写：认领/释放->Issue；提 PR->Issue（`Fixes #N`）；退回/通过/返工->PR+Issue；已合并->Issue。无远端只记账本。
 
 - **第五步：独立审查与合并**——
 
-  **独立审查通过之后，由那个审查者直接合。** 外部 PR 同理，安全防线在审查前（只读扫描与禁用生命周期脚本）。**唯一必须人点头的一类：弱化门禁**（删测试、放宽断言、加跳过标记、改警告、改松 CI）。
+  **独立审查通过后由审查者直接合**（**Round 2+ 永远新建独立 `review` 子代理并在同 `HEAD`/增量视野/历史停损硬锁下复审**）；外部 PR 先过安全扫描；**仅弱化门禁须人点头**（退出码 4）。
 
   | 改动 | 谁能合 |
   | --- | --- |
   | 普通改动 / 外部 PR，独立审查 `fail` 为空 | **审查者直接合** |
-  | 触碰下方「高风险路径」任一处 | 审查者合，但审查必须是独立上下文 + 故障注入 |
+  | 触碰「高风险路径」任一处 | 审查者合（独立上下文 + 故障注入） |
   | **弱化门禁** | **必须人点头** |
 
-  `contributor-fork` 严禁自合正本 PR，提交后等待上游维护者处理。在「## 取舍」写 `merge-authority: human` 时收回人工确认；发版、改可见性、改写历史永不自动。审查只判冻结标准 `C*`（`fail:`/`pass:` + 故障注入记录），六锁收敛与停损熔断规则只在协作判据写一份，不在本节复抄。
+  `contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`；「取舍」写 `merge-authority: human` 收回人合；发版/改可见性/改历史永不自动。六锁收敛见协作判据。
 
-- **第六步：合并收尾与平台交互防乱码**——固定 7 步，顺序不能调：
+- **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；
   2. 合并 PR（**不勾选自动删分支**）；
   3. 回读确认 `state=MERGED`；
   4. `git switch main && git pull`；
   5. **先卸 worktree**：`git worktree remove <路径>`（先用 `worktree-deps` 解绑共享依赖链接再删；分支被 worktree 检出时下一步必败）；
   6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；
-  7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base（Fork 场景另查上游 PR 非 `OPEN`）；**两件都清了才** `git push origin --delete <分支>`。
+  7. **删远端分支之前查两件事**：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR 以该分支为 base（Fork 另查上游 PR 非 `OPEN`）；**两件都清了才** `git push origin --delete <分支>`。
 
-  **第 1 步为什么在合并之前**：文档与任务单是库内文件，合并后主干拒推会迫使每件事多出一个只改记录的 PR。
+  **第 1 步应在合并前随同分支提交**，避免主干拒推多出只改记录的 PR。
 
-  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支，以及「干净的」是哪几项。**问到人点头才删**（对应 `flow.mjs cleanup --confirm`）；没问到人只汇报，不自己动手。
+  **第 5 步之前先把要删的清单列出来问一次**：哪个 worktree、哪条本地分支、哪条远端分支及干净状态；**问到人点头才删**（`flow.mjs cleanup --confirm`）。
 
-  通过平台命令创建或更新 Issue、PR、Release、评论时，**含中文或非 ASCII 的正文一律先写入系统临时目录的 UTF-8 文件，用 `--body-file` / `--notes-file` 提交**并回读删临时文件；**严禁命令行直接拼接正文字符串**。
+  平台命令含非 ASCII 正文先写系统临时 UTF-8 文件经 `--body-file`/`--notes-file` 提交并回读删临时文件，严禁命令行直接拼接正文。
 
-- **日常到此为止**：合并就是一次改动的终点。**发版是另一件事**，要人明确说才做——见上面「版本管理与回滚底线」。
+- **日常到此为止**：合并即改动终点，发版必须人明令（见「版本管理与回滚底线」）。
 
 - **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；指路一律用标题名，不用节号。
 <!-- project-forge: end 日常协作与风险分流 -->

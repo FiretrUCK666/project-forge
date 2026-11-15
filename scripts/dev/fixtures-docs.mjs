@@ -409,57 +409,58 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     }
 
     // 启动流转分支后只修改 src/api.mjs 并提交，检验 doc-plan triage / review-pack / flow finalize
-    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir])
+    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir, '--json'])
     if (startRes.status !== 0) return `flow.mjs start 失败：${startRes.stderr}`
+    const c29Wt = join(dir, JSON.parse(startRes.stdout).worktreePath)
 
-    writeFileSync(join(dir, 'src/api.mjs'), 'export const version = 2\n')
-    gitSync(dir, ['add', 'src/api.mjs'])
-    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'])
+    writeFileSync(join(c29Wt, 'src/api.mjs'), 'export const version = 2\n')
+    gitSync(c29Wt, ['add', 'src/api.mjs'])
+    gitSync(c29Wt, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'])
 
-    const triageOne = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
+    const triageOne = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', c29Wt, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
     if (triageOne.status !== 0) return `doc-plan.mjs triage 失败：${triageOne.stderr}`
     const triageOneJson = JSON.parse(triageOne.stdout)
     if ((triageOneJson.coupledSyncWarnings?.length ?? 0) !== 1 || !triageOneJson.coupledSyncWarnings[0].expectedCompanions.includes('docs/api.md')) {
       return `doc-plan.mjs triage 单边未输出 coupledSyncWarnings：${JSON.stringify(triageOneJson)}`
     }
 
-    const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])
+    const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master', '--json'])
     if (packJsonRes.status !== 0) return `review-pack.mjs --json 失败：${packJsonRes.stderr}`
     const packJson = JSON.parse(packJsonRes.stdout)
     if ((packJson.coupledSyncWarnings?.length ?? 0) !== 1) {
       return `review-pack.mjs --json 未输出 coupledSyncWarnings：${JSON.stringify(packJson.coupledSyncWarnings)}`
     }
-    const packMdRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master'])
+    const packMdRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master'])
     if (packMdRes.status !== 0 || !packMdRes.stdout.includes('## 联动同步核对（改哪看哪）') || !packMdRes.stdout.includes('docs/api.md')) {
       return `review-pack.mjs Markdown 缺少联动同步核对节：\n${packMdRes.stdout}`
     }
 
-    const finJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', dir, '--json'])
+    const finJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', c29Wt, '--json'])
     if (finJsonRes.status !== 0) return `flow.mjs finalize --json 失败：${finJsonRes.stderr}`
     const finJson = JSON.parse(finJsonRes.stdout)
     if ((finJson.coupledSyncWarnings?.length ?? 0) !== 1) {
       return `flow.mjs finalize --json 未输出 coupledSyncWarnings：${JSON.stringify(finJson)}`
     }
 
-    const strictFail = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir])
+    const strictFail = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', c29Wt])
     if (strictFail.status === 0 || !strictFail.stderr.includes('BLOCKED_COUPLED_SYNC')) {
       return `flow.mjs finalize --strict-sync 未阻断单边改动：exit=${strictFail.status}, err=${strictFail.stderr}`
     }
 
     // 反面：补齐伴随文件 docs/api.md 后，三处工具均应 0 告警且 --strict-sync 放行
-    writeFileSync(join(dir, 'docs/api.md'), '# API\n\nUpdated version 2.\n')
-    gitSync(dir, ['add', 'docs/api.md'])
-    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'])
+    writeFileSync(join(c29Wt, 'docs/api.md'), '# API\n\nUpdated version 2.\n')
+    gitSync(c29Wt, ['add', 'docs/api.md'])
+    gitSync(c29Wt, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'])
 
-    const triageSynced = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json'])).stdout)
+    const triageSynced = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', c29Wt, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json'])).stdout)
     if ((triageSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
       return `doc-plan.mjs triage 配对同步后仍误报：${JSON.stringify(triageSynced.coupledSyncWarnings)}`
     }
-    const packSynced = JSON.parse((await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])).stdout)
+    const packSynced = JSON.parse((await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master', '--json'])).stdout)
     if ((packSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
       return `review-pack.mjs 配对同步后仍误报：${JSON.stringify(packSynced.coupledSyncWarnings)}`
     }
-    const strictPass = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir, '--json'])
+    const strictPass = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', c29Wt, '--json'])
     if (strictPass.status !== 0 || (JSON.parse(strictPass.stdout).coupledSyncWarnings?.length ?? 0) !== 0) {
       return `flow.mjs finalize 配对同步后未放行：exit=${strictPass.status}, out=${strictPass.stdout}, err=${strictPass.stderr}`
     }

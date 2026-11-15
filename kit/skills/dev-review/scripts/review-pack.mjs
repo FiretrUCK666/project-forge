@@ -22,10 +22,10 @@ import {
   scanUntrustedDiff, syncTier2ReviewSlotIfNeeded,
 } from './review-diff.mjs'
 import {
-  assessBehavioralGate, assessDoor, assessStructuralGate, checkDocCodeParity,
-  collectGateWeakeningHits, collectHighRiskHits, parseAcceptanceCriteria,
+  assessBehavioralGate, assessDoor, assessStructuralGate, buildPackNextSteps, checkDocCodeParity,
+  collectGateWeakeningHits, collectHighRiskHits, formatPackText, parseAcceptanceCriteria,
 } from './review-gates.mjs'
-import { buildPackNextSteps, formatPackText, handleOverride, handleRecord } from './review-ledger.mjs'
+import { handleOverride, handleRecord } from './review-ledger.mjs'
 
 const SUBCOMMANDS = ['pack', 'record', 'override']
 
@@ -49,13 +49,15 @@ function printHelp() {
     '  --untrusted-scan              Run static supply-chain & gate-weakening scan before execution',
     '  --human-approved-exec         Allow continuing past untrusted hazard gate (use --ignore-scripts)',
     '  --include-diff                Embed full diffText inside --json output (default: hunk summary only)',
+    '  --reset-review-slot           Clean dirty Tier 2 review worktree before syncing HEAD',
     '  --json                        Emit machine-readable JSON',
     '',
     'Record / Override Options:',
     '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id>',
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
+    '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
-    '  [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
+    '  [--enforce-gates] [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
     '',
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
     '',
@@ -166,13 +168,14 @@ async function main(argv = process.argv.slice(2)) {
       booleanFlags: [
         'local', 'staged', 'untrusted-scan', 'human-approved-exec',
         'human-approved', 'include-diff', 'visual-checked',
+        'reset-review-slot', 'enforce-gates',
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
         'reason', 'visual-evidence', 'agent',
       ],
-      multiFlags: ['must-fix', 'should-fix', 'rebut-accepted', 'resolved'],
+      multiFlags: ['must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: 'review-pack.mjs [pack|record|override] [dir] [options]',
     })
     validateCliArgs(cli)

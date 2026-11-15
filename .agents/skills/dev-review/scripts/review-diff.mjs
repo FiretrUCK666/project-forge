@@ -74,23 +74,23 @@ export async function resolveReviewWorktree(mainRoot, worktreeRoot, opts, task) 
   return worktreeRoot
 }
 
-async function tryMountReviewDeps(mainRoot, reviewWtAbs) {
+async function callReviewDepsHelper(fnName, mainRoot, reviewWtAbs) {
   const hereDir = dirname(fileURLToPath(import.meta.url))
   const depsScript = join(hereDir, '..', '..', 'dev-flow', 'scripts', 'worktree-deps.mjs')
   if (!existsSync(depsScript)) return { mode: 'skipped', reason: 'dev-flow-absent' }
   try {
     const mod = await import(pathToFileURL(depsScript).href)
-    if (typeof mod.mountSharedDeps === 'function') {
-      return mod.mountSharedDeps(mainRoot, reviewWtAbs)
+    if (typeof mod[fnName] === 'function') {
+      return mod[fnName](mainRoot, reviewWtAbs)
     }
   } catch (err) {
     return { mode: 'failed', reason: err instanceof Error ? err.message : String(err) }
   }
-  return { mode: 'skipped', reason: 'no-mount-fn' }
+  return { mode: 'skipped', reason: 'no-fn' }
 }
 
 /**
- * 在 --task 且非外部 PR 模式下，自动同步干净的 .worktrees/review-{taskId} 至最新分支 HEAD 并挂载共享依赖。
+ * 在 --task 且非外部 PR 模式下，先解绑旧 Junction，按需清理脏审查位，同步最新 HEAD 后重挂载共享依赖。
  */
 export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts, task, mode }) {
   const isExternalPr = Boolean(opts['external-pr'] || opts.pr || task?.role === 'inbound-external-pr')
@@ -106,11 +106,14 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
   const reviewRel = task.reviewWorktreePath || defaultReviewRel
   const reviewWtAbs = resolve(mainRoot, reviewRel)
   const targetSha = await resolveReviewTargetSha(mainRoot, worktreeRoot, task, opts.head ?? 'HEAD')
-  const syncRes = await syncDetachedWorktree(mainRoot, reviewWtAbs, targetSha)
+  if (existsSync(reviewWtAbs)) {
+    await callReviewDepsHelper('unmountSharedDeps', mainRoot, reviewWtAbs)
+  }
+  const syncRes = await syncDetachedWorktree(mainRoot, reviewWtAbs, targetSha, { resetDirty: Boolean(opts['reset-review-slot']) })
   const skipDepsForUntrusted = Boolean(opts['untrusted-scan'] && !opts['human-approved-exec'])
   const depsRes = skipDepsForUntrusted
     ? { mode: 'skipped', reason: 'untrusted-scan-before-approval' }
-    : await tryMountReviewDeps(mainRoot, reviewWtAbs)
+    : await callReviewDepsHelper('mountSharedDeps', mainRoot, reviewWtAbs)
 
   if (task.reviewWorktreeHead !== targetSha || !task.reviewWorktreePath) {
     task.reviewWorktreePath = posixPath(reviewRel)

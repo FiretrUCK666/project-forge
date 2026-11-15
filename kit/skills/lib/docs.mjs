@@ -400,12 +400,82 @@ function collectSiblingSet(repoRoot, { slugOrPath, includeArchived = false } = {
   return { siblingSet, allActive, allArchived, seedRel, targetDate, targetSlug }
 }
 
+function resolveRelatedTargetRel(repoRoot, fromRel, relLink) {
+  if (!relLink || typeof relLink !== 'string') return null
+  const trimmed = relLink.trim()
+  if (!trimmed || /^(?:无|none|null)$/i.test(trimmed)) return null
+  const abs = resolve(dirname(join(repoRoot, fromRel)), trimmed)
+  return posixPath(relative(repoRoot, abs))
+}
+
+/**
+ * 判定 PRD 是否为 1:N 多切片共享总控 PRD，避免被单个子切片生命周期改写或提前归档。
+ */
+export function isSharedMasterPrd(repoRoot, prdRel, activeSpecRel = null) {
+  if (!prdRel) return false
+  const prdNorm = posixPath(prdRel).replace(/^\.\//, '')
+  const prdAbs = join(repoRoot, prdNorm)
+  if (!existsSync(prdAbs)) return false
+  const raw = readTextSafe(prdAbs) ?? ''
+  const fm = parseDocFrontmatter(raw)
+  const fn = parseDocFilename(prdNorm)
+  const normActiveSpec = activeSpecRel ? posixPath(activeSpecRel).replace(/^\.\//, '') : null
+
+  if (fm.data?.multi_spec === true || String(fm.data?.archive_policy ?? '').toLowerCase() === 'manual') {
+    return true
+  }
+
+  for (const archSpec of listDocsInFolder(repoRoot, 'docs/archive/specs')) {
+    if (normActiveSpec && archSpec === normActiveSpec) continue
+    const sFm = parseDocFrontmatter(readTextSafe(join(repoRoot, archSpec)) ?? '')
+    if (resolveRelatedTargetRel(repoRoot, archSpec, sFm.data?.related_prd) === prdNorm) {
+      return true
+    }
+  }
+
+  for (const otherSpec of listDocsInFolder(repoRoot, 'docs/specs')) {
+    if (normActiveSpec && otherSpec === normActiveSpec) continue
+    const sFm = parseDocFrontmatter(readTextSafe(join(repoRoot, otherSpec)) ?? '')
+    if (resolveRelatedTargetRel(repoRoot, otherSpec, sFm.data?.related_prd) === prdNorm) {
+      return true
+    }
+  }
+
+  for (const otherTodo of listDocsInFolder(repoRoot, 'docs/todo')) {
+    const tFm = parseDocFrontmatter(readTextSafe(join(repoRoot, otherTodo)) ?? '')
+    if (resolveRelatedTargetRel(repoRoot, otherTodo, tFm.data?.related_prd) !== prdNorm) continue
+    const linkedSpec = resolveRelatedTargetRel(repoRoot, otherTodo, tFm.data?.related_spec)
+    if (normActiveSpec) {
+      if (linkedSpec && linkedSpec !== normActiveSpec) return true
+      if (!linkedSpec && parseDocFilename(otherTodo)?.slug !== fn?.slug) return true
+    } else {
+      const prdRelSpec = resolveRelatedTargetRel(repoRoot, prdNorm, fm.data?.related_spec)
+      if (linkedSpec && prdRelSpec && linkedSpec !== prdRelSpec) return true
+      if (!prdRelSpec && parseDocFilename(otherTodo)?.slug !== fn?.slug) return true
+    }
+  }
+
+  if ((fm.data?.related_spec === null || fm.data?.related_spec === undefined) && normActiveSpec) {
+    const specSlug = parseDocFilename(normActiveSpec)?.slug
+    if (fn?.slug && specSlug && fn.slug !== specSlug && /^- \[ \]\s+C\d+/m.test(raw)) {
+      return true
+    }
+  }
+  return false
+}
+
 /** 同步 PRD / SPEC / Todo 生命周期、重命名、互链与任务账本（不再锁在 renameMap > 0）。 */
 export async function syncDocsLifecycle(repoRoot, {
   slugOrPath, issue, pr, branch, owner, status, approved, implemented, doneAt, planCritique,
   preserveTerminalStatus = false,
 } = {}) {
   const { siblingSet, allActive, allArchived, seedRel, targetDate, targetSlug } = collectSiblingSet(repoRoot, { slugOrPath })
+
+  const activeSpecRel = [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec')
+    ?? (seedRel && inferDocKindFromPath(seedRel, null) === 'spec' ? seedRel : null)
+  const sharedPrds = new Set(
+    [...siblingSet].filter((p) => inferDocKindFromPath(p, null) === 'prd' && isSharedMasterPrd(repoRoot, p, activeSpecRel)),
+  )
 
   const normalizedIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
     ? Number(String(issue).replace(/^#/, '').trim())
@@ -414,6 +484,7 @@ export async function syncDocsLifecycle(repoRoot, {
 
   if (effectiveIssue === undefined) {
     for (const rel of siblingSet) {
+      if (sharedPrds.has(rel)) continue
       const fn = parseDocFilename(rel)
       if (fn?.issue) { effectiveIssue = fn.issue; break }
       const raw = readTextSafe(join(repoRoot, rel))
@@ -434,6 +505,7 @@ export async function syncDocsLifecycle(repoRoot, {
     const fm = parseDocFrontmatter(raw)
     const fn = parseDocFilename(oldRel)
     const kind = inferDocKindFromPath(oldRel, fm.data)
+    const isSharedMaster = sharedPrds.has(oldRel)
     const dateFromCreated = typeof fm.data?.created === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fm.data.created)
       ? `${fm.data.created.slice(2, 4)}${fm.data.created.slice(5, 7)}${fm.data.created.slice(8, 10)}`
       : null
@@ -441,7 +513,7 @@ export async function syncDocsLifecycle(repoRoot, {
     const docSlug = fn?.slug ?? targetSlug
     let currentRel = oldRel
 
-    if (effectiveIssue && kind && docSlug) {
+    if (!isSharedMaster && effectiveIssue && kind && docSlug) {
       const needsRename = !fn || fn.legacy || fn.issue !== effectiveIssue || fn.kind !== kind
       if (needsRename) {
         const dirRel = posixPath(dirname(oldRel))
@@ -454,7 +526,7 @@ export async function syncDocsLifecycle(repoRoot, {
         }
       }
     }
-    finalSiblings.push({ oldRel, rel: currentRel, kind, date: docDate, slug: docSlug })
+    finalSiblings.push({ oldRel, rel: currentRel, kind, date: docDate, slug: docSlug, isSharedMaster })
   }
 
   const byKind = { prd: null, spec: null, todo: null }
@@ -476,6 +548,7 @@ export async function syncDocsLifecycle(repoRoot, {
   const updated = []
   const today = docIsoDate()
   for (const sib of finalSiblings) {
+    if (sib.isSharedMaster) continue
     const abs = join(repoRoot, sib.rel)
     let raw = readTextSafe(abs) ?? ''
     raw = replaceDocReferencesSinglePass(raw, renameMap)
@@ -553,12 +626,12 @@ export async function syncDocsLifecycle(repoRoot, {
     if (dirty) writeTaskLedger(repoRoot, ledger)
   }
 
-  return { renamed, updated, byKind, issue: effectiveIssue ?? null }
+  return { renamed, updated, byKind, issue: effectiveIssue ?? null, sharedMasterPrds: [...sharedPrds] }
 }
 
 /**
  * 将关联的 PRD / SPEC / Todo 成对通过 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`，
- * 并同步更新状态、done_at、三者互链 `related_*` 相对路径与任务账本。
+ * 并同步更新状态、done_at、三者互链 `related_*` 相对路径与任务账本（自动跳过共享 1:N 总控 PRD）。
  */
 export async function archiveCompletedDocsGroup(repoRoot, {
   prdFile, specFile, todoFile, slugOrPath, issue, pr, branch, owner, doneAt,
@@ -571,6 +644,13 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     if (existsSync(join(repoRoot, norm))) siblingSet.add(norm)
   }
 
+  const activeSpecRel = (specFile ? posixPath(specFile) : null)
+    ?? [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec')
+    ?? null
+  const sharedPrds = new Set(
+    [...siblingSet].filter((p) => inferDocKindFromPath(p, null) === 'prd' && isSharedMasterPrd(repoRoot, p, activeSpecRel)),
+  )
+
   const archiveDirByKind = { prd: 'docs/archive/prd', spec: 'docs/archive/specs', todo: 'docs/archive/todo' }
   const moveMap = new Map()
   const moved = []
@@ -580,8 +660,9 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     const raw = readTextSafe(join(repoRoot, oldRel)) ?? ''
     const fm = parseDocFrontmatter(raw)
     const kind = inferDocKindFromPath(oldRel, fm.data)
+    const isSharedMaster = sharedPrds.has(oldRel)
     let curRel = oldRel
-    if (kind && !oldRel.startsWith('docs/archive/')) {
+    if (kind && !oldRel.startsWith('docs/archive/') && !isSharedMaster) {
       const targetRel = `${archiveDirByKind[kind]}/${basename(oldRel)}`
       if (targetRel !== oldRel) {
         await moveDocWithGit(repoRoot, oldRel, targetRel)
@@ -590,7 +671,7 @@ export async function archiveCompletedDocsGroup(repoRoot, {
         curRel = targetRel
       }
     }
-    groupItems.push({ oldRel, rel: curRel, kind })
+    groupItems.push({ oldRel, rel: curRel, kind, isSharedMaster })
   }
 
   const byKind = { prd: null, spec: null, todo: null }
@@ -601,9 +682,16 @@ export async function archiveCompletedDocsGroup(repoRoot, {
   const today = doneAt ?? docIsoDate()
   const updated = []
   for (const item of groupItems) {
+    if (item.isSharedMaster) continue
     const abs = join(repoRoot, item.rel)
     let raw = readTextSafe(abs) ?? ''
     raw = replaceDocReferencesSinglePass(raw, moveMap)
+    if (item.rel.startsWith('docs/archive/') && !item.oldRel.startsWith('docs/archive/')) {
+      for (const sharedRel of sharedPrds) {
+        const base = basename(sharedRel)
+        raw = raw.replace(new RegExp(`\\.\\./prd/${escapeRegExpStr(base)}`, 'g'), `../../prd/${base}`)
+      }
+    }
     const fm = parseDocFrontmatter(raw)
     const patch = { updated: today }
     if (item.kind && !fm.data.kind) patch.kind = item.kind
@@ -642,127 +730,28 @@ export async function archiveCompletedDocsGroup(repoRoot, {
       || (targetSlug && ledger.slug === targetSlug)
     if (!matches) continue
     let dirty = false
-    if (byKind.prd) { ledger.prdFile = byKind.prd; ledger.archivedPrdFile = byKind.prd; dirty = true }
+    if (byKind.prd) {
+      ledger.prdFile = byKind.prd
+      if (sharedPrds.has(byKind.prd)) ledger.archivedPrdFile = null
+      else if (byKind.prd.startsWith('docs/archive/')) ledger.archivedPrdFile = byKind.prd
+      dirty = true
+    }
     if (byKind.spec) { ledger.specFile = byKind.spec; ledger.archivedSpecFile = byKind.spec; dirty = true }
     if (byKind.todo) { ledger.todoFile = byKind.todo; ledger.archivedTodoFile = byKind.todo; dirty = true }
     if (dirty) writeTaskLedger(repoRoot, ledger)
   }
 
-  return { moved, updated, byKind, archived: groupItems.map((g) => g.rel) }
+  return { moved, updated, byKind, archived: groupItems.filter((g) => !g.isSharedMaster).map((g) => g.rel), sharedMasterPrds: [...sharedPrds] }
 }
 
-// ── 联动同步解析（AGENTS.md ## 改哪看哪）───────────────────────────────
-
-const COUPLED_ROOT_FILENAMES = new Set([
-  'AGENTS.md', 'SKILL.md', 'README.md', 'README.en.md',
-  'CONTRIBUTING.md', 'RELEASING.md', 'CHANGELOG.md',
-  'Makefile', 'justfile', '.gitattributes', '.gitignore',
-])
-
-function isPathLikeToken(rawToken) {
-  const s = posixPath(String(rawToken ?? '').trim()).replace(/^\.\//, '')
-  if (!s || /\s/.test(s) || /^https?:|^file:|^mailto:/i.test(s)) return false
-  if (/[*?<>{};|$]/.test(s)) return false
-  if (s.includes('/')) return true
-  if (COUPLED_ROOT_FILENAMES.has(s)) return true
-  return /^[A-Za-z0-9_.-]+\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(s)
-}
-
-function extractCoupledPathTokens(cellText) {
-  const tokens = []
-  const seen = new Set()
-  for (const m of String(cellText ?? '').matchAll(/`([^`\n]+)`/g)) {
-    const raw = m[1].trim()
-    if (!isPathLikeToken(raw)) continue
-    const norm = posixPath(raw).replace(/^\.\//, '')
-    if (!seen.has(norm)) { seen.add(norm); tokens.push(norm) }
-  }
-  return tokens
-}
-
-function splitMarkdownTableRow(rawLine) {
-  const trimmed = rawLine.trim()
-  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return null
-  const inner = trimmed.slice(1, -1)
-  const cells = []
-  let cur = ''
-  for (let i = 0; i < inner.length; i += 1) {
-    const ch = inner[i]
-    if (ch === '\\' && inner[i + 1] === '|') { cur += '|'; i += 1 }
-    else if (ch === '|') { cells.push(cur.trim()); cur = '' }
-    else cur += ch
-  }
-  cells.push(cur.trim())
-  return cells
-}
-
-/** 从 AGENTS.md「## 改哪看哪」章节表格解析文件联动触发与伴随同步规则。 */
-export function parseCoupledSyncRules(agentsText) {
-  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
-  let inSection = false
-  let inFence = false
-  const tableRows = []
-  for (const line of lines) {
-    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
-    if (inFence) continue
-    if (/^##\s+改哪看哪(?:\s|$)/.test(line.trim())) { inSection = true; continue }
-    if (inSection && (/^##\s+/.test(line.trim()) || /^<!--\s*project-forge:\s*end\b/.test(line.trim()))) break
-    if (!inSection) continue
-    const cells = splitMarkdownTableRow(line)
-    if (cells && cells.length >= 2) tableRows.push({ rawRow: line.trim(), cells })
-  }
-
-  const rules = []
-  for (let i = 0; i < tableRows.length; i += 1) {
-    const { rawRow, cells } = tableRows[i]
-    if (cells.every((c) => /^:?-+:?$/.test(c.trim()))) continue
-    const nextRow = tableRows[i + 1]
-    if (nextRow && nextRow.cells.every((c) => /^:?-+:?$/.test(c.trim()))) continue
-    const triggers = extractCoupledPathTokens(cells[0])
-    const companions = extractCoupledPathTokens(cells[1])
-    if (triggers.length === 0 || companions.length === 0) continue
-    rules.push({ triggers, companions, rawRow })
-  }
-  return rules
-}
-
-function matchesCoupledPath(filePath, ruleToken, repoRoot) {
-  const normTok = posixPath(ruleToken).replace(/^\.\//, '')
-  if (!normTok) return false
-  if (normTok.endsWith('/')) return filePath.startsWith(normTok) || filePath === normTok.slice(0, -1)
-  if (filePath === normTok) return true
-  if (repoRoot) {
-    try {
-      const abs = join(repoRoot, normTok)
-      if (existsSync(abs) && readdirSync(abs)) return filePath.startsWith(`${normTok}/`)
-    } catch { /* not a dir */ }
-  }
-  return false
-}
-
-/** 对照「改哪看哪」规则校验变更文件清单，过滤目标仓不存在的可选伴随文件。 */
-export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
-  const normalizedChanged = [...new Set(
-    (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(f).replace(/^\.\//, '').trim()).filter(Boolean),
-  )]
-  if (normalizedChanged.length === 0 || !Array.isArray(rules) || rules.length === 0) return []
-  const warnings = []
-  for (const rule of rules) {
-    const touchedTriggers = (rule.triggers ?? []).filter((t) => normalizedChanged.some((f) => matchesCoupledPath(f, t, repoRoot)))
-    if (touchedTriggers.length === 0) continue
-    const existingCompanions = (rule.companions ?? []).filter((c) => {
-      if (!repoRoot) return true
-      const clean = posixPath(c).replace(/^\.\//, '').replace(/\/+$/, '')
-      return Boolean(clean) && existsSync(join(repoRoot, clean))
-    })
-    if (existingCompanions.length === 0) continue
-    const companionSynced = existingCompanions.some((c) => normalizedChanged.some((f) => matchesCoupledPath(f, c, repoRoot)))
-    if (!companionSynced) warnings.push({ triggers: rule.triggers, touchedTriggers, expectedCompanions: existingCompanions, rawRow: rule.rawRow })
-  }
-  return warnings
-}
-
-export { checkMermaidLabelWidth, displayWidth, MERMAID_LIMITS } from './doc-templates.mjs'
+export {
+  buildStandardDocContent,
+  checkMermaidLabelWidth,
+  displayWidth,
+  evaluateCoupledSync,
+  MERMAID_LIMITS,
+  parseCoupledSyncRules,
+} from './doc-templates.mjs'
 import { buildStandardDocContent } from './doc-templates.mjs'
 
 /**

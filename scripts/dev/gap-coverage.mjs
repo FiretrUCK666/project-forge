@@ -175,7 +175,7 @@ export function selfCheck(source, expected) {
 
 /** 读真实源码跑一遍。门禁与行为断言共用这一个入口。 */
 export async function checkGapCoverage(root = ROOT) {
-  const source = readFileSync(join(root, 'scripts', 'survey.mjs'), 'utf8')
+  const source = readFileSync(join(root, 'scripts', 'lib', 'survey-gap-rules.mjs'), 'utf8')
   const reviewSource = readFileSync(join(root, 'scripts', 'review.mjs'), 'utf8')
   // 登记的 id 名单从模块里取，不从源码里再解析一遍：两份解析器会给出两个答案，
   // 而其中一个答案决定了这个检查本身是否在工作。

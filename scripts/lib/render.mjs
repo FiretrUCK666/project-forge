@@ -51,7 +51,7 @@ function gitLine(git) {
 }
 
 function ecosystemLine(eco) {
-  const kinds = eco.kinds.length > 0 ? eco.kinds.join('、') : '认不出来'
+  const kinds = eco.kinds.length > 0 ? eco.kinds.join('、') : '清单里没有已知生态标记（按 CI 与任务文件读命令）'
   const bits = [kinds]
   if (eco.packageManager) bits.push(`包管理器 ${eco.packageManager}`)
   if (eco.declaredVersion) bits.push(`版本 ${eco.declaredVersion}`)
@@ -128,7 +128,15 @@ export function toMarkdown(facts) {
     test: '测试', verify: '综合验证',
   }
   if (cmdEntries.length === 0) {
-    lines.push('一个都没探到。纯文档项目属正常；其他情况要读源码补充，**不要凭生态惯例编一个**。')
+    // 生态清单认不出来时，命令是从 CI 与 Makefile 里读的。这两处读不到才是真的没有，
+    // 那时候要说清「下一步该怎么办」，而不是让人自己猜。
+    lines.push('一个都没探到。纯文档项目属正常。其他情况按这个顺序找：')
+    lines.push('')
+    lines.push('1. 打开 `.github/workflows/`，看 CI 里跑的是哪条命令——那是被真实执行过的，最可靠；')
+    lines.push('2. 有 `Makefile` 或 `justfile` 的，看里面定义了哪几个 target；')
+    lines.push('3. 两者都没有，就在 `AGENTS.md` 的 `Dev Profile` 里手写这条命令。')
+    lines.push('')
+    lines.push('**不要凭生态惯例编一个**。编出来的会在 CI 里失败，而那条失败看起来像「代码坏了」。')
   } else {
     for (const [key, value] of cmdEntries) {
       lines.push(`- **${label[key] ?? key}**：\`${value}\``)

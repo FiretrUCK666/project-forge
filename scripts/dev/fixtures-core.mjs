@@ -1,55 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, loadPreflight,
   readDirRefs, rmTree, runAbs, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
 export function registerCoreCases(cases) {
-// ── 勘察：生态判定 ──────────────────────────────────────────────────
-
-cases.push(['node 项目被判成 node', async () => {
-  const dir = tmpProject({ 'package.json': '{"name":"a","version":"1.0.0","scripts":{"test":"node --test"}}' })
-  try {
-    const f = await survey(dir)
-    if (!f.ecosystem.kinds.includes('node')) return `kinds=${f.ecosystem.kinds}`
-    if (f.commands.test !== 'npm test') return `test 命令是 ${f.commands.test}`
-    return true
-  } finally { rmTree(dir) }
-}])
-
-cases.push(['CMake 项目被判成 cpp，不是 docs-only', async () => {
-  const dir = tmpProject({ 'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.20)\nproject(x CXX)\n' })
-  try {
-    const f = await survey(dir)
-    if (!f.ecosystem.kinds.includes('cpp')) return `kinds=${f.ecosystem.kinds}`
-    if (f.ecosystem.kinds.includes('docs-only')) return '同时被判成 docs-only'
-    if (f.maturity !== 'greenfield') return `maturity=${f.maturity}`
-    return true
-  } finally { rmTree(dir) }
-}])
-
-cases.push(['纯 md 但没 README 判成 unknown，不是 docs-only', async () => {
-  const dir = tmpProject({ 'notes.md': '# 随手记\n' })
-  try {
-    const f = await survey(dir)
-    if (f.ecosystem.kinds.includes('docs-only')) return '被误判成 docs-only'
-    if (!f.ecosystem.kinds.includes('unknown')) return `kinds=${f.ecosystem.kinds}`
-    if (!textsOf(f.questions).some((q) => /什么项目/.test(q))) return '没问用户这是什么项目'
-    return true
-  } finally { rmTree(dir) }
-}])
-
-cases.push(['README + 只有 md 判成 docs-only', async () => {
-  const dir = tmpProject({ 'README.md': '# 手册\n\n内容。\n', 'guide.md': '# 指南\n' })
-  try {
-    const f = await survey(dir)
-    if (!f.ecosystem.kinds.includes('docs-only')) return `kinds=${f.ecosystem.kinds}`
-    return true
-  } finally { rmTree(dir) }
-}])
 
 cases.push(['能力目录：frontmatter 缺 description 时判为不合法', async () => {
   const dir = tmpProject({ 'SKILL.md': '---\nname: demo-skill\n---\n\n# demo\n' })

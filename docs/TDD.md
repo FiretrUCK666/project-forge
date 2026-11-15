@@ -124,10 +124,11 @@ flowchart TB
 | `scripts/lib/update-ops.mjs` | 原子更新暂存校验与冷却状态 | 同盘 `stageAndValidatePackage`、写前备份与原地回滚、全深度退役清理、`FAILURE_COOLDOWN_MS`（15 分钟） |
 | `scripts/lib/starter-templates.mjs` | 空白目录六栈起步与初始 TDD | 支持 `node`、`python`、`go`、`rust`、`java`、`docs` 起步骨架及标准化 `starterTdd` |
 | `scripts/lib/agents-sections.mjs` | `AGENTS.md` 区间刷新与 v2 兼容检查 | `filterIntentRouting`、`refreshRegions`、`driftRegions`、`inspectKitManifestForReview` |
-| `scripts/lib/survey-ecosystem.mjs` | 生态、命令、工作区与制品探测 | 多包清单与任务入口提取、运行环境要求探测 |
+| `scripts/lib/survey-ecosystem.mjs` | 生态、命令、工作区与制品探测 | 多包清单与任务入口提取、`detectUniversalCommands`（清单外语言从 CI 的 `run` 块与 Makefile/justfile 读取已被真实执行的命令）、运行环境要求探测 |
 | `scripts/lib/survey-workspace.mjs` | 工作区遍历、Git 事态、文档与凭据扫描 | `walkWorkspace`、`detectGit`、`detectDocs`、`detectConventions` |
 | `scripts/lib/survey-reentry.mjs` | 套件现状、自有技能与重入漂移检测 | `isReentryProject`、`detectKit`、`detectLocalSkills`、`detectTddStalePaths`、`detectStaleAgentScripts` |
 | `scripts/lib/survey-plan.mjs` | 探索分片策略与装配档位推荐 | `computeExplorationStrategy`、`computeRecommendedTier` |
+| `scripts/lib/survey-gap-rules.mjs` | 勘察的缺口判据表（条件、面向用户的说明、体检处置映射） | `GAP_RULES`；由 `survey.mjs` 的 `judgeGaps` 展开，`gap-coverage.mjs` 按源码核对处置覆盖 |
 | `scripts/lib/platform/registry.mjs` | 平台抽象注册表与多远端拓扑模型 | `registerHostingProvider`、`resolveRemotesTopology`、`GENERIC_GIT_PROVIDER`、`classifyTopologyIdentity` |
 | `scripts/lib/platform/github.mjs` | GitHub 适配器入口（配合 `github-client.mjs`、`github-probe.mjs`、`index.mjs`） | `GITHUB_PROVIDER`、`probeGitHubEnv`、`resolveWorkspaceIdentity`、`createGitHubClient` |
 | `kit/skills/lib/shared.mjs` | 套件统一兼容导出出口 | 汇总导出 `cli.mjs`、`git.mjs`、`profile.mjs`、`static-gates.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`platform.mjs`、`github-client.mjs` |

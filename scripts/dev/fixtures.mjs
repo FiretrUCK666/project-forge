@@ -7,27 +7,31 @@ import { cpus } from 'node:os'
 
 import { initTestBackupDir } from './fixtures-helpers.mjs'
 import { registerCoreCases } from './fixtures-core.mjs'
+import { registerSurveyCases } from './fixtures-survey.mjs'
 import { registerContractCases } from './fixtures-contracts.mjs'
 import { registerReviewCases } from './fixtures-review.mjs'
 import { registerClaimsCases } from './fixtures-claims.mjs'
-import { registerV5WaveCases } from './fixtures-v5-waves.mjs'
-import { registerV5LateCases } from './fixtures-v5-late.mjs'
-import { registerV5SyncCases } from './fixtures-v5-sync.mjs'
-import { registerV6PlatformCases } from './fixtures-v6-platform.mjs'
-import { registerV6KitCases } from './fixtures-v6-kit.mjs'
+import { registerExploreCases } from './fixtures-explore.mjs'
+import { registerDocsCases } from './fixtures-docs.mjs'
+import { registerFlowCases } from './fixtures-flow.mjs'
+import { registerGovernCases } from './fixtures-govern.mjs'
+import { registerEquipCases } from './fixtures-equip.mjs'
+import { registerPlatformCases } from './fixtures-platform.mjs'
 
 initTestBackupDir()
 
 const cases = []
+registerSurveyCases(cases)
 registerCoreCases(cases)
 registerContractCases(cases)
 registerReviewCases(cases)
 registerClaimsCases(cases)
-registerV5WaveCases(cases)
-registerV5LateCases(cases)
-registerV5SyncCases(cases)
-registerV6PlatformCases(cases)
-registerV6KitCases(cases)
+registerExploreCases(cases)
+registerDocsCases(cases)
+registerFlowCases(cases)
+registerGovernCases(cases)
+registerEquipCases(cases)
+registerPlatformCases(cases)
 
 function parseCliFlags(argv) {
   let prefer = ''
@@ -73,9 +77,9 @@ const failures = []
 //
 // 用例之间**有共享资源**，所以不能无脑并发：
 //
-// - `PF_BACKUP_DIR` 是进程级的，`fixtures-v5-waves` 会把自己的值塞进子进程 env，
+// - `PF_BACKUP_DIR` 是进程级的，`fixtures-equip` 会把自己的值塞进子进程 env，
 //   同时别的用例在起 `backup.mjs`、`compose-agents.mjs` 子进程；
-// - `fixtures-v6-platform` 会先把 `.agents/skills/dev-flow/SKILL.md` 复制出来改成 CRLF
+// - `fixtures-equip` 会先把 `.agents/skills/dev-flow/SKILL.md` 复制出来改成 CRLF
 //   再改回去，目标是它自己的临时仓，但它读的是同一个模块级常量；
 // - 一批用例会 spawn `git`，而 `git` 会去读同一个 `~/.gitconfig`、同一份 `~/.ssh`。
 //

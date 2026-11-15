@@ -16,7 +16,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import tls from 'node:tls'
 import { fileURLToPath } from 'node:url'
 
-import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
+import { flushAndExit, skillSource, skillVersion, isMainModule } from './lib/text.mjs'
 import {
   REPO_ONLY_FILES, REPO_ONLY_PREFIXES, isRepoOnlyPath, apiTarget,
 } from './lib/protocol.mjs'
@@ -970,9 +970,9 @@ export {
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2))
-    .then((code) => { process.exitCode = code })
+    .then((code) => flushAndExit(code))
     .catch((error) => {
       process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`)
-      process.exitCode = 1
+      return flushAndExit(1)
     })
 }

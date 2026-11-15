@@ -56,7 +56,7 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI 3 项 MUST-FIX 返工均已落盘，提交后于 HEAD 上锁定 finalize + verify --mode gate 并发起 Round 2 独立审查）`
+- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI + Round 3 flushAndExit 与 macOS 并发防挂死根治均已落盘，提交后于 HEAD 上锁定 finalize + verify --mode gate 并发起 Round 3 审查）`
 - **待拍板事项**：无
 
 ## 完成后的记录
@@ -66,7 +66,11 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 - **Round 2 跨平台返工修复**：
   - `MUST-FIX 1`（`scripts/lib/survey-workspace.mjs`、`scripts/dev/preflight-e2e.mjs`、`scripts/dev/fixtures-m4.mjs`）：detached `HEAD` 且无 `origin/HEAD` 时，优先核对 `refs/heads/*` 与 `refs/remotes/origin/*` 真实存在的候选默认分支再回退 `init.defaultbranch`；`preflight-e2e.mjs` 失败时同步回显 `stdout` 首要 `missing`；`fixtures-m4.mjs` 补齐正反与仅远端引用测试。
   - `MUST-FIX 2`（`scripts/dev/fixtures-equip.mjs`）：扫描缓存目录纳入 macOS `Library/Caches/project-forge` 与 `.cache/project-forge` 并直接遍历 `cacheHome` 校验节流状态不被 `--check` 篡改。
-  - `MUST-FIX 3`（`scripts/*.mjs` 与 `kit/skills/**/scripts/*.mjs` 顶层 CLI 入口）：移除异步输出后的 `process.exit(code)`，统一改用 `process.exitCode = code` 等事件循环/管道自然刷新退出，根治 macOS Node 18 `stdout` 截断并同步重跑 `equip.mjs .`。
+  - `MUST-FIX 3`（`scripts/*.mjs` 与 `kit/skills/**/scripts/*.mjs` 顶层 CLI 入口）：消除异步管道截断风险。
+- **Round 3 macOS Node 18 防挂死与 CI 减半根治修复**：
+  - `flushAndExit` 单源排空显式退出（`kit/skills/lib/cli.mjs`、`shared.mjs`、`scripts/lib/text.mjs`）：先排空 `process.stdout`/`process.stderr` 再 `process.exit(code)`，全面替换 8 个顶层脚本与 6 个 kit CLI（含 `sync-toc.mjs`/`handoff.mjs`/`worktree-deps.mjs`），在 `fixtures-m4.mjs` 实测 >128KB JSON 管道完整刷新且带活跃定时器不挂起，并同步重跑 `equip.mjs .`。
+  - 并发防挂死看门狗与限流（`scripts/dev/verify-injections.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/fixtures-equip.mjs`）：注入 `PF_NO_REAL_AUTH_PROBE=1`、`stdio: ['ignore', 'pipe', 'pipe']`、`90000ms`/`45000ms` 超时强杀进程树并精准定位超时用例/注入 ID；`darwin && CI` 钳制 `verify-injections` 并发上限至 `2`。
+  - 消除重复 CI 触发与设置任务超时（`.github/workflows/check.yml`）：`on.push.branches` 收敛为 `['main']` 避免 PR 分支双跑 14 个 job，并为 `gates` 增加 `timeout-minutes: 20`。
 - **实际验证命令清单**：提交后于最新 `HEAD` 跑通 `flow.mjs verify --mode gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`verify-injections.mjs`）、`bench.mjs`、`e2e-zip-harness.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
 - **文档同步检查**：已同步更新 `docs/TDD.md`（收窄第 218–219 行状态图边标签并登记 M4 新增模块表与门禁矩阵）、`references/plugin-ecosystems.md`、`references/skill-project.md`、`kit/skills/dev-govern/SKILL.md` 及 `.agents/skills/`；总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` 按 1:N 保护保持 `active` 未动。
 - **遗留问题**：无（M5 全盘精简对齐与总控 PRD 归档留待后续里程碑）。

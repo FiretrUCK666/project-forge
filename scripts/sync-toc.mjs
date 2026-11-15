@@ -39,7 +39,7 @@ import { relative, resolve } from 'node:path'
 // 入口判定按**真实路径**归一，经 junction / 符号链接调用也算直接执行——字面比较在
 // 那种调用下会**什么都不做并返回 0**，而「exit 0、零输出」会被调用方读成「目录已是
 // 最新」，那是本工具最不该给出的答案。
-import { isMainModule, readUtf8Strict } from './lib/text.mjs'
+import { flushAndExit, isMainModule, readUtf8Strict } from './lib/text.mjs'
 import { scanLines, fencedSpans, markerPositions } from './lib/markdown.mjs'
 import { tempPathFor, clearStaleTemps, reportTemps, writeAtomic } from './lib/fs-atomic.mjs'
 
@@ -431,4 +431,4 @@ export { headings as markdownHeadings, slug as githubSlug }
 // 判据按**真实路径**归一（survey.mjs 的 isMainModule，全仓只此一份）：字面比较在经
 // junction / 符号链接调用时会**什么都不做并返回 0**，而「exit 0、零输出」与「目录
 // 已是最新」在调用方眼里长得一模一样——那正是这个工具最不该给出的答案。
-if (isMainModule(import.meta.url, process.argv[1])) process.exitCode = main()
+if (isMainModule(import.meta.url, process.argv[1])) void flushAndExit(main())

@@ -9,6 +9,8 @@ import { cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
+import { killProcessTree } from '../../kit/skills/lib/exec.mjs'
 import { initTestBackupDir } from './fixtures-helpers.mjs'
 import { registerCoreCases } from './fixtures-core.mjs'
 import { registerSurveyCases } from './fixtures-survey.mjs'
@@ -131,17 +133,33 @@ function buildDispatchOrder(allCases) {
     .map((x) => x.index)
 }
 
-function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
+const WORKER_TASK_TIMEOUT_MS = 90000
+
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = []) {
   return new Promise((done) => {
     let cursor = 0
     let passed = 0
     const failures = []
     const timings = []
     let activeWorkers = lanes
+    const activeChildren = new Set()
+
+    const cleanupWorkers = (sig) => {
+      for (const ch of activeChildren) killProcessTree(ch)
+      process.exit(sig === 'SIGINT' ? 130 : 143)
+    }
+    const onSigTerm = () => cleanupWorkers('SIGTERM')
+    const onSigInt = () => cleanupWorkers('SIGINT')
+    process.once('SIGTERM', onSigTerm)
+    process.once('SIGINT', onSigInt)
 
     const onWorkerFinished = () => {
       activeWorkers -= 1
-      if (activeWorkers === 0) done({ passed, failures, timings })
+      if (activeWorkers === 0) {
+        process.off('SIGTERM', onSigTerm)
+        process.off('SIGINT', onSigInt)
+        done({ passed, failures, timings })
+      }
     }
 
     for (let i = 0; i < lanes; i += 1) {
@@ -155,15 +173,52 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
         },
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
         windowsHide: true,
+        detached: process.platform !== 'win32',
       })
+      activeChildren.add(child)
       let errBuf = ''
       let currentIdx = null
       let finalized = false
+      let taskTimer = null
+      let closeFallback = null
+      let timedOutMsg = null
       child.stderr?.on('data', (c) => { errBuf += c })
 
+      const clearTaskTimer = () => {
+        if (taskTimer) { clearTimeout(taskTimer); taskTimer = null }
+      }
+
+      const finishWorker = (code) => {
+        if (finalized) return
+        finalized = true
+        activeChildren.delete(child)
+        clearTaskTimer()
+        if (closeFallback) { clearTimeout(closeFallback); closeFallback = null }
+        if (timedOutMsg) {
+          failures.push(timedOutMsg)
+        } else if (currentIdx !== null) {
+          failures.push(`工作进程 ${tag} 在用例 #${currentIdx}（${caseNames[currentIdx] ?? 'unknown'}）异常退出 (${code})：${errBuf.trim()}`)
+        }
+        onWorkerFinished()
+      }
+
+      const armTaskWatchdog = (idx) => {
+        clearTaskTimer()
+        taskTimer = setTimeout(() => {
+          const name = caseNames[idx] ?? 'unknown'
+          timedOutMsg = `工作进程 ${tag} 在用例 #${idx}（${name}）执行超时 (>${WORKER_TASK_TIMEOUT_MS}ms)`
+          killProcessTree(child)
+          closeFallback = setTimeout(() => finishWorker(124), 3000)
+          closeFallback.unref?.()
+        }, WORKER_TASK_TIMEOUT_MS)
+        taskTimer.unref?.()
+      }
+
       const dispatchNext = () => {
+        clearTaskTimer()
         if (cursor < dispatchOrder.length) {
           currentIdx = dispatchOrder[cursor++]
+          armTaskWatchdog(currentIdx)
           child.send({ type: 'run', index: currentIdx })
         } else {
           currentIdx = null
@@ -177,6 +232,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
           dispatchNext()
         } else if (msg.type === 'done') {
           currentIdx = null
+          clearTaskTimer()
           if (Number.isFinite(msg.ms)) timings.push({ index: msg.index, name: msg.name, ms: msg.ms, worker: tag })
           if (msg.ok) passed += 1
           else failures.push(msg.entry)
@@ -184,18 +240,14 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
         }
       })
 
-      child.on('close', (code) => {
-        if (finalized) return
-        finalized = true
-        if (currentIdx !== null) {
-          failures.push(`工作进程 ${tag} 在用例 #${currentIdx} 异常退出 (${code})：${errBuf.trim()}`)
-        }
-        onWorkerFinished()
-      })
+      child.on('close', (code) => finishWorker(code))
 
       child.on('error', (error) => {
         if (finalized) return
         finalized = true
+        activeChildren.delete(child)
+        clearTaskTimer()
+        if (closeFallback) { clearTimeout(closeFallback); closeFallback = null }
         failures.push(`工作进程 ${tag} 启动失败：${error.message}`)
         onWorkerFinished()
       })
@@ -306,6 +358,7 @@ async function main() {
         dispatchOrder,
         Math.min(lanes, allCases.length),
         workerBkRoot,
+        allCases.map(([name]) => name),
       )
       if (profile) {
         const sorted = [...timings].sort((a, b) => b.ms - a.ms)
@@ -358,4 +411,4 @@ async function main() {
   return 1
 }
 
-main().then((code) => process.exit(code))
+main().then((code) => flushAndExit(code))

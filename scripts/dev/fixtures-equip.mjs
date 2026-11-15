@@ -642,13 +642,41 @@ cases.push(['M1 update.mjs 6 项修复：--check 只读、--equip 冷却期刷�
     writeFileSync(join(pkgSub, 'SKILL.md'), `---\nname: project-forge\ndescription: demo subpkg\nmetadata:\n  version: "6.0.0"\n  source: "http://127.0.0.1:${gPort}"\n---\n# sub\n`)
 
     const runNodeAsync = (args, env) => new Promise((done) => {
-      const child = spawn(process.execPath, [join(pkgSub, 'scripts/update.mjs'), ...args], { env, windowsHide: true })
+      const child = spawn(process.execPath, [join(pkgSub, 'scripts/update.mjs'), ...args], {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      let killFallback = null
+      const finish = (status) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (killFallback) clearTimeout(killFallback)
+        done({
+          status: timedOut ? 1 : (status ?? 1),
+          stdout,
+          stderr: timedOut ? `${stderr}\nupdate.mjs 执行超时 (>45000ms): ${args.join(' ')}` : stderr,
+        })
+      }
+      const timer = setTimeout(() => {
+        timedOut = true
+        try { child.kill('SIGTERM') } catch { /* ignore */ }
+        killFallback = setTimeout(() => {
+          try { child.kill('SIGKILL') } catch { /* ignore */ }
+          finish(1)
+        }, 1500)
+        killFallback.unref?.()
+      }, 45000)
+      timer.unref?.()
       child.stdout?.on('data', (c) => { stdout += c })
       child.stderr?.on('data', (c) => { stderr += c })
-      child.on('close', (status) => done({ status: status ?? 1, stdout, stderr }))
-      child.on('error', (err) => done({ status: 1, stdout, stderr: err.message }))
+      child.on('close', (status) => finish(status))
+      child.on('error', (err) => { stderr += `\n${err.message}`; finish(1) })
     })
     const isoEnv = { ...process.env, LOCALAPPDATA: cacheHome, XDG_CACHE_HOME: cacheHome, HOME: cacheHome, HTTP_PROXY: '', HTTPS_PROXY: '', NO_PROXY: '' }
     const chkRun = await runNodeAsync(['--check'], isoEnv)

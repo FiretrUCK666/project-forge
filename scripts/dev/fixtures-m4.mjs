@@ -8,10 +8,14 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readZip, stripCommonPrefix, writeZip } from '../zip.mjs'
 import { gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+
+const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 export function registerM4Cases(cases) {
   cases.push(['M4-C1a：救活 zero-assertion/mock-tautology 死检查与纯 ASSERTION_RE 大小写敏感(I70)', async () => {
@@ -149,6 +153,41 @@ export function registerM4Cases(cases) {
     })
     if (!emptyTestDel.some((h) => h.type === 'deleted-assertion')) {
       return `整块删除空 test 未触发 deleted-assertion：${JSON.stringify(emptyTestDel)}`
+    }
+
+    // 4. flushAndExit re-exports & drains >128KB stdout JSON cleanly without waiting on live timer
+    const sharedMod = await import('../../kit/skills/lib/shared.mjs')
+    const cliMod = await import('../../kit/skills/lib/cli.mjs')
+    const textMod = await import('../lib/text.mjs')
+    if (sharedMod.flushAndExit !== cliMod.flushAndExit || textMod.flushAndExit !== cliMod.flushAndExit) {
+      return 'flushAndExit 未在 shared.mjs 与 scripts/lib/text.mjs 单源重导出'
+    }
+    const cliUrl = pathToFileURL(join(FIXTURES_M4_ROOT, 'kit', 'skills', 'lib', 'cli.mjs')).href
+    const flushRes = await new Promise((done) => {
+      const child = spawn(process.execPath, [
+        '--input-type=module',
+        '-e',
+        `import { flushAndExit } from ${JSON.stringify(cliUrl)}; setTimeout(() => {}, 60000); process.stdout.write(JSON.stringify({ big: 'x'.repeat(196608) }) + '\\n'); await flushAndExit(0)`,
+      ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      let out = ''
+      let err = ''
+      const wd = setTimeout(() => { try { child.kill('SIGKILL') } catch {} done({ timedOut: true, out, err }) }, 10000)
+      wd.unref?.()
+      child.stdout?.on('data', (d) => { out += d })
+      child.stderr?.on('data', (d) => { err += d })
+      child.on('close', (code) => { clearTimeout(wd); done({ code, out, err, timedOut: false }) })
+      child.on('error', (e) => { clearTimeout(wd); done({ code: 1, out, err: e.message, timedOut: false }) })
+    })
+    if (flushRes.timedOut || flushRes.code !== 0) {
+      return `flushAndExit 退出失败或挂起：${JSON.stringify({ timedOut: flushRes.timedOut, code: flushRes.code, err: flushRes.err })}`
+    }
+    try {
+      const parsedFlush = JSON.parse(flushRes.out)
+      if (parsedFlush?.big?.length !== 196608) {
+        return `flushAndExit 大 JSON 输出长度不一致：${parsedFlush?.big?.length}`
+      }
+    } catch (e) {
+      return `flushAndExit 大 JSON 管道输出被截断：${e.message}`
     }
     return true
   }])

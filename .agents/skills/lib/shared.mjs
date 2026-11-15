@@ -6,6 +6,7 @@
  */
 
 export {
+  flushAndExit,
   parseStandardCli,
   printNextStep,
   resolveAvailableSkills,

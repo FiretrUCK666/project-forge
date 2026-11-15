@@ -14,11 +14,14 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
+import { killProcessTree } from '../../kit/skills/lib/exec.mjs'
 import { isMainModule } from '../lib/text.mjs'
 import { INJECTIONS } from './injections-data.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
+const INJ_STEP_TIMEOUT_MS = 90000
 
 /**
  * 复验必须在**独立副本**里做，而且每条注入各用一份。
@@ -46,46 +49,91 @@ function removeTree(dir) {
   } catch { /* 留给系统清理 */ }
 }
 
-/** 用 spawn + Promise 而不是 spawnSync：同步阻塞会让「并行」只并行了个说法。 */
-function runNodeAsync(scriptPath, args, cwd) {
+/** 用 spawn + Promise 而不是 spawnSync：关闭 stdin、注入防外网探针并附带 90s 看门狗强杀树防止并发挂死。 */
+function runNodeAsync(scriptPath, args, cwd, label = '') {
   return new Promise((resolveDone) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { cwd })
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      env: { ...process.env, PF_NO_REAL_AUTH_PROBE: process.env.PF_NO_REAL_AUTH_PROBE || '1' },
+    })
     let out = ''
     let err = ''
-    child.stdout.on('data', (chunk) => { out += chunk })
-    child.stderr.on('data', (chunk) => { err += chunk })
-    child.on('close', () => resolveDone({ out, err }))
-    child.on('error', (error) => resolveDone({ out, err: `${err}\n${error.message}` }))
+    let settled = false
+    let timedOut = false
+    let killFallback
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (killFallback) clearTimeout(killFallback)
+      resolveDone({ out, err, timedOut, step: label })
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      killProcessTree(child)
+      killFallback = setTimeout(finish, 3000)
+      killFallback.unref?.()
+    }, INJ_STEP_TIMEOUT_MS)
+    timer.unref?.()
+    child.stdout?.on('data', (chunk) => { out += chunk })
+    child.stderr?.on('data', (chunk) => { err += chunk })
+    child.on('close', finish)
+    child.on('error', (error) => { err += `\n${error.message}`; finish() })
   })
 }
 
-async function runFixturesIn(root, expect = '') {
+async function runFixturesIn(root, expect = '', injId = '') {
   const args = []
   if (expect) args.push('--only', expect)
-  const { out, err } = await runNodeAsync(join(root, 'scripts', 'dev', 'fixtures.mjs'), args, root)
+  const { out, err, timedOut, step } = await runNodeAsync(
+    join(root, 'scripts', 'dev', 'fixtures.mjs'),
+    args,
+    root,
+    `${injId || 'inj'}:fixtures`,
+  )
   const all = `${out}\n${err}`
   return {
+    timedOut,
+    timedOutStep: step,
     failed: all.split('\n').filter((l) => l.startsWith('FAIL')),
     summary: all.split('\n').filter((l) => /行为断言/.test(l)).join(' '),
   }
 }
 
-async function runPreflightIn(root) {
-  const { out, err } = await runNodeAsync(join(root, 'scripts', 'dev', 'preflight.mjs'), [], root)
-  return { failed: `${out}\n${err}`.split('\n').filter((l) => l.startsWith('FAIL')) }
+async function runPreflightIn(root, injId = '') {
+  const { out, err, timedOut, step } = await runNodeAsync(
+    join(root, 'scripts', 'dev', 'preflight.mjs'),
+    [],
+    root,
+    `${injId || 'inj'}:preflight`,
+  )
+  return {
+    timedOut,
+    timedOutStep: step,
+    failed: `${out}\n${err}`.split('\n').filter((l) => l.startsWith('FAIL')),
+  }
 }
 
 /**
  * 两套门禁都问，但按代价排序。
  * 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人看着它。
  */
-async function runBothIn(root, expect) {
+async function runBothIn(root, expect, injId = '') {
   if (!expect) {
-    return { failed: [...(await runPreflightIn(root)).failed, ...(await runFixturesIn(root)).failed] }
+    const pre = await runPreflightIn(root, injId)
+    if (pre.timedOut) return pre
+    const fix = await runFixturesIn(root, '', injId)
+    if (fix.timedOut) return fix
+    return { failed: [...pre.failed, ...fix.failed] }
   }
-  const fix = await runFixturesIn(root, expect)
+  const fix = await runFixturesIn(root, expect, injId)
+  if (fix.timedOut) return fix
   if (fix.failed.some((line) => line.includes(expect))) return fix
-  const pre = await runPreflightIn(root)
+  const pre = await runPreflightIn(root, injId)
+  if (pre.timedOut) return pre
   if (pre.failed.some((line) => line.includes(expect))) return pre
   return { failed: [...pre.failed, ...fix.failed] }
 }
@@ -107,7 +155,10 @@ async function runInjection(inj) {
       writeFileSync(full, original.replace(from, to), 'utf8')
     }
 
-    const result = await runBothIn(root, inj.expect)
+    const result = await runBothIn(root, inj.expect, inj.id)
+    if (result.timedOut) {
+      return { id: inj.id, what: inj.what, skipped: `执行超时 (>${INJ_STEP_TIMEOUT_MS}ms): ${result.timedOutStep}` }
+    }
     const sample = result.failed.find((line) => line.includes(inj.expect))
     return { id: inj.id, what: inj.what, hit: Boolean(sample), sample }
   } finally {
@@ -136,12 +187,15 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const onlyIndex = process.argv.indexOf('--only')
   const argvOnly = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined
   const jobsIndex = process.argv.indexOf('--jobs')
-  const jobs = jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) || 6 : 6
+  const requestedJobs = jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) || 6 : 6
+  const jobs = (process.platform === 'darwin' && process.env.CI)
+    ? Math.min(requestedJobs, 2)
+    : requestedJobs
 
   const selected = argvOnly ? INJECTIONS.filter((i) => i.id === argvOnly) : INJECTIONS
   if (argvOnly && selected.length === 0) {
     process.stderr.write(`没有注入匹配 --only ${argvOnly}：编号写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)
-    process.exit(1)
+    await flushAndExit(1)
   }
 
   const results = await runWithConcurrency(selected, jobs, runInjection)
@@ -162,5 +216,5 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   process.stdout.write(bad === 0
     ? `\n故障注入复验：${selected.length} 条判据都能被抓到。\n`
     : `\n故障注入复验未通过：${bad} 处有问题。\n`)
-  process.exit(bad === 0 ? 0 : 1)
+  await flushAndExit(bad === 0 ? 0 : 1)
 }

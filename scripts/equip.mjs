@@ -36,7 +36,7 @@ import {
   PF_MANIFEST_SCHEMA_VERSION,
   isMacOsMetadata,
 } from './lib/protocol.mjs'
-import { isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
+import { flushAndExit, isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
 
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_KIT_SKILLS_DIR = join(SKILL_ROOT, 'kit', 'skills')
@@ -606,9 +606,9 @@ export { main as runCli, bootstrapEmpty, starterTemplates }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2))
-    .then((code) => { process.exitCode = code })
+    .then((code) => flushAndExit(code))
     .catch((err) => {
       process.stderr.write(`equip 失败：${err instanceof Error ? err.message : String(err)}\n`)
-      process.exitCode = 2
+      return flushAndExit(2)
     })
 }

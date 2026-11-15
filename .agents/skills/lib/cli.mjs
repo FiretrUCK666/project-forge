@@ -248,3 +248,35 @@ export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkil
     process.stdout.write(`  - ${line}\n`)
   }
 }
+
+function flushWritable(stream) {
+  if (!stream || stream.destroyed || stream.writableEnded || stream.writableFinished || !stream.writable) {
+    return Promise.resolve()
+  }
+  return new Promise((done) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      done()
+    }
+    const timer = setTimeout(finish, 2000)
+    timer.unref?.()
+    try {
+      stream.write('', finish)
+    } catch {
+      finish()
+    }
+  })
+}
+
+/**
+ * 在退出前显式排空 stdout 与 stderr 写入缓冲区（防止 macOS Node 18 并发管道截断大 JSON），
+ * 随后调用 `process.exit(code)` 防止残留句柄导致子进程无限挂起。
+ */
+export async function flushAndExit(code = 0) {
+  const exitCode = Number.isInteger(code) ? code : 0
+  await Promise.all([flushWritable(process.stdout), flushWritable(process.stderr)])
+  process.exit(exitCode)
+}

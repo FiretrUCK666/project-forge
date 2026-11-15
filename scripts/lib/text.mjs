@@ -424,3 +424,5 @@ export function normVersion(value) {
     .replace(/^[vV](?=\d)/, '')
     .toLowerCase()
 }
+
+export { flushAndExit } from '../../kit/skills/lib/cli.mjs'

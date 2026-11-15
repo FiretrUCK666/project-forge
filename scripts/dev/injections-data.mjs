@@ -34,7 +34,7 @@ export const INJECTIONS = [
     file: 'scripts/lib/survey-gap-rules.mjs',
     from: "    when: (f) => !f.docs.agents && f.scale.effectiveFiles > 0,",
     to: "    when: () => false,",
-    expect: 'AGENTS.md',
+    expect: 'gaps 里没有「缺 AGENTS.md」',
   },
   {
     id: 'I5',

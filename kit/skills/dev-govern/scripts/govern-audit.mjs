@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { parseStandardCli } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import {
   canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule,
   posixPath, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
@@ -395,5 +395,10 @@ async function finishAudit({
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main().then((code) => { process.exitCode = code })
+  main()
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`govern-audit 错误：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

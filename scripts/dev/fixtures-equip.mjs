@@ -2,11 +2,11 @@
  * fixtures-equip.mjs —— 装配夹具：equip 装备与两档升档、compose-agents 装配、backup 快照与 update 原子更新。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { basename, join, sep } from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { gitInit, rmTree, runAbs, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { basename, dirname, join, sep } from 'node:path'
+import { spawn, spawnSync } from 'node:child_process'
+import { SKILL_ROOT, gitInit, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerEquipCases(cases) {
 cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防污染清理多余文件、dry-run 与空变更跳过', async () => {
@@ -21,7 +21,7 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
 
   try {
     // 1. 直接创建快照 -> 落在 PF_BACKUP_DIR 下且项目目录不被污染
-    const cr = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'snap', '--json'], { env: bkEnv })
+    const cr = await runAbsAsync('scripts/backup.mjs', ['create', dir, '--label', 'snap', '--json'], { env: bkEnv })
     if (cr.status !== 0) return `backup create 失败：${cr.stderr}`
     const crJson = JSON.parse(cr.stdout)
     if (!crJson.created || crJson.count < 4 || !existsSync(crJson.archivePath)) {
@@ -30,7 +30,7 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
     if (!crJson.backupDir.startsWith(backupStore)) return `快照未落入 PF_BACKUP_DIR：${crJson.backupDir}`
 
     // list 命中快照
-    const ls = runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv })
+    const ls = await runAbsAsync('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv })
     if (ls.status !== 0) return `backup list 失败：${ls.stderr}`
     const lsJson = JSON.parse(ls.stdout)
     if ((lsJson.backups?.length ?? 0) !== 1) return `backup list 计数不对：${ls.stdout}`
@@ -42,7 +42,7 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
     mkdirSync(join(dir, 'sub'), { recursive: true })
     writeFileSync(join(dir, 'sub/orphan2.mjs'), 'export const o2 = 1\n')
 
-    const dr = runAbs('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--dry-run', '--json'], { env: bkEnv })
+    const dr = await runAbsAsync('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--dry-run', '--json'], { env: bkEnv })
     if (dr.status !== 0) return `backup restore dry-run 失败：${dr.stderr}`
     const drJson = JSON.parse(dr.stdout)
     if (!drJson.dryRun || !drJson.removedOrphans.includes('src/orphan-extra.mjs') || !drJson.removedOrphans.includes('sub/orphan2.mjs')) {
@@ -53,7 +53,7 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
     }
 
     // 3. 真实 restore -> 原文件完好恢复，且多余文件与空目录被彻底清理
-    const rs = runAbs('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--json'], { env: bkEnv })
+    const rs = await runAbsAsync('scripts/backup.mjs', ['restore', dir, '--id', 'latest', '--json'], { env: bkEnv })
     if (rs.status !== 0) return `backup restore 失败：${rs.stderr}`
     if (readFileSync(join(dir, 'src/a.mjs'), 'utf8') !== 'export const a = 1\n') return 'restore 未恢复 src/a.mjs'
     if (readFileSync(join(dir, 'src/b.mjs'), 'utf8') !== 'export const b = 2\n') return 'restore 未恢复 src/b.mjs'
@@ -63,16 +63,16 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
 
     // 4. --no-backup 与幂等空变更跳过
     const bkFilesBeforeNoBk = readdirSync(crJson.backupDir).length
-    const caNoBk = runAbs('scripts/compose-agents.mjs', [dir, '--no-backup'], { env: bkEnv })
+    const caNoBk = await runAbsAsync('scripts/compose-agents.mjs', [dir, '--no-backup'], { env: bkEnv })
     if (caNoBk.status !== 0) return `compose-agents --no-backup 失败：${caNoBk.stderr}`
     if (readdirSync(crJson.backupDir).length !== bkFilesBeforeNoBk) return 'compose-agents --no-backup 仍创建了快照'
 
-    const eq1 = runAbs('scripts/equip.mjs', [dir], { env: bkEnv })
+    const eq1 = await runAbsAsync('scripts/equip.mjs', [dir], { env: bkEnv })
     if (eq1.status !== 0) return `equip 首次运行失败：${eq1.stderr}`
     const eq1Json = JSON.parse(eq1.stdout).equip
     if (!eq1Json?.backup?.created) return `equip 首次变更未触发写前快照：${eq1.stdout}`
 
-    const eq2 = runAbs('scripts/equip.mjs', [dir], { env: bkEnv })
+    const eq2 = await runAbsAsync('scripts/equip.mjs', [dir], { env: bkEnv })
     if (eq2.status !== 0) return `equip 二次运行失败：${eq2.stderr}`
     const eq2Json = JSON.parse(eq2.stdout).equip
     if (eq2Json?.backup?.created || eq2Json?.backup?.skippedReason !== 'no-pending-changes') {
@@ -82,9 +82,9 @@ cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防�
     const agentsFilled = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。')
     writeFileSync(join(dir, 'AGENTS.md'), agentsFilled)
-    const caCheck = runAbs('scripts/compose-agents.mjs', [dir, '--check'], { env: bkEnv })
+    const caCheck = await runAbsAsync('scripts/compose-agents.mjs', [dir, '--check'], { env: bkEnv })
     if (caCheck.status !== 0) return `compose-agents --check 失败：${caCheck.stderr}`
-    const bkCountAfterCheck = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout).backups.length
+    const bkCountAfterCheck = JSON.parse((await runAbsAsync('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv })).stdout).backups.length
     if (bkCountAfterCheck !== 2) return `--check 只读检查意外生成了快照：count=${bkCountAfterCheck}`
 
     // 5. 纯路径断言：无 .git 且未设 PF_BACKUP_DIR 时仍回退到 ~/.project-forge/backups/
@@ -111,13 +111,13 @@ cases.push(['backup.mjs 快照去重：treeSha256 同内容跳过 unchanged-sinc
   })
 
   try {
-    const c1 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'pre-forge', '--json'], { env: bkEnv })
+    const c1 = await runAbsAsync('scripts/backup.mjs', ['create', dir, '--label', 'pre-forge', '--json'], { env: bkEnv })
     if (c1.status !== 0) return `pre-forge backup 失败：${c1.stderr}`
     const j1 = JSON.parse(c1.stdout)
     if (!j1.created || !j1.treeSha256) return `首次快照缺少 treeSha256：${c1.stdout}`
 
     // 工作区未变动时立即再次调用 -> 命中 unchanged-since-latest 且不增加快照数
-    const c2 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--json'], { env: bkEnv })
+    const c2 = await runAbsAsync('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--json'], { env: bkEnv })
     if (c2.status !== 0) return `二次去重调用失败：${c2.stderr}`
     const j2 = JSON.parse(c2.stdout)
     if (j2.created || j2.skippedReason !== 'unchanged-since-latest' || j2.id !== j1.id) {
@@ -125,21 +125,21 @@ cases.push(['backup.mjs 快照去重：treeSha256 同内容跳过 unchanged-sinc
     }
 
     // 传 --force 必须无视去重写入新快照
-    const c3 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--force', '--json'], { env: bkEnv })
+    const c3 = await runAbsAsync('scripts/backup.mjs', ['create', dir, '--label', 'equip', '--force', '--json'], { env: bkEnv })
     if (c3.status !== 0) return `--force backup 失败：${c3.stderr}`
     const j3 = JSON.parse(c3.stdout)
     if (!j3.created || j3.id === j1.id) return `--force 未生成新快照：${c3.stdout}`
 
     // 修改文件内容 -> treeSha256 变化并写入新快照
     writeFileSync(join(dir, 'src/index.mjs'), 'export const v = 2\n')
-    const c4 = runAbs('scripts/backup.mjs', ['create', dir, '--label', 'edit', '--json'], { env: bkEnv })
+    const c4 = await runAbsAsync('scripts/backup.mjs', ['create', dir, '--label', 'edit', '--json'], { env: bkEnv })
     if (c4.status !== 0) return `变更后 backup 失败：${c4.stderr}`
     const j4 = JSON.parse(c4.stdout)
     if (!j4.created || !j4.treeSha256 || j4.treeSha256 === j1.treeSha256) {
       return `文件变更后未生成新 treeSha256 快照：${c4.stdout}`
     }
 
-    const ls = JSON.parse(runAbs('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv }).stdout)
+    const ls = JSON.parse((await runAbsAsync('scripts/backup.mjs', ['list', dir, '--json'], { env: bkEnv })).stdout)
     if ((ls.backups?.length ?? 0) !== 3) return `预期保留 3 份快照，实际：${ls.backups?.length}`
     return true
   } finally {
@@ -164,7 +164,7 @@ cases.push(['equip.mjs + survey.mjs：五语言空目录闭环、computeArtifact
     for (const item of langs) {
       const dir = tmpProject({})
       dirs.push(dir)
-      const res = runAbs('scripts/equip.mjs', [dir, '--bootstrap-empty', '--lang', item.lang, '--name', item.name, '--description', `Desc ${item.lang}`])
+      const res = await runAbsAsync('scripts/equip.mjs', [dir, '--bootstrap-empty', '--lang', item.lang, '--name', item.name, '--description', `Desc ${item.lang}`])
       if (res.status !== 0) return `bootstrap-empty(${item.lang}) 失败：${res.stderr}`
       for (const reqRel of ['.gitattributes', '.gitignore', 'README.md', 'docs/TDD.md', ...item.expected]) {
         if (!existsSync(join(dir, reqRel))) return `bootstrap-empty(${item.lang}) 缺文件：${reqRel}`
@@ -207,7 +207,7 @@ cases.push(['equip.mjs + survey.mjs：五语言空目录闭环、computeArtifact
       '.agents/skills/keep-me/SKILL.md': '---\nname: keep-me\ndescription: Custom keep skill.\n---\n# keep-me\n',
     })
     dirs.push(withCustomAgentDir)
-    const keepRes = runAbs('scripts/equip.mjs', [withCustomAgentDir, '--bootstrap-empty', '--lang', 'node', '--name', 'keep-demo'])
+    const keepRes = await runAbsAsync('scripts/equip.mjs', [withCustomAgentDir, '--bootstrap-empty', '--lang', 'node', '--name', 'keep-demo'])
     if (keepRes.status !== 0) return `含 .agents 自有技能的空目录拒绝起步：${keepRes.stderr}`
     if (!readFileSync(join(withCustomAgentDir, '.agents/skills/keep-me/SKILL.md'), 'utf8').includes('Custom keep skill.')) {
       return 'bootstrap-empty 破坏了既有自有技能文件'
@@ -215,7 +215,7 @@ cases.push(['equip.mjs + survey.mjs：五语言空目录闭环、computeArtifact
 
     const nonEmptyDir = tmpProject({ 'README.md': '# Custom Handcrafted README\n' })
     dirs.push(nonEmptyDir)
-    const blockRes = runAbs('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--lang', 'node', '--name', 'block-demo'])
+    const blockRes = await runAbsAsync('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--lang', 'node', '--name', 'block-demo'])
     if (blockRes.status === 0) return '非空目录存在 README.md 时未拒绝 --bootstrap-empty'
     if (readFileSync(join(nonEmptyDir, 'README.md'), 'utf8') !== '# Custom Handcrafted README\n') {
       return '被拒绝的 --bootstrap-empty 意外修改了既有 README.md'
@@ -437,6 +437,249 @@ cases.push(['update.mjs 同盘 staging 原子更新（中断回滚保留旧 SKIL
   } finally {
     rmTree(skillCopy)
     rmTree(cwdShadow)
+  }
+}])
+
+cases.push(['M1 zip 读写与 backup 5 缺陷：默认 .zip、i+16 偏移、>20MB 恢复、CRC32 防篡改、./ 前缀与长 UTF-8', async () => {
+  const { readZip, writeZip } = await import('../zip.mjs')
+  const { createBackup, listBackups, restoreBackup, packTar, unpackTar, truncateUtf8Bytes } = await import('../backup.mjs')
+
+  // 1. writeZip + 非紧邻中央目录 padding（验 i+16 偏移）+ CRC32 篡改拦截
+  const zRaw = writeZip([
+    { name: 'README.md', data: Buffer.from('# demo\n'), mode: 0o644 },
+    { name: 'src/中文路径/hello.mjs', data: Buffer.from('export const x = "你好世界"\n'.repeat(8)), mode: 0o755 },
+  ])
+  const parsedOk = readZip(zRaw)
+  if (parsedOk.length !== 2 || parsedOk[1].name !== 'src/中文路径/hello.mjs') {
+    return `writeZip/readZip 往返异常：${JSON.stringify(parsedOk.map((e) => e.name))}`
+  }
+
+  // 在中央目录之前插入 16B 填充并修正 EOCD cdOffset（若误用 offset - size 则必坏）
+  const eocdAt = zRaw.length - 22
+  const origCdOff = zRaw.readUInt32LE(eocdAt + 16)
+  const pad = Buffer.alloc(16, 0xaa)
+  const paddedZip = Buffer.concat([zRaw.subarray(0, origCdOff), pad, zRaw.subarray(origCdOff)])
+  paddedZip.writeUInt32LE(origCdOff + 16, paddedZip.length - 6)
+  const parsedPadded = readZip(paddedZip)
+  if (parsedPadded.length !== 2) return '非紧邻中央目录未按 EOCD i+16 读取'
+
+  // 篡改中央目录期待 CRC32，验证 readZip 必报错（对应注入 I53）
+  const badCrcZip = Buffer.from(zRaw)
+  const badCdStart = badCrcZip.readUInt32LE(badCrcZip.length - 6)
+  badCrcZip.writeUInt32LE((badCrcZip.readUInt32LE(badCdStart + 16) ^ 0xdeadbeef) >>> 0, badCdStart + 16)
+  let crcRejected = false
+  try { readZip(badCrcZip) } catch { crcRejected = true }
+  if (!crcRejected) return '损坏 CRC32 的 .zip 未被拦截'
+
+  // 2. truncateUtf8Bytes 不劈裂多字节字符 + USTAR ./ 前缀与越界拦截 + COMMON_SKIP_DIRS
+  const longZh = '深层中文目录/'.repeat(10) + '测试脚本.mjs'
+  const cut = truncateUtf8Bytes(longZh, 95)
+  if (cut.length > 95 || cut.toString('utf8').includes('\uFFFD')) {
+    return `truncateUtf8Bytes 劈裂了多字节字符：len=${cut.length}`
+  }
+  const tarDot = packTar([{ relPath: './src/main.mjs', data: Buffer.from('1\n') }, { relPath: longZh, data: Buffer.from('2\n') }])
+  const tarRead = unpackTar(tarDot)
+  if (tarRead[0].relPath !== 'src/main.mjs' || tarRead[1].relPath !== longZh) {
+    return `packTar/unpackTar ./ 或 PAX 长中文处理失败：${JSON.stringify(tarRead.map((f) => f.relPath))}`
+  }
+
+  // 3. backup 默认 .zip、向下兼容 .tar.gz、>20MB 整仓恢复及 COMMON_SKIP_DIRS（如 .turbo/.gradle）跳过
+  const backupStore = mkdtempSync(join(tmpdir(), 'pf-m1-bk-'))
+  const bkEnv = { ...process.env, PF_BACKUP_DIR: backupStore }
+  const bigChunk = Buffer.alloc(7 * 1024 * 1024, 66)
+  const dir = tmpProject({
+    'README.md': '# zip-test\n',
+    'a1.bin': bigChunk,
+    'a2.bin': bigChunk,
+    'a3.bin': bigChunk,
+    '.turbo/cache.json': 'skip\n',
+    '.gradle/build.bin': 'skip\n',
+  })
+  try {
+    const zipSnap = createBackup(dir, { label: 'zip-def', env: bkEnv })
+    if (!zipSnap.created || zipSnap.format !== 'zip' || !zipSnap.archivePath.endsWith('.zip')) {
+      return `createBackup 默认不是 .zip：${JSON.stringify(zipSnap)}`
+    }
+    if (zipSnap.count !== 4) return `COMMON_SKIP_DIRS 未跳过 .turbo/.gradle（count=${zipSnap.count}）`
+
+    writeFileSync(join(dir, 'README.md'), '# mutated\n')
+    const gzSnap = createBackup(dir, { label: 'legacy-gz', format: 'tar.gz', env: bkEnv })
+    if (!gzSnap.created || !gzSnap.archivePath.endsWith('.tar.gz')) {
+      return `显式 --format tar.gz 未生效：${JSON.stringify(gzSnap)}`
+    }
+    const listed = listBackups(dir, { env: bkEnv })
+    if (listed.backups.length !== 2) return `listBackups 数量错误：${listed.backups.length}`
+
+    // 恢复 .zip（总字节 21MB > 20MB 单包默认上限，单文件 7MB < 20MB）
+    rmSync(join(dir, 'a3.bin'))
+    const rZip = restoreBackup(dir, { id: zipSnap.id, env: bkEnv })
+    if (!rZip.ok || !existsSync(join(dir, 'a3.bin')) || readFileSync(join(dir, 'README.md'), 'utf8') !== '# zip-test\n') {
+      return `>20MB .zip 快照恢复失败：${JSON.stringify(rZip)}`
+    }
+
+    // 向上/向下兼容恢复 .tar.gz 快照
+    const rGz = restoreBackup(dir, { id: gzSnap.id, env: bkEnv })
+    if (!rGz.ok || readFileSync(join(dir, 'README.md'), 'utf8') !== '# mutated\n') {
+      return `兼容恢复 .tar.gz 快照失败：${JSON.stringify(rGz)}`
+    }
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(backupStore)
+  }
+}])
+
+cases.push(['M1 update.mjs 6 项修复：--check 只读、--equip 冷却期刷新、全目录核验回滚、退役清理与用户自建保留、代理与缺 source', async () => {
+  const { createServer } = await import('node:http')
+  const { applyPackage, download, fallbackSource, resolveStatePath } = await import('../update.mjs')
+
+  // 1. 缺 metadata.source 且无 PF_UPDATE_SOURCE 时 fallbackSource 不隐式回退 UPSTREAM
+  const savedSrc = process.env.PF_UPDATE_SOURCE
+  delete process.env.PF_UPDATE_SOURCE
+  try {
+    if (fallbackSource() !== undefined) return `fallbackSource 竟隐式回退到：${fallbackSource()}`
+  } finally {
+    if (savedSrc !== undefined) process.env.PF_UPDATE_SOURCE = savedSrc
+  }
+
+  // 2. applyPackage：verifyInstalled 全目录核验失败原子回滚（连带已删退役文件），同时清理包内退役顶层文件且保留用户自建
+  const pkgDir = tmpProject({
+    'SKILL.md': '---\nname: project-forge\ndescription: demo skill test\nmetadata:\n  version: "6.0.0"\n---\n# v6\n',
+    'references/survey.md': '# old survey\n\n## 何时读本文件\n\nold\n',
+    'references/user-custom-guide.md': '# user handwritten note\n',
+    'scripts/selftest.mjs': '// known retired top-level script\n',
+    'scripts/user-custom-tool.mjs': '// user custom script\n',
+    'scripts/update.mjs': '// old\n',
+    'templates/agents-project.md': '# old\n',
+    'kit/skills/dev-flow/SKILL.md': '---\nname: dev-flow\ndescription: old\n---\n',
+  })
+  const entries = [
+    { name: 'SKILL.md', data: Buffer.from('---\nname: project-forge\ndescription: demo skill test\nmetadata:\n  version: "7.0.0"\n---\n# v7\n') },
+    { name: 'references/survey.md', data: Buffer.from('# new survey\n\n## 何时读本文件\n\nnew\n') },
+    { name: 'scripts/update.mjs', data: Buffer.from('// new update\n') },
+    { name: 'templates/agents-project.md', data: Buffer.from('# new tpl\n') },
+    { name: 'kit/skills/dev-flow/SKILL.md', data: Buffer.from('---\nname: dev-flow\ndescription: new\n---\n') },
+  ]
+
+  // 2a. 模拟 kit/ 文件静默截断，verifyInstalled 在 applyPackage 内拦截并回滚（含恢复 scripts/selftest.mjs）
+  const silentTruncateWriter = (dest, buf) => {
+    const p = String(dest).replace(/\\/g, '/')
+    if (p.endsWith('kit/skills/dev-flow/SKILL.md')) {
+      writeFileSync(dest, Buffer.from('truncated'))
+      return
+    }
+    writeFileSync(dest, buf)
+  }
+  const failVerifyRes = applyPackage(entries, {
+    skillRoot: pkgDir,
+    expectedVersion: '7.0.0',
+    writeFile: silentTruncateWriter,
+  })
+  if (failVerifyRes.ok !== false || failVerifyRes.rolledBack !== true) {
+    return `verifyInstalled 失败未触发回滚：${JSON.stringify(failVerifyRes)}`
+  }
+  if (!readFileSync(join(pkgDir, 'SKILL.md'), 'utf8').includes('6.0.0') || !existsSync(join(pkgDir, 'scripts/selftest.mjs'))) {
+    return 'verifyInstalled 回滚未还原旧 SKILL.md 或未恢复已删退役文件'
+  }
+
+  // 2b. 正常更新：清理包内退役顶层 scripts/selftest.mjs，保留用户自建 references/user-custom-guide.md & scripts/user-custom-tool.mjs
+  const okApply = applyPackage(entries, { skillRoot: pkgDir, expectedVersion: '7.0.0' })
+  if (!okApply.ok) return `正常 applyPackage 失败：${JSON.stringify(okApply)}`
+  if (existsSync(join(pkgDir, 'scripts/selftest.mjs'))) return 'applyPackage 未清理已知退役顶层 scripts/selftest.mjs'
+  if (!existsSync(join(pkgDir, 'references/user-custom-guide.md')) || !existsSync(join(pkgDir, 'scripts/user-custom-tool.mjs'))) {
+    return 'applyPackage 误删了用户自建未托管文件'
+  }
+  if (!okApply.staleFiles.includes('references/user-custom-guide.md')) {
+    return `用户自建文件未留在 staleFiles：${JSON.stringify(okApply.staleFiles)}`
+  }
+
+  // 3. 本地代理 HTTP_PROXY & NO_PROXY 验证 + --check 严格只读（支撑 I54）
+  let proxyHits = 0
+  const proxyServer = createServer((req, res) => {
+    if (req.url?.startsWith('http://')) {
+      proxyHits += 1
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('via-proxy-ok')
+      return
+    }
+    res.writeHead(404).end()
+  })
+  const mockGhServer = createServer((req, res) => {
+    if (req.url === '/releases/latest') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ tag_name: 'v9.9.9' }))
+      return
+    }
+    res.writeHead(404).end()
+  })
+  const cacheHome = mkdtempSync(join(tmpdir(), 'pf-upd-cache-'))
+  const equipProj = tmpProject({ 'README.md': '# eq\n' })
+  const pkgSub = tmpProject({
+    'SKILL.md': '---\nname: project-forge\ndescription: demo subpkg\nmetadata:\n  version: "6.0.0"\n  source: "http://127.0.0.1:1"\n---\n# sub\n',
+    'zip.mjs': readFileSync(join(SKILL_ROOT, 'scripts/zip.mjs'), 'utf8'),
+  })
+
+  try {
+    await new Promise((r) => proxyServer.listen(0, '127.0.0.1', r))
+    await new Promise((r) => mockGhServer.listen(0, '127.0.0.1', r))
+    const pPort = proxyServer.address().port
+    const gPort = mockGhServer.address().port
+
+    const proxied = await download('http://proxy-target.invalid/test', { env: { HTTP_PROXY: `http://127.0.0.1:${pPort}` } })
+    if (!proxied.ok || proxyHits !== 1 || proxied.body.toString('utf8') !== 'via-proxy-ok') {
+      return `HTTP_PROXY 未经代理请求：${JSON.stringify({ proxied, proxyHits })}`
+    }
+
+    // 拷贝精简可运行包副本到临时目录验证 update.mjs CLI：--check 只读 + --equip 最新版刷新
+    cpSync(join(SKILL_ROOT, 'scripts', 'lib'), join(pkgSub, 'scripts', 'lib'), { recursive: true })
+    cpSync(join(SKILL_ROOT, 'kit', 'skills'), join(pkgSub, 'kit', 'skills'), { recursive: true })
+    for (const f of ['scripts/update.mjs', 'scripts/zip.mjs', 'scripts/equip.mjs', 'scripts/backup.mjs']) {
+      mkdirSync(dirname(join(pkgSub, f)), { recursive: true })
+      writeFileSync(join(pkgSub, f), readFileSync(join(SKILL_ROOT, f)))
+    }
+    writeFileSync(join(pkgSub, 'SKILL.md'), `---\nname: project-forge\ndescription: demo subpkg\nmetadata:\n  version: "6.0.0"\n  source: "http://127.0.0.1:${gPort}"\n---\n# sub\n`)
+
+    const runNodeAsync = (args, env) => new Promise((done) => {
+      const child = spawn(process.execPath, [join(pkgSub, 'scripts/update.mjs'), ...args], { env, windowsHide: true })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (c) => { stdout += c })
+      child.stderr?.on('data', (c) => { stderr += c })
+      child.on('close', (status) => done({ status: status ?? 1, stdout, stderr }))
+      child.on('error', (err) => done({ status: 1, stdout, stderr: err.message }))
+    })
+    const isoEnv = { ...process.env, LOCALAPPDATA: cacheHome, XDG_CACHE_HOME: cacheHome, HOME: cacheHome, HTTP_PROXY: '', HTTPS_PROXY: '', NO_PROXY: '' }
+    const chkRun = await runNodeAsync(['--check'], isoEnv)
+    if (chkRun.status !== 0 || !chkRun.stdout.includes('9.9.9')) {
+      return `update.mjs --check 执行失败：${chkRun.stdout} ${chkRun.stderr}`
+    }
+    const chkState = existsSync(join(cacheHome, 'project-forge', 'cache')) || existsSync(join(cacheHome, 'project-forge'))
+    if (chkState) {
+      // 检查缓存目录内所有 json 的 lastOkAt 是否被写入
+      const findStates = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? findStates(join(d, e.name)) : [join(d, e.name)])
+      const stateFiles = findStates(cacheHome).filter((f) => f.endsWith('.json'))
+      if (stateFiles.some((sf) => JSON.parse(readFileSync(sf, 'utf8')).lastOkAt > 0)) {
+        return 'update.mjs --check 篡改了节流状态'
+      }
+    }
+    void resolveStatePath
+
+    // 同版 --equip：远端回报 9.9.9（已是最新），仍必须刷新 --equip 目标项目
+    writeFileSync(join(pkgSub, 'SKILL.md'), `---\nname: project-forge\ndescription: demo subpkg\nmetadata:\n  version: "9.9.9"\n  source: "http://127.0.0.1:${gPort}"\n---\n# sub\n`)
+    const eqRun = await runNodeAsync(['--equip', equipProj], isoEnv)
+    if (eqRun.status !== 0 || !existsSync(join(equipProj, '.agents/skills/dev-flow/SKILL.md'))) {
+      return `最新版时 update.mjs --equip 未刷新目标仓：${eqRun.stdout} ${eqRun.stderr}`
+    }
+    return true
+  } finally {
+    proxyServer.closeAllConnections?.()
+    mockGhServer.closeAllConnections?.()
+    proxyServer.close()
+    mockGhServer.close()
+    rmTree(pkgDir)
+    rmTree(pkgSub)
+    rmTree(equipProj)
+    rmTree(cacheHome)
   }
 }])
 

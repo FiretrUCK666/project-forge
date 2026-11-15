@@ -35,7 +35,7 @@
 
 ## 三、`AGENTS.md`：给 AI 看的契约（`lightweight < 14KB` / `full <= 30KB`）
 
-- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录> [--tier lightweight|full]`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`；改写已有非空 `AGENTS.md` 前（含默认刷新、`--upgrade` 与有变化的 `--clean`）自动经 `scripts/backup.mjs` 创建 `.tar.gz` 快照（`--no-backup` 可跳过，`--check` 严格零写入）。
+- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录> [--tier lightweight|full]`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`；改写已有非空 `AGENTS.md` 前（含默认刷新、`--upgrade` 与有变化的 `--clean`）自动经 `scripts/backup.mjs` 创建 `.zip` 快照（支持 `--format tar.gz` 且兼容恢复 `.tar.gz`，`--no-backup` 可跳过，`--check` 严格零写入）。
 - **核心构成**：
   1. 顶部 **自然语言静默意图路由表**（直载已装配的 `.agents/skills/` 并先跑对应 `.mjs`，`lightweight` 档自动过滤未装入的 `dev-review`/`dev-govern` 行；若有仓库自有技能 `kit.customSkills`，由 `has-custom-skills` 自动追加并存路由）；
   2. **`行事总纲与决策准则`**（四条准则、信任倒金字塔与同类纠偏满 2 次下沉脚本、最优解与 UX/DX/AX 取舍、不当人肉代理）与**测试分层与控频**；

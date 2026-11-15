@@ -151,8 +151,7 @@ async function resolveTaskForPack(roots, opts) {
   return { taskId: null, task: null, mode: null }
 }
 
-async function main() {
-  const argv = process.argv.slice(2)
+async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help') || argv.includes('-h')) {
     printHelp()
     return EXIT.OK
@@ -402,6 +401,8 @@ async function main() {
     return EXIT.ERROR
   }
 }
+
+export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main().then((code) => process.exit(code))

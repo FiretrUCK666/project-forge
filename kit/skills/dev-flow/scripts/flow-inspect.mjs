@@ -5,14 +5,15 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, detectProjectConventions, ensureWorktreesIgnored,
-  gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
-  readTextSafe, writeAtomic,
+  LIKELY_DEFAULT_BRANCHES, canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
+  gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
+  readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
@@ -28,14 +29,14 @@ export const EXIT_ACTION_REQUIRED = 4
 
 /** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含工作区未提交变动）。 */
 export async function getChangedFiles(cwd, baseRef) {
+  const [diff, st] = await Promise.all([
+    baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null),
+    gitStatusPorcelainZ(cwd),
+  ])
   const set = new Set()
-  if (baseRef) {
-    const diff = await gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`])
-    if (diff.ok) {
-      for (const e of diff.entries) if (e.file) set.add(e.file)
-    }
+  if (diff?.ok) {
+    for (const e of diff.entries) if (e.file) set.add(e.file)
   }
-  const st = await gitStatusPorcelainZ(cwd)
   if (st.ok) {
     for (const e of st.entries) if (e.file) set.add(e.file)
   }
@@ -117,37 +118,254 @@ export function analyzeIssueDependencies(issueItems = []) {
   }
 }
 
+function parsePorcelainV2BranchZ(buf) {
+  const tokens = Buffer.isBuffer(buf) ? buf.toString('utf8').split('\0') : String(buf ?? '').split('\0')
+  let head = null
+  let branch = null
+  let dirty = 0
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i]
+    if (!tok) continue
+    if (tok.startsWith('# branch.oid ')) {
+      const val = tok.slice(13).trim()
+      head = val && val !== '(initial)' ? val : null
+    } else if (tok.startsWith('# branch.head ')) {
+      const val = tok.slice(14).trim()
+      branch = val || null
+    } else if (!tok.startsWith('#')) {
+      dirty += 1
+      if (tok.startsWith('2 ')) i += 1
+    }
+  }
+  if (branch === '(detached)' && !head) branch = null
+  return { head, branch, dirty }
+}
+
+function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultBranch) {
+  const localHeads = new Set()
+  const originHeads = new Set()
+  let originHeadTarget
+  for (const rawLine of String(refsStdout ?? '').split('\n')) {
+    if (!rawLine) continue
+    const [refName, symTarget = ''] = rawLine.split('\t')
+    if (refName === 'refs/remotes/origin/HEAD' && symTarget.trim()) {
+      originHeadTarget = symTarget.trim().replace(/^origin\//, '')
+    } else if (refName.startsWith('refs/heads/')) {
+      localHeads.add(refName.slice(11))
+    } else if (refName.startsWith('refs/remotes/origin/')) {
+      const name = refName.slice(20)
+      if (name !== 'HEAD') originHeads.add(name)
+    }
+  }
+  if (originHeadTarget) return originHeadTarget
+  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
+  for (const cand of LIKELY_DEFAULT_BRANCHES) {
+    if (localHeads.has(cand) || originHeads.has(cand)) return cand
+  }
+  if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
+  return initDefaultBranch || 'main'
+}
+
+function readGitConfigFast(gitCommonDir) {
+  if (!gitCommonDir) return null
+  if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
+  const localCfg = readTextSafe(join(gitCommonDir, 'config'))
+  if (localCfg === undefined) return null
+  const xdgHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  const globalPaths = [join(homedir(), '.gitconfig'), join(xdgHome, 'git', 'config')]
+  let globalCfg = ''
+  for (const gp of globalPaths) {
+    const txt = readTextSafe(gp)
+    if (txt) { globalCfg = txt; break }
+  }
+  const combined = `${globalCfg}\n${localCfg}`
+  if (/^\s*\[(?:url\b|include\b|includeif\b)/im.test(combined)) return null
+
+  const remoteLines = []
+  let curSection = ''
+  let curRemote = null
+  const remotes = new Map()
+  let userName
+  let userEmail
+  let initDefaultBranch
+
+  for (const rawCfg of [globalCfg, localCfg]) {
+    curSection = ''
+    curRemote = null
+    for (const rawLine of rawCfg.split('\n')) {
+      const line = rawLine.replace(/(?:^|\s)[;#].*$/, '').trim()
+      if (!line) continue
+      const sec = /^\[([a-z0-9-]+)(?:\s+"([^"]*)")?\]$/i.exec(line)
+      if (sec) {
+        curSection = sec[1].toLowerCase()
+        curRemote = curSection === 'remote' ? (sec[2] ?? '') : null
+        if (curSection === 'remote' && curRemote && !remotes.has(curRemote)) {
+          remotes.set(curRemote, { urls: [], pushUrls: [] })
+        }
+        continue
+      }
+      const eq = line.indexOf('=')
+      if (eq <= 0) continue
+      const k = line.slice(0, eq).trim().toLowerCase()
+      const v = line.slice(eq + 1).trim()
+      if (curSection === 'user') {
+        if (k === 'name') userName = v
+        else if (k === 'email') userEmail = v
+      } else if (curSection === 'init' && k === 'defaultbranch') {
+        initDefaultBranch = v
+      } else if (curSection === 'remote' && curRemote) {
+        const entry = remotes.get(curRemote)
+        if (k === 'url' && v) entry.urls.push(v)
+        else if (k === 'pushurl' && v) entry.pushUrls.push(v)
+      }
+    }
+  }
+
+  for (const [name, entry] of remotes.entries()) {
+    const fetchUrl = entry.urls[0]
+    const pushUrl = entry.pushUrls[0] ?? fetchUrl
+    if (fetchUrl) remoteLines.push(`${name}\t${fetchUrl} (fetch)`)
+    if (pushUrl) remoteLines.push(`${name}\t${pushUrl} (push)`)
+  }
+  return {
+    userName,
+    userEmail,
+    initDefaultBranch,
+    remoteText: remoteLines.join('\n'),
+    hasIdentity: Boolean(userName && userEmail),
+  }
+}
+
+function readRefsFast(gitCommonDir, curBranch, initDefaultBranch) {
+  if (!gitCommonDir || existsSync(join(gitCommonDir, 'reftable'))) return null
+  let originHeadTarget
+  const origHeadPath = join(gitCommonDir, 'refs', 'remotes', 'origin', 'HEAD')
+  const origHeadText = readTextSafe(origHeadPath)
+  if (origHeadText) {
+    const m = /^ref:\s*refs\/remotes\/origin\/(.+)$/im.exec(origHeadText.trim())
+    if (m) return m[1].trim()
+  }
+  const localHeads = new Set()
+  const originHeads = new Set()
+  const scanLoose = (dirAbs, prefix, bucket) => {
+    if (!existsSync(dirAbs)) return
+    const stack = [{ abs: dirAbs, rel: '' }]
+    while (stack.length > 0) {
+      const cur = stack.pop()
+      let entries = []
+      try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
+      for (const e of entries) {
+        const name = cur.rel ? `${cur.rel}/${e.name}` : e.name
+        if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: name })
+        else if (e.isFile() && name !== 'HEAD') bucket.add(name)
+      }
+    }
+    void prefix
+  }
+  scanLoose(join(gitCommonDir, 'refs', 'heads'), '', localHeads)
+  scanLoose(join(gitCommonDir, 'refs', 'remotes', 'origin'), '', originHeads)
+  const packed = readTextSafe(join(gitCommonDir, 'packed-refs'))
+  if (packed) {
+    for (const line of packed.split('\n')) {
+      if (!line || line.startsWith('#') || line.startsWith('^')) continue
+      const sp = line.indexOf(' ')
+      if (sp <= 0) continue
+      const refName = line.slice(sp + 1).trim()
+      if (refName.startsWith('refs/heads/')) localHeads.add(refName.slice(11))
+      else if (refName.startsWith('refs/remotes/origin/')) {
+        const n = refName.slice(20)
+        if (n !== 'HEAD') originHeads.add(n)
+      }
+    }
+  }
+  if (originHeadTarget) return originHeadTarget
+  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
+  for (const cand of LIKELY_DEFAULT_BRANCHES) {
+    if (localHeads.has(cand) || originHeads.has(cand)) return cand
+  }
+  if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
+  return initDefaultBranch || 'main'
+}
+
 export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
-  const roots = await import('../../lib/git.mjs').then((m) => m.resolveRepoRoots(targetDir))
+  const roots = opts.roots ?? await resolveRepoRoots(targetDir)
   const mainRoot = roots.mainRoot
   const workRoot = roots.workTreeRoot
+  const hasLinkedWorktrees = Boolean(roots.isGit && roots.gitDir && (roots.isWorktree || existsSync(join(roots.gitDir, 'worktrees'))))
+  const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir) : null
+  const needGitConfig = Boolean(roots.isGit && (!fastCfg || !fastCfg.hasIdentity))
+  const needRefsExec = Boolean(roots.isGit && existsSync(join(roots.gitDir ?? '', 'reftable')))
 
-  const [remoteRes, headRes, branchRes, logRes, userNameRes, userEmailRes, wtRes, conventions, stZ] = await Promise.all([
-    roots.isGit ? gitRun(workRoot, ['remote', '-v']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(workRoot, ['rev-parse', 'HEAD']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(workRoot, ['symbolic-ref', '--short', 'HEAD']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(workRoot, ['log', '--format=%an <%ae>', '-n', '100']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(workRoot, ['config', '--get', 'user.name']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(workRoot, ['config', '--get', 'user.email']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? gitRun(mainRoot, ['worktree', 'list', '--porcelain']) : Promise.resolve({ ok: false, stdout: '' }),
-    roots.isGit ? detectProjectConventions(mainRoot) : Promise.resolve({ defaultBranch: 'main', commitStyle: 'plain', hasDocsSystem: false }),
-    roots.isGit ? gitStatusPorcelainZ(workRoot) : Promise.resolve({ ok: true, entries: [] }),
-  ])
+  const [statusRes, remoteRes, configRes, logRes, refsRes, wtRes] = roots.isGit
+    ? await Promise.all([
+        gitRunBuffer(workRoot, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']),
+        fastCfg ? Promise.resolve({ ok: true, stdout: fastCfg.remoteText }) : gitRun(workRoot, ['remote', '-v']),
+        needGitConfig ? gitRun(workRoot, ['config', '--get-regexp', '^(user\\.name|user\\.email|init\\.defaultbranch)$']) : Promise.resolve(null),
+        gitRun(workRoot, ['--no-optional-locks', 'log', '-n', '500', '--format=%an <%ae>\x1f%s']),
+        needRefsExec ? gitRun(mainRoot, ['for-each-ref', '--format=%(refname)\t%(symref:short)', 'refs/heads', 'refs/remotes/origin']) : Promise.resolve(null),
+        hasLinkedWorktrees ? gitRun(mainRoot, ['--no-optional-locks', 'worktree', 'list', '--porcelain']) : Promise.resolve(null),
+      ])
+    : [{ ok: false, stdout: '' }, { ok: false, stdout: '' }, null, { ok: false, stdout: '' }, null, null]
 
+  const stParsed = parsePorcelainV2BranchZ(statusRes.ok ? statusRes.stdout : '')
+  const head = stParsed.head
+  const branch = stParsed.branch ?? (head ? '(detached)' : null)
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
-  const head = headRes.ok && headRes.stdout ? headRes.stdout.trim() : null
-  const branch = branchRes.ok && branchRes.stdout ? branchRes.stdout.trim() : (head ? '(detached)' : null)
+
+  let userName = fastCfg?.userName
+  let userEmail = fastCfg?.userEmail
+  let initDefaultBranch = fastCfg?.initDefaultBranch
+  if (configRes?.ok && configRes.stdout) {
+    for (const line of configRes.stdout.split('\n')) {
+      const sp = line.indexOf(' ')
+      if (sp <= 0) continue
+      const k = line.slice(0, sp).trim().toLowerCase()
+      const v = line.slice(sp + 1).trim()
+      if (k === 'user.name') userName = v
+      else if (k === 'user.email') userEmail = v
+      else if (k === 'init.defaultbranch') initDefaultBranch = v
+    }
+  }
+  const gitIdentity = { name: userName, email: userEmail }
+
+  const logLines = logRes.ok && logRes.stdout ? logRes.stdout.split('\n').filter(Boolean) : []
+  const authorSet = new Set()
+  const subjects = []
+  for (const line of logLines) {
+    const sepIdx = line.indexOf('\x1f')
+    const author = sepIdx >= 0 ? line.slice(0, sepIdx) : line
+    const subj = sepIdx >= 0 ? line.slice(sepIdx + 1) : ''
+    if (author) authorSet.add(author)
+    if (subj && subjects.length < 20) subjects.push(subj)
+  }
+  const historyAuthors = [...authorSet]
+  const convRe = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]*\))?!?:\s+\S/i
+  const convCount = subjects.filter((s) => convRe.test(s)).length
+  const commitStyle = subjects.length > 0 && convCount > subjects.length / 2 ? 'conventional' : 'plain'
   let commits = 0
-  if (head && roots.isGit) {
-    const cntRes = await gitRun(workRoot, ['rev-list', '--count', 'HEAD'])
-    if (cntRes.ok && /^\d+$/.test(cntRes.stdout.trim())) commits = Number(cntRes.stdout.trim())
+  if (head) {
+    if (logLines.length < 500) commits = logLines.length
+    else {
+      const revRes = await gitRun(workRoot, ['--no-optional-locks', 'rev-list', '--count', 'HEAD'])
+      commits = revRes.ok && /^\d+$/.test(revRes.stdout?.trim()) ? Number(revRes.stdout.trim()) : logLines.length
+    }
   }
-  const historyAuthors = logRes.ok && logRes.stdout ? [...new Set(logRes.stdout.split('\n').filter(Boolean))] : []
-  const gitIdentity = {
-    name: userNameRes.ok ? userNameRes.stdout.trim() : undefined,
-    email: userEmailRes.ok ? userEmailRes.stdout.trim() : undefined,
-  }
+
+  const defaultBranch = !roots.isGit
+    ? 'main'
+    : (needRefsExec
+        ? resolveDefaultBranchFromRefs(refsRes?.stdout, branch, initDefaultBranch)
+        : (readRefsFast(roots.gitDir, branch, initDefaultBranch) ?? resolveDefaultBranchFromRefs('', branch, initDefaultBranch)))
+  const hasDocsSystem = existsSync(join(mainRoot, 'docs', 'TDD.md'))
+    || existsSync(join(mainRoot, 'docs', 'specs'))
+    || existsSync(join(mainRoot, 'docs', 'todo'))
+    || existsSync(join(mainRoot, 'docs', 'prd'))
+  const worktrees = !roots.isGit
+    ? []
+    : (wtRes?.ok && wtRes.stdout
+        ? parseWorktreeListPorcelain(wtRes.stdout)
+        : [{ path: canonicalPath(mainRoot), head, branch: branch === '(detached)' ? null : branch, detached: branch === '(detached)', bare: false, prunable: null }])
 
   const profile = parseAgentsProfile(mainRoot)
   const declaredRepo = detectDeclaredRepo(mainRoot)
@@ -226,10 +444,10 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     branch,
     head,
     commits,
-    dirty: stZ.entries.length,
-    defaultBranch: conventions.defaultBranch,
-    commitStyle: conventions.commitStyle,
-    hasDocsSystem: conventions.hasDocsSystem,
+    dirty: stParsed.dirty,
+    defaultBranch,
+    commitStyle,
+    hasDocsSystem,
     declaredRepo: declaredRepo ?? null,
     remoteUrls,
     remotesTopology: topology.remotes,
@@ -248,7 +466,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
       doNotEdit: profile.doNotEdit,
       mergeAuthority: profile.mergeAuthority,
     },
-    worktrees: parseWorktreeListPorcelain(wtRes.stdout),
+    worktrees,
     activeTasks: listTaskLedgers(mainRoot, { includeTerminal: false }).map((t) => ({
       taskId: t.taskId, slug: t.slug, status: t.status, branch: t.branch, worktreePath: t.worktreePath, prNumber: t.prNumber,
     })),
@@ -271,7 +489,8 @@ function findMatchingDocStrict(root, dirRel, slug, taskId) {
 }
 
 /** 将主仓中尚未提交的关联规划文档同步迁入新创建的 Tier 2 实施 worktree，防止断链。 */
-async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger) {
+async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty = undefined) {
+  if (mainDirty === 0) return []
   const st = await gitStatusPorcelainZ(mainRoot)
   if (!st.ok) return []
   const dirtyMap = new Map(st.entries.map((e) => [e.file, e.xy]))
@@ -334,7 +553,7 @@ export async function handleStart(opts, roots) {
   }
 
   const state = await inspectWorkspace(roots.mainRoot, {
-    inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
+    roots, inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
     issue: linkedIssues.join(','), probeAuth: Boolean(opts['probe-auth']),
   })
   const effectiveExternalPr = externalPr
@@ -550,7 +769,7 @@ export async function handleStart(opts, roots) {
     linkedIssues, prNumber, implementerId, status: 'started',
   })
 
-  const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger)
+  const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)
   if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId)
   if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId)
   if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId)
@@ -570,202 +789,6 @@ export async function handleStart(opts, roots) {
         ? { skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` }
         : `在 ${implRel} 中推进实施；提交评审时将自动同步创建 ${reviewRel} 审查工作树。`,
     ], { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: 0 }
-}
-
-/** 解析 Issue 评论流中的最新有效认领状态（claim/takeover 激活，release 释放）。 */
-export function analyzeIssueClaimState(comments = []) {
-  let activeClaim = null
-  for (const c of Array.isArray(comments) ? comments : []) {
-    const states = Array.isArray(c?.pfStates) && c.pfStates.length > 0
-      ? c.pfStates
-      : (c?.pfState ? [c.pfState] : parsePfStateTags(c?.body ?? ''))
-    for (const st of states) {
-      const action = String(st?.action ?? '').toLowerCase()
-      if (action === 'claim' || action === 'takeover') {
-        activeClaim = {
-          action,
-          actor: st.agent || st.actor || st.owner || c?.author || null,
-          login: c?.author ?? null,
-          taskId: st.taskId ?? null,
-          branch: st.branch ?? null,
-          reason: st.reason ?? null,
-          commentId: c?.id ?? null,
-          createdAt: c?.createdAt ?? null,
-        }
-      } else if (action === 'release') {
-        const relActor = st.agent || st.actor || c?.author || null
-        if (!activeClaim || !relActor || !activeClaim.actor
-          || String(relActor).toLowerCase() === String(activeClaim.actor).toLowerCase()
-          || (c?.author && activeClaim.login && c.author.toLowerCase() === activeClaim.login.toLowerCase())
-          || (st.taskId && activeClaim.taskId && st.taskId === activeClaim.taskId)) {
-          activeClaim = null
-        }
-      }
-    }
-  }
-  return activeClaim
-}
-
-function isSameClaimant(activeClaim, actor, viewerLogin) {
-  if (!activeClaim) return true
-  const aNorm = String(actor ?? '').trim().toLowerCase()
-  const cNorm = String(activeClaim.actor ?? '').trim().toLowerCase()
-  if (cNorm && aNorm) return cNorm === aNorm
-  if (viewerLogin && activeClaim.login) {
-    return String(viewerLogin).trim().toLowerCase() === String(activeClaim.login).trim().toLowerCase()
-  }
-  return false
-}
-
-export async function handleClaim(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const parsedPos = parseFlowInputs(opts._ ?? [])
-  const extraIssues = [
-    ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
-    ...parsedPos.issues.map((i) => i.number),
-  ]
-  if (extraIssues.length > 0) {
-    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
-  }
-  const claimPr = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : (parsedPos.prs[0]?.number ?? null)
-  if (claimPr) ledger.prNumber = claimPr
-
-  const isTakeover = Boolean(opts.takeover)
-  const takeoverReason = String(opts.reason ?? '').trim()
-  if (isTakeover && !takeoverReason) {
-    process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-
-  const initContrib = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
-  const prevImpl = ledger.implementerId
-  let actor = initContrib.actor
-  let actorDisplay = initContrib.display
-  ledger.implementerId = actor
-  const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
-
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
-  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
-
-  const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
-  if (skipApi) {
-    ledger.status = 'claimed'
-    ledger.claimedAt = new Date().toISOString()
-    if (isTakeover) {
-      ledger.takeoverReason = takeoverReason
-      ledger.takenOverAt = ledger.claimedAt
-    }
-    writeTaskLedger(roots.mainRoot, ledger)
-    if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
-    else {
-      process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
-    }
-    return { exitCode: 0 }
-  }
-
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
-  const ghClient = opts._ghClient ?? ghProbe.client
-  const onlineContrib = resolveContributorIdentity({
-    explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: prevImpl,
-  })
-  if (onlineContrib.actor !== actor) {
-    actor = onlineContrib.actor
-    actorDisplay = onlineContrib.display
-    ledger.implementerId = actor
-    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
-  }
-  const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
-  const activeClaimsByIssue = new Map()
-  if (canQueryComments) {
-    for (const num of ledger.linkedIssues) {
-      const listRes = await ghClient.listComments({ repo: targetRepo, number: num })
-      if (!listRes.ok) continue
-      const activeClaim = analyzeIssueClaimState(listRes.comments)
-      if (activeClaim && !isSameClaimant(activeClaim, actor, ghProbe.env.trackB.login)) {
-        if (!isTakeover) {
-          if (opts.json) {
-            process.stdout.write(`${JSON.stringify({
-              blocked: true,
-              code: 'BLOCKED_ISSUE_ALREADY_CLAIMED',
-              taskId,
-              issue: num,
-              activeClaim,
-              nextStep: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId} --takeover --reason "<接管原因>"`,
-            }, null, 2)}\n`)
-          }
-          process.stderr.write(`BLOCKED_ISSUE_ALREADY_CLAIMED: Issue #${num} 已被 ${activeClaim.actor ?? activeClaim.login ?? '他人'} 认领（分支=${activeClaim.branch ?? '未知'}），且尚无 release/takeover；如需接管请传 --takeover --reason "<接管原因>"。\n`)
-          return { exitCode: EXIT_POLICY_BLOCK }
-        }
-        activeClaimsByIssue.set(num, activeClaim)
-      }
-    }
-  }
-
-  const claimResults = []
-  for (const num of ledger.linkedIssues) {
-    const prevClaim = activeClaimsByIssue.get(num)
-    const commentRes = isTakeover
-      ? await ghClient.postComment({
-          repo: targetRepo,
-          number: num,
-          body: `接管认领：由 ${actorDisplay} 接管任务 \`${taskId}\`（分支 \`${ledger.branch}\`，原认领人：${prevClaim?.actor ?? prevClaim?.login ?? '无/未知'}），原因：${takeoverReason}。`,
-          statePayload: {
-            taskId,
-            action: 'takeover',
-            agent: actor,
-            previousAgent: prevClaim?.actor ?? prevClaim?.login ?? null,
-            branch: ledger.branch,
-            reason: takeoverReason,
-          },
-        })
-      : await ghClient.postComment({
-          repo: targetRepo,
-          number: num,
-          body: `认领：由 ${actorDisplay} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
-          statePayload: { taskId, action: 'claim', agent: actor, branch: ledger.branch },
-        })
-    const labelRes = await ghClient.addLabels({ repo: targetRepo, number: num, labels: ['in-progress'] })
-    claimResults.push({ issue: num, action: isTakeover ? 'takeover' : 'claim', comment: commentRes, label: labelRes })
-  }
-
-  let prTakeoverResult = null
-  if (isTakeover && ledger.prNumber) {
-    const prevActors = [...activeClaimsByIssue.values()].map((c) => c.actor ?? c.login).filter(Boolean)
-    prTakeoverResult = await ghClient.postComment({
-      repo: targetRepo,
-      number: ledger.prNumber,
-      body: `接管认领：由 ${actorDisplay} 接管关联 PR #${ledger.prNumber}（分支 \`${ledger.branch}\`，关联 Issue：${ledger.linkedIssues.map((n) => `#${n}`).join(', ')}），原因：${takeoverReason}。`,
-      statePayload: {
-        taskId,
-        action: 'takeover',
-        agent: actor,
-        previousAgent: prevActors[0] ?? null,
-        branch: ledger.branch,
-        prNumber: ledger.prNumber,
-        reason: takeoverReason,
-      },
-    })
-  }
-
-  ledger.status = 'claimed'
-  ledger.claimedAt = new Date().toISOString()
-  if (isTakeover) {
-    ledger.takeoverReason = takeoverReason
-    ledger.takenOverAt = ledger.claimedAt
-  }
-  writeTaskLedger(roots.mainRoot, ledger)
-  if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
-  } else {
-    process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }
 }

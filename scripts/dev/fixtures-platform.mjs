@@ -4,8 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { SKILL_ROOT, gitInit, rmTree, runAbs, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerPlatformCases(cases) {
 cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git 放行 merge 与多远端拓扑', async () => {
@@ -80,19 +79,15 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     const sNoRem = await survey(dirNoRemote, { probeAuth: true, offline: true })
     if (!sNoRem.git?.auth?.probed) return `无远端 --probe-auth 未执行探测：${JSON.stringify(sNoRem.git?.auth)}`
 
-    gitInit(dirGeneric)
-    spawnSync('git', ['branch', '-M', 'main'], { cwd: dirGeneric, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.name', 't'], { cwd: dirGeneric, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dirGeneric, stdio: 'ignore' })
-    spawnSync('git', ['remote', 'add', 'origin', 'https://git.internal.corp/team/repo.git'], { cwd: dirGeneric, stdio: 'ignore' })
+    gitInit(dirGeneric, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://git.internal.corp/team/repo.git' })
 
-    const st = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-gen', '--case', '1', '--slug', 'gen', '--json'], { cwd: dirGeneric })
+    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-gen', '--case', '1', '--slug', 'gen', '--json'], { cwd: dirGeneric })
     if (st.status !== 0) return `generic-git start 失败：${st.stderr}`
     const l = JSON.parse(st.stdout)
     if (l.role !== 'generic-git' || l.providerId !== 'generic-git') return `generic-git 角色错误：${st.stdout}`
-    const v = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: dirGeneric })
+    const v = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: dirGeneric })
     if (v.status !== 0) return `generic-git verify 失败：${v.stderr}`
-    const m = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
+    const m = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
     if (m.status !== 0) return `generic-git 阻断了本地 merge：exit=${m.status} ${m.stderr}`
 
     const probeOffline = await probeGitHubEnv({
@@ -168,8 +163,7 @@ cases.push(['Java 空目录起步、handoff 跳过挂载链接与 manifest、mac
     }
 
     // 2. macOS 元数据在 survey / repo-map 全面过滤 + handoff 保留 .agents/skills/ 且跳过 .worktrees/ 依赖链接退出 0
-    gitInit(handoffDir)
-    spawnSync('git', ['branch', '-M', 'main'], { cwd: handoffDir, stdio: 'ignore' })
+    gitInit(handoffDir, { branch: 'main' })
     mkdirSync(join(handoffDir, 'node_modules', 'dep'), { recursive: true })
     writeFileSync(join(handoffDir, 'node_modules/dep/index.js'), '1\n')
     mkdirSync(join(handoffDir, '.worktrees/impl-1'), { recursive: true })
@@ -370,21 +364,21 @@ cases.push(['多维护者团队协同：team-collaborator 与 owner 区分、防
     'src/index.mjs': 'export const ok = true\n',
   })
   try {
-    spawnSync('git', ['init', '-q'], { cwd: teamDir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'add', '-A'], { cwd: teamDir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'commit', '-qm', 'init by lead'], { cwd: teamDir, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.name', 'NewTeammate'], { cwd: teamDir, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.email', 'new@org-a.example'], { cwd: teamDir, stdio: 'ignore' })
-    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/org-a/team-app.git'], { cwd: teamDir, stdio: 'ignore' })
+    gitSync(teamDir, ['init', '-q'])
+    gitSync(teamDir, ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'add', '-A'])
+    gitSync(teamDir, ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'commit', '-qm', 'init by lead'])
+    gitSync(teamDir, ['config', 'user.name', 'NewTeammate'])
+    gitSync(teamDir, ['config', 'user.email', 'new@org-a.example'])
+    gitSync(teamDir, ['remote', 'add', 'origin', 'https://github.com/org-a/team-app.git'])
 
-    const flowJsonRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--json'], { cwd: teamDir })
+    const flowJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--json'], { cwd: teamDir })
     if (flowJsonRes.status !== 0) return `flow.mjs inspect --json 失败：${flowJsonRes.stderr}`
     const flowJson = JSON.parse(flowJsonRes.stdout)
     if (flowJson.identity?.role !== 'clone-readonly' || !flowJson.identity?.teamProbeHint?.includes('--probe-auth')) {
       return `flow.mjs inspect --json 离线同源未给出 teamProbeHint：${JSON.stringify(flowJson.identity)}`
     }
 
-    const flowTextRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['inspect'], { cwd: teamDir })
+    const flowTextRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['inspect'], { cwd: teamDir })
     if (flowTextRes.status !== 0 || !flowTextRes.stdout.includes('团队权限提示') || !flowTextRes.stdout.includes('--probe-auth')) {
       return `flow.mjs inspect 文本缺少团队权限提示：\n${flowTextRes.stdout}`
     }
@@ -403,6 +397,62 @@ cases.push(['多维护者团队协同：team-collaborator 与 owner 区分、防
     return true
   } finally {
     rmTree(teamDir)
+  }
+}])
+
+cases.push(['M1 惰性平台探测：默认 probeNetwork=false / PF_NO_REAL_AUTH_PROBE=1 零外网探针、PF_MCP_GITHUB 与 SSH IdentityFile', async () => {
+  const { probeGitHubEnvCore, probeSshTransport, parseSshConfigDetails } = await import('../../kit/skills/lib/platform-probe.mjs')
+  const { probeGitHubEnv } = await import('../../kit/skills/lib/platform.mjs')
+
+  const fakeHome = tmpProject({
+    '.ssh/custom_work_key': '# mock ssh key placeholder\n',
+    '.ssh/config': 'Host gh-work\n  HostName github.com\n  IdentityFile ~/.ssh/custom_work_key\n',
+  })
+  const emptyHome = tmpProject({})
+
+  try {
+    // 1. 默认 probeNetwork=false 不调用 gh / git credential fill / ssh / /user
+    const lazyCore = await probeGitHubEnvCore({
+      cwd: fakeHome,
+      remoteUrls: { origin: 'https://github.com/octocat/demo.git' },
+      env: { PF_NO_REAL_AUTH_PROBE: '1', HOME: emptyHome, USERPROFILE: emptyHome },
+    })
+    if (lazyCore.ghCli.reason !== '惰性模式未调用 gh auth status' || lazyCore.httpsPublic.state !== 'unprobed') {
+      return `惰性鉴权破坏：未跳过外部探测 (${JSON.stringify({ ghCli: lazyCore.ghCli, https: lazyCore.httpsPublic })})`
+    }
+
+    // 2. trackB.tier 无 MCP 证据时返回 none，有 PF_MCP_GITHUB=1 时才给 mcp-delegate
+    const noMcp = await probeGitHubEnv({
+      cwd: fakeHome,
+      remoteUrls: { origin: 'https://github.com/octocat/demo.git' },
+      env: { HOME: emptyHome, USERPROFILE: emptyHome },
+    })
+    if (noMcp.env.trackB.tier !== 'none') return `未确认 MCP 却误给 tier=${noMcp.env.trackB.tier}`
+    const withMcp = await probeGitHubEnv({
+      cwd: fakeHome,
+      remoteUrls: { origin: 'https://github.com/octocat/demo.git' },
+      env: { HOME: emptyHome, USERPROFILE: emptyHome, PF_MCP_GITHUB: '1' },
+    })
+    if (withMcp.env.trackB.tier !== 'mcp-delegate') return `显式 PF_MCP_GITHUB=1 未识别 mcp-delegate：${withMcp.env.trackB.tier}`
+
+    // 3. SSH IdentityFile 提取与无密钥跳过联网握手
+    const details = parseSshConfigDetails(join(fakeHome, '.ssh', 'config'), { HOME: fakeHome, USERPROFILE: fakeHome })
+    const ids = details.identityFiles.get('gh-work') ?? []
+    if (details.hostMap.get('gh-work') !== 'github.com' || ids.length !== 1 || !ids[0].includes('custom_work_key')) {
+      return `parseSshConfigDetails 未识别 IdentityFile：${JSON.stringify({ map: [...details.hostMap], ids })}`
+    }
+    const noKeySsh = await probeSshTransport({
+      cwd: emptyHome,
+      env: { HOME: emptyHome, USERPROFILE: emptyHome, SSH_AUTH_SOCK: '', PATH: emptyHome },
+      timeoutMs: 1500,
+    })
+    if (noKeySsh.state !== 'no-key' || noKeySsh.available !== false) {
+      return `无本机密钥时 probeSshTransport 未快速跳过：${JSON.stringify(noKeySsh)}`
+    }
+    return true
+  } finally {
+    rmTree(fakeHome)
+    rmTree(emptyHome)
   }
 }])
 

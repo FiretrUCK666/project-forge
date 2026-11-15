@@ -38,7 +38,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 | 新版已移除的退役托管文件 | 未改 -> **自动物理删除并移出 manifest**；已改 -> 保留标 `orphaned-modified` | 绝不误删用户手改资产 |
 | 用户自建的 `.agents/skills/<custom>/` | **永远不碰、不扫进清理名单** | 严守边界，不侵占项目私有扩展 |
 
-注：`equip.mjs` 与 `compose-agents.mjs` 在修改已有非空文件前均动态通过 `scripts/backup.mjs` 在仓外（`<gitCommonDir>/project-forge-backups/`、`PF_BACKUP_DIR` 或 `~/.project-forge/backups/`）保留最多 5 份 `.tar.gz` 快照并**永久钉住最新一份 `pre-forge` 初始基线**不被滚动淘汰（`--no-backup` 可跳过，零变动时不冗余备份，可用 `backup.mjs restore` 回滚且零污染工作区）。`compose-agents.mjs` 同样核对 `.pf-manifest.json` 的 `agentsRegions` 与 `removedAgentsRegions`，缺失基线时对既有非空区段默认 `protect` 跳过。
+注：`equip.mjs` 与 `compose-agents.mjs` 在修改已有非空文件前均动态通过 `scripts/backup.mjs` 在仓外（`<gitCommonDir>/project-forge-backups/`、`PF_BACKUP_DIR` 或 `~/.project-forge/backups/`）保留最多 5 份 `.zip` 快照（兼容读取与恢复历史 `.tar.gz`）并**永久钉住最新一份 `pre-forge` 初始基线**不被滚动淘汰（`--no-backup` 可跳过，零变动时不冗余备份，可用 `backup.mjs restore` 回滚且零污染工作区）。`compose-agents.mjs` 同样核对 `.pf-manifest.json` 的 `agentsRegions` 与 `removedAgentsRegions`，缺失基线时对既有非空区段默认 `protect` 跳过。
 
 ## 四、交棒前四步清单
 

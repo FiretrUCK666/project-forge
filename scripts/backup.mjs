@@ -1,12 +1,12 @@
 /**
- * 写前自动 `.tar.gz` 快照与可逆恢复（纯 `node:zlib` + 标准 POSIX USTAR tar）。
+ * 写前自动 `.zip` 快照与可逆恢复（纯 `node:zlib` zip，并向下兼容 `.tar.gz` / POSIX USTAR 恢复）。
  *
  * - 零第三方依赖、零外部命令行依赖，跨平台可运行。
  * - 存储位置绝对不污染工作区 `git status`：
  *   1) `PF_BACKUP_DIR/<slug>-<hash8>/`
  *   2) `<gitCommonDir>/project-forge-backups/`（兼容 worktree `.git` 文件解析）
  *   3) `~/.project-forge/backups/<slug>-<hash8>/`
- * - 自动跳过版本库、依赖缓存与构建产物目录，以及超过 20MB 的单文件。
+ * - 统一复用 `COMMON_SKIP_DIRS`，自动跳过版本库、依赖缓存、构建产物目录与超 20MB 单文件。
  */
 
 import { createHash, randomBytes } from 'node:crypto'
@@ -19,32 +19,17 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { tempPathFor, writeAtomic } from './lib/fs-atomic.mjs'
-import { isMacOsMetadata } from './lib/protocol.mjs'
+import { COMMON_SKIP_DIRS, isMacOsMetadata } from './lib/protocol.mjs'
 import { isMainModule, posixPath, readJsonSafe } from './lib/text.mjs'
+import { readZip, writeZip } from './zip.mjs'
 
 export const DEFAULT_MAX_KEEP = 5
 export const MAX_BACKUP_FILE_BYTES = 20 * 1024 * 1024
-
-export const BACKUP_SKIP_DIRS = new Set([
-  '.git',
-  '.worktrees',
-  'node_modules',
-  '.pnpm-store',
-  '.yarn',
-  '.venv',
-  'venv',
-  '__pycache__',
-  'target',
-  'dist',
-  'build',
-  'out',
-  'coverage',
-  '.next',
-  '.nuxt',
-  '.cache',
-])
+export const MAX_RESTORE_TOTAL_BYTES = 512 * 1024 * 1024
+export const BACKUP_SKIP_DIRS = COMMON_SKIP_DIRS
 
 const BLOCK_SIZE = 512
+const IN_MEM_CACHE_LIMIT_BYTES = 24 * 1024 * 1024
 
 function writeAtomicBinary(filePath, buf) {
   const tmp = tempPathFor(filePath)
@@ -55,6 +40,17 @@ function writeAtomicBinary(filePath, buf) {
     try { unlinkSync(tmp) } catch { /* ignore */ }
     throw err
   }
+}
+
+/** 按 UTF-8 字节长度安全截断字符串，绝不在多字节字符中间劈裂。 */
+export function truncateUtf8Bytes(str, maxBytes) {
+  const buf = Buffer.from(String(str ?? ''), 'utf8')
+  if (buf.length <= maxBytes) return buf
+  let end = Math.max(0, maxBytes)
+  if (end < buf.length && (buf[end] & 0xC0) === 0x80) {
+    while (end > 0 && (buf[end] & 0xC0) === 0x80) end -= 1
+  }
+  return buf.subarray(0, end)
 }
 
 /** 解析目标目录对应的 Git common directory（兼容常规仓库与 worktree `.git` 文件）。 */
@@ -132,7 +128,7 @@ export function resolveBackupDir(targetDir, { env = process.env } = {}) {
 }
 
 function assertSafeRelPath(rel) {
-  const clean = posixPath(rel)
+  const clean = posixPath(rel).replace(/^(?:\.\/)+/, '')
   if (!clean || clean.startsWith('/') || /^[A-Za-z]:/.test(clean) || clean.includes('\0')) {
     throw new Error(`快照条目路径不安全：${rel}`)
   }
@@ -140,7 +136,7 @@ function assertSafeRelPath(rel) {
   if (parts.some((p) => p === '' || p === '.' || p === '..')) {
     throw new Error(`快照条目包含越界路径段：${rel}`)
   }
-  if (BACKUP_SKIP_DIRS.has(parts[0])) {
+  if (parts.slice(0, -1).some((p) => BACKUP_SKIP_DIRS.has(p))) {
     throw new Error(`快照条目命中保留跳过目录：${rel}`)
   }
   return clean
@@ -161,10 +157,8 @@ function splitUstarPath(relPath) {
   if (full.length <= 100) {
     return { nameBuf: full, prefixBuf: Buffer.alloc(0), needsPax: false }
   }
-  const idx = relPath.indexOf('/')
-  let searchFrom = idx
+  let searchFrom = relPath.indexOf('/')
   while (searchFrom !== -1) {
-    // 尝试将较长路径拆为 prefix (<=155B) + name (<=100B)
     const candidatePrefix = relPath.slice(0, searchFrom)
     const candidateName = relPath.slice(searchFrom + 1)
     const prefixBuf = Buffer.from(candidatePrefix, 'utf8')
@@ -175,7 +169,7 @@ function splitUstarPath(relPath) {
     searchFrom = relPath.indexOf('/', searchFrom + 1)
   }
   return {
-    nameBuf: full.subarray(0, 100),
+    nameBuf: truncateUtf8Bytes(relPath, 100),
     prefixBuf: Buffer.alloc(0),
     needsPax: true,
   }
@@ -222,19 +216,21 @@ function padBlockChunk(buf) {
   return Buffer.concat([buf, Buffer.alloc(BLOCK_SIZE - rem, 0)])
 }
 
-/** 将文件数组编码为标准 POSIX USTAR tar Buffer。 */
+/** 将文件数组编码为标准 POSIX USTAR tar Buffer（兼容 `--format tar.gz` 与恢复）。 */
 export function packTar(entries) {
   const chunks = []
   for (const entry of entries) {
     const rel = assertSafeRelPath(entry.relPath)
-    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data ?? '')
+    const data = typeof entry.readData === 'function'
+      ? entry.readData()
+      : (Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data ?? ''))
     const mode = typeof entry.mode === 'number' ? (entry.mode & 0o777) : 0o644
     const mtimeSec = typeof entry.mtimeMs === 'number' ? Math.floor(entry.mtimeMs / 1000) : Math.floor(Date.now() / 1000)
 
     const split = splitUstarPath(rel)
     if (split.needsPax) {
       const paxPayload = buildPaxRecord('path', rel)
-      const paxName = Buffer.from(`PaxHeaders/${basename(rel)}`.slice(0, 95), 'utf8')
+      const paxName = truncateUtf8Bytes(`PaxHeaders/${basename(rel)}`, 95)
       chunks.push(buildUstarHeader({
         nameBuf: paxName,
         prefixBuf: Buffer.alloc(0),
@@ -360,40 +356,41 @@ export function unpackTar(tarBuf) {
   return files
 }
 
-function collectEligibleWorkspaceFiles(root, backupDir, { readData = true } = {}) {
+function isInsideRelPrefix(relPath, backupRelPrefix) {
+  if (!backupRelPrefix) return false
+  return relPath === backupRelPrefix || relPath.startsWith(`${backupRelPrefix}/`)
+}
+
+function collectEligibleWorkspaceFiles(canonRoot, canonBackupDir) {
   const entries = []
   const skippedLarge = []
-  if (!existsSync(root)) return { entries, skippedLarge }
-  const canonBackupDir = backupDir ? canonicalBackupPath(backupDir) : ''
+  if (!existsSync(canonRoot)) return { entries, skippedLarge }
 
-  function visit(dir) {
-    const canonDir = canonicalBackupPath(dir)
-    if (canonBackupDir && (canonDir === canonBackupDir || canonDir.startsWith(canonBackupDir + sep))) {
-      return
-    }
+  let backupRelPrefix = ''
+  if (canonBackupDir && canonBackupDir.startsWith(canonRoot + sep)) {
+    backupRelPrefix = posixPath(relative(canonRoot, canonBackupDir))
+  }
+
+  function visit(dir, relPrefix) {
     let dirEntries = []
     try {
-      dirEntries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
+      dirEntries = readdirSync(dir, { withFileTypes: true })
     } catch {
       return
     }
     for (const d of dirEntries) {
       if (d.isSymbolicLink()) continue
       if (d.name === '.git' || isMacOsMetadata(d.name)) continue
+      const relPath = relPrefix ? `${relPrefix}/${d.name}` : d.name
+      if (isInsideRelPrefix(relPath, backupRelPrefix)) continue
       const abs = join(dir, d.name)
-      const canonAbs = canonicalBackupPath(abs)
-      if (canonBackupDir && (canonAbs === canonBackupDir || canonAbs.startsWith(canonBackupDir + sep))) {
-        continue
-      }
       if (d.isDirectory()) {
         if (BACKUP_SKIP_DIRS.has(d.name)) continue
-        visit(abs)
+        visit(abs, relPath)
         continue
       }
       if (!d.isFile()) continue
-      const relPath = posixPath(relative(root, abs))
-      if (!relPath || relPath.startsWith('..')) continue
-      if (/\.tmp-\d+$/.test(d.name)) continue
+      if (/\.tmp-\d+(?:-\d+)*$/.test(d.name)) continue
       let st
       try { st = statSync(abs) } catch { continue }
       if (st.size > MAX_BACKUP_FILE_BYTES) {
@@ -402,15 +399,15 @@ function collectEligibleWorkspaceFiles(root, backupDir, { readData = true } = {}
       }
       entries.push({
         relPath,
+        absPath: abs,
         size: st.size,
         mode: st.mode & 0o777,
         mtimeMs: st.mtimeMs,
-        ...(readData ? { data: readFileSync(abs) } : {}),
       })
     }
   }
 
-  visit(root)
+  visit(canonRoot, '')
   entries.sort((a, b) => a.relPath.localeCompare(b.relPath))
   return { entries, skippedLarge }
 }
@@ -452,28 +449,49 @@ function pruneEmptyParentsWithin(filePath, rootDir) {
   }
 }
 
-function computeTreeSha256(entries) {
+function computeTreeShaAndPrepareReaders(entries, totalBytes, { dryRun }) {
+  const retainCache = !dryRun && totalBytes <= IN_MEM_CACHE_LIMIT_BYTES
+  const cache = retainCache ? new Array(entries.length) : null
   const h = createHash('sha256')
-  for (const entry of entries) {
-    const dataSha = createHash('sha256').update(entry.data).digest('hex')
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i]
+    const data = readFileSync(entry.absPath)
+    const dataSha = createHash('sha256').update(data).digest('hex')
     h.update(`${entry.relPath}\0${entry.size}\0${dataSha}\0`)
+    if (cache) cache[i] = data
   }
-  return h.digest('hex')
+  const readers = entries.map((entry, i) => ({
+    ...entry,
+    readData: () => {
+      if (cache && cache[i] !== undefined) {
+        const buf = cache[i]
+        cache[i] = undefined
+        return buf
+      }
+      return readFileSync(entry.absPath)
+    },
+  }))
+  return { treeSha256: h.digest('hex'), readers }
 }
 
 /**
- * 为 `<targetDir>` 创建一份滚动 `.tar.gz` 快照并更新 `index.json`。
+ * 为 `<targetDir>` 创建一份滚动 `.zip`（或 `--format tar.gz`）快照并更新 `index.json`。
  */
 export function createBackup(targetDir, {
   label = 'write',
+  format = 'zip',
   maxKeep = DEFAULT_MAX_KEEP,
   dryRun = false,
   hasPendingChanges = true,
   force = false,
   env = process.env,
 } = {}) {
+  if (format !== 'zip' && format !== 'tar.gz') {
+    throw new Error(`不支持的快照格式：${format}（仅支持 zip 或 tar.gz）`)
+  }
   const root = canonicalBackupPath(targetDir)
   const backupDir = resolveBackupDir(root, { env })
+  const canonBackupDir = canonicalBackupPath(backupDir)
 
   if (hasPendingChanges === false) {
     return { created: false, skippedReason: 'no-pending-changes', backupDir }
@@ -487,12 +505,20 @@ export function createBackup(targetDir, {
   const latest = index.backups.length > 0 ? index.backups[index.backups.length - 1] : undefined
   const needHashes = !dryRun || (!force && Boolean(latest?.treeSha256))
 
-  const { entries, skippedLarge } = collectEligibleWorkspaceFiles(root, backupDir, { readData: needHashes })
+  const { entries, skippedLarge } = collectEligibleWorkspaceFiles(root, canonBackupDir)
   if (entries.length === 0) {
     return { created: false, skippedReason: 'empty-target', backupDir }
   }
 
-  const treeSha256 = needHashes ? computeTreeSha256(entries) : undefined
+  const totalBytes = entries.reduce((sum, e) => sum + e.size, 0)
+  let treeSha256
+  let packedEntries = entries
+  if (needHashes) {
+    const prep = computeTreeShaAndPrepareReaders(entries, totalBytes, { dryRun })
+    treeSha256 = prep.treeSha256
+    packedEntries = prep.readers
+  }
+
   if (!force && latest && latest.treeSha256 && treeSha256 && latest.treeSha256 === treeSha256) {
     const latestArchivePath = join(backupDir, latest.archive)
     if (existsSync(latestArchivePath)) {
@@ -507,9 +533,8 @@ export function createBackup(targetDir, {
   }
 
   const existingPaths = entries.map((e) => e.relPath)
-  const totalBytes = entries.reduce((sum, e) => sum + e.size, 0)
   const id = makeSnapshotId(label)
-  const archiveName = `${id}.tar.gz`
+  const archiveName = format === 'zip' ? `${id}.zip` : `${id}.tar.gz`
   const archivePath = join(backupDir, archiveName)
 
   if (dryRun) {
@@ -519,6 +544,7 @@ export function createBackup(targetDir, {
       skippedReason: 'dry-run',
       id,
       label,
+      format,
       backupDir,
       archivePath,
       count: entries.length,
@@ -528,12 +554,16 @@ export function createBackup(targetDir, {
   }
 
   mkdirSync(backupDir, { recursive: true })
-  const gzBuf = gzipSync(packTar(entries), { level: 6 })
-  writeAtomicBinary(archivePath, gzBuf)
+  let archiveBuf = format === 'zip'
+    ? writeZip(packedEntries, { level: 6 })
+    : gzipSync(packTar(packedEntries), { level: 6 })
+  writeAtomicBinary(archivePath, archiveBuf)
+  archiveBuf = null
 
   index.backups.push({
     id,
     label,
+    format,
     createdAt: new Date().toISOString(),
     archive: archiveName,
     fileCount: entries.length,
@@ -575,6 +605,7 @@ export function createBackup(targetDir, {
     created: true,
     id,
     label,
+    format,
     backupDir,
     archivePath,
     count: entries.length,
@@ -587,11 +618,14 @@ export function createBackup(targetDir, {
 
 /** 写前防呆快照封装：无待写变动或空目录时静默跳过，绝不写冗余空包。 */
 export function ensurePreWriteBackup(targetDir, opts = {}) {
-  const { label = 'write', maxKeep = DEFAULT_MAX_KEEP, hasPendingChanges = true, dryRun = false, force = false, env = process.env } = opts
+  const {
+    label = 'write', format = 'zip', maxKeep = DEFAULT_MAX_KEEP,
+    hasPendingChanges = true, dryRun = false, force = false, env = process.env,
+  } = opts
   if (hasPendingChanges === false) {
     return { created: false, skippedReason: 'no-pending-changes', backupDir: resolveBackupDir(targetDir, { env }) }
   }
-  return createBackup(targetDir, { label, maxKeep, dryRun, hasPendingChanges, force, env })
+  return createBackup(targetDir, { label, format, maxKeep, dryRun, hasPendingChanges, force, env })
 }
 
 /** 列出指定工作区已有快照（按最新在前顺序）。 */
@@ -601,13 +635,33 @@ export function listBackups(targetDir, { env = process.env } = {}) {
   const index = readIndex(join(backupDir, 'index.json'), root)
   const backups = [...index.backups].reverse().map((b) => ({
     ...b,
+    format: b.format || (b.archive.endsWith('.tar.gz') ? 'tar.gz' : 'zip'),
     archivePath: join(backupDir, b.archive),
     exists: existsSync(join(backupDir, b.archive)),
   }))
   return { target: root, backupDir, backups }
 }
 
-/** 恢复指定快照（默认 `latest`），写回历史文件并清理快照之后新生成的无主文件。 */
+function decodeArchiveEntries(archiveBuf, archiveName, declaredFormat) {
+  const isZipMagic = archiveBuf.length >= 2 && archiveBuf[0] === 0x50 && archiveBuf[1] === 0x4b
+  const isGzipMagic = archiveBuf.length >= 2 && archiveBuf[0] === 0x1f && archiveBuf[1] === 0x8b
+  const useZip = isZipMagic || (!isGzipMagic && (declaredFormat === 'zip' || archiveName.endsWith('.zip')))
+  if (useZip) {
+    return readZip(archiveBuf, {
+      maxTotalBytes: MAX_RESTORE_TOTAL_BYTES,
+      maxEntryBytes: MAX_BACKUP_FILE_BYTES,
+    }).map((e) => ({
+      relPath: assertSafeRelPath(e.name),
+      data: e.data,
+      mode: e.mode ?? 0o644,
+      mtimeMs: e.mtimeMs ?? 0,
+    }))
+  }
+  const tarBuf = gunzipSync(archiveBuf)
+  return unpackTar(tarBuf)
+}
+
+/** 恢复指定快照（默认 `latest`，兼容 `.zip` 与历史 `.tar.gz`），写回历史文件并清理无主文件。 */
 export function restoreBackup(targetDir, {
   id = 'latest',
   dryRun = false,
@@ -615,6 +669,7 @@ export function restoreBackup(targetDir, {
 } = {}) {
   const root = canonicalBackupPath(targetDir)
   const backupDir = resolveBackupDir(root, { env })
+  const canonBackupDir = canonicalBackupPath(backupDir)
   const index = readIndex(join(backupDir, 'index.json'), root)
 
   if (index.backups.length === 0) {
@@ -633,15 +688,17 @@ export function restoreBackup(targetDir, {
     throw new Error(`快照归档文件缺失：${archivePath}`)
   }
 
-  const tarBuf = gunzipSync(readFileSync(archivePath))
-  const archivedFiles = unpackTar(tarBuf)
+  let rawArchive = readFileSync(archivePath)
+  const archivedFiles = decodeArchiveEntries(rawArchive, chosen.archive, chosen.format)
+  rawArchive = null
+
   const existingSet = new Set(
     Array.isArray(chosen.existingPaths) && chosen.existingPaths.length > 0
       ? chosen.existingPaths.map((p) => assertSafeRelPath(p))
       : archivedFiles.map((f) => f.relPath),
   )
 
-  const current = collectEligibleWorkspaceFiles(root, backupDir, { readData: false })
+  const current = collectEligibleWorkspaceFiles(root, canonBackupDir)
   const removedOrphans = []
   for (const cur of current.entries) {
     if (!existingSet.has(cur.relPath)) {
@@ -649,12 +706,14 @@ export function restoreBackup(targetDir, {
     }
   }
 
+  const restoredNames = archivedFiles.map((f) => f.relPath)
   if (!dryRun) {
     mkdirSync(root, { recursive: true })
     for (const file of archivedFiles) {
       const dest = join(root, file.relPath)
       mkdirSync(dirname(dest), { recursive: true })
       writeAtomicBinary(dest, file.data)
+      file.data = null
       if (process.platform !== 'win32' && typeof file.mode === 'number') {
         try { chmodSync(dest, file.mode) } catch { /* ignore */ }
       }
@@ -675,7 +734,7 @@ export function restoreBackup(targetDir, {
     label: chosen.label,
     dryRun,
     backupDir,
-    restored: archivedFiles.map((f) => f.relPath),
+    restored: restoredNames,
     removedOrphans,
   }
 }
@@ -684,11 +743,12 @@ function usage() {
   return [
     '用法：node scripts/backup.mjs <create|list|restore> [目标目录] [选项]',
     '',
-    '  create                   创建当前工作区写前快照（.tar.gz + index.json）',
+    '  create                   创建当前工作区写前快照（默认 .zip + index.json，兼容 .tar.gz）',
     '  list                     列出可用快照',
-    '  restore                  恢复快照并清理快照之后新增的无主文件',
+    '  restore                  恢复快照并清理快照之后新增的无主文件（自动识别 .zip / .tar.gz）',
     '',
     '  --label <op>             快照标签（默认 manual）',
+    '  --format <zip|tar.gz>    快照格式（默认 zip）',
     '  --id <id|latest>         要恢复的快照 ID（默认 latest）',
     `  --max-keep <n>           最多保留快照份数（默认 ${DEFAULT_MAX_KEEP}）`,
     '  --force                  即使工作区内容与最新快照一致也强制写入新快照',
@@ -706,13 +766,14 @@ async function main(argv) {
 
   const command = argv[0]
   if (!command || command.startsWith('-') || !['create', 'list', 'restore'].includes(command)) {
-    process.stderr.write(`请指定子命令 create | list | restore（用 --help 看用法）\n`)
+    process.stderr.write('请指定子命令 create | list | restore（用 --help 看用法）\n')
     return 2
   }
 
   let target = process.cwd()
   let targetSet = false
   let label = 'manual'
+  let format = 'zip'
   let id = 'latest'
   let maxKeep = DEFAULT_MAX_KEEP
   let dryRun = false
@@ -726,6 +787,8 @@ async function main(argv) {
     else if (arg === '--json') asJson = true
     else if (arg === '--label') label = argv[++i] ?? label
     else if (arg.startsWith('--label=')) label = arg.slice('--label='.length)
+    else if (arg === '--format') format = argv[++i] ?? format
+    else if (arg.startsWith('--format=')) format = arg.slice('--format='.length)
     else if (arg === '--id') id = argv[++i] ?? id
     else if (arg.startsWith('--id=')) id = arg.slice('--id='.length)
     else if (arg === '--max-keep') maxKeep = Number(argv[++i])
@@ -741,7 +804,7 @@ async function main(argv) {
 
   try {
     if (command === 'create') {
-      const res = createBackup(target, { label, maxKeep, dryRun, force })
+      const res = createBackup(target, { label, format, maxKeep, dryRun, force })
       if (asJson) {
         process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       } else if (res.created) {
@@ -780,6 +843,8 @@ async function main(argv) {
     return 1
   }
 }
+
+export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code))

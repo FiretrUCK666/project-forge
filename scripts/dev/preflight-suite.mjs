@@ -2,7 +2,7 @@
  * preflight-suite.mjs —— 脚本依赖、架构边界、Dev Profile 单源、孤儿脚本、平台语义对齐、模板与套件卫生校验。
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -59,7 +59,70 @@ function sameKeyList(a, b) {
   return sa.every((k, i) => k === sb[i])
 }
 
-function checkScripts({ ROOT, rel, readText, walk, fail, note }) {
+function runSpawnCheckPool(files, concurrency = 8) {
+  return new Promise((done) => {
+    const errors = new Map()
+    let idx = 0
+    const workers = Array.from({ length: Math.min(concurrency, files.length) }, () => new Promise((finishWorker) => {
+      const next = () => {
+        if (idx >= files.length) { finishWorker(); return }
+        const file = files[idx++]
+        const child = spawn(process.execPath, ['--check', file], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+        let err = ''
+        child.stderr?.on('data', (c) => { err += c })
+        child.on('close', (code) => {
+          if (code !== 0) errors.set(file, err.split('\n').slice(0, 3).join(' '))
+          next()
+        })
+        child.on('error', (e) => {
+          errors.set(file, e.message)
+          next()
+        })
+      }
+      next()
+    }))
+    Promise.all(workers).then(() => done(errors))
+  })
+}
+
+async function batchSyntaxCheck(files) {
+  if (files.length === 0) return new Map()
+  const runnerScript = [
+    "import { readFileSync } from 'node:fs';",
+    "import { SourceTextModule } from 'node:vm';",
+    "const files = JSON.parse(readFileSync(0, 'utf8'));",
+    "const errors = [];",
+    "for (const file of files) {",
+    "  try {",
+    "    new SourceTextModule(readFileSync(file, 'utf8'), { identifier: file });",
+    "  } catch (err) {",
+    "    errors.push({ file, msg: (err && err.message ? err.message : String(err)).split('\\n').slice(0, 3).join(' ') });",
+    "  }",
+    "}",
+    "process.stdout.write(JSON.stringify(errors));",
+  ].join('\n')
+
+  const res = spawnSync(
+    process.execPath,
+    ['--no-warnings', '--experimental-vm-modules', '--input-type=module', '-e', runnerScript],
+    { input: JSON.stringify(files), encoding: 'utf8', timeout: 15000, windowsHide: true },
+  )
+  if (res.status === 0 && res.stdout) {
+    try {
+      const parsed = JSON.parse(res.stdout)
+      if (Array.isArray(parsed)) {
+        const errors = new Map()
+        for (const item of parsed) {
+          if (item?.file) errors.set(item.file, item.msg || '语法错误')
+        }
+        return errors
+      }
+    } catch { /* fallback below */ }
+  }
+  return runSpawnCheckPool(files)
+}
+
+function checkScripts({ ROOT, rel, readText, walk, fail, note }, syntaxErrors) {
   const scripts = walk(join(ROOT, 'scripts'), (f) => f.endsWith('.mjs'))
   if (scripts.length === 0) { fail('scripts/ 下没有任何 .mjs'); return }
 
@@ -71,39 +134,49 @@ function checkScripts({ ROOT, rel, readText, walk, fail, note }) {
       if (spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../')) continue
       fail(`${name} 引入了非内置模块「${spec}」——必须保持零第三方依赖`)
     }
-    const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
-    if (syntax.status !== 0) fail(`${name} 语法错误：${(syntax.stderr || '').split('\n').slice(0, 3).join(' ')}`)
+    const synErr = syntaxErrors.get(file)
+    if (synErr) fail(`${name} 语法错误：${synErr}`)
   }
   note(`脚本：${scripts.length} 个，全是内置依赖、语法都能解析`)
 }
 
 function checkArchBoundaries({ ROOT, rel, readText, walk, fail, note }) {
+  const kitFiles = walk(join(ROOT, 'kit'), (f) => f.endsWith('.mjs'))
   const productScripts = [
     ...readdirSync(join(ROOT, 'scripts'), { withFileTypes: true })
       .filter((d) => d.isFile() && d.name.endsWith('.mjs'))
       .map((d) => join(ROOT, 'scripts', d.name)),
     ...walk(join(ROOT, 'scripts', 'lib'), (f) => f.endsWith('.mjs')),
-    ...walk(join(ROOT, 'kit'), (f) => f.endsWith('.mjs')),
+    ...kitFiles,
   ]
 
   const importSpecRe = /(?:^\s*(?:import|export)[\s\S]*?from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/gm
   for (const file of productScripts) {
     const name = rel(file)
     const text = readText(file)
+    const isKit = name.startsWith('kit/')
     for (const m of text.matchAll(importSpecRe)) {
       const spec = m[1].trim()
       if (spec.startsWith('node:')) continue
-      let pointsToDev = /(?:^|\/)scripts\/dev(?:\/|$)/.test(spec)
-      if (!pointsToDev && (spec.startsWith('./') || spec.startsWith('../'))) {
-        const targetRel = rel(resolve(dirname(file), spec))
-        pointsToDev = targetRel === 'scripts/dev' || targetRel.startsWith('scripts/dev/')
+      let targetRel = ''
+      if (spec.startsWith('./') || spec.startsWith('../')) {
+        targetRel = rel(resolve(dirname(file), spec))
       }
+      const pointsToDev = /(?:^|\/)scripts\/dev(?:\/|$)/.test(spec)
+        || targetRel === 'scripts/dev' || targetRel.startsWith('scripts/dev/')
       if (pointsToDev) {
         fail(`产品层架构越界：${name} 引用了开发门禁层「${spec}」（违反 kit/**、scripts/*.mjs、scripts/lib/** -> scripts/dev/** 禁引规则）`)
       }
+      if (isKit) {
+        const pointsToScriptsLib = /(?:^|\/)scripts\/lib(?:\/|$)/.test(spec)
+          || targetRel === 'scripts/lib' || targetRel.startsWith('scripts/lib/')
+        if (pointsToScriptsLib) {
+          fail(`架构边界越界：${name} 引用了安装期库「${spec}」（违反 kit/** -> scripts/lib/** 禁引规则）`)
+        }
+      }
     }
   }
-  note(`架构边界：${productScripts.length} 个产品层脚本均未逆向引用 scripts/dev/`)
+  note(`架构边界：${productScripts.length} 个产品层脚本均严守 dev 与 scripts/lib 单向隔离边界`)
 }
 
 function checkDevProfileParity({ ROOT, rel, readText, walk, fail, note }) {
@@ -249,22 +322,33 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
     fail(`平台语义对齐：注册表仅允许注册 github（engine=${engProviders}, kit=${kitProviders}）`)
   }
 
-  const probeSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-probe.mjs'))
+  const probeAdapterSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-probe.mjs'))
+  const ghAdapterSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github.mjs'))
+  const kitProbeSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform-probe.mjs'))
   const kitPlatSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'platform.mjs'))
-  if (/accept-new/i.test(probeSrc) || /accept-new/i.test(kitPlatSrc)) {
+  if (!probeAdapterSrc.includes('kit/skills/lib/platform-probe.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/github-probe.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
+  }
+  if (!ghAdapterSrc.includes('kit/skills/lib/platform.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/github.mjs 必须单源复用 kit/skills/lib/platform.mjs')
+  }
+  if (/accept-new/i.test(probeAdapterSrc) || /accept-new/i.test(kitProbeSrc) || /accept-new/i.test(kitPlatSrc)) {
     fail('平台语义对齐：禁止使用 StrictHostKeyChecking=accept-new 自动写盘')
   }
-  if (!probeSrc.includes('StrictHostKeyChecking=yes') || !kitPlatSrc.includes('StrictHostKeyChecking=yes')) {
-    fail('平台语义对齐：两端必须统一使用 StrictHostKeyChecking=yes')
+  if (!kitProbeSrc.includes('StrictHostKeyChecking=yes')) {
+    fail('平台语义对齐：共享平台探测核心必须显式使用 StrictHostKeyChecking=yes')
   }
-  if (!probeSrc.includes('--hostname') || !kitPlatSrc.includes('--hostname')) {
-    fail('平台语义对齐：两端 gh auth status 必须显式指定 --hostname github.com')
+  if (!kitProbeSrc.includes('--hostname')) {
+    fail('平台语义对齐：共享平台探测核心 gh auth status 必须显式指定 --hostname github.com')
   }
 
   const kitClientSrc = readText(join(ROOT, 'kit', 'skills', 'lib', 'github-client.mjs'))
   const engClientSrc = readText(join(ROOT, 'scripts', 'lib', 'platform', 'github-client.mjs'))
-  if (!kitClientSrc.includes('AbortSignal.timeout') || !engClientSrc.includes('AbortSignal.timeout')) {
+  if (!kitClientSrc.includes('AbortSignal.timeout') || !kitProbeSrc.includes('AbortSignal.timeout')) {
     fail('平台语义对齐：双端 HTTPS 请求必须显式设置 AbortSignal.timeout')
+  }
+  if (!engClientSrc.includes('kit/skills/lib/platform-probe.mjs')) {
+    fail('平台语义对齐：scripts/lib/platform/github-client.mjs 必须单源复用 kit/skills/lib/platform-probe.mjs')
   }
 
   const sshMap = new Map([['gh-work', 'github.com']])
@@ -371,7 +455,7 @@ function checkStructureRules({ ROOT, readText, fail, note }) {
   note(`结构规则：.gitattributes 与 REPO_ONLY_* 一致（${codeDirs.length} 处目录、${codeFiles.length} 个文件）`)
 }
 
-function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, note }) {
+function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, note }, syntaxErrors) {
   const eq = checkEquip(ROOT)
   if (!eq.ok) {
     const details = [
@@ -416,8 +500,8 @@ function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, note }) {
         fail(`${name} 越界引用了套件外部模块「${spec}」——kit/skills/ 必须自包含，否则复制到目标仓后无法运行`)
       }
     }
-    const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
-    if (syntax.status !== 0) fail(`${name} 语法错误：${(syntax.stderr || '').split('\n').slice(0, 3).join(' ')}`)
+    const synErr = syntaxErrors.get(file)
+    if (synErr) fail(`${name} 语法错误：${synErr}`)
   }
   note(`工程套件：${KIT_SKILLS.length} 个 Skill（<= ${KIT_SKILL_MAX_LINES} 行）、${kitScripts.length} 个脚本（<= 800 行）自包含，与 .agents/skills/ 字节级一致`)
 }
@@ -568,7 +652,12 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
 }
 
 export async function runSuiteChecks(ctx) {
-  checkScripts(ctx)
+  const allMjs = [
+    ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
+    ...ctx.walk(join(ctx.ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
+  ]
+  const syntaxErrors = await batchSyntaxCheck([...new Set(allMjs)])
+  checkScripts(ctx, syntaxErrors)
   checkArchBoundaries(ctx)
   checkDevProfileParity(ctx)
   checkOrphanScripts(ctx)
@@ -579,6 +668,6 @@ export async function runSuiteChecks(ctx) {
   checkTemplates(ctx)
   checkPlatformLock(ctx)
   checkStructureRules(ctx)
-  checkKitSuite(ctx)
+  checkKitSuite(ctx, syntaxErrors)
   checkHygiene(ctx)
 }

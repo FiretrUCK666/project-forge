@@ -1,9 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { spawnSync } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, loadPreflight,
+  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitSync, loadPreflight,
   readDirRefs, rmTree, runAbs, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -57,8 +56,8 @@ cases.push(['没有远端时角色是 local-only（按纯本地工作区处置�
 
 cases.push(['有远端、无提交历史且没声明源仓库时角色是 undetermined', async () => {
   const dir = tmpProject({ 'README.md': '# a\n' })
-  spawnSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/x/y.git'], { cwd: dir, stdio: 'ignore' })
+  gitSync(dir, ['init', '-q'])
+  gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/x/y.git'])
   try {
     const f = await survey(dir)
     if (f.git.role !== 'undetermined') return `role=${f.git.role}`
@@ -70,8 +69,7 @@ cases.push(['origin 与声明源仓库不一致时是 contributor-fork', async (
   const dir = tmpProject({
     'package.json': '{"name":"a","version":"1.0.0","repository":"https://github.com/upstream/real"}',
   })
-  gitInit(dir)
-  spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/fork.git'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { origin: 'https://github.com/me/fork.git' })
   try {
     const f = await survey(dir)
     if (f.git.role !== 'contributor-fork') return `role=${f.git.role}`
@@ -154,8 +152,7 @@ cases.push(['没有 CI 时提示的 flag 键必须是 no-ci（文案漂移回归
 
 cases.push(['有远端但缺 PR 模板时提示的键是 no-collab-templates（文案漂移回归）', async () => {
   const dir = tmpProject({ 'README.md': '# a\n\n说明足够长以通过长度检查，内容真实。\n' })
-  gitInit(dir)
-  spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/x/y.git'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { origin: 'https://github.com/x/y.git' })
   try {
     const r = await runNode('review.mjs', [dir, '--json'])
     const data = JSON.parse(r.stdout)
@@ -457,13 +454,13 @@ cases.push(['插件项目打了带 v 的标签判 [缺]，裸版本号放行', a
   const good = tmpProject(files)
   try {
     gitInit(bad)
-    spawnSync('git', ['tag', 'v1.0.0'], { cwd: bad, stdio: 'ignore' })
+    gitSync(bad, ['tag', 'v1.0.0'])
     const rb = JSON.parse((await runNode('review.mjs', [bad, '--json'])).stdout)
     const hit = rb.results.find((x) => x.id === 'release.observed-v-tag')
     if (!hit || hit.level !== 'missing') return `带 v 的标签被判成 ${hit && hit.level}`
 
     gitInit(good)
-    spawnSync('git', ['tag', '1.0.0'], { cwd: good, stdio: 'ignore' })
+    gitSync(good, ['tag', '1.0.0'])
     const rg = JSON.parse((await runNode('review.mjs', [good, '--json'])).stdout)
     const falsePositive = rg.results.find((x) => x.id === 'release.observed-v-tag')
     if (falsePositive) return `裸版本号被误报成 ${falsePositive.level}`
@@ -674,6 +671,80 @@ cases.push(['默认分支名换个环境算出来不一样，不算漂移；真�
     writeFileSync(join(dir, 'AGENTS.md'), drifted)
     const driftCheck = await runNode('compose-agents.mjs', [dir, '--check'])
     if (driftCheck.status === 0) return '真漂移被掩码掩盖了'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['exec.mjs / git.mjs / template.mjs：Windows .cmd 解析、4KB 探测与深层 node_modules 跳过、单遍嵌套模板', async () => {
+  const { execSafe, buildNonInteractiveEnv, COMMON_SKIP_DIRS, gitLsFilesTextAndCode } = await import('../../kit/skills/lib/git.mjs')
+  const { evaluateConditions, TemplateError } = await import('../lib/template.mjs')
+
+  if (typeof buildNonInteractiveEnv !== 'function' || !(COMMON_SKIP_DIRS instanceof Set) || !COMMON_SKIP_DIRS.has('.turbo')) {
+    return 'git.mjs 必须保留导出 buildNonInteractiveEnv 与扩展版 COMMON_SKIP_DIRS'
+  }
+
+  // 1. template.mjs 单遍嵌套条件求值与异常配对（正反双向）
+  const tpl = [
+    'top',
+    '<!-- project-forge: if is-full -->',
+    'full-only',
+    '<!-- project-forge: if has-remote -->',
+    'full+remote',
+    '<!-- project-forge: endif -->',
+    '<!-- project-forge: endif -->',
+    '```md',
+    '<!-- project-forge: if never -->',
+    'kept-inside-fence',
+    '<!-- project-forge: endif -->',
+    '```',
+  ].join('\n')
+  const renderedFull = evaluateConditions(tpl, { 'is-full': true, 'has-remote': false })
+  if (!renderedFull.includes('full-only') || renderedFull.includes('full+remote') || !renderedFull.includes('<!-- project-forge: if never -->')) {
+    return `嵌套条件求值异常：\n${renderedFull}`
+  }
+  const renderedLight = evaluateConditions(tpl, { 'is-full': false, 'has-remote': true })
+  if (renderedLight.includes('full-only') || renderedLight.includes('full+remote')) {
+    return `外层为假时内层未一并移除：\n${renderedLight}`
+  }
+  let badUnclosed = false
+  try { evaluateConditions('<!-- project-forge: if is-full -->\nx', { 'is-full': true }) } catch (e) { badUnclosed = e instanceof TemplateError }
+  if (!badUnclosed) return '未闭合 if 未抛出 TemplateError'
+
+  // 2. gitLsFilesTextAndCode 4KB NUL 探测、packages/*/node_modules 跳过与 --focus ./src
+  const dir = tmpProject({
+    'src/app.mjs': 'export const app = 1\n',
+    'src/deep/.gitkeep': '',
+    'packages/web/node_modules/pkg/index.js': 'export const dep = 1\n',
+    'other/sub.py': 'print(1)\n',
+  })
+  const binBuf = Buffer.alloc(16 * 1024, 65)
+  binBuf[128] = 0
+  writeFileSync(join(dir, 'src/asset.bin'), binBuf)
+  gitInit(dir)
+
+  try {
+    const all = await gitLsFilesTextAndCode(dir, { isGit: true })
+    if (all.files.some((f) => f.rel.includes('node_modules'))) {
+      return `gitLsFilesTextAndCode 未过滤深层 node_modules：${JSON.stringify(all.files.map((f) => f.rel))}`
+    }
+    const assetRec = all.files.find((f) => f.rel === 'src/asset.bin')
+    if (!assetRec || !assetRec.isBinary) return `4KB NUL 探测未标二进制：${JSON.stringify(assetRec)}`
+
+    const focused = await gitLsFilesTextAndCode(dir, { isGit: true, focus: './src' })
+    const rels = focused.files.map((f) => f.rel)
+    if (!rels.includes('src/app.mjs') || rels.includes('other/sub.py')) {
+      return `--focus ./src 归一化失败：${JSON.stringify(rels)}`
+    }
+
+    // 3. Windows .cmd 批处理安全执行（含空格参数与退出码）
+    if (process.platform === 'win32') {
+      const cmdPath = join(dir, 'tool-shim.cmd')
+      writeFileSync(cmdPath, '@echo off\r\necho ARG1=%~1\r\necho ARG2=%~2\r\n')
+      const cmdRes = await execSafe(cmdPath, ['alpha', 'hello world'], { cwd: dir })
+      if (!cmdRes.ok || !cmdRes.stdout.includes('ARG1=alpha') || !cmdRes.stdout.includes('ARG2=hello world')) {
+        return `Windows .cmd shim 执行失败：${JSON.stringify(cmdRes)}`
+      }
+    }
     return true
   } finally { rmTree(dir) }
 }])

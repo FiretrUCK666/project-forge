@@ -4,247 +4,30 @@
  * 全程禁交互，零第三方依赖，且令牌仅通过 `TOKEN_VAULT`（WeakMap）保存在内存中。
  */
 
-import { spawn } from 'node:child_process'
 import { unlinkSync, writeFileSync } from 'node:fs'
-import https from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { githubRepoPath } from '../text.mjs'
+import { buildNonInteractiveEnv } from '../../../kit/skills/lib/exec.mjs'
+import {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  TOKEN_VAULT,
+  buildOneClickPrUrl,
+  defaultCommandRunner as defaultRunCommand,
+  defaultHttpsRequest,
+  detectRemoteProtocol,
+  normalizeGitHubRepo,
+} from '../../../kit/skills/lib/platform-probe.mjs'
 
-export const DEFAULT_PROBE_TIMEOUT_MS = 5000
-
-/** 内存令牌保险箱：按探测结果对象弱引用保存令牌，严禁序列化或暴露到返回值。 */
-export const TOKEN_VAULT = new WeakMap()
-
-/** 构造禁止一切交互提示的子进程环境变量（防止 macOS 钥匙串 / GUI 弹窗卡死）。 */
-export function buildNonInteractiveEnv(baseEnv = process.env) {
-  return {
-    ...baseEnv,
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: 'echo',
-    SSH_ASKPASS: '',
-    SSH_ASKPASS_REQUIRE: 'never',
-    GCM_INTERACTIVE: 'never',
-    GH_PROMPT_DISABLED: '1',
-  }
-}
-
-/**
- * 归一 GitHub 仓库标识为 `owner/name`；同时兼容完整 URL、SSH 别名（via `sshHostMap`）与裸 `owner/name`。
- * 认不出返回 `undefined`。
- */
-export function normalizeGitHubRepo(value, sshHostMap) {
-  if (typeof value !== 'string') return undefined
-  const s = value.trim()
-  if (!s) return undefined
-  const fromUrl = githubRepoPath(s, sshHostMap)
-  if (fromUrl) return fromUrl
-  const bare = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(s)
-  if (bare && bare[1] !== '.' && bare[1] !== '..') {
-    return `${bare[1]}/${bare[2]}`
-  }
-  return undefined
-}
-
-/**
- * 识别单个 Git 远端地址使用的传输协议。
- * @returns {'ssh' | 'https' | 'unknown'}
- */
-export function detectRemoteProtocol(url) {
-  if (typeof url !== 'string' || !url.trim()) return 'unknown'
-  const s = url.trim()
-  if (/^https?:\/\//i.test(s)) return 'https'
-  if (/^(?:ssh:\/\/|git@)/i.test(s)) return 'ssh'
-  if (/^[^/:@\s]+@[^:\s]+:.+/.test(s)) return 'ssh'
-  return 'unknown'
-}
-
-/**
- * 生成 1-click GitHub Pull Request 创建链接（half-duplex 降级输出）。
- */
-export function buildOneClickPrUrl({
-  targetRepo,
-  baseBranch = 'main',
-  headOwner,
-  headBranch,
-} = {}) {
-  const repo = normalizeGitHubRepo(targetRepo)
-  if (!repo) return undefined
-  const base = encodeURIComponent(baseBranch || 'main')
-  if (!headBranch || headBranch === baseBranch || headBranch === 'HEAD') {
-    return `https://github.com/${repo}/compare?expand=1`
-  }
-  const repoOwner = repo.split('/')[0]
-  const branchEnc = encodeURIComponent(headBranch)
-  const headSpec = headOwner && headOwner.toLowerCase() !== repoOwner.toLowerCase()
-    ? `${encodeURIComponent(headOwner)}:${branchEnc}`
-    : branchEnc
-  return `https://github.com/${repo}/compare/${base}...${headSpec}?expand=1`
-}
-
-function killProcessTree(child) {
-  if (!child || !child.pid) return
-  if (process.platform === 'win32') {
-    try {
-      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      })
-      killer.on('error', () => {})
-    } catch { /* ignore */ }
-    try { child.kill('SIGKILL') } catch {}
-    return
-  }
-  try {
-    process.kill(-child.pid, 'SIGKILL')
-  } catch {
-    try { child.kill('SIGKILL') } catch {}
-  }
-}
-
-export function defaultRunCommand(cmd, args, { cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, input } = {}) {
-  return new Promise((resolvePromise) => {
-    let settled = false
-    let graceTimer
-    const done = (result) => {
-      if (settled) return
-      settled = true
-      if (graceTimer) clearTimeout(graceTimer)
-      resolvePromise(result)
-    }
-
-    let child
-    try {
-      child = spawn(cmd, args, {
-        cwd: cwd || process.cwd(),
-        env: buildNonInteractiveEnv(env),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: process.platform !== 'win32',
-        windowsHide: true,
-        shell: false,
-      })
-    } catch (err) {
-      done({ code: null, stdout: '', stderr: err.message, timedOut: false, errorCode: err.code })
-      return
-    }
-
-    const outChunks = []
-    const errChunks = []
-    child.stdout?.on('data', (c) => outChunks.push(c))
-    child.stderr?.on('data', (c) => errChunks.push(c))
-    if (child.stdin) child.stdin.on('error', () => {})
-
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      killProcessTree(child)
-      graceTimer = setTimeout(() => {
-        done({
-          code: null,
-          stdout: Buffer.concat(outChunks).toString('utf8'),
-          stderr: Buffer.concat(errChunks).toString('utf8') || '命令执行超时',
-          timedOut: true,
-        })
-      }, 150)
-    }, timeoutMs)
-
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      done({
-        code: null,
-        stdout: Buffer.concat(outChunks).toString('utf8'),
-        stderr: Buffer.concat(errChunks).toString('utf8') || err.message,
-        timedOut,
-        errorCode: err.code,
-      })
-    })
-
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      done({
-        code: typeof code === 'number' ? code : null,
-        stdout: Buffer.concat(outChunks).toString('utf8'),
-        stderr: Buffer.concat(errChunks).toString('utf8'),
-        timedOut,
-      })
-    })
-
-    if (typeof input === 'string') {
-      try {
-        child.stdin.write(input)
-        child.stdin.end()
-      } catch {
-        try { child.stdin.end() } catch {}
-      }
-    } else {
-      try { child.stdin.end() } catch {}
-    }
-  })
-}
-
-export function defaultHttpsRequest({
-  method = 'GET',
-  url,
-  headers = {},
-  body,
-  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
-}) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    let settled = false
-    const parsed = new URL(url)
-    const signal = timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
-      ? AbortSignal.timeout(timeoutMs)
-      : undefined
-    const req = https.request({
-      protocol: parsed.protocol,
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: `${parsed.pathname}${parsed.search}`,
-      method,
-      ...(signal ? { signal } : {}),
-      headers: {
-        'User-Agent': 'project-forge',
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...headers,
-      },
-      timeout: timeoutMs,
-    }, (res) => {
-      const chunks = []
-      res.on('data', (d) => chunks.push(d))
-      res.on('end', () => {
-        if (settled) return
-        settled = true
-        const text = Buffer.concat(chunks).toString('utf8')
-        let data
-        try { data = text ? JSON.parse(text) : undefined } catch { data = undefined }
-        resolvePromise({
-          status: res.statusCode ?? 0,
-          headers: res.headers,
-          text,
-          data,
-        })
-      })
-    })
-
-    req.on('timeout', () => {
-      req.destroy(Object.assign(new Error('GitHub API 请求超时'), { code: 'ETIMEDOUT' }))
-    })
-    req.on('error', (err) => {
-      if (settled) return
-      settled = true
-      rejectPromise(err)
-    })
-
-    if (body !== undefined && body !== null) {
-      const payload = typeof body === 'string' ? body : JSON.stringify(body)
-      req.setHeader('Content-Type', 'application/json; charset=utf-8')
-      req.setHeader('Content-Length', Buffer.byteLength(payload, 'utf8'))
-      req.write(payload)
-    }
-    req.end()
-  })
+export {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  TOKEN_VAULT,
+  buildNonInteractiveEnv,
+  buildOneClickPrUrl,
+  defaultHttpsRequest,
+  defaultRunCommand,
+  detectRemoteProtocol,
+  normalizeGitHubRepo,
 }
 
 function makeHttpError(status, message, data) {

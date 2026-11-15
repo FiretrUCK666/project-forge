@@ -63,10 +63,10 @@ function finding(level, scope, id, title, extra = {}) {
  * 渲染失败（模板有洞、勘察出错）时返回「都空」并附一句原因：体检不该因为
  * 契约那一面算不出来就整个崩掉，那一面本来只是它的一项。
  */
-async function inspectContract(root) {
+async function inspectContract(root, facts) {
   try {
     const { contractHealth } = await import('./compose-agents.mjs')
-    return await contractHealth(root)
+    return await contractHealth(root, { facts })
   } catch (error) {
     return {
       broken: [], missing: [], drifted: [], error: error instanceof Error ? error.message : String(error),
@@ -314,7 +314,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       // 缺了本该有的节（建好远端之后没重跑生成）、内容与模板脱节（模板加了规则而
       // 这份还停在旧版）。只查 fill 那一档，这三种会一起报「已就绪」——而它是假绿。
       // 判据直接取 `compose-agents` 的，不在这里重算一遍。
-      const health = await inspectContract(root)
+      const health = await inspectContract(root, facts)
       if (health.broken.length > 0) {
         add(finding('missing', 'agents', 'agents.broken',
           `${facts.docs.agents.file} 的受管标记没成对：${health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
@@ -758,6 +758,8 @@ async function main(argv) {
     return 2
   }
 }
+
+export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code))

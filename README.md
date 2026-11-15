@@ -22,7 +22,7 @@
 
 | 能力 | 具体是什么 |
 | --- | --- |
-| **保住你手写的东西** | 已有的 `README.md`、`CONTRIBUTING.md`、架构文档、CI 工作流、自定义技能全部原样保留。写任何文件前先在仓库外面存一份 `.tar.gz` 快照 |
+| **保住你手写的东西** | 已有的 `README.md`、`CONTRIBUTING.md`、架构文档、CI 工作流、自定义技能全部原样保留。写任何文件前先在仓库外面存一份 `.zip` 快照 |
 | **文档跟着分支走** | `docs/prd/`、`docs/specs/`、`docs/todo/` 用统一的 YAML 头信息和 `YYMMDD-issue<N>-<slug>-{prd,spec,todo}.md` 命名，做完由 `flow.mjs finalize` 一起归档到 `docs/archive/` |
 | **合入前要有实测** | 静态门禁、真实命令输出、独立上下文审查记录，三样齐了才合并。Mermaid 图表宽度和文档锚点提交前自动检查 |
 | **改一侧提醒另一侧** | `AGENTS.md` 里有一张关联表，写明动源码要同步看哪些模板和文档、动文档要核对哪些源码入口 |

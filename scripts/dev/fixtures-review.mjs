@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, loadPreflight,
+  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitSync, loadPreflight,
   readDirRefs, rmTree, runAbs, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -20,8 +20,7 @@ cases.push(['导航：缺文档推 docs-set，缺远端推 remote-github，skill
     if (!nav.some((x) => x.includes('docs-set.md'))) return '缺文档却没推 docs-set.md'
     if (!nav.some((x) => x.includes('version-control.md'))) return '缺 .gitattributes / 没版本库，却没推 version-control.md'
 
-    gitInit(bare)
-    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: bare, stdio: 'ignore' })
+    gitInit(bare, { origin: 'https://github.com/acme/demo.git' })
     const g = await survey(bare)
     const nav2 = g.navigation ?? []
     if (!nav2.some((x) => x.includes('remote-github.md'))) return '没有 CI / PR 模板，却没推 remote-github.md'
@@ -114,17 +113,15 @@ cases.push(['体检拦下结构坏掉的契约', async () => {
 cases.push(['体检把系统占位署名判成缺，正常署名判成齐', async () => {
   const dir = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
   try {
-    gitInit(dir)
-    spawnSync('git', ['config', 'user.name', 'Administrator'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.email', 'admin@localhost'], { cwd: dir, stdio: 'ignore' })
+    gitInit(dir, { name: 'Administrator', email: 'admin@localhost' })
     const r = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
     const bad = r.results.find((x) => x.id === 'git.identity.placeholder')
     if (!bad) return 'Administrator / admin@localhost 被当成了合法署名'
     if (bad.level !== 'missing') return `占位署名报成了 ${bad.level}`
 
     // 反面：正常署名不许被误伤。
-    spawnSync('git', ['config', 'user.name', 'Dev Person'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['config', 'user.email', 'dev@example.com'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['config', 'user.name', 'Dev Person'])
+    gitSync(dir, ['config', 'user.email', 'dev@example.com'])
     const r2 = JSON.parse((await runNode('review.mjs', [dir, '--json'])).stdout)
     if (r2.results.some((x) => x.id === 'git.identity.placeholder')) return '正常署名被当成了占位'
     if (!r2.results.some((x) => x.id === 'git.identity.ok')) return '正常署名没有被判成齐'
@@ -136,10 +133,8 @@ cases.push(['远端不在 GitHub 上时，导航给「不适用」而不是塞�
   const elsewhere = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'index.js': 'console.log(1)\n' })
   const onGithub = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'index.js': 'console.log(1)\n' })
   try {
-    gitInit(elsewhere)
-    spawnSync('git', ['remote', 'add', 'origin', 'https://git.example.com/team/demo.git'], { cwd: elsewhere, stdio: 'ignore' })
-    gitInit(onGithub)
-    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: onGithub, stdio: 'ignore' })
+    gitInit(elsewhere, { origin: 'https://git.example.com/team/demo.git' })
+    gitInit(onGithub, { origin: 'https://github.com/acme/demo.git' })
 
     // 正面：非 GitHub 远端时，不推那份通篇 `gh` / Actions 的文档，改成一句「不适用」。
     const a = await survey(elsewhere)
@@ -173,8 +168,7 @@ cases.push(['许可证不是缺口：不可发布的项目缺许可证照样能 
     ].join('\n'),
   })
   try {
-    gitInit(dir)
-    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/privdemo.git'], { cwd: dir, stdio: 'ignore' })
+    gitInit(dir, { origin: 'https://github.com/acme/privdemo.git' })
     const f = await survey(dir)
     // 正面：私有项目不放许可证是对的，它不该被算成「该修的东西」，也不该把 maturity 拖下来。
     if (textsOf(f.projectGaps).some((g) => /LICENSE/.test(g))) return '不可发布的项目缺许可证被写成了缺口'

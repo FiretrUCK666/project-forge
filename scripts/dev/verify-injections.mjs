@@ -11,7 +11,7 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { isMainModule } from '../lib/text.mjs'
@@ -258,9 +258,9 @@ const INJECTIONS = [
   {
     id: 'I21',
     what: '拆掉 clone-readonly 防误判分支（他人公开仓退化成 maintainer）',
-    file: 'scripts/lib/platform/github.mjs',
-    from: `      return {\n        role: 'clone-readonly',\n        reason: \`origin 与 \${origin} 一致，但历史提交非本机作者且无写权限证明（按只读克隆处置）\`,\n      }`,
-    to: `      return {\n        role: 'maintainer',\n        reason: \`origin 与 \${origin} 一致\`,\n      }`,
+    file: 'kit/skills/lib/platform.mjs',
+    from: `    if (hasHistory && authors.length > 0) {\n      return {\n        role: 'clone-readonly',\n        providerId: 'github',\n        reason: \`origin 与 \${origin} 一致，但历史提交非本机作者且无写权限证明（按只读克隆处置）\`,\n      }\n    }`,
+    to: `    if (hasHistory && authors.length > 0) {\n      return {\n        role: 'maintainer',\n        providerId: 'github',\n        reason: \`origin 与 \${origin} 一致\`,\n      }\n    }`,
     expect: '他人公开仓被误判成',
   },
   {
@@ -307,8 +307,8 @@ const INJECTIONS = [
     id: 'I27',
     what: '跳过 flow.mjs merge 的 detectGateWeakening 门禁弱化阻断检查',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: '  const gateFindings = await detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch)',
-    to: '  const gateFindings = []',
+    from: '    detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch),',
+    to: '    Promise.resolve([]),',
     expect: '门禁弱化改动未被 merge 拦截',
   },
   {
@@ -385,19 +385,19 @@ const INJECTIONS = [
   },
   {
     id: 'I37',
-    what: '破坏 github.mjs 写权限协作者判为 team-collaborator 的逻辑',
-    file: 'scripts/lib/platform/github.mjs',
-    from: 'if (apiWrite) {\n    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)',
-    to: 'if (apiWrite) {\n    const isTeamCollaborator = false',
+    what: '破坏单源 platform.mjs 写权限协作者判为 team-collaborator 的逻辑',
+    file: 'kit/skills/lib/platform.mjs',
+    from: '  if (apiWrite) {\n    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)',
+    to: '  if (apiWrite) {\n    const isTeamCollaborator = false',
     expect: 'github.mjs 未将写权限团队协作者判为 team-collaborator',
   },
   {
     id: 'I38',
-    what: '移除 platform.mjs 离线同源 clone-readonly 分支的 teamProbeHint 提示',
+    what: '移除单源 platform.mjs 离线同源 clone-readonly 分支的 teamProbeHint 提示',
     file: 'kit/skills/lib/platform.mjs',
-    from: "role: 'clone-readonly',\n      providerId,\n      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,\n      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),",
-    to: "role: 'clone-readonly',\n      providerId,\n      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,\n      // disabled teamProbeHint",
-    expect: 'shared.mjs 离线同源未保留 clone-readonly + teamProbeHint',
+    from: '  if (apiProbed) return res\n  return { ...res, teamProbeHint: TEAM_PROBE_HINT }',
+    to: '  if (apiProbed) return res\n  return res',
+    expect: '未保留 clone-readonly + teamProbeHint',
   },
   {
     id: 'I39',
@@ -475,8 +475,8 @@ const INJECTIONS = [
   },
   {
     id: 'I48',
-    what: '禁用 flow-inspect.mjs claim 对已被他人认领 Issue 的互斥阻断检查',
-    file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
+    what: '禁用 flow-merge.mjs claim 对已被他人认领 Issue 的互斥阻断检查',
+    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
     from: '        if (!isTakeover) {',
     to: '        if (false && !isTakeover) {',
     expect: '他人重复 claim 未阻断',
@@ -507,6 +507,30 @@ const INJECTIONS = [
     to: "export const BOOTSTRAP_LANGS = new Set(['node', 'python', 'go', 'rust', 'java', 'docs', 'cobol'])",
     expect: '生态清单里没有对应识别项',
   },
+  {
+    id: 'I52',
+    what: '破坏 platform-probe.mjs 惰性原则（默认不联网也强行调外部探针）',
+    file: 'kit/skills/lib/platform-probe.mjs',
+    from: '  const shouldProbeExternal = offline !== true && !disableRealProbe && (probeNetwork === true || hasCustomRunner)',
+    to: '  const shouldProbeExternal = true',
+    expect: '惰性鉴权破坏：',
+  },
+  {
+    id: 'I53',
+    what: '跳过 zip.mjs readZip 的 CRC32 完整性校验',
+    file: 'scripts/zip.mjs',
+    from: '    if (actualCrc !== expectedCrc) {',
+    to: '    if (false && actualCrc !== expectedCrc) {',
+    expect: '损坏 CRC32 的 .zip 未被拦截',
+  },
+  {
+    id: 'I54',
+    what: '允许 update.mjs --check 违规写入本地节流状态',
+    file: 'scripts/update.mjs',
+    from: '    if (!checkOnly) rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)',
+    to: '    rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)',
+    expect: 'update.mjs --check 篡改了节流状态',
+  },
 ]
 
 
@@ -527,11 +551,14 @@ const INJECTIONS = [
 const SANDBOX = mkdtempSync(join(tmpdir(), 'pf-inj-'))
 const STAGING = join(SANDBOX, 'base')
 
-/** 复制时跳过的目录：`.git` 复验用不上，`node_modules` 与 `.worktrees` 是本地状态。 */
-const COPY_SKIP = /[\\/](?:\.git|node_modules|\.worktrees)(?:[\\/]|$)/
+/** 复制时跳过的相对目录：`.git` 复验用不上，`node_modules` 与 `.worktrees` 是本地状态（基于相对路径校验以兼容在 worktree 内直接运行）。 */
+const COPY_SKIP = /(?:^|[\\/])(?:\.git|node_modules|\.worktrees)(?:[\\/]|$)/
 
 function cloneTree(from, to) {
-  cpSync(from, to, { recursive: true, filter: (src) => src === from || !COPY_SKIP.test(src) })
+  cpSync(from, to, {
+    recursive: true,
+    filter: (src) => src === from || !COPY_SKIP.test(relative(from, src)),
+  })
   return to
 }
 

@@ -398,6 +398,7 @@ function report(agentsPath, info, { verbose = false } = {}) {
 let renderedCache = ''
 
 async function main(argv) {
+  renderedCache = ''
   let target = process.cwd()
   let targetSpecified = false
   let mode = 'default'
@@ -680,9 +681,9 @@ async function generate(root, agentsPath, template, { tier, manifest } = {}) {
   return 0
 }
 
-export async function contractHealth(root, { tier } = {}) {
+export async function contractHealth(root, { tier, facts: precomputedFacts } = {}) {
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
-  const facts = await factsOf(root)
+  const facts = precomputedFacts ?? await factsOf(root)
   const manifest = readManifestSafe(root)
   const rendered = renderAgentsTemplate(facts, template, root, { tier, manifest })
   const agentsPath = join(root, 'AGENTS.md')
@@ -702,7 +703,7 @@ export async function contractHealth(root, { tier } = {}) {
   }
 }
 
-export { TemplateError, refreshRegions, driftRegions, collectMissingSections, handWrittenCoverage }
+export { main as runCli, TemplateError, refreshRegions, driftRegions, collectMissingSections, handWrittenCoverage }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   Promise.resolve(main(process.argv.slice(2))).then((code) => process.exit(code))

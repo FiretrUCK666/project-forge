@@ -5,16 +5,10 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
+import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
 
-export const SKIP_DIRS = new Set([
-  '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn', 'bower_components',
-  '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
-  '.tox', '.gradle', '.cache', '.next', '.nuxt', '.svelte-kit', '.turbo',
-  'target', 'dist', 'build', 'out', 'coverage', '.idea', '.vs',
-  'DerivedData', '.build', '.swiftpm',
-  '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd',
-])
+export const SKIP_DIRS = COMMON_SKIP_DIRS
 
 export const OUTPUT_DIRS = new Set([
   'node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage',

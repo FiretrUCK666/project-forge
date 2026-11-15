@@ -35,7 +35,8 @@ import {
   detectConventions,
   detectDocs,
   detectGit,
-  walkWorkspace,
+  finalizeWalkWorkspace,
+  scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
 import {
   collectTopModuleDirs,
@@ -134,8 +135,8 @@ export function computeArtifactPlan(facts) {
 
   // 1. 写前仓外快照
   items.push(isEmpty
-    ? { id: 'pre-backup', artifact: '写前仓外 .tar.gz 快照', status: '空目录（无需快照）', action: 'skip', detail: '空白目录无现有文件，直接初始化即可' }
-    : { id: 'pre-backup', artifact: '写前仓外 .tar.gz 快照', status: '待创建', action: 'snapshot', detail: '写任何治理文件前先执行 `node scripts/backup.mjs create <目录> --label pre-forge`' })
+    ? { id: 'pre-backup', artifact: '写前仓外 .zip 快照', status: '空目录（无需快照）', action: 'skip', detail: '空白目录无现有文件，直接初始化即可' }
+    : { id: 'pre-backup', artifact: '写前仓外 .zip 快照', status: '待创建', action: 'snapshot', detail: '写任何治理文件前先执行 `node scripts/backup.mjs create <目录> --label pre-forge`' })
 
   // 2. Git 基线
   if (git.available === false) {
@@ -394,26 +395,30 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
 
-  const gitFacts = await detectGit(root, {
+  // 先派生 git 子进程，与本地磁盘扫描（文件树、生态、文档、套件）并发推进
+  const gitPromise = detectGit(root, {
     probeAuth: opts.probeAuth === true,
     verifyToken: opts.verifyToken === true,
     sshHostMap: opts.sshHostMap,
     mcpAvailable: opts.mcpAvailable,
     offline: opts.offline,
   })
+  const rawWs = scanWorkspaceRaw(root)
   const ecosystem = detectEcosystem(root)
   const taskEntryMeta = detectTaskEntriesDetailed(root)
   const taskCommands = taskEntryMeta.commands
-  const ws = await walkWorkspace(root, gitFacts)
   const docs = detectDocs(root)
-  const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
-
-  // 生态清单一个都没命中时，改读「人已经在跑的命令」：CI 的 run 块、Makefile、justfile。
-  // 一份 Haskell、OCaml、Zig 或者自研 DSL 的仓库，生态识别会返回 unknown，命令也就空了；
-  // 可它的 CI 里明明写着 `stack test`。命令一直有，只是没人去读。
+  const workspace = detectWorkspace(root)
+  const kit = detectKit(root)
+  const localSkills = detectLocalSkills(root)
+  const artifacts = detectArtifacts(root, ecosystem)
   const universal = ecosystem.kinds.length === 0
     ? detectUniversalCommands(root)
     : { commands: {}, sources: {} }
+
+  const gitFacts = await gitPromise
+  const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
+  const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
 
   const commands = { ...ecosystem.commands, ...universal.commands, ...taskCommands }
   const commandsByEcosystem = { ...ecosystem.commandsByEcosystem }
@@ -460,8 +465,6 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     delete gitFacts.auth._probeResult
   }
 
-  const workspace = detectWorkspace(root)
-  const kit = detectKit(root)
   const reentry = detectReentry(root, {
     docs,
     kit,
@@ -539,8 +542,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     commandsByEcosystem,
     conventions,
     workspace,
-    artifacts: detectArtifacts(root, ecosystem),
-    localSkills: detectLocalSkills(root),
+    artifacts,
+    localSkills,
     kit,
     docs,
     reentry,
@@ -590,7 +593,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
 
   delete gitFacts._sshHostMap
   delete gitFacts._hasGit
-  delete gitFacts._ignoreProbeOk
+  delete gitFacts._ignoredTracked
+  delete gitFacts._statusIgnored
   return facts
 }
 
@@ -616,6 +620,7 @@ export function judgeRole(gitFacts, declaredRepo, opts = {}) {
 }
 
 export {
+  main as runCli,
   computeExplorationStrategy,
   computeRecommendedTier,
   classifyHomePath,

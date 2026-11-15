@@ -1,15 +1,31 @@
 /**
- * platform.mjs —— 与主引擎对齐的平台注册契约、SSH 别名解析、多远端拓扑与五态身份判定。
+ * platform.mjs —— 平台注册契约、SSH 别名解析、多远端拓扑与双端单源五态身份判定。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），产品层注册表仅注册 GitHub 适配器，
- * 未匹配已知主机的远端退化为 `generic-git` 安全放行本地研发全流转。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），底层网络与凭据探测复用 `./platform-probe.mjs`。
+ * 产品层注册表仅注册 GitHub 适配器，未知主机优雅退化为 `generic-git` 安全放行本地研发流。
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
-import { execSafe, readJsonSafe, readTextSafe } from './git.mjs'
+import { readJsonSafe, readTextSafe } from './git.mjs'
+import {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  TEAM_PROBE_HINT,
+  buildOneClickPrUrl,
+  detectRemoteProtocol,
+  extractHostAndPath,
+  githubRepoFull,
+  githubRepoPath,
+  lookupSshHost,
+  normalizeGitHubRepo,
+  parseRemoteUrlHost,
+  parseSshConfigDetails,
+  parseSshConfigHostMap,
+  probeGitHubEnvCore,
+  probeSshKeyReadiness,
+  probeSshTransport,
+} from './platform-probe.mjs'
 import {
   createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
   listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
@@ -18,13 +34,24 @@ import {
 } from './github-client.mjs'
 
 export {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  TEAM_PROBE_HINT,
+  buildOneClickPrUrl,
   createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  detectRemoteProtocol,
+  githubRepoFull,
+  githubRepoPath,
   listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
+  lookupSshHost,
+  normalizeGitHubRepo,
+  parseRemoteUrlHost,
+  parseSshConfigDetails,
+  parseSshConfigHostMap,
+  probeSshKeyReadiness,
+  probeSshTransport,
   summarizeCommitChecks,
 }
-
-export const DEFAULT_PROBE_TIMEOUT_MS = 5000
 
 export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
@@ -34,75 +61,11 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
 
 const PROVIDER_REGISTRY = new Map()
 
-function stripProtocolAndAuth(rawUrl) {
-  let s = String(rawUrl ?? '').trim()
-  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
-  s = s.replace(/^[^@/]*@/, '')
-  return s
-}
-
-function extractHostAndPath(rawUrl) {
-  const s = String(rawUrl ?? '').trim()
-  if (!s) return null
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
-    try {
-      const u = new URL(s)
-      return { host: u.hostname.toLowerCase(), port: u.port || undefined, path: u.pathname.replace(/^\/+/, '') }
-    } catch { /* fall through */ }
-  }
-  const scp = /^(?:[^@\s]+@)?([^:/\s]+):(.+)$/.exec(s)
-  if (scp && !/^[A-Za-z]:\\/.test(s)) {
-    return { host: scp[1].toLowerCase(), path: scp[2].replace(/^\/+/, '') }
-  }
-  return null
-}
-
-/** 只读解析 `~/.ssh/config` 中的 `Host -> HostName` 映射，识别 SSH 多账号别名。 */
-export function parseSshConfigHostMap(sshConfigPath = join(homedir(), '.ssh', 'config')) {
-  const map = new Map()
-  const text = readTextSafe(sshConfigPath)
-  if (!text) return map
-  let currentHosts = []
-  for (const rawLine of text.split('\n')) {
-    const clean = rawLine.replace(/#.*$/, '').trim()
-    if (!clean) continue
-    const hm = /^Host\s+(.+)$/i.exec(clean)
-    if (hm) {
-      currentHosts = hm[1].trim().split(/\s+/).filter((h) => h && !/[*?]/.test(h)).map((h) => h.toLowerCase())
-      continue
-    }
-    const nm = /^HostName\s+(\S+)$/i.exec(clean)
-    if (nm && currentHosts.length > 0) {
-      const target = nm[1].trim().toLowerCase()
-      for (const alias of currentHosts) map.set(alias, target)
-    }
-  }
-  return map
-}
-
 function resolveEffectiveHost(host, sshHostMap) {
   const h = String(host ?? '').toLowerCase()
   if (!h) return ''
-  if (sshHostMap instanceof Map && sshHostMap.has(h)) return sshHostMap.get(h)
-  if (sshHostMap && typeof sshHostMap === 'object' && sshHostMap[h]) return String(sshHostMap[h]).toLowerCase()
-  return h
-}
-
-function normalizeGitHubRepoWithMap(value, sshHostMap) {
-  const s = String(value ?? '').trim()
-  if (!s) return undefined
-  const extracted = extractHostAndPath(s)
-  if (extracted) {
-    const effective = resolveEffectiveHost(extracted.host, sshHostMap)
-    if (effective !== 'github.com' && effective !== 'www.github.com' && effective !== 'ssh.github.com') {
-      return undefined
-    }
-    const repoPart = extracted.path.replace(/\.git$/i, '').replace(/\/+$/, '')
-    return /^[^/\s]+\/[^/\s]+$/.test(repoPart) ? repoPart : undefined
-  }
-  const bare = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(s)
-  if (bare && bare[1] !== '.' && bare[1] !== '..') return `${bare[1]}/${bare[2]}`
-  return undefined
+  const mapped = lookupSshHost(sshHostMap, h)
+  return mapped ? String(mapped).toLowerCase() : h
 }
 
 const GITHUB_PROVIDER = Object.freeze({
@@ -116,7 +79,7 @@ const GITHUB_PROVIDER = Object.freeze({
     return effective === 'github.com' || effective === 'www.github.com' || effective === 'ssh.github.com'
   },
   normalizeRepo(remoteUrl, sshHostMap) {
-    return normalizeGitHubRepoWithMap(remoteUrl, sshHostMap)
+    return normalizeGitHubRepo(remoteUrl, sshHostMap)
   },
 })
 
@@ -211,29 +174,6 @@ export function parseRemotesTopology(remoteOutput, sshHostMap = parseSshConfigHo
   }
 }
 
-/** 将 GitHub 地址归一为保留原始大小写的 owner/name（支持 SSH Host 别名）。 */
-export function githubRepoFull(value, sshHostMap = parseSshConfigHostMap()) {
-  const s = String(value ?? '').trim()
-  if (!s) return undefined
-  const ext = extractHostAndPath(s)
-  if (ext) {
-    const effective = resolveEffectiveHost(ext.host, sshHostMap)
-    if (effective !== 'github.com' && effective !== 'www.github.com' && effective !== 'ssh.github.com') {
-      return undefined
-    }
-    const clean = ext.path.replace(/\.git$/i, '').replace(/\/+$/, '')
-    return /^[^/\s]+\/[^/\s]+$/.test(clean) ? clean : undefined
-  }
-  const norm = stripProtocolAndAuth(s).replace(/^[^/:]+:/, '').replace(/^[^/]*\.[^/]*\//, '').replace(/\.git$/i, '').replace(/\/+$/, '')
-  return /github\.com[:/]/i.test(s) && /^[^/\s]+\/[^/\s]+$/.test(norm) ? norm : undefined
-}
-
-/** 将 GitHub 地址归一为小写 owner/name。 */
-export function githubRepoPath(value, sshHostMap = parseSshConfigHostMap()) {
-  const full = githubRepoFull(value, sshHostMap)
-  return full ? full.toLowerCase() : undefined
-}
-
 /** 从项目清单提取声明的源仓库（owner/name）。 */
 export function detectDeclaredRepo(repoRoot, sshHostMap = parseSshConfigHostMap()) {
   const pkg = readJsonSafe(join(repoRoot, 'package.json'))
@@ -272,38 +212,329 @@ export function detectDeclaredRepo(repoRoot, sshHostMap = parseSshConfigHostMap(
   return undefined
 }
 
-function resolveGitMarkerExists(cwdOrGitDir, markerName) {
-  if (!cwdOrGitDir) return false
-  if (existsSync(join(cwdOrGitDir, markerName))) return true
+function resolveGitDirs(cwdOrGitDir) {
+  if (!cwdOrGitDir) return []
   const dotGit = join(cwdOrGitDir, '.git')
-  if (!existsSync(dotGit)) return false
+  if (!existsSync(dotGit)) return [cwdOrGitDir]
   try {
     const st = statSync(dotGit)
-    if (st.isDirectory()) return existsSync(join(dotGit, markerName))
+    if (st.isDirectory()) return [dotGit]
     if (st.isFile()) {
       const content = readFileSync(dotGit, 'utf8')
       const m = /^gitdir:\s*(.+)$/im.exec(content)
-      if (!m) return false
-      const gitDir = isAbsolute(m[1].trim()) ? m[1].trim() : resolve(cwdOrGitDir, m[1].trim())
-      if (existsSync(join(gitDir, markerName))) return true
+      if (!m) return [cwdOrGitDir]
+      const rawDir = m[1].trim()
+      const gitDir = isAbsolute(rawDir) ? rawDir : resolve(cwdOrGitDir, rawDir)
+      const dirs = [gitDir]
       const commondirFile = join(gitDir, 'commondir')
       if (existsSync(commondirFile)) {
         const relCommon = readFileSync(commondirFile, 'utf8').trim()
         const commonDir = isAbsolute(relCommon) ? relCommon : resolve(gitDir, relCommon)
-        if (existsSync(join(commonDir, markerName))) return true
+        if (commonDir !== gitDir) dirs.push(commonDir)
       }
+      return dirs
     }
-  } catch { return false }
-  return false
+  } catch { /* ignore */ }
+  return [cwdOrGitDir]
+}
+
+function resolveGitMarkerExists(cwdOrGitDir, markerName) {
+  if (!cwdOrGitDir) return false
+  if (existsSync(join(cwdOrGitDir, markerName))) return true
+  return resolveGitDirs(cwdOrGitDir).some((dir) => existsSync(join(dir, markerName)))
+}
+
+export function detectGitModeMarkers(cwdOrGitDir) {
+  return {
+    localMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-local-mode'),
+    forkMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-fork-mode'),
+    standaloneMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-standalone-mode'),
+  }
 }
 
 export function hasLocalOnlyMarker(cwdOrGitDir) {
   return resolveGitMarkerExists(cwdOrGitDir, 'pf-local-mode')
 }
 
+export function hasForkModeMarker(cwdOrGitDir) {
+  return resolveGitMarkerExists(cwdOrGitDir, 'pf-fork-mode')
+}
+
+export function hasStandaloneModeMarker(cwdOrGitDir) {
+  return resolveGitMarkerExists(cwdOrGitDir, 'pf-standalone-mode')
+}
+
+function hasWritePerm(probeApi) {
+  if (!probeApi || typeof probeApi !== 'object') return false
+  if (probeApi.canPush === true || probeApi.pushable === true) return true
+  const perm = String(probeApi.viewerPermission ?? '').toUpperCase()
+  return perm === 'ADMIN' || perm === 'MAINTAIN' || perm === 'WRITE'
+}
+
+function hasReadOnlyPerm(probeApi) {
+  if (!probeApi || typeof probeApi !== 'object') return false
+  if (probeApi.canPush === false || probeApi.pushable === false) return true
+  const perm = String(probeApi.viewerPermission ?? '').toUpperCase()
+  return perm === 'READ' || perm === 'TRIAGE' || perm === 'NONE'
+}
+
+function extractNoreplyLogin(email) {
+  if (typeof email !== 'string') return undefined
+  const m = /^(?:\d+\+)?([^@\s]+)@users\.noreply\.github\.com$/i.exec(email.trim())
+  return m ? m[1] : undefined
+}
+
+function parseAuthorEntry(entry) {
+  if (!entry) return { name: '', email: '' }
+  if (typeof entry === 'string') {
+    const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(entry)
+    if (m) return { name: m[1].trim(), email: m[2].trim() }
+    const s = entry.trim()
+    return s.includes('@') ? { name: '', email: s } : { name: s, email: '' }
+  }
+  if (typeof entry === 'object') {
+    return {
+      name: typeof entry.name === 'string' ? entry.name.trim() : '',
+      email: typeof entry.email === 'string' ? entry.email.trim() : '',
+    }
+  }
+  return { name: '', email: '' }
+}
+
+function matchAuthorsHistory(authors, { userName, userEmail }) {
+  const emailLow = typeof userEmail === 'string' ? userEmail.trim().toLowerCase() : ''
+  const nameLow = typeof userName === 'string' ? userName.trim().toLowerCase() : ''
+  if (!Array.isArray(authors) || authors.length === 0) {
+    return { hasHistory: false, anyMatch: false, allMatch: false, matchedCount: 0 }
+  }
+  let matchedCount = 0
+  for (const a of authors) {
+    const parsed = parseAuthorEntry(a)
+    const ae = parsed.email.toLowerCase()
+    const an = parsed.name.toLowerCase()
+    if ((emailLow && ae && ae === emailLow) || (nameLow && an && an === nameLow)) matchedCount += 1
+  }
+  return {
+    hasHistory: true,
+    anyMatch: matchedCount > 0,
+    allMatch: matchedCount === authors.length,
+    matchedCount,
+  }
+}
+
+function classifyGitHubIdentityCore({
+  gitFacts = {},
+  declaredRepo,
+  probeApi,
+  localIdentity = {},
+  localMode = false,
+  forkMode = false,
+  standaloneMode = false,
+  sshHostMap,
+} = {}) {
+  if (localMode === true) {
+    return { role: 'local-only', providerId: 'none', reason: '存在 .git/pf-local-mode 标记：按纯本地项目处置' }
+  }
+  const primaryRemoteUrl = gitFacts.remoteUrls?.origin
+    ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
+    ?? gitFacts.remote
+  if (gitFacts.present === false || !primaryRemoteUrl) {
+    return { role: 'local-only', providerId: 'none', reason: '还没有配置远端仓库：按纯本地工作区处置' }
+  }
+  if (forkMode === true) {
+    return { role: 'contributor-fork', providerId: 'github', reason: '存在 .git/pf-fork-mode 标记：按贡献者 Fork 协作处置' }
+  }
+  if (standaloneMode === true) {
+    return {
+      role: 'maintainer',
+      providerId: 'github',
+      collaborationScope: 'owner',
+      reason: '存在 .git/pf-standalone-mode 标记：按独立个人项目维护者处置',
+    }
+  }
+
+  const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const origin = normalizeGitHubRepo(primaryRemoteUrl, effectiveHostMap)
+  const upstream = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream, effectiveHostMap)
+  const declared = normalizeGitHubRepo(declaredRepo, effectiveHostMap)
+
+  if (!origin) {
+    return { role: 'undetermined', reason: '远端不是可识别的 GitHub 地址，无法核对归属' }
+  }
+
+  const originLow = origin.toLowerCase()
+  const originOwnerLow = originLow.split('/')[0]
+  const declaredLow = declared?.toLowerCase()
+  const upstreamLow = upstream?.toLowerCase()
+
+  const apiWrite = hasWritePerm(probeApi)
+  const apiReadOnly = hasReadOnlyPerm(probeApi)
+  const apiIsFork = probeApi?.isFork === true
+  const apiParent = normalizeGitHubRepo(probeApi?.parent ?? probeApi?.parentRepo, effectiveHostMap)
+
+  const userName = localIdentity.userName ?? gitFacts.userName ?? gitFacts.identity?.name
+  const userEmail = localIdentity.userEmail ?? gitFacts.userEmail ?? gitFacts.identity?.email
+  const credLogin = probeApi?.login
+    || probeApi?.viewerLogin
+    || localIdentity.githubLogin
+    || gitFacts.auth?.apiChannel?.login
+    || gitFacts.auth?.ssh?.login
+    || gitFacts.auth?.https?.username
+    || extractNoreplyLogin(userEmail)
+  const isOwnerByCred = Boolean(credLogin && credLogin.toLowerCase() === originOwnerLow)
+  const gitUserMatchesOwner = Boolean(
+    typeof userName === 'string'
+    && userName.trim()
+    && !/\s/.test(userName.trim())
+    && userName.trim().toLowerCase() === originOwnerLow,
+  )
+
+  const authors = localIdentity.historyAuthors ?? gitFacts.historyAuthors ?? []
+  const hist = matchAuthorsHistory(authors, { userName, userEmail })
+  const rawCommitCount = gitFacts.commitCount ?? gitFacts.commits
+  const hasHistory = (typeof rawCommitCount === 'number' && rawCommitCount > 0) || hist.hasHistory
+
+  if (upstreamLow && upstreamLow !== originLow) {
+    if (apiReadOnly) {
+      return { role: 'clone-readonly', providerId: 'github', reason: `upstream 指向 ${upstream}，但对 origin（${origin}）只有只读权限` }
+    }
+    return { role: 'contributor-fork', providerId: 'github', reason: `origin 指向 ${origin}，upstream 指向 ${upstream}` }
+  }
+
+  if (apiIsFork) {
+    if (apiReadOnly && !isOwnerByCred) {
+      return { role: 'clone-readonly', providerId: 'github', reason: `origin（${origin}）是他人 fork 且当前账号没有写入权限` }
+    }
+    if (!declaredLow || !apiParent || apiParent.toLowerCase() === declaredLow || declaredLow !== originLow) {
+      return {
+        role: 'contributor-fork',
+        providerId: 'github',
+        reason: apiParent ? `API 判定 ${origin} 是 ${apiParent} 的 fork` : `API 判定 ${origin} 是派生 fork`,
+      }
+    }
+  }
+
+  if (declaredLow && declaredLow !== originLow) {
+    if (apiReadOnly && !isOwnerByCred) {
+      return { role: 'clone-readonly', providerId: 'github', reason: `源仓库为 ${declared}，且对 origin（${origin}）没有写入权限` }
+    }
+    return { role: 'contributor-fork', providerId: 'github', reason: `项目声明的源仓库是 ${declared}，而 origin 是 ${origin}` }
+  }
+
+  if (apiReadOnly) {
+    return { role: 'clone-readonly', providerId: 'github', reason: `探测到对仓库 ${origin} 仅具备只读权限或不可推送` }
+  }
+
+  if (apiWrite) {
+    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
+    const collaborationScope = isTeamCollaborator ? 'team-collaborator' : 'owner'
+    return {
+      role: 'maintainer',
+      providerId: 'github',
+      collaborationScope,
+      reason: isTeamCollaborator
+        ? (declared
+            ? `origin 与声明源仓库 ${origin} 一致，且当前账号 ${credLogin} 为同源组织/团队写入协作者`
+            : `当前账号 ${credLogin} 对同源仓库 ${origin} 具备组织/团队协作者写入权限`)
+        : (declared
+            ? `origin 与声明源仓库 ${origin} 一致且具备写入权限`
+            : `探测到对仓库 ${origin} 具备写入权限`),
+    }
+  }
+
+  if (isOwnerByCred) {
+    return {
+      role: 'maintainer',
+      providerId: 'github',
+      collaborationScope: 'owner',
+      reason: `本机认证账号 ${credLogin} 与仓库所属者 ${origin.split('/')[0]} 一致`,
+    }
+  }
+
+  if (!declaredLow && gitUserMatchesOwner && (!hasHistory || hist.anyMatch)) {
+    return {
+      role: 'maintainer',
+      providerId: 'github',
+      collaborationScope: 'owner',
+      reason: `未声明源仓库，但本机 git user（${userName}）指向自有仓库 ${origin}`,
+    }
+  }
+
+  if (declaredLow && declaredLow === originLow) {
+    if (hist.anyMatch) {
+      const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
+      return {
+        role: 'maintainer',
+        providerId: 'github',
+        collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+        reason: isTeamCollaborator
+          ? `origin 与声明源仓库 ${origin} 一致，且提交历史作者与团队协作者（${credLogin}）匹配`
+          : `origin 与声明源仓库 ${origin} 一致，且提交历史作者与当前 Git 身份匹配`,
+      }
+    }
+    if (hasHistory && authors.length > 0) {
+      return {
+        role: 'clone-readonly',
+        providerId: 'github',
+        reason: `origin 与 ${origin} 一致，但历史提交非本机作者且无写权限证明（按只读克隆处置）`,
+      }
+    }
+    return {
+      role: 'undetermined',
+      providerId: 'github',
+      reason: `origin 与 ${origin} 一致，但缺少写入权限与提交作者证据，保守按贡献者处置`,
+    }
+  }
+
+  if (hasHistory && authors.length > 0 && !hist.anyMatch) {
+    return {
+      role: 'clone-readonly',
+      providerId: 'github',
+      reason: `未声明源仓库，历史提交非本机作者且无写权限，按只读克隆 ${origin} 处置`,
+    }
+  }
+
+  if (hist.hasHistory && hist.allMatch) {
+    const isTeamCollaborator = Boolean(credLogin && credLogin.toLowerCase() !== originOwnerLow)
+    return {
+      role: 'maintainer',
+      providerId: 'github',
+      collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
+      reason: '未声明源仓库，但全部采样提交均由本机 Git 身份完成',
+    }
+  }
+
+  return {
+    role: 'undetermined',
+    providerId: 'github',
+    reason: '缺少源仓库声明或仓库写权限证据，无法确认是否为维护者',
+  }
+}
+
+/** 双端单源 GitHub 五态分类纯函数（附加未探活 teamProbeHint 提示）。 */
+export function classifyWorkspaceIdentity(opts = {}) {
+  const res = classifyGitHubIdentityCore(opts)
+  if (res.role !== 'clone-readonly' && res.role !== 'undetermined') return res
+  const { gitFacts = {}, declaredRepo, probeApi, localMode = false, forkMode = false, standaloneMode = false, sshHostMap } = opts
+  const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
+  const primaryRemoteUrl = gitFacts.remoteUrls?.origin
+    ?? (gitFacts.remoteUrls && typeof gitFacts.remoteUrls === 'object' ? Object.values(gitFacts.remoteUrls).find(Boolean) : undefined)
+    ?? gitFacts.remote
+  if (localMode === true || forkMode === true || standaloneMode === true || gitFacts.present === false || !primaryRemoteUrl) return res
+  const originLow = normalizeGitHubRepo(primaryRemoteUrl, effectiveHostMap)?.toLowerCase()
+  if (!originLow) return res
+  const upstreamLow = normalizeGitHubRepo(gitFacts.remoteUrls?.upstream, effectiveHostMap)?.toLowerCase()
+  if (upstreamLow && upstreamLow !== originLow) return res
+  if (probeApi?.isFork === true) return res
+  const declaredLow = normalizeGitHubRepo(declaredRepo, effectiveHostMap)?.toLowerCase()
+  if (declaredLow && declaredLow !== originLow) return res
+  const apiProbed = Boolean(probeApi && (hasWritePerm(probeApi) || hasReadOnlyPerm(probeApi) || probeApi.viewerPermission))
+  if (apiProbed) return res
+  return { ...res, teamProbeHint: TEAM_PROBE_HINT }
+}
+
 /**
- * 双轴五态工作区身份判定：
- * local-only | maintainer | contributor-fork | clone-readonly | inbound-external-pr | generic-git | undetermined
+ * 统一五态工作区身份判定（同时兼容套件侧参数与通用 git / 本地测试远端退化）。
  */
 export function resolveWorkspaceIdentity({
   gitDir,
@@ -316,12 +547,11 @@ export function resolveWorkspaceIdentity({
   apiProbe,
   sshHostMap = parseSshConfigHostMap(),
 } = {}) {
-  const TEAM_PROBE_HINT = '如你是仓库团队或组织协作者且尚未提交过代码，可追加 --probe-auth（或运行 flow.mjs inspect --probe-auth）探测 GitHub 写权限以确认 maintainer'
-
   if (externalPr) {
     return { role: 'inbound-external-pr', providerId: 'github', reason: `审阅外部传入 PR #${externalPr}` }
   }
-  if (resolveGitMarkerExists(gitDir, 'pf-local-mode')) {
+  const markers = resolveGitModeMarkersCompat(gitDir)
+  if (markers.localMode) {
     return { role: 'local-only', providerId: 'none', reason: '已显式启用本地模式（.git/pf-local-mode）' }
   }
 
@@ -332,33 +562,21 @@ export function resolveWorkspaceIdentity({
 
   const descriptor = resolveRemoteDescriptor(originRaw, sshHostMap)
   const providerId = descriptor.providerId
-
-  if (resolveGitMarkerExists(gitDir, 'pf-fork-mode')) {
+  if (markers.forkMode) {
     return { role: 'contributor-fork', providerId, reason: '已选择 Fork 协作模式（.git/pf-fork-mode）' }
   }
-  if (resolveGitMarkerExists(gitDir, 'pf-standalone-mode')) {
+  if (markers.standaloneMode) {
     return { role: 'maintainer', providerId, collaborationScope: 'owner', reason: '已选择独立项目模式（.git/pf-standalone-mode）' }
   }
 
   const origin = githubRepoPath(originRaw, sshHostMap)
-  const upstream = githubRepoPath(remoteUrls.upstream, sshHostMap)
-  const originLow = origin?.toLowerCase()
-  const upstreamLow = upstream?.toLowerCase()
-  const declaredLow = declaredRepo?.toLowerCase()
-
-  const localEmail = (gitIdentity.email ?? '').trim().toLowerCase()
-  const localName = (gitIdentity.name ?? '').trim().toLowerCase()
-  const authorMatched = historyAuthors.some((a) => {
-    const lower = a.toLowerCase()
-    return (localEmail && lower.includes(`<${localEmail}>`)) || (localName && lower.startsWith(`${localName} <`))
-  })
-
   if (!origin) {
     if (descriptor.isLocal) {
       if (remoteUrls.upstream && remoteUrls.upstream !== originRaw) {
         return { role: 'contributor-fork', providerId: 'generic-git', reason: '本地测试远端存在独立的 upstream 与 origin' }
       }
-      if (commits > 0 && historyAuthors.length > 0 && !authorMatched) {
+      const hist = matchAuthorsHistory(historyAuthors, { userName: gitIdentity.name, userEmail: gitIdentity.email })
+      if (commits > 0 && historyAuthors.length > 0 && !hist.anyMatch) {
         return { role: 'clone-readonly', providerId: 'generic-git', reason: '克隆仓历史作者与当前配置署名不匹配' }
       }
       return { role: 'maintainer', providerId: 'generic-git', collaborationScope: 'owner', reason: '本地测试远端且属主匹配' }
@@ -374,188 +592,45 @@ export function resolveWorkspaceIdentity({
     }
   }
 
-  const apiWrite = /^(ADMIN|MAINTAIN|WRITE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === true
-  const apiReadOnly = /^(READ|TRIAGE|NONE)$/i.test(apiProbe?.viewerPermission ?? '') || apiProbe?.canPush === false
-  const apiProbed = Boolean(apiProbe && (apiWrite || apiReadOnly || apiProbe.viewerPermission))
-  const canEmitTeamProbeHint = !apiProbed && !apiProbe?.isFork
-
-  if (upstreamLow && upstreamLow !== originLow) {
-    if (apiReadOnly) {
-      return { role: 'clone-readonly', providerId, reason: `upstream 指向 ${upstream}，但对 origin（${origin}）只有只读权限` }
-    }
-    return { role: 'contributor-fork', providerId, reason: `origin (${origin}) 与 upstream (${upstream}) 不同` }
-  }
-
-  if (apiProbe?.isFork === true && (!declaredLow || !apiProbe.parent || apiProbe.parent.toLowerCase() === declaredLow || declaredLow !== originLow)) {
-    if (apiReadOnly) {
-      return { role: 'clone-readonly', providerId, reason: `origin（${origin}）是他人 Fork 且当前账号无写入权限` }
-    }
-    return { role: 'contributor-fork', providerId, reason: `API 探测表明 ${origin} 是 Fork 仓库` }
-  }
-
-  if (declaredLow && declaredLow !== originLow) {
-    if (apiReadOnly) {
-      return { role: 'clone-readonly', providerId, reason: `对声明的远端 ${origin} 无写权限（${apiProbe.viewerPermission ?? 'READ'}）` }
-    }
-    return { role: 'contributor-fork', providerId, reason: `项目声明源仓库为 ${declaredRepo}，当前 origin 为 ${origin}` }
-  }
-
-  const originOwnerLow = origin.split('/')[0].toLowerCase()
-  const viewerLogin = apiProbe?.viewerLogin || apiProbe?.login
-  if (apiReadOnly) {
-    return { role: 'clone-readonly', providerId, reason: `对 ${origin} 仅具备只读权限（${apiProbe?.viewerPermission ?? 'READ'}）` }
-  }
-  if (apiWrite) {
-    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
-    const collaborationScope = isTeamCollaborator ? 'team-collaborator' : 'owner'
-    const permLabel = apiProbe?.viewerPermission ?? 'WRITE'
-    return {
-      role: 'maintainer',
-      providerId,
-      collaborationScope,
-      reason: isTeamCollaborator
-        ? `当前账号 ${viewerLogin} 具备同源仓库 ${origin} 的组织/团队写权限（${permLabel}，团队协作者）`
-        : `拥有 ${origin} 写权限（${permLabel}）`,
-    }
-  }
-
-  if (viewerLogin && String(viewerLogin).toLowerCase() === originOwnerLow) {
-    return { role: 'maintainer', providerId, collaborationScope: 'owner', reason: `当前登录账号 ${viewerLogin} 与仓库属主一致` }
-  }
-
-  if (commits > 0 && historyAuthors.length > 0 && !authorMatched) {
-    return {
-      role: 'clone-readonly',
-      providerId,
-      reason: `未检测到对 ${origin} 的写权限，且本机提交署名未出现在历史作者中（疑似只读克隆他人仓库）`,
-      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
-    }
-  }
-
-  if (declaredLow && declaredLow === originLow) {
-    if (authorMatched) {
-      const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
-      return {
-        role: 'maintainer',
-        providerId,
-        collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
-        reason: `origin 与项目声明源仓库 ${origin} 一致且本机提交归属吻合`,
-      }
-    }
-    return {
-      role: 'undetermined',
-      providerId,
-      reason: `origin 与项目声明源仓库 ${origin} 一致，但缺少写入权限与提交作者证据，保守按贡献者处置`,
-      ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
-    }
-  }
-
-  if (authorMatched) {
-    const isTeamCollaborator = Boolean(viewerLogin && String(viewerLogin).toLowerCase() !== originOwnerLow)
-    return {
-      role: 'maintainer',
-      providerId,
-      collaborationScope: isTeamCollaborator ? 'team-collaborator' : 'owner',
-      reason: '自有仓库且本机署名匹配历史提交作者',
-    }
-  }
-
-  return {
-    role: 'undetermined',
-    providerId,
-    reason: '缺乏源仓库声明与远端写权限证明，按保守贡献者处置',
-    ...(canEmitTeamProbeHint ? { teamProbeHint: TEAM_PROBE_HINT } : {}),
-  }
-}
-
-function parseGitHubUrlParts(remoteUrl, sshHostMap) {
-  const full = githubRepoFull(remoteUrl, sshHostMap)
-  if (!full) return null
-  const s = String(remoteUrl ?? '').trim()
-  const isSsh = /^git@|^ssh:\/\/|^[^/:@\s]+@[^:\s]+:/i.test(s)
-  const ext = extractHostAndPath(s)
-  return { full, lower: full.toLowerCase(), protocol: isSsh ? 'ssh' : 'https', rawHost: ext?.host ?? 'github.com' }
-}
-
-function hasLocalSshKeys() {
-  const sshDir = join(homedir(), '.ssh')
-  if (!existsSync(sshDir)) return false
-  try {
-    return readdirSync(sshDir).some((n) => /^id_(?:ed25519|ecdsa|rsa|dsa)(?:\.pub)?$/i.test(n))
-  } catch { return false }
-}
-
-async function probeHttpsCredential(cwd, remoteUrl, sshHostMap) {
-  const parts = parseGitHubUrlParts(remoteUrl, sshHostMap)
-  const pathPart = parts ? `${parts.full}.git` : ''
-  const lines = ['protocol=https', 'host=github.com']
-  if (pathPart) lines.push(`path=${pathPart}`)
-  const res = await execSafe('git', ['credential', 'fill'], {
-    cwd,
-    input: `${lines.join('\n')}\n\n`,
-    timeout: DEFAULT_PROBE_TIMEOUT_MS,
+  return classifyWorkspaceIdentity({
+    gitFacts: { present: true, remoteUrls, commits, historyAuthors, identity: gitIdentity },
+    declaredRepo,
+    probeApi: apiProbe,
+    localIdentity: { userName: gitIdentity.name, userEmail: gitIdentity.email, historyAuthors },
+    sshHostMap,
   })
-  if (!res.ok || res.timedOut || !res.stdout) return { available: false, token: null, username: null, timedOut: Boolean(res.timedOut) }
-  let token = null
-  let username = null
-  for (const line of res.stdout.split('\n')) {
-    const eq = line.indexOf('=')
-    if (eq <= 0) continue
-    const k = line.slice(0, eq).trim()
-    const v = line.slice(eq + 1).trim()
-    if (k === 'password' && v) token = v
-    if (k === 'username' && v && !/^(?:x-access-token|oauth2|token|git)$/i.test(v)) username = v
-  }
-  return { available: Boolean(token), token, username, timedOut: false }
 }
 
-async function probeSshAuth(cwd, host = 'github.com') {
-  const targetHost = host || 'github.com'
-  const sshAgent = await execSafe('ssh-add', ['-l'], { cwd, timeout: 2000 })
-  const agentReady = sshAgent.ok && !/no identities/i.test(sshAgent.stdout + sshAgent.stderr)
-  if (!agentReady && !hasLocalSshKeys()) {
-    return { available: false, port: null, login: null, reason: 'no-local-key' }
-  }
-
-  const r22 = await execSafe('ssh', [
-    '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=2', '-o', 'StrictHostKeyChecking=yes',
-    `git@${targetHost}`,
-  ], { cwd, timeout: 3500 })
-  const out22 = [r22.stderr, r22.stdout].filter(Boolean).join('\n')
-  const m22 = /Hi\s+([^!\s]+)!\s+You(?:'ve| have)\s+successfully\s+authenticated/i.exec(out22)
-  if (m22 || /successfully authenticated/i.test(out22)) {
-    return { available: true, port: 22, login: m22?.[1] ?? null }
-  }
-  const r443 = await execSafe('ssh', [
-    '-T', '-p', '443', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=2', '-o', 'StrictHostKeyChecking=yes',
-    'git@ssh.github.com',
-  ], { cwd, timeout: 3500 })
-  const out443 = [r443.stderr, r443.stdout].filter(Boolean).join('\n')
-  const m443 = /Hi\s+([^!\s]+)!\s+You(?:'ve| have)\s+successfully\s+authenticated/i.exec(out443)
-  if (m443 || /successfully authenticated/i.test(out443)) {
-    return { available: true, port: 443, login: m443?.[1] ?? null }
-  }
-  return { available: false, port: null, login: null }
+function resolveGitModeMarkersCompat(gitDir) {
+  return gitDir ? detectGitModeMarkers(gitDir) : { localMode: false, forkMode: false, standaloneMode: false }
 }
 
 /**
- * 并发探测双轨四级 GitHub 环境并返回自包含客户端实例；非 GitHub 远端安全退化为 generic-git。
+ * 惰性双轨平台环境探测并返回自包含客户端实例（默认 `probeNetwork = false` 不派生外网子进程）。
  */
 export async function probeGitHubEnv({
   cwd = process.cwd(),
   remoteUrls = {},
+  branch,
+  defaultBranch = 'main',
   probeNetwork = false,
   verifyToken = false,
+  mcpAvailable,
+  offline,
+  runner,
+  httpRequest,
+  env = process.env,
   sshHostMap = parseSshConfigHostMap(),
 } = {}) {
   const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
-  const parsedOrigin = originRaw ? parseGitHubUrlParts(originRaw, sshHostMap) : null
   const descriptor = originRaw ? resolveRemoteDescriptor(originRaw, sshHostMap) : { providerId: 'none' }
 
   if (!originRaw) {
     return {
       env: {
-        hasRemote: false, providerId: 'none', protocol: null,
+        hasRemote: false,
+        providerId: 'none',
+        protocol: null,
         trackA: { ssh: 'n/a', https: 'n/a', remediationCmd: null },
         trackB: { tier: 'offline', ghCli: false, hasToken: false },
       },
@@ -580,76 +655,55 @@ export async function probeGitHubEnv({
     }
   }
 
-  const envToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || null
-  const [ghStatus, credResult] = await Promise.all([
-    execSafe('gh', ['auth', 'status', '--hostname', 'github.com'], { cwd, timeout: 3000 }),
-    probeHttpsCredential(cwd, originRaw, sshHostMap),
-  ])
-  const sshResult = probeNetwork && (parsedOrigin?.protocol === 'ssh' || (!credResult.available && !envToken))
-    ? await probeSshAuth(cwd, parsedOrigin?.rawHost ?? 'github.com')
-    : { available: null, port: null, login: null }
+  const core = await probeGitHubEnvCore({
+    cwd,
+    remoteUrls,
+    branch,
+    defaultBranch,
+    probeNetwork,
+    verifyToken,
+    mcpAvailable,
+    offline,
+    runner,
+    httpRequest,
+    env,
+    sshHostMap,
+  })
 
-  const ghOk = !ghStatus.missing && ghStatus.ok
-  const ghOutText = [ghStatus.stdout ?? '', ghStatus.stderr ?? ''].join('\n')
-  const ghLoginMatch = ghOk ? /Logged in to [^\s]+ (?:account|as)\s+([^\s(]+)/i.exec(ghOutText) : null
-  const ghLogin = ghLoginMatch ? ghLoginMatch[1].trim() : null
+  const sshState = core.ssh.state === 'available' || core.ssh.state === 'port443-only'
+    ? `available:${core.ssh.port}`
+    : (core.ssh.state === 'unprobed' ? 'unprobed' : 'unavailable')
+  const httpsState = core.httpsPublic.hasToken || core.httpsPublic.state === 'available'
+    ? 'available'
+    : (core.httpsPublic.state === 'unprobed' ? 'unprobed' : 'no-credential')
 
-  let token = envToken || credResult.token || null
-  let tokenLogin = credResult.username || null
-  let tokenValid = Boolean(token)
-  if (!ghOk && token && (verifyToken || probeNetwork)) {
-    const userCheck = await githubHttpsRequest('GET', '/user', token)
-    if (userCheck.status === 401) {
-      tokenValid = false
-      token = null
-    } else if (userCheck.ok && userCheck.data?.login) {
-      tokenLogin = userCheck.data.login
-      tokenValid = true
-    }
-  }
-
-  const hasHttps = Boolean(tokenValid) || credResult.available
-  let sshState = 'unprobed'
-  if (sshResult.available === true) sshState = `available:${sshResult.port}`
-  else if (sshResult.available === false) sshState = 'unavailable'
-
-  let remediationCmd = null
-  if (parsedOrigin?.protocol === 'https' && !hasHttps && sshResult.available === true) {
-    remediationCmd = `git remote set-url origin git@github.com:${parsedOrigin.full}.git`
-  } else if (parsedOrigin?.protocol === 'https' && !hasHttps && ghOk) {
-    remediationCmd = 'gh auth setup-git'
-  } else if (parsedOrigin?.protocol === 'ssh' && sshResult.available === false && hasHttps) {
-    remediationCmd = `git remote set-url origin https://github.com/${parsedOrigin.full}.git`
-  }
-
-  let tier = 'mcp-delegate'
-  if (ghOk) tier = 'gh-cli'
-  else if (token && tokenValid) tier = 'node-https-token'
-  else if (parsedOrigin?.protocol === 'ssh' && sshResult.available === true) tier = 'half-duplex'
-
-  const effectiveLogin = ghLogin || tokenLogin || sshResult.login || null
-  const env = {
+  const resultEnv = {
     hasRemote: true,
     providerId: 'github',
-    origin: parsedOrigin?.full ?? null,
-    protocol: parsedOrigin?.protocol ?? null,
+    origin: core.originRepo ? (githubRepoFull(originRaw, sshHostMap) ?? core.originRepo) : null,
+    protocol: core.parsedOrigin?.protocol ?? null,
     trackA: {
       ssh: sshState,
-      ...(sshResult.login ? { sshLogin: sshResult.login } : {}),
-      https: hasHttps ? 'available' : 'no-credential',
-      ...(credResult.username ? { httpsUsername: credResult.username } : {}),
-      remediationCmd,
+      ...(core.ssh.login ? { sshLogin: core.ssh.login } : {}),
+      https: httpsState,
+      ...(core.httpsPublic.username ? { httpsUsername: core.httpsPublic.username } : {}),
+      remediationCmd: core.remediationCmd ?? null,
     },
     trackB: {
-      tier,
-      ghCli: ghOk,
-      ...(effectiveLogin ? { login: effectiveLogin } : {}),
-      hasToken: Boolean(token && tokenValid),
+      tier: core.apiChannel.tier,
+      ghCli: Boolean(core.ghCli.authenticated),
+      ...(core.effectiveLogin ? { login: core.effectiveLogin } : {}),
+      hasToken: Boolean(core.memoryToken && core.tokenVerified),
     },
   }
 
   return {
-    env,
-    client: createGitHubClient({ tier, cwd, token: tokenValid ? token : null, login: effectiveLogin }),
+    env: resultEnv,
+    client: createGitHubClient({
+      tier: core.apiChannel.tier,
+      cwd,
+      token: core.tokenVerified ? core.memoryToken : null,
+      login: core.effectiveLogin,
+    }),
   }
 }

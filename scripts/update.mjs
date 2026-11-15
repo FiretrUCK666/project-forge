@@ -3,21 +3,17 @@
  * update.mjs —— 让这个 skill 的副本保持最新
  *
  * - 目录里有 `.git` → 源码副本，只读报告，绝不自动改写文件。
- * - 没有 `.git` → 包副本，经「同盘 staging 解包校验 -> 先备后写 -> 最后原子写 SKILL.md -> 异常回滚」更新。
- * - 状态文件按 `realpathSync.native` 归一后的路径隔离保存在用户专属缓存目录（受限时回退 `os.tmpdir()`），
- *   内置 1h 核对节流、15m 失败冷却（`FAILURE_COOLDOWN_MS`）与 24h 替换窗口，绝不隐式写入 `process.cwd()`。
- *
- * 用法：
- *   node scripts/update.mjs [--quiet] [--check]
- *
- * 退出码：0 = 无事或已更新；1 = 尝试更新但失败；2 = 用法错误。
+ * - 没有 `.git` → 包副本，经「同盘 staging 解包校验 -> 先备后写 -> 全量核验 -> 失败原地回滚」。
+ * - 状态文件按 `canonicalRealPath` 隔离保存在用户缓存目录（受限回退 `os.tmpdir()`），绝不写入 `cwd`。
+ * - 支持 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`、`GH_TOKEN` / `GITHUB_TOKEN`（仅 `api.github.com`）与 `AbortSignal.timeout`。
  */
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { get as httpGet } from 'node:http'
-import { get as httpsGet } from 'node:https'
+import { get as httpGet, request as httpRequest } from 'node:http'
+import { get as httpsGet, request as httpsRequest } from 'node:https'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import tls from 'node:tls'
 import { fileURLToPath } from 'node:url'
 
 import { skillSource, skillVersion, isMainModule } from './lib/text.mjs'
@@ -31,6 +27,7 @@ import {
   FAILURE_COOLDOWN_MS,
   canonicalRealPath,
   collectDeepStaleAndRetired,
+  collectDeletionCandidates,
   decodeTagSegment,
   durationText,
   isNewer,
@@ -38,6 +35,7 @@ import {
   readStateFrom,
   rememberStateAt,
   resolveStatePath,
+  restoreRemovedFiles,
   rollbackAppliedWrites,
   snapshotTargetBackups,
   stageAndValidatePackage,
@@ -51,7 +49,7 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
 const STALE_CHECK_MS = 24 * 60 * 60 * 1000
 const CHECK_INTERVAL_MS = 60 * 60 * 1000
 const NETWORK_TIMEOUT_MS = 10 * 1000
-const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1000
 const ASSET = 'project-forge.zip'
 
 function usage() {
@@ -64,10 +62,11 @@ function usage() {
     '  没有 .git 的是包副本：经 staging 校验后原子更新，不隐式改写当前工作目录。',
     '',
     '  --quiet          只在「真的更新了」时输出',
-    '  --check          只报告不更新，也不受节流、失败冷却与 24 小时窗口限制',
-    '  --equip <目录>   显式指定目标项目，在更新完成后刷新其 `.agents/skills/`',
+    '  --check          纯只读核对（不写节流状态、不受冷却与 24 小时窗口限制）',
+    '  --equip <目录>   显式指定目标项目，完成后刷新其 `.agents/skills/`',
     '',
-    '  可用环境变量 PF_UPDATE_SOURCE 改来源；设 PF_NO_UPDATE 为非空值可关掉自动检查（--check 不受影响）。',
+    '  可用 PF_UPDATE_SOURCE 改来源；设 PF_NO_UPDATE 为非空值可关掉自动检查（--check 不受影响）。',
+    '  支持 HTTPS_PROXY / HTTP_PROXY / NO_PROXY 与 api.github.com 按需注入 GH_TOKEN / GITHUB_TOKEN。',
     '',
   ].join('\n')
 }
@@ -109,61 +108,197 @@ function report(lines, { quiet, always = false } = {}) {
   if (text !== '') process.stdout.write(`${text}\n`)
 }
 
-function download(url, { redirects = 5, accept = '*/*', final } = {}) {
-  return new Promise((resolvePromise) => {
-    const secure = url.startsWith('https:')
-    const request = (secure ? httpsGet : httpGet)(url, {
-      headers: { 'user-agent': 'project-forge-update', accept },
+function matchesNoProxy(hostname, noProxyEnv = '') {
+  const host = String(hostname ?? '').toLowerCase()
+  const raw = String(noProxyEnv ?? '').trim()
+  if (!raw || !host) return false
+  for (const token of raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+    if (token === '*') return true
+    const clean = token.replace(/:\d+$/, '').replace(/^\./, '')
+    if (!clean) continue
+    if (host === clean || host.endsWith(`.${clean}`)) return true
+  }
+  return false
+}
+
+function resolveProxyFor(targetUrl, env = process.env) {
+  let parsed
+  try { parsed = new URL(targetUrl) } catch { return undefined }
+  if (matchesNoProxy(parsed.hostname, env.NO_PROXY || env.no_proxy)) return undefined
+  const raw = parsed.protocol === 'https:'
+    ? (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy)
+    : (env.HTTP_PROXY || env.http_proxy)
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) return undefined
+  try {
+    const pUrl = new URL(trimmed)
+    if (pUrl.protocol !== 'http:' && pUrl.protocol !== 'https:') return undefined
+    return pUrl
+  } catch {
+    return undefined
+  }
+}
+
+function openRequestThroughProxy(targetParsed, proxyUrl, reqHeaders, signal) {
+  const proxyAuth = proxyUrl.username || proxyUrl.password
+    ? `Basic ${Buffer.from(`${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`).toString('base64')}`
+    : undefined
+
+  if (targetParsed.protocol === 'http:') {
+    const pPort = Number(proxyUrl.port) || (proxyUrl.protocol === 'https:' ? 443 : 80)
+    return Promise.resolve({
+      request: (proxyUrl.protocol === 'https:' ? httpsRequest : httpRequest)({
+        hostname: proxyUrl.hostname,
+        port: pPort,
+        path: targetParsed.toString(),
+        method: 'GET',
+        headers: {
+          ...reqHeaders,
+          Host: targetParsed.host,
+          ...(proxyAuth ? { 'Proxy-Authorization': proxyAuth } : {}),
+        },
+        timeout: NETWORK_TIMEOUT_MS,
+        ...(signal ? { signal } : {}),
+      }),
+    })
+  }
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    const targetPort = Number(targetParsed.port) || 443
+    const authority = `${targetParsed.hostname}:${targetPort}`
+    const proxyPort = Number(proxyUrl.port) || (proxyUrl.protocol === 'https:' ? 443 : 80)
+    const connectReq = (proxyUrl.protocol === 'https:' ? httpsRequest : httpRequest)({
+      hostname: proxyUrl.hostname,
+      port: proxyPort,
+      method: 'CONNECT',
+      path: authority,
+      headers: {
+        Host: authority,
+        ...(proxyAuth ? { 'Proxy-Authorization': proxyAuth } : {}),
+      },
       timeout: NETWORK_TIMEOUT_MS,
-    }, (res) => {
-      const { statusCode, headers } = res
-      const location = headers.location
-      if (statusCode !== undefined && statusCode >= 300 && statusCode < 400
-        && location !== undefined && redirects > 0) {
-        res.resume()
-        let next
-        try {
-          next = new URL(location, url).toString()
-        } catch {
-          resolvePromise({ ok: false, status: 0, final })
+      ...(signal ? { signal } : {}),
+    })
+    connectReq.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy()
+        rejectPromise(new Error(`proxy CONNECT ${res.statusCode}`))
+        return
+      }
+      const tlsSocket = tls.connect({ socket, servername: targetParsed.hostname })
+      const req = httpsRequest({
+        hostname: targetParsed.hostname,
+        port: targetPort,
+        path: `${targetParsed.pathname}${targetParsed.search}`,
+        method: 'GET',
+        headers: reqHeaders,
+        createConnection: () => tlsSocket,
+        timeout: NETWORK_TIMEOUT_MS,
+        ...(signal ? { signal } : {}),
+      })
+      resolvePromise({ request: req })
+    })
+    connectReq.on('error', rejectPromise)
+    connectReq.on('timeout', () => {
+      connectReq.destroy()
+      rejectPromise(new Error('proxy CONNECT timeout'))
+    })
+    connectReq.end()
+  })
+}
+
+function download(url, { redirects = 5, accept = '*/*', final, env = process.env } = {}) {
+  return new Promise((resolvePromise) => {
+    let parsed
+    try { parsed = new URL(url) } catch {
+      resolvePromise({ ok: false, status: 0, final })
+      return
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      resolvePromise({ ok: false, status: 0, final })
+      return
+    }
+
+    const reqHeaders = { 'user-agent': 'project-forge-update', accept }
+    const ghToken = (typeof env?.GH_TOKEN === 'string' && env.GH_TOKEN.trim())
+      || (typeof env?.GITHUB_TOKEN === 'string' && env.GITHUB_TOKEN.trim())
+      || ''
+    if (ghToken && parsed.hostname.toLowerCase() === 'api.github.com') {
+      reqHeaders.Authorization = `Bearer ${ghToken}`
+      reqHeaders['X-GitHub-Api-Version'] = '2022-11-28'
+    }
+
+    const signal = typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(NETWORK_TIMEOUT_MS)
+      : undefined
+    const proxyUrl = resolveProxyFor(url, env)
+
+    const attachHandlers = (request) => {
+      request.on('response', (res) => {
+        const { statusCode, headers } = res
+        const location = headers.location
+        if (statusCode !== undefined && statusCode >= 300 && statusCode < 400
+          && location !== undefined && redirects > 0) {
+          res.resume()
+          let next
+          try {
+            next = new URL(location, url).toString()
+          } catch {
+            resolvePromise({ ok: false, status: 0, final })
+            return
+          }
+          resolvePromise(download(next, { redirects: redirects - 1, accept, final: next, env }))
           return
         }
-        resolvePromise(download(next, { redirects: redirects - 1, accept, final: next }))
-        return
-      }
-      if (statusCode !== 200) {
-        res.resume()
-        resolvePromise({ ok: false, status: statusCode ?? 0, final })
-        return
-      }
-      const declared = Number(headers['content-length'])
-      if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
-        res.resume()
-        resolvePromise({ ok: false, status: 0, final, tooLarge: true })
-        return
-      }
-      const chunks = []
-      let received = 0
-      let aborted = false
-      res.on('data', (c) => {
-        if (aborted) return
-        received += c.length
-        if (received > MAX_DOWNLOAD_BYTES) {
-          aborted = true
-          chunks.length = 0
-          res.destroy()
+        if (statusCode !== 200) {
+          res.resume()
+          resolvePromise({ ok: false, status: statusCode ?? 0, final })
+          return
+        }
+        const declared = Number(headers['content-length'])
+        if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
+          res.resume()
           resolvePromise({ ok: false, status: 0, final, tooLarge: true })
           return
         }
-        chunks.push(c)
+        const chunks = []
+        let received = 0
+        let aborted = false
+        res.on('data', (c) => {
+          if (aborted) return
+          received += c.length
+          if (received > MAX_DOWNLOAD_BYTES) {
+            aborted = true
+            chunks.length = 0
+            res.destroy()
+            resolvePromise({ ok: false, status: 0, final, tooLarge: true })
+            return
+          }
+          chunks.push(c)
+        })
+        res.on('end', () => {
+          if (!aborted) resolvePromise({ ok: true, status: 200, final, body: Buffer.concat(chunks) })
+        })
+        res.on('error', () => { if (!aborted) resolvePromise({ ok: false, status: 0, final }) })
       })
-      res.on('end', () => {
-        if (!aborted) resolvePromise({ ok: true, status: 200, final, body: Buffer.concat(chunks) })
-      })
-      res.on('error', () => { if (!aborted) resolvePromise({ ok: false, status: 0, final }) })
+      request.on('timeout', () => { request.destroy(); resolvePromise({ ok: false, status: 0, final }) })
+      request.on('error', () => resolvePromise({ ok: false, status: 0, final }))
+      request.end()
+    }
+
+    if (proxyUrl) {
+      openRequestThroughProxy(parsed, proxyUrl, reqHeaders, signal)
+        .then(({ request }) => attachHandlers(request))
+        .catch(() => resolvePromise({ ok: false, status: 0, final }))
+      return
+    }
+
+    const req = (parsed.protocol === 'https:' ? httpsGet : httpGet)(url, {
+      headers: reqHeaders,
+      timeout: NETWORK_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
     })
-    request.on('timeout', () => { request.destroy(); resolvePromise({ ok: false, status: 0, final }) })
-    request.on('error', () => resolvePromise({ ok: false, status: 0 }))
+    attachHandlers(req)
   })
 }
 
@@ -276,29 +411,118 @@ function pruneEmptyDirsWithin(dir, baseRoot = SKILL_ROOT) {
   }
 }
 
+function formatWriteErrorMessage(err) {
+  const msg = err instanceof Error ? err.message : String(err)
+  const code = err && typeof err === 'object' ? err.code : ''
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS' || /\b(?:EACCES|EPERM|EROFS)\b/i.test(msg)) {
+    return `安装目录无写入权限（${code || 'permission'}：${msg}）——请检查目录读写权限或换至用户可写目录后重试`
+  }
+  return msg
+}
+
+/**
+ * 全目录落盘验收：覆盖 `SKILL.md`、`kit/`、`templates/`、`references/` 与 `scripts/` 全部条目。
+ */
+function verifyInstalled(entries, after, remote, root = SKILL_ROOT) {
+  const skillFile = join(root, 'SKILL.md')
+  if (!existsSync(skillFile)) {
+    return { ok: false, why: '装完之后 SKILL.md 不见了', hint: '这份副本已经不能用了。' }
+  }
+  const text = readFileSync(skillFile, 'utf8')
+  const name = /^name:[ \t]*(.+)$/m.exec(text)?.[1]?.trim()
+  if (name === undefined || name === '') {
+    return {
+      ok: false,
+      why: 'SKILL.md 的 frontmatter 里读不到 name（文件可能被截断）',
+      hint: '宿主不会加载没有 name 的技能。',
+    }
+  }
+  const managedPrefixes = ['scripts/', 'kit/', 'templates/', 'references/']
+  const expectFiles = (entries ?? [])
+    .map((e) => ({
+      rel: String(e.rel ?? e.name ?? '').replace(/\\/g, '/'),
+      expectedBytes: e.data ? Buffer.byteLength(e.data) : undefined,
+    }))
+    .filter((item) => managedPrefixes.some((p) => item.rel.startsWith(p)))
+
+  const missing = []
+  const sizeMismatch = []
+  for (const item of expectFiles) {
+    const abs = join(root, item.rel)
+    if (!existsSync(abs)) {
+      missing.push(item.rel)
+      continue
+    }
+    if (typeof item.expectedBytes === 'number') {
+      try {
+        if (statSync(abs).size !== item.expectedBytes) sizeMismatch.push(item.rel)
+      } catch {
+        missing.push(item.rel)
+      }
+    }
+  }
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      why: `包里带了的 ${missing.length} 个文件没有落盘（${missing.slice(0, 3).join('、')}）`,
+      hint: '缺共用模块或套件文件时后续命令会失效，已回滚。',
+    }
+  }
+  if (sizeMismatch.length > 0) {
+    return {
+      ok: false,
+      why: `落盘文件长度与包内不一致（${sizeMismatch.slice(0, 3).join('、')}）`,
+      hint: '文件可能被部分写入或截断，已回滚。',
+    }
+  }
+  if (after === undefined) {
+    return { ok: false, why: '装完之后读不到版本号', hint: `这次要装的是 ${remote}。` }
+  }
+  if (remote !== undefined && after !== remote) {
+    return { ok: false, why: `装完的版本是 ${after}，而要装的是 ${remote}`, hint: '装进去的可能不是那一版。' }
+  }
+  return { ok: true }
+}
+
 /**
  * 整包原子替换流程：
  *   1. 同盘 staging 解包并核验目录结构与 SKILL.md 版本；
- *   2. 写前备份将被触及的旧文件；
- *   3. 先写入除 `SKILL.md` 外的全部文件，最后原子写回 `SKILL.md`；
- *   4. 任何写入失败（如 Windows EPERM）立即回滚已写文件且不更新 `SKILL.md`；
- *   5. 仅在包副本上清理仓库专属文件并全深度递归清理 `kit/skills/**` 与 `scripts/lib/**` 退役文件。
+ *   2. 写前备份将写入及拟退役清理的全部旧文件字节；
+ *   3. 写入全部非 `SKILL.md` 文件 -> 原子写回 `SKILL.md` -> 清理退役与专属文件；
+ *   4. 在事务内部执行全目录 `verifyInstalled`，任何异常或验收未过均全量原地回滚。
  */
 function applyPackage(entries, {
   skillRoot = SKILL_ROOT,
   expectedVersion,
   writeFile = writeAtomic,
   requireFullStructure = true,
+  prevManagedFiles,
 } = {}) {
   const targetRoot = resolve(skillRoot)
   const insideTarget = (p) => insideRoot(targetRoot, p)
   const pruneTargetDir = (d) => pruneEmptyDirsWithin(d, targetRoot)
 
-  const staged = stageAndValidatePackage(entries, targetRoot, {
-    expectedVersion,
-    insideSkillFn: insideTarget,
-    requireFullStructure,
-  })
+  let staged
+  try {
+    staged = stageAndValidatePackage(entries, targetRoot, {
+      expectedVersion,
+      insideSkillFn: insideTarget,
+      requireFullStructure,
+    })
+  } catch (err) {
+    return {
+      ok: false,
+      why: formatWriteErrorMessage(err),
+      rolledBack: false,
+      removed: [],
+      retiredFiles: [],
+      skipped: [],
+      keptTemps: [],
+      staleFiles: [],
+      mapRead: false,
+    }
+  }
+
   if (!staged.ok) {
     try { if (staged.stageDir) rmSync(staged.stageDir, { recursive: true, force: true }) } catch { /* ignore */ }
     return {
@@ -317,7 +541,23 @@ function applyPackage(entries, {
   const keptTemps = []
   const skipped = [...staged.skipped]
   const appliedDests = []
-  const backups = snapshotTargetBackups(staged.stagedEntries, targetRoot)
+  const removedAbsPaths = []
+
+  const now = new Set(staged.stagedEntries.map((e) => e.rel))
+  const isPackageCopy = !existsSync(join(SKILL_ROOT, '.git'))
+  const targetIsPackageCopy = targetRoot === SKILL_ROOT ? isPackageCopy : !existsSync(join(targetRoot, '.git'))
+  const effectivePrevManaged = prevManagedFiles ?? (readStateFrom(resolveStatePath(targetRoot)).managedFiles)
+  const delCandidates = collectDeletionCandidates(targetRoot, now, {
+    isPackageCopy: targetIsPackageCopy,
+    prevManagedFiles: effectivePrevManaged,
+  })
+  const repoOnlyCandidates = targetIsPackageCopy
+    ? [
+        ...REPO_ONLY_PREFIXES.map((d) => join(targetRoot, d)),
+        ...REPO_ONLY_FILES.map((f) => join(targetRoot, f)),
+      ]
+    : []
+  const backups = snapshotTargetBackups(staged.stagedEntries, targetRoot, [...delCandidates, ...repoOnlyCandidates])
 
   const nonSkillEntries = staged.stagedEntries.filter((e) => e.rel !== 'SKILL.md')
   const skillEntry = staged.stagedEntries.find((e) => e.rel === 'SKILL.md')
@@ -348,11 +588,71 @@ function applyPackage(entries, {
         writeFile(skillDest, skillPayload)
         appliedDests.push(skillDest)
       }
+
+      const removed = []
+      const remove = (p) => {
+        rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+        return !existsSync(p)
+      }
+
+      const shouldRemove = (name) => isPackageCopy
+        && isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
+      const shouldRemoveAtTarget = (name) => targetRoot === SKILL_ROOT
+        ? shouldRemove(name)
+        : (targetIsPackageCopy && isRepoOnlyPath(name) && !now.has(name) && insideTarget(join(targetRoot, name)))
+
+      for (const dir of REPO_ONLY_PREFIXES) {
+        const p = join(targetRoot, dir)
+        if (!shouldRemoveAtTarget(dir)) continue
+        if (existsSync(p) && remove(p)) {
+          removed.push(dir)
+          pruneTargetDir(dirname(p))
+        }
+      }
+      for (const file of REPO_ONLY_FILES) {
+        const p = join(targetRoot, file)
+        if (!shouldRemoveAtTarget(file)) continue
+        if (existsSync(p) && statSync(p).isFile() && remove(p)) {
+          removed.push(file)
+          removedAbsPaths.push(p)
+          pruneTargetDir(dirname(p))
+        }
+      }
+
+      const { retiredFiles, retiredAbsPaths, staleFiles } = collectDeepStaleAndRetired(targetRoot, now, {
+        isPackageCopy: targetIsPackageCopy,
+        insideSkillFn: insideTarget,
+        pruneDirFn: pruneTargetDir,
+        prevManagedFiles: effectivePrevManaged,
+      })
+      removed.push(...retiredFiles)
+      removedAbsPaths.push(...retiredAbsPaths)
+
+      const appliedEntryList = staged.stagedEntries.filter((item) => !skipped.includes(item.rel))
+      const after = localVersion(targetRoot)
+      const health = verifyInstalled(appliedEntryList, after, expectedVersion ?? staged.version, targetRoot)
+      if (!health.ok) {
+        throw Object.assign(new Error(`${health.why}${health.hint ? `（${health.hint}）` : ''}`), { health })
+      }
+
+      return {
+        ok: true,
+        afterVersion: after,
+        removed,
+        retiredFiles,
+        skipped,
+        keptTemps: [...new Set(keptTemps)],
+        staleFiles,
+        mapRead: true,
+        managedFiles: staged.stagedEntries.map((e) => e.rel),
+      }
     } catch (err) {
       rollbackAppliedWrites(appliedDests, backups, pruneTargetDir)
+      restoreRemovedFiles(removedAbsPaths, backups)
       return {
         ok: false,
-        why: err instanceof Error ? err.message : String(err),
+        why: formatWriteErrorMessage(err),
+        health: err?.health,
         rolledBack: true,
         removed: [],
         retiredFiles: [],
@@ -362,55 +662,6 @@ function applyPackage(entries, {
         mapRead: true,
       }
     }
-
-    const removed = []
-    const now = new Set(staged.stagedEntries.map((e) => e.rel))
-    const remove = (p) => {
-      rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-      return !existsSync(p)
-    }
-
-    const isPackageCopy = !existsSync(join(SKILL_ROOT, '.git'))
-    const targetIsPackageCopy = targetRoot === SKILL_ROOT ? isPackageCopy : !existsSync(join(targetRoot, '.git'))
-    const shouldRemove = (name) => isPackageCopy
-      && isRepoOnlyPath(name) && !now.has(name) && insideSkill(join(SKILL_ROOT, name))
-    const shouldRemoveAtTarget = (name) => targetRoot === SKILL_ROOT
-      ? shouldRemove(name)
-      : (targetIsPackageCopy && isRepoOnlyPath(name) && !now.has(name) && insideTarget(join(targetRoot, name)))
-
-    for (const dir of REPO_ONLY_PREFIXES) {
-      const p = join(targetRoot, dir)
-      if (!shouldRemoveAtTarget(dir)) continue
-      if (existsSync(p) && remove(p)) {
-        removed.push(dir)
-        pruneTargetDir(dirname(p))
-      }
-    }
-    for (const file of REPO_ONLY_FILES) {
-      const p = join(targetRoot, file)
-      if (!shouldRemoveAtTarget(file)) continue
-      if (existsSync(p) && statSync(p).isFile() && remove(p)) {
-        removed.push(file)
-        pruneTargetDir(dirname(p))
-      }
-    }
-
-    const { retiredFiles, staleFiles } = collectDeepStaleAndRetired(targetRoot, now, {
-      isPackageCopy: targetIsPackageCopy,
-      insideSkillFn: insideTarget,
-      pruneDirFn: pruneTargetDir,
-    })
-    removed.push(...retiredFiles)
-
-    return {
-      ok: true,
-      removed,
-      retiredFiles,
-      skipped,
-      keptTemps: [...new Set(keptTemps)],
-      staleFiles,
-      mapRead: true,
-    }
   } finally {
     try {
       if (staged.stageDir) rmSync(staged.stageDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
@@ -418,44 +669,8 @@ function applyPackage(entries, {
   }
 }
 
-function verifyInstalled(entries, after, remote) {
-  const root = SKILL_ROOT
-  const skillFile = join(root, 'SKILL.md')
-  if (!existsSync(skillFile)) {
-    return { ok: false, why: '装完之后 SKILL.md 不见了', hint: '这份副本已经不能用了。' }
-  }
-  const text = readFileSync(skillFile, 'utf8')
-  const name = /^name:[ \t]*(.+)$/m.exec(text)?.[1]?.trim()
-  if (name === undefined || name === '') {
-    return {
-      ok: false,
-      why: 'SKILL.md 的 frontmatter 里读不到 name（文件可能被截断）',
-      hint: '宿主不会加载没有 name 的技能。',
-    }
-  }
-  const expectScripts = (entries ?? [])
-    .map((e) => String(e.name).replace(/\\/g, '/'))
-    .filter((n) => /^scripts\/(?:lib\/(?:[^/]+\/)*)?[^/]+\.mjs$/.test(n))
-  const missing = expectScripts.filter((rel) => !existsSync(join(root, rel)))
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      why: `包里带了的 ${missing.length} 个脚本没有落盘（${missing.slice(0, 3).join('、')}）`,
-      hint: '缺共用模块时，别的脚本一跑就会报找不到模块。',
-    }
-  }
-  if (after === undefined) {
-    return { ok: false, why: '装完之后读不到版本号', hint: `这次要装的是 ${remote}。` }
-  }
-  if (remote !== undefined && after !== remote) {
-    return { ok: false, why: `装完的版本是 ${after}，而要装的是 ${remote}`, hint: '装进去的可能不是那一版。' }
-  }
-  return { ok: true }
-}
-
 function fallbackSource() {
-  const fromEnv = originUrl(process.env.PF_UPDATE_SOURCE)
-  return fromEnv ?? originUrl(UPSTREAM)
+  return originUrl(process.env.PF_UPDATE_SOURCE)
 }
 
 function originUrl(source) {
@@ -577,7 +792,11 @@ async function main(argv) {
   }
 
   const source = originUrl(facts.source) ?? fallbackSource()
-  if (source === undefined || facts.version === undefined) return reportUnverifiable(facts, { quiet })
+  if (source === undefined || facts.version === undefined) {
+    const code = reportUnverifiable(facts, { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
+    return code
+  }
 
   const statePath = resolveStatePath(SKILL_ROOT)
   const now = Date.now()
@@ -585,7 +804,8 @@ async function main(argv) {
   const sinceUpdate = now - state.lastUpdateAt
   const inWindow = sinceUpdate < UPDATE_INTERVAL_MS
 
-  if (quiet && state.lastOkAt !== 0 && now - state.lastOkAt < CHECK_INTERVAL_MS) {
+  if (!checkOnly && quiet && state.lastOkAt !== 0 && now - state.lastOkAt < CHECK_INTERVAL_MS) {
+    if (equipTarget) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
   if (!checkOnly && state.lastFailAt !== 0 && now - state.lastFailAt < FAILURE_COOLDOWN_MS) {
@@ -593,6 +813,7 @@ async function main(argv) {
     report([
       `project-forge ${tag}：最近核对失败，处于 ${durationText(FAILURE_COOLDOWN_MS)} 冷却中（剩余约 ${durationText(left)}；可用 --check 立即核对）。`,
     ], { quiet })
+    if (equipTarget) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
 
@@ -619,10 +840,12 @@ async function main(argv) {
           : `project-forge ${tag}：已经 ${durationText(staleFor)}没能核对新版了，这份停在 ${tag}（不是「已是最新」）。`,
         '  核对不上不影响它干活，只是会一直停在这个版本；换一个能连上发布方的网络就能恢复。',
       ], { quiet, always: true })
+      if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
       return 0
     }
     if (!checkOnly) rememberState({ lastFailAt: Date.now() }, statePath)
     report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
 
@@ -630,29 +853,37 @@ async function main(argv) {
   let remote
   if (found.state === 'ok') {
     remote = found.version
-    rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)
+    if (!checkOnly) rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)
   } else {
     latest = await fetchPackage(latestPackageUrl(source))
     if (!latest.ok) {
       if (!checkOnly) rememberState({ lastFailAt: Date.now() }, statePath)
       report([`project-forge ${tag}：这次没能联网核对（不是「已是最新」）。`], { quiet })
+      if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
       return 0
     }
     remote = latest.version
-    rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)
+    if (!checkOnly) rememberState({ lastOkAt: Date.now(), lastFailAt: 0 }, statePath)
   }
 
   if (remote === undefined) {
     report([`project-forge ${tag}：最新版读不到版本号，无法判断有没有新版。`], { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
   const newer = isNewer(remote, facts.version)
   if (newer === undefined) {
     report([`project-forge ${tag}：版本号形状认不出来（远端是 ${remote}），跳过（不猜）。`], { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
   if (!newer) {
     report([`project-forge ${tag}：已是最新。`], { quiet })
+    if (equipTarget && !checkOnly) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
+    return 0
+  }
+  if (checkOnly) {
+    report([`project-forge ${tag}：有新版本 ${remote}（--check 只报告，没有更新）。`], { quiet })
     return 0
   }
   if (inWindow) {
@@ -661,10 +892,7 @@ async function main(argv) {
       `project-forge ${tag}：有新版本 ${remote}。这份副本刚更新过，`,
       `  ${durationText(left)}之后再自动换；这次继续用现在这份就够（想马上要新版，去发布页下载覆盖）。`,
     ], { quiet, always: true })
-    return 0
-  }
-  if (checkOnly) {
-    report([`project-forge ${tag}：有新版本 ${remote}（--check 只报告，没有更新）。`], { quiet })
+    if (equipTarget) refreshEquippedWorkspace(equipTarget, { explicit: true, quiet })
     return 0
   }
 
@@ -688,36 +916,37 @@ async function main(argv) {
     return 1
   }
 
-  const applyRes = applyPackage(latest.entries, { expectedVersion: found.state === 'ok' ? remote : undefined })
+  const applyRes = applyPackage(latest.entries, {
+    expectedVersion: found.state === 'ok' ? remote : undefined,
+    prevManagedFiles: state.managedFiles,
+  })
   if (!applyRes.ok) {
     rememberState({ lastFailAt: Date.now() }, statePath)
     report([
-      `project-forge ${tag}：更新在 staging 校验或落盘阶段中止（${applyRes.why}）${applyRes.rolledBack ? '，已回滚到原文件' : ''}。`,
+      `project-forge ${tag}：更新在 staging 校验或落盘验收阶段中止（${applyRes.why}）${applyRes.rolledBack ? '，已全量原地回滚' : ''}。`,
     ], { quiet, always: true })
     return 1
   }
 
-  const { removed, skipped, keptTemps, staleFiles } = applyRes
-  const after = localVersion()
-  const health = verifyInstalled(latest.entries, after, remote)
-  if (health.ok) rememberState({ lastUpdateAt: Date.now(), lastFailAt: 0 }, statePath)
+  const { removed, skipped, keptTemps, staleFiles, afterVersion, managedFiles } = applyRes
+  rememberState({ lastUpdateAt: Date.now(), lastFailAt: 0, managedFiles }, statePath)
 
-  const versionText = after === undefined
-    ? `project-forge 的文件已换成 ${remote} 那一份，但版本号读不出来`
-    : `project-forge 已更新到最新版 ${after} —— 你之前用的是 ${tag}。`
+  const after = afterVersion ?? localVersion()
   report([
-    health.ok ? versionText : `project-forge 更新了文件，但验收没过：${health.why}`,
-    health.ok ? '  这个 skill 的文件换了，我重新读一遍 SKILL.md 再继续。' : `  你这份副本可能已经不可用。${health.hint ?? ''}`,
+    after === undefined
+      ? `project-forge 的文件已换成 ${remote} 那一份，但版本号读不出来`
+      : `project-forge 已更新到最新版 ${after} —— 你之前用的是 ${tag}。`,
+    '  这个 skill 的文件换了，我重新读一遍 SKILL.md 再继续。',
     removed.length > 0 ? `  清掉了 ${removed.length} 处残留或退役文件（${removed.slice(0, 3).join('、')}${removed.length > 3 ? ' 等' : ''}）。` : undefined,
     skipped.length > 0 ? `  有 ${skipped.length} 个条目指向本领目录之外，已跳过（${skipped.slice(0, 3).join('、')}）。` : undefined,
     keptTemps.length > 0 ? `  有 ${keptTemps.length} 个属于其他进程的临时文件，没动（${keptTemps.slice(0, 3).join('、')}）。` : undefined,
-    staleFiles.length > 0 ? `  这几个非核心目录文件在新版包里没有，未擅删：${staleFiles.slice(0, 5).join('、')}${staleFiles.length > 5 ? ' 等' : ''}。` : undefined,
+    staleFiles.length > 0 ? `  这几个非核心目录或自建文件在新版包里没有，未擅删：${staleFiles.slice(0, 5).join('、')}${staleFiles.length > 5 ? ' 等' : ''}。` : undefined,
   ], { quiet, always: true })
 
-  if (health.ok && equipTarget) {
+  if (equipTarget) {
     runDiskEquip(equipTarget, { quiet })
   }
-  return health.ok ? 0 : 1
+  return 0
 }
 
 export {
@@ -728,6 +957,10 @@ export {
   FAILURE_COOLDOWN_MS,
   apiEndpoint,
   routesFor,
+  download,
+  resolveProxyFor,
+  fallbackSource,
+  verifyInstalled,
   refreshEquippedWorkspace,
   applyPackage,
   readState,

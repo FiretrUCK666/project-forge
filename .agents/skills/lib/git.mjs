@@ -5,25 +5,39 @@
  * Windows 盘符大小写与 junction、submodule / --separate-git-dir、unborn HEAD 与冲突态。
  */
 
-import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
-  renameSync, statSync, unlinkSync, writeFileSync,
+  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync,
+  readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import {
+  buildNonInteractiveEnv, execSafe, execShellCommand, killProcessTree, resolveExecutable,
+} from './exec.mjs'
+
+export {
+  buildNonInteractiveEnv,
+  execSafe,
+  execShellCommand,
+  killProcessTree,
+  resolveExecutable,
+}
 
 export const LIKELY_DEFAULT_BRANCHES = Object.freeze([
   'main', 'master', 'trunk', 'develop', 'default', 'development',
 ])
 
-export const DEFAULT_WALK_SKIP_DIRS = new Set([
+export const COMMON_SKIP_DIRS = new Set([
   '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn', 'bower_components',
   '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
-  '.tox', '.gradle', '.idea', '.vs', 'Pods', 'DerivedData',
+  '.tox', '.gradle', '.idea', '.vs', 'Pods', 'DerivedData', '.build', '.swiftpm',
   'dist', 'build', 'out', 'target', 'coverage', '.next', '.nuxt', '.svelte-kit', '.turbo', '.cache',
+  '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd',
 ])
+
+export const DEFAULT_WALK_SKIP_DIRS = COMMON_SKIP_DIRS
 
 const MACOS_JUNK_NAMES = new Set(['.DS_Store', '__MACOSX', '.Spotlight-V100', '.Trashes', '.fseventsd'])
 
@@ -144,76 +158,6 @@ export function sha256File(filePath) {
   }
 }
 
-/** 构造全平台防交互弹窗子进程环境变量。 */
-export function buildNonInteractiveEnv(baseEnv = process.env, extra = {}) {
-  return {
-    ...baseEnv,
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: 'echo',
-    SSH_ASKPASS: '',
-    SSH_ASKPASS_REQUIRE: 'never',
-    GCM_INTERACTIVE: 'never',
-    GH_PROMPT_DISABLED: '1',
-    ...extra,
-  }
-}
-
-/**
- * 使用 execFile 安全执行命令（不经过 shell），并注入完整防凭据弹窗环境变量。
- * 区分 cwd 不存在与命令本身缺失（missing），永不抛出未捕获异常。
- */
-export function execSafe(cmd, args = [], opts = {}) {
-  return new Promise((done) => {
-    if (opts.cwd && !existsSync(opts.cwd)) {
-      done({
-        ok: false,
-        code: 1,
-        missing: false,
-        missingCwd: true,
-        timedOut: false,
-        stdout: opts.buffer ? Buffer.alloc(0) : '',
-        stderr: `工作目录不存在：${opts.cwd}`,
-      })
-      return
-    }
-    const env = buildNonInteractiveEnv(process.env, opts.env ?? {})
-    const isBuffer = Boolean(opts.buffer)
-    const child = execFile(cmd, args, {
-      cwd: opts.cwd,
-      encoding: isBuffer ? 'buffer' : 'utf8',
-      timeout: opts.timeout ?? 15000,
-      maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
-      windowsHide: true,
-      env,
-    }, (error, stdout, stderr) => {
-      const code = error === null
-        ? 0
-        : (typeof error.code === 'number' ? error.code : 1)
-      const outVal = isBuffer
-        ? (Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? ''))
-        : (stdout ?? '').replace(/\r\n/g, '\n').trimEnd()
-      const errVal = (Buffer.isBuffer(stderr) ? stderr.toString('utf8') : (stderr ?? ''))
-        .replace(/\r\n/g, '\n')
-        .trim()
-      done({
-        ok: error === null,
-        code,
-        missing: error?.code === 'ENOENT',
-        timedOut: Boolean(error?.killed),
-        stdout: outVal,
-        stderr: errVal,
-      })
-    })
-
-    if (child.stdin) child.stdin.on('error', () => {})
-    if (opts.input !== undefined && child.stdin) {
-      child.stdin.end(opts.input)
-    } else if (child.stdin) {
-      child.stdin.end()
-    }
-  })
-}
-
 /** 安全执行 git 命令（保留 UTF-8 输出并统一 NFC 路径）。 */
 export function gitRun(cwd, args, opts = {}) {
   return execSafe('git', ['-c', 'core.quotepath=false', '-c', 'core.precomposeunicode=true', ...args], { ...opts, cwd })
@@ -222,80 +166,6 @@ export function gitRun(cwd, args, opts = {}) {
 /** 执行 git 命令并返回原始 Buffer stdout（供 `-z` NUL 分隔解析与精确 SHA256 使用）。 */
 export function gitRunBuffer(cwd, args, opts = {}) {
   return gitRun(cwd, args, { ...opts, buffer: true })
-}
-
-function killProcessTree(child) {
-  if (!child || !child.pid) return
-  if (process.platform === 'win32') {
-    execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {
-      try { child.kill() } catch { /* 已退出 */ }
-    })
-    return
-  }
-  try {
-    process.kill(-child.pid, 'SIGTERM')
-  } catch {
-    try { child.kill('SIGTERM') } catch { /* 已退出 */ }
-  }
-  const killTimer = setTimeout(() => {
-    try { process.kill(-child.pid, 'SIGKILL') } catch {
-      try { child.kill('SIGKILL') } catch { /* 已退出 */ }
-    }
-  }, 300)
-  if (typeof killTimer.unref === 'function') killTimer.unref()
-}
-
-/**
- * 执行项目自备验证命令字符串（来自 Dev Profile 或用户 --cmd）。
- * 超时时按平台杀整棵进程树（Windows taskkill /T /F，POSIX detached + 进程组 -pid）。
- */
-export function execShellCommand(commandStr, cwd, opts = {}) {
-  return new Promise((done) => {
-    if (cwd && !existsSync(cwd)) {
-      done({ ok: false, code: 1, timedOut: false, stdout: '', stderr: `工作目录不存在：${cwd}` })
-      return
-    }
-    const env = buildNonInteractiveEnv(process.env, opts.env ?? {})
-    const useDetached = process.platform !== 'win32'
-    const child = spawn(commandStr, {
-      cwd,
-      shell: true,
-      detached: useDetached,
-      windowsHide: true,
-      env,
-    })
-    const outChunks = []
-    const errChunks = []
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      killProcessTree(child)
-    }, opts.timeout ?? 120000)
-
-    child.stdout?.on('data', (d) => outChunks.push(d))
-    child.stderr?.on('data', (d) => errChunks.push(d))
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      done({
-        ok: false,
-        code: 1,
-        timedOut,
-        stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
-        stderr: err.message,
-      })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      const exitCode = timedOut ? 124 : (typeof code === 'number' ? code : 1)
-      done({
-        ok: exitCode === 0,
-        code: exitCode,
-        timedOut,
-        stdout: Buffer.concat(outChunks).toString('utf8').trimEnd(),
-        stderr: Buffer.concat(errChunks).toString('utf8').trimEnd(),
-      })
-    })
-  })
 }
 
 /** 解析 `git worktree list --porcelain` 输出，路径统一 canonicalPath。 */
@@ -327,13 +197,66 @@ export function parseWorktreeListPorcelain(text) {
   return items
 }
 
+function tryResolveRepoRootsFast(absCwd) {
+  const dotGit = join(absCwd, '.git')
+  if (!existsSync(dotGit)) return null
+  try {
+    const st = statSync(dotGit)
+    if (st.isDirectory()) {
+      if (!existsSync(join(dotGit, 'HEAD'))) return null
+      const cfg = readTextSafe(join(dotGit, 'config')) ?? ''
+      if (/^\s*bare\s*=\s*true\b/im.test(cfg)) return null
+      return {
+        isGit: true,
+        cwd: absCwd,
+        mainRoot: absCwd,
+        workTreeRoot: absCwd,
+        gitDir: dotGit,
+        workTreeGitDir: dotGit,
+        isWorktree: false,
+        isBare: false,
+      }
+    }
+    if (st.isFile()) {
+      const content = readFileSync(dotGit, 'utf8')
+      const m = /^gitdir:\s*(.+)$/im.exec(content)
+      if (!m) return null
+      const perWtGitDir = canonicalPath(resolve(absCwd, m[1].trim()))
+      if (!existsSync(join(perWtGitDir, 'HEAD'))) return null
+      const commondirFile = join(perWtGitDir, 'commondir')
+      if (!existsSync(commondirFile)) return null
+      const relCommon = readFileSync(commondirFile, 'utf8').trim()
+      const commonDir = canonicalPath(resolve(perWtGitDir, relCommon))
+      if (basename(commonDir).toLowerCase() !== '.git') return null
+      if (!samePath(dirname(dirname(perWtGitDir)), commonDir)) return null
+      const mainRoot = canonicalPath(dirname(commonDir))
+      return {
+        isGit: true,
+        cwd: absCwd,
+        mainRoot,
+        workTreeRoot: absCwd,
+        gitDir: commonDir,
+        workTreeGitDir: perWtGitDir,
+        isWorktree: !samePath(mainRoot, absCwd),
+        isBare: false,
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 /**
  * 解析当前目录所属的 Git 仓库边界。
- * 基于 `git worktree list --porcelain` 首条非 bare 条目确定 `mainRoot`，
- * 兼容 linked worktree、submodule（`.git/modules/<name>`）与 `--separate-git-dir`。
+ * 常规仓与 `.worktrees/` 链接工作树通过本地 `.git` 元信息直接零开销解析；
+ * 子目录、子模块或 `--separate-git-dir` 自动回退 `git rev-parse`。
  */
 export async function resolveRepoRoots(cwd = process.cwd()) {
   const absCwd = canonicalPath(cwd)
+  const fast = tryResolveRepoRootsFast(absCwd)
+  if (fast) return fast
+
   const res = await gitRun(absCwd, [
     'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--is-bare-repository', '--git-dir',
   ])
@@ -370,14 +293,21 @@ export async function resolveRepoRoots(cwd = process.cwd()) {
   }
 
   let mainRoot = null
-  const wtRes = await gitRun(topLevel, ['worktree', 'list', '--porcelain'])
-  if (wtRes.ok && wtRes.stdout) {
-    const list = parseWorktreeListPorcelain(wtRes.stdout)
-    const primary = list.find((item) => !item.bare)
-    if (primary?.path) mainRoot = primary.path
-  }
-  if (!mainRoot) {
-    mainRoot = basename(commonDir).toLowerCase() === '.git' ? canonicalPath(dirname(commonDir)) : topLevel
+  const isStandardDotGit = basename(commonDir).toLowerCase() === '.git'
+  if (isStandardDotGit && samePath(commonDir, perWtGitDir) && samePath(dirname(commonDir), topLevel)) {
+    mainRoot = topLevel
+  } else if (isStandardDotGit && !samePath(commonDir, perWtGitDir) && samePath(dirname(dirname(perWtGitDir)), commonDir)) {
+    mainRoot = canonicalPath(dirname(commonDir))
+  } else {
+    const wtRes = await gitRun(topLevel, ['worktree', 'list', '--porcelain'])
+    if (wtRes.ok && wtRes.stdout) {
+      const list = parseWorktreeListPorcelain(wtRes.stdout)
+      const primary = list.find((item) => !item.bare)
+      if (primary?.path) mainRoot = primary.path
+    }
+    if (!mainRoot) {
+      mainRoot = isStandardDotGit ? canonicalPath(dirname(commonDir)) : topLevel
+    }
   }
 
   return {
@@ -522,14 +452,22 @@ export async function detectInProgressGitOp(repoRoot) {
 }
 
 function isBinaryProbe(absPath) {
+  let fd
   try {
     const st = statSync(absPath)
     if (!st.isFile()) return { exists: false, isBinary: false, size: 0 }
     if (st.size === 0) return { exists: true, isBinary: false, size: 0 }
-    const buf = readFileSync(absPath)
-    return { exists: true, isBinary: buf.subarray(0, 4096).includes(0), size: st.size }
+    fd = openSync(absPath, 'r')
+    const probeLen = Math.min(st.size, 4096)
+    const buf = Buffer.allocUnsafe(probeLen)
+    const n = readSync(fd, buf, 0, probeLen, 0)
+    return { exists: true, isBinary: buf.subarray(0, n).includes(0), size: st.size }
   } catch {
     return { exists: false, isBinary: false, size: 0 }
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd) } catch { /* ignore */ }
+    }
   }
 }
 
@@ -539,17 +477,21 @@ function isBinaryProbe(absPath) {
  */
 export async function gitLsFilesTextAndCode(root, { isGit = true, focus, probeBinary = true, maxFiles = 50000 } = {}) {
   const absRoot = canonicalPath(root)
-  const focusRel = focus ? posixPath(focus).replace(/^\/+|\/+$/g, '') : undefined
+  const focusParts = focus
+    ? posixPath(focus).replace(/^\/+|\/+$/g, '').split('/').filter((s) => s && s !== '.')
+    : []
+  const focusRel = focusParts.length > 0 ? focusParts.join('/') : undefined
   const files = []
   const dirSummary = new Map()
   let truncated = false
 
   const pushFile = (relPath) => {
-    const rel = posixPath(relPath).replace(/^\.\//, '')
+    const rel = posixPath(relPath).replace(/^(?:\.\/)+/, '')
     if (!rel || isMacOsJunkPath(rel)) return
     if (focusRel && rel !== focusRel && !rel.startsWith(`${focusRel}/`)) return
-    const firstSeg = rel.split('/')[0]
-    if (DEFAULT_WALK_SKIP_DIRS.has(firstSeg)) return
+    const segs = rel.split('/')
+    const firstSeg = segs[0]
+    if (segs.slice(0, -1).some((s) => COMMON_SKIP_DIRS.has(s))) return
     const full = join(absRoot, rel)
     const probe = probeBinary ? isBinaryProbe(full) : { exists: existsSync(full), isBinary: false, size: 0 }
     if (!probe.exists) return
@@ -594,7 +536,7 @@ export async function gitLsFilesTextAndCode(root, { isGit = true, focus, probeBi
       const full = join(dir, entry.name)
       const rel = posixPath(relative(absRoot, full))
       if (entry.isDirectory()) {
-        if (!DEFAULT_WALK_SKIP_DIRS.has(entry.name)) queue.push(full)
+        if (!COMMON_SKIP_DIRS.has(entry.name)) queue.push(full)
       } else if (entry.isFile()) {
         pushFile(rel)
         if (truncated) break
@@ -656,42 +598,43 @@ export async function detectProjectConventions(repoRoot) {
  */
 export async function inspectBranchMergeState(mainRoot, { branch, headSha, defaultBranch = 'main' } = {}) {
   const targetRef = branch || headSha
-  const shallowRes = await gitRun(mainRoot, ['rev-parse', '--is-shallow-repository'])
+  const [shallowRes, baseCheck, ownRes, isAncRes] = await Promise.all([
+    gitRun(mainRoot, ['rev-parse', '--is-shallow-repository']),
+    targetRef ? gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', defaultBranch]) : Promise.resolve({ ok: false }),
+    targetRef ? gitRun(mainRoot, ['rev-list', '--count', `${defaultBranch}..${targetRef}`]) : Promise.resolve({ ok: false, stdout: '0' }),
+    targetRef ? gitRun(mainRoot, ['merge-base', '--is-ancestor', targetRef, defaultBranch]) : Promise.resolve({ ok: false }),
+  ])
   const isShallow = shallowRes.ok && shallowRes.stdout.trim() === 'true'
   if (!targetRef) {
     return { state: 'unmerged', ownCommits: 0, isShallow, reason: '缺少目标分支或提交引用' }
   }
-
-  const baseCheck = await gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', defaultBranch])
   if (!baseCheck.ok) {
     return { state: 'unmerged', ownCommits: 0, isShallow, reason: `基线分支 ${defaultBranch} 不存在` }
   }
 
-  const ownRes = await gitRun(mainRoot, ['rev-list', '--count', `${defaultBranch}..${targetRef}`])
   const ownCommits = ownRes.ok ? (Number(ownRes.stdout.trim()) || 0) : 1
-  const isAncestor = (await gitRun(mainRoot, ['merge-base', '--is-ancestor', targetRef, defaultBranch])).ok
+  const isAncestor = isAncRes.ok
 
   if (isAncestor && ownCommits === 0) {
-    const targetShaRes = headSha
-      ? { ok: true, stdout: headSha }
-      : await gitRun(mainRoot, ['rev-parse', targetRef])
+    const [targetShaRes, fpRes, reflog] = await Promise.all([
+      headSha ? Promise.resolve({ ok: true, stdout: headSha }) : gitRun(mainRoot, ['rev-parse', targetRef]),
+      gitRun(mainRoot, ['rev-list', '--first-parent', '-n', '200', defaultBranch]),
+      branch ? gitRun(mainRoot, ['reflog', 'show', '--format=%gs', `refs/heads/${branch}`]) : Promise.resolve({ ok: false, stdout: '' }),
+    ])
     const targetSha = targetShaRes.ok ? targetShaRes.stdout.trim() : ''
-    const fpRes = await gitRun(mainRoot, ['rev-list', '--first-parent', '-n', '200', defaultBranch])
     const firstParentSet = new Set(fpRes.ok ? fpRes.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : [])
-    let hasCommitReflog = false
-    if (branch) {
-      const reflog = await gitRun(mainRoot, ['reflog', 'show', '--format=%gs', `refs/heads/${branch}`])
-      if (reflog.ok && reflog.stdout) {
-        hasCommitReflog = reflog.stdout.split('\n').some((l) => /^(?:commit(?:\s|\(|:)|cherry-pick)/.test(l.trim()))
-      }
-    }
+    const hasCommitReflog = Boolean(reflog.ok && reflog.stdout
+      && reflog.stdout.split('\n').some((l) => /^(?:commit(?:\s|\(|:)|cherry-pick)/.test(l.trim())))
     if ((targetSha && !firstParentSet.has(targetSha)) || hasCommitReflog) {
       return { state: 'merged', ownCommits: 0, isShallow, reason: `已合入 ${defaultBranch}` }
     }
     return { state: 'no_own_commits', ownCommits: 0, isShallow, reason: `无领先 ${defaultBranch} 的独立提交` }
   }
 
-  const cherryRes = await gitRun(mainRoot, ['cherry', defaultBranch, targetRef])
+  const [cherryRes, mbRes] = await Promise.all([
+    gitRun(mainRoot, ['cherry', defaultBranch, targetRef]),
+    gitRun(mainRoot, ['merge-base', defaultBranch, targetRef]),
+  ])
   const cherryLines = cherryRes.ok && cherryRes.stdout
     ? cherryRes.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
     : []
@@ -704,25 +647,24 @@ export async function inspectBranchMergeState(mainRoot, { branch, headSha, defau
     }
   }
 
-  const mbRes = await gitRun(mainRoot, ['merge-base', defaultBranch, targetRef])
   if (mbRes.ok && mbRes.stdout.trim()) {
     const diffRes = await gitRun(mainRoot, ['diff', mbRes.stdout.trim(), targetRef])
     if (diffRes.ok && diffRes.stdout) {
-      const branchPidRes = await gitRun(mainRoot, ['patch-id', '--stable'], { input: diffRes.stdout })
+      const [branchPidRes, logRes] = await Promise.all([
+        gitRun(mainRoot, ['patch-id', '--stable'], { input: diffRes.stdout }),
+        gitRun(mainRoot, ['log', '-n', '60', '--no-merges', '-p', defaultBranch], { timeout: 30000 }),
+      ])
       const branchPid = branchPidRes.ok ? branchPidRes.stdout.trim().split(/\s+/)[0] : ''
-      if (branchPid) {
-        const logRes = await gitRun(mainRoot, ['log', '-n', '60', '--no-merges', '-p', defaultBranch], { timeout: 30000 })
-        if (logRes.ok && logRes.stdout) {
-          const defPidRes = await gitRun(mainRoot, ['patch-id', '--stable'], { input: logRes.stdout })
-          if (defPidRes.ok && defPidRes.stdout) {
-            const set = new Set(defPidRes.stdout.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean))
-            if (set.has(branchPid)) {
-              return {
-                state: 'squash_or_rebase_merged',
-                ownCommits,
-                isShallow,
-                reason: `合并补丁 patch-id 与 ${defaultBranch} 提交完全一致（Squash 合并）`,
-              }
+      if (branchPid && logRes.ok && logRes.stdout) {
+        const defPidRes = await gitRun(mainRoot, ['patch-id', '--stable'], { input: logRes.stdout })
+        if (defPidRes.ok && defPidRes.stdout) {
+          const set = new Set(defPidRes.stdout.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean))
+          if (set.has(branchPid)) {
+            return {
+              state: 'squash_or_rebase_merged',
+              ownCommits,
+              isShallow,
+              reason: `合并补丁 patch-id 与 ${defaultBranch} 提交完全一致（Squash 合并）`,
             }
           }
         }

@@ -87,7 +87,7 @@ metadata:
 node "<本 skill 目录>/scripts/update.mjs" --quiet
 # S1 只读勘察（--probe-auth 无远端亦可探测本地凭据，输出 recommendedTier 与 explorationStrategy.tier）
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe-auth
-# S3 第 0 步：非空存量仓写前全仓 .tar.gz 快照（钉住首份 pre-forge 基线；支持 list / restore）
+# S3 第 0 步：非空存量仓写前全仓 .zip 快照（钉住首份 pre-forge 基线；支持 list / restore，兼容 .tar.gz）
 node "<本 skill 目录>/scripts/backup.mjs" create "<项目目录>" --label pre-forge
 # S3 按档位装配 / 无损升级套件（空目录加 --bootstrap-empty --lang <node|python|go|rust|java|docs> --name <name>）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>" --tier <lightweight|full>

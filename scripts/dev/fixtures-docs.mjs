@@ -4,8 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { SKILL_ROOT, gitInit, rmTree, runAbs, survey, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerDocsCases(cases) {
 cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截、critique-pass 防篡改、approve 与豁免', async () => {
@@ -67,47 +66,47 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
 
   try {
     // 1. 坏 SPEC audit 与 approve 必须阻断
-    const badAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/bad.md', '--json'], { cwd: dir })
+    const badAudit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/bad.md', '--json'], { cwd: dir })
     if (badAudit.status === 0) return '缺陷 SPEC 的 audit 竟通过了'
     const badJson = JSON.parse(badAudit.stdout)
     const codes = new Set(badJson.errors.map((e) => e.code))
     for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_NON_GOALS', 'MISSING_DOOR_OR_ROLLBACK', 'MISSING_ACCEPTANCE_CRITERIA']) {
       if (!codes.has(req)) return `坏 SPEC audit 漏报 ${req}：${badAudit.stdout}`
     }
-    const badApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })
+    const badApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })
     if (badApprove.status === 0 || !/BLOCKED_AUDIT_FAILED/.test(badApprove.stderr)) {
       return `未通过 audit 的 SPEC 竟被 approve 放行：${badApprove.stderr}`
     }
 
     // 2. 好 SPEC audit 放行，但未 critique-pass 不允许直接 approve
-    const goodAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
+    const goodAudit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
     if (goodAudit.status !== 0) return `合规 SPEC audit 误杀：${goodAudit.stdout}\n${goodAudit.stderr}`
 
-    const noCritApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
+    const noCritApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
     if (noCritApprove.status === 0 || !/BLOCKED_CRITIQUE_REQUIRED/.test(noCritApprove.stderr)) {
       return `未 critique-pass 的 SPEC 竟被 approve 放行：exit=${noCritApprove.status} stderr=${noCritApprove.stderr}`
     }
 
     // 3. critique-pass 后篡改正文 -> BLOCKED_CRITIQUE_STALE
-    const crit1 = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '1', '--json'], { cwd: dir })
+    const crit1 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '1', '--json'], { cwd: dir })
     if (crit1.status !== 0) return `critique-pass 失败：${crit1.stderr}`
 
     const goodAbs = join(dir, 'docs/specs/good.md')
     writeFileSync(goodAbs, readFileSync(goodAbs, 'utf8') + '\n- 事后偷偷追加的范围\n')
-    const staleApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
+    const staleApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md'], { cwd: dir })
     if (staleApprove.status === 0 || !/BLOCKED_CRITIQUE_STALE/.test(staleApprove.stderr)) {
       return `critique-pass 后篡改正文未拦截：exit=${staleApprove.status} stderr=${staleApprove.stderr}`
     }
 
     // 4. 重审并 approve 成功；另测 --skip-critique-reason 豁免
-    const crit2 = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
+    const crit2 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
     if (crit2.status !== 0) return `二次 critique-pass 失败：${crit2.stderr}`
-    const okApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
+    const okApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
     if (okApprove.status !== 0 || JSON.parse(okApprove.stdout).status !== 'approved') {
       return `复核后 approve 失败：${okApprove.stderr}`
     }
 
-    const exApprove = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', 'emergency-fix', '--json'], { cwd: dir })
+    const exApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/exempt.md', '--skip-critique-reason', 'emergency-fix', '--json'], { cwd: dir })
     if (exApprove.status !== 0 || !JSON.parse(exApprove.stdout).critiqueSkipped) {
       return `--skip-critique-reason 豁免失败：${exApprove.stderr}`
     }
@@ -137,12 +136,9 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
     'docs/TDD.md': '# TDD\n\n## 文档信息\n\n| 项目 | 内容 |\n| --- | --- |\n| 最近更新 | 2026-01-01 |\n',
     'src/app.mjs': 'export const a = 1\n',
   })
-  gitInit(dir)
-  spawnSync('git', ['branch', '-M', 'main'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'ignore' })
-  spawnSync('git', ['config', 'user.email', 't@t.t'], { cwd: dir, stdio: 'ignore' })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
   try {
-    const initRes = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+    const initRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
       'init', '--kind', 'all', '--slug', '中文特性', '--title', '中文特性方案', '--json',
     ], { cwd: dir })
     if (initRes.status !== 0) return `doc-plan init all 失败：${initRes.stderr}`
@@ -163,11 +159,11 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
       writeFileSync(p, txt)
     }
 
-    const cp = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', specRel, '--reviewer', 'critic-1'], { cwd: dir })
+    const cp = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', specRel, '--reviewer', 'critic-1'], { cwd: dir })
     if (cp.status !== 0) return `critique-pass 失败：${cp.stderr}`
 
     // link --issue 后不应触发 BLOCKED_CRITIQUE_STALE 且中文 slug 不嵌套重复日期
-    const lk = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['link', specRel, '--issue', '42', '--json'], { cwd: dir })
+    const lk = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['link', specRel, '--issue', '42', '--json'], { cwd: dir })
     if (lk.status !== 0) return `link --issue 失败：${lk.stderr}`
     const lkJson = JSON.parse(lk.stdout)
     const renamedSpec = lkJson.byKind?.spec
@@ -175,22 +171,22 @@ cases.push(['四层统一模板、中文 slug 成对归档、approve 不写非�
       return `中文 slug 重命名重复损坏：${renamedSpec}`
     }
     const renamedTodo = lkJson.byKind?.todo
-    const apTodo = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedTodo], { cwd: dir })
+    const apTodo = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedTodo], { cwd: dir })
     if (apTodo.status !== 0) return `Todo approve 失败：${apTodo.stderr}`
     if (/^status:\s*approved/m.test(readFileSync(join(dir, renamedTodo), 'utf8'))) {
       return 'approveSpec 向 Todo 写了非法 status: approved'
     }
-    const apSpec = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedSpec], { cwd: dir })
+    const apSpec = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', renamedSpec], { cwd: dir })
     if (apSpec.status !== 0) return `link --issue 后 approveSpec 失败（误触 critique stale）：${apSpec.stderr}`
 
     // 成对归档：PRD / SPEC / Todo 一并移入 docs/archive/{prd,specs,todo}/ 并重算 related_* 零断链
-    const arch = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['archive', renamedSpec, '--json'], { cwd: dir })
+    const arch = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['archive', renamedSpec, '--json'], { cwd: dir })
     if (arch.status !== 0) return `doc-plan archive 失败：${arch.stderr}`
     const archJson = JSON.parse(arch.stdout)
     for (const k of ['prd', 'spec', 'todo']) {
       if (!archJson.byKind?.[k]?.startsWith('docs/archive/')) return `${k} 未成对归档：${JSON.stringify(archJson.byKind)}`
     }
-    const audAfter = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--json'], { cwd: dir })
+    const audAfter = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--json'], { cwd: dir })
     if (audAfter.status !== 0) return `归档后 doc-plan audit 断链：${audAfter.stdout} ${audAfter.stderr}`
 
     // syncDocsLifecycle 单遍替换防嵌套测试
@@ -283,7 +279,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
 
   try {
     gitInit(dir)
-    const initAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--json'])
+    const initAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'auth', '--title', 'Auth Flow', '--json'])
     if (initAuth.status !== 0) return `doc-plan init pair 失败：${initAuth.stderr}`
     const authJson = JSON.parse(initAuth.stdout)
     const authSpec = authJson.files.find((f) => f.endsWith('-auth-spec.md'))
@@ -292,7 +288,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     fillGeneratedDoc(join(dir, authSpec))
     fillGeneratedDoc(join(dir, authTodo))
 
-    const linkAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['link', 'auth', '--issue', '42', '--dir', dir, '--json'])
+    const linkAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['link', 'auth', '--issue', '42', '--dir', dir, '--json'])
     if (linkAuth.status !== 0) return `doc-plan link 失败：${linkAuth.stderr}`
     const linkJson = JSON.parse(linkAuth.stdout)
     const renamedSpec = linkJson.byKind?.spec
@@ -308,19 +304,19 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     if (fmSpec42.data.issue !== 42 || !String(fmSpec42.data.related_todo).includes('-issue42-auth-todo.md') || !String(fmTodo42.data.related_spec).includes('-issue42-auth-spec.md')) {
       return `link 后 frontmatter 或 related_* 未同步：spec=${JSON.stringify(fmSpec42.data)}, todo=${JSON.stringify(fmTodo42.data)}`
     }
-    const auditAuth = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--dir', dir])
+    const auditAuth = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--dir', dir])
     if (auditAuth.status !== 0) return `link 后 doc-plan audit . 失败：\n${auditAuth.stdout}\n${auditAuth.stderr}`
 
     // 第二组文档提交后，由 flow.mjs start --issue 77 在工作位触发协同重命名
-    const initBill = JSON.parse(runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--json']).stdout)
+    const initBill = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--dir', dir, '--kind', 'pair', '--slug', 'billing', '--title', 'Billing Flow', '--json'])).stdout)
     const billSpec = initBill.files.find((f) => f.endsWith('-billing-spec.md'))
     const billTodo = initBill.files.find((f) => f.endsWith('-billing-todo.md'))
     fillGeneratedDoc(join(dir, billSpec))
     fillGeneratedDoc(join(dir, billTodo))
-    spawnSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add auth42 and billing docs'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', '-A'])
+    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add auth42 and billing docs'])
 
-    const flowStart = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--dir', dir, '--json'])
+    const flowStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--dir', dir, '--json'])
     if (flowStart.status !== 0) return `flow.mjs start --issue 77 失败：${flowStart.stderr}`
     const ledger = JSON.parse(flowStart.stdout)
     const wtRoot = ledger.worktreePath ? join(dir, ledger.worktreePath) : dir
@@ -333,7 +329,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     if (legacyFm.hasFrontmatter || legacyFm.malformedFrontmatter || legacyFm.data.status !== 'active') {
       return `parseDocFrontmatter 未平滑兼容旧版 bullet-header：${JSON.stringify(legacyFm)}`
     }
-    const badPlanAudit = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', 'docs/specs/261114-bad-status-spec.md', '--dir', badDir, '--json'])
+    const badPlanAudit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', 'docs/specs/261114-bad-status-spec.md', '--dir', badDir, '--json'])
     if (badPlanAudit.status === 0) return `doc-plan.mjs audit 未拦截非法 status/悬空 link/issue 脱节`
     const badPlanJson = JSON.parse(badPlanAudit.stdout)
     const codes = new Set((badPlanJson.errors ?? []).map((e) => e.code))
@@ -341,7 +337,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
       return `doc-plan.mjs audit 未报 INVALID_STATUS：${JSON.stringify(badPlanJson.errors)}`
     }
 
-    const badGovRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', badDir, '--json'])
+    const badGovRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', badDir, '--json'])
     if (badGovRes.status !== 0) return `govern-audit 坏文档仓运行异常：${badGovRes.stderr}`
     const badGovIds = (JSON.parse(badGovRes.stdout).findings ?? []).map((f) => f.id)
     for (const prefix of ['docs.frontmatter-invalid.', 'docs.filename-issue-mismatch.', 'docs.broken-related-link.']) {
@@ -413,57 +409,57 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     }
 
     // 启动流转分支后只修改 src/api.mjs 并提交，检验 doc-plan triage / review-pack / flow finalize
-    const startRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir])
+    const startRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c29-t1', '--case', '2', '--slug', 'api-sync', '--dir', dir])
     if (startRes.status !== 0) return `flow.mjs start 失败：${startRes.stderr}`
 
     writeFileSync(join(dir, 'src/api.mjs'), 'export const version = 2\n')
-    spawnSync('git', ['add', 'src/api.mjs'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', 'src/api.mjs'])
+    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'])
 
-    const triageOne = runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
+    const triageOne = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
     if (triageOne.status !== 0) return `doc-plan.mjs triage 失败：${triageOne.stderr}`
     const triageOneJson = JSON.parse(triageOne.stdout)
     if ((triageOneJson.coupledSyncWarnings?.length ?? 0) !== 1 || !triageOneJson.coupledSyncWarnings[0].expectedCompanions.includes('docs/api.md')) {
       return `doc-plan.mjs triage 单边未输出 coupledSyncWarnings：${JSON.stringify(triageOneJson)}`
     }
 
-    const packJsonRes = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])
+    const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])
     if (packJsonRes.status !== 0) return `review-pack.mjs --json 失败：${packJsonRes.stderr}`
     const packJson = JSON.parse(packJsonRes.stdout)
     if ((packJson.coupledSyncWarnings?.length ?? 0) !== 1) {
       return `review-pack.mjs --json 未输出 coupledSyncWarnings：${JSON.stringify(packJson.coupledSyncWarnings)}`
     }
-    const packMdRes = runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master'])
+    const packMdRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master'])
     if (packMdRes.status !== 0 || !packMdRes.stdout.includes('## 联动同步核对（改哪看哪）') || !packMdRes.stdout.includes('docs/api.md')) {
       return `review-pack.mjs Markdown 缺少联动同步核对节：\n${packMdRes.stdout}`
     }
 
-    const finJsonRes = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', dir, '--json'])
+    const finJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', dir, '--json'])
     if (finJsonRes.status !== 0) return `flow.mjs finalize --json 失败：${finJsonRes.stderr}`
     const finJson = JSON.parse(finJsonRes.stdout)
     if ((finJson.coupledSyncWarnings?.length ?? 0) !== 1) {
       return `flow.mjs finalize --json 未输出 coupledSyncWarnings：${JSON.stringify(finJson)}`
     }
 
-    const strictFail = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir])
+    const strictFail = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir])
     if (strictFail.status === 0 || !strictFail.stderr.includes('BLOCKED_COUPLED_SYNC')) {
       return `flow.mjs finalize --strict-sync 未阻断单边改动：exit=${strictFail.status}, err=${strictFail.stderr}`
     }
 
     // 反面：补齐伴随文件 docs/api.md 后，三处工具均应 0 告警且 --strict-sync 放行
     writeFileSync(join(dir, 'docs/api.md'), '# API\n\nUpdated version 2.\n')
-    spawnSync('git', ['add', 'docs/api.md'], { cwd: dir, stdio: 'ignore' })
-    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'], { cwd: dir, stdio: 'ignore' })
+    gitSync(dir, ['add', 'docs/api.md'])
+    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'])
 
-    const triageSynced = JSON.parse(runAbs('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json']).stdout)
+    const triageSynced = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', dir, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json'])).stdout)
     if ((triageSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
       return `doc-plan.mjs triage 配对同步后仍误报：${JSON.stringify(triageSynced.coupledSyncWarnings)}`
     }
-    const packSynced = JSON.parse(runAbs('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json']).stdout)
+    const packSynced = JSON.parse((await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', dir, '--base', 'master', '--json'])).stdout)
     if ((packSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
       return `review-pack.mjs 配对同步后仍误报：${JSON.stringify(packSynced.coupledSyncWarnings)}`
     }
-    const strictPass = runAbs('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir, '--json'])
+    const strictPass = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--strict-sync', '--dir', dir, '--json'])
     if (strictPass.status !== 0 || (JSON.parse(strictPass.stdout).coupledSyncWarnings?.length ?? 0) !== 0) {
       return `flow.mjs finalize 配对同步后未放行：exit=${strictPass.status}, out=${strictPass.stdout}, err=${strictPass.stderr}`
     }
@@ -517,7 +513,7 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
     return 'docs/TDD.md 缺少可执行 arch-rules yaml 块'
   }
 
-  const mapRes = runAbs('kit/skills/dev-explore/scripts/repo-map.mjs', [SKILL_ROOT, '--json'])
+  const mapRes = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', [SKILL_ROOT, '--json'])
   if (mapRes.status !== 0) return `repo-map.mjs --json 失败：${mapRes.stderr}`
   const mapJson = JSON.parse(mapRes.stdout)
   const tddFeatures = (mapJson.featureMap ?? []).filter((x) => x.origin === 'docs/TDD.md')
@@ -554,7 +550,7 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
     if (!sGhost.reentry?.drifted || !sGhost.reentry?.staleTddPaths?.includes('src/ghost-nonexistent-module.mjs') || sGhost.reentry?.staleTddPaths?.includes('src/ok.mjs')) {
       return `survey 未准确识别 TDD 幽灵路径：${JSON.stringify(sGhost.reentry)}`
     }
-    const auditRes = runAbs('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', ghostDir, '--json'])
+    const auditRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', ghostDir, '--json'])
     if (auditRes.status !== 0) return `govern-audit 失败：${auditRes.stderr}`
     const auditJson = JSON.parse(auditRes.stdout)
     const hit = (auditJson.findings ?? []).some((f) => f.id === 'docs.tdd-stale-path.src/ghost-nonexistent-module.mjs')

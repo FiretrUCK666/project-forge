@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { parseStandardCli } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import {
   canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule,
   posixPath, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
@@ -26,16 +26,17 @@ import {
   readSignalsJsonl, resolveGovernStateDir, saveBaseline, updateLoopState,
 } from './govern-state.mjs'
 import { auditDocs, buildPlan } from './govern-docs.mjs'
+import { handleRetro } from './govern-retro.mjs'
 import { auditTests } from './govern-tests.mjs'
 import { handleReleasePrep } from './release-prep-lib.mjs'
 
 const ALL_CATEGORIES = ['security', 'deadcode', 'tests', 'docs', 'hygiene', 'perf']
 const VALID_CATEGORIES = new Set(ALL_CATEGORIES)
-const SUBCOMMANDS = ['audit', 'reconcile', 'plan', 'issues', 'record', 'cluster', 'sample', 'release-prep']
+const SUBCOMMANDS = ['audit', 'reconcile', 'plan', 'issues', 'record', 'cluster', 'sample', 'retro', 'release-prep']
 
 function printHelp() {
   process.stdout.write([
-    '用法：node govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|release-prep] [targetDir] [options]',
+    '用法：node govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|retro|release-prep] [targetDir] [options]',
     '',
     'Subcommands & Modes:',
     '  audit | --audit-only         Read-only audit outputting findings + [GAP_SCAN] (default)',
@@ -45,6 +46,7 @@ function printHelp() {
     '  record                       Append governance signal into <gitCommonDir>/project-forge-govern/signals.jsonl',
     '  cluster                      Group signals & findings by module+pattern, flagging >= 2 repeat sink candidates',
     '  sample [--commits 30]        Inspect git Revert rate, 48h same-file rework hotspots, and rule-sinking actions',
+    '  retro [--task <id>]          Aggregate signals.jsonl & task ledgers to emit rule/gate/fixture patches (--apply-patches)',
     '  release-prep                 Collect noise-filtered multi-version release-prep brief (shallow-aware)',
     '',
     'Options:',
@@ -140,9 +142,11 @@ function normalizeParsedArgs(cli) {
     loop: Boolean(opts.loop),
     issues: Boolean(opts.issues || sub === 'issues'),
     applyIssues: Boolean(opts['apply-issues']),
+    applyPatches: Boolean(opts['apply-patches']),
     writeTodo: Boolean(opts['write-todo']),
     strict: Boolean(opts.strict),
     json: Boolean(opts.json),
+    task: opts.task,
     category: opts.category,
     pattern: opts.pattern,
     module: opts.module,
@@ -168,16 +172,16 @@ async function main(argv = process.argv.slice(2)) {
       positionalDir: 'auto',
       booleanFlags: [
         'audit-only', 'plan-only', 'execute', 'reconcile', 'cluster',
-        'signals-only', 'loop', 'issues', 'apply-issues', 'write-todo',
+        'signals-only', 'loop', 'issues', 'apply-issues', 'apply-patches', 'write-todo',
         'strict', 'save-baseline', 'changed', 'all',
       ],
       valueFlags: [
         'scope', 'categories', 'commits', 'from', 'to', 'version',
         'category', 'pattern', 'rule', 'module', 'file', 'severity',
-        'source', 'message', 'title', 'note',
+        'source', 'message', 'title', 'note', 'task',
       ],
       aliases: { rule: 'pattern', title: 'message' },
-      usageHint: 'govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|release-prep] [dir]',
+      usageHint: 'govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|retro|release-prep] [dir]',
     })
     opts = normalizeParsedArgs(cli)
   } catch (err) {
@@ -193,8 +197,9 @@ async function main(argv = process.argv.slice(2)) {
   const roots = await resolveRepoRoots(opts.targetDir)
   const { isGit, mainRoot, workTreeRoot, gitDir } = roots
 
-  if (opts.sub === 'record') return handleRecordSignal(mainRoot, gitDir, isGit, opts)
+  if (opts.sub === 'record') return await handleRecordSignal(mainRoot, gitDir, isGit, opts)
   if (opts.sub === 'sample') return await handleSampleCommits(workTreeRoot, mainRoot, gitDir, isGit, opts)
+  if (opts.sub === 'retro') return await handleRetro(workTreeRoot, mainRoot, gitDir, isGit, opts)
   if (opts.sub === 'release-prep') return await handleReleasePrep(workTreeRoot, mainRoot, gitDir, isGit, opts)
 
   let scopeRel = ''
@@ -390,5 +395,10 @@ async function finishAudit({
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main().then((code) => process.exit(code))
+  main()
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`govern-audit 错误：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

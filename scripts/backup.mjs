@@ -20,7 +20,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { tempPathFor, writeAtomic } from './lib/fs-atomic.mjs'
 import { COMMON_SKIP_DIRS, isMacOsMetadata } from './lib/protocol.mjs'
-import { isMainModule, posixPath, readJsonSafe } from './lib/text.mjs'
+import { flushAndExit, isMainModule, posixPath, readJsonSafe } from './lib/text.mjs'
 import { readZip, writeZip } from './zip.mjs'
 
 export const DEFAULT_MAX_KEEP = 5
@@ -847,5 +847,10 @@ async function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`backup 失败：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

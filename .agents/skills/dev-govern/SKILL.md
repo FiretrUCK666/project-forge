@@ -27,10 +27,11 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs plan [--write-todo]     
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --execute --loop
 node .agents/skills/dev-govern/scripts/govern-audit.mjs issues [--apply-issues] # 兼容 --issues
 
-# 3. 园艺信号记录、聚类与事后历史抽检
+# 3. 园艺信号记录、聚类、事后抽检与闭环复盘
 node .agents/skills/dev-govern/scripts/govern-audit.mjs record --pattern <key> --message "<text>" [--module <dir>] [--file <path>]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs cluster [--signals-only]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs sample [--commits 30]
+node .agents/skills/dev-govern/scripts/govern-audit.mjs retro [--task <id>] [--apply-patches] [--json]
 
 # 4. 跨多版本人类可读发版筹备（支持跳跃自定义号、浅克隆警告与多子包版本聚合）
 node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <tag|rev>] [--to HEAD] [--version <ver>] [--json]

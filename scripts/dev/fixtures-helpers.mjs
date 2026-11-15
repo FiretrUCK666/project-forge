@@ -52,7 +52,20 @@ export function existingKept(result, pid) {
   return (result.kept ?? []).some((p) => p.endsWith(`.tmp-${pid}`))
 }
 
+let lastFixtureTraceAt = 0
+
+export function traceFixtureStage(stage, force = false) {
+  const tf = process.env.PF_TRACE_FILE
+  if (!tf) return
+  const now = Date.now()
+  if (force) lastFixtureTraceAt = 0
+  else if (now - lastFixtureTraceAt < 250) return
+  else lastFixtureTraceAt = now
+  try { writeFileSync(tf, `${now} ${stage}\n`) } catch { /* ignore */ }
+}
+
 export function gitSync(cwd, args, opts = {}) {
+  traceFixtureStage(`git:${args[0] ?? ''}`)
   const baseEnv = opts.env ?? process.env
   const targetCwd = opts.cwd ?? cwd
   const inv = prepareExecInvocation('git', args, { cwd: targetCwd, env: baseEnv })
@@ -60,6 +73,7 @@ export function gitSync(cwd, args, opts = {}) {
     cwd: targetCwd,
     encoding: 'utf8',
     stdio: opts.stdio ?? (opts.encoding ? 'pipe' : 'ignore'),
+    timeout: opts.timeout ?? 30000,
     windowsHide: true,
     ...opts,
     env: inv.env,
@@ -117,6 +131,7 @@ const cliModCache = new Map()
 let inProcessQueue = Promise.resolve()
 
 function execCliInProcess(absPath, args, opts = {}) {
+  traceFixtureStage(`cli:${basename(absPath)}:${args[0] ?? ''}`)
   const task = inProcessQueue.then(() => runCliInProcessUnlocked(absPath, args, opts))
   inProcessQueue = task.catch(() => {})
   return task

@@ -8,7 +8,7 @@
 
 import { basename } from 'node:path'
 
-import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
@@ -162,5 +162,10 @@ async function main(argv) {
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`flow 错误：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

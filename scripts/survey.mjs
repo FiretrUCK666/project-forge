@@ -51,6 +51,7 @@ import {
   computeRecommendedTier,
 } from './lib/survey-plan.mjs'
 import {
+  flushAndExit,
   githubRepoPath,
   isMainModule,
   readJsonSafe,
@@ -675,5 +676,10 @@ async function main(argv) {
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(2)
+    })
 }

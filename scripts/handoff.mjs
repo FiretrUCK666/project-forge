@@ -25,7 +25,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
+import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import {
@@ -495,5 +495,5 @@ function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  process.exit(main(process.argv.slice(2)))
+  void flushAndExit(main(process.argv.slice(2)))
 }

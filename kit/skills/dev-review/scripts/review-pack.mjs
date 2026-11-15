@@ -9,7 +9,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { parseStandardCli } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import {
   gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
@@ -437,5 +437,10 @@ async function main(argv = process.argv.slice(2)) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main().then((code) => process.exit(code))
+  main()
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

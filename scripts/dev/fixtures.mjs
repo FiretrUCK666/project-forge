@@ -4,12 +4,14 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { initTestBackupDir } from './fixtures-helpers.mjs'
+import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
+import { killProcessTree, supportsSafeDetachedSpawn } from '../../kit/skills/lib/exec.mjs'
+import { initTestBackupDir, traceFixtureStage } from './fixtures-helpers.mjs'
 import { registerCoreCases } from './fixtures-core.mjs'
 import { registerSurveyCases } from './fixtures-survey.mjs'
 import { registerContractCases } from './fixtures-contracts.mjs'
@@ -20,6 +22,7 @@ import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
 import { registerM2Cases } from './fixtures-m2.mjs'
 import { registerM3Cases } from './fixtures-m3.mjs'
+import { registerM4Cases } from './fixtures-m4.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
@@ -30,6 +33,7 @@ const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
   ['m2', registerM2Cases],
   ['m3', registerM3Cases],
+  ['m4', registerM4Cases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],
   ['equip', registerEquipCases],
@@ -76,8 +80,11 @@ function caseMatches(fn, keyword) {
   return fn[0].includes(keyword) || fn[1].toString().includes(keyword)
 }
 
+const RAW_STDOUT_WRITE = process.stdout.write.bind(process.stdout)
+
 async function runCase([name, fn]) {
   const t0 = performance.now()
+  traceFixtureStage(`case-start:${name.slice(0, 60)}`, true)
   try {
     const outcome = await fn()
     const ms = Math.round(performance.now() - t0)
@@ -91,30 +98,35 @@ async function runCase([name, fn]) {
 }
 
 const HEAVY_CASE_HINTS = [
-  'Tier 2 review 槽同步',
-  'M2 C3',
+  '与 STOP_LOSS 人工解锁',
   'flow.mjs：smoke',
-  'M3-C2',
   '全链路 URL',
   'M3-C1b',
-  'govern-audit.mjs：fence-aware',
+  'M3-C2b',
   'M2 C4+C5',
+  'govern-audit.mjs：fence-aware',
   'govern-audit.mjs release-prep',
   'M2 C1b',
-  'flow.mjs + doc-plan.mjs',
-  'M3-C1a',
   '远端 CI 合并硬门禁',
-  'equip.mjs + survey.mjs',
+  'M3-C1a',
+  'flow.mjs + doc-plan.mjs',
   'M2 C2',
-  'review-pack.mjs + govern-audit.mjs',
-  '无远端探测',
-  '测试分层控频',
-  '8 层深',
-  '统一 YAML',
-  'survey.mjs + compose-agents.mjs',
-  'M2 C1c',
+  'M2 C3b',
+  'M2 C3a',
   '耦合文件自同步',
+  'equip.mjs + survey.mjs',
+  'M4-C3',
+  'review-pack.mjs + govern-audit.mjs',
+  'M4-C2b',
+  'M2 C1c',
+  '测试分层控频',
+  'survey.mjs + compose-agents.mjs',
+  '8 层深',
+  'Trust Gateway',
+  '统一 YAML',
   'M3-C5',
+  'M4-C1a',
+  '无远端探测',
 ]
 
 function buildDispatchOrder(allCases) {
@@ -128,71 +140,164 @@ function buildDispatchOrder(allCases) {
     .map((x) => x.index)
 }
 
-function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
+const WORKER_TASK_TIMEOUT_MS = 90000
+const WORKER_MSG_PREFIX = '__PF_W__:'
+
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, caseNames = []) {
   return new Promise((done) => {
     let cursor = 0
     let passed = 0
     const failures = []
     const timings = []
     let activeWorkers = lanes
+    const activeChildren = new Set()
+
+    const cleanupWorkers = (sig) => {
+      for (const ch of activeChildren) killProcessTree(ch, false)
+      process.exit(sig === 'SIGINT' ? 130 : 143)
+    }
+    const onSigTerm = () => cleanupWorkers('SIGTERM')
+    const onSigInt = () => cleanupWorkers('SIGINT')
+    process.once('SIGTERM', onSigTerm)
+    process.once('SIGINT', onSigInt)
 
     const onWorkerFinished = () => {
       activeWorkers -= 1
-      if (activeWorkers === 0) done({ passed, failures, timings })
+      if (activeWorkers === 0) {
+        process.off('SIGTERM', onSigTerm)
+        process.off('SIGINT', onSigInt)
+        done({ passed, failures, timings })
+      }
     }
 
     for (let i = 0; i < lanes; i += 1) {
       const tag = `w-${i}`
+      const traceFile = join(workerBkRoot, `${tag}.trace`)
       const child = spawn(process.execPath, [scriptPath, '--worker'], {
         env: {
           ...process.env,
           PF_NO_REAL_AUTH_PROBE: process.env.PF_NO_REAL_AUTH_PROBE || '1',
           PF_BACKUP_DIR: join(workerBkRoot, tag),
           PF_FIXTURE_WORKER: '1',
+          PF_TRACE_FILE: traceFile,
         },
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       })
+      activeChildren.add(child)
+      child.stdin?.on('error', () => {})
+      let outBuf = ''
       let errBuf = ''
       let currentIdx = null
+      let taskStartedAt = 0
       let finalized = false
+      let taskTimer = null
+      let closeFallback = null
+      let timedOutMsg = null
       child.stderr?.on('data', (c) => { errBuf += c })
 
+      const clearTaskTimer = () => {
+        if (taskTimer) { clearTimeout(taskTimer); taskTimer = null }
+      }
+
+      const sendWorkerMsg = (obj) => {
+        try {
+          if (child.stdin && !child.stdin.destroyed && child.stdin.writable) {
+            child.stdin.write(`${JSON.stringify(obj)}\n`)
+          }
+        } catch { /* worker exiting */ }
+      }
+
+      const readTraceSummary = () => {
+        if (!existsSync(traceFile)) return ''
+        try {
+          const raw = readFileSync(traceFile, 'utf8').trim()
+          if (!raw) return ''
+          const sp = raw.indexOf(' ')
+          const ts = sp > 0 ? Number(raw.slice(0, sp)) : NaN
+          const stage = sp > 0 ? raw.slice(sp + 1).trim() : raw
+          const stageAge = Number.isFinite(ts) ? `, stageAge=${Date.now() - ts}ms` : ''
+          const totalElapsed = taskStartedAt ? `, elapsed=${Date.now() - taskStartedAt}ms` : ''
+          return `; lastStage=${stage}${stageAge}${totalElapsed}`
+        } catch { return '' }
+      }
+
+      const finishWorker = (code) => {
+        if (finalized) return
+        finalized = true
+        activeChildren.delete(child)
+        clearTaskTimer()
+        if (closeFallback) { clearTimeout(closeFallback); closeFallback = null }
+        if (timedOutMsg) {
+          failures.push(timedOutMsg)
+        } else if (currentIdx !== null) {
+          failures.push(`工作进程 ${tag} 在用例 #${currentIdx}（${caseNames[currentIdx] ?? 'unknown'}）异常退出 (${code})：${errBuf.trim()}${readTraceSummary()}`)
+        }
+        onWorkerFinished()
+      }
+
+      const armTaskWatchdog = (idx) => {
+        clearTaskTimer()
+        taskStartedAt = Date.now()
+        taskTimer = setTimeout(() => {
+          const name = caseNames[idx] ?? 'unknown'
+          timedOutMsg = `工作进程 ${tag} 在用例 #${idx}（${name}）执行超时 (>${WORKER_TASK_TIMEOUT_MS}ms${readTraceSummary()})`
+          killProcessTree(child, false)
+          closeFallback = setTimeout(() => finishWorker(124), 3000)
+          closeFallback.unref?.()
+        }, WORKER_TASK_TIMEOUT_MS)
+        taskTimer.unref?.()
+      }
+
       const dispatchNext = () => {
+        clearTaskTimer()
         if (cursor < dispatchOrder.length) {
           currentIdx = dispatchOrder[cursor++]
-          child.send({ type: 'run', index: currentIdx })
+          armTaskWatchdog(currentIdx)
+          sendWorkerMsg({ type: 'run', index: currentIdx })
         } else {
           currentIdx = null
-          child.send({ type: 'stop' })
+          sendWorkerMsg({ type: 'stop' })
+          try { child.stdin?.end() } catch { /* ignore */ }
         }
       }
 
-      child.on('message', (msg) => {
+      const handleWorkerMessage = (msg) => {
         if (!msg) return
         if (msg.type === 'ready') {
           dispatchNext()
         } else if (msg.type === 'done') {
           currentIdx = null
+          clearTaskTimer()
           if (Number.isFinite(msg.ms)) timings.push({ index: msg.index, name: msg.name, ms: msg.ms, worker: tag })
           if (msg.ok) passed += 1
           else failures.push(msg.entry)
           dispatchNext()
         }
+      }
+
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk) => {
+        outBuf += chunk
+        let nl
+        while ((nl = outBuf.indexOf('\n')) >= 0) {
+          const line = outBuf.slice(0, nl).trim()
+          outBuf = outBuf.slice(nl + 1)
+          if (!line.startsWith(WORKER_MSG_PREFIX)) continue
+          try {
+            handleWorkerMessage(JSON.parse(line.slice(WORKER_MSG_PREFIX.length)))
+          } catch { /* ignore malformed non-protocol line */ }
+        }
       })
 
-      child.on('close', (code) => {
-        if (finalized) return
-        finalized = true
-        if (currentIdx !== null) {
-          failures.push(`工作进程 ${tag} 在用例 #${currentIdx} 异常退出 (${code})：${errBuf.trim()}`)
-        }
-        onWorkerFinished()
-      })
+      child.on('close', (code) => finishWorker(code))
 
       child.on('error', (error) => {
         if (finalized) return
         finalized = true
+        activeChildren.delete(child)
+        clearTaskTimer()
+        if (closeFallback) { clearTimeout(closeFallback); closeFallback = null }
         failures.push(`工作进程 ${tag} 启动失败：${error.message}`)
         onWorkerFinished()
       })
@@ -206,15 +311,46 @@ async function main() {
   if (worker) {
     const allCases = []
     for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(allCases)
-    process.on('message', async (msg) => {
-      if (!msg || msg.type === 'stop') { process.exit(0); return }
+    process.stdout.write = (chunk, enc, cb) => {
+      if (typeof enc === 'function') enc()
+      else if (typeof cb === 'function') cb()
+      return true
+    }
+    const emit = (obj) => RAW_STDOUT_WRITE(`${WORKER_MSG_PREFIX}${JSON.stringify(obj)}\n`)
+    let inBuf = ''
+    let queue = Promise.resolve()
+    let stopped = false
+    const handleCommand = async (line) => {
+      if (!line || stopped) return
+      let msg
+      try { msg = JSON.parse(line) } catch { return }
+      if (msg.type === 'stop') {
+        stopped = true
+        await flushAndExit(0)
+        return
+      }
       if (msg.type === 'run') {
         const entry = allCases[msg.index]
         const res = entry ? await runCase(entry) : { ok: false, entry: `缺失用例索引 ${msg.index}` }
-        process.send?.({ type: 'done', index: msg.index, ...res })
+        emit({ type: 'done', index: msg.index, ...res })
+      }
+    }
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (chunk) => {
+      inBuf += chunk
+      let nl
+      while ((nl = inBuf.indexOf('\n')) >= 0) {
+        const line = inBuf.slice(0, nl).trim()
+        inBuf = inBuf.slice(nl + 1)
+        queue = queue.then(() => handleCommand(line))
       }
     })
-    process.send?.({ type: 'ready' })
+    process.stdin.on('end', () => {
+      queue = queue.then(async () => {
+        if (!stopped) await flushAndExit(0)
+      })
+    })
+    emit({ type: 'ready' })
     return new Promise(() => {})
   }
 
@@ -285,8 +421,11 @@ async function main() {
     return 1
   }
 
-  // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（避免长尾倾斜与 Windows 进程风暴）
-  const defaultJobs = only || bailOn ? 1 : Math.min(8, Math.max(2, cpus().length))
+  // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（macOS Node < 20 限 2 并发防调度拥塞，>= 12 核主机开 9 并发兼顾吞吐与低上下文切换）
+  const isMacLegacyNode = process.platform === 'darwin' && !supportsSafeDetachedSpawn()
+  const cpuCount = cpus().length
+  const defaultCap = isMacLegacyNode ? 2 : (cpuCount >= 12 ? 9 : 8)
+  const defaultJobs = only || bailOn ? 1 : Math.min(defaultCap, Math.max(2, cpuCount))
   const lanes = Number.isFinite(jobsArg) && jobsArg >= 1
     ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length))
     : defaultJobs
@@ -303,6 +442,7 @@ async function main() {
         dispatchOrder,
         Math.min(lanes, allCases.length),
         workerBkRoot,
+        allCases.map(([name]) => name),
       )
       if (profile) {
         const sorted = [...timings].sort((a, b) => b.ms - a.ms)
@@ -355,4 +495,4 @@ async function main() {
   return 1
 }
 
-main().then((code) => process.exit(code))
+main().then((code) => flushAndExit(code))

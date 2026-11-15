@@ -431,7 +431,7 @@ export function discoverWorkspacePackages(repoRoot, fileRelList = null) {
         const fileFlag = dirRel ? ` -f ${dirRel}/pom.xml` : ''
         const hasSrcTest = existsSync(join(absDir, 'src', 'test'))
         bucket.commands.java = {
-          ...(hasSrcTest || !dirRel ? { quickTest: `${bin}${fileFlag} test` } : { quickTest: `${bin}${fileFlag} test` }),
+          quickTest: `${bin}${fileFlag} test`,
           build: `${bin}${fileFlag} package -DskipTests`,
           hasSrcTest,
         }

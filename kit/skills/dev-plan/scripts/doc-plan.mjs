@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
-import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
   archiveCompletedDocsGroup, buildDocFilename, DOC_FRONTMATTER_KEY_ORDER,
   docDateTag, docIsoDate, parseDocFilename, parseDocFrontmatter,
@@ -517,5 +517,10 @@ async function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`doc-plan 错误：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

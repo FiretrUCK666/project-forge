@@ -204,9 +204,30 @@ function inspectDotGitFast(root) {
       if (sym) originHeadBranch = sym[1].trim()
     }
     const useReftable = existsSync(join(commonDir, 'reftable'))
+    const walkLooseRefs = (dirAbs, excludeName = null) => {
+      const set = new Set()
+      if (!existsSync(dirAbs)) return set
+      const stack = [{ abs: dirAbs, rel: '' }]
+      while (stack.length > 0) {
+        const cur = stack.pop()
+        let entries = []
+        try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
+        for (const e of entries) {
+          if (isMacMetadataName(e.name)) continue
+          const subRel = cur.rel ? `${cur.rel}/${e.name}` : e.name
+          if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: subRel })
+          else if (e.isFile() && subRel !== excludeName) set.add(subRel)
+        }
+      }
+      return set
+    }
     let fastTags = null
+    let fastLocalBranches = null
+    let fastRemoteOriginBranches = null
     if (!useReftable) {
-      const tagSet = new Set()
+      const tagSet = walkLooseRefs(join(commonDir, 'refs', 'tags'))
+      const headSet = walkLooseRefs(join(commonDir, 'refs', 'heads'))
+      const remoteOriginSet = walkLooseRefs(join(commonDir, 'refs', 'remotes', 'origin'), 'HEAD')
       if (packed) {
         for (const line of packed.split('\n')) {
           if (!line || line.startsWith('#') || line.startsWith('^')) continue
@@ -214,26 +235,18 @@ function inspectDotGitFast(root) {
           if (sp <= 0) continue
           const refName = line.slice(sp + 1).trim()
           if (refName.startsWith('refs/tags/')) tagSet.add(refName.slice(10))
-        }
-      }
-      const tagsDir = join(commonDir, 'refs', 'tags')
-      if (existsSync(tagsDir)) {
-        const stack = [{ abs: tagsDir, rel: '' }]
-        while (stack.length > 0) {
-          const cur = stack.pop()
-          let entries = []
-          try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
-          for (const e of entries) {
-            if (isMacMetadataName(e.name)) continue
-            const subRel = cur.rel ? `${cur.rel}/${e.name}` : e.name
-            if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: subRel })
-            else if (e.isFile()) tagSet.add(subRel)
-          }
+          else if (refName.startsWith('refs/heads/')) headSet.add(refName.slice(11))
+          else if (refName.startsWith('refs/remotes/origin/') && refName !== 'refs/remotes/origin/HEAD') remoteOriginSet.add(refName.slice(20))
         }
       }
       fastTags = [...tagSet].sort()
+      fastLocalBranches = [...headSet].sort()
+      fastRemoteOriginBranches = [...remoteOriginSet].sort()
     }
-    return { isRepoRoot: true, workTreeRoot: root, workGitDir, commonDir, isShallow, isSha256, remoteText, originHeadBranch, fastTags, useReftable }
+    return {
+      isRepoRoot: true, workTreeRoot: root, workGitDir, commonDir, isShallow, isSha256,
+      remoteText, originHeadBranch, fastTags, fastLocalBranches, fastRemoteOriginBranches, useReftable,
+    }
   } catch {
     return null
   }
@@ -304,6 +317,8 @@ function mapProbeToAuth(probe) {
 
 function parseTagsAndOriginHead(forEachRefOut) {
   const tags = []
+  const localBranches = []
+  const remoteOriginBranches = []
   let originHeadBranch
   for (const rawLine of String(forEachRefOut ?? '').split('\n')) {
     if (!rawLine) continue
@@ -313,9 +328,13 @@ function parseTagsAndOriginHead(forEachRefOut) {
       if (target) originHeadBranch = target.replace(/^origin\//, '')
     } else if (refName.startsWith('refs/tags/')) {
       tags.push(refName.slice(10))
+    } else if (refName.startsWith('refs/heads/')) {
+      localBranches.push(refName.slice(11))
+    } else if (refName.startsWith('refs/remotes/origin/')) {
+      remoteOriginBranches.push(refName.slice(20))
     }
   }
-  return { tags, originHeadBranch }
+  return { tags, originHeadBranch, localBranches, remoteOriginBranches }
 }
 
 function readScopeConfigFast(commonDir) {
@@ -410,7 +429,7 @@ export async function detectGit(root, opts = {}) {
     dotFast && dotFast.remoteText !== null ? Promise.resolve({ ok: true, stdout: dotFast.remoteText }) : git(root, ['remote', '-v']),
     dotFast && !dotFast.useReftable && dotFast.fastTags !== null
       ? Promise.resolve(null)
-      : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/remotes/origin/HEAD']),
+      : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/heads', 'refs/remotes/origin']),
     git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '500']),
     fastTrackedPaths ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
     git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z']),
@@ -432,9 +451,18 @@ export async function detectGit(root, opts = {}) {
   const remote = topology.primary?.fetchUrl
   const modeMarkers = detectGitModeMarkers(root)
 
-  const parsedRefs = refsRes ? parseTagsAndOriginHead(refsRes.ok ? refsRes.stdout : '') : { tags: dotFast?.fastTags ?? [], originHeadBranch: dotFast?.originHeadBranch }
+  const parsedRefs = refsRes
+    ? parseTagsAndOriginHead(refsRes.ok ? refsRes.stdout : '')
+    : {
+        tags: dotFast?.fastTags ?? [],
+        originHeadBranch: dotFast?.originHeadBranch,
+        localBranches: dotFast?.fastLocalBranches ?? [],
+        remoteOriginBranches: dotFast?.fastRemoteOriginBranches ?? [],
+      }
   const tags = parsedRefs.tags
   const originHeadBranch = parsedRefs.originHeadBranch
+  const localBranches = parsedRefs.localBranches ?? []
+  const remoteOriginBranches = parsedRefs.remoteOriginBranches ?? []
   const rawLogLines = logRes.ok && logRes.stdout ? logRes.stdout.split('\n').filter(Boolean) : []
   const historyAuthorsSet = new Set()
   const recentSubjects = []
@@ -464,6 +492,10 @@ export async function detectGit(root, opts = {}) {
     }
   }
 
+  const currentLikelyBranch = statusInfo.head && statusInfo.head !== '(detached)' && LIKELY_DEFAULT_BRANCHES.includes(statusInfo.head)
+    ? statusInfo.head
+    : undefined
+  const existingLikelyBranch = LIKELY_DEFAULT_BRANCHES.find((b) => localBranches.includes(b) || remoteOriginBranches.includes(b))
   let auth = { https: 'undetermined', network: 'undetermined', reason: '默认不联网、不问凭据助手' }
   if (!remote && !probeAuth) {
     auth = { https: 'n/a', network: 'n/a', reason: '没有远端（需探测本机建仓凭据可加 --probe-auth）' }
@@ -473,7 +505,7 @@ export async function detectGit(root, opts = {}) {
       remoteUrls,
       topology,
       branch: statusInfo.head,
-      defaultBranch: originHeadBranch || 'main',
+      defaultBranch: originHeadBranch || currentLikelyBranch || existingLikelyBranch || 'main',
       verifyToken,
       mcpAvailable,
       offline,
@@ -492,6 +524,8 @@ export async function detectGit(root, opts = {}) {
     insideWorkTree: insideFlag === 'true',
     branch: statusInfo.head,
     originHeadBranch: originHeadBranch ?? dotFast?.originHeadBranch,
+    localBranches,
+    remoteOriginBranches,
     commitStyle,
     upstream: statusInfo.upstream,
     ahead: statusInfo.ahead,
@@ -965,8 +999,12 @@ function detectWorkflowTooling(root) {
 
 export function detectConventions(root, { gitFacts, docs, ecosystem }) {
   const currentBranch = gitFacts.branch && gitFacts.branch !== '(detached)' ? gitFacts.branch : undefined
+  const localSet = new Set(gitFacts.localBranches ?? [])
+  const remoteOriginSet = new Set(gitFacts.remoteOriginBranches ?? [])
+  const existingDefaultBranch = LIKELY_DEFAULT_BRANCHES.find((b) => localSet.has(b) || remoteOriginSet.has(b))
   const defaultBranch = gitFacts.originHeadBranch
     || (currentBranch && LIKELY_DEFAULT_BRANCHES.includes(currentBranch) ? currentBranch : undefined)
+    || existingDefaultBranch
     || gitFacts.initDefaultBranch
     || 'main'
 

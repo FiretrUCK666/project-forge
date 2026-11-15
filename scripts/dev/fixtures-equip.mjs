@@ -642,27 +642,62 @@ cases.push(['M1 update.mjs 6 项修复：--check 只读、--equip 冷却期刷�
     writeFileSync(join(pkgSub, 'SKILL.md'), `---\nname: project-forge\ndescription: demo subpkg\nmetadata:\n  version: "6.0.0"\n  source: "http://127.0.0.1:${gPort}"\n---\n# sub\n`)
 
     const runNodeAsync = (args, env) => new Promise((done) => {
-      const child = spawn(process.execPath, [join(pkgSub, 'scripts/update.mjs'), ...args], { env, windowsHide: true })
+      const child = spawn(process.execPath, [join(pkgSub, 'scripts/update.mjs'), ...args], {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      let killFallback = null
+      const finish = (status) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (killFallback) clearTimeout(killFallback)
+        done({
+          status: timedOut ? 1 : (status ?? 1),
+          stdout,
+          stderr: timedOut ? `${stderr}\nupdate.mjs 执行超时 (>45000ms): ${args.join(' ')}` : stderr,
+        })
+      }
+      const timer = setTimeout(() => {
+        timedOut = true
+        try { child.kill('SIGTERM') } catch { /* ignore */ }
+        killFallback = setTimeout(() => {
+          try { child.kill('SIGKILL') } catch { /* ignore */ }
+          finish(1)
+        }, 1500)
+        killFallback.unref?.()
+      }, 45000)
+      timer.unref?.()
       child.stdout?.on('data', (c) => { stdout += c })
       child.stderr?.on('data', (c) => { stderr += c })
-      child.on('close', (status) => done({ status: status ?? 1, stdout, stderr }))
-      child.on('error', (err) => done({ status: 1, stdout, stderr: err.message }))
+      child.on('close', (status) => finish(status))
+      child.on('error', (err) => { stderr += `\n${err.message}`; finish(1) })
     })
     const isoEnv = { ...process.env, LOCALAPPDATA: cacheHome, XDG_CACHE_HOME: cacheHome, HOME: cacheHome, HTTP_PROXY: '', HTTPS_PROXY: '', NO_PROXY: '' }
     const chkRun = await runNodeAsync(['--check'], isoEnv)
     if (chkRun.status !== 0 || !chkRun.stdout.includes('9.9.9')) {
       return `update.mjs --check 执行失败：${chkRun.stdout} ${chkRun.stderr}`
     }
-    const chkState = existsSync(join(cacheHome, 'project-forge', 'cache')) || existsSync(join(cacheHome, 'project-forge'))
-    if (chkState) {
-      // 检查缓存目录内所有 json 的 lastOkAt 是否被写入
-      const findStates = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? findStates(join(d, e.name)) : [join(d, e.name)])
-      const stateFiles = findStates(cacheHome).filter((f) => f.endsWith('.json'))
-      if (stateFiles.some((sf) => JSON.parse(readFileSync(sf, 'utf8')).lastOkAt > 0)) {
-        return 'update.mjs --check 篡改了节流状态'
-      }
+    const cacheDirs = [
+      join(cacheHome, 'project-forge', 'cache'),
+      join(cacheHome, 'project-forge'),
+      join(cacheHome, 'Library', 'Caches', 'project-forge'),
+      join(cacheHome, '.cache', 'project-forge'),
+    ]
+    const findStates = (d) => existsSync(d)
+      ? readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? findStates(join(d, e.name)) : [join(d, e.name)])
+      : []
+    const stateFiles = [...new Set([
+      ...cacheDirs.flatMap((d) => findStates(d)),
+      ...findStates(cacheHome),
+    ])].filter((f) => f.endsWith('.json'))
+    if (stateFiles.some((sf) => JSON.parse(readFileSync(sf, 'utf8')).lastOkAt > 0)) {
+      return 'update.mjs --check 篡改了节流状态'
     }
     void resolveStatePath
 

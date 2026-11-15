@@ -189,3 +189,19 @@ jobs:
             exit "$CODE"
           }
           printf '%s\n' "$OUT"
+
+      - name: 回读校验已上传用户包（存在性 / SHA256 / CRC32）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          ASSETS_OUT=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[] | "\(.name)\t\(.size)"')
+          printf '%s\n' "$ASSETS_OUT"
+          if ! printf '%s\n' "$ASSETS_OUT" | grep -qE "^${ASSET}[[:space:]]+[1-9][0-9]*$"; then
+            echo "::error::发布页上找不到非空附件 $ASSET，上传可能静默失败。"
+            exit 1
+          fi
+          TMP_ZIP="$RUNNER_TEMP/readback-${ASSET}"
+          rm -f "$TMP_ZIP"
+          gh release download "$TAG" -p "$ASSET" --repo "$REPO" -O "$TMP_ZIP"
+          node --input-type=module -e "import { readFileSync, statSync } from 'node:fs'; import { createHash } from 'node:crypto'; import { readZip } from './scripts/zip.mjs'; const [local, remote] = process.argv.slice(1); const b1 = readFileSync(local), b2 = readFileSync(remote); const h1 = createHash('sha256').update(b1).digest('hex'), h2 = createHash('sha256').update(b2).digest('hex'); if (statSync(local).size !== statSync(remote).size || h1 !== h2) { console.error('readback mismatch', { s1: statSync(local).size, s2: statSync(remote).size, h1, h2 }); process.exit(1); } const entries = readZip(b2); if (entries.length === 0) { console.error('empty zip'); process.exit(1); } console.log('readback SHA256 & readZip CRC32 OK:', entries.length, 'entries');" "$ASSET" "$TMP_ZIP"
+          rm -f "$TMP_ZIP"

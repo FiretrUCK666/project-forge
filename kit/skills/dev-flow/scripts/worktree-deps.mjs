@@ -16,7 +16,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
-import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 
@@ -492,5 +492,5 @@ function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  process.exit(main(process.argv.slice(2)))
+  void flushAndExit(main(process.argv.slice(2)))
 }

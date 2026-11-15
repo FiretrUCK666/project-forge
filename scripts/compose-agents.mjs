@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { survey } from './survey.mjs'
-import { isMainModule, readTextSafe } from './lib/text.mjs'
+import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import * as protocol from './lib/protocol.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
@@ -788,5 +788,10 @@ export async function contractHealth(root, { tier, facts: precomputedFacts } = {
 export { main as runCli, TemplateError, refreshRegions, driftRegions, collectMissingSections, handWrittenCoverage }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  Promise.resolve(main(process.argv.slice(2))).then((code) => process.exit(code))
+  Promise.resolve(main(process.argv.slice(2)))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`compose-agents 失败：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

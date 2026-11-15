@@ -22,10 +22,12 @@ import {
   detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls,
   probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
-import { isProfileExplicitNone, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
+import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
+import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
   readVerificationEvidence, runLowRiskDocStaticCheck, validateVerificationEvidence,
@@ -62,10 +64,7 @@ function findUncheckedLines(text) {
   let inFence = false
   for (const line of String(text ?? '').split('\n')) {
     if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
-    if (inFence) continue
-    if (/^- \[ \]/.test(line) && !/(?:<!--\s*waive:|\[waive:|豁免|跳过原因)/i.test(line)) {
-      out.push(line.trim())
-    }
+    if (!inFence && /^- \[ \]/.test(line) && !/(?:<!--\s*waive:|\[waive:|豁免|跳过原因)/i.test(line)) out.push(line.trim())
   }
   return out
 }
@@ -84,36 +83,8 @@ function findStrictDocBySlug(root, dirRel, ledger) {
   return null
 }
 
-async function checkTddSyncParity(implRoot, changed, ledger) {
-  const profile = parseAgentsProfile(implRoot)
-  const tddRel = resolveAuthoritativeTddPath(implRoot, profile.decisions)
-  const tddPath = tddRel ? join(implRoot, tddRel) : null
-  const changedEntries = ledger.baseSha ? (await gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`])).entries : []
-  const st = await gitStatusPorcelainZ(implRoot)
-  const touchedBoundary = changedEntries.some((e) =>
-    (/^[ADR]/.test(e.status) && /^(?:src|lib|scripts|kit|packages|apps|services|backend|frontend)\//i.test(e.file))
-    || /^(?:package\.json|Cargo\.toml|pyproject\.toml|go\.mod|go\.work|pom\.xml|build\.gradle(?:\.kts)?)$/i.test(basename(e.file)))
-    || st.entries.some((e) => e.xy === '??' && /^(?:src|lib|scripts|kit|packages|apps|services|backend|frontend)\//i.test(e.file))
-    || changed.some((f) => /^(?:src|lib|scripts|kit|bin|cmd)\/|package\.json$|Cargo\.toml$|pyproject\.toml$|go\.mod$|pom\.xml$/i.test(f))
-  const touchedAnyDoc = changed.some((f) =>
-    (tddRel && f === tddRel)
-    || /^(?:docs\/TDD\.md|ARCHITECTURE\.md|README(?:\.[a-z0-9_-]+)?\.md|AGENTS\.md)$/i.test(f))
-  let tddDateStale = false
-  if (touchedBoundary && tddPath && existsSync(tddPath)) {
-    const tddText = readTextSafe(tddPath) ?? ''
-    const today = docIsoDate()
-    const hasMetaDate = /最近更新[^\n]*\d{4}-\d{2}-\d{2}/.test(tddText)
-    if (hasMetaDate && !changed.includes(tddRel) && !tddText.includes(today)) tddDateStale = true
-  }
-  const hasTddMissingUpdate = Boolean(tddRel && touchedBoundary && (!changed.includes(tddRel) || tddDateStale))
-  return {
-    docParityReminder: touchedBoundary && !touchedAnyDoc,
-    tddDateStale,
-    authoritativeTddPath: tddRel,
-    tddSyncWarning: hasTddMissingUpdate
-      ? `本次改动涉及模块目录边界或对外清单，请核对 ${tddRel} 的最近更新日期与模块职责表并随本次提交更新。`
-      : null,
-  }
+async function emitFlowSignal(roots, payload) {
+  await appendGovernSignal({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, ...payload })
 }
 
 export async function handleFinalize(opts, roots) {
@@ -232,9 +203,7 @@ export async function handleFinalize(opts, roots) {
     })
     if (archivedGroup.byKind.prd) {
       ledger.prdFile = archivedGroup.byKind.prd
-      ledger.archivedPrdFile = sharedMasterPrd || !archivedGroup.byKind.prd.startsWith('docs/archive/')
-        ? null
-        : archivedGroup.byKind.prd
+      ledger.archivedPrdFile = sharedMasterPrd || !archivedGroup.byKind.prd.startsWith('docs/archive/') ? null : archivedGroup.byKind.prd
     }
     if (archivedGroup.byKind.spec) { ledger.specFile = archivedGroup.byKind.spec; ledger.archivedSpecFile = archivedGroup.byKind.spec }
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
@@ -252,10 +221,7 @@ export async function handleFinalize(opts, roots) {
   const out = {
     taskId, finalized: true, finalizedHead: currentHead,
     prdFile: ledger.prdFile, specFile: ledger.specFile, todoFile: ledger.todoFile,
-    archivedDocs: archivedGroup.moved,
-    docParityReminder: parity.docParityReminder,
-    tddSyncWarning: parity.tddSyncWarning,
-    coupledSyncWarnings,
+    archivedDocs: archivedGroup.moved, coupledSyncWarnings, ...parity,
   }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else {
@@ -289,6 +255,7 @@ export async function handleVerify(opts, roots) {
 
   const untrustedGate = checkUntrustedPrGate(ledger, { humanApproved: Boolean(opts['human-approved'] || opts['human-approved-exec']) })
   if (untrustedGate.blocked) {
+    await emitFlowSignal(roots, { category: 'security', module: 'workflow', pattern: 'verify.untrusted-blocked', severity: 'high', source: 'flow-verify', message: untrustedGate.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(untrustedGate, null, 2)}\n`)
     process.stderr.write(`${untrustedGate.message}\n`)
     return { exitCode: untrustedGate.exitCode ?? EXIT_POLICY_BLOCK }
@@ -297,12 +264,14 @@ export async function handleVerify(opts, roots) {
   const profile = parseAgentsProfile(implRoot)
   const mode = opts.tier ?? opts.mode ?? 'quick'
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
+    await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
     process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
     return { exitCode: 1 }
   }
   let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
   if (rawTarget !== null) {
     if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
+      await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-target', severity: 'low', source: 'flow-verify', message: `invalid target: ${opts.target}`, taskId })
       process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
       return { exitCode: 1 }
     }
@@ -401,6 +370,7 @@ export async function handleVerify(opts, roots) {
     ledger.empiricalVisualCheckRequired = policy.visualFilesChanged.length > 0
     ledger.status = docOk ? 'verified' : 'verify-failed'
     writeTaskLedger(roots.mainRoot, ledger)
+    await emitFlowSignal(roots, { category: docOk ? 'tests' : 'docs', module: 'workflow', pattern: docOk ? `verify.${mode}.pass` : `verify.${mode}.doc-static-fail`, severity: docOk ? 'info' : 'medium', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? '', taskId, message: docOk ? `verify (${mode}) explicit-none pass` : `verify (${mode}) static doc check failed` })
     if (!docOk) {
       const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_STATIC_DOC_CHECK_FAILED', errors: docStaticRes.errors }, null, 2)}\n`)
@@ -417,6 +387,7 @@ export async function handleVerify(opts, roots) {
   }
 
   if (!cmd) {
+    await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.no-cmd`, severity: 'medium', source: 'flow-verify', message: `no verify command for ${mode}`, taskId })
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
     return { exitCode: 1 }
   }
@@ -430,6 +401,7 @@ export async function handleVerify(opts, roots) {
       cmd = cmd.replace(/\s*(?:--[A-Za-z0-9_-]+(?:=|\s+)|-[A-Za-z]\s+)?\{target\}\s*/g, ' ').replace(/\s+/g, ' ').trim()
       targetTip = '提示：quick 分层未传入 --target <path>，已省略 {target} 执行；单测迭代建议传 --target <path> 缩窄范围。'
     } else {
+      await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.missing-target`, severity: 'low', source: 'flow-verify', message: `missing --target for ${mode}`, taskId })
       process.stderr.write(`MISSING_TARGET_ARG: 验证命令 "${cmd}" 含 {target} 占位符，请追加 --target <file> 指定单测文件或用例。\n`)
       return { exitCode: 1 }
     }
@@ -438,6 +410,7 @@ export async function handleVerify(opts, roots) {
   const defaultTimeout = mode === 'gate' ? 600000 : mode === 'full' ? 300000 : 120000
   const timeoutMs = opts.timeout !== undefined ? Number(opts.timeout) : defaultTimeout
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
+    await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.invalid-timeout`, severity: 'low', source: 'flow-verify', message: `invalid timeout: ${opts.timeout}`, taskId })
     process.stderr.write(`INVALID_TIMEOUT_ARG: --timeout 须为 >= 1000 的毫秒数，收到：${opts.timeout}\n`)
     return { exitCode: 1 }
   }
@@ -471,6 +444,7 @@ export async function handleVerify(opts, roots) {
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
   writeTaskLedger(roots.mainRoot, ledger)
+  await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? changedFiles[0] ?? '', taskId, message: `verify (${mode}) exit=${finalExit}: ${cmd}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
   if (docStaticRes && !docStaticRes.ok) {
     process.stderr.write(`BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}\n`)
   }
@@ -785,6 +759,7 @@ export async function handleRework(opts, roots) {
 
   ledger.status = 'rework'
   writeTaskLedger(roots.mainRoot, ledger)
+  await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'flow.rework', severity: 'medium', source: 'flow-rework', file: changed[0] ?? '', taskId, message: `rework entered (rebuts=${addedRebuts.length}, forbidden=${forbiddenTouched.length})`, meta: { forbiddenTouched, rebutCount: addedRebuts.length } })
   if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, branch: ledger.branch, prNumber: ledger.prNumber, forbiddenTouched, addedRebuts }, null, 2)}\n`)
   else {
     process.stdout.write(`进入返工模式（task=${taskId}，原分支=${ledger.branch}，原 PR=${ledger.prNumber ?? '待创建'}）：\n`)

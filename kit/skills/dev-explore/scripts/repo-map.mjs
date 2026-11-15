@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
   gitLsFilesTextAndCode, gitRun, isMainModule, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/git.mjs'
@@ -561,5 +561,10 @@ async function main(argv) {
 export { main as runCli }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code))
+  main(process.argv.slice(2))
+    .then((code) => flushAndExit(code))
+    .catch((err) => {
+      process.stderr.write(`探索失败：${err instanceof Error ? err.message : String(err)}\n`)
+      return flushAndExit(1)
+    })
 }

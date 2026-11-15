@@ -149,8 +149,8 @@ cases.push(['发布通道：release.yml 固定解压前缀、README 一键链接
   return true
 }])
 
-cases.push(['Java 空目录起步、handoff 跳过挂载链接与 manifest、macOS 元数据过滤、NFC/进程树清理', async () => {
-  // 1. --bootstrap-empty --lang java 生成可编译源码与 docs/TDD.md
+cases.push(['Java 空目录通用基线、handoff 跳过挂载链接与 manifest、macOS 元数据过滤、NFC/进程树清理', async () => {
+  // 1. --bootstrap-empty --lang java 生成通用基线、Java .gitignore 与 docs/TDD.md（零玩具业务码）
   const javaDir = tmpProject({})
   const handoffDir = tmpProject({
     '.gitignore': 'node_modules/\n.worktrees/\n',
@@ -163,8 +163,11 @@ cases.push(['Java 空目录起步、handoff 跳过挂载链接与 manifest、mac
   try {
     const bootJava = await runNode('equip.mjs', [javaDir, '--bootstrap-empty', '--lang', 'java', '--name', 'JavaDemo'])
     if (bootJava.status !== 0) return `--bootstrap-empty --lang java 失败：${bootJava.stderr}`
-    for (const f of ['src/main/java/app/Greeter.java', 'src/test/java/app/SmokeTest.java', 'docs/TDD.md', 'README.md']) {
+    for (const f of ['.gitattributes', '.gitignore', 'docs/TDD.md', 'README.md', 'AGENTS.md']) {
       if (!existsSync(join(javaDir, f))) return `java 起步缺少 ${f}`
+    }
+    if (!readFileSync(join(javaDir, '.gitignore'), 'utf8').includes('.gradle/')) {
+      return 'java 基线 .gitignore 缺 .gradle/'
     }
     if (!readFileSync(join(javaDir, 'docs/TDD.md'), 'utf8').includes('## 文档信息')) {
       return 'starterTdd 未包含 ## 文档信息 元信息表'

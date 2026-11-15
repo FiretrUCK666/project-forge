@@ -7,6 +7,7 @@ import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { execShellCommand, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone } from '../../lib/profile.mjs'
 import { runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
@@ -65,15 +66,23 @@ export async function runTrialMerge({
 
   const branch = ledger?.branch
   if (!branch) return { ok: true, localBranchMissing: true, into: baseBranch }
-  const brRes = await gitRun(mainRoot, ['rev-parse', '--verify', `refs/heads/${branch}`])
+  const fastGitDir = resolveGitDirFast(mainRoot)
+  const fastBranchSha = resolveRefShaFast(fastGitDir, `refs/heads/${branch}`)
+  const brRes = fastBranchSha
+    ? { ok: true, stdout: fastBranchSha }
+    : await gitRun(mainRoot, ['rev-parse', '--verify', `refs/heads/${branch}`])
   if (!brRes.ok || !brRes.stdout.trim()) {
     throw new Error(`找不到本地待合并分支：${branch}`)
   }
   const branchSha = brRes.stdout.trim()
 
   const baseRefName = `refs/heads/${baseBranch}`
-  const baseRes = await gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', baseRefName])
-  const curMainRes = await gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+  const fastBaseSha = resolveRefShaFast(fastGitDir, baseRefName)
+  const fastHead = readHeadFast(fastGitDir)
+  const [baseRes, curMainRes] = await Promise.all([
+    fastBaseSha ? Promise.resolve({ ok: true, stdout: fastBaseSha }) : gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', baseRefName]),
+    fastHead?.branch ? Promise.resolve({ ok: true, stdout: fastHead.branch }) : gitRun(mainRoot, ['symbolic-ref', '--short', 'HEAD']),
+  ])
   const curMainBranch = curMainRes.ok ? curMainRes.stdout.trim() : ''
 
   if (!baseRes.ok) {

@@ -14,7 +14,7 @@ import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, statSync, symlinkSync, unlinkSync,
 } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
@@ -225,12 +225,37 @@ export function compareLockfiles(mainRoot, wtRoot) {
   }
 }
 
-/** 按子包独立比对锁文件并防毒化探测，安全挂载可共享依赖（半途失败原子回滚）。 */
-export function mountSharedDeps(mainRoot, wtRoot) {
+/** 按子包独立比对锁文件并防毒化探测，安全挂载可共享依赖（半途失败原子回滚；外部 PR 未扫未批硬阻断）。 */
+export function mountSharedDeps(mainRoot, wtRoot, opts = {}) {
   const mainAbs = canonicalPath(mainRoot)
   const wtAbs = canonicalPath(wtRoot)
   if (!existsSync(wtAbs)) throw new Error(`目标 worktree 目录不存在：${wtAbs}`)
   if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自挂载：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
+
+  if (!opts.allowUntrusted) {
+    const wtName = basename(wtAbs)
+    const stateDir = join(mainAbs, '.worktrees', '.state', 'tasks')
+    let matchedLedger = readJsonSafe(join(stateDir, `${wtName}.json`))
+    if (!matchedLedger && existsSync(stateDir)) {
+      try {
+        for (const fn of readdirSync(stateDir).filter((f) => f.endsWith('.json'))) {
+          const cand = readJsonSafe(join(stateDir, fn))
+          if (cand && (cand.reviewWorktreePath === `.worktrees/${wtName}` || cand.worktreePath === `.worktrees/${wtName}`)) {
+            matchedLedger = cand
+            break
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (/^review-pr-\d+$/.test(wtName) || matchedLedger?.role === 'inbound-external-pr') {
+      const scanOk = matchedLedger?.untrustedScanPassed === true
+      const approved = Boolean(matchedLedger?.untrustedApproved === true || matchedLedger?.humanApprovedExec === true)
+      if (!scanOk || !approved) {
+        const reason = !scanOk ? '尚未通过 --untrusted-scan 静态扫描' : '尚未获得人类安全授权'
+        throw new Error(`BLOCKED_UNTRUSTED_PR_UNSCANNED: 外部 PR 隔离位 (${wtName}) ${reason}，禁止挂载共享依赖。`)
+      }
+    }
+  }
 
   const cmp = compareLockfiles(mainAbs, wtAbs)
   const linkType = process.platform === 'win32' ? 'junction' : 'dir'

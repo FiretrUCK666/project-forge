@@ -751,6 +751,7 @@ export {
   evaluateCoupledSync,
   MERMAID_LIMITS,
   parseCoupledSyncRules,
+  resolveRepoCustomDocTemplate,
 } from './doc-templates.mjs'
 import { buildStandardDocContent } from './doc-templates.mjs'
 

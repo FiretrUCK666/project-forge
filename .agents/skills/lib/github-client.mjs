@@ -505,6 +505,26 @@ export function createGitHubClient({
       return makeMcpDelegate('merge_pr', { repo, number, method })
     },
 
+    async updatePrBase({ repo, number, base } = {}) {
+      const cleanRepo = String(repo ?? '').trim()
+      const cleanBase = String(base ?? '').trim()
+      const num = Number(number)
+      if (!cleanRepo || !cleanBase || !Number.isInteger(num) || num <= 0) {
+        return { ok: false, error: 'missing-repo-number-or-base' }
+      }
+      if (tier === 'gh-cli') {
+        const res = await runner('gh', ['pr', 'edit', String(num), '--repo', cleanRepo, '--base', cleanBase], { cwd })
+        if (!res.ok) return { ok: false, error: res.stderr }
+        return { ok: true, number: num, base: cleanBase }
+      }
+      if (tier === 'node-https-token') {
+        const res = await httpsRequest('PATCH', `/repos/${cleanRepo}/pulls/${num}`, token, { base: cleanBase })
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'update-pr-base-failed' }
+        return { ok: true, number: res.data?.number ?? num, base: res.data?.base?.ref ?? cleanBase }
+      }
+      return makeMcpDelegate('update_pr_base', { repo: cleanRepo, number: num, base: cleanBase })
+    },
+
     async createIssue({ repo, title, body = '', labels = [] } = {}) {
       const cleanTitle = String(title ?? '').trim()
       if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }

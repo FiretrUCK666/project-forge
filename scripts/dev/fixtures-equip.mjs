@@ -148,77 +148,79 @@ cases.push(['backup.mjs 快照去重：treeSha256 同内容跳过 unchanged-sinc
   }
 }])
 
-cases.push(['equip.mjs + survey.mjs：五语言空目录闭环、computeArtifactPlan 与 docs/todo 优先探测', async () => {
+cases.push(['equip.mjs + survey.mjs：通用空目录基线、已有 README/LICENSE 兼容、降档保留与 docs/todo 优先探测', async () => {
   const { toMarkdown } = await import('../lib/render.mjs')
   const { computeArtifactPlan } = await import('../survey.mjs')
 
-  const langs = [
-    { lang: 'node', name: 'demo-node', expected: ['package.json', 'src/index.mjs', 'test/smoke.test.mjs'], entry: 'src/index.mjs' },
-    { lang: 'python', name: 'demo-py', expected: ['pyproject.toml', 'src/demo_py/__init__.py', 'tests/test_smoke.py'], entry: 'src/demo_py/__init__.py' },
-    { lang: 'go', name: 'demo-go', expected: ['go.mod', 'hello.go', 'hello_test.go'], entry: 'hello.go' },
-    { lang: 'rust', name: 'demo-rust', expected: ['Cargo.toml', 'src/lib.rs'], entry: 'src/lib.rs' },
-    { lang: 'docs', name: 'demo-docs', expected: ['docs/guide.md'], entry: 'README.md' },
+  const stacks = [
+    { stack: undefined, name: 'demo-universal', expectedIgnore: '.worktrees/' },
+    { stack: 'node', name: 'demo-node', expectedIgnore: 'node_modules/' },
+    { stack: 'python', name: 'demo-py', expectedIgnore: '__pycache__/' },
+    { stack: 'go', name: 'demo-go', expectedIgnore: 'coverage.out' },
+    { stack: 'rust', name: 'demo-rust', expectedIgnore: 'target/' },
+    { stack: 'docs', name: 'demo-docs', expectedIgnore: '_site/' },
   ]
   const dirs = []
   try {
-    for (const item of langs) {
+    const stackChecks = await Promise.all(stacks.map(async (item) => {
       const dir = tmpProject({})
       dirs.push(dir)
-      const res = await runAbsAsync('scripts/equip.mjs', [dir, '--bootstrap-empty', '--lang', item.lang, '--name', item.name, '--description', `Desc ${item.lang}`])
-      if (res.status !== 0) return `bootstrap-empty(${item.lang}) 失败：${res.stderr}`
-      for (const reqRel of ['.gitattributes', '.gitignore', 'README.md', 'docs/TDD.md', ...item.expected]) {
-        if (!existsSync(join(dir, reqRel))) return `bootstrap-empty(${item.lang}) 缺文件：${reqRel}`
+      const args = [dir, '--bootstrap-empty', '--name', item.name, '--description', `Desc ${item.stack ?? 'universal'}`]
+      if (item.stack) args.push('--stack', item.stack)
+      const res = await runAbsAsync('scripts/equip.mjs', args)
+      if (res.status !== 0) return `bootstrap-empty(${item.stack ?? 'default'}) 失败：${res.stderr}`
+      for (const reqRel of ['.gitattributes', '.gitignore', 'README.md', 'docs/TDD.md', 'AGENTS.md', '.agents/skills/.pf-manifest.json']) {
+        if (!existsSync(join(dir, reqRel))) return `bootstrap-empty(${item.stack ?? 'default'}) 缺文件：${reqRel}`
       }
       if (!readFileSync(join(dir, '.gitattributes'), 'utf8').includes('* text=auto eol=lf')) {
-        return `bootstrap-empty(${item.lang}) .gitattributes 缺 eol=lf`
+        return `bootstrap-empty(${item.stack ?? 'default'}) .gitattributes 缺 eol=lf`
       }
-      if (!readFileSync(join(dir, '.gitignore'), 'utf8').includes('.worktrees/')) {
-        return `bootstrap-empty(${item.lang}) .gitignore 缺 .worktrees/`
+      if (!readFileSync(join(dir, '.gitignore'), 'utf8').includes(item.expectedIgnore)) {
+        return `bootstrap-empty(${item.stack ?? 'default'}) .gitignore 缺 ${item.expectedIgnore}`
       }
       const readme = readFileSync(join(dir, 'README.md'), 'utf8')
-      if (readme.includes('project-forge: fill') || readme.includes('img.shields.io')) {
-        return `bootstrap-empty(${item.lang}) README 含占位或假徽章`
+      if (readme.includes('project-forge: fill') || readme.includes('img.shields.io') || readme.includes('greet')) {
+        return `bootstrap-empty(${item.stack ?? 'default'}) README 含占位、假徽章或玩具码`
       }
       const tdd = readFileSync(join(dir, 'docs/TDD.md'), 'utf8')
-      if (tdd.includes('<待补充>') || !tdd.includes(item.entry) || !tdd.includes('arch-rules: none')) {
-        return `bootstrap-empty(${item.lang}) docs/TDD.md 未填实：${tdd}`
+      if (tdd.includes('<待补充>') || !tdd.includes('AGENTS.md') || !tdd.includes('arch-rules: none') || tdd.includes('greet')) {
+        return `bootstrap-empty(${item.stack ?? 'default'}) docs/TDD.md 异常：${tdd}`
       }
-      if (item.lang === 'node') {
-        const nt = spawnSync(process.execPath, ['--test'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
-        if (nt.status !== 0) return `bootstrap-empty(node) 单测未过：${nt.stderr || nt.stdout}`
-      }
-      if (item.lang === 'python') {
-        const pyBin = ['python3', 'python'].find((b) => spawnSync(b, ['--version'], { stdio: 'ignore' }).status === 0)
-        if (pyBin) {
-          const pt = spawnSync(pyBin, ['-m', 'unittest', 'discover', '-s', 'tests'], { cwd: dir, encoding: 'utf8', timeout: 30000 })
-          if (pt.status !== 0) return `bootstrap-empty(python) unittest 未过：${pt.stderr || pt.stdout}`
-        }
-      }
-      if (item.lang === 'node' || item.lang === 'python') {
-        const sBoot = await survey(dir)
-        if ((sBoot.reentry?.staleTddPaths?.length ?? 0) > 0) {
-          return `bootstrap-empty(${item.lang}) TDD 存在失效路径：${JSON.stringify(sBoot.reentry.staleTddPaths)}`
-        }
-      }
-    }
+      return null
+    }))
+    const stackErr = stackChecks.find(Boolean)
+    if (stackErr) return stackErr
 
-    // 反面与保护：已有 .agents 自有技能时允许起步且保留；已有 README.md 时拒绝执行且不覆盖
-    const withCustomAgentDir = tmpProject({
+    // 1. 首装通用基线后立刻通过 compose-agents --check 与 review.mjs 且保留已有 README/LICENSE/.agents
+    const withPresetFiles = tmpProject({
+      'README.md': '# Custom Handcrafted README\n\n这是已经写好的项目入口说明文本，确保通过长度检查。\n',
+      'LICENSE': 'MIT License\n\nCopyright (c) 2026 Custom Author\n',
       '.agents/skills/keep-me/SKILL.md': '---\nname: keep-me\ndescription: Custom keep skill.\n---\n# keep-me\n',
     })
-    dirs.push(withCustomAgentDir)
-    const keepRes = await runAbsAsync('scripts/equip.mjs', [withCustomAgentDir, '--bootstrap-empty', '--lang', 'node', '--name', 'keep-demo'])
-    if (keepRes.status !== 0) return `含 .agents 自有技能的空目录拒绝起步：${keepRes.stderr}`
-    if (!readFileSync(join(withCustomAgentDir, '.agents/skills/keep-me/SKILL.md'), 'utf8').includes('Custom keep skill.')) {
+    dirs.push(withPresetFiles)
+    const keepRes = await runAbsAsync('scripts/equip.mjs', [withPresetFiles, '--bootstrap-empty', '--name', 'keep-demo'])
+    if (keepRes.status !== 0) return `含 README/LICENSE/.agents 的近空目录拒绝起步：${keepRes.stderr}`
+    if (readFileSync(join(withPresetFiles, 'README.md'), 'utf8') !== '# Custom Handcrafted README\n\n这是已经写好的项目入口说明文本，确保通过长度检查。\n') {
+      return 'bootstrap-empty 覆盖了既有 README.md'
+    }
+    if (!readFileSync(join(withPresetFiles, 'LICENSE'), 'utf8').includes('Custom Author')) {
+      return 'bootstrap-empty 破坏了既有 LICENSE'
+    }
+    if (!readFileSync(join(withPresetFiles, '.agents/skills/keep-me/SKILL.md'), 'utf8').includes('Custom keep skill.')) {
       return 'bootstrap-empty 破坏了既有自有技能文件'
     }
+    const caChk = await runAbsAsync('scripts/compose-agents.mjs', [withPresetFiles, '--check'])
+    if (caChk.status !== 0) return `bootstrap-empty 初装后未立刻过 compose-agents --check：${caChk.stdout}\n${caChk.stderr}`
+    const revChk = await runAbsAsync('scripts/review.mjs', [withPresetFiles])
+    if (revChk.status !== 0) return `bootstrap-empty 初装后未立刻过 review.mjs：${revChk.stdout}\n${revChk.stderr}`
 
-    const nonEmptyDir = tmpProject({ 'README.md': '# Custom Handcrafted README\n' })
+    // 2. 反面：含源码文件或生态清单的非空目录必须拒绝 --bootstrap-empty
+    const nonEmptyDir = tmpProject({ 'src/app.mjs': 'export const app = 1\n' })
     dirs.push(nonEmptyDir)
-    const blockRes = await runAbsAsync('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--lang', 'node', '--name', 'block-demo'])
-    if (blockRes.status === 0) return '非空目录存在 README.md 时未拒绝 --bootstrap-empty'
-    if (readFileSync(join(nonEmptyDir, 'README.md'), 'utf8') !== '# Custom Handcrafted README\n') {
-      return '被拒绝的 --bootstrap-empty 意外修改了既有 README.md'
+    const blockRes = await runAbsAsync('scripts/equip.mjs', [nonEmptyDir, '--bootstrap-empty', '--stack', 'node', '--name', 'block-demo'])
+    if (blockRes.status === 0) return '存在源码文件的非空目录未拒绝 --bootstrap-empty'
+    if (readFileSync(join(nonEmptyDir, 'src/app.mjs'), 'utf8') !== 'export const app = 1\n') {
+      return '被拒绝的 --bootstrap-empty 意外修改了既有源码'
     }
 
     // computeArtifactPlan 空白仓 vs 异构存量仓 + docs/todo 优先于 docs/work

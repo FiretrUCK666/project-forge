@@ -18,6 +18,7 @@ import {
   detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
   parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
+import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
@@ -173,20 +174,28 @@ async function syncReviewToGitHub({
       ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
       ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
     ]
+    const backend = createTaskBackend({
+      role: ledger.role,
+      providerId: ledger.providerId,
+      targetRepo,
+      client: ghClient,
+      mainRoot,
+      gitDir: opts.gitDir,
+    })
     const results = []
     for (const t of targets) {
-      const commentRes = await ghClient.postComment({
+      const commentRes = await backend.postComment({
         repo: targetRepo,
         number: t.number,
         body: commentBody,
         statePayload,
       })
-      const labelRes = await ghClient.addLabels({
+      const labelRes = await backend.addLabels({
         repo: targetRepo,
         number: t.number,
         labels: [labelName],
       })
-      await ghClient.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
+      await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
       results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
     }
 
@@ -350,6 +359,9 @@ export async function handleRecord(opts, roots) {
     headSha,
     baseSha: baseLedger.baseSha,
     baseBranch: baseLedger.baseBranch,
+    prevRoundBaseSha: prevRound?.baseSha ?? baseLedger.roundBaseSha?.prevBaseSha,
+    currentBaseSha: baseLedger.baseSha ?? baseLedger.roundBaseSha?.newBaseSha,
+    roundBaseSha: baseLedger.roundBaseSha,
     evidence,
     lastVerifyExitCode: baseLedger.lastVerifyExitCode,
   })
@@ -429,6 +441,7 @@ export async function handleRecord(opts, roots) {
   const visualChecked = Boolean(opts['visual-checked'] || opts['visual-evidence'])
   const roundEntry = {
     round,
+    baseSha: baseLedger.baseSha ?? null,
     headSha,
     reviewerId,
     verdict,

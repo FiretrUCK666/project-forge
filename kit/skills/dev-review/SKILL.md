@@ -78,7 +78,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 2. **上下文隔离**：只读冻结验收标准 `C1..Cn`、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
    `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
-4. **轮次视野动态收窄与 Round 2+ 硬锁**：Round 1 审全量 `base...head` 并一次列全同类问题；**Round 2+ 永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬拦截下复审**——同 `HEAD` 原地复审直接拒绝（`BLOCKED_SAME_HEAD_REREVIEW`，退出码 `2`）；Round 2+ 只核前轮未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，对未改旧行或无文件无据主观新挑刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`（退出码 `2`，非阻塞建议改用 `--should-fix` 或 `--pre-existing`）；`pass` 前核对未清失败实证或 `--enforce-gates` 门禁（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
+4. **轮次视野动态收窄与 Round 2+ 硬锁**：Round 1 审全量 `base...head` 并一次列全同类问题；**Round 2+ 永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬拦截下复审**——同 `HEAD` 原地复审直接拒绝（`BLOCKED_SAME_HEAD_REREVIEW`，退出码 `2`）；若分支经 `flow.mjs sync` 变基，自动通过 `git range-diff` 提取 `!`/`>` 新侧提交限定增量视野；Round 2+ 只核前轮未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，对未改旧行或无文件无据主观新挑刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`（退出码 `2`，非阻塞建议改用 `--should-fix` 或 `--pre-existing`）；`pass` 前核对未清失败实证或 `--enforce-gates` 门禁（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
 5. **独立性与跨文件指纹硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）；连续未决比对按完整 `fingerprint` / `(file, summary)`，绝不因不同文件同标 `C*` 误触发停损。
 6. **停损熔断与人工解锁**：历史已触发停损且未解锁时，禁止通过 Round 4+ `pass`/`changes` 绕过（优先返回退出码 `4` `STOP_LOSS_ESCALATE`）；人类拍板放行后用 `override` 解锁（支持 `--disposition` 记录四类处置统计）：
 

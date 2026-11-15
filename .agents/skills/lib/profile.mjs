@@ -5,10 +5,17 @@
  * 严格保留显式填写的 `none` 禁用态，绝不回退猜测命令或默认高风险路径覆盖用户声明。
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { basename, dirname, join, posix as pathPosix, relative } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
-import { DEFAULT_WALK_SKIP_DIRS, isMacOsJunkPath, posixPath, readJsonSafe, readTextSafe } from './git.mjs'
+import { isMacOsJunkPath, posixPath, readTextSafe } from './git.mjs'
+import {
+  discoverWorkspacePackages,
+  parseYamlWorkspaceGlobs,
+  sniffLayeredCommands,
+} from './profile-sniffer.mjs'
+
+export { discoverWorkspacePackages, parseYamlWorkspaceGlobs, sniffLayeredCommands }
 
 export const DEV_PROFILE_KEYS = Object.freeze([
   'quick-test',
@@ -268,314 +275,9 @@ export function isProfileExplicitNone(profile, key) {
   return false
 }
 
-/** 解析 `pnpm-workspace.yaml` 或 `package.json#workspaces` 中的工作区目录模式。 */
-export function parseYamlWorkspaceGlobs(repoRoot) {
-  const globs = []
-  const pnpmWs = readTextSafe(join(repoRoot, 'pnpm-workspace.yaml'))
-  if (pnpmWs) {
-    let inPkgs = false
-    for (const line of pnpmWs.split('\n')) {
-      const t = line.trim()
-      if (!t || t.startsWith('#')) continue
-      if (/^packages\s*:/.test(t)) { inPkgs = true; continue }
-      if (inPkgs) {
-        if (/^-\s+/.test(t)) {
-          const item = stripWrapQuotes(stripInlineYamlComment(t.replace(/^-\s+/, '')))
-          if (item && !item.startsWith('!')) globs.push(posixPath(item).replace(/\/+$/, ''))
-        } else if (!/^\s/.test(line)) {
-          inPkgs = false
-        }
-      }
-    }
-  }
-  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
-  const ws = Array.isArray(pkg?.workspaces) ? pkg.workspaces : pkg?.workspaces?.packages
-  if (Array.isArray(ws)) {
-    for (const item of ws) {
-      const clean = posixPath(String(item ?? '').trim()).replace(/\/+$/, '')
-      if (clean && !clean.startsWith('!')) globs.push(clean)
-    }
-  }
-  return [...new Set(globs)]
-}
-
-function collectManifestFilesSync(repoRoot) {
-  const hits = []
-  const queue = [repoRoot]
-  let visitedDirs = 0
-  while (queue.length > 0 && visitedDirs < 8000) {
-    const dir = queue.shift()
-    visitedDirs += 1
-    let entries = []
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { continue }
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-    for (const entry of entries) {
-      if (entry.isSymbolicLink() || isMacOsJunkPath(entry.name)) continue
-      const full = join(dir, entry.name)
-      const rel = posixPath(relative(repoRoot, full))
-      if (entry.isDirectory()) {
-        if (entry.name.endsWith('.xcodeproj') || entry.name.endsWith('.xcworkspace')) {
-          hits.push(rel)
-          continue
-        }
-        if (!DEFAULT_WALK_SKIP_DIRS.has(entry.name)) queue.push(full)
-      } else if (entry.isFile()) {
-        hits.push(rel)
-      }
-    }
-  }
-  return hits
-}
-
-const MANIFEST_BASENAMES = new Set([
-  'package.json', 'pnpm-workspace.yaml',
-  'pyproject.toml', 'setup.py', 'setup.cfg', 'pytest.ini', 'Pipfile',
-  'pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'mvnw', 'gradlew',
-  'Cargo.toml', 'go.work', 'go.mod',
-  'Package.swift', 'CMakeLists.txt', 'meson.build',
-  'composer.json', 'Gemfile', 'pubspec.yaml', 'mix.exs',
-  'Makefile', 'GNUmakefile', 'makefile', 'justfile', 'Justfile', '.justfile', 'Taskfile.yml', 'Taskfile.yaml',
-])
-
-const LOCKFILE_ONLY_NAMES = new Set([
-  'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
-  'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum',
-  'gradle.lockfile', 'packages.lock.json', 'Gemfile.lock', 'composer.lock', 'flake.lock', 'Package.resolved',
-])
-
-function isInterestingManifestRel(rel) {
-  const base = pathPosix.basename(rel)
-  if (MANIFEST_BASENAMES.has(base) || LOCKFILE_ONLY_NAMES.has(base)) return true
-  if (/^requirements.*\.txt$/i.test(base)) return true
-  if (/\.(?:sln|csproj|fsproj|vbproj|xcodeproj|xcworkspace)$/i.test(base)) return true
-  return false
-}
-
-function detectNodePackageCommands(repoRoot, dirRel, rootPm) {
-  const absDir = dirRel ? join(repoRoot, dirRel) : repoRoot
-  const pkg = readJsonSafe(join(absDir, 'package.json'))
-  if (!pkg) return null
-  const pm = existsSync(join(absDir, 'pnpm-lock.yaml')) ? 'pnpm'
-    : existsSync(join(absDir, 'yarn.lock')) ? 'yarn'
-      : existsSync(join(absDir, 'bun.lock')) || existsSync(join(absDir, 'bun.lockb')) ? 'bun'
-        : existsSync(join(absDir, 'package-lock.json')) ? 'npm' : (rootPm ?? 'npm')
-  const prefixArg = dirRel
-    ? (pm === 'npm' ? ` --prefix ${dirRel}` : pm === 'pnpm' ? ` --dir ${dirRel}` : pm === 'yarn' ? ` --cwd ${dirRel}` : '')
-    : ''
-  const wrapDir = (subCmd) => {
-    if (!dirRel) return subCmd
-    if (pm === 'npm' || pm === 'pnpm' || pm === 'yarn') return `${pm}${prefixArg} ${subCmd}`
-    return `(cd ${dirRel} && ${pm} ${subCmd})`
-  }
-  const scripts = pkg.scripts ?? {}
-  let quickTest
-  let fullTest
-  let lint
-  let build
-  if (scripts.test && !/no test specified/i.test(String(scripts.test))) {
-    quickTest = wrapDir('test')
-  }
-  if (scripts.check) fullTest = wrapDir(pm === 'npm' ? 'run check' : 'check')
-  else if (scripts.verify) fullTest = wrapDir(pm === 'npm' ? 'run verify' : 'verify')
-  else if (scripts.ci) fullTest = wrapDir(pm === 'npm' ? 'run ci' : 'ci')
-  if (scripts.lint) lint = wrapDir(pm === 'npm' ? 'run lint' : 'lint')
-  if (scripts.build) build = wrapDir(pm === 'npm' ? 'run build' : 'build')
-  return {
-    name: pkg.name ?? (dirRel || 'root'),
-    scripts: Object.keys(scripts),
-    pm,
-    quickTest,
-    fullTest,
-    lint,
-    build,
-  }
-}
-
-/**
- * 动态发现全仓库多语言包清单与任务入口（无深度限制，支持 Java/React 前后端分离、
- * Apple `Package.swift`/`*.xcodeproj`、Python `uv`/`poetry`、Rust/Go/C#/C++/Taskfile）。
- */
-export function discoverWorkspacePackages(repoRoot, fileRelList = null) {
-  const files = Array.isArray(fileRelList) ? fileRelList : collectManifestFilesSync(repoRoot)
-  const relevant = files.filter((rel) => !isMacOsJunkPath(rel) && isInterestingManifestRel(rel))
-
-  const rootPm = existsSync(join(repoRoot, 'pnpm-lock.yaml')) ? 'pnpm'
-    : existsSync(join(repoRoot, 'yarn.lock')) ? 'yarn'
-      : existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb')) ? 'bun' : 'npm'
-
-  const byDir = new Map()
-  const ensureDir = (dirRel) => {
-    const key = dirRel === '.' ? '' : dirRel
-    if (!byDir.has(key)) {
-      byDir.set(key, {
-        dirRel: key,
-        ecosystems: new Set(),
-        manifests: [],
-        lockfiles: [],
-        commands: {},
-      })
-    }
-    return byDir.get(key)
-  }
-
-  for (const rel of relevant) {
-    const base = pathPosix.basename(rel)
-    const dirRel = pathPosix.dirname(rel) === '.' ? '' : pathPosix.dirname(rel)
-    const bucket = ensureDir(dirRel)
-    if (LOCKFILE_ONLY_NAMES.has(base) || /^requirements.*\.txt$/i.test(base)) {
-      bucket.lockfiles.push(base)
-    }
-    if (!LOCKFILE_ONLY_NAMES.has(base)) {
-      bucket.manifests.push(base)
-    }
-
-    if (base === 'package.json') bucket.ecosystems.add('node')
-    else if (['pyproject.toml', 'setup.py', 'setup.cfg', 'pytest.ini', 'Pipfile', 'uv.lock', 'poetry.lock', 'Pipfile.lock'].includes(base) || /^requirements.*\.txt$/i.test(base)) {
-      bucket.ecosystems.add('python')
-    } else if (['pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'mvnw', 'gradlew', 'gradle.lockfile'].includes(base)) {
-      bucket.ecosystems.add('java')
-    } else if (base === 'Cargo.toml' || base === 'Cargo.lock') bucket.ecosystems.add('rust')
-    else if (base === 'go.work' || base === 'go.mod' || base === 'go.sum') bucket.ecosystems.add('go')
-    else if (/\.(?:sln|csproj|fsproj|vbproj)$/i.test(base) || base === 'packages.lock.json') bucket.ecosystems.add('dotnet')
-    else if (base === 'Package.swift' || /\.(?:xcodeproj|xcworkspace)$/i.test(base)) bucket.ecosystems.add('apple')
-    else if (base === 'CMakeLists.txt' || base === 'meson.build') bucket.ecosystems.add('cpp')
-    else if (base === 'composer.json' || base === 'composer.lock') bucket.ecosystems.add('php')
-    else if (base === 'Gemfile' || base === 'Gemfile.lock') bucket.ecosystems.add('ruby')
-    else if (base === 'pubspec.yaml') bucket.ecosystems.add('dart')
-    else if (base === 'mix.exs') bucket.ecosystems.add('elixir')
-  }
-
-  const packages = []
-  const allEcosystems = new Set()
-
-  for (const bucket of [...byDir.values()].sort((a, b) => a.dirRel.localeCompare(b.dirRel))) {
-    const dirRel = bucket.dirRel
-    const absDir = dirRel ? join(repoRoot, dirRel) : repoRoot
-    for (const eco of bucket.ecosystems) allEcosystems.add(eco)
-
-    if (bucket.ecosystems.has('node')) {
-      const nodeInfo = detectNodePackageCommands(repoRoot, dirRel, rootPm)
-      if (nodeInfo) {
-        bucket.name = nodeInfo.name
-        bucket.commands.node = nodeInfo
-      }
-    }
-    if (bucket.ecosystems.has('java')) {
-      const hasMvn = existsSync(join(absDir, 'pom.xml'))
-      const hasGradle = existsSync(join(absDir, 'build.gradle')) || existsSync(join(absDir, 'build.gradle.kts'))
-      const hasMvnw = existsSync(join(absDir, 'mvnw')) || existsSync(join(repoRoot, 'mvnw'))
-      const hasGradlew = existsSync(join(absDir, 'gradlew')) || existsSync(join(repoRoot, 'gradlew'))
-      if (hasMvn) {
-        const bin = hasMvnw ? (existsSync(join(absDir, 'mvnw')) ? `./${dirRel ? `${dirRel}/` : ''}mvnw` : './mvnw') : 'mvn'
-        const fileFlag = dirRel ? ` -f ${dirRel}/pom.xml` : ''
-        bucket.commands.java = { quickTest: `${bin}${fileFlag} test`, build: `${bin}${fileFlag} package -DskipTests` }
-      } else if (hasGradle) {
-        const bin = hasGradlew ? (existsSync(join(absDir, 'gradlew')) ? `./${dirRel ? `${dirRel}/` : ''}gradlew` : './gradlew') : 'gradle'
-        const projFlag = dirRel ? ` -p ${dirRel}` : ''
-        bucket.commands.java = { quickTest: `${bin}${projFlag} test`, build: `${bin}${projFlag} build -x test` }
-      }
-    }
-    if (bucket.ecosystems.has('python')) {
-      const pyWrap = existsSync(join(absDir, 'uv.lock')) || existsSync(join(repoRoot, 'uv.lock'))
-        ? 'uv run pytest'
-        : (existsSync(join(absDir, 'poetry.lock')) || existsSync(join(repoRoot, 'poetry.lock')) ? 'poetry run pytest' : 'pytest')
-      const hasTests = existsSync(join(absDir, 'tests')) || existsSync(join(absDir, 'test')) || existsSync(join(absDir, 'pytest.ini'))
-      if (hasTests) {
-        const cmd = dirRel ? `(cd ${dirRel} && ${pyWrap})` : pyWrap
-        bucket.commands.python = { quickTest: cmd }
-      }
-    }
-    if (bucket.ecosystems.has('rust') && existsSync(join(absDir, 'Cargo.toml'))) {
-      const mf = dirRel ? ` --manifest-path ${dirRel}/Cargo.toml` : ''
-      bucket.commands.rust = { quickTest: `cargo test${mf}`, build: `cargo build${mf}` }
-    }
-    if (bucket.ecosystems.has('go') && (existsSync(join(absDir, 'go.mod')) || existsSync(join(absDir, 'go.work')))) {
-      const cmd = dirRel ? `(cd ${dirRel} && go test ./...)` : 'go test ./...'
-      const build = dirRel ? `(cd ${dirRel} && go build ./...)` : 'go build ./...'
-      bucket.commands.go = { quickTest: cmd, build }
-    }
-    if (bucket.ecosystems.has('dotnet')) {
-      const cmd = dirRel ? `dotnet test ${dirRel}` : 'dotnet test'
-      bucket.commands.dotnet = { quickTest: cmd, build: dirRel ? `dotnet build ${dirRel}` : 'dotnet build' }
-    }
-    if (bucket.ecosystems.has('apple') && existsSync(join(absDir, 'Package.swift'))) {
-      const pkgFlag = dirRel ? ` --package-path ${dirRel}` : ''
-      bucket.commands.apple = { quickTest: `swift test${pkgFlag}`, build: `swift build${pkgFlag}` }
-    }
-    if (bucket.ecosystems.has('cpp') && existsSync(join(absDir, 'CMakeLists.txt'))) {
-      const bdir = dirRel ? `${dirRel}/build` : 'build'
-      bucket.commands.cpp = { quickTest: `ctest --test-dir ${bdir} --output-on-failure`, build: `cmake --build ${bdir}` }
-    }
-
-    packages.push({
-      dirRel,
-      name: bucket.name ?? (dirRel || basename(repoRoot)),
-      ecosystems: [...bucket.ecosystems].sort(),
-      manifests: bucket.manifests.sort(),
-      lockfiles: [...new Set(bucket.lockfiles)].sort(),
-      commands: bucket.commands,
-    })
-  }
-
-  return {
-    packages,
-    ecosystems: [...allEcosystems].sort(),
-    workspaceGlobs: parseYamlWorkspaceGlobs(repoRoot),
-  }
-}
-
-/** 从全仓库清单嗅探测试与门禁命令，作为 Dev Profile 缺失时的安全兜底。 */
+/** 从全仓库清单三层嗅探测试与门禁命令，作为 Dev Profile 缺失时的安全兜底。 */
 export function detectEcosystemCommands(repoRoot) {
-  const discovery = discoverWorkspacePackages(repoRoot)
-  const quickList = []
-  const fullList = []
-  const lintList = []
-  const buildList = []
-  const pushUnique = (arr, v) => {
-    if (v && !arr.includes(v)) arr.push(v)
-  }
-
-  for (const pkg of discovery.packages) {
-    for (const c of Object.values(pkg.commands)) {
-      pushUnique(quickList, c.quickTest)
-      pushUnique(fullList, c.fullTest)
-      pushUnique(lintList, c.lint)
-      pushUnique(buildList, c.build)
-    }
-  }
-
-  const makefile = readTextSafe(join(repoRoot, 'Makefile')) ?? readTextSafe(join(repoRoot, 'GNUmakefile'))
-  if (makefile) {
-    if (/^test:/m.test(makefile)) pushUnique(quickList, 'make test')
-    if (/^check:/m.test(makefile)) pushUnique(fullList, 'make check')
-  }
-  const justfile = readTextSafe(join(repoRoot, 'justfile')) ?? readTextSafe(join(repoRoot, 'Justfile'))
-  if (justfile) {
-    if (/^test(?:\s+[^:\n]*)?:/m.test(justfile)) pushUnique(quickList, 'just test')
-    if (/^check(?:\s+[^:\n]*)?:/m.test(justfile)) pushUnique(fullList, 'just check')
-  }
-  const taskfile = readTextSafe(join(repoRoot, 'Taskfile.yml')) ?? readTextSafe(join(repoRoot, 'Taskfile.yaml'))
-  if (taskfile) {
-    if (/^\s*test\s*:/m.test(taskfile)) pushUnique(quickList, 'task test')
-    if (/^\s*check\s*:/m.test(taskfile)) pushUnique(fullList, 'task check')
-  }
-
-  // 仅当 test/ 目录真实包含 JS/TS 测试文件时才兜底 node --test，不误伤 Java/纯文档仓
-  if (quickList.length === 0 && existsSync(join(repoRoot, 'test'))) {
-    try {
-      const hasJsTest = readdirSync(join(repoRoot, 'test')).some((n) => /\.(?:m?js|cjs|ts)$/i.test(n))
-      if (hasJsTest) pushUnique(quickList, 'node --test')
-    } catch { /* ignore */ }
-  }
-
-  return {
-    quickTest: quickList.length > 0 ? quickList.join(' && ') : undefined,
-    fullTest: fullList.length > 0 ? fullList.join(' && ') : undefined,
-    lint: lintList.length > 0 ? lintList.join(' && ') : undefined,
-    build: buildList.length > 0 ? buildList.join(' && ') : undefined,
-    kinds: discovery.ecosystems,
-    packages: discovery.packages,
-  }
+  return sniffLayeredCommands(repoRoot)
 }
 
 /**
@@ -709,7 +411,10 @@ export function parseAgentsProfile(repoRoot) {
     || (!profile.fullTest && !explicitNone.has('full-test'))
     || (!profile.mergeGate && !explicitNone.has('merge-gate'))
   const fallback = needFallback ? detectEcosystemCommands(repoRoot) : undefined
-  if (!fallback) return profile
+  if (!fallback) {
+    profile.detectionEvidence = sniffLayeredCommands(repoRoot, { profile, fileRelList: [] }).detectionEvidence
+    return profile
+  }
   if (!profile.quickTest && !explicitNone.has('quick-test')) profile.quickTest = fallback.quickTest
   if (!profile.fullTest && !explicitNone.has('full-test')) {
     profile.fullTest = fallback.fullTest ?? (!explicitNone.has('quick-test') ? fallback.quickTest : undefined)
@@ -718,6 +423,7 @@ export function parseAgentsProfile(repoRoot) {
     profile.mergeGate = profile.fullTest ?? (!explicitNone.has('quick-test') ? profile.quickTest : undefined)
   }
   profile.detectedCommands = fallback
+  profile.detectionEvidence = fallback.detectionEvidence
   return profile
 }
 

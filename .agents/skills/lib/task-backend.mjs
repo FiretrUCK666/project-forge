@@ -1,0 +1,570 @@
+/**
+ * task-backend.mjs —— 统一 13 接口 TaskBackend 抽象层（GitHubBackend / GenericRemoteBackend / LocalOnlyBackend）。
+ *
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），统一三态后端契约：
+ *   claimTask, releaseTask, postComment, addLabels, removeLabel, createIssue,
+ *   findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr
+ */
+
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { gitRun, gitStatusPorcelainZ, readTextSafe, withFileLock } from './git.mjs'
+import { createGitHubClient, parsePfStateTags } from './github-client.mjs'
+import { sanitizeTaskId } from './ledger.mjs'
+
+export const TASK_BACKEND_METHODS = Object.freeze([
+  'claimTask',
+  'releaseTask',
+  'postComment',
+  'addLabels',
+  'removeLabel',
+  'createIssue',
+  'findOpenPrForBranch',
+  'createPr',
+  'updatePrBase',
+  'getPr',
+  'listComments',
+  'getCommitChecks',
+  'mergePr',
+])
+
+function resolveEffectiveGitDir(mainRoot, gitDir) {
+  if (gitDir) return gitDir
+  if (!mainRoot) return null
+  const dotGit = join(mainRoot, '.git')
+  return existsSync(dotGit) ? dotGit : null
+}
+
+function eventLogPath(mainRoot, gitDir, taskId = 'shared') {
+  const effectiveGitDir = resolveEffectiveGitDir(mainRoot, gitDir)
+  const baseDir = effectiveGitDir
+    ? join(effectiveGitDir, 'project-forge-flow', 'events')
+    : join(mainRoot || process.cwd(), '.worktrees', '.state', 'events')
+  return join(baseDir, `${sanitizeTaskId(String(taskId || 'shared'))}.jsonl`)
+}
+
+async function appendBackendEvent(mainRoot, gitDir, taskId, event) {
+  const file = eventLogPath(mainRoot, gitDir, taskId)
+  const lockPath = `${file}.lock`
+  const line = `${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`
+  await withFileLock(lockPath, () => {
+    mkdirSync(join(file, '..'), { recursive: true })
+    appendFileSync(file, line, 'utf8')
+  })
+  return file
+}
+
+function readBackendEvents(mainRoot, gitDir, taskId) {
+  if (!taskId) return []
+  const file = eventLogPath(mainRoot, gitDir, taskId)
+  const raw = readTextSafe(file)
+  if (!raw) return []
+  const events = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try { events.push(JSON.parse(trimmed)) } catch { /* ignore malformed line */ }
+  }
+  return events
+}
+
+function normalizeFindArgs(repoOrOpts, headBranch, opts = {}) {
+  if (repoOrOpts && typeof repoOrOpts === 'object') {
+    return {
+      repo: repoOrOpts.repo ?? repoOrOpts.targetRepo ?? null,
+      headBranch: repoOrOpts.headBranch ?? repoOrOpts.head ?? null,
+      headOwner: repoOrOpts.headOwner,
+      base: repoOrOpts.base,
+    }
+  }
+  return { repo: repoOrOpts ?? null, headBranch: headBranch ?? null, headOwner: opts.headOwner, base: opts.base }
+}
+
+function normalizeGetPrArgs(repoOrOpts, number) {
+  if (repoOrOpts && typeof repoOrOpts === 'object') {
+    return { repo: repoOrOpts.repo ?? repoOrOpts.targetRepo ?? null, number: repoOrOpts.number }
+  }
+  return { repo: repoOrOpts ?? null, number }
+}
+
+function normalizeListCommentArgs(arg, maybeNumber) {
+  if (arg && typeof arg === 'object') return arg
+  return { repo: arg, number: maybeNumber }
+}
+
+export class GitHubBackend {
+  constructor({ targetRepo = null, client = null, pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null } = {}) {
+    this.kind = 'github'
+    this.targetRepo = targetRepo
+    this.pushRemote = pushRemote
+    this.mainRoot = mainRoot
+    this.gitDir = gitDir
+    this.client = client ?? createGitHubClient({ cwd: mainRoot })
+    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, checks: true })
+  }
+
+  async claimTask({
+    taskId, issue, issues, prNumber, actor, actorDisplay, branch,
+    takeover = false, reason = '', previousActor = null, labels = ['in-progress'],
+  } = {}) {
+    const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
+    const repo = this.targetRepo
+    const results = []
+    for (const num of issueList) {
+      const comment = await this.postComment({
+        repo,
+        number: num,
+        body: takeover
+          ? `接管认领：由 ${actorDisplay ?? actor} 接管任务 \`${taskId}\`（分支 \`${branch}\`，原认领人：${previousActor ?? '无/未知'}），原因：${reason}。`
+          : `认领：由 ${actorDisplay ?? actor} 在分支 \`${branch}\` 开始处理（task: \`${taskId}\`）。`,
+        statePayload: takeover
+          ? { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, reason }
+          : { taskId, action: 'claim', agent: actor, branch },
+      })
+      const label = await this.addLabels({ repo, number: num, labels })
+      results.push({ issue: num, action: takeover ? 'takeover' : 'claim', comment, label })
+    }
+    let prResult = null
+    if (takeover && prNumber) {
+      prResult = await this.postComment({
+        repo,
+        number: prNumber,
+        body: `接管认领：由 ${actorDisplay ?? actor} 接管关联 PR #${prNumber}（分支 \`${branch}\`，关联 Issue：${issueList.map((n) => `#${n}`).join(', ')}），原因：${reason}。`,
+        statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, prNumber, reason },
+      })
+    }
+    return { ok: true, results, prResult }
+  }
+
+  async releaseTask({ taskId, issue, issues, actor, actorDisplay, branch, reason = '' } = {}) {
+    const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
+    const repo = this.targetRepo
+    const results = []
+    for (const num of issueList) {
+      const comment = await this.postComment({
+        repo,
+        number: num,
+        body: `释放认领：${actorDisplay ?? actor} 放弃任务 \`${taskId}\`（分支 \`${branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`,
+        statePayload: { taskId, action: 'release', agent: actor, branch: branch ?? null, ...(reason ? { reason } : {}) },
+      })
+      const labelRemoved = await this.removeLabel({ repo, number: num, label: 'in-progress' })
+      results.push({ issue: num, comment, labelRemoved })
+    }
+    return { ok: true, results }
+  }
+
+  async postComment({ repo, number, body, statePayload = {} } = {}) {
+    if (typeof this.client?.postComment !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.postComment({ repo: repo ?? this.targetRepo, number, body, statePayload })
+  }
+
+  async addLabels({ repo, number, labels = [] } = {}) {
+    if (typeof this.client?.addLabels !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.addLabels({ repo: repo ?? this.targetRepo, number, labels })
+  }
+
+  async removeLabel({ repo, number, label } = {}) {
+    if (typeof this.client?.removeLabel !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.removeLabel({ repo: repo ?? this.targetRepo, number, label })
+  }
+
+  async createIssue({ repo, title, body = '', labels = [] } = {}) {
+    if (typeof this.client?.createIssue !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.createIssue({ repo: repo ?? this.targetRepo, title, body, labels })
+  }
+
+  async findOpenPrForBranch(repoOrOpts, headBranch, opts = {}) {
+    const parsed = normalizeFindArgs(repoOrOpts, headBranch, opts)
+    if (typeof this.client?.findOpenPrForBranch !== 'function') {
+      return { ok: false, prs: [], skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.findOpenPrForBranch(parsed.repo ?? this.targetRepo, parsed.headBranch, {
+      headOwner: parsed.headOwner,
+      base: parsed.base,
+    })
+  }
+
+  async createPr({ targetRepo, repo, head, base, title, body, draft = false } = {}) {
+    if (typeof this.client?.createPr !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.createPr({
+      targetRepo: targetRepo ?? repo ?? this.targetRepo,
+      head,
+      base,
+      title,
+      body,
+      draft,
+    })
+  }
+
+  async updatePrBase({ repo, number, base } = {}) {
+    if (typeof this.client?.updatePrBase !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.updatePrBase({ repo: repo ?? this.targetRepo, number, base })
+  }
+
+  async getPr(repoOrOpts, number) {
+    if (typeof this.client?.getPr !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    const parsed = normalizeGetPrArgs(repoOrOpts, number)
+    return this.client.getPr(parsed.repo ?? this.targetRepo, parsed.number)
+  }
+
+  async listComments(arg, maybeNumber) {
+    if (typeof this.client?.listComments !== 'function') {
+      return { ok: false, comments: [], skipped: true, reason: 'client-unsupported' }
+    }
+    const norm = normalizeListCommentArgs(arg, maybeNumber)
+    return this.client.listComments({ ...norm, repo: norm.repo ?? this.targetRepo })
+  }
+
+  async getCommitChecks({ repo, ref } = {}) {
+    if (typeof this.client?.getCommitChecks !== 'function') {
+      return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true }
+    }
+    return this.client.getCommitChecks({ repo: repo ?? this.targetRepo, ref })
+  }
+
+  async mergePr({ repo, number, method = 'merge' } = {}) {
+    if (typeof this.client?.mergePr !== 'function') {
+      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    }
+    return this.client.mergePr({ repo: repo ?? this.targetRepo, number, method })
+  }
+}
+
+export class GenericRemoteBackend {
+  constructor({ targetRepo = null, pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null } = {}) {
+    this.kind = 'generic-git'
+    this.targetRepo = targetRepo
+    this.pushRemote = pushRemote
+    this.mainRoot = mainRoot
+    this.gitDir = gitDir
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: false, labels: false, checks: false })
+  }
+
+  async claimTask({ taskId, issue, issues, prNumber, actor, branch, takeover = false, reason = '' } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId, {
+      backend: this.kind,
+      action: takeover ? 'takeover' : 'claim',
+      taskId,
+      issues: Array.isArray(issues) ? issues : (issue ? [issue] : []),
+      prNumber: prNumber ?? null,
+      actor,
+      branch,
+      ...(reason ? { reason } : {}),
+    })
+    return { ok: true, mode: 'generic-remote-event-log', eventPath }
+  }
+
+  async releaseTask({ taskId, issue, issues, actor, branch, reason = '' } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId, {
+      backend: this.kind,
+      action: 'release',
+      taskId,
+      issues: Array.isArray(issues) ? issues : (issue ? [issue] : []),
+      actor,
+      branch,
+      ...(reason ? { reason } : {}),
+    })
+    return { ok: true, mode: 'generic-remote-event-log', eventPath }
+  }
+
+  async postComment({ taskId, repo, number, body, statePayload = {} } = {}) {
+    const idKey = taskId ?? statePayload?.taskId ?? (number ? `ref-${number}` : 'shared')
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, idKey, {
+      backend: this.kind,
+      action: 'comment',
+      repo: repo ?? this.targetRepo,
+      number: number ?? null,
+      body,
+      statePayload,
+    })
+    return { ok: true, mode: 'generic-remote-event-log', id: null, verifiedReadback: true, eventPath }
+  }
+
+  async addLabels({ taskId, repo, number, labels = [] } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'add-labels', repo, number, labels,
+    })
+    return { ok: true, skipped: true, reason: 'generic-git-event-log' }
+  }
+
+  async removeLabel({ taskId, repo, number, label } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'remove-label', repo, number, label,
+    })
+    return { ok: true, skipped: true, reason: 'generic-git-event-log' }
+  }
+
+  async createIssue({ taskId, repo, title, body = '', labels = [] } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'create-issue-skipped', repo, title, body, labels,
+    })
+    return { ok: false, skipped: true, reason: 'generic-git-no-api' }
+  }
+
+  async findOpenPrForBranch() {
+    return { ok: true, prs: [], skipped: true, reason: 'generic-git' }
+  }
+
+  async createPr({ taskId, head, base, title } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'mr-intent', head, base, title,
+    })
+    return { ok: true, mode: 'generic-git-push-only', number: null, status: 'submitted', eventPath }
+  }
+
+  async updatePrBase({ taskId, number, base } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'update-pr-base', number: number ?? null, base,
+    })
+    return { ok: true, number: number ?? null, base, mode: 'generic-remote-event-log', eventPath }
+  }
+
+  async getPr() {
+    return { ok: false, skipped: true, reason: 'generic-git' }
+  }
+
+  async listComments(arg, maybeNumber) {
+    const norm = normalizeListCommentArgs(arg, maybeNumber)
+    const events = readBackendEvents(this.mainRoot, this.gitDir, norm.taskId ?? 'shared')
+      .filter((e) => e.action === 'comment' && (norm.number === undefined || e.number === norm.number))
+      .map((e, idx) => ({
+        id: idx + 1,
+        body: e.body ?? '',
+        pfState: e.statePayload ?? null,
+        pfStates: e.statePayload ? [e.statePayload] : parsePfStateTags(e.body ?? ''),
+      }))
+    return { ok: true, comments: events, skipped: true, reason: 'generic-git' }
+  }
+
+  async getCommitChecks() {
+    return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'generic-git' }
+  }
+
+  async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {
+    if (!remoteMerged && !humanApproved) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED',
+        exitCode: 3,
+        message: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。',
+      }
+    }
+    return {
+      ok: true,
+      merged: true,
+      remoteMerged: Boolean(remoteMerged),
+      humanApproved: Boolean(humanApproved),
+      state: 'MERGED',
+      branch: branch ?? ledger?.branch ?? null,
+      into: baseBranch ?? ledger?.baseBranch ?? 'main',
+    }
+  }
+}
+
+export class LocalOnlyBackend {
+  constructor({ mainRoot = process.cwd(), gitDir = null, baseBranch = 'main' } = {}) {
+    this.kind = 'local-only'
+    this.mainRoot = mainRoot
+    this.gitDir = gitDir
+    this.baseBranch = baseBranch
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: false, labels: false, checks: false })
+  }
+
+  async claimTask({ taskId, issue, issues, actor, branch, takeover = false, reason = '' } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId, {
+      backend: this.kind,
+      action: takeover ? 'takeover' : 'claim',
+      taskId,
+      issues: Array.isArray(issues) ? issues : (issue ? [issue] : []),
+      actor,
+      branch,
+      ...(reason ? { reason } : {}),
+    })
+    return { ok: true, mode: 'local-ledger-only', eventPath }
+  }
+
+  async releaseTask({ taskId, issue, issues, actor, branch, reason = '' } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId, {
+      backend: this.kind,
+      action: 'release',
+      taskId,
+      issues: Array.isArray(issues) ? issues : (issue ? [issue] : []),
+      actor,
+      branch,
+      ...(reason ? { reason } : {}),
+    })
+    return { ok: true, mode: 'local-ledger-only', eventPath }
+  }
+
+  async postComment({ taskId, number, body, statePayload = {} } = {}) {
+    const idKey = taskId ?? statePayload?.taskId ?? (number ? `ref-${number}` : 'shared')
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, idKey, {
+      backend: this.kind, action: 'comment', number: number ?? null, body, statePayload,
+    })
+    return { ok: true, mode: 'local-ledger-only', id: null, verifiedReadback: true, eventPath }
+  }
+
+  async addLabels({ taskId, number, labels = [] } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'add-labels', number: number ?? null, labels,
+    })
+    return { ok: true, skipped: true, reason: 'local-only' }
+  }
+
+  async removeLabel({ taskId, number, label } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'remove-label', number: number ?? null, label,
+    })
+    return { ok: true, skipped: true, reason: 'local-only' }
+  }
+
+  async createIssue({ taskId, title, body = '', labels = [] } = {}) {
+    await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'create-issue-local', title, body, labels,
+    })
+    return { ok: false, skipped: true, reason: 'local-only' }
+  }
+
+  async findOpenPrForBranch() {
+    return { ok: true, prs: [], skipped: true, reason: 'local-only' }
+  }
+
+  async createPr({ taskId, head, base, title } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'local-ready', head, base, title,
+    })
+    return { ok: true, localReady: true, status: 'local-ready', number: null, eventPath }
+  }
+
+  async updatePrBase({ taskId, number, base } = {}) {
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
+      backend: this.kind, action: 'update-base', number: number ?? null, base,
+    })
+    return { ok: true, number: number ?? null, base, mode: 'local-only', eventPath }
+  }
+
+  async getPr() {
+    return { ok: false, skipped: true, reason: 'local-only' }
+  }
+
+  async listComments(arg, maybeNumber) {
+    const norm = normalizeListCommentArgs(arg, maybeNumber)
+    const events = readBackendEvents(this.mainRoot, this.gitDir, norm.taskId ?? 'shared')
+      .filter((e) => e.action === 'comment' && (norm.number === undefined || e.number === norm.number))
+      .map((e, idx) => ({
+        id: idx + 1,
+        body: e.body ?? '',
+        pfState: e.statePayload ?? null,
+        pfStates: e.statePayload ? [e.statePayload] : parsePfStateTags(e.body ?? ''),
+      }))
+    return { ok: true, comments: events, skipped: true, reason: 'local-only' }
+  }
+
+  async getCommitChecks() {
+    return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'local-only' }
+  }
+
+  async mergePr({
+    ledger,
+    mainRoot: mrArg,
+    baseBranch: bbArg,
+    profile = null,
+    evidence = null,
+    policy = null,
+    changedFiles = [],
+    runVerify = true,
+    trialMerger = null,
+  } = {}) {
+    const root = mrArg ?? this.mainRoot
+    const targetBase = bbArg ?? ledger?.baseBranch ?? this.baseBranch ?? 'main'
+    if (typeof trialMerger === 'function') {
+      const res = await trialMerger({
+        mainRoot: root,
+        ledger,
+        baseBranch: targetBase,
+        profile,
+        evidence,
+        policy,
+        changedFiles,
+        runVerify,
+      })
+      if (res?.ok && ledger?.taskId) {
+        await appendBackendEvent(this.mainRoot, this.gitDir, ledger.taskId, {
+          backend: this.kind, action: 'merged', branch: ledger.branch ?? null, into: targetBase,
+        })
+      }
+      return res
+    }
+    if (!ledger?.branch) {
+      return { ok: true, localMerge: true, merged: true, into: targetBase }
+    }
+    const mainSt = await gitStatusPorcelainZ(root)
+    if (!mainSt.ok || mainSt.entries.length > 0) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_DIRTY_MAIN',
+        exitCode: 3,
+        message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
+      }
+    }
+    const brRes = await gitRun(root, ['rev-parse', '--verify', `refs/heads/${ledger.branch}`])
+    if (!brRes.ok) return { ok: false, blocked: true, code: 'BRANCH_NOT_FOUND', exitCode: 1, message: brRes.stderr }
+    const branchSha = brRes.stdout.trim()
+    const baseRef = `refs/heads/${targetBase}`
+    const baseRes = await gitRun(root, ['rev-parse', '--verify', '--quiet', baseRef])
+    if (!baseRes.ok) {
+      const up = await gitRun(root, ['update-ref', baseRef, branchSha])
+      return { ok: up.ok, localMerge: up.ok, merged: up.ok, into: targetBase, mergedSha: branchSha }
+    }
+    const curMainRes = await gitRun(root, ['symbolic-ref', '--short', 'HEAD'])
+    const curMain = curMainRes.ok ? curMainRes.stdout.trim() : ''
+    if (curMain === targetBase) {
+      const ff = await gitRun(root, ['merge', '--ff-only', branchSha])
+      if (ff.ok) return { ok: true, localMerge: true, merged: true, into: targetBase, mergedSha: branchSha }
+    }
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_TRIAL_MERGER_REQUIRED',
+      exitCode: 3,
+      message: '非快进本地合并必须经 runTrialMerge 在临时 --detach worktree 试合复测。',
+    }
+  }
+}
+
+/** 根据身份角色与托管协议构造统一的 13 方法 TaskBackend。 */
+export function createTaskBackend({
+  role = 'local-only',
+  providerId = 'github',
+  targetRepo = null,
+  client = null,
+  pushRemote = 'origin',
+  mainRoot = process.cwd(),
+  gitDir = null,
+  baseBranch = 'main',
+} = {}) {
+  if (role === 'local-only' || providerId === 'none') {
+    return new LocalOnlyBackend({ mainRoot, gitDir, baseBranch })
+  }
+  if (role === 'generic-git' || providerId === 'generic-git' || !targetRepo) {
+    return new GenericRemoteBackend({ targetRepo, pushRemote, mainRoot, gitDir })
+  }
+  return new GitHubBackend({ targetRepo, client, pushRemote, mainRoot, gitDir })
+}

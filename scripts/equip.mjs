@@ -1,23 +1,33 @@
 #!/usr/bin/env node
 /**
  * `.agents/skills/` 工程套件装配、两档分档（lightweight / full）、manifest v2 墓碑/定制豁免、
- * 字节级校验与空白工程初始化。
+ * 字节级校验与通用空白工程初始化。
  *
  * - 只使用 Node 18+ 内置模块，零第三方依赖。
- * - 文本文件统一按 LF 写入，哈希比对兼容 CRLF/LF 跨系统归一等价。
- * - 磁盘已删除的技能/文件记入 `disabledSkills` / `removedFiles` 墓碑，仅 `--restore` 恢复。
- * - `--adopt-custom` 登记定制豁免后 `--check` 返回 0，并标明上游新版是否有变化。
+ * - 降档 `--tier lightweight` 保留既有且完好校验的高阶技能，不误删用户已装配内容。
+ * - `--adopt-custom` 登记定制豁免及二次改写重采用后，`--check` 返回 0。
  */
 
-import { createHash } from 'node:crypto'
-import {
-  existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, unlinkSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
 import { writeAtomic } from './lib/fs-atomic.mjs'
+import {
+  filterKitByTier,
+  generateInitialBootstrappedAgents,
+  normalizeCustomizedFiles,
+  normalizedSha256,
+  normalizePrevFiles,
+  normalizeRemovedFiles,
+  normalizeStringArray,
+  pruneEmptyParents,
+  readExistingManifest,
+  sortObjectKeys,
+  walkKitFiles,
+} from './lib/equip-bootstrap.mjs'
+import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import {
   EQUIP_TIERS,
   KIT_SKILLS,
@@ -26,163 +36,11 @@ import {
   PF_MANIFEST_SCHEMA_VERSION,
   isMacOsMetadata,
 } from './lib/protocol.mjs'
-import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import { isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
 
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_KIT_SKILLS_DIR = join(SKILL_ROOT, 'kit', 'skills')
 const FULL_GITKEEP_PATHS = ['docs/prd/.gitkeep', 'docs/specs/.gitkeep', 'docs/todo/.gitkeep']
-
-function sha256Buffer(buf) {
-  return createHash('sha256').update(buf).digest('hex')
-}
-
-function isTextBuffer(buf) {
-  if (buf.subarray(0, 8192).includes(0)) return false
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(buf)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function normalizeWriteBuffer(buf) {
-  if (!isTextBuffer(buf)) return buf
-  const normalized = buf.toString('utf8').replace(/\r\n/g, '\n')
-  return Buffer.from(normalized, 'utf8')
-}
-
-function normalizedSha256(buf) {
-  return sha256Buffer(normalizeWriteBuffer(buf))
-}
-
-function sortObjectKeys(obj) {
-  const out = {}
-  for (const k of Object.keys(obj ?? {}).sort()) out[k] = obj[k]
-  return out
-}
-
-function walkKitFiles(kitDir) {
-  const map = new Map()
-  if (!existsSync(kitDir)) return map
-
-  function visit(dir) {
-    const entries = readdirSync(dir, { withFileTypes: true })
-      .sort((a, b) => a.name.localeCompare(b.name))
-    for (const entry of entries) {
-      if (entry.name === '.pf-manifest.json' || isMacOsMetadata(entry.name)) continue
-      const abs = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        visit(abs)
-        continue
-      }
-      if (!entry.isFile()) continue
-      const rel = posixPath(relative(kitDir, abs))
-      const rawBuf = readFileSync(abs)
-      const buf = normalizeWriteBuffer(rawBuf)
-      map.set(rel, { abs, buf, sha256: sha256Buffer(buf) })
-    }
-  }
-
-  visit(kitDir)
-  return map
-}
-
-function filterKitByTier(kitFiles, tier) {
-  if (tier !== 'lightweight') return new Map(kitFiles)
-  const allowedTops = new Set(['lib', ...LIGHTWEIGHT_KIT_SKILLS])
-  const filtered = new Map()
-  for (const [rel, item] of kitFiles.entries()) {
-    const top = rel.split('/')[0]
-    if (allowedTops.has(top)) filtered.set(rel, item)
-  }
-  return filtered
-}
-
-function normalizeStringArray(arr) {
-  if (!Array.isArray(arr)) return []
-  return [...new Set(arr.map((x) => posixPath(String(x ?? '')).replace(/^\/+|\/+$/g, '')).filter(Boolean))].sort()
-}
-
-function normalizeRemovedFiles(obj) {
-  const out = {}
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return out
-  for (const [k, v] of Object.entries(obj)) {
-    const rel = posixPath(k).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
-    if (!rel) continue
-    if (typeof v === 'string') out[rel] = { removedAt: v, baseSha256: null }
-    else if (v && typeof v === 'object') {
-      out[rel] = {
-        removedAt: typeof v.removedAt === 'string' ? v.removedAt : '',
-        baseSha256: typeof v.baseSha256 === 'string' ? v.baseSha256 : null,
-      }
-    }
-  }
-  return sortObjectKeys(out)
-}
-
-function normalizeCustomizedFiles(obj) {
-  const out = {}
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return out
-  for (const [k, v] of Object.entries(obj)) {
-    const rel = posixPath(k).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
-    if (!rel || !v || typeof v !== 'object' || typeof v.baseSha256 !== 'string' || !v.baseSha256) continue
-    out[rel] = {
-      adoptedAt: typeof v.adoptedAt === 'string' ? v.adoptedAt : '',
-      baseSha256: v.baseSha256,
-      upstreamSha256: typeof v.upstreamSha256 === 'string' ? v.upstreamSha256 : null,
-    }
-  }
-  return sortObjectKeys(out)
-}
-
-function readExistingManifest(manifestPath) {
-  if (!existsSync(manifestPath)) return { exists: false, valid: false, data: undefined }
-  const text = readTextSafe(manifestPath)
-  if (!text) return { exists: true, valid: false, data: undefined }
-  try {
-    const parsed = JSON.parse(text)
-    const valid = Boolean(
-      parsed
-      && typeof parsed === 'object'
-      && (parsed.schemaVersion === 1 || parsed.schemaVersion === 2)
-      && parsed.files
-      && typeof parsed.files === 'object'
-      && !Array.isArray(parsed.files),
-    )
-    return { exists: true, valid, data: valid ? parsed : undefined }
-  } catch {
-    return { exists: true, valid: false, data: undefined }
-  }
-}
-
-function pruneEmptyParents(filePath, stopDir) {
-  let cur = dirname(filePath)
-  const stop = resolve(stopDir)
-  while (cur.length > stop.length && cur.startsWith(stop)) {
-    try {
-      if (readdirSync(cur).length > 0) break
-      rmdirSync(cur)
-      cur = dirname(cur)
-    } catch {
-      break
-    }
-  }
-}
-
-function normalizePrevFiles(filesObj) {
-  const map = new Map()
-  if (!filesObj || typeof filesObj !== 'object') return map
-  for (const [k, v] of Object.entries(filesObj)) {
-    const rel = posixPath(k)
-    const hash = typeof v === 'string' ? v : v?.sha256
-    if (rel && typeof hash === 'string' && hash) {
-      map.set(rel, hash)
-    }
-  }
-  return map
-}
 
 function normalizeSkillFilterArg(raw) {
   return posixPath(String(raw ?? ''))
@@ -203,7 +61,7 @@ function buildFilterMatcher(option) {
   }
 }
 
-function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}) {
+function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}, extraAllowed = null) {
   const extras = []
   const managedTopDirs = new Set(
     [...KIT_SKILLS, 'lib', ...[...kitFiles.keys()].map((k) => k.split('/')[0]).filter(Boolean)],
@@ -224,7 +82,7 @@ function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}) {
           stack.push(abs)
         } else if (entry.isFile()) {
           const rel = posixPath(relative(skillsDir, abs))
-          if (kitFiles.has(rel)) continue
+          if (kitFiles.has(rel) || extraAllowed?.has(rel)) continue
           const customEntry = customizedFiles[rel]
           if (customEntry && normalizedSha256(readFileSync(abs)) === customEntry.baseSha256) continue
           extras.push(rel)
@@ -247,7 +105,7 @@ function resolveEffectiveTier(requestedTier, existing) {
 }
 
 /**
- * 字节级只读校验 `<targetDir>/.agents/skills/` 与源 `kit/skills/` 的一致性（兼容 v1/v2 账本、墓碑与定制豁免）。
+ * 字节级只读校验 `<targetDir>/.agents/skills/` 与源 `kit/skills/` 的一致性（兼容 v1/v2 账本、降档保留、墓碑与定制豁免）。
  */
 export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } = {}) {
   const root = resolve(targetDir)
@@ -255,21 +113,13 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
   const manifestPath = join(root, PF_MANIFEST_REL)
 
   if (!existsSync(kitDir)) {
-    return {
-      ok: false,
-      reason: `找不到源套件目录：${kitDir}`,
-      missing: [],
-      drifted: [],
-      unregistered: [],
-      extraManaged: [],
-      customized: [],
-    }
+    return { ok: false, reason: `找不到源套件目录：${kitDir}`, missing: [], drifted: [], unregistered: [], extraManaged: [], customized: [] }
   }
 
   const existing = readExistingManifest(manifestPath)
   const effectiveTier = resolveEffectiveTier(tier, existing)
   const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier)
+  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, LIGHTWEIGHT_KIT_SKILLS)
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
   const removedMap = existing.valid ? normalizeRemovedFiles(existing.data?.removedFiles) : {}
@@ -280,79 +130,66 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
   const unregistered = []
   const extraManaged = []
   const customized = []
+  const toleratedHigherTier = new Set()
 
-  if (!existing.exists) {
-    missing.push(PF_MANIFEST_REL)
-  } else if (!existing.valid) {
-    drifted.push(PF_MANIFEST_REL)
+  if (!existing.exists) missing.push(PF_MANIFEST_REL)
+  else if (!existing.valid) drifted.push(PF_MANIFEST_REL)
+
+  const inspectManagedEntry = (rel, src) => {
+    const dest = join(skillsDir, rel)
+    if (!existsSync(dest)) { missing.push(rel); return }
+    const diskHash = normalizedSha256(readFileSync(dest))
+    if (diskHash === src.sha256) {
+      if (existing.valid && prevFiles.get(rel) !== src.sha256) unregistered.push(rel)
+      return
+    }
+    const customEntry = customizedMap[rel]
+    if (customEntry && diskHash === customEntry.baseSha256) {
+      customized.push({
+        path: rel, adoptedAt: customEntry.adoptedAt, baseSha256: customEntry.baseSha256,
+        upstreamSha256: customEntry.upstreamSha256, upstreamChanged: customEntry.upstreamSha256 !== src.sha256,
+      })
+      return
+    }
+    drifted.push(rel)
   }
 
   for (const [rel, src] of kitFiles.entries()) {
     const top = rel.split('/')[0]
     if (disabledSet.has(top) || removedMap[rel]) continue
-    const dest = join(skillsDir, rel)
-    if (!existsSync(dest)) {
-      missing.push(rel)
-      continue
-    }
-    const diskHash = normalizedSha256(readFileSync(dest))
-    if (diskHash === src.sha256) {
-      if (existing.valid && prevFiles.get(rel) !== src.sha256) {
-        unregistered.push(rel)
-      }
-      continue
-    }
-    const customEntry = customizedMap[rel]
-    if (customEntry && diskHash === customEntry.baseSha256) {
-      customized.push({
-        path: rel,
-        adoptedAt: customEntry.adoptedAt,
-        baseSha256: customEntry.baseSha256,
-        upstreamSha256: customEntry.upstreamSha256,
-        upstreamChanged: customEntry.upstreamSha256 !== src.sha256,
-      })
-      continue
-    }
-    drifted.push(rel)
+    inspectManagedEntry(rel, src)
   }
 
   if (existing.valid) {
     for (const rel of prevFiles.keys()) {
       const top = rel.split('/')[0]
-      if (disabledSet.has(top) || removedMap[rel]) continue
-      if (!kitFiles.has(rel)) extraManaged.push(rel)
+      if (disabledSet.has(top) || removedMap[rel] || kitFiles.has(rel)) continue
+      if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {
+        toleratedHigherTier.add(rel)
+        inspectManagedEntry(rel, allKitFiles.get(rel))
+        continue
+      }
+      extraManaged.push(rel)
     }
   }
-  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap)) {
+  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap, toleratedHigherTier)) {
     if (!extraManaged.includes(rel)) extraManaged.push(rel)
   }
   extraManaged.sort()
 
-  const ok = existing.exists
-    && existing.valid
-    && missing.length === 0
-    && drifted.length === 0
-    && unregistered.length === 0
-    && extraManaged.length === 0
+  const ok = existing.exists && existing.valid
+    && missing.length === 0 && drifted.length === 0
+    && unregistered.length === 0 && extraManaged.length === 0
 
   return {
-    ok,
-    target: root,
-    tier: effectiveTier,
-    schemaVersion: existing.data?.schemaVersion,
-    manifestPath: PF_MANIFEST_REL,
-    missing,
-    drifted,
-    unregistered,
-    extraManaged,
-    customized,
-    disabledSkills: [...disabledSet].sort(),
-    removedFiles: Object.keys(removedMap).sort(),
+    ok, target: root, tier: effectiveTier, schemaVersion: existing.data?.schemaVersion,
+    manifestPath: PF_MANIFEST_REL, missing, drifted, unregistered, extraManaged, customized,
+    disabledSkills: [...disabledSet].sort(), removedFiles: Object.keys(removedMap).sort(),
   }
 }
 
 /**
- * 将 `kit/skills/**` 按两档策略与 manifest v2（删除墓碑 + 定制豁免）同步到 `<targetDir>/.agents/skills/**`。
+ * 将 `kit/skills/**` 按两档策略与 manifest v2（删除墓碑 + 定制豁免 + 降档保留）同步到 `<targetDir>/.agents/skills/**`。
  */
 export function equip(targetDir, {
   kitDir = DEFAULT_KIT_SKILLS_DIR,
@@ -365,16 +202,14 @@ export function equip(targetDir, {
   now = new Date().toISOString(),
 } = {}) {
   const root = resolve(targetDir)
-  if (!existsSync(kitDir)) {
-    throw new Error(`找不到源套件目录：${kitDir}`)
-  }
+  if (!existsSync(kitDir)) throw new Error(`找不到源套件目录：${kitDir}`)
 
   const skillsDir = join(root, '.agents', 'skills')
   const manifestPath = join(root, PF_MANIFEST_REL)
   const existing = readExistingManifest(manifestPath)
   const effectiveTier = resolveEffectiveTier(tier, existing)
   const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier)
+  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, LIGHTWEIGHT_KIT_SKILLS)
 
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
@@ -385,15 +220,10 @@ export function equip(targetDir, {
   const adoptMatcher = buildFilterMatcher(adoptCustom)
 
   if (restoreMatcher) {
-    for (const skill of [...disabledSet]) {
-      if (restoreMatcher(skill)) disabledSet.delete(skill)
-    }
-    for (const rel of Object.keys(removedMap)) {
-      if (restoreMatcher(rel)) delete removedMap[rel]
-    }
+    for (const skill of [...disabledSet]) if (restoreMatcher(skill)) disabledSet.delete(skill)
+    for (const rel of Object.keys(removedMap)) if (restoreMatcher(rel)) delete removedMap[rel]
   }
 
-  // 检测自上次记录以来被用户手动删除的整套技能与单文件，记录墓碑且绝不擅自恢复。
   if (existing.valid) {
     const trackedBySkill = new Map()
     for (const rel of prevFiles.keys()) {
@@ -405,21 +235,15 @@ export function equip(targetDir, {
     for (const [skill, trackedRels] of trackedBySkill.entries()) {
       if (disabledSet.has(skill)) continue
       if (restoreMatcher && (restoreMatcher(skill) || trackedRels.some((r) => restoreMatcher(r)))) continue
-      const skillDir = join(skillsDir, skill)
-      if (!existsSync(skillDir)) {
+      if (!existsSync(join(skillsDir, skill))) {
         disabledSet.add(skill)
-        for (const rel of Object.keys(removedMap)) {
-          if (rel === skill || rel.startsWith(`${skill}/`)) delete removedMap[rel]
-        }
-        for (const rel of Object.keys(nextCustomized)) {
-          if (rel === skill || rel.startsWith(`${skill}/`)) delete nextCustomized[rel]
-        }
+        for (const rel of Object.keys(removedMap)) if (rel === skill || rel.startsWith(`${skill}/`)) delete removedMap[rel]
+        for (const rel of Object.keys(nextCustomized)) if (rel === skill || rel.startsWith(`${skill}/`)) delete nextCustomized[rel]
       }
     }
     for (const [rel, oldHash] of prevFiles.entries()) {
       const top = rel.split('/')[0]
-      if (disabledSet.has(top)) continue
-      if (!kitFiles.has(rel)) continue
+      if (disabledSet.has(top) || !kitFiles.has(rel)) continue
       if (restoreMatcher && restoreMatcher(rel)) continue
       if (!existsSync(join(skillsDir, rel))) {
         if (!removedMap[rel]) removedMap[rel] = { removedAt: now, baseSha256: oldHash }
@@ -434,6 +258,7 @@ export function equip(targetDir, {
   const unchanged = []
   const conflicts = []
   const retired = []
+  const preservedHigherTier = []
   const orphanedModified = []
   const adopted = []
   const customized = []
@@ -462,7 +287,6 @@ export function equip(targetDir, {
     }
 
     const diskHash = normalizedSha256(readFileSync(dest))
-    // 磁盘内容已与新版源码归一等价（含首次修复基线漂移），直接收敛至新版 sha256。
     if (diskHash === src.sha256) {
       nextFiles[rel] = { sha256: src.sha256 }
       delete nextCustomized[rel]
@@ -471,11 +295,7 @@ export function equip(targetDir, {
     }
 
     if (adoptMatcher && adoptMatcher(rel)) {
-      nextCustomized[rel] = {
-        adoptedAt: now,
-        baseSha256: diskHash,
-        upstreamSha256: src.sha256,
-      }
+      nextCustomized[rel] = { adoptedAt: now, baseSha256: diskHash, upstreamSha256: src.sha256 }
       nextFiles[rel] = { sha256: oldHash || src.sha256 }
       adopted.push(rel)
       customized.push({ path: rel, upstreamChanged: false })
@@ -485,20 +305,12 @@ export function equip(targetDir, {
     const customEntry = nextCustomized[rel]
     if (customEntry && customEntry.baseSha256 === diskHash) {
       nextFiles[rel] = { sha256: oldHash || src.sha256 }
-      customized.push({
-        path: rel,
-        upstreamChanged: customEntry.upstreamSha256 !== src.sha256,
-      })
+      customized.push({ path: rel, upstreamChanged: customEntry.upstreamSha256 !== src.sha256 })
       continue
     }
 
     if (!oldHash) {
-      conflicts.push({
-        path: rel,
-        reason: 'untracked-modified',
-        diskSha256: diskHash,
-        incomingSha256: src.sha256,
-      })
+      conflicts.push({ path: rel, reason: 'untracked-modified', diskSha256: diskHash, incomingSha256: src.sha256 })
       continue
     }
 
@@ -512,7 +324,7 @@ export function equip(targetDir, {
     nextFiles[rel] = { sha256: oldHash }
     conflicts.push({
       path: rel,
-      reason: 'modified-preserved',
+      reason: customEntry ? 're-edited-custom' : 'modified-preserved',
       baselineSha256: oldHash,
       diskSha256: diskHash,
       incomingSha256: src.sha256,
@@ -524,10 +336,11 @@ export function equip(targetDir, {
       if (!adoptMatcher(extraRel)) continue
       const abs = join(skillsDir, extraRel)
       if (!existsSync(abs)) continue
+      const up = allKitFiles.get(extraRel)
       nextCustomized[extraRel] = {
         adoptedAt: now,
         baseSha256: normalizedSha256(readFileSync(abs)),
-        upstreamSha256: null,
+        upstreamSha256: up ? up.sha256 : null,
       }
       adopted.push(extraRel)
     }
@@ -544,17 +357,38 @@ export function equip(targetDir, {
       continue
     }
     const diskHash = normalizedSha256(readFileSync(dest))
+    if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {
+      const upItem = allKitFiles.get(rel)
+      if (adoptMatcher && adoptMatcher(rel)) {
+        nextCustomized[rel] = { adoptedAt: now, baseSha256: diskHash, upstreamSha256: upItem.sha256 }
+        nextFiles[rel] = { sha256: oldHash || upItem.sha256 }
+        if (!adopted.includes(rel)) adopted.push(rel)
+        customized.push({ path: rel, upstreamChanged: false })
+      } else if (diskHash === upItem.sha256 || diskHash === oldHash) {
+        nextFiles[rel] = { sha256: diskHash === upItem.sha256 ? upItem.sha256 : oldHash }
+        preservedHigherTier.push(rel)
+      } else if (nextCustomized[rel]?.baseSha256 === diskHash) {
+        nextFiles[rel] = { sha256: oldHash || upItem.sha256 }
+        preservedHigherTier.push(rel)
+        customized.push({ path: rel, upstreamChanged: nextCustomized[rel].upstreamSha256 !== upItem.sha256 })
+      } else {
+        nextFiles[rel] = { sha256: oldHash }
+        conflicts.push({
+          path: rel,
+          reason: nextCustomized[rel] ? 're-edited-custom' : 'modified-preserved',
+          baselineSha256: oldHash,
+          diskSha256: diskHash,
+          incomingSha256: upItem.sha256,
+        })
+      }
+      continue
+    }
     if (diskHash === oldHash) {
       pendingDeletes.push(dest)
       retired.push(rel)
       delete nextCustomized[rel]
     } else {
-      orphanedModified.push({
-        path: rel,
-        status: 'orphaned-modified',
-        baselineSha256: oldHash,
-        diskSha256: diskHash,
-      })
+      orphanedModified.push({ path: rel, status: 'orphaned-modified', baselineSha256: oldHash, diskSha256: diskHash })
     }
   }
 
@@ -577,18 +411,13 @@ export function equip(targetDir, {
     disabledSkills: [...disabledSet].sort(),
     removedFiles: sortObjectKeys(removedMap),
     customizedFiles: sortObjectKeys(nextCustomized),
-    agentsRegions: existing.data?.agentsRegions && typeof existing.data.agentsRegions === 'object'
-      ? { ...existing.data.agentsRegions }
-      : {},
+    agentsRegions: existing.data?.agentsRegions && typeof existing.data.agentsRegions === 'object' ? { ...existing.data.agentsRegions } : {},
     removedAgentsRegions: existing.valid ? normalizeStringArray(existing.data?.removedAgentsRegions) : [],
   }
 
   const prevNormalizedRaw = existing.valid ? JSON.stringify({
-    schemaVersion: existing.data.schemaVersion,
-    tier: existing.data.tier,
-    forgeVersion: existing.data.forgeVersion,
-    installedAt: existing.data.installedAt,
-    files: sortObjectKeys(existing.data.files),
+    schemaVersion: existing.data.schemaVersion, tier: existing.data.tier, forgeVersion: existing.data.forgeVersion,
+    installedAt: existing.data.installedAt, files: sortObjectKeys(existing.data.files),
     disabledSkills: normalizeStringArray(existing.data.disabledSkills),
     removedFiles: normalizeRemovedFiles(existing.data.removedFiles),
     customizedFiles: normalizeCustomizedFiles(existing.data.customizedFiles),
@@ -596,25 +425,19 @@ export function equip(targetDir, {
     removedAgentsRegions: normalizeStringArray(existing.data.removedAgentsRegions),
   }) : ''
 
-  const manifestChanged = !existing.exists
-    || !existing.valid
-    || prevNormalizedRaw !== JSON.stringify(nextManifest)
+  const manifestChanged = !existing.exists || !existing.valid || prevNormalizedRaw !== JSON.stringify(nextManifest)
   if (manifestChanged && existing.valid && prevNormalizedRaw !== '') {
     nextManifest.installedAt = pendingWrites.length > 0 || pendingDeletes.length > 0 ? now : nextManifest.installedAt
   }
 
   const hasPendingChanges = pendingWrites.length > 0 || pendingDeletes.length > 0 || manifestChanged
-
-  let backup
-  if (dryRun) {
-    backup = { created: false, skippedReason: 'dry-run' }
-  } else if (noBackup) {
-    backup = { created: false, skippedReason: 'disabled' }
-  } else if (!hasPendingChanges) {
-    backup = { created: false, skippedReason: 'no-pending-changes' }
-  } else {
-    backup = ensurePreWriteBackup(root, { label: 'equip', hasPendingChanges: true })
-  }
+  const backup = dryRun
+    ? { created: false, skippedReason: 'dry-run' }
+    : (noBackup
+        ? { created: false, skippedReason: 'disabled' }
+        : (!hasPendingChanges
+            ? { created: false, skippedReason: 'no-pending-changes' }
+            : ensurePreWriteBackup(root, { label: 'equip', hasPendingChanges: true })))
 
   if (!dryRun) {
     for (const item of pendingWrites) {
@@ -632,25 +455,11 @@ export function equip(targetDir, {
   }
 
   return {
-    target: root,
-    tier: effectiveTier,
-    schemaVersion: PF_MANIFEST_SCHEMA_VERSION,
-    dryRun,
-    backup,
-    manifestPath: PF_MANIFEST_REL,
-    manifestUpdated: manifestChanged,
-    added,
-    restored,
-    upgraded,
-    unchanged,
-    conflicts,
-    retired,
-    orphanedModified,
-    adopted,
-    customized,
-    disabledSkills: nextManifest.disabledSkills,
-    removedFiles: Object.keys(nextManifest.removedFiles),
-    ensuredGitkeeps,
+    target: root, tier: effectiveTier, schemaVersion: PF_MANIFEST_SCHEMA_VERSION, dryRun, backup,
+    manifestPath: PF_MANIFEST_REL, manifestUpdated: manifestChanged,
+    added, restored, upgraded, unchanged, preservedHigherTier, conflicts, retired,
+    orphanedModified, adopted, customized,
+    disabledSkills: nextManifest.disabledSkills, removedFiles: Object.keys(nextManifest.removedFiles), ensuredGitkeeps,
   }
 }
 
@@ -662,9 +471,7 @@ function formatCheckReport(res) {
   for (const p of res.unregistered) lines.push(`未登记哈希：${p}`)
   for (const p of res.extraManaged) lines.push(`多余托管文件：${p}`)
   for (const c of res.customized ?? []) {
-    lines.push(c.upstreamChanged
-      ? `定制豁免：${c.path}（上游新版有变化，可供参考合并）`
-      : `定制豁免：${c.path}（与上游基线一致）`)
+    lines.push(c.upstreamChanged ? `定制豁免：${c.path}（上游新版有变化，可供参考合并）` : `定制豁免：${c.path}（与上游基线一致）`)
   }
   return lines.join('\n')
 }
@@ -687,6 +494,7 @@ async function main(argv) {
   let dryRun = false
   let noBackup = false
   let doBootstrap = false
+  let stack
   let lang
   let name
   let description = ''
@@ -703,12 +511,12 @@ async function main(argv) {
         '',
         '  --tier <lightweight|full>  装配档位（lightweight 3 技能 / full 全套 5 技能）',
         '  --check                    只读校验，不一致退出码 1（已豁免定制文件退出 0）',
-        '  --adopt-custom [path]      将手工修改的托管技能登记为定制豁免',
+        '  --adopt-custom [path]      将手工修改或二次编辑的托管技能登记为定制豁免',
         '  --restore [pathOrSkill]    显式恢复此前删除记入墓碑的技能或文件',
         '  --dry-run                  仅打印将执行的操作，不写文件',
         '  --no-backup                写入前不自动创建增量保护快照',
-        '  --bootstrap-empty          为空目录生成最小可运行骨架与初始 docs/TDD.md',
-        '  --lang <lang>              骨架语言：node | python | go | rust | java | docs',
+        '  --bootstrap-empty          为空目录（或仅含 README/LICENSE/.github/.agents）生成通用基线、TDD 与自洽 AGENTS.md',
+        '  --stack <stack>            基线栈提示（默认 universal；--lang 为兼容别名）',
         '  --name <name>              项目名称（默认取目录名）',
         '  --description <text>       项目一句话简介（仅 --bootstrap-empty 时生效）',
         '',
@@ -721,6 +529,8 @@ async function main(argv) {
     else if (arg === '--bootstrap-empty') doBootstrap = true
     else if (arg === '--tier') tier = argv[++i]
     else if (arg.startsWith('--tier=')) tier = arg.slice('--tier='.length)
+    else if (arg === '--stack') stack = argv[++i]
+    else if (arg.startsWith('--stack=')) stack = arg.slice('--stack='.length)
     else if (arg === '--lang') lang = argv[++i]
     else if (arg.startsWith('--lang=')) lang = arg.slice('--lang='.length)
     else if (arg === '--name') name = argv[++i]
@@ -768,7 +578,7 @@ async function main(argv) {
 
     let bootstrapResult
     if (doBootstrap) {
-      bootstrapResult = bootstrapEmpty(target, { lang, name, description, dryRun })
+      bootstrapResult = bootstrapEmpty(target, { stack, lang, name, description, dryRun })
       if (!existsSync(kitDir)) {
         process.stdout.write(`${JSON.stringify({ bootstrap: bootstrapResult, equip: null }, null, 2)}\n`)
         return 0
@@ -776,9 +586,14 @@ async function main(argv) {
     }
 
     const equipResult = equip(target, { kitDir, tier, dryRun, noBackup, restore, adoptCustom })
+    let agentsResult
+    if (doBootstrap && !dryRun) {
+      agentsResult = await generateInitialBootstrappedAgents(target, { stack: stack ?? lang ?? 'universal', name, noBackup })
+    }
     process.stdout.write(`${JSON.stringify({
       ...(bootstrapResult ? { bootstrap: bootstrapResult } : {}),
       equip: equipResult,
+      ...(agentsResult ? { agents: agentsResult } : {}),
     }, null, 2)}\n`)
     return 0
   } catch (err) {

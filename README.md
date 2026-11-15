@@ -79,8 +79,8 @@
 | 情况 | 会发生什么 |
 | --- | --- |
 | **清单能精准识别（12 种）** | `Node.js` `Python` `Rust` `Go` `Java` `Ruby` `PHP` `.NET` `C/C++` `Dart` `Swift` `Elixir`。给出该语言惯用的构建、测试、安装命令 |
-| **清单外的其他语言** | Haskell、OCaml、Zig、Nim、Crystal、Julia、自研 DSL 都一样：从你项目里**已经在跑的命令**读——CI 的 `run:` 块、`Makefile`、`justfile`。这些命令被真实执行过，比任何推断都可靠 |
-| **想从空目录起步** | 只有 6 种语言能自动生成可跑通冒烟测试的最小工程：`node` `python` `go` `rust` `java` `docs`。其他语言先用自己的脚手架建起来，再跑勘察 |
+| **清单外的其他语言** | Haskell、OCaml、Zig、Nim、Crystal、Julia、自研 DSL 都一样：从你项目里**已经在跑的命令**读——CI 的 `run:` 块、`Makefile`、`justfile`、`Taskfile`。这些命令被真实执行过，比任何推断都可靠 |
+| **想从空目录起步** | `equip.mjs --bootstrap-empty` 对**任意技术栈**生成通用工程基线（Git 基线、四层文档、`docs/TDD.md`、自洽 `AGENTS.md` 与 `.agents/skills/`），零示例玩具业务代码，并支持 `14` 种预设栈（默认 `universal`）与已有 `README.md`/`LICENSE` 共存 |
 
 还支持纯文档目录、编辑器插件、Obsidian 插件和能力目录。
 

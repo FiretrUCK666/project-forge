@@ -125,7 +125,7 @@ export function parseDiffHunkRanges(diffText, { contextPadding = 3 } = {}) {
   for (const [rawFile, chunk] of chunks.entries()) {
     const file = normRel(rawFile)
     if (!file) continue
-    const ranges = []
+    const ranges = map.get(file) ?? []
     for (const line of String(chunk).split('\n')) {
       const m = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/.exec(line)
       if (!m) continue
@@ -146,7 +146,39 @@ export function parseDiffHunkRanges(diffText, { contextPadding = 3 } = {}) {
   return map
 }
 
-export async function collectIncrementalScope(targetRoot, { prevHead, headSha, baseSha, baseBranch } = {}) {
+/** 解析 `git range-diff --no-color` 输出的新侧变更/新增提交 SHA（! 与 >）。 */
+export function parseRangeDiffNewCommits(text) {
+  const shas = []
+  for (const rawLine of String(text ?? '').split('\n')) {
+    const m = /^\s*(?:\d+|-)\s*:\s*[0-9a-f-]+\s+([!>=<])\s+(?:\d+|-)\s*:\s*([0-9a-f]+)\b/i.exec(rawLine)
+    if (!m) continue
+    const op = m[1]
+    const sha = m[2]
+    if ((op === '!' || op === '>') && sha && !/^-+$/.test(sha) && !shas.includes(sha)) {
+      shas.push(sha)
+    }
+  }
+  return shas
+}
+
+function collectFilesFromShowNameStatusZ(buf, fileRanges) {
+  const tokens = Buffer.isBuffer(buf) ? buf.toString('utf8').split('\0') : String(buf ?? '').split('\0')
+  for (let i = 0; i < tokens.length; i += 1) {
+    const st = tokens[i]?.trim()
+    if (!st) continue
+    if (/^[RC]/.test(st)) {
+      const f = normRel(tokens[i + 2] ?? '')
+      i += 2
+      if (f && !fileRanges.has(f)) fileRanges.set(f, [])
+    } else if (/^[MADTU]/.test(st)) {
+      const f = normRel(tokens[i + 1] ?? '')
+      i += 1
+      if (f && !fileRanges.has(f)) fileRanges.set(f, [])
+    }
+  }
+}
+
+export async function collectIncrementalScope(targetRoot, { prevHead, headSha, baseSha, baseBranch, prevRoundBaseSha, currentBaseSha, roundBaseSha } = {}) {
   if (!targetRoot || !headSha || headSha === 'UNBORN') {
     return { available: false, range: null, fileRanges: new Map() }
   }
@@ -154,7 +186,36 @@ export async function collectIncrementalScope(targetRoot, { prevHead, headSha, b
   if (prevHead && prevHead !== 'UNBORN') {
     const anc = await gitRun(targetRoot, ['merge-base', '--is-ancestor', prevHead, headSha])
     if (anc.ok) range = `${prevHead}..${headSha}`
-    else if (baseSha && (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok) range = `${baseSha}..${headSha}`
+    else {
+      const oldBase = prevRoundBaseSha ?? roundBaseSha?.prevBaseSha
+      const newBase = currentBaseSha ?? roundBaseSha?.newBaseSha ?? baseSha
+      if (oldBase && newBase) {
+        if (oldBase === prevHead) {
+          range = `${newBase}..${headSha}`
+        } else {
+          const rdRes = await gitRun(targetRoot, [
+            'range-diff', '--no-color',
+            `${oldBase}..${prevHead}`,
+            `${newBase}..${headSha}`,
+          ])
+          if (rdRes.ok) {
+            const commits = parseRangeDiffNewCommits(rdRes.stdout)
+            const label = `range-diff (${commits.length} changed/new commit(s))`
+            if (commits.length === 0) return { available: true, range: label, fileRanges: new Map() }
+            const [showDiff, showNs] = await Promise.all([
+              gitRunBuffer(targetRoot, ['show', '--format=tformat:', '--unified=0', '--no-ext-diff', '--no-color', ...commits], { maxBuffer: 32 * 1024 * 1024 }),
+              gitRunBuffer(targetRoot, ['show', '--format=tformat:', '--name-status', '-z', ...commits]),
+            ])
+            if (showDiff.ok) {
+              const fileRanges = parseDiffHunkRanges(showDiff.stdout.toString('utf8').replace(/\r\n/g, '\n'), { contextPadding: 3 })
+              if (showNs.ok) collectFilesFromShowNameStatusZ(showNs.stdout, fileRanges)
+              return { available: true, range: label, fileRanges }
+            }
+          }
+        }
+      }
+    }
+    if (!range && baseSha && (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok) range = `${baseSha}..${headSha}`
   } else if (baseSha && (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok) {
     range = `${baseSha}..${headSha}`
   }
@@ -226,12 +287,12 @@ function matchesRebutList(mf, rebuts = []) {
 /** 锁 C：Round 2+ 增量视野硬锁，拦截指向未改旧文件/旧行或无据主观新挑刺（退出码 2）。 */
 export async function checkIncrementalScopeLock({
   round, verdict, mustFixList, prevOpen, rebuts, targetRoot,
-  prevHead, headSha, baseSha, baseBranch, evidence, lastVerifyExitCode,
+  prevHead, headSha, baseSha, baseBranch, prevRoundBaseSha, currentBaseSha, roundBaseSha, evidence, lastVerifyExitCode,
 }) {
   if (round < 2 || verdict !== 'changes' || !Array.isArray(mustFixList) || mustFixList.length === 0) {
     return { blocked: false }
   }
-  const scope = await collectIncrementalScope(targetRoot, { prevHead, headSha, baseSha, baseBranch })
+  const scope = await collectIncrementalScope(targetRoot, { prevHead, headSha, baseSha, baseBranch, prevRoundBaseSha, currentBaseSha, roundBaseSha })
   const hasFailedEvidence = Boolean(
     (lastVerifyExitCode !== null && lastVerifyExitCode !== undefined && lastVerifyExitCode !== 0)
     || (evidence && evidence.headSha === headSha && evidence.exitCode !== 0),

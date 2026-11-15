@@ -21,7 +21,7 @@ import { parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
   archiveCompletedDocsGroup, buildDocFilename, DOC_FRONTMATTER_KEY_ORDER,
   docDateTag, docIsoDate, parseDocFilename, parseDocFrontmatter,
-  renderStandardDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
+  renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
@@ -91,12 +91,15 @@ async function initDoc({
     planned.push({ kind: k, file: relFile, absFile })
   }
 
+  const customTemplates = []
   for (const item of planned) {
     const relatedSpecRel = item.kind === 'todo' && relatedSpec
       ? posixPath(relative(dirname(item.absFile), resolve(writeRoot, relatedSpec)))
       : null
+    const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
+    if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
     const content = renderStandardDocTemplate({
-      kind: item.kind, title, safeSlug, today, headSha, headBranch,
+      kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
       taskId, issueNum, owner, quickCmd, relatedSpecRel,
     })
     mkdirSync(dirname(item.absFile), { recursive: true })
@@ -133,14 +136,25 @@ async function initDoc({
   return {
     type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
     files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
-    issue: issueNum, plannedAt: headSha, ledgerUpdated,
+    issue: issueNum, plannedAt: headSha, ledgerUpdated, customTemplates,
   }
+}
+
+function normActorId(s) {
+  return String(s ?? '').trim().replace(/^@/, '').toLowerCase()
 }
 
 function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) {
   if (!reviewer || !String(reviewer).trim()) throw new Error('critique-pass 必须指定 --reviewer <reviewerId>')
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
+
+  const rawPre = readTextSafe(abs)
+  if (rawPre === undefined) throw new Error(`无法读取文本文件：${file}`)
+  const fmPre = parseDocFrontmatter(rawPre)
+  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {
+    throw new Error(`SELF_CRITIQUE_REJECTED: critique-pass 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
+  }
 
   const audit = auditDoc({ repoRoot, file })
   if (!audit.ok) {
@@ -392,12 +406,25 @@ async function main(argv) {
         process.stdout.write(`文档审计（${res.file}，type=${res.docType}）：${res.ok ? '通过' : `失败（${res.errors.length} 项错误）`}\n`)
         for (const e of res.errors) process.stdout.write(`- [${e.code}] L${e.line}: ${e.message}\n  修法: ${e.fixHint}\n`)
         if (res.ok) {
-          const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
+          const docText = readTextSafe(resolve(repoRoot, res.file)) ?? ''
+          const fm = parseDocFrontmatter(docText)
           const fn = parseDocFilename(res.file)
           const slugVal = fn?.slug ?? 'task'
-          if (res.docType === 'todo' && !fm.data?.related_spec) {
+          const statusLow = String(fm.data?.status ?? '').toLowerCase()
+          const fileRefs = [...new Set(docText.match(/`[^`\n]+\/[A-Za-z0-9_.-]+\.[A-Za-z0-9]+`/g) ?? [])]
+          const isNonTrivialTodo = Boolean(fm.data?.related_spec) || fileRefs.length >= 3 || /^- \[[ xX]\] C3\b/m.test(docText)
+          if (res.docType === 'prd' && !['active', 'done', 'dropped'].includes(statusLow)) {
+            printNextStep([{ skill: 'dev-plan', text: `PRD 须经独立只读 Plan Critique 后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+          } else if (res.docType === 'tdd') {
+            printNextStep([{ skill: 'dev-plan', text: `TDD 架构基线须经独立架构 Critique 确认与 AGENTS.md 模块边界、arch-rules 对齐：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
+          } else if (res.docType === 'todo' && !fm.data?.related_spec && !isNonTrivialTodo) {
             printNextStep([{ skill: 'dev-flow', text: `Todo 自审通过，移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` }], { repoRoot: mainRoot })
-          } else if (res.docType === 'spec' && String(fm.data?.status ?? '').toLowerCase() !== 'approved') {
+          } else if (res.docType === 'todo') {
+            printNextStep([
+              { skill: 'dev-plan', text: `非平凡 Todo（多文件/关联 SPEC）建议先独立 Plan Critique：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` },
+              { skill: 'dev-flow', text: `Todo 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` },
+            ], { repoRoot: mainRoot })
+          } else if (res.docType === 'spec' && statusLow !== 'approved') {
             printNextStep([{ skill: 'dev-plan', text: `独立只读 Critique 通过后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
           }
         }

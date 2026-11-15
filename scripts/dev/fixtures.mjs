@@ -19,6 +19,7 @@ import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
 import { registerM2Cases } from './fixtures-m2.mjs'
+import { registerM3Cases } from './fixtures-m3.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
@@ -28,10 +29,11 @@ initTestBackupDir()
 const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
   ['m2', registerM2Cases],
-  ['claims', registerClaimsCases],
+  ['m3', registerM3Cases],
   ['govern', registerGovernCases],
-  ['docs', registerDocsCases],
+  ['claims', registerClaimsCases],
   ['equip', registerEquipCases],
+  ['docs', registerDocsCases],
   ['platform', registerPlatformCases],
   ['explore', registerExploreCases],
   ['contracts', registerContractCases],
@@ -83,11 +85,50 @@ async function runCase([name, fn]) {
     return { ok: false, name, ms, entry: `${name} —— ${outcome}` }
   } catch (error) {
     const ms = Math.round(performance.now() - t0)
-    return { ok: false, name, ms, entry: `${name} —— 抛异常：${error instanceof Error ? error.message : String(error)}` }
+    const msg = error instanceof Error ? `${error.message} [${error.stack?.split('\n').slice(1, 3).map((s) => s.trim()).join(' <- ') ?? ''}]` : String(error)
+    return { ok: false, name, ms, entry: `${name} —— 抛异常：${msg}` }
   }
 }
 
-function runDynamicWorkerPool(scriptPath, totalCases, lanes, workerBkRoot) {
+const HEAVY_CASE_HINTS = [
+  'Tier 2 review 槽同步',
+  'M2 C3',
+  'flow.mjs：smoke',
+  'M3-C2',
+  '全链路 URL',
+  'M3-C1b',
+  'govern-audit.mjs：fence-aware',
+  'M2 C4+C5',
+  'govern-audit.mjs release-prep',
+  'M2 C1b',
+  'flow.mjs + doc-plan.mjs',
+  'M3-C1a',
+  '远端 CI 合并硬门禁',
+  'equip.mjs + survey.mjs',
+  'M2 C2',
+  'review-pack.mjs + govern-audit.mjs',
+  '无远端探测',
+  '测试分层控频',
+  '8 层深',
+  '统一 YAML',
+  'survey.mjs + compose-agents.mjs',
+  'M2 C1c',
+  '耦合文件自同步',
+  'M3-C5',
+]
+
+function buildDispatchOrder(allCases) {
+  const rank = (name) => {
+    const idx = HEAVY_CASE_HINTS.findIndex((h) => name.includes(h))
+    return idx === -1 ? HEAVY_CASE_HINTS.length : idx
+  }
+  return allCases
+    .map(([name], index) => ({ index, priority: rank(name) }))
+    .sort((a, b) => (a.priority - b.priority) || (a.index - b.index))
+    .map((x) => x.index)
+}
+
+function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot) {
   return new Promise((done) => {
     let cursor = 0
     let passed = 0
@@ -118,8 +159,8 @@ function runDynamicWorkerPool(scriptPath, totalCases, lanes, workerBkRoot) {
       child.stderr?.on('data', (c) => { errBuf += c })
 
       const dispatchNext = () => {
-        if (cursor < totalCases) {
-          currentIdx = cursor++
+        if (cursor < dispatchOrder.length) {
+          currentIdx = dispatchOrder[cursor++]
           child.send({ type: 'run', index: currentIdx })
         } else {
           currentIdx = null
@@ -244,8 +285,8 @@ async function main() {
     return 1
   }
 
-  // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（避免长尾倾斜与 chdir/env 竞态）
-  const defaultJobs = only || bailOn ? 1 : Math.min(6, Math.max(2, cpus().length))
+  // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（避免长尾倾斜与 Windows 进程风暴）
+  const defaultJobs = only || bailOn ? 1 : Math.min(8, Math.max(2, cpus().length))
   const lanes = Number.isFinite(jobsArg) && jobsArg >= 1
     ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length))
     : defaultJobs
@@ -256,9 +297,10 @@ async function main() {
     const scriptPath = fileURLToPath(import.meta.url)
     const workerBkRoot = mkdtempSync(join(tmpdir(), 'pf-fix-pool-'))
     try {
+      const dispatchOrder = buildDispatchOrder(allCases)
       const { passed: totalPassed, failures: allFailures, timings } = await runDynamicWorkerPool(
         scriptPath,
-        allCases.length,
+        dispatchOrder,
         Math.min(lanes, allCases.length),
         workerBkRoot,
       )

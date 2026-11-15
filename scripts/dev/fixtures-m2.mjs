@@ -61,16 +61,54 @@ export function registerM2Cases(cases) {
         return `runLowRiskDocStaticCheck 正反异常：bad=${JSON.stringify(sBad)}, good=${JSON.stringify(sGood)}`
       }
     } finally { rmTree(docDir) }
+    return true
+  }])
 
-    // 3. quick --target 旁路拦截 + 无 CI 低风险死链阻断 + flow next (idle/ambiguous/--probe-auth/ownerRole) + submit 权责锁
+  cases.push(['M2 C1c：quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
+    const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const qOnlyDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# qonly\n\n```yaml\nquick-test: node -e "process.exit(0)" -- {target}\nfull-test: none\nsmoke-verify: none\nmerge-gate: none\nhigh-risk: none\n```\n',
+      'src/a.mjs': 'export const q = 1\n',
+    })
+    gitInit(qOnlyDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    try {
+      const roots = await resolveRepoRoots(qOnlyDir)
+      await handleStart({ task: 'q1', case: '2', slug: 'q1' }, roots)
+      const wtq = join(qOnlyDir, '.worktrees', 'impl-q1')
+      writeFileSync(join(wtq, 'src/a.mjs'), 'export const q = 2\n')
+      gitSync(wtq, ['add', '-A'])
+      gitSync(wtq, ['commit', '-qm', 'q2'])
+      await handleVerify({ task: 'q1', tier: 'quick', target: 'src/a.mjs' }, roots)
+      const qBypass = await handleSubmit({ task: 'q1' }, roots)
+      if (qBypass.exitCode !== 3) {
+        return `quick-only 仓库 --target 局部旁路未被拦截：exit=${qBypass.exitCode}`
+      }
+      await handleVerify({ task: 'q1', tier: 'quick' }, roots)
+      const qOk = await handleSubmit({ task: 'q1' }, roots)
+      if (qOk.exitCode !== 0) return `quick-only 仓库全量 quick 误拦：exit=${qOk.exitCode}`
+      return true
+    } finally { rmTree(qOnlyDir) }
+  }])
+
+  cases.push(['M2 C1b：quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
+    const {
+      evaluateNextState, readTaskLedger, resolveRepoRoots,
+    } = await import('../../kit/skills/lib/shared.mjs')
+    const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { handleNext } = await import('../../kit/skills/dev-flow/scripts/flow-next.mjs')
+    // 3. quick --target 旁路拦截 + flow next (idle/ambiguous/--probe-auth/ownerRole) + submit 权责锁
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': [
         '# m2-c1', '',
         '```yaml',
         'quick-test: node -e "process.exit(0)" -- {target}',
-        'full-test: node -e "process.exit(0)"',
-        'merge-gate: node -e "process.exit(0)"',
+        'full-test: exit 0',
+        'merge-gate: exit 0',
         'high-risk: none',
         '```', '',
       ].join('\n'),
@@ -81,65 +119,39 @@ export function registerM2Cases(cases) {
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c1.git' })
 
     try {
-      // 3a. idle 态
-      const nextIdle = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['next', '--json'], { cwd: dir })).stdout)
+      const roots = await resolveRepoRoots(dir)
+      const nextIdle = (await handleNext({ json: true }, roots)).payload
       if (nextIdle.phase !== 'idle' || nextIdle.ownerRole !== 'coordinator') {
         return `idle next 异常：${JSON.stringify(nextIdle)}`
       }
 
-      // 3b. 启动 medium 任务：quick --target 拦截 -> full 放行 -> ownerRole & submit 权责守卫
-      const s1 = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c1-code', '--case', '2', '--slug', 'c1-code', '--json'], { cwd: dir })).stdout)
-      const wt1 = join(dir, s1.worktreePath)
+      await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code' }, roots)
+      const wt1 = join(dir, '.worktrees', 'impl-c1-code')
       writeFileSync(join(wt1, 'src/app.mjs'), 'export const a = 2\n')
       gitSync(wt1, ['add', '-A'])
       gitSync(wt1, ['commit', '-qm', 'feat: a=2'])
 
-      const vPartial = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c1-code', '--tier', 'quick', '--target', 'src/app.mjs'], { cwd: wt1 })
-      if (vPartial.status !== 0) return `quick --target 失败：${vPartial.stderr}`
+      const vPartial = await handleVerify({ task: 'c1-code', tier: 'quick', target: 'src/app.mjs' }, roots)
+      if (vPartial.exitCode !== 0) return `quick --target 失败：${vPartial.exitCode}`
 
-      const subBypass = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c1-code'], { cwd: wt1 })
-      if (subBypass.status !== 3 || !subBypass.stderr.includes('BLOCKED_INSUFFICIENT_VERIFICATION_TIER')) {
-        return `quick --target 旁路未被 submit 拦截：exit=${subBypass.status}, err=${subBypass.stderr}`
+      const subBypass = await handleSubmit({ task: 'c1-code' }, roots)
+      if (subBypass.exitCode !== 3) {
+        return `quick --target 旁路未被 submit 拦截：exit=${subBypass.exitCode}`
       }
 
-      // 3c. 验证 validateVerificationEvidence 在仅配 quick-test (full/smoke=none) 时仍拦截 quick --target 局部旁路
-      const qOnlyDir = tmpProject({
-        '.gitignore': '.worktrees/\n',
-        'AGENTS.md': '# qonly\n\n```yaml\nquick-test: node -e "process.exit(0)" -- {target}\nfull-test: none\nsmoke-verify: none\nmerge-gate: none\nhigh-risk: none\n```\n',
-        'src/a.mjs': 'export const q = 1\n',
-      })
-      gitInit(qOnlyDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
-      try {
-        const sq = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'q1', '--case', '2', '--slug', 'q1', '--json'], { cwd: qOnlyDir })).stdout)
-        const wtq = join(qOnlyDir, sq.worktreePath)
-        writeFileSync(join(wtq, 'src/a.mjs'), 'export const q = 2\n')
-        gitSync(wtq, ['add', '-A'])
-        gitSync(wtq, ['commit', '-qm', 'q2'])
-        await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'q1', '--tier', 'quick', '--target', 'src/a.mjs'], { cwd: wtq })
-        const qBypass = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'q1'], { cwd: wtq })
-        if (qBypass.status !== 3 || !qBypass.stderr.includes('BLOCKED_INSUFFICIENT_VERIFICATION_TIER')) {
-          return `quick-only 仓库 --target 局部旁路未被拦截：exit=${qBypass.status}, err=${qBypass.stderr}`
-        }
-        await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'q1', '--tier', 'quick'], { cwd: wtq })
-        const qOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'q1'], { cwd: wtq })
-        if (qOk.status !== 0) return `quick-only 仓库全量 quick 误拦：exit=${qOk.status}, err=${qOk.stderr}`
-      } finally { rmTree(qOnlyDir) }
-
-      const nextVerify = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['next', '--task', 'c1-code', '--json'], { cwd: dir })).stdout)
+      const nextVerify = (await handleNext({ task: 'c1-code', json: true }, roots)).payload
       if (nextVerify.phase !== 'needs-verify' || nextVerify.ownerRole !== 'implementer') {
         return `verify 缺失时 next phase/ownerRole 错误：${JSON.stringify(nextVerify)}`
       }
 
-      const vFull = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c1-code', '--mode', 'full'], { cwd: wt1 })
-      if (vFull.status !== 0) return `full verify 失败：${vFull.stderr}`
+      const vFull = await handleVerify({ task: 'c1-code', mode: 'full' }, roots)
+      if (vFull.exitCode !== 0) return `full verify 失败：${vFull.exitCode}`
 
-      const nextSub = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['next', '--task', 'c1-code', '--json'], { cwd: dir })).stdout)
+      const nextSub = (await handleNext({ task: 'c1-code', json: true }, roots)).payload
       if (nextSub.phase !== 'needs-submit' || nextSub.ownerRole !== 'implementer') {
         return `verify 通过后 next phase/ownerRole 错误：${JSON.stringify(nextSub)}`
       }
 
-      // submit 权责校验：coordinator-* 与非认领人被拒，本人与 --takeover --reason 放行
-      const roots = await resolveRepoRoots(dir)
       const mockClient = {
         tier: 'gh-cli',
         async findOpenPrForBranch() { return { ok: true, prs: [] } },
@@ -167,20 +179,17 @@ export function registerM2Cases(cases) {
         if (okAlice.exitCode !== 0) return `原实施者 alice submit 被误拦：exit=${okAlice.exitCode}`
       } finally { rmTree(bare) }
 
-      // 多任务 ambiguous + --probe-auth 远端水合
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c1-doc', '--case', '1', '--slug', 'c1-doc', '--json'], { cwd: dir })
-      const nextAmb = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['next', '--json'], { cwd: dir })).stdout)
+      await handleStart({ task: 'c1-doc', case: '1', slug: 'c1-doc' }, roots)
+      const nextAmb = (await handleNext({ json: true }, roots)).payload
       if (nextAmb.phase !== 'ambiguous' || nextAmb.ownerRole !== 'coordinator' || (nextAmb.candidates?.length ?? 0) < 2) {
         return `多任务 ambiguous next 异常：${JSON.stringify(nextAmb)}`
       }
 
-      const { handleNext } = await import('../../kit/skills/dev-flow/scripts/flow-next.mjs')
       const hydRes = await handleNext({ task: 'c1-code', 'probe-auth': true, json: true, _ghClient: mockClient }, roots)
       if (!hydRes.payload.hydration?.rehydrated || readTaskLedger(dir, 'c1-code')?.rounds?.length === 0) {
         return `--probe-auth 未从远端 pf-state 水合轮次：${JSON.stringify(hydRes.payload)}`
       }
 
-      // evaluateNextState ownerRole 覆盖校验
       const revPhase = evaluateNextState({
         activeTasks: [readTaskLedger(dir, 'c1-code')],
         selectedTask: { ...readTaskLedger(dir, 'c1-code'), status: 'submitted', lastSubmittedHead: 'abc', reviewPassed: false, rounds: [] },
@@ -201,7 +210,7 @@ export function registerM2Cases(cases) {
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'package.json': '{"name":"c2-wt","version":"1.0.0"}\n',
       'package-lock.json': '{"lockfileVersion":3,"v":1}\n',
-      'AGENTS.md': '# c2\n\n```yaml\nquick-test: node -e "process.exit(0)"\n```\n',
+      'AGENTS.md': '# c2\n\n```yaml\nquick-test: exit 0\n```\n',
       'src/a.mjs': 'export const a = 1\n',
     })
     gitInit(committed, { branch: 'main', name: 't', email: 't@t.t' })
@@ -252,18 +261,14 @@ export function registerM2Cases(cases) {
     } finally { rmTree(unborn); rmTree(committed) }
   }])
 
-  cases.push(['M2 C3：1:N 总控 PRD 保护与 1:1 归档、OPEN PR 防重与模板填充、--detach 试合回滚与 Squash 清理', async () => {
-    const { isSharedMasterPrd, readTaskLedger, writeTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
-    const { handleSubmit, handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow.mjs').then(async () => ({
-      ...(await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')),
-      ...(await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')),
-    }))
-    const { runTrialMerge } = await import('../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs')
+  cases.push(['M2 C3a：1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
+    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
 
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       '.github/pull_request_template.md': '# PR\n\n## 改了什么\n\n## 关联 Issue\n\n## 为什么\n\n## 实现依据\n\n## 怎么验证的\n\n## 回滚点\n\n## 风险与影响范围\n\n## 合并授权\n\n## 独立审查与故障注入\n',
-      'AGENTS.md': '# c3\n\n```yaml\nquick-test: node -e "process.exit(0)"\nfull-test: node -e "process.exit(0)"\n```\n',
+      'AGENTS.md': '# c3\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\n```\n',
       'src/app.mjs': 'export const v = 1\n',
       'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
       'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',
@@ -277,34 +282,40 @@ export function registerM2Cases(cases) {
     const bareUrl = bare.replace(/\\/g, '/')
 
     try {
+      const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+      const { handleFinalize, handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+      const { auditDoc, auditRepoDocs } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
+      const roots = await resolveRepoRoots(dir)
+
       if (!isSharedMasterPrd(dir, 'docs/prd/261116-issue10-master-prd.md', 'docs/specs/261116-issue11-m1-spec.md')) {
         return '1:N 总控 PRD 未被 isSharedMasterPrd 识别'
       }
 
-      const st = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'm1', '--case', '4', '--slug', 'm1', '--issue', '11', '--spec', 'docs/specs/261116-issue11-m1-spec.md', '--json'], { cwd: dir })).stdout)
+      await handleStart({ task: 'm1', case: '4', slug: 'm1', issue: '11', spec: 'docs/specs/261116-issue11-m1-spec.md' }, roots)
+      const st = readTaskLedger(dir, 'm1')
       const wt = join(dir, st.worktreePath)
       const masterAfterStart = readFileSync(join(wt, 'docs/prd/261116-issue10-master-prd.md'), 'utf8')
       if (!/^issue:\s*10\b/m.test(masterAfterStart)) {
         return `1:N 总控 PRD 的 issue 被 start 覆盖写脏：\n${masterAfterStart}`
       }
 
-      const fin = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'm1', '--json'], { cwd: wt })
-      if (fin.status !== 0) return `1:N 子切片 finalize 被未勾总控 PRD 误拦：${fin.stderr}`
+      const fin = await handleFinalize({ task: 'm1' }, roots)
+      if (fin.exitCode !== 0) return `1:N 子切片 finalize 被未勾总控 PRD 误拦：${fin.exitCode}`
       if (!existsSync(join(wt, 'docs/prd/261116-issue10-master-prd.md')) || !existsSync(join(wt, 'docs/archive/specs/261116-issue11-m1-spec.md'))) {
         return '1:N 总控 PRD 被提前归档或子 SPEC 未归档'
       }
-      const aud = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--json'], { cwd: wt })
-      if (aud.status !== 0) return `1:N 归档后互链断链：${aud.stdout} ${aud.stderr}`
-      const audArch = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', 'docs/archive/specs/261116-issue11-m1-spec.md', '--json'], { cwd: wt })
-      if (audArch.status !== 0) return `已归档子 SPEC 指向总控 PRD 互链断链：${audArch.stdout} ${audArch.stderr}`
+      const aud = auditRepoDocs(wt, '.')
+      if (!aud.ok) return `1:N 归档后互链断链：${JSON.stringify(aud)}`
+      const audArch = auditDoc({ repoRoot: wt, file: 'docs/archive/specs/261116-issue11-m1-spec.md' })
+      if (!audArch.ok) return `已归档子 SPEC 指向总控 PRD 互链断链：${JSON.stringify(audArch)}`
 
       // 返工幂等 finalize + 零脏文件 submit + findOpenPrForBranch 复用 OPEN PR
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
       gitSync(wt, ['add', '-A'])
       gitSync(wt, ['commit', '-qm', 'feat: m1 v2'])
-      const finRework = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'm1', '--json'], { cwd: wt })
-      if (finRework.status !== 0) return `返工重复 finalize 失败：${finRework.stderr}`
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'm1', '--mode', 'gate'], { cwd: wt })
+      const finRework = await handleFinalize({ task: 'm1' }, roots)
+      if (finRework.exitCode !== 0) return `返工重复 finalize 失败：${finRework.exitCode}`
+      await handleVerify({ task: 'm1', mode: 'gate' }, roots)
 
       gitSync(dir, ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/c3.git'])
       let createdCount = 0
@@ -313,10 +324,7 @@ export function registerM2Cases(cases) {
         async findOpenPrForBranch() { return { ok: true, prs: [{ number: 55, url: 'https://github.com/acme/c3/pull/55', state: 'OPEN' }] } },
         async createPr() { createdCount += 1; return { ok: true, number: 56 } },
         async postComment() { return { ok: true, id: 1, verifiedReadback: true } },
-        async getPr() { return { ok: true, state: 'MERGED', merged: true } },
-        async listOpenPrsByBase() { return { ok: true, prs: [] } },
       }
-      const roots = await resolveRepoRoots(dir)
       const subReuse = await handleSubmit({ task: 'm1', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: reusedClient } }, roots)
       if (subReuse.exitCode !== 0 || createdCount !== 0 || readTaskLedger(dir, 'm1')?.prNumber !== 55) {
         return `OPEN PR 防重失败：code=${subReuse.exitCode}, created=${createdCount}, pr=${readTaskLedger(dir, 'm1')?.prNumber}`
@@ -324,37 +332,67 @@ export function registerM2Cases(cases) {
       if (gitSync(wt, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim() !== '') {
         return 'submit 推送后 worktree 仍留脏跟踪文件'
       }
+      return true
+    } finally { rmTree(bare); rmTree(dir) }
+  }])
 
-      // 试合失败回滚 + 成功推进 + cleanup MERGED (Squash) 清本地分支
+  cases.push(['M2 C3b：--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
+    const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+    const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
+    const { runTrialMerge } = await import('../../kit/skills/dev-flow/scripts/flow-trial-merge.mjs')
+
+    const dir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# c3b\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\n```\n',
+      'src/app.mjs': 'export const v = 1\n',
+    })
+    gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c3.git' })
+
+    try {
+      const roots = await resolveRepoRoots(dir)
+      await handleStart({ task: 'm1b', case: '1', slug: 'm1b', implementer: 'alice' }, roots)
+      const wt = join(dir, readTaskLedger(dir, 'm1b').worktreePath)
+      writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
+      gitSync(wt, ['add', '-A'])
+      gitSync(wt, ['commit', '-qm', 'feat: m1b v2'])
+      await handleVerify({ task: 'm1b', mode: 'full' }, roots)
+      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+
       const mainBefore = gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim()
       const tmFail = await runTrialMerge({
         mainRoot: dir,
-        ledger: readTaskLedger(dir, 'm1'),
+        ledger: readTaskLedger(dir, 'm1b'),
         baseBranch: 'main',
         profile: { fullTest: 'node -e "process.exit(1)"' },
         policy: { riskTier: 'medium', requiredGates: ['full'] },
         runVerify: true,
       })
-      if (!tmFail.blocked || tmFail.code !== 'BLOCKED_TRIAL_MERGE_VERIFY_FAILED' || existsSync(join(dir, '.worktrees/.tmp-merge-m1')) || gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim() !== mainBefore) {
+      if (!tmFail.blocked || tmFail.code !== 'BLOCKED_TRIAL_MERGE_VERIFY_FAILED' || existsSync(join(dir, '.worktrees/.tmp-merge-m1b')) || gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim() !== mainBefore) {
         return `试合失败未阻断或残留临时 worktree：${JSON.stringify(tmFail)}`
       }
 
       const tmOk = await runTrialMerge({
-        mainRoot: dir, ledger: readTaskLedger(dir, 'm1'), baseBranch: 'main',
-        profile: { fullTest: 'node -e "process.exit(0)"' }, policy: { riskTier: 'medium', requiredGates: ['full'] }, runVerify: true,
+        mainRoot: dir, ledger: readTaskLedger(dir, 'm1b'), baseBranch: 'main',
+        profile: { fullTest: 'exit 0' }, policy: { riskTier: 'medium', requiredGates: ['full'] }, runVerify: true,
       })
       if (!tmOk.ok || gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim() === mainBefore) {
         return `试合通过未推进 main：${JSON.stringify(tmOk)}`
       }
 
-      // Squash 模拟：新建未合入的本地提交记录 PR 状态 MERGED，验证 cleanup --confirm 安全删本地分支
-      const clRes = await handleCleanup({ task: 'm1', confirm: true, json: true, _ghClient: reusedClient }, roots)
-      const branchStillExists = gitSync(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${readTaskLedger(dir, 'm1').branch}`]).status === 0
+      const mergedClient = {
+        tier: 'gh-cli',
+        async getPr() { return { ok: true, state: 'MERGED', merged: true } },
+        async listOpenPrsByBase() { return { ok: true, prs: [] } },
+      }
+      const clRes = await handleCleanup({ task: 'm1b', confirm: true, json: true, _ghClient: mergedClient }, roots)
+      const branchStillExists = gitSync(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${readTaskLedger(dir, 'm1b').branch}`]).status === 0
       if (clRes.exitCode !== 0 || branchStillExists) {
         return `MERGED/Squash 状态 cleanup 未删除本地分支：exit=${clRes.exitCode}, exists=${branchStillExists}`
       }
 
-      // 反面 1:1 归档验证：init --kind all 3 件全归档
       const soloDir = tmpProject({ 'README.md': '# solo\n' })
       try {
         const sInit = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'all', '--slug', 'solo', '--title', 'Solo', '--json'], { cwd: soloDir })).stdout)
@@ -362,15 +400,14 @@ export function registerM2Cases(cases) {
         const prd = sInit.files.find((f) => f.endsWith('-solo-prd.md'))
         if (isSharedMasterPrd(soloDir, prd, sp)) return '1:1 PRD 被误判为 1:N 总控 PRD'
       } finally { rmTree(soloDir) }
-
       return true
-    } finally { rmTree(bare); rmTree(dir) }
+    } finally { rmTree(dir) }
   }])
 
   cases.push(['M2 C4+C5：六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
-      'AGENTS.md': '# c4\n\n```yaml\nquick-test: node -e "process.exit(0)"\n```\n',
+      'AGENTS.md': '# c4\n\n```yaml\nquick-test: exit 0\n```\n',
       'src/a.mjs': 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n',
       'src/b.mjs': 'b1\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n',
     })
@@ -400,12 +437,18 @@ export function registerM2Cases(cases) {
         return `parseDiffHunkRanges count=0 删除锚定区间异常：${JSON.stringify(dRng)}`
       }
 
-      const st = JSON.parse((await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c4-lk', '--case', '2', '--slug', 'c4-lk', '--json'], { cwd: dir })).stdout)
+      const { readTaskLedger, resolveRepoRoots: resRoots } = await import('../../kit/skills/lib/shared.mjs')
+      const { handleStart: hStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+      const { handleVerify: hVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+      const { handleRecord: hRecord, handleOverride: hOverride } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
+      const roots = await resRoots(dir)
+      await hStart({ task: 'c4-lk', case: '2', slug: 'c4-lk' }, roots)
+      const st = readTaskLedger(dir, 'c4-lk')
       const wt = join(dir, st.worktreePath)
       writeFileSync(join(wt, 'src/a.mjs'), 'x1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nx10\n')
       gitSync(wt, ['add', '-A'])
       gitSync(wt, ['commit', '-qm', 'r1'])
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk'], { cwd: wt })
+      await hVerify({ task: 'c4-lk' }, roots)
 
       const r1 = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 'c4-lk', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-1',
@@ -418,83 +461,53 @@ export function registerM2Cases(cases) {
       }
 
       // 同 HEAD 复审拒绝（exit 2）
-      const sameHead = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-1',
-      ], { cwd: dir })
-      if (sameHead.status !== 2 || !(sameHead.stdout + sameHead.stderr).includes('BLOCKED_SAME_HEAD_REREVIEW')) {
-        return `同 HEAD 复审未被拦截：exit=${sameHead.status}, err=${sameHead.stderr}`
-      }
+      const sameHead = await hRecord({ task: 'c4-lk', round: '2', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      if (sameHead !== 2) return `同 HEAD 复审未被拦截：exit=${sameHead}`
 
-      // 推进 HEAD 仅改 src/b.mjs:1，检验增量视野硬锁（未改 src/a.mjs:10 新刺 & 无文件路径新刺拒审 vs 改行内 + 同 C1 跨文件不误停损）
+      // 推进 HEAD 仅改 src/b.mjs:1，检验增量视野硬锁
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitSync(wt, ['add', '-A'])
       gitSync(wt, ['commit', '-qm', 'r2'])
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk'], { cwd: wt })
+      await hVerify({ task: 'c4-lk' }, roots)
 
-      const outScope = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-1',
-        '--must-fix', 'C1: src/a.mjs:10 outside hunk',
-      ], { cwd: dir })
-      if (outScope.status !== 2 || !(outScope.stdout + outScope.stderr).includes('BLOCKED_OUT_OF_SCOPE_MUST_FIX')) {
-        return `Round 2 未改旧文件新刺未被拦截：exit=${outScope.status}, err=${outScope.stderr}`
-      }
+      const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
+      if (outScope !== 2) return `Round 2 未改旧文件新刺未被拦截：exit=${outScope}`
 
-      const subjScope = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-1',
-        '--must-fix', 'C1: rename helper style nitpick',
-      ], { cwd: dir })
-      if (subjScope.status !== 2 || !(subjScope.stdout + subjScope.stderr).includes('BLOCKED_OUT_OF_SCOPE_MUST_FIX')) {
-        return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope.status}`
-      }
+      const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: rename helper style nitpick'] }, roots)
+      if (subjScope !== 2) return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope}`
 
-      const r2CrossC1 = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-1',
-        '--must-fix', 'C1: src/b.mjs:1 new diff bug', '--json',
-      ], { cwd: dir })
-      if (r2CrossC1.status !== 0) return `不同文件同标 C1 误触发停损或遭拒：exit=${r2CrossC1.status}, err=${r2CrossC1.stderr}`
-      if (JSON.parse(r2CrossC1.stdout).dispositionStats?.total !== 1) {
-        return `dispositionStats 跨轮累计去重异常：${r2CrossC1.stdout}`
-      }
+      const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      if (r2CrossC1 !== 0) return `不同文件同标 C1 误触发停损或遭拒：exit=${r2CrossC1}`
 
-      // 无效 disposition 退出 2
-      const badDisp = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '3', '--verdict', 'pass', '--reviewer-id', 'rev-1', '--disposition', 'c1:bogus',
-      ], { cwd: dir })
-      if (badDisp.status !== 2) return `非法 --disposition 未阻断：exit=${badDisp.status}`
+      const badDisp = await hRecord({ task: 'c4-lk', round: '3', verdict: 'pass', 'reviewer-id': 'rev-1', disposition: ['c1:bogus'] }, roots)
+      if (badDisp !== 2) return `非法 --disposition 未阻断：exit=${badDisp}`
 
       // Round 3 触发停损 -> Round 4 pass 绕过未解锁停损必须 exit 4 -> override 后 pass 成功
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod2\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitSync(wt, ['add', '-A'])
       gitSync(wt, ['commit', '-qm', 'r3'])
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk'], { cwd: wt })
-      const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-1', '--must-fix', 'C1: src/b.mjs:1 new diff bug',
-      ], { cwd: dir })
-      if (r3Stop.status !== 4) return `R3 停损未触发：exit=${r3Stop.status}`
+      await hVerify({ task: 'c4-lk' }, roots)
+      const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      if (r3Stop !== 4) return `R3 停损未触发：exit=${r3Stop}`
 
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod3\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitSync(wt, ['add', '-A'])
       gitSync(wt, ['commit', '-qm', 'r4'])
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk'], { cwd: wt })
-      const r4Bypass = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-1',
-      ], { cwd: dir })
-      if (r4Bypass.status !== 4) return `Round 4 pass 竟绕过了未解锁的历史停损：exit=${r4Bypass.status}`
+      await hVerify({ task: 'c4-lk' }, roots)
+      const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      if (r4Bypass !== 4) return `Round 4 pass 竟绕过了未解锁的历史停损：exit=${r4Bypass}`
 
-      // findingsBlocker：失败 verify 后即使解锁停损，pass 仍需被 BLOCKED_PASS_WITH_OPEN_BLOCKERS (exit 2) 拦截
-      await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['override', '--task', 'c4-lk', '--human-approved', '--reason', 'approved'], { cwd: dir })
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk', '--cmd', 'node -e "process.exit(1)"'], { cwd: wt })
+      await hOverride({ task: 'c4-lk', 'human-approved': true, reason: 'approved' }, roots)
+      await hVerify({ task: 'c4-lk', cmd: 'node -e "process.exit(1)"' }, roots)
       const passBlocked = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-1',
       ], { cwd: dir })
       if (passBlocked.status !== 2 || !(passBlocked.stdout + passBlocked.stderr).includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
         return `失败 verify 后虚假 pass 未被拦截：exit=${passBlocked.status}, out=${passBlocked.stdout}, err=${passBlocked.stderr}`
       }
-      await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c4-lk'], { cwd: wt })
-      const passOk = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-        'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-1',
-      ], { cwd: dir })
-      if (passOk.status !== 0) return `override+复绿后 Round 4 pass 失败：exit=${passOk.status}, err=${passOk.stderr}`
+      await hVerify({ task: 'c4-lk' }, roots)
+      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      if (passOk !== 0) return `override+复绿后 Round 4 pass 失败：exit=${passOk}`
 
       return true
     } finally { rmTree(dir) }

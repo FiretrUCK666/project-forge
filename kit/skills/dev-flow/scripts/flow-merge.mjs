@@ -1,153 +1,98 @@
 /**
- * flow-merge.mjs —— merge（强校审查 HEAD/止损解锁/generic-git）、cleanup（Squash/Rebase 四态）、status 与 abort。
+ * flow-merge.mjs —— merge（前置门禁共享校验/堆叠/依赖/CI/止损/generic-git）、claim 与 release。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 与 flow-batch.mjs 调度。
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
-import {
-  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
-  inspectBranchMergeState, samePath,
-} from '../../lib/git.mjs'
-import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber,
   parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
   validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
-import {
-  buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK,
-  getChangedFiles, syncTaskDocsSafe,
-} from './flow-inspect.mjs'
+import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
+import { buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
-import { unmountSharedDeps } from './worktree-deps.mjs'
 
-function isCwdInside(wtAbs) {
-  const cwd = canonicalPath(process.cwd())
-  const wt = canonicalPath(wtAbs)
-  if (samePath(cwd, wt)) return true
-  const rel = relative(wt, cwd)
-  return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
-}
+export { handleAbort, handleCleanup, handleStatus }
 
-async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin', { skipRemoteProbe = false, _ghProbe = null, _ghClient = null } = {}) {
-  const worktreePaths = [ledger.reviewWorktreePath, ledger.worktreePath]
-    .filter(Boolean)
-    .map((relWt) => ({ relWt, abs: resolve(mainRoot, relWt) }))
-    .filter((item) => existsSync(item.abs))
-
-  const pushUrl = remoteUrls[pushRemote] ?? ''
-  const isNetworkRemote = /^(?:https?:\/\/|ssh:\/\/|[^/@:\s]+@)/i.test(pushUrl)
-  const shouldProbeRemote = Boolean(ledger.branch && pushUrl)
-    && !(isNetworkRemote && (skipRemoteProbe || process.env.PF_NO_REAL_AUTH_PROBE === '1'))
-
-  const [wtEntries, refRes, lsRes] = await Promise.all([
-    Promise.all(worktreePaths.map(async ({ relWt, abs }) => {
-      const stZ = await gitStatusPorcelainZ(abs)
-      return { path: relWt, abs, dirty: stZ.entries.length > 0 }
-    })),
-    ledger.branch
-      ? gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${ledger.branch}`])
-      : Promise.resolve({ ok: false }),
-    shouldProbeRemote
-      ? gitRun(mainRoot, ['ls-remote', '--heads', pushRemote, ledger.branch])
-      : Promise.resolve({ ok: false, stdout: '' }),
-  ])
-
-  const worktrees = wtEntries
-  const localBranchExists = Boolean(ledger.branch && refRes.ok)
-  const mergeState = localBranchExists
-    ? await inspectBranchMergeState(mainRoot, { branch: ledger.branch, defaultBranch: ledger.baseBranch || 'main' })
-    : null
-  const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
-
-  const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git')
-  const ghProbe = _ghProbe
-    ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
-    ?? (needGhApi ? await probeGitHubEnv({ cwd: mainRoot, remoteUrls }) : null)
-  const ghClient = _ghClient ?? ghProbe?.client
-  const canQueryGh = Boolean(_ghProbe || _ghClient)
-    || ghProbe?.env?.trackB?.tier === 'gh-cli'
-    || ghProbe?.env?.trackB?.tier === 'node-https-token'
-  const downstream = needGhApi && ghProbe?.env?.providerId === 'github' && typeof ghClient?.listOpenPrsByBase === 'function'
-    ? await ghClient.listOpenPrsByBase(targetRepo, ledger.branch)
-    : { ok: true, prs: [] }
-
-  let prState = ledger.prState ?? (ledger.status === 'awaiting-upstream-merge' ? 'OPEN' : null)
-  if (needGhApi && ledger.prNumber && canQueryGh && typeof ghClient?.getPr === 'function') {
-    const pr = await ghClient.getPr(targetRepo, ledger.prNumber)
-    if (pr.ok) prState = pr.state
-  }
-
-  return {
-    taskId: ledger.taskId, role: ledger.role, worktrees,
-    localBranch: localBranchExists ? ledger.branch : null, mergeState,
-    remoteBranch: remoteBranchExists ? `${pushRemote}/${ledger.branch}` : null,
-    pushRemote, downstreamStackedPrs: downstream.prs ?? [], prNumber: ledger.prNumber, prState,
-  }
-}
-
-function printCleanupChecklistText(cl) {
-  process.stdout.write('\n待确认清理清单（未得人点头前严禁自动删除）：\n')
-  process.stdout.write(`- Worktrees: ${cl.worktrees.length > 0 ? cl.worktrees.map((w) => `${w.path}${w.dirty ? ' [脏]' : ' [干净]'}`).join(', ') : '无'}\n`)
-  process.stdout.write(`- 本地分支: ${cl.localBranch ?? '无'}${cl.mergeState ? ` (${cl.mergeState.state})` : ''}\n`)
-  process.stdout.write(`- 远端分支: ${cl.remoteBranch ?? '无'}\n`)
-  process.stdout.write(`- 下游堆叠 PR: ${cl.downstreamStackedPrs.length}\n`)
-  if (cl.prNumber) process.stdout.write(`- 关联 PR #${cl.prNumber} 状态: ${cl.prState ?? '未知'}\n`)
-}
-
-export async function handleMerge(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-
+/**
+ * 统一合并前置门禁校验（被 flow-merge 与 flow-batch FIFO 合并队列共同复用）。
+ */
+export async function assertPreMergeGates({
+  mainRoot, gitDir, taskId, ledger, opts = {}, profile: preProfile = null, backend = null, targetRepo = null,
+} = {}) {
   if (ledger.role === 'contributor-fork') {
     process.stderr.write('BLOCKED_FORK_CANNOT_MERGE: contributor-fork 无权合并上游仓库 PR，请等待上游维护者合并。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_FORK_CANNOT_MERGE' }
   }
   if (ledger.role === 'clone-readonly' || ledger.role === 'undetermined') {
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
   }
   if (ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {
     const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。'
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', role: ledger.role }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' }
   }
 
-  const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
+  const implRoot = ledger.worktreePath ? resolve(mainRoot, ledger.worktreePath) : mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
 
-  const [op, stZ, headRes] = await Promise.all([
-    detectInProgressGitOp(implRoot),
+  const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), gitDir)?.oid ?? null
+  const [stZ, headRes, diffNsRes] = await Promise.all([
     gitStatusPorcelainZ(implRoot),
-    gitRun(implRoot, ['rev-parse', 'HEAD']),
+    fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
+    ledger.baseSha ? gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`]) : Promise.resolve(null),
   ])
+  const op = await detectInProgressGitOp(implRoot, { statusEntries: stZ.entries })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交并验证后再执行 merge。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_DIRTY_WORKTREE' }
   }
 
   const currentHead = headRes.ok ? headRes.stdout.trim() : null
   if (!ledger.verifiedHead || (currentHead && ledger.verifiedHead !== currentHead) || ledger.lastVerifyExitCode !== 0) {
     process.stderr.write('BLOCKED_NOT_VERIFIED: 合并前必须有匹配当前 HEAD 的实证通过记录。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_NOT_VERIFIED' }
   }
 
-  const profile = parseAgentsProfile(roots.mainRoot)
-  const [changed, gateFindings, remoteRes] = await Promise.all([
-    getChangedFiles(implRoot, ledger.baseSha),
-    detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch),
-    gitRun(roots.mainRoot, ['remote', '-v']),
+  const stackGate = await checkStackedParentMerged(mainRoot, ledger, { backend, targetRepo, defaultBranch: ledger.stackTargetBase || 'main' })
+  if (stackGate.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(stackGate, null, 2)}\n`)
+    process.stderr.write(`${stackGate.message}\n`)
+    return { ok: false, exitCode: stackGate.exitCode ?? EXIT_POLICY_BLOCK, code: stackGate.code }
+  }
+
+  if (Array.isArray(ledger.unresolvedBlockers) && ledger.unresolvedBlockers.length > 0) {
+    const depGate = checkUnresolvedDependencies({ unresolvedBlockers: ledger.unresolvedBlockers }, { force: Boolean(opts.force) })
+    if (depGate.blocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify(depGate, null, 2)}\n`)
+      process.stderr.write(`${depGate.message}\n`)
+      return { ok: false, exitCode: depGate.exitCode ?? EXIT_POLICY_BLOCK, code: depGate.code }
+    }
+  }
+
+  const profile = preProfile ?? parseAgentsProfile(mainRoot)
+  const sharedDiffEntries = diffNsRes?.ok ? diffNsRes.entries : undefined
+  const [changed, gateFindings] = await Promise.all([
+    getChangedFiles(implRoot, ledger.baseSha, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
+    detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
   ])
   const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
   const policy = determineWorkflowPolicy({
@@ -157,12 +102,12 @@ export async function handleMerge(opts, roots) {
     hasCiWorkflow: hasRepoCiWorkflow(implRoot),
     visualFilesChanged: changed.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile,
   })
-  const evidence = readVerificationEvidence(roots.gitDir, taskId)
+  const evidence = readVerificationEvidence(gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
   if (!evCheck.ok) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
     process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
-    return { exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK, code: evCheck.code }
   }
 
   const highRiskHits = changed.filter((f) => profile.highRisk.some((pat) => matchGlob(f, pat)))
@@ -175,20 +120,20 @@ export async function handleMerge(opts, roots) {
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({
         ok: false, blocked: true, code: 'BLOCKED_GATE_WEAKENING', doorType: doorInfo.doorType, findings: gateFindings,
-        nextStep: `请向人类报告上述门禁弱化发现，获准后再附 --human-approved 重试 merge`,
+        nextStep: '请向人类报告上述门禁弱化发现，获准后再附 --human-approved 重试 merge',
       }, null, 2)}\n`)
     } else {
       process.stderr.write(`BLOCKED_GATE_WEAKENING (one-way door): 检测到门禁弱化改动，须人类确认：${summary}\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved` }], { repoRoot: roots.mainRoot })
+      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} --human-approved` }], { repoRoot: mainRoot })
     }
-    return { exitCode: EXIT_ACTION_REQUIRED }
+    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_GATE_WEAKENING' }
   }
 
   const stopLossActive = Boolean(ledger.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered)
   const humanApprovedUnlock = Boolean(opts['human-approved'] || ledger.humanApprovedStopLoss)
   if (stopLossActive && !humanApprovedUnlock) {
     process.stderr.write('BLOCKED_STOP_LOSS_ESCALATE: 独立审查已触发停损升级（STOP_LOSS_ESCALATE），须人类裁决后带 --human-approved --reason "..." 放行。\n')
-    return { exitCode: EXIT_ACTION_REQUIRED }
+    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_STOP_LOSS_ESCALATE' }
   }
   if (stopLossActive && opts['human-approved']) {
     ledger.humanApprovedStopLoss = true
@@ -199,7 +144,7 @@ export async function handleMerge(opts, roots) {
   if (requiresReview) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
+      return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REQUIRES_INDEPENDENT_REVIEW' }
     }
     if (!stopLossActive) {
       const reviewHeadOk = ledger.reviewPassed === true
@@ -208,32 +153,58 @@ export async function handleMerge(opts, roots) {
         && (!lastRound || !currentHead || lastRound.headSha === currentHead)
       if (!reviewHeadOk) {
         process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 独立审查结论未覆盖当前 HEAD（reviewPassed=${ledger.reviewPassed}, reviewPassedHead=${ledger.reviewPassedHead ?? 'null'}, currentHead=${currentHead ?? 'null'}）。\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
       if (lastRound && (lastRound.verdict !== 'pass' || (lastRound.blockers ?? []).length > 0)) {
         process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 最新一轮审查未通过（verdict=${lastRound.verdict}）。\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
+        return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
     }
   }
 
   if (profile.mergeAuthority === 'human' && !opts['human-approved']) {
     process.stderr.write('BLOCKED_HUMAN_MERGE_AUTHORITY: 项目「取舍」声明了 merge-authority: human，请经人类确认后附加 --human-approved。\n')
-    return { exitCode: EXIT_POLICY_BLOCK }
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
   }
 
+  return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer }
+}
+
+export async function handleMerge(opts, roots) {
+  const ctx = await resolveTaskContext(roots, opts)
+  const { taskId, ledger } = ctx
+
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
   const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
 
-  let mergeRes = null
+  const canUseGhApi = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
+  const ghProbe = canUseGhApi ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))) : null
+  const backend = createTaskBackend({
+    role: ledger.role,
+    providerId: ledger.providerId,
+    targetRepo: originFull,
+    client: opts._ghClient ?? ghProbe?.client,
+    pushRemote,
+    mainRoot: roots.mainRoot,
+    gitDir: roots.gitDir,
+  })
+
+  const gate = await assertPreMergeGates({
+    mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, ledger, opts, backend, targetRepo: originFull,
+  })
+  if (!gate.ok) return { exitCode: gate.exitCode, code: gate.code }
+
+  const { implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer } = gate
   const baseBranch = ledger.baseBranch || 'main'
-  const canUseGhMerge = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && ledger.prNumber && originFull
-  if (canUseGhMerge) {
-    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
-    if (currentHead && typeof ghProbe.client?.getCommitChecks === 'function') {
-      const checks = await ghProbe.client.getCommitChecks({ repo: originFull, ref: currentHead })
+  let mergeRes = null
+
+  if (canUseGhApi && ledger.prNumber) {
+    if (currentHead) {
+      const checks = await backend.getCommitChecks({ repo: originFull, ref: currentHead })
       const ciRequired = hasRepoCiWorkflow(implRoot)
       const ciBlock = (code, msg) => {
         if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code, head: currentHead, checks }, null, 2)}\n`)
@@ -256,7 +227,7 @@ export async function handleMerge(opts, roots) {
         return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`)
       }
     }
-    mergeRes = await ghProbe.client.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
+    mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
     if (mergeRes.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, mergeDelegated: mergeRes }, null, 2)}\n`)
       else {
@@ -266,17 +237,17 @@ export async function handleMerge(opts, roots) {
       return { exitCode: 0 }
     }
     if (!mergeRes.ok || !mergeRes.merged) throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（state=${mergeRes.state ?? mergeRes.error}）`)
-    const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe.env?.trackB?.login, ledgerActor: ledger.implementerId })
-    await ghProbe.client.postComment({
+    const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.implementerId })
+    await backend.postComment({
       repo: originFull,
       number: ledger.prNumber,
       body: `审查通过并已合并：由独立审查（\`${effectiveReviewer}\`）复核通过（fail: 无），已将 \`${ledger.branch}\` 合入 \`${baseBranch}\`（实施人：${mergeContrib.display}）。`,
       statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer },
     })
     for (const iss of ledger.linkedIssues ?? []) {
-      await ghProbe.client.postComment({ repo: originFull, number: iss, body: `已合并：PR #${ledger.prNumber} 经独立审查通过并合入 \`${baseBranch}\`。`, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer } })
-      await ghProbe.client.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
-      await ghProbe.client.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
+      await backend.postComment({ repo: originFull, number: iss, body: `已合并：PR #${ledger.prNumber} 经独立审查通过并合入 \`${baseBranch}\`。`, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer } })
+      await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
+      await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
     }
     const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
     if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
@@ -286,25 +257,32 @@ export async function handleMerge(opts, roots) {
         await gitRun(roots.mainRoot, ['merge', '--ff-only', `${pushRemote}/${baseBranch}`])
       }
     }
-  } else if (ledger.branch) {
-    if (ledger.role === 'generic-git' && opts['remote-merged']) {
-      mergeRes = { ok: true, remoteMerged: true, branch: ledger.branch, into: baseBranch }
-    } else {
-      mergeRes = await runTrialMerge({
-        mainRoot: roots.mainRoot,
+  } else if (ledger.branch || ledger.role === 'generic-git') {
+    if (ledger.role === 'generic-git') {
+      mergeRes = await backend.mergePr({
+        remoteMerged: Boolean(opts['remote-merged']),
+        humanApproved: Boolean(opts['human-approved']),
         ledger,
+        branch: ledger.branch,
+        baseBranch,
+      })
+    } else {
+      mergeRes = await backend.mergePr({
+        ledger,
+        mainRoot: roots.mainRoot,
         baseBranch,
         profile,
         evidence,
         policy,
         changedFiles: changed,
         runVerify: true,
+        trialMerger: runTrialMerge,
       })
-      if (mergeRes.blocked) {
-        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
-        process.stderr.write(`${mergeRes.message}\n`)
-        return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK }
-      }
+    }
+    if (mergeRes.blocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
+      process.stderr.write(`${mergeRes.message}\n`)
+      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK }
     }
   }
 
@@ -315,6 +293,7 @@ export async function handleMerge(opts, roots) {
     skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
     _ghProbe: opts._ghProbe,
     _ghClient: opts._ghClient,
+    gitDir: roots.gitDir,
   })
   if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist }, null, 2)}\n`)
   else {
@@ -322,172 +301,6 @@ export async function handleMerge(opts, roots) {
     printCleanupChecklistText(checklist)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
-}
-
-export async function handleCleanup(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
-  const remoteUrls = parseRemoteUrls(remoteRes.stdout)
-  const topology = parseRemotesTopology(remoteRes.stdout)
-  const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-  const { targetRepo, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
-  const cl = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, targetRepo, pushRemote, {
-    skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
-    _ghProbe: opts._ghProbe,
-    _ghClient: opts._ghClient,
-  })
-
-  const keepWorktree = Boolean(opts['keep-worktree'])
-  const onlyReviewWt = Boolean(opts['only-review-worktree'])
-  const keepLocalBr = Boolean(opts['keep-branch'] || opts['keep-local-branch'] || keepWorktree || onlyReviewWt)
-  const keepRemoteBr = Boolean(opts['keep-branch'] || opts['keep-remote-branch'])
-  const worktreesToRemove = keepWorktree
-    ? []
-    : (onlyReviewWt ? cl.worktrees.filter((w) => w.path === ledger.reviewWorktreePath || w.path.includes('/review-')) : cl.worktrees)
-  const keptWorktrees = cl.worktrees.filter((w) => !worktreesToRemove.includes(w)).map((w) => w.path)
-
-  if (!opts.confirm) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', checklist: cl }, null, 2)}\n`)
-    else {
-      process.stdout.write('BLOCKED_CONFIRMATION_REQUIRED: 缺少 --confirm，已拒绝执行删除。\n')
-      printCleanupChecklistText(cl)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
-    }
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-  if (ledger.role === 'contributor-fork' && cl.prState === 'OPEN' && (!keepRemoteBr || !keepLocalBr)) {
-    process.stderr.write(`BLOCKED_OPEN_FORK_PR: contributor-fork 关联上游 PR #${ledger.prNumber ?? '?'} 仍为 OPEN，硬锁拒绝删除 Fork 分支。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-  if (cl.downstreamStackedPrs.length > 0 && (!keepRemoteBr || !keepLocalBr)) {
-    process.stderr.write(`BLOCKED_STACKED_PR: 存在以 ${ledger.branch} 为 base 的下游开放 PR，拒绝删除分支。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-  const dirtyWt = worktreesToRemove.find((w) => w.dirty)
-  if (dirtyWt && !opts.force) {
-    process.stderr.write(`BLOCKED_DIRTY_WORKTREE: 工作树 ${dirtyWt.path} 存在未提交改动，拒绝自动移除。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-
-  if (cl.localBranch && !keepLocalBr) {
-    const curBr = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (curBr.ok && curBr.stdout.trim() === cl.localBranch) {
-      const sw = await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
-      if (!sw.ok) throw new Error(`切回默认分支失败：${sw.stderr}`)
-    }
-  }
-
-  const removedWorktrees = []
-  for (const wt of worktreesToRemove) {
-    if (isCwdInside(wt.abs)) throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
-    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs)
-    const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
-    const rmRes = await gitRun(roots.mainRoot, rmArgs)
-    if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
-    removedWorktrees.push({ path: wt.path, unmountedDeps: unmount.unmounted.length })
-  }
-
-  let deletedLocalBranch = false
-  if (cl.localBranch && !keepLocalBr && cl.localBranch !== ledger.baseBranch) {
-    const isSquashOrRemoteMerged = cl.mergeState?.state === 'squash_or_rebase_merged' || cl.prState === 'MERGED'
-    const delArgs = isSquashOrRemoteMerged ? ['branch', '-D', cl.localBranch] : ['branch', '-d', cl.localBranch]
-    const delBr = await gitRun(roots.mainRoot, delArgs)
-    if (!delBr.ok) throw new Error(`安全删除本地分支 ${cl.localBranch} 失败（state=${cl.mergeState?.state ?? 'unknown'}）：${delBr.stderr}`)
-    deletedLocalBranch = true
-  }
-
-  let deletedRemoteBranch = false
-  if (cl.remoteBranch && !keepRemoteBr && ledger.role !== 'local-only') {
-    const delRemote = await gitRun(roots.mainRoot, ['push', cl.pushRemote, '--delete', ledger.branch])
-    if (!delRemote.ok) throw new Error(`删除远端分支 ${cl.pushRemote}/${ledger.branch} 失败：${delRemote.stderr}`)
-    deletedRemoteBranch = true
-  }
-
-  ledger.status = (keptWorktrees.length === 0 && !keepLocalBr && !keepRemoteBr) ? 'cleaned' : ledger.status
-  ledger.cleanedAt = new Date().toISOString()
-  writeTaskLedger(roots.mainRoot, ledger)
-  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, status: ledger.status }
-  if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
-  else {
-    process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
-    printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: 0 }
-}
-
-export async function handleStatus(opts, roots) {
-  const active = listTaskLedgers(roots.mainRoot, { includeTerminal: false })
-  let ctx = null
-  try {
-    ctx = await resolveTaskContext(roots, opts)
-  } catch (err) {
-    if (opts.task || active.length === 0) throw err
-    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, ambiguous: true, activeTasks: active }, null, 2)}\n`)
-    else {
-      process.stdout.write(`当前有 ${active.length} 个未闭环任务：\n`)
-      for (const t of active) process.stdout.write(`- ${t.taskId}: status=${t.status}, branch=${t.branch ?? '-'}\n`)
-      printNextStep(active.map((t) => ({ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}` })), { repoRoot: roots.mainRoot })
-    }
-    return { exitCode: 0 }
-  }
-
-  const { taskId, ledger, source } = ctx
-  const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  const exists = existsSync(implRoot)
-  const op = exists ? await detectInProgressGitOp(implRoot) : { inProgress: false }
-  const headRes = exists ? await gitRun(implRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' }
-  const head = headRes.ok ? headRes.stdout.trim() : null
-  const stZ = exists ? await gitStatusPorcelainZ(implRoot) : { entries: [] }
-
-  let nextAction
-  if (op.inProgress) nextAction = `先解决当前 ${op.op} 冲突，再继续流转`
-  else if (ledger.status === 'released') nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}`
-  else if (stZ.entries.length > 0) nextAction = '工作区有未提交改动，完成后 git add -A && git commit 再 verify'
-  else if ((ledger.caseType >= 3 || ledger.todoFile || ledger.specFile) && !ledger.finalized) nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
-  else if (!ledger.verifiedHead || (head && ledger.verifiedHead !== head) || ledger.lastVerifyExitCode !== 0) nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}`
-  else if (!['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged'].includes(ledger.status)) nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}`
-  else if (ledger.status === 'merged') nextAction = `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm`
-  else nextAction = ledger.reviewPassed ? `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}` : `等待独立审查 PASS（当前 HEAD=${head?.slice(0, 7) ?? 'unborn'}）`
-
-  const payload = { taskId, inferredFrom: source, status: ledger.status, role: ledger.role, branch: ledger.branch, head, dirty: stZ.entries.length, finalized: ledger.finalized, verifiedHead: ledger.verifiedHead, reviewPassed: Boolean(ledger.reviewPassed), nextAction }
-  if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-  else {
-    process.stdout.write(`任务状态：${taskId}（推断来源=${source}）\n- status=${ledger.status} | role=${ledger.role} | branch=${ledger.branch ?? '-'}\n- HEAD=${head?.slice(0, 7) ?? 'unborn'} | dirty=${stZ.entries.length} | verified=${ledger.verifiedHead === head} | reviewPassed=${Boolean(ledger.reviewPassed)}\n`)
-    printNextStep([{ skill: 'dev-flow', text: nextAction }], { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: 0 }
-}
-
-export async function handleAbort(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const worktrees = [ledger.reviewWorktreePath, ledger.worktreePath].filter(Boolean).map((p) => ({ path: p, abs: resolve(roots.mainRoot, p) })).filter((w) => existsSync(w.abs))
-  if (!opts.confirm) {
-    if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_CONFIRMATION_REQUIRED', taskId, worktrees: worktrees.map((w) => w.path), branch: ledger.branch }, null, 2)}\n`)
-    else {
-      process.stdout.write(`BLOCKED_CONFIRMATION_REQUIRED: 放弃任务 ${taskId} 将移除 worktree (${worktrees.map((w) => w.path).join(', ') || '无'}) 并标记账本为 aborted。\n`)
-      printNextStep([{ skill: 'dev-flow', text: `确认放弃后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
-    }
-    return { exitCode: EXIT_POLICY_BLOCK }
-  }
-  for (const wt of worktrees) {
-    if (isCwdInside(wt.abs)) throw new Error(`当前工作目录位于待拆除 worktree (${wt.path}) 内，请先切回主仓`)
-    unmountSharedDeps(roots.mainRoot, wt.abs)
-    const rmRes = await gitRun(roots.mainRoot, opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs])
-    if (!rmRes.ok) throw new Error(`移除 ${wt.path} 失败：${rmRes.stderr}`)
-  }
-  if (ledger.branch && !opts['keep-branch'] && ledger.branch !== ledger.baseBranch) {
-    const cur = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (cur.ok && cur.stdout.trim() === ledger.branch) await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
-    await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
-  }
-  ledger.status = 'aborted'
-  ledger.abortedAt = new Date().toISOString()
-  writeTaskLedger(roots.mainRoot, ledger)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted' }, null, 2)}\n`)
-  else process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)
   return { exitCode: 0 }
 }
 
@@ -499,50 +312,34 @@ export async function handleRelease(opts, roots) {
     ...(opts.issue || opts.issues ? parseIssueNumbers([opts.issue, opts.issues], { strict: true }) : []),
     ...parsedPos.issues.map((i) => i.number),
   ]
-  if (extraIssues.length > 0) {
-    ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
-  }
+  if (extraIssues.length > 0) ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
 
   const relInit = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
   let actor = relInit.actor
   let actorDisplay = relInit.display
   const reason = String(opts.reason ?? '').trim()
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
   const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
 
-  const skipApi = ledger.role === 'local-only'
-    || ledger.role === 'generic-git'
-    || ledger.providerId === 'generic-git'
-    || (ledger.linkedIssues ?? []).length === 0
-    || !targetRepo
-
+  const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
   const releaseResults = []
   if (!skipApi) {
     const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
     const ghClient = opts._ghClient ?? ghProbe.client
+    const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
     const onlineRel = resolveContributorIdentity({
       explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: ledger.implementerId,
     })
     actor = onlineRel.actor
     actorDisplay = onlineRel.display
-    for (const num of ledger.linkedIssues) {
-      const commentRes = await ghClient.postComment({
-        repo: targetRepo,
-        number: num,
-        body: `释放认领：${actorDisplay} 放弃任务 \`${taskId}\`（分支 \`${ledger.branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`,
-        statePayload: {
-          taskId,
-          action: 'release',
-          agent: actor,
-          branch: ledger.branch ?? null,
-          ...(reason ? { reason } : {}),
-        },
-      })
-      const labelRes = await ghClient.removeLabel({ repo: targetRepo, number: num, label: 'in-progress' })
-      releaseResults.push({ issue: num, comment: commentRes, labelRemoved: labelRes })
-    }
+    const rel = await backend.releaseTask({ taskId, issues: ledger.linkedIssues, actor, actorDisplay, branch: ledger.branch, reason })
+    releaseResults.push(...(rel.results ?? []))
+  } else {
+    const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
+    await localBackend.releaseTask({ taskId, issues: ledger.linkedIssues, actor, actorDisplay, branch: ledger.branch, reason })
   }
 
   ledger.status = 'released'
@@ -552,15 +349,7 @@ export async function handleRelease(opts, roots) {
   writeTaskLedger(roots.mainRoot, ledger)
 
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({
-      ok: true,
-      taskId,
-      role: ledger.role,
-      mode: skipApi ? 'local-ledger-only' : 'remote-synced',
-      status: ledger.status,
-      reason: ledger.releaseReason,
-      releaseResults,
-    }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ ok: true, taskId, role: ledger.role, mode: skipApi ? 'local-ledger-only' : 'remote-synced', status: ledger.status, reason: ledger.releaseReason, releaseResults }, null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已释放认领（status=released${skipApi ? '，仅本地账本' : `, issues=${ledger.linkedIssues.join(',')}`}）。\n`)
     printNextStep([
@@ -575,9 +364,7 @@ export async function handleRelease(opts, roots) {
 export function analyzeIssueClaimState(comments = []) {
   let activeClaim = null
   for (const c of Array.isArray(comments) ? comments : []) {
-    const states = Array.isArray(c?.pfStates) && c.pfStates.length > 0
-      ? c.pfStates
-      : (c?.pfState ? [c.pfState] : parsePfStateTags(c?.body ?? ''))
+    const states = Array.isArray(c?.pfStates) && c.pfStates.length > 0 ? c.pfStates : (c?.pfState ? [c.pfState] : parsePfStateTags(c?.body ?? ''))
     for (const st of states) {
       const action = String(st?.action ?? '').toLowerCase()
       if (action === 'claim' || action === 'takeover') {
@@ -605,9 +392,7 @@ function isSameClaimant(activeClaim, actor, viewerLogin) {
   const aNorm = String(actor ?? '').trim().toLowerCase()
   const cNorm = String(activeClaim.actor ?? '').trim().toLowerCase()
   if (cNorm && aNorm) return cNorm === aNorm
-  if (viewerLogin && activeClaim.login) {
-    return String(viewerLogin).trim().toLowerCase() === String(activeClaim.login).trim().toLowerCase()
-  }
+  if (viewerLogin && activeClaim.login) return String(viewerLogin).trim().toLowerCase() === String(activeClaim.login).trim().toLowerCase()
   return false
 }
 
@@ -636,15 +421,21 @@ export async function handleClaim(opts, roots) {
   let actorDisplay = initContrib.display
   ledger.implementerId = actor
   const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
+  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
+    const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
+    await syncTaskDocsSafe(claimRoot, ledger)
+  }
 
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
   const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
 
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
   if (skipApi) {
+    const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
+    await localBackend.claimTask({ taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber, actor, actorDisplay, branch: ledger.branch, takeover: isTakeover, reason: takeoverReason })
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
     if (isTakeover) {
@@ -662,6 +453,7 @@ export async function handleClaim(opts, roots) {
 
   const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
+  const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
   const onlineContrib = resolveContributorIdentity({
     explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: prevImpl,
   })
@@ -669,13 +461,16 @@ export async function handleClaim(opts, roots) {
     actor = onlineContrib.actor
     actorDisplay = onlineContrib.display
     ledger.implementerId = actor
-    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) await syncTaskDocsSafe(claimRoot, ledger)
+    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
+      const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
+      await syncTaskDocsSafe(claimRoot, ledger)
+    }
   }
   const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
   const activeClaimsByIssue = new Map()
   if (canQueryComments) {
     for (const num of ledger.linkedIssues) {
-      const listRes = await ghClient.listComments({ repo: targetRepo, number: num })
+      const listRes = await backend.listComments({ repo: targetRepo, number: num })
       if (!listRes.ok) continue
       const activeClaim = analyzeIssueClaimState(listRes.comments)
       if (activeClaim && !isSameClaimant(activeClaim, actor, ghProbe.env.trackB.login)) {
@@ -694,33 +489,20 @@ export async function handleClaim(opts, roots) {
     }
   }
 
-  const claimResults = []
-  for (const num of ledger.linkedIssues) {
-    const prevClaim = activeClaimsByIssue.get(num)
-    const commentRes = isTakeover
-      ? await ghClient.postComment({
-          repo: targetRepo, number: num,
-          body: `接管认领：由 ${actorDisplay} 接管任务 \`${taskId}\`（分支 \`${ledger.branch}\`，原认领人：${prevClaim?.actor ?? prevClaim?.login ?? '无/未知'}），原因：${takeoverReason}。`,
-          statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: prevClaim?.actor ?? prevClaim?.login ?? null, branch: ledger.branch, reason: takeoverReason },
-        })
-      : await ghClient.postComment({
-          repo: targetRepo, number: num,
-          body: `认领：由 ${actorDisplay} 在分支 \`${ledger.branch}\` 开始处理（task: \`${taskId}\`）。`,
-          statePayload: { taskId, action: 'claim', agent: actor, branch: ledger.branch },
-        })
-    const labelRes = await ghClient.addLabels({ repo: targetRepo, number: num, labels: ['in-progress'] })
-    claimResults.push({ issue: num, action: isTakeover ? 'takeover' : 'claim', comment: commentRes, label: labelRes })
-  }
-
-  let prTakeoverResult = null
-  if (isTakeover && ledger.prNumber) {
-    const prevActors = [...activeClaimsByIssue.values()].map((c) => c.actor ?? c.login).filter(Boolean)
-    prTakeoverResult = await ghClient.postComment({
-      repo: targetRepo, number: ledger.prNumber,
-      body: `接管认领：由 ${actorDisplay} 接管关联 PR #${ledger.prNumber}（分支 \`${ledger.branch}\`，关联 Issue：${ledger.linkedIssues.map((n) => `#${n}`).join(', ')}），原因：${takeoverReason}。`,
-      statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: prevActors[0] ?? null, branch: ledger.branch, prNumber: ledger.prNumber, reason: takeoverReason },
-    })
-  }
+  const prevActors = [...activeClaimsByIssue.values()].map((c) => c.actor ?? c.login).filter(Boolean)
+  const claimOut = await backend.claimTask({
+    taskId,
+    issues: ledger.linkedIssues,
+    prNumber: ledger.prNumber,
+    actor,
+    actorDisplay,
+    branch: ledger.branch,
+    takeover: isTakeover,
+    reason: takeoverReason,
+    previousActor: prevActors[0] ?? null,
+  })
+  const claimResults = claimOut.results ?? []
+  const prTakeoverResult = claimOut.prResult ?? null
 
   ledger.status = 'claimed'
   ledger.claimedAt = new Date().toISOString()

@@ -5,11 +5,12 @@
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { existsSync, readdirSync } from 'node:fs'
-import { join, posix } from 'node:path'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join, posix, resolve } from 'node:path'
 
-import { posixPath, readJsonSafe } from '../../lib/git.mjs'
-import { discoverWorkspacePackages, isProfileExplicitNone } from '../../lib/profile.mjs'
+import { posixPath, readJsonSafe, readTextSafe } from '../../lib/git.mjs'
+import { discoverWorkspacePackages, isProfileExplicitNone, readDecisions } from '../../lib/profile.mjs'
+import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE,
   stripCodeCommentsLines,
@@ -36,97 +37,33 @@ const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?:\.\s*n
 const UNIT_HEAVY_RE = /\b(?:playwright\.launch|chromium\.launch|firefox\.launch|webkit\.launch|puppeteer\.launch|ffmpeg|ffprobe|docker(?:\s+compose|\s+build|\s+run)|testcontainers)\b|['"](?:@playwright\/test|playwright|puppeteer|cypress|selenium-webdriver|testcontainers)['"]|(?:for\s*\([^;\n]*;\s*[^;\n]*<\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|1e[5-9])|for\s+\w+\s+in\s+range\(\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|100_000))/i
 const NON_UNIT_TEST_RE = /(?:^|\/)(?:e2e|integration|browser|perf|benchmark|benchmarks|load|stress)\/|(?:\.(?:e2e|int|integration|perf|bench)\.[^/]+$)/i
 
-const NEUTRAL_CI_CONFIGS = Object.freeze([
-  '.circleci/config.yml',
-  '.circleci/config.yaml',
-  'azure-pipelines.yml',
-  'azure-pipelines.yaml',
-  'Jenkinsfile',
-  '.travis.yml',
-  '.drone.yml',
-  '.buildkite/pipeline.yml',
-  '.buildkite/pipeline.yaml',
-  '.woodpecker.yml',
-])
-
-function extractYamlRunBlocks(relFile, text) {
-  const steps = []
-  const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = /^(\s*)(?:-\s*)?(?:run|script)\s*:\s*(.*)$/.exec(lines[i])
-    if (!m) continue
-    const baseIndent = m[1].length + (lines[i].includes('- ') ? 2 : 0)
-    const tail = m[2].trim()
-    if (!tail || /^[|>][+-]?$/.test(tail)) {
-      const blockLines = []
-      let blockIndent = null
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const raw = lines[j]
-        if (!raw.trim()) { blockLines.push(''); continue }
-        const curIndent = /^(\s*)/.exec(raw)[1].length
-        if (blockIndent === null) {
-          if (curIndent <= baseIndent) break
-          blockIndent = curIndent
-        } else if (curIndent < blockIndent) {
-          break
-        }
-        blockLines.push(raw.slice(blockIndent))
-        i = j
-      }
-      const cmd = blockLines.filter((l) => !l.trim().startsWith('#')).join('\n').trim()
-      if (cmd) steps.push({ file: relFile, cmd })
-    } else {
-      const clean = tail.replace(/\s+#.*$/, '').trim()
-      if (clean && !/^(?:true|false|null)$/i.test(clean)) steps.push({ file: relFile, cmd: clean })
-    }
-  }
-  return steps
+function parseWorkflowCiSteps(repoRoot) {
+  return scanNeutralCiSteps(repoRoot)
 }
 
-function parseWorkflowCiSteps(repoRoot) {
-  const steps = []
-  const ciConfigFiles = []
-
-  const wfDir = join(repoRoot, '.github', 'workflows')
-  if (existsSync(wfDir)) {
-    try {
-      for (const name of readdirSync(wfDir).filter((n) => /\.ya?ml$/i.test(n)).sort()) {
-        const rel = `.github/workflows/${name}`
-        ciConfigFiles.push(rel)
-        const info = readTextStrictInfo(join(wfDir, name))
-        if (info?.text) steps.push(...extractYamlRunBlocks(rel, info.text))
+function isPureLocalOrNoCiRepo(repoRoot) {
+  const agentsText = readTextSafe(join(repoRoot, 'AGENTS.md')) ?? ''
+  if (readDecisions(agentsText).has('no-ci')) return true
+  const dotGit = join(repoRoot, '.git')
+  if (!existsSync(dotGit)) return true
+  try {
+    const st = statSync(dotGit)
+    let gitDir = dotGit
+    let commonDir = dotGit
+    if (st.isFile()) {
+      const m = /^gitdir:\s*(.+)$/im.exec(readTextSafe(dotGit) ?? '')
+      if (m) {
+        gitDir = resolve(repoRoot, m[1].trim())
+        const cm = readTextSafe(join(gitDir, 'commondir'))
+        commonDir = cm ? resolve(gitDir, cm.trim()) : gitDir
       }
-    } catch { /* ignore */ }
-  }
-
-  for (const rel of NEUTRAL_CI_CONFIGS) {
-    const abs = join(repoRoot, rel)
-    if (!existsSync(abs)) continue
-    ciConfigFiles.push(rel)
-    const info = readTextStrictInfo(abs)
-    if (!info?.text) continue
-    if (rel === 'Jenkinsfile') {
-      for (const m of info.text.matchAll(/\bsh\s+['"]([^'"]+)['"]/g)) {
-        if (m[1]?.trim()) steps.push({ file: rel, cmd: m[1].trim() })
-      }
-    } else {
-      steps.push(...extractYamlRunBlocks(rel, info.text))
     }
+    if (existsSync(join(gitDir, 'pf-local-mode')) || existsSync(join(commonDir, 'pf-local-mode'))) return true
+    const cfg = readTextSafe(join(commonDir, 'config')) ?? ''
+    return !/^\s*\[remote\s+"[^"]+"\]/m.test(cfg)
+  } catch {
+    return false
   }
-
-  const wpDir = join(repoRoot, '.woodpecker')
-  if (existsSync(wpDir)) {
-    try {
-      for (const name of readdirSync(wpDir).filter((n) => /\.ya?ml$/i.test(n)).sort()) {
-        const rel = `.woodpecker/${name}`
-        ciConfigFiles.push(rel)
-        const info = readTextStrictInfo(join(wpDir, name))
-        if (info?.text) steps.push(...extractYamlRunBlocks(rel, info.text))
-      }
-    } catch { /* ignore */ }
-  }
-
-  return { steps, ciConfigFiles: [...new Set(ciConfigFiles)].sort() }
 }
 
 function collectMakefileTargets(repoRoot) {
@@ -383,7 +320,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     })
   }
 
-  if (!testInventory.hasCiConfig && (testFiles.length > 0 || configuredTestEntries.length > 0)) {
+  if (!testInventory.hasCiConfig && !isPureLocalOrNoCiRepo(repoRoot) && (testFiles.length > 0 || configuredTestEntries.length > 0)) {
     addFinding(findings, {
       id: 'tests.no-ci-config',
       category: 'tests',

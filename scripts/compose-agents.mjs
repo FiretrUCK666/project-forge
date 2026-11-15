@@ -8,7 +8,7 @@
  * - `--check` / `--status` / `--clean` / `--upgrade` 保持幂等与写前仓外快照保护。
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -51,12 +51,27 @@ async function maybePreWriteBackup(root, existingText, noBackup) {
 }
 
 function checkAgentsBytes(text) {
-  const bytes = Buffer.byteLength(String(text ?? ''), 'utf8')
+  const raw = String(text ?? '').replace(/\r\n/g, '\n')
+  const bytes = Buffer.byteLength(raw, 'utf8')
+  const { regions } = markerRegions(raw, 'AGENTS.md')
+  const lines = raw.split('\n')
+  let managedBytes = 0
+  for (const r of regions) {
+    if (r.customized) continue
+    managedBytes += Buffer.byteLength(lines.slice(r.start, r.end + 1).join('\n'), 'utf8')
+  }
+  const customBytes = Math.max(0, bytes - managedBytes)
   return {
     bytes,
+    managedBytes,
+    customBytes,
     oversize: bytes > AGENTS_MAX_BYTES,
     warn: bytes >= AGENTS_WARN_BYTES && bytes <= AGENTS_MAX_BYTES,
   }
+}
+
+function formatOversizeBreakdown(sizeInfo) {
+  return `total=${sizeInfo.bytes}B（受管区 managed=${sizeInfo.managedBytes}B + 自定义/正文 custom=${sizeInfo.customBytes}B，上限 ${AGENTS_MAX_BYTES}B / 30KB）；建议将长篇子模块规范外置到 <subdir>/AGENTS.md 或 docs/TDD.md`
 }
 
 function readManifestSafe(root) {
@@ -406,6 +421,8 @@ async function main(argv) {
   let noBackup = false
   let explicitTier
   let restoreRegions = false
+  let adoptCustom = false
+  let allowCustomOversize = false
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -415,6 +432,8 @@ async function main(argv) {
         '',
         '  （默认）                   文件不存在就建一份；已存在就刷新还带占位的区间、补上新增的节',
         '  --tier <lightweight|full>  按档位渲染（is-lightweight / is-full）',
+        '  --adopt-custom [id,...]    将手工修改/保护的受管区头标为 customized 并写入 manifest 基线',
+        '  --allow-custom-oversize    当受管区本身 <= 30KB 且超限源自项目自定义长文时放行刷新与校验',
         '  --restore-regions          允许重新补回此前已记入 removedAgentsRegions 的区间',
         '  --status                   只报现状，不写任何文件',
         '  --upgrade                  向手写文件追加缺失的节，每节带自己的标记，已有内容不动',
@@ -433,7 +452,21 @@ async function main(argv) {
     else if (arg === '--clean') mode = 'clean'
     else if (arg === '--no-backup') noBackup = true
     else if (arg === '--restore-regions') restoreRegions = true
-    else if (arg === '--verbose') verbose = true
+    else if (arg === '--allow-custom-oversize') allowCustomOversize = true
+    else if (arg === '--adopt-custom') {
+      const next = argv[i + 1]
+      const nextIsDir = next && !next.startsWith('-') && !targetSpecified && existsSync(next) && statSync(next).isDirectory()
+      if (next && !next.startsWith('-') && !nextIsDir) {
+        i += 1
+        const ids = next.split(',').map((s) => s.trim()).filter(Boolean)
+        adoptCustom = ids.length > 0 ? [...(Array.isArray(adoptCustom) ? adoptCustom : []), ...ids] : true
+      } else if (!adoptCustom) {
+        adoptCustom = true
+      }
+    } else if (arg.startsWith('--adopt-custom=')) {
+      const ids = arg.slice('--adopt-custom='.length).split(',').map((s) => s.trim()).filter(Boolean)
+      adoptCustom = ids.length > 0 ? [...(Array.isArray(adoptCustom) ? adoptCustom : []), ...ids] : true
+    } else if (arg === '--verbose') verbose = true
     else if (arg === '--tier') explicitTier = argv[++i]
     else if (arg.startsWith('--tier=')) explicitTier = arg.slice('--tier='.length)
     else if (!arg.startsWith('-') && !targetSpecified) { target = arg; targetSpecified = true }
@@ -504,6 +537,41 @@ async function main(argv) {
 
   const info = inspect(agentsPath, rendered, removedSet)
 
+  if (adoptCustom && mode === 'default') {
+    if (info.broken && info.broken.length > 0) {
+      process.stderr.write(`AGENTS.md 的标记没成对，无法采用定制：${info.broken.join('、')}\n`)
+      return 1
+    }
+    const baselineRegions = manifest && !manifest.invalid ? (manifest.data.agentsRegions ?? {}) : {}
+    const driftedSet = new Set(driftRegions(existing, rendered, volatileValues(facts)))
+    const lines = existing.split('\n')
+    const targetIds = Array.isArray(adoptCustom) ? new Set(adoptCustom) : null
+    const adoptedIds = []
+    for (const r of info.regions) {
+      if (r.customized) continue
+      if (targetIds && !targetIds.has(r.id)) continue
+      const baseSha = baselineRegions[r.id]?.sha256
+      const diskSha = regionBodySha(lines.slice(r.start + 1, r.end))
+      const changed = driftedSet.has(r.id) || (baseSha && diskSha !== baseSha) || (!baseSha && targetIds !== null)
+      if (!targetIds && !changed) continue
+      lines[r.start] = lines[r.start].replace(
+        /^(\s*<!--\s*project-forge:\s*begin\s+)(.+?)(\s*-->\s*)$/,
+        (_, p1, mid, p3) => `${p1}${mid.trim()} customized${p3}`,
+      )
+      adoptedIds.push(r.id)
+    }
+    const adoptedText = lines.join('\n')
+    if (adoptedText !== existing) {
+      await maybePreWriteBackup(root, existing, noBackup)
+      writeAtomic(agentsPath, adoptedText)
+    }
+    writeManifestRegions(root, adoptedText)
+    process.stdout.write(adoptedIds.length > 0
+      ? `已将 ${adoptedIds.length} 段受管区标为 customized 并更新基线：${adoptedIds.join('、')}。\n`
+      : '没有需要标为 customized 的修改区段（已刷新基线）。\n')
+    return 0
+  }
+
   if (mode === 'check') {
     if (info.state === 'unreadable') {
       process.stderr.write('AGENTS.md 读不出来（不是 UTF-8 文本？）\n')
@@ -511,12 +579,13 @@ async function main(argv) {
     }
     const sizeInfo = checkAgentsBytes(info.text)
     if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节，接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B），接近上限 ${AGENTS_MAX_BYTES} 字节（预警线 ${AGENTS_WARN_BYTES} 字节）。\n`)
     }
     if (info.broken && info.broken.length > 0) {
       process.stderr.write(`AGENTS.md 的标记没成对：${info.broken.join('、')}\n`)
       return 1
     }
+    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
     if (info.regions.length === 0) {
       const coverage = handWrittenCoverage(info.text ?? '')
       if (!coverage.ok) {
@@ -527,9 +596,12 @@ async function main(argv) {
           + '  加 `--upgrade` 会追加缺的节，原有内容一个字节不动。\n')
         return 1
       }
-      if (sizeInfo.oversize) {
-        process.stderr.write(`AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），请精简或拆至子目录契约。\n`)
+      if (sizeInfo.oversize && !allowOversizeBypass) {
+        process.stderr.write(`AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
         return 1
+      }
+      if (sizeInfo.oversize && allowOversizeBypass) {
+        process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
       }
       process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判格式，只核对过它答了'
         + '「这是什么项目 / 怎么构建验证 / 改动的边界」这三件事。\n')
@@ -537,8 +609,12 @@ async function main(argv) {
     }
     let bad = false
     if (sizeInfo.oversize) {
-      process.stderr.write(`AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），请精简过时条款或拆出细节至 docs/。\n`)
-      bad = true
+      if (allowOversizeBypass) {
+        process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+      } else {
+        process.stderr.write(`AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}。\n`)
+        bad = true
+      }
     }
     if (info.fills.length > 0) {
       process.stderr.write(`AGENTS.md 还有 ${info.fills.length} 处未填的占位\n`)
@@ -585,12 +661,15 @@ async function main(argv) {
     }
     const nextText = `${existing.trimEnd()}\n\n${additions.join('\n\n')}\n`
     const sizeInfo = checkAgentsBytes(nextText)
-    if (sizeInfo.oversize) {
-      process.stderr.write(`追加后 AGENTS.md 体积将达 ${sizeInfo.bytes} 字节，超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
+    if (sizeInfo.oversize && !allowOversizeBypass) {
+      process.stderr.write(`追加后 AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
-    if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
+    if (sizeInfo.oversize && allowOversizeBypass) {
+      process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+    } else if (sizeInfo.warn) {
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）接近上限 ${AGENTS_MAX_BYTES} 字节。\n`)
     }
     await maybePreWriteBackup(root, existing, noBackup)
     writeAtomic(agentsPath, nextText)
@@ -617,12 +696,15 @@ async function main(argv) {
     const refreshed = refreshRegions(existing, rendered, volatileValues(facts), baselineRegions, removedSet)
     const nextText = refreshed.changed ? refreshed.text : existing
     const sizeInfo = checkAgentsBytes(nextText)
-    if (sizeInfo.oversize) {
-      process.stderr.write(`刷新后 AGENTS.md 体积 ${sizeInfo.bytes} 字节超过上限 ${AGENTS_MAX_BYTES} 字节（30KB），已中止写入。\n`)
+    const allowOversizeBypass = Boolean(allowCustomOversize && sizeInfo.managedBytes <= AGENTS_MAX_BYTES && sizeInfo.customBytes > 0)
+    if (sizeInfo.oversize && !allowOversizeBypass) {
+      process.stderr.write(`刷新后 AGENTS.md 体积超限：${formatOversizeBreakdown(sizeInfo)}，已中止写入。\n`)
       return 1
     }
-    if (sizeInfo.warn) {
-      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
+    if (sizeInfo.oversize && allowOversizeBypass) {
+      process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
+    } else if (sizeInfo.warn) {
+      process.stderr.write(`[警告] AGENTS.md 体积 ${sizeInfo.bytes} 字节（managed=${sizeInfo.managedBytes}B, custom=${sizeInfo.customBytes}B）已达预警线 ${AGENTS_WARN_BYTES} 字节（上限 ${AGENTS_MAX_BYTES} 字节）。\n`)
     }
     if (refreshed.changed) {
       await maybePreWriteBackup(root, existing, noBackup)

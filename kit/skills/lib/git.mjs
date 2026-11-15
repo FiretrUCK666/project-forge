@@ -14,15 +14,18 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  buildNonInteractiveEnv, execSafe, execShellCommand, killProcessTree, resolveExecutable,
+  buildNonInteractiveEnv, computeWorktreeEnv, execSafe, execShellCommand,
+  killProcessTree, resolveExecutable, withFileLock,
 } from './exec.mjs'
 
 export {
   buildNonInteractiveEnv,
+  computeWorktreeEnv,
   execSafe,
   execShellCommand,
   killProcessTree,
   resolveExecutable,
+  withFileLock,
 }
 
 export const LIKELY_DEFAULT_BRANCHES = Object.freeze([
@@ -158,9 +161,21 @@ export function sha256File(filePath) {
   }
 }
 
-/** 安全执行 git 命令（保留 UTF-8 输出并统一 NFC 路径）。 */
-export function gitRun(cwd, args, opts = {}) {
-  return execSafe('git', ['-c', 'core.quotepath=false', '-c', 'core.precomposeunicode=true', ...args], { ...opts, cwd })
+const GIT_LOCK_ERROR_RE = /Unable to create '[^']*\.lock'|Another git process seems to be running|index\.lock|\.lock['":\s]+(?:File exists|Permission denied|Resource temporarily unavailable)/i
+const DEFAULT_GIT_LOCK_BACKOFF_MS = Object.freeze([50, 100, 200, 400, 800])
+
+/** 安全执行 git 命令（保留 UTF-8 输出并统一 NFC 路径，遇 `.git/*.lock` 自动指数退避重试）。 */
+export async function gitRun(cwd, args, opts = {}) {
+  const fullArgs = ['-c', 'core.quotepath=false', '-c', 'core.precomposeunicode=true', ...args]
+  const execOpts = { ...opts, cwd }
+  const runner = opts.runner ?? execSafe
+  const backoff = Array.isArray(opts.lockBackoffMs) ? opts.lockBackoffMs : DEFAULT_GIT_LOCK_BACKOFF_MS
+  let res = await runner('git', fullArgs, execOpts)
+  for (let i = 0; i < backoff.length && !res.ok && GIT_LOCK_ERROR_RE.test(res.stderr ?? ''); i += 1) {
+    if (backoff[i] > 0) await new Promise((r) => setTimeout(r, backoff[i]))
+    res = await runner('git', fullArgs, execOpts)
+  }
+  return res
 }
 
 /** 执行 git 命令并返回原始 Buffer stdout（供 `-z` NUL 分隔解析与精确 SHA256 使用）。 */
@@ -322,21 +337,39 @@ export async function resolveRepoRoots(cwd = process.cwd()) {
   }
 }
 
-/** 确保 .worktrees/ 已被 Git 忽略（优先写本地 .git/info/exclude）。 */
+function hasWorktreesRuleInFile(filePath) {
+  const txt = readTextSafe(filePath)
+  if (!txt) return false
+  return txt.split('\n').some((l) => {
+    const t = l.trim()
+    return t === '.worktrees' || t === '.worktrees/' || t === '/.worktrees' || t === '/.worktrees/'
+  })
+}
+
+/** 确保 .worktrees/ 已被 Git 忽略（优先零进程本地核对，写 `.git/info/exclude` 加文件锁）。 */
 export async function ensureWorktreesIgnored(mainRoot, gitDir) {
-  const check = await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])
-  if (check.ok) return { ok: true, method: 'existing' }
   const actualGitDir = gitDir ?? join(mainRoot, '.git')
   const excludeFile = join(actualGitDir, 'info', 'exclude')
+  if (hasWorktreesRuleInFile(join(mainRoot, '.gitignore')) || hasWorktreesRuleInFile(excludeFile)) {
+    return { ok: true, method: 'existing' }
+  }
+  const check = await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])
+  if (check.ok) return { ok: true, method: 'existing' }
+  const lockPath = join(actualGitDir, 'project-forge-flow', 'locks', 'info-exclude.lock')
   try {
-    mkdirSync(dirname(excludeFile), { recursive: true })
-    const cur = readTextSafe(excludeFile) ?? ''
-    const hasRule = cur.split('\n').some((l) => l.trim() === '.worktrees' || l.trim() === '.worktrees/')
-    if (!hasRule) {
-      const next = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n.worktrees/\n` : `${cur}.worktrees/\n`
-      writeAtomic(excludeFile, next)
-    }
-    return { ok: true, method: 'git-info-exclude' }
+    return await withFileLock(lockPath, () => {
+      mkdirSync(dirname(excludeFile), { recursive: true })
+      const cur = readTextSafe(excludeFile) ?? ''
+      const hasRule = cur.split('\n').some((l) => {
+        const t = l.trim()
+        return t === '.worktrees' || t === '.worktrees/' || t === '/.worktrees' || t === '/.worktrees/'
+      })
+      if (!hasRule) {
+        const next = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n.worktrees/\n` : `${cur}.worktrees/\n`
+        writeAtomic(excludeFile, next)
+      }
+      return { ok: true, method: 'git-info-exclude' }
+    })
   } catch {
     return { ok: false, method: 'unignored' }
   }
@@ -420,13 +453,26 @@ export async function gitDiffNameStatusZ(cwd, diffArgs = []) {
   return { ok: true, entries, stderr: '' }
 }
 
-/** 检测仓库是否处于进行中的 Merge / Rebase / Cherry-pick / Revert / 冲突态。 */
-export async function detectInProgressGitOp(repoRoot) {
+function resolveWtGitDirLocal(repoRoot) {
+  const dotGit = join(repoRoot, '.git')
+  try {
+    const st = statSync(dotGit)
+    if (st.isDirectory()) return dotGit
+    if (st.isFile()) {
+      const m = /^gitdir:\s*(.+)$/im.exec(readFileSync(dotGit, 'utf8'))
+      if (m) return resolve(repoRoot, m[1].trim())
+    }
+  } catch { /* fall back to git rev-parse */ }
+  return null
+}
+
+/** 检测仓库是否处于进行中的 Merge / Rebase / Cherry-pick / Revert / 冲突态（复用已知 wtGitDir 与 statusEntries）。 */
+export async function detectInProgressGitOp(repoRoot, opts = {}) {
   const ops = []
-  let wtGitDir = join(repoRoot, '.git')
-  const gdRes = await gitRun(repoRoot, ['rev-parse', '--git-dir'])
-  if (gdRes.ok && gdRes.stdout.trim()) {
-    wtGitDir = resolve(repoRoot, gdRes.stdout.trim())
+  let wtGitDir = opts.wtGitDir ?? resolveWtGitDirLocal(repoRoot)
+  if (!wtGitDir) {
+    const gdRes = await gitRun(repoRoot, ['rev-parse', '--git-dir'])
+    wtGitDir = gdRes.ok && gdRes.stdout.trim() ? resolve(repoRoot, gdRes.stdout.trim()) : join(repoRoot, '.git')
   }
   if (existsSync(join(wtGitDir, 'MERGE_HEAD'))) ops.push('merge')
   if (existsSync(join(wtGitDir, 'REBASE_HEAD')) || existsSync(join(wtGitDir, 'rebase-merge')) || existsSync(join(wtGitDir, 'rebase-apply'))) {
@@ -436,12 +482,12 @@ export async function detectInProgressGitOp(repoRoot) {
   if (existsSync(join(wtGitDir, 'REVERT_HEAD'))) ops.push('revert')
   if (existsSync(join(wtGitDir, 'BISECT_LOG'))) ops.push('bisect')
 
-  const st = await gitStatusPorcelainZ(repoRoot)
-  const conflicts = st.ok
-    ? st.entries
-      .filter((e) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(e.xy))
-      .map((e) => e.file)
-    : []
+  const entries = Array.isArray(opts.statusEntries)
+    ? opts.statusEntries
+    : ((await gitStatusPorcelainZ(repoRoot)).entries ?? [])
+  const conflicts = entries
+    .filter((e) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(e.xy))
+    .map((e) => e.file)
 
   return {
     inProgress: ops.length > 0 || conflicts.length > 0,
@@ -596,10 +642,14 @@ export async function detectProjectConventions(repoRoot) {
  * 使用 `git cherry` + `git patch-id` 判定分支相对于默认主干的四态合流状态：
  * `'merged' | 'squash_or_rebase_merged' | 'no_own_commits' | 'unmerged'`。
  */
-export async function inspectBranchMergeState(mainRoot, { branch, headSha, defaultBranch = 'main' } = {}) {
+export async function inspectBranchMergeState(mainRoot, { branch, headSha, defaultBranch = 'main', gitDir = null } = {}) {
   const targetRef = branch || headSha
+  const resolvedGitDir = gitDir ?? resolveWtGitDirLocal(mainRoot)
+  const canFastShallow = Boolean(resolvedGitDir && !existsSync(join(resolvedGitDir, 'reftable')))
   const [shallowRes, baseCheck, ownRes, isAncRes] = await Promise.all([
-    gitRun(mainRoot, ['rev-parse', '--is-shallow-repository']),
+    canFastShallow
+      ? Promise.resolve({ ok: true, stdout: existsSync(join(resolvedGitDir, 'shallow')) ? 'true' : 'false' })
+      : gitRun(mainRoot, ['rev-parse', '--is-shallow-repository']),
     targetRef ? gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', defaultBranch]) : Promise.resolve({ ok: false }),
     targetRef ? gitRun(mainRoot, ['rev-list', '--count', `${defaultBranch}..${targetRef}`]) : Promise.resolve({ ok: false, stdout: '0' }),
     targetRef ? gitRun(mainRoot, ['merge-base', '--is-ancestor', targetRef, defaultBranch]) : Promise.resolve({ ok: false }),

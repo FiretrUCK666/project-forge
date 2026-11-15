@@ -404,7 +404,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     offline: opts.offline,
   })
   const rawWs = scanWorkspaceRaw(root)
-  const ecosystem = detectEcosystem(root)
+  const relFiles = rawWs.files.map((f) => f.rel)
+  const ecosystem = detectEcosystem(root, relFiles)
   const taskEntryMeta = detectTaskEntriesDetailed(root)
   const taskCommands = taskEntryMeta.commands
   const docs = detectDocs(root)
@@ -414,7 +415,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const artifacts = detectArtifacts(root, ecosystem)
   const universal = ecosystem.kinds.length === 0
     ? detectUniversalCommands(root)
-    : { commands: {}, sources: {} }
+    : { commands: {}, sources: {}, detectionEvidence: [] }
 
   const gitFacts = await gitPromise
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
@@ -540,6 +541,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     },
     commands,
     commandsByEcosystem,
+    ...(universal.detectionEvidence?.length > 0 ? { detectionEvidence: universal.detectionEvidence } : {}),
     conventions,
     workspace,
     artifacts,

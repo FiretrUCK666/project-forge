@@ -15,6 +15,7 @@ export {
   buildNonInteractiveEnv,
   canonicalPath,
   COMMON_SKIP_DIRS,
+  computeWorktreeEnv,
   DEFAULT_WALK_SKIP_DIRS,
   detectInProgressGitOp,
   detectProjectConventions,
@@ -43,9 +44,20 @@ export {
   sha256Text,
   syncDetachedWorktree,
   unescapeGitPath,
+  withFileLock,
   writeAtomic,
   writeJsonAtomic,
 } from './git.mjs'
+
+export {
+  parsePorcelainV2BranchZ,
+  readGitConfigFast,
+  readHeadFast,
+  readRefsFast,
+  resolveDefaultBranchFromRefs,
+  resolveGitDirFast,
+  resolveRefShaFast,
+} from './git-fast.mjs'
 
 export {
   detectEcosystemCommands,
@@ -59,7 +71,16 @@ export {
   readDecisionMap,
   readDecisions,
   resolveAuthoritativeTddPath,
+  sniffLayeredCommands,
 } from './profile.mjs'
+
+export {
+  extractYamlRunBlocks,
+  NEUTRAL_CI_CONFIGS,
+  scanDeclaredTaskRunners,
+  scanNeutralCiSteps,
+  VENDOR_OR_EXAMPLE_SKIP_DIRS,
+} from './profile-sniffer.mjs'
 
 export {
   ASSERTION_RE,
@@ -120,6 +141,7 @@ export {
   parseDocFilename,
   parseDocFrontmatter,
   renderStandardDocTemplate,
+  resolveRepoCustomDocTemplate,
   serializeDocFrontmatter,
   slugify,
   syncDocsLifecycle,
@@ -184,3 +206,19 @@ export {
   resolveWorkspaceIdentity,
   summarizeCommitChecks,
 } from './platform.mjs'
+
+export {
+  createTaskBackend,
+  GenericRemoteBackend,
+  GitHubBackend,
+  LocalOnlyBackend,
+  TASK_BACKEND_METHODS,
+} from './task-backend.mjs'
+
+export {
+  assertNoDuplicatePrForTask,
+  checkStackedParentMerged,
+  checkUnresolvedDependencies,
+  checkUntrustedPrGate,
+  resolveExternalCollaborationGraph,
+} from './task-graph.mjs'

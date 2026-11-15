@@ -47,11 +47,16 @@ export function filterIntentRouting(rendered, excludedSkills) {
   return out.join('\n')
 }
 
-function maskVolatile(text, values) {
-  let out = text
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function maskVolatile(text, values) {
+  let out = String(text ?? '')
   for (const value of values) {
     if (typeof value !== 'string' || value.length < 2) continue
-    out = out.split(value).join('\u0000VOLATILE\u0000')
+    const re = new RegExp(`(?<![A-Za-z0-9_./-])${escapeRegExp(value)}(?![A-Za-z0-9_./-])`, 'g')
+    out = out.replace(re, '\u0000VOLATILE\u0000')
   }
   return out
 }
@@ -69,29 +74,32 @@ function normalizeBody(bodyLines, volatile = []) {
 const HEADING_PREFIX = /^#{2,3}\s+(?:\d+[.)、]\s*)?(?:[一二三四五六七八九十]+[、.)]\s*)?/
 
 const SECTION_KEYWORDS = {
-  意图路由: { words: ['意图路由', '路由', 'Intent Routing', 'Routing'] },
-  行事总纲: { words: ['行事总纲', '决策准则', '总纲', 'Operating Principles', 'Core Principles'] },
-  项目定位: { words: ['定位', '简介', '概述', '说明', 'Overview', 'Introduction', 'About'] },
-  'Dev Profile': { words: ['Dev Profile', 'Profile'] },
+  意图路由: { words: ['意图路由', 'Intent Routing'] },
+  行事总纲: { words: ['行事总纲', '决策准则', 'Operating Principles', 'Core Principles'] },
+  项目定位: { words: ['项目定位', '定位', '项目简介', '项目概述', 'Overview', 'Introduction', 'About'] },
+  'Dev Profile': { words: ['Dev Profile'] },
   上下文阅读护栏: { words: ['上下文阅读护栏', '阅读护栏', 'Context Reading', 'Reading Guardrails'] },
-  架构与关键不变量: { words: ['架构', '结构', '关键不变量', 'Architecture', 'Structure', 'Layout', 'Invariants'] },
+  架构与关键不变量: {
+    words: ['架构', '模块结构', '目录结构', '关键不变量', 'Architecture', 'Project Structure', 'Invariants'],
+    exclude: ['数据结构'],
+  },
   构建与验证: {
-    words: ['构建', '验证', '环境', '安装', '开发', '测试', '命令', '运行',
-      'Setup', 'Install', 'Build', 'Test', 'Verif', 'Commands', 'Development', 'Environment'],
-    exclude: ['审查', '流程', '审核', '评审', 'review'],
+    words: ['构建与验证', '构建与测试', '构建', '环境与构建', '测试命令', '验证命令', '运行环境', '安装依赖', '验证',
+      'Setup', 'Install', 'Build', 'Test Commands', 'Verif', 'Commands', 'Environment'],
+    exclude: ['审查', '流程', '审核', '评审', '环境变量', 'review'],
   },
   修改守则: {
-    words: ['修改守则', '硬性规范', '编码规范', '开发规范', '约定', '红线',
-      'Rules', 'Guidelines', 'Conventions', 'Standards', 'Coding', 'Style'],
+    words: ['修改守则', '硬性规范', '编码规范', '开发规范', '项目红线', '红线',
+      'Coding Rules', 'Guidelines', 'Conventions', 'Standards'],
   },
-  版本与发布: { words: ['版本', '发布', '发版', 'Version', 'Release', 'Publish'] },
+  版本与发布: { words: ['版本管理', '版本与发布', '发版', '发布流程', 'Version', 'Release', 'Publish'] },
   日常协作与风险分流: {
-    words: ['协作', '改动怎么落地', '工作流', '分支', '提交',
-      'Workflow', 'Collaboration', 'Contributing', 'Pull Request', 'Branch', 'Commit'],
+    words: ['日常协作', '改动怎么落地', '协作流程', '工作流', '分支管理',
+      'Workflow', 'Collaboration', 'Contributing', 'Pull Request'],
   },
-  高风险路径: { words: ['高风险', '风险', 'Risk', 'Sensitive'] },
-  改哪看哪: { words: ['改哪看哪', '联动', 'Coupled'] },
-  取舍: { words: ['取舍', '决定', '选型', 'Decisions', 'Trade-off', 'Tradeoff'] },
+  高风险路径: { words: ['高风险路径', '高风险', 'High Risk', 'Sensitive Paths'] },
+  改哪看哪: { words: ['改哪看哪', '联动同步', 'Coupled'] },
+  取舍: { words: ['取舍', '技术选型', 'Decisions', 'Trade-off', 'Tradeoff'] },
 }
 
 function renderedTitleOf(id, rendered) {

@@ -722,18 +722,18 @@ function checkReviewContract({ ROOT, readText, fail, note }) {
  */
 function checkStarterLanguageCoverage(ctx) {
   const ecosystemPath = join(ctx.ROOT, 'scripts/lib/survey-ecosystem.mjs')
-  const starterPath = join(ctx.ROOT, 'scripts/lib/starter-templates.mjs')
+  const starterPath = join(ctx.ROOT, 'scripts/lib/equip-bootstrap.mjs')
   const ecosystemText = ctx.readText(ecosystemPath)
   const starterText = ctx.readText(starterPath)
 
-  const declared = /export const BOOTSTRAP_LANGS = new Set\(\[([^\]]+)\]\)/.exec(starterText)?.[1]
+  const declared = /export const BOOTSTRAP_STACKS = new Set\(\[([\s\S]*?)\]\)/.exec(starterText)?.[1]
   if (declared === undefined) {
-    ctx.fail('起步骨架语言清单读不出来（`BOOTSTRAP_LANGS` 的形状变了）——清单读不到时，下面这条包含关系会被静默跳过')
+    ctx.fail('起步基线技术栈清单读不出来（`BOOTSTRAP_STACKS` 的形状变了）——清单读不到时，下面这条包含关系会被静默跳过')
     return
   }
   const bootstrap = [...declared.matchAll(/'([^']+)'/g)].map((m) => m[1])
   if (bootstrap.length === 0) {
-    ctx.fail('起步骨架语言清单是空的——空清单会让包含关系恒真，那是一条永远绿着的判据')
+    ctx.fail('起步基线技术栈清单是空的——空清单会让包含关系恒真，那是一条永远绿着的判据')
     return
   }
 
@@ -743,13 +743,13 @@ function checkStarterLanguageCoverage(ctx) {
     return
   }
 
-  const orphans = bootstrap.filter((lang) => lang !== 'docs' && !detected.includes(lang))
+  const orphans = bootstrap.filter((stack) => stack !== 'docs' && stack !== 'universal' && !detected.includes(stack))
   if (orphans.length > 0) {
-    ctx.fail(`起步骨架支持 ${orphans.join('、')}，但勘察的生态清单里没有对应识别项——生成得出来却认不出来，用户拿到的项目会被判成「无生态」`)
+    ctx.fail(`起步基线支持 ${orphans.join('、')}，但勘察的生态清单里没有对应识别项——生成得出来却认不出来，用户拿到的项目会被判成「无生态」`)
     return
   }
 
-  ctx.note(`语言清单：可识别 ${detected.length} 种，能生成起步骨架 ${bootstrap.length} 种（${bootstrap.join('/')}），包含关系成立`)
+  ctx.note(`语言清单：可识别 ${detected.length} 种，能生成起步基线 ${bootstrap.length} 种（${bootstrap.join('/')}），包含关系成立`)
 }
 
 export async function runContractChecks(ctx) {

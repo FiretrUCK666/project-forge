@@ -14,7 +14,7 @@ import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import {
   gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
-import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId } from '../../lib/ledger.mjs'
+import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import {
@@ -26,6 +26,7 @@ import {
   collectGateWeakeningHits, collectHighRiskHits, formatPackText, parseAcceptanceCriteria,
 } from './review-gates.mjs'
 import { handleOverride, handleRecord } from './review-ledger.mjs'
+import { parseRangeDiffNewCommits } from './review-locks.mjs'
 
 const SUBCOMMANDS = ['pack', 'record', 'override']
 
@@ -249,11 +250,31 @@ async function main(argv = process.argv.slice(2)) {
         rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
         const prevHead = prev?.headSha
         if (prevHead && (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok) {
-          diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
-          diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
-          roundLockNote = round === 2
-            ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
-            : `R${targetPrevRound}_HEAD..HEAD binary Pass/Fail verification only; no new findings`
+          const isAnc = await gitRun(reviewRoot, ['merge-base', '--is-ancestor', prevHead, headRef])
+          const oldBase = prev?.baseSha ?? task?.roundBaseSha?.prevBaseSha
+          const newBase = task?.baseSha ?? task?.roundBaseSha?.newBaseSha ?? baseRef
+          if (!isAnc.ok && oldBase && newBase) {
+            if (oldBase === prevHead) {
+              diffSpec = { mode: 'range', range: `${newBase}..${headRef}` }
+              diffScope = `${newBase.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} rebased)`
+              roundLockNote = `Round ${round} rebased via sync`
+            } else {
+              const rd = await gitRun(reviewRoot, ['range-diff', '--no-color', `${oldBase}..${prevHead}`, `${newBase}..${headSha}`])
+              if (rd.ok) {
+                const shas = parseRangeDiffNewCommits(rd.stdout)
+                diffSpec = { mode: 'commits', commits: shas }
+                diffScope = `range-diff (${shas.length} changed/new commit(s))`
+                roundLockNote = `Round ${round} rebased via sync (range-diff incremental lock)`
+              }
+            }
+          }
+          if (!diffSpec) {
+            diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
+            diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
+            roundLockNote = round === 2
+              ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
+              : `R${targetPrevRound}_HEAD..HEAD binary Pass/Fail verification only; no new findings`
+          }
         } else if (baseRef) {
           diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
           diffScope = `${baseRef}...${headRef}`
@@ -316,6 +337,14 @@ async function main(argv = process.argv.slice(2)) {
         return EXIT.UNTRUSTED_HAZARD
       }
       untrustedWarnings = hazards
+      if (task && task.role === 'inbound-external-pr') {
+        task.untrustedScanPassed = true
+        if (opts['human-approved'] || opts.humanApprovedExec) {
+          task.untrustedApproved = true
+          task.humanApprovedExec = true
+        }
+        writeTaskLedger(mainRoot, task)
+      }
     }
 
     const parity = checkDocCodeParity(reviewRoot, mainRoot, diff, effectiveProfile, task)

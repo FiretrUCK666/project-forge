@@ -418,24 +418,22 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     gitSync(c29Wt, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'])
 
     const triageOne = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', c29Wt, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
+    const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master', '--json'])
+    const packMdRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master'])
+    const finJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', c29Wt, '--json'])
     if (triageOne.status !== 0) return `doc-plan.mjs triage 失败：${triageOne.stderr}`
     const triageOneJson = JSON.parse(triageOne.stdout)
     if ((triageOneJson.coupledSyncWarnings?.length ?? 0) !== 1 || !triageOneJson.coupledSyncWarnings[0].expectedCompanions.includes('docs/api.md')) {
       return `doc-plan.mjs triage 单边未输出 coupledSyncWarnings：${JSON.stringify(triageOneJson)}`
     }
-
-    const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master', '--json'])
     if (packJsonRes.status !== 0) return `review-pack.mjs --json 失败：${packJsonRes.stderr}`
     const packJson = JSON.parse(packJsonRes.stdout)
     if ((packJson.coupledSyncWarnings?.length ?? 0) !== 1) {
       return `review-pack.mjs --json 未输出 coupledSyncWarnings：${JSON.stringify(packJson.coupledSyncWarnings)}`
     }
-    const packMdRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master'])
     if (packMdRes.status !== 0 || !packMdRes.stdout.includes('## 联动同步核对（改哪看哪）') || !packMdRes.stdout.includes('docs/api.md')) {
       return `review-pack.mjs Markdown 缺少联动同步核对节：\n${packMdRes.stdout}`
     }
-
-    const finJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'c29-t1', '--dir', c29Wt, '--json'])
     if (finJsonRes.status !== 0) return `flow.mjs finalize --json 失败：${finJsonRes.stderr}`
     const finJson = JSON.parse(finJsonRes.stdout)
     if ((finJson.coupledSyncWarnings?.length ?? 0) !== 1) {

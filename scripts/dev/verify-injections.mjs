@@ -96,6 +96,7 @@ async function runInjection(inj) {
   try {
     const targets = [[inj.file, inj.from, inj.to]]
     for (const other of inj.alsoDropIn ?? []) targets.push([other, inj.from, inj.to])
+    for (const patch of inj.alsoPatches ?? []) targets.push([patch.file, patch.from, patch.to])
 
     for (const [rel, from, to] of targets) {
       const full = join(root, rel)

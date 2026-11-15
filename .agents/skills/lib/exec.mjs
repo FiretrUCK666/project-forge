@@ -6,7 +6,11 @@
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  accessSync, closeSync, constants, existsSync, mkdirSync, openSync,
+  readFileSync, statSync, unlinkSync, writeFileSync,
+} from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
 
 const WIN_CMD_BATCH_EXT_RE = /\.(?:cmd|bat)$/i
@@ -364,4 +368,104 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
       })
     })
   })
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err?.code === 'EPERM'
+  }
+}
+
+/**
+ * 基于 `O_EXCL` (`wx`) 原子文件互斥锁，支持陈旧死锁自动回收与超时拦截。
+ */
+export async function withFileLock(lockPath, fn, { timeoutMs = 15000, staleMs = 30000, pollMs = 25 } = {}) {
+  const absLock = resolve(String(lockPath))
+  mkdirSync(dirname(absLock), { recursive: true })
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const deadline = Date.now() + Math.max(50, Number(timeoutMs) || 15000)
+
+  let acquired = false
+  while (!acquired) {
+    let fd
+    try {
+      fd = openSync(absLock, 'wx')
+      try {
+        writeFileSync(fd, `${JSON.stringify({ pid: process.pid, token, createdAt: Date.now() })}\n`, 'utf8')
+      } finally {
+        try { closeSync(fd) } catch { /* ignore */ }
+      }
+      acquired = true
+      break
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err
+      let parsed = null
+      let mtimeMs = 0
+      try {
+        const st = statSync(absLock)
+        mtimeMs = st.mtimeMs
+        const raw = readFileSync(absLock, 'utf8').trim()
+        if (raw) parsed = JSON.parse(raw)
+      } catch (readErr) {
+        if (readErr?.code === 'ENOENT') continue
+      }
+
+      const stamp = Number(parsed?.createdAt) || mtimeMs || 0
+      const expired = stamp > 0 && (Date.now() - stamp) >= staleMs
+      const deadOwner = Boolean(parsed?.pid && parsed.pid !== process.pid && !isPidAlive(Number(parsed.pid)) && (Date.now() - stamp) >= 200)
+      if (expired || deadOwner) {
+        try {
+          const recheck = readFileSync(absLock, 'utf8').trim()
+          const curParsed = recheck ? JSON.parse(recheck) : null
+          if (!parsed?.token || curParsed?.token === parsed.token) {
+            unlinkSync(absLock)
+            continue
+          }
+        } catch {
+          try { unlinkSync(absLock) } catch { /* ignore */ }
+          continue
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        throw new Error(`LOCK_TIMEOUT: 无法在 ${timeoutMs}ms 内获取互斥锁 ${absLock}`)
+      }
+      await new Promise((r) => setTimeout(r, Math.max(5, Number(pollMs) || 25)))
+    }
+  }
+
+  try {
+    return await fn()
+  } finally {
+    try {
+      const raw = readFileSync(absLock, 'utf8').trim()
+      const cur = raw ? JSON.parse(raw) : null
+      if (!cur?.token || cur.token === token) unlinkSync(absLock)
+    } catch { /* already removed */ }
+  }
+}
+
+/**
+ * 为并行 Worktree 计算确定性隔离环境变量（槽位、端口偏移、测试端口与独立缓存目录）。
+ */
+export function computeWorktreeEnv({ mainRoot, gitDir, taskId = 'default', slotIndex, basePort = 18000 } = {}) {
+  const cleanId = String(taskId ?? 'default').trim().replace(/[^a-zA-Z0-9._-]/g, '_') || 'default'
+  const slot = slotIndex !== undefined && slotIndex !== null && Number.isInteger(Number(slotIndex)) && Number(slotIndex) >= 0
+    ? Number(slotIndex)
+    : (createHash('sha1').update(cleanId).digest()[0] % 128)
+  const portOffset = slot * 100
+  const port = Number(basePort) + portOffset
+  const baseGitDir = gitDir || join(mainRoot || process.cwd(), '.git')
+  const cacheDir = join(baseGitDir, 'project-forge-flow', 'cache', cleanId)
+  mkdirSync(cacheDir, { recursive: true })
+  return {
+    PF_SLOT: String(slot),
+    PF_PORT_OFFSET: String(portOffset),
+    PF_PORT: String(port),
+    PF_CACHE_DIR: cacheDir,
+  }
 }

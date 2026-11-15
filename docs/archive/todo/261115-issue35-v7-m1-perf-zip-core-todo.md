@@ -1,15 +1,15 @@
 ---
 kind: todo
 title: Milestone 1：共享内核单源收敛、性能根治与纯 JS .zip 备份及自更新修复
-status: active
+status: done
 created: 2026-11-15
-updated: 2026-11-15
+updated: 2026-11-16
 issue: 35
 pr: null
 branch: feat/v7-m1-perf-zip-core
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-16
 task_id: m1-perf-zip-core
 planned_at: cd60c18ee7cb990f20c533ff837dd04709356132
 related_prd: null

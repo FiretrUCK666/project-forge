@@ -1,16 +1,16 @@
 ---
 kind: spec
 title: Milestone 1：共享内核单源收敛、性能根治与纯 JS .zip 备份及自更新修复
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-15
-updated: 2026-11-15
+updated: 2026-11-16
 issue: 35
 pr: null
 branch: feat/v7-m1-perf-zip-core
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=independent-plan-critic-m1, round=2, sha=8b8c9c622075, summary=Round 2 verified all 4 Must-Fix and 4 Should-Fix notes resolved cleanly)"
 related_prd: null
 related_todo: ../todo/261115-issue35-v7-m1-perf-zip-core-todo.md

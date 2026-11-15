@@ -565,3 +565,31 @@ export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
   }
   return warnings
 }
+
+/** 构造归档文档的 Frontmatter 补丁；归档 1:N 总控 PRD 时仅更新日期与终态并完整保留原有元信息。 */
+export function buildArchivedDocPatch({
+  kind, fmData = {}, today, issue, pr, branch, owner,
+  preserveMasterMeta = false, relatedTargets = {},
+} = {}) {
+  const patch = { updated: today }
+  if (kind && !fmData.kind) patch.kind = kind
+  if (preserveMasterMeta) {
+    if (kind === 'prd') patch.status = 'done'
+    return patch
+  }
+  if (issue !== undefined && issue !== null) patch.issue = Number(issue)
+  if (pr !== undefined && pr !== null) patch.pr = Number(pr)
+  if (branch) patch.branch = branch
+  if (owner) patch.owner = owner
+  if (kind === 'prd') patch.status = 'done'
+  if (kind === 'spec') { patch.status = 'implemented'; patch.implemented = true }
+  if (kind === 'todo') {
+    const curSt = String(fmData?.status ?? '').toLowerCase()
+    patch.status = curSt === 'archived' ? 'archived' : 'done'
+    patch.done_at = fmData?.done_at ?? today
+  }
+  for (const [rk, relVal] of Object.entries(relatedTargets)) {
+    if (relVal) patch[rk] = relVal
+  }
+  return patch
+}

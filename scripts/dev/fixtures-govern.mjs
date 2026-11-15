@@ -605,4 +605,30 @@ cases.push(['claims.mjs + review.mjs：dirs 并入 claim.path、claim.script 核
   }
 }])
 
+cases.push(['govern-docs.mjs：跳过 docs/archive/ 历史归档死链并持续拦截活跃目录死链（include-master-prd 协同）', async () => {
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'README.md': '# archive-deadlink-demo\n',
+    'AGENTS.md': '# archive-deadlink-demo\n',
+    'docs/TDD.md': '# TDD\n',
+    'docs/archive/specs/261115-issue11-m1-spec.md': '# Archived M1\n\n- [总控 PRD](../../prd/261115-master-prd.md)\n',
+    'docs/specs/261116-issue12-m2-spec.md': '# Active M2\n\n- [坏掉的活跃链接](../../prd/missing-active.md)\n',
+  })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+  try {
+    const res = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--json'])
+    if (res.status !== 0) return `govern-audit 失败：${res.stderr}`
+    const ids = (JSON.parse(res.stdout).findings ?? []).map((f) => f.id)
+    if (ids.some((id) => id.startsWith('docs.dead-link.docs/archive/'))) {
+      return `govern-docs 未跳过 docs/archive/ 历史归档死链：${JSON.stringify(ids)}`
+    }
+    if (!ids.some((id) => id.startsWith('docs.dead-link.docs/specs/261116-issue12-m2-spec.md:'))) {
+      return `govern-docs 漏报活跃目录死链：${JSON.stringify(ids)}`
+    }
+    return true
+  } finally {
+    rmTree(dir)
+  }
+}])
+
 }

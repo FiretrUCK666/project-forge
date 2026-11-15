@@ -9,7 +9,7 @@
  *   audit          [--file <docPath> | .] [--json]
  *   critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <text>] [--json]
  *   approve        --file <specPath> [--skip-critique-reason <text>] [--json]
- *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--json]
+ *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--include-master-prd] [--json]
  *   supersede      <oldSpec> --by <newSpec> [--json]
  *   list           [--json]
  */
@@ -284,7 +284,7 @@ function printHelp() {
     '  audit          [--file <docPath> | .] [--json]',
     '  critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
     '  approve        --file <specPath> [--skip-critique-reason <文本>] [--json]',
-    '  archive        [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--json]',
+    '  archive        [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
     '  supersede      <oldSpec> --by <newSpec> [--json]',
     '  list           [--json]',
   ].join('\n') + '\n')
@@ -299,7 +299,7 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by'],
       aliases: { type: 'kind' },
       usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-pass|approve|archive|supersede|list>',
@@ -477,6 +477,7 @@ async function main(argv) {
         prdFile: taskLedger?.prdFile, specFile: taskLedger?.specFile, todoFile: taskLedger?.todoFile,
         slugOrPath: targetSlugOrPath, issue: taskLedger?.linkedIssues?.[0], pr: taskLedger?.prNumber,
         branch: taskLedger?.branch, owner: taskLedger?.implementerId, doneAt: opts['done-at'],
+        includeMasterPrd: Boolean(opts['include-master-prd']),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`成对归档完成（移动 ${res.moved.length} 份，更新互链 ${res.updated.length} 份）：${res.archived.join(', ')}\n`)

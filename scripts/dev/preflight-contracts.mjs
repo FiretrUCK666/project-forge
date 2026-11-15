@@ -760,6 +760,25 @@ function checkStarterLanguageCoverage(ctx) {
   ctx.note(`语言清单：可识别 ${detected.length} 种，能生成起步基线 ${bootstrap.length} 种（${bootstrap.join('/')}），包含关系成立`)
 }
 
+function checkWorkflowLifecycleContracts({ ROOT, readText, fail, note }) {
+  const checks = [
+    ['SKILL.md', ['需求', '澄清', '设计', '实现', '评审', '实证测试-形式验证', '验收', '合入', 'dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern', 'Critique', 'Worktree', 'retro']],
+    ['kit/skills/dev-explore/SKILL.md', ['只读', 'Feature Map', 'reusableModules', 'dev-plan', 'dev-flow']],
+    ['kit/skills/dev-plan/SKILL.md', ['澄清', 'PRD', 'Critique', 'SELF_CRITIQUE_REJECTED', 'dev-explore', 'dev-flow']],
+    ['kit/skills/dev-flow/SKILL.md', ['Worktree', 'next', 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', '--include-master-prd', 'dev-plan', 'dev-review']],
+    ['kit/skills/dev-review/SKILL.md', ['--untrusted-scan', 'Behavioral', 'Structural', '六锁', 'flow.mjs merge', 'dev-flow', 'dev-govern']],
+    ['kit/skills/dev-govern/SKILL.md', ['audit', 'reconcile', 'retro', 'signals.jsonl', 'dev-explore', 'dev-plan', 'dev-flow', 'dev-review']],
+  ]
+  for (const [file, tokens] of checks) {
+    const p = join(ROOT, file)
+    if (!existsSync(p)) { fail(`工作流生命周期契约缺失（${file}）：文件不存在`); continue }
+    const text = readText(p)
+    const missing = tokens.filter((t) => !text.includes(t))
+    if (missing.length > 0) fail(`工作流生命周期契约缺失（${file}）：缺少「${missing.join('、')}」——8 阶段全链路与五套件衔接必须显式对齐`)
+  }
+  note(`工作流生命周期契约：根 SKILL.md 与 ${checks.length - 1} 套研发技能全量覆盖 8 阶段核心门控与双向衔接`)
+}
+
 export async function runContractChecks(ctx) {
   checkEntry(ctx)
   checkLinks(ctx)
@@ -770,4 +789,5 @@ export async function runContractChecks(ctx) {
   checkSingleSources(ctx)
   checkReviewContract(ctx)
   checkStarterLanguageCoverage(ctx)
+  checkWorkflowLifecycleContracts(ctx)
 }

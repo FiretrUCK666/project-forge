@@ -163,9 +163,10 @@ export async function handleFinalize(opts, roots) {
   const todoRel = ledger.todoFile ?? ledger.archivedTodoFile ?? findStrictDocBySlug(implRoot, 'docs/todo', ledger)
   const specRel = ledger.specFile ?? ledger.archivedSpecFile ?? findStrictDocBySlug(implRoot, 'docs/specs', ledger)
   const prdRel = ledger.prdFile ?? ledger.archivedPrdFile ?? findStrictDocBySlug(implRoot, 'docs/prd', ledger)
+  const includeMasterPrd = Boolean(opts['include-master-prd'])
   const sharedMasterPrd = Boolean(prdRel && isSharedMasterPrd(implRoot, prdRel, specRel))
 
-  for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', sharedMasterPrd ? null : prdRel]]) {
+  for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', (sharedMasterPrd && !includeMasterPrd) ? null : prdRel]]) {
     if (!relDoc) continue
     const absDoc = join(implRoot, relDoc)
     if (!existsSync(absDoc)) continue
@@ -195,15 +196,18 @@ export async function handleFinalize(opts, roots) {
     writeAtomic(specAbs, specText)
   }
 
-  let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel } }
+  let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel }, archivedMasterPrd: null }
   if (prdRel || specRel || todoRel) {
     archivedGroup = await archiveCompletedDocsGroup(implRoot, {
       prdFile: prdRel, specFile: specRel, todoFile: todoRel, slugOrPath: specRel ?? todoRel ?? prdRel ?? ledger.slug,
       issue: ledger.linkedIssues?.[0], pr: ledger.prNumber ?? undefined, branch: ledger.branch, owner: ledger.implementerId ?? undefined, doneAt: today,
+      includeMasterPrd,
     })
     if (archivedGroup.byKind.prd) {
       ledger.prdFile = archivedGroup.byKind.prd
-      ledger.archivedPrdFile = sharedMasterPrd || !archivedGroup.byKind.prd.startsWith('docs/archive/') ? null : archivedGroup.byKind.prd
+      ledger.archivedPrdFile = ((!includeMasterPrd && sharedMasterPrd) || !archivedGroup.byKind.prd.startsWith('docs/archive/'))
+        ? null
+        : archivedGroup.byKind.prd
     }
     if (archivedGroup.byKind.spec) { ledger.specFile = archivedGroup.byKind.spec; ledger.archivedSpecFile = archivedGroup.byKind.spec }
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
@@ -220,7 +224,8 @@ export async function handleFinalize(opts, roots) {
 
   const out = {
     taskId, finalized: true, finalizedHead: currentHead,
-    prdFile: ledger.prdFile, specFile: ledger.specFile, todoFile: ledger.todoFile,
+    prdFile: ledger.prdFile, archivedPrdFile: ledger.archivedPrdFile, archivedMasterPrd: archivedGroup.archivedMasterPrd ?? null,
+    specFile: ledger.specFile, todoFile: ledger.todoFile,
     archivedDocs: archivedGroup.moved, coupledSyncWarnings, ...parity,
   }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)

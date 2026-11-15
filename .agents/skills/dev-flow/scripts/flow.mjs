@@ -28,7 +28,7 @@ function printHelp() {
     '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
-    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--json]',
+    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--include-master-prd] [--json]',
     '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--visual-checked] [--human-approved] [--json]',
     '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
@@ -51,7 +51,7 @@ async function main(argv) {
       booleanFlags: [
         'probe-auth', 'parallel', 'draft', 'rework', 'confirm', 'force',
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
-        'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync',
+        'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local',
       ],

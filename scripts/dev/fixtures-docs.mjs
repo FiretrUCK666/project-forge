@@ -560,4 +560,142 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
   }
 }])
 
+cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传入检查勾选、保原元信息并写入 archivedPrdFile 放行 do-not-edit', async () => {
+  const { parseDocFrontmatter, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
+  const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { handleFinalize, handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+  const { auditDoc } = await import('../../kit/skills/dev-plan/scripts/doc-plan.mjs')
+
+  const makeMasterRepo = (issueNum) => tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'AGENTS.md': [
+      '# master-prd-test',
+      '',
+      '## Dev Profile',
+      '',
+      '```yaml',
+      'quick-test: exit 0',
+      'full-test: exit 0',
+      'smoke-verify: exit 0',
+      'merge-gate: exit 0',
+      'do-not-edit: docs/archive/',
+      '```',
+      '',
+    ].join('\n'),
+    'src/app.mjs': 'export const v = 1\n',
+    'docs/archive/specs/261116-issue10-m1-spec.md': [
+      '---', 'kind: spec', 'title: "M1"', 'status: implemented', 'tier: L3',
+      'created: 2026-11-16', 'updated: 2026-11-16', 'issue: 10', 'pr: null',
+      'owner: alice', 'approved: true', 'implemented: true',
+      'related_prd: ../../prd/261116-master-plan-prd.md',
+      '---', '', '# SPEC: M1', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
+    ].join('\n'),
+    'docs/prd/261116-master-plan-prd.md': [
+      '---', 'kind: prd', 'title: "Master Plan"', 'status: active',
+      'created: 2026-11-16', 'updated: 2026-11-16', 'issue: null', 'pr: null',
+      'owner: alice', 'plan_critique: passed', 'related_spec: null', 'related_todo: null',
+      '---', '', '# PRD: Master Plan', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '## 五、验收标准', '- [x] C1: `src/app.mjs` M1', '- [ ] C2: `src/app.mjs` M2', '',
+    ].join('\n'),
+    [`docs/specs/261116-issue${issueNum}-m2-spec.md`]: [
+      '---', 'kind: spec', 'title: "M2"', 'status: approved', 'tier: L3',
+      'created: 2026-11-16', 'updated: 2026-11-16', `issue: ${issueNum}`, 'pr: null',
+      'branch: null', 'owner: alice', 'approved: true', 'implemented: false', 'plan_critique: passed',
+      'related_prd: ../prd/261116-master-plan-prd.md',
+      `related_todo: ../todo/261116-issue${issueNum}-m2-todo.md`,
+      'high_risk_paths: []', '---', '', '# SPEC: M2', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '## 验收标准', '- [x] C1: `src/app.mjs` ok', '', '## 实现说明', '- 已在 `src/app.mjs` 完成。', '',
+    ].join('\n'),
+    [`docs/todo/261116-issue${issueNum}-m2-todo.md`]: [
+      '---', 'kind: todo', 'title: "M2"', 'status: active',
+      'created: 2026-11-16', 'updated: 2026-11-16', `issue: ${issueNum}`, 'pr: null',
+      'branch: null', 'owner: alice', 'approved: true', 'done_at: null', 'task_id: m2',
+      'planned_at: HEAD', 'related_prd: ../prd/261116-master-plan-prd.md',
+      `related_spec: ../specs/261116-issue${issueNum}-m2-spec.md`,
+      '---', '', '# Todo: M2', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '## 验收标准', '- [x] C1: `src/app.mjs` ok', '', '## 完成后的记录', '**在合并之前写完。**', '',
+    ].join('\n'),
+  })
+
+  const dir = makeMasterRepo(11)
+  const directDir = makeMasterRepo(21)
+
+  try {
+    gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    const roots = await resolveRepoRoots(dir)
+    await handleStart({
+      task: 'm2', case: '4', slug: 'm2', issue: '11',
+      spec: 'docs/specs/261116-issue11-m2-spec.md', todo: 'docs/todo/261116-issue11-m2-todo.md',
+      implementer: 'alice',
+    }, roots)
+    const wt = join(dir, readTaskLedger(dir, 'm2').worktreePath)
+
+    // 1. 默认不传 --include-master-prd：仍守 1:N 共享 PRD，不归档且 archivedPrdFile 为 null
+    const finDefault = await handleFinalize({ task: 'm2', json: true }, roots)
+    if (finDefault.exitCode !== 0) return `默认 finalize 失败：${finDefault.exitCode}`
+    if (!existsSync(join(wt, 'docs/prd/261116-master-plan-prd.md')) || existsSync(join(wt, 'docs/archive/prd/261116-master-plan-prd.md'))) {
+      return '未传 --include-master-prd 时不应归档共享总控 PRD'
+    }
+    if (readTaskLedger(dir, 'm2')?.archivedPrdFile !== null) {
+      return `默认归档时 archivedPrdFile 应为 null：${readTaskLedger(dir, 'm2')?.archivedPrdFile}`
+    }
+
+    // 2. 传 --include-master-prd 但主 PRD 仍有未勾选 C2 -> 必须阻断
+    const finBlocked = await handleFinalize({ task: 'm2', 'include-master-prd': true }, roots)
+    if (finBlocked.exitCode !== 1) {
+      return `主 PRD 有未勾选条目前 --include-master-prd 未阻断：exit=${finBlocked.exitCode}`
+    }
+
+    // 3. 勾选主 PRD C2 后传 --include-master-prd（实测 CLI 透传）-> 归档总控 PRD，保原元信息，写入 archivedPrdFile 并放行 verify
+    const prdPath = join(wt, 'docs/prd/261116-master-plan-prd.md')
+    writeFileSync(prdPath, readFileSync(prdPath, 'utf8').replace('- [ ] C2:', '- [x] C2:'))
+    const finInc = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 'm2', '--include-master-prd', '--dir', wt, '--json'])
+    if (finInc.status !== 0) return `--include-master-prd finalize 失败：${finInc.stderr}`
+    const archivedPrdRel = 'docs/archive/prd/261116-master-plan-prd.md'
+    if (existsSync(prdPath) || !existsSync(join(wt, archivedPrdRel))) {
+      return '传入 --include-master-prd 后总控 PRD 未移入 docs/archive/prd/'
+    }
+    const prdFm = parseDocFrontmatter(readFileSync(join(wt, archivedPrdRel), 'utf8')).data
+    if (prdFm.status !== 'done' || prdFm.issue !== null || prdFm.pr !== null || prdFm.branch !== undefined || prdFm.related_spec !== null || prdFm.related_todo !== null || prdFm.owner !== 'alice') {
+      return `总控 PRD 归档后元信息被子切片覆盖写脏：${JSON.stringify(prdFm)}`
+    }
+    const ledgerAfter = readTaskLedger(dir, 'm2')
+    if (ledgerAfter?.archivedPrdFile !== archivedPrdRel) {
+      return `ledger.archivedPrdFile 未记录归档主 PRD：${JSON.stringify(ledgerAfter)}`
+    }
+    const audPrd = auditDoc({ repoRoot: wt, file: archivedPrdRel })
+    if (!audPrd.ok) return `归档后总控 PRD audit 失败：${JSON.stringify(audPrd.errors)}`
+
+    gitSync(wt, ['add', '-A'])
+    gitSync(wt, ['-c', 'user.name=alice', '-c', 'user.email=alice@example.com', 'commit', '-qm', 'finalize with master prd'])
+    const verRes = await handleVerify({ task: 'm2', mode: 'gate' }, roots)
+    if (verRes.exitCode !== 0) return `archivedPrdFile 未放行 do-not-edit 拦截：exit=${verRes.exitCode}`
+
+    // 4. 返工再次 finalize 幂等保持元信息与 archivedPrdFile
+    writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
+    gitSync(wt, ['add', '-A'])
+    gitSync(wt, ['-c', 'user.name=alice', '-c', 'user.email=alice@example.com', 'commit', '-qm', 'rework v2'])
+    const finRework = await handleFinalize({ task: 'm2', 'include-master-prd': true, json: true }, roots)
+    if (finRework.exitCode !== 0) return `返工重复 finalize --include-master-prd 失败：${finRework.exitCode}`
+    const prdFm2 = parseDocFrontmatter(readFileSync(join(wt, archivedPrdRel), 'utf8')).data
+    if (prdFm2.issue !== null || prdFm2.related_spec !== null || readTaskLedger(dir, 'm2')?.archivedPrdFile !== archivedPrdRel) {
+      return `返工重复 finalize 破坏了总控 PRD 元信息或账本：fm=${JSON.stringify(prdFm2)}`
+    }
+
+    // 5. 验证 doc-plan.mjs archive --include-master-prd 独立入口
+    const directPrd = join(directDir, 'docs/prd/261116-master-plan-prd.md')
+    writeFileSync(directPrd, readFileSync(directPrd, 'utf8').replace('- [ ] C2:', '- [x] C2:'))
+    const dpArch = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['archive', 'docs/specs/261116-issue21-m2-spec.md', '--include-master-prd', '--dir', directDir, '--json'])
+    if (dpArch.status !== 0) return `doc-plan archive --include-master-prd 失败：${dpArch.stderr}`
+    const dpJson = JSON.parse(dpArch.stdout)
+    if (dpJson.archivedMasterPrd !== archivedPrdRel || !existsSync(join(directDir, archivedPrdRel))) {
+      return `doc-plan archive --include-master-prd 返回或移动异常：${JSON.stringify(dpJson)}`
+    }
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(directDir)
+  }
+}])
+
 }

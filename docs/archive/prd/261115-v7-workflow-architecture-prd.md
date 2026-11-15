@@ -1,9 +1,9 @@
 ---
 kind: prd
 title: project-forge v7 全栈治理与工作流重构总控需求说明
-status: active
+status: done
 created: 2026-11-15
-updated: 2026-11-15
+updated: 2026-11-16
 issue: null
 pr: null
 owner: FiretrUCK666
@@ -18,8 +18,8 @@ related_todo: null
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `active`（独立 Plan Critique 并批准后置 `active`，跨 M1–M5 持续追踪，M5 终态归档） |
-| 创建 / 更新 | `2026-11-15` / `2026-11-15` |
+| 当前状态 | `done`（M0–M5 全量实施并实证验收通过，终态归档） |
+| 创建 / 更新 | `2026-11-15` / `2026-11-16` |
 | 关联 Issue / PR | M0 校准单 #33 / PR #34（M1–M5 各自建单并提交独立 SPEC + Todo + PR） |
 | 提出方 / 负责人 | FiretrUCK666 |
 | 关联设计 / 任务单 | 常青架构契约 `docs/TDD.md`；M0 任务单 `docs/archive/todo/261115-issue33-v7-prd-tdd-todo.md` |
@@ -159,18 +159,18 @@ flowchart LR
 
 ## 五、冻结的产品级验收标准（C1..C12）
 
-- [ ] C1: 实测性能达标（以 `scripts/dev/bench.mjs` 300 文件基准仓库与本仓 3 轮热态中位数在 Windows 基线检验）——无 `--probe-auth` 的 `flow.mjs inspect` / `next` `<= 300ms`（基线 `1,905ms`），`survey.mjs` `<= 250ms`（基线 `644ms`），`review.mjs` `<= 450ms`（基线 `1,028ms`），`preflight.mjs` `< 2,500ms`（基线 `9,399ms`），`fixtures.mjs` 默认并发全量跑通 `< 30s` 且 `bench.mjs` 满足硬预算。
-- [ ] C2: 仓外备份默认输出纯 JS 零依赖 `.zip`（1,000 文件创建 `<= 250ms`，Win/Mac/Linux 原生打开；修复上述 5 项 `backup.mjs` 缺陷与 `zip.mjs` `i+16` 偏移），`backup.mjs list/restore` 向下兼容恢复历史 `.tar.gz`，且 `update.mjs` 的 `--check` 纯只读、最新版 `--equip`、全深度清理与失败原子回滚全绿。
-- [ ] C3: 仓库有提交历史时全量默认 `impl-*` + `review-*` 隔离与跨轮复用（不按轮次新建多余工作树）；返工改锁文件自动解绑旧 Junction；本地合入经临时 `--detach` worktree 试合复测后对干净 `mainRoot` 走 `merge --ff-only` 推进（绝不强推或撕裂索引）；`submit` 推远端后 0 跟踪文件变脏。
-- [ ] C4: 三正交策略表在 `verify`/`submit`/`merge` 现场依据完整 diff 重算，`low` 仅限纯非可执行文本白名单且在无 CI 仓必过静态检验，`medium`/`high` 按级强制独立审查、故障注入与不可旁路的分层 `evidence.json`（`.gitCommonDir` 下 `project-forge-flow/tasks/...`）绑定验证。
-- [ ] C5: 六锁 + 收敛四律全数代码级硬落地——Round 2+ 硬拒未改旧行新刺、硬拒同 `HEAD` 复审、修复同 `C*` 误报停损与 Round 4 绕过停损、接入 `findingsBlocker` 与噪声筛选，并记录 `fixed`/`rebutted-wrong`/`intentional`/`deferred` 四类处置统计无效意见率。
-- [ ] C6: 完整覆盖外部单 Issue、单 PR（含供应链 `--untrusted-scan`）、Issue+PR 互链防重复建单、外部阻塞依赖拦截，以及堆叠 PR（`--after`、`sync` `rebase --onto`、`roundBaseSha` / `range-diff` 防视野爆炸与清理保护）。
-- [ ] C7: 宿主无关并行多 Worktree 调度与 FIFO 合并队列落地——含 `withLock('wx')`、Git 锁退避、槽位/端口/缓存环境变量、`batch plan`/`check-disjoint`、跨会话句柄轮换与临时工作树试合冲突退回，且产物层零宿主与工具名称绑定。
-- [ ] C8: 全场景动态适配落地——统一 `TaskBackend` 抹平有无远端与 `generic-git` 防越权；`--bootstrap-empty` 通用基线无玩具码且初装即过 `--check`；三层声明式嗅探覆盖多语言深层子包；1:N 总控 PRD 在仍有未完结子 SPEC 时不被误归档。
-- [ ] C9: `AGENTS.md` 完整保留全防呆地图且修净 `no-remote` 泄漏、多行注释劈断、`maskVolatile` 误替换、定制区 `--check` 死结（新增 `--adopt-custom`）与大仓 30KB 升级阻断；`equip.mjs` 降档不误删且二次改定制文件可自洽。
-- [ ] C10: 救活 `govern-tests.mjs` 失效的零断言与纯 Mock 检测，补全多行词法状态、删除 CI 步骤检测与全图表 Mermaid `16/12` 校验，由 `flow verify`/`review-pack record`/`flow rework` 自动写入 `.gitCommonDir` 运行期 `signals.jsonl` 并由 `govern-audit.mjs retro` 产出规则补丁闭环。
-- [ ] C11: `.github/workflows/check.yml` 覆盖 `ubuntu`/`windows`/`macos` 三平台并纳入 `bench.mjs` 与 `verify-injections.mjs`；`release.yml` 在上传后回读校验 `.zip` 附件；清理 `references/plugin-ecosystems.md` 等残留宿主耦合描述。
-- [ ] C12: 建成基于 `git archive` 真 `.zip` 安装包的 Fake-Agent E2E 测试台，实证跑通全部 7 大场景、跨会话接管与全部防绕过负面测试，本仓全门禁（含 `verify-injections.mjs`）退出码为 0 完成自举。
+- [x] C1: 实测性能达标（以 `scripts/dev/bench.mjs` 300 文件基准仓库与本仓 3 轮热态中位数在 Windows 基线检验）——无 `--probe-auth` 的 `flow.mjs inspect` / `next` `<= 300ms`（基线 `1,905ms`），`survey.mjs` `<= 250ms`（基线 `644ms`），`review.mjs` `<= 450ms`（基线 `1,028ms`），`preflight.mjs` `< 2,500ms`（基线 `9,399ms`），`fixtures.mjs` 默认并发全量跑通 `< 30s` 且 `bench.mjs` 满足硬预算。
+- [x] C2: 仓外备份默认输出纯 JS 零依赖 `.zip`（1,000 文件创建 `<= 250ms`，Win/Mac/Linux 原生打开；修复上述 5 项 `backup.mjs` 缺陷与 `zip.mjs` `i+16` 偏移），`backup.mjs list/restore` 向下兼容恢复历史 `.tar.gz`，且 `update.mjs` 的 `--check` 纯只读、最新版 `--equip`、全深度清理与失败原子回滚全绿。
+- [x] C3: 仓库有提交历史时全量默认 `impl-*` + `review-*` 隔离与跨轮复用（不按轮次新建多余工作树）；返工改锁文件自动解绑旧 Junction；本地合入经临时 `--detach` worktree 试合复测后对干净 `mainRoot` 走 `merge --ff-only` 推进（绝不强推或撕裂索引）；`submit` 推远端后 0 跟踪文件变脏。
+- [x] C4: 三正交策略表在 `verify`/`submit`/`merge` 现场依据完整 diff 重算，`low` 仅限纯非可执行文本白名单且在无 CI 仓必过静态检验，`medium`/`high` 按级强制独立审查、故障注入与不可旁路的分层 `evidence.json`（`.gitCommonDir` 下 `project-forge-flow/tasks/...`）绑定验证。
+- [x] C5: 六锁 + 收敛四律全数代码级硬落地——Round 2+ 硬拒未改旧行新刺、硬拒同 `HEAD` 复审、修复同 `C*` 误报停损与 Round 4 绕过停损、接入 `findingsBlocker` 与噪声筛选，并记录 `fixed`/`rebutted-wrong`/`intentional`/`deferred` 四类处置统计无效意见率。
+- [x] C6: 完整覆盖外部单 Issue、单 PR（含供应链 `--untrusted-scan`）、Issue+PR 互链防重复建单、外部阻塞依赖拦截，以及堆叠 PR（`--after`、`sync` `rebase --onto`、`roundBaseSha` / `range-diff` 防视野爆炸与清理保护）。
+- [x] C7: 宿主无关并行多 Worktree 调度与 FIFO 合并队列落地——含 `withLock('wx')`、Git 锁退避、槽位/端口/缓存环境变量、`batch plan`/`check-disjoint`、跨会话句柄轮换与临时工作树试合冲突退回，且产物层零宿主与工具名称绑定。
+- [x] C8: 全场景动态适配落地——统一 `TaskBackend` 抹平有无远端与 `generic-git` 防越权；`--bootstrap-empty` 通用基线无玩具码且初装即过 `--check`；三层声明式嗅探覆盖多语言深层子包；1:N 总控 PRD 在仍有未完结子 SPEC 时不被误归档。
+- [x] C9: `AGENTS.md` 完整保留全防呆地图且修净 `no-remote` 泄漏、多行注释劈断、`maskVolatile` 误替换、定制区 `--check` 死结（新增 `--adopt-custom`）与大仓 30KB 升级阻断；`equip.mjs` 降档不误删且二次改定制文件可自洽。
+- [x] C10: 救活 `govern-tests.mjs` 失效的零断言与纯 Mock 检测，补全多行词法状态、删除 CI 步骤检测与全图表 Mermaid `16/12` 校验，由 `flow verify`/`review-pack record`/`flow rework` 自动写入 `.gitCommonDir` 运行期 `signals.jsonl` 并由 `govern-audit.mjs retro` 产出规则补丁闭环。
+- [x] C11: `.github/workflows/check.yml` 覆盖 `ubuntu`/`windows`/`macos` 三平台并纳入 `bench.mjs` 与 `verify-injections.mjs`；`release.yml` 在上传后回读校验 `.zip` 附件；清理 `references/plugin-ecosystems.md` 等残留宿主耦合描述。
+- [x] C12: 建成基于 `git archive` 真 `.zip` 安装包的 Fake-Agent E2E 测试台，实证跑通全部 7 大场景、跨会话接管与全部防绕过负面测试，本仓全门禁（含 `verify-injections.mjs`）退出码为 0 完成自举。
 
 ---
 

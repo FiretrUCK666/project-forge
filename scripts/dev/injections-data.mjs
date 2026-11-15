@@ -689,4 +689,13 @@ export const INJECTIONS = [
     expect: 'release.yml 缺少发布附件回读校验',
     runner: 'preflight',
   },
+  {
+    id: 'I76',
+    what: 'M5：移除 SKILL.md 的 8 阶段标准闭环核心环节（验证 checkWorkflowLifecycleContracts 红灯拦截）',
+    file: 'SKILL.md',
+    from: '需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入',
+    to: '需求 → 实现 → 合入',
+    expect: '工作流生命周期契约',
+    runner: 'preflight',
+  },
 ]

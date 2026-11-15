@@ -47,19 +47,17 @@ metadata:
 | **G6** | 目标为插件或能力目录 | `references/skill-project.md` + `references/plugin-ecosystems.md` | frontmatter 错字段静默丢包、产物入库错位、拿本地挂载当隔离验收 |
 | **G7** | 交棒校验或清理痕迹前 | `references/handoff.md` | 把交棒做成撤销、误把 `.pf-manifest.json` 当痕迹、把退出码 `3` 当成干净 |
 
-## 日常研发流路由（配好之后无感使用）
+## 日常研发闭环（8 阶段与五套件协同）
 
-项目配好后日常走 `AGENTS.md` 顶部意图路由，直接静默加载已装配的 `.agents/skills/`（`lightweight` 含 `dev-explore`/`dev-plan`/`dev-flow`，`full` 含全套 5 技能），**不要求用户敲斜杠命令、不反问是否调用**：
+项目配好后按 `AGENTS.md` 意图路由静默调度已装配的 `.agents/skills/`（`lightweight` 含前 3 套、`full` 含全套 5 套），贯通 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八阶段闭环（`TaskBackend` 抹平 `github` / `generic-git` / `local-only` 三态差异，有提交仓全量进入 `.worktrees/` 隔离），**不要求敲斜杠命令、不反问是否调用**：
 
-| 日常场景 | 权威协作判据（按标题名直达） |
-| --- | --- |
-| 判身份与防只读误推 | `references/collaboration.md`「一、先判角色」：五态表、`generic-git` 降级与 `clone-readonly` 阻断 |
-| 定门型、写规划与三正交路由 | `references/collaboration.md`「二、五档开工分流」：`flow.mjs next`、`two-way`/`one-way`、三正交 `evidence.json` |
-| 开全量 Worktree 与临时试合 | `references/collaboration.md`「三、三档隔离」：有提交仓全入 `impl-*`、槽位复用、`--reset-review-slot`、临时 `--detach` 试合 |
-| 认领、1:N PRD 与零脏文件提审 | `references/collaboration.md`「四、认领、PR 前文档同步」：`isSharedMasterPrd`、推后零改写、PR 模板套用与双写 |
-| 收 Issue 与审外部 PR | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」：先扫供应链高危改动 |
-| 双门新上下文复审、六锁硬拦截 | `references/collaboration.md`「七、审查循环：怎么才会停」：Round 2+ 新 `review` 子代理、同 `HEAD`/增量硬锁与停损 |
-| 合并授权与收尾清理七步 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」：弱化门禁必拦（退出码 4）与先问再清理 |
+| 阶段 / 场景 | 负责技能与核心机制 | 权威协作判据（按标题名直达） |
+| --- | --- | --- |
+| **1. 需求侦察与判身份** | `dev-explore` 只读跑 `repo-map.mjs` 输出 `Feature Map` 与 `reusableModules`；`flow.mjs inspect` 判五态与多 Issue 依赖图 | `references/collaboration.md`「一、先判角色」 |
+| **2–3. 澄清、设计与 Critique** | `dev-plan` 联查多链接与自有模板，**多轮互动澄清直至无待拍板问题**（复杂需求主动建议 PRD），按 Case 1–5 分流并走不可自审 Critique | `references/collaboration.md`「二、五档开工分流」 |
+| **4. 隔离实现与提审锁** | `dev-flow` 由 `next` 路由，全入 `impl-*`/`review-*` 槽复用；**谁改代码谁认领并负责 `finalize`（含 `--include-master-prd`）/`verify`/`submit` 与 PR/Issue 评论** | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
+| **5–7. 评审、实证与验收** | `dev-review` 对外部 PR 先扫 `--untrusted-scan`；运行 Behavioral/Structural 双门与实证核验，Round 2+ 新独立上下文 + 六锁收敛 | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
+| **8. 合入、清理与复盘** | 独立审查 PASS 后由审查者 `flow.mjs merge`（弱化门禁必拦），问人确认后 7 步清理；`dev-govern` 经 `audit`/`reconcile`/`retro` 读取 `signals.jsonl` 下沉门禁 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」 |
 
 ## 能力矩阵与默认范围
 

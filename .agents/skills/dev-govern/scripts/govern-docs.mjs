@@ -131,7 +131,7 @@ function decodeUriSafe(raw) {
 function checkMarkdownDeadLinks(repoRoot, files, findings) {
   for (const f of files) {
     if (!/\.mdx?$/i.test(f.name)) continue
-    if (f.rel.startsWith('templates/')) continue
+    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/')) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const lines = info.text.split('\n')

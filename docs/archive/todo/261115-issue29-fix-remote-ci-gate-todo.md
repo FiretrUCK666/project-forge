@@ -5,7 +5,7 @@ status: done
 created: 2026-11-15
 updated: 2026-11-15
 issue: 29
-pr: null
+pr: 30
 branch: fix/remote-ci-merge-gate
 owner: FiretrUCK666
 approved: false

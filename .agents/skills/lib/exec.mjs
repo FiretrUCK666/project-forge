@@ -191,8 +191,23 @@ function buildWindowsCmdLine(filePath, args) {
   return `"${inner}"`
 }
 
-/** 超时或异常时按平台终止整个子进程树，防止孤儿进程驻留。 */
-export function killProcessTree(child) {
+/**
+ * 判断当前运行环境是否可安全使用 `detached: true`：
+ * macOS Node < 20（libuv < 1.45）下 `detached: true` 会退回多线程裸 `fork()` 并触发 malloc/dyld 锁死锁；
+ * Windows 走 `taskkill /T /F` 无需 `detached`。
+ */
+export function supportsSafeDetachedSpawn({
+  platform = process.platform,
+  nodeVersion = process.versions?.node,
+} = {}) {
+  if (platform === 'win32') return false
+  const nodeMajor = Number(String(nodeVersion ?? '').split('.')[0]) || 0
+  if (platform === 'darwin' && nodeMajor > 0 && nodeMajor < 20) return false
+  return true
+}
+
+/** 超时或异常时按平台终止整个子进程树（仅以进程组启动时发 -pgid），防止孤儿进程驻留或误伤无关 pgid。 */
+export function killProcessTree(child, useProcessGroup = true) {
   if (!child || !child.pid) return
   if (process.platform === 'win32') {
     execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {
@@ -200,16 +215,17 @@ export function killProcessTree(child) {
     })
     return
   }
-  try {
-    process.kill(-child.pid, 'SIGTERM')
-  } catch {
-    try { child.kill('SIGTERM') } catch { /* 已退出 */ }
-  }
-  const killTimer = setTimeout(() => {
-    try { process.kill(-child.pid, 'SIGKILL') } catch {
-      try { child.kill('SIGKILL') } catch { /* 已退出 */ }
+  const terminate = (sig) => {
+    if (useProcessGroup) {
+      try {
+        process.kill(-child.pid, sig)
+        return
+      } catch { /* fallback to direct child kill */ }
     }
-  }, 300)
+    try { child.kill(sig) } catch { /* 已退出 */ }
+  }
+  terminate('SIGTERM')
+  const killTimer = setTimeout(() => terminate('SIGKILL'), 300)
   if (typeof killTimer.unref === 'function') killTimer.unref()
 }
 
@@ -328,11 +344,12 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
       return
     }
     const env = buildNonInteractiveEnv(process.env, opts.env ?? {})
-    const useDetached = process.platform !== 'win32'
+    // macOS Node 18 (libuv < 1.45) 下 detached: true 会退回非 fork-safe 裸 fork() 触发 malloc/dyld 死锁
+    const canUseDetached = supportsSafeDetachedSpawn()
     const child = spawn(commandStr, {
       cwd,
       shell: true,
-      detached: useDetached,
+      detached: canUseDetached,
       stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env,
@@ -361,7 +378,7 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
     }
     const timer = setTimeout(() => {
       timedOut = true
-      killProcessTree(child)
+      killProcessTree(child, canUseDetached)
       closeGraceTimer = setTimeout(() => {
         try { child.stdout?.destroy() } catch { /* ignore */ }
         try { child.stderr?.destroy() } catch { /* ignore */ }

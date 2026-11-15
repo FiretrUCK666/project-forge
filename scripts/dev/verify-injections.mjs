@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
-import { killProcessTree } from '../../kit/skills/lib/exec.mjs'
+import { killProcessTree, supportsSafeDetachedSpawn } from '../../kit/skills/lib/exec.mjs'
 import { isMainModule } from '../lib/text.mjs'
 import { INJECTIONS } from './injections-data.mjs'
 
@@ -52,11 +52,12 @@ function removeTree(dir) {
 /** 用 spawn + Promise 而不是 spawnSync：关闭 stdin、注入防外网探针并附带 90s 看门狗强杀树防止并发挂死。 */
 function runNodeAsync(scriptPath, args, cwd, label = '') {
   return new Promise((resolveDone) => {
+    const useDetached = supportsSafeDetachedSpawn()
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      detached: process.platform !== 'win32',
+      detached: useDetached,
       env: { ...process.env, PF_NO_REAL_AUTH_PROBE: process.env.PF_NO_REAL_AUTH_PROBE || '1' },
     })
     let out = ''
@@ -73,7 +74,7 @@ function runNodeAsync(scriptPath, args, cwd, label = '') {
     }
     const timer = setTimeout(() => {
       timedOut = true
-      killProcessTree(child)
+      killProcessTree(child, useDetached)
       killFallback = setTimeout(finish, 3000)
       killFallback.unref?.()
     }, INJ_STEP_TIMEOUT_MS)

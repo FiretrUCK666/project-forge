@@ -148,7 +148,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
     const activeChildren = new Set()
 
     const cleanupWorkers = (sig) => {
-      for (const ch of activeChildren) killProcessTree(ch)
+      for (const ch of activeChildren) killProcessTree(ch, false)
       process.exit(sig === 'SIGINT' ? 130 : 143)
     }
     const onSigTerm = () => cleanupWorkers('SIGTERM')
@@ -176,7 +176,6 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
         },
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
         windowsHide: true,
-        detached: process.platform !== 'win32',
       })
       activeChildren.add(child)
       let errBuf = ''
@@ -210,7 +209,7 @@ function runDynamicWorkerPool(scriptPath, dispatchOrder, lanes, workerBkRoot, ca
         taskTimer = setTimeout(() => {
           const name = caseNames[idx] ?? 'unknown'
           timedOutMsg = `工作进程 ${tag} 在用例 #${idx}（${name}）执行超时 (>${WORKER_TASK_TIMEOUT_MS}ms)`
-          killProcessTree(child)
+          killProcessTree(child, false)
           closeFallback = setTimeout(() => finishWorker(124), 3000)
           closeFallback.unref?.()
         }, WORKER_TASK_TIMEOUT_MS)

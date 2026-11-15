@@ -190,8 +190,16 @@ export function registerM4Cases(cases) {
       return `flushAndExit 大 JSON 管道输出被截断：${e.message}`
     }
 
-    // 5. execShellCommand closes stdin (EOF immediate) and preserves positive/negative exit codes
-    const { execShellCommand } = await import('../../kit/skills/lib/exec.mjs')
+    // 5. execShellCommand closes stdin (EOF immediate), supportsSafeDetachedSpawn skips macOS Node <20 detached fork() deadlock, and killProcessTree(..., false) cleanly terminates
+    const { execShellCommand, killProcessTree, supportsSafeDetachedSpawn } = await import('../../kit/skills/lib/exec.mjs')
+    if (supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '18.20.4' }) !== false
+      || supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '19.9.0' }) !== false
+      || supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '20.0.0' }) !== true
+      || supportsSafeDetachedSpawn({ platform: 'darwin', nodeVersion: '22.11.0' }) !== true
+      || supportsSafeDetachedSpawn({ platform: 'linux', nodeVersion: '18.20.4' }) !== true
+      || supportsSafeDetachedSpawn({ platform: 'win32', nodeVersion: '22.0.0' }) !== false) {
+      return 'supportsSafeDetachedSpawn 跨平台/版本判定异常'
+    }
     const stdinCmd = `${JSON.stringify(process.execPath)} -e "const t=setTimeout(()=>process.exit(3),5000);process.stdin.resume();process.stdin.on('end',()=>{clearTimeout(t);process.stdout.write('eof');});"`
     const resZero = await execShellCommand(stdinCmd, FIXTURES_M4_ROOT, { timeout: 6000 })
     if (!resZero.ok || resZero.code !== 0 || resZero.timedOut || resZero.stdout !== 'eof') {
@@ -201,6 +209,14 @@ export function registerM4Cases(cases) {
     if (resFail.ok || resFail.code !== 2 || resFail.timedOut) {
       return `execShellCommand 负退出码异常：${JSON.stringify(resFail)}`
     }
+    const directKillOk = await new Promise((done) => {
+      const sleeper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true })
+      const guard = setTimeout(() => { try { sleeper.kill('SIGKILL') } catch {} done(false) }, 3000)
+      guard.unref?.()
+      sleeper.on('close', () => { clearTimeout(guard); done(true) })
+      killProcessTree(sleeper, false)
+    })
+    if (!directKillOk) return 'killProcessTree(child, false) 未能在 3000ms 内终止直属子进程'
     return true
   }])
 

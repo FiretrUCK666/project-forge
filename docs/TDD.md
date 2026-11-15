@@ -108,7 +108,7 @@ flowchart TB
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层与跨版本采集（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | `preflight.mjs`（含 `contracts`/`suite`/`e2e` 子模块）、`gap-coverage.mjs`、`fixtures.mjs`（含 9 个领域夹具模块）、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
+| `scripts/dev/` | 自用层 | `preflight.mjs`（含 `contracts`/`suite`/`e2e` 子模块）、`gap-coverage.mjs`、`fixtures.mjs`（含 9 个领域夹具模块，支持 `--only` 定向与 `--jobs` 并发）、`verify-injections.mjs`、`bench.mjs`、`evidence.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 
@@ -325,7 +325,7 @@ flowchart LR
 | `scripts/equip.mjs` | `.agents/skills/` 与 `kit/skills/` 及 `.pf-manifest.json` 字节级一致（`--check`） | 修改 `kit/skills/` 后；退出码 `0` |
 | `scripts/review.mjs` | 交付成熟度体检、`claims.mjs` 真实路径/脚本回查与 `staleTddPaths` 检测 | 交付验收与合流前；`0` 个「缺」 |
 | `scripts/sync-toc.mjs` | 双语 README 目录标题与 GitHub 锚点双向一致性（`README.md README.en.md --check`） | 修改 README 结构后；退出码 `0` |
-| `scripts/dev/verify-injections.mjs` | 在临时隔离副本上逐条注入退化故障（削弱门禁、破坏指针、删去关键检测），验证对应检查必红且还原后全绿 | 合流与发版前；全部故障可捕获且还原后全绿 |
+| `scripts/dev/verify-injections.mjs` | 在整树隔离副本上逐条注入退化故障（削弱门禁、破坏指针、删去关键检测），每条注入独占一份副本并行验证对应检查必红；主工作区全程不被触碰 | 合流与发版前；全部故障可捕获 |
 | `scripts/dev/bench.mjs` | 300 文件基准仓库下 `survey.mjs` 耗时低于 `BUDGET_MS`（3000ms） | 修改扫描逻辑后；防止线性退化 |
 | `scripts/dev/evidence.mjs` | 清点当前导出包 `skillVersion`、`skillSource`、条目列表与文件哈希（只读） | 发版前核对制品证据 |
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 /**
- * 故障注入复验：逐个把关键判据拆掉，确认对应的断言真的变红，再还原确认变绿。
+ * 故障注入复验：逐个把关键判据拆掉，确认对应的断言真的变红。
  *
  * 这不是测试的一部分，是**证明测试不是空的**。测试全绿有两种可能——代码对了，或者
  * 测试什么都没测；只有亲眼看到它红过，才排除后一种。
  *
- * 用法：node scripts/dev/verify-injections.mjs
+ * 用法：node scripts/dev/verify-injections.mjs [--only I12] [--jobs 6]
  */
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { isMainModule } from '../lib/text.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -434,7 +437,9 @@ const INJECTIONS = [
     file: 'kit/skills/dev-govern/scripts/govern-tests.mjs',
     from: 'if (HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {',
     to: 'if (false && HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {',
-    expect: '未检出 tests.hard-sleep',
+    // 断言报的是带文件名的 finding id（`tests.hard-sleep.test/sleep.test.mjs`），
+    // 拿光秃秃的 `tests.hard-sleep` 去匹配，`--only` 一条都命不中。
+    expect: 'tests.hard-sleep',
   },
   {
     id: 'I44',
@@ -490,116 +495,170 @@ const INJECTIONS = [
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
     from: "        if (checks.bucket === 'fail' && !opts['human-approved']) {",
     to: "        if (false && checks.bucket === 'fail' && !opts['human-approved']) {",
-    expect: '远端 CI 失败未阻断合并',
+    expect: '远端 CI 失败未阻断合并：',
+  },
+  {
+    // 两张语言清单各写各的：「能生成骨架」里加了一种语言，「能识别」里忘了登记，
+    // 不会有任何东西报错——用户拿到的 README 一边说支持、一边静默走兜底分支。
+    id: 'I51',
+    what: '往起步骨架语言清单里加一种勘察根本认不出来的语言',
+    file: 'scripts/lib/starter-templates.mjs',
+    from: "export const BOOTSTRAP_LANGS = new Set(['node', 'python', 'go', 'rust', 'java', 'docs'])",
+    to: "export const BOOTSTRAP_LANGS = new Set(['node', 'python', 'go', 'rust', 'java', 'docs', 'cobol'])",
+    expect: '生态清单里没有对应识别项',
   },
 ]
 
-function runFixtures(expect = '') {
-  const args = [join(HERE, 'fixtures.mjs')]
-  if (expect) args.push('--prefer', expect, '--bail-on', expect)
-  const res = spawnSync(process.execPath, args, {
-    encoding: 'utf8', timeout: 300000,
+
+/**
+ * 复验必须在**独立副本**里做，而且每条注入各用一份。
+ *
+ * 两件事一起治：
+ *
+ * 1. **就地改再还原**取决于「这个进程能一直跑到底」。中途被 Ctrl-C、被超时杀掉、机器休眠，
+ *    仓库就停在「判据被拆掉」的状态里——那时 `git status` 上只是一行 M，看着像正常改动，
+ *    下一次门禁报的是假故障，改的人会去查一个不存在的问题。
+ * 2. **串行注入跑不完**。五十多条注入串行跑，每条都要付一次门禁的代价，加起来是按小时计的。
+ *    有条数就是有上限，而得不出一条结论的等待等于没跑。
+ *
+ * 所以：先把工作树复制一份当母版，每条注入从母版再复制一份自己的副本，各自并行。
+ * 谁也不碰真正的工作区，谁也碰不到别人。
+ */
+const SANDBOX = mkdtempSync(join(tmpdir(), 'pf-inj-'))
+const STAGING = join(SANDBOX, 'base')
+
+/** 复制时跳过的目录：`.git` 复验用不上，`node_modules` 与 `.worktrees` 是本地状态。 */
+const COPY_SKIP = /[\\/](?:\.git|node_modules|\.worktrees)(?:[\\/]|$)/
+
+function cloneTree(from, to) {
+  cpSync(from, to, { recursive: true, filter: (src) => src === from || !COPY_SKIP.test(src) })
+  return to
+}
+
+function removeTree(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  } catch { /* 留给系统清理 */ }
+}
+
+/** 用 spawn + Promise 而不是 spawnSync：同步阻塞会让「并行」只并行了个说法。 */
+function runNodeAsync(scriptPath, args, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], { cwd })
+    let out = ''
+    let err = ''
+    child.stdout.on('data', (chunk) => { out += chunk })
+    child.stderr.on('data', (chunk) => { err += chunk })
+    child.on('close', () => resolve({ out, err }))
+    child.on('error', (error) => resolve({ out, err: `${err}\n${error.message}` }))
   })
-  const all = `${res.stdout ?? ''}\n${res.stderr ?? ''}`
+}
+
+async function runFixturesIn(root, expect = '') {
+  const args = []
+  if (expect) args.push('--only', expect)
+  const { out, err } = await runNodeAsync(join(root, 'scripts', 'dev', 'fixtures.mjs'), args, root)
+  const all = `${out}\n${err}`
   return {
     failed: all.split('\n').filter((l) => l.startsWith('FAIL')),
     summary: all.split('\n').filter((l) => /行为断言/.test(l)).join(' '),
   }
 }
 
-function runPreflight() {
-  const res = spawnSync(process.execPath, [join(HERE, 'preflight.mjs')], {
-    encoding: 'utf8', timeout: 300000,
-  })
-  const all = `${res.stdout ?? ''}\n${res.stderr ?? ''}`
-  return { failed: all.split('\n').filter((l) => l.startsWith('FAIL')) }
+async function runPreflightIn(root) {
+  const { out, err } = await runNodeAsync(join(root, 'scripts', 'dev', 'preflight.mjs'), [], root)
+  return { failed: `${out}\n${err}`.split('\n').filter((l) => l.startsWith('FAIL')) }
 }
 
 /**
- * 这一处注入该由哪套门禁核对。
+ * 两套门禁都问，但按代价排序。
  *
- * **答案是「两套都跑」。** 按路径前缀分派会让一部分注入永远不会红——不是因为判据不灵，
- * 是因为跑错了那一套，而「没红」会被当成一条结论。判据只有一条：**拆掉一处之后，只要有
- * 任何一道门禁报出来，就算有人看着它**。猜哪一套会看，是这套复验里最容易出错的一步。
+ * 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人看着它。按路径前缀猜
+ * 「该由谁看」，猜错的那次注入就不会红，而「没红」会被读成「判据不灵」——那是把一次
+ * 跑错当成了一条结论。定向跑命中时是亚秒级，没命中时 `--only` 直接以非零退出，
+ * 也不会被读成「全过」；只有它没能证伪这条注入时，才付整套 preflight 的代价。
  */
-const FIXTURES_SOURCE = readdirSync(HERE)
-  .filter((n) => n.startsWith('fixtures') && n.endsWith('.mjs'))
-  .map((n) => readFileSync(join(HERE, n), 'utf8'))
-  .join('\n')
-const PREFLIGHT_SOURCE = readdirSync(HERE)
-  .filter((n) => n.startsWith('preflight') && n.endsWith('.mjs'))
-  .map((n) => readFileSync(join(HERE, n), 'utf8'))
-  .join('\n')
-
-function runBoth(expect) {
-  if (expect && FIXTURES_SOURCE.includes(expect) && !PREFLIGHT_SOURCE.includes(expect)) {
-    const fix = runFixtures(expect)
-    if (fix.failed.some((line) => line.includes(expect))) return fix
-    return { failed: [...fix.failed, ...runPreflight().failed] }
+async function runBothIn(root, expect) {
+  if (!expect) {
+    return { failed: [...(await runPreflightIn(root)).failed, ...(await runFixturesIn(root)).failed] }
   }
-  const pre = runPreflight()
-  if (expect && pre.failed.some((line) => line.includes(expect))) return pre
-  return { failed: [...pre.failed, ...runFixtures(expect).failed] }
+  const fix = await runFixturesIn(root, expect)
+  if (fix.failed.some((line) => line.includes(expect))) return fix
+  const pre = await runPreflightIn(root)
+  if (pre.failed.some((line) => line.includes(expect))) return pre
+  return { failed: [...pre.failed, ...fix.failed] }
 }
 
-let bad = 0
-for (const inj of INJECTIONS) {
-  const full = join(ROOT, inj.file)
-  const original = readFileSync(full, 'utf8')
-  if (!original.includes(inj.from)) {
-    process.stdout.write(`${inj.id} 跳过：${inj.file} 里找不到要替换的那一段\n`)
-    bad += 1
-    continue
-  }
-  writeFileSync(full, original.replace(inj.from, inj.to), 'utf8')
-
-  // 有些形状只有在**多处同时改**时才成立（集体遗忘）。它们额外带一份清单，
-  // 把同一处改动也施加到别的文件上——只改一处的注入，抓不到「三处一起错」这一类。
-  const extras = []
-  if (Array.isArray(inj.alsoDropIn)) {
-    for (const other of inj.alsoDropIn) {
-      const otherPath = join(ROOT, other)
-      const otherText = readFileSync(otherPath, 'utf8')
-      if (!otherText.includes(inj.from)) {
-        process.stdout.write(`${inj.id} 跳过：${other} 里找不到要替换的那一段\n`)
-        bad += 1
-        continue
-      }
-      extras.push([otherPath, otherText])
-      writeFileSync(otherPath, otherText.replace(inj.from, inj.to), 'utf8')
-    }
-  }
-
+/** 把一条注入施加到它自己的副本上，跑门禁，返回结论。副本用完即删。 */
+async function runInjection(inj) {
+  const root = cloneTree(STAGING, join(SANDBOX, `run-${inj.id}`))
   try {
-    // **两套门禁都跑。** 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人
-    // 看着它。按路径前缀猜「该由谁看」，猜错的那次注入就不会红，而「没红」会被读成
-    // 「判据不灵」——那是把一次跑错当成了一条结论。
-    const result = runBoth(inj.expect)
-    const hit = result.failed.some((line) => line.includes(inj.expect))
-    if (hit) {
-      const sample = result.failed.find((line) => line.includes(inj.expect))
-      process.stdout.write(`${inj.id} 红了（正确）：${inj.what}\n    ${sample.slice(0, 110)}\n`)
+    const targets = [[inj.file, inj.from, inj.to]]
+    for (const other of inj.alsoDropIn ?? []) targets.push([other, inj.from, inj.to])
+
+    for (const [rel, from, to] of targets) {
+      const full = join(root, rel)
+      const original = readFileSync(full, 'utf8')
+      if (!original.includes(from)) {
+        return { id: inj.id, what: inj.what, skipped: `${rel} 里找不到要替换的那一段` }
+      }
+      writeFileSync(full, original.replace(from, to), 'utf8')
+    }
+
+    const result = await runBothIn(root, inj.expect)
+    const sample = result.failed.find((line) => line.includes(inj.expect))
+    return { id: inj.id, what: inj.what, hit: Boolean(sample), sample }
+  } finally {
+    removeTree(root)
+  }
+}
+
+/** 有限并发：每条注入要起几个 node 子进程，并发太高会把机器拖成彼此等 I/O。 */
+async function runWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length)
+  let cursor = 0
+  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await worker(items[index])
+    }
+  })
+  await Promise.all(lanes)
+  return results
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  cloneTree(ROOT, STAGING)
+  process.on('exit', () => removeTree(SANDBOX))
+
+  const onlyIndex = process.argv.indexOf('--only')
+  const argvOnly = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined
+  const jobsIndex = process.argv.indexOf('--jobs')
+  const jobs = jobsIndex >= 0 ? Number(process.argv[jobsIndex + 1]) || 6 : 6
+
+  const selected = argvOnly ? INJECTIONS.filter((i) => i.id === argvOnly) : INJECTIONS
+  if (argvOnly && selected.length === 0) {
+    process.stderr.write(`没有注入匹配 --only ${argvOnly}：编号写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)
+    process.exit(1)
+  }
+
+  const results = await runWithConcurrency(selected, jobs, runInjection)
+
+  let bad = 0
+  for (const result of results) {
+    if (result.skipped) {
+      process.stdout.write(`${result.id} 跳过：${result.skipped}\n`)
+      bad += 1
+    } else if (result.hit) {
+      process.stdout.write(`${result.id} 红了（正确）：${result.what}\n    ${result.sample.slice(0, 110)}\n`)
     } else {
-      process.stdout.write(`${inj.id} **没红**（判据被拆掉却没人报）：${inj.what}\n`)
+      process.stdout.write(`${result.id} **没红**（判据被拆掉却没人报）：${result.what}\n`)
       bad += 1
     }
-  } finally {
-    writeFileSync(full, original, 'utf8')
-    for (const [path, text] of extras) writeFileSync(path, text, 'utf8')
   }
-}
 
-// 还原之后必须全绿——否则注入留下的痕迹本身成了故障。
-const after = runFixtures()
-const pre = runPreflight()
-if (after.failed.length === 0 && pre.failed.length === 0) {
-  process.stdout.write(`\n还原后全绿：${after.summary}\n`)
-} else {
-  process.stdout.write(`\n还原后仍红：\n${[...after.failed, ...pre.failed].join('\n')}\n`)
-  bad += 1
+  process.stdout.write(bad === 0
+    ? `\n故障注入复验：${selected.length} 条判据都能被抓到。\n`
+    : `\n故障注入复验未通过：${bad} 处有问题。\n`)
+  process.exit(bad === 0 ? 0 : 1)
 }
-
-process.stdout.write(bad === 0
-  ? `\n故障注入复验：${INJECTIONS.length} 条判据都能被抓到，还原后全绿。\n`
-  : `\n故障注入复验未通过：${bad} 处有问题。\n`)
-process.exit(bad === 0 ? 0 : 1)

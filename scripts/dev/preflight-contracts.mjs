@@ -712,6 +712,46 @@ function checkReviewContract({ ROOT, readText, fail, note }) {
   note(`收尾步骤对拍：${FINISH_STEPS.length} 步在 ${siteCount} 处（模板 / 实例 / 判据源头）顺序与命令一致`)
 }
 
+/**
+ * 两张语言清单必须一张包住另一张。
+ *
+ * 「能识别」和「能生成起步骨架」是两件不同的事：前者靠 `survey-ecosystem.mjs` 的清单探测，
+ * 后者靠 `starter-templates.mjs` 的分支生成。两份清单各写各的时候，骨架里多加一种语言、
+ * 识别里却忘了登记（或反过来），不会有任何东西报错——用户拿到的那份 README 于是一边
+ * 说支持、一边静默走兜底分支。这里把包含关系钉成判据。
+ */
+function checkStarterLanguageCoverage(ctx) {
+  const ecosystemPath = join(ctx.ROOT, 'scripts/lib/survey-ecosystem.mjs')
+  const starterPath = join(ctx.ROOT, 'scripts/lib/starter-templates.mjs')
+  const ecosystemText = ctx.readText(ecosystemPath)
+  const starterText = ctx.readText(starterPath)
+
+  const declared = /export const BOOTSTRAP_LANGS = new Set\(\[([^\]]+)\]\)/.exec(starterText)?.[1]
+  if (declared === undefined) {
+    ctx.fail('起步骨架语言清单读不出来（`BOOTSTRAP_LANGS` 的形状变了）——清单读不到时，下面这条包含关系会被静默跳过')
+    return
+  }
+  const bootstrap = [...declared.matchAll(/'([^']+)'/g)].map((m) => m[1])
+  if (bootstrap.length === 0) {
+    ctx.fail('起步骨架语言清单是空的——空清单会让包含关系恒真，那是一条永远绿着的判据')
+    return
+  }
+
+  const detected = [...ecosystemText.matchAll(/^\s{4}kind:\s*'([^']+)'/gm)].map((m) => m[1])
+  if (detected.length === 0) {
+    ctx.fail('可识别语言清单读不出来（`ECOSYSTEMS` 的 `kind:` 形状变了）——两张清单的对账从此失效')
+    return
+  }
+
+  const orphans = bootstrap.filter((lang) => lang !== 'docs' && !detected.includes(lang))
+  if (orphans.length > 0) {
+    ctx.fail(`起步骨架支持 ${orphans.join('、')}，但勘察的生态清单里没有对应识别项——生成得出来却认不出来，用户拿到的项目会被判成「无生态」`)
+    return
+  }
+
+  ctx.note(`语言清单：可识别 ${detected.length} 种，能生成起步骨架 ${bootstrap.length} 种（${bootstrap.join('/')}），包含关系成立`)
+}
+
 export async function runContractChecks(ctx) {
   checkEntry(ctx)
   checkLinks(ctx)
@@ -721,4 +761,5 @@ export async function runContractChecks(ctx) {
   checkPushSemantics(ctx)
   checkSingleSources(ctx)
   checkReviewContract(ctx)
+  checkStarterLanguageCoverage(ctx)
 }

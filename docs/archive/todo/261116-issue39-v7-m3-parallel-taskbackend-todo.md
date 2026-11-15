@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: v7 M3 并行调度、TaskBackend、外部图谱/堆叠 PR 与通用初始化
-status: active
+status: done
 created: 2026-11-16
 updated: 2026-11-16
 issue: 39
@@ -9,10 +9,10 @@ pr: null
 branch: feat/v7-m3-parallel-taskbackend
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-16
 task_id: m3-parallel-taskbackend
 planned_at: 7abfbeafed17e3d9ba9ef36b51b9c2c22e908ac0
-related_prd: ../prd/261115-v7-workflow-architecture-prd.md
+related_prd: ../../prd/261115-v7-workflow-architecture-prd.md
 related_spec: ../specs/261116-issue39-v7-m3-parallel-taskbackend-spec.md
 ---
 
@@ -28,7 +28,7 @@ related_spec: ../specs/261116-issue39-v7-m3-parallel-taskbackend-spec.md
 | 任务编号 | `m3-parallel-taskbackend` |
 | 负责人 / 审批 | `FiretrUCK666` / `false` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/specs/261116-issue39-v7-m3-parallel-taskbackend-spec.md` 及对应工作树最新提交。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与 `docs/archive/specs/261116-issue39-v7-m3-parallel-taskbackend-spec.md` 及对应工作树最新提交。
 
 ## 任务范围与验证基准
 

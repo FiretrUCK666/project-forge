@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: v7 M3 并行调度、TaskBackend、外部图谱/堆叠 PR 与通用初始化
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-16
 updated: 2026-11-16
@@ -10,9 +10,9 @@ pr: null
 branch: feat/v7-m3-parallel-taskbackend
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=independent-plan-critic-r2, round=2, sha=306f6ce8d9da, summary=Resolved all 8 MUST-FIXes: <=800L splits, no-remote template/preflight/I9 parity, neutral CI & vendor exclusion, --bootstrap-empty & fixture sync, 30KB I24 guard, sync range-diff in review-pack/locks, merge-queue workflow-policy & pre-merge gates, unified 13-method TaskBackend)"
-related_prd: ../prd/261115-v7-workflow-architecture-prd.md
+related_prd: ../../prd/261115-v7-workflow-architecture-prd.md
 related_todo: ../todo/261116-issue39-v7-m3-parallel-taskbackend-todo.md
 high_risk_paths: [kit/, templates/, AGENTS.md, scripts/lib/]
 ---

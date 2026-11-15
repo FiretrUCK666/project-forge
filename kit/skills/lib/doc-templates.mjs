@@ -43,10 +43,24 @@ export function displayWidth(str) {
 
 const MERMAID_HTML_TAG_RE = /<\/?(?:br|p|div|span|b|i|strong|em|small|code|sub|sup|ul|ol|li|font|table|tr|td|th|hr)\b[^>]*>/i
 
+function stripOuterDoubleQuotes(s) {
+  const t = String(s ?? '').trim()
+  return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1).trim() : t
+}
+
+function detectMermaidDiagramType(trimmed) {
+  if (/^(?:flowchart|graph)\b/i.test(trimmed)) return 'flowchart'
+  if (/^sequenceDiagram\b/i.test(trimmed)) return 'sequence'
+  if (/^stateDiagram(?:-v2)?\b/i.test(trimmed)) return 'state'
+  if (/^erDiagram\b/i.test(trimmed)) return 'er'
+  if (/^(?:classDiagram|pie|gantt|journey|gitGraph|mindmap|timeline|xychart-beta)\b/i.test(trimmed)) return 'other'
+  return null
+}
+
 /**
  * 校验 Markdown 内全部 `mermaid` 图表防截断规范：
- *   - 矩形节点与分组标题单行 <= 16 单位；
- *   - 菱形判断节点与边标签单行 <= 12 单位；
+ *   - 矩形节点、分组标题、参与者与实体单行 <= 16 单位；
+ *   - 菱形判断节点、边标签、时序消息与注释单行 <= 12 单位；
  *   - 禁止在节点/标签内使用 HTML 标签（如 `<br/>`）。
  */
 export function checkMermaidLabelWidth(text) {
@@ -55,9 +69,11 @@ export function checkMermaidLabelWidth(text) {
   let inMermaid = false
   let blockIndex = 0
   let fenceLen = 0
+  let diagramType = 'unknown'
+  let inErEntityBlock = false
 
   const inspectLabel = ({ label, kind, maxWidth, lineNo }) => {
-    const raw = String(label ?? '').trim()
+    const raw = stripOuterDoubleQuotes(label)
     if (!raw) return
     if (MERMAID_HTML_TAG_RE.test(raw)) {
       violations.push({
@@ -89,18 +105,112 @@ export function checkMermaidLabelWidth(text) {
         inMermaid = true
         fenceLen = fenceOpen[1].length
         blockIndex += 1
+        diagramType = 'unknown'
+        inErEntityBlock = false
       }
       continue
     }
     if (/^(`{3,}|~{3,})\s*$/.test(trimmed) && trimmed.length >= fenceLen) {
       inMermaid = false
+      inErEntityBlock = false
       continue
     }
-    if (!trimmed || trimmed.startsWith('%%') || /^(?:flowchart|graph|sequenceDiagram|stateDiagram|classDiagram|erDiagram|style|classDef|class|linkStyle|click|direction|end)\b/i.test(trimmed)) {
+    if (!trimmed || trimmed.startsWith('%%')) continue
+
+    if (diagramType === 'unknown') {
+      const detected = detectMermaidDiagramType(trimmed)
+      if (detected) {
+        diagramType = detected
+        continue
+      }
+      diagramType = 'flowchart'
+    } else if (detectMermaidDiagramType(trimmed)) {
+      continue
+    }
+
+    if (/^(?:style|classDef|class|linkStyle|click|direction|end|autonumber|activate|deactivate|destroy|create)\b/i.test(trimmed)) {
       continue
     }
 
     const lineNo = i + 1
+    if (diagramType === 'other') continue
+
+    if (diagramType === 'sequence') {
+      const partAs = /^\s*(?:participant|actor)\s+(.+?)\s+as\s+(.+)$/i.exec(line)
+      if (partAs) {
+        inspectLabel({ label: partAs[2], kind: 'participant', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        continue
+      }
+      const partBare = /^\s*(?:participant|actor)\s+(.+)$/i.exec(line)
+      if (partBare) {
+        inspectLabel({ label: partBare[1], kind: 'participant', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        continue
+      }
+      const blk = /^\s*(?:loop|alt|else|opt|par|and|critical|option|break)\s+(.+)$/i.exec(line)
+      if (blk) {
+        inspectLabel({ label: blk[1], kind: 'subgraph', maxWidth: MERMAID_LIMITS.subgraphMaxWidth, lineNo })
+        continue
+      }
+      const note = /^\s*Note\s+(?:left\s+of|right\s+of|over)\s+[^:\n]+:\s*(.+)$/i.exec(line)
+      if (note) {
+        inspectLabel({ label: note[1], kind: 'edge', maxWidth: MERMAID_LIMITS.edgeMaxWidth, lineNo })
+        continue
+      }
+      const msg = /^[^:\n]*?(?:<<?--?>>?|--?[x)]|->?|->>|-->>)\s*[+-]?[^:\n]*:\s*(.+)$/.exec(line)
+      if (msg) {
+        inspectLabel({ label: msg[1], kind: 'edge', maxWidth: MERMAID_LIMITS.edgeMaxWidth, lineNo })
+      }
+      continue
+    }
+
+    if (diagramType === 'state') {
+      const stAlias = /^\s*state\s+"([^"]*)"\s+as\s+[A-Za-z0-9_.-]+/i.exec(line)
+      if (stAlias) {
+        inspectLabel({ label: stAlias[1], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        continue
+      }
+      const stNote = /^\s*note\s+(?:left\s+of|right\s+of)\s+[^:\n]+:\s*(.+)$/i.exec(line)
+      if (stNote) {
+        inspectLabel({ label: stNote[1], kind: 'edge', maxWidth: MERMAID_LIMITS.edgeMaxWidth, lineNo })
+        continue
+      }
+      const stEdge = /^[^:\n]*?-->[^:\n]*:\s*(.+)$/.exec(line)
+      if (stEdge) {
+        inspectLabel({ label: stEdge[1], kind: 'edge', maxWidth: MERMAID_LIMITS.edgeMaxWidth, lineNo })
+        continue
+      }
+      if (!/-->/.test(trimmed)) {
+        const stDesc = /^\s*[A-Za-z0-9_.*[\]-]+\s*:\s*(.+)$/.exec(line)
+        if (stDesc) inspectLabel({ label: stDesc[1], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+      }
+      continue
+    }
+
+    if (diagramType === 'er') {
+      if (inErEntityBlock) {
+        if (/^\s*\}/.test(trimmed)) inErEntityBlock = false
+        continue
+      }
+      const erBlock = /^\s*("[^"]*"|[A-Za-z0-9_.-]+)(?:\s*\[\s*"?([^"\]\n]+)"?\s*\])?\s*\{/.exec(line)
+      if (erBlock) {
+        inspectLabel({ label: erBlock[2] ?? erBlock[1], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        if (!/\}\s*$/.test(trimmed)) inErEntityBlock = true
+        continue
+      }
+      const erRel = /^\s*("[^"]*"|[A-Za-z0-9_.-]+)(?:\s*\[\s*"?([^"\]\n]+)"?\s*\])?\s+[|o}{1]+(?:--|\.\.)[|o}{1]+\s+("[^"]*"|[A-Za-z0-9_.-]+)(?:\s*\[\s*"?([^"\]\n]+)"?\s*\])?(?:\s*:\s*(.+))?\s*$/.exec(line)
+      if (erRel) {
+        inspectLabel({ label: erRel[2] ?? erRel[1], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        inspectLabel({ label: erRel[4] ?? erRel[3], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+        if (erRel[5]) inspectLabel({ label: erRel[5], kind: 'edge', maxWidth: MERMAID_LIMITS.edgeMaxWidth, lineNo })
+        continue
+      }
+      const erAlias = /^\s*[A-Za-z0-9_.-]+\s*\[\s*"?([^"\]\n]+)"?\s*\]\s*$/.exec(line)
+      if (erAlias) {
+        inspectLabel({ label: erAlias[1], kind: 'node', maxWidth: MERMAID_LIMITS.rectMaxWidth, lineNo })
+      }
+      continue
+    }
+
     let working = line
 
     const sg = /^\s*subgraph\s+(?:[A-Za-z0-9_.-]+\s*\[\s*"([^"]*)"\s*\]|[A-Za-z0-9_.-]+\s*\[\s*([^\]]*)\s*\]|"?([^"\n]+?)"?)\s*$/.exec(working)

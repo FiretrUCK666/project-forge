@@ -365,9 +365,12 @@ const PLUGIN_HINTS = [
     const m = readJsonSafe(join(root, 'manifest.json'))
     return Boolean(m && typeof m.id === 'string' && typeof m.minAppVersion === 'string')
   } },
-  { kind: 'dsh-plugin', marker: 'package.json', test: (root) => {
+  { kind: 'config-patch-plugin', marker: 'package.json', test: (root) => {
     const p = readJsonSafe(join(root, 'package.json'))
-    return Boolean(p?.dsh || p?.dependencies?.cordis || p?.peerDependencies?.cordis)
+    return Boolean(
+      p?.configPatch || p?.patchManifest || p?.pluginConfig
+      || existsSync(join(root, 'plugin.patch.yml')) || existsSync(join(root, 'plugin.patch.yaml')),
+    )
   } },
 ]
 

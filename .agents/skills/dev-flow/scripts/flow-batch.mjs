@@ -16,7 +16,7 @@ import {
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
-import { evaluateNextState } from '../../lib/workflow-policy.mjs'
+import { evaluateNextState, hasRepoCiWorkflow } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { assertPreMergeGates } from './flow-merge.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
@@ -179,6 +179,7 @@ async function handleMergeQueue(opts, roots) {
     const topology = parseRemotesTopology(remoteRes.stdout)
     const declaredRepo = detectDeclaredRepo(roots.mainRoot)
     const defaultBranch = await resolveDefaultBranch(roots.mainRoot)
+    let sharedGhProbe = opts._ghProbe ?? null
     const results = []
     let stoppedWithFailure = false
     let exitCode = 0
@@ -189,14 +190,16 @@ async function handleMergeQueue(opts, roots) {
       if (!ledger) throw new Error(`合并队列找不到任务账本：${taskId}`)
 
       const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
-      const ghProbe = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull && (opts._ghProbe || opts._ghClient)
-        ? (opts._ghProbe ?? null)
-        : null
+      const canUseGhApi = Boolean(ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull)
+      const needsOnlineRemoteMerge = Boolean(canUseGhApi && ledger.prNumber && !opts['trial-local'])
+      if (needsOnlineRemoteMerge && !sharedGhProbe && !opts._ghClient) {
+        sharedGhProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+      }
       const backend = createTaskBackend({
         role: ledger.role,
         providerId: ledger.providerId,
         targetRepo: originFull,
-        client: opts._ghClient ?? ghProbe?.client,
+        client: opts._ghClient ?? sharedGhProbe?.client,
         pushRemote,
         mainRoot: roots.mainRoot,
         gitDir: roots.gitDir,
@@ -218,13 +221,40 @@ async function handleMergeQueue(opts, roots) {
         break
       }
 
+      if (needsOnlineRemoteMerge && gate.currentHead) {
+        const checks = await backend.getCommitChecks({ repo: originFull, ref: gate.currentHead })
+        const ciRequired = hasRepoCiWorkflow(gate.implRoot)
+        let ciBlock = null
+        if (checks?.ok) {
+          if (checks.bucket === 'fail' && !opts['human-approved']) {
+            const list = (checks.failed ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
+            ciBlock = { code: 'BLOCKED_CI_FAILED', msg: `BLOCKED_CI_FAILED: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 检查未通过（${list}），禁止带病合并。` }
+          } else if (checks.bucket === 'pending' && !opts['human-approved']) {
+            const list = (checks.pending ?? []).map((c) => `${c.name}[${c.state}]`).join(', ')
+            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 仍在运行或排队（${list}），请等待全部变绿后再执行 merge。` }
+          } else if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
+            ciBlock = { code: 'BLOCKED_CI_PENDING', msg: `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。` }
+          }
+        } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
+          ciBlock = { code: 'BLOCKED_CI_UNVERIFIED', msg: `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${gate.currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。` }
+        }
+        if (ciBlock) {
+          queue.unshift(taskId)
+          process.stderr.write(`${ciBlock.msg}\n`)
+          results.push({ taskId, ok: false, blocked: true, code: ciBlock.code, exitCode: EXIT_POLICY_BLOCK, checks })
+          stoppedWithFailure = true
+          exitCode = EXIT_POLICY_BLOCK
+          break
+        }
+      }
+
       const baseBranch = ledger.baseBranch || defaultBranch || 'main'
       const curBaseRes = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`])
       const currentBaseSha = curBaseRes.ok ? curBaseRes.stdout.trim() : null
       const baseDrifted = Boolean(ledger.baseSha && currentBaseSha && ledger.baseSha !== currentBaseSha)
 
       let mergeRes
-      if (ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && ledger.prNumber && originFull && !opts['trial-local']) {
+      if (needsOnlineRemoteMerge) {
         mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
       } else if (ledger.role === 'generic-git') {
         mergeRes = await backend.mergePr({
@@ -285,7 +315,8 @@ async function handleMergeQueue(opts, roots) {
     else {
       process.stdout.write(`FIFO 合并队列执行完成：处理 ${results.length} 项，剩余队列 ${queue.length} 项。\n`)
       for (const r of results) {
-        process.stdout.write(`- ${r.taskId}: ${r.ok ? `merged (drifted=${r.baseDrifted})` : `rework (${r.queueConflict?.code ?? r.code})`}\n`)
+        const statusLabel = r.ok ? `merged (drifted=${r.baseDrifted})` : (r.queueConflict ? `rework (${r.queueConflict.code})` : `blocked (${r.code})`)
+        process.stdout.write(`- ${r.taskId}: ${statusLabel}\n`)
       }
     }
     return { exitCode, ...out }

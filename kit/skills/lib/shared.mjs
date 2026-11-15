@@ -98,6 +98,7 @@ export {
   GATE_SHELL_OR_SCRIPT_RE,
   GATE_SKIP_RE,
   GATE_WORKFLOW_FILE_RE,
+  isRustLifetimeAt,
   LOCKFILE_NAMES,
   matchGlob,
   PACKAGE_LOCKFILES,
@@ -222,3 +223,12 @@ export {
   checkUntrustedPrGate,
   resolveExternalCollaborationGraph,
 } from './task-graph.mjs'
+
+export { checkTddSyncParity } from './tdd-parity.mjs'
+
+export {
+  appendGovernSignal,
+  inferSignalModule,
+  readSignalsJsonl,
+  resolveGovernStateDir,
+} from './signals.mjs'

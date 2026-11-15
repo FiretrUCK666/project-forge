@@ -19,6 +19,7 @@ import {
   parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { appendGovernSignal } from '../../lib/signals.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
@@ -508,6 +509,22 @@ export async function handleRecord(opts, roots) {
   }
 
   const tPath = writeTaskLedger(mainRoot, updated)
+  await appendGovernSignal({
+    mainRoot,
+    gitDir: roots.gitDir,
+    isGit: roots.isGit,
+    category: 'review',
+    module: mustFixList[0]?.file ? undefined : 'review',
+    pattern: stopLoss ? 'review.stop-loss' : (verdict === 'pass' ? 'review.pass' : 'review.changes'),
+    severity: stopLoss ? 'high' : (verdict === 'pass' ? 'info' : 'medium'),
+    source: 'review-record',
+    file: mustFixList[0]?.file ?? '',
+    message: `review round ${round} verdict=${verdict}${stopLoss ? ' [STOP_LOSS]' : ''} (mustFix=${mustFixList.length}, rebutted=${rebuttedItems.length})`,
+    taskId,
+    round,
+    verdict,
+    meta: { dispositions: roundDispositions, dispositionStats, mustFixCount: mustFixList.length },
+  })
   const githubSync = await syncReviewToGitHub({
     mainRoot,
     workTreeRoot,

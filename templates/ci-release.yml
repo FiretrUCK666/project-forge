@@ -199,5 +199,14 @@ jobs:
           fi
           echo "回读一致：$TAG 的正文与 $NOTES 逐字相同。"
 
-      # TODO(3)：若分发通道要求在发布页挂产物附件（如独立构建包或插件三件套），在回读一致后追加上传步骤，
-      # 并将对应产物加入 .gitignore（禁止与库内分发混用）。
+      # TODO(3)：若分发通道要求在发布页挂产物附件（如独立构建包或插件三件套），在回读一致后追加上传与回读校验步骤，
+      # 并将对应产物加入 .gitignore（禁止与库内分发混用）：
+      # - name: 上传并回读校验发布附件
+      #   env:
+      #     GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+      #   run: |
+      #     gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+      #     gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)\t\(.size)"'
+      #     gh release download "$TAG" -p "$ASSET" --repo "$GITHUB_REPOSITORY" -O "$RUNNER_TEMP/readback-$ASSET"
+      #     # 按格式做完整性校验与字节/SHA256 比对（示例：zip 用 unzip -tq / tar 用 tar -tzf），校验后删除临时文件：
+      #     # unzip -tq "$RUNNER_TEMP/readback-$ASSET" && cmp -s "$ASSET" "$RUNNER_TEMP/readback-$ASSET" && rm -f "$RUNNER_TEMP/readback-$ASSET"

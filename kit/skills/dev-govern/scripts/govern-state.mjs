@@ -6,18 +6,20 @@
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import {
-  canonicalPath, ensureWorktreesIgnored, gitDiffNameStatusZ,
+  ensureWorktreesIgnored, gitDiffNameStatusZ,
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
-  sha256Text, writeAtomic, writeJsonAtomic,
+  writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeGitHubEnv } from '../../lib/platform.mjs'
+import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
+
+export { readSignalsJsonl, resolveGovernStateDir }
 
 const SEVERITY_RANK = Object.freeze({ info: 0, low: 1, medium: 2, high: 3, critical: 4 })
 
@@ -27,14 +29,6 @@ export function baselinePath(mainRoot) {
 
 export function loopStatePath(mainRoot) {
   return join(mainRoot, '.worktrees', '.state', 'govern-loop.json')
-}
-
-export function resolveGovernStateDir(mainRoot, gitDir, isGit) {
-  if (isGit) {
-    return join(gitDir ?? join(mainRoot, '.git'), 'project-forge-govern')
-  }
-  const hash = sha256Text(canonicalPath(mainRoot)).slice(0, 12)
-  return join(tmpdir(), 'project-forge-govern', hash)
 }
 
 export function findingFingerprint(f) {
@@ -208,14 +202,6 @@ export async function updateLoopState(mainRoot, gitDir, isGit, findings, writeSt
   return { statePath: posixPath(statePath), state, snapshot }
 }
 
-function inferModuleFromFile(fileRel) {
-  const clean = posixPath(fileRel).replace(/^\.\//, '').trim()
-  if (!clean) return 'repo'
-  const parts = clean.split('/')
-  if (parts.length <= 1) return 'root'
-  return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0]
-}
-
 function normalizePatternFromFindingId(id) {
   const parts = String(id ?? '').split('.')
   if (parts.length >= 2) return `${parts[0]}.${parts[1]}`
@@ -239,22 +225,6 @@ function suggestClusterRootFix(pattern, moduleName) {
     return `Wire missing/empty tests in ${moduleName} into CI workflows and Dev Profile merge-gate/quick-test.`
   }
   return `Promote recurring root cause (${pattern} in ${moduleName}) to static check, Dev Profile script, or smoke-verify command.`
-}
-
-export function readSignalsJsonl(stateDir) {
-  const signalsPath = join(stateDir, 'signals.jsonl')
-  if (!existsSync(signalsPath)) return { signalsPath, events: [] }
-  const text = readTextStrictInfo(signalsPath)?.text ?? ''
-  const events = []
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const obj = JSON.parse(trimmed)
-      if (obj && typeof obj === 'object') events.push(obj)
-    } catch { /* ignore corrupt partial line */ }
-  }
-  return { signalsPath, events }
 }
 
 export function buildClusterReport(signals, findings) {
@@ -298,7 +268,7 @@ export function buildClusterReport(signals, findings) {
 
   for (const ev of signals) {
     upsert({
-      module: ev.module || inferModuleFromFile(ev.file),
+      module: ev.module || inferSignalModule(ev.file),
       pattern: ev.pattern || 'manual-signal',
       category: ev.category || 'hygiene',
       sourceKind: 'signal',
@@ -309,7 +279,7 @@ export function buildClusterReport(signals, findings) {
   }
   for (const f of findings) {
     upsert({
-      module: inferModuleFromFile(f.file),
+      module: inferSignalModule(f.file),
       pattern: normalizePatternFromFindingId(f.id),
       category: f.category,
       sourceKind: 'audit',
@@ -332,38 +302,31 @@ export function buildClusterReport(signals, findings) {
   }
 }
 
-export function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
+export async function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
   const message = String(opts.message || opts.note || '').trim()
   const rawPattern = String(opts.pattern || '').trim()
   if (!rawPattern && !message) {
     process.stderr.write('Error: `record` requires --pattern <key> or --message <text>.\n')
     return 2
   }
-  const fileRel = opts.file ? posixPath(opts.file) : ''
-  const moduleName = String(opts.module || '').trim() || inferModuleFromFile(fileRel)
-  const pattern = rawPattern || message.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'signal'
-  const category = String(opts.category || 'hygiene').trim().toLowerCase()
-  const severity = String(opts.severity || 'medium').trim().toLowerCase()
-  const source = String(opts.source || 'manual').trim().toLowerCase()
-
-  const stateDir = resolveGovernStateDir(mainRoot, gitDir, isGit)
-  mkdirSync(stateDir, { recursive: true })
-  const signalsPath = join(stateDir, 'signals.jsonl')
-  const event = {
-    ts: new Date().toISOString(),
-    category,
-    module: moduleName,
-    pattern,
-    severity,
-    source,
-    file: fileRel,
-    message: message || pattern,
-  }
-  appendFileSync(signalsPath, `${JSON.stringify(event)}\n`, 'utf8')
-
+  const res = await appendGovernSignal({
+    mainRoot,
+    gitDir,
+    isGit,
+    category: opts.category || 'hygiene',
+    module: opts.module,
+    pattern: rawPattern,
+    severity: opts.severity || 'medium',
+    source: opts.source || 'manual',
+    file: opts.file,
+    message,
+    taskId: opts.task,
+    silent: false,
+  })
+  const { stateDir, signalsPath, event } = res
   const { events } = readSignalsJsonl(stateDir)
   const clusterReport = buildClusterReport(events, [])
-  const matched = clusterReport.clusters.find((c) => c.key === `${moduleName}::${pattern}`)
+  const matched = clusterReport.clusters.find((c) => c.key === `${event.module}::${event.pattern}`)
   const repeatCount = matched?.count ?? 1
   const payload = {
     status: 'RECORDED',
@@ -373,7 +336,7 @@ export function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
     modulePatternCount: repeatCount,
     ruleSinkCandidate: repeatCount >= 2,
     recommendation: repeatCount >= 2
-      ? `[RULE_SINK_CANDIDATE] Pattern "${pattern}" in "${moduleName}" occurred ${repeatCount} times; sink into static check or Dev Profile.`
+      ? `[RULE_SINK_CANDIDATE] Pattern "${event.pattern}" in "${event.module}" occurred ${repeatCount} times; sink into static check or Dev Profile.`
       : 'Signal recorded in gardening buffer; run `cluster` to identify patterns reaching >= 2 repeats.',
   }
 
@@ -383,7 +346,7 @@ export function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
     process.stdout.write([
       '=== DEV-GOVERN SIGNAL RECORDED ===',
       `Signals File : ${payload.signalsPath}`,
-      `Key          : ${moduleName}::${pattern} (category=${category}, severity=${severity}, count=${repeatCount})`,
+      `Key          : ${event.module}::${event.pattern} (category=${event.category}, severity=${event.severity}, count=${repeatCount})`,
       `Sink Ready?  : ${payload.ruleSinkCandidate}`,
     ].join('\n') + '\n')
     printNextStep([payload.recommendation], { repoRoot: mainRoot })

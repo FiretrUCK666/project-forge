@@ -10,6 +10,13 @@ import { join, posix as pathPosix } from 'node:path'
 
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
 import { hasHumanMergeAuthority } from './profile.mjs'
+import {
+  extractLineCommentInfo,
+  isRustLifetimeAt,
+  stripCodeCommentsLines,
+} from './static-gates-lexer.mjs'
+
+export { extractLineCommentInfo, isRustLifetimeAt, stripCodeCommentsLines }
 
 export const PACKAGE_LOCKFILES = Object.freeze([
   'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
@@ -26,10 +33,10 @@ export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\
 export const GATE_WORKFLOW_FILE_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile)$/i
 export const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|package\.json|Makefile|justfile|Taskfile\.ya?ml)$|\.(?:sh|bash|ps1)$/i
 export const GATE_SKIP_RE = /(?:^|[^\w.])(?:(?:it|test|describe|context|suite)\.(?:skip|only)\s*\(|(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@(?:pytest\.mark\.skip(?:if)?|unittest\.skip|Disabled|Ignore)\b|#\[\s*ignore\b|\bt\.Skip(?:f|Now)?\s*\(|\[(?:Fact|Theory)\s*\([^\)]*\bSkip\s*=)|\bDISABLED_[A-Za-z0-9_]+|\{\s*(?:skip|only)\s*:\s*true\b/
-export const GATE_ASSERTION_RE = /\b(?:assert(?:\.\w+)?|expect|should|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?!|assert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\bassert\s+|\b(?:it|test)\s*\(|@(?:Test|Fact|Theory)\b|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]/i
+export const ASSERTION_RE = /\b(?:[Aa]ssert(?:\.\w+)?|[Ee]xpect|[Ss]hould|pytest\.raises|t\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\b\s*(?:\(|!|\.)|\b[Aa]ssert\s+/
+export const GATE_ASSERTION_RE = ASSERTION_RE
 export const TEST_CASE_RE = /\b(?:it|test|describe|context|suite)(?:\.(?:skip|only|todo))?\s*\(|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|\bdef\s+test_|#\[\s*test\s*\]|\bfunc\s+Test[A-Z]|@(?:Test|ParameterizedTest)\b|\[(?:Fact|Theory)\b/
 export const TEST_SKIP_RE = GATE_SKIP_RE
-export const ASSERTION_RE = GATE_ASSERTION_RE
 export const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-events|actions|pull-requests|checks|deployments|issues)\s*:\s*write\b/i
 export const GATE_SHELL_BYPASS_RE = /(?:^|[\s;|&"'])\|\|\s*true(?:\s|$|["';&|])/
 
@@ -37,12 +44,6 @@ export const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|call
 export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
 export const EXCUSE_TEMP_RE = /\bTEMP\b/
 export const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
-
-const C_FAMILY_NO_HASH_COMMENT_EXTS = new Set([
-  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'cs', 'java', 'kt', 'kts', 'rs', 'go',
-  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'mts', 'cts', 'swift', 'dart', 'php',
-])
-const C_PREPROC_RE = /^#\s*(?:define|include|if|ifdef|ifndef|else|elif|endif|pragma|undef|error|warning|line|region|endregion)\b/
 
 /** 通用路径 glob 匹配（支持 `*`、`**`、`?` 及目录前缀斜杠）。 */
 export function matchGlob(filePath, pattern) {
@@ -78,174 +79,6 @@ export function matchGlob(filePath, pattern) {
   }
   reStr += '$'
   return new RegExp(reStr).test(f)
-}
-
-function isRustLifetimeAt(s, idx, ext) {
-  if (ext && ext !== 'rs') return false
-  const rest = s.slice(idx)
-  if (!/^'(?:_|[A-Za-z][A-Za-z0-9_]*)/.test(rest)) return false
-  const m = /^'([A-Za-z_][A-Za-z0-9_]*)/.exec(rest)
-  if (!m) return false
-  const after = rest[m[0].length]
-  // `'a'` is a char literal; `'a` or `'static` without closing `'` is a Rust lifetime
-  return after !== '\''
-}
-
-/**
- * 多语言词法注释提取器：
- * 修复 Rust 生命周期 `'a`、C/C++ 预处理指令（如 `#define`）与块注释跨行跟踪，
- * 返回 `{ commentText, codeText, nextInBlock, pureSingleLine }`。
- */
-export function extractLineCommentInfo(line, inBlock = false, ext = '') {
-  const s = String(line ?? '')
-  const extLow = String(ext ?? '').toLowerCase().replace(/^\./, '')
-  const allowHashComment = !C_FAMILY_NO_HASH_COMMENT_EXTS.has(extLow)
-  const commentParts = []
-  let codeText = ''
-  let segStart = 0
-  let i = 0
-  let block = inBlock
-  let quote = ''
-  let prevSig = ''
-  let onlyComment = true
-  let pureSingleLine = false
-
-  if (block) {
-    const closeToken = block === 'html' ? '-->' : '*/'
-    const end = s.indexOf(closeToken)
-    if (end === -1) {
-      return { commentText: s.trim(), codeText: '', nextInBlock: block, pureSingleLine: false }
-    }
-    commentParts.push(s.slice(0, end))
-    block = false
-    i = end + closeToken.length
-    segStart = i
-    onlyComment = false
-  }
-
-  while (i < s.length) {
-    const ch = s[i]
-    const next = s[i + 1]
-    if (quote) {
-      onlyComment = false
-      if (ch === '\\') { i += 2; continue }
-      if (ch === quote) quote = ''
-      i += 1
-      continue
-    }
-    if (ch === '\'') {
-      if (isRustLifetimeAt(s, i, extLow)) {
-        onlyComment = false
-        prevSig = '\''
-        i += 1
-        continue
-      }
-      onlyComment = false
-      quote = ch
-      prevSig = ch
-      i += 1
-      continue
-    }
-    if (ch === '"' || ch === '`') {
-      onlyComment = false
-      quote = ch
-      prevSig = ch
-      i += 1
-      continue
-    }
-    if (ch === '/' && next === '/') {
-      codeText += s.slice(segStart, i)
-      segStart = s.length
-      if (!prevSig && s[i + 2] !== '/') pureSingleLine = true
-      commentParts.push(s.slice(i + 2))
-      break
-    }
-    if (ch === '/' && next === '*') {
-      onlyComment = false
-      codeText += s.slice(segStart, i)
-      const end = s.indexOf('*/', i + 2)
-      if (end === -1) {
-        commentParts.push(s.slice(i + 2))
-        block = true
-        segStart = s.length
-        break
-      }
-      commentParts.push(s.slice(i + 2, end))
-      i = end + 2
-      segStart = i
-      continue
-    }
-    if (ch === '<' && s.slice(i, i + 4) === '<!--') {
-      onlyComment = false
-      codeText += s.slice(segStart, i)
-      const end = s.indexOf('-->', i + 4)
-      if (end === -1) {
-        commentParts.push(s.slice(i + 4))
-        block = 'html'
-        segStart = s.length
-        break
-      }
-      commentParts.push(s.slice(i + 4, end))
-      i = end + 3
-      segStart = i
-      continue
-    }
-    if (ch === '/') {
-      const canRegex = !prevSig || '=(:,?[!&|;{}~^+-*'.includes(prevSig)
-        || /\b(?:return|case|throw|typeof|await|yield)$/.test(s.slice(0, i).trimEnd())
-      if (canRegex) {
-        let j = i + 1
-        let inClass = false
-        let closed = false
-        while (j < s.length) {
-          const rc = s[j]
-          if (rc === '\\') { j += 2; continue }
-          if (rc === '[') inClass = true
-          else if (rc === ']' && inClass) inClass = false
-          else if (rc === '/' && !inClass) { closed = true; break }
-          j += 1
-        }
-        if (closed) {
-          onlyComment = false
-          prevSig = '/'
-          i = j + 1
-          continue
-        }
-      }
-    }
-    if (ch === '#' && allowHashComment) {
-      const prevCh = i > 0 ? s[i - 1] : ''
-      const rest = s.slice(i)
-      if ((i === 0 || /\s/.test(prevCh)) && next !== '!' && next !== '[' && !C_PREPROC_RE.test(rest)) {
-        codeText += s.slice(segStart, i)
-        segStart = s.length
-        if (!prevSig && onlyComment) pureSingleLine = true
-        commentParts.push(s.slice(i + 1))
-        break
-      }
-    }
-    if (!/\s/.test(ch)) {
-      prevSig = ch
-      onlyComment = false
-    }
-    i += 1
-  }
-
-  if (segStart < s.length) codeText += s.slice(segStart)
-  return { commentText: commentParts.join(' ').trim(), codeText, nextInBlock: block, pureSingleLine }
-}
-
-/** 剥离源码行内全部注释，保留原始行号映射。 */
-export function stripCodeCommentsLines(text, ext = '') {
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  const out = []
-  let inBlock = false
-  for (const line of lines) {
-    const info = extractLineCommentInfo(line, inBlock, ext)
-    inBlock = info.nextInBlock
-    out.push(info.codeText)
-  }
-  return out
 }
 
 function parseArchRuleItem(rawRule) {
@@ -565,6 +398,86 @@ export function summarizeHunkChanges(fileDiff) {
   return { added, removed, hunks }
 }
 
+const CI_VERIFY_CMD_RE = /\b(?:test|tests|spec|specs|lint|check|typecheck|tsc|eslint|flake8|mypy|ruff|clippy|vet|audit|verify|preflight|fixtures|gap-coverage|bench|compose-agents|equip|review|sync-toc|e2e|pytest|unittest|jest|vitest|mocha|ava|tap|cargo\s+(?:test|check|clippy)|go\s+(?:test|vet)|npm\s+(?:test|run\b)|pnpm\s+(?:test|lint|check|verify|run\b)|yarn\s+(?:test|lint|check|verify|run\b)|dotnet\s+test|mvn\b|mvnw\b|gradle\b|gradlew\b|ctest|meson\s+test|swift\s+test|dart\s+test|mix\s+test|bundle\s+exec\s+(?:rspec|rake)|make\s+(?:test|check|verify|lint)|just\s+(?:test|check|verify|lint)|task\s+(?:test|check|verify|lint)|node\s+(?:--test|\S+\.mjs))\b/i
+const CI_VERIFY_STEP_NAME_RE = /\b(?:test|tests|check|checks|lint|verify|audit|gate|e2e|bench|preflight|门禁|自检|断言|体检|审计|测试|校验)\b/i
+const CI_SHELL_BOILERPLATE_RE = /^(?:echo|printf|mkdir|cd|export|set|if|then|else|elif|fi|for|do|done|exit|return|true|false|rm|cp|mv|cat|\{|\}|#|$)/i
+
+function splitNormalizeCiCommands(rawCmd) {
+  const cleaned = String(rawCmd ?? '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/\|\|\s*\{[\s\S]*$/g, '')
+  const out = []
+  for (const part of cleaned.split(/\s*(?:&&|;)\s*/)) {
+    const norm = part
+      .trim()
+      .replace(/\$\{\{\s*runner\.temp\s*\}\}[/\\]?/gi, '')
+      .replace(/(?:\$RUNNER_TEMP|\$\{RUNNER_TEMP\}|\$TMPDIR|\$\{TMPDIR\})[/\\]?/g, '')
+      .replace(/["']/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (norm && !CI_SHELL_BOILERPLATE_RE.test(norm)) out.push(norm)
+  }
+  return out
+}
+
+function extractCiCommands(rawLines) {
+  const entries = []
+  let runBlockIndent = -1
+  let scriptArrayIndent = -1
+  let curStepIndent = -1
+  let curStepVerifyName = false
+
+  const pushCmd = (raw, namedVerify) => {
+    for (const norm of splitNormalizeCiCommands(raw)) {
+      entries.push({ raw: String(raw).trim(), norm, namedVerify })
+    }
+  }
+
+  for (const rawLine of rawLines) {
+    const { codeText } = extractLineCommentInfo(rawLine, false, 'yml')
+    const trimmed = codeText.trim()
+    if (!trimmed) continue
+    const indent = codeText.length - codeText.trimStart().length
+    if (runBlockIndent >= 0 && indent <= runBlockIndent) runBlockIndent = -1
+    if (scriptArrayIndent >= 0 && indent <= scriptArrayIndent) scriptArrayIndent = -1
+    if (curStepIndent >= 0 && indent < curStepIndent) { curStepIndent = -1; curStepVerifyName = false }
+
+    const nameM = /^-\s*name\s*:\s*(.+)$/i.exec(trimmed)
+    if (nameM) {
+      curStepIndent = indent
+      curStepVerifyName = CI_VERIFY_STEP_NAME_RE.test(nameM[1])
+      continue
+    }
+    if (/^(?:-\s*)?(?:run|script|command)\s*:\s*[|>][-+]?$/i.test(trimmed)) {
+      runBlockIndent = indent
+      continue
+    }
+    const inlineM = /^(?:-\s*)?(?:run|script|command)\s*:\s*(.+)$/i.exec(trimmed)
+    if (inlineM) {
+      pushCmd(inlineM[1], curStepVerifyName)
+      continue
+    }
+    if (/^(?:-\s*)?script\s*:\s*$/i.test(trimmed)) {
+      scriptArrayIndent = indent
+      continue
+    }
+    if (scriptArrayIndent >= 0 && indent > scriptArrayIndent) {
+      const itemM = /^-\s+(.+)$/.exec(trimmed)
+      if (itemM) { pushCmd(itemM[1], curStepVerifyName); continue }
+    }
+    if (runBlockIndent >= 0 && indent > runBlockIndent) {
+      pushCmd(trimmed, curStepVerifyName)
+      continue
+    }
+    // Partial hunk inside an existing `run: |` block (header untouched in diff)
+    if (!/^(?:-\s*)?[A-Za-z0-9_.-]+\s*:/.test(trimmed) && CI_VERIFY_CMD_RE.test(trimmed)) {
+      pushCmd(trimmed, false)
+    }
+  }
+  return entries
+}
+
 /** 统一单条目门禁弱化扫描（兼顾 deterministic 与测试断言减少检测）。 */
 export function detectGateWeakeningInEntry({ file, status, added = [], removed = [], hunks = null }) {
   const hits = []
@@ -650,17 +563,34 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
     }
   }
 
+  if (isWorkflow && removed.length > 0) {
+    const removedVerify = extractCiCommands(removed).filter((c) => CI_VERIFY_CMD_RE.test(c.norm) || c.namedVerify)
+    if (removedVerify.length > 0) {
+      const addedCmdSet = new Set(extractCiCommands(added).map((c) => c.norm))
+      const deletedSteps = removedVerify.filter((c) => !addedCmdSet.has(c.norm))
+      if (deletedSteps.length > 0) {
+        hits.push({
+          type: 'deleted-ci-step',
+          category: 'gate-weakening',
+          severity: 'deterministic',
+          file: rel,
+          reason: `删除 CI 验证步骤命令（${deletedSteps.slice(0, 2).map((d) => d.raw).join('; ')}）`,
+          detail: deletedSteps[0].raw.slice(0, 120),
+          excerpt: deletedSteps.slice(0, 4).map((d) => `- ${d.raw}`),
+        })
+      }
+    }
+  }
+
   if (isTest) {
     const hunkList = Array.isArray(hunks) && hunks.length > 0 ? hunks : [{ added, removed }]
+    const hasAssertOrTest = (l) => {
+      const info = extractLineCommentInfo(l, false, ext)
+      return info.codeText.trim() && (ASSERTION_RE.test(info.codeText) || TEST_CASE_RE.test(info.codeText))
+    }
     for (const hk of hunkList) {
-      const remAsserts = hk.removed.filter((l) => {
-        const info = extractLineCommentInfo(l, false, ext)
-        return info.codeText.trim() && GATE_ASSERTION_RE.test(info.codeText)
-      })
-      const addAsserts = hk.added.filter((l) => {
-        const info = extractLineCommentInfo(l, false, ext)
-        return info.codeText.trim() && GATE_ASSERTION_RE.test(info.codeText)
-      })
+      const remAsserts = hk.removed.filter(hasAssertOrTest)
+      const addAsserts = hk.added.filter(hasAssertOrTest)
       if (remAsserts.length > addAsserts.length) {
         hits.push({
           type: 'deleted-assertion',

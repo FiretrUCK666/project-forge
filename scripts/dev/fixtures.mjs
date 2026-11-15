@@ -20,6 +20,7 @@ import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
 import { registerM2Cases } from './fixtures-m2.mjs'
 import { registerM3Cases } from './fixtures-m3.mjs'
+import { registerM4Cases } from './fixtures-m4.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
@@ -30,6 +31,7 @@ const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
   ['m2', registerM2Cases],
   ['m3', registerM3Cases],
+  ['m4', registerM4Cases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],
   ['equip', registerEquipCases],
@@ -104,6 +106,7 @@ const HEAVY_CASE_HINTS = [
   'flow.mjs + doc-plan.mjs',
   'M3-C1a',
   '远端 CI 合并硬门禁',
+  'M4-C3',
   'equip.mjs + survey.mjs',
   'M2 C2',
   'review-pack.mjs + govern-audit.mjs',

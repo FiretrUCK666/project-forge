@@ -620,6 +620,14 @@ function checkSingleSources({ ROOT, readText, fail, note }) {
     for (const rule of mustHave) {
       if (!rule.re.test(text)) fail(`${pair.file}（${pair.label}）缺${rule.what}——两份工作流检查的东西不一样，CI 会放过模板能拦下的那种说明`)
     }
+    if (pair.file === 'templates/ci-release.yml') {
+      if (!/gh release upload/.test(text) || !/gh release view/.test(text) || !/gh release download/.test(text) || !/(?:unzip -tq|tar -tzf)/.test(text)) {
+        fail('templates/ci-release.yml TODO(3) 缺少通用附件上传/回读/归档校验指引')
+      }
+      if (/scripts\/zip\.mjs/.test(text)) fail('templates/ci-release.yml 不得引用本仓独有的 scripts/zip.mjs')
+    } else if (!/gh release download[^\n]*-p/.test(text) || !/readZip/.test(text) || !/sha256/.test(text)) {
+      fail('.github/workflows/release.yml 缺少发布附件回读校验（gh release download + SHA256 + readZip CRC32）')
+    }
   }
 
   for (const c of [

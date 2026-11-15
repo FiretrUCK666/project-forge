@@ -21,17 +21,21 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  # 真正干活的那一组。**它的名字会带上矩阵后缀**（`gates (18)`、`gates (22)`），
+  # 真正干活的那一组。**它的名字会带上矩阵后缀**（如 `gates (ubuntu-latest, 18)`），
   # 所以它不能是分支保护里那个必需检查——见下面 `check` 那个 job 的说明。
   gates:
-    runs-on: ubuntu-latest
-    # **跑两个版本，不只是最新的那个。** README 承诺「在 Node 18 上验证通过」，
-    # 而只跑 22 时那句话没有任何东西在支撑它——真到 18 上跑不起来也不会有人知道，
-    # 直到用户报「装完跑不动」。上界跑最新 LTS，下界跑承诺的那个版本。
+    runs-on: ${{ matrix.os }}
+    # **跑三平台与双 Node 版本**（Node 18 下界与 Node 22 LTS，覆盖 Windows / macOS / Linux），
+    # 防止路径、行尾、PowerShell/Bash 差异或下界 API 兼容在用户机器上才暴露。
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         node: ['18', '22']
     steps:
       - name: 检出
@@ -60,6 +64,15 @@ jobs:
       - name: 行为断言（造临时项目实跑，正反双向）
         run: node scripts/dev/fixtures.mjs
 
+      - name: 核心命令与快照性能基准
+        run: node scripts/dev/bench.mjs
+
+      - name: 真包解压 E2E 沙盒全链路实证
+        run: node scripts/dev/e2e-zip-harness.mjs
+
+      - name: 故障注入门禁防空转复验
+        run: node scripts/dev/verify-injections.mjs --jobs 4
+
       # 这个仓库是这套规范的第一个用户：模板改了、自己那份没跟上时，这一条会红。
       - name: 契约自举（标记成对 / 无未填占位 / 该有的节都在）
         run: node scripts/compose-agents.mjs . --check
@@ -74,8 +87,8 @@ jobs:
       # 声明与实际是否一致，最终得由产出物自己回答。
       - name: 用户包内容（真跑 git archive）
         run: |
-          git archive --format=tar HEAD | tar -t > package-list.txt
-          node scripts/dev/preflight.mjs --package package-list.txt
+          git archive --format=tar HEAD | tar -t > "${{ runner.temp }}/package-list.txt"
+          node scripts/dev/preflight.mjs --package "${{ runner.temp }}/package-list.txt"
 
       # 这个仓库自己也过一遍交付体检。它是**工具的使用者**，不是旁观者。
       #
@@ -94,10 +107,10 @@ jobs:
   # ── 分支保护要的那个检查 ─────────────────────────────────────────────
   #
   # 分支保护里写的是**检查名 `check`**，而矩阵里每个 job 报上来的名字都带后缀
-  # （`gates (18)`、`gates (22)`）。名字对不上，那个「必需检查」就永远不会出现，
+  # （`gates (ubuntu-latest, 18)` 等）。名字对不上，那个「必需检查」就永远不会出现，
   # 提案会一直停在 `BLOCKED` ——而它看起来像「还在跑」，不像「永远跑不完」。
   #
-  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面两队都结束。
+  # 解法是让一个**不带矩阵**的 job 顶着这个名字，它只做一件事：等上面全部队列结束。
   # 必须带 `if: always()` 并显式校验 `needs.gates.result == 'success'`；否则上游一旦失败，
   # 汇总 job 会被标成 `skipped`，而 GitHub 分支保护把 `skipped` 当成放行（假绿）。
   check:
@@ -105,10 +118,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: 两个版本的门禁都过了
+      - name: 全部平台与节点版本的门禁都过了
         run: |
           if [ "${{ needs.gates.result }}" != "success" ]; then
             echo "::error::gates 未通过（result=${{ needs.gates.result }}），拒绝假绿放行。"
             exit 1
           fi
-          echo "gates 在 Node 18 与 22 上都已经通过。"
+          echo "gates 在 Ubuntu/Windows/macOS 与 Node 18/22 上都已经通过。"

@@ -309,12 +309,12 @@ cases.push(['围栏里的同名标题不算「这一节已经有了」', async (
 
     await runNode('compose-agents.mjs', [dir])
     const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    const real = (after.match(/^## 高风险路径/mg) ?? []).length
+    const real = (after.match(/^## 高风险路径（/mg) ?? []).length
     if (real === 0) return '围栏里的同名标题被当成了「已有」，该补的节永远补不上'
 
     // 反面：再跑一遍不许插第二份。
     await runNode('compose-agents.mjs', [dir])
-    const twice = (readFileSync(join(dir, 'AGENTS.md'), 'utf8').match(/^## 高风险路径/mg) ?? []).length
+    const twice = (readFileSync(join(dir, 'AGENTS.md'), 'utf8').match(/^## 高风险路径（/mg) ?? []).length
     if (twice > 1) return `同一节被插了两份（${twice} 份）`
     return true
   } finally { rmTree(dir) }

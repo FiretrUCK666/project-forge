@@ -31,6 +31,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     // 1. smoke --target 缺参 / 元字符阻断 / 正常替换
     const s1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-w2', '--case', '1', '--slug', 'w2-gate', '--json'], { cwd: dir })
     if (s1.status !== 0) return `start t-w2 失败：${s1.stderr}`
+    const implW2 = join(dir, JSON.parse(s1.stdout).worktreePath)
 
     const missTarget = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--mode', 'smoke'], { cwd: dir })
     if (missTarget.status === 0 || !/MISSING_TARGET_ARG/.test(missTarget.stderr)) {
@@ -44,19 +45,20 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     if (okSmoke.status !== 0) return `smoke --target src/ok.mjs 失败：${okSmoke.stderr}`
     if (!JSON.parse(okSmoke.stdout).cmd.includes('src/ok.mjs')) return `smoke 未替换 {target}：${okSmoke.stdout}`
 
-    // 2. 删减测试断言（门禁弱化）-> verify 后 merge 必须 exit 4 (BLOCKED_GATE_WEAKENING)
-    writeFileSync(join(dir, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\n')
-    gitSync(dir, ['add', '-A'])
-    gitSync(dir, ['commit', '-qm', 'weaken test'])
+    // 2. 删减测试断言（门禁弱化）-> gate verify + 独立审查后 merge 必须 exit 4 (BLOCKED_GATE_WEAKENING)
+    writeFileSync(join(implW2, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\n')
+    gitSync(implW2, ['add', '-A'])
+    gitSync(implW2, ['commit', '-qm', 'weaken test'])
 
-    const vWeak = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--cmd', 'node -e "process.exit(0)"'], { cwd: dir })
+    const vWeak = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2', '--mode', 'gate'], { cwd: implW2 })
     if (vWeak.status !== 0) return `verify 失败：${vWeak.stderr}`
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-w2', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-w2'], { cwd: dir })
 
     const mGate = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2', '--json'], { cwd: dir })
     if (mGate.status !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.status} out=${mGate.stdout} err=${mGate.stderr}`
     if (JSON.parse(mGate.stdout).code !== 'BLOCKED_GATE_WEAKENING') return `缺少 BLOCKED_GATE_WEAKENING：${mGate.stdout}`
 
-    // 3. 人工豁免 --human-approved 放行并入 main
+    // 3. 人工豁免 --human-approved 经临时 --detach 试合并入 main
     const mApproved = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2', '--human-approved', '--json'], { cwd: dir })
     if (mApproved.status !== 0 || JSON.parse(mApproved.stdout).status !== 'merged') {
       return `--human-approved merge 失败：exit=${mApproved.status} out=${mApproved.stdout} err=${mApproved.stderr}`
@@ -65,10 +67,13 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     // 4. 反面证伪：新增测试断言（非弱化）无 --human-approved 直接合并放行
     const s2 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-w2-clean', '--case', '1', '--slug', 'w2-clean', '--json'], { cwd: dir })
     if (s2.status !== 0) return `start t-w2-clean 失败：${s2.stderr}`
-    writeFileSync(join(dir, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
-    gitSync(dir, ['add', '-A'])
-    gitSync(dir, ['commit', '-qm', 'add assertion'])
-    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2-clean', '--cmd', 'node -e "process.exit(0)"'], { cwd: dir })
+    const implClean = join(dir, JSON.parse(s2.stdout).worktreePath)
+    writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
+    gitSync(implClean, ['add', '-A'])
+    gitSync(implClean, ['commit', '-qm', 'add assertion'])
+    const vClean = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-w2-clean', '--mode', 'full'], { cwd: implClean })
+    if (vClean.status !== 0) return `clean verify 失败：${vClean.stderr}`
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-w2-clean', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-w2'], { cwd: dir })
     const mClean = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-w2-clean', '--json'], { cwd: dir })
     if (mClean.status !== 0) return `正常增量测试被 merge 误杀为门禁弱化：exit=${mClean.status} out=${mClean.stdout} err=${mClean.stderr}`
     return true
@@ -191,7 +196,10 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       if (!lastPrCom.includes(kw)) return `PR 评论缺关键字段 ${kw}：\n${lastPrCom}`
     }
 
-    // 离线/无凭据 CLI 调用绝不阻塞（exit 0）
+    // 离线/无凭据 CLI 调用绝不阻塞（exit 0；需提交新 HEAD 后再触发 Round 2 复审）
+    writeFileSync(join(implAbs, 'src/app.mjs'), 'export const gw = 2\n')
+    gitSync(implAbs, ['add', '-A'])
+    gitSync(implAbs, ['commit', '-qm', 'fix: gw null guard'])
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--json',
     ], { cwd: dir })
@@ -283,7 +291,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['finalize', '--task', 't-t2'], { cwd: implAbs })
     gitSync(implAbs, ['add', '-A'])
     gitSync(implAbs, ['commit', '-qm', 'docs: archive'])
-    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-t2'], { cwd: implAbs })
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-t2', '--mode', 'gate'], { cwd: implAbs })
     const sub = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 't-t2', '--json'], { cwd: implAbs })
     if (sub.status !== 0) return `Tier 2 submit 失败：${sub.stderr}`
     const subJson = JSON.parse(sub.stdout)
@@ -302,18 +310,22 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 3\n')
     gitSync(implAbs, ['add', '-A'])
     gitSync(implAbs, ['commit', '-qm', 'feat: v3'])
-    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-t2'], { cwd: implAbs })
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-t2', '--mode', 'gate'], { cwd: implAbs })
     const mStaleHead = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-t2'], { cwd: dir })
     if (mStaleHead.status === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
 
-    // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；触发 stop-loss 后可 override 解锁
-    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-t2', '--round', '2', '--verdict', 'changes', '--must-fix', 'C1: bug', '--reviewer-id', 'rev-a'], { cwd: dir })
+    // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；再提交新 HEAD 触发 Round 3 stop-loss 后 override 解锁
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-t2', '--round', '2', '--verdict', 'changes', '--must-fix', 'C1: src/app.mjs:1 bug', '--reviewer-id', 'rev-a'], { cwd: dir })
     const t2AfterR2 = JSON.parse(readFileSync(join(dir, '.worktrees/.state/tasks/t-t2.json'), 'utf8'))
     if (t2AfterR2.reviewPassedHead !== null) return `verdict=changes 未清空 reviewPassedHead：${t2AfterR2.reviewPassedHead}`
     const mBlocked = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-t2'], { cwd: dir })
     if (mBlocked.status === 0) return 'verdict=changes 后 merge 竟然放行了'
 
-    const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-t2', '--round', '3', '--verdict', 'changes', '--must-fix', 'C1: bug', '--reviewer-id', 'rev-a'], { cwd: dir })
+    writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
+    gitSync(implAbs, ['add', '-A'])
+    gitSync(implAbs, ['commit', '-qm', 'feat: v4'])
+    await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-t2', '--mode', 'gate'], { cwd: implAbs })
+    const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-t2', '--round', '3', '--verdict', 'changes', '--must-fix', 'C1: src/app.mjs:1 bug', '--reviewer-id', 'rev-a'], { cwd: dir })
     if (r3Stop.status !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop.status}`
     const ov = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['override', '--task', 't-t2', '--human-approved', '--reason', 'human verified'], { cwd: dir })
     if (ov.status !== 0) return `override 失败：${ov.stderr}`
@@ -333,8 +345,9 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
   })
   gitInit(ciDir, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://github.com/acme/ci-demo.git' })
   try {
-    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'ci-t', '--case', '2', '--slug', 'ci-t', '--clone-choice', 'standalone'], { cwd: ciDir })
+    const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'ci-t', '--case', '2', '--slug', 'ci-t', '--clone-choice', 'standalone', '--json'], { cwd: ciDir })
     if (st.status !== 0) return `ciDir start 失败：${st.stderr}`
+    const ciImpl = join(ciDir, JSON.parse(st.stdout).worktreePath)
     const { readTaskLedger, writeTaskLedger, resolveRepoRoots: resRoots, summarizeCommitChecks } = await import('../../kit/skills/lib/shared.mjs')
     const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
     let mergeCalls = 0
@@ -348,28 +361,28 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
         async removeLabel() { return { ok: true } },
       },
     })
-    const prepHead = async () => {
-      const ver = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'ci-t'], { cwd: ciDir })
+    const prepHead = async (mode = 'quick') => {
+      const ver = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'ci-t', '--mode', mode], { cwd: ciImpl })
       if (ver.status !== 0) throw new Error(`verify 失败：${ver.stderr}`)
-      const curSha = gitSync(ciDir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      const curSha = gitSync(ciImpl, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
       const rec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 'ci-t', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-ci'], { cwd: ciDir })
       if (rec.status !== 0) throw new Error(`record 失败：${rec.stderr}`)
       const led = readTaskLedger(ciDir, 'ci-t')
       writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })
     }
-    writeFileSync(join(ciDir, 'src/app.mjs'), 'export const c = 2\n')
-    gitSync(ciDir, ['add', '-A'])
-    gitSync(ciDir, ['commit', '-qm', 'feat: c2'])
-    await prepHead()
+    writeFileSync(join(ciImpl, 'src/app.mjs'), 'export const c = 2\n')
+    gitSync(ciImpl, ['add', '-A'])
+    gitSync(ciImpl, ['commit', '-qm', 'feat: c2'])
+    await prepHead('quick')
     const roots = await resRoots(ciDir)
     const rNoWf = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([], [])) }, roots)
     if (rNoWf.exitCode !== 0 || mergeCalls !== 1) return `无检查工作流时 bucket=none 未放行合并：code=${rNoWf.exitCode}, calls=${mergeCalls}`
 
-    mkdirSync(join(ciDir, '.github/workflows'), { recursive: true })
-    writeFileSync(join(ciDir, '.github/workflows/check.yml'), 'name: check\non:\n  pull_request:\njobs:\n  check:\n    runs-on: ubuntu-latest\n')
-    gitSync(ciDir, ['add', '-A'])
-    gitSync(ciDir, ['commit', '-qm', 'ci: add check workflow'])
-    await prepHead()
+    mkdirSync(join(ciImpl, '.github/workflows'), { recursive: true })
+    writeFileSync(join(ciImpl, '.github/workflows/check.yml'), 'name: check\non:\n  pull_request:\njobs:\n  check:\n    runs-on: ubuntu-latest\n')
+    gitSync(ciImpl, ['add', '-A'])
+    gitSync(ciImpl, ['commit', '-qm', 'ci: add check workflow'])
+    await prepHead('gate')
     const rPend = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'in_progress', conclusion: null }], [])) }, roots)
     const rFail = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'completed', conclusion: 'failure' }, { id: 2, name: 'check', status: 'completed', conclusion: 'skipped' }], [])) }, roots)
     const rNone = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([], [])) }, roots)
@@ -541,10 +554,11 @@ cases.push(['五套技能全场景联通：dev-govern 联动 explore/plan/flow �
         async postComment(p) { postedComments.push(p); return { ok: true, id: postedComments.length, verifiedReadback: true } },
       }
       const subRes = await handleSubmit({ task: 'note-case', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, await resRoots(urlDir))
-      const archivedSpecRel = spRel.replace(/^docs\/specs\//, 'docs/archive/specs/')
-      const archivedSpecTxt = readFileSync(join(implNote, archivedSpecRel), 'utf8')
-      if (subRes.exitCode !== 0 || !/^pr:\s*99\b/m.test(archivedSpecTxt) || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev'))) {
-        return `handleSubmit archived pr 回填或首提 PR 评论失败：code=${subRes.exitCode}, spec=${archivedSpecTxt.slice(0, 260)}`
+      const { readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+      const noteLedger = readTaskLedger(urlDir, 'note-case')
+      const noteDirtyAfterPush = gitSync(implNote, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()
+      if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== '' || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev'))) {
+        return `handleSubmit 零脏文件/账本 prNumber 或首提 PR 评论失败：code=${subRes.exitCode}, pr=${noteLedger?.prNumber}, dirty="${noteDirtyAfterPush}"`
       }
     } finally { rmTree(bareRem) }
 

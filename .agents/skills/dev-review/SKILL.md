@@ -17,7 +17,7 @@ description: |
 
 ```sh
 # 模式 A：flow 独立审查子代理 / 外部 PR（支持自动推断 --task 与下一 --round，Tier 2 自动同步 review-<id> 并挂载依赖）
-node .agents/skills/dev-review/scripts/review-pack.mjs --task <id|auto> [--round <1|2|3>] [--include-diff]
+node .agents/skills/dev-review/scripts/review-pack.mjs --task <id|auto> [--round <1|2|3>] [--include-diff] [--reset-review-slot]
 node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> [--untrusted-scan] [--worktree <path>]
 
 # 模式 B：开发者本地日常预审（支持位置目录 / --dir；--local 与 --task/--pr/--base 互斥）
@@ -78,17 +78,16 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 2. **上下文隔离**：只读冻结验收标准 `C1..Cn`、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
    `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
-4. **轮次视野动态收窄**：Round 1 审全量 `base...head`；Round 2 只读 R1 未关 `Must Fix` +
-   `R1_HEAD..HEAD` + `rebuts`（锁定未改动旧 hunks，禁发新挑刺）；Round 3 只对 `R2_HEAD..HEAD`
-   做二元 Pass/Fail 核对。
-5. **独立性硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）。
-6. **停损熔断与人工解锁**：轮次 `>= 3` 仍有未收口 `Must Fix`，或同一指纹连续 2 轮重复时，
-   输出 `STOP_LOSS_ESCALATE` 并以退出码 `4` 转交人类维护者裁决；人类拍板放行后用 `override` 解锁：
+4. **轮次视野动态收窄与 Round 2+ 硬锁**：Round 1 审全量 `base...head` 并一次列全同类问题；**Round 2+ 永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬拦截下复审**——同 `HEAD` 原地复审直接拒绝（`BLOCKED_SAME_HEAD_REREVIEW`，退出码 `2`）；Round 2+ 只核前轮未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，对未改旧行或无文件无据主观新挑刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`（退出码 `2`，非阻塞建议改用 `--should-fix` 或 `--pre-existing`）；`pass` 前核对未清失败实证或 `--enforce-gates` 门禁（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
+5. **独立性与跨文件指纹硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）；连续未决比对按完整 `fingerprint` / `(file, summary)`，绝不因不同文件同标 `C*` 误触发停损。
+6. **停损熔断与人工解锁**：历史已触发停损且未解锁时，禁止通过 Round 4+ `pass`/`changes` 绕过（优先返回退出码 `4` `STOP_LOSS_ESCALATE`）；人类拍板放行后用 `override` 解锁（支持 `--disposition` 记录四类处置统计）：
 
 ```sh
 node .agents/skills/dev-review/scripts/review-pack.mjs record \
   [--task <id>] [--round <N>] --verdict pass|changes --reviewer-id <id> \
-  [--must-fix <textOrJson>...] [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--visual-checked]
+  [--must-fix <textOrJson>...] [--should-fix <text>...] [--pre-existing <text>...] \
+  [--disposition "<idOrFp>:fixed|rebutted-wrong|intentional|deferred"...] \
+  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--enforce-gates] [--visual-checked]
 
 node .agents/skills/dev-review/scripts/review-pack.mjs override \
   [--task <id>] --human-approved --reason "<裁决理由>"

@@ -15,31 +15,31 @@ import {
   gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
   readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
-import { createDefaultLedger, listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+import { createDefaultLedger, listTaskLedgers, readTaskLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseBodyRelations, parseFlowInputs,
-  parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology,
+  detectDeclaredRepo, githubRepoFull, parseFlowInputs,
+  parseIssueNumbers, parsePrNumber, parseRemotesTopology,
   parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { analyzeIssueDependencies } from '../../lib/workflow-policy.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
+export { analyzeIssueDependencies }
 export const EXIT_POLICY_BLOCK = 3
 export const EXIT_ACTION_REQUIRED = 4
 
-/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含工作区未提交变动）。 */
+/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动）。 */
 export async function getChangedFiles(cwd, baseRef) {
-  const [diff, st] = await Promise.all([
+  const [diff, tree, st] = await Promise.all([
     baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null),
+    baseRef ? Promise.resolve(null) : gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD']),
     gitStatusPorcelainZ(cwd),
   ])
   const set = new Set()
-  if (diff?.ok) {
-    for (const e of diff.entries) if (e.file) set.add(e.file)
-  }
-  if (st.ok) {
-    for (const e of st.entries) if (e.file) set.add(e.file)
-  }
+  if (diff?.ok) for (const e of diff.entries) if (e.file) set.add(e.file)
+  if (tree?.ok) for (const f of tree.stdout.toString('utf8').split('\0')) if (f) set.add(posixPath(f))
+  if (st.ok) for (const e of st.entries) if (e.file) set.add(e.file)
   return [...set].sort()
 }
 
@@ -73,48 +73,6 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
     return res
   } catch {
     return null
-  }
-}
-
-/** 对多个 Issue 依正文提取出的 Depends on / Blocks 关系进行拓扑排序与策略建议。 */
-export function analyzeIssueDependencies(issueItems = []) {
-  const byNum = new Map()
-  for (const it of issueItems) if (Number.isInteger(it?.number)) byNum.set(it.number, it)
-  const nums = [...byNum.keys()]
-  if (nums.length <= 1) {
-    return { hasDependencies: false, orderedIssues: nums, edges: [], hasCycle: false, strategy: nums.length === 1 ? 'single-issue' : 'none' }
-  }
-  const adj = new Map(nums.map((n) => [n, new Set()]))
-  const indeg = new Map(nums.map((n) => [n, 0]))
-  const edges = []
-  const addEdge = (from, to, kind) => {
-    if (!byNum.has(from) || !byNum.has(to) || from === to || adj.get(from).has(to)) return
-    adj.get(from).add(to)
-    indeg.set(to, (indeg.get(to) ?? 0) + 1)
-    edges.push({ from, to, kind })
-  }
-  for (const item of byNum.values()) {
-    const rel = item.relations ?? parseBodyRelations(item.body ?? '')
-    for (const dep of rel.dependsOn ?? []) addEdge(dep, item.number, 'depends-on')
-    for (const blk of rel.blocks ?? []) addEdge(item.number, blk, 'blocks')
-  }
-  const queue = nums.filter((n) => indeg.get(n) === 0).sort((a, b) => a - b)
-  const ordered = []
-  while (queue.length > 0) {
-    const cur = queue.shift()
-    ordered.push(cur)
-    for (const next of adj.get(cur)) {
-      indeg.set(next, indeg.get(next) - 1)
-      if (indeg.get(next) === 0) { queue.push(next); queue.sort((a, b) => a - b) }
-    }
-  }
-  const hasCycle = ordered.length < nums.length
-  if (hasCycle) for (const n of nums.sort((a, b) => a - b)) if (!ordered.includes(n)) ordered.push(n)
-  const parents = new Set()
-  for (const it of byNum.values()) for (const p of it.relations?.partOf ?? []) parents.add(p)
-  return {
-    hasDependencies: edges.length > 0, orderedIssues: ordered, edges, hasCycle,
-    strategy: edges.length > 0 ? 'serial-order' : (parents.size === 1 ? 'same-branch-or-parallel' : 'parallel-or-combine'),
   }
 }
 
@@ -670,7 +628,13 @@ export async function handleStart(opts, roots) {
   }
 
   const baseBranch = state.defaultBranch || 'main'
-  const baseSha = state.head
+  let baseSha = state.head
+  if (state.commits > 0) {
+    for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', candRef])
+      if (r.ok && r.stdout.trim()) { baseSha = r.stdout.trim(); break }
+    }
+  }
   const implementerId = resolveContributorIdentity({
     explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
   }).actor
@@ -713,8 +677,6 @@ export async function handleStart(opts, roots) {
   const branchPrefix = caseType === 2 ? 'fix' : caseType === 1 ? 'docs' : 'feat'
   const reusedPrBranch = state.inputs.reuseExistingPr?.branch ?? null
   const branch = opts.branch || reusedPrBranch || `${branchPrefix}/${slug}`
-  const filesCount = opts.files !== undefined ? Number(opts.files) : undefined
-  const forceWorktree = Boolean(opts.parallel) || caseType >= 3 || linkedIssues.length > 0 || state.dirty > 0 || (filesCount !== undefined && filesCount >= 4)
 
   const resolveLocalBranchRef = async () => {
     const has = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
@@ -727,8 +689,8 @@ export async function handleStart(opts, roots) {
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId)
 
-  if (!forceWorktree || state.commits === 0) {
-    if (Boolean(opts.parallel) && state.commits === 0) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
+  if (state.commits === 0) {
+    if (Boolean(opts.parallel)) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
     const hasBranch = await resolveLocalBranchRef()
     const sw = hasBranch.ok ? await gitRun(roots.mainRoot, ['switch', branch]) : await gitRun(roots.mainRoot, ['switch', '-c', branch])
     if (!sw.ok) throw new Error(`切换分支 ${branch} 失败：${sw.stderr}`)
@@ -743,18 +705,25 @@ export async function handleStart(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
-      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 分支模式）：branch=${branch}, role=${role}\n`)
+      process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式）：branch=${branch}, role=${role}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
 
-  // Tier 2: 实施工作树 + 挂载依赖（不在 start 阶段预分配过时的 baseSha 审查空槽，改由 submit/review 同步推进至最新 HEAD）
+  // commits > 0 全量进入 Tier 2 Worktree 隔离，不再允许在主仓原地切换分支
   const implRel = `.worktrees/impl-${taskId}`
   const reviewRel = `.worktrees/review-${taskId}`
   const implAbs = join(roots.mainRoot, implRel)
 
   if (!existsSync(implAbs)) {
+    const checkedOutAt = (state.worktrees ?? []).find((w) => w.branch === branch)
+    if (checkedOutAt) {
+      const msg = `BLOCKED_BRANCH_IN_USE: 分支 ${branch} 已在工作树 ${checkedOutAt.path} 检出，请传入 --branch <新分支名> 或清理原工作树。`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_BRANCH_IN_USE', branch, checkedOutAt: checkedOutAt.path }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
     const hasBranch = await resolveLocalBranchRef()
     const addArgs = hasBranch.ok ? ['worktree', 'add', implAbs, branch] : ['worktree', 'add', '-b', branch, implAbs, baseSha]
     const wtRes = await gitRun(roots.mainRoot, addArgs)

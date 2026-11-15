@@ -384,22 +384,37 @@ export function createGitHubClient({
       return { ok: true, prs: [], skipped: true, reason: tier }
     },
 
-    async findOpenPrForBranch(repo, headBranch, { headOwner } = {}) {
+    async findOpenPrForBranch(repo, headBranch, { headOwner, base } = {}) {
       if (!repo || !headBranch) return { ok: false, prs: [] }
       if (tier === 'gh-cli') {
         const headArg = headOwner ? `${headOwner}:${headBranch}` : headBranch
-        const res = await runner('gh', ['pr', 'list', '--repo', repo, '--head', headArg, '--state', 'open', '--json', 'number,title,headRefName,baseRefName,url,state'], { cwd })
+        const args = ['pr', 'list', '--repo', repo, '--head', headArg, '--state', 'open']
+        if (base) args.push('--base', base)
+        args.push('--json', 'number,title,headRefName,baseRefName,url,state')
+        const res = await runner('gh', args, { cwd })
         if (!res.ok) return { ok: false, prs: [] }
-        try { return { ok: true, prs: JSON.parse(res.stdout) } } catch { return { ok: false, prs: [] } }
+        try {
+          const list = JSON.parse(res.stdout)
+          const filtered = base && Array.isArray(list) ? list.filter((p) => !p.baseRefName || p.baseRefName === base) : list
+          return { ok: true, prs: filtered }
+        } catch { return { ok: false, prs: [] } }
       }
       if (tier === 'node-https-token') {
         const owner = headOwner || repo.split('/')[0]
         const headParam = headBranch.includes(':') ? headBranch : `${owner}:${headBranch}`
-        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}`, token)
+        const baseQ = base ? `&base=${encodeURIComponent(base)}` : ''
+        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}${baseQ}`, token)
         if (!res.ok) return { ok: false, prs: [] }
-        return { ok: true, prs: (res.data ?? []).map((p) => ({ number: p.number, title: p.title, headRefName: p.head?.ref, baseRefName: p.base?.ref, url: p.html_url })) }
+        const prs = (res.data ?? []).map((p) => ({
+          number: p.number, title: p.title, headRefName: p.head?.ref, baseRefName: p.base?.ref, url: p.html_url, state: String(p.state ?? 'open').toUpperCase(),
+        }))
+        return { ok: true, prs: base ? prs.filter((p) => !p.baseRefName || p.baseRefName === base) : prs }
       }
       return { ok: false, prs: [], reason: tier }
+    },
+
+    async listOpenPrsByHead(repo, headBranch, opts = {}) {
+      return this.findOpenPrForBranch(repo, headBranch, opts)
     },
 
     async postComment({ repo, number, body, statePayload = {} }) {
@@ -665,4 +680,9 @@ export async function listComments({ repo, number, perPage = 100, client, ...cli
 export async function removeLabel({ repo, number, label, client, ...clientOpts } = {}) {
   const c = client ?? createGitHubClient(clientOpts)
   return c.removeLabel({ repo, number, label })
+}
+
+export async function listOpenPrsByHead({ repo, headBranch, headOwner, base, client, ...clientOpts } = {}) {
+  const c = client ?? createGitHubClient(clientOpts)
+  return c.findOpenPrForBranch(repo, headBranch, { headOwner, base })
 }

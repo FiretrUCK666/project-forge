@@ -85,10 +85,18 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     if (st.status !== 0) return `generic-git start 失败：${st.stderr}`
     const l = JSON.parse(st.stdout)
     if (l.role !== 'generic-git' || l.providerId !== 'generic-git') return `generic-git 角色错误：${st.stdout}`
-    const v = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: dirGeneric })
+    const wtGen = join(dirGeneric, l.worktreePath)
+    writeFileSync(join(wtGen, 'README.md'), '# generic\n\n低风险文档更新。\n')
+    gitSync(wtGen, ['add', '-A'])
+    gitSync(wtGen, ['commit', '-qm', 'docs: update readme'])
+    const v = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: wtGen })
     if (v.status !== 0) return `generic-git verify 失败：${v.stderr}`
-    const m = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
-    if (m.status !== 0) return `generic-git 阻断了本地 merge：exit=${m.status} ${m.stderr}`
+    const mBlock = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
+    if (mBlock.status !== 3 || !mBlock.stderr.includes('BLOCKED_GENERIC_REMOTE_MR_REQUIRED')) {
+      return `generic-git 未阻断未确认本地 merge：exit=${mBlock.status} ${mBlock.stderr}`
+    }
+    const mOk = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--remote-merged', '--json'], { cwd: dirGeneric })
+    if (mOk.status !== 0) return `generic-git 带 --remote-merged 仍未放行：exit=${mOk.status} ${mOk.stderr}`
 
     const probeOffline = await probeGitHubEnv({
       cwd: dirNoRemote,

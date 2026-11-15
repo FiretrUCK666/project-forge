@@ -28,7 +28,7 @@ import {
 } from './platform-probe.mjs'
 import {
   createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
-  listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  listComments, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
   summarizeCommitChecks,
 } from './github-client.mjs'
@@ -41,7 +41,7 @@ export {
   detectRemoteProtocol,
   githubRepoFull,
   githubRepoPath,
-  listComments, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  listComments, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
   lookupSshHost,
   normalizeGitHubRepo,

@@ -114,6 +114,7 @@ export {
   docDateTag,
   docIsoDate,
   evaluateCoupledSync,
+  isSharedMasterPrd,
   MERMAID_LIMITS,
   parseCoupledSyncRules,
   parseDocFilename,
@@ -124,6 +125,21 @@ export {
   syncDocsLifecycle,
   updateDocFrontmatter,
 } from './docs.mjs'
+
+export {
+  determineWorkflowPolicy,
+  evaluateNextState,
+  GATE_TIER_RANK,
+  hasRepoCiWorkflow,
+  hydratePrTemplateBody,
+  LOW_RISK_TEXT_EXT_RE,
+  readVerificationEvidence,
+  resolveRequiredGates,
+  runLowRiskDocStaticCheck,
+  validateVerificationEvidence,
+  verificationEvidencePath,
+  writeVerificationEvidence,
+} from './workflow-policy.mjs'
 
 export {
   buildOneClickPrUrl,
@@ -145,6 +161,7 @@ export {
   isInternalAgentSlug,
   listComments,
   listHostingProviders,
+  listOpenPrsByHead,
   lookupSshHost,
   normalizeGitHubRepo,
   parseBodyRelations,

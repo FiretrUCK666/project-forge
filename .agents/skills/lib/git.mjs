@@ -675,12 +675,16 @@ export async function inspectBranchMergeState(mainRoot, { branch, headSha, defau
   return { state: 'unmerged', ownCommits, isShallow, reason: `存在 ${ownCommits} 个未合并提交` }
 }
 
-/** 同步或按需创建干净的 detached 审查隔离工作树至 targetSha，脏工作树直接阻断。 */
-export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha) {
+/** 同步或按需创建干净的 detached 审查隔离工作树至 targetSha，脏工作树直接阻断（支持 resetDirty）。 */
+export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha, { resetDirty = false } = {}) {
   if (!targetSha || targetSha === 'UNBORN') {
     throw new Error('目标工作区尚无有效提交（UNBORN HEAD），无法同步审查隔离工作树')
   }
   if (existsSync(wtAbs)) {
+    if (resetDirty) {
+      await gitRun(wtAbs, ['reset', '--hard'])
+      await gitRun(wtAbs, ['clean', '-fd'])
+    }
     const st = await gitStatusPorcelainZ(wtAbs)
     if (!st.ok) throw new Error(`读取审查工作树状态失败（${wtAbs}）：${st.stderr}`)
     if (st.entries.length > 0) {
@@ -688,11 +692,11 @@ export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha) {
     }
     const curHead = await gitRun(wtAbs, ['rev-parse', 'HEAD'])
     if (curHead.ok && curHead.stdout.trim() === targetSha) {
-      return { ok: true, action: 'already-synced', headSha: targetSha, path: wtAbs }
+      return { ok: true, action: resetDirty ? 'reset-synced' : 'already-synced', headSha: targetSha, path: wtAbs }
     }
     const co = await gitRun(wtAbs, ['checkout', '--detach', targetSha])
     if (!co.ok) throw new Error(`推进审查工作树至 ${targetSha.slice(0, 7)} 失败：${co.stderr}`)
-    return { ok: true, action: 'updated', headSha: targetSha, path: wtAbs }
+    return { ok: true, action: resetDirty ? 'reset-updated' : 'updated', headSha: targetSha, path: wtAbs }
   }
   const addRes = await gitRun(mainRoot, ['worktree', 'add', '--detach', wtAbs, targetSha])
   if (!addRes.ok) throw new Error(`创建审查隔离工作树失败：${addRes.stderr}`)

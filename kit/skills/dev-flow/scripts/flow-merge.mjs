@@ -4,13 +4,13 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { isAbsolute, relative, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
   canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
-  inspectBranchMergeState, readTextSafe, samePath,
+  inspectBranchMergeState, samePath,
 } from '../../lib/git.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
@@ -18,11 +18,16 @@ import {
   parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { classifyDoorType, detectGateWeakening, matchGlob } from '../../lib/static-gates.mjs'
+import { classifyDoorType, detectGateWeakening, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import {
+  determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
+  validateVerificationEvidence,
+} from '../../lib/workflow-policy.mjs'
 import {
   buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK,
   getChangedFiles, syncTaskDocsSafe,
 } from './flow-inspect.mjs'
+import { runTrialMerge } from './flow-trial-merge.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
 
 function isCwdInside(wtAbs) {
@@ -33,22 +38,7 @@ function isCwdInside(wtAbs) {
   return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
 }
 
-function hasRepoCiWorkflow(repoRoot) {
-  const wfDir = join(repoRoot, '.github', 'workflows')
-  if (!existsSync(wfDir)) return false
-  try {
-    for (const name of readdirSync(wfDir)) {
-      if (!/\.(?:yml|yaml)$/i.test(name)) continue
-      const txt = (readTextSafe(join(wfDir, name)) ?? '').replace(/#[^\n]*/g, '').slice(0, 2000)
-      if (!/\bon\s*:/i.test(txt)) continue
-      if (/\bpull_request\b/i.test(txt)) return true
-      if (/\bpush\b/i.test(txt) && !(/\btags\s*:/i.test(txt) && !/\bbranches\s*:/i.test(txt))) return true
-    }
-  } catch { /* ignore */ }
-  return false
-}
-
-async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin', { skipRemoteProbe = false } = {}) {
+async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin', { skipRemoteProbe = false, _ghProbe = null, _ghClient = null } = {}) {
   const worktreePaths = [ledger.reviewWorktreePath, ledger.worktreePath]
     .filter(Boolean)
     .map((relWt) => ({ relWt, abs: resolve(mainRoot, relWt) }))
@@ -80,14 +70,20 @@ async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, p
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
   const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git')
-  const ghProbe = needGhApi ? await probeGitHubEnv({ cwd: mainRoot, remoteUrls }) : null
-  const downstream = needGhApi && ghProbe?.env.providerId === 'github'
-    ? await ghProbe.client.listOpenPrsByBase(targetRepo, ledger.branch)
+  const ghProbe = _ghProbe
+    ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
+    ?? (needGhApi ? await probeGitHubEnv({ cwd: mainRoot, remoteUrls }) : null)
+  const ghClient = _ghClient ?? ghProbe?.client
+  const canQueryGh = Boolean(_ghProbe || _ghClient)
+    || ghProbe?.env?.trackB?.tier === 'gh-cli'
+    || ghProbe?.env?.trackB?.tier === 'node-https-token'
+  const downstream = needGhApi && ghProbe?.env?.providerId === 'github' && typeof ghClient?.listOpenPrsByBase === 'function'
+    ? await ghClient.listOpenPrsByBase(targetRepo, ledger.branch)
     : { ok: true, prs: [] }
 
   let prState = ledger.prState ?? (ledger.status === 'awaiting-upstream-merge' ? 'OPEN' : null)
-  if (needGhApi && ledger.prNumber && (ghProbe?.env.trackB.tier === 'gh-cli' || ghProbe?.env.trackB.tier === 'node-https-token')) {
-    const pr = await ghProbe.client.getPr(targetRepo, ledger.prNumber)
+  if (needGhApi && ledger.prNumber && canQueryGh && typeof ghClient?.getPr === 'function') {
+    const pr = await ghClient.getPr(targetRepo, ledger.prNumber)
     if (pr.ok) prState = pr.state
   }
 
@@ -120,6 +116,12 @@ export async function handleMerge(opts, roots) {
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
     return { exitCode: EXIT_POLICY_BLOCK }
   }
+  if (ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {
+    const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', role: ledger.role }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { exitCode: EXIT_POLICY_BLOCK }
+  }
 
   const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
@@ -147,6 +149,22 @@ export async function handleMerge(opts, roots) {
     detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch),
     gitRun(roots.mainRoot, ['remote', '-v']),
   ])
+  const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
+  const policy = determineWorkflowPolicy({
+    changedFiles: changed, ownArchived, caseType: ledger.caseType,
+    highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
+    gateWeakeningHits: gateFindings, hasRemote: ledger.role !== 'local-only',
+    hasCiWorkflow: hasRepoCiWorkflow(implRoot),
+    visualFilesChanged: changed.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile,
+  })
+  const evidence = readVerificationEvidence(roots.gitDir, taskId)
+  const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
+  if (!evCheck.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: evCheck.code, reason: evCheck.reason, policy }, null, 2)}\n`)
+    process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
+    return { exitCode: evCheck.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+
   const highRiskHits = changed.filter((f) => profile.highRisk.some((pat) => matchGlob(f, pat)))
   const rounds = ledger.rounds ?? []
   const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
@@ -177,7 +195,7 @@ export async function handleMerge(opts, roots) {
     ledger.humanApprovedReason = opts.reason ?? ledger.humanApprovedReason ?? 'human-approved-stop-loss-override'
   }
 
-  const requiresReview = highRiskHits.length > 0 || rounds.length > 0 || ledger.caseType >= 3 || Boolean(ledger.lastReview)
+  const requiresReview = policy.independentReviewRequired || rounds.length > 0 || Boolean(ledger.lastReview)
   if (requiresReview) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
@@ -269,42 +287,35 @@ export async function handleMerge(opts, roots) {
       }
     }
   } else if (ledger.branch) {
-    const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
-    if (!mainSt.ok || mainSt.entries.length > 0) {
-      process.stderr.write('BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。\n')
-      return { exitCode: EXIT_POLICY_BLOCK }
-    }
-    const curMainBr = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (!curMainBr.ok || curMainBr.stdout.trim() !== baseBranch) {
-      const hasBase = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${baseBranch}`])
-      if (hasBase.ok) {
-        const sw = await gitRun(roots.mainRoot, ['switch', baseBranch])
-        if (!sw.ok) throw new Error(`切回基线分支 ${baseBranch} 失败：${sw.stderr}`)
-      }
-    }
-    const baseExists = (await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', baseBranch])).ok
-    const curAfter = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
-    if (baseExists && (!curAfter.ok || curAfter.stdout.trim() !== ledger.branch)) {
-      const isAnc = await gitRun(roots.mainRoot, ['merge-base', '--is-ancestor', ledger.branch, 'HEAD'])
-      if (!isAnc.ok) {
-        const mRes = await gitRun(roots.mainRoot, ['merge', '--no-ff', ledger.branch, '-m', `Merge branch '${ledger.branch}' (${taskId})`])
-        if (!mRes.ok) {
-          await gitRun(roots.mainRoot, ['merge', '--abort'])
-          throw new Error(`本地合并分支 ${ledger.branch} 到 ${baseBranch} 失败（已中止合并）：${mRes.stderr}`)
-        }
-        mergeRes = { ok: true, localMerge: true, branch: ledger.branch, into: baseBranch }
-      } else {
-        mergeRes = { ok: true, alreadyMerged: true, branch: ledger.branch, into: baseBranch }
-      }
+    if (ledger.role === 'generic-git' && opts['remote-merged']) {
+      mergeRes = { ok: true, remoteMerged: true, branch: ledger.branch, into: baseBranch }
     } else {
-      mergeRes = { ok: true, localBranchCurrent: true, branch: ledger.branch, into: baseBranch }
+      mergeRes = await runTrialMerge({
+        mainRoot: roots.mainRoot,
+        ledger,
+        baseBranch,
+        profile,
+        evidence,
+        policy,
+        changedFiles: changed,
+        runVerify: true,
+      })
+      if (mergeRes.blocked) {
+        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
+        process.stderr.write(`${mergeRes.message}\n`)
+        return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK }
+      }
     }
   }
 
   ledger.status = 'merged'
   ledger.mergedAt = new Date().toISOString()
   writeTaskLedger(roots.mainRoot, ledger)
-  const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, { skipRemoteProbe: Boolean(opts._ghProbe) })
+  const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, {
+    skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
+    _ghProbe: opts._ghProbe,
+    _ghClient: opts._ghClient,
+  })
   if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist }, null, 2)}\n`)
   else {
     process.stdout.write(`合并状态已确认（task=${taskId}, status=${ledger.status}）。未自动删除任何分支或 Worktree。\n`)
@@ -322,7 +333,11 @@ export async function handleCleanup(opts, roots) {
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
   const { targetRepo, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
-  const cl = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, targetRepo, pushRemote)
+  const cl = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, targetRepo, pushRemote, {
+    skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
+    _ghProbe: opts._ghProbe,
+    _ghClient: opts._ghClient,
+  })
 
   const keepWorktree = Boolean(opts['keep-worktree'])
   const onlyReviewWt = Boolean(opts['only-review-worktree'])
@@ -376,8 +391,8 @@ export async function handleCleanup(opts, roots) {
 
   let deletedLocalBranch = false
   if (cl.localBranch && !keepLocalBr && cl.localBranch !== ledger.baseBranch) {
-    const isSquashOrRebase = cl.mergeState?.state === 'squash_or_rebase_merged'
-    const delArgs = isSquashOrRebase ? ['branch', '-D', cl.localBranch] : ['branch', '-d', cl.localBranch]
+    const isSquashOrRemoteMerged = cl.mergeState?.state === 'squash_or_rebase_merged' || cl.prState === 'MERGED'
+    const delArgs = isSquashOrRemoteMerged ? ['branch', '-D', cl.localBranch] : ['branch', '-d', cl.localBranch]
     const delBr = await gitRun(roots.mainRoot, delArgs)
     if (!delBr.ok) throw new Error(`安全删除本地分支 ${cl.localBranch} 失败（state=${cl.mergeState?.state ?? 'unknown'}）：${delBr.stderr}`)
     deletedLocalBranch = true

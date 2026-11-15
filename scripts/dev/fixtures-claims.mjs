@@ -644,6 +644,9 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     ], { cwd: dir })
     if (r1.status !== 0) return `Round 1 record 失败：${r1.stderr}`
 
+    writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 3\n')
+    gitSync(dir, ['add', 'src/app.mjs'])
+    gitSync(dir, ['commit', '-qm', 'attempt fix'])
     const r2Repeat = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 't-rev', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 缺少边界空值检查',
     ], { cwd: dir })
@@ -651,11 +654,17 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
       return `连续两轮同一 must-fix 未触发停损（应 exit 4）：exit=${r2Repeat.status} out=${r2Repeat.stdout}`
     }
 
-    // 第 3 轮上限测试（无重复问题，第 3 轮仍 verdict=changes 必须 exit 4）
-    writeFileSync(join(ledgerDir, 't-r3.json'), JSON.stringify({ taskId: 't-r3', implementerId: 'author-a', rounds: [] }, null, 2))
-    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: 问题一'], { cwd: dir })
-    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C2: 问题二'], { cwd: dir })
-    const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C3: 问题三'], { cwd: dir })
+    // 第 3 轮上限测试（推进 HEAD + 增量域问题，第 3 轮仍 verdict=changes 必须 exit 4）
+    writeFileSync(ledgerDir + '/t-r3.json', JSON.stringify({ taskId: 't-r3', branch: 'main', implementerId: 'author-a', rounds: [] }, null, 2))
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C1: src/app.mjs:1 问题一'], { cwd: dir })
+    writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 4\n')
+    gitSync(dir, ['add', 'src/app.mjs'])
+    gitSync(dir, ['commit', '-qm', 'r2 fix'])
+    await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C2: src/app.mjs:1 问题二'], { cwd: dir })
+    writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 5\n')
+    gitSync(dir, ['add', 'src/app.mjs'])
+    gitSync(dir, ['commit', '-qm', 'r3 fix'])
+    const r3Stop = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 't-r3', '--round', '3', '--verdict', 'changes', '--reviewer-id', 'rev-b', '--must-fix', 'C3: src/app.mjs:1 问题三'], { cwd: dir })
     if (r3Stop.status !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop.status}`
 
     // 4. govern-audit.mjs --audit-only 与 reconcile

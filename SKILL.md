@@ -54,11 +54,11 @@ metadata:
 | 日常场景 | 权威协作判据（按标题名直达） |
 | --- | --- |
 | 判身份与防只读误推 | `references/collaboration.md`「一、先判角色」：五态表、`generic-git` 降级与 `clone-readonly` 阻断 |
-| 定门型、写规划与分级内审 | `references/collaboration.md`「二、五档开工分流」：`two-way`/`one-way` 判定、Case 1..5、规划 `audit` 与 Critique |
-| 开分支、建 Worktree 与共享依赖 | `references/collaboration.md`「三、三档隔离」：审查槽自动同步待审 HEAD、分包依赖隔离与 4 态清理 |
-| 认领、PR 成对归档与双写节点 | `references/collaboration.md`「四、认领、PR 前文档同步」：`finalize` 将 `PRD`/`SPEC`/`Todo` 成对归档至 `docs/archive/` |
+| 定门型、写规划与三正交路由 | `references/collaboration.md`「二、五档开工分流」：`flow.mjs next`、`two-way`/`one-way`、三正交 `evidence.json` |
+| 开全量 Worktree 与临时试合 | `references/collaboration.md`「三、三档隔离」：有提交仓全入 `impl-*`、槽位复用、`--reset-review-slot`、临时 `--detach` 试合 |
+| 认领、1:N PRD 与零脏文件提审 | `references/collaboration.md`「四、认领、PR 前文档同步」：`isSharedMasterPrd`、推后零改写、PR 模板套用与双写 |
 | 收 Issue 与审外部 PR | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」：先扫供应链高危改动 |
-| 双门独立审查、园艺治理与熔断 | `references/collaboration.md`「七、审查循环：怎么才会停」：双门评估、6 锁收敛、停损解锁与基线增量审计 |
+| 双门新上下文复审、六锁硬拦截 | `references/collaboration.md`「七、审查循环：怎么才会停」：Round 2+ 新 `review` 子代理、同 `HEAD`/增量硬锁与停损 |
 | 合并授权与收尾清理七步 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」：弱化门禁必拦（退出码 4）与先问再清理 |
 
 ## 能力矩阵与默认范围

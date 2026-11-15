@@ -3,7 +3,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { gitInit, gitSync, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerExploreCases(cases) {
@@ -114,9 +114,15 @@ cases.push(['8 层深 Java+React repo-map、Dev Profile 显式 none 与未知 fl
     if (stat.status !== 0 || JSON.parse(stat.stdout).taskId !== 't-none') return `status 自动推断失败：${stat.stdout}`
 
     // 4. MERGE_HEAD 冲突态自动阻断 verify 与 review-pack
+    const tNoneWtRel = JSON.parse(st.stdout).worktreePath
+    const tNoneRoot = tNoneWtRel ? resolve(dir, tNoneWtRel) : dir
+    const wtMergeRel = gitSync(tNoneRoot, ['rev-parse', '--git-path', 'MERGE_HEAD'], { encoding: 'utf8' }).stdout.trim()
+    const wtMergeHeadAbs = resolve(tNoneRoot, wtMergeRel)
+    writeFileSync(wtMergeHeadAbs, '0'.repeat(40) + '\n')
     writeFileSync(join(dir, '.git', 'MERGE_HEAD'), '0'.repeat(40) + '\n')
     const verConflict = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify'], { cwd: dir })
     const revConflict = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--local'], { cwd: dir })
+    rmTree(wtMergeHeadAbs)
     rmTree(join(dir, '.git', 'MERGE_HEAD'))
     if (verConflict.status === 0 || !/BLOCKED_GIT_CONFLICT_IN_PROGRESS/.test(verConflict.stderr)) {
       return `MERGE_HEAD 未阻断 verify：${verConflict.stderr}`

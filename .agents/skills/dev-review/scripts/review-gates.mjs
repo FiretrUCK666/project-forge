@@ -8,6 +8,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import { checkMermaidLabelWidth } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
@@ -455,4 +456,163 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
       ? 'Irreversible or high-cost rollback; require explicit human sign-off and staged rollback plan before merge.'
       : 'Two-way door: cleanly reversible via `git revert <merge-commit>`.',
   }
+}
+
+export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate }) {
+  const skills = resolveAvailableSkills(mainRoot)
+  const nextSteps = []
+  if (opts['untrusted-scan'] && untrustedWarnings.length === 0) {
+    nextSteps.push('Untrusted static scan clean (UNTRUSTED_SCAN_PASS). Safe to proceed with isolated review worktree checks.')
+  }
+  if (doorAssessment.gateWeakened) {
+    nextSteps.push('GATE_WEAKENED detected: escalate to human maintainer for explicit sign-off (mergeAuthority=human-required).')
+  }
+  if (structuralGate.archViolations.length > 0) {
+    nextSteps.push(`Fix ${structuralGate.archViolations.length} architecture boundary violation(s) at root cause before passing review.`)
+  }
+  if (mode === 'local' || mode === 'staged' || mode === 'base') {
+    nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
+  } else if (mode === 'task' && task) {
+    nextSteps.push('Review independently against criteria C1..Cn, run tests + fault injection, then record verdict:')
+    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id>`)
+    if (task.role === 'contributor-fork') {
+      nextSteps.push('Contributor-fork note: after PASS, wait for upstream maintainer merge; do NOT run `flow.mjs merge` or delete fork branch.')
+    } else if (!skills.has('dev-flow')) {
+      nextSteps.push('Note: dev-flow is not installed in .agents/skills/; handle branch merge manually after PASS.')
+    }
+  } else if (opts.pr) {
+    nextSteps.push('Complete independent review using the diff hash, dual gates, and empirical tests above before posting PR review.')
+  }
+  return nextSteps
+}
+
+export function formatPackText(pack, fullDiffText = '', includeFullDiff = false) {
+  const lines = []
+  lines.push(`=== DEV-REVIEW PACK (${pack.mode.toUpperCase()}) ===`)
+  lines.push(`Worktree : ${pack.worktreeRoot}`)
+  lines.push(`Round    : ${pack.round}${pack.roundLockNote ? ` (${pack.roundLockNote})` : ''}`)
+  lines.push(`Scope    : ${pack.diffScope}`)
+  lines.push(`Head SHA : ${pack.headSha}`)
+  lines.push(`Diff Hash: sha256:${pack.diff.sha256} (${pack.diff.bytes} bytes, ${pack.diff.files.length} changed, ${pack.diff.untracked.length} untracked)`)
+  if (pack.reviewSlotSync) {
+    lines.push(`SlotSync : ${pack.reviewSlotSync.action} -> ${pack.reviewSlotSync.reviewWorktreePath} @ ${String(pack.reviewSlotSync.headSha).slice(0, 7)} (deps=${pack.reviewSlotSync.depsMode})`)
+  }
+  if (pack.task) {
+    lines.push(`Task     : ${pack.task.taskId} | role=${pack.task.role ?? 'unknown'} | finalized=${Boolean(pack.task.finalized)} | verifiedHead=${pack.task.verifiedHead ?? 'none'}`)
+    if (pack.headMismatchWarning) lines.push(`WARNING  : ${pack.headMismatchWarning}`)
+  }
+
+  if (pack.criteria.length > 0) {
+    lines.push('', '--- Frozen Acceptance Criteria ---')
+    for (const c of pack.criteria) lines.push(`  [${c.checked ? 'x' : ' '}] ${c.id}: ${c.text} (${c.source})`)
+  }
+
+  if (pack.priorOpenMustFix.length > 0 || pack.rebuts.length > 0) {
+    lines.push('', '--- Prior Round Open Must-Fix & Rebuts ---')
+    for (const mf of pack.priorOpenMustFix) lines.push(`  - [${mf.id}] (fp:${mf.fingerprint}) ${mf.summary}`)
+    for (const rb of pack.rebuts) lines.push(`  * Rebut: ${typeof rb === 'string' ? rb : JSON.stringify(rb)}`)
+  }
+
+  lines.push('', '--- Changed Files & Hunk Index ---')
+  if (pack.diff.hunkIndex.length === 0) {
+    lines.push('  (no changes in scope)')
+  } else {
+    for (const item of pack.diff.hunkIndex) {
+      lines.push(`  ${item.status}\t${item.file} (+${item.addedLines}/-${item.removedLines}, ${item.hunks.length} hunk(s))`)
+    }
+  }
+
+  lines.push('', '--- Doc-Code Parity Gate ---')
+  if (pack.parity.triggers.length === 0 && pack.parity.todoIssues.length === 0 && (pack.parity.mermaidViolations?.length ?? 0) === 0) {
+    lines.push('  OK: No unaddressed API/CLI/module doc parity drift, Mermaid truncation, or open Todo detected.')
+  } else {
+    if (pack.parity.parityMissingDocs) {
+      lines.push(`  ${pack.isFlowMode ? '[MUST_FIX_CANDIDATE]' : '[PARITY_WARN]'} Code surface changed without updating docs (${pack.parity.existingDocs.join(', ')}):`)
+    } else if (pack.parity.triggers.length > 0) {
+      lines.push('  Parity triggers (docs also touched in diff — verify accuracy):')
+    }
+    for (const t of pack.parity.triggers.slice(0, 12)) lines.push(`    - [${t.type}] ${t.file}: ${t.detail}`)
+    for (const td of pack.parity.todoIssues) lines.push(`    - ${pack.isFlowMode ? '[MUST_FIX_CANDIDATE]' : '[TODO_WARN]'} ${td.file}: unchecked=${td.unchecked}, unarchived=${td.unarchived}`)
+    for (const mv of pack.parity.mermaidViolations ?? []) lines.push(`    - [MERMAID_TRUNCATION_RISK] ${mv.file}:${mv.line}: ${mv.message}`)
+  }
+
+  lines.push('', '## 联动同步核对（改哪看哪）')
+  const syncWarnings = pack.coupledSyncWarnings ?? []
+  if (syncWarnings.length === 0) lines.push('  OK: 未触发 AGENTS.md「改哪看哪」缺漏项。')
+  else {
+    for (const sw of syncWarnings) lines.push(`  - [COUPLED_SYNC_WARN] 触及 ${sw.touchedTriggers.join(', ')} -> 需检查伴随更新: ${sw.expectedCompanions.join(', ')}`)
+  }
+
+  lines.push('', '--- Behavioral Gate (Empirical & Smoke-Verify) ---')
+  const bg = pack.behavioralGate
+  lines.push(`  Status     : ${bg.status} | verifiedHead=${bg.verifiedHead ?? 'none'} | smokeRequired=${bg.smokeRequired} | empiricalVisualCheckRequired=${bg.empiricalVisualCheckRequired}`)
+  if (bg.visualFilesChanged.length > 0) lines.push(`  Visual/UI Files (${bg.visualFilesChanged.length}): ${bg.visualFilesChanged.slice(0, 12).join(', ')}`)
+  if (bg.smokeVerifyCommands.length > 0) {
+    lines.push('  Smoke-Verify Commands (anti-human-proxy: run locally and observe real runtime):')
+    for (const sc of bg.smokeVerifyCommands) lines.push(`    $ ${sc}`)
+  }
+  for (const w of bg.warnings) lines.push(`  - WARN: ${w}`)
+
+  lines.push('', '--- Structural Gate (Comments, Suppressions, Arch Rules, Size) ---')
+  const sg = pack.structuralGate
+  lines.push(`  Status     : ${sg.status} | tombstones=${sg.tombstoneComments.length}, excuses=${sg.excuseSuppressions.length}, archViolations=${sg.archViolations.length}, godFiles=${sg.godFiles.length}, mermaid=${sg.mermaidViolations?.length ?? 0}`)
+  for (const tc of sg.tombstoneComments.slice(0, 8)) lines.push(`  - [TOMBSTONE] ${tc.file}: ${tc.excerpt}`)
+  for (const ex of sg.excuseSuppressions.slice(0, 8)) lines.push(`  - [EXCUSE_SUPPRESS] ${ex.file}: ${ex.excerpt}`)
+  for (const av of sg.archViolations.slice(0, 8)) lines.push(`  - [ARCH_VIOLATION] ${av.file}:${av.line} (${av.rule}) -> "${av.specifier}" | ${av.fixHint}`)
+  for (const gf of sg.godFiles) lines.push(`  - [GOD_FILE:${gf.severity.toUpperCase()}] ${gf.file} (${gf.lines} lines): ${gf.hint}`)
+
+  lines.push('', '--- Door & Blast Radius Assessment ---')
+  const da = pack.doorAssessment
+  lines.push(`  Door Type  : ${da.doorType} | gateWeakened=${da.gateWeakened} | blastRadius=${da.blastRadius} | mergeAuthority=${da.mergeAuthority}`)
+  for (const r of da.reasons) lines.push(`  - Reason   : ${r}`)
+  lines.push(`  - Rollback : ${da.rollbackPath}`)
+
+  lines.push('', '--- Empirical Test & Fault Injection Checklist ---')
+  const cmds = [
+    ...(pack.devProfile['quick-test'] ?? []),
+    ...(pack.devProfile['smoke-verify'] ?? []),
+    ...(pack.devProfile['full-test'] ?? []),
+    ...(pack.devProfile['merge-gate'] ?? []),
+  ]
+  if (cmds.length > 0) {
+    lines.push('  Run project verification commands (do not guess pass/fail):')
+    for (const cmd of cmds) lines.push(`    $ ${cmd}`)
+  } else {
+    lines.push('  No Dev Profile test commands in AGENTS.md; run repository test suite manually.')
+  }
+  if (pack.highRiskHits.length > 0) {
+    lines.push('  HIGH-RISK PATHS TOUCHED (mandatory fault injection in detached review worktree):')
+    for (const h of pack.highRiskHits) lines.push(`    - ${h.file} (rule: ${h.rule})`)
+  }
+  lines.push('  Verification Precedence: Formal static gates + empirical execution/render checks > adversarial code reading.')
+  if (bg.empiricalVisualCheckRequired) {
+    lines.push('  Visual / UI Empirical Checklist (actual render + interaction + screenshots; never judge from reading code alone):')
+    lines.push('    - [ ] Open the actual rendered page, component, or SVG in a live browser/renderer (confirm clean render, no 404 or console errors)')
+    lines.push('    - [ ] Walk through interactive user flows end-to-end (clicks, form inputs, state transitions, error/empty states)')
+    lines.push('    - [ ] Capture and inspect Light & Dark theme screenshots for contrast, clipping, text overlap, and legibility')
+  }
+  lines.push('  Fault Injection Protocol (Must Fix requires violated frozen C*, failed formal gate, or reproducible empirical failure; NO subjective code-reading nitpicks):')
+  lines.push('    1. Temporarily break 1 core branch/guard in the review worktree and run test -> MUST FAIL.')
+  lines.push('    2. Restore cleanly (`git checkout -- .`) and re-run test -> MUST PASS.')
+  lines.push('    3. Classify findings strictly: Must Fix / Should Fix / Pre-existing (list all R1 locations at once).')
+
+  if (pack.untrustedWarnings.length > 0) {
+    lines.push('', '--- [APPROVED_EXEC_WITH_WARNINGS] ---')
+    lines.push('  Human execution approval active. Use `--ignore-scripts` for dependency install.')
+    for (const h of pack.untrustedWarnings) lines.push(`  - [${h.category}] ${h.file}: ${h.reason}`)
+  }
+
+  if (fullDiffText) {
+    const diffLines = fullDiffText.split('\n')
+    const maxLines = includeFullDiff ? diffLines.length : 240
+    lines.push('', '--- Diff Patch (Context-Isolated) ---')
+    lines.push(...diffLines.slice(0, maxLines))
+    if (diffLines.length > maxLines) {
+      lines.push(`... (truncated ${diffLines.length - maxLines} more lines; pass --include-diff or run git diff ${pack.diffScope} to inspect full patch)`)
+    }
+  }
+
+  lines.push('', '[NEXT STEP]')
+  for (const step of pack.nextSteps) lines.push(`  ${step}`)
+  return lines.join('\n')
 }

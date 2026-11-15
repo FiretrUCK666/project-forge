@@ -18,6 +18,7 @@ import { registerClaimsCases } from './fixtures-claims.mjs'
 import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
+import { registerM2Cases } from './fixtures-m2.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
@@ -26,6 +27,7 @@ initTestBackupDir()
 
 const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
+  ['m2', registerM2Cases],
   ['claims', registerClaimsCases],
   ['govern', registerGovernCases],
   ['docs', registerDocsCases],

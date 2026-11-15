@@ -8,8 +8,9 @@ description: |
   触发词：弄版本管理、配 git、上仓库、建仓库、推到 GitHub、初始化项目、项目起步、空项目起步、
   新项目配置、标准化项目、规范项目、整理项目、项目规范配置、写 AGENTS.md、写 README、
   写贡献指南、配 LICENSE、配 CI、发版配置、交棒、升级工具包、把痕迹清干净。
-  支持 Node、Python、Rust、Go、Java、纯文档目录及插件与能力目录；只读勘察先行，幂等不覆盖，
-  支持 v2 墓碑/定制豁免与纯本地降级运行；默认私有仓库。
+  支持 Node、Python、Rust、Go、Java、Ruby、PHP、.NET、C/C++、Dart、Swift、Elixir 共 12 种
+  生态的识别与命令探测；空目录起步骨架覆盖 node/python/go/rust/java/docs 六种；只读勘察先行，
+  幂等不覆盖，支持 v2 墓碑/定制豁免与纯本地降级运行；默认私有仓库。
   不用于：纯概念问答、临时只改一行代码且不涉及工程治理、或跳过勘察强行覆盖手写规范。
 metadata:
   version: "6.0.0"

@@ -121,18 +121,30 @@ async function runPreflightIn(root, injId = '') {
  * 两套门禁都问，但按代价排序。
  * 判据只有一条：拆掉一处之后，只要有任何一道门禁报出来，就算有人看着它。
  */
-async function runBothIn(root, expect, injId = '') {
+async function runBothIn(root, injOrExpect, injId = '') {
+  const inj = typeof injOrExpect === 'object' && injOrExpect !== null
+    ? injOrExpect
+    : { expect: injOrExpect, id: injId }
+  const expect = inj.expect
+  const id = inj.id || injId
   if (!expect) {
-    const pre = await runPreflightIn(root, injId)
+    const pre = await runPreflightIn(root, id)
     if (pre.timedOut) return pre
-    const fix = await runFixturesIn(root, '', injId)
+    const fix = await runFixturesIn(root, '', id)
     if (fix.timedOut) return fix
     return { failed: [...pre.failed, ...fix.failed] }
   }
-  const fix = await runFixturesIn(root, expect, injId)
+  if (inj.runner === 'preflight') {
+    const pre = await runPreflightIn(root, id)
+    if (pre.timedOut || pre.failed.some((line) => line.includes(expect))) return pre
+    const fix = await runFixturesIn(root, expect, id)
+    if (fix.timedOut) return fix
+    return { failed: [...pre.failed, ...fix.failed] }
+  }
+  const fix = await runFixturesIn(root, expect, id)
   if (fix.timedOut) return fix
   if (fix.failed.some((line) => line.includes(expect))) return fix
-  const pre = await runPreflightIn(root, injId)
+  const pre = await runPreflightIn(root, id)
   if (pre.timedOut) return pre
   if (pre.failed.some((line) => line.includes(expect))) return pre
   return { failed: [...pre.failed, ...fix.failed] }
@@ -155,7 +167,7 @@ async function runInjection(inj) {
       writeFileSync(full, original.replace(from, to), 'utf8')
     }
 
-    const result = await runBothIn(root, inj.expect, inj.id)
+    const result = await runBothIn(root, inj)
     if (result.timedOut) {
       return { id: inj.id, what: inj.what, skipped: `执行超时 (>${INJ_STEP_TIMEOUT_MS}ms): ${result.timedOutStep}` }
     }

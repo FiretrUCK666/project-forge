@@ -96,30 +96,33 @@ async function runCase([name, fn]) {
 
 const HEAVY_CASE_HINTS = [
   'Tier 2 review 槽同步',
-  'M2 C3',
   'flow.mjs：smoke',
-  'M3-C2',
   '全链路 URL',
   'M3-C1b',
-  'govern-audit.mjs：fence-aware',
+  'M3-C2b',
   'M2 C4+C5',
+  'govern-audit.mjs：fence-aware',
   'govern-audit.mjs release-prep',
   'M2 C1b',
-  'flow.mjs + doc-plan.mjs',
-  'M3-C1a',
   '远端 CI 合并硬门禁',
-  'M4-C3',
-  'equip.mjs + survey.mjs',
+  'M3-C1a',
+  'flow.mjs + doc-plan.mjs',
   'M2 C2',
-  'review-pack.mjs + govern-audit.mjs',
-  '无远端探测',
-  '测试分层控频',
-  '8 层深',
-  '统一 YAML',
-  'survey.mjs + compose-agents.mjs',
-  'M2 C1c',
+  'M2 C3b',
+  'M2 C3a',
   '耦合文件自同步',
+  'equip.mjs + survey.mjs',
+  'M4-C3',
+  'review-pack.mjs + govern-audit.mjs',
+  'M2 C1c',
+  '测试分层控频',
+  'survey.mjs + compose-agents.mjs',
+  '8 层深',
+  'Trust Gateway',
+  '统一 YAML',
   'M3-C5',
+  'M4-C1a',
+  '无远端探测',
 ]
 
 function buildDispatchOrder(allCases) {
@@ -341,7 +344,7 @@ async function main() {
   }
 
   // 全量跑且未传 --only / --bail-on 时，默认按动态工作窃取队列派生隔离子进程池（避免长尾倾斜与 Windows 进程风暴）
-  const defaultJobs = only || bailOn ? 1 : Math.min(8, Math.max(2, cpus().length))
+  const defaultJobs = only || bailOn ? 1 : Math.min(9, Math.max(2, cpus().length))
   const lanes = Number.isFinite(jobsArg) && jobsArg >= 1
     ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length))
     : defaultJobs

@@ -51,6 +51,7 @@ export const INJECTIONS = [
     from: 'Repo → docs → remote → automation',
     to: 'Repo → remote → docs → automation',
     expect: 'S3 落盘顺序',
+    runner: 'preflight',
   },
   {
     id: 'I7',
@@ -67,6 +68,7 @@ export const INJECTIONS = [
     from: '- **止损记录**：触发过哪条止损',
     to: '- **止损**：触发过哪条止损',
     expect: '审查栏',
+    runner: 'preflight',
   },
   {
     id: 'I9',
@@ -75,6 +77,7 @@ export const INJECTIONS = [
     from: '  5. **先卸 worktree**：`git worktree remove <路径>`（先用 `worktree-deps` 解绑共享依赖链接再删；分支被 worktree 检出时下一步必败）；\n  6. 再删本地分支：`git branch -d <分支>`（不是 `-D`）；',
     to: '  5. **先删本地分支**：`git branch -d <分支>`（不是 `-D`）；\n  6. **再卸 worktree**：`git worktree remove <路径>`；',
     expect: '合并收尾',
+    runner: 'preflight',
   },
   {
     id: 'I9b',
@@ -83,6 +86,7 @@ export const INJECTIONS = [
     from: '  1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；\n  2. 合并 PR（**不勾选自动删分支**）；',
     to: '  1. 合并 PR（**不勾选自动删分支**）；\n  2. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；',
     expect: '合并收尾',
+    runner: 'preflight',
   },
   {
     id: 'I9c',
@@ -91,6 +95,7 @@ export const INJECTIONS = [
     from: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n  'references/collaboration.md',\n]",
     to: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n]",
     expect: '判据源头',
+    runner: 'preflight',
   },
   {
     id: 'I9d',
@@ -99,6 +104,7 @@ export const INJECTIONS = [
     from: '：远端还在不在（`git ls-remote --heads origin <分支>`）、有没有下游堆叠 PR',
     to: '：远端还在不在、有没有下游堆叠 PR',
     expect: '教人敲的命令不一致',
+    runner: 'preflight',
   },
   {
     id: 'I9e',
@@ -107,6 +113,7 @@ export const INJECTIONS = [
     from: '、有没有下游堆叠 PR 以该分支为 base',
     to: '',
     expect: '没有交代',
+    runner: 'preflight',
     alsoDropIn: ['templates/agents-project.md', 'AGENTS.md'],
   },
   {
@@ -116,6 +123,7 @@ export const INJECTIONS = [
     from: '、有没有下游堆叠 PR 以该分支为 base',
     to: '',
     expect: 'templates/agents-project.md 的合并收尾没有交代',
+    runner: 'preflight',
   },
   {
     id: 'I9f',
@@ -132,6 +140,7 @@ export const INJECTIONS = [
     from: '- [ ] C1: <第一条可判定的标准>\n- [ ] C2: <第二条>',
     to: '- [ ] 1. <第一条可判定的标准>\n- [ ] 2. <第二条>',
     expect: '验收标准编号',
+    runner: 'preflight',
   },
   {
     id: 'I10b',
@@ -139,7 +148,8 @@ export const INJECTIONS = [
     file: 'templates/docs-todo.md',
     from: '**在合并之前写完，随这次改动一起提交。**',
     to: '**合并之后补。**',
-    expect: '完成后的记录',
+    expect: '「完成后的记录」里没有要求「在合并之前写完」',
+    runner: 'preflight',
   },
   {
     id: 'I11',
@@ -148,6 +158,7 @@ export const INJECTIONS = [
     from: "    text: '还没有版本库',\n    review: 'git.absent',",
     to: "    text: '还没有版本库',",
     expect: '缺口覆盖',
+    runner: 'preflight',
   },
   {
     id: 'I12',
@@ -156,6 +167,7 @@ export const INJECTIONS = [
     from: "    text: '还没有版本库',\n    review: 'git.absent',",
     to: "    text: '还没有版本库',\n    review: 'git.no-such-finding',",
     expect: '缺口覆盖',
+    runner: 'preflight',
   },
   {
     id: 'I13',
@@ -180,6 +192,7 @@ export const INJECTIONS = [
     from: "  return [...headings].filter((h) => h.replace(/`/g, '').startsWith(wanted))",
     to: "  return [...headings].filter((h) => h.replace(/`/g, '') === wanted)",
     expect: '指路落空',
+    runner: 'preflight',
   },
   {
     id: 'I16',
@@ -188,6 +201,7 @@ export const INJECTIONS = [
     from: 'return { ...coverageOf(gapDeclarations(source), reviewIds(reviewSource), GAP_RULE_IDS), counts }',
     to: 'return { ...coverageOf(gapDeclarations(source), reviewIds(reviewSource), null), counts }',
     expect: '缺口覆盖',
+    runner: 'preflight',
   },
   {
     id: 'I17',
@@ -196,6 +210,7 @@ export const INJECTIONS = [
     from: 'export const GAP_RULES = [',
     to: 'export const GAP_RULES_RENAMED = [',
     expect: '缺口覆盖',
+    runner: 'preflight',
   },
   {
     id: 'I18',
@@ -204,6 +219,7 @@ export const INJECTIONS = [
     from: 'export ',
     to: `// 详见第` + `四` + `节。\nexport `,
     expect: '节号指针',
+    runner: 'preflight',
   },
   {
     id: 'I19',
@@ -212,6 +228,7 @@ export const INJECTIONS = [
     from: 'name: dev-flow',
     to: 'name: dev-flow-drifted',
     expect: '内置套件一致性失败',
+    runner: 'preflight',
   },
   {
     id: 'I20',
@@ -220,6 +237,7 @@ export const INJECTIONS = [
     from: 'name: dev-flow',
     to: 'name: dev-flow\n# ' + 'Git' + 'Lab',
     expect: '别的托管平台不进产物层',
+    runner: 'preflight',
   },
   {
     id: 'I21',
@@ -380,6 +398,7 @@ export const INJECTIONS = [
     from: '<text x="64" y="68" class="mono" font-size="16" font-weight="600" letter-spacing="2" fill="#526075">GIT WORKFLOW HARNESS · GITHUB</text>',
     to: '<text x="64" y="68" class="mono" font-size="11" font-weight="600" letter-spacing="2" fill="#526075">GIT WORKFLOW HARNESS · GITHUB</text>',
     expect: '禁止微小字号',
+    runner: 'preflight',
   },
   {
     id: 'I41',
@@ -396,6 +415,7 @@ export const INJECTIONS = [
     from: '---\nkind: spec',
     to: 'kind: spec',
     expect: '缺少 YAML Frontmatter',
+    runner: 'preflight',
   },
   {
     id: 'I43',
@@ -452,6 +472,7 @@ export const INJECTIONS = [
     from: '  check:\n    needs: gates\n    if: always()',
     to: '  check:\n    needs: gates',
     expect: '汇总 job `check` 缺少 `if: always()`',
+    runner: 'preflight',
   },
   {
     id: 'I50',
@@ -468,6 +489,7 @@ export const INJECTIONS = [
     from: "  'ruby', 'php', 'dotnet', 'cpp', 'dart', 'swift', 'elixir', 'docs',",
     to: "  'ruby', 'php', 'dotnet', 'cpp', 'dart', 'swift', 'elixir', 'docs', 'cobol',",
     expect: '生态清单里没有对应识别项',
+    runner: 'preflight',
   },
   {
     id: 'I52',
@@ -665,5 +687,6 @@ export const INJECTIONS = [
     from: '          gh release download "$TAG" -p "$ASSET" --repo "$REPO" -O "$TMP_ZIP"',
     to: '          # removed release readback',
     expect: 'release.yml 缺少发布附件回读校验',
+    runner: 'preflight',
   },
 ]

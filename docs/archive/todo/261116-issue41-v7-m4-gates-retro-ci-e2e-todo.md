@@ -56,7 +56,7 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI + Round 3 flushAndExit 与 macOS 并发防挂死根治均已落盘，提交后于 HEAD 上锁定 finalize + verify --mode gate 并发起 Round 3 审查）`
+- **当前状态**：`已完成，无遗留（Round 1 M4 交付 + Round 2 跨平台 CI + Round 3 flushAndExit 与看门狗 + Round 4 I10b/preflight 收敛与长尾排期均已落盘，提交后锁定 finalize + verify --mode gate 并发起 Round 4 复审）`
 - **待拍板事项**：无
 
 ## 完成后的记录
@@ -71,6 +71,9 @@ related_spec: ../specs/261116-issue41-v7-m4-gates-retro-ci-e2e-spec.md
   - `flushAndExit` 单源排空显式退出（`kit/skills/lib/cli.mjs`、`shared.mjs`、`scripts/lib/text.mjs`）：先排空 `process.stdout`/`process.stderr` 再 `process.exit(code)`，全面替换 8 个顶层脚本与 6 个 kit CLI（含 `sync-toc.mjs`/`handoff.mjs`/`worktree-deps.mjs`），在 `fixtures-m4.mjs` 实测 >128KB JSON 管道完整刷新且带活跃定时器不挂起，并同步重跑 `equip.mjs .`。
   - 并发防挂死看门狗与限流（`scripts/dev/verify-injections.mjs`、`scripts/dev/fixtures.mjs`、`scripts/dev/fixtures-equip.mjs`）：注入 `PF_NO_REAL_AUTH_PROBE=1`、`stdio: ['ignore', 'pipe', 'pipe']`、`90000ms`/`45000ms` 超时强杀进程树并精准定位超时用例/注入 ID；`darwin && CI` 钳制 `verify-injections` 并发上限至 `2`。
   - 消除重复 CI 触发与设置任务超时（`.github/workflows/check.yml`）：`on.push.branches` 收敛为 `['main']` 避免 PR 分支双跑 14 个 job，并为 `gates` 增加 `timeout-minutes: 20`。
+- **Round 4 `I10b` 收敛与调度裕量优化**：
+  - `scripts/dev/injections-data.mjs` + `scripts/dev/verify-injections.mjs`：将 `I10b.expect` 收敛为 `'「完成后的记录」里没有要求「在合并之前写完」'`（零匹配重型 `fixtures-*.mjs`），并支持 `runner: 'preflight'`（优先跑 `preflight` 再兜底 `fixtures`，保持任一道捕获语义不削弱），`I10b` 单跑降至 `3.25s`；
+  - `scripts/dev/fixtures.mjs`：按实测 `--profile` 真实耗时倒序重排 `HEAVY_CASE_HINTS` 并调整 `defaultJobs` 上限为 `Math.min(9, ...)`，消除重型长尾倾斜。
 - **实际验证命令清单**：提交后于最新 `HEAD` 跑通 `flow.mjs verify --mode gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs`、`verify-injections.mjs`）、`bench.mjs`、`e2e-zip-harness.mjs`、`govern-audit.mjs audit .` 与 `--package` 净包检查。
 - **文档同步检查**：已同步更新 `docs/TDD.md`（收窄第 218–219 行状态图边标签并登记 M4 新增模块表与门禁矩阵）、`references/plugin-ecosystems.md`、`references/skill-project.md`、`kit/skills/dev-govern/SKILL.md` 及 `.agents/skills/`；总控 PRD `docs/prd/261115-v7-workflow-architecture-prd.md` 按 1:N 保护保持 `active` 未动。
 - **遗留问题**：无（M5 全盘精简对齐与总控 PRD 归档留待后续里程碑）。

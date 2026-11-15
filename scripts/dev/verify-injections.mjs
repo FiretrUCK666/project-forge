@@ -48,7 +48,7 @@ const INJECTIONS = [
   {
     id: 'I4',
     what: '缺口清单不再报「缺 AGENTS.md」',
-    file: 'scripts/survey.mjs',
+    file: 'scripts/lib/survey-gap-rules.mjs',
     from: "    when: (f) => !f.docs.agents && f.scale.effectiveFiles > 0,",
     to: "    when: () => false,",
     expect: 'AGENTS.md',
@@ -176,7 +176,7 @@ const INJECTIONS = [
   {
     id: 'I11',
     what: '勘察的某条缺口不再登记处置（体检那边从此没人接）',
-    file: 'scripts/survey.mjs',
+    file: 'scripts/lib/survey-gap-rules.mjs',
     from: "    text: '还没有版本库',\n    review: 'git.absent',",
     to: "    text: '还没有版本库',",
     expect: '缺口覆盖',
@@ -184,7 +184,7 @@ const INJECTIONS = [
   {
     id: 'I12',
     what: '某条缺口的处置指向一个体检里不存在的结论 id',
-    file: 'scripts/survey.mjs',
+    file: 'scripts/lib/survey-gap-rules.mjs',
     from: "    text: '还没有版本库',\n    review: 'git.absent',",
     to: "    text: '还没有版本库',\n    review: 'git.no-such-finding',",
     expect: '缺口覆盖',
@@ -224,9 +224,9 @@ const INJECTIONS = [
   {
     id: 'I17',
     what: '缺口表整段改名（词法切块彻底失灵，一条都读不出来）',
-    file: 'scripts/survey.mjs',
-    from: 'const GAP_RULES = [',
-    to: 'const GAP_RULES_RENAMED = [',
+    file: 'scripts/lib/survey-gap-rules.mjs',
+    from: 'export const GAP_RULES = [',
+    to: 'export const GAP_RULES_RENAMED = [',
     expect: '缺口覆盖',
   },
   {

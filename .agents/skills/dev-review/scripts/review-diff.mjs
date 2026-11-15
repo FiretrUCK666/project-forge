@@ -183,11 +183,61 @@ function buildHunkIndex(files, untracked, chunks, reviewRoot) {
   }
 }
 
+function parseCommitShowNameStatusZ(buf) {
+  const tokens = Buffer.isBuffer(buf) ? buf.toString('utf8').split('\0') : String(buf ?? '').split('\0')
+  const byFile = new Map()
+  for (let i = 0; i < tokens.length; i += 1) {
+    const rawStatus = tokens[i]?.trim()
+    if (!rawStatus) continue
+    if (/^[RC]/.test(rawStatus)) {
+      const oldFile = posixPath(tokens[i + 1] ?? '')
+      const file = posixPath(tokens[i + 2] ?? '')
+      i += 2
+      if (file) byFile.set(file, { status: rawStatus, file, oldFile })
+    } else if (/^[MADTU]/.test(rawStatus)) {
+      const file = posixPath(tokens[i + 1] ?? '')
+      i += 1
+      if (file) byFile.set(file, { status: rawStatus, file })
+    }
+  }
+  return [...byFile.values()]
+}
+
 export async function collectDiff(repoRoot, spec) {
   const op = await detectInProgressGitOp(repoRoot)
   if (op.inProgress) {
     const detail = op.conflicts.length > 0 ? `（冲突文件：${op.conflicts.slice(0, 5).join(', ')}）` : ''
     throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态${detail}，请先解决冲突后再运行 review-pack。`)
+  }
+
+  if (spec.mode === 'commits') {
+    const commits = Array.isArray(spec.commits) ? spec.commits.filter(Boolean) : []
+    if (commits.length === 0) {
+      return {
+        sha256: createHash('sha256').update('').digest('hex'),
+        bytes: 0,
+        text: '',
+        chunks: new Map(),
+        files: [],
+        untracked: [],
+        hunkIndex: [],
+        summary: { filesChanged: 0, untrackedCount: 0, addedLines: 0, removedLines: 0 },
+      }
+    }
+    const [rawBufRes, nsBufRes] = await Promise.all([
+      gitRunBuffer(repoRoot, ['show', '--format=tformat:', '--no-ext-diff', '--no-color', ...commits], { maxBuffer: 64 * 1024 * 1024, timeout: 30000 }),
+      gitRunBuffer(repoRoot, ['show', '--format=tformat:', '--name-status', '-z', ...commits], { maxBuffer: 16 * 1024 * 1024, timeout: 30000 }),
+    ])
+    if (!rawBufRes.ok || !nsBufRes.ok) {
+      const errText = rawBufRes.stderr || nsBufRes.stderr || 'unknown git show error'
+      throw new Error(`GIT_DIFF_FAILED: git show 执行失败（commits=${commits.join(',')}）：${errText}`)
+    }
+    const rawBuf = Buffer.isBuffer(rawBufRes.stdout) ? rawBufRes.stdout : Buffer.from('')
+    const text = rawBuf.toString('utf8').replace(/\r\n/g, '\n')
+    const files = parseCommitShowNameStatusZ(nsBufRes.stdout).filter((e) => e.file && !isMacOsJunkPath(e.file))
+    const chunks = splitDiffByFile(text)
+    const { hunkIndex, summary } = buildHunkIndex(files, [], chunks, repoRoot)
+    return { sha256: createHash('sha256').update(rawBuf).digest('hex'), bytes: rawBuf.length, text, chunks, files, untracked: [], hunkIndex, summary }
   }
 
   const argsBase = ['diff', '--no-ext-diff', '--no-color']

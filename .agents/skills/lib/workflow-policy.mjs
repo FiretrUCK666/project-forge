@@ -535,6 +535,12 @@ export function evaluateNextState({
     blockingReasons.push('STOP_LOSS_ESCALATE')
     nextAction = '已触发停损熔断，须人类审阅后执行 override 解锁'
     command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" override --task ${t.taskId} --human-approved --reason "<理由>"`
+  } else if (t.status === 'rework' && t.queueConflict) {
+    phase = 'needs-rework'
+    ownerRole = 'implementer'
+    blockingReasons.push(t.queueConflict.code || 'BLOCKED_TRIAL_MERGE_CONFLICT')
+    nextAction = `合并队列试合失败（${t.queueConflict.code ?? 'conflict'}），请先同步基线（flow.mjs sync）解决冲突并重跑 verify`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" sync --task ${t.taskId}`
   } else if (lastRound?.verdict === 'changes' && lastRound?.headSha && currentHead && lastRound.headSha === currentHead) {
     phase = 'needs-rework'
     ownerRole = 'implementer'

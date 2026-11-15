@@ -515,7 +515,10 @@ export function splitDiffByFile(diffText) {
   let currentFile = null
   let buf = []
   const flush = () => {
-    if (currentFile !== null) chunks.set(currentFile, buf.join('\n'))
+    if (currentFile !== null) {
+      const nextChunk = buf.join('\n')
+      chunks.set(currentFile, chunks.has(currentFile) ? `${chunks.get(currentFile)}\n${nextChunk}` : nextChunk)
+    }
   }
   for (const line of lines) {
     if (line.startsWith('diff --git ')) {
@@ -674,11 +677,10 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
   return hits
 }
 
-/** 扫描仓库 diff 中可能弱化验证门禁的改动，返回精确命中列表。 */
-export async function detectGateWeakening(implRoot, baseRef, baseBranch) {
+/** 扫描仓库 diff 中可能弱化验证门禁的改动，返回精确命中列表（支持复用 headSha 与 nameStatusEntries）。 */
+export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = {}) {
   let ref = baseRef
-  const headRes = await gitRun(implRoot, ['rev-parse', 'HEAD'])
-  const headSha = headRes.ok ? headRes.stdout.trim() : null
+  const headSha = opts.headSha ?? ((await gitRun(implRoot, ['rev-parse', 'HEAD'])).stdout?.trim() || null)
 
   if (!ref && baseBranch) {
     const brRes = await gitRun(implRoot, ['rev-parse', '--verify', baseBranch])
@@ -686,16 +688,25 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch) {
   }
   if (!ref) return []
 
+  const hasPreNs = ref === baseRef && Array.isArray(opts.nameStatusEntries)
+  if (hasPreNs && opts.nameStatusEntries.every((e) => !e?.file || /\.mdx?$|\.txt$/i.test(e.file))) {
+    return []
+  }
+
   const [diffRes, nsRes] = await Promise.all([
     gitRunBuffer(implRoot, ['diff', '--unified=3', '--no-ext-diff', '--no-color', `${ref}..HEAD`]),
-    gitRunBuffer(implRoot, ['diff', '--name-status', '-z', `${ref}..HEAD`]),
+    hasPreNs ? Promise.resolve(null) : gitRunBuffer(implRoot, ['diff', '--name-status', '-z', `${ref}..HEAD`]),
   ])
   if (!diffRes.ok) return []
 
   const diffText = diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n')
   const chunks = splitDiffByFile(diffText)
   const statusMap = new Map()
-  if (nsRes.ok) {
+  if (hasPreNs) {
+    for (const e of opts.nameStatusEntries) {
+      if (e?.file) statusMap.set(posixPath(e.file), e.status || 'M')
+    }
+  } else if (nsRes?.ok) {
     const tokens = nsRes.stdout.toString('utf8').split('\0')
     for (let i = 0; i < tokens.length; i += 1) {
       const st = tokens[i]

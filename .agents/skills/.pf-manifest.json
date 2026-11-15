@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-15T18:19:25.461Z",
+  "installedAt": "2026-11-15T19:54:31.757Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "5d863f7c6333958eb5786cb3cefef82993144669bba91f2b2a7d4302b23802f6"
@@ -11,28 +11,37 @@
       "sha256": "731471f4b347966bfd57686588b5b734675ceeba754f7b7b98ef062337f91620"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "42c4f7da8f44d297fb6311289d41eb1b979a28f85798305f98d272273b5193a7"
+      "sha256": "7619f3dc11f4fa6427cb768e61d6ea366e2a6fc6a0c95094b54430bf54b697f9"
+    },
+    "dev-flow/scripts/flow-batch.mjs": {
+      "sha256": "a32e077ffb7b1b329c626e6e32c228df536232064807390afe423911c97320d5"
+    },
+    "dev-flow/scripts/flow-cleanup.mjs": {
+      "sha256": "fbab20d209bfbb209e939f2275cca40966b72cf1df47d74ccb88255740ca814d"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "3189e472341452d242204c1d2852b0a84ef1f7feb9fe2619a1c22b37e8975348"
+      "sha256": "2be2c4129c01edc38880ce41975913e5430aa86f89bbcfd954b71291f5965c81"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "008ca27c578196537c1b4aba921948f33474be5153f4dfe5757360b65a701960"
+      "sha256": "81f77227d39cf5cddd1a79b7e5007aff1bd15e271643b5a2536a7c2a7d9fdd37"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "ad18a40e7b98f39ad0bbbfdc163f218f48fb34ca77d28d9b2e04d582bcdad4c0"
+      "sha256": "7081df39822543e9fff448f43c900275129fb70452794611d6df7524e9ffdd64"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "47b483f44b4bec02320826c3fa86b8f74bb08a9e2a8a836dd48bcfea2b92c573"
+      "sha256": "1a0b1766fa4be9e56a7a54e9578e148d7ec59720f0c607dfce517e89499f7844"
+    },
+    "dev-flow/scripts/flow-sync.mjs": {
+      "sha256": "559c40bb69242d64e4eb02de6f9d0fc9246fb64af1d4d81fc99e0ccf35221a3f"
     },
     "dev-flow/scripts/flow-trial-merge.mjs": {
-      "sha256": "4ff44d9b39fd13908d312bf3ab51636c739a15f2a3bfef90995813dcd4ad41e6"
+      "sha256": "81e8afd1ef89e19cf2bb2148a131896e861daf3646fc336d34c497ec19644121"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "e0b21886e980ad6073c745923a17d6573c062e925ae04d5952d8be463aa21f92"
+      "sha256": "02da53fa48f6b59a0c4abceeea99a2a3e12ca5b6ce80ce8f927b649e3f26a915"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
-      "sha256": "f4825d5454a8a040bd250512521f32b895f11f7a68de3f3dfc42b674de208180"
+      "sha256": "f9735371b3fac2af0b11af6eb581fe1d8a387744fd851790ff29d49164e633c6"
     },
     "dev-govern/SKILL.md": {
       "sha256": "0ca802e57d4f655c47212b84dc84b7bcfb7cef2c793e9b367cb13a0418c88589"
@@ -50,58 +59,61 @@
       "sha256": "439ad52d61c6dbf685f654e80be50dba8fd20103380a2c3479fe16741ca5b72a"
     },
     "dev-govern/scripts/govern-tests.mjs": {
-      "sha256": "41f337e4eb935ddf5c2171e18c24e8fe82bfb3cba8b44b20dc491eaca706c131"
+      "sha256": "2337f083f7a168e2fc1b5b38873c8f646e4619138534c483c785d289ae4e56a5"
     },
     "dev-govern/scripts/release-prep-lib.mjs": {
       "sha256": "57fad9ddcd14b3d0ea531aae9014050ad04e27b5f8d265f8fa0bfe3e6bf8468f"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "c46e787b43c88c05d26fc457fcc0941c9a40f0abb82d0b7e077be3ad8d9422f6"
+      "sha256": "6c6c51e723ad066295dc3eed0c50cab584838b3fdb76847b012b506c4ac82276"
     },
     "dev-plan/scripts/doc-audit.mjs": {
       "sha256": "ef949451dfcd9a30d74c04462338d075336061fd9a12b33e9c15f11a1df9e155"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "d78ff19a05c6199288be533ac9aa3a487b7d84f4b278fb56f9b8339465ef363e"
+      "sha256": "4e06bdc7a91a3a2108d5a61c88d04b59680c6973af4f195b79e25cb6fd2dc0e6"
     },
     "dev-review/SKILL.md": {
-      "sha256": "4cc5506b276b7e0dd3ac3a2bf9a0b76e058500712c852bf38983f8c54ed0c2d9"
+      "sha256": "4adef50849f87dfb5dc80127aded65c0f6fa16c65603c3dd8880758cc16be614"
     },
     "dev-review/scripts/review-diff.mjs": {
-      "sha256": "5c2f87fcb0c75e85b70b762deabcee7d07fc9d78f1df74199aa05f16b0934dd1"
+      "sha256": "d0731afee13ae271914832c8bd1d4114852a82d3d9f8934f36d96c9e8cb804ba"
     },
     "dev-review/scripts/review-gates.mjs": {
       "sha256": "dc6b8b06001269b128ed32e6e76772280c28b15b46c98ae42594006790c60f3c"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "3488776049921813cb0ced8a0a1c48cff7c11d4f848c13d682177bedd5ac2fa3"
+      "sha256": "b952e9b74869f00d149b0a8e0f279e0fdf3d655f150fa3b5f323b1211fecd61b"
     },
     "dev-review/scripts/review-locks.mjs": {
-      "sha256": "469ce78224c73914217d20bfc8c6c32bb99f93c38ef0e62715bd082eb5c86f9b"
+      "sha256": "7649cd7c618795ae0051c8ba982ad486108063d2df24b48fbd2ada2aabe6246c"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "0800b0582230aa5e54ddc3499206cb5cc57ca28dfe7800db9d5d31432968444c"
+      "sha256": "9e81796fa58929b62db28d2e4362901efb49c75e4644c38d302abab5d441804e"
     },
     "lib/cli.mjs": {
       "sha256": "0c9a22a10344093eea03d116811354f6d8a38672dc2aeecef0b3217f98fe2831"
     },
     "lib/doc-templates.mjs": {
-      "sha256": "a341be0a0e67053369dd5d2a8640af2d149c7fe5ee3f360eafc4792194f4c7b2"
+      "sha256": "000e59f7f149c0ae054d9f3188f0f7f644ffaced142d1cf584812a013778e79b"
     },
     "lib/docs.mjs": {
-      "sha256": "78542e80ae99322cbd5ff0ff242a081fc156c01d73666758496983b1609e02bb"
+      "sha256": "0465550089bcd4160f563685aef32763346a81f6854f14f92713d91d9e1e6644"
     },
     "lib/exec.mjs": {
-      "sha256": "2e74d3c9b9278f649ece757d42763f32fd5d4ae5db0e9dfa58d01eaa39a46f2b"
+      "sha256": "f912c8601e83571ff49a84e0bbfaec7ccd6376888276f1196eb4438b32669617"
+    },
+    "lib/git-fast.mjs": {
+      "sha256": "22e272c58ae388b52877ec4489a72f39a9cc364791355efe51849c020a3a8ed6"
     },
     "lib/git.mjs": {
-      "sha256": "e78434c17ffc2612e84c02aa08849668fe3501719ba0403b9428653920b2050a"
+      "sha256": "82478af6a1599669aebf2d80ef9d88a9a903ea8390c73971763dee3ea9107284"
     },
     "lib/github-client.mjs": {
-      "sha256": "b8760255aadd3635035b57b7392aabdbf10519056db143bedb39f896652f586d"
+      "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/ledger.mjs": {
-      "sha256": "feeb443df1087d25383765796ea1657c57fdaa840db6d6b2430a949ac2f737c2"
+      "sha256": "99dc1bdbbf6731b70dfe37d020e5af0d734e40753fa9e5efa8a930ca1a1a06b5"
     },
     "lib/platform-probe.mjs": {
       "sha256": "6ea9cb0645122d4f77220f6bd81db0430ef3dba26090aef2a339cbdf7b0bcd19"
@@ -109,17 +121,26 @@
     "lib/platform.mjs": {
       "sha256": "a08ac4e4c8e75d5696389a901fe38f51b23be5928d33981bba4bc99468aba7c2"
     },
+    "lib/profile-sniffer.mjs": {
+      "sha256": "11fa9b90c7e21a5a29d5d91ed22353c7cdd2c1ed220958b83965c9510b8d3d01"
+    },
     "lib/profile.mjs": {
-      "sha256": "3bcfe655690d1d4d96dc9346332818a3ee2c6b620e984f78508fce7fb79c41a8"
+      "sha256": "47c8c69025d544ac65dda6f5010ea63396e5358bfcaeb57af6128f875b90ecf0"
     },
     "lib/shared.mjs": {
-      "sha256": "cab02d7f3be27ac211de7c44ce14c9959875d0f1e5b446d45f8c40c71de1b42c"
+      "sha256": "e9ceb406da4b09984f6bf70776da859b79c2b49eddaf2174b91969fe8d44b1a3"
     },
     "lib/static-gates.mjs": {
-      "sha256": "6eb1a3816db6778f5ae9fb5f9c2ebbba14ee4a26eba463a64b32e1137e757adc"
+      "sha256": "0d33f230e0335e9a6d2965c0303699be56ec9479123abef3a207fb75e956aadc"
+    },
+    "lib/task-backend.mjs": {
+      "sha256": "a02a02c1be26676351438b4bcbfccff39f4cd82c120c2386f8ebea959e0a118e"
+    },
+    "lib/task-graph.mjs": {
+      "sha256": "6d283f486b126b1026f2c33b3cc38c223641d967e636682b2be47a6ca00d4888"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "05e354cf7700870d0ddd81fc9b2e26f1ff9d57d7c3b94af5d7738b630fb4b85c"
+      "sha256": "20699c295c1d38ca4b1b8d5c6a6a2d77d770d2bdca0bb431f616549a5954c7aa"
     }
   },
   "disabledSkills": [],
@@ -127,7 +148,7 @@
   "customizedFiles": {},
   "agentsRegions": {
     "意图路由": {
-      "sha256": "e3eecaa117dab22e79479f25ee5ba4fc8110a814924d927726f66c207af8d1fe"
+      "sha256": "e77e71504bdd8e93b03b7c6e5f0a6e5da73a6246915b1b3effad26af0ea116a9"
     },
     "行事总纲": {
       "sha256": "54ed483134d0d172cf7a4b2eb694612d4e8ceea3c9fd96ff3798102e731671b8"

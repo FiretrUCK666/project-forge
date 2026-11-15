@@ -43,14 +43,14 @@ description: |
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd]
 
-# 2. 按统一模板生成文档（若已存在任务 worktree，自动写进实施工作树）
+# 2. 按统一模板生成文档（若已存在任务 worktree，自动写进实施工作树；自动识别仓库自有 docs/templates/* / .github/*-template.md）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--task "<taskId>"]
 
-# 3. 规划内审自净化（含两遍 (new) 收集与 Mermaid 16/12 宽度门禁）
+# 3. 规划内审自净化（含两遍 (new) 收集、Mermaid 16/12 宽度门禁与 prd/TDD/非平凡 todo 独立 Critique 指引）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/todo/<YYMMDD-slug-todo>.md"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 
-# 4. 关联、Critique、批准、成对归档与取代
+# 4. 关联、Critique（SELF_CRITIQUE_REJECTED 禁自审）、批准、成对归档与取代
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--branch <B>] [--status <S>]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<reviewerId>" --round 1 --summary "<结论>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "docs/specs/<file>"

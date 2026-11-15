@@ -34,8 +34,10 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...] [--probe-auth]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 
-# 2. 启动或放弃隔离工作位（commits > 0 均进 .worktrees/impl-<id>；--create-issue 可由 maintainer 自动建单）
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--create-issue --title "<标题>"] [--external-pr <M|URL>]
+# 2. 启动或放弃隔离工作位（--after 支持堆叠子分支，--files 声明切片，--create-issue 自动建单）
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" sync [--task <id>] [--onto <branch>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm]
 
 # 3. 认领（真账号防撞车，接管须带 --takeover --reason）/ 释放 / 文档锁与分层实证

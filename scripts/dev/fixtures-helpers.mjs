@@ -114,8 +114,15 @@ const IN_PROCESS_CLI_SCRIPTS = new Set([
   'kit/skills/dev-govern/scripts/govern-audit.mjs',
 ])
 const cliModCache = new Map()
+let inProcessQueue = Promise.resolve()
 
-async function execCliInProcess(absPath, args, opts = {}) {
+function execCliInProcess(absPath, args, opts = {}) {
+  const task = inProcessQueue.then(() => runCliInProcessUnlocked(absPath, args, opts))
+  inProcessQueue = task.catch(() => {})
+  return task
+}
+
+async function runCliInProcessUnlocked(absPath, args, opts = {}) {
   let mod = cliModCache.get(absPath)
   if (!mod) {
     mod = await import(pathToFileURL(absPath).href)

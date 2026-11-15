@@ -3,7 +3,7 @@
  * flow.mjs —— Git 协同流转状态机总入口（零记忆自动推断 --task，按子命令按需加载减少启动耗时）。
  *
  * 子命令：
- *   inspect | start | claim | finalize | verify | submit | rework | merge | cleanup | status | abort
+ *   inspect | next | start | claim | release | finalize | verify | submit | rework | sync | merge | cleanup | status | abort | batch
  */
 
 import { basename } from 'node:path'
@@ -16,26 +16,28 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'merge', 'cleanup', 'status', 'abort']
+const SUBCOMMANDS = ['inspect', 'next', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
 
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-flow/scripts/flow.mjs <子命令> [选项]',
     '',
-    '子命令（next/claim/release/finalize/verify/submit/rework/merge/cleanup/status/abort 支持自动推断 --task）：',
+    '子命令（next/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--probe-auth] [--json]',
-    '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--json]',
+    '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--json]',
-    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--visual-checked] [--json]',
-    '  submit    [--task <id>] [--draft] [--rework] [--reset-review-slot] [--json]',
+    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--visual-checked] [--human-approved] [--json]',
+    '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
+    '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--json]',
     '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--json]',
     '  status    [--task <id>] [--json]',
     '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--json]',
+    '  batch     <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--enqueue-only] [--trial-local] [--task <id>] [--json]',
   ].join('\n') + '\n')
 }
 
@@ -49,17 +51,18 @@ async function main(argv) {
       booleanFlags: [
         'probe-auth', 'parallel', 'draft', 'rework', 'confirm', 'force',
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
-        'human-approved', 'visual-checked', 'strict-sync',
+        'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
+        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body',
-        'labels', 'method', 'reason',
+        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot',
       ],
       multiFlags: ['rebut'],
-      usageHint: 'flow.mjs <inspect|next|start|claim|release|finalize|verify|submit|rework|merge|cleanup|status|abort>',
+      usageHint: 'flow.mjs <inspect|next|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -134,6 +137,14 @@ async function main(argv) {
       if (sub === 'cleanup') return (await handleCleanup(opts, roots)).exitCode
       if (sub === 'status') return (await handleStatus(opts, roots)).exitCode
       return (await handleAbort(opts, roots)).exitCode
+    }
+    if (sub === 'sync') {
+      const { handleSync } = await import('./flow-sync.mjs')
+      return (await handleSync(opts, roots)).exitCode
+    }
+    if (sub === 'batch') {
+      const { handleBatch } = await import('./flow-batch.mjs')
+      return (await handleBatch(opts, roots)).exitCode
     }
     if (sub === 'finalize' || sub === 'verify' || sub === 'submit' || sub === 'rework') {
       const { handleFinalize, handleVerify, handleSubmit, handleRework } = await import('./flow-lifecycle.mjs')

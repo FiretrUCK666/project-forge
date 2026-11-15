@@ -5,11 +5,11 @@
  * 支持显式 `--task` -> CWD worktree -> 当前分支 -> `--pr`/`--issue` -> 唯一未闭环任务推断。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import {
-  canonicalPath, gitRun, posixPath, readJsonSafe, samePath, writeJsonAtomic,
+  canonicalPath, gitRun, posixPath, readJsonSafe, samePath, withFileLock, writeJsonAtomic,
 } from './git.mjs'
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
@@ -109,18 +109,31 @@ export function writeTaskLedger(mainRoot, ledger) {
   return p
 }
 
-/** 原子读取、转换并写回任务账本（防止直接裸写丢失契约默认值）。 */
+function resolveLedgerLockDir(mainRoot) {
+  const dotGit = join(mainRoot, '.git')
+  try {
+    if (existsSync(dotGit) && statSync(dotGit).isDirectory()) {
+      return join(dotGit, 'project-forge-flow', 'locks')
+    }
+  } catch { /* fallback below */ }
+  return join(mainRoot, '.worktrees', '.state', 'locks')
+}
+
+/** 原子读取、转换并写回任务账本（防止直接裸写丢失契约默认值，且经文件锁防并发竞态）。 */
 export async function updateTaskLedger(mainRoot, taskId, updater, { createIfMissing = false, defaults = {} } = {}) {
   const id = sanitizeTaskId(taskId)
-  const existing = readTaskLedger(mainRoot, id)
-  if (!existing && !createIfMissing) {
-    throw new Error(`找不到任务账本：${id}（请先运行 flow.mjs start --task ${id}）`)
-  }
-  const base = existing ? createDefaultLedger(existing) : createDefaultLedger({ ...defaults, taskId: id })
-  const next = typeof updater === 'function' ? await updater(structuredClone(base)) : { ...base, ...updater }
-  const merged = createDefaultLedger({ ...base, ...(next ?? {}), taskId: id })
-  const path = writeTaskLedger(mainRoot, merged)
-  return { ledger: readTaskLedger(mainRoot, id) ?? merged, path }
+  const lockPath = join(resolveLedgerLockDir(mainRoot), `ledger-${id}.lock`)
+  return withFileLock(lockPath, async () => {
+    const existing = readTaskLedger(mainRoot, id)
+    if (!existing && !createIfMissing) {
+      throw new Error(`找不到任务账本：${id}（请先运行 flow.mjs start --task ${id}）`)
+    }
+    const base = existing ? createDefaultLedger(existing) : createDefaultLedger({ ...defaults, taskId: id })
+    const next = typeof updater === 'function' ? await updater(structuredClone(base)) : { ...base, ...updater }
+    const merged = createDefaultLedger({ ...base, ...(next ?? {}), taskId: id })
+    const path = writeTaskLedger(mainRoot, merged)
+    return { ledger: readTaskLedger(mainRoot, id) ?? merged, path }
+  })
 }
 
 export function listTaskLedgers(mainRoot, { includeTerminal = true } = {}) {

@@ -19,8 +19,8 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
    子目录本身无独立 `.git`，而父目录已有仓库。直接执行初始化或提交会把项目塞进毫不相干的父仓；必须先确认应独立建仓还是本就属于父仓单包模块。
 2. **`commitsState === 'unreadable'`（仓库损坏或无权访问）**：
    不要把读不出提交误当成「零提交新仓库」，更不许直接重跑 `git init`；先排查工作树指针、`.git` 权限或对象损坏。
-3. **空目录或近空目录起步（`effectiveFiles === 0`）**：
-   只读扫描确认目录几乎空白时，不要自造骨架。停下来用 3-4 个简明问题确认：**项目定位与技术栈（Node / Python / Go / Rust / Java / 纯文档）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --lang <技术栈> --name <包名>` 一次生成完整最小可运行工程基础：`.gitattributes`、`.gitignore`、初始 `README.md`、真实可运行源码与冒烟测试、填实 `Feature Map` 的 `docs/TDD.md`（不留空洞）及按档位装配的 `.agents/skills/`（已有文件跳过不覆盖；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.zip` 快照，支持 `--format tar.gz` 与兼容恢复）。
+3. **空目录或近空目录起步（`effectiveFiles === 0` 或仅含 `README`/`LICENSE`/`.github`/`.agents`）**：
+   只读扫描确认无业务源码或生态清单时，停下来用 3-4 个简明问题确认：**项目定位与栈倾向（`universal` / 12 生态栈 / `docs`）**、**包名与简短描述**、**许可证倾向（如 MIT / Apache-2.0 / 私有不放）**、**是否需要连 GitHub 远端**。收齐后调用 `equip.mjs <目标目录> --bootstrap-empty --stack <技术栈> --name <包名>`（兼容 `--lang`）一次生成零玩具业务源码的通用治理基线：`git init`、`.gitattributes`、`.gitignore`（按栈配置忽略规则）、缺失时补 `README.md`（已有 `README.md`/`LICENSE` 原文跳过不覆盖）、无占位 `docs/TDD.md`、`docs/{prd,specs,todo}/.gitkeep`、按档位装配的 `.agents/skills/` 与初始自洽 `AGENTS.md`（生成即过 `compose-agents --check` 与 `review.mjs`；非空目录写前经 `scripts/backup.mjs` 自动打仓外 `.zip` 快照）。三层命令嗅探由 `kit/skills/lib/profile-sniffer.mjs` 单源驱动（`Dev Profile -> 2/4 空格中立 CI 与 Makefile/justfile/Taskfile -> 跳过 vendor/examples 等深层非第三方多语言子包`）。
 
 ## 三、字段含义
 

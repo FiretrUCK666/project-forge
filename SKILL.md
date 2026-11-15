@@ -9,9 +9,9 @@ description: |
   新项目配置、标准化项目、规范项目、整理项目、项目规范配置、写 AGENTS.md、写 README、
   写贡献指南、配 LICENSE、配 CI、发版配置、交棒、升级工具包、把痕迹清干净。
   适用于任意语言的仓库：12 种生态（Node、Python、Rust、Go、Java、Ruby、PHP、.NET、C/C++、
-  Dart、Swift、Elixir）走清单精准推断，其余语言从 CI 的 run 块与 Makefile/justfile 读取已被
-  真实执行的命令；空目录起步骨架覆盖 node/python/go/rust/java/docs 六种；只读勘察先行，
-  幂等不覆盖，支持 v2 墓碑/定制豁免与纯本地降级运行；默认私有仓库。
+  Dart、Swift、Elixir）走清单精准推断，其余语言从 CI 的 run 块与 Makefile/justfile/Taskfile
+  读取已被真实执行的命令；空目录 `--bootstrap-empty` 统一搭通用工程基线（支持 `--stack`），
+  只读勘察先行，幂等不覆盖，支持 v2 墓碑/定制豁免与纯本地降级运行；默认私有仓库。
   不用于：纯概念问答、临时只改一行代码且不涉及工程治理、或跳过勘察强行覆盖手写规范。
 metadata:
   version: "6.0.0"
@@ -28,7 +28,7 @@ metadata:
 
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
-| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet`（1h 检查 / 15m 失败冷却、staging 校验后最后原子写 `SKILL.md`）后跑 `survey.mjs --markdown --probe-auth`（无远端亦探测本机凭据），获取 `recommendedTier`、`explorationStrategy.tier` 与 `artifactPlan`；若目录空白（`none` / 0 业务文件），停下问 3–4 个简明问题后走 `--bootstrap-empty` 生成 6 栈骨架与初始 `docs/TDD.md`，**不派只读子代理**；存量或重入仓记下 `tier` 与 `shards` 供 `S3` 深度校准 | `references/survey.md` |
+| **S1 勘察** | 先更新再只读扫：`update.mjs --quiet`（1h 检查 / 15m 失败冷却、staging 校验后最后原子写 `SKILL.md`）后跑 `survey.mjs --markdown --probe-auth`（无远端亦探测本机凭据），获取 `recommendedTier`、`explorationStrategy.tier` 与 `artifactPlan`；若目录空白或仅含 `README`/`LICENSE`/配置（`none` / 0 业务文件），停下问 3–4 个简明问题后走 `--bootstrap-empty` 生成通用治理基线、初始 `docs/TDD.md` 与自洽 `AGENTS.md`，**不派只读子代理**；存量或重入仓记下 `tier` 与 `shards` 供 `S3` 深度校准 | `references/survey.md` |
 | **S2 定范围** | 逐项按 `facts.artifactPlan` 确定装配档位（`lightweight` 3 技能 / `full` 5 技能，待用户确认）与处置动作：**存量 `README`/`CONTRIBUTING`/单双 `LICENSE`/存量设计文档（`ARCHITECTURE.md`、`docs/adr/` 等）/工作流/`.agents/skills/<custom>/` 一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可或待选发版策略（5 选 1）走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`，并由 `equip.mjs` 按 v2 账本尊重 `disabledSkills`/`removedFiles` 墓碑与定制豁免 | 本文件 |
 | **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（按 `treeSha256` 去重并钉住初始基线）；再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；按确认档位跑 `equip.mjs --tier <lightweight|full>` 装配 `.agents/skills/` 后，存量/重入仓依 `S1` `tier` 调 `.agents/skills/dev-explore/`（`parallel-subagents` 时按 `shards` 并行只读深挖，否则 `single-pass`）编写或校准 `docs/TDD.md`（含 `## 文档信息` 表与短名 Mermaid 图）与 `prd`/`specs`/`todo`，生成/无损刷新 `AGENTS.md`（`lightweight < 14KB` / `full <= 30KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；按 `HostingProvider`（`github` / `generic-git` 降级）与五态身份配远端与自动化 | 见门控表 |
 | **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check`（已登记定制文件豁免通过）+ `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记（保留 `.agents/skills/` 时不把 `.pf-manifest.json` 计为残留） | `references/handoff.md` |
@@ -65,7 +65,7 @@ metadata:
 
 | 事实 | 版本控制 | 文档与 `AGENTS` | `.agents/skills/` | 远端与自动化 |
 | --- | --- | --- | --- | --- |
-| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左生成基线、`README`、测试与 `TDD` | 按确认档位装配 | 按意向可选 |
+| `empty`（0 业务文件） | 先问 3–4 题后 `--bootstrap-empty` | 同左保留既有 `README`/`LICENSE` 并生成基线、`TDD` 与自洽 `AGENTS.md` | 按确认档位装配 | 按意向可选 |
 | `docs-only` | 做 | 做（无代码可省 `TDD`，Profile 尊重 `none`） | 按确认档位装配 | 视远端（不发包） |
 | 已识别代码生态 / 插件 / 能力目录 | 做 | 做（保留存量架构文档） | 按确认档位装配（支持 `--tier full` 升档） | 按声明与 5 选 1 策略 |
 | `isRepoRoot` 为假 / `unknown` | **先停下问清** | 同左 | 暂缓 | 暂缓 |
@@ -89,7 +89,7 @@ node "<本 skill 目录>/scripts/update.mjs" --quiet
 node "<本 skill 目录>/scripts/survey.mjs" "<项目目录>" --markdown --probe-auth
 # S3 第 0 步：非空存量仓写前全仓 .zip 快照（钉住首份 pre-forge 基线；支持 list / restore，兼容 .tar.gz）
 node "<本 skill 目录>/scripts/backup.mjs" create "<项目目录>" --label pre-forge
-# S3 按档位装配 / 无损升级套件（空目录加 --bootstrap-empty --lang <node|python|go|rust|java|docs> --name <name>）
+# S3 按档位装配 / 无损升级套件（空目录加 --bootstrap-empty [--stack <universal|node|python|go|rust|java|docs|...>] --name <name>）
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>" --tier <lightweight|full>
 # S3 按档位生成或无损刷新 AGENTS.md（--check / --upgrade / --clean / --no-backup）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>" --tier <lightweight|full>

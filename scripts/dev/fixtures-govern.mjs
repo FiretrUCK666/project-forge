@@ -174,8 +174,29 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     if (wc.merged !== 1 || wc.squash_or_rebase_merged !== 1 || wc.no_own_commits !== 1 || wc.unmerged !== 1) {
       return `worktree 四态识别数量有误：${JSON.stringify(rj.reconcileSummary?.worktrees)}`
     }
+    return true
+  } finally {
+    for (const wt of [wtMerged, wtSquash, wtNoOwn, wtUnmerged]) {
+      gitSync(dir, ['worktree', 'remove', '--force', wt])
+    }
+    rmTree(dir)
+  }
+}])
 
-    // 2. record -> cluster -> sample
+cases.push(['govern-audit.mjs：record -> cluster 规则下沉候选与 sample 高频返工热点', async () => {
+  const dir = tmpProject({ '.gitignore': '.worktrees/\n', 'src/hot.mjs': 'export const h = 0\n' })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+  try {
+    for (let i = 1; i <= 3; i += 1) {
+      writeFileSync(join(dir, 'src/hot.mjs'), `export const h = ${i}\n`)
+      gitSync(dir, ['add', 'src/hot.mjs'])
+      gitSync(dir, ['commit', '-qm', `hot edit ${i}`])
+    }
+    writeFileSync(join(dir, 'src/rev.mjs'), 'export const r = 1\n')
+    gitSync(dir, ['add', 'src/rev.mjs'])
+    gitSync(dir, ['commit', '-qm', 'add rev'])
+    gitSync(dir, ['revert', '--no-edit', 'HEAD'])
+
     const r1 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'direct db import', '--json'])
     if (r1.status !== 0 || JSON.parse(r1.stdout).ruleSinkCandidate !== false) return `首次 record 判据有误：${r1.stdout}`
     const r2 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'second db import', '--json'])
@@ -184,23 +205,16 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     }
 
     const cl = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['cluster', dir, '--signals-only', '--json'])
-    if (cl.status !== 0) return `cluster 失败：${cl.stderr}`
-    const clj = JSON.parse(cl.stdout)
-    if ((clj.cluster?.sinkCandidateCount ?? 0) < 1) return `cluster 未识别下沉候选：${cl.stdout}`
-
     const smp = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['sample', dir, '--commits', '20', '--json'])
+    if (cl.status !== 0) return `cluster 失败：${cl.stderr}`
+    if ((JSON.parse(cl.stdout).cluster?.sinkCandidateCount ?? 0) < 1) return `cluster 未识别下沉候选：${cl.stdout}`
     if (smp.status !== 0) return `sample 失败：${smp.stderr}`
     const sj = JSON.parse(smp.stdout)
     if (sj.revertCount < 1 || !sj.reworkHotspots?.some((h) => h.file === 'src/hot.mjs')) {
       return `sample 未识别 Revert 与 48h 高频返工热点：${smp.stdout}`
     }
     return true
-  } finally {
-    for (const wt of [wtMerged, wtSquash, wtNoOwn, wtUnmerged]) {
-      gitSync(dir, ['worktree', 'remove', '--force', wt])
-    }
-    rmTree(dir)
-  }
+  } finally { rmTree(dir) }
 }])
 
 cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过滤、unaccountedPublicFiles 与单提交冷启动', async () => {
@@ -287,7 +301,19 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
     if (prepTextRes.status !== 0 || !prepTextRes.stdout.includes('v3.0.0') || !prepTextRes.stdout.includes('[AUDIT_ALERT]') || !prepTextRes.stdout.includes('[NEXT STEP]')) {
       return `release-prep 文本输出缺失关键字段：exit=${prepTextRes.status}\n${prepTextRes.stdout}`
     }
+    return true
+  } finally { rmTree(multiDir) }
+}])
 
+cases.push(['govern-audit.mjs release-prep：无标签 CHANGELOG 冷启动与非 Git 拦截', async () => {
+  const changelogDir = tmpProject({
+    'pyproject.toml': '[project]\nname = "py-app"\nversion = "0.2.0"\nrequires-python = ">=3.11"\n',
+    'CHANGELOG.md': '# Changelog\n',
+    'README.md': '# py-app\n',
+  })
+  gitInit(changelogDir)
+  const nonGitDir = tmpProject({ 'README.md': '# plain\n' })
+  try {
     const chgRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', changelogDir, '--version', '1.0.0', '--json'])
     if (chgRes.status !== 0) return `release-prep 无标签 CHANGELOG 仓失败：${chgRes.stderr}`
     const chgJson = JSON.parse(chgRes.stdout)
@@ -300,7 +326,6 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
 
     return true
   } finally {
-    rmTree(multiDir)
     rmTree(changelogDir)
     rmTree(nonGitDir)
   }
@@ -384,7 +409,7 @@ cases.push(['测试分层控频与反膨胀治理：tests.* 正反双向检出�
   })
 
   try {
-    gitInit(posDir)
+    gitInit(posDir, { origin: 'https://github.com/acme/c31-pos.git', name: 'acme', email: 'acme@acme.test' })
     const posRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', posDir, '--json'])
     if (posRes.status !== 0) return `govern-audit posDir 失败：${posRes.stderr}`
     const posJson = JSON.parse(posRes.stdout)

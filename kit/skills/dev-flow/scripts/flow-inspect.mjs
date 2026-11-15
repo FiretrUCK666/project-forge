@@ -5,16 +5,19 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
 import {
-  LIKELY_DEFAULT_BRANCHES, canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
+  canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
   gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
   readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
+import {
+  parsePorcelainV2BranchZ, readGitConfigFast, readRefsFast,
+  resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
+} from '../../lib/git-fast.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseFlowInputs,
@@ -22,6 +25,9 @@ import {
   parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
+import {
+  assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
+} from '../../lib/task-graph.mjs'
 import { analyzeIssueDependencies } from '../../lib/workflow-policy.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
@@ -29,12 +35,14 @@ export { analyzeIssueDependencies }
 export const EXIT_POLICY_BLOCK = 3
 export const EXIT_ACTION_REQUIRED = 4
 
-/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动）。 */
-export async function getChangedFiles(cwd, baseRef) {
+/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动，支持复用已知 statusEntries 与 diffEntries）。 */
+export async function getChangedFiles(cwd, baseRef, opts = {}) {
   const [diff, tree, st] = await Promise.all([
-    baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null),
+    Array.isArray(opts.diffEntries)
+      ? Promise.resolve({ ok: true, entries: opts.diffEntries })
+      : (baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null)),
     baseRef ? Promise.resolve(null) : gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD']),
-    gitStatusPorcelainZ(cwd),
+    Array.isArray(opts.statusEntries) ? Promise.resolve({ ok: true, entries: opts.statusEntries }) : gitStatusPorcelainZ(cwd),
   ])
   const set = new Set()
   if (diff?.ok) for (const e of diff.entries) if (e.file) set.add(e.file)
@@ -74,175 +82,6 @@ export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
   } catch {
     return null
   }
-}
-
-function parsePorcelainV2BranchZ(buf) {
-  const tokens = Buffer.isBuffer(buf) ? buf.toString('utf8').split('\0') : String(buf ?? '').split('\0')
-  let head = null
-  let branch = null
-  let dirty = 0
-  for (let i = 0; i < tokens.length; i += 1) {
-    const tok = tokens[i]
-    if (!tok) continue
-    if (tok.startsWith('# branch.oid ')) {
-      const val = tok.slice(13).trim()
-      head = val && val !== '(initial)' ? val : null
-    } else if (tok.startsWith('# branch.head ')) {
-      const val = tok.slice(14).trim()
-      branch = val || null
-    } else if (!tok.startsWith('#')) {
-      dirty += 1
-      if (tok.startsWith('2 ')) i += 1
-    }
-  }
-  if (branch === '(detached)' && !head) branch = null
-  return { head, branch, dirty }
-}
-
-function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultBranch) {
-  const localHeads = new Set()
-  const originHeads = new Set()
-  let originHeadTarget
-  for (const rawLine of String(refsStdout ?? '').split('\n')) {
-    if (!rawLine) continue
-    const [refName, symTarget = ''] = rawLine.split('\t')
-    if (refName === 'refs/remotes/origin/HEAD' && symTarget.trim()) {
-      originHeadTarget = symTarget.trim().replace(/^origin\//, '')
-    } else if (refName.startsWith('refs/heads/')) {
-      localHeads.add(refName.slice(11))
-    } else if (refName.startsWith('refs/remotes/origin/')) {
-      const name = refName.slice(20)
-      if (name !== 'HEAD') originHeads.add(name)
-    }
-  }
-  if (originHeadTarget) return originHeadTarget
-  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
-  for (const cand of LIKELY_DEFAULT_BRANCHES) {
-    if (localHeads.has(cand) || originHeads.has(cand)) return cand
-  }
-  if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
-  return initDefaultBranch || 'main'
-}
-
-function readGitConfigFast(gitCommonDir) {
-  if (!gitCommonDir) return null
-  if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
-  const localCfg = readTextSafe(join(gitCommonDir, 'config'))
-  if (localCfg === undefined) return null
-  const xdgHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
-  const globalPaths = [join(homedir(), '.gitconfig'), join(xdgHome, 'git', 'config')]
-  let globalCfg = ''
-  for (const gp of globalPaths) {
-    const txt = readTextSafe(gp)
-    if (txt) { globalCfg = txt; break }
-  }
-  const combined = `${globalCfg}\n${localCfg}`
-  if (/^\s*\[(?:url\b|include\b|includeif\b)/im.test(combined)) return null
-
-  const remoteLines = []
-  let curSection = ''
-  let curRemote = null
-  const remotes = new Map()
-  let userName
-  let userEmail
-  let initDefaultBranch
-
-  for (const rawCfg of [globalCfg, localCfg]) {
-    curSection = ''
-    curRemote = null
-    for (const rawLine of rawCfg.split('\n')) {
-      const line = rawLine.replace(/(?:^|\s)[;#].*$/, '').trim()
-      if (!line) continue
-      const sec = /^\[([a-z0-9-]+)(?:\s+"([^"]*)")?\]$/i.exec(line)
-      if (sec) {
-        curSection = sec[1].toLowerCase()
-        curRemote = curSection === 'remote' ? (sec[2] ?? '') : null
-        if (curSection === 'remote' && curRemote && !remotes.has(curRemote)) {
-          remotes.set(curRemote, { urls: [], pushUrls: [] })
-        }
-        continue
-      }
-      const eq = line.indexOf('=')
-      if (eq <= 0) continue
-      const k = line.slice(0, eq).trim().toLowerCase()
-      const v = line.slice(eq + 1).trim()
-      if (curSection === 'user') {
-        if (k === 'name') userName = v
-        else if (k === 'email') userEmail = v
-      } else if (curSection === 'init' && k === 'defaultbranch') {
-        initDefaultBranch = v
-      } else if (curSection === 'remote' && curRemote) {
-        const entry = remotes.get(curRemote)
-        if (k === 'url' && v) entry.urls.push(v)
-        else if (k === 'pushurl' && v) entry.pushUrls.push(v)
-      }
-    }
-  }
-
-  for (const [name, entry] of remotes.entries()) {
-    const fetchUrl = entry.urls[0]
-    const pushUrl = entry.pushUrls[0] ?? fetchUrl
-    if (fetchUrl) remoteLines.push(`${name}\t${fetchUrl} (fetch)`)
-    if (pushUrl) remoteLines.push(`${name}\t${pushUrl} (push)`)
-  }
-  return {
-    userName,
-    userEmail,
-    initDefaultBranch,
-    remoteText: remoteLines.join('\n'),
-    hasIdentity: Boolean(userName && userEmail),
-  }
-}
-
-function readRefsFast(gitCommonDir, curBranch, initDefaultBranch) {
-  if (!gitCommonDir || existsSync(join(gitCommonDir, 'reftable'))) return null
-  let originHeadTarget
-  const origHeadPath = join(gitCommonDir, 'refs', 'remotes', 'origin', 'HEAD')
-  const origHeadText = readTextSafe(origHeadPath)
-  if (origHeadText) {
-    const m = /^ref:\s*refs\/remotes\/origin\/(.+)$/im.exec(origHeadText.trim())
-    if (m) return m[1].trim()
-  }
-  const localHeads = new Set()
-  const originHeads = new Set()
-  const scanLoose = (dirAbs, prefix, bucket) => {
-    if (!existsSync(dirAbs)) return
-    const stack = [{ abs: dirAbs, rel: '' }]
-    while (stack.length > 0) {
-      const cur = stack.pop()
-      let entries = []
-      try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
-      for (const e of entries) {
-        const name = cur.rel ? `${cur.rel}/${e.name}` : e.name
-        if (e.isDirectory()) stack.push({ abs: join(cur.abs, e.name), rel: name })
-        else if (e.isFile() && name !== 'HEAD') bucket.add(name)
-      }
-    }
-    void prefix
-  }
-  scanLoose(join(gitCommonDir, 'refs', 'heads'), '', localHeads)
-  scanLoose(join(gitCommonDir, 'refs', 'remotes', 'origin'), '', originHeads)
-  const packed = readTextSafe(join(gitCommonDir, 'packed-refs'))
-  if (packed) {
-    for (const line of packed.split('\n')) {
-      if (!line || line.startsWith('#') || line.startsWith('^')) continue
-      const sp = line.indexOf(' ')
-      if (sp <= 0) continue
-      const refName = line.slice(sp + 1).trim()
-      if (refName.startsWith('refs/heads/')) localHeads.add(refName.slice(11))
-      else if (refName.startsWith('refs/remotes/origin/')) {
-        const n = refName.slice(20)
-        if (n !== 'HEAD') originHeads.add(n)
-      }
-    }
-  }
-  if (originHeadTarget) return originHeadTarget
-  if (curBranch && LIKELY_DEFAULT_BRANCHES.includes(curBranch)) return curBranch
-  for (const cand of LIKELY_DEFAULT_BRANCHES) {
-    if (localHeads.has(cand) || originHeads.has(cand)) return cand
-  }
-  if (curBranch && curBranch !== 'HEAD' && curBranch !== '(detached)') return curBranch
-  return initDefaultBranch || 'main'
 }
 
 export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
@@ -327,72 +166,36 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
 
   const profile = parseAgentsProfile(mainRoot)
   const declaredRepo = detectDeclaredRepo(mainRoot)
-  const ghProbe = await probeGitHubEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) })
+  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls, probeNetwork: Boolean(opts.probeAuth) }))
   const originFull = githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0])
-  const parsedInputs = parseFlowInputs(opts.inputs ?? [], originFull)
-  const addUnique = (bucket, item) => {
-    if (item && Number.isInteger(item.number) && !bucket.some((x) => x.number === item.number && (x.repo ?? originFull) === (item.repo ?? originFull))) {
-      bucket.push(item)
-    }
-  }
-  if (opts.issue) {
-    for (const it of parseFlowInputs(String(opts.issue).split(/[\s,]+/), originFull).issues) addUnique(parsedInputs.issues, it)
-    for (const num of parseIssueNumbers(opts.issue)) addUnique(parsedInputs.issues, { repo: originFull, number: num, raw: `#${num}` })
-  }
-  const prRawFlag = opts.pr ?? opts.externalPr
-  if (prRawFlag) {
-    const rawPr = parseFlowInputs([String(prRawFlag)], originFull)
-    if (rawPr.prs.length > 0) rawPr.prs.forEach((it) => addUnique(parsedInputs.prs, it))
-    else {
-      const num = parsePrNumber(prRawFlag)
-      if (num) addUnique(parsedInputs.prs, { repo: originFull, number: num, raw: `pr#${num}` })
-    }
-  }
+  const canQueryApi = Boolean(opts._ghClient || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token')
+  const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && canQueryApi
+  const apiClient = opts._ghClient ?? (canQueryApi ? ghProbe.client : null)
 
-  const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && (ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token')
-  const canQueryApi = ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
-  const [repoMetaRes, fetchedIssues, fetchedPrs] = await Promise.all([
-    shouldFetchRepoMeta ? ghProbe.client.getRepoMeta(originFull) : Promise.resolve(null),
-    Promise.all(parsedInputs.issues.map(async (it) => {
-      const targetRepo = it.repo ?? originFull
-      if (targetRepo && canQueryApi) {
-        const res = await ghProbe.client.getIssue(targetRepo, it.number)
-        if (res.ok) return { ...it, ...res, fetched: true }
-      }
-      return { ...it, fetched: false, relations: { dependsOn: [], blocks: [], partOf: [], fixes: [], refs: [] } }
-    })),
-    Promise.all(parsedInputs.prs.map(async (pr) => {
-      const targetRepo = pr.repo ?? originFull
-      if (targetRepo && canQueryApi) {
-        const res = await ghProbe.client.getPr(targetRepo, pr.number)
-        if (res.ok) return { ...pr, ...res, fetched: true }
-      }
-      return { ...pr, fetched: false }
-    })),
+  const [repoMetaRes, graph] = await Promise.all([
+    shouldFetchRepoMeta && typeof apiClient?.getRepoMeta === 'function' ? apiClient.getRepoMeta(originFull) : Promise.resolve(null),
+    resolveExternalCollaborationGraph({
+      inputs: opts.inputs ?? [],
+      issueInput: opts.issue ?? null,
+      prInput: opts.pr ?? null,
+      externalPrInput: opts.externalPr ?? null,
+      defaultRepo: originFull,
+      originRepo: originFull,
+      client: apiClient,
+      knownIssueStates: opts.knownIssueStates ?? null,
+      knownPrs: opts.knownPrs ?? null,
+    }),
   ])
 
-  let externalPr = opts.externalPr ? parsePrNumber(opts.externalPr) : null
-  if (!externalPr && fetchedPrs.length === 1 && fetchedPrs[0].fetched) {
-    const p = fetchedPrs[0]
-    if (p.headRepo && originFull && p.headRepo.toLowerCase() !== originFull.toLowerCase()) externalPr = p.number
-  }
+  const fetchedIssues = graph.issues
+  const fetchedPrs = graph.prs
+  const externalPr = graph.externalPr
+  const reuseExistingPr = graph.reuseExistingPr
 
   const identity = resolveWorkspaceIdentity({
     gitDir: roots.gitDir, remoteUrls, declaredRepo, gitIdentity, historyAuthors, commits, externalPr,
     apiProbe: repoMetaRes?.ok ? repoMetaRes : undefined,
   })
-
-  let reuseExistingPr = null
-  if (fetchedPrs.length > 0 && (fetchedIssues.length > 0 || fetchedPrs.length === 1)) {
-    const pr = fetchedPrs[0]
-    if (fetchedIssues.length > 0 || (pr.fetched && !externalPr)) {
-      reuseExistingPr = {
-        prNumber: pr.number, branch: pr.headBranch ?? null, baseBranch: pr.baseBranch ?? null, url: pr.url ?? pr.raw,
-        linkedIssues: fetchedIssues.map((i) => i.number),
-        note: '检测到已有 PR（与 Issue 关联），请直接复用该 PR 与原分支，禁止新开第二个 PR',
-      }
-    }
-  }
 
   return {
     isGit: roots.isGit,
@@ -428,7 +231,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     activeTasks: listTaskLedgers(mainRoot, { includeTerminal: false }).map((t) => ({
       taskId: t.taskId, slug: t.slug, status: t.status, branch: t.branch, worktreePath: t.worktreePath, prNumber: t.prNumber,
     })),
-    inputs: { issues: fetchedIssues, prs: fetchedPrs, unknown: parsedInputs.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues) },
+    inputs: { issues: fetchedIssues, prs: fetchedPrs, unknown: graph.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues), graph },
   }
 }
 
@@ -484,7 +287,7 @@ async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty =
 
 export async function handleStart(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
-  const op = await detectInProgressGitOp(roots.mainRoot)
+  const op = await detectInProgressGitOp(roots.mainRoot, { wtGitDir: resolveGitDirFast(roots.mainRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 仓库正处于 ${op.op} 状态，请先解决冲突再执行 start`)
 
   const parsedPos = parseFlowInputs(opts._ ?? [])
@@ -513,11 +316,14 @@ export async function handleStart(opts, roots) {
   const state = await inspectWorkspace(roots.mainRoot, {
     roots, inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
     issue: linkedIssues.join(','), probeAuth: Boolean(opts['probe-auth']),
+    knownIssueStates: opts.knownIssueStates, knownPrs: opts.knownPrs,
+    _ghClient: opts._ghClient, _ghProbe: opts._ghProbe,
   })
   const effectiveExternalPr = externalPr
     ?? (state.identity.role === 'inbound-external-pr' ? (prNumber ?? state.inputs.prs[0]?.number ?? null) : null)
   if (effectiveExternalPr && !prNumber) prNumber = effectiveExternalPr
   if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
+    if (!prNumber && state.inputs.reuseExistingPr.prNumber) prNumber = state.inputs.reuseExistingPr.prNumber
     for (const iss of [...(state.inputs.reuseExistingPr.linkedIssues ?? []), ...(state.inputs.prs[0]?.relations?.fixes ?? [])]) {
       if (Number.isInteger(iss) && !linkedIssues.includes(iss)) linkedIssues.push(iss)
     }
@@ -556,6 +362,31 @@ export async function handleStart(opts, roots) {
       }
       role = 'contributor-fork'
     } else throw new Error(`--clone-choice 仅支持 fork | standalone | local，收到：${choice}`)
+  }
+
+  const depCheck = checkUnresolvedDependencies(state.inputs?.graph, {
+    force: Boolean(opts.force),
+    strictDeps: Boolean(opts['strict-deps']),
+  })
+  if (depCheck.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(depCheck, null, 2)}\n`)
+    process.stderr.write(`${depCheck.message}\n`)
+    return { exitCode: depCheck.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+  if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
+    const reqBranch = opts.branch ? String(opts.branch).trim() : null
+    const reuseBr = state.inputs.reuseExistingPr.branch
+    if (opts['new-pr'] || (reqBranch && reuseBr && reqBranch !== reuseBr)) {
+      const dup = assertNoDuplicatePrForTask({
+        ledger: { prNumber: state.inputs.reuseExistingPr.prNumber },
+        graph: state.inputs.graph,
+      })
+      if (dup.blocked) {
+        if (opts.json) process.stdout.write(`${JSON.stringify(dup, null, 2)}\n`)
+        process.stderr.write(`${dup.message}\n`)
+        return { exitCode: dup.exitCode ?? EXIT_POLICY_BLOCK }
+      }
+    }
   }
 
   let createdIssue = null
@@ -627,14 +458,52 @@ export async function handleStart(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const baseBranch = state.defaultBranch || 'main'
+  let baseBranch = state.defaultBranch || 'main'
   let baseSha = state.head
-  if (state.commits > 0) {
+  if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
     for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
+      const fastSha = resolveRefShaFast(roots.gitDir, candRef)
+      if (fastSha) { baseSha = fastSha; break }
       const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', candRef])
       if (r.ok && r.stdout.trim()) { baseSha = r.stdout.trim(); break }
     }
   }
+  let stackFields = {}
+  if (opts.after) {
+    const rawAfter = String(opts.after).trim()
+    let parentLedger = null
+    try { parentLedger = readTaskLedger(roots.mainRoot, sanitizeTaskId(rawAfter)) } catch { /* branch name fallback */ }
+    if (!parentLedger) {
+      parentLedger = listTaskLedgers(roots.mainRoot, { includeTerminal: false }).find((t) => t.branch === rawAfter) ?? null
+    }
+    const parentBranch = parentLedger?.branch ?? rawAfter
+    let parentSha = resolveRefShaFast(roots.gitDir, `refs/heads/${parentBranch}`)
+    if (!parentSha) {
+      for (const cand of [`refs/heads/${parentBranch}`, parentBranch]) {
+        const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+        if (r.ok && r.stdout.trim()) { parentSha = r.stdout.trim(); break }
+      }
+    }
+    if (!parentSha && parentLedger?.worktreePath && existsSync(join(roots.mainRoot, parentLedger.worktreePath))) {
+      const r = await gitRun(join(roots.mainRoot, parentLedger.worktreePath), ['rev-parse', 'HEAD'])
+      if (r.ok && r.stdout.trim()) parentSha = r.stdout.trim()
+    }
+    if (!parentSha) throw new Error(`找不到 --after 指定的父任务或父分支：${rawAfter}`)
+    baseBranch = parentBranch
+    baseSha = parentSha
+    stackFields = {
+      parentTaskId: parentLedger?.taskId ?? null,
+      parentBranch,
+      parentPrNumber: parentLedger?.prNumber ?? null,
+      stackTargetBase: parentLedger?.stackTargetBase ?? (state.defaultBranch || 'main'),
+    }
+  }
+  const filesList = opts.files
+    ? String(opts.files).split(/[\s,]+/).map((s) => posixPath(s).replace(/^\.\//, '').trim()).filter(Boolean)
+    : []
+  const depMeta = state.inputs?.graph?.externalDependencies?.length
+    ? { dependsOn: state.inputs.graph.externalDependencies }
+    : {}
   const implementerId = resolveContributorIdentity({
     explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
   }).actor
@@ -664,6 +533,7 @@ export async function handleStart(opts, roots) {
       taskId, slug, caseType, tier: 3, isolation: 'review-pr', role: 'inbound-external-pr', providerId: 'github',
       branch: null, baseBranch, baseSha: baseSha ?? targetSha, worktreePath: null, reviewWorktreePath: reviewRel,
       linkedIssues, prNumber: effectiveExternalPr, implementerId: `external-pr-${effectiveExternalPr}`, status: 'review-ready',
+      untrustedScanPassed: false, untrustedApproved: false, humanApprovedExec: false,
     })
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
@@ -679,6 +549,8 @@ export async function handleStart(opts, roots) {
   const branch = opts.branch || reusedPrBranch || `${branchPrefix}/${slug}`
 
   const resolveLocalBranchRef = async () => {
+    if (resolveRefShaFast(roots.gitDir, `refs/heads/${branch}`)) return { ok: true }
+    if (roots.gitDir && existsSync(join(roots.gitDir, 'refs', 'heads', branch))) return { ok: true }
     const has = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
     if (has.ok || !reusedPrBranch || branch !== reusedPrBranch || !state.remoteUrls.origin) return has
     await gitRun(roots.mainRoot, ['fetch', 'origin', `${branch}:${branch}`])
@@ -699,6 +571,7 @@ export async function handleStart(opts, roots) {
       worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
       linkedIssues, prNumber, implementerId, status: 'started',
+      ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
     writeTaskLedger(roots.mainRoot, ledger)
@@ -736,6 +609,7 @@ export async function handleStart(opts, roots) {
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
     linkedIssues, prNumber, implementerId, status: 'started',
+    ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
   })
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)

@@ -79,8 +79,8 @@ Suppose you want to add an "export to CSV" feature:
 | Situation | What happens |
 | --- | --- |
 | **A recognized manifest (12)** | `Node.js` `Python` `Rust` `Go` `Java` `Ruby` `PHP` `.NET` `C/C++` `Dart` `Swift` `Elixir`. You get that language's idiomatic build, test, and install commands |
-| **Any other language** | Haskell, OCaml, Zig, Nim, Crystal, Julia, or an in-house DSL are all the same: commands are read from what your project **already runs** — the `run:` blocks in CI, `Makefile`, `justfile`. Those commands were really executed, which beats any inference |
-| **Starting from an empty folder** | Only six languages can generate a minimal project that passes its own smoke test: `node` `python` `go` `rust` `java` `docs`. For anything else, create the project with your own generator, then run the survey |
+| **Any other language** | Haskell, OCaml, Zig, Nim, Crystal, Julia, or an in-house DSL are all the same: commands are read from what your project **already runs** — the `run:` blocks in CI, `Makefile`, `justfile`, `Taskfile`. Those commands were really executed, which beats any inference |
+| **Starting from an empty folder** | `equip.mjs --bootstrap-empty` lays down a universal engineering baseline for **any stack** (Git baseline, four-layer docs, `docs/TDD.md`, self-consistent `AGENTS.md`, and `.agents/skills/`) with zero toy business code, `14` stack presets (defaulting to `universal`), and full preservation of existing `README.md` / `LICENSE` |
 
 Documentation-only folders, editor extensions, Obsidian plugins, and capability directories are also supported.
 

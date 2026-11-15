@@ -7,7 +7,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { posixPath } from './git.mjs'
+import { posixPath, readTextSafe } from './git.mjs'
 
 export const MERMAID_LIMITS = Object.freeze({
   rectMaxWidth: 16,
@@ -136,11 +136,55 @@ export function checkMermaidLabelWidth(text) {
   return { ok: violations.length === 0, checkedBlocks: blockIndex, violations }
 }
 
+const CUSTOM_TEMPLATE_REL_CANDIDATES = Object.freeze({
+  prd: ['docs/templates/prd.md', 'docs/templates/prd-template.md', 'docs/.templates/prd.md', '.github/prd-template.md', '.github/prd_template.md'],
+  spec: ['docs/templates/spec.md', 'docs/templates/spec-template.md', 'docs/.templates/spec.md', '.github/spec-template.md', '.github/spec_template.md'],
+  todo: ['docs/templates/todo.md', 'docs/templates/todo-template.md', 'docs/.templates/todo.md', '.github/todo-template.md', '.github/todo_template.md'],
+})
+
+function extractCustomDocSections(rawTemplate, standardContent, { title, safeSlug, taskId }) {
+  const cleanRaw = String(rawTemplate ?? '').replace(/^---\n[\s\S]*?\n---\n*/m, '')
+  const existingH2 = new Set(
+    [...String(standardContent ?? '').matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim().toLowerCase()),
+  )
+  const parts = cleanRaw.split(/\n(?=##\s+)/)
+  const extraSections = []
+  for (const part of parts) {
+    const trimmed = part.trim()
+    if (!trimmed.startsWith('## ')) continue
+    const heading = trimmed.split('\n')[0].replace(/^##\s+/, '').trim()
+    if (!heading || existingH2.has(heading.toLowerCase())) continue
+    const hydrated = trimmed
+      .replace(/\{\{TITLE\}\}/g, String(title ?? ''))
+      .replace(/\{\{SLUG\}\}/g, String(safeSlug ?? ''))
+      .replace(/\{\{TASK_ID\}\}/g, String(taskId ?? safeSlug ?? 'task'))
+      .replace(/<!--\s*project-forge:\s*fill[\s\S]*?-->/gi, '')
+    extraSections.push(hydrated)
+  }
+  return extraSections
+}
+
+/**
+ * 探测并识别仓库自带的项目自定义文档模板（docs/templates/*、docs/.templates/*、.github/*-template.md）。
+ * 严禁读取工具母版目录或绑定宿主专有目录。
+ */
+export function resolveRepoCustomDocTemplate(repoRoot, kind) {
+  if (!repoRoot || !CUSTOM_TEMPLATE_REL_CANDIDATES[kind]) return null
+  for (const rel of CUSTOM_TEMPLATE_REL_CANDIDATES[kind]) {
+    const abs = join(repoRoot, rel)
+    if (!existsSync(abs)) continue
+    const text = readTextSafe(abs)
+    if (text !== undefined && text.trim()) return { rel, text }
+  }
+  return null
+}
+
 /**
  * 统一工程文档模板生成器（YAML Frontmatter + 顶部可见元信息概览表 + SPEC 短名 Mermaid 图）。
  */
 export function buildStandardDocContent({
   kind,
+  repoRoot = null,
   title,
   safeSlug,
   today,
@@ -163,6 +207,15 @@ export function buildStandardDocContent({
   keyOrders,
 }) {
   const effectiveCriteria = Array.isArray(criteria) && criteria.length > 0 ? criteria : null
+  const customTpl = resolveRepoCustomDocTemplate(repoRoot, kind)
+  const applyCustomTemplate = (rendered) => {
+    if (!customTpl) return rendered
+    const extra = extractCustomDocSections(customTpl.text, rendered, { title, safeSlug, taskId })
+    const marker = `<!-- project-custom-template: ${customTpl.rel} -->`
+    return extra.length > 0
+      ? `${rendered.trimEnd()}\n\n${marker}\n\n${extra.join('\n\n')}\n`
+      : `${rendered.trimEnd()}\n\n${marker}\n`
+  }
 
   if (kind === 'prd') {
     const fm = serializeFm({
@@ -170,7 +223,7 @@ export function buildStandardDocContent({
       issue: issueNum, pr: null, owner: owner ?? null, plan_critique: 'pending',
       related_spec: relatedSpecRel ?? null, related_todo: relatedTodoRel ?? null,
     }, keyOrders.prd)
-    return [
+    return applyCustomTemplate([
       fm.trimEnd(), '', `# PRD: ${title}`, '',
       '## 文档信息', '',
       '| 项目 | 内容 |', '| --- | --- |',
@@ -194,7 +247,7 @@ export function buildStandardDocContent({
       `- **回滚路径**：${rollbackPath ?? '<说明如何安全撤回，不可逆改动须写明降级方案>'}`, '',
       '## 七、待拍板问题', '',
       '- 待确认：无（如有未决设计取舍请列明选项与代价）', '',
-    ].join('\n')
+    ].join('\n'))
   }
 
   if (kind === 'spec') {
@@ -210,7 +263,7 @@ export function buildStandardDocContent({
     const nonGoalText = Array.isArray(nonGoals) && nonGoals.length > 0
       ? nonGoals.join('；')
       : '<明确本期保持不动或故意延后的范围>'
-    return [
+    return applyCustomTemplate([
       fm.trimEnd(), '', `# SPEC: ${title}`, '',
       '## 文档信息与变更概览', '',
       '| 项目 | 内容 |', '| --- | --- |',
@@ -240,7 +293,7 @@ export function buildStandardDocContent({
       `- **门型与回滚路径**：${doorType ?? '<two-way | one-way>'}；<说明回退命令或反向修补方式>`,
       '- **故障注入预演**：<待核实填写：复用项目中已有的工具/协议/脚本路径，不重复造轮子>', '',
       '## 实现说明', '', '<!-- 在合并之前补齐真实实现摘要与验证结果 -->', '',
-    ].join('\n')
+    ].join('\n'))
   }
 
   const fm = serializeFm({
@@ -260,7 +313,7 @@ export function buildStandardDocContent({
     : '<明确排除本次不顺手重构的无关事项>'
   const doorVal = doorType ?? 'two-way'
   const rbVal = rollbackPath ?? '局部可逆改动，直接 git revert 或删除临时分支即可回退。'
-  return [
+  return applyCustomTemplate([
     fm.trimEnd(), '', `# Todo: ${title}`, '',
     '## 文档信息与范围概览', '',
     '| 项目 | 内容 |', '| --- | --- |',
@@ -289,7 +342,7 @@ export function buildStandardDocContent({
     '- **实际验证命令与结果**：',
     '- **文档同步检查**：',
     '- **遗留问题**：', '',
-  ].join('\n')
+  ].join('\n'))
 }
 
 // ── 联动同步解析（AGENTS.md ## 改哪看哪）───────────────────────────────

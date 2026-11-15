@@ -18,10 +18,17 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 | --- | --- | --- |
 | 理解项目 / 梳理架构 / 找模块入口 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/repo-map.mjs` |
 | 写需求 / 定方案 / 拆任务 / 查文档全景 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs` |
-| 做功能 / 修缺陷 / 接 Issue / 改 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
+| 做功能 / 修缺陷 / 启动任务 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
+<!-- project-forge: if has-remote -->
 | 提交 / 推分支 / 开或更新 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
 | 本地预审 / 独立审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
 | 合并 PR / 清理本地分支与 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+<!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+| 归档文档 / 验证并提交至特性分支 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
+| 本地预审 / 隔离工作树独立审查 | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
+| 本地试合并入主干与清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+<!-- project-forge: endif -->
 | 代码体检 / 清技术债 / 对齐契约与文档 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: if has-custom-skills -->
@@ -150,14 +157,19 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: begin 修改守则补充 -->
 ## 项目特有红线
 
-<!-- project-forge: fill 项目特有红线：补充本项目特有的硬性规范（如兼容性下限、禁 emoji、性能预算等）；无额外规范可直接删掉本行{{CONVENTIONS_HINT}} -->
+<!-- project-forge: fill 项目特有红线：补充本项目特有的硬性规范（如兼容性下限、禁 emoji、性能预算等）；无额外规范可直接删掉本行 -->{{CONVENTIONS_HINT}}
 <!-- project-forge: end 修改守则补充 -->
 
 <!-- project-forge: begin 版本与发布 -->
 ## 版本管理与回滚底线
 
 - **提交纪律**：一次实质变更一个独立提交，提交信息说清「改了什么、为什么」，不用内部编号充当说明；大改动或高风险操作前先留干净存档点；有入库构建产物或锁文件须同提交更新。
+<!-- project-forge: if has-remote -->
 - **回滚四档**：未提交 -> 丢弃工作区；已提交未推 -> 回退存档点；**已推送远端 -> 一律反向提交，严禁强推或改写已推送历史**；已发布版本 -> 只能发递增的新版本（永不复用或删旧版）。
+<!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+- **回滚四档**：未提交 -> 丢弃工作区；分支未并入主干 -> 重置或重起提交；已并入主干 -> 一律反向提交，不随意改写主干记录；已发布版本 -> 只能发递增的新版本（永不复用或删旧版）。
+<!-- project-forge: endif -->
 <!-- project-forge: if has-release -->
 
 ### 版本号与发版死锁防护
@@ -167,6 +179,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 **日常与发版是两件事，默认只做前一件：**
 
 <!-- project-forge: if is-full -->
+<!-- project-forge: if has-remote -->
 - **日常**：改完 -> 跑门禁 -> 提交 -> **推自己的分支 -> 开 PR -> 独立审查 -> 合并**。**不打标签、不建发布页、不发制品库。**
 
   **推到哪一档由「能不能撤回」决定，不由「是不是对外」决定**：推自己的分支、开 PR、改 PR 都能撤回，属于日常；合并默认分支、发布、改可见性、改写历史撤不回来，要先给人看清单。**强制推送与改写已推送历史永不自动执行。**
@@ -174,9 +187,21 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **不自己判断「该发版了」**：攒了几个改动或隔了一阵都不是理由，发版必须人点头。
 - **回读才算发完**：标签推上后回读发布页正文、附件与制品库版本均已就位才算完成。
 <!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+- **日常**：改完 -> 跑门禁 -> 提交至本地特性分支 -> 独立审查 -> 本地试合并入 `{{DEFAULT_BRANCH}}`。**不打标签、不建发布页、不发制品库。**
+- **发版**：只有明确说要「发版」时才做，按 `{{RELEASING_DOC}}` 准备发布说明（`{{RELEASE_NOTES_TARGET}}`）与递增版本。
+- **不自己判断「该发版了」**：攒了几个改动或隔了一阵都不是理由，发版必须人点头。
+<!-- project-forge: endif -->
+<!-- project-forge: endif -->
 <!-- project-forge: if is-lightweight -->
+<!-- project-forge: if has-remote -->
 - **日常**：按能不能撤回分档——推自己的分支、开 PR 可撤回属日常（不打标签不发制品库）；合并默认分支、发版、改写历史撤不回来。
 - **发版**：不自己判断该发版，仅在人明确说要发版时按 `{{RELEASING_DOC}}` 先提交推送说明（`{{RELEASE_NOTES_TARGET}}`）到 `{{DEFAULT_BRANCH}}`，再打标签并回读确认。
+<!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+- **日常**：改完 -> 跑门禁 -> 提交至本地分支 -> 独立审查 -> 本地试合并入 `{{DEFAULT_BRANCH}}`（不打标签不发制品库）。
+- **发版**：不自己判断该发版，仅在人明确说要发版时按 `{{RELEASING_DOC}}` 准备说明（`{{RELEASE_NOTES_TARGET}}`）与版本。
+<!-- project-forge: endif -->
 <!-- project-forge: endif -->
 <!-- project-forge: endif -->
 <!-- project-forge: end 版本与发布 -->
@@ -192,8 +217,14 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   <!-- project-forge: if no-remote -->
   项目还没有远端，仅本地提交；碰「高风险路径」或 `one-way` 变更仍须独立审查并记录。
   <!-- project-forge: endif -->
+<!-- project-forge: if has-remote -->
 - **五档分流与文档归档**：改前跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）定 Case 1–5 与门型（`two-way`/`one-way`）：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 并经 Critique 后 `approve`；Case 5 先更新 `docs/TDD.md`。PR 前跑 `flow.mjs finalize` 将关联 `PRD`/`SPEC`/`Todo` 一并 `git mv` 成对归档至 `docs/archive/{prd,specs,todo}/`。
-- **分档推送、审查与清理**：能不能撤回决定分档——推自己的分支与开 PR 属日常；审查通过由审查者直接合（`contributor-fork` 等上游合），**弱化门禁必须人点头**。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再列清单问人确认后清理；非 ASCII 平台正文先写 UTF-8 临时文件经 `--body-file` 提交。升级完整协作设施可随时重跑 `equip.mjs --tier full` 与 `compose-agents.mjs --tier full`。
+- **分档推送、审查与清理**：能不能撤回决定分档——推自己的分支与开 PR 属日常；审查通过由审查者直接合（`contributor-fork` 等上游合），**日常到此为止**（**弱化门禁必须人点头**）。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再列清单问人确认后清理；非 ASCII 平台正文先写 UTF-8 临时文件经 `--body-file` 提交。升级完整协作设施可随时重跑 `equip.mjs --tier full` 与 `compose-agents.mjs --tier full`。
+<!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+- **五档分流与文档归档**：改前跑 `doc-plan.mjs triage`（或 `flow.mjs inspect`）定 Case 1–5 与门型（`two-way`/`one-way`）：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 并经 Critique 后 `approve`；Case 5 先更新 `docs/TDD.md`。合并前跑 `flow.mjs finalize` 将关联 `PRD`/`SPEC`/`Todo` 一并 `git mv` 成对归档至 `docs/archive/{prd,specs,todo}/`。
+- **审查、试合与清理**：独立审查通过由审查者经 `--detach` 试合并入 `{{DEFAULT_BRANCH}}`，**日常到此为止**（**弱化门禁必须人点头**）。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再列清单问人确认后清理。升级完整协作设施可随时重跑 `equip.mjs --tier full` 与 `compose-agents.mjs --tier full`。
+<!-- project-forge: endif -->
 <!-- project-forge: endif -->
 <!-- project-forge: if is-full -->
 - **第一步：双轴五态身份判定（不靠猜）**。
@@ -223,10 +254,13 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   | --- | --- | --- |
   | 第 1 档：`commits === 0` 且非 `--parallel` | 本地新建特性分支 | 仅 0 提交仓原地开发 |
   | 第 2 档：**所有有提交历史仓（`commits > 0`）**或并行 | `.worktrees/impl-<taskId>/` + `.worktrees/review-<taskId>/`（detached `HEAD`） | 实施者仅改 `impl-*`；跨轮复用并自动解绑重挂载依赖（支持 `--reset-review-slot`）；本地合入经 `.worktrees/.tmp-merge-*` 试合后推进干净主干 |
+  <!-- project-forge: if has-remote -->
   | 第 3 档：外来 PR（`inbound-external-pr`） | `.worktrees/review-pr-<M>/`（detached `FETCH_HEAD`） | 先静态扫高危，禁生命周期脚本经人确认后再测 |
+  <!-- project-forge: endif -->
 
   锁一致时用 `worktree-deps.mjs` 挂载（Workspace/editable 指回主仓自动隔离）；**卸 worktree 前先仅对链接 `unlinkSync` 解绑，严禁直接递归删目录**，列清 4 态后问人再删（`.worktrees/` 须忽略）。
 
+<!-- project-forge: if has-remote -->
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
   **谁改谁先认领**（`flow.mjs claim`，弃领 `release`）；**一任务一分支一 PR**（复用已有 OPEN PR，返工原分支追加）。**PR 前跑 `flow.mjs finalize`**：全勾 `[x]`，成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`（`1:N` 总控 PRD 自动保留于 `docs/prd/` 维持 `active` 且不写脏）；`submit` 推后**零跟踪文件写回**、查重 PR 并套用 `.github/pull_request_template.md`。双写：认领/释放->Issue；提 PR->Issue（`Fixes #N`）；退回/通过/返工->PR+Issue；已合并->Issue。无远端只记账本。
@@ -261,6 +295,26 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **日常到此为止**：合并即改动终点，发版必须人明令（见「版本管理与回滚底线」）。
 
 - **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；指路一律用标题名，不用节号。
+<!-- project-forge: endif -->
+<!-- project-forge: if no-remote -->
+- **第四步：任务留痕与合并前文档同步**——
+
+  **谁改谁先认领**（`flow.mjs claim` / `release` 记入本地账本与事件日志），一任务一特性分支。**合并入主干前先跑 `flow.mjs finalize`**：Todo/SPEC 全勾 `[x]`，成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`（`1:N` 总控 PRD 自动保留于 `docs/prd/` 维持 `active` 且不写脏）；`flow.mjs submit` 仅校验本地干净状态并刷新审查槽。
+
+- **第五步：独立审查与本地试合**——
+
+  **独立审查通过后由审查者直接合入 `{{DEFAULT_BRANCH}}`**（**Round 2+ 永远新建独立 `review` 子代理并在同 `HEAD`/增量视野/历史停损硬锁下复审**）；**仅弱化门禁须人点头**（退出码 4）；「取舍」写 `merge-authority: human` 收回人合。本地合入经临时 `--detach` 工作树试合与复测通过后以 `--ff-only` 推进 `{{DEFAULT_BRANCH}}`。
+
+- **第六步：本地合入收尾与 Worktree 清理**——按序执行：
+  1. **把要写的东西写完，随本次提交一并合入**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」；
+  2. 经 `flow.mjs merge`（或 `flow.mjs batch merge-queue`）试合通过并推进 `{{DEFAULT_BRANCH}}`；
+  3. `git switch {{DEFAULT_BRANCH}}` 确认主干提交完整；
+  4. **清理前先列清单问一次**：哪个 worktree、哪条本地分支及干净状态；**问到人点头才删**（`flow.mjs cleanup --confirm`：先 `worktree-deps` `unlinkSync` 解绑，再 `git worktree remove` 与 `git branch -d <分支>`）。
+
+- **日常到此为止**：本地合入 `{{DEFAULT_BRANCH}}` 即改动终点，发版必须人明令（见「版本管理与回滚底线」）。
+
+- **同步不变量**：本节与项目协作判据是**同一套规则**，改任一处必须在同一次提交里对齐另一处；指路一律用标题名，不用节号。
+<!-- project-forge: endif -->
 <!-- project-forge: endif -->
 <!-- project-forge: end 日常协作与风险分流 -->
 

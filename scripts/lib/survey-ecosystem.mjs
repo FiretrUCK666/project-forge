@@ -5,6 +5,11 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
+import {
+  discoverWorkspacePackages,
+  scanDeclaredTaskRunners,
+  scanNeutralCiSteps,
+} from '../../kit/skills/lib/profile-sniffer.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
 
@@ -204,13 +209,18 @@ export const ECOSYSTEMS = [
       || existsSync(join(root, 'build.gradle.kts')),
     read: (root, s) => {
       if (existsSync(join(root, 'pom.xml'))) {
-        s.commands.build ??= 'mvn -B package'
-        if (hasSuffix(root, '.java')) s.commands.test ??= 'mvn -B test'
+        const hasMvnw = existsSync(join(root, 'mvnw')) || existsSync(join(root, 'mvnw.cmd'))
+        const mvn = hasMvnw ? (process.platform === 'win32' && existsSync(join(root, 'mvnw.cmd')) && !existsSync(join(root, 'mvnw')) ? 'mvnw.cmd' : './mvnw') : 'mvn'
+        s.commands.build ??= `${mvn} -B package`
+        if (existsSync(join(root, 'src', 'test')) || hasSuffix(root, '.java')) s.commands.test ??= `${mvn} -B test`
         s.publishable = true
         return
       }
-      const wrapper = existsSync(join(root, 'gradlew')) || existsSync(join(root, 'gradlew.bat'))
-      const gradle = wrapper ? './gradlew' : 'gradle'
+      const hasUnixW = existsSync(join(root, 'gradlew'))
+      const hasWinW = existsSync(join(root, 'gradlew.bat'))
+      const gradle = hasUnixW || hasWinW
+        ? (process.platform === 'win32' && hasWinW && !hasUnixW ? 'gradlew.bat' : './gradlew')
+        : 'gradle'
       s.commands.build ??= `${gradle} build`
       if (gradleTestEvidence(root)) s.commands.test ??= `${gradle} test`
     },
@@ -417,10 +427,40 @@ export function detectSkillKind(root) {
   return undefined
 }
 
-const SUBDIR_CANDIDATES = [
-  'frontend', 'backend', 'client', 'server', 'web', 'api', 'app', 'apps',
-  'packages', 'services', 'libs', 'ios', 'macos',
-]
+function scanSubdirectories(root, s, fileRelList = null) {
+  const discovery = discoverWorkspacePackages(root, fileRelList)
+  for (const pkg of discovery.packages) {
+    const dir = pkg.dirRel
+    if (!dir || pkg.ecosystems.length === 0) continue
+    const full = join(root, dir)
+    if (!existsSync(full)) continue
+    const sub = newEcosystemState()
+    scanEcosystemAt(full, sub, { name: dir })
+    if (sub.kinds.length === 0) continue
+    for (const kind of sub.kinds) if (!s.kinds.includes(kind)) s.kinds.push(kind)
+    for (const name of sub.manifests) if (!s.manifests.includes(name)) s.manifests.push(name)
+    if (sub.publishable) s.publishable = true
+    if (sub.private) s.private = true
+    if (Array.isArray(sub.packageScripts)) {
+      s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...sub.packageScripts])]
+    }
+    for (const req of sub.runtimeRequirements) {
+      if (!s.runtimeRequirements.includes(req)) s.runtimeRequirements.push(req)
+    }
+    const mergedSubCmds = { ...sub.commands }
+    for (const ecoCmd of Object.values(pkg.commands ?? {})) {
+      if (ecoCmd.quickTest) mergedSubCmds.test = ecoCmd.quickTest
+      if (ecoCmd.fullTest) mergedSubCmds.verify = ecoCmd.fullTest
+      if (ecoCmd.lint) mergedSubCmds.lint = ecoCmd.lint
+      if (ecoCmd.build) mergedSubCmds.build = ecoCmd.build
+    }
+    s.subdirs.push({ dir, kinds: sub.kinds, commands: mergedSubCmds })
+    for (const [key, value] of Object.entries(mergedSubCmds)) {
+      if (s.commands[key] === undefined) s.commands[key] = value
+    }
+    if (Object.keys(mergedSubCmds).length > 0) s.commandsByEcosystem[dir] = mergedSubCmds
+  }
+}
 
 function newEcosystemState() {
   return {
@@ -466,36 +506,10 @@ function scanEcosystemAt(root, s, { name } = {}) {
   }
 }
 
-function scanSubdirectories(root, s) {
-  if (s.kinds.length > 0) return
-  for (const dir of SUBDIR_CANDIDATES) {
-    const full = join(root, dir)
-    if (!existsSync(full)) continue
-    const sub = newEcosystemState()
-    scanEcosystemAt(full, sub, { name: dir })
-    if (sub.kinds.length === 0) continue
-    for (const kind of sub.kinds) if (!s.kinds.includes(kind)) s.kinds.push(kind)
-    for (const name of sub.manifests) if (!s.manifests.includes(name)) s.manifests.push(name)
-    if (sub.publishable) s.publishable = true
-    if (sub.private) s.private = true
-    if (Array.isArray(sub.packageScripts)) {
-      s.packageScripts = [...new Set([...(s.packageScripts ?? []), ...sub.packageScripts])]
-    }
-    for (const req of sub.runtimeRequirements) {
-      if (!s.runtimeRequirements.includes(req)) s.runtimeRequirements.push(req)
-    }
-    s.subdirs.push({ dir, kinds: sub.kinds, commands: sub.commands })
-    for (const [key, value] of Object.entries(sub.commands)) {
-      if (s.commands[key] === undefined) s.commands[key] = value
-    }
-    if (Object.keys(sub.commands).length > 0) s.commandsByEcosystem[dir] = sub.commands
-  }
-}
-
-export function detectEcosystem(root) {
+export function detectEcosystem(root, fileRelList = null) {
   const s = newEcosystemState()
   scanEcosystemAt(root, s)
-  scanSubdirectories(root, s)
+  scanSubdirectories(root, s, fileRelList)
   for (const hint of PLUGIN_HINTS) {
     if (!hint.test(root)) continue
     if (!s.kinds.includes(hint.kind)) s.kinds.push(hint.kind)
@@ -527,19 +541,6 @@ export function detectEcosystem(root) {
  * 这里读的是「人已经在跑的命令」：CI 的 `run:` 块、Makefile、justfile。它不猜语言，
  * 也不按生态惯例编——写进 CI 的命令是被真实执行过的，比任何清单推断都可靠。
  */
-const CI_CONFIG_CANDIDATES = Object.freeze([
-  '.circleci/config.yml',
-  '.circleci/config.yaml',
-  'azure-pipelines.yml',
-  'azure-pipelines.yaml',
-  'Jenkinsfile',
-  '.travis.yml',
-  '.drone.yml',
-  '.buildkite/pipeline.yml',
-  '.woodpecker.yml',
-])
-
-/** 命令归类：先匹配到的赢，所以把更具体的放前面。 */
 const COMMAND_KINDS = [
   // 测试要排在 build 前面：`dune runtest`、`zig build test`、`cargo build --tests`
   // 这类命令里都带 build，先按 build 判就把测试命令整个吞掉了。
@@ -556,174 +557,58 @@ function classifyCommand(cmd) {
   return undefined
 }
 
-/** 抽 `run:` 块与内联写法；块写法要按缩进收口。 */
-function extractRunCommands(text) {
-  const out = []
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = /^(\s*)(?:-\s*)?(?:run|script)\s*:\s*(.*)$/.exec(lines[i])
-    if (!m) continue
-    const baseIndent = m[1].length + (lines[i].includes('- ') ? 2 : 0)
-    const tail = m[2].trim()
-    if (tail && !/^[|>][+-]?$/.test(tail)) {
-      const clean = tail.replace(/\s+#.*$/, '').trim()
-      if (clean && !/^(?:true|false|null)$/i.test(clean)) out.push(clean)
-      continue
-    }
-    const body = []
-    let bodyIndent = null
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const raw = lines[j]
-      if (!raw.trim()) { body.push(''); continue }
-      const cur = /^(\s*)/.exec(raw)[1].length
-      if (bodyIndent === null) {
-        if (cur <= baseIndent) break
-        bodyIndent = cur
-      } else if (cur < bodyIndent) {
-        break
-      }
-      body.push(raw.slice(bodyIndent))
-      i = j
-    }
-    const cmd = body.filter((l) => !l.trim().startsWith('#')).join('\n').trim()
-    if (cmd) out.push(cmd)
-  }
-  return out
-}
-
-function readCiConfigTexts(root) {
-  const texts = []
-  const wfDir = join(root, '.github', 'workflows')
-  if (existsSync(wfDir)) {
-    try {
-      for (const name of cleanReaddir(wfDir).filter((n) => /\.ya?ml$/i.test(n)).sort()) {
-        const text = readTextSafe(join(wfDir, name))
-        if (text) texts.push({ rel: `.github/workflows/${name}`, text })
-      }
-    } catch { /* 读不到就算了 */ }
-  }
-  for (const rel of CI_CONFIG_CANDIDATES) {
-    const text = readTextSafe(join(root, rel))
-    if (text) texts.push({ rel, text })
-  }
-  const wpDir = join(root, '.woodpecker')
-  if (existsSync(wpDir)) {
-    try {
-      for (const name of cleanReaddir(wpDir).filter((n) => /\.ya?ml$/i.test(n)).sort()) {
-        const text = readTextSafe(join(wpDir, name))
-        if (text) texts.push({ rel: `.woodpecker/${name}`, text })
-      }
-    } catch { /* 读不到就算了 */ }
-  }
-  return texts
-}
-
 export function detectCiCommands(root) {
   const commands = {}
   const sources = {}
-  for (const { rel, text } of readCiConfigTexts(root)) {
-    for (const cmd of extractRunCommands(text)) {
-      const kind = classifyCommand(cmd)
-      if (!kind) continue
-      if (commands[kind] !== undefined) continue
-      commands[kind] = cmd
-      sources[kind] = rel
-    }
+  const evidence = []
+  const { steps } = scanNeutralCiSteps(root)
+  for (const step of steps) {
+    const kind = classifyCommand(step.cmd)
+    if (!kind || commands[kind] !== undefined) continue
+    commands[kind] = step.cmd
+    sources[kind] = step.file
+    evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: step.cmd })
   }
-  return { commands, sources }
+  return { commands, sources, evidence }
 }
 
-/**
- * target 名与用途的对应。
- *
- * 各家叫法不一样：同一个「跑测试」的动作，有人写 `test`，有人写 `check`、`spec`、
- * `runtest`；同一个「静态检查」也一样，`lint`、`vet`、`fmt-check` 都见过。只认 `test`
- * 这一个词，等于把一大批项目判成「没有测试命令」——而它们明明有。
- */
-const TASKFILE_ALIASES = {
-  test: ['test', 'tests', 'check', 'verify', 'spec', 'specs', 'runtest', 'unittest'],
-  lint: ['lint', 'vet', 'fmt-check', 'format-check', 'style'],
-  build: ['build', 'all', 'compile', 'dist'],
-  install: ['install', 'deps', 'dependencies', 'setup', 'bootstrap'],
-}
-
-/** 从 Makefile / justfile 里读已经定义好的 target，作为无 CI 时的第二道兜底。 */
+/** 从 Makefile / justfile / Taskfile 里读已经定义好的 target，作为无 CI 时的第二道兜底。 */
 export function detectDeclaredTaskCommands(root) {
-  const commands = {}
-  const sources = {}
-  const runners = []
-
-  const makefile = ['Makefile', 'makefile', 'GNUmakefile'].find((n) => existsSync(join(root, n)))
-  if (makefile) {
-    const text = readTextSafe(join(root, makefile)) ?? ''
-    runners.push({
-      runner: 'make',
-      file: makefile,
-      names: new Set([...text.matchAll(/^([A-Za-z0-9_.-]+):/gm)].map((m) => m[1])),
-    })
-  }
-  const justfile = ['justfile', 'Justfile'].find((n) => existsSync(join(root, n)))
-  if (justfile) {
-    const text = readTextSafe(join(root, justfile)) ?? ''
-    runners.push({
-      runner: 'just',
-      file: justfile,
-      names: new Set([...text.matchAll(/^([A-Za-z0-9_-]+)(?:\s+[^:]*)?:/gm)].map((m) => m[1])),
-    })
-  }
-
-  for (const { runner, file, names } of runners) {
-    for (const [kind, aliases] of Object.entries(TASKFILE_ALIASES)) {
-      if (commands[kind] !== undefined) continue
-      const hit = aliases.find((alias) => names.has(alias))
-      if (hit === undefined) continue
-      commands[kind] = `${runner} ${hit}`
-      sources[kind] = file
-    }
-  }
-  return { commands, sources }
+  const runners = scanDeclaredTaskRunners(root)
+  return { commands: runners.commands, sources: runners.sources, evidence: runners.evidence }
 }
 
 /**
- * 语言无关的命令兜底：CI 优先，其次 Makefile / justfile。
- *
- * 只在生态清单一个都没命中时启用——生态清单命中时它自己的推断更贴近该语言的实际用法，
- * 不该被 CI 里某一条偶然的 `npm run lint` 覆盖掉。
+ * 语言无关的命令兜底：CI 优先，其次 Makefile / justfile / Taskfile。
  */
 export function detectUniversalCommands(root) {
   const ci = detectCiCommands(root)
   const declared = detectDeclaredTaskCommands(root)
   const commands = {}
   const sources = {}
+  const detectionEvidence = []
   for (const key of ['test', 'lint', 'build', 'install']) {
     const from = ci.commands[key] !== undefined ? ci : (declared.commands[key] !== undefined ? declared : null)
     if (!from) continue
     commands[key] = from.commands[key]
     sources[key] = from.sources[key]
+    const ev = (from.evidence ?? []).find((e) => e.kind === key)
+    if (ev) detectionEvidence.push(ev)
   }
-  return { commands, sources }
+  return { commands, sources, detectionEvidence }
 }
 
 export function detectTaskEntriesDetailed(root) {
+  const runners = scanDeclaredTaskRunners(root)
   const commands = {}
-  const makeTargets = new Set()
-  const justRecipes = new Set()
-  const makefile = ['Makefile', 'makefile', 'GNUmakefile'].find((n) => existsSync(join(root, n)))
-  if (makefile) {
-    const text = readTextSafe(join(root, makefile)) ?? ''
-    for (const m of text.matchAll(/^([A-Za-z0-9_.-]+):/gm)) makeTargets.add(m[1])
-    if (makeTargets.has('test')) commands.test ??= 'make test'
-    if (makeTargets.has('build')) commands.build ??= 'make build'
-    if (makeTargets.has('lint')) commands.lint ??= 'make lint'
-  }
-  const justfile = ['justfile', 'Justfile'].find((n) => existsSync(join(root, n)))
-  if (justfile) {
-    const text = readTextSafe(join(root, justfile)) ?? ''
-    for (const m of text.matchAll(/^([A-Za-z0-9_-]+)(?:\s+[^:]*)?:/gm)) justRecipes.add(m[1])
-    if (justRecipes.has('test')) commands.test ??= 'just test'
-    if (justRecipes.has('build')) commands.build ??= 'just build'
-  }
-  return { commands, makeTargets, justRecipes }
+  if (runners.makeTargets.has('test')) commands.test ??= 'make test'
+  if (runners.makeTargets.has('build')) commands.build ??= 'make build'
+  if (runners.makeTargets.has('lint')) commands.lint ??= 'make lint'
+  if (runners.justRecipes.has('test')) commands.test ??= 'just test'
+  if (runners.justRecipes.has('build')) commands.build ??= 'just build'
+  if (runners.taskNames.has('test')) commands.test ??= 'task test'
+  if (runners.taskNames.has('build')) commands.build ??= 'task build'
+  return { commands, makeTargets: runners.makeTargets, justRecipes: runners.justRecipes, taskNames: runners.taskNames }
 }
 
 export function detectTaskEntries(root) {

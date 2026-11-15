@@ -129,15 +129,15 @@ export async function handleNext(opts, roots) {
     const implRoot = selectedTask.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.mainRoot
     const exists = existsSync(implRoot)
     const profile = parseAgentsProfile(roots.mainRoot)
-    const [op, headRes, stZ, changedFiles, gateHits] = exists
+    const stZ = exists ? await gitStatusPorcelainZ(implRoot) : { ok: true, entries: [] }
+    const [op, headRes, changedFiles, gateHits] = exists
       ? await Promise.all([
-          detectInProgressGitOp(implRoot),
+          detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
           gitRun(implRoot, ['rev-parse', 'HEAD']),
-          gitStatusPorcelainZ(implRoot),
-          getChangedFiles(implRoot, selectedTask.baseSha),
+          getChangedFiles(implRoot, selectedTask.baseSha, { statusEntries: stZ.entries }),
           detectGateWeakening(implRoot, selectedTask.baseSha, selectedTask.baseBranch),
         ])
-      : [{ inProgress: false }, { ok: false, stdout: '' }, { entries: [] }, [], []]
+      : [{ inProgress: false }, { ok: false, stdout: '' }, [], []]
 
     const headSha = headRes.ok ? headRes.stdout.trim() : null
     const ownArchived = [selectedTask.archivedTodoFile, selectedTask.archivedSpecFile, selectedTask.archivedPrdFile].filter(Boolean)

@@ -173,11 +173,24 @@ export async function handleNext(opts, roots) {
       nonDocChangesAfterFinalize = postFin.entries.some((e) => e.file && !/^docs\//.test(e.file))
     }
 
+    // 主工作区直接改文件：这是「绕过隔离位」的早期信号。
+    //
+    // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
+    // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
+    //
+    // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
+    // 真正的硬拦留在 merge。
+    const mainStatus = selectedTask.worktreePath && roots.mainRoot !== implRoot
+      ? await gitStatusPorcelainZ(roots.mainRoot)
+      : null
+    const mainDirtyCount = mainStatus?.ok ? mainStatus.entries.length : 0
+
     taskRuntime = {
       opInProgress: Boolean(op.inProgress),
       opName: op.op ?? null,
       headSha,
       dirty: stZ.entries.length,
+      mainDirtyCount,
       policy,
       evidenceValidation,
       nonDocChangesAfterFinalize,
@@ -229,6 +242,9 @@ export async function handleNext(opts, roots) {
     if (payload.taskId) process.stdout.write(`- 任务: ${payload.taskId} | risk=${payload.policy?.riskTier ?? '-'} | worktree=${payload.worktreePath ?? 'branch'}\n`)
     process.stdout.write(`- 下一步: ${payload.nextAction}\n`)
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
+    for (const w of payload.warnings ?? []) {
+      process.stdout.write(`- 提醒 ${w.code}: ${w.message}\n`)
+    }
     if (payload.candidates?.length > 0) {
       for (const c of payload.candidates) process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, branch=${c.branch ?? '-'})\n`)
     }

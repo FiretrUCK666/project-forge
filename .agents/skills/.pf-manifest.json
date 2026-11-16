@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-16T19:07:17.164Z",
+  "installedAt": "2026-11-16T19:09:35.989Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -29,7 +29,7 @@
       "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "8045b87aeeee77bbbf0797d62a8cddcb13832710bb8fb0d1e863e3887068d702"
+      "sha256": "989a73bfbb2b498016b7f4741d2df82a946faa974a94e0e1068a92695eb112a4"
     },
     "dev-flow/scripts/flow-sync.mjs": {
       "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
@@ -173,7 +173,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "0a2de3f5f6e15a7dab68dea7f8ed1678cc438ee7553ab0ed2c2721169070411f"
+      "sha256": "c118dfe21f131e43f2ed60c0c16f3c2402dac5e9abc10a7f7832b8a4baf7d4b1"
     }
   },
   "disabledSkills": [],

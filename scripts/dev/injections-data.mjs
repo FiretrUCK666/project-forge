@@ -796,6 +796,14 @@ export const INJECTIONS = [
     expect: '规划审核范围',
   },
   {
+    id: 'I88',
+    what: '主工作区直改不再提醒（绕过隔离位变成完全看不见）',
+    file: 'kit/skills/lib/workflow-policy.mjs',
+    from: '  if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {',
+    to: '  if (false && (rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {',
+    expect: '主工作区有改动时给提醒',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

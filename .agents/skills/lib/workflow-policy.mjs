@@ -599,6 +599,23 @@ export function evaluateNextState({
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
   }
 
+  // 主工作区直接改文件：warning 不是 blocker。
+  //
+  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
+  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
+  //
+  // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
+  // 真正的硬拦留在 merge。所以它进 `warnings` 而不进 `blockingReasons`——两件事不能混。
+  const warnings = []
+  if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {
+    warnings.push({
+      code: 'WARN_WORKING_IN_MAIN_CHECKOUT',
+      message: `主工作区有 ${rt.mainDirtyCount} 处未提交改动，而这条任务的实施位是 ${t.worktreePath}`
+        + '——Case 2/3/4 的活应该落在隔离位；小改动（Case 1）才在主工作区直接改。'
+        + '不改也行，但「这次改动包含什么」会因此说不清。',
+    })
+  }
+
   return {
     taskId: t.taskId,
     phase,
@@ -606,6 +623,7 @@ export function evaluateNextState({
     nextAction,
     command,
     blockingReasons,
+    warnings,
     worktreePath: t.worktreePath ?? null,
     reviewWorktreePath: t.reviewWorktreePath ?? null,
     policy,

@@ -1297,4 +1297,48 @@ cases.push(['规划审核范围：上轮意见留痕，改没改都要逐条回�
   return true
 }])
 
+// 主工作区直接改文件：这是「绕过隔离位」的早期信号，此前没有任何东西看得见。
+//
+// 但它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
+// 真正的硬拦留在 merge。所以它进 warnings 而不进 blockingReasons。
+cases.push(['主工作区有改动时给提醒，但不改阶段、不阻塞', async () => {
+  const { evaluateNextState } = await import('../../kit/skills/lib/workflow-policy.mjs')
+
+  const baseTask = {
+    taskId: 'w1', caseType: 3, role: 'maintainer', status: 'implementing',
+    branch: 'feat/w1', baseBranch: 'main', worktreePath: '.worktrees/impl-w1',
+    rounds: [], implementerId: 'alice',
+  }
+  const rt = (mainDirtyCount) => ({
+    opInProgress: false, opName: null, headSha: 'abc1234', dirty: 0,
+    mainDirtyCount, policy: { riskTier: 'medium', requiredGates: ['full'], independentReviewRequired: true },
+    evidenceValidation: { ok: false, code: 'BLOCKED_NOT_VERIFIED', reason: '尚未实证' },
+    nonDocChangesAfterFinalize: false,
+  })
+
+  // 正向：主工作区脏 + 有隔离位 → 出警告
+  const dirty = evaluateNextState({ activeTasks: [baseTask], selectedTask: baseTask, taskRuntime: rt(2) })
+  const hit = (dirty.warnings ?? []).find((w) => w.code === 'WARN_WORKING_IN_MAIN_CHECKOUT')
+  if (!hit) return `主工作区脏时没有 WARN_WORKING_IN_MAIN_CHECKOUT：${JSON.stringify(dirty.warnings ?? [])}`
+  if (!hit.message.includes('2')) return '警告里没说清有几处改动'
+  // 反向：它不许进阻塞原因（那是拦截，不是提醒）
+  if ((dirty.blockingReasons ?? []).includes('WARN_WORKING_IN_MAIN_CHECKOUT')) return '警告被误放进阻塞原因'
+
+  // 反向：主工作区干净时不许报
+  const clean = evaluateNextState({ activeTasks: [baseTask], selectedTask: baseTask, taskRuntime: rt(0) })
+  if ((clean.warnings ?? []).some((w) => w.code === 'WARN_WORKING_IN_MAIN_CHECKOUT')) return '主工作区干净时误报'
+
+  // 反向：没有隔离位的任务（分支模式）不该报——它本来就在主工作区干
+  const noWt = { ...baseTask, worktreePath: null }
+  const branchMode = evaluateNextState({ activeTasks: [noWt], selectedTask: noWt, taskRuntime: rt(5) })
+  if ((branchMode.warnings ?? []).some((w) => w.code === 'WARN_WORKING_IN_MAIN_CHECKOUT')) {
+    return '分支模式的任务（本来就在主工作区干）被误报'
+  }
+
+  // 反向：警告不得改变阶段
+  const samePhase = evaluateNextState({ activeTasks: [baseTask], selectedTask: baseTask, taskRuntime: rt(0) }).phase
+  if (dirty.phase !== samePhase) return `警告改变了阶段：脏=${dirty.phase} 干净=${samePhase}`
+  return true
+}])
+
 }

@@ -116,7 +116,9 @@ export {
 } from './static-gates.mjs'
 
 export {
+  consumeReviewToken,
   createDefaultLedger,
+  issueReviewToken,
   listTaskLedgers,
   readTaskLedger,
   resolveTaskContext,
@@ -226,6 +228,28 @@ export {
 } from './task-graph.mjs'
 
 export { checkTddSyncParity } from './tdd-parity.mjs'
+
+export {
+  failedVerdict,
+  isOk,
+  mergeVerdicts,
+  needsAttention,
+  okVerdict,
+  unavailableVerdict,
+  VERDICT_STATES,
+  verdictFromError,
+  verdictLabel,
+} from './verdict.mjs'
+
+export {
+  hasRealContent,
+  isToolOwnedPath,
+  isToolSkeletonFile,
+  normalizeRelPath,
+  projectOwnedPaths,
+  TOOL_OWNED_PREFIXES,
+  TOOL_SKELETON_FILES,
+} from './tool-owned.mjs'
 
 export {
   appendGovernSignal,

@@ -15,6 +15,34 @@ import { scanLines } from './markdown.mjs'
 
 export { COMMON_SKIP_DIRS }
 
+/**
+ * 三态结论与「工具产物归属」两套契约的唯一真相源住在 `kit/skills/lib/`：
+ * 它们是**被更多脚本共用**的那一份（勘察、体检、流转、审查四个方向都要读），
+ * 而 `scripts/lib/` 只承载首次配置与升级专用逻辑。这里重导出，让安装期脚本
+ * 与运行时脚本读同一份实现——两份实现会给出两个答案，而错的那个通常静默。
+ */
+export {
+  failedVerdict,
+  isOk,
+  mergeVerdicts,
+  needsAttention,
+  okVerdict,
+  unavailableVerdict,
+  VERDICT_STATES,
+  verdictFromError,
+  verdictLabel,
+} from '../../kit/skills/lib/verdict.mjs'
+
+export {
+  hasRealContent,
+  isToolOwnedPath,
+  isToolSkeletonFile,
+  normalizeRelPath,
+  projectOwnedPaths,
+  TOOL_OWNED_PREFIXES,
+  TOOL_SKELETON_FILES,
+} from '../../kit/skills/lib/tool-owned.mjs'
+
 /** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
 

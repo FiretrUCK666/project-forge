@@ -17,6 +17,39 @@ import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
 
+/**
+ * 发一枚独立审查令牌。**只由 `flow next` 在 `needs-review` 阶段调用。**
+ *
+ * 令牌的形状刻意不透明（前缀 `pf-rv-` 便于在日志里认出来，其余是随机字节），
+ * 它不承载任何可推导的信息：能推导的东西就等于能自己造。
+ */
+export function issueReviewToken(round) {
+  const bytes = new Uint8Array(18)
+  globalThis.crypto.getRandomValues(bytes)
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return { token: `pf-rv-${hex}`, round: Number(round) || 1, issuedAt: new Date().toISOString(), consumedAt: null }
+}
+
+/**
+ * 消费一枚令牌。成功返回 `{ ok: true }`，失败返回原因。
+ *
+ * 三条都要满足：令牌存在、round 对得上、未被消费过。少判一条就等于没有令牌——
+ * 复用旧令牌、或拿 Round 1 的令牌记 Round 3，都会让「独立审查」这个说法失效。
+ */
+export function consumeReviewToken(ledger, token, round) {
+  const value = String(token ?? '').trim()
+  if (!value) return { ok: false, reason: 'MISSING_REVIEW_TOKEN' }
+  const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const hit = list.find((t) => t && t.token === value)
+  if (!hit) return { ok: false, reason: 'UNKNOWN_REVIEW_TOKEN' }
+  if (hit.consumedAt) return { ok: false, reason: 'REVIEW_TOKEN_ALREADY_CONSUMED' }
+  if (Number(hit.round) !== Number(round)) {
+    return { ok: false, reason: `REVIEW_TOKEN_ROUND_MISMATCH: 令牌是 Round ${hit.round} 的，当前记 Round ${round}` }
+  }
+  hit.consumedAt = new Date().toISOString()
+  return { ok: true, entry: hit }
+}
+
 /** 校验并清洗 taskId，兼容 ASCII 与中文字符，防止路径穿越。 */
 export function sanitizeTaskId(taskId) {
   const raw = String(taskId ?? '').trim().normalize('NFC')
@@ -82,6 +115,25 @@ export function createDefaultLedger(partial = {}) {
     visualCheckEvidence: partial.visualCheckEvidence ?? null,
     implementerId: partial.implementerId ?? null,
     reviewerId: partial.reviewerId ?? null,
+    /**
+     * 探索证据：这个任务开干之前，有没有人真的读过这个仓。
+     *
+     * 形状冻结在这里，因为三处要读它——`flow next`（缺了就只给探索这一步）、
+     * `flow merge`（缺了拦）、`review-pack`（写进审查材料）。三处各定义一个字段名，
+     * 就会出现「写了没人读、读了没人写」。
+     *
+     * `by` 是派发者标识（子代理名或会话标识）。它不承担防伪——防伪在 `reviewTokens`；
+     * 它承担的是「事后能追到是谁说的」。
+     */
+    explored: partial.explored ?? null,
+    /**
+     * 独立审查的一次性令牌。
+     *
+     * `--reviewer-id` 是命令行传进来的自由字符串，谁都能编一个不一样的名字。
+     * 令牌把「随便编个名」抬成「至少得伪造一个 `flow next` 现场发的东西」，
+     * 且一个令牌只能被消费一次。
+     */
+    reviewTokens: Array.isArray(partial.reviewTokens) ? partial.reviewTokens : [],
     rounds: Array.isArray(partial.rounds) ? partial.rounds : [],
     lastReview: partial.lastReview ?? null,
     reviewPassed: Boolean(partial.reviewPassed),

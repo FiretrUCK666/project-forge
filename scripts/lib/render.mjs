@@ -8,6 +8,14 @@
  * 一处排序、一句措辞都不改变判定，因此它坏掉时最坏结果是「报告难看」，不是「判错」。
  */
 
+/**
+ * 每个生态最多展开几条命令。
+ *
+ * 阈值给名字、不写裸数字：改它的时候知道自己在改「契约里展开多少条」。
+ * 每类至少留一条是硬要求——只剩一句「见 CI」的节等于没有这一节。
+ */
+export const ECO_COMMANDS_SHOWN_PER_KIND = 3
+
 const MATURITY_TEXT = {
   empty: '空目录 —— 先让项目存在（选技术栈、写源码），再回来配工程设施',
   greenfield: '白纸或刚起步 —— 缺的东西多，但该做的一次配齐',
@@ -143,16 +151,26 @@ export function toMarkdown(facts) {
     }
   }
 
-  // 多生态并存时**逐生态全量列出**。只给顶层那几张表，写文档与配 CI 的人会以为
-  // 后端没有命令——而只测一半的 CI 看起来完全正常：测试绿着，另一半一次没跑过。
+  // 多生态并存时**逐生态列出，但不是全量抄一遍**。
+  //
+  // 全抄的后果实测过：一个能力目录类的仓，CI 里有十几条真实命令，全部装进契约之后
+  // 「构建与验证」那一节直接逼近 30KB 上限，而其中大半是同一条命令的不同调用。
+  // 契约的作用是告诉人「去哪看、跑哪条」，不是把 CI 文件复制一遍。
+  //
+  // 所以：每类只展示前 `ECO_COMMANDS_SHOWN_PER_KIND` 条，其余折叠成一句指向源文件的话。
+  // 阅读成本降下来的同时，**每类至少留一条真实命令**——不能退化成一个纯指针。
   const byEco = facts.commandsByEcosystem ?? {}
   const ecoKeys = Object.keys(byEco).filter((k) => Object.keys(byEco[k] ?? {}).length > 0)
   if (ecoKeys.length > 1) {
     lines.push('')
     lines.push('**按生态分开的命令**（每个都要出现在契约与 CI 里，别只取一份）：')
     for (const kind of ecoKeys) {
-      const pairs = Object.entries(byEco[kind]).map(([k, v]) => `${label[k] ?? k} \`${v}\``)
-      lines.push(`- **${kind}**：${pairs.join('；')}`)
+      const pairs = Object.entries(byEco[kind])
+      const shown = pairs.slice(0, ECO_COMMANDS_SHOWN_PER_KIND).map(([k, v]) => `${label[k] ?? k} \`${v}\``)
+      lines.push(`- **${kind}**：${shown.join('；')}`)
+      if (pairs.length > shown.length) {
+        lines.push(`  - 另有 ${pairs.length - shown.length} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
+      }
     }
   }
 

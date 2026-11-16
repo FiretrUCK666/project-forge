@@ -739,4 +739,12 @@ export const INJECTIONS = [
     to: '  // 一次性被拆掉',
     expect: '独立审查令牌',
   },
+  {
+    id: 'I80',
+    what: '命令按生态分组时退化成空节（折叠后一条真实命令都不留）',
+    file: 'scripts/lib/render.mjs',
+    from: 'export const ECO_COMMANDS_SHOWN_PER_KIND = 3',
+    to: 'export const ECO_COMMANDS_SHOWN_PER_KIND = 0',
+    expect: '命令按生态分组',
+  },
 ]

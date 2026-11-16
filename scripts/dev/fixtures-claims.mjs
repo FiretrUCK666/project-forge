@@ -975,4 +975,37 @@ cases.push(['文档兄弟集按 slug 认亲，不依赖同一天创建', async (
   } finally { rmTree(dir) }
 }])
 
+// #49 C27：命令多到逼近上限时，契约改说「去哪看」，不是把 CI 抄一遍。
+//
+// 实测形状：一个能力目录类的仓，CI 里有十几条真实命令，全量装进契约之后
+// 「构建与验证」那一节直接逼近 30KB 上限。但**折叠不能变成空指针**——每类至少留一条。
+cases.push(['命令按生态分组后每类留真实命令，超量折叠成指向源文件的说明', async () => {
+  const many = Array.from({ length: 8 }, (_, i) => `      - run: npm run task${i}`).join('\n')
+  const dir = tmpProject({
+    'package.json': '{"name":"many","version":"1.0.0","scripts":{"test":"node --test"}}',
+    'README.md': '# many\n\n命令折叠测试仓。\n',
+    '.github/workflows/ci.yml': `name: ci\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n${many}\n`,
+    'Makefile': 'test:\n\tmake -s inner\ntest2:\n\tmake -s inner2\n',
+  })
+  try {
+    const gen = await runAbsAsync('scripts/compose-agents.mjs', [dir])
+    if (gen.status !== 0) return `compose 失败：${gen.stderr?.slice(0, 200)}`
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const section = /## 环境与构建验证[\s\S]*?(?=\n## |\n<!-- project-forge: end)/.exec(text)?.[0] ?? ''
+    if (!section) return '生成的 AGENTS.md 没有「环境与构建验证」节'
+    // 反向：不得退化成空节或纯指针
+    // 反向：不得退化成空节——代码块里至少要有一条真实命令（不是注释）
+    const fence = /```sh\n([\s\S]*?)```/.exec(section)?.[1] ?? ''
+    const realCmds = fence.split('\n').map((l) => l.replace(/\s+#.*$/, '').trim()).filter((l) => l && !l.startsWith('#'))
+    if (realCmds.length === 0) return '「构建与验证」的代码块里一条真实命令都没有——折叠退化成了空节'
+    // 折叠发生时必须留下可核对的话，不能默默截断
+    const truncated = /另有 \d+ 条同类命令未展开/.test(section)
+    if (truncated) {
+      const byEco = /按生态分开的命令[\s\S]*$/.exec(section)?.[0] ?? ''
+      if (!/`[^`]+`/.test(byEco)) return '折叠之后按生态那一段没有任何内联命令，只剩指针'
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

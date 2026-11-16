@@ -16,6 +16,7 @@ import { survey } from './survey.mjs'
 import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import * as protocol from './lib/protocol.mjs'
+import { ECO_COMMANDS_SHOWN_PER_KIND } from './lib/render.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 import {
   collectMissingSections,
@@ -231,12 +232,24 @@ function commandsBlock(facts) {
   const kinds = Object.keys(byEco).filter((k) => COMMAND_ORDER.some((key) => byEco[k]?.[key]))
 
   if (kinds.length > 1) {
+    // 每类只展开前若干条，其余折叠成一句可核对的说明。
+    //
+    // 全抄的后果实测过：一个能力目录类的仓，CI 里十几条真实命令全部装进契约之后
+    // 「构建与验证」那一节直接逼近 30KB 上限，而其中大半是同一条命令的不同调用。
+    // 契约的作用是告诉人「去哪看、跑哪条」，不是把 CI 文件复制一遍。
+    //
+    // 折叠有一条硬底线：**每类至少留一条真实命令**。只剩一句「见 CI」的节等于没有这一节。
     const blocks = []
     for (const kind of kinds) {
+      const pairs = COMMAND_ORDER
+        .map((key) => [key, byEco[kind]?.[key]])
+        .filter(([, value]) => typeof value === 'string' && value.trim())
       const lines = [`# --- ${kind} ---`]
-      for (const key of COMMAND_ORDER) {
-        const value = byEco[kind]?.[key]
-        if (typeof value === 'string' && value.trim()) lines.push(`${value}  # ${COMMAND_LABEL[key]}`)
+      for (const [key, value] of pairs.slice(0, ECO_COMMANDS_SHOWN_PER_KIND)) {
+        lines.push(`${value}  # ${COMMAND_LABEL[key]}`)
+      }
+      if (pairs.length > ECO_COMMANDS_SHOWN_PER_KIND) {
+        lines.push(`# 另有 ${pairs.length - ECO_COMMANDS_SHOWN_PER_KIND} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
       }
       blocks.push(lines.join('\n'))
     }

@@ -29,8 +29,12 @@ description: |
 
 ## 与 `docs/TDD.md` 的读写边界分工
 
-- **`dev-explore` 只读采证**：输出真实文件入口、包清单、CI 命令与可复用基建；**绝不越权写文件**。
-- **初始化与跨月重入写入**：空白仓由 `--bootstrap-empty` 一步落盘初始 `docs/TDD.md`；存量接入在装配套件后用本技能输出写入或校准 `docs/TDD.md`（保留人工决策，按需删去不适用的可选节）。
+- **本技能一律只读**：输出真实文件入口、包清单、CI 命令与可复用基建；**绝不写任何文件，包括 `docs/TDD.md`**。
+- **写入归谁**：
+  - 空白仓的初始 `docs/TDD.md` 由 `equip --bootstrap-empty` 一步落盘；
+  - 存量仓的校准由 `dev-govern` 指出该改哪里（`docs.tdd-module-drift` 一类结论），Arc 结论由人落笔或由 `dev-plan` 写进 PRD/SPEC；
+  - 本技能只负责把真相查清楚、说清楚。
+- **为什么不让本技能写**：一个叫「完全只读」的技能拥有写权限，是所有误判的来源——调用方分不清它到底会不会动手，于是既不敢信它的「我没改」，也不敢在只读场景用它。**「只读」这个词只有一个含义：一个字都不写。**
 - **日常迭代持续校准**：当 `dev-flow`（`finalize`）、`dev-govern`（`audit`、`docs.tdd-module-drift`）或 `reentry.staleTddPaths` 发现路径漂移时调用本技能定向重扫并同步修订 `docs/TDD.md`。
 
 ## 脚本命令（只读）

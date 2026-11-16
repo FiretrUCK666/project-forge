@@ -9,6 +9,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 
@@ -554,19 +555,44 @@ export function auditDoc({ repoRoot, file }) {
   const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
   const sections = extractSections(bodyForSections)
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
-    if (!/^- \[[ xX]\]\s+C1\b/m.test(normRaw)) {
-      errors.push({ code: 'MISSING_ACCEPTANCE_CRITERIA', line: 1, message: '缺少至少一条「- [ ] C1: ...」可判定验收标准', fixHint: '动手前必须冻结 C1..Cn 标准，每条须能被一条命令或断言证明。' })
+    // 「必须有什么」不再写死在这里，而是从 `doc-requirements.mjs` 那一份真相源读。
+    //
+    // 早先这里硬编码了三条检查（验收标准、非目标、门型），模板里也硬编码了七节——
+    // 两处都把「这个工具自己长什么样」当成了「所有项目都必须长什么样」。于是数据管道
+    // 被要求写「关键交互」、论文被要求标「门型 two-way」、纯文档站被要求写「复用模块」。
+    //
+    // 现在只有「与项目形态无关」的三件是主干（要做什么、不做什么、怎么算做完），
+    // 其余章节由项目自己的模板声明要或不要。
+    const docRequirements = resolveDocRequirements(repoRoot, docType)
+    const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
+    const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)
+    const missing = findMissingSections(docRequirements, sectionLookup, { hasInlineAcceptance: hasAcceptance })
+    for (const miss of missing) {
+      const code = miss.id === 'acceptance'
+        ? 'MISSING_ACCEPTANCE_CRITERIA'
+        : `MISSING_SECTION_${miss.id.toUpperCase().replace(/-/g, '_')}`
+      const lead = miss.core
+        ? `缺少「${miss.label}」节或内容为空——这一节与项目形态无关，任何项目都得回答`
+        : `项目自己的模板要求了「${miss.label}」，但这份文档里没有`
+      const valueGap = miss.reason === 'section-missing-required-value'
+        ? `（内容在，但没有给出必须标注的值：${miss.needsPattern.source}）`
+        : ''
+      errors.push({ code, line: 1, message: `${lead}${valueGap}`, fixHint: miss.fixHint })
     }
-    const nonGoalSec = findSectionByKeywords(sections, ['本期不做', '明确不做', '非目标', 'Non-Goals'])
-    const hasNonGoalBullet = /-\s+\*\*本期不做\*\*\s*[:：]|###\s*(?:明确不做|Non-Goals)/i.test(bodyForSections)
-    if ((!nonGoalSec || !nonGoalSec.body.replace(/<!--[\s\S]*?-->/g, '').trim()) && !hasNonGoalBullet) {
-      errors.push({ code: 'MISSING_NON_GOALS', line: 1, message: '缺少「本期不做 / 非目标」节或内容为空', fixHint: '请写清本期明确不做的事项，防止范围蔓延。' })
-    }
-    const doorSec = findSectionByKeywords(sections, ['门型与回滚', '门型', '回滚路径'])
-    const doorText = doorSec ? doorSec.body.replace(/<!--[\s\S]*?-->/g, '') : ''
-    const hasInlineDoor = /\*\*门型(?:判定|与回滚路径)?\*\*[^\n]*\b(?:two-way|one-way)\b/i.test(bodyForSections)
-    if ((!doorSec || !/\b(?:two-way|one-way)\b/i.test(doorText)) && !hasInlineDoor) {
-      errors.push({ code: 'MISSING_DOOR_OR_ROLLBACK', line: 1, message: '缺少「门型与回滚路径」节，或未明确标注 two-way / one-way', fixHint: '请标注「门型：two-way」或「门型：one-way」，并写明具体回滚操作。' })
+
+    // 反向：自定义模板不能变成「什么都不用写」的免检通道。
+    // 主干三节即使被项目声明 omit，也照样要求——这是上面 resolveDocRequirements 的保证，
+    // 这里显式断言一次，防止哪天有人在那一层把 core 判据改松。
+    const coreIds = FORM_INDEPENDENT_CORE[docType] ?? []
+    const droppedCore = coreIds.filter((id) => !docRequirements.sections.some((sec) => sec.id === id))
+    if (droppedCore.length > 0) {
+      errors.push({
+        code: 'CORE_SECTION_WAIVED',
+        line: 1,
+        message: `项目声明把主干章节去掉了：${droppedCore.join('、')}——主干是不可豁免的，`
+          + '否则「我有一个自己的模板」就成了什么都不用写的免检通道。',
+        fixHint: '把这几节从自定义模板的 omit_sections 里移除；要写得合身，减的是可选章节，不是主干。',
+      })
     }
   }
 

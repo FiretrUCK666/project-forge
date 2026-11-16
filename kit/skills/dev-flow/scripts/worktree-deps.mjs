@@ -503,7 +503,11 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
   const skipped = []
   const blocked = []
 
-  // 校验基准：解绑之前，把每个外链目标记下来，解绑后逐个复核它还在。
+  // 校验基准：**删除前扫描到的每一条外链目标**，都记下来，处理完逐个复核还在。
+  //
+  // 关键在「同一个集合」：早先只把「准备解绑的那几条」记进基准，于是被拦下的与因 tracked
+  // 跳过的那些目标，事后没人复核——**校验用的集合比它要保护的东西小**，洞就在这里。
+  // 现在基准直接取自扫描结果，与后面解不解绑无关。
   const before = scan.outbound.map((item) => ({ path: item.path, resolved: item.resolved }))
 
   for (const link of scan.outbound) {

@@ -738,8 +738,17 @@ cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出�
     if (!existsSync(join(dir, 'data', 'precious', 'SURVIVE.txt'))) return 'cleanup 之后深一层链接的目标没了'
 
     // 显式逐个放行才允许删；且只删链接，不碰目标
+    // 同一个集合：被拦下的那些目标，事后也必须在完好校验的范围内。
+    // 反证方式：先让 3 条被拦下，再逐条放行其中 1 条；两个阶段结束后，所有目标都还在。
+    for (const name of names.slice(0, 3)) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `被拦下阶段目标就没了：${name}`
+    }
+
     const allowed = unmountSharedDeps(dir, implAbs, { allowOutbound: expected })
     if (allowed.ok !== true) return `显式放行后仍被拒：${JSON.stringify(allowed.blocked)}`
+    if (allowed.scanned?.outbound !== expected.length) {
+      return `完好校验的集合与删除前扫描不一致：scanned.outbound=${allowed.scanned?.outbound}，扫描=${expected.length}`
+    }
     if (allowed.unmounted.length !== expected.length) return `放行后解绑数不对：${allowed.unmounted.length}（期望 ${expected.length}）`
     for (const name of names) {
       if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `解绑碰了目标内容：主仓 ${name}/precious 没了`

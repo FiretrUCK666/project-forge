@@ -154,6 +154,15 @@ export {
 } from './docs.mjs'
 
 export {
+  DEFAULT_OPTIONAL_SECTIONS,
+  FORM_INDEPENDENT_CORE,
+  SECTION_DEFS,
+  findMissingSections,
+  resolveDocRequirements,
+  sectionKeywordMap,
+} from './doc-requirements.mjs'
+
+export {
   determineWorkflowPolicy,
   evaluateNextState,
   GATE_TIER_RANK,

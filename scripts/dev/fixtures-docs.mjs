@@ -29,6 +29,10 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '',
       '改动 `src/real.mjs` 与 `src/planned.mjs` (new)。',
       '',
+      '## 要解决的问题',
+      '',
+      '- 当前缺一份可校准的实现方案。',
+      '',
       '## 本期不做',
       '',
       '- 不修改外部公共 CLI。',
@@ -48,6 +52,10 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '- Plan Critique: pending',
       '',
       '修改 `src/real.mjs`。',
+      '',
+      '## 要解决的问题',
+      '',
+      '- 走紧急豁免，补一份最小方案。',
       '',
       '## 本期不做',
       '',
@@ -70,7 +78,7 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
     if (badAudit.status === 0) return '缺陷 SPEC 的 audit 竟通过了'
     const badJson = JSON.parse(badAudit.stdout)
     const codes = new Set(badJson.errors.map((e) => e.code))
-    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_NON_GOALS', 'MISSING_DOOR_OR_ROLLBACK', 'MISSING_ACCEPTANCE_CRITERIA']) {
+    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_SECTION_NON_GOALS', 'MISSING_SECTION_DOOR', 'MISSING_ACCEPTANCE_CRITERIA']) {
       if (!codes.has(req)) return `坏 SPEC audit 漏报 ${req}：${badAudit.stdout}`
     }
     const badApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })
@@ -590,13 +598,13 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: 10', 'pr: null',
       'owner: alice', 'approved: true', 'implemented: true',
       'related_prd: ../../prd/261116-master-plan-prd.md',
-      '---', '', '# SPEC: M1', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
+      '---', '', '# SPEC: M1', '', '## 要解决的问题', '- 拆出第一个切片', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
     ].join('\n'),
     'docs/prd/261116-master-plan-prd.md': [
       '---', 'kind: prd', 'title: "Master Plan"', 'status: active',
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: null', 'pr: null',
       'owner: alice', 'plan_critique: passed', 'related_spec: null', 'related_todo: null',
-      '---', '', '# PRD: Master Plan', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划总纲', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 五、验收标准', '- [x] C1: `src/app.mjs` M1', '- [ ] C2: `src/app.mjs` M2', '',
     ].join('\n'),
     [`docs/specs/261116-issue${issueNum}-m2-spec.md`]: [

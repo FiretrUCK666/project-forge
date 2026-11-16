@@ -467,6 +467,7 @@ cases.push(['M3-C5：CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/overs
     const initPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'prd', '--slug', 'p1', '--title', 'PRD 1', '--owner', 'alice', '--json'], { cwd: dir })
     const prdFile = JSON.parse(initPrd.stdout).file
     const prdClean = readFileSync(join(dir, prdFile), 'utf8')
+      .replace('<现状痛点与预期可观测的收益>', '当前缺一份可执行的治理配置')
       .replace('<明确交付能力>', '交付可执行配置')
       .replace('<明确排除的扩展设想，防止需求蔓延>', '不做跨仓调度')
       .replace('<待核实填写：拟复用的现成模块文件路径与导出能力>', '复用已有 README.md')

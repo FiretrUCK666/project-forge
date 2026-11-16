@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-16T18:37:26.509Z",
+  "installedAt": "2026-11-16T18:55:31.492Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -41,7 +41,7 @@
       "sha256": "2dd36cdc21f2a59dda029e26463980390699722e0283747627f33c261a8a8370"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
-      "sha256": "74b90e050d0d4b925583ff9365b533c2117587ca30f95b100a9360784978f52c"
+      "sha256": "40386ca8de2ae8ea0fb14c2096db22d4a3c3ae8a66f6dcaf1a56c166975e5a9e"
     },
     "dev-govern/SKILL.md": {
       "sha256": "753815d5bf20be663b5ac1a7b4d37bd5ae6ae65e17a3faa64d4577ba4ad806fe"
@@ -71,7 +71,7 @@
       "sha256": "ba2fbab228ebed8142bbd6aa9e126ef2e6b61b13bb3f6ef8f73776d57d0c0c70"
     },
     "dev-plan/scripts/doc-audit.mjs": {
-      "sha256": "c2255ddaae90d179f1ecf59919d9afb6d17d4c24182b630b209ed8ad3446e8a5"
+      "sha256": "c4d84f411df077a7a349fd351e3f97c0d05b46591f48c3b8168608cc16e697ed"
     },
     "dev-plan/scripts/doc-plan.mjs": {
       "sha256": "ce8c52991cadd76c9de26031f0c0c0105c9486c75ff46a1bf0e68a5a635f74bd"
@@ -100,8 +100,11 @@
     "lib/command-lex.mjs": {
       "sha256": "48bc6a8440a0da520975a19c43b9e5b72a18e5ec234eb7d922e15d48b035ed70"
     },
+    "lib/doc-requirements.mjs": {
+      "sha256": "1685a3f99575ecf96536235c3a0ff0fd4fccb75968fd5bf84f7271eeb57be64a"
+    },
     "lib/doc-templates.mjs": {
-      "sha256": "336bcaf9dbe0f735b4c1c79cad491a5302ec61b1e56304cb4ca6ce92a43719a9"
+      "sha256": "7e5a671a25a1540563367aae204c5d8b83b6aabc49145e03353ab1ea4f7eec6f"
     },
     "lib/docs.mjs": {
       "sha256": "442a01bb260d562ed1b7bed0eedf4bba3e9a03a8957f75d378ac3e95dd4559af"
@@ -137,7 +140,7 @@
       "sha256": "711a4e7abd4d41da22665950423e98550f9b941b47ff9c8697f775fd21e38bf3"
     },
     "lib/shared.mjs": {
-      "sha256": "f2ac7bdb4b65000edebe6910e35b9009504559736049a36a04e31bbc9c7bea26"
+      "sha256": "bfd6d7be9008b2f8abd35a09ae2675c56b6c2e5ab064ef9ee3d2780660664299"
     },
     "lib/signals.mjs": {
       "sha256": "ecdc6df599809d7b92f6e984df741afe822b9c45bd0de42805cf095478cedda8"

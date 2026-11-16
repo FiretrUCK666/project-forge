@@ -351,7 +351,22 @@ const QUESTION_RULES = [
       && f.docs.workflowFacts?.hasRelease !== true
       && (f.conventions?.workflowTooling ?? []).every((t) => !/changeset|release-please|releaserc|goreleaser/i.test(t))
       && (f.ecosystem.publishable === true || Boolean(f.docs.releasing) || (f.git.tags?.length ?? 0) > 0),
-    text: '项目具备发布形态且尚未配置发布流水线，请选择发版策略（5 选 1）：1) 不配置；2) 沿用已有工具；3) 纯手动 `gh release create`；4) Tag 自动发布页（默认用内置 `GITHUB_TOKEN`，零额外 Secret）；5) 联动下游或推送制品库（按需配 `RELEASE_TOKEN` 或 OIDC 可信发布）',
+    // 发版手段按这个平台真的能做什么来说。
+    //
+    // 远端不是 GitHub 时还教 gh release create，等于让人照着敲一条必然 404 的命令，
+    // 而文案本身不会报错——这是最坏的一种：错在文档里，执行的人以为是自己配错了。
+    text: (f) => {
+      const caps = f.git?.capabilities ?? null
+      const canRelease = caps?.known === true && caps.releases === true
+      if (!canRelease) {
+        const who = caps?.providerId ?? "未知"
+        return `项目具备发布形态且尚未配置发布流水线。这个远端（${who}）的发布能力`
+          + "要么不支持、要么认不出来，所以这里不给本平台专用的命令：请先在它的托管界面上确认发版方式，再决定要不要接到流水线里"
+      }
+      return "项目具备发布形态且尚未配置发布流水线，请选择发版策略（5 选 1）：1) 不配置；2) 沿用已有工具；"
+        + "3) 纯手动 `gh release create`；4) Tag 自动发布页（默认用内置 `GITHUB_TOKEN`，零额外 Secret）；"
+        + "5) 联动下游或推送制品库（按需配 `RELEASE_TOKEN` 或 OIDC 可信发布）"
+    },
   },
 ]
 

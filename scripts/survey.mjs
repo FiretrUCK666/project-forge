@@ -579,6 +579,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       totalFiles: ws.totalFiles,
       effectiveFiles: ws.effectiveFiles,
       codeFiles: ws.codeFiles,
+      codeLines: ws.codeLines,
       docFiles: ws.docFiles,
     },
     gaps: [],

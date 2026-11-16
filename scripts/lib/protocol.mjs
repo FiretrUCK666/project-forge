@@ -43,6 +43,23 @@ export {
   TOOL_SKELETON_FILES,
 } from '../../kit/skills/lib/tool-owned.mjs'
 
+/**
+ * 数一个文本有多少行。
+ *
+ * 行数是「真实通读成本」的一个维度，而文件数不是——实测 30000 行 / 10 文件的仓与
+ * 500 行 / 10 文件的仓，文件数一模一样，通读成本差 60 倍。
+ *
+ * 结尾的空行不算：它是换行符的产物，不是内容。CRLF 与 LF 在这里等价——
+ * 同一份源码在两台机器上不该算出两个数字。
+ */
+export function countTextLines(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  if (normalized === '') return 0
+  const lines = normalized.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines.length
+}
+
 /** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
 

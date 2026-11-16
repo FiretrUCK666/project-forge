@@ -8,6 +8,8 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import * as protocol from './protocol.mjs'
+// 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
+const { hasRealContent } = protocol
 import {
   isMacMetadataName,
   posixPath,
@@ -383,12 +385,29 @@ function extractProfileAndBuildCommands(agentsText) {
   return cmds
 }
 
+/**
+ * 这是不是一个「跨月重入」的项目——以前被人治理过，现在还在往下走。
+ *
+ * ## 判据必须是「有内容」，不是「目录存在」
+ *
+ * 早先这里数的是目录在不在：`docs/specs` 与 `docs/todo` 都存在就算重入。可 `equip.mjs`
+ * 会建这两个目录（各放一个空 `.gitkeep`）。于是**「工具刚装了套件」被读成「这是个
+ * 跨月重入的仓，正在失步」**——实测：只加三个空的骨架文件，`isReentry` 就从 false 翻成
+ * true，再叠一处路径误报就改写了探索策略。三个条件里两个是工具自己造的。
+ *
+ * 现在只认有内容的东西：清单文件、AGENTS.md 里的受管标记、真有正文的 TDD、
+ * 真装着 SPEC 或 Todo 的目录。空骨架不算。
+ *
+ * @param {object} docs 文档事实（含 `specsDirContent` / `todoDirContent`，由 detectDocs 提供）
+ * @param {object} kit 套件事实
+ */
 export function isReentryProject(docs, kit) {
   return Boolean(
     kit?.manifestExists
     || (docs?.agentsMarkers?.marks ?? 0) > 0
     || docs?.tdd
-    || (docs?.specsDir && docs?.todoDir),
+    || hasRealContent(docs?.specsDirContent)
+    || hasRealContent(docs?.todoDirContent),
   )
 }
 

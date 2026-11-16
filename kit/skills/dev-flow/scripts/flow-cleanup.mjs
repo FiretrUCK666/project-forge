@@ -188,7 +188,15 @@ export async function handleCleanup(opts, roots) {
     const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
     const rmRes = await gitRun(roots.mainRoot, rmArgs)
     if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
-    removedWorktrees.push({ path: wt.path, unmountedDeps: unmount.unmounted.length })
+    // 回执要逐条列出解绑了什么，不是只报个数。
+    //
+    // 早先这里只记 `.length`。而「同意放行了 3 条外链」与「同意放行了 node_modules、
+    // vendor、shared 这 3 条」是两件事：前者在事后无法核对，后者能对上你点头时看到的那份清单。
+    removedWorktrees.push({
+      path: wt.path,
+      unmountedDeps: unmount.unmounted.length,
+      unmountedLinks: unmount.unmounted.map((u) => ({ path: u.path, target: u.target })),
+    })
   }
 
   let deletedLocalBranch = false
@@ -214,6 +222,12 @@ export async function handleCleanup(opts, roots) {
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
     process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
+    for (const w of removedWorktrees) {
+      const links = w.unmountedLinks ?? []
+      if (links.length === 0) continue
+      process.stdout.write(`- ${w.path}：解绑 ${links.length} 条共享依赖链接\n`)
+      for (const link of links) process.stdout.write(`  * ${link.path} -> ${link.target ?? '(目标已不存在)'}\n`)
+    }
     printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }

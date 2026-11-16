@@ -705,6 +705,10 @@ cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出�
     const implAbs = join(dir, ledger.worktreePath)
 
     for (const name of names) symlinkSync(join(dir, name), join(implAbs, name), linkType)
+    // 深一层的同名链接：判据是「这条路径是不是链接、指向是否在外面」，与它在第几层无关。
+    // 只测根目录那一层时，把遍历改成只看根目录也能过——那不是这条判据的意思。
+    mkdirSync(join(implAbs, 'nested', 'deeper'), { recursive: true })
+    symlinkSync(join(dir, 'data'), join(implAbs, 'nested', 'deeper', 'data-deep'), linkType)
     // 反向：worktree 内部互指的链接不该被当成外链
     mkdirSync(join(implAbs, 'inner'), { recursive: true })
     writeFileSync(join(implAbs, 'inner', 'a.txt'), 'inner\n')
@@ -712,14 +716,16 @@ cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出�
 
     const scan = scanOutboundLinks(implAbs)
     const found = scan.outbound.map((o) => o.path).sort()
-    if (found.length !== names.length) {
-      return `外链检出数不对：期望 ${names.length} 个，实际 ${found.length} 个（${found.join(', ')}）——按名字筛就会漏`
+    const expected = [...names, 'nested/deeper/data-deep'].sort()
+    if (found.length !== expected.length) {
+      return `外链检出数不对：期望 ${expected.length} 个（含深一层的那个），实际 ${found.length} 个（${found.join(', ')}）——按名字筛或只看根目录都会漏`
     }
+    if (!found.includes('nested/deeper/data-deep')) return `深一层的链接没被检出：${found.join(', ')}`
     if (scan.internal.length !== 1) return `worktree 内部链接被误判成外链：internal=${JSON.stringify(scan.internal.map((i) => i.path))}`
 
     const denied = unmountSharedDeps(dir, implAbs)
     if (denied.ok !== false) return '存在外链时 unmountSharedDeps 必须拒绝，实际放行了'
-    if (denied.blocked.length !== names.length) return `拒绝理由不全：blocked=${denied.blocked.length}`
+    if (denied.blocked.length !== expected.length) return `拒绝理由不全：blocked=${denied.blocked.length}（期望 ${expected.length}）`
     if (denied.unmounted.length !== 0) return '被拒绝时不得解绑任何链接'
 
     // 真实清理路径：带 --confirm --force 也必须被拦住
@@ -728,11 +734,13 @@ cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出�
     for (const name of names) {
       if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `cleanup 之后主仓 ${name}/precious 没了——这就是删穿`
     }
+    // 深一层的链接目标同样要完好
+    if (!existsSync(join(dir, 'data', 'precious', 'SURVIVE.txt'))) return 'cleanup 之后深一层链接的目标没了'
 
     // 显式逐个放行才允许删；且只删链接，不碰目标
-    const allowed = unmountSharedDeps(dir, implAbs, { allowOutbound: names })
+    const allowed = unmountSharedDeps(dir, implAbs, { allowOutbound: expected })
     if (allowed.ok !== true) return `显式放行后仍被拒：${JSON.stringify(allowed.blocked)}`
-    if (allowed.unmounted.length !== names.length) return `放行后解绑数不对：${allowed.unmounted.length}`
+    if (allowed.unmounted.length !== expected.length) return `放行后解绑数不对：${allowed.unmounted.length}（期望 ${expected.length}）`
     for (const name of names) {
       if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `解绑碰了目标内容：主仓 ${name}/precious 没了`
       if (existsSync(join(implAbs, name))) return `解绑后链接还在：${name}`

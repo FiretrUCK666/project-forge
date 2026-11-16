@@ -57,7 +57,7 @@ flowchart LR
 - **要改什么**：`cleanup` 删 worktree 目录时，若目录里存在**指向 worktree 之外**的符号链接，删目录动作会顺着链接删穿到主仓或宿主目录。加一层「先扫描、再判、再删」的保护，并把「解绑」与「阻断」两种处置分开——因为 `sync`/`submit` 推进审查工作位时本来就该解绑，阻断在那里会把正常流程堵死。
 - **不改什么**：不改 `git worktree remove` 本身的语义，不改三档隔离策略，不改 `unmountSharedDeps` 对「正常挂载」的判定口径。
 - **本期不做**：不做跨平台文件系统层的 delete-guard（那是操作系统的事）；不处理硬链接（硬链接删一个不减数据，不构成删穿）。
-- **复用既有模块**：`lstatSafe`（`worktree-deps.mjs` 已有）、`EXIT_POLICY_BLOCK`（`scripts/lib/protocol.mjs`）、`printNextStep`（`kit/skills/lib/cli.mjs`）、夹具助手 `gitInitBare` / `gitSync`（`scripts/dev/fixtures-helpers.mjs`）。
+- **复用既有模块**：`lstatSafe`（`worktree-deps.mjs` 已有）、`EXIT_POLICY_BLOCK`（定义在 `kit/skills/dev-flow/scripts/flow-inspect.mjs`，`flow-cleanup.mjs` 直接 import）、`printNextStep`（`kit/skills/lib/cli.mjs`）、夹具助手 `tmpProject` / `gitInit` / `gitCommitFast`（`scripts/dev/fixtures-helpers.mjs`）。
 - **架构基线关系**：对齐「卸 worktree 前先仅对链接 `unlinkSync` 解绑，严禁直接递归删目录」这条不变量；与 `docs/TDD.md` 的 worktree 三档描述不冲突。
 
 ## 二、设计方案与契约变更
@@ -67,8 +67,10 @@ flowchart LR
 **扫描（新增导出）**
 
 ```js
-scanOutboundLinks(wtRoot) -> { outbound: Link[], internal: Link[], broken: Link[] }
-// Link = { path: <相对 wtRoot 的 posix 路径>, target: <readlink 原文>, resolved: <绝对路径> }
+scanOutboundLinks(wtRoot) -> { outbound: OutLink[], internal: PlainLink[], broken: PlainLink[] }
+// OutLink   = { path: posix 相对路径, target: readlink 原文|null, kind: 'outside'|'unresolved', resolved: posix 绝对路径|null }
+// PlainLink = { path: posix 相对路径, target: readlink 原文|null }
+// kind 是分支判据本身：unresolved（悬空）在 cleanup 档同样阻断——解不出来就更不能删。
 ```
 
 判据是**全深度 `lstat().isSymbolicLink()` 遍历**，不看目录名。任何名字、任何深度都算。
@@ -86,7 +88,7 @@ unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' })
 **CLI**
 
 - `worktree-deps.mjs unmount` 加工作位路径、可重复传入 `--allow-outbound`（值为链接相对路径）与 `--strict`，默认 `mode: 'deps'`。
-- `worktree-deps.mjs scan` 加工作位路径，只读输出三类清单。
+- `worktree-deps.mjs scan` 需要工作位路径与 `--main` 两个参数，只读输出三类清单。
 - `flow.mjs cleanup` 支持可重复传入的 `--allow-outbound`（值为链接相对路径），命中外链返回 `EXIT_POLICY_BLOCK`。
 
 **失败时如何阻断**：`cleanup` 在**调用 `rm -rf` 之前**先跑解绑；解绑抛错则整个 cleanup 以 `EXIT_POLICY_BLOCK` 退出，并列出每条外链的路径与目标。
@@ -95,13 +97,13 @@ unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' })
 
 ### 影响范围
 
-- 预计涉及文件：`kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-sync.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`scripts/dev/fixtures-flow.mjs`
+- 预计涉及文件：`kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-sync.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`scripts/dev/fixtures-flow.mjs`、`scripts/dev/injections-data.mjs`
 
 ## 三、冻结的验收标准
 
-- [ ] C1: worktree 里存在**任意名字、任意深度**、指向 worktree 之外的符号链接时，`cleanup` 在删目录**之前**以 `EXIT_POLICY_BLOCK` 终止，并逐个列出链接路径与目标；同一条链接若出现在 `sync`/`submit` 的依赖解绑路径上，**不阻断**，只解绑。
-- [ ] C2: 没有任何外链的普通 worktree 照常成功退出 0；外链目标在 worktree 之外但在主仓之内（即正常的共享依赖挂载）不得被误判成删穿风险；`--allow-outbound` 逐条点名放行后能正常完成，且回执里逐条列出解绑了什么。
-- [ ] C3: 外链检测**不使用目录名白名单**作为前置条件：实现里不得出现「先按 `node_modules`/`.venv` 之类的名字过滤，再判是不是外链」的形状——判据必须是「这条路径是不是符号链接、指向是否在 worktree 之外」，与它叫什么无关；`cleanup` 与 `deps` 两个 mode 共用同一次扫描结果，不得各扫一遍。
+- [ ] C1: worktree 里存在**任意名字、任意深度**、指向 worktree 之外的符号链接时，`cleanup` 在删目录**之前**以 `EXIT_POLICY_BLOCK` 终止，并逐个列出链接路径与目标；**主仓哨兵文件在 `cleanup` 之后必须仍存在**（`existsSync` 断言，根目录与外链目标两处都查）；悬空链接（`kind: unresolved`）同样阻断；同一条链接若出现在 `sync`/`submit` 的依赖解绑路径上，**不阻断**，只解绑。
+- [ ] C2: 没有任何外链的普通 worktree 照常成功退出 0；外链目标在 worktree **内部**时不影响删除；外链在仓库之外但已被显式逐个列出（相对路径归一后**完全**匹配）时删除正常完成且目标内容完好；`--force` 只跳过「脏 / 有未跟踪文件」，**不跳过外链检查**；回执里**逐条列出**解绑了哪条路径、指向哪里（不是只报个数）。
+- [ ] C3: 外链检测**不使用目录名白名单**作为前置条件：静态断言的形式是「`isSymbolicLink()` 的检查不得位于按名字过滤的循环内部」——判据必须是「这条路径是不是符号链接、指向是否在 worktree 之外」，与它叫什么无关；全深度遍历（深一层的链接同样检出）；`mainDepsIntact` 一类校验的采集范围与删除前扫描范围**必须是同一个集合**；`cleanup` 与 `deps` 两个 mode 共用同一次扫描结果，不得各扫一遍。
 
 ## 四、高风险点、门型与回滚路径
 

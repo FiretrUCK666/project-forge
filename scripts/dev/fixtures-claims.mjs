@@ -1341,4 +1341,41 @@ cases.push(['主工作区有改动时给提醒，但不改阶段、不阻塞', a
   return true
 }])
 
+// 体检报告里的命令长度必须有上限：一条压平的多行 run 块能有几千字节。
+//
+// 早先 `missing.slice(0, 3).join('、')` 只限条数、不限每条长度，于是一条超长命令
+// 会把整份报告撑变形，而看报告的人只会觉得「这工具怎么这么啰嗦」。
+cases.push(['体检报告里的命令展示有字节上限', async () => {
+  const { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } = await import('../../kit/skills/lib/command-lex.mjs')
+
+  // 正向：超长命令被截断，且带总字节数
+  const long = `git archive --format=zip -o dist/a.zip ${'x'.repeat(2000)}`
+  const out = truncateCommandForDisplay(long, COMMAND_DISPLAY_MAX_BYTES).text
+  if (Buffer.byteLength(out, 'utf8') > COMMAND_DISPLAY_MAX_BYTES + 200) {
+    return `截断后仍然太长：${Buffer.byteLength(out, 'utf8')} 字节`
+  }
+  if (!/字节|…|\.\.\./.test(out)) return `截断后没有标出省略或总长度：${out.slice(0, 80)}`
+
+  // 反向：短命令原样返回，不许被加省略号
+  const short = 'npm test'
+  if (truncateCommandForDisplay(short, COMMAND_DISPLAY_MAX_BYTES).text !== short) return '短命令被误改了'
+
+  // 反向：真实体检路径上也要有上限——造一个命令超长的仓，看 review 的输出长度
+  const dir = tmpProject({
+    'README.md': '# long\n\n命令长度测试仓。\n',
+    'package.json': '{"name":"long","version":"1.0.0","scripts":{"test":"node --test"}}',
+    'AGENTS.md': '# long\n\n## Dev Profile\n\n```yaml\nquick-test: exit 0\n```\n',
+    'Makefile': 'test:\n\t' + 'echo very-long-command-segment '.repeat(200) + '\n\nfull:\n\techo other\n\nverify:\n\techo third\n\nbuild:\n\techo fourth\n\ninstall:\n\techo fifth\n',
+  })
+  try {
+    const { reviewProject } = await import('../../scripts/review.mjs')
+    const res = await reviewProject(dir, { scopes: new Set(['agents']) })
+    const stale = (res.results ?? []).find((f) => f.id === 'agents.commands-stale')
+    if (!stale) return '夹具没造出 agents.commands-stale —— 这条判据在生产路径上没被测到'
+    const len = Buffer.byteLength(String(stale.title), 'utf8')
+    if (len > 1200) return `体检结论本身过长（${len} 字节），单条命令没有长度上限`
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

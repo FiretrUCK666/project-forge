@@ -804,6 +804,14 @@ export const INJECTIONS = [
     expect: '主工作区有改动时给提醒',
   },
   {
+    id: 'I89',
+    what: '命令展示不再截断（一条超长命令把整份报告撑变形）',
+    file: 'kit/skills/lib/command-lex.mjs',
+    from: '  if (total <= maxBytes) return { text, total, truncated: false }',
+    to: '  if (true) return { text, total, truncated: false }',
+    expect: '体检报告里的命令展示',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

@@ -100,7 +100,7 @@ related_todo: null
 ### #51 删穿保护
 
 - [ ] C1（#51 删穿保护 · 核心）worktree 里存在**任意名字、任意深度**、指向 worktree 之外的符号链接时，`cleanup` 默认拒绝删除并退出非 0；把名字换成 `vendor`/`shared`/`data`/`packages`/中文名，行为一致；主仓哨兵文件在 `cleanup` 之后必须仍存在。
-- [ ] C2（#51 删穿保护 · 反向，不能误伤）没有任何外链的普通 worktree 照常成功退出 0；外链目标在 worktree **内部**时不影响删除；外链在仓库之外但已被显式逐个列出时，删除正常完成且目标内容完好；`--force` 只跳过「脏 / 有未跟踪文件」，不跳过外链检查。
+- [ ] C2（#51 删穿保护 · 反向，不能误伤）没有任何外链的普通 worktree 照常成功退出 0；外链目标在 worktree **内部**时不影响删除；外链在仓库之外但已被显式逐个列出时，删除正常完成且目标内容完好，**回执里逐条列出解绑了哪条路径、指向哪里**（不是只报个数）；`--force` 只跳过「脏 / 有未跟踪文件」，不跳过外链检查。
 - [ ] C3（#51 判据的结构）外链检测**不使用目录名白名单**作为前置条件：实现里不得出现「先按 `node_modules`/`.venv`/`venv` 之类名字筛，再判断是不是链接」的顺序；检测方式是对 worktree 全深度遍历 + 判断是否为链接；`mainDepsIntact` 一类校验的采集范围与删除前扫描范围**必须是同一个集合**；删除后主仓中此前存在的路径仍在。
 
 ### #49 A 组 命名空间
@@ -161,9 +161,9 @@ related_todo: null
 | 波次 | 覆盖的 C | 写域（完整相对路径） | 为什么这个顺序 |
 | --- | --- | --- | --- |
 | 0 | C4、C5、C6 的形状部分；C9 的三态构造器 | `kit/skills/lib/verdict.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/ledger.mjs`、`scripts/lib/protocol.mjs` | 后面每一波都消费这几个形状，先定死防撞 |
-| 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` | 与 | `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
-| 2 | C7、C8、C9、C22、C27、C28；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs` | 与 | `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
-| 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs` | 与 | `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml`、`templates/ci-check.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
+| 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`；右列为 `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
+| 2 | C7、C8、C9、C22、C27、C28；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs`；右列为 `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
+| 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs`；右列为 `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml`、`templates/ci-check.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
 | 4 | C16、C17、C18、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
 | 5 | C26 + 文档同步（C24、C25 已落地，这里只做回归确认） | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
 
@@ -202,6 +202,7 @@ related_todo: null
 6. **主 Agent 在主工作区直改文件是警告还是拦截**：C23 要求报出来，但报出来之后呢？
    - 建议：**警告 + 不阻断**。这是「绕过隔离位」的早期提示，拦死会把正常的小改动也堵住；真正的硬拦留在 `merge`（C18）。
 7. **C26 把 `doc-audit` 的强制章节降为「最小核心」是实质放宽门禁**：按本仓契约「仅弱化门禁须人点头」，这一条必须先拍板再落。
-   - 建议：**追溯，但给一次宽限**。首次在本仓跑报「待补齐」而不阻断，宽限内改完；宽限期结束转为阻断。不给宽限会让所有人同时红，给永久宽限等于没有这条判据。
+   - 建议：**接受这次放宽**。理由不是「为了通用性」，而是原来那七节**从来不是门禁，只是模板**：强制七节让数据管道、论文、硬件仓写不了合身的文档，人只能绕过流程。收紧到三节之后门禁**更硬**了（主干三节不可豁免，而以前自定义模板只要「有模板」就能过）。这是把一条假门禁换成一条真门禁，不是弱化。
+   - 配套：反向条件已落地——自定义模板不能把主干三节减掉，`CORE_SECTION_WAIVED` 会拦。
 8. **C10 的新门禁对存量仓是否追溯**：符号锚点门禁上线后，一批只列了模块名的存量 TDD 会立刻变红。
-   - 建议：**追溯，但给一次宽限**（同上一条的实现方式：先 notice，次版本后转阻断）。
+   - 建议：**追溯，但给一次宽限**。首次在本仓跑只报 `notice` 不阻断，宽限期内改完；宽限期结束（下一个次版本发布）转为阻断。不给宽限会让所有人同时红，给永久宽限等于没有这条判据。

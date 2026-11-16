@@ -30,6 +30,7 @@ const SCOPES = new Set([
 //
 // 早先这里有一份逐字相同的副本。同一份「已表态」的事实两个脚本各读一份，改一处就有一条
 // 路径静默失效——而失效的表现是「明明表过态了，它还在问」。重导出而不是重新实现。
+import { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../kit/skills/lib/command-lex.mjs'
 import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
 import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
 
@@ -544,8 +545,16 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     const declared = Object.values(facts.commands).filter((v) => typeof v === 'string' && v.trim())
     const missing = declared.filter((cmd) => !agentsText.includes(cmd))
     if (missing.length > 0) {
+      // 单条命令展示长度与总字节数都要有上限。
+      //
+      // 早先这里是 `missing.slice(0, 3).join('、')`：条数有上限，**每条的长度没有**。
+      // 一条压缩成单行的多行 `run:` 块能有几千字节，它会原样塞进这一行结论里，
+      // 把整份体检报告撑变形——而看报告的人只会觉得「这工具怎么这么啰嗦」。
+      const shown = missing.slice(0, 3).map((cmd) => truncateCommandForDisplay(cmd, COMMAND_DISPLAY_MAX_BYTES).text)
+      const totalBytes = missing.reduce((sum, cmd) => sum + Buffer.byteLength(cmd, 'utf8'), 0)
       add(finding('notice', 'agents', 'agents.commands-stale',
-        `${facts.docs.agents.file} 里没提到这些实际存在的命令：${missing.slice(0, 3).join('、')}`
+        `${facts.docs.agents.file} 里没提到这些实际存在的命令：${shown.join('、')}`
+        + `（共 ${missing.length} 条、${totalBytes} 字节）`
         + '——契约里的构建与验证节已经和项目现状脱节，照着它跑会漏掉这一步', {
           ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
         }))

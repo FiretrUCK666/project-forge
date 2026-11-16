@@ -5,7 +5,7 @@ status: done
 created: 2026-11-16
 updated: 2026-11-16
 issue: 45
-pr: null
+pr: 46
 branch: feat/readme-tdd-diagrams
 owner: FiretrUCK666
 approved: true

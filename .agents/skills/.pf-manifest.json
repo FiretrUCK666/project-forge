@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-16T19:09:35.989Z",
+  "installedAt": "2026-11-16T19:10:58.022Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -77,7 +77,7 @@
       "sha256": "3573687fa7b61ed8a5fa3747ff80e88a516a8375f1220053ea04abd55e9c6128"
     },
     "dev-review/SKILL.md": {
-      "sha256": "3160b79c98ad0219c276b30eb94f9737d2382abdc110b3602c3592aabfaee48f"
+      "sha256": "50f465414107572df949f02e6449ed75d8048deda348fba9ef082a359c2b4187"
     },
     "dev-review/scripts/review-diff.mjs": {
       "sha256": "0aea6d96502995514b2845096f8dd3f049bd309819d8819e23605b477825e0cf"

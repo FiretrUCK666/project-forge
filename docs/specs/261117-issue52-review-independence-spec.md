@@ -66,7 +66,7 @@ flowchart LR
 - **要改什么**：三件事都指向同一个病——**流程里的「独立」与「语境」只写在文档里，没有东西核验**。①`--reviewer-id` 是个自由字符串，编一个不一样的名字立刻通过，而 `implementerId` 为空时自审检查整条跳过；②`--issue 42` 只记编号，正文一个字没读，AI 拿到的只有一个数字；③意图路由表点名的 `SKILL.md` 路径没人核对是否真实存在。
 - **不改什么**：不改六锁收敛算法本身（轮次上限、停损阈值、增量视野规则），不改 PR 评论与标签的双写格式。
 - **本期不做**：不做密码学意义上的身份认证（令牌的作用是把「随便编个名」抬高成「伪造一件显眼的事」，不是不可伪造）。
-- **复用既有模块**：`kit/skills/lib/ledger.mjs` 的账本读写、`kit/skills/lib/platform.mjs` 的 API 通道探测、`scripts/lib/protocol.mjs` 的退出码常量。
+- **复用既有模块**：`kit/skills/lib/ledger.mjs` 的账本读写、`kit/skills/lib/platform.mjs` 的 API 通道探测、`kit/skills/dev-review/scripts/review-diff.mjs` 的 `EXIT` 常量（`USAGE_OR_POLICY: 2`、`UNTRUSTED_HAZARD: 3`；`scripts/lib/protocol.mjs` 里没有退出码定义，且 `kit/**` 禁引 `scripts/lib/**`）。
 - **架构基线关系**：与 `AGENTS.md`「Round 2+ 永远新建独立 review 子代理」同一条规矩的两个落点（代码审查与规划审核），实现上复用同一套令牌机制。
 
 ## 二、设计方案与契约变更
@@ -107,13 +107,13 @@ issueContextUnavailable: number[]   // 拿不到正文的编号
 
 ### 影响范围
 
-- 预计涉及文件：`kit/skills/lib/ledger.mjs`、`kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/lib/workflow-policy.mjs`、`scripts/dev/fixtures-*.mjs`（六处夹具补令牌）
+- 预计涉及文件：`kit/skills/lib/ledger.mjs`、`kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/lib/workflow-policy.mjs`、`scripts/compose-agents.mjs`、`scripts/lib/agents-sections.mjs`、`kit/skills/dev-review/SKILL.md`、`scripts/dev/fixtures-*.mjs`
 
 ## 三、冻结的验收标准
 
 - [ ] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）。
-- [ ] C2: `flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与紧凑上下文；**拿不到正文时明确记下**（编号 + 原因）而不是静默只存编号，`flow next` 据此给出取正文的具体命令；反向：正文取到之后不再提示。
-- [ ] C3: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**；不存在的必须报出来，而不是生成一份指向空地址的路由表。
+- [ ] C2: `flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与 `compactContext`；**拿不到正文时明确记下**（编号 + 原因）而不是静默只存编号，`flow next` 据此给出取正文的具体命令；`--issue` 与 `--pr` 的「要不要去取」行为必须一致；PR 模式下 `diffScope` 必须来自真实 PR 的 base/head，不得回退成分支到分支；**静态断言**：PR 模式下 `pr` 字段为空时 `status` 不得是 `PACK_READY`；反向：重跑 `start` 时正文已取到就清掉「拿不到」的标记。
+- [ ] C3: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**，不存在的必须报出来；装配档位与生成档位**不一致时**任一方必须拒绝或警告；删掉某个技能目录后（未跑 `equip`），`compose-agents` 要能发现并指出死链。
 
 ## 四、高风险点、门型与回滚路径
 

@@ -1008,4 +1008,60 @@ cases.push(['命令按生态分组后每类留真实命令，超量折叠成指�
   } finally { rmTree(dir) }
 }])
 
+// #50 I：拆分多份 SPEC 时，必须有一份总控 PRD 说「整体算不算做完」。
+//
+// 早先的阶梯只到「SPEC + Todo」，最上面那格不存在：`docsRequired` 里 `docs/prd/`
+// 永远是可选，全仓没有任何判据强制过 PRD。于是「加一个 Python 生态」和「重构整套研发流程」
+// 落进同一个 Case 4，要求写一模一样的东西。
+cases.push(['大需求判出必写 PRD，小需求不许被误判；多份无主 SPEC 要报出来', async () => {
+  const { triageTask, checkOrphanSlices } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
+
+  // 正向：需求自己说了要分批 → 必须写 PRD
+  const big = triageTask({ summary: '重构研发流程，拆成多份 SPEC 分批落地，涉及技能与目录' })
+  if (!big.prdRequired) return `说了要分批却没判出必写 PRD：${JSON.stringify(big.docsRequired)}`
+  if (!big.docsRequired.includes('docs/prd/')) return `判出必写 PRD 但 docsRequired 里没有：${JSON.stringify(big.docsRequired)}`
+  if ((big.prdReasons ?? []).length === 0) return '判出必写 PRD 却没给依据'
+  if (big.caseType !== 4) return `大需求应与 Case 4 同一档（危险程度不变，只是多了上层容器）：caseType=${big.caseType}`
+
+  // 正向：同时要碰四面以上 → 必须写 PRD
+  const wide = triageTask({ summary: '统一文档、CI 流水线、接口契约与目录结构，顺带改工具的配置' })
+  if (!wide.prdRequired) return '同时碰四面以上却没判出必写 PRD'
+
+  // 反向：小需求不许被判进来（每件小事都要求先写 PRD，人会直接绕过整套流程）
+  const tiny = triageTask({ summary: '改一下 README 里的错别字' })
+  if (tiny.prdRequired) return `小需求被误判成必写 PRD：${JSON.stringify(tiny.prdReasons)}`
+  if (tiny.caseType !== 1) return `错别字应判 Case 1：caseType=${tiny.caseType}`
+  const mid = triageTask({ summary: '给探测器加一个 Python 生态支持' })
+  if (mid.prdRequired) return `单个生态支持被误判成必写 PRD：${JSON.stringify(mid.prdReasons)}`
+
+  // 反向：只有一份 SPEC 时不是「无主切片」——一份 SPEC 自己就是完整单位
+  const dir = tmpProject({ 'README.md': '# orphan\n\n无主切片测试仓。\n' })
+  try {
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    const spec = (slug, related) => [
+      '---', 'kind: spec', `title: ${slug}`, 'status: draft',
+      `related_prd: ${related ?? 'null'}`, '---', '', `# ${slug}`, '',
+      '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way', '',
+      '- [ ] C1: x', '',
+    ].join('\n')
+    writeFileSync(join(dir, 'docs', 'specs', '261117-a-spec.md'), spec('A'))
+    if (checkOrphanSlices(dir).length !== 0) return '只有一份 SPEC 就报了无主切片——一份 SPEC 自己就是完整单位'
+
+    writeFileSync(join(dir, 'docs', 'specs', '261117-b-spec.md'), spec('B'))
+    const orphan = checkOrphanSlices(dir)
+    if (orphan.length !== 1 || orphan[0].code !== 'ORPHAN_SLICES_NO_MASTER_PRD') {
+      return `两份都没指向 PRD 的 SPEC 没报无主切片：${JSON.stringify(orphan)}`
+    }
+
+    // 反向：两份 SPEC 共同指向一份 PRD = 这一组有主，不许报
+    mkdirSync(join(dir, 'docs', 'prd'), { recursive: true })
+    writeFileSync(join(dir, 'docs', 'prd', '261117-master-prd.md'), '# master\n')
+    writeFileSync(join(dir, 'docs', 'specs', '261117-a-spec.md'), spec('A', '../prd/261117-master-prd.md'))
+    writeFileSync(join(dir, 'docs', 'specs', '261117-b-spec.md'), spec('B', '../prd/261117-master-prd.md'))
+    const adopted = checkOrphanSlices(dir)
+    if (adopted.length !== 0) return `两份 SPEC 已共同指向一份 PRD 却仍报无主：${JSON.stringify(adopted)}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

@@ -85,6 +85,51 @@ function facesOf(text) {
 }
 
 /**
+ * 这件事大到一份 SPEC 装不下吗？装不下就得先有一份总控 PRD。
+ *
+ * ## 判据为什么必须有
+ *
+ * 早先的阶梯只有三格有规则：0 份文档 / 只有 Todo / SPEC + Todo。**最上面那格不存在**——
+ * `docsRequired` 里 `docs/prd/` 永远是 `optionalDocs`，全仓没有任何判据强制过 PRD。
+ * 于是「给探测器加个 Python 生态」和「重构整套研发流程」落进同一个 Case 4，要求写一模一样的东西。
+ *
+ * ## 判的是「能不能装进一份 SPEC」，不是「大不大」
+ *
+ * 「大」是个形容词，量不出来。能问的是一个结构问题：**这份需求的验收清单，一份 SPEC 装得下吗？**
+ * 装不下就得拆，拆了就需要一个上层容器记「整个算不算做完」——那就是总控 PRD。
+ *
+ * 三条信号都不依赖措辞，且任一条成立就够：
+ *
+ * 1. **同时要碰四面以上**：面数是「这件事牵涉多少个互不相干的关注点」，四面以上一份
+ *    SPEC 的验收清单必然跨模块，装得下也审不动；
+ * 2. **明确说了要分批**：`拆成 / 分两批 / 一期二期 / 几个独立 / 逐步`——写的人自己已经
+ *    认为它不止一步；
+ * 3. **声明要动十二个以上文件**：这已经不是一处改动了。
+ *
+ * 反向同样重要：**只碰一两面的小需求不许被判进来**，否则每件小事都要求先写 PRD，
+ * 人会直接绕过整套流程。
+ */
+function assessPrdNeed({ text, faces, fileCount }) {
+  const batchRe = /拆成|拆分为|分\s*(?:两|二|三|四|多)\s*批|分\s*(?:两|二|三|四|多)\s*期|一期.{0,6}二期|几个独立|逐步推进|分批落地|多切片|拆成多份/
+  const reasons = []
+  if (faces.length >= 4) reasons.push(`同时要碰 ${faces.length} 个面（${faces.join('、')}）`)
+  if (batchRe.test(text)) reasons.push('需求本身说了要分批落地')
+  if (Number.isFinite(fileCount) && fileCount >= 12) reasons.push(`声明要动 ${fileCount} 个文件`)
+
+  return {
+    required: reasons.length > 0,
+    reasons,
+    // 一份 SPEC 的验收清单大约装得下「一件事」；超过门上就要上层容器。
+    // 这里给的是可覆盖的默认档，不是硬阈值——判据本身是上面三条。
+    advice: reasons.length > 0
+      ? '先写总控 PRD 冻结整份验收清单，再拆成多份 SPEC + Todo；每份 SPEC 认领其中几条 C。'
+      : '先按一份 SPEC 做；一旦发现要拆成两份以上，就必须先补一份总控 PRD——'
+        + '不然那几份 SPEC 加起来「算不算做完」没人说得清（audit 会报「无主切片」）。',
+  }
+}
+
+
+/**
  * 治理类任务：把「一个项目整理成什么样」当目标，而不是改其中某一处。
  *
  * 它天然跨面（文档 + CI + 契约 + 目录都会动），所以它不该落进「只改文档」那一档。
@@ -121,6 +166,7 @@ export function triageTask({
   const isGovernance = GOVERNANCE_RE.test(text)
   // 三面以上就不是局部改动。这是「实质」那一半判据，与措辞无关。
   const isCrossCutting = faces.length >= 3
+  const prdNeed = assessPrdNeed({ text, faces, fileCount })
 
   const isConflict = conflictsTdd || conflictRe.test(text)
   const isContract = touchesContract
@@ -128,6 +174,7 @@ export function triageTask({
     || contractRe.test(text)
     || isCrossCutting
     || isGovernance
+    || prdNeed.required
   // 只改文档 = 确实在说文档，**并且**没有同时要动别的面。
   const pureDocCue = docRe.test(text) && !runtimeBugRe.test(text) && !explicitFeatureRe.test(text) && !bugfix
   const looksDocOnly = docOnly
@@ -149,6 +196,7 @@ export function triageTask({
       doorType: 'one-way', doorDetails: { ...door, doorType: 'one-way' }, critiqueTier: 'independent-critique',
       reason: '该需求与 docs/TDD.md 或生效 SPEC 存在架构/契约冲突，必须先更新 TDD.md 并获人类确认后再拆解。',
       docsRequired: ['docs/TDD.md (先更新并确认)'], redGreenRequired: true, needsReview: true, specApprovalRequired: true,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -157,7 +205,11 @@ export function triageTask({
       caseType: 4, tier: 2, blocked: false, action: 'SPEC_AND_TODO',
       doorType: door.doorType, doorDetails: door, critiqueTier: 'independent-critique',
       reason: '涉及跨模块协作或外部契约变更（L3），需先编写 SPEC 经内审 Critique 与批准后，再落地 Todo 与实现。',
-      docsRequired: ['docs/specs/', 'docs/todo/'], optionalDocs: ['docs/prd/'],
+      docsRequired: prdNeed.required ? ['docs/prd/', 'docs/specs/', 'docs/todo/'] : ['docs/specs/', 'docs/todo/'],
+      optionalDocs: prdNeed.required ? [] : ['docs/prd/'],
+      prdRequired: prdNeed.required,
+      prdReasons: prdNeed.reasons,
+      prdAdvice: prdNeed.advice,
       redGreenRequired: true, needsReview: true, specApprovalRequired: true, activeContracts, coupledSyncWarnings,
     }
   }
@@ -167,6 +219,7 @@ export function triageTask({
       doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
       reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
       docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -179,6 +232,7 @@ export function triageTask({
         ? '属于触及高风险/单向门边界的缺陷修复（Case 2），须 Red-Green 回归并接受独立审查。'
         : '属于明确局部缺陷修复（Case 2），不建规划文档，但强制先补失败复现测试再修复（Red-Green）。',
       docsRequired: [], redGreenRequired: true, needsReview: bugNeedsReview, specApprovalRequired: false,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -187,6 +241,7 @@ export function triageTask({
     doorType: door.doorType, doorDetails: door, critiqueTier: 'self-audit',
     reason: '属于不改变外部契约的局部功能开发（L2），只需建立 docs/todo/ 冻结验收标准并通过 audit 自净化。',
     docsRequired: ['docs/todo/'], redGreenRequired: true, needsReview: true, specApprovalRequired: false,
+    prdRequired: false, prdReasons: [], prdAdvice: prdNeed.advice,
     activeContracts, coupledSyncWarnings,
   }
 }
@@ -587,6 +642,65 @@ export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
   return out
 }
 
+/**
+ * 有几份生效 SPEC，却没有任何 PRD 认领它们 = 一组没人的切片。
+ *
+ * ## 它补的是预判的漏
+ *
+ * `triage` 在动手前预判「这份需求要不要总控 PRD」。但预判会落空：人可能先按 Case 4
+ * 开了第一份 SPEC，做到一半发现要拆第二份、第三份——**拆的那一刻 PRD 就成了必需品，
+ * 而没有人回头看这件事。**
+ *
+ * 没有 PRD 的多份切片，问题不在于「少一份文档」，而在于**「整体算不算做完」没有落点**：
+ *
+ * - 每份 SPEC 各自勾完自己的 C，都绿了；
+ * - 但它们合起来是不是把这件事做完了，没有任何一份文档回答得了；
+ * - 于是「做了一半就宣布完成」成了一种完全合法的状态。
+ *
+ * ## 判据
+ *
+ * 只认 **1:N 已成事实**：`docs/specs/` 里有两份以上生效 SPEC，它们各自 `related_prd`
+ * 指向不同的（或空的）PRD。只要有一份 PRD 被两份以上 SPEC 共同指向，这一组就算有主。
+ *
+ * 反向条件写清楚：一份 SPEC 或零份 SPEC 时不报——**一份 SPEC 自己就是完整单位，
+ * 不需要上层容器。**
+ */
+export function checkOrphanSlices(repoRoot) {
+  const specDir = join(repoRoot, 'docs', 'specs')
+  if (!existsSync(specDir)) return []
+  const specs = collectMarkdownFiles(specDir, repoRoot)
+  if (specs.length < 2) return []
+
+  // 每份 SPEC 指向哪个 PRD（空 = 没指）。解析不出来的按「没指」算，宁可多报一次。
+  const pointed = new Map()
+  for (const item of specs) {
+    const fm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const raw = fm.data?.related_prd
+    const target = typeof raw === 'string' && raw.trim() && !/^(?:无|none)$/i.test(raw.trim())
+      ? posixPath(relative(repoRoot, resolve(dirname(item.abs), raw.trim())))
+      : null
+    pointed.set(item.rel, target)
+  }
+
+  // 同一份 PRD 被两份以上 SPEC 指向 = 这一组有主，正常。
+  const counts = new Map()
+  for (const target of pointed.values()) {
+    if (!target) continue
+    counts.set(target, (counts.get(target) ?? 0) + 1)
+  }
+  if ([...counts.values()].some((n) => n >= 2)) return []
+
+  return [{
+    code: 'ORPHAN_SLICES_NO_MASTER_PRD',
+    file: 'docs/specs/',
+    specs: [...pointed.keys()],
+    message: `docs/specs/ 里有 ${specs.length} 份生效 SPEC，但没有任何一份 PRD 被两份以上 SPEC 共同认领`
+      + '——每份 SPEC 自己勾完都绿着，而「这一整件事算不算做完」没有落点，'
+      + '于是「做了一半就宣布完成」是一种完全合法的状态。'
+      + '要么补一份总控 PRD 让这些 SPEC 指向它，要么说明它们确实是彼此独立的多件事（各自单独走完）。',
+  }]
+}
+
 export function auditRepoDocs(repoRoot, scope = '.') {
   const scopeAbs = resolve(repoRoot, scope)
   const scopeRel = posixPath(relative(repoRoot, scopeAbs))
@@ -599,7 +713,7 @@ export function auditRepoDocs(repoRoot, scope = '.') {
     }
   }
   const results = targets.map((file) => auditDoc({ repoRoot, file }))
-  const coverageErrors = checkMasterPrdCoverage(repoRoot)
+  const coverageErrors = [...checkMasterPrdCoverage(repoRoot), ...checkOrphanSlices(repoRoot)]
   const allErrors = [...results.flatMap((r) => r.errors ?? []), ...coverageErrors]
   const failedCount = results.filter((r) => !r.ok).length + (coverageErrors.length > 0 ? 1 : 0)
   return {

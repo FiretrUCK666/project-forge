@@ -747,4 +747,20 @@ export const INJECTIONS = [
     to: 'export const ECO_COMMANDS_SHOWN_PER_KIND = 0',
     expect: '命令按生态分组',
   },
+  {
+    id: 'I81',
+    what: '拆成多份 SPEC 也不用总控 PRD（阶梯最高那一格被拆掉）',
+    file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',
+    from: '  if (faces.length >= 4) reasons.push',
+    to: '  if (false && faces.length >= 4) reasons.push',
+    expect: '大需求判出必写 PRD',
+  },
+  {
+    id: 'I82',
+    what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
+    file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',
+    from: '  if ([...counts.values()].some((n) => n >= 2)) return []',
+    to: '  return []',
+    expect: '大需求判出必写 PRD',
+  },
 ]

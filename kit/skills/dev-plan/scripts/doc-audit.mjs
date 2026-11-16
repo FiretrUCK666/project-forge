@@ -531,6 +531,62 @@ export function collectMarkdownFiles(dir, root) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
+/**
+ * 总控 PRD 的每个 `C` 项，必须被某份生效 SPEC 认领。
+ *
+ * ## 它治的病
+ *
+ * 一份总控 PRD 冻结了 `C1..C27`，然后拆成四份 SPEC。**没有任何东西检查这四份加起来
+ * 有没有把 27 条都认领到。** 漏掉的那几条不会报错：PRD 里它还在，SPEC 里没人提，
+ * 于是它既不进实现也不进审查，最后以「这件事好像做过」的样子消失在记忆里。
+ *
+ * 实测形状：一份 PRD 第 19 条明确要求「会话结束清理 worktree」，拆成三份 SPEC 执行时
+ * 没有任何一份认领它，而 PRD 的验收勾选表里第 19 条是 `[x]`——它什么时候被勾上的，
+ * 没人说得清。
+ *
+ * ## 判据只认「点名」
+ *
+ * 一条 C 被认领的证据是：某份 SPEC 的正文里**出现了这个 C 编号**（`C7`、`C7、`、
+ * `C7的`、`C7）` 等边界形状都算）。按语义判断「这份 SPEC 讲的是不是这条」不是这里
+ * 能做的事；本判据只回答一个机械问题：**有没有人提过它**。
+ *
+ * 漏掉的不一定真漏（也可能写成了「见 PRD 第 7 条」），所以报出来的是**编号缺失**，
+ * 处置是人去看一眼——这比静默通过好，因为静默通过连「看一眼」的机会都没有。
+ */
+export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
+  const prdDir = join(repoRoot, 'docs', 'prd')
+  const prdFiles = prdRel
+    ? [prdRel]
+    : (existsSync(prdDir) ? collectMarkdownFiles(prdDir, repoRoot).map((x) => x.rel) : [])
+  if (prdFiles.length === 0) return []
+
+  const specDir = join(repoRoot, 'docs', 'specs')
+  const specTexts = existsSync(specDir)
+    ? collectMarkdownFiles(specDir, repoRoot).map((item) => readTextSafe(item.abs) ?? '')
+    : []
+
+  const out = []
+  for (const rel of prdFiles) {
+    const text = readTextSafe(join(repoRoot, rel)) ?? ''
+    const ids = [...new Set([...text.matchAll(/^- \[[ xX]\]\s+(C\d+)\b/gm)].map((m) => m[1]))]
+    if (ids.length === 0) continue
+    const uncovered = ids.filter((id) => {
+      const re = new RegExp(`\\b${id}(?![0-9])`)
+      return !specTexts.some((spec) => re.test(spec))
+    })
+    if (uncovered.length > 0) {
+      out.push({
+        code: 'UNCOVERED_ACCEPTANCE_CRITERIA',
+        file: rel,
+        missing: uncovered,
+        message: `${rel} 里有 ${uncovered.length} 条验收标准没有被任何生效 SPEC 认领：${uncovered.join('、')}`
+          + '——它们不会进实现也不会进审查，最后以「好像做过」的样子消失',
+      })
+    }
+  }
+  return out
+}
+
 export function auditRepoDocs(repoRoot, scope = '.') {
   const scopeAbs = resolve(repoRoot, scope)
   const scopeRel = posixPath(relative(repoRoot, scopeAbs))
@@ -543,8 +599,17 @@ export function auditRepoDocs(repoRoot, scope = '.') {
     }
   }
   const results = targets.map((file) => auditDoc({ repoRoot, file }))
-  const failedCount = results.filter((r) => !r.ok).length
-  return { ok: failedCount === 0, scope: scopeRel || '.', auditedCount: results.length, failedCount, results }
+  const coverageErrors = checkMasterPrdCoverage(repoRoot)
+  const allErrors = [...results.flatMap((r) => r.errors ?? []), ...coverageErrors]
+  const failedCount = results.filter((r) => !r.ok).length + (coverageErrors.length > 0 ? 1 : 0)
+  return {
+    ok: allErrors.length === 0,
+    scope: scopeRel || '.',
+    auditedCount: results.length,
+    failedCount,
+    results,
+    coverageErrors,
+  }
 }
 
 function summarizeDoc(item) {

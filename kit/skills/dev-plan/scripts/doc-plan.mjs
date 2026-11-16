@@ -434,6 +434,9 @@ async function main(argv) {
             process.stdout.write(`- ${r.file} (${r.docType}): ${r.ok ? '通过' : `失败 (${r.errors.length})`}\n`)
             for (const e of r.errors) process.stdout.write(`  * [${e.code}] L${e.line}: ${e.message}\n    修法: ${e.fixHint}\n`)
           }
+          for (const e of batch.coverageErrors ?? []) {
+            process.stdout.write(`- ${e.file}：${e.message}\n`)
+          }
         }
         return batch.ok ? 0 : 1
       }

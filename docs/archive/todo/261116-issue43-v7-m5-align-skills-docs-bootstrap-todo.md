@@ -69,9 +69,9 @@ plan_critique: "passed (reviewer=independent-plan-critic-m5-align-skills-docs-bo
 - **实际验证命令与结果**：
   - `node scripts/dev/fixtures.mjs --only "include-master-prd"`：2 项通过，0 项失败；`node scripts/dev/verify-injections.mjs --only I58` / `I76` 均红灯拦截通过。
   - `node scripts/dev/preflight.mjs`：0 项失败（32 项读数；`SKILL.md` `99L/12576B`、`kit/skills/*/SKILL.md <= 104L`、`kit/skills/**/*.mjs <= 799L`）。
-  - `node scripts/dev/fixtures.mjs`（Round 2 性能优化与结构化评论升级后实测，164 项全通）：`--jobs 4` 耗时 `16,855 ms`；默认 9 并发连续两次耗时 `14,868 ms`、`14,008 ms`（均远低于 `30,000 ms` 上限）。
-  - `node scripts/dev/bench.mjs`：6/6 项预算通过（`survey(300 files)` 179ms、`flow inspect(self)` 216ms、`survey(self)` 214ms、`review(self)` 235ms、`preflight(self)` 1569ms、`backup.zip(1000 files)` 97ms）。
-  - `node scripts/dev/e2e-zip-harness.mjs`：真 `.zip` 7 场景 + 跨会话 `--takeover` + 防绕过全通（119 条目，31,509ms）；`node scripts/dev/verify-injections.mjs --jobs 4`：83/83 条判据捕获；`git archive --package`：119 文件 0 越界。
-  - 归档提交后将在最新 `HEAD` 上复跑 `flow.mjs verify --mode gate`、`govern-audit.mjs audit .` 与全套门禁锁定 `verifiedHead`。
+  - `node scripts/dev/fixtures.mjs`（Round 2 性能优化、评论标题统一与 `readSystemGitConfigMapAsync` 后实测，164 项全通）：`--jobs 4` 耗时 `24,518 ms`；默认 9 并发耗时 `17,882 ms`（均低于 `30,000 ms` 上限）。
+  - `node scripts/dev/bench.mjs`：6/6 项预算通过（`survey(300 files)` 201ms、`flow inspect(self)` 189ms、`survey(self)` 227ms、`review(self)` 244ms、`preflight(self)` 1551ms、`backup.zip(1000 files)` 93ms）。
+  - `node scripts/dev/e2e-zip-harness.mjs`：真 `.zip` 7 场景 + 跨会话 `--takeover` + 防绕过全通（120 条目，50,001ms）；`node scripts/dev/verify-injections.mjs --jobs 4`：83/83 条判据捕获；`git archive --package`：120 文件 + 20 目录，0 越界。
+  - 提交最终 `HEAD` 后复跑 `flow.mjs verify --mode gate`、`fixtures.mjs --jobs 4`、`govern-audit.mjs audit .`、`doc-plan.mjs audit .` 与 `submit --rework` 锁定 `verifiedHead`。
 - **文档同步检查**：`equip.mjs . --check`、`compose-agents.mjs . --check`（`AGENTS.md` `22559B <= 24576B`、`lightweight` `9400B < 14KB`、`no-remote` 零泄漏）、`sync-toc.mjs README.md README.en.md --check`、`doc-plan.mjs audit .`、`review.mjs .` 与 `gap-coverage.mjs` 全部通过；`docs/TDD.md` 已清除全部 `[v7 规划` 并指向 `docs/archive/prd/261115-v7-workflow-architecture-prd.md`。
 - **遗留问题**：无

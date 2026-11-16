@@ -626,12 +626,12 @@ export function buildReviewComments({
   const shortHead = String(headSha ?? '').slice(0, 7) || 'HEAD'
   const baselineText = shortBase && shortBase !== shortHead ? `${shortBase}..${shortHead}` : shortHead
   const statusTagText = verdict === 'pass' ? 'PASS' : 'CHANGES_REQUESTED'
-  const cnVerdict = verdict === 'pass' ? '审核通过' : '审核退回'
+  const cnVerdict = verdict === 'pass' ? '审核通过' : '审核不通过（退回）'
   const stopLossText = stopLoss ? `已触发（${stopReasons.join('；')}）` : '未触发'
   const stateTag = Object.keys(statePayload).length > 0 ? `<!-- pf-state:${JSON.stringify(statePayload)} -->` : ''
 
   const prLines = [
-    `### 独立审查 Round ${round}（${statusTagText} @ \`${baselineText}\`）`,
+    `### ${cnVerdict} · Round ${round}（${statusTagText} @ \`${baselineText}\`）`,
     '',
     `- **审查来源**：${sourceLine}`,
     `- **逐条标准状态**：${criteriaStatusText}`,

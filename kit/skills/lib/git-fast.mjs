@@ -4,7 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 flow-inspect / git / ledger 共用。
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -192,9 +192,21 @@ export function resolveDefaultBranchFromRefs(refsStdout, curBranch, initDefaultB
 }
 
 let cachedSysConfigMap
+let pendingSysConfigPromise
+function parseSysConfigLines(out) {
+  const map = new Map()
+  for (const line of String(out ?? '').split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const k = line.slice(0, eq).trim().toLowerCase()
+    const v = line.slice(eq + 1).trim()
+    if (k) map.set(k, v)
+  }
+  return map
+}
+
 export function readSystemGitConfigMapFast() {
   if (cachedSysConfigMap !== undefined) return cachedSysConfigMap
-  const map = new Map()
   try {
     const inv = process.platform === 'win32'
       ? prepareExecInvocation('git', ['config', '--system', '--list'], {})
@@ -205,20 +217,40 @@ export function readSystemGitConfigMapFast() {
       windowsHide: true,
       ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     })
-    for (const line of String(out ?? '').split('\n')) {
-      const eq = line.indexOf('=')
-      if (eq <= 0) continue
-      const k = line.slice(0, eq).trim().toLowerCase()
-      const v = line.slice(eq + 1).trim()
-      if (k) map.set(k, v)
+    cachedSysConfigMap = parseSysConfigLines(out)
+  } catch { cachedSysConfigMap = new Map() }
+  return cachedSysConfigMap
+}
+
+export function readSystemGitConfigMapAsync() {
+  if (cachedSysConfigMap !== undefined) return Promise.resolve(cachedSysConfigMap)
+  if (pendingSysConfigPromise) return pendingSysConfigPromise
+  pendingSysConfigPromise = new Promise((done) => {
+    try {
+      const inv = process.platform === 'win32'
+        ? prepareExecInvocation('git', ['config', '--system', '--list'], {})
+        : { cmd: 'git', args: ['config', '--system', '--list'] }
+      execFile(inv.cmd, inv.args, {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true,
+        ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      }, (err, stdout) => {
+        cachedSysConfigMap = (!err && stdout) ? parseSysConfigLines(stdout) : new Map()
+        pendingSysConfigPromise = null
+        done(cachedSysConfigMap)
+      })
+    } catch {
+      cachedSysConfigMap = new Map()
+      pendingSysConfigPromise = null
+      done(cachedSysConfigMap)
     }
-  } catch { /* no system gitconfig */ }
-  cachedSysConfigMap = map
-  return map
+  })
+  return pendingSysConfigPromise
 }
 
 /** 零子进程解析全局与本地 `.git/config`（遇 include 时返回 null 回退 git CLI）。 */
-export function readGitConfigFast(gitCommonDir) {
+export function readGitConfigFast(gitCommonDir, opts = {}) {
   if (!gitCommonDir) return null
   if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
   const localCfg = readTextSafe(join(gitCommonDir, 'config'))
@@ -233,7 +265,8 @@ export function readGitConfigFast(gitCommonDir) {
   const combined = `${globalCfg}\n${localCfg}`
   if (/^\s*\[(?:include\b|includeif\b)/im.test(combined)) return null
 
-  const sysMap = readSystemGitConfigMapFast()
+  const skipSys = opts.systemMap === false
+  const sysMap = skipSys ? new Map() : (opts.systemMap ?? readSystemGitConfigMapFast())
   const remoteLines = []
   let curSection = ''
   let curRemote = null
@@ -326,7 +359,7 @@ export function readGitConfigFast(gitCommonDir) {
     initDefaultBranch,
     remoteText: remoteLines.join('\n'),
     hasIdentity: Boolean(userName && userEmail),
-    checkedAllScopes: true,
+    checkedAllScopes: !skipSys,
   }
 }
 

@@ -16,8 +16,8 @@ import {
 } from '../../lib/git.mjs'
 import {
   hasUnmergedIndexFast, parsePorcelainV2BranchZ, readGitConfigFast, readHeadFast,
-  readLooseCommitLogFast, readRefsFast, resolveDefaultBranchFromRefs,
-  resolveGitDirFast, resolveRefShaFast,
+  readLooseCommitLogFast, readRefsFast, readSystemGitConfigMapAsync,
+  resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
 } from '../../lib/git-fast.mjs'
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
@@ -95,8 +95,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const mainRoot = roots.mainRoot
   const workRoot = roots.workTreeRoot
   const hasLinkedWorktrees = Boolean(roots.isGit && roots.gitDir && (roots.isWorktree || existsSync(join(roots.gitDir, 'worktrees'))))
-  const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir) : null
-  const needGitConfig = Boolean(roots.isGit && (!fastCfg || !fastCfg.checkedAllScopes))
+  const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir, { systemMap: false }) : null
+  const needGitConfig = Boolean(roots.isGit && !fastCfg)
+  const needSysCfg = Boolean(fastCfg && (!fastCfg.userName || !fastCfg.userEmail || !fastCfg.initDefaultBranch))
   const needRefsExec = Boolean(roots.isGit && existsSync(join(roots.gitDir ?? '', 'reftable')))
   const fastHead = (roots.isGit && !needRefsExec) ? readHeadFast(roots.workTreeGitDir, roots.gitDir) : null
   const fastHeadUnborn = Boolean(fastHead && !fastHead.oid)
@@ -116,13 +117,14 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     : null
   const fastWtList = hasLinkedWorktrees ? readWorktreeListFast(mainRoot, roots.gitDir) : null
 
-  const [statusRes, remoteRes, configRes, logRes, refsRes, wtRes] = roots.isGit
+  const [statusRes, remoteRes, configRes, sysCfgMap, logRes, refsRes, wtRes] = roots.isGit
     ? await Promise.all([
         canFastStatus
           ? Promise.resolve(null)
           : gitRunBuffer(workRoot, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']),
         fastCfg ? Promise.resolve({ ok: true, stdout: fastCfg.remoteText }) : gitRun(workRoot, ['remote', '-v']),
         needGitConfig ? gitRun(workRoot, ['config', '--get-regexp', '^(user\\.name|user\\.email|init\\.defaultbranch)$']) : Promise.resolve(null),
+        needSysCfg ? readSystemGitConfigMapAsync() : Promise.resolve(null),
         skipLog
           ? Promise.resolve({ ok: true, stdout: '' })
           : (fastLog
@@ -131,7 +133,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
         needRefsExec ? gitRun(mainRoot, ['for-each-ref', '--format=%(refname)\t%(symref:short)', 'refs/heads', 'refs/remotes/origin']) : Promise.resolve(null),
         hasLinkedWorktrees && !fastWtList ? gitRun(mainRoot, ['--no-optional-locks', 'worktree', 'list', '--porcelain']) : Promise.resolve(null),
       ])
-    : [{ ok: false, stdout: '' }, { ok: false, stdout: '' }, null, { ok: false, stdout: '' }, null, null]
+    : [{ ok: false, stdout: '' }, { ok: false, stdout: '' }, null, null, { ok: false, stdout: '' }, null, null]
 
   const stParsed = canFastStatus
     ? { head: fastHead.oid, branch: fastHead.detached ? '(detached)' : fastHead.branch, dirty: null, conflicts: [] }
@@ -141,9 +143,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
 
-  let userName = fastCfg?.userName
-  let userEmail = fastCfg?.userEmail
-  let initDefaultBranch = fastCfg?.initDefaultBranch
+  let userName = fastCfg?.userName ?? sysCfgMap?.get('user.name')
+  let userEmail = fastCfg?.userEmail ?? sysCfgMap?.get('user.email')
+  let initDefaultBranch = fastCfg?.initDefaultBranch ?? sysCfgMap?.get('init.defaultbranch')
   if (configRes?.ok && configRes.stdout) {
     for (const line of configRes.stdout.split('\n')) {
       const sp = line.indexOf(' ')

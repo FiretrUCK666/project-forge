@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-16T07:43:54.388Z",
+  "installedAt": "2026-11-16T08:16:59.820Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "a008a6a86714c789aa7c6582d841992bb29c609df5a685c40d8cc43914bbd7a0"
@@ -20,7 +20,7 @@
       "sha256": "28c0b990b2c96fee0c2e3a2fa589f34cf8a58335fc75d549174ea20597448054"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "577c30bb8e321a7b2ec7be33ee38f5d113e1cd065dfcdd13362b289f349a8c60"
+      "sha256": "85b6107cbb641d47d069fdcd716f7b4a23b2fdec5011aa5edf75897a18faf0d6"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
       "sha256": "cd2a5429ff1a38d5360f13203fc92db60def57467a64183aca64f8148d445ebe"
@@ -77,7 +77,7 @@
       "sha256": "17cc0f7d5aaabc0c1f8fe4afc9e1eaa1a36d5e84679ec94025e47d0116c84324"
     },
     "dev-review/SKILL.md": {
-      "sha256": "26afab1a847ac4eebbfa486b11cfc08656487ba37fb1b491ce679e663a0c984e"
+      "sha256": "3160b79c98ad0219c276b30eb94f9737d2382abdc110b3602c3592aabfaee48f"
     },
     "dev-review/scripts/review-diff.mjs": {
       "sha256": "0aea6d96502995514b2845096f8dd3f049bd309819d8819e23605b477825e0cf"
@@ -98,7 +98,7 @@
       "sha256": "c02575fc8c183a440f505ac712ef0e9a3a05380d595f49f8ec782ab82413826d"
     },
     "lib/doc-templates.mjs": {
-      "sha256": "51f152071b2150bc72f1baa8ee24ebeb433a1b61b3f5a48aec1cd05bde4ec81c"
+      "sha256": "336bcaf9dbe0f735b4c1c79cad491a5302ec61b1e56304cb4ca6ce92a43719a9"
     },
     "lib/docs.mjs": {
       "sha256": "ab3abd30bb0c88dfa77fe9b16568fb03311bce15892cae49950f66f0aceac0f3"
@@ -107,7 +107,7 @@
       "sha256": "d0e3908ab516b14a1659f9f912fb0b7aa5dba616ac49270458cad2c9cb6b1457"
     },
     "lib/git-fast.mjs": {
-      "sha256": "24ff42515b144897b41db3819584104ea02a339f7eeba4b1f3a53abdf8533b9a"
+      "sha256": "00ebd607673b3979b19a0e894d0661cd4c5400db1eba10fa54d971818c3b811f"
     },
     "lib/git-status-fast.mjs": {
       "sha256": "1b4d0a57fdf6ef12bf37b1b8bbeca32874947216e591173f011fbcd3bb171b7c"

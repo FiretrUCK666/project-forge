@@ -196,11 +196,11 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       return `record changes 未双写 PR/Issue 或未贴 changes-requested：code=${recChangesCode}, labels88=${[...(labelsByNum.get(88) ?? [])]}`
     }
     const lastPrCom = (commentsByNum.get(88) ?? []).at(-1)?.body ?? ''
-    for (const kw of ['审查来源', '逐条标准状态', '故障注入记录', '止损记录', '"action":"review"', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '先判空再返回', '#### Should Fix', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
+    for (const kw of ['### 审核不通过（退回） · Round 1', '审查来源', '逐条标准状态', '故障注入记录', '止损记录', '"action":"review"', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '先判空再返回', '#### Should Fix', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
       if (!lastPrCom.includes(kw)) return `PR 评论缺关键字段 ${kw}：\n${lastPrCom}`
     }
     const lastIssueCom = (commentsByNum.get(77) ?? []).at(-1)?.body ?? ''
-    for (const kw of ['### 审核退回 · Round 1', 'PR #88', '逐条状态与标签', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
+    for (const kw of ['### 审核不通过（退回） · Round 1', 'PR #88', '逐条状态与标签', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
       if (!lastIssueCom.includes(kw)) return `Issue 摘要评论缺关键字段 ${kw}：\n${lastIssueCom}`
     }
     if (lastIssueCom.includes('#### 验收标准逐条核对')) {
@@ -217,7 +217,8 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     const delPr = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'pr' && t.number === 88)
     const delIss = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'issue' && t.number === 77)
     if (offlineRec.status !== 0 || offlineSync?.delegatedPayloads?.targetRepo !== 'acme/demo'
-      || offlineSync?.delegatedPayloads?.label !== 'reviewed' || !delPr?.body?.includes('#### 验收标准逐条核对')
+      || offlineSync?.delegatedPayloads?.label !== 'reviewed'
+      || !delPr?.body?.includes('### 审核通过 · Round 2') || !delPr?.body?.includes('#### 验收标准逐条核对')
       || !delIss?.body?.includes('### 审核通过 · Round 2') || !delIss?.body?.includes('"action":"review"')) {
       return `离线 record 阻塞或缺少规范 delegatedPayloads：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
     }

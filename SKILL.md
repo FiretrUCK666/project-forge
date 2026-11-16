@@ -91,6 +91,8 @@ node "<本 skill 目录>/scripts/backup.mjs" create "<项目目录>" --label pre
 node "<本 skill 目录>/scripts/equip.mjs" "<项目目录>" --tier <lightweight|full>
 # S3 按档位生成或无损刷新 AGENTS.md（--check / --upgrade / --clean / --no-backup）
 node "<本 skill 目录>/scripts/compose-agents.mjs" "<项目目录>" --tier <lightweight|full>
+# S3 把 CI 骨架按勘察事实落盘（--kind check|release；已有工作流拒绝覆盖，非 GitHub 远端直接退出）
+node "<本 skill 目录>/scripts/equip-ci.mjs" "<项目目录>" --kind check
 # S4 交付体检与交棒检查（--verify 四档退出码：0 干净 / 1 有痕迹 / 3 没扫全 / 4 本仓源码不适用）
 node "<本 skill 目录>/scripts/review.mjs" "<项目目录>"
 node "<本 skill 目录>/scripts/handoff.mjs" "<项目目录>" --scan

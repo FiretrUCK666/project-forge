@@ -30,6 +30,7 @@ const SCOPES = new Set([
 //
 // 早先这里有一份逐字相同的副本。同一份「已表态」的事实两个脚本各读一份，改一处就有一条
 // 路径静默失效——而失效的表现是「明明表过态了，它还在问」。重导出而不是重新实现。
+import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
 import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
 
 export { readDecisionMap, readDecisions }
@@ -104,6 +105,19 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   const facts = await survey(targetDir)
   const root = facts.target.path
   const wants = (face) => !scopes || scopes.has(face)
+
+  // 计划说要建，就得有人说得出「谁建、怎么建」。
+  //
+  // 早先 `artifactPlan` 与「执行者」之间没有任何联系：勘察报 `ci-check` 该建，
+  // 而模板在 templates/ 里躺着、没有任何脚本读过它。于是「计划说了要建 CI」可以永远
+  // 停在计划状态，而门禁全绿——这是最难发现的一类：每一份报告都是对的，
+  // 合起来什么也没有发生。
+  const unexecutable = findUnexecutableArtifacts(facts.artifactPlan ?? [])
+  for (const item of unexecutable) {
+    add(finding('missing', 'artifacts', item.code, item.message, {
+      ref: { file: 'references/handoff.md', section: '四、交棒前四步清单' },
+    }))
+  }
 
   const agentsPath = facts.docs.agents ? join(root, facts.docs.agents.file) : undefined
   const agentsText = agentsPath ? (readTextSafe(agentsPath) ?? '') : undefined

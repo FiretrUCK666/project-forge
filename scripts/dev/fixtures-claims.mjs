@@ -1108,4 +1108,48 @@ cases.push(['远端能力三态：能做、不能做、认不出来，且未知�
   return true
 }])
 
+// #50 G：计划说要建，就得有人说得出「谁建、怎么建」。
+//
+// 早先 `artifactPlan` 与「执行者」之间没有任何联系：勘察报 `ci-check` 该建，而模板在
+// templates/ 里躺着、没有任何脚本读过它。于是「计划说了要建 CI」可以永远停在计划状态，
+// 而门禁全绿——每一份报告都是对的，合起来什么也没有发生。
+cases.push(['产物计划里每个「该建」都必须指名执行者', async () => {
+  const { findUnexecutableArtifacts, ARTIFACT_EXECUTORS } = await import('../../scripts/lib/artifact-executors.mjs')
+
+  // 正向：无执行者的 create 必须被报出来
+  const orphan = findUnexecutableArtifacts([{ id: 'no-such-artifact', artifact: 'X.md', action: 'create' }])
+  if (orphan.length !== 1 || orphan[0].code !== 'ARTIFACT_WITHOUT_EXECUTOR') {
+    return `没有执行者的 create 没被报：${JSON.stringify(orphan)}`
+  }
+
+  // 正向：连 id 都没有的项同样报（拿不到 id 就没法对执行者）
+  const noId = findUnexecutableArtifacts([{ artifact: 'Y.md', action: 'create' }])
+  if (noId.length !== 1 || noId[0].code !== 'ARTIFACT_WITHOUT_ID') {
+    return `没有 id 的 create 没被报：${JSON.stringify(noId)}`
+  }
+
+  // 反向：非 create 的动作都不该报——calibrate 有东西可校准、preserve 不动、
+  // ask-human 本来就等人、skip 与 snapshot 不产生产物内容
+  for (const action of ['calibrate', 'preserve', 'ask-human', 'skip', 'snapshot', 'equip']) {
+    const res = findUnexecutableArtifacts([{ id: 'no-such-artifact', artifact: 'Z.md', action }])
+    if (res.length !== 0) return `action=${action} 不该被查执行者，却报了：${JSON.stringify(res)}`
+  }
+
+  // 反向：表里覆盖到的 create 不许误报
+  for (const id of Object.keys(ARTIFACT_EXECUTORS)) {
+    const res = findUnexecutableArtifacts([{ id, artifact: id, action: 'create' }])
+    if (res.length !== 0) return `已有执行者的 ${id} 被误报：${JSON.stringify(res)}`
+  }
+
+  // 反向：真实勘察产出的计划必须每一项都有着落（这是这条判据在生产路径上的样子）
+  const { survey } = await import('../../scripts/survey.mjs')
+  const dir = tmpProject({ 'README.md': '# ap\n\n产物计划测试仓。\n', 'package.json': '{"name":"ap","version":"1.0.0","scripts":{"test":"node --test"}}' })
+  try {
+    const facts = await survey(dir, {})
+    const real = findUnexecutableArtifacts(facts.artifactPlan ?? [])
+    if (real.length > 0) return `真实勘察计划里有项没人接：${real.map((x) => x.id).join(',')}`
+  } finally { rmTree(dir) }
+  return true
+}])
+
 }

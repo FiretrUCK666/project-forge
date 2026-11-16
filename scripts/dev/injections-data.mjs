@@ -764,6 +764,14 @@ export const INJECTIONS = [
     expect: '远端能力三态',
   },
   {
+    id: 'I84',
+    what: '产物计划说「该建」却没人负责建（执行者对照表被清空）',
+    file: 'scripts/lib/artifact-executors.mjs',
+    from: '  return out\n}\n',
+    to: '  return []\n}\n',
+    expect: '产物计划里每个',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

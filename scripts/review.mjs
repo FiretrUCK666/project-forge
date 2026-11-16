@@ -587,6 +587,34 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (!hasRemote) {
     add(finding('ok', 'collaboration', 'collab.no-remote', '没有远端：谈不上收别人的改动'))
   } else {
+    // 这个远端能不能干 GitHub 的那些事，说清楚。
+    //
+    // 早先只报一句话：「已连 GitHub」，而托管不在 GitHub 上时同样一句话照说，
+    // 产物计划里照样给 GitHub 专用命令——执行它的人只看到 404。
+    // 现在：能力成 true 的照常；成 false 的明说做不了；认不出来的说认不出来。
+    const caps = facts.git.capabilities ?? null
+    if (caps && caps.known === false) {
+      add(finding('notice', 'collaboration', 'collab.remote-unknown',
+        `认不出 ${caps.providerId ?? '这个'} 远端能做什么（Issue / PR / 发布 / 检查状态），`
+        + '所以下面这些能力一律按「不确定」处理，不假设它和 GitHub 一样', {
+          decision: 'remote-setup',
+          ref: { file: 'references/remote-github.md', section: '一、双轨四级连接引擎' },
+        }))
+    } else if (caps && caps.known === true) {
+      const missing = []
+      if (caps.issues === false) missing.push('Issue')
+      if (caps.pullRequests === false) missing.push('PR')
+      if (caps.releases === false) missing.push('发布')
+      if (caps.checks === false) missing.push('CI 检查状态')
+      if (missing.length > 0) {
+        add(finding('notice', 'collaboration', 'collab.remote-capability-gap',
+          `这个远端做不了：${missing.join('、')}——不是没配好，是这条路在它上面不成立；`
+          + '涉及这些能力的动作请改走它自己的流程，别照搬 GitHub 的命令', {
+            decision: 'remote-setup',
+            ref: { file: 'references/remote-github.md', section: '一、双轨四级连接引擎' },
+          }))
+      }
+    }
     if (!facts.docs.prTemplate) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {

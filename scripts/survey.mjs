@@ -21,6 +21,7 @@ import * as protocol from './lib/protocol.mjs'
 import {
   classifyWorkspaceIdentity,
   detectGitModeMarkers,
+  getHostingProvider,
   resolveWorkspaceIdentity,
 } from './lib/platform/index.mjs'
 import {
@@ -392,6 +393,35 @@ function judgeGaps(facts) {
   return { gaps, questions, projectGaps }
 }
 
+/**
+ * 这个远端到底能做什么。
+ *
+ * 三态，不是两态：`true` 能做、`false` 不能做、`null` 认不出来。
+ * **`null` 不许被下游当成 `true`**——「看着像能」正是给出 GitHub 专用命令然后 404 的来源。
+ *
+ * 取值全部来自注册表里平台自己的声明（`PROVIDER.capabilities`），不在这里写死任何平台名；
+ * 未注册的托管退化成 `generic-git` 的能力表（全 false），本地仓直接 `none`。
+ */
+function summarizeRemoteCapabilities(role, gitFacts) {
+  const providerId = role?.providerId ?? gitFacts?.providerId ?? null
+  if (!providerId) return { known: false, providerId: null, issues: null, pullRequests: null, releases: null, checks: null }
+  if (providerId === 'none') {
+    return { known: true, providerId, issues: false, pullRequests: false, releases: false, checks: false }
+  }
+  const provider = getHostingProvider(providerId)
+  const caps = provider?.capabilities
+  if (!caps) return { known: false, providerId, issues: null, pullRequests: null, releases: null, checks: null }
+  return {
+    known: true,
+    providerId,
+    issues: caps.issues === true,
+    pullRequests: caps.pr === true,
+    releases: caps.releases === true,
+    // 「能不能读 CI 检查状态」在平台声明里没有单独位，只有 api 通不通。api 不通一律算不能。
+    checks: caps.api === true && caps.pr === true,
+  }
+}
+
 export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
@@ -532,6 +562,15 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
       roleReason: role.reason,
+      // 这个远端到底能做什么，如实报出来。
+      //
+      // 早先只报 `providerId` 一个字符串，而「能不能开 Issue / 发 Release / 读检查状态」
+      // 全靠下游各自猜——于是不在 GitHub 上的托管仓上，产物计划照样给出 GitHub 专用命令，
+      // 而执行它的人只会看到 404。
+      //
+      // 报 capabilities 而不是猜：能就是 true，不能就是 false，认不出来就是 null（未知），
+      // **未知不许被当成能**——那正是「看着像配好了」的来源。
+      capabilities: summarizeRemoteCapabilities(role, gitFacts),
       ...(role.collaborationScope ? { collaborationScope: role.collaborationScope } : {}),
       ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
     },

@@ -1064,4 +1064,48 @@ cases.push(['大需求判出必写 PRD，小需求不许被误判；多份无主
   } finally { rmTree(dir) }
 }])
 
+// #50 F：如实报出远端能做与不能做，认不出来就说认不出来。
+//
+// 早先只报 `providerId` 一个字符串。托管不在 GitHub 上时，产物计划照样给 GitHub 专用命令，
+// 执行它的人只看到 404——而流程本身不会报错。
+cases.push(['远端能力三态：能做、不能做、认不出来，且未知不许被当成能', async () => {
+  const { survey } = await import('../../scripts/survey.mjs')
+
+  const makeRepo = (slug) => {
+    const dir = tmpProject({ 'README.md': `# ${slug}\n\n远端能力测试仓。\n`, 'package.json': `{"name":"${slug}","version":"1.0.0"}` })
+    gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+    gitCommitFast(dir, undefined, { allowEmpty: true, message: 'init' })
+    return dir
+  }
+
+  // 没有远端：能力表必须是「不能」，而不是「未知」或「能」
+  const noRemote = makeRepo('nr')
+  try {
+    const res = await survey(noRemote, {})
+    const caps = res.git?.capabilities
+    if (!caps) return '没有远端时 capabilities 缺失——下游只能靠猜'
+    if (caps.known !== true) return `没有远端应判 known=true（本地就是没有这些能力）：${JSON.stringify(caps)}`
+    if (caps.issues !== false || caps.pullRequests !== false || caps.releases !== false) {
+      return `没有远端却报出能做：${JSON.stringify(caps)}`
+    }
+  } finally { rmTree(noRemote) }
+
+  // 有远端但不在注册表里：能力全 false，且必须标出它是哪个 provider
+  const other = makeRepo('ot')
+  try {
+    gitSync(other, ['remote', 'add', 'origin', 'https://example.invalid/acme/demo.git'])
+    const res = await survey(other, {})
+    const caps = res.git?.capabilities
+    if (!caps) return '认不出的托管上 capabilities 缺失'
+    if (caps.known !== true) return `认不出的托管应仍然报出确定的「做不到」：${JSON.stringify(caps)}`
+    if (caps.releases !== false) return `认不出的托管不许报出能发 Release：${JSON.stringify(caps)}`
+    if (!caps.providerId) return 'capabilities 里没有 providerId，没人知道这是哪个托管'
+  } finally { rmTree(other) }
+
+  // 认不出来时不许是 true：这条是反向的核心——「未知」被当成「能」正是 404 的来源
+  const { getHostingProvider } = await import('../../scripts/lib/platform/index.mjs')
+  if (getHostingProvider('no-such-provider') !== undefined) return '不存在的 provider 竟然查得到能力表'
+  return true
+}])
+
 }

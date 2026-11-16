@@ -756,6 +756,14 @@ export const INJECTIONS = [
     expect: '大需求判出必写 PRD',
   },
   {
+    id: 'I83',
+    what: '远端能力认不出来时被当成能做（下游于是给出平台专用命令）',
+    file: 'scripts/survey.mjs',
+    from: '    releases: caps.releases === true,',
+    to: '    releases: true,',
+    expect: '远端能力三态',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

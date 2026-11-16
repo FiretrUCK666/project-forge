@@ -415,21 +415,28 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const kit = detectKit(root)
   const localSkills = detectLocalSkills(root)
   const artifacts = detectArtifacts(root, ecosystem)
-  const universal = ecosystem.kinds.length === 0
-    ? detectUniversalCommands(root)
-    : { commands: {}, sources: {}, detectionEvidence: [] }
+  // CI 与 Makefile 里被真实执行过的命令**永远要读**，不是「只给认不出的项目兜底」。
+  //
+  // 早先这里是 `ecosystem.kinds.length === 0 ? detectUniversalCommands(root) : 空`。
+  // 于是一个 `kinds: ['skill']` 的仓（本仓库就是）拿到的是 `commands = {}`——它有 CI、
+  // CI 里写着十几条真实命令，但整条兜底被跳过了。结果是生成的 `AGENTS.md`
+  // 「构建与验证」永远空着，而体检还会说它「已就绪」。
+  //
+  // 优先级不变：生态清单推断出来的更具体，覆盖 CI 兜底的那一份（反过来的话，
+  // 一份 CI 里偶然出现的 `npm run lint` 会把 `npm test` 顶掉）。
+  const universal = detectUniversalCommands(root)
 
   const gitFacts = await gitPromise
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
   const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
 
-  const commands = { ...ecosystem.commands, ...universal.commands, ...taskCommands }
+  const commands = { ...universal.commands, ...taskCommands, ...ecosystem.commands }
   const commandsByEcosystem = { ...ecosystem.commandsByEcosystem }
   if (Object.keys(taskCommands).length > 0) commandsByEcosystem.task = taskCommands
   if (Object.keys(universal.commands).length > 0) {
     commandsByEcosystem['ci-or-taskfile'] = universal.commands
   }
-  const commandSources = { ...(universal.sources ?? {}) }
+  const commandSources = { ...(universal.sources ?? {}), ...(ecosystem.commandSources ?? {}) }
 
   let kinds = ecosystem.kinds
   if (kinds.length === 0) {

@@ -10,6 +10,7 @@ import {
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
+import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
 
@@ -553,11 +554,16 @@ const COMMAND_KINDS = [
   { key: 'install', re: /\b(?:install|deps|dependencies|setup|bootstrap|restore)\b/i },
 ]
 
+/**
+ * 分类只在**命令位置**上判：命令名与动词，不看参数值与属性名。
+ *
+ * 早先是 `kind.re.test(整段文本)`——在一段多行 CI 脚本压成的大杂烩里搜第一个命中词，
+ * 于是 `mac/test-mac-pure.sh` 的文件名让整段 Bash 变成 `test`、`git archive --format=zip`
+ * 里的参数值让整个打包段变成 `lint`、`.Restore` 属性名让整段 PowerShell 变成 `install`。
+ * 判据要有语法边界：动作词只出现在命令位置。
+ */
 function classifyCommand(cmd) {
-  for (const kind of COMMAND_KINDS) {
-    if (kind.re.test(cmd)) return kind.key
-  }
-  return undefined
+  return classifyCommandText(cmd, COMMAND_KINDS)
 }
 
 export function detectCiCommands(root) {

@@ -692,4 +692,106 @@ cases.push(['govern-audit.mjs：--audit-only 与 reconcile', async () => {
     } finally { rmTree(cleanAuditDir) }
 }])
 
+// #49 A-2：判据缺主语。「`x/y.z` 是不是本仓库路径」这个问题，光看形状答不出来——
+// 同一个形状可以挂在仓库根、家目录根、环境变量根下。只有第一种能被仓库现状核对。
+//
+// 实测被误判的四种：`~/.envproxy/locks/op.lock`、`~/notes.txt`、
+// `~/projects/x/package.json`、`~/.config/app/settings.yaml`。
+// 同一处判据的另一头还在漏认：`./docs/TDD.md` 因为带 `./` 前缀，一个都没认出来。
+cases.push(['契约路径归属：家目录与环境变量根不算仓内路径，`./` 前缀的仓内路径必须仍被认出', async () => {
+  const { claimsOf } = await import('../lib/claims.mjs')
+
+  const outsideRoots = [
+    '~/.envproxy/locks/op.lock',
+    '~/notes.txt',
+    '~/projects/x/package.json',
+    '~/.config/app/settings.yaml',
+    '~/.ssh/config',
+    '~/Library/LaunchAgents/x.plist',
+    '~user/docs/x.txt',
+    '$HOME/a/b.json',
+    '${HOME}/a/b.yaml',
+    '%APPDATA%\\x.ps1',
+    'D:\\proj\\a.ps1',
+    '/etc/app/a.yaml',
+  ]
+  const falsePositives = []
+  for (const p of outsideRoots) {
+    const got = claimsOf('见 `' + p + '`').paths
+    if (got.length > 0) falsePositives.push(`${p} -> ${JSON.stringify(got)}`)
+  }
+  if (falsePositives.length > 0) {
+    return `这些不属于仓库根的路径被当成了契约承诺：${falsePositives.join(' | ')}`
+  }
+
+  const insideRoots = [
+    ['win/lib/base.ps1', 'win/lib/base.ps1'],
+    ['src/main.ts', 'src/main.ts'],
+    ['./docs/TDD.md', 'docs/TDD.md'],
+    ['./src/a.ts', 'src/a.ts'],
+  ]
+  const missed = []
+  for (const [raw, expected] of insideRoots) {
+    const got = claimsOf('见 `' + raw + '`').paths
+    if (got.length !== 1 || got[0] !== expected) missed.push(`${raw} -> ${JSON.stringify(got)}（期望 ${expected}）`)
+  }
+  if (missed.length > 0) return `这些仓内路径没被认出（或没有归一）：${missed.join(' | ')}`
+
+  // 反向：以 `..` 开头、或剥完仍带 `..` 的，都要相对别处的目录才能解析，不该算承诺。
+  for (const raw of ['../../outside/a.ts', '../docs/x.md', 'src/../../a.ts']) {
+    const escaped = claimsOf('见 `' + raw + '`').paths
+    if (escaped.length > 0) return `需相对别处解析的路径被当成承诺：${raw} -> ${JSON.stringify(escaped)}`
+  }
+  return true
+}])
+
+// #49 A-1：模板变量里带着宿主的模板语法，渲染就崩。
+//
+// `COMMANDS` 的值来自 CI 的 `run:` 块，而 GitHub Actions 的表达式恰好也是 `${{ }}`。
+// 早先渲染之后会再用 `/{{[^}]*}}/g` 扫全文找残留——它分不清「模板作者写的 `{{`」与
+// 「被替换进来的数据里的 `{{`」，于是用 Actions 表达式的项目一个子命令都跑不了。
+cases.push(['模板渲染：变量值里的宿主语法不得让渲染失败（反向：模板正文里的未登记占位符仍要拦住）', async () => {
+  const { renderVars, TemplateError } = await import('../lib/template.mjs')
+
+  const hostileValues = [
+    'TAG="${{ github.ref_name }}" && ls',
+    'echo "${{ inputs.tag }}"',
+    'x=${{ matrix.os }}; echo $x',
+    'run: ${{ secrets.TOKEN }}',
+    '混合正文占位与 ${{ github.sha }}',
+    '${{ inputs.tag != \'\' && inputs.tag || github.ref_name }}',
+  ]
+  const failed = []
+  for (const value of hostileValues) {
+    try {
+      const out = renderVars('cmd: {{PROJECT_NAME}}', { PROJECT_NAME: value })
+      if (out !== `cmd: ${value}`) failed.push(`${JSON.stringify(value.slice(0, 30))} -> 渲染结果被改动：${out.slice(0, 40)}`)
+    } catch (error) {
+      failed.push(`${JSON.stringify(value.slice(0, 30))} -> 抛错：${error instanceof Error ? error.message.slice(0, 40) : String(error)}`)
+    }
+  }
+  if (failed.length > 0) return `宿主语法打崩了渲染：${failed.join(' | ')}`
+
+  // 正面：普通替换照旧
+  if (renderVars('a {{PROJECT_NAME}} b', { PROJECT_NAME: 'x' }) !== 'a x b') return '普通变量替换坏了'
+
+  // 反向三条：放宽不能变成失明
+  const mustThrow = [
+    ['正文里有 {{ REALLY_NOT_REGISTERED }}', {}, '未登记的全大写占位符'],
+    ['正文里有 {{ PROJECT_NAME }}', {}, '登记了但没有取值'],
+    ['正文里有 {{ project_name }}', { project_name: 'x' }, '小写形状（不会被替换，必须报）'],
+  ]
+  const notThrown = []
+  for (const [text, vars, why] of mustThrow) {
+    try {
+      renderVars(text, vars)
+      notThrown.push(why)
+    } catch (error) {
+      if (!(error instanceof TemplateError)) notThrown.push(`${why}（抛的不是 TemplateError）`)
+    }
+  }
+  if (notThrown.length > 0) return `放宽之后这些本该报的没报：${notThrown.join(' | ')}`
+  return true
+}])
+
 }

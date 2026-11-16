@@ -288,7 +288,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (!excludeTxt.split('\n').some((line) => line.trim() === '/backend/node_modules')) {
       return `mountSharedDeps 未写入无尾斜杠软链忽略规则：${excludeTxt}`
     }
-    unmountSharedDeps(dir, implAbs)
+    unmountSharedDeps(dir, implAbs, { mode: 'deps' })
     writeFileSync(join(implAbs, 'frontend/package-lock.json'), '{"lockfileVersion":3,"changed":1}\n')
     const mPartial = mountSharedDeps(dir, implAbs)
     if (existsSync(join(implAbs, 'frontend/node_modules')) || !existsSync(join(implAbs, 'backend/node_modules/pkg/i.js'))) {
@@ -670,6 +670,110 @@ cases.push(['doc-plan approve 移交 flow start 与静态回归（mergeAuthority
     }
     return true
   } finally { rmTree(apDir) }
+}])
+
+// #51：`git worktree remove --force` 会跟随 junction 递归删除。工具早先只解绑
+// node_modules / .venv / venv 三种名字，其余名字（vendor、shared、data……）一个都发现
+// 不了，于是「清理 worktree」把主仓的数据删干净，退出码还是 0。
+//
+// 判据必须是「是不是链接」，不是「叫什么名字」——所以这里用五个不同的名字打它，
+// 其中一个还是中文，另加一条反向：worktree 内部互指的链接不该被当成外链。
+cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出并默认拒绝（反向：无外链照常放行）', async () => {
+  const { scanOutboundLinks, unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
+  const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
+  const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+  const names = ['vendor', 'shared', 'data', 'packages', '中文名']
+  const dir = tmpProject({
+    '.gitignore': `.worktrees/\n${names.map((n) => `${n}/\n`).join('')}`,
+    'README.md': '# outbound\n',
+  })
+  gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
+  for (const name of names) {
+    mkdirSync(join(dir, name, 'precious'), { recursive: true })
+    writeFileSync(join(dir, name, 'precious', 'SURVIVE.txt'), 'MUST SURVIVE')
+  }
+  gitCommitFast(dir, 'add shared dirs')
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+  try {
+    const roots = await resolveRepoRoots(dir)
+    const started = await handleStart({ task: 'outbound', case: '3', slug: 'outbound' }, roots)
+    if (started.exitCode !== 0) return `start 失败：${started.exitCode}`
+    const ledger = readTaskLedger(dir, 'outbound')
+    const implAbs = join(dir, ledger.worktreePath)
+
+    for (const name of names) symlinkSync(join(dir, name), join(implAbs, name), linkType)
+    // 反向：worktree 内部互指的链接不该被当成外链
+    mkdirSync(join(implAbs, 'inner'), { recursive: true })
+    writeFileSync(join(implAbs, 'inner', 'a.txt'), 'inner\n')
+    symlinkSync(join(implAbs, 'inner'), join(implAbs, 'inner-link'), linkType)
+
+    const scan = scanOutboundLinks(implAbs)
+    const found = scan.outbound.map((o) => o.path).sort()
+    if (found.length !== names.length) {
+      return `外链检出数不对：期望 ${names.length} 个，实际 ${found.length} 个（${found.join(', ')}）——按名字筛就会漏`
+    }
+    if (scan.internal.length !== 1) return `worktree 内部链接被误判成外链：internal=${JSON.stringify(scan.internal.map((i) => i.path))}`
+
+    const denied = unmountSharedDeps(dir, implAbs)
+    if (denied.ok !== false) return '存在外链时 unmountSharedDeps 必须拒绝，实际放行了'
+    if (denied.blocked.length !== names.length) return `拒绝理由不全：blocked=${denied.blocked.length}`
+    if (denied.unmounted.length !== 0) return '被拒绝时不得解绑任何链接'
+
+    // 真实清理路径：带 --confirm --force 也必须被拦住
+    const cl = await handleCleanup({ task: 'outbound', confirm: true, force: true, json: true }, roots)
+    if (cl.exitCode === 0) return 'cleanup --confirm --force 带着外链删成功了——主仓数据会被删穿'
+    for (const name of names) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `cleanup 之后主仓 ${name}/precious 没了——这就是删穿`
+    }
+
+    // 显式逐个放行才允许删；且只删链接，不碰目标
+    const allowed = unmountSharedDeps(dir, implAbs, { allowOutbound: names })
+    if (allowed.ok !== true) return `显式放行后仍被拒：${JSON.stringify(allowed.blocked)}`
+    if (allowed.unmounted.length !== names.length) return `放行后解绑数不对：${allowed.unmounted.length}`
+    for (const name of names) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `解绑碰了目标内容：主仓 ${name}/precious 没了`
+      if (existsSync(join(implAbs, name))) return `解绑后链接还在：${name}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// 反向：完全没有外链的普通 worktree，清理必须照常成功。保护不能变成误伤。
+cases.push(['cleanup 外链保护反向：工具自己挂的 node_modules 照常解绑放行', async () => {
+  const { scanOutboundLinks, unmountSharedDeps, mountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
+  const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\nnode_modules/\n',
+    'package.json': '{"name":"plain","version":"1.0.0"}\n',
+    'package-lock.json': '{"lockfileVersion":3}\n',
+    'README.md': '# plain\n',
+  })
+  gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
+  mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', 'pkg', 'i.js'), '1\n')
+  gitCommitFast(dir, 'add deps')
+  try {
+    const roots = await resolveRepoRoots(dir)
+    const started = await handleStart({ task: 'plain', case: '3', slug: 'plain' }, roots)
+    if (started.exitCode !== 0) return `start 失败：${started.exitCode}`
+    const ledger = readTaskLedger(dir, 'plain')
+    const implAbs = join(dir, ledger.worktreePath)
+    mountSharedDeps(dir, implAbs)
+
+    const scan = scanOutboundLinks(implAbs)
+    if (!scan.outbound.some((o) => o.path === 'node_modules')) {
+      return `工具自己挂的 node_modules 没被扫出来：${JSON.stringify(scan.outbound.map((o) => o.path))}`
+    }
+    if (!existsSync(join(dir, 'node_modules', 'pkg', 'i.js'))) return '主仓 node_modules 被误删'
+
+    const res = unmountSharedDeps(dir, implAbs, { allowOutbound: ['node_modules'] })
+    if (res.ok !== true) return `白名单内的依赖挂载被误拦：${JSON.stringify(res.blocked)}`
+    if (!existsSync(join(dir, 'node_modules', 'pkg', 'i.js'))) return '解绑 node_modules 时删了主仓内容'
+    if (existsSync(join(implAbs, 'node_modules'))) return '解绑后 node_modules 链接还在'
+    return true
+  } finally { rmTree(dir) }
 }])
 
 }

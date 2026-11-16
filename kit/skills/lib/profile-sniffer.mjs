@@ -130,8 +130,17 @@ export function extractYamlRunBlocks(relFile, text) {
       }
       if (!isYamlStepObject) {
         const cleanLines = blockLines.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-        const cmd = cleanLines.length > 1 ? cleanLines.join(' && ') : (cleanLines[0] ?? '')
-        if (cmd) steps.push({ file: relFile, line: startLine, cmd })
+        // 多行 `run:` 块**逐行成条**，不压成一行。
+        //
+        // 早先这里是 `cleanLines.join(' && ')`：控制流被压平，本来互不相干的语句拼在一起，
+        // 下游把它当「一条命令」去分类、去装进契约。实测后果是一个 92 文件的正常项目
+        // 从零生成 AGENTS.md 直接超限中止——工具把自己抓来的命令装进契约，然后被自己撑爆。
+        //
+        // 每一行本来就是一条独立语句。分开之后，分类器看到的是真实的那一条，
+        // 体积预算看到的也是真实的那一条。
+        for (const [offset, clean] of cleanLines.entries()) {
+          steps.push({ file: relFile, line: startLine + offset + 1, cmd: clean })
+        }
       }
     } else {
       const clean = stripWrapQuotes(tail.replace(/\s+#.*$/, '').trim())

@@ -34,9 +34,9 @@ function printHelp() {
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--json]',
-    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--json]',
+    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  status    [--task <id>] [--json]',
-    '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--json]',
+    '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  batch     <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--enqueue-only] [--trial-local] [--task <id>] [--json]',
   ].join('\n') + '\n')
 }
@@ -61,7 +61,7 @@ async function main(argv) {
         'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body',
         'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot',
       ],
-      multiFlags: ['rebut'],
+      multiFlags: ['rebut', 'allow-outbound'],
       usageHint: 'flow.mjs <inspect|next|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {

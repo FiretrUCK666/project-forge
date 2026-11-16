@@ -284,7 +284,7 @@ cases.push(['条件名拼错要报错，不许当成「条件为假」整块删�
   const bad = ['{{release_doc}}', '{{ PROJECT_NAME }}', '{{PROJECT-NAME}}']
   for (const token of bad) {
     let hit = false
-    try { renderVars(`x ${token} y`, { PROJECT_NAME: 'demo' }) } catch (error) { hit = /还剩这些占位符/.test(error.message) }
+    try { renderVars(`x ${token} y`, { PROJECT_NAME: 'demo' }) } catch (error) { hit = /形状不对的占位符/.test(error.message) }
     if (!hit) return `${token} 这种形状的占位符没有被拦下——它会原样留在产物里`
   }
 

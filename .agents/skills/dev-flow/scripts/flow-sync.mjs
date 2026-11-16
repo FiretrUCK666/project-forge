@@ -85,7 +85,7 @@ export async function handleSync(opts = {}, roots) {
     throw new Error(`找不到 sync 目标基线分支或提交：${targetBaseBranch}`)
   }
 
-  if (ledger.tier === 2) unmountSharedDeps(roots.mainRoot, implRoot)
+  if (ledger.tier === 2) unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps' })
 
   const rebaseArgs = oldBaseSha
     ? ['rebase', '--onto', newBaseSha, oldBaseSha, ...(ledger.branch ? [ledger.branch] : [])]
@@ -127,7 +127,7 @@ export async function handleSync(opts = {}, roots) {
   if (ledger.tier === 2 && newHeadSha && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
     if (existsSync(reviewAbs)) {
-      unmountSharedDeps(roots.mainRoot, reviewAbs)
+      unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
       reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, newHeadSha, { resetDirty: true })
       const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
       ledger.reviewWorktreeHead = newHeadSha

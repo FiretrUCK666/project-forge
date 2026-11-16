@@ -614,7 +614,7 @@ export async function handleSubmit(opts, roots) {
   let reviewSlotSync = null
   if (ledger.tier === 2 && currentHead && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
-    if (existsSync(reviewAbs)) unmountSharedDeps(roots.mainRoot, reviewAbs)
+    if (existsSync(reviewAbs)) unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
     reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
     const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
     ledger.reviewWorktreeHead = currentHead

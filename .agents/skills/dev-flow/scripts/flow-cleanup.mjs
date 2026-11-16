@@ -170,7 +170,21 @@ export async function handleCleanup(opts, roots) {
   const removedWorktrees = []
   for (const wt of worktreesToRemove) {
     if (isCwdInside(wt.abs)) throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
-    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs)
+    // 解绑在前、判断在后：有未获准的外链就整条停下，绝不带着链接去 `worktree remove --force`
+    // （那一步会跟随 junction 递归删掉主仓里的目标内容，而退出码依然是 0）。
+    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
+    if (unmount.ok === false) {
+      const lines = unmount.blocked.map((one) => `  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）`)
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_OUTBOUND_LINKS', worktree: wt.path, blockedLinks: unmount.blocked }, null, 2)}\n`)
+      } else {
+        process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接。\n`)
+        for (const line of lines) process.stderr.write(`${line}\n`)
+        process.stderr.write('`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
+        process.stderr.write('确认可以切断后，用 --allow-outbound <路径> 逐个列出重跑；没有「全部放行」开关。\n')
+      }
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
     const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
     const rmRes = await gitRun(roots.mainRoot, rmArgs)
     if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
@@ -267,7 +281,12 @@ export async function handleAbort(opts, roots) {
   }
   for (const wt of worktrees) {
     if (isCwdInside(wt.abs)) throw new Error(`当前工作目录位于待拆除 worktree (${wt.path}) 内，请先切回主仓`)
-    unmountSharedDeps(roots.mainRoot, wt.abs)
+    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
+    if (unmount.ok === false) {
+      process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接，放弃任务同样不得连带删除主仓内容。\n`)
+      for (const one of unmount.blocked) process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
     const rmRes = await gitRun(roots.mainRoot, opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs])
     if (!rmRes.ok) throw new Error(`移除 ${wt.path} 失败：${rmRes.stderr}`)
   }

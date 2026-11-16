@@ -412,7 +412,15 @@ export function parseAgentsProfile(repoRoot) {
     || (!profile.mergeGate && !explicitNone.has('merge-gate'))
   const fallback = needFallback ? detectEcosystemCommands(repoRoot) : undefined
   if (!fallback) {
-    profile.detectionEvidence = sniffLayeredCommands(repoRoot, { profile, fileRelList: [] }).detectionEvidence
+    const aLines = text ? text.split('\n') : []
+    const evidence = []
+    for (const [key, prop] of [['quick-test', 'quickTest'], ['full-test', 'fullTest'], ['smoke-verify', 'smokeVerify'], ['merge-gate', 'mergeGate']]) {
+      if (profile[prop]) {
+        const idx = aLines.findIndex((l) => new RegExp(`^\\s*(?:[-*]\\s+)?\`?${key}\`?\\s*:`, 'i').test(l))
+        evidence.push({ layer: 'dev-profile', kind: key, file: 'AGENTS.md', line: idx >= 0 ? idx + 1 : 1, command: profile[prop] })
+      }
+    }
+    profile.detectionEvidence = evidence
     return profile
   }
   if (!profile.quickTest && !explicitNone.has('quick-test')) profile.quickTest = fallback.quickTest

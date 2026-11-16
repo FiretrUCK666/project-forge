@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerM2Cases(cases) {
   cases.push(['M2 C1：三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
@@ -79,8 +79,7 @@ export function registerM2Cases(cases) {
       await handleStart({ task: 'q1', case: '2', slug: 'q1' }, roots)
       const wtq = join(qOnlyDir, '.worktrees', 'impl-q1')
       writeFileSync(join(wtq, 'src/a.mjs'), 'export const q = 2\n')
-      gitSync(wtq, ['add', '-A'])
-      gitSync(wtq, ['commit', '-qm', 'q2'])
+      gitCommitFast(wtq, 'q2', { updateOnly: true })
       await handleVerify({ task: 'q1', tier: 'quick', target: 'src/a.mjs' }, roots)
       const qBypass = await handleSubmit({ task: 'q1' }, roots)
       if (qBypass.exitCode !== 3) {
@@ -128,8 +127,7 @@ export function registerM2Cases(cases) {
       await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code' }, roots)
       const wt1 = join(dir, '.worktrees', 'impl-c1-code')
       writeFileSync(join(wt1, 'src/app.mjs'), 'export const a = 2\n')
-      gitSync(wt1, ['add', '-A'])
-      gitSync(wt1, ['commit', '-qm', 'feat: a=2'])
+      gitCommitFast(wt1, 'feat: a=2', { updateOnly: true })
 
       const vPartial = await handleVerify({ task: 'c1-code', tier: 'quick', target: 'src/app.mjs' }, roots)
       if (vPartial.exitCode !== 0) return `quick --target 失败：${vPartial.exitCode}`
@@ -161,7 +159,7 @@ export function registerM2Cases(cases) {
         async getPr() { return { ok: true, state: 'OPEN', merged: false } },
       }
       const bare = tmpProject({})
-      gitSync(undefined, ['init', '--bare', bare])
+      gitInitBare(bare)
       const bareUrl = bare.replace(/\\/g, '/')
       try {
         gitSync(dir, ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/c1.git'])
@@ -205,7 +203,7 @@ export function registerM2Cases(cases) {
   cases.push(['M2 C2：全 Worktree 隔离（commits>0 含 Case1）、分支冲突拦截、跨轮槽复用与 --reset-review-slot', async () => {
     // 1. 0 提交仓保持 Tier 1；有提交仓 Case 1 强制 Tier 2 .worktrees/impl-* 且 baseSha 来自默认分支
     const unborn = tmpProject({ 'README.md': '# u\n' })
-    gitSync(unborn, ['init', '-b', 'main'])
+    gitInit(unborn, { commit: false, branch: 'main' })
     const committed = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'package.json': '{"name":"c2-wt","version":"1.0.0"}\n',
@@ -238,8 +236,7 @@ export function registerM2Cases(cases) {
       const implAbs = join(committed, sCom.worktreePath)
       const revAbs = join(committed, sCom.reviewWorktreePath)
       writeFileSync(join(implAbs, 'src/a.mjs'), 'export const a = 2\n')
-      gitSync(implAbs, ['add', '-A'])
-      gitSync(implAbs, ['commit', '-qm', 'r1'])
+      gitCommitFast(implAbs, 'r1', { updateOnly: true })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c2-wt'], { cwd: implAbs })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt'], { cwd: implAbs })
       if (!existsSync(join(revAbs, 'node_modules/p/i.js'))) return '首轮 review 槽未挂载共享依赖'
@@ -249,8 +246,7 @@ export function registerM2Cases(cases) {
       writeFileSync(join(revAbs, 'stray.tmp'), 'junk\n')
       writeFileSync(join(implAbs, 'package-lock.json'), '{"lockfileVersion":3,"v":2}\n')
       writeFileSync(join(implAbs, 'src/a.mjs'), 'export const a = 3\n')
-      gitSync(implAbs, ['add', '-A'])
-      gitSync(implAbs, ['commit', '-qm', 'r2'])
+      gitCommitFast(implAbs, 'r2', { updateOnly: true })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c2-wt', '--mode', 'gate'], { cwd: implAbs })
       const subReset = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--rework', '--reset-review-slot', '--json'], { cwd: implAbs })
       if (subReset.status !== 0) return `submit --reset-review-slot 失败：${subReset.stderr}`
@@ -278,7 +274,7 @@ export function registerM2Cases(cases) {
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c3.git' })
 
     const bare = tmpProject({})
-    gitSync(undefined, ['init', '--bare', bare])
+    gitInitBare(bare)
     const bareUrl = bare.replace(/\\/g, '/')
 
     try {
@@ -311,8 +307,7 @@ export function registerM2Cases(cases) {
 
       // 返工幂等 finalize + 零脏文件 submit + findOpenPrForBranch 复用 OPEN PR
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'feat: m1 v2'])
+      gitCommitFast(wt, 'feat: m1 v2')
       const finRework = await handleFinalize({ task: 'm1' }, roots)
       if (finRework.exitCode !== 0) return `返工重复 finalize 失败：${finRework.exitCode}`
       await handleVerify({ task: 'm1', mode: 'gate' }, roots)
@@ -356,8 +351,7 @@ export function registerM2Cases(cases) {
       await handleStart({ task: 'm1b', case: '1', slug: 'm1b', implementer: 'alice' }, roots)
       const wt = join(dir, readTaskLedger(dir, 'm1b').worktreePath)
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'feat: m1b v2'])
+      gitCommitFast(wt, 'feat: m1b v2', { updateOnly: true })
       await handleVerify({ task: 'm1b', mode: 'full' }, roots)
       await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
 
@@ -407,7 +401,7 @@ export function registerM2Cases(cases) {
   cases.push(['M2 C4+C5：六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
-      'AGENTS.md': '# c4\n\n```yaml\nquick-test: exit 0\n```\n',
+      'AGENTS.md': '# c4\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n',
       'src/a.mjs': 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n',
       'src/b.mjs': 'b1\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n',
     })
@@ -446,8 +440,7 @@ export function registerM2Cases(cases) {
       const st = readTaskLedger(dir, 'c4-lk')
       const wt = join(dir, st.worktreePath)
       writeFileSync(join(wt, 'src/a.mjs'), 'x1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nx10\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'r1'])
+      gitCommitFast(wt, 'r1', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
 
       const r1 = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
@@ -466,8 +459,7 @@ export function registerM2Cases(cases) {
 
       // 推进 HEAD 仅改 src/b.mjs:1，检验增量视野硬锁
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'r2'])
+      gitCommitFast(wt, 'r2', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
 
       const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
@@ -484,15 +476,13 @@ export function registerM2Cases(cases) {
 
       // Round 3 触发停损 -> Round 4 pass 绕过未解锁停损必须 exit 4 -> override 后 pass 成功
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod2\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'r3'])
+      gitCommitFast(wt, 'r3', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
       const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r3Stop !== 4) return `R3 停损未触发：exit=${r3Stop}`
 
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod3\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
-      gitSync(wt, ['add', '-A'])
-      gitSync(wt, ['commit', '-qm', 'r4'])
+      gitCommitFast(wt, 'r4', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
       const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
       if (r4Bypass !== 4) return `Round 4 pass 竟绕过了未解锁的历史停损：exit=${r4Bypass}`

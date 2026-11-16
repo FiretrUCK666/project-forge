@@ -7,7 +7,7 @@ import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { execShellCommand, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
-import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone } from '../../lib/profile.mjs'
 import { runLowRiskDocStaticCheck } from '../../lib/workflow-policy.mjs'
@@ -98,8 +98,12 @@ export async function runTrialMerge({
   }
 
   const oldBaseSha = baseRes.stdout.trim()
-  const isAnc = await gitRun(mainRoot, ['merge-base', '--is-ancestor', branchSha, oldBaseSha])
-  if (isAnc.ok) {
+  if (branchSha === oldBaseSha) {
+    return { ok: true, alreadyMerged: true, branch, into: baseBranch, mergedSha: oldBaseSha }
+  }
+  const fastAnc = isAncestorLinearFast(fastGitDir, branchSha, oldBaseSha)
+  const isAncOk = fastAnc !== null ? fastAnc : (await gitRun(mainRoot, ['merge-base', '--is-ancestor', branchSha, oldBaseSha])).ok
+  if (isAncOk) {
     return { ok: true, alreadyMerged: true, branch, into: baseBranch, mergedSha: oldBaseSha }
   }
 
@@ -115,12 +119,12 @@ export async function runTrialMerge({
     }
   }
 
-  const addRes = await gitRun(mainRoot, ['worktree', 'add', '--detach', tmpAbs, oldBaseSha])
+  const addRes = await gitRun(mainRoot, ['worktree', 'add', '-q', '--detach', tmpAbs, oldBaseSha])
   if (!addRes.ok) throw new Error(`创建临时试合 worktree 失败：${addRes.stderr}`)
 
   let mergedSha = null
   try {
-    const mRes = await gitRun(tmpAbs, ['merge', '--no-ff', branchSha, '-m', `Merge branch '${branch}' (${ledger.taskId})`])
+    const mRes = await gitRun(tmpAbs, ['merge', '--no-ff', '-q', '--no-edit', branchSha, '-m', `Merge branch '${branch}' (${ledger.taskId})`])
     if (!mRes.ok) {
       await gitRun(tmpAbs, ['merge', '--abort'])
       return {
@@ -131,7 +135,8 @@ export async function runTrialMerge({
         message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${baseBranch} 存在冲突：${(mRes.stderr || mRes.stdout).trim()}`,
       }
     }
-    const revRes = await gitRun(tmpAbs, ['rev-parse', 'HEAD'])
+    const fastMergedHead = readHeadFast(resolveGitDirFast(tmpAbs))?.oid ?? null
+    const revRes = fastMergedHead ? { ok: true, stdout: fastMergedHead } : await gitRun(tmpAbs, ['rev-parse', 'HEAD'])
     mergedSha = revRes.stdout.trim()
 
     if (runVerify) {
@@ -168,7 +173,7 @@ export async function runTrialMerge({
   }
 
   if (curMainBranch === baseBranch) {
-    const ffRes = await gitRun(mainRoot, ['merge', '--ff-only', mergedSha])
+    const ffRes = await gitRun(mainRoot, ['merge', '--ff-only', '-q', mergedSha])
     if (!ffRes.ok) throw new Error(`试合通过但推进主干 ${baseBranch} (merge --ff-only) 失败：${ffRes.stderr}`)
   } else {
     const casRes = await gitRun(mainRoot, ['update-ref', baseRefName, mergedSha, oldBaseSha])

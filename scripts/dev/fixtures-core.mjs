@@ -56,8 +56,7 @@ cases.push(['没有远端时角色是 local-only（按纯本地工作区处置�
 
 cases.push(['有远端、无提交历史且没声明源仓库时角色是 undetermined', async () => {
   const dir = tmpProject({ 'README.md': '# a\n' })
-  gitSync(dir, ['init', '-q'])
-  gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/x/y.git'])
+  gitInit(dir, { commit: false, origin: 'https://github.com/x/y.git' })
   try {
     const f = await survey(dir)
     if (f.git.role !== 'undetermined') return `role=${f.git.role}`

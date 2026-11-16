@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readZip, stripCommonPrefix, writeZip } from '../zip.mjs'
-import { gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -327,8 +327,7 @@ export function registerM4Cases(cases) {
       mkdirSync(join(dir, 'src'), { recursive: true })
       writeFileSync(join(dir, 'src/billing.mjs'), 'export async function billUser() { return true }\n')
       writeFileSync(join(dir, 'src/core.mjs'), 'export function runCore() { return 1 }\nexport const NEW_CLI_FLAG = 1\n')
-      gitSync(dir, ['add', '-A'])
-      gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add billing and export'])
+      gitCommitFast(dir, 'add billing and export', { name: 't', email: 't@t.t' })
 
       const drift = await checkTddSyncParity(dir, ['src/billing.mjs', 'src/core.mjs'], { baseSha })
       if (!drift.missingModulesInTdd.includes('src/billing.mjs')
@@ -406,8 +405,7 @@ export function registerM4Cases(cases) {
         .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填完。')
         .replace('<填写项目快测命令>', 'node -e "process.exit(1)"')
       writeFileSync(join(dir, 'AGENTS.md'), filledAgents)
-      gitSync(dir, ['add', 'AGENTS.md'])
-      gitSync(dir, ['-c', 'user.name=alice', '-c', 'user.email=alice@acme.test', 'commit', '-qm', 'init agents'])
+      gitCommitFast(dir, 'init agents', { files: ['AGENTS.md'], name: 'alice', email: 'alice@acme.test' })
 
       const roots = await resolveRepoRoots(dir)
       // Concurrent signals write safety
@@ -423,8 +421,7 @@ export function registerM4Cases(cases) {
       await handleStart({ task: 'c3-t', case: '2', slug: 'c3-t', implementer: 'alice' }, roots)
       const wt = join(dir, '.worktrees', 'impl-c3-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const app = 2\n')
-      gitSync(wt, ['add', 'src/app.mjs'])
-      gitSync(wt, ['-c', 'user.name=alice', '-c', 'user.email=alice@acme.test', 'commit', '-qm', 'change app'])
+      gitCommitFast(wt, 'change app', { files: ['src/app.mjs'], name: 'alice', email: 'alice@acme.test' })
 
       // verify fail -> rework -> verify pass -> review record pass (with false-positive dispositions)
       await handleVerify({ task: 'c3-t', mode: 'full', cmd: 'exit 1' }, roots)

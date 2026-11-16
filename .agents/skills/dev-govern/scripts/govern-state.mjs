@@ -15,6 +15,7 @@ import {
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
   writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeGitHubEnv } from '../../lib/platform.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
@@ -72,19 +73,24 @@ export async function collectChangedFilesSet(workRoot, isGit, defaultBranch) {
     }
   }
 
-  const hasHead = (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok
+  const fastGitDir = resolveGitDirFast(workRoot)
+  const fastHead = readHeadFast(fastGitDir)
+  const hasHead = fastHead ? Boolean(fastHead.oid) : (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok
   if (!hasHead) return changed
 
   const baseCandidates = [...new Set([defaultBranch, 'main', 'master', 'HEAD~1'].filter(Boolean))]
   for (const baseRef of baseCandidates) {
-    const verify = await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', baseRef])
+    const fastBaseSha = baseRef === 'HEAD~1' ? null : (resolveRefShaFast(fastGitDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(fastGitDir, `refs/remotes/origin/${baseRef}`))
+    const verify = fastBaseSha
+      ? { ok: true }
+      : await gitRun(workRoot, ['rev-parse', '--verify', '--quiet', baseRef])
     if (!verify.ok) continue
     let range = null
     if (baseRef === 'HEAD~1') {
       range = 'HEAD~1..HEAD'
     } else {
-      const mb = await gitRun(workRoot, ['merge-base', baseRef, 'HEAD'])
-      const headSha = (await gitRun(workRoot, ['rev-parse', 'HEAD'])).stdout.trim()
+      const mb = await gitRun(workRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
+      const headSha = fastHead?.oid ?? (await gitRun(workRoot, ['rev-parse', 'HEAD'])).stdout.trim()
       if (mb.ok && mb.stdout.trim() && mb.stdout.trim() !== headSha) {
         range = `${mb.stdout.trim()}..HEAD`
       }
@@ -365,7 +371,8 @@ export async function handleSampleCommits(workRoot, mainRoot, gitDir, isGit, opt
   const signalClusters = buildClusterReport(events, [])
 
   const commits = []
-  if (isGit && (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok) {
+  const fastSampleHead = isGit ? readHeadFast(resolveGitDirFast(workRoot)) : null
+  if (isGit && (fastSampleHead ? Boolean(fastSampleHead.oid) : (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok)) {
     const logRes = await gitRun(workRoot, ['log', '-n', String(limit), '--name-only', '--format=__COMMIT__%H\t%ct\t%s'])
     if (logRes.ok && logRes.stdout) {
       let cur = null
@@ -513,7 +520,8 @@ export function buildIssues(findings) {
 
 export async function applyGitHubIssues(repoRoot, issues) {
   if (issues.length === 0) return { applied: [], error: undefined }
-  const remotes = await gitRun(repoRoot, ['remote', '-v'])
+  const fastCfg = readGitConfigFast(resolveGitDirFast(repoRoot))
+  const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remotes.stdout)
   const topology = parseRemotesTopology(remotes.stdout)
   const originUrl = remoteUrls.origin ?? Object.values(remoteUrls)[0]

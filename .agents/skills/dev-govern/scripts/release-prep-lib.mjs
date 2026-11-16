@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs'
 import { join, posix } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
-import { gitRun, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { gitRun, gitRunBuffer, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { hasAnyTagFast, readGitBlobTextFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 import { splitDiffByFile } from '../../lib/static-gates.mjs'
 
@@ -21,7 +22,12 @@ const BREAKING_SUBJECT_RE = /^[a-z]+(?:\([^)]*\))?!:\s*/i
 const TYPO_OR_FORMAT_RE = /^(?:(?:docs|style|chore)(?:\([^)]*\))?:\s*)?(?:fix\s+typos?|typos?|formatting|format\s+code|lint(?:\s+fix)?|whitespace|prettier|eslint|错别字|错字|排版|格式(?:整理|微调)?)\b/i
 const VAGUE_SUBJECT_RE = /^(?:update|updates|updated|wip|misc|cleanup|clean\s*up|tweak|tweaks|fixup|squash|sync|temp|tmp|minor|adjust|changes|patch|fix|fix\s+bug|minor\s+changes|update\s+(?:code|files?|docs?|readme|cli|index|config)|修改|改动|更新|调整|微调|清理|同步|提交|临时|修复)$/i
 
-async function readFileAtRev(repoRoot, rev, relPosix) {
+async function readFileAtRev(repoRoot, rev, relPosix, gitDir = null, blobMap = null) {
+  const blobSha = blobMap?.get(relPosix)
+  if (blobSha && gitDir) {
+    const fast = readGitBlobTextFast(gitDir, blobSha)
+    if (fast !== null) return fast
+  }
   const show = await gitRun(repoRoot, ['show', `${rev}:${relPosix}`])
   if (show.ok) return show.stdout
   if (rev === 'HEAD') return readTextSafe(join(repoRoot, relPosix))
@@ -65,14 +71,21 @@ function collectPackagePublicPaths(pkg, dirRel = '') {
 
 async function resolveBaseAndRange(repoRoot, gitDir, opts) {
   const targetRev = String(opts.to || 'HEAD').trim() || 'HEAD'
-  const toCheck = await gitRun(repoRoot, ['rev-parse', '--verify', `${targetRev}^{commit}`])
+  const effectiveGitDir = gitDir ?? resolveGitDirFast(repoRoot)
+  const fastToSha = targetRev === 'HEAD' ? readHeadFast(resolveGitDirFast(repoRoot), effectiveGitDir)?.oid : null
+  const canFastShallow = Boolean(effectiveGitDir && !existsSync(join(effectiveGitDir, 'reftable')))
+  const [toCheck, shallowCmd] = await Promise.all([
+    fastToSha ? Promise.resolve({ ok: true, stdout: fastToSha }) : gitRun(repoRoot, ['rev-parse', '--verify', `${targetRev}^{commit}`]),
+    canFastShallow
+      ? Promise.resolve({ ok: true, stdout: existsSync(join(effectiveGitDir, 'shallow')) ? 'true' : 'false' })
+      : gitRun(repoRoot, ['rev-parse', '--is-shallow-repository']),
+  ])
   if (!toCheck.ok || !toCheck.stdout.trim()) {
     return { error: `Invalid --to revision: "${targetRev}"`, code: 2 }
   }
   const toSha = toCheck.stdout.trim()
-  const shallowCmd = await gitRun(repoRoot, ['rev-parse', '--is-shallow-repository'])
   const isShallow = (shallowCmd.ok && shallowCmd.stdout.trim() === 'true')
-    || existsSync(join(gitDir ?? join(repoRoot, '.git'), 'shallow'))
+    || existsSync(join(effectiveGitDir ?? join(repoRoot, '.git'), 'shallow'))
 
   if (opts.from) {
     const fromCheck = await gitRun(repoRoot, ['rev-parse', '--verify', `${opts.from}^{commit}`])
@@ -87,23 +100,27 @@ async function resolveBaseAndRange(repoRoot, gitDir, opts) {
   }
 
   let fromTag = null
-  const tagsAtTo = await gitRun(repoRoot, ['tag', '--points-at', toSha])
-  const excludeArgs = []
-  if (tagsAtTo.ok && tagsAtTo.stdout) {
-    for (const t of tagsAtTo.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) excludeArgs.push('--exclude', t)
-  }
-  const desc = await gitRun(repoRoot, ['describe', '--tags', '--abbrev=0', ...excludeArgs, toSha])
-  if (desc.ok && desc.stdout.trim()) {
-    const tag = desc.stdout.trim()
-    const tagShaRes = await gitRun(repoRoot, ['rev-parse', '--verify', `${tag}^{commit}`])
-    if (tagShaRes.ok && tagShaRes.stdout.trim() && tagShaRes.stdout.trim() !== toSha) fromTag = tag
+  let fromTagSha = null
+  if (hasAnyTagFast(effectiveGitDir) !== false) {
+    const tagsAtTo = await gitRun(repoRoot, ['tag', '--points-at', toSha])
+    const excludeArgs = []
+    if (tagsAtTo.ok && tagsAtTo.stdout) {
+      for (const t of tagsAtTo.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) excludeArgs.push('--exclude', t)
+    }
+    const desc = await gitRun(repoRoot, ['describe', '--tags', '--abbrev=0', ...excludeArgs, toSha])
+    if (desc.ok && desc.stdout.trim()) {
+      const tag = desc.stdout.trim()
+      const fastTagSha = resolveRefShaFast(effectiveGitDir, `refs/tags/${tag}`)
+      const tagShaRes = fastTagSha ? { ok: true, stdout: fastTagSha } : await gitRun(repoRoot, ['rev-parse', '--verify', `${tag}^{commit}`])
+      const candSha = tagShaRes.ok ? tagShaRes.stdout.trim() : ''
+      if (candSha && candSha !== toSha) { fromTag = tag; fromTagSha = candSha }
+    }
   }
 
   if (fromTag) {
-    const fromSha = (await gitRun(repoRoot, ['rev-parse', '--verify', `${fromTag}^{commit}`])).stdout.trim()
     return {
-      from: fromTag, fromSha, fromMode: 'auto-tag', to: targetRev, toSha,
-      rangeSpec: `${fromTag}..${targetRev}`, diffBaseSha: fromSha, isInitialRelease: false, isShallow,
+      from: fromTag, fromSha: fromTagSha, fromMode: 'auto-tag', to: targetRev, toSha,
+      rangeSpec: `${fromTag}..${targetRev}`, diffBaseSha: fromTagSha, isInitialRelease: false, isShallow,
     }
   }
 
@@ -113,9 +130,10 @@ async function resolveBaseAndRange(repoRoot, gitDir, opts) {
   }
 }
 
-async function detectTagPrefix(repoRoot, fromTag) {
+async function detectTagPrefix(repoRoot, fromTag, gitDir = null) {
   if (fromTag && /^v\d/i.test(fromTag)) return 'v'
   if (fromTag && /^\d/.test(fromTag)) return ''
+  if (hasAnyTagFast(gitDir) === false) return 'v'
   const tags = await gitRun(repoRoot, ['tag', '--list', '--sort=-creatordate'])
   if (tags.ok && tags.stdout) {
     for (const t of tags.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
@@ -173,45 +191,56 @@ function parseGradleVersion(text) {
   return /^\s*version\s*=\s*["']([^"']+)["']/m.exec(text)?.[1]?.trim() ?? null
 }
 
-async function detectPackageManifestVersions(repoRoot, rev, dirRel, manifests) {
+async function detectPackageManifestVersions(repoRoot, rev, dirRel, manifests, treeSet = null, gitDir = null, blobMap = null) {
   const out = []
   const publicPaths = new Set()
   const prefix = dirRel ? `${dirRel}/` : ''
   const pkgInfo = { pkg: null }
-
-  if (!dirRel) {
-    const skillVer = parseSkillMdVersion(await readFileAtRev(repoRoot, rev, 'SKILL.md'))
-    if (skillVer) out.push({ file: 'SKILL.md', field: 'metadata.version', version: skillVer, package: 'root', dirRel: '' })
+  const readIfPresent = (relPath) => {
+    if (treeSet && !treeSet.has(relPath)) return Promise.resolve(undefined)
+    return readFileAtRev(repoRoot, rev, relPath, gitDir, blobMap)
   }
 
-  const pkg = parseJsonStr(await readFileAtRev(repoRoot, rev, `${prefix}package.json`))
+  const csManifests = manifests.filter((m) => /\.csproj$/i.test(m))
+  const gradleFiles = ['build.gradle', 'build.gradle.kts'].filter((gf) => manifests.includes(gf))
+  const [skillTxt, pkgTxt, pyTxt, cargoTxt, manTxt, pomTxt, gradleTxts, csTxts] = await Promise.all([
+    !dirRel ? readIfPresent('SKILL.md') : Promise.resolve(undefined),
+    readIfPresent(`${prefix}package.json`),
+    readIfPresent(`${prefix}pyproject.toml`),
+    readIfPresent(`${prefix}Cargo.toml`),
+    readIfPresent(`${prefix}manifest.json`),
+    manifests.includes('pom.xml') ? readIfPresent(`${prefix}pom.xml`) : Promise.resolve(undefined),
+    Promise.all(gradleFiles.map(async (gf) => [gf, await readIfPresent(`${prefix}${gf}`)])),
+    Promise.all(csManifests.map(async (mf) => [mf, await readIfPresent(`${prefix}${mf}`)])),
+  ])
+
+  const skillVer = parseSkillMdVersion(skillTxt)
+  if (skillVer) out.push({ file: 'SKILL.md', field: 'metadata.version', version: skillVer, package: 'root', dirRel: '' })
+
+  const pkg = parseJsonStr(pkgTxt)
   if (pkg) {
     pkgInfo.pkg = pkg
     for (const p of collectPackagePublicPaths(pkg, dirRel)) publicPaths.add(p)
     if (pkg.version) out.push({ file: `${prefix}package.json`, field: 'version', version: String(pkg.version), package: pkg.name || dirRel || 'root', dirRel })
   }
 
-  const pyVer = parseTomlSectionVersion(await readFileAtRev(repoRoot, rev, `${prefix}pyproject.toml`), ['project', 'tool.poetry'])
+  const pyVer = parseTomlSectionVersion(pyTxt, ['project', 'tool.poetry'])
   if (pyVer) out.push({ file: `${prefix}pyproject.toml`, field: 'version', version: pyVer, package: dirRel || 'root', dirRel })
 
-  const cargoVer = parseTomlSectionVersion(await readFileAtRev(repoRoot, rev, `${prefix}Cargo.toml`), ['package'])
+  const cargoVer = parseTomlSectionVersion(cargoTxt, ['package'])
   if (cargoVer) out.push({ file: `${prefix}Cargo.toml`, field: 'package.version', version: cargoVer, package: dirRel || 'root', dirRel })
 
-  const man = parseJsonStr(await readFileAtRev(repoRoot, rev, `${prefix}manifest.json`))
+  const man = parseJsonStr(manTxt)
   if (man?.version) out.push({ file: `${prefix}manifest.json`, field: 'version', version: String(man.version), package: man.name || dirRel || 'root', dirRel })
 
-  if (manifests.includes('pom.xml')) {
-    const pomVer = parsePomVersion(await readFileAtRev(repoRoot, rev, `${prefix}pom.xml`))
-    if (pomVer) out.push({ file: `${prefix}pom.xml`, field: 'version', version: pomVer, package: dirRel || 'root', dirRel })
+  const pomVer = parsePomVersion(pomTxt)
+  if (pomVer) out.push({ file: `${prefix}pom.xml`, field: 'version', version: pomVer, package: dirRel || 'root', dirRel })
+
+  for (const [gf, gTxt] of gradleTxts) {
+    const gv = parseGradleVersion(gTxt)
+    if (gv) out.push({ file: `${prefix}${gf}`, field: 'version', version: gv, package: dirRel || 'root', dirRel })
   }
-  for (const gf of ['build.gradle', 'build.gradle.kts']) {
-    if (manifests.includes(gf)) {
-      const gv = parseGradleVersion(await readFileAtRev(repoRoot, rev, `${prefix}${gf}`))
-      if (gv) out.push({ file: `${prefix}${gf}`, field: 'version', version: gv, package: dirRel || 'root', dirRel })
-    }
-  }
-  for (const mf of manifests.filter((m) => /\.csproj$/i.test(m))) {
-    const csTxt = await readFileAtRev(repoRoot, rev, `${prefix}${mf}`)
+  for (const [mf, csTxt] of csTxts) {
     const cv = csTxt ? /<Version>\s*([^<\s]+)\s*<\/Version>/i.exec(csTxt)?.[1]?.trim() : null
     if (cv) out.push({ file: `${prefix}${mf}`, field: 'Version', version: cv, package: dirRel || mf, dirRel })
   }
@@ -219,17 +248,32 @@ async function detectPackageManifestVersions(repoRoot, rev, dirRel, manifests) {
   return { sources: out, pkg: pkgInfo.pkg, publicPaths }
 }
 
-async function detectVersionSources(repoRoot, rev) {
+async function detectVersionSources(repoRoot, rev, gitDir = null) {
   const discovery = discoverWorkspacePackages(repoRoot)
+  const lsRes = await gitRunBuffer(repoRoot, ['ls-tree', '-r', '-z', rev])
+  const treeSet = lsRes.ok ? new Set() : null
+  const blobMap = lsRes.ok ? new Map() : null
+  if (lsRes.ok) {
+    for (const rec of lsRes.stdout.toString('utf8').split('\0')) {
+      const tab = rec.indexOf('\t')
+      if (tab <= 0) continue
+      const file = posixPath(rec.slice(tab + 1))
+      const sha = rec.slice(0, tab).trim().split(/\s+/).at(-1)
+      if (file) { treeSet.add(file); if (sha) blobMap.set(file, sha) }
+    }
+  }
   const rootManifests = discovery.packages.find((p) => p.dirRel === '')?.manifests ?? ['package.json', 'pyproject.toml', 'Cargo.toml', 'manifest.json']
-  const rootRes = await detectPackageManifestVersions(repoRoot, rev, '', rootManifests)
+  const rootRes = await detectPackageManifestVersions(repoRoot, rev, '', rootManifests, treeSet, gitDir, blobMap)
   const rootSources = rootRes.sources
   const allPublicPaths = new Set(rootRes.publicPaths)
   const workspacePackages = []
 
-  for (const pkg of discovery.packages) {
-    if (!pkg.dirRel) continue
-    const subRes = await detectPackageManifestVersions(repoRoot, rev, pkg.dirRel, pkg.manifests)
+  const subResults = await Promise.all(
+    discovery.packages
+      .filter((pkg) => Boolean(pkg.dirRel))
+      .map((pkg) => detectPackageManifestVersions(repoRoot, rev, pkg.dirRel, pkg.manifests, treeSet, gitDir, blobMap)),
+  )
+  for (const subRes of subResults) {
     for (const p of subRes.publicPaths) allPublicPaths.add(p)
     for (const s of subRes.sources) workspacePackages.push(s)
   }
@@ -240,6 +284,7 @@ async function detectVersionSources(repoRoot, rev) {
     sources: rootSources.length > 0 ? rootSources : workspacePackages,
     pkg: rootRes.pkg,
     pkgPublicPaths: allPublicPaths,
+    blobMap,
   }
 }
 
@@ -499,7 +544,7 @@ function extractDocTitleAndSummary(text, fallback) {
   return { title, summary: picked.slice(0, 2).join(' ').slice(0, 180) }
 }
 
-async function collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles) {
+async function collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles, gitDir = null, blobMap = null) {
   const specsPrefix = posix.join('docs', 'specs') + '/'
   const archiveSpecsPrefix = posix.join('docs', 'archive', 'specs') + '/'
   const archiveTodoPrefix = posix.join('docs', 'archive', 'todo') + '/'
@@ -509,10 +554,10 @@ async function collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles) {
   for (const item of netChangedFiles) {
     if (item.status === 'D') continue
     if ((item.file.startsWith(specsPrefix) || item.file.startsWith(archiveSpecsPrefix)) && item.file.endsWith('.md')) {
-      const curText = await readFileAtRev(repoRoot, range.toSha, item.file)
+      const curText = await readFileAtRev(repoRoot, range.toSha, item.file, gitDir, blobMap)
       if (!curText || !/^\s*(?:[-*]\s*)?(?:status|implemented)\s*:\s*(?:implemented|true)\b/im.test(curText)) continue
       let alreadyImplemented = false
-      if (range.fromSha) {
+      if (range.fromSha && item.status !== 'A') {
         const oldText = await readFileAtRev(repoRoot, range.fromSha, item.file)
         if (oldText && /^\s*(?:[-*]\s*)?(?:status|implemented)\s*:\s*(?:implemented|true)\b/im.test(oldText)) alreadyImplemented = true
       }
@@ -521,7 +566,7 @@ async function collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles) {
         implementedSpecs.push({ file: item.file, title: meta.title, summary: meta.summary })
       }
     } else if (item.file.startsWith(archiveTodoPrefix) && item.file.endsWith('.md')) {
-      const curText = await readFileAtRev(repoRoot, range.toSha, item.file)
+      const curText = await readFileAtRev(repoRoot, range.toSha, item.file, gitDir, blobMap)
       if (!curText) continue
       const meta = extractDocTitleAndSummary(curText, posix.basename(item.file, '.md'))
       archivedOutcomes.push({ file: item.file, title: meta.title, summary: meta.summary })
@@ -587,7 +632,8 @@ export async function handleReleasePrep(repoRoot, mainRoot, gitDir, isGit, opts)
     process.stderr.write('Error: `release-prep` requires a git repository.\n')
     return 1
   }
-  if (!(await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok) {
+  const fastHeadOid = readHeadFast(resolveGitDirFast(repoRoot), gitDir)?.oid ?? null
+  if (!fastHeadOid && !(await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok) {
     process.stderr.write('Error: repository has no commits yet.\n')
     return 1
   }
@@ -600,7 +646,8 @@ export async function handleReleasePrep(repoRoot, mainRoot, gitDir, isGit, opts)
 
   let requestedVersion = null
   let normalizedVersion = null
-  const tagPrefix = await detectTagPrefix(repoRoot, range.from)
+  const effectiveGitDir = gitDir ?? resolveGitDirFast(repoRoot)
+  const tagPrefix = await detectTagPrefix(repoRoot, range.from, effectiveGitDir)
   let targetTag = null
   if (opts.version !== undefined) {
     requestedVersion = String(opts.version).trim()
@@ -612,7 +659,7 @@ export async function handleReleasePrep(repoRoot, mainRoot, gitDir, isGit, opts)
     targetTag = /^v/i.test(requestedVersion) ? `v${normalizedVersion}` : `${tagPrefix}${normalizedVersion}`
   }
 
-  const { rootSources, workspacePackages, sources, pkgPublicPaths } = await detectVersionSources(repoRoot, range.toSha)
+  const { rootSources, workspacePackages, sources, pkgPublicPaths, blobMap } = await detectVersionSources(repoRoot, range.toSha, effectiveGitDir)
   const currentVersion = sources[0]?.version ?? null
   const parityCheckSet = rootSources.length > 0 ? rootSources : sources
   const distinctVers = [...new Set(parityCheckSet.map((s) => s.version.replace(/^v/i, '')))]
@@ -651,8 +698,11 @@ export async function handleReleasePrep(repoRoot, mainRoot, gitDir, isGit, opts)
     else userFacingCandidates.push(entry)
   }
 
-  const breakingSignals = await extractBreakingSignals(repoRoot, range, netChangedFiles, commits)
-  const { implementedSpecs, archivedOutcomes } = await collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles)
+  const [breakingSignals, docOutcomes] = await Promise.all([
+    extractBreakingSignals(repoRoot, range, netChangedFiles, commits),
+    collectSpecsAndArchivedTodos(repoRoot, range, netChangedFiles, effectiveGitDir, blobMap),
+  ])
+  const { implementedSpecs, archivedOutcomes } = docOutcomes
 
   const publicSurfaceTouched = []
   const unaccountedPublicFiles = []

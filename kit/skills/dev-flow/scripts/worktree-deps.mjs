@@ -18,6 +18,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { canonicalPath, isMainModule, posixPath, readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, writeAtomic } from '../../lib/git.mjs'
+import { isPathInGitIndexFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages } from '../../lib/profile.mjs'
 
 const NODE_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
@@ -411,12 +412,11 @@ export function unmountSharedDeps(mainRoot, wtRoot) {
       if (!st || !st.isSymbolicLink()) continue
 
       const relPosix = posixPath(rel)
-      const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', relPosix], {
-        cwd: wtAbs,
-        stdio: 'ignore',
-        windowsHide: true,
-      })
-      if (tracked.status === 0) {
+      const fastTracked = isPathInGitIndexFast(wtAbs, relPosix)
+      const isTracked = fastTracked !== null
+        ? fastTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', relPosix], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isTracked) {
         skipped.push({ path: relPosix, reason: 'tracked-in-git' })
         continue
       }

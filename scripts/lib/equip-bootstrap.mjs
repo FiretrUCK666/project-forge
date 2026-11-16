@@ -9,7 +9,8 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -262,7 +263,7 @@ export async function generateInitialBootstrappedAgents(root, { stack = 'univers
 
   const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates', 'agents-project.md')
   const template = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n')
-  const facts = await survey(root)
+  const facts = await survey(root, { fastUnbornStatus: true })
   const manifestPath = join(root, '.agents', 'skills', '.pf-manifest.json')
   const manifestRaw = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : null
   const manifestObj = manifestRaw ? JSON.parse(manifestRaw) : null
@@ -279,6 +280,17 @@ export async function generateInitialBootstrappedAgents(root, { stack = 'univers
     writeAtomic(manifestPath, `${JSON.stringify(manifestObj, null, 2)}\n`)
   }
   return { created: true, bytes: Buffer.byteLength(finalAgents, 'utf8') }
+}
+
+let emptyBootstrapTplDir
+function getEmptyBootstrapTplDir() {
+  if (!emptyBootstrapTplDir) {
+    emptyBootstrapTplDir = mkdtempSync(join(tmpdir(), 'pf-boot-gtpl-'))
+    process.on('exit', () => {
+      try { rmSync(emptyBootstrapTplDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+    })
+  }
+  return emptyBootstrapTplDir
 }
 
 /** 初始化空目录（或仅含 README/LICENSE/.github/.agents 等起步文件）的通用治理基线。 */
@@ -324,8 +336,9 @@ export function bootstrapEmpty(targetDir, {
 
   let gitInitialized = false
   if (!dryRun && !existsSync(join(root, '.git'))) {
-    let initRes = spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root, windowsHide: true })
-    if (initRes.status !== 0) initRes = spawnSync('git', ['init', '-q'], { cwd: root, windowsHide: true })
+    const tplArg = `--template=${getEmptyBootstrapTplDir()}`
+    let initRes = spawnSync('git', ['init', '-q', tplArg, '-b', 'main'], { cwd: root, windowsHide: true })
+    if (initRes.status !== 0) initRes = spawnSync('git', ['init', '-q', tplArg], { cwd: root, windowsHide: true })
     gitInitialized = initRes.status === 0
   }
 
@@ -365,17 +378,30 @@ export function sortObjectKeys(obj) {
   return out
 }
 
+const kitFileWalkCache = new Map()
 export function walkKitFiles(kitDir) {
   const map = new Map()
   if (!existsSync(kitDir)) return map
+  const absKitDir = resolve(kitDir)
+  let prevMap = kitFileWalkCache.get(absKitDir)
+  if (!prevMap) { prevMap = new Map(); kitFileWalkCache.set(absKitDir, prevMap) }
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.name === '.pf-manifest.json' || isMacOsMetadata(entry.name)) continue
       const abs = join(dir, entry.name)
       if (entry.isDirectory()) { visit(abs); continue }
       if (!entry.isFile()) continue
+      const rel = posixPath(relative(kitDir, abs))
+      const st = statSync(abs)
+      const cached = prevMap.get(abs)
+      if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+        map.set(rel, cached.val)
+        continue
+      }
       const buf = normalizeWriteBuffer(readFileSync(abs))
-      map.set(posixPath(relative(kitDir, abs)), { abs, buf, sha256: sha256Buffer(buf) })
+      const val = { abs, buf, sha256: sha256Buffer(buf) }
+      prevMap.set(abs, { mtimeMs: st.mtimeMs, size: st.size, val })
+      map.set(rel, val)
     }
   }
   visit(kitDir)

@@ -64,7 +64,7 @@
 
 仓库严格划分为**产品层**与**自用层**两个平面，通过 `.gitattributes`（`export-ignore`）与 `scripts/lib/protocol.mjs`（`REPO_ONLY_DIRS`、`REPO_ONLY_FILES`）双端对齐。在产品层内部，按以下四层正交边界收敛演进：
 
-1. **L1 基础原语层（`kit/skills/lib/exec.mjs`、`git.mjs`、`git-fast.mjs`、`scripts/zip.mjs`、`backup.mjs`）**：跨平台无弹窗命令与 Windows `.cmd`/`.bat` 解析、Worktree 共享路径、`withFileLock`（`O_EXCL`）、`computeWorktreeEnv`、`.git/*.lock` 指数退避重试、零子进程配置/ref 快速解析与纯 JS `.zip` 读写。
+1. **L1 基础原语层（`kit/skills/lib/exec.mjs`、`git.mjs`、`git-fast.mjs`、`git-status-fast.mjs`、`scripts/zip.mjs`、`backup.mjs`）**：跨平台无弹窗命令与 Windows `.cmd`/`.bat` 解析、Worktree 共享路径、`withFileLock`（`O_EXCL`）、`computeWorktreeEnv`、`.git/*.lock` 指数退避重试、零子进程配置/ref/洁净状态快速解析与纯 JS `.zip` 读写。
 2. **L2 环境与拓扑抽象层（`kit/skills/lib/platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs`、`profile-sniffer.mjs`、`profile.mjs`、`docs.mjs`）**：双端单源惰性平台探测、统一 13 方法 `TaskBackend`、外部互链/堆叠图谱与单源三层优先级命令嗅探。
 3. **L3 纯策略与状态机引擎层（`kit/skills/lib/workflow-policy.mjs`、`static-gates.mjs`、`ledger.mjs`）**：无副作用纯函数确定性计算三正交风险策略、分层 `evidence.json` 防旁路校验、无 CI 低风险静态必检与 `next` 单入口状态路由（含 `merge-queue` 冲突退回再路由）。
 4. **L4 薄 CLI 入口层与安装器层（`kit/skills/*/scripts/` 与 `scripts/*.mjs`）**：调用 L3 决策与 L1/L2 副作用，含 `flow-sync.mjs`、`flow-batch.mjs`、`flow-cleanup.mjs`；首次锻造专用逻辑留驻 `scripts/lib/` 绝不反向进入 `kit/skills/lib/`。
@@ -111,14 +111,14 @@ flowchart TB
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（`reviewProject`、`readDecisions`）与交棒扫描（`VERIFY_EXIT` 0/1/3/4） |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 全目录核验原子自更新（支持代理/`GH_TOKEN`/回滚）与双语 README 目录同步 |
 | `scripts/lib/` | 产品层 | 首次锻造/升级/交棒专用库（含安装期模板与渲染、`scripts/lib/platform/` 平台适配器层：`index.mjs`、`registry.mjs`、`github.mjs`、`github-probe.mjs`、`github-client.mjs`） |
-| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（`shared.mjs` 汇总导出 `cli.mjs`、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`workflow-policy.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs`） |
+| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（内置 `git-status-fast.mjs` 状态与 Worktree 快速探针，`shared.mjs` 汇总导出 `cli.mjs`、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`workflow-policy.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs`） |
 | `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs`，配合 `doc-audit.mjs`） |
 | `kit/skills/dev-flow/` | 产品层 | 隔离流转、并行调度与堆叠同步（`flow.mjs`、`flow-next.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`flow-cleanup.mjs`、`flow-sync.mjs`、`flow-batch.mjs`、`flow-trial-merge.mjs`、`worktree-deps.mjs`） |
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步、六锁硬拦截与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-locks.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层、跨版本采集与复盘补丁（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`govern-retro.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-m2.mjs`、`fixtures-m3.mjs`、`fixtures-m4.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
+| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-m2.mjs`、`fixtures-m3.mjs`、`fixtures-m4.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 

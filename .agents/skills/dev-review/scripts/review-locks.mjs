@@ -5,10 +5,15 @@
  */
 
 import { createHash } from 'node:crypto'
+import { join, resolve } from 'node:path'
 
-import { gitDiffNameStatusZ, gitRun, gitRunBuffer, posixPath } from '../../lib/git.mjs'
+import { gitRun, gitRunBuffer, posixPath, readTextSafe } from '../../lib/git.mjs'
+import {
+  getCachedRangeDiffCommits, isAncestorLinearFast, parseRawAndUnifiedDiff,
+  resolveGitDirFast, setCachedRangeDiffCommits,
+} from '../../lib/git-fast.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { detectGateWeakening, evaluateArchRules, splitDiffByFile } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile } from '../../lib/static-gates.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
@@ -74,6 +79,8 @@ export function normalizeMustFixObj(obj, idx) {
     endLine,
     summary,
     fingerprint: fp,
+    ...(obj.rootCause ? { rootCause: String(obj.rootCause).trim() } : {}),
+    ...(obj.fixHint ? { fixHint: String(obj.fixHint).trim() } : {}),
     gateFailure: Boolean(obj.gateFailure),
     empiricalFailure: Boolean(obj.empiricalFailure),
     status: obj.status ?? 'open',
@@ -178,14 +185,33 @@ function collectFilesFromShowNameStatusZ(buf, fileRanges) {
   }
 }
 
+const scopeRangeCache = new Map()
+
 export async function collectIncrementalScope(targetRoot, { prevHead, headSha, baseSha, baseBranch, prevRoundBaseSha, currentBaseSha, roundBaseSha } = {}) {
   if (!targetRoot || !headSha || headSha === 'UNBORN') {
     return { available: false, range: null, fileRanges: new Map() }
   }
+  const shaHexRe = /^[0-9a-f]{40,64}$/i
+  if (prevHead && shaHexRe.test(prevHead) && shaHexRe.test(headSha)) {
+    const cacheKey = `${targetRoot}\0${prevHead}\0${headSha}\0${baseSha ?? ''}`
+    if (scopeRangeCache.has(cacheKey)) return scopeRangeCache.get(cacheKey)
+  }
+  const saveScopeCache = (result) => {
+    if (result?.available && prevHead && shaHexRe.test(prevHead) && shaHexRe.test(headSha)) {
+      const cacheKey = `${targetRoot}\0${prevHead}\0${headSha}\0${baseSha ?? ''}`
+      if (scopeRangeCache.size >= 32) scopeRangeCache.clear()
+      scopeRangeCache.set(cacheKey, result)
+    }
+    return result
+  }
   let range = null
   if (prevHead && prevHead !== 'UNBORN') {
-    const anc = await gitRun(targetRoot, ['merge-base', '--is-ancestor', prevHead, headSha])
-    if (anc.ok) range = `${prevHead}..${headSha}`
+    const wtGitDir = resolveGitDirFast(targetRoot)
+    const cdTxt = wtGitDir ? readTextSafe(join(wtGitDir, 'commondir')) : null
+    const commonDir = wtGitDir ? (cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir) : null
+    const fastAnc = commonDir ? isAncestorLinearFast(commonDir, prevHead, headSha) : null
+    const ancOk = fastAnc !== null ? fastAnc : (await gitRun(targetRoot, ['--no-optional-locks', 'merge-base', '--is-ancestor', prevHead, headSha])).ok
+    if (ancOk) range = `${prevHead}..${headSha}`
     else {
       const oldBase = prevRoundBaseSha ?? roundBaseSha?.prevBaseSha
       const newBase = currentBaseSha ?? roundBaseSha?.newBaseSha ?? baseSha
@@ -193,53 +219,66 @@ export async function collectIncrementalScope(targetRoot, { prevHead, headSha, b
         if (oldBase === prevHead) {
           range = `${newBase}..${headSha}`
         } else {
-          const rdRes = await gitRun(targetRoot, [
-            'range-diff', '--no-color',
-            `${oldBase}..${prevHead}`,
-            `${newBase}..${headSha}`,
-          ])
-          if (rdRes.ok) {
-            const commits = parseRangeDiffNewCommits(rdRes.stdout)
+          const oldR = `${oldBase}..${prevHead}`
+          const newR = `${newBase}..${headSha}`
+          const shaRangeOk = Boolean(commonDir && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR))
+          let commits = shaRangeOk ? getCachedRangeDiffCommits(commonDir, oldR, newR) : null
+          if (!commits) {
+            const rdRes = await gitRun(targetRoot, ['--no-optional-locks', 'range-diff', '--no-color', oldR, newR])
+            if (rdRes.ok) {
+              commits = parseRangeDiffNewCommits(rdRes.stdout)
+              if (shaRangeOk) setCachedRangeDiffCommits(commonDir, oldR, newR, commits)
+            }
+          }
+          if (commits) {
             const label = `range-diff (${commits.length} changed/new commit(s))`
-            if (commits.length === 0) return { available: true, range: label, fileRanges: new Map() }
+            if (commits.length === 0) return saveScopeCache({ available: true, range: label, fileRanges: new Map() })
+            if (commits.length === 1) {
+              const oneRes = await gitRunBuffer(targetRoot, ['--no-optional-locks', 'show', '--format=tformat:', '--raw', '--unified=0', '--no-ext-diff', '--no-color', commits[0]], { maxBuffer: 32 * 1024 * 1024 })
+              if (oneRes.ok) {
+                const { entries: rawEntries, diffText } = parseRawAndUnifiedDiff(oneRes.stdout)
+                const fileRanges = parseDiffHunkRanges(diffText, { contextPadding: 3 })
+                for (const e of rawEntries) { const f = normRel(e.file); if (f && !fileRanges.has(f)) fileRanges.set(f, []) }
+                return saveScopeCache({ available: true, range: label, fileRanges })
+              }
+            }
             const [showDiff, showNs] = await Promise.all([
-              gitRunBuffer(targetRoot, ['show', '--format=tformat:', '--unified=0', '--no-ext-diff', '--no-color', ...commits], { maxBuffer: 32 * 1024 * 1024 }),
-              gitRunBuffer(targetRoot, ['show', '--format=tformat:', '--name-status', '-z', ...commits]),
+              gitRunBuffer(targetRoot, ['--no-optional-locks', 'show', '--format=tformat:', '--unified=0', '--no-ext-diff', '--no-color', ...commits], { maxBuffer: 32 * 1024 * 1024 }),
+              gitRunBuffer(targetRoot, ['--no-optional-locks', 'show', '--format=tformat:', '--name-status', '-z', ...commits]),
             ])
             if (showDiff.ok) {
               const fileRanges = parseDiffHunkRanges(showDiff.stdout.toString('utf8').replace(/\r\n/g, '\n'), { contextPadding: 3 })
               if (showNs.ok) collectFilesFromShowNameStatusZ(showNs.stdout, fileRanges)
-              return { available: true, range: label, fileRanges }
+              return saveScopeCache({ available: true, range: label, fileRanges })
             }
           }
         }
       }
     }
-    if (!range && baseSha && (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok) range = `${baseSha}..${headSha}`
-  } else if (baseSha && (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok) {
-    range = `${baseSha}..${headSha}`
+    if (!range && baseSha && (shaHexRe.test(baseSha) || (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok)) range = `${baseSha}..${headSha}`
+  } else if (baseSha) {
+    const fastOk = shaHexRe.test(String(baseSha)) || (await gitRun(targetRoot, ['rev-parse', '--verify', baseSha])).ok
+    if (fastOk) range = `${baseSha}..${headSha}`
   }
 
   if (!range && baseBranch) {
-    const mb = await gitRun(targetRoot, ['merge-base', baseBranch, headSha])
+    const mb = await gitRun(targetRoot, ['--no-optional-locks', 'merge-base', baseBranch, headSha])
     if (mb.ok && mb.stdout.trim()) range = `${mb.stdout.trim()}..${headSha}`
   }
   if (!range) return { available: false, range: null, fileRanges: new Map() }
 
-  const [diffRes, nsRes] = await Promise.all([
-    gitRunBuffer(targetRoot, ['diff', '--unified=0', '--no-ext-diff', '--no-color', range], { maxBuffer: 32 * 1024 * 1024 }),
-    gitDiffNameStatusZ(targetRoot, [range]),
-  ])
-  if (!diffRes.ok) return { available: false, range, fileRanges: new Map() }
+  const rawDiffRes = await gitRunBuffer(targetRoot, [
+    '--no-optional-locks', 'diff', '--raw', '--unified=0', '--no-ext-diff', '--no-color', range,
+  ], { maxBuffer: 32 * 1024 * 1024 })
+  if (!rawDiffRes.ok) return { available: false, range, fileRanges: new Map() }
 
-  const fileRanges = parseDiffHunkRanges(diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n'), { contextPadding: 3 })
-  if (nsRes.ok) {
-    for (const e of nsRes.entries) {
-      const f = normRel(e.file)
-      if (f && !fileRanges.has(f)) fileRanges.set(f, [])
-    }
+  const { entries: rawEntries, diffText } = parseRawAndUnifiedDiff(rawDiffRes.stdout)
+  const fileRanges = parseDiffHunkRanges(diffText, { contextPadding: 3 })
+  for (const e of rawEntries) {
+    const f = normRel(e.file)
+    if (f && !fileRanges.has(f)) fileRanges.set(f, [])
   }
-  return { available: true, range, fileRanges }
+  return saveScopeCache({ available: true, range, fileRanges })
 }
 
 /** 锁 A：历史轮次已触发停损且未经人类解锁时，硬阻断 Round 4+ pass/changes 绕过（退出码 4）。 */
@@ -358,14 +397,17 @@ export async function evaluatePassBlockers({
     const profile = parseAgentsProfile(mainRoot)
     if (targetRoot && (await hasCommits(targetRoot))) {
       const ref = ledger?.baseSha || ledger?.baseBranch
-      const filesRes = ref ? await gitDiffNameStatusZ(targetRoot, [`${ref}..HEAD`]) : { ok: false, entries: [] }
+      const filesRes = ref ? await gitDiffRawEntriesAndText(targetRoot, `${ref}..HEAD`) : { ok: false, entries: [] }
       const changedFiles = filesRes.ok ? filesRes.entries.filter((e) => e.status !== 'D').map((e) => e.file) : []
       if (profile.archRules?.length && changedFiles.length > 0) {
         const arch = evaluateArchRules(targetRoot, changedFiles, profile.archRules)
         if (!arch.ok) blockers.push(`--enforce-gates: 存在 ${arch.violations.length} 处 arch-rules 禁引违规`)
       }
       if (!humanApproved && !ledger?.humanApprovedStopLoss) {
-        const gw = await detectGateWeakening(targetRoot, ledger?.baseSha, ledger?.baseBranch)
+        const gw = await detectGateWeakening(targetRoot, ledger?.baseSha, ledger?.baseBranch, {
+          headSha,
+          nameStatusEntries: filesRes.ok ? filesRes.entries : undefined,
+        })
         if (gw.length > 0) blockers.push(`--enforce-gates: 检测到未授权的门禁弱化改动（${gw.map((h) => h.file).join(', ')}）`)
       }
     }

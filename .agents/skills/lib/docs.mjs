@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
+import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
 import { listTaskLedgers, writeTaskLedger } from './ledger.mjs'
 
 export const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
@@ -326,8 +327,11 @@ function replaceDocReferencesSinglePass(rawText, renameMap) {
 
 async function moveDocWithGit(repoRoot, oldRel, targetRel) {
   mkdirSync(dirname(join(repoRoot, targetRel)), { recursive: true })
-  const tracked = await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])
-  if (tracked.ok) {
+  const fastTracked = isPathInGitIndexFast(repoRoot, oldRel)
+  const isTracked = fastTracked !== null
+    ? fastTracked
+    : (hasDotGitInAncestors(repoRoot) ? (await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])).ok : false)
+  if (isTracked) {
     const mv = await gitRun(repoRoot, ['mv', oldRel, targetRel])
     if (!mv.ok) throw new Error(`移动文档失败（${oldRel} -> ${targetRel}）：${mv.stderr}`)
   } else {
@@ -750,7 +754,10 @@ export async function archiveCompletedDocsGroup(repoRoot, {
 
 export {
   buildArchivedDocPatch,
+  buildMergeComments,
+  buildReviewComments,
   buildStandardDocContent,
+  buildSubmitComments,
   checkMermaidLabelWidth,
   displayWidth,
   evaluateCoupledSync,

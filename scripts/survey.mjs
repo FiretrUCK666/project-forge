@@ -403,6 +403,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     sshHostMap: opts.sshHostMap,
     mcpAvailable: opts.mcpAvailable,
     offline: opts.offline,
+    fastUnbornStatus: opts.fastUnbornStatus === true,
   })
   const rawWs = scanWorkspaceRaw(root)
   const relFiles = rawWs.files.map((f) => f.rel)

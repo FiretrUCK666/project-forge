@@ -2,7 +2,7 @@
  * fixtures-helpers.mjs —— 行为断言共享沙盒夹具与执行辅助原语。
  */
 
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { textsOf, survey as runSurvey } from '../survey.mjs'
+import { tryFastNodeCommit, tryFastNodeInitialCommit } from './fixtures-git-fast.mjs'
 
 export const HERE = dirname(fileURLToPath(import.meta.url))
 export const SCRIPTS = resolve(HERE, '..')
@@ -81,9 +82,67 @@ export function gitSync(cwd, args, opts = {}) {
   })
 }
 
+let emptyGitTplDir
+let seedGitRepoDir
+let seedBareGitDir
+function getEmptyGitTemplateDir() {
+  if (!emptyGitTplDir) {
+    emptyGitTplDir = mkdtempSync(join(tmpdir(), 'pf-gtpl-'))
+    process.on('exit', () => {
+      try { rmSync(emptyGitTplDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+    })
+  }
+  return emptyGitTplDir
+}
+
+function getSeedGitDir() {
+  if (!seedGitRepoDir) {
+    const repo = mkdtempSync(join(tmpdir(), 'pf-gseed-'))
+    gitSync(repo, ['init', '-q', `--template=${getEmptyGitTemplateDir()}`])
+    appendFileSync(join(repo, '.git', 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
+    seedGitRepoDir = join(repo, '.git')
+    process.on('exit', () => {
+      try { rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+    })
+  }
+  return seedGitRepoDir
+}
+
+export function gitInitBare(dir) {
+  if (!seedBareGitDir) {
+    const bare = mkdtempSync(join(tmpdir(), 'pf-gbare-'))
+    gitSync(undefined, ['init', '--bare', '-q', `--template=${getEmptyGitTemplateDir()}`, bare])
+    appendFileSync(join(bare, 'config'), '[core]\n\tfsync = none\n[gc]\n\tauto = 0\n', 'utf8')
+    seedBareGitDir = bare
+    process.on('exit', () => {
+      try { rmSync(bare, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+    })
+  }
+  cpSync(seedBareGitDir, dir, { recursive: true })
+}
+
+export function gitCommitFast(dir, message, opts = {}) {
+  traceFixtureStage('git:commit-fast')
+  if (tryFastNodeCommit(dir, message, opts)) return
+  const args = ['-c', 'core.fsync=none']
+  if (opts.name) args.push('-c', `user.name=${opts.name}`)
+  if (opts.email) args.push('-c', `user.email=${opts.email}`)
+  if (Array.isArray(opts.files) && opts.files.length > 0) {
+    gitSync(dir, [...args, 'add', ...opts.files])
+    gitSync(dir, [...args, 'commit', '-qm', message])
+  } else if (opts.updateOnly) {
+    gitSync(dir, [...args, 'commit', '-qam', message])
+  } else {
+    gitSync(dir, [...args, 'add', '-A'])
+    gitSync(dir, [...args, 'commit', '-qm', message])
+  }
+}
+
 export function gitInit(dir, opts = {}) {
-  const initArgs = ['init', '-q', ...(opts.branch ? ['-b', opts.branch] : [])]
-  gitSync(dir, initArgs)
+  cpSync(getSeedGitDir(), join(dir, '.git'), { recursive: true })
+  if (opts.branch) {
+    writeFileSync(join(dir, '.git', 'HEAD'), `ref: refs/heads/${opts.branch}\n`, 'utf8')
+  }
   const cfgBlocks = []
   if (opts.name || opts.email) {
     cfgBlocks.push('[user]')
@@ -102,8 +161,10 @@ export function gitInit(dir, opts = {}) {
   if (opts.commit !== false) {
     const cName = opts.name || 't'
     const cEmail = opts.email || 't@t.t'
-    gitSync(dir, ['-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'add', '-A'])
-    gitSync(dir, ['-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'commit', '-qm', opts.message || 'init'])
+    const msg = opts.message || 'init'
+    if (tryFastNodeInitialCommit(dir, opts.branch, cName, cEmail, msg)) return
+    gitSync(dir, ['-c', 'core.fsync=none', '-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'add', '-A'])
+    gitSync(dir, ['-c', 'core.fsync=none', '-c', `user.name=${cName}`, '-c', `user.email=${cEmail}`, 'commit', '-qm', msg])
   }
 }
 

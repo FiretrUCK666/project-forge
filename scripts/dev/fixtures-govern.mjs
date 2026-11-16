@@ -4,7 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerGovernCases(cases) {
 cases.push(['review-pack.mjs：双轨门禁、arch-rules、tombstone/excuse 检出与 two-way/one-way 误伤防线', async () => {
@@ -113,38 +113,24 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     // 构造 4 态 worktree + 1 个 Revert 与 3 次高频修改提交给 sample
     gitSync(dir, ['checkout', '-qb', 'wt-merged'])
     writeFileSync(join(dir, 'src/merged.mjs'), 'export const m = 1\n')
-    gitSync(dir, ['add', '-A'])
-    gitSync(dir, ['commit', '-qm', 'merged commit'])
+    gitCommitFast(dir, 'merged commit')
     gitSync(dir, ['checkout', '-q', 'main'])
     gitSync(dir, ['merge', '--no-ff', 'wt-merged', '-qm', 'merge wt-merged'])
 
     gitSync(dir, ['checkout', '-qb', 'wt-squash'])
     writeFileSync(join(dir, 'src/sq.mjs'), 'export const sq = 1\n')
-    gitSync(dir, ['add', '-A'])
-    gitSync(dir, ['commit', '-qm', 'squash feat'])
+    gitCommitFast(dir, 'squash feat')
     gitSync(dir, ['checkout', '-q', 'main'])
     gitSync(dir, ['merge', '--squash', '-q', 'wt-squash'])
     gitSync(dir, ['commit', '-qm', 'squash feat onto main'])
 
-    for (let k = 1; k <= 3; k += 1) {
-      writeFileSync(join(dir, 'src/hot.mjs'), `export const h = ${k}\n`)
-      gitSync(dir, ['add', 'src/hot.mjs'])
-      gitSync(dir, ['commit', '-qm', `touch hot ${k}`])
-    }
-    writeFileSync(join(dir, 'src/hot.mjs'), 'export const h = 2\n')
-    gitSync(dir, ['add', 'src/hot.mjs'])
-    gitSync(dir, ['commit', '-qm', 'Revert "touch hot 3"'])
-
-    gitSync(dir, ['branch', 'wt-no-own', 'main'])
-    gitSync(dir, ['branch', 'wt-unmerged', 'main'])
     gitSync(dir, ['worktree', 'add', '-q', wtMerged, 'wt-merged'])
     gitSync(dir, ['worktree', 'add', '-q', wtSquash, 'wt-squash'])
-    gitSync(dir, ['worktree', 'add', '-q', wtNoOwn, 'wt-no-own'])
+    gitSync(dir, ['worktree', 'add', '-q', '-b', 'wt-no-own', wtNoOwn, 'main'])
     writeFileSync(join(wtNoOwn, 'wip.txt'), 'uncommitted note\n')
-    gitSync(dir, ['worktree', 'add', '-q', wtUnmerged, 'wt-unmerged'])
+    gitSync(dir, ['worktree', 'add', '-q', '-b', 'wt-unmerged', wtUnmerged, 'main'])
     writeFileSync(join(wtUnmerged, 'src/unmerged.mjs'), 'export const u = 1\n')
-    gitSync(wtUnmerged, ['add', '-A'])
-    gitSync(wtUnmerged, ['commit', '-qm', 'unique unmerged commit'])
+    gitCommitFast(wtUnmerged, 'unique unmerged commit')
 
     // 1. reconcile（4 态 worktree）+ audit 全类别扫描验证
     const rec = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['reconcile', dir, '--json'])
@@ -176,9 +162,6 @@ cases.push(['govern-audit.mjs：fence-aware 死链接、注释死代码、上帝
     }
     return true
   } finally {
-    for (const wt of [wtMerged, wtSquash, wtNoOwn, wtUnmerged]) {
-      gitSync(dir, ['worktree', 'remove', '--force', wt])
-    }
     rmTree(dir)
   }
 }])
@@ -189,12 +172,10 @@ cases.push(['govern-audit.mjs：record -> cluster 规则下沉候选与 sample �
   try {
     for (let i = 1; i <= 3; i += 1) {
       writeFileSync(join(dir, 'src/hot.mjs'), `export const h = ${i}\n`)
-      gitSync(dir, ['add', 'src/hot.mjs'])
-      gitSync(dir, ['commit', '-qm', `hot edit ${i}`])
+      gitCommitFast(dir, `touch hot ${i}`, { updateOnly: true, name: 't', email: 't@t.t' })
     }
     writeFileSync(join(dir, 'src/rev.mjs'), 'export const r = 1\n')
-    gitSync(dir, ['add', 'src/rev.mjs'])
-    gitSync(dir, ['commit', '-qm', 'add rev'])
+    gitCommitFast(dir, 'add rev', { files: ['src/rev.mjs'], name: 't', email: 't@t.t' })
     gitSync(dir, ['revert', '--no-edit', 'HEAD'])
 
     const r1 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['record', dir, '--module', 'src/ui', '--pattern', 'arch-boundary', '--message', 'direct db import', '--json'])
@@ -236,16 +217,12 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
   const tagRes = gitSync(multiDir, ['tag', 'v1.0.0'], { encoding: 'utf8' })
   if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`)
 
-  const commitIn = (dir, files, msg) => {
+  const commitIn = (dir, files, msg, hasNew = false) => {
     for (const [r, c] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, r)), { recursive: true })
       writeFileSync(join(dir, r), c)
     }
-    const opts = { cwd: dir, encoding: 'utf8' }
-    const addRes = gitSync(undefined, ['add', '-A'], opts)
-    if (addRes.status !== 0) throw new Error(`git add failed: ${addRes.stderr}`)
-    const cRes = gitSync(undefined, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', msg], opts)
-    if (cRes.status !== 0) throw new Error(`git commit failed (${msg}): ${cRes.stderr}`)
+    gitCommitFast(dir, msg, { updateOnly: !hasNew, name: 't', email: 't@t.t' })
   }
 
   commitIn(multiDir, { 'src/core.mjs': 'export const core = 2\n' }, 'feat: C9 Wave 4 support streaming exports')
@@ -260,19 +237,10 @@ cases.push(['govern-audit.mjs release-prep：多版本跳号采集、噪音过�
   commitIn(multiDir, {
     'docs/specs/261114-stream.md': '# 流式导出规范\n\nStatus: implemented\n\n支持大文件流式导出输出。\n',
     'docs/archive/todo/261114-stream.md': '# 任务单：流式导出\n\n## 完成后的记录\n\n已完成流式导出并同步文档。\n',
-  }, 'docs: record stream spec and archive todo')
+  }, 'docs: record stream spec and archive todo', true)
   commitIn(multiDir, { 'test/core.test.mjs': 'export const t = 2\n' }, 'feat: add test assertions for streaming')
   commitIn(multiDir, { '.gitignore': 'node_modules/\ntmp/\n' }, 'chore: ignore tmp files')
   commitIn(multiDir, { 'bin/cli.mjs': 'export function runCli() { return 2 }\n' }, 'update')
-
-  const changelogDir = tmpProject({
-    'pyproject.toml': '[project]\nname = "py-app"\nversion = "0.2.0"\nrequires-python = ">=3.11"\n',
-    'CHANGELOG.md': '# Changelog\n',
-    'README.md': '# py-app\n',
-  })
-  gitInit(changelogDir)
-
-  const nonGitDir = tmpProject({ 'README.md': '# plain\n' })
 
   try {
     const prepJsonRes = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['release-prep', multiDir, '--version', '3.0.0', '--json'])
@@ -443,8 +411,7 @@ cases.push(['测试分层控频与反膨胀治理：tests.* 正反双向检出�
       '```',
       '',
     ].join('\n'))
-    gitSync(posDir, ['add', 'AGENTS.md'])
-    gitSync(posDir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add quick-test target'])
+    gitCommitFast(posDir, 'add quick-test target', { files: ['AGENTS.md'], name: 't', email: 't@t.t' })
     const startVerify = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c31-v1', '--case', '1', '--slug', 'verify-target', '--dir', posDir])
     if (startVerify.status !== 0) return `flow start c31-v1 失败：${startVerify.stderr}`
     const verTargetRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c31-v1', '--tier', 'quick', '--target', 'test/sub.test.mjs', '--dir', posDir])

@@ -410,23 +410,77 @@ export function execSafe(cmd, args = [], opts = {}) {
  * 执行项目自备验证命令字符串（来自 Dev Profile 或用户 --cmd）。
  * 超时时按平台杀整棵进程树（Windows taskkill /T /F，POSIX detached + 进程组 -pid）。
  */
+function tryParseDirectNodeArgs(commandStr) {
+  const s = String(commandStr ?? '').trim()
+  if (!s || /[&|;<>~*?$\\`%\r\n!']/.test(s)) return null
+  const tokens = []
+  let i = 0
+  while (i < s.length) {
+    while (i < s.length && (s[i] === ' ' || s[i] === '\t')) i += 1
+    if (i >= s.length) break
+    let tok = ''
+    if (s[i] === '"') {
+      i += 1
+      const end = s.indexOf('"', i)
+      if (end < 0) return null
+      tok = s.slice(i, end)
+      i = end + 1
+      if (i < s.length && s[i] !== ' ' && s[i] !== '\t') return null
+    } else {
+      const start = i
+      while (i < s.length && s[i] !== ' ' && s[i] !== '\t') {
+        if (s[i] === '"' || s[i] === '(' || s[i] === ')') return null
+        i += 1
+      }
+      tok = s.slice(start, i)
+    }
+    tokens.push(tok)
+  }
+  if (tokens.length === 0) return null
+  if (tokens[0] !== 'node' && tokens[0] !== process.execPath) return null
+  return tokens.slice(1)
+}
+
 export function execShellCommand(commandStr, cwd, opts = {}) {
   return new Promise((done) => {
     if (cwd && !existsSync(cwd)) {
       done({ ok: false, code: 1, timedOut: false, stdout: '', stderr: `工作目录不存在：${cwd}` })
       return
     }
+    const trimCmd = String(commandStr ?? '').trim()
+    if (!opts.stdio) {
+      const exitM = /^exit(?:\s+(\d+))?$/i.exec(trimCmd)
+      if (exitM) {
+        const code = exitM[1] !== undefined ? (Number(exitM[1]) & 255) : 0
+        done({ ok: code === 0, code, timedOut: false, stdout: '', stderr: '' })
+        return
+      }
+      if (trimCmd === 'true') {
+        done({ ok: true, code: 0, timedOut: false, stdout: '', stderr: '' })
+        return
+      }
+    }
     const env = buildNonInteractiveEnv(process.env, opts.env ?? {})
     // macOS Node 18 (libuv < 1.45) 下 detached: true 会退回非 fork-safe 裸 fork() 触发 malloc/dyld 死锁
     const canUseDetached = supportsSafeDetachedSpawn()
-    const child = spawn(commandStr, {
-      cwd,
-      shell: true,
-      detached: canUseDetached,
-      stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      env,
-    })
+    const directNodeArgs = !opts.stdio ? tryParseDirectNodeArgs(trimCmd) : null
+    const child = directNodeArgs
+      ? spawn(process.execPath, directNodeArgs, {
+          cwd,
+          shell: false,
+          detached: canUseDetached,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env,
+        })
+      : spawn(commandStr, {
+          cwd,
+          shell: true,
+          detached: canUseDetached,
+          stdio: opts.stdio ?? ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env,
+        })
     const outChunks = []
     const errChunks = []
     let timedOut = false

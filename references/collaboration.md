@@ -57,7 +57,7 @@
   2. 检查源码模块边界、对外 CLI 或契约变更是否同步更新 `docs/TDD.md` 与 `README*.md` / `AGENTS.md`；
   3. **推送防脏与模板套用**：`submit` 推后**零跟踪文件写回**（仅写账本与评论）；建 PR 前先查 OPEN PR 防重，新建 PR 默认读取 `.github/pull_request_template.md` 注入实证上下文；
   4. **外部 Fork 防污染**：若 `contributor-fork` 且上游未接入 `docs/`，私有规划存于 `.worktrees/.state/private-docs/<taskId>/` 绝不混入 PR diff。
-- **六个双写节点**：认领/释放（Issue）、已提 PR（Issue + `Fixes #N`/`refs #N`）、审查退回（PR 与 Issue）、审查通过（PR 与 Issue）、返工已提交（PR 与 Issue，附新 HEAD 短哈希）、已合并（Issue）。`review-pack.mjs record` 在关联 PR/Issue 且在线时自动拼装四字段审查评论（附 `pf-state`）**实时双写到 PR 与 Issue** 并按裁决贴 `changes-requested` / `reviewed` 标签；`contributor-fork` 设标签遇 403 自动降级仅发评论，离线或无凭据静默写本地账本并提示绝不阻塞。含中文/非 ASCII 正文一律先写系统临时目录 UTF-8 文件再以 `--body-file` / JSON 体提交并回读删除临时文件，绝不在命令行直接拼接中文。
+- **六个双写节点**：认领/释放（Issue）、已提 PR（Issue + `Fixes #N`/`refs #N`）、审查退回（PR 与 Issue）、审查通过（PR 与 Issue）、返工已提交（PR 与 Issue，附新 HEAD 短哈希）、已合并（Issue）。`review-pack.mjs record` 按职责区分 PR 完整审查单（四字段 + `对比基线` + `验收标准逐条核对` 表 + `Must Fix` 编号位置/根因/`Should Fix`/`Pre-existing` + `pf-state`）与 Issue 摘要单（`审核退回/通过` + 逐条状态/标签 + `Must Fix` `file:line` 核心原因 + `pf-state`）**实时双写到 PR 与 Issue** 并按裁决贴 `changes-requested` / `reviewed` 标签；`contributor-fork` 设标签遇 403 自动降级仅发评论，离线或 `mcp-delegate` 无直连凭据时会在 `githubSync.delegatedPayloads` 原样吐出各目标完整正文与 `statePayload` 供宿主 MCP 直接双写，绝不阻塞或临场手写变形。含中文/非 ASCII 正文一律先写系统临时目录 UTF-8 文件再以 `--body-file` / JSON 体提交并回读删除临时文件，绝不在命令行直接拼接中文。
 
 ## 五、收到别人的 Issue
 

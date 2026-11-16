@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
 cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
@@ -15,7 +15,9 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
       '',
       '```yaml',
       'quick-test: exit 0',
+      'full-test: exit 0',
       'smoke-verify: node scripts/smoke.mjs --file {target}',
+      'merge-gate: exit 0',
       'high-risk: none',
       '```',
       '',
@@ -52,8 +54,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     // 2. 删减测试断言（门禁弱化）-> gate verify + 独立审查后 merge 必须 exit 4 (BLOCKED_GATE_WEAKENING)
 
     writeFileSync(join(implW2, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\n')
-    gitSync(implW2, ['add', '-A'])
-    gitSync(implW2, ['commit', '-qm', 'weaken test'])
+    gitCommitFast(implW2, 'weaken test', { updateOnly: true })
 
     const vWeak = await handleVerify({ task: 't-w2', mode: 'gate' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
@@ -71,8 +72,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     if (s2.exitCode !== 0) return `start t-w2-clean 失败：${s2.exitCode}`
     const implClean = join(dir, '.worktrees', 'impl-t-w2-clean')
     writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
-    gitSync(implClean, ['add', '-A'])
-    gitSync(implClean, ['commit', '-qm', 'add assertion'])
+    gitCommitFast(implClean, 'add assertion', { updateOnly: true })
     const vClean = await handleVerify({ task: 't-w2-clean', mode: 'full' }, roots)
     if (vClean.exitCode !== 0) return `clean verify 失败：${vClean.exitCode}`
     await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2' }, roots)
@@ -184,29 +184,42 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     const cCarol = await handleClaim({ task: 'gw-feat', agent: 'carol', json: true, _ghClient: client }, roots)
     if (cCarol.exitCode !== 0) return `release 后重新 claim 失败：exit=${cCarol.exitCode}`
 
-    // review-pack record 实时双写四字段评论到 PR #88 与 Issue #77 并贴标签；离线绝不阻塞
+    // review-pack record 实时双写结构化评论（PR 完整核对单 + Issue 阻塞摘要）到 PR #88 与 Issue #77 并贴标签；离线不阻塞且产出 delegatedPayloads
     const recChangesCode = await handleRecord({
       task: 'gw-feat', round: '1', verdict: 'changes', 'reviewer-id': 'rev-z',
-      'must-fix': ['C1: 修复空指针'], 'fault-injection': '注入故障后变红，还原复绿', json: true, _ghClient: client,
+      'must-fix': [JSON.stringify([{ id: 'C1', file: 'src/app.mjs', line: 1, summary: 'C1: 修复空指针', rootCause: '缺少空值守卫', fixHint: '先判空再返回' }])],
+      'should-fix': ['补齐边界日志'],
+      'pre-existing': ['src/legacy.mjs:3 历史遗留告警'],
+      'fault-injection': '注入故障后变红，还原复绿', json: true, _ghClient: client,
     }, roots)
     if (recChangesCode !== 0 || !labelsByNum.get(88)?.has('changes-requested') || !labelsByNum.get(77)?.has('changes-requested')) {
       return `record changes 未双写 PR/Issue 或未贴 changes-requested：code=${recChangesCode}, labels88=${[...(labelsByNum.get(88) ?? [])]}`
     }
-    const prComs = commentsByNum.get(88) ?? []
-    const lastPrCom = prComs[prComs.length - 1]?.body ?? ''
-    for (const kw of ['审查来源', '逐条标准状态', '故障注入记录', '止损记录', '"action":"review"']) {
+    const lastPrCom = (commentsByNum.get(88) ?? []).at(-1)?.body ?? ''
+    for (const kw of ['审查来源', '逐条标准状态', '故障注入记录', '止损记录', '"action":"review"', '#### 验收标准逐条核对', '| C1 | FAIL |', '| C2 | PASS |', 'src/app.mjs:1', '缺少空值守卫', '先判空再返回', '#### Should Fix', '#### Pre-existing', 'src/legacy.mjs:3 历史遗留告警']) {
       if (!lastPrCom.includes(kw)) return `PR 评论缺关键字段 ${kw}：\n${lastPrCom}`
     }
+    const lastIssueCom = (commentsByNum.get(77) ?? []).at(-1)?.body ?? ''
+    for (const kw of ['### 审核退回 · Round 1', 'PR #88', '逐条状态与标签', 'src/app.mjs:1', '缺少空值守卫', 'Pre-existing 1 项']) {
+      if (!lastIssueCom.includes(kw)) return `Issue 摘要评论缺关键字段 ${kw}：\n${lastIssueCom}`
+    }
+    if (lastIssueCom.includes('#### 验收标准逐条核对')) {
+      return `Issue 摘要与 PR 全量审查表未区分详略：\n${lastIssueCom}`
+    }
 
-    // 离线/无凭据 CLI 调用绝不阻塞（exit 0；需提交新 HEAD 后再触发 Round 2 复审）
+    // 离线/无凭据 CLI 调用绝不阻塞，且必须输出完整 delegatedPayloads 供宿主 MCP 原样双写
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const gw = 2\n')
-    gitSync(implAbs, ['add', '-A'])
-    gitSync(implAbs, ['commit', '-qm', 'fix: gw null guard'])
+    gitCommitFast(implAbs, 'fix: gw null guard', { updateOnly: true })
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--json',
     ], { cwd: dir })
-    if (offlineRec.status !== 0 || !JSON.parse(offlineRec.stdout).githubSync) {
-      return `离线 record 阻塞或缺少 githubSync 提示：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
+    const offlineSync = offlineRec.status === 0 ? JSON.parse(offlineRec.stdout).githubSync : null
+    const delPr = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'pr' && t.number === 88)
+    const delIss = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'issue' && t.number === 77)
+    if (offlineRec.status !== 0 || offlineSync?.delegatedPayloads?.targetRepo !== 'acme/demo'
+      || offlineSync?.delegatedPayloads?.label !== 'reviewed' || !delPr?.body?.includes('#### 验收标准逐条核对')
+      || !delIss?.body?.includes('### 审核通过 · Round 2') || !delIss?.body?.includes('"action":"review"')) {
+      return `离线 record 阻塞或缺少规范 delegatedPayloads：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
     }
 
     // 传内部调度代号（如 coordinator-hydrogen-xhigh）认领时必须自动解析为真实 GitHub 协作者账号
@@ -220,8 +233,6 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     }
     return true
   } finally {
-    const wtAbs = join(dir, '.worktrees/impl-gw-feat')
-    gitSync(dir, ['worktree', 'remove', '--force', wtAbs])
     rmTree(dir)
   }
 }])
@@ -314,11 +325,9 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
       join(implAbs, l.todoFile),
       readFileSync(join(implAbs, l.todoFile), 'utf8').replace('<two-way | one-way>', 'two-way').replace(/<[^>]+>/g, '`src/app.mjs`').replace(/- \[ \]/g, '- [x]'),
     )
-    gitSync(implAbs, ['add', '-A'])
-    gitSync(implAbs, ['commit', '-qm', 'feat: v2'])
+    gitCommitFast(implAbs, 'feat: v2')
     await handleFinalize({ task: 't-t2' }, roots)
-    gitSync(implAbs, ['add', '-A'])
-    gitSync(implAbs, ['commit', '-qm', 'docs: archive'])
+    gitCommitFast(implAbs, 'docs: archive')
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
     const subRes = await handleSubmit({ task: 't-t2' }, roots)
     if (subRes.exitCode !== 0) return `Tier 2 submit 失败：exit=${subRes.exitCode}`
@@ -336,8 +345,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     // Round 1 pass 后再提交新改动并 verify（未复审），merge 必须拦截陈旧 reviewPassedHead
     await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 3\n')
-    gitSync(implAbs, ['add', '-A'])
-    gitSync(implAbs, ['commit', '-qm', 'feat: v3'])
+    gitCommitFast(implAbs, 'feat: v3', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
     const mStaleHead = await handleMerge({ task: 't-t2' }, roots)
     if (mStaleHead.exitCode === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
@@ -350,8 +358,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (mBlocked.exitCode === 0) return 'verdict=changes 后 merge 竟然放行了'
 
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
-    gitSync(implAbs, ['add', '-A'])
-    gitSync(implAbs, ['commit', '-qm', 'feat: v4'])
+    gitCommitFast(implAbs, 'feat: v4', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
     const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a' }, roots)
     if (r3Stop !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop}`
@@ -403,16 +410,14 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
       writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })
     }
     writeFileSync(join(ciImpl, 'src/app.mjs'), 'export const c = 2\n')
-    gitSync(ciImpl, ['add', '-A'])
-    gitSync(ciImpl, ['commit', '-qm', 'feat: c2'])
+    gitCommitFast(ciImpl, 'feat: c2', { updateOnly: true })
     await prepHead('quick')
     const rNoWf = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([], [])) }, roots)
     if (rNoWf.exitCode !== 0 || mergeCalls !== 1) return `无检查工作流时 bucket=none 未放行合并：code=${rNoWf.exitCode}, calls=${mergeCalls}`
 
     mkdirSync(join(ciImpl, '.github/workflows'), { recursive: true })
     writeFileSync(join(ciImpl, '.github/workflows/check.yml'), 'name: check\non:\n  pull_request:\njobs:\n  check:\n    runs-on: ubuntu-latest\n')
-    gitSync(ciImpl, ['add', '-A'])
-    gitSync(ciImpl, ['commit', '-qm', 'ci: add check workflow'])
+    gitCommitFast(ciImpl, 'ci: add check workflow')
     await prepHead('gate')
     const rPend = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'in_progress', conclusion: null }], [])) }, roots)
     const rFail = await handleMerge({ task: 'ci-t', json: true, _ghProbe: makeProbe(summarizeCommitChecks([{ id: 1, name: 'gates (18)', status: 'completed', conclusion: 'failure' }, { id: 2, name: 'check', status: 'completed', conclusion: 'skipped' }], [])) }, roots)
@@ -561,8 +566,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       .replace('- [ ] C1: 真实值', '- [x] C1: verified')
       .replace('- [ ] C2: 真实值', '- [x] C2: verified')
     writeFileSync(join(urlDir, spRel), spTxt)
-    gitSync(urlDir, ['add', spRel])
-    gitSync(urlDir, ['commit', '-qm', 'spec todo'])
+    gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
     await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
     const finBad = await finUrl({ task: 'note-case' }, urlRoots)
     if (finBad.exitCode === 0) {
@@ -570,20 +574,18 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     }
     const spWtAbs = join(urlDir, '.worktrees/impl-note-case', spRel)
     writeFileSync(spWtAbs, readFileSync(spWtAbs, 'utf8').replace(`- ${placeholderTodo}`, '- 已按 Todo 与 docs/todo/ 收尾验证。'))
-    gitSync(join(urlDir, '.worktrees/impl-note-case'), ['add', '-A'])
-    gitSync(join(urlDir, '.worktrees/impl-note-case'), ['commit', '-qm', 'spec real note'])
+    gitCommitFast(join(urlDir, '.worktrees/impl-note-case'), 'spec real note', { updateOnly: true })
     const finOk = await finUrl({ task: 'note-case' }, urlRoots)
     if (finOk.exitCode !== 0) return `finalize 误拦合法 Todo 实现说明：exit=${finOk.exitCode}`
 
     // submit 创建 PR 后回填 archived SPEC/Todo 的 pr 字段（不再抛 today is not defined）
     const bareRem = tmpProject({})
-    gitSync(undefined, ['init', '--bare', bareRem])
+    gitInitBare(bareRem)
     const bareUrl = bareRem.replace(/\\/g, '/')
     try {
       const implNote = join(urlDir, '.worktrees/impl-note-case')
       gitSync(urlDir, ['config', `url.${bareUrl}.pushInsteadOf`, 'https://github.com/acme/demo.git'])
-      gitSync(implNote, ['add', '-A'])
-      gitSync(implNote, ['commit', '-qm', 'archive spec'])
+      gitCommitFast(implNote, 'archive spec')
       const verOk = await verUrl({ task: 'note-case', cmd: 'exit 0' }, urlRoots)
       if (verOk.exitCode !== 0) return `note-case verify 失败：exit=${verOk.exitCode}`
       const postedComments = []
@@ -595,13 +597,15 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       const subRes = await subUrl({ task: 'note-case', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'url-dev' } }, client: mockSubmitClient } }, urlRoots)
       const noteLedger = readUrlLedger(urlDir, 'note-case')
       const noteDirtyAfterPush = gitSync(implNote, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()
-      if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== '' || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev'))) {
+      if (subRes.exitCode !== 0 || noteLedger?.prNumber !== 99 || noteDirtyAfterPush !== '' || !postedComments.some((c) => c.number === 99 && c.body.includes('@url-dev') && c.body.includes('### 提交待审'))) {
         return `handleSubmit 零脏文件/账本 prNumber 或首提 PR 评论失败：code=${subRes.exitCode}, pr=${noteLedger?.prNumber}, dirty="${noteDirtyAfterPush}"`
       }
     } finally { rmTree(bareRem) }
 
     // flow cleanup 细粒度保留：仅删 review worktree，保留 impl worktree 与本地分支
-    gitSync(urlDir, ['worktree', 'add', '--detach', join(urlDir, '.worktrees/review-note-case'), 'HEAD'])
+    if (!existsSync(join(urlDir, '.worktrees/review-note-case'))) {
+      gitSync(urlDir, ['worktree', 'add', '--detach', join(urlDir, '.worktrees/review-note-case'), 'HEAD'])
+    }
     const clOnlyRev = await clUrl({ task: 'note-case', confirm: true, 'only-review-worktree': true }, urlRoots)
     if (clOnlyRev.exitCode !== 0 || existsSync(join(urlDir, '.worktrees/review-note-case')) || !existsSync(join(urlDir, '.worktrees/impl-note-case'))) {
       return `cleanup --only-review-worktree 未按粒度保留：exit=${clOnlyRev.exitCode}`
@@ -609,9 +613,6 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
 
     return true
   } finally {
-    for (const wt of ['.worktrees/impl-pr-88', '.worktrees/review-pr-89', '.worktrees/impl-note-case', '.worktrees/review-note-case']) {
-      gitSync(urlDir, ['worktree', 'remove', '--force', join(urlDir, wt)])
-    }
     rmTree(urlDir)
   }
 }])

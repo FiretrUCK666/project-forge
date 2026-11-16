@@ -13,6 +13,7 @@ import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs
 import {
   gitLsFilesTextAndCode, gitRun, isMainModule, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
 
@@ -394,8 +395,11 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     throw new Error(`--focus 指定的子目录不存在：${focusRel}`)
   }
 
+  const fastHead = roots.isGit ? readHeadFast(roots.workTreeGitDir ?? resolveGitDirFast(root), roots.gitDir) : null
   const [branchRes, hotspots, scan] = await Promise.all([
-    roots.isGit ? gitRun(root, ['symbolic-ref', '--short', 'HEAD']) : Promise.resolve({ ok: false, stdout: '' }),
+    roots.isGit
+      ? (fastHead ? Promise.resolve({ ok: Boolean(fastHead.branch), stdout: fastHead.branch ?? '' }) : gitRun(root, ['symbolic-ref', '--short', 'HEAD']))
+      : Promise.resolve({ ok: false, stdout: '' }),
     roots.isGit ? detectHotspots(root, focusRel) : Promise.resolve([]),
     gitLsFilesTextAndCode(root, { isGit: roots.isGit, focus: focusRel }),
   ])

@@ -17,6 +17,13 @@ import {
   buildNonInteractiveEnv, computeWorktreeEnv, execSafe, execShellCommand,
   killProcessTree, resolveExecutable, withFileLock,
 } from './exec.mjs'
+import {
+  countCommitsAheadDagFast, getCachedNameStatus, hasDotGitInAncestors, hasUnmergedIndexFast,
+  isAncestorLinearFast, readFirstParentsFast, readGitIndexPathsFast, readHeadFast,
+  readLooseCommitLogFast, readReflogFast, resolveDefaultBranchFast, resolveGitDirFast,
+  resolveRefShaFast, setCachedNameStatus,
+} from './git-fast.mjs'
+import { hasNoGlobalExcludesFast, isCleanWorktreeFast } from './git-status-fast.mjs'
 
 export {
   buildNonInteractiveEnv,
@@ -271,6 +278,12 @@ export async function resolveRepoRoots(cwd = process.cwd()) {
   const absCwd = canonicalPath(cwd)
   const fast = tryResolveRepoRootsFast(absCwd)
   if (fast) return fast
+  if (!hasDotGitInAncestors(absCwd)) {
+    return {
+      isGit: false, cwd: absCwd, mainRoot: absCwd, workTreeRoot: absCwd,
+      gitDir: null, workTreeGitDir: null, isWorktree: false, isBare: false,
+    }
+  }
 
   const res = await gitRun(absCwd, [
     'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--is-bare-repository', '--git-dir',
@@ -339,22 +352,15 @@ export async function resolveRepoRoots(cwd = process.cwd()) {
 
 function hasWorktreesRuleInFile(filePath) {
   const txt = readTextSafe(filePath)
-  if (!txt) return false
-  return txt.split('\n').some((l) => {
-    const t = l.trim()
-    return t === '.worktrees' || t === '.worktrees/' || t === '/.worktrees' || t === '/.worktrees/'
-  })
+  return Boolean(txt && txt.split('\n').some((l) => /^\/?\.worktrees\/?$/.test(l.trim())))
 }
 
 /** 确保 .worktrees/ 已被 Git 忽略（优先零进程本地核对，写 `.git/info/exclude` 加文件锁）。 */
 export async function ensureWorktreesIgnored(mainRoot, gitDir) {
   const actualGitDir = gitDir ?? join(mainRoot, '.git')
   const excludeFile = join(actualGitDir, 'info', 'exclude')
-  if (hasWorktreesRuleInFile(join(mainRoot, '.gitignore')) || hasWorktreesRuleInFile(excludeFile)) {
-    return { ok: true, method: 'existing' }
-  }
-  const check = await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])
-  if (check.ok) return { ok: true, method: 'existing' }
+  if (hasWorktreesRuleInFile(join(mainRoot, '.gitignore')) || hasWorktreesRuleInFile(excludeFile)) return { ok: true, method: 'existing' }
+  if (!hasNoGlobalExcludesFast(actualGitDir) && (await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])).ok) return { ok: true, method: 'existing' }
   const lockPath = join(actualGitDir, 'project-forge-flow', 'locks', 'info-exclude.lock')
   try {
     return await withFileLock(lockPath, () => {
@@ -407,9 +413,10 @@ export function unescapeGitPath(rawPath) {
   return posixPath(Buffer.from(bytes).toString('utf8'))
 }
 
-/** 使用 `git status --porcelain=v1 -z -u` 零截断解析工作区改动与冲突条目。 */
+/** 使用 `git status --porcelain=v1 -z -u` 零截断解析工作区改动与冲突条目（干净工作区优先走零进程校验）。 */
 export async function gitStatusPorcelainZ(cwd) {
-  const res = await gitRunBuffer(cwd, ['status', '--porcelain=v1', '-z', '-u'])
+  if (isCleanWorktreeFast(cwd)?.clean) return { ok: true, entries: [], stderr: '' }
+  const res = await gitRunBuffer(cwd, ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-u'])
   if (!res.ok) return { ok: false, entries: [], stderr: res.stderr }
   const text = res.stdout.toString('utf8')
   const tokens = text.split('\0')
@@ -432,7 +439,9 @@ export async function gitStatusPorcelainZ(cwd) {
 
 /** 使用 `git diff --name-status -z` 零截断解析变更文件清单。 */
 export async function gitDiffNameStatusZ(cwd, diffArgs = []) {
-  const res = await gitRunBuffer(cwd, ['diff', '--name-status', '-z', ...diffArgs])
+  const nsCache = getCachedNameStatus(cwd, diffArgs)
+  if (nsCache?.hit) return nsCache.hit
+  const res = await gitRunBuffer(cwd, ['--no-optional-locks', 'diff', '--name-status', '-z', ...diffArgs])
   if (!res.ok) return { ok: false, entries: [], stderr: res.stderr }
   const tokens = res.stdout.toString('utf8').split('\0')
   const entries = []
@@ -450,26 +459,15 @@ export async function gitDiffNameStatusZ(cwd, diffArgs = []) {
       if (file) entries.push({ status, file })
     }
   }
-  return { ok: true, entries, stderr: '' }
-}
-
-function resolveWtGitDirLocal(repoRoot) {
-  const dotGit = join(repoRoot, '.git')
-  try {
-    const st = statSync(dotGit)
-    if (st.isDirectory()) return dotGit
-    if (st.isFile()) {
-      const m = /^gitdir:\s*(.+)$/im.exec(readFileSync(dotGit, 'utf8'))
-      if (m) return resolve(repoRoot, m[1].trim())
-    }
-  } catch { /* fall back to git rev-parse */ }
-  return null
+  const out = { ok: true, entries, stderr: '' }
+  if (nsCache?.key) setCachedNameStatus(nsCache.key, out)
+  return out
 }
 
 /** 检测仓库是否处于进行中的 Merge / Rebase / Cherry-pick / Revert / 冲突态（复用已知 wtGitDir 与 statusEntries）。 */
 export async function detectInProgressGitOp(repoRoot, opts = {}) {
   const ops = []
-  let wtGitDir = opts.wtGitDir ?? resolveWtGitDirLocal(repoRoot)
+  let wtGitDir = opts.wtGitDir ?? resolveGitDirFast(repoRoot)
   if (!wtGitDir) {
     const gdRes = await gitRun(repoRoot, ['rev-parse', '--git-dir'])
     wtGitDir = gdRes.ok && gdRes.stdout.trim() ? resolve(repoRoot, gdRes.stdout.trim()) : join(repoRoot, '.git')
@@ -484,7 +482,7 @@ export async function detectInProgressGitOp(repoRoot, opts = {}) {
 
   const entries = Array.isArray(opts.statusEntries)
     ? opts.statusEntries
-    : ((await gitStatusPorcelainZ(repoRoot)).entries ?? [])
+    : (hasUnmergedIndexFast(wtGitDir) === false ? [] : ((await gitStatusPorcelainZ(repoRoot)).entries ?? []))
   const conflicts = entries
     .filter((e) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(e.xy))
     .map((e) => e.file)
@@ -508,13 +506,8 @@ function isBinaryProbe(absPath) {
     const buf = Buffer.allocUnsafe(probeLen)
     const n = readSync(fd, buf, 0, probeLen, 0)
     return { exists: true, isBinary: buf.subarray(0, n).includes(0), size: st.size }
-  } catch {
-    return { exists: false, isBinary: false, size: 0 }
-  } finally {
-    if (fd !== undefined) {
-      try { closeSync(fd) } catch { /* ignore */ }
-    }
-  }
+  } catch { return { exists: false, isBinary: false, size: 0 } }
+  finally { if (fd !== undefined) try { closeSync(fd) } catch { /* ignore */ } }
 }
 
 /**
@@ -558,6 +551,11 @@ export async function gitLsFilesTextAndCode(root, { isGit = true, focus, probeBi
   }
 
   if (isGit) {
+    const fastIdxPaths = !focusRel && isCleanWorktreeFast(absRoot)?.clean ? readGitIndexPathsFast(absRoot) : null
+    if (fastIdxPaths) {
+      for (const p of [...fastIdxPaths].sort()) { if (truncated) break; pushFile(p) }
+      return { files, dirSummary, truncated, source: 'git-ls-files-z' }
+    }
     const args = ['ls-files', '-z', '--cached', '--others', '--exclude-standard']
     if (focusRel) args.push('--', focusRel)
     const res = await gitRunBuffer(absRoot, args)
@@ -594,6 +592,8 @@ export async function gitLsFilesTextAndCode(root, { isGit = true, focus, probeBi
 
 /** 现场解析仓库真实默认分支（兼容 unborn HEAD、shallow clone 与非 main 主干）。 */
 export async function resolveDefaultBranch(repoRoot) {
+  const fast = resolveDefaultBranchFast(repoRoot)
+  if (fast) return fast
   const [originHeadRes, branchRes, initDefRes] = await Promise.all([
     gitRun(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
     gitRun(repoRoot, ['symbolic-ref', '--short', 'HEAD']),
@@ -618,9 +618,15 @@ export async function resolveDefaultBranch(repoRoot) {
 
 /** 探测项目格式、默认分支、提交风格与是否启用了四层 docs/ 体系。 */
 export async function detectProjectConventions(repoRoot) {
+  const wtGitDir = resolveGitDirFast(repoRoot)
+  const fastHead = readHeadFast(wtGitDir)
+  const isUnborn = Boolean(fastHead && !fastHead.oid)
+  const fastLog = (!isUnborn && fastHead?.oid && wtGitDir) ? readLooseCommitLogFast(repoRoot, wtGitDir, fastHead.oid, 20) : null
   const [defaultBranch, logRes] = await Promise.all([
     resolveDefaultBranch(repoRoot),
-    gitRun(repoRoot, ['log', '--format=%s', '-n', '20']),
+    isUnborn
+      ? Promise.resolve({ ok: true, stdout: '' })
+      : (fastLog ? Promise.resolve({ ok: true, stdout: fastLog.entries.map((e) => e.subject).join('\n') }) : gitRun(repoRoot, ['log', '--format=%s', '-n', '20'])),
   ])
 
   const subjects = logRes.ok && logRes.stdout
@@ -642,49 +648,74 @@ export async function detectProjectConventions(repoRoot) {
  * 使用 `git cherry` + `git patch-id` 判定分支相对于默认主干的四态合流状态：
  * `'merged' | 'squash_or_rebase_merged' | 'no_own_commits' | 'unmerged'`。
  */
-export async function inspectBranchMergeState(mainRoot, { branch, headSha, defaultBranch = 'main', gitDir = null } = {}) {
+export async function inspectBranchMergeState(mainRoot, { branch, headSha, defaultBranch = 'main', gitDir = null, cache = null } = {}) {
   const targetRef = branch || headSha
-  const resolvedGitDir = gitDir ?? resolveWtGitDirLocal(mainRoot)
+  const resolvedGitDir = gitDir ?? resolveGitDirFast(mainRoot)
   const canFastShallow = Boolean(resolvedGitDir && !existsSync(join(resolvedGitDir, 'reftable')))
-  const [shallowRes, baseCheck, ownRes, isAncRes] = await Promise.all([
+  const fastBaseSha = canFastShallow && defaultBranch ? resolveRefShaFast(resolvedGitDir, `refs/heads/${defaultBranch}`) : null
+  const fastTargetSha = canFastShallow && branch ? resolveRefShaFast(resolvedGitDir, `refs/heads/${branch}`) : (headSha ?? null)
+  const sameTip = Boolean(fastBaseSha && fastTargetSha && fastBaseSha === fastTargetSha)
+  const fastOwnCount = (fastBaseSha && fastTargetSha && !sameTip) ? countCommitsAheadDagFast(resolvedGitDir, fastBaseSha, fastTargetSha) : null
+  const [shallowRes, baseCheck, ownRes] = await Promise.all([
     canFastShallow
       ? Promise.resolve({ ok: true, stdout: existsSync(join(resolvedGitDir, 'shallow')) ? 'true' : 'false' })
       : gitRun(mainRoot, ['rev-parse', '--is-shallow-repository']),
-    targetRef ? gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', defaultBranch]) : Promise.resolve({ ok: false }),
-    targetRef ? gitRun(mainRoot, ['rev-list', '--count', `${defaultBranch}..${targetRef}`]) : Promise.resolve({ ok: false, stdout: '0' }),
-    targetRef ? gitRun(mainRoot, ['merge-base', '--is-ancestor', targetRef, defaultBranch]) : Promise.resolve({ ok: false }),
+    targetRef
+      ? (fastBaseSha ? Promise.resolve({ ok: true, stdout: fastBaseSha }) : gitRun(mainRoot, ['rev-parse', '--verify', '--quiet', defaultBranch]))
+      : Promise.resolve({ ok: false }),
+    targetRef
+      ? (sameTip
+          ? Promise.resolve({ ok: true, stdout: '0' })
+          : (fastOwnCount !== null ? Promise.resolve({ ok: true, stdout: String(fastOwnCount) }) : gitRun(mainRoot, ['--no-optional-locks', 'rev-list', '--count', `${defaultBranch}..${targetRef}`])))
+      : Promise.resolve({ ok: false, stdout: '0' }),
   ])
   const isShallow = shallowRes.ok && shallowRes.stdout.trim() === 'true'
-  if (!targetRef) {
-    return { state: 'unmerged', ownCommits: 0, isShallow, reason: '缺少目标分支或提交引用' }
-  }
-  if (!baseCheck.ok) {
-    return { state: 'unmerged', ownCommits: 0, isShallow, reason: `基线分支 ${defaultBranch} 不存在` }
-  }
+  if (!targetRef) return { state: 'unmerged', ownCommits: 0, isShallow, reason: '缺少目标分支或提交引用' }
+  if (!baseCheck.ok) return { state: 'unmerged', ownCommits: 0, isShallow, reason: `基线分支 ${defaultBranch} 不存在` }
 
   const ownCommits = ownRes.ok ? (Number(ownRes.stdout.trim()) || 0) : 1
-  const isAncestor = isAncRes.ok
+  const isAncestor = ownRes.ok && ownCommits === 0
 
   if (isAncestor && ownCommits === 0) {
-    const [targetShaRes, fpRes, reflog] = await Promise.all([
-      headSha ? Promise.resolve({ ok: true, stdout: headSha }) : gitRun(mainRoot, ['rev-parse', targetRef]),
-      gitRun(mainRoot, ['rev-list', '--first-parent', '-n', '200', defaultBranch]),
-      branch ? gitRun(mainRoot, ['reflog', 'show', '--format=%gs', `refs/heads/${branch}`]) : Promise.resolve({ ok: false, stdout: '' }),
-    ])
-    const targetSha = targetShaRes.ok ? targetShaRes.stdout.trim() : ''
-    const firstParentSet = new Set(fpRes.ok ? fpRes.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : [])
-    const hasCommitReflog = Boolean(reflog.ok && reflog.stdout
-      && reflog.stdout.split('\n').some((l) => /^(?:commit(?:\s|\(|:)|cherry-pick)/.test(l.trim())))
-    if ((targetSha && !firstParentSet.has(targetSha)) || hasCommitReflog) {
+    let inFirstParents = sameTip
+    if (!sameTip) {
+      const loadFirstParents = () => {
+        if (cache?.firstParentPromises?.has(defaultBranch)) return cache.firstParentPromises.get(defaultBranch)
+        const fastFp = fastBaseSha ? readFirstParentsFast(resolvedGitDir, fastBaseSha, 200) : null
+        const p = fastFp
+          ? Promise.resolve(fastFp)
+          : gitRun(mainRoot, ['--no-optional-locks', 'rev-list', '--first-parent', '-n', '200', defaultBranch])
+              .then((r) => new Set(r.ok ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : []))
+        cache?.firstParentPromises?.set(defaultBranch, p)
+        return p
+      }
+      const [targetShaRes, firstParentSet] = await Promise.all([
+        fastTargetSha ? Promise.resolve({ ok: true, stdout: fastTargetSha }) : gitRun(mainRoot, ['rev-parse', targetRef]),
+        loadFirstParents(),
+      ])
+      const targetSha = targetShaRes.ok ? targetShaRes.stdout.trim() : ''
+      inFirstParents = !targetSha || firstParentSet.has(targetSha)
+    }
+    if (!inFirstParents) {
+      return { state: 'merged', ownCommits: 0, isShallow, reason: `已合入 ${defaultBranch}` }
+    }
+    const fastReflog = branch && canFastShallow ? readReflogFast(resolvedGitDir, `refs/heads/${branch}`) : null
+    const reflogLines = fastReflog ?? (branch ? (await gitRun(mainRoot, ['--no-optional-locks', 'reflog', 'show', '--format=%gs', `refs/heads/${branch}`])).stdout?.split('\n') : []) ?? []
+    const hasCommitReflog = reflogLines.some((l) => /^(?:commit(?:\s|\(|:)|cherry-pick)/.test(l.trim()))
+    if (hasCommitReflog) {
       return { state: 'merged', ownCommits: 0, isShallow, reason: `已合入 ${defaultBranch}` }
     }
     return { state: 'no_own_commits', ownCommits: 0, isShallow, reason: `无领先 ${defaultBranch} 的独立提交` }
   }
 
-  const [cherryRes, mbRes] = await Promise.all([
-    gitRun(mainRoot, ['cherry', defaultBranch, targetRef]),
-    gitRun(mainRoot, ['merge-base', defaultBranch, targetRef]),
-  ])
+  const fastAnc = fastBaseSha && fastTargetSha ? isAncestorLinearFast(resolvedGitDir, fastBaseSha, fastTargetSha) : null
+  const mbSha = fastAnc === true
+    ? fastBaseSha
+    : ((await gitRun(mainRoot, ['--no-optional-locks', 'merge-base', defaultBranch, targetRef])).stdout?.trim() ?? '')
+  if (mbSha && fastBaseSha && mbSha === fastBaseSha) {
+    return { state: 'unmerged', ownCommits, isShallow, reason: `存在 ${ownCommits} 个未合并提交` }
+  }
+  const cherryRes = await gitRun(mainRoot, ['--no-optional-locks', 'cherry', defaultBranch, targetRef])
   const cherryLines = cherryRes.ok && cherryRes.stdout
     ? cherryRes.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
     : []
@@ -697,26 +728,28 @@ export async function inspectBranchMergeState(mainRoot, { branch, headSha, defau
     }
   }
 
-  if (mbRes.ok && mbRes.stdout.trim()) {
-    const diffRes = await gitRun(mainRoot, ['diff', mbRes.stdout.trim(), targetRef])
+  if (mbSha) {
+    const diffRes = await gitRun(mainRoot, ['--no-optional-locks', 'diff', mbSha, targetRef])
     if (diffRes.ok && diffRes.stdout) {
-      const [branchPidRes, logRes] = await Promise.all([
+      const loadDefaultPatchIds = () => {
+        if (cache?.patchIdPromises?.has(defaultBranch)) return cache.patchIdPromises.get(defaultBranch)
+        const p = gitRun(mainRoot, ['--no-optional-locks', 'log', '-n', '60', '--no-merges', '-p', defaultBranch], { timeout: 30000 })
+          .then((lr) => (lr.ok && lr.stdout ? gitRun(mainRoot, ['patch-id', '--stable'], { input: lr.stdout }) : { ok: false }))
+          .then((pr) => new Set(pr.ok && pr.stdout ? pr.stdout.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean) : []))
+        cache?.patchIdPromises?.set(defaultBranch, p)
+        return p
+      }
+      const [branchPidRes, set] = await Promise.all([
         gitRun(mainRoot, ['patch-id', '--stable'], { input: diffRes.stdout }),
-        gitRun(mainRoot, ['log', '-n', '60', '--no-merges', '-p', defaultBranch], { timeout: 30000 }),
+        loadDefaultPatchIds(),
       ])
       const branchPid = branchPidRes.ok ? branchPidRes.stdout.trim().split(/\s+/)[0] : ''
-      if (branchPid && logRes.ok && logRes.stdout) {
-        const defPidRes = await gitRun(mainRoot, ['patch-id', '--stable'], { input: logRes.stdout })
-        if (defPidRes.ok && defPidRes.stdout) {
-          const set = new Set(defPidRes.stdout.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean))
-          if (set.has(branchPid)) {
-            return {
-              state: 'squash_or_rebase_merged',
-              ownCommits,
-              isShallow,
-              reason: `合并补丁 patch-id 与 ${defaultBranch} 提交完全一致（Squash 合并）`,
-            }
-          }
+      if (branchPid && set.has(branchPid)) {
+        return {
+          state: 'squash_or_rebase_merged',
+          ownCommits,
+          isShallow,
+          reason: `合并补丁 patch-id 与 ${defaultBranch} 提交完全一致（Squash 合并）`,
         }
       }
     }
@@ -740,7 +773,14 @@ export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha, { resetDi
     if (st.entries.length > 0) {
       throw new Error(`BLOCKED_DIRTY_REVIEW_WORKTREE: 审查工作树 ${wtAbs} 存在未提交改动，请先清理后再推进审查`)
     }
-    const curHead = await gitRun(wtAbs, ['rev-parse', 'HEAD'])
+    const wtGitDir = resolveGitDirFast(wtAbs)
+    const fastSha = wtGitDir ? readTextSafe(join(wtGitDir, 'HEAD'))?.trim() : null
+    if (fastSha && /^[0-9a-f]{40,64}$/i.test(fastSha) && fastSha === targetSha) {
+      return { ok: true, action: resetDirty ? 'reset-synced' : 'already-synced', headSha: targetSha, path: wtAbs }
+    }
+    const curHead = (fastSha && /^[0-9a-f]{40,64}$/i.test(fastSha))
+      ? { ok: true, stdout: fastSha }
+      : await gitRun(wtAbs, ['rev-parse', 'HEAD'])
     if (curHead.ok && curHead.stdout.trim() === targetSha) {
       return { ok: true, action: resetDirty ? 'reset-synced' : 'already-synced', headSha: targetSha, path: wtAbs }
     }

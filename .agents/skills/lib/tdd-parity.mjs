@@ -9,6 +9,7 @@ import { basename, join } from 'node:path'
 
 import { docIsoDate } from './docs.mjs'
 import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
+import { getCachedEntriesDiffText } from './git-fast.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from './profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE, splitDiffByFile, summarizeHunkChanges } from './static-gates.mjs'
 
@@ -81,7 +82,7 @@ function collectExportAndCliChanges(diffText) {
 /**
  * 校验本次变更的非测试源码模块、导出符号及 CLI 子命令是否与权威架构文档同步。
  */
-export async function checkTddSyncParity(implRoot, changed = [], ledger = {}) {
+export async function checkTddSyncParity(implRoot, changed = [], ledger = {}, opts = {}) {
   const profile = parseAgentsProfile(implRoot)
   const tddRel = resolveAuthoritativeTddPath(implRoot, profile.decisions)
   if (!tddRel) {
@@ -101,8 +102,12 @@ export async function checkTddSyncParity(implRoot, changed = [], ledger = {}) {
   const tddText = existsSync(tddPath) ? (readTextSafe(tddPath) ?? '') : ''
 
   const [diffRes, st] = await Promise.all([
-    ledger?.baseSha ? gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`]) : Promise.resolve({ entries: [] }),
-    gitStatusPorcelainZ(implRoot),
+    Array.isArray(opts.diffEntries)
+      ? Promise.resolve({ entries: opts.diffEntries })
+      : (ledger?.baseSha ? gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`]) : Promise.resolve({ entries: [] })),
+    Array.isArray(opts.statusEntries)
+      ? Promise.resolve({ entries: opts.statusEntries })
+      : gitStatusPorcelainZ(implRoot),
   ])
   const changedEntries = diffRes?.entries ?? []
   const normChanged = (Array.isArray(changed) ? changed : []).map((f) => posixPath(f)).filter(Boolean)
@@ -144,9 +149,14 @@ export async function checkTddSyncParity(implRoot, changed = [], ledger = {}) {
 
   let changedExportsOrCli = []
   if (ledger?.baseSha && normChanged.some((f) => isNonTestSourceFile(f))) {
-    const diffBuf = await gitRunBuffer(implRoot, ['diff', '--unified=3', '--no-ext-diff', '--no-color', `${ledger.baseSha}..HEAD`])
-    if (diffBuf.ok) {
-      changedExportsOrCli = collectExportAndCliChanges(diffBuf.stdout.toString('utf8').replace(/\r\n/g, '\n'))
+    const cachedText = opts.diffText ?? getCachedEntriesDiffText(opts.diffEntries)
+    if (cachedText !== undefined) {
+      changedExportsOrCli = collectExportAndCliChanges(cachedText)
+    } else {
+      const diffBuf = await gitRunBuffer(implRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', `${ledger.baseSha}..HEAD`])
+      if (diffBuf.ok) {
+        changedExportsOrCli = collectExportAndCliChanges(diffBuf.stdout.toString('utf8').replace(/\r\n/g, '\n'))
+      }
     }
   }
 

@@ -12,7 +12,7 @@ import {
   canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
   inspectBranchMergeState, samePath,
 } from '../../lib/git.mjs'
-import { readGitConfigFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv,
@@ -30,8 +30,9 @@ function isCwdInside(wtAbs) {
 }
 
 export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin', {
-  skipRemoteProbe = false, _ghProbe = null, _ghClient = null, gitDir = null,
+  skipRemoteProbe = false, _ghProbe = null, _ghClient = null, gitDir = null, mergeStateOverride = null, knownCleanWorktrees = [],
 } = {}) {
+  const cleanWtSet = new Set(Array.isArray(knownCleanWorktrees) ? knownCleanWorktrees.filter(Boolean) : [])
   const worktreePaths = [ledger.reviewWorktreePath, ledger.worktreePath]
     .filter(Boolean)
     .map((relWt) => ({ relWt, abs: resolve(mainRoot, relWt) }))
@@ -46,6 +47,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
   const fastBranchSha = ledger.branch ? resolveRefShaFast(effectiveGitDir, `refs/heads/${ledger.branch}`) : null
   const [wtEntries, refRes, lsRes] = await Promise.all([
     Promise.all(worktreePaths.map(async ({ relWt, abs }) => {
+      if (cleanWtSet.has(relWt)) return { path: relWt, abs, dirty: false }
       const stZ = await gitStatusPorcelainZ(abs)
       return { path: relWt, abs, dirty: stZ.entries.length > 0 }
     })),
@@ -60,7 +62,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
   const worktrees = wtEntries
   const localBranchExists = Boolean(ledger.branch && refRes.ok)
   const mergeState = localBranchExists
-    ? await inspectBranchMergeState(mainRoot, { branch: ledger.branch, defaultBranch: ledger.baseBranch || 'main', gitDir: effectiveGitDir })
+    ? (mergeStateOverride ?? await inspectBranchMergeState(mainRoot, { branch: ledger.branch, defaultBranch: ledger.baseBranch || 'main', gitDir: effectiveGitDir }))
     : null
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
@@ -157,7 +159,8 @@ export async function handleCleanup(opts, roots) {
   }
 
   if (cl.localBranch && !keepLocalBr) {
-    const curBr = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+    const fastMainBranch = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
+    const curBr = fastMainBranch ? { ok: true, stdout: fastMainBranch } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
     if (curBr.ok && curBr.stdout.trim() === cl.localBranch) {
       const sw = await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
       if (!sw.ok) throw new Error(`切回默认分支失败：${sw.stderr}`)
@@ -222,10 +225,11 @@ export async function handleStatus(opts, roots) {
   const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   const exists = existsSync(implRoot)
   const stZ = exists ? await gitStatusPorcelainZ(implRoot) : { entries: [] }
+  const fastStatusHead = exists ? readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid : null
   const [op, headRes] = exists
     ? await Promise.all([
         detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
-        gitRun(implRoot, ['rev-parse', 'HEAD']),
+        fastStatusHead ? Promise.resolve({ ok: true, stdout: fastStatusHead }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
       ])
     : [{ inProgress: false }, { ok: false, stdout: '' }]
   const head = headRes.ok ? headRes.stdout.trim() : null
@@ -268,7 +272,8 @@ export async function handleAbort(opts, roots) {
     if (!rmRes.ok) throw new Error(`移除 ${wt.path} 失败：${rmRes.stderr}`)
   }
   if (ledger.branch && !opts['keep-branch'] && ledger.branch !== ledger.baseBranch) {
-    const cur = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+    const fastAbrBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
+    const cur = fastAbrBr ? { ok: true, stdout: fastAbrBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
     if (cur.ok && cur.stdout.trim() === ledger.branch) await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
     await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
   }

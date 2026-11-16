@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerM3Cases(cases) {
 cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
@@ -39,8 +39,7 @@ cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 
     // 外部 PR：未扫描与未审批前阻断 worktree-deps 挂载与 flow verify
     gitSync(dir, ['checkout', '-qb', 'ext-branch'])
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n')
-    gitSync(dir, ['add', 'src/app.mjs'])
-    gitSync(dir, ['-c', 'user.name=ext', '-c', 'user.email=ext@x.test', 'commit', '-qm', 'ext fix'])
+    gitCommitFast(dir, 'ext fix', { updateOnly: true, name: 'ext', email: 'ext@x.test' })
     const extSha = gitSync(dir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
     gitSync(dir, ['checkout', '-q', 'main'])
 
@@ -99,15 +98,13 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
     if (pStart.exitCode !== 0) return `父任务 start 失败：${pStart.exitCode}`
     const pRoot = join(dir, '.worktrees', 'impl-parent-t')
     writeFileSync(join(pRoot, 'parent-file.mjs'), 'export const p = 1\n')
-    gitSync(pRoot, ['add', 'parent-file.mjs'])
-    gitSync(pRoot, ['commit', '-qm', 'feat: parent work'])
+    gitCommitFast(pRoot, 'feat: parent work', { files: ['parent-file.mjs'] })
 
     const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '1', implementer: 'dev-a' }, roots)
     if (cStart.exitCode !== 0) return `子任务 --after start 失败：${cStart.exitCode}`
     const cRoot = join(dir, '.worktrees', 'impl-child-t')
     writeFileSync(join(cRoot, 'child-file.mjs'), 'export const c = 1\n')
-    gitSync(cRoot, ['add', 'child-file.mjs'])
-    gitSync(cRoot, ['commit', '-qm', 'feat: child work'])
+    gitCommitFast(cRoot, 'feat: child work', { files: ['child-file.mjs'] })
 
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
     const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
@@ -123,15 +120,13 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
     if (r1 !== 0) return `Round 1 record 失败：${r1}`
 
     writeFileSync(join(cRoot, 'child-file.mjs'), 'export const c = 2\n')
-    gitSync(cRoot, ['add', 'child-file.mjs'])
-    gitSync(cRoot, ['commit', '-qm', 'fix: address R1'])
+    gitCommitFast(cRoot, 'fix: address R1', { updateOnly: true })
 
     // 模拟父分支已合入 main，main 同时有无关提交 upstream-only.mjs
     const mergeP = gitSync(dir, ['merge', '--no-ff', 'docs/parent', '-qm', 'merge parent'])
     if (mergeP.status !== 0) return `合并父分支失败：${mergeP.stderr}`
     writeFileSync(join(dir, 'upstream-only.mjs'), 'export const u = 1\n')
-    gitSync(dir, ['add', 'upstream-only.mjs'])
-    gitSync(dir, ['commit', '-qm', 'chore: upstream change'])
+    gitCommitFast(dir, 'chore: upstream change', { files: ['upstream-only.mjs'] })
 
     const ledgerPath = join(dir, '.worktrees', '.state', 'tasks', 'child-t.json')
     const lObj = JSON.parse(readFileSync(ledgerPath, 'utf8'))
@@ -165,11 +160,9 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
 
     // sync 冲突恢复测试：再往 main 与 child 同行制造冲突后 sync 必须干净中止并回到非冲突状态
     writeFileSync(join(dir, 'conflict.mjs'), 'export const x = "main"\n')
-    gitSync(dir, ['add', 'conflict.mjs'])
-    gitSync(dir, ['commit', '-qm', 'main conflict'])
+    gitCommitFast(dir, 'main conflict', { files: ['conflict.mjs'] })
     writeFileSync(join(cRoot, 'conflict.mjs'), 'export const x = "child"\n')
-    gitSync(cRoot, ['add', 'conflict.mjs'])
-    gitSync(cRoot, ['commit', '-qm', 'child conflict'])
+    gitCommitFast(cRoot, 'child conflict', { files: ['conflict.mjs'] })
     const syncConflict = await handleSync({ task: 'child-t', onto: 'main' }, roots)
     if (syncConflict.exitCode !== 3 || syncConflict.code !== 'BLOCKED_SYNC_REBASE_CONFLICT') {
       return `sync 冲突未返回 BLOCKED_SYNC_REBASE_CONFLICT：${JSON.stringify(syncConflict)}`
@@ -262,8 +255,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
     // 实施 ta (干净)、tb (随后制造与 main 冲突)
     const wa = join(dir, '.worktrees', 'impl-ta')
     writeFileSync(join(wa, 'src/a.mjs'), 'export const a = 2\n')
-    gitSync(wa, ['add', 'src/a.mjs'])
-    gitSync(wa, ['commit', '-qm', 'feat: a'])
+    gitCommitFast(wa, 'feat: a', { updateOnly: true })
     const va = await handleVerify({ task: 'ta', tier: 'gate' }, roots)
     if (va.exitCode !== 0) return `ta verify --tier gate 失败：${va.exitCode}`
     const ra = await handleRecord({ task: 'ta', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
@@ -271,8 +263,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
 
     const wb = join(dir, '.worktrees', 'impl-tb')
     writeFileSync(join(wb, 'src/b.mjs'), 'export const b = "tb"\n')
-    gitSync(wb, ['add', 'src/b.mjs'])
-    gitSync(wb, ['commit', '-qm', 'feat: b'])
+    gitCommitFast(wb, 'feat: b', { updateOnly: true })
     const vb = await handleVerify({ task: 'tb', tier: 'gate' }, roots)
     if (vb.exitCode !== 0) return `tb verify --tier gate 失败：${vb.exitCode}`
     const rb = await handleRecord({ task: 'tb', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
@@ -280,8 +271,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
 
     // main 上改写 src/b.mjs 制造基线漂移冲突
     writeFileSync(join(dir, 'src/b.mjs'), 'export const b = "main-drift"\n')
-    gitSync(dir, ['add', 'src/b.mjs'])
-    gitSync(dir, ['commit', '-qm', 'main drift on b'])
+    gitCommitFast(dir, 'main drift on b', { updateOnly: true })
 
     const mq = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['batch', 'merge-queue', '--tasks', 'ta,tb', '--json'], { cwd: dir })
     if (mq.status === 0) return `存在冲突任务 tb 的合并队列不应全绿：${mq.stdout}`

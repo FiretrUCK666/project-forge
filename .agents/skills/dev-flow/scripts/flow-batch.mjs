@@ -13,6 +13,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import {
   gitRun, posixPath, readJsonSafe, resolveDefaultBranch, withFileLock, writeJsonAtomic,
 } from '../../lib/git.mjs'
+import { readGitConfigFast, readHeadFast, readRefsFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -57,8 +58,7 @@ async function collectTaskTouchedFiles(mainRoot, ledger) {
 
 async function handleBatchPlan(opts, roots) {
   const taskIds = parseTasksList(opts, roots.mainRoot)
-  const items = []
-  for (const id of taskIds) {
+  const items = await Promise.all(taskIds.map(async (id) => {
     const ledger = readTaskLedger(roots.mainRoot, id)
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
     const files = await collectTaskTouchedFiles(roots.mainRoot, ledger)
@@ -66,8 +66,8 @@ async function handleBatchPlan(opts, roots) {
       ...(Array.isArray(ledger.dependsOn) ? ledger.dependsOn.map(String) : []),
       ...(ledger.parentTaskId ? [String(ledger.parentTaskId)] : []),
     ])
-    items.push({ taskId: id, files, deps: [...deps].filter((d) => taskIds.includes(d)), ledger })
-  }
+    return { taskId: id, files, deps: [...deps].filter((d) => taskIds.includes(d)), ledger }
+  }))
 
   const byId = new Map(items.map((it) => [it.taskId, it]))
   const placedWave = new Map()
@@ -111,13 +111,12 @@ async function handleBatchPlan(opts, roots) {
 async function handleCheckDisjoint(opts, roots) {
   const taskIds = parseTasksList(opts, roots.mainRoot)
   const fileOwners = new Map()
-  const perTask = []
-
-  for (const id of taskIds) {
+  const perTask = await Promise.all(taskIds.map(async (id) => {
     const ledger = readTaskLedger(roots.mainRoot, id)
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
-    const files = await collectTaskTouchedFiles(roots.mainRoot, ledger)
-    perTask.push({ taskId: id, files })
+    return { taskId: id, files: await collectTaskTouchedFiles(roots.mainRoot, ledger) }
+  }))
+  for (const { taskId: id, files } of perTask) {
     for (const f of files) {
       if (!fileOwners.has(f)) fileOwners.set(f, [])
       fileOwners.get(f).push(id)
@@ -174,11 +173,13 @@ async function handleMergeQueue(opts, roots) {
       return { exitCode: 0, ...out }
     }
 
-    const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+    const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+    const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
     const remoteUrls = parseRemoteUrls(remoteRes.stdout)
     const topology = parseRemotesTopology(remoteRes.stdout)
     const declaredRepo = detectDeclaredRepo(roots.mainRoot)
-    const defaultBranch = await resolveDefaultBranch(roots.mainRoot)
+    const defaultBranch = (roots.gitDir ? readRefsFast(roots.gitDir, null, fastCfg?.initDefaultBranch) : null)
+      ?? await resolveDefaultBranch(roots.mainRoot)
     let sharedGhProbe = opts._ghProbe ?? null
     const results = []
     let stoppedWithFailure = false
@@ -249,7 +250,8 @@ async function handleMergeQueue(opts, roots) {
       }
 
       const baseBranch = ledger.baseBranch || defaultBranch || 'main'
-      const curBaseRes = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`])
+      const fastBaseSha = resolveRefShaFast(roots.gitDir, `refs/heads/${baseBranch}`)
+      const curBaseRes = fastBaseSha ? { ok: true, stdout: fastBaseSha } : await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`])
       const currentBaseSha = curBaseRes.ok ? curBaseRes.stdout.trim() : null
       const baseDrifted = Boolean(ledger.baseSha && currentBaseSha && ledger.baseSha !== currentBaseSha)
 
@@ -330,7 +332,10 @@ async function handleResumeSession(opts, roots) {
   if (!existing) throw new Error(`找不到任务账本：${taskId}`)
 
   const implRoot = existing.worktreePath ? resolve(roots.mainRoot, existing.worktreePath) : roots.mainRoot
-  const headRes = existsSync(implRoot) ? await gitRun(implRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' }
+  const fastResumeHead = existsSync(implRoot) ? (readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null) : null
+  const headRes = existsSync(implRoot)
+    ? (fastResumeHead ? { ok: true, stdout: fastResumeHead } : await gitRun(implRoot, ['rev-parse', 'HEAD']))
+    : { ok: false, stdout: '' }
   const headSha = headRes.ok ? headRes.stdout.trim() : null
   const nextState = evaluateNextState({ activeTasks: [existing], selectedTask: existing, taskRuntime: { headSha } })
   const prevEpoch = Number(existing.sessionHandle?.epoch) || 0

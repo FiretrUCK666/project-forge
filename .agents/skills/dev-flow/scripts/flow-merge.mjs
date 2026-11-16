@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { buildMergeComments } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
@@ -16,7 +17,7 @@ import {
   parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { classifyDoorType, detectGateWeakening, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
@@ -57,7 +58,9 @@ export async function assertPreMergeGates({
   const [stZ, headRes, diffNsRes] = await Promise.all([
     gitStatusPorcelainZ(implRoot),
     fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-    ledger.baseSha ? gitDiffNameStatusZ(implRoot, [`${ledger.baseSha}..HEAD`]) : Promise.resolve(null),
+    !ledger.baseSha
+      ? Promise.resolve(null)
+      : (fastHeadOid && fastHeadOid === ledger.baseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`)),
   ])
   const op = await detectInProgressGitOp(implRoot, { statusEntries: stZ.entries })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)
@@ -238,21 +241,26 @@ export async function handleMerge(opts, roots) {
     }
     if (!mergeRes.ok || !mergeRes.merged) throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（state=${mergeRes.state ?? mergeRes.error}）`)
     const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.implementerId })
+    const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
+      prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead,
+      reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
+    })
     await backend.postComment({
       repo: originFull,
       number: ledger.prNumber,
-      body: `审查通过并已合并：由独立审查（\`${effectiveReviewer}\`）复核通过（fail: 无），已将 \`${ledger.branch}\` 合入 \`${baseBranch}\`（实施人：${mergeContrib.display}）。`,
+      body: mergePrBody,
       statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer },
     })
     for (const iss of ledger.linkedIssues ?? []) {
-      await backend.postComment({ repo: originFull, number: iss, body: `已合并：PR #${ledger.prNumber} 经独立审查通过并合入 \`${baseBranch}\`。`, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer } })
+      await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer } })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
     }
     const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
     if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
       await gitRun(roots.mainRoot, ['fetch', pushRemote, baseBranch])
-      const curMainBr = await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
+      const fastMainBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
+      const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
       if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {
         await gitRun(roots.mainRoot, ['merge', '--ff-only', `${pushRemote}/${baseBranch}`])
       }
@@ -294,6 +302,8 @@ export async function handleMerge(opts, roots) {
     _ghProbe: opts._ghProbe,
     _ghClient: opts._ghClient,
     gitDir: roots.gitDir,
+    mergeStateOverride: mergeRes?.trialMerged ? { state: 'merged', ownCommits: 0, isShallow: false, reason: `已合入 ${baseBranch}` } : null,
+    knownCleanWorktrees: ledger.worktreePath ? [ledger.worktreePath] : [],
   })
   if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, status: ledger.status, mergeRes, pendingCleanupChecklist: checklist }, null, 2)}\n`)
   else {

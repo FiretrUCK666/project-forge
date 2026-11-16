@@ -5,9 +5,11 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative, basename, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
-import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
+import { prepareExecInvocation, resolveExecutable } from '../../kit/skills/lib/exec.mjs'
+import { hasDotGitInAncestors, readHeadFast, readLooseCommitLogFast } from '../../kit/skills/lib/git-fast.mjs'
+import { inspectSurveyStatusFast } from '../../kit/skills/lib/git-status-fast.mjs'
 
 import {
   detectGitModeMarkers,
@@ -140,8 +142,24 @@ function parsePorcelainV2(text) {
 }
 
 function inspectDotGitFast(root) {
-  const dotGit = join(root, '.git')
-  if (!existsSync(dotGit)) return null
+  if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return null
+  let wtRoot = resolve(root)
+  let dotGit = join(wtRoot, '.git')
+  let isRepoRoot = true
+  if (!existsSync(dotGit)) {
+    isRepoRoot = false
+    let cur = dirname(wtRoot)
+    while (cur !== wtRoot) {
+      if (existsSync(join(cur, '.git'))) {
+        wtRoot = cur
+        dotGit = join(cur, '.git')
+        break
+      }
+      wtRoot = cur
+      cur = dirname(cur)
+    }
+    if (!existsSync(dotGit)) return null
+  }
   try {
     const st = statSync(dotGit)
     let workGitDir = dotGit
@@ -149,7 +167,7 @@ function inspectDotGitFast(root) {
     if (st.isFile()) {
       const m = /^gitdir:\s*(.+)$/im.exec(readTextSafe(dotGit) ?? '')
       if (!m) return null
-      workGitDir = resolve(root, m[1].trim())
+      workGitDir = resolve(wtRoot, m[1].trim())
       const commondirTxt = readTextSafe(join(workGitDir, 'commondir'))
       commonDir = commondirTxt ? resolve(workGitDir, commondirTxt.trim()) : workGitDir
     } else if (!st.isDirectory()) {
@@ -244,7 +262,7 @@ function inspectDotGitFast(root) {
       fastRemoteOriginBranches = [...remoteOriginSet].sort()
     }
     return {
-      isRepoRoot: true, workTreeRoot: root, workGitDir, commonDir, isShallow, isSha256,
+      isRepoRoot, workTreeRoot: wtRoot, workGitDir, commonDir, isShallow, isSha256,
       remoteText, originHeadBranch, fastTags, fastLocalBranches, fastRemoteOriginBranches, useReftable,
     }
   } catch {
@@ -337,7 +355,46 @@ function parseTagsAndOriginHead(forEachRefOut) {
   return { tags, originHeadBranch, localBranches, remoteOriginBranches }
 }
 
-function readScopeConfigFast(commonDir) {
+let cachedSystemGitConfig
+let pendingSystemGitConfig
+function getSystemGitConfigEntriesAsync() {
+  if (cachedSystemGitConfig !== undefined) return Promise.resolve(cachedSystemGitConfig)
+  if (pendingSystemGitConfig) return pendingSystemGitConfig
+  pendingSystemGitConfig = new Promise((resolveDone) => {
+    const entries = []
+    try {
+      const inv = process.platform === 'win32'
+        ? prepareExecInvocation('git', ['config', '--system', '--list'], {})
+        : { cmd: 'git', args: ['config', '--system', '--list'], windowsVerbatimArguments: false }
+      execFile(inv.cmd, inv.args, {
+        encoding: 'utf8', timeout: 5000, windowsHide: true,
+        ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      }, (err, stdout) => {
+        if (!err && stdout) {
+          for (const rawLine of String(stdout).split('\n')) {
+            const eq = rawLine.indexOf('=')
+            if (eq <= 0) continue
+            const key = rawLine.slice(0, eq).trim().toLowerCase()
+            const value = rawLine.slice(eq + 1).trim()
+            if (/^(?:user|credential|init)\./.test(key) || key === 'core.excludesfile') {
+              entries.push({ key, scope: 'system', value })
+            }
+          }
+        }
+        cachedSystemGitConfig = entries
+        pendingSystemGitConfig = null
+        resolveDone(entries)
+      })
+    } catch {
+      cachedSystemGitConfig = entries
+      pendingSystemGitConfig = null
+      resolveDone(entries)
+    }
+  })
+  return pendingSystemGitConfig
+}
+
+function readUserScopeConfigFast(commonDir) {
   if (process.env.GIT_CONFIG_GLOBAL || process.env.GIT_CONFIG_SYSTEM || process.env.GIT_CONFIG_COUNT) return null
   const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
   const globalPath = existsSync(join(homedir(), '.gitconfig'))
@@ -347,7 +404,6 @@ function readScopeConfigFast(commonDir) {
   const sources = []
   if (globalPath) sources.push({ scope: 'global', text: readTextSafe(globalPath) ?? '' })
   if (existsSync(localPath)) sources.push({ scope: 'local', text: readTextSafe(localPath) ?? '' })
-  if (sources.length === 0) return null
   for (const s of sources) {
     if (/^\s*\[include(?:if)?\b/im.test(s.text)) return null
   }
@@ -363,21 +419,76 @@ function readScopeConfigFast(commonDir) {
       if (eq <= 0) continue
       const k = line.slice(0, eq).trim().toLowerCase()
       const v = line.slice(eq + 1).trim()
-      if (curSection === 'user' || curSection === 'credential' || curSection === 'init') {
+      if (curSection === 'user' || curSection === 'credential' || curSection === 'init' || (curSection === 'core' && k === 'excludesfile')) {
         map.set(`${curSection}.${k}`, { scope, value: v })
       }
     }
   }
-  if (!map.get('user.name')?.value || !map.get('user.email')?.value) return null
   return map
 }
 
+function mergeScopeConfigFast(sysEntries, userMap) {
+  const map = new Map()
+  for (const sysEntry of sysEntries ?? []) {
+    map.set(sysEntry.key, { scope: sysEntry.scope, value: sysEntry.value })
+  }
+  for (const [k, v] of userMap.entries()) map.set(k, v)
+  return map
+}
+
+function hasIgnoredTrackedImpossibleFast(root, commonDir, trackedPaths, configMap) {
+  if (!Array.isArray(trackedPaths) || trackedPaths.length === 0) return true
+  if (configMap?.get('core.excludesfile')?.value) return false
+  if (trackedPaths.some((p) => p.includes('/') && p.endsWith('/.gitignore'))) return false
+  const rules = []
+  for (const file of [join(root, '.gitignore'), join(commonDir, 'info', 'exclude')]) {
+    const txt = readTextSafe(file)
+    if (!txt) continue
+    for (const raw of txt.split('\n')) {
+      const line = raw.trim()
+      if (!line || line.startsWith('#') || line.startsWith('!')) continue
+      if (line === '*.py[cod]') {
+        if (trackedPaths.some((p) => /\.(?:pyc|pyo|pyd)$/.test(p))) return false
+        continue
+      }
+      if (/[\\[\]?]/.test(line) || line.includes('**')) return false
+      rules.push(line)
+    }
+  }
+  if (rules.length === 0) return true
+  for (const rule of rules) {
+    const anchored = rule.startsWith('/')
+    const clean = rule.replace(/^\/+/, '').replace(/\/+$/, '')
+    if (!clean) continue
+    if (clean.includes('*')) {
+      const starM = /^\*\.([A-Za-z0-9_-]+)$/.exec(clean)
+      if (starM) {
+        const suffix = `.${starM[1]}`
+        if (trackedPaths.some((p) => p.endsWith(suffix))) return false
+        continue
+      }
+      if (!anchored && !clean.includes('/') && clean.startsWith('*') && clean.length > 1 && !/[*?[\]\\/]/.test(clean.slice(1))) {
+        const suffix = clean.slice(1)
+        if (trackedPaths.some((p) => p.split('/').some((seg) => seg.endsWith(suffix)))) return false
+        continue
+      }
+      return false
+    }
+    if (anchored || clean.includes('/')) {
+      if (trackedPaths.some((p) => p === clean || p.startsWith(`${clean}/`))) return false
+    } else {
+      if (trackedPaths.some((p) => p === clean || p.startsWith(`${clean}/`) || p.split('/').includes(clean))) return false
+    }
+  }
+  return true
+}
+
 export async function detectGit(root, opts = {}) {
-  const { probeAuth = false, verifyToken = false, sshHostMap, mcpAvailable, offline } = opts
+  const { probeAuth = false, verifyToken = false, sshHostMap, mcpAvailable, offline, fastUnbornStatus = false } = opts
   const effectiveHostMap = sshHostMap === false ? {} : (sshHostMap ?? parseSshConfigHostMap())
   const dotFast = inspectDotGitFast(root)
 
-  // 非根目录且无直属 .git 时先用单次 rev-parse 确认是否处于版本库内，避免在纯目录上并发空跑必败 git 子进程
+  // 非根目录且无直属 .git 时先纯本地核查祖先是否存在 .git，避免非 Git 目录空跑 `git rev-parse`
   // 注意：不可将 --show-toplevel 与裸仓检测合并，否则裸仓会直接报错退出 128
   let top
   let isBare = false
@@ -387,6 +498,19 @@ export async function detectGit(root, opts = {}) {
   if (dotFast) {
     insideFlag = 'true'
     isShallow = dotFast.isShallow
+    workTreeRoot = dotFast.workTreeRoot
+  } else if (!hasDotGitInAncestors(root)) {
+    if (!resolveExecutable('git')) {
+      return { available: false, present: false, auth: { https: 'n/a', network: 'n/a' } }
+    }
+    let auth = { https: 'n/a', network: 'n/a' }
+    if (probeAuth) {
+      const probe = await probeGitHubEnv({
+        cwd: root, remoteUrls: {}, verifyToken, mcpAvailable, offline, sshHostMap: effectiveHostMap,
+      })
+      auth = mapProbeToAuth(probe)
+    }
+    return { available: true, present: false, auth }
   } else {
     top = await git(root, ['rev-parse', '--is-inside-work-tree', '--is-bare-repository', '--is-shallow-repository', '--git-dir'])
     if (top.missing) {
@@ -421,23 +545,68 @@ export async function detectGit(root, opts = {}) {
     }
   }
 
-  const fastConfigMap = dotFast ? readScopeConfigFast(dotFast.commonDir) : null
-  const fastTrackedPaths = dotFast ? readGitIndexFast(dotFast.workGitDir, dotFast.isSha256) : null
-  const [cfg, st, remotes, refsRes, logRes, lsFiles, lsIgnoredRes] = await Promise.all([
-    fastConfigMap ? Promise.resolve(null) : git(root, ['config', '--list', '--show-scope', '--show-origin']),
-    git(root, ['status', '--porcelain=v2', '--branch', '--ignored=matching', '--untracked-files=normal']),
+  const userScopeMap = dotFast ? readUserScopeConfigFast(dotFast.commonDir) : null
+  const fastIndexAbsent = Boolean(dotFast && !dotFast.useReftable && !existsSync(join(dotFast.workGitDir, 'index')))
+  const fastTrackedPaths = dotFast ? (fastIndexAbsent ? [] : readGitIndexFast(dotFast.workGitDir, dotFast.isSha256)) : null
+  const fastHeadInfo = (() => {
+    if (!dotFast || dotFast.useReftable) return null
+    const ht = readTextSafe(join(dotFast.workGitDir, 'HEAD'))?.trim()
+    if (!ht) return null
+    if (!ht.startsWith('ref:')) return { unborn: false, branch: '(detached)' }
+    const refRel = ht.slice(4).trim().replace(/^\/+/, '')
+    const branch = refRel.startsWith('refs/heads/') ? refRel.slice(11) : refRel
+    if (existsSync(join(dotFast.commonDir, ...refRel.split('/')))) return { unborn: false, branch }
+    const packed = readTextSafe(join(dotFast.commonDir, 'packed-refs')) ?? ''
+    const hasPacked = packed.split('\n').some((l) => l && !l.startsWith('#') && !l.startsWith('^') && l.slice(l.indexOf(' ') + 1).trim() === refRel)
+    return { unborn: !hasPacked, branch }
+  })()
+  const fastHeadUnborn = Boolean(fastHeadInfo?.unborn)
+  const fastHeadOid = (dotFast && !dotFast.useReftable && !fastHeadUnborn) ? readHeadFast(dotFast.workGitDir, dotFast.commonDir)?.oid : null
+  const fastCommitLog = (fastHeadOid && !dotFast?.isShallow) ? readLooseCommitLogFast(workTreeRoot, dotFast.commonDir, fastHeadOid, 500) : null
+  const skipUnbornStatus = Boolean(fastUnbornStatus && fastHeadUnborn && fastIndexAbsent)
+  const fastSurveyStatus = (!skipUnbornStatus && dotFast && !dotFast.useReftable)
+    ? inspectSurveyStatusFast(workTreeRoot)
+    : null
+  const sysEntriesPromise = userScopeMap ? getSystemGitConfigEntriesAsync() : null
+  const lsIgnoredPromise = (dotFast && !dotFast.useReftable && userScopeMap)
+    ? sysEntriesPromise.then((sysEntries) => (
+      hasIgnoredTrackedImpossibleFast(workTreeRoot, dotFast.commonDir, fastTrackedPaths, mergeScopeConfigFast(sysEntries, userScopeMap))
+        ? { ok: true, stdout: '' }
+        : git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z'])
+    ))
+    : git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z'])
+  const [sysEntries, cfg, st, remotes, refsRes, logRes, lsFiles, lsIgnoredRes] = await Promise.all([
+    sysEntriesPromise ?? Promise.resolve(null),
+    userScopeMap ? Promise.resolve(null) : git(root, ['config', '--list', '--show-scope', '--show-origin']),
+    skipUnbornStatus
+      ? Promise.resolve({ ok: true, stdout: `# branch.oid (initial)\n# branch.head ${fastHeadInfo.branch}\n` })
+      : (fastSurveyStatus?.ok
+          ? Promise.resolve({
+              ok: true,
+              stdout: [
+                `# branch.oid ${fastSurveyStatus.headInfo.oid || '(initial)'}`,
+                `# branch.head ${fastSurveyStatus.headInfo.detached ? '(detached)' : fastSurveyStatus.headInfo.branch}`,
+                ...Array.from({ length: fastSurveyStatus.dirty }, (_, idx) => `? fast-dirty-${idx}`),
+                ...fastSurveyStatus.ignored.map((p) => `! ${p}`),
+              ].join('\n'),
+            })
+          : git(root, ['status', '--porcelain=v2', '--branch', '--ignored=matching', '--untracked-files=normal'])),
     dotFast && dotFast.remoteText !== null ? Promise.resolve({ ok: true, stdout: dotFast.remoteText }) : git(root, ['remote', '-v']),
     dotFast && !dotFast.useReftable && dotFast.fastTags !== null
       ? Promise.resolve(null)
       : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/heads', 'refs/remotes/origin']),
-    git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '500']),
-    fastTrackedPaths ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
-    git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z']),
+    fastHeadUnborn
+      ? Promise.resolve({ ok: true, stdout: '' })
+      : (fastCommitLog
+          ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
+          : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '500'])),
+    fastTrackedPaths !== null ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
+    lsIgnoredPromise,
   ])
 
-  const isRepoRoot = dotFast ? true : samePath(root, workTreeRoot)
+  const isRepoRoot = dotFast ? dotFast.isRepoRoot : samePath(root, workTreeRoot)
 
-  const config = fastConfigMap ?? parseConfigList(cfg?.ok ? cfg.stdout : '')
+  const config = userScopeMap ? mergeScopeConfigFast(sysEntries, userScopeMap) : parseConfigList(cfg?.ok ? cfg.stdout : '')
   const statusInfo = parsePorcelainV2(st.ok ? st.stdout : '')
 
   const topology = resolveRemotesTopology(remotes.stdout || '', { sshHostMap: effectiveHostMap })

@@ -27,6 +27,7 @@ import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
 } from '../../lib/ledger.mjs'
@@ -68,10 +69,13 @@ async function initDoc({
 
   const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo' }
   const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
-  const headRes = isGit ? await gitRun(writeRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' }
+  const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
+  const headRes = fastHead?.oid
+    ? { ok: true, stdout: fastHead.oid }
+    : (isGit ? await gitRun(writeRoot, ['rev-parse', 'HEAD']) : { ok: false, stdout: '' })
   const headSha = headRes.ok && headRes.stdout ? headRes.stdout.trim() : 'uncommitted'
-  let headBranch = branch ?? null
-  if (!headBranch && isGit) {
+  let headBranch = branch ?? (fastHead?.branch ?? null)
+  if (!headBranch && isGit && !fastHead) {
     const sym = await gitRun(writeRoot, ['symbolic-ref', '--short', 'HEAD'])
     if (sym.ok && sym.stdout.trim()) headBranch = sym.stdout.trim()
     else {

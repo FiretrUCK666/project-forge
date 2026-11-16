@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-16
 updated: 2026-11-16
 issue: 43
-pr: null
+pr: 44
 branch: feat/v7-m5-align-skills-docs-bootstrap
 owner: FiretrUCK666
 approved: true

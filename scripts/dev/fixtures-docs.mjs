@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SKILL_ROOT, gitInit, gitSync, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerDocsCases(cases) {
 cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截、critique-pass 防篡改、approve 与豁免', async () => {
@@ -313,8 +313,7 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
     const billTodo = initBill.files.find((f) => f.endsWith('-billing-todo.md'))
     fillGeneratedDoc(join(dir, billSpec))
     fillGeneratedDoc(join(dir, billTodo))
-    gitSync(dir, ['add', '-A'])
-    gitSync(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'add auth42 and billing docs'])
+    gitCommitFast(dir, 'add auth42 and billing docs', { name: 't', email: 't@t.t' })
 
     const flowStart = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 'c30-bill', '--case', '3', '--slug', 'billing', '--issue', '77', '--spec', billSpec, '--todo', billTodo, '--dir', dir, '--json'])
     if (flowStart.status !== 0) return `flow.mjs start --issue 77 失败：${flowStart.stderr}`
@@ -414,8 +413,7 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
     const c29Wt = join(dir, JSON.parse(startRes.stdout).worktreePath)
 
     writeFileSync(join(c29Wt, 'src/api.mjs'), 'export const version = 2\n')
-    gitSync(c29Wt, ['add', 'src/api.mjs'])
-    gitSync(c29Wt, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'update api only'])
+    gitCommitFast(c29Wt, 'update api only', { files: ['src/api.mjs'], name: 't', email: 't@t.t' })
 
     const triageOne = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', c29Wt, '--summary', 'update api', '--paths', 'src/api.mjs', '--json'])
     const packJsonRes = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--dir', c29Wt, '--base', 'master', '--json'])
@@ -447,8 +445,7 @@ cases.push(['耦合文件自同步门禁：AGENTS 改哪看哪解析、单边触
 
     // 反面：补齐伴随文件 docs/api.md 后，三处工具均应 0 告警且 --strict-sync 放行
     writeFileSync(join(c29Wt, 'docs/api.md'), '# API\n\nUpdated version 2.\n')
-    gitSync(c29Wt, ['add', 'docs/api.md'])
-    gitSync(c29Wt, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'sync api docs'])
+    gitCommitFast(c29Wt, 'sync api docs', { files: ['docs/api.md'], name: 't', email: 't@t.t' })
 
     const triageSynced = JSON.parse((await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['triage', '--dir', c29Wt, '--summary', 'update api', '--paths', 'src/api.mjs,docs/api.md', '--json'])).stdout)
     if ((triageSynced.coupledSyncWarnings?.length ?? 0) !== 0) {
@@ -666,15 +663,13 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
     const audPrd = auditDoc({ repoRoot: wt, file: archivedPrdRel })
     if (!audPrd.ok) return `归档后总控 PRD audit 失败：${JSON.stringify(audPrd.errors)}`
 
-    gitSync(wt, ['add', '-A'])
-    gitSync(wt, ['-c', 'user.name=alice', '-c', 'user.email=alice@example.com', 'commit', '-qm', 'finalize with master prd'])
+    gitCommitFast(wt, 'finalize with master prd', { name: 'alice', email: 'alice@example.com' })
     const verRes = await handleVerify({ task: 'm2', mode: 'gate' }, roots)
     if (verRes.exitCode !== 0) return `archivedPrdFile 未放行 do-not-edit 拦截：exit=${verRes.exitCode}`
 
     // 4. 返工再次 finalize 幂等保持元信息与 archivedPrdFile
     writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
-    gitSync(wt, ['add', '-A'])
-    gitSync(wt, ['-c', 'user.name=alice', '-c', 'user.email=alice@example.com', 'commit', '-qm', 'rework v2'])
+    gitCommitFast(wt, 'rework v2', { updateOnly: true, name: 'alice', email: 'alice@example.com' })
     const finRework = await handleFinalize({ task: 'm2', 'include-master-prd': true, json: true }, roots)
     if (finRework.exitCode !== 0) return `返工重复 finalize --include-master-prd 失败：${finRework.exitCode}`
     const prdFm2 = parseDocFrontmatter(readFileSync(join(wt, archivedPrdRel), 'utf8')).data

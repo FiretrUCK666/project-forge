@@ -14,6 +14,11 @@ import {
   detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitRunBuffer,
   isMacOsJunkPath, posixPath, readTextSafe, syncDetachedWorktree,
 } from '../../lib/git.mjs'
+import {
+  computePatchRawDigest, getCachedCommitDiff, isAncestorLinearFast, parseRawAndUnifiedDiff,
+  readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
+} from '../../lib/git-fast.mjs'
+import { isCleanWorktreeFast } from '../../lib/git-status-fast.mjs'
 import { writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, detectGateWeakeningInEntry,
@@ -33,6 +38,8 @@ const BUILD_SCRIPT_RE = /(?:^|\/)(?:Makefile|GNUmakefile|makefile|justfile|Taskf
 const EXTRA_CI_FILE_RE = /(?:^|\/)(?:\.travis\.ya?ml|\.drone\.ya?ml|\.buildkite\/pipeline\.ya?ml|\.woodpecker(?:\.ya?ml|\/[^/]+\.ya?ml))$/i
 
 export async function hasCommits(repoRoot) {
+  const fastHead = readHeadFast(resolveGitDirFast(repoRoot))
+  if (fastHead) return Boolean(fastHead.oid)
   return (await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok
 }
 
@@ -40,13 +47,23 @@ export async function resolveReviewTargetSha(mainRoot, worktreeRoot, task, headR
   if (task) {
     const implRoot = task.worktreePath ? resolve(mainRoot, task.worktreePath) : null
     if (implRoot && existsSync(implRoot)) {
+      if (headRef === 'HEAD') {
+        const fast = readHeadFast(resolveGitDirFast(implRoot))?.oid
+        if (fast) return fast
+      }
       const res = await gitRun(implRoot, ['rev-parse', headRef])
       if (res.ok && res.stdout.trim()) return res.stdout.trim()
     }
     if (task.branch && headRef === 'HEAD') {
+      const fastBr = resolveRefShaFast(resolveGitDirFast(mainRoot), `refs/heads/${task.branch}`)
+      if (fastBr) return fastBr
       const brRes = await gitRun(mainRoot, ['rev-parse', '--verify', `refs/heads/${task.branch}`])
       if (brRes.ok && brRes.stdout.trim()) return brRes.stdout.trim()
     }
+  }
+  if (headRef === 'HEAD') {
+    const fastWt = readHeadFast(resolveGitDirFast(worktreeRoot))?.oid
+    if (fastWt) return fastWt
   }
   const fallback = await gitRun(worktreeRoot, ['rev-parse', headRef])
   return fallback.ok && fallback.stdout.trim() ? fallback.stdout.trim() : 'UNBORN'
@@ -130,6 +147,20 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
 }
 
 export async function computeDiffRange(repoRoot, baseRef, headRef) {
+  const wtGitDir = resolveGitDirFast(repoRoot)
+  if (wtGitDir && !existsSync(join(wtGitDir, 'reftable'))) {
+    const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
+    const commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
+    const baseSha = /^[0-9a-f]{40}$/i.test(baseRef)
+      ? baseRef
+      : (resolveRefShaFast(commonDir, `refs/heads/${baseRef}`) ?? resolveRefShaFast(commonDir, `refs/remotes/${baseRef}`))
+    const headSha = headRef === 'HEAD'
+      ? readHeadFast(wtGitDir, commonDir)?.oid
+      : (/^[0-9a-f]{40}$/i.test(headRef) ? headRef : null)
+    if (baseSha && headSha && isAncestorLinearFast(commonDir, baseSha, headSha) === true) {
+      return `${baseSha}..${headRef}`
+    }
+  }
   const mb = await gitRun(repoRoot, ['merge-base', baseRef, headRef])
   if (mb.ok && mb.stdout.trim()) return `${mb.stdout.trim()}..${headRef}`
   return `${baseRef}..${headRef}`
@@ -224,6 +255,19 @@ export async function collectDiff(repoRoot, spec) {
         summary: { filesChanged: 0, untrackedCount: 0, addedLines: 0, removedLines: 0 },
       }
     }
+    if (commits.length === 1) {
+      const singleRes = await gitRunBuffer(repoRoot, ['show', '--format=tformat:', '--raw', '--no-ext-diff', '--no-color', commits[0]], { maxBuffer: 64 * 1024 * 1024, timeout: 30000 })
+      if (!singleRes.ok) {
+        throw new Error(`GIT_DIFF_FAILED: git show 执行失败（commits=${commits[0]}）：${singleRes.stderr || 'unknown git show error'}`)
+      }
+      const fullBuf = Buffer.isBuffer(singleRes.stdout) ? singleRes.stdout : Buffer.from('')
+      const digest = computePatchRawDigest(fullBuf)
+      const { entries: parsedEntries, diffText: text } = parseRawAndUnifiedDiff(fullBuf)
+      const files = parsedEntries.filter((e) => e.file && !isMacOsJunkPath(e.file))
+      const chunks = splitDiffByFile(text)
+      const { hunkIndex, summary } = buildHunkIndex(files, [], chunks, repoRoot)
+      return { sha256: digest.sha256, bytes: digest.bytes, text, chunks, files, untracked: [], hunkIndex, summary }
+    }
     const [rawBufRes, nsBufRes] = await Promise.all([
       gitRunBuffer(repoRoot, ['show', '--format=tformat:', '--no-ext-diff', '--no-color', ...commits], { maxBuffer: 64 * 1024 * 1024, timeout: 30000 }),
       gitRunBuffer(repoRoot, ['show', '--format=tformat:', '--name-status', '-z', ...commits], { maxBuffer: 16 * 1024 * 1024, timeout: 30000 }),
@@ -240,44 +284,76 @@ export async function collectDiff(repoRoot, spec) {
     return { sha256: createHash('sha256').update(rawBuf).digest('hex'), bytes: rawBuf.length, text, chunks, files, untracked: [], hunkIndex, summary }
   }
 
-  const argsBase = ['diff', '--no-ext-diff', '--no-color']
+  const argsBase = ['--no-optional-locks', 'diff', '--raw', '--no-ext-diff', '--no-color']
   let diffArgs
-  let nsArgs
+  let cacheCommonDir = null
+  let cacheBaseSha = null
+  let cacheHeadSha = null
   if (spec.mode === 'local') {
     if (await hasCommits(repoRoot)) {
       diffArgs = [...argsBase, 'HEAD']
-      nsArgs = ['HEAD']
     } else {
       diffArgs = [...argsBase, '--cached']
-      nsArgs = ['--cached']
     }
   } else if (spec.mode === 'staged') {
     diffArgs = [...argsBase, '--cached']
-    nsArgs = ['--cached']
   } else {
-    diffArgs = [...argsBase, spec.range]
-    nsArgs = [spec.range]
+    let effectiveRange = spec.range
+    const rangeM = /^([0-9a-f]{40,64})\.\.([0-9a-f]{40,64}|HEAD)$/i.exec(String(spec.range ?? ''))
+    if (rangeM) {
+      const wtGitDir = resolveGitDirFast(repoRoot)
+      if (wtGitDir) {
+        const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
+        cacheCommonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
+        const hSha = rangeM[2].toUpperCase() === 'HEAD' ? readHeadFast(wtGitDir, cacheCommonDir)?.oid : rangeM[2]
+        if (hSha && /^[0-9a-f]{40,64}$/i.test(hSha)) {
+          cacheBaseSha = rangeM[1]
+          cacheHeadSha = hSha
+          effectiveRange = `${cacheBaseSha}..${cacheHeadSha}`
+        }
+      }
+    }
+    diffArgs = [...argsBase, effectiveRange]
   }
 
-  const [rawBufRes, ns] = await Promise.all([
-    gitRunBuffer(repoRoot, diffArgs, { maxBuffer: 64 * 1024 * 1024, timeout: 30000 }),
-    gitDiffNameStatusZ(repoRoot, nsArgs),
-  ])
-
-  if (!rawBufRes.ok || !ns.ok) {
-    const errText = rawBufRes.stderr || ns.stderr || 'unknown git diff error'
-    throw new Error(`GIT_DIFF_FAILED: git diff 执行失败（scope=${spec.range ?? spec.mode}）：${errText}；请确认基线引用（可用 --base <ref> 指定）及提交历史有效。`)
+  let sha256
+  let bytes
+  let parsedEntries
+  let text
+  const cachedHit = (cacheCommonDir && cacheBaseSha && cacheHeadSha)
+    ? (cacheBaseSha === cacheHeadSha
+        ? { entries: [], diffText: '', rawSha256: createHash('sha256').update('').digest('hex'), rawBytes: 0 }
+        : getCachedCommitDiff(cacheCommonDir, cacheBaseSha, cacheHeadSha))
+    : null
+  if (cachedHit && cachedHit.rawSha256) {
+    sha256 = cachedHit.rawSha256
+    bytes = cachedHit.rawBytes
+    parsedEntries = cachedHit.entries
+    text = cachedHit.diffText
+  } else {
+    const rawBufRes = await gitRunBuffer(repoRoot, diffArgs, { maxBuffer: 64 * 1024 * 1024, timeout: 30000 })
+    if (!rawBufRes.ok) {
+      const errText = rawBufRes.stderr || 'unknown git diff error'
+      throw new Error(`GIT_DIFF_FAILED: git diff 执行失败（scope=${spec.range ?? spec.mode}）：${errText}；请确认基线引用（可用 --base <ref> 指定）及提交历史有效。`)
+    }
+    const fullBuf = Buffer.isBuffer(rawBufRes.stdout) ? rawBufRes.stdout : Buffer.from('')
+    const digest = computePatchRawDigest(fullBuf)
+    sha256 = digest.sha256
+    bytes = digest.bytes
+    const parsed = parseRawAndUnifiedDiff(fullBuf)
+    parsedEntries = parsed.entries
+    text = parsed.diffText
+    if (cacheCommonDir && cacheBaseSha && cacheHeadSha && cacheBaseSha !== cacheHeadSha) {
+      setCachedCommitDiff(cacheCommonDir, cacheBaseSha, cacheHeadSha, {
+        ok: true, entries: parsedEntries, diffText: text, rawSha256: sha256, rawBytes: bytes,
+      })
+    }
   }
 
-  const rawBuf = Buffer.isBuffer(rawBufRes.stdout) ? rawBufRes.stdout : Buffer.from('')
-  const sha256 = createHash('sha256').update(rawBuf).digest('hex')
-  const bytes = rawBuf.length
-  const text = rawBuf.toString('utf8').replace(/\r\n/g, '\n')
-
-  const files = ns.entries.filter((e) => e.file && !isMacOsJunkPath(e.file))
+  const files = parsedEntries.filter((e) => e.file && !isMacOsJunkPath(e.file))
   const untracked = []
-  if (spec.mode === 'local') {
-    const st = await gitRunBuffer(repoRoot, ['ls-files', '-z', '--others', '--exclude-standard'])
+  if (spec.mode === 'local' && !isCleanWorktreeFast(repoRoot)?.clean) {
+    const st = await gitRunBuffer(repoRoot, ['--no-optional-locks', 'ls-files', '-z', '--others', '--exclude-standard'])
     if (!st.ok) {
       throw new Error(`GIT_LS_FILES_FAILED: 枚举未跟踪文件失败：${st.stderr}`)
     }

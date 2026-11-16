@@ -23,10 +23,10 @@
 | 能力 | 具体是什么 |
 | --- | --- |
 | **保住你手写的东西** | 已有的 `README.md`、`CONTRIBUTING.md`、架构文档、自定义模板、CI 工作流和自有技能全部原样保留。写任何文件前先在仓库外面存一份 `.zip` 快照（兼容恢复 `.tar.gz`） |
-| **8 阶段闭环与澄清网关** | 贯通「需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入」。复杂需求主动建议 PRD，先多轮澄清消解待拍板事项并过不可自审的独立 Critique，再隔离开工 |
+| **先澄清，再按八步推进** | 按需求、澄清、设计、实现、评审、实证测试、验收、合并的顺序推进。复杂需求先建议建 PRD，多轮澄清待拍板事项并经独立 Critique 审核后再隔离开工 |
 | **全 Worktree 隔离与实证** | 有提交历史默认进入 `.worktrees/` 隔离槽复用，谁改代码谁认领并负责提 PR，推分支后零跟踪文件写脏；合入前须齐备分层实证、双门独立审查、Mermaid `16/12` 与跨平台 CI 检查 |
 | **本地 / 非 GitHub 自适应** | 统一 `TaskBackend` 适配 GitHub、纯本地无远端和 `generic-git`（非 GitHub 远端不越权在本地强合主干）；还支持外部 Issue+PR 互链防重、堆叠 PR 与并行波次 |
-| **两档配置与自进化复盘** | 个人小仓库只装 `lightweight`（`< 14KB` 契约 + 3 个技能），随时 `--tier full` 补到 5 个。运行期信号自动沉淀到 `signals.jsonl`，通过 `retro` 复盘规则下沉 |
+| **两档配置与复盘下沉** | 个人小仓库只装 `lightweight`（`< 14KB` 契约 + 3 个技能），随时 `--tier full` 补到 5 个。运行期间的门禁与返工信号自动记入 `signals.jsonl`，可通过 `retro` 提取规则补丁 |
 
 ## 目录
 
@@ -47,22 +47,21 @@
 ## 一次改动怎么走完
 
 <p align="center">
-  <img src="assets/readme/architecture.svg" alt="五个日常技能与合入主干前必须拿到的四项实证证据" width="100%">
+  <img src="assets/readme/architecture.svg" alt="五个日常技能的先后分工与合入前四项实证要求" width="100%">
 </p>
 
-日常研发沿 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八阶段推进。`lightweight` 档装前三个技能，`full` 档装全部五个；直接用自然语言说明意图，`AGENTS.md` 会路由到对应技能。
+日常研发按 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八个阶段推进。`lightweight` 档装前三个技能，`full` 档装全部五个；直接用自然语言说明意图，或直接粘贴 Issue、PR 链接，`AGENTS.md` 会路由到对应技能。
 
 假设你要给项目加一个「导出 CSV」的功能：
 
-| 步骤 | 你说什么 | 谁来做 | 拿到什么 |
+| 步骤 | 你说什么 | 负责技能 | 拿到什么 |
 | --- | --- | --- | --- |
 | 1 | 「理清导出模块在哪、现在有哪些命令能验证」 | `dev-explore` | 模块入口、`Feature Map` 与可复用模块清单。只读，不改任何文件 |
 | 2 | 「给导出 CSV 澄清需求并写方案，标准要能判定」 | `dev-plan` | 多轮澄清消解待拍板问题，按需出 PRD / SPEC / Todo（`C1`、`C2` 编号）并过独立 Critique |
 | 3 | 「按方案开工」 | `dev-flow` | `.worktrees/` 隔离工作树、谁改谁认领、`finalize` 成对归档、分层实证绑定提交、推分支并提 PR |
 | 4 | 「用独立视角审这个 PR」 | `dev-review` | 外部 PR 先过供应链扫描；跑行为/结构双门实证与六锁收敛，Round 2+ 换新独立上下文复核 |
-| 5 | 「过了就合，然后清理」 | `dev-flow` | 审查者经临时试合后合并，列出待清理清单请人点头后执行 7 步收尾 |
-
-`dev-govern` 负责定期巡检与闭环复盘：平时可随时体检代码、查测试分层与 Worktree 残留；任务完成后运行 `retro` 读取 `signals.jsonl` 提出门禁下沉补丁，结论反哺下一轮 `dev-plan`。
+| 5 | 「过了就合，然后清理」 | `dev-flow` | 独立审查通过后由审查者经临时试合合并，列出待清理清单请人点头后执行 7 步收尾 |
+| 日常 / 复盘 | 「查仓库健康，或把返工教训写成规则」 | `dev-govern` | 平时随时审计死链、测试分层与 Worktree 残留；任务后用 `retro` 读 `signals.jsonl` 生成补丁供下轮规划参考 |
 
 **哪些能跳过：**
 
@@ -80,7 +79,7 @@
 | --- | --- |
 | **清单能精准识别（12 种）** | `Node.js` `Python` `Rust` `Go` `Java` `Ruby` `PHP` `.NET` `C/C++` `Dart` `Swift` `Elixir`。给出该语言惯用的构建、测试、安装命令 |
 | **清单外的其他语言** | Haskell、OCaml、Zig、Nim、Crystal、Julia、自研 DSL 都一样：从你项目里**已经在跑的命令**读——CI 的 `run:` 块、`Makefile`、`justfile`、`Taskfile`。这些命令被真实执行过，比任何推断都可靠 |
-| **想从空目录起步** | `equip.mjs --bootstrap-empty` 对**任意技术栈**生成通用工程基线（Git 基线、四层文档、`docs/TDD.md`、自洽 `AGENTS.md` 与 `.agents/skills/`），零示例玩具业务代码，并支持 `14` 种预设栈（默认 `universal`）与已有 `README.md`/`LICENSE` 共存 |
+| **想从空目录起步** | `equip.mjs --bootstrap-empty` 对**任意技术栈**生成通用工程基线（Git 基线、四层文档、`docs/TDD.md`、自洽 `AGENTS.md` 与 `.agents/skills/`），零示例玩具业务代码；支持 `14` 种预设栈（上述 `12` 种语言加 `universal` 与 `docs`，默认 `universal`），并与已有 `README.md` 和 `LICENSE` 共存 |
 
 还支持纯文档目录、编辑器插件、Obsidian 插件和能力目录。
 
@@ -92,10 +91,10 @@
 
 | 方式 | 怎么装 | 更新机制 | 适合谁 |
 | --- | --- | --- | --- |
-| **下载压缩包** | 从 [Releases 页面](https://github.com/FiretrUCK666/project-forge/releases) 下最新的 `project-forge.zip`，或直接用这个链接：<br>`https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip` | 自动更新 | 日常使用者 |
+| **下载压缩包** | [下载 project-forge.zip（最新版）](https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip) | 自动更新 | 日常使用者 |
 | **`git clone`** | `git clone https://github.com/FiretrUCK666/project-forge.git` | 只提示不覆写，你自己 `git pull` | 要改工具本身的人 |
 
-两种方式都要**保持文件夹名是 `project-forge`**。加了版本号后缀（比如 `project-forge-v6`），宿主会因为前后名字对不上而跳过加载。
+两种方式都要**保持文件夹名是 `project-forge`**。如果加了分支或版本号后缀（比如 `project-forge-main`），宿主会因为前后名字对不上而跳过加载。
 
 装好之后，打开要整理的项目目录，直接说：
 

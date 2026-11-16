@@ -23,10 +23,10 @@ A brand-new folder, or a repository that has been maintained for months, usually
 | Capability | What that means |
 | --- | --- |
 | **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, custom templates, CI workflows, and custom skills stay as they are. An external `.zip` snapshot is saved before any write (with `.tar.gz` restore compatibility) |
-| **8-stage loop and clarification gate** | Runs across `Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge`. Complex tasks trigger a master PRD, multi-round clarification to clear open questions, and non-self Critique before work starts |
+| **Clarify first, then eight stages** | Follows Requirement, Clarification, Design, Implementation, Review, Empirical & Formal Verification, Acceptance, and Merge. Complex requests propose a master PRD, run multi-round clarification to clear open questions, and pass non-self Critique before coding starts |
 | **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require tiered evidence, dual gates, Mermaid `16/12`, and CI |
 | **Adaptive remotes and topologies** | Unified `TaskBackend` handles GitHub, local-only repos without leaking remote terms, and `generic-git` without local merge overreach; also supports linked Issue+PR graphs, stacked PRs, and parallel wave queues |
-| **Two tiers and retro feedback** | Small repos can start with `lightweight` (`< 14KB` contract + 3 skills) and upgrade via `--tier full`. Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule improvements |
+| **Two tiers and retro patches** | Small repos can start with `lightweight` (`< 14KB` contract + 3 skills) and upgrade via `--tier full`. Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule patches |
 
 ## Contents
 
@@ -47,22 +47,21 @@ A brand-new folder, or a repository that has been maintained for months, usually
 ## How One Change Travels
 
 <p align="center">
-  <img src="assets/readme/architecture-en.svg" alt="Five everyday skills beside the four pieces of evidence required before merging" width="100%">
+  <img src="assets/readme/architecture-en.svg" alt="Role flow across the five everyday skills and the four proof gates required before merging" width="100%">
 </p>
 
-Daily work follows an 8-stage loop: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `lightweight` installs the first three skills; `full` installs all five. Describe what you want in plain language and `AGENTS.md` routes it to the right skill.
+Daily work follows an 8-stage path: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `lightweight` installs the first three skills; `full` installs all five. Describe what you want in plain language, or paste Issue/PR links directly, and `AGENTS.md` routes it to the matching skill.
 
 Suppose you want to add an "export to CSV" feature:
 
-| Step | What you say | Who handles it | What you get |
+| Step | What you say | Skill | What you get |
 | --- | --- | --- | --- |
 | 1 | "Where does the export module live, and which commands verify it?" | `dev-explore` | Module entry points, `Feature Map`, and `reusableModules`. Read-only, nothing modified |
 | 2 | "Clarify requirements and plan CSV export with checkable criteria" | `dev-plan` | Multi-round clarification until open items are zero, PRD/SPEC/Todo (`C1`, `C2`), and independent Critique |
 | 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, tiered `evidence.json`, and PR |
 | 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, Behavioral/Structural dual gates, Round 2+ fresh independent context, and six-lock convergence |
 | 5 | "Merge if it passes, then clean up" | `dev-flow` | Reviewer merges after trial merge; 7-step cleanup runs only after you confirm the cleanup list |
-
-`dev-govern` handles periodic health audits and continuous improvement: run `audit`, `reconcile`, and `sample` at any time, or run `retro` after tasks merge to turn `signals.jsonl` patterns into concrete rule patches for the next `dev-plan` cycle.
+| Audits / retro | "Audit repo health or turn rework signals into rule patches" | `dev-govern` | Runs `audit`, `reconcile`, and `sample` anytime; `retro` reads `signals.jsonl` to produce rule patches for the next planning round |
 
 **What you can skip:**
 
@@ -80,7 +79,7 @@ Suppose you want to add an "export to CSV" feature:
 | --- | --- |
 | **A recognized manifest (12)** | `Node.js` `Python` `Rust` `Go` `Java` `Ruby` `PHP` `.NET` `C/C++` `Dart` `Swift` `Elixir`. You get that language's idiomatic build, test, and install commands |
 | **Any other language** | Haskell, OCaml, Zig, Nim, Crystal, Julia, or an in-house DSL are all the same: commands are read from what your project **already runs** — the `run:` blocks in CI, `Makefile`, `justfile`, `Taskfile`. Those commands were really executed, which beats any inference |
-| **Starting from an empty folder** | `equip.mjs --bootstrap-empty` lays down a universal engineering baseline for **any stack** (Git baseline, four-layer docs, `docs/TDD.md`, self-consistent `AGENTS.md`, and `.agents/skills/`) with zero toy business code, `14` stack presets (defaulting to `universal`), and full preservation of existing `README.md` / `LICENSE` |
+| **Starting from an empty folder** | `equip.mjs --bootstrap-empty` lays down a universal engineering baseline for **any stack** (Git baseline, four-layer docs, `docs/TDD.md`, self-consistent `AGENTS.md`, and `.agents/skills/`) with zero toy business code; supports `14` stack presets (the `12` languages above plus `universal` and `docs`, defaulting to `universal`) while preserving existing `README.md` and `LICENSE` |
 
 Documentation-only folders, editor extensions, Obsidian plugins, and capability directories are also supported.
 
@@ -92,10 +91,10 @@ Documentation-only folders, editor extensions, Obsidian plugins, and capability 
 
 | Option | How | Updates | For whom |
 | --- | --- | --- | --- |
-| **Download the archive** | Get the latest `project-forge.zip` from the [Releases page](https://github.com/FiretrUCK666/project-forge/releases), or use this direct link:<br>`https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip` | Automatic | Everyday users |
+| **Download the archive** | [Download project-forge.zip (latest)](https://github.com/FiretrUCK666/project-forge/releases/latest/download/project-forge.zip) | Automatic | Everyday users |
 | **`git clone`** | `git clone https://github.com/FiretrUCK666/project-forge.git` | Reports only, never overwrites; you run `git pull` | People changing the tool itself |
 
-Either way, **keep the folder named `project-forge`**. A version suffix such as `project-forge-v6` makes the host skip loading it, because the folder name no longer matches the skill name.
+Either way, **keep the folder named `project-forge`**. Adding a branch or version suffix (such as `project-forge-main`) makes the host skip loading it, because the folder name no longer matches the skill name.
 
 Once installed, open the project folder you want to organize and say:
 

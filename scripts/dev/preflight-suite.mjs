@@ -651,6 +651,61 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
   note(`协同与 TDD 契约：4 处团队多维护者口径、TDD 双份目录锚点、三场景协同及 ${checkedMermaidDocs} 份文档（${mermaidBlocks} 处 Mermaid 16/12 零 HTML）全部对齐`)
 }
 
+/** 校验常青文档不漂移过时：禁止未发布高版本号、M* 阶段代号及 README 徽章版本与 SKILL.md 脱节。 */
+export function evergreenFreshnessErrors({ skillVersion, docs = [] }) {
+  const errs = []
+  const verMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(skillVersion ?? '').trim())
+  const skillMajor = verMatch ? Number(verMatch[1]) : null
+  for (const { name, text } of docs) {
+    if (!name || text === undefined) continue
+    if (name === 'README.md' || name === 'README.en.md') {
+      const bm = /img\.shields\.io\/badge\/version-v([0-9]+\.[0-9]+\.[0-9]+)/.exec(text)
+      if (bm && skillVersion && bm[1] !== skillVersion) {
+        errs.push(`${name} 版本徽章写着 v${bm[1]}，而 SKILL.md metadata.version 是 ${skillVersion}`)
+      }
+      const suf = /\bproject-forge-v[0-9]+\b/.exec(text)
+      if (suf) errs.push(`${name} 示例使用了会过时的版本目录后缀「${suf[0]}」，改用「project-forge-main」`)
+    }
+    const ms = /\bM[0-9]+\b/.exec(text)
+    if (ms) {
+      errs.push(`${name} 含内部施工阶段代号「${ms[0]}」——常青文档只陈述当前真实结构，阶段记录留在 docs/archive/`)
+    }
+    if (skillMajor !== null) {
+      for (const m of text.matchAll(/\bv([0-9]+)\.([0-9]+)(?:\.([0-9]+))?\b/g)) {
+        const maj = Number(m[1])
+        if (maj > skillMajor) {
+          errs.push(`${name} 出现了高于 SKILL.md（${skillVersion}）的未发布版本号「${m[0]}」`)
+          break
+        }
+        if (name === 'docs/TDD.md' && m[3] !== undefined && `${m[1]}.${m[2]}.${m[3]}` !== skillVersion) {
+          errs.push(`docs/TDD.md 显式版本号「${m[0]}」与 SKILL.md（${skillVersion}）不一致`)
+          break
+        }
+      }
+    }
+  }
+  return errs
+}
+
+function checkEvergreenFreshness({ ROOT, rel, readText, walk, fail, note }) {
+  const skillRaw = existsSync(join(ROOT, 'SKILL.md')) ? readText(join(ROOT, 'SKILL.md')) : ''
+  const skillVer = /^ {2}version:\s*["']?([0-9]+\.[0-9]+\.[0-9]+)["']?/m.exec(skillRaw)?.[1] ?? ''
+  const docPaths = [
+    join(ROOT, 'SKILL.md'),
+    join(ROOT, 'AGENTS.md'),
+    join(ROOT, 'docs', 'TDD.md'),
+    join(ROOT, 'README.md'),
+    join(ROOT, 'README.en.md'),
+    ...walk(join(ROOT, 'references'), (f) => f.endsWith('.md')),
+    ...walk(join(ROOT, 'templates'), (f) => f.endsWith('.md')),
+    ...walk(join(ROOT, 'kit', 'skills'), (f) => basename(f) === 'SKILL.md'),
+  ]
+  const docs = docPaths.filter((p) => existsSync(p)).map((p) => ({ name: rel(p), text: readText(p) }))
+  const errs = evergreenFreshnessErrors({ skillVersion: skillVer, docs })
+  for (const e of errs) fail(`常青保鲜：${e}`)
+  if (errs.length === 0) note(`常青保鲜：${docs.length} 份常青文档无未发布版本号（基准 ${skillVer || 'none'}）或 M* 阶段残留，双语徽章对齐`)
+}
+
 export async function runSuiteChecks(ctx) {
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
@@ -664,6 +719,7 @@ export async function runSuiteChecks(ctx) {
   await checkPlatformSemanticParity(ctx)
   checkOwnInstances(ctx)
   checkTeamAndTddContracts(ctx)
+  checkEvergreenFreshness(ctx)
   checkReadmeVisualsAndDocFrontmatter(ctx)
   checkTemplates(ctx)
   checkPlatformLock(ctx)

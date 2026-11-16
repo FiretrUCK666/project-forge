@@ -1,84 +1,111 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 580" width="1200" height="580" role="img" aria-labelledby="arch-en-title arch-en-desc">
-  <title id="arch-en-title">Five Everyday Skills and Required Proof Before Merge</title>
-  <desc id="arch-en-desc">Shows dev-explore, dev-plan, dev-flow, dev-review, and dev-govern on the left connected to a dark-ink merge gate panel listing four empirical verification checks on the right.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" width="1200" height="620" role="img" aria-labelledby="arch-en-title arch-en-desc">
+  <title id="arch-en-title">Role Flow Across Five Everyday Skills and Merge Gate Proof</title>
+  <desc id="arch-en-desc">Top row shows the ordered path through dev-explore, dev-plan, dev-flow, and dev-review with a rework return loop. Bottom left shows dev-govern feeding rule patches back to planning; bottom right lists the four merge proof checks.</desc>
   <defs>
     <style>
       .sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
       .mono { font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace; }
     </style>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#4E7496"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#D96B27"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#1F6F5B"/>
+    </marker>
   </defs>
 
-  <!-- Stone paper outer card -->
-  <rect x="1" y="1" width="1198" height="578" rx="18" fill="#F5F3EE" stroke="#DFDBD2" stroke-width="1.5"/>
+  <!-- Stone paper outer frame -->
+  <rect x="1" y="1" width="1198" height="618" rx="18" fill="#F5F3EE" stroke="#DFDBD2" stroke-width="1.5"/>
 
-  <!-- Left column: 5 everyday skill pills -->
-  <g>
-    <rect x="56" y="64" width="440" height="76" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="82" cy="92" r="5.5" fill="#4E7496"/>
-    <text x="100" y="98" class="mono" font-size="17" font-weight="700" fill="#172033">dev-explore</text>
-    <text x="100" y="124" class="sans" font-size="16" font-weight="400" fill="#526075">Map codebase and module boundaries first</text>
+  <!-- Title block -->
+  <text x="48" y="48" class="mono" font-size="16" font-weight="600" letter-spacing="1.6" fill="#526075">FIVE SKILLS · STAGE FLOW</text>
+  <text x="48" y="84" class="sans" font-size="26" font-weight="700" fill="#172033">Five skills divide the work from codebase mapping to verified merge</text>
 
-    <rect x="56" y="156" width="440" height="76" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="82" cy="184" r="5.5" fill="#4E7496"/>
-    <text x="100" y="190" class="mono" font-size="17" font-weight="700" fill="#172033">dev-plan</text>
-    <text x="100" y="216" class="sans" font-size="16" font-weight="400" fill="#526075">Align specs and numbered task checklists</text>
+  <!-- Forward arrows between stages 01 -> 02 -> 03 -> 04 -->
+  <line x1="294" y1="204" x2="328" y2="204" stroke="#4E7496" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <line x1="580" y1="204" x2="614" y2="204" stroke="#4E7496" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <line x1="866" y1="204" x2="900" y2="204" stroke="#D96B27" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
 
-    <rect x="56" y="248" width="440" height="76" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="82" cy="276" r="5.5" fill="#D96B27"/>
-    <text x="100" y="282" class="mono" font-size="17" font-weight="700" fill="#172033">dev-flow</text>
-    <text x="100" y="308" class="sans" font-size="16" font-weight="400" fill="#526075">Deliver verified changes on a branch</text>
+  <!-- Rework loop: 04 dev-review -> 03 dev-flow -->
+  <path d="M 1029 286 L 1029 332 L 743 332 L 743 292" fill="none" stroke="#D96B27" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <rect x="742" y="314" width="288" height="34" rx="10" fill="#FFF7ED" stroke="#F2A65A" stroke-width="1.5"/>
+  <text x="886" y="336" class="sans" font-size="16" font-weight="600" fill="#B45309" text-anchor="middle">Changes requested · max 3 rounds</text>
 
-    <rect x="56" y="340" width="440" height="76" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="82" cy="368" r="5.5" fill="#1F6F5B"/>
-    <text x="100" y="374" class="mono" font-size="17" font-weight="700" fill="#172033">dev-review</text>
-    <text x="100" y="400" class="sans" font-size="16" font-weight="400" fill="#526075">Review diffs in an isolated context</text>
+  <!-- Govern feedback arrow: 05 dev-govern -> 02 dev-plan -->
+  <path d="M 457 388 L 457 294" fill="none" stroke="#1F6F5B" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow-teal)"/>
+  <rect x="336" y="324" width="242" height="32" rx="10" fill="#ECFDF5" stroke="#6EE7B7" stroke-width="1.5"/>
+  <text x="457" y="346" class="sans" font-size="16" font-weight="600" fill="#1F6F5B" text-anchor="middle">Rule patches feed next plans</text>
 
-    <rect x="56" y="432" width="440" height="76" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
-    <circle cx="82" cy="460" r="5.5" fill="#1F6F5B"/>
-    <text x="100" y="466" class="mono" font-size="17" font-weight="700" fill="#172033">dev-govern</text>
-    <text x="100" y="492" class="sans" font-size="16" font-weight="400" fill="#526075">Audit test tiers and repository health</text>
+  <!-- Stage Cards 01 .. 04 -->
+  <g id="stage-cards">
+    <!-- 01 dev-explore -->
+    <rect x="48" y="122" width="246" height="164" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="72" cy="150" r="6" fill="#4E7496"/>
+    <text x="88" y="156" class="mono" font-size="16" font-weight="700" fill="#4E7496">01</text>
+    <text x="88" y="188" class="mono" font-size="20" font-weight="700" fill="#172033">dev-explore</text>
+    <text x="72" y="224" class="sans" font-size="18" font-weight="600" fill="#172033">Read-only survey</text>
+    <text x="72" y="256" class="sans" font-size="16" font-weight="400" fill="#526075">Map code &amp; test commands</text>
+
+    <!-- 02 dev-plan -->
+    <rect x="334" y="122" width="246" height="164" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="358" cy="150" r="6" fill="#4E7496"/>
+    <text x="374" y="156" class="mono" font-size="16" font-weight="700" fill="#4E7496">02</text>
+    <text x="374" y="188" class="mono" font-size="20" font-weight="700" fill="#172033">dev-plan</text>
+    <text x="358" y="224" class="sans" font-size="18" font-weight="600" fill="#172033">Clarify &amp; freeze C*</text>
+    <text x="358" y="256" class="sans" font-size="16" font-weight="400" fill="#526075">PRD/SPEC/Todo · Critique</text>
+
+    <!-- 03 dev-flow -->
+    <rect x="620" y="122" width="246" height="164" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="644" cy="150" r="6" fill="#D96B27"/>
+    <text x="660" y="156" class="mono" font-size="16" font-weight="700" fill="#D96B27">03</text>
+    <text x="660" y="188" class="mono" font-size="20" font-weight="700" fill="#172033">dev-flow</text>
+    <text x="644" y="224" class="sans" font-size="18" font-weight="600" fill="#172033">Isolate &amp; verify PR</text>
+    <text x="644" y="256" class="sans" font-size="16" font-weight="400" fill="#526075">Worktree · archive · evidence</text>
+
+    <!-- 04 dev-review -->
+    <rect x="906" y="122" width="246" height="164" rx="14" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="930" cy="150" r="6" fill="#1F6F5B"/>
+    <text x="946" y="156" class="mono" font-size="16" font-weight="700" fill="#1F6F5B">04</text>
+    <text x="946" y="188" class="mono" font-size="20" font-weight="700" fill="#172033">dev-review</text>
+    <text x="930" y="224" class="sans" font-size="18" font-weight="600" fill="#172033">Independent review</text>
+    <text x="930" y="256" class="sans" font-size="16" font-weight="400" fill="#526075">Dual gates · six locks · merge</text>
   </g>
 
-  <!-- Smooth cubic Bezier connectors -->
-  <g fill="none" stroke-width="2.5" stroke-linecap="round">
-    <path d="M 496 102 C 548 102, 548 210, 598 210" stroke="#4E7496"/>
-    <path d="M 496 194 C 546 194, 548 250, 598 250" stroke="#4E7496"/>
-    <path d="M 496 286 C 544 286, 548 290, 598 290" stroke="#D96B27"/>
-    <path d="M 496 378 C 546 378, 548 330, 598 330" stroke="#1F6F5B"/>
-    <path d="M 496 470 C 548 470, 548 370, 598 370" stroke="#1F6F5B"/>
+  <!-- Bottom Left: 05 dev-govern -->
+  <g id="govern-card">
+    <rect x="48" y="388" width="492" height="184" rx="16" fill="#FFFFFF" stroke="#DFDBD2" stroke-width="1.5"/>
+    <circle cx="76" cy="422" r="6.5" fill="#1F6F5B"/>
+    <text x="94" y="428" class="mono" font-size="16" font-weight="700" fill="#1F6F5B">05 · CONTINUOUS GOVERNANCE</text>
+    <text x="76" y="464" class="mono" font-size="22" font-weight="700" fill="#172033">dev-govern</text>
+    <text x="234" y="464" class="sans" font-size="20" font-weight="600" fill="#172033">Health audits &amp; retro</text>
+    <text x="76" y="502" class="sans" font-size="16" font-weight="400" fill="#526075">· audit / reconcile: dead links, dead code, tests</text>
+    <text x="76" y="534" class="sans" font-size="16" font-weight="400" fill="#526075">· retro: turn signals.jsonl into rule patches</text>
   </g>
 
-  <!-- Right dark-ink merge proof panel -->
-  <rect x="598" y="56" width="546" height="468" rx="18" fill="#172033"/>
-  <circle cx="598" cy="210" r="5" fill="#4E7496"/>
-  <circle cx="598" cy="250" r="5" fill="#4E7496"/>
-  <circle cx="598" cy="290" r="5" fill="#D96B27"/>
-  <circle cx="598" cy="330" r="5" fill="#1F6F5B"/>
-  <circle cx="598" cy="370" r="5" fill="#1F6F5B"/>
+  <!-- Bottom Right: Merge Gate Dark Card -->
+  <g id="merge-gate-panel">
+    <rect x="564" y="388" width="588" height="184" rx="16" fill="#172033"/>
+    <text x="594" y="424" class="mono" font-size="16" font-weight="600" letter-spacing="1.2" fill="#8FA4FF">MERGE GATE · ENFORCED BY dev-flow merge &amp; dev-review</text>
+    <line x1="594" y1="440" x2="1122" y2="440" stroke="#2B3750" stroke-width="1"/>
 
-  <text x="634" y="100" class="mono" font-size="16" font-weight="600" letter-spacing="1.8" fill="#8FA4FF">MERGE GATE · EVIDENCE</text>
-  <text x="634" y="138" class="sans" font-size="24" font-weight="700" fill="#FFFFFF">Required Proof Before Merge</text>
-  <line x1="634" y1="160" x2="1108" y2="160" stroke="#2B3750" stroke-width="1"/>
+    <!-- 2x2 Evidence Grid -->
+    <rect x="594" y="458" width="60" height="28" rx="6" fill="none" stroke="#8FA4FF" stroke-width="1.5"/>
+    <text x="624" y="478" class="mono" font-size="16" font-weight="700" fill="#8FA4FF" text-anchor="middle">SYNC</text>
+    <text x="666" y="478" class="sans" font-size="16" font-weight="600" fill="#F8FAFC">Coupled files synced</text>
 
-  <g>
-    <rect x="634" y="186" width="68" height="30" rx="7" fill="none" stroke="#8FA4FF" stroke-width="1.5"/>
-    <text x="668" y="207" class="mono" font-size="16" font-weight="700" fill="#8FA4FF" text-anchor="middle">SYNC</text>
-    <text x="718" y="207" class="sans" font-size="18" font-weight="600" fill="#F8FAFC">Coupled contracts &amp; docs stay synced</text>
-    <text x="718" y="233" class="mono" font-size="16" font-weight="400" fill="#94A3B8">AGENTS.md  ·  compose-agents --check</text>
+    <rect x="844" y="458" width="60" height="28" rx="6" fill="none" stroke="#F2A65A" stroke-width="1.5"/>
+    <text x="874" y="478" class="mono" font-size="16" font-weight="700" fill="#F2A65A" text-anchor="middle">DOCS</text>
+    <text x="916" y="478" class="sans" font-size="16" font-weight="600" fill="#F8FAFC">Docs checked &amp; archived</text>
 
-    <rect x="634" y="266" width="68" height="30" rx="7" fill="none" stroke="#F2A65A" stroke-width="1.5"/>
-    <text x="668" y="287" class="mono" font-size="16" font-weight="700" fill="#F2A65A" text-anchor="middle">DOCS</text>
-    <text x="718" y="287" class="sans" font-size="18" font-weight="600" fill="#F8FAFC">Specs &amp; issues match branch state</text>
-    <text x="718" y="313" class="mono" font-size="16" font-weight="400" fill="#94A3B8">docs/TDD.md · docs/{prd,specs,todo}</text>
+    <rect x="594" y="512" width="60" height="28" rx="6" fill="none" stroke="#6EE7B7" stroke-width="1.5"/>
+    <text x="624" y="532" class="mono" font-size="16" font-weight="700" fill="#6EE7B7" text-anchor="middle">TEST</text>
+    <text x="666" y="532" class="sans" font-size="16" font-weight="600" fill="#F8FAFC">Verify bound to HEAD</text>
 
-    <rect x="634" y="346" width="68" height="30" rx="7" fill="none" stroke="#6EE7B7" stroke-width="1.5"/>
-    <text x="668" y="367" class="mono" font-size="16" font-weight="700" fill="#6EE7B7" text-anchor="middle">TEST</text>
-    <text x="718" y="367" class="sans" font-size="18" font-weight="600" fill="#F8FAFC">Tiered fast checks &amp; real outputs</text>
-    <text x="718" y="393" class="mono" font-size="16" font-weight="400" fill="#94A3B8">flow.mjs verify  ·  quick-test</text>
-
-    <rect x="634" y="426" width="68" height="30" rx="7" fill="none" stroke="#FF8A7A" stroke-width="1.5"/>
-    <text x="668" y="447" class="mono" font-size="16" font-weight="700" fill="#FF8A7A" text-anchor="middle">GATE</text>
-    <text x="718" y="447" class="sans" font-size="18" font-weight="600" fill="#F8FAFC">Independent review, zero fake tests</text>
-    <text x="718" y="473" class="mono" font-size="16" font-weight="400" fill="#94A3B8">review-pack.mjs  ·  govern-audit.mjs</text>
+    <rect x="844" y="512" width="60" height="28" rx="6" fill="none" stroke="#FF8A7A" stroke-width="1.5"/>
+    <text x="874" y="532" class="mono" font-size="16" font-weight="700" fill="#FF8A7A" text-anchor="middle">GATE</text>
+    <text x="916" y="532" class="sans" font-size="16" font-weight="600" fill="#F8FAFC">Non-self review, no bypass</text>
   </g>
 </svg>

@@ -63,13 +63,13 @@ related_spec: ../specs/261117-issue49-survey-honesty-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`。已落地并有正反用例：C1、C2、C3、C4、C5、C6、C9、C10、C11、C12；**未完成**：C7（符号锚点，`symbol-index.mjs` 尚未创建、`tdd-parity.mjs` 仍用 `includes`）、C8（`survey` 尚未报出「N 种语言其中 M 种缺规则」）。
+- **当前状态**：`进行中`。已落地并有正反用例：C1、C2、C3（含命令展示字节上限）、C4、C5、C6、C9、C10、C11、C12；**未完成**：C7（符号锚点：`symbol-index.mjs` 尚未创建、`tdd-parity.mjs` 仍用 `includes`）、C8（`survey` 尚未报出「N 种语言其中 M 种缺规则」）。
 - **待拍板事项**：C7 的存量仓宽限期长度（见 PRD 待拍板第 8 项）
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs` → 180 项通过 / 0 失败；`node scripts/dev/preflight.mjs` → 32 项读数 0 失败；`node scripts/dev/verify-injections.mjs --only I22c` 与 `--only I80` 均红（正确）。
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs` → 185 项通过 / 0 失败；`node scripts/dev/preflight.mjs` → 32 项读数 0 失败；`verify-injections --only I22c`、`I80`、`I89` 均红（正确）。
 - **文档同步检查**：`AGENTS.md` 的「构建与验证」与 `docs/TDD.md` 的模块表已随同更新；`README.md` 与 `README.en.md` 成对同步。
-- **遗留问题**：C7、C8 未完成，见上方「断点与遗留决策」。
+- **遗留问题**：C7 与 C8 的后半条未完成，见上方「断点与遗留决策」。

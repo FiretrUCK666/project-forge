@@ -54,13 +54,13 @@ related_spec: ../specs/261117-issue52-review-independence-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`已完成`（C1..C3 已随 v8 分支落地并全绿）
+- **当前状态**：`进行中`（C1 已完成；C2 的 `compactContext` 与「重跑 start 清标记」、C3 的档位一致性与死链检测未完成）
 - **待拍板事项**：无
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain flow` → 10 项通过 / 0 失败；`node scripts/dev/verify-injections.mjs --only I79` 与 `--only I78` 均红（正确）。
-- **文档同步检查**：`AGENTS.md`「Round 2+ 永远新建独立 review 子代理」一条与代码一致；`references/collaboration.md` 的互审说明未变。
-- **遗留问题**：无
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain flow` → 10 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 185 项通过 / 0 失败；`verify-injections --only I79`（令牌一次性）、`--only I78`（规划审核同人连审）均红（正确）。
+- **文档同步检查**：`kit/skills/dev-review/SKILL.md` 已补 `--review-token` 用法，与 `.agents/` 字节一致。
+- **遗留问题**：C2 的 `compactContext` 未含 `issueContext`；重跑 `start` 不会重算 `issueContextUnavailable`；C3 的档位一致性与死链检测未实现。

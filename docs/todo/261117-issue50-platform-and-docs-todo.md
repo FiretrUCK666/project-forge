@@ -61,13 +61,13 @@ related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`部分完成`（C1、C5、C7、C8、C10 已落地；C2、C3、C4、C6、C9 待实现）
+- **当前状态**：`部分完成`（C1、C2、C3、C4、C5、C7、C8、C10 已落地；C6 部分、C9 待拍板）
 - **待拍板事项**：C9 的「audit 只强制最小核心」实质是放宽门禁，按本仓契约须人点头后再落（见 PRD 待拍板第 7 项）
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain docs` → 7 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 178 项通过 / 0 失败。
-- **文档同步检查**：`AGENTS.md` 的「意图路由」与 `templates/agents-project.md` 一致；四层模板改动需同步 `references/`。
-- **遗留问题**：C2、C3、C4、C6、C9 尚未实现，见上方「断点与遗留决策」。
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain docs` → 7 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 185 项通过 / 0 失败；`doc-plan audit .` → 9 份全部通过、覆盖率 0 漏项；`verify-injections --only I78`、`I81`、`I82`、`I83`、`I84`、`I85`、`I87`、`I88` 均红（正确）。
+- **文档同步检查**：`SKILL.md` 的 S3 已改成「只读取证，由本步落笔」；`kit/skills/dev-explore/SKILL.md` 与 `.agents/` 字节一致。
+- **遗留问题**：C6 的「波次计划」与「`finalize` 对 `tddSyncWarning` 非 0」未完成；C9 的模板最小核心需 PRD 待拍板第 7 项点头后生效（机制已落，判定权在人）。

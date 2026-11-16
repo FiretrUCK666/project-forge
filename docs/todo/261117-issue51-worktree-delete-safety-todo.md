@@ -54,13 +54,13 @@ related_spec: ../specs/261117-issue51-worktree-delete-safety-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`进行中`。已落地并有正反用例：全深度扫描、`mode` 分档、删前解绑、`--allow-outbound` 逐条放行、回执明细、深一层与悬空链接用例。**未完成**：`mainDepsIntact` 与删除前扫描同集合的断言（C3 后半）。
+- **当前状态**：`进行中`。已落地并有正反用例：全深度扫描、`mode` 分档、删前解绑、`--allow-outbound` 逐条放行、回执明细、深一层与悬空链接用例。C3 的「同一集合」断言已补（完好校验直接以扫描结果做基准，被拦下与跳过的目标也复核）。
 - **待拍板事项**：无
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain flow` → 10 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 180 项通过 / 0 失败；`node scripts/dev/verify-injections.mjs --only I22` 与 `--only I22b` 均红（正确）。
-- **文档同步检查**：`AGENTS.md` 的「卸 worktree 前先仅对链接 unlinkSync 解绑」一条与本 SPEC 一致；`docs/TDD.md` 的 worktree 三档描述未变。
-- **遗留问题**：C3 的「同一集合」断言未补，见上方「断点与遗留决策」。
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain flow` → 10 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 185 项通过 / 0 失败；`verify-injections --only I22` 与 `--only I22b` 均红（正确）。
+- **文档同步检查**：`AGENTS.md` 的「卸 worktree 前先仅对链接 `unlinkSync` 解绑」一条与本 SPEC 一致；`docs/TDD.md` 的 worktree 三档描述未变。
+- **遗留问题**：无

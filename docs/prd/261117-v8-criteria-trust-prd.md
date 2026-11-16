@@ -146,6 +146,7 @@ related_todo: null
 - [ ] C24（规划审核的独立上下文）规划文档（PRD / SPEC / Todo）的 Critique **Round 2 及以后必须由新建的独立子代理执行**，与代码审查同一条规矩；`doc-plan critique-pass` 必须能识别「这一轮的复核人就是上一轮的复核人」并拒绝，而不是只比较「复核人是否等于文档负责人」；反向：换一个真正新建的复核人时流程不受影响。
 - [ ] C25（文档兄弟集的认亲方式）同一件事的 PRD / SPEC / Todo 必须被认作一个兄弟集，**且判定不能依赖「同一天创建」**：今天建 PRD、明天建 SPEC 时，`issue` / `branch` / `owner` / `status` 仍要双向同步；写在其中一份上的 Issue 编号要能被其余几份读到；反向：确实属于两件事的同名 slug 不得被误合并。
 - [ ] C26（文档模板的通用性）四层规划文档的模板必须是「通用主干 + 可扩展章节」，而不是七节固定表单：任何项目（App、数据管道、论文、硬件、SaaS、纯文档站）都能在**不改工具代码**的前提下写出合身的 PRD/SPEC/Todo；项目自定义章节与工具生成的章节共存且不互相覆盖；`audit` 只强制**与项目形态无关的最小核心**（做什么、不做什么、怎么判定完成），其余章节的存在性由项目自己的模板声明，而不是工具写死；反向：自定义模板不能变成「什么都不用写」的免检通道。
+- [ ] C28（需求分级判据：装不装得进一份 SPEC）规划分流必须能判出「这件事大到一份 SPEC 装不下」：同时碰四面以上、需求自己说了要分批、声明要动 12 个以上文件，三条任一条成立就必须先写总控 PRD 再拆 SPEC + Todo；`triage` 输出 `prdRequired` 与判定依据；**反向**：只碰一两面的小需求不得被判进来（每件小事都要求先写 PRD，人会直接绕过整套流程）；**事后兜底**：`docs/specs/` 里有两份以上生效 SPEC、却没有任何 PRD 被两份以上 SPEC 共同认领时，`audit` 必须报 `ORPHAN_SLICES_NO_MASTER_PRD`——否则「每份 SPEC 各自勾完都绿、整体算不算做完没人管」是一种完全合法的状态。
 - [ ] C27（体积与可读性的取舍，对应「待拍板问题」第 4 项）当真实命令多到逼近 30KB 上限时，契约**改为「去哪看」而不是「全抄一遍」**：命令按生态分组、每类只展示前若干条、其余指向 CI 文件与 Makefile 的路径；反向：分组之后「构建与验证」仍必须包含**每类至少一条真实命令**，不得退化成空节或纯指针。
 
 ## 六、门型、回滚路径与波次依赖
@@ -161,7 +162,7 @@ related_todo: null
 | --- | --- | --- | --- |
 | 0 | C4、C5、C6 的形状部分；C9 的三态构造器 | `kit/skills/lib/verdict.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/ledger.mjs`、`scripts/lib/protocol.mjs` | 后面每一波都消费这几个形状，先定死防撞 |
 | 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` | 与 | `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
-| 2 | C7、C8、C9、C22、C27；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs` | 与 | `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
+| 2 | C7、C8、C9、C22、C27、C28；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs` | 与 | `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
 | 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs` | 与 | `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml`、`templates/ci-check.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
 | 4 | C16、C17、C18、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
 | 5 | C26 + 文档同步（C24、C25 已落地，这里只做回归确认） | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
@@ -180,9 +181,9 @@ related_todo: null
 
 | 状态 | 覆盖的 C |
 | --- | --- |
-| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22、C25、C24 |
+| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22、C24、C25、C27、C28 |
 | 部分实现 | C7（缺「代码行数不随工具产物变化」的断言）、C8（6 格矩阵已落地，缺「依据变化要报」与「写入 AGENTS.md 受管区」）、C11（缺「项目模块必须被认出」）、C13（`review.mjs` 仍有副本）、C19（令牌已落地）、C20（PR 硬失败已落地，缺 Issue 正文缺失时的 next 提示一致性）、C23（命令探测已修，缺「绕过隔离位要报」） |
-| 未开始 | C10、C12、C14、C15、C16、C17、C18（`explored` 字段已落地，缺「只给探索这一步」与 `finalize` 退出码）、C21、C26、C27 |
+| 未开始 | C10、C12、C14、C15、C16、C17、C18（`explored` 字段已落地，缺「只给探索这一步」与 `finalize` 退出码）、C21、C26 |
 
 ## 七、待拍板问题
 

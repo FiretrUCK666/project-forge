@@ -14,6 +14,7 @@ import {
   parseDocFrontmatter, renderStandardDocTemplate,
 } from '../../lib/docs.mjs'
 import { gitRun, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
+import { collectAncestorsDagFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE, matchGlob } from '../../lib/static-gates.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
@@ -131,7 +132,7 @@ function decodeUriSafe(raw) {
 function checkMarkdownDeadLinks(repoRoot, files, findings) {
   for (const f of files) {
     if (!/\.mdx?$/i.test(f.name)) continue
-    if (f.rel.startsWith('templates/')) continue
+    if (f.rel.startsWith('templates/') || f.rel.startsWith('docs/archive/')) continue
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const lines = info.text.split('\n')
@@ -186,7 +187,14 @@ function checkMarkdownDeadLinks(repoRoot, files, findings) {
 }
 
 async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, authoritativeTddPath = null) {
-  if (!isGit || !(await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok) return
+  if (!isGit) return
+  const wtGitDir = resolveGitDirFast(repoRoot)
+  const fastHead = readHeadFast(wtGitDir)
+  if (fastHead ? !fastHead.oid : !(await gitRun(repoRoot, ['rev-parse', '--verify', 'HEAD'])).ok) return
+  if (fastHead?.oid && wtGitDir) {
+    const fastSmallHistory = collectAncestorsDagFast(wtGitDir, fastHead.oid, 7)
+    if (fastSmallHistory && fastSmallHistory.size < 8) return
+  }
   const logRes = await gitRun(repoRoot, ['log', '-n', '80', '--name-only', '--format=__COMMIT__%ct'])
   if (!logRes.ok || !logRes.stdout) return
 
@@ -568,12 +576,18 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
   let headSha = 'uncommitted'
   let headBranch = null
   if (isGit) {
-    const [hr, br] = await Promise.all([
-      gitRun(repoRoot, ['rev-parse', 'HEAD']),
-      gitRun(repoRoot, ['symbolic-ref', '--short', 'HEAD']),
-    ])
-    if (hr.ok && hr.stdout.trim()) headSha = hr.stdout.trim()
-    if (br.ok && br.stdout.trim()) headBranch = br.stdout.trim()
+    const fastPlanHead = readHeadFast(resolveGitDirFast(repoRoot))
+    if (fastPlanHead) {
+      if (fastPlanHead.oid) headSha = fastPlanHead.oid
+      if (fastPlanHead.branch) headBranch = fastPlanHead.branch
+    } else {
+      const [hr, br] = await Promise.all([
+        gitRun(repoRoot, ['rev-parse', 'HEAD']),
+        gitRun(repoRoot, ['symbolic-ref', '--short', 'HEAD']),
+      ])
+      if (hr.ok && hr.stdout.trim()) headSha = hr.stdout.trim()
+      if (br.ok && br.stdout.trim()) headBranch = br.stdout.trim()
+    }
   }
 
   const scopeSet = new Set()

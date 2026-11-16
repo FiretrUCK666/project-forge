@@ -14,6 +14,10 @@ import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import {
   gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
 } from '../../lib/git.mjs'
+import {
+  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast,
+  resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits,
+} from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
@@ -66,6 +70,20 @@ function printHelp() {
 }
 
 async function resolveDefaultBaseRef(repoRoot, headRef) {
+  const fastGitDir = resolveGitDirFast(repoRoot)
+  const canFastRefs = Boolean(fastGitDir && !existsSync(join(fastGitDir, 'reftable')))
+  if (canFastRefs) {
+    const origHeadTxt = readTextSafe(join(fastGitDir, 'refs', 'remotes', 'origin', 'HEAD'))?.trim()
+    if (origHeadTxt?.startsWith('ref:')) {
+      const symTarget = origHeadTxt.slice(4).trim()
+      if (resolveRefShaFast(fastGitDir, symTarget)) return symTarget.replace(/^refs\/remotes\//, '')
+    }
+    const def = await resolveDefaultBranch(repoRoot)
+    for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
+      const fullRef = cand.startsWith('origin/') ? `refs/remotes/${cand}` : `refs/heads/${cand}`
+      if (resolveRefShaFast(fastGitDir, fullRef)) return cand
+    }
+  }
   const sym = await gitRun(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
   if (sym.ok && sym.stdout.trim()) {
     const ref = sym.stdout.trim()
@@ -224,13 +242,17 @@ async function main(argv = process.argv.slice(2)) {
     if (!Number.isInteger(round) || round < 1) round = 1
 
     const headRef = opts.head ?? 'HEAD'
-    const commitsExist = await hasCommits(reviewRoot)
-    const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
-    if (commitsExist && opts.head && !headRes.ok) {
-      process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
-      return EXIT.ERROR
+    const fastHeadSha = headRef === 'HEAD' ? readHeadFast(resolveGitDirFast(reviewRoot), roots.gitDir)?.oid : null
+    let headSha = fastHeadSha
+    if (!headSha) {
+      const commitsExist = await hasCommits(reviewRoot)
+      const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
+      if (commitsExist && opts.head && !headRes.ok) {
+        process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
+        return EXIT.ERROR
+      }
+      headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
     }
-    const headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
 
     let diffSpec
     let diffScope
@@ -249,8 +271,17 @@ async function main(argv = process.argv.slice(2)) {
         priorOpenMustFix = prev ? (prev.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved') : []
         rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
         const prevHead = prev?.headSha
-        if (prevHead && (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok) {
-          const isAnc = await gitRun(reviewRoot, ['merge-base', '--is-ancestor', prevHead, headRef])
+        const hasPrevLoose = Boolean(
+          prevHead && /^[0-9a-f]{40}$/i.test(prevHead) && roots.gitDir
+          && existsSync(join(roots.gitDir, 'objects', prevHead.slice(0, 2).toLowerCase(), prevHead.slice(2).toLowerCase())),
+        )
+        if (prevHead && (hasPrevLoose || (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok)) {
+          const fastAnc = headSha && headSha !== 'UNBORN' && roots.gitDir
+            ? isAncestorLinearFast(roots.gitDir, prevHead, headSha)
+            : null
+          const isAnc = fastAnc !== null
+            ? { ok: fastAnc }
+            : await gitRun(reviewRoot, ['merge-base', '--is-ancestor', prevHead, headRef])
           const oldBase = prev?.baseSha ?? task?.roundBaseSha?.prevBaseSha
           const newBase = task?.baseSha ?? task?.roundBaseSha?.newBaseSha ?? baseRef
           if (!isAnc.ok && oldBase && newBase) {
@@ -259,9 +290,22 @@ async function main(argv = process.argv.slice(2)) {
               diffScope = `${newBase.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} rebased)`
               roundLockNote = `Round ${round} rebased via sync`
             } else {
-              const rd = await gitRun(reviewRoot, ['range-diff', '--no-color', `${oldBase}..${prevHead}`, `${newBase}..${headSha}`])
-              if (rd.ok) {
-                const shas = parseRangeDiffNewCommits(rd.stdout)
+              const oldR = `${oldBase}..${prevHead}`
+              const newR = `${newBase}..${headSha}`
+              const cachedShas = /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR) && roots.gitDir
+                ? getCachedRangeDiffCommits(roots.gitDir, oldR, newR)
+                : null
+              let shas = cachedShas
+              if (!shas) {
+                const rd = await gitRun(reviewRoot, ['range-diff', '--no-color', oldR, newR])
+                if (rd.ok) {
+                  shas = parseRangeDiffNewCommits(rd.stdout)
+                  if (roots.gitDir && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR)) {
+                    setCachedRangeDiffCommits(roots.gitDir, oldR, newR, shas)
+                  }
+                }
+              }
+              if (shas) {
                 diffSpec = { mode: 'commits', commits: shas }
                 diffScope = `range-diff (${shas.length} changed/new commit(s))`
                 roundLockNote = `Round ${round} rebased via sync (range-diff incremental lock)`

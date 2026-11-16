@@ -113,6 +113,7 @@ const HEAVY_CASE_HINTS = [
   'M2 C2',
   'M2 C3b',
   'M2 C3a',
+  '--include-master-prd',
   '耦合文件自同步',
   'equip.mjs + survey.mjs',
   'M4-C3',

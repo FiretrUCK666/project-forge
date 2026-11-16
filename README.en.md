@@ -22,11 +22,11 @@ A brand-new folder, or a repository that has been maintained for months, usually
 
 | Capability | What that means |
 | --- | --- |
-| **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, CI workflows, and custom skills stay exactly as they are. A `.zip` snapshot is saved outside the repository before any file is written |
-| **Docs travel with the branch** | `docs/prd/`, `docs/specs/`, and `docs/todo/` share one YAML frontmatter format and `YYMMDD-issue<N>-<slug>-{prd,spec,todo}.md` naming; `flow.mjs finalize` archives them together into `docs/archive/` when the work is done |
-| **Nothing merges without evidence** | A change needs passing static gates, real command output, and an independent-context review. Mermaid diagram widths and document anchors are checked before every commit |
-| **Editing one side warns about the other** | A dependency table inside `AGENTS.md` records which templates and docs to check when source changes, and which source entry points to verify when docs change |
-| **Two tiers, lossless upgrade** | A small repository can stay on `lightweight` (a `< 14KB` contract plus three skills) and move to all five later with `--tier full`. Files you deleted or edited are recorded in `.pf-manifest.json` and never written back |
+| **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, custom templates, CI workflows, and custom skills stay as they are. An external `.zip` snapshot is saved before any write (with `.tar.gz` restore compatibility) |
+| **8-stage loop and clarification gate** | Runs across `Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge`. Complex tasks trigger a master PRD, multi-round clarification to clear open questions, and non-self Critique before work starts |
+| **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require tiered evidence, dual gates, Mermaid `16/12`, and CI |
+| **Adaptive remotes and topologies** | Unified `TaskBackend` handles GitHub, local-only repos without leaking remote terms, and `generic-git` without local merge overreach; also supports linked Issue+PR graphs, stacked PRs, and parallel wave queues |
+| **Two tiers and retro feedback** | Small repos can start with `lightweight` (`< 14KB` contract + 3 skills) and upgrade via `--tier full`. Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule improvements |
 
 ## Contents
 
@@ -50,27 +50,27 @@ A brand-new folder, or a repository that has been maintained for months, usually
   <img src="assets/readme/architecture-en.svg" alt="Five everyday skills beside the four pieces of evidence required before merging" width="100%">
 </p>
 
-`lightweight` installs the first three skills; `full` installs all five. You never type commands in daily use: describe what you want and `AGENTS.md` routes it to the right skill.
+Daily work follows an 8-stage loop: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `lightweight` installs the first three skills; `full` installs all five. Describe what you want in plain language and `AGENTS.md` routes it to the right skill.
 
 Suppose you want to add an "export to CSV" feature:
 
 | Step | What you say | Who handles it | What you get |
 | --- | --- | --- | --- |
-| 1 | "Where does the export module live, and which commands verify it?" | `dev-explore` | Module entry points and a verification command list. Read-only, nothing modified |
-| 2 | "Write a plan for CSV export with checkable criteria" | `dev-plan` | A SPEC and a Todo, criteria numbered `C1`, `C2` |
-| 3 | "Start on that plan" | `dev-flow` | An isolated branch or worktree, verification bound to this commit, pushed and opened as a PR |
-| 4 | "Review this PR from an independent angle" | `dev-review` | A per-criterion verdict on `C1` and `C2`, written back to both the PR and the issue |
-| 5 | "Merge if it passes, then clean up" | `dev-flow` | Merge, remove the worktree, delete the local branch, read back to confirm |
+| 1 | "Where does the export module live, and which commands verify it?" | `dev-explore` | Module entry points, `Feature Map`, and `reusableModules`. Read-only, nothing modified |
+| 2 | "Clarify requirements and plan CSV export with checkable criteria" | `dev-plan` | Multi-round clarification until open items are zero, PRD/SPEC/Todo (`C1`, `C2`), and independent Critique |
+| 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, tiered `evidence.json`, and PR |
+| 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, Behavioral/Structural dual gates, Round 2+ fresh independent context, and six-lock convergence |
+| 5 | "Merge if it passes, then clean up" | `dev-flow` | Reviewer merges after trial merge; 7-step cleanup runs only after you confirm the cleanup list |
 
-`dev-govern` is not on this chain. You run it on a maintenance schedule (health checks, technical debt, documentation drift, release notes), and its findings usually become the input to the next `dev-plan` round.
+`dev-govern` handles periodic health audits and continuous improvement: run `audit`, `reconcile`, and `sample` at any time, or run `retro` after tasks merge to turn `signals.jsonl` patterns into concrete rule patches for the next `dev-plan` cycle.
 
 **What you can skip:**
 
-- Fixing a typo or adjusting one line of formatting: skip steps 1 and 2, make the change, run the relevant check.
-- When the requirement is unambiguous and touches one file: step 2 can go, but the independent review in step 4 cannot.
-- When a change touches critical paths such as `scripts/lib/`, `templates/`, or `SKILL.md`: step 4 must run in a separate independent context. Reviewing your own work is not review.
+- Typo or one-line formatting fix (Case 1): skip steps 1 and 2, make the edit, run the relevant check.
+- Clear local bugfix without contract changes (Case 2): skip planning docs in step 2, but write a failing regression test first (Red-Green).
+- Touching `high-risk` paths, `one-way` boundaries, or Case 4 changes: step 4 must run in a separate independent context with fault injection. Reviewing your own work does not count.
 
-**Why the order is what it is:** surveying before planning keeps invented paths out of the plan; freezing criteria up front gives the review a shared ruler; separating implementation and review into different contexts prevents "I remember changing that" from hiding a regression.
+**Why the order is what it is:** surveying and clearing open questions before freezing `C*` criteria keeps invented paths and guesswork out of the plan; separating implementation and review into isolated contexts and worktrees prevents regressions from slipping past.
 
 ## Supported Languages
 

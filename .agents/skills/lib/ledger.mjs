@@ -11,6 +11,7 @@ import { basename, join } from 'node:path'
 import {
   canonicalPath, gitRun, posixPath, readJsonSafe, samePath, withFileLock, writeJsonAtomic,
 } from './git.mjs'
+import { readHeadFast, resolveGitDirFast } from './git-fast.mjs'
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
@@ -195,8 +196,10 @@ export async function resolveTaskContext(roots, opts = {}, { requireExisting = t
 
   // 3. Current branch match
   if (roots?.isGit) {
-    const brRes = await gitRun(workRoot, ['symbolic-ref', '--short', 'HEAD'])
-    const curBranch = brRes.ok ? brRes.stdout.trim() : ''
+    const fastHead = readHeadFast(roots.workTreeGitDir ?? resolveGitDirFast(workRoot), roots.gitDir)
+    const curBranch = fastHead
+      ? (fastHead.branch ?? '')
+      : ((await gitRun(workRoot, ['symbolic-ref', '--short', 'HEAD'])).stdout?.trim() ?? '')
     if (curBranch) {
       const brMatches = active.filter((t) => t.branch === curBranch)
       if (brMatches.length === 1) {

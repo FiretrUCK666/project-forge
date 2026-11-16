@@ -175,6 +175,9 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
   readFrom(task?.specFile)
   readFrom(task?.todoFile)
   readFrom(task?.prdFile)
+  readFrom(task?.archivedSpecFile)
+  readFrom(task?.archivedTodoFile)
+  readFrom(task?.archivedPrdFile)
 
   if (task?.privateDocsDir) {
     const privDirAbs = join(mainRoot, task.privateDocsDir)

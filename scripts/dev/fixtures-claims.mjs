@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitSync, loadPreflight,
+  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, loadPreflight,
   readDirRefs, rmTree, runAbsAsync, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -518,8 +518,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     // 勾选 Todo 并提交；故意不运行 finalize，先 verify 再 submit -> submit 必须返回 3（BLOCKED_NOT_FINALIZED）
     const todoAbs = join(wtRoot, todoInfo.file)
     writeFileSync(todoAbs, readFileSync(todoAbs, 'utf8').replace(/- \[ \]/g, '- [x]'))
-    gitSync(wtRoot, ['add', '-A'])
-    gitSync(wtRoot, ['commit', '-qm', 'check todo'])
+    gitCommitFast(wtRoot, 'check todo')
 
     const v1 = await handleVerify({ task: 't-flow', cmd: 'exit 0' }, lRoots)
     if (v1.exitCode !== 0) return `verify 失败：${v1.exitCode}`
@@ -531,12 +530,10 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     // finalize 后再改非文档代码并提交，使 verifiedHead !== HEAD -> submit 必须拦截
     const finOk = await handleFinalize({ task: 't-flow' }, lRoots)
     if (finOk.exitCode !== 0) return `finalize 失败：${finOk.exitCode}`
-    gitSync(wtRoot, ['add', '-A'])
-    gitSync(wtRoot, ['commit', '-qm', 'archive todo'])
+    gitCommitFast(wtRoot, 'archive todo')
 
     writeFileSync(join(wtRoot, 'src/app.mjs'), 'export const n = 2\n')
-    gitSync(wtRoot, ['add', '-A'])
-    gitSync(wtRoot, ['commit', '-qm', 'code change after verify'])
+    gitCommitFast(wtRoot, 'code change after verify', { updateOnly: true })
     const subStale = await handleSubmit({ task: 't-flow' }, lRoots)
     if (subStale.exitCode !== 3) return `代码变更后 verifiedHead 失效未拦截 submit：exit=${subStale.exitCode}`
 
@@ -547,8 +544,6 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
     if (subOk.exitCode !== 0) return `本地完整校验后 submit 失败：exit=${subOk.exitCode}`
     return true
   } finally {
-    const wtCleanup = join(localDir, '.worktrees', 'impl-t-flow')
-    gitSync(localDir, ['worktree', 'remove', '--force', wtCleanup])
     rmTree(localDir)
   }
 }])
@@ -650,8 +645,7 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     if (r1 !== 0) return `Round 1 record 失败：${r1}`
 
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 3\n')
-    gitSync(dir, ['add', 'src/app.mjs'])
-    gitSync(dir, ['commit', '-qm', 'attempt fix'])
+    gitCommitFast(dir, 'attempt fix', { updateOnly: true })
     const r2Repeat = await handleRecord({ task: 't-rev', round: '2', verdict: 'changes', 'reviewer-id': 'rev-b', 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
     if (r2Repeat !== 4) {
       return `连续两轮同一 must-fix 未触发停损（应 exit 4）：exit=${r2Repeat}`
@@ -661,12 +655,10 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     writeFileSync(ledgerDir + '/t-r3.json', JSON.stringify({ taskId: 't-r3', branch: 'main', implementerId: 'author-a', rounds: [] }, null, 2))
     await handleRecord({ task: 't-r3', round: '1', verdict: 'changes', 'reviewer-id': 'rev-b', 'must-fix': ['C1: src/app.mjs:1 问题一'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 4\n')
-    gitSync(dir, ['add', 'src/app.mjs'])
-    gitSync(dir, ['commit', '-qm', 'r2 fix'])
+    gitCommitFast(dir, 'r2 fix', { updateOnly: true })
     await handleRecord({ task: 't-r3', round: '2', verdict: 'changes', 'reviewer-id': 'rev-b', 'must-fix': ['C2: src/app.mjs:1 问题二'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 5\n')
-    gitSync(dir, ['add', 'src/app.mjs'])
-    gitSync(dir, ['commit', '-qm', 'r3 fix'])
+    gitCommitFast(dir, 'r3 fix', { updateOnly: true })
     const r3Stop = await handleRecord({ task: 't-r3', round: '3', verdict: 'changes', 'reviewer-id': 'rev-b', 'must-fix': ['C3: src/app.mjs:1 问题三'] }, revRoots)
     if (r3Stop !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop}`
     return true

@@ -15,9 +15,11 @@ import {
   readTextSafe, resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
 import {
-  parsePorcelainV2BranchZ, readGitConfigFast, readRefsFast,
+  hasUnmergedIndexFast, parsePorcelainV2BranchZ, readGitConfigFast, readHeadFast,
+  readLooseCommitLogFast, readRefsFast, readSystemGitConfigMapAsync,
   resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
 } from '../../lib/git-fast.mjs'
+import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseFlowInputs,
@@ -37,10 +39,14 @@ export const EXIT_ACTION_REQUIRED = 4
 
 /** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动，支持复用已知 statusEntries 与 diffEntries）。 */
 export async function getChangedFiles(cwd, baseRef, opts = {}) {
+  const fastAtBase = !Array.isArray(opts.diffEntries) && baseRef
+    && readHeadFast(resolveGitDirFast(cwd))?.oid === baseRef
   const [diff, tree, st] = await Promise.all([
     Array.isArray(opts.diffEntries)
       ? Promise.resolve({ ok: true, entries: opts.diffEntries })
-      : (baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null)),
+      : (fastAtBase
+          ? Promise.resolve({ ok: true, entries: [] })
+          : (baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null))),
     baseRef ? Promise.resolve(null) : gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD']),
     Array.isArray(opts.statusEntries) ? Promise.resolve({ ok: true, entries: opts.statusEntries }) : gitStatusPorcelainZ(cwd),
   ])
@@ -89,30 +95,57 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const mainRoot = roots.mainRoot
   const workRoot = roots.workTreeRoot
   const hasLinkedWorktrees = Boolean(roots.isGit && roots.gitDir && (roots.isWorktree || existsSync(join(roots.gitDir, 'worktrees'))))
-  const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir) : null
-  const needGitConfig = Boolean(roots.isGit && (!fastCfg || !fastCfg.hasIdentity))
+  const fastCfg = roots.isGit ? readGitConfigFast(roots.gitDir, { systemMap: false }) : null
+  const needGitConfig = Boolean(roots.isGit && !fastCfg)
+  const needSysCfg = Boolean(fastCfg && (!fastCfg.userName || !fastCfg.userEmail || !fastCfg.initDefaultBranch))
   const needRefsExec = Boolean(roots.isGit && existsSync(join(roots.gitDir ?? '', 'reftable')))
+  const fastHead = (roots.isGit && !needRefsExec) ? readHeadFast(roots.workTreeGitDir, roots.gitDir) : null
+  const fastHeadUnborn = Boolean(fastHead && !fastHead.oid)
+  const canFastStatus = Boolean(opts.lightStart && fastHead && hasUnmergedIndexFast(roots.workTreeGitDir) === false)
+  const hasOriginRemote = !fastCfg || Boolean(fastCfg.remoteText && /^origin\t/m.test(fastCfg.remoteText))
+  const hasExplicitModeMarker = Boolean(
+    roots.gitDir && (
+      existsSync(join(roots.gitDir, 'pf-local-mode'))
+      || existsSync(join(roots.gitDir, 'pf-standalone-mode'))
+      || existsSync(join(roots.gitDir, 'pf-fork-mode'))
+    ),
+  )
+  const needHistoryForStart = !opts.lightStart || (hasOriginRemote && !hasExplicitModeMarker && !opts.externalPr && !opts['external-pr'])
+  const skipLog = fastHeadUnborn || !needHistoryForStart
+  const fastLog = (!skipLog && fastHead?.oid)
+    ? readLooseCommitLogFast(workRoot, roots.gitDir, fastHead.oid, 500)
+    : null
+  const fastWtList = hasLinkedWorktrees ? readWorktreeListFast(mainRoot, roots.gitDir) : null
 
-  const [statusRes, remoteRes, configRes, logRes, refsRes, wtRes] = roots.isGit
+  const [statusRes, remoteRes, configRes, sysCfgMap, logRes, refsRes, wtRes] = roots.isGit
     ? await Promise.all([
-        gitRunBuffer(workRoot, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']),
+        canFastStatus
+          ? Promise.resolve(null)
+          : gitRunBuffer(workRoot, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']),
         fastCfg ? Promise.resolve({ ok: true, stdout: fastCfg.remoteText }) : gitRun(workRoot, ['remote', '-v']),
         needGitConfig ? gitRun(workRoot, ['config', '--get-regexp', '^(user\\.name|user\\.email|init\\.defaultbranch)$']) : Promise.resolve(null),
-        gitRun(workRoot, ['--no-optional-locks', 'log', '-n', '500', '--format=%an <%ae>\x1f%s']),
+        needSysCfg ? readSystemGitConfigMapAsync() : Promise.resolve(null),
+        skipLog
+          ? Promise.resolve({ ok: true, stdout: '' })
+          : (fastLog
+              ? Promise.resolve({ ok: true, stdout: fastLog.entries.map((e) => `${e.author}\x1f${e.subject}`).join('\n') })
+              : gitRun(workRoot, ['--no-optional-locks', 'log', '-n', '500', '--format=%an <%ae>\x1f%s'])),
         needRefsExec ? gitRun(mainRoot, ['for-each-ref', '--format=%(refname)\t%(symref:short)', 'refs/heads', 'refs/remotes/origin']) : Promise.resolve(null),
-        hasLinkedWorktrees ? gitRun(mainRoot, ['--no-optional-locks', 'worktree', 'list', '--porcelain']) : Promise.resolve(null),
+        hasLinkedWorktrees && !fastWtList ? gitRun(mainRoot, ['--no-optional-locks', 'worktree', 'list', '--porcelain']) : Promise.resolve(null),
       ])
-    : [{ ok: false, stdout: '' }, { ok: false, stdout: '' }, null, { ok: false, stdout: '' }, null, null]
+    : [{ ok: false, stdout: '' }, { ok: false, stdout: '' }, null, null, { ok: false, stdout: '' }, null, null]
 
-  const stParsed = parsePorcelainV2BranchZ(statusRes.ok ? statusRes.stdout : '')
+  const stParsed = canFastStatus
+    ? { head: fastHead.oid, branch: fastHead.detached ? '(detached)' : fastHead.branch, dirty: null, conflicts: [] }
+    : parsePorcelainV2BranchZ(statusRes?.ok ? statusRes.stdout : '')
   const head = stParsed.head
   const branch = stParsed.branch ?? (head ? '(detached)' : null)
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
 
-  let userName = fastCfg?.userName
-  let userEmail = fastCfg?.userEmail
-  let initDefaultBranch = fastCfg?.initDefaultBranch
+  let userName = fastCfg?.userName ?? sysCfgMap?.get('user.name')
+  let userEmail = fastCfg?.userEmail ?? sysCfgMap?.get('user.email')
+  let initDefaultBranch = fastCfg?.initDefaultBranch ?? sysCfgMap?.get('init.defaultbranch')
   if (configRes?.ok && configRes.stdout) {
     for (const line of configRes.stdout.split('\n')) {
       const sp = line.indexOf(' ')
@@ -142,7 +175,8 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const commitStyle = subjects.length > 0 && convCount > subjects.length / 2 ? 'conventional' : 'plain'
   let commits = 0
   if (head) {
-    if (logLines.length < 500) commits = logLines.length
+    if (skipLog && !fastHeadUnborn) commits = 1
+    else if (logLines.length < 500) commits = logLines.length
     else {
       const revRes = await gitRun(workRoot, ['--no-optional-locks', 'rev-list', '--count', 'HEAD'])
       commits = revRes.ok && /^\d+$/.test(revRes.stdout?.trim()) ? Number(revRes.stdout.trim()) : logLines.length
@@ -160,9 +194,10 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     || existsSync(join(mainRoot, 'docs', 'prd'))
   const worktrees = !roots.isGit
     ? []
-    : (wtRes?.ok && wtRes.stdout
-        ? parseWorktreeListPorcelain(wtRes.stdout)
-        : [{ path: canonicalPath(mainRoot), head, branch: branch === '(detached)' ? null : branch, detached: branch === '(detached)', bare: false, prunable: null }])
+    : (fastWtList
+        ?? (wtRes?.ok && wtRes.stdout
+          ? parseWorktreeListPorcelain(wtRes.stdout)
+          : [{ path: canonicalPath(mainRoot), head, branch: branch === '(detached)' ? null : branch, detached: branch === '(detached)', bare: false, prunable: null }]))
 
   const profile = parseAgentsProfile(mainRoot)
   const declaredRepo = detectDeclaredRepo(mainRoot)
@@ -208,6 +243,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     dirty: stParsed.dirty,
     defaultBranch,
     commitStyle,
+    conflicts: stParsed.conflicts ?? [],
     hasDocsSystem,
     declaredRepo: declaredRepo ?? null,
     remoteUrls,
@@ -249,9 +285,21 @@ function findMatchingDocStrict(root, dirRel, slug, taskId) {
   return null
 }
 
+function hasAnyPlanMarkdownFiles(root) {
+  for (const dirRel of ['docs/prd', 'docs/specs', 'docs/todo']) {
+    const abs = join(root, dirRel)
+    if (!existsSync(abs)) continue
+    try {
+      if (readdirSync(abs).some((n) => n.endsWith('.md'))) return true
+    } catch { /* ignore */ }
+  }
+  return false
+}
+
 /** 将主仓中尚未提交的关联规划文档同步迁入新创建的 Tier 2 实施 worktree，防止断链。 */
 async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty = undefined) {
   if (mainDirty === 0) return []
+  if (!ledger.prdFile && !ledger.specFile && !ledger.todoFile && !hasAnyPlanMarkdownFiles(mainRoot)) return []
   const st = await gitStatusPorcelainZ(mainRoot)
   if (!st.ok) return []
   const dirtyMap = new Map(st.entries.map((e) => [e.file, e.xy]))
@@ -287,7 +335,7 @@ async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty =
 
 export async function handleStart(opts, roots) {
   if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
-  const op = await detectInProgressGitOp(roots.mainRoot, { wtGitDir: resolveGitDirFast(roots.mainRoot) })
+  const op = await detectInProgressGitOp(roots.mainRoot, { wtGitDir: resolveGitDirFast(roots.mainRoot), statusEntries: [] })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 仓库正处于 ${op.op} 状态，请先解决冲突再执行 start`)
 
   const parsedPos = parseFlowInputs(opts._ ?? [])
@@ -317,8 +365,11 @@ export async function handleStart(opts, roots) {
     roots, inputs: opts._, externalPr: opts['external-pr'] ?? externalPr, pr: opts.pr ?? prFromFlag,
     issue: linkedIssues.join(','), probeAuth: Boolean(opts['probe-auth']),
     knownIssueStates: opts.knownIssueStates, knownPrs: opts.knownPrs,
-    _ghClient: opts._ghClient, _ghProbe: opts._ghProbe,
+    _ghClient: opts._ghClient, _ghProbe: opts._ghProbe, lightStart: true,
   })
+  if ((state.conflicts?.length ?? 0) > 0) {
+    throw new Error('BLOCKED_GIT_CONFLICT_IN_PROGRESS: 仓库正处于 conflict 状态，请先解决冲突再执行 start')
+  }
   const effectiveExternalPr = externalPr
     ?? (state.identity.role === 'inbound-external-pr' ? (prNumber ?? state.inputs.prs[0]?.number ?? null) : null)
   if (effectiveExternalPr && !prNumber) prNumber = effectiveExternalPr
@@ -549,10 +600,16 @@ export async function handleStart(opts, roots) {
   const branch = opts.branch || reusedPrBranch || `${branchPrefix}/${slug}`
 
   const resolveLocalBranchRef = async () => {
-    if (resolveRefShaFast(roots.gitDir, `refs/heads/${branch}`)) return { ok: true }
-    if (roots.gitDir && existsSync(join(roots.gitDir, 'refs', 'heads', branch))) return { ok: true }
+    const canFastRefs = Boolean(roots.gitDir && !existsSync(join(roots.gitDir, 'reftable')))
+    const originUrl = state.remoteUrls.origin ?? ''
+    const isNetOrigin = /^(?:https?:\/\/|ssh:\/\/|[^/@:\s]+@)/i.test(originUrl)
+    const skipNetworkFetch = Boolean(isNetOrigin && (opts._ghProbe || opts._ghClient || opts.knownPrs || opts.knownIssueStates || process.env.PF_NO_REAL_AUTH_PROBE === '1'))
+    if (canFastRefs) {
+      if (resolveRefShaFast(roots.gitDir, `refs/heads/${branch}`)) return { ok: true }
+      if (skipNetworkFetch || !reusedPrBranch || branch !== reusedPrBranch || !originUrl) return { ok: false }
+    }
     const has = await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
-    if (has.ok || !reusedPrBranch || branch !== reusedPrBranch || !state.remoteUrls.origin) return has
+    if (has.ok || skipNetworkFetch || !reusedPrBranch || branch !== reusedPrBranch || !originUrl) return has
     await gitRun(roots.mainRoot, ['fetch', 'origin', `${branch}:${branch}`])
     return await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
   }

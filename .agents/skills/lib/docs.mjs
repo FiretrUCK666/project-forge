@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
+import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
 import { listTaskLedgers, writeTaskLedger } from './ledger.mjs'
 
 export const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
@@ -326,8 +327,11 @@ function replaceDocReferencesSinglePass(rawText, renameMap) {
 
 async function moveDocWithGit(repoRoot, oldRel, targetRel) {
   mkdirSync(dirname(join(repoRoot, targetRel)), { recursive: true })
-  const tracked = await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])
-  if (tracked.ok) {
+  const fastTracked = isPathInGitIndexFast(repoRoot, oldRel)
+  const isTracked = fastTracked !== null
+    ? fastTracked
+    : (hasDotGitInAncestors(repoRoot) ? (await gitRun(repoRoot, ['ls-files', '--error-unmatch', oldRel])).ok : false)
+  if (isTracked) {
     const mv = await gitRun(repoRoot, ['mv', oldRel, targetRel])
     if (!mv.ok) throw new Error(`移动文档失败（${oldRel} -> ${targetRel}）：${mv.stderr}`)
   } else {
@@ -635,6 +639,7 @@ export async function syncDocsLifecycle(repoRoot, {
  */
 export async function archiveCompletedDocsGroup(repoRoot, {
   prdFile, specFile, todoFile, slugOrPath, issue, pr, branch, owner, doneAt,
+  includeMasterPrd = false,
 } = {}) {
   const seedInput = specFile ?? todoFile ?? prdFile ?? slugOrPath
   const { siblingSet, targetSlug } = collectSiblingSet(repoRoot, { slugOrPath: seedInput, includeArchived: true })
@@ -647,9 +652,10 @@ export async function archiveCompletedDocsGroup(repoRoot, {
   const activeSpecRel = (specFile ? posixPath(specFile) : null)
     ?? [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec')
     ?? null
-  const sharedPrds = new Set(
+  const wasSharedPrds = new Set(
     [...siblingSet].filter((p) => inferDocKindFromPath(p, null) === 'prd' && isSharedMasterPrd(repoRoot, p, activeSpecRel)),
   )
+  const skippedSharedPrds = includeMasterPrd ? new Set() : wasSharedPrds
 
   const archiveDirByKind = { prd: 'docs/archive/prd', spec: 'docs/archive/specs', todo: 'docs/archive/todo' }
   const moveMap = new Map()
@@ -660,7 +666,8 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     const raw = readTextSafe(join(repoRoot, oldRel)) ?? ''
     const fm = parseDocFrontmatter(raw)
     const kind = inferDocKindFromPath(oldRel, fm.data)
-    const isSharedMaster = sharedPrds.has(oldRel)
+    const isSharedMaster = skippedSharedPrds.has(oldRel)
+    const wasSharedMaster = wasSharedPrds.has(oldRel)
     let curRel = oldRel
     if (kind && !oldRel.startsWith('docs/archive/') && !isSharedMaster) {
       const targetRel = `${archiveDirByKind[kind]}/${basename(oldRel)}`
@@ -671,7 +678,7 @@ export async function archiveCompletedDocsGroup(repoRoot, {
         curRel = targetRel
       }
     }
-    groupItems.push({ oldRel, rel: curRel, kind, isSharedMaster })
+    groupItems.push({ oldRel, rel: curRel, kind, isSharedMaster, wasSharedMaster })
   }
 
   const byKind = { prd: null, spec: null, todo: null }
@@ -687,31 +694,27 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     let raw = readTextSafe(abs) ?? ''
     raw = replaceDocReferencesSinglePass(raw, moveMap)
     if (item.rel.startsWith('docs/archive/') && !item.oldRel.startsWith('docs/archive/')) {
-      for (const sharedRel of sharedPrds) {
+      for (const sharedRel of skippedSharedPrds) {
         const base = basename(sharedRel)
         raw = raw.replace(new RegExp(`\\.\\./prd/${escapeRegExpStr(base)}`, 'g'), `../../prd/${base}`)
       }
     }
     const fm = parseDocFrontmatter(raw)
-    const patch = { updated: today }
-    if (item.kind && !fm.data.kind) patch.kind = item.kind
-    if (issue !== undefined && issue !== null) patch.issue = Number(issue)
-    if (pr !== undefined && pr !== null) patch.pr = Number(pr)
-    if (branch) patch.branch = branch
-    if (owner) patch.owner = owner
-    if (item.kind === 'prd') patch.status = 'done'
-    if (item.kind === 'spec') { patch.status = 'implemented'; patch.implemented = true }
-    if (item.kind === 'todo') {
-      const curSt = String(fm.data?.status ?? '').toLowerCase()
-      patch.status = curSt === 'archived' ? 'archived' : 'done'
-      patch.done_at = fm.data?.done_at ?? today
+    const preserveMasterMeta = item.wasSharedMaster || (
+      item.oldRel.startsWith('docs/archive/prd/') && item.kind === 'prd'
+      && !parseDocFilename(item.oldRel)?.issue && fm.data?.issue == null && fm.data?.related_spec == null
+    )
+    const relatedTargets = {}
+    if (!preserveMasterMeta) {
+      for (const [rk, targetKind] of [['related_prd', 'prd'], ['related_spec', 'spec'], ['related_todo', 'todo']]) {
+        if (item.kind !== targetKind && byKind[targetKind]) {
+          relatedTargets[rk] = posixPath(relative(dirname(abs), join(repoRoot, byKind[targetKind])))
+        }
+      }
     }
-
-    for (const [rk, targetKind] of [['related_prd', 'prd'], ['related_spec', 'spec'], ['related_todo', 'todo']]) {
-      if (item.kind === targetKind) continue
-      const targetRel = byKind[targetKind]
-      if (targetRel) patch[rk] = posixPath(relative(dirname(abs), join(repoRoot, targetRel)))
-    }
+    const patch = buildArchivedDocPatch({
+      kind: item.kind, fmData: fm.data, today, issue, pr, branch, owner, preserveMasterMeta, relatedTargets,
+    })
 
     const merged = { ...fm.data }
     for (const [k, v] of Object.entries(patch)) {
@@ -732,7 +735,7 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     let dirty = false
     if (byKind.prd) {
       ledger.prdFile = byKind.prd
-      if (sharedPrds.has(byKind.prd)) ledger.archivedPrdFile = null
+      if (skippedSharedPrds.has(byKind.prd)) ledger.archivedPrdFile = null
       else if (byKind.prd.startsWith('docs/archive/')) ledger.archivedPrdFile = byKind.prd
       dirty = true
     }
@@ -741,11 +744,20 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     if (dirty) writeTaskLedger(repoRoot, ledger)
   }
 
-  return { moved, updated, byKind, archived: groupItems.filter((g) => !g.isSharedMaster).map((g) => g.rel), sharedMasterPrds: [...sharedPrds] }
+  const archivedMasterPrd = groupItems.find((g) => g.wasSharedMaster && g.rel.startsWith('docs/archive/'))?.rel ?? null
+  return {
+    moved, updated, byKind, archivedMasterPrd,
+    archived: groupItems.filter((g) => !g.isSharedMaster).map((g) => g.rel),
+    sharedMasterPrds: [...skippedSharedPrds],
+  }
 }
 
 export {
+  buildArchivedDocPatch,
+  buildMergeComments,
+  buildReviewComments,
   buildStandardDocContent,
+  buildSubmitComments,
   checkMermaidLabelWidth,
   displayWidth,
   evaluateCoupledSync,
@@ -753,7 +765,7 @@ export {
   parseCoupledSyncRules,
   resolveRepoCustomDocTemplate,
 } from './doc-templates.mjs'
-import { buildStandardDocContent } from './doc-templates.mjs'
+import { buildArchivedDocPatch, buildStandardDocContent } from './doc-templates.mjs'
 
 /**
  * 统一工程文档模板生成器（YAML Frontmatter + 顶部可见元信息概览表 + SPEC 短名 Mermaid 图）。

@@ -14,6 +14,7 @@ import {
   canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule,
   posixPath, resolveDefaultBranch, resolveRepoRoots, samePath, writeAtomic,
 } from '../../lib/git.mjs'
+import { readGitIndexPathsFast, readHeadFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import {
   auditDeadcode, auditHygiene, auditPerf, auditSecurity,
@@ -227,12 +228,19 @@ async function main(argv = process.argv.slice(2)) {
   let defaultBranch = null
   let headSha = null
   if (isGit) {
+    const fastHeadOid = readHeadFast(roots.workTreeGitDir, gitDir)?.oid ?? null
+    const fastTrackedSet = runLiveAudit ? readGitIndexPathsFast(workTreeRoot) : null
     const [ls, defBr, hr] = await Promise.all([
-      runLiveAudit ? gitRunBuffer(workTreeRoot, ['ls-files', '-z']) : Promise.resolve(null),
+      runLiveAudit && !fastTrackedSet ? gitRunBuffer(workTreeRoot, ['ls-files', '-z']) : Promise.resolve(null),
       resolveDefaultBranch(workTreeRoot),
-      gitRun(workTreeRoot, ['rev-parse', 'HEAD']),
+      fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(workTreeRoot, ['rev-parse', 'HEAD']),
     ])
-    if (ls?.ok) {
+    if (fastTrackedSet) {
+      for (const p of fastTrackedSet) {
+        const clean = posixPath(p)
+        if (clean && !isMacOsJunkPath(clean)) trackedSet.add(clean)
+      }
+    } else if (ls?.ok) {
       for (const p of ls.stdout.toString('utf8').split('\0')) {
         const clean = posixPath(p)
         if (clean && !isMacOsJunkPath(clean)) trackedSet.add(clean)

@@ -12,8 +12,9 @@ import { join, relative } from 'node:path'
 import {
   DEFAULT_WALK_SKIP_DIRS, canonicalPath, gitRun, inspectBranchMergeState,
   isMacOsJunkPath, parseWorktreeListPorcelain, posixPath, readJsonSafe,
-  samePath, sha256Text,
+  readTextSafe, samePath, sha256Text,
 } from '../../lib/git.mjs'
+import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_TEMP_RE, RUST_ALLOW_RE, TEST_FILE_RE,
   TOMBSTONE_COMMENT_RE, evaluateArchRules, extractLineCommentInfo,
@@ -386,8 +387,12 @@ export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
   const counts = { merged: 0, squash_or_rebase_merged: 0, no_own_commits: 0, unmerged: 0, prunable: 0, orphan_dir: 0 }
   if (!isGit) return { total: 0, counts, entries: worktreeEntries, stale }
 
-  const listRes = await gitRun(mainRoot, ['worktree', 'list', '--porcelain'])
-  const rawEntries = listRes.ok && listRes.stdout ? parseWorktreeListPorcelain(listRes.stdout) : []
+  const fastWtList = readWorktreeListFast(mainRoot)
+  let rawEntries = fastWtList
+  if (!rawEntries) {
+    const listRes = await gitRun(mainRoot, ['worktree', 'list', '--porcelain'])
+    rawEntries = listRes.ok && listRes.stdout ? parseWorktreeListPorcelain(listRes.stdout) : []
+  }
   const mainCanon = canonicalPath(mainRoot)
   const registeredPaths = []
   let registeredInDotWorktrees = 0
@@ -400,39 +405,53 @@ export async function inspectWorktrees(mainRoot, isGit, defaultBranch) {
   })
   registeredInDotWorktrees = dotWorktreeEntries.length
 
-  const inspected = await Promise.all(dotWorktreeEntries.map(async (e) => {
-    const rel = posixPath(relative(mainCanon, e.path))
-    if (e.prunable) {
-      return {
-        stateKey: 'prunable',
-        item: { path: rel, branch: e.branch, headSha: e.head, state: 'prunable', dirty: false, reason: `prunable (${e.prunable})` },
-        isStale: true,
+  const mergeCache = { firstParentPromises: new Map(), patchIdPromises: new Map() }
+  const inspected = new Array(dotWorktreeEntries.length)
+  let wtCursor = 0
+  const inspectOneWt = async () => {
+    while (wtCursor < dotWorktreeEntries.length) {
+      const idx = wtCursor
+      wtCursor += 1
+      const e = dotWorktreeEntries[idx]
+      const rel = posixPath(relative(mainCanon, e.path))
+      if (e.prunable) {
+        inspected[idx] = {
+          stateKey: 'prunable',
+          item: { path: rel, branch: e.branch, headSha: e.head, state: 'prunable', dirty: false, reason: `prunable (${e.prunable})` },
+          isStale: true,
+        }
+        continue
       }
-    }
-    const [stRes, mergeInfo] = await Promise.all([
-      existsSync(e.path) ? gitRun(e.path, ['status', '--porcelain']) : Promise.resolve({ ok: false, stdout: '' }),
-      inspectBranchMergeState(mainRoot, {
+      const fastCleanWt = existsSync(e.path) ? isCleanWorktreeFast(e.path) : null
+      const [stRes, mergeInfo] = await Promise.all([
+        fastCleanWt?.clean
+          ? Promise.resolve({ ok: true, stdout: '' })
+          : (existsSync(e.path) ? gitRun(e.path, ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=normal']) : Promise.resolve({ ok: false, stdout: '' })),
+        inspectBranchMergeState(mainRoot, {
+          branch: e.branch,
+          headSha: e.head,
+          defaultBranch: defaultBranch || 'main',
+          cache: mergeCache,
+        }),
+      ])
+      const dirty = Boolean(stRes.ok && stRes.stdout.trim())
+      const st = mergeInfo.state
+      const item = {
+        path: rel,
         branch: e.branch,
         headSha: e.head,
-        defaultBranch: defaultBranch || 'main',
-      }),
-    ])
-    const dirty = Boolean(stRes.ok && stRes.stdout.trim())
-    const st = mergeInfo.state
-    const item = {
-      path: rel,
-      branch: e.branch,
-      headSha: e.head,
-      state: st,
-      dirty,
-      ownCommits: mergeInfo.ownCommits,
-      isShallow: mergeInfo.isShallow,
-      reason: st === 'no_own_commits'
-        ? `no_own_commits: no unique commits ahead of ${defaultBranch || 'main'} (dirty=${dirty}; ask human before cleaning)`
-        : `${st}: ${mergeInfo.reason}`,
+        state: st,
+        dirty,
+        ownCommits: mergeInfo.ownCommits,
+        isShallow: mergeInfo.isShallow,
+        reason: st === 'no_own_commits'
+          ? `no_own_commits: no unique commits ahead of ${defaultBranch || 'main'} (dirty=${dirty}; ask human before cleaning)`
+          : `${st}: ${mergeInfo.reason}`,
+      }
+      inspected[idx] = { stateKey: st, item, isStale: st !== 'unmerged' }
     }
-    return { stateKey: st, item, isStale: st !== 'unmerged' }
-  }))
+  }
+  await Promise.all(Array.from({ length: Math.min(2, dotWorktreeEntries.length) }, inspectOneWt))
 
   for (const res of inspected) {
     counts[res.stateKey] = (counts[res.stateKey] ?? 0) + 1
@@ -644,7 +663,13 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
 
   const presentOutputs = OUTPUT_DIRS.filter((d) => existsSync(join(workRoot, d)))
   if (isGit && presentOutputs.length > 0) {
-    const res = await gitRun(workRoot, ['check-ignore', '-z', '--stdin'], { input: presentOutputs.join('\0') })
+    const giTxt = readTextSafe(join(workRoot, '.gitignore')) ?? ''
+    const exTxt = readTextSafe(join(mainRoot, '.git', 'info', 'exclude')) ?? ''
+    const onlyWorktrees = presentOutputs.length === 1 && presentOutputs[0] === '.worktrees'
+      && [giTxt, exTxt].some((t) => /^\s*\/?\.worktrees\/?\s*(?:#.*)?$/m.test(t))
+    const res = onlyWorktrees
+      ? { stdout: '.worktrees\0' }
+      : await gitRun(workRoot, ['check-ignore', '-z', '--stdin'], { input: presentOutputs.join('\0') })
     const ignored = new Set((res.stdout || '').split('\0').filter(Boolean).map((s) => posixPath(s).replace(/\/$/, '')))
     for (const d of presentOutputs) {
       if (!ignored.has(d)) {

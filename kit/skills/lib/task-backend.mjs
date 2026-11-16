@@ -10,6 +10,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { gitRun, gitStatusPorcelainZ, readTextSafe, withFileLock } from './git.mjs'
+import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 import { createGitHubClient, parsePfStateTags } from './github-client.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
 
@@ -524,16 +525,20 @@ export class LocalOnlyBackend {
         message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
       }
     }
-    const brRes = await gitRun(root, ['rev-parse', '--verify', `refs/heads/${ledger.branch}`])
+    const fastGitDir = this.gitDir ?? resolveGitDirFast(root)
+    const fastBrSha = resolveRefShaFast(fastGitDir, `refs/heads/${ledger.branch}`)
+    const brRes = fastBrSha ? { ok: true, stdout: fastBrSha } : await gitRun(root, ['rev-parse', '--verify', `refs/heads/${ledger.branch}`])
     if (!brRes.ok) return { ok: false, blocked: true, code: 'BRANCH_NOT_FOUND', exitCode: 1, message: brRes.stderr }
     const branchSha = brRes.stdout.trim()
     const baseRef = `refs/heads/${targetBase}`
-    const baseRes = await gitRun(root, ['rev-parse', '--verify', '--quiet', baseRef])
+    const fastBaseSha = resolveRefShaFast(fastGitDir, baseRef)
+    const baseRes = fastBaseSha ? { ok: true, stdout: fastBaseSha } : await gitRun(root, ['rev-parse', '--verify', '--quiet', baseRef])
     if (!baseRes.ok) {
       const up = await gitRun(root, ['update-ref', baseRef, branchSha])
       return { ok: up.ok, localMerge: up.ok, merged: up.ok, into: targetBase, mergedSha: branchSha }
     }
-    const curMainRes = await gitRun(root, ['symbolic-ref', '--short', 'HEAD'])
+    const fastHeadBr = readHeadFast(fastGitDir)?.branch ?? null
+    const curMainRes = fastHeadBr ? { ok: true, stdout: fastHeadBr } : await gitRun(root, ['symbolic-ref', '--short', 'HEAD'])
     const curMain = curMainRes.ok ? curMainRes.stdout.trim() : ''
     if (curMain === targetBase) {
       const ff = await gitRun(root, ['merge', '--ff-only', branchSha])

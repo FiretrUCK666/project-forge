@@ -11,6 +11,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import {
   detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree,
 } from '../../lib/git.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -32,12 +33,14 @@ export async function handleSync(opts = {}, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  const headRes = await gitRun(implRoot, ['rev-parse', 'HEAD'])
+  const fastPrevHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
+  const headRes = fastPrevHead ? { ok: true, stdout: fastPrevHead } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
   const prevHeadSha = headRes.ok ? headRes.stdout.trim() : null
   const oldBaseSha = ledger.baseSha ?? null
   const oldBaseBranch = ledger.baseBranch ?? 'main'
 
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
@@ -70,10 +73,13 @@ export async function handleSync(opts = {}, roots) {
     }
   }
 
-  let newBaseSha = null
-  for (const cand of [targetBaseBranch, `refs/heads/${targetBaseBranch}`, `refs/remotes/${pushRemote}/${targetBaseBranch}`]) {
-    const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
-    if (r.ok && r.stdout.trim()) { newBaseSha = r.stdout.trim(); break }
+  let newBaseSha = resolveRefShaFast(roots.gitDir, `refs/heads/${targetBaseBranch}`)
+    ?? resolveRefShaFast(roots.gitDir, `refs/remotes/${pushRemote}/${targetBaseBranch}`)
+  if (!newBaseSha) {
+    for (const cand of [targetBaseBranch, `refs/heads/${targetBaseBranch}`, `refs/remotes/${pushRemote}/${targetBaseBranch}`]) {
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+      if (r.ok && r.stdout.trim()) { newBaseSha = r.stdout.trim(); break }
+    }
   }
   if (!newBaseSha) {
     throw new Error(`找不到 sync 目标基线分支或提交：${targetBaseBranch}`)
@@ -108,7 +114,8 @@ export async function handleSync(opts = {}, roots) {
   }
 
   const depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }
-  const newHeadRes = await gitRun(implRoot, ['rev-parse', 'HEAD'])
+  const fastNewHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
+  const newHeadRes = fastNewHead ? { ok: true, stdout: fastNewHead } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
   const newHeadSha = newHeadRes.ok ? newHeadRes.stdout.trim() : prevHeadSha
 
   let prBaseUpdate = null

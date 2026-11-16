@@ -9,10 +9,11 @@ import { resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { detectGateWeakening } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
 import {
   determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
   readVerificationEvidence, validateVerificationEvidence,
@@ -24,7 +25,8 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   if (process.env.PF_NO_REAL_AUTH_PROBE === '1' && !opts._ghClient && !opts._ghProbe) {
     return { rehydrated: false, reason: 'PF_NO_REAL_AUTH_PROBE' }
   }
-  const remoteRes = await gitRun(roots.mainRoot, ['remote', '-v'])
+  const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+  const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const declaredRepo = detectDeclaredRepo(roots.mainRoot)
   const { targetRepo } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo)
@@ -129,17 +131,25 @@ export async function handleNext(opts, roots) {
     const implRoot = selectedTask.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.mainRoot
     const exists = existsSync(implRoot)
     const profile = parseAgentsProfile(roots.mainRoot)
-    const stZ = exists ? await gitStatusPorcelainZ(implRoot) : { ok: true, entries: [] }
-    const [op, headRes, changedFiles, gateHits] = exists
+    const fastHeadOid = exists ? (readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null) : null
+    const [stZ, headRes, diffRawRes] = exists
+      ? await Promise.all([
+          gitStatusPorcelainZ(implRoot),
+          fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
+          !selectedTask.baseSha
+            ? Promise.resolve(null)
+            : (fastHeadOid && fastHeadOid === selectedTask.baseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${selectedTask.baseSha}..HEAD`)),
+        ])
+      : [{ ok: true, entries: [] }, { ok: false, stdout: '' }, null]
+    const headSha = headRes.ok ? headRes.stdout.trim() : null
+    const sharedEntries = diffRawRes?.ok ? diffRawRes.entries : undefined
+    const [op, changedFiles, gateHits] = exists
       ? await Promise.all([
           detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
-          gitRun(implRoot, ['rev-parse', 'HEAD']),
-          getChangedFiles(implRoot, selectedTask.baseSha, { statusEntries: stZ.entries }),
-          detectGateWeakening(implRoot, selectedTask.baseSha, selectedTask.baseBranch),
+          getChangedFiles(implRoot, selectedTask.baseSha, { statusEntries: stZ.entries, diffEntries: sharedEntries }),
+          detectGateWeakening(implRoot, selectedTask.baseSha, selectedTask.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
         ])
-      : [{ inProgress: false }, { ok: false, stdout: '' }, [], []]
-
-    const headSha = headRes.ok ? headRes.stdout.trim() : null
+      : [{ inProgress: false }, [], []]
     const ownArchived = [selectedTask.archivedTodoFile, selectedTask.archivedSpecFile, selectedTask.archivedPrdFile].filter(Boolean)
     const policy = determineWorkflowPolicy({
       changedFiles,

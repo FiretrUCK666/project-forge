@@ -6,10 +6,10 @@ description: |
   供应链扫描、故障注入审查、复审、打回返工、review、pre-review、untrusted scan。
 ---
 
-# dev-review
+# dev-review：评审 → 实证测试-形式验证 → 验收 双门六锁把关器
 
-把「独立审查子代理调用」与「开发者日常本地预审」统一到同一个只读打包和记账入口：
-`node .agents/skills/dev-review/scripts/review-pack.mjs`。
+承接 `dev-flow submit` 提审或本地预审，把「独立审查子代理调用」与「开发者本地日常预审」统一到只读打包与记账入口：
+`node .agents/skills/dev-review/scripts/review-pack.mjs`，并在记账时向 `signals.jsonl` 沉淀处置信号供 `dev-govern retro` 复盘进化。
 
 ## 双重模式与入口命令
 
@@ -93,11 +93,11 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
   [--task <id>] --human-approved --reason "<裁决理由>"
 ```
 
-说明：`record` 在存在关联 PR 或 `linkedIssues` 且处于 GitHub 在线环境时，会自动拼装规范化四字段评论（`审查来源`、`逐条标准状态`、`故障注入记录`、`止损记录` + `pf-state`）**实时双写至 PR 与关联 Issue 评论**，并按裁决贴 `changes-requested` / `reviewed` 标签（403 自动降级、离线或无凭据静默写本地账本并提示，绝不阻塞离线使用）。
+说明：`record` 在存在关联 PR 或 `linkedIssues` 且处于 GitHub 在线环境时，会自动拼装规范化结构双写评论（标题统一以 `审核不通过（退回）/审核通过 · Round N` 开头；PR 完整审查单含四字段、`对比基线`、`验收标准逐条核对` 表、`Must Fix` 编号展开/`Should Fix`/`Pre-existing` 与 `pf-state`；Issue 摘要单含每条 `Must Fix` `file:line` 核心原因）**实时双写至 PR 与关联 Issue 评论**，并按裁决贴 `changes-requested` / `reviewed` 标签；403 自动降级，离线或 `mcp-delegate` 无直连凭据时在 `githubSync.delegatedPayloads` 产出各目标完整渲染正文供宿主 MCP 原样双写，同时写入 `<gitCommonDir>/project-forge-govern/signals.jsonl` 供 `dev-govern`（`retro`）统计误报率与下沉规则。
 
-## 输出与下一跳
+## 输出与下一跳（合入或返工闭环）
 
 每条命令均附 `[NEXT STEP]` 明确提示下一合法动作：
-- `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 cleanup 清理范围；
-- `CHANGES_REQUESTED`：实施者在原分支追加修复（`flow.mjs rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由独立审查复核；
-- `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：立即停循环转交人类。
+- `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `node .agents/skills/dev-flow/scripts/flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 `flow.mjs cleanup --confirm` 清理范围；
+- `CHANGES_REQUESTED`：实施者在原 `impl` 分支追加修复（`dev-flow` 的 `rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由**新的独立 `review` 子代理上下文**复核；
+- `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：立即停循环转交人类（`override --human-approved --reason` 或人工批准执行）。

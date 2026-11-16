@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitSync, loadPreflight,
+  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitInit, gitInitBare, gitSync, loadPreflight,
   readDirRefs, rmTree, runAbs, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -44,10 +44,7 @@ cases.push(['有远端与没远端拿到的是两段不同的正文，不是同�
   const withRemote = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
   const withoutRemote = tmpProject({ 'README.md': '# d\n\n说明足够长以通过长度检查。\n' })
   try {
-    gitSync(withRemote, ['init', '-q', '-b', 'main'])
-    gitSync(withRemote, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'add', '-A'])
-    gitSync(withRemote, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'init'])
-    gitSync(withRemote, ['remote', 'add', 'origin', 'https://github.com/a/b.git'])
+    gitInit(withRemote, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://github.com/a/b.git' })
     await runNode('compose-agents.mjs', [withRemote])
     await runNode('compose-agents.mjs', [withoutRemote])
 
@@ -568,7 +565,7 @@ cases.push(['纯 .vue 组件库不是「纯文档项目」', async () => {
 cases.push(['裸仓库判成「裸仓库」，不是「还没有版本库」', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pf-bare-'))
   try {
-    gitSync(undefined, ['init', '-q', '--bare', dir])
+    gitInitBare(dir)
     const f = await survey(dir)
     if (f.git.isBare !== true) return `isBare 是 ${f.git.isBare}`
     if (f.git.present !== true) return '裸仓库被判成「没有版本库」'
@@ -591,7 +588,7 @@ cases.push(['子目录里的独立仓库会被点名，并给出边界问题', a
   try {
     gitInit(dir)
     mkdirSync(join(dir, 'sub'))
-    gitSync(join(dir, 'sub'), ['init', '-q'])
+    gitInit(join(dir, 'sub'), { commit: false })
     const f = await survey(dir)
     if (!(f.git.nestedRepos ?? []).includes('sub')) return `nestedRepos=${JSON.stringify(f.git.nestedRepos)}`
     if (!textsOf(f.gaps).some((g) => /独立仓库/.test(g))) return 'gaps 里没有嵌套仓库这一条'
@@ -622,8 +619,7 @@ cases.push(['清单声明了源仓库且作者匹配，角色就判得出来；�
     // 反面：没声明且无提交作者/写权限证据时，不许猜成维护者，而且要把问题问出来。
     const undeclared = tmpProject({ 'README.md': '# d\n\n说明足够长。\n', 'main.py': 'print(1)\n' })
     try {
-      gitSync(undeclared, ['init', '-q'])
-      gitSync(undeclared, ['remote', 'add', 'origin', 'https://github.com/acme/unknown.git'])
+      gitInit(undeclared, { commit: false, origin: 'https://github.com/acme/unknown.git' })
       const g = await survey(undeclared)
       if (g.git.role !== 'undetermined') return `role=${g.git.role}（没声明源仓库却判成了别的）`
       if (!textsOf(g.questions).some((q) => /正本|源仓库/.test(q))) return '角色比不出来却没有提问'

@@ -6,9 +6,13 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join, posix as pathPosix } from 'node:path'
+import { join, posix as pathPosix, resolve } from 'node:path'
 
 import { gitRun, gitRunBuffer, posixPath, readTextSafe, unescapeGitPath } from './git.mjs'
+import {
+  computePatchRawDigest, getCachedCommitDiff, getCachedEntriesDiffText, parseRawAndUnifiedDiff,
+  readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
+} from './git-fast.mjs'
 import { hasHumanMergeAuthority } from './profile.mjs'
 import {
   extractLineCommentInfo,
@@ -607,14 +611,55 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
   return hits
 }
 
+/** 单次调用同时获取 `nameStatus` 条目与 `--unified=3` diff 正文，并绑定 WeakMap 与不可变提交缓存。 */
+export async function gitDiffRawEntriesAndText(cwd, range) {
+  let effectiveRange = range
+  let commonDir = null
+  let cacheBase = null
+  let cacheHead = null
+  const rangeM = /^([0-9a-f]{40,64})\.\.([0-9a-f]{40,64}|HEAD)$/i.exec(String(range ?? ''))
+  if (rangeM) {
+    const wtGitDir = resolveGitDirFast(cwd)
+    if (wtGitDir) {
+      const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
+      commonDir = cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir
+      const resolvedHead = rangeM[2].toUpperCase() === 'HEAD' ? readHeadFast(wtGitDir, commonDir)?.oid : rangeM[2]
+      if (resolvedHead && /^[0-9a-f]{40,64}$/i.test(resolvedHead)) {
+        cacheBase = rangeM[1]
+        cacheHead = resolvedHead
+        if (cacheBase === cacheHead) return { ok: true, entries: [], diffText: '', rawSha256: null, rawBytes: 0, stderr: '' }
+        effectiveRange = `${cacheBase}..${cacheHead}`
+        const hit = getCachedCommitDiff(commonDir, cacheBase, cacheHead)
+        if (hit) return { ok: true, entries: hit.entries, diffText: hit.diffText, rawSha256: hit.rawSha256, rawBytes: hit.rawBytes, stderr: '' }
+      }
+    }
+  }
+  const res = await gitRunBuffer(cwd, ['--no-optional-locks', 'diff', '--raw', '--unified=3', '--no-ext-diff', '--no-color', effectiveRange])
+  if (!res.ok) return { ok: false, entries: [], diffText: '', stderr: res.stderr }
+  const { entries, diffText } = parseRawAndUnifiedDiff(res.stdout)
+  const digest = computePatchRawDigest(res.stdout)
+  const out = { ok: true, entries, diffText, rawSha256: digest.sha256, rawBytes: digest.bytes, stderr: '' }
+  if (commonDir && cacheBase && cacheHead) setCachedCommitDiff(commonDir, cacheBase, cacheHead, out)
+  return out
+}
+
 /** 扫描仓库 diff 中可能弱化验证门禁的改动，返回精确命中列表（支持复用 headSha 与 nameStatusEntries）。 */
 export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = {}) {
   let ref = baseRef
-  const headSha = opts.headSha ?? ((await gitRun(implRoot, ['rev-parse', 'HEAD'])).stdout?.trim() || null)
+  const wtGitDir = !opts.headSha || (!ref && baseBranch) ? resolveGitDirFast(implRoot) : null
+  const fastHead = opts.headSha ? null : (wtGitDir ? readHeadFast(wtGitDir)?.oid : null)
+  const headSha = opts.headSha ?? (fastHead || ((await gitRun(implRoot, ['rev-parse', 'HEAD'])).stdout?.trim() || null))
 
   if (!ref && baseBranch) {
-    const brRes = await gitRun(implRoot, ['rev-parse', '--verify', baseBranch])
-    if (brRes.ok && brRes.stdout.trim() !== headSha) ref = baseBranch
+    const cdTxt = wtGitDir ? readTextSafe(join(wtGitDir, 'commondir')) : null
+    const commonDir = wtGitDir ? (cdTxt ? resolve(wtGitDir, cdTxt.trim()) : wtGitDir) : null
+    const fastBrSha = commonDir ? resolveRefShaFast(commonDir, `refs/heads/${baseBranch}`) : null
+    if (fastBrSha) {
+      if (fastBrSha !== headSha) ref = baseBranch
+    } else {
+      const brRes = await gitRun(implRoot, ['rev-parse', '--verify', baseBranch])
+      if (brRes.ok && brRes.stdout.trim() !== headSha) ref = baseBranch
+    }
   }
   if (!ref) return []
 
@@ -623,27 +668,25 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = 
     return []
   }
 
-  const [diffRes, nsRes] = await Promise.all([
-    gitRunBuffer(implRoot, ['diff', '--unified=3', '--no-ext-diff', '--no-color', `${ref}..HEAD`]),
-    hasPreNs ? Promise.resolve(null) : gitRunBuffer(implRoot, ['diff', '--name-status', '-z', `${ref}..HEAD`]),
-  ])
-  if (!diffRes.ok) return []
+  let diffText = hasPreNs ? getCachedEntriesDiffText(opts.nameStatusEntries) : undefined
+  let resolvedEntries = hasPreNs ? opts.nameStatusEntries : null
+  if (diffText === undefined) {
+    if (hasPreNs) {
+      const diffRes = await gitRunBuffer(implRoot, ['--no-optional-locks', 'diff', '--unified=3', '--no-ext-diff', '--no-color', `${ref}..HEAD`])
+      if (!diffRes.ok) return []
+      diffText = diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n')
+    } else {
+      const rawRes = await gitDiffRawEntriesAndText(implRoot, `${ref}..HEAD`)
+      if (!rawRes.ok) return []
+      diffText = rawRes.diffText
+      resolvedEntries = rawRes.entries
+    }
+  }
 
-  const diffText = diffRes.stdout.toString('utf8').replace(/\r\n/g, '\n')
   const chunks = splitDiffByFile(diffText)
   const statusMap = new Map()
-  if (hasPreNs) {
-    for (const e of opts.nameStatusEntries) {
-      if (e?.file) statusMap.set(posixPath(e.file), e.status || 'M')
-    }
-  } else if (nsRes?.ok) {
-    const tokens = nsRes.stdout.toString('utf8').split('\0')
-    for (let i = 0; i < tokens.length; i += 1) {
-      const st = tokens[i]
-      if (!st) continue
-      if (/^[RC]/.test(st)) { statusMap.set(posixPath(tokens[i + 2] ?? ''), st); i += 2 }
-      else { statusMap.set(posixPath(tokens[i + 1] ?? ''), st); i += 1 }
-    }
+  for (const e of resolvedEntries ?? []) {
+    if (e?.file) statusMap.set(posixPath(e.file), e.status || 'M')
   }
 
   const files = [...new Set([...chunks.keys(), ...statusMap.keys()])].filter(Boolean)

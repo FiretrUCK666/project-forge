@@ -87,8 +87,7 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     if (l.role !== 'generic-git' || l.providerId !== 'generic-git') return `generic-git 角色错误：${st.stdout}`
     const wtGen = join(dirGeneric, l.worktreePath)
     writeFileSync(join(wtGen, 'README.md'), '# generic\n\n低风险文档更新。\n')
-    gitSync(wtGen, ['add', '-A'])
-    gitSync(wtGen, ['commit', '-qm', 'docs: update readme'])
+    gitSync(wtGen, ['commit', '-qam', 'docs: update readme'])
     const v = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 't-gen'], { cwd: wtGen })
     if (v.status !== 0) return `generic-git verify 失败：${v.stderr}`
     const mBlock = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['merge', '--task', 't-gen', '--json'], { cwd: dirGeneric })
@@ -375,12 +374,13 @@ cases.push(['多维护者团队协同：team-collaborator 与 owner 区分、防
     'src/index.mjs': 'export const ok = true\n',
   })
   try {
-    gitSync(teamDir, ['init', '-q'])
-    gitSync(teamDir, ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'add', '-A'])
-    gitSync(teamDir, ['-c', 'user.name=Lead', '-c', 'user.email=lead@org-a.example', 'commit', '-qm', 'init by lead'])
-    gitSync(teamDir, ['config', 'user.name', 'NewTeammate'])
-    gitSync(teamDir, ['config', 'user.email', 'new@org-a.example'])
-    gitSync(teamDir, ['remote', 'add', 'origin', 'https://github.com/org-a/team-app.git'])
+    gitInit(teamDir, { name: 'Lead', email: 'lead@org-a.example', origin: 'https://github.com/org-a/team-app.git' })
+    writeFileSync(
+      join(teamDir, '.git/config'),
+      readFileSync(join(teamDir, '.git/config'), 'utf8')
+        .replace('name = Lead', 'name = NewTeammate')
+        .replace('email = lead@org-a.example', 'email = new@org-a.example'),
+    )
 
     const flowJsonRes = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['inspect', '--json'], { cwd: teamDir })
     if (flowJsonRes.status !== 0) return `flow.mjs inspect --json 失败：${flowJsonRes.stderr}`

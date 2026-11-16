@@ -55,7 +55,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ```
 
 - **契约体积与失效引用**：`AGENTS.md` 达 `24576` 字节预警、超 `30720` 字节报危，校验反引号路径、默认分支与 `Dev Profile`（含过期 `high-risk:` 零匹配检查 `docs.devprofile-unmatched-high-risk`）。
-- **文档温差、相对死链、Mermaid 与活跃 Frontmatter**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），扫描 Markdown 相对死链（`docs.dead-link`）、Mermaid `16/12` 防截断宽度（`docs.mermaid-label-width`）、`docs/TDD.md` 模块漂移（遵循 `readDecisions` 的 `no-tdd` / 既有架构文档豁免），以及 `docs/{prd,specs,todo}/` 活跃文档的 YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链。
+- **文档温差、相对死链、Mermaid 与活跃 Frontmatter**：对照最近 80 次提交热点目录检查文档滞后（`docs.stale-vs-churn`），扫描活跃目录 Markdown 相对死链（`docs.dead-link`，跳过 `docs/archive/` 历史归档）、Mermaid `16/12` 防截断宽度（`docs.mermaid-label-width`）、`docs/TDD.md` 模块漂移（遵循 `readDecisions` 的 `no-tdd` / 既有架构文档豁免），以及 `docs/{prd,specs,todo}/` 活跃文档的 YAML Frontmatter、`-issue<N>-` 与 `related_*` 互链。
 - **结构腐化与跨层边界**：识别墓碑履历注释（`hygiene.tombstone-comment`）、借口/压制标记（`hygiene.excuse-suppression`）、连续注释死代码块（`deadcode.commented-block`）、`>800`/`>1500` 行超大源码（`hygiene.god-file`）与 `arch-rules:` 跨层禁引违规（`hygiene.arch-boundary`）。
 - **测试覆盖与 CI 对齐**：聚合根与多子包脚本（`package.json`、`Makefile`、`justfile`、`pom.xml`、`Cargo.toml` 等）、`.github/workflows/` 及中性 CI 配置（`.circleci/config.yml`、`azure-pipelines.yml`、`Jenkinsfile` 等）与 `Dev Profile` 输出 `testInventory`，揪出零断言、全跳过与孤儿测试套件（`tests.orphan-suite`）。
 - **Worktree 四态精细判定**：在 worktree 内运行同样以 `<mainRoot>/.worktrees/` 为基准，结合 `git cherry` 与 `git patch-id` 识别 `merged`、`squash_or_rebase_merged`、`no_own_commits`（**仅报告并要求先问人核对未提交改动，绝不误删**）与 `unmerged`。
@@ -79,15 +79,15 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ## 园艺缓冲聚类、事后抽检与顽固 Bug 三步止损
 
 - **园艺缓冲与批清理**：定期用 `cluster` 汇总 `signals.jsonl` 与现场审计发现，按模块+模式一次性整片清理，不在同一文件叠补丁。
-- **事后历史抽检（`sample`）**：定期运行 `sample --commits 30`，统计 `Revert` 回滚率与 48 小时同文件反复返工热点，输出需要补建测试或 `smoke-verify` 的规则下沉建议。
+- **事后历史抽检与任务复盘（`sample` / `retro`）**：定期运行 `sample --commits 30` 统计 `Revert` 与 48 小时返工热点；任务合入后运行 `retro [--task <id>] [--apply-patches] [--json]` 自动读取 `dev-flow`（`verify`/`rework`）与 `dev-review`（`record` `--disposition`）自动沉淀的 `<gitCommonDir>/project-forge-govern/signals.jsonl`，统计无效审查率并产出规则/门禁/夹具建议补丁，反馈给下轮 `dev-plan`。
 - **顽固 Bug 三步止损**：同一模块或同一缺陷连续尝试修复 **3 次仍复发或退回**时，立即停手止损，禁止继续试错打补丁；用 `sample` 与 `cluster` 复盘架构边界与回归测试缺口，交由人类维护者拍板方案后再动。
 
 ## 与其余四套研发技能的联动
 
-- **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift` 或 `hygiene.god-file`/`arch-boundary` 时，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 摸清真实模块入口与 `reusableModules`，再落笔治理或修订 `docs/TDD.md`。
-- **`dev-plan`**：`govern-audit.mjs plan --write-todo` 生成符合统一模板的标准 Todo 并可直接通过 `doc-plan.mjs audit`；命中跨模块/架构边界债时，自动指引先走 `doc-plan.mjs triage`（L3 建 `SPEC + Todo`）。
-- **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理（`lightweight` 档缺省兄弟技能时自动降级为原生 Git 指引）。
-- **`dev-review`**：每轮整改与规则下沉后运行 `AGENTS.md` 全部验证命令，再用 `review-pack.mjs --local` 收口确认。
+- **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift`、`hygiene.god-file`/`arch-boundary` 或准备执行 `retro` 规则下沉前，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 摸清真实模块入口与 `reusableModules`，再落笔治理或修订 `docs/TDD.md`。
+- **`dev-plan`**：`govern-audit.mjs plan --write-todo` 生成符合统一模板的标准 Todo 并可直接通过 `doc-plan.mjs audit`；命中跨模块债或 `retro` 建议整改时，自动指引先走 `doc-plan.mjs triage`（L3 建 `SPEC + Todo`）。
+- **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理；`flow.mjs verify`/`rework` 自动向 `signals.jsonl` 写入运行时信号供 `retro` 消费（`lightweight` 档缺省兄弟技能时自动降级为原生 Git 指引）。
+- **`dev-review`**：每轮整改与规则下沉后运行 `AGENTS.md` 全部验证命令，再用 `review-pack.mjs --local` 收口确认；`review-pack.mjs record` 的 `--disposition` 反馈自动入库 `signals.jsonl`。
 
 ## 执行与安全护栏
 

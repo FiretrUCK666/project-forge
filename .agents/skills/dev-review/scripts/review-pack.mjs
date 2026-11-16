@@ -58,7 +58,7 @@ function printHelp() {
     '  --json                        Emit machine-readable JSON',
     '',
     'Record / Override Options:',
-    '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id>',
+    '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id> --review-token <token>',
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
     '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
@@ -191,6 +191,7 @@ async function main(argv = process.argv.slice(2)) {
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
+        'review-token',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
         'reason', 'visual-evidence', 'agent',
       ],

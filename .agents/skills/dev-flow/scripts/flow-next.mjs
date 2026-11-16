@@ -10,7 +10,7 @@ import { resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { issueReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -183,7 +183,30 @@ export async function handleNext(opts, roots) {
     }
   }
 
-  const out = evaluateNextState({ activeTasks, selectedTask, taskRuntime })
+  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime })
+
+  // 待审查时签发一枚一次性令牌。
+  //
+  // 独立审查的身份不能只靠 `--reviewer-id` 一个自由字符串：谁能编一个不一样的名字。
+  // 令牌由这里现场签发、写进账本，`review-pack record` 必须持有它且只能消费一次。
+  // 它不承担「防伪到不可伪造」——它承担的是「把随便编个名的成本从 0 抬成一件显眼的事」。
+  //
+  // `--json` 也要带：只看 JSON 的调用方拿不到令牌就永远记不了审查。
+  if (out.phase === 'needs-review' && selectedTask) {
+    const round = (selectedTask.rounds ?? []).length + 1
+    const existing = (selectedTask.reviewTokens ?? []).find((t) => Number(t.round) === round && !t.consumedAt)
+    const tokenEntry = existing ?? issueReviewToken(round)
+    if (!existing) {
+      selectedTask.reviewTokens = [...(selectedTask.reviewTokens ?? []), tokenEntry]
+      writeTaskLedger(roots.mainRoot, selectedTask)
+    }
+    out = {
+      ...out,
+      reviewToken: tokenEntry.token,
+      command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${tokenEntry.token}`,
+    }
+  }
+
   const payload = { ...out, hydration }
 
   if (opts.json) {

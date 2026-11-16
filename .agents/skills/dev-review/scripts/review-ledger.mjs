@@ -13,7 +13,7 @@ import { buildReviewComments } from '../../lib/docs.mjs'
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId,
+  consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId,
   writeTaskLedger,
 } from '../../lib/ledger.mjs'
 import {
@@ -265,11 +265,45 @@ export async function handleRecord(opts, roots) {
     return EXIT.USAGE_OR_POLICY
   }
 
+  // 独立审查的「身份」不能只靠一个自由字符串。
+  //
+  // 早先这里只做一件事：`--reviewer-id` 与账本里的 `implementerId` 比一比。两者都是
+  // 命令行传进来的名字，谁都能编一个不一样的——实测编一个 `totally-fake-agent` 立刻通过。
+  // 而 `implementerId` 为空时这个判断直接跳过（`if (implementerId && ...)`），
+  // 于是「没有实施者标识」变成了「不需要独立审查」。
+  //
+  // 现在两条都要过：
+  //   一、`implementerId` 必须有，没有就拒绝记录（空值不再是一条免检通道）；
+  //   二、必须持有一枚由 `flow next` 在待审查阶段签发的一次性令牌，只能消费一次、轮次要对得上。
+  //
+  // 这不是完美防伪（AI 理论上还能自己伪造一个进程），但它把「随便编个名」抬成了
+  // 「至少得伪造一个现场签发的东西」——成本从 0 变成了一件很显眼的事。
   const implementerId = String(opts['implementer-id'] ?? baseLedger.implementerId ?? '').trim()
-  if (implementerId && reviewerId === implementerId) {
+  if (!implementerId) {
+    const msg = 'BLOCKED_MISSING_IMPLEMENTER: 账本里没有 implementerId，无法判断这是不是自审——'
+      + '缺少实施者标识不等于不需要独立审查。请用 flow.mjs start 建立任务（会记下实施者），或显式传 --implementer-id。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_IMPLEMENTER', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+  if (reviewerId === implementerId) {
     const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${implementerId}). Independent review requires a distinct reviewer.`
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+
+  const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round)
+  if (!tokenCheck.ok) {
+    const msg = `BLOCKED_REVIEW_TOKEN: ${tokenCheck.reason}。`
+      + '独立审查要凭 flow.mjs next 在待审查阶段签发的一次性令牌，--reviewer-id 一个字符串不再是凭据。'
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_REVIEW_TOKEN', code: tokenCheck.reason, error: msg, taskId, round, reviewerId }, null, 2)}\n`)
     } else {
       process.stdout.write(`${msg}\n`)
     }

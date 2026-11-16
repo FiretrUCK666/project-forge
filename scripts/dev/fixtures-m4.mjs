@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readZip, stripCommonPrefix, writeZip } from '../zip.mjs'
-import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -428,7 +428,7 @@ export function registerM4Cases(cases) {
       await handleRework({ task: 'c3-t' }, roots)
       await handleVerify({ task: 'c3-t', mode: 'full', cmd: 'exit 0' }, roots)
       const recRes = await handleRecord({
-        task: 'c3-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-1',
+        task: 'c3-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c3-t', 1),
         disposition: ['C1:rebutted-wrong', 'C2:intentional'],
       }, roots)
       if (recRes !== 0) return `handleRecord 失败：exit=${recRes}`

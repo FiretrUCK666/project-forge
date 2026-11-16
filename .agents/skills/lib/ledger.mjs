@@ -31,6 +31,27 @@ export function issueReviewToken(round) {
 }
 
 /**
+ * 取这一轮的一次性审查令牌：有未消费的就复用，没有就发一枚并写回账本。
+ *
+ * 只有 `flow next` 在待审查阶段调用它——**签发点唯一**，否则调用方各发各的，
+ * 令牌就不再是「现场签发的那个东西」。
+ *
+ * 复用而不是每次新发：`flow next` 可能被连跑好几次（人看状态、脚本问路），
+ * 每次新发一枚会让前一枚作废，而调用方手里拿的很可能是前一枚。
+ *
+ * @returns {{ token: string, entry: object, issued: boolean }}
+ */
+export function ensureReviewToken(mainRoot, ledger, round) {
+  const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const existing = list.find((t) => t && Number(t.round) === Number(round) && !t.consumedAt)
+  if (existing) return { token: existing.token, entry: existing, issued: false }
+  const entry = issueReviewToken(round)
+  ledger.reviewTokens = [...list, entry]
+  writeTaskLedger(mainRoot, ledger)
+  return { token: entry.token, entry, issued: true }
+}
+
+/**
  * 消费一枚令牌。成功返回 `{ ok: true }`，失败返回原因。
  *
  * 三条都要满足：令牌存在、round 对得上、未被消费过。少判一条就等于没有令牌——

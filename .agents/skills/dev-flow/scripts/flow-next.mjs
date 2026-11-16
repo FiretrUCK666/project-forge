@@ -10,7 +10,7 @@ import { resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { issueReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -194,16 +194,11 @@ export async function handleNext(opts, roots) {
   // `--json` 也要带：只看 JSON 的调用方拿不到令牌就永远记不了审查。
   if (out.phase === 'needs-review' && selectedTask) {
     const round = (selectedTask.rounds ?? []).length + 1
-    const existing = (selectedTask.reviewTokens ?? []).find((t) => Number(t.round) === round && !t.consumedAt)
-    const tokenEntry = existing ?? issueReviewToken(round)
-    if (!existing) {
-      selectedTask.reviewTokens = [...(selectedTask.reviewTokens ?? []), tokenEntry]
-      writeTaskLedger(roots.mainRoot, selectedTask)
-    }
+    const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round)
     out = {
       ...out,
-      reviewToken: tokenEntry.token,
-      command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${tokenEntry.token}`,
+      reviewToken: token,
+      command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${token}`,
     }
   }
 

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-16T17:14:37.056Z",
+  "installedAt": "2026-11-16T17:19:37.208Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "a008a6a86714c789aa7c6582d841992bb29c609df5a685c40d8cc43914bbd7a0"
@@ -29,7 +29,7 @@
       "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "74f6038f498f05cfe51687eb5556de5e13886224a1289f7bd5febc7bbb9ffc99"
+      "sha256": "dd16ae17b91b2fdf51aace6cbae064d2c89e24ef201b0567f37b9f32aa632c56"
     },
     "dev-flow/scripts/flow-sync.mjs": {
       "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
@@ -122,7 +122,7 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/ledger.mjs": {
-      "sha256": "290d876e3b3284fd967c9cd3d6db6eb87cf6abc1b78dae1e792cbdc461019d51"
+      "sha256": "3121eb7c52b08b28922f26428d2c87be704e9b8fe46760a20e7d72e94da7ec9f"
     },
     "lib/platform-probe.mjs": {
       "sha256": "6ea9cb0645122d4f77220f6bd81db0430ef3dba26090aef2a339cbdf7b0bcd19"
@@ -137,7 +137,7 @@
       "sha256": "711a4e7abd4d41da22665950423e98550f9b941b47ff9c8697f775fd21e38bf3"
     },
     "lib/shared.mjs": {
-      "sha256": "7a7e4939ce6b482367cf3c11303a18e35d65f011ecf775de45fc2f6dd7ed5f0c"
+      "sha256": "f2ac7bdb4b65000edebe6910e35b9009504559736049a36a04e31bbc9c7bea26"
     },
     "lib/signals.mjs": {
       "sha256": "ecdc6df599809d7b92f6e984df741afe822b9c45bd0de42805cf095478cedda8"

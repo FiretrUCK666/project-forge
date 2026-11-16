@@ -118,6 +118,7 @@ export {
 export {
   consumeReviewToken,
   createDefaultLedger,
+  ensureReviewToken,
   issueReviewToken,
   listTaskLedgers,
   readTaskLedger,

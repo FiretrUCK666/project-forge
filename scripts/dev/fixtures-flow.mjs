@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
 cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
@@ -58,7 +58,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
     const vWeak = await handleVerify({ task: 't-w2', mode: 'gate' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
-    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2' }, roots)
+    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
 
     const mGate = await handleMerge({ task: 't-w2', json: true }, roots)
     if (mGate.exitCode !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.exitCode}`
@@ -75,7 +75,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     gitCommitFast(implClean, 'add assertion', { updateOnly: true })
     const vClean = await handleVerify({ task: 't-w2-clean', mode: 'full' }, roots)
     if (vClean.exitCode !== 0) return `clean verify 失败：${vClean.exitCode}`
-    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2' }, roots)
+    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2-clean', 1) }, roots)
     const mClean = await handleMerge({ task: 't-w2-clean' }, roots)
     if (mClean.exitCode !== 0) return `正常增量测试被 merge 误杀为门禁弱化：exit=${mClean.exitCode}`
     return true
@@ -187,6 +187,7 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     // review-pack record 实时双写结构化评论（PR 完整核对单 + Issue 阻塞摘要）到 PR #88 与 Issue #77 并贴标签；离线不阻塞且产出 delegatedPayloads
     const recChangesCode = await handleRecord({
       task: 'gw-feat', round: '1', verdict: 'changes', 'reviewer-id': 'rev-z',
+      'review-token': await issueTokenFor(dir, 'gw-feat', 1),
       'must-fix': [JSON.stringify([{ id: 'C1', file: 'src/app.mjs', line: 1, summary: 'C1: 修复空指针', rootCause: '缺少空值守卫', fixHint: '先判空再返回' }])],
       'should-fix': ['补齐边界日志'],
       'pre-existing': ['src/legacy.mjs:3 历史遗留告警'],
@@ -211,7 +212,8 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const gw = 2\n')
     gitCommitFast(implAbs, 'fix: gw null guard', { updateOnly: true })
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--json',
+      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z',
+      '--review-token', await issueTokenFor(dir, 'gw-feat', 2), '--json',
     ], { cwd: dir })
     const offlineSync = offlineRec.status === 0 ? JSON.parse(offlineRec.stdout).githubSync : null
     const delPr = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'pr' && t.number === 88)
@@ -344,7 +346,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     }
 
     // Round 1 pass 后再提交新改动并 verify（未复审），merge 必须拦截陈旧 reviewPassedHead
-    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 1) }, roots)
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 3\n')
     gitCommitFast(implAbs, 'feat: v3', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
@@ -352,7 +354,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (mStaleHead.exitCode === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
 
     // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；再提交新 HEAD 触发 Round 3 stop-loss 后 override 解锁
-    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a' }, roots)
+    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 2) }, roots)
     const t2AfterR2 = readTaskLedger(dir, 't-t2')
     if (t2AfterR2.reviewPassedHead !== null) return `verdict=changes 未清空 reviewPassedHead：${t2AfterR2.reviewPassedHead}`
     const mBlocked = await handleMerge({ task: 't-t2' }, roots)
@@ -361,7 +363,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
     gitCommitFast(implAbs, 'feat: v4', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
-    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a' }, roots)
+    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 3) }, roots)
     if (r3Stop !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop}`
     const ov = await handleOverride({ task: 't-t2', 'human-approved': true, reason: 'human verified' }, roots)
     if (ov !== 0) return `override 失败：${ov}`
@@ -405,7 +407,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
       const ver = await handleVerify({ task: 'ci-t', mode }, roots)
       if (ver.exitCode !== 0) throw new Error(`verify 失败：${ver.exitCode}`)
       const curSha = gitSync(ciImpl, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
-      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-ci' }, roots)
+      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-ci', 'review-token': await issueTokenFor(ciDir, 'ci-t', 1) }, roots)
       if (rec !== 0) throw new Error(`record 失败：${rec}`)
       const led = readTaskLedger(ciDir, 'ci-t')
       writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })

@@ -471,6 +471,27 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
   const c5 = triageTask({ summary: '推翻 TDD 架构重新设计核心引擎', conflictsTdd: true })
   if (c5.caseType !== 5 || c5.blocked !== true) return `Case 5 未阻断：${JSON.stringify(c5)}`
 
+  // 反面：判据看措辞不看实质的典型翻车。这句话里「文档」两个字出现过，
+  // 但它同时要动 CI、契约与目录结构——一件要拆十几步的治理工程，
+  // 早先被自己的分流器判成「不需要任何规划文档」（Case 1）。
+  const governance = [
+    '把一个已有项目治理成规范工程：补文档、配 CI、统一契约、规范目录结构',
+    '项目规范化',
+    '接入工程治理套件',
+    '整理项目目录结构并补齐持续集成与贡献指南',
+  ]
+  for (const summary of governance) {
+    const res = triageTask({ summary })
+    if (res.caseType < 4) {
+      return `治理类任务被漏判成 Case ${res.caseType}（${summary}）——它会绕过 PRD/SPEC/Todo 直接开干`
+    }
+  }
+  // 反向：真·只改文案仍必须是 Case 1，不能因为上面放宽就一律升档。
+  for (const summary of ['修正 README 错别字', 'typo in README', '翻译一下注释']) {
+    const res = triageTask({ summary, files: 1 })
+    if (res.caseType !== 1) return `纯文案任务被误升档成 Case ${res.caseType}（${summary}）`
+  }
+
   // 2. 多 Issue 依赖边与环检测
   const graphOk = analyzeIssueDependencies([
     { number: 1, relations: { dependsOn: [], blocks: [] } },

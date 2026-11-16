@@ -50,6 +50,49 @@ function computeCoupledSyncWarnings(repoRoot, paths) {
   return rules.length > 0 ? evaluateCoupledSync(paths, rules, repoRoot) : []
 }
 
+/**
+ * 一件事会同时碰到的「面」。分流判据数的是**会碰几面**，不是**出现了哪个词**。
+ *
+ * ## 为什么要换判据
+ *
+ * 早先的 docOnly 判据是一句 `docRe.test(text)`：句子里出现「文档」两个字就判 Case 1
+ * （0 文档、直接改）。实测翻车得很直接——
+ *
+ *     把一个已有项目治理成规范工程：补文档、配 CI、统一契约、规范目录结构
+ *     -> Case 1（0 文档）
+ *
+ * 这句话里「文档」命中了，其余三件事（CI、契约、目录结构）没人看。于是一件要拆十几步、
+ * 跨模块、动契约的治理工程，被自己的分流器判成「不需要任何规划文档」。
+ *
+ * **判据看措辞，不看实质**，这就是那个形状。
+ *
+ * 现在按面数：一件事同时要碰三面以上，它就不是局部的；不管写它的人用了什么词，
+ * 都不会被漏判。加一个新的面只需要在表里加一行，判据不用改。
+ */
+const CONCERN_FACES = [
+  { id: 'docs', re: /\bdocs?\b|readme|contributing|文档|说明|指南|文案|错别字|拼写|注释|翻译/i },
+  { id: 'ci', re: /\bci\b|workflow|actions|流水线|发布|release|发版|自动化|门禁/i },
+  { id: 'contract', re: /契约|contract|agents|规范|标准|schema|接口|协议|许可|license/i },
+  { id: 'structure', re: /目录|结构|重构|refactor|模块|边界|布局|组织/i },
+  { id: 'code', re: /源码|代码|脚本|函数|判据|逻辑|算法|性能|勘察|校验|bug|缺陷/i },
+  { id: 'tooling', re: /工具|套件|skill|技能|脚手架|依赖|配置/i },
+]
+
+/** 这件事同时会碰到哪几个面。 */
+function facesOf(text) {
+  const source = String(text ?? '')
+  return CONCERN_FACES.filter((face) => face.re.test(source)).map((face) => face.id)
+}
+
+/**
+ * 治理类任务：把「一个项目整理成什么样」当目标，而不是改其中某一处。
+ *
+ * 它天然跨面（文档 + CI + 契约 + 目录都会动），所以它不该落进「只改文档」那一档。
+ * 这个词表只用来**认出这类任务**，判档仍然走上面数面数的判据——认出来也只是因为它
+ * 通常同时命中三面以上。
+ */
+const GOVERNANCE_RE = /治理|规范化|标准化|整理项目|项目规范|接管|接入套件|项目起步|初始化项目/i
+
 /** 严格五档分流判定逻辑，同步输出 doorType、critiqueTier 与改哪看哪联动提醒。 */
 export function triageTask({
   summary = '',
@@ -74,11 +117,23 @@ export function triageTask({
   const docRe = /\b(?:typo|spelling|docs?(?:-only)?|readme|comment|explain|question|changelog)\b|文档|错别字|注释|问答|翻译|拼写|解释/i
   const explicitFeatureRe = /\b(?:feat|feature|implement|add\s+(?:support|command|flag|endpoint|api))\b|新功能|新增功能|开发新/i
 
+  const faces = facesOf(text)
+  const isGovernance = GOVERNANCE_RE.test(text)
+  // 三面以上就不是局部改动。这是「实质」那一半判据，与措辞无关。
+  const isCrossCutting = faces.length >= 3
+
   const isConflict = conflictsTdd || conflictRe.test(text)
-  const isContract = touchesContract || (!docOnly && fileCount !== undefined && fileCount >= 6) || contractRe.test(text)
+  const isContract = touchesContract
+    || (!docOnly && fileCount !== undefined && fileCount >= 6)
+    || contractRe.test(text)
+    || isCrossCutting
+    || isGovernance
+  // 只改文档 = 确实在说文档，**并且**没有同时要动别的面。
   const pureDocCue = docRe.test(text) && !runtimeBugRe.test(text) && !explicitFeatureRe.test(text) && !bugfix
-  const looksDocOnly = docOnly || (pureDocCue && (fileCount === undefined || fileCount <= 3))
-  const isBugfix = bugfix || (!looksDocOnly && (runtimeBugRe.test(text) || fixVerbRe.test(text)) && !explicitFeatureRe.test(text) && (fileCount === undefined || fileCount <= 3))
+  const looksDocOnly = docOnly
+    || (pureDocCue && !isCrossCutting && !isGovernance && faces.every((f) => f === 'docs')
+      && (fileCount === undefined || fileCount <= 3))
+  const isBugfix = bugfix || (!looksDocOnly && (runtimeBugRe.test(text) || fixVerbRe.test(text)) && !explicitFeatureRe.test(text) && !isCrossCutting && !isGovernance && (fileCount === undefined || fileCount <= 3))
 
   const door = classifyDoorType({
     changedFiles: Array.isArray(paths) ? paths : [],

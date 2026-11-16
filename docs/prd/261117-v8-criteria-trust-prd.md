@@ -162,7 +162,7 @@ related_todo: null
 | --- | --- | --- | --- |
 | 0 | C4、C5、C6 的形状部分；C9 的三态构造器 | `kit/skills/lib/verdict.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/ledger.mjs`、`scripts/lib/protocol.mjs` | 后面每一波都消费这几个形状，先定死防撞 |
 | 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`；右列为 `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
-| 2 | C7、C8、C9、C22、C27、C28；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs`；右列为 `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
+| 2 | C7、C8、C9、C22、C27、C28；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs`、`kit/skills/lib/doc-requirements.mjs`(new)、`kit/skills/lib/handoff-package.mjs`(new)；右列为 `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
 | 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs`；右列为 `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml`、`templates/ci-check.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
 | 4 | C16、C17、C18、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
 | 5 | C26 + 文档同步（C24、C25 已落地，这里只做回归确认） | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
@@ -181,9 +181,9 @@ related_todo: null
 
 | 状态 | 覆盖的 C |
 | --- | --- |
-| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22、C24、C25、C27、C28 |
-| 部分实现 | C7（缺「代码行数不随工具产物变化」的断言）、C8（6 格矩阵已落地，缺「依据变化要报」与「写入 AGENTS.md 受管区」）、C11（缺「项目模块必须被认出」）、C13（`review.mjs` 仍有副本）、C19（令牌已落地）、C20（PR 硬失败已落地，缺 Issue 正文缺失时的 next 提示一致性）、C23（命令探测已修，缺「绕过隔离位要报」） |
-| 未开始 | C10、C12、C14、C15、C16、C17、C18（`explored` 字段已落地，缺「只给探索这一步」与 `finalize` 退出码）、C21、C26 |
+| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9、C15、C22、C24、C25、C27、C28 |
+| 部分实现 | C7（缺「`codeLines` 不随工具产物变化」的断言）、C8（6 格矩阵已落地，缺「依据变化要报」与「写入 `AGENTS.md` 受管区」）、C11（两条都没做到：`repo-map` 仍把 `.agents/skills/lib/*` 当可复用模块；「项目模块必须被认出」也未验）、C13（副本已删；真缺的是 `NEEDS_HUMAN` 机器可读标记，以及 `computeArtifactPlan` 不读取舍集合）、C19（令牌已落地，SKILL.md 已补用法）、C20（PR 硬失败已落地；缺 `compactContext` 里的 issueContext 与「重跑 start 清标记」）、C23（命令探测已修、主工作区直改已报 `WARN_WORKING_IN_MAIN_CHECKOUT`；缺「档位不一致要拦下」） |
+| 未开始 | C10、C12、C14、C16、C17、C18（`explored` 字段已落地，缺「只给探索这一步」与 `finalize` 退出码）、C21、C26 |
 
 ## 七、待拍板问题
 

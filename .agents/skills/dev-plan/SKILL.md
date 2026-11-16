@@ -32,10 +32,18 @@ description: |
 | **Case 1**（问答 / 错别字 / 单行） | **0 文档** | 不写多余文档，直接转交执行并跑对应校验 |
 | **Case 2**（明确局部 Bugfix，不改契约） | **0 文档** | 强制 **Red-Green**：先补失败复现回归测试再修绿；触及高风险须独立审查 |
 | **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` 自净化直通（非平凡 Todo 建议走 Critique） |
-| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`（按需 `docs/prd/`） | 跑 `audit` -> 1–2 轮**独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审）-> 原位改净 -> `critique-pass` -> 交人 `approve` |
+| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> 1–2 轮**独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审）-> 原位改净 -> `critique-pass` -> 交人 `approve` |
 | **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | **阻断拆解** | 先修订 `docs/TDD.md` 并经独立确认后再续 |
 
 说明：`contributor-fork` 若上游仓未接入 `docs/`，私有草案绝不混入 PR diff。
+
+**为什么「一份 SPEC 装不下」是判据、而不是「这件事大不大」**：大小是形容词，量不出来；能问的是
+一个结构问题——这份需求的验收清单，一份 SPEC 装得下吗？装不下就必须拆，拆了就需要一个上层容器
+记「整体算不算做完」，那个容器就是总控 PRD。三条机械信号任一条成立就够（同时碰四面以上、需求
+自己说了要分批、声明要动 12 个以上文件），`doc-plan.mjs triage` 会输出 `prdRequired` 与依据。
+**反向同样要守住**：只碰一两面的小需求不许被判进来，否则每件小事都要求先写 PRD，人会直接绕过
+整套流程。事后兜底由 `audit` 的 `ORPHAN_SLICES_NO_MASTER_PRD` 负责——两份以上生效 SPEC 没有
+共同认领的 PRD 时会报出来。
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 

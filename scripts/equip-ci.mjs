@@ -52,10 +52,10 @@ function parseArgs(argv) {
 }
 
 /**
- * 把模板里的 TODO 占位替换成勘察到的真实取值。
+ * 把模板里的待办占位替换成勘察到的真实取值。
  *
- * 只替换能确定的那几行：门禁命令。定不下来的**原样保留 TODO**——
- * 保留一个显眼的 TODO 比填一个猜的值安全：猜的值会静默跑错，TODO 会被人看见。
+ * 只替换能确定的那几行：门禁命令。定不下来的**原样保留模板里的待办标记**——
+ * 留一个显眼的标记比填一个猜的值安全：猜的值会静默跑错，标记会被人看见。
  */
 function hydrateCheckTemplate(template, facts) {
   const commands = facts.commands ?? {}

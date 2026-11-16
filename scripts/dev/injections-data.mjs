@@ -780,6 +780,14 @@ export const INJECTIONS = [
     expect: 'SPEC 作者不得就是实施者',
   },
   {
+    id: 'I86',
+    what: '交接包抽不到时编一句看起来合理的话（而不是明说没有登记）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: "    lines.push('**没有登记验收标准。** 这不等于「随便做」——先把 SPEC 或 Todo 里的 `C1..Cn` 写出来再动手；')",
+    to: "    lines.push('- [ ] **C1**：按惯例实现即可')",
+    expect: '交接包把该做什么',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

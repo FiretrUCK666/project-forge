@@ -10,6 +10,7 @@ import { resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -202,6 +203,23 @@ export async function handleNext(opts, roots) {
     }
   }
 
+  // `--handoff`：把「这件事要做什么」也搬出来。
+  //
+  // 早先这里只给机器事实（分支、SHA、风险档），没有一句「要做什么」。于是主 Agent 派子代理
+  // 时只能自己现编 prompt：去 SPEC 里摘 C 编号、摘影响路径、摘验收命令。这段摘要纯手工，
+  // 每派一次重写一遍；写到第十次时它的上下文已被前面的代码与报错撑满，摘要质量必然下降。
+  //
+  // 现在由工具机械地抽，抽不到就写「没有登记」——不编。
+  if (opts.handoff && selectedTask) {
+    const handoff = buildHandoff({
+      mainRoot: roots.mainRoot,
+      ledger: selectedTask,
+      policy: out.policy ?? taskRuntime?.policy ?? null,
+      headSha: taskRuntime?.headSha ?? null,
+    })
+    out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
+  }
+
   const payload = { ...out, hydration }
 
   if (opts.json) {
@@ -213,6 +231,10 @@ export async function handleNext(opts, roots) {
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
     if (payload.candidates?.length > 0) {
       for (const c of payload.candidates) process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, branch=${c.branch ?? '-'})\n`)
+    }
+    if (payload.handoffPrompt) {
+      process.stdout.write('\n--- 交接包（可直接粘给子代理）---\n\n')
+      process.stdout.write(payload.handoffPrompt)
     }
     printNextStep([{ skill: 'dev-flow', text: payload.command }], { repoRoot: roots.mainRoot })
   }

@@ -1197,4 +1197,68 @@ cases.push(['SPEC 作者不得就是实施者', async () => {
   } finally { rmTree(dir) }
 }])
 
+// 交接包：把「这件事要做什么」从文档里搬出来，别压在主 Agent 的上下文里。
+//
+// 早先 `flow next` 只给机器事实（分支、SHA、风险档），没有一句「要做什么」。于是主 Agent
+// 派子代理时只能自己现编 prompt：去 SPEC 里摘 C 编号、摘影响路径、摘验收命令。这段摘要
+// 纯手工，每派一次重写一遍；写到第十次时上下文已被前面的代码与报错撑满。
+cases.push(['交接包把该做什么、能改哪里、怎么算做完机械搬出来', async () => {
+  const { buildHandoff } = await import('../../kit/skills/lib/handoff-package.mjs')
+
+  const dir = tmpProject({
+    'README.md': '# h\n\n交接包测试仓。\n',
+    'AGENTS.md': [
+      '# h', '', '## Dev Profile', '', '```yaml',
+      'quick-test: node scripts/dev/preflight.mjs',
+      'full-test: node scripts/dev/fixtures.mjs',
+      'merge-gate: npm run all', '```', '',
+    ].join('\n'),
+  })
+  try {
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    writeFileSync(join(dir, 'docs', 'specs', '261117-h-spec.md'), [
+      '---', 'kind: spec', 'title: H', 'status: approved', '---', '',
+      '# SPEC: H', '',
+      '## 一、背景与边界声明', '',
+      '- **本期不做**：不改对外契约；不动 `docs/archive/`', '',
+      '## 二、影响范围', '',
+      '- 预计涉及文件：`scripts/a.mjs`、`kit/b.mjs`', '',
+      '## 三、冻结的验收标准', '',
+      '- [ ] C1: 外链存在时以退出码 3 终止',
+      '- [ ] C2: 没有外链时退出 0', '',
+    ].join('\n'))
+
+    const { prompt, fields } = buildHandoff({
+      mainRoot: dir,
+      ledger: { taskId: 'h-t', specFile: 'docs/specs/261117-h-spec.md', worktreePath: '.worktrees/impl-h-t', branch: 'feat/h', baseBranch: 'main', baseSha: 'abc1234' },
+      policy: { requiredGates: ['full', 'merge-gate'] },
+      headSha: 'def5678',
+    })
+
+    // 四样该搬的都要搬到
+    if (fields.criteriaCount !== 2) return `验收标准没抽全：${fields.criteriaCount}`
+    if (!prompt.includes('C1') || !prompt.includes('C2')) return '交接包里没有 C 编号'
+    if (!prompt.includes('scripts/a.mjs') || !prompt.includes('kit/b.mjs')) return '交接包里没有影响路径'
+    if (!prompt.includes('不改对外契约')) return '交接包里没有「不许顺手做什么」'
+    if (!prompt.includes('node scripts/dev/preflight.mjs')) return '交接包里没有验收命令'
+
+    // 反向：抽不到的项要明说「没有登记」，不许编
+    const empty = buildHandoff({ mainRoot: dir, ledger: { taskId: 'x', specFile: null, todoFile: null }, policy: null })
+    if (!/没有登记验收标准/.test(empty.prompt)) return '没有验收标准时没说「没有登记」，可能在编'
+    if (!/没有登记影响路径/.test(empty.prompt)) return '没有影响路径时没说「没有登记」'
+    if (!/只准在隔离位改/.test(empty.prompt)) return '交接包没写「只准在隔离位改」这条边界'
+
+    // 反向：没有 SPEC 但 Todo 里有验收标准时，要退到 Todo 取
+    mkdirSync(join(dir, 'docs', 'todo'), { recursive: true })
+    writeFileSync(join(dir, 'docs', 'todo', '261117-h-todo.md'), [
+      '---', 'kind: todo', 'title: H', 'status: active', '---', '',
+      '# Todo: H', '', '## 验收标准与执行清单', '', '- [ ] C1: 只有 Todo 也能抽到', '',
+    ].join('\n'))
+    const fromTodo = buildHandoff({ mainRoot: dir, ledger: { taskId: 'y', todoFile: 'docs/todo/261117-h-todo.md' }, policy: null })
+    if (fromTodo.fields.criteriaCount !== 1) return `没有 SPEC 时没退到 Todo：${fromTodo.fields.criteriaCount}`
+    if (fromTodo.fields.sourceDoc !== 'docs/todo/261117-h-todo.md') return '来源文档记错了'
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

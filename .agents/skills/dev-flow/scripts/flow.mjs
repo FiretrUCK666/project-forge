@@ -53,7 +53,7 @@ async function main(argv) {
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
-        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local',
+        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues',

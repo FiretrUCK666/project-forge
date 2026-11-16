@@ -26,28 +26,13 @@ const SCOPES = new Set([
   'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`。 */
-export function readDecisionMap(agentsText) {
-  const map = new Map()
-  if (typeof agentsText !== 'string') return map
-  const lines = agentsText.replace(/\r\n/g, '\n').split('\n')
-  let inSection = false
-  for (const line of lines) {
-    if (/^##\s+取舍(?:\s|$|[（(:：])/.test(line.trim())) { inSection = true; continue }
-    if (inSection && /^#{1,2}\s+/.test(line)) break
-    if (!inSection) continue
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('>') || trimmed.startsWith('```')) continue
-    const m = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*[:：]\s*(.*)$/.exec(line)
-    if (m) map.set(m[1], m[2].trim())
-  }
-  return map
-}
+// 「取舍」解析只有一份实现，住在 `kit/skills/lib/profile.mjs`。
+//
+// 早先这里有一份逐字相同的副本。同一份「已表态」的事实两个脚本各读一份，改一处就有一条
+// 路径静默失效——而失效的表现是「明明表过态了，它还在问」。重导出而不是重新实现。
+import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
-export function readDecisions(agentsText) {
-  return new Set(readDecisionMap(agentsText).keys())
-}
+export { readDecisionMap, readDecisions }
 
 function finding(level, scope, id, title, extra = {}) {
   return { level, scope, id, title, ...extra }

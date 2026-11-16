@@ -815,4 +815,93 @@ cases.push(['模板渲染：变量值里的宿主语法不得让渲染失败（�
   return true
 }])
 
+// #49 C-1：失败被塌缩成「通过」。
+//
+// `inspectContract` 早先把异常 catch 掉，返回三个空数组。三个空数组在读的人眼里就是
+// 「三项都通过」——于是落到了 else 分支盖章「结构也完整」。全仓搜 `health.error` 的
+// 引用数是 0，错误被存下来，从没人读。
+//
+// 实测现场：compose 退出码 2（模板渲染崩了）的同一时刻，review 说「结构也完整」。
+//
+// 这条判据的失效方式只有一种：**catch 之后返回一个与「成功」同形的值**。所以既要
+// 行为断言（compose 失败时不得给出 agents.ready），也要静态断言（catch 分支的形状）。
+cases.push(['算不出来不等于算出来没问题：catch 分支不得返回与「成功」同形的值', async () => {
+  const source = readFileSync(join(SKILL_ROOT, 'scripts', 'review.mjs'), 'utf8')
+  const fn = /async function inspectContract\([\s\S]*?\n\}/.exec(source)?.[0] ?? ''
+  if (!fn) return '找不到 inspectContract —— 判据搬家了，这条静态断言得跟着搬'
+  const catchBlock = /catch[^{]*\{([\s\S]*?)\n  \}/.exec(fn)?.[1] ?? ''
+  if (!catchBlock) return 'inspectContract 里没有 catch 分支'
+  if (/state:\s*'ok'/.test(catchBlock)) return 'catch 分支返回了 state: ok —— 那正是「崩了却说没事」'
+  if (!/state:\s*'unavailable'/.test(catchBlock)) return "catch 分支没有返回 state: 'unavailable'——算不出来必须与成功不同形"
+  if (!/error/.test(catchBlock)) return 'catch 分支把原因丢了——没有原因的「算不出来」无法被处置'
+
+  // 行为面：compose 校验不过时，review 不许给出 agents.ready。
+  const dir = tmpProject({
+    'README.md': '# svc\n\n一个用于验证体检结论的最小仓库。\n',
+    'src/app.mjs': 'export const v = 1\n',
+    // 受管标记没成对：compose --check 会红，契约这一面没验过
+    'AGENTS.md': '# svc\n\n<!-- project-forge: begin 构建与验证 -->\n## 环境与构建验证\n\n内容。\n',
+  })
+  gitInit(dir, { branch: 'main' })
+  try {
+    const compose = await runAbsAsync('scripts/compose-agents.mjs', [dir, '--check'])
+    const review = await runAbsAsync('scripts/review.mjs', [dir, '--json'])
+    if (compose.status === 0) return '夹具没造出「契约校验不过」的场景'
+    const out = review.stdout || ''
+    if (/agents\.ready/.test(out)) {
+      return `compose 退出码 ${compose.status}（契约没验过），review 却报 agents.ready「结构也完整」`
+    }
+    if (!/agents\.(broken|missing-sections|drifted|unavailable)/.test(out)) {
+      return `compose 失败时 review 没给出任何 agents 侧的「缺」：${out.slice(0, 300)}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// #49 副产物 P7：生成路径本身必须能成功。
+//
+// 早先多行 `run:` 块被 `join(' && ')` 压成一行，工具把自己抓来的命令装进契约，
+// 然后被自己撑爆——一个 92 文件的正常项目从零生成 AGENTS.md 直接超限中止（exit 1）。
+cases.push(['默认 CI 形状下 compose 能生成成功，且「构建与验证」没有超长单行', async () => {
+  const dir = tmpProject({
+    'package.json': '{"name":"p7","version":"1.0.0","scripts":{"test":"node --test"}}',
+    'README.md': '# p7\n\n用于验证生成体积的最小仓库。\n',
+    '.github/workflows/ci.yml': [
+      'name: ci',
+      'on: [push]',
+      'jobs:',
+      '  t:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - name: 打包',
+      '        run: |',
+      '          TAG="${{ github.ref_name }}"',
+      '          git archive --format=zip -o dist/a.zip "$TAG"',
+      '          echo done',
+      '',
+    ].join('\n'),
+  })
+  try {
+    const gen = await runAbsAsync('scripts/compose-agents.mjs', [dir])
+    if (gen.status !== 0) return `默认 CI 形状下 compose 生成失败（exit ${gen.status}）：${gen.stderr?.slice(0, 200)}`
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const section = /## 环境与构建验证[\s\S]*?(?=\n## |\n<!-- project-forge: end)/.exec(text)?.[0] ?? ''
+    if (!section) return '生成的 AGENTS.md 里没有「环境与构建验证」节'
+    const overlong = section.split('\n').filter((line) => Buffer.byteLength(line, 'utf8') > 500)
+    if (overlong.length > 0) {
+      return `「构建与验证」里有 ${overlong.length} 行超过 500 字节：${overlong[0].slice(0, 80)}…`
+    }
+    // 反面：多行 run 块被压成一行时，`git archive --format=zip` 那段会变成一个巨大的
+    // 单条命令并被误分类成 lint。这里确认它要么出现为独立短命令，要么不出现为「一条大命令」。
+    const archiveLines = section.split('\n').filter((line) => line.includes('git archive'))
+    for (const line of archiveLines) {
+      if (line.includes('echo done')) {
+        return `多行 run 块被压成了一行（含 echo done）：${line.slice(0, 120)}`
+      }
+    }
+    if (gen.stderr && /占位符/.test(gen.stderr)) return `生成过程报占位符错误：${gen.stderr.slice(0, 200)}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

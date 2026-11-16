@@ -63,13 +63,28 @@ function finding(level, scope, id, title, extra = {}) {
  * 渲染失败（模板有洞、勘察出错）时返回「都空」并附一句原因：体检不该因为
  * 契约那一面算不出来就整个崩掉，那一面本来只是它的一项。
  */
+/**
+ * 契约的结构健康度。**算不出来与算出来没问题必须长得不一样。**
+ *
+ * 早先这里 `catch` 之后返回 `{ broken: [], missing: [], drifted: [], error }`。
+ * 三个空数组在语义上是「三项都通过」，于是落到了 else 分支盖章「结构也完整」。
+ * 全仓搜 `health.error` 的引用数是 0——错误被存下来，从没人读。
+ *
+ * 实测现场：`compose-agents --check` 退出码 2（模板渲染崩了）的同一时刻，
+ * `review` 报的是「AGENTS.md 已就绪，结构也完整」。
+ *
+ * 现在返回三态：`state` 只有三种，`catch` 拿不到 `ok`。
+ */
 async function inspectContract(root, facts) {
   try {
     const { contractHealth } = await import('./compose-agents.mjs')
-    return await contractHealth(root, { facts })
+    const health = await contractHealth(root, { facts })
+    return { state: 'ok', health, error: null }
   } catch (error) {
     return {
-      broken: [], missing: [], drifted: [], error: error instanceof Error ? error.message : String(error),
+      state: 'unavailable',
+      health: null,
+      error: error instanceof Error ? error.message : String(error),
     }
   }
 }
@@ -314,20 +329,28 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       // 缺了本该有的节（建好远端之后没重跑生成）、内容与模板脱节（模板加了规则而
       // 这份还停在旧版）。只查 fill 那一档，这三种会一起报「已就绪」——而它是假绿。
       // 判据直接取 `compose-agents` 的，不在这里重算一遍。
-      const health = await inspectContract(root, facts)
-      if (health.broken.length > 0) {
+      const contract = await inspectContract(root, facts)
+      // 算不出来时**不许**落到「已就绪」。这是这条判据唯一的失效方式，
+      // 也是它曾经失效的那一种：模板崩了，体检说结构完整。
+      if (contract.state === 'unavailable') {
+        add(finding('missing', 'agents', 'agents.unavailable',
+          `${facts.docs.agents.file} 的结构这一面这次算不出来（${contract.error}）——`
+          + '它不等于「结构完整」，恰恰相反：说明这一步没有验过', {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
+      } else if (contract.health.broken.length > 0) {
         add(finding('missing', 'agents', 'agents.broken',
-          `${facts.docs.agents.file} 的受管标记没成对：${health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
+          `${facts.docs.agents.file} 的受管标记没成对：${contract.health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else if (health.missing.length > 0) {
+      } else if (contract.health.missing.length > 0) {
         add(finding('missing', 'agents', 'agents.missing-sections',
-          `${facts.docs.agents.file} 缺 ${health.missing.length} 节（条件为真却没有）：${health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
+          `${facts.docs.agents.file} 缺 ${contract.health.missing.length} 节（条件为真却没有）：${contract.health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else if (health.drifted.length > 0) {
+      } else if (contract.health.drifted.length > 0) {
         add(finding('missing', 'agents', 'agents.drifted',
-          `${facts.docs.agents.file} 有 ${health.drifted.length} 段与模板不一致：${health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
+          `${facts.docs.agents.file} 有 ${contract.health.drifted.length} 段与模板不一致：${contract.health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
       } else if (!oversize) {

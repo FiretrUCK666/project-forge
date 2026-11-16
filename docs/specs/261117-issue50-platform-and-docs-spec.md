@@ -67,6 +67,8 @@ flowchart LR
 | `kit/skills/lib/profile.mjs` | 改造 | 取舍解析唯一实现（`review.mjs` 复用） |
 | `scripts/survey.mjs` | 改造 | `questions` 可复现、平台能力、产物计划 |
 | `kit/skills/lib/docs.mjs` | 改造 | 兄弟集按 slug 认亲，不依赖同日 |
+| `kit/skills/lib/doc-requirements.mjs` | 新增 | 「必须有什么」的唯一真相源：只锁与形态无关的三节 |
+| `kit/skills/lib/critique-rounds.mjs` | 新增 | 规划审核的增量范围：上轮意见留痕 |
 | `kit/skills/lib/doc-templates.mjs` | 改造 | 自定义章节与标准章节共存 |
 | `kit/skills/dev-plan/scripts/doc-audit.mjs` | 改造 | 面数判档、`prdRequired`、覆盖率与无主切片 |
 | `kit/skills/dev-plan/scripts/doc-plan.mjs` | 改造 | `critique-pass` 拒绝同人连审 |
@@ -98,14 +100,14 @@ flowchart LR
 
 ### 影响范围
 
-- 预计涉及文件：`kit/skills/lib/profile.mjs`、`scripts/survey.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-explore/SKILL.md`、`scripts/equip-ci.mjs`(new)、`scripts/lib/platform/registry.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`
+- 预计涉及文件：`kit/skills/lib/profile.mjs`、`kit/skills/lib/doc-requirements.mjs`(new)、`kit/skills/lib/critique-rounds.mjs`(new)、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`kit/skills/dev-explore/SKILL.md`、`SKILL.md`、`scripts/review.mjs`、`scripts/lib/artifact-executors.mjs`(new)、`scripts/equip-ci.mjs`(new)、`scripts/survey.mjs`、`scripts/lib/platform/registry.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`
 
 ## 三、冻结的验收标准
 
 - [ ] C1: `survey` 与 `review` 共用**同一个**「取舍」解析函数（`review.mjs` 里那份逐字相同的副本必须删掉，不留双轨）；写上具体表态后对应项不再是 `ask-human`，具体实例：表态不自动发布后 `ci-release` 不再是 `ask-human`；同一份仓连跑两次 `survey`，`questions` 逐字相同**当且仅当**取舍节没变；`questions` 非空时输出机器可读的 `NEEDS_HUMAN` 标记，不能只是一行 Markdown。
-- [ ] C2: `survey` 与 `review` 都报出当前远端 `providerId` 与 `capabilities`；非 GitHub 托管上产物计划给出的是「先问人」的出口，而不是 GitHub 专用命令；**反向**：GitHub 上的现有输出不变。
-- [ ] C3: `artifactPlan` 里每个 `action: 'create'` 都**有对应执行入口**，否则门禁红；反向：`preserve` 与 `pending` 项不需要执行入口，不得误报。
-- [ ] C4: `dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；若保留写入例外，必须先备份并在文案里明写「这不是只读」；当前选择：彻底只读，写入交给 `dev-govern` 或 `equip` 的初始化路径。
+- [ ] C2: `survey --json` 的 `git.capabilities` 与 `review --json` 都报出当前远端 `providerId` 与结构化能力（`known` / `issues` / `pullRequests` / `releases` / `checks` 五键）；认不出来时 `known: false` 且各能力为 `null`，**未知不许被当成能**；已有远端但非 GitHub 时 `questions` 出现 `q.remote-setup`（问平台是哪个、要不要配 API 通道）；没有 GitHub 远端时 `q.release-strategy` 的文案里**不得出现** `RELEASE_TOKEN` / `gh release`，改为「先在托管界面确认发版方式」；**反向**：GitHub 上的现有输出（5 选 1 文案）不变。
+- [ ] C3: `artifactPlan` 里每个 `action: create` 都**在 `ARTIFACT_EXECUTORS` 里有执行者**，否则 `review` 报 `ARTIFACT_WITHOUT_EXECUTOR`（门禁红）；连 `id` 都没有的项报 `ARTIFACT_WITHOUT_ID`；标为人工执行的项必须写清「从哪儿开始」；落盘之后重跑 `survey`，该项要从 `create` 变成 `preserve`；反向：`calibrate` / `preserve` / `ask-human` / `skip` / `snapshot` / `equip` 六种动作不查执行者，不得误报。
+- [ ] C4: `dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；当前选择：彻底只读；**主流程也不许再让这个只读技能承担写入职责**——`SKILL.md` 的 S3 落盘步骤必须写明「只读取证，由本步落笔」，而不是「调 dev-explore 编写或校准 `docs/TDD.md`」；反向：`equip --bootstrap-empty` 仍能生成初始 TDD，`dev-govern` 仍能报出该补哪些模块。
 - [ ] C5: 治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），**三面以上即跨模块**；可判形式：同一件事的三种同义改写、以及**完全不含「治理 / 规范化」字样**但跨三面的输入，都必须判 Case 4；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**（缺一项即门禁红）；**另一条**：每个 C 项还必须被某份 SPEC 认领；治理 PRD 在重入时可继续追加而非每次重开。
 - [ ] C6: 账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
 - [ ] C7: 规划文档（PRD / SPEC / Todo）的 Critique **Round 2 及以后必须由新建的独立子代理执行**，与代码审查同一条规矩；`doc-plan critique-pass` 必须能识别「这一轮的复核人就是上一轮的复核人」并拒绝，而不是只比较「复核人是否等于文档负责人」；反向：换一个真正新建的复核人时流程不受影响。
@@ -116,7 +118,7 @@ flowchart LR
 ## 四、高风险点、门型与回滚路径
 
 - **门型与回滚路径**：`one-way`。文档模板与判档规则一旦写死，用户项目的文档形态就被绑死；门禁放宽则「无主切片」静默通过。回退方式：模板改动可逐份回退，`profile.mjs` 的取舍解析可暂时保留 `review.mjs` 的副本（但需在 TDD 里记明是临时状态）；`prdRequired` 与 `checkOrphanSlices` 独立，可分别关闭。
-- **故障注入预演**：I78（Round 2 复用同一复核人）、I81（拆多份 SPEC 也不用 PRD）、I82（无主切片不报）。
+- **故障注入预演**：I78（Round 2 复用同一复核人）、I81（拆多份 SPEC 也不用 PRD）、I82（无主切片不报）、I83（远端能力认不出来被当成能）、I84（产物计划没执行者）、I85（作者与实施者同一人）、I87（规划审核不带上一轮意见）、I88（主工作区直改不提醒）。
 
 ## 实现说明
 

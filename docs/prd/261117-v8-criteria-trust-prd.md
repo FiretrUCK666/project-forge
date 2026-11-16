@@ -107,7 +107,7 @@ related_todo: null
 
 - [ ] C4（#49 A-1）变量值含宿主模板语法时 `renderVars` 正常返回；**宿主模板语法出现在模板正文里时也放过**（它不是本工具的占位符）；模板正文里未登记的全大写占位符、缺取值的占位符、形状不对的占位符三类**仍必须抛错**；含宿主模板语法的仓上 `compose-agents.mjs --check` 退出码不得为 2。
 - [ ] C5（#49 A-2）家目录根（`~/`、`~user/`）与环境变量根（`$HOME/`、`${HOME}/`、`%VAR%\`）写起的带后缀路径**不得**被当成仓内路径；剥掉点斜杠前缀后的仓内真路径**必须**仍被认出；以父目录相对写法起头、或剥完仍带上级跳转的路径不当作承诺。
-- [ ] C6（#49 A-3）命令按 shell 运算符切段（尊重引号），动作词**只在命令位置**匹配；`git archive --format=zip` 不得被判成 lint，属性名 `.Restore` 不得被判成 install，文件名里的 `test` 不得让整段脚本变成测试命令；单条命令展示长度有上限并标出总字节数。
+- [ ] C6（#49 A-3）命令按 shell 运算符切段（尊重引号），动作词**只在命令位置**匹配；`git archive --format=zip` 不得被判成 lint，属性名 `.Restore` 不得被判成 install，文件名里的 `test` 不得让整段脚本变成测试命令；单条命令展示长度上限与 C22 复用同一常量（500 字节），超限时标出总字节数。
 
 ### #49 B / C 组 输入分层与三态
 
@@ -117,7 +117,7 @@ related_todo: null
 
 ### #49 D 组 指称层
 
-- [ ] C10（#49 D-4、D-7、修法 7）空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——**四种全部判红**（判红的命令与退出码要写进对应 SPEC：「`tdd-parity` / `govern-docs` 的非零退出码 + 具体 finding id」）；TDD 里点名的符号在源码里不存在判红；真读过的 TDD（符号全命中）判绿；**反向：只在注释里出现的符号名不得被当成「已定义」**。
+- [ ] C10（#49 D-4、D-7、修法 7）空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——**四种全部判红**（判红的命令与退出码要写进对应 SPEC：「`tdd-parity` / `govern-docs` 的非零退出码 + 具体 finding id」）；**存量仓宽限**：首次上线时先只报 `notice`，宽限期结束（下一个次版本发布）后转为阻断；TDD 里点名的符号在源码里不存在判红；真读过的 TDD（符号全命中）判绿；**反向：只在注释里出现的符号名不得被当成「已定义」**。
 - [ ] C11（#49 D-2、D-3、修法 6）`reusableModules` 与 `entrypoints` 里属于工具产物目录的条目数**必须为 0**；**反向：项目自己的模块必须被认出来**——一个只有项目源码的仓，`reusableModules` 不得为空（只判「工具产物为 0」时，全排除干净 + 项目模块全空心也能过）；PowerShell 的 `function Foo {`、Bash 的 `foo() {`、Go 的 `func bar()` 三种写法符号抽取分别命中；遇到没有符号规则的语言返回 `unsupported` 而**不是空数组**；`survey` 能报出「本仓 N 种语言，其中 M 种缺少符号规则」。
 - [ ] C12（#49 D-7）模板的「取舍」节**出厂为空**，不含预填的 `license` / `no-ci`；0 业务文件、完全由工具生成的仓，`review` **不得**输出「没有会出事的缺口」。
 
@@ -130,7 +130,7 @@ related_todo: null
 ### #50 H / I / J 组 只读边界、治理即 PRD、账本与并行
 
 - [ ] C16（#50 H）`dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；若保留写入例外，显式写明唯一允许写入的路径与写前备份要求；主流程不再让只读技能承担写入职责。
-- [ ] C17（#50 I）治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），三面以上即跨模块，**不靠匹配某几个词**；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**（缺一项即门禁红——这是「治理动作不漏」的判据）；**另一条**：每个 C 项还必须被某份 SPEC 认领（这是「文档互认」的判据，不能替代前一条）；治理 PRD 在重入时可继续追加而非每次重开。
+- [ ] C17（#50 I）治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），**三面以上即跨模块**；可判形式：同一件事的三种同义改写、以及**完全不含「治理 / 规范化」字样**但跨三面的输入，都必须判 Case 4；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**（缺一项即门禁红——这是「治理动作不漏」的判据）；**另一条**：每个 C 项还必须被某份 SPEC 认领（这是「文档互认」的判据，不能替代前一条）；治理 PRD 在重入时可继续追加而非每次重开。
 - [ ] C18（#50 J）账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0（一条不影响任何结果的警告等于没有）；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
 
 ### #52 联动第三层
@@ -142,11 +142,11 @@ related_todo: null
 ### 跨组 副产物与流程自证
 
 - [ ] C22（#49 副产物 · P7）默认 CI 形状下 `compose-agents` 的生成路径**退出码 0**；「构建与验证」代码块里没有单行超过 500 字节的命令；命令体积不再由压平成一行产生。
-- [ ] C27（体积与可读性的取舍，对应「待拍板问题」第 4 项）当真实命令多到逼近 30KB 上限时，契约**改为「去哪看」而不是「全抄一遍」**：命令按生态分组、每类只展示前若干条、其余指向 CI 文件与 Makefile 的路径；反向：分组之后「构建与验证」仍必须包含**每类至少一条真实命令**，不得退化成空节或纯指针。
-- [ ] C23（流程自证）任何 `kinds` 下 `survey` 都必须读 CI / Makefile / Taskfile 里被真实执行过的命令，不得因「已识别生态」而整条跳过；主 Agent 在主工作区直接改文件时，`flow next` 或 `inspect` 要能报出「你正在绕过隔离位」；`equip` 与 `compose-agents` 档位不一致要被拦下。
+- [ ] C23（流程自证）任何 `kinds` 下 `survey` 都必须读 CI / Makefile / Taskfile 里被真实执行过的命令，不得因「已识别生态」而整条跳过；主 Agent 在主工作区直接改文件时，`flow next` 或 `inspect` 要能报出固定标记 `WARN_WORKING_IN_MAIN_CHECKOUT`（它是警告不是拦截，退出码仍为 0）。
 - [ ] C24（规划审核的独立上下文）规划文档（PRD / SPEC / Todo）的 Critique **Round 2 及以后必须由新建的独立子代理执行**，与代码审查同一条规矩；`doc-plan critique-pass` 必须能识别「这一轮的复核人就是上一轮的复核人」并拒绝，而不是只比较「复核人是否等于文档负责人」；反向：换一个真正新建的复核人时流程不受影响。
 - [ ] C25（文档兄弟集的认亲方式）同一件事的 PRD / SPEC / Todo 必须被认作一个兄弟集，**且判定不能依赖「同一天创建」**：今天建 PRD、明天建 SPEC 时，`issue` / `branch` / `owner` / `status` 仍要双向同步；写在其中一份上的 Issue 编号要能被其余几份读到；反向：确实属于两件事的同名 slug 不得被误合并。
 - [ ] C26（文档模板的通用性）四层规划文档的模板必须是「通用主干 + 可扩展章节」，而不是七节固定表单：任何项目（App、数据管道、论文、硬件、SaaS、纯文档站）都能在**不改工具代码**的前提下写出合身的 PRD/SPEC/Todo；项目自定义章节与工具生成的章节共存且不互相覆盖；`audit` 只强制**与项目形态无关的最小核心**（做什么、不做什么、怎么判定完成），其余章节的存在性由项目自己的模板声明，而不是工具写死；反向：自定义模板不能变成「什么都不用写」的免检通道。
+- [ ] C27（体积与可读性的取舍，对应「待拍板问题」第 4 项）当真实命令多到逼近 30KB 上限时，契约**改为「去哪看」而不是「全抄一遍」**：命令按生态分组、每类只展示前若干条、其余指向 CI 文件与 Makefile 的路径；反向：分组之后「构建与验证」仍必须包含**每类至少一条真实命令**，不得退化成空节或纯指针。
 
 ## 六、门型、回滚路径与波次依赖
 
@@ -161,10 +161,10 @@ related_todo: null
 | --- | --- | --- | --- |
 | 0 | C4、C5、C6 的形状部分；C9 的三态构造器 | `kit/skills/lib/verdict.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/ledger.mjs`、`scripts/lib/protocol.mjs` | 后面每一波都消费这几个形状，先定死防撞 |
 | 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` | 与 | `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
-| 2 | C7、C8、C9；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md` | 与 | `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
-| 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs` | 与 | `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
-| 4 | C16、C17、C18、C22、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
-| 5 | C24、C25、C26 + 文档同步 | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
+| 2 | C7、C8、C9、C22、C27；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/lib/render.mjs` | 与 | `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
+| 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs` | 与 | `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml`、`templates/ci-check.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
+| 4 | C16、C17、C18、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
+| 5 | C26 + 文档同步（C24、C25 已落地，这里只做回归确认） | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
 
 **跨波共享文件的纪律**（写成规则，不写死清单）：
 
@@ -172,7 +172,7 @@ related_todo: null
 2. 同一个波次内两列**不得出现同一个文件**——`flow.mjs batch check-disjoint` 就是判这个；
 3. 新增共享文件时把它登记进本表，不登记就不许改。
 
-当前有两处刻意跨波：`scripts/review.mjs`（波次 2 与 3）、`templates/agents-project.md`（波次 2 与 3）、`kit/skills/dev-flow/scripts/flow-next.mjs`（波次 2 与 4）、`kit/skills/lib/workflow-policy.mjs`（波次 2 与 4）。它们各有 `C` 项要求在同一文件里落两件事，拆不开但必须串行。
+当前刻意跨波的有七处，每一处都有 `C` 项要求在同一文件里落两件事，拆不开但必须串行：`scripts/review.mjs`（波次 2 与 3）、`templates/agents-project.md`（波次 2 与 3）、`kit/skills/dev-flow/scripts/flow-next.mjs`（波次 2 与 4）、`kit/skills/lib/workflow-policy.mjs`（波次 2 与 4）、`kit/skills/lib/ledger.mjs`（波次 0 与 2）、`AGENTS.md`（波次 2 与 5）、`kit/skills/dev-plan/scripts/doc-plan.mjs`（波次 4 与 5）。
 
 ### 每条 C 的当前状态
 
@@ -180,13 +180,13 @@ related_todo: null
 
 | 状态 | 覆盖的 C |
 | --- | --- |
-| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22 |
-| 部分实现 | C7（缺「代码行数不随工具产物变化」的断言）、C8（缺 6 格矩阵与「依据变化要报」）、C11（缺「项目模块必须被认出」）、C13（`review.mjs` 仍有副本）、C19、C20（令牌已落地，缺「只给探索这一步」与 `finalize` 退出码）、C23（命令探测已修，缺「绕过隔离位要报」） |
-| 未开始 | C10、C12、C14、C15、C16、C17、C18、C21、C24、C25、C26 |
+| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22、C25、C24 |
+| 部分实现 | C7（缺「代码行数不随工具产物变化」的断言）、C8（6 格矩阵已落地，缺「依据变化要报」与「写入 AGENTS.md 受管区」）、C11（缺「项目模块必须被认出」）、C13（`review.mjs` 仍有副本）、C19（令牌已落地）、C20（PR 硬失败已落地，缺 Issue 正文缺失时的 next 提示一致性）、C23（命令探测已修，缺「绕过隔离位要报」） |
+| 未开始 | C10、C12、C14、C15、C16、C17、C18（`explored` 字段已落地，缺「只给探索这一步」与 `finalize` 退出码）、C21、C26、C27 |
 
 ## 七、待拍板问题
 
-以下四项是产品级取舍，只有使用者能定。**未定了不进入 SPEC 拆解。**
+以下八项是产品级取舍，只有使用者能定。**未定了不进入 SPEC 拆解。**
 
 1. **#50 F 组做到哪一步**：只做到「如实报出 providerId 与 capabilities + 非 GitHub 时提问」，还是也包括「非 GitHub 的发版出口」？后者与「不新增平台适配器」的非目标相邻，边界要人定。
    - 建议：**两者都做**。发版出口是文案与策略选项，不是适配器；它让 GitLab / Gitea 用户不必看着 GitHub 专用命令。
@@ -200,5 +200,7 @@ related_todo: null
    - 建议：**只在人确认后建**。`equip` 的定位是「只读先行、写前备份」，自动往用户仓塞工作流与那个定位相冲；`artifactPlan` 负责说「缺」，执行器负责「人点头后建」。
 6. **主 Agent 在主工作区直改文件是警告还是拦截**：C23 要求报出来，但报出来之后呢？
    - 建议：**警告 + 不阻断**。这是「绕过隔离位」的早期提示，拦死会把正常的小改动也堵住；真正的硬拦留在 `merge`（C18）。
-7. **C10 的新门禁对存量仓是否追溯**：符号锚点门禁上线后，一批只列了模块名的存量 TDD 会立刻变红。
+7. **C26 把 `doc-audit` 的强制章节降为「最小核心」是实质放宽门禁**：按本仓契约「仅弱化门禁须人点头」，这一条必须先拍板再落。
    - 建议：**追溯，但给一次宽限**。首次在本仓跑报「待补齐」而不阻断，宽限内改完；宽限期结束转为阻断。不给宽限会让所有人同时红，给永久宽限等于没有这条判据。
+8. **C10 的新门禁对存量仓是否追溯**：符号锚点门禁上线后，一批只列了模块名的存量 TDD 会立刻变红。
+   - 建议：**追溯，但给一次宽限**（同上一条的实现方式：先 notice，次版本后转阻断）。

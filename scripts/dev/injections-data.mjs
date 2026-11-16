@@ -256,6 +256,22 @@ export const INJECTIONS = [
     expect: 'unmount 后 worktree node_modules 依然存在',
   },
   {
+    id: 'I22b',
+    what: '外链判定退回按目录名白名单筛（判据的形状被改回特例）',
+    file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs',
+    from: '  for (const link of scan.outbound) {',
+    to: "  for (const link of scan.outbound.filter((one) => ['node_modules', '.venv', 'venv'].includes(one.path))) {",
+    expect: 'cleanup 外链保护',
+  },
+  {
+    id: 'I22c',
+    what: '算不出来时让 catch 返回与成功同形的值',
+    file: 'scripts/review.mjs',
+    from: `    return {\n      state: 'unavailable',\n      health: null,\n      error: error instanceof Error ? error.message : String(error),\n    }`,
+    to: `    return { state: 'ok', health: { broken: [], missing: [], drifted: [] }, error: null }`,
+    expect: '算不出来不等于算出来没问题',
+  },
+  {
     id: 'I23',
     what: '放行外部 PR --untrusted-scan 高危 workflow/postinstall 拦截',
     file: 'kit/skills/dev-review/scripts/review-pack.mjs',

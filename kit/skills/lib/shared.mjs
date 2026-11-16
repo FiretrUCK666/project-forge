@@ -156,6 +156,7 @@ export {
 export {
   DEFAULT_OPTIONAL_SECTIONS,
   FORM_INDEPENDENT_CORE,
+  checkAuthorIsNotImplementer,
   SECTION_DEFS,
   findMissingSections,
   resolveDocRequirements,

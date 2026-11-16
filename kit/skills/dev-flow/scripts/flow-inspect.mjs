@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'no
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
 import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
@@ -662,6 +663,25 @@ export async function handleStart(opts, roots) {
   const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId)
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId)
+
+  // 干活的人不许给自己定验收标准。
+  //
+  // 早先这条只写在文档里：SPEC 的 `owner` 与账本的 `implementerId` 是同一个也没人管。
+  // 于是实现子代理完全可以直接写一份 SPEC，把验收标准写成「代码能跑就行」，照着做完再
+  // 自己宣布通过——而「动手前冻结标准」的全部意义，就在于这个冻结由**另一方**完成。
+  //
+  // 只判「两边都拿得到」的情况：缺 owner 的文档在 approve 时另有门禁，
+  // 缺账本的任务 `flow next` 会退回「先规划或 start」。不判不等于放行。
+  for (const docRel of [initialSpec, initialTodo]) {
+    const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
+    if (authored.length > 0) {
+      const msg = `BLOCKED_SELF_AUTHORED_ACCEPTANCE: ${authored[0].message}`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_SELF_AUTHORED_ACCEPTANCE', file: docRel, ...authored[0] }, null, 2)}\n`)
+      else process.stdout.write(`${msg}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
+  }
 
   if (state.commits === 0) {
     if (Boolean(opts.parallel)) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')

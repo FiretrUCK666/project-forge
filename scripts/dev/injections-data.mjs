@@ -772,6 +772,14 @@ export const INJECTIONS = [
     expect: '产物计划里每个',
   },
   {
+    id: 'I85',
+    what: '干活的人给自己定验收标准不再被拦（作者与实施者同一人也放行）',
+    file: 'kit/skills/lib/doc-requirements.mjs',
+    from: '  if (norm(owner) !== norm(implementerId)) return []',
+    to: '  if (true) return []',
+    expect: 'SPEC 作者不得就是实施者',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

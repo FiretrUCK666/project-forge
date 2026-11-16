@@ -1152,4 +1152,49 @@ cases.push(['产物计划里每个「该建」都必须指名执行者', async (
   return true
 }])
 
+// 干活的人不许给自己定验收标准。
+//
+// 早先这条只写在文档里：SPEC 的 `owner` 与账本的 `implementerId` 是同一个也没人管。
+// 于是实现子代理可以直接写一份 SPEC，把验收标准写成「代码能跑就行」，做完再自己宣布通过。
+cases.push(['SPEC 作者不得就是实施者', async () => {
+  const { checkAuthorIsNotImplementer } = await import('../../kit/skills/lib/doc-requirements.mjs')
+
+  const dir = tmpProject({ 'README.md': '# a\n\n作者检查测试仓。\n', 'src/app.mjs': 'export const v = 1\n' })
+  try {
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    const specWith = (owner) => [
+      '---', 'kind: spec', 'title: T', 'status: approved',
+      `owner: ${owner === null ? 'null' : `"${owner}"`}`, '---', '', '# SPEC: T', '',
+      '## 要解决的问题', '- x', '', '## 本期不做', '- y', '',
+      '## 门型与回滚路径', '- two-way', '', '- [ ] C1: z', '',
+    ].join('\n')
+    const rel = 'docs/specs/261117-a-spec.md'
+
+    // 正向：作者 = 实施者 必须被拦
+    writeFileSync(join(dir, rel), specWith('alice'))
+    const hit = checkAuthorIsNotImplementer(dir, rel, 'alice')
+    if (hit.length !== 1 || hit[0].code !== 'SELF_AUTHORED_ACCEPTANCE') {
+      return `作者与实施者同一人未被拦：${JSON.stringify(hit)}`
+    }
+    // 大小写与 @ 前缀不该让它漏判
+    if (checkAuthorIsNotImplementer(dir, rel, '@Alice').length !== 1) return '大小写或 @ 前缀让它漏判了'
+
+    // 反向：不同人放行
+    if (checkAuthorIsNotImplementer(dir, rel, 'bob').length !== 0) return '不同人却被拦了'
+
+    // 反向：owner 缺失不判（缺 owner 在 approve 时另有门禁）
+    writeFileSync(join(dir, rel), specWith(null))
+    if (checkAuthorIsNotImplementer(dir, rel, 'alice').length !== 0) return 'owner 缺失时不该判'
+
+    // 反向：实施者标识缺失不判（缺账本的任务 next 会退回先规划）
+    writeFileSync(join(dir, rel), specWith('alice'))
+    if (checkAuthorIsNotImplementer(dir, rel, null).length !== 0) return '实施者标识缺失时不该判'
+    if (checkAuthorIsNotImplementer(dir, rel, '').length !== 0) return '实施者标识为空串时不该判'
+
+    // 反向：文档不存在不判
+    if (checkAuthorIsNotImplementer(dir, 'docs/specs/nope.md', 'alice').length !== 0) return '文档不存在时不该判'
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

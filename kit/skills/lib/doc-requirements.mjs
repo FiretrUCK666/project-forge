@@ -262,3 +262,41 @@ export function resolveSectionPresence(text, docRequirements) {
   }
   return found
 }
+
+/**
+ * 验收标准必须由**不干活的人**定。
+ *
+ * ## 它治的病
+ *
+ * 干活的与定标准的是同一个：他一定会写一份自己能轻松通过的验收标准，然后照着做，
+ * 最后自己宣布通过。整套「动手前冻结标准」的意义，就在于这个冻结动作由另一方完成。
+ *
+ * ## 判据
+ *
+ * SPEC / Todo 的 frontmatter `owner`（写它的那个人）不得等于该任务账本里的
+ * `implementerId`（干活的那个人）。两边都拿得到才判；任何一边缺失就不判——
+ * **不判不等于放行**：缺 owner 的文档在 `approve` 时另有门禁，缺账本的任务
+ * `flow next` 会退回「先规划或 start」。
+ *
+ * 返回值空数组表示没问题。
+ */
+export function checkAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
+  if (!specRel || !implementerId) return []
+  const abs = join(repoRoot, specRel)
+  if (!existsSync(abs)) return []
+  const fm = parseDocFrontmatter(readTextSafe(abs) ?? '')
+  const owner = fm.data?.owner
+  if (!owner) return []
+  const norm = (s) => String(s ?? '').trim().replace(/^@/, '').toLowerCase()
+  if (norm(owner) !== norm(implementerId)) return []
+  return [{
+    code: 'SELF_AUTHORED_ACCEPTANCE',
+    file: specRel,
+    owner: String(owner),
+    implementerId: String(implementerId),
+    message: `${specRel} 的作者（${owner}）就是这个任务的实施者（${implementerId}）`
+      + '——干活的人给自己定验收标准，一定会写一份自己能轻松通过的，'
+      + '「动手前冻结标准」这件事就失去了意义。请换一个不参与实施的人来写或复核这份规划。',
+  }]
+}
+

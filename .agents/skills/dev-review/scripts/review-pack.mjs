@@ -226,6 +226,30 @@ async function main(argv = process.argv.slice(2)) {
           : opts.base ? 'base' : 'local'
     const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
 
+    // PR 模式必须真的拉到那个 PR。
+    //
+    // 早先在没有 API 通道时，`--pr 7` 被接受，`diffScope` 回退成 `master...HEAD`——
+    // 它审的是本地当前分支，**从来没看过那个 PR**，却报出 `PACK_READY`。
+    // AI 看到「审查包就绪」就照常审查、记录 PASS、合入。
+    //
+    // 失败必须与成功用不同的表示：拉不到就退出非 0 并说清「不能假装审了」。
+    if (mode === 'pr') {
+      const prNo = opts.pr ?? opts['external-pr']
+      const prRecorded = task?.prNumber ?? null
+      const prResolved = prRecorded !== null && String(prRecorded) === String(prNo)
+      if (!prResolved) {
+        const msg = `BLOCKED_PR_UNRESOLVED: 没有拿到 PR #${prNo} 的真实信息（无可用 API 通道或该 PR 未被识别）。`
+          + '不能假装审过：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑，或用 --task <id> 审查已记录的本地任务。'
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PR_UNRESOLVED', exitCode: EXIT.UNTRUSTED_HAZARD, pr: prNo ?? null, error: msg }, null, 2)}\n`)
+        } else {
+          process.stdout.write(`${msg}\n`)
+        }
+        process.stderr.write(`${msg}\n`)
+        return EXIT.UNTRUSTED_HAZARD
+      }
+    }
+
     const slotSyncRes = await syncTier2ReviewSlotIfNeeded({
       mainRoot,
       worktreeRoot: roots.workTreeRoot,

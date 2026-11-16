@@ -558,6 +558,51 @@ export async function handleStart(opts, roots) {
   const implementerId = resolveContributorIdentity({
     explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
   }).actor
+
+  // 贴一个 Issue 编号，就要把它的正文取回来。
+  //
+  // 早先这里只记下「42」这个数字，issue 里写了什么（复现步骤、期望行为、验收标准）一个
+  // 字都没读。于是「贴了 issue 还得把内容再讲一遍」——而 AI 拿到的只有一个编号。
+  //
+  // 现在：有通道就把标题与正文摘要写进账本；没通道就**明确记下拿不到**，让 `flow next`
+  // 提示先去取。不静默降级成「凭编号猜」。
+  const issueContext = []
+  if (linkedIssues.length > 0) {
+    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+    let client = opts._ghClient ?? null
+    if (!client && targetRepo && providerId === 'github') {
+      try {
+        const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
+        client = ghProbe.client
+      } catch { client = null }
+    }
+    for (const num of linkedIssues) {
+      if (!client || !targetRepo) {
+        issueContext.push({ number: num, fetched: false, reason: 'no-api-channel', title: null, summary: null })
+        continue
+      }
+      try {
+        const res = await client.getIssue(targetRepo, num)
+        if (!res?.ok) {
+          issueContext.push({ number: num, fetched: false, reason: res?.error ?? 'fetch-failed', title: null, summary: null })
+          continue
+        }
+        const body = String(res.body ?? '').replace(/\r\n/g, '\n').trim()
+        issueContext.push({
+          number: num,
+          fetched: true,
+          title: res.title ?? null,
+          url: res.url ?? null,
+          state: res.state ?? null,
+          summary: body.length > 1200 ? `${body.slice(0, 1200)}…` : body,
+        })
+      } catch (error) {
+        issueContext.push({ number: num, fetched: false, reason: error instanceof Error ? error.message : String(error), title: null, summary: null })
+      }
+    }
+  }
+  const issueContextUnavailable = issueContext.filter((x) => !x.fetched).map((x) => x.number)
+
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
@@ -627,7 +672,7 @@ export async function handleStart(opts, roots) {
       taskId, slug, caseType, tier: 1, isolation: 'branch', role, providerId, branch, baseBranch, baseSha,
       worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-      linkedIssues, prNumber, implementerId, status: 'started',
+      linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable, status: 'started',
       ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
@@ -665,7 +710,7 @@ export async function handleStart(opts, roots) {
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-    linkedIssues, prNumber, implementerId, status: 'started',
+    linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable, status: 'started',
     ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
   })
 

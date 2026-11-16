@@ -529,6 +529,16 @@ export function evaluateNextState({
     ownerRole = 'implementer'
     nextAction = '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
     command = `git -C "${t.worktreePath ?? '.'}" status`
+  } else if ((t.issueContextUnavailable ?? []).length > 0) {
+    // 贴了 Issue 却拿不到正文：先去取，别凭编号猜。
+    // 早先 `--issue 42` 只记编号、从不取正文，AI 拿到的只有一个数字。
+    phase = 'needs-issue-context'
+    ownerRole = 'implementer'
+    blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')
+    const nums = t.issueContextUnavailable.join('、')
+    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：gh issue view <N> --repo <声明仓库>，`
+      + '或显式说明「这一条凭现有信息无法澄清」并写进 Todo 的待拍板事项'
+    command = `gh issue view ${t.issueContextUnavailable[0]} --json number,title,body`
   } else if (stopLossActive) {
     phase = 'stop-loss-escalated'
     ownerRole = 'human'

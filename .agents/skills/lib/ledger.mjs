@@ -119,6 +119,15 @@ export function createDefaultLedger(partial = {}) {
     archivedPrdFile: partial.archivedPrdFile ?? null,
     privateDocsDir: partial.privateDocsDir ?? null,
     linkedIssues: Array.isArray(partial.linkedIssues) ? partial.linkedIssues : [],
+    /**
+     * 贴进来的 Issue 到底说了什么。
+     *
+     * 只记编号不够：AI 拿着一个 「42」 什么也做不了，只能要么自己再跑一次 `gh issue view`
+     * （没人检查它做没做），要么凭编号猜。这里把标题与正文摘要落在账本里。
+     */
+    issueContext: Array.isArray(partial.issueContext) ? partial.issueContext : [],
+    /** 没取到正文的 Issue 编号。非空时 `flow next` 要提示先去取。 */
+    issueContextUnavailable: Array.isArray(partial.issueContextUnavailable) ? partial.issueContextUnavailable : [],
     prNumber: partial.prNumber ?? null,
     prState: partial.prState ?? null,
     prUrl: partial.prUrl ?? null,

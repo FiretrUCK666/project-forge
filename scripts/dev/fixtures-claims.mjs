@@ -935,4 +935,44 @@ cases.push(['独立审查令牌：一次性、对轮次、编一个名字不再�
   return true
 }])
 
+// #50 C25：文档兄弟集不能靠「同一天创建」认。
+//
+// 早先 siblingSet 要求 `fn.date === targetDate`。于是同一件事的 PRD 今天建、SPEC 明天建，
+// 两份文档就不再是兄弟：`issue` / `status` / `owner` 从此各说各话，而没有任何东西报错。
+// 「什么时候写的」不是「是不是同一件事」的证据，「叫什么」才是。
+cases.push(['文档兄弟集按 slug 认亲，不依赖同一天创建', async () => {
+  const dir = tmpProject({ 'README.md': '# sib\n\n兄弟集认亲测试仓。\n' })
+  gitInit(dir, { branch: 'main' })
+  try {
+    mkdirSync(join(dir, 'docs', 'prd'), { recursive: true })
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    // 同一件事：PRD 在 11 月 17 日建，SPEC 在 11 月 18 日建
+    writeFileSync(join(dir, 'docs', 'prd', '261117-sib-demo-prd.md'), [
+      '---', 'kind: prd', 'title: 兄弟集', 'status: active', 'issue: null', 'owner: null', '---', '',
+      '# 兄弟集', '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'docs', 'specs', '261118-sib-demo-spec.md'), [
+      '---', 'kind: spec', 'title: 兄弟集方案', 'status: draft', 'issue: null', 'owner: null', '---', '',
+      '# 兄弟集方案', '',
+    ].join('\n'))
+    const { syncDocsLifecycle } = await import('../../kit/skills/lib/shared.mjs')
+    const res = await syncDocsLifecycle(dir, { slugOrPath: 'docs/prd/261117-sib-demo-prd.md', issue: 99, branch: 'feat/sib' })
+    if (!res?.byKind?.spec) return `跨天的 SPEC 没被认成兄弟：byKind=${JSON.stringify(res?.byKind)}`
+    const specText = readFileSync(join(dir, res.byKind.spec), 'utf8')
+    if (!/issue:\s*99/.test(specText)) return `跨天的 SPEC 没同步到 Issue 编号：${specText.slice(0, 200)}`
+    if (!/branch:\s*"?'?feat\/sib/.test(specText)) return '跨天的 SPEC 没同步到分支名'
+
+    // 反向：slug 不同就是两件事，不得被合并
+    writeFileSync(join(dir, 'docs', 'prd', '261117-other-demo-prd.md'), [
+      '---', 'kind: prd', 'title: 另一件事', 'status: active', 'issue: null', 'owner: null', '---', '',
+      '# 另一件事', '',
+    ].join('\n'))
+    const res2 = await syncDocsLifecycle(dir, { slugOrPath: 'docs/prd/261117-sib-demo-prd.md', issue: 100 })
+    const otherText = readFileSync(join(dir, 'docs', 'prd', '261117-other-demo-prd.md'), 'utf8')
+    if (/issue:\s*100/.test(otherText)) return '不同 slug 的文档被误合并进兄弟集'
+    void res2
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

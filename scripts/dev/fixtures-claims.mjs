@@ -687,7 +687,6 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
 }])
 
 cases.push(['govern-audit.mjs：--audit-only 与 reconcile', async () => {
-    // 4. govern-audit.mjs --audit-only 与 reconcile
     const cleanAuditDir = tmpProject({
       'package.json': '{"name":"gov-demo","version":"1.0.0","scripts":{"test":"exit 0"}}\n',
       'README.md': '# gov-demo\n\n治理测试仓说明。\n',

@@ -99,8 +99,13 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
     }
 
     // 4. 重审并 approve 成功；另测 --skip-critique-reason 豁免
-    const crit2 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
-    if (crit2.status !== 0) return `二次 critique-pass 失败：${crit2.stderr}`
+    //    注意：Round 2 必须换复核人——同一个上下文审核完自己提的意见不算独立审。
+    const sameReviewerAgain = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
+    if (sameReviewerAgain.status === 0 || !/BLOCKED_CRITIQUE_SAME_REVIEWER/.test(sameReviewerAgain.stderr)) {
+      return `Round 2 复用同一复核人未被拦截：exit=${sameReviewerAgain.status} stderr=${sameReviewerAgain.stderr}`
+    }
+    const crit2 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r2', '--round', '2', '--json'], { cwd: dir })
+    if (crit2.status !== 0) return `二次 critique-pass（换人）失败：${crit2.stderr}`
     const okApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
     if (okApprove.status !== 0 || JSON.parse(okApprove.stdout).status !== 'approved') {
       return `复核后 approve 失败：${okApprove.stderr}`

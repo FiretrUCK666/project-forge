@@ -788,6 +788,14 @@ export const INJECTIONS = [
     expect: '交接包把该做什么',
   },
   {
+    id: 'I87',
+    what: '规划审核范围不再带上轮意见（Round 2 又变成重读全文或只看改动）',
+    file: 'kit/skills/lib/critique-rounds.mjs',
+    from: '  const lastFindings = history.filter((h) => h.round === lastRound)',
+    to: '  const lastFindings = []',
+    expect: '规划审核范围',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

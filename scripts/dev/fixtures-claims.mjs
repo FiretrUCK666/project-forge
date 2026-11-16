@@ -1261,4 +1261,40 @@ cases.push(['交接包把该做什么、能改哪里、怎么算做完机械搬�
   } finally { rmTree(dir) }
 }])
 
+// 规划审核的「这一轮看什么」：上轮意见要留痕，别让 Round 2 重读全文或只看改动。
+//
+// 代码审查早有增量视野硬锁；规划审核此前没有。于是 Round 2 的复核人要么重读全文
+// （吃光上下文），要么只看改动（新问题一条看不到）。根子是没有东西告诉它这一轮的范围。
+cases.push(['规划审核范围：上轮意见留痕，改没改都要逐条回看', async () => {
+  const { buildCritiqueScope, serializeFindings, parseFindings } = await import('../../kit/skills/lib/critique-rounds.mjs')
+
+  // 序列化往返
+  const raw = serializeFindings(1, ['C1 不可判定', { severity: 'should', text: '缺反向条件' }])
+  const parsed = parseFindings(raw)
+  if (parsed.length !== 2) return `往返丢了条目：${parsed.length}`
+  if (parsed[0].severity !== 'must' || parsed[1].severity !== 'should') return `严重度丢了：${JSON.stringify(parsed)}`
+
+  // 正向：上轮意见必须出现在这一轮的范围清单里
+  const scope = buildCritiqueScope({ round: 2, currentSha: 'bbbb', previousSha: 'aaaa', findingsRaw: raw, reviewer: 'carol' })
+  if (!scope.prompt.includes('C1 不可判定')) return '上轮意见没进这一轮的范围清单'
+  if (!scope.prompt.includes('缺反向条件')) return '上轮建议也没进范围清单'
+  if (scope.mustRecheck.length !== 2) return `mustRecheck 数量不对：${scope.mustRecheck.length}`
+  if (!scope.changed) return '正文改过却没标出来'
+
+  // 反向：正文没改时不许说「改过」，且要提示「被驳回的更成立吗」
+  const unchanged = buildCritiqueScope({ round: 2, currentSha: 'aaaa', previousSha: 'aaaa', findingsRaw: raw, reviewer: 'carol' })
+  if (unchanged.changed) return '正文没改却说改了'
+  if (!/没有改动/.test(unchanged.prompt)) return '没改时没提示'
+  if (!/仍然成立/.test(unchanged.prompt)) return '没改时没提示「被驳回的更要回看」'
+
+  // 反向：没有历史意见时不许假装有
+  const fresh = buildCritiqueScope({ round: 2, currentSha: 'x', previousSha: null, findingsRaw: '', reviewer: 'carol' })
+  if (fresh.mustRecheck.length !== 0) return '没有历史意见却给出 mustRecheck'
+  if (!/没有记录意见/.test(fresh.prompt)) return '没有历史意见时没说清'
+
+  // 反向：坏数据不该把整轮堵死
+  if (parseFindings('garbage ;; 2|must|还能读').length !== 1) return '坏数据把好数据也丢了'
+  return true
+}])
+
 }

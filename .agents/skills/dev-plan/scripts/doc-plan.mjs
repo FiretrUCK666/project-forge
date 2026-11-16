@@ -27,6 +27,7 @@ import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
+import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
@@ -174,7 +175,7 @@ function parseCritiqueReviewer(stamp) {
  * 代码审查那边早就有这条规矩（`freshReviewRequiredForRound2Plus`），规划审核这边没有。
  * 规划文档与代码一样会被「看起来审过了」骗过去，所以规矩必须是同一条。
  */
-function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) {
+function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', findings = [] }) {
   if (!reviewer || !String(reviewer).trim()) throw new Error('critique-pass 必须指定 --reviewer <reviewerId>')
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
@@ -209,8 +210,17 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) 
   const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
   const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${round}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
 
+  // 把这一轮的意见记进 frontmatter：下一轮的范围就靠它，不靠谁的记忆。
+  const prevFindings = fm.data?.[CRITIQUE_FINDINGS_KEY]
+  const findingList = Array.isArray(findings) ? findings : []
+  const newFindings = findingList.length > 0
+    ? [String(prevFindings ?? '').trim(), serializeFindings(round, findingList)].filter(Boolean).join(' ;; ')
+    : (prevFindings ?? null)
+
   if (fm.hasFrontmatter) {
-    updateDocFrontmatter(abs, { plan_critique: stampValue, updated: docIsoDate() }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
+    const patch = { plan_critique: stampValue, updated: docIsoDate() }
+    if (newFindings) patch[CRITIQUE_FINDINGS_KEY] = newFindings
+    updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   } else {
     const stampLine = `- Plan Critique: ${stampValue}`
     let updated
@@ -338,8 +348,9 @@ async function main(argv) {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by'],
+      multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-pass|approve|archive|supersede|list>',
+      usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-scope|critique-pass|approve|archive|supersede|list>',
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)
@@ -472,9 +483,35 @@ async function main(argv) {
       return res.ok ? 0 : 1
     }
 
+    if (sub === 'critique-scope') {
+      // 这一轮该看什么：把上轮意见与正文指纹摆出来。
+      //
+      // 代码审查早有增量视野硬锁，规划审核此前没有：Round 2 要么重读全文（吃光上下文），
+      // 要么只看改动（新问题一条看不到）。两头都不对，根子是没有东西告诉它这一轮的范围。
+      if (!opts.file) throw new Error('critique-scope 需要 --file <docPath>')
+      const scopeAbs = resolve(repoRoot, opts.file)
+      if (!existsSync(scopeAbs)) throw new Error(`找不到文档：${opts.file}`)
+      const scopeText = readTextSafe(scopeAbs) ?? ''
+      const scopeFm = parseDocFrontmatter(scopeText)
+      const curSha = sha256Text(stripCritiqueMeta(scopeText)).slice(0, 12)
+      const prevSha = /\bsha=([a-f0-9]{8,64})\b/i.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? null
+      const scope = buildCritiqueScope({
+        round: Number(opts.round ?? ((Number(/\bround=(\d+)\b/.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? 0) + 1))),
+        currentSha: curSha,
+        previousSha: prevSha,
+        findingsRaw: scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? '',
+        reviewer: opts.reviewer ?? '(未指定)',
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify({ file: opts.file, currentSha: curSha, previousSha: prevSha, ...scope }, null, 2)}\n`)
+      else process.stdout.write(scope.prompt)
+      return 0
+    }
+
     if (sub === 'critique-pass') {
       if (!opts.file || !opts.reviewer) throw new Error('critique-pass 需要 --file <docPath> 与 --reviewer <reviewerId>')
-      const res = critiquePassDoc({ repoRoot, file: opts.file, reviewer: opts.reviewer, round: opts.round ?? 1, summary: opts.summary ?? '' })
+      const findingArg = opts.findings ?? opts.finding ?? []
+      const findingList = Array.isArray(findingArg) ? findingArg : [findingArg]
+      const res = critiquePassDoc({ repoRoot, file: opts.file, reviewer: opts.reviewer, round: opts.round ?? 1, summary: opts.summary ?? '', findings: findingList })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)

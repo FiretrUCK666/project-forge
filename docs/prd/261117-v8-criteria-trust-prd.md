@@ -105,33 +105,33 @@ related_todo: null
 
 ### #49 A 组 命名空间
 
-- [ ] C4（#49 A-1）变量值含宿主模板语法时 `renderVars` 正常返回；模板正文里未登记的全大写占位符、缺取值的占位符、形状不对的占位符三类**仍必须抛错**；含宿主模板语法的仓上 `compose-agents.mjs --check` 退出码不得为 2。
+- [ ] C4（#49 A-1）变量值含宿主模板语法时 `renderVars` 正常返回；**宿主模板语法出现在模板正文里时也放过**（它不是本工具的占位符）；模板正文里未登记的全大写占位符、缺取值的占位符、形状不对的占位符三类**仍必须抛错**；含宿主模板语法的仓上 `compose-agents.mjs --check` 退出码不得为 2。
 - [ ] C5（#49 A-2）家目录根（`~/`、`~user/`）与环境变量根（`$HOME/`、`${HOME}/`、`%VAR%\`）写起的带后缀路径**不得**被当成仓内路径；剥掉点斜杠前缀后的仓内真路径**必须**仍被认出；以父目录相对写法起头、或剥完仍带上级跳转的路径不当作承诺。
 - [ ] C6（#49 A-3）命令按 shell 运算符切段（尊重引号），动作词**只在命令位置**匹配；`git archive --format=zip` 不得被判成 lint，属性名 `.Restore` 不得被判成 install，文件名里的 `test` 不得让整段脚本变成测试命令；单条命令展示长度有上限并标出总字节数。
 
 ### #49 B / C 组 输入分层与三态
 
 - [ ] C7（#49 B-1、B-2、修法 2）装套件前后 `codeFiles` 与 `tier` **完全相同**；只加空的 `docs/prd`、`docs/specs`、`docs/todo` 骨架文件不改变「重入」判定；静态断言：规模判据的代码里不出现 `.agents/` 路径字面量（排除靠「声明为工具产物」实现，不靠特例）。
-- [ ] C8（#49 B-5、修法 3）`tier` 随真实规模单调不降，28000 行 / 40 文件的仓判 `parallel-subagents`；同一份仓连跑两次 `survey`，`explorationStrategy` 逐字相同；改一个模块的行数使规模跨档后，`survey` 要**报出策略变化及其依据**（各维取值）；策略写入 `AGENTS.md` 受管区，重入时比对而不是默默重算。
+- [ ] C8（#49 B-5、修法 3）`tier` 随真实规模单调不降——**用 6 格矩阵验「任意两格对比都成立」**（500/2000/3950/4050/30000/28000 行），不是只验一个点；28000 行 / 40 文件的仓判 `parallel-subagents`；同一份仓连跑两次 `survey`，`explorationStrategy` 逐字相同；改一个模块的行数使规模跨档后，`survey` 要**报出策略变化及其依据**（各维取值）；策略写入 `AGENTS.md` 受管区，重入时比对而不是默默重算。
 - [ ] C9（#49 C-1、修法 4）`compose` 退出码非 0 时 `review` 的 agents 段不得出现「结构也完整」；结论算不出来时必须产出**非 ok** 的 finding 且文案直说「这一面算不出来，原因是 X」；静态断言：`catch` 分支不得返回 `state: 'ok'`，禁止用空数组表示失败。
 
 ### #49 D 组 指称层
 
-- [ ] C10（#49 D-4、D-7、修法 7）空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——**四种全部判红**；TDD 里点名的符号在源码里不存在判红；真读过的 TDD（符号全命中）判绿；**反向：只在注释里出现的符号名不得被当成「已定义」**。
-- [ ] C11（#49 D-2、D-3、修法 6）`reusableModules` 与 `entrypoints` 里属于工具产物目录的条目数**必须为 0**；PowerShell 的 `function Foo {`、Bash 的 `foo() {`、Go 的 `func bar()` 三种写法符号抽取分别命中；遇到没有符号规则的语言返回 `unsupported` 而**不是空数组**；`survey` 能报出「本仓 N 种语言，其中 M 种缺少符号规则」。
+- [ ] C10（#49 D-4、D-7、修法 7）空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——**四种全部判红**（判红的命令与退出码要写进对应 SPEC：「`tdd-parity` / `govern-docs` 的非零退出码 + 具体 finding id」）；TDD 里点名的符号在源码里不存在判红；真读过的 TDD（符号全命中）判绿；**反向：只在注释里出现的符号名不得被当成「已定义」**。
+- [ ] C11（#49 D-2、D-3、修法 6）`reusableModules` 与 `entrypoints` 里属于工具产物目录的条目数**必须为 0**；**反向：项目自己的模块必须被认出来**——一个只有项目源码的仓，`reusableModules` 不得为空（只判「工具产物为 0」时，全排除干净 + 项目模块全空心也能过）；PowerShell 的 `function Foo {`、Bash 的 `foo() {`、Go 的 `func bar()` 三种写法符号抽取分别命中；遇到没有符号规则的语言返回 `unsupported` 而**不是空数组**；`survey` 能报出「本仓 N 种语言，其中 M 种缺少符号规则」。
 - [ ] C12（#49 D-7）模板的「取舍」节**出厂为空**，不含预填的 `license` / `no-ci`；0 业务文件、完全由工具生成的仓，`review` **不得**输出「没有会出事的缺口」。
 
 ### #50 E / F / G 组 状态单一来源、平台自适应、CI 落盘
 
-- [ ] C13（#50 E）`survey` 与 `review` 共用**同一个**「取舍」解析函数；写上具体表态后对应项不再是 `ask-human`，具体实例：表态不自动发布后 `ci-release` 不再是 `ask-human`；`questions` 非空时输出机器可读的 `NEEDS_HUMAN` 标记，不能只是一行 Markdown。
+- [ ] C13（#50 E）`survey` 与 `review` 共用**同一个**「取舍」解析函数（`review.mjs` 里那份逐字相同的副本必须删掉，不留双轨）；写上具体表态后对应项不再是 `ask-human`，具体实例：表态不自动发布后 `ci-release` 不再是 `ask-human`；同一份仓连跑两次 `survey`，`questions` 逐字相同**当且仅当**取舍节没变；`questions` 非空时输出机器可读的 `NEEDS_HUMAN` 标记，不能只是一行 Markdown。
 - [ ] C14（#50 F）`survey` 与 `review` 都报出当前远端 `providerId` 与 `capabilities`；**已有远端但非 GitHub 时** `questions` 里出现「平台是哪个 / 要不要配 API 通道」；没有任何 GitHub 远端时 `ci-release` 的 `ask-human` 文案里**不得**出现 `RELEASE_TOKEN` / `gh release`；发版策略有非 GitHub 出口（用自己流水线，只要求 tag 与版本说明同步）；认证缺口在 `--json` 输出里是结构化字段，不只出现在 markdown 正文。
 - [ ] C15（#50 G）`artifactPlan` 里每个 `action: create` 都**有对应执行入口**，否则门禁红；落盘后重跑 `survey` 从 `create` 变 `preserve`；没有执行器的 `create` 不许输出。
 
 ### #50 H / I / J 组 只读边界、治理即 PRD、账本与并行
 
 - [ ] C16（#50 H）`dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；若保留写入例外，显式写明唯一允许写入的路径与写前备份要求；主流程不再让只读技能承担写入职责。
-- [ ] C17（#50 I）治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），三面以上即跨模块，**不靠匹配某几个词**；写任何治理文件之前先建治理 PRD；这份 PRD 的 `C` 项必须被某份 SPEC 认领，缺一项即门禁红；治理 PRD 在重入时可继续追加而非每次重开。
-- [ ] C18（#50 J）账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 `flow merge` 拦截；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
+- [ ] C17（#50 I）治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），三面以上即跨模块，**不靠匹配某几个词**；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**（缺一项即门禁红——这是「治理动作不漏」的判据）；**另一条**：每个 C 项还必须被某份 SPEC 认领（这是「文档互认」的判据，不能替代前一条）；治理 PRD 在重入时可继续追加而非每次重开。
+- [ ] C18（#50 J）账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0（一条不影响任何结果的警告等于没有）；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
 
 ### #52 联动第三层
 
@@ -154,16 +154,34 @@ related_todo: null
 
 ### 波次依赖与写域（决定谁能并行）
 
-| 波次 | 内容 | 写域 | 为什么这个顺序 |
-| --- | --- | --- | --- |
-| 0 | 共享契约（三态、工具产物归属、命令词法、账本字段） | `kit/skills/lib/verdict.mjs`、`tool-owned.mjs`、`command-lex.mjs`、`ledger.mjs`、`scripts/lib/protocol.mjs` | 后面所有切片都要消费，先定形状防撞 |
-| 1 | #51 删穿保护 + #49 A 组 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`flow-cleanup.mjs` ↕ `scripts/lib/template.mjs`、`claims.mjs` | 文件域零重叠；删数据不可恢复，排最前 |
-| 2 | #49 B/C 三态分层 + #52 | `scripts/lib/survey-workspace.mjs`、`survey-reentry.mjs`、`survey-plan.mjs`、`review.mjs`、`compose-agents.mjs`、`templates/agents-project.md` ↕ `review-ledger.mjs`、`review-pack.mjs`、`flow-inspect.mjs` | #52 依赖波次 0 冻结的账本字段 |
-| 3 | #49 D 指称层 + #50 E/F/G | `kit/skills/lib/symbol-index.mjs`(new)、`repo-map.mjs`、`tdd-parity.mjs`、`govern-docs.mjs` ↕ `decisions.mjs`(new)、`survey.mjs`、`survey-gap-rules.mjs`、`scripts/equip-ci.mjs`(new) | 指称层依赖波次 2 的分层结果 |
-| 4 | #50 H/I/J | `SKILL.md`、`doc-audit.mjs`、`flow-next.mjs`、`workflow-policy.mjs`、`review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
-| 5 | 文档同步 + 四 PR 收口 | `docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 只有总控能同时看全四份改动 |
+写域一律写**从仓库根算起的完整相对路径**——`check-disjoint` 按路径比写域，短名（`review-pack.mjs`）在六个不同目录里都有同名文件时无法判定重叠。
 
-**跨波共享文件的纪律**：`scripts/lib/protocol.mjs`、`kit/skills/lib/ledger.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs` 只允许波次 0 与波次 4 各改一次；其余波次只读。
+| 波次 | 覆盖的 C | 写域（完整相对路径） | 为什么这个顺序 |
+| --- | --- | --- | --- |
+| 0 | C4、C5、C6 的形状部分；C9 的三态构造器 | `kit/skills/lib/verdict.mjs`、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/command-lex.mjs`、`kit/skills/lib/ledger.mjs`、`scripts/lib/protocol.mjs` | 后面每一波都消费这几个形状，先定死防撞 |
+| 1 | C1、C2、C3、C4、C5、C6 | `kit/skills/dev-flow/scripts/worktree-deps.mjs`、`kit/skills/dev-flow/scripts/flow-cleanup.mjs`、`kit/skills/dev-flow/scripts/flow.mjs` ↕ `scripts/lib/template.mjs`、`scripts/lib/claims.mjs`、`scripts/lib/survey-ecosystem.mjs`、`kit/skills/lib/profile-sniffer.mjs` | 两列写域零重叠；删数据不可恢复，排最前 |
+| 2 | C7、C8、C9；C19、C20、C21 | `scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/review.mjs`、`scripts/compose-agents.mjs`、`templates/agents-project.md`、`AGENTS.md` ↕ `kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-review/scripts/review-pack.mjs`、`kit/skills/dev-flow/scripts/flow-inspect.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/ledger.mjs` | 审查令牌与 Issue 取正文都要改 `flow next` 的行为，与三态分层同波必须错开列——**因此 `flow-next.mjs` 的共享窗口从「只许 0/4」改为「波次 2 一次 + 波次 4 一次」** |
+| 3 | C10、C11、C12、C13、C14、C15 | `kit/skills/lib/symbol-index.mjs`(new)、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/lib/tdd-parity.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`scripts/survey.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/review.mjs`、`templates/agents-project.md`、`scripts/equip-ci.mjs`(new)、`kit/skills/lib/profile.mjs` ↕ `scripts/lib/platform/registry.mjs`、`templates/ci-release.yml` | 指称层依赖波次 2 的分层结果；`review.mjs` 与 `templates/agents-project.md` 在波次 2 与 3 各改一次，中间必须重跑全量门禁 |
+| 4 | C16、C17、C18、C22、C23 | `SKILL.md`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs` | 依赖波次 3 的探索证据与产物计划 |
+| 5 | C24、C25、C26 + 文档同步 | `kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`、`docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md`、`references/` | 规划审核独立上下文与文档模板通用性都落在规划链，只有总控能同时看全四份改动 |
+
+**跨波共享文件的纪律**（写成规则，不写死清单）：
+
+1. 一个文件被两波点名时，**前一波必须已经合入并通过全量门禁**，后一波才允许改它；
+2. 同一个波次内两列**不得出现同一个文件**——`flow.mjs batch check-disjoint` 就是判这个；
+3. 新增共享文件时把它登记进本表，不登记就不许改。
+
+当前有两处刻意跨波：`scripts/review.mjs`（波次 2 与 3）、`templates/agents-project.md`（波次 2 与 3）、`kit/skills/dev-flow/scripts/flow-next.mjs`（波次 2 与 4）、`kit/skills/lib/workflow-policy.mjs`（波次 2 与 4）。它们各有 `C` 项要求在同一文件里落两件事，拆不开但必须串行。
+
+### 每条 C 的当前状态
+
+四份 SPEC 不许重复认领已完成的部分。状态以提交历史为准，拆 SPEC 前必须重新核对一次：
+
+| 状态 | 覆盖的 C |
+| --- | --- |
+| 已实现（有回归用例） | C1、C2、C3、C4、C5、C6、C9 的构造器部分、C22 |
+| 部分实现 | C7（缺「代码行数不随工具产物变化」的断言）、C8（缺 6 格矩阵与「依据变化要报」）、C11（缺「项目模块必须被认出」）、C13（`review.mjs` 仍有副本）、C19、C20（令牌已落地，缺「只给探索这一步」与 `finalize` 退出码）、C23（命令探测已修，缺「绕过隔离位要报」） |
+| 未开始 | C10、C12、C14、C15、C16、C17、C18、C21、C24、C25、C26 |
 
 ## 七、待拍板问题
 
@@ -175,5 +193,11 @@ related_todo: null
    - 建议：**接受**。正确做法是让这些项落在「待定」档而不是「缺」档——它们本来就该由人表态，不该由模板代答。
 3. **#50 H 组二选一**：删掉「写 TDD」让 `dev-explore` 彻底只读，还是保留「唯一允许写 `docs/TDD.md` + 写前备份」的例外？
    - 建议：**彻底只读**。写入交给 `dev-govern` 或 `equip` 的初始化路径；一个叫「只读」的技能拥有写权限，是所有误判的来源。
-4. **命令探测修好后的体积压力**：`skill` 类仓的「构建与验证」会新增十余条真实命令，逼近 30KB 上限，与「不改 30KB 上限」的非目标相冲。
-   - 建议：**不改上限，改渲染**。命令按生态分组并只展示每类前若干条 + 指向 CI 文件，让契约说「去哪看」而不是「全抄一遍」。
+4. **命令探测修好后的体积压力**：能力目录类仓的「构建与验证」会新增十余条真实命令，逼近 30KB 上限，与「不改 30KB 上限」的非目标相冲。
+   - 建议：**不改上限，改渲染**。命令按生态分组并只展示每类前若干条 + 指向 CI 文件，让契约说「去哪看」而不是「全抄一遍」。对应判据见 C22 的养版与 C27。
+5. **CI 落盘的触发时机**：C15 会往用户仓写 `.github/workflows/`。是「勘察发现缺就自动建」，还是「只在人确认后建」？
+   - 建议：**只在人确认后建**。`equip` 的定位是「只读先行、写前备份」，自动往用户仓塞工作流与那个定位相冲；`artifactPlan` 负责说「缺」，执行器负责「人点头后建」。
+6. **主 Agent 在主工作区直改文件是警告还是拦截**：C23 要求报出来，但报出来之后呢？
+   - 建议：**警告 + 不阻断**。这是「绕过隔离位」的早期提示，拦死会把正常的小改动也堵住；真正的硬拦留在 `merge`（C18）。
+7. **C10 的新门禁对存量仓是否追溯**：符号锚点门禁上线后，一批只列了模块名的存量 TDD 会立刻变红。
+   - 建议：**追溯，但给一次宽限**。首次在本仓跑报「待补齐」而不阻断，宽限内改完；宽限期结束转为阻断。不给宽限会让所有人同时红，给永久宽限等于没有这条判据。

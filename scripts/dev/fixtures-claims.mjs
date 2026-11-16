@@ -902,5 +902,37 @@ cases.push(['默认 CI 形状下 compose 能生成成功，且「构建与验证
     return true
   } finally { rmTree(dir) }
 }])
+// #52 M：独立审查的身份不能只靠一个自由字符串。
+//
+// 早先 `--reviewer-id` 就是全部凭据，编一个不一样的名字立刻通过；而 `implementerId`
+// 为空时自审检查整条跳过——「没有实施者标识」变成了「不需要独立审查」。
+cases.push(['独立审查令牌：一次性、对轮次、编一个名字不再能过', async () => {
+  const { createDefaultLedger, consumeReviewToken, issueReviewToken } = await import('../../kit/skills/lib/ledger.mjs')
+
+  const ledger = createDefaultLedger({ taskId: 'tok', implementerId: 'impl-a' })
+  const t1 = issueReviewToken(1)
+  ledger.reviewTokens = [t1]
+
+  const first = consumeReviewToken(ledger, t1.token, 1)
+  if (!first.ok) return `第一次消费就被拒：${JSON.stringify(first)}`
+  const second = consumeReviewToken(ledger, t1.token, 1)
+  if (second.ok) return '同一枚令牌被消费了两次——一次性不成立'
+  if (!/ALREADY_CONSUMED/.test(second.reason)) return `重复消费的理由不对：${second.reason}`
+
+  const fresh = createDefaultLedger({ taskId: 'tok2', implementerId: 'impl-a' })
+  fresh.reviewTokens = [issueReviewToken(2)]
+  const wrongRound = consumeReviewToken(fresh, fresh.reviewTokens[0].token, 1)
+  if (wrongRound.ok) return '拿 Round 2 的令牌记 Round 1 竟然通过'
+  if (!/ROUND_MISMATCH/.test(wrongRound.reason)) return `轮次不符的理由不对：${wrongRound.reason}`
+
+  if (consumeReviewToken(ledger, '', 1).ok) return '不带令牌竟然通过'
+  if (consumeReviewToken(ledger, 'pf-rv-made-up', 1).ok) return '编一个令牌竟然通过'
+
+  // 反向：正常签发、正常消费必须可用（保护不能变成误伤）
+  const okLedger = createDefaultLedger({ taskId: 'tok3', implementerId: 'impl-a' })
+  okLedger.reviewTokens = [issueReviewToken(1)]
+  if (!consumeReviewToken(okLedger, okLedger.reviewTokens[0].token, 1).ok) return '正常令牌被误拦'
+  return true
+}])
 
 }

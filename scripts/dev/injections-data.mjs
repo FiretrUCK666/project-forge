@@ -723,4 +723,20 @@ export const INJECTIONS = [
     expect: '常青保鲜：docs/TDD.md',
     runner: 'preflight',
   },
+  {
+    id: 'I78',
+    what: '规划审核 Round 2 起允许复用同一复核人（独立上下文这一条被拆掉）',
+    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
+    from: '  if (Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {',
+    to: '  if (false && Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {',
+    expect: 'Round 2 复用同一复核人未被拦截',
+  },
+  {
+    id: 'I79',
+    what: '独立审查令牌可以被重复消费（一次性失效）',
+    file: 'kit/skills/lib/ledger.mjs',
+    from: "  if (hit.consumedAt) return { ok: false, reason: 'REVIEW_TOKEN_ALREADY_CONSUMED' }",
+    to: '  // 一次性被拆掉',
+    expect: '独立审查令牌',
+  },
 ]

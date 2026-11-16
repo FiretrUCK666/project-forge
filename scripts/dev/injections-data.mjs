@@ -698,4 +698,13 @@ export const INJECTIONS = [
     expect: '工作流生命周期契约',
     runner: 'preflight',
   },
+  {
+    id: 'I77',
+    what: '常青保鲜：往 docs/TDD.md 注入未发布高版本 v7.0.0 与阶段代号 M0-M5（验证 evergreenFreshnessErrors 拦截）',
+    file: 'docs/TDD.md',
+    from: '本文档说明 `project-forge` 仓库当前的技术设计',
+    to: '文档版本 v7.0.0（M0-M5 实装）本文档说明 `project-forge` 仓库当前的技术设计',
+    expect: '常青保鲜：docs/TDD.md',
+    runner: 'preflight',
+  },
 ]

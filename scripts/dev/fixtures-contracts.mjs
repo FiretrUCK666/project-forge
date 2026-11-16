@@ -628,4 +628,25 @@ cases.push(['清单声明了源仓库且作者匹配，角色就判得出来；�
   } finally { rmTree(declared) }
 }])
 
+cases.push(['常青文档保鲜校验（evergreenFreshnessErrors）：正反拦截未发布版本号、M* 阶段代号与徽章脱节', async () => {
+  const { evergreenFreshnessErrors } = await import('./preflight-suite.mjs')
+  const okErrs = evergreenFreshnessErrors({
+    skillVersion: '6.0.0',
+    docs: [
+      { name: 'README.md', text: '![v](https://img.shields.io/badge/version-v6.0.0-4E7496)\n`project-forge-main`\n' },
+      { name: 'docs/TDD.md', text: '# TDD\n\n仅写当前真实架构与 Node.js 18 约束。\n' },
+    ],
+  })
+  if (okErrs.length > 0) return `合法常青文档被误报：${JSON.stringify(okErrs)}`
+
+  const badVer = evergreenFreshnessErrors({ skillVersion: '6.0.0', docs: [{ name: 'docs/TDD.md', text: '文档版本 v7.0.0' }] })
+  const badMilestone = evergreenFreshnessErrors({ skillVersion: '6.0.0', docs: [{ name: 'docs/TDD.md', text: 'M0-M5 全量实装' }] })
+  const badBadge = evergreenFreshnessErrors({ skillVersion: '6.0.0', docs: [{ name: 'README.md', text: 'img.shields.io/badge/version-v5.0.0-4E7496' }] })
+  const badSuffix = evergreenFreshnessErrors({ skillVersion: '6.0.0', docs: [{ name: 'README.md', text: '例如 `project-forge-v6`' }] })
+  if (!badVer.length || !badMilestone.length || !badBadge.length || !badSuffix.length) {
+    return `常青保鲜未拦截坏样例：${JSON.stringify({ badVer, badMilestone, badBadge, badSuffix })}`
+  }
+  return true
+}])
+
 }

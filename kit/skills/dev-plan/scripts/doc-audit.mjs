@@ -11,6 +11,7 @@ import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
+import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
@@ -410,6 +411,9 @@ export function auditDoc({ repoRoot, file }) {
       if (lines[idx].trim() === '---') { fmEndIdx = idx; break }
     }
   }
+
+  // TDD 的主干核对只对 TDD 自己生效——PRD/SPEC/Todo 不走这套章节要求。
+  if (docType === 'tdd') errors.push(...checkTddStructure(rawText))
 
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     if (fm.malformedFrontmatter) {

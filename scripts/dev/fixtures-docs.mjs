@@ -524,7 +524,8 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
   const tplRaw = readFileSync(join(SKILL_ROOT, 'kit/skills/templates/docs-tdd.md'), 'utf8')
   const tplErrors = validateDocTocAnchors(tplRaw)
   if (tplErrors.length > 0) return `kit/skills/templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
-  if (!tplRaw.includes('[按需保留，不适用整节删除]') || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
+  // 可选章节用统一的 section 标记表达：说明文字可以被忽略，标记会被渲染与审计真正执行。
+  if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(tplRaw) || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
     return 'kit/skills/templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
   }
 

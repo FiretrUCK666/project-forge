@@ -194,7 +194,7 @@ flowchart TD
 
 1. **空白目录（`maturity: 'empty'`）**：`computeExplorationStrategy` 输出 `tier: 'none'`，跳过探索子代理；通过 `bootstrapEmpty`（`scripts/lib/equip-bootstrap.mjs`）生成零业务玩具代码的通用治理基线（兼容已有 `README`/`LICENSE`/`.github`/`.agents`）、初始 `docs/TDD.md`、`git init`、`.agents/skills/` 与无未填占位自洽 `AGENTS.md`，初装即过 `--check` 与 `review.mjs`。
 2. **存量项目接入与两档推荐**：`computeRecommendedTier` 按有效文件数、多包布局与协作信号推荐 `lightweight` 或 `full`；当代码文件数 `> 80`、多生态多子包或重入存在漂移时，升级为 `parallel-subagents` 并输出 `shards`；由 `kit/skills/lib/profile-sniffer.mjs` 统一执行三层优先级命令嗅探。
-3. **重入校准与仓外备份解析**：仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入。`scripts/backup.mjs` 按优先顺序解析仓外备份根路径：`PF_BACKUP_DIR/<slug>-<hash8>` -> `<gitCommonDir>/project-forge-backups/` -> `~/.project-forge/backups/<slug>-<hash8>`，滚动清理时永久钉住最新一份 `pre-forge` 基线。
+3. **重入校准与仓外备份解析**：仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入。`scripts/backup.mjs` 按优先顺序解析仓外备份根路径：`PF_BACKUP_DIR` 下的「项目名加八位哈希」子目录 -> Git 公共目录下的 `project-forge-backups` -> 用户主目录下的 `project-forge/backups` 同名子目录，滚动清理时永久钉住最新一份 `pre-forge` 基线。
 
 ### `.pf-manifest.json` v2 账本状态机与仓外备份
 
@@ -336,7 +336,7 @@ flowchart TD
   Lock -- "已停损" --> Ask["人批override"]
 ```
 
-- **澄清机制与规划边界**：`dev-plan` 支持一次解析多个 Issue/PR 链接，需求跨多模块或复杂度较高时主动建议先建总控 PRD，经多轮提问消解全部待拍板事项后再冻结 `C*` 并创建文档；尊重仓内 `docs/templates/` 与 `.github/` 模板；`critique-pass` 硬拒自审（`SELF_CRITIQUE_REJECTED`）；若 `impl` 工作树已创建则直接落盘其中。
+- **澄清机制与规划边界**：`dev-plan` 支持一次解析多个 Issue/PR 链接，需求跨多模块或复杂度较高时主动建议先建总控 PRD，经多轮提问消解全部待拍板事项后再冻结 `C*` 并创建文档；尊重目标仓自有的文档模板：约定放在 docs 下的 templates 目录，或以 template 结尾的 .github 文件；`critique-pass` 硬拒自审（`SELF_CRITIQUE_REJECTED`）；若 `impl` 工作树已创建则直接落盘其中。
 - **Worktree 隔离、权责归属与槽复用**：`flow-inspect.mjs` 在仓库有提交历史时统一创建 `.worktrees/impl-<taskId>`（仅 0 提交且非并行的仓原地开分支），同一任务跨轮最多复用 1 个 `impl` 槽与 1 个 `review` 槽（推进前先解绑 Junction/Symlink 共享依赖，再同步并重挂载）；**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 阻止协调者代提 PR）；本地合并通过 `.worktrees/.tmp-merge-*` 临时试合确认全绿后再 `ff-only` / CAS 更新主干。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理实施。
 - **单入口路由、三正交策略与结构化评论**：`flow-next.mjs`（`flow.mjs next [--probe-auth]`）统一判断下一合法动作及执行角色（`ownerRole`），并按需从远端 `pf-state` 恢复轮次；`workflow-policy.mjs` 依据真实 `baseSha..HEAD` 差异判定 `low`/`medium`/`high` 风险策略并核验 `<gitCommonDir>/project-forge-flow/tasks/<taskId>/evidence.json`（禁止 `quick --target` 顶替全量、禁止 `submit` 后工作区变脏）；`doc-templates.mjs` 统一生成结构化 PR/Issue 审查与流转评论（标题直接以中文结论词开头、附逐条标准对照表与 `delegatedPayloads`）；`finalize --include-master-prd` 允许在总控 PRD 全部勾选后保留原元信息一并归档并写 `archivedPrdFile` 豁免 `do-not-edit`。
 - **六锁硬拦截与多任务协同**：`review-locks.mjs` 代码级强制执行历史停损锁定、同 `HEAD` 复审拦截、Round 2+ 增量 hunk（及 `flow sync` 变基后 `git range-diff`）视野限制、跨文件指纹比对与未清门禁阻断伪 `pass`；Round 2+ 一律新建独立 `review` 子代理。`task-graph.mjs`、`flow-sync.mjs` 与 `flow-batch.mjs` 提供外部阻塞图谱、堆叠分支同步、并行切片互斥规划（`withFileLock` / `computeWorktreeEnv`）与 FIFO 合并队列。

@@ -28,6 +28,8 @@ import {
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
 import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
+import { collectTddFacts } from '../../lib/tdd-facts.mjs'
+import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
@@ -50,8 +52,8 @@ async function initDoc({
   taskId, issue, owner, branch, relatedSpec, force = false,
 }) {
   const effectiveKind = kind ?? type
-  if (!['prd', 'spec', 'todo', 'pair', 'all'].includes(effectiveKind)) {
-    throw new Error(`--kind / --type 必须是 prd、spec、todo、pair 或 all，收到：${effectiveKind}`)
+  if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
+    throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
   }
   const safeSlug = slugify(slug)
   const issueNum = parseIssueArg(issue)
@@ -68,7 +70,7 @@ async function initDoc({
     }
   }
 
-  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo' }
+  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
   const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
   const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
   const headRes = fastHead?.oid
@@ -89,7 +91,9 @@ async function initDoc({
 
   const planned = []
   for (const k of kindsToCreate) {
-    const fileName = buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
+    // TDD 是常青单文件，文件名固定为 docs/TDD.md——加日期前缀会让每份 TDD 变成新文件，
+    // 而它本来就该被就地改写。
+    const fileName = k === 'tdd' ? 'TDD.md' : buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
     const relFile = `${dirMap[k]}/${fileName}`
     const absFile = join(writeRoot, relFile)
     if (existsSync(absFile) && !force) throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
@@ -103,10 +107,23 @@ async function initDoc({
       : null
     const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
     if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
-    const content = renderStandardDocTemplate({
-      kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
-      taskId, issueNum, owner, quickCmd, relatedSpecRel,
-    })
+    let content
+    if (item.kind === 'tdd') {
+      // 从仓库事实预填：技术栈、模块表、命令这些读得出来的东西不该让人再抄一遍。
+      // 只收集生成 TDD 需要的那几项事实：跑整套勘察既慢又跨层。
+      const facts = await collectTddFacts(writeRoot)
+      content = buildPreFilledTdd(facts, {
+        projectName: title,
+        today,
+        topLevelDirs: facts?.tddShape?.topLevelDirs ?? [],
+        allPaths: facts?.tddShape?.filePaths ?? [],
+      })
+    } else {
+      content = renderStandardDocTemplate({
+        kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
+        taskId, issueNum, owner, quickCmd, relatedSpecRel,
+      })
+    }
     mkdirSync(dirname(item.absFile), { recursive: true })
     writeAtomic(item.absFile, content)
   }

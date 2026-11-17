@@ -39,6 +39,7 @@ import {
   finalizeWalkWorkspace,
   scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
+import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
 import {
   collectTopModuleDirs,
   detectKit,
@@ -656,6 +657,24 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.explorationStrategy = computeExplorationStrategy(facts)
   facts.artifactPlan = computeArtifactPlan(facts)
   facts.navigation = computeNavigation(facts)
+
+  // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
+  // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。
+  // finalize 之后 files 已经不是数组，路径清单要用扫完那一刻的原始结果。
+  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+  const tddShape = detectTddShapes({
+    paths: shapePaths,
+    kinds: facts.ecosystem?.kinds ?? [],
+    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
+    codeFiles: facts.scale?.codeFiles ?? 0,
+  })
+  facts.tddShape = {
+    enabled: [...tddShape.enabled],
+    reasons: tddShape.reasons,
+    dropSections: [...tddDropSections(tddShape)],
+    filePaths: shapePaths,
+    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
+  }
 
   delete gitFacts._sshHostMap
   delete gitFacts._hasGit

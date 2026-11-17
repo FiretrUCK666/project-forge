@@ -616,7 +616,14 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
       if (!/\barch-rules\s*:/.test(text)) fail('docs/TDD.md 缺少 arch-rules 校验块')
       if (!text.includes('Feature Map')) fail('docs/TDD.md 缺少 Feature Map 功能入口地图')
     } else {
-      if (!text.includes('[按需保留，不适用整节删除]')) fail('kit/skills/templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
+      // 可选章节用统一的 section 标记表达，不再靠一句人读的说明文字：
+      // 说明文字可以被忽略，标记会被渲染器与审计真正执行。
+      if (!/<!--\s*section:\s*[a-z-]+(\s+optional)?\s*-->/.test(text)) {
+        fail('kit/skills/templates/docs-tdd.md 没有任何 section 标记——可选章节无法按项目形态裁剪')
+      }
+      if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(text)) {
+        fail('kit/skills/templates/docs-tdd.md 没有任何 optional 章节——所有章节都强制，等于不认项目形态')
+      }
       if (text.includes('references/')) fail('kit/skills/templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
       if (templateVarsOf(text).length > 0) fail('kit/skills/templates/docs-tdd.md 存在未登记模板变量占位')
     }

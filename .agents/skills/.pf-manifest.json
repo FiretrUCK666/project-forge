@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T01:03:17.029Z",
+  "installedAt": "2026-11-17T03:05:07.669Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -71,10 +71,10 @@
       "sha256": "ba2fbab228ebed8142bbd6aa9e126ef2e6b61b13bb3f6ef8f73776d57d0c0c70"
     },
     "dev-plan/scripts/doc-audit.mjs": {
-      "sha256": "c4d84f411df077a7a349fd351e3f97c0d05b46591f48c3b8168608cc16e697ed"
+      "sha256": "ec74b03d0d3d60b81940707a2898f4e01b23f6da7c95df3260e046e650259115"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "3573687fa7b61ed8a5fa3747ff80e88a516a8375f1220053ea04abd55e9c6128"
+      "sha256": "63442aa19806eeb98bb09d3f7c4685467ca87d92572577016d1bba033075b54f"
     },
     "dev-review/SKILL.md": {
       "sha256": "50f465414107572df949f02e6449ed75d8048deda348fba9ef082a359c2b4187"
@@ -169,8 +169,20 @@
     "lib/task-graph.mjs": {
       "sha256": "6d283f486b126b1026f2c33b3cc38c223641d967e636682b2be47a6ca00d4888"
     },
+    "lib/tdd-facts.mjs": {
+      "sha256": "51f373866b315f72afabdc1c337fa9aa473a9eb14a7ae7de9e4a58cff5f99b1b"
+    },
     "lib/tdd-parity.mjs": {
       "sha256": "45c891de1690ee0da005842ab5d3fd29b2c1e5d77590dff7af5db4b9026bf6ce"
+    },
+    "lib/tdd-scaffold.mjs": {
+      "sha256": "4093dfa282ddc2892993f41106ad981a6a686c77d7c9416b69da74d0f43d7b8a"
+    },
+    "lib/tdd-shape.mjs": {
+      "sha256": "c86630472bafb146150c8d64fc8eb8bc370ff0f3bde6bf6693e1e3241aabb5a6"
+    },
+    "lib/tdd-structure.mjs": {
+      "sha256": "2833d9b5810666a84e3d1928abc80d77f02524d767f63100863c457713423282"
     },
     "lib/tool-owned.mjs": {
       "sha256": "566e671d871073b8abd8d01cae8b919f08f533abfa992dd640fba6d60d559866"
@@ -188,7 +200,7 @@
       "sha256": "416ad3dd79847e31ec229d4462b442a2d9cd3e181a5ced0a2723409cc4297bfa"
     },
     "templates/docs-tdd.md": {
-      "sha256": "af75096afdc8e6d19632d678d239876f90f23db580533ca20a29cff25b00dfd6"
+      "sha256": "5d05d41128bca88a7eaadf713e9739036686d27e5a3cfa5659997fc6fcda4954"
     },
     "templates/docs-todo.md": {
       "sha256": "857491993b08750529133812a2c463cada7e741908e10109591fc4b4cda6b9d7"

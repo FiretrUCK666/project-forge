@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | **Case 1** | 纯问答 / 错别字 / 单行格式 | **0 文档**，直接改，跑相关校验 |
 | **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，先写稳定复现失败回归测试再修复（Red-Green）；触及高风险/单向门仍须独立审查 |
-| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `kit/skills/templates/docs-todo.md` 建单（含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
+| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `kit/skills/templates/docs-todo.md` 建单（主干为影响路径、`C1..Cn` 与完成记录，其余按需；含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
 | **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `kit/skills/templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit`（含 Mermaid `16/12` 宽度检查）+ 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 `status: approved`，Todo 设 `approved: true`） |
 | **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，先退回更新 `docs/TDD.md`**，同级内审获批后重启 |
 

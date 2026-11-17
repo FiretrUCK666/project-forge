@@ -4,6 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
@@ -562,13 +563,12 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     ], { cwd: urlDir })
     const spRel = JSON.parse(spInit.stdout).file
     const placeholderTodo = `${'TO'}DO: fill later`
-    let spTxt = readFileSync(join(urlDir, spRel), 'utf8')
-      .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', `- ${placeholderTodo}`)
-      .replace('<two-way | one-way>', 'two-way')
-      .replace(/<[^>]+>/g, '真实值')
-      .replace('- [ ] C1: 真实值', '- [x] C1: verified')
-      .replace('- [ ] C2: 真实值', '- [x] C2: verified')
-    writeFileSync(join(urlDir, spRel), spTxt)
+    hydrateGeneratedDoc(join(urlDir, spRel), { filled: '真实值' })
+    const spTxt0 = readFileSync(join(urlDir, spRel), 'utf8')
+    writeFileSync(join(urlDir, spRel), spTxt0
+      .replace(/^- \[ \] C1: .*$/m, '- [x] C1: verified')
+      .replace(/^- \[ \] C2: .*$/m, '- [x] C2: verified')
+      .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
     await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
     const finBad = await finUrl({ task: 'note-case' }, urlRoots)

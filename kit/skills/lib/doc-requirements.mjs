@@ -93,6 +93,58 @@ export const SECTION_DEFS = Object.freeze({
     needsPattern: /\b(?:two-way|one-way)\b/i,
     fixHint: '标注「门型：two-way」或「门型：one-way」，并写明具体回滚操作。',
   },
+  // ── 以下章节是模板里的可选节 ──────────────────────────────────
+  // 它们**默认不要求**（不在 DEFAULT_OPTIONAL_SECTIONS 里），登记在此只是为了让
+  // 项目能在 omit_sections 里点名删掉它们。不登记就删不掉，等于形态不可调。
+  reuse: {
+    id: 'reuse',
+    label: '复用既有模块',
+    keywords: ['复用既有模块', '复用模块', '可复用'],
+    core: false,
+    fixHint: '写清复用哪个现成模块；没有就说明为什么不能复用。',
+  },
+  flow: {
+    id: 'flow',
+    label: '关键交互与用户路径',
+    keywords: ['关键交互', '用户路径', '交互流程'],
+    core: false,
+    fixHint: '从用户入口写到终态，含失败与缺配置时的可见反馈。',
+  },
+  pending: {
+    id: 'pending',
+    label: '待拍板问题',
+    keywords: ['待拍板', '未决问题', '待确认'],
+    core: false,
+    fixHint: '列出需要人拍板的取舍与各自代价；清空后才可进独立 Critique。',
+  },
+  design: {
+    id: 'design',
+    label: '设计方案与契约变更',
+    keywords: ['设计方案', '契约变更', '接口变更'],
+    core: false,
+    fixHint: '写清改了哪些接口、数据结构、退出码或状态流转。',
+  },
+  implementation: {
+    id: 'implementation',
+    label: '实现说明',
+    keywords: ['实现说明', '落地摘要'],
+    core: false,
+    fixHint: '合入前补齐实际落地内容与同步了哪些文件。',
+  },
+  steps: {
+    id: 'steps',
+    label: '执行步骤',
+    keywords: ['执行步骤', '实施步骤'],
+    core: false,
+    fixHint: '按先后写清每一步做什么、怎么验。',
+  },
+  breakpoint: {
+    id: 'breakpoint',
+    label: '断点与遗留决策',
+    keywords: ['断点与遗留', '断点', '遗留决策'],
+    core: false,
+    fixHint: '写清当前停在哪、哪些要人拍板，接手人据此恢复。',
+  },
 })
 
 /**
@@ -163,10 +215,13 @@ export function resolveDocRequirements(repoRoot, kind) {
 
   // 主干永远是主干：即使项目声明里把它列进 omit，也照样要求。
   const ids = [...new Set([...coreIds, ...optionalIds])]
+  // 项目点名不要的章节。主干不许被列进来（上面已经把主干并回 ids，这里再兜一次）。
+  const omitIds = new Set((decl?.omit ?? []).filter((id) => !coreIds.includes(id)))
   return {
     kind,
     source: decl ? `项目声明（${decl.rel}）` : '工具默认',
     sections: ids.map((id) => SECTION_DEFS[id]).filter(Boolean),
+    omit: omitIds,
   }
 }
 

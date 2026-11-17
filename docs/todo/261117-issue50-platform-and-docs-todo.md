@@ -33,7 +33,7 @@ related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`kit/skills/lib/profile.mjs`、`scripts/survey.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-explore/SKILL.md`、`scripts/equip-ci.mjs`(new)、`scripts/lib/platform/registry.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`
+- **影响路径**：`kit/skills/lib/profile.mjs`、`scripts/survey.mjs`、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-explore/SKILL.md`、`scripts/equip-ci.mjs`(new)、`scripts/lib/platform/registry.mjs`、`kit/skills/templates/docs-prd.md`、`kit/skills/templates/docs-spec.md`、`kit/skills/templates/docs-todo.md`
 - **复用既有模块**：`verdict.mjs`、`tool-owned.mjs`、`workflow-policy.mjs` 的阶段判定、`protocol.mjs`
 - **本期不做**：能力目录的语义检索；为每个平台写专用命令
 - **门型与回滚路径**：one-way；模板逐份可回退，`prdRequired` 与 `checkOrphanSlices` 各自独立可关闭

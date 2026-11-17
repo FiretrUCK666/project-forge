@@ -363,9 +363,9 @@ flowchart TD
 | 层级 | 路径或母版载体 | 定位与生命周期控制 |
 | --- | --- | --- |
 | 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 保留意图路由、总纲、7 键 `Dev Profile`、高风险/联动表与协作防呆细则（`lightweight < 14KB`，`full <= 30KB`） |
-| 常青架构层 | `docs/TDD.md`、`templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图 |
-| 需求基线层 | `templates/docs-prd.md`、`docs/prd/` | YAML Frontmatter + 顶部元信息表 + 冻结 `C1/C2`；`docs.mjs` `isSharedMasterPrd` 保护 `1:N` 总控 PRD 维持 `active` 直至子 SPEC 全部完结才归档 |
-| 规格与任务单层 | `templates/docs-spec.md`、`docs/specs/`、`templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表；`doc-templates.mjs` 统一 `prd`/`spec`/`todo` 结构，随 `finalize` / `archive` 成对归档 |
+| 常青架构层 | `docs/TDD.md`、`kit/skills/templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图 |
+| 需求基线层 | `kit/skills/templates/docs-prd.md`、`docs/prd/` | YAML Frontmatter + 顶部元信息表 + 冻结 `C1/C2`；`docs.mjs` `isSharedMasterPrd` 保护 `1:N` 总控 PRD 维持 `active` 直至子 SPEC 全部完结才归档 |
+| 规格与任务单层 | `kit/skills/templates/docs-spec.md`、`docs/specs/`、`kit/skills/templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表；`doc-templates.mjs` 统一 `prd`/`spec`/`todo` 结构，随 `finalize` / `archive` 成对归档 |
 
 - **Mermaid 纯字符显示宽度硬上限**：普通矩形与分组标题单行 `<= 16` 单位，菱形与边标签 `<= 12` 单位，严禁 HTML 标签；校验集中于 `kit/skills/lib/doc-templates.mjs`（经 `docs.mjs` 与 `shared.mjs` 导出 `checkMermaidLabelWidth`，按图表类型分流覆盖 `flowchart`/`graph`、`sequenceDiagram`、`stateDiagram`/`stateDiagram-v2` 与 `erDiagram`）。
 

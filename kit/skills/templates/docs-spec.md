@@ -1,0 +1,98 @@
+---
+kind: spec
+title: "{{TITLE}}"
+status: draft
+tier: {{TIER}}
+created: {{TODAY}}
+updated: {{TODAY}}
+issue: {{ISSUE}}
+pr: null
+branch: {{BRANCH}}
+owner: "{{OWNER}}"
+approved: false
+implemented: false
+plan_critique: pending
+related_prd: null
+related_todo: null
+high_risk_paths: []
+---
+
+# {{TITLE}} — 功能设计规范（SPEC）
+
+## 文档信息与变更概览
+
+| 项目 | 内容 |
+| --- | --- |
+| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 规划级别 | `{{TIER}}`（跨模块重构、接口/契约变更或高风险改造；未 `approved` 前不编码） |
+| 创建 / 更新 | `{{TODAY}}` / `{{TODAY}}` |
+| 分支 / Issue / PR | `{{BRANCH}}` / {{ISSUE_LABEL}} / 未关联 |
+| 负责人 / 内审状态 | {{OWNER_LABEL}} / `pending` |
+| 关联 PRD / Todo | 按需补齐 `related_prd` / `related_todo` |
+
+## 系统变更全景
+
+```mermaid
+flowchart LR
+  In["请求输入"] --> Core["核心改动"]
+  Core --> Gate["门禁验证"]
+```
+
+| 模块 / 文件 | 变更性质 | 核心职责 |
+| --- | --- | --- |
+{{MODULES}}
+
+<!-- section: goal -->
+## 一、背景与边界声明
+
+- **要改什么**：<受影响的模块、协议或对外契约>
+- **不改什么**：<明确保持兼容或本次不触碰的模块>
+- **本期不做**：<明确本期排除或故意延后的范围，防止顺手改造>
+- **复用既有模块**：<先经 `dev-explore` 核实的可复用现有函数、协议或脚本入口；禁止另起炉灶>
+- **架构基线关系**：<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs/TDD.md`>
+
+<!-- /section -->
+
+<!-- section: design optional -->
+## 二、设计方案与契约变更
+
+### 接口 / 数据结构变更
+
+{{CONTRACT_CHANGES}}
+
+### 异常、回退与安全边界
+
+{{SAFETY_BOUNDARIES}}
+
+<!-- /section -->
+
+<!-- section: acceptance -->
+## 三、冻结的验收标准
+
+> 动手改代码前冻结；实现期间不顺手删减或放宽标准。每条必须能由一条命令或断言实证。
+
+<!-- criteria:start -->
+- [ ] C1: <第一条可判定的标准>
+- [ ] C2: <第二条>
+<!-- criteria:end -->
+
+<!-- /section -->
+
+<!-- section: door optional -->
+## 四、高风险点、门型与回滚路径
+
+- **门型与回滚路径**：{{DOOR}}（可局部回退）| `one-way`（不可逆变更）；回滚做法：{{ROLLBACK}}
+- **高风险路径**：{{HIGH_RISK}}
+- **故障注入预演**：{{FAULT_INJECTION}}
+
+<!-- /section -->
+
+<!-- section: implementation optional -->
+## 实现说明
+
+> 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
+
+- **实际落地摘要**：
+- **关联同步文件**：
+
+<!-- /section -->

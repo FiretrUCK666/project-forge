@@ -526,7 +526,7 @@ function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note }) {
     if (!/https:\/\/img\.shields\.io\/badge\//i.test(readText(join(ROOT, readmeRel)))) fail(`${readmeRel} 缺少 shields.io 事实徽章行`)
   }
 
-  for (const [tplRel, expectedKind] of [['templates/docs-prd.md', 'prd'], ['templates/docs-spec.md', 'spec'], ['templates/docs-todo.md', 'todo']]) {
+  for (const [tplRel, expectedKind] of [['kit/skills/templates/docs-prd.md', 'prd'], ['kit/skills/templates/docs-spec.md', 'spec'], ['kit/skills/templates/docs-todo.md', 'todo']]) {
     const fm = parseDocFrontmatter(readText(join(ROOT, tplRel)))
     if (!fm.hasFrontmatter) { fail(`${tplRel} 缺少 YAML Frontmatter（首行 --- ... ---）`); continue }
     if (fm.malformedFrontmatter) { fail(`${tplRel} YAML Frontmatter 格式错误：${fm.syntaxErrors.join('；')}`); continue }
@@ -606,7 +606,7 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
     if (missing.length > 0) fail(`${relPath} 缺少多维护者团队协同要素：${missing.join('、')}`)
   }
 
-  for (const docPath of ['docs/TDD.md', 'templates/docs-tdd.md']) {
+  for (const docPath of ['docs/TDD.md', 'kit/skills/templates/docs-tdd.md']) {
     const p = join(ROOT, docPath)
     if (!existsSync(p)) { fail(`TDD 契约核对：缺 ${docPath}`); continue }
     const text = readText(p)
@@ -616,9 +616,9 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
       if (!/\barch-rules\s*:/.test(text)) fail('docs/TDD.md 缺少 arch-rules 校验块')
       if (!text.includes('Feature Map')) fail('docs/TDD.md 缺少 Feature Map 功能入口地图')
     } else {
-      if (!text.includes('[按需保留，不适用整节删除]')) fail('templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
-      if (text.includes('references/')) fail('templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
-      if (templateVarsOf(text).length > 0) fail('templates/docs-tdd.md 存在未登记模板变量占位')
+      if (!text.includes('[按需保留，不适用整节删除]')) fail('kit/skills/templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
+      if (text.includes('references/')) fail('kit/skills/templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
+      if (templateVarsOf(text).length > 0) fail('kit/skills/templates/docs-tdd.md 存在未登记模板变量占位')
     }
   }
 

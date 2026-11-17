@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerDocsCases(cases) {
@@ -212,25 +213,10 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
   const { parseDocFrontmatter } = await import('../../kit/skills/lib/shared.mjs')
 
   const fillGeneratedDoc = (absPath) => {
-    let txt = readFileSync(absPath, 'utf8')
-    txt = txt
-      .replace(/<受影响的模块、协议或对外契约>/g, 'src/index.mjs 入口模块')
-      .replace(/<明确保持兼容或本次不触碰的模块>/g, '保持对外导出兼容')
-      .replace(/<先经 `dev-explore` 核实的可复用现有函数、协议或脚本入口；禁止另起炉灶>/g, '复用 src/index.mjs')
-      .replace(/<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs\/TDD\.md`>/g, '对齐现有架构约束')
-      .replace(/<新增或调整的接口、参数、文件结构、退出码或状态流转>/g, '新增鉴权入口函数')
-      .replace(/<失败时如何降级或阻断、权限校验、并发\/状态持久化保护>/g, '校验失败时返回非零错误')
-      .replace(/<two-way \| one-way>/g, 'two-way')
-      .replace(/<说明回退命令或反向修补方式>/g, '直接 git revert 回退')
-      .replace(/<待核实填写：复用项目中已有的工具\/协议\/脚本路径，不重复造轮子>/g, '复用 src/index.mjs 既有导出')
-      .replace(/<明确本期保持不动或故意延后的范围>/g, '本期不改造构建工具链')
-      .replace(/<真实文件路径，新建文件标 \(new\)>/g, 'src/index.mjs')
-      .replace(/<第一条可判定的标准>/g, '执行 node --test 全部通过')
-      .replace(/<第二条>/g, '异常输入返回明确错误码')
-      .replace(/<待核实真实路径，新建文件标 \(new\)>/g, 'src/index.mjs')
-      .replace(/<待核实填写：准备复用的现成函数、库或脚本>/g, '复用 src/index.mjs')
-      .replace(/<明确排除本次不顺手重构的无关事项>/g, '不调整无关构建脚本')
-    writeFileSync(absPath, txt)
+    hydrateGeneratedDoc(absPath, {
+      criteria: ['执行 node --test 全部通过', '异常输入返回明确错误码'],
+      filled: 'src/index.mjs 入口模块',
+    })
   }
 
   const dir = tmpProject({
@@ -535,11 +521,11 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
     return `本仓 docs/TDD.md 存在失效路径：${JSON.stringify(sSelf.reentry.staleTddPaths)}`
   }
 
-  const tplRaw = readFileSync(join(SKILL_ROOT, 'templates/docs-tdd.md'), 'utf8')
+  const tplRaw = readFileSync(join(SKILL_ROOT, 'kit/skills/templates/docs-tdd.md'), 'utf8')
   const tplErrors = validateDocTocAnchors(tplRaw)
-  if (tplErrors.length > 0) return `templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
+  if (tplErrors.length > 0) return `kit/skills/templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
   if (!tplRaw.includes('[按需保留，不适用整节删除]') || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
-    return 'templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
+    return 'kit/skills/templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
   }
 
   // 反面 1：validateDocTocAnchors 必须抓出悬空锚点

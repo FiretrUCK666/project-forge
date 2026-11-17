@@ -136,7 +136,7 @@ export const INJECTIONS = [
   {
     id: 'I10',
     what: '验收标准的编号形状从 `C1` 改成 `1.`',
-    file: 'templates/docs-todo.md',
+    file: 'kit/skills/templates/docs-todo.md',
     from: '- [ ] C1: <第一条可判定的标准>\n- [ ] C2: <第二条>',
     to: '- [ ] 1. <第一条可判定的标准>\n- [ ] 2. <第二条>',
     expect: '验收标准编号',
@@ -145,7 +145,7 @@ export const INJECTIONS = [
   {
     id: 'I10b',
     what: '工作记录模板把「在合并之前写完」改回「合并之后补」',
-    file: 'templates/docs-todo.md',
+    file: 'kit/skills/templates/docs-todo.md',
     from: '**在合并之前写完，随这次改动一起提交。**',
     to: '**合并之后补。**',
     expect: '「完成后的记录」里没有要求「在合并之前写完」',
@@ -426,8 +426,8 @@ export const INJECTIONS = [
   },
   {
     id: 'I42',
-    what: '剥除 templates/docs-spec.md 头部 YAML Frontmatter 分隔符',
-    file: 'templates/docs-spec.md',
+    what: '剥除 kit/skills/templates/docs-spec.md 头部 YAML Frontmatter 分隔符',
+    file: 'kit/skills/templates/docs-spec.md',
     from: '---\nkind: spec',
     to: 'kind: spec',
     expect: '缺少 YAML Frontmatter',

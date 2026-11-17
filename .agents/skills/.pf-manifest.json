@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T00:42:15.742Z",
+  "installedAt": "2026-11-17T01:03:17.029Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -104,10 +104,13 @@
       "sha256": "7db00a731eaa40e3c5fe9bebb6d316ccf2462a542006cba12b69e64c634c3e0d"
     },
     "lib/doc-requirements.mjs": {
-      "sha256": "4703be3474722ad449998948958ca4d58f24b5dd428b025e339cdd7ceed6edc0"
+      "sha256": "26c270cb255575625e3397a6946e6a65081bd06986442b948ab63f506a0d4ff0"
+    },
+    "lib/doc-template-render.mjs": {
+      "sha256": "395ffb01e73a00686e63437f70775f15f9e7a023ddfeac4b13516c079b68c5ab"
     },
     "lib/doc-templates.mjs": {
-      "sha256": "7e5a671a25a1540563367aae204c5d8b83b6aabc49145e03353ab1ea4f7eec6f"
+      "sha256": "297a0bbe3bfb2dcaffd96c336574716f887b40e523f71f350b750c373d814da5"
     },
     "lib/docs.mjs": {
       "sha256": "442a01bb260d562ed1b7bed0eedf4bba3e9a03a8957f75d378ac3e95dd4559af"
@@ -177,6 +180,18 @@
     },
     "lib/workflow-policy.mjs": {
       "sha256": "c118dfe21f131e43f2ed60c0c16f3c2402dac5e9abc10a7f7832b8a4baf7d4b1"
+    },
+    "templates/docs-prd.md": {
+      "sha256": "e3cd8a0f29fa8f48fee0e3dd94d4edb521535098d7e69add262f4328f7fecd39"
+    },
+    "templates/docs-spec.md": {
+      "sha256": "416ad3dd79847e31ec229d4462b442a2d9cd3e181a5ced0a2723409cc4297bfa"
+    },
+    "templates/docs-tdd.md": {
+      "sha256": "af75096afdc8e6d19632d678d239876f90f23db580533ca20a29cff25b00dfd6"
+    },
+    "templates/docs-todo.md": {
+      "sha256": "857491993b08750529133812a2c463cada7e741908e10109591fc4b4cda6b9d7"
     }
   },
   "disabledSkills": [],

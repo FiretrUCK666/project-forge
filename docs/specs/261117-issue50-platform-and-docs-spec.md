@@ -100,7 +100,7 @@ flowchart LR
 
 ### 影响范围
 
-- 预计涉及文件：`kit/skills/lib/profile.mjs`、`kit/skills/lib/doc-requirements.mjs`(new)、`kit/skills/lib/critique-rounds.mjs`(new)、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`kit/skills/dev-explore/SKILL.md`、`SKILL.md`、`scripts/review.mjs`、`scripts/lib/artifact-executors.mjs`(new)、`scripts/equip-ci.mjs`(new)、`scripts/survey.mjs`、`scripts/lib/platform/registry.mjs`、`templates/docs-prd.md`、`templates/docs-spec.md`、`templates/docs-todo.md`
+- 预计涉及文件：`kit/skills/lib/profile.mjs`、`kit/skills/lib/doc-requirements.mjs`(new)、`kit/skills/lib/critique-rounds.mjs`(new)、`kit/skills/lib/docs.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/dev-plan/scripts/doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-plan.mjs`、`kit/skills/dev-flow/scripts/flow-next.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-merge.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`kit/skills/dev-explore/SKILL.md`、`SKILL.md`、`scripts/review.mjs`、`scripts/lib/artifact-executors.mjs`(new)、`scripts/equip-ci.mjs`(new)、`scripts/survey.mjs`、`scripts/lib/platform/registry.mjs`、`kit/skills/templates/docs-prd.md`、`kit/skills/templates/docs-spec.md`、`kit/skills/templates/docs-todo.md`
 
 ## 三、冻结的验收标准
 

@@ -165,6 +165,29 @@ export {
 } from './doc-requirements.mjs'
 
 export {
+  DOC_SHAPE_SIGNALS,
+  analyzeDocShapeFromPaths,
+  detectDocShapesSync,
+  formatDocShapeSkippedBlock,
+  parseDocShapeSkippedComment,
+  probeWorkspaceDocShape,
+  resolveDocShapePolicy,
+  validateSkippedSections,
+} from './doc-shape.mjs'
+
+export {
+  checkCoreSubstantiveness,
+  checkDocRegression,
+  extractDocSnapshot,
+  extractTechAnchors,
+  isStubValue,
+  parseCritiqueAnchors,
+  readGitHeadFileSync,
+  resolveBaselineSnapshotSync,
+  VAGUE_FLUFF_RE,
+} from './doc-substantive.mjs'
+
+export {
   buildInspectNextSteps,
   buildSubmitNextSteps,
   determineWorkflowPolicy,

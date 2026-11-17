@@ -57,10 +57,11 @@ description: |
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd]
 
-# 2. 按统一模板生成文档（若已存在任务 worktree 自动落入实施工作树；自动尊重自有模板）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--task "<taskId>"]
+# 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承）
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--no-prune]
 
-# 3. 规划内审自净化（(new) 校验、Mermaid 16/12、无占位、Frontmatter 互链）
+# 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/specs/<YYMMDD-slug-spec>.md"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 

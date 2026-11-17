@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseDocFrontmatter } from './docs.mjs'
+import { isStubValue } from './doc-substantive.mjs'
 import { readTextSafe } from './git.mjs'
 
 
@@ -248,6 +249,14 @@ export const SECTION_DEFS = Object.freeze({
     core: false,
     fixHint: '写清需要谁配合、什么时候要、找谁。',
   },
+  clarifications: {
+    id: 'clarifications',
+    label: '澄清与补充记录',
+    keywords: ['澄清与补充记录', '澄清记录', '补充澄清'],
+    evidence: [/已确认(?:（\d{4}-\d{2}-\d{2}|[:：])/],
+    core: false,
+    fixHint: '可通过 doc-plan.mjs clarify 追加已确认要求。',
+  },
 })
 
 export const DEFAULT_OPTIONAL_SECTIONS = Object.freeze({
@@ -363,9 +372,9 @@ export function sectionKeywordMap(docRequirements) {
  * 命中时把**命中的那一段原文**当正文交下去：塞一个占位串会让二次判据失效。
  */
 const INLINE_FORMS = Object.freeze({
-  'non-goals': /-\s+\*\*(?:本期不做|非目标|不做)\*\*\s*[:：]\s*\S/,
+  'non-goals': /-\s+\*\*(?:本期不做|非目标|不做)\*\*\s*[:：]\s*([^\n]+)/,
   door: /\*\*门型(?:判定|与回滚路径)?\*\*[^\n]*\b(?:two-way|one-way)\b/i,
-  goal: /-\s+\*\*(?:要改什么|要做什么|目标)\*\*\s*[:：]\s*\S/,
+  goal: /-\s+\*\*(?:要改什么|要做什么|目标)\*\*\s*[:：]\s*([^\n]+)/,
 })
 
 /**
@@ -416,9 +425,18 @@ export function resolveSectionPresence(text, docRequirements) {
     }
   }
 
-  // 证据二：内容命中证据模式（强证据）——按节扫，命中即认该节
+  // 证据二：内容命中证据模式（强证据）——按节扫，先剔除仅含占位桩的行内标签行再判定
+  const stripStubInlineLines = (txt) => String(txt ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .split('\n')
+    .filter((ln) => {
+      const m = /^-\s+\*\*[^*\n]+\*\*\s*[:：](.*)$/.exec(ln.trim())
+      return !(m && isStubValue(m[1]))
+    })
+    .join('\n')
+
   for (const [title, sectionBody] of byTitle.entries()) {
-    const clean = sectionBody.replace(/<!--[\s\S]*?-->/g, '')
+    const clean = stripStubInlineLines(sectionBody)
     for (const id of ids) {
       const def = SECTION_DEFS[id]
       if (!def?.evidence || found.has(id)) continue
@@ -429,17 +447,20 @@ export function resolveSectionPresence(text, docRequirements) {
   }
 
   // 证据三：全文级的强证据——某些内容写在哪一节都算数
+  const cleanBodyAll = stripStubInlineLines(body)
   for (const id of ids) {
     const def = SECTION_DEFS[id]
     if (!def?.evidence || found.has(id)) continue
-    const hit = def.evidence.map((re) => re.exec(body)).find(Boolean)
+    const hit = def.evidence.map((re) => re.exec(cleanBodyAll)).find(Boolean)
     if (hit) found.set(id, { body: hit[0], via: 'document' })
   }
 
   for (const [id, re] of Object.entries(INLINE_FORMS)) {
     if (found.has(id)) continue
     const hit = re.exec(body)
-    if (hit) found.set(id, { body: hit[0], via: 'inline' })
+    if (!hit) continue
+    if ((id === 'non-goals' || id === 'goal') && isStubValue(hit[1] ?? hit[0])) continue
+    found.set(id, { body: hit[0], via: 'inline' })
   }
   return found
 }

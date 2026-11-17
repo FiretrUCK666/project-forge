@@ -7,7 +7,7 @@ updated: 2026-11-18
 issue: 56
 pr: null
 branch: feat/doc-shape-depth
-owner: planner-56
+owner: FiretrUCK666
 approved: true
 done_at: null
 task_id: issue-56
@@ -43,11 +43,11 @@ related_spec: ../specs/261118-issue56-doc-shape-depth-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。与 `docs/specs/261118-issue56-doc-shape-depth-spec.md` 保持 1:1 严格一致。
 
-- [ ] C1: （`init` 骨架保留与开箱自洽）在 3 文件 Go CLI 临时仓及多生态仓执行 `doc-plan.mjs init --kind prd|spec|todo|pair|all` 时，默认 `pruneUnfilled: false` 保留当前形态适用的可选节（`spec` 含 `design`/`alternatives`/`breakdown`/`door`/`implementation`/`clarifications`、`todo` 含 `steps`/`risk`/`rollback`/`breakpoint`/`clarifications`、`prd` 含 `flow`/`reuse`/`pending`/`door`/`clarifications`），传入 `--no-prune` 时保留模板全部可选节；`spec` 正确渲染 `NON_GOALS`、`REUSABLE`、合法 Markdown 表格 `MODULES`（`| ... |`）及条件化 `{{TDD_REF}}`（无 `docs/TDD.md` 时零 `HALLUCINATED_PATH`、零 `待补齐` 残余，有 `docs/TDD.md` 时保留有效路径）；`govern-docs.mjs --write-todo` 与直接调用 `renderDocTemplate(kind, { vars })` 仍保持 `pruneUnfilled: true` 向后兼容。
-- [ ] C2: （工作区形态探测与可复核跳过说明）`kit/skills/lib/doc-shape.mjs` (new) 基于实时工作区证据探测 `authRoles`/`stateRules`/`uiFrontend`/`ciRollout`/`cliEntry`/`multiCollab`（零硬编码仓库名，严守 `kit/**` 架构边界）：3 文件 Go CLI 仓跳过不适用的 `users`（`roles`）/`rules`/`rollout`/`coordination` 并写入 `<!-- doc-shape-skipped: ... -->` 与人类可复核摘要且被 `doc-audit` 放行；含鉴权/状态机/前端/CI 发布文件的仓则自动保留对应可选节；`FORM_INDEPENDENT_CORE` 与自定义模板 `required_sections` 永不被跳过（强行写入跳过注释时 `doc-audit` 报 `DOC_SKIP_INVALID_SECTION` 阻断）。
-- [ ] C3: （核心实质性与非字数型跨轮防退化）`kit/skills/lib/doc-substantive.mjs` (new) + `doc-requirements.mjs` + `doc-audit.mjs` 拦截核心/设计节中的 `待补齐`、`PLACEHOLDER_TEXT_RE` 占位词、`暂无`、`暂缺`、裸 `无`（包含 `- **本期不做**：待补齐`）以及无技术锚点或明确排除对象的纯套话（如「提升体验、优化功能、确保稳定」），**不使用最小字数或字符数下限**（含真实路径/命令/符号/排除依据的短文本如 `- **本期不做**：不动 \`scripts/survey.mjs\`` 通过）；跨轮编辑对比 `HEAD:{relDoc}` / `critique_anchors` / `baselineText` 时，把已填核心节改回空话/清空或静默删减技术锚点必报 `DOC_REGRESSION_CORE_EMPTIED` / `DOC_REGRESSION_ANCHOR_LOST`，并在 `auditDoc` 返回结构化 `delta`（`anchorsAdded`、`anchorsRemoved`、`pendingResolved`）。
-- [ ] C4: （互链继承、澄清落盘、归档隔离与总控 PRD 归档覆盖）`doc-plan.mjs init --kind todo --spec {specPath}` 自动继承 `related_prd` 并回写父 `related_todo`（同时支持 `--prd` 且不覆写 `1:N` 共享总控 PRD 元信息）；`doc-plan.mjs clarify` 向 `## 澄清与补充记录` 写入已确认需求后 `doc-audit` 退出 `0` 且不触发 `BLOCKED_PENDING_DECISIONS`；`collectSiblingSet` / `syncDocsLifecycle` / `archiveCompletedDocsGroup` 在存在同 `slug` 其他 `issue`/任务（含 `issue: null`）的历史归档文档时，使其保持字节级不变且 `byKind` 返回当前归档路径（同时保持活跃组跨日同 `slug` 互认）；`checkMasterPrdCoverage` 同步扫描 `docs/specs/` 与指向当前总控 PRD 的 `docs/archive/specs/`（排除非关联历史归档 SPEC），使已归档 `#49`/`#55`/`#57` 切片后仓内执行 `doc-plan.mjs audit .` 退出 `0`。
-- [ ] C5: （双向夹具、故障注入 `I139..I142` 与全量门禁）在 `scripts/dev/fixtures-doc-depth.mjs` (new) 补齐 `C1..C4` 正反双向用例（与 `#50` C5/C8/C9/C10 零重叠）并在 `scripts/dev/fixtures.mjs` 注册 `--domain doc-depth`；在 `scripts/dev/injections-data.mjs` 追加 `I139..I142` 验证全红；全部新增及修改的 `kit/skills/**/*.mjs` 与 `scripts/dev/fixtures-*.mjs` 单文件不超过 `800` 行、`kit/skills/dev-plan/SKILL.md` 不超过 `180` 行；同步 `docs/TDD.md` 与 `node scripts/equip.mjs . --check` 并全量通过 `node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check` 与 `node scripts/dev/verify-injections.mjs`。
+- [x] C1: （`init` 骨架保留与开箱自洽）在 3 文件 Go CLI 临时仓及多生态仓执行 `doc-plan.mjs init --kind prd|spec|todo|pair|all` 时，默认 `pruneUnfilled: false` 保留当前形态适用的可选节（`spec` 含 `design`/`alternatives`/`breakdown`/`door`/`implementation`/`clarifications`、`todo` 含 `steps`/`risk`/`rollback`/`breakpoint`/`clarifications`、`prd` 含 `flow`/`reuse`/`pending`/`door`/`clarifications`），传入 `--no-prune` 时保留模板全部可选节；`spec` 正确渲染 `NON_GOALS`、`REUSABLE`、合法 Markdown 表格 `MODULES`（`| ... |`）及条件化 `{{TDD_REF}}`（无 `docs/TDD.md` 时零 `HALLUCINATED_PATH`、零 `待补齐` 残余，有 `docs/TDD.md` 时保留有效路径）；`govern-docs.mjs --write-todo` 与直接调用 `renderDocTemplate(kind, { vars })` 仍保持 `pruneUnfilled: true` 向后兼容。
+- [x] C2: （工作区形态探测与可复核跳过说明）`kit/skills/lib/doc-shape.mjs` (new) 基于实时工作区证据探测 `authRoles`/`stateRules`/`uiFrontend`/`ciRollout`/`cliEntry`/`multiCollab`（零硬编码仓库名，严守 `kit/**` 架构边界）：3 文件 Go CLI 仓跳过不适用的 `users`（`roles`）/`rules`/`rollout`/`coordination` 并写入 `<!-- doc-shape-skipped: ... -->` 与人类可复核摘要且被 `doc-audit` 放行；含鉴权/状态机/前端/CI 发布文件的仓则自动保留对应可选节；`FORM_INDEPENDENT_CORE` 与自定义模板 `required_sections` 永不被跳过（强行写入跳过注释时 `doc-audit` 报 `DOC_SKIP_INVALID_SECTION` 阻断）。
+- [x] C3: （核心实质性与非字数型跨轮防退化）`kit/skills/lib/doc-substantive.mjs` (new) + `doc-requirements.mjs` + `doc-audit.mjs` 拦截核心/设计节中的 `待补齐`、`PLACEHOLDER_TEXT_RE` 占位词、`暂无`、`暂缺`、裸 `无`（包含 `- **本期不做**：待补齐`）以及无技术锚点或明确排除对象的纯套话（如「提升体验、优化功能、确保稳定」），**不使用最小字数或字符数下限**（含真实路径/命令/符号/排除依据的短文本如 `- **本期不做**：不动 \`scripts/survey.mjs\`` 通过）；跨轮编辑对比 `HEAD:{relDoc}` / `critique_anchors` / `baselineText` 时，把已填核心节改回空话/清空或静默删减技术锚点必报 `DOC_REGRESSION_CORE_EMPTIED` / `DOC_REGRESSION_ANCHOR_LOST`，并在 `auditDoc` 返回结构化 `delta`（`anchorsAdded`、`anchorsRemoved`、`pendingResolved`）。
+- [x] C4: （互链继承、澄清落盘、归档隔离与总控 PRD 归档覆盖）`doc-plan.mjs init --kind todo --spec {specPath}` 自动继承 `related_prd` 并回写父 `related_todo`（同时支持 `--prd` 且不覆写 `1:N` 共享总控 PRD 元信息）；`doc-plan.mjs clarify` 向 `## 澄清与补充记录` 写入已确认需求后 `doc-audit` 退出 `0` 且不触发 `BLOCKED_PENDING_DECISIONS`；`collectSiblingSet` / `syncDocsLifecycle` / `archiveCompletedDocsGroup` 在存在同 `slug` 其他 `issue`/任务（含 `issue: null`）的历史归档文档时，使其保持字节级不变且 `byKind` 返回当前归档路径（同时保持活跃组跨日同 `slug` 互认）；`checkMasterPrdCoverage` 同步扫描 `docs/specs/` 与指向当前总控 PRD 的 `docs/archive/specs/`（排除非关联历史归档 SPEC），使已归档 `#49`/`#55`/`#57` 切片后仓内执行 `doc-plan.mjs audit .` 退出 `0`。
+- [x] C5: （双向夹具、故障注入 `I139..I142` 与全量门禁）在 `scripts/dev/fixtures-doc-depth.mjs` (new) 补齐 `C1..C4` 正反双向用例（与 `#50` C5/C8/C9/C10 零重叠）并在 `scripts/dev/fixtures.mjs` 注册 `--domain doc-depth`；在 `scripts/dev/injections-data.mjs` 追加 `I139..I142` 验证全红；全部新增及修改的 `kit/skills/**/*.mjs` 与 `scripts/dev/fixtures-*.mjs` 单文件不超过 `800` 行、`kit/skills/dev-plan/SKILL.md` 不超过 `180` 行；同步 `docs/TDD.md` 与 `node scripts/equip.mjs . --check` 并全量通过 `node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check` 与 `node scripts/dev/verify-injections.mjs`。
 
 ## 执行步骤
 
@@ -60,14 +60,20 @@ related_spec: ../specs/261118-issue56-doc-shape-depth-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`规划中`（SPEC 与 Todo 草案已落盘 `.worktrees/impl-issue-56`，待 `audit` 与 `critique-scope` 自证后移交独立 Critique）
+- **当前状态**：`已完成，无遗留`（已按 C1..C5 完成实现与门禁验证，待 `finalize`/`verify`/`submit` 提交审查）
 - **待拍板事项**：无
-- **下一步第一件事**：经独立只读 Critique 执行 `critique-pass` 与人类 `approve` 后，在 `.worktrees/impl-issue-56` 按 Red-Green 顺序实施 `C1..C5`。
+- **下一步第一件事**：在独立审视上下文完成 PR 审查并由审查者合入。
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：待合并前补充全量门禁实测输出
-- **文档同步检查**：待合并前核对 `docs/TDD.md` 与 `kit/skills/dev-plan/SKILL.md`
-- **遗留问题**：待合并前确认无遗留
+- **实际验证命令与结果**：
+  - `node scripts/dev/preflight.mjs`：通过，0 项失败（33 项读数）
+  - `node scripts/dev/gap-coverage.mjs`：通过，19 条均有真实处置
+  - `node scripts/dev/fixtures.mjs`：全量 243 项通过 / 0 项失败（含 `--domain doc-depth` 4/4、docs 7/7、doc-shapes 12/12、doc-rules 15/15、flow-state 7/7）
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：151 条判据全部拦截（含 `I139..I142`）
+  - `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .`：9 份活跃文档与 `docs/prd/261117-v8-criteria-trust-prd.md` 覆盖率全部通过（退出码 0）
+  - `node scripts/equip.mjs . --check` / `compose-agents.mjs . --check` / `review.mjs .` / `sync-toc.mjs README.md README.en.md --check`：全绿
+- **文档同步检查**：已同步 `docs/TDD.md`、`kit/skills/dev-plan/SKILL.md` 及 `.agents/skills/`（`equip.mjs .` 一致）；全部 `kit/skills/**/*.mjs` 与 `scripts/dev/fixtures-*.mjs` <= 800 行（`doc-audit.mjs` 787 行、`doc-plan.mjs` 766 行、`SKILL.md` 75 行）
+- **遗留问题**：无

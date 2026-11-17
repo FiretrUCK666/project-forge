@@ -10,6 +10,11 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
+import { validateSkippedSections } from '../../lib/doc-shape.mjs'
+import {
+  checkCoreSubstantiveness, checkDocRegression, collectMasterPrdSpecTexts,
+  extractDocSnapshot, resolveBaselineSnapshotSync,
+} from '../../lib/doc-substantive.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
 import { numberingErrors } from '../../lib/doc-renumber.mjs'
@@ -238,7 +243,7 @@ export function stripCritiqueMeta(text) {
     tier: fm.data?.tier ?? null,
     high_risk_paths: Array.isArray(fm.data?.high_risk_paths) ? fm.data.high_risk_paths : [],
   }
-  const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
+  const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|critique_anchors|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
   const cleanBody = String(fm.body ?? norm)
     .split('\n')
     .filter((l) => !volatileLineRe.test(l.trim()))
@@ -371,7 +376,7 @@ function candHasNewAnnotation(strippedLine, rawCand) {
 }
 
 /** 规划文档静态自净化审计：两遍收集 `(new)`、校验 Mermaid 宽度、Frontmatter 与占位。 */
-export function auditDoc({ repoRoot, file }) {
+export function auditDoc({ repoRoot, file, baselineText = null }) {
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到待审查文档：${file}`)
   const rawText = readTextSafe(abs)
@@ -402,6 +407,7 @@ export function auditDoc({ repoRoot, file }) {
       }
     } else if (fm.hasFrontmatter) {
       for (const [k, v] of Object.entries(fm.data)) {
+        if (k === 'critique_anchors') continue
         if (typeof v === 'string') collectPlaceholderErrors(v, v, findFmKeyLine(lines, fmEndIdx, k), errors)
       }
       if (!fm.data.kind) {
@@ -544,17 +550,31 @@ export function auditDoc({ repoRoot, file }) {
   }
 
   const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
-  const sections = extractSections(bodyForSections)
+  let skippedSections = []
+  let delta = null
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     const docRequirements = resolveDocRequirements(repoRoot, docType)
     const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
     const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)
+
+    const skipCheck = validateSkippedSections(bodyForSections, docRequirements, docType)
+    skippedSections = skipCheck.skippedSections
+    errors.push(...skipCheck.errors)
 
     // 章节编号必须连续：删了一节却没重排，读的人会以为文档缺了东西。
     errors.push(...numberingErrors(bodyForSections))
 
     // 待拍板没清空就往下走，等于让实现去猜答案。
     errors.push(...pendingDecisionErrors(normRaw))
+
+    // 核心与设计节实质性检查（零字数下限）与跨轮防退化快照比对
+    errors.push(...checkCoreSubstantiveness(bodyForSections, docType))
+    const currentSnap = extractDocSnapshot(normRaw)
+    const baseInfo = resolveBaselineSnapshotSync({ repoRoot, relDoc, fmData: fm.data, baselineText })
+    const reg = checkDocRegression(baseInfo.snap, currentSnap, baseInfo.source)
+    delta = reg.delta
+    errors.push(...reg.errors)
+
     const missing = findMissingSections(docRequirements, sectionLookup, { hasInlineAcceptance: hasAcceptance })
     for (const miss of missing) {
       const code = miss.id === 'acceptance'
@@ -587,7 +607,7 @@ export function auditDoc({ repoRoot, file }) {
 
   const legacyCritique = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(normRaw)?.[1]?.trim() ?? null
   const critiqueStatus = (typeof fm.data?.plan_critique === 'string' ? fm.data.plan_critique : null) ?? legacyCritique
-  return { ok: errors.length === 0, file: relDoc, docType, critiqueStatus, errors, warnings }
+  return { ok: errors.length === 0, file: relDoc, docType, critiqueStatus, skippedSections, delta, errors, warnings }
 }
 
 export function collectMarkdownFiles(dir, root) {
@@ -630,16 +650,13 @@ export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
     : (existsSync(prdDir) ? collectMarkdownFiles(prdDir, repoRoot).map((x) => x.rel) : [])
   if (prdFiles.length === 0) return []
 
-  const specDir = join(repoRoot, 'docs', 'specs')
-  const specTexts = existsSync(specDir)
-    ? collectMarkdownFiles(specDir, repoRoot).map((item) => readTextSafe(item.abs) ?? '')
-    : []
-
   const out = []
   for (const rel of prdFiles) {
     const text = readTextSafe(join(repoRoot, rel)) ?? ''
     const ids = [...new Set([...text.matchAll(/^- \[[ xX]\]\s+(C\d+)\b/gm)].map((m) => m[1]))]
     if (ids.length === 0) continue
+    const fm = parseDocFrontmatter(text)
+    const specTexts = collectMasterPrdSpecTexts(repoRoot, rel, fm.data)
     const uncovered = ids.filter((id) => {
       const re = new RegExp(`\\b${id}(?![0-9])`)
       return !specTexts.some((spec) => re.test(spec))

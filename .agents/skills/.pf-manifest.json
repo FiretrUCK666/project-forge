@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T21:15:17.233Z",
+  "installedAt": "2026-11-17T22:45:29.189Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -68,13 +68,13 @@
       "sha256": "f5e9cdb1652601e6775fc23d9058aa995919df39449ed7f2801638f6babd2b32"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "5495f74a3e7aa178548f653b7f830e541e5cb01e6f7a387f013f95125999bbd7"
+      "sha256": "0ea6fea36be64510f108816c391de7d07393776b8c5178214f77de2c357dcb89"
     },
     "dev-plan/scripts/doc-audit.mjs": {
-      "sha256": "354e4c15d63b45cb3435852b4de582faeba82cfabefd2cec58fa1cb41ddcab46"
+      "sha256": "236d36c75e9f91402cd4221e0a3cf74bd4da0025b2012f977912a53e16a191bb"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "e64ddd389cd3fd66ca8938157b2caf63aeed60ada429b93d372822135f77d066"
+      "sha256": "e057600dd5948570e9170644d2885e6b1abcb9a7a14a7157db04bfb7f6a313c1"
     },
     "dev-plan/scripts/triage-rules.mjs": {
       "sha256": "e1f2c88a121cf4c30e1301769f2493225502b7e6d0637a5c15a12de7ff518ab9"
@@ -115,20 +115,32 @@
     "lib/critique-rounds.mjs": {
       "sha256": "7db00a731eaa40e3c5fe9bebb6d316ccf2462a542006cba12b69e64c634c3e0d"
     },
+    "lib/doc-comments.mjs": {
+      "sha256": "16b8f2584c84551e5e7ccbac73354b16a97c96063e72f58f560fb323702be794"
+    },
     "lib/doc-facts.mjs": {
       "sha256": "c980f4887ee223be6f729d4a69d8aa8a4dfe403c1fc7ffee07208273e54669e9"
+    },
+    "lib/doc-frontmatter.mjs": {
+      "sha256": "f9cf2161b639e69153fd6aa6cfee2f244f77677cab74b7908ab1620bb57625e3"
     },
     "lib/doc-renumber.mjs": {
       "sha256": "8da93fdb1a5c194218fc5520a063cb662debc3f971ec6bdac0ce02d1a467b068"
     },
     "lib/doc-requirements.mjs": {
-      "sha256": "0d228ce73a4cf8762c48b0bc5cfaeb5dd9b18f161193ea311e21dc5870598cb8"
+      "sha256": "68d3e03d1745184f1e6c69cd2d9e0b893777bed37dd678700f65cc64fefd4e48"
+    },
+    "lib/doc-shape.mjs": {
+      "sha256": "712cfae2d972129b912d5d2f27b28ded05f17087798a9161a7b466661b96d2d5"
+    },
+    "lib/doc-substantive.mjs": {
+      "sha256": "d41807baa48d12a9925934157afb967839d4def723ddb6342db39853f87aaefc"
     },
     "lib/doc-template-render.mjs": {
-      "sha256": "5c5f06c885f9a288a9e0a58614ce6d52803819fb56e8ca567273794d8caed134"
+      "sha256": "667b98becb0b8f52dd9a1badcf2b6d6d068f27c51649a3dff7720342ed162349"
     },
     "lib/doc-templates.mjs": {
-      "sha256": "196a095f4b731607efc9b5b08a7bddf9f9064a057d86cfc148f0106b9619d79a"
+      "sha256": "89a2b54333be0e6653ffdb73c21f2e3bc9ea9d457b6dd8b940d93bd04af85e44"
     },
     "lib/doc-toc.mjs": {
       "sha256": "cee51305ac148e5296308601944646714a140d95cc80bc9395e3dafbec9480df"
@@ -137,7 +149,7 @@
       "sha256": "ce897c19abb9e1e6106ee8796eb8936617c92c232519d013f0d81e10f4ad056d"
     },
     "lib/docs.mjs": {
-      "sha256": "25ffc6e2b2b2215397ec9ef4760825688d3fb50cb3fe2079344133142c92cbed"
+      "sha256": "84cf130ee0e4d65fbe3a707aed97255ff8bc9c571698260173b3553472238548"
     },
     "lib/exec.mjs": {
       "sha256": "d0e3908ab516b14a1659f9f912fb0b7aa5dba616ac49270458cad2c9cb6b1457"
@@ -182,7 +194,7 @@
       "sha256": "626835df8cc7206e3175e9757b0d0f8b3f1df23c98f745a035664e33a602db4f"
     },
     "lib/shared.mjs": {
-      "sha256": "90a437f4040f29db2772c2aabac6c7299a7d4136212d5026505c14c8fc4adf95"
+      "sha256": "c7da2dc7bf2b2b585c7c2a4ada7389b2761e165c1ae0f681f02b45cf92df72d7"
     },
     "lib/signals.mjs": {
       "sha256": "ecdc6df599809d7b92f6e984df741afe822b9c45bd0de42805cf095478cedda8"
@@ -227,16 +239,16 @@
       "sha256": "6a1ca80a868b9902ea4a4493de26e4f1b143684dbe2355e87641a8a7003ec96c"
     },
     "templates/docs-prd.md": {
-      "sha256": "5521fa3da20bdaa28641859452deafc4c42bfb81ff927570acb783e5cf1b487b"
+      "sha256": "ca7988f329858aa2ba7fcc5534f849e5fb8802d06b97c2308001287168d8b2cf"
     },
     "templates/docs-spec.md": {
-      "sha256": "9c979c9085b2411a80186c1024ad701047d2729caf46f1f15e4f0f6486b9f803"
+      "sha256": "19e08ce840766a7acdf0533d99e0658fb2315f8a49d68ec791c4066e5e47a89e"
     },
     "templates/docs-tdd.md": {
       "sha256": "574f30d24a2a4d615569b226a7565c2ed2fbb6fef75bb5948653db14c0e74afb"
     },
     "templates/docs-todo.md": {
-      "sha256": "b74f7b727dd7f7c83811293eac395dfa7368c136264a51db80f134e195e572bc"
+      "sha256": "6fd6e138b5f4f217e3c13bceb3652539b6429f22ea48716e25dab500b6d2bd8c"
     }
   },
   "disabledSkills": [],

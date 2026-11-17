@@ -51,7 +51,7 @@ flowchart LR
 - **不改什么**：<明确保持兼容或本次不触碰的模块>
 - **本期不做**：{{NON_GOALS}}
 - **复用既有模块**：{{REUSABLE}}
-- **架构基线关系**：<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs/TDD.md`>
+- **架构基线关系**：<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新>（依据：{{TDD_REF}}）
 - **替代方案与否决理由**：<还考虑过哪条路、为什么不选它——这段最能防止下一轮推翻重来>
 
 <!-- /section -->
@@ -136,10 +136,17 @@ flowchart LR
 
 <!-- /section -->
 
+<!-- section: clarifications optional -->
+## 澄清与补充记录
+
+- （本轮无额外澄清补充；用户拍板确认的新增要求可通过 `doc-plan.mjs clarify` 写入「已确认：…」）
+
+<!-- /section -->
+
 <!-- section: implementation optional -->
 ## 实现说明
 
-> 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
+> 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 {{TDD_REF}}，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
 - **实际落地摘要**：
 - **与草案的差异**：

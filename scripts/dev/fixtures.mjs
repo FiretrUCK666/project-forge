@@ -34,6 +34,7 @@ import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
 import { registerReviewEmpiricalCases } from './fixtures-review-empirical.mjs'
 import { registerOnboardingCases } from './fixtures-onboarding.mjs'
+import { registerDocDepthCases } from './fixtures-doc-depth.mjs'
 
 initTestBackupDir()
 
@@ -49,6 +50,7 @@ const DOMAIN_REGISTRY = [
   ['flow-docs', registerFlowDocsCases],
   ['doc-rules', registerDocRuleCases],
   ['doc-shapes', registerDocShapeCases],
+  ['doc-depth', registerDocDepthCases],
   ['doc-triage', registerDocTriageCases],
   ['handoff-review', registerHandoffReviewCases],
   ['equip', registerEquipCases],

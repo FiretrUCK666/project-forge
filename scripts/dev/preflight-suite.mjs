@@ -19,6 +19,7 @@ import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
+import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
 
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
@@ -745,6 +746,13 @@ function checkEvergreenFreshness({ ROOT, rel, readText, walk, fail, note }) {
   if (errs.length === 0) note(`常青保鲜：${docs.length} 份常青文档无未发布版本号（基准 ${skillVer || 'none'}）或 M* 阶段残留，双语徽章对齐`)
 }
 
+function checkKitWriteProbes({ ROOT, fail, note }) {
+  const targets = collectKitWriteProbeTargets(ROOT)
+  const violations = scanKitWriteProbeViolations(targets)
+  for (const v of violations) fail(`写路径联网探测门禁（${v.file}:${v.line}）：${v.message}`)
+  if (violations.length === 0) note(`写路径联网探测：${targets.length} 个脚本均已通过 probeForWrite 与显式 probeNetwork 门禁（0 违规）`)
+}
+
 export async function runSuiteChecks(ctx) {
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
@@ -764,5 +772,6 @@ export async function runSuiteChecks(ctx) {
   checkPlatformLock(ctx)
   checkStructureRules(ctx)
   checkKitSuite(ctx, syntaxErrors)
+  checkKitWriteProbes(ctx)
   checkHygiene(ctx)
 }

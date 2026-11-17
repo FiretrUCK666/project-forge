@@ -238,6 +238,7 @@ export {
   parseRemoteUrls,
   parseSshConfigDetails,
   parseSshConfigHostMap,
+  probeForWrite,
   probeGitHubEnv,
   probeSshKeyReadiness,
   probeSshTransport,

@@ -8,7 +8,7 @@ updated: 2026-11-18
 issue: 62
 pr: null
 branch: feat/probe-for-write
-owner: plan-62
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-62, round=1, sha=1a59df79576b, summary=Plan Critique passed: verified Issue #62 coverage, all 4 bare probeGitHubEnv write paths + flow-sync PR trigger + shared.mjs export, zero missed kit/ write paths, C1-C4 testability and I145 non-collision with #56 (I139-I142) and #51 (I143-I144), and <=800 line budget.)"
@@ -59,15 +59,15 @@ flowchart LR
 
 ## 一、背景与边界声明
 
-- **要改什么**：
+- **要改什么**：将 `review-ledger.mjs`、`flow-batch.mjs`、`flow-inspect.mjs`（`--create-issue`）与 `govern-state.mjs` 切至 `probeForWrite`，补齐 `flow-sync.mjs` / `shared.mjs` / `govern-audit.mjs` 并落地全量静态扫描器 `scripts/dev/write-probe-audit.mjs`：
   1. `kit/skills/lib/platform.mjs` 的 `probeGitHubEnv` 默认 `probeNetwork = false`，仅当未设 `GH_TOKEN`/`GITHUB_TOKEN` 时在 `kit/skills/lib/platform-probe.mjs` 跳过 `gh auth status` 并返回 `tier: "none"`。`kit/skills/dev-review/scripts/review-ledger.mjs`（`syncReviewToGitHub`）、`kit/skills/dev-flow/scripts/flow-batch.mjs`（`handleMergeQueue`）、`kit/skills/dev-flow/scripts/flow-inspect.mjs`（`handleStart --create-issue`）与 `kit/skills/dev-govern/scripts/govern-state.mjs`（`applyGitHubIssues`）四处写路径误用裸 `probeGitHubEnv`，导致仅凭 `gh auth` 登录时静默退化为 `tier=none`/`delegated` 或报错失败；同时 `kit/skills/dev-flow/scripts/flow-sync.mjs` 在未显式传 `--probe-auth` 时跳过 `probeForWrite`，使 `updatePrBase` 退化为代理载荷。
   2. `scripts/dev/fixtures-handoff-review.mjs` 仅扫描 4 个 `dev-flow` 文件且正则依赖单行 `cwd:` 首字段，而 `scripts/dev/preflight-suite.mjs` 与 `scripts/dev/preflight-contracts.mjs` 缺少写路径静态校验。本次将全量静态扫描沉淀到共享模块并双端接入。
-- **不改什么**：
+- **不改什么**：保持 `probeGitHubEnv` 惰性只读语义、`inspectWorkspace` 与 `scripts/lib/platform/`、`task-backend.mjs` 13 方法契约及六锁算法不变：
   - 保持 `probeGitHubEnv` 默认 `probeNetwork = false` 惰性只读语义不变，不拖慢 `flow inspect`、`flow next`（无 `--probe-auth`）的本地响应预算。
   - 保持 `flow-inspect.mjs` 中只读 `inspectWorkspace`（`probeNetwork: Boolean(opts.probeAuth)`）与已显式设 `probeNetwork: true` 的 `getIssue`/`hydrateRemotePfState` 语义不变。
   - 不修改 `scripts/lib/platform/`、`task-backend.mjs` 13 方法契约与六锁算法，不修改 `docs/prd/261117-v8-criteria-trust-prd.md`。
 - **本期不做**：不新增 GitHub 以外托管平台适配器；不改变无凭据时的 `delegatedPayloads` 结构或 `BLOCKED_*` 错误码命名。
-- **复用既有模块**：
+- **复用既有模块**：复用 `kit/skills/lib/platform.mjs`、`kit/skills/lib/static-gates-lexer.mjs` 与 `scripts/dev/fixtures-helpers.mjs`：
   - `kit/skills/lib/platform.mjs` 的 `probeForWrite` 与 `probeGitHubEnv`；
   - `kit/skills/lib/static-gates-lexer.mjs` 的 `stripCodeCommentsLines`（先剥除注释与字符串外噪声再做词法扫描）；
   - `scripts/dev/fixtures-helpers.mjs` 的 `tmpProject`、`gitInit`、`gitCommitFast`、`runAbsAsync`、`rmTree`。
@@ -118,10 +118,10 @@ flowchart LR
 
 ## 三、冻结的验收标准
 
-- [ ] C1: 写与同步调用点全部切至 `probeForWrite` 且文件行数合规。`kit/skills/dev-review/scripts/review-ledger.mjs`（`syncReviewToGitHub`）、`kit/skills/dev-flow/scripts/flow-batch.mjs`（`handleMergeQueue`）、`kit/skills/dev-flow/scripts/flow-inspect.mjs`（`handleStart --create-issue` 分支）与 `kit/skills/dev-govern/scripts/govern-state.mjs`（`applyGitHubIssues`）全部改为调用 `probeForWrite(...)`；`kit/skills/dev-govern/scripts/govern-audit.mjs` 透传 `_ghProbe`/`_ghClient`；`kit/skills/lib/shared.mjs` 导出 `probeForWrite`；`kit/skills/dev-flow/scripts/flow-sync.mjs` 在 `canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'] || ledger.prNumber || ledger.parentPrNumber)` 时触发 `probeForWrite`；`flow-inspect.mjs` 只读 `inspectWorkspace` 维持 `probeNetwork: Boolean(opts.probeAuth)`；所有改动文件均保持 `<= 800` 行，且 `node scripts/equip.mjs . --check` 退出 `0`。
-- [ ] C2: 真实联网探测运行时正反双向夹具实证（不传 `_ghProbe`/`_ghClient`）。在 `scripts/dev/fixtures-handoff-review.mjs` 中以 `PF_NO_REAL_AUTH_PROBE=0`、清空 `GH_TOKEN`/`GITHUB_TOKEN` 与临时 `PATH` 假 `gh` 验证四处入口：正向（`gh auth status` 返回已登录）四者均进入 `tier === 'gh-cli'` 并实际执行写/查子命令；反向（`gh auth status` 失败或无凭据）`review-ledger` 返回 `offlineOrNoCreds: true` 与完整 `delegatedPayloads`、`flow start --create-issue` 返回 `ACTION_REQUIRED_CREATE_ISSUE_DELEGATED`（退出码 `4`）、`govern-state` 返回 `gh CLI / GitHub token` 错误、`flow-batch` 不虚报 PR 合并成功；`node scripts/dev/fixtures.mjs --only 写操作必须联网探通道` 退出 `0`。
-- [ ] C3: 全量 `kit/skills/` 静态门禁与 `preflight` + `fixtures` 双端阻断。`scripts/dev/write-probe-audit.mjs`(new) 复用 `stripCodeCommentsLines` 导出 `scanKitWriteProbeViolations` 与 `collectKitWriteProbeTargets`，在 `scripts/dev/preflight-suite.mjs`（`checkKitWriteProbes`）与 `scripts/dev/fixtures-handoff-review.mjs` 双端运行；对真实 `kit/skills/` 扫出 `0` 违规，对键序倒置/多行 `probeGitHubEnv`、`probeNetwork: false`、缺 `probeForWrite` 或仅注释出现 `probeForWrite` 的合成反面样本全部精准拦截，且不误报只读 `probeNetwork: Boolean(opts.probeAuth)`；`node scripts/dev/preflight.mjs` 退出 `0`。
-- [ ] C4: 故障注入自证与合前全量门禁通过。在 `scripts/dev/injections-data.mjs` 新增 `I145`（不占用 `I139..I144`），验证退回裸 `probeGitHubEnv` 后运行 `scripts/dev/verify-injections.mjs`（`--only I145`）退出 `0`；`node scripts/dev/preflight.mjs`、全量 `scripts/dev/fixtures.mjs`、`node scripts/equip.mjs . --check` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict` 均退出 `0`。
+- [x] C1: 写与同步调用点全部切至 `probeForWrite` 且文件行数合规。`kit/skills/dev-review/scripts/review-ledger.mjs`（`syncReviewToGitHub`）、`kit/skills/dev-flow/scripts/flow-batch.mjs`（`handleMergeQueue`）、`kit/skills/dev-flow/scripts/flow-inspect.mjs`（`handleStart --create-issue` 分支）与 `kit/skills/dev-govern/scripts/govern-state.mjs`（`applyGitHubIssues`）全部改为调用 `probeForWrite(...)`；`kit/skills/dev-govern/scripts/govern-audit.mjs` 透传 `_ghProbe`/`_ghClient`；`kit/skills/lib/shared.mjs` 导出 `probeForWrite`；`kit/skills/dev-flow/scripts/flow-sync.mjs` 在 `canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'] || ledger.prNumber || ledger.parentPrNumber)` 时触发 `probeForWrite`；`flow-inspect.mjs` 只读 `inspectWorkspace` 维持 `probeNetwork: Boolean(opts.probeAuth)`；所有改动文件均保持 `<= 800` 行，且 `node scripts/equip.mjs . --check` 退出 `0`。
+- [x] C2: 真实联网探测运行时正反双向夹具实证（不传 `_ghProbe`/`_ghClient`）。在 `scripts/dev/fixtures-handoff-review.mjs` 中以 `PF_NO_REAL_AUTH_PROBE=0`、清空 `GH_TOKEN`/`GITHUB_TOKEN` 与临时 `PATH` 假 `gh` 验证四处入口：正向（`gh auth status` 返回已登录）四者均进入 `tier === 'gh-cli'` 并实际执行写/查子命令；反向（`gh auth status` 失败或无凭据）`review-ledger` 返回 `offlineOrNoCreds: true` 与完整 `delegatedPayloads`、`flow start --create-issue` 返回 `ACTION_REQUIRED_CREATE_ISSUE_DELEGATED`（退出码 `4`）、`govern-state` 返回 `gh CLI / GitHub token` 错误、`flow-batch` 不虚报 PR 合并成功；`node scripts/dev/fixtures.mjs --only 写操作必须联网探通道` 退出 `0`。
+- [x] C3: 全量 `kit/skills/` 静态门禁与 `preflight` + `fixtures` 双端阻断。`scripts/dev/write-probe-audit.mjs`(new) 复用 `stripCodeCommentsLines` 导出 `scanKitWriteProbeViolations` 与 `collectKitWriteProbeTargets`，在 `scripts/dev/preflight-suite.mjs`（`checkKitWriteProbes`）与 `scripts/dev/fixtures-handoff-review.mjs` 双端运行；对真实 `kit/skills/` 扫出 `0` 违规，对键序倒置/多行 `probeGitHubEnv`、`probeNetwork: false`、缺 `probeForWrite` 或仅注释出现 `probeForWrite` 的合成反面样本全部精准拦截，且不误报只读 `probeNetwork: Boolean(opts.probeAuth)`；`node scripts/dev/preflight.mjs` 退出 `0`。
+- [x] C4: 故障注入自证与合前全量门禁通过。在 `scripts/dev/injections-data.mjs` 新增 `I145`（不占用 `I139..I144`），验证退回裸 `probeGitHubEnv` 后运行 `scripts/dev/verify-injections.mjs`（`--only I145`）退出 `0`；`node scripts/dev/preflight.mjs`、全量 `scripts/dev/fixtures.mjs`、`node scripts/equip.mjs . --check` 与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict` 均退出 `0`。
 
 ## 四、高风险点、门型与回滚路径
 
@@ -134,6 +134,6 @@ flowchart LR
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`。
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：`review-ledger.mjs`（713 行）、`flow-batch.mjs`（373 行）、`flow-inspect.mjs`（773 行，`--create-issue` 分支）与 `govern-state.mjs`（693 行，`applyGitHubIssues` 支持可选第三参 `_ghProbe`/`_ghClient`）均已切换至 `probeForWrite`；`govern-audit.mjs`（419 行）的 `main`/`runCli` 接收 `runtimeOpts` 并将 `_ghProbe`/`_ghClient` 透传至 `applyGitHubIssues`；`flow-sync.mjs`（195 行）在存在 `ledger.prNumber` 或 `ledger.parentPrNumber` 时触发 `probeForWrite`；`shared.mjs`（298 行）导出 `probeForWrite`；共享静态扫描器 `scripts/dev/write-probe-audit.mjs`（318 行）接入 `scripts/dev/preflight-suite.mjs`（777 行，`checkKitWriteProbes`）与 `scripts/dev/fixtures-handoff-review.mjs`（741 行，含正反假 `gh` 实跑子进程夹具），并在 `scripts/dev/injections-data.mjs` 追加 `I145`。
+- **与草案的差异**：1. 在无凭据孤立子进程实测中发现 `kit/skills/lib/exec.mjs` 的 `buildNonInteractiveEnv` 将 `GIT_ASKPASS` 设为 `'echo'` 会导致无 credential helper 时 `git credential fill` 回显提示文本冒充可用令牌并误升为 `node-https-token`，故一并将 `GIT_ASKPASS` 置空（`''`）并在 `kit/skills/lib/platform-probe.mjs` 的 `probeHttpsCredential` 显式禁用 `GIT_ASKPASS`/`SSH_ASKPASS`；2. 合并 `origin/main`（#56）后按新版 `doc-substantive.mjs` 校验规则补齐本规范 `## 一、背景与边界声明` 行内摘要句。
+- **关联同步文件**：`kit/skills/lib/exec.mjs`（633 行）、`kit/skills/lib/platform-probe.mjs`（772 行）、`.agents/skills/` 与 `.agents/skills/.pf-manifest.json`（经 `node scripts/equip.mjs .` 全量同步）、`docs/TDD.md`。

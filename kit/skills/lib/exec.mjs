@@ -24,7 +24,7 @@ export function buildNonInteractiveEnv(baseEnv = process.env, extra = {}) {
   return {
     ...baseEnv,
     GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: 'echo',
+    GIT_ASKPASS: '',
     SSH_ASKPASS: '',
     SSH_ASKPASS_REQUIRE: 'never',
     GCM_INTERACTIVE: 'never',

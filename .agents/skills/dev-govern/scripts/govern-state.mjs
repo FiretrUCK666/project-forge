@@ -16,7 +16,7 @@ import {
   writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeGitHubEnv } from '../../lib/platform.mjs'
+import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from '../../lib/platform.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -518,7 +518,7 @@ export function buildIssues(findings) {
   return issues
 }
 
-export async function applyGitHubIssues(repoRoot, issues) {
+export async function applyGitHubIssues(repoRoot, issues, opts = {}) {
   if (issues.length === 0) return { applied: [], error: undefined }
   const fastCfg = readGitConfigFast(resolveGitDirFast(repoRoot))
   const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
@@ -529,7 +529,9 @@ export async function applyGitHubIssues(repoRoot, issues) {
   if (!remotes.ok || topology.providerId !== 'github' || !targetRepo) {
     return { applied: [], error: 'No GitHub remote found (generic-git / local-only mode); cannot create GitHub issues.' }
   }
-  const probe = await probeGitHubEnv({ cwd: repoRoot, remoteUrls })
+  const probe = opts._ghProbe ?? (opts._ghClient
+    ? { env: { providerId: 'github', trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
+    : await probeForWrite({ cwd: repoRoot, remoteUrls }))
   if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
     return { applied: [], error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.' }
   }

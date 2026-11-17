@@ -25,7 +25,7 @@ import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDeps
 import {
   detectDeclaredRepo, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import {
@@ -457,7 +457,7 @@ export async function handleStart(opts, roots) {
     if (!targetRepo || providerId !== 'github') {
       throw new Error('--create-issue 需要配置有效的 GitHub 远端仓库')
     }
-    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
+    const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
     const ghClient = opts._ghClient ?? ghProbe.client
     const issueTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
     const issueBody = String(opts.body ?? [

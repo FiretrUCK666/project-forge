@@ -846,7 +846,7 @@ export const INJECTIONS = [
     id: 'I94',
     what: '英文写法的非目标认不出来（「won\'t touch」被判成没写）',
     file: 'kit/skills/lib/doc-requirements.mjs',
-    from: "      /(?:out\\s+of\\s+scope|won'?t\\s+(?:do|touch|change)|not\\s+in\\s+scope|excluded)/i,",
+    from: "      /(?:out\\s+of\\s+scope|won'?t\\s+(?:do|touch|change|support)|not\\s+in\\s+scope|excluded|no\\s+(?:GUI|API|support)\\b)/i,",
     to: '      /(?:NEVER_MATCH_XYZ)/,',
     expect: '认节看内容不看标题',
   },

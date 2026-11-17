@@ -915,6 +915,14 @@ export const INJECTIONS = [
     expect: '待拍板没清空就拦下',
   },
   {
+    id: 'I103',
+    what: '被 Git 跟踪的链接在删除档又被豁免（git worktree remove 会顺着链接删穿仓外）',
+    file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs',
+    from: "        skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })",
+    to: "        skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })\n        continue",
+    expect: '跟踪的链接在删除档不许豁免',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

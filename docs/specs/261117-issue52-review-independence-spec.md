@@ -157,7 +157,7 @@ issueContextUnavailable: number[]   // 拿不到正文的编号
 
 ## 三、冻结的验收标准
 
-- [ ] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）；**轮次唯一派生式**：`flow next` 签发的 `round` 与 `record` 期望的 `round` 必须由同一个函数算出——构造 `rounds = [1, 3]` 的账本，走完 `next` → `record` 必须成功，不得出现「令牌对不上且无出口」。
+- [ ] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）；**轮次唯一派生式**：`flow next` 签发的 `round` 与 `record` 期望的 `round` 必须由同一个函数算出。构造 `rounds = [1, 3]` 的账本（轮次有空档），走完 `next` → `record` 必须成功——现在两处各自算（`rounds.length + 1` 与 `maxPrev + 1`），空档时前者为已存在的那一轮签令牌、后者要下一轮，令牌永远对不上且没有出口。
 - [ ] C2: **Issue 语境**。`flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与 `compactContext`；**拿不到正文时必须留痕**——记下编号与原因（`no-api-channel` / `not-found` / `forbidden`），`flow next` 据此给出取正文的具体命令；**`--pr` 与 `--issue` 走同一条「尝试 → 留痕 → 给命令」链路**（无通道时不硬失败，因为多数本地仓没有通道；但静默只存编号也不算通过）；反向：重跑 `start` 且这次取到了正文，必须清掉「拿不到」的标记。
 - [ ] C3: **PR 模式的基线只能来自真实 PR**。`mode === 'pr'` 时 `diffScope` 必须形如 `<baseRefOid>...<headRefOid>`（两个都是 GitHub 返回的 SHA），**不得出现分支名**；拿不到 SHA 时返回 `BLOCKED_PR_UNRESOLVED` 且退出码非 0；**行为断言**：构造一个账本里记了 PR 号、但远端拉不到该 PR 的仓，跑 `review-pack --pr` 带上那个 PR 号，`status` 不得是 `PACK_READY`；**行为断言（旁路）**：账本标记了 `externalPr` 的任务，跑 `review-pack --task` 带上那个任务号，必须同样走 PR 判据，不得因为换了入口就放行；反向：真实拉到 PR 时 `diffScope` 里两个 SHA 与账本记录一致。
 - [ ] C4: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**，不存在的必须报出来；装配档位与生成档位**不一致时**任一方必须拒绝或警告；删掉某个技能目录后（未跑 `equip`），`compose-agents` 要能发现并指出死链；**反向**：装齐且档位一致的仓不得误报——一个没有死链、档位一致的仓跑 `compose-agents --check` 必须退出 0 且不出现任何死链或档位告警。

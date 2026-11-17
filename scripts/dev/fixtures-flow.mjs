@@ -795,4 +795,46 @@ cases.push(['cleanup 外链保护反向：工具自己挂的 node_modules 照常
   } finally { rmTree(dir) }
 }])
 
+
+// 「已被 Git 跟踪的链接」曾经是一条豁免：理由听起来合理（git 自己会删），
+// 实际是错的——git 删含链接的目录时会跟着链接走进去，仓外目标被一起删。
+cases.push(["跟踪的链接在删除档不许豁免，解绑档才跳过", async () => {
+  const { unmountSharedDeps } = await import("../../kit/skills/dev-flow/scripts/worktree-deps.mjs")
+  const fs = await import("node:fs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# t\n\n跟踪链接测试。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+
+    const outside = join(dir, "..", `${Date.now()}-outside`)
+    fs.mkdirSync(outside, { recursive: true })
+    fs.writeFileSync(join(outside, "SURVIVE.txt"), "keep me")
+
+    const wt = join(dir, ".worktrees", "wt")
+    fs.mkdirSync(wt, { recursive: true })
+
+    // 造一个被 git 跟踪的链接：写进索引，再在 worktree 里真实创建
+    const linkRel = "linked"
+    try { fs.symlinkSync(outside, join(wt, linkRel), "junction") } catch { return true }
+
+    gitCommitFast(wt, "add link")
+    // 让它在索引里（tmpProject 的仓不一定有同 HEAD，用 add 即可）
+    const { spawnSync } = await import("node:child_process")
+    spawnSync("git", ["add", "-A"], { cwd: wt, stdio: "ignore", windowsHide: true })
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "link"], { cwd: wt, stdio: "ignore", windowsHide: true })
+
+    // 删除档：必须解绑（哪怕它是被跟踪的）
+    const cleanup = unmountSharedDeps(dir, wt, { mode: "cleanup", allowOutbound: [linkRel] })
+    if (cleanup.blocked.length > 0) return `cleanup 档把它拦下了（那是另一条路）：${JSON.stringify(cleanup.blocked)}`
+    if (!fs.existsSync(join(outside, "SURVIVE.txt"))) return "解绑把仓外内容删了"
+    if (cleanup.unmounted.every((u) => u.path !== linkRel)) {
+      return `删除档没有解绑这条被跟踪的链接：${JSON.stringify({ unmounted: cleanup.unmounted, skipped: cleanup.skipped })}`
+    }
+    if (fs.existsSync(join(wt, linkRel))) return "解绑之后链接还在"
+
+    return true
+  } finally { rmTree(dir); }
+}])
 }

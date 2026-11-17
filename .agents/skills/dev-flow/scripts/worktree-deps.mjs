@@ -523,13 +523,24 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
     }
 
     const abs = join(wtAbs, link.path)
-    const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
-    const isTracked = fastTracked !== null
-      ? fastTracked
-      : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
-    if (isTracked) {
-      skipped.push({ path: link.path, reason: 'tracked-in-git' })
-      continue
+
+    // 已被 Git 跟踪的链接**不能豁免**。
+    //
+    // 豁免的初衷是「git 自己会删，不用我们管」，但 git 删含链接的目录时会跟着链接走进去：
+    // 实测在分支里提交一个指向仓外的符号链接，cleanup 把它记进 skipped、
+    // 紧接着 git worktree remove --force 退出 0，**仓外那个目录的内容被删了**。
+    //
+    // 所以只有「worktree 不消失」的依赖清场档才跳过（解绑会让工作区变脏）；
+    // 删除档一律解绑——反正整个目录马上就没，链接删掉不影响任何事。
+    if (strict) {
+      const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
+      const isTracked = fastTracked !== null
+        ? fastTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isTracked) {
+        // 记下来，回执里要能看见「这一条是被 Git 跟踪的」——排查时这是关键信息。
+        skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })
+      }
     }
 
     let targetBefore = null
@@ -554,7 +565,6 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
     skipped,
     blocked,
     scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
-    mainDepsIntact: true,
   }
 }
 

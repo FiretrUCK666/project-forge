@@ -872,4 +872,60 @@ cases.push(["flow start 能指定基线分支", async () => {
     return true
   } finally { rmTree(dir) }
 }])
+
+// 新任务「还没 finalized」天然成立，于是刚建好就要求归档——下一步该是实施。
+// 判据要问「有没有做过事」，不是「有没有标记做过事」。
+cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
+  const { evaluateNextState } = await import("../../kit/skills/lib/workflow-policy.mjs")
+
+  const mk = (over = {}) => ({
+    taskId: "t1", caseType: 4, role: "maintainer", status: "started",
+    branch: "feat/x", baseBranch: "main", baseSha: "aaa",
+    worktreePath: ".worktrees/impl-t1",
+    specFile: "docs/specs/x.md", todoFile: "docs/todo/x.md",
+    rounds: [], finalized: false,
+    ...over,
+  })
+  const rt = (over = {}) => ({
+    headSha: "aaa", dirty: 0, policy: { riskTier: "high", requiredGates: ["gate"], independentReviewRequired: true },
+    evidenceValidation: { ok: false, code: "BLOCKED_NOT_VERIFIED" },
+    opInProgress: false, mainDirtyCount: 0,
+    ...over,
+  })
+
+  // 正向：基线 SHA 等于 HEAD、工作区干净 → 还没开始，下一步是实施
+  const fresh = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  if (fresh.phase === "needs-finalize") {
+    return "刚建好的任务被判成「该归档」——下一步应是实施"
+  }
+  if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
+
+  // 反向：真做完了（HEAD 已前移）→ 才该要求归档
+  const done = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ headSha: "bbb" }) })
+  if (done.phase !== "needs-finalize") {
+    return `HEAD 前移后仍判 ${done.phase}，应要求 finalize`
+  }
+
+  // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」
+  const dirty = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ dirty: 3 }) })
+  if (dirty.phase !== "implementing") return `有未提交改动时判成 ${dirty.phase}`
+
+  return true
+}])
+
+// 取 Issue 正文时用「不联网」的探测结果判断「能不能取」，必然得到 tier=none，
+// 然后装配出一个只会委托的客户端——把「我没去取」记成了「取不到」。
+// 委托与失败是两件事：前者该由调用方补上，后者要等通道恢复。
+cases.push(["Issue 正文取不到时，委托和失败要分开记", async () => {
+  const { createGitHubClient } = await import("../../kit/skills/lib/github-client.mjs")
+
+  // 无通道的客户端对 getIssue 只能委托，不是「查不到」
+  const off = createGitHubClient({ tier: "none" })
+  const r = await off.getIssue("a/b", 7)
+  if (r.ok) return "无通道客户端竟然读到了正文"
+  if (!r.delegated) return "无通道时没有标记成委托——会被误记成「取不到」"
+  if (r.action !== "get_issue") return `委托的动作名不对：${r.action}`
+
+  return true
+}])
 }

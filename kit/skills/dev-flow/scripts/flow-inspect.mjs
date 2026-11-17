@@ -578,7 +578,12 @@ export async function handleStart(opts, roots) {
     let client = opts._ghClient ?? null
     if (!client && targetRepo && providerId === 'github') {
       try {
-        const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
+        // 取正文是网络操作。用「不联网」的探测结果判断「能不能取」，
+        // 必然得到 tier=none，然后装配出一个只会委托的客户端——那不是通道不存在，
+        // 是没去探。所以这里要显式联网探一次。
+        const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({
+          cwd: roots.mainRoot, remoteUrls: state.remoteUrls, probeNetwork: true,
+        }))
         client = ghProbe.client
       } catch { client = null }
     }
@@ -590,7 +595,12 @@ export async function handleStart(opts, roots) {
       try {
         const res = await client.getIssue(targetRepo, num)
         if (!res?.ok) {
-          issueContext.push({ number: num, fetched: false, reason: res?.error ?? 'fetch-failed', title: null, summary: null })
+          // 委托 ≠ 失败。「我替你做不了」和「取不到」都要留痕，但不能都叫 fetch-failed：
+          // 前者该由调用方补上，后者要等通道恢复，处置完全不同。
+          const reason = res?.delegated
+            ? `needs-manual-fetch:${res.action ?? 'get_issue'}`
+            : (res?.error ?? 'fetch-failed')
+          issueContext.push({ number: num, fetched: false, reason, title: null, summary: null })
           continue
         }
         const body = String(res.body ?? '').replace(/\r\n/g, '\n').trim()

@@ -481,6 +481,11 @@ export function evaluateNextState({
   const currentHead = rt.headSha ?? null
   const evidenceVal = rt.evidenceValidation ?? { ok: false, code: 'BLOCKED_NOT_VERIFIED' }
   const needsFinalize = t.caseType === 3 || t.caseType === 4 || Boolean(t.todoFile) || Boolean(t.specFile)
+  // 「一件事都没做过」：基线 SHA 与当前 HEAD 相同、工作区干净。
+  // 用它区分「还没开始」与「做完了待归档」——两者都满足「尚未 finalized」。
+  const nothingImplementedYet = Boolean(
+    !t.finalized && t.baseSha && currentHead && t.baseSha === currentHead && !(rt.dirty > 0),
+  )
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)
   const reviewCoversHead = Boolean(t.reviewPassed === true && (!currentHead || t.reviewPassedHead === currentHead) && (!lastRound || !currentHead || lastRound.headSha === currentHead))
@@ -555,6 +560,13 @@ export function evaluateNextState({
     blockingReasons.push('CHANGES_REQUESTED')
     nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit --rework`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task ${t.taskId}`
+  } else if (nothingImplementedYet) {
+    // 还没提交过任何东西，下一步是实施，不是归档。
+    // 少了这一支，对新任务来说「尚未 finalized」天然成立，刚建好就要求归档。
+    phase = 'implementing'
+    ownerRole = 'implementer'
+    nextAction = '按交接包实施，改完提交；提交后按 flow next 继续'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${t.taskId}`
   } else if (finalizeStale) {
     phase = 'needs-finalize'
     ownerRole = 'implementer'

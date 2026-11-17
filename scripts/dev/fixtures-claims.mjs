@@ -1494,4 +1494,61 @@ cases.push(['模板文件就是产物来源，可选章节按项目声明增删'
   } finally { rmTree(dir) }
 }])
 
+// 文档模板要能适配完全不同的项目，而不是一套七节表走天下。
+//
+// 早先的模板是固定七节，且生成器里另有一份写死的内容：改模板文件对产物毫无影响。
+// 更实际的问题是——CLI 工具没有「数据模型」，数据管道没有「关键交互」，
+// 论文仓没有「复用模块」。写死章节逼着人填「不适用」，或者干脆绕过流程。
+cases.push(['文档模板按项目形态裁剪，且填不上的可选节不留占位', async () => {
+  const { renderDocTemplate, templateSections, DOC_TEMPLATE_VARS } = await import('../../kit/skills/lib/doc-template-render.mjs')
+
+  // 正向 1：三份模板都有主干三节。注意渲染后标记已被清除，
+  // 所以要查**模板原文**而不是产物——产物里章节只剩标题。
+  const fsMod = await import('node:fs')
+  for (const kind of ['prd', 'spec', 'todo']) {
+    const raw = fsMod.readFileSync(new URL(`../../kit/skills/templates/docs-${kind}.md`, import.meta.url), 'utf8')
+    const ids = templateSections(raw).map((s) => s.id)
+    for (const must of ['goal', 'acceptance']) {
+      if (!ids.includes(must)) return `${kind} 模板没有主干章 ${must}`
+    }
+  }
+
+  // 正向 2：真实项目形态能落地——PRD 的十节里，身份/流程/规则/非功能都是可选
+  const prdSections = templateSections(await import('node:fs').then((fs) => fs.readFileSync(
+    new URL('../../kit/skills/templates/docs-prd.md', import.meta.url), 'utf8')))
+  const optionalIds = prdSections.filter((s) => s.optional).map((s) => s.id)
+  for (const must of ['users', 'flow', 'rules', 'nfr']) {
+    if (!optionalIds.includes(must)) return `PRD 模板的 ${must} 节不是可选的——纯工具类项目会被迫填「不适用」`
+  }
+
+  // 正向 3：不填 optional 时，那一节必须整节消失（否则会带着尖括号占位过不了审计）。
+  // 主干**故意留着**占位让人看见该写什么，所以这里只查可选节对应的标题还在不在。
+  const sparse = renderDocTemplate('prd', { vars: { TITLE: 'T', TODAY: '2026-01-01' } })
+  for (const [id, title] of [['users', '用户身份与权限'], ['rules', '状态与业务规则'], ['nfr', '非功能要求']]) {
+    if (sparse.includes(title)) return `未填的可选节「${title}」没有被剪掉——它会带着尖括号占位过不了审计`
+  }
+
+  // 反向 1：主干填不上要留占位让人看见，不许静默删掉
+  if (!/<[\u4e00-\u9fa5][^<>\n]{1,120}>/.test(sparse)) return '主干填不上时也没留占位——人不会知道这里要写东西'
+  if (!sparse.includes('要解决的问题')) return '主干「要解决的问题」被误删了'
+
+  // 反向 2：项目声明不要的章节要被裁掉
+  const dropped = renderDocTemplate('prd', {
+    vars: { TITLE: 'T', TODAY: '2026-01-01', NON_GOALS: '- 不做', REUSABLE: '- 复用', CRITERIA: '- [ ] C1: x', DOOR: 'two-way', ROLLBACK: 'r' },
+    dropSections: new Set(['users', 'rules']),
+  })
+  if (dropped.includes('用户身份与权限')) return '声明要删的章节还在'
+  if (!dropped.includes('要解决的问题')) return '主干被误删'
+
+  // 占位登记表不能漂：模板里出现的每个占位都得能取值
+  for (const kind of ['prd', 'spec', 'todo']) {
+    const raw = await import('node:fs').then((fs) => fs.readFileSync(
+      new URL(`../../kit/skills/templates/docs-${kind}.md`, import.meta.url), 'utf8'))
+    const names = [...new Set([...raw.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
+    const unreg = names.filter((n) => !DOC_TEMPLATE_VARS[kind].includes(n))
+    if (unreg.length > 0) return `${kind} 模板有未登记占位：${unreg.join(',')}`
+  }
+  return true
+}])
+
 }

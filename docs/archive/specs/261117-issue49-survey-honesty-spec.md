@@ -4,9 +4,9 @@ title: 勘察与体检的诚实性
 status: implemented
 tier: L3
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: 49
-pr: null
+pr: 53
 branch: feat/issue-49
 owner: FiretrUCK666
 approved: true

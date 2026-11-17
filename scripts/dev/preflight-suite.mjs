@@ -579,6 +579,9 @@ function checkHygiene({ ROOT, rel, walk, fail }) {
     // `.agents/` 是 `.kit/skills` 的镜像，同一个问题会在两处各报一次；
     // 镜像由 `equip --check` 保证字节一致，不需要在这里重复扫。
     if (/^(?:docs\/archive|docs\/release-notes|node_modules|\.agents)\//.test(name)) continue
+    // 夹具的存在意义就是装错的样本：写「早先这里是 join 拼接」是为了证明检测器抓得到。
+    // 用同一条规则去判它，等于要求测谎仪自己不能说谎。
+    if (/^scripts\/dev\/fixtures-[^/]+\.mjs$/.test(name)) continue
     for (const hit of findChangelogVoice(readFileSync(file, 'utf8'), { file: name })) found.push(hit)
   }
   const fresh = findNewChangelogVoice(found, baseline)

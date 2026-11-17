@@ -891,6 +891,22 @@ export const INJECTIONS = [
     expect: '履历体写法能被认出来',
   },
   {
+    id: 'I100',
+    what: '宿主模板语法的豁免只加在形状检查一处（未登记检查照样拦住全大写的 Actions 表达式）',
+    file: 'scripts/lib/template.mjs',
+    from: '  const hostStripped = source.replace(/\\$\\{\\{[\\s\\S]*?\\}\\}/g, \'\')',
+    to: '  const hostStripped = source',
+    expect: '宿主模板语法在任何检查前就放过',
+  },
+  {
+    id: 'I101',
+    what: '命令截断退回按字符砍（中文命令砍完仍超字节上限）',
+    file: 'kit/skills/lib/command-lex.mjs',
+    from: '    if (used + size > budget) break',
+    to: '    if (cut.length >= budget) break',
+    expect: '命令截断按字节算',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

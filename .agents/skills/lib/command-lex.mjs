@@ -158,12 +158,29 @@ export function classifyCommandText(command, rules) {
 /** 单条命令展示上限。超过它的命令在报告里要截断并标出总长度。 */
 export const COMMAND_DISPLAY_MAX_BYTES = 500
 
-/** 按 UTF-8 字节截断一条命令，给出总长度，供报告层使用。 */
+/**
+ * 按 UTF-8 字节截断一条命令，给出总长度，供报告层使用。
+ *
+ * 截断必须**按字节**而不是按字符：一个汉字 3 字节、一个 emoji 4 字节，
+ * 按字符砍会砍出远超上限的结果——`maxBytes - 20` 是按字节留的余量，
+ * 却用在按字符切片上，于是「限 500 字节」实际输出了 504 字节。
+ */
 export function truncateCommandForDisplay(command, maxBytes = COMMAND_DISPLAY_MAX_BYTES) {
   const text = String(command ?? '')
   const total = Buffer.byteLength(text, 'utf8')
   if (total <= maxBytes) return { text, total, truncated: false }
-  let cut = text
-  while (Buffer.byteLength(cut, 'utf8') > maxBytes - 20) cut = cut.slice(0, -1)
-  return { text: `${cut}…（共 ${total} 字节）`, total, truncated: true }
+
+  // 后缀「…（共 N 字节）」自己也要占位，先把它算出来再决定正文留多少。
+  const suffix = `…（共 ${total} 字节）`
+  const budget = Math.max(0, maxBytes - Buffer.byteLength(suffix, 'utf8'))
+
+  let cut = ''
+  let used = 0
+  for (const ch of text) {
+    const size = Buffer.byteLength(ch, 'utf8')
+    if (used + size > budget) break
+    cut += ch
+    used += size
+  }
+  return { text: `${cut}${suffix}`, total, truncated: true }
 }

@@ -89,7 +89,12 @@ export function evaluateConditions(text, condMap = {}, file = 'template.md') {
  */
 export function renderVars(text, vars = {}) {
   const source = String(text ?? '')
-  const used = [...new Set([...source.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
+  // 取占位名时要先剥掉宿主语法（`${{ ... }}`），否则 `${{GITHUB_SHA}}` 会被当成
+  // 本工具的 `{{GITHUB_SHA}}`——它的名字恰好是全大写，正好落在「未登记」那一类，
+  // 于是用了 Actions 表达式的项目一条命令都跑不了。豁免必须在**所有**检查之前，
+  // 不能只加在形状检查那一处。
+  const hostStripped = source.replace(/\$\{\{[\s\S]*?\}\}/g, '')
+  const used = [...new Set([...hostStripped.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
   const unknown = used.filter((name) => !TEMPLATE_VARS.includes(name))
   if (unknown.length > 0) {
     throw new TemplateError(`模板里有未登记的占位符：${unknown.map((n) => `{{${n}}}`).join('、')}（见 lib/protocol.mjs 的 TEMPLATE_VARS）`)
@@ -100,11 +105,9 @@ export function renderVars(text, vars = {}) {
   }
 
   const shapes = new Set()
-  for (const m of source.matchAll(/\{\{[\s\S]*?\}\}/g)) {
+  for (const m of hostStripped.matchAll(/\{\{[\s\S]*?\}\}/g)) {
     const raw = m[0]
     if (/^\{\{[A-Z0-9_]+\}\}$/.test(raw)) continue
-    // 宿主的模板语法（`${{ ... }}`）不是本工具的占位符，不归这里管。
-    if (source[m.index - 1] === '$') continue
     shapes.add(raw)
   }
   if (shapes.size > 0) {

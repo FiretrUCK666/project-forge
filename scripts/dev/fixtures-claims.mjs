@@ -1981,4 +1981,62 @@ cases.push(['履历体写法能被认出来，规则条文本身不算', async (
   return true
 }])
 
+
+// GitHub Actions 的表达式也是 `${{ }}`。它的名字常常是全大写（`${{GITHUB_SHA}}`），
+// 正好落在「本工具的占位符」那一类里，于是用了 Actions 的项目一条命令都跑不了。
+// 豁免必须在**所有**检查之前——只加在形状检查那一处，未登记检查照样会拦住它。
+cases.push(["宿主模板语法在任何检查前就放过，本工具的三类错照样抛", async () => {
+  const { renderVars } = await import("../../scripts/lib/template.mjs")
+
+  // 正向：宿主的三种写法都不归本工具管
+  for (const s of ["${{GITHUB_SHA}}", "${{ github.sha }}", "${{matrix.os}}"]) {
+    try { renderVars(s, {}) } catch (e) { return `宿主语法被拦了：${s} → ${String(e.message).slice(0, 40)}` }
+  }
+
+  // 反向 1：未登记的全大写占位符仍必须抛（不是「全大写就放过」）
+  let threw = false
+  try { renderVars("{{NOT_REGISTERED_XYZ}}", {}) } catch { threw = true }
+  if (!threw) return "未登记的占位符不再抛错——那会把模板写错变成静默失效"
+
+  // 反向 2：形状不对的仍必须抛
+  threw = false
+  try { renderVars("{{ BAD_SHAPE }}", {}) } catch { threw = true }
+  if (!threw) return "形状不对的占位符不再抛错"
+
+  // 反向 3：缺取值的仍必须抛
+  const { TEMPLATE_VARS } = await import("../lib/protocol.mjs")
+  const known = TEMPLATE_VARS[0]
+  threw = false
+  try { renderVars(`{{${known}}}`, {}) } catch { threw = true }
+  if (!threw) return `缺取值的 ${known} 不再抛错`
+
+  return true
+}])
+
+// 命令展示长度上限是**字节**上限。按字符砍在中文/emoji 上会砍出超过上限的结果，
+// 而门禁查的恰恰是「这一行有没有超 500 字节」——函数自己先超了，查了也白查。
+cases.push(["命令截断按字节算，不是按字符算", async () => {
+  const { truncateCommandForDisplay, COMMAND_DISPLAY_MAX_BYTES } = await import("../../kit/skills/lib/command-lex.mjs")
+
+  const shorт = "npm test"
+  const a = truncateCommandForDisplay(shorт)
+  if (a.truncated || a.text !== shorт) return "短命令被改动了"
+
+  // 中文一个字 3 字节：按字符砍会留下远超上限的字节数
+  const cn = "node scripts/dev/fixtures.mjs --only 中文用例名称很长很长".repeat(20)
+  const b = truncateCommandForDisplay(cn)
+  const bBytes = Buffer.byteLength(b.text, "utf8")
+  if (bBytes > COMMAND_DISPLAY_MAX_BYTES) {
+    return `截断后 ${bBytes} 字节，超过上限 ${COMMAND_DISPLAY_MAX_BYTES}`
+  }
+  if (!b.truncated) return "超长命令没被标记为截断"
+  if (b.total !== Buffer.byteLength(cn, "utf8")) return "总字节数没报对"
+  if (!b.text.endsWith("字节）")) return "截断提示没说明总长度"
+
+  // 纯 ASCII 也要守上限
+  const c = truncateCommandForDisplay("x".repeat(2000))
+  if (Buffer.byteLength(c.text, "utf8") > COMMAND_DISPLAY_MAX_BYTES) return "ASCII 超长命令超了上限"
+
+  return true
+}])
 }

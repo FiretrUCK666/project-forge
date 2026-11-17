@@ -29,6 +29,7 @@ import {
 } from '../../lib/git.mjs'
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
+import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
@@ -529,8 +530,19 @@ async function main(argv) {
         findingsRaw: scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? '',
         reviewer: opts.reviewer ?? '(未指定)',
       })
-      if (cli.json) process.stdout.write(`${JSON.stringify({ file: opts.file, currentSha: curSha, previousSha: prevSha, ...scope }, null, 2)}\n`)
-      else process.stdout.write(scope.prompt)
+      // 审核慢的根因是分工错了：一百多条「文件在不在、名字有没有、命令跑不跑得通」
+      // 是不需要判断的，却让审核人每次拿手工去核。这里先跑一遍，他只看剩下的判断题。
+      const facts = await verifyDocClaims(repoRoot, scopeText)
+      const factsText = renderVerificationForReviewer(facts)
+
+      if (cli.json) {
+        process.stdout.write(`${JSON.stringify({
+          file: opts.file, currentSha: curSha, previousSha: prevSha, ...scope, facts, factsText,
+        }, null, 2)}\n`)
+      } else {
+        // 先给已核事实，再给这一轮该看什么——顺序本身就是在说「这些不用你核了」。
+        process.stdout.write(`${factsText}\n${scope.prompt}`)
+      }
       return 0
     }
 

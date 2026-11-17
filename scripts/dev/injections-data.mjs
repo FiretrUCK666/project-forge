@@ -940,6 +940,22 @@ export const INJECTIONS = [
     expect: '交接包必须带设计方案',
   },
   {
+    id: 'I106',
+    what: '机械事实不再核名字（编出来的符号也能过审）',
+    file: 'kit/skills/lib/doc-verify.mjs',
+    from: '  const names = claims.identifiers.map((name) => ({ name, ...checkNameExists(codeText, name) }))',
+    to: '  const names = claims.identifiers.map((name) => ({ name, ok: true }))',
+    expect: '文档里的机械断言能自动核',
+  },
+  {
+    id: 'I107',
+    what: '找不到的名字被硬判成错（「要新建」被当成写错，造出一堆假红灯）',
+    file: 'kit/skills/lib/doc-verify.mjs',
+    from: "    lines.push('### 源码里还没有（请确认是「要新建」还是「写错了」）', '')",
+    to: "    lines.push('### 不成立的（这几条要先改文档）', '')",
+    expect: '文档里的机械断言能自动核',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

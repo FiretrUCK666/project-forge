@@ -2143,4 +2143,52 @@ cases.push(["交接包必须带设计方案，且不许把同一件事说两遍"
     return true
   } finally { rmTree(dir) }
 }])
+
+// 审核慢的根因不是审核人笨，是分工错了：一百多条「文件在不在、名字有没有、命令跑不跑得通」
+// 不需要判断，却让审核人每次拿手工去核。把这一半接过来，他的时间才花得在判断题上。
+cases.push(["文档里的机械断言能自动核，判断类的不替人下结论", async () => {
+  const { verifyDocClaims, renderVerificationForReviewer } =
+    await import("../../kit/skills/lib/doc-verify.mjs")
+  const { collectDocClaims, checkPathClaim } = await import("../../kit/skills/lib/doc-facts.mjs")
+
+  // 名字要在运行时生成：写死在夹具里的话，夹具自己就在仓库里，扫源码时必然扫到它。
+  const fake = `__FAKE_${Date.now()}_SYMBOL__`
+  const doc = [
+    "# 探针文档", "",
+    "设计里会用到 `kit/skills/lib/verdict.mjs` 与 `kit/skills/lib/doc-verify.mjs`。",
+    "要新建 `kit/skills/lib/brand-new-thing.mjs`(new)。",
+    "判断函数叫 `collectDocClaims`，返回 `paths` 与 `commands`。",
+    "还有一条命令：`node scripts/dev/preflight.mjs`。",
+    "以及一个根本不存在的名字 `" + fake + "`。",
+    "以及一条跑不通的命令：`node scripts/no-such-probe-script.mjs`。",
+  ].join("\n")
+
+  const claims = collectDocClaims(doc)
+  if (claims.paths.length === 0) return "一条路径都没抽出来"
+  if (!claims.paths.includes("kit/skills/lib/verdict.mjs")) return "真路径没抽到"
+  if (claims.paths.includes("kit/skills/lib/brand-new-thing.mjs")) {
+    return "(new) 标注的新文件被当成现存路径——这会造成假红灯"
+  }
+
+  const r = await verifyDocClaims(".", doc)
+
+  // 正向：真实存在的路径与名字要核成成立
+  if (!r.paths.find((x) => x.rel === "kit/skills/lib/verdict.mjs")?.ok) return "真路径被判不存在"
+  if (!r.names.find((x) => x.name === "collectDocClaims")?.ok) return "真函数被判不存在"
+
+  // 反向：编的名字要能被发现（但归到「待确认」那一类，不硬判错）
+  const fakeEntry = r.names.find((x) => x.name === fake)
+  if (!fakeEntry || fakeEntry.ok) return "编出来的名字没被发现"
+
+  const text = renderVerificationForReviewer(r)
+  if (!text.includes(fake)) return "待确认清单里没列出那个编的名字"
+  if (!text.includes("请确认是「要新建」还是「写错了」")) {
+    return "「找不到」没有被标成需要人确认——工具不该替人下这个结论"
+  }
+
+  // 反向：跑不通的命令是硬错，要单独列出来
+  if (!text.includes("命令跑不通（硬错，文档要改）")) return "硬错区没出现"
+
+  return true
+}])
 }

@@ -23,6 +23,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { renumberHeadings } from './doc-renumber.mjs'
 import { readTextSafe } from './git.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -164,6 +165,8 @@ export function renderDocTemplate(kind, { vars = {}, dropSections = null } = {})
   // 什么也看不出来，于是所有可选节一律被当成「填上了」而保留下来，
   // 生成的文档里塞满 `<待核实填写：...>`，过不了自己的审计。
   const filled = fillTemplateVars(withCriteria, restVars)
-  return applySectionPolicy(filled, dropSections)
+  const pruned = applySectionPolicy(filled, dropSections)
+  // 编号必须按裁剪后的集合重算：模板里写死的「八、验收标准」在裁掉几节之后就成了空档。
+  return renumberHeadings(pruned)
 }
 

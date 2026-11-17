@@ -11,6 +11,7 @@ import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
+import { numberingErrors } from '../../lib/doc-renumber.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 
@@ -577,6 +578,10 @@ export function auditDoc({ repoRoot, file }) {
     const docRequirements = resolveDocRequirements(repoRoot, docType)
     const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
     const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)
+
+    // 章节编号必须连续：删了一节却没重排，读的人会以为文档缺了东西。
+    errors.push(...numberingErrors(bodyForSections))
+
     const missing = findMissingSections(docRequirements, sectionLookup, { hasInlineAcceptance: hasAcceptance })
     for (const miss of missing) {
       const code = miss.id === 'acceptance'

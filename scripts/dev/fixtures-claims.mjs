@@ -1873,4 +1873,44 @@ cases.push(['七种真实项目形态都能通过，真没写照样被拦', asyn
   return true
 }])
 
+// 章节编号不该写死在模板里：章节是可变集合，序号必须由集合算出来。
+//
+// 裁掉几节之后如果编号不重排，就成了「一、二、八、九」——读的人会以为文档缺了东西，
+// 而它只是被裁掉了。这是「模板写太死」的一个具体后果。
+cases.push(['章节序号按裁剪结果重排，手改乱了要报出来', async () => {
+  const { renumberHeadings, findNumberingGaps, numberingErrors } = await import('../../kit/skills/lib/doc-renumber.mjs')
+  const { renderDocTemplate } = await import('../../kit/skills/lib/doc-template-render.mjs')
+
+  // 正向：裁剪后编号连续
+  const prd = renderDocTemplate('prd', {
+    vars: { TITLE: 'T', TODAY: '2026-01-01', NON_GOALS: '- 不做', CRITERIA: '- [ ] C1: x' },
+  })
+  const gaps = findNumberingGaps(prd)
+  if (gaps.length > 0) {
+    return `裁剪后编号有空档：${gaps.map((g) => `${g.found}应为${g.expected}`).join('、')}`
+  }
+
+  // 正向：不带序号的标题不参与计数，也不打断计数
+  const mixed = ['## 文档信息', '## 一、甲', '## 系统变更全景', '## 二、乙'].join('\n')
+  if (findNumberingGaps(mixed).length > 0) return '不带序号的标题打断了计数'
+
+  // 正向：重排会修掉空档
+  const broken = ['## 一、甲', '## 三、丙', '## 四、丁'].join('\n')
+  if (findNumberingGaps(broken).length === 0) return '空档没被检出——那报错就永远不会响'
+  const fixed = renumberHeadings(broken)
+  if (findNumberingGaps(fixed).length > 0) return '重排之后仍有空档'
+  if (!fixed.includes('## 二、丙')) return `重排结果不对：${fixed}`
+
+  // 反向：连续的就不要动它（别把对的改错）
+  const already = ['## 一、甲', '## 二、乙'].join('\n')
+  if (renumberHeadings(already) !== already) return '本来就连续的编号被改了'
+
+  // 报错要带可定位的行号与期望值
+  const errs = numberingErrors(broken)
+  if (errs.length === 0 || !errs[0].code || !errs[0].fixHint) return '报错项缺字段'
+  if (!/第 2 行/.test(errs[0].message)) return `报错没指到行：${errs[0].message}`
+
+  return true
+}])
+
 }

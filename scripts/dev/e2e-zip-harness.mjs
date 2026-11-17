@@ -18,6 +18,27 @@ import { readZip, stripCommonPrefix } from '../zip.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
 
+async function issueTokenFor(repoRoot, taskId, round) {
+  const { readTaskLedger, writeTaskLedger, ensureReviewToken } =
+    await import(pathToFileURL(join(repoRoot, '.agents', 'skills', 'lib', 'ledger.mjs')).href)
+  const ledger = readTaskLedger(repoRoot, taskId)
+  const { token } = ensureReviewToken(repoRoot, ledger, round)
+  return token
+}
+
+async function recordWithToken(flowScript, revScript, taskId, cwd, env, extra = []) {
+  let token = null
+  const nextRes = runNodeScript(flowScript, ['next', '--task', taskId, '--json'], cwd, env)
+  if (nextRes.status === 0) {
+    try {
+      token = JSON.parse(nextRes.stdout).reviewToken ?? null
+    } catch { token = null }
+  }
+  if (!token) token = await issueTokenFor(cwd, taskId, Number(extra[extra.indexOf('--round') + 1]) || 1)
+  return runNodeScript(revScript, ['record', '--task', taskId, ...extra,
+    '--review-token', token, '--evidence', 'E2E 实测：门禁已跑，输出符合预期'], cwd, env)
+}
+
 function runNodeScript(scriptAbs, args, cwd, envExtra = {}) {
   return spawnSync(process.execPath, [scriptAbs, ...args], {
     cwd,
@@ -101,7 +122,7 @@ function extractRealArchivePackage(sandbox) {
   return { pkgRoot, entryCount: entries.length }
 }
 
-function runScenarioA(pkgRoot, sandbox, env) {
+async function runScenarioA(pkgRoot, sandbox, env) {
   const repoA = join(sandbox, 'repo-a')
   mkdirSync(repoA, { recursive: true })
   const boot = runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoA, '--bootstrap-empty'], repoA, env)
@@ -118,7 +139,7 @@ function runScenarioA(pkgRoot, sandbox, env) {
   if ((JSON.parse(rev.stdout).missing ?? []).length > 0) throw new Error(`Scenario A review has missing items: ${rev.stdout}`)
 }
 
-function runScenarioBAndC(pkgRoot, sandbox, env) {
+async function runScenarioBAndC(pkgRoot, sandbox, env) {
   const repoB = join(sandbox, 'repo-b')
   mkdirSync(repoB, { recursive: true })
   initGitRepo(repoB, {
@@ -172,7 +193,7 @@ function runScenarioBAndC(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoB, '--check', '--tier', 'lightweight'], repoB, env), 'Scenario C equip check lightweight')
 }
 
-function runScenarioD(pkgRoot, sandbox, env) {
+async function runScenarioD(pkgRoot, sandbox, env) {
   // D1: local-only no-remote zero leak + full flow
   const repoD1 = join(sandbox, 'repo-d1')
   mkdirSync(repoD1, { recursive: true })
@@ -204,7 +225,9 @@ function runScenarioD(pkgRoot, sandbox, env) {
   runGit(wtD1, ['commit', '-qm', 'fix: d1'])
   assertOk(runNodeScript(flowD1, ['verify', '--task', 'd1', '--mode', 'full'], wtD1, env), 'Scenario D1 verify')
   assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit')
-  assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1'], repoD1, env), 'Scenario D1 review pass')
+  const nextD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
+  assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1',
+    '--review-token', nextD1.reviewToken, '--evidence', 'E2E 实测：门禁已跑，输出符合预期'], repoD1, env), 'Scenario D1 review pass')
   assertOk(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'Scenario D1 merge')
   assertOk(runNodeScript(flowD1, ['cleanup', '--task', 'd1', '--confirm'], repoD1, env), 'Scenario D1 cleanup')
 
@@ -231,12 +254,12 @@ function runScenarioD(pkgRoot, sandbox, env) {
   runGit(wtD2, ['commit', '-qm', 'fix: d2'])
   assertOk(runNodeScript(flowD2, ['verify', '--task', 'd2', '--mode', 'full'], wtD2, env), 'Scenario D2 verify')
   assertOk(runNodeScript(flowD2, ['submit', '--task', 'd2'], wtD2, env), 'Scenario D2 submit')
-  assertOk(runNodeScript(revD2, ['record', '--task', 'd2', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d2'], repoD2, env), 'Scenario D2 review pass')
+  assertOk(await recordWithToken(flowD2, revD2, 'd2', repoD2, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d2']), 'Scenario D2 review pass')
   assertBlocked(runNodeScript(flowD2, ['merge', '--task', 'd2'], repoD2, env), 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', 'Scenario D2 generic-git unconfirmed merge')
   assertOk(runNodeScript(flowD2, ['merge', '--task', 'd2', '--remote-merged'], repoD2, env), 'Scenario D2 generic-git --remote-merged')
 }
 
-function runScenarioE(pkgRoot, sandbox, env) {
+async function runScenarioE(pkgRoot, sandbox, env) {
   const repoE = join(sandbox, 'repo-e')
   mkdirSync(repoE, { recursive: true })
   initGitRepo(repoE, {
@@ -273,7 +296,7 @@ function runScenarioE(pkgRoot, sandbox, env) {
   runGit(repoE, ['add', '-A'])
   runGit(repoE, ['commit', '-qm', 'docs: add approved child1 spec'])
 
-  assertOk(runNodeScript(flowE, ['start', '--task', 't-e', '--case', '3', '--slug', 'child1', '--spec', specRel, '--prd', 'docs/prd/261116-issue10-master-prd.md', '--implementer', 'alice'], repoE, env), 'Scenario E flow start')
+  assertOk(runNodeScript(flowE, ['start', '--task', 't-e', '--case', '3', '--slug', 'child1', '--spec', specRel, '--prd', 'docs/prd/261116-issue10-master-prd.md', '--implementer', 'bob'], repoE, env), 'Scenario E flow start')
   const wtE = join(repoE, '.worktrees', 'impl-t-e')
   writeFiles(wtE, { 'src/app.mjs': 'export const app = 2\n' })
   runGit(wtE, ['add', '-A'])
@@ -288,14 +311,16 @@ function runScenarioE(pkgRoot, sandbox, env) {
 
   // Negative: quick --target bypass blocked by submit
   assertOk(runNodeScript(flowE, ['verify', '--task', 't-e', '--tier', 'quick', '--target', 'src/app.mjs'], wtE, env), 'Scenario E verify partial')
-  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'alice'], wtE, env), 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER', 'Scenario E quick --target bypass')
+  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob'], wtE, env), 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER', 'Scenario E quick --target bypass')
 
   assertOk(runNodeScript(flowE, ['verify', '--task', 't-e', '--mode', 'gate'], wtE, env), 'Scenario E verify gate')
-  assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'alice'], wtE, env), 'Scenario E submit r1')
+  assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob'], wtE, env), 'Scenario E submit r1')
 
   // Round 1 changes -> negative same-HEAD rereview -> cross-session --takeover -> negative out-of-scope -> pass
-  assertOk(runNodeScript(revE, ['record', '--task', 't-e', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-1', '--must-fix', 'C1: src/app.mjs:1 adjust'], repoE, env), 'Scenario E record r1')
-  assertBlocked(runNodeScript(revE, ['record', '--task', 't-e', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2'], repoE, env), 'BLOCKED_SAME_HEAD_REREVIEW', 'Scenario E same-HEAD rereview')
+  assertOk(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-1', '--must-fix', 'C1: src/app.mjs:1 adjust']), 'Scenario E record r1')
+  const sameHeadToken = await issueTokenFor(repoE, 't-e', 2)
+  assertBlocked(runNodeScript(revE, ['record', '--task', 't-e', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2',
+    '--review-token', sameHeadToken, '--evidence', 'E2E 实测：同 HEAD 重审'], repoE, env), 'BLOCKED_SAME_HEAD_REREVIEW', 'Scenario E same-HEAD rereview')
 
   assertOk(runNodeScript(flowE, ['rework', '--task', 't-e'], wtE, env), 'Scenario E rework')
   writeFiles(wtE, { 'src/app.mjs': 'export const app = 3\n' })
@@ -303,11 +328,11 @@ function runScenarioE(pkgRoot, sandbox, env) {
   runGit(wtE, ['commit', '-qm', 'fix: app=3'])
   assertOk(runNodeScript(flowE, ['finalize', '--task', 't-e', '--json'], wtE, env), 'Scenario E re-finalize')
   assertOk(runNodeScript(flowE, ['verify', '--task', 't-e', '--mode', 'gate'], wtE, env), 'Scenario E verify r2')
-  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob', '--rework'], wtE, env), 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', 'Scenario E ownership mismatch')
+  assertBlocked(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'alice', '--rework'], wtE, env), 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', 'Scenario E ownership mismatch')
   assertOk(runNodeScript(flowE, ['submit', '--task', 't-e', '--agent', 'bob', '--takeover', '--reason', 'cross-session handoff', '--rework'], wtE, env), 'Scenario E takeover submit')
 
-  assertBlocked(runNodeScript(revE, ['record', '--task', 't-e', '--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-2', '--must-fix', 'C1: src/untouched.mjs:1 out of scope'], repoE, env), 'BLOCKED_OUT_OF_SCOPE_MUST_FIX', 'Scenario E out-of-scope must-fix')
-  assertOk(runNodeScript(revE, ['record', '--task', 't-e', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2'], repoE, env), 'Scenario E record r2 pass')
+  assertBlocked(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'changes', '--reviewer-id', 'rev-2', '--must-fix', 'C1: src/untouched.mjs:1 out of scope']), 'BLOCKED_OUT_OF_SCOPE_MUST_FIX', 'Scenario E out-of-scope must-fix')
+  assertOk(await recordWithToken(flowE, revE, 't-e', repoE, env, ['--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-2']), 'Scenario E record r2 pass')
 
   const sigFile = join(repoE, '.git', 'project-forge-govern', 'signals.jsonl')
   if (!existsSync(sigFile) || !readFileSync(sigFile, 'utf8').includes('verify.gate.pass')) {
@@ -353,7 +378,7 @@ async function runScenarioF(pkgRoot, sandbox, env) {
   assertBlocked(runNodeScript(flowF, ['merge', '--task', 'c1'], repoF, env), 'BLOCKED_STACK_PARENT_UNMERGED', 'Scenario F stacked parent unmerged')
 }
 
-function runScenarioG(pkgRoot, sandbox, env) {
+async function runScenarioG(pkgRoot, sandbox, env) {
   const repoG = join(sandbox, 'repo-g')
   mkdirSync(repoG, { recursive: true })
   initGitRepo(repoG, {
@@ -386,7 +411,7 @@ function runScenarioG(pkgRoot, sandbox, env) {
   runGit(wtA, ['add', '-A'])
   runGit(wtA, ['commit', '-qm', 'feat: ta'])
   assertOk(runNodeScript(flowG, ['verify', '--task', 'ta', '--mode', 'gate'], wtA, env), 'Scenario G verify ta')
-  assertOk(runNodeScript(revG, ['record', '--task', 'ta', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-g'], repoG, env), 'Scenario G review ta')
+  assertOk(await recordWithToken(flowG, revG, 'ta', repoG, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-g']), 'Scenario G review ta')
   const mq = runNodeScript(flowG, ['batch', 'merge-queue', '--tasks', 'ta', '--json'], repoG, env)
   assertOk(mq, 'Scenario G merge-queue ta')
   if (JSON.parse(mq.stdout).processed?.[0]?.status !== 'merged') throw new Error(`Scenario G merge-queue failed: ${mq.stdout}`)
@@ -401,7 +426,7 @@ async function main() {
     runScenarioA(pkgRoot, sandbox, env)
     runScenarioBAndC(pkgRoot, sandbox, env)
     runScenarioD(pkgRoot, sandbox, env)
-    runScenarioE(pkgRoot, sandbox, env)
+    await runScenarioE(pkgRoot, sandbox, env)
     await runScenarioF(pkgRoot, sandbox, env)
     runScenarioG(pkgRoot, sandbox, env)
     const ms = Math.round(performance.now() - t0)

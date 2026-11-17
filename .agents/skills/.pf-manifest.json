@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T03:09:52.560Z",
+  "installedAt": "2026-11-17T03:12:55.327Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -107,7 +107,7 @@
       "sha256": "26c270cb255575625e3397a6946e6a65081bd06986442b948ab63f506a0d4ff0"
     },
     "lib/doc-template-render.mjs": {
-      "sha256": "395ffb01e73a00686e63437f70775f15f9e7a023ddfeac4b13516c079b68c5ab"
+      "sha256": "a6ce4ee89592ea112193094150f89d63fbaf7ea6a260941311e9774a663a2968"
     },
     "lib/doc-templates.mjs": {
       "sha256": "297a0bbe3bfb2dcaffd96c336574716f887b40e523f71f350b750c373d814da5"
@@ -197,7 +197,7 @@
       "sha256": "45036bfa5a84dcf503f7e20bad74a84ed97eb381b8bc299e4795beb9dea67e6b"
     },
     "templates/docs-spec.md": {
-      "sha256": "416ad3dd79847e31ec229d4462b442a2d9cd3e181a5ced0a2723409cc4297bfa"
+      "sha256": "48ce528a86b6a1aa4401dc5e806684d1c1ac200e92fd1c27e51c32d8e66618d5"
     },
     "templates/docs-tdd.md": {
       "sha256": "5d05d41128bca88a7eaadf713e9739036686d27e5a3cfa5659997fc6fcda4954"

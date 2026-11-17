@@ -43,7 +43,7 @@ export const DOC_TEMPLATE_VARS = Object.freeze({
   ]),
   spec: Object.freeze([
     'TITLE', 'TODAY', 'ISSUE', 'ISSUE_LABEL', 'BRANCH', 'OWNER', 'OWNER_LABEL', 'TIER',
-    'MODULES', 'CONTRACT_CHANGES', 'SAFETY_BOUNDARIES', 'CRITERIA',
+    'MODULES', 'CONTRACT_CHANGES', 'SAFETY_BOUNDARIES', 'CRITERIA', 'NON_GOALS', 'REUSABLE',
     'DOOR', 'ROLLBACK', 'HIGH_RISK', 'FAULT_INJECTION',
   ]),
   todo: Object.freeze([

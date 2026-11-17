@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T04:18:18.804Z",
+  "installedAt": "2026-11-17T04:19:42.786Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -200,13 +200,13 @@
       "sha256": "5521fa3da20bdaa28641859452deafc4c42bfb81ff927570acb783e5cf1b487b"
     },
     "templates/docs-spec.md": {
-      "sha256": "48ce528a86b6a1aa4401dc5e806684d1c1ac200e92fd1c27e51c32d8e66618d5"
+      "sha256": "9c979c9085b2411a80186c1024ad701047d2729caf46f1f15e4f0f6486b9f803"
     },
     "templates/docs-tdd.md": {
       "sha256": "17755479c4f221c3157a2229db132e5f10d1c5c2ea0afc794267633e769afb7e"
     },
     "templates/docs-todo.md": {
-      "sha256": "6858b8762503b74e29562e6b2f08933ca1a479b557011f315091f11230ccc8df"
+      "sha256": "b74f7b727dd7f7c83811293eac395dfa7368c136264a51db80f134e195e572bc"
     }
   },
   "disabledSkills": [],

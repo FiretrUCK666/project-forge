@@ -1913,4 +1913,50 @@ cases.push(['章节序号按裁剪结果重排，手改乱了要报出来', asyn
   return true
 }])
 
+// 「只写现状」这条规矩要能被机器检查，否则它只是一句口号。
+//
+// 代码里到处是「早先这里是 X，现在改成 Y」。写的时候觉得在解释原因，
+// 下一个人读到的却是一份过期的对照表——他不知道「早先」是哪个版本，「现在」是不是还是现在。
+cases.push(['履历体写法能被认出来，规则条文本身不算', async () => {
+  const { findChangelogVoice, findNewChangelogVoice, buildChangelogVoiceBaseline } =
+    await import('../../kit/skills/lib/no-changelog-voice.mjs')
+
+  // 正向：强信号要抓到
+  const bad = [
+    '// 早先这里是 join 拼接，控制流被压平。',
+    '// 以前是七节固定表单。',
+    '// 原来这里是三节，后来改成七节。',
+  ].join('\n')
+  const hits = findChangelogVoice(bad, { file: 'x.mjs' })
+  if (hits.length !== 3) return `应抓到 3 条，实际 ${hits.length}：${hits.map((h) => h.word).join(',')}`
+  if (hits[0].line !== 1) return '行号不对'
+
+  // 反向 1：讲现状的章节标题不算
+  const legit = ['## 现状与痛点', '当前流程有问题。', '## 背景', '这里原来没有校验。'].join('\n')
+  const legitHits = findChangelogVoice(legit, { file: 'd.md' })
+  if (legitHits.length > 0) return `讲现状的章节被误判：${legitHits.map((h) => h.word).join(',')}`
+
+  // 反向 2：规则条文举的例子不算——它是在**描述**这种写法，不是在写
+  const rule = '扫描新增行里的履历墓碑注释（如「以前是/后来改成/deprecated since」）与压制标记。'
+  if (findChangelogVoice(rule, { file: 'skill.md' }).length > 0) {
+    return '规则条文里被引用的例子被当成了履历'
+  }
+
+  // 反向 3：普通技术描述不算
+  const plain = [
+    '// 这里用对象参数，便于以后扩展。',
+    '// 校验失败返回非零退出码。',
+  ].join('\n')
+  if (findChangelogVoice(plain, { file: 'y.mjs' }).length > 0) return '普通技术注释被误判成履历'
+
+  // 基线：存量冻结，只报新增
+  const base = buildChangelogVoiceBaseline(hits)
+  if ((base['x.mjs'] ?? 0) !== 3) return '基线生成不对'
+  if (findNewChangelogVoice(hits, base).length !== 0) return '存量被当成新增'
+  const more = findChangelogVoice(`${bad}\n// 曾经这里是另一套。`, { file: 'x.mjs' })
+  if (findNewChangelogVoice(more, base).length !== 1) return '新增的那条没被报出来'
+
+  return true
+}])
+
 }

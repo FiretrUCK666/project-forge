@@ -18,6 +18,7 @@ import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
+import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
 
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 const OWN_INSTANCE_CHECKS = [
@@ -564,6 +565,26 @@ function checkHygiene({ ROOT, rel, walk, fail }) {
       if (banned) fail(`${name} 包含禁止的内部黑话「${banned[0]}」`)
     }
   }
+
+  // 「只写现状」这条规矩要能被机器检查，否则它只是一句口号。
+  //
+  // 但不该一上线就让存量全红：那会逼人把这条检查关掉。所以冻结基线，
+  // **只报新增的履历体句子**——新写的能被抓住，旧的等它自然退役。
+  const baseline = readChangelogVoiceBaseline(ROOT)
+  const found = []
+  for (const file of files) {
+    const name = rel(file)
+    if (!/\.(?:md|mjs|js|ya?ml|json)$/i.test(name)) continue
+    // `.agents/` 是 `.kit/skills` 的镜像，同一个问题会在两处各报一次；
+    // 镜像由 `equip --check` 保证字节一致，不需要在这里重复扫。
+    if (/^(?:docs\/archive|docs\/release-notes|node_modules|\.agents)\//.test(name)) continue
+    for (const hit of findChangelogVoice(readFileSync(file, 'utf8'), { file: name })) found.push(hit)
+  }
+  const fresh = findNewChangelogVoice(found, baseline)
+  for (const hit of fresh.slice(0, 5)) {
+    fail(`${hit.file}:${hit.line} 出现履历体写法「${hit.word}」——只写现在为什么这样，改过什么留给提交记录`)
+  }
+  if (fresh.length > 5) fail(`另有 ${fresh.length - 5} 处新增履历体写法未列出`)
 }
 
 function checkOwnInstances({ ROOT, rel, readText, walk, fail, note }) {

@@ -883,6 +883,14 @@ export const INJECTIONS = [
     expect: '章节序号按裁剪结果重排',
   },
   {
+    id: 'I99',
+    what: '履历体判据失效（早先/以前是 不再被抓）',
+    file: 'kit/skills/lib/no-changelog-voice.mjs',
+    from: '    const strong = STRONG.find((w) => line.includes(w))',
+    to: '    const strong = undefined',
+    expect: '履历体写法能被认出来',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

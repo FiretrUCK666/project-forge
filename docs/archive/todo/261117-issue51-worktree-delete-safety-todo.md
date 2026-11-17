@@ -5,7 +5,7 @@ status: done
 created: 2026-11-17
 updated: 2026-11-18
 issue: 51
-pr: null
+pr: 64
 branch: feat/worktree-delete-safety
 owner: FiretrUCK666
 approved: false

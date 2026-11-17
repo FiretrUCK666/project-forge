@@ -54,7 +54,7 @@ flowchart LR
 | `kit/skills/lib/tool-owned.mjs` | 已落地 | 工具产物目录声明制 | — |
 | `scripts/lib/survey-workspace.mjs` | 已落地 | 规模四维阈值与探索策略 | — |
 | `scripts/review.mjs` | 已落地 | `inspectContract` 三态，`catch` 不返回 ok | 手写 AGENTS.md 时 `missing` 直接设成 `[]`，分不出「结构完好」与「压根没验」 |
-| `kit/skills/dev-explore/scripts/repo-map.mjs` | **改造（主要缺口）** | `reusableModules` / `entrypoints` 由它产出 | 现在仍把 `.agents/skills/lib/*` 当可复用模块；SPEC 早先没列这个文件 |
+| `kit/skills/dev-explore/scripts/repo-map.mjs` | **改造（主要缺口）** | `reusableModules` / `entrypoints` 由它产出 | 现在仍把 `.agents/skills/lib/*` 当可复用模块；本 SPEC 已把它纳入改造范围 |
 | `kit/skills/dev-govern/scripts/govern-docs.mjs` | **改造** | 有 `docs.missing-tdd` / `docs.tdd-module-drift` | **没有 `docs.tdd-shell`**——空壳/4 行/模板原样三种判红要新增 |
 | `kit/skills/lib/tdd-parity.mjs` | 已落地 | 返回 `missingModulesInTdd` / `staleModulesInTdd` / `tddSyncWarning` | 判据里写的 `missing` 字段不存在，要按真实键名写 |
 | `kit/skills/lib/symbol-index.mjs` | **新增** | 不存在 | 符号抽取（PowerShell / Bash / Go 三种写法）与 `unsupported` 三态 |

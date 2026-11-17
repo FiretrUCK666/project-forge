@@ -145,6 +145,11 @@ function pickEntryFile(dir, allPaths) {
   return null
 }
 
+/** 形态判定里这一节是不是被打开了。勘察没给出结论时按「没开」处理。 */
+function isShapeOn(facts, id) {
+  return Array.isArray(facts?.tddShape?.enabled) && facts.tddShape.enabled.includes(id)
+}
+
 function roleOfDir(name) {
   for (const [re, role] of DIR_ROLE) if (re.test(name)) return role
   for (const [re, role] of DIR_SUFFIX_ROLE) if (re.test(name)) return role
@@ -196,6 +201,22 @@ export function buildPreFilledTdd(facts, opts = {}) {
   const commands = facts?.commands ?? {}
   const quick = commands.test || commands.verify || '（项目尚未登记测试命令）'
 
+  // 能从文件清单里认出来的，就别留成「待补」——那些是事实，不是判断题。
+  // kinds 已在上面取过：这里不再声明，避免重复定义
+  const manifests = facts?.ecosystem?.manifests ?? []
+  const hasFrontend = isShapeOn(facts, 'frontend')
+  const hasData = isShapeOn(facts, 'data')
+
+  const frameworkCell = manifests.length > 0
+    ? `见 ${manifests.map((m) => `\`${m}\``).join('、')}`
+    : '<待补：本仓没有可识别的依赖清单>'
+  const structureCell = facts?.workspace?.declared
+    ? `多包（${(facts.workspace.packages ?? []).length} 个）`
+    : (kinds.length > 1 ? `多生态单体（${kinds.join('、')}）` : '单包 / 单体')
+  const dataCell = hasData ? '<待补：清单里检出持久化痕迹，写清载体与版本>' : '无持久化'
+  const dataHint = hasData ? '<连接方式与迁移位置>' : '本项目不涉及数据持久化'
+  const frontendCell = hasFrontend ? '<待补：检出前端工程，写清框架与构建工具>' : '本项目无前端'
+
   const moduleRows = (Array.isArray(opts.topLevelDirs) ? opts.topLevelDirs : [])
     .filter(isProjectModule)
     // 认得出职责的排前面：一堆「职责待补」挡在开头，读的人第一眼就放弃了。
@@ -245,11 +266,11 @@ export function buildPreFilledTdd(facts, opts = {}) {
     '| 层级 | 本项目采用 | 说明 |',
     '| --- | --- | --- |',
     `| 运行时与最低版本 | ${runtimeLines.join(' / ') || '<待核实>'} | 从清单文件读出 |`,
-    `| 核心框架 | <待补：读 ${(facts?.ecosystem?.manifests ?? []).join('、') || '清单'} 得出> | <为什么选它> |`,
-    `| 工程结构 | ${facts?.workspace?.declared ? `多包（${(facts.workspace.packages ?? []).length} 个）` : '单包 / 单体'} | <源码与产物位置> |`,
-    `| 数据与状态 | <待补：有持久化就写载体与版本> | ${(facts?.ecosystem?.kinds ?? []).includes('docs-only') ? '纯文档项目无持久化' : '<连接方式>'} |`,
+    `| 核心框架 | ${frameworkCell} | <为什么选它> |`,
+    `| 工程结构 | ${structureCell} | <源码与产物位置> |`,
+    `| 数据与状态 | ${dataCell} | ${dataHint} |`,
     '| 关键第三方依赖 | <只列会约束架构的> | <版本边界与许可约束> |',
-    '| 前端与 UI | <有前端就写框架与构建工具，没有就写「本项目无前端」> | <构建产物目录> |',
+    `| 前端与 UI | ${frontendCell} | <构建产物目录> |`,
     '',
     `- **跨平台兼容范围**：<${process.platform} 上已验证；其余平台待实测>`,
     '- **变更前提**：上移版本下限或换框架时，须同步更新 README 与 CI',

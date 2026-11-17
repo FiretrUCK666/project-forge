@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T04:37:33.311Z",
+  "installedAt": "2026-11-17T05:30:54.254Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -173,13 +173,13 @@
       "sha256": "6d283f486b126b1026f2c33b3cc38c223641d967e636682b2be47a6ca00d4888"
     },
     "lib/tdd-facts.mjs": {
-      "sha256": "51f373866b315f72afabdc1c337fa9aa473a9eb14a7ae7de9e4a58cff5f99b1b"
+      "sha256": "b52693a64877625f3ddfd3753c14892522192bbeded58550d58e84735c9c7c8e"
     },
     "lib/tdd-parity.mjs": {
       "sha256": "45c891de1690ee0da005842ab5d3fd29b2c1e5d77590dff7af5db4b9026bf6ce"
     },
     "lib/tdd-scaffold.mjs": {
-      "sha256": "4093dfa282ddc2892993f41106ad981a6a686c77d7c9416b69da74d0f43d7b8a"
+      "sha256": "2edc6ef4fdc4c6014ec55f3a4594c337864e5864f1a2d098639f10b89bbd78c8"
     },
     "lib/tdd-shape.mjs": {
       "sha256": "ab3f97363425e9042c64f08a241a0ab579e0775e02bfc3989c9d651ed124ede5"

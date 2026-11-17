@@ -15,6 +15,10 @@ import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
 import { numberingErrors } from '../../lib/doc-renumber.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
+import {
+  CONCERN_FACES, DOC_CUE_RE, EXPLICIT_FEATURE_RE, FIX_VERB_RE, RUNTIME_BUG_RE,
+  evaluatePureDocCheck, extractTriageSignals, facesOf as resolveTriageFaces, normalizeTriageInputs,
+} from './triage-rules.mjs'
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
   prd: new Set(['draft', 'active', 'in_review', 'done', 'dropped']),
@@ -54,19 +58,9 @@ function computeCoupledSyncWarnings(repoRoot, paths) {
   return rules.length > 0 ? evaluateCoupledSync(paths, rules, repoRoot) : []
 }
 
-const CONCERN_FACES = [
-  { id: 'docs', re: /\bdocs?\b|readme|contributing|文档|说明|指南|文案|错别字|拼写|注释|翻译/i },
-  { id: 'ci', re: /\bci\b|workflow|actions|流水线|发布|release|发版|自动化|门禁/i },
-  { id: 'contract', re: /契约|contract|agents|规范|标准|schema|接口|协议|许可|license/i },
-  { id: 'structure', re: /目录|结构|重构|refactor|模块|边界|布局|组织/i },
-  { id: 'code', re: /源码|代码|脚本|函数|判据|逻辑|算法|性能|勘察|校验|bug|缺陷/i },
-  { id: 'tooling', re: /工具|套件|skill|技能|脚手架|依赖|配置/i },
-]
-
 /** 这件事同时会碰到哪几个面。 */
-function facesOf(text) {
-  const source = String(text ?? '')
-  return CONCERN_FACES.filter((face) => face.re.test(source)).map((face) => face.id)
+function facesOf(text, preSignals = null) {
+  return resolveTriageFaces(text, preSignals)
 }
 
 function assessPrdNeed({ text, faces, fileCount }) {
@@ -110,21 +104,18 @@ export function triageTask({
   repoRoot,
 } = {}) {
   const text = String(summary ?? '').trim()
-  const fileCount = Number.isFinite(files) ? Number(files) : undefined
+  const { fileCount, effectivePaths } = normalizeTriageInputs(files, paths)
+
   const activeContracts = repoRoot ? scanActiveContracts(repoRoot) : { tdd: false, activeSpecs: [] }
   const profile = repoRoot ? parseAgentsProfile(repoRoot) : null
-  const coupledSyncWarnings = computeCoupledSyncWarnings(repoRoot, paths)
+  const coupledSyncWarnings = computeCoupledSyncWarnings(repoRoot, effectivePaths)
 
   const conflictRe = /(?:conflicts?\s+(?:with\s+)?tdd|与\s*tdd\s*冲突|打破\s*tdd|推翻.*(?:架构|契约|spec)|违背.*(?:tdd|spec))/i
   const contractRe = /(?:跨模块|cross[- ]?module|external\s+contract|breaking\s+change|外部契约|接口变更|协议变更|schema\s*变更|架构重构|新增命令|新增子命令|api\s*契约|refactor\s+architecture)/i
-  const runtimeBugRe = /\b(?:bug|bugfix|hotfix|crash|regression|exception|panic|broken|fail(?:ing|ure)?|error\s*\d*)\b|报错|异常|缺陷|故障|崩溃|复现|回归/i
-  const fixVerbRe = /\bfix\b|修复|修一下|修正/i
-  const docRe = /\b(?:typo|spelling|docs?(?:-only)?|readme|comment|explain|question|changelog)\b|文档|错别字|注释|问答|翻译|拼写|解释/i
-  const explicitFeatureRe = /\b(?:feat|feature|implement|add\s+(?:support|command|flag|endpoint|api))\b|新功能|新增功能|开发新/i
 
-  const faces = facesOf(text)
+  const signals = extractTriageSignals(text, effectivePaths)
+  const faces = facesOf(text, signals)
   const isGovernance = GOVERNANCE_RE.test(text)
-  // 三面以上就不是局部改动。这是「实质」那一半判据，与措辞无关。
   const isCrossCutting = faces.length >= 3
   const prdNeed = assessPrdNeed({ text, faces, fileCount })
 
@@ -135,19 +126,47 @@ export function triageTask({
     || isCrossCutting
     || isGovernance
     || prdNeed.required
-  // 只改文档 = 确实在说文档，**并且**没有同时要动别的面。
-  const pureDocCue = docRe.test(text) && !runtimeBugRe.test(text) && !explicitFeatureRe.test(text) && !bugfix
+
+  const hasRuntimeBug = bugfix || signals.runtimeBugSignals.length > 0 || RUNTIME_BUG_RE.test(signals.maskedText)
+  const hasExplicitFeature = EXPLICIT_FEATURE_RE.test(signals.maskedText)
+  const pureDocCue = (DOC_CUE_RE.test(signals.maskedText) || (signals.docPaths.length > 0 && signals.pathsVerifiedDocOnly))
+    && !hasRuntimeBug && !hasExplicitFeature
+  const hasOnlyDocFaces = faces.length > 0 && faces.every((f) => f === 'docs')
   const looksDocOnly = docOnly
-    || (pureDocCue && !isCrossCutting && !isGovernance && faces.every((f) => f === 'docs')
-      && (fileCount === undefined || fileCount <= 3))
-  const isBugfix = bugfix || (!looksDocOnly && (runtimeBugRe.test(text) || fixVerbRe.test(text)) && !explicitFeatureRe.test(text) && !isCrossCutting && !isGovernance && (fileCount === undefined || fileCount <= 3))
+    || signals.pureQa
+    || (pureDocCue && !isCrossCutting && !isGovernance && hasOnlyDocFaces && (fileCount === undefined || fileCount <= 3))
+  const isBugfix = bugfix || (!looksDocOnly && (hasRuntimeBug || FIX_VERB_RE.test(signals.maskedText)) && !hasExplicitFeature && !isCrossCutting && !isGovernance && (fileCount === undefined || fileCount <= 3))
 
   const door = classifyDoorType({
-    changedFiles: Array.isArray(paths) ? paths : [],
+    changedFiles: effectivePaths,
     summary: text,
     touchesContract: Boolean(isContract || isConflict),
     highRisk: profile?.highRisk ?? [],
     gateWeakened: /弱化门禁|跳过测试|skip\s+test/i.test(text),
+  })
+
+  const buildCase2 = (pureDocCheck = null) => {
+    const bugNeedsReview = door.doorType === 'one-way' || door.signals.length > 0
+    return {
+      caseType: 2, tier: 1, blocked: false, action: 'NO_DOC_RED_GREEN',
+      doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
+      reason: bugNeedsReview
+        ? '属于触及高风险/单向门边界的缺陷修复（Case 2），须 Red-Green 回归并接受独立审查。'
+        : '属于明确局部缺陷修复（Case 2），不建规划文档，但强制先补失败复现测试再修复（Red-Green）。',
+      docsRequired: [], redGreenRequired: true, needsReview: bugNeedsReview, specApprovalRequired: false,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
+      faces, ...(pureDocCheck ? { pureDocCheck } : {}),
+      activeContracts, coupledSyncWarnings,
+    }
+  }
+  const buildCase3 = (pureDocCheck = null) => ({
+    caseType: 3, tier: 2, blocked: false, action: 'TODO_ONLY',
+    doorType: door.doorType, doorDetails: door, critiqueTier: 'self-audit',
+    reason: '属于不改变外部契约的局部功能开发（L2），只需建立 docs/todo/ 冻结验收标准并通过 audit 自净化。',
+    docsRequired: ['docs/todo/'], redGreenRequired: true, needsReview: true, specApprovalRequired: false,
+    prdRequired: false, prdReasons: [], prdAdvice: prdNeed.advice,
+    faces, ...(pureDocCheck ? { pureDocCheck } : {}),
+    activeContracts, coupledSyncWarnings,
   })
 
   if (isConflict) {
@@ -156,8 +175,7 @@ export function triageTask({
       doorType: 'one-way', doorDetails: { ...door, doorType: 'one-way' }, critiqueTier: 'independent-critique',
       reason: '该需求与 docs/TDD.md 或生效 SPEC 存在架构/契约冲突，必须先更新 TDD.md 并获人类确认后再拆解。',
       docsRequired: ['docs/TDD.md (先更新并确认)'], redGreenRequired: true, needsReview: true, specApprovalRequired: true,
-      prdRequired: false, prdReasons: [], prdAdvice: null,
-      activeContracts, coupledSyncWarnings,
+      prdRequired: false, prdReasons: [], prdAdvice: null, faces, activeContracts, coupledSyncWarnings,
     }
   }
   if (isContract) {
@@ -170,40 +188,44 @@ export function triageTask({
       prdRequired: prdNeed.required,
       prdReasons: prdNeed.reasons,
       prdAdvice: prdNeed.advice,
-      redGreenRequired: true, needsReview: true, specApprovalRequired: true, activeContracts, coupledSyncWarnings,
+      redGreenRequired: true, needsReview: true, specApprovalRequired: true, faces, activeContracts, coupledSyncWarnings,
     }
   }
   if (looksDocOnly) {
-    return {
-      caseType: 1, tier: 1, blocked: false, action: 'NO_DOC_DIRECT',
-      doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
-      reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
-      docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
-      prdRequired: false, prdReasons: [], prdAdvice: null,
-      activeContracts, coupledSyncWarnings,
+    const pureDocCheck = evaluatePureDocCheck({
+      faces,
+      signals,
+      hasOnlyDocFaces,
+      docOnly,
+      hasRuntimeBug,
+      hasExplicitFeature,
+      touchesContract,
+      conflictsTdd,
+      isCrossCutting,
+      isGovernance,
+      fileCount,
+    })
+    if (pureDocCheck.passed) {
+      return {
+        caseType: 1, tier: 1, blocked: false, action: 'NO_DOC_DIRECT',
+        doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
+        reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
+        docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
+        prdRequired: false, prdReasons: [], prdAdvice: null,
+        faces, pureDocCheck, activeContracts, coupledSyncWarnings,
+      }
     }
+    const rejectToBugfix = bugfix || hasRuntimeBug || (FIX_VERB_RE.test(signals.maskedText) && !hasExplicitFeature && !isCrossCutting && !isGovernance)
+    return rejectToBugfix ? buildCase2(pureDocCheck) : buildCase3(pureDocCheck)
   }
-  if (isBugfix) {
-    const bugNeedsReview = door.doorType === 'one-way' || door.signals.length > 0
-    return {
-      caseType: 2, tier: 1, blocked: false, action: 'NO_DOC_RED_GREEN',
-      doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
-      reason: bugNeedsReview
-        ? '属于触及高风险/单向门边界的缺陷修复（Case 2），须 Red-Green 回归并接受独立审查。'
-        : '属于明确局部缺陷修复（Case 2），不建规划文档，但强制先补失败复现测试再修复（Red-Green）。',
-      docsRequired: [], redGreenRequired: true, needsReview: bugNeedsReview, specApprovalRequired: false,
-      prdRequired: false, prdReasons: [], prdAdvice: null,
-      activeContracts, coupledSyncWarnings,
-    }
-  }
-  return {
-    caseType: 3, tier: 2, blocked: false, action: 'TODO_ONLY',
-    doorType: door.doorType, doorDetails: door, critiqueTier: 'self-audit',
-    reason: '属于不改变外部契约的局部功能开发（L2），只需建立 docs/todo/ 冻结验收标准并通过 audit 自净化。',
-    docsRequired: ['docs/todo/'], redGreenRequired: true, needsReview: true, specApprovalRequired: false,
-    prdRequired: false, prdReasons: [], prdAdvice: prdNeed.advice,
-    activeContracts, coupledSyncWarnings,
-  }
+  const rejectedCheck = (pureDocCue || signals.nonDocPaths.length > 0)
+    ? evaluatePureDocCheck({
+        faces, signals, hasOnlyDocFaces, docOnly, hasRuntimeBug, hasExplicitFeature,
+        touchesContract, conflictsTdd, isCrossCutting, isGovernance, fileCount,
+      })
+    : null
+  if (isBugfix) return buildCase2(rejectedCheck)
+  return buildCase3(rejectedCheck)
 }
 
 /** 剥离易变生命周期元字段（保留方案正文、稳定标题/层级与验收标准），确保 link --issue/--pr 后不误触发陈旧锁定。 */

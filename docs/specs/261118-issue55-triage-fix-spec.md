@@ -8,7 +8,7 @@ updated: 2026-11-18
 issue: 55
 pr: null
 branch: feat/triage-fix
-owner: planner-55
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-w1, round=1, sha=b7138a9f53e9, summary=C1-C4 解析格式与 doc-triage 域已对齐，掩码/空真拦截/pureDocCheck/I128-I130 可证伪且写域隔离)"
@@ -137,10 +137,10 @@ pureDocCheck: {
 
 > 动手改代码前冻结；实现期间不顺手删减或放宽标准。每条必须能由一条命令或断言实证。
 
-- [ ] C1: （工具名等价性与去特例）运行 `node kit/skills/dev-plan/scripts/doc-plan.mjs triage --summary "doc-plan init 会把可选章节剪光" --json` 以及等价调用（`"planx init 会把可选章节剪光"`、`"survey 会把可选章节剪光"`，含直接调用 `triageTask`），三者的分流档位与动作完全一致（均为非 Case 1，且均不返回 `NO_DOC_DIRECT`）。
-- [ ] C2: （消除空真与代码符号误触发）实装 `kit/skills/dev-plan/scripts/triage-rules.mjs` (new) 代码/工具掩码与空面集拦截后，`"comment out retry timer"`、`"explain why auth fails"`、`"把 docs.mjs 里的路径正则修一下"`、`"fix doc-audit false positive"`、`"update doc-plan.mjs usage help"`、`"fix typo in doc-audit.mjs"`、`"doc-audit false positive on headings"`、`"doc-template-render.mjs strips optional sections"`、`"给 doc-plan init 加一个 --no-prune 参数"`、`"为什么 doc-plan init 会把可选章节剪光"`，以及传入 `--files kit/skills/lib/docs.mjs` 的 `"fix typo"`，全部不得返回 `caseType: 1`；对缺陷类提示词（如 `"fix doc-audit false positive"`、`"把 docs.mjs 里的路径正则修一下"`、`"explain why auth fails"`）返回 `caseType: 2`（`NO_DOC_RED_GREEN`）。
-- [ ] C3: （Case 1 正向不误伤与自检不变式）运行 `doc-plan.mjs triage`（输入 `"fix typo in README.md"`、`"补充 CONTRIBUTING.md 的发版说明"`、`"解释一下 dev-plan 的五档分流规则"` 与传入 `--files README.md` 的 `"fix broken phrasing"`），全部返回 `caseType: 1`（`NO_DOC_DIRECT`），且 JSON 输出携带 `pureDocCheck.passed === true` 与非空 `whyPureDocs`、`rejectedCodeSignals.length === 0`；反向验证 `pureDocCheck` 不变式在检测到任意代码/缺陷信号时阻止返回 Case 1。
-- [ ] C4: （双向夹具、故障注入与全量门禁）`node scripts/dev/fixtures.mjs` 全量通过（支持 `--domain doc-triage` 单独跑 `scripts/dev/fixtures-doc-triage.mjs` (new) 的正反双向断言）；`node scripts/dev/verify-injections.mjs` 验证预留故障注入 `I128..I130`（`I128` 关闭符号掩码、`I129` 恢复 `faces.every` 空真、`I130` 绕过 `pureDocCheck`）全部精准变红且退出码非 `0`；`kit/skills/dev-plan/scripts/doc-audit.mjs` 与 `kit/skills/dev-plan/scripts/triage-rules.mjs` (new) 均不超过 `800` 行；`node scripts/equip.mjs . --check` 与 `merge-gate` 全绿。
+- [x] C1: （工具名等价性与去特例）运行 `node kit/skills/dev-plan/scripts/doc-plan.mjs triage --summary "doc-plan init 会把可选章节剪光" --json` 以及等价调用（`"planx init 会把可选章节剪光"`、`"survey 会把可选章节剪光"`，含直接调用 `triageTask`），三者的分流档位与动作完全一致（均为非 Case 1，且均不返回 `NO_DOC_DIRECT`）。
+- [x] C2: （消除空真与代码符号误触发）实装 `kit/skills/dev-plan/scripts/triage-rules.mjs` (new) 代码/工具掩码与空面集拦截后，`"comment out retry timer"`、`"explain why auth fails"`、`"把 docs.mjs 里的路径正则修一下"`、`"fix doc-audit false positive"`、`"update doc-plan.mjs usage help"`、`"fix typo in doc-audit.mjs"`、`"doc-audit false positive on headings"`、`"doc-template-render.mjs strips optional sections"`、`"给 doc-plan init 加一个 --no-prune 参数"`、`"为什么 doc-plan init 会把可选章节剪光"`，以及传入 `--files kit/skills/lib/docs.mjs` 的 `"fix typo"`，全部不得返回 `caseType: 1`；对缺陷类提示词（如 `"fix doc-audit false positive"`、`"把 docs.mjs 里的路径正则修一下"`、`"explain why auth fails"`）返回 `caseType: 2`（`NO_DOC_RED_GREEN`）。
+- [x] C3: （Case 1 正向不误伤与自检不变式）运行 `doc-plan.mjs triage`（输入 `"fix typo in README.md"`、`"补充 CONTRIBUTING.md 的发版说明"`、`"解释一下 dev-plan 的五档分流规则"` 与传入 `--files README.md` 的 `"fix broken phrasing"`），全部返回 `caseType: 1`（`NO_DOC_DIRECT`），且 JSON 输出携带 `pureDocCheck.passed === true` 与非空 `whyPureDocs`、`rejectedCodeSignals.length === 0`；反向验证 `pureDocCheck` 不变式在检测到任意代码/缺陷信号时阻止返回 Case 1。
+- [x] C4: （双向夹具、故障注入与全量门禁）`node scripts/dev/fixtures.mjs` 全量通过（支持 `--domain doc-triage` 单独跑 `scripts/dev/fixtures-doc-triage.mjs` (new) 的正反双向断言）；`node scripts/dev/verify-injections.mjs` 验证预留故障注入 `I128..I130`（`I128` 关闭符号掩码、`I129` 恢复 `faces.every` 空真、`I130` 绕过 `pureDocCheck`）全部精准变红且退出码非 `0`；`kit/skills/dev-plan/scripts/doc-audit.mjs` 与 `kit/skills/dev-plan/scripts/triage-rules.mjs` (new) 均不超过 `800` 行；`node scripts/equip.mjs . --check` 与 `merge-gate` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -155,4 +155,14 @@ pureDocCheck: {
 
 ## 实现说明
 
-<!-- 在合并之前补齐真实实现摘要与验证结果 -->
+- 实现载体与模块边界：
+  - `kit/skills/dev-plan/scripts/triage-rules.mjs`（265 行）：实现 `extractTriageSignals`（先提取并掩码代码文件路径、工具/CLI 子命令、`--flag`、`comment out`/`注释掉` 为 `__CODE_TOKEN__`）、`isPureDocPath`（纯文档白名单校验，排除隐藏配置目录、代码/工作流/模板资产）、`facesOf`、`normalizeTriageInputs` 与 `evaluatePureDocCheck`。
+  - `kit/skills/dev-plan/scripts/doc-audit.mjs`（771 行）：在 `triageTask` 中接入 `extractTriageSignals`、`facesOf`、非空 `faces.length > 0 && faces.every((f) => f === 'docs')` 保护与 `pureDocCheck.passed` 安全退回不变式，输出 `faces` 与 `pureDocCheck`。
+  - `kit/skills/dev-plan/scripts/doc-plan.mjs`（653 行）：`triage` 子命令支持 `--files` 传入文件路径列表与整数文件数两种形式，保证 `--files README.md` 与 `--files kit/skills/lib/docs.mjs` 传入路径白名单校验。
+  - `scripts/dev/fixtures-doc-triage.mjs`、`scripts/dev/fixtures.mjs`（`doc-triage` 域）、`scripts/dev/injections-data.mjs`（`I128..I130`）、`docs/TDD.md`（同步登记模块清单）及 `.agents/skills/`（`equip.mjs .` 同步）。
+- 实测结果摘要：
+  - `node scripts/dev/fixtures.mjs --domain doc-triage`：3/3 项通过（0 失败）。
+  - `node scripts/dev/fixtures.mjs`：228/228 项通过（0 失败）。
+  - `node scripts/dev/preflight.mjs`：33 项读数全通过（0 失败）。
+  - `node scripts/dev/verify-injections.mjs --only I128` / `I129` / `I130`：全部精准变红抓获。
+  - `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/gap-coverage.mjs`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`：均退出 `0`。

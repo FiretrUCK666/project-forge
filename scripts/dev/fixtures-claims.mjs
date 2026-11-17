@@ -1831,4 +1831,46 @@ cases.push(['TDD 生成器的章节必须在模板里存在', async () => {
   return true
 }])
 
+// 真项目长什么样：这七种形态都是真实存在的，写法各不相同。
+//
+// 「通用」的验收标准不是「模板有十节」，而是：**这七种项目按自己习惯的写法写，
+// 都能通过；而真的什么都没写，照样被拦下。** 前者少了就是误报，后者少了就是漏报。
+cases.push(['七种真实项目形态都能通过，真没写照样被拦', async () => {
+  const { resolveDocRequirements, resolveSectionPresence, findMissingSections } =
+    await import('../../kit/skills/lib/doc-requirements.mjs')
+
+  const samples = {
+    SaaS: '## 背景\n\n现有审批靠邮件，无法追溯，需要系统化。\n\n## 不做\n\n- 不做移动端\n\n## 验收标准\n\n- [ ] C1: 可追溯\n',
+    CLI: '## Why\n\nThe current CLI cannot handle >1000 files. We need streaming.\n\n## Out of scope\n\n- No GUI\n\n## Done when\n\n- [ ] C1: 10k under 2s\n',
+    数据管道: '## 现状\n\n上游 schema 变更后静默丢字段，需要强校验。\n\n## 范围外\n\n- 不改调度器\n\n## 交付判据\n\n- [ ] C1: 退出码 1\n',
+    硬件固件: '## 目标\n\n待机功耗降到 5uA 以下。\n\n## 不做\n\n- 不改 PCB\n\n## 验收\n\n- [ ] C1: 实测 <= 5uA\n',
+    算法库: '## Problem\n\nSorting degrades to O(n^2). We must keep O(n log n).\n\n## Non-goals\n\n- No parallel version\n\n## Acceptance\n\n- [ ] C1: bench <= 50ms\n',
+    论文: '## 研究问题\n\n现有方法在长文本上无法保持一致，需要新机制。\n\n## 不在本文范围\n\n- 不做多模态\n\n## Contributions\n\n- [ ] C1: LongBench 超基线 3 分\n',
+    游戏: '## 玩法目标\n\n当前战斗节奏太慢，玩家平均流失在第 3 关，需要调整。\n\n## 不做\n\n- 不改美术资源\n\n## 验收标准\n\n- [ ] C1: 第 3 关通过率 >= 60%\n',
+  }
+
+  const bad = []
+  for (const [name, text] of Object.entries(samples)) {
+    for (const kind of ['prd', 'spec', 'todo']) {
+      const req = resolveDocRequirements(null, kind)
+      const miss = findMissingSections(req, resolveSectionPresence(text, req), { hasInlineAcceptance: true })
+      if (miss.length > 0) bad.push(`${name}/${kind}: ${miss.map((m) => m.id).join(',')}`)
+    }
+  }
+  if (bad.length > 0) return `这些真实写法被判缺节：${bad.join('；')}`
+
+  // 反向 1：真的什么都没写，必须报全主干三节
+  const req = resolveDocRequirements(null, 'spec')
+  const bare = '## 随便写点\n\n一句话。\n'
+  const all = findMissingSections(req, resolveSectionPresence(bare, req), { hasInlineAcceptance: false })
+  if (all.length !== 3) return `空文档只报了 ${all.length} 节，应该 3 节：${all.map((m) => m.id).join(',')}`
+
+  // 反向 2：只写目标不写非目标，要单独报出来
+  const half = '## 背景\n\n现有方法无法保持一致，需要新机制。\n\n## 验收\n\n- [ ] C1: x\n'
+  const m2 = findMissingSections(req, resolveSectionPresence(half, req), { hasInlineAcceptance: true })
+  if (!m2.some((m) => m.id === 'non-goals')) return '缺非目标却没报'
+
+  return true
+}])
+
 }

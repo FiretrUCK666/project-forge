@@ -64,13 +64,21 @@ export const SECTION_DEFS = Object.freeze({
   goal: {
     id: 'goal',
     label: '要做什么',
-    keywords: ['要解决的问题', '背景与边界', '背景', '目标', '要改什么', '任务范围', '需求描述', '动机'],
+    keywords: [
+      '要解决的问题', '背景与边界', '背景', '目标', '要改什么', '任务范围', '需求描述', '动机',
+      '现状', 'Why', 'Problem', 'Motivation', 'Goal', 'Overview',
+    ],
     // 强证据：说清「现在什么不行 / 要做成什么」的句子。这些在任何项目里都长这样。
+    //
+    // 覆盖面比看起来重要：中文有「需要强校验」「要补上」「得改」多种说法，
+    // 英文有 "we need"、"cannot"、"the goal is"。少写一条，就有一类真实文档被判成没写。
     evidence: [
-      /(?:现状|当前|目前)[^\n]{0,40}(?:痛点|问题|缺失|不足|卡在|无法|不能|缺)/,
-      /(?:需要|要)(?:改成|做成|支持|解决|引入|新增)/,
+      /(?:现状|当前|目前|现有)[^\n]{0,40}(?:痛点|问题|缺失|不足|卡在|无法|不能|缺|退化|失败)/,
+      /(?:需要|必须|得|要)[^\n]{0,8}(?:改|换|补|加|做|支持|解决|引入|新增|加强|提升|降低|系统化|规范)/,
       /(?:预期|期望)(?:收益|效果|结果|行为)/,
-      /(?:so that|in order to|we need to|the goal is)/i,
+      /(?:current|currently|today)[^\n]{0,50}(?:cannot|can't|no longer|fails?|broken|missing|lacks?|drops?|degrades?)/i,
+      /(?:we|it|this|they)\s+(?:need|needs|require|requires|must)\b/i,
+      /(?:so that|in order to|the goal is|we want to)/i,
     ],
     core: true,
     fixHint: '用一段话说清这件事要解决什么、给谁解决；不写形容词，写可观察的结果。',
@@ -78,12 +86,13 @@ export const SECTION_DEFS = Object.freeze({
   'non-goals': {
     id: 'non-goals',
     label: '不做什么',
-    keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals', '不在本次范围', '范围外', 'Out of scope'],
+    keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals', '不在本次范围', '范围外', 'Out of scope', '不做'],
     // 强证据：任何形式的「不做 / 不在范围 / 排除」。
     evidence: [
       /(?:不|暂不|本次不|本期不|不在)(?:做|改|动|引入|涉及|考虑|包含|纳入)/,
       /(?:排除|范围外|非目标|不含)/,
-      /(?:out\s+of\s+scope|won'?t\s+(?:do|touch|change)|not\s+in\s+scope|excluded)/i,
+      /(?:out\s+of\s+scope|won'?t\s+(?:do|touch|change|support)|not\s+in\s+scope|excluded|no\s+(?:GUI|API|support)\b)/i,
+      /(?:non-?goals?|not\s+doing)\b/i,
     ],
     core: true,
     fixHint: '写清本期明确不做的事项，防止范围蔓延。',

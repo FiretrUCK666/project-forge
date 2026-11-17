@@ -1378,4 +1378,59 @@ cases.push(['体检报告里的命令展示有字节上限', async () => {
   } finally { rmTree(dir) }
 }])
 
+// 冷启动全景：新会话不该靠翻目录才知道这个仓做到哪了。
+//
+// 早先 `flow next` 无任务时只说「请先运行 triage 或 start」。而进度信息一直在仓库里
+// （frontmatter 的状态与勾选数），只是没有入口把它们摆出来。
+cases.push(['冷启动全景把进度摆出来，且不猜', async () => {
+  const { buildSessionOrientation } = await import('../../kit/skills/lib/session-orient.mjs')
+
+  const dir = tmpProject({ 'README.md': '# o\n\n冷启动测试仓。\n' })
+  try {
+    mkdirSync(join(dir, 'docs', 'prd'), { recursive: true })
+    mkdirSync(join(dir, 'docs', 'specs'), { recursive: true })
+    mkdirSync(join(dir, 'docs', 'todo'), { recursive: true })
+
+    // 空仓：不许编进度，要明说没有
+    const empty = buildSessionOrientation(dir)
+    if (empty.docs.prd.length !== 0 || empty.docs.specs.length !== 0) return '空仓却报出了文档'
+    if (!/没有卡住的文档/.test(empty.text)) return '空仓时没说「没有卡住的文档」'
+    if (empty.nextSteps.length === 0) return '空仓时没给下一步'
+
+    // 有文档：要在全景里出现，且未批准要被判成「卡住」
+    writeFileSync(join(dir, 'docs', 'prd', '261117-x-prd.md'), [
+      '---', 'kind: prd', 'title: X', 'status: draft', 'issue: 7', '---', '',
+      '# PRD: X', '', '## 要解决的问题', '- a', '', '## 本期不做', '- b', '',
+      '## 门型与回滚路径', '- two-way', '', '- [ ] C1: c1', '- [ ] C2: c2', '',
+    ].join('\n'))
+    const filled = buildSessionOrientation(dir)
+    if (filled.docs.prd.length !== 1) return `PRD 没被扫到：${filled.docs.prd.length}`
+    if (!filled.docs.prd[0].issue) return '全景里没带 Issue 编号'
+    if (!filled.stuck.some((s) => s.why.includes('未批准'))) return '未批准的 PRD 没被列进「卡在哪」'
+    if (!/0\/2 条已勾|0\/2/.test(filled.text)) return '全景里没报勾选进度'
+    if (!/未批准/.test(filled.text)) return '全景里没报阻塞原因'
+
+    // 反向：已批准的 PRD 不该被列成卡住
+    writeFileSync(join(dir, 'docs', 'prd', '261117-x-prd.md'), [
+      '---', 'kind: prd', 'title: X', 'status: active', 'issue: 7', '---', '',
+      '# PRD: X', '', '## 要解决的问题', '- a', '', '## 本期不做', '- b', '',
+      '## 门型与回滚路径', '- two-way', '', '- [x] C1: c1', '',
+    ].join('\n'))
+    const approved = buildSessionOrientation(dir)
+    if (approved.stuck.some((s) => s.file.includes('x-prd'))) return '已批准的 PRD 被误判成卡住'
+
+    // 反向：勾选没做完却标 implemented，要报出来
+    writeFileSync(join(dir, 'docs', 'specs', '261117-y-spec.md'), [
+      '---', 'kind: spec', 'title: Y', 'status: implemented', '---', '',
+      '# SPEC: Y', '', '## 要解决的问题', '- a', '', '## 本期不做', '- b', '',
+      '## 门型与回滚路径', '- two-way', '', '- [x] C1: done', '- [ ] C2: not done', '',
+    ].join('\n'))
+    const inconsistent = buildSessionOrientation(dir)
+    if (!inconsistent.stuck.some((s) => s.why.includes('勾选未完成'))) {
+      return '标了 implemented 但勾选没做完，没被报出来'
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

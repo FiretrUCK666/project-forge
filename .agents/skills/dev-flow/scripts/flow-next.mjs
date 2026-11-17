@@ -11,6 +11,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
+import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -239,6 +240,13 @@ export async function handleNext(opts, roots) {
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   } else {
     process.stdout.write(`# flow next (${payload.phase} | owner=${payload.ownerRole})\n`)
+    // 冷启动：没有任何任务时，光说「去 start」等于让新会话自己翻目录。
+    // 把仓里已有的进度摆出来——那些信息一直都在，只是没有入口。
+    if (payload.phase === 'idle') {
+      const orient = buildSessionOrientation(roots.mainRoot)
+      process.stdout.write('\n')
+      process.stdout.write(orient.text)
+    }
     if (payload.taskId) process.stdout.write(`- 任务: ${payload.taskId} | risk=${payload.policy?.riskTier ?? '-'} | worktree=${payload.worktreePath ?? 'branch'}\n`)
     process.stdout.write(`- 下一步: ${payload.nextAction}\n`)
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)

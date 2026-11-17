@@ -812,6 +812,14 @@ export const INJECTIONS = [
     expect: '体检报告里的命令展示',
   },
   {
+    id: 'I90',
+    what: '冷启动全景不报未批准（新会话又得自己翻目录才知道卡在哪）',
+    file: 'kit/skills/lib/session-orient.mjs',
+    from: "    out.push('未批准（state=draft，需 critique-pass 后 approve）')",
+    to: '    // 不报',
+    expect: '冷启动全景',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

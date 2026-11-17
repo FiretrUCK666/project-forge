@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 修复 triage 误判工具名与空面集并补全纯文档自检
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -10,9 +10,9 @@ pr: null
 branch: feat/triage-fix
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w1, round=1, sha=b7138a9f53e9, summary=C1-C4 解析格式与 doc-triage 域已对齐，掩码/空真拦截/pureDocCheck/I128-I130 可证伪且写域隔离)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261118-issue55-triage-fix-todo.md
 high_risk_paths: [kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/triage-rules.mjs]
 ---
@@ -28,7 +28,7 @@ high_risk_paths: [kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan
 | 创建 / 更新 | `2026-11-18` / `2026-11-18` |
 | 分支 / Issue / PR | `feat/triage-fix` / #55 / 未关联 |
 | 负责人 / 内审状态 | planner-55 / `pending` |
-| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/todo/261118-issue55-triage-fix-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/archive/todo/261118-issue55-triage-fix-todo.md` |
 
 - **与总控 PRD 的关系**：挂载于 `docs/prd/261117-v8-criteria-trust-prd.md`（V8 收口增补单），承接 Issue #55 的独立验收标准 `C1..C4`，不修改已冻结的既有 PRD 条目编号。
 - **变更一句话**：把 `triageTask` 从「裸正则匹配 `doc` 且放任空面集空真通过」改为「代码符号先行提取与掩码 + 显式非空纯文档证据 + Case 1 强制自检不变式」，杜绝代码改动与缺陷任务被静默放水为 `NO_DOC_DIRECT`。

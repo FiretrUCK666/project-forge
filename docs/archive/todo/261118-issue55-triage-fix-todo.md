@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 修复 triage 误判工具名与空面集并补全纯文档自检
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 55
@@ -9,10 +9,10 @@ pr: null
 branch: feat/triage-fix
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-55
 planned_at: 9e966352f10318a0893c9cb722fe7c0a9f59ab0f
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261118-issue55-triage-fix-spec.md
 ---
 
@@ -27,7 +27,7 @@ related_spec: ../specs/261118-issue55-triage-fix-spec.md
 | 分支 / 基线 | `feat/triage-fix` @ `9e96635` |
 | 任务编号 | `issue-55` |
 | 负责人 / 审批 | planner-55 / `false` |
-| 关联 Issue / PR / SPEC | #55 / 未关联 / `docs/specs/261118-issue55-triage-fix-spec.md` |
+| 关联 Issue / PR / SPEC | #55 / 未关联 / `docs/archive/specs/261118-issue55-triage-fix-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，并在实施前确认所属 SPEC 已获 `approved: true`。
 
@@ -72,5 +72,5 @@ related_spec: ../specs/261118-issue55-triage-fix-spec.md
   - `node scripts/dev/preflight.mjs`：0 项失败（33 项读数）。
   - `node scripts/dev/verify-injections.mjs --only I128` / `I129` / `I130`：全部精准变红且退出码 `0`（表示 3 条注入均成功捕获）。
   - `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/gap-coverage.mjs`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`：均退出 `0`；文件行数 `triage-rules.mjs` 265 行、`doc-audit.mjs` 771 行（均 `<= 800`）。
-- **文档同步检查**：已同步更新 `docs/TDD.md`（登记 `kit/skills/dev-plan/scripts/triage-rules.mjs` 与 `scripts/dev/fixtures-doc-triage.mjs` 及最近更新日期 `2026-11-18`）与 `docs/specs/261118-issue55-triage-fix-spec.md`。
+- **文档同步检查**：已同步更新 `docs/TDD.md`（登记 `kit/skills/dev-plan/scripts/triage-rules.mjs` 与 `scripts/dev/fixtures-doc-triage.mjs` 及最近更新日期 `2026-11-18`）与 `docs/archive/specs/261118-issue55-triage-fix-spec.md`。
 - **遗留问题**：无

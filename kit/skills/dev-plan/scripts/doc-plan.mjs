@@ -30,6 +30,8 @@ import {
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
 import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
+import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
+import { extractDocSnapshot } from '../../lib/doc-substantive.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
@@ -51,7 +53,7 @@ function parseIssueArg(rawIssue) {
 
 async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
-  taskId, issue, owner, branch, relatedSpec, force = false,
+  taskId, issue, owner, branch, relatedSpec, relatedPrd, force = false, noPrune = false,
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
@@ -90,6 +92,20 @@ async function initDoc({
   }
   const profile = parseAgentsProfile(writeRoot)
   const quickCmd = profile.quickTest ?? '<填写项目快测命令>'
+  const needsShape = kindsToCreate.some((k) => k !== 'tdd')
+  const docShape = needsShape && !noPrune ? await probeWorkspaceDocShape(writeRoot) : null
+
+  let inheritedPrdAbs = relatedPrd ? resolve(writeRoot, relatedPrd) : null
+  if (!inheritedPrdAbs && relatedSpec) {
+    const parentSpecAbs = resolve(writeRoot, relatedSpec)
+    const parentRaw = readTextSafe(parentSpecAbs)
+    const parentFm = parentRaw ? parseDocFrontmatter(parentRaw) : null
+    const rawRelPrd = parentFm?.data?.related_prd
+    if (typeof rawRelPrd === 'string' && rawRelPrd.trim() && !/^(?:无|none|null)$/i.test(rawRelPrd.trim())) {
+      const candAbs = resolve(dirname(parentSpecAbs), rawRelPrd.trim())
+      if (existsSync(candAbs)) inheritedPrdAbs = candAbs
+    }
+  }
 
   const planned = []
   for (const k of kindsToCreate) {
@@ -107,6 +123,9 @@ async function initDoc({
     const relatedSpecRel = item.kind === 'todo' && relatedSpec
       ? posixPath(relative(dirname(item.absFile), resolve(writeRoot, relatedSpec)))
       : null
+    const relatedPrdRel = item.kind !== 'prd' && inheritedPrdAbs
+      ? posixPath(relative(dirname(item.absFile), inheritedPrdAbs))
+      : null
     const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
     if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
     let content
@@ -123,20 +142,28 @@ async function initDoc({
     } else {
       content = renderStandardDocTemplate({
         kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
-        taskId, issueNum, owner, quickCmd, relatedSpecRel,
+        taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
+        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape,
       })
     }
     mkdirSync(dirname(item.absFile), { recursive: true })
     writeAtomic(item.absFile, content)
   }
 
-  if (planned.length > 1) {
-    await syncDocsLifecycle(writeRoot, {
+  if (planned.length > 1 || relatedSpec || relatedPrd) {
+    const syncRes = await syncDocsLifecycle(writeRoot, {
       slugOrPath: planned[0].file,
       issue: issueNum ?? undefined,
-      branch: headBranch ?? undefined,
+      branch: planned.length > 1 ? (headBranch ?? undefined) : (branch ?? undefined),
       owner: owner ?? undefined,
     })
+    for (const r of syncRes.renamed ?? []) {
+      const hit = planned.find((p) => p.file === r.from)
+      if (hit) {
+        hit.file = r.to
+        hit.absFile = join(writeRoot, r.to)
+      }
+    }
   }
 
   let ledgerUpdated = false
@@ -222,7 +249,12 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', fi
     : (prevFindings ?? null)
 
   if (fm.hasFrontmatter) {
-    const patch = { plan_critique: stampValue, updated: docIsoDate() }
+    const snap = extractDocSnapshot(text)
+    const patch = {
+      plan_critique: stampValue,
+      critique_anchors: JSON.stringify(snap),
+      updated: docIsoDate(),
+    }
     if (newFindings) patch[CRITIQUE_FINDINGS_KEY] = newFindings
     updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   } else {
@@ -333,13 +365,83 @@ function supersedeSpec({ repoRoot, oldSpecPath, newSpecPath }) {
   return { oldSpec: posixPath(relative(repoRoot, oldAbs)), newSpec: posixPath(relative(repoRoot, newAbs)), status: 'superseded', supersededBy: relOldToNew }
 }
 
+function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', criterion = '' }) {
+  if (!file || !decision || !String(decision).trim()) {
+    throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
+  }
+  const abs = resolve(repoRoot, file)
+  if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
+  const raw = readTextSafe(abs)
+  if (raw === undefined) throw new Error(`无法读取文本文件：${file}`)
+
+  const norm = raw.replace(/\r\n/g, '\n')
+  const today = docIsoDate()
+  const byNote = by && String(by).trim() ? ` · ${String(by).trim()}` : ''
+  const qText = question && String(question).trim() ? `${String(question).trim()} -> ` : ''
+  const entry = `- 已确认（${today}${byNote}）：${qText}${String(decision).trim()}`
+
+  const lines = norm.split('\n')
+  const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
+  if (secIdx >= 0) {
+    let endIdx = lines.length
+    for (let i = secIdx + 1; i < lines.length; i += 1) {
+      if (/^##\s+/.test(lines[i])) { endIdx = i; break }
+    }
+    const existingBody = lines.slice(secIdx + 1, endIdx)
+      .filter((l) => !/^\s*-\s*（本轮无额外澄清补充/.test(l))
+    while (existingBody.length > 0 && !existingBody[existingBody.length - 1].trim()) existingBody.pop()
+    while (existingBody.length > 0 && !existingBody[0].trim()) existingBody.shift()
+    const nextBody = existingBody.length > 0 ? ['', ...existingBody, entry, ''] : ['', entry, '']
+    lines.splice(secIdx + 1, endIdx - secIdx - 1, ...nextBody)
+  } else {
+    const anchorIdx = lines.findIndex((l) => /^##\s+(?:实现说明|完成后的记录|待拍板问题)/.test(l))
+    const insertBlock = ['## 澄清与补充记录', '', entry, '']
+    if (anchorIdx >= 0) lines.splice(anchorIdx, 0, ...insertBlock)
+    else {
+      while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop()
+      lines.push('', ...insertBlock)
+    }
+  }
+  let updatedText = lines.join('\n')
+  if (!updatedText.endsWith('\n')) updatedText += '\n'
+
+  let addedCriterion = null
+  if (criterion && String(criterion).trim()) {
+    let maxN = 0
+    for (const cm of updatedText.matchAll(/^- \[[ xX]\] C(\d+)\b/gm)) {
+      const n = Number(cm[1])
+      if (n > maxN) maxN = n
+    }
+    const nextId = `C${maxN + 1}`
+    const critLine = `- [ ] ${nextId}: ${String(criterion).trim()}`
+    addedCriterion = { id: nextId, line: critLine }
+    const cLines = updatedText.split('\n')
+    let lastCritIdx = -1
+    for (let i = 0; i < cLines.length; i += 1) {
+      if (/^- \[[ xX]\] C\d+\b/.test(cLines[i])) lastCritIdx = i
+    }
+    if (lastCritIdx >= 0) cLines.splice(lastCritIdx + 1, 0, critLine)
+    else cLines.push(critLine)
+    updatedText = cLines.join('\n')
+  }
+
+  writeAtomic(abs, updatedText)
+  const fm = parseDocFrontmatter(updatedText)
+  if (fm.hasFrontmatter) {
+    const docType = detectDocType(posixPath(relative(repoRoot, abs)), updatedText)
+    updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
+  }
+  return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, updated: today }
+}
+
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
     '  triage         --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]',
-    '  init           --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--json]',
+    '  init           --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--prd <path>] [--spec <path>] [--no-prune] [--json]',
+    '  clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--approve] [--json]',
     '  audit          [--file <docPath> | .] [--json]',
     '  critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
@@ -350,7 +452,7 @@ function printHelp() {
   ].join('\n') + '\n')
 }
 
-const SUBCOMMANDS = ['triage', 'init', 'link', 'audit', 'critique-pass', 'approve', 'archive', 'supersede', 'list']
+const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-pass', 'approve', 'archive', 'supersede', 'list']
 
 async function main(argv) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }
@@ -359,11 +461,11 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-scope|critique-pass|approve|archive|supersede|list>',
+      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|approve|archive|supersede|list>',
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)
@@ -432,13 +534,25 @@ async function main(argv) {
       const res = await initDoc({
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         kind: opts.kind, slug: opts.slug, title: opts.title, taskId: opts.task,
-        issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec, force: Boolean(opts.force),
+        issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec,
+        relatedPrd: opts.prd, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}）\n`)
         printNextStep([{ skill: 'dev-plan', text: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${res.file}"` }], { repoRoot: mainRoot })
       }
+      return 0
+    }
+
+    if (sub === 'clarify') {
+      if (!opts.file || !opts.decision) throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
+      const res = clarifyDoc({
+        repoRoot, file: opts.file, question: opts.question ?? '',
+        decision: opts.decision, by: opts.by ?? 'user', criterion: opts.criterion ?? '',
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+      else process.stdout.write(`已写入澄清记录到 ${res.file}：${res.entry}${res.addedCriterion ? `（新增 ${res.addedCriterion.id}）` : ''}\n`)
       return 0
     }
 

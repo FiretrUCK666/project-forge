@@ -590,13 +590,13 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: 10', 'pr: null',
       'owner: alice', 'approved: true', 'implemented: true',
       'related_prd: ../../prd/261116-master-plan-prd.md',
-      '---', '', '# SPEC: M1', '', '## 要解决的问题', '- 拆出第一个切片', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
+      '---', '', '# SPEC: M1', '', '## 要解决的问题', '- 拆出第一个切片', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
     ].join('\n'),
     'docs/prd/261116-master-plan-prd.md': [
       '---', 'kind: prd', 'title: "Master Plan"', 'status: active',
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: null', 'pr: null',
       'owner: alice', 'plan_critique: passed', 'related_spec: null', 'related_todo: null',
-      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划总纲', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划总纲', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 五、验收标准', '- [x] C1: `src/app.mjs` M1', '- [ ] C2: `src/app.mjs` M2', '',
     ].join('\n'),
     [`docs/specs/261116-issue${issueNum}-m2-spec.md`]: [
@@ -605,7 +605,7 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       'branch: null', 'owner: planner', 'approved: true', 'implemented: false', 'plan_critique: passed',
       'related_prd: ../prd/261116-master-plan-prd.md',
       `related_todo: ../todo/261116-issue${issueNum}-m2-todo.md`,
-      'high_risk_paths: []', '---', '', '# SPEC: M2', '', '## 要解决的问题', '- 拆出第二个切片', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      'high_risk_paths: []', '---', '', '# SPEC: M2', '', '## 要解决的问题', '- 拆出第二个切片', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 验收标准', '- [x] C1: `src/app.mjs` ok', '', '## 实现说明', '- 已在 `src/app.mjs` 完成。', '',
     ].join('\n'),
     [`docs/todo/261116-issue${issueNum}-m2-todo.md`]: [
@@ -614,7 +614,7 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       'branch: null', 'owner: planner', 'approved: true', 'done_at: null', 'task_id: m2',
       'planned_at: HEAD', 'related_prd: ../prd/261116-master-plan-prd.md',
       `related_spec: ../specs/261116-issue${issueNum}-m2-spec.md`,
-      '---', '', '# Todo: M2', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '---', '', '# Todo: M2', '', '## 本期不做', '- 不修改独立单仓接口', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 验收标准', '- [x] C1: `src/app.mjs` ok', '', '## 完成后的记录', '**在合并之前写完。**', '',
     ].join('\n'),
   })

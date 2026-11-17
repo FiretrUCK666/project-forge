@@ -893,29 +893,38 @@ cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
     ...over,
   })
 
-  // 正向：基线 SHA 等于 HEAD、工作区干净 → 还没开始，下一步是实施
-  const fresh = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  // 正向：还没认领 → 第一步是认领（这是「我接手了」的平台侧落地）
+  const unclaimed = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  if (unclaimed.phase !== "needs-claim") {
+    return `还没认领时判成 ${unclaimed.phase}，应先要求 claim`
+  }
+  if (!unclaimed.blockingReasons.includes("BLOCKED_NOT_CLAIMED")) return "没给出阻塞原因"
+
+  // 正向：认领之后、还没动代码 → 下一步是实施
+  const fresh = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "2026-01-01T00:00:00Z" }), taskRuntime: rt(),
+  })
   if (fresh.phase === "needs-finalize") {
     return "刚建好的任务被判成「该归档」——下一步应是实施"
   }
   if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
 
   // 反向：真做完了（HEAD 已前移）→ 才该要求归档
-  const done = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
+  const done = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
   if (done.phase !== "needs-finalize") {
     return `分支上有提交后仍判 ${done.phase}，应要求 finalize`
   }
 
   // 反向：跟着基线 rebase 了（HEAD 变了）但没写代码 → 仍算还没开始
   const rebased = evaluateNextState({
-    selectedTask: mk(), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
+    selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
   })
   if (rebased.phase !== "implementing") {
     return `跟着基线 rebase 后被判成 ${rebased.phase}——同步基线不是「做完了」`
   }
 
   // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」
-  const dirty = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ dirty: 3 }) })
+  const dirty = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ dirty: 3 }) })
   if (dirty.phase !== "implementing") return `有未提交改动时判成 ${dirty.phase}`
 
   return true

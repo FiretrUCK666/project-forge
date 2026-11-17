@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T10:33:34.911Z",
+  "installedAt": "2026-11-17T11:11:35.473Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -26,7 +26,7 @@
       "sha256": "c36c7ff37c123651b9337bc8e28ae71da34c12e7d93d70d9e16ee422aca66c35"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
+      "sha256": "b334166914f411ff570629a62759c3e17464bb0cc220a287448c0a95994a8d60"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "f8c5e7023b385f5de5901886139057c081db60606cd634df1d01a15ec76d09f5"
@@ -212,7 +212,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "4ade7a80ff5bdaa3df7c02985858b25212c87f55d8fdd8587498c80f30b31319"
+      "sha256": "05f4870835977df5fbf99a583b7809885cb8de40b500491d11b0e9a18c8868a7"
     },
     "templates/docs-prd.md": {
       "sha256": "5521fa3da20bdaa28641859452deafc4c42bfb81ff927570acb783e5cf1b487b"

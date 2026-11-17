@@ -988,6 +988,14 @@ export const INJECTIONS = [
     expect: '审核角色拿到这一轮该看什么',
   },
   {
+    id: 'I112',
+    what: '认领不再是独立状态（新任务直接开工，Issue 上永远没有开工痕迹）',
+    file: 'kit/skills/lib/workflow-policy.mjs',
+    from: "  } else if (t.status === 'started' && !t.claimedAt && t.role !== 'inbound-external-pr') {",
+    to: "  } else if (false) {",
+    expect: '刚建好的任务下一步是实施',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

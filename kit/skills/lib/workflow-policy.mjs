@@ -483,8 +483,11 @@ export function evaluateNextState({
   const needsFinalize = t.caseType === 3 || t.caseType === 4 || Boolean(t.todoFile) || Boolean(t.specFile)
   // 「一件事都没做过」：工作区干净、且分支上没有基线没有的提交。
   // 用它区分「还没开始」与「做完了待归档」——两者都满足「尚未 finalized」。
+  // 「还没做过事」：没交出去过、没轮次、工作区干净、分支上没有基线之外的提交。
+  // 不写成 status === 'started'——认领会让 status 变成 claimed，那一格就漏了。
+  const CLOSED_STATUSES = new Set(['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged', 'aborted'])
   const nothingImplementedYet = Boolean(
-    t.status === 'started'
+    !CLOSED_STATUSES.has(t.status)
     && !t.finalized
     && !(t.rounds ?? []).length
     && !(rt.dirty > 0)
@@ -516,6 +519,14 @@ export function evaluateNextState({
     phase = 'released'
     ownerRole = 'coordinator'
     nextAction = '任务已被释放认领，请先重新 claim 后继续'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${t.taskId}`
+  } else if (t.status === 'started' && !t.claimedAt && t.role !== 'inbound-external-pr') {
+    // 认领是「我接手了」的平台侧落地。它是一个独立状态，
+    // 因为没有它，这一步就没人触发——Issue 上永远不会有开工痕迹。
+    phase = 'needs-claim'
+    ownerRole = 'implementer'
+    blockingReasons.push('BLOCKED_NOT_CLAIMED')
+    nextAction = '先认领再动手：认领会往关联 Issue 留开工痕迹，并记下谁在做'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${t.taskId}`
   } else if (t.status === 'merged') {
     phase = 'needs-cleanup'

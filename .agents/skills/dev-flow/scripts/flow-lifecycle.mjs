@@ -13,7 +13,7 @@ import {
 import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
+import { nextReviewRound, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
@@ -612,11 +612,13 @@ export async function handleSubmit(opts, roots) {
   let reviewSlotSync = null
   if (ledger.tier === 2 && currentHead && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
-    if (existsSync(reviewAbs)) unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
+    if (existsSync(reviewAbs) && !unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })?.ok) throw new Error(`审查槽解绑共享依赖失败：${ledger.reviewWorktreePath}`)
     reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
     const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
+    recordMountedDepsInLedger(ledger, ledger.reviewWorktreePath, revDeps)
     ledger.reviewWorktreeHead = currentHead
     reviewSlotSync.depsMode = revDeps.mode
+    writeTaskLedger(roots.mainRoot, ledger)
   }
 
   const nextRound = (ledger.rounds ?? []).length > 0

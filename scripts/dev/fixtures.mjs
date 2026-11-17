@@ -25,6 +25,7 @@ import { registerHandoffReviewCases } from './fixtures-handoff-review.mjs'
 import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
+import { registerFlowCleanupCases } from './fixtures-flow-cleanup.mjs'
 import { registerFlowStateCases } from './fixtures-flow-state.mjs'
 import { registerFlowParallelCases } from './fixtures-flow-parallel.mjs'
 import { registerLifecycleCases } from './fixtures-lifecycle.mjs'
@@ -39,6 +40,7 @@ initTestBackupDir()
 
 const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
+  ['flow-cleanup', registerFlowCleanupCases],
   ['flow-state', registerFlowStateCases],
   ['flow-parallel', registerFlowParallelCases],
   ['lifecycle', registerLifecycleCases],

@@ -111,6 +111,15 @@ export function createDefaultLedger(partial = {}) {
     worktreePath: partial.worktreePath ?? null,
     reviewWorktreePath: partial.reviewWorktreePath ?? null,
     reviewWorktreeHead: partial.reviewWorktreeHead ?? null,
+    depsMode: partial.depsMode ?? 'none',
+    /**
+     * 工具自己挂载的共享依赖相对路径清单（按工作位索引 + 扁平汇总）。
+     * `cleanup` 只依实际挂盘清单逐条自动解绑，不靠 `depsMode === 'shared'` 一股脑放行。
+     */
+    mountedDeps: Array.isArray(partial.mountedDeps) ? partial.mountedDeps : [],
+    mountedDepsByWorktree: (partial.mountedDepsByWorktree && typeof partial.mountedDepsByWorktree === 'object' && !Array.isArray(partial.mountedDepsByWorktree))
+      ? partial.mountedDepsByWorktree
+      : {},
     todoFile: partial.todoFile ?? null,
     specFile: partial.specFile ?? null,
     prdFile: partial.prdFile ?? null,
@@ -190,6 +199,32 @@ export function createDefaultLedger(partial = {}) {
 
 export function readTaskLedger(mainRoot, taskId) {
   return readJsonSafe(taskLedgerPath(mainRoot, taskId))
+}
+
+/** 将 `mountSharedDeps` 实际挂载/已挂载的单元路径同步写入账本，供 `cleanup` 精确识别工具挂载。 */
+export function recordMountedDepsInLedger(ledger, worktreeRel, mountResult) {
+  if (!ledger || typeof ledger !== 'object') return []
+  const rawList = Array.isArray(mountResult?.mountedPaths)
+    ? mountResult.mountedPaths
+    : [...(mountResult?.mounted ?? []), ...(mountResult?.alreadyMounted ?? [])].map((item) => (typeof item === 'string' ? item : item?.path))
+  const normalizedPaths = [...new Set(
+    rawList
+      .map((p) => posixPath(String(p ?? '').trim()).replace(/^(?:\.\/)+/, '').replace(/^\/+|\/+$/g, ''))
+      .filter((p) => p && p !== '.'),
+  )].sort()
+  const wtKey = posixPath(String(worktreeRel ?? '').trim()).replace(/^(?:\.\/)+/, '').replace(/\/+$/, '')
+  const byWt = (ledger.mountedDepsByWorktree && typeof ledger.mountedDepsByWorktree === 'object' && !Array.isArray(ledger.mountedDepsByWorktree))
+    ? { ...ledger.mountedDepsByWorktree }
+    : {}
+  if (wtKey) byWt[wtKey] = normalizedPaths
+  ledger.mountedDepsByWorktree = byWt
+  const flat = new Set()
+  for (const arr of Object.values(byWt)) {
+    if (Array.isArray(arr)) for (const p of arr) if (p) flat.add(p)
+  }
+  if (!wtKey) for (const p of normalizedPaths) flat.add(p)
+  ledger.mountedDeps = [...flat].sort()
+  return normalizedPaths
 }
 
 export function writeTaskLedger(mainRoot, ledger) {

@@ -8,7 +8,7 @@ issue: 62
 pr: null
 branch: feat/probe-for-write
 owner: plan-62
-approved: false
+approved: true
 done_at: null
 task_id: issue-62
 planned_at: ba4de9c66d20451d8daf6e9f310553ec68fb3258

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 写操作路径改用 probeForWrite 与静态门禁全覆盖
-status: draft
+status: approved
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -9,9 +9,9 @@ issue: 62
 pr: null
 branch: feat/probe-for-write
 owner: plan-62
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-62, round=1, sha=1a59df79576b, summary=Plan Critique passed: verified Issue #62 coverage, all 4 bare probeGitHubEnv write paths + flow-sync PR trigger + shared.mjs export, zero missed kit/ write paths, C1-C4 testability and I145 non-collision with #56 (I139-I142) and #51 (I143-I144), and <=800 line budget.)"
 related_prd: null
 related_todo: ../todo/261118-issue62-probe-for-write-todo.md
 high_risk_paths: [kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-flow/scripts/flow-batch.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-sync.mjs, kit/skills/dev-govern/scripts/govern-state.mjs, kit/skills/dev-govern/scripts/govern-audit.mjs, kit/skills/lib/shared.mjs]

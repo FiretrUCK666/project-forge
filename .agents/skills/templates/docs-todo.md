@@ -107,6 +107,13 @@ related_spec: null
 
 <!-- /section -->
 
+<!-- section: clarifications optional -->
+## 澄清与补充记录
+
+- （本轮无额外澄清补充；用户拍板确认的新增要求可通过 `doc-plan.mjs clarify` 写入「已确认：…」）
+
+<!-- /section -->
+
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）

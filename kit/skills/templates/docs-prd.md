@@ -185,4 +185,11 @@ related_todo: null
 
 <!-- /section -->
 
+<!-- section: clarifications optional -->
+## 澄清与补充记录
+
+- （本轮无额外澄清补充；用户拍板确认的新增要求可通过 `doc-plan.mjs clarify` 写入「已确认：…」）
+
+<!-- /section -->
+
 > 确认需调整系统模块或对外契约时，以此 PRD 为依据补充 `docs/specs/` 后再进入实现；需求全部交付后随同关联 `SPEC`/`Todo` 成对归档至 `docs/archive/prd/`。

@@ -70,6 +70,6 @@ related_spec: ../specs/261117-issue49-survey-honesty-spec.md
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs` → 218 项通过 / 0 失败；`node scripts/dev/preflight.mjs` → 33 项读数 0 失败；`node scripts/dev/gap-coverage.mjs` → 19 条各有处置；`node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check` 全绿；`node scripts/dev/verify-injections.mjs` → 129 条判据都能被抓到（新增 I112–I120）。
+- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs` → 225 项通过 / 0 失败；`node scripts/dev/preflight.mjs` → 33 项读数 0 失败；`node scripts/dev/gap-coverage.mjs` → 19 条各有处置；`node scripts/compose-agents.mjs . --check`、`node scripts/equip.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check` 全绿；`node scripts/dev/verify-injections.mjs` → 136 条判据都能被抓到（新增 I118–I127）。
 - **文档同步检查**：`AGENTS.md` 的「探索策略」受管区由 `compose-agents` 生成、与模板一致；`docs/TDD.md` 的共享内核模块表已补 `command-lex.mjs`、`tool-owned.mjs`、`symbol-index.mjs`；`README.md` 与 `README.en.md` 成对同步。
 - **遗留问题**：无。

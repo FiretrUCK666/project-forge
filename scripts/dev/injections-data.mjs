@@ -1044,7 +1044,7 @@ export const INJECTIONS = [
     expect: '大需求判出必写 PRD',
   },
   {
-    id: 'I112',
+    id: 'I118',
     what: '空壳 TDD 不再判红（占位符原样、只列模块名、三五行都当成写完了）',
     file: 'kit/skills/dev-govern/scripts/govern-docs.mjs',
     from: '      const shellReasons = tddShellReasons(tddInfo.text)',
@@ -1052,7 +1052,7 @@ export const INJECTIONS = [
     expect: '空壳 TDD 判红',
   },
   {
-    id: 'I113',
+    id: 'I119',
     what: '手写契约没验过却被说成结构完整（agents.unverified 被摘掉）',
     file: 'scripts/review.mjs',
     from: '      } else if (contract.health.handWritten) {',
@@ -1060,7 +1060,7 @@ export const INJECTIONS = [
     expect: '手写契约要说清',
   },
   {
-    id: 'I114',
+    id: 'I120',
     what: '空仓把「几条判据根本没跑起来」说成「没有会出事的缺口」',
     file: 'scripts/review.mjs',
     from: '  } else if (result.unscanned.length > 0) {',
@@ -1068,7 +1068,7 @@ export const INJECTIONS = [
     expect: '空仓的结论不许说',
   },
   {
-    id: 'I115',
+    id: 'I121',
     what: '超长命令被截断后仍塞进可执行块（照抄必失败）',
     file: 'scripts/compose-agents.mjs',
     from: '        if (Buffer.byteLength(text, \'utf8\') > INLINE_COMMAND_MAX_BYTES) {',
@@ -1076,7 +1076,7 @@ export const INJECTIONS = [
     expect: '超 500 字节的命令不进可执行块',
   },
   {
-    id: 'I116',
+    id: 'I122',
     what: '命令位置只留最后一段，唯一入口 test-mac-pure.sh 再也探测不到',
     file: 'kit/skills/lib/command-lex.mjs',
     from: '  const positions = [head, verb].filter(Boolean).map(commandNameOf)',
@@ -1084,7 +1084,7 @@ export const INJECTIONS = [
     expect: '命令动作词只认命令位置',
   },
   {
-    id: 'I117',
+    id: 'I123',
     what: '可复用模块把工具产物也推荐出去（项目自己的代码一条都进不了榜）',
     file: 'kit/skills/dev-explore/scripts/repo-map.mjs',
     from: "    if (isToolOwnedPath(f.rel)) return false\n    if (!isSourceCodeFile(f) || TEST_FILE_RE.test(f.rel)) return false\n    return /(?:^|\\/)(?:lib|shared|utils?|helpers?|common|core|domain)\\//i.test(f.rel)",
@@ -1092,7 +1092,7 @@ export const INJECTIONS = [
     expect: '可复用模块与入口滤掉工具产物',
   },
   {
-    id: 'I118',
+    id: 'I124',
     what: '没有符号规则的语言被当成「这个文件没有符号」（空数组冒充已抽取）',
     file: 'kit/skills/lib/symbol-index.mjs',
     from: "  if (!rules) return { lang, supported: false, status: 'unsupported', symbols: [] }",
@@ -1100,7 +1100,7 @@ export const INJECTIONS = [
     expect: '可复用模块与入口滤掉工具产物',
   },
   {
-    id: 'I119',
+    id: 'I125',
     what: '规模跨了档而契约里的探索策略不跟着变（重入时没人看得见这次变化）',
     file: 'scripts/compose-agents.mjs',
     from: "  if (!strategy || strategy.tier === 'none') return ''",
@@ -1108,11 +1108,19 @@ export const INJECTIONS = [
     expect: '规模跨档后策略变化要带依据',
   },
   {
-    id: 'I120',
+    id: 'I126',
     what: '规模计数不再排除工具产物（先装套件还是先勘察决定了这个仓该不该并行）',
     file: 'scripts/lib/survey-workspace.mjs',
     from: "    const toolOwned = protocol.isToolOwnedPath(file.rel)\n    if (!isJunkFile(file.rel) && !toolOwned) {",
     to: "    if (!isJunkFile(file.rel)) {",
     expect: '规模计数的代码段里不许出现工具产物目录',
+  },
+  {
+    id: 'I127',
+    what: 'tdd-parity 匹配导出符号时不剥注释（注释里提一嘴旧导出就能掩盖真实删除）',
+    file: 'kit/skills/lib/tdd-parity.mjs',
+    from: "  const codeOnly = stripCodeCommentsLines(lines.join('\\n'), ext)",
+    to: '  const codeOnly = lines',
+    expect: '注释里的旧导出名掩盖了真实删除',
   },
 ]

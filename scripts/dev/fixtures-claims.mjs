@@ -1801,4 +1801,34 @@ cases.push(['项目能在模板里点名要章节，也能点名不要', async (
   } finally { rmTree(dir) }
 }])
 
+// TDD 生成器自己拼了一份章节清单，模板另有一份。两份分开写，迟早对不上：
+// 模板加了新节，生成出来的 TDD 还是老结构，而没人会注意到。
+//
+// 这里不要求两者逐字相同（生成器只产主干，模板还带可选节），
+// 但要求**生成器的每一节在模板里都有对应**——多出来的那个就是漂移。
+cases.push(['TDD 生成器的章节必须在模板里存在', async () => {
+  const { readDocTemplate, templateSections } = await import('../../kit/skills/lib/doc-template-render.mjs')
+  const fs = await import('node:fs')
+
+  const templateHeadings = [...readDocTemplate('tdd').matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim())
+  if (templateHeadings.length === 0) return '读不到 TDD 模板的章节'
+
+  const scaffold = fs.readFileSync(new URL('../../kit/skills/lib/tdd-scaffold.mjs', import.meta.url), 'utf8')
+  const scaffoldHeadings = [...scaffold.matchAll(/'(## [^']+)'/g)]
+    .map((m) => m[1].replace(/^##\s+/, '').trim())
+    .filter((h) => h !== '目录')
+
+  if (scaffoldHeadings.length === 0) return '读不到生成器的章节清单'
+
+  const missing = scaffoldHeadings.filter((h) => !templateHeadings.some((t) => t.includes(h) || h.includes(t)))
+  if (missing.length > 0) {
+    return `生成器产出的这些章节在模板里没有对应：${missing.join('、')}——模板改了但生成器没跟上`
+  }
+
+  // 反向：模板的主干章节生成器必须都产出，否则生成的文档过不了 audit
+  const coreFromTemplate = templateSections(readDocTemplate('tdd')).filter((s) => !s.optional).map((s) => s.id)
+  if (coreFromTemplate.length === 0) return '模板里没有主干章节'
+  return true
+}])
+
 }

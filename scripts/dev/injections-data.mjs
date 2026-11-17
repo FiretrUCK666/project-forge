@@ -980,6 +980,14 @@ export const INJECTIONS = [
     expect: '交接包给角色边界',
   },
   {
+    id: 'I111',
+    what: '审核侧拿不到上一轮意见（每轮都从零开始审）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: "      const findings = Array.isArray(last.findings) ? last.findings : []",
+    to: "      const findings = []",
+    expect: '审核角色拿到这一轮该看什么',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

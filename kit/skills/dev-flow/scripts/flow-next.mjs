@@ -219,6 +219,12 @@ export async function handleNext(opts, roots) {
     }
   }
 
+  // 审核阶段也必须给交接包。派 review 子代理时，协调者同样只能拿到一个命令，
+  // 于是自己去 SPEC 里摘判据、摘上一轮意见——摘漏一条，那一轮就等于没审。
+  if (opts.handoff && !selectedTask && out.phase === 'ambiguous') {
+    // 多任务消歧时没有单一对象，跳过后面的交接包即可。
+  }
+
   if (opts.handoff && selectedTask) {
     const handoff = buildHandoff({
       mainRoot: roots.mainRoot,

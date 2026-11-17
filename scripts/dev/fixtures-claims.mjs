@@ -2192,4 +2192,43 @@ cases.push(["交接包给角色边界与状态机指针，不抄流程清单", a
     return true
   } finally { rmTree(dir) }
 }])
+
+// 审核侧此前完全拿不到交接包：协调者派 review 子代理时只能自己现编 prompt，
+// 摘漏一条上一轮意见，那一轮就等于没审。这不是「实现侧的问题」，是两边的共同缺口。
+cases.push(["审核角色拿到这一轮该看什么，实现角色不拿", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+
+  const ledger = {
+    taskId: "x", linkedIssues: [], role: "local-only",
+    specFile: "docs/specs/261117-issue49-survey-honesty-spec.md", todoFile: null,
+    branch: "b", baseBranch: "main", baseSha: "abc",
+    rounds: [{ round: 1, verdict: "changes", headSha: "aaa", findings: [
+      { severity: "must", text: "C7 的判红形式与真实输出对不上" },
+      { severity: "should", text: "C3 措辞可再收窄" },
+    ] }],
+  }
+
+  const rev = buildHandoff({ mainRoot: ".", ledger, policy: {}, ownerRole: "reviewer", headSha: "bbb" })
+
+  // 正向：Round 2 必须提示新建独立子代理
+  if (!rev.prompt.includes("Round 2")) return "没算出下一轮是 Round 2"
+  if (!rev.prompt.includes("必须新建独立子代理")) return "Round 2 没提示必须换人"
+
+  // 正向：上一轮意见要逐条带到（摘要都不给，等于让人重头审）
+  if (!rev.prompt.includes("C7 的判红形式与真实输出对不上")) return "上一轮的意见没带过来"
+  if (!rev.prompt.includes("必修")) return "没标出哪条是必修"
+
+  // 正向：同一判据要提醒「只对着判据判断」
+  if (!rev.prompt.includes("验收标准是冻结的")) return "没说明判据是冻结的"
+
+  // 反向：实现角色不该看到审核侧的清单——那是别人的活
+  const impl = buildHandoff({ mainRoot: ".", ledger, policy: {}, ownerRole: "implementer", headSha: "bbb" })
+  if (impl.prompt.includes("这一轮该看什么")) return "实现角色拿到了审核清单"
+
+  // 反向：HEAD 没变时要说清「同样的输入不会得出不同结论」
+  const same = buildHandoff({ mainRoot: ".", ledger, policy: {}, ownerRole: "reviewer", headSha: "aaa" })
+  if (!same.prompt.includes("当前 HEAD 与上一轮审查时相同")) return "HEAD 没变却没提醒"
+
+  return true
+}])
 }

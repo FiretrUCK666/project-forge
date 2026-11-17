@@ -304,6 +304,48 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   lines.push('')
   lines.push(boundary.report)
   lines.push('')
+  // 审核侧要的两样：这一轮该看什么、上一轮提了什么。
+  // 实现侧不需要它们（那是审查者的事），所以按角色给，不给所有人。
+  if (role === 'reviewer' || role === 'human') {
+    const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+    const last = rounds.length > 0 ? rounds[rounds.length - 1] : null
+    const nextRound = rounds.length > 0
+      ? Math.max(...rounds.map((r) => Number(r?.round ?? r) || 0)) + 1
+      : 1
+
+    lines.push('## 这一轮该看什么')
+    lines.push('')
+    lines.push(`Round ${nextRound}。` + (nextRound >= 2
+      ? '**必须新建独立子代理**——复用上一轮的上下文见过自己提的意见，那一轮已经不算独立审。'
+      : ''))
+    lines.push('')
+    if (last) {
+      lines.push(`上一轮（Round ${last.round ?? '?'}）的结论：\`${last.verdict ?? '未记录'}\``)
+      if (last.headSha && headSha && last.headSha === headSha) {
+        lines.push('')
+        lines.push('**当前 HEAD 与上一轮审查时相同**——什么都没改。同样的输入不会得出不同的结论，')
+        lines.push('先让实现者按上一轮意见改，改完再复审。')
+      }
+      const findings = Array.isArray(last.findings) ? last.findings : []
+      if (findings.length > 0) {
+        lines.push('')
+        lines.push(`上一轮提了 ${findings.length} 条：`)
+        for (const f of findings.slice(0, 20)) {
+          lines.push(`- [${f.severity === 'must' ? '必修' : '建议'}] ${f.text ?? f}`)
+        }
+        if (findings.length > 20) lines.push(`- （另有 ${findings.length - 20} 条，见账本）`)
+      }
+    } else {
+      lines.push('第一轮，按完整范围审。')
+      lines.push('')
+      lines.push('审出的每一条都要记下来——那是下一轮的范围依据。不记，下一轮又从零开始。')
+    }
+    lines.push('')
+    lines.push('**只对着这些判据判断**：上面的验收标准是冻结的。判据本身有问题就提出来，')
+    lines.push('但不要因为「读起来不顺」判不通过。')
+    lines.push('')
+  }
+
   const gates = policy?.requiredGates ?? []
   if (gates.length > 0) {
     lines.push('## 这门改动的必过门')

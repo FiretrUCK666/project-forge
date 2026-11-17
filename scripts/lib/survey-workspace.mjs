@@ -799,6 +799,7 @@ export function scanWorkspaceRaw(root) {
           name: entry.name,
           full,
           size: st.size,
+          text: null,
           textSecrets: null,
           textLeaks: null,
           unreadable: false,
@@ -808,6 +809,7 @@ export function scanWorkspaceRaw(root) {
           if (text === undefined) {
             rec.unreadable = true
           } else {
+            rec.text = text
             const mightHaveSecret = SECRET_FAST_PRECHECK_RE.test(text)
             const mightHaveHome = Boolean(homeLeaf && text.toLowerCase().includes(homeLeaf))
             if (mightHaveSecret || mightHaveHome) {
@@ -891,6 +893,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
   }
 
   let codeFiles = 0
+  let codeLines = 0
   let docFiles = 0
   let effectiveFiles = 0
   let skippedLargeFiles = 0
@@ -907,10 +910,19 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
   }
 
   for (const file of files) {
-    if (!isJunkFile(file.rel)) {
+    // 规模判据只读项目自己的东西。
+    //
+    // 工具装进项目里的技能源码不是这个项目的代码量：实测装套件前 codeFiles 是 40，
+    // 装完变 86，于是 tier 从 single-pass 跳到 parallel-subagents——
+    // **「先装套件还是先勘察」决定了这个项目该不该并行探索**。因果是倒的。
+    const toolOwned = protocol.isToolOwnedPath(file.rel)
+    if (!isJunkFile(file.rel) && !toolOwned) {
       effectiveFiles += 1
-      if (CODE_EXT.test(file.name)) codeFiles += 1
-      else if (DOC_EXT.test(file.name)) docFiles += 1
+      if (CODE_EXT.test(file.name)) {
+        codeFiles += 1
+        // 行数只能从已经读进内存的文本里数，不为此多开一次 IO。
+        if (typeof file.text === 'string') codeLines += protocol.countTextLines(file.text)
+      } else if (DOC_EXT.test(file.name)) docFiles += 1
     }
 
     const tracked = trackedSet.has(file.rel)
@@ -946,6 +958,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
     totalFiles: files.length,
     effectiveFiles,
     codeFiles,
+    codeLines,
     docFiles,
     unignoredOutputDirs,
     ignoredButTracked: ignoredTracked,
@@ -974,6 +987,22 @@ const RELEASE_WORKFLOW_PATTERNS = [
   { tool: 'changesets', re: /changesets\/action/i },
   { tool: 'semantic-release', re: /\bsemantic-release\b/i },
 ]
+
+/**
+ * 列出某个文档目录下**真实存在的文件**（相对仓库根的 posix 路径）。
+ *
+ * 只给「这个目录里有什么」，不做任何判断——判断在 `isReentryProject` 与
+ * `hasRealContent` 里，那里才知道「空骨架」与「有正文」的区别。
+ */
+function listRelFiles(dirAbs, dirRel) {
+  if (!existsSync(dirAbs)) return []
+  let names = []
+  try { names = readdirSync(dirAbs) } catch { return [] }
+  return names
+    .filter((name) => !isMacMetadataName(name))
+    .sort()
+    .map((name) => `${dirRel}/${name}`)
+}
 
 function detectExistingDesignDocs(root) {
   const found = new Set()
@@ -1118,6 +1147,10 @@ export function detectDocs(root) {
   const specsDir = existsSync(join(root, 'docs', 'specs'))
   const todoDir = existsSync(join(root, 'docs', 'todo'))
   const prdDir = existsSync(join(root, 'docs', 'prd'))
+  // 「目录存在」与「目录里有真东西」是两件事：`equip` 会建空骨架，
+  // 拿目录存在当「这个项目治理过」，等于让工具自己证明自己。
+  const specsDirContent = listRelFiles(join(root, 'docs', 'specs'), 'docs/specs')
+  const todoDirContent = listRelFiles(join(root, 'docs', 'todo'), 'docs/todo')
   let agentsBytes = 0
   if (agents) {
     try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 }
@@ -1139,6 +1172,8 @@ export function detectDocs(root) {
     specsDir,
     todoDir,
     prdDir,
+    specsDirContent,
+    todoDirContent,
     otherAiConventions,
     workflows,
     workflowFacts,

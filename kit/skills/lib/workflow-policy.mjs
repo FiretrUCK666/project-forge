@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 import { checkMermaidLabelWidth } from './docs.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
-import { sanitizeTaskId } from './ledger.mjs'
+import { sanitizeTaskId, nextReviewRound } from './ledger.mjs'
 import { parseBodyRelations } from './platform.mjs'
 import { isProfileExplicitNone } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
@@ -477,10 +477,22 @@ export function evaluateNextState({
   const policy = rt.policy ?? null
   const rounds = Array.isArray(t.rounds) ? t.rounds : []
   const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
-  const nextRound = rounds.length + 1
+  const nextRound = nextReviewRound(t)
   const currentHead = rt.headSha ?? null
   const evidenceVal = rt.evidenceValidation ?? { ok: false, code: 'BLOCKED_NOT_VERIFIED' }
   const needsFinalize = t.caseType === 3 || t.caseType === 4 || Boolean(t.todoFile) || Boolean(t.specFile)
+  // 「一件事都没做过」：工作区干净、且分支上没有基线没有的提交。
+  // 用它区分「还没开始」与「做完了待归档」——两者都满足「尚未 finalized」。
+  // 「还没做过事」：没交出去过、没轮次、工作区干净、分支上没有基线之外的提交。
+  // 不写成 status === 'started'——认领会让 status 变成 claimed，那一格就漏了。
+  const CLOSED_STATUSES = new Set(['submitted', 'local-ready', 'awaiting-upstream-merge', 'merged', 'aborted'])
+  const nothingImplementedYet = Boolean(
+    !CLOSED_STATUSES.has(t.status)
+    && !t.finalized
+    && !(t.rounds ?? []).length
+    && !(rt.dirty > 0)
+    && !((rt.commitsAheadOfBase ?? 0) > 0),
+  )
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)
   const reviewCoversHead = Boolean(t.reviewPassed === true && (!currentHead || t.reviewPassedHead === currentHead) && (!lastRound || !currentHead || lastRound.headSha === currentHead))
@@ -508,6 +520,14 @@ export function evaluateNextState({
     ownerRole = 'coordinator'
     nextAction = '任务已被释放认领，请先重新 claim 后继续'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${t.taskId}`
+  } else if (t.status === 'started' && !t.claimedAt && t.role !== 'inbound-external-pr') {
+    // 认领是「我接手了」的平台侧落地。它是一个独立状态，
+    // 因为没有它，这一步就没人触发——Issue 上永远不会有开工痕迹。
+    phase = 'needs-claim'
+    ownerRole = 'implementer'
+    blockingReasons.push('BLOCKED_NOT_CLAIMED')
+    nextAction = '先认领再动手：认领会往关联 Issue 留开工痕迹，并记下谁在做'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${t.taskId}`
   } else if (t.status === 'merged') {
     phase = 'needs-cleanup'
     ownerRole = 'coordinator'
@@ -529,6 +549,14 @@ export function evaluateNextState({
     ownerRole = 'implementer'
     nextAction = '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
     command = `git -C "${t.worktreePath ?? '.'}" status`
+  } else if ((t.issueContextUnavailable ?? []).length > 0) {
+    phase = 'needs-issue-context'
+    ownerRole = 'implementer'
+    blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')
+    const nums = t.issueContextUnavailable.join('、')
+    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：gh issue view <N> --repo <声明仓库>，`
+      + '或显式说明「这一条凭现有信息无法澄清」并写进 Todo 的待拍板事项'
+    command = `gh issue view ${t.issueContextUnavailable[0]} --json number,title,body`
   } else if (stopLossActive) {
     phase = 'stop-loss-escalated'
     ownerRole = 'human'
@@ -547,6 +575,16 @@ export function evaluateNextState({
     blockingReasons.push('CHANGES_REQUESTED')
     nextAction = `Round ${lastRound.round} 已退回修改，请在 ${t.worktreePath ?? '原分支'} 修复并提交新 commit 后执行 verify + submit --rework`
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" rework --task ${t.taskId}`
+  } else if (nothingImplementedYet) {
+    // 还没提交过任何东西，下一步是实施，不是归档。
+    // 少了这一支，对新任务来说「尚未 finalized」天然成立，刚建好就要求归档。
+    //
+    // 命令不能是 `flow next` 自己——那是循环：跑完还是这一格，等于什么都没说。
+    // 这一格能给的只有「去哪个位子里改」，推进要靠真的写代码提交。
+    phase = 'implementing'
+    ownerRole = 'implementer'
+    nextAction = '按交接包实施，改完提交；提交后按 flow next 继续'
+    command = `git -C "${t.worktreePath ?? '.'}" status`
   } else if (finalizeStale) {
     phase = 'needs-finalize'
     ownerRole = 'implementer'
@@ -589,6 +627,23 @@ export function evaluateNextState({
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
   }
 
+  // 主工作区直接改文件：warning 不是 blocker。
+  //
+  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
+  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
+  //
+  // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
+  // 真正的硬拦留在 merge。所以它进 `warnings` 而不进 `blockingReasons`——两件事不能混。
+  const warnings = []
+  if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {
+    warnings.push({
+      code: 'WARN_WORKING_IN_MAIN_CHECKOUT',
+      message: `主工作区有 ${rt.mainDirtyCount} 处未提交改动，而这条任务的实施位是 ${t.worktreePath}`
+        + '——Case 2/3/4 的活应该落在隔离位；小改动（Case 1）才在主工作区直接改。'
+        + '不改也行，但「这次改动包含什么」会因此说不清。',
+    })
+  }
+
   return {
     taskId: t.taskId,
     phase,
@@ -596,6 +651,7 @@ export function evaluateNextState({
     nextAction,
     command,
     blockingReasons,
+    warnings,
     worktreePath: t.worktreePath ?? null,
     reviewWorktreePath: t.reviewWorktreePath ?? null,
     policy,

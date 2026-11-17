@@ -10,7 +10,9 @@ import { resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { buildHandoff } from '../../lib/handoff-package.mjs'
+import { buildSessionOrientation } from '../../lib/session-orient.mjs'
+import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -172,29 +174,110 @@ export async function handleNext(opts, roots) {
       nonDocChangesAfterFinalize = postFin.entries.some((e) => e.file && !/^docs\//.test(e.file))
     }
 
+    // 主工作区直接改文件：这是「绕过隔离位」的早期信号。
+    //
+    // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
+    // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
+    //
+    // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
+    // 真正的硬拦留在 merge。
+    const mainStatus = selectedTask.worktreePath && roots.mainRoot !== implRoot
+      ? await gitStatusPorcelainZ(roots.mainRoot)
+      : null
+    const mainDirtyCount = mainStatus?.ok ? mainStatus.entries.length : 0
+
+    // 分支上有没有基线没有的提交。rebase 会把基线的提交带进来，
+    // 所以这个数不因同步基线而变——只有真写了东西才会涨。
+    let commitsAheadOfBase = 0
+    if (exists) {
+      const baseRef = selectedTask.baseBranch || selectedTask.baseSha
+      if (baseRef) {
+        const countRes = await gitRun(implRoot, ['rev-list', '--count', `${baseRef}..HEAD`])
+        if (countRes.ok) commitsAheadOfBase = Number(countRes.stdout.trim()) || 0
+      }
+    }
+
     taskRuntime = {
       opInProgress: Boolean(op.inProgress),
       opName: op.op ?? null,
       headSha,
       dirty: stZ.entries.length,
+      mainDirtyCount,
       policy,
       evidenceValidation,
       nonDocChangesAfterFinalize,
+      profile,
+      commitsAheadOfBase,
     }
   }
 
-  const out = evaluateNextState({ activeTasks, selectedTask, taskRuntime })
+  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime })
+
+  // 待审查时签发一枚一次性令牌。
+  //
+  // 独立审查的身份不能只靠 `--reviewer-id` 一个自由字符串：谁能编一个不一样的名字。
+  // 令牌由这里现场签发、写进账本，`review-pack record` 必须持有它且只能消费一次。
+  // 它不承担「防伪到不可伪造」——它承担的是「把随便编个名的成本从 0 抬成一件显眼的事」。
+  //
+  // `--json` 也要带：只看 JSON 的调用方拿不到令牌就永远记不了审查。
+  if (out.phase === 'needs-review' && selectedTask) {
+    // 轮次只能有一个派生式（`ledger.mjs` 的 `nextReviewRound`）。
+    // 按条数算会在轮次有空档时算错，而空档是正常历史。
+    const round = nextReviewRound(selectedTask)
+    const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round)
+    out = {
+      ...out,
+      reviewToken: token,
+      command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${token}`,
+    }
+  }
+
+  // 审核阶段也必须给交接包。派 review 子代理时，协调者同样只能拿到一个命令，
+  // 于是自己去 SPEC 里摘判据、摘上一轮意见——摘漏一条，那一轮就等于没审。
+  if (opts.handoff && !selectedTask && out.phase === 'ambiguous') {
+    // 多任务消歧时没有单一对象，跳过后面的交接包即可。
+  }
+
+  if (opts.handoff && selectedTask) {
+    const handoff = buildHandoff({
+      mainRoot: roots.mainRoot,
+      ledger: selectedTask,
+      policy: out.policy ?? taskRuntime?.policy ?? null,
+      headSha: taskRuntime?.headSha ?? null,
+      ownerRole: out.ownerRole ?? null,
+      // Dev Profile 决定「必过门」那条命令长什么样——不传就只剩一个档位名。
+      profile: taskRuntime?.profile ?? out.profile ?? null,
+      // flow next 刚算出来的这一格，直接搬进交接包——丢掉它，子代理就不知道此刻要干什么。
+      current: out,
+    })
+    out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
+  }
+
   const payload = { ...out, hydration }
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   } else {
     process.stdout.write(`# flow next (${payload.phase} | owner=${payload.ownerRole})\n`)
+    // 冷启动：没有任何任务时，光说「去 start」等于让新会话自己翻目录。
+    // 把仓里已有的进度摆出来——那些信息一直都在，只是没有入口。
+    if (payload.phase === 'idle') {
+      const orient = buildSessionOrientation(roots.mainRoot)
+      process.stdout.write('\n')
+      process.stdout.write(orient.text)
+    }
     if (payload.taskId) process.stdout.write(`- 任务: ${payload.taskId} | risk=${payload.policy?.riskTier ?? '-'} | worktree=${payload.worktreePath ?? 'branch'}\n`)
     process.stdout.write(`- 下一步: ${payload.nextAction}\n`)
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
+    for (const w of payload.warnings ?? []) {
+      process.stdout.write(`- 提醒 ${w.code}: ${w.message}\n`)
+    }
     if (payload.candidates?.length > 0) {
       for (const c of payload.candidates) process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, branch=${c.branch ?? '-'})\n`)
+    }
+    if (payload.handoffPrompt) {
+      process.stdout.write('\n--- 交接包（可直接粘给子代理）---\n\n')
+      process.stdout.write(payload.handoffPrompt)
     }
     printNextStep([{ skill: 'dev-flow', text: payload.command }], { repoRoot: roots.mainRoot })
   }

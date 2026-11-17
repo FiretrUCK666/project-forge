@@ -15,9 +15,11 @@ import {
 import { checkEquip } from '../equip.mjs'
 import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
 import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
+import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
+import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
 
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 const OWN_INSTANCE_CHECKS = [
@@ -526,7 +528,7 @@ function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note }) {
     if (!/https:\/\/img\.shields\.io\/badge\//i.test(readText(join(ROOT, readmeRel)))) fail(`${readmeRel} 缺少 shields.io 事实徽章行`)
   }
 
-  for (const [tplRel, expectedKind] of [['templates/docs-prd.md', 'prd'], ['templates/docs-spec.md', 'spec'], ['templates/docs-todo.md', 'todo']]) {
+  for (const [tplRel, expectedKind] of [['kit/skills/templates/docs-prd.md', 'prd'], ['kit/skills/templates/docs-spec.md', 'spec'], ['kit/skills/templates/docs-todo.md', 'todo']]) {
     const fm = parseDocFrontmatter(readText(join(ROOT, tplRel)))
     if (!fm.hasFrontmatter) { fail(`${tplRel} 缺少 YAML Frontmatter（首行 --- ... ---）`); continue }
     if (fm.malformedFrontmatter) { fail(`${tplRel} YAML Frontmatter 格式错误：${fm.syntaxErrors.join('；')}`); continue }
@@ -564,6 +566,29 @@ function checkHygiene({ ROOT, rel, walk, fail }) {
       if (banned) fail(`${name} 包含禁止的内部黑话「${banned[0]}」`)
     }
   }
+
+  // 「只写现状」这条规矩要能被机器检查，否则它只是一句口号。
+  //
+  // 但不该一上线就让存量全红：那会逼人把这条检查关掉。所以冻结基线，
+  // **只报新增的履历体句子**——新写的能被抓住，旧的等它自然退役。
+  const baseline = readChangelogVoiceBaseline(ROOT)
+  const found = []
+  for (const file of files) {
+    const name = rel(file)
+    if (!/\.(?:md|mjs|js|ya?ml|json)$/i.test(name)) continue
+    // `.agents/` 是 `.kit/skills` 的镜像，同一个问题会在两处各报一次；
+    // 镜像由 `equip --check` 保证字节一致，不需要在这里重复扫。
+    if (/^(?:docs\/archive|docs\/release-notes|node_modules|\.agents)\//.test(name)) continue
+    // 夹具的存在意义就是装错的样本：写「早先这里是 join 拼接」是为了证明检测器抓得到。
+    // 用同一条规则去判它，等于要求测谎仪自己不能说谎。
+    if (/^scripts\/dev\/fixtures-[^/]+\.mjs$/.test(name)) continue
+    for (const hit of findChangelogVoice(readFileSync(file, 'utf8'), { file: name })) found.push(hit)
+  }
+  const fresh = findNewChangelogVoice(found, baseline)
+  for (const hit of fresh.slice(0, 5)) {
+    fail(`${hit.file}:${hit.line} 出现履历体写法「${hit.word}」——只写现在为什么这样，改过什么留给提交记录`)
+  }
+  if (fresh.length > 5) fail(`另有 ${fresh.length - 5} 处新增履历体写法未列出`)
 }
 
 function checkOwnInstances({ ROOT, rel, readText, walk, fail, note }) {
@@ -606,7 +631,7 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
     if (missing.length > 0) fail(`${relPath} 缺少多维护者团队协同要素：${missing.join('、')}`)
   }
 
-  for (const docPath of ['docs/TDD.md', 'templates/docs-tdd.md']) {
+  for (const docPath of ['docs/TDD.md', 'kit/skills/templates/docs-tdd.md']) {
     const p = join(ROOT, docPath)
     if (!existsSync(p)) { fail(`TDD 契约核对：缺 ${docPath}`); continue }
     const text = readText(p)
@@ -616,9 +641,23 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
       if (!/\barch-rules\s*:/.test(text)) fail('docs/TDD.md 缺少 arch-rules 校验块')
       if (!text.includes('Feature Map')) fail('docs/TDD.md 缺少 Feature Map 功能入口地图')
     } else {
-      if (!text.includes('[按需保留，不适用整节删除]')) fail('templates/docs-tdd.md 缺少 `[按需保留，不适用整节删除]` 裁剪标记')
-      if (text.includes('references/')) fail('templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
-      if (templateVarsOf(text).length > 0) fail('templates/docs-tdd.md 存在未登记模板变量占位')
+      // 可选章节用统一的 section 标记表达，不再靠一句人读的说明文字：
+      // 说明文字可以被忽略，标记会被渲染器与审计真正执行。
+      if (!/<!--\s*section:\s*[a-z-]+(\s+optional)?\s*-->/.test(text)) {
+        fail('kit/skills/templates/docs-tdd.md 没有任何 section 标记——可选章节无法按项目形态裁剪')
+      }
+      if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(text)) {
+        fail('kit/skills/templates/docs-tdd.md 没有任何 optional 章节——所有章节都强制，等于不认项目形态')
+      }
+      if (text.includes('references/')) fail('kit/skills/templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
+      // TDD 模板同样用 {{VAR}} 填事实（技术栈、运行时、模块表都是读得出来的）。
+      // 判据要的是「占位登记过」，不是「不许有占位」。
+      const tddVars = new Set(DOC_TEMPLATE_VARS.tdd)
+      for (const v of templateVarsOf(text)) {
+        if (!tddVars.has(v)) {
+          fail(`kit/skills/templates/docs-tdd.md 里的占位 {{${v}}} 没登记在 DOC_TEMPLATE_VARS.tdd——渲染会留下字面量`)
+        }
+      }
     }
   }
 

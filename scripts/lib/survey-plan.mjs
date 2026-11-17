@@ -51,6 +51,44 @@ export function computeRecommendedTier(facts, root) {
   }
 }
 
+/**
+ * 探索策略：按**真实通读成本**分档，不是按文件数。
+ *
+ * ## 为什么不能只数文件
+ *
+ * 文件数不衡量通读成本。实测的完整矩阵：
+ *
+ * | 真实规模 | codeFiles | 旧判据给的 tier |
+ * | --- | --- | --- |
+ * | 500 行 | 10 | single-pass（合理） |
+ * | 2 000 行 | 40 | single-pass（合理） |
+ * | 30 000 行 | 10 | **single-pass（不合理）** |
+ * | 28 000 行 | 40 | **single-pass（不合理）** |
+ *
+ * `28 000 行(single-pass)` 比 `4 050 行(parallel-subagents)` 大 7 倍，却拿到更低的档——
+ * 「随规模单调不降」被直接违反。真实后果是一个 28 189 行、30 个核心模块、双平台同构的
+ * 项目被判成「小型单仓结构清晰，单 Agent 通读即可」，于是主 Agent 只来得及 grep 几个
+ * 常量，最外层那几个上千行的状态机根本没读。
+ *
+ * ## 判据：任一维越线就升档
+ *
+ * 文件数、代码行数、模块数（顶层用户量最大的目录数）、语言数，各自有阈值；
+ * 任何一维越线就升到 `parallel-subagents`。不取加权平均——一维极大时平均值会把它拉平，
+ * 而通读成本是被最大那一维决定的。
+ *
+ * 阈值都给名字，不写裸数字：改阈值时知道自己在改什么。
+ */
+const EXPLORATION_THRESHOLDS = Object.freeze({
+  /** 超过这个文件数，逐个读完已经超出一次会话的合理额度。 */
+  codeFiles: 80,
+  /** 超过这个行数，即使文件很少也读不完（单文件几千行的状态机是真实存在的）。 */
+  codeLines: 4000,
+  /** 模块目录多到一定程度，彼此边界本身就要花时间理清。 */
+  modules: 8,
+  /** 多语言并存时每门语言都有自己的构建与约定，成本按语言数放大。 */
+  languages: 2,
+})
+
 export function computeExplorationStrategy(facts) {
   const maturity = facts?.maturity
   if (maturity === 'empty') {
@@ -58,33 +96,46 @@ export function computeExplorationStrategy(facts) {
       tier: 'none',
       reason: '空目录先问 3-4 个起步问题，不派深挖探索',
       shards: [],
+      evidence: { codeFiles: 0, codeLines: 0, modules: 0, languages: 0 },
     }
   }
 
   const codeFiles = facts?.scale?.codeFiles ?? 0
+  const codeLines = facts?.scale?.codeLines ?? 0
   const workspaceDeclared = Boolean(facts?.workspace?.declared)
   const subdirCount = facts?.ecosystem?.subdirs?.length ?? 0
   const kindCount = facts?.ecosystem?.kinds?.length ?? 0
   const reentry = facts?.reentry ?? {}
   const otherConventionsCount = facts?.docs?.otherAiConventions?.length ?? 0
+  const moduleCount = (reentry.unregisteredTopDirs ?? []).length
+    || (facts?.ecosystem?.subdirs ?? []).length
+    || Math.min(codeFiles, 1)
 
-  const isLarge = codeFiles > 80
+  const evidence = { codeFiles, codeLines, modules: moduleCount, languages: kindCount }
+
+  // 任一维越线即视为「读不完」。四个判断各自独立，不看别人。
+  const oversize = []
+  if (codeFiles > EXPLORATION_THRESHOLDS.codeFiles) oversize.push(`代码文件 ${codeFiles} 个`)
+  if (codeLines > EXPLORATION_THRESHOLDS.codeLines) oversize.push(`代码 ${codeLines} 行`)
+  if (moduleCount > EXPLORATION_THRESHOLDS.modules) oversize.push(`模块目录 ${moduleCount} 个`)
+  if (kindCount > EXPLORATION_THRESHOLDS.languages) oversize.push(`语言/生态 ${kindCount} 种`)
+
   const isPolyglotOrMonorepo = workspaceDeclared || subdirCount > 1 || kindCount > 1
   const isReentryComplex = Boolean(
     reentry.isReentry
     && (reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0 || otherConventionsCount > 0),
   )
 
-  if (!isLarge && !isPolyglotOrMonorepo && !isReentryComplex) {
+  if (oversize.length === 0 && !isPolyglotOrMonorepo && !isReentryComplex) {
     return {
       tier: 'single-pass',
-      reason: '小型单仓结构清晰，单 Agent 通读即可',
+      reason: `小型单仓结构清晰（${codeFiles} 文件 / ${codeLines} 行），单 Agent 通读即可`,
       shards: [],
+      evidence,
     }
   }
 
-  const reasons = []
-  if (isLarge) reasons.push(`代码文件 ${codeFiles} 个`)
+  const reasons = [...oversize]
   if (isPolyglotOrMonorepo) reasons.push('存在多包或多生态/子目录布局')
   if (isReentryComplex) reasons.push('重入存在契约漂移、未登记模块或既有 AI 约定')
 
@@ -155,5 +206,6 @@ export function computeExplorationStrategy(facts) {
     tier: 'parallel-subagents',
     reason: reasons.join('；'),
     shards,
+    evidence,
   }
 }

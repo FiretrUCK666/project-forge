@@ -68,12 +68,14 @@ export function evaluateConditions(text, condMap = {}, file = 'template.md') {
   return out.join('\n')
 }
 
-/**
- * 替换全部 `{{VAR}}`；未登记变量、缺失取值或任何残留 `{{…}}` 立即报错。
- */
 export function renderVars(text, vars = {}) {
   const source = String(text ?? '')
-  const used = [...new Set([...source.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
+  // 取占位名时要先剥掉宿主语法（`${{ ... }}`），否则 `${{GITHUB_SHA}}` 会被当成
+  // 本工具的 `{{GITHUB_SHA}}`——它的名字恰好是全大写，正好落在「未登记」那一类，
+  // 于是用了 Actions 表达式的项目一条命令都跑不了。豁免必须在**所有**检查之前，
+  // 不能只加在形状检查那一处。
+  const hostStripped = source.replace(/\$\{\{[\s\S]*?\}\}/g, '')
+  const used = [...new Set([...hostStripped.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
   const unknown = used.filter((name) => !TEMPLATE_VARS.includes(name))
   if (unknown.length > 0) {
     throw new TemplateError(`模板里有未登记的占位符：${unknown.map((n) => `{{${n}}}`).join('、')}（见 lib/protocol.mjs 的 TEMPLATE_VARS）`)
@@ -82,15 +84,21 @@ export function renderVars(text, vars = {}) {
   if (missing.length > 0) {
     throw new TemplateError(`这些占位符没有对应的取值：${missing.map((n) => `{{${n}}}`).join('、')}`)
   }
-  let out = source
-  for (const name of used) out = out.split(`{{${name}}}`).join(String(vars[name]))
 
-  const leftovers = [...new Set([...out.matchAll(/\{\{[^}]*\}\}/g)].map((m) => m[0]))]
-  if (leftovers.length > 0) {
-    throw new TemplateError(`渲染之后还剩这些占位符：${leftovers.join('、')}`
+  const shapes = new Set()
+  for (const m of hostStripped.matchAll(/\{\{[\s\S]*?\}\}/g)) {
+    const raw = m[0]
+    if (/^\{\{[A-Z0-9_]+\}\}$/.test(raw)) continue
+    shapes.add(raw)
+  }
+  if (shapes.size > 0) {
+    throw new TemplateError(`模板正文里有这些形状不对的占位符：${[...shapes].join('、')}`
       + '——占位符必须是全大写的已登记名字、且前后紧贴大括号（`{{NAME}}` 而不是 `{{ NAME }}`）；'
       + '写成别的形状既不会被替换，也不会有人发现')
   }
+
+  let out = source
+  for (const name of used) out = out.split(`{{${name}}}`).join(String(vars[name]))
   return out
 }
 

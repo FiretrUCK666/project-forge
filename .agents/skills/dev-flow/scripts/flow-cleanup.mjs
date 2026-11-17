@@ -9,14 +9,11 @@ import { isAbsolute, relative, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
-  inspectBranchMergeState, samePath,
-} from '../../lib/git.mjs'
+  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ, inspectBranchMergeState, samePath, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv,
-} from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
@@ -69,7 +66,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
   const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git')
   const ghProbe = _ghProbe
     ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
-    ?? (needGhApi ? await probeGitHubEnv({ cwd: mainRoot, remoteUrls }) : null)
+    ?? (needGhApi ? await probeForWrite({ cwd: mainRoot, remoteUrls }) : null)
   const ghClient = _ghClient ?? ghProbe?.client
   const backend = createTaskBackend({
     role: ledger.role,
@@ -170,11 +167,29 @@ export async function handleCleanup(opts, roots) {
   const removedWorktrees = []
   for (const wt of worktreesToRemove) {
     if (isCwdInside(wt.abs)) throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
-    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs)
+    // 解绑在前、判断在后：有未获准的外链就整条停下，绝不带着链接去 `worktree remove --force`
+    // （那一步会跟随 junction 递归删掉主仓里的目标内容，而退出码依然是 0）。
+    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
+    if (unmount.ok === false) {
+      const lines = unmount.blocked.map((one) => `  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）`)
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_OUTBOUND_LINKS', worktree: wt.path, blockedLinks: unmount.blocked }, null, 2)}\n`)
+      } else {
+        process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接。\n`)
+        for (const line of lines) process.stderr.write(`${line}\n`)
+        process.stderr.write('`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
+        process.stderr.write('确认可以切断后，用 --allow-outbound <路径> 逐个列出重跑；没有「全部放行」开关。\n')
+      }
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
     const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
     const rmRes = await gitRun(roots.mainRoot, rmArgs)
     if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
-    removedWorktrees.push({ path: wt.path, unmountedDeps: unmount.unmounted.length })
+    removedWorktrees.push({
+      path: wt.path,
+      unmountedDeps: unmount.unmounted.length,
+      unmountedLinks: unmount.unmounted.map((u) => ({ path: u.path, target: u.target })),
+    })
   }
 
   let deletedLocalBranch = false
@@ -200,6 +215,12 @@ export async function handleCleanup(opts, roots) {
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
     process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
+    for (const w of removedWorktrees) {
+      const links = w.unmountedLinks ?? []
+      if (links.length === 0) continue
+      process.stdout.write(`- ${w.path}：解绑 ${links.length} 条共享依赖链接\n`)
+      for (const link of links) process.stdout.write(`  * ${link.path} -> ${link.target ?? '(目标已不存在)'}\n`)
+    }
     printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }
@@ -267,7 +288,12 @@ export async function handleAbort(opts, roots) {
   }
   for (const wt of worktrees) {
     if (isCwdInside(wt.abs)) throw new Error(`当前工作目录位于待拆除 worktree (${wt.path}) 内，请先切回主仓`)
-    unmountSharedDeps(roots.mainRoot, wt.abs)
+    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
+    if (unmount.ok === false) {
+      process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接，放弃任务同样不得连带删除主仓内容。\n`)
+      for (const one of unmount.blocked) process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
     const rmRes = await gitRun(roots.mainRoot, opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs])
     if (!rmRes.ok) throw new Error(`移除 ${wt.path} 失败：${rmRes.stderr}`)
   }

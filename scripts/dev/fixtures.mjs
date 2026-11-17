@@ -17,12 +17,17 @@ import { registerSurveyCases } from './fixtures-survey.mjs'
 import { registerContractCases } from './fixtures-contracts.mjs'
 import { registerReviewCases } from './fixtures-review.mjs'
 import { registerClaimsCases } from './fixtures-claims.mjs'
+import { registerFlowDocsCases } from './fixtures-flow-docs.mjs'
+import { registerDocRuleCases } from './fixtures-doc-rules.mjs'
+import { registerDocShapeCases } from './fixtures-doc-shapes.mjs'
+import { registerHandoffReviewCases } from './fixtures-handoff-review.mjs'
 import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
-import { registerM2Cases } from './fixtures-m2.mjs'
-import { registerM3Cases } from './fixtures-m3.mjs'
-import { registerM4Cases } from './fixtures-m4.mjs'
+import { registerFlowStateCases } from './fixtures-flow-state.mjs'
+import { registerFlowParallelCases } from './fixtures-flow-parallel.mjs'
+import { registerLifecycleCases } from './fixtures-lifecycle.mjs'
+import { registerReviewGovernCases } from './fixtures-review-govern.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
@@ -31,11 +36,16 @@ initTestBackupDir()
 
 const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
-  ['m2', registerM2Cases],
-  ['m3', registerM3Cases],
-  ['m4', registerM4Cases],
+  ['flow-state', registerFlowStateCases],
+  ['flow-parallel', registerFlowParallelCases],
+  ['lifecycle', registerLifecycleCases],
+  ['review-govern', registerReviewGovernCases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],
+  ['flow-docs', registerFlowDocsCases],
+  ['doc-rules', registerDocRuleCases],
+  ['doc-shapes', registerDocShapeCases],
+  ['handoff-review', registerHandoffReviewCases],
   ['equip', registerEquipCases],
   ['docs', registerDocsCases],
   ['platform', registerPlatformCases],
@@ -97,47 +107,21 @@ async function runCase([name, fn]) {
   }
 }
 
-const HEAVY_CASE_HINTS = [
-  '与 STOP_LOSS 人工解锁',
-  'flow.mjs：smoke',
-  '全链路 URL',
-  'M3-C1b',
-  'M3-C2b',
-  'M2 C4+C5',
-  'govern-audit.mjs：fence-aware',
-  'govern-audit.mjs release-prep',
-  'M2 C1b',
-  '远端 CI 合并硬门禁',
-  'M3-C1a',
-  'flow.mjs + doc-plan.mjs',
-  'M2 C2',
-  'M2 C3b',
-  'M2 C3a',
-  '--include-master-prd',
-  '耦合文件自同步',
-  'equip.mjs + survey.mjs',
-  'M4-C3',
-  'review-pack.mjs + govern-audit.mjs',
-  'M4-C2b',
-  'M2 C1c',
-  '测试分层控频',
-  'survey.mjs + compose-agents.mjs',
-  '8 层深',
-  'Trust Gateway',
-  '统一 YAML',
-  'M3-C5',
-  'M4-C1a',
-  '无远端探测',
-]
-
+/**
+ * 派发顺序：**最贵的先跑**。
+ *
+ * 用例可以带第三段声明自己的成本（毫秒，`--profile` 实测值）：
+ *
+ *   cases.push(['名字', async () => { ... }, 3800])
+ *
+ * 不声明的按 0 处理。多核并行时先派长任务，尾巴最短；
+ * 而「哪个长」是**用例自己说的**，不是框架靠名字猜的——
+ * 名字一改就该照常工作，不该悄悄换一个调度顺序。
+ */
 function buildDispatchOrder(allCases) {
-  const rank = (name) => {
-    const idx = HEAVY_CASE_HINTS.findIndex((h) => name.includes(h))
-    return idx === -1 ? HEAVY_CASE_HINTS.length : idx
-  }
   return allCases
-    .map(([name], index) => ({ index, priority: rank(name) }))
-    .sort((a, b) => (a.priority - b.priority) || (a.index - b.index))
+    .map(([, , costMs], index) => ({ index, cost: Number(costMs) > 0 ? Number(costMs) : 0 }))
+    .sort((a, b) => (b.cost - a.cost) || (a.index - b.index))
     .map((x) => x.index)
 }
 

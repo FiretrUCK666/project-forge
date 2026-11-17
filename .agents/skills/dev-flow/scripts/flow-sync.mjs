@@ -9,11 +9,10 @@ import { resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree,
-} from '../../lib/git.mjs'
+  detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
@@ -48,7 +47,7 @@ export async function handleSync(opts = {}, roots) {
 
   const canQueryGh = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
   const ghProbe = canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'])
-    ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })))
+    ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls })))
     : null
   const backend = createTaskBackend({
     role: opts._ghClient ? 'maintainer' : ledger.role,
@@ -85,7 +84,7 @@ export async function handleSync(opts = {}, roots) {
     throw new Error(`找不到 sync 目标基线分支或提交：${targetBaseBranch}`)
   }
 
-  if (ledger.tier === 2) unmountSharedDeps(roots.mainRoot, implRoot)
+  if (ledger.tier === 2) unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps' })
 
   const rebaseArgs = oldBaseSha
     ? ['rebase', '--onto', newBaseSha, oldBaseSha, ...(ledger.branch ? [ledger.branch] : [])]
@@ -127,7 +126,7 @@ export async function handleSync(opts = {}, roots) {
   if (ledger.tier === 2 && newHeadSha && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
     if (existsSync(reviewAbs)) {
-      unmountSharedDeps(roots.mainRoot, reviewAbs)
+      unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
       reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, newHeadSha, { resetDirty: true })
       const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
       ledger.reviewWorktreeHead = newHeadSha

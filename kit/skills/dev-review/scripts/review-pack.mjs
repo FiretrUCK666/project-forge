@@ -12,13 +12,10 @@ import { basename, join, resolve } from 'node:path'
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import {
-  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
-} from '../../lib/git.mjs'
+  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots, } from '../../lib/git.mjs'
 import {
-  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast,
-  resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits,
-} from '../../lib/git-fast.mjs'
-import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits, } from '../../lib/git-fast.mjs'
+import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import {
@@ -58,7 +55,7 @@ function printHelp() {
     '  --json                        Emit machine-readable JSON',
     '',
     'Record / Override Options:',
-    '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id>',
+    '  --task <id> --round <N> --verdict pass|changes --reviewer-id <id> --review-token <token>',
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
     '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
@@ -191,8 +188,9 @@ async function main(argv = process.argv.slice(2)) {
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
+        'review-token',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
-        'reason', 'visual-evidence', 'agent',
+        'reason', 'visual-evidence', 'agent', 'evidence',
       ],
       multiFlags: ['must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: 'review-pack.mjs [pack|record|override] [dir] [options]',
@@ -225,6 +223,23 @@ async function main(argv = process.argv.slice(2)) {
           : opts.base ? 'base' : 'local'
     const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
 
+    if (mode === 'pr') {
+      const prNo = opts.pr ?? opts['external-pr']
+      const prRecorded = task?.prNumber ?? null
+      const prResolved = prRecorded !== null && String(prRecorded) === String(prNo)
+      if (!prResolved) {
+        const msg = `BLOCKED_PR_UNRESOLVED: 没有拿到 PR #${prNo} 的真实信息（无可用 API 通道或该 PR 未被识别）。`
+          + '不能假装审过：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑，或用 --task <id> 审查已记录的本地任务。'
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PR_UNRESOLVED', exitCode: EXIT.UNTRUSTED_HAZARD, pr: prNo ?? null, error: msg }, null, 2)}\n`)
+        } else {
+          process.stdout.write(`${msg}\n`)
+        }
+        process.stderr.write(`${msg}\n`)
+        return EXIT.UNTRUSTED_HAZARD
+      }
+    }
+
     const slotSyncRes = await syncTier2ReviewSlotIfNeeded({
       mainRoot,
       worktreeRoot: roots.workTreeRoot,
@@ -237,7 +252,7 @@ async function main(argv = process.argv.slice(2)) {
 
     let round = opts.round ? Number(opts.round) : 1
     if (!opts.round && task?.rounds?.length) {
-      round = Math.max(...task.rounds.map((r) => Number(r.round) || 1)) + 1
+      round = nextReviewRound(task)
     }
     if (!Number.isInteger(round) || round < 1) round = 1
 

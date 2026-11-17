@@ -27,6 +27,11 @@ import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
+import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
+import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
+import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
+import { collectTddFacts } from '../../lib/tdd-facts.mjs'
+import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
@@ -49,8 +54,8 @@ async function initDoc({
   taskId, issue, owner, branch, relatedSpec, force = false,
 }) {
   const effectiveKind = kind ?? type
-  if (!['prd', 'spec', 'todo', 'pair', 'all'].includes(effectiveKind)) {
-    throw new Error(`--kind / --type 必须是 prd、spec、todo、pair 或 all，收到：${effectiveKind}`)
+  if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
+    throw new Error(`--kind / --type 必须是 prd、spec、todo、tdd、pair 或 all，收到：${effectiveKind}`)
   }
   const safeSlug = slugify(slug)
   const issueNum = parseIssueArg(issue)
@@ -67,7 +72,7 @@ async function initDoc({
     }
   }
 
-  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo' }
+  const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
   const kindsToCreate = effectiveKind === 'pair' ? ['spec', 'todo'] : effectiveKind === 'all' ? ['prd', 'spec', 'todo'] : [effectiveKind]
   const fastHead = isGit ? readHeadFast(resolveGitDirFast(writeRoot), gitDir) : null
   const headRes = fastHead?.oid
@@ -88,7 +93,9 @@ async function initDoc({
 
   const planned = []
   for (const k of kindsToCreate) {
-    const fileName = buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
+    // TDD 是常青单文件，文件名固定为 docs/TDD.md——加日期前缀会让每份 TDD 变成新文件，
+    // 而它本来就该被就地改写。
+    const fileName = k === 'tdd' ? 'TDD.md' : buildDocFilename({ date: dateTag, issue: issueNum, slug: safeSlug, kind: k })
     const relFile = `${dirMap[k]}/${fileName}`
     const absFile = join(writeRoot, relFile)
     if (existsSync(absFile) && !force) throw new Error(`目标文件已存在：${relFile}（如确需重建请加 --force）`)
@@ -102,10 +109,23 @@ async function initDoc({
       : null
     const customTpl = resolveRepoCustomDocTemplate(writeRoot, item.kind)
     if (customTpl) customTemplates.push({ kind: item.kind, template: customTpl.rel })
-    const content = renderStandardDocTemplate({
-      kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
-      taskId, issueNum, owner, quickCmd, relatedSpecRel,
-    })
+    let content
+    if (item.kind === 'tdd') {
+      // 从仓库事实预填：技术栈、模块表、命令这些读得出来的东西不该让人再抄一遍。
+      // 只收集生成 TDD 需要的那几项事实：跑整套勘察既慢又跨层。
+      const facts = await collectTddFacts(writeRoot)
+      content = buildPreFilledTdd(facts, {
+        projectName: title,
+        today,
+        topLevelDirs: facts?.tddShape?.topLevelDirs ?? [],
+        allPaths: facts?.tddShape?.filePaths ?? [],
+      })
+    } else {
+      content = renderStandardDocTemplate({
+        kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
+        taskId, issueNum, owner, quickCmd, relatedSpecRel,
+      })
+    }
     mkdirSync(dirname(item.absFile), { recursive: true })
     writeAtomic(item.absFile, content)
   }
@@ -148,7 +168,18 @@ function normActorId(s) {
   return String(s ?? '').trim().replace(/^@/, '').toLowerCase()
 }
 
-function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) {
+/**
+ * 从 `plan_critique` 戳里读上一轮的复核人。
+ *
+ * 戳的形状是 `passed (reviewer=<id>, round=<n>, sha=<hex>...)`。读不出来就返回 null——
+ * 读不出来时不拦：老文档没有这个字段，拿「读不出来」当「同一个人」会把存量文档全堵死。
+ */
+function parseCritiqueReviewer(stamp) {
+  const m = /reviewer=([^,)]+)/i.exec(String(stamp ?? ''))
+  return m ? m[1].trim() : null
+}
+
+function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', findings = [] }) {
   if (!reviewer || !String(reviewer).trim()) throw new Error('critique-pass 必须指定 --reviewer <reviewerId>')
   const abs = resolve(repoRoot, file)
   if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
@@ -158,6 +189,13 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) 
   const fmPre = parseDocFrontmatter(rawPre)
   if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {
     throw new Error(`SELF_CRITIQUE_REJECTED: critique-pass 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
+  }
+
+  // Round 2 起必须换人。上一轮的复核人记在 frontmatter 里，读得到。
+  const prevReviewer = parseCritiqueReviewer(fmPre.data?.plan_critique)
+  if (Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {
+    throw new Error(`BLOCKED_CRITIQUE_SAME_REVIEWER: Round ${round} 的复核人 (${reviewer}) 与上一轮相同。`
+      + 'Round 2 起必须新建独立子代理复审——复用上一轮的上下文见过自己提出的意见，这一轮已经不算独立审了。')
   }
 
   const audit = auditDoc({ repoRoot, file })
@@ -176,8 +214,17 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '' }) 
   const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
   const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${round}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
 
+  // 把这一轮的意见记进 frontmatter：下一轮的范围就靠它，不靠谁的记忆。
+  const prevFindings = fm.data?.[CRITIQUE_FINDINGS_KEY]
+  const findingList = Array.isArray(findings) ? findings : []
+  const newFindings = findingList.length > 0
+    ? [String(prevFindings ?? '').trim(), serializeFindings(round, findingList)].filter(Boolean).join(' ;; ')
+    : (prevFindings ?? null)
+
   if (fm.hasFrontmatter) {
-    updateDocFrontmatter(abs, { plan_critique: stampValue, updated: docIsoDate() }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
+    const patch = { plan_critique: stampValue, updated: docIsoDate() }
+    if (newFindings) patch[CRITIQUE_FINDINGS_KEY] = newFindings
+    updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
   } else {
     const stampLine = `- Plan Critique: ${stampValue}`
     let updated
@@ -257,8 +304,17 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     writeAtomic(abs, workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`))
   }
 
+  // 批准即冻结：把这一刻的验收标准指纹记下来。
+  //
+  // 「冻结」在此之前只是文档里的一句话。实现阶段回到 SPEC 里改一条标准，
+  // 文件照样合法、audit 照样通过，而审查者只能凭记忆发现——人的记忆不是门禁。
+  const criteria = extractCriteria(workingText)
+  const fingerprint = criteria.length > 0 ? criteriaFingerprint(criteria) : null
+
   return {
     file: posixPath(relative(repoRoot, abs)), previousStatus: curStatus, status: nextStatus, critiqueSkipped,
+    criteriaCount: criteria.length,
+    criteriaFingerprint: fingerprint,
     warning: hasPlaceholder ? '检测到仍有占位描述 <...>，动手实现前请替换成真实可判定条件' : null,
   }
 }
@@ -305,8 +361,9 @@ async function main(argv) {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by'],
+      multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-pass|approve|archive|supersede|list>',
+      usageHint: 'doc-plan.mjs <triage|init|link|audit|critique-scope|critique-pass|approve|archive|supersede|list>',
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)
@@ -401,6 +458,9 @@ async function main(argv) {
             process.stdout.write(`- ${r.file} (${r.docType}): ${r.ok ? '通过' : `失败 (${r.errors.length})`}\n`)
             for (const e of r.errors) process.stdout.write(`  * [${e.code}] L${e.line}: ${e.message}\n    修法: ${e.fixHint}\n`)
           }
+          for (const e of batch.coverageErrors ?? []) {
+            process.stdout.write(`- ${e.file}：${e.message}\n`)
+          }
         }
         return batch.ok ? 0 : 1
       }
@@ -436,9 +496,46 @@ async function main(argv) {
       return res.ok ? 0 : 1
     }
 
+    if (sub === 'critique-scope') {
+      // 这一轮该看什么：把上轮意见与正文指纹摆出来。
+      //
+      // 代码审查早有增量视野硬锁，规划审核此前没有：Round 2 要么重读全文（吃光上下文），
+      // 要么只看改动（新问题一条看不到）。两头都不对，根子是没有东西告诉它这一轮的范围。
+      if (!opts.file) throw new Error('critique-scope 需要 --file <docPath>')
+      const scopeAbs = resolve(repoRoot, opts.file)
+      if (!existsSync(scopeAbs)) throw new Error(`找不到文档：${opts.file}`)
+      const scopeText = readTextSafe(scopeAbs) ?? ''
+      const scopeFm = parseDocFrontmatter(scopeText)
+      const curSha = sha256Text(stripCritiqueMeta(scopeText)).slice(0, 12)
+      const prevSha = /\bsha=([a-f0-9]{8,64})\b/i.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? null
+      const scope = buildCritiqueScope({
+        round: Number(opts.round ?? ((Number(/\bround=(\d+)\b/.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? 0) + 1))),
+        currentSha: curSha,
+        previousSha: prevSha,
+        findingsRaw: scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? '',
+        reviewer: opts.reviewer ?? '(未指定)',
+      })
+      // 审核慢的根因是分工错了：一百多条「文件在不在、名字有没有、命令跑不跑得通」
+      // 是不需要判断的，却让审核人每次拿手工去核。这里先跑一遍，他只看剩下的判断题。
+      const facts = await verifyDocClaims(repoRoot, scopeText)
+      const factsText = renderVerificationForReviewer(facts)
+
+      if (cli.json) {
+        process.stdout.write(`${JSON.stringify({
+          file: opts.file, currentSha: curSha, previousSha: prevSha, ...scope, facts, factsText,
+        }, null, 2)}\n`)
+      } else {
+        // 先给已核事实，再给这一轮该看什么——顺序本身就是在说「这些不用你核了」。
+        process.stdout.write(`${factsText}\n${scope.prompt}`)
+      }
+      return 0
+    }
+
     if (sub === 'critique-pass') {
       if (!opts.file || !opts.reviewer) throw new Error('critique-pass 需要 --file <docPath> 与 --reviewer <reviewerId>')
-      const res = critiquePassDoc({ repoRoot, file: opts.file, reviewer: opts.reviewer, round: opts.round ?? 1, summary: opts.summary ?? '' })
+      const findingArg = opts.findings ?? opts.finding ?? []
+      const findingList = Array.isArray(findingArg) ? findingArg : [findingArg]
+      const res = critiquePassDoc({ repoRoot, file: opts.file, reviewer: opts.reviewer, round: opts.round ?? 1, summary: opts.summary ?? '', findings: findingList })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
@@ -451,6 +548,19 @@ async function main(argv) {
       if (!opts.file) throw new Error('approve 需要 --file <specPath>')
       const res = approveSpec({ repoRoot, file: opts.file, skipCritiqueReason: opts['skip-critique-reason'] })
       const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
+
+      // 有绑定任务就把冻结指纹写进账本：最终的「标准有没有被悄悄改过」
+      // 要在 finalize / verify 那一刻对得上，所以指纹必须进账本，不能只留在文档里。
+      const taskKey = opts.task ?? fm.data?.task_id
+      if (taskKey && res.criteriaFingerprint) {
+        const led = readTaskLedger(mainRoot, sanitizeTaskId(taskKey))
+        if (led) {
+          led.criteriaFingerprint = res.criteriaFingerprint
+          led.criteriaFrozenFrom = res.file
+          led.criteriaFrozenAt = docIsoDate()
+          writeTaskLedger(mainRoot, led)
+        }
+      }
       const fn = parseDocFilename(res.file)
       const slugVal = fn?.slug ?? 'task'
       const issueNum = Number.isInteger(Number(fm.data?.issue)) && Number(fm.data.issue) > 0 ? Number(fm.data.issue) : (fn?.issue ?? null)

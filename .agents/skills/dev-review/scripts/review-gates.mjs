@@ -476,8 +476,16 @@ export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untruste
   if (mode === 'local' || mode === 'staged' || mode === 'base') {
     nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
   } else if (mode === 'task' && task) {
-    nextSteps.push('Review independently against criteria C1..Cn, run tests + fault injection, then record verdict:')
-    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id>`)
+    // 先说跑什么，再说怎么记。反过来的话，人读完 diff 才会注意到要跑。
+    nextSteps.push('先实证，再下结论。按这个顺序做：')
+    nextSteps.push('  1. 复跑判据：对着每条 C* 找到能证伪它的命令，在审查工作位里跑；跑不通就是这条判据有问题。')
+    nextSteps.push('  2. 故障注入：挑一处核心判定改坏，同一条判据必须变红；不改回去就是注入无效。')
+    nextSteps.push('  3. 还原复绿：\`git checkout -- .\` 之后同一条必须重新通过。')
+    nextSteps.push('  4. 需要看具体改动时再 \`--include-diff\` 取全文；不要用读 diff 代替跑。')
+    nextSteps.push('  拿不出上面三步的实测输出，不要下任何结论。')
+    nextSteps.push('')
+    nextSteps.push('记结论（--evidence 必填，写你实际跑的命令与输出摘要）：')
+    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id> --review-token <flow next 输出的令牌> --evidence "<跑了什么、结果如何>"`)
     if (task.role === 'contributor-fork') {
       nextSteps.push('Contributor-fork note: after PASS, wait for upstream maintainer merge; do NOT run `flow.mjs merge` or delete fork branch.')
     } else if (!skills.has('dev-flow')) {

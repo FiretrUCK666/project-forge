@@ -297,3 +297,22 @@ export function createTempHookEnv(extra = {}) {
 export function hasFile(root, rel) {
   return existsSync(join(root, rel))
 }
+
+/**
+ * 给某个任务发一枚审查令牌，供夹具调用 `review-pack record --review-token`。
+ *
+ * 夹具不该自己造令牌字面量：令牌是「由 flow next 现场签发」的东西，夹具绕过签发点
+ * 直接编一个，测出来的就不是真实链路。这里走与 `flow next` 同一个签发函数。
+ *
+ * `round` 不传时取「下一个轮次」，与 `flow next` 的算法一致。
+ */
+export async function issueTokenFor(mainRoot, taskId, round) {
+  const { readTaskLedger, writeTaskLedger, ensureReviewToken } = await import('../../kit/skills/lib/ledger.mjs')
+  const ledger = readTaskLedger(mainRoot, taskId)
+  if (!ledger) throw new Error(`找不到任务账本：${taskId}`)
+  const effectiveRound = round ?? ((ledger.rounds ?? []).length + 1)
+  const { token } = ensureReviewToken(mainRoot, ledger, effectiveRound)
+  // ensureReviewToken 可能已写盘；这里再读一次保证调用方拿到的是落盘后的账本
+  void writeTaskLedger
+  return token
+}

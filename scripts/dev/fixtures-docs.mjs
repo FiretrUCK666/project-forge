@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerDocsCases(cases) {
@@ -29,6 +30,10 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '',
       '改动 `src/real.mjs` 与 `src/planned.mjs` (new)。',
       '',
+      '## 要解决的问题',
+      '',
+      '- 当前缺一份可校准的实现方案。',
+      '',
       '## 本期不做',
       '',
       '- 不修改外部公共 CLI。',
@@ -48,6 +53,10 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
       '- Plan Critique: pending',
       '',
       '修改 `src/real.mjs`。',
+      '',
+      '## 要解决的问题',
+      '',
+      '- 走紧急豁免，补一份最小方案。',
       '',
       '## 本期不做',
       '',
@@ -70,7 +79,9 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
     if (badAudit.status === 0) return '缺陷 SPEC 的 audit 竟通过了'
     const badJson = JSON.parse(badAudit.stdout)
     const codes = new Set(badJson.errors.map((e) => e.code))
-    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_NON_GOALS', 'MISSING_DOOR_OR_ROLLBACK', 'MISSING_ACCEPTANCE_CRITERIA']) {
+    // 默认不再要求「门型」这类可选章节：一份数据管道的 SPEC 没有门，不该被要求编一个。
+    // 所以这里只核主干三节 + 两条硬缺陷。
+    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_SECTION_GOAL', 'MISSING_SECTION_NON_GOALS', 'MISSING_ACCEPTANCE_CRITERIA']) {
       if (!codes.has(req)) return `坏 SPEC audit 漏报 ${req}：${badAudit.stdout}`
     }
     const badApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })
@@ -99,8 +110,13 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
     }
 
     // 4. 重审并 approve 成功；另测 --skip-critique-reason 豁免
-    const crit2 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
-    if (crit2.status !== 0) return `二次 critique-pass 失败：${crit2.stderr}`
+    //    注意：Round 2 必须换复核人——同一个上下文审核完自己提的意见不算独立审。
+    const sameReviewerAgain = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r1', '--round', '2', '--json'], { cwd: dir })
+    if (sameReviewerAgain.status === 0 || !/BLOCKED_CRITIQUE_SAME_REVIEWER/.test(sameReviewerAgain.stderr)) {
+      return `Round 2 复用同一复核人未被拦截：exit=${sameReviewerAgain.status} stderr=${sameReviewerAgain.stderr}`
+    }
+    const crit2 = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['critique-pass', '--file', 'docs/specs/good.md', '--reviewer', 'indep-r2', '--round', '2', '--json'], { cwd: dir })
+    if (crit2.status !== 0) return `二次 critique-pass（换人）失败：${crit2.stderr}`
     const okApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/good.md', '--json'], { cwd: dir })
     if (okApprove.status !== 0 || JSON.parse(okApprove.stdout).status !== 'approved') {
       return `复核后 approve 失败：${okApprove.stderr}`
@@ -199,25 +215,10 @@ cases.push(['统一 YAML Frontmatter 与文档命名生命周期：init/link/flo
   const { parseDocFrontmatter } = await import('../../kit/skills/lib/shared.mjs')
 
   const fillGeneratedDoc = (absPath) => {
-    let txt = readFileSync(absPath, 'utf8')
-    txt = txt
-      .replace(/<受影响的模块、协议或对外契约>/g, 'src/index.mjs 入口模块')
-      .replace(/<明确保持兼容或本次不触碰的模块>/g, '保持对外导出兼容')
-      .replace(/<先经 `dev-explore` 核实的可复用现有函数、协议或脚本入口；禁止另起炉灶>/g, '复用 src/index.mjs')
-      .replace(/<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新 `docs\/TDD\.md`>/g, '对齐现有架构约束')
-      .replace(/<新增或调整的接口、参数、文件结构、退出码或状态流转>/g, '新增鉴权入口函数')
-      .replace(/<失败时如何降级或阻断、权限校验、并发\/状态持久化保护>/g, '校验失败时返回非零错误')
-      .replace(/<two-way \| one-way>/g, 'two-way')
-      .replace(/<说明回退命令或反向修补方式>/g, '直接 git revert 回退')
-      .replace(/<待核实填写：复用项目中已有的工具\/协议\/脚本路径，不重复造轮子>/g, '复用 src/index.mjs 既有导出')
-      .replace(/<明确本期保持不动或故意延后的范围>/g, '本期不改造构建工具链')
-      .replace(/<真实文件路径，新建文件标 \(new\)>/g, 'src/index.mjs')
-      .replace(/<第一条可判定的标准>/g, '执行 node --test 全部通过')
-      .replace(/<第二条>/g, '异常输入返回明确错误码')
-      .replace(/<待核实真实路径，新建文件标 \(new\)>/g, 'src/index.mjs')
-      .replace(/<待核实填写：准备复用的现成函数、库或脚本>/g, '复用 src/index.mjs')
-      .replace(/<明确排除本次不顺手重构的无关事项>/g, '不调整无关构建脚本')
-    writeFileSync(absPath, txt)
+    hydrateGeneratedDoc(absPath, {
+      criteria: ['执行 node --test 全部通过', '异常输入返回明确错误码'],
+      filled: 'src/index.mjs 入口模块',
+    })
   }
 
   const dir = tmpProject({
@@ -496,6 +497,7 @@ cases.push(['templates/readme.md 与文档口径：HTML 注释配对、零残留
 cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/arch-rules/FeatureMap 与漂移拦截', async () => {
   const { validateDocTocAnchors } = await import('./preflight.mjs')
   const { templateVarsOf } = await import('../lib/protocol.mjs')
+  const { DOC_TEMPLATE_VARS } = await import('../../kit/skills/lib/doc-template-render.mjs')
 
   const tddRaw = readFileSync(join(SKILL_ROOT, 'docs/TDD.md'), 'utf8')
   const tddErrors = validateDocTocAnchors(tddRaw)
@@ -522,11 +524,14 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
     return `本仓 docs/TDD.md 存在失效路径：${JSON.stringify(sSelf.reentry.staleTddPaths)}`
   }
 
-  const tplRaw = readFileSync(join(SKILL_ROOT, 'templates/docs-tdd.md'), 'utf8')
+  const tplRaw = readFileSync(join(SKILL_ROOT, 'kit/skills/templates/docs-tdd.md'), 'utf8')
   const tplErrors = validateDocTocAnchors(tplRaw)
-  if (tplErrors.length > 0) return `templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
-  if (!tplRaw.includes('[按需保留，不适用整节删除]') || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
-    return 'templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
+  if (tplErrors.length > 0) return `kit/skills/templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
+  // 可选章节用统一的 section 标记表达：说明文字可以被忽略，标记会被渲染与审计真正执行。
+  const tddTplVars = new Set(DOC_TEMPLATE_VARS.tdd)
+  const tddBadVars = templateVarsOf(tplRaw).filter((v) => !tddTplVars.has(v))
+  if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(tplRaw) || tplRaw.includes('references/') || tddBadVars.length > 0) {
+    return 'kit/skills/templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
   }
 
   // 反面 1：validateDocTocAnchors 必须抓出悬空锚点
@@ -585,28 +590,28 @@ cases.push(['--include-master-prd：默认仍保护 1:N 共享 PRD，显式传�
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: 10', 'pr: null',
       'owner: alice', 'approved: true', 'implemented: true',
       'related_prd: ../../prd/261116-master-plan-prd.md',
-      '---', '', '# SPEC: M1', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
+      '---', '', '# SPEC: M1', '', '## 要解决的问题', '- 拆出第一个切片', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '', '## 验收标准', '- [x] C1: `src/app.mjs` ok', '',
     ].join('\n'),
     'docs/prd/261116-master-plan-prd.md': [
       '---', 'kind: prd', 'title: "Master Plan"', 'status: active',
       'created: 2026-11-16', 'updated: 2026-11-16', 'issue: null', 'pr: null',
       'owner: alice', 'plan_critique: passed', 'related_spec: null', 'related_todo: null',
-      '---', '', '# PRD: Master Plan', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      '---', '', '# PRD: Master Plan', '', '## 要解决的问题', '- 统一规划总纲', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 五、验收标准', '- [x] C1: `src/app.mjs` M1', '- [ ] C2: `src/app.mjs` M2', '',
     ].join('\n'),
     [`docs/specs/261116-issue${issueNum}-m2-spec.md`]: [
       '---', 'kind: spec', 'title: "M2"', 'status: approved', 'tier: L3',
       'created: 2026-11-16', 'updated: 2026-11-16', `issue: ${issueNum}`, 'pr: null',
-      'branch: null', 'owner: alice', 'approved: true', 'implemented: false', 'plan_critique: passed',
+      'branch: null', 'owner: planner', 'approved: true', 'implemented: false', 'plan_critique: passed',
       'related_prd: ../prd/261116-master-plan-prd.md',
       `related_todo: ../todo/261116-issue${issueNum}-m2-todo.md`,
-      'high_risk_paths: []', '---', '', '# SPEC: M2', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
+      'high_risk_paths: []', '---', '', '# SPEC: M2', '', '## 要解决的问题', '- 拆出第二个切片', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',
       '## 验收标准', '- [x] C1: `src/app.mjs` ok', '', '## 实现说明', '- 已在 `src/app.mjs` 完成。', '',
     ].join('\n'),
     [`docs/todo/261116-issue${issueNum}-m2-todo.md`]: [
       '---', 'kind: todo', 'title: "M2"', 'status: active',
       'created: 2026-11-16', 'updated: 2026-11-16', `issue: ${issueNum}`, 'pr: null',
-      'branch: null', 'owner: alice', 'approved: true', 'done_at: null', 'task_id: m2',
+      'branch: null', 'owner: planner', 'approved: true', 'done_at: null', 'task_id: m2',
       'planned_at: HEAD', 'related_prd: ../prd/261116-master-plan-prd.md',
       `related_spec: ../specs/261116-issue${issueNum}-m2-spec.md`,
       '---', '', '# Todo: M2', '', '## 本期不做', '- 无', '', '## 门型与回滚路径', '- two-way；revert', '',

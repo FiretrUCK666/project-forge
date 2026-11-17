@@ -6,7 +6,9 @@
  *   1. 按子包/生态独立比对锁文件 SHA256（单个子包变更只隔离该子包，不连坐其余子包）；
  *   2. 探测到 npm/pnpm/yarn Workspace 本地软链或 Python editable `.venv` 指回主仓源码时自动局部隔离防毒化；
  *   3. `samePath(main, wt)` 严禁自挂载/自解绑，半途失败原子回滚已建链接；
- *   4. 清理前强制第一件事只对 junction/symlink 执行 `unlinkSync` 并校验主仓依赖完好。
+ *   4. 清理前按「是不是链接」而不是「叫什么名字」全深度扫一遍 worktree，把指向外部的链接
+ *      逐个解绑并列出来，再校验主仓完好——`git worktree remove --force` 会跟随 junction，
+ *      而它不会替你判断那个链接指向哪里。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -389,59 +391,134 @@ function ensureMountedDepsExcluded(mainAbs, relPaths) {
   } catch { /* ignore non-writable exclude */ }
 }
 
-/** 清理 worktree 前先仅对 junction/symlink 调用 `unlinkSync` 解绑，并校验主仓依赖完好。 */
-export function unmountSharedDeps(mainRoot, wtRoot) {
-  const mainAbs = canonicalPath(mainRoot)
+export function scanOutboundLinks(wtRoot) {
   const wtAbs = canonicalPath(wtRoot)
-  if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自解绑：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
-  if (!existsSync(wtAbs)) return { ok: true, unmounted: [], mainDepsIntact: true, note: 'worktree-absent' }
+  const outbound = []
+  const internal = []
+  const broken = []
+  if (!existsSync(wtAbs)) return { outbound, internal, broken }
 
-  const dirs = new Set([...collectCandidatePackageDirs(mainAbs), ...collectCandidatePackageDirs(wtAbs)])
-  const unmounted = []
-  const skipped = []
-  const mainExpected = []
+  const walk = (absDir, relDir, depth) => {
+    if (depth > 24) return
+    let entries = []
+    try { entries = readdirSync(absDir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const abs = join(absDir, entry.name)
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name
+      // `.git` 是 worktree 的元数据，不是用户内容，删它是 `git worktree remove` 的本职。
+      if (rel === '.git') continue
+      const st = lstatSafe(abs)
+      if (!st) continue
 
-  for (const dirRel of [...dirs].sort()) {
-    for (const depName of ['node_modules', ...PYTHON_DEP_DIRS]) {
-      const rel = dirRel ? `${dirRel}/${depName}` : depName
-      const src = join(mainAbs, rel)
-      if (existsSync(src)) mainExpected.push({ path: posixPath(rel), src })
-
-      const dst = join(wtAbs, rel)
-      const st = lstatSafe(dst)
-      if (!st || !st.isSymbolicLink()) continue
-
-      const relPosix = posixPath(rel)
-      const fastTracked = isPathInGitIndexFast(wtAbs, relPosix)
-      const isTracked = fastTracked !== null
-        ? fastTracked
-        : spawnSync('git', ['ls-files', '--error-unmatch', '--', relPosix], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
-      if (isTracked) {
-        skipped.push({ path: relPosix, reason: 'tracked-in-git' })
+      if (st.isSymbolicLink()) {
+        let target = null
+        try { target = readlinkSync(abs) } catch { /* 悬空链接读不到目标 */ }
+        let resolved = null
+        try { resolved = realpathSync.native(abs) } catch { /* 目标可能已不存在 */ }
+        if (resolved === null) {
+          broken.push({ path: posixPath(rel), target })
+          outbound.push({ path: posixPath(rel), target, kind: 'unresolved', resolved: null })
+          continue
+        }
+        if (isInsideDir(resolved, wtAbs)) internal.push({ path: posixPath(rel), target })
+        else outbound.push({ path: posixPath(rel), target, kind: 'outside', resolved: posixPath(resolved) })
         continue
       }
 
-      let targetBefore = null
-      try { targetBefore = readlinkSync(dst) } catch { /* ignore */ }
-      unlinkSync(dst)
-      if (lstatSafe(dst) !== null) throw new Error(`解绑依赖链接失败，路径仍然存在：${dst}`)
-      unmounted.push({ path: relPosix, target: targetBefore })
+      // junction 在 Windows 上 lstat 也报 symlink，这里兜的是「真目录里还嵌着链接」。
+      if (entry.isDirectory()) walk(abs, rel, depth + 1)
     }
   }
 
-  const missingMain = mainExpected.filter((item) => !existsSync(item.src))
-  if (missingMain.length > 0) {
-    throw new Error(`安全校验失败：主仓依赖目录异常缺失（${missingMain.map((m) => m.path).join(', ')}）`)
+  walk(wtAbs, '', 0)
+  return { outbound, internal, broken }
+}
+
+export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' } = {}) {
+  const mainAbs = canonicalPath(mainRoot)
+  const wtAbs = canonicalPath(wtRoot)
+  if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自解绑：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
+  if (!existsSync(wtAbs)) {
+    return { ok: true, unmounted: [], skipped: [], blocked: [], mainDepsIntact: true, note: 'worktree-absent' }
   }
-  return { ok: true, unmounted, skipped, mainDepsIntact: true }
+
+  const allowed = new Set((allowOutbound ?? []).map((p) => posixPath(p).replace(/^\.\//, '').replace(/\/+$/, '')))
+  const scan = scanOutboundLinks(wtAbs)
+  // 默认档（cleanup）下一步是 `git worktree remove`：未获准的外链必须当场拦下。
+  // 依赖清场档（deps）worktree 不会消失：照常解绑并列出来，但目标完好校验一样要过。
+  const strict = mode !== 'deps'
+
+  const unmounted = []
+  const skipped = []
+  const blocked = []
+
+  const before = scan.outbound.map((item) => ({ path: item.path, resolved: item.resolved }))
+
+  for (const link of scan.outbound) {
+    if (link.kind === 'unresolved') {
+      // 解不出来的悬空链接：cleanup 档不能删（连带删什么不知道），deps 档可以解绑。
+      if (strict) {
+        blocked.push({ path: link.path, target: link.target, reason: 'unresolved-target' })
+        continue
+      }
+    } else if (!allowed.has(link.path) && strict) {
+      blocked.push({ path: link.path, target: link.target, reason: 'points-outside-worktree', resolved: link.resolved })
+      continue
+    }
+
+    const abs = join(wtAbs, link.path)
+
+    // 已被 Git 跟踪的链接**不能豁免**。
+    //
+    // 豁免的初衷是「git 自己会删，不用我们管」，但 git 删含链接的目录时会跟着链接走进去：
+    // 实测在分支里提交一个指向仓外的符号链接，cleanup 把它记进 skipped、
+    // 紧接着 git worktree remove --force 退出 0，**仓外那个目录的内容被删了**。
+    //
+    // 所以只有「worktree 不消失」的依赖清场档才跳过（解绑会让工作区变脏）；
+    // 删除档一律解绑——反正整个目录马上就没，链接删掉不影响任何事。
+    if (strict) {
+      const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
+      const isTracked = fastTracked !== null
+        ? fastTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isTracked) {
+        // 记下来，回执里要能看见「这一条是被 Git 跟踪的」——排查时这是关键信息。
+        skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })
+      }
+    }
+
+    let targetBefore = null
+    try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+    unlinkSync(abs)
+    if (lstatSafe(abs) !== null) throw new Error(`解绑链接失败，路径仍然存在：${abs}`)
+    unmounted.push({ path: link.path, target: targetBefore })
+  }
+
+  // 解绑只允许动链接本身，绝不允许连带目标内容。逐个复核目标还在。
+  const missingTargets = before
+    .filter((item) => item.resolved)
+    .filter((item) => !existsSync(item.resolved))
+  if (missingTargets.length > 0) {
+    throw new Error(`安全校验失败：解绑之后外部目标不见了（${missingTargets.map((m) => `${m.path} -> ${m.resolved}`).join(', ')}）`
+      + '——解绑只该删链接，不该碰目标内容')
+  }
+
+  return {
+    ok: blocked.length === 0,
+    unmounted,
+    skipped,
+    blocked,
+    scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
+  }
 }
 
 function printHelp() {
   process.stdout.write([
-    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|status> --main <主仓> --worktree <工作树> [--json]',
+    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [--allow-outbound <路径>] [--json]',
     '',
     '  mount    按子包独立比对锁文件并防毒化探测，安全挂载共享依赖',
-    '  unmount  安全 unlinkSync 解绑 junction/symlink，并复核主仓依赖完好',
+    '  unmount  全深度扫出指向外部的链接并逐个解绑（清场重挂默认档；删 worktree 请加 --strict）',
+    '  scan     只报告 worktree 里的外链，不做任何修改',
     '  status   按子包与生态比对锁文件状态并输出差异',
   ].join('\n') + '\n')
 }
@@ -451,9 +528,11 @@ function main(argv) {
   let cli
   try {
     cli = parseStandardCli(argv, {
-      subcommands: ['mount', 'unmount', 'status'],
+      subcommands: ['mount', 'unmount', 'scan', 'status'],
       valueFlags: ['main', 'worktree'],
-      usageHint: 'worktree-deps.mjs <mount|unmount|status> --main <dir> --worktree <dir>',
+      multiFlags: ['allow-outbound'],
+      booleanFlags: ['strict'],
+      usageHint: 'worktree-deps.mjs <mount|unmount|scan|status> --main <dir> --worktree <dir>',
     })
   } catch (err) {
     process.stderr.write(`${err.message}\n`)
@@ -468,20 +547,37 @@ function main(argv) {
   try {
     let res
     if (cli.sub === 'status') res = compareLockfiles(cli.opts.main, cli.opts.worktree)
+    else if (cli.sub === 'scan') res = scanOutboundLinks(cli.opts.worktree)
     else if (cli.sub === 'mount') res = mountSharedDeps(cli.opts.main, cli.opts.worktree)
-    else if (cli.sub === 'unmount') res = unmountSharedDeps(cli.opts.main, cli.opts.worktree)
-    else throw new Error(`未知子命令：${cli.sub}`)
+    else if (cli.sub === 'unmount') {
+      // 这个子命令的本职是「清场以便重挂依赖」，所以默认走 deps 档（worktree 不会消失）。
+      // 要删 worktree 就必须显式加 --strict，让「跟随 junction 递归删除」这道闸生效。
+      res = unmountSharedDeps(cli.opts.main, cli.opts.worktree, {
+        allowOutbound: cli.opts['allow-outbound'],
+        mode: cli.opts.strict ? 'cleanup' : 'deps',
+      })
+    } else throw new Error(`未知子命令：${cli.sub}`)
 
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
     } else {
       process.stdout.write(`worktree-deps (${cli.sub}): ${JSON.stringify(res)}\n`)
+      if (cli.sub === 'unmount' && res.ok === false) {
+        process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree 里有 ${res.blocked.length} 条指向外部的链接未获准删除。`
+          + '`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
+        for (const one of res.blocked) {
+          process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
+        }
+        process.stderr.write('确认这些目标可以切断后，用 --allow-outbound <路径> 逐个列出再重跑；不存在「全部放行」开关。\n')
+        return 4
+      }
       printNextStep([
         cli.sub === 'unmount'
-          ? '主仓依赖完好且已解绑，可安全执行 git worktree remove。'
+          ? '外链已解绑且主仓完好，可安全执行 git worktree remove。'
           : '可在 worktree 中直接运行项目命令；清理前务必先执行 unmount。',
       ], { repoRoot: cli.opts.main })
     }
+    if (cli.sub === 'unmount' && res.ok === false) return 4
     return 0
   } catch (err) {
     process.stderr.write(`worktree-deps 错误：${err instanceof Error ? err.message : String(err)}\n`)

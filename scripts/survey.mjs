@@ -21,6 +21,7 @@ import * as protocol from './lib/protocol.mjs'
 import {
   classifyWorkspaceIdentity,
   detectGitModeMarkers,
+  getHostingProvider,
   resolveWorkspaceIdentity,
 } from './lib/platform/index.mjs'
 import {
@@ -38,6 +39,7 @@ import {
   finalizeWalkWorkspace,
   scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
+import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
 import {
   collectTopModuleDirs,
   detectKit,
@@ -350,7 +352,22 @@ const QUESTION_RULES = [
       && f.docs.workflowFacts?.hasRelease !== true
       && (f.conventions?.workflowTooling ?? []).every((t) => !/changeset|release-please|releaserc|goreleaser/i.test(t))
       && (f.ecosystem.publishable === true || Boolean(f.docs.releasing) || (f.git.tags?.length ?? 0) > 0),
-    text: '项目具备发布形态且尚未配置发布流水线，请选择发版策略（5 选 1）：1) 不配置；2) 沿用已有工具；3) 纯手动 `gh release create`；4) Tag 自动发布页（默认用内置 `GITHUB_TOKEN`，零额外 Secret）；5) 联动下游或推送制品库（按需配 `RELEASE_TOKEN` 或 OIDC 可信发布）',
+    // 发版手段按这个平台真的能做什么来说。
+    //
+    // 远端不是 GitHub 时还教 gh release create，等于让人照着敲一条必然 404 的命令，
+    // 而文案本身不会报错——这是最坏的一种：错在文档里，执行的人以为是自己配错了。
+    text: (f) => {
+      const caps = f.git?.capabilities ?? null
+      const canRelease = caps?.known === true && caps.releases === true
+      if (!canRelease) {
+        const who = caps?.providerId ?? "未知"
+        return `项目具备发布形态且尚未配置发布流水线。这个远端（${who}）的发布能力`
+          + "要么不支持、要么认不出来，所以这里不给本平台专用的命令：请先在它的托管界面上确认发版方式，再决定要不要接到流水线里"
+      }
+      return "项目具备发布形态且尚未配置发布流水线，请选择发版策略（5 选 1）：1) 不配置；2) 沿用已有工具；"
+        + "3) 纯手动 `gh release create`；4) Tag 自动发布页（默认用内置 `GITHUB_TOKEN`，零额外 Secret）；"
+        + "5) 联动下游或推送制品库（按需配 `RELEASE_TOKEN` 或 OIDC 可信发布）"
+    },
   },
 ]
 
@@ -392,6 +409,35 @@ function judgeGaps(facts) {
   return { gaps, questions, projectGaps }
 }
 
+/**
+ * 这个远端到底能做什么。
+ *
+ * 三态，不是两态：`true` 能做、`false` 不能做、`null` 认不出来。
+ * **`null` 不许被下游当成 `true`**——「看着像能」正是给出 GitHub 专用命令然后 404 的来源。
+ *
+ * 取值全部来自注册表里平台自己的声明（`PROVIDER.capabilities`），不在这里写死任何平台名；
+ * 未注册的托管退化成 `generic-git` 的能力表（全 false），本地仓直接 `none`。
+ */
+function summarizeRemoteCapabilities(role, gitFacts) {
+  const providerId = role?.providerId ?? gitFacts?.providerId ?? null
+  if (!providerId) return { known: false, providerId: null, issues: null, pullRequests: null, releases: null, checks: null }
+  if (providerId === 'none') {
+    return { known: true, providerId, issues: false, pullRequests: false, releases: false, checks: false }
+  }
+  const provider = getHostingProvider(providerId)
+  const caps = provider?.capabilities
+  if (!caps) return { known: false, providerId, issues: null, pullRequests: null, releases: null, checks: null }
+  return {
+    known: true,
+    providerId,
+    issues: caps.issues === true,
+    pullRequests: caps.pr === true,
+    releases: caps.releases === true,
+    // 「能不能读 CI 检查状态」在平台声明里没有单独位，只有 api 通不通。api 不通一律算不能。
+    checks: caps.api === true && caps.pr === true,
+  }
+}
+
 export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
@@ -415,21 +461,19 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const kit = detectKit(root)
   const localSkills = detectLocalSkills(root)
   const artifacts = detectArtifacts(root, ecosystem)
-  const universal = ecosystem.kinds.length === 0
-    ? detectUniversalCommands(root)
-    : { commands: {}, sources: {}, detectionEvidence: [] }
+  const universal = detectUniversalCommands(root)
 
   const gitFacts = await gitPromise
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
   const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
 
-  const commands = { ...ecosystem.commands, ...universal.commands, ...taskCommands }
+  const commands = { ...universal.commands, ...taskCommands, ...ecosystem.commands }
   const commandsByEcosystem = { ...ecosystem.commandsByEcosystem }
   if (Object.keys(taskCommands).length > 0) commandsByEcosystem.task = taskCommands
   if (Object.keys(universal.commands).length > 0) {
     commandsByEcosystem['ci-or-taskfile'] = universal.commands
   }
-  const commandSources = { ...(universal.sources ?? {}) }
+  const commandSources = { ...(universal.sources ?? {}), ...(ecosystem.commandSources ?? {}) }
 
   let kinds = ecosystem.kinds
   if (kinds.length === 0) {
@@ -525,6 +569,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
       roleReason: role.reason,
+      capabilities: summarizeRemoteCapabilities(role, gitFacts),
       ...(role.collaborationScope ? { collaborationScope: role.collaborationScope } : {}),
       ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
     },
@@ -572,6 +617,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       totalFiles: ws.totalFiles,
       effectiveFiles: ws.effectiveFiles,
       codeFiles: ws.codeFiles,
+      codeLines: ws.codeLines,
       docFiles: ws.docFiles,
     },
     gaps: [],
@@ -594,6 +640,24 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.explorationStrategy = computeExplorationStrategy(facts)
   facts.artifactPlan = computeArtifactPlan(facts)
   facts.navigation = computeNavigation(facts)
+
+  // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
+  // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。
+  // finalize 之后 files 已经不是数组，路径清单要用扫完那一刻的原始结果。
+  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+  const tddShape = detectTddShapes({
+    paths: shapePaths,
+    kinds: facts.ecosystem?.kinds ?? [],
+    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
+    codeFiles: facts.scale?.codeFiles ?? 0,
+  })
+  facts.tddShape = {
+    enabled: [...tddShape.enabled],
+    reasons: tddShape.reasons,
+    dropSections: [...tddDropSections(tddShape)],
+    filePaths: shapePaths,
+    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
+  }
 
   delete gitFacts._sshHostMap
   delete gitFacts._hasGit

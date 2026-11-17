@@ -13,9 +13,7 @@ import { buildReviewComments } from '../../lib/docs.mjs'
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId,
-  writeTaskLedger,
-} from '../../lib/ledger.mjs'
+  consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
   parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
@@ -250,8 +248,8 @@ export async function handleRecord(opts, roots) {
       return EXIT.USAGE_OR_POLICY
     }
   } else {
-    const maxPrev = prevRounds.length > 0 ? Math.max(...prevRounds.map((r) => Number(r.round) || 0)) : 0
-    round = maxPrev + 1
+    // 与签发侧用同一个派生式——两处各算一次，轮次有空档时必然对不上。
+    round = nextReviewRound(task)
   }
 
   const verdict = String(opts.verdict ?? '').toLowerCase()
@@ -265,11 +263,43 @@ export async function handleRecord(opts, roots) {
     return EXIT.USAGE_OR_POLICY
   }
 
+  // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来。
+  const evidenceRaw = String(opts.evidence ?? '').trim()
+  if (!evidenceRaw) {
+    const msg = 'BLOCKED_MISSING_REVIEW_EVIDENCE: 记审查结论必须传 --evidence "<你实际跑过的命令与输出摘要>"。'
+      + '判据是「跑过什么」，不是「觉得怎样」——没有佐证的通过和没有通过是一回事。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_REVIEW_EVIDENCE', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+
   const implementerId = String(opts['implementer-id'] ?? baseLedger.implementerId ?? '').trim()
-  if (implementerId && reviewerId === implementerId) {
+  if (!implementerId) {
+    const msg = 'BLOCKED_MISSING_IMPLEMENTER: 账本里没有 implementerId，无法判断这是不是自审——'
+      + '缺少实施者标识不等于不需要独立审查。请用 flow.mjs start 建立任务（会记下实施者），或显式传 --implementer-id。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_IMPLEMENTER', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+  if (reviewerId === implementerId) {
     const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${implementerId}). Independent review requires a distinct reviewer.`
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId }, null, 2)}\n`)
+    } else {
+      process.stdout.write(`${msg}\n`)
+    }
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+
+  const tokenCheck = consumeReviewToken(baseLedger, opts['review-token'], round)
+  if (!tokenCheck.ok) {
+    const msg = `BLOCKED_REVIEW_TOKEN: ${tokenCheck.reason}。`
+      + '独立审查要凭 flow.mjs next 在待审查阶段签发的一次性令牌，--reviewer-id 一个字符串不再是凭据。'
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_REVIEW_TOKEN', code: tokenCheck.reason, error: msg, taskId, round, reviewerId }, null, 2)}\n`)
     } else {
       process.stdout.write(`${msg}\n`)
     }
@@ -446,6 +476,8 @@ export async function handleRecord(opts, roots) {
     headSha,
     reviewerId,
     verdict,
+    // 跑过什么。没有它，'我跑过' 和 '我觉得' 在账本里分不出来。
+    reviewEvidence: evidenceRaw,
     blockers: mustFixList.map((m) => m.summary),
     mustFix: mustFixList,
     shouldFix: shouldFixList,

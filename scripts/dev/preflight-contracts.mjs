@@ -13,7 +13,7 @@ import { VERIFY_EXIT } from '../handoff.mjs'
 import { markdownHeadings } from '../sync-toc.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
-const PATH_RE = /\b((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json))\b/g
+const PATH_RE = /(?<![A-Za-z0-9_./-])((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json))\b/g
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 
 const PUSH_TIER_RULE = [
@@ -58,7 +58,7 @@ const STALE_DAILY_END = /提交\s*[+＋]\s*推送/
 
 const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']
 const ACCEPTANCE_ID_RE = /^- \[[ xX]\] C\d+\b/m
-const ACCEPTANCE_ID_SITES = ['templates/docs-todo.md', 'templates/docs-spec.md']
+const ACCEPTANCE_ID_SITES = ['kit/skills/templates/docs-todo.md', 'kit/skills/templates/docs-spec.md']
 
 const FINISH_ANCHOR = /合并收尾/
 const FINISH_STEPS = [
@@ -675,11 +675,11 @@ function checkReviewContract({ ROOT, readText, fail, note }) {
   }
   note(`验收标准编号：${ACCEPTANCE_ID_SITES.length} 处都是 \`C<数字>\` 形状`)
 
-  const todoTplPath = join(ROOT, 'templates/docs-todo.md')
-  if (!existsSync(todoTplPath)) fail('完成后记录：缺 templates/docs-todo.md')
+  const todoTplPath = join(ROOT, 'kit/skills/templates/docs-todo.md')
+  if (!existsSync(todoTplPath)) fail('完成后记录：缺 kit/skills/templates/docs-todo.md')
   else {
     const { ok, why } = completionRecordBeforeMerge(readText(todoTplPath))
-    if (!ok) fail(`templates/docs-todo.md：${why}——这句一改，合并之后就得再开一个只改记录的提案，而那个提案没人审、也没和这件事绑在一起`)
+    if (!ok) fail(`kit/skills/templates/docs-todo.md：${why}——这句一改，合并之后就得再开一个只改记录的提案，而那个提案没人审、也没和这件事绑在一起`)
   }
   note('完成后记录：模板要求「在合并之前写完」')
 

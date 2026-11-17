@@ -7,6 +7,7 @@
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 import {
   canonicalPath, gitRun, posixPath, readJsonSafe, samePath, withFileLock, writeJsonAtomic,
@@ -16,6 +17,59 @@ import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
 const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
+
+/**
+ * 发一枚独立审查令牌。**只由 `flow next` 在 `needs-review` 阶段调用。**
+ *
+ * 令牌的形状刻意不透明（前缀 `pf-rv-` 便于在日志里认出来，其余是随机字节），
+ * 它不承载任何可推导的信息：能推导的东西就等于能自己造。
+ */
+export function issueReviewToken(round) {
+  const bytes = randomBytes(18)
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return { token: `pf-rv-${hex}`, round: Number(round) || 1, issuedAt: new Date().toISOString(), consumedAt: null }
+}
+
+/**
+ * 取这一轮的一次性审查令牌：有未消费的就复用，没有就发一枚并写回账本。
+ *
+ * 只有 `flow next` 在待审查阶段调用它——**签发点唯一**，否则调用方各发各的，
+ * 令牌就不再是「现场签发的那个东西」。
+ *
+ * 复用而不是每次新发：`flow next` 可能被连跑好几次（人看状态、脚本问路），
+ * 每次新发一枚会让前一枚作废，而调用方手里拿的很可能是前一枚。
+ *
+ * @returns {{ token: string, entry: object, issued: boolean }}
+ */
+export function ensureReviewToken(mainRoot, ledger, round) {
+  const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const existing = list.find((t) => t && Number(t.round) === Number(round) && !t.consumedAt)
+  if (existing) return { token: existing.token, entry: existing, issued: false }
+  const entry = issueReviewToken(round)
+  ledger.reviewTokens = [...list, entry]
+  writeTaskLedger(mainRoot, ledger)
+  return { token: entry.token, entry, issued: true }
+}
+
+/**
+ * 消费一枚令牌。成功返回 `{ ok: true }`，失败返回原因。
+ *
+ * 三条都要满足：令牌存在、round 对得上、未被消费过。少判一条就等于没有令牌——
+ * 复用旧令牌、或拿 Round 1 的令牌记 Round 3，都会让「独立审查」这个说法失效。
+ */
+export function consumeReviewToken(ledger, token, round) {
+  const value = String(token ?? '').trim()
+  if (!value) return { ok: false, reason: 'MISSING_REVIEW_TOKEN' }
+  const list = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const hit = list.find((t) => t && t.token === value)
+  if (!hit) return { ok: false, reason: 'UNKNOWN_REVIEW_TOKEN' }
+  if (hit.consumedAt) return { ok: false, reason: 'REVIEW_TOKEN_ALREADY_CONSUMED' }
+  if (Number(hit.round) !== Number(round)) {
+    return { ok: false, reason: `REVIEW_TOKEN_ROUND_MISMATCH: 令牌是 Round ${hit.round} 的，当前记 Round ${round}` }
+  }
+  hit.consumedAt = new Date().toISOString()
+  return { ok: true, entry: hit }
+}
 
 /** 校验并清洗 taskId，兼容 ASCII 与中文字符，防止路径穿越。 */
 export function sanitizeTaskId(taskId) {
@@ -65,6 +119,26 @@ export function createDefaultLedger(partial = {}) {
     archivedPrdFile: partial.archivedPrdFile ?? null,
     privateDocsDir: partial.privateDocsDir ?? null,
     linkedIssues: Array.isArray(partial.linkedIssues) ? partial.linkedIssues : [],
+    /**
+     * 验收标准的冻结指纹。
+     *
+     * 批准那一刻记下 `C1..Cn` 的指纹；之后实现阶段回到 SPEC 里改标准，
+     * 指纹就对不上。**这是「批准后标准不许变」的唯一机械保证**——
+     * 在此之前，改标准既不报错也不留痕，只能靠审查者记得原文。
+     */
+    criteriaFingerprint: partial.criteriaFingerprint ?? null,
+    /** 冻结发生在哪个文件上（SPEC 或 Todo），以及冻结时的审批人/时间。 */
+    criteriaFrozenFrom: partial.criteriaFrozenFrom ?? null,
+    criteriaFrozenAt: partial.criteriaFrozenAt ?? null,
+    /**
+     * 贴进来的 Issue 到底说了什么。
+     *
+     * 只记编号不够：AI 拿着一个 「42」 什么也做不了，只能要么自己再跑一次 `gh issue view`
+     * （没人检查它做没做），要么凭编号猜。这里把标题与正文摘要落在账本里。
+     */
+    issueContext: Array.isArray(partial.issueContext) ? partial.issueContext : [],
+    /** 没取到正文的 Issue 编号。非空时 `flow next` 要提示先去取。 */
+    issueContextUnavailable: Array.isArray(partial.issueContextUnavailable) ? partial.issueContextUnavailable : [],
     prNumber: partial.prNumber ?? null,
     prState: partial.prState ?? null,
     prUrl: partial.prUrl ?? null,
@@ -82,6 +156,25 @@ export function createDefaultLedger(partial = {}) {
     visualCheckEvidence: partial.visualCheckEvidence ?? null,
     implementerId: partial.implementerId ?? null,
     reviewerId: partial.reviewerId ?? null,
+    /**
+     * 探索证据：这个任务开干之前，有没有人真的读过这个仓。
+     *
+     * 形状冻结在这里，因为三处要读它——`flow next`（缺了就只给探索这一步）、
+     * `flow merge`（缺了拦）、`review-pack`（写进审查材料）。三处各定义一个字段名，
+     * 就会出现「写了没人读、读了没人写」。
+     *
+     * `by` 是派发者标识（子代理名或会话标识）。它不承担防伪——防伪在 `reviewTokens`；
+     * 它承担的是「事后能追到是谁说的」。
+     */
+    explored: partial.explored ?? null,
+    /**
+     * 独立审查的一次性令牌。
+     *
+     * `--reviewer-id` 是命令行传进来的自由字符串，谁都能编一个不一样的名字。
+     * 令牌把「随便编个名」抬成「至少得伪造一个 `flow next` 现场发的东西」，
+     * 且一个令牌只能被消费一次。
+     */
+    reviewTokens: Array.isArray(partial.reviewTokens) ? partial.reviewTokens : [],
     rounds: Array.isArray(partial.rounds) ? partial.rounds : [],
     lastReview: partial.lastReview ?? null,
     reviewPassed: Boolean(partial.reviewPassed),
@@ -238,4 +331,29 @@ export async function resolveTaskContext(roots, opts = {}, { requireExisting = t
   }
   const choices = active.map((t) => `  - --task ${t.taskId} (status=${t.status}, branch=${t.branch ?? '-'})`).join('\n')
   throw new Error(`存在 ${active.length} 个未闭环任务，无法自动消歧，请显式追加以下任一参数：\n${choices}`)
+}
+
+/**
+ * 下一个审查轮次。
+ *
+ * ## 为什么必须只有一个派生式
+ *
+ * 这件事此前在五处各算一遍，其中两种算法并存：
+ *
+ * - `rounds.length + 1`（签令、打印命令）—— 轮次有空档时算错；
+ * - `Math.max(...) + 1`（diff 基线、变更记录、rebind）—— 这个是对的。
+ *
+ * 空档（`rounds = [1, 3]`）时前者给 3、后者给 4：令牌按 4 签、命令让人照 3 跑，
+ * 于是 `REVIEW_TOKEN_ROUND_MISMATCH`，而且没有出口。
+ *
+ * 判据就是「取最大轮次加一」——**空档不是异常，是正常历史**（某轮被撤销、
+ * 某轮只审了一部分）。按条数算等于假设轮次永远连续，那个假设不成立。
+ *
+ * @param {object} ledger 任务账本
+ * @returns {number} 下一个轮次，最小为 1
+ */
+export function nextReviewRound(ledger) {
+  const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+  const nums = rounds.map((r) => Number(r?.round ?? r) || 0).filter((n) => n > 0)
+  return nums.length > 0 ? Math.max(...nums) + 1 : 1
 }

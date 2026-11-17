@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'no
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
 import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
@@ -511,7 +512,19 @@ export async function handleStart(opts, roots) {
 
   let baseBranch = state.defaultBranch || 'main'
   let baseSha = state.head
-  if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
+  // 允许显式指定基线：工作全在一条特性分支上时（主线还没合），
+  // 新任务必须从那条分支起头，否则它看不到已有工作——一开会就少几十个提交。
+  const explicitBase = String(opts.base ?? '').trim()
+  if (explicitBase) {
+    let ok = false
+    for (const cand of [`refs/heads/${explicitBase}`, `refs/remotes/origin/${explicitBase}`, explicitBase]) {
+      const sha = resolveRefShaFast(roots.gitDir, cand)
+      if (sha) { baseBranch = explicitBase; baseSha = sha; ok = true; break }
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+      if (r.ok && r.stdout.trim()) { baseBranch = explicitBase; baseSha = r.stdout.trim(); ok = true; break }
+    }
+    if (!ok) throw new Error(`--base 指定的分支不存在：${explicitBase}`)
+  } else if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
     for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
       const fastSha = resolveRefShaFast(roots.gitDir, candRef)
       if (fastSha) { baseSha = fastSha; break }
@@ -558,6 +571,54 @@ export async function handleStart(opts, roots) {
   const implementerId = resolveContributorIdentity({
     explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
   }).actor
+
+  const issueContext = []
+  if (linkedIssues.length > 0) {
+    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+    let client = opts._ghClient ?? null
+    if (!client && targetRepo && providerId === 'github') {
+      try {
+        // 取正文是网络操作。用「不联网」的探测结果判断「能不能取」，
+        // 必然得到 tier=none，然后装配出一个只会委托的客户端——那不是通道不存在，
+        // 是没去探。所以这里要显式联网探一次。
+        const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({
+          cwd: roots.mainRoot, remoteUrls: state.remoteUrls, probeNetwork: true,
+        }))
+        client = ghProbe.client
+      } catch { client = null }
+    }
+    for (const num of linkedIssues) {
+      if (!client || !targetRepo) {
+        issueContext.push({ number: num, fetched: false, reason: 'no-api-channel', title: null, summary: null })
+        continue
+      }
+      try {
+        const res = await client.getIssue(targetRepo, num)
+        if (!res?.ok) {
+          // 委托 ≠ 失败。「我替你做不了」和「取不到」都要留痕，但不能都叫 fetch-failed：
+          // 前者该由调用方补上，后者要等通道恢复，处置完全不同。
+          const reason = res?.delegated
+            ? `needs-manual-fetch:${res.action ?? 'get_issue'}`
+            : (res?.error ?? 'fetch-failed')
+          issueContext.push({ number: num, fetched: false, reason, title: null, summary: null })
+          continue
+        }
+        const body = String(res.body ?? '').replace(/\r\n/g, '\n').trim()
+        issueContext.push({
+          number: num,
+          fetched: true,
+          title: res.title ?? null,
+          url: res.url ?? null,
+          state: res.state ?? null,
+          summary: body.length > 1200 ? `${body.slice(0, 1200)}…` : body,
+        })
+      } catch (error) {
+        issueContext.push({ number: num, fetched: false, reason: error instanceof Error ? error.message : String(error), title: null, summary: null })
+      }
+    }
+  }
+  const issueContextUnavailable = issueContext.filter((x) => !x.fetched).map((x) => x.number)
+
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
 
   if (effectiveExternalPr) {
@@ -618,6 +679,17 @@ export async function handleStart(opts, roots) {
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId)
 
+  for (const docRel of [initialSpec, initialTodo]) {
+    const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
+    if (authored.length > 0) {
+      const msg = `BLOCKED_SELF_AUTHORED_ACCEPTANCE: ${authored[0].message}`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_SELF_AUTHORED_ACCEPTANCE', file: docRel, ...authored[0] }, null, 2)}\n`)
+      else process.stdout.write(`${msg}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
+  }
+
   if (state.commits === 0) {
     if (Boolean(opts.parallel)) throw new Error('仓库尚无初始提交，无法使用 worktree 并行隔离')
     const hasBranch = await resolveLocalBranchRef()
@@ -627,7 +699,7 @@ export async function handleStart(opts, roots) {
       taskId, slug, caseType, tier: 1, isolation: 'branch', role, providerId, branch, baseBranch, baseSha,
       worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-      linkedIssues, prNumber, implementerId, status: 'started',
+      linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable, status: 'started',
       ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
@@ -665,7 +737,7 @@ export async function handleStart(opts, roots) {
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-    linkedIssues, prNumber, implementerId, status: 'started',
+    linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable, status: 'started',
     ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
   })
 

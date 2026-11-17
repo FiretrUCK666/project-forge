@@ -1,17 +1,18 @@
 /**
- * fixtures-m2.mjs —— Milestone 2 行为断言（正反双向）：
- *   C1 三正交策略/evidence.json/flow next/ownerRole/submit 权责锁定
- *   C2 全 Worktree 隔离/冲突拦截/跨轮复用与 --reset-review-slot
- *   C3 submit 零脏文件/PR 模板与查重/1:N 总控 PRD 保护/generic-git/trial-merge/Squash 清理
- *   C4 六锁防无限审查硬拦截与跨文件反误判 + C5 统一模板链路
+ * fixtures-flow-state.mjs —— 流程状态与防死锁（正反双向）：
+ *   三正交策略 / evidence.json 防旁路 / flow next 与 submit 权责锁
+ *   全 Worktree 隔离 / 分支冲突拦截 / 跨轮槽复用与 --reset-review-slot
+ *   1:N 总控 PRD 保护 / 子 SPEC 归档互链 / OPEN PR 防重 / 试合回滚与 Squash 清理
+ *   六锁防无限审查硬拦截（Round 4 历史停损 / 同 HEAD / 增量视野 / cross-file C1 / Pass 门禁）
  */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
-export function registerM2Cases(cases) {
-  cases.push(['M2 C1：三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
+export function registerFlowStateCases(cases) {
+  cases.push(['三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
     const {
       determineWorkflowPolicy, evaluateNextState, readTaskLedger, resolveRepoRoots,
       runLowRiskDocStaticCheck,
@@ -64,7 +65,7 @@ export function registerM2Cases(cases) {
     return true
   }])
 
-  cases.push(['M2 C1c：quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
+  cases.push(['quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
     const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -92,7 +93,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(qOnlyDir) }
   }])
 
-  cases.push(['M2 C1b：quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
+  cases.push(['quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
     const {
       evaluateNextState, readTaskLedger, resolveRepoRoots,
     } = await import('../../kit/skills/lib/shared.mjs')
@@ -103,7 +104,7 @@ export function registerM2Cases(cases) {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': [
-        '# m2-c1', '',
+        '# probe-state', '',
         '```yaml',
         'quick-test: node -e "process.exit(0)" -- {target}',
         'full-test: exit 0',
@@ -111,8 +112,8 @@ export function registerM2Cases(cases) {
         'high-risk: none',
         '```', '',
       ].join('\n'),
-      'package.json': '{"name":"m2-c1","version":"1.0.0","repository":"https://github.com/acme/c1.git"}\n',
-      'README.md': '# m2-c1\n',
+      'package.json': '{"name":"probe-state","version":"1.0.0","repository":"https://github.com/acme/c1.git"}\n',
+      'README.md': '# probe-state\n',
       'src/app.mjs': 'export const a = 1\n',
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c1.git' })
@@ -200,7 +201,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M2 C2：全 Worktree 隔离（commits>0 含 Case1）、分支冲突拦截、跨轮槽复用与 --reset-review-slot', async () => {
+  cases.push(['全 Worktree 隔离（commits>0 含 Case1）、分支冲突拦截、跨轮槽复用与 --reset-review-slot', async () => {
     // 1. 0 提交仓保持 Tier 1；有提交仓 Case 1 强制 Tier 2 .worktrees/impl-* 且 baseSha 来自默认分支
     const unborn = tmpProject({ 'README.md': '# u\n' })
     gitInit(unborn, { commit: false, branch: 'main' })
@@ -257,7 +258,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(unborn); rmTree(committed) }
   }])
 
-  cases.push(['M2 C3a：1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
+  cases.push(['1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
     const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
 
@@ -266,10 +267,10 @@ export function registerM2Cases(cases) {
       '.github/pull_request_template.md': '# PR\n\n## 改了什么\n\n## 关联 Issue\n\n## 为什么\n\n## 实现依据\n\n## 怎么验证的\n\n## 回滚点\n\n## 风险与影响范围\n\n## 合并授权\n\n## 独立审查与故障注入\n',
       'AGENTS.md': '# c3\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\n```\n',
       'src/app.mjs': 'export const v = 1\n',
-      'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
-      'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',
-      'docs/todo/261116-issue11-m1-todo.md': '---\nkind: todo\ntitle: "M1"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\ndone_at: null\ntask_id: m1\nplanned_at: HEAD\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_spec: ../specs/261116-issue11-m1-spec.md\n---\n\n# Todo: M1\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
-      'docs/specs/261116-issue12-m2-spec.md': '---\nkind: spec\ntitle: "M2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "t"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nhigh_risk_paths: []\n---\n\n# SPEC: M2\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [ ] C1: `src/app.mjs` next\n',
+      'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 要解决的问题\n- 统一一个可复用的组件库\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
+      'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 要解决的问题\n- 拆出第一个切片\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',
+      'docs/todo/261116-issue11-m1-todo.md': '---\nkind: todo\ntitle: "M1"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\ndone_at: null\ntask_id: m1\nplanned_at: HEAD\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_spec: ../specs/261116-issue11-m1-spec.md\n---\n\n# Todo: M1\n\n## 要解决的问题\n- 拆出第一个切片\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 完成后的记录\n**在合并之前写完，随这次改动一起提交。**\n',
+      'docs/specs/261116-issue12-m2-spec.md': '---\nkind: spec\ntitle: "M2"\nstatus: draft\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 12\npr: null\nbranch: null\nowner: "t"\napproved: false\nimplemented: false\nplan_critique: pending\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: null\nhigh_risk_paths: []\n---\n\n# SPEC: M2\n\n## 要解决的问题\n- 拆出第二个切片\n\n## 本期不做\n- 无\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [ ] C1: `src/app.mjs` next\n- [ ] C2: 认领总控 PRD 的另一条\n',
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c3.git' })
 
@@ -331,7 +332,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(bare); rmTree(dir) }
   }])
 
-  cases.push(['M2 C3b：--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
+  cases.push(['--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
     const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -353,7 +354,7 @@ export function registerM2Cases(cases) {
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
       gitCommitFast(wt, 'feat: m1b v2', { updateOnly: true })
       await handleVerify({ task: 'm1b', mode: 'full' }, roots)
-      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a' }, roots)
 
       const mainBefore = gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim()
       const tmFail = await runTrialMerge({
@@ -398,7 +399,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M2 C4+C5：六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
+  cases.push(['六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': '# c4\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n',
@@ -445,16 +446,17 @@ export function registerM2Cases(cases) {
 
       const r1 = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 'c4-lk', '--round', '1', '--verdict', 'changes', '--reviewer-id', 'rev-1',
+        '--review-token', await issueTokenFor(dir, 'c4-lk', 1),
         '--must-fix', 'C1: src/a.mjs:1 err1',
         '--disposition', 'c1:rebutted-wrong', '--disposition', 'c1:rebutted-wrong',
-        '--pre-existing', 'old issue', '--pre-existing', 'old   issue', '--json',
+        '--pre-existing', 'old issue', '--pre-existing', 'old   issue', '--json', '--evidence', '夹具实测：命令已跑，输出符合预期'
       ], { cwd: dir })
       if (r1.status !== 0 || JSON.parse(r1.stdout).preExistingCount !== 1 || JSON.parse(r1.stdout).dispositionStats?.total !== 1) {
         return `R1 record 或去重统计失败：${r1.stdout} ${r1.stderr}`
       }
 
       // 同 HEAD 复审拒绝（exit 2）
-      const sameHead = await hRecord({ task: 'c4-lk', round: '2', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      const sameHead = await hRecord({ task: 'c4-lk', round: '2', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2) }, roots)
       if (sameHead !== 2) return `同 HEAD 复审未被拦截：exit=${sameHead}`
 
       // 推进 HEAD 仅改 src/b.mjs:1，检验增量视野硬锁
@@ -462,41 +464,42 @@ export function registerM2Cases(cases) {
       gitCommitFast(wt, 'r2', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
 
-      const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
+      const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
       if (outScope !== 2) return `Round 2 未改旧文件新刺未被拦截：exit=${outScope}`
 
-      const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: rename helper style nitpick'] }, roots)
+      const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: rename helper style nitpick'] }, roots)
       if (subjScope !== 2) return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope}`
 
-      const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r2CrossC1 !== 0) return `不同文件同标 C1 误触发停损或遭拒：exit=${r2CrossC1}`
 
-      const badDisp = await hRecord({ task: 'c4-lk', round: '3', verdict: 'pass', 'reviewer-id': 'rev-1', disposition: ['c1:bogus'] }, roots)
+      const badDisp = await hRecord({ task: 'c4-lk', round: '3', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), disposition: ['c1:bogus'] }, roots)
       if (badDisp !== 2) return `非法 --disposition 未阻断：exit=${badDisp}`
 
       // Round 3 触发停损 -> Round 4 pass 绕过未解锁停损必须 exit 4 -> override 后 pass 成功
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod2\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitCommitFast(wt, 'r3', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
-      const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'reviewer-id': 'rev-1', 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r3Stop !== 4) return `R3 停损未触发：exit=${r3Stop}`
 
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod3\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitCommitFast(wt, 'r4', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
-      const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
       if (r4Bypass !== 4) return `Round 4 pass 竟绕过了未解锁的历史停损：exit=${r4Bypass}`
 
       await hOverride({ task: 'c4-lk', 'human-approved': true, reason: 'approved' }, roots)
       await hVerify({ task: 'c4-lk', cmd: 'node -e "process.exit(1)"' }, roots)
       const passBlocked = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-1',
+        '--review-token', await issueTokenFor(dir, 'c4-lk', 4), '--evidence', '夹具实测：命令已跑，输出符合预期'
       ], { cwd: dir })
       if (passBlocked.status !== 2 || !(passBlocked.stdout + passBlocked.stderr).includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
         return `失败 verify 后虚假 pass 未被拦截：exit=${passBlocked.status}, out=${passBlocked.stdout}, err=${passBlocked.stderr}`
       }
       await hVerify({ task: 'c4-lk' }, roots)
-      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1' }, roots)
+      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
       if (passOk !== 0) return `override+复绿后 Round 4 pass 失败：exit=${passOk}`
 
       return true

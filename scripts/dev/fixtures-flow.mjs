@@ -4,7 +4,8 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
 cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
@@ -58,7 +59,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
     const vWeak = await handleVerify({ task: 't-w2', mode: 'gate' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
-    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2' }, roots)
+    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
 
     const mGate = await handleMerge({ task: 't-w2', json: true }, roots)
     if (mGate.exitCode !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.exitCode}`
@@ -75,7 +76,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     gitCommitFast(implClean, 'add assertion', { updateOnly: true })
     const vClean = await handleVerify({ task: 't-w2-clean', mode: 'full' }, roots)
     if (vClean.exitCode !== 0) return `clean verify 失败：${vClean.exitCode}`
-    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2' }, roots)
+    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2-clean', 1) }, roots)
     const mClean = await handleMerge({ task: 't-w2-clean' }, roots)
     if (mClean.exitCode !== 0) return `正常增量测试被 merge 误杀为门禁弱化：exit=${mClean.exitCode}`
     return true
@@ -186,7 +187,8 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
 
     // review-pack record 实时双写结构化评论（PR 完整核对单 + Issue 阻塞摘要）到 PR #88 与 Issue #77 并贴标签；离线不阻塞且产出 delegatedPayloads
     const recChangesCode = await handleRecord({
-      task: 'gw-feat', round: '1', verdict: 'changes', 'reviewer-id': 'rev-z',
+      task: 'gw-feat', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-z',
+      'review-token': await issueTokenFor(dir, 'gw-feat', 1),
       'must-fix': [JSON.stringify([{ id: 'C1', file: 'src/app.mjs', line: 1, summary: 'C1: 修复空指针', rootCause: '缺少空值守卫', fixHint: '先判空再返回' }])],
       'should-fix': ['补齐边界日志'],
       'pre-existing': ['src/legacy.mjs:3 历史遗留告警'],
@@ -211,7 +213,8 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const gw = 2\n')
     gitCommitFast(implAbs, 'fix: gw null guard', { updateOnly: true })
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--json',
+      'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z',
+      '--review-token', await issueTokenFor(dir, 'gw-feat', 2), '--json', '--evidence', '夹具实测：命令已跑，输出符合预期'
     ], { cwd: dir })
     const offlineSync = offlineRec.status === 0 ? JSON.parse(offlineRec.stdout).githubSync : null
     const delPr = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'pr' && t.number === 88)
@@ -288,7 +291,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (!excludeTxt.split('\n').some((line) => line.trim() === '/backend/node_modules')) {
       return `mountSharedDeps 未写入无尾斜杠软链忽略规则：${excludeTxt}`
     }
-    unmountSharedDeps(dir, implAbs)
+    unmountSharedDeps(dir, implAbs, { mode: 'deps' })
     writeFileSync(join(implAbs, 'frontend/package-lock.json'), '{"lockfileVersion":3,"changed":1}\n')
     const mPartial = mountSharedDeps(dir, implAbs)
     if (existsSync(join(implAbs, 'frontend/node_modules')) || !existsSync(join(implAbs, 'backend/node_modules/pkg/i.js'))) {
@@ -344,7 +347,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     }
 
     // Round 1 pass 后再提交新改动并 verify（未复审），merge 必须拦截陈旧 reviewPassedHead
-    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 1) }, roots)
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 3\n')
     gitCommitFast(implAbs, 'feat: v3', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
@@ -352,7 +355,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (mStaleHead.exitCode === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
 
     // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；再提交新 HEAD 触发 Round 3 stop-loss 后 override 解锁
-    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a' }, roots)
+    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 2) }, roots)
     const t2AfterR2 = readTaskLedger(dir, 't-t2')
     if (t2AfterR2.reviewPassedHead !== null) return `verdict=changes 未清空 reviewPassedHead：${t2AfterR2.reviewPassedHead}`
     const mBlocked = await handleMerge({ task: 't-t2' }, roots)
@@ -361,7 +364,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
     gitCommitFast(implAbs, 'feat: v4', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
-    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a' }, roots)
+    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 3) }, roots)
     if (r3Stop !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop}`
     const ov = await handleOverride({ task: 't-t2', 'human-approved': true, reason: 'human verified' }, roots)
     if (ov !== 0) return `override 失败：${ov}`
@@ -405,7 +408,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
       const ver = await handleVerify({ task: 'ci-t', mode }, roots)
       if (ver.exitCode !== 0) throw new Error(`verify 失败：${ver.exitCode}`)
       const curSha = gitSync(ciImpl, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
-      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-ci' }, roots)
+      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-ci', 'review-token': await issueTokenFor(ciDir, 'ci-t', 1) }, roots)
       if (rec !== 0) throw new Error(`record 失败：${rec}`)
       const led = readTaskLedger(ciDir, 'ci-t')
       writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })
@@ -560,13 +563,12 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     ], { cwd: urlDir })
     const spRel = JSON.parse(spInit.stdout).file
     const placeholderTodo = `${'TO'}DO: fill later`
-    let spTxt = readFileSync(join(urlDir, spRel), 'utf8')
-      .replace('<!-- 在合并之前补齐真实实现摘要与验证结果 -->', `- ${placeholderTodo}`)
-      .replace('<two-way | one-way>', 'two-way')
-      .replace(/<[^>]+>/g, '真实值')
-      .replace('- [ ] C1: 真实值', '- [x] C1: verified')
-      .replace('- [ ] C2: 真实值', '- [x] C2: verified')
-    writeFileSync(join(urlDir, spRel), spTxt)
+    hydrateGeneratedDoc(join(urlDir, spRel), { filled: '真实值' })
+    const spTxt0 = readFileSync(join(urlDir, spRel), 'utf8')
+    writeFileSync(join(urlDir, spRel), spTxt0
+      .replace(/^- \[ \] C1: .*$/m, '- [x] C1: verified')
+      .replace(/^- \[ \] C2: .*$/m, '- [x] C2: verified')
+      .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
     await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
     const finBad = await finUrl({ task: 'note-case' }, urlRoots)
@@ -672,4 +674,275 @@ cases.push(['doc-plan approve 移交 flow start 与静态回归（mergeAuthority
   } finally { rmTree(apDir) }
 }])
 
+cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出并默认拒绝（反向：无外链照常放行）', async () => {
+  const { scanOutboundLinks, unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
+  const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
+  const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+  const names = ['vendor', 'shared', 'data', 'packages', '中文名']
+  const dir = tmpProject({
+    '.gitignore': `.worktrees/\n${names.map((n) => `${n}/\n`).join('')}`,
+    'README.md': '# outbound\n',
+  })
+  gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
+  for (const name of names) {
+    mkdirSync(join(dir, name, 'precious'), { recursive: true })
+    writeFileSync(join(dir, name, 'precious', 'SURVIVE.txt'), 'MUST SURVIVE')
+  }
+  gitCommitFast(dir, 'add shared dirs')
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+  try {
+    const roots = await resolveRepoRoots(dir)
+    const started = await handleStart({ task: 'outbound', case: '3', slug: 'outbound' }, roots)
+    if (started.exitCode !== 0) return `start 失败：${started.exitCode}`
+    const ledger = readTaskLedger(dir, 'outbound')
+    const implAbs = join(dir, ledger.worktreePath)
+
+    for (const name of names) symlinkSync(join(dir, name), join(implAbs, name), linkType)
+    // 深一层的同名链接：判据是「这条路径是不是链接、指向是否在外面」，与它在第几层无关。
+    // 只测根目录那一层时，把遍历改成只看根目录也能过——那不是这条判据的意思。
+    mkdirSync(join(implAbs, 'nested', 'deeper'), { recursive: true })
+    symlinkSync(join(dir, 'data'), join(implAbs, 'nested', 'deeper', 'data-deep'), linkType)
+    // 反向：worktree 内部互指的链接不该被当成外链
+    mkdirSync(join(implAbs, 'inner'), { recursive: true })
+    writeFileSync(join(implAbs, 'inner', 'a.txt'), 'inner\n')
+    symlinkSync(join(implAbs, 'inner'), join(implAbs, 'inner-link'), linkType)
+
+    const scan = scanOutboundLinks(implAbs)
+    const found = scan.outbound.map((o) => o.path).sort()
+    const expected = [...names, 'nested/deeper/data-deep'].sort()
+    if (found.length !== expected.length) {
+      return `外链检出数不对：期望 ${expected.length} 个（含深一层的那个），实际 ${found.length} 个（${found.join(', ')}）——按名字筛或只看根目录都会漏`
+    }
+    if (!found.includes('nested/deeper/data-deep')) return `深一层的链接没被检出：${found.join(', ')}`
+    if (scan.internal.length !== 1) return `worktree 内部链接被误判成外链：internal=${JSON.stringify(scan.internal.map((i) => i.path))}`
+
+    const denied = unmountSharedDeps(dir, implAbs)
+    if (denied.ok !== false) return '存在外链时 unmountSharedDeps 必须拒绝，实际放行了'
+    if (denied.blocked.length !== expected.length) return `拒绝理由不全：blocked=${denied.blocked.length}（期望 ${expected.length}）`
+    if (denied.unmounted.length !== 0) return '被拒绝时不得解绑任何链接'
+
+    // 真实清理路径：带 --confirm --force 也必须被拦住
+    const cl = await handleCleanup({ task: 'outbound', confirm: true, force: true, json: true }, roots)
+    if (cl.exitCode === 0) return 'cleanup --confirm --force 带着外链删成功了——主仓数据会被删穿'
+    for (const name of names) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `cleanup 之后主仓 ${name}/precious 没了——这就是删穿`
+    }
+    // 深一层的链接目标同样要完好
+    if (!existsSync(join(dir, 'data', 'precious', 'SURVIVE.txt'))) return 'cleanup 之后深一层链接的目标没了'
+
+    // 显式逐个放行才允许删；且只删链接，不碰目标
+    // 同一个集合：被拦下的那些目标，事后也必须在完好校验的范围内。
+    // 反证方式：先让 3 条被拦下，再逐条放行其中 1 条；两个阶段结束后，所有目标都还在。
+    for (const name of names.slice(0, 3)) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `被拦下阶段目标就没了：${name}`
+    }
+
+    const allowed = unmountSharedDeps(dir, implAbs, { allowOutbound: expected })
+    if (allowed.ok !== true) return `显式放行后仍被拒：${JSON.stringify(allowed.blocked)}`
+    if (allowed.scanned?.outbound !== expected.length) {
+      return `完好校验的集合与删除前扫描不一致：scanned.outbound=${allowed.scanned?.outbound}，扫描=${expected.length}`
+    }
+    if (allowed.unmounted.length !== expected.length) return `放行后解绑数不对：${allowed.unmounted.length}（期望 ${expected.length}）`
+    for (const name of names) {
+      if (!existsSync(join(dir, name, 'precious', 'SURVIVE.txt'))) return `解绑碰了目标内容：主仓 ${name}/precious 没了`
+      if (existsSync(join(implAbs, name))) return `解绑后链接还在：${name}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// 反向：完全没有外链的普通 worktree，清理必须照常成功。保护不能变成误伤。
+cases.push(['cleanup 外链保护反向：工具自己挂的 node_modules 照常解绑放行', async () => {
+  const { scanOutboundLinks, unmountSharedDeps, mountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
+  const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+  const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\nnode_modules/\n',
+    'package.json': '{"name":"plain","version":"1.0.0"}\n',
+    'package-lock.json': '{"lockfileVersion":3}\n',
+    'README.md': '# plain\n',
+  })
+  gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
+  mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', 'pkg', 'i.js'), '1\n')
+  gitCommitFast(dir, 'add deps')
+  try {
+    const roots = await resolveRepoRoots(dir)
+    const started = await handleStart({ task: 'plain', case: '3', slug: 'plain' }, roots)
+    if (started.exitCode !== 0) return `start 失败：${started.exitCode}`
+    const ledger = readTaskLedger(dir, 'plain')
+    const implAbs = join(dir, ledger.worktreePath)
+    mountSharedDeps(dir, implAbs)
+
+    const scan = scanOutboundLinks(implAbs)
+    if (!scan.outbound.some((o) => o.path === 'node_modules')) {
+      return `工具自己挂的 node_modules 没被扫出来：${JSON.stringify(scan.outbound.map((o) => o.path))}`
+    }
+    if (!existsSync(join(dir, 'node_modules', 'pkg', 'i.js'))) return '主仓 node_modules 被误删'
+
+    const res = unmountSharedDeps(dir, implAbs, { allowOutbound: ['node_modules'] })
+    if (res.ok !== true) return `白名单内的依赖挂载被误拦：${JSON.stringify(res.blocked)}`
+    if (!existsSync(join(dir, 'node_modules', 'pkg', 'i.js'))) return '解绑 node_modules 时删了主仓内容'
+    if (existsSync(join(implAbs, 'node_modules'))) return '解绑后 node_modules 链接还在'
+    return true
+  } finally { rmTree(dir) }
+}])
+
+
+cases.push(["跟踪的链接在删除档不许豁免，解绑档才跳过", async () => {
+  const { unmountSharedDeps } = await import("../../kit/skills/dev-flow/scripts/worktree-deps.mjs")
+  const fs = await import("node:fs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# t\n\n跟踪链接测试。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+
+    const outside = join(dir, "..", `${Date.now()}-outside`)
+    fs.mkdirSync(outside, { recursive: true })
+    fs.writeFileSync(join(outside, "SURVIVE.txt"), "keep me")
+
+    const wt = join(dir, ".worktrees", "wt")
+    fs.mkdirSync(wt, { recursive: true })
+
+    // 造一个被 git 跟踪的链接：写进索引，再在 worktree 里真实创建
+    const linkRel = "linked"
+    try { fs.symlinkSync(outside, join(wt, linkRel), "junction") } catch { return true }
+
+    gitCommitFast(wt, "add link")
+    // 让它在索引里（tmpProject 的仓不一定有同 HEAD，用 add 即可）
+    const { spawnSync } = await import("node:child_process")
+    spawnSync("git", ["add", "-A"], { cwd: wt, stdio: "ignore", windowsHide: true })
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "link"], { cwd: wt, stdio: "ignore", windowsHide: true })
+
+    // 删除档：必须解绑（哪怕它是被跟踪的）
+    const cleanup = unmountSharedDeps(dir, wt, { mode: "cleanup", allowOutbound: [linkRel] })
+    if (cleanup.blocked.length > 0) return `cleanup 档把它拦下了（那是另一条路）：${JSON.stringify(cleanup.blocked)}`
+    if (!fs.existsSync(join(outside, "SURVIVE.txt"))) return "解绑把仓外内容删了"
+    if (cleanup.unmounted.every((u) => u.path !== linkRel)) {
+      return `删除档没有解绑这条被跟踪的链接：${JSON.stringify({ unmounted: cleanup.unmounted, skipped: cleanup.skipped })}`
+    }
+    if (fs.existsSync(join(wt, linkRel))) return "解绑之后链接还在"
+
+    return true
+  } finally { rmTree(dir); }
+}])
+
+// `flow start` 此前一律从 main 起头。工作全在一条特性分支上时（主线还没合），
+// 新任务的 worktree 会落后几十个提交——它看不见那些工作，等于从旧世界开工。
+cases.push(["flow start 能指定基线分支", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# b\n\n基线测试仓。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    // 造一条特性分支，然后在它上面多做一个提交
+    execFileSync("git", ["checkout", "-b", "feat/base-probe"], { cwd: dir, stdio: "ignore", windowsHide: true })
+    const fs = await import("node:fs")
+    fs.writeFileSync(join(dir, "probe.txt"), "x")
+    gitCommitFast(dir, "feat commit")
+    const featSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", windowsHide: true }).trim()
+    const defaultBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: dir, encoding: "utf8", windowsHide: true,
+    }).trim()
+    execFileSync("git", ["checkout", defaultBranch], { cwd: dir, stdio: "ignore", windowsHide: true })
+
+    const res = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-probe", "--case", "4", "--base", "feat/base-probe", "--branch", "feat/base-probe-task", "--json",
+    ], { cwd: dir })
+    if (res.status !== 0) return `--base 没被接受：${res.stderr}`
+    const out = JSON.parse(res.stdout)
+    if (!out.taskId) return "没建出任务"
+
+    const { readTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
+    const ledger = readTaskLedger(dir, "base-probe")
+    if (ledger.baseBranch !== "feat/base-probe") return `基线分支记成了 ${ledger.baseBranch}`
+    if (ledger.baseSha !== featSha) return `基线 SHA 记成了 ${String(ledger.baseSha).slice(0, 8)}，应为 ${featSha.slice(0, 8)}`
+
+    // 反向：不存在的分支要报错，而不是静默退回 main
+    const bad = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-bad", "--case", "4", "--base", "no-such-branch-xyz", "--branch", "feat/base-bad", "--json",
+    ], { cwd: dir })
+    if (bad.status === 0) return "不存在的 --base 被静默接受了"
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// 新任务「还没 finalized」天然成立，于是刚建好就要求归档——下一步该是实施。
+// 判据要问「有没有做过事」，不是「有没有标记做过事」。
+cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
+  const { evaluateNextState } = await import("../../kit/skills/lib/workflow-policy.mjs")
+
+  const mk = (over = {}) => ({
+    taskId: "t1", caseType: 4, role: "maintainer", status: "started",
+    branch: "feat/x", baseBranch: "main", baseSha: "aaa",
+    worktreePath: ".worktrees/impl-t1",
+    specFile: "docs/specs/x.md", todoFile: "docs/todo/x.md",
+    rounds: [], finalized: false,
+    ...over,
+  })
+  const rt = (over = {}) => ({
+    headSha: "aaa", dirty: 0, commitsAheadOfBase: 0, policy: { riskTier: "high", requiredGates: ["gate"], independentReviewRequired: true },
+    evidenceValidation: { ok: false, code: "BLOCKED_NOT_VERIFIED" },
+    opInProgress: false, mainDirtyCount: 0,
+    ...over,
+  })
+
+  // 正向：还没认领 → 第一步是认领（这是「我接手了」的平台侧落地）
+  const unclaimed = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  if (unclaimed.phase !== "needs-claim") {
+    return `还没认领时判成 ${unclaimed.phase}，应先要求 claim`
+  }
+  if (!unclaimed.blockingReasons.includes("BLOCKED_NOT_CLAIMED")) return "没给出阻塞原因"
+
+  // 正向：认领之后、还没动代码 → 下一步是实施
+  const fresh = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "2026-01-01T00:00:00Z" }), taskRuntime: rt(),
+  })
+  if (fresh.phase === "needs-finalize") {
+    return "刚建好的任务被判成「该归档」——下一步应是实施"
+  }
+  if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
+
+  // 反向：真做完了（HEAD 已前移）→ 才该要求归档
+  const done = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
+  if (done.phase !== "needs-finalize") {
+    return `分支上有提交后仍判 ${done.phase}，应要求 finalize`
+  }
+
+  // 反向：跟着基线 rebase 了（HEAD 变了）但没写代码 → 仍算还没开始
+  const rebased = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
+  })
+  if (rebased.phase !== "implementing") {
+    return `跟着基线 rebase 后被判成 ${rebased.phase}——同步基线不是「做完了」`
+  }
+
+  // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」
+  const dirty = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ dirty: 3 }) })
+  if (dirty.phase !== "implementing") return `有未提交改动时判成 ${dirty.phase}`
+
+  return true
+}])
+
+// 取 Issue 正文时用「不联网」的探测结果判断「能不能取」，必然得到 tier=none，
+// 然后装配出一个只会委托的客户端——把「我没去取」记成了「取不到」。
+// 委托与失败是两件事：前者该由调用方补上，后者要等通道恢复。
+cases.push(["Issue 正文取不到时，委托和失败要分开记", async () => {
+  const { createGitHubClient } = await import("../../kit/skills/lib/github-client.mjs")
+
+  // 无通道的客户端对 getIssue 只能委托，不是「查不到」
+  const off = createGitHubClient({ tier: "none" })
+  const r = await off.getIssue("a/b", 7)
+  if (r.ok) return "无通道客户端竟然读到了正文"
+  if (!r.delegated) return "无通道时没有标记成委托——会被误记成「取不到」"
+  if (r.action !== "get_issue") return `委托的动作名不对：${r.action}`
+
+  return true
+}])
 }

@@ -85,6 +85,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 ```sh
 node .agents/skills/dev-review/scripts/review-pack.mjs record \
   [--task <id>] [--round <N>] --verdict pass|changes --reviewer-id <id> \
+  --review-token <由 flow next 现场签发的令牌，只能消费一次> \
   [--must-fix <textOrJson>...] [--should-fix <text>...] [--pre-existing <text>...] \
   [--disposition "<idOrFp>:fixed|rebutted-wrong|intentional|deferred"...] \
   [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--enforce-gates] [--visual-checked]

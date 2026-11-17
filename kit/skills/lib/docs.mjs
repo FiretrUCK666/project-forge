@@ -372,7 +372,7 @@ function collectSiblingSet(repoRoot, { slugOrPath, includeArchived = false } = {
 
   for (const rel of candidates) {
     const fn = parseDocFilename(rel)
-    if (fn && targetSlug && fn.slug === targetSlug && (!targetDate || fn.date === targetDate)) {
+    if (fn && targetSlug && fn.slug === targetSlug) {
       siblingSet.add(rel)
     } else if (!fn && targetSlug && basename(rel, '.md') === targetSlug) {
       siblingSet.add(rel)

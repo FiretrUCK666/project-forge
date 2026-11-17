@@ -1705,4 +1705,44 @@ cases.push(['TDD 主干按内容认，空壳仍要报', async () => {
   return true
 }])
 
+// 误报的代价是人开始忽略这条检查。
+//
+// 「讲不做什么」时会说「不动那条旧路径」，「讲实现说明」时会说「删掉了哪个文件」，
+// 这些位置的路径本来就不该存在。在那里报幻觉路径，人第一次会改，第三次就不看了。
+cases.push(['讲不做与讲删除的地方，不存在的路径不是幻觉', async () => {
+  const { auditDoc } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
+  const fs = await import('node:fs')
+
+  const dir = tmpProject({ 'README.md': '# p\n\n路径误报测试仓。\n' })
+  const w = (rel, text) => { mkdirSync(join(dir, rel, '..'), { recursive: true }); fs.writeFileSync(join(dir, rel), text) }
+  try {
+    // 正向：这三处提到不存在的路径都该放过
+    w('docs/specs/a.md', [
+      '---', 'kind: spec', 'title: 探针', 'status: draft', 'owner: p', '---', '',
+      '# 探针', '',
+      '## 背景', '', '当前流程有问题，需要改。', '',
+      '## 不在本次范围', '', '- 不动 legacy/old-runner.mjs', '',
+      '## 删除清单', '', '- 已删除 src/removed-file.mjs', '',
+      '## 验收标准', '', '- [ ] C1: 退出码 0', '',
+    ].join('\n'))
+    const r = auditDoc({ repoRoot: dir, file: 'docs/specs/a.md' })
+    const fp = r.errors.filter((e) => e.code === 'HALLUCINATED_PATH')
+    if (fp.length > 0) return `讲不做/讲删除的地方被误报：${fp.map((e) => e.message.slice(0, 40)).join('；')}`
+
+    // 反向：真要引用一个不存在的新文件，必须报——否则这条检查等于被删掉
+    w('docs/specs/b.md', [
+      '---', 'kind: spec', 'title: 探针二', 'status: draft', 'owner: p', '---', '',
+      '# 探针二', '',
+      '## 背景', '', '当前流程有问题，需要改，改动落在 src/ghost-real.mjs。', '',
+      '## 不在本次范围', '', '- 不动调度器', '',
+      '## 验收标准', '', '- [ ] C1: 退出码 0', '',
+    ].join('\n'))
+    const r2 = auditDoc({ repoRoot: dir, file: 'docs/specs/b.md' })
+    if (!r2.errors.some((e) => e.code === 'HALLUCINATED_PATH')) {
+      return '正文里引用了不存在的文件却没报——那这条检查等于不存在'
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

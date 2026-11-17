@@ -860,6 +860,14 @@ export const INJECTIONS = [
     expect: 'TDD 主干按内容认',
   },
   {
+    id: 'I96',
+    what: '第二遍路径校验不再看 skipPathCheck（讲不做的地方开始误报）',
+    file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',
+    from: "  for (const item of bodyLines) {\n    if (item.skipPathCheck) continue\n    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {\n      if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue\n      if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue",
+    to: "  for (const item of bodyLines) {\n    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {\n      if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue\n      if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue",
+    expect: '讲不做与讲删除',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

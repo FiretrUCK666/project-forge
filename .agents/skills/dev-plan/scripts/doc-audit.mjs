@@ -475,13 +475,20 @@ export function auditDoc({ repoRoot, file }) {
     if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
     if (inFence) continue
     if (/^##+\s+/.test(rawLine)) curSection = rawLine.replace(/^##+\s+/, '').trim()
+    // 这些位置提到不存在的路径是**对的**：讲「不做什么」会说「不动那条旧路径」，
+    // 讲「实现说明 / 完成记录」会说「删掉了哪个文件」。在这些地方报幻觉路径是误报，
+    // 而误报的代价是人开始忽略这条检查。
+    //
+    // 认位置不能只看中文标题：真实文档写 `## Out of scope`、`## 实现说明`、
+    // `## What we removed` 的都有。所以标题启发 + 行内语义两条一起用。
+    const removedPathCue = /(?:已删除|删掉|删除|移除|不再使用|旧路径|废弃|不存在|\b(?:deleted|removed|dropped|no longer)\b)/i
     bodyLines.push({
       lineNo: i + 1,
       rawLine,
       strippedLine: rawLine.replace(/<!--[\s\S]*?-->/g, ''),
-      skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals)/i.test(curSection)
+      skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals|范围外|不在本次|Out of scope|removed|cleanup)/i.test(curSection)
         || rawLine.includes('...')
-        || /(?:已删除|删掉|不再使用|旧路径|不存在|\b(?:deleted|removed)\b)/i.test(rawLine),
+        || removedPathCue.test(rawLine),
     })
   }
 

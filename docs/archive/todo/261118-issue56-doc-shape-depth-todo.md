@@ -5,7 +5,7 @@ status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 56
-pr: null
+pr: 65
 branch: feat/doc-shape-depth
 owner: FiretrUCK666
 approved: true

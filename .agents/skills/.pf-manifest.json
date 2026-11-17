@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T09:30:48.853Z",
+  "installedAt": "2026-11-17T09:42:36.121Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -20,7 +20,7 @@
       "sha256": "df366476ce47c8cf840337e1d284ca89c64be76a3a176f5f826f2957c1dc01b6"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
-      "sha256": "11f88e3aae09b2e5345008a96ca4551e159919ee2ab4d753e67609bdc9954da2"
+      "sha256": "532725150e899b99ea796de4c918cc448370babfa3f6891280af48d3d24a9fd5"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
       "sha256": "c36c7ff37c123651b9337bc8e28ae71da34c12e7d93d70d9e16ee422aca66c35"
@@ -38,7 +38,7 @@
       "sha256": "144e2c47259109c0096a49743b49cc538ce543d31cf7eb5a9b8ad86d826eafc6"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "698859628b24425bcd1b95128d9c43af5dbda0e24e3f2531690ea0086ca809c9"
+      "sha256": "5017209036116cae1a8c7707c75d71d199ab79fa10dc8075200e9b9c894d07a5"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "8ce000ecbc130b538d57578d5a446522f029dbb911b821d36410183997471cd9"

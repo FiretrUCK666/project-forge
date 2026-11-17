@@ -512,7 +512,19 @@ export async function handleStart(opts, roots) {
 
   let baseBranch = state.defaultBranch || 'main'
   let baseSha = state.head
-  if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
+  // 允许显式指定基线：工作全在一条特性分支上时（主线还没合），
+  // 新任务必须从那条分支起头，否则它看不到已有工作——一开会就少几十个提交。
+  const explicitBase = String(opts.base ?? '').trim()
+  if (explicitBase) {
+    let ok = false
+    for (const cand of [`refs/heads/${explicitBase}`, `refs/remotes/origin/${explicitBase}`, explicitBase]) {
+      const sha = resolveRefShaFast(roots.gitDir, cand)
+      if (sha) { baseBranch = explicitBase; baseSha = sha; ok = true; break }
+      const r = await gitRun(roots.mainRoot, ['rev-parse', '--verify', '--quiet', cand])
+      if (r.ok && r.stdout.trim()) { baseBranch = explicitBase; baseSha = r.stdout.trim(); ok = true; break }
+    }
+    if (!ok) throw new Error(`--base 指定的分支不存在：${explicitBase}`)
+  } else if (state.commits > 0 && !(state.branch === baseBranch && state.head)) {
     for (const candRef of [`refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`]) {
       const fastSha = resolveRefShaFast(roots.gitDir, candRef)
       if (fastSha) { baseSha = fastSha; break }

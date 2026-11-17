@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 
-import { rmTree, runAbsAsync, survey, textsOf, tmpProject } from './fixtures-helpers.mjs'
+import { SCRIPTS, rmTree, runAbsAsync, runNode, survey, textsOf, tmpProject } from './fixtures-helpers.mjs'
 import { gitInit } from './fixtures-helpers.mjs'
 
 export function registerSurveyCases(cases) {
@@ -213,6 +213,82 @@ cases.push(['探索策略随真实规模单调不降，28000 行 / 40 文件必�
   const a2 = JSON.stringify(computeExplorationStrategy(mk(40, 28000)))
   if (a1 !== a2) return '同一份输入连跑两次结果不同'
   return true
+}])
+
+// ── 计数代码段里不许出现工具产物目录 ─────────────────────────────────
+//
+// `.agents/skills` 这三个字在这个仓里到处都是（勘察要认它、装备要写它），
+// 所以「文件里有没有这个词」这种整文件扫描必然误报。要守的是一条更窄的事实：
+// **计数那一段**只数项目自己的文件。判据扫描的是那一段，不是整个文件。
+cases.push(['规模计数的代码段里不许出现工具产物目录（只扫计数区间，不扫整文件）', async () => {
+  const text = readFileSync(join(SCRIPTS, 'lib', 'survey-workspace.mjs'), 'utf8').replace(/\r\n/g, '\n')
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => /^\s*let codeFiles = 0/.test(l))
+  if (start === -1) return 'survey-workspace.mjs 里找不到计数起点（let codeFiles = 0），判据锚点失效'
+  // 计数区间 = 起点那几行 + 真正数文件的那个循环。循环用缩进配对找出结尾，
+  // 不去猜固定的行号：行号会因为无关改动漂移，而漂移之后判据会静默失效。
+  const loopStart = lines.findIndex((l, i) => i > start && /^\s*for \(const file of files\) \{$/.test(l))
+  if (loopStart === -1) return 'survey-workspace.mjs 里找不到数文件的循环，判据锚点失效'
+  const indent = lines[loopStart].match(/^\s*/)[0]
+  const loopEnd = lines.findIndex((l, i) => i > loopStart && l === `${indent}}`)
+  if (loopEnd === -1) return '数文件的循环没有闭合，判据锚点失效'
+  const span = lines.slice(start, loopEnd + 1).join('\n')
+
+  if (!span.includes('isToolOwnedPath') && !span.includes('toolOwned')) {
+    return '计数区间里没有出现「这条路径属于工具」的判断——工具产物会被算进项目规模'
+  }
+  if (/(?:includes|startsWith)\(['"]\.agents/.test(span)) {
+    return '计数区间里用字面量 .agents 判目录，而不是走统一的工具所有权判据'
+  }
+  return true
+}])
+
+// ── 策略变了要说清变了什么、凭什么 ──────────────────────────────────
+//
+// 策略写进受管区之后，重入时它会被比对：跨档就红一次，而不是默默换一套做法。
+// 只说「变了」不够——还要说清是哪一维越的线，否则没人判得出这次升档是对的，
+// 还是规模那一维算错了。
+cases.push(['规模跨档后策略变化要带依据，受管区比对能看见这次变化', async () => {
+  const small = Array.from({ length: 20 }, (_, k) => `export const v${k} = ${k}`).join('\n')
+  const dir = tmpProject({ 'README.md': '# strat\n\n策略变化测试仓。\n' })
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  for (let i = 0; i < 10; i += 1) writeFileSync(join(dir, 'src', `m${i}.mjs`), small)
+  try {
+    const before = await survey(dir)
+    if (before.explorationStrategy.tier !== 'single-pass') {
+      return `小仓起始档位是 ${before.explorationStrategy.tier}，夹具前提不成立`
+    }
+    await runNode('compose-agents.mjs', [dir, '--no-backup'])
+    const first = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    if (!/## 探索策略/.test(first)) return '契约里没有「探索策略」这一节，策略没落进受管区'
+    writeFileSync(join(dir, 'AGENTS.md'), first.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。'))
+    if ((await runNode('compose-agents.mjs', [dir, '--check'])).status !== 0) {
+      return '同一份事实再比对一次就红了——策略段不是幂等的'
+    }
+
+    // 把规模推过线：文件数与行数一起越线。
+    const big = Array.from({ length: 200 }, (_, k) => `export const w${k} = ${k}`).join('\n')
+    for (let i = 0; i < 20; i += 1) writeFileSync(join(dir, 'src', `b${i}.mjs`), big)
+    const after = await survey(dir)
+    if (after.explorationStrategy.tier === before.explorationStrategy.tier) {
+      return `规模跨档后策略级别没变（${after.explorationStrategy.tier}）——那一维没被算进去`
+    }
+    if (after.explorationStrategy.evidence.codeFiles <= before.explorationStrategy.evidence.codeFiles) {
+      return '策略变了但依据里的文件数没变——报出来的依据不是这次判定的依据'
+    }
+    // 理由要说清是哪一维跨的线，而不是只给一句「变大了」。
+    if (!/(?:代码文件|代码 \d|模块目录|语言\/生态|多包|子目录)/.test(after.explorationStrategy.reason)) {
+      return `策略变化的理由没说清是哪一维跨的线：${after.explorationStrategy.reason}`
+    }
+
+    // 受管区比对要能看见这次变化，而不是默默重算。
+    const check = await runNode('compose-agents.mjs', [dir, '--check'])
+    if (check.status === 0) return '规模跨档后 --check 仍然放行——策略变化没人看得见'
+    if (!/探索策略/.test(check.stderr ?? '')) {
+      return `--check 红了但没点名「探索策略」：${(check.stderr ?? '').split('\n')[0]}`
+    }
+    return true
+  } finally { rmTree(dir) }
 }])
 
 }

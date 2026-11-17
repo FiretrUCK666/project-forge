@@ -2266,4 +2266,47 @@ cases.push(["必过门要展开成能直接跑的命令，不是一个档位名"
 
   return true
 }])
+// ── 命令词法：动作词只在命令位置匹配 ──────────────────────────────────
+//
+// 判据治的是「文本里出现过 test 就算测试命令」。两种误判各自坑一类项目：
+// 路径中间带 test 的辅助脚本被当成测试入口（真跑起来什么都没有），
+// 而唯一入口就叫 test-mac-pure.sh 的项目永远探测不到测试命令。
+cases.push(['命令动作词只认命令位置：脚本名保留、路径中间分量与属性名不算', async () => {
+  const { classifyCommandText } = await import('../../kit/skills/lib/command-lex.mjs')
+  const RULES = [
+    { key: 'test', re: /\b(?:test|tests|check|verify)\b/i },
+    { key: 'install', re: /\b(?:install|restore)\b/i },
+  ]
+
+  // 正面：脚本名本身就叫 test 的（唯一入口）必须认出来——带不带 ./ 都算。
+  if (classifyCommandText('bash scripts/test-mac-pure.sh', RULES) !== 'test') {
+    return 'bash 调用的 test-*.sh 脚本没被认成测试入口——这类项目会永远探测不到测试命令'
+  }
+  if (classifyCommandText('./scripts/test-mac-pure.sh', RULES) !== 'test') {
+    return './ 调用的 test-*.sh 脚本没被认成测试入口'
+  }
+  if (classifyCommandText('npm test', RULES) !== 'test') return 'npm test 没被认成测试'
+  if (classifyCommandText('pip install -r requirements.txt', RULES) !== 'install') return 'pip install 没被认成安装'
+
+  // 反面：路径中间分量里的关键词不算动作。
+  if (classifyCommandText('node scripts/ci/test-helper/run.mjs', RULES) !== undefined) {
+    return 'test-helper 目录名让整条命令变成了测试命令'
+  }
+  if (classifyCommandText('bash scripts/test-helper/run.sh', RULES) !== undefined) {
+    return 'test-helper 目录名让 shell 脚本变成了测试命令'
+  }
+  // 反面：属性名（.Restore / .Length）不是动作。
+  if (classifyCommandText('echo .Restore', RULES) !== undefined) return '属性名 .Restore 被当成了安装动作'
+  if (classifyCommandText('dotnet msbuild /t:Restore', RULES) !== undefined) return '/t:Restore 参数被当成了安装动作'
+  // 反面：选项取值不是动作。
+  if (classifyCommandText('git archive --format=zip -o a.zip HEAD', RULES) !== undefined) {
+    return '--format 的取值被当成了动作词'
+  }
+  // 反面：引号里的 && 不是分段符。
+  if (classifyCommandText('echo "a && b" && npm test', RULES) !== 'test') {
+    return '引号里的 && 被当成了分段，第二段的 test 没被认出来'
+  }
+  return true
+}])
+
 }

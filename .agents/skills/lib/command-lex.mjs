@@ -70,6 +70,10 @@ export function commandHeadOf(segment) {
  *
  * `git archive --format=zip` -> 命令位置是 `git`，动词是 `archive`。
  * 这两个位置才定义「这条命令在干什么」；`--format` 是它的参数，不是动作。
+ *
+ * 以 `.` 起头的词同样不是动词：那是对象的属性名（`.Restore`、`.Length`），
+ * 出现在命令里只会是参数。把它当成动作，会让 `dotnet ... $build.Restore()` 这类
+ * 调用被判成「安装依赖」。
  */
 export function commandVerbOf(segment) {
   const words = String(segment ?? '').trim().split(/\s+/).filter(Boolean)
@@ -80,16 +84,36 @@ export function commandVerbOf(segment) {
       seenHead = true
       continue
     }
-    if (word.startsWith('-')) return undefined
+    if (word.startsWith('-') || word.startsWith('.')) return undefined
     return word
   }
   return undefined
 }
 
 /**
+ * 把命令位置上的一「词」折成可比的脚本名。
+ *
+ * 带路径的词只保留最后一段：路径**中间**的分量说明它放在哪个目录，不说明这条命令
+ * 在干什么。`node scripts/ci/test-helper/run.mjs` 里的 `test-helper` 只是一个目录名，
+ * 整条命令与测试无关；把它算成测试命令，会让每个放着 `test-helper/` 的仓都被当成
+ * 「已经有测试入口」，真跑起来什么都没有。
+ *
+ * 反过来，**最后一段必须保留**：一个仓唯一的测试入口常常就叫
+ * `scripts/test-mac-pure.sh` 或 `./scripts/test-mac-pure.sh`——路径本身就在命令位置，
+ * 把最后一段也剥掉，这类项目就永远探测不到测试命令。
+ */
+function commandNameOf(word) {
+  const raw = String(word ?? '').trim()
+  if (!raw) return raw
+  const cut = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'))
+  return cut === -1 ? raw : raw.slice(cut + 1)
+}
+
+/**
  * 在一条命令的**命令位置**上找动作词，返回第一个命中的分类。
  *
- * `rules` 的形状：`[{ key, re }]`，`re` 只在命令名与动词上测。
+ * `rules` 的形状：`[{ key, re }]`，`re` 只在命令名与动词上测，且测的是
+ * `commandNameOf()` 折过之后的词（路径只留最后一段）。
  *
  * 拿一段真实的 CI 复现一下这条判据治的是什么：
  *
@@ -103,7 +127,7 @@ export function commandVerbOf(segment) {
 export function classifyByCommandPosition(segment, rules) {
   const head = commandHeadOf(segment)
   const verb = commandVerbOf(segment)
-  const positions = [head, verb].filter(Boolean)
+  const positions = [head, verb].filter(Boolean).map(commandNameOf)
   if (positions.length === 0) return undefined
   for (const rule of rules ?? []) {
     if (positions.some((word) => rule.re.test(word))) return rule.key

@@ -16,6 +16,8 @@ import {
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
+import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
+import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
 
 const CODE_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|scala|groovy|rb|php|cs|fs|vb|c|cc|cpp|cxx|h|hpp|m|mm|swift|dart|ex|exs|erl|sh|bash|zsh|ps1|sql|lua|r|zig|nim|hs)$/i
 const DOC_OR_DATA_EXT_RE = /\.(?:md|mdx|txt|rst|json|ya?ml|toml|xml|csv|tsv|ini|cfg|lock|lockb|svg|png|jpg|jpeg|gif|webp|ico|pdf|woff2?)$/i
@@ -60,6 +62,7 @@ function detectEntrypoints(root, files, packages) {
   }
 
   for (const f of files) {
+    if (isToolOwnedPath(f.rel)) continue
     if (ENTRY_NAMES.has(f.name)
       || /(?:Application|Main|Server|App)\.(?:java|kt|cs|swift|ts|tsx)$/i.test(f.name)
       || /^(?:bin|cmd|scripts)\/[^/]+\.(?:js|mjs|ts|py|go|sh)$/i.test(f.rel)) {
@@ -259,9 +262,16 @@ function extractTaskRunners(root, packages) {
   return runners
 }
 
-/** 扫描潜在可复用共享模块与公开导出符号，抑制重复造轮子。 */
+/**
+ * 扫描潜在可复用共享模块与公开导出符号，抑制重复造轮子。
+ *
+ * 工具装进来的技能源码不算「这个项目最值得复用的模块」：它是随包分发的说明书与
+ * 运行时，项目自己的 92 个源码文件才是。实测的形状是前三名全是 `.agents/skills/lib/*`，
+ * 而项目自己的模块一个都没进榜——推荐出去的东西没人该去复用。
+ */
 function extractReusableModules(files) {
   const candidates = files.filter((f) => {
+    if (isToolOwnedPath(f.rel)) return false
     if (!isSourceCodeFile(f) || TEST_FILE_RE.test(f.rel)) return false
     return /(?:^|\/)(?:lib|shared|utils?|helpers?|common|core|domain)\//i.test(f.rel)
       || /(?:shared|utils?|helpers?|common|protocol|template|render)\.[^/]+$/i.test(f.name)
@@ -271,13 +281,11 @@ function extractReusableModules(files) {
   for (const item of candidates.slice(0, 80)) {
     const text = readTextSafe(item.full, 256 * 1024)
     if (!text) continue
-    const exportsList = []
-    const re = /^(?:export\s+(?:default\s+)?(?:async\s+)?(?:function|const|class|type|interface|enum)|pub\s+(?:fn|struct|enum|trait)|func\s+[A-Z]|def\s+[A-Za-z]|public\s+(?:static\s+|final\s+|abstract\s+)?(?:class|interface|record|enum|fun))\s+([A-Za-z_][A-Za-z0-9_]*)/gm
-    for (const m of text.matchAll(re)) {
-      if (!m[1].startsWith('_') && !exportsList.includes(m[1])) exportsList.push(m[1])
-    }
+    const ext = item.name.includes('.') ? item.name.split('.').pop() : ''
+    const { symbols } = extractSymbols(text, ext)
+    const exportsList = symbols.slice(0, 12)
     if (exportsList.length > 0 || /(?:^|\/)(?:lib|common|core|shared)\//.test(item.rel)) {
-      out.push({ file: item.rel, exports: exportsList.slice(0, 12), exportCount: exportsList.length })
+      out.push({ file: item.rel, exports: exportsList, exportCount: symbols.length })
     }
   }
   return out.sort((a, b) => b.exportCount - a.exportCount || a.file.localeCompare(b.file)).slice(0, 20)
@@ -413,6 +421,9 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
   const ciRunSteps = extractCiRunSteps(root)
   const taskRunners = extractTaskRunners(root, discovery.packages)
   const reusableModules = extractReusableModules(scan.files)
+  // 「本仓 N 种语言，其中 M 种缺少符号规则」——被略过的语言要报出来，不能静默消失。
+  const projectFiles = scan.files.filter((f) => !isToolOwnedPath(f.rel))
+  const symbolCoverage = summarizeSymbolCoverage(projectFiles.filter((f) => isSourceCodeFile(f)).map((f) => f.name))
   const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners, discovery.packages)
   const preferredVerifyCommands = buildPreferredVerifyCommands(profile, ciRunSteps, taskRunners, discovery.packages)
 
@@ -455,6 +466,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     taskRunners,
     preferredVerifyCommands,
     reusableModules,
+    symbolCoverage,
     featureMap,
     docs,
     hotspots,
@@ -498,6 +510,13 @@ function formatText(map) {
     lines.push('## 可复用现成模块清单')
     for (const m of map.reusableModules) {
       lines.push(`- ${m.file}${m.exports.length > 0 ? ` [导出: ${m.exports.join(', ')}]` : ''}`)
+    }
+  }
+  if (map.symbolCoverage?.languageCount > 0) {
+    lines.push('')
+    lines.push(`## 符号抽取覆盖：本仓 ${map.symbolCoverage.languageCount} 种语言，其中 ${map.symbolCoverage.unsupportedCount} 种缺少符号规则`)
+    if (map.symbolCoverage.unsupportedCount > 0) {
+      lines.push(`- 缺规则的语言（这些语言的模块没有符号清单，不是「没有符号」）：${map.symbolCoverage.unsupported.join('、')}`)
     }
   }
   if (map.featureMap.length > 0) {

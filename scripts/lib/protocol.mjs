@@ -380,6 +380,8 @@ export const FORBIDDEN_PLATFORM_RE = new RegExp(
  */
 export const TEMPLATE_CONDITIONS = Object.freeze([
   'has-commands',
+  'has-omitted-commands',
+  'has-exploration-strategy',
   'no-commands',
   'has-remote',
   'no-remote',
@@ -404,6 +406,8 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
 export const TEMPLATE_VARS = Object.freeze([
   'PROJECT_NAME',
   'COMMANDS',
+  'COMMANDS_OMITTED',
+  'EXPLORATION_STRATEGY',
   'RUNTIME_REQUIREMENTS',
   'DEFAULT_BRANCH',
   'VERSION_SOURCE',

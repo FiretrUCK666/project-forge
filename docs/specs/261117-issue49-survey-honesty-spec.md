@@ -7,8 +7,8 @@ created: 2026-11-17
 updated: 2026-11-17
 issue: 49
 pr: null
-branch: fix/v8-criteria-trust
-owner: null
+branch: feat/issue-49
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"

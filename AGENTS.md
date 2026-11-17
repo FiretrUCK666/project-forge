@@ -61,6 +61,16 @@ do-not-edit: docs/archive/, docs/release-notes/
 - **按序读取**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `repo-map.mjs` 定位源码；修改前先跑 `flow.mjs inspect` 拿当前角色与任务状态。
 - **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（仅按需定向查阅；`do-not-edit` 仅禁手工改历史归档，允许 `finalize`/`archive` 合法归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
+
+<!-- project-forge: begin 探索策略 -->
+## 探索策略
+
+- **策略级别**：`parallel-subagents`
+- **越线的维度**：代码文件数、代码行数
+- **分片**：共 2 片
+  - `architecture-boundaries`（模块边界、顶层目录与可复用基础设施）：梳理核心入口、单向依赖、可复用模块及高风险/禁改目录边界
+  - `verification-runtime`（构建、测试、冒烟验证与发布命令）：核实清单脚本、CI 运行链、真实 smoke-verify 与过时命令声明
+<!-- project-forge: end 探索策略 -->
 <!-- project-forge: begin 架构与关键不变量 -->
 ## 架构与关键不变量
 

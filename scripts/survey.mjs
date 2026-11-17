@@ -40,6 +40,8 @@ import {
   scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
 import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
+import { CODE_EXT_RE } from '../kit/skills/lib/static-gates.mjs'
+import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../kit/skills/lib/symbol-index.mjs'
 import {
   collectTopModuleDirs,
   detectKit,
@@ -73,10 +75,21 @@ function detectReentry(root, { docs, kit, ecosystem, commandsByEcosystem, worksp
   let agentClaims
   if (agentsText) {
     agentClaims = claimsOf(agentsText)
+    // 三类不算「契约失约」：
+    //
+    //   - **工具自己装的东西**（`.agents/**`）：它的存在与否由 `equip` 决定，不由项目决定。
+    //     算进来的直接后果是「生成一次契约，contract 里就多出十几条失效路径」，
+    //     而生成契约这个动作本身把仓从「干净」推成了「漂移」——因果是倒的。
+    //   - **写着「若存在」的路径**：契约原文就没承诺它一定在。
+    //   - **工具建的骨架**（`docs/prd/.gitkeep` 一类）：存在不代表有内容，缺席也不代表失约。
+    const optional = new Set(agentClaims.optionalPaths ?? [])
     const combinedRefs = [...new Set([
       ...(agentClaims.paths ?? []),
       ...(agentClaims.dirs ?? []).map((d) => d.replace(/\/+$/, '')),
-    ])].sort()
+    ])]
+      .filter((p) => !protocol.isToolOwnedPath(p))
+      .filter((p) => !optional.has(p))
+      .sort()
     staleAgentPaths = combinedRefs.filter((p) => !existsSync(join(root, p)))
     staleAgentScripts = detectStaleAgentScripts({
       agentsText,
@@ -588,6 +601,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     },
     commands,
     commandsByEcosystem,
+    commandSources,
     ...(universal.detectionEvidence?.length > 0 ? { detectionEvidence: universal.detectionEvidence } : {}),
     conventions,
     workspace,
@@ -658,6 +672,18 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     filePaths: shapePaths,
     topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
   }
+
+  // 符号抽取的覆盖情况：这个仓里有几门语言有符号规则、几门没有。
+  //
+  // 报出来而不是「抽不到就当没有管理」：一个只有 Haskell / Clojure 的仓，符号索引一律
+  // 返回空数组，而空数组与「这个文件里真的没有符号」长得一模一样。下游据此认为「没有
+  // 可复用模块」，用户看到的是「这仓没什么结构」。差别只在覆盖这一面，所以必须单独说。
+  facts.symbolCoverage = summarizeSymbolCoverage(
+    (rawWs.files ?? [])
+      .map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+      .filter((rel) => !protocol.isToolOwnedPath(rel)
+        && (CODE_EXT_RE.test(rel) || isSymbolCandidatePath(rel))),
+  )
 
   delete gitFacts._sshHostMap
   delete gitFacts._hasGit

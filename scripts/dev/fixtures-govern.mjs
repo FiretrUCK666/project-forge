@@ -598,4 +598,77 @@ cases.push(['govern-docs.mjs：跳过 docs/archive/ 历史归档死链并持续�
   }
 }])
 
+// ── 空壳 TDD 比没有更糟：它看起来像有 ────────────────────────────────
+//
+// 四种形状各自能骗过一道检查：模板原样（占位符还在）、只有骨架（只列模块名）、
+// 短到不可能（三五行）、以及文件完全不存在。第四种由 docs.missing-tdd 管，
+// 前三种必须由 docs.tdd-shell 判红，且档位是 high——medium 的条目 --strict 看不见。
+cases.push(['空壳 TDD 判红（high，--strict 阻断），只有注释里出现的符号不算已定义', async () => {
+  const MODULE = 'export function runCore() { return 1 }\n'
+  const shapes = [
+    ['只列模块名', '# TDD\n\n## 模块与目录职责\n\n- src/app.mjs\n'],
+    ['四行', '# TDD\n\n本仓是一个小工具。\n\n它做一件事。\n'],
+    ['模板原样', '# TDD\n\n## 一、文档信息\n\n| 项 | 值 |\n| --- | --- |\n| 版本 | {{VERSION}} |\n\n## 二、背景\n\n{{BACKGROUND}}\n'],
+  ]
+  for (const [label, body] of shapes) {
+    const dir = tmpProject({
+      'README.md': '# shell\n\n空壳 TDD 判据测试仓。\n',
+      'AGENTS.md': '# shell\n\n## 取舍\n\n- `no-ci`：不配\n',
+      'src/app.mjs': MODULE,
+      'docs/TDD.md': body,
+    })
+    try {
+      const r = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--all', '--json'])
+      let parsed
+      try { parsed = JSON.parse(r.stdout) } catch { return `${label}：govern-audit --json 解析失败（顶层字段应为 findings）：${(r.stdout || r.stderr || '').slice(0, 160)}` }
+      const shell = (parsed.findings ?? []).find((f) => f.id === 'docs.tdd-shell')
+      if (!shell) return `${label}：没有产出 docs.tdd-shell`
+      if (shell.severity !== 'high') return `${label}：docs.tdd-shell 的 severity 是 ${shell.severity}，medium 的条目 --strict 看不见`
+      const strict = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--all', '--strict'])
+      if (strict.status === 0) return `${label}：--strict 放行了 high 档的空壳 TDD`
+    } finally { rmTree(dir) }
+  }
+
+  // 反向一：真的写了架构的 TDD 不许被判成空壳。
+  const good = tmpProject({
+    'README.md': '# good\n\n完整 TDD 不该被误判成空壳。\n',
+    'AGENTS.md': '# good\n\n## 取舍\n\n- `no-ci`：不配\n',
+    'src/app.mjs': MODULE,
+    'docs/TDD.md': [
+      '# TDD', '',
+      '## 文档信息', '', '| 项 | 内容 |', '| --- | --- |', '| 文档版本 | 1.0 |', '| 最近更新 | 2026-01-01 |', '| 关联工程契约 | AGENTS.md |', '',
+      '## 背景与范围', '', '- 核心定位：一个只做一件事的小工具。', '- 非目标：不做插件体系。', '- 服务对象：维护者本人。', '',
+      '## 架构全景', '', '- `src/app.mjs`：唯一入口，负责跑核心逻辑。', '',
+      '## 核心流程', '', '- 调用 `runCore()` -> 返回结果。', '',
+      '## 不变量', '', '- 破坏即事故：改动接口必须同步 AGENTS.md 的 Dev Profile。', '',
+    ].join('\n'),
+  })
+  try {
+    const r = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', good, '--all', '--json'])
+    const parsed = JSON.parse(r.stdout)
+    if ((parsed.findings ?? []).some((f) => f.id === 'docs.tdd-shell')) {
+      return '内容完整的 TDD 被判成了空壳——判据在惩罚写得好的仓'
+    }
+  } finally { rmTree(good) }
+
+  // 反向二：只在注释里出现的符号名，不得被当成「已定义」。
+  const { extractSymbols } = await import('../../kit/skills/lib/symbol-index.mjs')
+  const commented = [
+    '// 这类东西以前写成 export function LegacyHelper() {}',
+    '/* export const OLD = 1 */',
+    'export function Live() { return 1 }',
+  ].join('\n')
+  const got = extractSymbols(commented, 'mjs')
+  if (got.symbols.includes('LegacyHelper') || got.symbols.includes('OLD')) {
+    return `注释里的符号被当成了已定义：${JSON.stringify(got.symbols)}`
+  }
+  if (!got.symbols.includes('Live')) return `真定义没被抽出来：${JSON.stringify(got.symbols)}`
+  // 反面：没有规则的语言返回 unsupported，不是空数组冒充「没符号」。
+  const unsupported = extractSymbols('main = pure ()', 'hs')
+  if (unsupported.status !== 'unsupported' || unsupported.supported !== false) {
+    return `没有符号规则的语言没有返回 unsupported：${JSON.stringify(unsupported)}`
+  }
+  return true
+}])
+
 }

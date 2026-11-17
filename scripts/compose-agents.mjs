@@ -197,9 +197,28 @@ function customSkillsOf(facts) {
   return result.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 }
 
+/**
+ * 命令块在多处被读：`buildConditions` 要判「有没有命令 / 有没有被略掉的」，
+ * `buildVars` 要填正文。同一份 facts 只算一次，免得两处各算一遍算出两种结果。
+ */
+const COMMAND_PLAN_CACHE = new WeakMap()
+
+function commandPlanOf(facts) {
+  if (facts && typeof facts === 'object') {
+    const cached = COMMAND_PLAN_CACHE.get(facts)
+    if (cached) return cached
+    const plan = commandsBlock(facts)
+    COMMAND_PLAN_CACHE.set(facts, plan)
+    return plan
+  }
+  return commandsBlock(facts ?? {})
+}
+
 export function buildConditions(facts, { tier } = {}) {
   const commands = facts.commands ?? {}
-  const hasCommands = COMMAND_ORDER.some((k) => typeof commands[k] === 'string' && commands[k].trim())
+  const plan = commandPlanOf(facts)
+  const hasCommands = plan.block.trim().length > 0
+    || COMMAND_ORDER.some((k) => typeof commands[k] === 'string' && commands[k].trim())
   const kinds = facts.ecosystem?.kinds ?? []
   const tags = facts.git?.tags ?? []
   const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false
@@ -208,6 +227,7 @@ export function buildConditions(facts, { tier } = {}) {
 
   return {
     'has-commands': hasCommands,
+    'has-omitted-commands': plan.tooLong.length > 0,
     'no-commands': !hasCommands,
     'has-remote': hasRemote,
     'no-remote': !hasRemote,
@@ -222,13 +242,51 @@ export function buildConditions(facts, { tier } = {}) {
     'is-plugin-or-skill': kinds.some((k) => k === 'skill' || k.endsWith('-plugin') || k.endsWith('-extension')),
     'has-bilingual-docs': Boolean(facts.docs?.readmePair),
     'has-custom-skills': hasCustomSkills,
+    'has-exploration-strategy': explorationStrategyBlock(facts).length > 0,
     'is-lightweight': effectiveTier === 'lightweight',
     'is-full': effectiveTier === 'full',
   }
 }
 
+/**
+ * 一条命令能不能原样进「构建与验证」的代码块。
+ *
+ * 那个块是给人**复制去跑**的。超长命令有三种坏法：整行超出可读宽度、在报告里被
+ * 按字节截断（截断尾巴 `…（共 N 字节）` 不是 shell 注释，照抄必失败）、以及把
+ * 一行变成几百字节之后没人再看得清它在做什么。
+ *
+ * 超过上限时的正确做法不是截断，而是**不写进代码块**：在块外注明「这条命令太长，
+ * 见 CI 工作流里对应的那一步」。`truncateCommandForDisplay` 是报告层用的，不接这里。
+ */
+const INLINE_COMMAND_MAX_BYTES = protocol.COMMAND_DISPLAY_MAX_BYTES ?? 500
+
+/** 超长命令在块外的去向：源文件优先，其次是这个仓里真实存在的 CI / 任务运行器文件。 */
+function whereToLook(facts, cmd) {
+  if (cmd.source) return cmd.source
+  const workflows = (facts.docs?.workflowFacts?.checkWorkflows ?? facts.docs?.workflows ?? [])
+    .map((w) => `.github/workflows/${w}`)
+  if (workflows.length > 0) return workflows[0]
+  for (const candidate of ['Makefile', 'justfile', 'Taskfile.yml', 'Taskfile.yaml']) {
+    if (facts.commandSources && Object.values(facts.commandSources).includes(candidate)) return candidate
+  }
+  return null
+}
+
+/** 超长命令的去向说明（块外）。没有任何超长命令时返回空串。 */
+function commandsOmittedNote(facts, tooLong) {
+  if (!tooLong || tooLong.length === 0) return ''
+  const parts = tooLong.map((cmd) => {
+    const where = whereToLook(facts, cmd)
+    return where
+      ? `- ${cmd.label}：这条命令太长，见 \`${where}\` 里对应的那一步`
+      : `- ${cmd.label}：这条命令太长，见 CI 工作流里对应的那一步`
+  })
+  return ['这条命令太长，不写进上面那个代码块（照抄会被截断的尾巴带坏）：', ...parts].join('\n')
+}
+
 function commandsBlock(facts) {
   const byEco = facts.commandsByEcosystem ?? {}
+  const sources = facts.commandSources ?? {}
   const kinds = Object.keys(byEco).filter((k) => COMMAND_ORDER.some((key) => byEco[k]?.[key]))
 
   if (kinds.length > 1) {
@@ -240,27 +298,81 @@ function commandsBlock(facts) {
     //
     // 折叠有一条硬底线：**每类至少留一条真实命令**。只剩一句「见 CI」的节等于没有这一节。
     const blocks = []
+    const skipped = []
     for (const kind of kinds) {
       const pairs = COMMAND_ORDER
         .map((key) => [key, byEco[kind]?.[key]])
         .filter(([, value]) => typeof value === 'string' && value.trim())
       const lines = [`# --- ${kind} ---`]
-      for (const [key, value] of pairs.slice(0, ECO_COMMANDS_SHOWN_PER_KIND)) {
-        lines.push(`${value}  # ${COMMAND_LABEL[key]}`)
+      const rendered = []
+      const omittedHere = []
+      for (const [key, value] of pairs) {
+        const text = `${value}  # ${COMMAND_LABEL[key]}`
+        if (Buffer.byteLength(text, 'utf8') > INLINE_COMMAND_MAX_BYTES) {
+          omittedHere.push({ text: value, kind, label: COMMAND_LABEL[key], source: sources[key] })
+          continue
+        }
+        rendered.push(text)
       }
-      if (pairs.length > ECO_COMMANDS_SHOWN_PER_KIND) {
-        lines.push(`# 另有 ${pairs.length - ECO_COMMANDS_SHOWN_PER_KIND} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
+      skipped.push(...omittedHere)
+      // 超长的那几条不占「前 N 条」的名额：被挤掉的必须是真的能跑的那几条。
+      for (const line of rendered.slice(0, ECO_COMMANDS_SHOWN_PER_KIND)) lines.push(line)
+      const hidden = Math.max(0, rendered.length - ECO_COMMANDS_SHOWN_PER_KIND)
+      if (hidden > 0) {
+        lines.push(`# 另有 ${hidden} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
+      }
+      if (rendered.length === 0 && omittedHere.length > 0) {
+        lines.push(`# ${kind} 的命令都太长，见本节下方「去哪看」`)
       }
       blocks.push(lines.join('\n'))
     }
-    return blocks.join('\n\n')
+    return { block: blocks.join('\n\n'), tooLong: skipped }
   }
 
   const source = kinds.length === 1 ? byEco[kinds[0]] : facts.commands ?? {}
   const lines = []
+  const skipped = []
   for (const key of COMMAND_ORDER) {
     const value = source[key]
-    if (typeof value === 'string' && value.trim()) lines.push(`${value}  # ${COMMAND_LABEL[key]}`)
+    if (typeof value !== 'string' || !value.trim()) continue
+    const text = `${value}  # ${COMMAND_LABEL[key]}`
+    if (Buffer.byteLength(text, 'utf8') > INLINE_COMMAND_MAX_BYTES) {
+      skipped.push({ text: value, kind: key, label: COMMAND_LABEL[key], source: sources[key] })
+      continue
+    }
+    lines.push(text)
+  }
+  return { block: lines.join('\n'), tooLong: skipped }
+}
+
+/**
+ * 探索策略写进 `AGENTS.md` 的受管区。
+ *
+ * 写进去而不是只留在勘察报告里，是为了**重入时能比对**：策略一旦落在受管区，
+ * `compose-agents --check` 的漂移比对就会把它算进去——规模跨了档、策略该变的时候，
+ * 会红一次并说清「哪一段变了」。只重算不落盘，等于每次重入都默默换一套做法。
+ *
+ * 写的是**决定与依据的维度**，不是各维的即时取值。
+ *
+ * 取值（多少文件、多少行）每改一次代码就变一次：写进受管区之后，任何一次正常提交都会
+ * 让契约「与模板不一致」，`--check` 从此永远红着——红了以后人就学会忽略它，那比不写更糟。
+ * 决定只在这几件事上变：哪一维越了线、要不要并行、分几片。这正是重入时该比对的东西，
+ * 而具体取值属于当次勘察的报告，随勘察输出，不往契约里钉。
+ */
+function explorationStrategyBlock(facts) {
+  const strategy = facts.explorationStrategy
+  if (!strategy || strategy.tier === 'none') return ''
+  const lines = [`- **策略级别**：\`${strategy.tier}\``]
+  const dims = strategy.oversizeDims ?? []
+  if (dims.length > 0) lines.push(`- **越线的维度**：${dims.join('、')}`)
+  if (strategy.multiPackage) lines.push('- **布局**：存在多包或多生态子目录')
+  if (strategy.reentryComplex) lines.push('- **重入**：存在契约漂移、未登记模块或既有 AI 约定')
+  const shards = strategy.shards ?? []
+  if (shards.length > 0) {
+    lines.push(`- **分片**：共 ${shards.length} 片`)
+    for (const shard of shards) {
+      lines.push(`  - \`${shard.id}\`（${shard.scope}）：${shard.focus}`)
+    }
   }
   return lines.join('\n')
 }
@@ -315,9 +427,13 @@ export function buildVars(facts, root) {
     ? conventions.workDir
     : (legacyWorkExists ? 'docs/work' : 'docs/todo')
 
+  const commandPlan = commandPlanOf(facts)
+
   return {
     PROJECT_NAME: facts.target?.name ?? '这个项目',
-    COMMANDS: commandsBlock(facts),
+    COMMANDS: commandPlan.block,
+    COMMANDS_OMITTED: commandsOmittedNote(facts, commandPlan.tooLong),
+    EXPLORATION_STRATEGY: explorationStrategyBlock(facts),
     RUNTIME_REQUIREMENTS: (facts.artifacts?.runtimeRequirements ?? []).join('、') || '见清单文件声明',
     DEFAULT_BRANCH: conventions.defaultBranch || 'main',
     VERSION_SOURCE: facts.ecosystem?.manifests?.[0] ?? '清单文件',

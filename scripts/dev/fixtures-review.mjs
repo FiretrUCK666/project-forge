@@ -715,4 +715,111 @@ cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真�
   return true
 }])
 
+// ── 判据自己没验过时，不能说「验过了」 ────────────────────────────────
+//
+// 手写的 AGENTS.md 没有受管区，于是「与模板一致」这一面**没有可比对的东西**。
+// 这里如果什么都不说，输出里就只剩「结构完整」——那是这类判据最典型的假绿：
+// 没验过被读成验过了。
+cases.push(['手写契约要说清「这一面没验」，受管契约不许出现这句话', async () => {
+  const dir = tmpProject({
+    'README.md': '# hand\n\n手写契约测试仓，用于验证 review 的诚实措辞。\n',
+    'package.json': '{"name":"hand","version":"1.0.0","scripts":{"test":"node --test"}}',
+    'AGENTS.md': '# hand\n\n## 取舍\n\n- `no-ci`：不配，本地跑就够了\n',
+  })
+  try {
+    const { reviewProject } = await import('../../scripts/review.mjs')
+    const res = await reviewProject(dir, { scopes: new Set(['agents']) })
+    const unverified = (res.results ?? []).find((f) => f.id === 'agents.unverified')
+    if (!unverified) {
+      return '手写 AGENTS.md 没有产出 agents.unverified——「没验过」被当成「验过了」'
+    }
+    if (unverified.level !== 'notice') {
+      return `agents.unverified 的档位是 ${unverified.level}，它不是缺口，是「这一面没验」，应当是 notice`
+    }
+    if (!/没验|没有可核对/.test(unverified.title)) {
+      return `agents.unverified 没把「这一面没验」说清楚：${unverified.title}`
+    }
+    if ((res.results ?? []).some((f) => f.id === 'agents.ready')) {
+      return '手写契约同时报了 agents.ready——「没验过」与「验过且通过」不能同时成立'
+    }
+
+    // 反向：装过套件、有受管区的契约不该出现这句话。
+    //
+    // 注意生成顺序：仓里已经有一份手写契约时，`compose-agents` 默认**不覆盖**它
+    // （那是「人接手了」的正常语义），所以先删掉再生成，才落到「受管契约」这一侧。
+    const managedDir = tmpProject({
+      'README.md': '# managed\n\n受管契约测试仓，用于验证反向。\n',
+      'package.json': '{"name":"managed","version":"1.0.0","scripts":{"test":"node --test"}}',
+    })
+    try {
+      await runNode('equip.mjs', [managedDir, '--no-backup'])
+      await runNode('compose-agents.mjs', [managedDir, '--no-backup'])
+      const managedText = readFileSync(join(managedDir, 'AGENTS.md'), 'utf8')
+      if (!/project-forge: begin/.test(managedText)) return '反向仓没有生成受管标记，夹具前提不成立'
+      writeFileSync(join(managedDir, 'AGENTS.md'),
+        managedText.replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。'))
+      const managed = await reviewProject(managedDir, { scopes: new Set(['agents']) })
+      if ((managed.results ?? []).some((f) => f.id === 'agents.unverified')) {
+        return '受管契约仍然报 agents.unverified——这句话只对手写契约成立'
+      }
+      return true
+    } finally { rmTree(managedDir) }
+  } finally { rmTree(dir) }
+}])
+
+// ── 没有业务内容时，「没有缺口」是一句假话 ────────────────────────────
+//
+// 一个只装了套件的仓：代码文件 0 个、清单一个都没有。构建、测试、TDD、CI 这几条判据的
+// 前提全都不存在，于是它们一条都不报。把这些沉默读成「没有会出事的缺口」，
+// 就是自洽的假绿——什么都没验，所以什么都没缺。
+cases.push(['空仓的结论不许说「没有会出事的缺口」，有业务内容时仍要照实报缺口', async () => {
+  const empty = tmpProject({
+    'README.md': '# toolgen\n\n这个仓只装了套件，没有任何业务文件，用于验证结论措辞。\n',
+    'LICENSE': 'MIT License\n',
+  })
+  try {
+    // 先把版本管理这一面弄干净：结论句验的是「没有缺口时怎么说」，
+    // 留着「还不是版本库」这条缺，就永远走不到那一句，判据等于没测到。
+    gitInit(empty, { branch: 'main' })
+    gitSync(empty, ['add', '-A'])
+    gitSync(empty, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-qm', 'init'])
+    await runNode('equip.mjs', [empty, '--no-backup'])
+    await runNode('compose-agents.mjs', [empty, '--no-backup'])
+    writeFileSync(join(empty, 'AGENTS.md'),
+      readFileSync(join(empty, 'AGENTS.md'), 'utf8').replace(/^<!-- project-forge: fill [^\n]*-->/gm, '已填写。'))
+
+    const { reviewProject } = await import('../../scripts/review.mjs')
+    const res = await reviewProject(empty)
+    const blank = (res.results ?? []).find((f) => f.id === 'ecosystem.blank-content')
+    if (!blank) return '空仓没有产出 ecosystem.blank-content——那几条没跑起来的判据被静默压掉了'
+    if (blank.level !== 'pending') {
+      return `空仓的「什么都没查」被放进了 ${blank.level} 档；它只有使用者能定，应当落在 pending`
+    }
+    if (!Array.isArray(res.unscanned) || res.unscanned.length === 0) {
+      return '结果里没有 unscanned——结论句无法区分「验过没问题」与「没跑起来」'
+    }
+    const text = (await runNode('review.mjs', [empty])).stdout ?? ''
+    for (const phrase of ['没有会出事的缺口', '可以交付']) {
+      if (text.includes(phrase)) return `空仓的结论里出现了「${phrase}」——没查过不能当成没问题`
+    }
+
+    // 反向：真的写了业务代码，就要照实报缺口，不能拿「空仓」这条兜底糊过去。
+    const real = tmpProject({
+      'README.md': '# real\n\n有业务代码但没有技术设计文档的仓，用于验证反向。\n',
+      'package.json': '{"name":"real","version":"1.0.0","scripts":{"test":"node --test"}}',
+      'src/app.mjs': 'export const a = 1\n',
+    })
+    try {
+      const realRes = await reviewProject(real)
+      if ((realRes.results ?? []).some((f) => f.id === 'ecosystem.blank-content')) {
+        return '有业务代码的仓被报成了空仓'
+      }
+      if ((realRes.missing ?? []).length === 0) {
+        return '有业务代码但缺技术设计文档的仓，一条「缺」都没有——判据失明了'
+      }
+      return true
+    } finally { rmTree(real) }
+  } finally { rmTree(empty) }
+}])
+
 }

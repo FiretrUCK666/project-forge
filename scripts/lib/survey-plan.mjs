@@ -115,15 +115,28 @@ export function computeExplorationStrategy(facts) {
 
   // 任一维越线即视为「读不完」。四个判断各自独立，不看别人。
   const oversize = []
-  if (codeFiles > EXPLORATION_THRESHOLDS.codeFiles) oversize.push(`代码文件 ${codeFiles} 个`)
-  if (codeLines > EXPLORATION_THRESHOLDS.codeLines) oversize.push(`代码 ${codeLines} 行`)
-  if (moduleCount > EXPLORATION_THRESHOLDS.modules) oversize.push(`模块目录 ${moduleCount} 个`)
-  if (kindCount > EXPLORATION_THRESHOLDS.languages) oversize.push(`语言/生态 ${kindCount} 种`)
+  const oversizeDims = []
+  if (codeFiles > EXPLORATION_THRESHOLDS.codeFiles) { oversize.push(`代码文件 ${codeFiles} 个`); oversizeDims.push('代码文件数') }
+  if (codeLines > EXPLORATION_THRESHOLDS.codeLines) { oversize.push(`代码 ${codeLines} 行`); oversizeDims.push('代码行数') }
+  if (moduleCount > EXPLORATION_THRESHOLDS.modules) { oversize.push(`模块目录 ${moduleCount} 个`); oversizeDims.push('模块目录数') }
+  if (kindCount > EXPLORATION_THRESHOLDS.languages) { oversize.push(`语言/生态 ${kindCount} 种`); oversizeDims.push('语言/生态种类数') }
 
   const isPolyglotOrMonorepo = workspaceDeclared || subdirCount > 1 || kindCount > 1
+
+  // ## 这一段要写进 `AGENTS.md` 自己的受管区，所以它的输入**不能来自 `AGENTS.md`**
+  //
+  // `reentry.drifted` 与 `reentry.staleAgentPaths` 都是从契约正文里读出来的：契约里多一行
+  // 提到某个已删文件，它们就变。拿它们算策略的后果是自指——写进契约的内容取决于契约正文，
+  // 于是每次生成都可能改一次自己，`--check` 在「一致」与「漂移」之间来回跳，永远收敛不了。
+  // 实测形状：`retro --apply-patches` 往契约里追加一条建议规则，`--check` 立刻报漂移。
+  //
+  // 所以这里只认**磁盘上的事实**：技术设计文档里的失效路径（那是 `docs/TDD.md`，不是本文件）、
+  // 套件漂移、磁盘上的其它 AI 约定文件、磁盘上的自有技能。契约自身的问题由 `review` 报。
+  const tddDrift = (reentry.staleTddPaths ?? []).length > 0
+  const kitDrift = Boolean(facts?.kit?.drifted || facts?.kit?.versionMismatch)
   const isReentryComplex = Boolean(
     reentry.isReentry
-    && (reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0 || otherConventionsCount > 0),
+    && (tddDrift || kitDrift || otherConventionsCount > 0 || (reentry.unregisteredTopDirs?.length ?? 0) > 0),
   )
 
   if (oversize.length === 0 && !isPolyglotOrMonorepo && !isReentryComplex) {
@@ -132,6 +145,9 @@ export function computeExplorationStrategy(facts) {
       reason: `小型单仓结构清晰（${codeFiles} 文件 / ${codeLines} 行），单 Agent 通读即可`,
       shards: [],
       evidence,
+      oversizeDims: [],
+      multiPackage: false,
+      reentryComplex: false,
     }
   }
 
@@ -171,14 +187,18 @@ export function computeExplorationStrategy(facts) {
 
   const customSkills = facts?.kit?.customSkills ?? []
   if (customSkills.length > 0 || otherConventionsCount > 0 || reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+    // 这一段会被写进 `AGENTS.md` 自己的受管区。所以它**不能把 `AGENTS.md` 列成目标**：
+    // 第一次渲染时这个文件还不存在，渲染完它才出现，第二次就多出一项——
+    // 于是「生成一次契约」本身把仓从「一致」推成「漂移」，`--check` 每次必红。
+    // 判据的输入不得包含判据自己的产物，这条对契约正文同样成立。
+    const selfFile = facts?.docs?.agents?.file
     const convTargets = [...new Set([
-      ...(facts?.docs?.agents ? [facts.docs.agents.file] : []),
       ...(facts?.docs?.tdd ? [facts.docs.tdd] : []),
       ...(facts?.docs?.otherAiConventions ?? []),
       ...customSkills.map((s) => `${s.path}/SKILL.md`),
       ...(reentry.staleAgentPaths ?? []),
-    ])].slice(0, 8)
-    if (convTargets.length === 0) convTargets.push('AGENTS.md')
+    ].filter((p) => p && p !== selfFile))].slice(0, 8)
+    if (convTargets.length === 0) convTargets.push('契约自身（AGENTS.md）')
     shards.push({
       id: 'conventions-and-skills',
       scope: '既有 AI 约定、自有扩展技能与重入失步校准',
@@ -207,5 +227,10 @@ export function computeExplorationStrategy(facts) {
     reason: reasons.join('；'),
     shards,
     evidence,
+    // 越线的是哪几维。比 `reason` 更适合被程序比对：`reason` 里带具体数值，
+    // 而数值每次改代码都会变；维度只在真的跨线时变。
+    oversizeDims,
+    multiPackage: isPolyglotOrMonorepo,
+    reentryComplex: isReentryComplex,
   }
 }

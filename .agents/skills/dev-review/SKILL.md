@@ -17,16 +17,21 @@ description: |
 
 ```sh
 # 模式 A：flow 独立审查子代理 / 外部 PR（支持自动推断 --task 与下一 --round，Tier 2 自动同步 review-<id> 并挂载依赖）
-node .agents/skills/dev-review/scripts/review-pack.mjs --task <id|auto> [--round <1|2|3>] [--include-diff] [--reset-review-slot]
+node .agents/skills/dev-review/scripts/review-pack.mjs --task <id|auto> [--round <1|2|3>] [--reset-review-slot]
 node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> [--untrusted-scan] [--worktree <path>]
 
 # 模式 B：开发者本地日常预审（支持位置目录 / --dir；--local 与 --task/--pr/--base 互斥）
 node .agents/skills/dev-review/scripts/review-pack.mjs --local
 node .agents/skills/dev-review/scripts/review-pack.mjs --staged
 node .agents/skills/dev-review/scripts/review-pack.mjs --base <ref>
+
+# 先跑实证与故障注入闭环（写入 {gitCommonDir}/project-forge-flow/ 指纹回执），通过后再取全文 diff：
+node .agents/skills/dev-review/scripts/review-pack.mjs check-empirical (--task <id> | --pr <M> | --local | --staged | --base <ref>) [--cmd "<验证命令>"]
+node .agents/skills/dev-review/scripts/review-pack.mjs check-fault --phase fail|restore (--task <id> | --pr <M> | --local | --staged | --base <ref>) --cmd "<验证命令>"
+node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> | --local | --staged | --base <ref>) --include-diff [--visual-checked]
 ```
 
-注：`--json` 默认输出精简的 `diff.hunkIndex` 与统计摘要（仅传 `--include-diff` 时内嵌全文），防止大补丁撑爆上下文；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
+注：未传 `--include-diff` 时，JSON 与纯文本均只输出 `diff.hunkIndex` 与统计摘要（不输出补丁行，防止绕过或撑爆上下文）；传 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的 `check-empirical` 与 `check-fault`（`fail` + `restore`）闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`。`check-empirical` 与 `check-fault` 跳过 `syncTier2ReviewSlotIfNeeded` 保护在测故障与 `--local` 原未提交改动；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免除故障注入；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
 
 ## 不可信外部 PR 供应链门禁
 
@@ -73,8 +78,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 ## 六锁防死循环收敛协议
 
-1. **实证优先与故障注入**：在独立审查 worktree 运行测试；触碰高风险路径时做故障注入
-   （改坏一处核心判定 -> 确认测试变红 -> `git checkout -- .` 还原 -> 确认复绿）。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
+1. **实证优先与故障注入**：在独立审查 worktree 按序跑完 `check-empirical`、`check-fault --phase fail`（改坏一处核心判定并确认变红，拦截空突变 `BLOCKED_FAULT_NO_MUTATION` 与假通过 `BLOCKED_FAULT_NOT_CAUGHT`）、还原并跑 `check-fault --phase restore`（拦截未还原 `BLOCKED_DIRTY_FAULT_RESIDUE`），之后再按需 `--include-diff`。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
 2. **上下文隔离**：只读冻结验收标准 `C1..Cn`、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
    `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
@@ -101,4 +105,4 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
 每条命令均附 `[NEXT STEP]` 明确提示下一合法动作：
 - `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `node .agents/skills/dev-flow/scripts/flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 `flow.mjs cleanup --confirm` 清理范围；
 - `CHANGES_REQUESTED`：实施者在原 `impl` 分支追加修复（`dev-flow` 的 `rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由**新的独立 `review` 子代理上下文**复核；
-- `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：立即停循环转交人类（`override --human-approved --reason` 或人工批准执行）。
+- `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_EMPIRICAL_FIRST` / `BLOCKED_DIRTY_FAULT_RESIDUE` / `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：按返回 `nextSteps` 先完成实证与故障注入闭环（或外部高危项交人类 `override` / `--human-approved-exec`）。

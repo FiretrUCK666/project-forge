@@ -461,7 +461,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
   }
 }
 
-export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate }) {
+export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate }) {
   const skills = resolveAvailableSkills(mainRoot)
   const nextSteps = []
   if (opts['untrusted-scan'] && untrustedWarnings.length === 0) {
@@ -473,16 +473,18 @@ export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untruste
   if (structuralGate.archViolations.length > 0) {
     nextSteps.push(`Fix ${structuralGate.archViolations.length} architecture boundary violation(s) at root cause before passing review.`)
   }
+  if (empiricalGate?.required && !empiricalGate.readyForDiff) {
+    nextSteps.push('先跑实证与故障注入，再 --include-diff 取全文（未完成前 --include-diff 将退出码 3 阻断 BLOCKED_EMPIRICAL_FIRST）：')
+    for (const cmd of empiricalGate.unblockCommands ?? []) {
+      nextSteps.push(`  ${cmd}`)
+    }
+  }
   if (mode === 'local' || mode === 'staged' || mode === 'base') {
     nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
   } else if (mode === 'task' && task) {
-    // 先说跑什么，再说怎么记。反过来的话，人读完 diff 才会注意到要跑。
-    nextSteps.push('先实证，再下结论。按这个顺序做：')
-    nextSteps.push('  1. 复跑判据：对着每条 C* 找到能证伪它的命令，在审查工作位里跑；跑不通就是这条判据有问题。')
-    nextSteps.push('  2. 故障注入：挑一处核心判定改坏，同一条判据必须变红；不改回去就是注入无效。')
-    nextSteps.push('  3. 还原复绿：\`git checkout -- .\` 之后同一条必须重新通过。')
-    nextSteps.push('  4. 需要看具体改动时再 \`--include-diff\` 取全文；不要用读 diff 代替跑。')
-    nextSteps.push('  拿不出上面三步的实测输出，不要下任何结论。')
+    if (!empiricalGate?.required || empiricalGate.readyForDiff) {
+      nextSteps.push('实证与故障注入已就绪（或当前无需额外阻断），可按需传 `--include-diff` 取全文并核对：')
+    }
     nextSteps.push('')
     nextSteps.push('记结论（--evidence 必填，写你实际跑的命令与输出摘要）：')
     nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id> --review-token <flow next 输出的令牌> --evidence "<跑了什么、结果如何>"`)
@@ -607,20 +609,33 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
   lines.push('    2. Restore cleanly (`git checkout -- .`) and re-run test -> MUST PASS.')
   lines.push('    3. Classify findings strictly: Must Fix / Should Fix / Pre-existing (list all R1 locations at once).')
 
+  if (pack.empiricalGate) {
+    const eg = pack.empiricalGate
+    lines.push('', '--- Empirical-First Gate ---')
+    lines.push(`  Required   : ${eg.required} | FaultRequired=${eg.faultRequired} | ReadyForDiff=${eg.readyForDiff}`)
+    lines.push(`  Fingerprint: ${eg.workspaceFingerprint ?? 'none'}`)
+    if ((eg.missingSteps ?? []).length > 0) {
+      lines.push(`  Missing    : ${eg.missingSteps.join(', ')}`)
+      lines.push('  Unblock    :')
+      for (const cmd of eg.unblockCommands ?? []) lines.push(`    - ${cmd}`)
+    } else {
+      lines.push('  Status     : empirical & fault-injection gate ready for --include-diff.')
+    }
+  }
+
   if (pack.untrustedWarnings.length > 0) {
     lines.push('', '--- [APPROVED_EXEC_WITH_WARNINGS] ---')
     lines.push('  Human execution approval active. Use `--ignore-scripts` for dependency install.')
     for (const h of pack.untrustedWarnings) lines.push(`  - [${h.category}] ${h.file}: ${h.reason}`)
   }
 
-  if (fullDiffText) {
+  if (includeFullDiff && fullDiffText) {
     const diffLines = fullDiffText.split('\n')
-    const maxLines = includeFullDiff ? diffLines.length : 240
     lines.push('', '--- Diff Patch (Context-Isolated) ---')
-    lines.push(...diffLines.slice(0, maxLines))
-    if (diffLines.length > maxLines) {
-      lines.push(`... (truncated ${diffLines.length - maxLines} more lines; pass --include-diff or run git diff ${pack.diffScope} to inspect full patch)`)
-    }
+    lines.push(...diffLines)
+  } else if (fullDiffText) {
+    lines.push('', '--- Diff Patch (Suppressed Until Empirical Gate Passes) ---')
+    lines.push('  Raw patch suppressed (hunkIndex/summary only). Complete empirical & fault-injection steps, then pass --include-diff.')
   }
 
   lines.push('', '[NEXT STEP]')

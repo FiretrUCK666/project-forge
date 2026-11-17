@@ -8,7 +8,7 @@ updated: 2026-11-18
 issue: 57
 pr: null
 branch: feat/review-empirical-gate
-owner: planner-57
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-w1, round=1, sha=a443029b94c1, summary=C1-C4 与 review-empirical 域已对齐，脏残留优先于 slot 同步，I131-I133 及三模式门禁完备)"
@@ -141,10 +141,10 @@ Round 2+、`flow sync` 变基（`range-diff` 改变 `commits`/`diffScope`/`headS
 
 > 动手改代码前冻结；实现期间不顺手删减或放宽标准。每条必须能由一条命令或断言实证。
 
-- [ ] C1: （全模式前置阻断与纯文本旁路封堵）在 `--task`、`--pr`、`--local`/`--staged`/`--base` 模式下，在当前 `round` + `headSha` + `workspaceFingerprint` 尚未完成所需实证与故障注入闭环前，运行 `review-pack.mjs` 并带 `--include-diff`（无论是否带 `--json`）必须以退出码 `3` 阻断并输出 `BLOCKED_EMPIRICAL_FIRST`（JSON 中无 `diffText`，文本中无原始 diff 行，并列出 `missingSteps` 与可执行解封命令）；不带 `--include-diff` 的纯文本输出仅含 `diff.hunkIndex`/统计摘要，不打印 `formatPackText` 240 行原始补丁，且既有非 `--include-diff` 机械包（如 `fixtures-docs.mjs`、`fixtures-flow.mjs`、`fixtures-govern.mjs`）继续全部通过。
-- [ ] C2: （非空实证与两阶段故障注入解锁）执行「机械包 -> `check-empirical`（实跑命令退出 `0`）-> 修改故障并跑 `check-fault --phase fail --cmd ...` -> 还原并跑 `check-fault --phase restore --cmd ...`」完整链路后，`review-pack.mjs` 带 `--include-diff` 放行并返回退出码 `0`（`diffIncluded: true` 与完整 `diffText`）；**反向拦截**：`check-fault --phase fail` 在工作区未改动时必须报 `BLOCKED_FAULT_NO_MUTATION`（退出码 `3`），在故障下命令仍退出 `0` 时必须报 `BLOCKED_FAULT_NOT_CAUGHT`（退出码 `3`），未还原时 `--phase restore` 或 `--task` 带 `--include-diff` 必须报 `BLOCKED_DIRTY_FAULT_RESIDUE`（退出码 `3`）。
-- [ ] C3: （多轮失效、Slot 保护与纯文档/外部 PR 兼容）`check-empirical` 与 `check-fault` 不触发 `syncTier2ReviewSlotIfNeeded` 重置，不会洗掉 `--phase fail` 已注入故障，也不会破坏 `--local` 模式原有的未提交改动（仅比对还原回 `baselineFingerprint`）；Round 2+ 新提交、`flow sync` `range-diff` 变基或 `--local` 继续改文件后，旧实证凭证立即失效并重新阻断 `--include-diff`；空 diff 或 `0` 运行时文件且无测试命令的 `low` 级纯文档改动不被故障注入死锁；外部 `--pr` 在 `check-empirical` / `check-fault` 前未过 `--untrusted-scan`（或未批准高危项）时继续返回退出码 `3`（`BLOCKED_UNTRUSTED_HAZARD`）。
-- [ ] C4: （双向夹具、故障注入与全量门禁）`node scripts/dev/fixtures.mjs` 全量通过（支持 `--domain review-empirical` 单独跑 `scripts/dev/fixtures-review-empirical.mjs` (new) 覆盖 `--task`/`--pr`/`--local` 的双向断言）；`node scripts/dev/verify-injections.mjs` 验证预留故障注入 `I131..I133`（`I131` 关闭前置阻断、`I132` 跳过无突变检测、`I133` 恢复纯文本明文 diff 泄露）全部变红失败；`kit/skills/dev-review/scripts/*.mjs` 均不超过 `800` 行；`node scripts/equip.mjs . --check` 与 `merge-gate` 全绿。
+- [x] C1: （全模式前置阻断与纯文本旁路封堵）在 `--task`、`--pr`、`--local`/`--staged`/`--base` 模式下，在当前 `round` + `headSha` + `workspaceFingerprint` 尚未完成所需实证与故障注入闭环前，运行 `review-pack.mjs` 并带 `--include-diff`（无论是否带 `--json`）必须以退出码 `3` 阻断并输出 `BLOCKED_EMPIRICAL_FIRST`（JSON 中无 `diffText`，文本中无原始 diff 行，并列出 `missingSteps` 与可执行解封命令）；不带 `--include-diff` 的纯文本输出仅含 `diff.hunkIndex`/统计摘要，不打印 `formatPackText` 240 行原始补丁，且既有非 `--include-diff` 机械包（如 `fixtures-docs.mjs`、`fixtures-flow.mjs`、`fixtures-govern.mjs`）继续全部通过。
+- [x] C2: （非空实证与两阶段故障注入解锁）执行「机械包 -> `check-empirical`（实跑命令退出 `0`）-> 修改故障并跑 `check-fault --phase fail --cmd ...` -> 还原并跑 `check-fault --phase restore --cmd ...`」完整链路后，`review-pack.mjs` 带 `--include-diff` 放行并返回退出码 `0`（`diffIncluded: true` 与完整 `diffText`）；**反向拦截**：`check-fault --phase fail` 在工作区未改动时必须报 `BLOCKED_FAULT_NO_MUTATION`（退出码 `3`），在故障下命令仍退出 `0` 时必须报 `BLOCKED_FAULT_NOT_CAUGHT`（退出码 `3`），未还原时 `--phase restore` 或 `--task` 带 `--include-diff` 必须报 `BLOCKED_DIRTY_FAULT_RESIDUE`（退出码 `3`）。
+- [x] C3: （多轮失效、Slot 保护与纯文档/外部 PR 兼容）`check-empirical` 与 `check-fault` 不触发 `syncTier2ReviewSlotIfNeeded` 重置，不会洗掉 `--phase fail` 已注入故障，也不会破坏 `--local` 模式原有的未提交改动（仅比对还原回 `baselineFingerprint`）；Round 2+ 新提交、`flow sync` `range-diff` 变基或 `--local` 继续改文件后，旧实证凭证立即失效并重新阻断 `--include-diff`；空 diff 或 `0` 运行时文件且无测试命令的 `low` 级纯文档改动不被故障注入死锁；外部 `--pr` 在 `check-empirical` / `check-fault` 前未过 `--untrusted-scan`（或未批准高危项）时继续返回退出码 `3`（`BLOCKED_UNTRUSTED_HAZARD`）。
+- [x] C4: （双向夹具、故障注入与全量门禁）`node scripts/dev/fixtures.mjs` 全量通过（支持 `--domain review-empirical` 单独跑 `scripts/dev/fixtures-review-empirical.mjs` (new) 覆盖 `--task`/`--pr`/`--local` 的双向断言）；`node scripts/dev/verify-injections.mjs` 验证预留故障注入 `I131..I133`（`I131` 关闭前置阻断、`I132` 跳过无突变检测、`I133` 恢复纯文本明文 diff 泄露）全部变红失败；`kit/skills/dev-review/scripts/*.mjs` 均不超过 `800` 行；`node scripts/equip.mjs . --check` 与 `merge-gate` 全绿。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -159,4 +159,7 @@ Round 2+、`flow sync` 变基（`range-diff` 改变 `commits`/`diffScope`/`headS
 
 ## 实现说明
 
-<!-- 在合并之前补齐真实实现摘要与验证结果 -->
+- 将实证状态机按职责拆分为 `kit/skills/dev-review/scripts/review-empirical-state.mjs`（452 行：工作区指纹 `computeWorkspaceFingerprint`、排除挂载共享依赖链接与主仓 `.worktrees` 的 `getEffectiveStatusEntries`、`{gitCommonDir}/project-forge-flow/` 分槽回执存取、slot 同步前置 `checkDirtyFaultResidueBeforeSync`、外部 PR 预执行拦截 `checkUntrustedBeforeExec`）与 `kit/skills/dev-review/scripts/review-empirical.mjs`（695 行：`computeEmpiricalRequirements`、`evaluateIncludeDiffGate`、`handleCheckEmpirical`、`handleCheckFault`）。
+- 改造 `kit/skills/dev-review/scripts/review-pack.mjs`（690 行）：扩展 `check-empirical` / `check-fault` 子命令与 `--cmd` / `--phase` 参数；执行 `check-empirical` / `check-fault` 时跳过 `syncTier2ReviewSlotIfNeeded` 保护故障注入与 `--local` 原有未提交修改；执行 `pack` 时先跑 `checkDirtyFaultResidueBeforeSync` 防止脏故障残留触发退化报错，并在 `--include-diff` 输出前强校验 `evaluateIncludeDiffGate`（未闭环以退出码 `3` 输出 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`）。
+- 改造 `kit/skills/dev-review/scripts/review-gates.mjs`（644 行）：封堵 `formatPackText` 在 `!includeFullDiff` 时输出 240 行原始 diff 补丁的旁路，仅展示 `hunkIndex`/文件统计与 `--- Empirical-First Gate ---` 解封步骤；同步更新 `kit/skills/dev-review/SKILL.md`（108 行）、`kit/skills/lib/handoff-package.mjs`、`docs/TDD.md` 并执行 `node scripts/equip.mjs .` 同步 `.agents/skills/`。
+- 验证结果：`fixtures.mjs --domain review-empirical` 4/4 通过、全量 `fixtures.mjs` 229/229 通过；`verify-injections.mjs` 全量 139/139（含 `I131..I133`）全部精准变红；`preflight.mjs`（33 项）、`gap-coverage.mjs`（19 项）、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`（`mature`）、`sync-toc.mjs --check` 与 `govern-audit.mjs audit . --changed --strict`（`critical=0, high=0`）全绿。

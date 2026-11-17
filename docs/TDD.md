@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用基线 | 以仓库当前源码与 [SKILL.md](../SKILL.md) 当前 `metadata.version` 为准 |
-| 最近更新日期 | `2026-11-16` |
+| 最近更新日期 | `2026-11-18` |
 | 运行环境与生态栈 | `Node.js 18+`（仅使用 `node:*` 内置模块，零第三方依赖） |
 | 跨平台基线 | `Windows`（PowerShell）、`macOS`（APFS / BSD 工具链）、`Linux` |
 | 托管平台适配范围 | 产品层注册表当前仅注册 `github`；未匹配托管远端降级为 `generic-git`，由 `TaskBackend` 统一对外操作 |
@@ -110,10 +110,10 @@ flowchart LR
 | `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs`，配合 `doc-audit.mjs`） |
 | `kit/skills/dev-flow/` | 产品层 | 隔离流转、并行调度与堆叠同步（`flow.mjs`、`flow-next.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`flow-cleanup.mjs`、`flow-sync.mjs`、`flow-batch.mjs`、`flow-trial-merge.mjs`、`worktree-deps.mjs`） |
-| `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步、六锁硬拦截与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-locks.mjs`、`review-ledger.mjs`） |
+| `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步、先实证后读 diff 门禁（`check-empirical` / `check-fault` 护航 `--include-diff`）、六锁硬拦截与双门双写（`review-pack.mjs`、`kit/skills/dev-review/scripts/review-empirical.mjs`、`kit/skills/dev-review/scripts/review-empirical-state.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-locks.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层、跨版本采集与复盘补丁（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`govern-retro.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
+| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 

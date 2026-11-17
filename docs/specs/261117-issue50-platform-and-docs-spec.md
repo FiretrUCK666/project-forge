@@ -62,23 +62,35 @@ flowchart LR
   Gate -->|全覆盖| Ok["放行"]
 ```
 
-| 模块 / 文件 | 变更性质 | 核心职责 |
-| --- | --- | --- |
-| `kit/skills/lib/profile.mjs` | 改造 | 取舍解析唯一实现（`review.mjs` 复用） |
-| `scripts/survey.mjs` | 改造 | `questions` 可复现、平台能力、产物计划 |
-| `kit/skills/lib/docs.mjs` | 改造 | 兄弟集按 slug 认亲，不依赖同日 |
-| `kit/skills/lib/doc-requirements.mjs` | 新增 | 「必须有什么」的唯一真相源：只锁与形态无关的三节 |
-| `kit/skills/lib/critique-rounds.mjs` | 新增 | 规划审核的增量范围：上轮意见留痕 |
-| `kit/skills/lib/doc-templates.mjs` | 改造 | 自定义章节与标准章节共存 |
-| `kit/skills/dev-plan/scripts/doc-audit.mjs` | 改造 | 面数判档、`prdRequired`、覆盖率与无主切片 |
-| `kit/skills/dev-plan/scripts/doc-plan.mjs` | 改造 | `critique-pass` 拒绝同人连审 |
-| `kit/skills/dev-explore/SKILL.md` | 改造 | 只读与写 TDD 的矛盾收敛 |
-| `scripts/equip-ci.mjs` | 新增 | 产物计划里 `create` 项的执行入口 |
-| `scripts/lib/platform/registry.mjs` | 改造 | 非 GitHub 的能力与出口 |
+| 模块 / 文件 | 变更性质 | 现状 | 还要做什么 |
+| --- | --- | --- | --- |
+| `kit/skills/lib/profile.mjs` | 已落地 | 取舍解析唯一实现 | 让 `computeArtifactPlan` 读它（现在不读） |
+| `kit/skills/lib/doc-requirements.mjs` | 已落地 | 只锁三节；23 个章节可登记；按内容认节 | — |
+| `kit/skills/lib/doc-template-render.mjs` | 已落地 | 模板渲染、占位填充、按声明裁节 | — |
+| `kit/skills/lib/critique-rounds.mjs` | 已落地 | 规划审核增量范围 | — |
+| `kit/skills/lib/tdd-shape.mjs` / `tdd-structure.mjs` / `tdd-facts.mjs` | 已落地 | TDD 按形态裁剪、主干核对、事实预填 | — |
+| `kit/skills/lib/docs.mjs` | 已落地 | 兄弟集按 slug 认亲 | — |
+| `kit/skills/dev-plan/scripts/doc-audit.mjs` | 已落地 | 面数判档、`prdRequired`、覆盖率、无主切片 | — |
+| `kit/skills/dev-plan/scripts/doc-plan.mjs` | 已落地 | `critique-pass` 拒绝同人连审 | — |
+| `kit/skills/dev-explore/SKILL.md` | 已落地 | 严格只读 | — |
+| `scripts/equip-ci.mjs` | 已落地 | 产物计划 `create` 项的执行入口 | — |
+| `scripts/lib/artifact-executors.mjs` | 已落地 | 动作到执行者的映射 | 补 `optional` 与 `upgrade` 两条（现缺） |
+| `scripts/lib/platform/registry.mjs` | 已落地 | 非 GitHub 降级 `generic-git` | — |
+| `scripts/survey.mjs` | **改造（主要工作量）** | `questions` 可复现、能力三态已报 | `computeArtifactPlan` 读取舍；`known:false` 只在无 providerId 时出现，产品路径走不到 |
+| `scripts/review.mjs` | **改造** | 只有 `{target, maturity, verdict, results}` | **要补 `git.capabilities` 结构**——C2 的另一半现在没人落点 |
+| `kit/skills/lib/ledger.mjs` + `flow-next.mjs` + `workflow-policy.mjs` | **改造** | `explored` 只有透传归一 | 写入者、形状定义、`flow next` 只给探索这一步 |
 
 ## 一、背景与边界声明
 
-- **要改什么**：这一组是「通用性」问题——同一份工具要给形态完全不同的项目用，而它现在假设了太多。①取舍解析有两份逐字相同的实现，改一处就有一条路径静默失效；②平台事实只认 GitHub，别的托管上仍给 GitHub 专用命令；③产物计划说「该建 CI」，但没有任何执行入口；④一个叫「只读」的技能拥有写权限；⑤治理类任务的判档看措辞；⑥探索证据缺失时只在合并那一步拦；⑦规划审核 Round 2 可以复用同一个上下文；⑧兄弟集靠「同一天创建」认亲；⑨文档模板是七节固定表单，装不下论文、数据管道、硬件这类项目；⑩需求分级没有最上面那一格。
+- **要改什么**：这一组是「通用性」问题——同一份工具要给形态完全不同的项目用，而它假设了太多。
+  十条里八条已落地（取舍单源、CI 执行入口、只读技能、面数判档、Round 2 换人、兄弟集按 slug、
+  模板可裁剪、需求分级），**还活着的只剩两条**：
+  - ①**探索证据缺失**：`explored` 字段只有透传归一，没有写入者，也没有形状定义；
+    `flow next` 对多任务仍说「请显式传入 --task」。
+  - ②**平台能力的两处口径不一致**：`review --json` 根本没有 `git.capabilities` 结构
+    （只有 `{target, maturity, verdict, results}`），而 `survey --json` 有；
+    且「认不出来」这条分支在产品路径上走不到——任何远端都降级成 `generic-git`
+    并报 `known: true` + 四项全 `false`。
 - **不改什么**：不新增平台适配器（只把「能力」与「出口」如实报出来）；不改 30KB 上限；不改六锁收敛算法。
 - **本期不做**：不做能力目录的语义检索；不为每个平台写一套专用命令。
 - **复用既有模块**：`kit/skills/lib/verdict.mjs`（三态）、`kit/skills/lib/tool-owned.mjs`、`kit/skills/lib/workflow-policy.mjs` 的阶段判定、`scripts/lib/protocol.mjs`。
@@ -88,11 +100,40 @@ flowchart LR
 
 ### 接口 / 数据结构变更
 
-**取舍解析**：只有 `profile.mjs` 的 `readDecisionMap` / `readDecisions`；`review.mjs` 改为重导出。`questions` 的生成依赖它，因此同一份仓两次 `survey` 的 `questions` 逐字相同**当且仅当**取舍节没变。
+**取舍解析**：只有 `profile.mjs` 的 `readDecisionMap` / `readDecisions`，`review.mjs` 重导出——
+这一条**已经落地**，副本早就不在了。
 
-**平台能力**：`survey --json` 与 `review --json` 都带 `{ providerId, capabilities: { issues, pullRequests, releases, checks } }`；非 GitHub 时产物计划里的发版出口改成「先问人」而不是给 GitHub 专用命令。
+还差的是另一半：**`computeArtifactPlan` 压根不读取舍**。所以「写上具体表态后对应项不再是
+`ask-human`」现在做不到——实测在 `AGENTS.md` 取舍节写了 `no-auto-release`，`ci-release`
+仍是 `ask-human`。要让 `survey.mjs` 的产物计划读取舍表再做决定。
 
-**产物计划**：`artifactPlan` 里每个 `action: 'create'` 必须有对应执行入口（`scripts/equip-ci.mjs` 或 `equip` 的初始化路径）；没有入口即门禁红。
+`NEEDS_HUMAN` 机器可读标记全仓 0 处命中，要新增：`questions` 非空时在 JSON 顶层带一个
+布尔与计数，让人和脚本都不用去正则 Markdown。
+
+**平台能力**（口径按实测对齐，不按设想写）：
+
+- `survey --json` 已有 `git.capabilities = { known, providerId, issues, pullRequests, releases, checks }`；
+- **`review --json` 没有**——它只输出 `{target, maturity, verdict, results}`。`review` 要补同一份结构，
+  数据直接从 `survey` 的勘察结果取，不另算一套；
+- **「认不出来」是 `known: false` 还是 `known: true` + 全 `false`，以实测为准**：
+  任何远端都会降级成 `generic-git` 并报 `known: true` + 四项全 `false`。
+  `known: false` 只在 providerId 为空或注册表查不到时出现，产品路径走不到。
+  所以判据要写成「**认不出的托管必须报确定的做不到**」——不许让人以为能做，
+  这正是 `fixtures-claims.mjs` 里已经绿着的那条断言的口径。
+- 没有远端时才出现 `q.remote-setup`（实测触发条件是零远端）；
+  非 GitHub 远端上出现的是 `q.license` 与 `q.unknown-ecosystem`。
+- 非 GitHub 的发版出口：`artifactPlan` 里 `ci-release` 的动作是 `skip`，
+  「先问人」的文案在 `q.release-strategy` 问句里，**不在 `artifactPlan`**。
+
+**产物计划**：`artifactPlan` 里每个 `action: create` 必须在 `ARTIFACT_EXECUTORS` 里有执行者
+（`scripts/equip-ci.mjs` 或 `equip` 的初始化路径）；没有入口即门禁红。
+动作全集实测为 **九种**：`create` / `calibrate` / `preserve` / `ask-human` / `skip` /
+`snapshot` / `equip` / `optional` / `upgrade`——后两种现在**没有执行者登记**，要补，
+否则它们会被误报成缺执行者。
+
+落盘之后的重跑结果也要按实测写：`ci-check` 是 `create` 变成 `preserve`，
+而 `agents-contract` 是 `create` 变成 `calibrate`（`compose-agents` 会故意留待填占位）。
+判据不能写成「一律变 preserve」。
 
 **需求分级**：`triage` 输出 `prdRequired` / `prdReasons` / `prdAdvice`；三条机械信号（四面以上、说了要分批、声明动 12 个以上文件）任一成立即必写 PRD。兜底由 `checkOrphanSlices` 负责。
 
@@ -104,9 +145,28 @@ flowchart LR
 
 ## 三、冻结的验收标准
 
-- [ ] C1: `survey` 与 `review` 共用**同一个**「取舍」解析函数（`review.mjs` 里那份逐字相同的副本必须删掉，不留双轨）；写上具体表态后对应项不再是 `ask-human`，具体实例：表态不自动发布后 `ci-release` 不再是 `ask-human`；同一份仓连跑两次 `survey`，`questions` 逐字相同**当且仅当**取舍节没变；`questions` 非空时输出机器可读的 `NEEDS_HUMAN` 标记，不能只是一行 Markdown。
-- [ ] C2: `survey --json` 的 `git.capabilities` 与 `review --json` 都报出当前远端 `providerId` 与结构化能力（`known` / `issues` / `pullRequests` / `releases` / `checks` 五键）；认不出来时 `known: false` 且各能力为 `null`，**未知不许被当成能**；已有远端但非 GitHub 时 `questions` 出现 `q.remote-setup`（问平台是哪个、要不要配 API 通道）；没有 GitHub 远端时 `q.release-strategy` 的文案里**不得出现** `RELEASE_TOKEN` / `gh release`，改为「先在托管界面确认发版方式」；**反向**：GitHub 上的现有输出（5 选 1 文案）不变。
-- [ ] C3: `artifactPlan` 里每个 `action: create` 都**在 `ARTIFACT_EXECUTORS` 里有执行者**，否则 `review` 报 `ARTIFACT_WITHOUT_EXECUTOR`（门禁红）；连 `id` 都没有的项报 `ARTIFACT_WITHOUT_ID`；标为人工执行的项必须写清「从哪儿开始」；落盘之后重跑 `survey`，该项要从 `create` 变成 `preserve`；反向：`calibrate` / `preserve` / `ask-human` / `skip` / `snapshot` / `equip` 六种动作不查执行者，不得误报。
+- [ ] C1: **取舍真的能改变结论**。`computeArtifactPlan` 必须读取舍表：在 `AGENTS.md` 取舍节写上
+  `no-auto-release` 之后，`ci-release` 的动作不得再是 `ask-human`；**反向**：把该行删掉后必须回到
+  `ask-human`（否则等于取舍被写死）。同一份仓连跑两次 `survey`，`questions` 逐字相同**且**取舍节不变
+  时两者产物完全一致——只验「不抖动」这半边，因为取舍现在还不参与 `questions` 生成，
+  「变则变」那半边**没有实现对象**，写进判据就是编。`questions` 非空时 JSON 顶层必须带
+  `needsHuman: { count, kinds[] }` 这样的机器可读标记，不能只有 Markdown 正文。
+- [ ] C2: **两个入口报同一份能力，且「做不到」必须说成做不到**。`survey --json` 与 `review --json`
+  都必须在顶层输出 `git.capabilities = { known, providerId, issues, pullRequests, releases, checks }`
+  这六个键；两处取值必须一致（同一份仓同一次勘察）。**认不出的托管**（GitLab / Gitea / 任意非 GitHub 主机）
+  必须报「确定的做不到」——`known` 不得为 `true` 却让调用方以为能建 Issue 或发 Release；
+  实测现在的形态是 `known: true` + 四项全 `false`，这个口径可以保留，但**不许出现「四项为 null 且 known 为 true」**
+  这种既不知道又不像不知道的中间态。零远端时 `questions` 出现 `q.remote-setup`；
+  非 GitHub 远端时 `q.release-strategy` 文案里**不得出现** `RELEASE_TOKEN` / `gh release`；
+  **反向**：GitHub 上的现有输出（5 选 1 文案）不变，且四项能力全为 `true`。
+- [ ] C3: `artifactPlan` 里每个 `action: create` 都**在 `ARTIFACT_EXECUTORS` 里有执行者**，否则 `review`
+  报 `ARTIFACT_WITHOUT_EXECUTOR`（门禁红）；连 `id` 都没有的项报 `ARTIFACT_WITHOUT_ID`；
+  标为人工执行的项必须写清「从哪儿开始」。**九种动作都要有明确归宿**：`create` 查执行者，
+  其余八种（`calibrate` / `preserve` / `ask-human` / `skip` / `snapshot` / `equip` / `optional` / `upgrade`）
+  不查执行者、不得误报——其中 `optional` 与 `upgrade` 现在没在 `ARTIFACT_EXECUTORS` 里登记，
+  要补上，否则它们会被误判成缺执行者。**落盘后的去向按实测分两种**：`ci-check` 从 `create` 变 `preserve`，
+  `agents-contract` 从 `create` 变 `calibrate`（`compose-agents` 会故意留待填占位）——
+  判据写成「一律变 preserve」会把第二条判红。反向：已就绪项（`preserve`）重跑后仍为 `preserve`，不得来回跳。
 - [ ] C4: `dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；当前选择：彻底只读；**主流程也不许再让这个只读技能承担写入职责**——`SKILL.md` 的 S3 落盘步骤必须写明「只读取证，由本步落笔」，而不是「调 dev-explore 编写或校准 `docs/TDD.md`」；反向：`equip --bootstrap-empty` 仍能生成初始 TDD，`dev-govern` 仍能报出该补哪些模块。
 - [ ] C5: 治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），**三面以上即跨模块**；可判形式：同一件事的三种同义改写、以及**完全不含「治理 / 规范化」字样**但跨三面的输入，都必须判 Case 4；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**（缺一项即门禁红）；**另一条**：每个 C 项还必须被某份 SPEC 认领；治理 PRD 在重入时可继续追加而非每次重开。
 - [ ] C6: 账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
@@ -117,7 +177,7 @@ flowchart LR
 
 ## 四、高风险点、门型与回滚路径
 
-- **门型与回滚路径**：`one-way`。文档模板与判档规则一旦写死，用户项目的文档形态就被绑死；门禁放宽则「无主切片」静默通过。回退方式：模板改动可逐份回退，`profile.mjs` 的取舍解析可暂时保留 `review.mjs` 的副本（但需在 TDD 里记明是临时状态）；`prdRequired` 与 `checkOrphanSlices` 独立，可分别关闭。
+- **门型与回滚路径**：`one-way`。文档模板与判档规则一旦写死，用户项目的文档形态就被绑死；门禁放宽则「无主切片」静默通过。回退方式：模板改动可逐份回退（`kit/skills/templates/` 下四份互相独立）；`profile.mjs` 的取舍解析在 `review.mjs` 里是**重导出**，回退只需改回直接 import，不重建副本；`prdRequired` 与 `checkOrphanSlices` 各自独立，可分别关闭。
 - **故障注入预演**：I78（Round 2 复用同一复核人）、I81（拆多份 SPEC 也不用 PRD）、I82（无主切片不报）、I83（远端能力认不出来被当成能）、I84（产物计划没执行者）、I85（作者与实施者同一人）、I87（规划审核不带上一轮意见）、I88（主工作区直改不提醒）。
 
 ## 实现说明

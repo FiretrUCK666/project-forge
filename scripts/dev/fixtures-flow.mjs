@@ -887,7 +887,7 @@ cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
     ...over,
   })
   const rt = (over = {}) => ({
-    headSha: "aaa", dirty: 0, policy: { riskTier: "high", requiredGates: ["gate"], independentReviewRequired: true },
+    headSha: "aaa", dirty: 0, commitsAheadOfBase: 0, policy: { riskTier: "high", requiredGates: ["gate"], independentReviewRequired: true },
     evidenceValidation: { ok: false, code: "BLOCKED_NOT_VERIFIED" },
     opInProgress: false, mainDirtyCount: 0,
     ...over,
@@ -901,9 +901,17 @@ cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
   if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
 
   // 反向：真做完了（HEAD 已前移）→ 才该要求归档
-  const done = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ headSha: "bbb" }) })
+  const done = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
   if (done.phase !== "needs-finalize") {
-    return `HEAD 前移后仍判 ${done.phase}，应要求 finalize`
+    return `分支上有提交后仍判 ${done.phase}，应要求 finalize`
+  }
+
+  // 反向：跟着基线 rebase 了（HEAD 变了）但没写代码 → 仍算还没开始
+  const rebased = evaluateNextState({
+    selectedTask: mk(), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
+  })
+  if (rebased.phase !== "implementing") {
+    return `跟着基线 rebase 后被判成 ${rebased.phase}——同步基线不是「做完了」`
   }
 
   // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」

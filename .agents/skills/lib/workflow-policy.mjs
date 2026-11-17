@@ -481,10 +481,10 @@ export function evaluateNextState({
   const currentHead = rt.headSha ?? null
   const evidenceVal = rt.evidenceValidation ?? { ok: false, code: 'BLOCKED_NOT_VERIFIED' }
   const needsFinalize = t.caseType === 3 || t.caseType === 4 || Boolean(t.todoFile) || Boolean(t.specFile)
-  // 「一件事都没做过」：基线 SHA 与当前 HEAD 相同、工作区干净。
+  // 「一件事都没做过」：工作区干净、且分支上没有基线没有的提交。
   // 用它区分「还没开始」与「做完了待归档」——两者都满足「尚未 finalized」。
   const nothingImplementedYet = Boolean(
-    !t.finalized && t.baseSha && currentHead && t.baseSha === currentHead && !(rt.dirty > 0),
+    !t.finalized && !(rt.dirty > 0) && !((rt.commitsAheadOfBase ?? 0) > 0),
   )
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)

@@ -186,6 +186,17 @@ export async function handleNext(opts, roots) {
       : null
     const mainDirtyCount = mainStatus?.ok ? mainStatus.entries.length : 0
 
+    // 分支上有没有基线没有的提交。rebase 会把基线的提交带进来，
+    // 所以这个数不因同步基线而变——只有真写了东西才会涨。
+    let commitsAheadOfBase = 0
+    if (exists) {
+      const baseRef = selectedTask.baseBranch || selectedTask.baseSha
+      if (baseRef) {
+        const countRes = await gitRun(implRoot, ['rev-list', '--count', `${baseRef}..HEAD`])
+        if (countRes.ok) commitsAheadOfBase = Number(countRes.stdout.trim()) || 0
+      }
+    }
+
     taskRuntime = {
       opInProgress: Boolean(op.inProgress),
       opName: op.op ?? null,
@@ -196,6 +207,7 @@ export async function handleNext(opts, roots) {
       evidenceValidation,
       nonDocChangesAfterFinalize,
       profile,
+      commitsAheadOfBase,
     }
   }
 

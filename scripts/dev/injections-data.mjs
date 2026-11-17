@@ -1124,7 +1124,6 @@ export const INJECTIONS = [
     expect: '注释里的旧导出名掩盖了真实删除',
   },
   {
-  {
     id: 'I131',
     what: 'evaluateIncludeDiffGate 直接返回 readyForDiff=true 放行（未经 check-empirical/check-fault 就允许 --include-diff）',
     file: 'kit/skills/dev-review/scripts/review-empirical.mjs',

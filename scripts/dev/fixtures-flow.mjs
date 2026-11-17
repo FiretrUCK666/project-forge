@@ -59,7 +59,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
     const vWeak = await handleVerify({ task: 't-w2', mode: 'gate' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
-    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
+    await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
 
     const mGate = await handleMerge({ task: 't-w2', json: true }, roots)
     if (mGate.exitCode !== 4) return `门禁弱化改动未被 merge 拦截：exit=${mGate.exitCode}`
@@ -76,7 +76,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     gitCommitFast(implClean, 'add assertion', { updateOnly: true })
     const vClean = await handleVerify({ task: 't-w2-clean', mode: 'full' }, roots)
     if (vClean.exitCode !== 0) return `clean verify 失败：${vClean.exitCode}`
-    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2-clean', 1) }, roots)
+    await handleRecord({ task: 't-w2-clean', round: '1', verdict: 'pass', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2-clean', 1) }, roots)
     const mClean = await handleMerge({ task: 't-w2-clean' }, roots)
     if (mClean.exitCode !== 0) return `正常增量测试被 merge 误杀为门禁弱化：exit=${mClean.exitCode}`
     return true
@@ -187,7 +187,7 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
 
     // review-pack record 实时双写结构化评论（PR 完整核对单 + Issue 阻塞摘要）到 PR #88 与 Issue #77 并贴标签；离线不阻塞且产出 delegatedPayloads
     const recChangesCode = await handleRecord({
-      task: 'gw-feat', round: '1', verdict: 'changes', 'reviewer-id': 'rev-z',
+      task: 'gw-feat', round: '1', verdict: 'changes', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-z',
       'review-token': await issueTokenFor(dir, 'gw-feat', 1),
       'must-fix': [JSON.stringify([{ id: 'C1', file: 'src/app.mjs', line: 1, summary: 'C1: 修复空指针', rootCause: '缺少空值守卫', fixHint: '先判空再返回' }])],
       'should-fix': ['补齐边界日志'],
@@ -214,7 +214,7 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
     gitCommitFast(implAbs, 'fix: gw null guard', { updateOnly: true })
     const offlineRec = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
       'record', '--task', 'gw-feat', '--round', '2', '--verdict', 'pass', '--reviewer-id', 'rev-z',
-      '--review-token', await issueTokenFor(dir, 'gw-feat', 2), '--json',
+      '--review-token', await issueTokenFor(dir, 'gw-feat', 2), '--json', '--evidence', '夹具实测：命令已跑，输出符合预期'
     ], { cwd: dir })
     const offlineSync = offlineRec.status === 0 ? JSON.parse(offlineRec.stdout).githubSync : null
     const delPr = offlineSync?.delegatedPayloads?.targets?.find((t) => t.kind === 'pr' && t.number === 88)
@@ -347,7 +347,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     }
 
     // Round 1 pass 后再提交新改动并 verify（未复审），merge 必须拦截陈旧 reviewPassedHead
-    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 1) }, roots)
+    await handleRecord({ task: 't-t2', round: '1', verdict: 'pass', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 1) }, roots)
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 3\n')
     gitCommitFast(implAbs, 'feat: v3', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
@@ -355,7 +355,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     if (mStaleHead.exitCode === 0) return '新提交仅 verify 未复审却被 merge 放行了（reviewPassedHead 校验失效）'
 
     // Round 2 changes 必须清空 reviewPassedHead -> merge 阻断；再提交新 HEAD 触发 Round 3 stop-loss 后 override 解锁
-    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 2) }, roots)
+    await handleRecord({ task: 't-t2', round: '2', verdict: 'changes', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 2) }, roots)
     const t2AfterR2 = readTaskLedger(dir, 't-t2')
     if (t2AfterR2.reviewPassedHead !== null) return `verdict=changes 未清空 reviewPassedHead：${t2AfterR2.reviewPassedHead}`
     const mBlocked = await handleMerge({ task: 't-t2' }, roots)
@@ -364,7 +364,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     writeFileSync(join(implAbs, 'src/app.mjs'), 'export const v = 4\n')
     gitCommitFast(implAbs, 'feat: v4', { updateOnly: true })
     await handleVerify({ task: 't-t2', mode: 'gate' }, roots)
-    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 3) }, roots)
+    const r3Stop = await handleRecord({ task: 't-t2', round: '3', verdict: 'changes', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'must-fix': ['C1: src/app.mjs:1 bug'], 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 't-t2', 3) }, roots)
     if (r3Stop !== 4) return `Round 3 未触发 STOP_LOSS_ESCALATE (exit=4)：${r3Stop}`
     const ov = await handleOverride({ task: 't-t2', 'human-approved': true, reason: 'human verified' }, roots)
     if (ov !== 0) return `override 失败：${ov}`
@@ -408,7 +408,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
       const ver = await handleVerify({ task: 'ci-t', mode }, roots)
       if (ver.exitCode !== 0) throw new Error(`verify 失败：${ver.exitCode}`)
       const curSha = gitSync(ciImpl, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
-      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-ci', 'review-token': await issueTokenFor(ciDir, 'ci-t', 1) }, roots)
+      const rec = await handleRecord({ task: 'ci-t', round: '1', verdict: 'pass', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-ci', 'review-token': await issueTokenFor(ciDir, 'ci-t', 1) }, roots)
       if (rec !== 0) throw new Error(`record 失败：${rec}`)
       const led = readTaskLedger(ciDir, 'ci-t')
       writeTaskLedger(ciDir, { ...led, prNumber: 101, implementerId: 'dev-ci', lastReview: { ...(led.lastReview ?? {}), headSha: curSha } })
@@ -893,29 +893,38 @@ cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
     ...over,
   })
 
-  // 正向：基线 SHA 等于 HEAD、工作区干净 → 还没开始，下一步是实施
-  const fresh = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  // 正向：还没认领 → 第一步是认领（这是「我接手了」的平台侧落地）
+  const unclaimed = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  if (unclaimed.phase !== "needs-claim") {
+    return `还没认领时判成 ${unclaimed.phase}，应先要求 claim`
+  }
+  if (!unclaimed.blockingReasons.includes("BLOCKED_NOT_CLAIMED")) return "没给出阻塞原因"
+
+  // 正向：认领之后、还没动代码 → 下一步是实施
+  const fresh = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "2026-01-01T00:00:00Z" }), taskRuntime: rt(),
+  })
   if (fresh.phase === "needs-finalize") {
     return "刚建好的任务被判成「该归档」——下一步应是实施"
   }
   if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
 
   // 反向：真做完了（HEAD 已前移）→ 才该要求归档
-  const done = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
+  const done = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
   if (done.phase !== "needs-finalize") {
     return `分支上有提交后仍判 ${done.phase}，应要求 finalize`
   }
 
   // 反向：跟着基线 rebase 了（HEAD 变了）但没写代码 → 仍算还没开始
   const rebased = evaluateNextState({
-    selectedTask: mk(), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
+    selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
   })
   if (rebased.phase !== "implementing") {
     return `跟着基线 rebase 后被判成 ${rebased.phase}——同步基线不是「做完了」`
   }
 
   // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」
-  const dirty = evaluateNextState({ selectedTask: mk(), taskRuntime: rt({ dirty: 3 }) })
+  const dirty = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ dirty: 3 }) })
   if (dirty.phase !== "implementing") return `有未提交改动时判成 ${dirty.phase}`
 
   return true

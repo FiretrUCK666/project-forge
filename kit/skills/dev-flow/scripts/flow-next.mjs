@@ -247,6 +247,8 @@ export async function handleNext(opts, roots) {
       ownerRole: out.ownerRole ?? null,
       // Dev Profile 决定「必过门」那条命令长什么样——不传就只剩一个档位名。
       profile: taskRuntime?.profile ?? out.profile ?? null,
+      // flow next 刚算出来的这一格，直接搬进交接包——丢掉它，子代理就不知道此刻要干什么。
+      current: out,
     })
     out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
   }

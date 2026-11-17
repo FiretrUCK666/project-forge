@@ -17,11 +17,16 @@ import { registerSurveyCases } from './fixtures-survey.mjs'
 import { registerContractCases } from './fixtures-contracts.mjs'
 import { registerReviewCases } from './fixtures-review.mjs'
 import { registerClaimsCases } from './fixtures-claims.mjs'
+import { registerFlowDocsCases } from './fixtures-flow-docs.mjs'
+import { registerDocRuleCases } from './fixtures-doc-rules.mjs'
+import { registerDocShapeCases } from './fixtures-doc-shapes.mjs'
+import { registerHandoffReviewCases } from './fixtures-handoff-review.mjs'
 import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
 import { registerFlowStateCases } from './fixtures-flow-state.mjs'
 import { registerFlowParallelCases } from './fixtures-flow-parallel.mjs'
+import { registerLifecycleCases } from './fixtures-lifecycle.mjs'
 import { registerReviewGovernCases } from './fixtures-review-govern.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
@@ -33,9 +38,14 @@ const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
   ['flow-state', registerFlowStateCases],
   ['flow-parallel', registerFlowParallelCases],
+  ['lifecycle', registerLifecycleCases],
   ['review-govern', registerReviewGovernCases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],
+  ['flow-docs', registerFlowDocsCases],
+  ['doc-rules', registerDocRuleCases],
+  ['doc-shapes', registerDocShapeCases],
+  ['handoff-review', registerHandoffReviewCases],
   ['equip', registerEquipCases],
   ['docs', registerDocsCases],
   ['platform', registerPlatformCases],

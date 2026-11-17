@@ -178,11 +178,32 @@ function factsHasRemote(mainRoot) {
   } catch { return false }
 }
 
-export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null }) {
-  const specRel = ledger?.specFile ?? null
-  const todoRel = ledger?.todoFile ?? null
-  const specText = specRel && existsSync(join(mainRoot, specRel)) ? (readTextSafe(join(mainRoot, specRel)) ?? '') : ''
-  const todoText = todoRel && existsSync(join(mainRoot, todoRel)) ? (readTextSafe(join(mainRoot, todoRel)) ?? '') : ''
+export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null, current = null }) {
+  // 归档之后 specFile/todoFile 会指向 docs/archive/，而审核阶段正是归档之后。
+  // 只读 specFile 会让审核交接包变成「没有登记验收标准」——判据在，只是搬了家。
+  //
+  // 两个根都要看：主仓里有已归档的文档，而这条任务的归档在**实施位**里，
+  // 还没合并回主仓。只查一个根，两种情形各漏一半。
+  const docRoots = [mainRoot, ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null].filter(Boolean)
+  const pickDoc = (live, archived) => {
+    for (const rel of [live, archived]) {
+      if (!rel) continue
+      if (docRoots.some((root) => existsSync(join(root, rel)))) return rel
+    }
+    return null
+  }
+  const specRel = pickDoc(ledger?.specFile, ledger?.archivedSpecFile)
+  const todoRel = pickDoc(ledger?.todoFile, ledger?.archivedTodoFile)
+  const readFromDocRoots = (rel) => {
+    if (!rel) return ''
+    for (const root of docRoots) {
+      const abs = join(root, rel)
+      if (existsSync(abs)) return readTextSafe(abs) ?? ''
+    }
+    return ''
+  }
+  const specText = readFromDocRoots(specRel)
+  const todoText = readFromDocRoots(todoRel)
 
   // 验收标准以 SPEC 为准，没有 SPEC 时退到 Todo。两者都没有就明说没有。
   const criteria = specText ? extractCriteria(specText) : extractCriteria(todoText)
@@ -221,6 +242,35 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   lines.push('> 这一段由 `flow next --handoff` 机械生成，可以直接粘给子代理。')
   lines.push('> 抽不到的项写「没有登记」——不编。照着一句编出来的话干活，比什么都不给更危险。')
   lines.push('')
+
+  // 现在这一步：直接搬 flow next 算出来的结果，不在这里重新推。
+  //
+  // 之前只写「下一步从 flow next 查」，等于让人自己去问。可 flow next 刚刚
+  // 算过一遍——phase / nextAction / command 都在手上，丢掉它们没有任何道理。
+  // 这是**现算的派生值**，不是手抄的流程清单：状态机改了它自动跟上。
+  if (current?.phase) {
+    lines.push('## 现在这一步')
+    lines.push('')
+    lines.push(`阶段：\`${current.phase}\`${current.ownerRole ? `　由 \`${current.ownerRole}\` 负责` : ''}`)
+    if (current.nextAction) {
+      lines.push('')
+      lines.push(current.nextAction)
+    }
+    if (current.command) {
+      lines.push('')
+      lines.push('```')
+      lines.push(current.command)
+      lines.push('```')
+    }
+    if ((current.blockingReasons ?? []).length > 0) {
+      lines.push('')
+      lines.push(`挡住它的原因：\`${current.blockingReasons.join('、')}\``)
+    }
+    lines.push('')
+    lines.push(`**做完这一步，再跑一次 \`flow next --task ${ledger?.taskId ?? '<任务号>'}\` 拿下一步。**`)
+    lines.push('不要自己推断走到哪了——阶段是账本算出来的，不是猜出来的。')
+    lines.push('')
+  }
 
   lines.push('## 你在做什么')
   lines.push('')
@@ -343,6 +393,20 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push('')
     lines.push('**只对着这些判据判断**：上面的验收标准是冻结的。判据本身有问题就提出来，')
     lines.push('但不要因为「读起来不顺」判不通过。')
+    lines.push('')
+    lines.push('## 先跑，再判')
+    lines.push('')
+    lines.push('不要靠读 diff 下结论——静态读代码看不出「这条判据到底能不能被证伪」，')
+    lines.push('而判据能不能被证伪，正是这一轮唯一要回答的问题。')
+    lines.push('')
+    lines.push('按这个顺序做，每一步都要留输出：')
+    lines.push('')
+    lines.push('1. **复跑判据**：每条 C* 找到能证伪它的命令，在审查工作位里跑。跑不通，这条判据有问题。')
+    lines.push('2. **故障注入**：挑一处核心判定改坏，同一条判据必须变红。不变红，说明那条判据拦不住东西。')
+    lines.push('3. **还原复绿**：\`git checkout -- .\` 之后必须重新通过。')
+    lines.push('4. **要看具体改动时**再 \`--include-diff\` 取全文——先定位到哪一块，再去看那一块。')
+    lines.push('')
+    lines.push('记结论时 \`--evidence\` 必填，写你实际跑的命令与输出摘要。没有佐证的通过，与没通过是一回事。')
     lines.push('')
   }
 

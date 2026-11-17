@@ -822,4 +822,37 @@ cases.push(['空仓的结论不许说「没有会出事的缺口」，有业务�
   } finally { rmTree(empty) }
 }])
 
+
+// 审核人拿到的 diff 必须是**补丁正文**，不是文件清单。
+// `git diff --raw` 单独用只输出 40 行 name-status，一行补丁都没有——
+// 而报告里「changedFiles: 40」看起来完全正常，审核人却什么都看不到。
+// 这类「看起来有、实际是空」的洞最危险：门禁全绿，审核形同虚设。
+cases.push(["审核 diff 里必须有补丁正文，不能只有文件清单", async () => {
+  const { collectDiff } = await import("../../kit/skills/dev-review/scripts/review-diff.mjs")
+  const { gitCommitFast, gitInit, rmTree, tmpProject } = await import("./fixtures-helpers.mjs")
+  const { writeFileSync: wf, readFileSync: rf } = await import("node:fs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "a.txt": "line1\nline2\nline3\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    const base = rf(join(dir, ".git", "HEAD"), "utf8").trim()
+    wf(join(dir, "a.txt"), "line1\nCHANGED\nline3\n")
+    gitCommitFast(dir, "change")
+
+    const d = await collectDiff(dir, { mode: "range", range: "HEAD~1..HEAD" })
+
+    // 三个都要成立：字节数不为 0、正文里真有 +/- 行、hash 不是空串的 hash
+    if (d.bytes === 0) return "diff 是 0 字节——审核人什么都看不到"
+    if (!d.text.includes("+CHANGED")) return `正文里没有新增行：${JSON.stringify(d.text.slice(0, 120))}`
+    if (!d.text.includes("-line2")) return "正文里没有删除行"
+    if (d.hunkIndex.length === 0) return "hunk 索引是空的"
+
+    // 空串的 sha256 是 e3b0c442…，这个值出现就说明算的是空内容
+    if (d.sha256.startsWith("e3b0c442")) return "diff hash 是空串的 hash——正文没被读到"
+
+    return true
+  } finally { rmTree(dir) }
+}])
 }

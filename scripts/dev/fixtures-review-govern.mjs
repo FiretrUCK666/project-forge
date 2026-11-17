@@ -427,7 +427,7 @@ export function registerReviewGovernCases(cases) {
       await handleRework({ task: 'c3-t' }, roots)
       await handleVerify({ task: 'c3-t', mode: 'full', cmd: 'exit 0' }, roots)
       const recRes = await handleRecord({
-        task: 'c3-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c3-t', 1),
+        task: 'c3-t', round: '1', verdict: 'pass', evidence: '夹具实测：判据已跑，输出符合预期', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c3-t', 1),
         disposition: ['C1:rebutted-wrong', 'C2:intentional'],
       }, roots)
       if (recRes !== 0) return `handleRecord 失败：exit=${recRes}`

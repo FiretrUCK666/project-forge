@@ -17,22 +17,22 @@
       "sha256": "ef6a86343cb08bbce8ac082a9c3d2acc8bc1ca6805357882bf03a04af63f95fe"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "9eda9f6ef4b3f761dc87d9801911b9ea9763612ff5a5c749f8b354e8ceec8347"
+      "sha256": "418231cd3450b5cda34e7b666584db5d36b2780a898e4f7d972a7d06ded30337"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
       "sha256": "5eea4066311862f736678cce93ca656b4f1fbafb5bc7b33624632fa54aa244f6"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "c36c7ff37c123651b9337bc8e28ae71da34c12e7d93d70d9e16ee422aca66c35"
+      "sha256": "4d96654f54c9ed1c3b1f04242428a0bd78d4b341ff59253e5d214db40b647b1c"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
+      "sha256": "953adde0d319ec5b98cd42ef08556f06586d53556d0f2a8d65dee3178132d6b6"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "f8c5e7023b385f5de5901886139057c081db60606cd634df1d01a15ec76d09f5"
+      "sha256": "f8aa5ca9fdcedcd60676822bcc483239aff8aae6c33f5832cf5f6a92fdb1641d"
     },
     "dev-flow/scripts/flow-sync.mjs": {
-      "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
+      "sha256": "d144cabeff62e82c3a5654dda9c71e3c63f78d743113703654520f3598639c6b"
     },
     "dev-flow/scripts/flow-trial-merge.mjs": {
       "sha256": "144e2c47259109c0096a49743b49cc538ce543d31cf7eb5a9b8ad86d826eafc6"
@@ -80,19 +80,19 @@
       "sha256": "50f465414107572df949f02e6449ed75d8048deda348fba9ef082a359c2b4187"
     },
     "dev-review/scripts/review-diff.mjs": {
-      "sha256": "0aea6d96502995514b2845096f8dd3f049bd309819d8819e23605b477825e0cf"
+      "sha256": "6dc00b378689136f39431fb27d869164fb4e05db64a5db46f4bb510ad2b3cb4a"
     },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "c1a413bcc1708a6d305f92f75e7c10a1130b7cae8d8ebbd9b111337ad8620085"
+      "sha256": "a473b9f0cbbe125372361ba62ed2f383c5648e9d91622a8e4ee6c7d4509a05ce"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "692d3cb8a9188ff6b43881bd1a85c5cabc9791c61169e905b9f527d69170b61c"
+      "sha256": "e71e8ec7c1738c8f2020df29f29d4c3fc60a47b6428f02987f11bb16e3744882"
     },
     "dev-review/scripts/review-locks.mjs": {
       "sha256": "b6479c67ffb98db6a987d7ff097f324f567d6220d6fc1d2cb7340d7399c10398"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "8cf217c9d96727c22203d2c1ba77f3f3153012d57b331b0fc1b67cfb00fdc3f9"
+      "sha256": "a62d7fb2a81a05a5ff6fc556ad7cb6def76986f2f58f7d1fdbdb9cbbe5481721"
     },
     "lib/cli.mjs": {
       "sha256": "c02575fc8c183a440f505ac712ef0e9a3a05380d595f49f8ec782ab82413826d"
@@ -146,10 +146,10 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "cc9765d2be0a7e7d95d1ccc75f64088a3702bab1c809d6728219243e45dc25f9"
+      "sha256": "976e4113245261277590681f8ef0d0c3c611946f2ac02e1d6195b9044c9295b1"
     },
     "lib/ledger.mjs": {
-      "sha256": "2a5c7648e660427ca405753df1e4393e4b2e66b1750c4fa5800be2b10c992aba"
+      "sha256": "5762f4f618db4c62aa9c76f2c91a952e9d38d24881a5cc7bd7d6146fc6623387"
     },
     "lib/no-changelog-voice.mjs": {
       "sha256": "db70929f635116ca94760bdaec3267920dd5feb12855252f0e440cf8d1c0a882"
@@ -161,7 +161,7 @@
       "sha256": "6ea9cb0645122d4f77220f6bd81db0430ef3dba26090aef2a339cbdf7b0bcd19"
     },
     "lib/platform.mjs": {
-      "sha256": "a08ac4e4c8e75d5696389a901fe38f51b23be5928d33981bba4bc99468aba7c2"
+      "sha256": "c09cabedf42be55b10b278c62e0d2f434b9c1658200a093a03b44de8684a9903"
     },
     "lib/profile-sniffer.mjs": {
       "sha256": "5a147edd2cd0f2fcdee7b6550d12abed7db3645bddabafe0ebff5230fb4d3269"
@@ -215,7 +215,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "4ade7a80ff5bdaa3df7c02985858b25212c87f55d8fdd8587498c80f30b31319"
+      "sha256": "06eb702d1d200ab6a58bf81be7853a771f96c66311a6c360caf92db2759341db"
     },
     "templates/docs-prd.md": {
       "sha256": "5521fa3da20bdaa28641859452deafc4c42bfb81ff927570acb783e5cf1b487b"

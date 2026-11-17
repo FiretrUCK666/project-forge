@@ -606,6 +606,18 @@ function resolveGitModeMarkersCompat(gitDir) {
 }
 
 /**
+ * 要在平台上**写东西**之前用它探测。
+ *
+ * 与只读勘察只差一点：这里必须联网。「能不能写」不联网答不出来，
+ * 而答不出来时若静默降级成本地记账，调用方会以为写成功了。
+ *
+ * 判断标准一句话：这次调用之后平台上的状态会不会变。会，就用这个。
+ */
+export async function probeForWrite(options = {}) {
+  return probeGitHubEnv({ ...options, probeNetwork: true })
+}
+
+/**
  * 惰性双轨平台环境探测并返回自包含客户端实例（默认 `probeNetwork = false` 不派生外网子进程）。
  */
 export async function probeGitHubEnv({

@@ -7,6 +7,7 @@
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 import {
   canonicalPath, gitRun, posixPath, readJsonSafe, samePath, withFileLock, writeJsonAtomic,
@@ -24,8 +25,7 @@ const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released',
  * 它不承载任何可推导的信息：能推导的东西就等于能自己造。
  */
 export function issueReviewToken(round) {
-  const bytes = new Uint8Array(18)
-  globalThis.crypto.getRandomValues(bytes)
+  const bytes = randomBytes(18)
   const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
   return { token: `pf-rv-${hex}`, round: Number(round) || 1, issuedAt: new Date().toISOString(), consumedAt: null }
 }

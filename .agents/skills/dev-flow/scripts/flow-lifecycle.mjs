@@ -759,7 +759,6 @@ export async function handleSubmit(opts, roots) {
   }
   return { exitCode: 0 }
 }
-
 export async function handleRework(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx

@@ -70,7 +70,7 @@ export function rewriteToc(text) {
   const entries = headings.map((h) => `- [${h}](#${githubAnchor(h)})`).join('\n')
 
   if (TOC_BLOCK_RE.test(src)) {
-    return src.replace(TOC_BLOCK_RE, (_w, head) => `${head}\n${entries}\n`)
+    return src.replace(TOC_BLOCK_RE, (_w, head) => `${head}${entries}\n`)
   }
   return src
 }

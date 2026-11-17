@@ -20,6 +20,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { renderDocTemplate } from './doc-template-render.mjs'
 import { readTextSafe } from './git.mjs'
 
 /** 常见生态的运行时说明。读不出具体版本时只说语言，不编版本号。 */
@@ -228,91 +229,37 @@ export function buildPreFilledTdd(facts, opts = {}) {
       return `| \`${d}/\` | ${role} | （待补依赖方向） | ${entry ? `\`${entry}\`` : '（待补入口文件）'} |`
     })
 
-  return [
-    `# ${opts.projectName ?? facts?.target?.name ?? '项目'} — 技术设计与架构契约（TDD）`,
-    '',
-    '## 文档信息',
-    '',
-    '| 项目 | 内容 |',
-    '| --- | --- |',
-    '| 文档版本 | `0.1.0` |',
-    `| 编制 / 最近更新日期 | \`${opts.today ?? ''}\` / \`${opts.today ?? ''}\` |`,
-    `| 基线依据 | 由 \`survey\` 现场读取清单与目录得出（${kinds.join('、') || '未识别生态'}） |`,
-    `| 运行环境与生态栈 | ${runtimeLines.join('；') || '（待核实）'} |`,
-    `| 托管平台适配范围 | ${facts?.git?.hasRemote ? String(facts.git.remoteUrl ?? 'GitHub') : '仅本地，无远端'} |`,
-    '| 关联工程契约 | `AGENTS.md` |',
-    '',
-    '## 目录',
-    '',
-    '<!-- 章节增删后必须同步，锚点对不上等于没有目录 -->',
-    '',
-    '## 背景、非目标与术语表',
-    '',
-    '- **核心定位**：<一句话说明本系统解决的核心问题与服务对象>',
-    '- **架构目标与关键取舍**：<例如性能、可靠性、零依赖、向后兼容或安全隔离边界>',
-    '- **明确非目标（Non-Goals）**：',
-    '  - <明确不承担的能力范围 1>',
-    '',
-    '### 术语表',
-    '',
-    '| 术语 | 系统内定义 | 代码或配置中的对应载体 |',
-    '| --- | --- | --- |',
-    '| <领域术语 1> | <语义界定> | <对应类型、目录或配置字段> |',
-    '',
-    '## 技术栈选型',
-    '',
-    '> 取值以清单文件与部署目录为准；这里已按勘察结果预填，未核实处保留占位。',
-    '',
-    '| 层级 | 本项目采用 | 说明 |',
-    '| --- | --- | --- |',
-    `| 运行时与最低版本 | ${runtimeLines.join(' / ') || '<待核实>'} | 从清单文件读出 |`,
-    `| 核心框架 | ${frameworkCell} | <为什么选它> |`,
-    `| 工程结构 | ${structureCell} | <源码与产物位置> |`,
-    `| 数据与状态 | ${dataCell} | ${dataHint} |`,
-    '| 关键第三方依赖 | <只列会约束架构的> | <版本边界与许可约束> |',
-    `| 前端与 UI | ${frontendCell} | <构建产物目录> |`,
-    '',
-    `- **跨平台兼容范围**：<${process.platform} 上已验证；其余平台待实测>`,
-    '- **变更前提**：上移版本下限或换框架时，须同步更新 README 与 CI',
-    '',
-    '## 系统架构全景',
-    '',
-    '```mermaid',
-    'flowchart TB',
-    '  In["入口层"] --> Core["核心编排层"]',
-    '  Core --> Adapter["适配与存储"]',
-    '```',
-    '',
-    '### 模块与目录职责',
-    '',
-    '| 模块 / 目录 | 核心职责 | 允许依赖 / 禁止反向引用 | 核心入口文件 |',
-    '| --- | --- | --- | --- |',
-    ...(moduleRows.length > 0 ? moduleRows : ['| `<模块或目录>` | <对外职责> | <依赖方向> | <入口文件> |']),
-    '',
-    '### 分层禁引规则（arch-rules）',
-    '',
-    '```yaml',
-    'arch-rules: <fromGlob> -> <toGlob>',
-    '```',
-    '',
-    '### 功能与入口地图（Feature Map）',
-    '',
-    '| 功能 / 能力域 | 源码入口（文件与关键符号） | 本地验证命令 |',
-    '| --- | --- | --- |',
-    `| <核心能力 1> | <入口文件路径> | \`${quick}\` |`,
-    '',
-    '## 核心流程与状态流转',
-    '',
-    '- **正常主链路**：<核心数据流与关键状态迁移条件>',
-    '- **失败与回退语义**：<校验失败或外部超时时如何保障状态可恢复>',
-    '- **并发与幂等约定**：<重复执行或并发写入时的锁与幂等键>',
-    '',
-    '## 核心不变量与安全红线',
-    '',
-    '1. **数据与状态一致性**：<不能破坏的单一真相源与原子写入>',
-    '2. **权限与访问边界**：<鉴权最小权限与凭据防泄露>',
-    '3. **输入与外部边界**：<不可信输入校验与命令注入防护>',
-    '4. **高风险路径同步约定**：修改 <核心协议或权限边界> 时须同步校准本文与测试',
-    '',
-  ].join('\n')
+  // 章节结构交给模板，生成器只负责把事实算成取值。
+  //
+  // 这样模板一改，产物立刻跟着改——不会出现「模板 18 节、产物 7 节」这种漂移。
+  const vars = {
+    PROJECT_NAME: opts.projectName ?? facts?.target?.name ?? '项目',
+    DOC_VERSION: opts.docVersion ?? '0.1.0',
+    TODAY: opts.today ?? '',
+    BASIS: `由 survey 现场读取清单与目录得出（${kinds.join('、') || '未识别生态'}）`,
+    RUNTIME: runtimeLines.join(' / ') || '（待核查）',
+    PLATFORM: facts?.git?.hasRemote ? String(facts.git.remoteUrl ?? '有远端') : '仅本地，无远端',
+    MANIFESTS: frameworkCell,
+    STRUCTURE: structureCell,
+    DATA_CELL: dataCell,
+    DATA_HINT: dataHint,
+    FRONTEND_CELL: frontendCell,
+    PLATFORM_NOTE: `${process.platform} 上已验证；其余平台待实测`,
+    MODULE_ROWS: moduleRows.length > 0
+      ? moduleRows.join('\n')
+      : '| `<模块或目录>` | `<对外职责>` | `<依赖方向>` | `<入口文件>` |',
+    QUICK_CMD: quick,
+    POSITIONING: opts.positioning ?? '<一句话说明本系统解决的核心问题与服务对象>',
+    NON_GOALS_LINES: opts.nonGoals ?? '  - <明确不承担的能力范围，防止后续需求越界>',
+  }
+
+  // 形状开关决定裁哪几节：判不出来的保守全留——空的会被人删掉，缺的不会。
+  const dropSections = opts.dropSections
+    ?? (facts?.tddShape?.dropSections ? new Set(facts.tddShape.dropSections) : null)
+
+  const rendered = renderDocTemplate('tdd', { vars, dropSections, pruneUnfilled: false })
+  if (rendered === null) {
+    throw new Error('读不到 TDD 模板（kit/skills/templates/docs-tdd.md）——生成器不该在没有模板时继续')
+  }
+  return rendered
 }

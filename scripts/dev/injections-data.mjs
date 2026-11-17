@@ -878,7 +878,7 @@ export const INJECTIONS = [
     id: 'I98',
     what: '章节编号不再按裁剪结果重排（裁完就成了 一、二、八、九）',
     file: 'kit/skills/lib/doc-template-render.mjs',
-    from: '  return renumberHeadings(pruned)',
+    from: '  return rewriteToc(renumberHeadings(pruned))',
     to: '  return pruned',
     expect: '章节序号按裁剪结果重排',
   },

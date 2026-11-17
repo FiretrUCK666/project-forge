@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { renumberHeadings } from './doc-renumber.mjs'
+import { rewriteToc } from './doc-toc.mjs'
 import { readTextSafe } from './git.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -38,6 +39,11 @@ export const DOC_TEMPLATE_DIR = join(HERE, '..', 'templates')
  * 出现没登记的占位就报错——否则渲染时会静默输出一个字面的占位符文本。
  */
 export const DOC_TEMPLATE_VARS = Object.freeze({
+  tdd: Object.freeze([
+    'PROJECT_NAME', 'DOC_VERSION', 'TODAY', 'BASIS', 'RUNTIME', 'PLATFORM', 'MANIFESTS',
+    'STRUCTURE', 'DATA_CELL', 'DATA_HINT', 'FRONTEND_CELL', 'PLATFORM_NOTE', 'MODULE_ROWS',
+    'QUICK_CMD', 'POSITIONING', 'NON_GOALS_LINES',
+  ]),
   prd: Object.freeze([
     'TITLE', 'TODAY', 'ISSUE', 'ISSUE_LABEL', 'OWNER', 'OWNER_LABEL',
     'NON_GOALS', 'REUSABLE', 'CRITERIA', 'DOOR', 'ROLLBACK',
@@ -89,11 +95,15 @@ export function templateSections(text) {
  * 自己的审计，最后在提交前被退回来。生成器不该产出会被自己门禁拒收的文档。
  * 主干章节不参与这条：主干填不上就留着让人看见，那正是它该起的作用。
  */
-export function applySectionPolicy(text, dropSections) {
+export function applySectionPolicy(text, dropSections, { pruneUnfilled = true } = {}) {
   const drop = dropSections ?? new Set()
   const sliced = String(text ?? '').replace(SECTION_RE, (whole, id, optional) => {
     if (!optional) return whole
     if (drop.has(id)) return ''
+    // `pruneUnfilled: false` 表示「填不上也留着」。TDD 走这条路：
+    // 数据模型、接口、部署这几节生成器写不出来，但它们该不该存在由项目形态决定，
+    // 不由「生成器能不能填」决定。剪掉它们等于让架构文档什么都没说。
+    if (!pruneUnfilled) return whole
     // 标记还在，所以这一刻分得清主干与可选：只有可选节才看「填没填上」。
     const body = whole
       .replace(/<!--\s*section:[^>]*-->/, '')
@@ -148,7 +158,7 @@ export function fillTemplateVars(text, vars) {
  * 顺序不能反：先填占位再裁章节，否则被裁掉的章节里如果有占位，
  * 会白白多一次「取不到值」的告警。
  */
-export function renderDocTemplate(kind, { vars = {}, dropSections = null } = {}) {
+export function renderDocTemplate(kind, { vars = {}, dropSections = null, pruneUnfilled = true } = {}) {
   const raw = readDocTemplate(kind)
   if (raw === null) return null
   // 模板顶部的 frontmatter 是给人看、给 preflight 校验的「这张表该有哪些字段」；
@@ -165,8 +175,10 @@ export function renderDocTemplate(kind, { vars = {}, dropSections = null } = {})
   // 什么也看不出来，于是所有可选节一律被当成「填上了」而保留下来，
   // 生成的文档里塞满 `<待核实填写：...>`，过不了自己的审计。
   const filled = fillTemplateVars(withCriteria, restVars)
-  const pruned = applySectionPolicy(filled, dropSections)
-  // 编号必须按裁剪后的集合重算：模板里写死的「八、验收标准」在裁掉几节之后就成了空档。
-  return renumberHeadings(pruned)
+  const pruned = applySectionPolicy(filled, dropSections, { pruneUnfilled })
+  // 编号与目录都要按裁剪后的集合重算：
+  // 模板里写死的「八、验收标准」在裁掉几节之后成了空档；
+  // 手写的六条目录链接在保留更多节之后成了漏项。两者都是「集合变了、派生值没跟着变」。
+  return rewriteToc(renumberHeadings(pruned))
 }
 

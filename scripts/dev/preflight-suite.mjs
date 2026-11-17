@@ -15,6 +15,7 @@ import {
 import { checkEquip } from '../equip.mjs'
 import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
 import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
+import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/shared.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
@@ -646,7 +647,14 @@ function checkTeamAndTddContracts({ ROOT, rel, readText, walk, fail, note }) {
         fail('kit/skills/templates/docs-tdd.md 没有任何 optional 章节——所有章节都强制，等于不认项目形态')
       }
       if (text.includes('references/')) fail('kit/skills/templates/docs-tdd.md 不应硬编码本仓内部 references/ 路径')
-      if (templateVarsOf(text).length > 0) fail('kit/skills/templates/docs-tdd.md 存在未登记模板变量占位')
+      // TDD 模板同样用 {{VAR}} 填事实（技术栈、运行时、模块表都是读得出来的）。
+      // 判据要的是「占位登记过」，不是「不许有占位」。
+      const tddVars = new Set(DOC_TEMPLATE_VARS.tdd)
+      for (const v of templateVarsOf(text)) {
+        if (!tddVars.has(v)) {
+          fail(`kit/skills/templates/docs-tdd.md 里的占位 {{${v}}} 没登记在 DOC_TEMPLATE_VARS.tdd——渲染会留下字面量`)
+        }
+      }
     }
   }
 

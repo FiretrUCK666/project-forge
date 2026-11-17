@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { gitLsFilesTextAndCode, readTextSafe } from './git.mjs'
+import { tddDropSections } from './tdd-shape.mjs'
 import { isToolOwnedPath } from './tool-owned.mjs'
 import { detectTddShapes } from './tdd-shape.mjs'
 
@@ -190,6 +191,7 @@ export async function collectTddFacts(root) {
     tddShape: {
       enabled: [...shape.enabled],
       reasons: shape.reasons,
+      dropSections: [...tddDropSections(shape)],
       topLevelDirs,
       filePaths,
     },

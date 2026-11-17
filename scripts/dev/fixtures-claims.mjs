@@ -1806,28 +1806,50 @@ cases.push(['项目能在模板里点名要章节，也能点名不要', async (
 //
 // 这里不要求两者逐字相同（生成器只产主干，模板还带可选节），
 // 但要求**生成器的每一节在模板里都有对应**——多出来的那个就是漂移。
-cases.push(['TDD 生成器的章节必须在模板里存在', async () => {
-  const { readDocTemplate, templateSections } = await import('../../kit/skills/lib/doc-template-render.mjs')
+cases.push(['TDD 生成器真的从模板渲染，章节不会两边各写一份', async () => {
+  const { readDocTemplate, templateSections, renderDocTemplate } = await import('../../kit/skills/lib/doc-template-render.mjs')
+  const { buildPreFilledTdd } = await import('../../kit/skills/lib/tdd-scaffold.mjs')
   const fs = await import('node:fs')
 
   const templateHeadings = [...readDocTemplate('tdd').matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim())
   if (templateHeadings.length === 0) return '读不到 TDD 模板的章节'
 
   const scaffold = fs.readFileSync(new URL('../../kit/skills/lib/tdd-scaffold.mjs', import.meta.url), 'utf8')
-  const scaffoldHeadings = [...scaffold.matchAll(/'(## [^']+)'/g)]
-    .map((m) => m[1].replace(/^##\s+/, '').trim())
-    .filter((h) => h !== '目录')
-
-  if (scaffoldHeadings.length === 0) return '读不到生成器的章节清单'
-
-  const missing = scaffoldHeadings.filter((h) => !templateHeadings.some((t) => t.includes(h) || h.includes(t)))
-  if (missing.length > 0) {
-    return `生成器产出的这些章节在模板里没有对应：${missing.join('、')}——模板改了但生成器没跟上`
+  // 生成器不该再自己拼章节——它只该把事实算成取值，结构交给模板。
+  if (/'##\s/.test(scaffold)) {
+    return '生成器里还写着自己的章节字面量——那就会和模板漂移，两份清单谁也管不了谁'
+  }
+  if (!scaffold.includes("renderDocTemplate('tdd'")) {
+    return '生成器没有走模板渲染'
   }
 
-  // 反向：模板的主干章节生成器必须都产出，否则生成的文档过不了 audit
-  const coreFromTemplate = templateSections(readDocTemplate('tdd')).filter((s) => !s.optional).map((s) => s.id)
-  if (coreFromTemplate.length === 0) return '模板里没有主干章节'
+  // 产物的每一节都必须在模板里存在（结构只有一个来源）
+  const facts = {
+    target: { path: null, name: 'probe' },
+    ecosystem: { kinds: ['node'], manifests: ['package.json'] },
+    artifacts: { runtimeRequirements: ['Node >=18'] },
+    commands: { test: 'node --test' },
+    reentry: { unregisteredTopDirs: [] },
+    tddShape: { enabled: ['stack'], dropSections: [], filePaths: [], topLevelDirs: [] },
+  }
+  const md = buildPreFilledTdd(facts, { projectName: 'probe', today: '2026-01-01', topLevelDirs: [] })
+  const produced = [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim())
+  if (produced.length === 0) return '生成器产出了没有章节的文档'
+
+  const unknown = produced.filter((h) => !templateHeadings.some((t) => t.includes(h) || h.includes(t)))
+  if (unknown.length > 0) {
+    return `产物里的这些章节在模板里没有对应：${unknown.join('、')}`
+  }
+
+  // 反向：可选节被裁掉时，那一节的两个标记都不能留在产物里
+  const trimmed = renderDocTemplate('tdd', { vars: {}, dropSections: new Set(['data']), pruneUnfilled: false })
+  if (/<!--\s*\/?section:/.test(trimmed)) return '产物里残留章节标记'
+  if (trimmed.includes('数据模型与持久化契约')) return '声明要裁的章节还在'
+
+  // 反向：主干少了任何一节，都不该被裁掉
+  const coreIds = templateSections(readDocTemplate('tdd')).filter((s) => !s.optional).map((s) => s.id)
+  if (coreIds.length === 0) return '模板里没有主干章节'
+
   return true
 }])
 

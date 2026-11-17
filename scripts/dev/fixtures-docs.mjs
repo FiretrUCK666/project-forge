@@ -497,6 +497,7 @@ cases.push(['templates/readme.md 与文档口径：HTML 注释配对、零残留
 cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/arch-rules/FeatureMap 与漂移拦截', async () => {
   const { validateDocTocAnchors } = await import('./preflight.mjs')
   const { templateVarsOf } = await import('../lib/protocol.mjs')
+  const { DOC_TEMPLATE_VARS } = await import('../../kit/skills/lib/doc-template-render.mjs')
 
   const tddRaw = readFileSync(join(SKILL_ROOT, 'docs/TDD.md'), 'utf8')
   const tddErrors = validateDocTocAnchors(tddRaw)
@@ -527,7 +528,9 @@ cases.push(['通用自适应 TDD 与本仓 docs/TDD.md：目录锚点、Mermaid/
   const tplErrors = validateDocTocAnchors(tplRaw)
   if (tplErrors.length > 0) return `kit/skills/templates/docs-tdd.md 目录锚点有误：${tplErrors.join('；')}`
   // 可选章节用统一的 section 标记表达：说明文字可以被忽略，标记会被渲染与审计真正执行。
-  if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(tplRaw) || tplRaw.includes('references/') || templateVarsOf(tplRaw).length > 0) {
+  const tddTplVars = new Set(DOC_TEMPLATE_VARS.tdd)
+  const tddBadVars = templateVarsOf(tplRaw).filter((v) => !tddTplVars.has(v))
+  if (!/<!--\s*section:\s*[a-z-]+\s+optional\s*-->/.test(tplRaw) || tplRaw.includes('references/') || tddBadVars.length > 0) {
     return 'kit/skills/templates/docs-tdd.md 未满足自适应按需标记或纯净度要求'
   }
 

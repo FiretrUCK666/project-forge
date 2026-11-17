@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T06:23:27.782Z",
+  "installedAt": "2026-11-17T06:37:55.392Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -113,13 +113,13 @@
       "sha256": "76e0617bb6f0f5f5566b4dbff65e1337cf0226451a147941ea6f2e305981a897"
     },
     "lib/doc-template-render.mjs": {
-      "sha256": "6fdd421d6e9e9502bbd635df066593b4b91f13d55d314a480c897ceb247a76ef"
+      "sha256": "0428bf54f477e9e6aa3235169679be21c49171d5c80ca425568d0be34eaa51ea"
     },
     "lib/doc-templates.mjs": {
       "sha256": "297a0bbe3bfb2dcaffd96c336574716f887b40e523f71f350b750c373d814da5"
     },
     "lib/doc-toc.mjs": {
-      "sha256": "868cc6386a19513a6b1b0d6ce31668d7626fcd6a2dd3ae759379d92a4ef9e953"
+      "sha256": "cee51305ac148e5296308601944646714a140d95cc80bc9395e3dafbec9480df"
     },
     "lib/docs.mjs": {
       "sha256": "442a01bb260d562ed1b7bed0eedf4bba3e9a03a8957f75d378ac3e95dd4559af"
@@ -182,13 +182,13 @@
       "sha256": "6d283f486b126b1026f2c33b3cc38c223641d967e636682b2be47a6ca00d4888"
     },
     "lib/tdd-facts.mjs": {
-      "sha256": "b52693a64877625f3ddfd3753c14892522192bbeded58550d58e84735c9c7c8e"
+      "sha256": "f005c18708097ed2b5ca1a14ccbd15ffc85ae111edae33f137909c5e86404721"
     },
     "lib/tdd-parity.mjs": {
       "sha256": "45c891de1690ee0da005842ab5d3fd29b2c1e5d77590dff7af5db4b9026bf6ce"
     },
     "lib/tdd-scaffold.mjs": {
-      "sha256": "2edc6ef4fdc4c6014ec55f3a4594c337864e5864f1a2d098639f10b89bbd78c8"
+      "sha256": "993ec7c244e4825ea99ab0b7dad105001527b3fd55ccdfaa5ed875718ad37b2d"
     },
     "lib/tdd-shape.mjs": {
       "sha256": "ab3f97363425e9042c64f08a241a0ab579e0775e02bfc3989c9d651ed124ede5"
@@ -212,7 +212,7 @@
       "sha256": "9c979c9085b2411a80186c1024ad701047d2729caf46f1f15e4f0f6486b9f803"
     },
     "templates/docs-tdd.md": {
-      "sha256": "3f0d447301c381b94c8595d3a2f433133c2e821cc8edaccab503137dd7cff88f"
+      "sha256": "574f30d24a2a4d615569b226a7565c2ed2fbb6fef75bb5948653db14c0e74afb"
     },
     "templates/docs-todo.md": {
       "sha256": "b74f7b727dd7f7c83811293eac395dfa7368c136264a51db80f134e195e572bc"

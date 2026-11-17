@@ -964,6 +964,14 @@ export const INJECTIONS = [
     expect: '轮次只有一个派生式',
   },
   {
+    id: 'I109',
+    what: 'flow start 忽略 --base（新任务从落后几十个提交的主线起头）',
+    file: 'kit/skills/dev-flow/scripts/flow-inspect.mjs',
+    from: "  const explicitBase = String(opts.base ?? '').trim()",
+    to: "  const explicitBase = ''",
+    expect: 'flow start 能指定基线分支',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

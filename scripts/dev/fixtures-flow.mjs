@@ -837,4 +837,47 @@ cases.push(["跟踪的链接在删除档不许豁免，解绑档才跳过", asyn
     return true
   } finally { rmTree(dir); }
 }])
+
+// `flow start` 此前一律从 main 起头。工作全在一条特性分支上时（主线还没合），
+// 新任务的 worktree 会落后几十个提交——它看不见那些工作，等于从旧世界开工。
+cases.push(["flow start 能指定基线分支", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# b\n\n基线测试仓。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    // 造一条特性分支，然后在它上面多做一个提交
+    execFileSync("git", ["checkout", "-b", "feat/base-probe"], { cwd: dir, stdio: "ignore", windowsHide: true })
+    const fs = await import("node:fs")
+    fs.writeFileSync(join(dir, "probe.txt"), "x")
+    gitCommitFast(dir, "feat commit")
+    const featSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", windowsHide: true }).trim()
+    const defaultBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: dir, encoding: "utf8", windowsHide: true,
+    }).trim()
+    execFileSync("git", ["checkout", defaultBranch], { cwd: dir, stdio: "ignore", windowsHide: true })
+
+    const res = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-probe", "--case", "4", "--base", "feat/base-probe", "--branch", "feat/base-probe-task", "--json",
+    ], { cwd: dir })
+    if (res.status !== 0) return `--base 没被接受：${res.stderr}`
+    const out = JSON.parse(res.stdout)
+    if (!out.taskId) return "没建出任务"
+
+    const { readTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
+    const ledger = readTaskLedger(dir, "base-probe")
+    if (ledger.baseBranch !== "feat/base-probe") return `基线分支记成了 ${ledger.baseBranch}`
+    if (ledger.baseSha !== featSha) return `基线 SHA 记成了 ${String(ledger.baseSha).slice(0, 8)}，应为 ${featSha.slice(0, 8)}`
+
+    // 反向：不存在的分支要报错，而不是静默退回 main
+    const bad = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-bad", "--case", "4", "--base", "no-such-branch-xyz", "--branch", "feat/base-bad", "--json",
+    ], { cwd: dir })
+    if (bad.status === 0) return "不存在的 --base 被静默接受了"
+
+    return true
+  } finally { rmTree(dir) }
+}])
 }

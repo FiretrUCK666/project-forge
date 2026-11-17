@@ -7,7 +7,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
 import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
 import {
@@ -374,6 +374,12 @@ export async function handleStart(opts, roots) {
   const effectiveExternalPr = externalPr
     ?? (state.identity.role === 'inbound-external-pr' ? (prNumber ?? state.inputs.prs[0]?.number ?? null) : null)
   if (effectiveExternalPr && !prNumber) prNumber = effectiveExternalPr
+  if (effectiveExternalPr && !hasSkillSupport(roots.mainRoot, 'dev-review')) {
+    const msg = `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${effectiveExternalPr} 的不可信扫描与隔离审查需要 dev-review 技能，当前 lightweight 档未装配该技能；请通过 project-forge 工具运行 equip --tier full 升级后重试。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_REQUIRES_DEV_REVIEW', prNumber: effectiveExternalPr, message: msg }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { exitCode: EXIT_POLICY_BLOCK }
+  }
   if (!effectiveExternalPr && state.inputs.reuseExistingPr) {
     if (!prNumber && state.inputs.reuseExistingPr.prNumber) prNumber = state.inputs.reuseExistingPr.prNumber
     for (const iss of [...(state.inputs.reuseExistingPr.linkedIssues ?? []), ...(state.inputs.prs[0]?.relations?.fixes ?? [])]) {

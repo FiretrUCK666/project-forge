@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
@@ -128,6 +128,7 @@ export async function handleNext(opts, roots) {
 
   let hydration = { rehydrated: false }
   let taskRuntime = null
+  const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
   if (selectedTask) {
     hydration = await hydrateRemotePfState({ roots, ledger: selectedTask, opts })
     const implRoot = selectedTask.worktreePath ? resolve(roots.mainRoot, selectedTask.worktreePath) : roots.mainRoot
@@ -163,6 +164,7 @@ export async function handleNext(opts, roots) {
       hasRemote: selectedTask.role !== 'local-only',
       hasCiWorkflow: hasRepoCiWorkflow(exists ? implRoot : roots.mainRoot),
       profile,
+      hasDevReview,
     })
 
     const evidence = readVerificationEvidence(roots.gitDir, selectedTask.taskId)
@@ -208,10 +210,11 @@ export async function handleNext(opts, roots) {
       nonDocChangesAfterFinalize,
       profile,
       commitsAheadOfBase,
+      hasDevReview,
     }
   }
 
-  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime })
+  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime, hasDevReview })
 
   // 待审查时签发一枚一次性令牌。
   //

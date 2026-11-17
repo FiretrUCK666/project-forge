@@ -315,7 +315,13 @@ cases.push(['两档装配（lightweight/full）无损升档、manifest v2 删除
       return '无损升档 full 未补全 dev-review 与 docs/{prd,specs,todo}/.gitkeep'
     }
 
-    // 3. 定制文件写入 CRLF 仍归一等价 -> 手改后 --adopt-custom 使 --check 返回 0
+    // 3. --restore 显式恢复已删核心技能，确保核心套件完好再校验 CRLF 与定制豁免
+    const restore = await runNode('equip.mjs', [dir, '--restore', 'dev-plan', '--no-backup'])
+    if (restore.status !== 0 || !existsSync(join(dir, '.agents/skills/dev-plan/SKILL.md'))) {
+      return `--restore dev-plan 失败：${restore.stderr}`
+    }
+
+    // 4. 定制文件写入 CRLF 仍归一等价 -> 手改后 --adopt-custom 使 --check 返回 0
     const targetFlowSkill = join(dir, '.agents/skills/dev-flow/SKILL.md')
     const origFlow = readFileSync(targetFlowSkill, 'utf8')
     writeFileSync(targetFlowSkill, origFlow.replace(/\n/g, '\r\n'))
@@ -336,12 +342,6 @@ cases.push(['两档装配（lightweight/full）无损升档、manifest v2 删除
     const chkStruct = checkEquip(dir)
     if (!chkStruct.ok || !chkStruct.customized?.some((c) => c.path === 'dev-flow/SKILL.md')) {
       return `checkEquip 结构校验未列出 customized：${JSON.stringify(chkStruct)}`
-    }
-
-    // 4. --restore 显式恢复已删技能
-    const restore = await runNode('equip.mjs', [dir, '--restore', 'dev-plan', '--no-backup'])
-    if (restore.status !== 0 || !existsSync(join(dir, '.agents/skills/dev-plan/SKILL.md'))) {
-      return `--restore dev-plan 失败：${restore.stderr}`
     }
 
     // 5. backup.mjs 滚动淘汰时永久钉住最新 pre-forge 基线快照

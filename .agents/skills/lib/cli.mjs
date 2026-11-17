@@ -199,6 +199,17 @@ export function resolveAvailableSkills(repoRoot = process.cwd()) {
   }
 }
 
+/**
+ * 判断仓库是否支持指定内置技能：
+ * - 若未装配 `.agents/skills/` 目录（`hasSkillsDir === false`），按默认完整基线兼容返回 `true`；
+ * - 若已显式装配 `.agents/skills/`，则仅当目标技能真实存在时返回 `true`（`lightweight` 无 `dev-review` 返回 `false`）。
+ */
+export function hasSkillSupport(repoRoot = process.cwd(), skillName = 'dev-review') {
+  const info = resolveAvailableSkills(repoRoot)
+  if (!info.hasSkillsDir) return true
+  return info.has(skillName)
+}
+
 const DEFAULT_SKILL_FALLBACKS = Object.freeze({
   'dev-explore': '手工查看项目清单、CI 工作流与入口源码（未装配 dev-explore 技能）',
   'dev-plan': '按改动影响面人工分级（L3 改契约先写 docs/specs/ 与 docs/todo/，完成后用 git mv 归档；未装配 dev-plan 技能）',

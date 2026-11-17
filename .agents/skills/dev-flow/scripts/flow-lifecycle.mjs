@@ -7,7 +7,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import {
   archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter, } from '../../lib/docs.mjs'
 import {
@@ -24,7 +24,7 @@ import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
-  determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
+  buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
   readVerificationEvidence, runLowRiskDocStaticCheck, validateVerificationEvidence,
   writeVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
@@ -265,7 +265,8 @@ export async function handleVerify(opts, roots) {
   const implRoot = workRel ? resolve(roots.mainRoot, workRel) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
 
-  const untrustedGate = checkUntrustedPrGate(ledger, { humanApproved: Boolean(opts['human-approved'] || opts['human-approved-exec']) })
+  const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
+  const untrustedGate = checkUntrustedPrGate(ledger, { humanApproved: Boolean(opts['human-approved'] || opts['human-approved-exec']), hasDevReview })
   if (untrustedGate.blocked) {
     await emitFlowSignal(roots, { category: 'security', module: 'workflow', pattern: 'verify.untrusted-blocked', severity: 'high', source: 'flow-verify', message: untrustedGate.message, taskId })
     if (opts.json) process.stdout.write(`${JSON.stringify(untrustedGate, null, 2)}\n`)
@@ -330,7 +331,7 @@ export async function handleVerify(opts, roots) {
       changedFiles, ownArchived, caseType: ledger.caseType,
       highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
       gateWeakeningHits: gateHits, hasRemote: Boolean(remoteRes.ok && remoteRes.stdout.trim()),
-      hasCiWorkflow: hasCi, visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile,
+      hasCiWorkflow: hasCi, visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
     })
     return { currentHead, dirty, stStdout, changedFiles, policy }
   }
@@ -581,12 +582,13 @@ export async function handleSubmit(opts, roots) {
     detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: submitDiffEntries }),
   ])
   const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
+  const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
   const policy = determineWorkflowPolicy({
     changedFiles: changedForVisual, ownArchived, caseType: ledger.caseType,
     highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
     gateWeakeningHits: gateFindings, hasRemote: ledger.role !== 'local-only',
     hasCiWorkflow: hasRepoCiWorkflow(implRoot),
-    visualFilesChanged: changedForVisual.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile,
+    visualFilesChanged: changedForVisual.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
   })
   const evidence = readVerificationEvidence(roots.gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
@@ -627,7 +629,7 @@ export async function handleSubmit(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, reviewSlotSync }, null, 2)}\n`)
     else {
       process.stdout.write(`本地模式提交校验已通过（HEAD=${currentHead?.slice(0, 7)}，未配置远端不执行 push）。\n`)
-      printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}` }], { repoRoot: roots.mainRoot })
+      printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
@@ -653,7 +655,7 @@ export async function handleSubmit(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
     else {
       process.stdout.write(`submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
-      printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}` }], { repoRoot: roots.mainRoot })
+      printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
@@ -747,11 +749,7 @@ export async function handleSubmit(opts, roots) {
     process.stdout.write(`submit 完成：已推分支 ${pushRemote}/${ledger.branch} @ ${shortHead}，状态=${ledger.status}\n`)
     if (prResult?.oneClickPrUrl) process.stdout.write(`- 一键创建 PR 链接：${prResult.oneClickPrUrl}\n`)
     if (prResult?.delegated) process.stdout.write(`- 待宿主 MCP 代理执行 PR 载荷：${JSON.stringify(prResult.jsonPayload)}\n`)
-    printNextStep([
-      ledger.role === 'contributor-fork'
-        ? '当前处于 awaiting-upstream-merge，请等待上游维护者合并；合并前严禁删除该 Fork 分支。'
-        : { skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}` },
-    ], { repoRoot: roots.mainRoot })
+    printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }
 }

@@ -113,7 +113,7 @@ flowchart LR
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步、六锁硬拦截与双门双写（`review-pack.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-locks.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层、跨版本采集与复盘补丁（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`govern-retro.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
+| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`fixtures-onboarding.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 
@@ -128,7 +128,8 @@ flowchart LR
 | `scripts/lib/fs-atomic.mjs` | 进程安全临时文件与原子写回 | `tempPathFor`、`clearStaleTemps`、`writeAtomic` |
 | `scripts/lib/update-ops.mjs` | 原子更新暂存校验与冷却状态 | 同盘 `stageAndValidatePackage`、写前备份与原地回滚、全深度退役清理、`FAILURE_COOLDOWN_MS`（15 分钟） |
 | `scripts/lib/equip-bootstrap.mjs` / `starter-templates.mjs` | 通用空白工程基线与初始自洽契约 | `BOOTSTRAP_STACKS`、`bootstrapEmpty`、`starterTemplates`、`generateInitialBootstrappedAgents`（兼容已有 `README`/`LICENSE`） |
-| `scripts/lib/agents-sections.mjs` | `AGENTS.md` 区间刷新与 v2 兼容检查 | `filterIntentRouting`、`refreshRegions`、`driftRegions`、`maskVolatile`、`inspectKitManifestForReview` |
+| `scripts/lib/agents-defaults.mjs` | 模板变量计算与 `Dev Profile` 自动预填 | `buildDevProfileVars`、`buildVars`、`commandsBlock`、`explorationStrategyBlock`、`commitStyleHint`、`conventionsHint`、`customSkillsBlock` |
+| `scripts/lib/agents-sections.mjs` | `AGENTS.md` 区间刷新与 v2 兼容检查 | `filterIntentRouting`、`refreshRegions`、`driftRegions`（含已校准 `Dev Profile` 免漂移保护）、`maskVolatile`、`inspectKitManifestForReview` |
 | `scripts/lib/survey-ecosystem.mjs` | 生态、命令、工作区与制品探测 | 委托 `profile-sniffer.mjs` 统一探测多包清单、2/4 空格中立 CI 与 `Taskfile`/`Makefile`/`justfile` |
 | `scripts/lib/survey-workspace.mjs` | 工作区遍历、Git 事态、文档与凭据扫描 | `walkWorkspace`、`detectGit`、`detectDocs`、`detectConventions` |
 | `scripts/lib/survey-reentry.mjs` | 套件现状、自有技能与重入漂移检测 | `isReentryProject`、`detectKit`、`detectLocalSkills`、`detectTddStalePaths`、`detectStaleAgentScripts` |
@@ -138,7 +139,7 @@ flowchart LR
 | `scripts/lib/platform/registry.mjs` | 平台抽象注册表与多远端拓扑模型 | `registerHostingProvider`、`resolveRemotesTopology`、`GENERIC_GIT_PROVIDER`、`classifyTopologyIdentity` |
 | `scripts/lib/platform/github.mjs` | GitHub 适配器入口 | `GITHUB_PROVIDER`、`probeGitHubEnv`、`resolveWorkspaceIdentity`、`createGitHubClient` |
 | `scripts/lib/platform/github-probe.mjs` / `github-client.mjs` | 安装期探针与 REST 客户端薄适配 | 分别单源复用 `kit/skills/lib/platform-probe.mjs` 与 `kit/skills/lib/github-client.mjs` 防止语义漂移 |
-| `kit/skills/lib/shared.mjs` | 套件统一兼容导出出口 | 汇总导出 `cli.mjs`、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`command-lex.mjs`、`tool-owned.mjs`、`symbol-index.mjs`、`workflow-policy.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs` |
+| `kit/skills/lib/shared.mjs` | 套件统一兼容导出出口 | 汇总导出 `cli.mjs`（含 `hasSkillSupport`）、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`command-lex.mjs`、`tool-owned.mjs`、`symbol-index.mjs`、`workflow-policy.mjs`（含 `buildSubmitNextSteps`/`buildInspectNextSteps`）、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs` |
 | `kit/skills/lib/command-lex.mjs` | 命令词法：切段、命令位置与动作词 | `splitCommandSegments`、`commandHeadOf`、`commandVerbOf`、`classifyByCommandPosition`、`classifyCommandText`、`COMMAND_DISPLAY_MAX_BYTES`；动作词只在**命令位置**匹配，路径只留最后一段，`--opt=` 取值与 `.属性名` 不是动作 |
 | `kit/skills/lib/tool-owned.mjs` | 工具产物归属声明 | `TOOL_OWNED_PREFIXES`、`isToolOwnedPath`、`TOOL_SKELETON_FILES`、`hasRealContent`；规模、可复用模块与契约失效路径三类判据一律先过它 |
 | `kit/skills/lib/symbol-index.mjs` | 定义符号抽取与语言覆盖三态 | `extractSymbols`（先剥注释再匹配定义形状）、`isSymbolRuleSupported`、`languageOf`、`summarizeSymbolCoverage`；没有规则的语言返回 `unsupported` 而非空数组 |

@@ -750,14 +750,20 @@ export function buildSubmitComments({
 
 /** 渲染 `flow.mjs merge` 成功后的 PR 与关联 Issue 结构化收尾评论。 */
 export function buildMergeComments({
-  prNumber, branch, baseBranch, headSha = '', reviewerId, implementerDisplay, linkedIssues = [],
+  prNumber, branch, baseBranch, headSha = '', reviewerId, implementerDisplay, linkedIssues = [], humanApprovedReason = null,
 } = {}) {
   const shortHead = headSha ? String(headSha).slice(0, 7) : ''
   const issuesText = linkedIssues.map((n) => `#${n}`).join(', ')
+  const reviewLine = reviewerId
+    ? `- **审查结论**：由独立审查（\`${reviewerId}\`）复核通过（fail: 无）`
+    : `- **门禁结论**：lightweight 档门禁检查通过${humanApprovedReason ? `，人类确认放行（${humanApprovedReason}）` : ''}`
+  const issueReviewLine = reviewerId
+    ? `- **审查结论**：经独立审查（\`${reviewerId}\`）复核通过并合并（fail: 无）`
+    : `- **门禁结论**：lightweight 档门禁检查通过并合并${humanApprovedReason ? `（人类确认：${humanApprovedReason}）` : ''}`
   const prCommentBody = [
     `### 已合并（PR #${prNumber} -> \`${baseBranch}\`）`,
     '',
-    `- **审查结论**：由独立审查（\`${reviewerId}\`）复核通过（fail: 无）`,
+    reviewLine,
     `- **来源分支 / 实施人**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''} · ${implementerDisplay}`,
     ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
     '- **下一步**：核对待清理 Worktree 与分支清单后由维护者确认执行 `flow.mjs cleanup --confirm`。',
@@ -765,7 +771,7 @@ export function buildMergeComments({
   const issueCommentBody = [
     `### 已合并 · PR #${prNumber}（\`${branch}\` -> \`${baseBranch}\`）`,
     '',
-    `- **审查结论**：经独立审查（\`${reviewerId}\`）复核通过并合并（fail: 无）`,
+    issueReviewLine,
     `- **实施人**：${implementerDisplay}`,
     '- **下一步**：主干已更新，按收尾清单清理工作区。',
   ].join('\n')

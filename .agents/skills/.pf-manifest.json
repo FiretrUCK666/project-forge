@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T11:32:48.741Z",
+  "installedAt": "2026-11-17T14:46:36.102Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -17,22 +17,22 @@
       "sha256": "ef6a86343cb08bbce8ac082a9c3d2acc8bc1ca6805357882bf03a04af63f95fe"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "9eda9f6ef4b3f761dc87d9801911b9ea9763612ff5a5c749f8b354e8ceec8347"
+      "sha256": "418231cd3450b5cda34e7b666584db5d36b2780a898e4f7d972a7d06ded30337"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
       "sha256": "5eea4066311862f736678cce93ca656b4f1fbafb5bc7b33624632fa54aa244f6"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "c36c7ff37c123651b9337bc8e28ae71da34c12e7d93d70d9e16ee422aca66c35"
+      "sha256": "4d96654f54c9ed1c3b1f04242428a0bd78d4b341ff59253e5d214db40b647b1c"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "b334166914f411ff570629a62759c3e17464bb0cc220a287448c0a95994a8d60"
+      "sha256": "953adde0d319ec5b98cd42ef08556f06586d53556d0f2a8d65dee3178132d6b6"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "f8aa5ca9fdcedcd60676822bcc483239aff8aae6c33f5832cf5f6a92fdb1641d"
     },
     "dev-flow/scripts/flow-sync.mjs": {
-      "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
+      "sha256": "d144cabeff62e82c3a5654dda9c71e3c63f78d743113703654520f3598639c6b"
     },
     "dev-flow/scripts/flow-trial-merge.mjs": {
       "sha256": "144e2c47259109c0096a49743b49cc538ce543d31cf7eb5a9b8ad86d826eafc6"
@@ -161,7 +161,7 @@
       "sha256": "6ea9cb0645122d4f77220f6bd81db0430ef3dba26090aef2a339cbdf7b0bcd19"
     },
     "lib/platform.mjs": {
-      "sha256": "a08ac4e4c8e75d5696389a901fe38f51b23be5928d33981bba4bc99468aba7c2"
+      "sha256": "c09cabedf42be55b10b278c62e0d2f434b9c1658200a093a03b44de8684a9903"
     },
     "lib/profile-sniffer.mjs": {
       "sha256": "5a147edd2cd0f2fcdee7b6550d12abed7db3645bddabafe0ebff5230fb4d3269"

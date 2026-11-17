@@ -9,14 +9,11 @@ import { isAbsolute, relative, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ,
-  inspectBranchMergeState, samePath,
-} from '../../lib/git.mjs'
+  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ, inspectBranchMergeState, samePath, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv,
-} from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
 import { unmountSharedDeps } from './worktree-deps.mjs'
@@ -69,7 +66,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
   const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git')
   const ghProbe = _ghProbe
     ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
-    ?? (needGhApi ? await probeGitHubEnv({ cwd: mainRoot, remoteUrls }) : null)
+    ?? (needGhApi ? await probeForWrite({ cwd: mainRoot, remoteUrls }) : null)
   const ghClient = _ghClient ?? ghProbe?.client
   const backend = createTaskBackend({
     role: ledger.role,

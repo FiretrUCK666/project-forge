@@ -15,9 +15,7 @@ import {
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls,
-  probeGitHubEnv, resolveContributorIdentity,
-} from '../../lib/platform.mjs'
+  detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
@@ -660,7 +658,9 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+  // 提审要开 PR——那是平台写操作。用「不联网」的探测结果判断「能不能写」，
+  // 必然得到「不能」，然后安静地只记账本，看起来像成功。
+  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const backend = createTaskBackend({
     role: ledger.role, providerId: ledger.providerId, targetRepo,
     client: opts._ghClient ?? ghProbe.client, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,

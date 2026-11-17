@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: worktree 通配清理的删穿保护
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-17
 updated: 2026-11-18
@@ -10,9 +10,9 @@ pr: null
 branch: feat/worktree-delete-safety
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue51-worktree-delete-safety-todo.md
 high_risk_paths: [kit/skills/dev-flow/scripts/worktree-deps.mjs, kit/skills/dev-flow/scripts/flow-cleanup.mjs]
 ---

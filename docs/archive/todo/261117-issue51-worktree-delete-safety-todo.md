@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: worktree 通配清理的删穿保护
-status: active
+status: done
 created: 2026-11-17
 updated: 2026-11-18
 issue: 51
@@ -9,10 +9,10 @@ pr: null
 branch: feat/worktree-delete-safety
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: worktree-delete-safety
 planned_at: 73087a27cb9af3d9cea2988cc3e3e4d3b6154ec9
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261117-issue51-worktree-delete-safety-spec.md
 ---
 

@@ -195,6 +195,7 @@ export async function handleNext(opts, roots) {
       policy,
       evidenceValidation,
       nonDocChangesAfterFinalize,
+      profile,
     }
   }
 
@@ -232,6 +233,8 @@ export async function handleNext(opts, roots) {
       policy: out.policy ?? taskRuntime?.policy ?? null,
       headSha: taskRuntime?.headSha ?? null,
       ownerRole: out.ownerRole ?? null,
+      // Dev Profile 决定「必过门」那条命令长什么样——不传就只剩一个档位名。
+      profile: taskRuntime?.profile ?? out.profile ?? null,
     })
     out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
   }

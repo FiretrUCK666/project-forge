@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T10:27:18.346Z",
+  "installedAt": "2026-11-17T10:29:26.685Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -29,7 +29,7 @@
       "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "cc11c86e74834055c6aeb2d9914feb93bc34350ef536989949514f1232be22a3"
+      "sha256": "e7130dfa1933c1fc53044d437fe0aaf24504e27ad8c3f22e8a9e23806b689f73"
     },
     "dev-flow/scripts/flow-sync.mjs": {
       "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
@@ -146,7 +146,7 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "24cabe4cd76eb77eb47aa5c586d61dc9c7189d4b6434afded107157b908e3008"
+      "sha256": "cc9765d2be0a7e7d95d1ccc75f64088a3702bab1c809d6728219243e45dc25f9"
     },
     "lib/ledger.mjs": {
       "sha256": "2a5c7648e660427ca405753df1e4393e4b2e66b1750c4fa5800be2b10c992aba"

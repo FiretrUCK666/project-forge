@@ -2231,4 +2231,39 @@ cases.push(["审核角色拿到这一轮该看什么，实现角色不拿", asyn
 
   return true
 }])
+
+// `requiredGates` 里是层级名（gate / full / smoke / quick），不是命令。
+// 交接包只印一个 `gate`，子代理不知道它对应哪条命令——等于什么都没说。
+cases.push(["必过门要展开成能直接跑的命令，不是一个档位名", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+
+  const ledger = { taskId: "x", linkedIssues: [], role: "local-only",
+    specFile: null, todoFile: null, branch: "b", baseBranch: "main", baseSha: "a" }
+  const profile = { mergeGate: "node scripts/dev/preflight.mjs && node scripts/dev/fixtures.mjs" }
+
+  const r = buildHandoff({
+    mainRoot: ".", ledger, ownerRole: "implementer", profile,
+    policy: { riskTier: "high", requiredGates: ["gate"] },
+  })
+
+  // 正向：档位名旁边要给出真实命令
+  if (!r.prompt.includes("`gate` 档")) return "没标出这是 gate 档"
+  if (!r.prompt.includes("node scripts/dev/fixtures.mjs")) {
+    return "只印了档位名，没展开成 Dev Profile 里的真实命令"
+  }
+
+  // 反向：Dev Profile 里没有这条命令时，要说清「按上面的怎么算做完跑」，不许瞎猜
+  const noCmd = buildHandoff({
+    mainRoot: ".", ledger, ownerRole: "implementer", profile: {},
+    policy: { riskTier: "high", requiredGates: ["gate"] },
+  })
+  if (!noCmd.prompt.includes("没有对应命令")) return "缺命令时没说明怎么办"
+  const gateSection = noCmd.prompt.slice(noCmd.prompt.indexOf("必过门"))
+  const gateLine = gateSection.split("\n").find((l) => l.includes("`gate` 档")) ?? ""
+  if (gateLine.includes("node scripts/dev/fixtures.mjs")) {
+    return "缺命令时在必过门那一节编了一条出来"
+  }
+
+  return true
+}])
 }

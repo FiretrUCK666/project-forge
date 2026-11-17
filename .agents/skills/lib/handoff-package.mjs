@@ -178,7 +178,7 @@ function factsHasRemote(mainRoot) {
   } catch { return false }
 }
 
-export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null }) {
+export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null }) {
   const specRel = ledger?.specFile ?? null
   const todoRel = ledger?.todoFile ?? null
   const specText = specRel && existsSync(join(mainRoot, specRel)) ? (readTextSafe(join(mainRoot, specRel)) ?? '') : ''
@@ -348,9 +348,24 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
 
   const gates = policy?.requiredGates ?? []
   if (gates.length > 0) {
+    // 层级名 → Dev Profile 里的真实命令。印一个 `gate` 出来等于什么都没说。
+    const TIER_TO_PROFILE = {
+      gate: ['mergeGate', 'merge-gate'],
+      full: ['fullTest', 'full-test'],
+      smoke: ['smokeVerify', 'smoke-verify'],
+      quick: ['quickTest', 'quick-test'],
+    }
     lines.push('## 这门改动的必过门')
     lines.push('')
-    for (const g of gates) lines.push(`- \`${g}\``)
+    for (const g of gates) {
+      const hit = TIER_TO_PROFILE[g]
+      const cmd = hit ? profile?.[hit[0]] : null
+      if (cmd && String(cmd).trim() && String(cmd).trim() !== 'none') {
+        lines.push(`- \`${g}\` 档：\`${String(cmd).trim()}\``)
+      } else {
+        lines.push(`- \`${g}\` 档（Dev Profile 里没有对应命令，按上面的「怎么算做完」跑）`)
+      }
+    }
     lines.push('')
   }
 

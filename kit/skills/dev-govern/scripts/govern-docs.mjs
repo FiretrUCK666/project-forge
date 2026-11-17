@@ -611,6 +611,9 @@ export async function buildPlan(findings, repoRoot, devProfile, isGit) {
     ? sorted.slice(0, 10).map((f) => `[${f.severity}] ${sanitizeCriterionText(f.title, repoRoot)}（复跑 govern-audit 确认 \`${f.id}\` 归零，退出码 0）`)
     : ['复跑 govern-audit 确认仓库维持 0 个 critical/high 缺陷（退出码 0）']
 
+  // 治理整改的 Todo 是**已经定好**的内容（批次、验收命令、范围都是算出来的），
+  // 所以直接给足取值，别让模板里的示范占位留下来——一份带着 `<可能出问题的事>`
+  // 的文档过不了自己的 audit，等于每次生成都要人再修一遍。
   const todoDraft = renderStandardDocTemplate({
     kind: 'todo',
     title: 'Governance Remediation Plan',

@@ -82,12 +82,23 @@ export function templateSections(text) {
  * `dropSections` 是**要删掉**的章节 id 集合；为空时全部保留——保守默认：
  * 不知道项目形态就别删东西。反过来的「只保留白名单」写法会让新加的模板章节
  * 在没人留意时整节消失，那正是这份模板曾经掉过三节的原因。
+ *
+ * 另有一条：**填不上的可选章节也删掉**。一个「风险与应对」表里写着
+ * `<可能出问题的事>` 的文档，比没有这一节更糟——它能通过人的扫读，却过不了
+ * 自己的审计，最后在提交前被退回来。生成器不该产出会被自己门禁拒收的文档。
+ * 主干章节不参与这条：主干填不上就留着让人看见，那正是它该起的作用。
  */
 export function applySectionPolicy(text, dropSections) {
   const drop = dropSections ?? new Set()
   const sliced = String(text ?? '').replace(SECTION_RE, (whole, id, optional) => {
     if (!optional) return whole
-    return drop.has(id) ? '' : whole
+    if (drop.has(id)) return ''
+    // 标记还在，所以这一刻分得清主干与可选：只有可选节才看「填没填上」。
+    const body = whole
+      .replace(/<!--\s*section:[^>]*-->/, '')
+      .replace(/<!--\s*\/section\s*-->/, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+    return ANGLE_HINT_RE.test(body) ? '' : whole
   })
   return sliced
     .replace(/<!--\s*section:\s*[a-z-]+(\s+optional)?\s*-->\n?/g, '')
@@ -95,6 +106,9 @@ export function applySectionPolicy(text, dropSections) {
     // 裁掉整节后可能留下连续空行，收成一段；这也是产物洁净度的一部分。
     .replace(/\n{3,}/g, '\n\n')
 }
+
+/** 模板尖括号里写着中文的，是给人看的填写提示，不是真实内容。 */
+const ANGLE_HINT_RE = /<[\u4e00-\u9fa5][^<>\n]{1,120}>/
 
 /**
  * 把「示范块」换成实际内容。
@@ -140,3 +154,4 @@ export function renderDocTemplate(kind, { vars = {}, dropSections = null } = {})
   const { CRITERIA: _crit, ...restVars } = vars
   return fillTemplateVars(applySectionPolicy(withCriteria, dropSections), restVars)
 }
+

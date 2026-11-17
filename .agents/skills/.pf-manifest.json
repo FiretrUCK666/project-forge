@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T03:12:55.327Z",
+  "installedAt": "2026-11-17T03:22:05.958Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -53,7 +53,7 @@
       "sha256": "683612bf7a550176352fa650415cb39e35ee29f74daba0e6f0221801df8fa040"
     },
     "dev-govern/scripts/govern-docs.mjs": {
-      "sha256": "37f5eb098a9cd73effe562f96ac61db07e2737d1ec09c121518914fa15350cab"
+      "sha256": "10d615911c7ad50627f51b8bb240147283ee1422779d0133a1a31bf3ee93dc04"
     },
     "dev-govern/scripts/govern-retro.mjs": {
       "sha256": "30db786075fe98219d601e744fac39096fa196495d6168fd0dc55038915adf6b"
@@ -107,7 +107,7 @@
       "sha256": "26c270cb255575625e3397a6946e6a65081bd06986442b948ab63f506a0d4ff0"
     },
     "lib/doc-template-render.mjs": {
-      "sha256": "a6ce4ee89592ea112193094150f89d63fbaf7ea6a260941311e9774a663a2968"
+      "sha256": "3bce2448adb15df8db7317941cb842703cc9e087f17cd6ce68457d4c8c9a8119"
     },
     "lib/doc-templates.mjs": {
       "sha256": "297a0bbe3bfb2dcaffd96c336574716f887b40e523f71f350b750c373d814da5"
@@ -203,7 +203,7 @@
       "sha256": "5d05d41128bca88a7eaadf713e9739036686d27e5a3cfa5659997fc6fcda4954"
     },
     "templates/docs-todo.md": {
-      "sha256": "857491993b08750529133812a2c463cada7e741908e10109591fc4b4cda6b9d7"
+      "sha256": "6858b8762503b74e29562e6b2f08933ca1a479b557011f315091f11230ccc8df"
     }
   },
   "disabledSkills": [],

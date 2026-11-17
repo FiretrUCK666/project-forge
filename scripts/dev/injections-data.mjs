@@ -852,6 +852,14 @@ export const INJECTIONS = [
     expect: '认节看内容不看标题',
   },
   {
+    id: 'I95',
+    what: 'TDD 主干退回只看标题（英文标题的文档被判缺节）',
+    file: 'kit/skills/lib/tdd-structure.mjs',
+    from: '    const byContent = !byTitle && sec.evidence.some((re) => re.test(stripped))',
+    to: '    const byContent = false',
+    expect: 'TDD 主干按内容认',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

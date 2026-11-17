@@ -1654,4 +1654,55 @@ cases.push(['认节看内容不看标题：换个写法也算写了', async () =
   return true
 }])
 
+// TDD 的主干判定同样要看内容：真实项目的标题千奇百怪。
+//
+// `## 2. 系统架构全景（双平面、四层正交）`、`## Architecture`、`## 部署架构` 里顺手写模块边界，
+// 逐字比对标题会把一份写得比模板更细的文档判成缺节。
+cases.push(['TDD 主干按内容认，空壳仍要报', async () => {
+  const { checkTddStructure } = await import('../../kit/skills/lib/tdd-structure.mjs')
+
+  // 正向 1：英文标题 + 异名标题，内容答全了
+  const alt = [
+    '# MyApp TDD', '',
+    '## Version', '', '- 文档版本 0.1.0', '- 基线：当前源码与清单', '- 明确不做：不做多租户', '',
+    '## Architecture', '',
+    '| 模块 | 职责 | 依赖方向 |', '| --- | --- | --- |', '| core | 核心 | 仅基础层 |', '',
+    '## Data flow', '', '主链路是 读入 -> 校验 -> 落盘。', '',
+    '## Invariants', '', '- 单一真相源：配置只在 protocol.mjs', '',
+  ].join('\n')
+  const errs = checkTddStructure(alt)
+  if (errs.length > 0) return `异名标题被判缺节：${errs.map((e) => e.code).join(',')}`
+
+  // 正向 2：中文带编号的标题
+  const numbered = [
+    '# x TDD', '',
+    '## 文档信息', '', '| 文档版本 | 1.0 |', '| --- | --- |', '',
+    '## 1. 背景与非目标', '', '- 核心定位：给运维用', '- 非目标：不做多租户', '',
+    '## 2. 系统架构全景（双平面）', '', '模块与目录职责见下表。', '| 模块 | 职责 |', '| --- | --- |', '| a | b |', '',
+    '## 3. 主链路', '', '正常主链路：读入 -> 落盘。', '',
+    '## 4. 不变量', '', '- 单一真相源', '',
+  ].join('\n')
+  const errs2 = checkTddStructure(numbered)
+  if (errs2.length > 0) return `带编号中文标题被判缺节：${errs2.map((e) => e.code).join(',')}`
+
+  // 反向 1：空壳必须报全——否则这条判据等于被删掉
+  const bare = '# T\n\n## 随便写点\n\n一句话。\n'
+  const errs3 = checkTddStructure(bare).map((e) => e.code)
+  if (errs3.length < 5) return `空壳 TDD 只报了 ${errs3.length} 条：${errs3.join(',')}`
+
+  // 反向 2：模块表只有表头要单独报
+  const emptyTable = [
+    '# x TDD', '',
+    '## 文档信息', '', '- 文档版本 1.0', '- 基线：源码', '',
+    '## 背景与非目标', '', '- 核心定位：给运维用', '- 非目标：不做多租户', '',
+    '## 系统架构', '', '模块与目录职责：', '', '### 模块与目录职责', '', '| 模块 | 职责 | 依赖方向 | 入口文件 |', '| --- | --- | --- | --- |', '',
+    '## 主链路', '', '正常主链路：读入 -> 落盘。', '',
+    '## 不变量', '', '- 单一真相源', '',
+  ].join('\n')
+  if (!checkTddStructure(emptyTable).some((e) => e.code === 'EMPTY_TDD_MODULES')) {
+    return '模块表只有表头却没报——那张表等于没写'
+  }
+  return true
+}])
+
 }

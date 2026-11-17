@@ -190,7 +190,7 @@ async function main(argv = process.argv.slice(2)) {
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
         'review-token',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
-        'reason', 'visual-evidence', 'agent',
+        'reason', 'visual-evidence', 'agent', 'evidence',
       ],
       multiFlags: ['must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: 'review-pack.mjs [pack|record|override] [dir] [options]',

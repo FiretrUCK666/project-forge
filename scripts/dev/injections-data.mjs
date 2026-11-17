@@ -1028,6 +1028,14 @@ export const INJECTIONS = [
     expect: '审核 diff 里必须有补丁正文',
   },
   {
+    id: 'I117',
+    what: '记审查结论不要求实证（「我跑过」与「我觉得」在账本里长得一样）',
+    file: 'kit/skills/dev-review/scripts/review-ledger.mjs',
+    from: "  if (!evidenceRaw) {",
+    to: "  if (false) {",
+    expect: '记审查结论必须交实证佐证',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

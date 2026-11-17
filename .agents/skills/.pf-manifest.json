@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T15:15:24.880Z",
+  "installedAt": "2026-11-17T16:04:44.073Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -83,16 +83,16 @@
       "sha256": "6dc00b378689136f39431fb27d869164fb4e05db64a5db46f4bb510ad2b3cb4a"
     },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "c1a413bcc1708a6d305f92f75e7c10a1130b7cae8d8ebbd9b111337ad8620085"
+      "sha256": "a473b9f0cbbe125372361ba62ed2f383c5648e9d91622a8e4ee6c7d4509a05ce"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "692d3cb8a9188ff6b43881bd1a85c5cabc9791c61169e905b9f527d69170b61c"
+      "sha256": "e71e8ec7c1738c8f2020df29f29d4c3fc60a47b6428f02987f11bb16e3744882"
     },
     "dev-review/scripts/review-locks.mjs": {
       "sha256": "b6479c67ffb98db6a987d7ff097f324f567d6220d6fc1d2cb7340d7399c10398"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "8cf217c9d96727c22203d2c1ba77f3f3153012d57b331b0fc1b67cfb00fdc3f9"
+      "sha256": "a62d7fb2a81a05a5ff6fc556ad7cb6def76986f2f58f7d1fdbdb9cbbe5481721"
     },
     "lib/cli.mjs": {
       "sha256": "c02575fc8c183a440f505ac712ef0e9a3a05380d595f49f8ec782ab82413826d"
@@ -146,7 +146,7 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "d88560d26369c261b3b62214d5bcedcaf5658a5b174914010d8b03f16eb30500"
+      "sha256": "976e4113245261277590681f8ef0d0c3c611946f2ac02e1d6195b9044c9295b1"
     },
     "lib/ledger.mjs": {
       "sha256": "2a5c7648e660427ca405753df1e4393e4b2e66b1750c4fa5800be2b10c992aba"

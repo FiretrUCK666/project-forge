@@ -394,6 +394,20 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push('**只对着这些判据判断**：上面的验收标准是冻结的。判据本身有问题就提出来，')
     lines.push('但不要因为「读起来不顺」判不通过。')
     lines.push('')
+    lines.push('## 先跑，再判')
+    lines.push('')
+    lines.push('不要靠读 diff 下结论——静态读代码看不出「这条判据到底能不能被证伪」，')
+    lines.push('而判据能不能被证伪，正是这一轮唯一要回答的问题。')
+    lines.push('')
+    lines.push('按这个顺序做，每一步都要留输出：')
+    lines.push('')
+    lines.push('1. **复跑判据**：每条 C* 找到能证伪它的命令，在审查工作位里跑。跑不通，这条判据有问题。')
+    lines.push('2. **故障注入**：挑一处核心判定改坏，同一条判据必须变红。不变红，说明那条判据拦不住东西。')
+    lines.push('3. **还原复绿**：\`git checkout -- .\` 之后必须重新通过。')
+    lines.push('4. **要看具体改动时**再 \`--include-diff\` 取全文——先定位到哪一块，再去看那一块。')
+    lines.push('')
+    lines.push('记结论时 \`--evidence\` 必填，写你实际跑的命令与输出摘要。没有佐证的通过，与没通过是一回事。')
+    lines.push('')
   }
 
   const gates = policy?.requiredGates ?? []

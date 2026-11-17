@@ -656,28 +656,28 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
       rounds: [],
     }, null, 2))
 
-    const selfRev = await handleRecord({ task: 't-rev', round: '1', verdict: 'pass', 'reviewer-id': 'author-a', 'implementer-id': 'author-a' }, revRoots)
+    const selfRev = await handleRecord({ task: 't-rev', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'author-a', 'implementer-id': 'author-a' }, revRoots)
     if (selfRev !== 2) return `同人自审未被拒绝：exit=${selfRev}`
 
-    const r1 = await handleRecord({ task: 't-rev', round: '1', verdict: 'changes', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 1), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
+    const r1 = await handleRecord({ task: 't-rev', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 1), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
     if (r1 !== 0) return `Round 1 record 失败：${r1}`
 
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 3\n')
     gitCommitFast(dir, 'attempt fix', { updateOnly: true })
-    const r2Repeat = await handleRecord({ task: 't-rev', round: '2', verdict: 'changes', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 2), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
+    const r2Repeat = await handleRecord({ task: 't-rev', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 2), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
     if (r2Repeat !== 4) {
       return `连续两轮同一 must-fix 未触发停损（应 exit 4）：exit=${r2Repeat}`
     }
 
     // 第 3 轮上限测试（推进 HEAD + 增量域问题，第 3 轮仍 verdict=changes 必须 exit 4）
     writeFileSync(ledgerDir + '/t-r3.json', JSON.stringify({ taskId: 't-r3', branch: 'main', implementerId: 'author-a', rounds: [] }, null, 2))
-    await handleRecord({ task: 't-r3', round: '1', verdict: 'changes', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 1), 'must-fix': ['C1: src/app.mjs:1 问题一'] }, revRoots)
+    await handleRecord({ task: 't-r3', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 1), 'must-fix': ['C1: src/app.mjs:1 问题一'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 4\n')
     gitCommitFast(dir, 'r2 fix', { updateOnly: true })
-    await handleRecord({ task: 't-r3', round: '2', verdict: 'changes', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 2), 'must-fix': ['C2: src/app.mjs:1 问题二'] }, revRoots)
+    await handleRecord({ task: 't-r3', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 2), 'must-fix': ['C2: src/app.mjs:1 问题二'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 5\n')
     gitCommitFast(dir, 'r3 fix', { updateOnly: true })
-    const r3Stop = await handleRecord({ task: 't-r3', round: '3', verdict: 'changes', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 3), 'must-fix': ['C3: src/app.mjs:1 问题三'] }, revRoots)
+    const r3Stop = await handleRecord({ task: 't-r3', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 3), 'must-fix': ['C3: src/app.mjs:1 问题三'] }, revRoots)
     if (r3Stop !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop}`
     return true
   } finally { rmTree(dir) }
@@ -2377,6 +2377,47 @@ cases.push(["归档之后审核交接包仍拿得到验收标准", async () => {
     if (!r.prompt.includes("C1")) return "没收出 C1"
     if (!r.prompt.includes("C2")) return "没收出 C2"
     if (r.fields.criteriaCount !== 2) return `条数算出 ${r.fields.criteriaCount}，应为 2`
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// 审核的第一动作必须是**跑**，不是读。没有佐证的通过，与没通过是一回事——
+// 因为「我跑过」和「我觉得」在账本里长得一模一样。
+cases.push(["记审查结论必须交实证佐证", async () => {
+  const { handleRecord } = await import("../../kit/skills/dev-review/scripts/review-ledger.mjs")
+  const { issueTokenFor, gitCommitFast, gitInit, rmTree, tmpProject } = await import("./fixtures-helpers.mjs")
+  const { readTaskLedger, writeTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "src/a.mjs": "export const a = 1\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    const { handleStart } = await import("../../kit/skills/dev-flow/scripts/flow-inspect.mjs")
+    const { resolveRepoRoots } = await import("../../kit/skills/lib/shared.mjs")
+    const roots = await resolveRepoRoots(dir)
+    await handleStart({ task: "ev", case: "2", slug: "ev" }, roots)
+
+    const base = { task: "ev", round: "1", verdict: "pass", "reviewer-id": "rev-x" }
+
+    // 反向：不传 evidence 必须拒绝，且要说清为什么
+    const noEv = await handleRecord({ ...base, "review-token": await issueTokenFor(dir, "ev", 1) }, roots)
+    if (noEv === 0) return "不交实证也能记通过——「我跑过」和「我觉得」分不出来了"
+
+    // 正向：交了 evidence 才放行
+    const withEv = await handleRecord({
+      ...base, "review-token": await issueTokenFor(dir, "ev", 1),
+      evidence: "跑了 node scripts/dev/fixtures.mjs --only 某判据，输出 1 通过 0 失败",
+    }, roots)
+    if (withEv !== 0) return `交了实证仍被拒：exit=${withEv}`
+
+    // 佐证要落进账本，否则下一轮复审看不到上一轮跑过什么
+    const led = readTaskLedger(dir, "ev")
+    const r1 = (led.rounds ?? []).find((r) => Number(r.round) === 1)
+    if (!r1) return "账本里没有这一轮的记录"
+    if (!r1.reviewEvidence) return "佐证没写进账本——下一轮复审看不到跑过什么"
+    if (!String(r1.reviewEvidence).includes("fixtures.mjs")) return "账本里的佐证不是原文"
 
     return true
   } finally { rmTree(dir) }

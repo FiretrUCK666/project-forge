@@ -121,7 +121,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
     }
 
     // Round 1 review-pack changes，然后父分支合并 + main 前进 -> flow sync rebase -> Round 2 range-diff
-    const r1 = await handleRecord({ task: 'child-t', round: '1', verdict: 'changes', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 1), 'must-fix': ['C1: child-file.mjs:1 fix'] }, roots)
+    const r1 = await handleRecord({ task: 'child-t', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 1), 'must-fix': ['C1: child-file.mjs:1 fix'] }, roots)
     if (r1 !== 0) return `Round 1 record 失败：${r1}`
 
     writeFileSync(join(cRoot, 'child-file.mjs'), 'export const c = 2\n')
@@ -158,7 +158,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
     }
 
     // 变基后 Round 2 增量锁：挑刺未改动旧文件 other.mjs 必须拦截，挑刺 child-file.mjs 放行
-    const oos = await handleRecord({ task: 'child-t', round: '2', verdict: 'changes', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 2), 'must-fix': ['C1: other.mjs:1 unrelated'] }, roots)
+    const oos = await handleRecord({ task: 'child-t', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 2), 'must-fix': ['C1: other.mjs:1 unrelated'] }, roots)
     if (oos !== 2) {
       return `sync 后增量视野硬锁未拦截越界文件：exit=${oos}`
     }
@@ -263,7 +263,7 @@ cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调�
     gitCommitFast(wa, 'feat: a', { updateOnly: true })
     const va = await handleVerify({ task: 'ta', tier: 'gate' }, roots)
     if (va.exitCode !== 0) return `ta verify --tier gate 失败：${va.exitCode}`
-    const ra = await handleRecord({ task: 'ta', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'ta', 1) }, roots)
+    const ra = await handleRecord({ task: 'ta', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'ta', 1) }, roots)
     if (ra !== 0) return `ta review record 失败：${ra}`
 
     const wb = join(dir, '.worktrees', 'impl-tb')
@@ -271,7 +271,7 @@ cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调�
     gitCommitFast(wb, 'feat: b', { updateOnly: true })
     const vb = await handleVerify({ task: 'tb', tier: 'gate' }, roots)
     if (vb.exitCode !== 0) return `tb verify --tier gate 失败：${vb.exitCode}`
-    const rb = await handleRecord({ task: 'tb', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'tb', 1) }, roots)
+    const rb = await handleRecord({ task: 'tb', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'tb', 1) }, roots)
     if (rb !== 0) return `tb review record 失败：${rb}`
 
     // main 上改写 src/b.mjs 制造基线漂移冲突

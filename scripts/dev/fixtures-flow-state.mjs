@@ -354,7 +354,7 @@ export function registerFlowStateCases(cases) {
       writeFileSync(join(wt, 'src/app.mjs'), 'export const v = 2\n')
       gitCommitFast(wt, 'feat: m1b v2', { updateOnly: true })
       await handleVerify({ task: 'm1b', mode: 'full' }, roots)
-      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+      await handleRecord({ task: 'm1b', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a' }, roots)
 
       const mainBefore = gitSync(dir, ['rev-parse', 'main'], { encoding: 'utf8' }).stdout.trim()
       const tmFail = await runTrialMerge({
@@ -449,14 +449,14 @@ export function registerFlowStateCases(cases) {
         '--review-token', await issueTokenFor(dir, 'c4-lk', 1),
         '--must-fix', 'C1: src/a.mjs:1 err1',
         '--disposition', 'c1:rebutted-wrong', '--disposition', 'c1:rebutted-wrong',
-        '--pre-existing', 'old issue', '--pre-existing', 'old   issue', '--json',
+        '--pre-existing', 'old issue', '--pre-existing', 'old   issue', '--json', '--evidence', '夹具实测：命令已跑，输出符合预期'
       ], { cwd: dir })
       if (r1.status !== 0 || JSON.parse(r1.stdout).preExistingCount !== 1 || JSON.parse(r1.stdout).dispositionStats?.total !== 1) {
         return `R1 record 或去重统计失败：${r1.stdout} ${r1.stderr}`
       }
 
       // 同 HEAD 复审拒绝（exit 2）
-      const sameHead = await hRecord({ task: 'c4-lk', round: '2', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2) }, roots)
+      const sameHead = await hRecord({ task: 'c4-lk', round: '2', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2) }, roots)
       if (sameHead !== 2) return `同 HEAD 复审未被拦截：exit=${sameHead}`
 
       // 推进 HEAD 仅改 src/b.mjs:1，检验增量视野硬锁
@@ -464,42 +464,42 @@ export function registerFlowStateCases(cases) {
       gitCommitFast(wt, 'r2', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
 
-      const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
+      const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
       if (outScope !== 2) return `Round 2 未改旧文件新刺未被拦截：exit=${outScope}`
 
-      const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: rename helper style nitpick'] }, roots)
+      const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: rename helper style nitpick'] }, roots)
       if (subjScope !== 2) return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope}`
 
-      const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r2CrossC1 !== 0) return `不同文件同标 C1 误触发停损或遭拒：exit=${r2CrossC1}`
 
-      const badDisp = await hRecord({ task: 'c4-lk', round: '3', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), disposition: ['c1:bogus'] }, roots)
+      const badDisp = await hRecord({ task: 'c4-lk', round: '3', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), disposition: ['c1:bogus'] }, roots)
       if (badDisp !== 2) return `非法 --disposition 未阻断：exit=${badDisp}`
 
       // Round 3 触发停损 -> Round 4 pass 绕过未解锁停损必须 exit 4 -> override 后 pass 成功
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod2\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitCommitFast(wt, 'r3', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
-      const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
+      const r3Stop = await hRecord({ task: 'c4-lk', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 3), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r3Stop !== 4) return `R3 停损未触发：exit=${r3Stop}`
 
       writeFileSync(join(wt, 'src/b.mjs'), 'b1_mod3\nb2\nb3\nb4\nb5\nb6\nb7\nb8\nb9\nb10\n')
       gitCommitFast(wt, 'r4', { updateOnly: true })
       await hVerify({ task: 'c4-lk' }, roots)
-      const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
+      const r4Bypass = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
       if (r4Bypass !== 4) return `Round 4 pass 竟绕过了未解锁的历史停损：exit=${r4Bypass}`
 
       await hOverride({ task: 'c4-lk', 'human-approved': true, reason: 'approved' }, roots)
       await hVerify({ task: 'c4-lk', cmd: 'node -e "process.exit(1)"' }, roots)
       const passBlocked = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-1',
-        '--review-token', await issueTokenFor(dir, 'c4-lk', 4),
+        '--review-token', await issueTokenFor(dir, 'c4-lk', 4), '--evidence', '夹具实测：命令已跑，输出符合预期'
       ], { cwd: dir })
       if (passBlocked.status !== 2 || !(passBlocked.stdout + passBlocked.stderr).includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
         return `失败 verify 后虚假 pass 未被拦截：exit=${passBlocked.status}, out=${passBlocked.stdout}, err=${passBlocked.stderr}`
       }
       await hVerify({ task: 'c4-lk' }, roots)
-      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
+      const passOk = await hRecord({ task: 'c4-lk', round: '4', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-1', 'review-token': await issueTokenFor(dir, 'c4-lk', 4) }, roots)
       if (passOk !== 0) return `override+复绿后 Round 4 pass 失败：exit=${passOk}`
 
       return true

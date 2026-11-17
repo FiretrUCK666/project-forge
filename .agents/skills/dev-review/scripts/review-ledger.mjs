@@ -263,6 +263,17 @@ export async function handleRecord(opts, roots) {
     return EXIT.USAGE_OR_POLICY
   }
 
+  // 实证佐证：没有它，'我跑过' 与 '我觉得' 在账本里分不出来。
+  const evidenceRaw = String(opts.evidence ?? '').trim()
+  if (!evidenceRaw) {
+    const msg = 'BLOCKED_MISSING_REVIEW_EVIDENCE: 记审查结论必须传 --evidence "<你实际跑过的命令与输出摘要>"。'
+      + '判据是「跑过什么」，不是「觉得怎样」——没有佐证的通过和没有通过是一回事。'
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_MISSING_REVIEW_EVIDENCE', error: msg, taskId, round }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.USAGE_OR_POLICY
+  }
+
   const implementerId = String(opts['implementer-id'] ?? baseLedger.implementerId ?? '').trim()
   if (!implementerId) {
     const msg = 'BLOCKED_MISSING_IMPLEMENTER: 账本里没有 implementerId，无法判断这是不是自审——'
@@ -465,6 +476,8 @@ export async function handleRecord(opts, roots) {
     headSha,
     reviewerId,
     verdict,
+    // 跑过什么。没有它，'我跑过' 和 '我觉得' 在账本里分不出来。
+    reviewEvidence: evidenceRaw,
     blockers: mustFixList.map((m) => m.summary),
     mustFix: mustFixList,
     shouldFix: shouldFixList,

@@ -380,10 +380,21 @@ async function main(argv) {
     if (sub === 'triage') {
       const summary = opts.summary ?? opts._.join(' ')
       if (!summary) throw new Error('triage 需要传入 --summary "<需求描述>"')
-      const filesNum = opts.files !== undefined ? Number(opts.files) : undefined
+      const rawFilesOpt = opts.files !== undefined ? String(opts.files).trim() : ''
+      const isNumericFiles = rawFilesOpt !== '' && /^\d+$/.test(rawFilesOpt)
+      const filesAsPaths = (rawFilesOpt !== '' && !isNumericFiles)
+        ? rawFilesOpt.split(',').map((s) => s.trim()).filter(Boolean)
+        : []
       let triagePaths = []
-      if (opts.paths !== undefined) triagePaths = String(opts.paths).split(',').map((s) => s.trim()).filter(Boolean)
-      else if (roots.isGit) triagePaths = (await gitStatusPorcelainZ(repoRoot)).entries.map((e) => e.file)
+      if (opts.paths !== undefined) {
+        triagePaths = String(opts.paths).split(',').map((s) => s.trim()).filter(Boolean)
+        if (filesAsPaths.length > 0) triagePaths = [...new Set([...triagePaths, ...filesAsPaths])]
+      } else if (filesAsPaths.length > 0) {
+        triagePaths = filesAsPaths
+      } else if (roots.isGit) {
+        triagePaths = (await gitStatusPorcelainZ(repoRoot)).entries.map((e) => e.file)
+      }
+      const filesNum = isNumericFiles ? Number(rawFilesOpt) : (filesAsPaths.length > 0 ? filesAsPaths.length : undefined)
       const result = triageTask({
         summary, files: filesNum, touchesContract: Boolean(opts['touches-contract']),
         conflictsTdd: Boolean(opts['conflicts-tdd']), docOnly: Boolean(opts['doc-only']),

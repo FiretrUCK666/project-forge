@@ -20,6 +20,7 @@ import { registerClaimsCases } from './fixtures-claims.mjs'
 import { registerFlowDocsCases } from './fixtures-flow-docs.mjs'
 import { registerDocRuleCases } from './fixtures-doc-rules.mjs'
 import { registerDocShapeCases } from './fixtures-doc-shapes.mjs'
+import { registerDocTriageCases } from './fixtures-doc-triage.mjs'
 import { registerHandoffReviewCases } from './fixtures-handoff-review.mjs'
 import { registerExploreCases } from './fixtures-explore.mjs'
 import { registerDocsCases } from './fixtures-docs.mjs'
@@ -48,6 +49,7 @@ const DOMAIN_REGISTRY = [
   ['flow-docs', registerFlowDocsCases],
   ['doc-rules', registerDocRuleCases],
   ['doc-shapes', registerDocShapeCases],
+  ['doc-triage', registerDocTriageCases],
   ['handoff-review', registerHandoffReviewCases],
   ['equip', registerEquipCases],
   ['onboarding', registerOnboardingCases],

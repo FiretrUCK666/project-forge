@@ -22,6 +22,7 @@ import { registerDocsCases } from './fixtures-docs.mjs'
 import { registerFlowCases } from './fixtures-flow.mjs'
 import { registerFlowStateCases } from './fixtures-flow-state.mjs'
 import { registerFlowParallelCases } from './fixtures-flow-parallel.mjs'
+import { registerLifecycleCases } from './fixtures-lifecycle.mjs'
 import { registerReviewGovernCases } from './fixtures-review-govern.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
@@ -33,6 +34,7 @@ const DOMAIN_REGISTRY = [
   ['flow', registerFlowCases],
   ['flow-state', registerFlowStateCases],
   ['flow-parallel', registerFlowParallelCases],
+  ['lifecycle', registerLifecycleCases],
   ['review-govern', registerReviewGovernCases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],

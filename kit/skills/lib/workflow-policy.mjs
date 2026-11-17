@@ -578,10 +578,13 @@ export function evaluateNextState({
   } else if (nothingImplementedYet) {
     // 还没提交过任何东西，下一步是实施，不是归档。
     // 少了这一支，对新任务来说「尚未 finalized」天然成立，刚建好就要求归档。
+    //
+    // 命令不能是 `flow next` 自己——那是循环：跑完还是这一格，等于什么都没说。
+    // 这一格能给的只有「去哪个位子里改」，推进要靠真的写代码提交。
     phase = 'implementing'
     ownerRole = 'implementer'
     nextAction = '按交接包实施，改完提交；提交后按 flow next 继续'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${t.taskId}`
+    command = `git -C "${t.worktreePath ?? '.'}" status`
   } else if (finalizeStale) {
     phase = 'needs-finalize'
     ownerRole = 'implementer'

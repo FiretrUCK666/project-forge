@@ -1004,6 +1004,14 @@ export const INJECTIONS = [
     expect: '交接包第一眼就是现在这一步',
   },
   {
+    id: 'I114',
+    what: '做完事却不要求归档（整条链走不到头）',
+    file: 'kit/skills/lib/workflow-policy.mjs',
+    from: '  const finalizeStale = Boolean(needsFinalize && (!t.finalized',
+    to: '  const finalizeStale = Boolean(false && needsFinalize && (!t.finalized',
+    expect: '整条流转',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

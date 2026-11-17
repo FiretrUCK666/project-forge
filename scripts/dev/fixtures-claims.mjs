@@ -1551,4 +1551,50 @@ cases.push(['文档模板按项目形态裁剪，且填不上的可选节不留�
   return true
 }])
 
+// 验收标准「冻结」必须是真的冻住，不是文档里的一句话。
+//
+// 早先 approve 之后回到 SPEC 里把 C3 从「必须拒绝并退出码 1」改成「允许通过」，
+// 文件照样合法、audit 照样通过、finalize 照样放行；只有审查者凭记忆才能发现。
+// 人的记忆不是门禁。
+cases.push(['验收标准批准即冻结，改过要能被逐条指出来', async () => {
+  const { extractCriteria, criteriaFingerprint, compareCriteria, describeCriteriaDrift } =
+    await import('../../kit/skills/lib/criteria-lock.mjs')
+
+  // 正向：抽出编号与正文
+  const base = extractCriteria([
+    '## 验收标准', '',
+    '- [ ] C1: 退出码为 0',
+    '- [ ] C2: 异常输入必须拒绝',
+    '- [x] C3: 输出含预期字段',
+    '', '```sh', '- [ ] C9: 代码块里的不算', '```', '',
+  ].join('\n'))
+  if (base.length !== 3) return `应抽出 3 条，实际 ${base.length}：${base.map((c) => c.id).join(',')}`
+  if (!base.find((c) => c.id === 'C3')?.checked) return '勾选状态没读对'
+
+  // 反向：勾选变化**不算**标准变化——那是实现进度，算进去会让门禁变成噪音
+  const checked = extractCriteria('- [x] C1: 退出码为 0\n- [x] C2: 异常输入必须拒绝\n- [x] C3: 输出含预期字段')
+  if (criteriaFingerprint(base) !== criteriaFingerprint(checked)) {
+    return '只是打了勾就判成标准变了——这种噪音会让人直接把门禁关掉'
+  }
+
+  // 正向：正文改松要被抓到，并点名到 C 编号
+  const relaxed = extractCriteria('- [ ] C1: 退出码为 0\n- [ ] C2: 异常输入允许通过\n- [ ] C3: 输出含预期字段')
+  const drift = compareCriteria(base, relaxed)
+  if (drift.same) return '把「必须拒绝」改成「允许通过」竟然没被发现'
+  if (drift.changed.join(',') !== 'C2') return `改动的条目报错了：${drift.changed.join(',')}`
+  if (!describeCriteriaDrift(drift).includes('C2')) return '说明里没点到 C2'
+
+  // 正向：删掉一条、新增一条都要看得见
+  const removed = compareCriteria(base, extractCriteria('- [ ] C1: 退出码为 0\n- [ ] C3: 输出含预期字段'))
+  if (removed.removed.join(',') !== 'C2') return `删条目没报对：${removed.removed.join(',')}`
+  const added = compareCriteria(base, extractCriteria('- [ ] C1: 退出码为 0\n- [ ] C2: 异常输入必须拒绝\n- [ ] C3: 输出含预期字段\n- [ ] C4: 新要求'))
+  if (added.added.join(',') !== 'C4') return `新增条目没报对：${added.added.join(',')}`
+
+  // 反向：顺序调换不算变化（排序后再比）
+  const reordered = extractCriteria('- [ ] C3: 输出含预期字段\n- [ ] C1: 退出码为 0\n- [ ] C2: 异常输入必须拒绝')
+  if (!compareCriteria(base, reordered).same) return '只是调了顺序就判成改标准了'
+
+  return true
+}])
+
 }

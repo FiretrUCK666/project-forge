@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T03:22:05.958Z",
+  "installedAt": "2026-11-17T03:43:48.310Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -23,7 +23,7 @@
       "sha256": "11f88e3aae09b2e5345008a96ca4551e159919ee2ab4d753e67609bdc9954da2"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "38a426c974fc03346b34b3b0d48ed0f34ca5485a2fc5defbb629f86fe85ef911"
+      "sha256": "87759c76e756ce45a7041cccd1f3c9f1addb8b7cf7da973efbbb418e92ceb8a0"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
@@ -74,7 +74,7 @@
       "sha256": "ec74b03d0d3d60b81940707a2898f4e01b23f6da7c95df3260e046e650259115"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "63442aa19806eeb98bb09d3f7c4685467ca87d92572577016d1bba033075b54f"
+      "sha256": "7aaa786a5972593962e11b5e54a72b6520cb86220fbbfaa34e5e6e2cd2c3519a"
     },
     "dev-review/SKILL.md": {
       "sha256": "50f465414107572df949f02e6449ed75d8048deda348fba9ef082a359c2b4187"
@@ -99,6 +99,9 @@
     },
     "lib/command-lex.mjs": {
       "sha256": "48bc6a8440a0da520975a19c43b9e5b72a18e5ec234eb7d922e15d48b035ed70"
+    },
+    "lib/criteria-lock.mjs": {
+      "sha256": "8ccfedeba1932a419d58ff83fb5ef8f86e338b02039d10f0f8f946fb0f46c1c9"
     },
     "lib/critique-rounds.mjs": {
       "sha256": "7db00a731eaa40e3c5fe9bebb6d316ccf2462a542006cba12b69e64c634c3e0d"
@@ -134,7 +137,7 @@
       "sha256": "aa2c4fb2aad7f5025bd4cf5553880da08953c25ee9d3c3207f1eb81fb8291465"
     },
     "lib/ledger.mjs": {
-      "sha256": "6e2f49c1637c22f354d92811e985bf38dd6a56e2ffcdaa2a0a4cdc61c87557f3"
+      "sha256": "b69e6bb4868e22d6f36bc293b3551dc5a67d0a99f32dbfcf568d107faba512a2"
     },
     "lib/platform-probe.mjs": {
       "sha256": "6ea9cb0645122d4f77220f6bd81db0430ef3dba26090aef2a339cbdf7b0bcd19"

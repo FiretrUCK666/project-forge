@@ -27,6 +27,7 @@ import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
+import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
@@ -317,8 +318,17 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     writeAtomic(abs, workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`))
   }
 
+  // 批准即冻结：把这一刻的验收标准指纹记下来。
+  //
+  // 「冻结」在此之前只是文档里的一句话。实现阶段回到 SPEC 里改一条标准，
+  // 文件照样合法、audit 照样通过，而审查者只能凭记忆发现——人的记忆不是门禁。
+  const criteria = extractCriteria(workingText)
+  const fingerprint = criteria.length > 0 ? criteriaFingerprint(criteria) : null
+
   return {
     file: posixPath(relative(repoRoot, abs)), previousStatus: curStatus, status: nextStatus, critiqueSkipped,
+    criteriaCount: criteria.length,
+    criteriaFingerprint: fingerprint,
     warning: hasPlaceholder ? '检测到仍有占位描述 <...>，动手实现前请替换成真实可判定条件' : null,
   }
 }
@@ -541,6 +551,19 @@ async function main(argv) {
       if (!opts.file) throw new Error('approve 需要 --file <specPath>')
       const res = approveSpec({ repoRoot, file: opts.file, skipCritiqueReason: opts['skip-critique-reason'] })
       const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
+
+      // 有绑定任务就把冻结指纹写进账本：最终的「标准有没有被悄悄改过」
+      // 要在 finalize / verify 那一刻对得上，所以指纹必须进账本，不能只留在文档里。
+      const taskKey = opts.task ?? fm.data?.task_id
+      if (taskKey && res.criteriaFingerprint) {
+        const led = readTaskLedger(mainRoot, sanitizeTaskId(taskKey))
+        if (led) {
+          led.criteriaFingerprint = res.criteriaFingerprint
+          led.criteriaFrozenFrom = res.file
+          led.criteriaFrozenAt = docIsoDate()
+          writeTaskLedger(mainRoot, led)
+        }
+      }
       const fn = parseDocFilename(res.file)
       const slugVal = fn?.slug ?? 'task'
       const issueNum = Number.isInteger(Number(fm.data?.issue)) && Number(fm.data.issue) > 0 ? Number(fm.data.issue) : (fn?.issue ?? null)

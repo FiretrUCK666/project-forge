@@ -836,6 +836,14 @@ export const INJECTIONS = [
     expect: '文档模板按项目形态裁剪',
   },
   {
+    id: 'I93',
+    what: '验收标准指纹把勾选也算进去（打勾被判成改标准）',
+    file: 'kit/skills/lib/criteria-lock.mjs',
+    from: '    .map((c) => `${c.id}\\u0000${String(c.text ?? \'\').replace(/\\s+/g, \' \').trim()}`)',
+    to: '    .map((c) => `${c.id}\\u0000${c.checked}\\u0000${String(c.text ?? \'\').replace(/\\s+/g, \' \').trim()}`)',
+    expect: '验收标准批准即冻结',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

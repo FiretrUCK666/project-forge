@@ -120,6 +120,17 @@ export function createDefaultLedger(partial = {}) {
     privateDocsDir: partial.privateDocsDir ?? null,
     linkedIssues: Array.isArray(partial.linkedIssues) ? partial.linkedIssues : [],
     /**
+     * 验收标准的冻结指纹。
+     *
+     * 批准那一刻记下 `C1..Cn` 的指纹；之后实现阶段回到 SPEC 里改标准，
+     * 指纹就对不上。**这是「批准后标准不许变」的唯一机械保证**——
+     * 在此之前，改标准既不报错也不留痕，只能靠审查者记得原文。
+     */
+    criteriaFingerprint: partial.criteriaFingerprint ?? null,
+    /** 冻结发生在哪个文件上（SPEC 或 Todo），以及冻结时的审批人/时间。 */
+    criteriaFrozenFrom: partial.criteriaFrozenFrom ?? null,
+    criteriaFrozenAt: partial.criteriaFrozenAt ?? null,
+    /**
      * 贴进来的 Issue 到底说了什么。
      *
      * 只记编号不够：AI 拿着一个 「42」 什么也做不了，只能要么自己再跑一次 `gh issue view`

@@ -27,6 +27,7 @@ import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
+import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
@@ -73,7 +74,6 @@ function findUncheckedLines(text) {
   }
   return out
 }
-
 function findStrictDocBySlug(root, dirRel, ledger) {
   const abs = join(root, dirRel)
   if (!existsSync(abs)) return null
@@ -186,6 +186,8 @@ export async function handleFinalize(opts, roots) {
     }
   }
 
+  const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
+  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: 1 } }
   if (specRel && existsSync(join(implRoot, specRel))) {
     const specAbs = join(implRoot, specRel)
     let specText = readTextSafe(specAbs) ?? ''

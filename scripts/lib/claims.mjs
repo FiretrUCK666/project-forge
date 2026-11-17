@@ -102,7 +102,7 @@ function normalizeClaimPath(token) {
 }
 
 /** 可选设施目录（由协作/CI 工具按需启用，不把其缺席误报为目录失踪）。 */
-const OPTIONAL_INFRA_DIRS = new Set(['.github', '.github/workflows', '.worktrees', '.git'])
+const OPTIONAL_INFRA_DIRS = new Set(['.github', '.github/workflows', '.worktrees', '.git', 'docs/archive'])
 
 /** 判定目录项是不是具体可核验的相对目录前缀（排除占位符、通配符、可选设施与文件）。 */
 function normalizeProfileDir(token) {
@@ -228,6 +228,12 @@ export function claimsOf(text) {
   // 行内代码里也可能是 `git switch main` 或 `node scripts/x.mjs`
   for (const m of source.matchAll(INLINE_CODE)) {
     const token = m[1].trim()
+    const lineStart = source.lastIndexOf('\n', m.index) + 1
+    const rawLineEnd = source.indexOf('\n', m.index)
+    const lineText = source.slice(lineStart, rawLineEnd === -1 ? source.length : rawLineEnd).trim()
+    if ((lineText.startsWith('|') || /^(?:[-*]|\d+\.)\s/.test(lineText)) && /<[^>\n]+>/.test(lineText)) {
+      continue
+    }
     const after = source.slice(m.index + m[0].length, m.index + m[0].length + 24)
     const before = source.slice(Math.max(0, m.index - 16), m.index)
     const optional = OPTIONAL_SUFFIX_RE.test(after) || OPTIONAL_PREFIX_RE.test(before)

@@ -34,7 +34,7 @@ const TEMP_RE = /\.tmp-(\d+)$/
  * 挖多一处是漏报，而漏报在交棒里意味着「以为干净，其实没清」。
  */
 function stripInlineCode(line) {
-  return String(line ?? '').replace(/`[^`]*`/g, '')
+  return String(line ?? '').replace(/(`{2,})[^\n]*?\1/g, '')
 }
 
 const SKIP_DIRS = COMMON_SKIP_DIRS

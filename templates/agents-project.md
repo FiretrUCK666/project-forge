@@ -21,15 +21,30 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 | 做功能 / 修缺陷 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
 <!-- project-forge: if has-remote -->
 | 实施者归档 / 实证 / 推分支提 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
+<!-- project-forge: if is-full -->
 | 本地预审 / 独立双门审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
 | 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 <!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+| 门禁放行后合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+<!-- project-forge: endif -->
+<!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
 | 归档文档 / 验证并提交至特性分支 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
+<!-- project-forge: if is-full -->
 | 本地预审 / 隔离工作树独立双门审查 | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
 | 本地试合并入主干与确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 <!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+| 门禁放行后本地试合入主干与清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
+<!-- project-forge: endif -->
+<!-- project-forge: endif -->
+<!-- project-forge: if is-full -->
 | 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
+<!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+| 工程基线检查 / 按需升档完整套件 | 见「环境与构建验证」或升档完整套件 | 运行项目构建/测试命令（用本工具 `equip --tier full` 升档） |
+<!-- project-forge: endif -->
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: if has-custom-skills -->
 
@@ -68,16 +83,15 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 以下键值由研发流脚本自动读取，核对后替换为真实值（无对应项填 `none`）：
 
 ```yaml
-quick-test: <单文件或快测命令>
-full-test: <全量构建与测试命令>
-smoke-verify: <运行时端到端冒烟验证命令，或 none>
-merge-gate: <合并前必跑完整门禁命令>
-arch-rules: <跨层禁引规则如 src/lib/** -> src/ui/**，逗号分隔或 none>
-high-risk: <高风险路径前缀或文件，逗号分隔>
-do-not-edit: <禁止自动修改的路径，逗号分隔>
+quick-test: {{PROFILE_QUICK_TEST}}
+full-test: {{PROFILE_FULL_TEST}}
+smoke-verify: {{PROFILE_SMOKE_VERIFY}}
+merge-gate: {{PROFILE_MERGE_GATE}}
+arch-rules: {{PROFILE_ARCH_RULES}}
+high-risk: {{PROFILE_HIGH_RISK}}
+do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 ```
-
-<!-- project-forge: fill Dev Profile：核对并补齐上方 quick-test / full-test / smoke-verify / merge-gate / arch-rules / high-risk / do-not-edit 真实取值后删掉本行 -->
+{{PROFILE_FILL_HINT}}
 <!-- project-forge: end Dev Profile -->
 
 <!-- project-forge: begin 上下文阅读护栏 -->
@@ -153,12 +167,12 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: if is-full -->
 - **严控范围与依赖**：改前先读邻近实现，清净被替换旧逻辑；不擅自引入第三方依赖，确需引入须先说明理由并获确认。
 - **测试正反双向与分层控频**：修缺陷先写稳定复现失败测试（Red-Green）；新判定或解析逻辑须覆正反双向用例，禁跳过或凑数。编码中只跑语法/类型检查与 `--tier quick --target <path>`；合前跑 1 次 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测硬编码 `>=1s` sleep/非无头测试；单测超 800 行按模块拆分。
-- **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时提交前同步 `docs/TDD.md` / `README.md` / `AGENTS.md`。
+- **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时提交前同步 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
 <!-- project-forge: endif -->
 <!-- project-forge: if is-lightweight -->
 - **范围与依赖**：改前读邻近实现、清净旧逻辑；不擅自引入第三方依赖。
 - **测试与分层**：修缺陷先写复现失败测试（Red-Green），新判定须有正反双向用例；改完跑 `--tier quick --target <path>`，合前跑 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证、单测 `>=1s` sleep 与弱化门禁。
-- **注释与文档同步**：禁立碑履历、死代码注释块及无故 `HACK`/`@ts-ignore`/`eslint-disable`；改导出、CLI 或模块边界时同步更新 `docs/TDD.md` / `README.md` / `AGENTS.md`。
+- **注释与文档同步**：禁立碑履历、死代码注释块及无故 `HACK`/`@ts-ignore`/`eslint-disable`；改导出、CLI 或模块边界时同步更新 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
 <!-- project-forge: endif -->
 - {{COMMIT_STYLE_HINT}}
 <!-- project-forge: if has-bilingual-docs -->
@@ -211,7 +225,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **发版**：不自己判断该发版，仅在人明确说要发版时按 `{{RELEASING_DOC}}` 先提交推送说明（`{{RELEASE_NOTES_TARGET}}`）到 `{{DEFAULT_BRANCH}}`，再打标签并回读确认。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
-- **日常**：改完 -> 跑门禁 -> 提交至本地分支 -> 独立审查 -> 本地试合并入 `{{DEFAULT_BRANCH}}`（不打标签不发制品库）。
+- **日常**：改完 -> 跑门禁与测试 -> 提交至本地分支 -> 本地试合并入 `{{DEFAULT_BRANCH}}`（高风险变更须人类确认；不打标签不发制品库）。
 - **发版**：不自己判断该发版，仅在人明确说要发版时按 `{{RELEASING_DOC}}` 准备说明（`{{RELEASE_NOTES_TARGET}}`）与版本。
 <!-- project-forge: endif -->
 <!-- project-forge: endif -->
@@ -224,18 +238,18 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: if is-lightweight -->
 - **身份与远端**：
   <!-- project-forge: if has-remote -->
-  先核对远端与源仓库：`origin` 与声明源一致且有写权限为 `maintainer`（独立分支开 PR，禁直推主干；未匹配注册平台远端退化为 `generic-git` 走本地全流程）；Fork 为 `contributor-fork`（只推自己 `origin` 开 PR，禁自合与提前删分支）；只读克隆停下三选一（Fork/新建/`.git/pf-local-mode`）。
+  先核对远端与源仓库：`origin` 与声明源一致且有写权限为 `maintainer`（独立分支开 PR，禁直推主干；未匹配注册平台远端退化为 `generic-git` 走本地流程后带 `--remote-merged` 确认）；Fork 为 `contributor-fork`（只推自己 `origin` 开 PR 并等待上游合并，禁自合与提前删分支）；只读克隆停下三选一（Fork/新建/`.git/pf-local-mode`）；外来 PR 需先升级为 `full` 档再运行扫描。
   <!-- project-forge: endif -->
   <!-- project-forge: if no-remote -->
-  项目还没有远端，仅本地提交；碰「高风险路径」或 `one-way` 变更仍须独立审查并记录。
+  项目还没有远端，仅本地提交；碰「高风险路径」、`Case >= 4` 或 `one-way` 变更须人类确认后带 `--human-approved --reason "..."` 放行。
   <!-- project-forge: endif -->
 <!-- project-forge: if has-remote -->
-- **五档分流与文档归档**：沿 8 阶段闭环（需求→澄清→设计→实现→评审→实证→验收→合入）澄清拍板并跑 `doc-plan.mjs triage`：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 经独立 Critique（禁自审）后 `approve`；Case 5 先改 `docs/TDD.md`。PR 前实施者跑 `flow.mjs finalize`（总控收口加 `--include-master-prd`）成对归档进 `docs/archive/`。
-- **分档推送、审查与清理**：能不能撤回决定分档——推自己分支与开 PR 属日常（谁改谁认领并负责 `verify`/`submit`）；审查通过由审查者直接合（`contributor-fork` 等上游合），**日常到此为止**（**弱化门禁必须人点头**）。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再问人清理；非 ASCII 写临时 UTF-8 文件走 `--body-file`；随时 `--tier full` 升档。
+- **五档分流与文档归档**：沿 8 阶段闭环（需求→澄清→设计→实现→评审→实证→验收→合入）澄清拍板并跑 `doc-plan.mjs triage`：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 经独立 Critique（禁自审）后 `approve`；Case 5 先改 `docs/TDD.md`（若存在）。PR 前实施者跑 `flow.mjs finalize`（总控收口加 `--include-master-prd`）成对归档进 `docs/archive/`。
+- **分档推送、门禁放行与清理**：能不能撤回决定分档——推自己分支与开 PR 属日常（谁改谁认领并负责 `verify`/`submit`）；普通改动门禁通过即可合（`contributor-fork` 等上游合），触及高风险/`Case >= 4`/门禁弱化须人类确认并带 `--human-approved --reason "..."`（**弱化门禁必须人点头**），**日常到此为止**。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再问人清理；非 ASCII 写临时 UTF-8 文件走 `--body-file`；随时 `--tier full` 升档。
 <!-- project-forge: endif -->
 <!-- project-forge: if no-remote -->
-- **五档分流与文档归档**：沿 8 阶段闭环澄清拍板并跑 `doc-plan.mjs triage`：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 经独立 Critique（禁自审）后 `approve`；Case 5 先改 `docs/TDD.md`。合前实施者跑 `flow.mjs finalize`（总控收口加 `--include-master-prd`）成对归档进 `docs/archive/`。
-- **审查、试合与清理**：独立审查通过由审查者经 `--detach` 试合并入 `{{DEFAULT_BRANCH}}`，**日常到此为止**（**弱化门禁必须人点头**）。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再问人清理；随时可 `--tier full` 升档。
+- **五档分流与文档归档**：沿 8 阶段闭环澄清拍板并跑 `doc-plan.mjs triage`：Case 1/2 0 文档（Case 2 先写复现失败测试）；Case 3 建 Todo；Case 4 建 SPEC+Todo 经独立 Critique（禁自审）后 `approve`；Case 5 先改 `docs/TDD.md`（若存在）。合前实施者跑 `flow.mjs finalize`（总控收口加 `--include-master-prd`）成对归档进 `docs/archive/`。
+- **门禁放行、试合与清理**：普通改动门禁通过即可经 `--detach` 试合并入 `{{DEFAULT_BRANCH}}`，触及高风险/`Case >= 4`/门禁弱化须人类确认并带 `--human-approved --reason "..."`（**弱化门禁必须人点头**），**日常到此为止**。Worktree 先 `worktree-deps.mjs` 解绑（`unlinkSync`）再问人清理；随时可 `--tier full` 升档。
 <!-- project-forge: endif -->
 <!-- project-forge: endif -->
 <!-- project-forge: if is-full -->
@@ -256,7 +270,7 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
   | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写复现失败测试再修（Red-Green）** |
   | **Case 3** | `L2` 功能调整，不改外部契约 | 在 `{{WORK_DIR}}` 建 Todo 冻结 `C1`..`Cn`；跑 `doc-plan.mjs audit` 直通 |
   | **Case 4** | `L3` 跨模块/契约变更或高风险 | 先建 `docs/specs/` + `{{WORK_DIR}}` Todo；经 `audit` + 独立 Critique -> `critique-pass` 后交人 `approve` |
-  | **Case 5** | 与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**，内审获批后再继续 |
+  | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后再继续 |
 
   按三正交策略定级：`low`（纯非可执行文本白名单；无 CI 时强制 `verify` 静态必检）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量。Case 2/3/4 单任务在隔离 `impl` 位派 `impl` 子代理；账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
@@ -331,7 +345,12 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: end 日常协作与风险分流 -->
 
 <!-- project-forge: begin 高风险路径 -->
+<!-- project-forge: if is-full -->
 ## 高风险路径（触碰须独立审查 + 故障注入）
+<!-- project-forge: endif -->
+<!-- project-forge: if is-lightweight -->
+## 高风险路径（触碰须人类确认）
+<!-- project-forge: endif -->
 
 改在这里出错不会当场失败，而是让门禁从此少查一项——坏了看着还是一片绿。
 

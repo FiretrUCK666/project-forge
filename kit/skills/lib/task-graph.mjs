@@ -276,13 +276,21 @@ export function checkUnresolvedDependencies(graph, { force = false, strictDeps =
   return { blocked: false }
 }
 
-/** 外部/Fork PR 未过 `--untrusted-scan` 且经人类授权前，硬拦截挂载依赖与执行校验。 */
-export function checkUntrustedPrGate(ledger, { humanApproved = false } = {}) {
+/** 外部/Fork PR 未装配 dev-review 或未过 `--untrusted-scan` 且经人类授权前，硬拦截挂载依赖与执行校验。 */
+export function checkUntrustedPrGate(ledger, { humanApproved = false, hasDevReview = true } = {}) {
   if (!ledger || ledger.role !== 'inbound-external-pr') return { blocked: false }
+  const pr = ledger.prNumber ?? '?'
+  if (hasDevReview === false) {
+    return {
+      blocked: true,
+      code: 'BLOCKED_REQUIRES_DEV_REVIEW',
+      exitCode: 3,
+      message: `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${pr} 的供应链不可信扫描需要 dev-review 技能，当前 lightweight 档未装配该技能；请升级为 full 档后重试。`,
+    }
+  }
   const scanOk = ledger.untrustedScanPassed === true
   const approved = Boolean(humanApproved || ledger.untrustedApproved === true || ledger.humanApprovedExec === true)
   if (!scanOk || !approved) {
-    const pr = ledger.prNumber ?? '?'
     const stage = !scanOk ? '尚未通过 --untrusted-scan 供应链静态扫描' : '尚未获得人类安全授权（--human-approved-exec / untrustedApproved）'
     return {
       blocked: true,

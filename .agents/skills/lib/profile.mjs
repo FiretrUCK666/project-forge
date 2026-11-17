@@ -60,7 +60,7 @@ function stripInlineYamlComment(val) {
   return s.trim()
 }
 
-function isAnglePlaceholder(val) {
+export function isAnglePlaceholder(val) {
   const s = stripWrapQuotes(val)
   return !s || /^<[^>\n]+>$/.test(s) || /^<!--/.test(s)
 }

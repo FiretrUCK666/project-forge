@@ -331,7 +331,7 @@ function detectNodePackageCommands(repoRoot, dirRel, rootPm) {
   const prefixArg = dirRel
     ? (pm === 'npm' ? ` --prefix ${dirRel}` : pm === 'pnpm' ? ` --dir ${dirRel}` : ` --cwd ${dirRel}`)
     : ''
-  const wrapDir = (subCmd) => (dirRel ? `${pm}${prefixArg} ${subCmd}` : subCmd)
+  const wrapDir = (subCmd) => `${pm}${prefixArg} ${subCmd}`
   const scripts = pkg.scripts ?? {}
   let quickTest
   let fullTest

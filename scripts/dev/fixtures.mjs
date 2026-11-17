@@ -33,6 +33,7 @@ import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
 import { registerReviewEmpiricalCases } from './fixtures-review-empirical.mjs'
+import { registerOnboardingCases } from './fixtures-onboarding.mjs'
 
 initTestBackupDir()
 
@@ -51,6 +52,7 @@ const DOMAIN_REGISTRY = [
   ['doc-triage', registerDocTriageCases],
   ['handoff-review', registerHandoffReviewCases],
   ['equip', registerEquipCases],
+  ['onboarding', registerOnboardingCases],
   ['docs', registerDocsCases],
   ['platform', registerPlatformCases],
   ['explore', registerExploreCases],

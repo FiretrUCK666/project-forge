@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
 import { writeAtomic } from './lib/fs-atomic.mjs'
+import { detectSkillKind } from './lib/survey-ecosystem.mjs'
 import {
   filterKitByTier,
   generateInitialBootstrappedAgents,
@@ -104,8 +105,59 @@ function resolveEffectiveTier(requestedTier, existing) {
   return EQUIP_TIERS.includes(prevTier) ? prevTier : 'full'
 }
 
+function walkInstalledMjsFiles(skillsDir) {
+  const out = []
+  if (!existsSync(skillsDir)) return out
+  const visit = (dir, relBase) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (isMacOsMetadata(entry.name) || entry.name === '.pf-manifest.json') continue
+      const full = join(dir, entry.name)
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name
+      if (entry.isDirectory()) visit(full, rel)
+      else if (entry.isFile() && entry.name.endsWith('.mjs')) out.push({ full, rel })
+    }
+  }
+  visit(skillsDir, '')
+  return out
+}
+
+function inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existingExists) {
+  const required = effectiveTier === 'lightweight' ? LIGHTWEIGHT_KIT_SKILLS : KIT_SKILLS
+  const disabledCoreSkills = []
+  const brokenImports = []
+  const invalidFrontmatters = []
+
+  for (const skill of required) {
+    const skillEntry = `${skill}/SKILL.md`
+    if (disabledSet.has(skill) || Boolean(removedMap[skillEntry]) || (existingExists && !existsSync(join(skillsDir, skillEntry)))) {
+      disabledCoreSkills.push(skill)
+    }
+  }
+
+  if (existsSync(skillsDir)) {
+    const relImportRe = /(?:^\s*(?:import|export)[\s\S]*?from\s+|import\s*\(\s*)['"](\.[^'"]+)['"]/gm
+    for (const { full, rel } of walkInstalledMjsFiles(skillsDir)) {
+      const code = readTextSafe(full) ?? ''
+      for (const m of code.matchAll(relImportRe)) {
+        const spec = m[1].trim()
+        if (!existsSync(resolve(dirname(full), spec))) brokenImports.push(`${rel} -> ${spec}`)
+      }
+    }
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || isMacOsMetadata(entry.name) || entry.name === 'lib' || entry.name.startsWith('.')) continue
+      if (disabledSet.has(entry.name)) continue
+      const skillDir = join(skillsDir, entry.name)
+      if (!existsSync(join(skillDir, 'SKILL.md'))) continue
+      const detected = detectSkillKind(skillDir)
+      if (!detected?.skillMeta?.hasValidFrontmatter) invalidFrontmatters.push(`${entry.name}/SKILL.md`)
+    }
+  }
+
+  return { disabledCoreSkills, brokenImports, invalidFrontmatters }
+}
+
 /**
- * 字节级只读校验 `<targetDir>/.agents/skills/` 与源 `kit/skills/` 的一致性（兼容 v1/v2 账本、降档保留、墓碑与定制豁免）。
+ * 字节级与结构一致性只读校验 `<targetDir>/.agents/skills/`（含核心技能、跨目录导入断链与 YAML frontmatter 校验）。
  */
 export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } = {}) {
   const root = resolve(targetDir)
@@ -176,14 +228,21 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
     if (!extraManaged.includes(rel)) extraManaged.push(rel)
   }
   extraManaged.sort()
+  const integrity = inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existing.exists)
 
   const ok = existing.exists && existing.valid
     && missing.length === 0 && drifted.length === 0
     && unregistered.length === 0 && extraManaged.length === 0
+    && integrity.disabledCoreSkills.length === 0
+    && integrity.brokenImports.length === 0
+    && integrity.invalidFrontmatters.length === 0
 
   return {
     ok, target: root, tier: effectiveTier, schemaVersion: existing.data?.schemaVersion,
     manifestPath: PF_MANIFEST_REL, missing, drifted, unregistered, extraManaged, customized,
+    disabledCoreSkills: integrity.disabledCoreSkills,
+    brokenImports: integrity.brokenImports,
+    invalidFrontmatters: integrity.invalidFrontmatters,
     disabledSkills: [...disabledSet].sort(), removedFiles: Object.keys(removedMap).sort(),
   }
 }
@@ -470,6 +529,9 @@ function formatCheckReport(res) {
   for (const p of res.drifted) lines.push(`字节不一致：${p}`)
   for (const p of res.unregistered) lines.push(`未登记哈希：${p}`)
   for (const p of res.extraManaged) lines.push(`多余托管文件：${p}`)
+  for (const s of res.disabledCoreSkills ?? []) lines.push(`核心技能缺失或已禁用：${s}`)
+  for (const b of res.brokenImports ?? []) lines.push(`相对导入断链：${b}`)
+  for (const f of res.invalidFrontmatters ?? []) lines.push(`frontmatter 缺少 name/description：${f}`)
   for (const c of res.customized ?? []) {
     lines.push(c.upstreamChanged ? `定制豁免：${c.path}（上游新版有变化，可供参考合并）` : `定制豁免：${c.path}（与上游基线一致）`)
   }

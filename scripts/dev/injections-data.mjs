@@ -868,6 +868,14 @@ export const INJECTIONS = [
     expect: '讲不做与讲删除',
   },
   {
+    id: 'I97',
+    what: '项目声明的额外章节被静默忽略（点名要 nfr 也不要求）',
+    file: 'kit/skills/lib/doc-requirements.mjs',
+    from: '        ...decl.required.filter((id) => !(DEFAULT_OPTIONAL_SECTIONS[kind] ?? []).includes(id)),',
+    to: '        ...([]),',
+    expect: '项目能在模板里点名要章节',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

@@ -1755,4 +1755,46 @@ cases.push(['讲不做与讲删除的地方，不存在的路径不是幻觉', a
   } finally { rmTree(dir) }
 }])
 
+// 「通用」不是「什么都要求」，而是「用得上的人拿得到，用不上的人删得掉」。
+//
+// 早先可选章节只有零星几个登记在案，于是项目想在模板里点名要一节
+// （比如「非功能要求」），工具根本不认识那个 id，声明被静默忽略。
+cases.push(['项目能在模板里点名要章节，也能点名不要', async () => {
+  const { resolveDocRequirements } = await import('../../kit/skills/lib/doc-requirements.mjs')
+  const fs = await import('node:fs')
+
+  const dir = tmpProject({ 'README.md': '# d\n\n声明测试仓。\n' })
+  try {
+    mkdirSync(join(dir, 'docs/templates'), { recursive: true })
+
+    // 正向 1：点名要「非功能要求」——必须真的被要求
+    fs.writeFileSync(join(dir, 'docs/templates/spec.md'),
+      '---\nkind: spec\nrequired_sections: [nfr]\nomit_sections: [door]\n---\n\n# 自己的模板\n')
+    const req = resolveDocRequirements(dir, 'spec')
+    const ids = req.sections.map((s) => s.id)
+    if (!ids.includes('nfr')) return `点名要的 nfr 没被要求：${ids.join(',')}`
+    if (ids.includes('door')) return '点名不要的 door 还在要求里'
+    if (!req.omit.has('door')) return 'omit 集合里没有 door'
+
+    // 反向 1：无声明时不许凭空多要求——那会把纯工具类项目逼着写「用户身份」
+    const plain = resolveDocRequirements(null, 'spec')
+    const plainIds = plain.sections.map((s) => s.id)
+    for (const extra of ['nfr', 'users', 'risks', 'metrics']) {
+      if (plainIds.includes(extra)) return `没有声明却要求了 ${extra}——这就是「不够通用」的来源`
+    }
+    if (plainIds.length !== 3) return `默认应该只要求主干三节，实际 ${plainIds.length} 节：${plainIds.join(',')}`
+
+    // 反向 2：主干写进 omit 也不许被删
+    fs.writeFileSync(join(dir, 'docs/templates/spec.md'),
+      '---\nkind: spec\nomit_sections: [goal, acceptance]\n---\n\n# 模板\n')
+    const guarded = resolveDocRequirements(dir, 'spec')
+    if (guarded.omit.has('goal') || guarded.omit.has('acceptance')) {
+      return '主干章节被允许列进 omit——那等于允许不写要做什么'
+    }
+    if (!guarded.sections.map((s) => s.id).includes('goal')) return '主干被 omit 挤掉了'
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

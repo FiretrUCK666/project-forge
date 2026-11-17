@@ -173,6 +173,107 @@ export const SECTION_DEFS = Object.freeze({
     core: false,
     fixHint: '写清当前停在哪、哪些要人拍板，接手人据此恢复。',
   },
+
+  // ── 大型项目才用得到的章节 ────────────────────────────────────
+  // 它们全都登记在这里，但**默认一个都不要求**。登记的意义是：项目可以点名要
+  // 或点名不要，而不是被工具替它决定。这也正是「通用」的含义——
+  // 能用得上的人拿得到，用不上的人删得掉。
+  users: {
+    id: 'users',
+    label: '用户身份与权限',
+    keywords: ['用户身份', '权限', '角色'],
+    evidence: [/(?:角色|身份|权限)[^\n]{0,20}(?:能|可以|不能|禁止)/],
+    core: false,
+    fixHint: '列清谁能做什么、谁不能做什么，以及它们在代码里对应什么。',
+  },
+  rules: {
+    id: 'rules',
+    label: '状态与业务规则',
+    keywords: ['状态与业务规则', '业务规则', '状态机', '状态'],
+    evidence: [/(?:状态)[^\n]{0,20}(?:迁移|流转|变更)/, /\b(?:state\s+machine)\b/i],
+    core: false,
+    fixHint: '有状态机就列清对象、状态、允许的迁移与触发条件。',
+  },
+  nfr: {
+    id: 'nfr',
+    label: '非功能要求',
+    keywords: ['非功能', '性能要求', '质量属性'],
+    evidence: [/(?:性能|并发|响应时间|可用性|容量)[^\n]{0,30}(?:要求|上限|不低于|不超过)/],
+    core: false,
+    fixHint: '只写本项目真正会被验收的那几条，每条都要说清怎么验。',
+  },
+  rollout: {
+    id: 'rollout',
+    label: '上线、灰度与兼容策略',
+    keywords: ['上线', '灰度', '兼容策略', '发布方案'],
+    evidence: [/(?:灰度|开关|迁移|回填|兼容期)/],
+    core: false,
+    fixHint: '写清怎么上线、怎么退、老数据与老调用方怎么办。',
+  },
+  metrics: {
+    id: 'metrics',
+    label: '成功度量',
+    keywords: ['成功度量', '度量', '指标', 'Metrics'],
+    evidence: [/(?:基线|目标值)[^\n]{0,20}(?:达到|低于|高于)/, /(?:埋点|指标名)/],
+    core: false,
+    fixHint: '「做完了」和「做对了」是两件事；写清后者怎么量。',
+  },
+  dependencies: {
+    id: 'dependencies',
+    label: '依赖与前置条件',
+    keywords: ['依赖与前置', '前置条件', '依赖'],
+    evidence: [/(?:依赖|前置|等[^\n]{0,10}先|blocked\s+by)/i],
+    core: false,
+    fixHint: '写清要谁先做完、要谁点头；没有它会阻塞还是可绕过。',
+  },
+  risks: {
+    id: 'risks',
+    label: '风险与开放问题',
+    keywords: ['风险', '开放问题', 'Risks'],
+    evidence: [/(?:风险|可能出问题|兜底)/],
+    core: false,
+    fixHint: '与「待拍板」不同：这里要人知道可能会出什么事，不是要人做决定。',
+  },
+  alternatives: {
+    id: 'alternatives',
+    label: '备选方案与否决理由',
+    keywords: ['备选方案', '否决理由', '方案对比'],
+    evidence: [/(?:备选|另一个方案|还考虑过|没有选)/],
+    core: false,
+    fixHint: '写清还考虑过什么、为什么不选——这段能防止已否掉的方案被重新讨论。',
+  },
+  breakdown: {
+    id: 'breakdown',
+    label: '改动清单与影响面',
+    keywords: ['改动清单', '影响面', '影响范围', '变更清单'],
+    evidence: [/(?:新增|修改|删除)[^\n]{0,20}(?:文件|路径|模块)/, /(?:对外可见的变化|breaking)/i],
+    core: false,
+    fixHint: '一条一条列清要动什么；审查者按这张表核对 diff 有没有漏改。',
+  },
+  risk: {
+    id: 'risk',
+    label: '风险与应对',
+    keywords: ['风险与应对', '风险'],
+    evidence: [/(?:风险|触发条件|怎么退)/],
+    core: false,
+    fixHint: '只在确实有风险时保留；没有就整节删掉，不要留空表。',
+  },
+  rollback: {
+    id: 'rollback',
+    label: '回滚预案',
+    keywords: ['回滚预案', '回滚'],
+    evidence: [/(?:回滚|恢复快照|反向提交)[^\n]{0,20}(?:第一步|命令|操作)/],
+    core: false,
+    fixHint: '写清出问题时的第一条命令；「评估一下」不是预案。',
+  },
+  coordination: {
+    id: 'coordination',
+    label: '协作与依赖',
+    keywords: ['协作与依赖', '协作', '对接'],
+    evidence: [/(?:需要[^\n]{0,10}(?:配合|提供|确认)|找谁)/],
+    core: false,
+    fixHint: '写清需要谁配合、什么时候要、找谁。',
+  },
 })
 
 /**

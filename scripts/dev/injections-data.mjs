@@ -923,6 +923,23 @@ export const INJECTIONS = [
     expect: '跟踪的链接在删除档不许豁免',
   },
   {
+    id: 'I104',
+    what: '交接包不再带设计方案（实现子代理只能自己重新推导一遍）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: '  const design = extractDesignSection(specText)',
+    to: '  const design = String()',
+    expect: '交接包必须带设计方案',
+  },
+
+  {
+    id: 'I105',
+    what: '影响路径只认小节形态（行内写法整类静默变空）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: "  const inline = /^-\\s*\\*\\*(?:影响路径|影响范围|涉及文件|改动路径)\\*\\*\\s*[:：]\\s*(.+)$/gm",
+    to: '  const inline = /(?:NEVER_MATCH_XYZ)/g',
+    expect: '交接包必须带设计方案',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

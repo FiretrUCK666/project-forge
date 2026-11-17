@@ -2084,4 +2084,63 @@ cases.push(["待拍板没清空就拦下，清了才放行", async () => {
 
   return true
 }])
+
+// 交接包是「主 Agent 派活给实现子代理」时唯一传过去的东西。
+// 它此前只给三样：验收标准、影响路径、非目标——**唯独没有「怎么做」**。
+// 缺了设计方案，子代理只能自己重新推导一遍；推错了就是「每条判据都过、实现却不对」。
+cases.push(["交接包必须带设计方案，且不许把同一件事说两遍", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+
+  const spec = [
+    "---", "kind: spec", "title: h", "status: approved", "owner: me", "---", "",
+    "# SPEC: h", "",
+    "## 要解决的问题", "", "某功能要改。", "",
+    "## 设计方案与契约变更", "", "### 接口变更", "",
+    "loadThing(path) -> { ok, value }", "",
+    "失败返回 { ok: false }，不抛异常。", "",
+    "## 本期不做", "", "- **本期不做**：不引入第三方解析器；不做 LSP 级语义分析。", "",
+    "## 冻结的验收标准", "", "- [ ] C1: 退出码 0", "",
+  ].join("\n")
+
+  const todo = [
+    "---", "kind: todo", "title: h", "status: active", "owner: me", "---", "",
+    "# Todo: h", "",
+    "## 任务范围与验证基准", "", "- **影响路径**：`src/loader.mjs`", "",
+    "- **本期不做**：第三方解析器、LSP 级语义分析", "",
+    "## 验收标准与执行清单", "", "- [ ] C1: 退出码 0", "",
+  ].join("\n")
+
+  const dir = tmpProject({
+    "README.md": "# h\n\n交接包测试。\n",
+    "AGENTS.md": "```yaml\nquick-test: node --test\nfull-test: node --test\n```\n",
+    "docs/specs/261117-issue7-h-spec.md": spec,
+    "docs/todo/261117-issue7-h-todo.md": todo,
+  })
+  try {
+    const r = buildHandoff({
+      mainRoot: dir,
+      ledger: {
+        taskId: "h", specFile: "docs/specs/261117-issue7-h-spec.md",
+        todoFile: "docs/todo/261117-issue7-h-todo.md", branch: "feat/h", baseBranch: "main", baseSha: "abc",
+      },
+      policy: { requiredGates: [] },
+    })
+
+    // 正向：设计方案必须进 prompt，而且内容要真的在里面
+    if (!r.prompt.includes("怎么做（来自 SPEC 的设计方案）")) return "交接包里没有设计方案那一节"
+    if (!r.prompt.includes("loadThing(path)")) return "设计方案抽出来了但内容不全"
+    if (!r.prompt.includes("不抛异常")) return "设计方案的正文没带过来"
+
+    // 正向：影响路径与非目标照旧
+    if (!r.fields.paths.includes("src/loader.mjs")) return `影响路径没抽到：${JSON.stringify(r.fields.paths)}`
+    if (r.fields.nonGoals.length === 0) return "非目标没抽到"
+
+    // 反向：同一件事在 SPEC 与 Todo 各写一遍时，只该留一条
+    if (r.fields.nonGoals.length > 1) {
+      return `同一件事被说了两遍：${JSON.stringify(r.fields.nonGoals)}`
+    }
+
+    return true
+  } finally { rmTree(dir) }
+}])
 }

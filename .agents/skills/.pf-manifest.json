@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T08:49:00.139Z",
+  "installedAt": "2026-11-17T09:00:26.906Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -140,7 +140,7 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "aa2c4fb2aad7f5025bd4cf5553880da08953c25ee9d3c3207f1eb81fb8291465"
+      "sha256": "061bc0a7b041fb55b9f6231ae46b1d3fa86b44902395ae47dd22331e0dfb0bbe"
     },
     "lib/ledger.mjs": {
       "sha256": "b69e6bb4868e22d6f36bc293b3551dc5a67d0a99f32dbfcf568d107faba512a2"

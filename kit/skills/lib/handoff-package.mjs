@@ -179,10 +179,31 @@ function factsHasRemote(mainRoot) {
 }
 
 export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null, current = null }) {
-  const specRel = ledger?.specFile ?? null
-  const todoRel = ledger?.todoFile ?? null
-  const specText = specRel && existsSync(join(mainRoot, specRel)) ? (readTextSafe(join(mainRoot, specRel)) ?? '') : ''
-  const todoText = todoRel && existsSync(join(mainRoot, todoRel)) ? (readTextSafe(join(mainRoot, todoRel)) ?? '') : ''
+  // 归档之后 specFile/todoFile 会指向 docs/archive/，而审核阶段正是归档之后。
+  // 只读 specFile 会让审核交接包变成「没有登记验收标准」——判据在，只是搬了家。
+  //
+  // 两个根都要看：主仓里有已归档的文档，而这条任务的归档在**实施位**里，
+  // 还没合并回主仓。只查一个根，两种情形各漏一半。
+  const docRoots = [mainRoot, ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null].filter(Boolean)
+  const pickDoc = (live, archived) => {
+    for (const rel of [live, archived]) {
+      if (!rel) continue
+      if (docRoots.some((root) => existsSync(join(root, rel)))) return rel
+    }
+    return null
+  }
+  const specRel = pickDoc(ledger?.specFile, ledger?.archivedSpecFile)
+  const todoRel = pickDoc(ledger?.todoFile, ledger?.archivedTodoFile)
+  const readFromDocRoots = (rel) => {
+    if (!rel) return ''
+    for (const root of docRoots) {
+      const abs = join(root, rel)
+      if (existsSync(abs)) return readTextSafe(abs) ?? ''
+    }
+    return ''
+  }
+  const specText = readFromDocRoots(specRel)
+  const todoText = readFromDocRoots(todoRel)
 
   // 验收标准以 SPEC 为准，没有 SPEC 时退到 Todo。两者都没有就明说没有。
   const criteria = specText ? extractCriteria(specText) : extractCriteria(todoText)

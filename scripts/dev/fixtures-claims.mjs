@@ -2338,4 +2338,47 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
 
   return true
 }])
+
+// 审核阶段在归档**之后**：文档已搬进 docs/archive/，而且搬动发生在实施位里，
+// 还没合并回主仓。只读 specFile 会让审核交接包变成「没有登记验收标准」——
+// 判据在，只是搬了家。两个根都要看。
+cases.push(["归档之后审核交接包仍拿得到验收标准", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# a\n\n归档测试。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    // 建实施位，把归档文档放进**实施位**里（主仓没有）
+    const wt = join(dir, ".worktrees", "impl-a")
+    const fs = await import("node:fs")
+    fs.mkdirSync(join(wt, "docs", "archive", "specs"), { recursive: true })
+    fs.writeFileSync(join(wt, "docs", "archive", "specs", "x-spec.md"), [
+      "---", "kind: spec", "title: x", "status: implemented", "owner: me", "---", "",
+      "# SPEC: x", "", "## 冻结的验收标准", "", "- [x] C1: 退出码 0", "- [x] C2: 不误报", "",
+    ].join("\n"))
+
+    const r = buildHandoff({
+      mainRoot: dir,
+      ledger: {
+        taskId: "a", role: "local-only", branch: "b", baseBranch: "main", baseSha: "c",
+        worktreePath: ".worktrees/impl-a",
+        specFile: "docs/archive/specs/x-spec.md",
+        archivedSpecFile: "docs/archive/specs/x-spec.md",
+        todoFile: null, archivedTodoFile: null,
+      },
+      policy: {}, ownerRole: "reviewer",
+    })
+
+    if (r.prompt.includes("没有登记验收标准")) {
+      return "归档后的文档在主仓找不到，交接包就说没登记——判据在，只是搬了家"
+    }
+    if (!r.prompt.includes("C1")) return "没收出 C1"
+    if (!r.prompt.includes("C2")) return "没收出 C2"
+    if (r.fields.criteriaCount !== 2) return `条数算出 ${r.fields.criteriaCount}，应为 2`
+
+    return true
+  } finally { rmTree(dir) }
+}])
 }

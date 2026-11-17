@@ -258,6 +258,16 @@ export function prepareExecInvocation(cmd, args = [], { cwd, env = process.env }
 }
 
 /**
+ * 为子进程 stdio 流挂载空错误监听器，防止 Windows 管道初始化失败（如 ENOTCONN）抛出未捕获异常。
+ */
+export function attachChildStreamErrorGuards(child) {
+  if (!child) return
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream && typeof stream.on === 'function') stream.on('error', () => {})
+  }
+}
+
+/**
  * 安全执行外部命令（默认不经过 shell；Windows `.cmd`/`.bat` 自动经
  * `cmd.exe /d /s /c` + `windowsVerbatimArguments` 解析），并注入全套防弹窗环境变量。
  * 区分 cwd 不存在（`missingCwd`）与命令缺失（`missing`），永不抛出未捕获异常。
@@ -295,6 +305,7 @@ export function execSafe(cmd, args = [], opts = {}) {
         stdio: hasInput ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
         ...(inv.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       })
+      attachChildStreamErrorGuards(child)
     } catch (err) {
       done({
         ok: false,
@@ -400,7 +411,6 @@ export function execSafe(cmd, args = [], opts = {}) {
     })
 
     if (hasInput && child.stdin) {
-      child.stdin.on('error', () => {})
       child.stdin.end(opts.input)
     }
   })
@@ -481,6 +491,7 @@ export function execShellCommand(commandStr, cwd, opts = {}) {
           windowsHide: true,
           env,
         })
+    attachChildStreamErrorGuards(child)
     const outChunks = []
     const errChunks = []
     let timedOut = false

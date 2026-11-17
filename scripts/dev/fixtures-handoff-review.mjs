@@ -517,16 +517,26 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
 
     // 非回归：只读 inspectWorkspace 在无 --probe-auth 时绝不调 gh auth status
     const logRo = join(sb, "ro.log")
-    const envKeys = ["PF_NO_REAL_AUTH_PROBE", "PATH", "Path", "GH_TOKEN", "GITHUB_TOKEN", "PF_MCP_GITHUB", "MCP_GITHUB_AVAILABLE", "FAKE_GH_LOG", "FAKE_GH_AUTH", "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "SSH_AUTH_SOCK"]
+    const envKeys = ["PF_NO_REAL_AUTH_PROBE", "GH_TOKEN", "GITHUB_TOKEN", "PF_MCP_GITHUB", "MCP_GITHUB_AVAILABLE", "FAKE_GH_LOG", "FAKE_GH_AUTH", "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "SSH_AUTH_SOCK"]
     const saved = Object.fromEntries(envKeys.map((k) => [k, Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined]))
+    const savedPaths = Object.getOwnPropertyNames(process.env).filter((k) => k.toLowerCase() === "path").map((k) => [k, process.env[k]])
     try {
+      delete process.env.Path
+      delete process.env.PATH
       Object.assign(process.env, childEnv(true, logRo))
-      delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.Path
+      delete process.env.GH_TOKEN
+      delete process.env.GITHUB_TOKEN
+      if (!process.env.PATH || !process.env.PATH.includes(binDir)) {
+        return `测试隔离环境丢失 PATH：PATH=${String(process.env.PATH)}`
+      }
       const ro = await inspectWorkspace(dir, { roots })
       if (ro.github.trackB.tier !== "none" || existsSync(logRo)) {
         return `只读 inspectWorkspace 破坏了惰性默认：tier=${ro.github.trackB.tier}, logged=${existsSync(logRo)}`
       }
     } finally {
+      delete process.env.Path
+      delete process.env.PATH
+      for (const [pk, pv] of savedPaths) if (pv !== undefined) process.env[pk] = pv
       for (const k of envKeys) {
         if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]
       }
@@ -737,5 +747,27 @@ cases.push(["记审查结论必须交实证佐证", async () => {
 
     return true
   } finally { rmTree(dir) }
+}])
+
+cases.push(["子进程 stdio 流错误与早期关闭不崩溃", async () => {
+  const { EventEmitter } = await import("node:events")
+  const { attachChildStreamErrorGuards, execSafe, execShellCommand } = await import("../../kit/skills/lib/exec.mjs")
+
+  const fakeChild = { stdin: new EventEmitter(), stdout: new EventEmitter(), stderr: new EventEmitter() }
+  attachChildStreamErrorGuards(fakeChild)
+  for (const name of ["stdin", "stdout", "stderr"]) {
+    if (fakeChild[name].listenerCount("error") < 1) return `未挂载 ${name} error 监听器`
+    fakeChild[name].emit("error", Object.assign(new Error("read ENOTCONN"), { code: "ENOTCONN" }))
+  }
+  attachChildStreamErrorGuards(null)
+  attachChildStreamErrorGuards({ stdin: null, stdout: new EventEmitter(), stderr: null })
+
+  const r1 = await execSafe(process.execPath, ["-e", "process.stdout.destroy();process.stderr.destroy();"], { input: "x".repeat(512), cwd: process.cwd(), timeout: 5000 })
+  if (r1.timedOut) return "execSafe 早期销毁 stdio 后超时"
+
+  const r2 = await execShellCommand(`${JSON.stringify(process.execPath)} -e "process.stdout.destroy();process.stderr.destroy();"`, process.cwd(), { timeoutMs: 5000 })
+  if (r2.timedOut) return "execShellCommand 早期销毁 stdio 后超时"
+
+  return true
 }])
 }

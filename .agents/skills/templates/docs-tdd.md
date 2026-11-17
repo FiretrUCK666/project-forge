@@ -140,9 +140,8 @@ flowchart TD
 
 <!-- /section -->
 
-## 数据模型与持久化契约
-
 <!-- section: data optional -->
+## 数据模型与持久化契约
 
 ```mermaid
 erDiagram
@@ -166,9 +165,8 @@ erDiagram
 
 <!-- /section -->
 
-## 对外接口与交互时序
-
 <!-- section: api optional -->
+## 对外接口与交互时序
 
 ```mermaid
 sequenceDiagram
@@ -187,9 +185,8 @@ sequenceDiagram
 
 <!-- /section -->
 
-## 部署与环境差异
-
 <!-- section: deploy optional -->
+## 部署与环境差异
 
 - **部署拓扑**：<单进程 / 容器 / 多副本，各自的启动方式>
 - **环境变量与密钥边界**：<仅列配置键名与默认值，严禁写入真实密钥；明确禁止提交 `.env`>

@@ -11,6 +11,25 @@ import { join } from 'node:path'
 import { scanLines } from './markdown.mjs'
 import { PF_MANIFEST_REL, markerRegions, parseMarkers } from './protocol.mjs'
 import { readJsonSafe } from './text.mjs'
+import { DEV_PROFILE_KEYS, isAnglePlaceholder } from '../../kit/skills/lib/profile.mjs'
+
+function isCalibratedDevProfile(regionId, bodyLines) {
+  if (regionId !== 'Dev Profile') return false
+  const bodyText = bodyLines.join('\n')
+  if (parseMarkers(bodyText, 'AGENTS.md').some((m) => m.kind === 'fill')) return false
+  const yamlMatch = /```ya?ml\n([\s\S]*?)```/i.exec(bodyText)
+  if (!yamlMatch) return false
+  const found = new Map()
+  for (const line of yamlMatch[1].split('\n')) {
+    const clean = line.replace(/(?:^|\s)#.*$/, '').trim()
+    const kv = /^([a-z-]+)\s*:\s*(.*)$/i.exec(clean)
+    if (kv) found.set(kv[1].toLowerCase(), kv[2].trim())
+  }
+  return DEV_PROFILE_KEYS.every((k) => {
+    const v = found.get(k)
+    return typeof v === 'string' && v.length > 0 && !isAnglePlaceholder(v)
+  })
+}
 
 export function sha256Of(text) {
   return createHash('sha256').update(String(text ?? '').replace(/\r\n/g, '\n'), 'utf8').digest('hex')
@@ -195,6 +214,11 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
       if (bodyLines.join('\n') === renderedBody.join('\n')) { kept.push(region.id); continue }
       filled.push(region.id)
     } else {
+      if (isCalibratedDevProfile(region.id, bodyLines)) {
+        protectedRegions.push(region.id)
+        kept.push(region.id)
+        continue
+      }
       if (normalizeBody(bodyLines, volatile) === normalizeBody(renderedBody, volatile)) {
         kept.push(region.id)
         continue
@@ -283,10 +307,12 @@ export function driftRegions(existing, rendered, volatile = []) {
     if (region.customized) continue
     const source = freshById.get(region.id)
     if (!source) continue
+    const bodyLines = lines.slice(region.start + 1, region.end)
+    if (isCalibratedDevProfile(region.id, bodyLines)) continue
     const renderedBody = renderedLines.slice(source.start + 1, source.end)
     if (parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')) continue
 
-    const a = normalizeBody(lines.slice(region.start + 1, region.end), volatile)
+    const a = normalizeBody(bodyLines, volatile)
     const b = normalizeBody(renderedBody, volatile)
     if (a !== b) drifted.push(region.id)
   }

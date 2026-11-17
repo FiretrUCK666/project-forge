@@ -112,6 +112,7 @@ export function determineWorkflowPolicy({
   visualFilesChanged = [],
   diffBytes = 0,
   profile = null,
+  hasDevReview = true,
 } = {}) {
   const files = [...new Set((Array.isArray(changedFiles) ? changedFiles : []).map(normRel).filter(Boolean))].sort()
   const ownSet = new Set([...(ownArchived ?? [])].map(normRel).filter(Boolean))
@@ -146,10 +147,14 @@ export function determineWorkflowPolicy({
   if (riskTier === 'low') reasons.push('全部变更命中纯非可执行文档白名单')
   else if (riskTier === 'medium') reasons.push(files.length === 0 && isDocsOnlyRepo ? '无文件 diff 的文档仓任务按标准校验处理' : '常规源码或非白名单变更')
 
+  const independentReviewRequired = hasDevReview ? (riskTier !== 'low') : false
+  const humanApprovalRequired = !hasDevReview && riskTier === 'high'
+
   return {
     riskTier,
     issueRequired: riskTier === 'low' ? false : Boolean(hasRemote),
-    independentReviewRequired: riskTier !== 'low',
+    independentReviewRequired,
+    humanApprovalRequired,
     faultInjectionRequired: riskTier === 'high',
     requiredGates: resolveRequiredGates(riskTier, profile),
     staticDocCheckRequired: riskTier === 'low' && !hasCiWorkflow,
@@ -534,15 +539,24 @@ export function evaluateNextState({
     nextAction = '分支已合入，请向用户列清单确认后再执行 cleanup --confirm'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${t.taskId} --confirm`
   } else if (t.role === 'inbound-external-pr') {
-    ownerRole = 'reviewer'
-    if (!reviewCoversHead) {
-      phase = 'needs-review'
-      nextAction = `对外部 PR #${t.prNumber ?? ''} 运行安全扫描与隔离审查`
-      command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${t.prNumber} --untrusted-scan`
+    const hasDevReview = rt.hasDevReview ?? true
+    if (!hasDevReview) {
+      phase = 'blocked'
+      ownerRole = 'human'
+      blockingReasons.push('BLOCKED_REQUIRES_DEV_REVIEW')
+      nextAction = '当前项目为 lightweight 档且未装配 dev-review，外部 PR 不可信扫描与隔离审查须先通过 project-forge 升级为 full 档'
+      command = 'equip --tier full'
     } else {
-      phase = 'ready-to-merge'
-      nextAction = '外部 PR 独立审查已通过，按合并权限合并'
-      command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
+      ownerRole = 'reviewer'
+      if (!reviewCoversHead) {
+        phase = 'needs-review'
+        nextAction = `对外部 PR #${t.prNumber ?? ''} 运行安全扫描与隔离审查`
+        command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${t.prNumber} --untrusted-scan`
+      } else {
+        phase = 'ready-to-merge'
+        nextAction = '外部 PR 独立审查已通过，按合并权限合并'
+        command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
+      }
     }
   } else if (rt.dirty > 0) {
     phase = 'implementing'
@@ -605,26 +619,35 @@ export function evaluateNextState({
     const reworkFlag = rounds.length > 0 ? ' --rework' : ''
     nextAction = '实证已锁定当前 HEAD，由实施者执行 submit 推送并提 PR/同步审查工作位'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${t.taskId}${reworkFlag}`
-  } else if (policy?.independentReviewRequired !== false && !reviewCoversHead) {
-    phase = 'needs-review'
-    ownerRole = 'reviewer'
-    nextAction = `请新建独立审查子代理执行 Round ${nextRound} 审查（禁止复用旧上下文）`
-    command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${t.taskId} --round ${nextRound}`
   } else if (t.role === 'contributor-fork') {
     phase = 'awaiting-upstream-merge'
     ownerRole = 'human'
     nextAction = '等待上游维护者合并 PR，合并前严禁删除 Fork 分支'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}`
+  } else if (policy?.independentReviewRequired !== false && !reviewCoversHead) {
+    phase = 'needs-review'
+    ownerRole = 'reviewer'
+    nextAction = `请新建独立审查子代理执行 Round ${nextRound} 审查（禁止复用旧上下文）`
+    command = `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${t.taskId} --round ${nextRound}`
   } else if (t.role === 'generic-git') {
     phase = 'awaiting-remote-mr'
     ownerRole = 'human'
-    nextAction = '请先在远端托管完成 MR 合并，再带 --remote-merged 确认收尾'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId} --remote-merged`
+    const approveSuffix = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''
+    nextAction = policy?.humanApprovalRequired
+      ? '请先在远端托管完成 MR 合并，因触及高风险须人类确认后再带 --remote-merged --human-approved --reason 收尾'
+      : '请先在远端托管完成 MR 合并，再带 --remote-merged 确认收尾'
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId} --remote-merged${approveSuffix}`
   } else {
     phase = 'ready-to-merge'
-    ownerRole = 'reviewer'
-    nextAction = '门禁与审查全部就绪，由审查者执行 merge 完成合并'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
+    ownerRole = policy?.humanApprovalRequired ? 'human' : 'reviewer'
+    nextAction = policy?.humanApprovalRequired
+      ? 'lightweight 档触及高风险/one-way 边界，请人类确认后带 --human-approved --reason "<确认原因>" 执行 merge'
+      : (policy?.independentReviewRequired === false
+        ? '门禁与实证全部就绪，可执行 merge 完成合并'
+        : '门禁与审查全部就绪，由审查者执行 merge 完成合并')
+    command = policy?.humanApprovalRequired
+      ? `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId} --human-approved --reason "<确认原因>"`
+      : `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${t.taskId}`
   }
 
   // 主工作区直接改文件：warning 不是 blocker。
@@ -719,4 +742,47 @@ export function analyzeIssueDependencies(issueItems = []) {
     hasDependencies: edges.length > 0, orderedIssues: ordered, edges, hasCycle,
     strategy: edges.length > 0 ? 'serial-order' : (parents.size === 1 ? 'same-branch-or-parallel' : 'parallel-or-combine'),
   }
+}
+
+/** 构造 `flow.mjs submit` 结束时的下一步唯一合法动作（避免 lightweight 档引导不存在的 review-pack.mjs）。 */
+export function buildSubmitNextSteps({ taskId, role, policy, nextRound = 1, hasDevReview = true } = {}) {
+  if (role === 'contributor-fork') {
+    return ['当前处于 awaiting-upstream-merge，请等待上游维护者合并；合并前严禁删除该 Fork 分支。']
+  }
+  if (hasDevReview && policy?.independentReviewRequired !== false) {
+    return [{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --task ${taskId} --round ${nextRound}` }]
+  }
+  const remoteFlag = role === 'generic-git' ? ' --remote-merged' : ''
+  const approveFlag = policy?.humanApprovalRequired ? ' --human-approved --reason "<确认原因>"' : ''
+  return [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}${remoteFlag}${approveFlag}` }]
+}
+
+/** 构造 `flow.mjs inspect` 结束时的下一步指引（在 lightweight 档阻断外部 PR 并指引升档而非打印 review-pack.mjs）。 */
+export function buildInspectNextSteps({ role, teamProbeHint, extPrNum, reuseExistingPr, hasDevReview = true } = {}) {
+  if (extPrNum) {
+    if (!hasDevReview) {
+      return ['当前项目为 lightweight 档且未装配 dev-review，外部 PR 不可信扫描与审查需先升级为 full 档（--tier full）。']
+    }
+    return [
+      { skill: 'dev-flow', text: `1. 建立只读隔离审查位（不挂载依赖）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --external-pr ${extPrNum}` },
+      { skill: 'dev-review', text: `2. 先跑不可信供应链静态扫描：node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${extPrNum} --untrusted-scan` },
+    ]
+  }
+  if (reuseExistingPr) {
+    const steps = [
+      { skill: 'dev-flow', text: `1. 接手/返工该已有 PR（复用原分支，禁止新开第二个 PR）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --pr ${reuseExistingPr.prNumber}` },
+    ]
+    if (hasDevReview) {
+      steps.push({ skill: 'dev-flow', text: `2. 若仅独立审查该 PR：node ".agents/skills/dev-flow/scripts/flow.mjs" start --external-pr ${reuseExistingPr.prNumber} 后运行 review-pack.mjs --pr ${reuseExistingPr.prNumber}` })
+    }
+    return steps
+  }
+  if (role === 'clone-readonly') {
+    return [
+      teamProbeHint
+        ? '若是组织/团队协作者，可先运行 flow.mjs inspect --probe-auth 验证写权限；若确认为只读克隆，再带 --clone-choice 运行 start'
+        : '只读克隆仓，请先向用户确认 --clone-choice <fork|standalone|local> 再运行 flow.mjs start',
+    ]
+  }
+  return [{ skill: 'dev-plan', text: '1. 按任务规模运行 doc-plan.mjs triage；2. 执行 flow.mjs start --task <id>' }]
 }

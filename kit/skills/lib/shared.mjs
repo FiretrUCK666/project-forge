@@ -7,6 +7,7 @@
 
 export {
   flushAndExit,
+  hasSkillSupport,
   parseStandardCli,
   printNextStep,
   resolveAvailableSkills,
@@ -164,6 +165,8 @@ export {
 } from './doc-requirements.mjs'
 
 export {
+  buildInspectNextSteps,
+  buildSubmitNextSteps,
   determineWorkflowPolicy,
   evaluateNextState,
   GATE_TIER_RANK,

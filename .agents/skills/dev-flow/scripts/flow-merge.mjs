@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
@@ -96,12 +96,13 @@ export async function assertPreMergeGates({
     detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
   ])
   const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
+  const hasDevReview = hasSkillSupport(mainRoot, 'dev-review')
   const policy = determineWorkflowPolicy({
     changedFiles: changed, ownArchived, caseType: ledger.caseType,
     highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
     gateWeakeningHits: gateFindings, hasRemote: ledger.role !== 'local-only',
     hasCiWorkflow: hasRepoCiWorkflow(implRoot),
-    visualFilesChanged: changed.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile,
+    visualFilesChanged: changed.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
   })
   const evidence = readVerificationEvidence(gitDir, taskId)
   const evCheck = validateVerificationEvidence({ policy, evidence, headSha: currentHead, profile })
@@ -141,7 +142,19 @@ export async function assertPreMergeGates({
     ledger.humanApprovedReason = opts.reason ?? ledger.humanApprovedReason ?? 'human-approved-stop-loss-override'
   }
 
-  const requiresReview = policy.independentReviewRequired || rounds.length > 0 || Boolean(ledger.lastReview)
+  if (!hasDevReview && policy.humanApprovalRequired) {
+    const hasApprove = Boolean(opts['human-approved'])
+    const reasonText = String(opts.reason ?? '').trim()
+    if (!hasApprove || !reasonText) {
+      const msg = `BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL: lightweight 档未装配 dev-review 且触及高风险/one-way 边界（${policy.reasons.join('；')}），须人类确认并同时附加 --human-approved --reason "<确认原因>"。\n`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL', reasons: policy.reasons, message: msg.trim() }, null, 2)}\n`)
+      process.stderr.write(msg)
+      return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL' }
+    }
+    ledger.humanApprovedReason = reasonText
+  }
+
+  const requiresReview = hasDevReview && (policy.independentReviewRequired || rounds.length > 0 || Boolean(ledger.lastReview))
   if (requiresReview) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
@@ -242,15 +255,16 @@ export async function handleMerge(opts, roots) {
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
       prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead,
       reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
+      humanApprovedReason: ledger.humanApprovedReason ?? null,
     })
     await backend.postComment({
       repo: originFull,
       number: ledger.prNumber,
       body: mergePrBody,
-      statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer },
+      statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null },
     })
     for (const iss of ledger.linkedIssues ?? []) {
-      await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer } })
+      await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
     }

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 强制审查先跑实证与故障注入再允许 --include-diff
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 57
@@ -9,10 +9,10 @@ pr: null
 branch: feat/review-empirical-gate
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-57
 planned_at: 9e966352f10318a0893c9cb722fe7c0a9f59ab0f
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261118-issue57-review-empirical-gate-spec.md
 ---
 
@@ -27,7 +27,7 @@ related_spec: ../specs/261118-issue57-review-empirical-gate-spec.md
 | 分支 / 基线 | `feat/review-empirical-gate` @ `9e96635` |
 | 任务编号 | `issue-57` |
 | 负责人 / 审批 | planner-57 / `false` |
-| 关联 Issue / PR / SPEC | #57 / 未关联 / `docs/specs/261118-issue57-review-empirical-gate-spec.md` |
+| 关联 Issue / PR / SPEC | #57 / 未关联 / `docs/archive/specs/261118-issue57-review-empirical-gate-spec.md` |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，并在实施前确认所属 SPEC 已获 `approved: true`。
 

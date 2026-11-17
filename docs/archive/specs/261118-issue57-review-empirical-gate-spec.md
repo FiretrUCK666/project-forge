@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 强制审查先跑实证与故障注入再允许 --include-diff
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -10,9 +10,9 @@ pr: null
 branch: feat/review-empirical-gate
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w1, round=1, sha=a443029b94c1, summary=C1-C4 与 review-empirical 域已对齐，脏残留优先于 slot 同步，I131-I133 及三模式门禁完备)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261118-issue57-review-empirical-gate-todo.md
 high_risk_paths: [kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-gates.mjs, kit/skills/dev-review/SKILL.md, kit/skills/lib/handoff-package.mjs]
 ---
@@ -28,7 +28,7 @@ high_risk_paths: [kit/skills/dev-review/scripts/review-empirical.mjs, kit/skills
 | 创建 / 更新 | `2026-11-18` / `2026-11-18` |
 | 分支 / Issue / PR | `feat/review-empirical-gate` / #57 / 未关联 |
 | 负责人 / 内审状态 | planner-57 / `pending` |
-| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/todo/261118-issue57-review-empirical-gate-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/archive/todo/261118-issue57-review-empirical-gate-todo.md` |
 
 - **与总控 PRD 的关系**：挂载于 `docs/prd/261117-v8-criteria-trust-prd.md`（V8 收口增补单），承接 Issue #57 的独立验收标准 `C1..C4`，不修改既有 PRD 编号，也不重复改动 #52 已落地的令牌与 PR 基线机制。
 - **变更一句话**：把 `review-pack.mjs` 中的「先读机械事实 -> 跑实证验证 -> 故障注入改坏并还原复绿 -> 再取 `--include-diff` 全文」从口头提示升级为跨 `--task`、`--pr`、`--local`/`--staged`/`--base` 全部生效的确定性状态机门禁，并堵死纯文本模式泄漏 240 行原始 diff 的旁路。

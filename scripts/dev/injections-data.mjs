@@ -1012,6 +1012,14 @@ export const INJECTIONS = [
     expect: '整条流转',
   },
   {
+    id: 'I115',
+    what: '写操作退回不联网探测（提审安静地只记账本，看起来像成功）',
+    file: 'kit/skills/dev-flow/scripts/flow-lifecycle.mjs',
+    from: "  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))",
+    to: "  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))",
+    expect: '写操作必须联网探通道',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

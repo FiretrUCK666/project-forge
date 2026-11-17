@@ -2304,4 +2304,38 @@ cases.push(["交接包第一眼就是现在这一步", async () => {
 
   return true
 }])
+
+// 同一个「写操作前不联网探」的洞，在认领、归档、提审、合并、清理四处各犯一次。
+// 逐处加参数是打补丁——下一个写操作忘加，洞再来一次。
+// 所以判据要盯住**接口语义**：写操作不许走「不联网」的探测。
+cases.push(["写操作必须联网探通道，不许静默降级成本地记账", async () => {
+  const { readFileSync: rf, readdirSync } = await import("node:fs")
+  const { join } = await import("node:path")
+
+  // 写操作所在的文件。清单来自「这些命令会不会改平台状态」。
+  const writeFiles = [
+    "kit/skills/dev-flow/scripts/flow-merge.mjs",
+    "kit/skills/dev-flow/scripts/flow-lifecycle.mjs",
+    "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
+    "kit/skills/dev-flow/scripts/flow-sync.mjs",
+  ]
+
+  for (const f of writeFiles) {
+    const src = rf(f, "utf8")
+    if (!src.includes("probeForWrite")) {
+      return `${f} 是写操作，但没有走 probeForWrite`
+    }
+    // 反向：不许留下裸的「不联网」探测——那正是这个洞的形状
+    const bare = /probeGitHubEnv\(\{\s*cwd:[^}]*\}\)/.exec(src)
+    if (bare) {
+      return `${f} 还留着一处裸探测：${bare[0].slice(0, 60)}`
+    }
+  }
+
+  // 正向：probeForWrite 真的联网
+  const { probeForWrite } = await import("../../kit/skills/lib/platform.mjs")
+  if (typeof probeForWrite !== "function") return "probeForWrite 没导出"
+
+  return true
+}])
 }

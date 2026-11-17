@@ -1147,4 +1147,28 @@ export const INJECTIONS = [
     to: '    if (true || pureDocCheck.passed) {',
     expect: 'triage 纯文档 Case 1 正向不误伤与 pureDocCheck 拦截不变式',
   },
+  {
+    id: 'I131',
+    what: 'evaluateIncludeDiffGate 直接返回 readyForDiff=true 放行（未经 check-empirical/check-fault 就允许 --include-diff）',
+    file: 'kit/skills/dev-review/scripts/review-empirical.mjs',
+    from: '  const readyForDiff = !dirtyFaultResidue && missingSteps.length === 0',
+    to: '  const readyForDiff = true',
+    expect: '--include-diff 前置阻断',
+  },
+  {
+    id: 'I132',
+    what: 'check-fault --phase fail 跳过工作区基线指纹变化校验（未注入故障就能空跑通过）',
+    file: 'kit/skills/dev-review/scripts/review-empirical.mjs',
+    from: '    if (currentFingerprint === baselineFingerprint) {',
+    to: '    if (false && currentFingerprint === baselineFingerprint) {',
+    expect: '拦截空突变',
+  },
+  {
+    id: 'I133',
+    what: 'formatPackText 在未传 --include-diff 时仍输出前 240 行 diff 补丁（纯文本旁路泄露）',
+    file: 'kit/skills/dev-review/scripts/review-gates.mjs',
+    from: "  if (includeFullDiff && fullDiffText) {\n    const diffLines = fullDiffText.split('\\n')\n    lines.push('', '--- Diff Patch (Context-Isolated) ---')\n    lines.push(...diffLines)\n  } else if (fullDiffText) {",
+    to: "  if (fullDiffText) {\n    const diffLines = fullDiffText.split('\\n')\n    lines.push('', '--- Diff Patch (Context-Isolated) ---')\n    lines.push(...diffLines.slice(0, includeFullDiff ? diffLines.length : 240))\n  } else if (false && fullDiffText) {",
+    expect: '纯文本旁路封堵',
+  },
 ]

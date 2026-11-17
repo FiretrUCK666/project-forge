@@ -32,6 +32,7 @@ import { registerReviewGovernCases } from './fixtures-review-govern.mjs'
 import { registerGovernCases } from './fixtures-govern.mjs'
 import { registerEquipCases } from './fixtures-equip.mjs'
 import { registerPlatformCases } from './fixtures-platform.mjs'
+import { registerReviewEmpiricalCases } from './fixtures-review-empirical.mjs'
 
 initTestBackupDir()
 
@@ -41,6 +42,7 @@ const DOMAIN_REGISTRY = [
   ['flow-parallel', registerFlowParallelCases],
   ['lifecycle', registerLifecycleCases],
   ['review-govern', registerReviewGovernCases],
+  ['review-empirical', registerReviewEmpiricalCases],
   ['govern', registerGovernCases],
   ['claims', registerClaimsCases],
   ['flow-docs', registerFlowDocsCases],

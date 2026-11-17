@@ -129,7 +129,7 @@ export function registerDocDepthCases(cases) {
   }])
 
   cases.push(['C2: doc-shape 实时工作区探测、可复核跳过说明与主干/required_sections 硬保护', async () => {
-    const { probeWorkspaceDocShape } = await import('../../kit/skills/lib/doc-shape.mjs')
+    const { analyzeDocShapeFromPaths, probeWorkspaceDocShape } = await import('../../kit/skills/lib/doc-shape.mjs')
     const { auditDoc } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
 
     const goDir = tmpProject({
@@ -200,6 +200,11 @@ export function registerDocDepthCases(cases) {
       const richShape = await probeWorkspaceDocShape(richDir)
       for (const sig of ['authRoles', 'stateRules', 'uiFrontend', 'ciRollout', 'multiCollab']) {
         if (!richShape.signals[sig]) return `多面仓漏探信号 ${sig}：${JSON.stringify(richShape.signals)}`
+      }
+      // 回归校验：k8s/、helm/、deploy/ 目录应独立触发 ciRollout
+      for (const deployPath of ['k8s/app.yaml', 'deploy/prod.sh', 'helm/Chart.yaml']) {
+        const dShape = analyzeDocShapeFromPaths(null, ['package.json', deployPath])
+        if (!dShape.signals.ciRollout) return `${deployPath} 未触发 ciRollout：${JSON.stringify(dShape.signals)}`
       }
       const initRich = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'init', '--kind', 'all', '--slug', 'rich-app', '--title', 'Rich App', '--json',
@@ -374,6 +379,48 @@ export function registerDocDepthCases(cases) {
       const posDelta = auditDoc({ repoRoot: dir, file: conciseRel })
       if (!posDelta.ok || posDelta.delta?.baselineSource !== 'git-head' || (posDelta.delta?.anchorsAdded?.length ?? 0) === 0 || (posDelta.delta?.pendingResolved ?? 0) < 1) {
         return `正向增量更新被误拦或 delta 统计错误：${JSON.stringify(posDelta)}`
+      }
+
+      // 5. PRD `## 二、范围与非目标` + `### 本次要做` / `### 明确不做（Non-Goals）` 双向检查与跨轮退化拦截
+      const { extractDocSnapshot } = await import('../../kit/skills/lib/doc-substantive.mjs')
+      mkdirSync(join(dir, 'docs/prd'), { recursive: true })
+      const prdBase = [
+        '---', 'kind: prd', 'title: PrdScope', 'status: draft',
+        'created: 2026-11-18', 'updated: 2026-11-18', 'issue: null', 'owner: planner',
+        '---', '', '# PrdScope', '',
+        '## 一、要解决的问题', '- 修复 `src/app.mjs` CLI 返回码。', '',
+        '## 二、范围与非目标',
+        '### 本次要做（In Scope）', '- 改造 `src/app.mjs`',
+        '### 明确不做（Non-Goals）', '- 不修改 `scripts/survey.mjs`', '',
+        '## 三、验收标准', '- [ ] C1: `src/app.mjs` 退出码 0',
+      ].join('\n')
+      const prdRel = 'docs/prd/261118-prdscope-prd.md'
+      writeFileSync(join(dir, prdRel), prdBase)
+      const prdGoodAud = auditDoc({ repoRoot: dir, file: prdRel })
+      const prdSnap = extractDocSnapshot(prdBase)
+      if (!prdGoodAud.ok || !prdSnap.sections['non-goals']?.substantive) {
+        return `合法 PRD 范围与非目标未过审或未写入 sections.non-goals：${JSON.stringify({ prdGoodAud, prdSnap })}`
+      }
+      // 占位桩 / 套话（heading 本身绝不冒充 !（Non-Goals） 锚点）/ 本次要做占位均须拦截
+      writeFileSync(join(dir, prdRel), prdBase.replace('- 不修改 `scripts/survey.mjs`', '- 暂无'))
+      const prdStubAud = auditDoc({ repoRoot: dir, file: prdRel })
+      if (!prdStubAud.errors.some((e) => e.code === 'DOC_STUB_PLACEHOLDER' && e.section === 'non-goals')) {
+        return `PRD Non-Goals 占位桩未被拦截：${JSON.stringify(prdStubAud.errors)}`
+      }
+      writeFileSync(join(dir, prdRel), prdBase.replace('- 不修改 `scripts/survey.mjs`', '- 提升体验、优化功能、确保稳定'))
+      const prdFluffAud = auditDoc({ repoRoot: dir, file: prdRel })
+      if (!prdFluffAud.errors.some((e) => e.code === 'DOC_VAGUE_CORE_SECTION' && e.section === 'non-goals')) {
+        return `PRD Non-Goals 套话未被拦截（疑似标题被误算为排除锚点）：${JSON.stringify(prdFluffAud.errors)}`
+      }
+      writeFileSync(join(dir, prdRel), prdBase.replace('- 改造 `src/app.mjs`', '- 暂无'))
+      const prdInScopeStubAud = auditDoc({ repoRoot: dir, file: prdRel })
+      if (!prdInScopeStubAud.errors.some((e) => e.code === 'DOC_STUB_PLACEHOLDER' && e.section === 'goal')) {
+        return `PRD 本次要做占位桩未被拦截：${JSON.stringify(prdInScopeStubAud.errors)}`
+      }
+      writeFileSync(join(dir, prdRel), prdBase.replace('- 不修改 `scripts/survey.mjs`', '- 无'))
+      const prdRegAud = auditDoc({ repoRoot: dir, file: prdRel, baselineText: prdBase })
+      if (!prdRegAud.errors.some((e) => e.code === 'DOC_REGRESSION_CORE_DEGRADED' && e.section === 'non-goals')) {
+        return `PRD Non-Goals 退化回「- 无」未触发 DOC_REGRESSION_CORE_DEGRADED：${JSON.stringify(prdRegAud)}`
       }
 
       return true

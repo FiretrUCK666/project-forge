@@ -351,6 +351,7 @@ export function mountSharedDeps(mainRoot, wtRoot, opts = {}) {
     mismatches: cmp.mismatches,
     mounted,
     alreadyMounted,
+    mountedPaths: mountedRelPaths,
     isolatedUnits,
     skipped,
   }
@@ -391,15 +392,28 @@ function ensureMountedDepsExcluded(mainAbs, relPaths) {
   } catch { /* ignore non-writable exclude */ }
 }
 
+const MAX_SCAN_DEPTH = 24
+
+function normalizeLinkRel(p) {
+  const norm = posixPath(String(p ?? '').trim()).replace(/^(?:\.\/)+/, '').replace(/^\/+|\/+$/g, '')
+  return norm && norm !== '.' ? norm : ''
+}
+
 export function scanOutboundLinks(wtRoot) {
   const wtAbs = canonicalPath(wtRoot)
   const outbound = []
   const internal = []
   const broken = []
-  if (!existsSync(wtAbs)) return { outbound, internal, broken }
+  const truncatedPaths = []
+  let truncated = false
+  if (!existsSync(wtAbs)) return { outbound, internal, broken, truncated, truncatedPaths }
 
   const walk = (absDir, relDir, depth) => {
-    if (depth > 24) return
+    if (depth > MAX_SCAN_DEPTH) {
+      truncated = true
+      truncatedPaths.push(posixPath(relDir || '.'))
+      return
+    }
     let entries = []
     try { entries = readdirSync(absDir, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
@@ -431,28 +445,49 @@ export function scanOutboundLinks(wtRoot) {
   }
 
   walk(wtAbs, '', 0)
-  return { outbound, internal, broken }
+  return { outbound, internal, broken, truncated, truncatedPaths }
 }
 
-export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' } = {}) {
+export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup', mountedPaths = [], dryRun = false } = {}) {
   const mainAbs = canonicalPath(mainRoot)
   const wtAbs = canonicalPath(wtRoot)
   if (samePath(mainAbs, wtAbs)) throw new Error(`拒绝自解绑：mainRoot 与 worktree 指向同一目录 (${mainAbs})`)
   if (!existsSync(wtAbs)) {
-    return { ok: true, unmounted: [], skipped: [], blocked: [], mainDepsIntact: true, note: 'worktree-absent' }
+    return {
+      ok: true,
+      unmounted: [],
+      unmountedInternal: [],
+      skipped: [],
+      blocked: [],
+      truncated: false,
+      scanned: { outbound: 0, internal: 0, broken: 0 },
+      note: 'worktree-absent',
+    }
   }
 
-  const allowed = new Set((allowOutbound ?? []).map((p) => posixPath(p).replace(/^\.\//, '').replace(/\/+$/, '')))
+  const allowed = new Set((allowOutbound ?? []).map(normalizeLinkRel).filter(Boolean))
+  const mountedSet = new Set(
+    (mountedPaths ?? []).map((p) => normalizeLinkRel(typeof p === 'string' ? p : p?.path)).filter(Boolean),
+  )
   const scan = scanOutboundLinks(wtAbs)
-  // 默认档（cleanup）下一步是 `git worktree remove`：未获准的外链必须当场拦下。
-  // 依赖清场档（deps）worktree 不会消失：照常解绑并列出来，但目标完好校验一样要过。
+  // 默认档（cleanup）下一步是 `git worktree remove`：未获准的外链、悬空链接或深度截断必须当场拦下。
+  // 依赖清场档（deps）worktree 不会消失：跳过已跟踪链接以防工作区变脏，其余照常解绑并校验目标完好。
   const strict = mode !== 'deps'
 
   const unmounted = []
+  const unmountedInternal = []
   const skipped = []
   const blocked = []
+  const outboundPlan = []
 
   const before = scan.outbound.map((item) => ({ path: item.path, resolved: item.resolved }))
+
+  if (strict && scan.truncated) {
+    const spots = scan.truncatedPaths.length > 0 ? scan.truncatedPaths : ['.']
+    for (const tp of spots) {
+      blocked.push({ path: tp, target: null, reason: 'scan-truncated', resolved: null })
+    }
+  }
 
   for (const link of scan.outbound) {
     if (link.kind === 'unresolved') {
@@ -461,27 +496,46 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
         blocked.push({ path: link.path, target: link.target, reason: 'unresolved-target' })
         continue
       }
-    } else if (!allowed.has(link.path) && strict) {
+      outboundPlan.push({ link, source: 'deps-mode' })
+      continue
+    }
+    const isToolMounted = mountedSet.has(link.path) && Boolean(link.resolved) && isInsideDir(link.resolved, mainAbs)
+    const isAllowed = allowed.has(link.path)
+    if (strict && !isToolMounted && !isAllowed) {
       blocked.push({ path: link.path, target: link.target, reason: 'points-outside-worktree', resolved: link.resolved })
       continue
     }
+    const source = isToolMounted ? 'tool-mounted' : (isAllowed ? 'allow-outbound' : 'deps-mode')
+    outboundPlan.push({ link, source })
+  }
 
+  if ((strict && blocked.length > 0) || dryRun) {
+    return {
+      ok: blocked.length === 0,
+      unmounted,
+      unmountedInternal,
+      skipped,
+      blocked,
+      truncated: Boolean(scan.truncated),
+      scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
+    }
+  }
+
+  for (const { link, source } of outboundPlan) {
     const abs = join(wtAbs, link.path)
 
-    // 已被 Git 跟踪的链接**不能豁免**。
-    //
-    // 豁免的初衷是「git 自己会删，不用我们管」，但 git 删含链接的目录时会跟着链接走进去：
-    // 实测在分支里提交一个指向仓外的符号链接，cleanup 把它记进 skipped、
-    // 紧接着 git worktree remove --force 退出 0，**仓外那个目录的内容被删了**。
-    //
-    // 所以只有「worktree 不消失」的依赖清场档才跳过（解绑会让工作区变脏）；
-    // 删除档一律解绑——反正整个目录马上就没，链接删掉不影响任何事。
-    if (strict) {
-      const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
-      const isTracked = fastTracked !== null
-        ? fastTracked
-        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
-      if (isTracked) {
+    // 已被 Git 跟踪的链接：删除档一律解绑，不许豁免（git 删含链接的目录时会跟着链接走进去）；
+    // 只有「worktree 不消失」的依赖清场档（deps）才跳过，避免把工作区弄脏。
+    const fastTracked = isPathInGitIndexFast(wtAbs, link.path)
+    const isTracked = fastTracked !== null
+      ? fastTracked
+      : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+    if (isTracked) {
+      if (!strict) {
+        skipped.push({ path: link.path, reason: 'tracked-in-git' })
+        continue
+      }
+      if (strict) {
         // 记下来，回执里要能看见「这一条是被 Git 跟踪的」——排查时这是关键信息。
         skipped.push({ path: link.path, reason: 'tracked-in-git-but-unlinked' })
       }
@@ -491,7 +545,31 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
     try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
     unlinkSync(abs)
     if (lstatSafe(abs) !== null) throw new Error(`解绑链接失败，路径仍然存在：${abs}`)
-    unmounted.push({ path: link.path, target: targetBefore })
+    unmounted.push({
+      path: link.path,
+      target: targetBefore ?? link.resolved ?? link.target,
+      source,
+      ...(source === 'tool-mounted' ? { label: '工具挂载，自动解绑' } : {}),
+    })
+  }
+
+  // 删除档还要先解绑 worktree 内部链接（只删链接本身、内容留在即将拆除的 worktree 内），
+  // 防止 Windows `git worktree remove --force` 在内部 junction 处报 Directory not empty。
+  if (strict) {
+    for (const link of scan.internal) {
+      const abs = join(wtAbs, link.path)
+      if (!lstatSafe(abs)?.isSymbolicLink()) continue
+      const fastInternalTracked = isPathInGitIndexFast(wtAbs, link.path)
+      const isInternalTracked = fastInternalTracked !== null
+        ? fastInternalTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isInternalTracked) skipped.push({ path: link.path, reason: 'tracked-internal-in-git-but-unlinked' })
+      let targetBefore = null
+      try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+      unlinkSync(abs)
+      if (lstatSafe(abs) !== null) throw new Error(`解绑内部链接失败，路径仍然存在：${abs}`)
+      unmountedInternal.push({ path: link.path, target: targetBefore ?? link.target })
+    }
   }
 
   // 解绑只允许动链接本身，绝不允许连带目标内容。逐个复核目标还在。
@@ -506,15 +584,17 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
   return {
     ok: blocked.length === 0,
     unmounted,
+    unmountedInternal,
     skipped,
     blocked,
+    truncated: Boolean(scan.truncated),
     scanned: { outbound: scan.outbound.length, internal: scan.internal.length, broken: scan.broken.length },
   }
 }
 
 function printHelp() {
   process.stdout.write([
-    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [--allow-outbound <路径>] [--json]',
+    '用法：node .agents/skills/dev-flow/scripts/worktree-deps.mjs <mount|unmount|scan|status> --main <主仓> --worktree <工作树> [--allow-outbound <路径>] [--strict] [--json]',
     '',
     '  mount    按子包独立比对锁文件并防毒化探测，安全挂载共享依赖',
     '  unmount  全深度扫出指向外部的链接并逐个解绑（清场重挂默认档；删 worktree 请加 --strict）',

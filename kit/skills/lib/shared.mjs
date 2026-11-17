@@ -123,6 +123,7 @@ export {
   issueReviewToken,
   listTaskLedgers,
   readTaskLedger,
+  recordMountedDepsInLedger,
   resolveTaskContext,
   sanitizeTaskId,
   taskLedgerPath,

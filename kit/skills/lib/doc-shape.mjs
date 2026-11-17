@@ -132,7 +132,8 @@ export function analyzeDocShapeFromPaths(repoRoot, filePaths = []) {
   const uiFrontend = Boolean(uiHit || uiDeps)
 
   const ciHit = nonArchive.find((p) => /(?:^|\/)\.github\/workflows\/.+\.ya?ml$/i.test(p)
-    || /(?:^|\/)(?:Dockerfile(?:\..+)?|docker-compose(?:\.[^/]+)?\.ya?ml|compose(?:\.[^/]+)?\.ya?ml|k8s\/|helm\/|deploy\/|RELEASING\.md$|release\.(?:sh|mjs|py|yml|yaml)$)$/i.test(p)
+    || /(?:^|\/)(?:k8s|helm|deploy)\//i.test(p)
+    || /(?:^|\/)(?:Dockerfile(?:\..+)?|docker-compose(?:\.[^/]+)?\.ya?ml|compose(?:\.[^/]+)?\.ya?ml|RELEASING\.md|release\.(?:sh|mjs|py|yml|yaml))$/i.test(p)
     || /(?:^|\/)(?:migrations?|migrate|alembic\.ini)\b/i.test(p))
   const ciRollout = Boolean(ciHit)
 

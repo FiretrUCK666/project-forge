@@ -23,16 +23,16 @@ const EXACT_STUB_RE = /^(?:待补齐|待补充|待填写|待核实|待定|待确
 const DECIDED_RE = /(?:已定|已拍板|决定|结论|采纳建议|按建议执行|已确认)\s*[:：]/i
 
 const SECTION_SPECS = Object.freeze([
-  { id: 'goal', label: '要做什么', keywords: ['要解决的问题', '背景与边界', '背景', '目标', '要改什么', '任务范围', '需求描述', '动机', '现状', 'Why', 'Problem', 'Motivation', 'Goal', 'Overview'] },
   { id: 'non-goals', label: '不做什么', keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals', '不在本次范围', '范围外', 'Out of scope', '不做'] },
+  { id: 'goal', label: '要做什么', keywords: ['要解决的问题', '背景与边界', '背景', '目标', '要改什么', '任务范围', '需求描述', '动机', '现状', 'Why', 'Problem', 'Motivation', 'Goal', 'Overview'] },
   { id: 'design', label: '设计方案与契约变更', keywords: ['设计方案', '契约变更', '接口变更', '方案与契约'] },
   { id: 'alternatives', label: '备选方案与否决理由', keywords: ['备选方案', '否决理由', '方案对比'] },
   { id: 'reuse', label: '复用既有模块', keywords: ['复用既有模块', '复用模块', '可复用', '已有能力'] },
 ])
 
 const INLINE_CHECK_LABELS = Object.freeze([
-  { id: 'goal', label: '要改什么 / 目标', re: /^-\s+\*\*(?:要改什么|要做什么|目标)\*\*\s*[:：]\s*(.*)$/ },
-  { id: 'non-goals', label: '本期不做', re: /^-\s+\*\*(?:本期不做|非目标|不做)\*\*\s*[:：]\s*(.*)$/ },
+  { id: 'goal', label: '要改什么 / 目标', re: /^-\s+\*\*(?:要改什么|要做什么|目标|影响路径|改动路径|修改文件)\*\*\s*[:：]\s*(.*)$/ },
+  { id: 'non-goals', label: '本期不做', re: /^-\s+\*\*(?:本期不做|非目标|不做|不改什么|不动什么)\*\*\s*[:：]\s*(.*)$/ },
   { id: 'reuse', label: '复用既有模块', re: /^-\s+\*\*(?:复用既有模块|复用模块)\*\*\s*[:：]\s*(.*)$/ },
 ])
 
@@ -88,7 +88,9 @@ function hasExplicitStubOnlyContent(sectionText) {
 
 /** 抽取文档或章节中的可验证技术锚点（零字数门槛，兼容中英文路径、命令、参数、数值与具体排除对象）。 */
 export function extractTechAnchors(text) {
-  const src = String(text ?? '').replace(/<!--[\s\S]*?-->/g, '')
+  const src = String(text ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^#{1,6}\s+[^\n]*$/gm, '')
   const anchors = new Set()
 
   for (const m of src.matchAll(/`([^`\n]+)`/g)) {
@@ -155,6 +157,51 @@ function matchSectionId(title) {
   return null
 }
 
+const SUB_NON_GOALS_RE = /^###\s*(?:明确不做|本期不做|非目标|Non-Goals|不在本次范围|范围外|Out\s+of\s+scope)/i
+const SUB_GOAL_RE = /^###\s*(?:本次要做|In\s+Scope|要改什么|要做什么|目标|本次范围)/i
+
+function splitSubSectionsWithLineNos(blk) {
+  const subs = []
+  const preLines = []
+  let cur = null
+  let inFence = false
+  for (const ln of blk.lines) {
+    if (/^\s*(?:```|~~~)/.test(ln.text)) inFence = !inFence
+    if (!inFence && /^###\s+/.test(ln.text)) {
+      if (cur) subs.push(cur)
+      cur = { title: ln.text.replace(/^###\s+/, '').trim(), rawHeading: ln.text, lineNo: ln.lineNo, lines: [] }
+      continue
+    }
+    if (cur) cur.lines.push(ln.text)
+    else preLines.push(ln.text)
+  }
+  if (cur) subs.push(cur)
+  return { preLines, subs }
+}
+
+function resolveInspectableUnits(blk) {
+  const id = matchSectionId(blk.title)
+  if (!id) return []
+  const rawSec = blk.lines.map((l) => l.text).join('\n')
+  if (id === 'non-goals' || id === 'goal') {
+    const { preLines, subs } = splitSubSectionsWithLineNos(blk)
+    const hasScopedSubs = subs.some((s) => SUB_NON_GOALS_RE.test(s.rawHeading) || SUB_GOAL_RE.test(s.rawHeading))
+    if (hasScopedSubs) {
+      const units = []
+      const preClean = normalizeSectionText(preLines.join('\n'))
+      if (preClean) units.push({ id, label: blk.title, lineNo: blk.line, rawText: preLines.join('\n'), key: `${blk.line}:pre:${id}` })
+      for (const sub of subs) {
+        const subId = SUB_NON_GOALS_RE.test(sub.rawHeading)
+          ? 'non-goals'
+          : (SUB_GOAL_RE.test(sub.rawHeading) ? 'goal' : (id === 'non-goals' ? 'goal' : id))
+        units.push({ id: subId, label: sub.title, lineNo: sub.lineNo, rawText: sub.lines.join('\n'), key: `${sub.lineNo}:sub:${subId}` })
+      }
+      return units
+    }
+  }
+  return [{ id, label: blk.title, lineNo: blk.line, rawText: rawSec, key: `${blk.line}:${id}` }]
+}
+
 /** 校验核心与设计章节实质性（拦截占位桩与纯套话，绝不设字数下限）。 */
 export function checkCoreSubstantiveness(bodyText, docType) {
   if (!['prd', 'spec', 'todo'].includes(docType)) return []
@@ -205,7 +252,6 @@ export function checkCoreSubstantiveness(bodyText, docType) {
   for (const blk of blocks) {
     const id = matchSectionId(blk.title)
     if (!id) continue
-    const rawSec = blk.lines.map((l) => l.text).join('\n')
 
     // 若同一章节内打包了 `- **本期不做**：...` 等子条目，先逐条核对子条目防躲避
     let inFence = false
@@ -238,19 +284,9 @@ export function checkCoreSubstantiveness(bodyText, docType) {
       }
     }
 
-    // PRD `## 二、范围与非目标` 若含 `### 明确不做（Non-Goals）`，单独对准子节检验
-    if (id === 'non-goals' && /^###\s+/m.test(rawSec)) {
-      const subParts = rawSec.split(/\n(?=###\s+)/)
-      for (const sp of subParts) {
-        const firstLine = sp.split('\n')[0]
-        if (/###\s*(?:明确不做|本期不做|非目标|Non-Goals|不在本次范围)/i.test(firstLine)) {
-          const subBody = sp.split('\n').slice(1).join('\n')
-          inspectChunk({ id: 'non-goals', label: firstLine.replace(/^#+\s*/, ''), lineNo: blk.line, rawText: subBody, key: `${blk.line}:sub:non-goals` })
-        }
-      }
+    for (const unit of resolveInspectableUnits(blk)) {
+      inspectChunk(unit)
     }
-
-    inspectChunk({ id, label: blk.title, lineNo: blk.line, rawText: rawSec, key: `${blk.line}:${id}` })
   }
 
   return errors
@@ -275,20 +311,20 @@ export function extractDocSnapshot(rawText) {
   const coreSections = new Set()
 
   for (const blk of blocks) {
-    const id = matchSectionId(blk.title)
-    if (!id) continue
-    const rawSec = blk.lines.map((l) => l.text).join('\n')
-    const substantive = isSubstantiveText(rawSec)
-    const { anchors } = extractTechAnchors(rawSec)
-    if (!sections[id]) {
-      sections[id] = { present: Boolean(normalizeSectionText(rawSec)), substantive, anchors: new Set(anchors) }
-    } else {
-      sections[id].present = sections[id].present || Boolean(normalizeSectionText(rawSec))
-      sections[id].substantive = sections[id].substantive || substantive
-      for (const a of anchors) sections[id].anchors.add(a)
+    for (const unit of resolveInspectableUnits(blk)) {
+      const { id, rawText: rawUnit } = unit
+      const substantive = isSubstantiveText(rawUnit)
+      const { anchors } = extractTechAnchors(rawUnit)
+      if (!sections[id]) {
+        sections[id] = { present: Boolean(normalizeSectionText(rawUnit)), substantive, anchors: new Set(anchors) }
+      } else {
+        sections[id].present = sections[id].present || Boolean(normalizeSectionText(rawUnit))
+        sections[id].substantive = sections[id].substantive || substantive
+        for (const a of anchors) sections[id].anchors.add(a)
+      }
+      if (substantive) coreSections.add(id)
+      for (const a of anchors) allAnchors.add(a)
     }
-    if (substantive) coreSections.add(id)
-    for (const a of anchors) allAnchors.add(a)
   }
 
   // 合并验收条目 C* 编号与其中技术锚点，拦截静默删除 C* 条目的退化

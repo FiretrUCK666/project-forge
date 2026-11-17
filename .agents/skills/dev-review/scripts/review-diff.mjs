@@ -19,7 +19,7 @@ import {
   readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
 } from '../../lib/git-fast.mjs'
 import { isCleanWorktreeFast } from '../../lib/git-status-fast.mjs'
-import { writeTaskLedger } from '../../lib/ledger.mjs'
+import { recordMountedDepsInLedger, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, detectGateWeakeningInEntry,
   splitDiffByFile, summarizeHunkChanges,
@@ -91,14 +91,16 @@ export async function resolveReviewWorktree(mainRoot, worktreeRoot, opts, task) 
   return worktreeRoot
 }
 
-async function callReviewDepsHelper(fnName, mainRoot, reviewWtAbs) {
+async function callReviewDepsHelper(fnName, mainRoot, reviewWtAbs, helperOpts = undefined) {
   const hereDir = dirname(fileURLToPath(import.meta.url))
   const depsScript = join(hereDir, '..', '..', 'dev-flow', 'scripts', 'worktree-deps.mjs')
   if (!existsSync(depsScript)) return { mode: 'skipped', reason: 'dev-flow-absent' }
   try {
     const mod = await import(pathToFileURL(depsScript).href)
     if (typeof mod[fnName] === 'function') {
-      return mod[fnName](mainRoot, reviewWtAbs)
+      return helperOpts !== undefined
+        ? mod[fnName](mainRoot, reviewWtAbs, helperOpts)
+        : mod[fnName](mainRoot, reviewWtAbs)
     }
   } catch (err) {
     return { mode: 'failed', reason: err instanceof Error ? err.message : String(err) }
@@ -124,7 +126,10 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
   const reviewWtAbs = resolve(mainRoot, reviewRel)
   const targetSha = await resolveReviewTargetSha(mainRoot, worktreeRoot, task, opts.head ?? 'HEAD')
   if (existsSync(reviewWtAbs)) {
-    await callReviewDepsHelper('unmountSharedDeps', mainRoot, reviewWtAbs)
+    const umRes = await callReviewDepsHelper('unmountSharedDeps', mainRoot, reviewWtAbs, { mode: 'deps' })
+    if (umRes && (umRes.ok === false || umRes.mode === 'failed')) {
+      throw new Error(`同步审查槽 ${reviewRel} 前解绑共享依赖失败：${umRes.reason ?? JSON.stringify(umRes.blocked ?? [])}`)
+    }
   }
   const syncRes = await syncDetachedWorktree(mainRoot, reviewWtAbs, targetSha, { resetDirty: Boolean(opts['reset-review-slot']) })
   const skipDepsForUntrusted = Boolean(opts['untrusted-scan'] && !opts['human-approved-exec'])
@@ -132,7 +137,12 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
     ? { mode: 'skipped', reason: 'untrusted-scan-before-approval' }
     : await callReviewDepsHelper('mountSharedDeps', mainRoot, reviewWtAbs)
 
-  if (task.reviewWorktreeHead !== targetSha || !task.reviewWorktreePath) {
+  let mountedUpdated = false
+  if (depsRes?.ok) {
+    recordMountedDepsInLedger(task, reviewRel, depsRes)
+    mountedUpdated = true
+  }
+  if (mountedUpdated || task.reviewWorktreeHead !== targetSha || !task.reviewWorktreePath) {
     task.reviewWorktreePath = posixPath(reviewRel)
     task.reviewWorktreeHead = targetSha
     writeTaskLedger(mainRoot, task)

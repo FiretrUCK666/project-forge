@@ -9,7 +9,9 @@ import { isAbsolute, relative, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ, inspectBranchMergeState, samePath, } from '../../lib/git.mjs'
+  canonicalPath, detectInProgressGitOp, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
+  parseWorktreeListPorcelain, posixPath, samePath,
+} from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
@@ -24,6 +26,115 @@ function isCwdInside(wtAbs) {
   if (samePath(cwd, wt)) return true
   const rel = relative(wt, cwd)
   return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function mountedPathsForWorktree(ledger, wtRel) {
+  const normWt = posixPath(String(wtRel ?? '').trim()).replace(/^(?:\.\/)+/, '').replace(/\/+$/, '')
+  const byWt = ledger?.mountedDepsByWorktree
+  if (byWt && typeof byWt === 'object' && !Array.isArray(byWt) && Object.keys(byWt).length > 0) {
+    return Array.isArray(byWt[normWt]) ? byWt[normWt] : []
+  }
+  if (Array.isArray(ledger?.mountedDeps)) return ledger.mountedDeps
+  if (Array.isArray(ledger?.mountedPaths)) return ledger.mountedPaths
+  return []
+}
+
+function emitOutboundBlock(wtPath, blocked, opts, prefixNote = '') {
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_OUTBOUND_LINKS', worktree: wtPath, blockedLinks: blocked }, null, 2)}\n`)
+  } else {
+    process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wtPath} 里有 ${blocked.length} 条指向外部或未扫通的链接${prefixNote}。\n`)
+    for (const one of blocked) process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
+    process.stderr.write('`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
+    process.stderr.write('确认可以切断后，用 --allow-outbound <路径> 逐个列出重跑；不存在「全部放行」开关。\n')
+  }
+}
+
+async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isAbort = false } = {}) {
+  if (worktreesToRemove.length === 0) return { ok: true, removedWorktrees: [] }
+  const wtListRes = await gitRun(roots.mainRoot, ['worktree', 'list', '--porcelain'])
+  if (!wtListRes.ok) throw new Error(`校验 git worktree list 失败：${wtListRes.stderr}`)
+  const registered = parseWorktreeListPorcelain(wtListRes.stdout)
+  const prefixNote = isAbort ? '（放弃任务同样不得连带删除主仓内容）' : ''
+
+  for (const wt of worktreesToRemove) {
+    if (samePath(wt.abs, roots.mainRoot)) {
+      const msg = `BLOCKED_MAIN_WORKTREE_REMOVAL: 拒绝将主工作区 (${wt.path}) 作为清理目标删除。`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_MAIN_WORKTREE_REMOVAL', worktree: wt.path }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+    }
+    if (isCwdInside(wt.abs)) {
+      throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
+    }
+    const isRegistered = registered.some((entry) => entry.path && !entry.bare && samePath(entry.path, wt.abs))
+    if (!isRegistered) {
+      const msg = `BLOCKED_UNREGISTERED_WORKTREE: 路径 ${wt.path} 未在 git worktree list 中注册（可能已被并发清理或非工作树目录），拒绝执行删除。`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_UNREGISTERED_WORKTREE', worktree: wt.path }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+    }
+    // 预检全部待删 worktree：任一条命中未获准外链就整批停下，不先删第一个再在第二个失败。
+    const preCheck = unmountSharedDeps(roots.mainRoot, wt.abs, {
+      allowOutbound: opts['allow-outbound'] ?? [],
+      mountedPaths: mountedPathsForWorktree(ledger, wt.path),
+      mode: 'cleanup',
+      dryRun: true,
+    })
+    if (preCheck.ok === false) {
+      emitOutboundBlock(wt.path, preCheck.blocked, opts, prefixNote)
+      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+    }
+  }
+
+  const removedWorktrees = []
+  for (const wt of worktreesToRemove) {
+    const preDirty = opts.force
+      ? true
+      : (isAbort ? (await gitStatusPorcelainZ(wt.abs)).entries.length > 0 : Boolean(wt.dirty))
+    // 解绑在前、移除在后：绝不带着外部链接或内部 junction 去 `worktree remove --force`。
+    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, {
+      allowOutbound: opts['allow-outbound'] ?? [],
+      mountedPaths: mountedPathsForWorktree(ledger, wt.path),
+      mode: 'cleanup',
+    })
+    if (unmount.ok === false) {
+      emitOutboundBlock(wt.path, unmount.blocked, opts, prefixNote)
+      return { ok: false, exitCode: EXIT_POLICY_BLOCK }
+    }
+    // 原本干净的工作树在删除档解绑了被 Git 跟踪的链接后，工作树会出现 `D <link>`；
+    // 此时由工具自动附带 `--force` 完成移除，避免在合法放行场景卡在 git 的脏工作树拒删上。
+    const unlinkedTracked = (unmount.skipped ?? []).some(
+      (s) => s.reason === 'tracked-in-git-but-unlinked' || s.reason === 'tracked-internal-in-git-but-unlinked',
+    )
+    const useForceRemove = Boolean(opts.force || (!preDirty && unlinkedTracked))
+    const rmArgs = useForceRemove ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
+    const rmRes = await gitRun(roots.mainRoot, rmArgs)
+    if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
+    removedWorktrees.push({
+      path: wt.path,
+      unmountedDeps: unmount.unmounted.length,
+      unmountedLinks: unmount.unmounted.map((u) => ({
+        path: u.path,
+        target: u.target,
+        source: u.source ?? 'allow-outbound',
+        ...(u.source === 'tool-mounted' ? { label: '工具挂载，自动解绑' } : {}),
+      })),
+    })
+  }
+  return { ok: true, removedWorktrees }
+}
+
+function printUnmountedLinksText(removedWorktrees) {
+  for (const w of removedWorktrees) {
+    const links = w.unmountedLinks ?? []
+    if (links.length === 0) continue
+    process.stdout.write(`- ${w.path}：解绑 ${links.length} 条共享依赖链接\n`)
+    for (const link of links) {
+      const tag = link.source === 'tool-mounted' ? ' [工具挂载，自动解绑]' : (link.source === 'allow-outbound' ? ' [已放行外链]' : '')
+      process.stdout.write(`  * ${link.path} -> ${link.target ?? '(目标已不存在)'}${tag}\n`)
+    }
+  }
 }
 
 export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, targetRepo, pushRemote = 'origin', {
@@ -164,33 +275,9 @@ export async function handleCleanup(opts, roots) {
     }
   }
 
-  const removedWorktrees = []
-  for (const wt of worktreesToRemove) {
-    if (isCwdInside(wt.abs)) throw new Error(`当前进程工作目录位于待删除 worktree (${wt.path}) 内，请先切回主仓根目录再清理`)
-    // 解绑在前、判断在后：有未获准的外链就整条停下，绝不带着链接去 `worktree remove --force`
-    // （那一步会跟随 junction 递归删掉主仓里的目标内容，而退出码依然是 0）。
-    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
-    if (unmount.ok === false) {
-      const lines = unmount.blocked.map((one) => `  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）`)
-      if (opts.json) {
-        process.stdout.write(`${JSON.stringify({ blocked: true, code: 'BLOCKED_OUTBOUND_LINKS', worktree: wt.path, blockedLinks: unmount.blocked }, null, 2)}\n`)
-      } else {
-        process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接。\n`)
-        for (const line of lines) process.stderr.write(`${line}\n`)
-        process.stderr.write('`git worktree remove --force` 会跟随 junction 递归删除，删了主仓那些目标就没了。\n')
-        process.stderr.write('确认可以切断后，用 --allow-outbound <路径> 逐个列出重跑；没有「全部放行」开关。\n')
-      }
-      return { exitCode: EXIT_POLICY_BLOCK }
-    }
-    const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
-    const rmRes = await gitRun(roots.mainRoot, rmArgs)
-    if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
-    removedWorktrees.push({
-      path: wt.path,
-      unmountedDeps: unmount.unmounted.length,
-      unmountedLinks: unmount.unmounted.map((u) => ({ path: u.path, target: u.target })),
-    })
-  }
+  const rmOut = await safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts)
+  if (!rmOut.ok) return { exitCode: rmOut.exitCode }
+  const { removedWorktrees } = rmOut
 
   let deletedLocalBranch = false
   if (cl.localBranch && !keepLocalBr && cl.localBranch !== ledger.baseBranch) {
@@ -215,15 +302,10 @@ export async function handleCleanup(opts, roots) {
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
     process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
-    for (const w of removedWorktrees) {
-      const links = w.unmountedLinks ?? []
-      if (links.length === 0) continue
-      process.stdout.write(`- ${w.path}：解绑 ${links.length} 条共享依赖链接\n`)
-      for (const link of links) process.stdout.write(`  * ${link.path} -> ${link.target ?? '(目标已不存在)'}\n`)
-    }
+    printUnmountedLinksText(removedWorktrees)
     printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: 0, ...summary }
 }
 
 export async function handleStatus(opts, roots) {
@@ -286,17 +368,9 @@ export async function handleAbort(opts, roots) {
     }
     return { exitCode: EXIT_POLICY_BLOCK }
   }
-  for (const wt of worktrees) {
-    if (isCwdInside(wt.abs)) throw new Error(`当前工作目录位于待拆除 worktree (${wt.path}) 内，请先切回主仓`)
-    const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, { allowOutbound: opts['allow-outbound'] ?? [] })
-    if (unmount.ok === false) {
-      process.stderr.write(`BLOCKED_OUTBOUND_LINKS: worktree ${wt.path} 里有 ${unmount.blocked.length} 条指向外部的链接，放弃任务同样不得连带删除主仓内容。\n`)
-      for (const one of unmount.blocked) process.stderr.write(`  - ${one.path} -> ${one.resolved ?? one.target}（${one.reason}）\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
-    }
-    const rmRes = await gitRun(roots.mainRoot, opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs])
-    if (!rmRes.ok) throw new Error(`移除 ${wt.path} 失败：${rmRes.stderr}`)
-  }
+  const rmOut = await safeRemoveWorktrees(roots, ledger, worktrees, opts, { isAbort: true })
+  if (!rmOut.ok) return { exitCode: rmOut.exitCode }
+  const { removedWorktrees } = rmOut
   if (ledger.branch && !opts['keep-branch'] && ledger.branch !== ledger.baseBranch) {
     const fastAbrBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
     const cur = fastAbrBr ? { ok: true, stdout: fastAbrBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
@@ -306,7 +380,10 @@ export async function handleAbort(opts, roots) {
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
   writeTaskLedger(roots.mainRoot, ledger)
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted' }, null, 2)}\n`)
-  else process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)
-  return { exitCode: 0 }
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees }, null, 2)}\n`)
+  else {
+    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)
+    printUnmountedLinksText(removedWorktrees)
+  }
+  return { exitCode: 0, removedWorktrees }
 }

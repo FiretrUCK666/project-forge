@@ -1255,4 +1255,26 @@ export const INJECTIONS = [
     to: '  for (const item of []) {',
     expect: 'checkMasterPrdCoverage 扫描已归档关联 SPEC',
   },
+  {
+    id: 'I143',
+    what: "flow-trial-merge cleanupTrialWorktree 漏传 { mode: 'deps' }（默认档翻转后临时试合槽自挂的 node_modules 会阻断并中止）",
+    file: 'kit/skills/dev-flow/scripts/flow-trial-merge.mjs',
+    from: "  const um = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'deps' })",
+    to: '  const um = unmountSharedDeps(mainRoot, tmpAbs)',
+    expect: 'runTrialMerge 试合实测与主仓共享依赖完好',
+  },
+  {
+    id: 'I144',
+    what: 'scanOutboundLinks 深度上限越界时静默 return（超出即当没看见、继续删穿深层外链）',
+    file: 'kit/skills/dev-flow/scripts/worktree-deps.mjs',
+    from: [
+      '    if (depth > MAX_SCAN_DEPTH) {',
+      '      truncated = true',
+      "      truncatedPaths.push(posixPath(relDir || '.'))",
+      '      return',
+      '    }',
+    ].join('\n'),
+    to: '    if (depth > MAX_SCAN_DEPTH) return',
+    expect: 'scanOutboundLinks 深度上限越界 fail-closed',
+  },
 ]

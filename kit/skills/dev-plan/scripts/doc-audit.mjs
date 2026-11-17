@@ -13,7 +13,7 @@ import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, res
 import { validateSkippedSections } from '../../lib/doc-shape.mjs'
 import {
   checkCoreSubstantiveness, checkDocRegression, collectMasterPrdSpecTexts,
-  extractDocSnapshot, resolveBaselineSnapshotSync,
+  extractDocSnapshot, resolveBaselineSnapshotSync, VAGUE_FLUFF_RE,
 } from '../../lib/doc-substantive.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
@@ -31,7 +31,6 @@ export const VALID_STATUS_BY_TYPE = Object.freeze({
   todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
 })
 
-const VAGUE_FLUFF_RE = /(?:提高质量|保证稳定|确保稳定|确保安全|优化体验|提升体验|完善功能|做好测试|提升性能|增强健壮性|代码整洁|按需处理|合理设计|正常工作|正常运行)/
 const CONCRETE_ANCHOR_RE = /(?:`[^`]+`|\bexit\b|退出码|\bassert|expect|返回\s*\d|status\s*=|\.[a-z]{1,4}\b|\d+\s*(?:ms|s|条|项|个|KB|B|行))/i
 const PLACEHOLDER_TEXT_RE = /(?:待补充|待填写|待核实|\bTBD\b|\bFIXME\b|<!--\s*(?:project-forge:\s*)?fill)/i
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,60})>/g

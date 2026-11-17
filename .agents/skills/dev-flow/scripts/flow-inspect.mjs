@@ -21,7 +21,7 @@ import {
   resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
 } from '../../lib/git-fast.mjs'
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
-import { createDefaultLedger, listTaskLedgers, readTaskLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parsePrNumber, parseRemotesTopology,
@@ -746,6 +746,7 @@ export async function handleStart(opts, roots) {
     linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable, status: 'started',
     ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
   })
+  recordMountedDepsInLedger(ledger, implRel, depMount)
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)
   if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId)

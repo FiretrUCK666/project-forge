@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 勘察与体检的诚实性
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-17
 updated: 2026-11-17
@@ -10,9 +10,9 @@ pr: null
 branch: feat/issue-49
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue49-survey-honesty-todo.md
 high_risk_paths: [scripts/lib/template.mjs, scripts/lib/claims.mjs, kit/skills/lib/tdd-parity.mjs, templates/agents-project.md, scripts/review.mjs]
 ---
@@ -119,23 +119,23 @@ inspectContract() -> { state: 'ok' | 'unavailable', health, error }
 - **还要跟着走的地方**：改 `kit/**` 之后必须跑 `node scripts/equip.mjs .` 让 `.agents/skills/` 与源码字节一致，否则 `equip --check` 与 `preflight` 都会红；改 `scripts/review.mjs` 的结论形态要同步 `docs/TDD.md` 的体检段。
 ## 四、冻结的验收标准
 
-- [ ] C1: 变量值含宿主模板语法时 `renderVars` 正常返回；宿主语法出现在模板正文里时也放过——**包括名字是全大写的那种**（`${{GITHUB_SHA}}` 与 `${{ github.sha }}` 都必须放过：豁免要在所有检查之前，只加在形状检查那一处仍会被「未登记」拦住）；模板正文里未登记的全大写占位符、缺取值的占位符、形状不对的占位符三类**仍必须抛错**；含宿主模板语法的仓上 `compose-agents.mjs --check` 退出码不得为 2。
-- [ ] C2: 家目录根（`~/`、`~user/`）与环境变量根（`$HOME/`、`${HOME}/`、`%VAR%\`）、盘符与绝对路径**一律不作为仓库相对路径**报缺失；**剥掉点斜杠前缀后的仓内真路径必须仍被认出**（`./docs/TDD.md` 要认成 `docs/TDD.md`）；以父目录相对写法起头、或剥完仍带上级跳转的路径不当作承诺；反向：真实的仓库相对路径照常校验，缺失时仍报。
-- [ ] C3: 命令按 shell 运算符切段（尊重引号），动作词**只在命令位置**匹配；`--format=` 的取值与 `.属性名` 不得被误判成动作；**文件名里的 `test` 不得让整段脚本变成测试命令**——但这条有边界：`bash 某路径/test-mac-pure.sh` 与 `./某路径/test-mac-pure.sh` 当前都判成 `test`，因为脚本路径本身就在命令位置。判据要写成「**只排除路径中间分量里的关键词，保留脚本名的判断**」：文件名本身就叫 test 的那种（唯一测试入口）必须仍被认出来，否则等于让一类项目永远探测不到测试命令。
-- [ ] C4: 装套件前后 `codeFiles` 与 `tier` **完全相同**；只加空的 `docs/prd/.gitkeep` 之类骨架文件时 `isReentry` 仍为 `false`；**加了真实内容才变成 `true`**；`codeLines` 不随工具产物变化；**静态断言的范围要指明**：规模的计数代码是 `survey-workspace.mjs` 的 `finalizeWalkWorkspace` 里那段内联循环（`codeFiles` / `codeLines` 累加处），没有独立函数——断言就扫**那一段代码区间**（从 `let codeFiles = 0` 到该循环结束），不扫全文件：`survey.mjs` 与 `survey-reentry.mjs` 里本来就有 `.agents/skills` 字面量，用途不同，扫全文件必假红。
-- [ ] C5: `tier` 随真实规模单调不降——**用 6 格矩阵验「任意两格对比都成立」**（500/2000/3950/4050/30000/28000 行）；28000 行 / 40 文件的仓判 `parallel-subagents`；同一份仓连跑两次 `survey`，`explorationStrategy` 逐字相同；改一个模块的行数使规模跨档后，`survey` 要**报出策略变化及其依据**（各维取值）；策略写入 `AGENTS.md` 受管区，重入时比对而不是默默重算。**证明命令**：`node scripts/dev/fixtures.mjs --only "探索策略随真实规模"`。
-- [ ] C6: **三态要覆盖两条失败路径，且两条的判据不能互相冲突**。
+- [x] C1: 变量值含宿主模板语法时 `renderVars` 正常返回；宿主语法出现在模板正文里时也放过——**包括名字是全大写的那种**（`${{GITHUB_SHA}}` 与 `${{ github.sha }}` 都必须放过：豁免要在所有检查之前，只加在形状检查那一处仍会被「未登记」拦住）；模板正文里未登记的全大写占位符、缺取值的占位符、形状不对的占位符三类**仍必须抛错**；含宿主模板语法的仓上 `compose-agents.mjs --check` 退出码不得为 2。
+- [x] C2: 家目录根（`~/`、`~user/`）与环境变量根（`$HOME/`、`${HOME}/`、`%VAR%\`）、盘符与绝对路径**一律不作为仓库相对路径**报缺失；**剥掉点斜杠前缀后的仓内真路径必须仍被认出**（`./docs/TDD.md` 要认成 `docs/TDD.md`）；以父目录相对写法起头、或剥完仍带上级跳转的路径不当作承诺；反向：真实的仓库相对路径照常校验，缺失时仍报。
+- [x] C3: 命令按 shell 运算符切段（尊重引号），动作词**只在命令位置**匹配；`--format=` 的取值与 `.属性名` 不得被误判成动作；**文件名里的 `test` 不得让整段脚本变成测试命令**——但这条有边界：`bash 某路径/test-mac-pure.sh` 与 `./某路径/test-mac-pure.sh` 当前都判成 `test`，因为脚本路径本身就在命令位置。判据要写成「**只排除路径中间分量里的关键词，保留脚本名的判断**」：文件名本身就叫 test 的那种（唯一测试入口）必须仍被认出来，否则等于让一类项目永远探测不到测试命令。
+- [x] C4: 装套件前后 `codeFiles` 与 `tier` **完全相同**；只加空的 `docs/prd/.gitkeep` 之类骨架文件时 `isReentry` 仍为 `false`；**加了真实内容才变成 `true`**；`codeLines` 不随工具产物变化；**静态断言的范围要指明**：规模的计数代码是 `survey-workspace.mjs` 的 `finalizeWalkWorkspace` 里那段内联循环（`codeFiles` / `codeLines` 累加处），没有独立函数——断言就扫**那一段代码区间**（从 `let codeFiles = 0` 到该循环结束），不扫全文件：`survey.mjs` 与 `survey-reentry.mjs` 里本来就有 `.agents/skills` 字面量，用途不同，扫全文件必假红。
+- [x] C5: `tier` 随真实规模单调不降——**用 6 格矩阵验「任意两格对比都成立」**（500/2000/3950/4050/30000/28000 行）；28000 行 / 40 文件的仓判 `parallel-subagents`；同一份仓连跑两次 `survey`，`explorationStrategy` 逐字相同；改一个模块的行数使规模跨档后，`survey` 要**报出策略变化及其依据**（各维取值）；策略写入 `AGENTS.md` 受管区，重入时比对而不是默默重算。**证明命令**：`node scripts/dev/fixtures.mjs --only "探索策略随真实规模"`。
+- [x] C6: **三态要覆盖两条失败路径，且两条的判据不能互相冲突**。
   说明：`inspectContract` 调的是 `contractHealth()` 函数，**拿不到 CLI 退出码**，所以「退出码非 0」不是 review 能看到的输入。真实失败入口只有两个，按优先级判：
   ①**抛错** → `state: 'unavailable'`，产出 `agents.unavailable` 并带原因；**静态断言：`catch` 分支不得返回 `state` 为 `ok`**。
   ②**`contractHealth` 返回 `handWritten: true`**（`regions.length === 0`）→ 产出 `agents.unverified`，文案说「这份 AGENTS.md 是手写的，受管区一个都没有，所以这一面没有可核对的东西」。**不能**说「结构完整」——那正是自洽的假绿。
   两条互斥：抛错时走 ①，正常返回但手写时走 ②。同一份空壳手写仓只该命中 ②。
   反向：受管区齐全且无漂移时结论仍为「结构完整」。
-- [ ] C7: **判红的形态要与真实输出对得上**。空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——四种全部判红。判红的具体形式按实测写：①**判红分两条通道，缺一不可**：新增的 `docs.tdd-shell` 走 `severity: high`，`govern-audit.mjs audit --strict` 因 high>0 退出非 0；而「有代码但 `docs/TDD.md` 完全不存在」命中的是现有的 `docs.missing-tdd`，档位 **medium**，`--strict` 对它**不生效**（实测该仓 `audit --strict --json` 退出 0）——这一种要么把它一并提到 high，要么判据改看 `--json` 里有没有这条 id，不能只靠退出码。本仓当前 finding 是 8 条（1 high / 7 medium）；②`--json` 顶层字段是 **`findings`**（不是 `results`），档位字段是 **`severity`**（不是 `level`）；③finding id 为 `docs.tdd-shell`，需在 `govern-docs.mjs` 新增（现有只有 `docs.missing-tdd` 与 `docs.tdd-module-drift`）；④`checkTddSyncParity` 的字段名是 **`missingModulesInTdd`**（不是 `missing`），判据按真实键名写。**不做版本宽限**：全仓没有版本宽限机制，写「下一个次版本转阻断」无从判断，改为首次上线即按 `severity: high` 阻断，存量仓用 `--changed` 增量模式过渡。**反向：只在注释里出现的符号名不得被当成「已定义」**。
-- [ ] C8: **执行者在 `repo-map.mjs`，不在 `survey`**。`reusableModules` 与 `entrypoints` 只由 `kit/skills/dev-explore/scripts/repo-map.mjs` 产出（`survey --json` 里没有这两个键），所以判据要落在这个文件上。①`reusableModules` 与 `entrypoints` 里属于工具产物目录的条目数**必须为 0**——实测现在前三名全是 `.agents/skills/lib/*`；②**反向：项目自己的模块必须被认出来**——只有项目源码的仓，`reusableModules` 不得为空；③PowerShell 的 `function Foo {`、Bash 的 `foo() {`、Go 的 `func bar()` 三种写法符号抽取分别命中（落点 `symbol-index.mjs`）；④遇到没有符号规则的语言返回 `unsupported` 而**不是空数组**；⑤`survey` 能报出「本仓 N 种语言，其中 M 种缺少符号规则」。**证明命令**：`node kit/skills/dev-explore/scripts/repo-map.mjs . --json`。
-- [ ] C9: 模板的「取舍」节**出厂为空**，不含预填的 `license` / `no-ci`；**0 业务文件、完全由工具生成的仓，`review` 不得输出「没有会出事的缺口」**（那正是自洽的假绿：什么都没有，所以什么都没缺）；该报的项落到「待定」档而不是被压掉；**反向**：有业务文件的真实缺项照常按「缺」报。
-- [ ] C10: 默认 CI 形状下 `compose-agents` 的生成路径**退出码 0**；「构建与验证」代码块里没有单行超过 500 字节的命令；**「构建与验证」的代码块里不许出现被截断的命令**——那个块是给人复制去跑的，截断尾巴 `…（共 N 字节）` 不是 shell 注释，照抄必失败。超过上限时的正确做法是**不写进代码块**：改成在块外注明「这条命令太长，见 CI 工作流里对应的那一步」，与 C12 的分组指路同一套做法。`truncateCommandForDisplay`（`kit/skills/lib/command-lex.mjs`）只用于**报告层展示**（`scripts/review.mjs` 现在那一处），不要接进可执行块的生成路径。判据：①生成路径退出码 0；②`sh` 块里没有超 500 字节的单行；③超限命令出现在块外的「去哪看」说明里，且指向的真实文件存在。
-- [ ] C11: 任何 `kinds` 下 `survey` 都必须读 CI / Makefile / Taskfile 里被真实执行过的命令，不得因「已识别生态」而整条跳过；主 Agent 在主工作区直接改文件时，`flow next` 或 `inspect` 要能报出固定标记 `WARN_WORKING_IN_MAIN_CHECKOUT`（它是警告不是拦截，退出码仍为 0）。
-- [ ] C12: 当真实命令多到逼近 30KB 上限时，契约**改为「去哪看」而不是「全抄一遍」**：命令按生态分组、每类只展示前 `ECO_COMMANDS_SHOWN_PER_KIND` 条、其余指向 CI 文件与 Makefile 的路径；**反向**：分组之后「构建与验证」仍必须包含**每类至少一条真实命令**，不得退化成空节或纯指针。
+- [x] C7: **判红的形态要与真实输出对得上**。空壳 TDD（只列模块名）、4 行 TDD、模板原样（含占位符）、文件完全不存在但有代码——四种全部判红。判红的具体形式按实测写：①**判红分两条通道，缺一不可**：新增的 `docs.tdd-shell` 走 `severity: high`，`govern-audit.mjs audit --strict` 因 high>0 退出非 0；而「有代码但 `docs/TDD.md` 完全不存在」命中的是现有的 `docs.missing-tdd`，档位 **medium**，`--strict` 对它**不生效**（实测该仓 `audit --strict --json` 退出 0）——这一种要么把它一并提到 high，要么判据改看 `--json` 里有没有这条 id，不能只靠退出码。本仓当前 finding 是 8 条（1 high / 7 medium）；②`--json` 顶层字段是 **`findings`**（不是 `results`），档位字段是 **`severity`**（不是 `level`）；③finding id 为 `docs.tdd-shell`，需在 `govern-docs.mjs` 新增（现有只有 `docs.missing-tdd` 与 `docs.tdd-module-drift`）；④`checkTddSyncParity` 的字段名是 **`missingModulesInTdd`**（不是 `missing`），判据按真实键名写。**不做版本宽限**：全仓没有版本宽限机制，写「下一个次版本转阻断」无从判断，改为首次上线即按 `severity: high` 阻断，存量仓用 `--changed` 增量模式过渡。**反向：只在注释里出现的符号名不得被当成「已定义」**。
+- [x] C8: **执行者在 `repo-map.mjs`，不在 `survey`**。`reusableModules` 与 `entrypoints` 只由 `kit/skills/dev-explore/scripts/repo-map.mjs` 产出（`survey --json` 里没有这两个键），所以判据要落在这个文件上。①`reusableModules` 与 `entrypoints` 里属于工具产物目录的条目数**必须为 0**——实测现在前三名全是 `.agents/skills/lib/*`；②**反向：项目自己的模块必须被认出来**——只有项目源码的仓，`reusableModules` 不得为空；③PowerShell 的 `function Foo {`、Bash 的 `foo() {`、Go 的 `func bar()` 三种写法符号抽取分别命中（落点 `symbol-index.mjs`）；④遇到没有符号规则的语言返回 `unsupported` 而**不是空数组**；⑤`survey` 能报出「本仓 N 种语言，其中 M 种缺少符号规则」。**证明命令**：`node kit/skills/dev-explore/scripts/repo-map.mjs . --json`。
+- [x] C9: 模板的「取舍」节**出厂为空**，不含预填的 `license` / `no-ci`；**0 业务文件、完全由工具生成的仓，`review` 不得输出「没有会出事的缺口」**（那正是自洽的假绿：什么都没有，所以什么都没缺）；该报的项落到「待定」档而不是被压掉；**反向**：有业务文件的真实缺项照常按「缺」报。
+- [x] C10: 默认 CI 形状下 `compose-agents` 的生成路径**退出码 0**；「构建与验证」代码块里没有单行超过 500 字节的命令；**「构建与验证」的代码块里不许出现被截断的命令**——那个块是给人复制去跑的，截断尾巴 `…（共 N 字节）` 不是 shell 注释，照抄必失败。超过上限时的正确做法是**不写进代码块**：改成在块外注明「这条命令太长，见 CI 工作流里对应的那一步」，与 C12 的分组指路同一套做法。`truncateCommandForDisplay`（`kit/skills/lib/command-lex.mjs`）只用于**报告层展示**（`scripts/review.mjs` 现在那一处），不要接进可执行块的生成路径。判据：①生成路径退出码 0；②`sh` 块里没有超 500 字节的单行；③超限命令出现在块外的「去哪看」说明里，且指向的真实文件存在。
+- [x] C11: 任何 `kinds` 下 `survey` 都必须读 CI / Makefile / Taskfile 里被真实执行过的命令，不得因「已识别生态」而整条跳过；主 Agent 在主工作区直接改文件时，`flow next` 或 `inspect` 要能报出固定标记 `WARN_WORKING_IN_MAIN_CHECKOUT`（它是警告不是拦截，退出码仍为 0）。
+- [x] C12: 当真实命令多到逼近 30KB 上限时，契约**改为「去哪看」而不是「全抄一遍」**：命令按生态分组、每类只展示前 `ECO_COMMANDS_SHOWN_PER_KIND` 条、其余指向 CI 文件与 Makefile 的路径；**反向**：分组之后「构建与验证」仍必须包含**每类至少一条真实命令**，不得退化成空节或纯指针。
 ## 五、高风险点、门型与回滚路径
 
 - **门型与回滚路径**：`one-way`。门禁语义变更，判松了不会当场失败。回退方式：`template.mjs` / `claims.mjs` / `review.mjs` 的改动可逐文件反向提交；本次唯一新增模块是 `symbol-index.mjs`，删除即可（调用点同批回退）；`command-lex.mjs` 已存在且被 `survey-ecosystem.mjs` 调用，只做校准不改形状。
@@ -143,3 +143,6 @@ inspectContract() -> { state: 'ok' | 'unavailable', health, error }
 ## 实现说明
 
 <!-- 在合并之前补齐真实实现摘要与验证结果 -->
+
+- 实现提交基线: 0451970dd7ecb934441a4a2cedc5c97d66d80656
+- 关联任务: issue-49

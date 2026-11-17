@@ -12,7 +12,7 @@ approved: true
 done_at: 2026-11-17
 task_id: survey-honesty
 planned_at: 73087a27cb9af3d9cea2988cc3e3e4d3b6154ec9
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261117-issue49-survey-honesty-spec.md
 ---
 

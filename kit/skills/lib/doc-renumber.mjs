@@ -60,6 +60,10 @@ export function renumberHeadings(text) {
 /**
  * 检查一份文档里的编号是否连续。
  *
+ * 判据是**相邻两个有序号的标题必须相差 1**，不是「第一个必须是一」。
+ * 理由：真实文档常常只写其中几节（摘要、摘录、分册），从「五、」开始是合法的；
+ * 真正的问题是中间跳号——`一、二、八` 会让读的人以为缺了三节。
+ *
  * 给审计用：如果有人手改文档把编号改乱了，要能报出来，
  * 否则「序号连续」这件事就只是今天恰好成立。
  *
@@ -68,15 +72,18 @@ export function renumberHeadings(text) {
  */
 export function findNumberingGaps(text) {
   const out = []
-  let expected = 1
   const lines = String(text ?? '').split('\n')
+  let prev = null
   for (let i = 0; i < lines.length; i += 1) {
-    const m = NUMBERED_H2_RE.exec(lines[i])
+    const m = /^##\s+([一二三四五六七八九十百]+)、/.exec(lines[i])
     if (!m) continue
-    const found = /^##\s+([一二三四五六七八九十百]+)、/.exec(lines[i])?.[1] ?? ''
-    const want = CN_NUM[expected - 1]
-    if (want && found !== want) out.push({ line: i + 1, found, expected: want })
-    expected += 1
+    const n = CN_NUM.indexOf(m[1]) + 1
+    if (n <= 0) continue
+    if (prev !== null && n !== prev + 1) {
+      const want = CN_NUM[prev] ?? String(prev + 1)
+      out.push({ line: i + 1, found: m[1], expected: want })
+    }
+    prev = n
   }
   return out
 }

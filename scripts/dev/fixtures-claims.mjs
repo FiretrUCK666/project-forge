@@ -1470,15 +1470,19 @@ cases.push(['模板文件就是产物来源，可选章节按项目声明增删'
   if (!sparse.includes('待补齐')) return '缺值时没有写「待补齐」，而是留了空'
 
   // 正向：项目声明 omit 的章节会被裁掉
+  //
+  // 挑「待拍板问题」来验：它模板里自带真实内容（`- 待确认：无`），
+  // 不填也能留下来——于是「删掉它」这个动作才真的改变了产物。
+  // 换成「复用既有模块」就测不出东西：那节本来就会因为没填而被剪掉。
   const dir = tmpProject({
     'README.md': '# o\n\n模板裁剪测试仓。\n',
-    'docs/templates/prd.md': ['---', 'kind: prd', 'omit_sections: [reuse, flow, pending]', '---', '', '# 项目自己的 PRD 模板', '', '## 额外章节', '', '内容', ''].join('\n'),
+    'docs/templates/prd.md': ['---', 'kind: prd', 'omit_sections: [pending, metrics]', '---', '', '# 项目自己的 PRD 模板', ''].join('\n'),
   })
   try {
     const req = resolveDocRequirements(dir, 'prd')
-    if (!req.omit.has('reuse')) return 'omit 声明没被读出来'
+    if (!req.omit.has('pending')) return 'omit 声明没被读出来'
     const pruned = renderDocTemplate('prd', { vars: { TITLE: '丙', TODAY: '2026-01-01' }, dropSections: req.omit })
-    if (pruned.includes('复用既有模块')) return '声明要删的章节还在'
+    if (pruned.includes('待拍板问题')) return '声明要删的章节还在'
     if (!pruned.includes('要解决的问题')) return '主干章节被误删了'
 
     // 反向：主干三节写进 omit 也不许删

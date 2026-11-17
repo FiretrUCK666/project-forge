@@ -41,17 +41,14 @@ related_spec: ../specs/261117-issue51-worktree-delete-safety-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: 外链存在时 `cleanup` 在删目录之前以 `EXIT_POLICY_BLOCK` 终止并逐条列出；主仓哨兵文件事后仍存在；悬空链接同样阻断；同一链接在 `sync`/`submit` 的解绑路径上不阻断
-- [ ] C2: 无外链的普通 worktree 退出 0；worktree 内部链接不影响删除；`--allow-outbound` 逐条完全匹配放行；`--force` 不跳过外链检查；回执逐条列出解绑的路径与目标
-- [ ] C3: 判据不以目录名白名单为前置；全深度遍历；`mainDepsIntact` 与删除前扫描同一集合；两个 mode 共用同一次扫描
+> 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。编号与 SPEC 一一对应。
 
-## 执行步骤
-
-1. 先补失败用例：5 种链接名（`vendor` / `shared` / `data` / `packages` / 中文名）、深一层嵌套链接、悬空链接、外链目标在 worktree 外、真实 `handleCleanup --confirm --force` 期望被阻断 —— 验证：`node scripts/dev/fixtures.mjs --domain flow`
-2. 反向用例：无外链照常放行；worktree 内部互指不误判；`--allow-outbound` 逐条放行后回执含解绑清单 —— 验证：同上
-3. 实现 `scanOutboundLinks` 全深度扫描与 `mode` 分档，接入 `flow-cleanup` 的删前解绑与回执明细 —— 验证：`node scripts/dev/fixtures.mjs`
-4. 补两条故障注入（I22 跳过 `unlinkSync`、I22b 判据退回按目录名白名单筛）并复验 —— 验证：`node scripts/dev/verify-injections.mjs --only I22`
-
+- [ ] C1: 外链存在时 `cleanup` 在删目录之前以 `EXIT_POLICY_BLOCK` 终止并逐条列出路径与目标；主仓哨兵仍在；悬空链接同样阻断且 `reason` 为 `unresolved-target`；`sync` / `submit` / `trial-merge` 路径上不阻断只解绑。
+- [ ] C2: 无外链的 worktree 退出 0；**工具自己挂的依赖不要求人加 `--allow-outbound`** 且回执标明「工具挂载，自动解绑」；真外链仍阻断；`--allow-outbound` 逐个完全匹配才放行；`--force` 不跳过外链检查；回执里 `unmountedLinks` 的 `path` 与 `target` 都非空。
+- [ ] C3: **目标在 worktree 内部的链接先 `unlinkSync` 再删目录**——`cleanup` 退出 0、目录消失、分支已删、账本已更新；对照用例说明只 `unlink` 不删会 `Directory not empty`。
+- [ ] C4: 深度 25 的外链：`scanOutboundLinks` 要么检出、要么报 `scan-truncated`；两种情况下 `cleanup` 都不得继续删目录，主仓哨兵仍在；把上限改小后注入必须变红。
+- [ ] C5: `flow-sync` / `flow-lifecycle` / `flow-trial-merge` 三处都显式传 `{ mode: 'deps' }`；主仓有真 `node_modules` 时跑 `runTrialMerge` 返回 `ok: true` 且哨兵仍在；漏改任一处时该用例必须变红。
+- [ ] C6: 判据不以目录名白名单为前置——`I22b` 注入变红即可；不再要求源码级形状断言；`mainDepsIntact` 这类写死 `true` 的字段不作为证据，「被拦下的目标事后也复核」才是。
 ## 断点与遗留决策
 
 - **当前状态**：`进行中`。已落地并有正反用例：全深度扫描、`mode` 分档、删前解绑、`--allow-outbound` 逐条放行、回执明细、深一层与悬空链接用例。C3 的「同一集合」断言已补（完好校验直接以扫描结果做基准，被拦下与跳过的目标也复核）。

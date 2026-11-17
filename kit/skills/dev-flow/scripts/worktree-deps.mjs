@@ -499,7 +499,7 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
       outboundPlan.push({ link, source: 'deps-mode' })
       continue
     }
-    const isToolMounted = mountedSet.has(link.path)
+    const isToolMounted = mountedSet.has(link.path) && Boolean(link.resolved) && isInsideDir(link.resolved, mainAbs)
     const isAllowed = allowed.has(link.path)
     if (strict && !isToolMounted && !isAllowed) {
       blocked.push({ path: link.path, target: link.target, reason: 'points-outside-worktree', resolved: link.resolved })
@@ -559,6 +559,11 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
     for (const link of scan.internal) {
       const abs = join(wtAbs, link.path)
       if (!lstatSafe(abs)?.isSymbolicLink()) continue
+      const fastInternalTracked = isPathInGitIndexFast(wtAbs, link.path)
+      const isInternalTracked = fastInternalTracked !== null
+        ? fastInternalTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', link.path], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isInternalTracked) skipped.push({ path: link.path, reason: 'tracked-internal-in-git-but-unlinked' })
       let targetBefore = null
       try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
       unlinkSync(abs)

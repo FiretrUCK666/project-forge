@@ -89,6 +89,9 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
 
   const removedWorktrees = []
   for (const wt of worktreesToRemove) {
+    const preDirty = opts.force
+      ? true
+      : (isAbort ? (await gitStatusPorcelainZ(wt.abs)).entries.length > 0 : Boolean(wt.dirty))
     // 解绑在前、移除在后：绝不带着外部链接或内部 junction 去 `worktree remove --force`。
     const unmount = unmountSharedDeps(roots.mainRoot, wt.abs, {
       allowOutbound: opts['allow-outbound'] ?? [],
@@ -99,7 +102,13 @@ async function safeRemoveWorktrees(roots, ledger, worktreesToRemove, opts, { isA
       emitOutboundBlock(wt.path, unmount.blocked, opts, prefixNote)
       return { ok: false, exitCode: EXIT_POLICY_BLOCK }
     }
-    const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
+    // 原本干净的工作树在删除档解绑了被 Git 跟踪的链接后，工作树会出现 `D <link>`；
+    // 此时由工具自动附带 `--force` 完成移除，避免在合法放行场景卡在 git 的脏工作树拒删上。
+    const unlinkedTracked = (unmount.skipped ?? []).some(
+      (s) => s.reason === 'tracked-in-git-but-unlinked' || s.reason === 'tracked-internal-in-git-but-unlinked',
+    )
+    const useForceRemove = Boolean(opts.force || (!preDirty && unlinkedTracked))
+    const rmArgs = useForceRemove ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
     const rmRes = await gitRun(roots.mainRoot, rmArgs)
     if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
     removedWorktrees.push({

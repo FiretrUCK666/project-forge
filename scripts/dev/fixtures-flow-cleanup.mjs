@@ -47,7 +47,7 @@ export function registerFlowCleanupCases(cases) {
       symlinkSync(join(dir, 'data'), join(implAbs, 'nested', 'deeper', 'data-deep'), linkType)
       // 悬空链接：目标不存在，cleanup 档必须以 unresolved-target 阻断
       const missingTarget = join(dir, 'nonexistent-target-for-dangling-link')
-      symlinkSync(missingTarget, join(implAbs, 'dangling-link'), 'dir')
+      symlinkSync(missingTarget, join(implAbs, 'dangling-link'), linkType)
       // 反向：worktree 内部链接不归类为外链
       mkdirSync(join(implAbs, 'inner'), { recursive: true })
       writeFileSync(join(implAbs, 'inner', 'a.txt'), 'inner\n')
@@ -219,6 +219,19 @@ export function registerFlowCleanupCases(cases) {
         return 'cleanup 后主仓共享依赖受损'
       }
 
+      // 反证：账本有 mountedDeps=['node_modules'] 但工作树里 node_modules 被调包指向仓外目录时，必须阻断
+      const sForge = await handleStart({ task: 'c2-forge', case: '2', slug: 'c2-forge' }, roots)
+      if (sForge.exitCode !== 0) return `start c2-forge 失败：${sForge.exitCode}`
+      const lForge = readTaskLedger(dir, 'c2-forge')
+      const wtForge = join(dir, lForge.worktreePath)
+      unlinkSync(join(wtForge, 'node_modules'))
+      symlinkSync(outside, join(wtForge, 'node_modules'), linkType)
+      const forgeBlocked = await handleCleanup({ task: 'c2-forge', confirm: true, force: true, json: true }, roots)
+      if (forgeBlocked.exitCode !== 3 || !existsSync(join(outside, 'precious.txt'))) {
+        return `调包指向仓外的 node_modules 竟被工具清单放行：exit=${forgeBlocked.exitCode}`
+      }
+      await handleAbort({ task: 'c2-forge', confirm: true, force: true, 'allow-outbound': ['node_modules', 'packages/app/node_modules'], json: true }, roots)
+
       // 反证：账本有 depsMode='shared' 但 mountedDeps=[] 时，不得自动放行任何链接
       const s2 = await handleStart({ task: 'c2-shortcut', case: '2', slug: 'c2-shortcut' }, roots)
       if (s2.exitCode !== 0) return `start s2 失败：${s2.exitCode}`
@@ -258,8 +271,9 @@ export function registerFlowCleanupCases(cases) {
     } finally { rmTree(dir); rmTree(outside) }
   }])
 
-  // C3: 内部 junction 先 unlinkSync 再删目录（对照：不 unlink 直接 git worktree remove 会以 Directory not empty 失败）
+  // C3: 内部 junction 先 unlinkSync 再删目录（对照：只 unlink 不删目录会留下 worktree 与分支；older Windows git 不先 unlink 直接删会报 Directory not empty）
   cases.push(['cleanup 内部 junction 先 unlinkSync 再删目录', async () => {
+    const { unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
     const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { resolveRepoRoots, readTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
@@ -268,21 +282,22 @@ export function registerFlowCleanupCases(cases) {
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
     try {
       const roots = await resolveRepoRoots(dir)
-      // 对照验证：仅存在内部 junction 时直接 git worktree remove --force 在 Windows 会报 Directory not empty；
-      // 而只 unlink 不删目录会留下空壳与分支，因此 cleanup 必须两步都执行。
-      if (process.platform === 'win32') {
-        const ctrl = await handleStart({ task: 'c3-ctrl', case: '2', slug: 'c3-ctrl' }, roots)
-        if (ctrl.exitCode !== 0) return `对照 start 失败：${ctrl.exitCode}`
-        const lCtrl = readTaskLedger(dir, 'c3-ctrl')
-        const wtCtrl = join(dir, lCtrl.worktreePath)
-        mkdirSync(join(wtCtrl, 'inner'), { recursive: true })
-        writeFileSync(join(wtCtrl, 'inner', 'a.txt'), 'a\n')
-        gitCommitFast(wtCtrl, 'add inner dir')
-        symlinkSync(join(wtCtrl, 'inner'), join(wtCtrl, 'inner-junc'), linkType)
-        const rawRm = gitSync(dir, ['worktree', 'remove', '--force', wtCtrl], { encoding: 'utf8' })
-        if (rawRm.status === 0 || !/Directory not empty/i.test(`${rawRm.stderr}${rawRm.stdout}`)) {
-          return `对照预期 Windows raw worktree remove 报 Directory not empty，实际 status=${rawRm.status}: ${rawRm.stderr}`
-        }
+      // 对照验证：仅存在内部 junction 时，只做 unlink 不会删掉目录与分支，而部分 Windows Git 在未解绑前直接 `git worktree remove --force`
+      // 会以 Directory not empty 失败（newer Git for Windows 已兼容，故用跨版本确定性对照：只 unlink 不删目录 vs cleanup 完整两步）。
+      const ctrl = await handleStart({ task: 'c3-ctrl', case: '2', slug: 'c3-ctrl' }, roots)
+      if (ctrl.exitCode !== 0) return `对照 start 失败：${ctrl.exitCode}`
+      const lCtrl = readTaskLedger(dir, 'c3-ctrl')
+      const wtCtrl = join(dir, lCtrl.worktreePath)
+      mkdirSync(join(wtCtrl, 'inner'), { recursive: true })
+      writeFileSync(join(wtCtrl, 'inner', 'a.txt'), 'a\n')
+      gitCommitFast(wtCtrl, 'add inner dir')
+      symlinkSync(join(wtCtrl, 'inner'), join(wtCtrl, 'inner-junc'), linkType)
+      const umCtrl = unmountSharedDeps(dir, wtCtrl, { mode: 'cleanup' })
+      if (!umCtrl.ok || !umCtrl.unmountedInternal?.some((u) => u.path === 'inner-junc') || lstatSync(join(wtCtrl, 'inner-junc'), { throwIfNoEntry: false })) {
+        return `对照内部 junction 未被 cleanup 档 unlinkSync：${JSON.stringify(umCtrl)}`
+      }
+      if (!existsSync(wtCtrl) || gitSync(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${lCtrl.branch}`]).status !== 0) {
+        return '对照：只做 unlink 时工作树目录与分支应仍存在，须由 cleanup 执行两步删除'
       }
 
       const st = await handleStart({ task: 'c3-main', case: '2', slug: 'c3-main' }, roots)
@@ -441,6 +456,31 @@ export function registerFlowCleanupCases(cases) {
       }
       if (existsSync(join(dir, '.worktrees', '.tmp-merge-c5-tm'))) {
         return 'runTrialMerge 试合后临时 worktree 未清理'
+      }
+
+      // 3. 干净工作树含已提交跟踪的外链（core.symlinks=true）时，不传 --force 运行 cleanup --confirm --allow-outbound 也必须能删掉
+      const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
+      gitSync(dir, ['config', 'core.symlinks', 'true'])
+      const stTracked = await handleStart({ task: 'c1-tracked-clean', case: '2', slug: 'c1-tracked-clean' }, roots)
+      if (stTracked.exitCode !== 0) return `start c1-tracked-clean 失败：${stTracked.exitCode}`
+      const lTr = readTaskLedger(dir, 'c1-tracked-clean')
+      const wtTr = join(dir, lTr.worktreePath)
+      let dirSymOk = false
+      try {
+        symlinkSync(outside, join(wtTr, 'extlink'), 'dir')
+        dirSymOk = true
+      } catch (e) {
+        if (e?.code !== 'EPERM') throw e
+      }
+      if (dirSymOk) {
+        gitSync(wtTr, ['add', 'extlink'])
+        gitSync(wtTr, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'commit tracked extlink'])
+        gitSync(dir, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '--no-ff', lTr.branch, '-m', 'merge tracked extlink'])
+        const clTr = await handleCleanup({ task: 'c1-tracked-clean', confirm: true, 'allow-outbound': ['extlink'], json: true }, roots)
+        if (clTr.exitCode !== 0 || existsSync(wtTr)) {
+          return `干净工作树含跟踪外链不带 --force 清理失败：exit=${clTr.exitCode}`
+        }
+        if (!existsSync(join(outside, 'SURVIVE.txt'))) return '不带 --force 清理跟踪外链后仓外哨兵丢失'
       }
       return true
     } finally { rmTree(dir); rmTree(outside) }

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T22:22:13.588Z",
+  "installedAt": "2026-11-17T22:44:54.631Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -17,7 +17,7 @@
       "sha256": "ef6a86343cb08bbce8ac082a9c3d2acc8bc1ca6805357882bf03a04af63f95fe"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "3d8f74d9a48543bddbce24b396536fd202946a7154aea783c4d3e9355116a1dc"
+      "sha256": "8d7fb41fdba18b45eb588c63a3c63cba09e223b1102b33180c0facfbb275ab58"
     },
     "dev-flow/scripts/flow-inspect.mjs": {
       "sha256": "ae1ee21f339f5915aba125d43d97cebf1156ae66327a1f2563392a9ee83b5f3e"
@@ -41,7 +41,7 @@
       "sha256": "d2e6ba79c5031973aac6cbd8bf22c82dec80f9c5b00eb59935cec3bcc6434b56"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
-      "sha256": "5d9381668bc896b6ebd8b7a6d77ab4ee5b12a886330329a8454c481d4bca584c"
+      "sha256": "aa5df1d0d199c8eac74baa453f5cfeaf87ae336bbeedc58153a7b405a6b38146"
     },
     "dev-govern/SKILL.md": {
       "sha256": "753815d5bf20be663b5ac1a7b4d37bd5ae6ae65e17a3faa64d4577ba4ad806fe"

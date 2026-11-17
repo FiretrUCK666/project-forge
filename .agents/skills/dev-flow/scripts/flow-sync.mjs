@@ -11,7 +11,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import {
   detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { readTaskLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { readTaskLedger, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
@@ -84,7 +84,10 @@ export async function handleSync(opts = {}, roots) {
     throw new Error(`找不到 sync 目标基线分支或提交：${targetBaseBranch}`)
   }
 
-  if (ledger.tier === 2) unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps' })
+  if (ledger.tier === 2) {
+    const implUm = unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps' })
+    if (!implUm?.ok) throw new Error(`sync 前解绑实施工作区共享依赖失败：${JSON.stringify(implUm?.blocked ?? [])}`)
+  }
 
   const rebaseArgs = oldBaseSha
     ? ['rebase', '--onto', newBaseSha, oldBaseSha, ...(ledger.branch ? [ledger.branch] : [])]
@@ -94,7 +97,12 @@ export async function handleSync(opts = {}, roots) {
     const conflictSt = await gitStatusPorcelainZ(implRoot)
     const conflicts = conflictSt.entries.map((e) => e.file)
     await gitRun(implRoot, ['rebase', '--abort'])
-    if (ledger.tier === 2) mountSharedDeps(roots.mainRoot, implRoot)
+    if (ledger.tier === 2) {
+      const remount = mountSharedDeps(roots.mainRoot, implRoot)
+      ledger.depsMode = remount.mode
+      recordMountedDepsInLedger(ledger, ledger.worktreePath, remount)
+      writeTaskLedger(roots.mainRoot, ledger)
+    }
     const payload = {
       ok: false,
       blocked: true,
@@ -113,6 +121,10 @@ export async function handleSync(opts = {}, roots) {
   }
 
   const depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }
+  if (ledger.tier === 2) {
+    ledger.depsMode = depMount.mode
+    recordMountedDepsInLedger(ledger, ledger.worktreePath, depMount)
+  }
   const fastNewHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
   const newHeadRes = fastNewHead ? { ok: true, stdout: fastNewHead } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
   const newHeadSha = newHeadRes.ok ? newHeadRes.stdout.trim() : prevHeadSha
@@ -126,9 +138,11 @@ export async function handleSync(opts = {}, roots) {
   if (ledger.tier === 2 && newHeadSha && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
     if (existsSync(reviewAbs)) {
-      unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
+      const revUm = unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
+      if (!revUm?.ok) throw new Error(`sync 前解绑审查槽共享依赖失败：${JSON.stringify(revUm?.blocked ?? [])}`)
       reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, newHeadSha, { resetDirty: true })
       const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
+      recordMountedDepsInLedger(ledger, ledger.reviewWorktreePath, revDeps)
       ledger.reviewWorktreeHead = newHeadSha
       reviewSlotSync.depsMode = revDeps.mode
     }

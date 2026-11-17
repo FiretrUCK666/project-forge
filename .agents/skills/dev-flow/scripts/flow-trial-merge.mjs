@@ -40,6 +40,33 @@ function pickTrialVerifyCommand({ policy, profile, evidence, ledger }) {
   return cmd
 }
 
+async function cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel, { prune = false } = {}) {
+  if (!existsSync(tmpAbs)) return
+  const um = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'deps' })
+  if (!um?.ok) {
+    throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 临时试合 worktree (${tmpRel}) 解绑失败，拒绝执行 worktree remove`)
+  }
+  const trackedLeft = (um.skipped ?? []).filter((s) => s.reason === 'tracked-in-git').map((s) => s.path)
+  const internalGuard = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'cleanup', allowOutbound: trackedLeft })
+  if (!internalGuard?.ok) {
+    throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 临时试合 worktree (${tmpRel}) 存在未获准外链，拒绝强制删除`)
+  }
+  const rmRes = await gitRun(mainRoot, ['worktree', 'remove', '--force', tmpAbs])
+  if (!rmRes.ok && !prune) {
+    throw new Error(`移除临时试合 worktree (${tmpRel}) 失败：${rmRes.stderr}`)
+  }
+  if (prune) {
+    await gitRun(mainRoot, ['worktree', 'prune'])
+    if (existsSync(tmpAbs)) {
+      const residualGuard = unmountSharedDeps(mainRoot, tmpAbs, { mode: 'cleanup', allowOutbound: trackedLeft })
+      if (!residualGuard?.ok) {
+        throw new Error(`BLOCKED_TRIAL_MERGE_UNMOUNT: 残留目录 (${tmpRel}) 存在未解绑外链，拒绝清理`)
+      }
+      try { rmSync(tmpAbs, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  }
+}
+
 /**
  * 执行临时 `--detach` worktree 试合复测并推进干净主干。
  */
@@ -111,12 +138,7 @@ export async function runTrialMerge({
   const tmpRel = `.worktrees/.tmp-merge-${safeId}`
   const tmpAbs = join(mainRoot, tmpRel)
   if (existsSync(tmpAbs)) {
-    try { unmountSharedDeps(mainRoot, tmpAbs) } catch { /* ignore */ }
-    await gitRun(mainRoot, ['worktree', 'remove', '--force', tmpAbs])
-    await gitRun(mainRoot, ['worktree', 'prune'])
-    if (existsSync(tmpAbs)) {
-      try { rmSync(tmpAbs, { recursive: true, force: true }) } catch { /* ignore */ }
-    }
+    await cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel, { prune: true })
   }
 
   const addRes = await gitRun(mainRoot, ['worktree', 'add', '-q', '--detach', tmpAbs, oldBaseSha])
@@ -168,8 +190,7 @@ export async function runTrialMerge({
       }
     }
   } finally {
-    try { unmountSharedDeps(mainRoot, tmpAbs) } catch { /* ignore */ }
-    await gitRun(mainRoot, ['worktree', 'remove', '--force', tmpAbs])
+    await cleanupTrialWorktree(mainRoot, tmpAbs, tmpRel)
   }
 
   if (curMainBranch === baseBranch) {

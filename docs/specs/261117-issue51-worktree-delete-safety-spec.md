@@ -4,11 +4,11 @@ title: worktree 通配清理的删穿保护
 status: approved
 tier: L3
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: 51
 pr: null
-branch: fix/v8-criteria-trust
-owner: null
+branch: feat/worktree-delete-safety
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
@@ -23,11 +23,11 @@ high_risk_paths: [kit/skills/dev-flow/scripts/worktree-deps.mjs, kit/skills/dev-
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
+| 当前状态 | `approved`（`draft \| approved \| implementing \| in_review \| implemented \| superseded`） |
 | 规划级别 | `L3` |
-| 创建 / 更新 | `2026-11-17` / `2026-11-17` |
-| 分支 / Issue | `fix/v8-criteria-trust` / #51 |
-| 认领的验收标准 | C1、C2、C3 |
+| 创建 / 更新 | `2026-11-17` / `2026-11-18` |
+| 分支 / Issue | `feat/worktree-delete-safety` / #51 |
+| 认领的验收标准 | C1..C6 |
 
 ## 系统变更全景
 
@@ -138,16 +138,16 @@ unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' })
 - **还要跟着走的地方**：改 `kit/**` 之后必须跑 `node scripts/equip.mjs .` 让 `.agents/skills/` 与源码字节一致，否则 `equip --check` 与 `preflight` 都会红；`docs/TDD.md` 的 worktree 三档描述要同步（`finalize` 会查 `tdd-parity`）。
 ## 三、冻结的验收标准
 
-- [ ] C1: worktree 里存在**任意名字**、目标在 worktree 之外的符号链接时，`cleanup` 在删目录**之前**以 `EXIT_POLICY_BLOCK` 终止，并逐个列出链接路径与目标；**主仓哨兵文件在 `cleanup` 之后必须仍存在**（根目录与外链目标两处都查）；悬空链接（`kind: unresolved`）同样阻断——用 `symlinkSync` 指向一个不存在的目标构造，断言 `blocked[].reason` 是 `unresolved-target`；**已被 Git 跟踪的链接在删除档同样必须解绑，不许豁免**——
+- [x] C1: worktree 里存在**任意名字**、目标在 worktree 之外的符号链接时，`cleanup` 在删目录**之前**以 `EXIT_POLICY_BLOCK` 终止，并逐个列出链接路径与目标；**主仓哨兵文件在 `cleanup` 之后必须仍存在**（根目录与外链目标两处都查）；悬空链接（`kind: unresolved`）同样阻断——用 `symlinkSync` 指向一个不存在的目标构造，断言 `blocked[].reason` 是 `unresolved-target`；**已被 Git 跟踪的链接在删除档同样必须解绑，不许豁免**——
 实测：在分支里提交一个指向仓外的符号链接，cleanup 把它记进 skipped、紧接着 `git worktree remove --force` 退出 0，
 仓外那个目录的内容被删了。豁免的初衷「git 自己会删」是错的：git 删含链接的目录时会跟着链接走进去。
 只有「worktree 不消失」的依赖清场档才跳过（解绑会让工作区变脏）。
 同一条链接若出现在 `sync` / `submit` / **`trial-merge`** 的依赖解绑路径上，**不阻断**，只解绑。
-- [ ] C2: **不该拦的地方不能拦坏**。①没有任何外链的普通 worktree 照常退出 0；②**工具自己挂的依赖不阻断**——但要先补数据源：账本里现在**没有**挂载清单，`mountSharedDeps` 的 `mounted` / `alreadyMounted` 从未写盘，`depsMode` 只是个模式串（`shared`/`partial`/`isolated`/`none`）、而且只在 `start` 时写一次，之后 `sync` / `submit` 重挂载都不更新。所以这条要先把「这次挂了哪些工作单元」写进账本（落点：`flow-inspect.mjs` 写、`kit/skills/lib/ledger.mjs` 加字段默认值），`cleanup` 才能按清单逐条放行并在回执里标明「工具挂载，自动解绑」。**不许的捷径**：用 `depsMode === 'shared'` 一股脑全放行——那会把 ③「真的外部链接仍然阻断」直接作废。③保护只对准「账本里没有的来源」：真的外部链接仍然阻断；④外链在仓库之外但已被显式逐个列出（相对路径归一后**完全**匹配）时删除正常完成且目标内容完好；⑤`--force` 只跳过「脏 / 有未跟踪文件」，**不跳过外链检查**；⑥回执里**逐条列出**解绑了哪条路径、指向哪里——断言 `unmountedLinks` 里存在 `path` 与 `target` 都非空的那一项，只报个数不算过。
-- [ ] C3: **目标在 worktree 内部的链接不阻断，且删除要真的成功**。内部 junction 先 `unlinkSync` 再删目录：`cleanup` 退出 0、worktree 目录已消失、本地分支已删、账本已更新；反向：只 `unlink` 不删目录时 `git worktree remove --force` 会以 `Directory not empty` 失败——这条要作为对照写进用例注释，说明为什么必须两步都做。
-- [ ] C4: **越界要失败在「不删」那一侧**。  边界要说清：`scanOutboundLinks` 的 `depth` 以 worktree 根为 0，`depth > 24` 才返回，  所以「链接位于第 24 层目录下」（路径 25 个组件）**检得出**，「第 25 层目录下」（路径 26 个组件）才漏。  用例必须造**后者**，否则主用例会空转通过。  构造一个第 25 层目录下的外链：`scanOutboundLinks` 要么检出来，要么报 `scan-truncated`；两种情况下 `cleanup` 都**不得**继续删目录（退出码非 0），且主仓哨兵仍在。**禁止**的形态是「超出上限就当没看见、照常删除」——用故障注入把上限改小即可复现，必须变红。
-- [ ] C5: **调用点逐个核过**。`unmountSharedDeps` 的 `mode` 默认档翻转后，`flow-sync.mjs`、`flow-lifecycle.mjs`、`flow-trial-merge.mjs` **以及 `kit/skills/dev-review/scripts/review-diff.mjs`** 四处都必须走依赖清场档；注意 `review-diff.mjs` 走的是 `callReviewDepsHelper(fnName, mainRoot, wtAbs)`，**现在传不进 `mode`**——要扩它的签名。另有一条更根本的：`flow-trial-merge.mjs` 那处是 `try { unmount } catch { /* ignore */ }`，即使传了 `mode`，解绑抛的两种安全错误仍会被吞掉后继续 `git worktree remove --force`。**「解绑失败就绝不许删」这条护栏必须真的存在**，不是只传个参数。端到端断言：主仓真有 `node_modules`（含哨兵文件）时跑一次 `runTrialMerge`，返回 `ok: true` **且哨兵仍在**；反向：把某一处漏改（故障注入），该用例必须变红——这条是本次改动最容易静默丢数据的地方。
-- [ ] C6: **判据不靠目录名**。行为断言：把判据换成「先按 `node_modules` / `.venv` 名字筛再判断是不是链接」时，`I22b` 注入必须变红（已有，保留）；**不再要求**源码级形状断言（`isSymbolicLink()` 不得在按名过滤的循环里）——那个写法会误伤 `collectCandidatePackageDirs` 里用途完全不同的同名调用。`mainDepsIntact` 这类写死为 `true` 的字段不得作为「采集范围一致」的证据；真正的一致性由「被拦下的目标事后也复核」这条行为断言证明。
+- [x] C2: **不该拦的地方不能拦坏**。①没有任何外链的普通 worktree 照常退出 0；②**工具自己挂的依赖不阻断**——但要先补数据源：账本里现在**没有**挂载清单，`mountSharedDeps` 的 `mounted` / `alreadyMounted` 从未写盘，`depsMode` 只是个模式串（`shared`/`partial`/`isolated`/`none`）、而且只在 `start` 时写一次，之后 `sync` / `submit` 重挂载都不更新。所以这条要先把「这次挂了哪些工作单元」写进账本（落点：`flow-inspect.mjs` 写、`kit/skills/lib/ledger.mjs` 加字段默认值），`cleanup` 才能按清单逐条放行并在回执里标明「工具挂载，自动解绑」。**不许的捷径**：用 `depsMode === 'shared'` 一股脑全放行——那会把 ③「真的外部链接仍然阻断」直接作废。③保护只对准「账本里没有的来源」：真的外部链接仍然阻断；④外链在仓库之外但已被显式逐个列出（相对路径归一后**完全**匹配）时删除正常完成且目标内容完好；⑤`--force` 只跳过「脏 / 有未跟踪文件」，**不跳过外链检查**；⑥回执里**逐条列出**解绑了哪条路径、指向哪里——断言 `unmountedLinks` 里存在 `path` 与 `target` 都非空的那一项，只报个数不算过。
+- [x] C3: **目标在 worktree 内部的链接不阻断，且删除要真的成功**。内部 junction 先 `unlinkSync` 再删目录：`cleanup` 退出 0、worktree 目录已消失、本地分支已删、账本已更新；反向：只 `unlink` 不删目录时 `git worktree remove --force` 会以 `Directory not empty` 失败——这条要作为对照写进用例注释，说明为什么必须两步都做。
+- [x] C4: **越界要失败在「不删」那一侧**。  边界要说清：`scanOutboundLinks` 的 `depth` 以 worktree 根为 0，`depth > 24` 才返回，  所以「链接位于第 24 层目录下」（路径 25 个组件）**检得出**，「第 25 层目录下」（路径 26 个组件）才漏。  用例必须造**后者**，否则主用例会空转通过。  构造一个第 25 层目录下的外链：`scanOutboundLinks` 要么检出来，要么报 `scan-truncated`；两种情况下 `cleanup` 都**不得**继续删目录（退出码非 0），且主仓哨兵仍在。**禁止**的形态是「超出上限就当没看见、照常删除」——用故障注入把上限改小即可复现，必须变红。
+- [x] C5: **调用点逐个核过**。`unmountSharedDeps` 的 `mode` 默认档翻转后，`flow-sync.mjs`、`flow-lifecycle.mjs`、`flow-trial-merge.mjs` **以及 `kit/skills/dev-review/scripts/review-diff.mjs`** 四处都必须走依赖清场档；注意 `review-diff.mjs` 走的是 `callReviewDepsHelper(fnName, mainRoot, wtAbs)`，**现在传不进 `mode`**——要扩它的签名。另有一条更根本的：`flow-trial-merge.mjs` 那处是 `try { unmount } catch { /* ignore */ }`，即使传了 `mode`，解绑抛的两种安全错误仍会被吞掉后继续 `git worktree remove --force`。**「解绑失败就绝不许删」这条护栏必须真的存在**，不是只传个参数。端到端断言：主仓真有 `node_modules`（含哨兵文件）时跑一次 `runTrialMerge`，返回 `ok: true` **且哨兵仍在**；反向：把某一处漏改（故障注入），该用例必须变红——这条是本次改动最容易静默丢数据的地方。
+- [x] C6: **判据不靠目录名**。行为断言：把判据换成「先按 `node_modules` / `.venv` 名字筛再判断是不是链接」时，`I22b` 注入必须变红（已有，保留）；**不再要求**源码级形状断言（`isSymbolicLink()` 不得在按名过滤的循环里）——那个写法会误伤 `collectCandidatePackageDirs` 里用途完全不同的同名调用。`mainDepsIntact` 这类写死为 `true` 的字段不得作为「采集范围一致」的证据；真正的一致性由「被拦下的目标事后也复核」这条行为断言证明。
 ## 四、高风险点、门型与回滚路径
 
 - **门型与回滚路径**：`one-way`。删数据不可恢复，保护本身写错会让正常清理被永久堵住。回退方式：移除 `flow-cleanup.mjs` 里新增的解绑调用与 `BLOCKED_OUTBOUND_LINKS` 分支，`worktree-deps.mjs` 的 `scan`/`mode` 参数可保留（只读、无副作用）。
@@ -164,4 +164,16 @@ unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' })
 
 ## 实现说明
 
-<!-- 在合并之前补齐真实实现摘要与验证结果 -->
+- **全深度扫描与 `cleanup` / `deps` 双档解绑（`kit/skills/dev-flow/scripts/worktree-deps.mjs`）**：
+  - `scanOutboundLinks` 按 `lstat().isSymbolicLink()` 遍历全目录（不按目录名过滤），区分 `outside`、`unresolved` 与 `internal`；深度超过 `MAX_SCAN_DEPTH`（24）时设置 `truncated: true` 并记录 `truncatedPaths`，保证 `cleanup` 档 fail-closed 返回 `scan-truncated` 阻断，不放行未扫全子树。
+  - `unmountSharedDeps` 先整体评估 `scan.outbound` 与 `scan.truncated` 再执行解绑：存在任一 `blocked`（含未获准 `outside`、悬空 `unresolved-target`、越界 `scan-truncated`）时整批返回 `{ ok: false }`，一条都不解绑；被 Git 跟踪的外链仅在 `mode: 'deps'` 下跳过，在 `cleanup` 档同样执行 `unlinkSync` 不豁免；`cleanup` 档在放行后额外把 `scan.internal` 内部链接一并 `unlinkSync`，避免 Windows `git worktree remove --force` 在内部 junction 报 `Directory not empty`；移除 `worktree-absent` 分支上写死的 `mainDepsIntact: true`。
+- **账本实际挂载清单与安全清理收口（`kit/skills/lib/ledger.mjs`、`flow-inspect.mjs`、`flow-sync.mjs`、`flow-lifecycle.mjs`、`flow-cleanup.mjs`）**：
+  - `createDefaultLedger` 增加 `depsMode`、`mountedDeps` 与 `mountedDepsByWorktree` 默认字段，并导出 `recordMountedDepsInLedger`（经 `shared.mjs` 重导出），在 `start`、`sync`、`submit` 与 `review-diff` 每次挂载后把实际挂载相对路径写盘。
+  - `flow-cleanup.mjs` 提取 `safeRemoveWorktrees` 统一承载 `cleanup` 与 `abort`：卸载前先查 `git worktree list --porcelain` 校验注册状态、拒绝主工作区与未注册目录、仅按账本 `mountedDepsByWorktree`/`mountedDeps` 自动放行工具挂载并在回执 `unmountedLinks` 逐条输出 `{ path, target, source, label }`（`工具挂载，自动解绑`），对未登记外链与 `--allow-outbound` 不完全匹配路径以 `EXIT_POLICY_BLOCK` 终止。
+- **全调用点 `deps` 档对齐与试合防吞错（`flow-trial-merge.mjs`、`review-diff.mjs`）**：
+  - `review-diff.mjs` 扩展 `callReviewDepsHelper(fnName, mainRoot, reviewWtAbs, helperOpts)`，推进审查槽前显式传 `{ mode: 'deps' }` 解绑并在失败时中止。
+  - `flow-trial-merge.mjs` 提取 `cleanupTrialWorktree` 传 `{ mode: 'deps' }` 解绑并在 `unmountSharedDeps` 失败或遗留未解绑链接时立即抛错终止，绝不吞掉异常继续执行 `git worktree remove --force`。
+- **验证与故障注入结果**：
+  - `node scripts/dev/preflight.mjs`：33 项检查全部通过，0 项失败；`node scripts/dev/gap-coverage.mjs`：19 条全覆盖；`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check` 与 `govern-audit.mjs audit . --changed --strict` 均退出 0。
+  - `node scripts/dev/fixtures.mjs --domain flow-cleanup`：5 项通过 / 0 失败；`node scripts/dev/fixtures.mjs`：241 项通过 / 0 失败。
+  - `node scripts/dev/verify-injections.mjs`：149 条故障注入全部变红捕获（含 `I22`、`I22b`、`I103` 与新增 `I143`、`I144`）。

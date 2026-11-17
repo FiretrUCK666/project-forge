@@ -477,7 +477,7 @@ export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untruste
     nextSteps.push('Fix any [PARITY_WARN] / structural / test issues locally before creating a commit or opening a PR.')
   } else if (mode === 'task' && task) {
     nextSteps.push('Review independently against criteria C1..Cn, run tests + fault injection, then record verdict:')
-    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id>`)
+    nextSteps.push(`  node ".agents/skills/dev-review/scripts/review-pack.mjs" record --task ${task.taskId} --round ${round} --verdict pass|changes --reviewer-id <reviewer-id> --review-token <flow next 输出的令牌>`)
     if (task.role === 'contributor-fork') {
       nextSteps.push('Contributor-fork note: after PASS, wait for upstream maintainer merge; do NOT run `flow.mjs merge` or delete fork branch.')
     } else if (!skills.has('dev-flow')) {

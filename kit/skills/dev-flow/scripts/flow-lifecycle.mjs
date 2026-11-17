@@ -9,15 +9,11 @@ import { basename, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd,
-  parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter,
-} from '../../lib/docs.mjs'
+  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter, } from '../../lib/docs.mjs'
 import {
-  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun,
-  gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic,
-} from '../../lib/git.mjs'
+  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls,
   probeGitHubEnv, resolveContributorIdentity,
@@ -624,7 +620,7 @@ export async function handleSubmit(opts, roots) {
   }
 
   const nextRound = (ledger.rounds ?? []).length > 0
-    ? Math.max(...ledger.rounds.map((r) => Number(r.round) || 1)) + 1
+    ? nextReviewRound(ledger)
     : 1
 
   if (ledger.role === 'local-only') {

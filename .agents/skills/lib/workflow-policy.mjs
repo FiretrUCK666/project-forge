@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 import { checkMermaidLabelWidth } from './docs.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
-import { sanitizeTaskId } from './ledger.mjs'
+import { sanitizeTaskId, nextReviewRound } from './ledger.mjs'
 import { parseBodyRelations } from './platform.mjs'
 import { isProfileExplicitNone } from './profile.mjs'
 import { GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
@@ -477,7 +477,7 @@ export function evaluateNextState({
   const policy = rt.policy ?? null
   const rounds = Array.isArray(t.rounds) ? t.rounds : []
   const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null
-  const nextRound = rounds.length + 1
+  const nextRound = nextReviewRound(t)
   const currentHead = rt.headSha ?? null
   const evidenceVal = rt.evidenceValidation ?? { ok: false, code: 'BLOCKED_NOT_VERIFIED' }
   const needsFinalize = t.caseType === 3 || t.caseType === 4 || Boolean(t.todoFile) || Boolean(t.specFile)

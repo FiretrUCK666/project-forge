@@ -12,7 +12,7 @@ import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ 
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
-import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -208,7 +208,9 @@ export async function handleNext(opts, roots) {
   //
   // `--json` 也要带：只看 JSON 的调用方拿不到令牌就永远记不了审查。
   if (out.phase === 'needs-review' && selectedTask) {
-    const round = (selectedTask.rounds ?? []).length + 1
+    // 轮次只能有一个派生式（`ledger.mjs` 的 `nextReviewRound`）。
+    // 按条数算会在轮次有空档时算错，而空档是正常历史。
+    const round = nextReviewRound(selectedTask)
     const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round)
     out = {
       ...out,

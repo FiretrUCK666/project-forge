@@ -13,9 +13,7 @@ import { buildReviewComments } from '../../lib/docs.mjs'
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId,
-  writeTaskLedger,
-} from '../../lib/ledger.mjs'
+  consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
   parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
@@ -250,8 +248,8 @@ export async function handleRecord(opts, roots) {
       return EXIT.USAGE_OR_POLICY
     }
   } else {
-    const maxPrev = prevRounds.length > 0 ? Math.max(...prevRounds.map((r) => Number(r.round) || 0)) : 0
-    round = maxPrev + 1
+    // 与签发侧用同一个派生式——两处各算一次，轮次有空档时必然对不上。
+    round = nextReviewRound(task)
   }
 
   const verdict = String(opts.verdict ?? '').toLowerCase()

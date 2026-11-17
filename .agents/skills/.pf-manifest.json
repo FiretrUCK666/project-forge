@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T09:15:50.665Z",
+  "installedAt": "2026-11-17T09:30:48.853Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -23,13 +23,13 @@
       "sha256": "11f88e3aae09b2e5345008a96ca4551e159919ee2ab4d753e67609bdc9954da2"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "6c9bb9837e774240753142b618e213bf2d0257518d1df28064a7aa27003389f2"
+      "sha256": "c36c7ff37c123651b9337bc8e28ae71da34c12e7d93d70d9e16ee422aca66c35"
     },
     "dev-flow/scripts/flow-merge.mjs": {
       "sha256": "4e85fe824f754fc002c83c25789ab09fb966954cfb95b15eb9ca1c9f48b83029"
     },
     "dev-flow/scripts/flow-next.mjs": {
-      "sha256": "b6312ec83761f216a743ee284d2e1e43f50812707ec0db9e1f2ddb1524457b57"
+      "sha256": "c3f08283be3baa6b2ec9a050955d64561f0e3616b7afe4cb73ee928aa0b82b2b"
     },
     "dev-flow/scripts/flow-sync.mjs": {
       "sha256": "f8d326d674225b5517841228de5b4dc0d1597b47f5efb585e841f45d46f1815a"
@@ -83,16 +83,16 @@
       "sha256": "0aea6d96502995514b2845096f8dd3f049bd309819d8819e23605b477825e0cf"
     },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "d8d9679af65a7aefd3350288320951264925dfbd70dca9a227822dd41fcb3524"
+      "sha256": "c1a413bcc1708a6d305f92f75e7c10a1130b7cae8d8ebbd9b111337ad8620085"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "3474095dc06de41ce4cf9600cf7dbae42ef1d91ddfad27521cde727de08315c3"
+      "sha256": "a9bbebf1681f7000bb4aeb47f1a2360dac29bb0414e81f3b048a63f035bfe4f4"
     },
     "dev-review/scripts/review-locks.mjs": {
       "sha256": "b6479c67ffb98db6a987d7ff097f324f567d6220d6fc1d2cb7340d7399c10398"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "4bc625c79fdbe9c81bcfa40bdd82db8111f7c19d7a3f2723464a1ca571a755dd"
+      "sha256": "92f9ef0f93b224c760cb8f22f66729f73864c9f2cc76067e847fcd50d17d76dc"
     },
     "lib/cli.mjs": {
       "sha256": "c02575fc8c183a440f505ac712ef0e9a3a05380d595f49f8ec782ab82413826d"
@@ -149,7 +149,7 @@
       "sha256": "061bc0a7b041fb55b9f6231ae46b1d3fa86b44902395ae47dd22331e0dfb0bbe"
     },
     "lib/ledger.mjs": {
-      "sha256": "b69e6bb4868e22d6f36bc293b3551dc5a67d0a99f32dbfcf568d107faba512a2"
+      "sha256": "2a5c7648e660427ca405753df1e4393e4b2e66b1750c4fa5800be2b10c992aba"
     },
     "lib/no-changelog-voice.mjs": {
       "sha256": "db70929f635116ca94760bdaec3267920dd5feb12855252f0e440cf8d1c0a882"
@@ -212,7 +212,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "c118dfe21f131e43f2ed60c0c16f3c2402dac5e9abc10a7f7832b8a4baf7d4b1"
+      "sha256": "fc07f0ae3e15f2b839014b8fb8c96e88f54bde8ecffd0df07ab1f1fb5c9283d1"
     },
     "templates/docs-prd.md": {
       "sha256": "5521fa3da20bdaa28641859452deafc4c42bfb81ff927570acb783e5cf1b487b"

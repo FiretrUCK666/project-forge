@@ -332,3 +332,28 @@ export async function resolveTaskContext(roots, opts = {}, { requireExisting = t
   const choices = active.map((t) => `  - --task ${t.taskId} (status=${t.status}, branch=${t.branch ?? '-'})`).join('\n')
   throw new Error(`存在 ${active.length} 个未闭环任务，无法自动消歧，请显式追加以下任一参数：\n${choices}`)
 }
+
+/**
+ * 下一个审查轮次。
+ *
+ * ## 为什么必须只有一个派生式
+ *
+ * 这件事此前在五处各算一遍，其中两种算法并存：
+ *
+ * - `rounds.length + 1`（签令、打印命令）—— 轮次有空档时算错；
+ * - `Math.max(...) + 1`（diff 基线、变更记录、rebind）—— 这个是对的。
+ *
+ * 空档（`rounds = [1, 3]`）时前者给 3、后者给 4：令牌按 4 签、命令让人照 3 跑，
+ * 于是 `REVIEW_TOKEN_ROUND_MISMATCH`，而且没有出口。
+ *
+ * 判据就是「取最大轮次加一」——**空档不是异常，是正常历史**（某轮被撤销、
+ * 某轮只审了一部分）。按条数算等于假设轮次永远连续，那个假设不成立。
+ *
+ * @param {object} ledger 任务账本
+ * @returns {number} 下一个轮次，最小为 1
+ */
+export function nextReviewRound(ledger) {
+  const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+  const nums = rounds.map((r) => Number(r?.round ?? r) || 0).filter((n) => n > 0)
+  return nums.length > 0 ? Math.max(...nums) + 1 : 1
+}

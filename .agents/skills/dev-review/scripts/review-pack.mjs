@@ -12,13 +12,10 @@ import { basename, join, resolve } from 'node:path'
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
 import {
-  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots,
-} from '../../lib/git.mjs'
+  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots, } from '../../lib/git.mjs'
 import {
-  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast,
-  resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits,
-} from '../../lib/git-fast.mjs'
-import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits, } from '../../lib/git-fast.mjs'
+import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import {
@@ -262,7 +259,7 @@ async function main(argv = process.argv.slice(2)) {
 
     let round = opts.round ? Number(opts.round) : 1
     if (!opts.round && task?.rounds?.length) {
-      round = Math.max(...task.rounds.map((r) => Number(r.round) || 1)) + 1
+      round = nextReviewRound(task)
     }
     if (!Number.isInteger(round) || round < 1) round = 1
 

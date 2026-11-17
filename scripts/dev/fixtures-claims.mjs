@@ -2191,4 +2191,33 @@ cases.push(["文档里的机械断言能自动核，判断类的不替人下结�
 
   return true
 }])
+
+// 轮次派生式此前在五处各算一遍，两种算法并存：按条数（`length + 1`）与按最大值（`max + 1`）。
+// 轮次有空档时（某轮撤销、某轮只审了一部分），前者算出来的轮次是错的——
+// 令牌按 4 签、命令让人照 3 跑，于是 `REVIEW_TOKEN_ROUND_MISMATCH`，而且没有出口。
+cases.push(["轮次只有一个派生式，空档不算错", async () => {
+  const { nextReviewRound } = await import("../../kit/skills/lib/ledger.mjs")
+
+  // 正向：空账本从 1 开始
+  if (nextReviewRound({}) !== 1) return "空账本没从 1 开始"
+  if (nextReviewRound({ rounds: [] }) !== 1) return "空数组没从 1 开始"
+
+  // 正向：连续轮次
+  if (nextReviewRound({ rounds: [{ round: 1 }, { round: 2 }] }) !== 3) return "连续轮次算错"
+
+  // 反向：有空档时必须取最大值加一，不能按条数算
+  const gap = { rounds: [{ round: 1 }, { round: 3 }] }
+  const got = nextReviewRound(gap)
+  if (got !== 4) return `空档时算成了 ${got}，应为 4（取最大轮次加一）`
+  if (got === gap.rounds.length + 1) return "空档时退回了按条数算——那正是死锁的来源"
+
+  // 反向：从中间起头也算得出来（历史被清理过）
+  if (nextReviewRound({ rounds: [{ round: 3 }] }) !== 4) return "从中间起头时算错"
+
+  // 反向：脏数据不许把轮次算成 0 或 NaN
+  const dirty = nextReviewRound({ rounds: [{ round: "x" }, { round: null }, { round: 2 }] })
+  if (!Number.isInteger(dirty) || dirty < 2) return `脏数据算出了 ${dirty}`
+
+  return true
+}])
 }

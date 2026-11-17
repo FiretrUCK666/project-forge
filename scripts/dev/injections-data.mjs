@@ -956,6 +956,14 @@ export const INJECTIONS = [
     expect: '文档里的机械断言能自动核',
   },
   {
+    id: 'I108',
+    what: '轮次退回按条数算（有空档时令牌与命令对不上，且没有出口）',
+    file: 'kit/skills/lib/ledger.mjs',
+    from: '  return nums.length > 0 ? Math.max(...nums) + 1 : 1',
+    to: '  return nums.length + 1',
+    expect: '轮次只有一个派生式',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

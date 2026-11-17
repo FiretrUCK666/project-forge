@@ -1597,4 +1597,61 @@ cases.push(['验收标准批准即冻结，改过要能被逐条指出来', asyn
   return true
 }])
 
+// 认节要看内容，不能只看标题像不像模板。
+//
+// 同一个「不做什么」，有人写 `## 明确不做（Non-Goals）`，有人写 `## 不在本次范围`，
+// 有人写 `## Out of scope`，还有人写在目标那节的最后一句里。全都写了，
+// 按标题认会判成「没写」——那是最气人的一种误报：人明明写了，工具说没有。
+cases.push(['认节看内容不看标题：换个写法也算写了', async () => {
+  const { resolveDocRequirements, resolveSectionPresence, findMissingSections } =
+    await import('../../kit/skills/lib/doc-requirements.mjs')
+
+  const req = resolveDocRequirements(null, 'spec')
+  if (req.sections.some((s) => s.id === 'door')) return '默认竟然还要求「门型与回滚」——没门的项目只能编一个'
+
+  // 正向 1：中文标题但换了说法
+  const zh = [
+    '## 背景与动机', '',
+    '现有流程每天凌晨跑批，上游变更后静默丢字段，需要改成强校验。', '',
+    '## 不在本次范围', '', '- 不改调度器', '',
+    '## 交付判据', '', '- [ ] C1: 退出码为 1', '',
+  ].join('\n')
+  const f1 = resolveSectionPresence(zh, req)
+  const m1 = findMissingSections(req, f1, { hasInlineAcceptance: true })
+  if (m1.length > 0) return `中文变体被判缺节：${m1.map((m) => m.id).join(',')}`
+
+  // 正向 2：英文标题 + 隐式写法（非目标藏在目标那节里）
+  const en = [
+    '## Why', '',
+    'The ETL job silently drops columns. We need to fail fast.', '',
+    '## Approach', '',
+    "Validate on read. We won't touch the scheduler this round.", '',
+    '## Done when', '', '- [ ] C1: node x.mjs exits 1', '',
+  ].join('\n')
+  const f2 = resolveSectionPresence(en, req)
+  const m2 = findMissingSections(req, f2, { hasInlineAcceptance: true })
+  if (m2.length > 0) {
+    return `英文/隐式写法被判缺节：${m2.map((m) => m.id + '/' + m.reason).join(',')}`
+  }
+
+  // 反向 1：真没写「不做什么」就要报出来——否则这条判据等于被删掉
+  const noNonGoals = [
+    '## 背景', '', '现有流程有问题，需要改。', '',
+    '## 验收', '', '- [ ] C1: 退出码 0', '',
+  ].join('\n')
+  const f3 = resolveSectionPresence(noNonGoals, req)
+  if (!findMissingSections(req, f3, { hasInlineAcceptance: true }).some((m) => m.id === 'non-goals')) {
+    return '完全没写非目标，却也没报缺——那这条判据等于不存在'
+  }
+
+  // 反向 2：空壳章节不算写了（有标题没内容）
+  const empty = '## 要解决的问题\n\n## 本期不做\n\n## 验收标准\n\n- [ ] C1: x\n'
+  const f4 = resolveSectionPresence(empty, req)
+  if (!findMissingSections(req, f4, { hasInlineAcceptance: true }).some((m) => m.id === 'goal')) {
+    return '只有标题没内容的「要做什么」被判成写了'
+  }
+
+  return true
+}])
+
 }

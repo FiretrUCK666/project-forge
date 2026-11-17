@@ -9,40 +9,34 @@ import { readTextSafe } from './git.mjs'
  *
  * ## 它治的病
  *
- * 早先这件事分两处写死：
- * 1. `doc-templates.mjs` 里七节固定表单（文档信息 / 要解决的问题 / 范围与非目标 /
- *    复用既有模块 / 关键交互 / 验收标准 / 门型与回滚 / 待拍板）；
- * 2. `doc-audit.mjs` 里三条硬编码检查（验收标准、非目标、门型与回滚）。
+ * 早先这件事分两处写死：生成器里七节固定表单，审计里三条硬编码检查。
+ * 两处都把「这个工具自己长什么样」当成了「所有项目都必须长什么样」。
  *
- * 两处都把「这个工具自己长什么样」当成了「所有项目都必须长什么样」。于是：
+ * ## 判据分两层，缺一不可
  *
- * - 一个数据管道项目，被要求写「关键交互与用户路径」；
- * - 一篇论文或一个硬件仓，被要求标「门型 two-way / one-way」——它没有门；
- * - 一个纯文档站，被要求写「复用既有模块」——它没有模块。
+ * **第一层：只有三件事与形态无关。** 不论做成什么形状，都必须回答：
  *
- * 项目自己的模板**只能往后追加章节，不能减**（`extractCustomDocSections` 只挑标准
- * 内容里没有的二级标题追加）。想写得合身，只剩「改写工具代码」一条路。
- *
- * ## 判据：只有「与项目形态无关」的那几件才是必需的
- *
- * 任何事情，不论做成什么形状，都必须回答三件事：
- *
- * | 问题 | 对应 |
+ * | 问题 | 章节 id |
  * | --- | --- |
- * | 要做什么 | 目标或问题陈述 |
- * | 不做什么 | 非目标（防范围蔓延） |
- * | 怎么算做完 | 可判定的验收标准 `C1..Cn` |
+ * | 要做什么 | `goal` |
+ * | 不做什么 | `non-goals` |
+ * | 怎么算做完 | `acceptance` |
  *
- * 这三件就是**通用主干**。其余章节（门型与回滚、复用模块、关键交互、待拍板……）都是
- * 「某类项目需要、某类项目不需要」，因此它们属于**可选章节**：默认由工具的模板提供，
- * 项目可以按自己的形态声明要哪些、不要哪些。
+ * 这三节是主干，项目声明也去不掉。其余都是可选。
+ *
+ * **第二层：认节看内容，不看标题。** 这一层比第一层更要紧，也是最初设计漏掉的：
+ *
+ * 同一个「不做什么」，有人写在 `## 明确不做（Non-Goals）`，有人写 `## 不在本次范围`，
+ * 有人写 `## Out of scope`，还有人干脆在目标那节里写一句「本次不动调度器」。
+ * 按标题关键字认，前两种能过，后面几种全被判成「没写」——而它们其实写了。
+ *
+ * 于是判据改成：**这一节回答的是不是这个问题**，而不是「它的标题像不像模板」。
+ * 具体做法见 `SECTION_EVIDENCE`：每节给一组「内容里出现这些，就算答了这个题」的
+ * 证据模式。标题只作为弱证据参与，不作唯一依据。
  *
  * ## 反向：可扩展不等于可以什么都不写
  *
- * 通用主干是**锁死的**，项目声明不能把它减掉。自定义模板只能：
- * - 从可选章节里挑（减不能减主干）；
- * - 追加自己的章节。
- *
+ * 主干锁死，项目声明减不掉；自定义模板只能从可选章节里挑或追加自己的。
  * 否则「我有一个自己的模板」就成了免检通道——那比写死七节更糟。
  */
 
@@ -58,90 +52,122 @@ export const FORM_INDEPENDENT_CORE = Object.freeze({
 })
 
 /**
- * 章节定义表：`id` 是稳定标识，`keywords` 用于在正文里认出它。
+ * 章节定义表。
  *
- * 加一个新章节 = 加一行，判据与模板都不用改。这是「写原则，不写死」的落地：
- * 换项目、换形态，表不用重写。
+ * - `keywords`：标题里的弱证据；
+ * - `evidence`：**正文里的强证据**——出现任意一条，就算答了这个问题；
+ * - `core`：是否主干（主干不可被项目声明删掉）。
+ *
+ * 加一个新章节 = 加一行，判据与模板都不用改。
  */
 export const SECTION_DEFS = Object.freeze({
   goal: {
     id: 'goal',
     label: '要做什么',
-    keywords: ['要解决的问题', '背景与边界', '目标', '要改什么', '任务范围', '需求描述'],
+    keywords: ['要解决的问题', '背景与边界', '背景', '目标', '要改什么', '任务范围', '需求描述', '动机'],
+    // 强证据：说清「现在什么不行 / 要做成什么」的句子。这些在任何项目里都长这样。
+    evidence: [
+      /(?:现状|当前|目前)[^\n]{0,40}(?:痛点|问题|缺失|不足|卡在|无法|不能|缺)/,
+      /(?:需要|要)(?:改成|做成|支持|解决|引入|新增)/,
+      /(?:预期|期望)(?:收益|效果|结果|行为)/,
+      /(?:so that|in order to|we need to|the goal is)/i,
+    ],
     core: true,
     fixHint: '用一段话说清这件事要解决什么、给谁解决；不写形容词，写可观察的结果。',
   },
   'non-goals': {
     id: 'non-goals',
     label: '不做什么',
-    keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals'],
+    keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals', '不在本次范围', '范围外', 'Out of scope'],
+    // 强证据：任何形式的「不做 / 不在范围 / 排除」。
+    evidence: [
+      /(?:不|暂不|本次不|本期不|不在)(?:做|改|动|引入|涉及|考虑|包含|纳入)/,
+      /(?:排除|范围外|非目标|不含)/,
+      /(?:out\s+of\s+scope|won'?t\s+(?:do|touch|change)|not\s+in\s+scope|excluded)/i,
+    ],
     core: true,
     fixHint: '写清本期明确不做的事项，防止范围蔓延。',
   },
   acceptance: {
     id: 'acceptance',
     label: '怎么算做完',
-    keywords: ['验收标准', '冻结的验收标准', 'Acceptance'],
+    keywords: ['验收标准', '冻结的验收标准', 'Acceptance', '交付判据', '完成标准', 'Definition of Done'],
+    // 强证据最强：有编号勾选项就是验收标准，标题叫什么都算。
+    evidence: [/^-\s*\[[ xX]\]\s*C\d+/m],
     core: true,
     fixHint: '动手前冻结 C1..Cn，每条须能被一条命令或断言证明。',
   },
   door: {
     id: 'door',
     label: '门型与回滚路径',
-    keywords: ['门型与回滚', '门型', '回滚路径'],
+    keywords: ['门型与回滚', '门型', '回滚路径', '回滚'],
+    evidence: [
+      /\b(?:two-way|one-way)\b/i,
+      /(?:回滚|回退|revert|rollback)/i,
+    ],
     core: false,
-    needsPattern: /\b(?:two-way|one-way)\b/i,
     fixHint: '标注「门型：two-way」或「门型：one-way」，并写明具体回滚操作。',
   },
-  // ── 以下章节是模板里的可选节 ──────────────────────────────────
-  // 它们**默认不要求**（不在 DEFAULT_OPTIONAL_SECTIONS 里），登记在此只是为了让
-  // 项目能在 omit_sections 里点名删掉它们。不登记就删不掉，等于形态不可调。
+
+  // ── 以下为可选章节 ──────────────────────────────────────────────
+  // 默认不要求，登记在此是为了让项目能在 omit_sections 里点名删掉、在
+  // required_sections 里点名要求。不登记就两样都做不到。
   reuse: {
     id: 'reuse',
     label: '复用既有模块',
-    keywords: ['复用既有模块', '复用模块', '可复用'],
+    keywords: ['复用既有模块', '复用模块', '可复用', '已有能力'],
+    evidence: [/(?:复用|沿用|基于)(?:已有|现有|既有|现成)/, /(?:reuse|reusing)\s+existing/i],
     core: false,
     fixHint: '写清复用哪个现成模块；没有就说明为什么不能复用。',
   },
   flow: {
     id: 'flow',
     label: '关键交互与用户路径',
-    keywords: ['关键交互', '用户路径', '交互流程'],
+    keywords: ['关键交互', '用户路径', '交互流程', '业务流程', '主流程'],
+    evidence: [
+      /(?:用户|调用方|操作者)[^\n]{0,20}(?:输入|点击|触发|执行)/,
+      /^\d+\.\s+\S/m,
+    ],
     core: false,
     fixHint: '从用户入口写到终态，含失败与缺配置时的可见反馈。',
   },
   pending: {
     id: 'pending',
     label: '待拍板问题',
-    keywords: ['待拍板', '未决问题', '待确认'],
+    keywords: ['待拍板', '未决问题', '待确认', '待定'],
+    evidence: [/(?:待拍板|待确认|未决|需要?人(?:拍板|决定|确认))/, /(?:open\s+question|TBD)/i],
     core: false,
     fixHint: '列出需要人拍板的取舍与各自代价；清空后才可进独立 Critique。',
   },
   design: {
     id: 'design',
     label: '设计方案与契约变更',
-    keywords: ['设计方案', '契约变更', '接口变更'],
+    keywords: ['设计方案', '契约变更', '接口变更', '方案'],
+    evidence: [/(?:接口|协议|数据结构|退出码|状态)[^\n]{0,20}(?:变更|调整|新增|改为)/, /(?:breaking\s+change)/i],
     core: false,
     fixHint: '写清改了哪些接口、数据结构、退出码或状态流转。',
   },
   implementation: {
     id: 'implementation',
     label: '实现说明',
-    keywords: ['实现说明', '落地摘要'],
+    keywords: ['实现说明', '落地摘要', '实际落地'],
+    evidence: [/(?:实际(?:落地|采用|实现))/, /(?:implementation\s+notes)/i],
     core: false,
     fixHint: '合入前补齐实际落地内容与同步了哪些文件。',
   },
   steps: {
     id: 'steps',
     label: '执行步骤',
-    keywords: ['执行步骤', '实施步骤'],
+    keywords: ['执行步骤', '实施步骤', '步骤'],
+    evidence: [/(?:第[一二三四五1-9]步|先[^\n]{0,10}再)/],
     core: false,
     fixHint: '按先后写清每一步做什么、怎么验。',
   },
   breakpoint: {
     id: 'breakpoint',
     label: '断点与遗留决策',
-    keywords: ['断点与遗留', '断点', '遗留决策'],
+    keywords: ['断点与遗留', '断点', '遗留决策', '遗留'],
+    evidence: [/(?:断点|接手人|下一步第一件事|遗留)/],
     core: false,
     fixHint: '写清当前停在哪、哪些要人拍板，接手人据此恢复。',
   },
@@ -150,13 +176,17 @@ export const SECTION_DEFS = Object.freeze({
 /**
  * 各文档类型默认要哪些可选章节。
  *
- * 这是**工具的默认值**，不是硬性规则：项目可以按自己的形态改写，
- * 但只要它没表态，就沿用通用的那一套。
+ * **默认值是空的**，这一点很关键：早先默认要求 `door`（门型与回滚），
+ * 于是一个数据管道、一篇论文、一个纯文档站都会被要求标「门型 two-way / one-way」。
+ * 它没有门，只能编一个。
+ *
+ * 现在的默认是「只要求主干三节」——可选章节全部由项目自己声明。
+ * 没有声明就没有额外要求，这比「一律要求」更接近事实：多数可选项确实只适用于某类项目。
  */
 export const DEFAULT_OPTIONAL_SECTIONS = Object.freeze({
-  prd: Object.freeze(['door']),
-  spec: Object.freeze(['door']),
-  todo: Object.freeze(['door']),
+  prd: Object.freeze([]),
+  spec: Object.freeze([]),
+  todo: Object.freeze([]),
 })
 
 const CUSTOM_DECL_REL = Object.freeze({
@@ -177,8 +207,7 @@ const CUSTOM_DECL_REL = Object.freeze({
  * ---
  * ```
  *
- * 读不出来就返回空声明——**不抛错也不阻塞**：一个写坏的声明不该让整个文档链停摆，
- * 它会退回默认那一套，而默认那一套是保守的（什么都要求）。
+ * 读不出来就返回 null——**不抛错也不阻塞**：一个写坏的声明不该让整个文档链停摆。
  */
 function readProjectDeclaration(repoRoot, kind) {
   const candidates = CUSTOM_DECL_REL[kind] ?? []
@@ -199,7 +228,7 @@ function readProjectDeclaration(repoRoot, kind) {
 /**
  * 这份文档必须有哪几节。
  *
- * 返回值里每一项都带 `core: true|false`，调用方据此决定报错的措辞：
+ * 返回值里每项都带 `core: true|false`，调用方据此决定措辞：
  * 主干缺失是「你少回答了根本问题」，可选缺失是「你自己的模板要求了它」。
  */
 export function resolveDocRequirements(repoRoot, kind) {
@@ -228,14 +257,16 @@ export function resolveDocRequirements(repoRoot, kind) {
 /**
  * 逐节核对一份文档，返回缺失项。
  *
- * `sections` 来自 `auditDoc` 已经切好的 Map（标题 -> 正文）。这里只做判定，不做解析。
+ * `sections` 是 `resolveSectionPresence` 交上来的 Map（章节 id -> 命中的内容）。
  */
 export function findMissingSections(docRequirements, sections, { hasInlineAcceptance = false } = {}) {
   const missing = []
   for (const def of docRequirements.sections) {
     if (def.id === 'acceptance') {
       // 验收标准的判定交给调用方（它已经有一条正则），这里不重复实现。
-      if (!hasInlineAcceptance) missing.push({ ...def, reason: 'no-acceptance-criteria' })
+      if (!hasInlineAcceptance && !sections.has('acceptance')) {
+        missing.push({ ...def, reason: 'no-acceptance-criteria' })
+      }
       continue
     }
     const hit = sections.get(def.id)
@@ -262,11 +293,10 @@ export function sectionKeywordMap(docRequirements) {
  * 行内条目形态：`- **本期不做**：…`、`- **门型判定**：two-way`。
  *
  * 判据关心的是「这件事说没说」，不是「它用了标题还是条目」——短文档用条目不丢信息。
- * 命中时把**命中的那一段原文**当正文交下去：塞一个占位串会让「必须标注 two-way /
- * one-way」这类二次判据在这里失效——明明写了，却因为交下去的不是原文而被判没写。
+ * 命中时把**命中的那一段原文**当正文交下去：塞一个占位串会让二次判据失效。
  */
 const INLINE_FORMS = Object.freeze({
-  'non-goals': /-\s+\*\*(?:本期不做|非目标)\*\*\s*[:：]\s*\S/,
+  'non-goals': /-\s+\*\*(?:本期不做|非目标|不做)\*\*\s*[:：]\s*\S/,
   door: /\*\*门型(?:判定|与回滚路径)?\*\*[^\n]*\b(?:two-way|one-way)\b/i,
   goal: /-\s+\*\*(?:要改什么|要做什么|目标)\*\*\s*[:：]\s*\S/,
 })
@@ -274,12 +304,18 @@ const INLINE_FORMS = Object.freeze({
 /**
  * 把一份文档正文解析成「哪几节在、内容是什么」。
  *
- * 这一步放在这里而不是 `doc-audit.mjs` 里，是因为它和「必须有什么」是同一件事的两半：
- * 判据和找法分开写，改一处忘另一处，就会出现「明明写了却被判没写」。
+ * ## 认节的两条证据
+ *
+ * 1. **标题像**（弱）：`## 不做什么` / `## Non-Goals` 这类；
+ * 2. **内容像**（强）：这一节里写的句子，是不是在回答那个问题。
+ *
+ * 只靠标题会漏掉大量真实写法——同一个「不做什么」，有人写 `## 不在本次范围`，
+ * 有人写 `## Out of scope`，还有人写在目标那节的最后一句里。这些全都写了，
+ * 却被判成「没写」。所以内容证据是主判据，标题只是加分项。
  *
  * @param {string} text 已经剥掉 frontmatter 的正文
  * @param {object} docRequirements `resolveDocRequirements` 的返回值
- * @returns {Map<string, {body: string}>} 章节 id -> 找到的内容
+ * @returns {Map<string, {body: string, via: string}>} 章节 id -> 找到的内容
  */
 export function resolveSectionPresence(text, docRequirements) {
   const body = String(text ?? '').replace(/\r\n/g, '\n')
@@ -301,19 +337,42 @@ export function resolveSectionPresence(text, docRequirements) {
   }
   flush()
 
-  const keywordMap = sectionKeywordMap(docRequirements)
   const found = new Map()
+  const ids = docRequirements.sections.map((s) => s.id)
+
+  // 证据一：标题命中关键字（弱证据，但命中即认）
   for (const [title, sectionBody] of byTitle.entries()) {
-    for (const [id, keywords] of keywordMap.entries()) {
-      if (found.has(id)) continue
-      if (keywords.some((k) => title.includes(k))) found.set(id, { body: sectionBody })
+    for (const id of ids) {
+      const def = SECTION_DEFS[id]
+      if (!def || found.has(id)) continue
+      if (def.keywords.some((k) => title.includes(k))) found.set(id, { body: sectionBody, via: 'title' })
     }
+  }
+
+  // 证据二：内容命中证据模式（强证据）——按节扫，命中即认该节
+  for (const [title, sectionBody] of byTitle.entries()) {
+    const clean = sectionBody.replace(/<!--[\s\S]*?-->/g, '')
+    for (const id of ids) {
+      const def = SECTION_DEFS[id]
+      if (!def?.evidence || found.has(id)) continue
+      if (def.evidence.some((re) => re.test(clean))) {
+        found.set(id, { body: sectionBody, via: `content:${title}` })
+      }
+    }
+  }
+
+  // 证据三：全文级的强证据——某些内容写在哪一节都算数
+  for (const id of ids) {
+    const def = SECTION_DEFS[id]
+    if (!def?.evidence || found.has(id)) continue
+    const hit = def.evidence.map((re) => re.exec(body)).find(Boolean)
+    if (hit) found.set(id, { body: hit[0], via: 'document' })
   }
 
   for (const [id, re] of Object.entries(INLINE_FORMS)) {
     if (found.has(id)) continue
     const hit = re.exec(body)
-    if (hit) found.set(id, { body: hit[0] })
+    if (hit) found.set(id, { body: hit[0], via: 'inline' })
   }
   return found
 }
@@ -332,8 +391,6 @@ export function resolveSectionPresence(text, docRequirements) {
  * `implementerId`（干活的那个人）。两边都拿得到才判；任何一边缺失就不判——
  * **不判不等于放行**：缺 owner 的文档在 `approve` 时另有门禁，缺账本的任务
  * `flow next` 会退回「先规划或 start」。
- *
- * 返回值空数组表示没问题。
  */
 export function checkAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
   if (!specRel || !implementerId) return []
@@ -354,4 +411,3 @@ export function checkAuthorIsNotImplementer(repoRoot, specRel, implementerId) {
       + '「动手前冻结标准」这件事就失去了意义。请换一个不参与实施的人来写或复核这份规划。',
   }]
 }
-

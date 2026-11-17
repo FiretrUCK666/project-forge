@@ -844,6 +844,14 @@ export const INJECTIONS = [
     expect: '验收标准批准即冻结',
   },
   {
+    id: 'I94',
+    what: '英文写法的非目标认不出来（「won\'t touch」被判成没写）',
+    file: 'kit/skills/lib/doc-requirements.mjs',
+    from: "      /(?:out\\s+of\\s+scope|won'?t\\s+(?:do|touch|change)|not\\s+in\\s+scope|excluded)/i,",
+    to: '      /(?:NEVER_MATCH_XYZ)/,',
+    expect: '认节看内容不看标题',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

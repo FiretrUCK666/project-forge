@@ -79,7 +79,9 @@ cases.push(['doc-plan.mjs：critiqueTier 分级、audit 防幻觉与占位拦截
     if (badAudit.status === 0) return '缺陷 SPEC 的 audit 竟通过了'
     const badJson = JSON.parse(badAudit.stdout)
     const codes = new Set(badJson.errors.map((e) => e.code))
-    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_SECTION_NON_GOALS', 'MISSING_SECTION_DOOR', 'MISSING_ACCEPTANCE_CRITERIA']) {
+    // 默认不再要求「门型」这类可选章节：一份数据管道的 SPEC 没有门，不该被要求编一个。
+    // 所以这里只核主干三节 + 两条硬缺陷。
+    for (const req of ['UNRESOLVED_ANGLE_PLACEHOLDER', 'HALLUCINATED_PATH', 'MISSING_SECTION_GOAL', 'MISSING_SECTION_NON_GOALS', 'MISSING_ACCEPTANCE_CRITERIA']) {
       if (!codes.has(req)) return `坏 SPEC audit 漏报 ${req}：${badAudit.stdout}`
     }
     const badApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', 'docs/specs/bad.md'], { cwd: dir })

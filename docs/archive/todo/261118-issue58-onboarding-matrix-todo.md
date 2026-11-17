@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 修复外部项目装备断点、仓根命令嗅探与两档五态交叉兼容性
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 58
@@ -9,10 +9,10 @@ pr: null
 branch: feat/onboarding-matrix
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-58
 planned_at: 9e966352f10318a0893c9cb722fe7c0a9f59ab0f
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261118-issue58-onboarding-matrix-spec.md
 ---
 

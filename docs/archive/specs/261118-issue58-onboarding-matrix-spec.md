@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 修复外部项目装备断点、仓根命令嗅探与两档五态交叉兼容性
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -10,9 +10,9 @@ pr: null
 branch: feat/onboarding-matrix
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-58, round=1, sha=4dc4b028b368, summary=Plan Critique passed after fixing C8 backtick scope, unequipped repo hasSkillSupport baseline, L334 high-risk heading isolation, 6 high-risk triggers, and 800-line split.)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261118-issue58-onboarding-matrix-todo.md
 high_risk_paths: [templates/agents-project.md, scripts/lib/protocol.mjs, scripts/lib/agents-sections.mjs, scripts/lib/claims.mjs, kit/skills/lib/profile-sniffer.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/lib/task-graph.mjs, kit/skills/lib/cli.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-next.mjs, kit/skills/dev-flow/scripts/flow-lifecycle.mjs, kit/skills/dev-flow/scripts/flow-merge.mjs]
 ---
@@ -27,7 +27,7 @@ high_risk_paths: [templates/agents-project.md, scripts/lib/protocol.mjs, scripts
 | 规划级别 | `L3` |
 | 创建 / 更新 | `2026-11-18` / `2026-11-18` |
 | 分支 / Issue | `feat/onboarding-matrix` / #58 |
-| 关联总控 | [261117-v8-criteria-trust-prd.md](../prd/261117-v8-criteria-trust-prd.md) |
+| 关联总控 | [261117-v8-criteria-trust-prd.md](../../prd/261117-v8-criteria-trust-prd.md) |
 | 变更一句话 | 打通外部项目从勘察、两档装备、`Dev Profile` 预填与交付体检到 `lightweight`/`full` × 5 身份 `dev-flow` 流转的全链路断点，并补齐 5 形态端到端与 `2×5` 矩阵断言。 |
 
 ## 系统变更全景

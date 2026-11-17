@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 勘察与体检的诚实性
-status: draft
+status: approved
 tier: L3
 created: 2026-11-17
 updated: 2026-11-17
@@ -9,17 +9,12 @@ issue: 49
 pr: null
 branch: fix/v8-criteria-trust
 owner: null
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
 related_prd: ../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue49-survey-honesty-todo.md
-high_risk_paths:
-  - scripts/lib/template.mjs
-  - scripts/lib/claims.mjs
-  - kit/skills/lib/tdd-parity.mjs
-  - templates/agents-project.md
-  - scripts/review.mjs
+high_risk_paths: [scripts/lib/template.mjs, scripts/lib/claims.mjs, kit/skills/lib/tdd-parity.mjs, templates/agents-project.md, scripts/review.mjs]
 ---
 
 # SPEC: 勘察与体检的诚实性

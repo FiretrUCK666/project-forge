@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 独立审查与 Issue 语境
-status: draft
+status: approved
 tier: L3
 created: 2026-11-17
 updated: 2026-11-17
@@ -9,20 +9,12 @@ issue: 52
 pr: null
 branch: fix/v8-criteria-trust
 owner: null
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
 related_prd: ../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue52-review-independence-todo.md
-high_risk_paths:
-  - kit/skills/dev-review/scripts/review-ledger.mjs
-  - kit/skills/dev-review/scripts/review-pack.mjs
-  - kit/skills/dev-review/scripts/review-diff.mjs
-  - kit/skills/lib/ledger.mjs
-  - kit/skills/lib/github-client.mjs
-  - kit/skills/lib/workflow-policy.mjs
-  - kit/skills/dev-flow/scripts/flow-inspect.mjs
-  - kit/skills/dev-flow/scripts/flow-next.mjs
+high_risk_paths: [kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/github-client.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-next.mjs]
 ---
 
 # SPEC: 独立审查与 Issue 语境
@@ -92,6 +84,9 @@ consumeReviewToken(ledger, token, round)   -> { ok } | { ok: false, reason }
 
 **签发点唯一**：只有 `flow-next.mjs` 在 `phase === 'needs-review'` 时调用 `ensureReviewToken`；`--json` 输出里也带 `reviewToken`，否则只看 JSON 的调用方永远记不了审查。
 
+**打印出来的命令必须带令牌**：`review-gates.mjs` 给出的 `record` 提示此前不带 `--review-token`，
+照着做得到的是一条必然被拒的指令（`MISSING_REVIEW_TOKEN`）。`review-gates.mjs` 要一并改并列入影响范围。
+
 **拒绝条件（`review-ledger.mjs`）**
 
 1. `implementerId` 为空 → `BLOCKED_MISSING_IMPLEMENTER`（空值不再是一条免检通道）
@@ -159,14 +154,18 @@ issueContextUnavailable: number[]   // 拿不到正文的编号
 
 - [ ] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）；**轮次唯一派生式**：`flow next` 签发的 `round` 与 `record` 期望的 `round` 必须由同一个函数算出。构造 `rounds = [1, 3]` 的账本（轮次有空档），走完 `next` → `record` 必须成功——现在两处各自算（`rounds.length + 1` 与 `maxPrev + 1`），空档时前者为已存在的那一轮签令牌、后者要下一轮，令牌永远对不上且没有出口。
 - [ ] C2: **Issue 语境**。`flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与 `compactContext`；**拿不到正文时必须留痕**——记下编号与原因（`no-api-channel` / `not-found` / `forbidden`），`flow next` 据此给出取正文的具体命令；**`--pr` 与 `--issue` 走同一条「尝试 → 留痕 → 给命令」链路**（无通道时不硬失败，因为多数本地仓没有通道；但静默只存编号也不算通过）；反向：重跑 `start` 且这次取到了正文，必须清掉「拿不到」的标记。
-- [ ] C3: **PR 模式的基线只能来自真实 PR**。`mode === 'pr'` 时 `diffScope` 必须形如 `<baseRefOid>...<headRefOid>`（两个都是 GitHub 返回的 SHA），**不得出现分支名**；拿不到 SHA 时返回 `BLOCKED_PR_UNRESOLVED` 且退出码非 0；**行为断言**：构造一个账本里记了 PR 号、但远端拉不到该 PR 的仓，跑 `review-pack --pr` 带上那个 PR 号，`status` 不得是 `PACK_READY`；**行为断言（旁路）**：账本标记了 `externalPr` 的任务，跑 `review-pack --task` 带上那个任务号，必须同样走 PR 判据，不得因为换了入口就放行；反向：真实拉到 PR 时 `diffScope` 里两个 SHA 与账本记录一致。
+**必须给一个真实出口**：`issueContextUnavailable` 只在 `flow start` 成功时重算，而永远没有 API 通道的仓（`local-only` / `generic-git` 是常规存在）重跑也取不到——
+`needs-issue-context` 会永久挡住后续阶段，而提示里那句「或显式说明凭现有信息无法澄清」没有任何状态承接。
+要加一个显式放行：`flow.mjs next --ack-no-issue-context --reason "..."`，把原因写进账本，之后该阶段不再拦。
+- [ ] C3: **PR 模式的基线只能来自真实 PR**。`mode === 'pr'` 时 `diffScope` 必须形如 `<baseRefOid>...<headRefOid>`（两个都是 GitHub 返回的 SHA），**不得出现分支名**；拿不到 SHA 时返回 `BLOCKED_PR_UNRESOLVED` 且退出码非 0；**行为断言**：构造一个账本里记了 PR 号、但远端拉不到该 PR 的仓，跑 `review-pack --pr` 带上那个 PR 号，`status` 不得是 `PACK_READY`；**行为断言（旁路）**：账本标记了 `externalPr` 的任务，跑 `review-pack --task` 带上那个任务号，必须同样走 PR 判据，不得因为换了入口就放行；**反向**：真实拉到 PR 时 `diffScope` 里两个 SHA 与 GitHub 返回的一致——但「与账本记录一致」这句要改成「与 GitHub 返回值一致」：账本里现在**没有**存 PR 两个 SHA 的字段（`prBaseSha` / `prHeadSha` 都不存在），本 SPEC 要把这两个字段加进账本才谈得上比对。
 - [ ] C4: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**，不存在的必须报出来；装配档位与生成档位**不一致时**任一方必须拒绝或警告；删掉某个技能目录后（未跑 `equip`），`compose-agents` 要能发现并指出死链；**反向**：装齐且档位一致的仓不得误报——一个没有死链、档位一致的仓跑 `compose-agents --check` 必须退出 0 且不出现任何死链或档位告警。
 
 ## 四、高风险点、门型与回滚路径
 
 - **门型与回滚路径**：`one-way`。独立审查是最后一道门，令牌机制写错会让所有记录被拒（堵死）或全部放行（失效）。回退方式：`review-ledger.mjs` 的三条拒绝按需逐条移除（每条独立），`flow-next.mjs` 的签发调用回退后账本里的令牌字段成为死数据、不影响读取。
 - **故障注入预演**：I78（规划审核 Round 2 复用同一复核人）、I79（令牌可重复消费）打 C1；
-  I97（PR 模式退回分支到分支）、I98（无通道时静默只存编号）打 C2/C3。
+  另需新增三条打 C2/C3（I97/I98 已被别的域占用，编号从 I109 起）：
+    PR 模式退回分支到分支、无通道时静默只存编号、`--task` 绕过 PR 判据。
   四条都必须变红——C2/C3 改的是 `kit/`（高风险路径），没有注入等于门禁被改松也不会有人知道。
 
 ## 实现说明

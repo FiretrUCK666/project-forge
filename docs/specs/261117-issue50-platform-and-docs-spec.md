@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 平台事实、文档通用性与演进
-status: draft
+status: approved
 tier: L3
 created: 2026-11-17
 updated: 2026-11-17
@@ -9,16 +9,12 @@ issue: 50
 pr: null
 branch: fix/v8-criteria-trust
 owner: null
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
 related_prd: ../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue50-platform-and-docs-todo.md
-high_risk_paths:
-  - scripts/survey.mjs
-  - kit/skills/lib/profile.mjs
-  - kit/skills/lib/docs.mjs
-  - kit/skills/lib/doc-templates.mjs
+high_risk_paths: [scripts/survey.mjs, kit/skills/lib/profile.mjs, kit/skills/lib/docs.mjs, kit/skills/lib/doc-templates.mjs]
 ---
 
 # SPEC: 平台事实、文档通用性与演进

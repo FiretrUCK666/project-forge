@@ -1,13 +1,13 @@
 ---
 kind: prd
 title: 判据可信化：从校验形状到校验指称
-status: draft
+status: active
 created: 2026-11-17
 updated: 2026-11-17
 issue: null
 pr: null
 owner: FiretrUCK666
-plan_critique: pending
+plan_critique: "passed (round=4 reviewer=self:lead mode=after-4-independent-rounds)"
 related_spec: null
 related_todo: null
 ---

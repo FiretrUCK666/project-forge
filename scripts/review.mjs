@@ -309,6 +309,17 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           `${facts.docs.agents.file} 的受管标记没成对：${contract.health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
+      } else if (contract.health.handWritten) {
+        // 手写契约是**允许的选择**（`compose --check` 只核它答了三件事），但它没有受管区，
+        // 所以「与模板渲染结果是否一致」这件事**压根没有可比对的东西**。
+        // 这里如果什么都不说，下一句就落到 `agents.ready`——「结构也完整」，
+        // 而那正是这类判据最典型的假绿：没验过被读成验过了。
+        // 它排在 `broken` 之后：标记没成对的文件不是「手写契约」，是被改坏的契约。
+        add(finding('notice', 'agents', 'agents.unverified',
+          `${facts.docs.agents.file} 是手写的，受管区一个都没有，所以「与模板一致」这一面没有可核对的东西——`
+          + '这不是「结构完整」，是这一面没验', {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
       } else if (contract.health.missing.length > 0) {
         add(finding('missing', 'agents', 'agents.missing-sections',
           `${facts.docs.agents.file} 缺 ${contract.health.missing.length} 节（条件为真却没有）：${contract.health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
@@ -642,6 +653,29 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
+  // ── 没有业务内容时，「没有缺口」是一句假话 ────────────────────────
+  //
+  // 一个只装了套件的仓：代码文件 0 个、清单一个都没有、连形态都认不出。这时候
+  // 构建、测试、技术设计文档、CI 这几条判据的**前提全都不存在**，于是它们一条都不报。
+  // 把这些「因为没东西可查而沉默」读成「没有会出事的缺口」，正好是自洽的假绿——
+  // 什么都没验，所以什么都没缺。
+  //
+  // 只有使用者能回答「这个仓是做什么的、业务内容放哪」，所以它落在**待定**档：
+  // 报出来、等人表态，而不是被压掉。
+  const noManifests = (facts.ecosystem.manifests ?? []).length === 0
+  const blankProject = (facts.scale.codeFiles ?? 0) === 0
+    && noManifests
+    && !decisions.has('project-kind')
+  if (blankProject) {
+    add(finding('pending', 'ecosystem', 'ecosystem.blank-content',
+      '这个仓里没有代码文件、也没有任何生态清单——构建、测试、技术设计文档、CI 这几面都因为「前提不存在」而没报，那不等于它们没问题。先定这个仓是做什么的、业务内容放哪', {
+        decision: 'project-kind',
+        // 这一条不是「另一个待办」，它说明**别的判据根本没跑起来**。
+        // 结论句要据此改口：没跑过的检查不能拿来当「没有缺口」的证据。
+        verdictBlocked: true,
+      }))
+  }
+
   return summarize(facts, results)
 }
 
@@ -660,6 +694,9 @@ function summarize(facts, results) {
     pending,
     notice,
     ok,
+    // 「有一批判据压根没跑起来」与「跑完了没问题」必须能分开。
+    // 前者不能说「没有会出事的缺口」——那是拿没验过当验过了。
+    unscanned: results.filter((r) => r.verdictBlocked === true).map((r) => r.id),
     verdict: missing.length > 0 ? 'missing'
       : pending.length > 0 ? 'pending'
         : notice.length > 0 ? 'notice' : 'ok',
@@ -693,6 +730,11 @@ function render(result, strict) {
 
   if (result.missing.length > 0) {
     lines.push(`结论：${result.missing.length} 处会出事，改完重跑。`)
+  } else if (result.unscanned.length > 0) {
+    // 空仓不能报圆满：构建、测试、TDD、CI 这几条判据的前提不存在，它们一条都没跑。
+    // 把「没查」说成「没缺」，是这类结论里最难被发现的一种假绿。
+    lines.push(`结论：这一轮有几条判据的前提不存在、根本没跑起来（${result.unscanned.join('、')}），`
+      + `所以这一轮不构成「查过且没问题」的结论。先把 ${result.pending.length} 项待定回答掉，重跑。`)
   } else if (result.pending.length > 0) {
     lines.push(`结论：没有会出事的缺口，但有 ${result.pending.length} 项只有使用者能定。问完把答案写进 AGENTS.md 的「## 取舍」节，重跑即可。`)
   } else if (result.notice.length > 0) {

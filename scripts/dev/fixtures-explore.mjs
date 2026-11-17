@@ -4,7 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { gitInit, gitSync, rmTree, runAbsAsync, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerExploreCases(cases) {
 cases.push(['repo-map.mjs：CI run、Makefile/justfile、reusableModules、Feature Map 正反双向', async () => {
@@ -273,6 +273,85 @@ cases.push(['survey.mjs + compose-agents.mjs：自有技能共存路由、reentr
     rmTree(smallCleanDir)
     rmTree(largeDir)
   }
+}])
+
+// ── 可复用模块只认项目自己的东西 ──────────────────────────────────────
+//
+// 判据的输入不得包含判据自己的产物。这条在 `repo-map` 上的形状是：
+// 装完套件之后，「最值得复用的模块」前三名全是 `.agents/skills/lib/*`——
+// 工具自己写进去的说明书源码，被当成了这个项目的资产推荐出去。
+//
+// 反向也要成立：只有项目源码的仓必须认得出可复用模块，不能因为「滤掉工具产物」
+// 把整个清单滤空，那样只是把一种失明换成了另一种。
+cases.push(['可复用模块与入口滤掉工具产物，项目自己的模块仍要被认出', async () => {
+  const dir = tmpProject({
+    'README.md': '# rm\n\n可复用模块归属测试仓。\n',
+    'package.json': '{"name":"rm","version":"1.0.0"}',
+    'src/core/engine.mjs': 'export function runEngine() { return 1 }\nexport const ENGINE_NAME = "x"\n',
+    'src/core/parser.mjs': 'export function parseAll() { return [] }\nexport const PARSE_LIMIT = 10\n',
+    'src/bin.mjs': '#!/usr/bin/env node\nimport { runEngine } from "./core/engine.mjs"\nrunEngine()\n',
+    'src/tool.ps1': 'function Get-Thing {\n  Write-Output 1\n}\n',
+    'src/deploy.sh': 'deploy() {\n  echo deploy\n}\n',
+    'src/main.go': 'package main\n\nfunc RunMain() error { return nil }\n',
+  })
+  try {
+    // 先装套件：工具会往 .agents/ 里写一整套技能源码。判据必须无视它们。
+    await runNode('equip.mjs', [dir, '--no-backup'])
+    const r = await runAbsAsync('kit/skills/dev-explore/scripts/repo-map.mjs', [dir, '--json'])
+    if (r.status !== 0) return `repo-map 运行失败：${r.stderr}`
+    const out = JSON.parse(r.stdout)
+    const relOf = (x) => String(x?.file ?? x?.rel ?? x?.path ?? x ?? '')
+
+    const toolOwned = (out.reusableModules ?? []).filter((m) => relOf(m).startsWith('.agents/'))
+    if (toolOwned.length > 0) {
+      return `可复用模块里混进了工具产物：${toolOwned.map(relOf).slice(0, 3).join('、')}`
+    }
+    const entryToolOwned = (out.entrypoints ?? []).filter((e) => relOf(e).startsWith('.agents/'))
+    if (entryToolOwned.length > 0) {
+      return `入口清单里混进了工具产物：${entryToolOwned.map(relOf).slice(0, 3).join('、')}`
+    }
+    // 反向：项目自己的模块必须被认出来。
+    if ((out.reusableModules ?? []).length === 0) {
+      return '滤掉工具产物之后可复用模块是空的——项目自己的模块一个都没被认出来'
+    }
+    if (!(out.reusableModules ?? []).some((m) => /src\/core\//.test(relOf(m)))) {
+      return `项目自己的 core 模块没进可复用清单：${(out.reusableModules ?? []).map(relOf).join('、')}`
+    }
+
+    // 三种写法的符号抽取各自命中。
+    const { extractSymbols } = await import('../../kit/skills/lib/symbol-index.mjs')
+    const cases = [
+      ['ps1', 'function Get-Thing {\n  Write-Output 1\n}\n', 'Get-Thing'],
+      ['sh', 'deploy() {\n  echo deploy\n}\n', 'deploy'],
+      ['go', 'package main\n\nfunc RunMain() error { return nil }\n', 'RunMain'],
+    ]
+    for (const [ext, text, name] of cases) {
+      const got = extractSymbols(text, ext)
+      if (!got.supported || !got.symbols.includes(name)) {
+        return `${ext} 的符号抽取没命中 ${name}：${JSON.stringify(got)}`
+      }
+    }
+    // 没有规则的语言要报 unsupported，而不是返回空数组冒充「这个文件没有符号」。
+    const unsupported = extractSymbols('main = pure ()', 'hs')
+    if (unsupported.supported !== false || unsupported.status !== 'unsupported') {
+      return `没有符号规则的语言没有返回 unsupported：${JSON.stringify(unsupported)}`
+    }
+
+    // 勘察要能报出「本仓 N 种语言，其中 M 种缺少符号规则」。
+    writeFileSync(join(dir, 'src/Legacy.hs'), 'module Legacy where\n\nrun = pure ()\n')
+    const cov = (await survey(dir)).symbolCoverage
+    if (!cov || cov.languageCount < 2) {
+      return `勘察没有统计出多语言覆盖：${JSON.stringify(cov)}`
+    }
+    if (cov.unsupportedCount < 1 || !cov.languages.some((l) => l.lang === 'hs' && !l.supported)) {
+      return `勘察没有报出缺符号规则的语言：${JSON.stringify(cov)}`
+    }
+    const md = (await runNode('survey.mjs', [dir, '--markdown'])).stdout ?? ''
+    if (!/符号抽取覆盖：本仓 \d+ 种语言，其中 \d+ 种缺少符号规则/.test(md)) {
+      return '勘察报告里没有「本仓 N 种语言，其中 M 种缺少符号规则」这句'
+    }
+    return true
+  } finally { rmTree(dir) }
 }])
 
 }

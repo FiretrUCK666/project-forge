@@ -79,6 +79,7 @@ const SECTION_KEYWORDS = {
   项目定位: { words: ['项目定位', '定位', '项目简介', '项目概述', 'Overview', 'Introduction', 'About'] },
   'Dev Profile': { words: ['Dev Profile'] },
   上下文阅读护栏: { words: ['上下文阅读护栏', '阅读护栏', 'Context Reading', 'Reading Guardrails'] },
+  探索策略: { words: ['探索策略', '探索与接入策略', 'Exploration Strategy'] },
   架构与关键不变量: {
     words: ['架构', '模块结构', '目录结构', '关键不变量', 'Architecture', 'Project Structure', 'Invariants'],
     exclude: ['数据结构'],

@@ -2,13 +2,13 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T17:29:37.576Z",
+  "installedAt": "2026-11-17T13:38:53.255Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
     },
     "dev-explore/scripts/repo-map.mjs": {
-      "sha256": "08afe26bb501df4205519ff43bbec7ea9cd6c691f69048e5d284dfa5e5038ccb"
+      "sha256": "6aff89b47eee99a5002f5ed851fec6c87d2da29cf3e54c6c31de34b71d355646"
     },
     "dev-flow/SKILL.md": {
       "sha256": "101c232d87165d72b5621850254b7cda7d6f4cb77e881083eabc95d26b8a8a03"
@@ -53,7 +53,7 @@
       "sha256": "683612bf7a550176352fa650415cb39e35ee29f74daba0e6f0221801df8fa040"
     },
     "dev-govern/scripts/govern-docs.mjs": {
-      "sha256": "10d615911c7ad50627f51b8bb240147283ee1422779d0133a1a31bf3ee93dc04"
+      "sha256": "92bfde5722c63720470fd54dceb20a33fd962351eeb2659634acd39ac13344e9"
     },
     "dev-govern/scripts/govern-retro.mjs": {
       "sha256": "30db786075fe98219d601e744fac39096fa196495d6168fd0dc55038915adf6b"
@@ -98,7 +98,7 @@
       "sha256": "c02575fc8c183a440f505ac712ef0e9a3a05380d595f49f8ec782ab82413826d"
     },
     "lib/command-lex.mjs": {
-      "sha256": "51e3295fa40a5652292db0b6a2dc2fd60b9c4e7d2a136a5fbb8fb21bf3a84be3"
+      "sha256": "bd67c6ff761219e13fd8d6773cdafb2732083794c460ebed52166aca29f1adea"
     },
     "lib/criteria-lock.mjs": {
       "sha256": "8ccfedeba1932a419d58ff83fb5ef8f86e338b02039d10f0f8f946fb0f46c1c9"
@@ -184,6 +184,9 @@
     "lib/static-gates.mjs": {
       "sha256": "8eabed4aa071df7a72e00801a84244d7b6850c84de79d11883f1a363075c241f"
     },
+    "lib/symbol-index.mjs": {
+      "sha256": "51de1eda0d33444393da1f5edcd718985db0d91b79742eddacef9fd34bd647d4"
+    },
     "lib/task-backend.mjs": {
       "sha256": "c10094e8d32a14283739e2c41ab68c4f333f1c3dcfa12fc28d47e65128d4fcc8"
     },
@@ -194,7 +197,7 @@
       "sha256": "f7f01ae9292ffa59ad524e06c1d421e558e562db213eabc4f36a4047d8933291"
     },
     "lib/tdd-parity.mjs": {
-      "sha256": "45c891de1690ee0da005842ab5d3fd29b2c1e5d77590dff7af5db4b9026bf6ce"
+      "sha256": "b459d56e0217091a5df389ba8c8f79b8748ae16550fbf2d9f89882a1b4ec5fcf"
     },
     "lib/tdd-scaffold.mjs": {
       "sha256": "993ec7c244e4825ea99ab0b7dad105001527b3fd55ccdfaa5ed875718ad37b2d"
@@ -245,6 +248,9 @@
     },
     "上下文阅读护栏": {
       "sha256": "c9a6206dd51278faa19786462f6e44ccf52a9aa1b0e44ca70f8c2b46da9e7869"
+    },
+    "探索策略": {
+      "sha256": "02c13c3282a6d4b815dbcb9f7faa0cfa23c53e18e1b912685ed9266dc4f2c6cd"
     },
     "架构与关键不变量": {
       "sha256": "2e2f45d8a56a839af469805b0453bdc3787c46b16053e12af481237484c7c3b9"

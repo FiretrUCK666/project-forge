@@ -228,6 +228,25 @@ export function toMarkdown(facts) {
     lines.push('')
   }
 
+  if (facts.symbolCoverage) {
+    const cov = facts.symbolCoverage
+    const total = cov.languageCount ?? 0
+    const missing = cov.unsupportedCount ?? 0
+    if (total > 0) {
+      const tail = missing > 0
+        ? '；缺规则的那些语言里抽不到符号，不等于它们没有符号——那几门语言的可复用模块这一轮只能靠文件名看'
+        : ''
+      lines.push(`## 符号抽取覆盖：本仓 ${total} 种语言，其中 ${missing} 种缺少符号规则${tail}`)
+      if (missing > 0) {
+        lines.push('')
+        for (const item of (cov.languages ?? []).filter((l) => !l.supported)) {
+          lines.push(`- \`${item.lang}\`：${item.files} 个文件，没有符号规则`)
+        }
+      }
+      lines.push('')
+    }
+  }
+
   const re = facts.reentry
   if (re?.isReentry && (re.drifted || (re.unregisteredTopDirs?.length ?? 0) > 0)) {
     lines.push('## 跨月重入失步校准摘要（保留手写规则与自有技能，仅定向修复下列条目）')

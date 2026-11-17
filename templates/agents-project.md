@@ -86,6 +86,14 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 - **按序读取**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `repo-map.mjs` 定位源码；修改前先跑 `flow.mjs inspect` 拿当前角色与任务状态。
 - **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（仅按需定向查阅；`do-not-edit` 仅禁手工改历史归档，允许 `finalize`/`archive` 合法归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
+<!-- project-forge: if has-exploration-strategy -->
+
+<!-- project-forge: begin 探索策略 -->
+## 探索策略
+
+{{EXPLORATION_STRATEGY}}
+<!-- project-forge: end 探索策略 -->
+<!-- project-forge: endif -->
 
 <!-- project-forge: begin 架构与关键不变量 -->
 ## 架构与关键不变量
@@ -121,6 +129,10 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 ```sh
 {{COMMANDS}}
 ```
+<!-- project-forge: endif -->
+<!-- project-forge: if has-omitted-commands -->
+
+{{COMMANDS_OMITTED}}
 <!-- project-forge: endif -->
 <!-- project-forge: if no-commands -->
 
@@ -344,12 +356,11 @@ do-not-edit: <禁止自动修改的路径，逗号分隔>
 <!-- project-forge: begin 取舍 -->
 ## 取舍
 
-这一节由维护者手写，脚本不碰。**只有使用者能定的那几件事**记在这里，交付体检会把记下的项当作已表态：
+这一节由维护者手写，脚本不碰。**只有使用者能定的那几件事**记在这里，交付体检会把记下的项当作已表态。
+
+写法：一行一项 `- <键名>：<你的选择>`。可用的键名会在交付体检的「待定」项里逐条给出；删掉某一项就等于重新待定。
 
 ```text
-- `license`：不放，因为这是个人项目
-- `no-ci`：不配，本地跑就够了
 ```
 
-可用的键名会在交付体检的「待定」项里逐条给出；删掉某一项就等于重新待定。
 <!-- project-forge: end 取舍 -->

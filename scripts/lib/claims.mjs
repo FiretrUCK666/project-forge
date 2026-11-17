@@ -45,6 +45,18 @@ const NOT_A_PATH = [
 /** 反引号里的行内代码：`` `xxx` ``。 */
 const INLINE_CODE = /`([^`\n]+)`/g
 
+/**
+ * 紧跟在路径后面的「这是一条可选路径」的措辞。
+ *
+ * `读 `docs/TDD.md`（若存在）` 是**有条件的读取顺序**，不是「本仓一定有这个文件」的承诺。
+ * 不区分的话，一份写得诚实的契约会因为诚实而被判成「点名的路径已经不在了」——
+ * 而这类假警报一旦出现，人就会把整条判据关掉，连真的失效路径一起关掉。
+ *
+ * 只认紧贴其后的那几种写法：隔了一句再说「若存在」，那是叙述，不是限定这个路径。
+ */
+const OPTIONAL_SUFFIX_RE = /^\s*[（(]\s*(?:若存在|如存在|如果存在|可选|按需|if\s+(?:it\s+)?exists?|optional)[^）)]*[）)]/i
+const OPTIONAL_PREFIX_RE = /(?:若存在|如存在|如果存在|可选|optional|if\s+exists?)\s*[:：]?\s*$/i
+
 /** 围栏代码块里的正文。 */
 const FENCE_BLOCK = /```[a-zA-Z]*\n([\s\S]*?)```/g
 
@@ -205,6 +217,7 @@ function extractPackageScripts(source, scripts) {
 export function claimsOf(text) {
   const source = String(text ?? '').replace(/\r\n/g, '\n')
   const paths = new Set()
+  const optionalPaths = new Set()
   const dirs = new Set()
   const branches = new Set()
   const scripts = new Set()
@@ -215,8 +228,15 @@ export function claimsOf(text) {
   // 行内代码里也可能是 `git switch main` 或 `node scripts/x.mjs`
   for (const m of source.matchAll(INLINE_CODE)) {
     const token = m[1].trim()
+    const after = source.slice(m.index + m[0].length, m.index + m[0].length + 24)
+    const before = source.slice(Math.max(0, m.index - 16), m.index)
+    const optional = OPTIONAL_SUFFIX_RE.test(after) || OPTIONAL_PREFIX_RE.test(before)
     for (const word of token.split(/\s+/)) {
-      if (looksLikeRepoPath(word)) paths.add(normalizeClaimPath(word))
+      if (!looksLikeRepoPath(word)) continue
+      paths.add(normalizeClaimPath(word))
+      // 可选路径单独记一份：它仍然要参与「契约里写了什么」的统计，
+      // 但核对时它的缺席不算失效——写的是「若存在」，本来就可能没有。
+      if (optional) optionalPaths.add(normalizeClaimPath(word))
     }
     for (const b of token.matchAll(BRANCH_CMD)) branches.add(b[1])
   }
@@ -239,6 +259,7 @@ export function claimsOf(text) {
 
   return {
     paths: [...paths].sort(),
+    optionalPaths: [...optionalPaths].sort(),
     dirs: [...dirs].sort(),
     branches: [...branches].sort(),
     scripts: [...scripts].sort(),
@@ -261,7 +282,8 @@ export function claimsOf(text) {
  */
 export function verifyClaims(text, facts, exists) {
   const out = []
-  const { paths, dirs, branches, scripts } = claimsOf(text)
+  const { paths, optionalPaths, dirs, branches, scripts } = claimsOf(text)
+  const optional = new Set(optionalPaths)
 
   const actual = facts?.conventions?.defaultBranch ?? facts?.git?.originHeadBranch
   if (branches.length > 0 && actual) {
@@ -282,12 +304,19 @@ export function verifyClaims(text, facts, exists) {
 
   if (allPaths.length > 0) {
     const missing = allPaths.filter((p) => !exists(p))
+    const required = missing.filter((p) => !optional.has(p))
+    const optionalMissing = missing.filter((p) => optional.has(p))
+    // 只有**可选**路径缺席时不算失约：契约原文写的就是「若存在」。
+    // 但它也不是「都还在」——把两者混成一句话，读的人就分不清自己在看哪一种。
+    const optionalNote = optionalMissing.length > 0
+      ? `（另有 ${optionalMissing.length} 处写着「若存在」的路径确实还没建：${optionalMissing.join('、')}）`
+      : ''
     out.push({
       id: 'claim.path',
-      ok: missing.length === 0,
-      detail: missing.length === 0
-        ? `${allPaths.length} 个契约里点名的路径都还在`
-        : `契约里点名的这些路径已经不在了：${missing.join('、')}——照着它做的人会找不到东西`,
+      ok: required.length === 0,
+      detail: required.length === 0
+        ? `${allPaths.length - optionalMissing.length} 个契约里点名的路径都还在${optionalNote}`
+        : `契约里点名的这些路径已经不在了：${required.join('、')}——照着它做的人会找不到东西${optionalNote}`,
     })
   }
 

@@ -646,4 +646,50 @@ cases.push(['常青文档保鲜校验（evergreenFreshnessErrors）：正反拦�
   return true
 }])
 
+// ── 超长命令不进可执行块 ──────────────────────────────────────────────
+//
+// 「构建与验证」里的代码块是给人复制去跑的。截断后的尾巴 `…（共 N 字节）` 不是 shell
+// 注释，照抄必失败。所以超过上限的命令**不写进块**，改在块外指出去哪看——而且指的
+// 必须是一个真存在的文件，否则那句指路等于没说。
+cases.push(['超 500 字节的命令不进可执行块，块外指路必须指向真实文件', async () => {
+  const HUGE = `node scripts/dev/very-long-check.mjs --flag ${'x'.repeat(600)}`
+  const dir = tmpProject({
+    'README.md': '# longc\n\n超长命令与分组指路测试仓。\n',
+    'package.json': '{"name":"longc","version":"1.0.0","scripts":{"test":"node --test"}}',
+    '.github/workflows/ci.yml': `name: ci\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: ${HUGE}\n`,
+  })
+  try {
+    const gen = await runNode('compose-agents.mjs', [dir, '--no-backup'])
+    if (gen.status !== 0) return `生成路径退出码非 0：${gen.stderr}`
+
+    const text = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const section = /## 环境与构建验证[\s\S]*?(?=\n## |\n<!-- project-forge: end)/.exec(text)?.[0] ?? ''
+    if (!section) return '受管区里找不到「环境与构建验证」一节'
+    const blocks = [...section.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1])
+    for (const block of blocks) {
+      const over = block.split('\n').filter((line) => Buffer.byteLength(line, 'utf8') > 500)
+      if (over.length > 0) return `sh 块里有 ${over.length} 行超过 500 字节——照抄必失败`
+      if (/…|（共 \d+ 字节）/.test(block)) return 'sh 块里出现了截断尾巴，那不是 shell 注释'
+    }
+
+    // 块外必须有指路，且指的文件真的在。
+    if (!section.includes('这条命令太长')) return '超长命令被静默丢弃了，块外没说它去哪了'
+    const refs = [...section.matchAll(/`([^`]+\.(?:ya?ml|json|sh|mk|mjs))`/g)].map((m) => m[1])
+    const real = refs.filter((rel) => !rel.startsWith('.agents/') && existsSync(join(dir, rel)))
+    if (real.length === 0) return `块外的指路没有指向任何真实文件：${JSON.stringify(refs)}`
+
+    // 反向：命令都短时，不该出现「这条命令太长」这句话。
+    const short = tmpProject({
+      'README.md': '# short\n\n命令都很短的仓，用于验证反向。\n',
+      'package.json': '{"name":"short","version":"1.0.0","scripts":{"test":"node --test"}}',
+    })
+    try {
+      await runNode('compose-agents.mjs', [short, '--no-backup'])
+      const shortText = readFileSync(join(short, 'AGENTS.md'), 'utf8')
+      if (shortText.includes('这条命令太长')) return '短命令的仓被加上了「这条命令太长」的说明'
+      return true
+    } finally { rmTree(short) }
+  } finally { rmTree(dir) }
+}])
+
 }

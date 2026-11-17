@@ -17,6 +17,7 @@ import { gitRun, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
 import { collectAncestorsDagFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE, matchGlob } from '../../lib/static-gates.mjs'
+import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
 const REPO_PATH_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|sh|ps1|rs|go|java|kt|cs|json|ya?ml|toml|lock|txt|cfg|ini|md)$/i
@@ -288,6 +289,43 @@ function hasExistingArchitectureDocs(repoRoot) {
   return existsSync(join(repoRoot, 'docs', 'adr'))
 }
 
+/**
+ * TDD 的「空壳」判据：文件在、但里面没有架构。
+ *
+ * 三种形状各自能骗过一道检查：
+ *
+ *   - **模板原样**：把模板复制过来就提交，占位符原封不动。文件存在、章节齐全，
+ *     一个字的信息都没有；
+ *   - **只有骨架**：标题对了，内容只有模块名清单。看起来像写了，实际没讲任何职责与边界；
+ *   - **短到不可能**：三五行，撑不起「模块、数据流、不变量」这三件事。
+ *
+ * 只靠「文件在不在」判的后果是把这四种都当成合格——包括「文件完全不存在」那一种
+ * 由 `docs.missing-tdd` 单独管。空壳比没有更糟：它看起来像有。
+ *
+ * @returns {string[]} 命中的理由；空数组表示不像空壳
+ */
+function tddShellReasons(text) {
+  const reasons = []
+  const raw = String(text ?? '').replace(/\r\n/g, '\n')
+  // 模板占位符原样留着：`{{VAR}}` 是本工具的占位语法，「待补齐」是模板里的填空提示。
+  const placeholders = [...new Set(raw.match(/\{\{[A-Z0-9_]+\}\}/g) ?? [])]
+  if (placeholders.length > 0) {
+    reasons.push(`还留着 ${placeholders.length} 个未填的模板占位符（${placeholders.slice(0, 3).join('、')}）`)
+  }
+  // 去掉前置 frontmatter 与空行后再数：模板的前几行大多是 YAML，不算正文。
+  const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '')
+  const meaningful = body.split('\n').filter((line) => line.trim() && !/^\s*<!--/.test(line))
+  if (meaningful.length <= 4) {
+    reasons.push(`正文只有 ${meaningful.length} 行非空内容`)
+  } else {
+    const missing = checkTddStructure(raw)
+    if (missing.length >= 3) {
+      reasons.push(`主干缺 ${missing.length} 节（${missing.map((m) => m.code).slice(0, 3).join('、')}）——标题在，内容没写`)
+    }
+  }
+  return reasons
+}
+
 export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, findings) {
   const hasCode = files.some((f) => CODE_EXT_RE.test(f.name))
   if (!existsSync(join(repoRoot, 'README.md'))) {
@@ -370,6 +408,20 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
   } else if (tddInfo?.text && authoritativeTddPath) {
     const isTddDocFormat = /(?:^|\/).*tdd\.md$/i.test(authoritativeTddPath)
     if (isTddDocFormat && !decisions.has('existing-docs') && !decisions.has('no-tdd')) {
+      // 空壳 TDD 与「没有 TDD」是两种不同的病，判红的通道也不同：
+      // `docs.missing-tdd` 只说明「缺一份」，档位 medium；空壳是「有一份假的」，
+      // 它会让每个照着它理解架构的人读错，所以按 high 阻断（`--strict` 会因它退出非 0）。
+      const shellReasons = tddShellReasons(tddInfo.text)
+      if (shellReasons.length > 0) {
+        addFinding(findings, {
+          id: 'docs.tdd-shell',
+          category: 'docs',
+          severity: 'high',
+          file: authoritativeTddPath,
+          title: `${authoritativeTddPath} exists but carries no architecture: ${shellReasons.join('；')}`,
+          action: `Run dev-explore (\`repo-map.mjs\`) and write real modules, data flows, and invariants into ${authoritativeTddPath} (or record \`no-tdd\` / \`existing-docs\` in AGENTS.md ## 取舍 if the project genuinely has no architecture to document).`,
+        })
+      }
       const allMods = discoverCodeModules(repoRoot)
       const mods = scopeRel ? allMods.filter((m) => m.path === scopeRel || m.path.startsWith(`${scopeRel}/`)) : allMods
       const undocumented = mods.filter((m) => !tddInfo.text.includes(m.name) && !tddInfo.text.includes(m.path))

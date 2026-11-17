@@ -374,6 +374,55 @@ export function registerReviewGovernCases(cases) {
     } finally { rmTree(dir) }
   }])
 
+  cases.push(['tdd-parity.mjs：注释里的导出名不算定义，不能掩盖真实删掉的导出', async () => {
+    const { checkTddSyncParity } = await import('../../kit/skills/lib/shared.mjs')
+    const dir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'AGENTS.md': '# parity\n\n```yaml\nquick-test: exit 0\n```\n',
+      'docs/TDD.md': '# TDD\n\n| 项目 | 内容 |\n| --- | --- |\n| 最近更新 | 2026-01-01 |\n\n- `src/core.mjs`\n',
+      'src/core.mjs': 'export function legacyApi() { return 1 }\nexport function keepApi() { return 2 }\n',
+    })
+    gitInit(dir, { branch: 'main' })
+    const baseSha = gitSync(dir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+
+    try {
+      // 正向：删掉真实导出 `legacyApi`，同时在注释里提一嘴 `export function legacyApi`；
+      // 另加一句含 `export const COMMENT_ONLY_SYM` 的注释。
+      // 不剥注释的话，addedSyms 会把注释里的 legacyApi 当成「重新加上了」，于是删掉的导出被漏报。
+      writeFileSync(join(dir, 'src/core.mjs'), [
+        '// 以前这里写成 export function legacyApi()，现已移除',
+        '// export const COMMENT_ONLY_SYM = 1',
+        'export function keepApi() { return 2 }',
+        '',
+      ].join('\n'))
+      gitCommitFast(dir, 'remove legacyApi and mention in comment', { name: 't', email: 't@t.t' })
+
+      const res = await checkTddSyncParity(dir, ['src/core.mjs'], { baseSha })
+      if (!res.changedExportsOrCli.some((c) => c.symbol === 'legacyApi' && c.change === 'removed')) {
+        return `注释里的旧导出名掩盖了真实删除：${JSON.stringify(res.changedExportsOrCli)}`
+      }
+      if (res.changedExportsOrCli.some((c) => c.symbol === 'COMMENT_ONLY_SYM')) {
+        return `注释里的 export const 被误判成新增导出：${JSON.stringify(res.changedExportsOrCli)}`
+      }
+
+      // 反向：注释里没提到新导出、真实新增 `export function realNewApi` 时必须照常报 added
+      writeFileSync(join(dir, 'src/core.mjs'), [
+        '// 以前这里写成 export function legacyApi()，现已移除',
+        '// export const COMMENT_ONLY_SYM = 1',
+        'export function keepApi() { return 2 }',
+        'export function realNewApi() { return 3 }',
+        '',
+      ].join('\n'))
+      gitCommitFast(dir, 'add realNewApi', { name: 't', email: 't@t.t' })
+
+      const res2 = await checkTddSyncParity(dir, ['src/core.mjs'], { baseSha })
+      if (!res2.changedExportsOrCli.some((c) => c.symbol === 'realNewApi' && c.change === 'added')) {
+        return `真实新增导出 realNewApi 未被检出：${JSON.stringify(res2.changedExportsOrCli)}`
+      }
+      return true
+    } finally { rmTree(dir) }
+  }])
+
   cases.push(['signals.jsonl 自动写回(I74)+retro --apply-patches、flow-batch CI 门禁与 zip CRC32 冒烟', async () => {
     const { appendGovernSignal, readSignalsJsonl, resolveRepoRoots, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')

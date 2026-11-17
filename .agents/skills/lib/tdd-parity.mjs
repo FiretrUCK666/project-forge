@@ -11,20 +11,43 @@ import { docIsoDate } from './docs.mjs'
 import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from './git.mjs'
 import { getCachedEntriesDiffText } from './git-fast.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from './profile.mjs'
-import { CODE_EXT_RE, TEST_FILE_RE, splitDiffByFile, summarizeHunkChanges } from './static-gates.mjs'
+import { CODE_EXT_RE, TEST_FILE_RE, splitDiffByFile, stripCodeCommentsLines, summarizeHunkChanges } from './static-gates.mjs'
 
 const MODULE_BOUNDARY_DIR_RE = /^(?:src|lib|scripts|kit|packages|apps|services|backend|frontend|bin|cmd)\//i
 const CORE_MANIFEST_RE = /^(?:package\.json|Cargo\.toml|pyproject\.toml|go\.mod|go\.work|pom\.xml|build\.gradle(?:\.kts)?)$/i
-const GENERIC_BASENAMES = new Set(['index.js', 'index.mjs', 'index.cjs', 'index.ts', 'index.tsx', 'mod.rs', '__init__.py', 'main.go', 'main.rs', 'main.py'])
-const EXPORT_DECL_RE = /^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|const|class)\s+([A-Za-z0-9_$]+)/
 const SUBCOMMANDS_RE = /\bSUBCOMMANDS\b/
 
+/**
+ * 新增/删除行里找「对外符号」。
+ *
+ * 先剥注释再匹配：扔进注释里的 `export function Foo` 是**说明**，不是定义。
+ * 不剥的话，一句「这类东西以前写成 `export const Foo`」就能让判据以为符号还在，
+ * 于是真正被删掉的那个导出再也没人核对。
+ */
+function exportSymbolsOf(lines, file) {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(file)?.[1] ?? ''
+  const codeOnly = stripCodeCommentsLines(lines.join('\n'), ext)
+  const out = new Set()
+  for (const line of codeOnly) {
+    for (const m of line.matchAll(/\bexport\s+(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+([A-Za-z0-9_$]+)/g)) {
+      out.add(m[1])
+    }
+    for (const m of line.matchAll(/\bpub\s+(?:fn|struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) out.add(m[1])
+    for (const m of line.matchAll(/\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) out.add(m[1])
+  }
+  return out
+}
+
+/**
+ * 「模块 `x` 有没有被写进 TDD」只认**完整相对路径**。
+ *
+ * 只比裸文件名会被正文里的举例冒充：一句「比如 `utils.mjs` 这种」写的是举例，
+ * 不是承诺「本仓有一个 utils.mjs 模块」。完整路径（`src/utils.mjs`）是唯一的，
+ * 出现在文档里才配叫「点了名」。
+ */
 function isMentionedInTdd(tddText, fileRel) {
   if (!tddText) return false
-  if (tddText.includes(fileRel)) return true
-  const base = basename(fileRel)
-  if (!GENERIC_BASENAMES.has(base.toLowerCase()) && tddText.includes(base)) return true
-  return false
+  return tddText.includes(posixPath(fileRel))
 }
 
 function isNonTestSourceFile(rel) {
@@ -40,18 +63,11 @@ function collectExportAndCliChanges(diffText) {
     const file = posixPath(rawFile)
     if (!isNonTestSourceFile(file)) continue
     const { added, removed, hunks } = summarizeHunkChanges(chunk)
-    const addedSyms = new Set()
-    const removedSyms = new Set()
+    const addedSyms = exportSymbolsOf(added, file)
+    const removedSyms = exportSymbolsOf(removed, file)
     let subcommandsTouched = false
 
-    for (const line of added) {
-      const m = EXPORT_DECL_RE.exec(line)
-      if (m) addedSyms.add(m[1])
-      if (SUBCOMMANDS_RE.test(line)) subcommandsTouched = true
-    }
-    for (const line of removed) {
-      const m = EXPORT_DECL_RE.exec(line)
-      if (m) removedSyms.add(m[1])
+    for (const line of [...added, ...removed]) {
       if (SUBCOMMANDS_RE.test(line)) subcommandsTouched = true
     }
 

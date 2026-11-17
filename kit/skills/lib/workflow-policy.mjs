@@ -484,7 +484,11 @@ export function evaluateNextState({
   // 「一件事都没做过」：工作区干净、且分支上没有基线没有的提交。
   // 用它区分「还没开始」与「做完了待归档」——两者都满足「尚未 finalized」。
   const nothingImplementedYet = Boolean(
-    !t.finalized && !(rt.dirty > 0) && !((rt.commitsAheadOfBase ?? 0) > 0),
+    t.status === 'started'
+    && !t.finalized
+    && !(t.rounds ?? []).length
+    && !(rt.dirty > 0)
+    && !((rt.commitsAheadOfBase ?? 0) > 0),
   )
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)

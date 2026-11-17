@@ -35,25 +35,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
 
-/**
- * 从 `survey.mjs` 的声明表里读出每条缺口与它的处置。
- *
- * **读源码而不是 import**：那些表不是导出值，而是模块内部的常量；为了这个检查把它们
- * 导出来，等于为了让检查能跑而改变被检查的东西。
- *
- * 这一层只做词法，不做语义——`id` / `review` / `decision` / `surveyOnly` 四个键各出现
- * 几次、配没配上对，由下面的 `coverageOf` 判。
- *
- * ## 切块不依赖缩进
- *
- * 早先按 `\n  {\n` 切（写死两空格缩进）。换一次格式化器、或者有人把那一节整体多缩两格，
- * 切出来就是空数组——**语义一个字都没变，17 条缺口全部静默消失**，而退出码仍是 0。
- * 那是一条被削成恒真的判据，比没有更坏。
- *
- * 现在按「每个 `id:` 之前的那一段」切：只要 `id:` 还在，缩进、空行、注释怎么排都不影响。
- * 万一一条都读不出来，`coverageOf` 会把它当成「和导出的 id 名单对不上」报红——见那里的
- * `expected` 比对。
- */
 export function gapDeclarations(source) {
   const text = String(source ?? '').replace(/\r\n/g, '\n')
   const out = []
@@ -98,23 +79,6 @@ export function reviewIds(source) {
   return ids
 }
 
-/**
- * 每一条缺口落在哪一档。
- *
- * 返回 `{ ok, unclaimed, duplicated, dangling, missing, unknown }`：
- * 三档都没选的是 `unclaimed`；选了不止一档的是 `duplicated`（两处都管，结论会变成两个）；
- * `review` 指向一个 `review.mjs` 里不存在的 id 的是 `dangling`（映射看着有，实际空指）。
- *
- * ## `expected` 是必填的，不是可选的
- *
- * 只判「读出来的那些都配好了」是不够的：读出来的可能是**零条**。词法切块一旦失灵
- * （换格式化器、整体多缩两格），`declarations` 就成了空数组，而空数组让所有检查都通过
- * ——「0 条各有处置，退出码 0」，看起来比 17 条还干净。
- *
- * 所以登记的 id 名单是**必填参数**：不给就抛错。这是刻意的——一个可选参数被摘掉时
- * 什么都没发生，而一个必填参数被摘掉时程序当场崩，崩溃比静默通过好。
- * 早先它是可选的，于是「把第三个参数改成 null」这个动作能把整条双向比对削掉而不留痕。
- */
 export function coverageOf(declarations, knownReviewIds, expected) {
   if (!Array.isArray(expected) || expected.length === 0) {
     throw new Error('coverageOf 需要登记的 id 名单（第三参）。不给名单就无法判断「一条都没读出来」'

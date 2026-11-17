@@ -26,10 +26,6 @@ const SCOPES = new Set([
   'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
-// 「取舍」解析只有一份实现，住在 `kit/skills/lib/profile.mjs`。
-//
-// 早先这里有一份逐字相同的副本。同一份「已表态」的事实两个脚本各读一份，改一处就有一条
-// 路径静默失效——而失效的表现是「明明表过态了，它还在问」。重导出而不是重新实现。
 import { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../kit/skills/lib/command-lex.mjs'
 import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
 import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
@@ -40,28 +36,6 @@ function finding(level, scope, id, title, extra = {}) {
   return { level, scope, id, title, ...extra }
 }
 
-/**
- * 契约的结构健康度：标记成对、该有的节都在、内容与模板一致。
- *
- * **不在这里重算**：三项判据都住在 `compose-agents.mjs` 里（`inspect` 与
- * `driftRegions`），这里只把它的结论取过来。两处各写一份的话，`--check` 说红、
- * 体检说绿的那种事迟早发生，而信哪一个都不对。
- *
- * 渲染失败（模板有洞、勘察出错）时返回「都空」并附一句原因：体检不该因为
- * 契约那一面算不出来就整个崩掉，那一面本来只是它的一项。
- */
-/**
- * 契约的结构健康度。**算不出来与算出来没问题必须长得不一样。**
- *
- * 早先这里 `catch` 之后返回 `{ broken: [], missing: [], drifted: [], error }`。
- * 三个空数组在语义上是「三项都通过」，于是落到了 else 分支盖章「结构也完整」。
- * 全仓搜 `health.error` 的引用数是 0——错误被存下来，从没人读。
- *
- * 实测现场：`compose-agents --check` 退出码 2（模板渲染崩了）的同一时刻，
- * `review` 报的是「AGENTS.md 已就绪，结构也完整」。
- *
- * 现在返回三态：`state` 只有三种，`catch` 拿不到 `ok`。
- */
 async function inspectContract(root, facts) {
   try {
     const { contractHealth } = await import('./compose-agents.mjs')
@@ -107,12 +81,6 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   const root = facts.target.path
   const wants = (face) => !scopes || scopes.has(face)
 
-  // 计划说要建，就得有人说得出「谁建、怎么建」。
-  //
-  // 早先 `artifactPlan` 与「执行者」之间没有任何联系：勘察报 `ci-check` 该建，
-  // 而模板在 templates/ 里躺着、没有任何脚本读过它。于是「计划说了要建 CI」可以永远
-  // 停在计划状态，而门禁全绿——这是最难发现的一类：每一份报告都是对的，
-  // 合起来什么也没有发生。
   const unexecutable = findUnexecutableArtifacts(facts.artifactPlan ?? [])
   for (const item of unexecutable) {
     add(finding('missing', 'artifacts', item.code, item.message, {
@@ -330,8 +298,6 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       // 这份还停在旧版）。只查 fill 那一档，这三种会一起报「已就绪」——而它是假绿。
       // 判据直接取 `compose-agents` 的，不在这里重算一遍。
       const contract = await inspectContract(root, facts)
-      // 算不出来时**不许**落到「已就绪」。这是这条判据唯一的失效方式，
-      // 也是它曾经失效的那一种：模板崩了，体检说结构完整。
       if (contract.state === 'unavailable') {
         add(finding('missing', 'agents', 'agents.unavailable',
           `${facts.docs.agents.file} 的结构这一面这次算不出来（${contract.error}）——`
@@ -545,11 +511,6 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     const declared = Object.values(facts.commands).filter((v) => typeof v === 'string' && v.trim())
     const missing = declared.filter((cmd) => !agentsText.includes(cmd))
     if (missing.length > 0) {
-      // 单条命令展示长度与总字节数都要有上限。
-      //
-      // 早先这里是 `missing.slice(0, 3).join('、')`：条数有上限，**每条的长度没有**。
-      // 一条压缩成单行的多行 `run:` 块能有几千字节，它会原样塞进这一行结论里，
-      // 把整份体检报告撑变形——而看报告的人只会觉得「这工具怎么这么啰嗦」。
       const shown = missing.slice(0, 3).map((cmd) => truncateCommandForDisplay(cmd, COMMAND_DISPLAY_MAX_BYTES).text)
       const totalBytes = missing.reduce((sum, cmd) => sum + Buffer.byteLength(cmd, 'utf8'), 0)
       add(finding('notice', 'agents', 'agents.commands-stale',
@@ -610,11 +571,6 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (!hasRemote) {
     add(finding('ok', 'collaboration', 'collab.no-remote', '没有远端：谈不上收别人的改动'))
   } else {
-    // 这个远端能不能干 GitHub 的那些事，说清楚。
-    //
-    // 早先只报一句话：「已连 GitHub」，而托管不在 GitHub 上时同样一句话照说，
-    // 产物计划里照样给 GitHub 专用命令——执行它的人只看到 404。
-    // 现在：能力成 true 的照常；成 false 的明说做不了；认不出来的说认不出来。
     const caps = facts.git.capabilities ?? null
     if (caps && caps.known === false) {
       add(finding('notice', 'collaboration', 'collab.remote-unknown',

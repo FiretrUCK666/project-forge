@@ -219,19 +219,13 @@ export async function handleNext(opts, roots) {
     }
   }
 
-  // `--handoff`：把「这件事要做什么」也搬出来。
-  //
-  // 早先这里只给机器事实（分支、SHA、风险档），没有一句「要做什么」。于是主 Agent 派子代理
-  // 时只能自己现编 prompt：去 SPEC 里摘 C 编号、摘影响路径、摘验收命令。这段摘要纯手工，
-  // 每派一次重写一遍；写到第十次时它的上下文已被前面的代码与报错撑满，摘要质量必然下降。
-  //
-  // 现在由工具机械地抽，抽不到就写「没有登记」——不编。
   if (opts.handoff && selectedTask) {
     const handoff = buildHandoff({
       mainRoot: roots.mainRoot,
       ledger: selectedTask,
       policy: out.policy ?? taskRuntime?.policy ?? null,
       headSha: taskRuntime?.headSha ?? null,
+      ownerRole: out.ownerRole ?? null,
     })
     out = { ...out, handoff: handoff.fields, handoffPrompt: handoff.prompt }
   }

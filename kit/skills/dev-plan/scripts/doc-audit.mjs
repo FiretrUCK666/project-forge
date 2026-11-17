@@ -54,25 +54,6 @@ function computeCoupledSyncWarnings(repoRoot, paths) {
   return rules.length > 0 ? evaluateCoupledSync(paths, rules, repoRoot) : []
 }
 
-/**
- * 一件事会同时碰到的「面」。分流判据数的是**会碰几面**，不是**出现了哪个词**。
- *
- * ## 为什么要换判据
- *
- * 早先的 docOnly 判据是一句 `docRe.test(text)`：句子里出现「文档」两个字就判 Case 1
- * （0 文档、直接改）。实测翻车得很直接——
- *
- *     把一个已有项目治理成规范工程：补文档、配 CI、统一契约、规范目录结构
- *     -> Case 1（0 文档）
- *
- * 这句话里「文档」命中了，其余三件事（CI、契约、目录结构）没人看。于是一件要拆十几步、
- * 跨模块、动契约的治理工程，被自己的分流器判成「不需要任何规划文档」。
- *
- * **判据看措辞，不看实质**，这就是那个形状。
- *
- * 现在按面数：一件事同时要碰三面以上，它就不是局部的；不管写它的人用了什么词，
- * 都不会被漏判。加一个新的面只需要在表里加一行，判据不用改。
- */
 const CONCERN_FACES = [
   { id: 'docs', re: /\bdocs?\b|readme|contributing|文档|说明|指南|文案|错别字|拼写|注释|翻译/i },
   { id: 'ci', re: /\bci\b|workflow|actions|流水线|发布|release|发版|自动化|门禁/i },
@@ -88,31 +69,6 @@ function facesOf(text) {
   return CONCERN_FACES.filter((face) => face.re.test(source)).map((face) => face.id)
 }
 
-/**
- * 这件事大到一份 SPEC 装不下吗？装不下就得先有一份总控 PRD。
- *
- * ## 判据为什么必须有
- *
- * 早先的阶梯只有三格有规则：0 份文档 / 只有 Todo / SPEC + Todo。**最上面那格不存在**——
- * `docsRequired` 里 `docs/prd/` 永远是 `optionalDocs`，全仓没有任何判据强制过 PRD。
- * 于是「给探测器加个 Python 生态」和「重构整套研发流程」落进同一个 Case 4，要求写一模一样的东西。
- *
- * ## 判的是「能不能装进一份 SPEC」，不是「大不大」
- *
- * 「大」是个形容词，量不出来。能问的是一个结构问题：**这份需求的验收清单，一份 SPEC 装得下吗？**
- * 装不下就得拆，拆了就需要一个上层容器记「整个算不算做完」——那就是总控 PRD。
- *
- * 三条信号都不依赖措辞，且任一条成立就够：
- *
- * 1. **同时要碰四面以上**：面数是「这件事牵涉多少个互不相干的关注点」，四面以上一份
- *    SPEC 的验收清单必然跨模块，装得下也审不动；
- * 2. **明确说了要分批**：`拆成 / 分两批 / 一期二期 / 几个独立 / 逐步`——写的人自己已经
- *    认为它不止一步；
- * 3. **声明要动十二个以上文件**：这已经不是一处改动了。
- *
- * 反向同样重要：**只碰一两面的小需求不许被判进来**，否则每件小事都要求先写 PRD，
- * 人会直接绕过整套流程。
- */
 function assessPrdNeed({ text, faces, fileCount }) {
   const batchRe = /拆成|拆分为|分\s*(?:两|二|三|四|多)\s*批|分\s*(?:两|二|三|四|多)\s*期|一期.{0,6}二期|几个独立|逐步推进|分批落地|多切片|拆成多份/
   const reasons = []
@@ -568,14 +524,6 @@ export function auditDoc({ repoRoot, file }) {
   const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
   const sections = extractSections(bodyForSections)
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
-    // 「必须有什么」不再写死在这里，而是从 `doc-requirements.mjs` 那一份真相源读。
-    //
-    // 早先这里硬编码了三条检查（验收标准、非目标、门型），模板里也硬编码了七节——
-    // 两处都把「这个工具自己长什么样」当成了「所有项目都必须长什么样」。于是数据管道
-    // 被要求写「关键交互」、论文被要求标「门型 two-way」、纯文档站被要求写「复用模块」。
-    //
-    // 现在只有「与项目形态无关」的三件是主干（要做什么、不做什么、怎么算做完），
-    // 其余章节由项目自己的模板声明要或不要。
     const docRequirements = resolveDocRequirements(repoRoot, docType)
     const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
     const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)

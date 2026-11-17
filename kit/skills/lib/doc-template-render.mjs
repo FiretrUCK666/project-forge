@@ -1,23 +1,3 @@
-/**
- * doc-template-render.mjs —— 把 `templates/docs-*.md` 渲染成一份可用的工程文档。
- *
- * ## 为什么要有这一层
- *
- * 模板曾经有两份：`templates/docs-prd.md`（给人看、被 `preflight` 校验 frontmatter）
- * 和写死在生成器里的那一份字符串数组。两份内容不一样，也不共享任何代码——
- * 所以改模板文件对真实生成的文档毫无影响，而人以为自己改了。
- *
- * 现在只有 `kit/skills/templates/docs-*.md` 一份。生成器读它、填占位、按需裁章节。
- * 改模板就是改产物，没有第二条路。
- *
- * ## 两种标记
- *
- * - `{{NAME}}` —— 取值占位。清单在 `DOC_TEMPLATE_VARS`；填不上就写「待补齐」，
- *   绝不静默留空（留空会生成一份看着完整、实则缺内容的文档）。
- * - `<!-- section: <id> [optional] --> ... <!-- /section -->` —— 章节边界。
- *   `optional` 的章节在项目声明不需要它时整节删掉；没有 `optional` 的是主干，永远保留。
- *   标记本身在渲染后清除，不落进产物。
- */
 
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -83,18 +63,6 @@ export function templateSections(text) {
   return out
 }
 
-/**
- * 按项目声明裁掉可选章节，并清掉章节标记。
- *
- * `dropSections` 是**要删掉**的章节 id 集合；为空时全部保留——保守默认：
- * 不知道项目形态就别删东西。反过来的「只保留白名单」写法会让新加的模板章节
- * 在没人留意时整节消失，那正是这份模板曾经掉过三节的原因。
- *
- * 另有一条：**填不上的可选章节也删掉**。一个「风险与应对」表里写着
- * `<可能出问题的事>` 的文档，比没有这一节更糟——它能通过人的扫读，却过不了
- * 自己的审计，最后在提交前被退回来。生成器不该产出会被自己门禁拒收的文档。
- * 主干章节不参与这条：主干填不上就留着让人看见，那正是它该起的作用。
- */
 export function applySectionPolicy(text, dropSections, { pruneUnfilled = true } = {}) {
   const drop = dropSections ?? new Set()
   const sliced = String(text ?? '').replace(SECTION_RE, (whole, id, optional) => {

@@ -572,13 +572,6 @@ export async function handleStart(opts, roots) {
     explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
   }).actor
 
-  // 贴一个 Issue 编号，就要把它的正文取回来。
-  //
-  // 早先这里只记下「42」这个数字，issue 里写了什么（复现步骤、期望行为、验收标准）一个
-  // 字都没读。于是「贴了 issue 还得把内容再讲一遍」——而 AI 拿到的只有一个编号。
-  //
-  // 现在：有通道就把标题与正文摘要写进账本；没通道就**明确记下拿不到**，让 `flow next`
-  // 提示先去取。不静默降级成「凭编号猜」。
   const issueContext = []
   if (linkedIssues.length > 0) {
     const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
@@ -676,14 +669,6 @@ export async function handleStart(opts, roots) {
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId)
 
-  // 干活的人不许给自己定验收标准。
-  //
-  // 早先这条只写在文档里：SPEC 的 `owner` 与账本的 `implementerId` 是同一个也没人管。
-  // 于是实现子代理完全可以直接写一份 SPEC，把验收标准写成「代码能跑就行」，照着做完再
-  // 自己宣布通过——而「动手前冻结标准」的全部意义，就在于这个冻结由**另一方**完成。
-  //
-  // 只判「两边都拿得到」的情况：缺 owner 的文档在 approve 时另有门禁，
-  // 缺账本的任务 `flow next` 会退回「先规划或 start」。不判不等于放行。
   for (const docRel of [initialSpec, initialTodo]) {
     const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
     if (authored.length > 0) {

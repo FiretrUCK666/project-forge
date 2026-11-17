@@ -1,25 +1,4 @@
 #!/usr/bin/env node
-/**
- * handoff.mjs —— 找出本 skill 在一个项目里留下了什么，以及怎么安全地拿掉。
- *
- * ## 它只找，不动手
- *
- * 删东西是不可逆的。所以这个脚本**一个字节都不写**：它列出「哪里有、是什么、怎么处置」，
- * 动手是人的事。这条分工由两个不用猜测的事实支撑：
- *
- *   一、**痕迹是看得见的**。本 skill 写下的每一处都带 `project-forge:` 标记，
- *       标记就写在文件里，人和 AI 都能 grep 到。
- *   二、**没有账本**。早先版本靠一个藏在 `.project-forge/` 里的哈希账本倒推「这段是不是
- *       我写的」。那个做法能精确到字节，代价是用户项目里多一个他不知道存在、
- *       删了会退化成「什么都不认」的目录。换成标记之后，同一件事从「推断」变成「读取」。
- *
- * ## 三档处置
- *
- *   - `marker`：标记行本身。删掉标记、留下正文，是纯减法，随时可做。
- *   - `placeholder`：还没填的 `fill`。它意味着**有一节内容缺失**，删掉标记不等于填好。
- *   - `legacy`：更早版本留下的东西（旧标记、账本目录、拷进项目的脚本）。它们各自有
- *     不同的处置，不能一并删掉。
- */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
@@ -74,25 +53,6 @@ const MAX_BYTES = 256 * 1024
  */
 const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|equip|backup|review|handoff|sync-toc|update|zip)\.mjs)/g
 
-/**
- * 这一趟扫的是不是 **skill 自己的源码仓库**。
- *
- * ## 判据：位置，不是名字
- *
- * 早先按「`SKILL.md` 里写着 `name: project-forge`」判断。两个方向都会错：
- *
- *   - **漏**：别人 fork 之后改了名字，这条判据立刻失效；
- *   - **误**：一个被复制走的 skill 副本也写着同一行，于是**它的**痕迹被当成「不适用」跳过。
- *
- * 现在改成比位置：正在跑的这个脚本就在 skill 自己的目录里，所以「目标目录等于脚本所在的
- * skill 根」是一个**结构性事实**，与叫什么名字无关，也不需要任何人维护一份名单。
- *
- * ## 为什么这件事必须判准
- *
- * 交棒是「把一个项目从这套流程里摘出来」。skill 自己的仓库摘不出来——它就是这套流程。
- * 对它跑交棒，正确的回答是「不适用」，而不是「干净」（假话）或「还有 14 处痕迹」
- * （让人去删自己的语法）。
- */
 function isSelfScan(root) {
   return samePath(resolve(root), SKILL_ROOT)
 }

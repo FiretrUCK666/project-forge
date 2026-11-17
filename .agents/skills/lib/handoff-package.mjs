@@ -1,30 +1,3 @@
-/**
- * handoff.mjs —— 给子代理的交接包：把「这件事要做什么」从文档里搬出来。
- *
- * ## 它治的病
- *
- * `flow next` 早先只给机器事实：分支、SHA、风险档、轮次。**没有一句「这件事要做什么」。**
- * 于是主 Agent 派子代理时只能自己现编 prompt：去 SPEC 里摘 C 编号、摘影响路径、
- * 摘验收命令、摘禁改清单。
- *
- * 这段摘要是纯手工的，而且每派一次就要重写一遍。写到第十次的时候，它的上下文已经
- * 被前面九次的代码、diff、报错撑满了——摘要质量必然下降。**这就是「主 Agent 越干越蠢」
- * 的真实机制：该由机器搬的东西，压在了它的上下文里。**
- *
- * ## 这里做什么
- *
- * 从账本与规划文档里机械地抽出四样，拼成一段可以直接粘给子代理的话：
- *
- * 1. 这个切片认领了哪几条验收标准（`C1..Cn` 的原文）；
- * 2. 影响路径与禁改清单（`docsRequired` 之外的不许动）；
- * 3. 验收命令（从 `AGENTS.md` 的 Dev Profile 读，不在这里编）；
- * 4. 边界：只准在隔离位改，别再往主工作区写。
- *
- * ## 不认识的东西怎么办
- *
- * **不编。** 抽不到的项写「没有登记」，而不是填一句看起来合理的废话——
- * 子代理照着一句编出来的话干活，比什么都不给它更危险。
- */
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -137,7 +110,75 @@ function extractNonGoals(text) {
  * @param {string|null} opts.headSha 当前 HEAD
  * @returns {{ prompt: string, fields: object }}
  */
-export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null }) {
+/**
+ * 各角色的边界。键与 `workflow-policy.mjs` 的 `ownerRole` 一致。
+ *
+ * 这里只写**不随流程改动而失效**的东西：谁负责哪一段、谁不许做什么、交回来要给什么。
+ * 具体步骤、命令、门禁一律不抄——那些由状态机与 Dev Profile 现算。
+ */
+const ROLE_BOUNDARY = Object.freeze({
+  implementer: Object.freeze({
+    label: '实现者',
+    scope: '只负责把认领的验收标准落进代码，并在隔离实施位里跑绿门禁。',
+    mustNot: Object.freeze([
+      '自己宣布通过——完成的标准是实证记录，不是你的判断',
+      '自己合并，或替自己做独立审查',
+      '在主工作区直接改（那会让「这次改动包含什么」说不清）',
+      '为了让门禁变绿而改判据；判据有问题就如实说',
+    ]),
+    report: '**交回来要说清**：每条验收标准做了没、门禁的实测输出、提交 SHA、哪几条判据你判断实现不了以及为什么。',
+  }),
+  reviewer: Object.freeze({
+    label: '审查者',
+    scope: '只负责对着冻结的验收标准独立判断，不替实现者修代码。',
+    mustNot: Object.freeze([
+      '复用上一轮的上下文（Round 2 起必须新建独立子代理）',
+      '把「读起来不顺」当成「不对」——只对判据负责',
+      '在实现位里改文件；发现问题写进意见，交回实现者',
+      '因为拿不到证据就默认通过',
+    ]),
+    report: '**交回来要说清**：每条判据的结论（通过 / 不通过 + 理由）、你实际跑过的验证、以及必须改和可以改分开列。',
+  }),
+  coordinator: Object.freeze({
+    label: '协调者',
+    scope: '只负责调度与验收，不代实现者提交、不代审查者下结论。',
+    mustNot: Object.freeze([
+      '自己改业务代码（协调者改代码，就没人能独立判断了）',
+      '替被派出去的角色补跑它漏掉的流程',
+      '把多个任务混进同一个实施位',
+    ]),
+    report: '**汇报要说清**：哪些任务在哪个阶段、卡在哪一步、下一步派给谁。',
+  }),
+  human: Object.freeze({
+    label: '需要人拍板',
+    scope: '这一步不是 AI 能自己决定的——要么弱化了门禁，要么触发了停损，要么需要外部凭据。',
+    mustNot: Object.freeze([
+      '自己替人做这个决定',
+      '绕过这一步继续往下走',
+      '把「没人反对」当成「有人同意」',
+    ]),
+    report: '**交回来要说清**：卡在哪个决定上、有哪几个选项、各自的代价是什么、建议选哪个以及为什么。',
+  }),
+  default: Object.freeze({
+    label: '执行者',
+    scope: '只做这一轮被交代的那一段，其余交给状态机驱动。',
+    mustNot: Object.freeze([
+      '越过当前阶段去做后面的步骤',
+      '在没拿到实证的情况下声称做完',
+    ]),
+    report: '**交回来要说清**：做了什么、实测输出、还剩什么。',
+  }),
+})
+
+/** 这仓有没有远端。没有远端时 `submit` 只记账本，交接包里要说清。 */
+function factsHasRemote(mainRoot) {
+  try {
+    const cfg = readTextSafe(`${mainRoot}/.git/config`) ?? ''
+    return /\[remote\s+"origin"\]/.test(cfg)
+  } catch { return false }
+}
+
+export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null }) {
   const specRel = ledger?.specFile ?? null
   const todoRel = ledger?.todoFile ?? null
   const specText = specRel && existsSync(join(mainRoot, specRel)) ? (readTextSafe(join(mainRoot, specRel)) ?? '') : ''
@@ -237,6 +278,32 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null }
   }
   lines.push('')
 
+  // 角色边界，不是流程清单。
+  //
+  // 流程（认领 → 实施 → 归档 → 实证 → 提审 → 审查 → 合并）由 `workflow-policy.mjs`
+  // 的状态机驱动，`flow next` 永远输出当前这一步该干什么。这里再抄一份就会漂移：
+  // 状态机加了一步，这份清单不会跟着加，两边开始各说各话。
+  //
+  // 抄不走的只有一件事：**这个角色该做与不该做的边界**。它不随流程改动而失效。
+  const taskId = ledger?.taskId ?? null
+  // `ownerRole` 由状态机算出，`ledger.role` 是平台身份——不是一回事。
+  const role = String(ownerRole ?? ledger?.ownerRole ?? ledger?.role ?? '')
+  const boundary = ROLE_BOUNDARY[role] ?? ROLE_BOUNDARY.default
+
+  lines.push('## 你的角色与边界')
+  lines.push('')
+  lines.push(`**${boundary.label}**。${boundary.scope}`)
+  lines.push('')
+  for (const n of boundary.mustNot) lines.push(`- 不要${n}`)
+  lines.push('')
+  lines.push('**下一步永远从这里查，不要凭记忆推断**：')
+  lines.push('')
+  lines.push(`\`node .agents/skills/dev-flow/scripts/flow.mjs next --task ${taskId ?? '<任务号>'}\`  `)
+  lines.push('它读账本、输出当前阶段该做什么。状态在账本里，不在你的上下文里——')
+  lines.push('被打断、被重派，换一个会话读同一份账本就接得上。')
+  lines.push('')
+  lines.push(boundary.report)
+  lines.push('')
   const gates = policy?.requiredGates ?? []
   if (gates.length > 0) {
     lines.push('## 这门改动的必过门')

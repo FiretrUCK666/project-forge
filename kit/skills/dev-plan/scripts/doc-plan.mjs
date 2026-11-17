@@ -179,21 +179,6 @@ function parseCritiqueReviewer(stamp) {
   return m ? m[1].trim() : null
 }
 
-/**
- * 记录一轮独立规划审核的结论。
- *
- * ## 两条硬约束，都是「身份」这一件事
- *
- * 一、**不得自审**：复核人不能等于文档负责人。否则「我写、我审、我通过」。
- * 二、**Round 2 起必须换人**：复核人不能等于上一轮的复核人。
- *
- * 第二条是后来补的。早先只判第一条，于是同一个上下文可以一直审下去——实测的现场是：
- * 主 Agent 把意见发给同一个审核子代理做 Round 2，它带着「我提的都改了」的记忆回来，
- * 于是很容易说「通过」。**这一轮复审已经被污染了，而没有任何东西拦得住。**
- *
- * 代码审查那边早就有这条规矩（`freshReviewRequiredForRound2Plus`），规划审核这边没有。
- * 规划文档与代码一样会被「看起来审过了」骗过去，所以规矩必须是同一条。
- */
 function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', findings = [] }) {
   if (!reviewer || !String(reviewer).trim()) throw new Error('critique-pass 必须指定 --reviewer <reviewerId>')
   const abs = resolve(repoRoot, file)

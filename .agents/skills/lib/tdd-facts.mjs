@@ -112,15 +112,6 @@ function readProfileCommands(root) {
 /** 这些目录里的清单不是项目自己的（依赖、构建产物、样例）。 */
 const NOT_PROJECT_MANIFEST = /^(?:node_modules|dist|build|target|vendor|__pycache__|\.git|coverage)\//
 
-/**
- * 在文件清单里找清单文件。
- *
- * **不能只看仓库根**：多包仓（`trust-gateway-be/pom.xml` + `trust-gateway-fe/package.json`）
- * 的清单一个都不在根上。早先只查根，于是这类仓被判定成「没有生态」，
- * 生成的 TDD 里技术栈全是 `<待核实>`——那是勘察自己没看见，不是项目没写。
- *
- * 返回每个命中的**真实相对路径**，后续读版本号要用它，不能再拼根路径。
- */
 function findManifests(filePaths) {
   const hits = []
   for (const [name, kind] of MANIFEST_ECOSYSTEM) {

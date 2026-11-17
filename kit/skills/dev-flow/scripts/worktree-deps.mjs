@@ -391,33 +391,6 @@ function ensureMountedDepsExcluded(mainAbs, relPaths) {
   } catch { /* ignore non-writable exclude */ }
 }
 
-/**
- * 全深度扫出 worktree 里所有符号链接/junction，并判定每条指向哪里。
- *
- * ## 判据是「是不是链接」，不是「叫什么名字」
- *
- * 早先这一层是「先按名字筛出候选项（`node_modules` / `.venv` / `venv`），再看是不是链接」。
- * 顺序反了。真实的共享目录名字是一个开放集合：`vendor`（Go、PHP）、`shared`、`common`、
- * `packages`、`data`、`cache`、`assets`、`.pnpm-store`、`target`、`.gradle`、`build`……
- * 还有大量用户自己起的名。按名字筛，就是「没在这个名单里的一律看不见」。
- *
- * 而判「这个目录能不能直接删」的判据根本不需要名字：`lstat().isSymbolicLink()`
- * 对任何名字都成立，一次就够了。
- *
- * ## 为什么必须扫，而不能只解绑工具自己挂的那些
- *
- * `git worktree remove --force` 会**跟随 junction 递归删除**。实测：主仓 `node_modules`
- * 里放一个哨兵文件，worktree 里挂一个指向它的 junction，不先解绑就 `--force` 移除，
- * 退出码 `0`，哨兵没了。git 不替你判断链接指向哪里。
- *
- * 所以「删之前先看」不是稳妥选项，是**唯一让删除可逆的一步**。
- *
- * @returns {{ outbound: Array<{path: string, target: string|null, kind: string, resolved: string|null}>,
- *             internal: Array<{path: string, target: string|null}>,
- *             broken: Array<{path: string, target: string|null}> }}
- *   `outbound` 指解到 worktree 之外的（含解不出来的悬空链接——解不出来就更不能删）；
- *   `internal` 指解到 worktree 里的（删它不影响外面）。
- */
 export function scanOutboundLinks(wtRoot) {
   const wtAbs = canonicalPath(wtRoot)
   const outbound = []
@@ -461,30 +434,6 @@ export function scanOutboundLinks(wtRoot) {
   return { outbound, internal, broken }
 }
 
-/**
- * 清理 worktree 前把指向外部的链接逐个解绑，并校验主仓完好。
- *
- * ## 校验集合必须与删除动作同源
- *
- * 早先的「主仓依赖完好」校验只看白名单里那几个目录，所以 `vendor` 里的哨兵被删光时
- * 它一声不响——**洞在哪，校验就瞎在哪**。现在两边都从 `scanOutboundLinks` 的结果派生：
- * 解绑的集合，就是校验的集合。
- *
- * ## 两种模式，默认是最安全的那个
- *
- * 同一个函数被两类调用点共用，而它们要的答案不一样：
- *
- *   - `mode: 'cleanup'`（**默认**）：下一步是 `git worktree remove`。那一步会跟随 junction
- *     递归删除，所以**任何未获准的外链都要当场拦下**，退出码非 0。默认取这一档，是因为
- *     忘记传参数的调用者应当失败在「不删」这一侧，而不是失败在「删了别人的数据」那一侧。
- *   - `mode: 'deps'`：只是重新挂载依赖前的清场（`sync`、`lifecycle` 换审查槽）。worktree
- *     不会消失，所以外链照常解绑并列出来即可——但**目标完好校验一样要过**。
- *
- * ## `allowOutbound` 精确匹配才放行
- *
- * 不提供「全部放行」开关。要放行就逐个列出路径：一个能把「任意名字」一次性放过去的
- * 开关，等于把这条判据关掉。
- */
 export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode = 'cleanup' } = {}) {
   const mainAbs = canonicalPath(mainRoot)
   const wtAbs = canonicalPath(wtRoot)
@@ -503,11 +452,6 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
   const skipped = []
   const blocked = []
 
-  // 校验基准：**删除前扫描到的每一条外链目标**，都记下来，处理完逐个复核还在。
-  //
-  // 关键在「同一个集合」：早先只把「准备解绑的那几条」记进基准，于是被拦下的与因 tracked
-  // 跳过的那些目标，事后没人复核——**校验用的集合比它要保护的东西小**，洞就在这里。
-  // 现在基准直接取自扫描结果，与后面解不解绑无关。
   const before = scan.outbound.map((item) => ({ path: item.path, resolved: item.resolved }))
 
   for (const link of scan.outbound) {

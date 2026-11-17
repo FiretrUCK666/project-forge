@@ -471,9 +471,6 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
   const c5 = triageTask({ summary: '推翻 TDD 架构重新设计核心引擎', conflictsTdd: true })
   if (c5.caseType !== 5 || c5.blocked !== true) return `Case 5 未阻断：${JSON.stringify(c5)}`
 
-  // 反面：判据看措辞不看实质的典型翻车。这句话里「文档」两个字出现过，
-  // 但它同时要动 CI、契约与目录结构——一件要拆十几步的治理工程，
-  // 早先被自己的分流器判成「不需要任何规划文档」（Case 1）。
   const governance = [
     '把一个已有项目治理成规范工程：补文档、配 CI、统一契约、规范目录结构',
     '项目规范化',
@@ -765,11 +762,6 @@ cases.push(['契约路径归属：家目录与环境变量根不算仓内路径�
   return true
 }])
 
-// #49 A-1：模板变量里带着宿主的模板语法，渲染就崩。
-//
-// `COMMANDS` 的值来自 CI 的 `run:` 块，而 GitHub Actions 的表达式恰好也是 `${{ }}`。
-// 早先渲染之后会再用 `/{{[^}]*}}/g` 扫全文找残留——它分不清「模板作者写的 `{{`」与
-// 「被替换进来的数据里的 `{{`」，于是用 Actions 表达式的项目一个子命令都跑不了。
 cases.push(['模板渲染：变量值里的宿主语法不得让渲染失败（反向：模板正文里的未登记占位符仍要拦住）', async () => {
   const { renderVars, TemplateError } = await import('../lib/template.mjs')
 
@@ -814,16 +806,6 @@ cases.push(['模板渲染：变量值里的宿主语法不得让渲染失败（�
   return true
 }])
 
-// #49 C-1：失败被塌缩成「通过」。
-//
-// `inspectContract` 早先把异常 catch 掉，返回三个空数组。三个空数组在读的人眼里就是
-// 「三项都通过」——于是落到了 else 分支盖章「结构也完整」。全仓搜 `health.error` 的
-// 引用数是 0，错误被存下来，从没人读。
-//
-// 实测现场：compose 退出码 2（模板渲染崩了）的同一时刻，review 说「结构也完整」。
-//
-// 这条判据的失效方式只有一种：**catch 之后返回一个与「成功」同形的值**。所以既要
-// 行为断言（compose 失败时不得给出 agents.ready），也要静态断言（catch 分支的形状）。
 cases.push(['算不出来不等于算出来没问题：catch 分支不得返回与「成功」同形的值', async () => {
   const source = readFileSync(join(SKILL_ROOT, 'scripts', 'review.mjs'), 'utf8')
   const fn = /async function inspectContract\([\s\S]*?\n\}/.exec(source)?.[0] ?? ''
@@ -857,10 +839,6 @@ cases.push(['算不出来不等于算出来没问题：catch 分支不得返回�
   } finally { rmTree(dir) }
 }])
 
-// #49 副产物 P7：生成路径本身必须能成功。
-//
-// 早先多行 `run:` 块被 `join(' && ')` 压成一行，工具把自己抓来的命令装进契约，
-// 然后被自己撑爆——一个 92 文件的正常项目从零生成 AGENTS.md 直接超限中止（exit 1）。
 cases.push(['默认 CI 形状下 compose 能生成成功，且「构建与验证」没有超长单行', async () => {
   const dir = tmpProject({
     'package.json': '{"name":"p7","version":"1.0.0","scripts":{"test":"node --test"}}',
@@ -902,10 +880,6 @@ cases.push(['默认 CI 形状下 compose 能生成成功，且「构建与验证
     return true
   } finally { rmTree(dir) }
 }])
-// #52 M：独立审查的身份不能只靠一个自由字符串。
-//
-// 早先 `--reviewer-id` 就是全部凭据，编一个不一样的名字立刻通过；而 `implementerId`
-// 为空时自审检查整条跳过——「没有实施者标识」变成了「不需要独立审查」。
 cases.push(['独立审查令牌：一次性、对轮次、编一个名字不再能过', async () => {
   const { createDefaultLedger, consumeReviewToken, issueReviewToken } = await import('../../kit/skills/lib/ledger.mjs')
 
@@ -935,11 +909,6 @@ cases.push(['独立审查令牌：一次性、对轮次、编一个名字不再�
   return true
 }])
 
-// #50 C25：文档兄弟集不能靠「同一天创建」认。
-//
-// 早先 siblingSet 要求 `fn.date === targetDate`。于是同一件事的 PRD 今天建、SPEC 明天建，
-// 两份文档就不再是兄弟：`issue` / `status` / `owner` 从此各说各话，而没有任何东西报错。
-// 「什么时候写的」不是「是不是同一件事」的证据，「叫什么」才是。
 cases.push(['文档兄弟集按 slug 认亲，不依赖同一天创建', async () => {
   const dir = tmpProject({ 'README.md': '# sib\n\n兄弟集认亲测试仓。\n' })
   gitInit(dir, { branch: 'main' })
@@ -1008,11 +977,6 @@ cases.push(['命令按生态分组后每类留真实命令，超量折叠成指�
   } finally { rmTree(dir) }
 }])
 
-// #50 I：拆分多份 SPEC 时，必须有一份总控 PRD 说「整体算不算做完」。
-//
-// 早先的阶梯只到「SPEC + Todo」，最上面那格不存在：`docsRequired` 里 `docs/prd/`
-// 永远是可选，全仓没有任何判据强制过 PRD。于是「加一个 Python 生态」和「重构整套研发流程」
-// 落进同一个 Case 4，要求写一模一样的东西。
 cases.push(['大需求判出必写 PRD，小需求不许被误判；多份无主 SPEC 要报出来', async () => {
   const { triageTask, checkOrphanSlices } = await import('../../kit/skills/dev-plan/scripts/doc-audit.mjs')
 
@@ -1064,10 +1028,6 @@ cases.push(['大需求判出必写 PRD，小需求不许被误判；多份无主
   } finally { rmTree(dir) }
 }])
 
-// #50 F：如实报出远端能做与不能做，认不出来就说认不出来。
-//
-// 早先只报 `providerId` 一个字符串。托管不在 GitHub 上时，产物计划照样给 GitHub 专用命令，
-// 执行它的人只看到 404——而流程本身不会报错。
 cases.push(['远端能力三态：能做、不能做、认不出来，且未知不许被当成能', async () => {
   const { survey } = await import('../../scripts/survey.mjs')
 
@@ -1108,11 +1068,6 @@ cases.push(['远端能力三态：能做、不能做、认不出来，且未知�
   return true
 }])
 
-// #50 G：计划说要建，就得有人说得出「谁建、怎么建」。
-//
-// 早先 `artifactPlan` 与「执行者」之间没有任何联系：勘察报 `ci-check` 该建，而模板在
-// templates/ 里躺着、没有任何脚本读过它。于是「计划说了要建 CI」可以永远停在计划状态，
-// 而门禁全绿——每一份报告都是对的，合起来什么也没有发生。
 cases.push(['产物计划里每个「该建」都必须指名执行者', async () => {
   const { findUnexecutableArtifacts, ARTIFACT_EXECUTORS } = await import('../../scripts/lib/artifact-executors.mjs')
 
@@ -1152,10 +1107,6 @@ cases.push(['产物计划里每个「该建」都必须指名执行者', async (
   return true
 }])
 
-// 干活的人不许给自己定验收标准。
-//
-// 早先这条只写在文档里：SPEC 的 `owner` 与账本的 `implementerId` 是同一个也没人管。
-// 于是实现子代理可以直接写一份 SPEC，把验收标准写成「代码能跑就行」，做完再自己宣布通过。
 cases.push(['SPEC 作者不得就是实施者', async () => {
   const { checkAuthorIsNotImplementer } = await import('../../kit/skills/lib/doc-requirements.mjs')
 
@@ -1197,11 +1148,6 @@ cases.push(['SPEC 作者不得就是实施者', async () => {
   } finally { rmTree(dir) }
 }])
 
-// 交接包：把「这件事要做什么」从文档里搬出来，别压在主 Agent 的上下文里。
-//
-// 早先 `flow next` 只给机器事实（分支、SHA、风险档），没有一句「要做什么」。于是主 Agent
-// 派子代理时只能自己现编 prompt：去 SPEC 里摘 C 编号、摘影响路径、摘验收命令。这段摘要
-// 纯手工，每派一次重写一遍；写到第十次时上下文已被前面的代码与报错撑满。
 cases.push(['交接包把该做什么、能改哪里、怎么算做完机械搬出来', async () => {
   const { buildHandoff } = await import('../../kit/skills/lib/handoff-package.mjs')
 
@@ -1341,10 +1287,6 @@ cases.push(['主工作区有改动时给提醒，但不改阶段、不阻塞', a
   return true
 }])
 
-// 体检报告里的命令长度必须有上限：一条压平的多行 run 块能有几千字节。
-//
-// 早先 `missing.slice(0, 3).join('、')` 只限条数、不限每条长度，于是一条超长命令
-// 会把整份报告撑变形，而看报告的人只会觉得「这工具怎么这么啰嗦」。
 cases.push(['体检报告里的命令展示有字节上限', async () => {
   const { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } = await import('../../kit/skills/lib/command-lex.mjs')
 
@@ -1378,10 +1320,6 @@ cases.push(['体检报告里的命令展示有字节上限', async () => {
   } finally { rmTree(dir) }
 }])
 
-// 冷启动全景：新会话不该靠翻目录才知道这个仓做到哪了。
-//
-// 早先 `flow next` 无任务时只说「请先运行 triage 或 start」。而进度信息一直在仓库里
-// （frontmatter 的状态与勾选数），只是没有入口把它们摆出来。
 cases.push(['冷启动全景把进度摆出来，且不猜', async () => {
   const { buildSessionOrientation } = await import('../../kit/skills/lib/session-orient.mjs')
 
@@ -1433,11 +1371,6 @@ cases.push(['冷启动全景把进度摆出来，且不猜', async () => {
   } finally { rmTree(dir) }
 }])
 
-// 文档模板只有一个真相源：改模板就该改产物，删章节要按项目声明来。
-//
-// 早先 `templates/docs-prd.md` 和生成器里的字符串数组是两份互不相干的内容：
-// 模板文件被 preflight 校验、被人当参考改，但真实生成的文档一个字都不用它。
-// 于是「我改了模板」和「产物变了」之间没有任何关系。
 cases.push(['模板文件就是产物来源，可选章节按项目声明增删', async () => {
   const { renderDocTemplate, readDocTemplate, templateSections } = await import('../../kit/skills/lib/doc-template-render.mjs')
   const { resolveDocRequirements } = await import('../../kit/skills/lib/doc-requirements.mjs')
@@ -1498,11 +1431,6 @@ cases.push(['模板文件就是产物来源，可选章节按项目声明增删'
   } finally { rmTree(dir) }
 }])
 
-// 文档模板要能适配完全不同的项目，而不是一套七节表走天下。
-//
-// 早先的模板是固定七节，且生成器里另有一份写死的内容：改模板文件对产物毫无影响。
-// 更实际的问题是——CLI 工具没有「数据模型」，数据管道没有「关键交互」，
-// 论文仓没有「复用模块」。写死章节逼着人填「不适用」，或者干脆绕过流程。
 cases.push(['文档模板按项目形态裁剪，且填不上的可选节不留占位', async () => {
   const { renderDocTemplate, templateSections, DOC_TEMPLATE_VARS } = await import('../../kit/skills/lib/doc-template-render.mjs')
 
@@ -1565,11 +1493,6 @@ cases.push(['文档模板按项目形态裁剪，且填不上的可选节不留�
   return true
 }])
 
-// 验收标准「冻结」必须是真的冻住，不是文档里的一句话。
-//
-// 早先 approve 之后回到 SPEC 里把 C3 从「必须拒绝并退出码 1」改成「允许通过」，
-// 文件照样合法、audit 照样通过、finalize 照样放行；只有审查者凭记忆才能发现。
-// 人的记忆不是门禁。
 cases.push(['验收标准批准即冻结，改过要能被逐条指出来', async () => {
   const { extractCriteria, criteriaFingerprint, compareCriteria, describeCriteriaDrift } =
     await import('../../kit/skills/lib/criteria-lock.mjs')
@@ -1759,10 +1682,6 @@ cases.push(['讲不做与讲删除的地方，不存在的路径不是幻觉', a
   } finally { rmTree(dir) }
 }])
 
-// 「通用」不是「什么都要求」，而是「用得上的人拿得到，用不上的人删得掉」。
-//
-// 早先可选章节只有零星几个登记在案，于是项目想在模板里点名要一节
-// （比如「非功能要求」），工具根本不认识那个 id，声明被静默忽略。
 cases.push(['项目能在模板里点名要章节，也能点名不要', async () => {
   const { resolveDocRequirements } = await import('../../kit/skills/lib/doc-requirements.mjs')
   const fs = await import('node:fs')
@@ -2219,5 +2138,58 @@ cases.push(["轮次只有一个派生式，空档不算错", async () => {
   if (!Number.isInteger(dirty) || dirty < 2) return `脏数据算出了 ${dirty}`
 
   return true
+}])
+
+// 交接包自称「机械生成、可以直接粘给子代理」，那它就得把「粘过去之后还要走什么」也带上。
+// 少写一步，那一步就不会发生——而「做完了但没提交、没开 PR」看起来和「做完了」一模一样。
+cases.push(["交接包给角色边界与状态机指针，不抄流程清单", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({
+    "README.md": "# w\n\n角色边界测试。\n",
+    "AGENTS.md": "```yaml\nquick-test: node --test\n```\n",
+    "docs/specs/261117-issue7-w-spec.md": [
+      "---", "kind: spec", "title: w", "status: approved", "owner: me", "---", "",
+      "# SPEC: w", "", "## 要解决的问题", "", "某功能要改。", "",
+      "## 冻结的验收标准", "", "- [ ] C1: 退出码 0", "",
+    ].join("\n"),
+  })
+  try {
+    const ledger = {
+      taskId: "issue-7", linkedIssues: [7], role: "local-only",
+      specFile: "docs/specs/261117-issue7-w-spec.md", todoFile: null,
+      branch: "feat/w", baseBranch: "main", baseSha: "abc",
+    }
+
+    // 正向：四种角色各有各的边界，不许都落到同一个
+    const labels = {}
+    for (const role of ["implementer", "reviewer", "coordinator", "human"]) {
+      const r = buildHandoff({ mainRoot: dir, ledger, policy: {}, ownerRole: role })
+      const i = r.prompt.indexOf("你的角色与边界")
+      if (i < 0) return `${role} 的交接包里没有角色边界那一节`
+      const m = /\*\*(.+?)\*\*。/.exec(r.prompt.slice(i))
+      if (!m) return `${role} 的角色名没写出来`
+      labels[role] = m[1]
+    }
+    const distinct = new Set(Object.values(labels))
+    if (distinct.size !== 4) {
+      return `四种角色落成了 ${distinct.size} 种：${JSON.stringify(labels)}`
+    }
+
+    // 正向：必须指向状态机，不能让人凭记忆推断下一步
+    const r = buildHandoff({ mainRoot: dir, ledger, policy: {}, ownerRole: "implementer" })
+    if (!r.prompt.includes("flow.mjs next --task issue-7")) return "没给查下一步的命令"
+    if (!r.prompt.includes("状态在账本里")) return "没说明「状态在账本、不在上下文」——被中断时接不上"
+
+    // 反向：**不许**把状态机的流程清单抄进来。抄了就会漂移。
+    for (const word of ["finalize --task", "submit --task", "verify --task"]) {
+      if (r.prompt.includes(word)) {
+        return `交接包抄了流程步骤「${word}」——那是状态机的活，两处写同一件事必然漂移`
+      }
+    }
+
+    return true
+  } finally { rmTree(dir) }
 }])
 }

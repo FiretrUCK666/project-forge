@@ -370,13 +370,6 @@ function collectSiblingSet(repoRoot, { slugOrPath, includeArchived = false } = {
   const siblingSet = new Set()
   if (seedRel && (includeArchived || !seedRel.startsWith('docs/archive/'))) siblingSet.add(seedRel)
 
-  // 认亲第一判据：**同 slug**，不比日期。
-  //
-  // 早先这里要求 `fn.date === targetDate`——同一件事的 PRD 今天建、SPEC 明天建，
-  // 两份文档就再也不是兄弟，`issue` / `status` / `owner` 从此各说各话，而没有任何东西报错。
-  // 「什么时候写的」不是「是不是同一件事」的证据，「叫什么」才是。
-  //
-  // 防误合并改由 slug 的宽度承担：`slugify` 之后的重名本身就是同一件事的强信号。
   for (const rel of candidates) {
     const fn = parseDocFilename(rel)
     if (fn && targetSlug && fn.slug === targetSlug) {

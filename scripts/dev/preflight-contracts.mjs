@@ -13,12 +13,6 @@ import { VERIFY_EXIT } from '../handoff.mjs'
 import { markdownHeadings } from '../sync-toc.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
-// 只认「完整路径」，不认长路径的尾巴。
-//
-// 早先这里是 `\b(...)\b`：写 `kit/skills/templates/docs-todo.md` 时，
-// 它会在斜杠后面匹配到 `templates/docs-todo.md` 这一段，拿这个片段去查文件，
-// 自然查不到——于是**正确的路径反而被报成不存在**。前面加一个不吃字符的否后顾，
-// 长路径就不会再被截成尾段。
 const PATH_RE = /(?<![A-Za-z0-9_./-])((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json))\b/g
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 

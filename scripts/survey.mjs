@@ -461,15 +461,6 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const kit = detectKit(root)
   const localSkills = detectLocalSkills(root)
   const artifacts = detectArtifacts(root, ecosystem)
-  // CI 与 Makefile 里被真实执行过的命令**永远要读**，不是「只给认不出的项目兜底」。
-  //
-  // 早先这里是 `ecosystem.kinds.length === 0 ? detectUniversalCommands(root) : 空`。
-  // 于是一个 `kinds: ['skill']` 的仓（本仓库就是）拿到的是 `commands = {}`——它有 CI、
-  // CI 里写着十几条真实命令，但整条兜底被跳过了。结果是生成的 `AGENTS.md`
-  // 「构建与验证」永远空着，而体检还会说它「已就绪」。
-  //
-  // 优先级不变：生态清单推断出来的更具体，覆盖 CI 兜底的那一份（反过来的话，
-  // 一份 CI 里偶然出现的 `npm run lint` 会把 `npm test` 顶掉）。
   const universal = detectUniversalCommands(root)
 
   const gitFacts = await gitPromise
@@ -578,14 +569,6 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
       roleReason: role.reason,
-      // 这个远端到底能做什么，如实报出来。
-      //
-      // 早先只报 `providerId` 一个字符串，而「能不能开 Issue / 发 Release / 读检查状态」
-      // 全靠下游各自猜——于是不在 GitHub 上的托管仓上，产物计划照样给出 GitHub 专用命令，
-      // 而执行它的人只会看到 404。
-      //
-      // 报 capabilities 而不是猜：能就是 true，不能就是 false，认不出来就是 null（未知），
-      // **未知不许被当成能**——那正是「看着像配好了」的来源。
       capabilities: summarizeRemoteCapabilities(role, gitFacts),
       ...(role.collaborationScope ? { collaborationScope: role.collaborationScope } : {}),
       ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),

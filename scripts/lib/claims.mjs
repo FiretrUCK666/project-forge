@@ -27,30 +27,8 @@
  * 而交付体检不该跑用户项目的构建。那一层由项目自己的门禁负责。
  */
 
-/**
- * 当成路径看的后缀。
- *
- * `.md` / `.mdx` 在里面：`AGENTS.md` 写「设计文档在 `docs/TDD.md`」就是一条能被仓库现状
- * 核对的承诺，文件被搬走之后它就该报。早先刻意把它们排除在外，理由是「文档互链由别的
- * 判据管」——但那条判据管的是本 skill 自己的 `references/` 互链，管不到用户项目里的
- * `AGENTS.md`。范围不同，不是同一件事重复报。
- */
 const PATH_EXT = /\.(?:mjs|cjs|js|ts|py|sh|ps1|rs|go|java|json|ya?ml|toml|lock|txt|cfg|ini|mdx?)$/i
 
-/**
- * 一眼就知道**不是本仓库路径**的东西。
- *
- * ## 这里判的是「挂在哪个根下」
- *
- * 一条路径形如 `x/y.z` 时，光看形状分不出它属于谁。同一个形状可能挂在三个不同的根下：
- * 仓库根（`src/main.ts`）、家目录根（`~/.ssh/config`）、环境变量根（`%APPDATA%\x`）。
- * 只有第一种是契约能核对的承诺；后两种是「这台机器上的某个位置」，拿仓库现状去核它
- * 只会得到一条假警报。
- *
- * 早先这一层只有「绝对路径」的排除，没有家目录与环境变量，于是实测：
- * `~/.envproxy/locks/op.lock`、`~/notes.txt`、`~/projects/x/package.json`、
- * `~/.config/app/settings.yaml` 四条全被当成仓内路径报成「已经不在」。
- */
 const NOT_A_PATH = [
   /^https?:/i,
   /^mailto:/i,
@@ -86,16 +64,6 @@ const FENCE_BLOCK = /```[a-zA-Z]*\n([\s\S]*?)```/g
  */
 const BRANCH_CMD = /\bgit\s+(?:switch|checkout)\s+([A-Za-z0-9][A-Za-z0-9._/-]*)/g
 
-/**
- * 剥掉「同一个文件」的相对前缀：`./`、`.\`。
- *
- * `./docs/TDD.md` 与 `docs/TDD.md` 指的是同一个文件。早先只认后者，于是**契约里最规范的
- * 那种写法反而漏认**——同一处判据一边误报（`~/`）一边漏报（`./`），两个方向的错都在。
- *
- * `../` 不剥。以 `..` 开头的路径要相对**引用它的那份文件的目录**才能解析，而这里只有
- * 仓库根这一种坐标系。少认一条是保守的（不报假警报）；猜错则是另一种错——把「在子目录
- * 里写 `../README.md`」判成「仓库根下的 README.md 丢了」。
- */
 function stripRelativePrefix(raw) {
   let out = raw
   while (out.startsWith('./') || out.startsWith('.\\')) out = out.slice(2)

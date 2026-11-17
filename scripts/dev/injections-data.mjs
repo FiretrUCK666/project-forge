@@ -972,6 +972,14 @@ export const INJECTIONS = [
     expect: 'flow start 能指定基线分支',
   },
   {
+    id: 'I110',
+    what: '角色边界失效（四种角色都落成同一个默认，接手的人会被派错活）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: '  const boundary = ROLE_BOUNDARY[role] ?? ROLE_BOUNDARY.default',
+    to: '  const boundary = ROLE_BOUNDARY.default',
+    expect: '交接包给角色边界',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

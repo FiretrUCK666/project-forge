@@ -68,25 +68,6 @@ export function evaluateConditions(text, condMap = {}, file = 'template.md') {
   return out.join('\n')
 }
 
-/**
- * 替换全部 `{{VAR}}`；未登记变量、缺失取值或模板正文里形状不对的占位符立即报错。
- *
- * ## 只扫模板正文，不扫替换之后的结果
- *
- * 早先这里在替换**之后**再用 `/{{[^}]*}}/g` 扫全文找残留。它分不清「模板作者写的 `{{`」
- * 与「被替换进来的数据里的 `{{`」，于是一条来自 CI `run:` 块的命令就能把渲染打崩：
- *
- *     renderVars('cmd: {{COMMANDS}}', { COMMANDS: 'TAG="${{ github.ref_name }}"' })
- *     -> TemplateError: 渲染之后还剩这些占位符：{{ github.ref_name }}
- *
- * GitHub Actions 的表达式恰好也是 `${{ }}`。用 Actions 的项目，`compose-agents`
- * 一个子命令都跑不了（`--check` / `--status` / 默认模式全崩，退出码都是 2）。
- *
- * 判据要有主语：这段双大括号是模板作者的、还是项目数据的？模板作者的才归这里管。
- * 所以形状检查移到替换之前，只看**模板正文**；替换进去的值原样保留，一个字都不再解释。
- *
- * 顺带：`${{ ... }}` 是宿主的模板语法，不是本工具的占位符，即使出现在正文里也放过。
- */
 export function renderVars(text, vars = {}) {
   const source = String(text ?? '')
   // 取占位名时要先剥掉宿主语法（`${{ ... }}`），否则 `${{GITHUB_SHA}}` 会被当成

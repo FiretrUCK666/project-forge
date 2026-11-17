@@ -188,10 +188,6 @@ export async function handleCleanup(opts, roots) {
     const rmArgs = opts.force ? ['worktree', 'remove', '--force', wt.abs] : ['worktree', 'remove', wt.abs]
     const rmRes = await gitRun(roots.mainRoot, rmArgs)
     if (!rmRes.ok) throw new Error(`移除 worktree ${wt.path} 失败：${rmRes.stderr}`)
-    // 回执要逐条列出解绑了什么，不是只报个数。
-    //
-    // 早先这里只记 `.length`。而「同意放行了 3 条外链」与「同意放行了 node_modules、
-    // vendor、shared 这 3 条」是两件事：前者在事后无法核对，后者能对上你点头时看到的那份清单。
     removedWorktrees.push({
       path: wt.path,
       unmountedDeps: unmount.unmounted.length,

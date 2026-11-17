@@ -1,33 +1,3 @@
-/**
- * command-lex.mjs —— 命令的词法切分与「动作词只认命令位置」。
- *
- * ## 它治的病
- *
- * 一个项目从零生成 `AGENTS.md` 时，工具会把自己从 CI 里抓来的命令装进「构建与验证」节。
- * 那些命令要分类（test / lint / build / install）。早先的分类是：
- *
- *     for (const kind of COMMAND_KINDS) if (kind.re.test(整段文本)) return kind.key
- *
- * 在一整段文本里搜第一个命中词，没有任何语法边界。于是实测三条全错：
- *
- * | 分类 | 真实内容 | 真正命中的词 |
- * | --- | --- | --- |
- * | `test` | `check.yml` 里整段 Bash | 文件名 `mac/test-mac-pure.sh` 里的 `test` |
- * | `lint` | `release.yml` 里打包那一段 | `git archive --format=zip` 里的 `format` |
- * | `install` | `check.yml` 里一整段 PowerShell | `.Restore` 属性名里的 `restore` |
- *
- * 还有一层在更上游：多行 `run:` 块被 `join(' && ')` 压成一行交给下游当「一条命令」。
- * 控制流被压平，本来互不相干的语句拼在一起，分类器要在大杂烩里猜。
- *
- * ## 判据：先切段，再看命令位置
- *
- * 一条命令的动作词只可能出现在**命令位置**——每段的第一个词（跳过环境变量赋值与前置
- * 修饰）。参数值（`--format=zip`）和属性名（`.Restore`）不是命令位置，那里出现的词
- * 不定义这条命令在干什么。
- *
- * 所以这里做两件事：`splitCommandSegments` 切段，`commandHeadOf` 取命令位置的词。
- * 分类只在前者给的每一段上，用后者给的词去比。
- */
 
 /** 段与段之间的分隔：`&&`、`||`、`;`、`|`、换行。`|` 要在 `||` 之后判，否则会切成两个空串。 */
 const SEGMENT_OPERATORS = ['&&', '||', ';', '|', '\n']

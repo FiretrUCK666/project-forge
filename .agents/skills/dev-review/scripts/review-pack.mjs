@@ -223,13 +223,6 @@ async function main(argv = process.argv.slice(2)) {
           : opts.base ? 'base' : 'local'
     const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
 
-    // PR 模式必须真的拉到那个 PR。
-    //
-    // 早先在没有 API 通道时，`--pr 7` 被接受，`diffScope` 回退成 `master...HEAD`——
-    // 它审的是本地当前分支，**从来没看过那个 PR**，却报出 `PACK_READY`。
-    // AI 看到「审查包就绪」就照常审查、记录 PASS、合入。
-    //
-    // 失败必须与成功用不同的表示：拉不到就退出非 0 并说清「不能假装审了」。
     if (mode === 'pr') {
       const prNo = opts.pr ?? opts['external-pr']
       const prRecorded = task?.prNumber ?? null

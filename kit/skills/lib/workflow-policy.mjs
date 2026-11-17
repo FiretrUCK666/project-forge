@@ -530,8 +530,6 @@ export function evaluateNextState({
     nextAction = '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
     command = `git -C "${t.worktreePath ?? '.'}" status`
   } else if ((t.issueContextUnavailable ?? []).length > 0) {
-    // 贴了 Issue 却拿不到正文：先去取，别凭编号猜。
-    // 早先 `--issue 42` 只记编号、从不取正文，AI 拿到的只有一个数字。
     phase = 'needs-issue-context'
     ownerRole = 'implementer'
     blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')

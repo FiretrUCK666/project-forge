@@ -674,12 +674,6 @@ cases.push(['doc-plan approve 移交 flow start 与静态回归（mergeAuthority
   } finally { rmTree(apDir) }
 }])
 
-// #51：`git worktree remove --force` 会跟随 junction 递归删除。工具早先只解绑
-// node_modules / .venv / venv 三种名字，其余名字（vendor、shared、data……）一个都发现
-// 不了，于是「清理 worktree」把主仓的数据删干净，退出码还是 0。
-//
-// 判据必须是「是不是链接」，不是「叫什么名字」——所以这里用五个不同的名字打它，
-// 其中一个还是中文，另加一条反向：worktree 内部互指的链接不该被当成外链。
 cases.push(['cleanup 外链保护：任意名字的 junction 都必须被检出并默认拒绝（反向：无外链照常放行）', async () => {
   const { scanOutboundLinks, unmountSharedDeps } = await import('../../kit/skills/dev-flow/scripts/worktree-deps.mjs')
   const { handleCleanup } = await import('../../kit/skills/dev-flow/scripts/flow-cleanup.mjs')
@@ -796,8 +790,6 @@ cases.push(['cleanup 外链保护反向：工具自己挂的 node_modules 照常
 }])
 
 
-// 「已被 Git 跟踪的链接」曾经是一条豁免：理由听起来合理（git 自己会删），
-// 实际是错的——git 删含链接的目录时会跟着链接走进去，仓外目标被一起删。
 cases.push(["跟踪的链接在删除档不许豁免，解绑档才跳过", async () => {
   const { unmountSharedDeps } = await import("../../kit/skills/dev-flow/scripts/worktree-deps.mjs")
   const fs = await import("node:fs")

@@ -2266,4 +2266,42 @@ cases.push(["必过门要展开成能直接跑的命令，不是一个档位名"
 
   return true
 }])
+
+// flow next 已经算出 phase / nextAction / command，丢了它们子代理就不知道此刻要干什么。
+// 认领那一步就是这么漏掉的——一整包「做什么」里，唯独没有「现在做什么」。
+cases.push(["交接包第一眼就是现在这一步", async () => {
+  const { buildHandoff } = await import("../../kit/skills/lib/handoff-package.mjs")
+
+  const ledger = { taskId: "issue-9", linkedIssues: [9], role: "local-only",
+    specFile: null, todoFile: null, branch: "b", baseBranch: "main", baseSha: "a" }
+  const current = {
+    phase: "needs-claim", ownerRole: "implementer",
+    nextAction: "先认领再动手",
+    command: 'node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task issue-9',
+    blockingReasons: ["BLOCKED_NOT_CLAIMED"],
+  }
+  const r = buildHandoff({ mainRoot: ".", ledger, policy: {}, ownerRole: "implementer", current })
+  const p = r.prompt
+
+  if (!p.includes("## 现在这一步")) return "没有「现在这一步」那一节"
+
+  // 必须在「你在做什么」之前——第一眼看到的要是此刻的动作，不是长清单
+  const at = p.indexOf("## 现在这一步")
+  const after = p.indexOf("## 你在做什么")
+  if (after >= 0 && at > after) return "「现在这一步」排在了长清单后面"
+
+  if (!p.includes("`needs-claim`")) return "没写出当前阶段"
+  if (!p.includes("先认领再动手")) return "没写出这一步要做什么"
+  if (!p.includes("claim --task issue-9")) return "没给出能直接跑的命令"
+  if (!p.includes("BLOCKED_NOT_CLAIMED")) return "没写出挡住它的原因"
+
+  // 关键：做完之后要再查一次，不许自己推断
+  if (!p.includes("再跑一次 `flow next")) return "没说明做完要再查一次"
+
+  // 反向：没有 current 时不许编一个出来
+  const bare = buildHandoff({ mainRoot: ".", ledger, policy: {}, ownerRole: "implementer" })
+  if (bare.prompt.includes("## 现在这一步")) return "没传 current 却凭空造了一节"
+
+  return true
+}])
 }

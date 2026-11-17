@@ -178,7 +178,7 @@ function factsHasRemote(mainRoot) {
   } catch { return false }
 }
 
-export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null }) {
+export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, ownerRole = null, profile = null, current = null }) {
   const specRel = ledger?.specFile ?? null
   const todoRel = ledger?.todoFile ?? null
   const specText = specRel && existsSync(join(mainRoot, specRel)) ? (readTextSafe(join(mainRoot, specRel)) ?? '') : ''
@@ -221,6 +221,35 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   lines.push('> 这一段由 `flow next --handoff` 机械生成，可以直接粘给子代理。')
   lines.push('> 抽不到的项写「没有登记」——不编。照着一句编出来的话干活，比什么都不给更危险。')
   lines.push('')
+
+  // 现在这一步：直接搬 flow next 算出来的结果，不在这里重新推。
+  //
+  // 之前只写「下一步从 flow next 查」，等于让人自己去问。可 flow next 刚刚
+  // 算过一遍——phase / nextAction / command 都在手上，丢掉它们没有任何道理。
+  // 这是**现算的派生值**，不是手抄的流程清单：状态机改了它自动跟上。
+  if (current?.phase) {
+    lines.push('## 现在这一步')
+    lines.push('')
+    lines.push(`阶段：\`${current.phase}\`${current.ownerRole ? `　由 \`${current.ownerRole}\` 负责` : ''}`)
+    if (current.nextAction) {
+      lines.push('')
+      lines.push(current.nextAction)
+    }
+    if (current.command) {
+      lines.push('')
+      lines.push('```')
+      lines.push(current.command)
+      lines.push('```')
+    }
+    if ((current.blockingReasons ?? []).length > 0) {
+      lines.push('')
+      lines.push(`挡住它的原因：\`${current.blockingReasons.join('、')}\``)
+    }
+    lines.push('')
+    lines.push(`**做完这一步，再跑一次 \`flow next --task ${ledger?.taskId ?? '<任务号>'}\` 拿下一步。**`)
+    lines.push('不要自己推断走到哪了——阶段是账本算出来的，不是猜出来的。')
+    lines.push('')
+  }
 
   lines.push('## 你在做什么')
   lines.push('')

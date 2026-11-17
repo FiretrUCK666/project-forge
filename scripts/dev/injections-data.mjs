@@ -996,6 +996,14 @@ export const INJECTIONS = [
     expect: '刚建好的任务下一步是实施',
   },
   {
+    id: 'I113',
+    what: '交接包不再给「现在这一步」（子代理不知道此刻要干什么）',
+    file: 'kit/skills/lib/handoff-package.mjs',
+    from: '  if (current?.phase) {',
+    to: '  if (false) {',
+    expect: '交接包第一眼就是现在这一步',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

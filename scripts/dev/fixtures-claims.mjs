@@ -1433,4 +1433,65 @@ cases.push(['冷启动全景把进度摆出来，且不猜', async () => {
   } finally { rmTree(dir) }
 }])
 
+// 文档模板只有一个真相源：改模板就该改产物，删章节要按项目声明来。
+//
+// 早先 `templates/docs-prd.md` 和生成器里的字符串数组是两份互不相干的内容：
+// 模板文件被 preflight 校验、被人当参考改，但真实生成的文档一个字都不用它。
+// 于是「我改了模板」和「产物变了」之间没有任何关系。
+cases.push(['模板文件就是产物来源，可选章节按项目声明增删', async () => {
+  const { renderDocTemplate, readDocTemplate, templateSections } = await import('../../kit/skills/lib/doc-template-render.mjs')
+  const { resolveDocRequirements } = await import('../../kit/skills/lib/doc-requirements.mjs')
+
+  // 正向：三份模板都能读出来，且都声明了主干节
+  for (const kind of ['prd', 'spec', 'todo']) {
+    const raw = readDocTemplate(kind)
+    if (!raw) return `读不到 ${kind} 模板`
+    const ids = templateSections(raw).map((s) => s.id)
+    for (const must of ['goal', 'acceptance']) {
+      if (!ids.includes(must)) return `${kind} 模板缺少主干章节 ${must}`
+    }
+  }
+
+  // 正向：渲染会真的把占位填掉，且不残留章节标记
+  const rendered = renderDocTemplate('prd', {
+    vars: {
+      TITLE: '标题甲', TODAY: '2026-01-01', ISSUE: 'null', ISSUE_LABEL: '未关联',
+      OWNER: '甲', OWNER_LABEL: '甲', NON_GOALS: '- 不做乙', REUSABLE: '- 复用丙',
+      CRITERIA: '- [ ] C1: 命令退出码为 0', DOOR: 'two-way', ROLLBACK: '反向提交',
+      QUICK_CMD: 'node --test',
+    },
+  })
+  if (!rendered.includes('标题甲') || !rendered.includes('不做乙')) return '占位没有被填进产物'
+  if (/\{\{[A-Z0-9_]+\}\}/.test(rendered)) return `产物里残留未填占位：${/\{\{[A-Z0-9_]+\}\}/.exec(rendered)[0]}`
+  if (/<!--\s*\/?section:/.test(rendered)) return '产物里残留章节标记'
+
+  // 反向：没给值时写「待补齐」，不许留空
+  const sparse = renderDocTemplate('prd', { vars: { TITLE: '标题乙', TODAY: '2026-01-01' } })
+  if (!sparse.includes('待补齐')) return '缺值时没有写「待补齐」，而是留了空'
+
+  // 正向：项目声明 omit 的章节会被裁掉
+  const dir = tmpProject({
+    'README.md': '# o\n\n模板裁剪测试仓。\n',
+    'docs/templates/prd.md': ['---', 'kind: prd', 'omit_sections: [reuse, flow, pending]', '---', '', '# 项目自己的 PRD 模板', '', '## 额外章节', '', '内容', ''].join('\n'),
+  })
+  try {
+    const req = resolveDocRequirements(dir, 'prd')
+    if (!req.omit.has('reuse')) return 'omit 声明没被读出来'
+    const pruned = renderDocTemplate('prd', { vars: { TITLE: '丙', TODAY: '2026-01-01' }, dropSections: req.omit })
+    if (pruned.includes('复用既有模块')) return '声明要删的章节还在'
+    if (!pruned.includes('要解决的问题')) return '主干章节被误删了'
+
+    // 反向：主干三节写进 omit 也不许删
+    const guarded = tmpProject({
+      'README.md': '# o\n\n主干保护测试仓。\n',
+      'docs/templates/prd.md': ['---', 'kind: prd', 'omit_sections: [goal, acceptance]', '---', '', '# 模板', ''].join('\n'),
+    })
+    try {
+      const req2 = resolveDocRequirements(guarded, 'prd')
+      if (req2.omit.has('goal') || req2.omit.has('acceptance')) return '主干章节被允许列进 omit——那等于允许不写要做什么'
+    } finally { rmTree(guarded) }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

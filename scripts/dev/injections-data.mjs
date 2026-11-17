@@ -820,6 +820,14 @@ export const INJECTIONS = [
     expect: '冷启动全景',
   },
   {
+    id: 'I91',
+    what: '项目声明要删的章节不再被裁掉（形态可调变成一句空话）',
+    file: 'kit/skills/lib/doc-template-render.mjs',
+    from: '    return drop.has(id) ? \'\' : whole',
+    to: '    return whole',
+    expect: '模板文件就是产物来源',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

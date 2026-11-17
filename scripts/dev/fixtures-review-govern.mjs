@@ -1,11 +1,10 @@
 /**
- * fixtures-m4.mjs —— M4 行为断言（无 .git/HEAD 依赖，兼容 verify-injections 复制沙盒并维持 < 30s）：
- *   M4-C1a: 救活 tests.zero-assertion & tests.mock-tautology、纯 ASSERTION_RE 大小写敏感(I70)
- *   M4-C1b: Python 三引号词法、deleted-ci-step(I72)、整块删空 test 保留 deleted-assertion
- *   M4-C2a: 全图表 Mermaid 16/12 (sequenceDiagram(I71)/stateDiagram-v2/erDiagram)
- *   M4-C2b: tdd-parity.mjs 模块/导出/CLI 漂移(I73)、排除 TEST_FILE_RE 与 no-tdd 豁免
- *   M4-C3: signals.jsonl 自动写回(I74)+retro --task --apply-patches、flow-batch CI 阻断与 writeZip/readZip 冒烟
+ * fixtures-review-govern.mjs —— 审查与治理（不依赖 .git/HEAD，可跑在 verify-injections 沙盒里）：
+ *   死检查（zero-assertion / mock-tautology）与断言正则的误伤边界
+ *   Mermaid 标签宽度（含 sequenceDiagram / stateDiagram-v2 / erDiagram）
+ *   TDD 漂移检测与 no-tdd 豁免 / signals.jsonl 回写与 retro / zip 完整性
  */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -17,8 +16,8 @@ import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, ru
 
 const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-export function registerM4Cases(cases) {
-  cases.push(['M4-C1a：救活 zero-assertion/mock-tautology 死检查与纯 ASSERTION_RE 大小写敏感(I70)', async () => {
+export function registerReviewGovernCases(cases) {
+  cases.push(['救活 zero-assertion/mock-tautology 死检查与纯 ASSERTION_RE 大小写敏感(I70)', async () => {
     const { ASSERTION_RE, GATE_ASSERTION_RE } = await import('../../kit/skills/lib/shared.mjs')
     if (ASSERTION_RE !== GATE_ASSERTION_RE) return 'GATE_ASSERTION_RE 未与 ASSERTION_RE 保持兼容导出'
 
@@ -50,8 +49,8 @@ export function registerM4Cases(cases) {
     }
 
     const dir = tmpProject({
-      'package.json': '{"name":"m4-c1a","version":"1.0.0","scripts":{"test":"node --test"}}\n',
-      'AGENTS.md': '# m4-c1a\n\n```yaml\nquick-test: node --test\nfull-test: node --test\n```\n',
+      'package.json': '{"name":"probe-govern","version":"1.0.0","scripts":{"test":"node --test"}}\n',
+      'AGENTS.md': '# probe-govern\n\n```yaml\nquick-test: node --test\nfull-test: node --test\n```\n',
       'test/empty-it.test.mjs': "import { it } from 'node:test'\nconst dep = require('./x')\nit('empty', () => { void dep })\n",
       'tests/test_doc_only.py': 'def test_only_docstring():\n    """assert True"""\n    x = 1\n',
       'test/mock-it.test.mjs': "import { it } from 'node:test'\nit('mock only', () => {\n  const f1 = vi.fn(); const f2 = vi.fn(); const f3 = vi.fn(); const f4 = vi.fn(); const f5 = vi.fn();\n  f1(); expect(f1).toHaveBeenCalledWith(1)\n})\n",
@@ -77,7 +76,7 @@ export function registerM4Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M4-C1b：Python 三引号词法、deleted-ci-step(I72) 与整块删空 test 保留 deleted-assertion', async () => {
+  cases.push(['Python 三引号词法、deleted-ci-step(I72) 与整块删空 test 保留 deleted-assertion', async () => {
     const { detectGateWeakeningInEntry, extractLineCommentInfo, stripCodeCommentsLines } = await import('../../kit/skills/lib/shared.mjs')
 
     // 1. Python triple quotes (single-line & multi-line + r""" + trailing # comment)
@@ -232,7 +231,7 @@ export function registerM4Cases(cases) {
     return true
   }])
 
-  cases.push(['M4-C2a：全图表 Mermaid 16/12 (sequenceDiagram(I71)/stateDiagram-v2/erDiagram) 零误伤', async () => {
+  cases.push(['全图表 Mermaid 16/12 (sequenceDiagram(I71)/stateDiagram-v2/erDiagram) 零误伤', async () => {
     const { checkMermaidLabelWidth } = await import('../../kit/skills/lib/shared.mjs')
 
     const validMd = [
@@ -302,7 +301,7 @@ export function registerM4Cases(cases) {
     return true
   }])
 
-  cases.push(['M4-C2b：tdd-parity.mjs 结构级模块/导出/CLI 漂移检测(I73)、排除 TEST_FILE_RE 与 no-tdd 豁免', async () => {
+  cases.push(['tdd-parity.mjs 结构级模块/导出/CLI 漂移检测(I73)、排除 TEST_FILE_RE 与 no-tdd 豁免', async () => {
     const { checkTddSyncParity } = await import('../../kit/skills/lib/shared.mjs')
 
     const dir = tmpProject({
@@ -375,7 +374,7 @@ export function registerM4Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M4-C3：signals.jsonl 自动写回(I74)+retro --apply-patches、flow-batch CI 门禁与 zip CRC32 冒烟', async () => {
+  cases.push(['signals.jsonl 自动写回(I74)+retro --apply-patches、flow-batch CI 门禁与 zip CRC32 冒烟', async () => {
     const { appendGovernSignal, readSignalsJsonl, resolveRepoRoots, writeTaskLedger } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleRework } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -395,7 +394,7 @@ export function registerM4Cases(cases) {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       '.github/workflows/ci.yml': 'name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 0\n',
-      'README.md': '# m4-c3\n',
+      'README.md': '# probe-signal\n',
       'src/app.mjs': 'export const app = 1\n',
     })
     gitInit(dir, { branch: 'main', origin: 'https://github.com/acme/m4c3.git', name: 'alice', email: 'alice@acme.test' })

@@ -1,17 +1,18 @@
 /**
- * fixtures-m2.mjs —— Milestone 2 行为断言（正反双向）：
- *   C1 三正交策略/evidence.json/flow next/ownerRole/submit 权责锁定
- *   C2 全 Worktree 隔离/冲突拦截/跨轮复用与 --reset-review-slot
- *   C3 submit 零脏文件/PR 模板与查重/1:N 总控 PRD 保护/generic-git/trial-merge/Squash 清理
- *   C4 六锁防无限审查硬拦截与跨文件反误判 + C5 统一模板链路
+ * fixtures-flow-state.mjs —— 流程状态与防死锁（正反双向）：
+ *   三正交策略 / evidence.json 防旁路 / flow next 与 submit 权责锁
+ *   全 Worktree 隔离 / 分支冲突拦截 / 跨轮槽复用与 --reset-review-slot
+ *   1:N 总控 PRD 保护 / 子 SPEC 归档互链 / OPEN PR 防重 / 试合回滚与 Squash 清理
+ *   六锁防无限审查硬拦截（Round 4 历史停损 / 同 HEAD / 增量视野 / cross-file C1 / Pass 门禁）
  */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
-export function registerM2Cases(cases) {
-  cases.push(['M2 C1：三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
+export function registerFlowStateCases(cases) {
+  cases.push(['三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
     const {
       determineWorkflowPolicy, evaluateNextState, readTaskLedger, resolveRepoRoots,
       runLowRiskDocStaticCheck,
@@ -64,7 +65,7 @@ export function registerM2Cases(cases) {
     return true
   }])
 
-  cases.push(['M2 C1c：quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
+  cases.push(['quick-only 仓库 --target 局部旁路拦截与全量放行', async () => {
     const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -92,7 +93,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(qOnlyDir) }
   }])
 
-  cases.push(['M2 C1b：quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
+  cases.push(['quick --target 旁路拦截、flow next ownerRole 与 submit 权责锁', async () => {
     const {
       evaluateNextState, readTaskLedger, resolveRepoRoots,
     } = await import('../../kit/skills/lib/shared.mjs')
@@ -103,7 +104,7 @@ export function registerM2Cases(cases) {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': [
-        '# m2-c1', '',
+        '# probe-state', '',
         '```yaml',
         'quick-test: node -e "process.exit(0)" -- {target}',
         'full-test: exit 0',
@@ -111,8 +112,8 @@ export function registerM2Cases(cases) {
         'high-risk: none',
         '```', '',
       ].join('\n'),
-      'package.json': '{"name":"m2-c1","version":"1.0.0","repository":"https://github.com/acme/c1.git"}\n',
-      'README.md': '# m2-c1\n',
+      'package.json': '{"name":"probe-state","version":"1.0.0","repository":"https://github.com/acme/c1.git"}\n',
+      'README.md': '# probe-state\n',
       'src/app.mjs': 'export const a = 1\n',
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com', origin: 'https://github.com/acme/c1.git' })
@@ -200,7 +201,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M2 C2：全 Worktree 隔离（commits>0 含 Case1）、分支冲突拦截、跨轮槽复用与 --reset-review-slot', async () => {
+  cases.push(['全 Worktree 隔离（commits>0 含 Case1）、分支冲突拦截、跨轮槽复用与 --reset-review-slot', async () => {
     // 1. 0 提交仓保持 Tier 1；有提交仓 Case 1 强制 Tier 2 .worktrees/impl-* 且 baseSha 来自默认分支
     const unborn = tmpProject({ 'README.md': '# u\n' })
     gitInit(unborn, { commit: false, branch: 'main' })
@@ -257,7 +258,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(unborn); rmTree(committed) }
   }])
 
-  cases.push(['M2 C3a：1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
+  cases.push(['1:N 总控 PRD 保护、子 SPEC 归档互链与 OPEN PR 防重', async () => {
     const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
 
@@ -331,7 +332,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(bare); rmTree(dir) }
   }])
 
-  cases.push(['M2 C3b：--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
+  cases.push(['--detach 试合失败回滚与推进、Squash 清理与 1:1 归档正反', async () => {
     const { isSharedMasterPrd, readTaskLedger, resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
     const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
     const { handleVerify } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -398,7 +399,7 @@ export function registerM2Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['M2 C4+C5：六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
+  cases.push(['六锁硬拦截（Round 4 历史停损/同 HEAD/增量视野/cross-file C1/Pass 门禁/--disposition）与统一模板', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       'AGENTS.md': '# c4\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n',

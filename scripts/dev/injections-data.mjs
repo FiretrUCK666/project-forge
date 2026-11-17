@@ -533,7 +533,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I55',
-    what: 'M2：放宽 workflow-policy.mjs 低风险文本白名单至包含 .json',
+    what: '放宽 workflow-policy.mjs 低风险文本白名单至包含 .json',
     file: 'kit/skills/lib/workflow-policy.mjs',
     from: 'export const LOW_RISK_TEXT_EXT_RE = /\\.(?:md|mdx|txt|rst)$/i',
     to: 'export const LOW_RISK_TEXT_EXT_RE = /\\.(?:md|mdx|txt|rst|json)$/i',
@@ -541,7 +541,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I56',
-    what: 'M2：拆掉 validateVerificationEvidence 对 quick --target 局部实证的拦截',
+    what: '拆掉 validateVerificationEvidence 对 quick --target 局部实证的拦截',
     file: 'kit/skills/lib/workflow-policy.mjs',
     from: '    if (g.dirty === true || g.exitCode !== 0 || g.partial === true) continue',
     to: '    if (g.dirty === true || g.exitCode !== 0) continue',
@@ -549,7 +549,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I57',
-    what: 'M2：关闭无 CI 低风险纯文档变更的 staticDocCheckRequired 强制静态必检',
+    what: '关闭无 CI 低风险纯文档变更的 staticDocCheckRequired 强制静态必检',
     file: 'kit/skills/lib/workflow-policy.mjs',
     from: "    staticDocCheckRequired: riskTier === 'low' && !hasCiWorkflow,",
     to: '    staticDocCheckRequired: false,',
@@ -557,7 +557,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I58',
-    what: 'M2：架空 docs.mjs isSharedMasterPrd 1:N 总控 PRD 保护',
+    what: '架空 docs.mjs isSharedMasterPrd 1:N 总控 PRD 保护',
     file: 'kit/skills/lib/docs.mjs',
     from: 'export function isSharedMasterPrd(repoRoot, prdRel, activeSpecRel = null) {',
     to: 'export function isSharedMasterPrd(repoRoot, prdRel, activeSpecRel = null) {\n  return false',
@@ -565,7 +565,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I59',
-    what: 'M2：关闭 flow-merge.mjs generic-git 未经远端 MR 确认的本地强合阻断',
+    what: '关闭 flow-merge.mjs generic-git 未经远端 MR 确认的本地强合阻断',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
     from: "  if (ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {",
     to: "  if (false && ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {",
@@ -578,7 +578,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I60',
-    what: 'M2：关闭 review-locks.mjs Round 2+ 同 HEAD 原地复审硬拦截',
+    what: '关闭 review-locks.mjs Round 2+ 同 HEAD 原地复审硬拦截',
     file: 'kit/skills/dev-review/scripts/review-locks.mjs',
     from: "  if (round >= 2 && prevRound?.headSha && prevRound.headSha !== 'UNBORN' && headSha && headSha !== 'UNBORN' && prevRound.headSha === headSha) {",
     to: "  if (false && round >= 2 && prevRound?.headSha && prevRound.headSha !== 'UNBORN' && headSha && headSha !== 'UNBORN' && prevRound.headSha === headSha) {",
@@ -586,7 +586,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I61',
-    what: 'M2：关闭 review-locks.mjs Round 2+ 增量视野硬锁',
+    what: '关闭 review-locks.mjs Round 2+ 增量视野硬锁',
     file: 'kit/skills/dev-review/scripts/review-locks.mjs',
     from: "  if (round < 2 || verdict !== 'changes' || !Array.isArray(mustFixList) || mustFixList.length === 0) {",
     to: "  if (true || round < 2 || verdict !== 'changes' || !Array.isArray(mustFixList) || mustFixList.length === 0) {",
@@ -594,7 +594,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I62',
-    what: 'M2：关闭 review-locks.mjs Round 4 pass 绕过历史停损保护',
+    what: '关闭 review-locks.mjs Round 4 pass 绕过历史停损保护',
     file: 'kit/skills/dev-review/scripts/review-locks.mjs',
     from: '  if (!hasStopLoss || ledger?.humanApprovedStopLoss) return { blocked: false }',
     to: '  if (true || !hasStopLoss || ledger?.humanApprovedStopLoss) return { blocked: false }',
@@ -602,7 +602,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I63',
-    what: 'M2：关闭 flow-lifecycle.mjs handleSubmit 实施者权责校验',
+    what: '关闭 flow-lifecycle.mjs handleSubmit 实施者权责校验',
     file: 'kit/skills/dev-flow/scripts/flow-lifecycle.mjs',
     from: '    const nonImplRole = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i.test(lowExplicit)',
     to: '    const nonImplRole = false',
@@ -610,7 +610,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I64',
-    what: 'M3：关闭 doc-plan.mjs critique-pass 禁止自审拦截',
+    what: '关闭 doc-plan.mjs critique-pass 禁止自审拦截',
     file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
     from: '  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
     to: '  if (false && fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
@@ -618,7 +618,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I65',
-    what: 'M3：弱化 agents-sections.mjs maskVolatile 词边界校验导致误替换标识符子串',
+    what: '弱化 agents-sections.mjs maskVolatile 词边界校验导致误替换标识符子串',
     file: 'scripts/lib/agents-sections.mjs',
     from: "    const re = new RegExp(`(?<![A-Za-z0-9_./-])${escapeRegExp(value)}(?![A-Za-z0-9_./-])`, 'g')",
     to: "    const re = new RegExp(escapeRegExp(value), 'g')",
@@ -626,7 +626,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I66',
-    what: 'M3：关闭 task-graph.mjs 未关闭外部依赖阻塞拦截',
+    what: '关闭 task-graph.mjs 未关闭外部依赖阻塞拦截',
     file: 'kit/skills/lib/task-graph.mjs',
     from: '  if (Array.isArray(graph.unresolvedBlockers) && graph.unresolvedBlockers.length > 0) {',
     to: '  if (false && Array.isArray(graph.unresolvedBlockers) && graph.unresolvedBlockers.length > 0) {',
@@ -634,7 +634,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I67',
-    what: 'M3：关闭 task-graph.mjs 堆叠 PR 父分支未合阻断',
+    what: '关闭 task-graph.mjs 堆叠 PR 父分支未合阻断',
     file: 'kit/skills/lib/task-graph.mjs',
     from: '  if (!ledger?.parentTaskId && !ledger?.parentBranch) return { blocked: false }',
     to: '  return { blocked: false } //',
@@ -642,7 +642,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I68',
-    what: 'M3：关闭 flow-batch.mjs check-disjoint 重叠文件阻塞',
+    what: '关闭 flow-batch.mjs check-disjoint 重叠文件阻塞',
     file: 'kit/skills/dev-flow/scripts/flow-batch.mjs',
     from: '  if (overlaps.length > 0) {',
     to: '  if (false && overlaps.length > 0) {',
@@ -650,7 +650,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I69',
-    what: 'M3：破坏 equip.mjs --tier lightweight 降档保留高阶技能机制',
+    what: '破坏 equip.mjs --tier lightweight 降档保留高阶技能机制',
     file: 'scripts/equip.mjs',
     from: "    const diskHash = normalizedSha256(readFileSync(dest))\n    if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {",
     to: "    const diskHash = normalizedSha256(readFileSync(dest))\n    if (false && effectiveTier === 'lightweight' && allKitFiles.has(rel)) {",
@@ -658,7 +658,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I70',
-    what: 'M4：在 static-gates.mjs ASSERTION_RE 重新混入 test( 与小写 require( 使死检查回退失效',
+    what: '在 static-gates.mjs ASSERTION_RE 重新混入 test( 与小写 require( 使死检查回退失效',
     file: 'kit/skills/lib/static-gates.mjs',
     from: 'export const ASSERTION_RE = /\\b(?:[Aa]ssert(?:\\.\\w+)?|[Ee]xpect|[Ss]hould|pytest\\.raises|t\\.(?:Error|Errorf|Fatal|Fatalf|Fail)|assert_(?:eq|ne|matches)?|[Aa]ssert(?:Equals|NotEquals|True|False|Throws|Null|NotNull|That)|strictEqual|deepStrictEqual|equal|notEqual|throws|rejects|match|XCTAssert\\w*|EXPECT_[A-Z0-9_]+|ASSERT_[A-Z0-9_]+|REQUIRE|CHECK)\\b\\s*(?:\\(|!|\\.)|\\b[Aa]ssert\\s+/',
     to: 'export const ASSERTION_RE = /\\b(?:assert|expect|test|require)\\b/i',
@@ -666,7 +666,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I71',
-    what: 'M4：跳过 doc-templates.mjs checkMermaidLabelWidth 对 sequenceDiagram 的检查',
+    what: '跳过 doc-templates.mjs checkMermaidLabelWidth 对 sequenceDiagram 的检查',
     file: 'kit/skills/lib/doc-templates.mjs',
     from: "    if (diagramType === 'sequence') {",
     to: "    if (false && diagramType === 'sequence') {",
@@ -674,7 +674,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I72',
-    what: 'M4：关闭 static-gates.mjs detectGateWeakeningInEntry 的 deleted-ci-step 拦截',
+    what: '关闭 static-gates.mjs detectGateWeakeningInEntry 的 deleted-ci-step 拦截',
     file: 'kit/skills/lib/static-gates.mjs',
     from: '  if (isWorkflow && removed.length > 0) {',
     to: '  if (false && isWorkflow && removed.length > 0) {',
@@ -682,7 +682,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I73',
-    what: 'M4：架空 tdd-parity.mjs checkTddSyncParity 的模块与导出漂移检测',
+    what: '架空 tdd-parity.mjs checkTddSyncParity 的模块与导出漂移检测',
     file: 'kit/skills/lib/tdd-parity.mjs',
     from: '  if (!tddRel) {\n    return {',
     to: '  if (true || !tddRel) {\n    return {',
@@ -690,7 +690,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I74',
-    what: 'M4：跳过 signals.mjs appendGovernSignal 自动写入运行期信号',
+    what: '跳过 signals.mjs appendGovernSignal 自动写入运行期信号',
     file: 'kit/skills/lib/signals.mjs',
     from: '  try {\n    await withFileLock(lockPath, () => {',
     to: '  return { ok: true, stateDir, signalsPath: posixPath(signalsPath), event }\n  try {\n    await withFileLock(lockPath, () => {',
@@ -698,7 +698,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I75',
-    what: 'M4：移除 .github/workflows/release.yml 上传后的 .zip 附件回读下载与校验',
+    what: '移除 .github/workflows/release.yml 上传后的 .zip 附件回读下载与校验',
     file: '.github/workflows/release.yml',
     from: '          gh release download "$TAG" -p "$ASSET" --repo "$REPO" -O "$TMP_ZIP"',
     to: '          # removed release readback',
@@ -707,7 +707,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I76',
-    what: 'M5：移除 SKILL.md 的 8 阶段标准闭环核心环节（验证 checkWorkflowLifecycleContracts 红灯拦截）',
+    what: '移除 SKILL.md 的 8 阶段标准闭环核心环节（验证 checkWorkflowLifecycleContracts 红灯拦截）',
     file: 'SKILL.md',
     from: '需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入',
     to: '需求 → 实现 → 合入',

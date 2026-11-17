@@ -1,6 +1,10 @@
 /**
- * fixtures-m3.mjs —— M3 行为断言：外部图谱与堆叠 PR、并行调度与 FIFO 队列、TaskBackend 与 no-remote、三层嗅探与内审加固。
+ * fixtures-flow-parallel.mjs —— 并行调度与外部协作：
+ *   外部图谱未关闭依赖拦截 / 堆叠分支父未合阻断 / Issue+PR 互链防重
+ *   文件锁并发互斥 / 并行 scheduler 的 plan、disjoint、merge-queue
+ *   统一 TaskBackend / 无远端仓零泄漏 / 三层 profile 嗅探
  */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -8,8 +12,8 @@ import { join } from 'node:path'
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
-export function registerM3Cases(cases) {
-cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
+export function registerFlowParallelCases(cases) {
+cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
   const { resolveExternalCollaborationGraph, checkUnresolvedDependencies } = await import('../../kit/skills/lib/task-graph.mjs')
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -79,7 +83,7 @@ cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲突保护与 range-diff Round 2 增量视野', async () => {
+cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲突保护与 range-diff Round 2 增量视野', async () => {
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
   const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -172,7 +176,7 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C2a：L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 computeWorktreeEnv 隔离', async () => {
+cases.push(['L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 computeWorktreeEnv 隔离', async () => {
   const { computeWorktreeEnv, gitRun, withFileLock } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({})
   try {
@@ -207,7 +211,7 @@ cases.push(['M3-C2a：L1 withFileLock 并发互斥、gitRun .git/*.lock 退避�
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调度闭环', async () => {
+cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调度闭环', async () => {
   const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({
     '.gitignore': '.worktrees/\n',
@@ -296,7 +300,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C3：13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push 泄漏、govern-tests 本地仓豁免', async () => {
+cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push 泄漏、govern-tests 本地仓豁免', async () => {
   const { createTaskBackend, TASK_BACKEND_METHODS } = await import('../../kit/skills/lib/task-backend.mjs')
   const { renderAgentsTemplate } = await import('../compose-agents.mjs')
   const tpl = readFileSync(join(process.cwd(), 'templates', 'agents-project.md'), 'utf8').replace(/\r\n/g, '\n')
@@ -351,7 +355,7 @@ cases.push(['M3-C3：13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origi
   } finally { rmTree(localDir) }
 }])
 
-cases.push(['M3-C4：profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深层Java子包+Windows安全+detectionEvidence)', async () => {
+cases.push(['profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深层Java子包+Windows安全+detectionEvidence)', async () => {
   const { sniffLayeredCommands } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({
     'package.json': '{"name":"mono-root","version":"1.0.0","scripts":{"lint":"eslint ."}}\n',
@@ -391,7 +395,7 @@ cases.push(['M3-C4：profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非ve
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C5：CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 降档(I69)与 doc-plan 防自审(I64)/自定模板', async () => {
+cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 降档(I69)与 doc-plan 防自审(I64)/自定模板', async () => {
   const { maskVolatile } = await import('../lib/agents-sections.mjs')
   if (maskVolatile('node main.mjs domain maintainer git switch main', ['main']) !== 'node main.mjs domain maintainer git switch \u0000VOLATILE\u0000') {
     return 'maskVolatile 词边界失效：破坏了 main.mjs/domain/maintainer 标识符'

@@ -33,8 +33,8 @@
 | --- | --- | --- |
 | **Case 1** | 纯问答 / 错别字 / 单行格式 | **0 文档**，直接改，跑相关校验 |
 | **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，先写稳定复现失败回归测试再修复（Red-Green）；触及高风险/单向门仍须独立审查 |
-| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `templates/docs-todo.md` 建单（含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
-| **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit`（含 Mermaid `16/12` 宽度检查）+ 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 `status: approved`，Todo 设 `approved: true`） |
+| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `kit/skills/templates/docs-todo.md` 建单（主干为影响路径、`C1..Cn` 与完成记录，其余按需；含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
+| **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `kit/skills/templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit`（含 Mermaid `16/12` 宽度检查）+ 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 `status: approved`，Todo 设 `approved: true`） |
 | **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，先退回更新 `docs/TDD.md`**，同级内审获批后重启 |
 
 **验证优先级、三正交策略与拒绝人肉代理**：坚持形式验证（类型、Schema、`arch-rules`、Mermaid 宽度、静态门禁）与实证验证（真实启动、CLI/接口实测、UI 渲染交互与浅深色截图）**优先于静态读代码挑刺**。用 `flow.mjs next [--probe-auth]` 统一读取唯一合法下一步与三正交风险分档（`low` 纯文档白名单 + 无 CI 时强制独立静态门禁 / `medium` / `high`）；`verify` 写 `<gitCommonDir>/project-forge-flow/tasks/<taskId>/evidence.json` 拦截 `quick --target` 顶替全量门禁，全量 `merge-gate` 仅提交与合前运行 1 次。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；三问留痕写入首次回复、Issue 评论或 `templates/pull-request-template.md`「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`（支持 `status`/`abort`/`next`）。

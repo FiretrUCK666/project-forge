@@ -27,16 +27,16 @@
  * 而交付体检不该跑用户项目的构建。那一层由项目自己的门禁负责。
  */
 
-/** 当成路径看的后缀。**刻意不含 `.md`**：文档之间互相引用的 `.md` 由 `preflight` 的引用
- *  核对负责，两套判据都管同一件事时会给出两个答案。 */
-const PATH_EXT = /\.(?:mjs|cjs|js|ts|py|sh|ps1|rs|go|java|json|ya?ml|toml|lock|txt|cfg|ini)$/i
+const PATH_EXT = /\.(?:mjs|cjs|js|ts|py|sh|ps1|rs|go|java|json|ya?ml|toml|lock|txt|cfg|ini|mdx?)$/i
 
-/** 一眼就知道不是本仓库路径的东西。 */
 const NOT_A_PATH = [
   /^https?:/i,
   /^mailto:/i,
   /^[A-Za-z]:[\\/]/,          // Windows 绝对路径
   /^\//,                       // 绝对路径
+  /^~(?:\/|[A-Za-z])/,        // 家目录根：`~/x.y`、`~user/x.y`
+  /^\$[A-Za-z_{]/,             // 环境变量根：`$HOME/x.y`、`${HOME}/x.y`
+  /^%[A-Za-z_]+%[\\/]/,        // Windows 环境变量根：`%APPDATA%\x.ps1`
   /^<.*>$/,                    // 占位符
   /[<>*?]/,                    // 占位符或通配
   /\/$/,                       // 目录尾斜杠：目录可能是有意不建的，不在这里判
@@ -64,13 +64,29 @@ const FENCE_BLOCK = /```[a-zA-Z]*\n([\s\S]*?)```/g
  */
 const BRANCH_CMD = /\bgit\s+(?:switch|checkout)\s+([A-Za-z0-9][A-Za-z0-9._/-]*)/g
 
+function stripRelativePrefix(raw) {
+  let out = raw
+  while (out.startsWith('./') || out.startsWith('.\\')) out = out.slice(2)
+  return out
+}
+
 /** 一个 token 看起来是不是本仓库里的相对路径。 */
 function looksLikeRepoPath(token) {
-  const raw = String(token ?? '').trim().replace(/^['"]|['"]$/g, '')
+  const quoted = String(token ?? '').trim().replace(/^['"]|['"]$/g, '')
+  if (quoted.length === 0) return false
+  // 先判排除，再剥前缀：`~/x.y` 剥成 `x.y` 之后就分不出它原本挂在家目录下了。
+  if (NOT_A_PATH.some((re) => re.test(quoted))) return false
+  const raw = stripRelativePrefix(quoted)
   if (raw.length === 0) return false
+  if (raw.includes('..')) return false
   if (NOT_A_PATH.some((re) => re.test(raw))) return false
   if (!raw.includes('/')) return false
   return PATH_EXT.test(raw)
+}
+
+/** 抽出路径的正常形（剥掉相对前缀与包裹引号），供上层核对与去重。 */
+function normalizeClaimPath(token) {
+  return stripRelativePrefix(String(token ?? '').trim().replace(/^['"]|['"]$/g, ''))
 }
 
 /** 可选设施目录（由协作/CI 工具按需启用，不把其缺席误报为目录失踪）。 */
@@ -200,7 +216,7 @@ export function claimsOf(text) {
   for (const m of source.matchAll(INLINE_CODE)) {
     const token = m[1].trim()
     for (const word of token.split(/\s+/)) {
-      if (looksLikeRepoPath(word)) paths.add(word.replace(/^['"]|['"]$/g, ''))
+      if (looksLikeRepoPath(word)) paths.add(normalizeClaimPath(word))
     }
     for (const b of token.matchAll(BRANCH_CMD)) branches.add(b[1])
   }
@@ -212,7 +228,7 @@ export function claimsOf(text) {
       if (code.length === 0 || code.startsWith('#')) continue
       for (const b of code.matchAll(BRANCH_CMD)) branches.add(b[1])
       for (const word of code.split(/\s+/)) {
-        if (looksLikeRepoPath(word)) paths.add(word.replace(/^['"]|['"]$/g, ''))
+        if (looksLikeRepoPath(word)) paths.add(normalizeClaimPath(word))
       }
     }
   }

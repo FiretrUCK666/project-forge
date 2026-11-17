@@ -130,8 +130,9 @@ export function extractYamlRunBlocks(relFile, text) {
       }
       if (!isYamlStepObject) {
         const cleanLines = blockLines.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-        const cmd = cleanLines.length > 1 ? cleanLines.join(' && ') : (cleanLines[0] ?? '')
-        if (cmd) steps.push({ file: relFile, line: startLine, cmd })
+        for (const [offset, clean] of cleanLines.entries()) {
+          steps.push({ file: relFile, line: startLine + offset + 1, cmd: clean })
+        }
       }
     } else {
       const clean = stripWrapQuotes(tail.replace(/\s+#.*$/, '').trim())

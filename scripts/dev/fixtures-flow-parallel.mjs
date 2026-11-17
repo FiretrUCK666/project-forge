@@ -1,14 +1,19 @@
 /**
- * fixtures-m3.mjs —— M3 行为断言：外部图谱与堆叠 PR、并行调度与 FIFO 队列、TaskBackend 与 no-remote、三层嗅探与内审加固。
+ * fixtures-flow-parallel.mjs —— 并行调度与外部协作：
+ *   外部图谱未关闭依赖拦截 / 堆叠分支父未合阻断 / Issue+PR 互链防重
+ *   文件锁并发互斥 / 并行 scheduler 的 plan、disjoint、merge-queue
+ *   统一 TaskBackend / 无远端仓零泄漏 / 三层 profile 嗅探
  */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
+import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
-export function registerM3Cases(cases) {
-cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
+export function registerFlowParallelCases(cases) {
+cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
   const { resolveExternalCollaborationGraph, checkUnresolvedDependencies } = await import('../../kit/skills/lib/task-graph.mjs')
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleVerify, handleSubmit } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
@@ -78,7 +83,7 @@ cases.push(['M3-C1a：外部图谱单 Issue 未关闭依赖拦截(I66)、外部 
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲突保护与 range-diff Round 2 增量视野', async () => {
+cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲突保护与 range-diff Round 2 增量视野', async () => {
   const { handleStart } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
   const { handleSync } = await import('../../kit/skills/dev-flow/scripts/flow-sync.mjs')
   const { handleMerge } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
@@ -116,7 +121,7 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
     }
 
     // Round 1 review-pack changes，然后父分支合并 + main 前进 -> flow sync rebase -> Round 2 range-diff
-    const r1 = await handleRecord({ task: 'child-t', round: '1', verdict: 'changes', 'reviewer-id': 'rev-a', 'must-fix': ['C1: child-file.mjs:1 fix'] }, roots)
+    const r1 = await handleRecord({ task: 'child-t', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 1), 'must-fix': ['C1: child-file.mjs:1 fix'] }, roots)
     if (r1 !== 0) return `Round 1 record 失败：${r1}`
 
     writeFileSync(join(cRoot, 'child-file.mjs'), 'export const c = 2\n')
@@ -153,7 +158,7 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
     }
 
     // 变基后 Round 2 增量锁：挑刺未改动旧文件 other.mjs 必须拦截，挑刺 child-file.mjs 放行
-    const oos = await handleRecord({ task: 'child-t', round: '2', verdict: 'changes', 'reviewer-id': 'rev-a', 'must-fix': ['C1: other.mjs:1 unrelated'] }, roots)
+    const oos = await handleRecord({ task: 'child-t', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 2), 'must-fix': ['C1: other.mjs:1 unrelated'] }, roots)
     if (oos !== 2) {
       return `sync 后增量视野硬锁未拦截越界文件：exit=${oos}`
     }
@@ -171,7 +176,7 @@ cases.push(['M3-C1b：--after 堆叠分支、父未合阻断(I67)、flow sync �
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C2a：L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 computeWorktreeEnv 隔离', async () => {
+cases.push(['L1 withFileLock 并发互斥、gitRun .git/*.lock 退避与 computeWorktreeEnv 隔离', async () => {
   const { computeWorktreeEnv, gitRun, withFileLock } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({})
   try {
@@ -206,7 +211,7 @@ cases.push(['M3-C2a：L1 withFileLock 并发互斥、gitRun .git/*.lock 退避�
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调度闭环', async () => {
+cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调度闭环', async () => {
   const { resolveRepoRoots } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({
     '.gitignore': '.worktrees/\n',
@@ -258,7 +263,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
     gitCommitFast(wa, 'feat: a', { updateOnly: true })
     const va = await handleVerify({ task: 'ta', tier: 'gate' }, roots)
     if (va.exitCode !== 0) return `ta verify --tier gate 失败：${va.exitCode}`
-    const ra = await handleRecord({ task: 'ta', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+    const ra = await handleRecord({ task: 'ta', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'ta', 1) }, roots)
     if (ra !== 0) return `ta review record 失败：${ra}`
 
     const wb = join(dir, '.worktrees', 'impl-tb')
@@ -266,7 +271,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
     gitCommitFast(wb, 'feat: b', { updateOnly: true })
     const vb = await handleVerify({ task: 'tb', tier: 'gate' }, roots)
     if (vb.exitCode !== 0) return `tb verify --tier gate 失败：${vb.exitCode}`
-    const rb = await handleRecord({ task: 'tb', round: '1', verdict: 'pass', 'reviewer-id': 'rev-a' }, roots)
+    const rb = await handleRecord({ task: 'tb', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'tb', 1) }, roots)
     if (rb !== 0) return `tb review record 失败：${rb}`
 
     // main 上改写 src/b.mjs 制造基线漂移冲突
@@ -295,7 +300,7 @@ cases.push(['M3-C2b：flow batch plan/disjoint(I68)/merge-queue/resume-session �
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C3：13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push 泄漏、govern-tests 本地仓豁免', async () => {
+cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push 泄漏、govern-tests 本地仓豁免', async () => {
   const { createTaskBackend, TASK_BACKEND_METHODS } = await import('../../kit/skills/lib/task-backend.mjs')
   const { renderAgentsTemplate } = await import('../compose-agents.mjs')
   const tpl = readFileSync(join(process.cwd(), 'templates', 'agents-project.md'), 'utf8').replace(/\r\n/g, '\n')
@@ -350,7 +355,7 @@ cases.push(['M3-C3：13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origi
   } finally { rmTree(localDir) }
 }])
 
-cases.push(['M3-C4：profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深层Java子包+Windows安全+detectionEvidence)', async () => {
+cases.push(['profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深层Java子包+Windows安全+detectionEvidence)', async () => {
   const { sniffLayeredCommands } = await import('../../kit/skills/lib/shared.mjs')
   const dir = tmpProject({
     'package.json': '{"name":"mono-root","version":"1.0.0","scripts":{"lint":"eslint ."}}\n',
@@ -390,7 +395,7 @@ cases.push(['M3-C4：profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非ve
   } finally { rmTree(dir) }
 }])
 
-cases.push(['M3-C5：CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 降档(I69)与 doc-plan 防自审(I64)/自定模板', async () => {
+cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 降档(I69)与 doc-plan 防自审(I64)/自定模板', async () => {
   const { maskVolatile } = await import('../lib/agents-sections.mjs')
   if (maskVolatile('node main.mjs domain maintainer git switch main', ['main']) !== 'node main.mjs domain maintainer git switch \u0000VOLATILE\u0000') {
     return 'maskVolatile 词边界失效：破坏了 main.mjs/domain/maintainer 标识符'
@@ -466,16 +471,14 @@ cases.push(['M3-C5：CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/overs
 
     const initPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'prd', '--slug', 'p1', '--title', 'PRD 1', '--owner', 'alice', '--json'], { cwd: dir })
     const prdFile = JSON.parse(initPrd.stdout).file
-    const prdClean = readFileSync(join(dir, prdFile), 'utf8')
-      .replace('<明确交付能力>', '交付可执行配置')
-      .replace('<明确排除的扩展设想，防止需求蔓延>', '不做跨仓调度')
-      .replace('<待核实填写：拟复用的现成模块文件路径与导出能力>', '复用已有 README.md')
-      .replace('<用户入口 / 触发动作 -> 响应与终态>', '用户输入命令 -> 退出码 0')
-      .replace('<第一条可判定的产品结果>', '可断言收益')
-      .replace('<第二条>', '第二条收益')
-      .replace('<two-way | one-way>', 'two-way')
-      .replace('<说明如何安全撤回，不可逆改动须写明降级方案>', 'git revert 即可回退')
-    writeFileSync(join(dir, prdFile), prdClean)
+    hydrateGeneratedDoc(join(dir, prdFile), {
+      criteria: ['命令退出码为 0', '输出里含预期字段'],
+      filled: '当前缺一份可执行的治理配置',
+      extra: [
+        ['<two-way | one-way>', 'two-way'],
+        ['不做跨仓调度', '不做跨仓调度'],
+      ],
+    })
     const prdAud = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', prdFile], { cwd: dir })
     if (prdAud.status !== 0 || !/critique-pass/.test(prdAud.stdout)) {
       return `PRD audit 未输出独立 Critique 指引：${prdAud.stdout}\n${prdAud.stderr}`

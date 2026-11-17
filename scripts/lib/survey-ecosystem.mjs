@@ -10,6 +10,7 @@ import {
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
+import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
 
@@ -554,10 +555,7 @@ const COMMAND_KINDS = [
 ]
 
 function classifyCommand(cmd) {
-  for (const kind of COMMAND_KINDS) {
-    if (kind.re.test(cmd)) return kind.key
-  }
-  return undefined
+  return classifyCommandText(cmd, COMMAND_KINDS)
 }
 
 export function detectCiCommands(root) {

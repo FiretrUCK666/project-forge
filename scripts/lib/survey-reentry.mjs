@@ -8,6 +8,8 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import * as protocol from './protocol.mjs'
+// 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
+const { hasRealContent } = protocol
 import {
   isMacMetadataName,
   posixPath,
@@ -388,7 +390,8 @@ export function isReentryProject(docs, kit) {
     kit?.manifestExists
     || (docs?.agentsMarkers?.marks ?? 0) > 0
     || docs?.tdd
-    || (docs?.specsDir && docs?.todoDir),
+    || hasRealContent(docs?.specsDirContent)
+    || hasRealContent(docs?.todoDirContent),
   )
 }
 

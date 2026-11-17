@@ -205,6 +205,16 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     ? Math.min(requestedJobs, 2)
     : requestedJobs
 
+  // 数组里出现空洞时（比如某处多打了一个逗号 `},,`），后面的 `inj.id` 会崩在
+  // `Cannot read properties of undefined`——那条报错指向不了真正的问题。
+  // 空洞就是登记表坏了，直接在这里说清楚。
+  const holes = []
+  for (let i = 0; i < INJECTIONS.length; i += 1) if (!(i in INJECTIONS)) holes.push(i)
+  if (holes.length > 0) {
+    process.stderr.write(`注入表有 ${holes.length} 处空洞（位置 ${holes.join(', ')}）——多半是某处多了一个逗号。\n`)
+    await flushAndExit(1)
+  }
+
   const selected = argvOnly ? INJECTIONS.filter((i) => i.id === argvOnly) : INJECTIONS
   if (argvOnly && selected.length === 0) {
     process.stderr.write(`没有注入匹配 --only ${argvOnly}：编号写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)

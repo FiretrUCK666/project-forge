@@ -15,6 +15,51 @@ import { scanLines } from './markdown.mjs'
 
 export { COMMON_SKIP_DIRS }
 
+/**
+ * 三态结论与「工具产物归属」两套契约的唯一真相源住在 `kit/skills/lib/`：
+ * 它们是**被更多脚本共用**的那一份（勘察、体检、流转、审查四个方向都要读），
+ * 而 `scripts/lib/` 只承载首次配置与升级专用逻辑。这里重导出，让安装期脚本
+ * 与运行时脚本读同一份实现——两份实现会给出两个答案，而错的那个通常静默。
+ */
+export {
+  failedVerdict,
+  isOk,
+  mergeVerdicts,
+  needsAttention,
+  okVerdict,
+  unavailableVerdict,
+  VERDICT_STATES,
+  verdictFromError,
+  verdictLabel,
+} from '../../kit/skills/lib/verdict.mjs'
+
+export {
+  hasRealContent,
+  isToolOwnedPath,
+  isToolSkeletonFile,
+  normalizeRelPath,
+  projectOwnedPaths,
+  TOOL_OWNED_PREFIXES,
+  TOOL_SKELETON_FILES,
+} from '../../kit/skills/lib/tool-owned.mjs'
+
+/**
+ * 数一个文本有多少行。
+ *
+ * 行数是「真实通读成本」的一个维度，而文件数不是——实测 30000 行 / 10 文件的仓与
+ * 500 行 / 10 文件的仓，文件数一模一样，通读成本差 60 倍。
+ *
+ * 结尾的空行不算：它是换行符的产物，不是内容。CRLF 与 LF 在这里等价——
+ * 同一份源码在两台机器上不该算出两个数字。
+ */
+export function countTextLines(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n')
+  if (normalized === '') return 0
+  const lines = normalized.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines.length
+}
+
 /** 标记里的命名空间。所有标记都以它开头。**写入与读取都从这里取**，不各写一遍字面量。 */
 export const NS = 'project-forge'
 
@@ -438,23 +483,6 @@ export const REPO_ONLY_FILES = Object.freeze([
   '.gitignore',
 ])
 
-/**
- * 这个相对路径属不属于「只服务本仓库」。
- *
- * ## 判据必须与 git 自己的语义一致
- *
- * `.gitattributes` 里写的是 `/docs/` 这样的**目录规则**：git 只排除那个目录**里面**的东西，
- * 不排除一个恰好叫 `docs` 的普通文件。这一点实测过：仓库里放一个名为 `docs` 的文本文件，
- * 它照样进用户包。
- *
- * 所以这里**只做前缀匹配**，不接受裸名。早先那种「`p === 'docs'` 也算命中」的写法会与 git
- * 分叉，而分叉的那一侧不是多报一条，是 `update.mjs` 会**删掉用户一个叫 docs 的文件**——
- * 依据是一条它根本不满足的规则。
- *
- * 大小写按字面比：git 在 Windows 上默认不区分，所以 `DOCS/x.md` 这个写法在这里判不出来。
- * 那个方向的错是**漏判**，由 `preflight` 的产品层白名单兜住——它会报「这个条目没有归属」
- * 让人来看，不会静默放行。
- */
 export function isRepoOnlyPath(rel) {
   const p = String(rel ?? '').replace(/\\/g, '/')
   if (REPO_ONLY_FILES.includes(p)) return true

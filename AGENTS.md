@@ -91,7 +91,7 @@ do-not-edit: docs/archive/, docs/release-notes/
 - **产物与分发通道对齐**：宿主直读仓库/制品库编译产物时源码改动须同提交重建；从发布页附件下载时编译产物绝不入库。**严禁用本地挂载（符号链接）代替隔离安装验收**。
 <!-- project-forge: end 架构与关键不变量 -->
 
-<!-- project-forge: begin 构建与验证 -->
+<!-- project-forge: begin 构建与验证 customized -->
 ## 环境与构建验证（改完必跑，全绿才算完成）
 
 - **运行环境**：Node 18+，无构建步骤与外部依赖。

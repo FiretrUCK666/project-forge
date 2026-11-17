@@ -9,7 +9,11 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
+import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
+import { numberingErrors } from '../../lib/doc-renumber.mjs'
+import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
@@ -50,6 +54,50 @@ function computeCoupledSyncWarnings(repoRoot, paths) {
   return rules.length > 0 ? evaluateCoupledSync(paths, rules, repoRoot) : []
 }
 
+const CONCERN_FACES = [
+  { id: 'docs', re: /\bdocs?\b|readme|contributing|文档|说明|指南|文案|错别字|拼写|注释|翻译/i },
+  { id: 'ci', re: /\bci\b|workflow|actions|流水线|发布|release|发版|自动化|门禁/i },
+  { id: 'contract', re: /契约|contract|agents|规范|标准|schema|接口|协议|许可|license/i },
+  { id: 'structure', re: /目录|结构|重构|refactor|模块|边界|布局|组织/i },
+  { id: 'code', re: /源码|代码|脚本|函数|判据|逻辑|算法|性能|勘察|校验|bug|缺陷/i },
+  { id: 'tooling', re: /工具|套件|skill|技能|脚手架|依赖|配置/i },
+]
+
+/** 这件事同时会碰到哪几个面。 */
+function facesOf(text) {
+  const source = String(text ?? '')
+  return CONCERN_FACES.filter((face) => face.re.test(source)).map((face) => face.id)
+}
+
+function assessPrdNeed({ text, faces, fileCount }) {
+  const batchRe = /拆成|拆分为|分\s*(?:两|二|三|四|多)\s*批|分\s*(?:两|二|三|四|多)\s*期|一期.{0,6}二期|几个独立|逐步推进|分批落地|多切片|拆成多份/
+  const reasons = []
+  if (faces.length >= 4) reasons.push(`同时要碰 ${faces.length} 个面（${faces.join('、')}）`)
+  if (batchRe.test(text)) reasons.push('需求本身说了要分批落地')
+  if (Number.isFinite(fileCount) && fileCount >= 12) reasons.push(`声明要动 ${fileCount} 个文件`)
+
+  return {
+    required: reasons.length > 0,
+    reasons,
+    // 一份 SPEC 的验收清单大约装得下「一件事」；超过门上就要上层容器。
+    // 这里给的是可覆盖的默认档，不是硬阈值——判据本身是上面三条。
+    advice: reasons.length > 0
+      ? '先写总控 PRD 冻结整份验收清单，再拆成多份 SPEC + Todo；每份 SPEC 认领其中几条 C。'
+      : '先按一份 SPEC 做；一旦发现要拆成两份以上，就必须先补一份总控 PRD——'
+        + '不然那几份 SPEC 加起来「算不算做完」没人说得清（audit 会报「无主切片」）。',
+  }
+}
+
+
+/**
+ * 治理类任务：把「一个项目整理成什么样」当目标，而不是改其中某一处。
+ *
+ * 它天然跨面（文档 + CI + 契约 + 目录都会动），所以它不该落进「只改文档」那一档。
+ * 这个词表只用来**认出这类任务**，判档仍然走上面数面数的判据——认出来也只是因为它
+ * 通常同时命中三面以上。
+ */
+const GOVERNANCE_RE = /治理|规范化|标准化|整理项目|项目规范|接管|接入套件|项目起步|初始化项目/i
+
 /** 严格五档分流判定逻辑，同步输出 doorType、critiqueTier 与改哪看哪联动提醒。 */
 export function triageTask({
   summary = '',
@@ -74,11 +122,25 @@ export function triageTask({
   const docRe = /\b(?:typo|spelling|docs?(?:-only)?|readme|comment|explain|question|changelog)\b|文档|错别字|注释|问答|翻译|拼写|解释/i
   const explicitFeatureRe = /\b(?:feat|feature|implement|add\s+(?:support|command|flag|endpoint|api))\b|新功能|新增功能|开发新/i
 
+  const faces = facesOf(text)
+  const isGovernance = GOVERNANCE_RE.test(text)
+  // 三面以上就不是局部改动。这是「实质」那一半判据，与措辞无关。
+  const isCrossCutting = faces.length >= 3
+  const prdNeed = assessPrdNeed({ text, faces, fileCount })
+
   const isConflict = conflictsTdd || conflictRe.test(text)
-  const isContract = touchesContract || (!docOnly && fileCount !== undefined && fileCount >= 6) || contractRe.test(text)
+  const isContract = touchesContract
+    || (!docOnly && fileCount !== undefined && fileCount >= 6)
+    || contractRe.test(text)
+    || isCrossCutting
+    || isGovernance
+    || prdNeed.required
+  // 只改文档 = 确实在说文档，**并且**没有同时要动别的面。
   const pureDocCue = docRe.test(text) && !runtimeBugRe.test(text) && !explicitFeatureRe.test(text) && !bugfix
-  const looksDocOnly = docOnly || (pureDocCue && (fileCount === undefined || fileCount <= 3))
-  const isBugfix = bugfix || (!looksDocOnly && (runtimeBugRe.test(text) || fixVerbRe.test(text)) && !explicitFeatureRe.test(text) && (fileCount === undefined || fileCount <= 3))
+  const looksDocOnly = docOnly
+    || (pureDocCue && !isCrossCutting && !isGovernance && faces.every((f) => f === 'docs')
+      && (fileCount === undefined || fileCount <= 3))
+  const isBugfix = bugfix || (!looksDocOnly && (runtimeBugRe.test(text) || fixVerbRe.test(text)) && !explicitFeatureRe.test(text) && !isCrossCutting && !isGovernance && (fileCount === undefined || fileCount <= 3))
 
   const door = classifyDoorType({
     changedFiles: Array.isArray(paths) ? paths : [],
@@ -94,6 +156,7 @@ export function triageTask({
       doorType: 'one-way', doorDetails: { ...door, doorType: 'one-way' }, critiqueTier: 'independent-critique',
       reason: '该需求与 docs/TDD.md 或生效 SPEC 存在架构/契约冲突，必须先更新 TDD.md 并获人类确认后再拆解。',
       docsRequired: ['docs/TDD.md (先更新并确认)'], redGreenRequired: true, needsReview: true, specApprovalRequired: true,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -102,7 +165,11 @@ export function triageTask({
       caseType: 4, tier: 2, blocked: false, action: 'SPEC_AND_TODO',
       doorType: door.doorType, doorDetails: door, critiqueTier: 'independent-critique',
       reason: '涉及跨模块协作或外部契约变更（L3），需先编写 SPEC 经内审 Critique 与批准后，再落地 Todo 与实现。',
-      docsRequired: ['docs/specs/', 'docs/todo/'], optionalDocs: ['docs/prd/'],
+      docsRequired: prdNeed.required ? ['docs/prd/', 'docs/specs/', 'docs/todo/'] : ['docs/specs/', 'docs/todo/'],
+      optionalDocs: prdNeed.required ? [] : ['docs/prd/'],
+      prdRequired: prdNeed.required,
+      prdReasons: prdNeed.reasons,
+      prdAdvice: prdNeed.advice,
       redGreenRequired: true, needsReview: true, specApprovalRequired: true, activeContracts, coupledSyncWarnings,
     }
   }
@@ -112,6 +179,7 @@ export function triageTask({
       doorType: door.doorType, doorDetails: door, critiqueTier: 'none',
       reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
       docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -124,6 +192,7 @@ export function triageTask({
         ? '属于触及高风险/单向门边界的缺陷修复（Case 2），须 Red-Green 回归并接受独立审查。'
         : '属于明确局部缺陷修复（Case 2），不建规划文档，但强制先补失败复现测试再修复（Red-Green）。',
       docsRequired: [], redGreenRequired: true, needsReview: bugNeedsReview, specApprovalRequired: false,
+      prdRequired: false, prdReasons: [], prdAdvice: null,
       activeContracts, coupledSyncWarnings,
     }
   }
@@ -132,6 +201,7 @@ export function triageTask({
     doorType: door.doorType, doorDetails: door, critiqueTier: 'self-audit',
     reason: '属于不改变外部契约的局部功能开发（L2），只需建立 docs/todo/ 冻结验收标准并通过 audit 自净化。',
     docsRequired: ['docs/todo/'], redGreenRequired: true, needsReview: true, specApprovalRequired: false,
+    prdRequired: false, prdReasons: [], prdAdvice: prdNeed.advice,
     activeContracts, coupledSyncWarnings,
   }
 }
@@ -300,6 +370,9 @@ export function auditDoc({ repoRoot, file }) {
     }
   }
 
+  // TDD 的主干核对只对 TDD 自己生效——PRD/SPEC/Todo 不走这套章节要求。
+  if (docType === 'tdd') errors.push(...checkTddStructure(rawText))
+
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     if (fm.malformedFrontmatter) {
       for (const se of fm.syntaxErrors) {
@@ -360,13 +433,20 @@ export function auditDoc({ repoRoot, file }) {
     if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
     if (inFence) continue
     if (/^##+\s+/.test(rawLine)) curSection = rawLine.replace(/^##+\s+/, '').trim()
+    // 这些位置提到不存在的路径是**对的**：讲「不做什么」会说「不动那条旧路径」，
+    // 讲「实现说明 / 完成记录」会说「删掉了哪个文件」。在这些地方报幻觉路径是误报，
+    // 而误报的代价是人开始忽略这条检查。
+    //
+    // 认位置不能只看中文标题：真实文档写 `## Out of scope`、`## 实现说明`、
+    // `## What we removed` 的都有。所以标题启发 + 行内语义两条一起用。
+    const removedPathCue = /(?:已删除|删掉|删除|移除|不再使用|旧路径|废弃|不存在|\b(?:deleted|removed|dropped|no longer)\b)/i
     bodyLines.push({
       lineNo: i + 1,
       rawLine,
       strippedLine: rawLine.replace(/<!--[\s\S]*?-->/g, ''),
-      skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals)/i.test(curSection)
+      skipPathCheck: /(?:完成后的记录|实现说明|本期不做|明确不做|非目标|Non-Goals|范围外|不在本次|Out of scope|removed|cleanup)/i.test(curSection)
         || rawLine.includes('...')
-        || /(?:已删除|删掉|不再使用|旧路径|不存在|\b(?:deleted|removed)\b)/i.test(rawLine),
+        || removedPathCue.test(rawLine),
     })
   }
 
@@ -444,19 +524,42 @@ export function auditDoc({ repoRoot, file }) {
   const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
   const sections = extractSections(bodyForSections)
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
-    if (!/^- \[[ xX]\]\s+C1\b/m.test(normRaw)) {
-      errors.push({ code: 'MISSING_ACCEPTANCE_CRITERIA', line: 1, message: '缺少至少一条「- [ ] C1: ...」可判定验收标准', fixHint: '动手前必须冻结 C1..Cn 标准，每条须能被一条命令或断言证明。' })
+    const docRequirements = resolveDocRequirements(repoRoot, docType)
+    const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
+    const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)
+
+    // 章节编号必须连续：删了一节却没重排，读的人会以为文档缺了东西。
+    errors.push(...numberingErrors(bodyForSections))
+
+    // 待拍板没清空就往下走，等于让实现去猜答案。
+    errors.push(...pendingDecisionErrors(normRaw))
+    const missing = findMissingSections(docRequirements, sectionLookup, { hasInlineAcceptance: hasAcceptance })
+    for (const miss of missing) {
+      const code = miss.id === 'acceptance'
+        ? 'MISSING_ACCEPTANCE_CRITERIA'
+        : `MISSING_SECTION_${miss.id.toUpperCase().replace(/-/g, '_')}`
+      const lead = miss.core
+        ? `缺少「${miss.label}」节或内容为空——这一节与项目形态无关，任何项目都得回答`
+        : `项目自己的模板要求了「${miss.label}」，但这份文档里没有`
+      const valueGap = miss.reason === 'section-missing-required-value'
+        ? `（内容在，但没有给出必须标注的值：${miss.needsPattern.source}）`
+        : ''
+      errors.push({ code, line: 1, message: `${lead}${valueGap}`, fixHint: miss.fixHint })
     }
-    const nonGoalSec = findSectionByKeywords(sections, ['本期不做', '明确不做', '非目标', 'Non-Goals'])
-    const hasNonGoalBullet = /-\s+\*\*本期不做\*\*\s*[:：]|###\s*(?:明确不做|Non-Goals)/i.test(bodyForSections)
-    if ((!nonGoalSec || !nonGoalSec.body.replace(/<!--[\s\S]*?-->/g, '').trim()) && !hasNonGoalBullet) {
-      errors.push({ code: 'MISSING_NON_GOALS', line: 1, message: '缺少「本期不做 / 非目标」节或内容为空', fixHint: '请写清本期明确不做的事项，防止范围蔓延。' })
-    }
-    const doorSec = findSectionByKeywords(sections, ['门型与回滚', '门型', '回滚路径'])
-    const doorText = doorSec ? doorSec.body.replace(/<!--[\s\S]*?-->/g, '') : ''
-    const hasInlineDoor = /\*\*门型(?:判定|与回滚路径)?\*\*[^\n]*\b(?:two-way|one-way)\b/i.test(bodyForSections)
-    if ((!doorSec || !/\b(?:two-way|one-way)\b/i.test(doorText)) && !hasInlineDoor) {
-      errors.push({ code: 'MISSING_DOOR_OR_ROLLBACK', line: 1, message: '缺少「门型与回滚路径」节，或未明确标注 two-way / one-way', fixHint: '请标注「门型：two-way」或「门型：one-way」，并写明具体回滚操作。' })
+
+    // 反向：自定义模板不能变成「什么都不用写」的免检通道。
+    // 主干三节即使被项目声明 omit，也照样要求——这是上面 resolveDocRequirements 的保证，
+    // 这里显式断言一次，防止哪天有人在那一层把 core 判据改松。
+    const coreIds = FORM_INDEPENDENT_CORE[docType] ?? []
+    const droppedCore = coreIds.filter((id) => !docRequirements.sections.some((sec) => sec.id === id))
+    if (droppedCore.length > 0) {
+      errors.push({
+        code: 'CORE_SECTION_WAIVED',
+        line: 1,
+        message: `项目声明把主干章节去掉了：${droppedCore.join('、')}——主干是不可豁免的，`
+          + '否则「我有一个自己的模板」就成了什么都不用写的免检通道。',
+        fixHint: '把这几节从自定义模板的 omit_sections 里移除；要写得合身，减的是可选章节，不是主干。',
+      })
     }
   }
 
@@ -476,6 +579,121 @@ export function collectMarkdownFiles(dir, root) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
+/**
+ * 总控 PRD 的每个 `C` 项，必须被某份生效 SPEC 认领。
+ *
+ * ## 它治的病
+ *
+ * 一份总控 PRD 冻结了 `C1..C27`，然后拆成四份 SPEC。**没有任何东西检查这四份加起来
+ * 有没有把 27 条都认领到。** 漏掉的那几条不会报错：PRD 里它还在，SPEC 里没人提，
+ * 于是它既不进实现也不进审查，最后以「这件事好像做过」的样子消失在记忆里。
+ *
+ * 实测形状：一份 PRD 第 19 条明确要求「会话结束清理 worktree」，拆成三份 SPEC 执行时
+ * 没有任何一份认领它，而 PRD 的验收勾选表里第 19 条是 `[x]`——它什么时候被勾上的，
+ * 没人说得清。
+ *
+ * ## 判据只认「点名」
+ *
+ * 一条 C 被认领的证据是：某份 SPEC 的正文里**出现了这个 C 编号**（`C7`、`C7、`、
+ * `C7的`、`C7）` 等边界形状都算）。按语义判断「这份 SPEC 讲的是不是这条」不是这里
+ * 能做的事；本判据只回答一个机械问题：**有没有人提过它**。
+ *
+ * 漏掉的不一定真漏（也可能写成了「见 PRD 第 7 条」），所以报出来的是**编号缺失**，
+ * 处置是人去看一眼——这比静默通过好，因为静默通过连「看一眼」的机会都没有。
+ */
+export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
+  const prdDir = join(repoRoot, 'docs', 'prd')
+  const prdFiles = prdRel
+    ? [prdRel]
+    : (existsSync(prdDir) ? collectMarkdownFiles(prdDir, repoRoot).map((x) => x.rel) : [])
+  if (prdFiles.length === 0) return []
+
+  const specDir = join(repoRoot, 'docs', 'specs')
+  const specTexts = existsSync(specDir)
+    ? collectMarkdownFiles(specDir, repoRoot).map((item) => readTextSafe(item.abs) ?? '')
+    : []
+
+  const out = []
+  for (const rel of prdFiles) {
+    const text = readTextSafe(join(repoRoot, rel)) ?? ''
+    const ids = [...new Set([...text.matchAll(/^- \[[ xX]\]\s+(C\d+)\b/gm)].map((m) => m[1]))]
+    if (ids.length === 0) continue
+    const uncovered = ids.filter((id) => {
+      const re = new RegExp(`\\b${id}(?![0-9])`)
+      return !specTexts.some((spec) => re.test(spec))
+    })
+    if (uncovered.length > 0) {
+      out.push({
+        code: 'UNCOVERED_ACCEPTANCE_CRITERIA',
+        file: rel,
+        missing: uncovered,
+        message: `${rel} 里有 ${uncovered.length} 条验收标准没有被任何生效 SPEC 认领：${uncovered.join('、')}`
+          + '——它们不会进实现也不会进审查，最后以「好像做过」的样子消失',
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 有几份生效 SPEC，却没有任何 PRD 认领它们 = 一组没人的切片。
+ *
+ * ## 它补的是预判的漏
+ *
+ * `triage` 在动手前预判「这份需求要不要总控 PRD」。但预判会落空：人可能先按 Case 4
+ * 开了第一份 SPEC，做到一半发现要拆第二份、第三份——**拆的那一刻 PRD 就成了必需品，
+ * 而没有人回头看这件事。**
+ *
+ * 没有 PRD 的多份切片，问题不在于「少一份文档」，而在于**「整体算不算做完」没有落点**：
+ *
+ * - 每份 SPEC 各自勾完自己的 C，都绿了；
+ * - 但它们合起来是不是把这件事做完了，没有任何一份文档回答得了；
+ * - 于是「做了一半就宣布完成」成了一种完全合法的状态。
+ *
+ * ## 判据
+ *
+ * 只认 **1:N 已成事实**：`docs/specs/` 里有两份以上生效 SPEC，它们各自 `related_prd`
+ * 指向不同的（或空的）PRD。只要有一份 PRD 被两份以上 SPEC 共同指向，这一组就算有主。
+ *
+ * 反向条件写清楚：一份 SPEC 或零份 SPEC 时不报——**一份 SPEC 自己就是完整单位，
+ * 不需要上层容器。**
+ */
+export function checkOrphanSlices(repoRoot) {
+  const specDir = join(repoRoot, 'docs', 'specs')
+  if (!existsSync(specDir)) return []
+  const specs = collectMarkdownFiles(specDir, repoRoot)
+  if (specs.length < 2) return []
+
+  // 每份 SPEC 指向哪个 PRD（空 = 没指）。解析不出来的按「没指」算，宁可多报一次。
+  const pointed = new Map()
+  for (const item of specs) {
+    const fm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const raw = fm.data?.related_prd
+    const target = typeof raw === 'string' && raw.trim() && !/^(?:无|none)$/i.test(raw.trim())
+      ? posixPath(relative(repoRoot, resolve(dirname(item.abs), raw.trim())))
+      : null
+    pointed.set(item.rel, target)
+  }
+
+  // 同一份 PRD 被两份以上 SPEC 指向 = 这一组有主，正常。
+  const counts = new Map()
+  for (const target of pointed.values()) {
+    if (!target) continue
+    counts.set(target, (counts.get(target) ?? 0) + 1)
+  }
+  if ([...counts.values()].some((n) => n >= 2)) return []
+
+  return [{
+    code: 'ORPHAN_SLICES_NO_MASTER_PRD',
+    file: 'docs/specs/',
+    specs: [...pointed.keys()],
+    message: `docs/specs/ 里有 ${specs.length} 份生效 SPEC，但没有任何一份 PRD 被两份以上 SPEC 共同认领`
+      + '——每份 SPEC 自己勾完都绿着，而「这一整件事算不算做完」没有落点，'
+      + '于是「做了一半就宣布完成」是一种完全合法的状态。'
+      + '要么补一份总控 PRD 让这些 SPEC 指向它，要么说明它们确实是彼此独立的多件事（各自单独走完）。',
+  }]
+}
+
 export function auditRepoDocs(repoRoot, scope = '.') {
   const scopeAbs = resolve(repoRoot, scope)
   const scopeRel = posixPath(relative(repoRoot, scopeAbs))
@@ -488,8 +706,17 @@ export function auditRepoDocs(repoRoot, scope = '.') {
     }
   }
   const results = targets.map((file) => auditDoc({ repoRoot, file }))
-  const failedCount = results.filter((r) => !r.ok).length
-  return { ok: failedCount === 0, scope: scopeRel || '.', auditedCount: results.length, failedCount, results }
+  const coverageErrors = [...checkMasterPrdCoverage(repoRoot), ...checkOrphanSlices(repoRoot)]
+  const allErrors = [...results.flatMap((r) => r.errors ?? []), ...coverageErrors]
+  const failedCount = results.filter((r) => !r.ok).length + (coverageErrors.length > 0 ? 1 : 0)
+  return {
+    ok: allErrors.length === 0,
+    scope: scopeRel || '.',
+    auditedCount: results.length,
+    failedCount,
+    results,
+    coverageErrors,
+  }
 }
 
 function summarizeDoc(item) {

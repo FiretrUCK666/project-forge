@@ -21,7 +21,7 @@ description: |
    - **硬门槛**：文档中「待拍板事项 / 未决问题」全部消解且路径/命令核实后，才可进入 `audit` 与独立 Critique（严禁把未拍板问号留给实现或审查）。
 4. **尊重仓库自有模板与短名图表**：`doc-plan.mjs init` 自动识别并套用仓库既有的 `docs/templates/*.md` / `.github/*-template.md`，同时注入 YAML Frontmatter、元信息概览表与 SPEC 短名 Mermaid（矩形/分组单行 `<= 16`、菱形/边 `<= 12` 单位，禁节点内 HTML 标签）。
 5. **说人话四要素 + 三不写**：
-   - **四要素**：真实痛点与目标、本期明确不做（防膨胀）、可运行/可断言的 `C1..Cn`、门型（`two-way` / `one-way`）与回滚路径。
+   - **三件必答**：真实痛点与目标、本期明确不做（防膨胀）、可运行/可断言的 `C1..Cn`——这三件与项目形态无关，任何项目都得写。**其余章节按形态取舍**：有状态的业务才写状态规则，有身份的才写权限，有门的才标 `two-way`/`one-way`；没门的项目写个门型只是编。
    - **三不写**：不写空泛废话（如「提高质量」「确保稳定」「优化体验」）、不写假路径、不在文档里贴大段实现代码。
 
 ## 全场景五档分流（轻重恰当，绝不臃肿）
@@ -32,10 +32,18 @@ description: |
 | **Case 1**（问答 / 错别字 / 单行） | **0 文档** | 不写多余文档，直接转交执行并跑对应校验 |
 | **Case 2**（明确局部 Bugfix，不改契约） | **0 文档** | 强制 **Red-Green**：先补失败复现回归测试再修绿；触及高风险须独立审查 |
 | **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` 自净化直通（非平凡 Todo 建议走 Critique） |
-| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`（按需 `docs/prd/`） | 跑 `audit` -> 1–2 轮**独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审）-> 原位改净 -> `critique-pass` -> 交人 `approve` |
+| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> 1–2 轮**独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审）-> 原位改净 -> `critique-pass` -> 交人 `approve` |
 | **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | **阻断拆解** | 先修订 `docs/TDD.md` 并经独立确认后再续 |
 
 说明：`contributor-fork` 若上游仓未接入 `docs/`，私有草案绝不混入 PR diff。
+
+**为什么「一份 SPEC 装不下」是判据、而不是「这件事大不大」**：大小是形容词，量不出来；能问的是
+一个结构问题——这份需求的验收清单，一份 SPEC 装得下吗？装不下就必须拆，拆了就需要一个上层容器
+记「整体算不算做完」，那个容器就是总控 PRD。三条机械信号任一条成立就够（同时碰四面以上、需求
+自己说了要分批、声明要动 12 个以上文件），`doc-plan.mjs triage` 会输出 `prdRequired` 与依据。
+**反向同样要守住**：只碰一两面的小需求不许被判进来，否则每件小事都要求先写 PRD，人会直接绕过
+整套流程。事后兜底由 `audit` 的 `ORPHAN_SLICES_NO_MASTER_PRD` 负责——两份以上生效 SPEC 没有
+共同认领的 PRD 时会报出来。
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 

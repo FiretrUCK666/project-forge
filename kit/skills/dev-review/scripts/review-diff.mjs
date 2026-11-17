@@ -284,7 +284,10 @@ export async function collectDiff(repoRoot, spec) {
     return { sha256: createHash('sha256').update(rawBuf).digest('hex'), bytes: rawBuf.length, text, chunks, files, untracked: [], hunkIndex, summary }
   }
 
-  const argsBase = ['--no-optional-locks', 'diff', '--raw', '--no-ext-diff', '--no-color']
+  // `--raw` 单独用只输出文件清单（40 行），补丁正文一行都没有。
+  // 要拿正文必须同时给 `--unified=N`——两个开关缺一个，审核人拿到的就是一份空 diff：
+  // 文件列着 40 个、hunk 索引全空、正文 0 字节，而报告看起来完全正常。
+  const argsBase = ['--no-optional-locks', 'diff', '--raw', '--unified=3', '--no-ext-diff', '--no-color']
   let diffArgs
   let cacheCommonDir = null
   let cacheBaseSha = null

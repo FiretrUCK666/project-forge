@@ -26,50 +26,26 @@ const SCOPES = new Set([
   'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态键值映射，返回 `Map<id, value>`。 */
-export function readDecisionMap(agentsText) {
-  const map = new Map()
-  if (typeof agentsText !== 'string') return map
-  const lines = agentsText.replace(/\r\n/g, '\n').split('\n')
-  let inSection = false
-  for (const line of lines) {
-    if (/^##\s+取舍(?:\s|$|[（(:：])/.test(line.trim())) { inSection = true; continue }
-    if (inSection && /^#{1,2}\s+/.test(line)) break
-    if (!inSection) continue
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('>') || trimmed.startsWith('```')) continue
-    const m = /^\s*(?:[-*]\s*)?`?([a-z][a-z0-9._-]*)`?\s*[:：]\s*(.*)$/.exec(line)
-    if (m) map.set(m[1], m[2].trim())
-  }
-  return map
-}
+import { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../kit/skills/lib/command-lex.mjs'
+import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
+import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
 
-/** 从 AGENTS.md 的「## 取舍」节读出已表态的决定，返回 `Set<id>`。 */
-export function readDecisions(agentsText) {
-  return new Set(readDecisionMap(agentsText).keys())
-}
+export { readDecisionMap, readDecisions }
 
 function finding(level, scope, id, title, extra = {}) {
   return { level, scope, id, title, ...extra }
 }
 
-/**
- * 契约的结构健康度：标记成对、该有的节都在、内容与模板一致。
- *
- * **不在这里重算**：三项判据都住在 `compose-agents.mjs` 里（`inspect` 与
- * `driftRegions`），这里只把它的结论取过来。两处各写一份的话，`--check` 说红、
- * 体检说绿的那种事迟早发生，而信哪一个都不对。
- *
- * 渲染失败（模板有洞、勘察出错）时返回「都空」并附一句原因：体检不该因为
- * 契约那一面算不出来就整个崩掉，那一面本来只是它的一项。
- */
 async function inspectContract(root, facts) {
   try {
     const { contractHealth } = await import('./compose-agents.mjs')
-    return await contractHealth(root, { facts })
+    const health = await contractHealth(root, { facts })
+    return { state: 'ok', health, error: null }
   } catch (error) {
     return {
-      broken: [], missing: [], drifted: [], error: error instanceof Error ? error.message : String(error),
+      state: 'unavailable',
+      health: null,
+      error: error instanceof Error ? error.message : String(error),
     }
   }
 }
@@ -104,6 +80,13 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   const facts = await survey(targetDir)
   const root = facts.target.path
   const wants = (face) => !scopes || scopes.has(face)
+
+  const unexecutable = findUnexecutableArtifacts(facts.artifactPlan ?? [])
+  for (const item of unexecutable) {
+    add(finding('missing', 'artifacts', item.code, item.message, {
+      ref: { file: 'references/handoff.md', section: '四、交棒前四步清单' },
+    }))
+  }
 
   const agentsPath = facts.docs.agents ? join(root, facts.docs.agents.file) : undefined
   const agentsText = agentsPath ? (readTextSafe(agentsPath) ?? '') : undefined
@@ -314,20 +297,26 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       // 缺了本该有的节（建好远端之后没重跑生成）、内容与模板脱节（模板加了规则而
       // 这份还停在旧版）。只查 fill 那一档，这三种会一起报「已就绪」——而它是假绿。
       // 判据直接取 `compose-agents` 的，不在这里重算一遍。
-      const health = await inspectContract(root, facts)
-      if (health.broken.length > 0) {
+      const contract = await inspectContract(root, facts)
+      if (contract.state === 'unavailable') {
+        add(finding('missing', 'agents', 'agents.unavailable',
+          `${facts.docs.agents.file} 的结构这一面这次算不出来（${contract.error}）——`
+          + '它不等于「结构完整」，恰恰相反：说明这一步没有验过', {
+            ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
+          }))
+      } else if (contract.health.broken.length > 0) {
         add(finding('missing', 'agents', 'agents.broken',
-          `${facts.docs.agents.file} 的受管标记没成对：${health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
+          `${facts.docs.agents.file} 的受管标记没成对：${contract.health.broken.join('、')}——半对锚点意味着文件被改坏了，刷新已经不敢动它`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else if (health.missing.length > 0) {
+      } else if (contract.health.missing.length > 0) {
         add(finding('missing', 'agents', 'agents.missing-sections',
-          `${facts.docs.agents.file} 缺 ${health.missing.length} 节（条件为真却没有）：${health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
+          `${facts.docs.agents.file} 缺 ${contract.health.missing.length} 节（条件为真却没有）：${contract.health.missing.join('、')}——跑一次不带参数的 compose-agents 就会补上`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
-      } else if (health.drifted.length > 0) {
+      } else if (contract.health.drifted.length > 0) {
         add(finding('missing', 'agents', 'agents.drifted',
-          `${facts.docs.agents.file} 有 ${health.drifted.length} 段与模板不一致：${health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
+          `${facts.docs.agents.file} 有 ${contract.health.drifted.length} 段与模板不一致：${contract.health.drifted.join('、')}——这几段本该与模板渲染结果逐字相同`, {
             ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
           }))
       } else if (!oversize) {
@@ -522,8 +511,11 @@ export async function reviewProject(targetDir, { scopes } = {}) {
     const declared = Object.values(facts.commands).filter((v) => typeof v === 'string' && v.trim())
     const missing = declared.filter((cmd) => !agentsText.includes(cmd))
     if (missing.length > 0) {
+      const shown = missing.slice(0, 3).map((cmd) => truncateCommandForDisplay(cmd, COMMAND_DISPLAY_MAX_BYTES).text)
+      const totalBytes = missing.reduce((sum, cmd) => sum + Buffer.byteLength(cmd, 'utf8'), 0)
       add(finding('notice', 'agents', 'agents.commands-stale',
-        `${facts.docs.agents.file} 里没提到这些实际存在的命令：${missing.slice(0, 3).join('、')}`
+        `${facts.docs.agents.file} 里没提到这些实际存在的命令：${shown.join('、')}`
+        + `（共 ${missing.length} 条、${totalBytes} 字节）`
         + '——契约里的构建与验证节已经和项目现状脱节，照着它跑会漏掉这一步', {
           ref: { file: 'references/docs-set.md', section: '三、`AGENTS.md`' },
         }))
@@ -579,6 +571,29 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   if (!hasRemote) {
     add(finding('ok', 'collaboration', 'collab.no-remote', '没有远端：谈不上收别人的改动'))
   } else {
+    const caps = facts.git.capabilities ?? null
+    if (caps && caps.known === false) {
+      add(finding('notice', 'collaboration', 'collab.remote-unknown',
+        `认不出 ${caps.providerId ?? '这个'} 远端能做什么（Issue / PR / 发布 / 检查状态），`
+        + '所以下面这些能力一律按「不确定」处理，不假设它和 GitHub 一样', {
+          decision: 'remote-setup',
+          ref: { file: 'references/remote-github.md', section: '一、双轨四级连接引擎' },
+        }))
+    } else if (caps && caps.known === true) {
+      const missing = []
+      if (caps.issues === false) missing.push('Issue')
+      if (caps.pullRequests === false) missing.push('PR')
+      if (caps.releases === false) missing.push('发布')
+      if (caps.checks === false) missing.push('CI 检查状态')
+      if (missing.length > 0) {
+        add(finding('notice', 'collaboration', 'collab.remote-capability-gap',
+          `这个远端做不了：${missing.join('、')}——不是没配好，是这条路在它上面不成立；`
+          + '涉及这些能力的动作请改走它自己的流程，别照搬 GitHub 的命令', {
+            decision: 'remote-setup',
+            ref: { file: 'references/remote-github.md', section: '一、双轨四级连接引擎' },
+          }))
+      }
+    }
     if (!facts.docs.prTemplate) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {

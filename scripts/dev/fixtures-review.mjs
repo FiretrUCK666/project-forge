@@ -284,7 +284,7 @@ cases.push(['条件名拼错要报错，不许当成「条件为假」整块删�
   const bad = ['{{release_doc}}', '{{ PROJECT_NAME }}', '{{PROJECT-NAME}}']
   for (const token of bad) {
     let hit = false
-    try { renderVars(`x ${token} y`, { PROJECT_NAME: 'demo' }) } catch (error) { hit = /还剩这些占位符/.test(error.message) }
+    try { renderVars(`x ${token} y`, { PROJECT_NAME: 'demo' }) } catch (error) { hit = /形状不对的占位符/.test(error.message) }
     if (!hit) return `${token} 这种形状的占位符没有被拦下——它会原样留在产物里`
   }
 
@@ -471,10 +471,6 @@ cases.push(['收尾步骤核对清单：三种角色一个都不能少', async (
 }])
 
 cases.push(['收尾七步：插入一步不该让内容下限假红', async () => {
-  // 早先 `where: { step: 7 }` 写死步号，插入一步就取到错的那一步，判据以「没交代」的形式假红。
-  // **假红比漏检更耗人**：它把人引去改判据，而判据本来是对的。
-  // 这条断言就是给那个修法配的常驻守卫——没有它，把「按内容认步骤」改回「按编号认」，
-  // 今天正好七步，取第 7 块取对了，全部门禁照样绿。
   const { finishRequiredMissing } = await loadPreflight()
 
   const steps = (extra) => [
@@ -671,9 +667,6 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return `章外提到不算交代：应报缺 3 项，实际 ${finishRequiredMissing(outside).length} 项`
   }
 
-  // 反面五：**要素挪到第 7 步之后的解释段，不算第 7 步交代过。**
-  // 这一条治的是「步正文切片不收口」：早先最后一步会吞掉本章余下全部内容，
-  // 于是要素挪到哪都算数，范围宣告与实现不符。
   const stepScoped = full.replace(
     '  7. 删远端分支之前查两件事：远端还在不在（`git ls-remote --heads origin <分支>`）、'
       + '有没有下游堆叠 PR 以该分支为 base；两件都清了才 `git push origin --delete <分支>`。',
@@ -686,9 +679,6 @@ cases.push(['收尾章：内容下限抓得住「三处一起漏」', async () =
     return '要素挪到第 7 步之后的解释段仍然算数——步正文没有收口'
   }
 
-  // **正面：换序、改成分行，都不该报。**
-  // 排版不是判据。早先的正则要求三项同行按固定顺序出现，而这份文档自己的「清单长这样」
-  // 就是分行的——那会把正确写法判成错的。
   const reordered = full.replace(
     '  哪个 worktree、哪条本地分支、哪条远端分支。',
     '  哪条本地分支、哪个 worktree、哪条远端分支。',
@@ -725,4 +715,37 @@ cases.push(['判据指路：review.mjs 里每一个 references/ 小节名都真�
   return true
 }])
 
+
+// 审核人拿到的 diff 必须是**补丁正文**，不是文件清单。
+// `git diff --raw` 单独用只输出 40 行 name-status，一行补丁都没有——
+// 而报告里「changedFiles: 40」看起来完全正常，审核人却什么都看不到。
+// 这类「看起来有、实际是空」的洞最危险：门禁全绿，审核形同虚设。
+cases.push(["审核 diff 里必须有补丁正文，不能只有文件清单", async () => {
+  const { collectDiff } = await import("../../kit/skills/dev-review/scripts/review-diff.mjs")
+  const { gitCommitFast, gitInit, rmTree, tmpProject } = await import("./fixtures-helpers.mjs")
+  const { writeFileSync: wf, readFileSync: rf } = await import("node:fs")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "a.txt": "line1\nline2\nline3\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    const base = rf(join(dir, ".git", "HEAD"), "utf8").trim()
+    wf(join(dir, "a.txt"), "line1\nCHANGED\nline3\n")
+    gitCommitFast(dir, "change")
+
+    const d = await collectDiff(dir, { mode: "range", range: "HEAD~1..HEAD" })
+
+    // 三个都要成立：字节数不为 0、正文里真有 +/- 行、hash 不是空串的 hash
+    if (d.bytes === 0) return "diff 是 0 字节——审核人什么都看不到"
+    if (!d.text.includes("+CHANGED")) return `正文里没有新增行：${JSON.stringify(d.text.slice(0, 120))}`
+    if (!d.text.includes("-line2")) return "正文里没有删除行"
+    if (d.hunkIndex.length === 0) return "hunk 索引是空的"
+
+    // 空串的 sha256 是 e3b0c442…，这个值出现就说明算的是空内容
+    if (d.sha256.startsWith("e3b0c442")) return "diff hash 是空串的 hash——正文没被读到"
+
+    return true
+  } finally { rmTree(dir) }
+}])
 }

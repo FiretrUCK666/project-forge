@@ -25,7 +25,7 @@ function printHelp() {
     '子命令（next/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--probe-auth] [--json]',
-    '  start     [--task <id>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
+    '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--include-master-prd] [--json]',
@@ -34,9 +34,9 @@ function printHelp() {
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
     '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--json]',
-    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--json]',
+    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  status    [--task <id>] [--json]',
-    '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--json]',
+    '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  batch     <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--enqueue-only] [--trial-local] [--task <id>] [--json]',
   ].join('\n') + '\n')
 }
@@ -53,15 +53,15 @@ async function main(argv) {
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
-        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local',
+        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff',
       ],
       valueFlags: [
-        'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues',
+        'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body',
         'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot',
       ],
-      multiFlags: ['rebut'],
+      multiFlags: ['rebut', 'allow-outbound'],
       usageHint: 'flow.mjs <inspect|next|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {

@@ -13,9 +13,7 @@ import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ 
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber,
-  parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
-} from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -185,7 +183,7 @@ export async function handleMerge(opts, roots) {
   const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
 
   const canUseGhApi = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
-  const ghProbe = canUseGhApi ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))) : null
+  const ghProbe = canUseGhApi ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))) : null
   const backend = createTaskBackend({
     role: ledger.role,
     providerId: ledger.providerId,
@@ -337,7 +335,9 @@ export async function handleRelease(opts, roots) {
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
   const releaseResults = []
   if (!skipApi) {
-    const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+    // 认领/释放都要往平台写。写之前必须联网探清通道——
+  // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
+  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
     const ghClient = opts._ghClient ?? ghProbe.client
     const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
     const onlineRel = resolveContributorIdentity({
@@ -461,7 +461,9 @@ export async function handleClaim(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+  // 认领/释放都要往平台写。写之前必须联网探清通道——
+  // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
+  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
   const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
   const onlineContrib = resolveContributorIdentity({

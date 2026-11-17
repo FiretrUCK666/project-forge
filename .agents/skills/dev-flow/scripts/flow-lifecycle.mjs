@@ -9,24 +9,19 @@ import { basename, join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import {
-  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd,
-  parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter,
-} from '../../lib/docs.mjs'
+  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter, } from '../../lib/docs.mjs'
 import {
-  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun,
-  gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic,
-} from '../../lib/git.mjs'
+  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls,
-  probeGitHubEnv, resolveContributorIdentity,
-} from '../../lib/platform.mjs'
+  detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
+import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
@@ -73,7 +68,6 @@ function findUncheckedLines(text) {
   }
   return out
 }
-
 function findStrictDocBySlug(root, dirRel, ledger) {
   const abs = join(root, dirRel)
   if (!existsSync(abs)) return null
@@ -186,6 +180,8 @@ export async function handleFinalize(opts, roots) {
     }
   }
 
+  const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
+  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: 1 } }
   if (specRel && existsSync(join(implRoot, specRel))) {
     const specAbs = join(implRoot, specRel)
     let specText = readTextSafe(specAbs) ?? ''
@@ -614,7 +610,7 @@ export async function handleSubmit(opts, roots) {
   let reviewSlotSync = null
   if (ledger.tier === 2 && currentHead && ledger.reviewWorktreePath) {
     const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
-    if (existsSync(reviewAbs)) unmountSharedDeps(roots.mainRoot, reviewAbs)
+    if (existsSync(reviewAbs)) unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })
     reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
     const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
     ledger.reviewWorktreeHead = currentHead
@@ -622,7 +618,7 @@ export async function handleSubmit(opts, roots) {
   }
 
   const nextRound = (ledger.rounds ?? []).length > 0
-    ? Math.max(...ledger.rounds.map((r) => Number(r.round) || 1)) + 1
+    ? nextReviewRound(ledger)
     : 1
 
   if (ledger.role === 'local-only') {
@@ -662,7 +658,9 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls }))
+  // 提审要开 PR——那是平台写操作。用「不联网」的探测结果判断「能不能写」，
+  // 必然得到「不能」，然后安静地只记账本，看起来像成功。
+  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const backend = createTaskBackend({
     role: ledger.role, providerId: ledger.providerId, targetRepo,
     client: opts._ghClient ?? ghProbe.client, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
@@ -757,7 +755,6 @@ export async function handleSubmit(opts, roots) {
   }
   return { exitCode: 0 }
 }
-
 export async function handleRework(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx

@@ -862,8 +862,8 @@ export const INJECTIONS = [
     id: 'I96',
     what: '第二遍路径校验不再看 skipPathCheck（讲不做的地方开始误报）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',
-    from: "  for (const item of bodyLines) {\n    if (item.skipPathCheck) continue\n    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {\n      if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue\n      if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue",
-    to: "  for (const item of bodyLines) {\n    for (const rawCand of extractLinePathCandidates(item.strippedLine)) {\n      if (/^(?:https?:|file:|mailto:|node:)/i.test(rawCand) || /[*?{}<>]/.test(rawCand)) continue\n      if (rawCand.startsWith('docs/archive/') && /归档|archive/i.test(item.rawLine)) continue",
+    from: '  // Pass 2: 校验全部引用路径（已存在或已在本篇标为 (new)）\n  for (const item of bodyLines) {\n    if (item.skipPathCheck) continue',
+    to: '  // Pass 2: 校验全部引用路径（已存在或已在本篇标为 (new)）\n  for (const item of bodyLines) {',
     expect: '讲不做与讲删除',
   },
   {
@@ -905,6 +905,14 @@ export const INJECTIONS = [
     from: '    if (used + size > budget) break',
     to: '    if (cut.length >= budget) break',
     expect: '命令截断按字节算',
+  },
+  {
+    id: 'I102',
+    what: '待拍板的结论标记不再被认（只写「建议」也能一路过审）',
+    file: 'kit/skills/lib/pending-decisions.mjs',
+    from: "const DECIDED_RE = /(?:已定|已拍板|决定|结论|采纳建议|按建议执行|已确认)\\s*[:：]/i",
+    to: 'const DECIDED_RE = /(?:NEVER_MATCH_XYZ)/i',
+    expect: '待拍板没清空就拦下',
   },
   {
     id: 'I82',

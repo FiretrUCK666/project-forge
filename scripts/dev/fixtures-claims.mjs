@@ -2039,4 +2039,49 @@ cases.push(["命令截断按字节算，不是按字符算", async () => {
 
   return true
 }])
+
+// 文档里写着一堆问号，然后一路通过 audit / critique / approve——这条流程最容易糊弄的地方。
+// dev-plan 的说明写着「待拍板全部消解后才可进入 audit」，而这条门槛此前只存在于文档里。
+cases.push(["待拍板没清空就拦下，清了才放行", async () => {
+  const { analyzePendingDecisions, pendingDecisionErrors } =
+    await import("../../kit/skills/lib/pending-decisions.mjs")
+
+  // 正向：每条都有「已定：」→ 放行
+  const decided = [
+    "## 待拍板问题", "",
+    "1. TTL 默认值", "   - 建议：5 分钟", "   - 已定：5 分钟",
+    "2. 按 key 设 TTL", "   - 已定：不做", "",
+  ].join("\n")
+  if (pendingDecisionErrors(decided).length > 0) return "全都定了却仍被拦"
+
+  // 反向 1：只有「建议」不算拍板——这正是最容易糊弄过去的地方
+  const onlySuggestion = [
+    "## 待拍板问题", "",
+    "1. TTL 默认值", "   - 建议：5 分钟", "",
+  ].join("\n")
+  const errs = pendingDecisionErrors(onlySuggestion)
+  if (errs.length === 0) return "只写建议就被放行了——建议不是结论"
+  if (errs[0].code !== "BLOCKED_PENDING_DECISIONS") return `错误码不对：${errs[0].code}`
+  if (!/还有 \d+\/\d+ 条/.test(errs[0].message)) return "报错没写清还剩几条"
+
+  // 反向 2：整节写「无」→ 放行（没有遗留问题也是清空）
+  for (const empty of ["## 待拍板问题\n\n- 待确认：无\n", "## 待拍板问题\n\n无\n"]) {
+    if (pendingDecisionErrors(empty).length > 0) return `写了「无」却被拦：${empty}`
+  }
+
+  // 反向 3：没有这一节 → 不拦（短文档可以不设这一节，那是另一条判据的事）
+  if (pendingDecisionErrors("## 背景\n\n一句话\n").length > 0) return "没有这一节却被拦"
+
+  // 正向：节首说明文字不算事项——列表项才是事项
+  const withIntro = [
+    "## 待拍板问题", "",
+    "以下八项是产品级取舍。", "",
+    "1. 甲", "   - 已定：做", "2. 乙", "   - 已定：不做", "",
+  ].join("\n")
+  const r = analyzePendingDecisions(withIntro)
+  if (r.total !== 2) return `节首说明被当成事项了：共 ${r.total} 条，应为 2 条`
+  if (r.unresolved.length !== 0) return "全都定了却仍报未清"
+
+  return true
+}])
 }

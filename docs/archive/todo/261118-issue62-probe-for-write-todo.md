@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 写操作路径改用 probeForWrite 与静态门禁全覆盖
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 62
@@ -9,7 +9,7 @@ pr: null
 branch: feat/probe-for-write
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-62
 planned_at: ba4de9c66d20451d8daf6e9f310553ec68fb3258
 related_prd: null

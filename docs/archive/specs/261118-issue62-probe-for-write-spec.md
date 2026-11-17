@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 写操作路径改用 probeForWrite 与静态门禁全覆盖
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -10,7 +10,7 @@ pr: null
 branch: feat/probe-for-write
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-62, round=1, sha=1a59df79576b, summary=Plan Critique passed: verified Issue #62 coverage, all 4 bare probeGitHubEnv write paths + flow-sync PR trigger + shared.mjs export, zero missed kit/ write paths, C1-C4 testability and I145 non-collision with #56 (I139-I142) and #51 (I143-I144), and <=800 line budget.)"
 related_prd: null
 related_todo: ../todo/261118-issue62-probe-for-write-todo.md

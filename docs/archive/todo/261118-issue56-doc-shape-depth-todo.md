@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 修复规划文档骨架裁光、形态探测、审计退化与归档隔离
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 56
@@ -9,10 +9,10 @@ pr: null
 branch: feat/doc-shape-depth
 owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-56
 planned_at: a0a57a94e091d8e0907958566f1e3a7b855ca3be
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261118-issue56-doc-shape-depth-spec.md
 ---
 
@@ -27,9 +27,9 @@ related_spec: ../specs/261118-issue56-doc-shape-depth-spec.md
 | 分支 / 基线 | `feat/doc-shape-depth` @ `a0a57a9` |
 | 任务编号 | `issue-56` |
 | 负责人 / 审批 | planner-56 / `false` |
-| 关联 Issue / PR / SPEC | #56 / 未关联 / `docs/specs/261118-issue56-doc-shape-depth-spec.md` |
+| 关联 Issue / PR / SPEC | #56 / 未关联 / `docs/archive/specs/261118-issue56-doc-shape-depth-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，并在编码前确认 `docs/specs/261118-issue56-doc-shape-depth-spec.md` 已通过独立 Critique 与 `approved: true`。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，并在编码前确认 `docs/archive/specs/261118-issue56-doc-shape-depth-spec.md` 已通过独立 Critique 与 `approved: true`。
 
 ## 任务范围与验证基准
 
@@ -41,7 +41,7 @@ related_spec: ../specs/261118-issue56-doc-shape-depth-spec.md
 
 ## 验收标准与执行清单
 
-> 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。与 `docs/specs/261118-issue56-doc-shape-depth-spec.md` 保持 1:1 严格一致。
+> 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。与 `docs/archive/specs/261118-issue56-doc-shape-depth-spec.md` 保持 1:1 严格一致。
 
 - [x] C1: （`init` 骨架保留与开箱自洽）在 3 文件 Go CLI 临时仓及多生态仓执行 `doc-plan.mjs init --kind prd|spec|todo|pair|all` 时，默认 `pruneUnfilled: false` 保留当前形态适用的可选节（`spec` 含 `design`/`alternatives`/`breakdown`/`door`/`implementation`/`clarifications`、`todo` 含 `steps`/`risk`/`rollback`/`breakpoint`/`clarifications`、`prd` 含 `flow`/`reuse`/`pending`/`door`/`clarifications`），传入 `--no-prune` 时保留模板全部可选节；`spec` 正确渲染 `NON_GOALS`、`REUSABLE`、合法 Markdown 表格 `MODULES`（`| ... |`）及条件化 `{{TDD_REF}}`（无 `docs/TDD.md` 时零 `HALLUCINATED_PATH`、零 `待补齐` 残余，有 `docs/TDD.md` 时保留有效路径）；`govern-docs.mjs --write-todo` 与直接调用 `renderDocTemplate(kind, { vars })` 仍保持 `pruneUnfilled: true` 向后兼容。
 - [x] C2: （工作区形态探测与可复核跳过说明）`kit/skills/lib/doc-shape.mjs` (new) 基于实时工作区证据探测 `authRoles`/`stateRules`/`uiFrontend`/`ciRollout`/`cliEntry`/`multiCollab`（零硬编码仓库名，严守 `kit/**` 架构边界）：3 文件 Go CLI 仓跳过不适用的 `users`（`roles`）/`rules`/`rollout`/`coordination` 并写入 `<!-- doc-shape-skipped: ... -->` 与人类可复核摘要且被 `doc-audit` 放行；含鉴权/状态机/前端/CI 发布文件的仓则自动保留对应可选节；`FORM_INDEPENDENT_CORE` 与自定义模板 `required_sections` 永不被跳过（强行写入跳过注释时 `doc-audit` 报 `DOC_SKIP_INVALID_SECTION` 阻断）。

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 修复规划文档骨架裁光、形态探测、审计退化与归档隔离
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-18
@@ -10,9 +10,9 @@ pr: null
 branch: feat/doc-shape-depth
 owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-56, round=1, sha=e6f569f32ed9, summary=C1-C5 范围、正反断言与文件拆分完整；MODULES 沿用尖括号占位符以保留 audit/hydrate 校验)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261118-issue56-doc-shape-depth-todo.md
 high_risk_paths: [kit/skills/lib/docs.mjs, kit/skills/lib/doc-templates.mjs, kit/skills/lib/doc-requirements.mjs, kit/skills/lib/doc-template-render.mjs, kit/skills/dev-plan/scripts/doc-audit.mjs, kit/skills/dev-plan/scripts/doc-plan.mjs, kit/skills/templates/docs-prd.md, kit/skills/templates/docs-spec.md, kit/skills/templates/docs-todo.md, kit/skills/dev-plan/SKILL.md]
 ---
@@ -28,7 +28,7 @@ high_risk_paths: [kit/skills/lib/docs.mjs, kit/skills/lib/doc-templates.mjs, kit
 | 创建 / 更新 | `2026-11-18` / `2026-11-18` |
 | 分支 / Issue / PR | `feat/doc-shape-depth` / #56 / 未关联 |
 | 负责人 / 内审状态 | planner-56 / `pending` |
-| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/todo/261118-issue56-doc-shape-depth-todo.md` |
+| 关联 PRD / Todo | `docs/prd/261117-v8-criteria-trust-prd.md` / `docs/archive/todo/261118-issue56-doc-shape-depth-todo.md` |
 
 - **与总控 PRD 的关系**：挂载于 `docs/prd/261117-v8-criteria-trust-prd.md`（V8 判据可信化补充切片），承接 Issue #56 全部技术验收标准 `C1..C5`，同时补全 `checkMasterPrdCoverage` 对已归档切片 SPEC 的认领扫描，确保 `#49` / `#55` / `#57` 归档后全仓文档审计恢复通过。
 - **变更一句话**：把规划文档从「初始化即裁光可选节、默认模板自相矛盾、只验形状不验实质、归档扫入历史同 slug 文件」改造为「仓库形态驱动裁剪 + 可复核跳过说明 + 核心实质性与结构锚点防退化 + 互链继承与 `clarify` 落盘 + 历史归档物理隔离与覆盖率识别」。

@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
 import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerM3Cases(cases) {
@@ -466,17 +467,14 @@ cases.push(['M3-C5：CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/overs
 
     const initPrd = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'prd', '--slug', 'p1', '--title', 'PRD 1', '--owner', 'alice', '--json'], { cwd: dir })
     const prdFile = JSON.parse(initPrd.stdout).file
-    const prdClean = readFileSync(join(dir, prdFile), 'utf8')
-      .replace('<现状痛点与预期可观测的收益>', '当前缺一份可执行的治理配置')
-      .replace('<明确交付能力>', '交付可执行配置')
-      .replace('<明确排除的扩展设想，防止需求蔓延>', '不做跨仓调度')
-      .replace('<待核实填写：拟复用的现成模块文件路径与导出能力>', '复用已有 README.md')
-      .replace('<用户入口 / 触发动作 -> 响应与终态>', '用户输入命令 -> 退出码 0')
-      .replace('<第一条可判定的产品结果>', '可断言收益')
-      .replace('<第二条>', '第二条收益')
-      .replace('<two-way | one-way>', 'two-way')
-      .replace('<说明如何安全撤回，不可逆改动须写明降级方案>', 'git revert 即可回退')
-    writeFileSync(join(dir, prdFile), prdClean)
+    hydrateGeneratedDoc(join(dir, prdFile), {
+      criteria: ['命令退出码为 0', '输出里含预期字段'],
+      filled: '当前缺一份可执行的治理配置',
+      extra: [
+        ['<two-way | one-way>', 'two-way'],
+        ['不做跨仓调度', '不做跨仓调度'],
+      ],
+    })
     const prdAud = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', prdFile], { cwd: dir })
     if (prdAud.status !== 0 || !/critique-pass/.test(prdAud.stdout)) {
       return `PRD audit 未输出独立 Critique 指引：${prdAud.stdout}\n${prdAud.stderr}`

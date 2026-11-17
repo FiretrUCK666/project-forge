@@ -884,7 +884,7 @@ export const INJECTIONS = [
   },
   {
     id: 'I99',
-    what: '履历体判据失效（早先/以前是 不再被抓）',
+    what: '履历体判据失效（时间先后词不再被抓）',
     file: 'kit/skills/lib/no-changelog-voice.mjs',
     from: '    const strong = STRONG.find((w) => line.includes(w))',
     to: '    const strong = undefined',

@@ -91,9 +91,11 @@ export const SECTION_DEFS = Object.freeze({
   acceptance: {
     id: 'acceptance',
     label: '怎么算做完',
-    keywords: ['验收标准', '冻结的验收标准', 'Acceptance', '交付判据', '完成标准', 'Definition of Done'],
+    keywords: ['验收标准', '冻结的验收标准', 'Acceptance', '交付判据', '完成标准', 'Definition of Done', '验收'],
     // 强证据最强：有编号勾选项就是验收标准，标题叫什么都算。
-    evidence: [/^-\s*\[[ xX]\]\s*C\d+/m],
+    // 编号列表也算——真实的大型 PRD 常写成「1. 首个平台管理员只能初始化一次」，
+    // 逐条编号就是验收条目的另一种写法，只认 `- [ ]` 会把它们全判成没写。
+    evidence: [/^-\s*\[[ xX]\]\s*C\d+/m, /^\d+\.\s+\S/m],
     core: true,
     fixHint: '动手前冻结 C1..Cn，每条须能被一条命令或断言证明。',
   },

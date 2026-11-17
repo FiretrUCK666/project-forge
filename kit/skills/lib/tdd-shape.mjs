@@ -71,6 +71,34 @@ export const TDD_SHAPES = Object.freeze([
     label: '安全与权限边界',
     when: '检测到鉴权/加密/凭据相关依赖或配置',
   },
+  {
+    id: 'build',
+    label: '构建、测试与发布链路',
+    when: '有构建脚本、CI 流水线或发布配置——凡是要「产出一个东西」的项目都算',
+    always: true,
+  },
+  {
+    id: 'observability',
+    label: '可观测性与运维',
+    when: '有长期运行的服务（Dockerfile / k8s / systemd / 守护进程配置）',
+  },
+  {
+    id: 'migration',
+    label: '迁移与兼容策略',
+    when: '有数据库迁移、版本化 API 或多版本共存痕迹',
+  },
+  {
+    id: 'decisions',
+    label: '关键决策记录',
+    when: '任何有一定历史的项目都该有——它防止已否掉的方案被重新拿出来讨论',
+    always: true,
+  },
+  {
+    id: 'glossary-only',
+    label: '已知限制与技术债',
+    when: '所有长期维护的项目都该有——不写不会让它消失，只会让接手的人以为是 bug',
+    always: true,
+  },
 ])
 
 /** 从文件路径清单里认出某类特征。只看路径，不求内容——路径已经足够可靠。 */
@@ -115,6 +143,19 @@ const PATH_PROBES = Object.freeze({
     /(?:^|\/)perf\//i,
     /\.bench\./i,
   ],
+  observability: [
+    /(?:^|\/)Dockerfile(?:\..+)?$/i,
+    /(?:^|\/)(?:k8s|helm)\//i,
+    /(?:^|\/)(?:systemd|supervisor)\//i,
+    /(?:^|\/)(?:logging|telemetry|metrics|tracing|observability)\//i,
+    /(?:^|\/)docker-compose\.(?:ya?ml|yml)$/i,
+  ],
+  migration: [
+    /(?:^|\/)(?:migrations?|migrate)\//i,
+    /(?:^|\/)alembic\.ini$/i,
+    /(?:^|\/)(?:v1|v2)\/.*\.(?:mjs|ts|js|go|py|java)$/i,
+    /(?:^|\/)(?:CHANGELOG|MIGRATION)\.md$/i,
+  ],
 })
 
 function anyMatch(paths, probes) {
@@ -141,7 +182,7 @@ export function detectTddShapes(facts = {}) {
     return Boolean(hit)
   }
 
-  for (const id of ['data', 'api', 'deploy', 'frontend', 'security', 'perf']) {
+  for (const id of ['data', 'api', 'deploy', 'frontend', 'security', 'perf', 'observability', 'migration']) {
     if (has(id)) enabled.add(id)
   }
 

@@ -98,7 +98,9 @@ export function applySectionPolicy(text, dropSections) {
       .replace(/<!--\s*section:[^>]*-->/, '')
       .replace(/<!--\s*\/section\s*-->/, '')
       .replace(/<!--[\s\S]*?-->/g, '')
-    return ANGLE_HINT_RE.test(body) ? '' : whole
+    // 两种「没填上」：模板自带的尖括号提示，以及渲染器的兜底值。
+    // 后者也要算——`{{REUSABLE}}` 没有取值时会被填成「待补齐」，那一节同样是空壳。
+    return ANGLE_HINT_RE.test(body) || UNFILLED_MARKER_RE.test(body) ? '' : whole
   })
   return sliced
     .replace(/<!--\s*section:\s*[a-z-]+(\s+optional)?\s*-->\n?/g, '')
@@ -109,6 +111,9 @@ export function applySectionPolicy(text, dropSections) {
 
 /** 模板尖括号里写着中文的，是给人看的填写提示，不是真实内容。 */
 const ANGLE_HINT_RE = /<[\u4e00-\u9fa5][^<>\n]{1,120}>/
+
+/** 渲染器的兜底值。出现它，说明这个占位没有真实取值。 */
+const UNFILLED_MARKER_RE = /^待补齐$/m
 
 /**
  * 把「示范块」换成实际内容。
@@ -152,6 +157,13 @@ export function renderDocTemplate(kind, { vars = {}, dropSections = null } = {})
   const withCriteria = fillCriteriaBlock(body, vars.CRITERIA)
   // CRITERIA 已经由示范块承接，不再走普通占位替换（否则会把示范块外的残留也填上）。
   const { CRITERIA: _crit, ...restVars } = vars
-  return fillTemplateVars(applySectionPolicy(withCriteria, dropSections), restVars)
+
+  // 顺序不能反：**先填占位，再裁章节**。
+  //
+  // 因为「这一节填上了没有」要看填完的结果——在占位还是 `{{REUSABLE}}` 的时候看，
+  // 什么也看不出来，于是所有可选节一律被当成「填上了」而保留下来，
+  // 生成的文档里塞满 `<待核实填写：...>`，过不了自己的审计。
+  const filled = fillTemplateVars(withCriteria, restVars)
+  return applySectionPolicy(filled, dropSections)
 }
 

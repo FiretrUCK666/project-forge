@@ -1524,9 +1524,19 @@ cases.push(['文档模板按项目形态裁剪，且填不上的可选节不留�
   // 正向 3：不填 optional 时，那一节必须整节消失（否则会带着尖括号占位过不了审计）。
   // 主干**故意留着**占位让人看见该写什么，所以这里只查可选节对应的标题还在不在。
   const sparse = renderDocTemplate('prd', { vars: { TITLE: 'T', TODAY: '2026-01-01' } })
-  for (const [id, title] of [['users', '用户身份与权限'], ['rules', '状态与业务规则'], ['nfr', '非功能要求']]) {
+  for (const [id, title] of [['users', '用户身份与权限'], ['rules', '状态与业务规则'], ['nfr', '非功能要求'], ['reuse', '复用既有模块']]) {
     if (sparse.includes(title)) return `未填的可选节「${title}」没有被剪掉——它会带着尖括号占位过不了审计`
   }
+
+  // 正向 4：**给了值就要保留**——否则等于把可选节全删了，模板再全也没用
+  const rich = renderDocTemplate('prd', {
+    vars: {
+      TITLE: 'T', TODAY: '2026-01-01', NON_GOALS: '- 不做 X', REUSABLE: '- 复用 profile.mjs',
+      CRITERIA: '- [ ] C1: x', DOOR: 'two-way', ROLLBACK: '反向提交',
+    },
+  })
+  if (!rich.includes('复用既有模块')) return '给了复用模块却把这一节剪掉了'
+  if (!rich.includes('门型与回滚')) return '给了门型却把这一节剪掉了'
 
   // 反向 1：主干填不上要留占位让人看见，不许静默删掉
   if (!/<[\u4e00-\u9fa5][^<>\n]{1,120}>/.test(sparse)) return '主干填不上时也没留占位——人不会知道这里要写东西'

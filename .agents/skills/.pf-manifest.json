@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-17T21:21:14.592Z",
+  "installedAt": "2026-11-17T21:15:17.233Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
@@ -77,13 +77,19 @@
       "sha256": "60883651e77a2dd5a524fc93c4fad1a77a32382b315157dbad899ba651cdd71a"
     },
     "dev-review/SKILL.md": {
-      "sha256": "50f465414107572df949f02e6449ed75d8048deda348fba9ef082a359c2b4187"
+      "sha256": "0cb39e16521caaae41c430834c95d0f85a96ce004047a138106ed5fdc6c8d8a6"
     },
     "dev-review/scripts/review-diff.mjs": {
       "sha256": "6dc00b378689136f39431fb27d869164fb4e05db64a5db46f4bb510ad2b3cb4a"
     },
+    "dev-review/scripts/review-empirical-state.mjs": {
+      "sha256": "16b0c3aaa8d11e9a5c2f656d2b334147473d30a7a85abc8351b196e4ad3579e1"
+    },
+    "dev-review/scripts/review-empirical.mjs": {
+      "sha256": "bea6678a56e57c32f1c0ac911dc6be053f8f0140714e3a9eacabba0429080c23"
+    },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "a473b9f0cbbe125372361ba62ed2f383c5648e9d91622a8e4ee6c7d4509a05ce"
+      "sha256": "1ab309037bc25bfb708293c5fcab9235fd8be6377f36504ff90239a7a496de28"
     },
     "dev-review/scripts/review-ledger.mjs": {
       "sha256": "e71e8ec7c1738c8f2020df29f29d4c3fc60a47b6428f02987f11bb16e3744882"
@@ -92,7 +98,7 @@
       "sha256": "b6479c67ffb98db6a987d7ff097f324f567d6220d6fc1d2cb7340d7399c10398"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "a62d7fb2a81a05a5ff6fc556ad7cb6def76986f2f58f7d1fdbdb9cbbe5481721"
+      "sha256": "c41c0b35568b91cec17f177017b88c3d971a765d3955f35d177b1a1b79521a54"
     },
     "lib/cli.mjs": {
       "sha256": "245da2422de1fee6cc357adfefea288a31fda6193201647269d000350466cd5e"
@@ -146,7 +152,7 @@
       "sha256": "8baf3ad3eb94be99a909289b98b96872f5b631a4fc3a4bd63418391032f69829"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "976e4113245261277590681f8ef0d0c3c611946f2ac02e1d6195b9044c9295b1"
+      "sha256": "e1aa0f345d84bce12c8250fb991c934b326b8966a6b17314561a2c120aa434b2"
     },
     "lib/ledger.mjs": {
       "sha256": "5762f4f618db4c62aa9c76f2c91a952e9d38d24881a5cc7bd7d6146fc6623387"

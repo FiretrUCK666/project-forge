@@ -26,14 +26,19 @@ import {
   assessBehavioralGate, assessDoor, assessStructuralGate, buildPackNextSteps, checkDocCodeParity,
   collectGateWeakeningHits, collectHighRiskHits, formatPackText, parseAcceptanceCriteria,
 } from './review-gates.mjs'
+import {
+  checkDirtyFaultResidueBeforeSync, computeEmpiricalRequirements, computeWorkspaceFingerprint,
+  emitGateBlock, evaluateIncludeDiffGate, getEffectiveStatusEntries, handleCheckEmpirical,
+  handleCheckFault, recordMechanicalPack,
+} from './review-empirical.mjs'
 import { handleOverride, handleRecord } from './review-ledger.mjs'
 import { parseRangeDiffNewCommits } from './review-locks.mjs'
 
-const SUBCOMMANDS = ['pack', 'record', 'override']
+const SUBCOMMANDS = ['pack', 'record', 'override', 'check-empirical', 'check-fault']
 
 function printHelp() {
   process.stdout.write([
-    '用法：node review-pack.mjs [pack|record|override] [dir] [options]',
+    '用法：node review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
     '',
     'Modes:',
     '  --local                       Review working tree + staged uncommitted changes',
@@ -41,6 +46,8 @@ function printHelp() {
     '  --base <ref>                  Review HEAD against <ref> (base...HEAD)',
     '  --task <id|auto> [--round N]  Build flow review pack (auto-syncs Tier 2 review-{id})',
     '  --pr <M>                      Build external/internal PR review pack (auto-runs untrusted scan)',
+    '  check-empirical               Execute empirical / C* commands inside target review slot/worktree',
+    '  check-fault                   Two-phase fault injection (--phase fail|restore --cmd "<command>")',
     '  record                        Record round verdict & track rebutted/resolved/stop-loss',
     '  override                      Unlock STOP_LOSS_ESCALATE with --human-approved --reason',
     '',
@@ -50,8 +57,10 @@ function printHelp() {
     '  --head <ref>                  Override head ref (default HEAD)',
     '  --untrusted-scan              Run static supply-chain & gate-weakening scan before execution',
     '  --human-approved-exec         Allow continuing past untrusted hazard gate (use --ignore-scripts)',
-    '  --include-diff                Embed full diffText inside --json output (default: hunk summary only)',
-    '  --reset-review-slot           Clean dirty Tier 2 review worktree before syncing HEAD',
+    '  --include-diff                Embed full diffText/patch after empirical + fault-injection closure',
+    '  --phase <fail|restore>        Phase for check-fault (fail = injected red test; restore = clean green check)',
+    '  --cmd <command>               Repeatable verification command for check-empirical / check-fault',
+    '  --reset-review-slot           Clean dirty Tier 2 review worktree before syncing HEAD (without --include-diff)',
     '  --json                        Emit machine-readable JSON',
     '',
     'Record / Override Options:',
@@ -61,7 +70,7 @@ function printHelp() {
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
     '  [--enforce-gates] [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
     '',
-    `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
+    `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
     '',
   ].join('\n'))
 }
@@ -126,6 +135,12 @@ function validateCliArgs(cli) {
   if (sub && !SUBCOMMANDS.includes(sub)) {
     throw new Error(`未知子命令：${sub}`)
   }
+  if (sub === 'check-fault') {
+    const phase = String(opts.phase ?? '').trim().toLowerCase()
+    if (phase !== 'fail' && phase !== 'restore') {
+      throw new Error('check-fault 必须指定 --phase fail 或 --phase restore')
+    }
+  }
 
   const hasLocal = Boolean(opts.local)
   const hasStaged = Boolean(opts.staged)
@@ -169,6 +184,196 @@ async function resolveTaskForPack(roots, opts) {
   return { taskId: null, task: null, mode: null }
 }
 
+async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {}) {
+  const { mainRoot } = roots
+  const resolvedTask = await resolveTaskForPack(roots, opts)
+  const task = resolvedTask.task
+  const mode = opts.staged ? 'staged'
+    : opts.local ? 'local'
+      : resolvedTask.mode ? resolvedTask.mode
+        : opts.base ? 'base' : 'local'
+  const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
+  const prNo = opts.pr ?? opts['external-pr'] ?? task?.prNumber ?? null
+
+  if (mode === 'pr') {
+    const prArg = opts.pr ?? opts['external-pr']
+    const prRecorded = task?.prNumber ?? null
+    const prResolved = prRecorded !== null && String(prRecorded) === String(prArg)
+    if (!prResolved) {
+      const msg = `BLOCKED_PR_UNRESOLVED: 没有拿到 PR #${prArg} 的真实信息（无可用 API 通道或该 PR 未被识别）。`
+        + '不能假装审过：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑，或用 --task <id> 审查已记录的本地任务。'
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PR_UNRESOLVED', exitCode: EXIT.UNTRUSTED_HAZARD, pr: prArg ?? null, error: msg }, null, 2)}\n`)
+      } else {
+        process.stdout.write(`${msg}\n`)
+      }
+      process.stderr.write(`${msg}\n`)
+      return { earlyExitCode: EXIT.UNTRUSTED_HAZARD }
+    }
+  }
+
+  let slotSyncRes = null
+  if (syncSlot) {
+    const dirtyCheck = await checkDirtyFaultResidueBeforeSync({
+      mainRoot,
+      gitDir: roots.gitDir,
+      opts,
+      task,
+      mode,
+      prNo,
+    })
+    if (dirtyCheck.blocked) {
+      return {
+        earlyExitCode: emitGateBlock({
+          opts,
+          code: dirtyCheck.code,
+          payload: {
+            status: dirtyCheck.code,
+            code: dirtyCheck.code,
+            exitCode: dirtyCheck.exitCode,
+            mode: dirtyCheck.mode,
+            round: dirtyCheck.round,
+            targetRoot: dirtyCheck.targetRoot,
+            dirtyFiles: dirtyCheck.dirtyFiles,
+            unrestoredFault: dirtyCheck.unrestoredFault,
+            nextSteps: dirtyCheck.nextSteps,
+            error: dirtyCheck.message,
+          },
+          textLines: [
+            dirtyCheck.code,
+            `Worktree : ${dirtyCheck.targetRoot}`,
+            `Reason   : ${dirtyCheck.message}`,
+            '',
+            '[NEXT STEP]',
+            ...dirtyCheck.nextSteps.map((s) => `  - ${s}`),
+          ],
+        }),
+      }
+    }
+
+    slotSyncRes = await syncTier2ReviewSlotIfNeeded({
+      mainRoot,
+      worktreeRoot: roots.workTreeRoot,
+      opts,
+      task,
+      mode,
+    })
+  }
+
+  const reviewRoot = await resolveReviewWorktree(mainRoot, roots.workTreeRoot, opts, task)
+
+  let round = opts.round ? Number(opts.round) : 1
+  if (!opts.round && task?.rounds?.length) {
+    round = nextReviewRound(task)
+  }
+  if (!Number.isInteger(round) || round < 1) round = 1
+
+  const headRef = opts.head ?? 'HEAD'
+  const fastHeadSha = headRef === 'HEAD' ? readHeadFast(resolveGitDirFast(reviewRoot), roots.gitDir)?.oid : null
+  let headSha = fastHeadSha
+  if (!headSha) {
+    const commitsExist = await hasCommits(reviewRoot)
+    const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
+    if (commitsExist && opts.head && !headRes.ok) {
+      process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
+      return { earlyExitCode: EXIT.ERROR }
+    }
+    headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
+  }
+
+  let baseRef = opts.base ?? null
+  let diffSpec
+  let diffScope
+  let roundLockNote = ''
+  let priorOpenMustFix = []
+  let rebuts = []
+
+  if (mode === 'local' || mode === 'staged') {
+    diffSpec = { mode }
+    diffScope = mode === 'staged' ? 'staged index' : 'working tree + staged index'
+  } else {
+    baseRef = opts.base ?? task?.baseSha ?? task?.baseBranch ?? (await resolveDefaultBaseRef(reviewRoot, headRef))
+    if (mode === 'task' && round >= 2 && Array.isArray(task?.rounds) && task.rounds.length > 0) {
+      const targetPrevRound = round === 2 ? 1 : round - 1
+      const prev = task.rounds.find((r) => r.round === targetPrevRound) ?? task.rounds[task.rounds.length - 1]
+      priorOpenMustFix = prev ? (prev.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved') : []
+      rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
+      const prevHead = prev?.headSha
+      const hasPrevLoose = Boolean(
+        prevHead && /^[0-9a-f]{40}$/i.test(prevHead) && roots.gitDir
+        && existsSync(join(roots.gitDir, 'objects', prevHead.slice(0, 2).toLowerCase(), prevHead.slice(2).toLowerCase())),
+      )
+      if (prevHead && (hasPrevLoose || (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok)) {
+        const fastAnc = headSha && headSha !== 'UNBORN' && roots.gitDir
+          ? isAncestorLinearFast(roots.gitDir, prevHead, headSha)
+          : null
+        const isAnc = fastAnc !== null
+          ? { ok: fastAnc }
+          : await gitRun(reviewRoot, ['merge-base', '--is-ancestor', prevHead, headRef])
+        const oldBase = prev?.baseSha ?? task?.roundBaseSha?.prevBaseSha
+        const newBase = task?.baseSha ?? task?.roundBaseSha?.newBaseSha ?? baseRef
+        if (!isAnc.ok && oldBase && newBase) {
+          if (oldBase === prevHead) {
+            diffSpec = { mode: 'range', range: `${newBase}..${headRef}` }
+            diffScope = `${newBase.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} rebased)`
+            roundLockNote = `Round ${round} rebased via sync`
+          } else {
+            const oldR = `${oldBase}..${prevHead}`
+            const newR = `${newBase}..${headSha}`
+            const cachedShas = /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR) && roots.gitDir
+              ? getCachedRangeDiffCommits(roots.gitDir, oldR, newR)
+              : null
+            let shas = cachedShas
+            if (!shas) {
+              const rd = await gitRun(reviewRoot, ['range-diff', '--no-color', oldR, newR])
+              if (rd.ok) {
+                shas = parseRangeDiffNewCommits(rd.stdout)
+                if (roots.gitDir && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR)) {
+                  setCachedRangeDiffCommits(roots.gitDir, oldR, newR, shas)
+                }
+              }
+            }
+            if (shas) {
+              diffSpec = { mode: 'commits', commits: shas }
+              diffScope = `range-diff (${shas.length} changed/new commit(s))`
+              roundLockNote = `Round ${round} rebased via sync (range-diff incremental lock)`
+            }
+          }
+        }
+        if (!diffSpec) {
+          diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
+          diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
+          roundLockNote = round === 2
+            ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
+            : `R${targetPrevRound}_HEAD..HEAD binary Pass/Fail verification only; no new findings`
+        }
+      } else if (baseRef) {
+        diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
+        diffScope = `${baseRef}...${headRef}`
+        roundLockNote = `Round ${round} (prior head unavailable; fell back to base diff)`
+      }
+    }
+    if (!diffSpec) {
+      if (!baseRef) {
+        process.stderr.write('Error: cannot resolve base ref (unborn or single-commit repo); pass --base <ref>.\n')
+        return { earlyExitCode: EXIT.ERROR }
+      }
+      diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
+      diffScope = `${baseRef}...${headRef}`
+      if (mode === 'task') roundLockNote = 'Round 1 full diff'
+    }
+  }
+
+  const diff = await collectDiff(reviewRoot, diffSpec)
+  const reviewProfile = parseDevProfile(reviewRoot)
+  const effectiveProfile = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewProfile : parseDevProfile(mainRoot)
+
+  return {
+    task, mode, isFlowMode, prNo, baseRef, slotSyncRes, reviewRoot, round, headSha,
+    diffSpec, diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
+  }
+}
+
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help') || argv.includes('-h')) {
     printHelp()
@@ -188,12 +393,12 @@ async function main(argv = process.argv.slice(2)) {
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
-        'review-token',
+        'review-token', 'phase',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
         'reason', 'visual-evidence', 'agent', 'evidence',
       ],
-      multiFlags: ['must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
-      usageHint: 'review-pack.mjs [pack|record|override] [dir] [options]',
+      multiFlags: ['cmd', 'must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
+      usageHint: 'review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
     })
     validateCliArgs(cli)
   } catch (err) {
@@ -215,145 +420,32 @@ async function main(argv = process.argv.slice(2)) {
     if (sub === 'override') return await handleOverride(opts, roots)
 
     const { mainRoot } = roots
-    const resolvedTask = await resolveTaskForPack(roots, opts)
-    const task = resolvedTask.task
-    const mode = opts.staged ? 'staged'
-      : opts.local ? 'local'
-        : resolvedTask.mode ? resolvedTask.mode
-          : opts.base ? 'base' : 'local'
-    const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
-
-    if (mode === 'pr') {
-      const prNo = opts.pr ?? opts['external-pr']
-      const prRecorded = task?.prNumber ?? null
-      const prResolved = prRecorded !== null && String(prRecorded) === String(prNo)
-      if (!prResolved) {
-        const msg = `BLOCKED_PR_UNRESOLVED: 没有拿到 PR #${prNo} 的真实信息（无可用 API 通道或该 PR 未被识别）。`
-          + '不能假装审过：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑，或用 --task <id> 审查已记录的本地任务。'
-        if (opts.json) {
-          process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PR_UNRESOLVED', exitCode: EXIT.UNTRUSTED_HAZARD, pr: prNo ?? null, error: msg }, null, 2)}\n`)
-        } else {
-          process.stdout.write(`${msg}\n`)
-        }
-        process.stderr.write(`${msg}\n`)
-        return EXIT.UNTRUSTED_HAZARD
-      }
+    if (sub === 'check-empirical' || sub === 'check-fault') {
+      const ctx = await prepareReviewTargetContext(roots, opts, { syncSlot: false })
+      if (ctx.earlyExitCode !== undefined) return ctx.earlyExitCode
+      const parity = checkDocCodeParity(ctx.reviewRoot, mainRoot, ctx.diff, ctx.effectiveProfile, ctx.task)
+      const gateWeakenedHits = collectGateWeakeningHits(ctx.reviewRoot, ctx.diff)
+      const behavioralGate = assessBehavioralGate({
+        diff: ctx.diff,
+        devProfile: ctx.effectiveProfile,
+        task: ctx.task,
+        headSha: ctx.headSha,
+        gateWeakenedHits,
+        parity,
+        untrustedAdvisories: [],
+      })
+      const empCtx = { ...ctx, opts, roots, behavioralGate, gateWeakenedHits, scanUntrustedDiff }
+      return sub === 'check-empirical'
+        ? await handleCheckEmpirical(empCtx)
+        : await handleCheckFault(empCtx)
     }
 
-    const slotSyncRes = await syncTier2ReviewSlotIfNeeded({
-      mainRoot,
-      worktreeRoot: roots.workTreeRoot,
-      opts,
-      task,
-      mode,
-    })
-
-    const reviewRoot = await resolveReviewWorktree(mainRoot, roots.workTreeRoot, opts, task)
-
-    let round = opts.round ? Number(opts.round) : 1
-    if (!opts.round && task?.rounds?.length) {
-      round = nextReviewRound(task)
-    }
-    if (!Number.isInteger(round) || round < 1) round = 1
-
-    const headRef = opts.head ?? 'HEAD'
-    const fastHeadSha = headRef === 'HEAD' ? readHeadFast(resolveGitDirFast(reviewRoot), roots.gitDir)?.oid : null
-    let headSha = fastHeadSha
-    if (!headSha) {
-      const commitsExist = await hasCommits(reviewRoot)
-      const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
-      if (commitsExist && opts.head && !headRes.ok) {
-        process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
-        return EXIT.ERROR
-      }
-      headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
-    }
-
-    let diffSpec
-    let diffScope
-    let roundLockNote = ''
-    let priorOpenMustFix = []
-    let rebuts = []
-
-    if (mode === 'local' || mode === 'staged') {
-      diffSpec = { mode }
-      diffScope = mode === 'staged' ? 'staged index' : 'working tree + staged index'
-    } else {
-      const baseRef = opts.base ?? task?.baseSha ?? task?.baseBranch ?? (await resolveDefaultBaseRef(reviewRoot, headRef))
-      if (mode === 'task' && round >= 2 && Array.isArray(task?.rounds) && task.rounds.length > 0) {
-        const targetPrevRound = round === 2 ? 1 : round - 1
-        const prev = task.rounds.find((r) => r.round === targetPrevRound) ?? task.rounds[task.rounds.length - 1]
-        priorOpenMustFix = prev ? (prev.mustFix ?? []).filter((m) => m.status !== 'rebutted' && m.status !== 'resolved') : []
-        rebuts = [...(Array.isArray(task.rebuts) ? task.rebuts : []), ...(Array.isArray(prev?.rebuts) ? prev.rebuts : [])]
-        const prevHead = prev?.headSha
-        const hasPrevLoose = Boolean(
-          prevHead && /^[0-9a-f]{40}$/i.test(prevHead) && roots.gitDir
-          && existsSync(join(roots.gitDir, 'objects', prevHead.slice(0, 2).toLowerCase(), prevHead.slice(2).toLowerCase())),
-        )
-        if (prevHead && (hasPrevLoose || (await gitRun(reviewRoot, ['rev-parse', '--verify', prevHead])).ok)) {
-          const fastAnc = headSha && headSha !== 'UNBORN' && roots.gitDir
-            ? isAncestorLinearFast(roots.gitDir, prevHead, headSha)
-            : null
-          const isAnc = fastAnc !== null
-            ? { ok: fastAnc }
-            : await gitRun(reviewRoot, ['merge-base', '--is-ancestor', prevHead, headRef])
-          const oldBase = prev?.baseSha ?? task?.roundBaseSha?.prevBaseSha
-          const newBase = task?.baseSha ?? task?.roundBaseSha?.newBaseSha ?? baseRef
-          if (!isAnc.ok && oldBase && newBase) {
-            if (oldBase === prevHead) {
-              diffSpec = { mode: 'range', range: `${newBase}..${headRef}` }
-              diffScope = `${newBase.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} rebased)`
-              roundLockNote = `Round ${round} rebased via sync`
-            } else {
-              const oldR = `${oldBase}..${prevHead}`
-              const newR = `${newBase}..${headSha}`
-              const cachedShas = /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR) && roots.gitDir
-                ? getCachedRangeDiffCommits(roots.gitDir, oldR, newR)
-                : null
-              let shas = cachedShas
-              if (!shas) {
-                const rd = await gitRun(reviewRoot, ['range-diff', '--no-color', oldR, newR])
-                if (rd.ok) {
-                  shas = parseRangeDiffNewCommits(rd.stdout)
-                  if (roots.gitDir && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(oldR) && /^[0-9a-f]{40}\.\.[0-9a-f]{40}$/i.test(newR)) {
-                    setCachedRangeDiffCommits(roots.gitDir, oldR, newR, shas)
-                  }
-                }
-              }
-              if (shas) {
-                diffSpec = { mode: 'commits', commits: shas }
-                diffScope = `range-diff (${shas.length} changed/new commit(s))`
-                roundLockNote = `Round ${round} rebased via sync (range-diff incremental lock)`
-              }
-            }
-          }
-          if (!diffSpec) {
-            diffSpec = { mode: 'range', range: `${prevHead}..${headRef}` }
-            diffScope = `${prevHead.slice(0, 8)}..${headSha.slice(0, 8)} (Round ${round} incremental)`
-            roundLockNote = round === 2
-              ? 'R1 unchanged hunks LOCKED; review open Must-Fix + R1_HEAD..HEAD + rebuts only'
-              : `R${targetPrevRound}_HEAD..HEAD binary Pass/Fail verification only; no new findings`
-          }
-        } else if (baseRef) {
-          diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
-          diffScope = `${baseRef}...${headRef}`
-          roundLockNote = `Round ${round} (prior head unavailable; fell back to base diff)`
-        }
-      }
-      if (!diffSpec) {
-        if (!baseRef) {
-          process.stderr.write('Error: cannot resolve base ref (unborn or single-commit repo); pass --base <ref>.\n')
-          return EXIT.ERROR
-        }
-        diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
-        diffScope = `${baseRef}...${headRef}`
-        if (mode === 'task') roundLockNote = 'Round 1 full diff'
-      }
-    }
-
-    const diff = await collectDiff(reviewRoot, diffSpec)
-    const reviewProfile = parseDevProfile(reviewRoot)
-    const effectiveProfile = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewProfile : parseDevProfile(mainRoot)
+    const ctx = await prepareReviewTargetContext(roots, opts, { syncSlot: true })
+    if (ctx.earlyExitCode !== undefined) return ctx.earlyExitCode
+    const {
+      task, mode, isFlowMode, prNo, baseRef, slotSyncRes, reviewRoot, round, headSha,
+      diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
+    } = ctx
 
     const shouldScanUntrusted = Boolean(opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || task?.role === 'inbound-external-pr')
     let untrustedWarnings = []
@@ -437,11 +529,103 @@ async function main(argv = process.argv.slice(2)) {
       }
     }
 
-    const nextSteps = buildPackNextSteps({
-      opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate,
+    const includeDiff = Boolean(opts['include-diff'])
+    const dirtyEntries = await getEffectiveStatusEntries(reviewRoot, mainRoot)
+    const workspaceFingerprint = await computeWorkspaceFingerprint({
+      reviewRoot, mainRoot, headSha, diff, statusEntries: dirtyEntries,
+    })
+    const empiricalRequirements = computeEmpiricalRequirements({
+      diff, behavioralGate, effectiveProfile, task, gateWeakenedHits,
+    })
+    let empiricalGate = evaluateIncludeDiffGate({
+      gitDir: roots.gitDir,
+      mode,
+      task,
+      round,
+      prNo,
+      baseRef,
+      reviewRoot,
+      mainRoot,
+      headSha,
+      diffScope,
+      workspaceFingerprint,
+      dirtyEntries,
+      requirements: empiricalRequirements,
+      behavioralGate,
+      opts,
     })
 
-    const includeDiff = Boolean(opts['include-diff'])
+    if (includeDiff && !empiricalGate.readyForDiff) {
+      const blockCode = empiricalGate.dirtyFaultResidue ? 'BLOCKED_DIRTY_FAULT_RESIDUE' : 'BLOCKED_EMPIRICAL_FIRST'
+      const msg = blockCode === 'BLOCKED_DIRTY_FAULT_RESIDUE'
+        ? 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作位存在未还原复绿的故障注入残留，禁止输出 --include-diff。'
+        : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`
+      const payload = {
+        status: blockCode,
+        code: blockCode,
+        exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode,
+        round,
+        headSha,
+        diffScope,
+        workspaceFingerprint,
+        missingSteps: empiricalGate.missingSteps,
+        unblockCommands: empiricalGate.unblockCommands,
+        nextSteps: empiricalGate.unblockCommands,
+        empiricalGate,
+        error: msg,
+      }
+      const textLines = [
+        blockCode,
+        `Scope    : ${diffScope} (HEAD ${headSha === 'UNBORN' ? 'UNBORN' : headSha.slice(0, 8)})`,
+        `Target   : ${posixPath(reviewRoot)} | Fingerprint: ${workspaceFingerprint.slice(0, 12)}`,
+        `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : 'restore verification required'}`,
+        `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`,
+        '',
+        '[NEXT STEP]',
+        ...empiricalGate.unblockCommands.map((c, idx) => `  ${idx + 1}. ${c}`),
+      ]
+      return emitGateBlock({ opts, code: blockCode, payload, textLines })
+    }
+
+    if (!includeDiff) {
+      recordMechanicalPack({
+        gitDir: roots.gitDir,
+        mode,
+        task,
+        round,
+        prNo,
+        baseRef,
+        reviewRoot,
+        headSha,
+        diffScope,
+        workspaceFingerprint,
+        untrustedScanClean: shouldScanUntrusted ? untrustedWarnings.length === 0 : undefined,
+        humanApprovedExec: opts.humanApprovedExec,
+      })
+      empiricalGate = evaluateIncludeDiffGate({
+        gitDir: roots.gitDir,
+        mode,
+        task,
+        round,
+        prNo,
+        baseRef,
+        reviewRoot,
+        mainRoot,
+        headSha,
+        diffScope,
+        workspaceFingerprint,
+        dirtyEntries,
+        requirements: empiricalRequirements,
+        behavioralGate,
+        opts,
+      })
+    }
+
+    const nextSteps = buildPackNextSteps({
+      opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate,
+    })
+
     const pack = {
       status: opts['untrusted-scan'] && untrustedWarnings.length === 0 ? 'UNTRUSTED_SCAN_PASS' : 'PACK_READY',
       mode,
@@ -462,7 +646,7 @@ async function main(argv = process.argv.slice(2)) {
         hunkIndex: diff.hunkIndex,
         summary: diff.summary,
         diffIncluded: includeDiff,
-        ...(!includeDiff ? { includeDiffHint: 'Pass --include-diff to embed full diffText in JSON' } : {}),
+        ...(!includeDiff ? { includeDiffHint: 'Pass --include-diff after empirical & fault-injection closure to embed full diffText in JSON' } : {}),
       },
       task: task ?? null,
       criteria,
@@ -475,6 +659,7 @@ async function main(argv = process.argv.slice(2)) {
       behavioralGate,
       structuralGate,
       doorAssessment,
+      empiricalGate,
       untrustedWarnings,
       untrustedAdvisories,
       headMismatchWarning,

@@ -401,10 +401,13 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push('')
     lines.push('按这个顺序做，每一步都要留输出：')
     lines.push('')
-    lines.push('1. **复跑判据**：每条 C* 找到能证伪它的命令，在审查工作位里跑。跑不通，这条判据有问题。')
-    lines.push('2. **故障注入**：挑一处核心判定改坏，同一条判据必须变红。不变红，说明那条判据拦不住东西。')
-    lines.push('3. **还原复绿**：\`git checkout -- .\` 之后必须重新通过。')
-    lines.push('4. **要看具体改动时**再 \`--include-diff\` 取全文——先定位到哪一块，再去看那一块。')
+    const rpPrefix = 'node .agents/skills/dev-review/scripts/review-pack.mjs'
+    const rpTarget = taskId ? `--task ${taskId} --round ${nextRound}` : '--task <任务号>'
+    lines.push('1. **机械包建基线**：`' + `${rpPrefix} ${rpTarget}` + '`（仅输出 `hunkIndex` 与门禁摘要，不打印补丁正文）。')
+    lines.push('2. **复跑判据（实证）**：在审查工作位跑能证伪每条 C* 的命令：`' + `${rpPrefix} check-empirical ${rpTarget} [--cmd "<命令>"]` + '`。跑不通，这条判据有问题。')
+    lines.push('3. **故障注入（变红）**：挑一处核心判定改坏后运行 `' + `${rpPrefix} check-fault --phase fail ${rpTarget} --cmd "<命令>"` + '`（未改工作区报 `BLOCKED_FAULT_NO_MUTATION`，仍退出 0 报 `BLOCKED_FAULT_NOT_CAUGHT`）。')
+    lines.push('4. **还原复绿**：`git checkout -- .` 之后运行 `' + `${rpPrefix} check-fault --phase restore ${rpTarget} --cmd "<命令>"` + '` 校验工作区回到基线指纹并重新通过（脏残留报 `BLOCKED_DIRTY_FAULT_RESIDUE`）。')
+    lines.push('5. **按需读 diff**：上述实证闭环通过后再运行 `' + `${rpPrefix} ${rpTarget} --include-diff` + '` 取全文（未过闭环退出码 3 返回 `BLOCKED_EMPIRICAL_FIRST`）。')
     lines.push('')
     lines.push('记结论时 \`--evidence\` 必填，写你实际跑的命令与输出摘要。没有佐证的通过，与没通过是一回事。')
     lines.push('')

@@ -1020,6 +1020,14 @@ export const INJECTIONS = [
     expect: '写操作必须联网探通道',
   },
   {
+    id: 'I116',
+    what: '审核 diff 只剩文件清单（正文 0 字节，报告看起来正常）',
+    file: 'kit/skills/dev-review/scripts/review-diff.mjs',
+    from: "  const argsBase = ['--no-optional-locks', 'diff', '--raw', '--unified=3', '--no-ext-diff', '--no-color']",
+    to: "  const argsBase = ['--no-optional-locks', 'diff', '--raw', '--no-ext-diff', '--no-color']",
+    expect: '审核 diff 里必须有补丁正文',
+  },
+  {
     id: 'I82',
     what: '多份无主 SPEC 不再报（整体算不算做完又变成没人管）',
     file: 'kit/skills/dev-plan/scripts/doc-audit.mjs',

@@ -47,7 +47,7 @@ flowchart LR
 | --- | --- | --- |
 | 第 7 技能与功能地图 | 建立 `dev-verify-tools` 与 `docs/feature-map.json` 单一真相源，草稿锁仓外 | `kit/skills/dev-verify-tools/` (new)、`kit/skills/lib/feature-map.mjs` (new)、`docs/feature-map.json` (new) |
 | 免手工日期过时校验 | 基于 `symbol-index` 与 Git tree 基线对比及风险分级处置 | `kit/skills/lib/feature-map.mjs` (new)、`kit/skills/lib/symbol-index.mjs` |
-| 审查先实证再 Diff | 无论地图有无工具均先注入 `businessFlows` + 邻域跑实证再开 `--include-diff` | `kit/skills/dev-review/scripts/review-context.mjs` (new)、`review-pack.mjs`、`review-empirical.mjs` (new) |
+| 审查先实证再 Diff | 无论地图有无工具均先注入 `businessFlows` + 邻域跑实证再开 `--include-diff` | `kit/skills/dev-review/scripts/review-context.mjs` (new)、`review-pack.mjs`、`review-empirical.mjs` |
 | 三大场景与清理闭环 | 创造、自动复用、体检清理完整跑通，清理时销毁仓外草稿 | `kit/skills/dev-verify-tools/scripts/verify-tools.mjs` (new)、`kit/skills/dev-flow/scripts/flow-cleanup.mjs` |
 
 ## 一、背景与边界声明
@@ -57,9 +57,9 @@ flowchart LR
    - 审查工具与辅助测试草稿容易临时写入仓库工作区产生脏提交或无人清理；而靠人工标注「工具更新时间」极易遗忘与腐败。
    - 在没有注册预设验证工具的新功能或改造上，`dev-review` 容易退化成先扫源码 diff 再凭感觉出结论，忽略上下文关联业务流与相邻模块的真实运行回归测试。
 2. **明确边界**：
-   - `docs/feature-map.json` (new) 专注「功能流、业务入口与验证工具索引」，**不向 `docs/TDD.md` 复制工具清单**；`docs/TDD.md` 仍专注架构、边界与设计约束。
+   - `docs/feature-map.json` (new) 专注「功能流、业务入口与验证工具索引」，**不向 `docs/TDD.md` 复制工具清单**且**不往受跟踪的 JSON 内写入易变局部哈希**；`docs/TDD.md` 仍专注架构、边界与设计约束。
    - `dev-verify-tools` 管**验证工具资产**的发现、仓外试制、沉淀、过时检查与体检清理；把大量业务场景自动化回归测试正式写进目标仓原生测试目录的任务专归 Wave C-2 右翼 `C4` 的 `dev-iterate/` (new)。
-   - 本切片不改动 `kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`equip.mjs`、`govern-tests.mjs` 与 `govern-checks.mjs`，保持与 `C4` 的完全平行隔离。
+   - 本切片不改动 `kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`flow-lifecycle-hooks.mjs` (new)、`templates/`、`govern-tests.mjs` 与 `govern-checks.mjs`，保持与 `C4` 写域零交叠；因新增第 7 技能 `dev-verify-tools/` (new)，`C3` 须在本 PR 内执行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步刷新 `.agents/skills/` 与 `AGENTS.md` `意图路由`（绝不手改 `templates/agents-project.md`）。
 
 ## 二、设计方案与契约变更
 
@@ -88,7 +88,7 @@ flowchart LR
 - **抽出上下文装载模块（`kit/skills/dev-review/scripts/review-context.mjs` (new)）**：
   - 将上下文拼装、邻域图构建与 `feature-map` 查询从 `review-pack.mjs` 抽入 `review-context.mjs` (new)，把 `review-pack.mjs` 压缩至 `<= 660L`。
   - 根据本次 `git diff` 变动文件，查询 `docs/feature-map.json` (new) 及 `repo-map` 依赖逆邻域，无条件装入：受波及的全部 `businessFlows`、直接调用/被调用的相邻模块接口契约、可用运行时验证环境、以及命中的验证工具或缺口提示。
-- **审查先实证后 Diff 强顺序（`review-pack.mjs`、`review-gates.mjs`、`review-empirical.mjs` (new)、`kit/skills/dev-review/SKILL.md`）**：
+- **审查先实证后 Diff 强顺序（`review-pack.mjs`、`review-gates.mjs`、`review-empirical.mjs`、`kit/skills/dev-review/SKILL.md`）**：
   - 当评审任务要求输出 `--include-diff`（源码修改对比）时，前置门控检查本次审查会话是否已登记针对受影响 `businessFlows` 与相邻模块的真实运行实证证据：
     - 若功能地图存在健康工具 -> 强制优先调运行结果入证；
     - 若功能地图工具过期（`medium`/`high`）或**压根未注册任何预设工具** -> 绝不允许以「无工具」为借口跳过运行而直接看 diff！系统在首轮审查包直接下发可执行实证任务单，指示借助现有 E2E、模块测试命令或仓外 `scratch/{taskId}/` 临时验证脚本跑通实际受波及功能与相邻模块边界；
@@ -122,19 +122,19 @@ flowchart LR
    - `kit/skills/dev-review/scripts/review-context.mjs` (new)
    - `kit/skills/dev-review/scripts/review-pack.mjs`
    - `kit/skills/dev-review/scripts/review-gates.mjs`
-   - `kit/skills/dev-review/scripts/review-empirical.mjs` (new)
-4. **独立双向夹具**：
+   - `kit/skills/dev-review/scripts/review-empirical.mjs`
+4. **独立双向夹具与派生装配同步**：
    - `scripts/dev/fixtures-stagec-c3.mjs` (new)
    - `scripts/dev/injections-data-stagec-c3.mjs` (new)
-   - 合并 Wave C-2 时由 `equip.mjs` 同步 `.agents/skills/`。
+   - 在本 PR 内运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步派生 `.agents/skills/` 与 `AGENTS.md` `意图路由`。
 
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C9: （SC9）新增第 7 技能 `dev-verify-tools/` (new) 与唯一机读功能地图 `docs/feature-map.json` (new)（无冗余复写入 `docs/TDD.md`）；由 `repo-map.mjs` 自动从 E2E/脚本/`businessFlows` 预填并完成本仓自举；临时验证草稿锁入仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 并在 `flow cleanup`/`abort` 时确定性彻底销毁。
-- [ ] C10: （SC10）落地不依赖手工时间戳/日期的工具过时校验：通过 `symbol-index.mjs` 导出符号与 Git tree 基线对比 `{gitCommonDir}/project-forge-verify/cache.json` 自动判 `stale`，并按低/中/高风险执行告警提示、E2E 兜底或硬阻断策略。
-- [ ] C11: （SC11）重构 `dev-review`（拆出 `review-context.mjs` (new)），无论 `docs/feature-map.json` 是否存在预设工具，均强制注入 `businessFlows`、相邻模块与运行时能力并在输出 `--include-diff` 前强制完成真实运行或端到端实证校验。
-- [ ] C12: （SC12）完整跑通 `dev-verify-tools` 三大自然语言/斜杠核心场景——创造新工具（仓外草稿成熟后沉淀注册入 `docs/feature-map.json`）、自动复用已有工具（含过时分级处置）及工具体检清理（消除僵尸引用与高风险盲区）。
+- [ ] C9: （SC9）新增第 7 技能 `dev-verify-tools/` (new) 与唯一机读功能地图 `docs/feature-map.json` (new)（`verificationTools[]` + `testRefs`，无局部哈希且无冗余复写入 `docs/TDD.md`）；由 `repo-map.mjs` 自动从 E2E/脚本/`businessFlows` 预填并完成本仓自举；临时验证草稿锁入仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 并在 `flow cleanup`/`abort` 时确定性彻底销毁。
+- [ ] C10: （SC10）落地不依赖手工时间戳/日期的工具过时校验：通过 `symbol-index.mjs` 导出符号与 Git tree 基线对比仓外 `{gitCommonDir}/project-forge-verify/cache.json` 自动判 `stale`，并按低/中/高风险执行告警提示、E2E 兜底或硬阻断策略。
+- [ ] C11: （SC11）重构 `dev-review`（拆出 `review-context.mjs` (new)），无论 `docs/feature-map.json` (new) 是否存在预设工具，均强制注入 `businessFlows`、相邻模块与运行时能力并在输出 `--include-diff` 前强制完成真实运行或端到端实证校验。
+- [ ] C12: （SC12）完整跑通 `dev-verify-tools` 三大自然语言/斜杠核心场景——创造新工具（仓外草稿成熟后沉淀注册入 `docs/feature-map.json` (new)）、自动复用已有工具（含过时分级处置）及工具体检清理（消除僵尸引用与高风险盲区）。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -143,7 +143,7 @@ flowchart LR
 2. **紧文件拆分布局与行数控制**：
    - `kit/skills/dev-review/scripts/review-pack.mjs`（拆出 `review-context.mjs` (new)，主文件控制在 `<= 660L`）
    - `kit/skills/dev-review/scripts/review-gates.mjs`（控制在 `<= 730L`）
-   - `kit/skills/dev-review/scripts/review-empirical.mjs` (new)（控制在 `<= 740L`）
+   - `kit/skills/dev-review/scripts/review-empirical.mjs`（现 695L，控制 `<= 740L`）
    - `kit/skills/lib/feature-map.mjs` (new)（`<= 600L`）、`kit/skills/dev-verify-tools/scripts/verify-tools.mjs` (new)（`<= 650L`）。
 3. **关键故障点与回滚**：
    - **纯文案改动被误卡实证**：继续对齐协议 `LOW_RISK_NON_EXEC_EXTS` 纯非可执行文档白名单，保证改错别字或 Markdown 文档不触发不必要运行实证阻断。
@@ -153,7 +153,7 @@ flowchart LR
 ## 七、上线与兼容策略
 
 - **无 `docs/feature-map.json` 存量仓兼容**：老仓库首次运行 `review-pack` 或 `repo-map` 时自动触发轻量化预填并容错执行；缺失文件时既不崩盘，也不允许降级免除 `businessFlows` 先实证要求。
-- **Wave C-2 并行协同**：与 `C4` 全程 0 交叠文件，后者合并后同步跑 `node scripts/equip.mjs .` 与全量 `merge-gate`。
+- **Wave C-2 并行协同**：与 `C4` 全程 0 核心源/模板文件交叠；各自 PR 内均运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 刷新 `.agents/skills/` 与派生路由，波次内后合并者 rebase 后重跑该双指令并跑全量 `merge-gate`。
 
 ## 澄清与补充记录
 

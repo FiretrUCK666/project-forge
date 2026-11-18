@@ -46,18 +46,18 @@ flowchart LR
 | 第 6 技能 `dev-edit` | 覆全量改码入口并前置入 `verify`；阻断压制/墓碑/反作弊/`>800L` | `kit/skills/dev-edit/` (new)、`kit/skills/dev-edit/scripts/` (new)、`kit/skills/dev-edit/scripts/edit-gate.mjs` (new) |
 | 三层纠偏倒金字塔 | 扩展信号指纹、废除默认写 `AGENTS.md`、复发 `>=2` 升 Tier 1/2 | `kit/skills/lib/signals.mjs`、`kit/skills/dev-review/scripts/review-ledger.mjs`、`kit/skills/dev-govern/scripts/govern-retro.mjs` |
 | `dev-govern` 自动触发 | `finalize`/`verify`/`merge`/`cleanup` 轻量无感审计与复盘 | `kit/skills/dev-govern/scripts/govern-audit.mjs`、`kit/skills/dev-govern/scripts/govern-state.mjs` |
-| 清除测试分层假阳性 | 删去 `qa/`/`sit/` 硬编码误判；适配原生测试分层与小仓 | `kit/skills/dev-govern/scripts/govern-tests.mjs`、`kit/skills/lib/profile-sniffer.mjs` |
+| 清除测试分层假阳性 | 删去 `govern-tests.mjs:38` 固定路径正则误判；适配原生测试分层与小仓 | `kit/skills/dev-govern/scripts/govern-tests.mjs`、`kit/skills/lib/profile-sniffer.mjs` |
 
 ## 一、背景与边界声明
 
 1. **当前架构痛点**：
    - 现有 `static-gates` 仅部分挂在事后检查，缺少独立的改码阶段规范技能 `dev-edit/` (new)，导致 `Case 1`、`Case 2`、`rework` 及应急直接改码场景易混入 `HACK`/`@ts-ignore`/死代码/单测凑数/超长文件，到 PR 审查阶段才被迫打回返工。
-   - `govern-retro.mjs` 长期把复发教训自动建议写回 `AGENTS.md`（Tier 3 提示词层），违背「信任倒金字塔」，造成契约膨胀却无法在确定性编译或静态层面消灭同类 bug。
-   - `dev-govern` 仍靠用户记命令手跑，`merge`/`cleanup` 结束不复盘；`govern-tests.mjs` 硬编码 `qa/`、`sit/` 路径前缀并在小型精简仓库反复误报 `tests.unfiltered-quick-test`。
+   - `govern-retro.mjs` 长期把复发教训自动建议写回 `AGENTS.md`（Tier 3 提示词层），违背「信任倒金字塔」，造成契约膨胀却无法在确定性编译或静态层面消灭同类 bug；同时 `review-ledger.mjs` 第 194–199 行仅凭 `comment?.ok` 判断 `synced` 而忽略 `labelRes` 失败，且第 546、688 行仍直接调用 `writeTaskLedger`。
+   - `dev-govern` 仍靠用户记命令手跑，`merge`/`cleanup` 结束不复盘；`govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 将 `(?:e2e|integration|browser|perf|benchmark|benchmarks|load|stress)` 路径段整体排除出单元测试分层，并在小型精简仓库反复误报 `tests.unfiltered-quick-test`。
 2. **明确边界**：
-   - `dev-edit` 只做改码期边界、工程质量、词法静态门禁与复用前导，不取代 `dev-review` 双门实证或 `dev-iterate` 测试生成。
+   - `dev-edit` 只做改码期边界、工程质量、词法静态门禁与复用前导，不取代 `dev-review` 双门实证或 `dev-iterate` 测试生成；**`edit-gate` 与 Tier 2 检查绝不硬绑定任何第三方外部 linter 二进制**，仅针对目标仓已有配置文件按需调用可选原生命令。
    - `dev-govern` **严守静态审计与历史信号复盘边界**：绝不主动编写业务/并发测试或启动目标服务（该动态职责专归 Stage C-4 `dev-iterate`）。
-   - 本切片不触碰 `dev-flow/`、`templates/`、`SKILL.md`、`AGENTS.md` 等属于 `C1` 的文件；自动触发由 `C1` 预置在 `flow-lifecycle-hooks.mjs` (new) 的 CLI 契约驱动。
+   - 本切片不触碰 `dev-flow/`、`templates/`、`SKILL.md` 等属于 `C1` 的文件；自动触发由 `C1` 预置在 `flow-lifecycle-hooks.mjs` (new) 的 CLI 契约驱动，但 `C2` 新增第 6 技能后**必须在本 PR 内运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步派生 `.agents/skills/` 与 `AGENTS.md` `意图路由`**（绝不手改 `templates/agents-project.md`）。
 
 ## 二、设计方案与契约变更
 
@@ -78,12 +78,12 @@ flowchart LR
       3. **`arch-rules` 越界导入拦截**：读取项目 `AGENTS.md` `arch-rules` 单向依赖表，在纯代码视图的 `import`/`require`/`use` 中检查非法反向依赖。
       4. **单测反作弊检查**：在新增或变更测试文件中阻断零断言用例、`>= 5` 个 mock 仅校验调用次数的纯 Mock 自证、`>= 1000ms` 硬编码 `sleep`/`setTimeout` 等待，及非无头 UI 测试模式。
       5. **文件膨胀拦截**：单源文件 `> 800` 行硬阻断，进入 `730–800` 行紧文件区输出拆分建议。
-    - **原生工具链联动**：结合 `kit/skills/lib/profile-sniffer.mjs` 探测出的目标仓实际 ESLint/TS/Ruff/Clippy/GoVet 配置，在 `--with-native` 或门禁提示中给出确定性执行状态。
+    - **可选原生校验联动（绝不硬绑定二进制）**：结合 `kit/skills/lib/profile-sniffer.mjs` 探测目标仓实际存在的配置文件，仅在检测到对应本地工具或 `package.json`/CI 已声明指令时可选提示或联动，`edit-gate.mjs` (new) 与 Tier 2 检查绝不假设或强制要求全局安装任何第三方外部 linter 二进制。
 
 ### 2. 严格三层纠偏倒金字塔与 `signals.jsonl` 扩展（对应 C6 / SC6）
 - **结构化故障指纹流（`kit/skills/lib/signals.mjs` + `kit/skills/dev-review/scripts/review-ledger.mjs`）**：
   - 扩展 `signals.jsonl` 记录字段：`defectClass`（如 `suppression-bypass`、`arch-boundary`、`state-split`、`mock-only-test`、`race-condition`、`stale-contract`、`missing-runtime-proof`）、`pyramidTier`（`tier1-architecture` | `tier2-deterministic-gate` | `tier3-prompt-fallback`）、`fingerprint`（基于 `sha256(ruleId + defectClass + moduleRoot)` 前 12 位稳定指纹）与 `targetArtifact`。
-  - 升级 `review-ledger.mjs` 的 `record` 动作：当审查发现任意阻断项或返工项时，自动为每条 finding 追加一条完整指纹事件到运行态状态目录（`.worktrees` 公共状态 `signals.jsonl`），使同源缺陷不再隐没在笼统的 PR 打回次数中。
+  - 升级 `review-ledger.mjs`：① 在 `record` 时为每条 finding 追加完整指纹事件到运行态状态目录（`.worktrees` 公共状态 `signals.jsonl`）；② 修复第 194–199 行仅看 `comment?.ok` 忽略 `labelRes` 失败的漏洞，显式汇总标签状态与降级提示；③ 将第 546、688 行对 `writeTaskLedger` 的调用迁移至统一加锁 `updateTaskLedger`。
 - **倒金字塔强制升格发动机（`kit/skills/dev-govern/scripts/govern-retro.mjs`）**：
   - **彻底废除默认写回 `AGENTS.md`**：删除原来在复盘总结尾部自动拟写或建议向 `AGENTS.md`「修改守则/项目特有红线」追加自然语言条款的默认路径。
   - **同类复发 `>= 2` 次精确判定与三层路由**：
@@ -98,8 +98,8 @@ flowchart LR
   - 扩展 `kit/skills/dev-govern/scripts/govern-state.mjs`：持久化最近 `govern-audit`/`govern-retro` 检查基准与 `[TIER-3-FALLBACK]` 清单指纹，支持 `--skip-govern` 将显式豁免记录写入账本与信号流（保障过程绝对可审计）。
   - 更新 `kit/skills/dev-govern/SKILL.md` 声明「静态分析 + 自动周期复盘 + 严禁动态写测」边界。
 
-### 4. 移除 `govern-tests.mjs` 固定目录假阳性并适配小仓（对应 C8 / SC8）
-- **删除目录名硬编码**：移除 `kit/skills/dev-govern/scripts/govern-tests.mjs` 中把 `qa/`、`sit/` 等路径段硬定性为慢速/非单元测试的 `NON_UNIT_TEST_RE` 规则。
+### 4. 移除 `govern-tests.mjs` 固定路径正则硬编码与小仓假阳性（对应 C8 / SC8）
+- **删除 `NON_UNIT_TEST_RE` 硬编码**：移除 `kit/skills/dev-govern/scripts/govern-tests.mjs` 第 38 行将 `(?:e2e|integration|browser|perf|benchmark|benchmarks|load|stress)` 路径段机械当作非单元测试从而排除或误判的规则（注：`sit` 属于文档脚手架规则、`qa` 在 `govern-tests.mjs` 并无正则）。
 - **元数据与栈特征驱动判定**：
   - 扩展 `kit/skills/lib/profile-sniffer.mjs`：识别目标仓 `package.json` 测试脚本（如 `test:unit`、`test:integration`、`test:e2e`）、测试框架配置文件（Vitest/Jest projects、Pytest markers/ini、Cargo `--test` vs `--lib`、Go build tags）与实际测试文件数量。
   - `govern-tests.mjs` 依据上述真实测试层级元数据划分测试类别；当仓库总测试数较少且 `quick-test` 无分层分离必要（如小型仓库仅设单条极速运行指令）时，自动放行而不误报 `tests.unfiltered-quick-test`。
@@ -108,7 +108,7 @@ flowchart LR
 
 1. **否决「在 `govern-retro` 保留默认写 `AGENTS.md`，仅改用人工提醒优先改代码」**：软提醒无法阻止模型顺手写入自然语言补丁导致 `AGENTS.md` 逐代膨胀且同类故障继续复发；必须以代码层硬废除默认回写与 `--allow-tier3-fallback` 显式开关彻底落实倒金字塔。
 2. **否决「让 `edit-gate.mjs` 用简单的全文正则匹配 `@ts-ignore` / `HACK`」**：未经词法去噪会把合法字符串示例、正则定义本身（比如本仓自己的规则检测代码）误伤成违禁代码；坚持统一扩展 `static-gates-lexer.mjs` 走先剥离再匹配路径。
-3. **否决「把 `qa/`、`sit/` 扩展成更大的目录白名单/黑名单表」**：目录命名千差万别，治标不治本；直接从测试脚本与配置元数据读取分层真相。
+3. **否决「扩充路径目录名关键词清单替换 `NON_UNIT_TEST_RE`」**：目录与文件名约定跨项目千差万别，机械扩表治标不治本；直接从测试脚本与配置元数据读取分层真相。
 
 ## 四、改动清单与影响面
 
@@ -122,24 +122,24 @@ flowchart LR
    - `kit/skills/lib/static-gates-lexer.mjs`
    - `kit/skills/lib/profile-sniffer.mjs`
 3. **审查信号采集与治理闭环**：
-   - `kit/skills/dev-review/scripts/review-ledger.mjs`
+   - `kit/skills/dev-review/scripts/review-ledger.mjs`（修复第 194–199 行 `labelRes` 漏洞、写入指纹并迁移第 546/688 行 `writeTaskLedger`）
    - `kit/skills/dev-govern/SKILL.md`
    - `kit/skills/dev-govern/scripts/govern-retro.mjs`
    - `kit/skills/dev-govern/scripts/govern-state.mjs`
    - `kit/skills/dev-govern/scripts/govern-tests.mjs`
    - `kit/skills/dev-govern/scripts/govern-audit.mjs`
-4. **独立双向测试夹具**：
+4. **独立双向夹具与派生装配同步**：
    - `scripts/dev/fixtures-stagec-c2.mjs` (new)
    - `scripts/dev/injections-data-stagec-c2.mjs` (new)
-   - 合并至 Wave C-1 后由 `equip.mjs` 同步写入 `.agents/skills/`。
+   - 在本 PR 内运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步派生 `.agents/skills/` 与 `AGENTS.md` `意图路由`（保证 CI `equip.mjs . --check` 与 `compose-agents.mjs . --check` 全绿）。
 
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件。
-- [ ] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/目标仓原生 lint+CI，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并能清理过时兜底条款。
+- [ ] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件，且绝不硬绑定第三方外部 linter 二进制。
+- [ ] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号、迁移其 `writeTaskLedger` 及修复第 194–199 行忽略 `labelRes` 失败漏洞；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 Stage B 基线 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/可选原生校验配置，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并清理过时条款。
 - [ ] C7: （SC7）打通 `dev-govern` 自动触发体系：`flow finalize`/`verify` 链路自动触发轻量 `govern-audit --changed` 体检，`flow merge`/`cleanup` 完成后自动触发轻量 `govern-retro` 复盘（支持 `--skip-govern` 并显式记账，严禁无痕跳过）。
-- [ ] C8: （SC8）移除 `govern-tests.mjs` 中把目录名当作测试分层的固定正则硬编码，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
+- [ ] C8: （SC8）移除 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 把测试路径段硬编码排除出单元测试的规则，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -158,7 +158,7 @@ flowchart LR
 ## 七、上线与兼容策略
 
 - **历史 `signals.jsonl` 兼容**：旧条目的 `defectClass`/`fingerprint` 为空时由 `signals.mjs` 读时按 `ruleId` 与默认模块名实时补全虚拟指纹，平滑过渡不破坏现有信号账本。
-- **Wave C-1 合入协同**：若 `C1` 后合入，`C1` 负责合并 `.agents/skills/`；若 `C1` 先合入，`C2` 合入前 rebase `main`、运行 `node scripts/equip.mjs .` 将第 6 技能 `dev-edit/` (new) 写入 `.agents/skills/` 并验证 `fixtures.mjs` 自动发现加载 `fixtures-stagec-c2.mjs` (new) 全绿。
+- **Wave C-1 合入协同**：若 `C1` 后合入，`C1` 负责 rebase 并重跑 `equip.mjs . && compose-agents.mjs .`；若 `C1` 先合入，`C2` 合入前 rebase `main`、运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 将第 6 技能 `dev-edit/` (new) 同步入 `.agents/skills/` 与 `AGENTS.md` `意图路由`，并验证 `fixtures.mjs` 自动发现加载 `fixtures-stagec-c2.mjs` (new) 全绿。
 
 ## 澄清与补充记录
 

@@ -401,3 +401,38 @@ export function inspectKitManifestForReview(root, kit) {
   }
 }
 
+/** 核对 AGENTS.md 意图路由引用的 `.agents/skills/<name>/SKILL.md` 是否真实存在于磁盘。 */
+export function findMissingIntentRoutingSkills(root, agentsText) {
+  if (!root || (!existsSync(join(root, '.agents')) && !existsSync(join(root, PF_MANIFEST_REL)))) {
+    return []
+  }
+  const text = String(agentsText ?? '').replace(/\r\n/g, '\n')
+  const { regions } = markerRegions(text, 'AGENTS.md')
+  const intentRegion = regions.find((r) => r.id === '意图路由')
+  const lines = text.split('\n')
+  let scopeLines
+  if (intentRegion) {
+    scopeLines = lines.slice(intentRegion.start + 1, intentRegion.end)
+  } else if (regions.length > 0) {
+    return []
+  } else {
+    const startIdx = lines.findIndex((l) => /^##\s+意图路由/.test(l))
+    if (startIdx < 0) return []
+    const endRel = lines.slice(startIdx + 1).findIndex((l) => /^##\s+/.test(l))
+    scopeLines = endRel >= 0 ? lines.slice(startIdx + 1, startIdx + 1 + endRel) : lines.slice(startIdx + 1)
+  }
+  const missing = []
+  const seen = new Set()
+  for (const line of scopeLines) {
+    for (const m of line.matchAll(/\.agents\/skills\/([a-z0-9._-]+)\/SKILL\.md/gi)) {
+      const skill = m[1]
+      const rel = `.agents/skills/${skill}/SKILL.md`
+      if (seen.has(rel)) continue
+      seen.add(rel)
+      if (!existsSync(join(root, rel))) missing.push({ skill, rel })
+    }
+  }
+  return missing
+}
+
+

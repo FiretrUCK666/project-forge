@@ -24,6 +24,7 @@ import {
   collectMissingSections,
   driftRegions,
   filterIntentRouting,
+  findMissingIntentRoutingSkills,
   handWrittenCoverage,
   headingLines,
   missingRegionsOf,
@@ -104,7 +105,7 @@ function resolveEffectiveTier(explicitTier, manifest, facts) {
   return 'full'
 }
 
-function excludedSkillsFor(facts, manifest, tier) {
+function excludedSkillsFor(facts, manifest, tier, root) {
   const excluded = new Set()
   const fromManifest = !manifest?.invalid && Array.isArray(manifest?.data?.disabledSkills)
     ? manifest.data.disabledSkills
@@ -116,6 +117,11 @@ function excludedSkillsFor(facts, manifest, tier) {
   if (tier === 'lightweight') {
     for (const s of KIT_SKILLS) {
       if (!LIGHTWEIGHT_KIT_SKILLS.includes(s)) excluded.add(s)
+    }
+  }
+  if (root && (existsSync(join(root, '.agents')) || existsSync(join(root, PF_MANIFEST_REL)))) {
+    for (const s of KIT_SKILLS) {
+      if (!existsSync(join(root, '.agents', 'skills', s, 'SKILL.md'))) excluded.add(s)
     }
   }
   return excluded
@@ -208,7 +214,7 @@ export function renderAgentsTemplate(facts, templateText, root, { tier, manifest
     buildVars(facts, root),
     'template.md',
   )
-  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, effectiveTier))
+  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, effectiveTier, targetRoot))
 }
 
 function volatileValues(facts) {
@@ -368,6 +374,14 @@ async function main(argv) {
   const agentsPath = join(root, 'AGENTS.md')
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
   const manifest = readManifestSafe(root)
+  const manifestTier = !manifest?.invalid ? manifest?.data?.tier : undefined
+  if (explicitTier !== undefined && EQUIP_TIERS.includes(manifestTier) && explicitTier !== manifestTier) {
+    process.stderr.write(
+      `TIER_CONFLICT: --tier ${explicitTier} 与 ${PF_MANIFEST_REL} 记录的 tier (${manifestTier}) 冲突；`
+      + `请先运行 equip.mjs --tier ${explicitTier} 同步工具包档位，或移除与 manifest 不一致的 --tier 参数。\n`,
+    )
+    return 2
+  }
 
   if (!existsSync(agentsPath)) {
     if (mode === 'status' || mode === 'check') {
@@ -482,6 +496,14 @@ async function main(argv) {
       if (sizeInfo.oversize && allowOversizeBypass) {
         process.stderr.write(`[允许超限自写] ${formatOversizeBreakdown(sizeInfo)}。\n`)
       }
+      const missingHandSkills = findMissingIntentRoutingSkills(root, info.text)
+      if (missingHandSkills.length > 0) {
+        process.stderr.write(
+          `AGENTS.md 意图路由引用了磁盘上不存在的技能文件：${missingHandSkills.map((x) => x.rel).join('、')}\n`
+          + '  请先运行 equip.mjs --restore <skill> 恢复技能目录，或移除失效引用。\n',
+        )
+        return 1
+      }
       process.stdout.write('AGENTS.md 是手写的（没有受管标记）——不判格式，只核对过它答了'
         + '「这是什么项目 / 怎么构建验证 / 改动的边界」这三件事。\n')
       return 0
@@ -521,6 +543,14 @@ async function main(argv) {
           process.stderr.write(`  [冲突提示] ${modifiedByUser.join('、')} 与 ${PF_MANIFEST_REL} 记录的旧基线不符：若有意保留手改请在 begin 行追加 customized，否则还原后重跑。\n`)
         }
       }
+      bad = true
+    }
+    const missingRoutingSkills = findMissingIntentRoutingSkills(root, existing)
+    if (missingRoutingSkills.length > 0) {
+      process.stderr.write(
+        `AGENTS.md 意图路由引用了磁盘上不存在的技能文件：${missingRoutingSkills.map((x) => x.rel).join('、')}\n`
+        + '  请先运行 equip.mjs --restore <skill> 恢复技能目录，或重跑 compose-agents.mjs 同步意图路由。\n',
+      )
       bad = true
     }
     if (bad) return 1

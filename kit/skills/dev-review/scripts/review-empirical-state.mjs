@@ -222,7 +222,9 @@ export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, ta
 
 /** 在 syncTier2ReviewSlotIfNeeded 之前校验审查槽脏故障残留，防止退化为退出码 1 或误清空残留。 */
 export async function checkDirtyFaultResidueBeforeSync({ mainRoot, gitDir, opts, task, mode, prNo }) {
-  const isExternalPr = Boolean(opts['external-pr'] || opts.pr || task?.role === 'inbound-external-pr')
+  const isExternalPr = Boolean(
+    opts['external-pr'] || opts.pr || task?.role === 'inbound-external-pr' || task?.isolation === 'review-pr' || task?.externalPr,
+  )
   let slotRoot = null
   if (mode === 'task' && task && !isExternalPr && !opts.worktree) {
     const defaultReviewRel = `.worktrees/review-${task.taskId}`
@@ -352,7 +354,8 @@ export function emitGateBlock({ opts, code, payload, textLines }) {
 }
 
 export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, receipt, diff, reviewRoot, scanUntrustedDiff }) {
-  const shouldScan = Boolean(opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || task?.role === 'inbound-external-pr')
+  const isExtLedger = Boolean(task?.role === 'inbound-external-pr' || task?.isolation === 'review-pr' || task?.externalPr)
+  const shouldScan = Boolean(opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || isExtLedger)
   if (!shouldScan) return { blocked: false }
 
   const scanRes = scanUntrustedDiff(diff, reviewRoot)
@@ -364,7 +367,7 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
     || task?.humanApprovedExec === true
     || (receipt?.headSha === headSha && receipt?.humanApprovedExec === true),
   )
-  const isInboundExternal = Boolean(task?.role === 'inbound-external-pr' || opts['external-pr'] !== undefined)
+  const isInboundExternal = Boolean(isExtLedger || opts['external-pr'] !== undefined)
   const scanPassed = Boolean(
     opts['untrusted-scan']
     || task?.untrustedScanPassed === true

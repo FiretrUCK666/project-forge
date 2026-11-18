@@ -173,9 +173,26 @@ export function createDefaultLedger(partial = {}) {
     issueContext: Array.isArray(partial.issueContext) ? partial.issueContext : [],
     /** 没取到正文的 Issue 编号。非空时 `flow next` 要提示先去取。 */
     issueContextUnavailable: Array.isArray(partial.issueContextUnavailable) ? partial.issueContextUnavailable : [],
+    /** 无法联网或无权读取 Issue 时，用户显式确认继续的放行记录。 */
+    issueContextAck: partial.issueContextAck && typeof partial.issueContextAck === 'object'
+      ? {
+          issues: Array.isArray(partial.issueContextAck.issues) ? partial.issueContextAck.issues.map(Number).filter(Boolean) : [],
+          reason: typeof partial.issueContextAck.reason === 'string' ? partial.issueContextAck.reason : '',
+          at: typeof partial.issueContextAck.at === 'string' ? partial.issueContextAck.at : null,
+          by: typeof partial.issueContextAck.by === 'string' ? partial.issueContextAck.by : null,
+        }
+      : null,
     prNumber: partial.prNumber ?? null,
     prState: partial.prState ?? null,
     prUrl: partial.prUrl ?? null,
+    prContext: partial.prContext && typeof partial.prContext === 'object' && !Array.isArray(partial.prContext)
+      ? partial.prContext
+      : null,
+    prContextUnavailable: partial.prContextUnavailable && typeof partial.prContextUnavailable === 'object' && !Array.isArray(partial.prContextUnavailable)
+      ? partial.prContextUnavailable
+      : null,
+    prBaseSha: partial.prBaseSha ?? null,
+    prHeadSha: partial.prHeadSha ?? null,
     finalized: Boolean(partial.finalized),
     finalizedHead: partial.finalizedHead ?? null,
     verifiedHead: partial.verifiedHead ?? null,

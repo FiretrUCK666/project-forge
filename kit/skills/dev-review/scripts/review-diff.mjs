@@ -80,8 +80,9 @@ export async function resolveReviewWorktree(mainRoot, worktreeRoot, opts, task) 
     const cand = join(mainRoot, '.worktrees', `review-${taskId}`)
     if (existsSync(cand)) return cand
   }
-  if (opts.pr) {
-    const cand = join(mainRoot, '.worktrees', `review-pr-${opts.pr}`)
+  const prArg = opts.pr ?? opts['external-pr']
+  if (prArg) {
+    const cand = join(mainRoot, '.worktrees', `review-pr-${prArg}`)
     if (existsSync(cand)) return cand
   }
   if (task?.worktreePath) {
@@ -112,7 +113,9 @@ async function callReviewDepsHelper(fnName, mainRoot, reviewWtAbs, helperOpts = 
  * 在 --task 且非外部 PR 模式下，先解绑旧 Junction，按需清理脏审查位，同步最新 HEAD 后重挂载共享依赖。
  */
 export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts, task, mode }) {
-  const isExternalPr = Boolean(opts['external-pr'] || opts.pr || task?.role === 'inbound-external-pr')
+  const isExternalPr = Boolean(
+    opts['external-pr'] || opts.pr || task?.role === 'inbound-external-pr' || task?.isolation === 'review-pr' || task?.externalPr,
+  )
   if (mode !== 'task' || !task || isExternalPr || opts.worktree) {
     return null
   }

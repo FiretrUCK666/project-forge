@@ -11,12 +11,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
 
 const RP_SCRIPT = 'kit/skills/dev-review/scripts/review-pack.mjs'
 
-async function runRp(args, cwd) {
-  return runAbsAsync(RP_SCRIPT, args, { cwd })
+async function runRp(args, cwd, env) {
+  return runAbsAsync(RP_SCRIPT, args, { cwd, ...(env ? { env } : {}) })
 }
 
 function makeTestRepo({ extraFiles = {}, agentsYaml } = {}) {
@@ -139,22 +139,34 @@ export function registerReviewEmpiricalCases(cases) {
       }
 
       // 5. --pr (clean external PR after --untrusted-scan)
+      const baseSha501 = gitSync(dir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/acme/emp-demo.git'])
       gitSync(dir, ['checkout', '-qb', 'ext-c1-pr'])
       writeFileSync(join(dir, 'src/app.mjs'), `// ${sentinel}\nexport const computeVal = () => 2\n`)
       gitCommitFast(dir, 'ext pr change', { updateOnly: true })
       const extSha = gitSync(dir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
       gitSync(dir, ['checkout', '-q', 'main'])
       await handleStart({ task: 'review-pr-501', 'external-pr': '501', 'pr-ref': extSha }, roots)
-      const scanRes = await runRp(['--pr', '501', '--untrusted-scan', '--json'], dir)
-      if (scanRes.status !== 0) return `干净外部 PR --untrusted-scan 失败：${scanRes.stderr}`
+      const fakeGh501 = createFakeGhEnv({
+        prs: {
+          501: {
+            number: 501, title: 'Ext 501', state: 'OPEN', body: 'test', url: 'https://github.com/acme/emp-demo/pull/501',
+            baseRefName: 'main', headRefName: 'ext-c1-pr', baseRefOid: baseSha501, headRefOid: extSha, author: { login: 'ext' },
+          },
+        },
+      })
+      try {
+        const scanRes = await runRp(['--pr', '501', '--untrusted-scan', '--json'], dir, fakeGh501.env)
+        if (scanRes.status !== 0) return `干净外部 PR --untrusted-scan 失败：${scanRes.stderr}`
 
-      for (const extra of [['--json'], []]) {
-        const res = await runRp(['--pr', '501', '--include-diff', ...extra], dir)
-        if (res.status !== 3 || !`${res.stdout}\n${res.stderr}`.includes('BLOCKED_EMPIRICAL_FIRST')) {
-          return `--pr --include-diff 未阻断：exit=${res.status} out=${res.stdout}`
+        for (const extra of [['--json'], []]) {
+          const res = await runRp(['--pr', '501', '--include-diff', ...extra], dir, fakeGh501.env)
+          if (res.status !== 3 || !`${res.stdout}\n${res.stderr}`.includes('BLOCKED_EMPIRICAL_FIRST')) {
+            return `--pr --include-diff 未阻断：exit=${res.status} out=${res.stdout}`
+          }
+          if (res.stdout.includes(sentinel)) return `--pr 阻断时泄露了 diff`
         }
-        if (res.stdout.includes(sentinel)) return `--pr 阻断时泄露了 diff`
-      }
+      } finally { fakeGh501.cleanup() }
       return true
     } finally { rmTree(dir) }
   }])
@@ -413,6 +425,9 @@ export function registerReviewEmpiricalCases(cases) {
       const extDir = makeTestRepo({
         extraFiles: { 'src/app.mjs': 'export const computeVal = () => 2\n' },
       })
+      gitSync(extDir, ['remote', 'add', 'origin', 'https://github.com/acme/emp-ext.git'])
+      const mainExtSha = gitSync(extDir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+      const fakeGhExt = createFakeGhEnv({})
       try {
         // 3a. 干净外部 PR 但未先跑 --untrusted-scan
         gitSync(extDir, ['checkout', '-qb', 'ext-clean'])
@@ -421,17 +436,6 @@ export function registerReviewEmpiricalCases(cases) {
         const cleanSha = gitSync(extDir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
         gitSync(extDir, ['checkout', '-q', 'main'])
         await handleStart({ task: 'review-pr-71', 'external-pr': '71', 'pr-ref': cleanSha }, await resolveRepoRoots(extDir))
-
-        const markerA = join(extDir, '.marker-unscanned')
-        const cmdA = `node -e "require('fs').writeFileSync(${JSON.stringify(markerA)},'1')"`
-        const unscannedEmp = await runRp(['check-empirical', '--pr', '71', '--cmd', cmdA, '--json'], extDir)
-        if (unscannedEmp.status !== 3 || !`${unscannedEmp.stdout}\n${unscannedEmp.stderr}`.includes('BLOCKED_UNTRUSTED_HAZARD') || existsSync(markerA)) {
-          return `未过 --untrusted-scan 的外部 PR 竟允许执行 check-empirical：exit=${unscannedEmp.status} marker=${existsSync(markerA)}`
-        }
-        const unscannedFault = await runRp(['check-fault', '--phase', 'fail', '--pr', '71', '--cmd', cmdA, '--json'], extDir)
-        if (unscannedFault.status !== 3 || !`${unscannedFault.stdout}\n${unscannedFault.stderr}`.includes('BLOCKED_UNTRUSTED_HAZARD') || existsSync(markerA)) {
-          return `未过 --untrusted-scan 的外部 PR 竟允许执行 check-fault：exit=${unscannedFault.status}`
-        }
 
         // 3b. 含高危 workflow 的外部 PR 未经人类批准 -> check-empirical / check-fault 返回 exit 3 BLOCKED_UNTRUSTED_HAZARD
         gitSync(extDir, ['checkout', '-qb', 'ext-evil'])
@@ -442,16 +446,41 @@ export function registerReviewEmpiricalCases(cases) {
         gitSync(extDir, ['checkout', '-q', 'main'])
         await handleStart({ task: 'review-pr-72', 'external-pr': '72', 'pr-ref': evilSha }, await resolveRepoRoots(extDir))
 
-        const hazEmp = await runRp(['check-empirical', '--pr', '72', '--cmd', cmdA, '--json'], extDir)
+        fakeGhExt.update({
+          login: 'fake-dev',
+          prs: {
+            71: {
+              number: 71, title: 'PR 71', state: 'OPEN', body: 'clean', url: 'https://github.com/acme/emp-ext/pull/71',
+              baseRefName: 'main', headRefName: 'ext-clean', baseRefOid: mainExtSha, headRefOid: cleanSha, author: { login: 'ext' },
+            },
+            72: {
+              number: 72, title: 'PR 72', state: 'OPEN', body: 'evil', url: 'https://github.com/acme/emp-ext/pull/72',
+              baseRefName: 'main', headRefName: 'ext-evil', baseRefOid: mainExtSha, headRefOid: evilSha, author: { login: 'ext' },
+            },
+          },
+        })
+
+        const markerA = join(extDir, '.marker-unscanned')
+        const cmdA = `node -e "require('fs').writeFileSync(${JSON.stringify(markerA)},'1')"`
+        const unscannedEmp = await runRp(['check-empirical', '--pr', '71', '--cmd', cmdA, '--json'], extDir, fakeGhExt.env)
+        if (unscannedEmp.status !== 3 || !`${unscannedEmp.stdout}\n${unscannedEmp.stderr}`.includes('BLOCKED_UNTRUSTED_HAZARD') || existsSync(markerA)) {
+          return `未过 --untrusted-scan 的外部 PR 竟允许执行 check-empirical：exit=${unscannedEmp.status} marker=${existsSync(markerA)} out=${unscannedEmp.stdout}`
+        }
+        const unscannedFault = await runRp(['check-fault', '--phase', 'fail', '--pr', '71', '--cmd', cmdA, '--json'], extDir, fakeGhExt.env)
+        if (unscannedFault.status !== 3 || !`${unscannedFault.stdout}\n${unscannedFault.stderr}`.includes('BLOCKED_UNTRUSTED_HAZARD') || existsSync(markerA)) {
+          return `未过 --untrusted-scan 的外部 PR 竟允许执行 check-fault：exit=${unscannedFault.status} out=${unscannedFault.stdout}`
+        }
+
+        const hazEmp = await runRp(['check-empirical', '--pr', '72', '--cmd', cmdA, '--json'], extDir, fakeGhExt.env)
         if (hazEmp.status !== 3 || !`${hazEmp.stdout}\n${hazEmp.stderr}`.includes('BLOCKED_UNTRUSTED_HAZARD') || existsSync(markerA)) {
-          return `未批准高危外部 PR 竟执行了 check-empirical：exit=${hazEmp.status}`
+          return `未批准高危外部 PR 竟执行了 check-empirical：exit=${hazEmp.status} out=${hazEmp.stdout}`
         }
         // 人类明确批准后放行
-        const aprEmp = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--cmd', 'node test.mjs', '--json'], extDir)
+        const aprEmp = await runRp(['check-empirical', '--pr', '72', '--human-approved-exec', '--cmd', 'node test.mjs', '--json'], extDir, fakeGhExt.env)
         if (aprEmp.status !== 0) {
           return `人类批准高危外部 PR 后 check-empirical 失败：exit=${aprEmp.status} out=${aprEmp.stdout} err=${aprEmp.stderr}`
         }
-      } finally { rmTree(extDir) }
+      } finally { fakeGhExt.cleanup(); rmTree(extDir) }
 
       return true
     } finally { rmTree(dir) }

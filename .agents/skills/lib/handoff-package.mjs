@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { readTextSafe } from './git.mjs'
 import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
+import { nextReviewRound } from './ledger.mjs'
 
 /** 从一份规划文档里抽出 `- [ ] Cn: ...` 的原文条目。 */
 function extractCriteria(text) {
@@ -359,9 +360,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   if (role === 'reviewer' || role === 'human') {
     const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
     const last = rounds.length > 0 ? rounds[rounds.length - 1] : null
-    const nextRound = rounds.length > 0
-      ? Math.max(...rounds.map((r) => Number(r?.round ?? r) || 0)) + 1
-      : 1
+    const nextRound = nextReviewRound(ledger)
 
     lines.push('## 这一轮该看什么')
     lines.push('')

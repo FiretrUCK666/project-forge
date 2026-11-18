@@ -122,6 +122,7 @@ export {
   ensureReviewToken,
   issueReviewToken,
   listTaskLedgers,
+  nextReviewRound,
   readTaskLedger,
   recordMountedDepsInLedger,
   resolveTaskContext,

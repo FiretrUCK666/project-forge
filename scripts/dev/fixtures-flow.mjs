@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
-import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, createFakeGhEnv, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
 cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
@@ -543,16 +543,15 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       return `flow start --external-pr URL 失败：${stExt.stdout} ${stExt.stderr}`
     }
 
-    const rpPos = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-      'https://github.com/acme/demo/pull/89', '--json',
-    ], { cwd: urlDir })
+    const sha89 = gitSync(urlDir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+    const rpOff = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['https://github.com/acme/demo/pull/89', '--json'], { cwd: urlDir })
+    if (rpOff.status !== 3 || !rpOff.stdout.includes('BLOCKED_PR_UNRESOLVED')) return `离线 PR 未阻断：${rpOff.status}`
+    const fake89 = createFakeGhEnv({ prs: { 89: { number: 89, title: 'Ext 89', state: 'OPEN', baseRefName: 'main', headRefName: 'ext-89', baseRefOid: sha89, headRefOid: sha89 } } })
+    const rpPos = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['https://github.com/acme/demo/pull/89', '--json'], { cwd: urlDir, env: fake89.env }).finally(() => fake89.cleanup())
     if (rpPos.status !== 0 || !JSON.parse(rpPos.stdout).worktreeRoot?.endsWith('.worktrees/review-pr-89')) {
       return `review-pack 位置 PR URL 失败：${rpPos.stdout} ${rpPos.stderr}`
     }
-
-    const rpBad = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
-      '--pr', 'https://github.com/acme/demo/issues/42',
-    ], { cwd: urlDir })
+    const rpBad = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--pr', 'https://github.com/acme/demo/issues/42'], { cwd: urlDir })
     if (rpBad.status !== 2) return `review-pack --pr 未拒绝 Issue URL：status=${rpBad.status}`
 
     // finalize 实现说明：大写占位词阻断，合法 Todo / docs/todo/ 放行

@@ -1,18 +1,18 @@
 ---
 kind: spec
 title: 独立审查与 Issue 语境
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: 52
 pr: null
-branch: fix/v8-criteria-trust
-owner: null
+branch: feat/review-independence
+owner: FiretrUCK666
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_todo: ../todo/261117-issue52-review-independence-todo.md
 high_risk_paths: [kit/skills/dev-review/scripts/review-ledger.mjs, kit/skills/dev-review/scripts/review-pack.mjs, kit/skills/dev-review/scripts/review-diff.mjs, kit/skills/lib/ledger.mjs, kit/skills/lib/github-client.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/dev-flow/scripts/flow-inspect.mjs, kit/skills/dev-flow/scripts/flow-next.mjs]
 ---
@@ -152,13 +152,13 @@ issueContextUnavailable: number[]   // 拿不到正文的编号
 
 ## 三、冻结的验收标准
 
-- [ ] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）；**轮次唯一派生式**：`flow next` 签发的 `round` 与 `record` 期望的 `round` 必须由同一个函数算出。构造 `rounds = [1, 3]` 的账本（轮次有空档），走完 `next` → `record` 必须成功——现在两处各自算（`rounds.length + 1` 与 `maxPrev + 1`），空档时前者为已存在的那一轮签令牌、后者要下一轮，令牌永远对不上且没有出口。
-- [ ] C2: **Issue 语境**。`flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与 `compactContext`；**拿不到正文时必须留痕**——记下编号与原因（`no-api-channel` / `not-found` / `forbidden`），`flow next` 据此给出取正文的具体命令；**`--pr` 与 `--issue` 走同一条「尝试 → 留痕 → 给命令」链路**（无通道时不硬失败，因为多数本地仓没有通道；但静默只存编号也不算通过）；反向：重跑 `start` 且这次取到了正文，必须清掉「拿不到」的标记。
+- [x] C1: `record` 必须校验由 `flow next` 在待审查阶段生成的**一次性令牌**，同一令牌只能消费一次；Round 不匹配、令牌不存在、令牌为空三种全部拒绝；`implementerId` 缺失时拒绝记录（不再跳过自审检查）；**反向**：正常签发的令牌一次消费成功，且 `flow next` 连跑两次拿到的还是同一枚（不会把调用方手里的作废）；**轮次唯一派生式**：`flow next` 签发的 `round` 与 `record` 期望的 `round` 必须由同一个函数算出。构造 `rounds = [1, 3]` 的账本（轮次有空档），走完 `next` → `record` 必须成功——现在两处各自算（`rounds.length + 1` 与 `maxPrev + 1`），空档时前者为已存在的那一轮签令牌、后者要下一轮，令牌永远对不上且没有出口。
+- [x] C2: **Issue 语境**。`flow start --issue N` 在有 API 通道时把标题与正文摘要写进账本与 `compactContext`；**拿不到正文时必须留痕**——记下编号与原因（`no-api-channel` / `not-found` / `forbidden`），`flow next` 据此给出取正文的具体命令；**`--pr` 与 `--issue` 走同一条「尝试 → 留痕 → 给命令」链路**（无通道时不硬失败，因为多数本地仓没有通道；但静默只存编号也不算通过）；反向：重跑 `start` 且这次取到了正文，必须清掉「拿不到」的标记。
 **必须给一个真实出口**：`issueContextUnavailable` 只在 `flow start` 成功时重算，而永远没有 API 通道的仓（`local-only` / `generic-git` 是常规存在）重跑也取不到——
 `needs-issue-context` 会永久挡住后续阶段，而提示里那句「或显式说明凭现有信息无法澄清」没有任何状态承接。
 要加一个显式放行：`flow.mjs next --ack-no-issue-context --reason "..."`，把原因写进账本，之后该阶段不再拦。
-- [ ] C3: **PR 模式的基线只能来自真实 PR**。`mode === 'pr'` 时 `diffScope` 必须形如 `<baseRefOid>...<headRefOid>`（两个都是 GitHub 返回的 SHA），**不得出现分支名**；拿不到 SHA 时返回 `BLOCKED_PR_UNRESOLVED` 且退出码非 0；**行为断言**：构造一个账本里记了 PR 号、但远端拉不到该 PR 的仓，跑 `review-pack --pr` 带上那个 PR 号，`status` 不得是 `PACK_READY`；**行为断言（旁路）**：账本标记了 `externalPr` 的任务，跑 `review-pack --task` 带上那个任务号，必须同样走 PR 判据，不得因为换了入口就放行；**反向**：真实拉到 PR 时 `diffScope` 里两个 SHA 与 GitHub 返回的一致——但「与账本记录一致」这句要改成「与 GitHub 返回值一致」：账本里现在**没有**存 PR 两个 SHA 的字段（`prBaseSha` / `prHeadSha` 都不存在），本 SPEC 要把这两个字段加进账本才谈得上比对。
-- [ ] C4: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**，不存在的必须报出来；装配档位与生成档位**不一致时**任一方必须拒绝或警告；删掉某个技能目录后（未跑 `equip`），`compose-agents` 要能发现并指出死链；**反向**：装齐且档位一致的仓不得误报——一个没有死链、档位一致的仓跑 `compose-agents --check` 必须退出 0 且不出现任何死链或档位告警。
+- [x] C3: **PR 模式的基线只能来自真实 PR**。`mode === 'pr'` 时 `diffScope` 必须形如 `<baseRefOid>...<headRefOid>`（两个都是 GitHub 返回的 SHA），**不得出现分支名**；拿不到 SHA 时返回 `BLOCKED_PR_UNRESOLVED` 且退出码非 0；**行为断言**：构造一个账本里记了 PR 号、但远端拉不到该 PR 的仓，跑 `review-pack --pr` 带上那个 PR 号，`status` 不得是 `PACK_READY`；**行为断言（旁路）**：账本标记了 `externalPr` 的任务，跑 `review-pack --task` 带上那个任务号，必须同样走 PR 判据，不得因为换了入口就放行；**反向**：真实拉到 PR 时 `diffScope` 里两个 SHA 与 GitHub 返回的一致——但「与账本记录一致」这句要改成「与 GitHub 返回值一致」：账本里现在**没有**存 PR 两个 SHA 的字段（`prBaseSha` / `prHeadSha` 都不存在），本 SPEC 要把这两个字段加进账本才谈得上比对。
+- [x] C4: `compose-agents` 生成后，意图路由表里点名的每个 `SKILL.md` 路径**都真实存在**，不存在的必须报出来；装配档位与生成档位**不一致时**任一方必须拒绝或警告；删掉某个技能目录后（未跑 `equip`），`compose-agents` 要能发现并指出死链；**反向**：装齐且档位一致的仓不得误报——一个没有死链、档位一致的仓跑 `compose-agents --check` 必须退出 0 且不出现任何死链或档位告警。
 
 ## 四、高风险点、门型与回滚路径
 
@@ -170,4 +170,9 @@ issueContextUnavailable: number[]   // 拿不到正文的编号
 
 ## 实现说明
 
-<!-- 在合并之前补齐真实实现摘要与验证结果 -->
+- **实际落地摘要**：
+  - C1：`review-ledger.mjs` 统一调用 `nextReviewRound(baseLedger)` 并阻止 `--implementer-id` 覆盖账本已记录实施者以绕过自审；`handoff-package.mjs`、`fixtures-helpers.mjs` 与 `shared.mjs` 同步复用 `nextReviewRound` 单一派生式。
+  - C2：`github-client.mjs` 修复 `tier='none'` 委托标注并补齐 `getPr` 的 `baseRefOid`/`headRefOid`；新增 `flow-context.mjs` 统一拉取并归一 Issue/PR 远端上下文失败原因（`no-api-channel`/`not-found`/`forbidden`）；`flow-inspect.mjs` 在初建与幂等重入重跑时补全上下文并清零已恢复的 `issueContextUnavailable`/`prContextUnavailable`/`issueContextAck`；`ledger.mjs` 与 `workflow-policy.mjs` 把 Issue/PR 上下文及 `prBaseSha`/`prHeadSha` 写入 `compactContext`，并通过 `flow.mjs next --ack-no-issue-context --reason "原因说明"` 提供离线仓显式放行出口。
+  - C3：新增 `review-pr.mjs`，在 `review-pack.mjs` 对 `--pr` 及 `inbound-external-pr`/`review-pr`/`externalPr` 任务强制经 API 拉取真实 PR 与 SHA，阻断离线或缺失 SHA 时的静默分支降级（`BLOCKED_PR_UNRESOLVED`），输出严格 `baseRefOid...headRefOid` 的 `diffScope`，并阻止 `--task` 绕过 PR 解析与不可信扫描。
+  - C4：`compose-agents.mjs` 拒绝 `--tier` 与 `.pf-manifest.json` `tier` 不一致的冲突调用，`scripts/lib/agents-sections.mjs` 新增 `findMissingIntentRoutingSkills` 检测 `意图路由` 引用的 `.agents/skills/dev-*/SKILL.md` 磁盘死链。
+- **实际验证结果**：参见归档 Todo「完成后的记录」（`preflight.mjs` 34/34、`fixtures.mjs` 258/258 含 `fixtures-issue52.mjs`、`verify-injections.mjs` 165/165 含 `I152`–`I156` 全部通过）。

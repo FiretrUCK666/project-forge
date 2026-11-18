@@ -33,6 +33,10 @@ import {
 } from './review-empirical.mjs'
 import { handleOverride, handleRecord } from './review-ledger.mjs'
 import { parseRangeDiffNewCommits } from './review-locks.mjs'
+import {
+  emitPrUnresolvedBlock, ensurePrShasLocallyResolvable,
+  isExternalPrTaskLedger, resolvePrForReviewPack,
+} from './review-pr.mjs'
 
 const SUBCOMMANDS = ['pack', 'record', 'override', 'check-empirical', 'check-fault']
 
@@ -193,23 +197,27 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
       : resolvedTask.mode ? resolvedTask.mode
         : opts.base ? 'base' : 'local'
   const isFlowMode = Boolean(mode === 'task' || mode === 'pr')
-  const prNo = opts.pr ?? opts['external-pr'] ?? task?.prNumber ?? null
+  const taskExtPrNum = Number.isInteger(Number(task?.externalPr)) && Number(task?.externalPr) > 0 ? Number(task.externalPr) : null
+  const prNo = opts.pr ?? opts['external-pr'] ?? task?.prNumber ?? taskExtPrNum ?? null
+  const isExternalPrTask = isExternalPrTaskLedger(task)
+  const requiresPrResolution = mode === 'pr' || isExternalPrTask
 
-  if (mode === 'pr') {
-    const prArg = opts.pr ?? opts['external-pr']
-    const prRecorded = task?.prNumber ?? null
-    const prResolved = prRecorded !== null && String(prRecorded) === String(prArg)
-    if (!prResolved) {
-      const msg = `BLOCKED_PR_UNRESOLVED: 没有拿到 PR #${prArg} 的真实信息（无可用 API 通道或该 PR 未被识别）。`
-        + '不能假装审过：请先配好 GitHub 凭据（gh auth login 或 GH_TOKEN）再重跑，或用 --task <id> 审查已记录的本地任务。'
-      if (opts.json) {
-        process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_PR_UNRESOLVED', exitCode: EXIT.UNTRUSTED_HAZARD, pr: prArg ?? null, error: msg }, null, 2)}\n`)
-      } else {
-        process.stdout.write(`${msg}\n`)
+  let prResolution = null
+  if (requiresPrResolution) {
+    const prArg = opts.pr ?? opts['external-pr'] ?? task?.prNumber ?? taskExtPrNum ?? null
+    const prRes = await resolvePrForReviewPack({ mainRoot, roots, prNo: prArg, task, opts })
+    if (!prRes.ok) {
+      return {
+        earlyExitCode: emitPrUnresolvedBlock({
+          opts,
+          exitCode: EXIT.UNTRUSTED_HAZARD,
+          prArg,
+          reason: prRes.reason,
+          message: prRes.message,
+        }),
       }
-      process.stderr.write(`${msg}\n`)
-      return { earlyExitCode: EXIT.UNTRUSTED_HAZARD }
     }
+    prResolution = prRes
   }
 
   let slotSyncRes = null
@@ -268,17 +276,35 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   }
   if (!Number.isInteger(round) || round < 1) round = 1
 
-  const headRef = opts.head ?? 'HEAD'
-  const fastHeadSha = headRef === 'HEAD' ? readHeadFast(resolveGitDirFast(reviewRoot), roots.gitDir)?.oid : null
-  let headSha = fastHeadSha
-  if (!headSha) {
-    const commitsExist = await hasCommits(reviewRoot)
-    const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
-    if (commitsExist && opts.head && !headRes.ok) {
-      process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
-      return { earlyExitCode: EXIT.ERROR }
+  let headRef = opts.head ?? 'HEAD'
+  let headSha
+  if (prResolution && !opts.head) {
+    const shaCheck = await ensurePrShasLocallyResolvable({ reviewRoot, mainRoot, prResolution, opts })
+    if (!shaCheck.ok) {
+      return {
+        earlyExitCode: emitPrUnresolvedBlock({
+          opts,
+          exitCode: EXIT.UNTRUSTED_HAZARD,
+          prArg: prResolution.prNumber,
+          reason: shaCheck.reason,
+          message: shaCheck.message,
+        }),
+      }
     }
-    headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
+    headRef = prResolution.headRefOid
+    headSha = prResolution.headRefOid
+  } else {
+    const fastHeadSha = headRef === 'HEAD' ? readHeadFast(resolveGitDirFast(reviewRoot), roots.gitDir)?.oid : null
+    headSha = fastHeadSha
+    if (!headSha) {
+      const commitsExist = await hasCommits(reviewRoot)
+      const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
+      if (commitsExist && opts.head && !headRes.ok) {
+        process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
+        return { earlyExitCode: EXIT.ERROR }
+      }
+      headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
+    }
   }
 
   let baseRef = opts.base ?? null
@@ -291,6 +317,11 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   if (mode === 'local' || mode === 'staged') {
     diffSpec = { mode }
     diffScope = mode === 'staged' ? 'staged index' : 'working tree + staged index'
+  } else if (prResolution) {
+    baseRef = prResolution.baseRefOid
+    diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, prResolution.baseRefOid, headRef) }
+    diffScope = `${prResolution.baseRefOid}...${headSha}`
+    roundLockNote = `PR #${prResolution.prNumber} exact SHA diff (${prResolution.baseRefOid.slice(0, 8)}...${headSha.slice(0, 8)})`
   } else {
     baseRef = opts.base ?? task?.baseSha ?? task?.baseBranch ?? (await resolveDefaultBaseRef(reviewRoot, headRef))
     if (mode === 'task' && round >= 2 && Array.isArray(task?.rounds) && task.rounds.length > 0) {
@@ -369,7 +400,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   const effectiveProfile = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewProfile : parseDevProfile(mainRoot)
 
   return {
-    task, mode, isFlowMode, prNo, baseRef, slotSyncRes, reviewRoot, round, headSha,
+    task, mode, isFlowMode, prNo, prResolution, baseRef, slotSyncRes, reviewRoot, round, headSha,
     diffSpec, diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
   }
 }
@@ -443,11 +474,13 @@ async function main(argv = process.argv.slice(2)) {
     const ctx = await prepareReviewTargetContext(roots, opts, { syncSlot: true })
     if (ctx.earlyExitCode !== undefined) return ctx.earlyExitCode
     const {
-      task, mode, isFlowMode, prNo, baseRef, slotSyncRes, reviewRoot, round, headSha,
+      task, mode, isFlowMode, prNo, prResolution, baseRef, slotSyncRes, reviewRoot, round, headSha,
       diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
     } = ctx
 
-    const shouldScanUntrusted = Boolean(opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || task?.role === 'inbound-external-pr')
+    const shouldScanUntrusted = Boolean(
+      opts['untrusted-scan'] || opts.pr !== undefined || opts['external-pr'] !== undefined || isExternalPrTaskLedger(task),
+    )
     let untrustedWarnings = []
     let untrustedAdvisories = []
     if (shouldScanUntrusted) {
@@ -488,7 +521,7 @@ async function main(argv = process.argv.slice(2)) {
         return EXIT.UNTRUSTED_HAZARD
       }
       untrustedWarnings = hazards
-      if (task && task.role === 'inbound-external-pr') {
+      if (task && isExternalPrTaskLedger(task)) {
         task.untrustedScanPassed = true
         if (opts['human-approved'] || opts.humanApprovedExec) {
           task.untrustedApproved = true
@@ -636,6 +669,17 @@ async function main(argv = process.argv.slice(2)) {
       roundLockNote,
       diffScope,
       headSha,
+      ...(prResolution ? {
+        pr: {
+          number: prResolution.prNumber,
+          baseRefOid: prResolution.baseRefOid,
+          headRefOid: prResolution.headRefOid,
+          baseBranch: prResolution.baseBranch,
+          headBranch: prResolution.headBranch,
+          url: prResolution.url,
+          state: prResolution.state,
+        },
+      } : {}),
       ...(slotSyncRes ? { reviewSlotSync: slotSyncRes } : {}),
       ...(includeDiff ? { diffText: diff.text } : {}),
       diff: {

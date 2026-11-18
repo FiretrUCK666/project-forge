@@ -249,7 +249,7 @@ export async function handleRecord(opts, roots) {
     }
   } else {
     // 与签发侧用同一个派生式——两处各算一次，轮次有空档时必然对不上。
-    round = nextReviewRound(task)
+    round = nextReviewRound(baseLedger)
   }
 
   const verdict = String(opts.verdict ?? '').toLowerCase()
@@ -274,7 +274,9 @@ export async function handleRecord(opts, roots) {
     return EXIT.USAGE_OR_POLICY
   }
 
-  const implementerId = String(opts['implementer-id'] ?? baseLedger.implementerId ?? '').trim()
+  const ledgerImplementer = String(baseLedger.implementerId ?? '').trim()
+  const optImplementer = String(opts['implementer-id'] ?? '').trim()
+  const implementerId = ledgerImplementer || optImplementer
   if (!implementerId) {
     const msg = 'BLOCKED_MISSING_IMPLEMENTER: 账本里没有 implementerId，无法判断这是不是自审——'
       + '缺少实施者标识不等于不需要独立审查。请用 flow.mjs start 建立任务（会记下实施者），或显式传 --implementer-id。'
@@ -283,10 +285,11 @@ export async function handleRecord(opts, roots) {
     process.stderr.write(`${msg}\n`)
     return EXIT.USAGE_OR_POLICY
   }
-  if (reviewerId === implementerId) {
-    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${implementerId}). Independent review requires a distinct reviewer.`
+  if (reviewerId === implementerId || (optImplementer && reviewerId === optImplementer)) {
+    const matchedImpl = reviewerId === implementerId ? implementerId : optImplementer
+    const msg = `SELF_REVIEW_REJECTED: reviewerId (${reviewerId}) equals implementerId (${matchedImpl}). Independent review requires a distinct reviewer.`
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify({ status: 'SELF_REVIEW_REJECTED', error: msg, taskId, round, reviewerId, implementerId: matchedImpl }, null, 2)}\n`)
     } else {
       process.stdout.write(`${msg}\n`)
     }

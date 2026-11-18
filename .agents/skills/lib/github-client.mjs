@@ -273,7 +273,7 @@ export function createGitHubClient({
     return {
       ok: false,
       delegated: true,
-      tier: tier === 'offline' || tier === 'half-duplex' ? tier : 'mcp-delegate',
+      tier: tier === 'offline' || tier === 'half-duplex' || tier === 'none' ? tier : 'mcp-delegate',
       action,
       jsonPayload: { action, ...params, ...(bodyWithTag !== undefined ? { body: bodyWithTag } : {}), stateTag: tag },
       stateTag: tag,
@@ -322,7 +322,7 @@ export function createGitHubClient({
     async getIssue(repo, number) {
       if (tier === 'gh-cli') {
         const res = await runner('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'], { cwd })
-        if (!res.ok) return { ok: false, error: res.stderr }
+        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
         try {
           const d = JSON.parse(res.stdout)
           return { ok: true, ...d, labels: (d.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)), relations: parseBodyRelations(d.body) }
@@ -342,14 +342,15 @@ export function createGitHubClient({
 
     async getPr(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRepository,headRepositoryOwner,mergedAt,author'], { cwd })
-        if (!res.ok) return { ok: false, error: res.stderr }
+        const res = await runner('gh', ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,author'], { cwd })
+        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
         try {
           const d = JSON.parse(res.stdout)
           const headRepo = d.headRepositoryOwner?.login && d.headRepository?.name ? `${d.headRepositoryOwner.login}/${d.headRepository.name}` : null
           return {
             ok: true, number: d.number, title: d.title, state: String(d.state ?? '').toUpperCase(), body: d.body ?? '',
-            url: d.url, headBranch: d.headRefName, baseBranch: d.baseRefName, headRepo,
+            url: d.url, headBranch: d.headRefName, baseBranch: d.baseRefName,
+            headRefOid: d.headRefOid ?? null, baseRefOid: d.baseRefOid ?? null, headRepo,
             merged: Boolean(d.mergedAt) || String(d.state ?? '').toUpperCase() === 'MERGED',
             author: d.author?.login ?? null, relations: parseBodyRelations(d.body),
           }
@@ -362,6 +363,7 @@ export function createGitHubClient({
         return {
           ok: true, number: d.number, title: d.title, state: d.merged ? 'MERGED' : String(d.state ?? '').toUpperCase(),
           body: d.body ?? '', url: d.html_url, headBranch: d.head?.ref ?? null, baseBranch: d.base?.ref ?? null,
+          headRefOid: d.head?.sha ?? null, baseRefOid: d.base?.sha ?? null,
           headRepo: d.head?.repo?.full_name ?? null, merged: Boolean(d.merged), author: d.user?.login ?? null,
           relations: parseBodyRelations(d.body),
         }

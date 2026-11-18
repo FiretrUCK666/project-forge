@@ -2,7 +2,7 @@
  * fixtures-helpers.mjs —— 行为断言共享沙盒夹具与执行辅助原语。
  */
 
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -307,13 +307,11 @@ export function hasFile(root, rel) {
  * `round` 不传时取「下一个轮次」，与 `flow next` 的算法一致。
  */
 export async function issueTokenFor(mainRoot, taskId, round) {
-  const { readTaskLedger, writeTaskLedger, ensureReviewToken } = await import('../../kit/skills/lib/ledger.mjs')
+  const { readTaskLedger, ensureReviewToken, nextReviewRound } = await import('../../kit/skills/lib/ledger.mjs')
   const ledger = readTaskLedger(mainRoot, taskId)
   if (!ledger) throw new Error(`找不到任务账本：${taskId}`)
-  const effectiveRound = round ?? ((ledger.rounds ?? []).length + 1)
+  const effectiveRound = round ?? nextReviewRound(ledger)
   const { token } = ensureReviewToken(mainRoot, ledger, effectiveRound)
-  // ensureReviewToken 可能已写盘；这里再读一次保证调用方拿到的是落盘后的账本
-  void writeTaskLedger
   return token
 }
 
@@ -325,5 +323,70 @@ export async function seedExploredFor(mainRoot, ...taskIds) {
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
     ledger.explored = createExploredEvidence({ at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'fixture-seed' })
     writeTaskLedger(mainRoot, ledger)
+  }
+}
+
+/** 构造仅本地运行的 fake `gh` CLI 垫片环境（绕开真网探测，用于测真实 API 通道与 PR SHA 解析）。 */
+export function createFakeGhEnv({ prs = {}, issues = {}, login = 'fake-dev', failAuth = false } = {}) {
+  const sb = mkdtempSync(join(tmpdir(), 'pf-fake-gh-'))
+  const binDir = join(sb, 'bin')
+  mkdirSync(binDir, { recursive: true })
+  const dataFile = join(sb, 'gh-data.json')
+  writeFileSync(dataFile, JSON.stringify({ prs, issues, login, failAuth }, null, 2), 'utf8')
+
+  const fakeGhJs = join(sb, 'fake-gh.mjs')
+  writeFileSync(fakeGhJs, [
+    "import { readFileSync } from 'node:fs'",
+    'const data = JSON.parse(readFileSync(process.env.FAKE_GH_DATA, "utf8"))',
+    'const args = process.argv.slice(2)',
+    'if (args[0] === "auth" && args[1] === "status") {',
+    '  if (data.failAuth) { process.stderr.write("not logged into github.com\\n"); process.exit(1) }',
+    '  process.stdout.write(`Logged in to github.com account ${data.login || "fake-dev"}\\n`); process.exit(0)',
+    '}',
+    'if (args[0] === "api" && args[1] === "user") {',
+    '  process.stdout.write(`${data.login || "fake-dev"}\\n`); process.exit(0)',
+    '}',
+    'const lookup = (map, num) => map?.[String(num)] ?? map?.[Number(num)] ?? null',
+    'const handleView = (map, notFoundMsg) => {',
+    '  const item = lookup(map, args[2])',
+    '  if (!item) { process.stderr.write(`${notFoundMsg}\\n`); process.exit(1) }',
+    '  if (item.error || (item.statusCode && item.statusCode >= 400)) {',
+    '    process.stderr.write(`${item.error || ("HTTP " + item.statusCode)}\\n`); process.exit(1)',
+    '  }',
+    '  process.stdout.write(JSON.stringify(item)); process.exit(0)',
+    '}',
+    'if (args[0] === "pr" && args[1] === "view") handleView(data.prs, "Could not resolve to a PullRequest (404 Not Found)")',
+    'if (args[0] === "issue" && args[1] === "view") handleView(data.issues, "Could not resolve to an Issue (404 Not Found)")',
+    'process.stderr.write(`unsupported fake-gh cmd: ${args.join(" ")}\\n`)',
+    'process.exit(1)',
+  ].join('\n'), 'utf8')
+
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${fakeGhJs}" %*\r\n`, 'utf8')
+  } else {
+    const shPath = join(binDir, 'gh')
+    writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${fakeGhJs}" "$@"\n`, 'utf8')
+    chmodSync(shPath, 0o755)
+  }
+
+  const sepPath = process.platform === 'win32' ? ';' : ':'
+  const origPath = process.env.PATH ?? process.env.Path ?? ''
+  const nextPath = `${binDir}${sepPath}${origPath}`
+  const env = {
+    ...process.env,
+    PATH: nextPath,
+    ...(process.platform === 'win32' ? { Path: nextPath } : {}),
+    PF_NO_REAL_AUTH_PROBE: '0',
+    FAKE_GH_DATA: dataFile,
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    PF_MCP_GITHUB: undefined,
+    MCP_GITHUB_AVAILABLE: undefined,
+  }
+  return {
+    env,
+    dataFile,
+    update(next) { writeFileSync(dataFile, JSON.stringify(next, null, 2), 'utf8') },
+    cleanup() { rmTree(sb) },
   }
 }

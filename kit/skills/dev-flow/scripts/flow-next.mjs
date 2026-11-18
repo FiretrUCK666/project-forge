@@ -126,6 +126,35 @@ export async function handleNext(opts, roots) {
     }
   }
 
+  if (opts['ack-no-issue-context']) {
+    const reason = String(opts.reason ?? '').trim()
+    if (!selectedTask) {
+      const msg = 'BLOCKED_ACK_REQUIRES_TASK: --ack-no-issue-context 必须指定单个任务（传 --task <id>）。'
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_ACK_REQUIRES_TASK', error: msg }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: 2 }
+    }
+    if (!reason) {
+      const msg = 'BLOCKED_ACK_MISSING_REASON: --ack-no-issue-context 必须附带非空 --reason "<无法取得 Issue 上下文的原因>"。'
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_ACK_MISSING_REASON', taskId: selectedTask.taskId, error: msg }, null, 2)}\n`)
+      process.stderr.write(`${msg}\n`)
+      return { exitCode: 2 }
+    }
+    const unavail = Array.isArray(selectedTask.issueContextUnavailable)
+      ? selectedTask.issueContextUnavailable.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : []
+    const ackIssues = unavail.length > 0
+      ? unavail
+      : (Array.isArray(selectedTask.linkedIssues) ? selectedTask.linkedIssues.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [])
+    selectedTask.issueContextAck = {
+      issues: ackIssues,
+      reason,
+      at: new Date().toISOString(),
+      by: String(opts.agent ?? selectedTask.implementerId ?? 'human').trim() || 'human',
+    }
+    writeTaskLedger(roots.mainRoot, selectedTask)
+  }
+
   let hydration = { rehydrated: false }
   let taskRuntime = null
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')

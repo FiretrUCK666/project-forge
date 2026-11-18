@@ -461,6 +461,16 @@ export function evaluateNextState({
   const finalizeStale = Boolean(needsFinalize && (!t.finalized || (t.finalizedHead && currentHead && t.finalizedHead !== currentHead && rt.nonDocChangesAfterFinalize)))
   const stopLossActive = Boolean((t.lastReview?.stopLossTriggered || lastRound?.stopLossTriggered) && !t.humanApprovedStopLoss)
   const reviewCoversHead = Boolean(t.reviewPassed === true && (!currentHead || t.reviewPassedHead === currentHead) && (!lastRound || !currentHead || lastRound.headSha === currentHead))
+  const unavailIssues = Array.isArray(t.issueContextUnavailable)
+    ? t.issueContextUnavailable.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : []
+  const ack = t.issueContextAck
+  const ackedSet = new Set(Array.isArray(ack?.issues) ? ack.issues.map(Number).filter(Boolean) : [])
+  const hasValidIssueAck = Boolean(
+    ack && typeof ack.reason === 'string' && ack.reason.trim().length > 0
+    && unavailIssues.every((n) => ackedSet.has(n)),
+  )
+  const unackedIssues = unavailIssues.length > 0 && !hasValidIssueAck ? unavailIssues : []
 
   let phase
   let ownerRole = 'implementer'
@@ -529,14 +539,14 @@ export function evaluateNextState({
     ownerRole = 'implementer'
     nextAction = '实施工作位存在未提交改动，完成后提交并继续 finalize/verify'
     command = `git -C "${t.worktreePath ?? '.'}" status`
-  } else if ((t.issueContextUnavailable ?? []).length > 0) {
+  } else if (unackedIssues.length > 0) {
     phase = 'needs-issue-context'
     ownerRole = 'implementer'
     blockingReasons.push('ISSUE_CONTEXT_UNAVAILABLE')
-    const nums = t.issueContextUnavailable.join('、')
-    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：gh issue view <N> --repo <声明仓库>，`
-      + '或显式说明「这一条凭现有信息无法澄清」并写进 Todo 的待拍板事项'
-    command = `gh issue view ${t.issueContextUnavailable[0]} --json number,title,body`
+    const nums = unackedIssues.join('、')
+    nextAction = `拿不到 Issue #${nums} 的正文，先取回来再动手：gh issue view <N> --repo <声明仓库> 并重跑 flow start，`
+      + `或显式确认凭现有信息继续：flow.mjs next --task ${t.taskId} --ack-no-issue-context --reason "<原因>"`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${t.taskId} --ack-no-issue-context --reason "<无法读取 Issue 上下文的原因>"`
   } else if (stopLossActive) {
     phase = 'stop-loss-escalated'
     ownerRole = 'human'
@@ -664,6 +674,13 @@ export function evaluateNextState({
       round: rounds.length,
       lastVerdict: lastRound?.verdict ?? null,
       prNumber: t.prNumber ?? null,
+      issueContext: Array.isArray(t.issueContext) ? t.issueContext : [],
+      issueContextUnavailable: unavailIssues,
+      issueContextAck: t.issueContextAck ?? null,
+      prContext: t.prContext ?? null,
+      prContextUnavailable: t.prContextUnavailable ?? null,
+      prBaseSha: t.prBaseSha ?? null,
+      prHeadSha: t.prHeadSha ?? null,
     },
   }
 }

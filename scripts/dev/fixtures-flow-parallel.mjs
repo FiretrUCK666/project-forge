@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
-import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
+import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowParallelCases(cases) {
 cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
@@ -42,6 +42,7 @@ cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前
     if (stBlocked.exitCode !== 3) return `BLOCKED_UNRESOLVED_DEPENDENCY 未拦截 flow start：exit=${stBlocked.exitCode}`
 
     // 外部 PR：未扫描与未审批前阻断 worktree-deps 挂载与 flow verify
+    const mainSha = gitSync(dir, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
     gitSync(dir, ['checkout', '-qb', 'ext-branch'])
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 2\n')
     gitCommitFast(dir, 'ext fix', { updateOnly: true, name: 'ext', email: 'ext@x.test' })
@@ -56,7 +57,18 @@ cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前
     const vPre = await handleVerify({ task: 'review-pr-42', tier: 'quick' }, roots)
     if (vPre.exitCode !== 3) return `未扫未批外部 PR verify 未返回 exit 3：${vPre.exitCode}`
 
-    const scanOk = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--pr', '42', '--untrusted-scan', '--json'], { cwd: dir })
+    const fakeGh42 = createFakeGhEnv({
+      prs: {
+        42: {
+          number: 42, title: 'Ext PR 42', state: 'OPEN', body: 'ext', url: 'https://github.com/acme/g-demo/pull/42',
+          baseRefName: 'main', headRefName: 'ext-branch', baseRefOid: mainSha, headRefOid: extSha, author: { login: 'ext' },
+        },
+      },
+    })
+    let scanOk
+    try {
+      scanOk = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--pr', '42', '--untrusted-scan', '--json'], { cwd: dir, env: fakeGh42.env })
+    } finally { fakeGh42.cleanup() }
     if (scanOk.status !== 0) return `干净外部 PR 扫描失败：${scanOk.stderr}`
     const vNoApr = await handleVerify({ task: 'review-pr-42', tier: 'quick' }, roots)
     if (vNoApr.exitCode !== 3) return `扫描后未人类批准的外部 PR verify 未阻断：${vNoApr.exitCode}`

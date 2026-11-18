@@ -83,6 +83,16 @@ export const ARTIFACT_EXECUTORS = Object.freeze({
     command: 'node scripts/equip-ci.mjs <目录> --kind release',
     how: '从 templates/ci-release.yml 生成，非 GitHub 远端直接退出并说明原因',
   },
+  'branch-protection': {
+    mode: 'auto',
+    command: 'node scripts/equip-ci.mjs <目录> --protect-branch',
+    how: '对支持 branchProtection 的远端配置开关 A（禁设 required_approving_review_count >= 1）；403 或通用 Git 仓优雅降级至 --with-hooks',
+  },
+  'git-hooks': {
+    mode: 'auto',
+    command: 'node scripts/equip.mjs <目录> --with-hooks',
+    how: '从 templates/githooks-pre-push.sh 写入 .githooks/pre-push（+x）并配局部 core.hooksPath；遇既有 Hook 时 preserve 共存',
+  },
 })
 
 /** 不生成新文件的动作：仅 `create` 需要登记执行入口，其余八档明确跳过。 */

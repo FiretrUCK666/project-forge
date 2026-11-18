@@ -9,13 +9,14 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { writeAtomic } from './fs-atomic.mjs'
 import { isMacOsMetadata } from './protocol.mjs'
+import { detectGitHooksState } from './survey-docs.mjs'
 import { posixPath, readTextSafe } from './text.mjs'
 
 export const BOOTSTRAP_STACKS = new Set([
@@ -493,6 +494,86 @@ export function pruneEmptyParents(filePath, stopDir) {
     } catch {
       break
     }
+  }
+}
+
+/**
+ * 安装跨宿主 POSIX `.githooks/pre-push` 并配置仓库局部 `core.hooksPath .githooks`。
+ *
+ * - 不碰任何 AI 宿主私有目录与全局 Git 配置；
+ * - 若检测到 `.husky/`、`lefthook*`、非 `.githooks` 的 `core.hooksPath` 或非本工具 `.githooks/pre-push`，
+ *   一律 `preserve` 不覆写并输出安全共存说明。
+ */
+export function installGitHooks(targetDir, { dryRun = false } = {}) {
+  const root = resolve(targetDir)
+  if (!existsSync(join(root, '.git'))) {
+    return {
+      status: 'skipped-no-git',
+      action: 'skip',
+      dryRun,
+      reason: '目标目录尚未初始化 Git 仓库（缺少 .git），跳过 .githooks/pre-push 与局部 core.hooksPath 配置',
+    }
+  }
+
+  const state = detectGitHooksState(root)
+  if (state.hasConflict) {
+    const paths = (state.conflicts ?? []).map((c) => c.path).join('、')
+    return {
+      status: 'preserved',
+      action: 'preserve',
+      dryRun,
+      conflicts: state.conflicts,
+      hooksPath: state.coreHooksPath,
+      message: `检测到既有本地 Hook（${paths}），已按 preserve 原则原样保留，未写入 .githooks/pre-push 或修改 core.hooksPath；如需默认分支保护请将该逻辑并入既有钩子`,
+    }
+  }
+
+  const tplPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates', 'githooks-pre-push.sh')
+  if (!existsSync(tplPath)) {
+    throw new Error('缺少模板文件：templates/githooks-pre-push.sh')
+  }
+  const tplContent = readFileSync(tplPath, 'utf8').replace(/\r\n/g, '\n')
+  const destAbs = join(root, '.githooks', 'pre-push')
+  const prevContent = existsSync(destAbs) ? readFileSync(destAbs, 'utf8').replace(/\r\n/g, '\n') : null
+  const fileNeedsWrite = prevContent !== tplContent
+  const configNeedsUpdate = state.coreHooksPath !== '.githooks'
+
+  if (!dryRun) {
+    if (fileNeedsWrite) {
+      mkdirSync(dirname(destAbs), { recursive: true })
+      writeAtomic(destAbs, tplContent)
+    }
+    try {
+      chmodSync(destAbs, 0o755)
+    } catch { /* windows NTFS ignores POSIX mode */ }
+    if (configNeedsUpdate) {
+      const res = spawnSync('git', ['config', '--local', 'core.hooksPath', '.githooks'], {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      })
+      if (res.status !== 0) {
+        throw new Error(`配置局部 core.hooksPath 失败：${(res.stderr || res.stdout || '').trim()}`)
+      }
+    }
+  }
+
+  const status = dryRun
+    ? ((fileNeedsWrite || configNeedsUpdate) ? 'dry-run' : 'unchanged')
+    : ((fileNeedsWrite || configNeedsUpdate) ? 'installed' : 'unchanged')
+  return {
+    status,
+    action: (fileNeedsWrite || configNeedsUpdate) ? 'installed' : 'preserve',
+    dryRun,
+    dest: '.githooks/pre-push',
+    hooksPath: '.githooks',
+    fileUpdated: fileNeedsWrite,
+    gitConfigUpdated: configNeedsUpdate,
+    message: status === 'unchanged'
+      ? '跨宿主 .githooks/pre-push 与局部 core.hooksPath=.githooks 已是最新状态'
+      : (dryRun
+          ? '[dry-run] 将写入 .githooks/pre-push（+x）并设置 git config --local core.hooksPath .githooks'
+          : '已安装跨宿主 .githooks/pre-push（+x）并设置 git config --local core.hooksPath .githooks'),
   }
 }
 

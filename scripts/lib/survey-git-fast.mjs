@@ -292,7 +292,7 @@ export function getSystemGitConfigEntriesAsync() {
             if (eq <= 0) continue
             const key = rawLine.slice(0, eq).trim().toLowerCase()
             const value = rawLine.slice(eq + 1).trim()
-            if (/^(?:user|credential|init)\./.test(key) || key === 'core.excludesfile') {
+            if (/^(?:user|credential|init)\./.test(key) || key === 'core.excludesfile' || key === 'core.hookspath') {
               entries.push({ key, scope: 'system', value })
             }
           }
@@ -335,7 +335,7 @@ export function readUserScopeConfigFast(commonDir) {
       if (eq <= 0) continue
       const k = line.slice(0, eq).trim().toLowerCase()
       const v = line.slice(eq + 1).trim()
-      if (curSection === 'user' || curSection === 'credential' || curSection === 'init' || (curSection === 'core' && k === 'excludesfile')) {
+      if (curSection === 'user' || curSection === 'credential' || curSection === 'init' || (curSection === 'core' && (k === 'excludesfile' || k === 'hookspath'))) {
         map.set(`${curSection}.${k}`, { scope, value: v })
       }
     }

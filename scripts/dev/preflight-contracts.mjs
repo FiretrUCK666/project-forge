@@ -13,7 +13,7 @@ import { VERIFY_EXIT } from '../handoff.mjs'
 import { markdownHeadings } from '../sync-toc.mjs'
 import { checkGapCoverage as gapCoverage } from './gap-coverage.mjs'
 
-const PATH_RE = /(?<![A-Za-z0-9_./-])((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json))\b/g
+const PATH_RE = /(?<![A-Za-z0-9_./-])((?:references|templates|scripts)\/[A-Za-z0-9_./-]+\.(?:md|mjs|ya?ml|txt|json|sh))\b/g
 const HISTORY_PATHS = [/^docs\/work\//, /^docs\/archive\//, /^docs\/release-notes\//]
 
 const PUSH_TIER_RULE = [

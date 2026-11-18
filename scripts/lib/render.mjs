@@ -8,6 +8,8 @@
  * 一处排序、一句措辞都不改变判定，因此它坏掉时最坏结果是「报告难看」，不是「判错」。
  */
 
+import { computeS3NextStep, hasDecision } from './survey-questions.mjs'
+
 /**
  * 每个生态最多展开几条命令。
  *
@@ -347,7 +349,7 @@ export function toMarkdown(facts) {
     lines.push(`- **团队/组织协作者写权限**：${teamHint}`)
   }
   lines.push('- **远端可达性**：没探测。它会等满一次网络超时，而勘察要能随便调用')
-  lines.push('- **仓库设置**（分支保护、可见性、Actions 开关）：脚本读不到，在 GitHub 上看')
+  lines.push('- **仓库设置**（分支保护、可见性、检查流开关）：只读勘察默认不调写接口；可按托管界面或 `equip-ci.mjs --protect-branch` 核对开关 A')
   if (coverage?.truncated) {
     lines.push(`- **内容扫描被截断了**：只走到第 ${coverage.depthReached} 层、前 20000 个文件。`
       + '上面的「没扫到」覆盖不到更深的地方——这一趟不能当完整证据用')
@@ -362,6 +364,7 @@ export function toMarkdown(facts) {
 
   appendRemoteAndAuthWizard(lines, facts)
   appendNavigation(lines, facts)
+  appendS3NextStep(lines, facts)
 
   return lines.join('\n')
 }
@@ -369,9 +372,15 @@ export function toMarkdown(facts) {
 function appendRemoteAndAuthWizard(lines, facts) {
   const git = facts.git ?? {}
   const auth = git.auth ?? {}
-  const noRemote = (git.remotes ?? []).length === 0 && !git.localMode && facts.maturity !== 'empty'
   const isGeneric = git.providerId === 'generic-git'
-  const hasAnyGithubAuth = Boolean(
+  const hasRemote = (git.remotes ?? []).length > 0 && !git.localMode && git.isRepoRoot !== false && git.isBare !== true
+  const noRemote = (git.remotes ?? []).length === 0
+    && !git.localMode
+    && git.available !== false
+    && git.isBare !== true
+    && git.isRepoRoot !== false
+    && (facts.maturity !== 'empty' || git.present === true)
+  const hasAnyPushAuth = Boolean(
     auth.ghCli?.authenticated
     || auth.details?.canPushHttps
     || auth.details?.canPushSsh
@@ -379,31 +388,52 @@ function appendRemoteAndAuthWizard(lines, facts) {
     || auth.apiChannel?.tier === 'node-https-token'
     || auth.apiChannel?.tier === 'half-duplex',
   )
-  const needsAuthWizard = Boolean(auth.probed && !isGeneric && !hasAnyGithubAuth)
+  const needsAuthWizard = Boolean(noRemote || (auth.probed && !hasAnyPushAuth))
   const needsHostKeyHint = auth.ssh?.state === 'host-key-unverified'
   const hasRemediation = Boolean(auth.remediationCmd)
+  const needsBranchProtectionHint = Boolean(
+    !hasDecision(facts, 'no-ci')
+    && !hasDecision(facts, 'no-branch-protection')
+    && !hasDecision(facts, 'branch-protection')
+    && git.role !== 'contributor-fork'
+    && (hasRemote || noRemote),
+  )
 
-  if (!noRemote && !needsAuthWizard && !needsHostKeyHint && !hasRemediation) return
+  if (!noRemote && !needsAuthWizard && !needsHostKeyHint && !hasRemediation && !needsBranchProtectionHint) return
 
   lines.push('## 远端建仓与认证指引')
   lines.push('')
   if (noRemote) {
-    lines.push('- **无远端三路决策**：')
-    lines.push('  1. **暂不配远端（纯本地）**：在 `.git/` 创建 `pf-local-mode` 标记；')
-    lines.push('  2. **绑定已有 GitHub 仓库**：`git remote add origin <仓库地址>`；')
-    lines.push('  3. **新建 GitHub 仓库**：默认设 `private`（或按需 `public`）并确认个人/组织归属，再运行 `gh repo create <owner>/<name> --private --source=. --push`。')
+    lines.push('- **无远端三路决策（支持通用 Git SSH/HTTP(S) 与 GitHub）**：')
+    lines.push('  1. **暂不配远端（纯本地）**：在 `.git/` 创建 `pf-local-mode` 标记（或在 `AGENTS.md`「## 取舍」写 `remote-setup: local-only`）。')
+    lines.push('  2. **绑定已有远端（SSH / HTTP(S)）**：')
+    lines.push('     - SSH：`git remote add origin git@<host>:<owner>/<repo>.git`（先完成本机 SSH Key 与主机指纹核验）；')
+    lines.push('     - HTTP(S)：`git remote add origin https://<host>/<owner>/<repo>.git`（**严禁把令牌或口令写进 URL / `.git/config`**）。')
+    lines.push('  3. **新建远端仓库**：GitHub 可直接运行 `gh repo create <owner>/<name> --private --source=. --push`（默认 `private` 私有，或按需 `public` 并确认归属）；其他通用远端请先在托管页建好空仓库再按上面 SSH 或 HTTP(S) 命令绑定。')
   }
   if (hasRemediation) {
     lines.push(`- **协议错配自愈命令**：\`${auth.remediationCmd}\``)
   }
   if (needsHostKeyHint) {
-    lines.push(`- **SSH 主机指纹尚未收录**：只读探测不改写 \`~/.ssh/known_hosts\`；请人工核对 GitHub 指纹后运行 \`${auth.ssh.fingerprintCmd || 'ssh -T git@github.com'}\`。`)
+    lines.push(`- **SSH 主机指纹尚未收录**：只读探测不改写 \`~/.ssh/known_hosts\`；请人工核对主机指纹后运行验证（例如 GitHub：\`${auth.ssh.fingerprintCmd || 'ssh -T git@github.com'}\`，通用主机：\`ssh -T <user>@<host>\`）。`)
   }
   if (needsAuthWizard) {
-    lines.push('- **未检测到可用 GitHub 凭据，按偏好选一条路线完成认证**：')
-    lines.push('  1. **`gh CLI` 路线**：安装后依次运行 `gh auth login` -> `gh auth setup-git` -> `gh repo create <name> --private --source=. --push`。')
-    lines.push('  2. **`SSH Ed25519` 路线**：`ssh-keygen -t ed25519 -C "<你的邮箱>"`（macOS 可执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 并配置 `UseKeychain yes`）-> 将 `~/.ssh/id_ed25519.pub` 写入 GitHub SSH Keys -> `ssh -T git@github.com` 校验 -> `git remote add origin git@github.com:<owner>/<repo>.git`。')
-    lines.push('  3. **`HTTPS + Fine-grained PAT + GCM` 路线**：创建仅勾选 `Contents` / `Pull requests` 最小权限的 Fine-grained PAT，通过系统凭据管理器保存（macOS Keychain / Windows GCM），**严禁把令牌写进 `.git/config` 远端 URL**。')
+    lines.push(`- **SSH 与 HTTP(S) 凭据配置路线**（${isGeneric ? '通用托管平台按所用协议选一条' : '按所用协议与托管平台任选一条'}）：`)
+    lines.push('  1. **`SSH Ed25519` 路线（通用 SSH 远端与 GitHub 均适用）**：`ssh-keygen -t ed25519 -C "<你的邮箱>"`（macOS 可执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 并配置 `UseKeychain yes`）-> 将公钥 `~/.ssh/id_ed25519.pub` 写入托管账户 SSH Keys -> 核对主机指纹后运行 `ssh -T git@<host>` 校验 -> `git remote add origin git@<host>:<owner>/<repo>.git`。')
+    lines.push('  2. **`HTTP(S) + PAT + 系统凭据管理器` 路线（通用 HTTP(S) 远端与 GitHub 均适用）**：创建最小权限访问令牌（GitHub 选 Fine-grained PAT，仅勾选 `Contents` / `Pull requests`），交由系统 `credential.helper` 保存（macOS Keychain / Windows GCM / Linux 凭据库），**严禁把明文令牌写进 `.git/config` 远端 URL**。')
+    if (!isGeneric) {
+      lines.push('  3. **`GitHub gh CLI` 路线（GitHub 远端可选）**：`gh auth login` -> `gh auth setup-git` -> `gh repo create <name> --private --source=. --push`。')
+    }
+  }
+  if (needsBranchProtectionHint) {
+    const branch = facts.conventions?.defaultBranch || git.originHeadBranch || git.initDefaultBranch || 'main'
+    const targetPath = facts.target?.path || '.'
+    const hooksFlag = facts.git?.hooks?.hasConflict || hasDecision(facts, 'no-git-hooks') ? '' : ' --with-hooks'
+    if (git.capabilities?.branchProtection === true) {
+      lines.push(`- **默认分支保护（开关 A，GitHub 可执行）**：运行 \`node scripts/equip-ci.mjs "${targetPath}" --protect-branch --branch ${branch}\`（仅禁直推/强推/删默认分支并要求 PR 与状态检查通过，**严禁设置 \`required_approving_review_count >= 1\`**；若遇 HTTP \`403\` 自动降级改用 \`node scripts/equip.mjs "${targetPath}"${hooksFlag || ' --with-hooks'}\`）。完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
+    } else {
+      lines.push(`- **默认分支保护（开关 A，通用托管指引）**：当前远端不支持统一分支保护 API，请在托管仓库设置中为默认分支（\`${branch}\`）手动开启开关 A（禁直推/强推/删默认分支、要求变更提案与门禁检查通过，**不默认强制他人审批**），并建议运行 \`node scripts/equip.mjs "${targetPath}" --with-hooks\` 安装本地 \`.githooks/pre-push\` 防护；完成后在 \`AGENTS.md\`「## 取舍」写入 \`branch-protection\`（或 \`no-branch-protection\`）。`)
+    }
   }
   lines.push('')
 }
@@ -585,5 +615,18 @@ function appendNavigation(lines, facts) {
   lines.push('')
   lines.push('理由：这些文件里写的是**反直觉的硬判据**，不是概念介绍。凭自身常识跳过它们，'
     + '结果不会报错，只会在几周后以「用户装不上」「历史改不掉」的形式出现。')
+  lines.push('')
+}
+
+function appendS3NextStep(lines, facts) {
+  const nextStep = facts.nextStep ?? computeS3NextStep(facts)
+  if (!nextStep) return
+  lines.push('## S3 推荐落盘入口')
+  lines.push('')
+  lines.push(`${nextStep.text}`)
+  if (nextStep.reason) lines.push(`- 决策依据：${nextStep.reason}`)
+  if (nextStep.protectBranchCommand) {
+    lines.push(`- 分支保护命令：\`${nextStep.protectBranchCommand}\``)
+  }
   lines.push('')
 }

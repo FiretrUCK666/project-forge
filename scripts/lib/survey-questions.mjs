@@ -77,7 +77,33 @@ export const QUESTION_RULES = [
       && !f.git.localMode
       && f.scale.effectiveFiles > 0
       && !hasDecision(f, 'remote-setup'),
-    text: '当前还没有配置远端仓库：请选择 1) 暂不配远端（写入 `.git/pf-local-mode` 纯本地运作）；2) 绑定已有 GitHub 仓库；3) 新建 GitHub 仓库（默认 `private` 私有，或 `public` 公开，并确认个人/组织归属）',
+    text: '当前还没有配置远端仓库，请选择 1) 暂不配远端（写入 `.git/pf-local-mode` 纯本地运作）；'
+      + '2) 绑定已有远端（支持 SSH `git remote add origin git@<host>:<owner>/<repo>.git` 与 HTTP(S) `git remote add origin https://<host>/<owner>/<repo>.git`，勿把令牌写进 URL）；'
+      + '3) 新建远端仓库（GitHub 默认 `private` 私有或按需 `public`，确认个人/组织归属，如 `gh repo create <owner>/<name> --private --source=. --push`）',
+  },
+  {
+    id: 'q.branch-protection',
+    when: (f) => f.git.present === true
+      && f.git.isBare !== true
+      && f.git.isRepoRoot !== false
+      && (f.git.remotes ?? []).length > 0
+      && f.git.role !== 'contributor-fork'
+      && !hasDecision(f, 'no-ci')
+      && !hasDecision(f, 'branch-protection')
+      && !hasDecision(f, 'no-branch-protection'),
+    text: (f) => {
+      const branch = f.conventions?.defaultBranch || f.git?.originHeadBranch || f.git?.initDefaultBranch || 'main'
+      if (f.git?.capabilities?.branchProtection === true) {
+        return `尚未在 AGENTS.md「## 取舍」记录默认分支（\`${branch}\`）的分支保护决策。`
+          + '建议开启**开关 A**（禁直推、禁强推、禁删默认分支、要求 PR 与状态检查通过，**严禁默认设置 `required_approving_review_count >= 1`**）：'
+          + `运行 \`node scripts/equip-ci.mjs . --protect-branch --branch ${branch}\`（HTTP 403/权限受限将自动提示降级至 \`node scripts/equip.mjs . --with-hooks\`），`
+          + '并在 AGENTS.md「## 取舍」写入 `branch-protection`（或 `no-branch-protection` 豁免）以防重问'
+      }
+      return `当前远端不支持统一 API 自动配置分支保护（默认分支 \`${branch}\`）：`
+        + '请在托管仓库设置中为默认分支手工开启**开关 A** 原则（禁直推/强推/删默认分支、要求变更提案与状态检查通过，且不要强制他人审批），'
+        + '并可运行 `node scripts/equip.mjs . --with-hooks` 安装本地 `.githooks/pre-push` 防直推护栏；'
+        + '完成后在 AGENTS.md「## 取舍」写入 `branch-protection`（或 `no-branch-protection`）以防重问'
+    },
   },
   {
     id: 'q.release-strategy',
@@ -155,4 +181,66 @@ export function summarizeNeedsHuman(facts) {
   return count > 0
     ? { required: true, count, kinds, marker: 'NEEDS_HUMAN' }
     : { required: false, count: 0, kinds: [] }
+}
+
+/**
+ * 计算 S3 推荐下一步命令行与是否自动附带 `--with-hooks`。
+ *
+ * 规则：仅当本地没有外部 Hook 冲突、尚未接管、且 `AGENTS.md`「## 取舍」未写 `no-git-hooks` 时，
+ * 自动在推荐 `equip.mjs` 命令中附带 `--with-hooks`，防止弱模型遗漏本地护栏。
+ */
+export function computeS3NextStep(facts) {
+  const git = facts?.git ?? {}
+  const hooks = git.hooks ?? {}
+  const targetPath = facts?.target?.path || '.'
+  const tier = facts?.recommendedTier ?? facts?.kit?.recommendedTier ?? 'lightweight'
+  const isEmpty = facts?.maturity === 'empty'
+    || ((facts?.scale?.totalFiles ?? 0) === 0 && (git.commits ?? 0) === 0)
+
+  const hooksDisabled = hasDecision(facts, 'no-git-hooks')
+  const hooksConflict = Boolean(hooks.hasConflict || (hooks.conflicts?.length ?? 0) > 0)
+  const hooksInstalled = Boolean(hooks.installed)
+  const gitUsable = git.available !== false && git.isBare !== true && git.isRepoRoot !== false
+  const withHooks = Boolean(gitUsable && !hooksDisabled && !hooksConflict && !hooksInstalled)
+
+  const quotedTarget = /\s/.test(targetPath) ? `"${targetPath}"` : targetPath
+  const equipCommand = isEmpty
+    ? `node scripts/equip.mjs ${quotedTarget} --bootstrap-empty --tier ${tier}${withHooks ? ' --with-hooks' : ''}`
+    : `node scripts/equip.mjs ${quotedTarget} --tier ${tier}${withHooks ? ' --with-hooks' : ''}`
+
+  const canProtectApi = Boolean(
+    git.present === true
+    && !git.localMode
+    && (git.remotes ?? []).length > 0
+    && git.role !== 'contributor-fork'
+    && git.capabilities?.branchProtection === true
+    && !hasDecision(facts, 'no-ci')
+    && !hasDecision(facts, 'no-branch-protection'),
+  )
+  const defaultBranch = facts?.conventions?.defaultBranch || git.originHeadBranch || git.initDefaultBranch || 'main'
+  const protectBranchCommand = canProtectApi
+    ? `node scripts/equip-ci.mjs ${quotedTarget} --protect-branch --branch ${defaultBranch}`
+    : undefined
+
+  let reason = '无本地 Hook 冲突且未配置 `no-git-hooks`，已自动附带 `--with-hooks`'
+  if (!gitUsable) reason = '当前目录非可用普通仓库根目录，跳过 `--with-hooks`'
+  else if (hooksDisabled) reason = 'AGENTS.md「## 取舍」已写 `no-git-hooks`，已跳过 `--with-hooks`'
+  else if (hooksConflict) {
+    const paths = (hooks.conflicts ?? []).map((c) => c.path).filter(Boolean).join('、')
+    reason = `检测到既有 Hook（${paths || '外部钩子配置'}），按 preserve 原则保留现有配置，不附带 \`--with-hooks\``
+  } else if (hooksInstalled) {
+    reason = '本地 `.githooks/pre-push` 已由 project-forge 配置就位'
+  }
+
+  return {
+    stage: 'S3',
+    withHooks,
+    hooksConflict,
+    hooksDisabled,
+    hooksInstalled,
+    equipCommand,
+    ...(protectBranchCommand ? { protectBranchCommand } : {}),
+    reason,
+    text: `[NEXT STEP] ${equipCommand}${protectBranchCommand ? ` && ${protectBranchCommand}` : ''}`,
+  }
 }

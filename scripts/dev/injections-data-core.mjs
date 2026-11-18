@@ -265,7 +265,7 @@ export const INJECTIONS_CORE = [
   {
     id: 'I22c',
     what: '算不出来时让 catch 返回与成功同形的值',
-    file: 'scripts/review.mjs',
+    file: 'scripts/lib/review-helpers.mjs',
     from: `    return {\n      state: 'unavailable',\n      health: null,\n      error: error instanceof Error ? error.message : String(error),\n    }`,
     to: `    return { state: 'ok', health: { broken: [], missing: [], drifted: [] }, error: null }`,
     expect: '算不出来不等于算出来没问题',

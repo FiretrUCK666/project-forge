@@ -503,6 +503,8 @@ export function registerDocDepthCases(cases) {
       if (specBFm.related_prd !== '../prd/261117-master-prd.md') {
         return `init --kind spec --prd 未写入 related_prd：${JSON.stringify(specBFm)}`
       }
+      // 剥除模板自带的默认 C2 占位条目，确保 C2 仅由后文归档切片 S0 认领，避免掩盖对 docs/archive/specs/ 的覆盖率检测
+      writeFileSync(join(dir, specBRel), readFileSync(join(dir, specBRel), 'utf8').replace(/^- \[ \] C2:.*\r?\n?/m, ''))
 
       // 2. doc-plan clarify 向 ## 澄清与补充记录 写入后 audit 退出 0 且不触发 BLOCKED_PENDING_DECISIONS
       const clar = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [

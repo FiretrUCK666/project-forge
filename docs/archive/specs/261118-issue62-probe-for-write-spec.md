@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-18
 updated: 2026-11-18
 issue: 62
-pr: null
+pr: 66
 branch: feat/probe-for-write
 owner: FiretrUCK666
 approved: true

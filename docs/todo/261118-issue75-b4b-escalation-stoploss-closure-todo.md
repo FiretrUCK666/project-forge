@@ -48,7 +48,7 @@ related_spec: ../specs/261118-issue75-b4b-escalation-stoploss-closure-spec.md
 - [ ] C13: 实现 `review-locks.mjs` `checkDistinctRoundReviewer` 全历史换人锁（`BLOCKED_SAME_REVIEWER_REREVIEW`）、`flow-next.mjs` `excludedReviewers` 与结构化 `stopLossPacket`。
 - [ ] C14: 在 `critique-rounds.mjs`、`doc-plan.mjs` 与 `doc-audit.mjs` 补齐 `critique-reject`/`critique-override`、全历史换人、同 SHA 锁与 3 轮停损升级，同步更新 `injections-data-workflow.mjs` (`I64`/`I78`)。
 - [ ] C19: 在 `doc-substantive.mjs` 交付单源 `evaluateMasterPrdClosureState` 接入 `docs.mjs` 与 `flow-lifecycle`（`finalize` + `verify`），实现 `1:N` 总控 PRD 确定性四态收口与并行后重跑幂等归档，在 `fixtures-stageb-loop.mjs` 跑通正反双向用例。
-- [ ] C22: 交付 `C22` 六项闭环增强：`A4/A5`（`artifact_baseline` 防空转、`flow-trial-merge` 有界冲突提取与恢复包）、Issue/PR 统一工作前缀与单表语义标签流转、`low` 风险 PR 可选 `review-pack record`、`review-gates`/`review-ledger` 切片 `C*` 隔离与 `check-fault` 自动 `faultRecord`、按需 `capabilities.milestones` 与 `AGENTS.md`/`SKILL.md` `milestone`/裸链接可发现性入口，以及双侧复用共享 3 轮硬停损校验器并同步对齐 `kit/skills/dev-plan/SKILL.md`、`README.md`、`README.en.md`、`templates/agents-project.md`、`references/collaboration.md` 与 `references/docs-set.md`。
+- [ ] C22: 交付 `C22` 六项闭环增强：`A4/A5`（`artifact_baseline` 防空转、`flow-trial-merge` 有界冲突提取与恢复包）、Issue/PR 统一工作前缀（含 `Case 1 -> docs:`）与四态单表语义标签（`in-progress` / `in-review` / `changes-requested` / `reviewed`）、`low` 风险 PR 可选 `review-pack record`、`review-gates`/`review-ledger` 切片 `C*` 隔离与 `check-fault` 自动 `faultRecord`、按需跨后端 `capabilities.milestones`（`GitHub` 直连、`local-only` 持久存储且 `migrate` 带出、`generic-git` 本地分组映射并输出可直接照单配平台的结构化清单）与 `AGENTS.md`/`SKILL.md` `milestone`/裸链接可发现性入口，以及双侧复用共享 3 轮硬停损校验器并同步对齐 `kit/skills/dev-plan/SKILL.md`、`README.md`、`README.en.md`、`templates/agents-project.md`、`references/collaboration.md` 与 `references/docs-set.md`。
 
 ## 执行步骤
 

@@ -45,13 +45,13 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 - [ ] C9: `survey-docs.mjs` 探测非标设计目录、非 `.md` README、中性 CI（消除 `ci.absent` 误报）与 `.githooks/`；`survey-reentry.mjs` 与 `doc-audit-repo.mjs` 隔离外来 `docs/` 防误报 `FRONTMATTER_INVALID`；复用 `doc-shape.mjs` 证据跳节与异构模板兼容；`survey-workspace.mjs`/`survey-ecosystem.mjs`/`repo-map.mjs` 解除 `depth > 6` 硬截断并识别多包 glob、自动化脚本与 `exports` 对象映射。
 - [ ] C10: `survey-plan.mjs` 新增 `business-flows` 分片只读 `repo-map.mjs` 输出业务流映射；`SKILL.md` 与 `references/survey.md` 规定 `S1 -> S3` 改前只读实跑对方既有测试与入口建立基线；重资产入 `docs/TDD.md`，`AGENTS.md` 严守轻量体积上限。
-- [ ] C21: 落地 `A7` 存量异构盲点：`survey-reentry`/`skill-discovery`/`agents-defaults`/`survey-docs` 区分非隐藏 `skills/*`、`.agents/skills/*` 与深层宿主镜像并扫描 `*/AGENTS.md`；`survey-docs`/`doc-shape`/`release-prep-lib`（`<= 795` 行）/`govern-docs`/`review-gates`/`doc-templates` 泛化多语配对文件名（`README.*.md`、`CONTRIBUTING.*.md`、`SECURITY*.md`、`*.zh-CN.md`）；`repo-map.mjs` 补 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`；`profile-sniffer.mjs` 隔离重型 `e2e/`/`webtest/` 并聚合多 workflow。
+- [ ] C21: 落地 `A7` 存量异构盲点与 `survey.mjs` 减行：先从 `scripts/survey.mjs`（`758` 行）抽离辅助至 `scripts/lib/survey-docs.mjs` 压至 `<= 730` 行；`survey-reentry`/`skill-discovery`/`agents-defaults`/`survey-docs` 区分非隐藏 `skills/*`、`.agents/skills/*` 与深层宿主镜像并扫描 `*/AGENTS.md`；`survey-docs`/`doc-shape`/`release-prep-lib`（`<= 795` 行）/`govern-docs`/`review-gates`/`doc-templates` 泛化多语配对文件名（`README.*.md`、`CONTRIBUTING.*.md`、`SECURITY*.md`、`*.zh-CN.md`）；`repo-map.mjs` 补 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`；`profile-sniffer.mjs` 隔离重型 `e2e/`/`webtest/` 并聚合多 workflow。
 
 ## 执行步骤
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
-| 1 | 扩展 `survey-docs`/`survey-workspace`/`survey-ecosystem`/`survey-reentry`/`agents-defaults`/`skill-discovery`/`profile-sniffer`、`doc-audit-repo`/`doc-shape`/`doc-templates`/`release-prep-lib`/`govern-docs`/`review-gates` 异构兼容与 `A7` 盲点，并在 `fixtures-stageb-onboarding.mjs` 写失败前置用例 | 新夹具先红后绿，且 `release-prep-lib.mjs <= 795` | `#71`、`#72` 已合入 `main` |
+| 1 | 先从 `scripts/survey.mjs`（`758` 行）抽离 TDD/符号汇总与 CLI/角色封装至 `scripts/lib/survey-docs.mjs` 压至 `<= 730` 行（保留既有注入锚点），再扩展 `survey-docs`/`survey-workspace`/`survey-ecosystem`/`survey-reentry`/`agents-defaults`/`skill-discovery`/`profile-sniffer`、`doc-audit-repo`/`doc-shape`/`doc-templates`/`release-prep-lib`/`govern-docs`/`review-gates` 异构兼容与 `A7` 盲点，并在 `fixtures-stageb-onboarding.mjs` 写失败前置用例 | `scripts/survey.mjs <= 730`、`release-prep-lib.mjs <= 795`、`verify-injections.mjs` 与新夹具先红后绿 | `#71`、`#72` 已合入 `main` |
 | 2 | 实现 `business-flows` 分片、`repo-map.mjs` 业务流分析（含 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`）、`tdd-facts`/`tdd-scaffold` 承接与 `SKILL.md`/`references/` 基线规范 | `fixtures-stageb-onboarding.mjs` 全绿且 `SKILL.md <= 200` 行 | 步骤 1 |
 | 3 | 若平行列 `B3` 先合入，执行 rebase 后运行 `node scripts/equip.mjs .` 并跑通全量 `merge-gate` | 全量门禁全绿 | 步骤 2 |
 

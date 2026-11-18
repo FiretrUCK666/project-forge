@@ -33,6 +33,12 @@ export const LOCKFILE_NAMES = new Set(PACKAGE_LOCKFILES.map((n) => n.toLowerCase
 export const UI_VISUAL_EXT_RE = /\.(?:tsx|jsx|vue|svelte|html|css|scss|svg)$/i
 export const CODE_EXT_RE = /\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|rb|php|cs|fs|c|cc|cpp|h|hpp|swift|dart|sh|bash|ps1)$/i
 export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|src\/test|src\/it)\/|(?:\.(?:test|spec)\.[^/]+$)|_test\.[^/]+$|(?:^|\/)test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$|\.Tests\//i
+export const FIXTURE_FILE_RE = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|__mocks__)\/|(?:\.(?:fixtures?|mocks?|testdata)\.[^/]+$)|(?:^|\/)fixtures(?:-[^/]+)?\.[^/]+$|(?:^|\/)injections-data(?:-[^/]+)?\.[^/]+$/i
+
+export function isTestOrFixtureFile(rel) {
+  const p = posixPath(rel)
+  return TEST_FILE_RE.test(p) || FIXTURE_FILE_RE.test(p)
+}
 
 export const GATE_WORKFLOW_FILE_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile)$/i
 export const GATE_SHELL_OR_SCRIPT_RE = /(?:^|\/)(?:\.github\/(?:workflows|actions)\/[^/]+\.ya?ml|package\.json|Makefile|justfile|Taskfile\.ya?ml)$|\.(?:sh|bash|ps1)$/i
@@ -719,7 +725,7 @@ export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, 
     }
   }
 
-  const godFile = (!TEST_FILE_RE.test(fileRel) && !fileRel.endsWith('.min.js') && fullLineCount > warnLines)
+  const godFile = (!isTestOrFixtureFile(fileRel) && !fileRel.endsWith('.min.js') && fullLineCount > warnLines)
     ? { file: fileRel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
     : null
 

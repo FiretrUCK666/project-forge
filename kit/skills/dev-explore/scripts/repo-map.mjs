@@ -15,7 +15,7 @@ import {
 } from '../../lib/git.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
-import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
+import { TEST_FILE_RE, isTestOrFixtureFile } from '../../lib/static-gates.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 import { createExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
@@ -273,7 +273,7 @@ function extractTaskRunners(root, packages) {
 function extractReusableModules(files) {
   const candidates = files.filter((f) => {
     if (isToolOwnedPath(f.rel)) return false
-    if (!isSourceCodeFile(f) || TEST_FILE_RE.test(f.rel)) return false
+    if (!isSourceCodeFile(f) || isTestOrFixtureFile(f.rel)) return false
     return /(?:^|\/)(?:lib|shared|utils?|helpers?|common|core|domain)\//i.test(f.rel)
       || /(?:shared|utils?|helpers?|common|protocol|template|render)\.[^/]+$/i.test(f.name)
   })

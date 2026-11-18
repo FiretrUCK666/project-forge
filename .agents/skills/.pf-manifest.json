@@ -2,13 +2,13 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-18T02:55:16.031Z",
+  "installedAt": "2026-11-18T04:13:39.369Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
     },
     "dev-explore/scripts/repo-map.mjs": {
-      "sha256": "022827b8ba534bcbf52b974a17e07a5485a472b94019cf89055de7faa36870e7"
+      "sha256": "28e64ec77d3c3f119b776c7a5b357930bf6002213adb0c3b8e918a7261ea2615"
     },
     "dev-flow/SKILL.md": {
       "sha256": "48eaea27e0c376e24835f220fad3387132d7188976560a8e6d9c0ae2a2293116"
@@ -59,10 +59,10 @@
       "sha256": "7bdfd5a98f91de96f01950eae2211afab83acda523d52acff08d98aa97c53392"
     },
     "dev-govern/scripts/govern-checks.mjs": {
-      "sha256": "683612bf7a550176352fa650415cb39e35ee29f74daba0e6f0221801df8fa040"
+      "sha256": "f1c46cd3fb7fc63c769f52e53f5c62d8697c6cc07156d3b25cff4ea9dc033d44"
     },
     "dev-govern/scripts/govern-docs.mjs": {
-      "sha256": "92bfde5722c63720470fd54dceb20a33fd962351eeb2659634acd39ac13344e9"
+      "sha256": "d520a8629aef91c12808d35345ac2cc48fb1f963c101a11dab0b38a9b7e97323"
     },
     "dev-govern/scripts/govern-retro.mjs": {
       "sha256": "30db786075fe98219d601e744fac39096fa196495d6168fd0dc55038915adf6b"
@@ -104,7 +104,7 @@
       "sha256": "bea6678a56e57c32f1c0ac911dc6be053f8f0140714e3a9eacabba0429080c23"
     },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "def714a53835291e89872b99cc6d63c58af5b5d0e1768dc02cbec2f572dcd4ef"
+      "sha256": "bdbbe8444c71e72b914904aea955e503c40fbb144851fee4fabfafc0cca32b1e"
     },
     "dev-review/scripts/review-ledger.mjs": {
       "sha256": "b298cda8299bf69eec9cb2be0fd374741d5bf8ecc099cc1d4c7c070407493060"
@@ -209,7 +209,7 @@
       "sha256": "626835df8cc7206e3175e9757b0d0f8b3f1df23c98f745a035664e33a602db4f"
     },
     "lib/shared.mjs": {
-      "sha256": "af4e40eacc123a1aa7db66e7eaf6e59fead417b784ae050d5856ea046c96ac81"
+      "sha256": "563c9f7152b93ecebfd182a0bf743e7561141403834a2507068950ed3c63ba52"
     },
     "lib/signals.mjs": {
       "sha256": "ecdc6df599809d7b92f6e984df741afe822b9c45bd0de42805cf095478cedda8"
@@ -218,7 +218,7 @@
       "sha256": "00139ac78a199276f1cc22acc5d43f0f9ea0be5b1d78a8102527be4b9344ce6e"
     },
     "lib/static-gates.mjs": {
-      "sha256": "8eabed4aa071df7a72e00801a84244d7b6850c84de79d11883f1a363075c241f"
+      "sha256": "bc9d45e7c48a62e8a4034d2961855d576eaa74cfcc233870073457f2565640e9"
     },
     "lib/symbol-index.mjs": {
       "sha256": "51de1eda0d33444393da1f5edcd718985db0d91b79742eddacef9fd34bd647d4"

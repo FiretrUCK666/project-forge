@@ -506,4 +506,121 @@ export function registerFlowStateCases(cases) {
       return true
     } finally { rmTree(dir) }
   }])
+
+// `flow start` 此前一律从 main 起头。工作全在一条特性分支上时（主线还没合），
+// 新任务的 worktree 会落后几十个提交——它看不见那些工作，等于从旧世界开工。
+cases.push(["flow start 能指定基线分支", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { join } = await import("node:path")
+
+  const dir = tmpProject({ "README.md": "# b\n\n基线测试仓。\n" })
+  try {
+    gitInit(dir)
+    gitCommitFast(dir, "init")
+    // 造一条特性分支，然后在它上面多做一个提交
+    execFileSync("git", ["checkout", "-b", "feat/base-probe"], { cwd: dir, stdio: "ignore", windowsHide: true })
+    const fs = await import("node:fs")
+    fs.writeFileSync(join(dir, "probe.txt"), "x")
+    gitCommitFast(dir, "feat commit")
+    const featSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", windowsHide: true }).trim()
+    const defaultBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: dir, encoding: "utf8", windowsHide: true,
+    }).trim()
+    execFileSync("git", ["checkout", defaultBranch], { cwd: dir, stdio: "ignore", windowsHide: true })
+
+    const res = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-probe", "--case", "4", "--base", "feat/base-probe", "--branch", "feat/base-probe-task", "--json",
+    ], { cwd: dir })
+    if (res.status !== 0) return `--base 没被接受：${res.stderr}`
+    const out = JSON.parse(res.stdout)
+    if (!out.taskId) return "没建出任务"
+
+    const { readTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
+    const ledger = readTaskLedger(dir, "base-probe")
+    if (ledger.baseBranch !== "feat/base-probe") return `基线分支记成了 ${ledger.baseBranch}`
+    if (ledger.baseSha !== featSha) return `基线 SHA 记成了 ${String(ledger.baseSha).slice(0, 8)}，应为 ${featSha.slice(0, 8)}`
+
+    // 反向：不存在的分支要报错，而不是静默退回 main
+    const bad = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", [
+      "start", "--task", "base-bad", "--case", "4", "--base", "no-such-branch-xyz", "--branch", "feat/base-bad", "--json",
+    ], { cwd: dir })
+    if (bad.status === 0) return "不存在的 --base 被静默接受了"
+
+    return true
+  } finally { rmTree(dir) }
+}])
+
+// 新任务「还没 finalized」天然成立，于是刚建好就要求归档——下一步该是实施。
+// 判据要问「有没有做过事」，不是「有没有标记做过事」。
+cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
+  const { evaluateNextState } = await import("../../kit/skills/lib/workflow-policy.mjs")
+
+  const mk = (over = {}) => ({
+    taskId: "t1", caseType: 4, role: "maintainer", status: "started",
+    branch: "feat/x", baseBranch: "main", baseSha: "aaa",
+    worktreePath: ".worktrees/impl-t1",
+    specFile: "docs/specs/x.md", todoFile: "docs/todo/x.md",
+    explored: { at: "2026-01-01T00:00:00Z", tier: "direct-read", symbolCount: 1 },
+    rounds: [], finalized: false,
+    ...over,
+  })
+  const rt = (over = {}) => ({
+    headSha: "aaa", dirty: 0, commitsAheadOfBase: 0, policy: { riskTier: "high", requiredGates: ["gate"], independentReviewRequired: true },
+    evidenceValidation: { ok: false, code: "BLOCKED_NOT_VERIFIED" },
+    opInProgress: false, mainDirtyCount: 0,
+    ...over,
+  })
+
+  // 正向：还没认领 → 第一步是认领（这是「我接手了」的平台侧落地）
+  const unclaimed = evaluateNextState({ selectedTask: mk(), taskRuntime: rt() })
+  if (unclaimed.phase !== "needs-claim") {
+    return `还没认领时判成 ${unclaimed.phase}，应先要求 claim`
+  }
+  if (!unclaimed.blockingReasons.includes("BLOCKED_NOT_CLAIMED")) return "没给出阻塞原因"
+
+  // 正向：认领之后、还没动代码 → 下一步是实施
+  const fresh = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "2026-01-01T00:00:00Z" }), taskRuntime: rt(),
+  })
+  if (fresh.phase === "needs-finalize") {
+    return "刚建好的任务被判成「该归档」——下一步应是实施"
+  }
+  if (fresh.phase !== "implementing") return `期望 implementing，实际 ${fresh.phase}`
+
+  // 反向：真做完了（HEAD 已前移）→ 才该要求归档
+  const done = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "bbb", commitsAheadOfBase: 1 }) })
+  if (done.phase !== "needs-finalize") {
+    return `分支上有提交后仍判 ${done.phase}，应要求 finalize`
+  }
+
+  // 反向：跟着基线 rebase 了（HEAD 变了）但没写代码 → 仍算还没开始
+  const rebased = evaluateNextState({
+    selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ headSha: "zzz", commitsAheadOfBase: 0 }),
+  })
+  if (rebased.phase !== "implementing") {
+    return `跟着基线 rebase 后被判成 ${rebased.phase}——同步基线不是「做完了」`
+  }
+
+  // 反向：工作区有改动 → 也算开始了，不该回到「还没开始」
+  const dirty = evaluateNextState({ selectedTask: mk({ status: "claimed", claimedAt: "x" }), taskRuntime: rt({ dirty: 3 }) })
+  if (dirty.phase !== "implementing") return `有未提交改动时判成 ${dirty.phase}`
+
+  return true
+}])
+
+// 取 Issue 正文时用「不联网」的探测结果判断「能不能取」，必然得到 tier=none，
+// 然后装配出一个只会委托的客户端——把「我没去取」记成了「取不到」。
+// 委托与失败是两件事：前者该由调用方补上，后者要等通道恢复。
+cases.push(["Issue 正文取不到时，委托和失败要分开记", async () => {
+  const { createGitHubClient } = await import("../../kit/skills/lib/github-client.mjs")
+
+  // 无通道的客户端对 getIssue 只能委托，不是「查不到」
+  const off = createGitHubClient({ tier: "none" })
+  const r = await off.getIssue("a/b", 7)
+  if (r.ok) return "无通道客户端竟然读到了正文"
+  if (!r.delegated) return "无通道时没有标记成委托——会被误记成「取不到」"
+  if (r.action !== "get_issue") return `委托的动作名不对：${r.action}`
+
+  return true
+}])
 }

@@ -13,10 +13,10 @@ import {
   buildDocFilename, checkMermaidLabelWidth, docDateTag, parseDocFilename,
   parseDocFrontmatter, renderStandardDocTemplate,
 } from '../../lib/docs.mjs'
-import { gitRun, isMacOsJunkPath, posixPath } from '../../lib/git.mjs'
+import { gitRun, isMacOsJunkPath, posixPath, readJsonSafe } from '../../lib/git.mjs'
 import { collectAncestorsDagFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
-import { CODE_EXT_RE, TEST_FILE_RE, matchGlob } from '../../lib/static-gates.mjs'
+import { CODE_EXT_RE, isTestOrFixtureFile, matchGlob } from '../../lib/static-gates.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -230,11 +230,26 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, autho
     return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0]
   }
 
+  const manifest = !scopeRel ? readJsonSafe(join(repoRoot, '.agents', 'skills', '.pf-manifest.json')) : null
+  const hasManagedSkillsMirror = Boolean(
+    !scopeRel
+    && manifest
+    && typeof manifest === 'object'
+    && !Array.isArray(manifest)
+    && typeof manifest.files === 'object'
+    && manifest.files !== null
+    && !Array.isArray(manifest.files),
+  )
+  const shouldSkipChurnFile = (rel) =>
+    !CODE_EXT_RE.test(rel)
+    || isTestOrFixtureFile(rel)
+    || (hasManagedSkillsMirror && rel.startsWith('.agents/skills/'))
+
   const dirChurn = new Map()
   for (const c of commits) {
     const seenDirs = new Set()
     for (const rel of c.files) {
-      if (!CODE_EXT_RE.test(rel) || TEST_FILE_RE.test(rel)) continue
+      if (shouldSkipChurnFile(rel)) continue
       if (scopeRel && rel !== scopeRel && !rel.startsWith(`${scopeRel}/`)) continue
       const d = codeDirKey(rel)
       if (!d || seenDirs.has(d)) continue
@@ -246,7 +261,7 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, autho
   for (const [dir, stats] of dirChurn.entries()) {
     for (const c of commits) {
       if (c.files.some((rel) => isDocUpdate(rel, dir))) break
-      if (c.files.some((rel) => CODE_EXT_RE.test(rel) && !TEST_FILE_RE.test(rel) && codeDirKey(rel) === dir)) stats.sinceDoc += 1
+      if (c.files.some((rel) => !shouldSkipChurnFile(rel) && codeDirKey(rel) === dir)) stats.sinceDoc += 1
     }
     if (stats.sinceDoc >= 8) {
       addFinding(findings, {

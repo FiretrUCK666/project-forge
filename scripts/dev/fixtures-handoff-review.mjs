@@ -590,7 +590,7 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
       gitCommitFast(wt, tid, { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
       await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", tid, "--mode", "full"], { cwd: dir })
       await runAbsAsync("kit/skills/dev-review/scripts/review-pack.mjs", ["record", "--task", tid, "--round", "1", "--verdict", "pass", "--reviewer-id", "rev-mq", "--review-token", await issueTokenFor(dir, tid, 1), "--evidence", "mq verified"], { cwd: dir })
-      writeTaskLedger(dir, { ...readTaskLedger(dir, tid), prNumber: pr })
+      writeTaskLedger(dir, { ...readTaskLedger(dir, tid), prNumber: pr, explored: { at: "2026-01-01T00:00:00Z", tier: "direct-read", symbolCount: 1, by: "alice" } })
     }
     const logMqPos = join(sb, "mq-pos.log")
     const mqPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["batch", "merge-queue", "--tasks", "mq-pos", "--json"], { cwd: dir, env: childEnv(true, logMqPos), windowsHide: true })

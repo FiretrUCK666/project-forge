@@ -67,6 +67,6 @@ related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：已执行 `node scripts/dev/preflight.mjs`、`node scripts/dev/gap-coverage.mjs`、`node scripts/dev/fixtures.mjs`、`node scripts/dev/verify-injections.mjs`（159/159 捕获）、`node scripts/review.mjs .` 与 `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .`，并将在合流 `origin/main` 与 `finalize` 后运行 `flow verify --mode gate` 对最终 HEAD 全量复验。
+- **实际验证命令与结果**：已合流 `origin/main`（`359c977`）并完成 `node scripts/equip.mjs .` 同步，实证通过 `preflight`、`gap-coverage`、`fixtures`（254/254）与 `doc-plan audit`，提交归档后通过 `flow verify --mode gate` 锁定最终 `HEAD`。
 - **文档同步检查**：已同步 `docs/TDD.md`、`kit/skills/` 与 `.agents/skills/`（`equip.mjs . --check` 通过）。
 - **遗留问题**：无。

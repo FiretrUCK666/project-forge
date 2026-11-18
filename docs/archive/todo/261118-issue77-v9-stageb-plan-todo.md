@@ -1,15 +1,15 @@
 ---
 kind: todo
 title: v9 Wave 0.5：Stage B 总控 PRD 与 B1–B5 切片规划文档入仓
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 77
 pr: null
 branch: feat/v9-stageb-plan
-owner: "plan-stage-b"
+owner: plan-stage-b
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: v9-plan
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
 related_prd: null

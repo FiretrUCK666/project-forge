@@ -581,7 +581,7 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
   }
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     const docRequirements = resolveDocRequirements(repoRoot, docType)
-    const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
+    const hasAcceptance = /^- \[[ xX]\]\s+C\d+\b/m.test(normRaw)
     const sectionLookup = resolveSectionPresence(bodyForSections, docRequirements)
 
     const skipCheck = validateSkippedSections(bodyForSections, docRequirements, docType)

@@ -293,7 +293,7 @@ function approveSpec({ repoRoot, file, skipCritiqueReason }) {
   if (curStatus === 'superseded' || curStatus === 'implemented') {
     throw new Error(`${file} 当前状态为 ${curStatus}，不允许直接 approve`)
   }
-  if (!/^- \[[ xX]\] C1\b/m.test(text)) throw new Error(`${file} 至少需要包含一条「- [ ] C1: ...」可判定验收标准才可批准`)
+  if (!/^- \[[ xX]\]\s+C\d+\b/m.test(text)) throw new Error(`${file} 至少需要包含一条「- [ ] C<N>: ...」可判定验收标准才可批准`)
 
   const docType = detectDocType(audit.file, text)
   let workingText = text

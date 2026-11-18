@@ -615,4 +615,96 @@ cases.push(['体检报告里的命令展示有字节上限', async () => {
   } finally { rmTree(dir) }
 }])
 
+cases.push(['1:N 切片 SPEC 从 C4+ 起始允许 audit 与 approve，缺少 C<N> 验收条目仍拦截', async () => {
+  const dir = tmpProject({
+    'src/app.mjs': 'export const ok = 1\n',
+    'docs/prd/261118-issue10-master-prd.md': [
+      '---', 'kind: prd', 'title: Master', 'status: active', 'created: 2026-11-18',
+      'updated: 2026-11-18', 'issue: 10', 'owner: planner', '---', '',
+      '# PRD: Master', '', '## 要解决的问题', '- 拆成多个独立切片交付。', '',
+      '## 本期不做', '- 不改外部公共接口。', '', '## 验收标准', '',
+      '- [ ] C1: `node src/app.mjs` slice 1a',
+      '- [ ] C2: `node src/app.mjs` slice 1b',
+      '- [ ] C3: `node src/app.mjs` slice 1c',
+      '- [ ] C4: `node src/app.mjs` slice 2a',
+      '- [ ] C5: `node src/app.mjs` slice 2b', '',
+    ].join('\n'),
+    'docs/specs/261118-issue11-s1-spec.md': [
+      '---', 'kind: spec', 'title: Slice1', 'status: approved', 'tier: L3',
+      'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 11', 'owner: planner',
+      'approved: true', 'plan_critique: passed (reviewer=critic-a, round=1, sha=aaaaaaaa)',
+      'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
+      '# SPEC: Slice1', '', '## 要解决的问题', '- 落地第 1 批（C1..C3）。', '',
+      '## 本期不做', '- 不含第 2 批。', '', '## 验收标准', '',
+      '- [ ] C1: `node src/app.mjs` slice 1a',
+      '- [ ] C2: `node src/app.mjs` slice 1b',
+      '- [ ] C3: `node src/app.mjs` slice 1c', '',
+    ].join('\n'),
+    'docs/specs/261118-issue12-s2-spec.md': [
+      '---', 'kind: spec', 'title: Slice2', 'status: draft', 'tier: L3',
+      'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 12', 'owner: planner',
+      'approved: false', 'plan_critique: pending',
+      'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
+      '# SPEC: Slice2', '', '## 要解决的问题', '- 落地第 2 批（C4..C5），需修改 `src/app.mjs`。', '',
+      '## 本期不做', '- 不碰第 1 批模块。', '', '## 验收标准', '',
+      '- [ ] C4: `node src/app.mjs` slice 2a 退出码为 0',
+      '- [ ] C5: `node src/app.mjs` slice 2b 退出码为 0', '',
+    ].join('\n'),
+  })
+  try {
+    // 正向：从 C4 起始的 1:N 切片 SPEC 经 audit 与 critique-pass 后必须允许 approve
+    const s2 = 'docs/specs/261118-issue12-s2-spec.md'
+    const repoAudit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '.', '--json'], { cwd: dir })
+    if (repoAudit.status !== 0) return `1:N 切片仓库 audit 失败：${repoAudit.stdout}\n${repoAudit.stderr}`
+    const crit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+      'critique-pass', '--file', s2, '--reviewer', 'indep-critic', '--round', '1', '--json',
+    ], { cwd: dir })
+    if (crit.status !== 0) return `从 C4 起始切片 critique-pass 失败：${crit.stderr}`
+    const app = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', s2, '--json'], { cwd: dir })
+    if (app.status !== 0) return `从 C4 起始切片 approve 被拒：${app.stderr}`
+    const appJson = JSON.parse(app.stdout)
+    if (appJson.status !== 'approved' || appJson.criteriaCount !== 2) {
+      return `approve 返回状态或条目数不对：${app.stdout}`
+    }
+
+    // 反向 1：既无验收标准节也无 - [ ] C<N>: 的 SPEC 必须被 audit 与 approve 同时拦下
+    const noSectionRel = 'docs/specs/261118-issue13-nocrit-spec.md'
+    writeFileSync(join(dir, noSectionRel), [
+      '---', 'kind: spec', 'title: NoCrit', 'status: draft', 'tier: L3',
+      'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 13', 'owner: planner',
+      'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
+      '# SPEC: NoCrit', '', '## 要解决的问题', '- 修复 `src/app.mjs`。', '',
+      '## 本期不做', '- 不改外部接口。', '', '- [ ] 跑通 `node src/app.mjs`', '',
+    ].join('\n'))
+    const badAudit = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', '--file', noSectionRel, '--json'], { cwd: dir })
+    if (badAudit.status === 0 || !JSON.parse(badAudit.stdout).errors.some((e) => e.code === 'MISSING_ACCEPTANCE_CRITERIA')) {
+      return `缺验收条目的 SPEC 竟通过了 audit：${badAudit.stdout}`
+    }
+    const badApprove = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', noSectionRel], { cwd: dir })
+    if (badApprove.status === 0 || !/BLOCKED_AUDIT_FAILED/.test(badApprove.stderr)) {
+      return `缺验收条目的 SPEC 竟被 approve 放行：${badApprove.stderr}`
+    }
+
+    // 反向 2：即使带了验收标准标题但缺少 - [ ] C<N>: 编号条目，approve 仍必须拒绝
+    const noCidRel = 'docs/specs/261118-issue14-noid-spec.md'
+    writeFileSync(join(dir, noCidRel), [
+      '---', 'kind: spec', 'title: NoCid', 'status: draft', 'tier: L3',
+      'created: 2026-11-18', 'updated: 2026-11-18', 'issue: 14', 'owner: planner',
+      'related_prd: ../prd/261118-issue10-master-prd.md', '---', '',
+      '# SPEC: NoCid', '', '## 要解决的问题', '- 修复 `src/app.mjs`。', '',
+      '## 本期不做', '- 不改外部接口。', '', '## 验收标准', '',
+      '- [ ] 仅写描述而不写 C 编号', '',
+    ].join('\n'))
+    const critNoCid = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
+      'critique-pass', '--file', noCidRel, '--reviewer', 'indep-critic', '--round', '1', '--json',
+    ], { cwd: dir })
+    if (critNoCid.status !== 0) return `准备反向夹具 critique-pass 失败：${critNoCid.stderr}`
+    const appNoCid = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['approve', '--file', noCidRel], { cwd: dir })
+    if (appNoCid.status === 0 || !/可判定验收标准才可批准/.test(appNoCid.stderr)) {
+      return `缺少 C<N> 条目的 SPEC 竟被 approve 放行：exit=${appNoCid.status} stderr=${appNoCid.stderr}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

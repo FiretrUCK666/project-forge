@@ -9,7 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
-import { checkMermaidLabelWidth } from '../../lib/docs.mjs'
+import { checkMermaidLabelWidth, isSharedMasterPrd } from '../../lib/docs.mjs'
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
@@ -181,25 +181,30 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
     }
   }
 
+  const sliceSpecRel = task?.privateSpecFile ?? task?.specFile ?? task?.archivedSpecFile ?? null
   readFrom(task?.privateSpecFile)
   readFrom(task?.privateTodoFile)
-  readFrom(task?.privatePrdFile)
   readFrom(task?.specFile)
   readFrom(task?.todoFile)
-  readFrom(task?.prdFile)
   readFrom(task?.archivedSpecFile)
   readFrom(task?.archivedTodoFile)
-  readFrom(task?.archivedPrdFile)
 
   if (task?.privateDocsDir) {
     const privDirAbs = join(mainRoot, task.privateDocsDir)
     if (existsSync(privDirAbs)) {
       try {
         for (const name of readdirSync(privDirAbs).sort()) {
-          if (name.endsWith('.md')) readFrom(posixPath(join(task.privateDocsDir, name)))
+          if (name.endsWith('.md') && !name.endsWith('-prd.md')) readFrom(posixPath(join(task.privateDocsDir, name)))
         }
       } catch { /* ignore */ }
     }
+  }
+
+  // C22: 1:N 总控 PRD 不将全波未领条款注入当前切片审查包；仅当非共享 1:1 PRD 或无切片 SPEC/Todo 时读取 PRD 条款
+  for (const prdRel of [task?.privatePrdFile, task?.prdFile, task?.archivedPrdFile].filter(Boolean)) {
+    const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
+    if (criteria.length > 0 && sharedInRepo) continue
+    readFrom(prdRel)
   }
   return criteria
 }

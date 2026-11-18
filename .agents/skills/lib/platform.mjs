@@ -25,13 +25,13 @@ export {
 export {
   closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
   listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
-  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity, summarizeCommitChecks,
+  parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity, summarizeCommitChecks,
 } from './github-client.mjs'
 
 export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
   label: 'Generic Git Remote',
-  capabilities: Object.freeze({ api: false, pr: false, issues: false, releases: false, labels: false, branchProtection: false }),
+  capabilities: Object.freeze({ api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false }),
 })
 
 const PROVIDER_REGISTRY = new Map()
@@ -46,7 +46,7 @@ function resolveEffectiveHost(host, sshHostMap) {
 const GITHUB_PROVIDER = Object.freeze({
   id: 'github',
   label: 'GitHub',
-  capabilities: Object.freeze({ api: true, pr: true, issues: true, releases: true, labels: true, branchProtection: true }),
+  capabilities: Object.freeze({ api: true, pr: true, issues: true, releases: true, labels: true, milestones: true, branchProtection: true }),
   matchRemote(remoteUrl, sshHostMap) {
     const ext = extractHostAndPath(remoteUrl)
     if (!ext) return false

@@ -85,13 +85,13 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
 
 ## 六锁防死循环收敛协议
 
-1. **实证优先与故障注入**：在独立审查 worktree 按序跑完 `check-empirical`、`check-fault --phase fail`（改坏一处核心判定并确认变红，拦截空突变 `BLOCKED_FAULT_NO_MUTATION` 与假通过 `BLOCKED_FAULT_NOT_CAUGHT`）、还原并跑 `check-fault --phase restore`（拦截未还原 `BLOCKED_DIRTY_FAULT_RESIDUE`），之后再按需 `--include-diff`。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
-2. **上下文隔离**：只读冻结验收标准 `C1..Cn`、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊。
+1. **实证优先与故障注入**：在独立审查 worktree 按序跑完 `check-empirical`、`check-fault --phase fail`（改坏一处核心判定并确认变红，拦截空突变 `BLOCKED_FAULT_NO_MUTATION` 与假通过 `BLOCKED_FAULT_NOT_CAUGHT`）、还原并跑 `check-fault --phase restore`（自动写入 `ledger.faultRecord` 并在 `record`/`sync` 自动读取，拦截未还原 `BLOCKED_DIRTY_FAULT_RESIDUE`），之后再按需 `--include-diff`。形式验证与运行/渲染实证优先于静态读代码，**严禁未经实证的臆测挑刺**。
+2. **上下文隔离与切片 `C*` 隔离**：只读当前任务 SPEC/Todo 冻结验收标准 `C1..Cn`（不误拉 `1:N` 总控 PRD 全表）、diff（含 SHA256）、门禁证据与文档对齐单，不读实施闲聊；`low` 风险 PR 可选无 `--review-token` 运行 `review-pack record` 写状态单而不影响直接合入。
 3. **噪音过滤与三级分类**：只分 `Must Fix`（阻塞合入）、`Should Fix`（建议）与 `Pre-existing`（历史问题）。
    `Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败；主观代码风格偏好或未经实证验证的静态挑刺不得阻塞合入。Round 1 必须一次性列全同类问题全部位置。
-4. **轮次视野动态收窄与 Round 2+ 硬锁**：Round 1 审全量 `base...head` 并一次列全同类问题；**Round 2+ 永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬拦截下复审**——同 `HEAD` 原地复审直接拒绝（`BLOCKED_SAME_HEAD_REREVIEW`，退出码 `2`）；若分支经 `flow.mjs sync` 变基，自动通过 `git range-diff` 提取 `!`/`>` 新侧提交限定增量视野；Round 2+ 只核前轮未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，对未改旧行或无文件无据主观新挑刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`（退出码 `2`，非阻塞建议改用 `--should-fix` 或 `--pre-existing`）；`pass` 前核对未清失败实证或 `--enforce-gates` 门禁（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
+4. **轮次视野收窄、全历史换人与 `A4` 基线防空转**：Round 1 审全量 `base...head` 并一次列全同类问题；**Round 2+ 永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬拦截下复审**——复用任意历史轮次审稿人返回 `BLOCKED_SAME_REVIEWER_REREVIEW`（退出码 `2`，`flow.mjs next` 输出 `excludedReviewers`），同 `HEAD` 原地复审返回 `BLOCKED_SAME_HEAD_REREVIEW`，相对 `baseSha` 代码差异指纹未变返回 `BLOCKED_NO_REWORK_CHANGES`（退出码 `2`）；若分支经 `flow.mjs sync`（`GIT_EDITOR=true` 非交互变基）同步，自动通过 `git range-diff` 提取 `!`/`>` 新侧提交限定增量视野；Round 2+ 只核前轮未关 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`，对未改旧行或无据主观新挑刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX`；`pass` 前核对未清失败实证或 `--enforce-gates` 门禁（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
 5. **独立性与跨文件指纹硬锁**：`record` 时 `--reviewer-id === implementerId` 直接报错 `SELF_REVIEW_REJECTED`（退出码 `2`）；连续未决比对按完整 `fingerprint` / `(file, summary)`，绝不因不同文件同标 `C*` 误触发停损。
-6. **停损熔断与人工解锁**：历史已触发停损且未解锁时，禁止通过 Round 4+ `pass`/`changes` 绕过（优先返回退出码 `4` `STOP_LOSS_ESCALATE`）；人类拍板放行后用 `override` 解锁（支持 `--disposition` 记录四类处置统计）：
+6. **停损熔断、结构化证据包与统一分级建单**：历史已触发停损且未解锁时，禁止通过 Round 4+ `pass`/`changes` 绕过（退出码 `4` `STOP_LOSS_ESCALATE`，并落盘 `stopLossPacket` 与 `escalation.mjs` 按等级创建追踪工单）；人类拍板放行后用 `override` 解锁（支持 `--disposition` 记录四类处置统计）：
 
 ```sh
 node .agents/skills/dev-review/scripts/review-pack.mjs record \

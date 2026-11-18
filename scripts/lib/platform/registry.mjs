@@ -28,6 +28,7 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   issues: false,
   releases: false,
   labels: false,
+  milestones: false,
   branchProtection: false,
 })
 

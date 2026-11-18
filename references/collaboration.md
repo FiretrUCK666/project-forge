@@ -27,17 +27,17 @@
 
 日常研发遵循 **8 阶段标准闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**：动手前先由 `dev-explore`（按需走 `quick` / `medium` / `thorough`）产出 `reusableModules` 与 `featureMap` 核实复用基建（收到多个 Issue/PR URL 先由 `flow.mjs inspect` 联查互指与依赖拓扑），再由 `dev-plan` 跑 `doc-plan.mjs triage` 判定档位与**门型（`two-way` 可局部回退 vs `one-way` 不可逆契约/数据/发布）**及分级内审级别：
 
-- **需求澄清与 PRD 双触发**：用户主动要求或勘察发现跨多模块、痛点复杂时主动建议先建总控 PRD（支持 1:N 多切片拆解）；范围或边界不清时**多轮互动提问澄清并持续补全文档，直至消解全部待拍板事项后才交审**。`doc-plan.mjs init` 尊重仓库自有 `docs/templates/*.md` / `.github/*-template.md`，若 `impl` 工作树已存在则直接落盘其中（否则随 `flow.mjs start` 迁入），`critique-pass` 严禁自审（`SELF_CRITIQUE_REJECTED`），批准后按单任务或波次（`--after` / `batch plan`）移交 `dev-flow`。
+- **需求澄清与 PRD 双触发**：用户主动要求或勘察发现跨多模块、痛点复杂时主动建议先建总控 PRD（支持 1:N 多切片拆解）；范围或边界不清时**多轮互动提问澄清并持续补全文档，直至消解全部待拍板事项后才交审**。`doc-plan.mjs init` 尊重仓库自有 `docs/templates/*.md` / `.github/*-template.md`，若 `impl` 工作树已存在则直接落盘其中（否则随 `flow.mjs start` 迁入），`critique-pass` / `critique-reject` 共用「不可自审 `SELF_CRITIQUE_REJECTED` + 全历史换人 `BLOCKED_CRITIQUE_SAME_REVIEWER` + 未改稿拦截 `BLOCKED_CRITIQUE_SAME_SHA` + 3 轮硬停损 `STOP_LOSS_ESCALATE`」规则（仅人类 `critique-override` 解锁），批准后按单任务或并行波次（`--after` / `batch plan`）移交 `dev-flow`。
 
 | 档位 | 适用场景 | 强制产物、分级内审与测试控频 |
 | --- | --- | --- |
-| **Case 1** | 纯问答 / 错别字 / 单行格式 | **0 文档**，直接改，跑相关校验 |
-| **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，先写稳定复现失败回归测试再修复（Red-Green）；触及高风险/单向门仍须独立审查 |
-| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `kit/skills/templates/docs-todo.md` 建单（主干为影响路径、`C1..Cn` 与完成记录，其余按需；含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通 |
-| **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `kit/skills/templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit`（含 Mermaid `16/12` 宽度检查）+ 1–2 轮独立只读 Plan Critique -> 自修 -> `critique-pass` 后交人 `approve`（SPEC 须 `status: approved`，Todo 设 `approved: true`） |
+| **Case 1** | 纯问答 / 错别字 / 单行格式 | **0 文档**，直接改，跑相关校验（建单/PR 默认前缀 `docs:`） |
+| **Case 2** | 明确局部缺陷，不改外部契约 | **0 文档**，先写稳定复现失败回归测试再修复（Red-Green，前缀 `fix:`）；触及高风险/单向门仍须独立审查 |
+| **Case 3** | `L2` 局部功能，不改外部契约 | 按 `kit/skills/templates/docs-todo.md` 建单（主干为影响路径、`C1..Cn` 与完成记录，其余按需；含 `复用既有模块`/`本期不做`/`门型与回滚路径`），跑 `doc-plan.mjs audit` 自净化直通（前缀 `feat:`） |
+| **Case 4** | `L3` 跨模块、接口/契约变更或高风险 | 按 `kit/skills/templates/docs-spec.md`（按需 `docs-prd.md`）+ Todo 建单；经 `audit`（含 Mermaid `16/12` 宽度）+ 独立只读 Critique（全历史换人、支持 `critique-reject` 与 3 轮硬停损/人类 `critique-override`）-> `critique-pass` -> 交人 `approve`（SPEC `status: approved`，Todo `approved: true`） |
 | **Case 5** | 改动与 `docs/TDD.md` 或生效 `SPEC` 冲突 | **阻断编码，先退回更新 `docs/TDD.md`**，同级内审获批后重启 |
 
-**验证优先级、三正交策略与拒绝人肉代理**：坚持形式验证（类型、Schema、`arch-rules`、Mermaid 宽度、静态门禁）与实证验证（真实启动、CLI/接口实测、UI 渲染交互与浅深色截图）**优先于静态读代码挑刺**。用 `flow.mjs next [--probe-auth]` 统一读取唯一合法下一步与三正交风险分档（`low` 纯文档白名单 + 无 CI 时强制独立静态门禁 / `medium` / `high`）；`verify` 写 `<gitCommonDir>/project-forge-flow/tasks/<taskId>/evidence.json` 拦截 `quick --target` 顶替全量门禁，全量 `merge-gate` 仅提交与合前运行 1 次。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；三问留痕写入首次回复、Issue 评论或 `templates/pull-request-template.md`「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`（支持 `status`/`abort`/`next`）。
+**验证优先级、纯调度分波与分级建单**：坚持形式验证与实证验证**优先于静态读代码挑刺**。主会话保持薄上下文纯调度，仅运行 `flow.mjs next --handoff` 按 `ownerRole` 派发独立子代理；在 `idle`/`ambiguous` 态同步扫描未 `start` 的就绪 `docs/specs/*.md`（读取 `Depends on` 与写域，缺写域保守串行），`Wave 1 >= 2` 时确定性返回 `parallelDispatch: true` 并并行派发各槽位（不折叠回 `--task firstTask`），每次只输出单一可执行 `[NEXT STEP]`。风险分 `low`（纯非可执行文本白名单，可选无令牌 `review-pack record` 且不阻断直接合入；无 CI 必过静态门禁）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`escalation.mjs` 按等级把 `low`/`medium` 单文件非复发并入 Todo、`critical`/`high`/跨模块/复发 `>= 2`/阻塞 E2E 统一创建追踪 Issue（含 GitHub 与 `LocalOnlyBackend`）；`flow.mjs milestone` 按需管理跨后端里程碑（`generic-git` 本地分组并输出人工配单清单）；`evidence.json` 拦截 `quick --target` 顶替全量门禁，全量 `merge-gate` 仅提交与合前运行 1 次。Case 2/3/4 单任务在隔离 `impl` 位派 `impl` 子代理；三问留痕写入首次回复、Issue 评论或 PR 模板「实现依据」栏，账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
 ## 三、三档隔离与 Worktree 共享依赖
 
@@ -51,9 +51,9 @@
 
 ## 四、认领、PR 前文档同步与双写节点
 
-- **谁改谁认领、谁推送并提 PR 与关联评论（一任务一 PR）**：`maintainer` 可用 `flow.mjs start --create-issue --title "..."` 自动建单并联动 `syncDocsLifecycle` 重命名文档；**谁改代码谁负责在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 推送分支、创建/复用 PR 并写关联评论**（协调者只做路由与派发，不代提 PR；接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `flow.mjs release`）。若同一任务已有对应 Issue 与 OPEN PR 直接复用，不开第二条；多 Issue 联做先解 `Depends on` / `Blocks` 依赖序；返工永远在原分支追加提交更新同一个 PR，不重排无关文件。
-- **PR 提交前文档同步锁（`flow.mjs finalize`）与零脏文件提审**：
-  1. 核对关联 Todo 所有 `[ ]` 已完成勾选 `[x]`、填写「完成后的记录」，将关联 `PRD`（`done`）、`SPEC`（`implemented` 并补全「实现说明」）与 `Todo`（`done`/`archived`）一并 `git mv` **成对归档**进 `docs/archive/{prd,specs,todo}/` 并重算互链；若总控 PRD 为 `1:N` 共享（存在未完结子 SPEC/Todo、已归档子 SPEC 或声明多切片/手动归档），默认保留于 `docs/prd/` 维持 `active` 且不写脏其元数据；当全量切片收口且主 PRD `C1..Cn` 全勾选时，带 `--include-master-prd`（`flow.mjs finalize --include-master-prd` / `doc-plan.mjs archive --include-master-prd`）保留原 `issue`/`related_*` 一并归档至 `docs/archive/prd/` 并写入 `ledger.archivedPrdFile` 豁免 `do-not-edit`（返工期间支持 `finalize` 幂等刷新）；
+- **谁改谁认领、谁推送提 PR 与四态语义标签（一任务一 PR）**：`maintainer` 可用 `flow.mjs start --create-issue --title "..."` 自动建单并联动 `syncDocsLifecycle` 重命名文档；**谁改代码谁负责在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 推送分支、创建/复用 PR 并写关联评论**（协调者只做路由与派发，不代提 PR；接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `flow.mjs release`）。建单与 PR 入口统一套用工作前缀（默认 `Case 1 -> docs:`、`Case 2 -> fix:`、`Case >= 3 -> feat:`，保留显式前缀）并在 `TaskBackend` 同步四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`，支持 `no-labels` 豁免与 403/`generic-git` 降级），新建 PR 自动继承关联 Issue Milestone。同一任务已有 OPEN PR 直接复用；返工在原分支追加提交更新同一 PR；`git rebase --continue` 与 `git merge` 统一带 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 遇冲突在 `--abort` 前输出每文件 `<= 4`、总计 `<= 8` 块有界冲突与恢复包。
+- **PR 提交前文档同步锁（`flow.mjs finalize` 四态闭环）与零脏文件提审**：
+  1. 核对关联 Todo 所有 `[ ]` 已完成勾选 `[x]`、填写「完成后的记录」，将关联 `PRD`、`SPEC` 与 `Todo` 一并 `git mv` **成对归档**进 `docs/archive/{prd,specs,todo}/` 并重算互链；若总控 PRD 为 `1:N` 共享，由 `evaluateMasterPrdClosureState` 执行确定性四态闭环：① 手动策略或仍有活跃兄弟切片维持 `active`；② 尚留未覆盖后续 `C*` 维持 `active`；③ 无其余活跃切片、100% 覆盖且全勾 `[x]` 时无需额外 `--include-master-prd` 即自动同分支归档（含并行后 `sync`/rebase 幂等重跑 `finalize`）；④ 100% 覆盖却仍留 `[ ] C*` 时 `finalize` 与 `verify` 均返回 `BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED` 与单一 `[NEXT STEP]`；
   2. 检查源码模块边界、对外 CLI 或契约变更是否同步更新 `docs/TDD.md` 与 `README*.md` / `AGENTS.md`；
   3. **推送防脏与模板套用**：`submit` 推后**零跟踪文件写回**（仅写账本与评论）；建 PR 前先查 OPEN PR 防重，新建 PR 默认读取 `.github/pull_request_template.md` 注入实证上下文；
   4. **外部 Fork 防污染**：若 `contributor-fork` 且上游未接入 `docs/`，私有规划存于 `.worktrees/.state/private-docs/<taskId>/` 绝不混入 PR diff。
@@ -84,11 +84,11 @@
 - **diff 绑定与双门评估（`review-pack.mjs` 驱动）**：自动将干净 `.worktrees/review-<taskId>/` 推进至待审分支最新 `HEAD`（非外部 PR），按 `git diff <基线>...<HEAD> > d.txt` 导出并核对 SHA256（`--json` 默认返回 diff 摘要与 hunk 索引，传 `--include-diff` 可选全文）；材料包输出 **`behavioralGate`**（测试 + `smoke-verify` 运行实证，以及 UI/视觉文件变更时触发 `visualFilesChanged` 与 `empiricalVisualCheckRequired` 强制核对真实渲染交互与浅深色截图并由 `record --visual-checked` 记账，杜绝人肉代理）、**`structuralGate`**（词法剥离后的立碑履历注释、连续死代码块、压制标记、`arch-rules`、Mermaid `16/12` 宽度与 `>800` 行超大文件）及 **`doorAssessment`**。`flow.mjs merge` 强制校验 `reviewPassed === true && reviewPassedHead === currentHead && lastReview?.headSha === currentHead && !lastReview?.stopLossTriggered` 且 `implRoot` 工作区干净（`verdict: 'changes'` 重置 `reviewPassedHead: null`）。
 - **六锁防死循环与园艺规则下沉**：
   1. **实证优先**：形式静态门禁与运行/渲染/交互实证优先于纯静态读代码挑刺；附可执行命令与高风险故障注入清单；
-  2. **上下文隔离**：审查上下文只收 `C*`、diff、门禁证据与文档对齐单，隔离实施过程闲聊；
+  2. **上下文隔离与切片 `C*` 隔离**：审查上下文只收当前任务 SPEC/Todo 冻结 `C*`（不误拉 `1:N` 总控 PRD 全表）、diff、门禁证据（`check-fault --phase restore` 自动写 `ledger.faultRecord`）与文档对齐单，隔离实施过程闲聊；`low` 风险 PR 可选运行 `review-pack record` 写结构化评论；
   3. **三级分级与全量首轮**：问题分 `Must Fix` / `Should Fix` / `Pre-existing`；**`Must Fix` 仅限违反已冻结 `C*`、确定性形式门禁失败、或可复现的运行/渲染/交互实证失败，主观偏好或未实证的静态读代码挑刺不得阻塞合入**；第 1 轮必须一次指出全部同类问题；
-  4. **轮次视野收窄与独立新上下文**：第 1 轮看全量 diff -> **第 2 轮起永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬锁下复审**：只核前轮未决 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`（未改旧行或无文件主观新刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX` 退出码 `2`，非阻塞项改用 `--should-fix` / `--pre-existing`）；
+  4. **轮次视野收窄、全历史换人与 `A4` 基线**：第 1 轮看全量 diff -> **第 2 轮起永远新建独立 `review` 子代理并在 `review-locks.mjs` 硬锁下复审**——复用任意历史轮次审稿人返回 `BLOCKED_SAME_REVIEWER_REREVIEW`（退出码 `2`，`flow.mjs next` 输出 `excludedReviewers`），代码差异指纹未变返回 `BLOCKED_NO_REWORK_CHANGES`（退出码 `2`）；只核前轮未决 `Must Fix`、`prevHead..HEAD` 增量 hunk（±3 行）及 `rebuts`（未改旧行或无文件主观新刺返回 `BLOCKED_OUT_OF_SCOPE_MUST_FIX` 退出码 `2`，非阻塞项改用 `--should-fix` / `--pre-existing`）；
   5. **防越界返工与虚假 `pass`**：同 `HEAD` 原地复审直接拒绝（`BLOCKED_SAME_HEAD_REREVIEW` 退出码 `2`）；同 `C*` 不同文件/摘要按完整指纹精确追踪不误停损；未清失败 `verify`/`--enforce-gates` 阻断虚假 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）；返工支持 `--rebut` 与 `--disposition` 四类统计；
-  6. **停损熔断、防绕过与园艺复盘**：同一 `Must Fix` 连续两轮未收口或达 **3 轮**上限触发 `STOP_LOSS_ESCALATE`；历史已停损未解锁时硬拒 Round 4+ `pass`/`changes` 绕过（退出码 `4`）；人类裁决（`override --human-approved --reason` 配 `merge --human-approved --reason`）方可解锁；`flow verify` / `review-pack record` / `flow rework` 自动写入 `<gitCommonDir>/project-forge-govern/signals.jsonl`，由 `govern-audit.mjs retro [--task] [--apply-patches]`（配合基线增量、`record`/`cluster` 满 `2` 次下沉静态门禁、`sample` 抽检）闭环压低熵增。
+  6. **停损熔断、证据包与分级升级**：同一 `Must Fix` 连续两轮未收口或达 **3 轮**上限触发 `STOP_LOSS_ESCALATE`（落盘 `stopLossPacket` 并按 `escalation.mjs` 升级）；历史已停损未解锁时硬拒 Round 4+ `pass`/`changes` 绕过（退出码 `4`）；人类裁决（`override --human-approved --reason` 配 `merge --human-approved --reason`）方可解锁；`flow verify` / `review-pack record` / `flow rework` 自动写入 `<gitCommonDir>/project-forge-govern/signals.jsonl`，由 `govern-audit.mjs retro [--task] [--apply-patches]`（配合基线增量、`record`/`cluster` 满 `2` 次下沉静态门禁、`sample` 抽检）闭环压低熵增。
 
 ## 八、谁能合
 

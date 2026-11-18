@@ -11,7 +11,7 @@ import { printNextStep } from '../../lib/cli.mjs'
 import {
   detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { readTaskLedger, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { readTaskLedger, recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
@@ -101,7 +101,7 @@ export async function handleSync(opts = {}, roots) {
       const remount = mountSharedDeps(roots.mainRoot, implRoot)
       ledger.depsMode = remount.mode
       recordMountedDepsInLedger(ledger, ledger.worktreePath, remount)
-      writeTaskLedger(roots.mainRoot, ledger)
+      await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     }
     const payload = {
       ok: false,
@@ -171,7 +171,7 @@ export async function handleSync(opts = {}, roots) {
     ledger.parentBranch = null
     ledger.parentPrNumber = null
   }
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   const out = {
     ok: true,

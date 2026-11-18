@@ -4,16 +4,17 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
-import { copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import {
-  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, isSharedMasterPrd, } from '../../lib/docs.mjs'
+  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, } from '../../lib/docs.mjs'
+import { formatWorkTitle } from '../../lib/escalation.mjs'
 import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { nextReviewRound, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { nextReviewRound, recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
@@ -25,17 +26,20 @@ import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
   readVerificationEvidence, runLowRiskDocStaticCheck, validateVerificationEvidence,
-  writeVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 import {
+  applySubmitPostActions,
   collectFinalizeChangedFiles,
   computeFlowCoupledSync,
   emitFlowSignal,
+  evaluateFlowMasterPrdGate,
   findStrictDocBySlug,
   findUncheckedLines,
+  handleForkFinalize,
   handleRework,
+  recordVerifyEvidenceForFlow,
 } from './flow-lifecycle-helpers.mjs'
 
 export { handleRework }
@@ -59,71 +63,25 @@ export async function handleFinalize(opts, roots) {
 
   // contributor-fork：若上游仓库并未接入 docs/ 体系，严禁把本地私有 docs/ 混入 PR diff
   if (ledger.role === 'contributor-fork') {
-    const baseRef = ledger.baseSha || ledger.baseBranch || 'HEAD'
-    const baseTree = await gitRun(implRoot, ['ls-tree', '-r', '--name-only', baseRef, '--', 'docs/'])
-    const baseDocs = baseTree.ok ? baseTree.stdout.split('\n').filter(Boolean) : []
-    const upstreamUsesDocs = baseDocs.some((p) => /^docs\/(?:TDD\.md|specs\/|todo\/|prd\/)/.test(p))
-    if (!upstreamUsesDocs) {
-      const committedDiff = ledger.baseSha ? await gitRun(implRoot, ['diff', '--name-only', `${ledger.baseSha}..HEAD`]) : { ok: false, stdout: '' }
-      const committedDocs = (committedDiff.stdout || '').split('\n').filter((f) => /^docs\/(?:TDD\.md|specs\/|todo\/|prd\/|archive\/)/.test(f.trim()))
-      if (committedDocs.length > 0) {
-        process.stderr.write(`BLOCKED_FORK_PRIVATE_DOCS: 上游仓未接入 docs/ 体系，私有规划文件不应混入 Fork PR 提交：${committedDocs.join(', ')}\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
-      }
-      const sharedForkPrd = Boolean(ledger.prdFile && isSharedMasterPrd(implRoot, ledger.prdFile, ledger.specFile))
-      for (const relDoc of [ledger.todoFile, ledger.specFile, sharedForkPrd ? null : ledger.prdFile].filter(Boolean)) {
-        const docPath = join(implRoot, relDoc)
-        if (!existsSync(docPath)) continue
-        const unchecked = findUncheckedLines(readTextSafe(docPath) ?? '')
-        if (unchecked.length > 0) {
-          process.stderr.write(`BLOCKED_UNCHECKED_DOC: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
-          return { exitCode: 1 }
-        }
-      }
-      const privateKeepDir = join(roots.mainRoot, '.worktrees', '.state', 'private-docs', taskId)
-      const relocated = []
-      for (const [kind, relDoc] of [['todo', ledger.todoFile], ['spec', ledger.specFile], ['prd', sharedForkPrd ? null : ledger.prdFile]]) {
-        if (!relDoc) continue
-        const src = join(implRoot, relDoc)
-        if (!existsSync(src)) continue
-        await gitRun(implRoot, ['reset', '--', relDoc])
-        mkdirSync(privateKeepDir, { recursive: true })
-        const dst = join(privateKeepDir, basename(relDoc))
-        try { renameSync(src, dst) } catch { copyFileSync(src, dst) }
-        relocated.push(relDoc)
-        const privRel = posixPath(`.worktrees/.state/private-docs/${taskId}/${basename(relDoc)}`)
-        if (kind === 'todo') ledger.privateTodoFile = privRel
-        if (kind === 'spec') ledger.privateSpecFile = privRel
-        if (kind === 'prd') ledger.privatePrdFile = privRel
-      }
-      ledger.privateDocsDir = `.worktrees/.state/private-docs/${taskId}`
-      const changedFork = await collectFinalizeChangedFiles(implRoot, ledger, stZ.entries)
-      const coupledSyncWarnings = computeFlowCoupledSync(implRoot, roots.mainRoot, changedFork)
-      ledger.finalized = true
-      ledger.finalizedHead = currentHead
-      ledger.status = 'finalized'
-      writeTaskLedger(roots.mainRoot, ledger)
-      const res = { taskId, role: ledger.role, upstreamUsesDocs: false, privateDocsIsolated: true, relocatedPrivateDocs: relocated, finalizedHead: currentHead, coupledSyncWarnings }
-      if (opts.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
-      else {
-        process.stdout.write('Fork finalize 完成（上游未接入 docs/，私有规划已安全隔离到 .worktrees/.state/private-docs/）。\n')
-        printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
-      }
-      if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
-        process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则（共 ${coupledSyncWarnings.length} 组）。\n`)
-        return { exitCode: 1 }
-      }
-      return { exitCode: 0 }
-    }
+    const forkOut = await handleForkFinalize({ implRoot, roots, ledger, taskId, stZ, currentHead, opts })
+    if (forkOut) return forkOut
   }
 
   const todoRel = ledger.todoFile ?? ledger.archivedTodoFile ?? findStrictDocBySlug(implRoot, 'docs/todo', ledger)
   const specRel = ledger.specFile ?? ledger.archivedSpecFile ?? findStrictDocBySlug(implRoot, 'docs/specs', ledger)
   const prdRel = ledger.prdFile ?? ledger.archivedPrdFile ?? findStrictDocBySlug(implRoot, 'docs/prd', ledger)
   const includeMasterPrd = Boolean(opts['include-master-prd'])
-  const sharedMasterPrd = Boolean(prdRel && isSharedMasterPrd(implRoot, prdRel, specRel))
+  const prdGate = evaluateFlowMasterPrdGate(implRoot, {
+    prdRel, specRel, todoRel, includeMasterPrd, ledger, isVerify: false, taskId,
+  })
+  if (prdGate.blocked) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(prdGate, null, 2)}\n`)
+    process.stderr.write(`${prdGate.message}\n`)
+    printNextStep([prdGate.nextStep], { repoRoot: roots.mainRoot })
+    return { exitCode: prdGate.exitCode }
+  }
 
-  for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', (sharedMasterPrd && !includeMasterPrd) ? null : prdRel]]) {
+  for (const [label, relDoc] of [['TODO', todoRel], ['SPEC', specRel], ['PRD', prdGate.checkPrdInFinalize ? prdRel : null]]) {
     if (!relDoc) continue
     const absDoc = join(implRoot, relDoc)
     if (!existsSync(absDoc)) continue
@@ -185,13 +143,13 @@ export async function handleFinalize(opts, roots) {
     archivedGroup = await archiveCompletedDocsGroup(implRoot, {
       prdFile: prdRel, specFile: specRel, todoFile: todoRel, slugOrPath: specRel ?? todoRel ?? prdRel ?? ledger.slug,
       issue: ledger.linkedIssues?.[0], pr: ledger.prNumber ?? undefined, branch: ledger.branch, owner: ledger.implementerId ?? undefined, doneAt: today,
-      includeMasterPrd,
+      includeMasterPrd, ledgerRoot: roots.mainRoot,
     })
     if (archivedGroup.byKind.prd) {
       ledger.prdFile = archivedGroup.byKind.prd
-      ledger.archivedPrdFile = ((!includeMasterPrd && sharedMasterPrd) || !archivedGroup.byKind.prd.startsWith('docs/archive/'))
-        ? null
-        : archivedGroup.byKind.prd
+      ledger.archivedPrdFile = archivedGroup.byKind.prd.startsWith('docs/archive/')
+        ? archivedGroup.byKind.prd
+        : null
     }
     if (archivedGroup.byKind.spec) { ledger.specFile = archivedGroup.byKind.spec; ledger.archivedSpecFile = archivedGroup.byKind.spec }
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
@@ -200,7 +158,7 @@ export async function handleFinalize(opts, roots) {
   ledger.finalized = true
   ledger.finalizedHead = currentHead
   ledger.status = 'finalized'
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   const out = {
     taskId, finalized: true, finalizedHead: currentHead,
@@ -241,6 +199,21 @@ export async function handleVerify(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify(untrustedGate, null, 2)}\n`)
     process.stderr.write(`${untrustedGate.message}\n`)
     return { exitCode: untrustedGate.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+
+  const vPrdRel = ledger.prdFile ?? ledger.archivedPrdFile ?? findStrictDocBySlug(implRoot, 'docs/prd', ledger)
+  if (vPrdRel) {
+    const vSpecRel = ledger.specFile ?? ledger.archivedSpecFile ?? findStrictDocBySlug(implRoot, 'docs/specs', ledger)
+    const vTodoRel = ledger.todoFile ?? ledger.archivedTodoFile ?? findStrictDocBySlug(implRoot, 'docs/todo', ledger)
+    const prdGateV = evaluateFlowMasterPrdGate(implRoot, {
+      prdRel: vPrdRel, specRel: vSpecRel, todoRel: vTodoRel, ledger, isVerify: true, taskId,
+    })
+    if (prdGateV.blocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify(prdGateV, null, 2)}\n`)
+      process.stderr.write(`${prdGateV.message}\n`)
+      printNextStep([prdGateV.nextStep], { repoRoot: roots.mainRoot })
+      return { exitCode: prdGateV.exitCode }
+    }
   }
 
   const profile = parseAgentsProfile(implRoot)
@@ -305,45 +278,12 @@ export async function handleVerify(opts, roots) {
     return { currentHead, dirty, stStdout, changedFiles, policy }
   }
 
-  const recordEvidence = ({ currentHead, dirty, policy, modeName, targetVal, cmdStr, customCmd, exitCode, explicitNoneSkipped, docStaticRes }) => {
-    const prev = readVerificationEvidence(roots.gitDir, taskId)
-    const sameClean = Boolean(prev && prev.headSha === currentHead && !dirty && !prev.dirty)
-    const gates = sameClean ? { ...(prev.gates ?? {}) } : {}
-    const skipped = new Set(sameClean && Array.isArray(prev.skipped) ? prev.skipped : [])
-    const now = new Date().toISOString()
-    gates[modeName] = {
-      headSha: currentHead, dirty, mode: modeName, target: targetVal,
-      partial: modeName === 'quick' && Boolean(targetVal),
-      exitCode, cmd: cmdStr, customCmd,
-      status: explicitNoneSkipped ? 'skipped-explicit-none' : (exitCode === 0 ? 'passed' : 'failed'),
-      recordedAt: now,
-    }
-    if (explicitNoneSkipped) {
-      skipped.add('skipped-explicit-none')
-      skipped.add(`${profileKey}:skipped-explicit-none`)
-    }
-    if (docStaticRes) {
-      gates.docStatic = {
-        headSha: currentHead, dirty, ok: docStaticRes.ok,
-        exitCode: docStaticRes.ok ? 0 : 1, checkedFiles: docStaticRes.checkedFiles,
-        errors: docStaticRes.errors, recordedAt: now,
-      }
-    }
-    const overallExit = docStaticRes && !docStaticRes.ok ? EXIT_POLICY_BLOCK : exitCode
-    writeVerificationEvidence(roots.gitDir, taskId, {
-      taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
-      riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: overallExit,
-      gates, skipped: [...skipped],
-    })
-    return overallExit
-  }
-
   if (!cmd && isExplicitNone) {
     const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
     const docStaticRes = policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles) : null
     const docOk = !docStaticRes || docStaticRes.ok
-    recordEvidence({
-      currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
+    recordVerifyEvidenceForFlow({
+      roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
       cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: 0,
       explicitNoneSkipped: true, docStaticRes,
     })
@@ -356,7 +296,7 @@ export async function handleVerify(opts, roots) {
     ledger.visualFilesChanged = policy.visualFilesChanged
     ledger.empiricalVisualCheckRequired = policy.visualFilesChanged.length > 0
     ledger.status = docOk ? 'verified' : 'verify-failed'
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     await emitFlowSignal(roots, { category: docOk ? 'tests' : 'docs', module: 'workflow', pattern: docOk ? `verify.${mode}.pass` : `verify.${mode}.doc-static-fail`, severity: docOk ? 'info' : 'medium', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? '', taskId, message: docOk ? `verify (${mode}) explicit-none pass` : `verify (${mode}) static doc check failed` })
     if (!docOk) {
       const msg = `BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}`
@@ -406,8 +346,8 @@ export async function handleVerify(opts, roots) {
   const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
   const docStaticRes = runRes.ok && policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles) : null
   const allOk = runRes.ok && (!docStaticRes || docStaticRes.ok)
-  const finalExit = recordEvidence({
-    currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
+  const finalExit = recordVerifyEvidenceForFlow({
+    roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
     cmdStr: cmd, customCmd: Boolean(opts.cmd), exitCode: runRes.code,
     explicitNoneSkipped: false, docStaticRes,
   })
@@ -430,7 +370,7 @@ export async function handleVerify(opts, roots) {
       : (ledger.visualCheckEvidence ?? '实际渲染、端到端交互与浅深色截图核验已确认')
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? changedFiles[0] ?? '', taskId, message: `verify (${mode}) exit=${finalExit}: ${cmd}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
   if (docStaticRes && !docStaticRes.ok) {
     process.stderr.write(`BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}\n`)
@@ -587,7 +527,7 @@ export async function handleSubmit(opts, roots) {
     recordMountedDepsInLedger(ledger, ledger.reviewWorktreePath, revDeps)
     ledger.reviewWorktreeHead = currentHead
     reviewSlotSync.depsMode = revDeps.mode
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   }
 
   const nextRound = (ledger.rounds ?? []).length > 0
@@ -610,6 +550,9 @@ export async function handleSubmit(opts, roots) {
         taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActor.actor,
         statePayload: { taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, agent: submitActor.actor, headSha: currentHead },
       })
+      if (typeof localBackend.syncStateLabel === 'function') {
+        await Promise.resolve(localBackend.syncStateLabel({ taskId, number: iss, state: 'in-review' })).catch(() => null)
+      }
     }
   }
 
@@ -617,7 +560,7 @@ export async function handleSubmit(opts, roots) {
     const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
     await postLocalLifecycleComments({ actionFallback: 'local-ready' })
     ledger.status = 'local-ready'
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, reviewSlotSync }, null, 2)}\n`)
     else {
       process.stdout.write(`本地模式提交校验已通过（HEAD=${shortHead}，未配置远端不执行 push）。\n`)
@@ -644,7 +587,7 @@ export async function handleSubmit(opts, roots) {
   if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || !targetRepo) {
     await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
     ledger.status = 'submitted'
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)
     else {
       process.stdout.write(`submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
@@ -704,8 +647,9 @@ export async function handleSubmit(opts, roots) {
         res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, prNumber: ledger.prNumber, headSha: currentHead } }),
       })
     }
+    await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
   } else {
-    const title = opts.title ?? `${ledger.caseType === 2 ? 'fix' : 'feat'}: ${ledger.slug}`
+    const title = formatWorkTitle(opts.title ?? ledger.slug, ledger.caseType)
     const body = opts.body ?? hydratePrTemplateBody({
       repoRoot: implRoot, taskId, ledger, policy, actorDisplay: submitActor.display,
       visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual,
@@ -731,12 +675,13 @@ export async function handleSubmit(opts, roots) {
           res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }),
         })
       }
+      await applySubmitPostActions({ backend, targetRepo, prNumber: prResult.number, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: false })
     }
   }
 
   ledger.lastSubmittedHead = currentHead
   ledger.status = ledger.role === 'contributor-fork' ? 'awaiting-upstream-merge' : 'submitted'
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, status: ledger.status, head: currentHead, prResult, commentResults, reviewSlotSync }, null, 2)}\n`)
   else {
     process.stdout.write(`submit 完成：已推分支 ${pushRemote}/${ledger.branch} @ ${shortHead}，状态=${ledger.status}\n`)

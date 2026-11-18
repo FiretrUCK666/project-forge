@@ -4,7 +4,21 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 docs.mjs 汇总重导出。
  */
 
+import { basename } from 'node:path'
+
 import { readTextSafe, writeAtomic } from './git.mjs'
+
+export const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
+export const DOC_LEGACY_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)\.md$/
+
+export function parseDocFilename(name) {
+  const base = basename(String(name ?? '').trim())
+  const std = DOC_STANDARD_NAME_RE.exec(base)
+  if (std) return { date: std[1], issue: std[2] ? Number(std[2]) : null, slug: std[3], kind: std[4], legacy: false }
+  const leg = DOC_LEGACY_NAME_RE.exec(base)
+  if (leg) return { date: leg[1], issue: leg[2] ? Number(leg[2]) : null, slug: leg[3], kind: null, legacy: true }
+  return null
+}
 
 export const CUSTOM_DECL_REL = Object.freeze({
   prd: Object.freeze(['docs/templates/prd.md', 'docs/templates/prd-template.md', 'docs/.templates/prd.md', 'doc/templates/prd.md', 'doc/templates/prd-template.md', '.github/prd-template.md', '.github/prd_template.md']),
@@ -239,4 +253,24 @@ export function isManagedPlanDoc(rel, text = '') {
   if (/<!--\s*(?:project-forge:|section:)/i.test(normText)) return true
   if (STANDARD_FORGE_PLAN_NAME_RE.test(base)) return true
   return false
+}
+
+/** 剥离易变生命周期元字段（保留方案正文、稳定标题/层级与验收标准），确保 link --issue/--pr 后不误触发陈旧锁定。 */
+export function stripCritiqueMeta(text) {
+  const norm = String(text ?? '').replace(/\r\n/g, '\n')
+  const fm = parseDocFrontmatter(norm)
+  const stableMeta = {
+    kind: fm.data?.kind ?? null,
+    title: fm.data?.title ?? null,
+    tier: fm.data?.tier ?? null,
+    high_risk_paths: Array.isArray(fm.data?.high_risk_paths) ? fm.data.high_risk_paths : [],
+  }
+  const volatileLineRe = /^(?:-\s+)?(?:Plan Critique|Status|Issue|PR|Updated|Branch|Owner|Related\s+(?:SPEC|PRD|Todo)|plan_critique|critique_anchors|critique_rounds|critique_override|critique_findings|updated|issue|pr|status|related_prd|related_spec|related_todo|approved|implemented|done_at|branch|owner)\s*:/i
+  const cleanBody = String(fm.body ?? norm)
+    .split('\n')
+    .filter((l) => !volatileLineRe.test(l.trim()))
+    .join('\n')
+    .replace(/(\bdocs\/(?:prd|specs|todo)\/\d{6})-issue\d+-/gi, '$1-')
+    .trim()
+  return `${JSON.stringify(stableMeta)}\n${cleanBody}`
 }

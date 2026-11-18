@@ -53,10 +53,10 @@ metadata:
 
 | 阶段 / 场景 | 负责技能与核心机制 | 权威协作判据（按标题名直达） |
 | --- | --- | --- |
-| **1. 需求侦察与判身份** | `dev-explore` 只读跑 `repo-map.mjs` 输出 `Feature Map` 与 `reusableModules`；`flow.mjs inspect` 判五态与多 Issue 依赖图 | `references/collaboration.md`「一、先判角色」 |
-| **2–3. 澄清、设计与 Critique** | `dev-plan` 联查多链接与自有模板，**多轮互动澄清直至无待拍板问题**（复杂需求主动建议 PRD），按 Case 1–5 分流并走不可自审 Critique | `references/collaboration.md`「二、五档开工分流」 |
-| **4. 隔离实现与提审锁** | `dev-flow` 由 `next` 路由，全入 `impl-*`/`review-*` 槽复用；**谁改代码谁认领并负责 `finalize`（含 `--include-master-prd`）/`verify`/`submit` 与 PR/Issue 评论** | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
-| **5–7. 评审、实证与验收** | `dev-review` 对外部 PR 先扫 `--untrusted-scan`；运行 Behavioral/Structural 双门与实证核验，Round 2+ 新独立上下文 + 六锁收敛 | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
+| **1. 需求侦察与判身份** | `dev-explore` 只读跑 `repo-map.mjs` 输出 `Feature Map` 与 `reusableModules`；`flow.mjs inspect` 判五态、多 Issue/PR/Milestone 链接及依赖图 | `references/collaboration.md`「一、先判角色」 |
+| **2–3. 澄清、设计与 Critique** | `dev-plan` 联查多链接与自有模板，**多轮互动澄清直至无待拍板问题**（复杂需求主动建议 PRD），按 Case 1–5 分流并走不可自审、全历史换人、3 轮停损 Critique | `references/collaboration.md`「二、五档开工分流」 |
+| **4. 隔离实现与提审锁** | 主会话薄上下文纯调度（就绪 `SPEC` 默认并行优先分波 `parallelDispatch`），`dev-flow` 由单一 `[NEXT STEP]` 路由进 `impl-*`/`review-*` 槽；**谁改代码谁认领并负责 `finalize`/`verify`/`submit`** | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
+| **5–7. 评审、实证与验收** | `dev-review` 对外部 PR 先扫 `--untrusted-scan`；运行 Behavioral/Structural 双门与故障注入，Round 2+ 全历史换人新上下文 + 六锁与统一分级停损升级 | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
 | **8. 合入、清理与复盘** | 独立审查 PASS 后由审查者 `flow.mjs merge`（弱化门禁必拦），问人确认后 7 步清理；`dev-govern` 经 `audit`/`reconcile`/`retro` 读取 `signals.jsonl` 下沉门禁 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」 |
 
 ## 能力矩阵与默认范围

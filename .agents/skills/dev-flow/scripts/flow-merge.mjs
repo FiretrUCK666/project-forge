@@ -11,7 +11,7 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { hasExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { hasExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -160,7 +160,7 @@ export async function assertPreMergeGates({
     ledger.humanApprovedReason = reasonText
   }
 
-  const requiresReview = hasDevReview && (policy.independentReviewRequired || rounds.length > 0 || Boolean(ledger.lastReview))
+  const requiresReview = hasDevReview && (policy.independentReviewRequired || (policy.riskTier !== 'low' && (rounds.length > 0 || Boolean(ledger.lastReview))))
   if (requiresReview) {
     if (!effectiveReviewer || effectiveReviewer === ledger.implementerId) {
       process.stderr.write(`BLOCKED_REQUIRES_INDEPENDENT_REVIEW: 触碰高风险路径或需要独立审查（hits=${highRiskHits.join(',') || `case ${ledger.caseType}`}），必须存在 reviewerId !== implementerId 的独立审查 PASS 记录。\n`)
@@ -290,6 +290,7 @@ export async function handleMerge(opts, roots) {
     for (const iss of ledger.linkedIssues ?? []) {
       await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
+      await backend.removeLabel({ repo: originFull, number: iss, label: 'in-review' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
       await backend.closeIssue({ repo: originFull, number: iss })
     }
@@ -339,6 +340,7 @@ export async function handleMerge(opts, roots) {
       for (const iss of ledger.linkedIssues ?? []) {
         await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })
         await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
+        await backend.removeLabel({ taskId, number: iss, label: 'in-review' })
         await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
         await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
       }
@@ -347,7 +349,7 @@ export async function handleMerge(opts, roots) {
 
   ledger.status = 'merged'
   ledger.mergedAt = new Date().toISOString()
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, {
     skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
     _ghProbe: opts._ghProbe,
@@ -409,7 +411,7 @@ export async function handleRelease(opts, roots) {
   ledger.releasedAt = new Date().toISOString()
   ledger.releaseReason = reason || null
   ledger.claimedAt = null
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ok: true, taskId, role: ledger.role, mode: skipApi ? 'local-ledger-only' : 'remote-synced', status: ledger.status, reason: ledger.releaseReason, releaseResults }, null, 2)}\n`)
@@ -510,7 +512,7 @@ export async function handleClaim(opts, roots) {
       ledger.takeoverReason = takeoverReason
       ledger.takenOverAt = ledger.claimedAt
     }
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
@@ -580,7 +582,7 @@ export async function handleClaim(opts, roots) {
     ledger.takeoverReason = takeoverReason
     ledger.takenOverAt = ledger.claimedAt
   }
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
   } else {

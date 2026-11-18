@@ -126,6 +126,7 @@ export const GITHUB_PROVIDER = Object.freeze({
     issues: true,
     releases: true,
     labels: true,
+    milestones: true,
     branchProtection: true,
   }),
   matchRemote(remoteUrl, sshHostMap) {

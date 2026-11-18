@@ -35,32 +35,33 @@ metadata:
 
 ## 核心规则
 
-1. **先 `next` / `inspect` 再动手（`TaskBackend` 抹平三态）**：
-   - `flow.mjs next [--probe-auth]` 是跨会话唯一入口：离线/换机时自动从远端 `pf-state` 重建状态并给出唯一合法下一步、`worktreePath` 与阻塞原因；
-   - `flow.mjs inspect [Issue/PR URL...]` 识别五态身份（`local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `inbound-external-pr` / `generic-git`），解析多 Issue `Depends on`/`Blocks` 拓扑序与已有 OPEN PR；遇 `clone-readonly` 必停让用户三选一（`--clone-choice fork|standalone|local`）；遇 Git 冲突态一律阻断。
+1. **先 `next` / `inspect` 再动手（`TaskBackend` 抹平三态，默认并行优先）**：
+   - `flow.mjs next [--probe-auth]` 是跨会话唯一入口：在 `idle`/`ambiguous` 态同步扫描未 `start` 的就绪 `docs/specs/*.md`（读取 `Depends on` 与写域），`Wave 1 >= 2` 时直接返回 `parallelDispatch: true` 供主会话薄上下文纯调度并行派发；每次只输出单一 `[NEXT STEP]`，并在审查阶段附 `excludedReviewers`；
+   - `flow.mjs inspect [Issue/PR/Milestone URL...]` 识别五态身份（`local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `inbound-external-pr` / `generic-git`），解析多 Issue 依赖、已有 OPEN PR 与裸粘贴 Milestone URL；`flow.mjs milestone` 按需管理跨后端里程碑（`submit` 创建 PR 自动继承关联 Issue 里程碑）。
 2. **全量 Worktree 隔离、跨轮槽复用与防毒化共享依赖**：
    - 有历史提交仓（`commits > 0`）无论 Case 1/2/3/4 **一律**入第 2 档 `.worktrees/impl-<id>`（含分支占用与主仓脏改动拦截）；仅 0 提交非并行仓允许第 1 档本地特性分支；外部 PR（`--external-pr <M>`）入 `.worktrees/review-pr-<M>`，过 `--untrusted-scan` 前绝不挂依赖或执行脚本。
-   - 每任务最多复用 1 个 `impl` 槽 + 1 个 `review` 槽；`submit`/`review-pack` 推进 `review-<id>` 时自动 `unmountSharedDeps` -> 同步 `HEAD` -> 重挂载依赖（`--reset-review-slot` 清理故障注入残留）。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；多任务由 `batch plan`/`check-disjoint`/`merge-queue`/`resume-session` 与 `sync`（`--after` 堆叠 `rebase --onto`）协同。
-3. **谁改谁认领、谁推送提 PR 与双写评论（协调者不代提）**：
-   - **谁改代码谁在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 与 PR/Issue 评论**（协调者只负责调度派发与验收，不得代提 PR；`submit` 传非原认领人或 `coordinator-*`/`reviewer-*` 触发 `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH`）。接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `release`。
-4. **文档同步锁（`--include-master-prd`）与防旁路分层 `evidence.json`**：
-   - `finalize [--strict-sync] [--include-master-prd]`：校验 `C1..Cn` 全勾 `[x]`、检查 `docs/TDD.md` 同步（`tdd-parity`）及 `AGENTS.md`「改哪看哪」联动，成对 `git mv` 归档至 `docs/archive/`（`isSharedMasterPrd` 默认保护 `1:N` 总控 PRD 维持 `active`；仅全量完结时传 `--include-master-prd` 检查总控勾选、保留原元信息一并归档并写 `archivedPrdFile`）；`contributor-fork` 且上游无 `docs/` 时私有草案隔离至 `.worktrees/.state/private-docs/`。
+   - 每任务最多复用 1 个 `impl` 槽 + 1 个 `review` 槽；`submit`/`review-pack` 推进 `review-<id>` 时自动 `unmountSharedDeps` -> 同步 `HEAD` -> 重挂载依赖（`--reset-review-slot` 清理故障注入残留）；所有变基/试合同步命令附 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 在 `--abort` 前输出有界冲突摘要与恢复包。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；多任务由 `batch plan`/`check-disjoint`/`merge-queue`/`resume-session` 与 `sync`（`--after` 堆叠 `rebase --onto`）协同。
+3. **谁改谁认领、统一工作前缀与双写评论（协调者不代提）**：
+   - **谁改代码谁在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 与 PR/Issue 评论**（协调者只负责调度派发与验收，不得代提 PR；`submit` 传非原认领人或 `coordinator-*`/`reviewer-*` 触发 `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH`）。所有建单与 PR 入口统一遵循 `Case 1 -> docs:` / `Case 2 -> fix:` / `Case >= 3 -> feat:` 规范前缀及四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`）。接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `release`。
+4. **文档同步锁（`1:N` 总控四态闭环）与防旁路分层 `evidence.json`**：
+   - `finalize [--strict-sync] [--include-master-prd]`：校验 `C1..Cn` 全勾 `[x]`、检查 `docs/TDD.md` 同步与「改哪看哪」联动，成对 `git mv` 归档至 `docs/archive/`；`1:N` 总控 PRD 执行四态闭环（手动/有活跃兄弟维持 `active`；有未覆盖后续 `C*` 维持 `active`；100% 覆盖且全勾 `[x]` 自动同分支归档；100% 覆盖留 `[ ]` 则 `finalize`/`verify` 均拦截 `BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED`）。`contributor-fork` 且上游无 `docs/` 时私有草案隔离至 `.worktrees/.state/private-docs/`。
    - `verify --mode quick|smoke|full|gate`：写入 `<gitCommonDir>/project-forge-flow/tasks/<id>/evidence.json`（并向 `signals.jsonl` 写事件）绑定 `verifiedHead === HEAD`；`submit`/`merge` 现场按 `low`/`medium`/`high` 三正交策略核验，`quick --target` 绝不顶替全量门禁，无 CI 低风险纯文档变更须过 `runLowRiskDocStaticCheck`。
-   - `submit` 推后**零跟踪文件写回**，先查 OPEN PR 防重并套用 `.github/pull_request_template.md` 后移交 `dev-review`。
+   - `submit` 推后**零跟踪文件写回**，先查 OPEN PR 防重、套用 `.github/pull_request_template.md` 并继承 Milestone 后移交 `dev-review`。
 5. **审查者合入、临时 `--detach` 试合、`generic-git` 防越权与 7 步确认清理**：
-   - 独立审查 PASS 后由审查者执行 `flow.mjs merge`（强制校验 `verifiedHead === HEAD`、`reviewPassedHead === HEAD`、远端 CI 绿灯与堆叠父 PR 已合）；`generic-git` 禁本地强合（退出码 `3`，需 `--remote-merged` 或 `--human-approved`）；本地合入须先建 `.worktrees/.tmp-merge-*` `--detach` 试合复测再 `ff-only` / CAS 推进主干；弱化门禁或停损解锁（退出码 `4`）必传 `--human-approved --reason`。
-   - `cleanup` 先列清单请人确认后带 `--confirm` 执行（兼容 Squash/远端 `MERGED`；先校验 `git worktree list` 注册状态、自动放行账本 `mountedDeps` 并对未登记外链/悬空链接/深度截断以 `EXIT_POLICY_BLOCK` 阻断，确需切断外链须逐条传 `--allow-outbound <路径>`，内部 junction 先 `unlinkSync` 再删 worktree 与分支）。
+   - 独立审查 PASS（`low` 风险可免审查直接合或可选 `review-pack record` 写状态单）后由审查者执行 `flow.mjs merge`（校验 `verifiedHead === HEAD`、`reviewPassedHead === HEAD`、远端 CI 绿灯与堆叠父 PR 已合）；`generic-git` 禁本地强合（退出码 `3`，需 `--remote-merged` 或 `--human-approved`）；本地合入须先建 `.worktrees/.tmp-merge-*` `--detach` 试合复测再推进主干；弱化门禁或停损解锁（退出码 `4`）必传 `--human-approved --reason`。
+   - `cleanup` 先列清单请人确认后带 `--confirm` 执行（兼容 Squash/远端 `MERGED`；放行账本 `mountedDeps`，阻断未登记外链/悬空链接，确需切断须逐条传 `--allow-outbound`，先 `unlinkSync` 再删 worktree 与分支）。
 
 ## 标准命令流
 
 ```sh
-# 1. 状态重水合 / 身份与多 Issue 拓扑探测 / 账本状态
+# 1. 状态重水合 / 身份与多 Issue・PR・Milestone 拓扑探测 / 账本与里程碑管理
 node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth] [--json]
-node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR URL...] [--probe-auth]
+node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR/Milestone URL...] [--probe-auth]
+node ".agents/skills/dev-flow/scripts/flow.mjs" milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--issue <N>] [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 
-# 2. 启动工作位（--after 堆叠子分支 / --files 切片声明 / --create-issue 建单）、变基同步与并行队列
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>]
+# 2. 启动工作位（--after 堆叠子分支 / --files 切片声明 / --create-issue 建单 / --milestone）、变基同步与并行队列
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" sync [--task <id>] [--onto <branch>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm] [--allow-outbound <路径>]

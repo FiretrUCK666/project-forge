@@ -8,23 +8,34 @@ import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import {
+  DOC_LEGACY_NAME_RE,
+  DOC_STANDARD_NAME_RE,
   isManagedPlanDoc,
+  parseDocFilename,
   parseDocFrontmatter,
   serializeDocFrontmatter,
+  stripCritiqueMeta,
   updateDocFrontmatter,
 } from './doc-frontmatter.mjs'
+import { evaluateMasterPrdClosureState } from './doc-substantive.mjs'
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
-import { listTaskLedgers, writeTaskLedger } from './ledger.mjs'
+import { listTaskLedgers, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
 
-export { isManagedPlanDoc, parseDocFrontmatter, serializeDocFrontmatter, updateDocFrontmatter }
-
-export const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
-export const DOC_LEGACY_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)\.md$/
+export {
+  DOC_LEGACY_NAME_RE,
+  DOC_STANDARD_NAME_RE,
+  isManagedPlanDoc,
+  parseDocFilename,
+  parseDocFrontmatter,
+  serializeDocFrontmatter,
+  stripCritiqueMeta,
+  updateDocFrontmatter,
+}
 
 export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
-  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'related_spec', 'related_todo'],
-  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'related_prd', 'related_todo', 'high_risk_paths'],
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
   todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
 })
 
@@ -72,19 +83,6 @@ export function buildDocFilename({ date, issue, slug, kind }) {
 }
 
 /** 解析规范或兼容历史工程文档文件名，提取 date / issue / slug / kind。 */
-export function parseDocFilename(name) {
-  const base = basename(String(name ?? '').trim())
-  const std = DOC_STANDARD_NAME_RE.exec(base)
-  if (std) {
-    return { date: std[1], issue: std[2] ? Number(std[2]) : null, slug: std[3], kind: std[4], legacy: false }
-  }
-  const leg = DOC_LEGACY_NAME_RE.exec(base)
-  if (leg) {
-    return { date: leg[1], issue: leg[2] ? Number(leg[2]) : null, slug: leg[3], kind: null, legacy: true }
-  }
-  return null
-}
-
 function inferDocKindFromPath(relPath, fmData) {
   const k = fmData?.kind
   if (k === 'prd' || k === 'spec' || k === 'todo') return k
@@ -422,7 +420,7 @@ export function isSharedMasterPrd(repoRoot, prdRel, activeSpecRel = null) {
 /** 同步 PRD / SPEC / Todo 生命周期、重命名、互链与任务账本（不再锁在 renameMap > 0）。 */
 export async function syncDocsLifecycle(repoRoot, {
   slugOrPath, issue, pr, branch, owner, status, approved, implemented, doneAt, planCritique,
-  preserveTerminalStatus = false,
+  preserveTerminalStatus = false, ledgerRoot = null,
 } = {}) {
   const preIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
     ? Number(String(issue).replace(/^#/, '').trim())
@@ -554,41 +552,36 @@ export async function syncDocsLifecycle(repoRoot, {
   }
 
   const groupRelList = finalSiblings.flatMap((s) => [s.oldRel, s.rel])
-  for (const ledger of listTaskLedgers(repoRoot)) {
+  const effectiveLedgerRoot = await resolveLedgerRoot(repoRoot, ledgerRoot)
+  for (const ledger of listTaskLedgers(effectiveLedgerRoot)) {
+    const patch = {}
     let dirty = false
     for (const field of ['prdFile', 'specFile', 'todoFile', 'archivedTodoFile', 'archivedSpecFile', 'archivedPrdFile']) {
       if (ledger[field] && renameMap.has(ledger[field])) {
-        ledger[field] = renameMap.get(ledger[field])
-        dirty = true
+        patch[field] = renameMap.get(ledger[field]); dirty = true
       }
     }
-    const referencesThisSet = ledgerMatchesGroup(ledger, groupRelList, targetSlug, effectiveIssue)
-    if (referencesThisSet) {
+    if (ledgerMatchesGroup(ledger, groupRelList, targetSlug, effectiveIssue)) {
       if (effectiveIssue && Array.isArray(ledger.linkedIssues) && !ledger.linkedIssues.includes(effectiveIssue)) {
-        ledger.linkedIssues = [...ledger.linkedIssues, effectiveIssue]
-        dirty = true
+        patch.linkedIssues = [...ledger.linkedIssues, effectiveIssue]; dirty = true
       }
       if (pr !== undefined && pr !== null && Number(ledger.prNumber) !== Number(pr)) {
-        ledger.prNumber = Number(pr)
-        dirty = true
+        patch.prNumber = Number(pr); dirty = true
       }
-      if (byKind.prd && !ledger.prdFile) { ledger.prdFile = byKind.prd; dirty = true }
-      if (byKind.spec && !ledger.specFile) { ledger.specFile = byKind.spec; dirty = true }
-      if (byKind.todo && !ledger.todoFile) { ledger.todoFile = byKind.todo; dirty = true }
+      if (byKind.prd && !ledger.prdFile) { patch.prdFile = byKind.prd; dirty = true }
+      if (byKind.spec && !ledger.specFile) { patch.specFile = byKind.spec; dirty = true }
+      if (byKind.todo && !ledger.todoFile) { patch.todoFile = byKind.todo; dirty = true }
     }
-    if (dirty) writeTaskLedger(repoRoot, ledger)
+    if (dirty) await updateTaskLedger(effectiveLedgerRoot, ledger.taskId, patch)
   }
 
   return { renamed, updated, byKind, issue: effectiveIssue ?? null, sharedMasterPrds: [...sharedPrds] }
 }
 
-/**
- * 将关联的 PRD / SPEC / Todo 成对通过 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`，
- * 并同步更新状态、done_at、三者互链 `related_*` 相对路径与任务账本（自动跳过共享 1:N 总控 PRD）。
- */
+/** 成对归档 PRD / SPEC / Todo 至 `docs/archive/`，同步互链与账本，并按 C19 四态规则闭环总控 PRD。 */
 export async function archiveCompletedDocsGroup(repoRoot, {
   prdFile, specFile, todoFile, slugOrPath, issue, pr, branch, owner, doneAt,
-  includeMasterPrd = false,
+  includeMasterPrd = false, ledgerRoot = null,
 } = {}) {
   const seedInput = specFile ?? todoFile ?? prdFile ?? slugOrPath
   const explicitRels = [prdFile, specFile, todoFile].filter(Boolean)
@@ -596,24 +589,33 @@ export async function archiveCompletedDocsGroup(repoRoot, {
     ? Number(String(issue).replace(/^#/, '').trim())
     : null
   const { siblingSet, targetSlug } = collectSiblingSet(repoRoot, {
-    slugOrPath: seedInput,
-    includeArchived: true,
-    explicitRels,
+    slugOrPath: seedInput, includeArchived: true, explicitRels,
     currentIssue: Number.isInteger(numericIssue) && numericIssue > 0 ? numericIssue : null,
   })
 
   for (const explicitRel of explicitRels) {
     const norm = posixPath(explicitRel)
     if (existsSync(join(repoRoot, norm))) siblingSet.add(norm)
+    else if (norm.startsWith('docs/prd/')) {
+      const arch = `docs/archive/prd/${basename(norm)}`
+      if (existsSync(join(repoRoot, arch))) siblingSet.add(arch)
+    }
   }
 
-  const activeSpecRel = (specFile ? posixPath(specFile) : null)
-    ?? [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec')
-    ?? null
+  const activeSpecRel = (specFile ? posixPath(specFile) : null) ?? [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec') ?? null
+  const activeTodoRel = (todoFile ? posixPath(todoFile) : null) ?? [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'todo') ?? null
   const wasSharedPrds = new Set(
     [...siblingSet].filter((p) => inferDocKindFromPath(p, null) === 'prd' && isSharedMasterPrd(repoRoot, p, activeSpecRel)),
   )
-  const skippedSharedPrds = includeMasterPrd ? new Set() : wasSharedPrds
+  const skippedSharedPrds = new Set()
+  const masterPrdClosures = []
+  for (const p of [...siblingSet].filter((rel) => inferDocKindFromPath(rel, null) === 'prd')) {
+    const closure = evaluateMasterPrdClosureState(repoRoot, p, { currentSpecRel: activeSpecRel, currentTodoRel: activeTodoRel, includeMasterPrd })
+    masterPrdClosures.push(closure)
+    if (!includeMasterPrd && (wasSharedPrds.has(p) || (closure.isMasterPrd && closure.shouldHold)) && (closure.shouldHold || closure.blocked)) {
+      skippedSharedPrds.add(p)
+    }
+  }
 
   const archiveDirByKind = { prd: 'docs/archive/prd', spec: 'docs/archive/specs', todo: 'docs/archive/todo' }
   const moveMap = new Map()
@@ -621,8 +623,7 @@ export async function archiveCompletedDocsGroup(repoRoot, {
   const groupItems = []
 
   for (const oldRel of [...siblingSet].sort()) {
-    const raw = readTextSafe(join(repoRoot, oldRel)) ?? ''
-    const fm = parseDocFrontmatter(raw)
+    const fm = parseDocFrontmatter(readTextSafe(join(repoRoot, oldRel)) ?? '')
     const kind = inferDocKindFromPath(oldRel, fm.data)
     const isSharedMaster = skippedSharedPrds.has(oldRel)
     const wasSharedMaster = wasSharedPrds.has(oldRel)
@@ -640,20 +641,22 @@ export async function archiveCompletedDocsGroup(repoRoot, {
   }
 
   const byKind = { prd: null, spec: null, todo: null }
-  for (const it of groupItems) {
-    if (it.kind && !it.oldRel.startsWith('docs/archive/') && !byKind[it.kind]) byKind[it.kind] = it.rel
-  }
-  for (const it of groupItems) {
-    if (it.kind && !byKind[it.kind]) byKind[it.kind] = it.rel
-  }
+  for (const it of groupItems) if (it.kind && !it.oldRel.startsWith('docs/archive/') && !byKind[it.kind]) byKind[it.kind] = it.rel
+  for (const it of groupItems) if (it.kind && !byKind[it.kind]) byKind[it.kind] = it.rel
 
   const today = doneAt ?? docIsoDate()
   const updated = []
   for (const item of groupItems) {
-    if (item.isSharedMaster) continue
+    if (item.isSharedMaster || (item.oldRel.startsWith('docs/archive/prd/') && item.kind === 'prd')) continue
     const abs = join(repoRoot, item.rel)
-    let raw = readTextSafe(abs) ?? ''
-    raw = replaceDocReferencesSinglePass(raw, moveMap)
+    let raw = replaceDocReferencesSinglePass(readTextSafe(abs) ?? '', moveMap)
+    for (const [movedOldRel, movedNewRel] of moveMap.entries()) {
+      if (movedOldRel.startsWith('docs/prd/') && movedNewRel.startsWith('docs/archive/prd/')) {
+        const base = basename(movedOldRel)
+        if (item.rel.startsWith('docs/archive/')) raw = raw.replace(new RegExp(`\\.\\./\\.\\./prd/${escapeRegExpStr(base)}`, 'g'), `../prd/${base}`)
+        else raw = raw.replace(new RegExp(`(\\.\\./)prd/${escapeRegExpStr(base)}`, 'g'), `$1archive/prd/${base}`)
+      }
+    }
     if (item.rel.startsWith('docs/archive/') && !item.oldRel.startsWith('docs/archive/')) {
       for (const sharedRel of skippedSharedPrds) {
         const base = basename(sharedRel)
@@ -673,42 +676,45 @@ export async function archiveCompletedDocsGroup(repoRoot, {
         }
       }
     }
-    const patch = buildArchivedDocPatch({
-      kind: item.kind, fmData: fm.data, today, issue, pr, branch, owner, preserveMasterMeta, relatedTargets,
-    })
-
+    const patch = buildArchivedDocPatch({ kind: item.kind, fmData: fm.data, today, issue, pr, branch, owner, preserveMasterMeta, relatedTargets })
     const merged = { ...fm.data }
-    for (const [k, v] of Object.entries(patch)) {
-      if (v !== undefined) merged[k] = v
-    }
-    const defaultOrder = DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? []
-    const keyOrder = [...defaultOrder, ...fm.keyOrder, ...Object.keys(merged)]
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) merged[k] = v
+    const keyOrder = [...(DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? []), ...fm.keyOrder, ...Object.keys(merged)]
     const cleanBody = fm.body.replace(/^\n+/, '')
-    const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
-    writeAtomic(abs, nextText)
+    writeAtomic(abs, `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`)
     updated.push({ file: item.rel, kind: item.kind, status: merged.status })
   }
 
-  const archiveMembers = groupItems.flatMap((g) => [g.oldRel, g.rel])
+  const sharedMasterRels = new Set([
+    ...skippedSharedPrds,
+    ...groupItems.filter((g) => g.wasSharedMaster).flatMap((g) => [g.oldRel, g.rel]),
+  ])
+  const archivedMasterPrd = groupItems.find((g) => g.wasSharedMaster && g.rel.startsWith('docs/archive/'))?.rel ?? null
+  const archiveMembers = groupItems
+    .filter((g) => !sharedMasterRels.has(g.rel) && !sharedMasterRels.has(g.oldRel))
+    .flatMap((g) => [g.oldRel, g.rel])
   const numericIssueArg = Number.isInteger(numericIssue) && numericIssue > 0 ? numericIssue : null
-  for (const ledger of listTaskLedgers(repoRoot)) {
-    const matches = ledgerMatchesGroup(ledger, archiveMembers, targetSlug, numericIssueArg)
-    if (!matches) continue
+  const effectiveLedgerRoot = await resolveLedgerRoot(repoRoot, ledgerRoot)
+  for (const ledger of listTaskLedgers(effectiveLedgerRoot)) {
+    const patch = {}
     let dirty = false
-    if (byKind.prd) {
-      ledger.prdFile = byKind.prd
-      if (skippedSharedPrds.has(byKind.prd)) ledger.archivedPrdFile = null
-      else if (byKind.prd.startsWith('docs/archive/')) ledger.archivedPrdFile = byKind.prd
+    if (ledgerMatchesGroup(ledger, archiveMembers, targetSlug, numericIssueArg)) {
+      if (byKind.prd) {
+        patch.prdFile = byKind.prd
+        patch.archivedPrdFile = skippedSharedPrds.has(byKind.prd) ? null : (byKind.prd.startsWith('docs/archive/') ? byKind.prd : ledger.archivedPrdFile)
+        dirty = true
+      }
+      if (byKind.spec) { patch.specFile = byKind.spec; patch.archivedSpecFile = byKind.spec; dirty = true }
+      if (byKind.todo) { patch.todoFile = byKind.todo; patch.archivedTodoFile = byKind.todo; dirty = true }
+    } else if (archivedMasterPrd && sharedMasterRels.has(ledger.prdFile)) {
+      patch.prdFile = archivedMasterPrd
+      patch.archivedPrdFile = archivedMasterPrd
       dirty = true
     }
-    if (byKind.spec) { ledger.specFile = byKind.spec; ledger.archivedSpecFile = byKind.spec; dirty = true }
-    if (byKind.todo) { ledger.todoFile = byKind.todo; ledger.archivedTodoFile = byKind.todo; dirty = true }
-    if (dirty) writeTaskLedger(repoRoot, ledger)
+    if (dirty) await updateTaskLedger(effectiveLedgerRoot, ledger.taskId, patch)
   }
-
-  const archivedMasterPrd = groupItems.find((g) => g.wasSharedMaster && g.rel.startsWith('docs/archive/'))?.rel ?? null
   return {
-    moved, updated, byKind, archivedMasterPrd,
+    moved, updated, byKind, archivedMasterPrd, masterPrdClosures,
     archived: groupItems.filter((g) => !g.isSharedMaster).map((g) => g.rel),
     sharedMasterPrds: [...skippedSharedPrds],
   }

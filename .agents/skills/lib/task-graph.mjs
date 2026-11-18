@@ -235,6 +235,7 @@ export async function resolveExternalCollaborationGraph({
     kind,
     issues: resolvedIssues,
     prs: resolvedPrs,
+    milestones: parsed.milestones,
     unknown: parsed.unknown,
     linkedIssues: linkedIssueNumbers,
     externalPr,

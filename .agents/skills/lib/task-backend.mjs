@@ -16,15 +16,45 @@ import { sanitizeTaskId } from './ledger.mjs'
 import {
   addLocalIssueComment,
   addLocalIssueLabels,
+  assignLocalMilestone,
   claimLocalIssue,
   closeLocalIssue,
+  closeLocalMilestone,
   createLocalIssue,
+  createLocalMilestone,
   getLocalIssue,
   listLocalIssues,
+  listLocalMilestones,
   releaseLocalIssue,
   removeLocalIssueLabel,
   resolveEffectiveCommonGitDir,
 } from './local-issues.mjs'
+import { readDecisions } from './profile.mjs'
+
+export const WORKFLOW_STATE_LABELS = Object.freeze({
+  'in-progress': Object.freeze({ primary: 'in-progress', aliases: ['in-progress', 'status:in-progress', 'wip', 'doing'], removes: ['in-review', 'changes-requested', 'reviewed'] }),
+  'in-review': Object.freeze({ primary: 'in-review', aliases: ['in-review', 'status:in-review', 'review', 'needs-review'], removes: ['in-progress', 'changes-requested'] }),
+  'changes-requested': Object.freeze({ primary: 'changes-requested', aliases: ['changes-requested', 'status:changes-requested', 'rework'], removes: ['in-review', 'reviewed'] }),
+  reviewed: Object.freeze({ primary: 'reviewed', aliases: ['reviewed', 'status:reviewed', 'approved', 'ready-to-merge'], removes: ['in-review', 'changes-requested', 'in-progress'] }),
+})
+
+function hasNoLabelsDecision(mainRoot) {
+  if (!mainRoot) return false
+  const txt = readTextSafe(join(mainRoot, 'AGENTS.md'))
+  return txt ? readDecisions(txt).has('no-labels') : false
+}
+
+function resolveSemanticStateLabel(stateName, existingRepoLabels = []) {
+  const entry = WORKFLOW_STATE_LABELS[stateName]
+  if (!entry) return { primary: stateName, removes: [] }
+  const lowMap = new Map((existingRepoLabels ?? []).map((l) => [String(l).toLowerCase(), String(l)]))
+  const matched = entry.aliases.map((a) => lowMap.get(a.toLowerCase())).find(Boolean)
+  const primary = matched ?? entry.primary
+  const removes = [...new Set([...entry.removes, ...entry.removes.map((r) => WORKFLOW_STATE_LABELS[r]?.aliases ?? []).flat()])]
+    .map((r) => lowMap.get(r.toLowerCase()) ?? r)
+    .filter((r) => r.toLowerCase() !== primary.toLowerCase())
+  return { primary, removes }
+}
 
 export const TASK_BACKEND_METHODS = Object.freeze([
   'claimTask',
@@ -207,8 +237,8 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
     return { ok: true, local: true, number: num }
   }
 
-  const localCreateIssue = async ({ title, body = '', labels = [], assignees = [] } = {}) => (
-    createLocalIssue({ mainRoot, gitDir, title, body, labels, assignees })
+  const localCreateIssue = async ({ title, body = '', labels = [], assignees = [], milestone = null } = {}) => (
+    createLocalIssue({ mainRoot, gitDir, title, body, labels, assignees, milestone })
   )
 
   const localGetIssue = async (arg, maybeNumber) => {
@@ -251,12 +281,21 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
     return { ok: true, local: true, comments }
   }
 
+  const localSyncStateLabel = async ({ taskId, repo, number, state } = {}) => {
+    if (hasNoLabelsDecision(mainRoot)) return { ok: true, skipped: true, reason: 'no-labels' }
+    const { primary, removes } = resolveSemanticStateLabel(state)
+    const addRes = await localAddLabels({ taskId, repo, number, labels: [primary] })
+    for (const r of removes) await localRemoveLabel({ taskId, repo, number, label: r })
+    return { ok: true, local: true, label: primary, removes, addRes }
+  }
+
   return {
     localClaimTask,
     localReleaseTask,
     localPostComment,
     localAddLabels,
     localRemoveLabel,
+    localSyncStateLabel,
     localCreateIssue,
     localGetIssue,
     localListIssues,
@@ -273,7 +312,7 @@ export class GitHubBackend {
     this.mainRoot = mainRoot
     this.gitDir = gitDir
     this.client = client ?? createGitHubClient({ cwd: mainRoot })
-    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, checks: true, releases: true })
+    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, milestones: true, checks: true, releases: true })
   }
 
   async claimTask({
@@ -294,7 +333,7 @@ export class GitHubBackend {
           ? { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, reason }
           : { taskId, action: 'claim', agent: actor, branch },
       })
-      const label = await this.addLabels({ repo, number: num, labels })
+      const label = await this.syncStateLabel({ repo, number: num, state: 'in-progress', fallbackLabels: labels })
       results.push({ issue: num, action: takeover ? 'takeover' : 'claim', comment, label })
     }
     let prResult = null
@@ -347,11 +386,49 @@ export class GitHubBackend {
     return this.client.removeLabel({ repo: repo ?? this.targetRepo, number, label })
   }
 
-  async createIssue({ repo, title, body = '', labels = [] } = {}) {
+  async syncStateLabel({ repo, number, state, fallbackLabels = [] } = {}) {
+    if (hasNoLabelsDecision(this.mainRoot)) return { ok: true, skipped: true, reason: 'no-labels' }
+    const targetRepo = repo ?? this.targetRepo
+    const repoLabels = typeof this.client?.listLabels === 'function'
+      ? ((await Promise.resolve(this.client.listLabels({ repo: targetRepo })).catch(() => null))?.labels ?? [])
+      : []
+    const { primary, removes } = resolveSemanticStateLabel(state, repoLabels)
+    const addLabelsList = primary ? [primary] : fallbackLabels
+    const addRes = await this.addLabels({ repo: targetRepo, number, labels: addLabelsList })
+    if (addRes?.reason && /403|forbidden/i.test(String(addRes.reason))) {
+      return { ok: false, skipped: true, reason: addRes.reason, label: primary }
+    }
+    for (const stale of removes) {
+      await Promise.resolve(this.removeLabel({ repo: targetRepo, number, label: stale })).catch(() => ({ ok: false, skipped: true }))
+    }
+    return { ok: Boolean(addRes?.ok || !addRes?.skipped), label: primary, removes, addRes }
+  }
+
+  async createIssue({ repo, title, body = '', labels = [], milestone = null } = {}) {
     if (typeof this.client?.createIssue !== 'function') {
       return { ok: false, skipped: true, reason: 'client-unsupported' }
     }
-    return this.client.createIssue({ repo: repo ?? this.targetRepo, title, body, labels })
+    return this.client.createIssue({ repo: repo ?? this.targetRepo, title, body, labels, ...(milestone ? { milestone } : {}) })
+  }
+
+  async listMilestones({ repo, state = 'open' } = {}) {
+    if (typeof this.client?.listMilestones !== 'function') return { ok: false, milestones: [], skipped: true, reason: 'client-unsupported' }
+    return this.client.listMilestones({ repo: repo ?? this.targetRepo, state })
+  }
+
+  async createMilestone({ repo, title, description = '', dueOn = null } = {}) {
+    if (typeof this.client?.createMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
+    return this.client.createMilestone({ repo: repo ?? this.targetRepo, title, description, dueOn })
+  }
+
+  async closeMilestone({ repo, number } = {}) {
+    if (typeof this.client?.closeMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
+    return this.client.closeMilestone({ repo: repo ?? this.targetRepo, number })
+  }
+
+  async assignMilestone({ repo, number, milestone } = {}) {
+    if (typeof this.client?.assignMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
+    return this.client.assignMilestone({ repo: repo ?? this.targetRepo, number, milestone })
   }
 
   async getIssue(arg, maybeNumber) {
@@ -447,7 +524,7 @@ export class GenericRemoteBackend {
     this.pushRemote = pushRemote
     this.mainRoot = mainRoot
     this.gitDir = gitDir
-    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, checks: false, releases: false })
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: false, checks: false, releases: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }
 
@@ -456,11 +533,35 @@ export class GenericRemoteBackend {
   postComment(args) { return this._local.localPostComment(args) }
   addLabels(args) { return this._local.localAddLabels(args) }
   removeLabel(args) { return this._local.localRemoveLabel(args) }
+  syncStateLabel(args) { return this._local.localSyncStateLabel(args) }
   createIssue(args) { return this._local.localCreateIssue(args) }
   getIssue(arg, maybeNumber) { return this._local.localGetIssue(arg, maybeNumber) }
   listIssues(args) { return this._local.localListIssues(args) }
   closeIssue(arg, maybeNumber) { return this._local.localCloseIssue(arg, maybeNumber) }
   listComments(arg, maybeNumber) { return this._local.localListComments(arg, maybeNumber) }
+  listMilestones({ state = 'open' } = {}) {
+    return {
+      ...listLocalMilestones({ mainRoot: this.mainRoot, gitDir: this.gitDir, state }),
+      capabilities: this.capabilities,
+      platformSetupChecklist: ['generic-git 远端未开放统一里程碑 API，请在托管平台 Web 控制台手动同步里程碑。'],
+    }
+  }
+  async createMilestone(args = {}) {
+    const res = await createLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args })
+    return {
+      ...res,
+      capabilities: this.capabilities,
+      platformSetupChecklist: [`在托管平台创建同名里程碑「${res.title ?? args.title}」`, '将关联 Issue/MR 手动归入该里程碑'],
+    }
+  }
+  async closeMilestone(args = {}) {
+    const res = await closeLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args })
+    return { ...res, capabilities: this.capabilities, platformSetupChecklist: [`在托管平台 Web 控制台关闭里程碑 #${args.number}`] }
+  }
+  async assignMilestone(args = {}) {
+    const res = await assignLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args })
+    return { ...res, capabilities: this.capabilities, platformSetupChecklist: [`在托管平台将 #${args.number} 关联至里程碑 ${args.milestone}`] }
+  }
 
   async findOpenPrForBranch() {
     return { ok: true, prs: [], skipped: true, reason: 'generic-git' }
@@ -516,7 +617,7 @@ export class LocalOnlyBackend {
     this.mainRoot = mainRoot
     this.gitDir = gitDir
     this.baseBranch = baseBranch
-    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, checks: false, releases: false })
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: true, checks: false, releases: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }
 
@@ -525,11 +626,16 @@ export class LocalOnlyBackend {
   postComment(args) { return this._local.localPostComment(args) }
   addLabels(args) { return this._local.localAddLabels(args) }
   removeLabel(args) { return this._local.localRemoveLabel(args) }
+  syncStateLabel(args) { return this._local.localSyncStateLabel(args) }
   createIssue(args) { return this._local.localCreateIssue(args) }
   getIssue(arg, maybeNumber) { return this._local.localGetIssue(arg, maybeNumber) }
   listIssues(args) { return this._local.localListIssues(args) }
   closeIssue(arg, maybeNumber) { return this._local.localCloseIssue(arg, maybeNumber) }
   listComments(arg, maybeNumber) { return this._local.localListComments(arg, maybeNumber) }
+  listMilestones(args = {}) { return listLocalMilestones({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
+  createMilestone(args = {}) { return createLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
+  closeMilestone(args = {}) { return closeLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
+  assignMilestone(args = {}) { return assignLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
 
   async findOpenPrForBranch() {
     return { ok: true, prs: [], skipped: true, reason: 'local-only' }

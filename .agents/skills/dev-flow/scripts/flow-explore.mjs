@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { readTextSafe } from '../../lib/git.mjs'
-import { createExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { createExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
 
 function detectExploreTier(workRoot, map) {
@@ -39,7 +39,7 @@ export async function handleExplore(opts, roots) {
   })
 
   ledger.explored = explored
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), explored }), { createIfMissing: true })
 
   const out = {
     ok: true,

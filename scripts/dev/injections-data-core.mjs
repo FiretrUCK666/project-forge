@@ -296,10 +296,10 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I26',
-    what: '废除 doc-plan.mjs approveSpec 的独立 Plan Critique 阻断门槛',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
-    from: '    if (!/^passed\\b/i.test(critiqueVal)) {',
-    to: '    if (false && !/^passed\\b/i.test(critiqueVal)) {',
+    what: '废除 doc-plan-ops.mjs approveSpec 的独立 Plan Critique 阻断门槛',
+    file: 'kit/skills/dev-plan/scripts/doc-plan-ops.mjs',
+    from: '      if (!/^passed\\b/i.test(critiqueVal)) {',
+    to: '      if (false && !/^passed\\b/i.test(critiqueVal)) {',
     expect: '未 critique-pass 的 SPEC 竟被 approve 放行',
   },
   {

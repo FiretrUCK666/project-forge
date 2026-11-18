@@ -7,6 +7,7 @@
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { computeWorktreeEnv, posixPath } from '../../lib/git.mjs'
+import { updateTaskLedger } from '../../lib/ledger.mjs'
 import { determineWorkflowPolicy } from '../../lib/workflow-policy.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
@@ -662,6 +663,19 @@ export async function handleCheckFault(ctx) {
     faultRestoredAt: restoredAt,
     faultRestoredMeta: { fingerprint: currentFingerprint, commands: results },
   })
+  const faultRecord = {
+    headSha,
+    round,
+    baselineFingerprint,
+    workspaceFingerprint: currentFingerprint,
+    failedCmd: prev?.faultInjectedAndFailed?.failedCmd ?? null,
+    failedExitCode: prev?.faultInjectedAndFailed?.exitCode ?? null,
+    commands: results.map((r) => ({ cmd: r.cmd, exitCode: r.exitCode, ok: r.ok })),
+    restoredAt,
+  }
+  if (task?.taskId) {
+    await updateTaskLedger(mainRoot, task.taskId, { faultRecord })
+  }
 
   const gate = evaluateIncludeDiffGate({
     gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
@@ -677,6 +691,7 @@ export async function handleCheckFault(ctx) {
     headSha,
     workspaceFingerprint: currentFingerprint,
     baselineFingerprint,
+    faultRecord,
     commands: results,
     empiricalGate: gate,
     nextSteps: gate.unblockCommands.length > 0

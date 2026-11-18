@@ -15,7 +15,7 @@ import {
   gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots, } from '../../lib/git.mjs'
 import {
   getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits, } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
+import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import {
@@ -420,7 +420,7 @@ async function main(argv = process.argv.slice(2)) {
       booleanFlags: [
         'local', 'staged', 'untrusted-scan', 'human-approved-exec',
         'human-approved', 'include-diff', 'visual-checked',
-        'reset-review-slot', 'enforce-gates',
+        'reset-review-slot', 'enforce-gates', 'escalate',
       ],
       valueFlags: [
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
@@ -522,12 +522,12 @@ async function main(argv = process.argv.slice(2)) {
       }
       untrustedWarnings = hazards
       if (task && isExternalPrTaskLedger(task)) {
-        task.untrustedScanPassed = true
-        if (opts['human-approved'] || opts.humanApprovedExec) {
-          task.untrustedApproved = true
-          task.humanApprovedExec = true
-        }
-        writeTaskLedger(mainRoot, task)
+        const { ledger: nextTask } = await updateTaskLedger(mainRoot, task.taskId, (cur) => ({
+          ...cur,
+          untrustedScanPassed: true,
+          ...(opts['human-approved'] || opts.humanApprovedExec ? { untrustedApproved: true, humanApprovedExec: true } : {}),
+        }))
+        Object.assign(task, nextTask)
       }
     }
 

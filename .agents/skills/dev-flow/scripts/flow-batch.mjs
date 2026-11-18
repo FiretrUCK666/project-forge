@@ -14,10 +14,10 @@ import {
   gitRun, posixPath, readJsonSafe, resolveDefaultBranch, withFileLock, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, readRefsFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger, writeTaskLedger } from '../../lib/ledger.mjs'
+import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
-import { evaluateNextState, hasRepoCiWorkflow } from '../../lib/workflow-policy.mjs'
+import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { assertPreMergeGates } from './flow-merge.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
@@ -57,53 +57,45 @@ async function collectTaskTouchedFiles(mainRoot, ledger) {
 }
 
 async function handleBatchPlan(opts, roots) {
+  const explicitTasks = Boolean(opts.tasks && String(opts.tasks).trim())
   const taskIds = parseTasksList(opts, roots.mainRoot)
   const items = await Promise.all(taskIds.map(async (id) => {
     const ledger = readTaskLedger(roots.mainRoot, id)
     if (!ledger) throw new Error(`找不到任务账本：${id}`)
     const files = await collectTaskTouchedFiles(roots.mainRoot, ledger)
-    const deps = new Set([
+    const deps = [
       ...(Array.isArray(ledger.dependsOn) ? ledger.dependsOn.map(String) : []),
       ...(ledger.parentTaskId ? [String(ledger.parentTaskId)] : []),
-    ])
-    return { taskId: id, files, deps: [...deps].filter((d) => taskIds.includes(d)), ledger }
+    ]
+    return { taskId: id, files, dependsOn: deps, status: ledger.status, branch: ledger.branch }
   }))
 
-  const byId = new Map(items.map((it) => [it.taskId, it]))
-  const placedWave = new Map()
-  const waves = []
-  const remaining = new Set(items.map((it) => it.taskId))
-  let waveNum = 0
+  const allLedgers = listTaskLedgers(roots.mainRoot, { includeTerminal: true })
+  const readySlices = explicitTasks ? [] : scanUnstartedReadySlices(roots.mainRoot, allLedgers)
+  const combined = [...items, ...readySlices]
+  const filesMap = Object.fromEntries(combined.map((it) => [it.taskId, it.files ?? []]))
+  const wavePlan = buildMultiTaskWavePlan(combined, filesMap)
+  const waves = wavePlan.waves
 
-  while (remaining.size > 0 && waveNum < items.length + 2) {
-    waveNum += 1
-    const curWave = []
-    const usedFiles = new Set()
-    for (const id of [...remaining]) {
-      const it = byId.get(id)
-      if (!it.deps.every((d) => placedWave.has(d) && placedWave.get(d) < waveNum)) continue
-      const conflict = it.files.some((f) => usedFiles.has(f))
-      if (conflict) continue
-      curWave.push({ taskId: id, files: it.files, deps: it.deps, slotIndex: curWave.length })
-      it.files.forEach((f) => usedFiles.add(f))
-    }
-    if (curWave.length === 0) {
-      const fallbackId = [...remaining][0]
-      const it = byId.get(fallbackId)
-      curWave.push({ taskId: fallbackId, files: it.files, deps: it.deps, slotIndex: 0, cycleOrForced: true })
-    }
-    for (const entry of curWave) {
-      placedWave.set(entry.taskId, waveNum)
-      remaining.delete(entry.taskId)
-    }
-    waves.push({ wave: waveNum, tasks: curWave })
+  const out = {
+    ok: true,
+    totalTasks: wavePlan.totalTasks,
+    parallelDispatch: wavePlan.parallelDispatch,
+    readySlicesCount: readySlices.length,
+    waves,
+    order: wavePlan.order,
+    parallelizable: wavePlan.parallelizable,
   }
-
-  const out = { ok: true, totalTasks: items.length, waves, order: waves.flatMap((w) => w.tasks.map((t) => t.taskId)) }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else {
-    process.stdout.write(`并行波次规划（共 ${items.length} 个任务，${waves.length} 个波次）：\n`)
-    for (const w of waves) process.stdout.write(`  Wave ${w.wave}: ${w.tasks.map((t) => t.taskId).join(', ')}\n`)
+    process.stdout.write(`并行波次规划（共 ${out.totalTasks} 个任务/就绪切片，${waves.length} 个波次，parallelDispatch=${out.parallelDispatch}）：\n`)
+    for (const w of waves) process.stdout.write(`  Wave ${w.wave} (${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(', ')}\n`)
+    const wave1 = waves[0]?.tasks ?? []
+    if (wave1.length >= 2) {
+      printNextStep([{ skill: 'dev-flow', text: `并行派发 Wave 1（${wave1.map((t) => t.taskId).join(', ')}）至各自隔离工作位` }], { repoRoot: roots.mainRoot })
+    } else if (wave1.length === 1) {
+      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${wave1[0].taskId}` }], { repoRoot: roots.mainRoot })
+    }
   }
   return { exitCode: 0, ...out }
 }
@@ -216,6 +208,7 @@ async function handleMergeQueue(opts, roots) {
         targetRepo: originFull,
       })
       if (!gate.ok) {
+        queue.unshift(taskId)
         results.push({ taskId, ok: false, blocked: true, code: gate.code, exitCode: gate.exitCode })
         stoppedWithFailure = true
         exitCode = gate.exitCode ?? EXIT_POLICY_BLOCK
@@ -258,7 +251,7 @@ async function handleMergeQueue(opts, roots) {
       let mergeRes
       if (needsOnlineRemoteMerge) {
         mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
-      } else if (ledger.role === 'generic-git') {
+      } else if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git') {
         mergeRes = await backend.mergePr({
           remoteMerged: Boolean(opts['remote-merged']),
           humanApproved: Boolean(opts['human-approved']),

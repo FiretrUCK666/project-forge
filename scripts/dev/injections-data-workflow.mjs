@@ -115,8 +115,8 @@ export const INJECTIONS_WORKFLOW = [
   },
   {
     id: 'I64',
-    what: '关闭 doc-plan.mjs critique-pass 禁止自审拦截',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
+    what: '关闭 critique-rounds.mjs critique 禁止自审拦截',
+    file: 'kit/skills/lib/critique-rounds.mjs',
     from: '  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
     to: '  if (false && fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {',
     expect: 'SELF_CRITIQUE_REJECTED',
@@ -230,10 +230,10 @@ export const INJECTIONS_WORKFLOW = [
   },
   {
     id: 'I78',
-    what: '规划审核 Round 2 起允许复用同一复核人（独立上下文这一条被拆掉）',
-    file: 'kit/skills/dev-plan/scripts/doc-plan.mjs',
-    from: '  if (Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {',
-    to: '  if (false && Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {',
+    what: '规划审核 Round 2 起允许复用同一复核人（全历史换人锁被拆掉）',
+    file: 'kit/skills/lib/critique-rounds.mjs',
+    from: '  if (reviewerLock.blocked) {',
+    to: '  if (false && reviewerLock.blocked) {',
     expect: 'Round 2 复用同一复核人未被拦截',
   },
   {

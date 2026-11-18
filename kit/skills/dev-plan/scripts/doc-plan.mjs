@@ -7,8 +7,10 @@
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
  *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name>] [--status <s>] [--approve] [--json]
  *   audit          [--file <docPath> | .] [--json]
- *   critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <text>] [--json]
- *   approve        --file <specPath> [--skip-critique-reason <text>] [--json]
+ *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--json]
+ *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--json]
+ *   critique-override --file <docPath> --human-approved --reason <text> [--by <actor>] [--json]
+ *   approve           --file <specPath> [--skip-critique-reason <text>] [--json]
  *   archive        [<slug-or-path>] [--task <id>] [--done-at YYYY-MM-DD] [--include-master-prd] [--json]
  *   supersede      <oldSpec> --by <newSpec> [--json]
  *   list           [--json]
@@ -27,20 +29,22 @@ import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
   posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
-import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
-import { buildCritiqueScope, CRITIQUE_FINDINGS_KEY, serializeFindings } from '../../lib/critique-rounds.mjs'
+import {
+  buildCritiqueScope, collectExcludedReviewers, CRITIQUE_FINDINGS_KEY,
+  critiqueOverrideDoc, critiquePassDoc, critiqueRejectDoc, parseCritiqueRounds,
+} from '../../lib/critique-rounds.mjs'
 import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
-import { extractDocSnapshot } from '../../lib/doc-substantive.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
 import { buildPreFilledTdd } from '../../lib/tdd-scaffold.mjs'
 import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger,
+  readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger,
 } from '../../lib/ledger.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
-import { auditDoc, auditRepoDocs, detectDocType, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
+import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
+import { approveSpec, clarifyDoc, supersedeSpec } from './doc-plan-ops.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 
@@ -53,7 +57,7 @@ function parseIssueArg(rawIssue) {
 
 async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
-  taskId, issue, owner, branch, relatedSpec, relatedPrd, force = false, noPrune = false,
+  taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
@@ -169,19 +173,27 @@ async function initDoc({
   }
 
   let ledgerUpdated = false
+  if (milestone) {
+    for (const item of planned) {
+      if (item.kind !== 'tdd') updateDocFrontmatter(item.absFile, { milestone }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? [] })
+    }
+  }
   if (taskId) {
     if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
     const id = sanitizeTaskId(taskId)
-    const ledger = existingLedger ?? createDefaultLedger({ taskId: id, slug: safeSlug, isolation: null, status: 'planned' })
-    for (const item of planned) {
-      if (item.kind === 'prd') ledger.prdFile = item.file
-      else if (item.kind === 'spec') ledger.specFile = item.file
-      else if (item.kind === 'todo') ledger.todoFile = item.file
-    }
-    if (issueNum && Array.isArray(ledger.linkedIssues) && !ledger.linkedIssues.includes(issueNum)) {
-      ledger.linkedIssues = [...ledger.linkedIssues, issueNum]
-    }
-    writeTaskLedger(mainRoot, ledger)
+    await updateTaskLedger(mainRoot, id, (cur) => {
+      const next = { ...cur }
+      for (const item of planned) {
+        if (item.kind === 'prd') next.prdFile = item.file
+        else if (item.kind === 'spec') next.specFile = item.file
+        else if (item.kind === 'todo') next.todoFile = item.file
+      }
+      if (issueNum && Array.isArray(next.linkedIssues) && !next.linkedIssues.includes(issueNum)) {
+        next.linkedIssues = [...next.linkedIssues, issueNum]
+      }
+      if (milestone) next.milestone = milestone
+      return next
+    }, { createIfMissing: true, defaults: { taskId: id, slug: safeSlug, isolation: null, status: 'planned' } })
     ledgerUpdated = true
   }
 
@@ -189,252 +201,8 @@ async function initDoc({
   return {
     type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
     files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
-    issue: issueNum, plannedAt: headSha, ledgerUpdated, customTemplates,
+    issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
   }
-}
-
-function normActorId(s) {
-  return String(s ?? '').trim().replace(/^@/, '').toLowerCase()
-}
-
-/**
- * 从 `plan_critique` 戳里读上一轮的复核人。
- *
- * 戳的形状是 `passed (reviewer=<id>, round=<n>, sha=<hex>...)`。读不出来就返回 null——
- * 读不出来时不拦：老文档没有这个字段，拿「读不出来」当「同一个人」会把存量文档全堵死。
- */
-function parseCritiqueReviewer(stamp) {
-  const m = /reviewer=([^,)]+)/i.exec(String(stamp ?? ''))
-  return m ? m[1].trim() : null
-}
-
-function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', findings = [] }) {
-  if (!reviewer || !String(reviewer).trim()) throw new Error('critique-pass 必须指定 --reviewer <reviewerId>')
-  const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
-
-  const rawPre = readTextSafe(abs)
-  if (rawPre === undefined) throw new Error(`无法读取文本文件：${file}`)
-  const fmPre = parseDocFrontmatter(rawPre)
-  if (fmPre.data?.owner && normActorId(fmPre.data.owner) && normActorId(fmPre.data.owner) === normActorId(reviewer)) {
-    throw new Error(`SELF_CRITIQUE_REJECTED: critique-pass 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
-  }
-
-  // Round 2 起必须换人。上一轮的复核人记在 frontmatter（或传统 Plan Critique 行）里，读得到。
-  const legacyCritiquePre = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(rawPre)?.[1]?.trim() ?? null
-  const prevReviewer = parseCritiqueReviewer(fmPre.data?.plan_critique ?? legacyCritiquePre)
-  if (Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {
-    throw new Error(`BLOCKED_CRITIQUE_SAME_REVIEWER: Round ${round} 的复核人 (${reviewer}) 与上一轮相同。`
-      + 'Round 2 起必须新建独立子代理复审——复用上一轮的上下文见过自己提出的意见，这一轮已经不算独立审了。')
-  }
-
-  const audit = auditDoc({ repoRoot, file })
-  if (!audit.ok) {
-    const err = new Error(`文档尚有 ${audit.errors.length} 处审计问题未自净化，禁止记录 critique-pass`)
-    err.audit = audit
-    throw err
-  }
-
-  const text = readTextSafe(abs)
-  if (text === undefined) throw new Error(`无法读取文本文件：${file}`)
-  const fm = parseDocFrontmatter(text)
-  const relDoc = posixPath(relative(repoRoot, abs))
-  const docType = detectDocType(relDoc, text)
-  const digest = sha256Text(stripCritiqueMeta(text)).slice(0, 12)
-  const cleanSummary = String(summary ?? '').replace(/[\r\n]+/g, ' ').trim()
-  const stampValue = `passed (reviewer=${String(reviewer).trim()}, round=${round}, sha=${digest}${cleanSummary ? `, summary=${cleanSummary}` : ''})`
-
-  // 把这一轮的意见记进 frontmatter：下一轮的范围就靠它，不靠谁的记忆。
-  const prevFindings = fm.data?.[CRITIQUE_FINDINGS_KEY]
-  const findingList = Array.isArray(findings) ? findings : []
-  const newFindings = findingList.length > 0
-    ? [String(prevFindings ?? '').trim(), serializeFindings(round, findingList)].filter(Boolean).join(' ;; ')
-    : (prevFindings ?? null)
-
-  if (fm.hasFrontmatter) {
-    const snap = extractDocSnapshot(text)
-    const patch = {
-      plan_critique: stampValue,
-      critique_anchors: JSON.stringify(snap),
-      updated: docIsoDate(),
-    }
-    if (newFindings) patch[CRITIQUE_FINDINGS_KEY] = newFindings
-    updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
-  } else {
-    const stampLine = `- Plan Critique: ${stampValue}`
-    let updated
-    if (/^(?:-\s+)?Plan Critique:.*$/mi.test(text)) updated = text.replace(/^(?:-\s+)?Plan Critique:.*$/mi, stampLine)
-    else if (/^(?:-\s+)?Status:.*$/mi.test(text)) updated = text.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${stampLine}`)
-    else updated = text.replace(/^(#[^\n]*\n)/, `$1\n${stampLine}\n`)
-    writeAtomic(abs, updated)
-  }
-
-  return { file: relDoc, reviewer: String(reviewer).trim(), round: Number(round), sha: digest, summary: cleanSummary || null, status: 'passed' }
-}
-
-function approveSpec({ repoRoot, file, skipCritiqueReason }) {
-  const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw new Error(`找不到 SPEC/PRD 文件：${file}`)
-  const text = readTextSafe(abs)
-  if (text === undefined) throw new Error(`无法读取文本文件：${file}`)
-
-  const audit = auditDoc({ repoRoot, file })
-  if (!audit.ok) {
-    const err = new Error(`BLOCKED_AUDIT_FAILED: ${audit.file} 尚未通过 doc-plan.mjs audit（共 ${audit.errors.length} 项缺陷），请先自修后再 approve`)
-    err.audit = audit
-    throw err
-  }
-
-  const fm = parseDocFrontmatter(text)
-  const legacyStatusMatch = /^((?:-\s+)?Status:\s*)(\S+)(\s*)$/mi.exec(text)
-  const curStatusRaw = fm.hasFrontmatter ? fm.data?.status : (fm.data?.status ?? legacyStatusMatch?.[2])
-  if (!curStatusRaw) throw new Error(`${file} 缺少 status 字段，无法切换状态`)
-  const curStatus = String(curStatusRaw).toLowerCase()
-  if (curStatus === 'superseded' || curStatus === 'implemented') {
-    throw new Error(`${file} 当前状态为 ${curStatus}，不允许直接 approve`)
-  }
-  if (!/^- \[[ xX]\]\s+C\d+\b/m.test(text)) throw new Error(`${file} 至少需要包含一条「- [ ] C<N>: ...」可判定验收标准才可批准`)
-
-  const docType = detectDocType(audit.file, text)
-  let workingText = text
-  let critiqueSkipped = false
-  let skippedCritiqueValue = null
-
-  if (docType === 'spec' || docType === 'prd') {
-    const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
-    if (!/^passed\b/i.test(critiqueVal)) {
-      if (skipCritiqueReason && String(skipCritiqueReason).trim()) {
-        skippedCritiqueValue = `skipped (reason=${String(skipCritiqueReason).trim()})`
-        if (!fm.hasFrontmatter) {
-          const skipLine = `- Plan Critique: ${skippedCritiqueValue}`
-          workingText = /^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)
-            ? workingText.replace(/^(?:-\s+)?Plan Critique:.*$/mi, skipLine)
-            : workingText.replace(/^((?:-\s+)?Status:.*)$/mi, `$1\n${skipLine}`)
-        }
-        critiqueSkipped = true
-      } else {
-        throw new Error(`BLOCKED_CRITIQUE_REQUIRED: ${audit.file} 为 ${docType.toUpperCase()} 文档，必须先通过独立 Critique 并运行 critique-pass，或传入 --skip-critique-reason "<原因>"`)
-      }
-    } else {
-      const shaMatch = /\bsha=([a-f0-9]{8,64})\b/i.exec(critiqueVal)
-      if (shaMatch) {
-        const currentSha = sha256Text(stripCritiqueMeta(workingText)).slice(0, shaMatch[1].length)
-        if (currentSha !== shaMatch[1].toLowerCase() && !skipCritiqueReason) {
-          throw new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在 critique-pass 之后正文已被修改（recorded=${shaMatch[1]} !== current=${currentSha}），请重新复核并执行 critique-pass`)
-        }
-      }
-    }
-  }
-
-  const nextStatus = docType === 'todo'
-    ? (['draft', 'pending'].includes(curStatus) ? 'active' : curStatus)
-    : (docType === 'prd' ? 'active' : 'approved')
-  const hasPlaceholder = /^- \[[ xX]\] C\d+:\s*<[^>]+>/m.test(workingText)
-  if (fm.hasFrontmatter) {
-    const patch = { status: nextStatus, updated: docIsoDate() }
-    if (docType === 'spec' || docType === 'todo') patch.approved = true
-    if (skippedCritiqueValue) patch.plan_critique = skippedCritiqueValue
-    updateDocFrontmatter(abs, patch, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
-  } else {
-    writeAtomic(abs, workingText.replace(/^((?:-\s+)?Status:\s*)\S+(\s*)$/mi, `$1${nextStatus}$2`))
-  }
-
-  // 批准即冻结：把这一刻的验收标准指纹记下来。
-  //
-  // 「冻结」在此之前只是文档里的一句话。实现阶段回到 SPEC 里改一条标准，
-  // 文件照样合法、audit 照样通过，而审查者只能凭记忆发现——人的记忆不是门禁。
-  const criteria = extractCriteria(workingText)
-  const fingerprint = criteria.length > 0 ? criteriaFingerprint(criteria) : null
-
-  return {
-    file: posixPath(relative(repoRoot, abs)), previousStatus: curStatus, status: nextStatus, critiqueSkipped,
-    criteriaCount: criteria.length,
-    criteriaFingerprint: fingerprint,
-    warning: hasPlaceholder ? '检测到仍有占位描述 <...>，动手实现前请替换成真实可判定条件' : null,
-  }
-}
-
-function supersedeSpec({ repoRoot, oldSpecPath, newSpecPath }) {
-  if (!oldSpecPath || !newSpecPath) throw new Error('supersede 需要 <oldSpec> 与 --by <newSpec>')
-  const oldAbs = resolve(repoRoot, oldSpecPath)
-  const newAbs = resolve(repoRoot, newSpecPath)
-  if (!existsSync(oldAbs)) throw new Error(`找不到被取代 SPEC：${oldSpecPath}`)
-  if (!existsSync(newAbs)) throw new Error(`找不到新 SPEC：${newSpecPath}`)
-  const today = docIsoDate()
-  const relOldToNew = posixPath(relative(dirname(oldAbs), newAbs))
-  const relNewToOld = posixPath(relative(dirname(newAbs), oldAbs))
-  updateDocFrontmatter(oldAbs, { status: 'superseded', updated: today, superseded_by: relOldToNew }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.spec })
-  updateDocFrontmatter(newAbs, { updated: today, supersedes: relNewToOld }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER.spec })
-  return { oldSpec: posixPath(relative(repoRoot, oldAbs)), newSpec: posixPath(relative(repoRoot, newAbs)), status: 'superseded', supersededBy: relOldToNew }
-}
-
-function clarifyDoc({ repoRoot, file, question = '', decision, by = 'user', criterion = '' }) {
-  if (!file || !decision || !String(decision).trim()) {
-    throw new Error('clarify 需要 --file <docPath> 与 --decision "<已确认结论>"')
-  }
-  const abs = resolve(repoRoot, file)
-  if (!existsSync(abs)) throw new Error(`找不到文档：${file}`)
-  const raw = readTextSafe(abs)
-  if (raw === undefined) throw new Error(`无法读取文本文件：${file}`)
-
-  const norm = raw.replace(/\r\n/g, '\n')
-  const today = docIsoDate()
-  const byNote = by && String(by).trim() ? ` · ${String(by).trim()}` : ''
-  const qText = question && String(question).trim() ? `${String(question).trim()} -> ` : ''
-  const entry = `- 已确认（${today}${byNote}）：${qText}${String(decision).trim()}`
-
-  const lines = norm.split('\n')
-  const secIdx = lines.findIndex((l) => /^##\s+澄清与补充记录(?:\s|$)/.test(l))
-  if (secIdx >= 0) {
-    let endIdx = lines.length
-    for (let i = secIdx + 1; i < lines.length; i += 1) {
-      if (/^##\s+/.test(lines[i])) { endIdx = i; break }
-    }
-    const existingBody = lines.slice(secIdx + 1, endIdx)
-      .filter((l) => !/^\s*-\s*（本轮无额外澄清补充/.test(l))
-    while (existingBody.length > 0 && !existingBody[existingBody.length - 1].trim()) existingBody.pop()
-    while (existingBody.length > 0 && !existingBody[0].trim()) existingBody.shift()
-    const nextBody = existingBody.length > 0 ? ['', ...existingBody, entry, ''] : ['', entry, '']
-    lines.splice(secIdx + 1, endIdx - secIdx - 1, ...nextBody)
-  } else {
-    const anchorIdx = lines.findIndex((l) => /^##\s+(?:实现说明|完成后的记录|待拍板问题)/.test(l))
-    const insertBlock = ['## 澄清与补充记录', '', entry, '']
-    if (anchorIdx >= 0) lines.splice(anchorIdx, 0, ...insertBlock)
-    else {
-      while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop()
-      lines.push('', ...insertBlock)
-    }
-  }
-  let updatedText = lines.join('\n')
-  if (!updatedText.endsWith('\n')) updatedText += '\n'
-
-  let addedCriterion = null
-  if (criterion && String(criterion).trim()) {
-    let maxN = 0
-    for (const cm of updatedText.matchAll(/^- \[[ xX]\] C(\d+)\b/gm)) {
-      const n = Number(cm[1])
-      if (n > maxN) maxN = n
-    }
-    const nextId = `C${maxN + 1}`
-    const critLine = `- [ ] ${nextId}: ${String(criterion).trim()}`
-    addedCriterion = { id: nextId, line: critLine }
-    const cLines = updatedText.split('\n')
-    let lastCritIdx = -1
-    for (let i = 0; i < cLines.length; i += 1) {
-      if (/^- \[[ xX]\] C\d+\b/.test(cLines[i])) lastCritIdx = i
-    }
-    if (lastCritIdx >= 0) cLines.splice(lastCritIdx + 1, 0, critLine)
-    else cLines.push(critLine)
-    updatedText = cLines.join('\n')
-  }
-
-  writeAtomic(abs, updatedText)
-  const fm = parseDocFrontmatter(updatedText)
-  if (fm.hasFrontmatter) {
-    const docType = detectDocType(posixPath(relative(repoRoot, abs)), updatedText)
-    updateDocFrontmatter(abs, { updated: today }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fm.data.kind ?? docType] ?? [] })
-  }
-  return { file: posixPath(relative(repoRoot, abs)), entry, addedCriterion, updated: today }
 }
 
 function printHelp() {
@@ -442,21 +210,23 @@ function printHelp() {
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
-    '  triage         --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]',
-    '  init           --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--prd <path>] [--spec <path>] [--no-prune] [--json]',
-    '  clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
-    '  link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--approve] [--json]',
-    '  audit           [--file <docPath> | .] [--json]',
-    '  critique-scope  --file <docPath> [--reviewer <id>] [--round <n>] [--json]',
-    '  critique-pass   --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
-    '  approve         --file <specPath> [--skip-critique-reason <文本>] [--json]',
-    '  archive         [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
-    '  supersede       <oldSpec> --by <newSpec> [--json]',
-    '  list            [--json]',
+    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--no-prune] [--json]',
+    '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
+    '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--milestone <m>] [--approve] [--json]',
+    '  audit              [--file <docPath> | .] [--json]',
+    '  critique-scope     --file <docPath> [--reviewer <id>] [--round <n>] [--json]',
+    '  critique-pass      --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
+    '  critique-reject    --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
+    '  critique-override  --file <docPath> --human-approved --reason <原因> [--by <actor>] [--json]',
+    '  approve            --file <specPath> [--skip-critique-reason <文本>] [--json]',
+    '  archive            [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
+    '  supersede          <oldSpec> --by <newSpec> [--json]',
+    '  list               [--json]',
   ].join('\n') + '\n')
 }
 
-const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'approve', 'archive', 'supersede', 'list']
+const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'critique-reject', 'critique-override', 'approve', 'archive', 'supersede', 'list']
 
 async function main(argv) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }
@@ -465,11 +235,11 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|approve|archive|supersede|list>',
+      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-override|approve|archive|supersede|list>',
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)
@@ -518,15 +288,9 @@ async function main(argv) {
         const steps = result.caseType === 5
           ? ['已阻断直接拆解！请先更新 docs/TDD.md 解决冲突并经独立确认。']
           : result.caseType === 4
-            ? [
-                { skill: 'dev-plan', text: '1. 创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>"' },
-                '2. 自检净化并派独立只读 Critique -> critique-pass -> 人类 approve',
-              ]
+            ? [{ skill: 'dev-plan', text: '创建 SPEC+Todo: node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind pair --slug <slug> --title "<标题>"' }]
             : result.caseType === 3
-              ? [
-                  { skill: 'dev-flow', text: '1. 启动任务隔离：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 3 --slug <slug>' },
-                  { skill: 'dev-plan', text: '2. 生成 Todo 并跑 audit 自净化：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind todo --slug <slug> --title "<标题>" --task <id>' },
-                ]
+              ? [{ skill: 'dev-flow', text: '启动任务隔离：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case 3 --slug <slug>' }]
               : [{ skill: 'dev-flow', text: `启动任务流转：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --case ${result.caseType} --slug <slug>` }]
         printNextStep(steps, { repoRoot: mainRoot })
       }
@@ -539,7 +303,7 @@ async function main(argv) {
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         kind: opts.kind, slug: opts.slug, title: opts.title, taskId: opts.task,
         issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec,
-        relatedPrd: opts.prd, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
+        relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -569,6 +333,17 @@ async function main(argv) {
         branch: opts.branch, owner: opts.owner, status: opts.status,
         approved: opts.approve ? true : undefined, implemented: opts.implemented ? true : undefined, doneAt: opts['done-at'],
       })
+      if (opts.milestone) {
+        const msTarget = res.byKind?.spec ?? res.byKind?.prd ?? res.byKind?.todo ?? target
+        const absTarget = resolve(repoRoot, msTarget)
+        if (existsSync(absTarget)) {
+          const fmMs = parseDocFrontmatter(readTextSafe(absTarget) ?? '')
+          if (fmMs.hasFrontmatter) updateDocFrontmatter(absTarget, { milestone: opts.milestone, updated: docIsoDate() }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[fmMs.data.kind ?? 'spec'] ?? [] })
+        }
+        if (opts.task) {
+          await updateTaskLedger(mainRoot, sanitizeTaskId(opts.task), { milestone: opts.milestone })
+        }
+      }
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else process.stdout.write(`文档生命周期同步完成（issue=${res.issue ?? '无'}，重命名 ${res.renamed.length} 个，更新 ${res.updated.length} 个）\n`)
       return 0
@@ -614,8 +389,7 @@ async function main(argv) {
             printNextStep([{ skill: 'dev-flow', text: `Todo 自审通过，移交 dev-flow 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` }], { repoRoot: mainRoot })
           } else if (res.docType === 'todo') {
             printNextStep([
-              { skill: 'dev-plan', text: `非平凡 Todo（多文件/关联 SPEC）建议先独立 Plan Critique：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` },
-              { skill: 'dev-flow', text: `Todo 启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` },
+              { skill: 'dev-flow', text: `Todo 自审通过，启动隔离实施：node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case 3 --todo "${res.file}"` },
             ], { repoRoot: mainRoot })
           } else if (res.docType === 'spec' && statusLow !== 'approved') {
             printNextStep([{ skill: 'dev-plan', text: `独立只读 Critique 通过后执行：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "${res.file}" --reviewer <criticId> --round 1` }], { repoRoot: mainRoot })
@@ -637,25 +411,25 @@ async function main(argv) {
       const scopeFm = parseDocFrontmatter(scopeText)
       const curSha = sha256Text(stripCritiqueMeta(scopeText)).slice(0, 12)
       const prevSha = /\bsha=([a-f0-9]{8,64})\b/i.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? null
+      const priorRounds = parseCritiqueRounds(scopeFm.data, scopeText)
+      const excludedReviewers = collectExcludedReviewers(priorRounds, scopeFm.data?.owner)
+      const roundNum = Number(opts.round ?? (priorRounds.reduce((m, r) => Math.max(m, Number(r.round) || 0), 0) + 1))
       const scope = buildCritiqueScope({
-        round: Number(opts.round ?? ((Number(/\bround=(\d+)\b/.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? 0) + 1))),
+        round: roundNum,
         currentSha: curSha,
         previousSha: prevSha,
         findingsRaw: scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? '',
         reviewer: opts.reviewer ?? '(未指定)',
       })
-      // 审核慢的根因是分工错了：一百多条「文件在不在、名字有没有、命令跑不跑得通」
-      // 是不需要判断的，却让审核人每次拿手工去核。这里先跑一遍，他只看剩下的判断题。
       const facts = await verifyDocClaims(repoRoot, scopeText)
       const factsText = renderVerificationForReviewer(facts)
-
       if (cli.json) {
         process.stdout.write(`${JSON.stringify({
-          file: opts.file, currentSha: curSha, previousSha: prevSha, ...scope, facts, factsText,
+          file: opts.file, currentSha: curSha, previousSha: prevSha, round: roundNum, excludedReviewers, ...scope, facts, factsText,
         }, null, 2)}\n`)
       } else {
-        // 先给已核事实，再给这一轮该看什么——顺序本身就是在说「这些不用你核了」。
-        process.stdout.write(`${factsText}\n${scope.prompt}`)
+        const exclNote = excludedReviewers.length > 0 ? `\n> 排除复核人（禁止复用）：${excludedReviewers.join(', ')}\n` : ''
+        process.stdout.write(`${factsText}${exclNote}\n${scope.prompt}`)
       }
       return 0
     }
@@ -663,8 +437,12 @@ async function main(argv) {
     if (sub === 'critique-pass') {
       if (!opts.file || !opts.reviewer) throw new Error('critique-pass 需要 --file <docPath> 与 --reviewer <reviewerId>')
       const findingArg = opts.findings ?? opts.finding ?? []
-      const findingList = Array.isArray(findingArg) ? findingArg : [findingArg]
-      const res = critiquePassDoc({ repoRoot, file: opts.file, reviewer: opts.reviewer, round: opts.round ?? 1, summary: opts.summary ?? '', findings: findingList })
+      const res = await critiquePassDoc({
+        repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
+        file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
+        summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        auditDoc, docType: null,
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
@@ -673,21 +451,52 @@ async function main(argv) {
       return 0
     }
 
+    if (sub === 'critique-reject') {
+      if (!opts.file || !opts.reviewer) throw new Error('critique-reject 需要 --file <docPath> 与 --reviewer <reviewerId>')
+      const findingArg = opts.findings ?? opts.finding ?? []
+      const res = await critiqueRejectDoc({
+        repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
+        file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
+        summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
+        taskId: opts.task ?? null,
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+      else {
+        process.stdout.write(`${res.status}: ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
+        if (res.stopLossTriggered) process.stderr.write(`STOP_LOSS_ESCALATE: ${res.stopLossPacket?.reasons?.join('; ') || '3-round plan stop-loss triggered'} (exit 4)\n`)
+        printNextStep([{ skill: 'dev-plan', text: res.nextStep }], { repoRoot: mainRoot })
+      }
+      if (res.stopLossTriggered && cli.json) process.stderr.write(`STOP_LOSS_ESCALATE: exit 4\n`)
+      return res.exitCode ?? 0
+    }
+
+    if (sub === 'critique-override') {
+      if (!opts.file) throw new Error('critique-override 需要 --file <docPath>')
+      const res = critiqueOverrideDoc({
+        repoRoot, file: opts.file, humanApproved: Boolean(opts['human-approved']),
+        reason: opts.reason ?? '', by: opts.by ?? opts.reviewer ?? 'human-maintainer',
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+      else {
+        process.stdout.write(`${res.status}: ${res.file}（sha=${res.sha}, reason=${res.override.reason}）\n`)
+        printNextStep([{ skill: 'dev-plan', text: res.nextStep }], { repoRoot: mainRoot })
+      }
+      return 0
+    }
+
     if (sub === 'approve') {
       if (!opts.file) throw new Error('approve 需要 --file <specPath>')
       const res = approveSpec({ repoRoot, file: opts.file, skipCritiqueReason: opts['skip-critique-reason'] })
       const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
-
-      // 有绑定任务就把冻结指纹写进账本：最终的「标准有没有被悄悄改过」
-      // 要在 finalize / verify 那一刻对得上，所以指纹必须进账本，不能只留在文档里。
       const taskKey = opts.task ?? fm.data?.task_id
       if (taskKey && res.criteriaFingerprint) {
-        const led = readTaskLedger(mainRoot, sanitizeTaskId(taskKey))
-        if (led) {
-          led.criteriaFingerprint = res.criteriaFingerprint
-          led.criteriaFrozenFrom = res.file
-          led.criteriaFrozenAt = docIsoDate()
-          writeTaskLedger(mainRoot, led)
+        const sanitizedId = sanitizeTaskId(taskKey)
+        if (readTaskLedger(mainRoot, sanitizedId)) {
+          await updateTaskLedger(mainRoot, sanitizedId, {
+            criteriaFingerprint: res.criteriaFingerprint,
+            criteriaFrozenFrom: res.file,
+            criteriaFrozenAt: docIsoDate(),
+          })
         }
       }
       const fn = parseDocFilename(res.file)
@@ -752,9 +561,19 @@ async function main(argv) {
 
     throw new Error(`未知子命令：${sub}`)
   } catch (err) {
-    if (cli.json && err?.audit) process.stdout.write(`${JSON.stringify({ ok: false, error: err.message, audit: err.audit }, null, 2)}\n`)
+    const code = Number(err?.exitCode) || 1
+    if (cli.json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: false,
+        ...(err?.code ? { code: err.code } : {}),
+        exitCode: code,
+        ...(err?.details ?? {}),
+        ...(err?.audit ? { audit: err.audit } : {}),
+        error: err instanceof Error ? err.message : String(err),
+      }, null, 2)}\n`)
+    }
     process.stderr.write(`doc-plan 错误：${err instanceof Error ? err.message : String(err)}\n`)
-    return 1
+    return code
   }
 }
 

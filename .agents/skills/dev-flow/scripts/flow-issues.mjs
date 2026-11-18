@@ -6,11 +6,45 @@
 
 import { printNextStep } from '../../lib/cli.mjs'
 import { slugify } from '../../lib/docs.mjs'
+import { formatWorkTitle } from '../../lib/escalation.mjs'
+import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
-import { parseIssueNumbers, probeForWrite, probeGitHubEnv, resolveContributorIdentity } from '../../lib/platform.mjs'
+import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveContributorIdentity } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext } from './flow-context.mjs'
 import { EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, inspectWorkspace } from './flow-inspect.mjs'
+
+async function resolveMilestoneId(backend, targetRepo, rawMilestone) {
+  if (rawMilestone === null || rawMilestone === undefined || String(rawMilestone).trim() === '') return null
+  const num = parseMilestoneNumber(rawMilestone?.number ?? rawMilestone)
+  if (num) return num
+  const wantTitle = String(rawMilestone?.title ?? rawMilestone).trim()
+  if (!wantTitle || typeof backend?.listMilestones !== 'function') return wantTitle
+  const listed = await Promise.resolve(backend.listMilestones({ repo: targetRepo, state: 'all' })).catch(() => null)
+  const hit = listed?.milestones?.find((m) => String(m.title ?? '').trim().toLowerCase() === wantTitle.toLowerCase())
+  return hit?.number ?? wantTitle
+}
+
+async function resolveOrCreateRemoteMilestone(remoteBackend, remoteRepo, localMilestone) {
+  if (!localMilestone) return null
+  const rawTitle = typeof localMilestone === 'object' ? (localMilestone.title ?? '') : String(localMilestone)
+  const cleanTitle = String(rawTitle).trim()
+  if (cleanTitle && typeof remoteBackend?.listMilestones === 'function') {
+    const listed = await Promise.resolve(remoteBackend.listMilestones({ repo: remoteRepo, state: 'all' })).catch(() => null)
+    const hit = listed?.milestones?.find((m) => String(m.title ?? '').trim().toLowerCase() === cleanTitle.toLowerCase())
+    if (hit?.number) return hit.number
+    if (typeof remoteBackend.createMilestone === 'function') {
+      const createdMs = await remoteBackend.createMilestone({
+        repo: remoteRepo,
+        title: cleanTitle,
+        description: localMilestone?.description ?? '',
+        dueOn: localMilestone?.dueOn ?? null,
+      })
+      if (createdMs?.ok && createdMs?.number) return createdMs.number
+    }
+  }
+  return parseMilestoneNumber(localMilestone?.number ?? localMilestone) ?? (cleanTitle || null)
+}
 
 function parseCsvList(raw) {
   if (!raw) return []
@@ -53,20 +87,27 @@ export async function createIssueForStart({
     mainRoot: roots.mainRoot,
     gitDir: roots.gitDir,
   })
-  const issueTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
+  const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
+  const issueTitle = formatWorkTitle(rawTitle, caseType)
   const issueBody = String(opts.body ?? [
     `## 任务追踪`,
-    `- Slug: \`${slugify(opts.slug ?? issueTitle)}\``,
+    `- Slug: \`${slugify(opts.slug ?? rawTitle)}\``,
     `- Case: Case ${caseType}`,
     opts.task ? `- Task ID: \`${opts.task}\`` : null,
   ].filter(Boolean).join('\n')).trim()
   const issueLabels = parseCsvList(opts.labels)
+  const milestone = await resolveMilestoneId(
+    backend,
+    targetRepo,
+    opts.milestone ?? state.inputs?.milestones?.[0]?.number ?? null,
+  )
 
   const createRes = await backend.createIssue({
     repo: targetRepo,
     title: issueTitle,
     body: issueBody,
     labels: issueLabels,
+    ...(milestone ? { milestone } : {}),
   })
   if (createRes.delegated) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...createRes }, null, 2)}\n`)
@@ -100,19 +141,22 @@ export async function handleIssue(opts, roots) {
   }
 
   if (action === 'create') {
-    const title = String(opts.title ?? pos[1] ?? '').trim()
-    if (!title) throw new Error('issue create 需要传入 --title "<标题>"')
+    const rawTitle = String(opts.title ?? pos[1] ?? '').trim()
+    if (!rawTitle) throw new Error('issue create 需要传入 --title "<标题>"')
+    const title = opts.case !== undefined ? formatWorkTitle(rawTitle, Number(opts.case)) : rawTitle
     const ghProbe = useRemoteGh
       ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} })))
       : null
     const backend = buildBackendForIssue({
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
+    const milestone = await resolveMilestoneId(backend, targetRepo, opts.milestone)
     const res = await backend.createIssue({
       repo: targetRepo,
       title,
       body: String(opts.body ?? '').trim(),
       labels: parseCsvList(opts.labels),
+      ...(milestone ? { milestone } : {}),
     })
     if (res.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...res }, null, 2)}\n`)
@@ -244,11 +288,13 @@ export async function handleIssue(opts, roots) {
         '',
         `> 迁移自本地工单 #${item.number}（createdAt: ${item.createdAt}）`,
       ].filter((x, idx) => idx > 0 || x).join('\n').trim()
+      const remoteMilestone = await resolveOrCreateRemoteMilestone(remoteBackend, remoteRepo, item.milestone)
       const created = await remoteBackend.createIssue({
         repo: remoteRepo,
         title: item.title,
         body: bodyWithMeta,
         labels: item.labels ?? [],
+        ...(remoteMilestone ? { milestone: remoteMilestone } : {}),
       })
       if (created.delegated) {
         if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MIGRATE_DELEGATED', localNumber: item.number, ...created }, null, 2)}\n`)
@@ -278,7 +324,7 @@ export async function handleIssue(opts, roots) {
         migratedTo: created.number,
         migratedUrl: created.url ?? null,
       })
-      migrated.push({ localNumber: item.number, remoteNumber: created.number, remoteUrl: created.url ?? null, title: item.title })
+      migrated.push({ localNumber: item.number, remoteNumber: created.number, remoteUrl: created.url ?? null, title: item.title, ...(remoteMilestone ? { milestone: remoteMilestone } : {}) })
     }
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, targetRepo: remoteRepo, migrated, total: migrated.length }, null, 2)}\n`)
     else {
@@ -290,4 +336,122 @@ export async function handleIssue(opts, roots) {
   }
 
   throw new Error(`未知 issue 子动作：${action}（支持 create | list | view | comment | close | migrate）`)
+}
+
+/** 按需执行 `flow.mjs milestone <create|list|assign|close>`（支持 GitHub / generic-git / local-only）。 */
+export async function handleMilestone(opts, roots) {
+  if (!roots.isGit) throw new Error('当前目录还不是 Git 仓库，请先初始化版本库')
+  const pos = Array.isArray(opts._) ? opts._ : []
+  const action = String(opts.action ?? pos[0] ?? 'list').trim().toLowerCase()
+  const state = await inspectWorkspace(roots.mainRoot, {
+    roots, lightStart: true, _ghClient: opts._ghClient, _ghProbe: opts._ghProbe,
+  })
+  const role = state.identity.role
+  const providerId = state.identity.providerId ?? 'none'
+  const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
+  const useRemoteGh = role !== 'local-only' && role !== 'generic-git' && providerId === 'github' && Boolean(targetRepo)
+
+  const ghProbe = useRemoteGh
+    ? (action === 'list'
+        ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {}, probeNetwork: true })))
+        : (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls ?? {} }))))
+    : null
+  const backend = buildBackendForIssue({
+    role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+  })
+
+  if (action === 'list') {
+    const res = await backend.listMilestones({ repo: targetRepo, state: String(opts.state ?? 'open').toLowerCase() })
+    if (!res.ok && !res.delegated) throw new Error(`列举里程碑失败：${res.error ?? 'unknown'}`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, capabilities: backend.capabilities, ...res }, null, 2)}\n`)
+    else {
+      const items = res.milestones ?? []
+      process.stdout.write(`里程碑列表（共 ${items.length} 条，role=${role}）：\n`)
+      for (const m of items) process.stdout.write(`- #${m.number} [${m.state}] ${m.title}${m.dueOn ? ` (due=${m.dueOn})` : ''}\n`)
+      for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
+    }
+    return { exitCode: 0 }
+  }
+
+  if (action === 'create') {
+    const title = String(opts.title ?? pos[1] ?? '').trim()
+    if (!title) throw new Error('milestone create 需要传入 --title "<标题>"')
+    const res = await backend.createMilestone({
+      repo: targetRepo,
+      title,
+      description: String(opts.description ?? opts.body ?? '').trim(),
+      dueOn: opts.due ?? opts['due-on'] ?? null,
+    })
+    if (res.delegated) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...res }, null, 2)}\n`)
+      else process.stdout.write(`已生成创建里程碑代理载荷：${JSON.stringify(res.jsonPayload)}\n`)
+      return { exitCode: EXIT_ACTION_REQUIRED }
+    }
+    if (!res.ok) throw new Error(`创建里程碑失败：${res.error ?? 'unknown'}`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, capabilities: backend.capabilities, milestone: res }, null, 2)}\n`)
+    else {
+      process.stdout.write(`已创建里程碑 #${res.number ?? '?'}：${res.title ?? title}\n`)
+      for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
+    }
+    return { exitCode: 0 }
+  }
+
+  if (action === 'assign') {
+    const msRaw = opts.milestone ?? pos[1]
+    if (!msRaw) throw new Error('milestone assign 需要传入 --milestone <编号|标题|URL>')
+    const msId = await resolveMilestoneId(backend, targetRepo, msRaw)
+    const issueNums = parseIssueNumbers([opts.issue, opts.issues])
+    const targetNums = [...issueNums]
+    if (opts.pr !== undefined && Number(opts.pr) > 0) targetNums.push(Number(opts.pr))
+    let taskCtx = null
+    if (opts.task || targetNums.length === 0) {
+      try { taskCtx = await resolveTaskContext(roots, opts) } catch { taskCtx = null }
+      if (taskCtx && targetNums.length === 0) {
+        for (const n of taskCtx.ledger.linkedIssues ?? []) if (!targetNums.includes(n)) targetNums.push(n)
+        if (taskCtx.ledger.prNumber && !targetNums.includes(taskCtx.ledger.prNumber)) targetNums.push(taskCtx.ledger.prNumber)
+      }
+    }
+    if (targetNums.length === 0) throw new Error('milestone assign 需要传入 --issue <N>、--pr <N> 或关联 --task <taskId>')
+    const results = []
+    for (const num of targetNums) {
+      const r = await backend.assignMilestone({ repo: targetRepo, number: num, milestone: msId })
+      if (r.delegated) {
+        if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...r }, null, 2)}\n`)
+        else process.stdout.write(`已生成指派里程碑代理载荷：${JSON.stringify(r.jsonPayload)}\n`)
+        return { exitCode: EXIT_ACTION_REQUIRED }
+      }
+      if (!r.ok) throw new Error(`指派里程碑至 #${num} 失败：${r.error ?? 'unknown'}`)
+      results.push(r)
+    }
+    if (taskCtx) {
+      await updateTaskLedger(roots.mainRoot, taskCtx.taskId, (cur) => (cur ? { ...cur, milestone: msId } : cur))
+    }
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, milestone: msId, results }, null, 2)}\n`)
+    else {
+      process.stdout.write(`已将 ${targetNums.map((n) => `#${n}`).join(', ')} 归入里程碑 ${msId}。\n`)
+      for (const step of results[0]?.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
+    }
+    return { exitCode: 0 }
+  }
+
+  if (action === 'close') {
+    const msRaw = opts.milestone ?? pos[1]
+    const msNum = parseMilestoneNumber(msRaw) ?? await resolveMilestoneId(backend, targetRepo, msRaw)
+    if (!Number.isInteger(Number(msNum)) || Number(msNum) <= 0) throw new Error('milestone close 需要有效里程碑编号')
+    const res = await backend.closeMilestone({ repo: targetRepo, number: Number(msNum) })
+    if (res.delegated) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MILESTONE_DELEGATED', ...res }, null, 2)}\n`)
+      else process.stdout.write(`已生成关闭里程碑代理载荷：${JSON.stringify(res.jsonPayload)}\n`)
+      return { exitCode: EXIT_ACTION_REQUIRED }
+    }
+    if (!res.ok) throw new Error(`关闭里程碑 #${msNum} 失败：${res.error ?? 'unknown'}`)
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, milestone: res }, null, 2)}\n`)
+    else {
+      process.stdout.write(`已关闭里程碑 #${msNum}。\n`)
+      for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
+    }
+    return { exitCode: 0 }
+  }
+
+  throw new Error(`未知 milestone 子动作：${action}（支持 create | list | assign | close）`)
 }

@@ -248,7 +248,7 @@ export const INJECTIONS_GATES = [
     id: 'I135',
     what: 'flow-merge 在 full 档绕过独立审查条件或在 lightweight 对高风险直接放行',
     file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: '  const requiresReview = hasDevReview && (policy.independentReviewRequired || rounds.length > 0 || Boolean(ledger.lastReview))',
+    from: "  const requiresReview = hasDevReview && (policy.independentReviewRequired || (policy.riskTier !== 'low' && (rounds.length > 0 || Boolean(ledger.lastReview))))",
     to: '  const requiresReview = false',
     expect: 'lightweight 与 full 档合并门禁',
   },

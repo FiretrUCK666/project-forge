@@ -36,6 +36,7 @@ import {
   rmTree, runAbsAsync, seedExploredFor, SKILL_ROOT, survey, tmpProject,
 } from './fixtures-helpers.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
+import { registerStageBLoopB4bCases } from './fixtures-stageb-loop-b4b.mjs'
 
 export function registerStageBLoopCases(cases) {
   cases.push(['C7：LocalOnlyBackend 16 接口、跨 Worktree 原子持久化与零 git status 污染', async () => {
@@ -609,4 +610,6 @@ export function registerStageBLoopCases(cases) {
       rmTree(bareDir)
     }
   }, 4000])
+
+  registerStageBLoopB4bCases(cases)
 }

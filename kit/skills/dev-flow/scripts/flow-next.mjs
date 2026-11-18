@@ -8,11 +8,12 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { collectExcludedReviewers } from '../../lib/critique-rounds.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
-import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
+import { ensureReviewToken, listTaskLedgers, resolveTaskContext, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
@@ -105,12 +106,17 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
     }
   }
 
-  if (changed) writeTaskLedger(roots.mainRoot, ledger)
+  if (changed) {
+    await updateTaskLedger(roots.mainRoot, ledger.taskId, () => ({
+      ...ledger,
+    }))
+  }
   return { rehydrated: true, changed, remoteRoundsCount: remoteRounds.length }
 }
 
 /** 唯一路由入口：处理 0 任务 idle、多任务 ambiguous 与单任务全态判定。 */
 export async function handleNext(opts, roots) {
+  const allLedgers = listTaskLedgers(roots.mainRoot, { includeTerminal: true })
   const activeTasks = listTaskLedgers(roots.mainRoot, { includeTerminal: false })
   let selectedTask = null
 
@@ -146,13 +152,14 @@ export async function handleNext(opts, roots) {
     const ackIssues = unavail.length > 0
       ? unavail
       : (Array.isArray(selectedTask.linkedIssues) ? selectedTask.linkedIssues.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [])
-    selectedTask.issueContextAck = {
+    const ackEntry = {
       issues: ackIssues,
       reason,
       at: new Date().toISOString(),
       by: String(opts.agent ?? selectedTask.implementerId ?? 'human').trim() || 'human',
     }
-    writeTaskLedger(roots.mainRoot, selectedTask)
+    const { ledger: acked } = await updateTaskLedger(roots.mainRoot, selectedTask.taskId, { issueContextAck: ackEntry })
+    selectedTask = acked
   }
 
   let hydration = { rehydrated: false }
@@ -258,7 +265,9 @@ export async function handleNext(opts, roots) {
     }))
   }
 
-  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime, hasDevReview, multiTaskFiles })
+  let out = evaluateNextState({
+    activeTasks, allLedgers, selectedTask, taskRuntime, hasDevReview, multiTaskFiles, repoRoot: roots.mainRoot,
+  })
 
   if (roots.isGit) {
     const cfgFast = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -302,10 +311,17 @@ export async function handleNext(opts, roots) {
     // 按条数算会在轮次有空档时算错，而空档是正常历史。
     const round = nextReviewRound(selectedTask)
     const { token } = ensureReviewToken(roots.mainRoot, selectedTask, round)
+    const excludedReviewers = collectExcludedReviewers(selectedTask.rounds, selectedTask.implementerId)
     out = {
       ...out,
       reviewToken: token,
+      excludedReviewers,
       command: `${out.command} --reviewer-id <新审查子代理名> --review-token ${token}`,
+    }
+  } else if (selectedTask && (selectedTask.rounds?.length > 0 || selectedTask.implementerId)) {
+    out = {
+      ...out,
+      excludedReviewers: collectExcludedReviewers(selectedTask.rounds, selectedTask.implementerId),
     }
   }
 
@@ -345,6 +361,10 @@ export async function handleNext(opts, roots) {
     }
     if (payload.taskId) process.stdout.write(`- 任务: ${payload.taskId} | risk=${payload.policy?.riskTier ?? '-'} | worktree=${payload.worktreePath ?? 'branch'}\n`)
     process.stdout.write(`- 下一步: ${payload.nextAction}\n`)
+    if (payload.parallelDispatch !== undefined) process.stdout.write(`- 并行派发: ${payload.parallelDispatch ? 'true (Wave 1 >= 2)' : 'false'}\n`)
+    if (payload.excludedReviewers?.length > 0 && payload.phase === 'needs-review') {
+      process.stdout.write(`- 排除历史审查人: ${payload.excludedReviewers.join(', ')}\n`)
+    }
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
     for (const w of payload.warnings ?? []) {
       process.stdout.write(`- 提醒 ${w.code}: ${w.message}\n`)

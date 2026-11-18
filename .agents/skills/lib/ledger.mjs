@@ -6,13 +6,13 @@
  */
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 import {
-  canonicalPath, gitRun, posixPath, readJsonSafe, samePath, withFileLock, writeJsonAtomic,
+  canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots, samePath, withFileLock, writeJsonAtomic,
 } from './git.mjs'
-import { readHeadFast, resolveGitDirFast } from './git-fast.mjs'
+import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
@@ -321,6 +321,24 @@ export async function updateTaskLedger(mainRoot, taskId, updater, { createIfMiss
     const path = writeTaskLedger(mainRoot, merged)
     return { ledger: readTaskLedger(mainRoot, id) ?? merged, path }
   })
+}
+
+/** 从工作树或主仓路径解析账本所在的主仓根路径（避免误读 worktree 下的空账本目录）。 */
+export async function resolveLedgerRoot(repoRoot, explicitLedgerRoot = null) {
+  if (explicitLedgerRoot) return explicitLedgerRoot
+  const wtGitDir = resolveGitDirFast(repoRoot)
+  if (wtGitDir) {
+    const cdTxt = readTextSafe(join(wtGitDir, 'commondir'))
+    if (cdTxt) {
+      const commonDir = resolve(wtGitDir, cdTxt.trim())
+      if (basename(commonDir) === '.git') return dirname(commonDir)
+    }
+  }
+  if (hasDotGitInAncestors(repoRoot)) {
+    const roots = await resolveRepoRoots(repoRoot).catch(() => null)
+    if (roots?.mainRoot) return roots.mainRoot
+  }
+  return repoRoot
 }
 
 export function listTaskLedgers(mainRoot, { includeTerminal = true } = {}) {

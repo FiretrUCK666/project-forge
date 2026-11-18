@@ -126,7 +126,7 @@ git archive --format=tar -o "$TMPDIR/pf-pkg.tar" HEAD && tar -tf "$TMPDIR/pf-pkg
 node scripts/dev/verify-injections.mjs
 ```
 
-**跑出来的才算做完**——未拿到实际通过输出，不得声称「已验证」。
+**跑出来的才算做完（改运行态须跑通 `smoke-verify` 并附 `--e2e-evidence`，异常自动写信号脱敏建单）**——未拿到实际通过输出，不得声称「已验证」。
 <!-- project-forge: end 构建与验证 -->
 
 <!-- project-forge: begin 修改守则 -->
@@ -210,7 +210,7 @@ node scripts/dev/verify-injections.mjs
   | 触碰「高风险路径」任一处 | 审查者合（独立上下文 + 故障注入） |
   | **弱化门禁** | **必须人点头** |
 
-  `contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`；「取舍」写 `merge-authority: human` 收回人合；发版/改可见性/改历史永不自动。六锁收敛见协作判据。
+  `contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`；「取舍」写 `merge-authority: human` 收回人合；合前强校三方 `headSha`、干净工作区与 E2E 观察；发版/改可见性/改历史永不自动。六锁收敛见协作判据。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；

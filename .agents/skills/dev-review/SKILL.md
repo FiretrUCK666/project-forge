@@ -32,13 +32,13 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --local
 node .agents/skills/dev-review/scripts/review-pack.mjs --staged
 node .agents/skills/dev-review/scripts/review-pack.mjs --base <ref>
 
-# 先跑实证与故障注入闭环（写入 {gitCommonDir}/project-forge-flow/ 指纹回执），通过后再取全文 diff：
-node .agents/skills/dev-review/scripts/review-pack.mjs check-empirical (--task <id> | --pr <M> | --local | --staged | --base <ref>) [--cmd "<验证命令>"]
+# 先跑实证、E2E 观察与故障注入闭环（写入 {gitCommonDir}/project-forge-flow/ 指纹回执），通过后再取全文 diff：
+node .agents/skills/dev-review/scripts/review-pack.mjs check-empirical (--task <id> | --pr <M> | --local | --staged | --base <ref>) [--cmd "<验证命令>"] [--e2e-evidence "<运行观察结论>"]
 node .agents/skills/dev-review/scripts/review-pack.mjs check-fault --phase fail|restore (--task <id> | --pr <M> | --local | --staged | --base <ref>) --cmd "<验证命令>"
-node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> | --local | --staged | --base <ref>) --include-diff [--visual-checked]
+node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> | --local | --staged | --base <ref>) --include-diff [--e2e-evidence "<观察结论>"|--visual-checked]
 ```
 
-注：未传 `--include-diff` 时，JSON 与纯文本均只输出 `diff.hunkIndex` 与统计摘要（不输出补丁行，防止绕过或撑爆上下文）；传 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的 `check-empirical` 与 `check-fault`（`fail` + `restore`）闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`。`check-empirical` 与 `check-fault` 跳过 `syncTier2ReviewSlotIfNeeded` 保护在测故障与 `--local` 原未提交改动；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免除故障注入；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
+注：未传 `--include-diff` 时，JSON 与纯文本均只输出 `diff.hunkIndex` 与统计摘要（不输出补丁行，防止绕过或撑爆上下文）；传 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的 `check-empirical`、`check-fault`（`fail` + `restore`）与运行态 E2E 观察（`--e2e-evidence` 或已有 `e2eObservation`）闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`。E2E 失败自动写入 `signals.jsonl`（`e2e.runtime-fail`）并输出脱敏诊断包与分级建单；`check-empirical` 与 `check-fault` 跳过 `syncTier2ReviewSlotIfNeeded` 保护在测故障与 `--local` 原未提交改动；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免除故障注入；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
 
 ## 不可信外部 PR 供应链门禁
 
@@ -65,7 +65,7 @@ node .agents/skills/dev-review/scripts/review-pack.mjs --pr <M> --untrusted-scan
    - 核对 `verifiedHead === HEAD` 与 `AGENTS.md` Dev Profile 中的
      `quick-test` / `smoke-verify` / `full-test` / `merge-gate`。
    - 若本次改动涉及运行态代码且配置了 `smoke-verify`，审查员必须在独立审查
-     worktree 本地运行 `smoke-verify` 并核验真实输出，**严禁把未验证的运行路径转交人肉代测**。
+     worktree 本地运行 `smoke-verify` 并附 `--e2e-evidence` 核验真实输出，解锁 `--include-diff` 后结合 `business-flows` 与冻结 `C*` 核查需求实质落地与根因（不做风格挑刺），**严禁跳过 E2E 只看 diff 或将未验证路径转交人肉代测**。
    - 若 `behavioralGate.empiricalVisualCheckRequired === true`（变更含 `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`/`.svg`），必须实际打开渲染界面或视觉资产、走通核心用户交互流程并核对浅色/深色主题截图，**不得仅凭静态读代码下结论**。
 2. **Structural Gate（结构与边界门）**：
    - 扫描 diff 新增行中的**履历墓碑注释**（如记录“以前是/后来改成/deprecated since”）与

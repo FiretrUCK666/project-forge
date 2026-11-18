@@ -55,9 +55,9 @@ export const INJECTIONS_CORE = [
   {
     id: 'I7',
     what: '审查栏的四个字段表里删掉「止损记录」',
-    file: 'scripts/dev/preflight-contracts.mjs',
-    from: "const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']",
-    to: "const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录']",
+    file: 'scripts/dev/preflight-contract-rules.mjs',
+    from: "export const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录', '止损记录']",
+    to: "export const REVIEW_FIELDS = ['审查来源', '逐条标准状态', '故障注入记录']",
     expect: '审查栏',
   },
   {
@@ -90,9 +90,9 @@ export const INJECTIONS_CORE = [
   {
     id: 'I9c',
     what: '收尾步骤核对清单里删掉判据源头（references/ 那一份）',
-    file: 'scripts/dev/preflight-contracts.mjs',
-    from: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n  'references/collaboration.md',\n]",
-    to: "const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n]",
+    file: 'scripts/dev/preflight-contract-rules.mjs',
+    from: "export const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n  'references/collaboration.md',\n]",
+    to: "export const FINISH_SITES = [\n  'templates/agents-project.md',\n  'AGENTS.md',\n]",
     expect: '判据源头',
     runner: 'preflight',
   },
@@ -127,7 +127,7 @@ export const INJECTIONS_CORE = [
   {
     id: 'I9f',
     what: '步正文切片不收口（最后一步吞掉整章余下内容）',
-    file: 'scripts/dev/preflight-contracts.mjs',
+    file: 'scripts/dev/preflight-contract-rules.mjs',
     from: '      if (current !== null) { bodies.push(current); current = null }\n      continue\n    }\n    // 顶格的标题或新条目也是边界',
     to: '      continue\n    }\n    // 顶格的标题或新条目也是边界',
     expect: '步正文',
@@ -187,7 +187,7 @@ export const INJECTIONS_CORE = [
   {
     id: 'I15',
     what: '锚点比对退回逐字相同（标题带副标题就再也指不上）',
-    file: 'scripts/dev/preflight-contracts.mjs',
+    file: 'scripts/dev/preflight-contract-rules.mjs',
     from: "  return [...headings].filter((h) => h.replace(/`/g, '').startsWith(wanted))",
     to: "  return [...headings].filter((h) => h.replace(/`/g, '') === wanted)",
     expect: '指路落空',
@@ -401,7 +401,7 @@ export const INJECTIONS_CORE = [
   {
     id: 'I39',
     what: '禁用 preflight.mjs validateDocTocAnchors 对失效目录锚点的拦截',
-    file: 'scripts/dev/preflight-contracts.mjs',
+    file: 'scripts/dev/preflight-contract-rules.mjs',
     from: 'if (!validIds.has(rawAnchor) && !validIds.has(decoded)) {\n      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)',
     to: 'if (false && !validIds.has(rawAnchor) && !validIds.has(decoded)) {\n      errors.push(`目录项「${label}」的锚点 #${rawAnchor} 找不到对应真实标题`)',
     expect: 'validateDocTocAnchors 未拦截失效目录锚点',
@@ -458,10 +458,11 @@ export const INJECTIONS_CORE = [
   },
   {
     id: 'I46',
-    what: '架空 flow-merge.mjs 对 reviewPassedHead === currentHead 的陈旧审查拦截',
-    file: 'kit/skills/dev-flow/scripts/flow-merge.mjs',
-    from: '      const reviewHeadOk = ledger.reviewPassed === true\n        && (!currentHead || ledger.reviewPassedHead === currentHead)\n        && (!ledger.lastReview || !currentHead || ledger.lastReview.headSha === currentHead)\n        && (!lastRound || !currentHead || lastRound.headSha === currentHead)',
-    to: '      const reviewHeadOk = ledger.reviewPassed === true',
+    what: '架空 validatePreMergeShaAndWorktree 对 reviewPassedHead === currentHead 的陈旧审查拦截',
+    file: 'kit/skills/lib/workflow-helpers.mjs',
+    alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
+    from: "    const allRevMatch = Boolean(revHead)\n      && ledger?.reviewPassedHead === currentHead\n      && (!ledger?.lastReview || ledger.lastReview.headSha === currentHead)\n      && (!lastRound || lastRound.headSha === currentHead)\n      && evidence.headSha === revHead",
+    to: '    const allRevMatch = true',
     expect: 'reviewPassedHead 校验失效',
   },
   {

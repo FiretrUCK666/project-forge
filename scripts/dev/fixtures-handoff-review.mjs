@@ -498,7 +498,7 @@ cases.push(["写操作必须联网探通道，不许静默降级成本地记账"
   const dir = tmpProject({
     ".gitignore": ".worktrees/\n",
     "package.json": '{"name":"demo","version":"1.0.0","repository":"https://github.com/acme/demo.git"}\n',
-    "AGENTS.md": "```yaml\nquick-test: exit 0\nfull-test: exit 0\nmerge-gate: exit 0\n```\n",
+    "AGENTS.md": "```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n",
     "README.md": "# demo\n",
     "src/app.mjs": "export const v = 1\n",
   })

@@ -18,6 +18,7 @@ import {
 import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
+import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import {
   EXIT, collectDiff, computeDiffRange, hasCommits, resolveReviewWorktree,
   scanUntrustedDiff, syncTier2ReviewSlotIfNeeded,
@@ -31,6 +32,7 @@ import {
   emitGateBlock, evaluateIncludeDiffGate, getEffectiveStatusEntries, handleCheckEmpirical,
   handleCheckFault, recordMechanicalPack,
 } from './review-empirical.mjs'
+import { readReceipt, resolveEmpiricalReceiptPath } from './review-empirical-state.mjs'
 import { handleOverride, handleRecord } from './review-ledger.mjs'
 import { parseRangeDiffNewCommits } from './review-locks.mjs'
 import {
@@ -72,7 +74,7 @@ function printHelp() {
     '  [--implementer-id <id>] [--must-fix <textOrJson>...] [--should-fix <text>...]',
     '  [--pre-existing <text>...] [--disposition "<idOrFp>:<outcome>"...]',
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
-    '  [--enforce-gates] [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
+    '  [--enforce-gates] [--e2e-evidence <text>] [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
     '',
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
     '',
@@ -426,7 +428,7 @@ async function main(argv = process.argv.slice(2)) {
         'worktree', 'base', 'head', 'task', 'pr', 'external-pr', 'issue', 'round',
         'review-token', 'phase',
         'verdict', 'reviewer-id', 'implementer-id', 'fault-injection', 'criteria-status',
-        'reason', 'visual-evidence', 'agent', 'evidence',
+        'reason', 'e2e-evidence', 'visual-evidence', 'agent', 'evidence',
       ],
       multiFlags: ['cmd', 'must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: 'review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
@@ -456,6 +458,8 @@ async function main(argv = process.argv.slice(2)) {
       if (ctx.earlyExitCode !== undefined) return ctx.earlyExitCode
       const parity = checkDocCodeParity(ctx.reviewRoot, mainRoot, ctx.diff, ctx.effectiveProfile, ctx.task)
       const gateWeakenedHits = collectGateWeakeningHits(ctx.reviewRoot, ctx.diff)
+      const evidence = ctx.task?.taskId ? readVerificationEvidence(roots.gitDir, ctx.task.taskId) : null
+      const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode: ctx.mode, task: ctx.task, prNo: ctx.prNo, reviewRoot: ctx.reviewRoot, baseRef: ctx.baseRef }))
       const behavioralGate = assessBehavioralGate({
         diff: ctx.diff,
         devProfile: ctx.effectiveProfile,
@@ -464,6 +468,8 @@ async function main(argv = process.argv.slice(2)) {
         gateWeakenedHits,
         parity,
         untrustedAdvisories: [],
+        evidence,
+        receipt,
       })
       const empCtx = { ...ctx, opts, roots, behavioralGate, gateWeakenedHits, scanUntrustedDiff }
       return sub === 'check-empirical'
@@ -541,8 +547,10 @@ async function main(argv = process.argv.slice(2)) {
     const hrHits = collectHighRiskHits(diff, effectiveProfile)
     const gateWeakenedHits = collectGateWeakeningHits(reviewRoot, diff)
 
+    const evidence = task?.taskId ? readVerificationEvidence(roots.gitDir, task.taskId) : null
+    const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode, task, prNo, reviewRoot, baseRef }))
     const behavioralGate = assessBehavioralGate({
-      diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories,
+      diff, devProfile: effectiveProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories, evidence, receipt,
     })
     const structuralGate = assessStructuralGate({ reviewRoot, diff, devProfile: effectiveProfile, parity })
     const doorAssessment = assessDoor({

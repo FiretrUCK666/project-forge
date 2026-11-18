@@ -10,11 +10,14 @@ import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { escalateToBackend } from '../../lib/escalation.mjs'
 import {
   canonicalPath, execShellCommand, gitStatusPorcelainZ,
   posixPath, readJsonSafe, samePath, sha256File, sha256Text, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { nextReviewRound, sanitizeTaskId } from '../../lib/ledger.mjs'
+import { appendGovernSignal } from '../../lib/signals.mjs'
+import { buildE2eDiagnosticPacket, scoreExecutionResult } from '../../lib/workflow-policy.mjs'
 import { EXIT } from './review-diff.mjs'
 
 function isInsideDir(candidateAbs, parentAbs) {
@@ -213,10 +216,14 @@ export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, ta
     cmds.push(`还原故障后运行: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase restore ${targetFlags} --cmd "${sampleCmd}"`)
   }
   if (missingSteps.includes('visual-check')) {
-    cmds.push('实际打开渲染界面核验交互与浅深色截图后追加 --visual-checked')
+    cmds.push('核验实际渲染/交互与浅深色视觉效果后追加 --visual-checked')
+  }
+  if (missingSteps.includes('e2e-observation')) {
+    cmds.push(`运行端到端实证并附带运行观察结论后重试: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<运行观察实证>"`)
   }
   const extraVisual = missingSteps.includes('visual-check') ? ' --visual-checked' : ''
-  cmds.push(`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}${extraVisual} --include-diff`)
+  const extraE2e = missingSteps.includes('e2e-observation') ? ' --e2e-evidence "<运行观察实证>"' : ''
+  cmds.push(`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}${extraVisual}${extraE2e} --include-diff`)
   return cmds
 }
 
@@ -440,16 +447,89 @@ export async function runCommandList(commands, { cwd, env, stopOnFail = true }) 
     const t0 = performance.now()
     const res = await execShellCommand(cmd, cwd, { timeout: 300000, env })
     const durationMs = Math.round(performance.now() - t0)
+    const scored = scoreExecutionResult({
+      executed: !res?.skipped,
+      exitCode: res?.code ?? 1,
+      errorOnly: Boolean(res?.errorOnly || (!res?.ok && res?.code === 0)),
+    })
     results.push({
       cmd,
       exitCode: res.code,
-      ok: Boolean(res.ok),
+      executed: scored.executed,
+      succeeded: scored.succeeded,
+      errorOnly: scored.errorOnly,
+      ok: Boolean(res.ok && scored.ok),
       timedOut: Boolean(res.timedOut),
       durationMs,
       stdoutExcerpt: String(res.stdout ?? '').slice(0, 600),
       stderrExcerpt: String(res.stderr ?? '').slice(0, 600),
     })
-    if (stopOnFail && !res.ok) break
+    if (stopOnFail && (!res.ok || !scored.ok)) break
   }
   return results
+}
+
+export async function handleEmpiricalE2eFailure({
+  mainRoot, gitDir, task, mode, failedCmdRes, headSha, changedFiles = [], opts = {},
+}) {
+  const diagnostic = buildE2eDiagnosticPacket({
+    cmd: failedCmdRes?.cmd ?? '',
+    exitCode: failedCmdRes?.exitCode ?? 1,
+    stdout: failedCmdRes?.stdoutExcerpt ?? '',
+    stderr: failedCmdRes?.stderrExcerpt ?? '',
+    headSha,
+    taskId: task?.taskId ?? null,
+    mode,
+    changedFiles,
+  })
+  await appendGovernSignal({
+    mainRoot,
+    gitDir,
+    isGit: Boolean(gitDir),
+    category: 'e2e',
+    module: changedFiles[0] ? undefined : 'e2e',
+    pattern: 'e2e.runtime-fail',
+    severity: 'high',
+    source: 'review-check-empirical',
+    file: changedFiles[0] ?? '',
+    taskId: task?.taskId ?? null,
+    message: diagnostic.Evidence.slice(0, 2).join(' | '),
+    meta: { exitCode: failedCmdRes?.exitCode ?? 1, headSha: headSha ?? null, mode },
+  })
+  const body = [
+    '## Evidence',
+    ...diagnostic.Evidence.map((l) => `- ${l}`),
+    '',
+    '## Unknowns',
+    ...diagnostic.Unknowns.map((l) => `- ${l}`),
+    '',
+    '## NextSteps',
+    ...diagnostic.NextSteps.map((l) => `- ${l}`),
+  ].join('\n')
+  let escalation = null
+  try {
+    escalation = await escalateToBackend({
+      repoRoot: mainRoot,
+      item: {
+        source: 'review-check-empirical',
+        category: 'e2e',
+        severity: 'high',
+        caseType: task?.caseType ?? 3,
+        e2eBlocking: true,
+        title: `Empirical E2E failure (${task?.taskId ?? mode})`,
+        summary: diagnostic.Evidence.slice(0, 2).join(' | '),
+        body,
+        rootCause: diagnostic.Unknowns.join('；'),
+        nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime issue and re-run check-empirical',
+        files: changedFiles.slice(0, 10),
+        taskId: task?.taskId ?? null,
+        labels: ['e2e-fail'],
+      },
+      _ghProbe: opts._ghProbe ?? null,
+      _ghClient: opts._ghClient ?? null,
+    })
+  } catch (err) {
+    escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  return { diagnostic, escalation }
 }

@@ -10,12 +10,20 @@ import { basename, join, resolve } from 'node:path'
 import { printNextStep } from '../../lib/cli.mjs'
 import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { escalateToBackend } from '../../lib/escalation.mjs'
 import { gitRun, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
 import { parseMilestoneNumber } from '../../lib/platform.mjs'
-import { readVerificationEvidence, writeVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import {
+  buildE2eDiagnosticPacket,
+  buildE2eObservation,
+  hasValidE2eObservationOnHead,
+  readVerificationEvidence,
+  scoreExecutionResult,
+  writeVerificationEvidence,
+} from '../../lib/workflow-policy.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { matchGlob } from '../../lib/static-gates.mjs'
@@ -242,21 +250,109 @@ export async function applySubmitPostActions({ backend, targetRepo, prNumber, li
   return null
 }
 
+export function cmdContainsSubcommand(fullCmd, subCmd) {
+  const target = String(subCmd ?? '').replace(/\s+/g, ' ').trim()
+  const full = String(fullCmd ?? '').replace(/\s+/g, ' ').trim()
+  if (!target || !full) return false
+  if (full === target) return true
+  return full.split(/\s*(?:&&|;|\n)\s*/).map((s) => s.trim()).includes(target)
+}
+
+export async function handleVerifyE2eFailure({
+  roots, taskId, ledger, mode, cmd, runRes, currentHead, changedFiles = [], opts = {},
+}) {
+  const diagnostic = buildE2eDiagnosticPacket({
+    cmd,
+    exitCode: runRes?.code ?? 1,
+    stdout: runRes?.stdout ?? '',
+    stderr: runRes?.stderr ?? '',
+    headSha: currentHead,
+    taskId,
+    mode,
+    changedFiles,
+  })
+  await emitFlowSignal(roots, {
+    category: 'e2e',
+    module: changedFiles[0] ? undefined : 'e2e',
+    pattern: 'e2e.runtime-fail',
+    severity: 'high',
+    source: 'flow-verify',
+    file: changedFiles[0] ?? '',
+    taskId,
+    message: diagnostic.Evidence.slice(0, 2).join(' | '),
+    meta: { exitCode: runRes?.code ?? 1, headSha: currentHead ?? null, mode },
+  })
+  const body = [
+    '## Evidence',
+    ...diagnostic.Evidence.map((l) => `- ${l}`),
+    '',
+    '## Unknowns',
+    ...diagnostic.Unknowns.map((l) => `- ${l}`),
+    '',
+    '## NextSteps',
+    ...diagnostic.NextSteps.map((l) => `- ${l}`),
+  ].join('\n')
+  let escalation = null
+  try {
+    escalation = await escalateToBackend({
+      repoRoot: roots.mainRoot,
+      item: {
+        source: 'flow-verify',
+        category: 'e2e',
+        severity: 'high',
+        caseType: ledger?.caseType ?? 3,
+        e2eBlocking: true,
+        title: `E2E verification failed (${taskId ?? mode})`,
+        summary: diagnostic.Evidence.slice(0, 2).join(' | '),
+        body,
+        rootCause: diagnostic.Unknowns.join('；'),
+        nextStep: diagnostic.NextSteps[0] ?? 'Fix runtime failure and re-run smoke verify with --e2e-evidence',
+        files: changedFiles.slice(0, 10),
+        taskId,
+        labels: ['e2e-fail'],
+      },
+      _ghProbe: opts._ghProbe ?? null,
+      _ghClient: opts._ghClient ?? null,
+    })
+  } catch (err) {
+    escalation = { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  return { diagnostic, escalation }
+}
+
 export function recordVerifyEvidenceForFlow({
   roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName, targetVal,
   cmdStr, customCmd, exitCode, explicitNoneSkipped, docStaticRes,
+  executed = !explicitNoneSkipped, errorOnly = false, e2eObservationText = '',
+  smokeCmd = null, smokeExitCode = null, smokeExecuted = false, smokeErrorOnly = false,
 }) {
   const prev = readVerificationEvidence(roots.gitDir, taskId)
   const sameClean = Boolean(prev && prev.headSha === currentHead && !dirty && !prev.dirty)
   const gates = sameClean ? { ...(prev.gates ?? {}) } : {}
   const skipped = new Set(sameClean && Array.isArray(prev.skipped) ? prev.skipped : [])
   const now = new Date().toISOString()
+  const mainScore = explicitNoneSkipped
+    ? { executed: false, succeeded: true, errorOnly: false }
+    : scoreExecutionResult({ executed, exitCode, errorOnly })
   gates[modeName] = {
     headSha: currentHead, dirty, mode: modeName, target: targetVal,
     partial: modeName === 'quick' && Boolean(targetVal),
     exitCode, cmd: cmdStr, customCmd,
-    status: explicitNoneSkipped ? 'skipped-explicit-none' : (exitCode === 0 ? 'passed' : 'failed'),
+    executed: mainScore.executed,
+    succeeded: mainScore.succeeded,
+    errorOnly: mainScore.errorOnly,
+    status: explicitNoneSkipped ? 'skipped-explicit-none' : (mainScore.succeeded ? 'passed' : 'failed'),
     recordedAt: now,
+  }
+  if (smokeCmd !== null && smokeExitCode !== null && modeName !== 'smoke') {
+    const sScore = scoreExecutionResult({ executed: smokeExecuted, exitCode: smokeExitCode, errorOnly: smokeErrorOnly })
+    gates.smoke = {
+      headSha: currentHead, dirty, mode: 'smoke', target: null, partial: false,
+      exitCode: smokeExitCode, cmd: smokeCmd, customCmd: false,
+      executed: sScore.executed, succeeded: sScore.succeeded, errorOnly: sScore.errorOnly,
+      status: sScore.succeeded ? 'passed' : 'failed',
+      recordedAt: now,
+    }
   }
   if (explicitNoneSkipped) {
     skipped.add('skipped-explicit-none')
@@ -269,11 +365,39 @@ export function recordVerifyEvidenceForFlow({
       errors: docStaticRes.errors, recordedAt: now,
     }
   }
-  const overallExit = docStaticRes && !docStaticRes.ok ? 3 : exitCode
+  const smokeGate = gates.smoke
+  const smokeVerifiedOnHead = Boolean(
+    smokeGate
+    && smokeGate.headSha === currentHead
+    && !smokeGate.dirty
+    && smokeGate.exitCode === 0
+    && smokeGate.executed !== false
+    && smokeGate.succeeded !== false
+    && smokeGate.errorOnly !== true,
+  )
+  const docFailed = Boolean(docStaticRes && !docStaticRes.ok)
+  const overallExit = docFailed ? 3 : (errorOnly ? 1 : exitCode)
+  let e2eObservation = sameClean && hasValidE2eObservationOnHead(prev, currentHead) ? prev.e2eObservation : null
+  if (String(e2eObservationText ?? '').trim()) {
+    e2eObservation = buildE2eObservation({
+      summary: e2eObservationText,
+      headSha: currentHead,
+      source: 'flow-verify',
+      cmd: smokeCmd ?? cmdStr,
+      executed: !explicitNoneSkipped && !errorOnly,
+      succeeded: overallExit === 0 && (!smokeGate || smokeVerifiedOnHead),
+      errorOnly,
+    })
+  }
   writeVerificationEvidence(roots.gitDir, taskId, {
     taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
     riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: overallExit,
+    executed: !explicitNoneSkipped,
+    succeeded: overallExit === 0 && !errorOnly,
+    errorOnly: Boolean(errorOnly),
+    smokeVerifiedOnHead,
+    e2eObservation,
     gates, skipped: [...skipped],
   })
-  return overallExit
+  return { overallExit, smokeVerifiedOnHead, e2eObservation }
 }

@@ -108,6 +108,7 @@ export function registerFlowStateCases(cases) {
         '```yaml',
         'quick-test: node -e "process.exit(0)" -- {target}',
         'full-test: exit 0',
+        'smoke-verify: none',
         'merge-gate: exit 0',
         'high-risk: none',
         '```', '',
@@ -210,7 +211,7 @@ export function registerFlowStateCases(cases) {
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'package.json': '{"name":"c2-wt","version":"1.0.0"}\n',
       'package-lock.json': '{"lockfileVersion":3,"v":1}\n',
-      'AGENTS.md': '# c2\n\n```yaml\nquick-test: exit 0\n```\n',
+      'AGENTS.md': '# c2\n\n```yaml\nquick-test: exit 0\nsmoke-verify: none\n```\n',
       'src/a.mjs': 'export const a = 1\n',
     })
     gitInit(committed, { branch: 'main', name: 't', email: 't@t.t' })
@@ -266,7 +267,7 @@ export function registerFlowStateCases(cases) {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\n',
       '.github/pull_request_template.md': '# PR\n\n## 改了什么\n\n## 关联 Issue\n\n## 为什么\n\n## 实现依据\n\n## 怎么验证的\n\n## 回滚点\n\n## 风险与影响范围\n\n## 合并授权\n\n## 独立审查与故障注入\n',
-      'AGENTS.md': '# c3\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\n```\n',
+      'AGENTS.md': '# c3\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\n```\n',
       'src/app.mjs': 'export const v = 1\n',
       'docs/prd/261116-issue10-master-prd.md': '---\nkind: prd\ntitle: "Master"\nstatus: active\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 10\npr: null\nowner: "t"\nrelated_spec: null\nrelated_todo: null\n---\n\n# PRD: Master\n\n## 要解决的问题\n- 统一一个可复用的组件库\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 五、验收标准\n\n- [ ] C1: `src/app.mjs` M1\n- [ ] C2: `src/app.mjs` M2\n',
       'docs/specs/261116-issue11-m1-spec.md': '---\nkind: spec\ntitle: "M1"\nstatus: approved\ntier: L3\ncreated: 2026-11-16\nupdated: 2026-11-16\nissue: 11\npr: null\nbranch: null\nowner: "t"\napproved: true\nimplemented: false\nplan_critique: passed\nrelated_prd: ../prd/261116-issue10-master-prd.md\nrelated_todo: ../todo/261116-issue11-m1-todo.md\nhigh_risk_paths: []\n---\n\n# SPEC: M1\n\n## 要解决的问题\n- 拆出第一个切片\n\n## 关联\n- [Master](../prd/261116-issue10-master-prd.md)\n\n## 本期不做\n- 不修改独立单仓接口\n\n## 门型与回滚路径\n- two-way；revert\n\n## 验收标准\n- [x] C1: `src/app.mjs` ok\n\n## 实现说明\n- 已完成实现。\n',

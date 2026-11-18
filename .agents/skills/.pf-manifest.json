@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-18T21:59:46.194Z",
+  "installedAt": "2026-11-19T00:26:06.011Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "1063a7364e27092b0442af592d4c829389be170e5f806c4ff7a2e72d441be856"
@@ -32,13 +32,13 @@
       "sha256": "82cb151c57f7f2422ecf06de677e5ffc41e94e9a44d1a9efe3b7cc9659641230"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
-      "sha256": "b922684d934fa1111b499fe8ab6f6c6ba8a02704757f3c357ad6d730567c0ec0"
+      "sha256": "9aa1205a509b2662269dffef8e30188c19594c9383d602637e7d27a2ddb5ca4c"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
-      "sha256": "5a02213e1f139049cf5aa47809e1df0520b41bf763ce18e9f8d3e1f8a90ead85"
+      "sha256": "80552bfd85904af9e85773a218743b89e6d75187dcb3ce039d657fba4a345f51"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "5f4cac3756ac9e8fb9f086a5291df1634803d8e5f7a5c36dc72d7dec7c642cd8"
+      "sha256": "2961c5a4674a60d938062a78d7dca84d128c6eef9ffc3b5255abd95ce0ac9383"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "b0fa9c0bc8a4703f2b2166bd4dcd152f01a7dcd4170594f310ccf087be75a6aa"
@@ -50,7 +50,7 @@
       "sha256": "0a2f87176f4beef157bce2207abb844bb3bc4291c434215618c26072c9607c73"
     },
     "dev-flow/scripts/flow.mjs": {
-      "sha256": "4685bc1acf6499b4c9b50b60ca74dfe6a3c7f58c173bd521948d489dc0b20c3b"
+      "sha256": "6c32e5823867a8e114a50e06d6ea2c47c4a2048cae259b7e33a138e2ffeaed4e"
     },
     "dev-flow/scripts/worktree-deps.mjs": {
       "sha256": "aa5df1d0d199c8eac74baa453f5cfeaf87ae336bbeedc58153a7b405a6b38146"
@@ -101,28 +101,28 @@
       "sha256": "e1f2c88a121cf4c30e1301769f2493225502b7e6d0637a5c15a12de7ff518ab9"
     },
     "dev-review/SKILL.md": {
-      "sha256": "51a48dfc65bac623ad3c69e3027bffd22d3e570cb725ec420219d96e744d10c5"
+      "sha256": "85e8fd808343057a415f735fc46209c6ec33b56096f1027d2851fd6dcbeccf0a"
     },
     "dev-review/scripts/review-diff.mjs": {
       "sha256": "9671f0e847f2fff852c2ee8545e7d276cb28e0232e9c278b4ef4ac2f5df2e874"
     },
     "dev-review/scripts/review-empirical-state.mjs": {
-      "sha256": "34a14b297850600e2b3f7de3d740118d8c101265fd3f34c3f7bf8b422a2f31cd"
+      "sha256": "b8e1f626f4a82945e95449b31a1de58c4bc707c2dac058dbaece35a0f234adf8"
     },
     "dev-review/scripts/review-empirical.mjs": {
-      "sha256": "3e1087c142950d5d8c46ab75d94e90b47cb87c0ac3583f478f80931056374092"
+      "sha256": "32fca45d30d63cc1a56b1a0f23e3c6ae1fa591d4b5bf4abbb9a5f5db3494a26d"
     },
     "dev-review/scripts/review-gates.mjs": {
-      "sha256": "d5019ca68e87403381fd6fc3dfd6eb8ce7d38dbf83da6104582313a3797a5cd4"
+      "sha256": "38961edd4d29297fce48d6a31150f969e3e2d35c52da3d1e771f47d468e91070"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "76b705b95247cce3e1a0aa9225f1f4f3e9408ea6b391e72c0d68496db97a268f"
+      "sha256": "2e33c9928a736c9cffab5be70a708eae872bcefb79bb9924eeacf82ea7ce5070"
     },
     "dev-review/scripts/review-locks.mjs": {
-      "sha256": "7912d8e3a4e9f162ea07d3862109d3a5c8f86b8704804bd71d0005fe15fe6041"
+      "sha256": "da9d2c2566ff6a7dd228f4700969530c405ec6dd0c23eda8a2f4ae0a751a1b20"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "4f00dfc96f1588373c413aacf13ea2bab9768cc6f3f1cee93d70593a17d11566"
+      "sha256": "611160bffb02acc7e3e05027609730154b43c030a0316807dff84be79423d8a5"
     },
     "dev-review/scripts/review-pr.mjs": {
       "sha256": "38a1637d6ee13faa92a493d579eb10b22fda6be1a41d3f321a04eb0028e20ef0"
@@ -184,14 +184,20 @@
     "lib/exec.mjs": {
       "sha256": "4b7c43a3573831242f9da12ee723511574bcb5ef564ff9db88e82d4c6d4d4e3f"
     },
+    "lib/git-core.mjs": {
+      "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"
+    },
+    "lib/git-fast-objects.mjs": {
+      "sha256": "2bb6aff21b830848a5b199ce9b6f14be261b76b7e7ce1e9e5bef7c55f183473b"
+    },
     "lib/git-fast.mjs": {
-      "sha256": "00ebd607673b3979b19a0e894d0661cd4c5400db1eba10fa54d971818c3b811f"
+      "sha256": "4ea42df3658395587d558025d6694daff610e7ff58411c43a07098c73de0039a"
     },
     "lib/git-status-fast.mjs": {
       "sha256": "1b4d0a57fdf6ef12bf37b1b8bbeca32874947216e591173f011fbcd3bb171b7c"
     },
     "lib/git.mjs": {
-      "sha256": "c916516c33cc181706a397b9aa7c791569fdc9807c30890bf7d0b91b55876d58"
+      "sha256": "d773813716ee1240aa67abad7f27beab87898543c612c2876bf6e5259be5fc03"
     },
     "lib/github-client.mjs": {
       "sha256": "9b5e44085f26e7d91be461867db70900d89cf4083bf879566545c52638944d86"
@@ -275,10 +281,10 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-helpers.mjs": {
-      "sha256": "a98803e628f8c25c6e910dcc7cf9f6d697475e6e47a5cf6ee1ee47bd5e9339a9"
+      "sha256": "1d3c12230d7408d42417fc43453f0865856ca5afd079af5a14a3a5507a19f03c"
     },
     "lib/workflow-policy.mjs": {
-      "sha256": "a1928538622b4ae805733cde05ec1f031b8721d7091bb44a2363f4b3112b3976"
+      "sha256": "de910a84b356862c7a21c53926cee6d79e8dc42d362efc81ee95bc5df9515a16"
     },
     "templates/docs-prd.md": {
       "sha256": "ca7988f329858aa2ba7fcc5534f849e5fb8802d06b97c2308001287168d8b2cf"
@@ -319,7 +325,7 @@
       "sha256": "2e2f45d8a56a839af469805b0453bdc3787c46b16053e12af481237484c7c3b9"
     },
     "构建与验证": {
-      "sha256": "b3fd6d6e14d990ad1e8390327508e43e692ada92115e2af053b54b23930ab653"
+      "sha256": "f9a945cd3a536637065a469d2cd52097eac9ab153ed067510dbd9b90c33bb0eb"
     },
     "修改守则": {
       "sha256": "355f506fb0c4b05641844dfbde81500dc723945893a5b8a5f67f9c11a093ebc9"
@@ -331,7 +337,7 @@
       "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
     },
     "日常协作与风险分流": {
-      "sha256": "ac3b1dbdde9efb6546d260c3d8a90c45cda0b67307c5329027d1f981055a8af4"
+      "sha256": "55ecfee0021e418f2ab1307dd1f74e0bd4fc7bbb27bd620f585481b289b7400a"
     },
     "高风险路径": {
       "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"

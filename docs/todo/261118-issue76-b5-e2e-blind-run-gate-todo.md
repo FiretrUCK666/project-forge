@@ -3,11 +3,11 @@ kind: todo
 title: v9 B5：通用 E2E 门禁、离线 Scenarios H–J、I160+ 注入与 $TMPDIR 盲跑终验
 status: active
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-19
 issue: 76
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b5-e2e-blind-run-gate
+owner: impl-76
 approved: false
 done_at: null
 task_id: b5-e2e-blind-run-gate
@@ -43,11 +43,11 @@ related_spec: ../specs/261118-issue76-b5-e2e-blind-run-gate-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C15: 保留 7 键 `Dev Profile`，在 `flow.mjs` 注册 `--e2e-evidence`，修复 `GATE_TIER_RANK` 跳过 `smoke-verify` 缺陷与 `assessBehavioralGate` `!smokeRequired` 缺陷并清除具体工具硬编码，落地 `--e2e-evidence`、缺 E2E 实证阻断 `--include-diff`/`pass` 与 E2E 失败自动信号建单闭环。
-- [ ] C16: 完善 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（`I160–I173`），全量 `scripts/dev/fixtures.mjs` 与 `scripts/dev/verify-injections.mjs` 100% 通过。
-- [ ] C17: 交付 `e2e-scenarios-stageb.mjs` (new) 接入 `e2e-zip-harness.mjs`，在 `git archive --format=zip` 离线黑盒环境下全绿跑通 Scenarios `H`、`I`、`J`。
-- [ ] C18: 交付 `blind-run-harness.mjs` (new)（登记 `docs/TDD.md` 防孤儿报错），在隔离 `$TMPDIR` 克隆多生态真实开源仓（含带自有项目级 Skill 与自定义规则且重跑 `S1–S4` 升级的已规范仓）低提示词盲跑与实跑原生测试，发现问题全部建单修复并沉淀夹具清零；全仓 `.mjs <= 800` 行、`AGENTS.md` 严守体积预算（本仓 `< 24576 B`），`merge-gate` 全链绿；且本片 `finalize` 直接验证 `C19` 免参自动收口总控 PRD。
-- [ ] C23: 落地 `A6` 校验（`flow-merge`/`review-empirical` 合并前 `headSha === evidence.headSha === review.headSha` 与干净工作区校核、`executed/succeeded/errorOnly` 三态计分、脱敏 `Evidence` / `Unknowns` / `NextSteps` 失败建单、确定性零 LLM Node CLI 故障注入 Stub 覆盖 `I160+` 及 `C20–C23` 探针），坚持「形式门禁 + 真实运行/E2E 实证 + `check-fault` 在前，解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺）」；跑通自建 HTTP/SSH 模拟远端交错 `Scenarios H–J`；执行零提示词（Zero-Hint）全机制主调度组 + 轻/弱模型对照与 `$TMPDIR`（含 `LoopForge-main`）盲跑终验（必测裸 Issue/同源与 Fork `inbound-external-pr` 链接及初次接入+Day-2+二次 `S1–S4`，且**专门验证轻/弱模型在审查时不跳过 E2E 只看 diff**），任何跳过/漏评/漏归档/歧义均走 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀离线回归。
+- [x] C15: 保留 7 键 `Dev Profile`，在 `flow.mjs` 注册 `--e2e-evidence`，修复 `GATE_TIER_RANK` 跳过 `smoke-verify` 缺陷与 `assessBehavioralGate` `!smokeRequired` 缺陷并清除具体工具硬编码，落地 `--e2e-evidence`、缺 E2E 实证阻断 `--include-diff`/`pass` 与 E2E 失败自动信号建单闭环。
+- [x] C16: 完善 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（`I160–I173`），全量 `scripts/dev/fixtures.mjs` 与 `scripts/dev/verify-injections.mjs` 100% 通过。
+- [x] C17: 交付 `e2e-scenarios-stageb.mjs` (new) 接入 `e2e-zip-harness.mjs`，在 `git archive --format=zip` 离线黑盒环境下全绿跑通 Scenarios `H`、`I`、`J`。
+- [x] C18: 交付 `blind-run-harness.mjs` (new)（登记 `docs/TDD.md` 防孤儿报错），在隔离 `$TMPDIR` 克隆多生态真实开源仓（含带自有项目级 Skill 与自定义规则且重跑 `S1–S4` 升级的已规范仓）低提示词盲跑与实跑原生测试，发现问题全部建单修复并沉淀夹具清零；全仓 `.mjs <= 800` 行、`AGENTS.md` 严守体积预算（本仓 `< 24576 B`），`merge-gate` 全链绿；且本片 `finalize` 直接验证 `C19` 免参自动收口总控 PRD。
+- [x] C23: 落地 `A6` 校验（`flow-merge`/`review-empirical` 合并前 `headSha === evidence.headSha === review.headSha` 与干净工作区校核、`executed/succeeded/errorOnly` 三态计分、脱敏 `Evidence` / `Unknowns` / `NextSteps` 失败建单、确定性零 LLM Node CLI 故障注入 Stub 覆盖 `I160+` 及 `C20–C23` 探针），坚持「形式门禁 + 真实运行/E2E 实证 + `check-fault` 在前，解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺）」；跑通自建 HTTP/SSH 模拟远端交错 `Scenarios H–J`；执行零提示词（Zero-Hint）全机制主调度组 + 轻/弱模型对照与 `$TMPDIR`（含 `LoopForge-main`）盲跑终验（必测裸 Issue/同源与 Fork `inbound-external-pr` 链接及初次接入+Day-2+二次 `S1–S4`，且**专门验证轻/弱模型在审查时不跳过 E2E 只看 diff**），任何跳过/漏评/漏归档/歧义均走 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀离线回归。
 
 ## 执行步骤
 
@@ -91,6 +91,6 @@ related_spec: ../specs/261118-issue76-b5-e2e-blind-run-gate-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：已跑通 `preflight.mjs`（35/35 通过，0 孤儿脚本）、`fixtures.mjs`（288/288 通过）、`verify-injections.mjs`（`I1–I178` 全捕获）、`e2e-zip-harness.mjs`（Scenarios `A–J` 通过）、`blind-run-harness.mjs`（11/11 执行成功、`errorOnly=0`）、`compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）、`equip.mjs . --check`、`review.mjs .`（mature）与 `sync-toc.mjs --check`，并在归档提交后于最终 `HEAD` 复跑全链门禁与 `flow verify --mode gate --e2e-evidence`。
+- **文档同步检查**：已同步更新 `docs/TDD.md`（登记全部新增模块与 `blind-run-harness.mjs`）、`templates/agents-project.md`、`AGENTS.md`（`< 24576 B`）、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`（`equip.mjs` 已同步至 `.agents/skills/`）及双语 `README.md`/`README.en.md`（`sync-toc.mjs` 已同步），`docs/prd/261118-v9-stageb-adaptive-architecture-prd.md` `C1–C23` 已全部勾选 `[x]`。
+- **遗留问题**：无（`C19` 免 `--include-master-prd` 闭环归档后完成终验并提审）。

@@ -24,7 +24,7 @@ A brand-new folder, or a repository that has been maintained for months, usually
 | --- | --- |
 | **Your handwritten content survives** | Existing `README.md`, `CONTRIBUTING.md`, architecture docs, custom templates, CI workflows, and custom skills stay as they are. An external `.zip` snapshot is saved before any write (with `.tar.gz` restore compatibility) |
 | **Clarify first, then eight stages** | Follows Requirement, Clarification, Design, Implementation, Review, Empirical & Formal Verification, Acceptance, and Merge. Complex requests propose a master PRD, run multi-round clarification to clear open questions, and pass distinct-reviewer, 3-round stop-loss Critique before coding starts |
-| **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require tiered evidence, dual gates, Mermaid `16/12`, and CI |
+| **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require generic run-and-observe E2E (`--e2e-evidence`), dual gates, three-way `headSha` checks, Mermaid `16/12`, and CI |
 | **Adaptive remotes and topologies** | Unified `TaskBackend` handles GitHub, local-only repos without leaking remote terms, and `generic-git` without local merge overreach; also supports linked Issue+PR graphs, stacked PRs, and parallel wave queues |
 | **Two tiers and retro patches** | Small repos can start with `lightweight` (`< 14KB` contract + 3 skills) and upgrade via `--tier full`. Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule patches |
 
@@ -58,8 +58,8 @@ Suppose you want to add an "export to CSV" feature:
 | --- | --- | --- | --- |
 | 1 | "Where does the export module live, and which commands verify it?" | `dev-explore` | Module entry points, `Feature Map`, and `reusableModules`. Read-only, nothing modified |
 | 2 | "Clarify requirements and plan CSV export with checkable criteria" | `dev-plan` | Multi-round clarification until open items are zero, PRD/SPEC/Todo (`C1`, `C2`), and distinct-reviewer, 3-round stop-loss Critique |
-| 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, 4-state master PRD closure, cross-backend milestones & state labels, and PR |
-| 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, Behavioral/Structural dual gates, Round 2+ full-history distinct-reviewer fresh context, six-lock convergence, and structured escalation on 3-round stop-loss |
+| 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, run-and-observe E2E gate (`--e2e-evidence`, sanitized failure signals + escalation), 4-state master PRD closure, cross-backend milestones & state labels, and PR |
+| 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, E2E + fault-injection gates enforced before `--include-diff` unlocks substantive `business-flows`/`C*` review, Round 2+ full-history distinct-reviewer fresh context, six-lock convergence, and structured escalation on 3-round stop-loss |
 | 5 | "Merge if it passes, then clean up" | `dev-flow` | Reviewer merges after trial merge; 7-step cleanup runs only after you confirm the cleanup list |
 | Audits / retro | "Audit repo health or turn rework signals into rule patches" | `dev-govern` | Runs `audit`, `reconcile`, and `sample` anytime; `retro` reads `signals.jsonl` to produce rule patches for the next planning round |
 

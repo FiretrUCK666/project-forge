@@ -33,7 +33,7 @@ function printHelp() {
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--json]',
-    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--visual-checked] [--human-approved] [--json]',
+    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-checked] [--human-approved] [--json]',
     '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
@@ -63,7 +63,7 @@ async function main(argv) {
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
-        'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body', 'comment', 'state',
+        'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
         'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
       ],

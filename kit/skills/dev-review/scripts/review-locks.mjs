@@ -5,6 +5,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport } from '../../lib/cli.mjs'
@@ -16,9 +17,9 @@ import {
   getCachedRangeDiffCommits, isAncestorLinearFast, parseRawAndUnifiedDiff,
   resolveGitDirFast, setCachedRangeDiffCommits,
 } from '../../lib/git-fast.mjs'
-import { parseAgentsProfile } from '../../lib/profile.mjs'
+import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
-import { determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import { determineWorkflowPolicy, hasRepoCiWorkflow, hasValidE2eObservationOnHead, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
 
 export { checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId }
@@ -437,19 +438,75 @@ export async function checkIncrementalScopeLock({
   return { blocked: false, range: scope.range }
 }
 
-/** Pass 门禁阻断核验（`findingsBlocker`），仅在失败实证或显式 `--enforce-gates` 时阻断虚假 pass。 */
+/** Pass 门禁阻断核验（`findingsBlocker`），仅在失败实证、缺失 E2E/观察实证或显式 `--enforce-gates` 时阻断虚假 pass。 */
 export async function evaluatePassBlockers({
-  mainRoot, targetRoot, gitDir, taskId, ledger, headSha, enforceGates = false, humanApproved = false,
+  mainRoot, targetRoot, gitDir, taskId, ledger, headSha, enforceGates = false, humanApproved = false, receipt = null, opts = {},
 }) {
   const blockers = []
   if (ledger?.lastVerifyExitCode !== null && ledger?.lastVerifyExitCode !== undefined && ledger.lastVerifyExitCode !== 0) {
     blockers.push(`任务账本 lastVerifyExitCode=${ledger.lastVerifyExitCode}（verify 未通过）`)
   }
   const evidence = gitDir && taskId ? readVerificationEvidence(gitDir, taskId) : null
-  if (evidence && (!headSha || headSha === 'UNBORN' || evidence.headSha === headSha)) {
-    const failedGate = Object.entries(evidence.gates ?? {}).find(([, g]) => g && g.headSha === evidence.headSha && g.exitCode !== 0)
-    if (evidence.exitCode !== 0 || failedGate) {
-      blockers.push(`evidence.json 记录存在失败门禁（${failedGate ? failedGate[0] : `exit=${evidence.exitCode}`}）`)
+  if (evidence) {
+    if (evidence.dirty === true) {
+      blockers.push('evidence.json 处于脏工作区状态（dirty=true）')
+    }
+    if (headSha && headSha !== 'UNBORN' && evidence.headSha && evidence.headSha !== headSha) {
+      blockers.push(`evidence.headSha (${evidence.headSha.slice(0, 7)}) 与当前 HEAD (${headSha.slice(0, 7)}) 不一致`)
+    } else if (!headSha || headSha === 'UNBORN' || evidence.headSha === headSha) {
+      const failedGate = Object.entries(evidence.gates ?? {}).find(([, g]) => g && g.headSha === evidence.headSha && (g.exitCode !== 0 || g.errorOnly === true || g.executed === false || g.succeeded === false))
+      if (evidence.exitCode !== 0 || evidence.errorOnly === true || failedGate) {
+        blockers.push(`evidence.json 记录存在失败或空跑门禁（${failedGate ? failedGate[0] : `exit=${evidence.exitCode}`}）`)
+      }
+    }
+  }
+
+  const hasAgentsProfile = Boolean(mainRoot && existsSync(join(mainRoot, 'AGENTS.md')))
+  const profile = mainRoot ? parseAgentsProfile(mainRoot) : null
+  let filesRes = null
+  let changedFiles = []
+  if (targetRoot && (await hasCommits(targetRoot))) {
+    const ref = ledger?.baseSha || ledger?.baseBranch
+    filesRes = ref ? await gitDiffRawEntriesAndText(targetRoot, `${ref}..HEAD`) : { ok: false, entries: [] }
+    changedFiles = filesRes.ok ? filesRes.entries.filter((e) => e.status !== 'D').map((e) => e.file) : []
+  }
+
+  const shouldEnforceSmokeOnPass = Boolean(
+    enforceGates
+    || receipt?.mechanicalPackSeen
+    || receipt?.empiricalVerified
+    || evidence
+    || profile?.smokeVerify,
+  )
+  if (hasAgentsProfile && changedFiles.length > 0 && profile && shouldEnforceSmokeOnPass) {
+    const pol = determineWorkflowPolicy({
+      changedFiles,
+      caseType: ledger?.caseType ?? 3,
+      highRiskGlobs: profile.highRisk,
+      doNotEditGlobs: profile.doNotEdit,
+      visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+      profile,
+      hasCiWorkflow: hasRepoCiWorkflow(targetRoot ?? mainRoot),
+    })
+    if (pol.smokeRequired && pol.riskTier !== 'low' && !isProfileExplicitNone(profile, 'smoke-verify')) {
+      const smokeOk = Boolean(
+        (evidence && (!headSha || headSha === 'UNBORN' || evidence.headSha === headSha) && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
+        || (receipt?.empiricalVerified && (!headSha || headSha === 'UNBORN' || receipt.empiricalVerified.headSha === headSha) && receipt.empiricalVerified.executed !== false && !receipt.empiricalVerified.errorOnly && receipt.empiricalVerified.smokeExecuted === true),
+      )
+      const e2eInput = Boolean(
+        (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+        || opts['visual-checked']
+        || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim()),
+      )
+      const e2eObsOk = Boolean(
+        hasValidE2eObservationOnHead(evidence, headSha)
+        || hasValidE2eObservationOnHead(receipt?.empiricalVerified, headSha)
+        || e2eInput
+        || (evidence?.visualCheckEvidence && (!headSha || evidence.visualVerifiedHead === headSha)),
+      )
+      if (!smokeOk || !e2eObsOk) {
+        blockers.push(`缺少当前 HEAD 的 E2E 运行与观察实证（smokeVerifiedOnHead=${smokeOk}, e2eObservation=${e2eObsOk}）`)
+      }
     }
   }
 
@@ -457,12 +514,8 @@ export async function evaluatePassBlockers({
     if (!ledger?.verifiedHead || (headSha && headSha !== 'UNBORN' && ledger.verifiedHead !== headSha)) {
       blockers.push(`--enforce-gates: verifiedHead (${String(ledger?.verifiedHead ?? 'null').slice(0, 7)}) 与当前 HEAD (${String(headSha ?? '').slice(0, 7)}) 不一致`)
     }
-    const profile = parseAgentsProfile(mainRoot)
-    if (targetRoot && (await hasCommits(targetRoot))) {
-      const ref = ledger?.baseSha || ledger?.baseBranch
-      const filesRes = ref ? await gitDiffRawEntriesAndText(targetRoot, `${ref}..HEAD`) : { ok: false, entries: [] }
-      const changedFiles = filesRes.ok ? filesRes.entries.filter((e) => e.status !== 'D').map((e) => e.file) : []
-      if (profile.archRules?.length && changedFiles.length > 0) {
+    if (targetRoot && filesRes) {
+      if (profile?.archRules?.length && changedFiles.length > 0) {
         const arch = evaluateArchRules(targetRoot, changedFiles, profile.archRules)
         if (!arch.ok) blockers.push(`--enforce-gates: 存在 ${arch.violations.length} 处 arch-rules 禁引违规`)
       }

@@ -166,7 +166,7 @@ export function registerLifecycleCases(cases) {
           if (fin.status !== 0) return `finalize 跑不通：${String(fin.stderr).slice(0, 220)}`
         }
         if (out.phase === "needs-verify") {
-          const ver = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", "lc", "--mode", "gate", "--json"], { cwd: dir })
+          const ver = await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", "lc", "--mode", "gate", "--e2e-evidence", "lifecycle cli exit=0", "--json"], { cwd: dir })
           if (ver.status !== 0) return `verify 跑不通：${String(ver.stderr).slice(0, 220)}`
         }
 

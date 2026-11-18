@@ -5,7 +5,7 @@ status: done
 created: 2026-11-17
 updated: 2026-11-18
 issue: 50
-pr: null
+pr: 67
 branch: feat/platform-and-docs
 owner: FiretrUCK666
 approved: false

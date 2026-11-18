@@ -159,7 +159,7 @@ function normalizeParsedArgs(cli) {
   }
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   if (argv.includes('--help') || argv.includes('-h')) {
     printHelp()
     return 0
@@ -185,6 +185,10 @@ async function main(argv = process.argv.slice(2)) {
       usageHint: 'govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|retro|release-prep] [dir]',
     })
     opts = normalizeParsedArgs(cli)
+    if (runtimeOpts && typeof runtimeOpts === 'object') {
+      if (runtimeOpts._ghProbe !== undefined) opts._ghProbe = runtimeOpts._ghProbe
+      if (runtimeOpts._ghClient !== undefined) opts._ghClient = runtimeOpts._ghClient
+    }
   } catch (err) {
     process.stderr.write(`${err.message.startsWith('Error:') ? err.message : `Error: ${err.message}`}\n`)
     return err.exitCode ?? 2
@@ -346,7 +350,10 @@ async function finishAudit({
   const issues = opts.issues ? buildIssues(findings) : undefined
   let applyResult
   if (opts.issues && opts.applyIssues && issues) {
-    applyResult = await applyGitHubIssues(workTreeRoot, issues)
+    applyResult = await applyGitHubIssues(workTreeRoot, issues, {
+      _ghProbe: opts._ghProbe,
+      _ghClient: opts._ghClient,
+    })
     if (applyResult.error) {
       process.stderr.write(`Error: ${applyResult.error}\n`)
       return 1

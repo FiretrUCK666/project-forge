@@ -1278,6 +1278,21 @@ export const INJECTIONS = [
     expect: 'scanOutboundLinks 深度上限越界 fail-closed',
   },
   {
+    id: 'I145',
+    what: 'review-ledger 写操作退回裸 probeGitHubEnv（无 GH_TOKEN 时 gh CLI 凭据静默降级为 tier=none）',
+    file: 'kit/skills/dev-review/scripts/review-ledger.mjs',
+    from: '      ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls })))',
+    to: '      ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls })))',
+    alsoPatches: [
+      {
+        file: 'kit/skills/dev-review/scripts/review-ledger.mjs',
+        from: '  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,',
+        to: '  parsePrNumber, parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveContributorIdentity,',
+      },
+    ],
+    expect: '写操作必须联网探通道',
+  },
+  {
     id: 'I146',
     what: 'computeArtifactPlan 跳过 AGENTS.md 取舍中 license 选定逻辑',
     file: 'scripts/survey.mjs',

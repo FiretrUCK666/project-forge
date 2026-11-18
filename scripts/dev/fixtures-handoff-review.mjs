@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, issueTokenFor, loadPreflight,
-  readDirRefs, rmTree, runAbsAsync, runNode, survey, textsOf, tmpProject,
+  readDirRefs, rmTree, runAbs, runAbsAsync, runNode, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
+import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 
 
 /** 交接包与审核：角色边界、现在这一步、实证佐证。 */
@@ -411,38 +412,257 @@ cases.push(["交接包第一眼就是现在这一步", async () => {
   return true
 }])
 
-// 同一个「写操作前不联网探」的洞，在认领、归档、提审、合并、清理四处各犯一次。
-// 逐处加参数是打补丁——下一个写操作忘加，洞再来一次。
-// 所以判据要盯住**接口语义**：写操作不许走「不联网」的探测。
+// 同一个「写操作前不联网探」的洞，在认领、归档、提审、合并、清理各处反复出现。
+// 所以判据要盯住全量静态门禁、shared 导出、只读惰性非回归，以及不传 mock 的真实子进程双态。
 cases.push(["写操作必须联网探通道，不许静默降级成本地记账", async () => {
-  const { readFileSync: rf, readdirSync } = await import("node:fs")
-  const { join } = await import("node:path")
+  const sharedMod = await import("../../kit/skills/lib/shared.mjs")
+  if (typeof sharedMod.probeForWrite !== "function") return "shared.mjs 缺少 probeForWrite 导出"
+  const { probeForWrite } = await import("../../kit/skills/lib/platform.mjs")
+  if (typeof probeForWrite !== "function") return "platform.mjs probeForWrite 没导出"
 
-  // 写操作所在的文件。清单来自「这些命令会不会改平台状态」。
-  const writeFiles = [
-    "kit/skills/dev-flow/scripts/flow-merge.mjs",
-    "kit/skills/dev-flow/scripts/flow-lifecycle.mjs",
-    "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
-    "kit/skills/dev-flow/scripts/flow-sync.mjs",
+  // C3：全量 kit/skills/ 静态门禁 + 合成正反双向（含注释欺骗/键序倒置/多行/probeNetwork:false）
+  const realViolations = scanKitWriteProbeViolations(collectKitWriteProbeTargets(SKILL_ROOT))
+  if (realViolations.length > 0) {
+    return `全量扫描检出写路径未联网探测：${realViolations.map((v) => `${v.file}:${v.line}(${v.rule})`).join("; ")}`
+  }
+  const synOk = scanKitWriteProbeViolations([
+    { file: "kit/skills/dev-flow/scripts/ro.mjs", text: "await probeGitHubEnv({ cwd, remoteUrls, probeNetwork: Boolean(opts.probeAuth) })\n" },
+    { file: "kit/skills/dev-flow/scripts/ro2.mjs", text: "await probeGitHubEnv({\n  remoteUrls,\n  cwd,\n  probeNetwork: true,\n})\n" },
+  ])
+  if (synOk.length > 0) return `合法只读 probeGitHubEnv 被误报：${JSON.stringify(synOk)}`
+
+  const synBadSamples = [
+    ["键序倒置", "await probeGitHubEnv({ remoteUrls, cwd })"],
+    ["多行参数", "await probeGitHubEnv({\n  remoteUrls,\n  cwd,\n})"],
+    ["probeNetwork:false", "await probeGitHubEnv({ cwd, remoteUrls, probeNetwork: false })"],
+    ["写入口缺probeForWrite", "await ghClient.createIssue({ repo, title })\nawait backend.postComment({ repo, number, body })"],
+    ["仅注释出现probeForWrite", "// await probeForWrite({ cwd })\nawait backend.postComment({ repo, number, body })"],
   ]
-
-  for (const f of writeFiles) {
-    const src = rf(f, "utf8")
-    if (!src.includes("probeForWrite")) {
-      return `${f} 是写操作，但没有走 probeForWrite`
-    }
-    // 反向：不许留下裸的「不联网」探测——那正是这个洞的形状
-    const bare = /probeGitHubEnv\(\{\s*cwd:[^}]*\}\)/.exec(src)
-    if (bare) {
-      return `${f} 还留着一处裸探测：${bare[0].slice(0, 60)}`
-    }
+  for (const [label, sample] of synBadSamples) {
+    const hits = scanKitWriteProbeViolations([{ file: "kit/skills/dev-flow/scripts/syn.mjs", text: sample }])
+    if (hits.length === 0) return `静态扫描器漏放合成违规样本（${label}）`
   }
 
-  // 正向：probeForWrite 真的联网
-  const { probeForWrite } = await import("../../kit/skills/lib/platform.mjs")
-  if (typeof probeForWrite !== "function") return "probeForWrite 没导出"
+  // C2 + C1：真实 fake-gh 沙盒与孤立 Git/Home 环境（绝不传 _ghProbe/_ghClient）
+  const sb = tmpProject({})
+  const binDir = join(sb, "bin")
+  const isoHome = join(sb, "home")
+  mkdirSync(binDir, { recursive: true })
+  mkdirSync(isoHome, { recursive: true })
+  const fakeGhJs = join(binDir, "fake-gh.mjs")
+  writeFileSync(fakeGhJs, [
+    "import { appendFileSync } from 'node:fs'",
+    "const args = process.argv.slice(2)",
+    "if (process.env.FAKE_GH_LOG) appendFileSync(process.env.FAKE_GH_LOG, args.join(' ') + '\\n')",
+    "const ok = process.env.FAKE_GH_AUTH === '1'",
+    "if (args[0] === 'auth' && args[1] === 'status') {",
+    "  if (ok) { process.stdout.write('github.com\\n  Logged in to github.com account alice (oauth_token)\\n'); process.exit(0) }",
+    "  process.stderr.write('You are not logged in to any GitHub hosts.\\n'); process.exit(1)",
+    "}",
+    "if (!ok) process.exit(1)",
+    "if (args[0] === 'issue' && args[1] === 'create') { process.stdout.write('https://github.com/acme/demo/issues/101\\n'); process.exit(0) }",
+    "if (args[0] === 'issue' && args[1] === 'edit') process.exit(0)",
+    "if (args[0] === 'pr' && (args[1] === 'merge' || args[1] === 'edit')) process.exit(0)",
+    "if (args[0] === 'pr' && args[1] === 'view') {",
+    "  process.stdout.write(JSON.stringify({ number: Number(args[2]) || 91, title: 'p', state: 'MERGED', body: '', url: 'https://github.com/acme/demo/pull/91', headRefName: 'fix/mq', baseRefName: 'main', mergedAt: '2026-11-18T00:00:00Z', author: { login: 'alice' } })); process.exit(0)",
+    "}",
+    "if (args[0] === 'api') {",
+    "  const ep = args[1] || ''",
+    "  if (ep.includes('/comments')) { process.stdout.write(JSON.stringify({ id: 1, html_url: 'https://github.com/acme/demo/issues/1#c1', body: '' })); process.exit(0) }",
+    "  if (ep.includes('/check-runs')) { process.stdout.write(JSON.stringify({ total_count: 1, check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }] })); process.exit(0) }",
+    "  if (ep.includes('/status')) { process.stdout.write(JSON.stringify({ state: 'success', statuses: [] })); process.exit(0) }",
+    "}",
+    "process.exit(1)",
+  ].join("\n"), "utf8")
+  if (process.platform === "win32") {
+    writeFileSync(join(binDir, "gh.cmd"), `@echo off\r\n"${process.execPath}" "${fakeGhJs}" %*\r\n`, "utf8")
+  } else {
+    const shPath = join(binDir, "gh")
+    writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${fakeGhJs}" "$@"\n`, "utf8")
+    chmodSync(shPath, 0o755)
+  }
 
-  return true
+  const sepPath = process.platform === "win32" ? ";" : ":"
+  const childEnv = (authOk, logFile) => {
+    const env = { ...process.env }
+    delete env.GH_TOKEN; delete env.GITHUB_TOKEN; delete env.PF_MCP_GITHUB; delete env.MCP_GITHUB_AVAILABLE; delete env.Path
+    env.PATH = `${binDir}${sepPath}${process.env.PATH ?? process.env.Path ?? ""}`
+    env.PF_NO_REAL_AUTH_PROBE = "0"
+    env.FAKE_GH_AUTH = authOk ? "1" : "0"
+    env.FAKE_GH_LOG = logFile
+    env.HOME = isoHome; env.USERPROFILE = isoHome; env.XDG_CONFIG_HOME = isoHome
+    env.GIT_CONFIG_NOSYSTEM = "1"; env.GIT_CONFIG_GLOBAL = ""; env.SSH_AUTH_SOCK = ""
+    return env
+  }
+
+  const dir = tmpProject({
+    ".gitignore": ".worktrees/\n",
+    "package.json": '{"name":"demo","version":"1.0.0","repository":"https://github.com/acme/demo.git"}\n',
+    "AGENTS.md": "```yaml\nquick-test: exit 0\nfull-test: exit 0\nmerge-gate: exit 0\n```\n",
+    "README.md": "# demo\n",
+    "src/app.mjs": "export const v = 1\n",
+  })
+  try {
+    gitInit(dir, { branch: "main", name: "alice", email: "alice@example.com", origin: "https://github.com/acme/demo.git" })
+    gitSync(dir, ["config", "core.autocrlf", "false"])
+    gitSync(dir, ["branch", "old-base"])
+    writeFileSync(join(dir, "upstream.mjs"), "export const up = 1\n")
+    gitCommitFast(dir, "advance main", { files: ["upstream.mjs"], name: "alice", email: "alice@example.com" })
+
+    const { resolveRepoRoots } = await import("../../kit/skills/lib/shared.mjs")
+    const { inspectWorkspace } = await import("../../kit/skills/dev-flow/scripts/flow-inspect.mjs")
+    const { writeTaskLedger, readTaskLedger } = await import("../../kit/skills/lib/ledger.mjs")
+    const { runCli: runGovernCli } = await import("../../kit/skills/dev-govern/scripts/govern-audit.mjs")
+    const roots = await resolveRepoRoots(dir)
+
+    // 非回归：只读 inspectWorkspace 在无 --probe-auth 时绝不调 gh auth status
+    const logRo = join(sb, "ro.log")
+    const envKeys = ["PF_NO_REAL_AUTH_PROBE", "GH_TOKEN", "GITHUB_TOKEN", "PF_MCP_GITHUB", "MCP_GITHUB_AVAILABLE", "FAKE_GH_LOG", "FAKE_GH_AUTH", "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "SSH_AUTH_SOCK"]
+    const saved = Object.fromEntries(envKeys.map((k) => [k, Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined]))
+    const savedPaths = Object.getOwnPropertyNames(process.env).filter((k) => k.toLowerCase() === "path").map((k) => [k, process.env[k]])
+    try {
+      delete process.env.Path
+      delete process.env.PATH
+      Object.assign(process.env, childEnv(true, logRo))
+      delete process.env.GH_TOKEN
+      delete process.env.GITHUB_TOKEN
+      if (!process.env.PATH || !process.env.PATH.includes(binDir)) {
+        return `测试隔离环境丢失 PATH：PATH=${String(process.env.PATH)}`
+      }
+      const ro = await inspectWorkspace(dir, { roots })
+      if (ro.github.trackB.tier !== "none" || existsSync(logRo)) {
+        return `只读 inspectWorkspace 破坏了惰性默认：tier=${ro.github.trackB.tier}, logged=${existsSync(logRo)}`
+      }
+    } finally {
+      delete process.env.Path
+      delete process.env.PATH
+      for (const [pk, pv] of savedPaths) if (pv !== undefined) process.env[pk] = pv
+      for (const k of envKeys) {
+        if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]
+      }
+    }
+
+    // 1. flow.mjs start --create-issue（正向进 gh-cli 建单 + 反向进 ACTION_REQUIRED_CREATE_ISSUE_DELEGATED exit 4）
+    const logCiPos = join(sb, "ci-pos.log")
+    const ciPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-pos", "--slug", "ci-pos", "--create-issue", "--title", "Real Issue", "--case", "3", "--json"], { cwd: dir, env: childEnv(true, logCiPos), windowsHide: true })
+    if (ciPos.status !== 0) return `start --create-issue 正向失败(${ciPos.status})：${ciPos.stderr || ciPos.stdout}`
+    const ciPosJson = JSON.parse(ciPos.stdout)
+    if (ciPosJson.createdIssue?.number !== 101 || !readFileSync(logCiPos, "utf8").includes("issue create")) {
+      return `start --create-issue 未走 gh-cli 建单：${ciPos.stdout}`
+    }
+    const logCiNeg = join(sb, "ci-neg.log")
+    const ciNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "ci-neg", "--slug", "ci-neg", "--create-issue", "--title", "Neg Issue", "--case", "3", "--json"], { cwd: dir, env: childEnv(false, logCiNeg), windowsHide: true })
+    if (ciNeg.status !== 4 || !ciNeg.stdout.includes("ACTION_REQUIRED_CREATE_ISSUE_DELEGATED")) {
+      return `start --create-issue 反向未阻断为 exit 4：status=${ciNeg.status}, out=${ciNeg.stdout}, err=${ciNeg.stderr}`
+    }
+
+    // 2. review-pack.mjs record（正向 real gh-cli 双写 + 反向 offlineOrNoCreds + delegatedPayloads）
+    const wtPos = join(dir, ".worktrees", "impl-ci-pos")
+    writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 3\n")
+    gitCommitFast(wtPos, "r1", { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
+    writeTaskLedger(dir, { ...readTaskLedger(dir, "ci-pos"), prNumber: 88, linkedIssues: [77] })
+    const logRecPos = join(sb, "rec-pos.log")
+    const recPos = runAbs("kit/skills/dev-review/scripts/review-pack.mjs", [
+      "record", "--task", "ci-pos", "--round", "1", "--verdict", "pass", "--reviewer-id", "rev-x",
+      "--review-token", await issueTokenFor(dir, "ci-pos", 1), "--evidence", "real fake-gh verified", "--json",
+    ], { cwd: dir, env: childEnv(true, logRecPos), windowsHide: true })
+    const recPosJson = recPos.status === 0 ? JSON.parse(recPos.stdout) : null
+    if (!recPosJson?.githubSync?.synced || !readFileSync(logRecPos, "utf8").includes("/issues/88/comments")) {
+      return `review-pack record 正向未走 gh-cli 双写：status=${recPos.status}, out=${recPos.stdout}, err=${recPos.stderr}`
+    }
+    writeFileSync(join(wtPos, "src/app.mjs"), "export const v = 4\n")
+    gitCommitFast(wtPos, "r2", { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
+    const logRecNeg = join(sb, "rec-neg.log")
+    const recNeg = runAbs("kit/skills/dev-review/scripts/review-pack.mjs", [
+      "record", "--task", "ci-pos", "--round", "2", "--verdict", "pass", "--reviewer-id", "rev-y",
+      "--review-token", await issueTokenFor(dir, "ci-pos", 2), "--evidence", "real fake-gh negative", "--json",
+    ], { cwd: dir, env: childEnv(false, logRecNeg), windowsHide: true })
+    const recNegSync = recNeg.status === 0 ? JSON.parse(recNeg.stdout).githubSync : null
+    if (recNeg.status !== 0 || recNegSync?.offlineOrNoCreds !== true || recNegSync?.tier !== "none" || (recNegSync?.delegatedPayloads?.targets?.length ?? 0) < 2) {
+      return `review-pack record 反向未安全降级：status=${recNeg.status}, out=${recNeg.stdout}`
+    }
+
+    // 3. flow-batch merge-queue（正向真合并 + 反向绝不虚报 merged）
+    for (const [tid, pr] of [["mq-pos", 91], ["mq-neg", 92]]) {
+      await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", tid, "--case", "2", "--slug", tid, "--implementer", "alice"], { cwd: dir })
+      const wt = join(dir, ".worktrees", `impl-${tid}`)
+      writeFileSync(join(wt, "src/app.mjs"), `export const v = '${tid}'\n`)
+      gitCommitFast(wt, tid, { files: ["src/app.mjs"], name: "alice", email: "alice@example.com" })
+      await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["verify", "--task", tid, "--mode", "full"], { cwd: dir })
+      await runAbsAsync("kit/skills/dev-review/scripts/review-pack.mjs", ["record", "--task", tid, "--round", "1", "--verdict", "pass", "--reviewer-id", "rev-mq", "--review-token", await issueTokenFor(dir, tid, 1), "--evidence", "mq verified"], { cwd: dir })
+      writeTaskLedger(dir, { ...readTaskLedger(dir, tid), prNumber: pr })
+    }
+    const logMqPos = join(sb, "mq-pos.log")
+    const mqPos = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["batch", "merge-queue", "--tasks", "mq-pos", "--json"], { cwd: dir, env: childEnv(true, logMqPos), windowsHide: true })
+    const mqPosJson = mqPos.status === 0 ? JSON.parse(mqPos.stdout) : null
+    if (!mqPosJson?.ok || mqPosJson?.processed?.[0]?.status !== "merged" || !readFileSync(logMqPos, "utf8").includes("pr merge 91")) {
+      return `flow-batch 正向未走 gh-cli 合并：status=${mqPos.status}, out=${mqPos.stdout}, err=${mqPos.stderr}`
+    }
+    const logMqNeg = join(sb, "mq-neg.log")
+    const mqNeg = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["batch", "merge-queue", "--tasks", "mq-neg", "--json"], { cwd: dir, env: childEnv(false, logMqNeg), windowsHide: true })
+    const mqNegJson = mqNeg.stdout ? JSON.parse(mqNeg.stdout) : null
+    if (mqNeg.status === 0 || mqNegJson?.ok !== false || mqNegJson?.processed?.[0]?.status === "merged") {
+      return `flow-batch 反向虚报合并成功：status=${mqNeg.status}, out=${mqNeg.stdout}`
+    }
+
+    // 4. flow-sync（有 prNumber / parentPrNumber 时无需 --probe-auth 自动联网探通道；无则不探）
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-pr", "--case", "2", "--slug", "sy-pr", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    const wtSy = join(dir, ".worktrees", "impl-sy-pr")
+    writeFileSync(join(wtSy, "sy-pr.mjs"), "export const s = 1\n")
+    gitCommitFast(wtSy, "sy-pr commit", { files: ["sy-pr.mjs"], name: "alice", email: "alice@example.com" })
+    writeTaskLedger(dir, { ...readTaskLedger(dir, "sy-pr"), prNumber: 95 })
+    const logSy = join(sb, "sy.log")
+    const syRes = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["sync", "--task", "sy-pr", "--onto", "main", "--json"], { cwd: dir, env: childEnv(true, logSy), windowsHide: true })
+    const syJson = syRes.status === 0 ? JSON.parse(syRes.stdout) : null
+    if (!syJson?.prBaseUpdate?.ok || !readFileSync(logSy, "utf8").includes("pr edit 95")) {
+      return `flow-sync 有 prNumber 时未自动触发 probeForWrite：status=${syRes.status}, out=${syRes.stdout}, err=${syRes.stderr}`
+    }
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-par", "--case", "2", "--slug", "sy-par", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    writeTaskLedger(dir, { ...readTaskLedger(dir, "sy-par"), parentBranch: "main", parentPrNumber: 94 })
+    const logSyPar = join(sb, "sy-par.log")
+    const syParRes = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["sync", "--task", "sy-par", "--json"], { cwd: dir, env: childEnv(true, logSyPar), windowsHide: true })
+    if (syParRes.status !== 0 || !readFileSync(logSyPar, "utf8").includes("pr view 94")) {
+      return `flow-sync 有 parentPrNumber 时未自动触发 probeForWrite：status=${syParRes.status}, log=${existsSync(logSyPar) ? readFileSync(logSyPar, "utf8") : "none"}`
+    }
+    await runAbsAsync("kit/skills/dev-flow/scripts/flow.mjs", ["start", "--task", "sy-none", "--case", "2", "--slug", "sy-none", "--base", "old-base", "--implementer", "alice"], { cwd: dir })
+    const logSyNone = join(sb, "sy-none.log")
+    const syNoneRes = runAbs("kit/skills/dev-flow/scripts/flow.mjs", ["sync", "--task", "sy-none", "--onto", "main", "--json"], { cwd: dir, env: childEnv(true, logSyNone), windowsHide: true })
+    if (syNoneRes.status !== 0 || existsSync(logSyNone)) {
+      return `flow-sync 无 PR/父 PR 且无 --probe-auth 时不应探测网络：status=${syNoneRes.status}, logged=${existsSync(logSyNone)}`
+    }
+
+    // 5. govern-state / govern-audit（正向 real gh-cli 建单 + 反向报 gh CLI / GitHub token 错误 + runtimeOpts 透传）
+    writeFileSync(join(dir, "src/leak.mjs"), `const tok = '${"ghp_" + "x".repeat(36)}'\n`)
+    gitCommitFast(dir, "add finding", { files: ["src/leak.mjs"], name: "alice", email: "alice@example.com" })
+    const logGovPos = join(sb, "gov-pos.log")
+    const govPos = runAbs("kit/skills/dev-govern/scripts/govern-audit.mjs", ["issues", dir, "--apply-issues", "--json"], { cwd: dir, env: childEnv(true, logGovPos), windowsHide: true })
+    const govPosJson = govPos.status === 0 ? JSON.parse(govPos.stdout) : null
+    if (!govPosJson?.applyResult?.applied?.length || !readFileSync(logGovPos, "utf8").includes("issue create")) {
+      return `govern-audit issues 正向未走 gh-cli 建单：status=${govPos.status}, out=${govPos.stdout}, err=${govPos.stderr}`
+    }
+    const logGovNeg = join(sb, "gov-neg.log")
+    const govNeg = runAbs("kit/skills/dev-govern/scripts/govern-audit.mjs", ["issues", dir, "--apply-issues", "--json"], { cwd: dir, env: childEnv(false, logGovNeg), windowsHide: true })
+    if (govNeg.status === 0 || !/gh.*CLI|GitHub token/i.test(govNeg.stderr)) {
+      return `govern-audit issues 反向未返回 gh CLI / GitHub token 错误：status=${govNeg.status}, err=${govNeg.stderr}`
+    }
+    let forwarded = false
+    const origOut = process.stdout.write.bind(process.stdout)
+    process.stdout.write = () => true
+    let rtCode = 1
+    try {
+      rtCode = await runGovernCli(["issues", dir, "--apply-issues", "--json"], {
+        _ghProbe: { env: { providerId: "github", trackB: { tier: "gh-cli" } }, client: { tier: "gh-cli", createIssue: async () => { forwarded = true; return { ok: true, number: 1, url: "u" } } } },
+      })
+    } finally {
+      process.stdout.write = origOut
+    }
+    if (rtCode !== 0 || !forwarded) return `govern-audit main/runCli 未透传 runtimeOpts._ghProbe：code=${rtCode}, forwarded=${forwarded}`
+
+    return true
+  } finally {
+    rmTree(dir)
+    rmTree(sb)
+  }
 }])
 
 // 审核阶段在归档**之后**：文档已搬进 docs/archive/，而且搬动发生在实施位里，
@@ -527,5 +747,27 @@ cases.push(["记审查结论必须交实证佐证", async () => {
 
     return true
   } finally { rmTree(dir) }
+}])
+
+cases.push(["子进程 stdio 流错误与早期关闭不崩溃", async () => {
+  const { EventEmitter } = await import("node:events")
+  const { attachChildStreamErrorGuards, execSafe, execShellCommand } = await import("../../kit/skills/lib/exec.mjs")
+
+  const fakeChild = { stdin: new EventEmitter(), stdout: new EventEmitter(), stderr: new EventEmitter() }
+  attachChildStreamErrorGuards(fakeChild)
+  for (const name of ["stdin", "stdout", "stderr"]) {
+    if (fakeChild[name].listenerCount("error") < 1) return `未挂载 ${name} error 监听器`
+    fakeChild[name].emit("error", Object.assign(new Error("read ENOTCONN"), { code: "ENOTCONN" }))
+  }
+  attachChildStreamErrorGuards(null)
+  attachChildStreamErrorGuards({ stdin: null, stdout: new EventEmitter(), stderr: null })
+
+  const r1 = await execSafe(process.execPath, ["-e", "process.stdout.destroy();process.stderr.destroy();"], { input: "x".repeat(512), cwd: process.cwd(), timeout: 5000 })
+  if (r1.timedOut) return "execSafe 早期销毁 stdio 后超时"
+
+  const r2 = await execShellCommand(`${JSON.stringify(process.execPath)} -e "process.stdout.destroy();process.stderr.destroy();"`, process.cwd(), { timeoutMs: 5000 })
+  if (r2.timedOut) return "execShellCommand 早期销毁 stdio 后超时"
+
+  return true
 }])
 }

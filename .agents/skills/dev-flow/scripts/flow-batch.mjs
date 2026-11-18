@@ -15,7 +15,7 @@ import {
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, readRefsFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger, writeTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { evaluateNextState, hasRepoCiWorkflow } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
@@ -194,7 +194,7 @@ async function handleMergeQueue(opts, roots) {
       const canUseGhApi = Boolean(ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull)
       const needsOnlineRemoteMerge = Boolean(canUseGhApi && ledger.prNumber && !opts['trial-local'])
       if (needsOnlineRemoteMerge && !sharedGhProbe && !opts._ghClient) {
-        sharedGhProbe = await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls })
+        sharedGhProbe = await probeForWrite({ cwd: roots.mainRoot, remoteUrls })
       }
       const backend = createTaskBackend({
         role: ledger.role,

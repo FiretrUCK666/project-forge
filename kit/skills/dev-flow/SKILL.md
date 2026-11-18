@@ -43,7 +43,8 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" sync [--task <id>] [--onto <bran
 node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm] [--allow-outbound <路径>]
 
-# 3. 实施者认领 / 释放 / 归档锁（--include-master-prd）与分层实证
+# 3. 实施者探索 / 认领 / 释放 / 归档锁（--include-master-prd）与分层实证
+node ".agents/skills/dev-flow/scripts/flow.mjs" explore [--task <id>] [--tier <tier>] [--focus <dir>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N|URL>] [--takeover --reason "<接管原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync] [--include-master-prd]

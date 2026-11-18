@@ -493,7 +493,7 @@ export function evaluateNextState({
     blockingReasons.push('BLOCKED_NOT_CLAIMED')
     nextAction = '先认领再动手：认领会往关联 Issue 留开工痕迹，并记下谁在做'
     command = `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${t.taskId}`
-  } else if (t.status !== 'merged' && t.role !== 'inbound-external-pr' && !hasExploredEvidence(t)) {
+  } else if (!['merged', 'cleaned', 'aborted'].includes(t.status) && t.role !== 'inbound-external-pr' && !hasExploredEvidence(t)) {
     phase = 'needs-explore'
     ownerRole = 'implementer'
     blockingReasons.push('BLOCKED_NOT_EXPLORED')

@@ -27,14 +27,13 @@ async function issueTokenFor(repoRoot, taskId, round) {
 }
 
 async function recordWithToken(flowScript, revScript, taskId, cwd, env, extra = []) {
-  let token = null
   const nextRes = runNodeScript(flowScript, ['next', '--task', taskId, '--json'], cwd, env)
-  if (nextRes.status === 0) {
-    try {
-      token = JSON.parse(nextRes.stdout).reviewToken ?? null
-    } catch { token = null }
+  assertOk(nextRes, `recordWithToken next (${taskId})`)
+  const nextJson = JSON.parse(nextRes.stdout)
+  const token = nextJson.reviewToken
+  if (!token) {
+    throw new Error(`recordWithToken(${taskId}) missing reviewToken in phase=${nextJson.phase}, blocking=${JSON.stringify(nextJson.blockingReasons)}`)
   }
-  if (!token) token = await issueTokenFor(cwd, taskId, Number(extra[extra.indexOf('--round') + 1]) || 1)
   return runNodeScript(revScript, ['record', '--task', taskId, ...extra,
     '--review-token', token, '--evidence', 'E2E 实测：门禁已跑，输出符合预期'], cwd, env)
 }
@@ -219,13 +218,20 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   const flowD1 = join(repoD1, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD1 = join(repoD1, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   assertOk(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--json'], repoD1, env), 'Scenario D1 start')
+  const preExploreD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
+  if (preExploreD1.phase !== 'needs-explore') {
+    throw new Error(`Scenario D1 expected needs-explore before explore, got ${preExploreD1.phase}`)
+  }
   const wtD1 = join(repoD1, '.worktrees', 'impl-d1')
   writeFiles(wtD1, { 'src/a.mjs': 'export const a = 2\n' })
   runGit(wtD1, ['add', '-A'])
   runGit(wtD1, ['commit', '-qm', 'fix: d1'])
   assertOk(runNodeScript(flowD1, ['verify', '--task', 'd1', '--mode', 'full'], wtD1, env), 'Scenario D1 verify')
   assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit')
+  assertBlocked(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'BLOCKED_NOT_EXPLORED', 'Scenario D1 un-explored merge blocked')
+  assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explore')
   const nextD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
+  if (!nextD1.reviewToken) throw new Error(`Scenario D1 missing reviewToken after explore: ${JSON.stringify(nextD1)}`)
   assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1',
     '--review-token', nextD1.reviewToken, '--evidence', 'E2E 实测：门禁已跑，输出符合预期'], repoD1, env), 'Scenario D1 review pass')
   assertOk(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'Scenario D1 merge')
@@ -248,6 +254,7 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   const flowD2 = join(repoD2, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD2 = join(repoD2, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   assertOk(runNodeScript(flowD2, ['start', '--task', 'd2', '--case', '2', '--slug', 'd2'], repoD2, env), 'Scenario D2 start')
+  assertOk(runNodeScript(flowD2, ['explore', '--task', 'd2'], repoD2, env), 'Scenario D2 explore')
   const wtD2 = join(repoD2, '.worktrees', 'impl-d2')
   writeFiles(wtD2, { 'src/g.mjs': 'export const g = 2\n' })
   runGit(wtD2, ['add', '-A'])
@@ -297,6 +304,7 @@ async function runScenarioE(pkgRoot, sandbox, env) {
   runGit(repoE, ['commit', '-qm', 'docs: add approved child1 spec'])
 
   assertOk(runNodeScript(flowE, ['start', '--task', 't-e', '--case', '3', '--slug', 'child1', '--spec', specRel, '--prd', 'docs/prd/261116-issue10-master-prd.md', '--implementer', 'bob'], repoE, env), 'Scenario E flow start')
+  assertOk(runNodeScript(flowE, ['explore', '--task', 't-e'], repoE, env), 'Scenario E flow explore')
   const wtE = join(repoE, '.worktrees', 'impl-t-e')
   writeFiles(wtE, { 'src/app.mjs': 'export const app = 2\n' })
   runGit(wtE, ['add', '-A'])
@@ -364,12 +372,14 @@ async function runScenarioF(pkgRoot, sandbox, env) {
 
   const flowF = join(repoF, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   assertOk(runNodeScript(flowF, ['start', '--task', 'p1', '--case', '1', '--slug', 'parent'], repoF, env), 'Scenario F parent start')
+  assertOk(runNodeScript(flowF, ['explore', '--task', 'p1'], repoF, env), 'Scenario F parent explore')
   const wtP = join(repoF, '.worktrees', 'impl-p1')
   writeFiles(wtP, { 'parent.mjs': 'export const p = 1\n' })
   runGit(wtP, ['add', '-A'])
   runGit(wtP, ['commit', '-qm', 'parent work'])
 
   assertOk(runNodeScript(flowF, ['start', '--task', 'c1', '--case', '1', '--slug', 'child', '--after', 'p1'], repoF, env), 'Scenario F child --after start')
+  assertOk(runNodeScript(flowF, ['explore', '--task', 'c1'], repoF, env), 'Scenario F child explore')
   const wtC = join(repoF, '.worktrees', 'impl-c1')
   writeFiles(wtC, { 'child.mjs': 'export const c = 1\n' })
   runGit(wtC, ['add', '-A'])
@@ -396,6 +406,9 @@ async function runScenarioG(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(flowG, ['start', '--task', 'ta', '--case', '1', '--slug', 'ta', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start ta')
   assertOk(runNodeScript(flowG, ['start', '--task', 'tb', '--case', '1', '--slug', 'tb', '--files', 'src/b.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tb')
   assertOk(runNodeScript(flowG, ['start', '--task', 'tc', '--case', '1', '--slug', 'tc', '--files', 'src/a.mjs', '--implementer', 'alice'], repoG, env), 'Scenario G start tc')
+  assertOk(runNodeScript(flowG, ['explore', '--task', 'ta'], repoG, env), 'Scenario G explore ta')
+  assertOk(runNodeScript(flowG, ['explore', '--task', 'tb'], repoG, env), 'Scenario G explore tb')
+  assertOk(runNodeScript(flowG, ['explore', '--task', 'tc'], repoG, env), 'Scenario G explore tc')
 
   assertBlocked(runNodeScript(flowG, ['batch', 'check-disjoint', '--tasks', 'ta,tc'], repoG, env), 'BLOCKED_OVERLAPPING_SLICE_FILES', 'Scenario G overlap check')
   const planRes = runNodeScript(flowG, ['batch', 'plan', '--tasks', 'ta,tb,tc', '--json'], repoG, env)
@@ -423,12 +436,12 @@ async function main() {
   const t0 = performance.now()
   try {
     const { pkgRoot, entryCount } = extractRealArchivePackage(sandbox)
-    runScenarioA(pkgRoot, sandbox, env)
-    runScenarioBAndC(pkgRoot, sandbox, env)
-    runScenarioD(pkgRoot, sandbox, env)
+    await runScenarioA(pkgRoot, sandbox, env)
+    await runScenarioBAndC(pkgRoot, sandbox, env)
+    await runScenarioD(pkgRoot, sandbox, env)
     await runScenarioE(pkgRoot, sandbox, env)
     await runScenarioF(pkgRoot, sandbox, env)
-    runScenarioG(pkgRoot, sandbox, env)
+    await runScenarioG(pkgRoot, sandbox, env)
     const ms = Math.round(performance.now() - t0)
     process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：7 大场景 + 跨会话 --takeover + 全部防绕过拦截成立（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0

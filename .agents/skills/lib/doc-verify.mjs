@@ -108,7 +108,7 @@ async function checkCommandClaim(root, cmd) {
   if (/^node\s+[^\n]*(?:equip(?:-ci)?\.mjs|backup\.mjs|compose-agents\.mjs)(?!.*--check\b)/i.test(cmd)) {
     return { ok: true, ran: false, why: '写入型脚手架命令，未执行' }
   }
-  if (/^node\s+[^\n]*flow\.mjs\s+(?:start|claim|finalize|merge|cleanup|submit|rework|sync)\b/i.test(cmd)
+  if (/^node\s+[^\n]*flow\.mjs\s+(?:start|claim|explore|finalize|merge|cleanup|abort|release|batch|submit|rework|sync)\b/i.test(cmd)
     || /^node\s+[^\n]*doc-plan\.mjs\s+(?:init|clarify|link|critique-pass|approve|archive|supersede)\b/i.test(cmd)) {
     return { ok: true, ran: false, why: '状态变更子命令，未执行' }
   }

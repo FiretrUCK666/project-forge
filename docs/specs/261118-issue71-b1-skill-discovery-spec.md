@@ -48,7 +48,7 @@ flowchart LR
 | --- | --- | --- |
 | `kit/skills/lib/skill-discovery.mjs` (new) | 新增 | 单源动态扫描内置 `kit/skills/`（YAML `metadata`）及 `.agents/skills/*`、隐藏容器、非隐藏 `skills/*` 非托管技能 frontmatter |
 | `kit/skills/lib/cli.mjs`、`scripts/lib/protocol.mjs` | 改造 | 清除 `KNOWN_KIT_SKILLS` / `KIT_SKILLS` / `LIGHTWEIGHT_KIT_SKILLS` 硬编码数组，改由 `skill-discovery.mjs` (new) 动态派生 |
-| `kit/skills/dev-*/SKILL.md` | 改造 | 补齐 frontmatter `metadata`（`tier`、`intent`、`script`、`order`、`fallback`），驱动动态路由渲染 |
+| `kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md`、`kit/skills/dev-govern/SKILL.md` | 改造 | 补齐 frontmatter `metadata`（`tier`、`intent`、`script`、`order`、`fallback`），驱动动态路由渲染 |
 | `scripts/lib/agents-defaults.mjs`、`scripts/compose-agents.mjs` | 改造 | 渲染动态 `{{KIT_ROUTING_ROWS}}`，融合非隐藏/隐藏容器项目自有技能 `name`/`description` 至 `意图路由` |
 | `scripts/lib/survey-reentry.mjs`、`scripts/equip.mjs`、`scripts/handoff.mjs` | 改造 | 修复 `detectKit` 自有技能提取，旧仓缺新版内置技能（未入墓碑）触发 `uninstalledKitSkills` 与 `upgrade` 无损补齐 |
 | `templates/agents-project.md`、`AGENTS.md` | 改造 | 将静态 5 行意图路由替换为 `{{KIT_ROUTING_ROWS}}` 并重生成 `AGENTS.md` |
@@ -70,7 +70,7 @@ flowchart LR
 
 1. **`kit/skills/lib/skill-discovery.mjs` (new)**：
    - 导出 `discoverKitSkills(kitSkillsRoot)`：扫描目录下含有效 `SKILL.md` 的子目录（排除 `lib`/`templates`），解析 frontmatter 与嵌套 `metadata` 块（`tier`: `'both' | 'full'`、`intent`、`script`、`order` 数字排序、`fallback`），返回按 `order` 升序排列的标准化描述符列表。
-   - 导出 `discoverCustomSkills(repoRoot, managedSet, manifest)`：同时扫描 `.agents/skills/*`、其他隐藏技能容器（`.claude/skills/*`、`.cursor/skills/*` 等仅只读探测，绝不写入）以及非隐藏 `skills/*` 目录下的 `SKILL.md`，跳过 `managedSet` 托管项，提取 `name`、`description`、`path`、`container`。
+   - 导出 `discoverCustomSkills(repoRoot, managedSet, manifest)`：同时扫描 `.agents/skills/*`、通用点前缀隐藏目录（`.*` 子目录下的 `skills/*`，跳过 `.git`/`.worktrees`/`.github`/`.agents`，仅只读探测、绝不写入）以及非隐藏 `skills/*` 目录下的 `SKILL.md`，跳过 `managedSet` 托管项，提取 `name`、`description`、`path`、`container`。
 2. **`scripts/lib/protocol.mjs` 与 `kit/skills/lib/cli.mjs`**：
    - `KIT_SKILLS`、`LIGHTWEIGHT_KIT_SKILLS`、`KNOWN_KIT_SKILLS` 由 `discoverKitSkills` 动态计算冻结（并支持传入自定义 `kitDir` 供单元测试注入临时第 6 技能目录）。
 3. **`scripts/lib/agents-defaults.mjs` 与 `templates/agents-project.md`**：
@@ -91,7 +91,7 @@ flowchart LR
 ### 实现顺序
 
 1. 在 `scripts/dev/preflight-suite.mjs` 抽出 `scripts/dev/preflight-suite-checks.mjs` (new)，并预建注册 `scripts/dev/fixtures-stageb-onboarding.mjs` (new) 与 `scripts/dev/fixtures-stageb-loop.mjs` (new) 到 `scripts/dev/fixtures.mjs`。
-2. 为 5 个 `kit/skills/dev-*/SKILL.md` 补全 `metadata` 字段并新增 `kit/skills/lib/skill-discovery.mjs` (new)。
+2. 为 `kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md` 与 `kit/skills/dev-govern/SKILL.md` 补全 `metadata` 字段并新增 `kit/skills/lib/skill-discovery.mjs` (new)。
 3. 将 `scripts/lib/protocol.mjs`、`kit/skills/lib/cli.mjs`、`kit/skills/lib/shared.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/handoff.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/agents-sections.mjs` 与 `scripts/lib/survey-reentry.mjs` 切换至动态发现，清除硬编码 5 技能枚举。
 4. 更新 `templates/agents-project.md` 为 `{{KIT_ROUTING_ROWS}}`，运行 `node scripts/compose-agents.mjs .` 与 `node scripts/equip.mjs .` 同步 `AGENTS.md` 与 `.agents/skills/`，补齐 `fixtures-equip.mjs` 与 `fixtures-stageb-onboarding.mjs` (new) 双向断言。
 
@@ -99,7 +99,7 @@ flowchart LR
 
 | 方案 | 怎么做的 | 为什么没选 | 什么情况下该改回它 |
 | --- | --- | --- | --- |
-| `kit/skills/lib/skill-discovery.mjs` 单源扫描 `metadata` + 兼容 `doc-frontmatter` | 仅用 Node 内置字符串解析读 `SKILL.md` frontmatter，零外部依赖供两端共享 | 首选：兼顾 `arch-rules` 单向引用与包分发自包含 | 若将来引入复杂多态 YAML Schema 且突破零依赖前提才改 |
+| `kit/skills/lib/skill-discovery.mjs` (new) 单源扫描 `metadata` + 兼容 `doc-frontmatter` | 仅用 Node 内置字符串解析读 `SKILL.md` frontmatter，零外部依赖供两端共享 | 首选：兼顾 `arch-rules` 单向引用与包分发自包含 | 若将来引入复杂多态 YAML Schema 且突破零依赖前提才改 |
 | 保留两处硬编码数组并靠 `preflight` 对比一致 | 继续在 `protocol.mjs` 与 `cli.mjs` 维护常量清单 | 每次增删内置技能仍须改多处源码、模板与测试，无法满足「放进第 6 技能零改源码识别」 | 若永远固定 5 个技能且放弃动态扩展能力 |
 
 ## 四、改动清单与影响面
@@ -108,7 +108,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `kit/skills/lib/skill-discovery.mjs` (new) | 新增 | 零依赖内置/自有技能目录与 YAML `metadata` 扫描器 | `protocol.mjs`、`cli.mjs`、`survey-reentry.mjs` |
 | `kit/skills/lib/cli.mjs`、`kit/skills/lib/shared.mjs` | 修改 | 移除硬编码 `KNOWN_KIT_SKILLS`，重导出动态技能发现 | 全套 `dev-*` 脚本 |
-| `kit/skills/dev-*/SKILL.md` | 修改 | 添加 `metadata.{tier,intent,script,order,fallback}` | `skill-discovery` 与动态路由 |
+| `kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md`、`kit/skills/dev-govern/SKILL.md` | 修改 | 添加 `metadata.{tier,intent,script,order,fallback}` | `skill-discovery` 与动态路由 |
 | `scripts/lib/protocol.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/agents-sections.mjs` | 修改 | 动态 `KIT_SKILLS`/`LIGHTWEIGHT_KIT_SKILLS`、`{{KIT_ROUTING_ROWS}}`、提取非隐藏/隐藏自有技能 | `compose-agents`、`equip`、`handoff` |
 | `scripts/lib/survey-reentry.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/handoff.mjs` | 修改 | `uninstalledKitSkills` 触发 `upgrade`、修复 `customSkills` 并存保留 | 目标仓 `S1–S4` 升级与接入 |
 | `templates/agents-project.md`、`AGENTS.md` | 修改 | 替换为 `{{KIT_ROUTING_ROWS}}` 并重算 `AGENTS.md`（验证体积净缩） | 所有新建与升级目标仓 |

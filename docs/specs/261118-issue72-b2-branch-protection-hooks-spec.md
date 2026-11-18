@@ -50,7 +50,7 @@ flowchart LR
 | `scripts/lib/survey-questions.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/lib/render.mjs` | 改造 | 新增 `q.branch-protection`、接入 `## 取舍` 防重问、无钩子冲突且未豁免 `no-git-hooks` 时在 `S3` 推荐命令带上 `--with-hooks` |
 | `scripts/lib/artifact-executors.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/survey-docs.mjs` | 改造 | 识别 `.githooks/` 与 `.husky/`/`lefthook` 冲突，注册 `branch-protection` / `git-hooks` 产物动作 |
 | `scripts/equip-ci.mjs`、`scripts/equip.mjs`、`scripts/survey.mjs` | 改造 | 实现 `equip-ci.mjs --protect-branch` 与 `equip.mjs --with-hooks`（写入 `.githooks/pre-push` 并配局部 `core.hooksPath`） |
-| `scripts/review.mjs`、`scripts/lib/review-helpers.mjs` | 改造 | 拆出非 `GAP` 辅助判断压降 `review.mjs <= 660` 行，补全 `gap-coverage` 配对结论 |
+| `scripts/review.mjs`、`scripts/lib/review-helpers.mjs`、`scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-gates.mjs` | 改造 | 拆出非 `GAP` 辅助判断压降 `review.mjs <= 660` 行，补全 `gap-coverage` 配对结论并同步更新 `I22c`（`inspectContract`）与 `I120`（`render`）注入目标 |
 | `templates/githooks-pre-push.sh` (new) | 新增 | 跨宿主 POSIX `pre-push` 模板：拦默认分支直推并打印 `[NEXT STEP]`，放行全零删分支与 `PF_ALLOW_DIRECT_PUSH=1` |
 | `references/remote-github.md`、`references/version-control.md` | 改造 | 固化开关 A 策略（禁默认审批人）与本地 `.githooks/` 无损共存规则 |
 | `scripts/dev/fixtures-stageb-onboarding.mjs` (new) | 修改 | 新增 `C4–C6` 正反双向用例（开关 A payload、403 降级、删分支全零放行、`preserve` 现有钩子等） |
@@ -58,7 +58,7 @@ flowchart LR
 ## 一、背景与边界声明
 
 - **要改什么**：平台 `branchProtection` 能力探针与 GitHub 开关 A 配置通道、勘察问答/产物计划/体检闭环、本地跨宿主 `.githooks/pre-push` 模板与无损安装逻辑，以及 `scripts/review.mjs` 行数重构。
-- **不改什么**：不修改除 GitHub 以外的新第三方托管平台适配器，保持 `checkPlatformLock` 干净；不动 `.claude/`/`.cursor/` 等任何 AI 宿主私有配置目录。
+- **不改什么**：不修改除 GitHub 以外的新第三方托管平台适配器，保持 `checkPlatformLock` 干净；不动任何特定 AI 宿主私有配置目录（`.*` 私有隐藏目录，除 `.agents/` 外）或私密环境。
 - **本期不做**：不默认请求或推荐 `required_approving_review_count >= 1`（会阻断单人/AI 自动合流）；不在存在 `.husky/`、`lefthook`、自定义 `core.hooksPath` 或非本工具 `.githooks/pre-push` 时强制覆写。
 - **复用既有模块**：复用 `scripts/lib/platform/github-client.mjs` HTTP 客户端、`scripts/lib/survey-gap-rules.mjs` + `scripts/dev/gap-coverage.mjs`、`kit/skills/lib/profile.mjs` 的 `readDecisions`（`## 取舍` 解析）。
 - **架构基线关系**：严格遵循 `preflight` 的 `checkPlatformSemanticParity`（`registry.mjs` 与 `kit/skills/lib/platform.mjs` 能力键位一致）及 `gap-coverage.mjs`（`GAP_RULES` 在 `scripts/review.mjs` 配对 `finding(...)`）。
@@ -84,14 +84,14 @@ flowchart LR
 
 - 若检测存在 `.husky/`、`lefthook.yml`/`.lefthook*`、自定义非 `.githooks` 的 `core.hooksPath` 或已有非本工具标识的 `.githooks/pre-push`，`equip.mjs --with-hooks` 一律 `preserve` 并输出安全共存提示，`survey.mjs` 在 `S3` 推荐命令中亦不注入 `--with-hooks`。
 - `.githooks/pre-push` 读取标准输入 `<local_ref> <local_sha> <remote_ref> <remote_sha>`：当 `local_sha` 为全 40 个 `0`（删除远端分支，兼容 `flow.mjs cleanup` 第 7 步）或设置 `PF_ALLOW_DIRECT_PUSH=1` 时立即 `exit 0`；直推默认分支则 `exit 1` 并打印 `[NEXT STEP]` 指向 `flow.mjs start` / `submit`。
-- `scripts/review.mjs` 保持所有 `GAP_RULES` 配对 `finding(...)` 调用不变，只将 `render`、`inspectContract` 与非 `GAP` 辅助迁移进 `scripts/lib/review-helpers.mjs`，把 `review.mjs` 压缩至 `<= 660` 行。
+- `scripts/review.mjs` 保持所有 `GAP_RULES` 配对 `finding(...)` 调用不变，只将 `render`、`inspectContract` 与非 `GAP` 辅助迁移进 `scripts/lib/review-helpers.mjs`，把 `review.mjs` 压缩至 `<= 660` 行，并同步更新 `scripts/dev/injections-data-core.mjs`（`I22c`：`inspectContract`）与 `scripts/dev/injections-data-gates.mjs`（`I120`：`render`）定位至 `review-helpers.mjs`。
 
 ### 实现顺序
 
-1. 先拆分 `scripts/review.mjs` 非 `GAP` 逻辑至 `scripts/lib/review-helpers.mjs` 压降行数至 `<= 660` 行并验证 `gap-coverage.mjs` 绿灯。
+1. 先拆分 `scripts/review.mjs` 非 `GAP` 逻辑至 `scripts/lib/review-helpers.mjs` 压降行数至 `<= 660` 行，同步迁移 `I22c`/`I120` 注入定位并验证 `gap-coverage.mjs` 与 `verify-injections.mjs` 绿灯。
 2. 三端对齐 `branchProtection` 能力位并在 `github-client.mjs` 与 `equip-ci.mjs` 实现开关 A 与 403 降级。
 3. 编写 `templates/githooks-pre-push.sh` (new)、`equip.mjs --with-hooks`、`survey-questions.mjs`、`survey-gap-rules.mjs` 与 `render.mjs` 的无冲突自动推荐逻辑。
-4. 更新两份 `references/` 文档并在 `scripts/dev/fixtures-stageb-onboarding.mjs` 补齐 `C4–C6` 正反双向断言。
+4. 更新两份 `references/` 文档并在 `scripts/dev/fixtures-stageb-onboarding.mjs` (new) 补齐 `C4–C6` 正反双向断言。
 
 ## 三、备选方案与否决理由
 
@@ -108,8 +108,8 @@ flowchart LR
 | `scripts/lib/platform/github-client.mjs`、`scripts/equip-ci.mjs` | 修改 | 开关 A API（禁设审批人数 `>= 1`）与 `--protect-branch` | GitHub 仓保护配置 |
 | `scripts/lib/survey-questions.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/lib/artifact-executors.mjs`、`scripts/lib/render.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/survey-docs.mjs`、`scripts/survey.mjs` | 修改 | `q.branch-protection`、钩子冲突检测、`S3` 自动推荐 `--with-hooks` | `survey` 与 `bootstrap` 用户流 |
 | `scripts/equip.mjs`、`templates/githooks-pre-push.sh` (new) | 新增 / 修改 | `--with-hooks` 无损安装本地 `.githooks/pre-push` | 跨宿主 Git 推送防护 |
-| `scripts/review.mjs`、`scripts/lib/review-helpers.mjs` | 修改 | 拆降行数并对齐 `gap-coverage` 分支保护体检 | `review`、`merge-gate` |
-| `references/remote-github.md`、`references/version-control.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` | 修改 | 规范正文对齐与 `C4–C6` 双向测试 | 维护者参照与回归套件 |
+| `scripts/review.mjs`、`scripts/lib/review-helpers.mjs`、`scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-gates.mjs` | 修改 | 拆降行数、同步迁移 `I22c`/`I120` 注入定位并对齐 `gap-coverage` 分支保护体检 | `review`、`verify-injections`、`merge-gate` |
+| `references/remote-github.md`、`references/version-control.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new) | 修改 | 规范正文对齐与 `C4–C6` 双向测试 | 维护者参照与回归套件 |
 
 - **对外可见的变化**：`survey --json` 新增 `git.capabilities.branchProtection` 与 `q.branch-protection`；新增 `equip-ci.mjs --protect-branch` 与 `equip.mjs --with-hooks` 开关。
 - **需要同步改的地方**：`.agents/skills/` 中 `kit/skills/lib/platform.mjs` 副本（执行 `node scripts/equip.mjs .`）。

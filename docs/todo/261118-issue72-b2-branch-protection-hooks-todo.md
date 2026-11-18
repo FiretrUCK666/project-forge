@@ -33,7 +33,7 @@ related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`scripts/lib/platform/registry.mjs`、`scripts/lib/platform/github.mjs`、`scripts/lib/platform/github-client.mjs`、`kit/skills/lib/platform.mjs`、`scripts/lib/survey-questions.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/lib/artifact-executors.mjs`、`scripts/lib/render.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/review-helpers.mjs`、`scripts/lib/survey-docs.mjs`、`scripts/equip-ci.mjs`、`scripts/equip.mjs`、`scripts/survey.mjs`、`scripts/review.mjs`、`templates/githooks-pre-push.sh` (new)、`references/remote-github.md`、`references/version-control.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)
+- **影响路径**：`scripts/lib/platform/registry.mjs`、`scripts/lib/platform/github.mjs`、`scripts/lib/platform/github-client.mjs`、`kit/skills/lib/platform.mjs`、`scripts/lib/survey-questions.mjs`、`scripts/lib/survey-gap-rules.mjs`、`scripts/lib/artifact-executors.mjs`、`scripts/lib/render.mjs`、`scripts/lib/equip-bootstrap.mjs`、`scripts/lib/review-helpers.mjs`、`scripts/lib/survey-docs.mjs`、`scripts/equip-ci.mjs`、`scripts/equip.mjs`、`scripts/survey.mjs`、`scripts/review.mjs`、`templates/githooks-pre-push.sh` (new)、`references/remote-github.md`、`references/version-control.md`、`scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-gates.mjs`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)
 - **复用既有模块**：`scripts/lib/platform/github-client.mjs`、`scripts/lib/survey-gap-rules.mjs`、`kit/skills/lib/profile.mjs`
 - **本期不做**：不默认请求 `required_approving_review_count >= 1`；不修改本地工单后端或非 GitHub 适配器；不覆盖已有 `.husky/`/`lefthook`
 - **门型与回滚路径**：`one-way`；合入前丢弃分支，合入后单提交 `git revert` 并重跑 `equip.mjs .` 与 `merge-gate`
@@ -51,7 +51,7 @@ related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
-| 1 | 迁出 `review.mjs` 非 `GAP` 辅助至 `review-helpers.mjs`，压至 `<= 660` 行 | `node scripts/dev/gap-coverage.mjs` 与 `review.mjs .` 通过 | `#71` 已合入 `main` |
+| 1 | 迁出 `review.mjs` 非 `GAP` 辅助至 `review-helpers.mjs`，压至 `<= 660` 行并同步更新 `injections-data-core.mjs` (`I22c`) 与 `injections-data-gates.mjs` (`I120`) | `node scripts/dev/gap-coverage.mjs`、`review.mjs .` 与 `verify-injections.mjs --only I22c --only I120` 通过 | `#71` 已合入 `main` |
 | 2 | 三端对齐 `branchProtection`，实现开关 A API、`--protect-branch`、`templates/githooks-pre-push.sh` (new) 与 `--with-hooks` 推荐逻辑 | `fixtures-stageb-onboarding.mjs` 中 `C4–C6` 双向断言由红转绿 | 步骤 1 |
 | 3 | 同步 `.agents/skills/`（`equip.mjs .`）、更新两份 `references/` 并跑通全量 `merge-gate` | 全量门禁全绿 | 步骤 2 |
 

@@ -47,10 +47,10 @@ flowchart LR
 | 模块 / 文件 | 变更性质 | 核心职责 |
 | --- | --- | --- |
 | `kit/skills/lib/workflow-policy.mjs` | 改造 | 保留 7 键 `Dev Profile`，修复 `GATE_TIER_RANK` 下 `full`/`gate` 跳过 `smoke-verify` 缺陷并强校 `e2eObservation` |
-| `kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 改造 | 支持 `verify --e2e-evidence`（兼容 `--visual-checked`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）与入账 |
+| `kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 改造 | 在 `flow.mjs` 严格 `parseStandardCli` 注册 `--e2e-evidence` 与帮助文案，支持 `verify --e2e-evidence`（兼容 `--visual-checked`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）与入账 |
 | `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 改造 | 修复 `assessBehavioralGate` `!smokeRequired` 逻辑缺陷，清除既有前端驱动工具硬编码文案；缺 E2E 实证阻断 `--include-diff` 与 `pass` |
-| `scripts/dev/preflight-contract-rules.mjs` (new)、`scripts/dev/preflight-contracts.mjs` | 新增 / 改造 | 先抽离常量与收尾校验辅助压降 `preflight-contracts.mjs <= 700` 行，并加入通用 E2E 与零具体工具名合约检查 |
-| `scripts/dev/fixtures-stageb-loop.mjs`、`injections-data-stageb.mjs` (new)、`injections-data.mjs` | 修改 / 新增 | 写入 `C15` 双向用例及覆盖 `C1..C15`/`C19` 的 `I160–I173` 故障注入集合 |
+| `scripts/dev/preflight-contract-rules.mjs` (new)、`scripts/dev/preflight-contracts.mjs`、`scripts/dev/injections-data-core.mjs` | 新增 / 改造 | 先抽离常量与收尾校验辅助压降 `preflight-contracts.mjs <= 700` 行，同步迁移 `I7`/`I9c`/`I9f` 注入目标，并加入通用 E2E 与零具体工具名合约检查 |
+| `scripts/dev/fixtures-stageb-loop.mjs` (new)、`scripts/dev/injections-data-stageb.mjs` (new)、`scripts/dev/injections-data.mjs` | 修改 / 新增 | 写入 `C15` 双向用例及覆盖 `C1..C15`/`C19` 的 `I160–I173` 故障注入集合 |
 | `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`scripts/dev/e2e-zip-harness.mjs` | 新增 / 改造 | 在解压 `git archive --format=zip` 黑盒环境下运行 Scenarios `H`、`I`、`J` 全闭环 |
 | `scripts/dev/blind-run-harness.mjs` (new) | 新增 | `$TMPDIR` 隔离真实开源仓（含带自有技能与规则已规范仓 `S1–S4` 升级）极简低提示词盲跑验收器（不入用户包，登记 `docs/TDD.md`） |
 | `templates/agents-project.md`、`SKILL.md`、`AGENTS.md`、`docs/TDD.md`、`README.md`、`README.en.md` | 改造 | 替换通用 E2E 实证文案、登记 `blind-run-harness.mjs` (new)（防孤儿报错）、同步双语 README 目录与校准全局体积 |
@@ -59,7 +59,7 @@ flowchart LR
 
 - **要改什么**：端到端门禁与策略引擎（`workflow-policy`、`review-gates`、`review-empirical`、`flow-lifecycle`）、`preflight-contracts.mjs` 行数拆分、Stage B 故障注入集（`I160+`）、离线 `zip` E2E Scenarios `H–J`、`$TMPDIR` 真实开源仓盲跑脚本及全仓文档同步。
 - **不改什么**：严禁扩张 `DEV_PROFILE_KEYS` 的 7 个标准键名（复用现有 `smoke-verify:` 键位）；不在任何通用门禁、模板或报错文案中出现具体前端/自动化端到端驱动库或客户端测试框架名称；不在非纯文档仓豁免运行时变更。
-- **本期不做**：不将 `blind-run-harness.mjs` (new) 打进随包分发的 `kit/` 或 `.gitattributes` 导出清单；不在 `$TMPDIR` 盲跑期间向任何外部开源仓库远端执行写操作或推送。
+- **本期不做**：不将 `scripts/dev/blind-run-harness.mjs` (new) 打进随包分发的 `kit/` 或 `.gitattributes` 导出清单；不在 `$TMPDIR` 盲跑期间向任何外部开源仓库远端执行写操作或推送。
 - **复用既有模块**：复用 `kit/skills/lib/profile.mjs`、`kit/skills/lib/signals.mjs`、`kit/skills/lib/escalation.mjs` (new)（`B4b` 交付）、`scripts/dev/e2e-zip-harness.mjs`、`scripts/dev/verify-injections.mjs`。
 - **架构基线关系**：同时作为 Stage B（`v9`）最后一片实施任务，`B5` 在自收口时直接通过 `flow.mjs finalize --task b5-e2e-blind-run-gate`（不传 `--include-master-prd`）实证 `C19` 与显式 `--include-master-prd` 的等价自动闭合语义。
 - **替代方案与否决理由**：若为了 E2E 门禁新增第 8 个 `Dev Profile` 键位（如 `e2e-verify:`），会迫使 `profile.mjs` 与 6 处单源契约及既有历史仓配置全部失效；复用 `smoke-verify:` + 结构化 `e2eObservation` 回执做到零迁移兼容。
@@ -89,13 +89,13 @@ flowchart LR
 
 ### 异常、回退与安全边界
 
-- 拆分 `scripts/dev/preflight-contracts.mjs`（`793` -> `<= 700` 行）至 `scripts/dev/preflight-contract-rules.mjs` (new) 前先保绿既有全部合约校验。
+- 拆分 `scripts/dev/preflight-contracts.mjs`（`793` -> `<= 700` 行）至 `scripts/dev/preflight-contract-rules.mjs` (new) 前先保绿既有全部合约校验，并同步更新 `scripts/dev/injections-data-core.mjs` 中 `I7`/`I9c`/`I9f` 定位。
 - 全局检查所有 `.mjs <= 800` 行、本仓 `AGENTS.md < 24576 B`、渲染 `lightweight < 14336 B`、`full <= 30720 B`、`sync-toc.mjs README.md README.en.md --check` 与 `merge-gate` 全链全绿。
 
 ### 实现顺序
 
-1. 先从 `scripts/dev/preflight-contracts.mjs` 抽离 `scripts/dev/preflight-contract-rules.mjs` (new) 并验证 `preflight.mjs` 绿灯。
-2. 修复 `workflow-policy.mjs`、`flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` 及 `templates/agents-project.md`/`SKILL.md` 的通用 E2E 门禁逻辑与文案，并在 `fixtures-stageb-loop.mjs` 写入 `C15` 双向断言。
+1. 先从 `scripts/dev/preflight-contracts.mjs` 抽离 `scripts/dev/preflight-contract-rules.mjs` (new)，同步更新 `scripts/dev/injections-data-core.mjs`（`I7`/`I9c`/`I9f`），并验证 `preflight.mjs` 与 `verify-injections.mjs` 绿灯。
+2. 修复 `workflow-policy.mjs`、`flow.mjs`（注册 `--e2e-evidence`）、`flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` 及 `templates/agents-project.md`/`SKILL.md` 的通用 E2E 门禁逻辑与文案，并在 `scripts/dev/fixtures-stageb-loop.mjs` (new) 写入 `C15` 双向断言。
 3. 实现 `scripts/dev/injections-data-stageb.mjs` (new)（`I160–I173`）与 `scripts/dev/e2e-scenarios-stageb.mjs` (new)（Scenarios `H–J`）并跑通 `verify-injections.mjs` 与 `e2e-zip-harness.mjs`。
 4. 实现 `scripts/dev/blind-run-harness.mjs` (new) 并完成 `$TMPDIR` 真实开源仓盲跑闭环（若检出问题则在隔离分支走「建单 -> SPEC/Todo -> 修复 -> 夹具/注入沉淀」清零），更新 `docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md` 与 `.agents/skills/`；随后在本分支直接运行 `flow.mjs finalize --task b5-e2e-blind-run-gate`（不传 `--include-master-prd`）实证 `C19` 自动收口与总控 PRD 归档。
 
@@ -110,10 +110,10 @@ flowchart LR
 
 | 文件 / 目录 | 改动性质 | 改什么 | 谁会被影响 |
 | --- | --- | --- | --- |
-| `kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 修改 | 修复 `full`/`gate` 跳过 `smoke-verify` 漏洞、接入 `--e2e-evidence` 与 E2E 失败自动建单 | `verify`、`submit`、门禁层 |
+| `kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 修改 | 在 `flow.mjs` 注册 `--e2e-evidence`、修复 `full`/`gate` 跳过 `smoke-verify` 漏洞、接入 E2E 回执与失败自动建单 | `flow`、`verify`、`submit`、门禁层 |
 | `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 修改 | 修 `!smokeRequired` 缺陷、清除具体工具硬编码、阻断缺实证 `--include-diff`/`pass` | `dev-review` 双门实证 |
-| `scripts/dev/preflight-contract-rules.mjs` (new)、`preflight-contracts.mjs` | 新增 / 修改 | 拆分减行并增加通用 E2E 工具名静态禁忌校验 | `preflight` 门禁 |
-| `scripts/dev/injections-data-stageb.mjs` (new)、`injections-data.mjs`、`fixtures-stageb-loop.mjs` | 新增 / 修改 | `I160–I173` 全套故障注入与 `C15` 双向断言 | `verify-injections`、`fixtures` |
+| `scripts/dev/preflight-contract-rules.mjs` (new)、`preflight-contracts.mjs`、`scripts/dev/injections-data-core.mjs` | 新增 / 修改 | 拆分减行、更新 `I7`/`I9c`/`I9f` 定位并增加通用 E2E 工具名静态禁忌校验 | `preflight`、`verify-injections` |
+| `scripts/dev/injections-data-stageb.mjs` (new)、`injections-data.mjs`、`scripts/dev/fixtures-stageb-loop.mjs` (new) | 新增 / 修改 | `I160–I173` 全套故障注入与 `C15` 双向断言 | `verify-injections`、`fixtures` |
 | `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`e2e-zip-harness.mjs`、`scripts/dev/blind-run-harness.mjs` (new) | 新增 / 修改 | 离线黑盒 Scenarios `H–J` 与 `$TMPDIR` 真实开源仓盲跑终验 | 端到端黑盒质量验收 |
 | `templates/agents-project.md`、`SKILL.md`、`AGENTS.md`、`docs/TDD.md`、`README.md`、`README.en.md` | 修改 | 文案对齐、`blind-run-harness` 登记 TDD、双语 README 与体积校验校准 | 全仓一致性与发布前基线 |
 
@@ -122,10 +122,10 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C15: 保留 7 键 `Dev Profile`，`workflow-policy.mjs`（`determineWorkflowPolicy`、`validateVerificationEvidence`）修复 `GATE_TIER_RANK` 下 `full`/`gate` 绕过 `smoke-verify` 缺陷——当 `runtimeFilesTouched.length > 0`、`riskTier !== 'low'` 且 `smoke-verify` 未显式设为 `none` 时强制校验 `smoke` (`smokeVerifiedOnHead`) 与结构化 `e2eObservation` 回执（缺失返回 `BLOCKED_INSUFFICIENT_VERIFICATION_TIER` 或 `BLOCKED_E2E_OBSERVATION_REQUIRED`，退出码 `3`）；`flow.mjs verify` 与 `review-pack.mjs check-empirical`/`record` 支持 `--e2e-evidence`（兼容 `--visual-checked`）；`review-gates.mjs`（修复 `assessBehavioralGate` `!smokeRequired` 缺陷并清除既有前端驱动工具硬编码文案）、`review-empirical.mjs` 与 `review-locks.mjs` 在缺 E2E 实证时阻断 `--include-diff`（`BLOCKED_EMPIRICAL_FIRST`）与 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）并接入 `C12` 建单闭环。
+- [ ] C15: 保留 7 键 `Dev Profile`，`workflow-policy.mjs`（`determineWorkflowPolicy`、`validateVerificationEvidence`）修复 `GATE_TIER_RANK` 下 `full`/`gate` 绕过 `smoke-verify` 缺陷——当 `runtimeFilesTouched.length > 0`、`riskTier !== 'low'` 且 `smoke-verify` 未显式设为 `none` 时强制校验 `smoke` (`smokeVerifiedOnHead`) 与结构化 `e2eObservation` 回执（缺失返回 `BLOCKED_INSUFFICIENT_VERIFICATION_TIER` 或 `BLOCKED_E2E_OBSERVATION_REQUIRED`，退出码 `3`）；`flow.mjs verify`（已在 `flow.mjs` `parseStandardCli` 注册 `--e2e-evidence`）与 `review-pack.mjs check-empirical`/`record` 支持 `--e2e-evidence`（兼容 `--visual-checked`）；`review-gates.mjs`（修复 `assessBehavioralGate` `!smokeRequired` 缺陷并清除既有前端驱动工具硬编码文案）、`review-empirical.mjs` 与 `review-locks.mjs` 在缺 E2E 实证时阻断 `--include-diff`（`BLOCKED_EMPIRICAL_FIRST`）与 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）并接入 `C12` 建单闭环。
 - [ ] C16: 新增 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（故障注入从 `I160` 起编号），覆盖 `C1..C15`、`C19` 全部正反双向用例与门禁拆解探测，`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs` 100% 通过。
 - [ ] C17: 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new) 接入 `scripts/dev/e2e-zip-harness.mjs`，从 `git archive --format=zip` 解压安装包黑盒执行 Scenario `H`（无远端本地工单起步 -> 新增远端并迁移/切回远端完整闭环至自动关单）、Scenario `I`（评审/规划双侧跨轮同人拦截、3 轮停损归因与分级建单）与 Scenario `J`（Node+Python 异构仓、非标文档、自定义脚本、自有技能 `S1–S4` 升级、`.githooks/pre-push`、`generic-git` 及真实非 `exit 0` 端到端实测失败建单修复复绿），退出码 `0`。
-- [ ] C18: 新增 `scripts/dev/blind-run-harness.mjs` (new，留存 `scripts/dev/` 不进用户包，并登记于 `docs/TDD.md` 通过孤儿脚本审计)，在隔离 `$TMPDIR` 克隆副本对多生态真实开源项目（含带自有项目级 Skill 与自定义规则且用新版重跑 `S1–S4` 校准的已规范仓）执行极简低提示词盲跑验收与实跑对方原生测试；发现的阻塞/跨范围问题全部通过「建单 -> SPEC/Todo -> 修复 -> 沉淀夹具与故障注入」清零；全仓所有 `.mjs <= 800` 行、`AGENTS.md` 符合体积预算（本仓 `< 24576 B`），`merge-gate` 全链命令全绿。
+- [ ] C18: 新增 `scripts/dev/blind-run-harness.mjs` (new)（留存 `scripts/dev/` 不进用户包，并登记于 `docs/TDD.md` 通过孤儿脚本审计），在隔离 `$TMPDIR` 克隆副本对多生态真实开源项目（含带自有项目级 Skill 与自定义规则且用新版重跑 `S1–S4` 校准的已规范仓）执行极简低提示词盲跑验收与实跑对方原生测试；发现的阻塞/跨范围问题全部通过「建单 -> SPEC/Todo -> 修复 -> 沉淀夹具与故障注入」清零；全仓所有 `.mjs <= 800` 行、`AGENTS.md` 符合体积预算（本仓 `< 24576 B`），`merge-gate` 全链命令全绿。
 
 ## 六、高风险点、门型与回滚路径
 

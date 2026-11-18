@@ -33,7 +33,7 @@ related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`kit/skills/lib/skill-discovery.mjs` (new)、`kit/skills/lib/cli.mjs`、`kit/skills/lib/shared.mjs`、`kit/skills/dev-*/SKILL.md`、`scripts/lib/protocol.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/agents-sections.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/handoff.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/dev/preflight-suite-checks.mjs` (new)、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-equip.mjs`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new)、`scripts/dev/fixtures.mjs`
+- **影响路径**：`kit/skills/lib/skill-discovery.mjs` (new)、`kit/skills/lib/cli.mjs`、`kit/skills/lib/shared.mjs`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-plan/SKILL.md`、`kit/skills/dev-flow/SKILL.md`、`kit/skills/dev-review/SKILL.md`、`kit/skills/dev-govern/SKILL.md`、`scripts/lib/protocol.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/agents-sections.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/handoff.mjs`、`templates/agents-project.md`、`AGENTS.md`、`scripts/dev/preflight-suite-checks.mjs` (new)、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-equip.mjs`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new)、`scripts/dev/fixtures.mjs`
 - **复用既有模块**：`kit/skills/lib/doc-frontmatter.mjs`、`scripts/lib/protocol.mjs`、`scripts/equip.mjs`
 - **本期不做**：不修改平台分支保护、本地工单后端或 E2E 门禁模块；不向代码引入任何外部项目 Skill 名称
 - **门型与回滚路径**：`one-way`；合入前可直接废弃隔离工作树，合入后通过反向提交回退并重跑 `equip.mjs .` 与 `merge-gate`
@@ -52,7 +52,7 @@ related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
 | 1 | 拆分 `preflight-suite-checks.mjs` (new) 并预注册 `fixtures-stageb-onboarding.mjs` (new) 与 `fixtures-stageb-loop.mjs` (new) | `node scripts/dev/preflight.mjs` 通过且 `preflight-suite.mjs <= 680` 行 | `Wave 0.5` 合入 |
-| 2 | 为 5 套 `kit/skills/dev-*/SKILL.md` 补全 `metadata` 并实现 `skill-discovery.mjs` (new)，先在 `fixtures-stageb-onboarding.mjs` (new) 写失败测试再切换全仓动态发现 | 新夹具由红转绿 | 步骤 1 |
+| 2 | 为 5 份技能 `SKILL.md` 补全 `metadata` 并实现 `skill-discovery.mjs` (new)，先在 `fixtures-stageb-onboarding.mjs` (new) 写失败测试再切换全仓动态发现 | 新夹具由红转绿 | 步骤 1 |
 | 3 | 运行 `node scripts/compose-agents.mjs .` 与 `node scripts/equip.mjs .`，核验 `AGENTS.md` 体积 `< 24576 B` 及全量 `merge-gate` | 全量门禁全绿 | 步骤 2 |
 
 ## 风险与应对

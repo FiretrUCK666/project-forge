@@ -93,7 +93,7 @@ flowchart LR
 1. 升级 `survey-docs.mjs`、`survey-workspace.mjs`、`survey-ecosystem.mjs` 与 `survey-reentry.mjs` 非标探测、深层遍历与 `isManagedPlanDoc` 隔离判定。
 2. 对接 `doc-audit-repo.mjs`、`doc-shape.mjs`、`doc-requirements.mjs` 的非受管文档略过与异构形态兼容（保持自建空壳或受损受管文档仍判红）。
 3. 实现 `survey-plan.mjs` `business-flows` 分片、`repo-map.mjs` 业务流提取、`tdd-facts.mjs`/`tdd-scaffold.mjs` TDD 承接及 `SKILL.md`/`references/survey.md`/`references/docs-set.md` `S1 -> S3` 改前基线规范。
-4. 在 `scripts/dev/fixtures-stageb-onboarding.mjs` 补充 `C9`、`C10` 正反双向用例，并与并行 `B3` 同步完成 `.pf-manifest.json`。
+4. 在 `scripts/dev/fixtures-stageb-onboarding.mjs` (new) 补充 `C9`、`C10` 正反双向用例，并与并行 `B3` 同步完成 `.pf-manifest.json`。
 
 ## 三、备选方案与否决理由
 
@@ -109,7 +109,7 @@ flowchart LR
 | `scripts/lib/survey-docs.mjs`、`scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-ecosystem.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/survey.mjs` | 修改 | 非标目录、中性 CI、深目录遍历、外来文档识别、`business-flows` 分片 | `survey` 与 `review` 准确度 |
 | `kit/skills/lib/doc-shape.mjs`、`kit/skills/lib/doc-requirements.mjs`、`kit/skills/dev-plan/scripts/doc-audit-repo.mjs` | 修改 | 异构模板兼容与只审受管文档防误报 `FRONTMATTER_INVALID` | 存量项目接入 `doc-plan audit` |
 | `kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/lib/tdd-facts.mjs`、`tdd-scaffold.mjs` | 修改 | `business-flows` 只读出图及重资产/改前基线落 `docs/TDD.md` | `dev-explore` 与 TDD 同步 |
-| `SKILL.md`、`references/survey.md`、`references/docs-set.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` | 修改 | 固化 `S1 -> S3` 改前基线流程与 `C9–C10` 正反夹具 | 入门流程与回归测试 |
+| `SKILL.md`、`references/survey.md`、`references/docs-set.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new) | 修改 | 固化 `S1 -> S3` 改前基线流程与 `C9–C10` 正反夹具 | 入门流程与回归测试 |
 
 - **对外可见的变化**：`survey --json` `explorationStrategy` 包含 `business-flows`；`doc-audit` 与 `survey` 不再对目标仓原有非本工具 `docs/specs/*`/`docs/todo/*` 误报 `FRONTMATTER_INVALID`；`review` 对中性 CI 不再误报 `ci.absent`。
 - **需要同步改的地方**：运行 `node scripts/equip.mjs .` 同步 `.agents/skills/` 中 `dev-explore`/`dev-plan`/`lib` 变更。

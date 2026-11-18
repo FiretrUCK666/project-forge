@@ -49,9 +49,9 @@ flowchart LR
 | `kit/skills/lib/local-issues.mjs` (new) | 新增 | 基于 `resolveGitDirFast(mainRoot)` 在 `<effectiveGitDir>/project-forge-flow/issues/` 原子读写工单、评论、标签与关单态 |
 | `kit/skills/lib/task-backend.mjs`、`kit/skills/lib/github-client.mjs` | 改造 | `TASK_BACKEND_METHODS` 扩至 16 方法（`getIssue`/`listIssues`/`closeIssue`）；`LocalOnlyBackend` 声明 `issues: true`/`labels: true` 并修复 `postComment`/`listComments` |
 | `kit/skills/lib/platform.mjs`、`scripts/lib/render.mjs`、`scripts/lib/survey-questions.mjs`、`scripts/compose-agents.mjs`、`scripts/equip.mjs` | 改造 | 纯无远端不写裸 `.git/pf-local-mode`，区分 `{ mode: "no-remote" }` 与 `{ mode: "readonly-override" }`；绑远端后清理陈旧 `no-remote` 标记并对齐 `compose-agents` `hasRemote` |
-| `kit/skills/dev-flow/scripts/flow-issues.mjs` (new)、`flow.mjs`、`flow-context.mjs`、`flow-inspect.mjs` | 新增 / 改造 | 拆出 `flow.mjs issue create\|list\|view\|comment\|close\|migrate` 与 `--create-issue`（`flow-inspect.mjs <= 680` 行）；支持迁单与运行态远端漂移提醒 |
+| `kit/skills/dev-flow/scripts/flow-issues.mjs` (new)、`flow.mjs`、`flow-context.mjs`、`flow-inspect.mjs` | 新增 / 改造 | 拆出 `flow.mjs issue create\|list\|view\|comment\|close\|migrate` 与 `--create-issue`（`flow-inspect.mjs <= 680` 行）；在 `flow-context.mjs` `findMatchingDocStrict` 补入 frontmatter `issue` 兜底绑定；支持迁单与运行态远端漂移提醒 |
 | `kit/skills/dev-flow/scripts/flow-merge.mjs`、`flow-lifecycle.mjs`、`flow-next.mjs`、`kit/skills/lib/session-orient.mjs` | 改造 | `claim`/`release` 冲突锁、`merge` 自动关单、冷启动展示未闭环本地单与切回远端后残余待办提醒 |
-| `kit/skills/dev-review/scripts/review-sync.mjs` (new)、`review-ledger.mjs`、`kit/skills/dev-govern/scripts/govern-state.mjs`、`govern-tests.mjs` | 新增 / 改造 | 抽离评审结果双写至 `review-sync.mjs` (new)（`review-ledger.mjs <= 600` 行），治理 `applyIssuesToBackend` 打通无远端建单，过 `write-probe-audit.mjs` |
+| `kit/skills/dev-review/scripts/review-sync.mjs` (new)、`review-ledger.mjs`、`kit/skills/dev-govern/scripts/govern-state.mjs`、`govern-tests.mjs`、`scripts/dev/injections-data-gates.mjs` | 新增 / 改造 | 抽离评审结果双写至 `review-sync.mjs` (new)（`review-ledger.mjs <= 600` 行）并同步更新 `I145`（`probeForWrite`），治理 `applyIssuesToBackend` 打通无远端建单，过 `write-probe-audit.mjs` |
 | `kit/skills/lib/exec.mjs`、`flow-sync.mjs`、`flow-trial-merge.mjs`、`scripts/dev/preflight-suite.mjs` | 改造 | `buildNonInteractiveEnv` 补 `GIT_EDITOR: 'true'` 与 `GIT_SEQUENCE_EDITOR: 'true'`（`preflight-suite` 对拍），防止 Windows 拉起交互编辑器 |
 | `scripts/dev/fixtures-stageb-loop.mjs` (new) | 修改 | 覆盖 `C7`、`C8` 正反双向用例（本地工单生命周期、并发认领、迁回远端过渡、`GIT_EDITOR=true`） |
 
@@ -93,14 +93,14 @@ flowchart LR
 
 - 并发认领已分配给他人的工单返回 `BLOCKED_ISSUE_ALREADY_CLAIMED`（须显式传 `--takeover --reason "..."`）。
 - 凡 `flow-issues.mjs` (new)、`review-sync.mjs` (new)、`flow-merge.mjs`、`govern-state.mjs` 在远端分支调用 `TaskBackend` 写接口前必须执行 `probeForWrite` 校验，确保 `write-probe-audit.mjs` 检查 0 违规。
-- `flow-inspect.mjs` 拆出 `flow-issues.mjs` (new) 并将 `migrateUncommittedPlanDocs`/`findMatchingDocStrict` 移入 `flow-context.mjs`，控制在 `<= 680` 行；`review-ledger.mjs` 拆出 `review-sync.mjs` (new) 压至 `<= 600` 行。
+- `flow-inspect.mjs` 拆出 `flow-issues.mjs` (new) 并将 `migrateUncommittedPlanDocs`/`findMatchingDocStrict` 移入 `flow-context.mjs`，控制在 `<= 680` 行（同时在 `flow-context.mjs` `findMatchingDocStrict` 中新增按文档 YAML frontmatter `issue: {N}` 兜底匹配，使裸跑 `flow.mjs start --issue <N>` 不传 `--task` 也能直接绑上预建 `SPEC`/`Todo`）；`review-ledger.mjs` 拆出 `review-sync.mjs` (new) 压至 `<= 600` 行并同步更新 `scripts/dev/injections-data-gates.mjs` 中 `I145`（`probeForWrite`）。
 
 ### 实现顺序
 
-1. 先拆分 `flow-inspect.mjs`（互链辅助迁入 `flow-context.mjs`）并扩展 `kit/skills/lib/exec.mjs` + `preflight-suite.mjs` 非交互环境变量对拍。
+1. 先拆分 `flow-inspect.mjs`（互链辅助迁入 `flow-context.mjs` 并补齐 `issue` 兜底绑定）与 `review-ledger.mjs`（抽离 `review-sync.mjs` (new) 并同步更新 `I145`），扩展 `kit/skills/lib/exec.mjs` + `preflight-suite.mjs` 非交互环境变量对拍。
 2. 实现 `kit/skills/lib/local-issues.mjs` (new)、`github-client.mjs` (`listIssues`/`closeIssue`) 与 `task-backend.mjs` 16 方法对称接口。
-3. 落地 `flow-issues.mjs` (new)（含 `migrate`）、`review-sync.mjs` (new)、`flow-merge.mjs`/`flow-lifecycle.mjs`/`session-orient.mjs`/`govern-state.mjs`/`govern-tests.mjs` 对接，以及 `platform.mjs`/`render.mjs`/`survey-questions.mjs`/`compose-agents.mjs`/`equip.mjs` 的无粘滞远端切换逻辑。
-4. 在 `scripts/dev/fixtures-stageb-loop.mjs` 写入 `C7`、`C8` 全部正反双向断言（含「本地起步 -> 建单 -> 新增 `origin` -> 迁移切回远端闭环」与 `write-probe-audit.mjs` 检验）。
+3. 落地 `flow-issues.mjs` (new)（含 `migrate`）、`flow-merge.mjs`/`flow-lifecycle.mjs`/`session-orient.mjs`/`govern-state.mjs`/`govern-tests.mjs` 对接，以及 `platform.mjs`/`render.mjs`/`survey-questions.mjs`/`compose-agents.mjs`/`equip.mjs` 的无粘滞远端切换逻辑。
+4. 在 `scripts/dev/fixtures-stageb-loop.mjs` (new) 写入 `C7`、`C8` 全部正反双向断言（含「本地起步 -> 建单 -> 新增 `origin` -> 迁移切回远端闭环」、裸 `--issue` 匹配与 `write-probe-audit.mjs` 检验）。
 
 ## 三、备选方案与否决理由
 
@@ -117,8 +117,8 @@ flowchart LR
 | `kit/skills/lib/task-backend.mjs`、`kit/skills/lib/github-client.mjs` | 修改 | 扩展 16 方法与本地能力修复 | `flow`、`review`、`govern` |
 | `kit/skills/lib/platform.mjs`、`scripts/lib/render.mjs`、`scripts/lib/survey-questions.mjs`、`scripts/compose-agents.mjs`、`scripts/equip.mjs` | 修改 | 解决 `pf-local-mode` 粘滞与 `hasRemote` 对齐 | 本地切远端项目与只读克隆 |
 | `kit/skills/dev-flow/scripts/flow-issues.mjs` (new)、`flow.mjs`、`flow-context.mjs`、`flow-inspect.mjs`、`flow-next.mjs`、`flow-merge.mjs`、`flow-lifecycle.mjs`、`flow-sync.mjs`、`flow-trial-merge.mjs` | 新增 / 修改 | `flow.mjs issue` 含 `migrate`、漂移提醒、非交互防护、拆降行数 | 全研发流转命令行 |
-| `kit/skills/dev-review/scripts/review-sync.mjs` (new)、`review-ledger.mjs`、`kit/skills/dev-govern/scripts/govern-state.mjs`、`govern-tests.mjs`、`kit/skills/lib/session-orient.mjs` | 新增 / 修改 | 评审同步拆解、治理想单直写、冷启动工单展示 | 评审、治理与跨会话唤醒 |
-| `kit/skills/lib/exec.mjs`、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-stageb-loop.mjs` | 修改 | `GIT_EDITOR=true` 对拍与 `C7–C8` 双向测试 | 跨平台子进程与门禁 |
+| `kit/skills/dev-review/scripts/review-sync.mjs` (new)、`review-ledger.mjs`、`kit/skills/dev-govern/scripts/govern-state.mjs`、`govern-tests.mjs`、`kit/skills/lib/session-orient.mjs`、`scripts/dev/injections-data-gates.mjs` | 新增 / 修改 | 评审同步拆解并更新 `I145`、治理想单直写、冷启动工单展示 | 评审、治理、`verify-injections` 与跨会话唤醒 |
+| `kit/skills/lib/exec.mjs`、`scripts/dev/preflight-suite.mjs`、`scripts/dev/fixtures-stageb-loop.mjs` (new) | 修改 | `GIT_EDITOR=true` 对拍与 `C7–C8` 双向测试 | 跨平台子进程与门禁 |
 
 - **对外可见的变化**：新增 `flow.mjs issue create|list|view|comment|close|migrate` 与 `flow start --create-issue`；`LocalOnlyBackend` 全面支持建单、评论、标签、关单并在绑定远端后平滑迁出。
 - **需要同步改的地方**：运行 `node scripts/equip.mjs .` 同步 `.agents/skills/`（与同波次 `B4a` 串行合入后重跑）。
@@ -126,7 +126,7 @@ flowchart LR
 ## 五、冻结的验收标准
 
 - [ ] C7: 新增 `kit/skills/lib/local-issues.mjs` (new)，经 `resolveGitDirFast(mainRoot)` 将本地工单原子写入 `<effectiveGitDir>/project-forge-flow/issues/`（`index.json` + `items/*.json`，主仓与所有 worktree 共享且 `git status` 零污染）；`kit/skills/lib/task-backend.mjs` 的 `TASK_BACKEND_METHODS` 扩展至 16 方法（新增 `getIssue`、`listIssues`、`closeIssue`）并由 `GitHubBackend`/`GenericRemoteBackend`/`LocalOnlyBackend` 共同实现；`LocalOnlyBackend` 声明 `issues: true`、`labels: true`，修复 `postComment`/`listComments` 错配并持久化标签与关单态；消除 `.git/pf-local-mode` 粘滞死锁——纯无远端不写裸 `.git/pf-local-mode`（`render.mjs`/`survey-questions.mjs`），`detectGitModeMarkers` 与 `flow-inspect.mjs` 区分 `{ mode: "no-remote" }` 与只读克隆 `{ mode: "readonly-override" }`（兼容 `fixtures-claims`），绑定 `origin` 后 `no-remote` 标记自动失效并清理，且 `compose-agents.mjs` `hasRemote` 尊重有效 `localMode`。
-- [ ] C8: `flow-inspect.mjs`（`start --create-issue`、`--issue` 依赖图水合与运行态远端漂移提醒）、`kit/skills/dev-flow/scripts/flow-issues.mjs` (new)（`flow.mjs issue create|list|view|comment|close|migrate`，支持将残余本地未闭环工单一键迁移至远端并关停本地单）、`flow-merge.mjs`（`claim`/`release` 拦截 `BLOCKED_ISSUE_ALREADY_CLAIMED` 与 `--takeover`、`merge` 双写并自动调用 `closeIssue`）、`flow-lifecycle.mjs`、`flow-next.mjs`、`kit/skills/dev-review/scripts/review-sync.mjs` (new)/`review-ledger.mjs`、`session-orient.mjs`（冷启动展示本地未闭环工单及切回远端后的残余本地单提示）与 `govern-state.mjs`/`govern-tests.mjs`（`applyIssuesToBackend`）在 `local-only` 及「本地起步 -> 新增 `origin` -> 无痛切回远端」均通过 `TaskBackend` 跑通完整自迭代闭环，零第二套 Skill，且 `write-probe-audit.mjs` 检查 0 违规；`kit/skills/lib/exec.mjs`（`buildNonInteractiveEnv` 补全 `GIT_EDITOR: 'true'`、`GIT_SEQUENCE_EDITOR: 'true'` 并纳入 `preflight-suite.mjs` 双端对拍）与 `flow-sync.mjs`/`flow-merge.mjs`/`flow-trial-merge.mjs` 确保所有子进程 `git merge` 与 `rebase` 均带非交互编辑器保护，Windows 下不拉起 `vim.exe`。
+- [ ] C8: `flow-inspect.mjs`（`start --create-issue`、`--issue` 依赖图水合与运行态远端漂移提醒）、`kit/skills/dev-flow/scripts/flow-context.mjs`（`findMatchingDocStrict` 支持按 frontmatter `issue` 兜底绑定预建 `SPEC`/`Todo`）、`kit/skills/dev-flow/scripts/flow-issues.mjs` (new)（`flow.mjs issue create|list|view|comment|close|migrate`，支持将残余本地未闭环工单一键迁移至远端并关停本地单）、`flow-merge.mjs`（`claim`/`release` 拦截 `BLOCKED_ISSUE_ALREADY_CLAIMED` 与 `--takeover`、`merge` 双写并自动调用 `closeIssue`）、`flow-lifecycle.mjs`、`flow-next.mjs`、`kit/skills/dev-review/scripts/review-sync.mjs` (new)/`review-ledger.mjs`、`session-orient.mjs`（冷启动展示本地未闭环工单及切回远端后的残余本地单提示）与 `govern-state.mjs`/`govern-tests.mjs`（`applyIssuesToBackend`）在 `local-only` 及「本地起步 -> 新增 `origin` -> 无痛切回远端」均通过 `TaskBackend` 跑通完整自迭代闭环，零第二套 Skill，且 `write-probe-audit.mjs` 检查 0 违规；`kit/skills/lib/exec.mjs`（`buildNonInteractiveEnv` 补全 `GIT_EDITOR: 'true'`、`GIT_SEQUENCE_EDITOR: 'true'` 并纳入 `preflight-suite.mjs` 双端对拍）与 `flow-sync.mjs`/`flow-merge.mjs`/`flow-trial-merge.mjs` 确保所有子进程 `git merge` 与 `rebase` 均带非交互编辑器保护，Windows 下不拉起 `vim.exe`。
 
 ## 六、高风险点、门型与回滚路径
 

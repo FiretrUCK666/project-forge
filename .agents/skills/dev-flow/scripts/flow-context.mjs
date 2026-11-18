@@ -1,10 +1,17 @@
 /**
- * flow-context.mjs —— Issue 与 PR 远端上下文拉取、失败原因归一与幂等补齐。
+ * flow-context.mjs —— Issue/PR 上下文拉取、规划文档严格匹配/迁移与运行态远端漂移检测。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块与 ../../lib/）。
  */
 
-import { probeGitHubEnv } from '../../lib/platform.mjs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+import { parseDocFilename, parseDocFrontmatter, syncDocsLifecycle } from '../../lib/docs.mjs'
+import { gitDiffNameStatusZ, gitRunBuffer, gitStatusPorcelainZ, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
+import { githubRepoFull, probeGitHubEnv } from '../../lib/platform.mjs'
 
 const NON_API_CLIENT_TIERS = new Set(['none', 'offline', 'half-duplex'])
 
@@ -71,8 +78,12 @@ export function summarizeContextBody(rawBody, maxLen = 1200) {
   return body.length > maxLen ? `${body.slice(0, maxLen)}…` : body
 }
 
-/** 批量拉取或补全关联 Issue 上下文；已成功拉取过的编号不重复请求。 */
+/** 批量拉取或补全关联 Issue 上下文；无远端/通用仓优先读取本地持久化工单，已拉取过不重复请求。 */
 export async function fetchIssueContextList({
+  mainRoot = null,
+  gitDir = null,
+  providerId = 'github',
+  role = null,
   issueNumbers = [],
   existingContext = [],
   client = null,
@@ -86,6 +97,7 @@ export async function fetchIssueContextList({
     }
   }
   const canCall = Boolean(targetRepo && isUsableApiClient(client) && typeof client.getIssue === 'function')
+  const allowLocalFallback = Boolean(mainRoot && (role === 'local-only' || providerId === 'none' || providerId === 'generic-git' || !targetRepo))
   const out = []
   for (const num of nums) {
     const prev = existingMap.get(num)
@@ -94,37 +106,32 @@ export async function fetchIssueContextList({
       continue
     }
     if (!canCall) {
+      if (allowLocalFallback) {
+        const localRes = getLocalIssue({ mainRoot, gitDir, number: num })
+        if (localRes.ok) {
+          out.push({
+            number: num, fetched: true, title: localRes.title ?? null,
+            url: localRes.url ?? `local-issue://${num}`, state: localRes.state ?? 'OPEN',
+            summary: summarizeContextBody(localRes.body),
+          })
+          continue
+        }
+      }
       out.push({ number: num, fetched: false, reason: 'no-api-channel', title: null, summary: null })
       continue
     }
     try {
       const res = await client.getIssue(targetRepo, num)
       if (!res?.ok) {
-        out.push({
-          number: num,
-          fetched: false,
-          reason: normalizeContextFetchReason(res),
-          title: null,
-          summary: null,
-        })
+        out.push({ number: num, fetched: false, reason: normalizeContextFetchReason(res), title: null, summary: null })
         continue
       }
       out.push({
-        number: num,
-        fetched: true,
-        title: res.title ?? null,
-        url: res.url ?? null,
-        state: res.state ?? null,
-        summary: summarizeContextBody(res.body),
+        number: num, fetched: true, title: res.title ?? null, url: res.url ?? null,
+        state: res.state ?? null, summary: summarizeContextBody(res.body),
       })
     } catch (error) {
-      out.push({
-        number: num,
-        fetched: false,
-        reason: normalizeContextFetchReason(null, error),
-        title: null,
-        summary: null,
-      })
+      out.push({ number: num, fetched: false, reason: normalizeContextFetchReason(null, error), title: null, summary: null })
     }
   }
   const unavail = out.filter((x) => !x.fetched).map((x) => x.number)
@@ -134,8 +141,10 @@ export async function fetchIssueContextList({
 /** 一次补齐或刷新单个任务账本所需的 Issue 与 PR 远端上下文（避免初建与幂等重入两处各写一套）。 */
 export async function resolveAndHydrateTaskContexts({
   mainRoot,
+  gitDir = null,
   remoteUrls,
   providerId,
+  role = null,
   targetRepo = null,
   issueNumbers = [],
   existingIssueContext = [],
@@ -148,29 +157,20 @@ export async function resolveAndHydrateTaskContexts({
   const hasPr = Number.isInteger(Number(prNumber)) && Number(prNumber) > 0
   if (!hasIssues && !hasPr) {
     return {
-      issueContext: [],
-      issueContextUnavailable: [],
-      issueContextAck: null,
-      prContext: null,
-      prContextUnavailable: null,
-      prPatch: {},
+      issueContext: [], issueContextUnavailable: [], issueContextAck: null,
+      prContext: null, prContextUnavailable: null, prPatch: {},
     }
   }
   const client = await resolveReadClient({ mainRoot, remoteUrls: remoteUrls ?? {}, providerId, targetRepo, opts })
   const { issueContext, issueContextUnavailable } = hasIssues
-    ? await fetchIssueContextList({ issueNumbers, existingContext: existingIssueContext, client, targetRepo })
+    ? await fetchIssueContextList({ mainRoot, gitDir, providerId, role, issueNumbers, existingContext: existingIssueContext, client, targetRepo })
     : { issueContext: [], issueContextUnavailable: [] }
   const { prContext, prContextUnavailable } = hasPr
     ? await fetchPrContextEntry({ prNumber, existingContext: existingPrContext, client, targetRepo })
     : { prContext: null, prContextUnavailable: null }
   const nextAck = issueContextUnavailable.length === 0 ? null : existingAck
   const prPatch = prContext?.fetched
-    ? {
-        prUrl: prContext.url ?? null,
-        prState: prContext.state ?? null,
-        prBaseSha: prContext.baseRefOid ?? null,
-        prHeadSha: prContext.headRefOid ?? null,
-      }
+    ? { prUrl: prContext.url ?? null, prState: prContext.state ?? null, prBaseSha: prContext.baseRefOid ?? null, prHeadSha: prContext.headRefOid ?? null }
     : {}
   return { issueContext, issueContextUnavailable, issueContextAck: nextAck, prContext, prContextUnavailable, prPatch }
 }
@@ -183,15 +183,8 @@ export async function fetchPrContextEntry({
   targetRepo = null,
 } = {}) {
   const num = Number(prNumber)
-  if (!Number.isInteger(num) || num <= 0) {
-    return { prContext: null, prContextUnavailable: null }
-  }
-  if (
-    existingContext?.fetched
-    && Number(existingContext.number) === num
-    && existingContext.baseRefOid
-    && existingContext.headRefOid
-  ) {
+  if (!Number.isInteger(num) || num <= 0) return { prContext: null, prContextUnavailable: null }
+  if (existingContext?.fetched && Number(existingContext.number) === num && existingContext.baseRefOid && existingContext.headRefOid) {
     return { prContext: existingContext, prContextUnavailable: null }
   }
   const canCall = Boolean(targetRepo && isUsableApiClient(client) && typeof client.getPr === 'function')
@@ -205,8 +198,7 @@ export async function fetchPrContextEntry({
   try {
     const res = await client.getPr(targetRepo, num)
     if (!res?.ok) {
-      const reason = normalizeContextFetchReason(res)
-      const unavail = { number: num, fetched: false, reason }
+      const unavail = { number: num, fetched: false, reason: normalizeContextFetchReason(res) }
       return {
         prContext: { ...unavail, title: null, summary: null, baseBranch: null, headBranch: null, baseRefOid: null, headRefOid: null },
         prContextUnavailable: unavail,
@@ -214,25 +206,177 @@ export async function fetchPrContextEntry({
     }
     return {
       prContext: {
-        number: num,
-        fetched: true,
-        title: res.title ?? null,
-        url: res.url ?? null,
-        state: res.state ?? null,
-        baseBranch: res.baseBranch ?? null,
-        headBranch: res.headBranch ?? null,
-        baseRefOid: res.baseRefOid ?? null,
-        headRefOid: res.headRefOid ?? null,
-        summary: summarizeContextBody(res.body),
+        number: num, fetched: true, title: res.title ?? null, url: res.url ?? null, state: res.state ?? null,
+        baseBranch: res.baseBranch ?? null, headBranch: res.headBranch ?? null,
+        baseRefOid: res.baseRefOid ?? null, headRefOid: res.headRefOid ?? null, summary: summarizeContextBody(res.body),
       },
       prContextUnavailable: null,
     }
   } catch (error) {
-    const reason = normalizeContextFetchReason(null, error)
-    const unavail = { number: num, fetched: false, reason }
+    const unavail = { number: num, fetched: false, reason: normalizeContextFetchReason(null, error) }
     return {
       prContext: { ...unavail, title: null, summary: null, baseBranch: null, headBranch: null, baseRefOid: null, headRefOid: null },
       prContextUnavailable: unavail,
     }
+  }
+}
+
+function collectIssueMatchSet(taskId, issueNumbers = []) {
+  const set = new Set((issueNumbers ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))
+  const m = /^issue-(\d+)$/.exec(String(taskId ?? ''))
+  if (m) set.add(Number(m[1]))
+  return set
+}
+
+/** 严格按文件名 slug、frontmatter `task_id` 与 frontmatter `issue` 兜底匹配预建规划文档。 */
+export function findMatchingDocStrict(root, dirRel, slug, taskId, issueNumbers = []) {
+  const abs = join(root, dirRel)
+  if (!existsSync(abs)) return null
+  const issueSet = collectIssueMatchSet(taskId, issueNumbers)
+  try {
+    for (const n of readdirSync(abs).filter((x) => x.endsWith('.md')).sort()) {
+      const fn = parseDocFilename(n)
+      if (fn && fn.slug === slug) return `${dirRel}/${n}`
+      const fm = parseDocFrontmatter(readTextSafe(join(abs, n)) ?? '')
+      if (taskId && fm.data?.task_id === taskId) return `${dirRel}/${n}`
+      const fmIssue = Number(fm.data?.issue)
+      if (Number.isInteger(fmIssue) && fmIssue > 0 && issueSet.has(fmIssue)) return `${dirRel}/${n}`
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+/** 判断仓库是否已存在任何 Markdown 规划文档。 */
+export function hasAnyPlanMarkdownFiles(root) {
+  for (const dirRel of ['docs/prd', 'docs/specs', 'docs/todo']) {
+    const abs = join(root, dirRel)
+    if (!existsSync(abs)) continue
+    try {
+      if (readdirSync(abs).some((n) => n.endsWith('.md'))) return true
+    } catch { /* ignore */ }
+  }
+  return false
+}
+
+/** 将主仓中尚未提交的关联规划文档同步迁入新创建的 Tier 2 实施 worktree，防止断链。 */
+export async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty = undefined) {
+  if (mainDirty === 0) return []
+  if (!ledger.prdFile && !ledger.specFile && !ledger.todoFile && !hasAnyPlanMarkdownFiles(mainRoot)) return []
+  const st = await gitStatusPorcelainZ(mainRoot)
+  if (!st.ok) return []
+  const dirtyMap = new Map(st.entries.map((e) => [e.file, e.xy]))
+  const migrated = []
+  const issueSet = collectIssueMatchSet(ledger.taskId, ledger.linkedIssues ?? [])
+
+  const candidates = new Set([ledger.prdFile, ledger.specFile, ledger.todoFile].filter(Boolean))
+  for (const [rel] of dirtyMap.entries()) {
+    if (!/^docs\/(?:prd|specs|todo)\/[^/]+\.md$/.test(rel)) continue
+    const fn = parseDocFilename(rel)
+    if (fn && fn.slug === ledger.slug) candidates.add(rel)
+    else {
+      const fm = parseDocFrontmatter(readTextSafe(join(mainRoot, rel)) ?? '')
+      const fmIssue = Number(fm.data?.issue)
+      if (fm.data?.task_id === ledger.taskId || (Number.isInteger(fmIssue) && issueSet.has(fmIssue))) {
+        candidates.add(rel)
+      }
+    }
+  }
+
+  for (const rel of candidates) {
+    const srcAbs = join(mainRoot, rel)
+    const dstAbs = join(implAbs, rel)
+    if (!existsSync(srcAbs)) continue
+    const xy = dirtyMap.get(rel)
+    if (!xy && existsSync(dstAbs)) continue
+    mkdirSync(dirname(dstAbs), { recursive: true })
+    copyFileSync(srcAbs, dstAbs)
+    migrated.push(rel)
+    if (xy === '??') {
+      try { unlinkSync(srcAbs) } catch { /* ignore */ }
+    }
+  }
+  return migrated
+}
+
+/** 检测由无远端切回远端后的运行态配置漂移与未迁移本地工单，输出非阻塞提醒。 */
+export function detectRemoteDriftWarnings({ mainRoot, gitDir = null, role = 'local-only', providerId = 'none' } = {}) {
+  if (!mainRoot || role === 'local-only') return []
+  const warnings = []
+  const agentsText = readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
+  if (agentsText && /这个项目还没有远端|任务留痕与合并前文档同步|提交至本地分支|提交至本地特性分支/.test(agentsText)) {
+    warnings.push({
+      code: 'WARN_REMOTE_DRIFT_AGENTS',
+      message: '远端漂移提醒：仓库已脱离纯本地模式，但 AGENTS.md 仍处于无远端模板状态；请重新运行 S1–S4（survey / compose-agents）刷新工程契约。',
+    })
+  }
+  if (providerId === 'github' && !existsSync(join(mainRoot, '.github'))) {
+    warnings.push({
+      code: 'WARN_REMOTE_DRIFT_GITHUB_DIR',
+      message: '远端漂移提醒：当前 GitHub 仓库缺少 .github/ 协作模板或 CI 配置；建议重跑 S1–S4（equip-ci）补齐。',
+    })
+  }
+  const openLocal = listLocalIssues({ mainRoot, gitDir, state: 'open' })
+  if (openLocal.ok && openLocal.issues.length > 0) {
+    const nums = openLocal.issues.map((i) => `#${i.number}`).join(', ')
+    warnings.push({
+      code: 'WARN_UNMIGRATED_LOCAL_ISSUES',
+      count: openLocal.issues.length,
+      issues: openLocal.issues.map((i) => i.number),
+      message: `远端漂移提醒：存在 ${openLocal.issues.length} 个未闭环本地工单（${nums}）；可运行 \`node ".agents/skills/dev-flow/scripts/flow.mjs" issue migrate\` 一键迁回远端。`,
+    })
+  }
+  return warnings
+}
+
+/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动，支持复用已知 statusEntries 与 diffEntries）。 */
+export async function getChangedFiles(cwd, baseRef, opts = {}) {
+  const fastAtBase = !Array.isArray(opts.diffEntries) && baseRef
+    && readHeadFast(resolveGitDirFast(cwd))?.oid === baseRef
+  const [diff, tree, st] = await Promise.all([
+    Array.isArray(opts.diffEntries)
+      ? Promise.resolve({ ok: true, entries: opts.diffEntries })
+      : (fastAtBase
+          ? Promise.resolve({ ok: true, entries: [] })
+          : (baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null))),
+    baseRef ? Promise.resolve(null) : gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD']),
+    Array.isArray(opts.statusEntries) ? Promise.resolve({ ok: true, entries: opts.statusEntries }) : gitStatusPorcelainZ(cwd),
+  ])
+  const set = new Set()
+  if (diff?.ok) for (const e of diff.entries) if (e.file) set.add(e.file)
+  if (tree?.ok) for (const f of tree.stdout.toString('utf8').split('\0')) if (f) set.add(posixPath(f))
+  if (st.ok) for (const e of st.entries) if (e.file) set.add(e.file)
+  return [...set].sort()
+}
+
+export function buildTargetRepoContext(role, remoteUrls, declaredRepo, topology = null) {
+  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
+  const upstreamRaw = remoteUrls.upstream
+  const originFull = githubRepoFull(originRaw)
+  const upstreamFull = githubRepoFull(upstreamRaw)
+  const originLower = originFull ? originFull.toLowerCase() : null
+  const upstreamLower = upstreamFull ? upstreamFull.toLowerCase() : null
+  const targetRepo = role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : originFull
+  const pushRemote = topology?.origin?.name ?? (remoteUrls.origin ? 'origin' : Object.keys(remoteUrls)[0] ?? 'origin')
+  return { originFull, originLower, upstreamFull, upstreamLower, targetRepo, pushRemote }
+}
+
+export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
+  const seed = ledger.specFile ?? ledger.todoFile ?? ledger.prdFile ?? ledger.slug
+  if (!seed) return null
+  try {
+    const res = await syncDocsLifecycle(workRoot, {
+      slugOrPath: seed,
+      issue: ledger.linkedIssues?.[0],
+      pr: ledger.prNumber ?? undefined,
+      branch: ledger.branch,
+      owner: ledger.implementerId ?? undefined,
+      ...overrides,
+    })
+    if (res.byKind?.prd) ledger.prdFile = res.byKind.prd
+    if (res.byKind?.spec) ledger.specFile = res.byKind.spec
+    if (res.byKind?.todo) ledger.todoFile = res.byKind.todo
+    return res
+  } catch {
+    return null
   }
 }

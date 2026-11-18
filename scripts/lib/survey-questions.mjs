@@ -77,7 +77,7 @@ export const QUESTION_RULES = [
       && !f.git.localMode
       && f.scale.effectiveFiles > 0
       && !hasDecision(f, 'remote-setup'),
-    text: '当前还没有配置远端仓库，请选择 1) 暂不配远端（写入 `.git/pf-local-mode` 纯本地运作）；'
+    text: '当前还没有配置远端仓库，请选择 1) 暂不配远端（已自动按 `local-only` 纯本地运作，无需写 `.git/pf-local-mode`，可在 `AGENTS.md`「## 取舍」写 `remote-setup: local-only`）；'
       + '2) 绑定已有远端（支持 SSH `git remote add origin git@<host>:<owner>/<repo>.git` 与 HTTP(S) `git remote add origin https://<host>/<owner>/<repo>.git`，勿把令牌写进 URL）；'
       + '3) 新建远端仓库（GitHub 默认 `private` 私有或按需 `public`，确认个人/组织归属，如 `gh repo create <owner>/<name> --private --source=. --push`）',
   },

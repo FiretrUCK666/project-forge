@@ -73,7 +73,7 @@ const DOMAIN_REGISTRY = [
   ['issue50', registerIssue50Cases],
   ['issue52', registerIssue52Cases],
   ['stageb-onboarding', registerStageBOnboardingCases],
-  ['stageb-loop', registerStageBLoopCases],
+  ['stageb-loop', registerStageBLoopCases], // 无远端本地工单、HTTP 退避幂等与通用 URL 断言
 ]
 
 function parseCliFlags(argv) {
@@ -108,6 +108,17 @@ function parseCliFlags(argv) {
 /** 用例命中的判据：标题或函数体里出现关键字即算命中。 */
 function caseMatches(fn, keyword) {
   return fn[0].includes(keyword) || fn[1].toString().includes(keyword)
+}
+
+/** 按 `--only` 筛选用例；零命中时报错返回 `null`，避免与全绿混淆。 */
+function selectOnlyCases(cases, only) {
+  if (!only) return cases
+  const matched = cases.filter((fn) => caseMatches(fn, only))
+  if (matched.length === 0) {
+    process.stderr.write(`没有用例匹配 --only ${only}：关键字写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)
+    return null
+  }
+  return matched
 }
 
 const RAW_STDOUT_WRITE = process.stdout.write.bind(process.stdout)
@@ -367,7 +378,8 @@ async function main() {
     }
     const domainCases = []
     found[1](domainCases)
-    const filtered = only ? domainCases.filter((fn) => caseMatches(fn, only)) : domainCases
+    const filtered = selectOnlyCases(domainCases, only)
+    if (!filtered) return 1
     let passed = 0
     const failures = []
     for (const entry of filtered) {
@@ -471,11 +483,8 @@ async function main() {
 
   const cases = []
   for (const [, registerFn] of DOMAIN_REGISTRY) registerFn(cases)
-  const selected = only ? cases.filter((fn) => caseMatches(fn, only)) : cases
-  if (only && selected.length === 0) {
-    process.stderr.write(`没有用例匹配 --only ${only}：关键字写错时会一条都不跑，而「没跑」看着和「全过」一样。\n`)
-    return 1
-  }
+  const selected = selectOnlyCases(cases, only)
+  if (!selected) return 1
   const orderedCases = prefer
     ? [...selected.filter((fn) => caseMatches(fn, prefer)), ...selected.filter((fn) => !caseMatches(fn, prefer))]
     : selected

@@ -5,7 +5,7 @@
  * 产品层注册表仅注册 GitHub 适配器，未知主机优雅退化为 `generic-git` 安全放行本地研发流。
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { readJsonSafe, readTextSafe } from './git.mjs'
@@ -27,8 +27,8 @@ import {
   probeSshTransport,
 } from './platform-probe.mjs'
 import {
-  createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
-  listComments, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
   summarizeCommitChecks,
 } from './github-client.mjs'
@@ -37,11 +37,11 @@ export {
   DEFAULT_PROBE_TIMEOUT_MS,
   TEAM_PROBE_HINT,
   buildOneClickPrUrl,
-  createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
   detectRemoteProtocol,
   githubRepoFull,
   githubRepoPath,
-  listComments, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
   parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
   lookupSshHost,
   normalizeGitHubRepo,
@@ -238,22 +238,76 @@ function resolveGitDirs(cwdOrGitDir) {
   return [cwdOrGitDir]
 }
 
-function resolveGitMarkerExists(cwdOrGitDir, markerName) {
-  if (!cwdOrGitDir) return false
-  if (existsSync(join(cwdOrGitDir, markerName))) return true
-  return resolveGitDirs(cwdOrGitDir).some((dir) => existsSync(join(dir, markerName)))
+function resolveGitMarkerPaths(cwdOrGitDir, markerName) {
+  if (!cwdOrGitDir) return []
+  const candidates = []
+  const direct = join(cwdOrGitDir, markerName)
+  if (existsSync(direct)) candidates.push(direct)
+  for (const dir of resolveGitDirs(cwdOrGitDir)) {
+    const p = join(dir, markerName)
+    if (existsSync(p) && !candidates.includes(p)) candidates.push(p)
+  }
+  return candidates
 }
 
-export function detectGitModeMarkers(cwdOrGitDir) {
+function resolveGitMarkerExists(cwdOrGitDir, markerName) {
+  return resolveGitMarkerPaths(cwdOrGitDir, markerName).length > 0
+}
+
+function hasAnyRemoteInDirs(cwdOrGitDir) {
+  const dirs = new Set([cwdOrGitDir, ...resolveGitDirs(cwdOrGitDir)].filter(Boolean))
+  for (const d of dirs) {
+    const cfg = readTextSafe(join(d, 'config'))
+    if (cfg && /^\s*\[remote\s+"[^"]+"\]/m.test(cfg)) return true
+  }
+  return false
+}
+
+export function detectGitModeMarkers(cwdOrGitDir, opts = {}) {
+  const localPaths = resolveGitMarkerPaths(cwdOrGitDir, 'pf-local-mode')
+  const forkMode = resolveGitMarkerExists(cwdOrGitDir, 'pf-fork-mode')
+  const standaloneMode = resolveGitMarkerExists(cwdOrGitDir, 'pf-standalone-mode')
+  if (localPaths.length === 0) {
+    return { localMode: false, staleNoRemote: false, localModeKind: null, staleLocalModePaths: [], forkMode, standaloneMode }
+  }
+  const hasRemote = typeof opts.hasRemote === 'boolean' ? opts.hasRemote : hasAnyRemoteInDirs(cwdOrGitDir)
+  let effectiveLocal = false
+  const stalePaths = []
+  let localModeKind = null
+  for (const p of localPaths) {
+    const raw = (readTextSafe(p) ?? '').trim()
+    let parsed = null
+    if (raw.startsWith('{')) { try { parsed = JSON.parse(raw) } catch { parsed = null } }
+    if (parsed && typeof parsed === 'object' && parsed.mode === 'no-remote') {
+      if (hasRemote) stalePaths.push(p)
+      else { effectiveLocal = true; localModeKind = 'no-remote' }
+    } else {
+      effectiveLocal = true
+      localModeKind = 'readonly-override'
+    }
+  }
   return {
-    localMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-local-mode'),
-    forkMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-fork-mode'),
-    standaloneMode: resolveGitMarkerExists(cwdOrGitDir, 'pf-standalone-mode'),
+    localMode: effectiveLocal,
+    staleNoRemote: !effectiveLocal && stalePaths.length > 0,
+    localModeKind: effectiveLocal ? localModeKind : (stalePaths.length > 0 ? 'no-remote' : null),
+    staleLocalModePaths: stalePaths,
+    forkMode,
+    standaloneMode,
   }
 }
 
-export function hasLocalOnlyMarker(cwdOrGitDir) {
-  return resolveGitMarkerExists(cwdOrGitDir, 'pf-local-mode')
+export function cleanStaleLocalModeMarker(cwdOrGitDir, opts = {}) {
+  const markers = detectGitModeMarkers(cwdOrGitDir, opts)
+  if (!markers.staleNoRemote || markers.staleLocalModePaths.length === 0) return { cleaned: false, removed: [] }
+  const removed = []
+  for (const p of markers.staleLocalModePaths) {
+    try { unlinkSync(p); removed.push(p) } catch { /* ignore */ }
+  }
+  return { cleaned: removed.length > 0, removed }
+}
+
+export function hasLocalOnlyMarker(cwdOrGitDir, opts = {}) {
+  return detectGitModeMarkers(cwdOrGitDir, opts).localMode
 }
 
 export function hasForkModeMarker(cwdOrGitDir) {
@@ -550,7 +604,8 @@ export function resolveWorkspaceIdentity({
   if (externalPr) {
     return { role: 'inbound-external-pr', providerId: 'github', reason: `审阅外部传入 PR #${externalPr}` }
   }
-  const markers = resolveGitModeMarkersCompat(gitDir)
+  const hasRemote = Boolean(remoteUrls.origin ?? Object.values(remoteUrls)[0])
+  const markers = resolveGitModeMarkersCompat(gitDir, { hasRemote })
   if (markers.localMode) {
     return { role: 'local-only', providerId: 'none', reason: '已显式启用本地模式（.git/pf-local-mode）' }
   }
@@ -601,8 +656,8 @@ export function resolveWorkspaceIdentity({
   })
 }
 
-function resolveGitModeMarkersCompat(gitDir) {
-  return gitDir ? detectGitModeMarkers(gitDir) : { localMode: false, forkMode: false, standaloneMode: false }
+function resolveGitModeMarkersCompat(gitDir, opts = {}) {
+  return gitDir ? detectGitModeMarkers(gitDir, opts) : { localMode: false, staleNoRemote: false, forkMode: false, standaloneMode: false }
 }
 
 /**

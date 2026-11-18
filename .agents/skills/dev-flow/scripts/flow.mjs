@@ -17,7 +17,7 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'explore', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+const SUBCOMMANDS = ['inspect', 'next', 'explore', 'start', 'issue', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
 
 function printHelp() {
   process.stdout.write([
@@ -28,6 +28,7 @@ function printHelp() {
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
+    '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
     '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--json]',
@@ -61,11 +62,11 @@ async function main(argv) {
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
-        'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body',
+        'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body', 'comment', 'state',
         'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
       ],
       multiFlags: ['rebut', 'allow-outbound'],
-      usageHint: 'flow.mjs <inspect|next|explore|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
+      usageHint: 'flow.mjs <inspect|next|explore|start|issue|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -99,6 +100,7 @@ async function main(argv) {
         if (data.github.trackA.remediationCmd) process.stdout.write(`- 协议修复建议: ${data.github.trackA.remediationCmd}\n`)
         if (data.inputs.reuseExistingPr) process.stdout.write(`- 复用已有 PR: #${data.inputs.reuseExistingPr.prNumber} (${data.inputs.reuseExistingPr.note})\n`)
         if (data.inputs.issues.length > 1) process.stdout.write(`- 多 Issue 拓扑排序: ${data.inputs.issueGraph.orderedIssues.map((n) => `#${n}`).join(' -> ')}\n`)
+        for (const dw of data.driftWarnings ?? []) process.stdout.write(`- [提醒] ${dw.message}\n`)
         const extPrNum = data.identity.role === 'inbound-external-pr'
           ? (data.inputs.prs[0]?.number ?? parsePrNumber(opts['external-pr']))
           : null
@@ -126,6 +128,10 @@ async function main(argv) {
     if (sub === 'start') {
       const { handleStart } = await import('./flow-inspect.mjs')
       return (await handleStart(opts, roots)).exitCode
+    }
+    if (sub === 'issue') {
+      const { handleIssue } = await import('./flow-issues.mjs')
+      return (await handleIssue(opts, roots)).exitCode
     }
     if (sub === 'claim' || sub === 'release' || sub === 'merge' || sub === 'cleanup' || sub === 'status' || sub === 'abort') {
       const { handleClaim, handleRelease, handleMerge, handleCleanup, handleStatus, handleAbort } = await import('./flow-merge.mjs')

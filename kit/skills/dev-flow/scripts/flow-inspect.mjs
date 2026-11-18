@@ -1,19 +1,19 @@
 /**
- * flow-inspect.mjs —— 工作区探测（inspect）、任务启动（start）、认领（claim）与多 Issue 依赖拓扑。
+ * flow-inspect.mjs —— 工作区探测（inspect）、任务启动（start）与多 Issue 依赖拓扑。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
-import { parseDocFilename, parseDocFrontmatter, slugify, syncDocsLifecycle } from '../../lib/docs.mjs'
+import { slugify } from '../../lib/docs.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
-  gitDiffNameStatusZ, gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
-  readTextSafe, resolveRepoRoots, writeAtomic,
+  gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
+  resolveRepoRoots, writeAtomic,
 } from '../../lib/git.mjs'
 import {
   hasUnmergedIndexFast, parsePorcelainV2BranchZ, readGitConfigFast, readHeadFast,
@@ -22,75 +22,26 @@ import {
 } from '../../lib/git-fast.mjs'
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+import { getLocalIssue } from '../../lib/local-issues.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, parseFlowInputs,
+  cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import {
   assertNoDuplicatePrForTask, checkUnresolvedDependencies, resolveExternalCollaborationGraph,
 } from '../../lib/task-graph.mjs'
 import { analyzeIssueDependencies } from '../../lib/workflow-policy.mjs'
-import { resolveAndHydrateTaskContexts } from './flow-context.mjs'
+import {
+  buildTargetRepoContext, detectRemoteDriftWarnings, findMatchingDocStrict,
+  getChangedFiles, migrateUncommittedPlanDocs, resolveAndHydrateTaskContexts, syncTaskDocsSafe,
+} from './flow-context.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
-export { analyzeIssueDependencies }
+export { analyzeIssueDependencies, buildTargetRepoContext, getChangedFiles, syncTaskDocsSafe }
 export const EXIT_POLICY_BLOCK = 3
 export const EXIT_ACTION_REQUIRED = 4
-
-/** 使用 `-z` 安全收集相对于 baseRef 的全部变更文件（含无 baseSha 首提交 `ls-tree HEAD` 与未提交变动，支持复用已知 statusEntries 与 diffEntries）。 */
-export async function getChangedFiles(cwd, baseRef, opts = {}) {
-  const fastAtBase = !Array.isArray(opts.diffEntries) && baseRef
-    && readHeadFast(resolveGitDirFast(cwd))?.oid === baseRef
-  const [diff, tree, st] = await Promise.all([
-    Array.isArray(opts.diffEntries)
-      ? Promise.resolve({ ok: true, entries: opts.diffEntries })
-      : (fastAtBase
-          ? Promise.resolve({ ok: true, entries: [] })
-          : (baseRef ? gitDiffNameStatusZ(cwd, [`${baseRef}..HEAD`]) : Promise.resolve(null))),
-    baseRef ? Promise.resolve(null) : gitRunBuffer(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD']),
-    Array.isArray(opts.statusEntries) ? Promise.resolve({ ok: true, entries: opts.statusEntries }) : gitStatusPorcelainZ(cwd),
-  ])
-  const set = new Set()
-  if (diff?.ok) for (const e of diff.entries) if (e.file) set.add(e.file)
-  if (tree?.ok) for (const f of tree.stdout.toString('utf8').split('\0')) if (f) set.add(posixPath(f))
-  if (st.ok) for (const e of st.entries) if (e.file) set.add(e.file)
-  return [...set].sort()
-}
-
-export function buildTargetRepoContext(role, remoteUrls, declaredRepo, topology = null) {
-  const originRaw = remoteUrls.origin ?? Object.values(remoteUrls)[0]
-  const upstreamRaw = remoteUrls.upstream
-  const originFull = githubRepoFull(originRaw)
-  const upstreamFull = githubRepoFull(upstreamRaw)
-  const originLower = originFull ? originFull.toLowerCase() : null
-  const upstreamLower = upstreamFull ? upstreamFull.toLowerCase() : null
-  const targetRepo = role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : originFull
-  const pushRemote = topology?.origin?.name ?? (remoteUrls.origin ? 'origin' : Object.keys(remoteUrls)[0] ?? 'origin')
-  return { originFull, originLower, upstreamFull, upstreamLower, targetRepo, pushRemote }
-}
-
-export async function syncTaskDocsSafe(workRoot, ledger, overrides = {}) {
-  const seed = ledger.specFile ?? ledger.todoFile ?? ledger.prdFile ?? ledger.slug
-  if (!seed) return null
-  try {
-    const res = await syncDocsLifecycle(workRoot, {
-      slugOrPath: seed,
-      issue: ledger.linkedIssues?.[0],
-      pr: ledger.prNumber ?? undefined,
-      branch: ledger.branch,
-      owner: ledger.implementerId ?? undefined,
-      ...overrides,
-    })
-    if (res.byKind?.prd) ledger.prdFile = res.byKind.prd
-    if (res.byKind?.spec) ledger.specFile = res.byKind.spec
-    if (res.byKind?.todo) ledger.todoFile = res.byKind.todo
-    return res
-  } catch {
-    return null
-  }
-}
 
 export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const roots = opts.roots ?? await resolveRepoRoots(targetDir)
@@ -105,13 +56,8 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const fastHeadUnborn = Boolean(fastHead && !fastHead.oid)
   const canFastStatus = Boolean(opts.lightStart && fastHead && hasUnmergedIndexFast(roots.workTreeGitDir) === false)
   const hasOriginRemote = !fastCfg || Boolean(fastCfg.remoteText && /^origin\t/m.test(fastCfg.remoteText))
-  const hasExplicitModeMarker = Boolean(
-    roots.gitDir && (
-      existsSync(join(roots.gitDir, 'pf-local-mode'))
-      || existsSync(join(roots.gitDir, 'pf-standalone-mode'))
-      || existsSync(join(roots.gitDir, 'pf-fork-mode'))
-    ),
-  )
+  const markersEarly = roots.gitDir ? detectGitModeMarkers(roots.gitDir, { hasRemote: hasOriginRemote }) : { localMode: false, forkMode: false, standaloneMode: false }
+  const hasExplicitModeMarker = Boolean(markersEarly.localMode || markersEarly.forkMode || markersEarly.standaloneMode)
   const needHistoryForStart = !opts.lightStart || (hasOriginRemote && !hasExplicitModeMarker && !opts.externalPr && !opts['external-pr'])
   const skipLog = fastHeadUnborn || !needHistoryForStart
   const fastLog = (!skipLog && fastHead?.oid)
@@ -144,6 +90,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const branch = stParsed.branch ?? (head ? '(detached)' : null)
   const remoteUrls = parseRemoteUrls(remoteRes.stdout)
   const topology = parseRemotesTopology(remoteRes.stdout)
+  if (roots.gitDir && Object.keys(remoteUrls).length > 0) {
+    cleanStaleLocalModeMarker(roots.gitDir, { hasRemote: true })
+  }
 
   let userName = fastCfg?.userName ?? sysCfgMap?.get('user.name')
   let userEmail = fastCfg?.userEmail ?? sysCfgMap?.get('user.email')
@@ -208,6 +157,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const canQueryApi = Boolean(opts._ghClient || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token')
   const shouldFetchRepoMeta = Boolean(opts.probeAuth) && originFull && canQueryApi
   const apiClient = opts._ghClient ?? (canQueryApi ? ghProbe.client : null)
+  const localIssueClient = apiClient ?? {
+    getIssue: async (_repo, num) => getLocalIssue({ mainRoot, gitDir: roots.gitDir, number: num }),
+  }
 
   const [repoMetaRes, graph] = await Promise.all([
     shouldFetchRepoMeta && typeof apiClient?.getRepoMeta === 'function' ? apiClient.getRepoMeta(originFull) : Promise.resolve(null),
@@ -216,9 +168,9 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
       issueInput: opts.issue ?? null,
       prInput: opts.pr ?? null,
       externalPrInput: opts.externalPr ?? null,
-      defaultRepo: originFull,
+      defaultRepo: originFull ?? 'local',
       originRepo: originFull,
-      client: apiClient,
+      client: localIssueClient,
       knownIssueStates: opts.knownIssueStates ?? null,
       knownPrs: opts.knownPrs ?? null,
     }),
@@ -232,6 +184,12 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
   const identity = resolveWorkspaceIdentity({
     gitDir: roots.gitDir, remoteUrls, declaredRepo, gitIdentity, historyAuthors, commits, externalPr,
     apiProbe: repoMetaRes?.ok ? repoMetaRes : undefined,
+  })
+  const driftWarnings = detectRemoteDriftWarnings({
+    mainRoot,
+    gitDir: roots.gitDir,
+    role: identity.role,
+    providerId: identity.providerId ?? 'none',
   })
 
   return {
@@ -253,6 +211,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     gitIdentity,
     identity,
     github: ghProbe.env,
+    driftWarnings,
     devProfile: {
       hasAgents: profile.hasAgents,
       quickTest: profile.quickTest ?? null,
@@ -271,68 +230,6 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     })),
     inputs: { issues: fetchedIssues, prs: fetchedPrs, unknown: graph.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues), graph },
   }
-}
-
-function findMatchingDocStrict(root, dirRel, slug, taskId) {
-  const abs = join(root, dirRel)
-  if (!existsSync(abs)) return null
-  try {
-    for (const n of readdirSync(abs).filter((x) => x.endsWith('.md')).sort()) {
-      const fn = parseDocFilename(n)
-      if (fn && fn.slug === slug) return `${dirRel}/${n}`
-      const fm = parseDocFrontmatter(readTextSafe(join(abs, n)) ?? '')
-      if (fm.data?.task_id === taskId) return `${dirRel}/${n}`
-    }
-  } catch { /* ignore */ }
-  return null
-}
-
-function hasAnyPlanMarkdownFiles(root) {
-  for (const dirRel of ['docs/prd', 'docs/specs', 'docs/todo']) {
-    const abs = join(root, dirRel)
-    if (!existsSync(abs)) continue
-    try {
-      if (readdirSync(abs).some((n) => n.endsWith('.md'))) return true
-    } catch { /* ignore */ }
-  }
-  return false
-}
-
-/** 将主仓中尚未提交的关联规划文档同步迁入新创建的 Tier 2 实施 worktree，防止断链。 */
-async function migrateUncommittedPlanDocs(mainRoot, implAbs, ledger, mainDirty = undefined) {
-  if (mainDirty === 0) return []
-  if (!ledger.prdFile && !ledger.specFile && !ledger.todoFile && !hasAnyPlanMarkdownFiles(mainRoot)) return []
-  const st = await gitStatusPorcelainZ(mainRoot)
-  if (!st.ok) return []
-  const dirtyMap = new Map(st.entries.map((e) => [e.file, e.xy]))
-  const migrated = []
-
-  const candidates = new Set([ledger.prdFile, ledger.specFile, ledger.todoFile].filter(Boolean))
-  for (const [rel, xy] of dirtyMap.entries()) {
-    if (!/^docs\/(?:prd|specs|todo)\/[^/]+\.md$/.test(rel)) continue
-    const fn = parseDocFilename(rel)
-    if (fn && fn.slug === ledger.slug) candidates.add(rel)
-    else {
-      const fm = parseDocFrontmatter(readTextSafe(join(mainRoot, rel)) ?? '')
-      if (fm.data?.task_id === ledger.taskId) candidates.add(rel)
-    }
-    void xy
-  }
-
-  for (const rel of candidates) {
-    const srcAbs = join(mainRoot, rel)
-    const dstAbs = join(implAbs, rel)
-    if (!existsSync(srcAbs)) continue
-    const xy = dirtyMap.get(rel)
-    if (!xy && existsSync(dstAbs)) continue
-    mkdirSync(dirname(dstAbs), { recursive: true })
-    copyFileSync(srcAbs, dstAbs)
-    migrated.push(rel)
-    if (xy === '??') {
-      try { unlinkSync(srcAbs) } catch { /* ignore */ }
-    }
-  }
-  return migrated
 }
 
 export async function handleStart(opts, roots) {
@@ -411,9 +308,13 @@ export async function handleStart(opts, roots) {
       }
       return { exitCode: EXIT_ACTION_REQUIRED }
     }
-    if (choice === 'local') { writeAtomic(join(roots.gitDir, 'pf-local-mode'), `enabled at ${new Date().toISOString()}\n`); role = 'local-only' }
-    else if (choice === 'standalone') { writeAtomic(join(roots.gitDir, 'pf-standalone-mode'), `enabled at ${new Date().toISOString()}\n`); role = 'maintainer' }
-    else if (choice === 'fork') {
+    if (choice === 'local') {
+      writeAtomic(join(roots.gitDir, 'pf-local-mode'), `${JSON.stringify({ mode: 'readonly-override', updatedAt: new Date().toISOString() }, null, 2)}\n`)
+      role = 'local-only'
+    } else if (choice === 'standalone') {
+      writeAtomic(join(roots.gitDir, 'pf-standalone-mode'), `enabled at ${new Date().toISOString()}\n`)
+      role = 'maintainer'
+    } else if (choice === 'fork') {
       writeAtomic(join(roots.gitDir, 'pf-fork-mode'), `enabled at ${new Date().toISOString()}\n`)
       if (opts['fork-url'] && state.remoteUrls.origin && !state.remoteUrls.upstream) {
         await gitRun(roots.mainRoot, ['remote', 'rename', 'origin', 'upstream'])
@@ -450,42 +351,13 @@ export async function handleStart(opts, roots) {
 
   let createdIssue = null
   if (wantCreateIssue && linkedIssues.length === 0) {
-    if (role !== 'maintainer') {
-      process.stderr.write(`BLOCKED_CREATE_ISSUE_ROLE: --create-issue 仅支持 maintainer 在 GitHub 仓创建新 Issue（当前 role=${role}）。\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
-    }
-    const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls, state.declaredRepo)
-    if (!targetRepo || providerId !== 'github') {
-      throw new Error('--create-issue 需要配置有效的 GitHub 远端仓库')
-    }
-    const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls: state.remoteUrls }))
-    const ghClient = opts._ghClient ?? ghProbe.client
-    const issueTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
-    const issueBody = String(opts.body ?? [
-      `## 任务追踪`,
-      `- Slug: \`${slugify(opts.slug ?? issueTitle)}\``,
-      `- Case: Case ${caseType}`,
-      opts.task ? `- Task ID: \`${opts.task}\`` : null,
-    ].filter(Boolean).join('\n')).trim()
-    const issueLabels = opts.labels
-      ? String(opts.labels).split(',').map((s) => s.trim()).filter(Boolean)
-      : []
-    const createRes = await ghClient.createIssue({
-      repo: targetRepo,
-      title: issueTitle,
-      body: issueBody,
-      labels: issueLabels,
+    const { createIssueForStart } = await import('./flow-issues.mjs')
+    const cr = await createIssueForStart({
+      roots, state, role, providerId, prelimTaskId, caseType, opts,
     })
-    if (createRes.delegated) {
-      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_CREATE_ISSUE_DELEGATED', ...createRes }, null, 2)}\n`)
-      else process.stdout.write(`无直连 GitHub 凭据，已生成创建 Issue 代理载荷：${JSON.stringify(createRes.jsonPayload)}\n`)
-      return { exitCode: EXIT_ACTION_REQUIRED }
-    }
-    if (!createRes.ok || !createRes.number) {
-      throw new Error(`创建 GitHub Issue 失败：${createRes.error ?? '未返回有效 Issue 编号'}`)
-    }
-    createdIssue = createRes
-    linkedIssues.push(createRes.number)
+    if (cr.exitCode !== 0) return { exitCode: cr.exitCode }
+    createdIssue = cr.createdIssue
+    linkedIssues.push(createdIssue.number)
   }
 
   const defaultPrTask = effectiveExternalPr ? `review-pr-${effectiveExternalPr}` : (prNumber ? `pr-${prNumber}` : null)
@@ -524,10 +396,8 @@ export async function handleStart(opts, roots) {
     if (needIssueRefresh || needPrRefresh) {
       const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
       const hydrated = await resolveAndHydrateTaskContexts({
-        mainRoot: roots.mainRoot,
-        remoteUrls: state.remoteUrls ?? {},
-        providerId,
-        targetRepo,
+        mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
+        providerId, role, targetRepo,
         issueNumbers: needIssueRefresh ? existing.linkedIssues : [],
         existingIssueContext: existing.issueContext,
         prNumber: needPrRefresh ? existing.prNumber : null,
@@ -553,7 +423,7 @@ export async function handleStart(opts, roots) {
     writeTaskLedger(roots.mainRoot, existing)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
-      if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
+      if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已存在（幂等复用）：isolation=${existing.isolation}, branch=${existing.branch ?? 'detached'}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
@@ -625,19 +495,10 @@ export async function handleStart(opts, roots) {
   const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
   const activePrForStart = effectiveExternalPr ?? prNumber ?? null
   const {
-    issueContext,
-    issueContextUnavailable,
-    prContext,
-    prContextUnavailable,
-    prPatch,
+    issueContext, issueContextUnavailable, prContext, prContextUnavailable, prPatch,
   } = await resolveAndHydrateTaskContexts({
-    mainRoot: roots.mainRoot,
-    remoteUrls: state.remoteUrls ?? {},
-    providerId,
-    targetRepo,
-    issueNumbers: linkedIssues,
-    prNumber: activePrForStart,
-    opts,
+    mainRoot: roots.mainRoot, gitDir: roots.gitDir, remoteUrls: state.remoteUrls ?? {},
+    providerId, role, targetRepo, issueNumbers: linkedIssues, prNumber: activePrForStart, opts,
   })
 
   await ensureWorktreesIgnored(roots.mainRoot, roots.gitDir)
@@ -697,9 +558,9 @@ export async function handleStart(opts, roots) {
     return await gitRun(roots.mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
   }
 
-  const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId)
-  const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId)
-  const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId)
+  const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId, linkedIssues)
+  const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues)
+  const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues)
 
   for (const docRel of [initialSpec, initialTodo]) {
     const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)
@@ -729,7 +590,7 @@ export async function handleStart(opts, roots) {
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
-      if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
+      if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式）：branch=${branch}, role=${role}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
@@ -767,20 +628,23 @@ export async function handleStart(opts, roots) {
   recordMountedDepsInLedger(ledger, implRel, depMount)
 
   const migratedDocs = await migrateUncommittedPlanDocs(roots.mainRoot, implAbs, ledger, state.dirty)
-  if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId)
-  if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId)
-  if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId)
+  if (!ledger.todoFile) ledger.todoFile = findMatchingDocStrict(implAbs, 'docs/todo', slug, taskId, linkedIssues)
+  if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues)
+  if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues)
   if (linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger)
   writeTaskLedger(roots.mainRoot, ledger)
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
   } else {
-    if (createdIssue) process.stdout.write(`已创建 GitHub Issue #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
+    if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
     process.stdout.write(`任务 ${taskId} 已就绪（Tier 2 Worktree 模式）：\n`)
     process.stdout.write(`- 实施位: ${implRel}（分支: ${branch}，依赖模式: ${depMount.mode}）\n`)
     if (migratedDocs.length > 0) process.stdout.write(`- 已迁入规划文档: ${migratedDocs.join(', ')}\n`)
     process.stdout.write(`- 角色: ${role} | 基线: ${baseBranch}@${(baseSha ?? '').slice(0, 7)}\n`)
+    if (Array.isArray(state.driftWarnings)) {
+      for (const w of state.driftWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
+    }
     printNextStep([
       linkedIssues.length > 0 && role !== 'local-only' && role !== 'generic-git'
         ? { skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` }

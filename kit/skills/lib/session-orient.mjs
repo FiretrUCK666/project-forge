@@ -34,6 +34,9 @@ import { join } from 'node:path'
 import { listDocs } from '../dev-plan/scripts/doc-audit.mjs'
 import { listTaskLedgers } from './ledger.mjs'
 import { readTextSafe } from './git.mjs'
+import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
+import { listLocalIssues } from './local-issues.mjs'
+import { detectGitModeMarkers } from './platform.mjs'
 
 /** 这份文档当前卡在哪一格。空数组表示它不需要人管。 */
 function blockOf(doc, kind) {
@@ -97,6 +100,21 @@ export function buildSessionOrientation(mainRoot) {
     }))
   } catch {
     tasks = []
+  }
+
+  let openLocalIssues = []
+  let pendingLocalMigration = false
+  try {
+    const fastGitDir = resolveGitDirFast(mainRoot)
+    openLocalIssues = listLocalIssues({ mainRoot, gitDir: fastGitDir, state: 'open' }).issues ?? []
+    if (openLocalIssues.length > 0 && fastGitDir) {
+      const cfg = readGitConfigFast(fastGitDir, { systemMap: false })
+      const hasRemote = Boolean(cfg?.remoteText && cfg.remoteText.trim().length > 0)
+      const markers = detectGitModeMarkers(fastGitDir, { hasRemote })
+      pendingLocalMigration = hasRemote && !markers.localMode
+    }
+  } catch {
+    openLocalIssues = []
   }
 
   const stuck = [
@@ -168,6 +186,19 @@ export function buildSessionOrientation(mainRoot) {
     lines.push('')
   }
 
+  if (openLocalIssues.length > 0) {
+    lines.push('## 未闭环本地工单')
+    lines.push('')
+    for (const it of openLocalIssues.slice(0, 10)) {
+      lines.push(`- #${it.number} [${it.state}] ${it.title}${it.assignees?.length ? `（认领：${it.assignees.join(', ')}）` : ''}`)
+    }
+    if (openLocalIssues.length > 10) lines.push(`- ... 其余 ${openLocalIssues.length - 10} 条请运行 \`flow.mjs issue list\``)
+    if (pendingLocalMigration) {
+      lines.push('- **切回远端迁移提示**：仓库已绑定远端，建议运行 `node ".agents/skills/dev-flow/scripts/flow.mjs" issue migrate` 将本地工单迁回远端。')
+    }
+    lines.push('')
+  }
+
   lines.push('## 卡在哪')
   lines.push('')
   if (stuck.length === 0) {
@@ -199,6 +230,8 @@ export function buildSessionOrientation(mainRoot) {
   return {
     docs,
     tasks,
+    localIssues: openLocalIssues.map((i) => ({ number: i.number, title: i.title, state: i.state, labels: i.labels ?? [], assignees: i.assignees ?? [] })),
+    pendingLocalMigration,
     stuck,
     nextSteps: nextSteps.slice(0, 3),
     text: `${lines.join('\n').trimEnd()}\n`,

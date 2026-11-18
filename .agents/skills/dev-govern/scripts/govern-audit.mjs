@@ -21,7 +21,7 @@ import {
   createFileContentCache, readTextStrictInfo, setActiveFileCache, walkFiles,
 } from './govern-checks.mjs'
 import {
-  buildClusterReport, buildGovernNextSteps, buildIssues, applyGitHubIssues,
+  buildClusterReport, buildGovernNextSteps, buildIssues, applyIssuesToBackend,
   collectChangedFilesSet, countBySeverity, filterFindingsByBaselineAndChanged,
   formatTextReport, handleRecordSignal, handleSampleCommits, loadBaseline,
   readSignalsJsonl, resolveGovernStateDir, saveBaseline, updateLoopState,
@@ -350,7 +350,7 @@ async function finishAudit({
   const issues = opts.issues ? buildIssues(findings) : undefined
   let applyResult
   if (opts.issues && opts.applyIssues && issues) {
-    applyResult = await applyGitHubIssues(workTreeRoot, issues, {
+    applyResult = await applyIssuesToBackend(workTreeRoot, issues, {
       _ghProbe: opts._ghProbe,
       _ghClient: opts._ghClient,
     })

@@ -303,8 +303,20 @@ async function checkPlatformSemanticParity({ ROOT, readText, fail, note }) {
   }
   const envA = enginePlatform.buildNonInteractiveEnv({})
   const envB = kitBuildNonInteractiveEnv({})
-  for (const k of ['GIT_TERMINAL_PROMPT', 'GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE', 'GCM_INTERACTIVE', 'GH_PROMPT_DISABLED']) {
+  for (const k of [
+    'GIT_TERMINAL_PROMPT',
+    'GIT_ASKPASS',
+    'SSH_ASKPASS',
+    'SSH_ASKPASS_REQUIRE',
+    'GCM_INTERACTIVE',
+    'GH_PROMPT_DISABLED',
+    'GIT_EDITOR',
+    'GIT_SEQUENCE_EDITOR',
+  ]) {
     if (envA[k] !== envB[k]) fail(`平台语义对齐：buildNonInteractiveEnv 键 ${k} 不一致（${envA[k]} vs ${envB[k]}）`)
+  }
+  if (envB.GIT_EDITOR !== 'true' || envB.GIT_SEQUENCE_EDITOR !== 'true') {
+    fail('平台语义对齐：buildNonInteractiveEnv 必须固定 GIT_EDITOR/GIT_SEQUENCE_EDITOR 为 true')
   }
 
   const engProviders = enginePlatform.listHostingProviders().map((p) => p.id)

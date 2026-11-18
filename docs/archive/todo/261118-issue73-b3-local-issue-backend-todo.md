@@ -1,18 +1,18 @@
 ---
 kind: todo
 title: v9 B3：无远端本地工单全生命周期闭环与非交互 Git 防护
-status: active
+status: done
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-19
 issue: 73
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b3-local-issue-backend
+owner: impl-73
 approved: false
-done_at: null
+done_at: 2026-11-19
 task_id: b3-local-issue-backend
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue73-b3-local-issue-backend-spec.md
 ---
 
@@ -43,9 +43,9 @@ related_spec: ../specs/261118-issue73-b3-local-issue-backend-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C7: 新增 `kit/skills/lib/local-issues.mjs` (new) 写入 `<effectiveGitDir>/project-forge-flow/issues/`；`TASK_BACKEND_METHODS` 扩至 16 方法；`LocalOnlyBackend` 声明 `issues: true`/`labels: true` 持久化评论、标签与关单态；消除 `.git/pf-local-mode` 粘滞锁定并让 `compose-agents.mjs` `hasRemote` 尊重有效 `localMode`（同时保留空/`readonly-override` 兼容 `fixtures-claims`）。
-- [ ] C8: 打通 `flow-issues.mjs` (new)（含 `migrate`）、`flow-context.mjs`（`findMatchingDocStrict` 支持 frontmatter `issue` 兜底匹配预建规划单）、`flow-inspect.mjs`（含远端漂移提示与拆分 `<= 680` 行）、`flow-merge.mjs`、`flow-next.mjs`、`review-sync.mjs` (new)（`review-ledger.mjs <= 600` 行，同步 `I145`）、`session-orient.mjs` 与 `govern-state.mjs`/`govern-tests.mjs` 在无远端与切回远端全闭环，通过 `write-probe-audit.mjs` 0 违规；`exec.mjs` 与 `flow-sync`/`flow-merge`/`flow-trial-merge` 补齐 `GIT_EDITOR=true` 非交互保护。
-- [ ] C20: 拆出 `github-parse.mjs` (new)（维持 `github-client.mjs <= 680` 行）并落实 `A1/A2/A3`：`429`/`5xx`/TLS 超时退避重试且严禁重试 `400/401/403/405/409/413`、`redirect: 'manual'` 拒跟 `3xx`、`createPr` 查重、`mergePr` `sha` 锚定与 `alreadyMerged` 续尾、`getCommitChecks` 查询异常降级 `unknown`、`closeIssue` 幂等先评后关与 `ledger` 禁回退、`postComment` `WriteBackFingerprint` 去重、`GenericRemoteBackend` 本地兼容追踪；`parsePrNumber`/`parseIssueNumbers`/`parseFlowInputs` 泛化支持自建站点 `/issues/{N}`、`/pulls/{M}`、`/-/merge_requests/{M}` 与 `!{M}`；`platform-probe.mjs` 排除 `^[A-Za-z]:/`。
+- [x] C7: 新增 `kit/skills/lib/local-issues.mjs` (new) 写入 `<effectiveGitDir>/project-forge-flow/issues/`；`TASK_BACKEND_METHODS` 扩至 16 方法；`LocalOnlyBackend` 声明 `issues: true`/`labels: true` 持久化评论、标签与关单态；消除 `.git/pf-local-mode` 粘滞锁定并让 `compose-agents.mjs` `hasRemote` 尊重有效 `localMode`（同时保留空/`readonly-override` 兼容 `fixtures-claims`）。
+- [x] C8: 打通 `flow-issues.mjs` (new)（含 `migrate`）、`flow-context.mjs`（`findMatchingDocStrict` 支持 frontmatter `issue` 兜底匹配预建规划单）、`flow-inspect.mjs`（含远端漂移提示与拆分 `<= 680` 行）、`flow-merge.mjs`、`flow-next.mjs`、`review-sync.mjs` (new)（`review-ledger.mjs <= 600` 行，同步 `I145`）、`session-orient.mjs` 与 `govern-state.mjs`/`govern-tests.mjs` 在无远端与切回远端全闭环，通过 `write-probe-audit.mjs` 0 违规；`exec.mjs` 与 `flow-sync`/`flow-merge`/`flow-trial-merge` 补齐 `GIT_EDITOR=true` 非交互保护。
+- [x] C20: 拆出 `github-parse.mjs` (new)（维持 `github-client.mjs <= 680` 行）并落实 `A1/A2/A3`：`429`/`5xx`/TLS 超时退避重试且严禁重试 `400/401/403/405/409/413`、`redirect: 'manual'` 拒跟 `3xx`、`createPr` 查重、`mergePr` `sha` 锚定与 `alreadyMerged` 续尾、`getCommitChecks` 查询异常降级 `unknown`、`closeIssue` 幂等先评后关与 `ledger` 禁回退、`postComment` `WriteBackFingerprint` 去重、`GenericRemoteBackend` 本地兼容追踪；`parsePrNumber`/`parseIssueNumbers`/`parseFlowInputs` 泛化支持自建站点 `/issues/{N}`、`/pulls/{M}`、`/-/merge_requests/{M}` 与 `!{M}`；`platform-probe.mjs` 排除 `^[A-Za-z]:/`。
 
 ## 执行步骤
 
@@ -90,6 +90,6 @@ related_spec: ../specs/261118-issue73-b3-local-issue-backend-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：已跑通 `node scripts/equip.mjs .` 与 `--check`、`node scripts/dev/preflight.mjs`（34 项全绿）、`node scripts/dev/write-probe-audit.mjs`（0 违规）、`node scripts/dev/verify-injections.mjs --only I145`（必红捕获）、`node scripts/dev/fixtures.mjs --domain stageb-loop`（4 项全绿）与基线 `fixtures.mjs`（270 项全绿）、`node scripts/dev/gap-coverage.mjs`、`node scripts/compose-agents.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`（0 finding），随后在最终 `HEAD` 锁定 `verify --mode gate` 与 `e2e-zip-harness.mjs` 实证。
+- **文档同步检查**：已将 `kit/skills/lib/local-issues.mjs`、`kit/skills/lib/github-parse.mjs`、`kit/skills/dev-flow/scripts/flow-issues.mjs`、`kit/skills/dev-review/scripts/review-sync.mjs` 与 16 方法 `TaskBackend`/`flow.mjs issue` 同步至 `docs/TDD.md`（更新日期 `2026-11-19`），并同步 `.agents/skills/`（`equip.mjs .`）及 `SPEC`/`Todo` 终态与成对归档。
+- **遗留问题**：无；待 `verify --mode gate` 与独立审查通过后合入 `main`。

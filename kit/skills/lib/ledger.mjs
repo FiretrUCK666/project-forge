@@ -272,8 +272,16 @@ export function recordMountedDepsInLedger(ledger, worktreeRel, mountResult) {
 
 export function writeTaskLedger(mainRoot, ledger) {
   const p = taskLedgerPath(mainRoot, ledger.taskId)
+  const existing = readJsonSafe(p)
+  const safeInput = { ...ledger }
+  if (existing?.status === 'merged' && !['merged', 'cleaned'].includes(String(safeInput.status ?? '').toLowerCase())) {
+    safeInput.status = 'merged'
+    if (existing.prState === 'MERGED' && (!safeInput.prState || String(safeInput.prState).toUpperCase() === 'UNKNOWN')) {
+      safeInput.prState = 'MERGED'
+    }
+  }
   const stamped = {
-    ...createDefaultLedger(ledger),
+    ...createDefaultLedger(safeInput),
     updatedAt: new Date().toISOString(),
   }
   if (!stamped.createdAt) stamped.createdAt = stamped.updatedAt
@@ -301,8 +309,15 @@ export async function updateTaskLedger(mainRoot, taskId, updater, { createIfMiss
       throw new Error(`找不到任务账本：${id}（请先运行 flow.mjs start --task ${id}）`)
     }
     const base = existing ? createDefaultLedger(existing) : createDefaultLedger({ ...defaults, taskId: id })
-    const next = typeof updater === 'function' ? await updater(structuredClone(base)) : { ...base, ...updater }
-    const merged = createDefaultLedger({ ...base, ...(next ?? {}), taskId: id })
+    const nextRaw = typeof updater === 'function' ? await updater(structuredClone(base)) : { ...base, ...updater }
+    const next = { ...(nextRaw ?? {}) }
+    if (base.status === 'merged' && next.status !== undefined && !['merged', 'cleaned'].includes(String(next.status).toLowerCase())) {
+      next.status = 'merged'
+      if (base.prState === 'MERGED' && String(next.prState ?? '').toUpperCase() === 'UNKNOWN') {
+        next.prState = 'MERGED'
+      }
+    }
+    const merged = createDefaultLedger({ ...base, ...next, taskId: id })
     const path = writeTaskLedger(mainRoot, merged)
     return { ledger: readTaskLedger(mainRoot, id) ?? merged, path }
   })

@@ -287,6 +287,49 @@
   "disabledSkills": [],
   "removedFiles": {},
   "customizedFiles": {},
-  "agentsRegions": {},
+  "agentsRegions": {
+    "意图路由": {
+      "sha256": "345435550d111cfd9715d06c30c6e4c1350411d17f2ca8d7a507535ca533b5f9"
+    },
+    "行事总纲": {
+      "sha256": "54ed483134d0d172cf7a4b2eb694612d4e8ceea3c9fd96ff3798102e731671b8"
+    },
+    "项目定位": {
+      "sha256": "a10dae3b061bb1df152c456f3587e95e37d53d51f6b927fd03f1619ae4a273db"
+    },
+    "Dev Profile": {
+      "sha256": "32e936599f405d4a380a98c45274820dfd8ea489dcd9c36b2960b95d3423b8c3"
+    },
+    "上下文阅读护栏": {
+      "sha256": "c9a6206dd51278faa19786462f6e44ccf52a9aa1b0e44ca70f8c2b46da9e7869"
+    },
+    "探索策略": {
+      "sha256": "7bf55b89a2c61988899e64419ef5bfc4b2066cf29139beb2a1c8205debecfa91"
+    },
+    "架构与关键不变量": {
+      "sha256": "2e2f45d8a56a839af469805b0453bdc3787c46b16053e12af481237484c7c3b9"
+    },
+    "构建与验证": {
+      "sha256": "b3fd6d6e14d990ad1e8390327508e43e692ada92115e2af053b54b23930ab653"
+    },
+    "修改守则": {
+      "sha256": "355f506fb0c4b05641844dfbde81500dc723945893a5b8a5f67f9c11a093ebc9"
+    },
+    "修改守则补充": {
+      "sha256": "b1d816bc3b3737ecd81fad0854859c68ffd108c059e6273230a71aca7bbb8201"
+    },
+    "版本与发布": {
+      "sha256": "3c041a9e5a2d65f07d17ce0eb581fdd8da8ff05a26b6434e675f4605b584a599"
+    },
+    "日常协作与风险分流": {
+      "sha256": "6cd2fe8c82af49fd42e6eb7a56bcce1add088397cc0f7988e348aa057acf84be"
+    },
+    "高风险路径": {
+      "sha256": "657a11b805e49191e7808452fa799e227fe184150de5d30b5a922d2a121a795c"
+    },
+    "改哪看哪": {
+      "sha256": "5939c85e363296a262d263978bd59a721a65fc6052a00df0f12c500b7fc10e6b"
+    }
+  },
   "removedAgentsRegions": []
 }

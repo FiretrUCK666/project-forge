@@ -1,15 +1,15 @@
 ---
 kind: todo
 title: 补全 docs/TDD.md 模块清单、修正 docs.stale-vs-churn 与夹具误报并按域拆分超长模块
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 59
 pr: null
 branch: feat/govern-tdd-and-split
-owner: plan-59
+owner: FiretrUCK666
 approved: true
-done_at: null
+done_at: 2026-11-18
 task_id: issue-59
 planned_at: 930aea1c1d9837ead25887330e554af1e18a705c
 related_prd: null
@@ -43,11 +43,11 @@ related_spec: ../specs/261118-issue59-govern-tdd-and-split-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C1: `docs/TDD.md` 包含 `kit/skills/**` 与 `scripts/**` 下全部 100% 既有及本次新增 `.mjs` 模块的完整相对路径（无一缺失），更新 `最近更新日期` 且 0 失效引用；运行 `node scripts/review.mjs .` 返回 0 个 `missing`，`node scripts/dev/preflight.mjs` 全绿退出 0。
-- [ ] C2: `kit/skills/dev-govern/scripts/govern-docs.mjs` 的 `checkDocChurnStaleness` 在第 237 行与第 249 行两处循环中一致跳过受有效 `.pf-manifest.json`（`!Array.isArray(manifest.files)` 非空普通对象且 `!scopeRel`）托管的 `.agents/skills/` 镜像目录以及 `isTestOrFixtureFile(rel)` 测试/夹具文件；反向：当真实源码目录（如 `kit/skills/` 或 `scripts/lib/`）在最近提交中达 `>= 8` 次非测试非夹具提交且未同步 `docs/TDD.md` / `AGENTS.md` / `docs/*.md` 时仍触发 `docs.stale-vs-churn.<dir>`（由 `scripts/dev/fixtures-govern.mjs` 正反夹具 + `I157` 验证）。
-- [ ] C3: `kit/skills/lib/static-gates.mjs`（`FIXTURE_FILE_RE` / `isTestOrFixtureFile`）与 `kit/skills/dev-govern/scripts/govern-checks.mjs` 正确豁免 `scripts/dev/fixtures-*.mjs` 与 `scripts/dev/injections-data*.mjs` 不报 `hygiene.god-file` 且不触发 `govern-tests.mjs` `tests.zero-assertion` 误报；反向：非测试/非夹具脚本（含 `scripts/dev/` 下普通非夹具脚本或 `scripts/lib/` 模块）超过 800 行仍必须触发 `hygiene.god-file`（由 `scripts/dev/fixtures-govern.mjs` 正反夹具 + `I158`、`I159` 验证）。
-- [ ] C4: `scripts/lib/survey-workspace.mjs`（拆出 `scripts/lib/survey-git-fast.mjs` 与 `scripts/lib/survey-docs.mjs`）、`scripts/update.mjs`（拆出 `scripts/lib/update-net.mjs`）、`scripts/backup.mjs`（拆出 `scripts/lib/tar.mjs`）、`scripts/dev/fixtures-review.mjs`（拆出 `scripts/dev/fixtures-review-contracts.mjs`）、`scripts/dev/fixtures-flow.mjs` 与 `scripts/dev/injections-data.mjs`（拆出 `scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-workflow.mjs`、`scripts/dev/injections-data-gates.mjs`）拆分后，含新增用例后的 `scripts/dev/fixtures-govern.mjs`（675 行起）在内全仓所有 `.mjs` 文件均 `<= 800` 行，原模块导出签名与行为 100% 兼容，且 `arch-rules` 四条禁引 0 违规。
-- [ ] C5: 在仓内可执行且可复现的检查下，执行 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --json` 与 `reconcile --json` 均达到 `0` 条 `docs.stale-vs-churn`、`0` 条 `hygiene.god-file` 与 `0` 条由 Issue #59 新引入的 `hygiene.stale-worktree`（外部宿主机既有孤儿目录 `.worktrees/impl-issue-49` 仅作为非阻塞带外运维备忘，不计入 PR/CI 阻断判据），且完整 `merge-gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）全绿通过（退出码 0）。
+- [x] C1: `docs/TDD.md` 包含 `kit/skills/**` 与 `scripts/**` 下全部 100% 既有及本次新增 `.mjs` 模块的完整相对路径（无一缺失），更新 `最近更新日期` 且 0 失效引用；运行 `node scripts/review.mjs .` 返回 0 个 `missing`，`node scripts/dev/preflight.mjs` 全绿退出 0。
+- [x] C2: `kit/skills/dev-govern/scripts/govern-docs.mjs` 的 `checkDocChurnStaleness` 在第 237 行与第 249 行两处循环中一致跳过受有效 `.pf-manifest.json`（`!Array.isArray(manifest.files)` 非空普通对象且 `!scopeRel`）托管的 `.agents/skills/` 镜像目录以及 `isTestOrFixtureFile(rel)` 测试/夹具文件；反向：当真实源码目录（如 `kit/skills/` 或 `scripts/lib/`）在最近提交中达 `>= 8` 次非测试非夹具提交且未同步 `docs/TDD.md` / `AGENTS.md` / `docs/*.md` 时仍触发 `docs.stale-vs-churn.<dir>`（由 `scripts/dev/fixtures-govern.mjs` 正反夹具 + `I157` 验证）。
+- [x] C3: `kit/skills/lib/static-gates.mjs`（`FIXTURE_FILE_RE` / `isTestOrFixtureFile`）与 `kit/skills/dev-govern/scripts/govern-checks.mjs` 正确豁免 `scripts/dev/fixtures-*.mjs` 与 `scripts/dev/injections-data*.mjs` 不报 `hygiene.god-file` 且不触发 `govern-tests.mjs` `tests.zero-assertion` 误报；反向：非测试/非夹具脚本（含 `scripts/dev/` 下普通非夹具脚本或 `scripts/lib/` 模块）超过 800 行仍必须触发 `hygiene.god-file`（由 `scripts/dev/fixtures-govern.mjs` 正反夹具 + `I158`、`I159` 验证）。
+- [x] C4: `scripts/lib/survey-workspace.mjs`（拆出 `scripts/lib/survey-git-fast.mjs` 与 `scripts/lib/survey-docs.mjs`）、`scripts/update.mjs`（拆出 `scripts/lib/update-net.mjs`）、`scripts/backup.mjs`（拆出 `scripts/lib/tar.mjs`）、`scripts/dev/fixtures-review.mjs`（拆出 `scripts/dev/fixtures-review-contracts.mjs`）、`scripts/dev/fixtures-flow.mjs` 与 `scripts/dev/injections-data.mjs`（拆出 `scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-workflow.mjs`、`scripts/dev/injections-data-gates.mjs`）拆分后，含新增用例后的 `scripts/dev/fixtures-govern.mjs`（675 行起）在内全仓所有 `.mjs` 文件均 `<= 800` 行，原模块导出签名与行为 100% 兼容，且 `arch-rules` 四条禁引 0 违规。
+- [x] C5: 在仓内可执行且可复现的检查下，执行 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --json` 与 `reconcile --json` 均达到 `0` 条 `docs.stale-vs-churn`、`0` 条 `hygiene.god-file` 与 `0` 条由 Issue #59 新引入的 `hygiene.stale-worktree`（外部宿主机既有孤儿目录 `.worktrees/impl-issue-49` 仅作为非阻塞带外运维备忘，不计入 PR/CI 阻断判据），且完整 `merge-gate`（含 `preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）全绿通过（退出码 0）。
 
 ## 执行步骤
 
@@ -75,9 +75,9 @@ related_spec: ../specs/261118-issue59-govern-tdd-and-split-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`规划完成，待独立 Critique`（`docs/specs/261118-issue59-govern-tdd-and-split-spec.md` 与本 Todo 已落盘 `.worktrees/impl-issue-59`）
+- **当前状态**：`已完成，无遗留`
 - **待拍板事项**：无
-- **下一步第一件事**：由独立 `critic-59` 对 `docs/specs/261118-issue59-govern-tdd-and-split-spec.md` 执行 Critique 并通过后进入 `approve` 与实施。
+- **下一步第一件事**：完成 `finalize` 归档与提交，运行 `merge-gate` 全量门禁并提交 PR 交由独立审查。
 
 ## 澄清与补充记录
 
@@ -88,5 +88,10 @@ related_spec: ../specs/261118-issue59-govern-tdd-and-split-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/dev/preflight.mjs`（退出 0，34 项全绿；163 个 `.mjs` 脚本零孤儿，118 个产品脚本 0 架构越界）
+  - `node scripts/review.mjs .`（退出 0，0 个「缺」）
+  - `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node scripts/dev/gap-coverage.mjs`、`node scripts/sync-toc.mjs README.md README.en.md --check`（均退出 0）
+  - `node scripts/dev/fixtures.mjs` 分域校验（`review-contracts` 8/8、`review` 16/16、`flow` 全绿、`flow-state` 10/10、`equip` 7/7、`survey` 13/13、`contracts` 24/24、`govern` 12/12）
+  - `node scripts/dev/verify-injections.mjs --only` 对 `I25`/`I29`/`I44`/`I54`/`I123`/`I126`/`I133`/`I157`/`I158`/`I159` 均必红捕获；提交后将在工作树 `HEAD` 上执行全量 `flow.mjs verify --mode gate`、`e2e-zip-harness.mjs` 与 `govern-audit.mjs`。
+- **文档同步检查**：`docs/TDD.md` 已更新 `最近更新日期` 为 `2026-11-18` 并补齐 `kit/skills/**` 与 `scripts/**` 全部 163 个 `.mjs` 模块完整相对路径（缺失 0），同步通过 `equip.mjs .` 对齐 `kit/skills/` 与 `.agents/skills/`。
+- **遗留问题**：无（主仓既有的外部孤儿目录 `.worktrees/impl-issue-49` 属带外宿主机运维事项，未在本 PR 中越界清理）。

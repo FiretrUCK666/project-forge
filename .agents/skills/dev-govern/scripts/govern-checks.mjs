@@ -17,7 +17,7 @@ import {
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_TEMP_RE, RUST_ALLOW_RE, TEST_FILE_RE,
-  TOMBSTONE_COMMENT_RE, evaluateArchRules, extractLineCommentInfo,
+  TOMBSTONE_COMMENT_RE, evaluateArchRules, extractLineCommentInfo, isTestOrFixtureFile,
 } from '../../lib/static-gates.mjs'
 
 export const AGENTS_WARN_BYTES = 24576
@@ -597,7 +597,7 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
       const lines = getLinesCached(f.full, info) ?? []
       const parsedComments = getCommentLinesCached(f.full, lines, ext)
-      if (!TEST_FILE_RE.test(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
+      if (!isTestOrFixtureFile(f.rel) && !f.name.endsWith('.min.js') && lines.length > GOD_FILE_WARN_LINES) {
         const isHigh = lines.length > GOD_FILE_HIGH_LINES
         addFinding(findings, {
           id: `hygiene.god-file.${f.rel}`,

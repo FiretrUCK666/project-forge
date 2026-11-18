@@ -14,7 +14,7 @@ import { posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasHumanMergeAuthority as checkHumanMergeAuthority } from '../../lib/profile.mjs'
 import {
   CODE_EXT_RE, GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE,
-  classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, matchGlob,
+  classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, isTestOrFixtureFile, matchGlob,
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 
@@ -335,7 +335,7 @@ export function assessStructuralGate({ reviewRoot, diff, devProfile, parity }) {
       added = summarizeHunkChanges(chunks.get(f) ?? '').added
     }
 
-    const fullText = !TEST_FILE_RE.test(f) ? readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024) : undefined
+    const fullText = !isTestOrFixtureFile(f) ? readTextSafe(join(reviewRoot, f), 2 * 1024 * 1024) : undefined
     const fullLineCount = fullText ? fullText.split('\n').length : 0
     const hy = scanStructuralHygiene({ fileRel: f, lines: added, fullLineCount, warnLines: 800, highLines: 1500 })
 

@@ -16,6 +16,7 @@ import { registerCoreCases } from './fixtures-core.mjs'
 import { registerSurveyCases } from './fixtures-survey.mjs'
 import { registerContractCases } from './fixtures-contracts.mjs'
 import { registerReviewCases } from './fixtures-review.mjs'
+import { registerReviewContractsCases } from './fixtures-review-contracts.mjs'
 import { registerClaimsCases } from './fixtures-claims.mjs'
 import { registerFlowDocsCases } from './fixtures-flow-docs.mjs'
 import { registerDocRuleCases } from './fixtures-doc-rules.mjs'
@@ -65,6 +66,7 @@ const DOMAIN_REGISTRY = [
   ['contracts', registerContractCases],
   ['core', registerCoreCases],
   ['review', registerReviewCases],
+  ['review-contracts', registerReviewContractsCases],
   ['survey', registerSurveyCases],
   ['issue50', registerIssue50Cases],
   ['issue52', registerIssue52Cases],

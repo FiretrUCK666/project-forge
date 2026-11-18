@@ -671,4 +671,108 @@ cases.push(['空壳 TDD 判红（high，--strict 阻断），只有注释里出�
   return true
 }])
 
+cases.push(['govern-docs.mjs：托管 .agents/skills 镜像与夹具免报 docs.stale-vs-churn，真实代码与 --scope/损坏清单仍报', async () => {
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'README.md': '# churn\n\nChurn exemption test repo.\n',
+    'docs/TDD.md': '# TDD\n\n- `src/core/app.mjs`\n',
+    'AGENTS.md': '# churn\n\n## 取舍\n\n- `no-ci`: none\n',
+    '.agents/skills/.pf-manifest.json': JSON.stringify({ schemaVersion: 2, files: { 'dev-flow/SKILL.md': { sha256: 'x' } } }),
+    '.agents/skills/dev-flow/scripts/flow.mjs': 'export const f = 0\n',
+    'scripts/dev/preflight.mjs': 'export const p = 0\n',
+    'scripts/dev/fixtures-demo.mjs': 'export const fd = 0\n',
+    'scripts/dev/injections-data-core.mjs': 'export const id = 0\n',
+    'src/core/app.mjs': 'export const c = 0\n',
+  })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+  try {
+    writeFileSync(join(dir, 'scripts/dev/preflight.mjs'), 'export const p = 1\n')
+    writeFileSync(join(dir, 'src/core/app.mjs'), 'export const c = 1\n')
+    gitCommitFast(dir, 'touch preflight and core once', { files: ['scripts/dev/preflight.mjs', 'src/core/app.mjs'] })
+    for (let i = 1; i <= 8; i += 1) {
+      writeFileSync(join(dir, '.agents/skills/dev-flow/scripts/flow.mjs'), `export const f = ${i}\n`)
+      writeFileSync(join(dir, 'scripts/dev/fixtures-demo.mjs'), `export const fd = ${i}\n`)
+      writeFileSync(join(dir, 'scripts/dev/injections-data-core.mjs'), `export const id = ${i}\n`)
+      gitCommitFast(dir, `churn ${i}`, { files: ['.agents/skills/dev-flow/scripts/flow.mjs', 'scripts/dev/fixtures-demo.mjs', 'scripts/dev/injections-data-core.mjs'] })
+    }
+    const auditIds = async (extra = []) => {
+      const r = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, ...extra, '--json'])
+      if (r.status !== 0) throw new Error(`govern-audit failed: ${r.stderr}`)
+      return (JSON.parse(r.stdout).findings ?? []).map((f) => f.id)
+    }
+    const baseIds = await auditIds()
+    for (const bad of ['docs.stale-vs-churn..agents/skills', 'docs.stale-vs-churn.scripts/dev', 'docs.stale-vs-churn.src/core']) {
+      if (baseIds.includes(bad)) return `合法镜像/夹具或低频代码误报 ${bad}：${JSON.stringify(baseIds)}`
+    }
+    const scopedIds = await auditIds(['--scope', '.agents/skills'])
+    if (!scopedIds.includes('docs.stale-vs-churn..agents/skills')) return `--scope .agents/skills 未检测镜像漂移：${JSON.stringify(scopedIds)}`
+    writeFileSync(join(dir, '.agents/skills/.pf-manifest.json'), JSON.stringify({ files: [] }))
+    const badManIds = await auditIds()
+    if (!badManIds.includes('docs.stale-vs-churn..agents/skills')) return `files 为数组时仍跳过 .agents/skills/：${JSON.stringify(badManIds)}`
+    writeFileSync(join(dir, '.agents/skills/.pf-manifest.json'), JSON.stringify({ schemaVersion: 2, files: { 'dev-flow/SKILL.md': { sha256: 'x' } } }))
+    for (let i = 2; i <= 8; i += 1) {
+      writeFileSync(join(dir, 'src/core/app.mjs'), `export const c = ${i}\n`)
+      gitCommitFast(dir, `core ${i}`, { files: ['src/core/app.mjs'] })
+    }
+    const realIds = await auditIds()
+    if (!realIds.includes('docs.stale-vs-churn.src/core')) return `真实源码未触发 docs.stale-vs-churn.src/core：${JSON.stringify(realIds)}`
+    return true
+  } finally { rmTree(dir) }
+}])
+
+cases.push(['static-gates + govern-checks + review-gates + repo-map：FIXTURE_FILE_RE 豁免夹具/注入且不放行普通长脚本', async () => {
+  const shared = await import('../../kit/skills/lib/shared.mjs')
+  if (!(shared.FIXTURE_FILE_RE instanceof RegExp) || typeof shared.isTestOrFixtureFile !== 'function') {
+    return 'shared.mjs 未导出 FIXTURE_FILE_RE 或 isTestOrFixtureFile'
+  }
+  for (const fx of ['scripts/dev/fixtures-govern.mjs', 'scripts/dev/injections-data-gates.mjs', 'test/fixtures/a.mjs', 'src/a.fixture.mjs']) {
+    if (!shared.isTestOrFixtureFile(fx)) return `isTestOrFixtureFile 漏判夹具路径：${fx}`
+  }
+  if (shared.TEST_FILE_RE.test('scripts/dev/fixtures-govern.mjs')) return 'TEST_FILE_RE 不应直接包含 fixtures-*'
+  for (const real of ['scripts/dev/preflight.mjs', 'scripts/dev/verify-injections.mjs', 'scripts/lib/text.mjs']) {
+    if (shared.isTestOrFixtureFile(real)) return `isTestOrFixtureFile 误豁免普通脚本：${real}`
+  }
+  if (shared.scanStructuralHygiene({ fileRel: 'scripts/dev/fixtures-demo.mjs', lines: [], fullLineCount: 850 }).godFile !== null) {
+    return 'scanStructuralHygiene 未豁免夹具 godFile'
+  }
+  if (!shared.scanStructuralHygiene({ fileRel: 'scripts/dev/verify-injections.mjs', lines: [], fullLineCount: 850 }).godFile) {
+    return 'scanStructuralHygiene 放行了普通 scripts/dev/ 脚本 godFile'
+  }
+  const bigBody = Array.from({ length: 820 }, (_, i) => `export const k${i} = ${i}`).join('\n') + '\n'
+  const dir = tmpProject({
+    '.gitignore': '.worktrees/\n',
+    'README.md': '# c3\n\nC3 fixture classification demo.\n',
+    'AGENTS.md': '# c3\n\n## 取舍\n\n- `no-ci`: none\n- `no-tdd`: none\n',
+    'scripts/dev/fixtures-demo.mjs': 'const cases = []\ncases.push(["demo", () => "fail"])\n' + bigBody,
+    'scripts/dev/injections-data-gates.mjs': bigBody,
+    'scripts/dev/verify-injections.mjs': bigBody,
+    'src/lib/real-big.mjs': bigBody,
+    'src/lib/fixtures/helper.mjs': 'export function fixHelper() { return 1 }\n',
+    'src/lib/shared-util.mjs': 'export function sharedUtil() { return 1 }\n',
+  })
+  gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
+  try {
+    const aud = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--json'])
+    if (aud.status !== 0) return `govern-audit 失败：${aud.stderr}`
+    const ids = (JSON.parse(aud.stdout).findings ?? []).map((f) => f.id)
+    for (const noHit of ['hygiene.god-file.scripts/dev/fixtures-demo.mjs', 'hygiene.god-file.scripts/dev/injections-data-gates.mjs', 'tests.zero-assertion.scripts/dev/fixtures-demo.mjs', 'tests.orphan-suite.scripts/dev/fixtures-demo.mjs']) {
+      if (ids.includes(noHit)) return `夹具/注入数据触发误报 ${noHit}：${JSON.stringify(ids)}`
+    }
+    for (const mustHit of ['hygiene.god-file.scripts/dev/verify-injections.mjs', 'hygiene.god-file.src/lib/real-big.mjs']) {
+      if (!ids.includes(mustHit)) return `非夹具超长脚本漏报 ${mustHit}：${JSON.stringify(ids)}`
+    }
+    const { generateRepoMap } = await import('../../kit/skills/dev-explore/scripts/repo-map.mjs')
+    const modFiles = ((await generateRepoMap(dir)).reusableModules ?? []).map((m) => m.file)
+    if (modFiles.includes('src/lib/fixtures/helper.mjs') || !modFiles.includes('src/lib/shared-util.mjs')) {
+      return `repo-map reusableModules 夹具过滤异常：${JSON.stringify(modFiles)}`
+    }
+    const { assessStructuralGate } = await import('../../kit/skills/dev-review/scripts/review-gates.mjs')
+    const gfFiles = (assessStructuralGate({ reviewRoot: dir, diff: { files: [], untracked: ['scripts/dev/fixtures-demo.mjs', 'src/lib/real-big.mjs'], text: '' }, devProfile: { 'arch-rules': [] }, parity: { mermaidViolations: [] } }).godFiles ?? []).map((g) => g.file)
+    if (gfFiles.includes('scripts/dev/fixtures-demo.mjs') || !gfFiles.includes('src/lib/real-big.mjs')) {
+      return `assessStructuralGate godFiles 判定异常：${JSON.stringify(gfFiles)}`
+    }
+    return true
+  } finally { rmTree(dir) }
+}])
+
 }

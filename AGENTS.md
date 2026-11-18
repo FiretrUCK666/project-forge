@@ -67,9 +67,10 @@ do-not-edit: docs/archive/, docs/release-notes/
 
 - **策略级别**：`parallel-subagents`
 - **越线的维度**：代码文件数、代码行数
-- **分片**：共 2 片
+- **分片**：共 3 片
   - `architecture-boundaries`（模块边界、顶层目录与可复用基础设施）：梳理核心入口、单向依赖、可复用模块及高风险/禁改目录边界
   - `verification-runtime`（构建、测试、冒烟验证与发布命令）：核实清单脚本、CI 运行链、真实 smoke-verify 与过时命令声明
+  - `business-flows`（核心业务流、服务入口与文档源码差异）：梳理服务对象、核心路由/CLI/UI/作业面，核对文档宣称与源码真实实现差异并产出改前基线
 <!-- project-forge: end 探索策略 -->
 <!-- project-forge: begin 架构与关键不变量 -->
 ## 架构与关键不变量
@@ -134,7 +135,7 @@ node scripts/dev/verify-injections.mjs
 - **测试正反双向与分层控频**：修缺陷先写稳定复现失败测试（Red-Green）；新判定或解析逻辑须覆正反双向用例，禁跳过或凑数。编码中只跑语法/类型检查与 `--tier quick --target <path>`；合前跑 1 次 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测硬编码 `>=1s` sleep/非无头测试；单测超 800 行按模块拆分。
 - **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时提交前同步 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
 - 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
-- **多语文档成对同步**：本仓库有 `README.en.md`、`README.md`，改任一语言版本必须同步另一份，并保持双向互指链接有效。
+- **多语文档成对同步**：本仓库有 `README.md`、`README.en.md`，改任一语言版本必须同步另一份，并保持双向互指链接有效。
 <!-- project-forge: end 修改守则 -->
 
 

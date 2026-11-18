@@ -89,7 +89,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 
 ### 模块与入口
 
-<!-- project-forge: fill 模块入口：按「职责 → 入口文件或目录」列出核心模块；如已维护 docs/TDD.md，此处只留总览表并指向 docs/TDD.md -->
+<!-- project-forge: fill 模块入口：按「职责 → 入口文件或目录」列出核心模块；如已维护 docs/TDD.md，此处只留薄指针指向 docs/TDD.md（含业务流与改前实跑基线） -->
 
 ### 关键不变量（破坏即事故）
 

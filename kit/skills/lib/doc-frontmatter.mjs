@@ -6,6 +6,13 @@
 
 import { readTextSafe, writeAtomic } from './git.mjs'
 
+export const CUSTOM_DECL_REL = Object.freeze({
+  prd: Object.freeze(['docs/templates/prd.md', 'docs/templates/prd-template.md', 'docs/.templates/prd.md', 'doc/templates/prd.md', 'doc/templates/prd-template.md', '.github/prd-template.md', '.github/prd_template.md']),
+  spec: Object.freeze(['docs/templates/spec.md', 'docs/templates/spec-template.md', 'docs/.templates/spec.md', 'doc/templates/spec.md', 'doc/templates/spec-template.md', '.github/spec-template.md', '.github/spec_template.md']),
+  todo: Object.freeze(['docs/templates/todo.md', 'docs/templates/todo-template.md', 'docs/.templates/todo.md', 'doc/templates/todo.md', 'doc/templates/todo-template.md', '.github/todo-template.md', '.github/todo_template.md']),
+  tdd: Object.freeze(['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', 'doc/templates/tdd.md', 'doc/templates/tdd-template.md', '.github/tdd-template.md', '.github/tdd_template.md']),
+})
+
 function splitInlineArrayItems(inner) {
   const items = []
   let cur = ''
@@ -207,4 +214,29 @@ export function updateDocFrontmatter(filePath, patch = {}, { defaultKeyOrder = [
   const nextText = `${serializeDocFrontmatter(merged, keyOrder)}\n${cleanBody.endsWith('\n') ? cleanBody : `${cleanBody}\n`}`
   writeAtomic(filePath, nextText)
   return { file: filePath, data: merged }
+}
+
+const STANDARD_FORGE_PLAN_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
+
+/**
+ * 判断 `docs/{prd,specs,todo}/*` 下的 Markdown 文档是否属于本工具受管规划文档。
+ * 目标仓原生的普通文档（无论无 frontmatter 或带自定义元数据）返回 false 并由调用方原样 preserve；
+ * 若携带受管 `kind:`/`plan` 等关键信号，即使 Frontmatter 受损仍返回 true 以便严格拦截。
+ */
+export function isManagedPlanDoc(rel, text = '') {
+  const normRel = String(rel ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+  if (!/\.md$/i.test(normRel)) return false
+  const base = normRel.split('/').pop() ?? ''
+  const normText = String(text ?? '').replace(/\r\n/g, '\n')
+  const head = normText.split('\n').slice(0, 60).join('\n')
+
+  if (/^\s*kind\s*:\s*['"]?(?:prd|specs?|todos?|plan)['"]?(?:\s*#.*)?$/im.test(head)) return true
+  if (/^\s*(?:plan_critique|plan|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\s*:/im.test(head)) return true
+  if (/^\s*task_id\s*:/im.test(head) && /^\s*(?:status|approved|owner|branch)\s*:/im.test(head)) return true
+  if (/^(?:-\s+)?(?:Plan Critique|Related (?:SPEC|PRD|Todo))\s*:/im.test(head)) return true
+  if (/^(?:-\s+)?(?:\*\*)?Planned at(?:\*\*)?\s*[:：]/im.test(head)) return true
+  if (/^#\s*(?:PRD|SPEC|Todo)\s*[:：]/m.test(head)) return true
+  if (/<!--\s*(?:project-forge:|section:)/i.test(normText)) return true
+  if (STANDARD_FORGE_PLAN_NAME_RE.test(base)) return true
+  return false
 }

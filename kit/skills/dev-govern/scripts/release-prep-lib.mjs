@@ -364,8 +364,8 @@ function classifyPublicSurface(relPosix, pkgPublicPaths) {
   if (TEST_OR_FIXTURE_RE.test(f)) return null
   if (pkgPublicPaths.has(f)) return 'package-entrypoint'
   if (/^SKILL\.md$/i.test(f) || /^kit\/skills\/[^/]+\/SKILL\.md$/i.test(f)) return 'skill-entry'
-  if (/^README(?:\.[A-Za-z-]+)?\.md$/i.test(f)) return 'readme'
-  if (/^(?:RELEASING|CHANGELOG|CONTRIBUTING)\.md$/i.test(f)) return 'project-guide'
+  if (/^README(?:\.[A-Za-z0-9_.-]+)?\.(?:md|mdx|rst|txt|adoc)$/i.test(f) || /^README$/i.test(f)) return 'readme'
+  if (/^(?:RELEASING|CHANGELOG|CONTRIBUTING|SECURITY)(?:\.[A-Za-z0-9_.-]+)?\.md$/i.test(f)) return 'project-guide'
   if (/(?:^|\/)(?:package\.json|pyproject\.toml|Cargo\.toml|go\.mod|manifest\.json|pom\.xml|build\.gradle(?:\.kts)?)$/i.test(f) || /\.csproj$/i.test(f)) return 'manifest'
   if (/^(?:templates|kit)\//i.test(f)) return 'distributed-asset'
   if (/^(?:bin|cmd|cli)\//i.test(f)) return 'cli-entrypoint'
@@ -377,7 +377,7 @@ function classifyPublicSurface(relPosix, pkgPublicPaths) {
 }
 
 function isContractDocFile(relPosix) {
-  return /^(?:README(?:\.[A-Za-z-]+)?\.md|SKILL\.md|CHANGELOG\.md|docs\/specs\/.+\.md|docs\/TDD\.md)$/i.test(posixPath(relPosix))
+  return /^(?:README(?:\.[A-Za-z0-9_.-]+)?\.(?:md|mdx|rst|txt|adoc)|README|SKILL\.md|(?:CHANGELOG|CONTRIBUTING|SECURITY|RELEASING)(?:\.[A-Za-z0-9_.-]+)?\.md|docs\/specs\/.+\.md|docs\/TDD\.md)$/i.test(posixPath(relPosix))
 }
 
 function cleanCommitSubject(subject) {

@@ -8,7 +8,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
-import { parseDocFrontmatter } from '../../lib/docs.mjs'
+import { isManagedPlanDoc, parseDocFrontmatter } from '../../lib/docs.mjs'
 
 export function collectMarkdownFiles(dir, root) {
   const out = []
@@ -53,11 +53,16 @@ export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCove
   const scopeAbs = resolve(repoRoot, scope)
   const scopeRel = posixPath(relative(repoRoot, scopeAbs))
   const targets = []
+  const preservedForeignPlanDocs = []
   for (const d of ['docs/prd', 'docs/specs', 'docs/todo']) {
     const dirAbs = join(repoRoot, d)
     if (!existsSync(dirAbs)) continue
     for (const item of collectMarkdownFiles(dirAbs, repoRoot)) {
-      if (!scopeRel || scopeRel === '.' || item.rel === scopeRel || item.rel.startsWith(`${scopeRel}/`)) targets.push(item.rel)
+      if (!scopeRel || scopeRel === '.' || item.rel === scopeRel || item.rel.startsWith(`${scopeRel}/`)) {
+        const text = readTextSafe(item.abs) ?? ''
+        if (isManagedPlanDoc(item.rel, text)) targets.push(item.rel)
+        else preservedForeignPlanDocs.push(item.rel)
+      }
     }
   }
   const results = targets.map((file) => auditDoc({ repoRoot, file }))
@@ -68,6 +73,8 @@ export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCove
     ok: allErrors.length === 0,
     scope: scopeRel || '.',
     auditedCount: results.length,
+    preservedCount: preservedForeignPlanDocs.length,
+    preservedForeignPlanDocs: preservedForeignPlanDocs.sort(),
     failedCount,
     results,
     coverageErrors,

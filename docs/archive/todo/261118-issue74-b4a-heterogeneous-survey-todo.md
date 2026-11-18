@@ -1,18 +1,18 @@
 ---
 kind: todo
 title: v9 B4a：存量异构仓通用勘察、外来文档隔离、business-flows 与改前基线
-status: active
+status: done
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-19
 issue: 74
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b4a-heterogeneous-survey
+owner: impl-74
 approved: false
-done_at: null
+done_at: 2026-11-19
 task_id: b4a-heterogeneous-survey
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 ---
 
@@ -43,9 +43,9 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C9: `survey-docs.mjs` 探测非标设计目录、非 `.md` README、中性 CI（消除 `ci.absent` 误报）与 `.githooks/`；`survey-reentry.mjs` 与 `doc-audit-repo.mjs` 隔离外来 `docs/` 防误报 `FRONTMATTER_INVALID`；复用 `doc-shape.mjs` 证据跳节与异构模板兼容；`survey-workspace.mjs`/`survey-ecosystem.mjs`/`repo-map.mjs` 解除 `depth > 6` 硬截断并识别多包 glob、自动化脚本与 `exports` 对象映射。
-- [ ] C10: `survey-plan.mjs` 新增 `business-flows` 分片只读 `repo-map.mjs` 输出业务流映射；`SKILL.md` 与 `references/survey.md` 规定 `S1 -> S3` 改前只读实跑对方既有测试与入口建立基线；重资产入 `docs/TDD.md`，`AGENTS.md` 严守轻量体积上限。
-- [ ] C21: 落地 `A7` 存量异构盲点与 `survey.mjs` 减行：先从 `scripts/survey.mjs`（`758` 行）抽离辅助至 `scripts/lib/survey-docs.mjs` 压至 `<= 730` 行；`survey-reentry`/`skill-discovery`/`agents-defaults`/`survey-docs` 区分非隐藏 `skills/*`、`.agents/skills/*` 与深层宿主镜像并扫描 `*/AGENTS.md`；`survey-docs`/`doc-shape`/`release-prep-lib`（`<= 795` 行）/`govern-docs`/`review-gates`/`doc-templates` 泛化多语配对文件名（`README.*.md`、`CONTRIBUTING.*.md`、`SECURITY*.md`、`*.zh-CN.md`）；`repo-map.mjs` 补 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`；`profile-sniffer.mjs` 隔离重型 `e2e/`/`webtest/` 并聚合多 workflow。
+- [x] C9: `survey-docs.mjs` 探测非标设计目录、非 `.md` README、中性 CI（消除 `ci.absent` 误报）与 `.githooks/`；`survey-reentry.mjs` 与 `doc-audit-repo.mjs` 隔离外来 `docs/` 防误报 `FRONTMATTER_INVALID`；复用 `doc-shape.mjs` 证据跳节与异构模板兼容；`survey-workspace.mjs`/`survey-ecosystem.mjs`/`repo-map.mjs` 解除 `depth > 6` 硬截断并识别多包 glob、自动化脚本与 `exports` 对象映射。
+- [x] C10: `survey-plan.mjs` 新增 `business-flows` 分片只读 `repo-map.mjs` 输出业务流映射；`SKILL.md` 与 `references/survey.md` 规定 `S1 -> S3` 改前只读实跑对方既有测试与入口建立基线；重资产入 `docs/TDD.md`，`AGENTS.md` 严守轻量体积上限。
+- [x] C21: 落地 `A7` 存量异构盲点与 `survey.mjs` 减行：先从 `scripts/survey.mjs`（`758` 行）抽离辅助至 `scripts/lib/survey-docs.mjs` 压至 `<= 730` 行；`survey-reentry`/`skill-discovery`/`agents-defaults`/`survey-docs` 区分非隐藏 `skills/*`、`.agents/skills/*` 与深层宿主镜像并扫描 `*/AGENTS.md`；`survey-docs`/`doc-shape`/`release-prep-lib`（`<= 795` 行）/`govern-docs`/`review-gates`/`doc-templates` 泛化多语配对文件名（`README.*.md`、`CONTRIBUTING.*.md`、`SECURITY*.md`、`*.zh-CN.md`）；`repo-map.mjs` 补 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`；`profile-sniffer.mjs` 隔离重型 `e2e/`/`webtest/` 并聚合多 workflow。
 
 ## 执行步骤
 
@@ -77,9 +77,9 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`待 Wave 3 启动`（依赖 `#71`、`#72` 先行合入）
+- **当前状态**：已完成，无遗留
 - **待拍板事项**：无
-- **下一步第一件事**：Wave 3 启动后执行 `flow.mjs start --task b4a-heterogeneous-survey --issue 74 --case 4` 进入 `.worktrees/impl-b4a-heterogeneous-survey`。
+- **下一步第一件事**：完成文档归档、提交后在最终 HEAD 运行全量验证并 `flow.mjs submit` 提审。
 
 ## 澄清与补充记录
 
@@ -89,6 +89,6 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`preflight.mjs`（0 失败 / 34 读数）、`gap-coverage.mjs`（20 条全覆盖）、`fixtures.mjs`（275 通过 / 0 失败）、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`（可交付）、`sync-toc.mjs --check`、`e2e-zip-harness.mjs`、`doc-plan.mjs audit .`、`govern-audit.mjs audit . --changed --strict`（0 finding），以及 `verify --mode gate` 将在最终 `HEAD` 重跑确认。
+- **文档同步检查**：已同步 `SKILL.md`、`references/survey.md`、`references/docs-set.md`、`kit/skills/dev-explore/SKILL.md`、`templates/agents-project.md`、`AGENTS.md` 与 `.agents/skills/`。
+- **遗留问题**：无（B3 写域 0 重叠；`I166`/`I167` 按总控设计留待 `B5` 注入收口）。

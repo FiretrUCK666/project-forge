@@ -36,30 +36,117 @@ function isSourceCodeFile(f) {
   return /(?:^|\/)(?:src|lib|app|cmd|internal|pkg|server|client|backend|frontend)\//i.test(f.rel)
 }
 
+function collectPkgExportStrings(val, out = []) {
+  if (typeof val === 'string') {
+    if (!val.includes('*') && !/\/package\.json$/i.test(val)) out.push(val)
+    return out
+  }
+  if (Array.isArray(val)) {
+    for (const item of val) collectPkgExportStrings(item, out)
+    return out
+  }
+  if (val && typeof val === 'object') {
+    for (const child of Object.values(val)) collectPkgExportStrings(child, out)
+  }
+  return out
+}
+
+function parsePyprojectScripts(text) {
+  const scripts = []
+  const norm = String(text ?? '').replace(/\r\n/g, '\n')
+  const secRe = /^\[(project\.(?:gui-)?scripts|tool\.poetry\.scripts)\]\s*$/gm
+  const matches = [...norm.matchAll(secRe)]
+  for (const m of matches) {
+    const start = (m.index ?? 0) + m[0].length
+    const rest = norm.slice(start)
+    const nextSec = /^\s*\[/m.exec(rest)
+    const body = nextSec ? rest.slice(0, nextSec.index) : rest
+    for (const line of body.split('\n')) {
+      const clean = line.replace(/#.*$/, '').trim()
+      if (!clean) continue
+      const kv = /^([A-Za-z0-9_.-]+)\s*=\s*["']([^"']+)["']/.exec(clean)
+      if (kv) scripts.push({ name: kv[1], target: kv[2] })
+    }
+  }
+  return scripts
+}
+
+function resolvePythonModuleRel(targetExpr, dirRel, fileSet) {
+  const modPart = String(targetExpr ?? '').split(':')[0].trim()
+  if (!modPart) return null
+  const slashPath = modPart.replace(/\./g, '/')
+  const prefix = dirRel ? `${dirRel}/` : ''
+  for (const cand of [
+    `${prefix}${slashPath}.py`,
+    `${prefix}src/${slashPath}.py`,
+    `${prefix}${slashPath}/__init__.py`,
+    `${prefix}src/${slashPath}/__init__.py`,
+  ]) {
+    if (fileSet.has(cand)) return cand
+  }
+  return null
+}
+
 function detectEntrypoints(root, files, packages) {
   const entries = new Set()
+  const cliEntrypoints = []
+  const fileSet = new Set(files.map((f) => f.rel))
+
+  for (const f of files) {
+    if (isToolOwnedPath(f.rel) || isTestOrFixtureFile(f.rel)) continue
+    const goCmd = /(?:^|\/)cmd\/([^/]+)\/main\.go$/i.exec(f.rel)
+    if (goCmd) {
+      entries.add(f.rel)
+      cliEntrypoints.push({ ecosystem: 'go', name: goCmd[1], file: f.rel })
+    }
+  }
+
   const addPkgEntries = (dirRel) => {
     const pkgPath = dirRel ? join(root, dirRel, 'package.json') : join(root, 'package.json')
     const pkg = readJsonSafe(pkgPath)
-    if (!pkg) return
     const prefixRel = (raw) => {
       const clean = posixPath(raw).replace(/^\.\//, '')
       return dirRel ? `${dirRel}/${clean}` : clean
     }
-    for (const field of [pkg.main, pkg.module, pkg.exports]) {
-      if (typeof field === 'string') entries.add(prefixRel(field))
+    if (pkg) {
+      for (const field of [pkg.main, pkg.module]) {
+        if (typeof field === 'string') entries.add(prefixRel(field))
+      }
+      for (const expTarget of collectPkgExportStrings(pkg.exports)) {
+        entries.add(prefixRel(expTarget))
+      }
+      if (typeof pkg.bin === 'string') {
+        const rel = prefixRel(pkg.bin)
+        entries.add(rel)
+        cliEntrypoints.push({ ecosystem: 'node', name: String(pkg.name ?? basename(rel)), file: rel })
+      } else if (pkg.bin && typeof pkg.bin === 'object') {
+        for (const [cmdName, v] of Object.entries(pkg.bin)) {
+          if (typeof v === 'string') {
+            const rel = prefixRel(v)
+            entries.add(rel)
+            cliEntrypoints.push({ ecosystem: 'node', name: cmdName, file: rel })
+          }
+        }
+      }
     }
-    if (typeof pkg.bin === 'string') entries.add(prefixRel(pkg.bin))
-    else if (pkg.bin && typeof pkg.bin === 'object') {
-      for (const v of Object.values(pkg.bin)) {
-        if (typeof v === 'string') entries.add(prefixRel(v))
+
+    const pyPath = dirRel ? join(root, dirRel, 'pyproject.toml') : join(root, 'pyproject.toml')
+    const pyText = existsSync(pyPath) ? readTextSafe(pyPath) : undefined
+    if (pyText) {
+      for (const sc of parsePyprojectScripts(pyText)) {
+        const modRel = resolvePythonModuleRel(sc.target, dirRel, fileSet)
+        const manifestRel = dirRel ? `${dirRel}/pyproject.toml` : 'pyproject.toml'
+        entries.add(modRel ?? manifestRel)
+        cliEntrypoints.push({ ecosystem: 'python', name: sc.name, target: sc.target, file: modRel ?? manifestRel })
       }
     }
   }
 
   addPkgEntries('')
   for (const pkg of packages) {
-    if (pkg.dirRel && pkg.manifests.includes('package.json')) addPkgEntries(pkg.dirRel)
+    if (pkg.dirRel && (pkg.manifests.includes('package.json') || pkg.manifests.includes('pyproject.toml'))) {
+      addPkgEntries(pkg.dirRel)
+    }
   }
 
   for (const f of files) {
@@ -70,7 +157,7 @@ function detectEntrypoints(root, files, packages) {
       entries.add(f.rel)
     }
   }
-  return [...entries].slice(0, 35)
+  return { entrypoints: [...entries].slice(0, 35), cliEntrypoints }
 }
 
 function detectDocsPresence(root) {
@@ -376,6 +463,76 @@ function buildPreferredVerifyCommands(profile, ciRunSteps, runners, packages) {
   return list.slice(0, 25)
 }
 
+function buildBusinessFlows(root, files, packages, entrypoints, cliEntrypoints) {
+  const nonTool = files.filter((f) => !isToolOwnedPath(f.rel) && !isTestOrFixtureFile(f.rel))
+  const fileSet = new Set(files.map((f) => f.rel))
+  const routes = nonTool
+    .filter((f) => /(?:^|\/)(?:routes?|routers?|controllers?|handlers?|endpoints?|pages\/api)\//i.test(f.rel)
+      || /(?:^|\/)(?:openapi|swagger)\.(?:ya?ml|json)$/i.test(f.rel) || /\.proto$/i.test(f.rel))
+    .map((f) => f.rel).slice(0, 15)
+  const ui = nonTool
+    .filter((f) => /\.(?:tsx|jsx|vue|svelte|astro)$/i.test(f.rel)
+      || /(?:^|\/)(?:pages|screens|views|app)\/[^/]+\.(?:tsx|jsx|vue|svelte|html)$/i.test(f.rel))
+    .map((f) => f.rel).slice(0, 15)
+  const jobs = files
+    .filter((f) => !isToolOwnedPath(f.rel)
+      && (/(?:^|\/)(?:jobs?|workers?|queues?|cron|schedules?|pipelines?)\//i.test(f.rel)
+        || /(?:^|\/)(?:\.github\/workflows\/.+\.ya?ml|Dockerfile(?:\.[^/]+)?|(?:docker-)?compose(?:\.[^/]+)?\.ya?ml|Jenkinsfile|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml)$/i.test(f.rel)))
+    .map((f) => f.rel).slice(0, 15)
+  const cli = cliEntrypoints.length > 0
+    ? cliEntrypoints
+    : entrypoints.filter((ep) => /(?:^|\/)(?:cmd|bin|cli)\//i.test(ep) || ep === 'SKILL.md')
+        .map((ep) => ({ ecosystem: 'generic', name: basename(ep), file: ep }))
+
+  const audienceCues = []
+  let primaryDocText = ''
+  for (const cand of ['README.md', 'README.zh-CN.md', 'README.en.md', 'docs/TDD.md']) {
+    const txt = readTextSafe(join(root, cand))
+    if (!txt) continue
+    primaryDocText += `\n${txt}`
+    if (audienceCues.length === 0) {
+      const lead = txt.split('\n').map((l) => l.trim()).find((l) => l && !/^(?:#|<!--|\[!|!\[)/.test(l))
+      if (lead) audienceCues.push(lead.slice(0, 120))
+    }
+  }
+  if (cli.length > 0) audienceCues.push('CLI/命令行用户与自动化脚本')
+  if (routes.length > 0) audienceCues.push('HTTP/RPC 接口调用方')
+  if (ui.length > 0) audienceCues.push('交互式前端界面用户')
+  if (jobs.length > 0) audienceCues.push('后台作业与持续集成流水线')
+
+  const flows = [
+    ...cli.slice(0, 10).map((c) => ({ name: `CLI:${c.name}`, surface: 'cli', entry: c.file, source: c.target ?? c.file })),
+    ...routes.slice(0, 8).map((r) => ({ name: basename(r), surface: 'route', entry: r, source: r })),
+    ...ui.slice(0, 6).map((u) => ({ name: basename(u), surface: 'ui', entry: u, source: u })),
+    ...jobs.slice(0, 6).map((j) => ({ name: basename(j), surface: 'job', entry: j, source: j })),
+  ]
+
+  const docCodeGaps = []
+  if (primaryDocText) {
+    const seenGap = new Set()
+    for (const m of primaryDocText.matchAll(/`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]+)?)`/g)) {
+      const p = m[1].replace(/^\.\//, '')
+      if (p.includes('<') || p.includes('*') || /^https?:/.test(p) || isToolOwnedPath(p)) continue
+      if (!/\.(?:mjs|cjs|js|ts|tsx|jsx|py|go|rs|java|kt|sh|ya?ml|json|toml|proto)$/i.test(p)) continue
+      if (!fileSet.has(p) && !existsSync(join(root, p)) && !seenGap.has(p)) {
+        seenGap.add(p)
+        docCodeGaps.push({ kind: 'missing-doc-path', path: p, detail: `文档引用的路径 ${p} 在源码树中不存在` })
+      }
+    }
+    for (const c of cli.slice(0, 10)) {
+      if (!primaryDocText.includes(c.name) && !primaryDocText.includes(c.file)) {
+        docCodeGaps.push({ kind: 'undocumented-entry', path: c.file, detail: `源码 CLI 入口 ${c.name}（${c.file}）未在 README/TDD 说明` })
+      }
+    }
+  }
+  return {
+    audienceCues: [...new Set(audienceCues)].slice(0, 6),
+    surfaces: { routes, cli: cli.slice(0, 12), ui, jobs },
+    flows: flows.slice(0, 25),
+    docCodeGaps: docCodeGaps.slice(0, 15),
+  }
+}
+
 async function detectHotspots(root, focus) {
   const args = ['log', '-n', '60', '--name-only', '--pretty=format:']
   if (focus) args.push('--', focus)
@@ -417,7 +574,9 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
   const discovery = discoverWorkspacePackages(root, scan.files.map((f) => f.rel))
   const codeFiles = scan.files.filter(isSourceCodeFile)
   const testFiles = scan.files.filter((f) => f.isText && TEST_FILE_RE.test(f.rel)).map((f) => f.rel)
-  const entrypoints = detectEntrypoints(root, scan.files, discovery.packages)
+  const epResult = detectEntrypoints(root, scan.files, discovery.packages)
+  const entrypoints = epResult.entrypoints
+  const cliEntrypoints = epResult.cliEntrypoints
   const docs = detectDocsPresence(root)
   const ciRunSteps = extractCiRunSteps(root)
   const taskRunners = extractTaskRunners(root, discovery.packages)
@@ -434,6 +593,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     symbolCount += extractSymbols(text, ext).symbols.length
   }
   const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners, discovery.packages)
+  const businessFlows = buildBusinessFlows(root, scan.files, discovery.packages, entrypoints, cliEntrypoints)
   const preferredVerifyCommands = buildPreferredVerifyCommands(profile, ciRunSteps, taskRunners, discovery.packages)
 
   const focusAgents = focusRel && existsSync(join(root, focusRel, 'AGENTS.md')) ? `${focusRel}/AGENTS.md` : null
@@ -459,6 +619,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     packages: discovery.packages,
     workspaceGlobs: discovery.workspaceGlobs,
     entrypoints,
+    cliEntrypoints,
     testFiles: testFiles.slice(0, 40),
     devProfile: {
       quickTest: profile.quickTest ?? null,
@@ -478,6 +639,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     symbolCount,
     symbolCoverage,
     featureMap,
+    businessFlows,
     docs,
     hotspots,
   }
@@ -533,6 +695,18 @@ function formatText(map) {
     lines.push('')
     lines.push('## Feature Map（入口 -> 源码 -> 验证）')
     for (const fm of map.featureMap) lines.push(`- ${fm.feature}: ${fm.source} -> ${fm.verifyCmd}`)
+  }
+  if (map.businessFlows) {
+    const bf = map.businessFlows
+    lines.push('')
+    lines.push('## 核心业务流与服务入口（Business Flows）')
+    if (bf.audienceCues.length > 0) lines.push(`- 服务对象线索: ${bf.audienceCues.join('；')}`)
+    for (const fl of bf.flows.slice(0, 12)) {
+      lines.push(`- [${fl.surface}] ${fl.name}: ${fl.entry}`)
+    }
+    if (bf.docCodeGaps.length > 0) {
+      for (const g of bf.docCodeGaps.slice(0, 8)) lines.push(`- [文档差异:${g.kind}] ${g.detail}`)
+    }
   }
   if (map.testFiles.length > 0) {
     lines.push('')

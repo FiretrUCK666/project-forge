@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { claimsOf } from './lib/claims.mjs'
-import { computeNavigation, toMarkdown } from './lib/render.mjs'
+import { computeNavigation } from './lib/render.mjs'
 import * as protocol from './lib/protocol.mjs'
 import {
   computeS3NextStep,
@@ -28,11 +28,14 @@ import {
   summarizeNeedsHuman,
   textsOf,
 } from './lib/survey-questions.mjs'
-import { detectGitHooksState } from './lib/survey-docs.mjs'
+import {
+  detectGitHooksState,
+  judgeRole,
+  runSurveyCli,
+  summarizeTddAndSymbolCoverage,
+} from './lib/survey-docs.mjs'
 import { readDecisionMap } from '../kit/skills/lib/profile.mjs'
 import {
-  classifyWorkspaceIdentity,
-  detectGitModeMarkers,
   getHostingProvider,
   resolveWorkspaceIdentity,
 } from './lib/platform/index.mjs'
@@ -51,10 +54,6 @@ import {
   finalizeWalkWorkspace,
   scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
-import { resolveDocRequirements } from '../kit/skills/lib/doc-requirements.mjs'
-import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
-import { CODE_EXT_RE } from '../kit/skills/lib/static-gates.mjs'
-import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../kit/skills/lib/symbol-index.mjs'
 import {
   collectTopModuleDirs,
   detectKit,
@@ -79,7 +78,7 @@ import {
 const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
 
 function detectReentry(root, { docs, kit, ecosystem, commandsByEcosystem, workspace, ws, taskEntryMeta }) {
-  const isReentry = isReentryProject(docs, kit)
+  const isReentry = isReentryProject(docs, kit, root)
   const agentsText = docs?.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
   const tddText = docs?.tdd ? (readTextSafe(join(root, docs.tdd)) ?? '') : ''
 
@@ -143,6 +142,7 @@ function detectReentry(root, { docs, kit, ecosystem, commandsByEcosystem, worksp
     staleAgentScripts,
     staleTddPaths,
     unregisteredTopDirs,
+    preservedForeignPlanDocs: docs?.preservedForeignPlanDocs ?? [],
     drifted,
   }
 }
@@ -439,11 +439,11 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const ecosystem = detectEcosystem(root, relFiles)
   const taskEntryMeta = detectTaskEntriesDetailed(root)
   const taskCommands = taskEntryMeta.commands
-  const docs = detectDocs(root)
-  const workspace = detectWorkspace(root)
+  const docs = detectDocs(root, { files: relFiles })
+  const workspace = detectWorkspace(root, relFiles)
   const kit = detectKit(root)
   const localSkills = detectLocalSkills(root)
-  const artifacts = detectArtifacts(root, ecosystem)
+  const artifacts = detectArtifacts(root, ecosystem, relFiles)
   const universal = detectUniversalCommands(root)
 
   const gitFacts = await gitPromise
@@ -634,37 +634,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.navigation = computeNavigation(facts)
   facts.nextStep = computeS3NextStep(facts)
 
-  // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
-  // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。
-  // finalize 之后 files 已经不是数组，路径清单要用扫完那一刻的原始结果。
-  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
-  const tddShape = detectTddShapes({
-    paths: shapePaths,
-    kinds: facts.ecosystem?.kinds ?? [],
-    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
-    codeFiles: facts.scale?.codeFiles ?? 0,
-  })
-  const tddReq = resolveDocRequirements(root, 'tdd')
-  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
-  facts.tddShape = {
-    enabled: [...tddShape.enabled],
-    reasons: tddShape.reasons,
-    dropSections: [...tddDropSections(tddShape, { omit: tddReq.omit, required: tddReqIds })],
-    filePaths: shapePaths,
-    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
-  }
-
-  // 符号抽取的覆盖情况：这个仓里有几门语言有符号规则、几门没有。
-  //
-  // 报出来而不是「抽不到就当没有管理」：一个只有 Haskell / Clojure 的仓，符号索引一律
-  // 返回空数组，而空数组与「这个文件里真的没有符号」长得一模一样。下游据此认为「没有
-  // 可复用模块」，用户看到的是「这仓没什么结构」。差别只在覆盖这一面，所以必须单独说。
-  facts.symbolCoverage = summarizeSymbolCoverage(
-    (rawWs.files ?? [])
-      .map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
-      .filter((rel) => !protocol.isToolOwnedPath(rel)
-        && (CODE_EXT_RE.test(rel) || isSymbolCandidatePath(rel))),
-  )
+  Object.assign(facts, summarizeTddAndSymbolCoverage(root, rawWs, facts))
 
   delete gitFacts._sshHostMap
   delete gitFacts._hasGit
@@ -673,28 +643,10 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   return facts
 }
 
-/**
- * 角色决定「能做到哪一步」，通过双轴五态分类器与平台注册表得出：
- * `local-only` / `contributor-fork` / `clone-readonly` / `maintainer` / `undetermined`。
- */
-export function judgeRole(gitFacts, declaredRepo, opts = {}) {
-  const markers = opts.cwd ? detectGitModeMarkers(opts.cwd) : { localMode: false, forkMode: false, standaloneMode: false }
-  const localMode = typeof opts.localMode === 'boolean' ? opts.localMode : markers.localMode
-  const forkMode = typeof opts.forkMode === 'boolean' ? opts.forkMode : markers.forkMode
-  const standaloneMode = typeof opts.standaloneMode === 'boolean' ? opts.standaloneMode : markers.standaloneMode
-  return classifyWorkspaceIdentity({
-    gitFacts,
-    declaredRepo,
-    probeApi: opts.probeApi,
-    localIdentity: opts.localIdentity,
-    localMode,
-    forkMode,
-    standaloneMode,
-    sshHostMap: opts.sshHostMap,
-  })
-}
+const main = (argv) => runSurveyCli(argv, survey)
 
 export {
+  judgeRole,
   main as runCli,
   computeExplorationStrategy,
   computeRecommendedTier,
@@ -703,48 +655,6 @@ export {
   readJsonSafe,
   samePath,
   githubRepoPath,
-}
-
-async function main(argv) {
-  let target = process.cwd()
-  let format = 'json'
-  let probeAuth = false
-  let verifyToken = false
-
-  for (const arg of argv) {
-    if (arg === '--help' || arg === '-h') {
-      process.stdout.write([
-        '用法：node scripts/survey.mjs [目标目录] [选项]',
-        '',
-        '  --markdown      输出给人读的报告（默认输出 JSON）',
-        '  --probe-auth    额外问一次凭据助手与 SSH/gh 状态（无远端亦可探测）',
-        '  --verify-token  配合 --probe-auth 对本地 Token 发一次轻量验活请求',
-        '',
-        '只读：不写任何文件。',
-      ].join('\n') + '\n')
-      return 0
-    }
-    if (arg === '--markdown' || arg === '--md') format = 'markdown'
-    else if (arg === '--json') format = 'json'
-    else if (arg === '--probe-auth') probeAuth = true
-    else if (arg === '--verify-token') { probeAuth = true; verifyToken = true }
-    else if (!arg.startsWith('-')) target = arg
-    else {
-      process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
-      return 2
-    }
-  }
-
-  try {
-    const facts = await survey(target, { probeAuth, verifyToken })
-    process.stdout.write(format === 'markdown'
-      ? toMarkdown(facts)
-      : `${JSON.stringify(facts, null, 2)}\n`)
-    return 0
-  } catch (err) {
-    process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)
-    return 2
-  }
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {

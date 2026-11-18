@@ -234,6 +234,57 @@ export function buildPreFilledTdd(facts, opts = {}) {
   // 章节结构交给模板，生成器只负责把事实算成取值。
   //
   // 这样模板一改，产物立刻跟着改——不会出现「模板 18 节、产物 7 节」这种漂移。
+function formatBusinessFlowsBlock(facts, opts) {
+  const bf = opts?.businessFlows ?? facts?.businessFlows
+  if (!bf) {
+    return '- 当前目录暂无业务流入口（核心源码就位后由 `repo-map.mjs` 只读补齐 `businessFlows` 映射）。'
+  }
+  if (typeof bf === 'string') return bf.trim() || '- 暂无业务流入口。'
+  const lines = []
+  if (Array.isArray(bf.audienceCues) && bf.audienceCues.length > 0) {
+    lines.push(`- **服务对象线索**：${bf.audienceCues.join('；')}`)
+  }
+  if (Array.isArray(bf.flows) && bf.flows.length > 0) {
+    for (const fl of bf.flows.slice(0, 10)) {
+      lines.push(`- **${fl.surface ?? 'entry'}** \`${fl.name}\` -> \`${fl.entry}\``)
+    }
+  } else {
+    const s = bf.surfaces ?? {}
+    if (s.cli?.length) lines.push(`- **CLI 入口**：${s.cli.slice(0, 5).map((x) => `\`${x.file ?? x}\``).join('、')}`)
+    if (s.routes?.length) lines.push(`- **接口/路由面**：${s.routes.slice(0, 5).map((x) => `\`${x}\``).join('、')}`)
+    if (s.ui?.length) lines.push(`- **前端交互面**：${s.ui.slice(0, 5).map((x) => `\`${x}\``).join('、')}`)
+    if (s.jobs?.length) lines.push(`- **作业与流水线面**：${s.jobs.slice(0, 5).map((x) => `\`${x}\``).join('、')}`)
+  }
+  if (Array.isArray(bf.docCodeGaps) && bf.docCodeGaps.length > 0) {
+    lines.push(`- **文档与源码差异**：${bf.docCodeGaps.slice(0, 5).map((g) => g.detail ?? g.path).join('；')}`)
+  }
+  return lines.length > 0
+    ? lines.join('\n')
+    : '- 当前目录暂无业务流入口（核心源码就位后由 `repo-map.mjs` 只读补齐 `businessFlows` 映射）。'
+}
+
+function formatPreForgeBaselineBlock(facts, opts) {
+  const base = opts?.preForgeBaseline ?? facts?.preForgeBaseline
+  if (!base) {
+    return '- **preForgeBaseline**：尚未采集（空白目录起步或未执行改前实跑；接入存量代码仓时须在 S1 -> S3 写前只读实跑既有测试与主入口后记录）。'
+  }
+  if (typeof base === 'string') return base.trim() || '- 已采集改前基线。'
+  const lines = []
+  if (base.ranAt || base.headSha) {
+    lines.push(`- **采集时间 / HEAD**：${base.ranAt ?? '未记时间'}（\`${base.headSha ?? 'uncommitted'}\`）`)
+  }
+  if (base.summary) lines.push(`- **基线结论**：${base.summary}`)
+  for (const item of base.commands ?? []) {
+    const st = item.ok === true || item.exitCode === 0 ? 'PASS' : `EXIT ${item.exitCode ?? 'ERR'}`
+    lines.push(`- \`${item.command}\` -> **${st}**${item.detail ? `（${item.detail}）` : ''}`)
+  }
+  for (const ep of base.entrypoints ?? []) {
+    const st = ep.ok === true || ep.exitCode === 0 ? 'OK' : `EXIT ${ep.exitCode ?? 'ERR'}`
+    lines.push(`- 入口 \`${ep.entry ?? ep.command}\` -> **${st}**${ep.detail ? `（${ep.detail}）` : ''}`)
+  }
+  return lines.length > 0 ? lines.join('\n') : '- 已采集改前基线。'
+}
+
   const vars = {
     PROJECT_NAME: opts.projectName ?? facts?.target?.name ?? '项目',
     DOC_VERSION: opts.docVersion ?? '0.1.0',
@@ -253,6 +304,8 @@ export function buildPreFilledTdd(facts, opts = {}) {
     QUICK_CMD: quick,
     POSITIONING: opts.positioning ?? '<一句话说明本系统解决的核心问题与服务对象>',
     NON_GOALS_LINES: opts.nonGoals ?? '  - <明确不承担的能力范围，防止后续需求越界>',
+    BUSINESS_FLOWS_BLOCK: formatBusinessFlowsBlock(facts, opts),
+    PRE_FORGE_BASELINE_BLOCK: formatPreForgeBaselineBlock(facts, opts),
   }
 
   const repoRoot = opts.repoRoot ?? root

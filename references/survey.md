@@ -32,9 +32,9 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 | `git` | `isRepoRoot`、`isBare`、`isShallow`、`commitsState`、`providerId`（`github` 或降级 `generic-git`）、`topology`（`0`/单/Fork/多远端 `remotes[]` 模型）与 `.git/pf-{local,fork,standalone}-mode` 标志 |
 | `git.role` | 双轴五态身份：`local-only`（无远端或 `pf-local-mode`）、`maintainer`（与声明源一致且有写权限，或 `generic-git` 通用降级放行本地全流程）、`contributor-fork`（存在不同 `upstream` / Fork 仓 / `pf-fork-mode`）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
 | `git.auth` | `https`、`ssh`（含 443 回退与指纹未收录提示）、`apiChannel`、`details`、`remediationCmd`（协议错配修复命令；缺凭据时渲染三路线认证指引） |
-| `docs` | `readmes`、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`、`existingDesignDocs`（识别 `ARCHITECTURE.md` / `*-TDD.md` / `docs/{design,architecture,adr}/` 避免双轨）、`workflowFacts`（明确拆分 `checkWorkflows` 与 `releaseWorkflows`，覆盖主流发布 Action）、`contributing`、`releasing`、`license` |
-| `kit` | 扫描 `skills/<name>/SKILL.md` 及任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2，保留 `tier`、`disabledSkills`、`removedFiles`、`customizedFiles`） |
-| `explorationStrategy` | 依据 `effectiveFiles`、多包/多生态与重入状态输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–4 个不重叠 `shards` 分片） |
+| `docs` | `readmes`（含双语及 `.rst`/无后缀 README）、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`、`existingDesignDocs`（识别 `ARCHITECTURE.md` / `*-TDD.md` / `docs/{design,architecture,adr}/` / `doc/` / `documentation/` / `rfcs/` 避免双轨）、`nonStandardDocs`、`preservedForeignPlanDocs`（原样保留目标仓原生 `docs/{specs,todo}/*`）、`workflowFacts`（含 `.github/workflows` 与中立 CI `neutralCiConfigs`，明确拆分 `checkWorkflows` 与 `releaseWorkflows`）、`contributing`、`releasing`、`license` |
+| `kit` | 扫描非隐藏 `skills/*`（含嵌套 `*/skills/*`）与任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码，自动区分宿主镜像副本 `mirrorCopies` 不双计不误删），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2，保留 `tier`、`disabledSkills`、`removedFiles`、`customizedFiles`） |
+| `explorationStrategy` | 依据 `effectiveFiles`、多包/多生态与重入状态输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–5 个不重叠 `shards` 分片，含 `business-flows` 核心业务流分片） |
 | `artifactPlan` | 由 `computeArtifactPlan` 产出的 11 项治理产物确定性处置列表（含拆分的 `ci-check` 与 `ci-release`），直接指明 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
 | `reentry` | 仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入（不误判存量手写 `AGENTS.md`）；输出 `staleAgentPaths`、`staleAgentScripts`（按 `commandsByEcosystem` 逐栈校验）、`staleTddPaths` 与 `unregisteredTopDirs` |
 | `ecosystem` / `workspace` | 识别 Node、Python、Rust、Go、Java、Swift/Apple（`Package.swift` / `*.xcodeproj` / `*.xcworkspace`）等生态、入口清单与多包布局 |
@@ -43,7 +43,8 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 ### 并行只读分片探索规范（大型与重入仓写前前置）
 
 - 当 `explorationStrategy.tier === 'parallel-subagents'` 时，**进入写入或生成阶段前必须先完成并行只读勘察**：按 `explorationStrategy.shards` 并发派发 2–4 个纯只读子代理，每人只负责互不重叠的分片（如顶层模块与架构入口、既有 `.agents/skills/` 与 `AGENTS.md` 规则、文档/测试/CI 现状）。
-- **分片汇总规范**：子代理严禁修改任何文件、严禁越界重复扫描他人分片，只回传**真实存在路径 + 关键事实摘要 + 发现的漂移/风险**；主代理收齐后与 `reentry` 四个漂移列表交叉核对，再敲定校准与落盘范围。
+- **分片汇总规范**：子代理严禁修改任何文件、严禁越界重复扫描他人分片，只回传**真实存在路径 + 关键事实摘要 + 发现的漂移/风险**（其中 `business-flows` 分片对照 `repo-map.mjs` 的 `businessFlows` 汇总服务对象、路由/CLI/UI/作业面与文档源码差异）；主代理收齐后与 `reentry` 四个漂移列表交叉核对，再敲定校准与落盘范围。
+- **改前只读实跑基线（`S1 -> S3` 前置）**：对非空存量代码仓进入 `S3` 写入前，先以**只读非破坏方式实跑对方既有测试与主入口**，采集 **`preForgeBaseline`**（执行命令、退出码/通过情况、主入口实测状态）直接写入 `docs/TDD.md`（`AGENTS.md` 仅留薄指针以守住体积预算），确保后续治理全过程可对照改前真基线核验无退化。
 
 ### `artifactPlan` 逐项确定性处置对照表（按表落地，不自由重写）
 

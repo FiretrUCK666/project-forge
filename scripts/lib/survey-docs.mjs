@@ -8,9 +8,21 @@ import { join } from 'node:path'
 
 import * as protocol from './protocol.mjs'
 import { isMacMetadataName, readTextSafe } from './text.mjs'
+import { classifyWorkspaceIdentity, detectGitModeMarkers } from './platform/index.mjs'
+import { resolveDocRequirements } from '../../kit/skills/lib/doc-requirements.mjs'
+import { detectTddShapes, tddDropSections } from '../../kit/skills/lib/tdd-shape.mjs'
+import { CODE_EXT_RE } from '../../kit/skills/lib/static-gates.mjs'
+import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../../kit/skills/lib/symbol-index.mjs'
+import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
+import { isManagedPlanDoc } from '../../kit/skills/lib/docs.mjs'
 
 const LIKELY_DEFAULT_BRANCHES = protocol.LIKELY_DEFAULT_BRANCHES ?? ['main', 'master', 'trunk', 'develop', 'default', 'development']
 const parseMarkers = protocol.parseMarkers
+const DOC_EXT_RE = /\.(?:md|mdx|markdown|rst|txt|adoc|asciidoc)$/i
+const SKIP_SCAN_DIRS = new Set([
+  '.git', '.worktrees', 'node_modules', 'vendor', 'third_party',
+  'dist', 'build', 'out', 'target', '__pycache__', '.venv', 'venv', 'fixtures',
+])
 
 const RELEASE_WORKFLOW_PATTERNS = [
   { tool: 'gh-release', re: /\bgh\s+release\b/i },
@@ -41,7 +53,43 @@ function listRelFiles(dirAbs, dirRel) {
     .map((name) => `${dirRel}/${name}`)
 }
 
-function detectExistingDesignDocs(root) {
+function walkBoundedRelFiles(root, baseDirs, { maxDepth = 5, maxFiles = 2000 } = {}) {
+  const out = []
+  const queue = baseDirs.map((rel) => ({ rel, depth: rel ? rel.split('/').length : 0 }))
+  while (queue.length > 0 && out.length < maxFiles) {
+    const { rel, depth } = queue.shift()
+    const abs = rel ? join(root, rel) : root
+    if (!existsSync(abs)) continue
+    let entries = []
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { continue }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const entry of entries) {
+      if (isMacMetadataName(entry.name) || entry.name === '.gitkeep') continue
+      const nextRel = rel ? `${rel}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        if (depth < maxDepth && !SKIP_SCAN_DIRS.has(entry.name)) {
+          queue.push({ rel: nextRel, depth: depth + 1 })
+        }
+      } else if (entry.isFile()) {
+        out.push(nextRel)
+        if (out.length >= maxFiles) break
+      }
+    }
+  }
+  return out
+}
+
+function normalizedRelList(root, files, fallbackDirs, opts) {
+  if (Array.isArray(files) && files.length > 0) {
+    return files
+      .map((f) => String(f?.rel ?? f).replace(/\\/g, '/'))
+      .filter(Boolean)
+      .sort()
+  }
+  return walkBoundedRelFiles(root, fallbackDirs, opts)
+}
+
+function detectExistingDesignDocs(root, files = null) {
   const found = new Set()
   const candidates = [
     'ARCHITECTURE.md', 'architecture.md', 'DESIGN.md', 'design.md',
@@ -64,20 +112,73 @@ function detectExistingDesignDocs(root) {
       }
     }
   }
-  for (const subRel of ['docs/design', 'docs/architecture', 'docs/adr']) {
-    const subAbs = join(root, subRel)
-    if (!existsSync(subAbs)) continue
-    let entries = []
-    try { entries = readdirSync(subAbs, { withFileTypes: true }) } catch { continue }
-    for (const entry of entries) {
-      if (!entry.isFile() || isMacMetadataName(entry.name) || entry.name === '.gitkeep') continue
-      if (/\.(?:md|mdx|rst|txt)$/i.test(entry.name)) found.add(`${subRel}/${entry.name}`)
-    }
+  const designRoots = [
+    'docs/design', 'docs/architecture', 'docs/adr', 'docs/rfcs',
+    'doc', 'documentation', 'rfcs', 'adr',
+  ]
+  const scanned = Array.isArray(files) && files.length > 0
+    ? files.map((f) => String(f?.rel ?? f).replace(/\\/g, '/'))
+    : walkBoundedRelFiles(root, designRoots, { maxDepth: 4 })
+  for (const rel of scanned) {
+    const inDesignDir = designRoots.some((d) => rel.startsWith(`${d}/`))
+    if (inDesignDir && DOC_EXT_RE.test(rel)) found.add(rel)
   }
   return [...found].sort()
 }
 
-function detectOtherAiConventions(root) {
+function detectNonStandardArtifacts(root, readmes, files = null) {
+  const nonStandardDirs = ['doc', 'documentation', 'rfcs', 'adr', 'proto']
+    .filter((d) => existsSync(join(root, d)))
+  const relFiles = normalizedRelList(
+    root,
+    files,
+    ['', 'docs', 'doc', 'documentation', 'rfcs', 'adr', 'runbooks', 'proto', 'protos', 'api', 'apis', 'idl', 'spec', 'specs', '.github'],
+    { maxDepth: 5 },
+  )
+  const runbooks = new Set()
+  const securityDocs = new Set()
+  const apiContracts = new Set()
+  const nonStandardDesign = new Set()
+
+  for (const rel of relFiles) {
+    const lower = rel.toLowerCase()
+    const base = lower.split('/').pop() ?? ''
+    if (/^(?:runbook(?:\.[a-z0-9_.-]+)?)\.(?:md|mdx|rst|txt|adoc)$/i.test(base)
+      || /^runbooks\/.+\.(?:md|mdx|rst|txt|adoc)$/i.test(lower)) {
+      runbooks.add(rel)
+    }
+    if (/^security(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|rst|txt)$/i.test(base)
+      && (!rel.includes('/') || /^(?:docs|\.github)\//i.test(lower))) {
+      securityDocs.add(rel)
+    }
+    if (/^(?:openapi|swagger)\.(?:ya?ml|json)$/i.test(base) || /\.proto$/i.test(base)) {
+      apiContracts.add(rel)
+    }
+    if (/^(?:doc|documentation|rfcs|adr)\//i.test(lower) && DOC_EXT_RE.test(base)) {
+      nonStandardDesign.add(rel)
+    }
+  }
+  const nonMdReadmes = readmes.filter((r) => !/\.md$/i.test(r))
+  const nonStandardDocs = [...new Set([
+    ...nonStandardDirs.map((d) => `${d}/`),
+    ...nonStandardDesign,
+    ...runbooks,
+    ...securityDocs,
+    ...apiContracts,
+    ...nonMdReadmes,
+  ])].sort()
+
+  return {
+    nonStandardDirs,
+    runbooks: [...runbooks].sort(),
+    securityDocs: [...securityDocs].sort(),
+    apiContracts: [...apiContracts].sort(),
+    nonMdReadmes,
+    nonStandardDocs,
+  }
+}
+
+function detectAiConventions(root, files = null) {
   const singles = [
     'CLAUDE.md', '.clinerules', '.cursorrules', '.windsurfrules', 'CONVENTIONS.md',
     '.github/copilot-instructions.md', 'GEMINI.md', 'COPILOT_INSTRUCTIONS.md',
@@ -94,7 +195,26 @@ function detectOtherAiConventions(root) {
       fromDirs.push(`${dir}/${entry.name}`)
     }
   }
-  return [...singles, ...fromDirs]
+
+  const allFiles = normalizedRelList(root, files, [''], { maxDepth: 6 })
+  const subdirAgentsFiles = []
+  const subdirClaudeFiles = []
+  for (const rel of allFiles) {
+    if (!rel.includes('/')) continue
+    const parts = rel.split('/')
+    if (parts.some((seg, idx) => idx < parts.length - 1 && (SKIP_SCAN_DIRS.has(seg) || seg.startsWith('.')))) {
+      continue
+    }
+    const base = parts[parts.length - 1]
+    if (/^agents\.md$/i.test(base)) subdirAgentsFiles.push(rel)
+    else if (/^claude\.md$/i.test(base)) subdirClaudeFiles.push(rel)
+  }
+
+  return {
+    otherAiConventions: [...new Set([...singles, ...fromDirs, ...subdirClaudeFiles])].sort(),
+    subdirAgentsFiles: [...new Set(subdirAgentsFiles)].sort(),
+    aiSubdirConventions: [...new Set([...subdirAgentsFiles, ...subdirClaudeFiles])].sort(),
+  }
 }
 
 function parseAgentMarkers(root, agents) {
@@ -107,20 +227,48 @@ function parseAgentMarkers(root, agents) {
   }
 }
 
-export function detectDocs(root) {
+function sortPrimaryFirst(files, exactPrimaryLower, englishLower) {
+  return [...files].sort((a, b) => {
+    const la = a.toLowerCase()
+    const lb = b.toLowerCase()
+    const rank = (s) => (s === exactPrimaryLower ? 0 : s === englishLower ? 1 : /\.md$/i.test(s) ? 2 : 3)
+    const ra = rank(la)
+    const rb = rank(lb)
+    return ra !== rb ? ra - rb : a < b ? -1 : a > b ? 1 : 0
+  })
+}
+
+export function detectDocs(root, opts = {}) {
+  const files = opts?.files ?? null
   let entries = []
-  try { entries = readdirSync(root).filter((n) => !isMacMetadataName(n)) } catch {}
+  let fileEntries = []
+  try {
+    const dirents = readdirSync(root, { withFileTypes: true }).filter((d) => !isMacMetadataName(d.name))
+    entries = dirents.map((d) => d.name)
+    fileEntries = dirents.filter((d) => d.isFile()).map((d) => d.name)
+  } catch {}
   const find = (name) => entries.find((e) => e.toLowerCase() === name.toLowerCase())
 
-  const readmes = entries.filter((e) => /^readme(?:\.[a-z0-9_-]+)?\.md$/i.test(e))
+  const readmes = sortPrimaryFirst(
+    fileEntries.filter((e) => /^readme$/i.test(e)
+      || /^readme(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|markdown|rst|txt|adoc|asciidoc|org)$/i.test(e)),
+    'readme.md',
+    'readme.en.md',
+  )
   const agents = find('AGENTS.md')
-  const contributing = find('CONTRIBUTING.md')
+  const contributingFiles = sortPrimaryFirst(
+    fileEntries.filter((e) => /^contributing(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|markdown|rst|txt|adoc)$/i.test(e)),
+    'contributing.md',
+    'contributing.en.md',
+  )
+  const contributing = contributingFiles[0]
   const releasing = ['RELEASING.md', 'RELEASE.md', 'RELEASING.rst', 'docs/RELEASING.md', 'docs/releasing.md']
     .find((rel) => existsSync(join(root, rel)))
   const changelog = ['CHANGELOG.md', 'CHANGELOG.rst', 'CHANGES.md', 'HISTORY.md']
     .find((rel) => existsSync(join(root, rel)))
   const license = entries.find((e) => /^licen[cs]e(?:\..+|-.*)?$/i.test(e))
-  const otherAiConventions = detectOtherAiConventions(root)
+  const aiConv = detectAiConventions(root, files)
+  const otherAiConventions = aiConv.otherAiConventions
 
   const wfDir = join(root, '.github', 'workflows')
   const workflows = []
@@ -130,6 +278,7 @@ export function detectDocs(root) {
     checkWorkflows: [],
     releaseWorkflows: [],
     releaseTools: [],
+    neutralCiConfigs: [],
     usesPullRequestTarget: false,
     checkoutsPrHead: false,
     hasContentsWrite: false,
@@ -167,6 +316,20 @@ export function detectDocs(root) {
     }
   }
 
+  const neutralCi = scanNeutralCiSteps(root)
+  const neutralCiConfigs = neutralCi.ciConfigFiles.filter((rel) => !rel.startsWith('.github/workflows/'))
+  workflowFacts.neutralCiConfigs = neutralCiConfigs
+  for (const rel of neutralCiConfigs) {
+    const text = readTextSafe(join(root, rel)) ?? ''
+    const activeText = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    const hasSteps = neutralCi.steps.some((s) => s.file === rel)
+    const hasCheckCmd = /\b(?:test|tests|check|lint|preflight|verify|build|pytest|unittest|ctest|stage|steps|script|jobs)\b/i.test(activeText)
+    if (hasSteps || hasCheckCmd) {
+      workflowFacts.hasCheck = true
+      if (!workflowFacts.checkWorkflows.includes(rel)) workflowFacts.checkWorkflows.push(rel)
+    }
+  }
+
   const prTemplateFiles = ['.github/pull_request_template.md', '.github/PULL_REQUEST_TEMPLATE.md']
     .filter((rel) => existsSync(join(root, rel)))
   const issueDir = join(root, '.github', 'ISSUE_TEMPLATE')
@@ -180,14 +343,46 @@ export function detectDocs(root) {
   }
 
   const tdd = existsSync(join(root, 'docs', 'TDD.md')) ? 'docs/TDD.md' : undefined
-  const existingDesignDocs = detectExistingDesignDocs(root)
+  const existingDesignDocs = detectExistingDesignDocs(root, files)
+  const nonStandard = detectNonStandardArtifacts(root, readmes, files)
+  const localizedDocs = [...new Set(
+    fileEntries.filter((e) => /^(?:readme|contributing|security|releasing|changelog)\.[a-z0-9_-]+\.md$/i.test(e)
+      || /\.zh-cn\.md$/i.test(e)),
+  )].sort()
+function partitionPlanDir(root, dirRel) {
+  const dirAbs = join(root, dirRel)
+  if (!existsSync(dirAbs)) return { content: [], foreign: [] }
+  const rawFiles = walkBoundedRelFiles(root, [dirRel], { maxDepth: 4 })
+  const topNames = listRelFiles(dirAbs, dirRel)
+  const all = [...new Set([...topNames, ...rawFiles])].sort()
+  const content = []
+  const foreign = []
+  for (const rel of all) {
+    const base = rel.split('/').pop() ?? ''
+    if (base === '.gitkeep') { content.push(rel); continue }
+    const abs = join(root, rel)
+    let isDir = false
+    try { isDir = statSync(abs).isDirectory() } catch { isDir = false }
+    if (isDir) continue
+    const text = readTextSafe(abs) ?? ''
+    if (isManagedPlanDoc(rel, text)) content.push(rel)
+    else foreign.push(rel)
+  }
+  return { content, foreign }
+}
+
   const specsDir = existsSync(join(root, 'docs', 'specs'))
   const todoDir = existsSync(join(root, 'docs', 'todo'))
   const prdDir = existsSync(join(root, 'docs', 'prd'))
   // 「目录存在」与「目录里有真东西」是两件事：`equip` 会建空骨架，
-  // 拿目录存在当「这个项目治理过」，等于让工具自己证明自己。
-  const specsDirContent = listRelFiles(join(root, 'docs', 'specs'), 'docs/specs')
-  const todoDirContent = listRelFiles(join(root, 'docs', 'todo'), 'docs/todo')
+  // 拿目录存在当「这个项目治理过」，等于让工具自己证明自己；目标仓原生非受管文档归入 preservedForeignPlanDocs。
+  const specsPart = partitionPlanDir(root, 'docs/specs')
+  const todoPart = partitionPlanDir(root, 'docs/todo')
+  const prdPart = partitionPlanDir(root, 'docs/prd')
+  const specsDirContent = specsPart.content
+  const todoDirContent = todoPart.content
+  const prdDirContent = prdPart.content
+  const preservedForeignPlanDocs = [...new Set([...specsPart.foreign, ...todoPart.foreign, ...prdPart.foreign])].sort()
   let agentsBytes = 0
   if (agents) {
     try { agentsBytes = statSync(join(root, agents)).size } catch { agentsBytes = 0 }
@@ -197,10 +392,18 @@ export function detectDocs(root) {
     readmes,
     readme: readmes[0],
     readmePair: readmes.length > 1,
+    nonMdReadmes: nonStandard.nonMdReadmes,
     agents: agents ? { file: agents } : undefined,
     agentsBytes,
     agentsMarkers: parseAgentMarkers(root, agents),
     contributing,
+    contributingFiles,
+    localizedDocs,
+    securityDocs: nonStandard.securityDocs,
+    runbooks: nonStandard.runbooks,
+    apiContracts: nonStandard.apiContracts,
+    nonStandardDirs: nonStandard.nonStandardDirs,
+    nonStandardDocs: nonStandard.nonStandardDocs,
     releasing,
     changelog,
     license,
@@ -211,8 +414,13 @@ export function detectDocs(root) {
     prdDir,
     specsDirContent,
     todoDirContent,
+    prdDirContent,
+    preservedForeignPlanDocs,
     otherAiConventions,
+    subdirAgentsFiles: aiConv.subdirAgentsFiles,
+    aiSubdirConventions: aiConv.aiSubdirConventions,
     workflows,
+    neutralCiConfigs,
     workflowFacts,
     prTemplate: prTemplateFiles.length > 0,
     prTemplateFile: prTemplateFiles[0],
@@ -323,10 +531,31 @@ export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}
     }
   }
 
+  const hooksDirAbs = join(root, '.githooks')
+  const hasGithooksDir = existsSync(hooksDirAbs)
+  let githooksFiles = []
+  if (hasGithooksDir) {
+    try {
+      githooksFiles = readdirSync(hooksDirAbs, { withFileTypes: true })
+        .filter((e) => e.isFile() && !isMacMetadataName(e.name) && e.name !== '.gitkeep')
+        .map((e) => e.name)
+        .sort()
+    } catch { githooksFiles = [] }
+  }
+  const customHookFiles = githooksFiles.filter((name) => !(name === 'pre-push' && managedPrePush))
+  if (!managedPrePush && !hasPrePush && customHookFiles.length > 0) {
+    conflicts.push({
+      kind: 'custom-githooks',
+      path: '.githooks/',
+      detail: `仓库已存在既有 .githooks/ 钩子（${customHookFiles.join('、')}），preserve 不覆写`,
+    })
+  }
+
   return {
     coreHooksPath: normalizedHooksPath || undefined,
     coreHooksPathScope: scope || undefined,
-    hasGithooksDir: existsSync(join(root, '.githooks')),
+    hasGithooksDir,
+    githooksFiles,
     hasPrePush,
     managedPrePush,
     prePushExecutable,
@@ -345,7 +574,7 @@ function detectWorkflowTooling(root) {
     'lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml',
   ]
   for (const rel of singles) if (existsSync(join(root, rel))) found.push(rel)
-  for (const dir of ['.changeset', '.husky', '.lefthook']) {
+  for (const dir of ['.changeset', '.husky', '.lefthook', '.githooks']) {
     if (existsSync(join(root, dir))) found.push(`${dir}/`)
   }
   return found
@@ -377,5 +606,105 @@ export function detectConventions(root, { gitFacts, docs, ecosystem }) {
     commitStyle: gitFacts.commitStyle ?? 'plain',
     workDir,
     workflowTooling: detectWorkflowTooling(root),
+  }
+}
+
+export function summarizeTddAndSymbolCoverage(root, rawWs, facts) {
+  // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
+  // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。
+  // finalize 之后 files 已经不是数组，路径清单要用扫完那一刻的原始结果。
+  const shapePaths = (rawWs.files ?? []).map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+  const tddShape = detectTddShapes({
+    paths: shapePaths,
+    kinds: facts.ecosystem?.kinds ?? [],
+    runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
+    codeFiles: facts.scale?.codeFiles ?? 0,
+  })
+  const tddReq = resolveDocRequirements(root, 'tdd')
+  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
+  const tddShapeSummary = {
+    enabled: [...tddShape.enabled],
+    reasons: tddShape.reasons,
+    dropSections: [...tddDropSections(tddShape, { omit: tddReq.omit, required: tddReqIds })],
+    filePaths: shapePaths,
+    topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
+  }
+
+  // 符号抽取的覆盖情况：这个仓里有几门语言有符号规则、几门没有。
+  // 报出来而不是「抽不到就当没有管理」：差别只在覆盖这一面，所以必须单独说。
+  const symbolCoverage = summarizeSymbolCoverage(
+    (rawWs.files ?? [])
+      .map((f) => String(f.rel ?? f).replace(/\\/g, '/'))
+      .filter((rel) => !protocol.isToolOwnedPath(rel)
+        && (CODE_EXT_RE.test(rel) || isSymbolCandidatePath(rel))),
+  )
+  return { tddShape: tddShapeSummary, symbolCoverage }
+}
+
+/**
+ * 角色决定「能做到哪一步」，通过双轴五态分类器与平台注册表得出：
+ * `local-only` / `contributor-fork` / `clone-readonly` / `maintainer` / `undetermined`。
+ */
+export function judgeRole(gitFacts, declaredRepo, opts = {}) {
+  const markers = opts.cwd ? detectGitModeMarkers(opts.cwd) : { localMode: false, forkMode: false, standaloneMode: false }
+  const localMode = typeof opts.localMode === 'boolean' ? opts.localMode : markers.localMode
+  const forkMode = typeof opts.forkMode === 'boolean' ? opts.forkMode : markers.forkMode
+  const standaloneMode = typeof opts.standaloneMode === 'boolean' ? opts.standaloneMode : markers.standaloneMode
+  return classifyWorkspaceIdentity({
+    gitFacts,
+    declaredRepo,
+    probeApi: opts.probeApi,
+    localIdentity: opts.localIdentity,
+    localMode,
+    forkMode,
+    standaloneMode,
+    sshHostMap: opts.sshHostMap,
+  })
+}
+
+export async function runSurveyCli(argv, surveyFn) {
+  let target = process.cwd()
+  let format = 'json'
+  let probeAuth = false
+  let verifyToken = false
+
+  for (const arg of argv) {
+    if (arg === '--help' || arg === '-h') {
+      process.stdout.write([
+        '用法：node scripts/survey.mjs [目标目录] [选项]',
+        '',
+        '  --markdown      输出给人读的报告（默认输出 JSON）',
+        '  --probe-auth    额外问一次凭据助手与 SSH/gh 状态（无远端亦可探测）',
+        '  --verify-token  配合 --probe-auth 对本地 Token 发一次轻量验活请求',
+        '',
+        '只读：不写任何文件。',
+      ].join('\n') + '\n')
+      return 0
+    }
+    if (arg === '--markdown' || arg === '--md') format = 'markdown'
+    else if (arg === '--json') format = 'json'
+    else if (arg === '--probe-auth') probeAuth = true
+    else if (arg === '--verify-token') { probeAuth = true; verifyToken = true }
+    else if (!arg.startsWith('-')) target = arg
+    else {
+      process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
+      return 2
+    }
+  }
+
+  try {
+    const facts = await surveyFn(target, { probeAuth, verifyToken })
+    let out
+    if (format === 'markdown') {
+      const { toMarkdown } = await import('./render.mjs')
+      out = toMarkdown(facts)
+    } else {
+      out = `${JSON.stringify(facts, null, 2)}\n`
+    }
+    process.stdout.write(out)
+    return 0
+  } catch (err) {
+    process.stderr.write(`勘察失败：${err instanceof Error ? err.message : String(err)}\n`)
+    return 2
   }
 }

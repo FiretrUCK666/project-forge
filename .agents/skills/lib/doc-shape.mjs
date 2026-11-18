@@ -132,8 +132,9 @@ export function analyzeDocShapeFromPaths(repoRoot, filePaths = []) {
   const uiFrontend = Boolean(uiHit || uiDeps)
 
   const ciHit = nonArchive.find((p) => /(?:^|\/)\.github\/workflows\/.+\.ya?ml$/i.test(p)
+    || /(?:^|\/)(?:\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile|\.travis\.yml|\.drone\.yml|\.buildkite\/pipeline\.ya?ml|\.woodpecker\.ya?ml|\.woodpecker\/.+\.ya?ml)$/i.test(p)
     || /(?:^|\/)(?:k8s|helm|deploy)\//i.test(p)
-    || /(?:^|\/)(?:Dockerfile(?:\..+)?|docker-compose(?:\.[^/]+)?\.ya?ml|compose(?:\.[^/]+)?\.ya?ml|RELEASING\.md|release\.(?:sh|mjs|py|yml|yaml))$/i.test(p)
+    || /(?:^|\/)(?:Dockerfile(?:\..+)?|docker-compose(?:\.[^/]+)?\.ya?ml|compose(?:\.[^/]+)?\.ya?ml|RELEASING(?:\.[^/]+)?\.md|release\.(?:sh|mjs|py|yml|yaml))$/i.test(p)
     || /(?:^|\/)(?:migrations?|migrate|alembic\.ini)\b/i.test(p))
   const ciRollout = Boolean(ciHit)
 
@@ -143,7 +144,8 @@ export function analyzeDocShapeFromPaths(repoRoot, filePaths = []) {
   const cliEntry = Boolean(cliHit || (repoRoot && probeGoOrPythonCli(repoRoot, nonDocPaths, manifestText)))
 
   const profile = repoRoot ? parseAgentsProfile(repoRoot) : null
-  const collabFileHit = nonArchive.find((p) => /(?:^|\/)(?:CODEOWNERS|CONTRIBUTING\.md|pnpm-workspace\.yaml|go\.work|lerna\.json|nx\.json|turbo\.json)$/i.test(p))
+  const collabFileHit = nonArchive.find((p) => /(?:^|\/)(?:CODEOWNERS|CONTRIBUTING(?:\.[A-Za-z0-9_.-]+)?\.md|pnpm-workspace\.yaml|go\.work|lerna\.json|nx\.json|turbo\.json)$/i.test(p)
+    || /^[^/]+(?:\/[^/]+)*\/(?:AGENTS|CLAUDE)\.md$/i.test(p))
   const codeTopDirs = new Set(
     nonDocPaths
       .filter((p) => CODE_OR_MANIFEST_RE.test(p) && p.includes('/'))

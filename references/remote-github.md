@@ -6,7 +6,7 @@
 
 ## 一、双轨四级连接引擎
 
-探测与操作全程注入 `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=echo`、`SSH_ASKPASS=''`、`SSH_ASKPASS_REQUIRE=never`、`GCM_INTERACTIVE=never`、`GH_PROMPT_DISABLED=1`，并对 `git credential fill` 施以 `5000ms` 硬超时，防止 macOS Keychain 或 GUI 弹窗挂死；无远端目录传入 `--probe-auth` 时同样只读探测本机 `gh` / SSH / 凭据以引导建仓。
+探测与操作全程注入 `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=''`、`SSH_ASKPASS=''`、`SSH_ASKPASS_REQUIRE=never`、`GCM_INTERACTIVE=never`、`GH_PROMPT_DISABLED=1`，并对 `git credential fill` 施以 `5000ms` 硬超时，防止 macOS Keychain 或 GUI 弹窗挂死；无远端目录传入 `--probe-auth` 时同样只读探测本机 `gh` / SSH / 凭据以引导建仓。
 
 ### 轨道 A：Git 传输层与协议自愈
 

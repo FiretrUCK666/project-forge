@@ -12,7 +12,7 @@ import {
   detectInProgressGitOp, gitRun, gitStatusPorcelainZ, resolveDefaultBranch, syncDetachedWorktree, } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { readTaskLedger, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
@@ -46,7 +46,7 @@ export async function handleSync(opts = {}, roots) {
   const { originFull, pushRemote } = buildTargetRepoContext(ledger.role, remoteUrls, declaredRepo, topology)
 
   const canQueryGh = ledger.role === 'maintainer' && ledger.providerId !== 'generic-git' && originFull
-  const ghProbe = canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'])
+  const ghProbe = canQueryGh && (opts._ghProbe || opts._ghClient || opts['probe-auth'] || ledger.prNumber || ledger.parentPrNumber)
     ? (opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls })))
     : null
   const backend = createTaskBackend({

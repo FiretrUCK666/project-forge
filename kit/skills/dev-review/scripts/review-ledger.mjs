@@ -16,7 +16,7 @@ import {
   consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
-  parsePrNumber, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity,
+  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
@@ -111,7 +111,7 @@ async function syncReviewToGitHub({
     const targetRepo = (ledger.role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : (originFull ?? declaredRepo)) ?? null
 
     const ghProbe = hasRemote
-      ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls })))
+      ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls })))
       : (opts._ghProbe ?? null)
     const ghClient = opts._ghClient ?? ghProbe?.client ?? null
     const tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'

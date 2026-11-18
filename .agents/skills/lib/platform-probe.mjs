@@ -444,7 +444,8 @@ export async function probeHttpsCredential({ cwd, env, repo, timeoutMs = DEFAULT
   inputLines.push('', '')
 
   const hardTimeoutMs = Math.min(Number(timeoutMs) || DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TIMEOUT_MS)
-  const res = await runner('git', ['credential', 'fill'], { cwd, env, timeoutMs: hardTimeoutMs, input: inputLines.join('\n') })
+  const credEnv = { ...(env ?? {}), GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_TERMINAL_PROMPT: '0' }
+  const res = await runner('git', ['credential', 'fill'], { cwd, env: credEnv, timeoutMs: hardTimeoutMs, input: inputLines.join('\n') })
 
   if (res.errorCode === 'ENOENT') return { state: 'undetermined', hasToken: false, token: undefined, reason: '系统未安装 git' }
   if (res.timedOut) return { state: 'undetermined', hasToken: false, token: undefined, reason: 'git credential fill 超时' }

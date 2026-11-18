@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { parseDocFrontmatter } from './docs.mjs'
+import { CUSTOM_DECL_REL, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { isStubValue } from './doc-substantive.mjs'
 import { readTextSafe } from './git.mjs'
+
+export { CUSTOM_DECL_REL }
 
 
 /**
@@ -417,13 +419,6 @@ export const DEFAULT_OPTIONAL_SECTIONS = Object.freeze({
   spec: Object.freeze([]),
   todo: Object.freeze([]),
   tdd: Object.freeze(['doc-info', 'flow', 'invariants']),
-})
-
-const CUSTOM_DECL_REL = Object.freeze({
-  prd: ['docs/templates/prd.md', 'docs/templates/prd-template.md', '.github/prd-template.md'],
-  spec: ['docs/templates/spec.md', 'docs/templates/spec-template.md', '.github/spec-template.md'],
-  todo: ['docs/templates/todo.md', 'docs/templates/todo-template.md', '.github/todo-template.md'],
-  tdd: ['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', '.github/tdd-template.md', '.github/tdd_template.md'],
 })
 
 export function readProjectDeclaration(repoRoot, kind) {

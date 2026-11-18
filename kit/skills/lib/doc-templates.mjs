@@ -8,6 +8,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { posixPath, readTextSafe } from './git.mjs'
+import { CUSTOM_DECL_REL } from './doc-frontmatter.mjs'
 import { resolveDocRequirements } from './doc-requirements.mjs'
 import { formatDocShapeSkippedBlock, resolveDocShapePolicy } from './doc-shape.mjs'
 import { renderDocTemplate } from './doc-template-render.mjs'
@@ -250,12 +251,7 @@ export function checkMermaidLabelWidth(text) {
   return { ok: violations.length === 0, checkedBlocks: blockIndex, violations }
 }
 
-const CUSTOM_TEMPLATE_REL_CANDIDATES = Object.freeze({
-  prd: ['docs/templates/prd.md', 'docs/templates/prd-template.md', 'docs/.templates/prd.md', '.github/prd-template.md', '.github/prd_template.md'],
-  spec: ['docs/templates/spec.md', 'docs/templates/spec-template.md', 'docs/.templates/spec.md', '.github/spec-template.md', '.github/spec_template.md'],
-  todo: ['docs/templates/todo.md', 'docs/templates/todo-template.md', 'docs/.templates/todo.md', '.github/todo-template.md', '.github/todo_template.md'],
-  tdd: ['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', '.github/tdd-template.md', '.github/tdd_template.md'],
-})
+const CUSTOM_TEMPLATE_REL_CANDIDATES = CUSTOM_DECL_REL
 
 function extractCustomDocSections(rawTemplate, standardContent, { title, safeSlug, taskId }) {
   const cleanRaw = String(rawTemplate ?? '').replace(/^---\n[\s\S]*?\n---\n*/m, '')
@@ -482,10 +478,27 @@ export function buildStandardDocContent({
 // ── 联动同步解析（AGENTS.md ## 改哪看哪）───────────────────────────────
 
 const COUPLED_ROOT_FILENAMES = new Set([
-  'AGENTS.md', 'SKILL.md', 'README.md', 'README.en.md',
-  'CONTRIBUTING.md', 'RELEASING.md', 'CHANGELOG.md',
+  'AGENTS.md', 'SKILL.md', 'README', 'README.md', 'README.en.md', 'README.zh-CN.md',
+  'CONTRIBUTING.md', 'CONTRIBUTING.zh-CN.md', 'SECURITY.md', 'SECURITY.zh-CN.md',
+  'RELEASING.md', 'CHANGELOG.md',
   'Makefile', 'justfile', '.gitattributes', '.gitignore',
 ])
+
+const PUBLIC_BILINGUAL_FAMILY_RE = /^(readme|contributing|security|releasing|changelog)(?:\.[A-Za-z0-9_-]+)?\.md$/i
+
+export function listLocalizedPublicSiblings(repoRoot, relFile) {
+  if (!repoRoot || !existsSync(repoRoot)) return []
+  const m = PUBLIC_BILINGUAL_FAMILY_RE.exec(String(relFile ?? '').trim())
+  if (!m) return []
+  const prefix = m[1].toLowerCase()
+  try {
+    return readdirSync(repoRoot)
+      .filter((name) => name !== relFile && new RegExp(`^${prefix}(?:\\.[A-Za-z0-9_-]+)?\\.md$`, 'i').test(name))
+      .sort()
+  } catch {
+    return []
+  }
+}
 
 function isPathLikeToken(rawToken) {
   const s = posixPath(String(rawToken ?? '').trim()).replace(/^\.\//, '')
@@ -578,7 +591,15 @@ export function evaluateCoupledSync(changedFiles, rules, repoRoot) {
   for (const rule of rules) {
     const touchedTriggers = (rule.triggers ?? []).filter((t) => normalizedChanged.some((f) => matchesCoupledPath(f, t, repoRoot)))
     if (touchedTriggers.length === 0) continue
-    const existingCompanions = (rule.companions ?? []).filter((c) => {
+    const triggerSet = new Set(rule.triggers ?? [])
+    const expandedCompanions = []
+    for (const c of rule.companions ?? []) {
+      expandedCompanions.push(c)
+      for (const sib of listLocalizedPublicSiblings(repoRoot, c)) {
+        if (!triggerSet.has(sib) && !expandedCompanions.includes(sib)) expandedCompanions.push(sib)
+      }
+    }
+    const existingCompanions = expandedCompanions.filter((c) => {
       if (!repoRoot) return true
       const clean = posixPath(c).replace(/^\.\//, '').replace(/\/+$/, '')
       return Boolean(clean) && existsSync(join(repoRoot, clean))

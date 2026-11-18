@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
-import { checkMermaidLabelWidth, evaluateCoupledSync, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
+import { checkMermaidLabelWidth, evaluateCoupledSync, isManagedPlanDoc, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { FORM_INDEPENDENT_CORE, findMissingSections, resolveDocRequirements, resolveSectionPresence } from '../../lib/doc-requirements.mjs'
 import { validateSkippedSections } from '../../lib/doc-shape.mjs'
 import {
@@ -47,6 +47,7 @@ function scanActiveContracts(root) {
   try {
     for (const name of readdirSync(specsDir).filter((n) => n.endsWith('.md')).sort()) {
       const text = readTextSafe(join(specsDir, name)) ?? ''
+      if (!isManagedPlanDoc(`docs/specs/${name}`, text)) continue
       const fm = parseDocFrontmatter(text)
       const status = String(fm.data?.status ?? 'unknown').toLowerCase()
       if (status === 'approved' || status === 'implementing' || status === 'implemented') {
@@ -669,6 +670,7 @@ export function checkMasterPrdCoverage(repoRoot, { prdRel = null } = {}) {
   const out = []
   for (const rel of prdFiles) {
     const text = readTextSafe(join(repoRoot, rel)) ?? ''
+    if (!isManagedPlanDoc(rel, text)) continue
     const ids = [...new Set([...text.matchAll(/^- \[[ xX]\]\s+(C\d+)\b/gm)].map((m) => m[1]))]
     if (ids.length === 0) continue
     const fm = parseDocFrontmatter(text)
@@ -717,6 +719,7 @@ export function checkOrphanSlices(repoRoot) {
   const specDir = join(repoRoot, 'docs', 'specs')
   if (!existsSync(specDir)) return []
   const specs = collectMarkdownFiles(specDir, repoRoot)
+    .filter((item) => isManagedPlanDoc(item.rel, readTextSafe(item.abs) ?? ''))
   if (specs.length < 2) return []
 
   // 每份 SPEC 指向哪个 PRD（空 = 没指）。解析不出来的按「没指」算，宁可多报一次。

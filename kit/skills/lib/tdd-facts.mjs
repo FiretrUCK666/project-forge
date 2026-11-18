@@ -168,6 +168,9 @@ export async function collectTddFacts(root) {
   })
 
   const topLevelDirs = [...new Set(filePaths.map((p) => p.split('/')[0]).filter((d) => d && !d.includes('.')))]
+  const cliFlows = filePaths.filter((p) => !isToolOwnedPath(p) && /(?:^|\/)cmd\/[^/]+\/main\.go$/i.test(p))
+  const routeFlows = filePaths.filter((p) => !isToolOwnedPath(p) && /(?:^|\/)(?:routes?|routers?|controllers?|handlers?|openapi|swagger)\b/i.test(p))
+  const uiFlows = filePaths.filter((p) => !isToolOwnedPath(p) && /\.(?:tsx|jsx|vue|svelte|astro)$/i.test(p))
   const hasRemote = existsSync(join(root, '.git', 'config'))
     ? /\[remote\s+"origin"\]/.test(readTextSafe(join(root, '.git', 'config')) ?? '')
     : false
@@ -183,6 +186,15 @@ export async function collectTddFacts(root) {
     workspace: { declared: presentManifests.includes('pnpm-workspace.yaml'), packages: [] },
     git: { hasRemote, remoteUrl: null },
     reentry: { unregisteredTopDirs: topLevelDirs },
+    businessFlows: {
+      surfaces: {
+        cli: cliFlows.slice(0, 8).map((file) => ({ name: file, file })),
+        routes: routeFlows.slice(0, 8),
+        ui: uiFlows.slice(0, 8),
+        jobs: [],
+      },
+    },
+    preForgeBaseline: null,
     tddShape: {
       enabled: [...shape.enabled],
       reasons: shape.reasons,

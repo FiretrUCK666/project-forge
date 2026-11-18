@@ -46,8 +46,8 @@ const LOCKFILE_ONLY_NAMES = new Set([
 ])
 
 const CI_COMMAND_KINDS = [
-  { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight)\b/i },
-  { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|format|fmt|hlint)\b/i },
+  { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight|pytest|unittest|vitest|jest|mocha|rspec|ctest|phpunit)\b/i },
+  { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|ruff|mypy|pyright|biome|format|fmt|hlint|vet)\b/i },
   { key: 'build', re: /\b(?:build|compile|bundle|package|make|assemble)\b/i },
   { key: 'install', re: /\b(?:install|deps|dependencies|setup|bootstrap|restore)\b/i },
 ]
@@ -502,6 +502,21 @@ function classifyCiCommand(cmd) {
   return undefined
 }
 
+const HEAVY_E2E_SEG_RE = /(?:^|\/)(?:e2e|webtest|web-tests?|browser-tests?|playwright|cypress|selenium)(?:\/|$)/i
+const HEAVY_E2E_CMD_RE = /\b(?:playwright|cypress|selenium|puppeteer|wdio|testcafe)\b|:e2e\b/i
+
+function isHeavyE2ePackage(pkg, cmdObj) {
+  const dirRel = String(pkg?.dirRel ?? '')
+  const pkgName = String(pkg?.name ?? '')
+  if (HEAVY_E2E_SEG_RE.test(dirRel) || /(?:^|[-_/])(?:e2e|webtest)$/i.test(pkgName)) return true
+  const cmds = [cmdObj?.quickTest, cmdObj?.fullTest].filter(Boolean)
+  return cmds.some((c) => HEAVY_E2E_CMD_RE.test(String(c)))
+}
+
+function normalizeCmdKey(cmd) {
+  return String(cmd ?? '').trim().replace(/\s+/g, ' ')
+}
+
 /**
  * 统一三层优先级命令嗅探：
  *   Layer 1: Dev Profile (AGENTS.md)
@@ -517,17 +532,43 @@ export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = n
 
   const ciCommands = {}
   const ciSources = {}
+  const ciCommandsByKind = { test: [], lint: [], build: [], install: [] }
+  const ciVerifyCommands = []
+  const seenVerify = new Set()
+  const ciE2eCommands = []
+
   for (const step of ci.steps) {
-    const kind = classifyCiCommand(step.cmd)
-    if (!kind || ciCommands[kind] !== undefined) continue
-    ciCommands[kind] = step.cmd
-    ciSources[kind] = step.file
-    detectionEvidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: step.cmd })
+    const normCmd = normalizeCmdKey(step.cmd)
+    if (!normCmd) continue
+    if (HEAVY_E2E_CMD_RE.test(normCmd)) {
+      if (!ciE2eCommands.includes(normCmd)) ciE2eCommands.push(normCmd)
+      continue
+    }
+    const kind = classifyCiCommand(normCmd)
+    if (!kind) continue
+    if (!ciCommandsByKind[kind].includes(normCmd)) {
+      ciCommandsByKind[kind].push(normCmd)
+      detectionEvidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: normCmd })
+    }
+    if (ciSources[kind] === undefined) ciSources[kind] = step.file
+    if (kind !== 'install' && !seenVerify.has(normCmd)) {
+      seenVerify.add(normCmd)
+      ciVerifyCommands.push(normCmd)
+    }
+  }
+  for (const [kind, cmds] of Object.entries(ciCommandsByKind)) {
+    if (cmds.length === 0) continue
+    ciCommands[kind] = kind === 'test' && cmds.length > 1 ? cmds.join(' && ') : cmds[0]
   }
   for (const ev of taskRunners.evidence) {
     if (ciCommands[ev.kind] === undefined) {
       ciCommands[ev.kind] = ev.command
       ciSources[ev.kind] = ev.file
+      if (!ciCommandsByKind[ev.kind].includes(ev.command)) ciCommandsByKind[ev.kind].push(ev.command)
+      if (ev.kind !== 'install' && !seenVerify.has(ev.command)) {
+        seenVerify.add(ev.command)
+        ciVerifyCommands.push(ev.command)
+      }
       detectionEvidence.push(ev)
     }
   }
@@ -536,10 +577,22 @@ export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = n
   const pkgFull = []
   const pkgLint = []
   const pkgBuild = []
+  const e2eCommands = [...ciE2eCommands]
+  const e2ePackages = []
   const pushUnique = (arr, v) => { if (v && !arr.includes(v)) arr.push(v) }
   for (const pkg of discovery.packages) {
     const mFile = pkg.dirRel ? `${pkg.dirRel}/${pkg.manifests[0] ?? ''}` : (pkg.manifests[0] ?? '')
     for (const c of Object.values(pkg.commands)) {
+      if (isHeavyE2ePackage(pkg, c)) {
+        if (pkg.dirRel && !e2ePackages.includes(pkg.dirRel)) e2ePackages.push(pkg.dirRel)
+        for (const cmd of [c.quickTest, c.fullTest]) {
+          if (cmd && !e2eCommands.includes(cmd)) {
+            e2eCommands.push(cmd)
+            detectionEvidence.push({ layer: 'manifest-e2e', kind: 'e2e', file: mFile, line: 1, command: cmd })
+          }
+        }
+        continue
+      }
       if (c.quickTest && !pkgQuick.includes(c.quickTest)) {
         pkgQuick.push(c.quickTest)
         detectionEvidence.push({ layer: 'manifest', kind: 'test', file: mFile, line: 1, command: c.quickTest })
@@ -591,6 +644,11 @@ export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = n
     lint,
     build,
     install: ciCommands.install,
+    e2eTest: e2eCommands.length > 0 ? e2eCommands.join(' && ') : undefined,
+    e2eCommands,
+    e2ePackages,
+    ciVerifyCommands,
+    ciCommandsByKind,
     kinds: discovery.ecosystems,
     packages: discovery.packages,
     ciCommands,

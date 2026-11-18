@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import {
+  isManagedPlanDoc,
   parseDocFrontmatter,
   serializeDocFrontmatter,
   updateDocFrontmatter,
@@ -16,7 +17,7 @@ import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
 import { listTaskLedgers, writeTaskLedger } from './ledger.mjs'
 
-export { parseDocFrontmatter, serializeDocFrontmatter, updateDocFrontmatter }
+export { isManagedPlanDoc, parseDocFrontmatter, serializeDocFrontmatter, updateDocFrontmatter }
 
 export const DOC_STANDARD_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)-(prd|spec|todo)\.md$/
 export const DOC_LEGACY_NAME_RE = /^(\d{6})(?:-issue(\d+))?-([a-z0-9\u4e00-\u9fa5][a-z0-9\u4e00-\u9fa5-]*)\.md$/

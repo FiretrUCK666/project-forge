@@ -7,9 +7,11 @@ import { basename, join } from 'node:path'
 
 import {
   discoverWorkspacePackages,
+  parseYamlWorkspaceGlobs,
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
+import { matchGlob } from '../../kit/skills/lib/static-gates.mjs'
 import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
 import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
@@ -548,8 +550,8 @@ export function detectEcosystem(root, fileRelList = null) {
 const COMMAND_KINDS = [
   // 测试要排在 build 前面：`dune runtest`、`zig build test`、`cargo build --tests`
   // 这类命令里都带 build，先按 build 判就把测试命令整个吞掉了。
-  { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight)\b/i },
-  { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|format|fmt|hlint)\b/i },
+  { key: 'test', re: /\b(?:test|tests|runtest|spec|specs|check|verify|validate|preflight|pytest|unittest|vitest|jest|mocha|rspec|ctest|phpunit)\b/i },
+  { key: 'lint', re: /\b(?:lint|clippy|rubocop|eslint|flake8|pylint|ruff|mypy|pyright|biome|format|fmt|hlint|vet)\b/i },
   { key: 'build', re: /\b(?:build|compile|bundle|package|make|assemble)\b/i },
   { key: 'install', re: /\b(?:install|deps|dependencies|setup|bootstrap|restore)\b/i },
 ]
@@ -562,14 +564,26 @@ export function detectCiCommands(root) {
   const commands = {}
   const sources = {}
   const evidence = []
+  const testCmds = []
   const { steps } = scanNeutralCiSteps(root)
   for (const step of steps) {
-    const kind = classifyCommand(step.cmd)
-    if (!kind || commands[kind] !== undefined) continue
-    commands[kind] = step.cmd
-    sources[kind] = step.file
-    evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: step.cmd })
+    const cleanCmd = String(step.cmd ?? '').trim().replace(/\s+/g, ' ')
+    if (!cleanCmd) continue
+    const kind = classifyCommand(cleanCmd)
+    if (!kind) continue
+    if (kind === 'test') {
+      if (!testCmds.includes(cleanCmd)) {
+        testCmds.push(cleanCmd)
+        sources[kind] ??= step.file
+        evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: cleanCmd })
+      }
+    } else if (commands[kind] === undefined) {
+      commands[kind] = cleanCmd
+      sources[kind] = step.file
+      evidence.push({ layer: 'ci-or-taskfile', kind, file: step.file, line: step.line, command: cleanCmd })
+    }
   }
+  if (testCmds.length > 0) commands.test = testCmds.join(' && ')
   return { commands, sources, evidence }
 }
 
@@ -616,8 +630,81 @@ export function detectTaskEntries(root) {
   return detectTaskEntriesDetailed(root).commands
 }
 
-export function detectWorkspace(root) {
+const WORKSPACE_MANIFEST_NAMES = new Set([
+  'package.json', 'Cargo.toml', 'pyproject.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'composer.json', 'Gemfile',
+])
+
+function collectWorkspaceDeclaredGlobs(root) {
+  const globs = [...parseYamlWorkspaceGlobs(root)]
+  const lerna = readJsonSafe(join(root, 'lerna.json'))
+  if (Array.isArray(lerna?.packages)) {
+    for (const p of lerna.packages) {
+      const clean = String(p ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+      if (clean && !clean.startsWith('!')) globs.push(clean)
+    }
+  }
   const cargo = readTextSafe(join(root, 'Cargo.toml')) ?? ''
+  const wsSec = /\[workspace\]([\s\S]*?)(?:\n\[|$)/.exec(cargo)?.[1] ?? ''
+  const memMatch = /\bmembers\s*=\s*\[([\s\S]*?)\]/.exec(wsSec)
+  if (memMatch) {
+    for (const m of memMatch[1].matchAll(/["']([^"']+)["']/g)) {
+      const clean = m[1].trim().replace(/\\/g, '/').replace(/\/+$/, '')
+      if (clean && !clean.startsWith('!')) globs.push(clean)
+    }
+  }
+  const goWork = readTextSafe(join(root, 'go.work')) ?? ''
+  for (const m of goWork.matchAll(/^\s*use\s+([^\s()]+)\s*$/gm)) {
+    const clean = m[1].trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+    if (clean && clean !== '.') globs.push(clean)
+  }
+  const useBlock = /\buse\s*\(([\s\S]*?)\)/.exec(goWork)?.[1] ?? ''
+  for (const rawLine of useBlock.split('\n')) {
+    const clean = rawLine.replace(/\/\/.*$/, '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+    if (clean && clean !== '.') globs.push(clean)
+  }
+  return [...new Set(globs)]
+}
+
+function listWorkspaceCandidateDirs(root, relFiles = null) {
+  const dirs = new Map()
+  const addDir = (dirRel, hasManifest) => {
+    if (!dirRel) return
+    dirs.set(dirRel, (dirs.get(dirRel) ?? false) || hasManifest)
+  }
+  if (Array.isArray(relFiles) && relFiles.length > 0) {
+    for (const raw of relFiles) {
+      const rel = String(raw ?? '').replace(/\\/g, '/')
+      const slash = rel.lastIndexOf('/')
+      if (slash <= 0) continue
+      const dirRel = rel.slice(0, slash)
+      const base = rel.slice(slash + 1)
+      if (dirRel.split('/').some((seg) => SKIP_DIRS.has(seg) || seg === '.git' || seg === '.worktrees' || seg === 'fixtures')) continue
+      addDir(dirRel, WORKSPACE_MANIFEST_NAMES.has(base))
+      const parts = dirRel.split('/')
+      for (let i = 1; i < parts.length; i += 1) addDir(parts.slice(0, i).join('/'), false)
+    }
+    return dirs
+  }
+  const walk = (absDir, relPrefix, depth) => {
+    if (depth > 5) return
+    let entries = []
+    try { entries = readdirSync(absDir, { withFileTypes: true }) } catch { return }
+    const hasManifest = entries.some((e) => e.isFile() && WORKSPACE_MANIFEST_NAMES.has(e.name))
+    if (relPrefix) addDir(relPrefix, hasManifest)
+    for (const entry of entries) {
+      if (!entry.isDirectory() || isMacMetadataName(entry.name) || entry.isSymbolicLink()) continue
+      if (SKIP_DIRS.has(entry.name) || entry.name === '.git' || entry.name === '.worktrees' || entry.name === 'fixtures') continue
+      const nextRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name
+      walk(join(absDir, entry.name), nextRel, depth + 1)
+    }
+  }
+  walk(root, '', 0)
+  return dirs
+}
+
+export function detectWorkspace(root, relFiles = null) {
+  const cargo = readTextSafe(join(root, 'Cargo.toml')) ?? ''
+  const declaredGlobs = collectWorkspaceDeclaredGlobs(root)
   const declared = existsSync(join(root, 'pnpm-workspace.yaml'))
     || existsSync(join(root, 'lerna.json'))
     || Boolean(readJsonSafe(join(root, 'package.json'))?.workspaces)
@@ -625,21 +712,38 @@ export function detectWorkspace(root) {
     || existsSync(join(root, 'go.work'))
   const packages = []
   if (declared) {
-    for (const dir of ['packages', 'apps', 'crates', 'workspaces']) {
-      const p = join(root, dir)
-      if (!existsSync(p)) continue
-      try {
-        for (const entry of readdirSync(p, { withFileTypes: true })) {
-          if (isMacMetadataName(entry.name)) continue
-          if (entry.isDirectory()) packages.push(`${dir}/${entry.name}`)
+    const patterns = declaredGlobs.length > 0 ? declaredGlobs : ['packages/*', 'apps/*', 'crates/*', 'workspaces/*']
+    const candidateDirs = listWorkspaceCandidateDirs(root, relFiles)
+    for (const [dirRel, hasManifest] of candidateDirs.entries()) {
+      const matched = patterns.some((pat) => {
+        if (pat.endsWith('/**')) {
+          const base = pat.slice(0, -3)
+          return (dirRel === base || dirRel.startsWith(`${base}/`)) && hasManifest
         }
-      } catch { /* 读不到 */ }
+        return matchGlob(dirRel, pat)
+      })
+      if (matched) packages.push(dirRel)
+    }
+    if (packages.length === 0) {
+      for (const dir of ['packages', 'apps', 'crates', 'workspaces']) {
+        const p = join(root, dir)
+        if (!existsSync(p)) continue
+        try {
+          for (const entry of readdirSync(p, { withFileTypes: true })) {
+            if (isMacMetadataName(entry.name)) continue
+            if (entry.isDirectory()) packages.push(`${dir}/${entry.name}`)
+          }
+        } catch { /* 读不到 */ }
+      }
     }
   }
-  return { declared, packages: packages.slice(0, 50) }
+  return { declared, globs: declaredGlobs, packages: [...new Set(packages)].sort().slice(0, 80) }
 }
 
-export function detectArtifacts(root, ecosystem) {
+const CONTAINER_FILE_RE = /^(?:Dockerfile(?:\.[^/]+)?|Containerfile(?:\.[^/]+)?|(?:docker-)?compose(?:\.[^/]+)?\.ya?ml|Earthfile|Tiltfile|\.devcontainer\/devcontainer\.json)$/i
+const AUTOMATION_SCRIPT_RE = /^(?:Makefile|GNUmakefile|justfile|Justfile|Taskfile\.ya?ml|Procfile|scripts\/[^/]+\.(?:sh|bash|zsh|ps1|py|mjs|ts))$/i
+
+export function detectArtifacts(root, ecosystem, relFiles = null) {
   const hooks = []
   const pkg = readJsonSafe(join(root, 'package.json'))
   if (pkg?.scripts) {
@@ -647,10 +751,21 @@ export function detectArtifacts(root, ecosystem) {
       if (typeof pkg.scripts[key] === 'string') hooks.push(`${key}: ${pkg.scripts[key]}`)
     }
   }
+  const filesToInspect = Array.isArray(relFiles) && relFiles.length > 0
+    ? relFiles.map((r) => String(r ?? '').replace(/\\/g, '/'))
+    : [
+        ...cleanReaddir(root),
+        ...cleanReaddir(join(root, 'scripts')).map((n) => `scripts/${n}`),
+        ...(existsSync(join(root, '.devcontainer', 'devcontainer.json')) ? ['.devcontainer/devcontainer.json'] : []),
+      ]
+  const containerFiles = [...new Set(filesToInspect.filter((rel) => CONTAINER_FILE_RE.test(rel) || CONTAINER_FILE_RE.test(basename(rel))))].sort()
+  const automationScripts = [...new Set(filesToInspect.filter((rel) => AUTOMATION_SCRIPT_RE.test(rel)))].sort()
   return {
     heavyDirsPresent: ['dist', 'build', 'out', 'target'].filter((d) => existsSync(join(root, d))),
     installHooks: hooks,
     hasNpmIgnore: existsSync(join(root, '.npmignore')),
+    containerFiles,
+    automationScripts,
     runtimeRequirements: ecosystem.runtimeRequirements,
     publishableManifest: ecosystem.publishable
       ? { ecosystem: ecosystem.kinds[0], file: ecosystem.manifests[0] }

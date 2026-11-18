@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 平台事实、文档通用性与演进
-status: active
+status: done
 created: 2026-11-17
 updated: 2026-11-18
 issue: 50
@@ -9,10 +9,10 @@ pr: null
 branch: feat/platform-and-docs
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: platform-and-docs
 planned_at: 73087a27cb9af3d9cea2988cc3e3e4d3b6154ec9
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 ---
 

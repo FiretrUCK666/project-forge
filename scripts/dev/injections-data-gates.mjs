@@ -126,7 +126,7 @@ export const INJECTIONS_GATES = [
   {
     id: 'I120',
     what: '空仓把「几条判据根本没跑起来」说成「没有会出事的缺口」',
-    file: 'scripts/review.mjs',
+    file: 'scripts/lib/review-helpers.mjs',
     from: '  } else if (result.unscanned.length > 0) {',
     to: '  } else if (false && result.unscanned.length > 0) {',
     expect: '空仓的结论不许说',

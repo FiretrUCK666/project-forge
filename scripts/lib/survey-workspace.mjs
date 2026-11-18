@@ -354,6 +354,8 @@ export async function detectGit(root, opts = {}) {
     trackedFiles: trackedPaths.length,
     head,
     initDefaultBranch: config.get('init.defaultbranch')?.value,
+    hooksPath: config.get('core.hookspath')?.value,
+    hooksPathScope: config.get('core.hookspath')?.scope,
     auth,
     _sshHostMap: effectiveHostMap,
     _hasGit: true,

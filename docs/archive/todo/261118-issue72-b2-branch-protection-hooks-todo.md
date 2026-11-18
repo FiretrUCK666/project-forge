@@ -1,18 +1,18 @@
 ---
 kind: todo
 title: v9 B2：平台分支保护能力（开关 A）与跨宿主 .githooks/pre-push
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 72
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b2-branch-protection-hooks
+owner: impl-72
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: b2-branch-protection-hooks
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 ---
 
@@ -24,9 +24,9 @@ related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 | --- | --- |
 | 当前状态 | `active`（枚举：`draft \| active \| pending \| in_review \| done \| archived \| dropped`） |
 | 建单 / 更新 | `2026-11-18` / `2026-11-18` |
-| 分支 / 基线 | 待启动 Wave 2 认领 @ `0aa2068` |
+| 分支 / 基线 | `feat/b2-branch-protection-hooks` @ `2fe299c` |
 | 任务编号 | `b2-branch-protection-hooks` |
-| 负责人 / 审批 | `plan-stage-b` / `false` |
+| 负责人 / 审批 | `impl-72` / `true` |
 | 关联 Issue / PR / SPEC | `#72` / 未关联 / [B2 SPEC](../specs/261118-issue72-b2-branch-protection-hooks-spec.md) |
 
 - **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与关联 SPEC；启动前确认 Wave 1 (`B1` `#71`) 已合入 `main`。
@@ -43,9 +43,9 @@ related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C4: `HostingProvider.capabilities` 三端对齐新增 `branchProtection` 并在 `survey.mjs` 输出；`github-client.mjs` 新增 `getBranchProtection` 与 `applyBranchProtectionSwitchA` 仅推开关 A（载荷禁含 `required_approving_review_count >= 1`），遇 `403` 返回 `{ ok: false, fallbackToHooks: true }`。
-- [ ] C5: `survey-questions.mjs` 新增 `q.branch-protection` 接入 `render.mjs` 与 `--bootstrap-empty`（`generic-git` 过 `checkPlatformLock`），`## 取舍` 写 `branch-protection`/`no-branch-protection` 后不再重复提问，`equip-ci.mjs --protect-branch` 在非 GitHub 仓安全退出 `0`。
-- [ ] C6: `equip.mjs --with-hooks` 从 `templates/githooks-pre-push.sh` (new) 安装跨宿主 `.githooks/pre-push` 并配局部 `core.hooksPath`（冲突时 `preserve`），无冲突且未写 `no-git-hooks` 时 `S3` 推荐自动带上 `--with-hooks`；拦默认分支直推并打印 `[NEXT STEP]`，放行全零删分支与 `PF_ALLOW_DIRECT_PUSH=1`；`gap-coverage.mjs` 全绿。
+- [x] C4: `HostingProvider.capabilities` 三端对齐新增 `branchProtection` 并在 `survey.mjs` 输出；`github-client.mjs` 新增 `getBranchProtection` 与 `applyBranchProtectionSwitchA` 仅推开关 A（载荷禁含 `required_approving_review_count >= 1`），遇 `403` 返回 `{ ok: false, fallbackToHooks: true }`。
+- [x] C5: `survey-questions.mjs` 新增 `q.branch-protection` 接入 `render.mjs` 与 `--bootstrap-empty`（`generic-git` 过 `checkPlatformLock`），`## 取舍` 写 `branch-protection`/`no-branch-protection` 后不再重复提问，`equip-ci.mjs --protect-branch` 在非 GitHub 仓安全退出 `0`。
+- [x] C6: `equip.mjs --with-hooks` 从 `templates/githooks-pre-push.sh` (new) 安装跨宿主 `.githooks/pre-push` 并配局部 `core.hooksPath`（冲突时 `preserve`），无冲突且未写 `no-git-hooks` 时 `S3` 推荐自动带上 `--with-hooks`；拦默认分支直推并打印 `[NEXT STEP]`，放行全零删分支与 `PF_ALLOW_DIRECT_PUSH=1`；`gap-coverage.mjs` 全绿。
 
 ## 执行步骤
 
@@ -76,18 +76,19 @@ related_spec: ../specs/261118-issue72-b2-branch-protection-hooks-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`待 Wave 2 启动`（依赖 `#71` 先行合入）
+- **当前状态**：`已完成，无遗留`（已落实 `C4–C6`、通用 SSH/HTTP(S) 向导与 REST 瞬断重试并执行最终全量门禁）
 - **待拍板事项**：无
-- **下一步第一件事**：`#71` 合入后运行 `flow.mjs start --task b2-branch-protection-hooks --issue 72 --case 4` 启动隔离工作位。
+- **下一步第一件事**：完成 `finalize --strict-sync`、`verify --mode gate` 与 `submit` 开 PR 交由独立 `review` 子代理审合并。
 
 ## 澄清与补充记录
 
 - （已落实 Q1 定稿：`equip.mjs --with-hooks` 为 opt-in 且遇既有钩子 `preserve`，无冲突且未写 `no-git-hooks` 时在 `S3` 推荐自动带上 `--with-hooks`）
+- （Wave 2 补充定稿：泛化 `q.remote-setup` 与 `scripts/lib/render.mjs` `appendRemoteAndAuthWizard`，支持通用 SSH/HTTP(S) 远端绑定与协议级 SSH Key/PAT 凭据配置并保留 GitHub/`gh` 选项，通过 `checkPlatformLock`；在 `scripts/lib/platform/github-client.mjs` 补充 `429`/`5xx`/TLS 超时指数退避重试，保持 `400/401/403/405/409/413` 不重试与 `redirect: 'manual'`）
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/dev/preflight.mjs` 0 失败（34 读数）；`node scripts/dev/gap-coverage.mjs` 20 条全匹配；`node scripts/dev/fixtures.mjs` 270 通过 / 0 失败（含 C4–C6 及真实 `git init --bare` `git push` 实测）；`node scripts/dev/verify-injections.mjs` 168 条（含 `I22c`/`I120`）全拦截；`node scripts/dev/e2e-zip-harness.mjs` 全通（7 场景、163 条目）；`equip --check`、`compose-agents --check`、`review.mjs .`、`sync-toc --check` 与 `doc-plan.mjs audit .` 全绿。
+- **文档同步检查**：已同步 `references/remote-github.md`、`references/version-control.md`、`.agents/skills/lib/platform.mjs`（`equip.mjs .`）与 `scripts/dev/preflight-contracts.mjs`/`fixtures-doc-rules.mjs`/`injections-data-*.mjs`
+- **遗留问题**：无

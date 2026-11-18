@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-onboarding.mjs —— Stage B 接入与发现层双向行为夹具（C1–C3）。
+ * fixtures-stageb-onboarding.mjs —— Stage B 接入与发现层双向行为夹具（C1–C6）。
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -7,18 +7,27 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import {
+  GENERIC_GIT_PROVIDER,
+  getHostingProvider as getKitHostingProvider,
+} from '../../kit/skills/lib/platform.mjs'
+import {
   discoverCustomSkills,
   discoverKitSkills,
   discoverKitSkillsDetailed,
   parseSkillFrontmatter,
 } from '../../kit/skills/lib/skill-discovery.mjs'
 import { renderAgentsTemplate } from '../compose-agents.mjs'
+import { protectBranch } from '../equip-ci.mjs'
 import { checkEquip, equip } from '../equip.mjs'
 import { renderKitRoutingRows } from '../lib/agents-defaults.mjs'
-import { getKitSkills, getLightweightKitSkills } from '../lib/protocol.mjs'
+import { buildSwitchABranchProtectionPayload, createGitHubClient } from '../lib/platform/github-client.mjs'
+import { GITHUB_PROVIDER } from '../lib/platform/github.mjs'
+import { GENERIC_GIT_PROVIDER as ENGINE_GENERIC_GIT_PROVIDER, getHostingProvider as getEngineHostingProvider } from '../lib/platform/registry.mjs'
+import { FORBIDDEN_PLATFORM_RE, getKitSkills, getLightweightKitSkills } from '../lib/protocol.mjs'
+import { toMarkdown } from '../lib/render.mjs'
 import { detectKit } from '../lib/survey-reentry.mjs'
-import { computeArtifactPlan } from '../survey.mjs'
-import { gitInit, rmTree, runNode, SKILL_ROOT, survey, tmpProject } from './fixtures-helpers.mjs'
+import { computeArtifactPlan, summarizeRemoteCapabilities } from '../survey.mjs'
+import { gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runNode, SKILL_ROOT, survey, tmpProject } from './fixtures-helpers.mjs'
 import { checkKitSuite } from './preflight-suite.mjs'
 
 function walkFiles(dir, pred) {
@@ -517,5 +526,236 @@ export function registerStageBOnboardingCases(cases) {
       rmTree(dir)
       rmTree(lightDir)
     }
+  }])
+
+  // C4 双向：branchProtection 三端对齐、开关 A 禁设审批>=1、403 降级、REST 重试与 redirect:'manual'、--protect-branch 非 GitHub 安全退出 0
+  cases.push(['StageB C4 双向：branchProtection 能力位、开关 A 载荷防线、403 降级、429/5xx/TLS 重试与 equip-ci 退出 0', async () => {
+    const kitGh = getKitHostingProvider('github')
+    const engGh = getEngineHostingProvider('github')
+    if (ENGINE_GENERIC_GIT_PROVIDER.capabilities.branchProtection !== false || GENERIC_GIT_PROVIDER.capabilities.branchProtection !== false
+      || GITHUB_PROVIDER.capabilities.branchProtection !== true || engGh?.capabilities?.branchProtection !== true || kitGh?.capabilities?.branchProtection !== true) {
+      return 'branchProtection 能力位三端对齐失败'
+    }
+    if (summarizeRemoteCapabilities(null, {}).branchProtection !== null || summarizeRemoteCapabilities(null, { providerId: 'none' }).branchProtection !== false) {
+      return 'summarizeRemoteCapabilities 三态 branchProtection 不符预期'
+    }
+
+    // 正反校验 Switch A 载荷与禁 required_approving_review_count >= 1
+    const switchAPayload = buildSwitchABranchProtectionPayload({ requiredChecks: ['check'] })
+    if (switchAPayload.required_pull_request_reviews?.required_approving_review_count !== 0
+      || switchAPayload.enforce_admins !== true || switchAPayload.allow_force_pushes !== false
+      || switchAPayload.allow_deletions !== false || !switchAPayload.required_status_checks?.contexts.includes('check')) {
+      return `开关 A 载荷结构异常：${JSON.stringify(switchAPayload)}`
+    }
+    let rejectedApprove = false
+    try { buildSwitchABranchProtectionPayload({ requiredApprovingReviewCount: 1 }) } catch { rejectedApprove = true }
+    if (!rejectedApprove) return 'buildSwitchABranchProtectionPayload 未拦截 required_approving_review_count >= 1'
+
+    // REST 429/5xx/TLS 超时指数退避重试 + 非重试状态 + redirect:'manual'
+    const sleeps = []
+    let retryAttempt = 0
+    const seenRedirects = []
+    const retryClient = createGitHubClient({
+      channel: 'node-https-token',
+      env: { GH_TOKEN: 'tok-test' },
+      maxRetries: 2,
+      retryBaseDelayMs: 1,
+      sleep: async (ms) => { sleeps.push(ms) },
+      httpRequest: async (req) => {
+        seenRedirects.push(req.redirect)
+        retryAttempt += 1
+        if (retryAttempt === 1) return { status: 429, data: { message: 'rate limit' } }
+        if (retryAttempt === 2) {
+          const tlsErr = new Error('TLS handshake timeout')
+          tlsErr.code = 'ETIMEDOUT'
+          throw tlsErr
+        }
+        if (req.method === 'PUT') return { status: 200, data: { url: 'ok', required_pull_request_reviews: { required_approving_review_count: 0 } } }
+        return { status: 200, data: { protected: true } }
+      },
+    })
+    const okSwitchA = await retryClient.applyBranchProtectionSwitchA('acme/demo', 'main', { requiredChecks: ['check'] })
+    if (!okSwitchA.ok || okSwitchA.payload?.required_pull_request_reviews?.required_approving_review_count !== 0
+      || sleeps.join(',') !== '1,2' || seenRedirects.some((r) => r !== 'manual')) {
+      return `REST 指数退避重试或 redirect:'manual' 异常：ok=${JSON.stringify(okSwitchA)}, sleeps=${sleeps}, redirects=${seenRedirects}`
+    }
+
+    let calls403 = 0
+    const fallbackClient = createGitHubClient({
+      channel: 'node-https-token',
+      env: { GH_TOKEN: 'tok-test' },
+      maxRetries: 2,
+      retryBaseDelayMs: 1,
+      httpRequest: async () => { calls403 += 1; return { status: 403, data: { message: 'Upgrade to GitHub Pro' } } },
+    })
+    const fb403 = await fallbackClient.applyBranchProtectionSwitchA('acme/demo', 'main', { requiredChecks: ['check'] })
+    if (fb403.ok !== false || fb403.fallbackToHooks !== true || fb403.status !== 403 || !fb403.reason || calls403 !== 1) {
+      return `HTTP 403 未降级或不重试失效：calls=${calls403}, res=${JSON.stringify(fb403)}`
+    }
+    const bp403 = await fallbackClient.getBranchProtection('acme/demo', 'main')
+    if (bp403.ok !== false || bp403.fallbackToHooks !== true) return `getBranchProtection 403 未降级：${JSON.stringify(bp403)}`
+
+    for (const noRetryStatus of [302, 400, 401, 403, 405, 409, 413]) {
+      let count = 0
+      const c = createGitHubClient({
+        channel: 'node-https-token',
+        env: { GH_TOKEN: 'tok-test' },
+        maxRetries: 2,
+        retryBaseDelayMs: 1,
+        httpRequest: async (req) => { count += 1; if (req.redirect !== 'manual') throw new Error('missing redirect:manual'); return { status: noRetryStatus, data: { message: `HTTP ${noRetryStatus}` } } },
+      })
+      let threw = false
+      try { await c.rest('GET', '/repos/acme/demo') } catch (e) { threw = e.status === noRetryStatus }
+      if (!threw || count !== 1) return `状态码 ${noRetryStatus} 不应重试（count=${count}, threw=${threw}）`
+    }
+
+    const dirGen = tmpProject({ 'index.js': '1\n' })
+    const dirGh = tmpProject({ '.github/workflows/check.yml': 'name: check\non: [push]\njobs:\n  gate-job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n' })
+    try {
+      gitInit(dirGen, { origin: 'https://git.internal.corp/team/demo.git' })
+      gitInit(dirGh, { origin: 'https://github.com/acme/demo.git' })
+      const fGen = await survey(dirGen)
+      const fGh = await survey(dirGh)
+      if (fGen.git.capabilities?.branchProtection !== false || fGh.git.capabilities?.branchProtection !== true) {
+        return `survey capabilities.branchProtection 异常：gen=${fGen.git.capabilities?.branchProtection}, gh=${fGh.git.capabilities?.branchProtection}`
+      }
+      const cliGen = await runNode('equip-ci.mjs', [dirGen, '--protect-branch', '--json'])
+      if (cliGen.status !== 0) return `非 GitHub --protect-branch 应安全退出 0，实际 ${cliGen.status}：${cliGen.stderr}`
+      const genJson = JSON.parse(cliGen.stdout)
+      if (genJson.status !== 'SKIPPED_UNSUPPORTED' || FORBIDDEN_PLATFORM_RE.test(cliGen.stdout)) {
+        return `非 GitHub --protect-branch 输出违例：${cliGen.stdout}`
+      }
+      const dryGh = await protectBranch(dirGh, { dryRun: true })
+      if (!dryGh.ok || dryGh.status !== 'DRY_RUN' || dryGh.payload?.required_pull_request_reviews?.required_approving_review_count !== 0
+        || !dryGh.payload?.required_status_checks?.contexts.includes('gate-job')) {
+        return `GitHub --protect-branch --dry-run 异常：${JSON.stringify(dryGh)}`
+      }
+      return true
+    } finally { rmTree(dirGen); rmTree(dirGh) }
+  }])
+
+  // C5 双向：q.branch-protection、取舍防重问、SSH/HTTP(S) 通用远端向导（过 checkPlatformLock）与 --bootstrap-empty
+  cases.push(['StageB C5 双向：q.branch-protection/取舍防重问、SSH/HTTP(S) 通用向导与 --bootstrap-empty', async () => {
+    const dirGh = tmpProject({ 'package.json': '{"name":"c5-gh","private":true}\n' })
+    const dirGen = tmpProject({ 'package.json': '{"name":"c5-gen","private":true}\n' })
+    const dirBoot = mkdtempSync(join(tmpdir(), 'pf-c5-boot-'))
+    try {
+      gitInit(dirGh, { origin: 'https://github.com/acme/c5.git' })
+      gitInit(dirGen, { origin: 'https://git.internal.corp/team/c5.git' })
+
+      const fGh = await survey(dirGh)
+      const qGh = fGh.questions.find((q) => q.id === 'q.branch-protection')
+      const mdGh = toMarkdown(fGh)
+      if (!qGh || !qGh.text.includes('equip-ci.mjs') || !qGh.text.includes('--protect-branch') || !mdGh.includes('--protect-branch')) {
+        return `GitHub 仓缺少 q.branch-protection 或 equip-ci 指引：${JSON.stringify(fGh.questions)}`
+      }
+
+      const fGen = await survey(dirGen)
+      const qGen = fGen.questions.find((q) => q.id === 'q.branch-protection')
+      const mdGen = toMarkdown(fGen)
+      if (!qGen || FORBIDDEN_PLATFORM_RE.test(qGen.text) || FORBIDDEN_PLATFORM_RE.test(mdGen) || !mdGen.includes('--with-hooks')) {
+        return `generic-git q.branch-protection/render 违反平台锁或缺少降级指引：${qGen?.text}`
+      }
+
+      writeFileSync(join(dirGh, 'AGENTS.md'), '# AGENTS\n\n## 取舍\n\n```text\n- `branch-protection`: 已启用开关 A\n```\n', 'utf8')
+      writeFileSync(join(dirGen, 'AGENTS.md'), '# AGENTS\n\n## 取舍\n\n```text\n- `no-branch-protection`: 私有暂不开启\n```\n', 'utf8')
+      const fGhDec = await survey(dirGh)
+      const fGenDec = await survey(dirGen)
+      if (fGhDec.questions.some((q) => q.id === 'q.branch-protection') || fGenDec.questions.some((q) => q.id === 'q.branch-protection')) {
+        return 'AGENTS.md 取舍写入 branch-protection/no-branch-protection 后仍重复提问'
+      }
+
+      const bootRes = await runNode('equip.mjs', [dirBoot, '--bootstrap-empty', '--tier', 'lightweight', '--no-backup'])
+      if (bootRes.status !== 0) return `--bootstrap-empty 失败：${bootRes.stderr}`
+      const fBoot = await survey(dirBoot)
+      const qRemote = fBoot.questions.find((q) => q.id === 'q.remote-setup')
+      const mdBoot = toMarkdown(fBoot)
+      if (!qRemote || !/SSH/.test(qRemote.text) || !/HTTP\(S\)/.test(qRemote.text) || FORBIDDEN_PLATFORM_RE.test(qRemote.text) || FORBIDDEN_PLATFORM_RE.test(mdBoot)) {
+        return `q.remote-setup 或 render 未泛化 SSH/HTTP(S) 或违背平台锁：${qRemote?.text}`
+      }
+      if (!mdBoot.includes('SSH Ed25519') || !mdBoot.includes('HTTP(S) + PAT') || !mdBoot.includes('GitHub gh CLI') || !mdBoot.includes('--with-hooks')) {
+        return `--bootstrap-empty 渲染缺少 SSH/HTTPS/GitHub 向导或 --with-hooks：\n${mdBoot}`
+      }
+      return true
+    } finally { rmTree(dirGh); rmTree(dirGen); rmTree(dirBoot) }
+  }])
+
+  // C6 双向：S3 [NEXT STEP] --with-hooks 推荐与冲突 preserve、真实 bare 仓 pre-push 拦直推/放行删分支/PF_ALLOW_DIRECT_PUSH
+  cases.push(['StageB C6 双向：S3 自动 --with-hooks、既有 Hook preserve 与真实 bare 仓 git push 拦截/删分支放行', async () => {
+    const bareDir = mkdtempSync(join(tmpdir(), 'pf-c6-bare-'))
+    const workDir = tmpProject({ 'README.md': '# hook-test\n' })
+    const huskyDir = tmpProject({ '.husky/pre-push': '#!/bin/sh\necho husky\n' })
+    const customHookDir = tmpProject({ '.githooks/pre-push': '#!/bin/sh\n# custom\nexit 0\n' })
+    const lefthookDir = tmpProject({ 'lefthook.yml': 'pre-push:\n  commands:\n    lint:\n      run: echo ok\n' })
+    const noHookDir = tmpProject({ 'AGENTS.md': '# AGENTS\n\n## 取舍\n\n```text\n- `no-git-hooks`: 手动约束\n```\n' })
+    try {
+      gitInitBare(bareDir)
+      gitSync(undefined, ['--git-dir', bareDir, 'symbolic-ref', 'HEAD', 'refs/heads/main'])
+      gitInit(workDir, { branch: 'main', origin: bareDir.replace(/\\/g, '/'), name: 'Dev', email: 'dev@example.com' })
+      gitInit(huskyDir)
+      gitInit(customHookDir)
+      gitInit(lefthookDir)
+      gitInit(noHookDir)
+
+      // 1) 无冲突自动推荐 --with-hooks；冲突或 no-git-hooks 不附带
+      const fClean = await survey(workDir)
+      const mdClean = toMarkdown(fClean)
+      if (fClean.nextStep?.withHooks !== true || !mdClean.includes('[NEXT STEP]') || !mdClean.includes('--with-hooks')) {
+        return `无冲突仓库 S3 [NEXT STEP] 未自动附带 --with-hooks：${JSON.stringify(fClean.nextStep)}`
+      }
+      const fNoHook = await survey(noHookDir)
+      if (fNoHook.nextStep?.withHooks !== false || toMarkdown(fNoHook).includes('--tier lightweight --with-hooks')) {
+        return `no-git-hooks 仓库不应推荐 --with-hooks：${JSON.stringify(fNoHook.nextStep)}`
+      }
+
+      // 2) .husky / custom .githooks/pre-push / lefthook.yml / 自定义 core.hooksPath 一律 preserve
+      const fHusky = await survey(huskyDir)
+      if (!fHusky.git.hooks?.hasConflict || fHusky.nextStep?.withHooks !== false) return `.husky 冲突未识别：${JSON.stringify(fHusky.git.hooks)}`
+      const eqHusky = await runNode('equip.mjs', [huskyDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      if (eqHusky.status !== 0 || JSON.parse(eqHusky.stdout).hooks?.action !== 'preserve' || existsSync(join(huskyDir, '.githooks/pre-push'))) {
+        return `.husky 场景未 preserve：${eqHusky.stdout}`
+      }
+      const eqLefthook = await runNode('equip.mjs', [lefthookDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      if (eqLefthook.status !== 0 || JSON.parse(eqLefthook.stdout).hooks?.action !== 'preserve' || existsSync(join(lefthookDir, '.githooks/pre-push'))) {
+        return `lefthook 场景未 preserve：${eqLefthook.stdout}`
+      }
+      const eqCustom = await runNode('equip.mjs', [customHookDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      if (eqCustom.status !== 0 || JSON.parse(eqCustom.stdout).hooks?.action !== 'preserve' || !readFileSync(join(customHookDir, '.githooks/pre-push'), 'utf8').includes('# custom')) {
+        return `已有非 forge pre-push 被篡改：${eqCustom.stdout}`
+      }
+      gitSync(huskyDir, ['config', '--local', 'core.hooksPath', 'custom-hooks'])
+      rmTree(join(huskyDir, '.husky'))
+      const eqCustomPath = await runNode('equip.mjs', [huskyDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      if (JSON.parse(eqCustomPath.stdout).hooks?.action !== 'preserve' || gitSync(huskyDir, ['config', '--local', '--get', 'core.hooksPath'], { encoding: 'utf8' }).stdout.trim() !== 'custom-hooks') {
+        return `自定义 core.hooksPath 未 preserve：${eqCustomPath.stdout}`
+      }
+
+      // 3) 真实安装 --with-hooks + 真实 bare 仓 git push 测试
+      const eqHook = await runNode('equip.mjs', [workDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      if (eqHook.status !== 0 || JSON.parse(eqHook.stdout).hooks?.action !== 'installed') return `equip --with-hooks 失败：${eqHook.stdout} ${eqHook.stderr}`
+      const hookContent = readFileSync(join(workDir, '.githooks/pre-push'), 'utf8')
+      if (/\r\n/.test(hookContent) || (process.platform !== 'win32' && (statSync(join(workDir, '.githooks/pre-push')).mode & 0o111) === 0)) {
+        return '写入的 .githooks/pre-push 非 LF 或缺少可执行位'
+      }
+      if (gitSync(workDir, ['config', '--local', '--get', 'core.hooksPath'], { encoding: 'utf8' }).stdout.trim() !== '.githooks') {
+        return '局部 core.hooksPath 未设为 .githooks'
+      }
+
+      const blockedPush = gitSync(workDir, ['push', 'origin', 'main'], { encoding: 'utf8' })
+      const blockedMsg = `${blockedPush.stdout ?? ''}\n${blockedPush.stderr ?? ''}`
+      if (blockedPush.status === 0 || !blockedMsg.includes('[NEXT STEP]') || !blockedMsg.includes('flow.mjs start')) {
+        return `直推默认分支未被 .githooks/pre-push 拦截或缺少 [NEXT STEP]：code=${blockedPush.status}, out=${blockedMsg}`
+      }
+      const bypassPush = gitSync(workDir, ['push', 'origin', 'main'], { encoding: 'utf8', env: { ...process.env, PF_ALLOW_DIRECT_PUSH: '1' } })
+      if (bypassPush.status !== 0) return `PF_ALLOW_DIRECT_PUSH=1 未放行：${bypassPush.stderr}`
+
+      gitSync(workDir, ['checkout', '-b', 'feat/c6-ok'])
+      writeFileSync(join(workDir, 'feat.txt'), 'ok\n')
+      gitCommitFast(workDir, 'feat commit')
+      if (gitSync(workDir, ['push', 'origin', 'feat/c6-ok'], { encoding: 'utf8' }).status !== 0) return '特性分支正常推送被误拦'
+      const delPush = gitSync(workDir, ['push', 'origin', '--delete', 'feat/c6-ok'], { encoding: 'utf8' })
+      if (delPush.status !== 0) return `删除远端分支（全零 local_sha）被 pre-push 误拦：${delPush.stderr}`
+      return true
+    } finally { rmTree(bareDir); rmTree(workDir); rmTree(huskyDir); rmTree(customHookDir); rmTree(lefthookDir); rmTree(noHookDir) }
   }])
 }

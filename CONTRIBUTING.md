@@ -45,8 +45,7 @@
 [参与项目](https://docs.github.com/zh/get-started/exploring-projects-on-github/contributing-to-a-project)。
 fork 落后于正本时，在自己 fork 的页面上点 **Sync fork** 更新即可。
 
-**不要往本仓库推主干，也不要打版本标签或发布制品**——那些由维护者执行。主干开了保护时，
-**有写权限也要走拉取请求**。另外请注意别把改动留在自己的 fork 主干上就算了事：那样维护者看不到，**必须开拉取请求**才会被处理。
+**不要往本仓库推主干，也不要打版本标签或发布制品**——那些由维护者执行。主干开了保护（开关 A：`equip-ci.mjs --protect-branch`）时，**有写权限也要走拉取请求**；本地可运行 `node scripts/equip.mjs . --with-hooks` 装配 `.githooks/pre-push` 防误推主干护栏（遇 `.husky/` 或 `lefthook` 会自动 `preserve`）。另外请注意别把改动留在自己的 fork 主干上就算了事：那样维护者看不到，**必须开拉取请求**才会被处理。
 
 **维护者也不会随手发版。** 一次改动合进主干就是终点；打标签、建发布页要单独决定。
 所以你的改动合了之后，不必追问「什么时候发版」——它会在某一次真正发版时出现在说明里。

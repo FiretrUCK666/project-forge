@@ -102,7 +102,7 @@ cases.push(['模板渲染：变量值里的宿主语法不得让渲染失败（�
 }])
 
 cases.push(['算不出来不等于算出来没问题：catch 分支不得返回与「成功」同形的值', async () => {
-  const source = readFileSync(join(SKILL_ROOT, 'scripts', 'review.mjs'), 'utf8')
+  const source = readFileSync(join(SKILL_ROOT, 'scripts', 'lib', 'review-helpers.mjs'), 'utf8')
   const fn = /async function inspectContract\([\s\S]*?\n\}/.exec(source)?.[0] ?? ''
   if (!fn) return '找不到 inspectContract —— 判据搬家了，这条静态断言得跟着搬'
   const catchBlock = /catch[^{]*\{([\s\S]*?)\n  \}/.exec(fn)?.[1] ?? ''

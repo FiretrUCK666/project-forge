@@ -18,17 +18,17 @@
 ### 轨道 B：GitHub API 四级降级
 
 1. **`gh-cli`（首选）**：`gh auth status` 就绪时通过标准 CLI 完成查询、PR、Issue 与 Release 读写。
-2. **`node-https-token`（原生自包含兜底）**：未装 `gh` 时使用 Node 内置 `node:https` 客户端（带 `AbortSignal.timeout`），优先读 `GH_TOKEN` / `GITHUB_TOKEN`，其次在 `WeakMap` 内存中复用 `git credential fill` 凭据——**严禁将令牌写入磁盘、日志、stdout 或返回值**。
+2. **`node-https-token`（原生自包含兜底）**：未装 `gh` 时使用 Node 内置 `node:https` 客户端（带 `AbortSignal.timeout` 与 `redirect: 'manual'` 禁止自动跟随重定向），优先读 `GH_TOKEN` / `GITHUB_TOKEN`，其次在 `WeakMap` 内存中复用 `git credential fill` 凭据——**严禁将令牌写入磁盘、日志、stdout 或返回值**；REST 客户端仅对 HTTP `429`、`5xx` 与网络/TLS 超时做指数退避重试，对 `3xx`、`400`/`401`/`403`/`404`/`405`/`409`/`413`/`422` 立即失败不重试。
 3. **`mcp-delegate`（宿主代理协同）**：仅当明确确认宿主具备 GitHub MCP 能力时才返回委托载荷，由宿主已授权工具代执行。
 4. **`half-duplex` / `offline` / `none`**：仅 Git SSH 可推时生成一键开 PR 比较链接；无可用凭据或离线时写本地任务账本并输出下方认证向导。
 
 ## 二、建仓三路决策、缺凭据向导与身份防锁
 
-1. **无远端三路决策**：① 暂不配远端（在 `.git/` 创建 `pf-local-mode` 走纯本地）；② 绑定已有远端（`git remote add origin <url>`）；③ 新建 GitHub 仓库（**默认 `private` 私有**，按需选 `public`，并确认个人或组织归属；私有转公开前必查全历史凭据）。
-2. **缺少凭据分步向导（三路线任选其一）**：
-   - **`gh CLI` 路线**：安装后依次运行 `gh auth login` -> `gh auth setup-git` -> `gh repo create <owner>/<name> --private --source=. --push`。
-   - **`SSH Ed25519` 路线**：生成密钥 `ssh-keygen -t ed25519 -C "<你的邮箱>"`；macOS 将私钥托管进钥匙串并执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`（在 `~/.ssh/config` 配置 `AddKeysToAgent yes` 与 `UseKeychain yes`）；把 `~/.ssh/id_ed25519.pub` 写入 GitHub Settings -> SSH Keys，运行 `ssh -T git@github.com` 校验后执行 `git remote add origin git@github.com:<owner>/<repo>.git`。
-   - **`HTTPS + Fine-grained PAT + GCM` 路线**：在 GitHub 生成仅勾选目标仓库 `Contents` 与 `Pull requests` 最小权限的 Fine-grained PAT，存入系统凭据管理器（macOS Keychain / Windows GCM），**严禁把 PAT 写入 `.git/config` 远端 URL**。
+1. **无远端三路决策（支持通用 Git SSH/HTTP(S) 与 GitHub）**：① 暂不配远端（在 `.git/` 创建 `pf-local-mode` 走纯本地）；② 绑定已有远端（SSH `git remote add origin git@<host>:<owner>/<repo>.git` 或 HTTP(S) `git remote add origin https://<host>/<owner>/<repo>.git`，严禁把令牌写进 URL）；③ 新建远端仓库（GitHub 可用 `gh repo create <owner>/<repo> --private --source=. --push`，**默认 `private` 私有**，按需选 `public`，并确认个人或组织归属；私有转公开前必查全历史凭据）。
+2. **缺少凭据分步向导（协议级路线任选其一）**：
+   - **`SSH Ed25519` 路线（通用 SSH 远端与 GitHub 均适用）**：生成密钥 `ssh-keygen -t ed25519 -C "<你的邮箱>"`；macOS 将私钥托管进钥匙串并执行 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`（在 `~/.ssh/config` 配置 `AddKeysToAgent yes` 与 `UseKeychain yes`）；把 `~/.ssh/id_ed25519.pub` 写入托管账户 SSH Keys，核对主机指纹后运行 `ssh -T git@<host>` 校验并执行 `git remote add origin git@<host>:<owner>/<repo>.git`。
+   - **`HTTPS + PAT + 系统凭据管理器` 路线（通用 HTTP(S) 远端与 GitHub 均适用）**：在托管平台生成最小权限访问令牌（GitHub 选仅勾选 `Contents` 与 `Pull requests` 的 Fine-grained PAT），存入系统 `credential.helper`（macOS Keychain / Windows GCM / Linux 凭据库），**严禁把明文令牌写入 `.git/config` 远端 URL**。
+   - **`gh CLI` 路线（GitHub 远端可选）**：安装后依次运行 `gh auth login` -> `gh auth setup-git` -> `gh repo create <owner>/<name> --private --source=. --push`。
 3. **身份归属与本地模式标志**：识别 `.git/pf-local-mode`（强制纯本地）、`.git/pf-fork-mode`（Fork 协作）、`.git/pf-standalone-mode`（独立项目维护者）。单人仓勿开启「合并必须他人审批（`require approving reviews >= 1`）」防止自锁。
 
 ## 三、仓库设置、Rulesets 与分支保护
@@ -37,6 +37,12 @@
 - **Rulesets / 分支保护 Required Check 对齐**：规则里登记的状态检查名必须与 `ci-check.yml` 中 `jobs.<jobId>.name`（开启 `matrix` 时带 `(<matrix值>)` 后缀）逐字一致；若使用无矩阵汇总 job（如 `check` `needs: gates`），该 job 必须配置 `if: always()` 并校验 `needs.<job>.result == 'success'`（非 `success` 时 `exit 1`），防止上游失败导致汇总 job 被标成 `skipped` 而被分支保护误放行。
 - **`delete_branch_on_merge` 冲突提示**：若平台开启合并后自动删分支，手工合并收尾的第 7 步 `git ls-remote` 会看到远端分支已消失；存在下游堆叠 PR 时谨慎开启自动删分支。
 - **团队协作可选设施**：按团队人数与协作者规模按需配置 `CODEOWNERS`、Dependabot 与基础 Issue/PR 标签。
+
+### 默认分支保护（开关 A）与本地降级
+
+- **能力位判定**：`HostingProvider.capabilities.branchProtection` 在 `github` 为 `true`、在 `generic-git` 为 `false`。
+- **仅开启开关 A（绝不默认请求他人审批）**：通过 `node scripts/equip-ci.mjs <目录> --protect-branch [--branch <分支>]` 调用 `applyBranchProtectionSwitchA` 配置默认分支保护（禁直推、禁强推、禁删默认分支、要求 PR 与状态检查通过，且 `required_pull_request_reviews.required_approving_review_count` 固定为 `0`——**严禁设 `>= 1`** 以免阻塞单人仓或自动化闭环）。
+- **优雅降级与防重问**：遇 GitHub HTTP `403`/计划权限受限时返回 `{ ok: false, fallbackToHooks: true }` 并引导安装本地 `.githooks/pre-push`（`node scripts/equip.mjs <目录> --with-hooks`）；非 GitHub 仓（`generic-git`）执行 `--protect-branch` 安全退出 `0` 并输出平台无关的手工开关 A Checklist；确认后在 `AGENTS.md`「## 取舍」记入 `branch-protection` 或 `no-branch-protection` 消除重复提问。
 
 ## 四、多账号与凭据边界
 

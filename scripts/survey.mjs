@@ -18,6 +18,7 @@ import { claimsOf } from './lib/claims.mjs'
 import { computeNavigation, toMarkdown } from './lib/render.mjs'
 import * as protocol from './lib/protocol.mjs'
 import {
+  computeS3NextStep,
   decisionValue,
   GAP_RULE_IDS,
   hasDecision,
@@ -27,6 +28,7 @@ import {
   summarizeNeedsHuman,
   textsOf,
 } from './lib/survey-questions.mjs'
+import { detectGitHooksState } from './lib/survey-docs.mjs'
 import { readDecisionMap } from '../kit/skills/lib/profile.mjs'
 import {
   classifyWorkspaceIdentity,
@@ -349,6 +351,41 @@ export function computeArtifactPlan(facts) {
     items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: '暂不需要', action: 'skip', detail: '非可发布项目或暂无远端，不配置发布工作流' })
   }
 
+  // 12. 默认分支保护（开关 A）
+  if (hasDecision(facts, 'no-branch-protection') || hasDecision(facts, 'no-ci')) {
+    items.push({ id: 'branch-protection', artifact: '默认分支保护（开关 A）', status: '已在取舍中豁免', action: 'skip', detail: 'AGENTS.md「取舍」已明确豁免或禁用 CI/分支保护' })
+  } else if (git.role === 'contributor-fork' || !git.remote) {
+    items.push({ id: 'branch-protection', artifact: '默认分支保护（开关 A）', status: !git.remote ? '无远端' : 'Fork 贡献者仓', action: 'skip', detail: '无远端或 Fork 贡献者仓不配置上游默认分支保护' })
+  } else if (hasDecision(facts, 'branch-protection') && git.capabilities?.branchProtection === true) {
+    items.push({ id: 'branch-protection', artifact: '默认分支保护（开关 A）', status: '待应用开关 A', action: 'create', detail: '运行 equip-ci.mjs --protect-branch 应用开关 A（禁直推/强推/删分支、不强制审批；403 时降级 --with-hooks）' })
+  } else {
+    const canProtectApi = git.capabilities?.branchProtection === true
+    items.push({
+      id: 'branch-protection',
+      artifact: '默认分支保护（开关 A）',
+      status: hasDecision(facts, 'branch-protection') ? '已在取舍确认（托管端手工/本地护栏）' : '可选（开关 A 待确认）',
+      action: 'optional',
+      detail: canProtectApi
+        ? '运行 equip-ci.mjs --protect-branch 配置开关 A（严禁设置 required_approving_review_count >= 1），或在取舍写 no-branch-protection'
+        : '当前远端不支持统一分支保护 API：在托管界面按开关 A 原则启用，并配合 equip.mjs --with-hooks',
+    })
+  }
+
+  // 13. 跨宿主本地 Git Hook（.githooks/pre-push，opt-in 且冲突时严格 preserve）
+  const hooksState = git.hooks ?? {}
+  if (hasDecision(facts, 'no-git-hooks')) {
+    items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: '已在取舍中豁免（no-git-hooks）', action: 'skip', detail: 'AGENTS.md「取舍」已明确跳过本地 Git Hook' })
+  } else if (hooksState.installed) {
+    items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: '已就绪（core.hooksPath=.githooks）', action: 'preserve', detail: '跨宿主 pre-push 防直推护栏已配置，保持现状' })
+  } else if (hooksState.hasConflict) {
+    const conflictDesc = (hooksState.conflicts ?? []).map((c) => c.path).filter(Boolean).join('、')
+    items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: `检测到既有 Hook（${conflictDesc}）`, action: 'preserve', detail: '严格 preserve 共存，不覆写既有钩子与 core.hooksPath；请确认已有钩子包含默认分支保护' })
+  } else if (git.available === false || git.isBare === true || git.isRepoRoot === false) {
+    items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: '当前目录不适用', action: 'skip', detail: '仅在可用普通仓库根目录启用本地 Git Hook' })
+  } else {
+    items.push({ id: 'git-hooks', artifact: '.githooks/pre-push', status: '未配置（opt-in，S3 自动推荐）', action: 'optional', detail: '运行 equip.mjs --with-hooks 写入 .githooks/pre-push（+x）并配局部 core.hooksPath' })
+  }
+
   return items
 }
 
@@ -363,15 +400,15 @@ export { GAP_RULE_IDS, QUESTION_RULE_IDS, textsOf }
  * 取值全部来自注册表里平台自己的声明（`PROVIDER.capabilities`），不在这里写死任何平台名；
  * 未注册的托管退化成 `generic-git` 的能力表（全 false），本地仓直接 `none`。
  */
-function summarizeRemoteCapabilities(role, gitFacts) {
+export function summarizeRemoteCapabilities(role, gitFacts) {
   const providerId = role?.providerId ?? gitFacts?.providerId ?? null
-  if (!providerId) return { known: false, providerId: null, issues: null, pullRequests: null, releases: null, checks: null }
+  if (!providerId) return { known: false, providerId: null, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null }
   if (providerId === 'none') {
-    return { known: true, providerId, issues: false, pullRequests: false, releases: false, checks: false }
+    return { known: true, providerId, issues: false, pullRequests: false, releases: false, checks: false, branchProtection: false }
   }
   const provider = getHostingProvider(providerId)
   const caps = provider?.capabilities
-  if (!caps) return { known: false, providerId, issues: null, pullRequests: null, releases: null, checks: null }
+  if (!caps) return { known: false, providerId, issues: null, pullRequests: null, releases: null, checks: null, branchProtection: null }
   return {
     known: true,
     providerId,
@@ -380,6 +417,7 @@ function summarizeRemoteCapabilities(role, gitFacts) {
     releases: caps.releases === true,
     // 「能不能读 CI 检查状态」在平台声明里没有单独位，只有 api 通不通。api 不通一律算不能。
     checks: caps.api === true && caps.pr === true,
+    branchProtection: caps.branchProtection === true,
   }
 }
 
@@ -514,6 +552,9 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
       head: gitFacts.head,
       initDefaultBranch: gitFacts.initDefaultBranch,
       originHeadBranch: gitFacts.originHeadBranch,
+      hooks: gitFacts.isBare !== true
+        ? detectGitHooksState(root, { coreHooksPath: gitFacts.hooksPath ?? null, hooksPathScope: gitFacts.hooksPathScope })
+        : { installed: false, hasConflict: false, conflicts: [] },
       auth: gitFacts.auth,
       declaredRepo: ecosystem.declaredRepo,
       role: role.role,
@@ -591,6 +632,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.artifactPlan = computeArtifactPlan(facts)
   facts.needsHuman = summarizeNeedsHuman(facts)
   facts.navigation = computeNavigation(facts)
+  facts.nextStep = computeS3NextStep(facts)
 
   // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
   // 只看路径清单，不读文件内容——路径已经足够可靠，读内容会让勘察变慢且易误判。

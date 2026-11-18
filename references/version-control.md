@@ -59,3 +59,9 @@
 
 - **按子包独立比对与防毒化隔离**：`dev-flow` 内的 `worktree-deps.mjs` 按子包根目录独立比对锁定文件（`package-lock.json`、`pnpm-lock.yaml`、`yarn.lock`、`poetry.lock`、`uv.lock`、`Cargo.lock`、`go.sum`、`requirements*.txt`、`Pipfile.lock`、`gradle.lockfile` 等）SHA256；当检测到 Monorepo Workspace 本地包软链或 Python 可编辑安装（`.venv` 内 `.pth`/路径指向主仓）时，自动拒绝共享并切换为局部隔离兼给出原因说明，绝不让 worktree 静默跑主仓旧代码。
 - **四态归属核验与清理顺序红线**：清理前通过 `git cherry` 与 `git patch-id` 区分 `merged`（正常可清理）、`squash_or_rebase_merged`（压缩/变基合入）、`no_own_commits`（无独立提交，先问人再清防误删）与 `unmerged`（仍阻断）；挂载与卸载前均校验 `samePath(mainAbs, wtAbs)` 防护，拆卸任何 worktree 之前，**必须先对挂载的 junction/symlink 本身执行 `unlinkSync` 解绑**，校验主仓依赖目录完好并请人确认后再执行 `git worktree remove`，严禁未解绑就直接递归强删 `.worktrees/*`。
+
+## 本地 Git Hooks（.githooks/pre-push）
+
+- **跨宿主 `opt-in` 护栏**：通过 `node scripts/equip.mjs <目录> --with-hooks` 将 `templates/githooks-pre-push.sh` 复制到 `.githooks/pre-push`（设可执行权限 `+x`），并写入仓库局部 `git config --local core.hooksPath .githooks`；**绝不修改任何 AI 宿主私有配置目录或全局 Git 配置**。
+- **既有 Hook 冲突与 `S3` 自动推荐**：若仓库已存在 `.husky/`、`lefthook*` / `.lefthook*`、自定义非 `.githooks` 的 `core.hooksPath` 或非本工具创建的 `.githooks/pre-push`，`equip.mjs --with-hooks` 一律 `preserve` 并输出安全共存指引，不强行覆盖；若无 Hook 冲突且 `AGENTS.md`「## 取舍」未写 `no-git-hooks`，`survey` 与 `render` 会在 `S3` `[NEXT STEP]` 自动附带 `--with-hooks`。
+- **推送拦截与放行语义**：脚本按 POSIX `sh` 从标准输入读取 `<local_ref> <local_sha> <remote_ref> <remote_sha>`——直推默认分支时 `exit 1` 并打印 `[NEXT STEP]` 指引 `flow.mjs start` / `submit`；**删远端分支（全零 `local_sha`，兼容收尾第 7 步 `git push origin --delete`）或设置 `PF_ALLOW_DIRECT_PUSH=1` 时放行退出 `0`**。

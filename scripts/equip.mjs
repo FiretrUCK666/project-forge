@@ -18,6 +18,7 @@ import { detectSkillKind } from './lib/survey-ecosystem.mjs'
 import {
   filterKitByTier,
   generateInitialBootstrappedAgents,
+  installGitHooks,
   normalizeCustomizedFiles,
   normalizedSha256,
   normalizePrevFiles,
@@ -590,6 +591,7 @@ async function main(argv) {
   let dryRun = false
   let noBackup = false
   let doBootstrap = false
+  let withHooks = false
   let stack
   let lang
   let name
@@ -618,6 +620,7 @@ async function main(argv) {
         '  --dry-run                  仅打印将执行的操作，不写文件',
         '  --no-backup                写入前不自动创建增量保护快照',
         '  --bootstrap-empty          为空目录（或仅含 README/LICENSE/.github/.agents）生成通用基线、TDD 与自洽 AGENTS.md',
+        '  --with-hooks               安装跨宿主 .githooks/pre-push 防直推护栏并配局部 core.hooksPath（遇既有钩子 preserve）',
         '  --stack <stack>            基线栈提示（默认 universal；--lang 为兼容别名）',
         '  --name <name>              项目名称（默认取目录名）',
         '  --description <text>       项目一句话简介（仅 --bootstrap-empty 时生效）',
@@ -629,6 +632,7 @@ async function main(argv) {
     else if (arg === '--dry-run') dryRun = true
     else if (arg === '--no-backup') noBackup = true
     else if (arg === '--bootstrap-empty') doBootstrap = true
+    else if (arg === '--with-hooks') withHooks = true
     else if (arg === '--tier') tier = argv[++i]
     else if (arg.startsWith('--tier=')) tier = arg.slice('--tier='.length)
     else if (arg === '--stack') stack = argv[++i]
@@ -688,6 +692,10 @@ async function main(argv) {
     }
 
     const equipResult = equip(target, { kitDir, tier, dryRun, noBackup, restore, adoptCustom })
+    let hooksResult
+    if (withHooks) {
+      hooksResult = installGitHooks(target, { dryRun })
+    }
     let agentsResult
     if (doBootstrap && !dryRun) {
       agentsResult = await generateInitialBootstrappedAgents(target, { stack: stack ?? lang ?? 'universal', name, noBackup })
@@ -695,6 +703,7 @@ async function main(argv) {
     process.stdout.write(`${JSON.stringify({
       ...(bootstrapResult ? { bootstrap: bootstrapResult } : {}),
       equip: equipResult,
+      ...(hooksResult ? { hooks: hooksResult } : {}),
       ...(agentsResult ? { agents: agentsResult } : {}),
     }, null, 2)}\n`)
     return 0

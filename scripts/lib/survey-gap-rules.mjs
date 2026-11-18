@@ -137,6 +137,19 @@ export const GAP_RULES = [
     review: 'agents.oversize',
   },
   {
+    id: 'git.hooks',
+    when: (f) => f.git.available !== false
+      && f.git.isBare !== true
+      && f.git.present === true
+      && f.git.isRepoRoot !== false
+      && f.git.hooks?.installed !== true
+      && f.git.hooks?.hasConflict !== true
+      && !(f.decisions && 'no-git-hooks' in f.decisions),
+    text: '尚未启用跨宿主本地 .githooks/pre-push 防直推护栏（opt-in，运行 `equip.mjs --with-hooks` 安装，或在「取舍」写 `no-git-hooks`）',
+    machineLocal: true,
+    review: 'git.hooks',
+  },
+  {
     id: 'kit.drifted',
     when: (f) => f.kit?.manifestExists === true
       && (f.kit?.corrupted === true || (f.kit?.missingFiles?.length ?? 0) > 0),

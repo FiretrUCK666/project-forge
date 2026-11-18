@@ -2,6 +2,7 @@
  * survey-docs.mjs —— 文档清单、工作流配置、设计体系与项目约定探测。
  */
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -222,16 +223,129 @@ export function detectDocs(root) {
 
 const WORK_DIR_CANDIDATES = ['docs/todo', 'docs/work', 'docs/tasks', 'todo', 'work']
 
+export const FORGE_HOOK_MARKER = '# project-forge: githooks-pre-push'
+
+const LEFTHOOK_FILES = [
+  'lefthook.yml',
+  'lefthook.yaml',
+  '.lefthook.yml',
+  '.lefthook.yaml',
+  'lefthook-local.yml',
+  'lefthook-local.yaml',
+]
+
+function normalizeHooksPath(raw) {
+  const s = String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  return s.replace(/^\.\//, '')
+}
+
+function readGitHooksPathSync(root) {
+  if (!existsSync(join(root, '.git'))) return { value: undefined, scope: undefined }
+  for (const args of [['config', '--local', '--get', 'core.hooksPath'], ['config', '--get', 'core.hooksPath']]) {
+    const res = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true })
+    if (res.status === 0 && res.stdout && res.stdout.trim()) {
+      return {
+        value: res.stdout.trim(),
+        scope: args.includes('--local') ? 'local' : 'global',
+      }
+    }
+  }
+  return { value: undefined, scope: undefined }
+}
+
+/**
+ * 只读探测本地 Git Hook 管理状况（`.husky/`、`lefthook*`、`core.hooksPath` 与 `.githooks/pre-push`）。
+ */
+export function detectGitHooksState(root, { coreHooksPath, hooksPathScope } = {}) {
+  let rawHooksPath = coreHooksPath
+  let scope = hooksPathScope
+  if (rawHooksPath === undefined) {
+    const probed = readGitHooksPathSync(root)
+    rawHooksPath = probed.value
+    scope = probed.scope
+  }
+  const normalizedHooksPath = rawHooksPath ? normalizeHooksPath(rawHooksPath) : ''
+  const conflicts = []
+
+  if (existsSync(join(root, '.husky'))) {
+    conflicts.push({
+      kind: 'husky',
+      path: '.husky/',
+      detail: '仓库已存在 .husky/ 钩子目录，preserve 不覆盖，请将默认分支推送护栏并入既有钩子',
+    })
+  }
+  for (const rel of LEFTHOOK_FILES) {
+    if (existsSync(join(root, rel))) {
+      conflicts.push({
+        kind: 'lefthook',
+        path: rel,
+        detail: `仓库已存在 ${rel}，preserve 不接管 core.hooksPath，请按需将保护脚本接入现有配置`,
+      })
+    }
+  }
+  if (existsSync(join(root, '.lefthook'))) {
+    conflicts.push({
+      kind: 'lefthook',
+      path: '.lefthook/',
+      detail: '仓库已存在 .lefthook/ 目录，preserve 不接管 core.hooksPath，请保持原有钩子管理入口',
+    })
+  }
+  if (normalizedHooksPath && normalizedHooksPath !== '.githooks') {
+    conflicts.push({
+      kind: 'custom-hooks-path',
+      path: rawHooksPath,
+      detail: `仓库已配置自定义 core.hooksPath=${rawHooksPath}，preserve 不覆盖`,
+    })
+  }
+
+  const prePushRel = '.githooks/pre-push'
+  const prePushAbs = join(root, '.githooks', 'pre-push')
+  const hasPrePush = existsSync(prePushAbs)
+  let managedPrePush = false
+  let prePushExecutable = false
+  if (hasPrePush) {
+    const content = readTextSafe(prePushAbs) ?? ''
+    managedPrePush = content.includes(FORGE_HOOK_MARKER)
+    if (!managedPrePush) {
+      conflicts.push({
+        kind: 'custom-githooks-pre-push',
+        path: prePushRel,
+        detail: '仓库已存在非本工具创建的 .githooks/pre-push，preserve 不覆写',
+      })
+    }
+    try {
+      const mode = statSync(prePushAbs).mode
+      prePushExecutable = process.platform === 'win32'
+        ? managedPrePush || /^#!\/bin\/sh/.test(content)
+        : (mode & 0o111) !== 0
+    } catch {
+      prePushExecutable = false
+    }
+  }
+
+  return {
+    coreHooksPath: normalizedHooksPath || undefined,
+    coreHooksPathScope: scope || undefined,
+    hasGithooksDir: existsSync(join(root, '.githooks')),
+    hasPrePush,
+    managedPrePush,
+    prePushExecutable,
+    installed: Boolean(hasPrePush && managedPrePush && normalizedHooksPath === '.githooks'),
+    conflicts,
+    hasConflict: conflicts.length > 0,
+  }
+}
+
 function detectWorkflowTooling(root) {
   const found = []
   const singles = [
     'release-please-config.json', '.releaserc', '.releaserc.json', '.releaserc.yml',
     '.goreleaser.yml', '.goreleaser.yaml', 'goreleaser.yml', 'goreleaser.yaml',
     'commitlint.config.js', 'commitlint.config.cjs', 'commitlint.config.mjs',
-    'lefthook.yml', 'lefthook.yaml',
+    'lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml',
   ]
   for (const rel of singles) if (existsSync(join(root, rel))) found.push(rel)
-  for (const dir of ['.changeset', '.husky']) {
+  for (const dir of ['.changeset', '.husky', '.lefthook']) {
     if (existsSync(join(root, dir))) found.push(`${dir}/`)
   }
   return found

@@ -41,7 +41,94 @@ function isPermissionError(err) {
   if (!err) return false
   if (err.status === 403 || err.status === 401) return true
   const msg = String(err.message ?? '')
-  return /403|forbidden|resource not accessible|must have (?:triage|write|admin) access|permission/i.test(msg)
+  return /403|forbidden|resource not accessible|must have (?:triage|write|admin) access|permission|upgrade to github pro/i.test(msg)
+}
+
+const NON_RETRYABLE_HTTP_STATUS = new Set([400, 401, 403, 404, 405, 409, 413, 422])
+const RETRYABLE_NET_CODES = new Set([
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EPIPE',
+  'ESOCKETTIMEDOUT',
+  'ECONNABORTED',
+])
+
+function defaultSleep(ms) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()
+}
+
+function isRetryableRestError(err) {
+  if (!err) return false
+  const status = Number(err.status ?? 0)
+  if (status >= 300 && status < 400) return false
+  if (status === 429 || (status >= 500 && status < 600)) return true
+  if (NON_RETRYABLE_HTTP_STATUS.has(status) || (status >= 400 && status < 500)) return false
+  const code = String(err.code ?? '')
+  if (RETRYABLE_NET_CODES.has(code) || /^ERR_TLS_/i.test(code)) return true
+  if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.timedOut === true) return true
+  const msg = String(err.message ?? '')
+  return status === 0 && /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ERR_TLS_|TLS|timed?\s*out|socket hang up|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable|504 Gateway/i.test(msg)
+}
+
+function extractGhHttpStatus(stderr, parsed) {
+  const raw = Number(parsed?.status)
+  if (Number.isFinite(raw) && raw >= 100 && raw <= 599) return raw
+  const text = String(stderr ?? '')
+  const m = text.match(/(?:HTTP|status(?:\s+code)?)\s*[:=]?\s*(\d{3})\b/i)
+  if (m) {
+    const code = Number(m[1])
+    if (code >= 100 && code <= 599) return code
+  }
+  if (/403 Forbidden/i.test(text)) return 403
+  if (/404 Not Found/i.test(text)) return 404
+  if (/429 Too Many Requests/i.test(text)) return 429
+  if (/502 Bad Gateway/i.test(text)) return 502
+  if (/503 Service Unavailable/i.test(text)) return 503
+  if (/504 Gateway/i.test(text)) return 504
+  return 0
+}
+
+/**
+ * 构造仅开启「开关 A」（禁直推/强推/删分支 + 要求 PR 与 Checks）的分支保护载荷。
+ *
+ * 严格禁止设置 `required_approving_review_count >= 1`，避免单人仓与自动化合流死锁。
+ */
+export function buildSwitchABranchProtectionPayload({
+  requiredChecks = [],
+  strictStatusChecks = true,
+  enforceAdmins = true,
+  requiredApprovingReviewCount = 0,
+} = {}) {
+  const reviewCount = Number(requiredApprovingReviewCount ?? 0)
+  if (!Number.isFinite(reviewCount) || reviewCount < 0 || reviewCount >= 1) {
+    throw new Error('开关 A 分支保护禁止设置 required_approving_review_count >= 1（仅阻断直推/强推/删分支并接入 PR 与 Checks）')
+  }
+  const contexts = Array.isArray(requiredChecks)
+    ? [...new Set(requiredChecks.map((item) => String(item ?? '').trim()).filter(Boolean))]
+    : []
+  return {
+    required_status_checks: {
+      strict: Boolean(strictStatusChecks),
+      contexts,
+    },
+    enforce_admins: Boolean(enforceAdmins),
+    required_pull_request_reviews: {
+      dismiss_stale_reviews: false,
+      require_code_owner_reviews: false,
+      required_approving_review_count: 0,
+    },
+    restrictions: null,
+    required_linear_history: false,
+    allow_force_pushes: false,
+    allow_deletions: false,
+    block_creations: false,
+    required_conversation_resolution: false,
+    lock_branch: false,
+    allow_fork_syncing: false,
+  }
 }
 
 function withTempUtf8File(content, fn) {
@@ -66,6 +153,9 @@ export function createGitHubClient({
   channel,
   env = process.env,
   timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  maxRetries = 2,
+  retryBaseDelayMs = 80,
+  sleep = defaultSleep,
   runner = defaultRunCommand,
   httpRequest = defaultHttpsRequest,
 } = {}) {
@@ -87,7 +177,7 @@ export function createGitHubClient({
     else resolvedChannel = token ? 'node-https-token' : 'gh-cli'
   }
 
-  async function rest(method, path, { query, body, headers = {} } = {}) {
+  async function restOnce(method, path, { query, body, headers = {} } = {}) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`
     const urlObj = new URL(`https://api.github.com${cleanPath}`)
     if (query && typeof query === 'object') {
@@ -112,7 +202,7 @@ export function createGitHubClient({
         if (res.code !== 0) {
           let parsed
           try { parsed = res.stdout ? JSON.parse(res.stdout) : undefined } catch {}
-          const status = parsed?.status ? Number(parsed.status) : (/HTTP 403|403 Forbidden/i.test(res.stderr) ? 403 : (/HTTP 404|404 Not Found/i.test(res.stderr) ? 404 : 0))
+          const status = extractGhHttpStatus(res.stderr, parsed)
           throw makeHttpError(status, res.stderr.trim() || parsed?.message || 'gh api 调用失败', parsed)
         }
         if (!res.stdout.trim()) return undefined
@@ -136,11 +226,31 @@ export function createGitHubClient({
       },
       body,
       timeoutMs: Math.max(timeoutMs, 10000),
+      redirect: 'manual',
     })
+    if (resp.status >= 300 && resp.status < 400) {
+      throw makeHttpError(resp.status, `GitHub API 返回重定向 HTTP ${resp.status}（禁止自动跟随携带凭据）`, resp.data)
+    }
     if (resp.status >= 400) {
       throw makeHttpError(resp.status, resp.data?.message || `GitHub API 返回 HTTP ${resp.status}`, resp.data)
     }
     return resp.data !== undefined ? resp.data : resp.text
+  }
+
+  async function rest(method, path, opts = {}) {
+    const retries = Math.max(0, Number(maxRetries ?? 2))
+    let lastError
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await restOnce(method, path, opts)
+      } catch (err) {
+        lastError = err
+        if (attempt >= retries || !isRetryableRestError(err)) throw err
+        const delayMs = Math.max(0, Number(retryBaseDelayMs ?? 80)) * (2 ** attempt)
+        if (delayMs > 0) await sleep(delayMs)
+      }
+    }
+    throw lastError
   }
 
   async function graphql(query, variables = {}) {
@@ -369,6 +479,91 @@ export function createGitHubClient({
     }
   }
 
+  async function getBranchProtection(repo, branch) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    const branchName = String(branch ?? '').trim()
+    if (!branchName) throw new Error('分支名不能为空')
+    try {
+      const protection = await rest(
+        'GET',
+        `/repos/${norm}/branches/${encodeURIComponent(branchName)}/protection`,
+      )
+      return { ok: true, protected: true, repo: norm, branch: branchName, protection }
+    } catch (err) {
+      if (err?.status === 404) {
+        return { ok: true, protected: false, status: 404, repo: norm, branch: branchName, protection: null }
+      }
+      if (isPermissionError(err)) {
+        return {
+          ok: false,
+          protected: null,
+          fallbackToHooks: true,
+          status: err?.status || 403,
+          reason: err?.message || 'HTTP 403/权限不足，无法读取分支保护设置',
+          repo: norm,
+          branch: branchName,
+        }
+      }
+      throw err
+    }
+  }
+
+  async function applyBranchProtectionSwitchA(
+    repo,
+    branch,
+    {
+      requiredChecks = [],
+      strictStatusChecks = true,
+      enforceAdmins = true,
+      requiredApprovingReviewCount = 0,
+    } = {},
+  ) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    const branchName = String(branch ?? '').trim()
+    if (!branchName) throw new Error('分支名不能为空')
+
+    const payload = buildSwitchABranchProtectionPayload({
+      requiredChecks,
+      strictStatusChecks,
+      enforceAdmins,
+      requiredApprovingReviewCount,
+    })
+    if ((payload.required_pull_request_reviews?.required_approving_review_count ?? 0) >= 1) {
+      throw new Error('开关 A 载荷校验失败：禁止设置 required_approving_review_count >= 1')
+    }
+
+    try {
+      const protection = await rest(
+        'PUT',
+        `/repos/${norm}/branches/${encodeURIComponent(branchName)}/protection`,
+        { body: payload },
+      )
+      return {
+        ok: true,
+        repo: norm,
+        branch: branchName,
+        mode: 'switch-a',
+        payload,
+        protection,
+      }
+    } catch (err) {
+      if (isPermissionError(err)) {
+        return {
+          ok: false,
+          fallbackToHooks: true,
+          status: err?.status || 403,
+          reason: err?.message || 'HTTP 403 或权限/计划受限，无法写入分支保护，请降级改用本地 .githooks/pre-push',
+          repo: norm,
+          branch: branchName,
+          payload,
+        }
+      }
+      throw err
+    }
+  }
+
   return {
     channel: resolvedChannel,
     rest,
@@ -384,5 +579,7 @@ export function createGitHubClient({
     ensureFork,
     postComment,
     addLabels,
+    getBranchProtection,
+    applyBranchProtectionSwitchA,
   }
 }

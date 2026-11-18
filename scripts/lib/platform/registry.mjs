@@ -28,6 +28,7 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   issues: false,
   releases: false,
   labels: false,
+  branchProtection: false,
 })
 
 /** 将通用 Git 远端地址（含多级群组路径或本地 file:// 路径）归一为仓库标识。 */

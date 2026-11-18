@@ -15,9 +15,19 @@ import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { claimsOf } from './lib/claims.mjs'
-import { GAP_RULES } from './lib/survey-gap-rules.mjs'
 import { computeNavigation, toMarkdown } from './lib/render.mjs'
 import * as protocol from './lib/protocol.mjs'
+import {
+  decisionValue,
+  GAP_RULE_IDS,
+  hasDecision,
+  judgeGaps,
+  judgeMaturity,
+  QUESTION_RULE_IDS,
+  summarizeNeedsHuman,
+  textsOf,
+} from './lib/survey-questions.mjs'
+import { readDecisionMap } from '../kit/skills/lib/profile.mjs'
 import {
   classifyWorkspaceIdentity,
   detectGitModeMarkers,
@@ -39,6 +49,7 @@ import {
   finalizeWalkWorkspace,
   scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
+import { resolveDocRequirements } from '../kit/skills/lib/doc-requirements.mjs'
 import { detectTddShapes, tddDropSections } from '../kit/skills/lib/tdd-shape.mjs'
 import { CODE_EXT_RE } from '../kit/skills/lib/static-gates.mjs'
 import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../kit/skills/lib/symbol-index.mjs'
@@ -182,7 +193,9 @@ export function computeArtifactPlan(facts) {
   const customizedNote = (kit.customizedFiles?.length ?? 0) > 0
     ? `（含 ${kit.customizedFiles.length} 个已豁免定制文件）`
     : ''
-  if (!kit.manifestExists) {
+  if (!kit.manifestExists && hasDecision(facts, 'no-kit')) {
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已在取舍中豁免（no-kit）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不装配本地技能套件' })
+  } else if (!kit.manifestExists) {
     items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `未装配（推荐 ${recommendedTier} 档）`, action: 'equip', detail: `运行 equip.mjs --tier ${recommendedTier} 写入受管技能并生成 .pf-manifest.json（v2）${customNote}` })
   } else if (kit.corrupted || kit.drifted || kit.versionMismatch || (kit.missingFiles?.length ?? 0) > 0) {
     items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `已装配 ${kit.tier ?? 'full'} 档（需无损升级/修复）`, action: 'upgrade', detail: `运行 equip.mjs 三态升级：未改文件升新、用户定制与删除墓碑严格保留、退役文件自净化${customNote}` })
@@ -203,6 +216,8 @@ export function computeArtifactPlan(facts) {
       action: 'preserve',
       detail: `沿用现有设计文档（${existingDesign.slice(0, 3).join('、')}），可在 AGENTS.md「取舍」登记权威入口，避免双轨重复生成 docs/TDD.md`,
     })
+  } else if (!docs.tdd && hasDecision(facts, 'no-tdd')) {
+    items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '已在取舍中豁免（no-tdd）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不单独建 docs/TDD.md' })
   } else if (!docs.tdd && (isEmpty || (scale.codeFiles ?? 0) === 0)) {
     items.push({ id: 'docs-tdd', artifact: 'docs/TDD.md', status: '暂无源码（待起步后生成）', action: 'skip', detail: '先选技术栈生成最小源码或使用 --bootstrap-empty 一并落盘 docs/TDD.md' })
   } else if (!docs.tdd) {
@@ -240,6 +255,8 @@ export function computeArtifactPlan(facts) {
   // 7. CONTRIBUTING.md
   if (docs.contributing) {
     items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: `已存在（${docs.contributing}）`, action: 'preserve', detail: '保留既有贡献约定，不强改文风与结构' })
+  } else if (hasDecision(facts, 'no-contributing')) {
+    items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: '已在取舍中豁免（no-contributing）', action: 'skip', detail: 'AGENTS.md「取舍」已明确跳过贡献指南' })
   } else if (git.role === 'maintainer' && Boolean(git.remote)) {
     items.push({ id: 'contributing', artifact: 'CONTRIBUTING.md', status: '缺失（可选）', action: 'optional', detail: '仅在计划接收外部贡献时新建；单人自用仓库可跳过' })
   } else {
@@ -247,14 +264,24 @@ export function computeArtifactPlan(facts) {
   }
 
   // 8. LICENSE
-  items.push(docs.license
-    ? { id: 'license', artifact: 'LICENSE', status: `已存在（${docs.license}）`, action: 'preserve', detail: '保留既有授权文本（含双许可等自定义声明，绝不覆盖）' }
-    : { id: 'license', artifact: 'LICENSE', status: ecosystem.publishable ? '缺失（可发布包需立即定夺）' : '缺失', action: 'ask-human', detail: '授权必须由人拍板：选定具体开源协议或明确不对外授权' })
+  if (docs.license) {
+    items.push({ id: 'license', artifact: 'LICENSE', status: `已存在（${docs.license}）`, action: 'preserve', detail: '保留既有授权文本（含双许可等自定义声明，绝不覆盖）' })
+  } else if (hasDecision(facts, 'license')) {
+    const licChoice = String(decisionValue(facts, 'license') ?? '').trim()
+    const skipLicense = /^(?:暂不|暂未|不放|不公开|不对外|私有|不授权|保留版权|proprietary|无|none|skip|n\/a|不适用)/i.test(licChoice)
+    items.push(skipLicense
+      ? { id: 'license', artifact: 'LICENSE', status: `已在取舍中定为不公开授权（${licChoice}）`, action: 'skip', detail: 'AGENTS.md「取舍」已明确暂不对外授权，跳过 LICENSE 生成' }
+      : { id: 'license', artifact: 'LICENSE', status: `已在取舍中选定（${licChoice}）`, action: 'create', detail: `按 AGENTS.md「取舍」选定的 ${licChoice} 协议补齐 LICENSE 文件` })
+  } else {
+    items.push({ id: 'license', artifact: 'LICENSE', status: ecosystem.publishable ? '缺失（可发布包需立即定夺）' : '缺失', action: 'ask-human', detail: '授权必须由人拍板：选定具体开源协议或明确不对外授权' })
+  }
 
   // 9. RELEASING.md 与发版说明
   const hasReleaseEvidence = Boolean(ecosystem.publishable || (git.tags?.length ?? 0) > 0 || docs.workflowFacts?.hasRelease)
   if (docs.releasing) {
     items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: `已存在（${docs.releasing}）`, action: 'preserve', detail: '保留现有发版流程与约定（目录或 CHANGELOG 模式），仅在命令失真时最小微调' })
+  } else if (hasDecision(facts, 'no-release-spec')) {
+    items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: '已在取舍中豁免（no-release-spec）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不建发版文档' })
   } else if (hasReleaseEvidence) {
     items.push({ id: 'releasing', artifact: 'RELEASING.md / 发版说明', status: '缺失', action: 'create', detail: '项目具备可发布形态、已有版本标签或发布工作流，按实测命令补充发版说明' })
   } else if (docs.changelog) {
@@ -272,6 +299,8 @@ export function computeArtifactPlan(facts) {
     items.push(wf.usesPullRequestTarget && wf.checkoutsPrHead
       ? { id: 'ci-check', artifact: '.github/workflows/check.yml', status: '已有检查流（含高危 pull_request_target）', action: 'calibrate', detail: '保留既有流水线结构，立即解除 pull_request_target 检出外部提案代码的高危组合' }
       : { id: 'ci-check', artifact: '.github/workflows/check.yml', status: `已存在（${(wf.checkWorkflows?.length ? wf.checkWorkflows : docs.workflows ?? []).join('、')}）`, action: 'preserve', detail: '保留现有 CI 检查工作流，仅在命令失真时最小校准' })
+  } else if (hasDecision(facts, 'no-ci')) {
+    items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: '已在取舍中豁免（no-ci）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不配置 CI 检查工作流' })
   } else if (git.role === 'contributor-fork') {
     items.push({ id: 'ci-check', artifact: '.github/workflows/check.yml', status: 'Fork 贡献者仓', action: 'skip', detail: 'Fork 贡献者不擅自改动或新增上游 CI 工作流' })
   } else if (Boolean(git.remote) && !onGithub) {
@@ -284,6 +313,7 @@ export function computeArtifactPlan(facts) {
 
   // 11. CI 发布工作流（ci-release，支持 5 选 1 发版策略）
   const releaseTooling = (conventions.workflowTooling ?? []).filter((t) => /changeset|release-please|releaserc|goreleaser/i.test(t))
+  const canReleasePlatform = git.capabilities ? (git.capabilities.known === true && git.capabilities.releases === true) : onGithub
   if (wf.hasRelease || releaseTooling.length > 0) {
     const wfNames = wf.releaseWorkflows?.length ? wf.releaseWorkflows : releaseTooling
     items.push({
@@ -293,10 +323,20 @@ export function computeArtifactPlan(facts) {
       action: 'preserve',
       detail: '沿用既有发布工作流或工具链（strategy=2），并在 AGENTS.md 对齐其实际发版步骤',
     })
+  } else if (hasDecision(facts, 'no-auto-release') || hasDecision(facts, 'no-release')) {
+    items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: '已在取舍中豁免自动发版', action: 'skip', detail: 'AGENTS.md「取舍」已明确不启用自动发布工作流' })
+  } else if (hasDecision(facts, 'release-strategy')) {
+    const rsChoice = String(decisionValue(facts, 'release-strategy') ?? '').trim()
+    const manualOrSkip = /^(?:1\b|2\b|3\b|不配置|沿用|纯手动|手动|none|manual|skip|不适用)/i.test(rsChoice)
+    if (manualOrSkip || !onGithub || !canReleasePlatform) {
+      items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: `已在取舍中定为 ${rsChoice}`, action: 'skip', detail: '按 AGENTS.md「取舍」跳过 GitHub Actions 自动发布流生成' })
+    } else {
+      items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: `已在取舍中选定（${rsChoice}）`, action: 'create', detail: '按 AGENTS.md「取舍」选定的发版策略生成 .github/workflows/release.yml' })
+    }
   } else if (git.role === 'contributor-fork') {
     items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: 'Fork 贡献者仓', action: 'skip', detail: 'Fork 贡献者不配置发布工作流' })
-  } else if (Boolean(git.remote) && !onGithub) {
-    items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: '通用 Git 远端（generic-git）', action: 'skip', detail: '远端非 GitHub，跳过 GitHub Release 发布流水线' })
+  } else if (Boolean(git.remote) && (!onGithub || !canReleasePlatform)) {
+    items.push({ id: 'ci-release', artifact: '.github/workflows/release.yml', status: '通用 Git 远端（generic-git）', action: 'skip', detail: '远端非 GitHub 或不支持 Release API，跳过 GitHub Release 发布流水线' })
   } else if (Boolean(git.remote) && hasReleaseEvidence) {
     items.push({
       id: 'ci-release',
@@ -312,115 +352,7 @@ export function computeArtifactPlan(facts) {
   return items
 }
 
-function judgeMaturity(facts) {
-  if (facts.scale.effectiveFiles === 0 && facts.scale.totalFiles === 0) return 'empty'
-  if (facts.scale.effectiveFiles === 0 && (facts.git.commits ?? 0) === 0) return 'empty'
-
-  const hasGit = facts.git.present === true && facts.git.isRepoRoot !== false
-  const hasDocs = Boolean(facts.docs.agents || facts.docs.readme)
-  if (!hasGit || !hasDocs) return 'greenfield'
-
-  const projectGaps = facts.projectGaps ?? []
-  const hasRemote = typeof facts.git.remote === 'string' && facts.git.remote.length > 0
-  if (hasRemote && facts.projectGapsComputed
-    && facts.docs.workflowFacts.hasCheck && facts.ignores.hasGitattributes
-    && projectGaps.length === 0) return 'mature'
-  return 'partial'
-}
-
-const QUESTION_RULES = [
-  {
-    id: 'q.license',
-    when: (f) => !f.docs.license,
-    text: '这个项目要不要公开授权？要的话选哪个许可证（MIT / Apache-2.0 / BSD-3-Clause）；不要就明确不放',
-  },
-  {
-    id: 'q.npm',
-    when: (f) => f.ecosystem.publishable === true && (f.ecosystem.kinds ?? []).includes('node'),
-    text: '这个项目要不要发到 npm？不发就补上 `private: true` 防误发',
-  },
-  {
-    id: 'q.unknown-ecosystem',
-    when: (f) => (f.ecosystem.kinds ?? []).includes('unknown'),
-    text: '认不出这是什么项目。它是什么形态（命令行工具 / 库 / 服务 / 文档 / 插件）？',
-  },
-  {
-    id: 'q.role',
-    when: (f) => f.git.present === true && typeof f.git.remote === 'string' && f.git.remote.length > 0
-      && f.git.role === 'undetermined',
-    text: '本地远端是不是这个项目的正本？项目里没有声明源仓库（清单的 repository 一类），'
-      + '所以比不出来——说不清的话，按贡献者处置（拉分支、开 PR），不推主干、不打标签',
-  },
-  {
-    id: 'q.remote-setup',
-    when: (f) => f.git.available !== false && f.git.isBare !== true && f.git.isRepoRoot !== false
-      && (f.git.remotes ?? []).length === 0 && !f.git.localMode && f.scale.effectiveFiles > 0,
-    text: '当前还没有配置远端仓库：请选择 1) 暂不配远端（写入 `.git/pf-local-mode` 纯本地运作）；2) 绑定已有 GitHub 仓库；3) 新建 GitHub 仓库（默认 `private` 私有，或 `public` 公开，并确认个人/组织归属）',
-  },
-  {
-    id: 'q.release-strategy',
-    when: (f) => f.git.present === true
-      && (f.git.remotes ?? []).length > 0
-      && f.git.role !== 'contributor-fork'
-      && f.docs.workflowFacts?.hasRelease !== true
-      && (f.conventions?.workflowTooling ?? []).every((t) => !/changeset|release-please|releaserc|goreleaser/i.test(t))
-      && (f.ecosystem.publishable === true || Boolean(f.docs.releasing) || (f.git.tags?.length ?? 0) > 0),
-    // 发版手段按这个平台真的能做什么来说。
-    //
-    // 远端不是 GitHub 时还教 gh release create，等于让人照着敲一条必然 404 的命令，
-    // 而文案本身不会报错——这是最坏的一种：错在文档里，执行的人以为是自己配错了。
-    text: (f) => {
-      const caps = f.git?.capabilities ?? null
-      const canRelease = caps?.known === true && caps.releases === true
-      if (!canRelease) {
-        const who = caps?.providerId ?? "未知"
-        return `项目具备发布形态且尚未配置发布流水线。这个远端（${who}）的发布能力`
-          + "要么不支持、要么认不出来，所以这里不给本平台专用的命令：请先在它的托管界面上确认发版方式，再决定要不要接到流水线里"
-      }
-      return "项目具备发布形态且尚未配置发布流水线，请选择发版策略（5 选 1）：1) 不配置；2) 沿用已有工具；"
-        + "3) 纯手动 `gh release create`；4) Tag 自动发布页（默认用内置 `GITHUB_TOKEN`，零额外 Secret）；"
-        + "5) 联动下游或推送制品库（按需配 `RELEASE_TOKEN` 或 OIDC 可信发布）"
-    },
-  },
-]
-
-export function textsOf(items) {
-  return (items ?? []).map((one) => (typeof one === 'string' ? one : one.text))
-}
-
-function expandRule(rule, facts) {
-  if (typeof rule.each === 'function') {
-    if (!rule.when(facts)) return []
-    return rule.each(facts).map((one) => ({ id: rule.id, text: one.text }))
-  }
-  if (!rule.when(facts)) return []
-  const text = typeof rule.text === 'function' ? rule.text(facts) : rule.text
-  return [{ id: rule.id, text }]
-}
-
-export const GAP_RULE_IDS = Object.freeze(GAP_RULES.map((r) => r.id))
-export const QUESTION_RULE_IDS = Object.freeze(QUESTION_RULES.map((r) => r.id))
-
-function judgeGaps(facts) {
-  const gaps = []
-  const questions = []
-  const projectGaps = []
-
-  for (const rule of GAP_RULES) {
-    for (const item of expandRule(rule, facts)) {
-      gaps.push(item)
-      if (rule.machineLocal !== true) projectGaps.push(item)
-    }
-    if (rule.question !== undefined && rule.when(facts)) {
-      questions.push({ id: `${rule.id}.question`, text: rule.question })
-    }
-  }
-  for (const rule of QUESTION_RULES) {
-    for (const item of expandRule(rule, facts)) questions.push(item)
-  }
-
-  return { gaps, questions, projectGaps }
-}
+export { GAP_RULE_IDS, QUESTION_RULE_IDS, textsOf }
 
 /**
  * 这个远端到底能做什么。
@@ -541,11 +473,15 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
   }
 
+  const agentsText = docs.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
+  const decisions = Object.fromEntries(readDecisionMap(agentsText))
+
   const facts = {
     target: { path: root, name: ecosystem.projectName, dirName: basename(root) },
     maturity: 'partial',
     recommendedTier: 'lightweight',
     recommendedTierReason: '',
+    decisions,
     git: {
       available: gitFacts.available,
       present: gitFacts.present,
@@ -653,6 +589,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
 
   facts.explorationStrategy = computeExplorationStrategy(facts)
   facts.artifactPlan = computeArtifactPlan(facts)
+  facts.needsHuman = summarizeNeedsHuman(facts)
   facts.navigation = computeNavigation(facts)
 
   // 文档形态：TDD 该有哪些章节，由这个仓自己有什么决定，不由模板定死。
@@ -665,10 +602,12 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     runtimeRequirements: facts.artifacts?.runtimeRequirements ?? [],
     codeFiles: facts.scale?.codeFiles ?? 0,
   })
+  const tddReq = resolveDocRequirements(root, 'tdd')
+  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
   facts.tddShape = {
     enabled: [...tddShape.enabled],
     reasons: tddShape.reasons,
-    dropSections: [...tddDropSections(tddShape)],
+    dropSections: [...tddDropSections(tddShape, { omit: tddReq.omit, required: tddReqIds })],
     filePaths: shapePaths,
     topLevelDirs: [...new Set((rawWs.dirs ?? []).map((d) => String(d.rel ?? d).replace(/\\/g, '/').split('/')[0]).filter(Boolean))],
   }

@@ -1,18 +1,18 @@
 ---
 kind: todo
 title: 平台事实、文档通用性与演进
-status: active
+status: done
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: 50
-pr: null
-branch: fix/v8-criteria-trust
-owner: null
+pr: 67
+branch: feat/platform-and-docs
+owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: platform-and-docs
 planned_at: 73087a27cb9af3d9cea2988cc3e3e4d3b6154ec9
-related_prd: ../prd/261117-v8-criteria-trust-prd.md
+related_prd: ../../prd/261117-v8-criteria-trust-prd.md
 related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 ---
 
@@ -41,16 +41,16 @@ related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 
 ## 验收标准与执行清单
 
-- [ ] C1: 取舍解析只留一份实现；`questions` 可复现；`NEEDS_HUMAN` 机器可读
-- [ ] C2: 如实报出托管平台与能力，非 GitHub 给出「先问人」的出口
-- [ ] C3: 产物计划每个 `create` 都有执行入口，`preserve`/`pending` 不误报
-- [ ] C4: 探索技能的「只读」与「写 TDD」只留一个
-- [ ] C5: 治理类输入按面数判 Case 4；治理 PRD 覆盖产物计划每一项
-- [ ] C6: 探索证据缺失时 next 只给探索这一步；`finalize` 对 TDD 警告不吞；波次计划；空 diff 不是 clean
-- [ ] C7: 规划审核 Round 2 起必须换人
-- [ ] C8: 文档兄弟集按 slug 认亲，不依赖同日
-- [ ] C9: 文档模板「通用主干 + 可扩展章节」
-- [ ] C10: 需求分级按装不装得进一份 SPEC；无主切片要报
+- [x] C1: 取舍解析只留一份实现；`questions` 可复现；`NEEDS_HUMAN` 机器可读
+- [x] C2: 如实报出托管平台与能力，非 GitHub 给出「先问人」的出口
+- [x] C3: 产物计划每个 `create` 都有执行入口，`preserve`/`pending` 不误报
+- [x] C4: 探索技能的「只读」与「写 TDD」只留一个
+- [x] C5: 治理类输入按面数判 Case 4；治理 PRD 覆盖产物计划每一项
+- [x] C6: 探索证据缺失时 next 只给探索这一步；`finalize` 对 TDD 警告不吞；波次计划；空 diff 不是 clean
+- [x] C7: 规划审核 Round 2 起必须换人
+- [x] C8: 文档兄弟集按 slug 认亲，不依赖同日
+- [x] C9: 文档模板「通用主干 + 可扩展章节」
+- [x] C10: 需求分级按装不装得进一份 SPEC；无主切片要报
 
 ## 执行步骤
 
@@ -61,13 +61,12 @@ related_spec: ../specs/261117-issue50-platform-and-docs-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`部分完成`（C1、C2、C3、C4、C5、C7、C8、C10 已落地；C6 部分、C9 待拍板）
-- **待拍板事项**：C9 的「audit 只强制最小核心」实质是放宽门禁，按本仓契约须人点头后再落（见 PRD 待拍板第 7 项）
+- **当前状态**：`已完成，无遗留`（C1..C10 均已完成实现与全门禁复验）
 
 ## 完成后的记录
 
 **在合并之前写完，随这次改动一起提交。**
 
-- **实际验证命令与结果**：`node scripts/dev/fixtures.mjs --domain docs` → 7 项通过 / 0 失败；`node scripts/dev/fixtures.mjs` → 185 项通过 / 0 失败；`doc-plan audit .` → 9 份全部通过、覆盖率 0 漏项；`verify-injections --only I78`、`I81`、`I82`、`I83`、`I84`、`I85`、`I87`、`I88` 均红（正确）。
-- **文档同步检查**：`SKILL.md` 的 S3 已改成「只读取证，由本步落笔」；`kit/skills/dev-explore/SKILL.md` 与 `.agents/` 字节一致。
-- **遗留问题**：C6 的「波次计划」与「`finalize` 对 `tddSyncWarning` 非 0」未完成；C9 的模板最小核心需 PRD 待拍板第 7 项点头后生效（机制已落，判定权在人）。
+- **实际验证命令与结果**：已合流 `origin/main`（`359c977`）并完成 `node scripts/equip.mjs .` 同步，实证通过 `preflight`、`gap-coverage`、`fixtures`（254/254）与 `doc-plan audit`，提交归档后通过 `flow verify --mode gate` 锁定最终 `HEAD`。
+- **文档同步检查**：已同步 `docs/TDD.md`、`kit/skills/` 与 `.agents/skills/`（`equip.mjs . --check` 通过）。
+- **遗留问题**：无。

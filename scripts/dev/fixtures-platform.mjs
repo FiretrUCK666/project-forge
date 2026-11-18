@@ -85,6 +85,8 @@ cases.push(['无远端探测不写 known_hosts、SSH Host 别名、generic-git �
     if (st.status !== 0) return `generic-git start 失败：${st.stderr}`
     const l = JSON.parse(st.stdout)
     if (l.role !== 'generic-git' || l.providerId !== 'generic-git') return `generic-git 角色错误：${st.stdout}`
+    const ex = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['explore', '--task', 't-gen', '--json'], { cwd: dirGeneric })
+    if (ex.status !== 0) return `generic-git explore 失败：${ex.stderr}`
     const wtGen = join(dirGeneric, l.worktreePath)
     writeFileSync(join(wtGen, 'README.md'), '# generic\n\n低风险文档更新。\n')
     gitSync(wtGen, ['commit', '-qam', 'docs: update readme'])

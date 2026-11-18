@@ -649,6 +649,7 @@ async function main(argv = process.argv.slice(2)) {
         ...(!includeDiff ? { includeDiffHint: 'Pass --include-diff after empirical & fault-injection closure to embed full diffText in JSON' } : {}),
       },
       task: task ?? null,
+      explored: task?.explored ?? null,
       criteria,
       priorOpenMustFix,
       rebuts,

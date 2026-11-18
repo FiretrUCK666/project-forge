@@ -9,7 +9,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowStateCases(cases) {
   cases.push(['三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
@@ -126,6 +126,7 @@ export function registerFlowStateCases(cases) {
       }
 
       await handleStart({ task: 'c1-code', case: '2', slug: 'c1-code' }, roots)
+      await seedExploredFor(dir, 'c1-code')
       const wt1 = join(dir, '.worktrees', 'impl-c1-code')
       writeFileSync(join(wt1, 'src/app.mjs'), 'export const a = 2\n')
       gitCommitFast(wt1, 'feat: a=2', { updateOnly: true })
@@ -191,7 +192,7 @@ export function registerFlowStateCases(cases) {
 
       const revPhase = evaluateNextState({
         activeTasks: [readTaskLedger(dir, 'c1-code')],
-        selectedTask: { ...readTaskLedger(dir, 'c1-code'), status: 'submitted', lastSubmittedHead: 'abc', reviewPassed: false, rounds: [] },
+        selectedTask: { ...readTaskLedger(dir, 'c1-code'), explored: { at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1 }, status: 'submitted', lastSubmittedHead: 'abc', reviewPassed: false, rounds: [] },
         taskRuntime: { opInProgress: false, headSha: 'abc', dirty: 0, policy: { riskTier: 'medium', independentReviewRequired: true, requiredGates: ['full'] }, evidenceValidation: { ok: true } },
       })
       if (revPhase.phase !== 'needs-review' || revPhase.ownerRole !== 'reviewer') {

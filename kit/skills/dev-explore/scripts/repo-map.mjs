@@ -17,6 +17,7 @@ import { readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
 import { TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
+import { createExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import { extractSymbols, summarizeSymbolCoverage } from '../../lib/symbol-index.mjs'
 
 const CODE_RE = /\.(?:js|mjs|cjs|mts|cts|ts|tsx|jsx|vue|svelte|py|rs|go|java|kt|kts|scala|groovy|rb|php|cs|fs|vb|c|cc|cpp|cxx|h|hpp|m|mm|swift|dart|ex|exs|erl|sh|bash|zsh|ps1|sql|lua|r|zig|nim|hs)$/i
@@ -423,7 +424,15 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
   const reusableModules = extractReusableModules(scan.files)
   // 「本仓 N 种语言，其中 M 种缺少符号规则」——被略过的语言要报出来，不能静默消失。
   const projectFiles = scan.files.filter((f) => !isToolOwnedPath(f.rel))
-  const symbolCoverage = summarizeSymbolCoverage(projectFiles.filter((f) => isSourceCodeFile(f)).map((f) => f.name))
+  const projectCodeFiles = projectFiles.filter((f) => isSourceCodeFile(f))
+  const symbolCoverage = summarizeSymbolCoverage(projectCodeFiles.map((f) => f.name))
+  let symbolCount = 0
+  for (const item of projectCodeFiles.slice(0, 200)) {
+    const text = readTextSafe(item.full, 256 * 1024)
+    if (!text) continue
+    const ext = item.name.includes('.') ? item.name.split('.').pop() : ''
+    symbolCount += extractSymbols(text, ext).symbols.length
+  }
   const featureMap = buildFeatureMap(root, entrypoints, testFiles, profile, taskRunners, discovery.packages)
   const preferredVerifyCommands = buildPreferredVerifyCommands(profile, ciRunSteps, taskRunners, discovery.packages)
 
@@ -466,6 +475,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     taskRunners,
     preferredVerifyCommands,
     reusableModules,
+    symbolCount,
     symbolCoverage,
     featureMap,
     docs,
@@ -546,8 +556,8 @@ async function main(argv) {
     cli = parseStandardCli(argv, {
       positionalDir: 'first',
       booleanFlags: ['json', 'help'],
-      valueFlags: ['focus', 'dir', 'repo'],
-      usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--json]',
+      valueFlags: ['focus', 'dir', 'repo', 'task', 'tier', 'by'],
+      usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--task <id>] [--json]',
     })
   } catch (err) {
     process.stderr.write(`${err.message}\n`)
@@ -555,7 +565,7 @@ async function main(argv) {
   }
   if (cli.help) {
     process.stdout.write([
-      '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--dir <path>] [--focus <subdir>] [--json]',
+      '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--dir <path>] [--focus <subdir>] [--task <id>] [--json]',
       '',
       '无深度限制枚举全仓文本源码与多生态包清单（git ls-files -z + 4KB NUL 探测），',
       '输出入口、Dev Profile 命令、带 working-directory 的 CI 步骤、可复用模块与 Feature Map。',
@@ -565,6 +575,19 @@ async function main(argv) {
 
   try {
     const map = await generateRepoMap(cli.targetDir, { focus: cli.opts.focus })
+    if (cli.opts.task) {
+      const roots = await resolveRepoRoots(cli.targetDir)
+      const { ledger } = await resolveTaskContext(roots, { task: cli.opts.task })
+      const autoTier = cli.opts.tier ?? ((map.codeFileCount ?? 0) >= 25 ? 'parallel-subagents' : ((map.codeFileCount ?? 0) >= 6 ? 'single-subagent' : 'direct-read'))
+      ledger.explored = createExploredEvidence({
+        at: new Date().toISOString(),
+        tier: autoTier,
+        symbolCount: map.symbolCount ?? 0,
+        by: cli.opts.by ?? 'repo-map',
+        source: 'repo-map',
+      })
+      writeTaskLedger(roots.mainRoot, ledger)
+    }
     if (cli.json) {
       process.stdout.write(`${JSON.stringify(map, null, 2)}\n`)
     } else {

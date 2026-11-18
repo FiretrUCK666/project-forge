@@ -42,6 +42,19 @@ export const ARTIFACT_EXECUTORS = Object.freeze({
     command: 'node scripts/equip.mjs <目录>',
     how: '补齐 .gitattributes / .gitignore 并初始化仓库',
   },
+  'kit-skills': {
+    mode: 'auto',
+    command: 'node scripts/equip.mjs <目录>',
+    how: '把 kit/skills/ 同步进 .agents/skills/ 并写清单校验',
+  },
+  'contributing': {
+    mode: 'manual',
+    how: '基于真实仓库角色与协作流程编写；模板见 templates/contributing.md',
+  },
+  'license': {
+    mode: 'manual',
+    how: '按 AGENTS.md「取舍」里定好的开源协议写入对应 LICENSE 文本',
+  },
   'docs-tdd': {
     mode: 'assisted',
     command: 'node scripts/equip.mjs <目录> --bootstrap-empty',
@@ -70,30 +83,26 @@ export const ARTIFACT_EXECUTORS = Object.freeze({
     command: 'node scripts/equip-ci.mjs <目录> --kind release',
     how: '从 templates/ci-release.yml 生成，非 GitHub 远端直接退出并说明原因',
   },
-  'docs-set': {
-    mode: 'assisted',
-    command: 'node .agents/skills/dev-plan/scripts/doc-plan.mjs init --kind pair --slug <slug> --title <标题>',
-    how: '按统一模板生成，再按五档分流补齐 C1..Cn',
-  },
-  'skills-kit': {
-    mode: 'auto',
-    command: 'node scripts/equip.mjs <目录>',
-    how: '把 kit/skills/ 同步进 .agents/skills/ 并写清单校验',
-  },
 })
+
+/** 不生成新文件的动作：仅 `create` 需要登记执行入口，其余八档明确跳过。 */
+export const NON_CREATE_ARTIFACT_ACTIONS = Object.freeze([
+  'calibrate', 'preserve', 'ask-human', 'skip', 'snapshot', 'equip', 'optional', 'upgrade',
+])
+const NON_CREATE_SET = new Set(NON_CREATE_ARTIFACT_ACTIONS)
 
 /**
  * 找出「计划说要建、但没人负责建」的项。
  *
- * 只查 `action === 'create'`：`calibrate` 已经有东西可校准（文件在），`preserve` 不动，
- * `ask-human` 本来就等人，`skip` 与 `snapshot` 都不产生产物内容。
+ * 只查 `action === 'create'`：`calibrate`、`preserve`、`ask-human`、`skip`、`snapshot`、
+ * `equip`、`optional`、`upgrade` 均不产生待新建产物，不要求执行者。
  *
  * 返回空数组表示每一项都有人接。
  */
 export function findUnexecutableArtifacts(artifactPlan = []) {
   const out = []
   for (const item of artifactPlan) {
-    if (item?.action !== 'create') continue
+    if (!item || NON_CREATE_SET.has(item.action) || item.action !== 'create') continue
     const id = item.id
     if (!id) {
       out.push({

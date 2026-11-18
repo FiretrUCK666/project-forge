@@ -8,7 +8,7 @@
  *   - `notice`：本机事实或可选项（署名、单语、没有 CI），不拦交付。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { survey } from './survey.mjs'
@@ -16,14 +16,18 @@ import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, parseMarkers } from './lib/protocol.mjs'
 import { CLAIM_IDS, verifyClaims } from './lib/claims.mjs'
 import { inspectKitManifestForReview } from './lib/agents-sections.mjs'
-
-/** 读目录名；读不到就返回空数组——「读不到」由别的判据报，这里不制造第二个报错。 */
-function readdirSyncSafe(dir) {
-  try { return readdirSync(dir) } catch { return [] }
-}
+import {
+  checkGovernancePrdCoverage,
+  parseReviewCliArgs,
+  placeholderIdentity,
+  readdirSyncSafe,
+  renderRef,
+  reviewHelpText,
+  summarizeReviewResults,
+} from './lib/review-helpers.mjs'
 
 const SCOPES = new Set([
-  'git', 'agents', 'docs', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
+  'git', 'agents', 'docs', 'artifacts', 'kit', 'license', 'secrets', 'ci', 'release', 'collaboration', 'ecosystem',
 ])
 
 import { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../kit/skills/lib/command-lex.mjs'
@@ -51,26 +55,6 @@ async function inspectContract(root, facts) {
 }
 
 /**
- * 系统占位署名：推上去之后历史里的提交追溯不到人。
- *
- * 判据分两半——名字是这一组系统默认值之一，**或**邮箱落在本地无效域名上。
- * 两半都要查：只查名字会漏掉 `dev@localhost` 这类「名字像人、邮箱是假的」；
- * 只查邮箱会漏掉 `Administrator <real@company.com>` 这类「邮箱真、署名是系统装出来的」。
- *
- * 为什么这不是 `notice` 而是 `missing`：它不会当场报错（推得上去），但**推上去就撤不回**，
- * 而且清起来要重写历史。这是「坏了看着还是一片绿」的典型形状。
- */
-const PLACEHOLDER_NAME = /^(?:administrator|admin|root|user|default|ubuntu|ec2-user|vagrant|runner|builder)$/i
-const PLACEHOLDER_EMAIL_DOMAIN = /@(?:localhost|.*\.local|.*\.localdomain|.*\.internal)$/i
-
-function placeholderIdentity(name, email) {
-  const hits = []
-  if (typeof name === 'string' && PLACEHOLDER_NAME.test(name.trim())) hits.push(`署名是系统默认值「${name.trim()}」`)
-  if (typeof email === 'string' && PLACEHOLDER_EMAIL_DOMAIN.test(email.trim())) hits.push(`邮箱落在本地无效域名上（${email.trim()}）`)
-  return hits
-}
-
-/**
  * 走一遍全部判据，返回扁平的结果记录。
  *
  * 每条判据都必须给 `id` 与 `scope`——`id` 是「决定写在哪」的键，`scope` 是
@@ -80,13 +64,6 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   const facts = await survey(targetDir)
   const root = facts.target.path
   const wants = (face) => !scopes || scopes.has(face)
-
-  const unexecutable = findUnexecutableArtifacts(facts.artifactPlan ?? [])
-  for (const item of unexecutable) {
-    add(finding('missing', 'artifacts', item.code, item.message, {
-      ref: { file: 'references/handoff.md', section: '四、交棒前四步清单' },
-    }))
-  }
 
   const agentsPath = facts.docs.agents ? join(root, facts.docs.agents.file) : undefined
   const agentsText = agentsPath ? (readTextSafe(agentsPath) ?? '') : undefined
@@ -100,6 +77,17 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       return
     }
     results.push(f)
+  }
+
+  const unexecutable = findUnexecutableArtifacts(facts.artifactPlan ?? [])
+  if (unexecutable.length === 0) {
+    add(finding('ok', 'artifacts', 'artifacts.executors', '产物计划中全部待建项均已对齐可执行入口'))
+  } else {
+    for (const item of unexecutable) {
+      add(finding('missing', 'artifacts', item.code, item.message, {
+        ref: { file: 'references/handoff.md', section: '四、交棒前四步清单' },
+      }))
+    }
   }
 
   // ── 版本控制 ──────────────────────────────────────────────────────
@@ -676,46 +664,29 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
-  return summarize(facts, results)
-}
-
-function summarize(facts, results) {
-  const by = (level) => results.filter((r) => r.level === level)
-  const missing = by('missing')
-  const pending = by('pending')
-  const notice = by('notice')
-  const ok = by('ok')
-  return {
-    target: facts.target,
-    maturity: facts.maturity,
-    facts,
-    results,
-    missing,
-    pending,
-    notice,
-    ok,
-    // 「有一批判据压根没跑起来」与「跑完了没问题」必须能分开。
-    // 前者不能说「没有会出事的缺口」——那是拿没验过当验过了。
-    unscanned: results.filter((r) => r.verdictBlocked === true).map((r) => r.id),
-    verdict: missing.length > 0 ? 'missing'
-      : pending.length > 0 ? 'pending'
-        : notice.length > 0 ? 'notice' : 'ok',
+  const govPrdCov = checkGovernancePrdCoverage(root, facts)
+  if (govPrdCov.checked) {
+    if (govPrdCov.missing.length > 0) {
+      const missLabels = govPrdCov.missing.map((m) => `${m.id}(${m.action})`).join('、')
+      add(finding('missing', 'docs', 'docs.governance-prd-coverage',
+        `全仓治理 PRD（${govPrdCov.prdFiles.join('、')}）的 C1..Cn 验收条目尚未覆盖产物计划中的待处置项：${missLabels}`))
+    } else {
+      add(finding('ok', 'docs', 'docs.governance-prd-coverage',
+        `全仓治理 PRD（${govPrdCov.prdFiles.join('、')}）已完整覆盖产物计划待处置条目`))
+    }
   }
+
+  return summarizeReviewResults(facts, results)
 }
 
-// ── 渲染 ────────────────────────────────────────────────────────────
-
-function renderRef(ref) {
-  if (!ref) return ''
-  return `\n        读：\`${ref.file}\` 的「${ref.section}」`
-}
+// ── 渲染与命令行 ──────────────────────────────────────────────────────────
 
 function render(result, strict) {
   const lines = []
   lines.push(`交付体检：${result.target.name}（成熟度 ${result.maturity}）`)
   lines.push('')
 
-  const order = ['git', 'secrets', 'agents', 'docs', 'kit', 'license', 'ci', 'release', 'collaboration', 'ecosystem']
+  const order = ['git', 'secrets', 'agents', 'docs', 'artifacts', 'kit', 'license', 'ci', 'release', 'collaboration', 'ecosystem']
   const label = { missing: '缺', pending: '待定', notice: '可以更好', ok: '齐' }
 
   for (const scope of order) {
@@ -754,61 +725,33 @@ function render(result, strict) {
   return lines.join('\n')
 }
 
-// ── 命令行 ──────────────────────────────────────────────────────────
-
 async function main(argv) {
-  let target = process.cwd()
-  let scopes
-  let strict = false
-  let asJson = false
-
-  for (const arg of argv) {
-    if (arg === '--help' || arg === '-h') {
-      process.stdout.write([
-        '用法：node scripts/review.mjs [目标目录] [选项]',
-        '',
-        '  --scope=git,agents,docs  只验这几面（逗号分隔）',
-        `                           可用：${[...SCOPES].join(', ')}`,
-        '  --strict                 把「待定」也算没通过（CI 用）',
-        '  --json                   输出机器可读的结果',
-        '',
-        '三档结论：缺（会出事）/ 待定（只有使用者能定）/ 可以更好（不拦）。',
-        '待定项的答案写进目标项目 AGENTS.md 的「## 取舍」节，不用记 flag。',
-      ].join('\n') + '\n')
-      return 0
-    }
-    if (arg === '--strict') strict = true
-    else if (arg === '--json') asJson = true
-    else if (arg.startsWith('--scope=')) {
-      const list = arg.slice('--scope='.length).split(',').map((s) => s.trim()).filter(Boolean)
-      const bad = list.filter((s) => !SCOPES.has(s))
-      if (bad.length > 0) {
-        process.stderr.write(`未知切面：${bad.join('、')}（可用：${[...SCOPES].join(', ')}）\n`)
-        return 2
-      }
-      scopes = new Set(list)
-    } else if (!arg.startsWith('-')) target = arg
-    else {
-      process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
-      return 2
-    }
+  const parsed = parseReviewCliArgs(argv, SCOPES)
+  if (parsed.error) {
+    process.stderr.write(`${parsed.error}\n`)
+    return 2
+  }
+  if (parsed.help) {
+    process.stdout.write(`${reviewHelpText(SCOPES)}\n`)
+    return 0
   }
 
   try {
-    const result = await reviewProject(target, { scopes })
-    if (asJson) {
+    const result = await reviewProject(parsed.target, { scopes: parsed.scopes })
+    if (parsed.asJson) {
       process.stdout.write(`${JSON.stringify({
         target: result.target,
         maturity: result.maturity,
+        git: result.git,
         verdict: result.verdict,
         results: result.results,
       }, null, 2)}\n`)
     } else {
-      process.stdout.write(`${render(result, strict)}\n`)
+      process.stdout.write(`${render(result, parsed.strict)}\n`)
     }
 
     if (result.missing.length > 0) return 1
-    if (strict && result.pending.length > 0) return 2
+    if (parsed.strict && result.pending.length > 0) return 2
     return 0
   } catch (err) {
     process.stderr.write(`体检失败：${err instanceof Error ? err.message : String(err)}\n`)

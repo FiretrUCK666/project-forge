@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { gitLsFilesTextAndCode, readTextSafe } from './git.mjs'
+import { resolveDocRequirements } from './doc-requirements.mjs'
 import { tddDropSections } from './tdd-shape.mjs'
 import { isToolOwnedPath } from './tool-owned.mjs'
 import { detectTddShapes } from './tdd-shape.mjs'
@@ -171,6 +172,9 @@ export async function collectTddFacts(root) {
     ? /\[remote\s+"origin"\]/.test(readTextSafe(join(root, '.git', 'config')) ?? '')
     : false
 
+  const tddReq = resolveDocRequirements(root, 'tdd')
+  const tddReqIds = new Set(tddReq.sections.map((s) => s.id))
+
   return {
     target: { path: root, name: readTextSafe(join(root, 'README.md'))?.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null },
     ecosystem: { kinds, manifests: presentManifests },
@@ -182,7 +186,7 @@ export async function collectTddFacts(root) {
     tddShape: {
       enabled: [...shape.enabled],
       reasons: shape.reasons,
-      dropSections: [...tddDropSections(shape)],
+      dropSections: [...tddDropSections(shape, { omit: tddReq.omit, required: tddReqIds })],
       topLevelDirs,
       filePaths,
     },

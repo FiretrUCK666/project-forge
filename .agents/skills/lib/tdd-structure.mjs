@@ -1,7 +1,10 @@
 
+import { FORM_INDEPENDENT_CORE, readProjectDeclaration, resolveDocRequirements } from './doc-requirements.mjs'
+
 /** 主干章节。`kw` 是标题弱证据，`evidence` 是内容强证据。 */
 export const TDD_CORE_SECTIONS = Object.freeze([
   {
+    id: 'doc-info',
     kw: ['文档信息', '文档说明', 'doc info', 'metadata'],
     evidence: [
       /(?:文档版本|版本号|最近更新|编制日期|更新日期)/,
@@ -11,19 +14,21 @@ export const TDD_CORE_SECTIONS = Object.freeze([
     what: '文档信息（版本、基线、运行环境）',
   },
   {
-    kw: ['背景', '非目标', '范围', '定位', 'overview', 'scope'],
+    id: 'background',
+    kw: ['背景', '非目标', '范围', '定位', '研究问题', 'overview', 'scope'],
     evidence: [
-      /(?:核心定位|解决的核心问题|服务对象)/,
-      /(?:非目标|明确不做|不承担)/,
+      /(?:核心定位|解决的核心问题|研究问题|服务对象)/,
+      /(?:非目标|明确不做|不承担|不在本文范围)/,
       /(?:架构目标|关键取舍)/,
     ],
     code: 'MISSING_TDD_BACKGROUND',
     what: '背景、非目标与术语表',
   },
   {
-    kw: ['架构全景', '系统架构', '架构设计', '架构', 'architecture', '模块'],
+    id: 'arch',
+    kw: ['架构全景', '系统架构', '架构设计', '架构', 'architecture', '模块', '组件'],
     evidence: [
-      /(?:模块|目录)[^\n]{0,20}(?:职责|边界|依赖)/,
+      /(?:模块|目录|组件)[^\n]{0,20}(?:职责|边界|依赖)/,
       /(?:arch-rules|分层禁引|依赖方向)/,
       /(?:入口文件|entrypoint|Feature\s*Map)/i,
     ],
@@ -31,6 +36,7 @@ export const TDD_CORE_SECTIONS = Object.freeze([
     what: '系统架构全景（模块与目录职责）',
   },
   {
+    id: 'flow',
     kw: ['核心流程', '状态流转', '流水线', '主链路', '生命周期', '流程', 'flow'],
     evidence: [
       /(?:主链路|正常主链路|数据流|调用链)/,
@@ -41,6 +47,7 @@ export const TDD_CORE_SECTIONS = Object.freeze([
     what: '核心流程与状态流转',
   },
   {
+    id: 'invariants',
     kw: ['不变量', '安全红线', '红线', 'invariant'],
     evidence: [
       /(?:不变量|invariant)/i,
@@ -52,19 +59,47 @@ export const TDD_CORE_SECTIONS = Object.freeze([
   },
 ])
 
+const TDD_BUILD_CORE = Object.freeze({
+  id: 'build',
+  kw: ['构建', '测试', '发布链路', '验证', '门禁', 'build', 'verify', 'verification', 'experiment'],
+  evidence: [
+    /(?:quick-test|full-test|smoke-verify|merge-gate|构建|单测|测试|验证|复现)[^\n]{0,30}(?:命令|脚本|步骤|判定|流程)/i,
+    /(?:npm\s+test|pytest|cargo\s+test|go\s+test|node\s+scripts)/i,
+  ],
+  code: 'MISSING_TDD_BUILD',
+  what: '构建与验证链路',
+})
+
 /**
  * 核 TDD 主干与模块表。
  *
+ * 未配置项目自定义 TDD 声明时，延续五段完整主干要求；配置了 `docs/templates/tdd.md`
+ * 声明（`omit_sections` / `required_sections`）后，允许裁剪可选章节，但不可豁免
+ * `FORM_INDEPENDENT_CORE.tdd` 三项最小核心（定位与非目标、架构/边界、构建与验证）。
+ *
  * @param {string} rawText 文档全文
+ * @param {{repoRoot?: string|null, docRequirements?: object|null}} opts
  * @returns {Array<{code: string, line: number, message: string, fixHint: string}>}
  */
-export function checkTddStructure(rawText) {
+export function checkTddStructure(rawText, { repoRoot = null, docRequirements = null } = {}) {
   const out = []
   const text = String(rawText ?? '')
   const stripped = text.replace(/<!--[\s\S]*?-->/g, '')
   const headings = [...stripped.matchAll(/^#{1,3}\s+(.+)$/gm)].map((m) => m[1])
 
-  for (const sec of TDD_CORE_SECTIONS) {
+  const customDecl = repoRoot ? readProjectDeclaration(repoRoot, 'tdd') : null
+  const effReq = docRequirements ?? (customDecl ? resolveDocRequirements(repoRoot, 'tdd') : null)
+  const immutableIds = new Set(FORM_INDEPENDENT_CORE.tdd)
+
+  let sectionsToCheck = TDD_CORE_SECTIONS
+  if (customDecl && effReq) {
+    const reqIds = new Set(effReq.sections.map((s) => s.id))
+    sectionsToCheck = [...TDD_CORE_SECTIONS, TDD_BUILD_CORE].filter(
+      (sec) => immutableIds.has(sec.id) || (!effReq.omit?.has(sec.id) && reqIds.has(sec.id)),
+    )
+  }
+
+  for (const sec of sectionsToCheck) {
     const byTitle = headings.some((h) => sec.kw.some((k) => h.toLowerCase().includes(k.toLowerCase())))
     // 标题没命中时看内容：写得细的文档常把内容摊在别的标题下。
     const byContent = !byTitle && sec.evidence.some((re) => re.test(stripped))

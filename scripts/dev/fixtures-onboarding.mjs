@@ -12,6 +12,7 @@ import { sniffLayeredCommands } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { createGitHubClient } from '../../kit/skills/lib/platform.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
+import { handleExplore } from '../../kit/skills/dev-flow/scripts/flow-explore.mjs'
 import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
 import { handleFinalize, handleVerify, handleSubmit } from '../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs'
 import { handleClaim, handleMerge } from '../../kit/skills/dev-flow/scripts/flow-merge.mjs'
@@ -539,6 +540,8 @@ export function registerOnboardingCases(cases) {
           ...(caseType >= 4 ? { spec: 'docs/specs/261118-issue88-mx-spec.md', todo: 'docs/todo/261118-issue88-mx-todo.md' } : {}),
         }, roots)
         if (s.exitCode !== 0) return `lightweight high-risk(${label}) start 失败：${s.exitCode}`
+        const ex = await handleExplore({ task: taskId }, roots)
+        if (ex.exitCode !== 0) return `lightweight high-risk(${label}) explore 失败：${ex.exitCode}`
         const implAbs = join(dir, '.worktrees', `impl-${taskId}`)
         mkdirSync(dirname(join(implAbs, change.file)), { recursive: true })
         writeFileSync(join(implAbs, change.file), change.content, 'utf8')
@@ -620,9 +623,13 @@ export function registerOnboardingCases(cases) {
             if (st.exitCode !== 0) return `start(${tier}/${role}) 失败：${st.exitCode}`
             const cl = await handleClaim({ task: taskId, agent: 'alice', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
             if (cl.exitCode !== 0) return `claim(${tier}/${role}) 失败`
+            const ex = await handleExplore({ task: taskId }, roots)
+            if (ex.exitCode !== 0) return `explore(${tier}/${role}) 失败：${ex.exitCode}`
           } else {
             const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--json'])
             if (stCli.status !== 0) return `cli start(${tier}/${role}) 失败：${stCli.stderr}`
+            const exCli = runLocal(dir, flowRel, ['explore', '--task', taskId])
+            if (exCli.status !== 0) return `cli explore(${tier}/${role}) 失败：${exCli.stderr}`
           }
 
           const implAbs = join(dir, '.worktrees', `impl-${taskId}`)

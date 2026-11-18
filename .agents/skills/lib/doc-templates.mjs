@@ -254,6 +254,7 @@ const CUSTOM_TEMPLATE_REL_CANDIDATES = Object.freeze({
   prd: ['docs/templates/prd.md', 'docs/templates/prd-template.md', 'docs/.templates/prd.md', '.github/prd-template.md', '.github/prd_template.md'],
   spec: ['docs/templates/spec.md', 'docs/templates/spec-template.md', 'docs/.templates/spec.md', '.github/spec-template.md', '.github/spec_template.md'],
   todo: ['docs/templates/todo.md', 'docs/templates/todo-template.md', 'docs/.templates/todo.md', '.github/todo-template.md', '.github/todo_template.md'],
+  tdd: ['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', '.github/tdd-template.md', '.github/tdd_template.md'],
 })
 
 function extractCustomDocSections(rawTemplate, standardContent, { title, safeSlug, taskId }) {
@@ -282,6 +283,17 @@ function extractCustomDocSections(rawTemplate, standardContent, { title, safeSlu
  * 探测并识别仓库自带的项目自定义文档模板（docs/templates/*、docs/.templates/*、.github/*-template.md）。
  * 严禁读取工具母版目录或绑定宿主专有目录。
  */
+/** 探测并识别仓库自带的项目自定义文档模板，把未收录于主模板的自定义章节附到渲染末尾。 */
+export function appendCustomDocSections(rendered, { repoRoot, kind, title = '', safeSlug = '', taskId = '' } = {}) {
+  const customTpl = resolveRepoCustomDocTemplate(repoRoot, kind)
+  if (!customTpl) return rendered
+  const extra = extractCustomDocSections(customTpl.text, rendered, { title, safeSlug, taskId })
+  const marker = `<!-- project-custom-template: ${customTpl.rel} -->`
+  return extra.length > 0
+    ? `${String(rendered).trimEnd()}\n\n${marker}\n\n${extra.join('\n\n')}\n`
+    : `${String(rendered).trimEnd()}\n\n${marker}\n`
+}
+
 export function resolveRepoCustomDocTemplate(repoRoot, kind) {
   if (!repoRoot || !CUSTOM_TEMPLATE_REL_CANDIDATES[kind]) return null
   for (const rel of CUSTOM_TEMPLATE_REL_CANDIDATES[kind]) {

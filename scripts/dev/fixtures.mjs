@@ -36,6 +36,7 @@ import { registerPlatformCases } from './fixtures-platform.mjs'
 import { registerReviewEmpiricalCases } from './fixtures-review-empirical.mjs'
 import { registerOnboardingCases } from './fixtures-onboarding.mjs'
 import { registerDocDepthCases } from './fixtures-doc-depth.mjs'
+import { registerIssue50Cases } from './fixtures-issue50.mjs'
 
 initTestBackupDir()
 
@@ -64,6 +65,7 @@ const DOMAIN_REGISTRY = [
   ['core', registerCoreCases],
   ['review', registerReviewCases],
   ['survey', registerSurveyCases],
+  ['issue50', registerIssue50Cases],
 ]
 
 function parseCliFlags(argv) {

@@ -4,7 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 doc-plan.mjs 与外部测试引用。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { posixPath, readTextSafe } from '../../lib/git.mjs'
@@ -24,6 +24,9 @@ import {
   CONCERN_FACES, DOC_CUE_RE, EXPLICIT_FEATURE_RE, FIX_VERB_RE, RUNTIME_BUG_RE,
   evaluatePureDocCheck, extractTriageSignals, facesOf as resolveTriageFaces, normalizeTriageInputs,
 } from './triage-rules.mjs'
+import { collectMarkdownFiles, listDocs, runRepoDocsAudit } from './doc-audit-repo.mjs'
+
+export { collectMarkdownFiles, listDocs }
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
   prd: new Set(['draft', 'active', 'in_review', 'done', 'dropped']),
@@ -67,12 +70,13 @@ function facesOf(text, preSignals = null) {
   return resolveTriageFaces(text, preSignals)
 }
 
-function assessPrdNeed({ text, faces, fileCount }) {
+function assessPrdNeed({ text, faces, fileCount, isGovernance = false }) {
   const batchRe = /拆成|拆分为|分\s*(?:两|二|三|四|多)\s*批|分\s*(?:两|二|三|四|多)\s*期|一期.{0,6}二期|几个独立|逐步推进|分批落地|多切片|拆成多份/
   const reasons = []
   if (faces.length >= 4) reasons.push(`同时要碰 ${faces.length} 个面（${faces.join('、')}）`)
   if (batchRe.test(text)) reasons.push('需求本身说了要分批落地')
   if (Number.isFinite(fileCount) && fileCount >= 12) reasons.push(`声明要动 ${fileCount} 个文件`)
+  if (isGovernance) reasons.push('属于全仓治理/规范化任务，须先建总控 PRD 覆盖全部产物清单')
 
   return {
     required: reasons.length > 0,
@@ -121,7 +125,7 @@ export function triageTask({
   const faces = facesOf(text, signals)
   const isGovernance = GOVERNANCE_RE.test(text)
   const isCrossCutting = faces.length >= 3
-  const prdNeed = assessPrdNeed({ text, faces, fileCount })
+  const prdNeed = assessPrdNeed({ text, faces, fileCount, isGovernance })
 
   const isConflict = conflictsTdd || conflictRe.test(text)
   const isContract = touchesContract
@@ -396,9 +400,6 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
     }
   }
 
-  // TDD 的主干核对只对 TDD 自己生效——PRD/SPEC/Todo 不走这套章节要求。
-  if (docType === 'tdd') errors.push(...checkTddStructure(rawText))
-
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     if (fm.malformedFrontmatter) {
       for (const se of fm.syntaxErrors) {
@@ -551,6 +552,33 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
   const bodyForSections = startBodyLine > 0 ? lines.slice(startBodyLine).join('\n') : normRaw
   let skippedSections = []
   let delta = null
+  if (docType === 'tdd') {
+    const tddReq = resolveDocRequirements(repoRoot, 'tdd')
+    errors.push(...checkTddStructure(rawText, { repoRoot, docRequirements: tddReq }))
+    if (tddReq.source !== '工具默认') {
+      const tddLookup = resolveSectionPresence(bodyForSections, tddReq)
+      const coreIds = FORM_INDEPENDENT_CORE.tdd ?? []
+      const droppedCore = coreIds.filter((id) => !tddReq.sections.some((sec) => sec.id === id))
+      if (droppedCore.length > 0) {
+        errors.push({
+          code: 'CORE_SECTION_WAIVED',
+          line: 1,
+          message: `项目声明把 TDD 主干章节去掉了：${droppedCore.join('、')}——主干三节不可豁免。`,
+          fixHint: '把这三节从自定义 TDD 模板的 omit_sections 里移除。',
+        })
+      }
+      const missingCustom = findMissingSections(tddReq, tddLookup, { hasInlineAcceptance: false })
+      for (const miss of missingCustom) {
+        if (miss.core) continue
+        errors.push({
+          code: `MISSING_SECTION_${miss.id.toUpperCase().replace(/-/g, '_')}`,
+          line: 1,
+          message: `项目自己的 TDD 模板要求了「${miss.label}」，但这份文档里没有`,
+          fixHint: miss.fixHint,
+        })
+      }
+    }
+  }
   if (docType === 'spec' || docType === 'todo' || docType === 'prd') {
     const docRequirements = resolveDocRequirements(repoRoot, docType)
     const hasAcceptance = /^- \[[ xX]\]\s+C1\b/m.test(normRaw)
@@ -607,17 +635,6 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
   const legacyCritique = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(normRaw)?.[1]?.trim() ?? null
   const critiqueStatus = (typeof fm.data?.plan_critique === 'string' ? fm.data.plan_critique : null) ?? legacyCritique
   return { ok: errors.length === 0, file: relDoc, docType, critiqueStatus, skippedSections, delta, errors, warnings }
-}
-
-export function collectMarkdownFiles(dir, root) {
-  const out = []
-  if (!existsSync(dir)) return out
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...collectMarkdownFiles(full, root))
-    else if (entry.isFile() && entry.name.endsWith('.md')) out.push({ rel: posixPath(relative(root, full)), abs: full })
-  }
-  return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
 /**
@@ -733,54 +750,5 @@ export function checkOrphanSlices(repoRoot) {
 }
 
 export function auditRepoDocs(repoRoot, scope = '.') {
-  const scopeAbs = resolve(repoRoot, scope)
-  const scopeRel = posixPath(relative(repoRoot, scopeAbs))
-  const targets = []
-  for (const d of ['docs/prd', 'docs/specs', 'docs/todo']) {
-    const dirAbs = join(repoRoot, d)
-    if (!existsSync(dirAbs)) continue
-    for (const item of collectMarkdownFiles(dirAbs, repoRoot)) {
-      if (!scopeRel || scopeRel === '.' || item.rel === scopeRel || item.rel.startsWith(`${scopeRel}/`)) targets.push(item.rel)
-    }
-  }
-  const results = targets.map((file) => auditDoc({ repoRoot, file }))
-  const coverageErrors = [...checkMasterPrdCoverage(repoRoot), ...checkOrphanSlices(repoRoot)]
-  const allErrors = [...results.flatMap((r) => r.errors ?? []), ...coverageErrors]
-  const failedCount = results.filter((r) => !r.ok).length + (coverageErrors.length > 0 ? 1 : 0)
-  return {
-    ok: allErrors.length === 0,
-    scope: scopeRel || '.',
-    auditedCount: results.length,
-    failedCount,
-    results,
-    coverageErrors,
-  }
-}
-
-function summarizeDoc(item) {
-  const text = readTextSafe(item.abs) ?? ''
-  const fm = parseDocFrontmatter(text)
-  const title = /^#\s+(.+)$/m.exec(fm.body || text)?.[1]?.trim() ?? fm.data?.title ?? basename(item.rel)
-  return {
-    file: item.rel,
-    title,
-    status: fm.data?.status ?? null,
-    created: fm.data?.created ?? null,
-    plannedAt: fm.data?.planned_at ?? null,
-    issue: fm.data?.issue ?? null,
-    pr: fm.data?.pr ?? null,
-    totalChecks: (text.match(/^- \[[ xX]\]/gm) ?? []).length,
-    doneChecks: (text.match(/^- \[[xX]\]/gm) ?? []).length,
-  }
-}
-
-export function listDocs(repoRoot) {
-  const tddPath = join(repoRoot, 'docs', 'TDD.md')
-  return {
-    tdd: existsSync(tddPath) ? summarizeDoc({ rel: 'docs/TDD.md', abs: tddPath }) : null,
-    prds: collectMarkdownFiles(join(repoRoot, 'docs', 'prd'), repoRoot).map(summarizeDoc),
-    specs: collectMarkdownFiles(join(repoRoot, 'docs', 'specs'), repoRoot).map(summarizeDoc),
-    todos: collectMarkdownFiles(join(repoRoot, 'docs', 'todo'), repoRoot).map(summarizeDoc),
-    archived: collectMarkdownFiles(join(repoRoot, 'docs', 'archive'), repoRoot).map(summarizeDoc),
-  }
+  return runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices })
 }

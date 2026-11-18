@@ -15,7 +15,7 @@ import { gitCommitFast, gitInit, rmTree, runAbsAsync, tmpProject } from './fixtu
 
 /** 状态机的全部阶段。出现表外的值就是拼错了，比「漏一整个状态」容易发现得多。 */
 const KNOWN_PHASES = new Set([
-  'idle', 'ambiguous', 'blocked', 'released', 'needs-claim', 'needs-issue-context',
+  'idle', 'ambiguous', 'blocked', 'released', 'needs-claim', 'needs-explore', 'needs-issue-context',
   'implementing', 'needs-finalize', 'needs-verify', 'needs-submit', 'needs-review',
   'needs-rework', 'ready-to-merge', 'needs-cleanup', 'stop-loss-escalated',
   'awaiting-upstream-merge', 'awaiting-remote-mr',
@@ -113,7 +113,7 @@ export function registerLifecycleCases(cases) {
         if (out.command) {
           const m = /flow\.mjs"?\s+([a-z-]+)/.exec(out.command)
           if (m) {
-            const known = ['inspect', 'next', 'start', 'claim', 'release', 'finalize', 'verify', 'submit',
+            const known = ['inspect', 'next', 'explore', 'start', 'claim', 'release', 'finalize', 'verify', 'submit',
               'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
             if (!known.includes(m[1])) return `${out.phase} 给的命令用了不存在的子命令 ${m[1]}`
           }
@@ -130,6 +130,12 @@ export function registerLifecycleCases(cases) {
           const led = JSON.parse(readFileSync(join(dir, '.worktrees', '.state', 'tasks', 'lc.json'), 'utf8'))
           if (!led.claimedAt) return '认领跑完了但账本没记 claimedAt'
           if (led.status !== 'claimed') return `认领之后 status 是 ${led.status}`
+        }
+        if (out.phase === 'needs-explore') {
+          const exp = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['explore', '--task', 'lc', '--json'], { cwd: dir })
+          if (exp.status !== 0) return `探索命令跑不通：${String(exp.stderr).slice(0, 200)}`
+          const led = JSON.parse(readFileSync(join(dir, '.worktrees', '.state', 'tasks', 'lc.json'), 'utf8'))
+          if (!led.explored?.at || !led.explored?.tier) return `explore 跑完了但账本没记 explored：${JSON.stringify(led.explored)}`
         }
         // 实施格：模拟子代理写代码并提交，验证阶段真的会前进
         if (out.phase === "implementing") {

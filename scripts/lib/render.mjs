@@ -287,8 +287,12 @@ export function toMarkdown(facts) {
   }
 
   if (facts.questions.length > 0) {
+    const kinds = facts.needsHuman?.kinds?.length
+      ? facts.needsHuman.kinds
+      : [...new Set(facts.questions.map((q) => q.id).filter(Boolean))]
     lines.push('## 要问用户的事')
     lines.push('')
+    lines.push(`<!-- NEEDS_HUMAN: count=${facts.questions.length} kinds=${kinds.join(',')} -->`)
     for (const q of facts.questions) lines.push(`- ${q.text}`)
     lines.push('')
   }

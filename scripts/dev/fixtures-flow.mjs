@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
-import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowCases(cases) {
 cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻断与人工豁免、干净增量测试放行', async () => {
@@ -41,6 +41,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
 
     const s1 = await handleStart({ task: 't-w2', case: '1', slug: 'w2-gate' }, roots)
     if (s1.exitCode !== 0) return `start t-w2 失败：${s1.exitCode}`
+    await seedExploredFor(dir, 't-w2')
     const implW2 = join(dir, '.worktrees', 'impl-t-w2')
 
     const missTarget = await handleVerify({ task: 't-w2', mode: 'smoke' }, roots)
@@ -71,6 +72,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     // 4. 反面证伪：新增测试断言（非弱化）无 --human-approved 直接合并放行
     const s2 = await handleStart({ task: 't-w2-clean', case: '1', slug: 'w2-clean' }, roots)
     if (s2.exitCode !== 0) return `start t-w2-clean 失败：${s2.exitCode}`
+    await seedExploredFor(dir, 't-w2-clean')
     const implClean = join(dir, '.worktrees', 'impl-t-w2-clean')
     writeFileSync(join(implClean, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\nassert.equal(3, 3)\n')
     gitCommitFast(implClean, 'add assertion', { updateOnly: true })
@@ -320,6 +322,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
     const t2Init = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['init', '--kind', 'todo', '--slug', 't2-feat', '--title', 'T2 Feature'], { cwd: dir })
     if (t2Init.status !== 0) return `t2 doc-plan init 失败：${t2Init.stderr}`
     await handleStart({ task: 't-t2', case: '3', slug: 't2-feat' }, roots)
+    await seedExploredFor(dir, 't-t2')
     const l = readTaskLedger(dir, 't-t2')
     const implAbs = join(dir, l.worktreePath)
     const revAbs = join(dir, l.reviewWorktreePath)
@@ -392,6 +395,7 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
     const roots = await resRoots(ciDir)
     const st = await handleStart({ task: 'ci-t', case: '2', slug: 'ci-t', 'clone-choice': 'standalone' }, roots)
     if (st.exitCode !== 0) return `ciDir start 失败：${st.exitCode}`
+    await seedExploredFor(ciDir, 'ci-t')
     const ciImpl = join(ciDir, '.worktrees', 'impl-ci-t')
     let mergeCalls = 0
     const makeProbe = (checksRes) => ({
@@ -727,6 +731,7 @@ cases.push(["刚建好的任务下一步是实施，不是归档", async () => {
     branch: "feat/x", baseBranch: "main", baseSha: "aaa",
     worktreePath: ".worktrees/impl-t1",
     specFile: "docs/specs/x.md", todoFile: "docs/todo/x.md",
+    explored: { at: "2026-01-01T00:00:00Z", tier: "direct-read", symbolCount: 1 },
     rounds: [], finalized: false,
     ...over,
   })

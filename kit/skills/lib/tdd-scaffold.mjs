@@ -20,7 +20,9 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { FORM_INDEPENDENT_CORE, resolveDocRequirements } from './doc-requirements.mjs'
 import { renderDocTemplate } from './doc-template-render.mjs'
+import { appendCustomDocSections } from './doc-templates.mjs'
 import { readTextSafe } from './git.mjs'
 
 /** 常见生态的运行时说明。读不出具体版本时只说语言，不编版本号。 */
@@ -253,13 +255,34 @@ export function buildPreFilledTdd(facts, opts = {}) {
     NON_GOALS_LINES: opts.nonGoals ?? '  - <明确不承担的能力范围，防止后续需求越界>',
   }
 
-  // 形状开关决定裁哪几节：判不出来的保守全留——空的会被人删掉，缺的不会。
-  const dropSections = opts.dropSections
-    ?? (facts?.tddShape?.dropSections ? new Set(facts.tddShape.dropSections) : null)
+  const repoRoot = opts.repoRoot ?? root
+  const docRequirements = repoRoot ? resolveDocRequirements(repoRoot, 'tdd') : null
+  const immutableCore = new Set(FORM_INDEPENDENT_CORE.tdd ?? [])
+  const baseDrops = opts.dropSections
+    ?? (facts?.tddShape?.dropSections ? new Set(facts.tddShape.dropSections) : new Set())
+  const dropSections = new Set(baseDrops)
+  if (docRequirements) {
+    const reqIds = new Set(docRequirements.sections.map((s) => s.id))
+    for (const id of docRequirements.omit ?? []) {
+      if (!immutableCore.has(id) && !reqIds.has(id)) dropSections.add(id)
+    }
+    for (const id of reqIds) dropSections.delete(id)
+  }
+  for (const id of immutableCore) dropSections.delete(id)
 
-  const rendered = renderDocTemplate('tdd', { vars, dropSections, pruneUnfilled: false })
+  const rendered = renderDocTemplate('tdd', {
+    vars,
+    dropSections: opts.noPrune ? new Set() : dropSections,
+    pruneUnfilled: false,
+  })
   if (rendered === null) {
     throw new Error('读不到 TDD 模板（kit/skills/templates/docs-tdd.md）——生成器不该在没有模板时继续')
   }
-  return rendered
+  return appendCustomDocSections(rendered, {
+    repoRoot,
+    kind: 'tdd',
+    title: vars.PROJECT_NAME,
+    safeSlug: 'tdd',
+    taskId: 'tdd',
+  })
 }

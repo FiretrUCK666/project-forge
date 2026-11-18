@@ -96,8 +96,21 @@ function checkNameExists(codeText, name) {
  */
 async function checkCommandClaim(root, cmd) {
   if (!/^(?:node|npm|npx|git)\s/.test(cmd)) return { ok: true, ran: false, why: '非只读命令，未执行' }
-  if (/(?:cleanup|--confirm|--force|\brm\s|\bremove\b|\bpush\b|\bdelete\b|--fix)/.test(cmd)) {
+  if (/^git\s/i.test(cmd) && !/^git\s+(?:status|log|diff|show|ls-files|rev-parse|describe|symbolic-ref|check-ignore)(?:\s|$)/i.test(cmd)) {
+    return { ok: true, ran: false, why: '非只读 Git 子命令，未执行' }
+  }
+  if (/^(?:npm|npx)\s/i.test(cmd) && !/^npm\s+(?:test|run\s+(?:test|lint|typecheck|check|build))\b/i.test(cmd)) {
+    return { ok: true, ran: false, why: '包管理命令存在副作用风险，未执行' }
+  }
+  if (/(?:cleanup|--confirm|--force|--hard|\brm\s|\bremove\b|\bpush\b|\bdelete\b|--fix|\b-e\b|--eval\b)/i.test(cmd)) {
     return { ok: true, ran: false, why: '命令带副作用，未执行' }
+  }
+  if (/^node\s+[^\n]*(?:equip(?:-ci)?\.mjs|backup\.mjs|compose-agents\.mjs)(?!.*--check\b)/i.test(cmd)) {
+    return { ok: true, ran: false, why: '写入型脚手架命令，未执行' }
+  }
+  if (/^node\s+[^\n]*flow\.mjs\s+(?:start|claim|explore|finalize|merge|cleanup|abort|release|batch|submit|rework|sync)\b/i.test(cmd)
+    || /^node\s+[^\n]*doc-plan\.mjs\s+(?:init|clarify|link|critique-pass|approve|archive|supersede)\b/i.test(cmd)) {
+    return { ok: true, ran: false, why: '状态变更子命令，未执行' }
   }
 
   const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []

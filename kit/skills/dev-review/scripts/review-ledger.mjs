@@ -9,25 +9,19 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
-import { buildReviewComments } from '../../lib/docs.mjs'
-import { gitRun, posixPath } from '../../lib/git.mjs'
-import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
+import { posixPath } from '../../lib/git.mjs'
 import {
   consumeReviewToken, createDefaultLedger, readTaskLedger, resolveTaskContext, sanitizeTaskId, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
-import {
-  detectDeclaredRepo, githubRepoFull, isInternalAgentSlug, parseIssueNumbers,
-  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
-} from '../../lib/platform.mjs'
-import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
-import { parseAcceptanceCriteria } from './review-gates.mjs'
 import {
   checkHistoricalStopLoss, checkIncrementalScopeLock, checkSameHeadRereview,
   computeDispositionStats, evaluatePassBlockers, normalizeAdvisoryList,
   normalizeMustFixObj, parseDispositions, parseMustFixItem, sameBlockerItem,
 } from './review-locks.mjs'
+import { syncReviewToGitHub } from './review-sync.mjs'
 
 function matchesItemIdSet(pm, idSet) {
   if (!pm || idSet.size === 0) return false
@@ -55,168 +49,6 @@ function resolveRecordNextSteps({ taskId, verdict, round, role, mainRoot }) {
   return [
     `Implementer: fix Must-Fix items on the SAME branch, re-run tests and commit, then invoke review Round ${round + 1}.`,
   ]
-}
-
-function buildCriteriaStatusSummary({ workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList, explicitStatus, parsedCriteria }) {
-  if (explicitStatus && String(explicitStatus).trim()) return String(explicitStatus).trim()
-  const criteria = parsedCriteria ?? parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
-  const allIds = criteria.map((c) => c.id)
-  if (verdict === 'pass') {
-    return allIds.length > 0
-      ? `fail: 无 / pass: ${allIds.join(', ')}`
-      : `fail: 无 / pass: 全部已核验项 (HEAD ${String(headSha ?? '').slice(0, 7)})`
-  }
-  const failIds = new Set()
-  for (const m of mustFixList) {
-    if (m.criterion) failIds.add(m.criterion.toUpperCase())
-    else {
-      for (const cm of String(m.summary ?? '').matchAll(/\b(C\d+)\b/gi)) {
-        failIds.add(cm[1].toUpperCase())
-      }
-    }
-  }
-  const passIds = allIds.filter((id) => !failIds.has(id))
-  const failList = failIds.size > 0
-    ? [...failIds]
-    : (mustFixList.length > 0 ? mustFixList.map((m) => m.id) : ['未满足全部验收条件'])
-  return `fail: ${failList.join(', ')}${passIds.length > 0 ? ` / pass: ${passIds.join(', ')}` : ''}`
-}
-
-async function syncReviewToGitHub({
-  mainRoot, workTreeRoot, ledger, round, verdict, headSha, reviewerId, implementerId,
-  stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
-  rebuttedItems = [], resolvedItems = [], nextSteps = [], opts,
-}) {
-  const prNum = Number.isInteger(Number(ledger.prNumber)) && Number(ledger.prNumber) > 0 ? Number(ledger.prNumber) : null
-  const issueNums = Array.isArray(ledger.linkedIssues)
-    ? [...new Set(ledger.linkedIssues.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))]
-    : []
-
-  if (!prNum && issueNums.length === 0) {
-    return { synced: false, skipped: true, reason: 'no-linked-pr-or-issue' }
-  }
-  if (ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || ledger.providerId === 'none') {
-    return { synced: false, skipped: true, reason: `role-${ledger.role ?? 'local'}` }
-  }
-
-  let delegatedPayloads = null
-  try {
-    const fastCfg = readGitConfigFast(opts.gitDir ?? resolveGitDirFast(mainRoot))
-    const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(mainRoot, ['remote', '-v'])
-    const hasRemote = Boolean(remoteRes.ok && remoteRes.stdout.trim())
-    const remoteUrls = hasRemote ? parseRemoteUrls(remoteRes.stdout) : {}
-    const declaredRepo = detectDeclaredRepo(mainRoot)
-    const originFull = hasRemote ? githubRepoFull(remoteUrls.origin ?? Object.values(remoteUrls)[0]) : null
-    const upstreamFull = hasRemote ? githubRepoFull(remoteUrls.upstream) : null
-    const targetRepo = (ledger.role === 'contributor-fork' ? (upstreamFull ?? declaredRepo ?? originFull) : (originFull ?? declaredRepo)) ?? null
-
-    const ghProbe = hasRemote
-      ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls })))
-      : (opts._ghProbe ?? null)
-    const ghClient = opts._ghClient ?? ghProbe?.client ?? null
-    const tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'
-    const ghLogin = ghProbe?.env?.trackB?.login
-    const implDisplay = resolveContributorIdentity({ ghLogin, ledgerActor: implementerId }).display
-    const sourceLine = isInternalAgentSlug(reviewerId) && ghLogin
-      ? `@${ghLogin}（独立审查子代理 \`${reviewerId}\`，隔离 worktree 复核，实施人：${implDisplay}）`
-      : `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`
-
-    const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
-    const criteriaStatusText = buildCriteriaStatusSummary({
-      workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
-      explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
-    })
-    const faultInjectionText = String(opts['fault-injection'] ?? '').trim() || '未触及高风险路径或未附额外故障注入摘要'
-    const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
-    const staleLabel = verdict === 'changes' ? 'reviewed' : 'changes-requested'
-    const statePayload = {
-      taskId: ledger.taskId, action: 'review', round, verdict, headSha, reviewerId, stopLossTriggered: stopLoss,
-    }
-
-    const { prCommentBody, issueCommentBody, stateTag } = buildReviewComments({
-      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria, criteriaStatusText,
-      faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
-      rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
-    })
-    const targets = [
-      ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
-      ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
-    ]
-    delegatedPayloads = {
-      targetRepo,
-      label: labelName,
-      staleLabel,
-      targets: targets.map((t) => {
-        const rawBody = t.kind === 'pr' ? prCommentBody : issueCommentBody
-        return {
-          kind: t.kind,
-          number: t.number,
-          body: stateTag ? `${rawBody}\n\n${stateTag}` : rawBody,
-          rawBody,
-          statePayload,
-          addLabels: [labelName],
-          removeLabels: [staleLabel],
-        }
-      }),
-    }
-
-    if (!hasRemote) {
-      return {
-        synced: false, offlineOrNoCreds: true, reason: 'no-remote', targetRepo, delegatedPayloads,
-        hint: '未配置远端，审查结论已安全保存至本地账本并附规范评论载荷（不阻塞离线使用）。',
-      }
-    }
-    if (!targetRepo) {
-      return { synced: false, skipped: true, reason: 'no-github-repo', delegatedPayloads, hint: '非 GitHub 远端，审查结论已写入本地账本。' }
-    }
-    if ((!opts._ghClient && ghProbe?.env?.providerId !== 'github') || (tier !== 'gh-cli' && tier !== 'node-https-token')) {
-      return {
-        synced: false,
-        offlineOrNoCreds: true,
-        tier,
-        targetRepo,
-        reason: `offline-or-no-credentials(${tier})`,
-        delegatedPayloads,
-        hint: `离线或无可用 GitHub 凭据（tier=${tier}），已写入本地账本并输出规范化 delegatedPayloads 供宿主原样双写。`,
-      }
-    }
-
-    const backend = createTaskBackend({
-      role: ledger.role, providerId: ledger.providerId, targetRepo,
-      client: ghClient, mainRoot, gitDir: opts.gitDir,
-    })
-    const results = []
-    for (const t of targets) {
-      const targetBody = t.kind === 'pr' ? prCommentBody : issueCommentBody
-      const commentRes = await backend.postComment({
-        repo: targetRepo, number: t.number, body: targetBody, statePayload,
-      })
-      const labelRes = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
-      await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
-      results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
-    }
-
-    const synced = results.some((r) => r.comment?.ok)
-    return {
-      synced,
-      targetRepo,
-      label: labelName,
-      delegatedPayloads,
-      results,
-      ...(!synced ? {
-        offlineOrNoCreds: true,
-        hint: '远端评论同步未成功（可能处于离线或无写权限环境），审查结论已写入本地账本，请使用 delegatedPayloads 原样双写。',
-      } : {}),
-    }
-  } catch (err) {
-    return {
-      synced: false,
-      offlineOrNoCreds: true,
-      ...(delegatedPayloads ? { delegatedPayloads } : {}),
-      error: err instanceof Error ? err.message : String(err),
-      hint: '远端同步异常（可能离线），已安全写入本地账本，绝不阻塞审查流转。',
-    }
-  }
 }
 
 export async function handleRecord(opts, roots) {

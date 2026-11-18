@@ -184,7 +184,7 @@ export function extractHostAndPath(rawUrl) {
     } catch { /* fall through */ }
   }
   const scp = /^(?:[^@\s]+@)?([^:/\s]+):(.+)$/.exec(s)
-  if (scp && !/^[A-Za-z]:\\/.test(s)) {
+  if (scp && !/^[A-Za-z]:[\\/]/.test(s)) {
     return { host: scp[1].toLowerCase(), path: scp[2].replace(/^\/+/, '') }
   }
   return null

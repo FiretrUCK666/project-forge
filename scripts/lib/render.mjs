@@ -405,7 +405,7 @@ function appendRemoteAndAuthWizard(lines, facts) {
   lines.push('')
   if (noRemote) {
     lines.push('- **无远端三路决策（支持通用 Git SSH/HTTP(S) 与 GitHub）**：')
-    lines.push('  1. **暂不配远端（纯本地）**：在 `.git/` 创建 `pf-local-mode` 标记（或在 `AGENTS.md`「## 取舍」写 `remote-setup: local-only`）。')
+    lines.push('  1. **暂不配远端（纯本地）**：仓库无远端时已自动识别为 `local-only`，无需创建 `.git/pf-local-mode` 标记；若需固定显式决策，在 `AGENTS.md`「## 取舍」写 `remote-setup: local-only` 即可。')
     lines.push('  2. **绑定已有远端（SSH / HTTP(S)）**：')
     lines.push('     - SSH：`git remote add origin git@<host>:<owner>/<repo>.git`（先完成本机 SSH Key 与主机指纹核验）；')
     lines.push('     - HTTP(S)：`git remote add origin https://<host>/<owner>/<repo>.git`（**严禁把令牌或口令写进 URL / `.git/config`**）。')

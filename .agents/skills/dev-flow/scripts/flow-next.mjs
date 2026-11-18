@@ -13,14 +13,14 @@ import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/gi
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { ensureReviewToken, listTaskLedgers, resolveTaskContext, writeTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, parsePfStateTags, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
 import {
   determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
   readVerificationEvidence, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
-import { buildTargetRepoContext, getChangedFiles } from './flow-inspect.mjs'
+import { buildTargetRepoContext, detectRemoteDriftWarnings, getChangedFiles } from './flow-context.mjs'
 
 async function hydrateRemotePfState({ roots, ledger, opts }) {
   if (!opts['probe-auth']) return { rehydrated: false }
@@ -259,6 +259,36 @@ export async function handleNext(opts, roots) {
   }
 
   let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime, hasDevReview, multiTaskFiles })
+
+  if (roots.isGit) {
+    const cfgFast = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
+    const remoteOut = cfgFast ? cfgFast.remoteText : (await gitRun(roots.mainRoot, ['remote', '-v'])).stdout
+    const remoteUrls = parseRemoteUrls(remoteOut ?? '')
+    const hasAnyRemote = Object.keys(remoteUrls).length > 0
+    const markers = roots.gitDir ? detectGitModeMarkers(roots.gitDir, { hasRemote: hasAnyRemote }) : { localMode: false }
+    if (hasAnyRemote && !markers.localMode) {
+      const topo = parseRemotesTopology(remoteOut ?? '')
+      const driftWarnings = detectRemoteDriftWarnings({
+        mainRoot: roots.mainRoot,
+        gitDir: roots.gitDir,
+        role: selectedTask?.role && selectedTask.role !== 'local-only' ? selectedTask.role : 'maintainer',
+        providerId: topo.providerId ?? 'github',
+      })
+      if (selectedTask?.role === 'local-only') {
+        driftWarnings.push({
+          code: 'WARN_TASK_STARTED_BEFORE_REMOTE',
+          message: `远端漂移提醒：任务 ${selectedTask.taskId} 启动时为 local-only，但当前仓库已绑定远端；建议重跑 S1–S4 或运行 \`flow.mjs issue migrate\` 后同步任务角色。`,
+        })
+      }
+      if (driftWarnings.length > 0) {
+        const merged = [...(out.warnings ?? [])]
+        for (const w of driftWarnings) {
+          if (!merged.some((m) => m.code === w.code)) merged.push(w)
+        }
+        out = { ...out, warnings: merged }
+      }
+    }
+  }
 
   // 待审查时签发一枚一次性令牌。
   //

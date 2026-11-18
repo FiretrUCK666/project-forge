@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ensurePreWriteBackup } from './backup.mjs'
 import { writeAtomic } from './lib/fs-atomic.mjs'
+import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
 import { detectSkillKind } from './lib/survey-ecosystem.mjs'
 import {
   filterKitByTier,
@@ -532,6 +533,7 @@ export function equip(targetDir, {
             ? { created: false, skippedReason: 'no-pending-changes' }
             : ensurePreWriteBackup(root, { label: 'equip', hasPendingChanges: true })))
 
+  let cleanedStaleLocalMode = []
   if (!dryRun) {
     for (const item of pendingWrites) {
       mkdirSync(dirname(item.dest), { recursive: true })
@@ -545,6 +547,8 @@ export function equip(targetDir, {
       mkdirSync(dirname(manifestPath), { recursive: true })
       writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
     }
+    const cleaned = cleanStaleLocalModeMarker(root)
+    if (cleaned.cleaned) cleanedStaleLocalMode = cleaned.removed
   }
 
   return {
@@ -553,6 +557,7 @@ export function equip(targetDir, {
     added, restored, upgraded, unchanged, preservedHigherTier, conflicts, retired,
     orphanedModified, adopted, customized,
     disabledSkills: nextManifest.disabledSkills, removedFiles: Object.keys(nextManifest.removedFiles), ensuredGitkeeps,
+    ...(cleanedStaleLocalMode.length > 0 ? { cleanedStaleLocalMode } : {}),
   }
 }
 

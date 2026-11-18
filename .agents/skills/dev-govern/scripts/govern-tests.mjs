@@ -9,6 +9,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, posix, resolve } from 'node:path'
 
 import { posixPath, readJsonSafe, readTextSafe } from '../../lib/git.mjs'
+import { detectGitModeMarkers } from '../../lib/platform.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, readDecisions } from '../../lib/profile.mjs'
 import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
 import {
@@ -58,9 +59,11 @@ function isPureLocalOrNoCiRepo(repoRoot) {
         commonDir = cm ? resolve(gitDir, cm.trim()) : gitDir
       }
     }
-    if (existsSync(join(gitDir, 'pf-local-mode')) || existsSync(join(commonDir, 'pf-local-mode'))) return true
     const cfg = readTextSafe(join(commonDir, 'config')) ?? ''
-    return !/^\s*\[remote\s+"[^"]+"\]/m.test(cfg)
+    const hasRemote = /^\s*\[remote\s+"[^"]+"\]/m.test(cfg)
+    const markers = detectGitModeMarkers(gitDir, { hasRemote })
+    if (markers.localMode) return true
+    return !hasRemote
   } catch {
     return false
   }

@@ -29,6 +29,8 @@ export function buildNonInteractiveEnv(baseEnv = process.env, extra = {}) {
     SSH_ASKPASS_REQUIRE: 'never',
     GCM_INTERACTIVE: 'never',
     GH_PROMPT_DISABLED: '1',
+    GIT_EDITOR: 'true',
+    GIT_SEQUENCE_EDITOR: 'true',
     ...extra,
   }
 }

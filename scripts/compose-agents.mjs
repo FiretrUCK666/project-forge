@@ -153,7 +153,7 @@ export function buildConditions(facts, { tier } = {}) {
     || COMMAND_ORDER.some((k) => typeof commands[k] === 'string' && commands[k].trim())
   const kinds = facts.ecosystem?.kinds ?? []
   const tags = facts.git?.tags ?? []
-  const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false
+  const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false && !facts.git?.localMode
   const hasCustomSkills = customSkillsOf(facts).length > 0
   const effectiveTier = resolveEffectiveTier(tier, null, facts)
 

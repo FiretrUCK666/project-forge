@@ -119,7 +119,7 @@ export async function runTrialMerge({
     const up = await gitRun(mainRoot, ['update-ref', baseRefName, branchSha])
     if (!up.ok) throw new Error(`创建基线分支 ${baseBranch} 失败：${up.stderr}`)
     if (curMainBranch === baseBranch) {
-      await gitRun(mainRoot, ['merge', '--ff-only', branchSha])
+      await gitRun(mainRoot, ['merge', '--ff-only', '--no-edit', branchSha])
     }
     return { ok: true, localMerge: true, initialBranchCreated: true, branch, into: baseBranch, mergedSha: branchSha }
   }

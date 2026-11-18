@@ -1,5 +1,5 @@
 /**
- * github-client.mjs —— 四级降级 GitHub 客户端与 Issue/PR 引用解析。
+ * github-client.mjs —— 四级降级 GitHub 客户端、HTTP 韧性退避重试与幂等保护。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），令牌仅留存在内存闭包中，绝不落盘。
  */
@@ -10,10 +10,48 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { execSafe } from './git.mjs'
+import {
+  MAX_RETRY_DELAY_MS,
+  computeWriteBackFingerprint,
+  extractCliHttpStatus,
+  isInternalAgentSlug,
+  isRetryableHttpOutcome,
+  normalizeCommentEntries,
+  normalizeIssuePayload,
+  normalizePrPayload,
+  normalizeRepoMetaPayload,
+  parseBodyRelations,
+  parseFlowInputs,
+  parseIssueNumbers,
+  parsePfStateTags,
+  parsePrNumber,
+  parseRetryAfterMs,
+  redactGhTokens,
+  resolveContributorIdentity,
+  stripPfStateTags,
+  summarizeCommitChecks,
+} from './github-parse.mjs'
+
+export {
+  computeWriteBackFingerprint,
+  isInternalAgentSlug,
+  parseBodyRelations,
+  parseFlowInputs,
+  parseIssueNumbers,
+  parsePfStateTags,
+  parsePrNumber,
+  resolveContributorIdentity,
+  stripPfStateTags,
+  summarizeCommitChecks,
+}
 
 let ghTmpCounter = 0
 
-export function githubHttpsRequest(method, apiPath, token, bodyObj, { timeoutMs = 10000 } = {}) {
+function defaultSleep(ms) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()
+}
+
+export function githubHttpsRequest(method, apiPath, token, bodyObj, { timeoutMs = 10000, redirect = 'manual' } = {}) {
   return new Promise((done) => {
     let settled = false
     const finish = (res) => {
@@ -42,41 +80,49 @@ export function githubHttpsRequest(method, apiPath, token, bodyObj, { timeoutMs 
       method,
       headers,
       timeout: timeoutMs,
+      redirect,
       ...(signal ? { signal } : {}),
     }, (res) => {
       const chunks = []
       res.on('data', (c) => chunks.push(c))
       res.on('end', () => {
+        const status = res.statusCode ?? 0
+        const resHeaders = res.headers ?? {}
+        if (status >= 300 && status < 400) {
+          finish({
+            ok: false,
+            status,
+            headers: resHeaders,
+            isRedirect: true,
+            redirectLocation: resHeaders.location ?? null,
+            data: { message: `Redirect rejected (HTTP ${status})` },
+          })
+          return
+        }
         const raw = Buffer.concat(chunks).toString('utf8')
         let data = null
         try { data = raw ? JSON.parse(raw) : null } catch { data = raw }
-        finish({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode ?? 0, data })
+        finish({ ok: status >= 200 && status < 300, status, headers: resHeaders, data })
       })
     })
     req.on('timeout', () => {
       req.destroy()
-      finish({ ok: false, status: 408, data: { message: 'GitHub API timeout' } })
+      finish({ ok: false, status: 408, timedOut: true, headers: {}, data: { message: 'GitHub API timeout' } })
     })
     req.on('error', (err) => {
       const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError'
-      const safeMsg = String(err?.message ?? 'request-error').replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
-      finish({ ok: false, status: isAbort ? 408 : 0, data: { message: safeMsg } })
+      finish({
+        ok: false,
+        status: isAbort ? 408 : 0,
+        timedOut: isAbort,
+        code: err?.code ?? null,
+        headers: {},
+        data: { message: redactGhTokens(err?.message ?? 'request-error') },
+      })
     })
     if (payload) req.write(payload)
     req.end()
   })
-}
-
-/** 解析评论正文中的所有 `<!-- pf-state:{...} -->` 状态标签。 */
-export function parsePfStateTags(body) {
-  const tags = []
-  for (const m of String(body ?? '').matchAll(/<!--\s*pf-state:(\{[\s\S]*?\})\s*-->/g)) {
-    try {
-      const parsed = JSON.parse(m[1])
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) tags.push(parsed)
-    } catch { /* ignore malformed tag */ }
-  }
-  return tags
 }
 
 async function withUtf8TempFile(prefix, content, fn) {
@@ -90,173 +136,6 @@ async function withUtf8TempFile(prefix, content, fn) {
   }
 }
 
-/** 解析 Issue / PR 正文中的依赖与引用关系（忽略代码块）。 */
-export function parseBodyRelations(body) {
-  const text = String(body ?? '')
-  const out = { dependsOn: [], blocks: [], partOf: [], fixes: [], refs: [] }
-  const cleanLines = []
-  let inFence = false
-  for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
-    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
-    if (!inFence) cleanLines.push(line)
-  }
-  const clean = cleanLines.join('\n')
-  const extractNums = (re, bucket) => {
-    for (const m of clean.matchAll(re)) {
-      for (const numMatch of m[1].matchAll(/#(\d+)/g)) {
-        const n = Number(numMatch[1])
-        if (Number.isInteger(n) && !bucket.includes(n)) bucket.push(n)
-      }
-    }
-  }
-  extractNums(/\bdepends\s+on\s*:?\s*([^\n.;]+)/gi, out.dependsOn)
-  extractNums(/\bblocks\s*:?\s*([^\n.;]+)/gi, out.blocks)
-  extractNums(/\bpart\s+of\s*:?\s*([^\n.;]+)/gi, out.partOf)
-  extractNums(/\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s*:?\s*([^\n.;]+)/gi, out.fixes)
-  extractNums(/\brefs?\s*:?\s*([^\n.;]+)/gi, out.refs)
-  return out
-}
-
-const INTERNAL_AGENT_SLUG_RE = /^(?:local-agent|implementer|coordinator(?:-|$)|swarm(?:-|$)|worker(?:-|$)|subagent(?:-|$)|independent-review(?:er)?(?:-|$)|critic(?:-|$)|integrator(?:-|$)|agent-\d+|claude(?:-|$)|gemini(?:-|$)|gpt(?:-|$)|codex(?:-|$))/i
-
-/** 判断标识是否为内部 AI 角色/调度代号而非真实仓库协作者账号。 */
-export function isInternalAgentSlug(val) {
-  const clean = String(val ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
-  return clean ? INTERNAL_AGENT_SLUG_RE.test(clean) : true
-}
-
-/** 优先解析真实 GitHub/Git 协作者署名（过滤内部子代理代号与冗余邮箱后缀），返回 `{ actor, display }`。 */
-export function resolveContributorIdentity({ explicitActor, ghLogin, gitName, ledgerActor } = {}) {
-  const clean = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
-  const exp = clean(explicitActor)
-  const picks = [
-    exp && !isInternalAgentSlug(exp) ? exp : '',
-    clean(ghLogin),
-    clean(gitName),
-    clean(ledgerActor),
-  ].filter((x) => x && !isInternalAgentSlug(x))
-  const actor = picks[0] || (!exp || isInternalAgentSlug(exp) ? 'maintainer' : exp)
-  const display = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(actor) ? `@${actor}` : actor
-  return { actor, display }
-}
-
-/** 解析单个 PR 引用（正整数、#M、pr#M 或 GitHub Pull Request URL）。 */
-export function parsePrNumber(raw, { strict = false } = {}) {
-  if (raw === undefined || raw === null || raw === '') return null
-  if (typeof raw === 'number') {
-    if (Number.isInteger(raw) && raw > 0) return raw
-    if (strict) throw new Error(`PR 编号必须为正整数，收到：${raw}`)
-    return null
-  }
-  const s = String(raw).trim()
-  if (!s) return null
-  let m = /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#]|$)/i.exec(s)
-  if (m) return Number(m[1])
-  m = /^(?:pr)?#?(\d+)$/i.exec(s)
-  if (m) {
-    const n = Number(m[1])
-    if (Number.isInteger(n) && n > 0) return n
-  }
-  if (strict) throw new Error(`PR 引用格式无效（支持编号、#M、pr#M 或 GitHub PR URL）：${raw}`)
-  return null
-}
-
-/** 解析 Issue 引用或列表（正整数、#N、issue#N 或 GitHub Issue URL，支持逗号/空格分隔）。 */
-export function parseIssueNumbers(rawOrList, { strict = false } = {}) {
-  const tokens = (Array.isArray(rawOrList) ? rawOrList : [rawOrList])
-    .flatMap((v) => (v === undefined || v === null ? [] : String(v).split(/[\s,]+/)))
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const nums = []
-  for (const tok of tokens) {
-    let m = /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)(?:[/?#]|$)/i.exec(tok)
-    if (!m) m = /^(?:issue)?#?(\d+)$/i.exec(tok)
-    if (m) {
-      const n = Number(m[1])
-      if (Number.isInteger(n) && n > 0 && !nums.includes(n)) nums.push(n)
-    } else if (strict) {
-      throw new Error(`Issue 引用格式无效（支持正整数、#N、issue#N 或 GitHub Issue URL）：${tok}`)
-    }
-  }
-  return nums
-}
-
-/** 解析混合输入列表（Issue URL / PR URL / #N / issue#N / pr#N）。 */
-export function parseFlowInputs(inputs = [], defaultRepo = null) {
-  const issues = []
-  const prs = []
-  const unknown = []
-  for (const raw of inputs) {
-    const s = String(raw ?? '').trim()
-    if (!s) continue
-    let m = /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/i.exec(s)
-    if (m) { issues.push({ repo: m[1], number: Number(m[2]), raw: s }); continue }
-    m = /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/i.exec(s)
-    if (m) { prs.push({ repo: m[1], number: Number(m[2]), raw: s }); continue }
-    m = /^pr#(\d+)$/i.exec(s)
-    if (m) { prs.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
-    m = /^(?:issue)?#(\d+)$/i.exec(s)
-    if (m) { issues.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
-    unknown.push(s)
-  }
-  return { issues, prs, unknown }
-}
-
-/** 解析并按同名/上下文去重汇总提交的 GitHub check-runs 与 commit statuses。 */
-export function summarizeCommitChecks(checkRunsRaw, combinedStatusRaw) {
-  const crList = Array.isArray(checkRunsRaw) ? checkRunsRaw : (Array.isArray(checkRunsRaw?.check_runs) ? checkRunsRaw.check_runs : [])
-  const stList = Array.isArray(combinedStatusRaw) ? combinedStatusRaw : (Array.isArray(combinedStatusRaw?.statuses) ? combinedStatusRaw.statuses : [])
-
-  const latestRuns = new Map()
-  for (const cr of crList) {
-    const name = String(cr?.name ?? '').trim()
-    if (!name) continue
-    const prev = latestRuns.get(name)
-    if (!prev) { latestRuns.set(name, cr); continue }
-    const idCur = Number(cr?.id) || 0
-    const idPrev = Number(prev?.id) || 0
-    if (idCur > idPrev || (idCur === idPrev && String(cr?.started_at ?? '') > String(prev?.started_at ?? ''))) {
-      latestRuns.set(name, cr)
-    }
-  }
-
-  const passed = []
-  const pending = []
-  const failed = []
-
-  for (const cr of latestRuns.values()) {
-    const name = String(cr?.name ?? '').trim()
-    const status = String(cr?.status ?? '').toLowerCase()
-    const conclusion = cr?.conclusion ? String(cr.conclusion).toLowerCase() : null
-    const url = cr?.details_url ?? cr?.html_url ?? null
-    if (status !== 'completed') {
-      pending.push({ kind: 'check-run', name, state: status || 'queued', url })
-    } else if (conclusion && ['success', 'neutral', 'skipped'].includes(conclusion)) {
-      passed.push({ kind: 'check-run', name, state: conclusion, url })
-    } else {
-      failed.push({ kind: 'check-run', name, state: conclusion || 'failure', url })
-    }
-  }
-
-  const seenCtx = new Set()
-  for (const st of stList) {
-    const ctx = String(st?.context ?? '').trim()
-    if (!ctx || seenCtx.has(ctx)) continue
-    seenCtx.add(ctx)
-    const state = String(st?.state ?? '').toLowerCase()
-    const url = st?.target_url ?? null
-    if (state === 'pending') pending.push({ kind: 'status', name: ctx, state, url })
-    else if (state === 'success') passed.push({ kind: 'status', name: ctx, state, url })
-    else failed.push({ kind: 'status', name: ctx, state: state || 'failure', url })
-  }
-
-  const total = passed.length + pending.length + failed.length
-  const bucket = failed.length > 0 ? 'fail'
-    : pending.length > 0 ? 'pending'
-      : passed.length > 0 ? 'pass' : 'none'
-  return { ok: true, bucket, total, passed, pending, failed }
-}
-
 /** 构造四级降级 GitHub 客户端。 */
 export function createGitHubClient({
   tier = 'mcp-delegate',
@@ -265,8 +144,14 @@ export function createGitHubClient({
   login = null,
   runner = execSafe,
   httpsRequest = githubHttpsRequest,
+  maxRetries = 2,
+  retryBaseDelayMs = 150,
+  maxRetryDelayMs = MAX_RETRY_DELAY_MS,
+  sleep = defaultSleep,
 } = {}) {
   let cachedLogin = login || null
+  const seenFingerprints = new Set()
+
   const makeMcpDelegate = (action, params, statePayload = {}) => {
     const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
     const bodyWithTag = params.body ? `${params.body}\n\n${tag}` : undefined
@@ -280,93 +165,156 @@ export function createGitHubClient({
     }
   }
 
+  const runWithRetry = async (fn, parseErrStatus) => {
+    const retries = Math.max(0, Number(maxRetries ?? 2))
+    const capMs = Math.min(MAX_RETRY_DELAY_MS, Math.max(0, Number(maxRetryDelayMs ?? MAX_RETRY_DELAY_MS)))
+    let lastOutcome = null
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      let outcome
+      try {
+        outcome = await fn()
+      } catch (err) {
+        outcome = {
+          ok: false,
+          status: Number(err?.status ?? 0),
+          code: err?.code ?? null,
+          name: err?.name ?? null,
+          timedOut: Boolean(err?.timedOut),
+          headers: err?.headers ?? {},
+          stderr: redactGhTokens(err?.message ?? ''),
+          data: { message: redactGhTokens(err?.message ?? 'request-error') },
+          thrown: err,
+        }
+      }
+      if (outcome && outcome.status >= 300 && outcome.status < 400) {
+        return {
+          ok: false,
+          status: outcome.status,
+          headers: outcome.headers ?? {},
+          isRedirect: true,
+          data: { message: `Redirect rejected (HTTP ${outcome.status})` },
+        }
+      }
+      if (!outcome?.ok && parseErrStatus && !outcome.status) {
+        outcome = { ...outcome, status: parseErrStatus(outcome) }
+      }
+      lastOutcome = outcome
+      if (outcome?.ok || attempt >= retries || !isRetryableHttpOutcome(outcome)) {
+        return outcome
+      }
+      const retryAfterMs = parseRetryAfterMs(outcome.headers, capMs)
+      const expMs = Math.min(capMs, Math.max(0, Number(retryBaseDelayMs ?? 150)) * (2 ** attempt))
+      const waitMs = retryAfterMs !== null ? Math.min(capMs, retryAfterMs) : expMs
+      if (waitMs > 0) await sleep(waitMs)
+    }
+    return lastOutcome
+  }
+
+  const callHttps = (method, apiPath, bodyObj, opts = {}) => runWithRetry(
+    () => httpsRequest(method, apiPath, token, bodyObj, { redirect: 'manual', ...opts }),
+  )
+
+  const callGh = (args, execOpts = {}) => runWithRetry(
+    () => runner('gh', args, { cwd, ...execOpts }),
+    (res) => extractCliHttpStatus(res?.stderr),
+  )
+
+  const commentMatchesFp = (c, fp) => {
+    if (!c) return false
+    const states = Array.isArray(c.pfStates) && c.pfStates.length > 0 ? c.pfStates : parsePfStateTags(c.body)
+    return states.some((s) => (s?.writeBackFingerprint ?? computeWriteBackFingerprint(c.body ?? '', s)) === fp)
+  }
+
   return {
     tier,
     async getRepoMeta(repo) {
       if (!repo) return { ok: false, reason: 'missing-repo' }
       if (tier === 'gh-cli') {
         const [res, userRes] = await Promise.all([
-          runner('gh', ['api', `repos/${repo}`], { cwd }),
-          cachedLogin ? Promise.resolve(null) : runner('gh', ['api', 'user', '--jq', '.login'], { cwd }),
+          callGh(['api', `repos/${repo}`]),
+          cachedLogin ? Promise.resolve(null) : callGh(['api', 'user', '--jq', '.login']),
         ])
         if (userRes?.ok && userRes.stdout?.trim()) cachedLogin = userRes.stdout.trim()
-        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
-        try {
-          const data = JSON.parse(res.stdout)
-          const perms = data.permissions
-          return {
-            ok: true, isFork: Boolean(data.fork), parent: data.parent?.full_name?.toLowerCase() ?? null,
-            defaultBranch: data.default_branch ?? 'main', viewerLogin: cachedLogin,
-            viewerPermission: perms?.admin ? 'ADMIN' : perms?.maintain ? 'MAINTAIN' : perms?.push ? 'WRITE' : (perms?.pull || !perms ? 'READ' : 'NONE'),
-          }
-        } catch { return { ok: false, error: 'invalid-json' } }
+        if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+        try { return normalizeRepoMetaPayload(JSON.parse(res.stdout), cachedLogin) } catch { return { ok: false, error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
         const [res, userRes] = await Promise.all([
-          httpsRequest('GET', `/repos/${repo}`, token),
-          !cachedLogin && token ? httpsRequest('GET', '/user', token) : Promise.resolve(null),
+          callHttps('GET', `/repos/${repo}`),
+          !cachedLogin && token ? callHttps('GET', '/user') : Promise.resolve(null),
         ])
         if (userRes?.ok && userRes.data?.login) cachedLogin = userRes.data.login
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
-        const data = res.data ?? {}
-        const perms = data.permissions
-        return {
-          ok: true, isFork: Boolean(data.fork), parent: data.parent?.full_name?.toLowerCase() ?? null,
-          defaultBranch: data.default_branch ?? 'main', viewerLogin: cachedLogin,
-          viewerPermission: perms?.admin ? 'ADMIN' : perms?.maintain ? 'MAINTAIN' : perms?.push ? 'WRITE' : (perms?.pull || !perms ? 'READ' : 'NONE'),
-        }
+        return normalizeRepoMetaPayload(res.data ?? {}, cachedLogin)
       }
       return makeMcpDelegate('get_repo', { repo })
     },
 
     async getIssue(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'], { cwd })
-        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
-        try {
-          const d = JSON.parse(res.stdout)
-          return { ok: true, ...d, labels: (d.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)), relations: parseBodyRelations(d.body) }
-        } catch { return { ok: false, error: 'invalid-json' } }
+        const res = await callGh(['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'])
+        if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+        try { return { ok: true, ...normalizeIssuePayload(JSON.parse(res.stdout), false) } } catch { return { ok: false, error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('GET', `/repos/${repo}/issues/${number}`, token)
+        const res = await callHttps('GET', `/repos/${repo}/issues/${number}`)
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
-        const d = res.data
-        return {
-          ok: true, number: d.number, title: d.title, state: String(d.state ?? '').toUpperCase(),
-          body: d.body ?? '', url: d.html_url, labels: (d.labels ?? []).map((l) => l.name), relations: parseBodyRelations(d.body),
-        }
+        return { ok: true, ...normalizeIssuePayload(res.data ?? {}, true) }
       }
       return makeMcpDelegate('get_issue', { repo, number })
     },
 
-    async getPr(repo, number) {
+    async listIssues({ repo, state = 'open', perPage = 30 } = {}) {
+      if (!repo) return { ok: false, issues: [], error: 'missing-repo' }
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,author'], { cwd })
-        if (!res.ok) return { ok: false, status: res.code, error: res.stderr }
+        const res = await callGh(['issue', 'list', '--repo', repo, '--state', state, '--limit', String(perPage), '--json', 'number,title,state,body,url,labels'])
+        if (!res.ok) return { ok: false, issues: [], status: res.status || res.code, error: res.stderr ?? res.data?.message }
         try {
-          const d = JSON.parse(res.stdout)
-          const headRepo = d.headRepositoryOwner?.login && d.headRepository?.name ? `${d.headRepositoryOwner.login}/${d.headRepository.name}` : null
-          return {
-            ok: true, number: d.number, title: d.title, state: String(d.state ?? '').toUpperCase(), body: d.body ?? '',
-            url: d.url, headBranch: d.headRefName, baseBranch: d.baseRefName,
-            headRefOid: d.headRefOid ?? null, baseRefOid: d.baseRefOid ?? null, headRepo,
-            merged: Boolean(d.mergedAt) || String(d.state ?? '').toUpperCase() === 'MERGED',
-            author: d.author?.login ?? null, relations: parseBodyRelations(d.body),
-          }
-        } catch { return { ok: false, error: 'invalid-json' } }
+          const raw = JSON.parse(res.stdout)
+          return { ok: true, issues: (Array.isArray(raw) ? raw : []).map((d) => normalizeIssuePayload(d, false)) }
+        } catch { return { ok: false, issues: [], error: 'invalid-json' } }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('GET', `/repos/${repo}/pulls/${number}`, token)
-        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
-        const d = res.data
-        return {
-          ok: true, number: d.number, title: d.title, state: d.merged ? 'MERGED' : String(d.state ?? '').toUpperCase(),
-          body: d.body ?? '', url: d.html_url, headBranch: d.head?.ref ?? null, baseBranch: d.base?.ref ?? null,
-          headRefOid: d.head?.sha ?? null, baseRefOid: d.base?.sha ?? null,
-          headRepo: d.head?.repo?.full_name ?? null, merged: Boolean(d.merged), author: d.user?.login ?? null,
-          relations: parseBodyRelations(d.body),
+        const res = await callHttps('GET', `/repos/${repo}/issues?state=${encodeURIComponent(state)}&per_page=${perPage}`)
+        if (!res.ok) return { ok: false, issues: [], status: res.status, error: res.data?.message }
+        return { ok: true, issues: (Array.isArray(res.data) ? res.data : []).filter((d) => !d.pull_request).map((d) => normalizeIssuePayload(d, true)) }
+      }
+      return { ...makeMcpDelegate('list_issues', { repo, state, perPage }), issues: [] }
+    },
+
+    async closeIssue({ repo, number } = {}) {
+      const num = Number(number)
+      if (!repo || !Number.isInteger(num) || num <= 0) return { ok: false, error: 'missing-repo-or-number' }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const cur = await this.getIssue(repo, num)
+        if (cur.ok && String(cur.state ?? '').toUpperCase() === 'CLOSED') {
+          return { ok: true, number: num, state: 'CLOSED', alreadyClosed: true }
         }
+        if (tier === 'gh-cli') {
+          const res = await callGh(['issue', 'close', String(num), '--repo', repo])
+          if (!res.ok) {
+            if (/already\s+closed/i.test(String(res.stderr ?? ''))) return { ok: true, number: num, state: 'CLOSED', alreadyClosed: true }
+            return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+          }
+          return { ok: true, number: num, state: 'CLOSED', alreadyClosed: false }
+        }
+        const res = await callHttps('PATCH', `/repos/${repo}/issues/${num}`, { state: 'closed' })
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'close-issue-failed' }
+        return { ok: true, number: res.data?.number ?? num, state: 'CLOSED', alreadyClosed: false }
+      }
+      return makeMcpDelegate('close_issue', { repo, number: num })
+    },
+
+    async getPr(repo, number) {
+      if (tier === 'gh-cli') {
+        const res = await callGh(['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,author'])
+        if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+        try { return normalizePrPayload(JSON.parse(res.stdout), false) } catch { return { ok: false, error: 'invalid-json' } }
+      }
+      if (tier === 'node-https-token') {
+        const res = await callHttps('GET', `/repos/${repo}/pulls/${number}`)
+        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        return normalizePrPayload(res.data ?? {}, true)
       }
       return makeMcpDelegate('get_pr', { repo, number })
     },
@@ -374,12 +322,12 @@ export function createGitHubClient({
     async listOpenPrsByBase(repo, baseBranch) {
       if (!repo || !baseBranch) return { ok: true, prs: [], skipped: true }
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['pr', 'list', '--repo', repo, '--base', baseBranch, '--state', 'open', '--json', 'number,title,headRefName,url'], { cwd })
-        if (!res.ok) return { ok: false, prs: [], error: res.stderr }
+        const res = await callGh(['pr', 'list', '--repo', repo, '--base', baseBranch, '--state', 'open', '--json', 'number,title,headRefName,url'])
+        if (!res.ok) return { ok: false, prs: [], error: res.stderr ?? res.data?.message }
         try { return { ok: true, prs: JSON.parse(res.stdout) } } catch { return { ok: false, prs: [] } }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}`, token)
+        const res = await callHttps('GET', `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}`)
         if (!res.ok) return { ok: false, prs: [], error: res.data?.message }
         return { ok: true, prs: (res.data ?? []).map((p) => ({ number: p.number, title: p.title, headRefName: p.head?.ref, url: p.html_url })) }
       }
@@ -389,11 +337,11 @@ export function createGitHubClient({
     async findOpenPrForBranch(repo, headBranch, { headOwner, base } = {}) {
       if (!repo || !headBranch) return { ok: false, prs: [] }
       if (tier === 'gh-cli') {
-        const headArg = headOwner ? `${headOwner}:${headBranch}` : headBranch
+        const headArg = headOwner && !headBranch.includes(':') ? `${headOwner}:${headBranch}` : headBranch
         const args = ['pr', 'list', '--repo', repo, '--head', headArg, '--state', 'open']
         if (base) args.push('--base', base)
         args.push('--json', 'number,title,headRefName,baseRefName,url,state')
-        const res = await runner('gh', args, { cwd })
+        const res = await callGh(args)
         if (!res.ok) return { ok: false, prs: [] }
         try {
           const list = JSON.parse(res.stdout)
@@ -405,7 +353,7 @@ export function createGitHubClient({
         const owner = headOwner || repo.split('/')[0]
         const headParam = headBranch.includes(':') ? headBranch : `${owner}:${headBranch}`
         const baseQ = base ? `&base=${encodeURIComponent(base)}` : ''
-        const res = await httpsRequest('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}${baseQ}`, token)
+        const res = await callHttps('GET', `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(headParam)}${baseQ}`)
         if (!res.ok) return { ok: false, prs: [] }
         const prs = (res.data ?? []).map((p) => ({
           number: p.number, title: p.title, headRefName: p.head?.ref, baseRefName: p.base?.ref, url: p.html_url, state: String(p.state ?? 'open').toUpperCase(),
@@ -419,44 +367,74 @@ export function createGitHubClient({
       return this.findOpenPrForBranch(repo, headBranch, opts)
     },
 
-    async postComment({ repo, number, body, statePayload = {} }) {
+    async postComment({ repo, number, body, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
-      const tag = `<!-- pf-state:${JSON.stringify(statePayload)} -->`
-      const fullBody = Object.keys(statePayload).length > 0 ? `${normalizedBody}\n\n${tag}` : normalizedBody
+      const hasState = statePayload && typeof statePayload === 'object' && Object.keys(statePayload).length > 0
+      const fp = hasState ? computeWriteBackFingerprint(normalizedBody, statePayload) : null
+      const finalState = hasState ? { ...statePayload, writeBackFingerprint: statePayload.writeBackFingerprint ?? fp } : {}
+      const tag = hasState ? `<!-- pf-state:${JSON.stringify(finalState)} -->` : ''
+      const fullBody = hasState ? `${normalizedBody}\n\n${tag}` : normalizedBody
+
+      if (deduplicate && fp && (tier === 'gh-cli' || tier === 'node-https-token')) {
+        const cacheKey = `${repo ?? ''}#${number ?? ''}#${fp}`
+        if (seenFingerprints.has(cacheKey)) {
+          return { ok: true, deduplicated: true, skipped: true, writeBackFingerprint: fp }
+        }
+        const candidateList = Array.isArray(existingComments)
+          ? { ok: true, comments: existingComments }
+          : (repo && number !== undefined && number !== null ? await this.listComments({ repo, number }) : null)
+        if (candidateList?.ok && Array.isArray(candidateList.comments)) {
+          const hit = candidateList.comments.find((c) => commentMatchesFp(c, fp))
+          if (hit) {
+            seenFingerprints.add(cacheKey)
+            return { ok: true, deduplicated: true, skipped: true, writeBackFingerprint: fp, id: hit.id ?? null, url: hit.url ?? null }
+          }
+        }
+      }
+
       if (tier === 'gh-cli') {
         return withUtf8TempFile('pf-comment', fullBody, async (tmpFile) => {
-          const res = await runner('gh', ['api', `repos/${repo}/issues/${number}/comments`, '-X', 'POST', '-F', `body=@${tmpFile}`], { cwd })
-          if (!res.ok) return { ok: false, error: res.stderr }
+          const res = await callGh(['api', `repos/${repo}/issues/${number}/comments`, '-X', 'POST', '-F', `body=@${tmpFile}`])
+          if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+          if (fp) seenFingerprints.add(`${repo ?? ''}#${number ?? ''}#${fp}`)
           let created = null
           try { created = JSON.parse(res.stdout) } catch { /* ignore */ }
           const readback = String(created?.body ?? '').replace(/\r\n/g, '\n').trim()
-          return { ok: true, id: created?.id ?? null, url: created?.html_url ?? null, verifiedReadback: readback === fullBody }
+          return {
+            ok: true, id: created?.id ?? null, url: created?.html_url ?? null,
+            verifiedReadback: readback === fullBody, ...(fp ? { writeBackFingerprint: fp } : {}),
+          }
         })
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('POST', `/repos/${repo}/issues/${number}/comments`, token, { body: fullBody })
+        const res = await callHttps('POST', `/repos/${repo}/issues/${number}/comments`, { body: fullBody })
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        if (fp) seenFingerprints.add(`${repo ?? ''}#${number ?? ''}#${fp}`)
         const readback = String(res.data?.body ?? '').replace(/\r\n/g, '\n').trim()
-        return { ok: true, id: res.data?.id ?? null, url: res.data?.html_url ?? null, verifiedReadback: readback === fullBody }
+        return {
+          ok: true, id: res.data?.id ?? null, url: res.data?.html_url ?? null,
+          verifiedReadback: readback === fullBody, ...(fp ? { writeBackFingerprint: fp } : {}),
+        }
       }
-      return makeMcpDelegate('post_comment', { repo, number, body: normalizedBody }, statePayload)
+      return makeMcpDelegate('post_comment', { repo, number, body: normalizedBody }, finalState)
     },
 
-    async addLabels({ repo, number, labels = [] }) {
+    async addLabels({ repo, number, labels = [] } = {}) {
       if (labels.length === 0) return { ok: true, skipped: true }
       if (tier === 'gh-cli') {
         const args = ['issue', 'edit', String(number), '--repo', repo]
         for (const l of labels) args.push('--add-label', l)
-        const res = await runner('gh', args, { cwd })
+        const res = await callGh(args)
         if (!res.ok) {
-          return /403|forbidden|permission|not authorized/i.test(res.stderr)
+          const msg = res.stderr ?? res.data?.message ?? ''
+          return /403|forbidden|permission|not authorized/i.test(msg)
             ? { ok: false, skipped: true, reason: 'forbidden-403' }
-            : { ok: false, skipped: true, reason: res.stderr }
+            : { ok: false, skipped: true, reason: msg }
         }
         return { ok: true }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('POST', `/repos/${repo}/issues/${number}/labels`, token, { labels })
+        const res = await callHttps('POST', `/repos/${repo}/issues/${number}/labels`, { labels })
         if (res.status === 403 || res.status === 404) return { ok: false, skipped: true, reason: `http-${res.status}` }
         if (!res.ok) return { ok: false, skipped: true, reason: res.data?.message }
         return { ok: true }
@@ -464,22 +442,44 @@ export function createGitHubClient({
       return makeMcpDelegate('add_labels', { repo, number, labels })
     },
 
-    async createPr({ targetRepo, head, base, title, body, draft = false }) {
+    async createPr({ targetRepo, head, base, title, body, draft = false } = {}) {
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
+      const [headOwner, headBranch] = String(head ?? '').includes(':') ? String(head).split(':') : [undefined, String(head ?? '')]
+      const tryReuseConcurrent = async () => {
+        if (!targetRepo || !headBranch) return null
+        const existing = await this.findOpenPrForBranch(targetRepo, headBranch, { headOwner, base })
+        if (existing?.ok && Array.isArray(existing.prs) && existing.prs.length > 0) {
+          const hit = existing.prs[0]
+          return { ok: true, number: hit.number ?? null, url: hit.url ?? null, reusedConcurrentPr: true }
+        }
+        return null
+      }
       if (tier === 'gh-cli') {
         return withUtf8TempFile('pf-pr-body', normalizedBody, async (tmpFile) => {
           const args = ['pr', 'create', '--repo', targetRepo, '--head', head, '--base', base, '--title', title, '--body-file', tmpFile]
           if (draft) args.push('--draft')
-          const res = await runner('gh', args, { cwd })
-          if (!res.ok) return { ok: false, error: res.stderr }
+          const res = await callGh(args)
+          if (!res.ok) {
+            if (res.status !== 401 && res.status !== 403) {
+              const reused = await tryReuseConcurrent()
+              if (reused) return reused
+            }
+            return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
+          }
           const url = res.stdout.trim().split('\n').pop()
           const numMatch = /\/pull\/(\d+)$/.exec(url ?? '')
           return { ok: true, url, number: numMatch ? Number(numMatch[1]) : null }
         })
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('POST', `/repos/${targetRepo}/pulls`, token, { title, body: normalizedBody, head, base, draft })
-        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
+        const res = await callHttps('POST', `/repos/${targetRepo}/pulls`, { title, body: normalizedBody, head, base, draft })
+        if (!res.ok) {
+          if (res.status !== 401 && res.status !== 403) {
+            const reused = await tryReuseConcurrent()
+            if (reused) return reused
+          }
+          return { ok: false, status: res.status, error: res.data?.message }
+        }
         return { ok: true, number: res.data?.number ?? null, url: res.data?.html_url ?? null }
       }
       const oneClickUrl = `https://github.com/${targetRepo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`
@@ -490,21 +490,36 @@ export function createGitHubClient({
       }
     },
 
-    async mergePr({ repo, number, method = 'merge' }) {
-      if (tier === 'gh-cli') {
-        const flag = method === 'squash' ? '--squash' : method === 'rebase' ? '--rebase' : '--merge'
-        const res = await runner('gh', ['pr', 'merge', String(number), '--repo', repo, flag], { cwd })
-        if (!res.ok) return { ok: false, error: res.stderr }
+    async mergePr({ repo, number, method = 'merge', sha } = {}) {
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await callGh([
+              'pr', 'merge', String(number), '--repo', repo,
+              method === 'squash' ? '--squash' : method === 'rebase' ? '--rebase' : '--merge',
+              ...(sha ? ['--match-head-commit', sha] : []),
+            ])
+          : await callHttps('PUT', `/repos/${repo}/pulls/${number}/merge`, {
+              merge_method: method,
+              ...(sha ? { sha } : {}),
+            })
         const readback = await this.getPr(repo, number)
+        if (!res.ok) {
+          if (readback.ok && readback.merged === true) {
+            return { ok: true, merged: true, alreadyMerged: true, state: 'MERGED' }
+          }
+          const status = Number(res.status ?? 0)
+          const msg = res.data?.message ?? res.stderr ?? 'merge-failed'
+          return {
+            ok: false,
+            status,
+            headMismatch: status === 409,
+            mergeBlocked: status === 405,
+            error: msg,
+          }
+        }
         return { ok: readback.ok && readback.merged === true, merged: Boolean(readback.merged), state: readback.state ?? 'UNKNOWN' }
       }
-      if (tier === 'node-https-token') {
-        const res = await httpsRequest('PUT', `/repos/${repo}/pulls/${number}/merge`, token, { merge_method: method })
-        if (!res.ok) return { ok: false, status: res.status, error: res.data?.message }
-        const readback = await this.getPr(repo, number)
-        return { ok: readback.ok && readback.merged === true, merged: Boolean(readback.merged), state: readback.state ?? 'UNKNOWN' }
-      }
-      return makeMcpDelegate('merge_pr', { repo, number, method })
+      return makeMcpDelegate('merge_pr', { repo, number, method, ...(sha ? { sha } : {}) })
     },
 
     async updatePrBase({ repo, number, base } = {}) {
@@ -515,12 +530,12 @@ export function createGitHubClient({
         return { ok: false, error: 'missing-repo-number-or-base' }
       }
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['pr', 'edit', String(num), '--repo', cleanRepo, '--base', cleanBase], { cwd })
-        if (!res.ok) return { ok: false, error: res.stderr }
+        const res = await callGh(['pr', 'edit', String(num), '--repo', cleanRepo, '--base', cleanBase])
+        if (!res.ok) return { ok: false, error: res.stderr ?? res.data?.message }
         return { ok: true, number: num, base: cleanBase }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('PATCH', `/repos/${cleanRepo}/pulls/${num}`, token, { base: cleanBase })
+        const res = await callHttps('PATCH', `/repos/${cleanRepo}/pulls/${num}`, { base: cleanBase })
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'update-pr-base-failed' }
         return { ok: true, number: res.data?.number ?? num, base: res.data?.base?.ref ?? cleanBase }
       }
@@ -531,99 +546,50 @@ export function createGitHubClient({
       const cleanTitle = String(title ?? '').trim()
       if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
-      const cleanLabels = Array.isArray(labels)
-        ? labels.map((l) => String(l ?? '').trim()).filter(Boolean)
-        : []
-
+      const cleanLabels = Array.isArray(labels) ? labels.map((l) => String(l ?? '').trim()).filter(Boolean) : []
       if (tier === 'gh-cli') {
         return withUtf8TempFile('pf-issue-body', normalizedBody, async (tmpFile) => {
           const args = ['issue', 'create', '--repo', repo, '--title', cleanTitle, '--body-file', tmpFile]
           for (const lbl of cleanLabels) args.push('--label', lbl)
-          const res = await runner('gh', args, { cwd })
-          if (!res.ok) return { ok: false, error: res.stderr }
+          const res = await callGh(args)
+          if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
           const url = res.stdout.trim().split('\n').pop()
           const numMatch = /\/issues\/(\d+)$/.exec(url ?? '')
-          return {
-            ok: true,
-            url: url || null,
-            number: numMatch ? Number(numMatch[1]) : null,
-            title: cleanTitle,
-            labels: cleanLabels,
-          }
+          return { ok: true, url: url || null, number: numMatch ? Number(numMatch[1]) : null, title: cleanTitle, labels: cleanLabels }
         })
       }
       if (tier === 'node-https-token') {
         const payload = { title: cleanTitle, body: normalizedBody }
         if (cleanLabels.length > 0) payload.labels = cleanLabels
-        const res = await httpsRequest('POST', `/repos/${repo}/issues`, token, payload)
+        const res = await callHttps('POST', `/repos/${repo}/issues`, payload)
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'create-issue-failed' }
         return {
-          ok: true,
-          number: res.data?.number ?? null,
-          url: res.data?.html_url ?? null,
+          ok: true, number: res.data?.number ?? null, url: res.data?.html_url ?? null,
           title: res.data?.title ?? cleanTitle,
           labels: (res.data?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean),
         }
       }
       return makeMcpDelegate('create_issue', {
-        repo,
-        title: cleanTitle,
-        body: normalizedBody,
-        ...(cleanLabels.length > 0 ? { labels: cleanLabels } : {}),
+        repo, title: cleanTitle, body: normalizedBody, ...(cleanLabels.length > 0 ? { labels: cleanLabels } : {}),
       }, { action: 'create_issue' })
     },
 
     async listComments(arg, maybeNumber) {
-      const { repo, number, perPage = 100 } = (typeof arg === 'object' && arg !== null)
-        ? arg
-        : { repo: arg, number: maybeNumber }
-      if (!repo || number === undefined || number === null) {
-        return { ok: false, comments: [], error: 'missing-repo-or-number' }
-      }
-      const normalizeList = (rawList) => (Array.isArray(rawList) ? rawList : []).map((c) => {
-        const body = String(c?.body ?? '')
-        const pfStates = parsePfStateTags(body)
-        return {
-          id: c?.id ?? null,
-          author: c?.user?.login ?? c?.author?.login ?? null,
-          body,
-          createdAt: c?.created_at ?? c?.createdAt ?? null,
-          updatedAt: c?.updated_at ?? c?.updatedAt ?? null,
-          url: c?.html_url ?? c?.url ?? null,
-          pfState: pfStates.length > 0 ? pfStates[pfStates.length - 1] : null,
-          pfStates,
-        }
-      })
-
-      if (tier === 'gh-cli') {
+      const { repo, number, perPage = 100 } = (typeof arg === 'object' && arg !== null) ? arg : { repo: arg, number: maybeNumber }
+      if (!repo || number === undefined || number === null) return { ok: false, comments: [], error: 'missing-repo-or-number' }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
         const collected = []
         for (let page = 1; page <= 5; page += 1) {
-          const res = await runner('gh', ['api', `repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`], { cwd })
-          if (!res.ok) {
-            if (page === 1) return { ok: false, comments: [], error: res.stderr }
-            break
-          }
-          let batch
-          try { batch = JSON.parse(res.stdout) } catch {
-            if (page === 1) return { ok: false, comments: [], error: 'invalid-json' }
-            break
+          const res = tier === 'gh-cli'
+            ? await callGh(['api', `repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`])
+            : await callHttps('GET', `/repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`)
+          if (!res.ok) return page === 1 ? { ok: false, status: res.status, comments: [], error: res.stderr ?? res.data?.message } : { ok: true, comments: collected }
+          let batch = res.data
+          if (tier === 'gh-cli') {
+            try { batch = JSON.parse(res.stdout) } catch { return page === 1 ? { ok: false, comments: [], error: 'invalid-json' } : { ok: true, comments: collected } }
           }
           if (!Array.isArray(batch)) break
-          collected.push(...normalizeList(batch))
-          if (batch.length < perPage) break
-        }
-        return { ok: true, comments: collected }
-      }
-      if (tier === 'node-https-token') {
-        const collected = []
-        for (let page = 1; page <= 5; page += 1) {
-          const res = await httpsRequest('GET', `/repos/${repo}/issues/${number}/comments?per_page=${perPage}&page=${page}`, token)
-          if (!res.ok) {
-            if (page === 1) return { ok: false, status: res.status, comments: [], error: res.data?.message }
-            break
-          }
-          const batch = Array.isArray(res.data) ? res.data : []
-          collected.push(...normalizeList(batch))
+          collected.push(...normalizeCommentEntries(batch))
           if (batch.length < perPage) break
         }
         return { ok: true, comments: collected }
@@ -635,20 +601,17 @@ export function createGitHubClient({
       const cleanLabel = String(label ?? '').trim()
       if (!repo || number === undefined || number === null || !cleanLabel) return { ok: true, skipped: true }
       if (tier === 'gh-cli') {
-        const res = await runner('gh', ['issue', 'edit', String(number), '--repo', repo, '--remove-label', cleanLabel], { cwd })
+        const res = await callGh(['issue', 'edit', String(number), '--repo', repo, '--remove-label', cleanLabel])
         if (!res.ok) {
-          if (/403|forbidden|permission|not authorized/i.test(res.stderr)) {
-            return { ok: false, skipped: true, reason: 'forbidden-403' }
-          }
-          if (/404|not found|does not have/i.test(res.stderr)) {
-            return { ok: true, skipped: true, reason: 'label-absent' }
-          }
-          return { ok: false, skipped: true, reason: res.stderr }
+          const msg = res.stderr ?? res.data?.message ?? ''
+          if (/403|forbidden|permission|not authorized/i.test(msg)) return { ok: false, skipped: true, reason: 'forbidden-403' }
+          if (/404|not found|does not have/i.test(msg)) return { ok: true, skipped: true, reason: 'label-absent' }
+          return { ok: false, skipped: true, reason: msg }
         }
         return { ok: true }
       }
       if (tier === 'node-https-token') {
-        const res = await httpsRequest('DELETE', `/repos/${repo}/issues/${number}/labels/${encodeURIComponent(cleanLabel)}`, token)
+        const res = await callHttps('DELETE', `/repos/${repo}/issues/${number}/labels/${encodeURIComponent(cleanLabel)}`)
         if (res.status === 404) return { ok: true, skipped: true, reason: 'label-absent' }
         if (res.status === 403) return { ok: false, skipped: true, reason: 'http-403' }
         if (!res.ok) return { ok: false, skipped: true, reason: res.data?.message }
@@ -660,51 +623,32 @@ export function createGitHubClient({
     async getCommitChecks({ repo, ref } = {}) {
       const cleanRepo = String(repo ?? '').trim()
       const cleanRef = String(ref ?? '').trim()
-      if (!cleanRepo || !cleanRef) return { ok: false, error: 'missing-repo-or-ref' }
+      if (!cleanRepo || !cleanRef) return { ok: false, bucket: 'unknown', total: 0, passed: [], pending: [], failed: [], warnings: ['missing-repo-or-ref'], error: 'missing-repo-or-ref' }
       const encRef = encodeURIComponent(cleanRef)
-      if (tier === 'gh-cli') {
-        const [crRes, stRes] = await Promise.all([
-          runner('gh', ['api', `repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`], { cwd }),
-          runner('gh', ['api', `repos/${cleanRepo}/commits/${encRef}/status`], { cwd }),
-        ])
-        if (!crRes.ok) return { ok: false, error: crRes.stderr || 'check-runs-api-failed' }
-        let crJson = null
-        let stJson = null
-        try { crJson = JSON.parse(crRes.stdout) } catch { return { ok: false, error: 'invalid-check-runs-json' } }
-        if (stRes.ok && stRes.stdout) {
-          try { stJson = JSON.parse(stRes.stdout) } catch { stJson = null }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const [crRes, stRes] = tier === 'gh-cli'
+          ? await Promise.all([callGh(['api', `repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`]), callGh(['api', `repos/${cleanRepo}/commits/${encRef}/status`])])
+          : await Promise.all([callHttps('GET', `/repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`), callHttps('GET', `/repos/${cleanRepo}/commits/${encRef}/status`)])
+        const warnings = []
+        const parseEp = (res, label) => {
+          if (!res?.ok) { warnings.push(`${label}-unavailable: ${res?.data?.message ?? res?.stderr ?? res?.status ?? 'error'}`); return { ok: false, data: null } }
+          if (tier === 'node-https-token') return { ok: true, data: res.data }
+          try { return { ok: true, data: res.stdout ? JSON.parse(res.stdout) : null } } catch { warnings.push(`invalid-${label}-json`); return { ok: false, data: null } }
         }
-        return summarizeCommitChecks(crJson, stJson)
-      }
-      if (tier === 'node-https-token') {
-        const [crRes, stRes] = await Promise.all([
-          httpsRequest('GET', `/repos/${cleanRepo}/commits/${encRef}/check-runs?per_page=100`, token),
-          httpsRequest('GET', `/repos/${cleanRepo}/commits/${encRef}/status`, token),
-        ])
-        if (!crRes.ok) return { ok: false, status: crRes.status, error: crRes.data?.message ?? 'check-runs-api-failed' }
-        return summarizeCommitChecks(crRes.data, stRes.ok ? stRes.data : null)
+        const cr = parseEp(crRes, 'check-runs')
+        const st = parseEp(stRes, 'status')
+        const summary = summarizeCommitChecks(cr.data, st.data, { warnings })
+        const ok = cr.ok || summary.failed.length > 0
+        return { ...summary, ok, ...(!ok ? { status: crRes?.status ?? stRes?.status ?? 0, error: warnings.join('; ') } : {}) }
       }
       return { ...makeMcpDelegate('get_commit_checks', { repo: cleanRepo, ref: cleanRef }), skipped: true, reason: tier }
     },
   }
 }
 
-export async function createIssue({ repo, title, body = '', labels = [], client, ...clientOpts } = {}) {
-  const c = client ?? createGitHubClient(clientOpts)
-  return c.createIssue({ repo, title, body, labels })
-}
-
-export async function listComments({ repo, number, perPage = 100, client, ...clientOpts } = {}) {
-  const c = client ?? createGitHubClient(clientOpts)
-  return c.listComments({ repo, number, perPage })
-}
-
-export async function removeLabel({ repo, number, label, client, ...clientOpts } = {}) {
-  const c = client ?? createGitHubClient(clientOpts)
-  return c.removeLabel({ repo, number, label })
-}
-
-export async function listOpenPrsByHead({ repo, headBranch, headOwner, base, client, ...clientOpts } = {}) {
-  const c = client ?? createGitHubClient(clientOpts)
-  return c.findOpenPrForBranch(repo, headBranch, { headOwner, base })
-}
+export const createIssue = ({ repo, title, body = '', labels = [], client, ...opts } = {}) => (client ?? createGitHubClient(opts)).createIssue({ repo, title, body, labels })
+export const listIssues = ({ repo, state = 'open', perPage = 30, client, ...opts } = {}) => (client ?? createGitHubClient(opts)).listIssues({ repo, state, perPage })
+export const closeIssue = ({ repo, number, client, ...opts } = {}) => (client ?? createGitHubClient(opts)).closeIssue({ repo, number })
+export const listComments = ({ repo, number, perPage = 100, client, ...opts } = {}) => (client ?? createGitHubClient(opts)).listComments({ repo, number, perPage })
+export const removeLabel = ({ repo, number, label, client, ...opts } = {}) => (client ?? createGitHubClient(opts)).removeLabel({ repo, number, label })
+export const listOpenPrsByHead = ({ repo, headBranch, headOwner, base, client, ...opts } = {}) => (client ?? createGitHubClient(opts)).findOpenPrForBranch(repo, headBranch, { headOwner, base })

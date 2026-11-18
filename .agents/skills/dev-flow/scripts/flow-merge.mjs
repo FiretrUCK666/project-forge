@@ -243,11 +243,25 @@ export async function handleMerge(opts, roots) {
         if (checks.bucket === 'none' && ciRequired && !opts['human-approved']) {
           return ciBlock('BLOCKED_CI_PENDING', `BLOCKED_CI_PENDING: 仓库存在检查工作流，但当前 HEAD (${currentHead.slice(0, 7)}) 远端尚未注册 check-run，请等待检查变绿后再执行 merge。`)
         }
+        if (checks.bucket === 'unknown' && ciRequired && !opts['human-approved']) {
+          const warnList = (checks.warnings ?? []).join(', ') || 'unknown'
+          return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法完整核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${warnList}），拒绝盲目合并。`)
+        }
       } else if (checks && !checks.skipped && ciRequired && !opts['human-approved']) {
         return ciBlock('BLOCKED_CI_UNVERIFIED', `BLOCKED_CI_UNVERIFIED: 无法核验当前 HEAD (${currentHead.slice(0, 7)}) 远端 CI 状态（${checks.error ?? 'unknown'}），拒绝盲目合并。`)
       }
     }
-    mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
+    try {
+      mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge', sha: currentHead })
+    } catch (err) {
+      mergeRes = { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    if (!mergeRes?.delegated && (!mergeRes?.ok || !mergeRes?.merged) && typeof backend.getPr === 'function') {
+      const readback = await backend.getPr(originFull, ledger.prNumber).catch(() => null)
+      if (readback?.ok && readback.merged === true) {
+        mergeRes = { ok: true, merged: true, alreadyMerged: true, state: 'MERGED' }
+      }
+    }
     if (mergeRes.delegated) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, mergeDelegated: mergeRes }, null, 2)}\n`)
       else {
@@ -256,7 +270,11 @@ export async function handleMerge(opts, roots) {
       }
       return { exitCode: 0 }
     }
-    if (!mergeRes.ok || !mergeRes.merged) throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（state=${mergeRes.state ?? mergeRes.error}）`)
+    if (!mergeRes.ok || !mergeRes.merged) {
+      const detail = mergeRes.headMismatch ? `409 HEAD 漂移(${mergeRes.error ?? ''})`
+        : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
+      throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
+    }
     const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.implementerId })
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
       prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead,
@@ -273,6 +291,7 @@ export async function handleMerge(opts, roots) {
       await backend.postComment({ repo: originFull, number: iss, body: mergeIssueBody, statePayload: { taskId, action: 'merged', prNumber: ledger.prNumber, reviewerId: effectiveReviewer ?? null } })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'in-progress' })
       await backend.removeLabel({ repo: originFull, number: iss, label: 'changes-requested' })
+      await backend.closeIssue({ repo: originFull, number: iss })
     }
     const mainSt = await gitStatusPorcelainZ(roots.mainRoot)
     if (!opts._ghProbe && mainSt.ok && mainSt.entries.length === 0) {
@@ -280,11 +299,11 @@ export async function handleMerge(opts, roots) {
       const fastMainBr = readHeadFast(resolveGitDirFast(roots.mainRoot), roots.gitDir)?.branch ?? null
       const curMainBr = fastMainBr ? { ok: true, stdout: fastMainBr } : await gitRun(roots.mainRoot, ['symbolic-ref', '--short', 'HEAD'])
       if (curMainBr.ok && curMainBr.stdout.trim() === baseBranch) {
-        await gitRun(roots.mainRoot, ['merge', '--ff-only', `${pushRemote}/${baseBranch}`])
+        await gitRun(roots.mainRoot, ['merge', '--ff-only', '--no-edit', `${pushRemote}/${baseBranch}`])
       }
     }
-  } else if (ledger.branch || ledger.role === 'generic-git') {
-    if (ledger.role === 'generic-git') {
+  } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
+    if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
       mergeRes = await backend.mergePr({
         remoteMerged: Boolean(opts['remote-merged']),
         humanApproved: Boolean(opts['human-approved']),
@@ -308,7 +327,21 @@ export async function handleMerge(opts, roots) {
     if (mergeRes.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
       process.stderr.write(`${mergeRes.message}\n`)
-      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK }
+      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
+    }
+    if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
+      const mergeContrib = resolveContributorIdentity({ ledgerActor: ledger.implementerId })
+      const { issueCommentBody: localMergeBody } = buildMergeComments({
+        prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead,
+        reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
+        humanApprovedReason: ledger.humanApprovedReason ?? null,
+      })
+      for (const iss of ledger.linkedIssues ?? []) {
+        await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })
+        await backend.removeLabel({ taskId, number: iss, label: 'in-progress' })
+        await backend.removeLabel({ taskId, number: iss, label: 'changes-requested' })
+        await backend.closeIssue({ number: iss, reason: `merged into ${baseBranch}` })
+      }
     }
   }
 
@@ -465,7 +498,12 @@ export async function handleClaim(opts, roots) {
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
   if (skipApi) {
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    await localBackend.claimTask({ taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber, actor, actorDisplay, branch: ledger.branch, takeover: isTakeover, reason: takeoverReason })
+    const localClaim = await localBackend.claimTask({ taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber, actor, actorDisplay, branch: ledger.branch, takeover: isTakeover, reason: takeoverReason })
+    if (localClaim?.blocked) {
+      if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, taskId, ...localClaim }, null, 2)}\n`)
+      process.stderr.write(`${localClaim.message}\n`)
+      return { exitCode: localClaim.exitCode ?? EXIT_POLICY_BLOCK }
+    }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
     if (isTakeover) {

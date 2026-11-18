@@ -16,7 +16,8 @@ import {
   writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from '../../lib/platform.mjs'
+import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from '../../lib/platform.mjs'
+import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -46,17 +47,8 @@ export async function saveBaseline(mainRoot, gitDir, isGit, findings, headSha) {
   if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
   const path = baselinePath(mainRoot)
   const payload = {
-    schemaVersion: 1,
-    savedAt: new Date().toISOString(),
-    headSha: headSha ?? null,
-    count: findings.length,
-    findings: findings.map((f) => ({
-      id: f.id,
-      category: f.category,
-      severity: f.severity,
-      file: f.file ?? '',
-      fingerprint: findingFingerprint(f),
-    })),
+    schemaVersion: 1, savedAt: new Date().toISOString(), headSha: headSha ?? null, count: findings.length,
+    findings: findings.map((f) => ({ id: f.id, category: f.category, severity: f.severity, file: f.file ?? '', fingerprint: findingFingerprint(f) })),
   }
   writeJsonAtomic(path, payload)
   return { path: posixPath(path), count: findings.length, savedAt: payload.savedAt }
@@ -274,37 +266,22 @@ export function buildClusterReport(signals, findings) {
 
   for (const ev of signals) {
     upsert({
-      module: ev.module || inferSignalModule(ev.file),
-      pattern: ev.pattern || 'manual-signal',
-      category: ev.category || 'hygiene',
-      sourceKind: 'signal',
-      file: ev.file || '',
-      line: ev.line,
-      message: ev.message || ev.note || ev.pattern,
+      module: ev.module || inferSignalModule(ev.file), pattern: ev.pattern || 'manual-signal', category: ev.category || 'hygiene',
+      sourceKind: 'signal', file: ev.file || '', line: ev.line, message: ev.message || ev.note || ev.pattern,
     })
   }
   for (const f of findings) {
     upsert({
-      module: inferSignalModule(f.file),
-      pattern: normalizePatternFromFindingId(f.id),
-      category: f.category,
-      sourceKind: 'audit',
-      file: f.file,
-      line: f.line,
-      message: f.title,
+      module: inferSignalModule(f.file), pattern: normalizePatternFromFindingId(f.id), category: f.category,
+      sourceKind: 'audit', file: f.file, line: f.line, message: f.title,
     })
   }
 
   const clusters = [...map.values()].sort((a, b) => (b.count - a.count) || a.key.localeCompare(b.key))
   const sinkCandidates = clusters.filter((c) => c.sinkCandidate)
   return {
-    totalEvents: signals.length + findings.length,
-    signalEvents: signals.length,
-    auditFindings: findings.length,
-    totalClusters: clusters.length,
-    sinkCandidateCount: sinkCandidates.length,
-    clusters,
-    sinkCandidates,
+    totalEvents: signals.length + findings.length, signalEvents: signals.length, auditFindings: findings.length,
+    totalClusters: clusters.length, sinkCandidateCount: sinkCandidates.length, clusters, sinkCandidates,
   }
 }
 
@@ -316,18 +293,9 @@ export async function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
     return 2
   }
   const res = await appendGovernSignal({
-    mainRoot,
-    gitDir,
-    isGit,
-    category: opts.category || 'hygiene',
-    module: opts.module,
-    pattern: rawPattern,
-    severity: opts.severity || 'medium',
-    source: opts.source || 'manual',
-    file: opts.file,
-    message,
-    taskId: opts.task,
-    silent: false,
+    mainRoot, gitDir, isGit, category: opts.category || 'hygiene', module: opts.module,
+    pattern: rawPattern, severity: opts.severity || 'medium', source: opts.source || 'manual',
+    file: opts.file, message, taskId: opts.task, silent: false,
   })
   const { stateDir, signalsPath, event } = res
   const { events } = readSignalsJsonl(stateDir)
@@ -335,12 +303,8 @@ export async function handleRecordSignal(mainRoot, gitDir, isGit, opts) {
   const matched = clusterReport.clusters.find((c) => c.key === `${event.module}::${event.pattern}`)
   const repeatCount = matched?.count ?? 1
   const payload = {
-    status: 'RECORDED',
-    repoRoot: posixPath(mainRoot),
-    signalsPath: posixPath(signalsPath),
-    event,
-    modulePatternCount: repeatCount,
-    ruleSinkCandidate: repeatCount >= 2,
+    status: 'RECORDED', repoRoot: posixPath(mainRoot), signalsPath: posixPath(signalsPath),
+    event, modulePatternCount: repeatCount, ruleSinkCandidate: repeatCount >= 2,
     recommendation: repeatCount >= 2
       ? `[RULE_SINK_CANDIDATE] Pattern "${event.pattern}" in "${event.module}" occurred ${repeatCount} times; sink into static check or Dev Profile.`
       : 'Signal recorded in gardening buffer; run `cluster` to identify patterns reaching >= 2 repeats.',
@@ -474,18 +438,11 @@ export async function handleSampleCommits(workRoot, mainRoot, gitDir, isGit, opt
       `48h Hotspots  : ${reworkHotspots.length} file(s)`,
       `Signal Sinks  : ${signalClusters.sinkCandidates.length} repeated cluster(s)`,
     ]
-    if (revertedCommits.length > 0) {
-      lines.push('', '--- Reverted Commits ---', ...revertedCommits.map((rc) => `  - ${rc.hash}: ${rc.subject}`))
-    }
-    if (reworkHotspots.length > 0) {
-      lines.push('', '--- 48h Same-File Rework Hotspots ---', ...reworkHotspots.map((hs) =>
-        `  - ${hs.file}: maxIn48h=${hs.maxEditsIn48h}, total=${hs.totalTouches}, hasRevert=${hs.hasRevert} [${hs.commitHashes.join(', ')}]`))
-    }
+    if (revertedCommits.length > 0) lines.push('', '--- Reverted Commits ---', ...revertedCommits.map((rc) => `  - ${rc.hash}: ${rc.subject}`))
+    if (reworkHotspots.length > 0) lines.push('', '--- 48h Same-File Rework Hotspots ---', ...reworkHotspots.map((hs) => `  - ${hs.file}: maxIn48h=${hs.maxEditsIn48h}, total=${hs.totalTouches}, hasRevert=${hs.hasRevert} [${hs.commitHashes.join(', ')}]`))
     if (recommendations.length > 0) {
       lines.push('', '--- Rule-Sinking Recommendations ---')
-      for (const rec of recommendations) {
-        lines.push(`  - [${rec.priority.toUpperCase()}] ${rec.reason}`, `      Action: ${rec.action}`)
-      }
+      for (const rec of recommendations) lines.push(`  - [${rec.priority.toUpperCase()}] ${rec.reason}`, `      Action: ${rec.action}`)
     }
     process.stdout.write(`${lines.join('\n')}\n`)
     printNextStep(nextSteps, { repoRoot: mainRoot })
@@ -518,36 +475,51 @@ export function buildIssues(findings) {
   return issues
 }
 
-export async function applyGitHubIssues(repoRoot, issues, opts = {}) {
+export async function applyIssuesToBackend(repoRoot, issues, opts = {}) {
   if (issues.length === 0) return { applied: [], error: undefined }
-  const fastCfg = readGitConfigFast(resolveGitDirFast(repoRoot))
+  const fastGitDir = resolveGitDirFast(repoRoot)
+  const fastCfg = readGitConfigFast(fastGitDir)
   const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
   const remoteUrls = parseRemoteUrls(remotes.stdout)
   const topology = parseRemotesTopology(remotes.stdout)
   const originUrl = remoteUrls.origin ?? Object.values(remoteUrls)[0]
   const targetRepo = githubRepoFull(originUrl)
-  if (!remotes.ok || topology.providerId !== 'github' || !targetRepo) {
-    return { applied: [], error: 'No GitHub remote found (generic-git / local-only mode); cannot create GitHub issues.' }
-  }
-  const probe = opts._ghProbe ?? (opts._ghClient
-    ? { env: { providerId: 'github', trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
-    : await probeForWrite({ cwd: repoRoot, remoteUrls }))
-  if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
-    return { applied: [], error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.' }
+  const hasRemote = Boolean(remotes.ok && Object.keys(remoteUrls).length > 0)
+  const markers = fastGitDir ? detectGitModeMarkers(fastGitDir, { hasRemote }) : { localMode: false }
+  const isLocal = !hasRemote || markers.localMode || topology.providerId === 'none'
+  const isGeneric = hasRemote && !markers.localMode && (topology.providerId === 'generic-git' || !targetRepo)
+
+  let backend
+  if (isLocal || isGeneric) {
+    backend = createTaskBackend({
+      role: isLocal ? 'local-only' : 'generic-git',
+      providerId: isLocal ? 'none' : 'generic-git',
+      targetRepo, mainRoot: repoRoot, gitDir: fastGitDir,
+    })
+  } else {
+    const probe = opts._ghProbe ?? (opts._ghClient
+      ? { env: { providerId: 'github', trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
+      : await probeForWrite({ cwd: repoRoot, remoteUrls }))
+    if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
+      return { applied: [], error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.' }
+    }
+    backend = createTaskBackend({
+      role: 'maintainer', providerId: 'github', targetRepo,
+      client: probe.client, mainRoot: repoRoot, gitDir: fastGitDir,
+    })
   }
   const created = []
   for (const iss of issues) {
-    const res = await probe.client.createIssue({
-      repo: targetRepo,
-      title: iss.title,
-      body: iss.body,
-      labels: iss.labels ?? [],
+    const res = await backend.createIssue({
+      repo: targetRepo, title: iss.title, body: iss.body, labels: iss.labels ?? [],
     })
-    if (!res.ok) return { applied: created, error: `GitHub issue create failed: ${res.error ?? 'unknown error'}` }
-    created.push({ title: iss.title, url: res.url, number: res.number })
+    if (!res.ok) return { applied: created, error: `Issue create failed: ${res.error ?? 'unknown error'}` }
+    created.push({ title: iss.title, url: res.url, number: res.number, ...(res.local ? { local: true } : {}) })
   }
   return { applied: created, error: undefined }
 }
+
+export const applyGitHubIssues = applyIssuesToBackend
 
 export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile, findings = [], plan, reconcileSummary, findingsCount }) {
   const skills = resolveAvailableSkills(mainRoot)

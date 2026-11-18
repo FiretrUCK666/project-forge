@@ -344,13 +344,13 @@ export const INJECTIONS_GATES = [
   },
   {
     id: 'I145',
-    what: 'review-ledger 写操作退回裸 probeGitHubEnv（无 GH_TOKEN 时 gh CLI 凭据静默降级为 tier=none）',
-    file: 'kit/skills/dev-review/scripts/review-ledger.mjs',
+    what: 'review-sync 写操作退回裸 probeGitHubEnv（无 GH_TOKEN 时 gh CLI 凭据静默降级为 tier=none）',
+    file: 'kit/skills/dev-review/scripts/review-sync.mjs',
     from: '      ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls })))',
     to: '      ? (opts._ghProbe ?? (await probeGitHubEnv({ cwd: mainRoot, remoteUrls })))',
     alsoPatches: [
       {
-        file: 'kit/skills/dev-review/scripts/review-ledger.mjs',
+        file: 'kit/skills/dev-review/scripts/review-sync.mjs',
         from: '  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,',
         to: '  parsePrNumber, parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveContributorIdentity,',
       },

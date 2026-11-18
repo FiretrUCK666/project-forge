@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
-import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
+import { buildNonInteractiveEnv, prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { textsOf, survey as runSurvey } from '../survey.mjs'
 import { tryFastNodeCommit, tryFastNodeInitialCommit } from './fixtures-git-fast.mjs'
 
@@ -67,7 +67,7 @@ export function traceFixtureStage(stage, force = false) {
 
 export function gitSync(cwd, args, opts = {}) {
   traceFixtureStage(`git:${args[0] ?? ''}`)
-  const baseEnv = opts.env ?? process.env
+  const baseEnv = buildNonInteractiveEnv(opts.env ?? process.env)
   const targetCwd = opts.cwd ?? cwd
   const inv = prepareExecInvocation('git', args, { cwd: targetCwd, env: baseEnv })
   return spawnSync(inv.cmd, inv.args, {
@@ -75,6 +75,7 @@ export function gitSync(cwd, args, opts = {}) {
     encoding: 'utf8',
     stdio: opts.stdio ?? (opts.encoding ? 'pipe' : 'ignore'),
     timeout: opts.timeout ?? 30000,
+    killSignal: opts.killSignal ?? 'SIGKILL',
     windowsHide: true,
     ...opts,
     env: inv.env,

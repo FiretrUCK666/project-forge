@@ -299,7 +299,7 @@ export async function handleVerify(opts, roots) {
     const policy = determineWorkflowPolicy({
       changedFiles, ownArchived, caseType: ledger.caseType,
       highRiskGlobs: profile.highRisk, doNotEditGlobs: profile.doNotEdit,
-      gateWeakeningHits: gateHits, hasRemote: Boolean(remoteRes.ok && remoteRes.stdout.trim()),
+      gateWeakeningHits: gateHits, hasRemote: ledger.role !== 'local-only' && Boolean(remoteRes.ok && remoteRes.stdout.trim()),
       hasCiWorkflow: hasCi, visualFilesChanged: changedFiles.filter((f) => UI_VISUAL_EXT_RE.test(f)), profile, hasDevReview,
     })
     return { currentHead, dirty, stStdout, changedFiles, policy }
@@ -594,12 +594,33 @@ export async function handleSubmit(opts, roots) {
     ? nextReviewRound(ledger)
     : 1
 
+  const postLocalLifecycleComments = async ({ targetRepo = null, pushRemote = null, actionFallback }) => {
+    if ((ledger.linkedIssues ?? []).length === 0) return
+    const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
+    const submitActor = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
+    const isReworkLocal = Boolean(opts.rework) || (ledger.rounds ?? []).length > 0
+    const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
+    const { issueCommentBodyFor } = buildSubmitComments({
+      isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitActor.display,
+      branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: null,
+      linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
+    })
+    for (const iss of ledger.linkedIssues ?? []) {
+      await localBackend.postComment({
+        taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActor.actor,
+        statePayload: { taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, agent: submitActor.actor, headSha: currentHead },
+      })
+    }
+  }
+
   if (ledger.role === 'local-only') {
+    const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
+    await postLocalLifecycleComments({ actionFallback: 'local-ready' })
     ledger.status = 'local-ready'
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, reviewSlotSync }, null, 2)}\n`)
     else {
-      process.stdout.write(`本地模式提交校验已通过（HEAD=${currentHead?.slice(0, 7)}，未配置远端不执行 push）。\n`)
+      process.stdout.write(`本地模式提交校验已通过（HEAD=${shortHead}，未配置远端不执行 push）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
@@ -621,6 +642,7 @@ export async function handleSubmit(opts, roots) {
   if (!pushRes.ok) throw new Error(`推送到 ${pushRemote}/${ledger.branch} 失败：${pushRes.stderr}`)
 
   if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || !targetRepo) {
+    await postLocalLifecycleComments({ targetRepo, pushRemote, actionFallback: 'submitted' })
     ledger.status = 'submitted'
     writeTaskLedger(roots.mainRoot, ledger)
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, providerId: ledger.providerId, status: ledger.status, head: currentHead, pushRemote, reviewSlotSync }, null, 2)}\n`)

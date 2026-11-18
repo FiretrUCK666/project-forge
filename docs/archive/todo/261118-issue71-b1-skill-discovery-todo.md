@@ -1,18 +1,18 @@
 ---
 kind: todo
 title: v9 B1：动态 Skill 发现、自有技能路由保留与升级补齐
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 71
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b1-skill-discovery
+owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: b1-skill-discovery
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 ---
 
@@ -43,9 +43,9 @@ related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C1: `kit/skills/lib/skill-discovery.mjs` (new) 动态扫描技能目录及 YAML `metadata` 字段（`tier`、`intent`、`script`、`order`、`fallback`），全仓清除硬编码 5 技能数组与写死路由，向临时 `kit/skills/` 放入第 6 个合规范内置技能后零改源码自动识别、`{{KIT_ROUTING_ROWS}}` 渲染与 `preflight-suite.mjs` 均退出 `0`。
-- [ ] C2: 修复 `survey-reentry.mjs` 与 `agents-defaults.mjs` 漏读非隐藏技能容器缺陷，提取 `.agents/skills/*`、其他隐藏技能容器与非隐藏 `skills/*` 下全部非托管自有 `SKILL.md` 的 YAML frontmatter `name` 与 `description` 注入 `kit.customSkills` 与 `AGENTS.md` `意图路由`，`S1–S4` 升级完整保留，产品层无具体业务项目 Skill 名称硬编码。
-- [ ] C3: 旧版已规范仓缺少新版新增内置技能且未入墓碑时，`survey.mjs` 在 `kit.uninstalledKitSkills` 报出并把 `kit-skills` 设为 `upgrade`，重跑 `S1–S4` 自动补齐新技能且完整保留墓碑/定制与自有技能，`equip.mjs --check` 与 `compose-agents.mjs --check` 退出 `0`。
+- [x] C1: `kit/skills/lib/skill-discovery.mjs` (new) 动态扫描技能目录及 YAML `metadata` 字段（`tier`、`intent`、`script`、`order`、`fallback`），全仓清除硬编码 5 技能数组与写死路由，向临时 `kit/skills/` 放入第 6 个合规范内置技能后零改源码自动识别、`{{KIT_ROUTING_ROWS}}` 渲染与 `preflight-suite.mjs` 均退出 `0`。
+- [x] C2: 修复 `survey-reentry.mjs` 与 `agents-defaults.mjs` 漏读非隐藏技能容器缺陷，提取 `.agents/skills/*`、其他隐藏技能容器与非隐藏 `skills/*` 下全部非托管自有 `SKILL.md` 的 YAML frontmatter `name` 与 `description` 注入 `kit.customSkills` 与 `AGENTS.md` `意图路由`，`S1–S4` 升级完整保留，产品层无具体业务项目 Skill 名称硬编码。
+- [x] C3: 旧版已规范仓缺少新版新增内置技能且未入墓碑时，`survey.mjs` 在 `kit.uninstalledKitSkills` 报出并把 `kit-skills` 设为 `upgrade`，重跑 `S1–S4` 自动补齐新技能且完整保留墓碑/定制与自有技能，`equip.mjs --check` 与 `compose-agents.mjs --check` 退出 `0`。
 
 ## 执行步骤
 
@@ -76,9 +76,9 @@ related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`待 Wave 1 启动`（#71 已建单，规划文档已入 `docs/`）
+- **当前状态**：已完成 `C1–C3` 实施与全量本地门禁实测，准备执行 `finalize`、同步主干并提交 PR 审查。
 - **待拍板事项**：无
-- **下一步第一件事**：收到 Wave 1 启动指令后运行 `flow.mjs start --task b1-skill-discovery --issue 71 --case 4` 进入 `.worktrees/impl-b1-skill-discovery`。
+- **下一步第一件事**：归档本切片 `SPEC+Todo`（保留 Master PRD 为 `active`）并提交 PR。
 
 ## 澄清与补充记录
 
@@ -89,5 +89,8 @@ related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`（本仓 `AGENTS.md` `23168 B < 24576 B`，`lightweight < 14336 B`，`preflight-suite.mjs` `606 L <= 680 L`）退出 `0`；
+  - `node scripts/dev/preflight.mjs`（34/34）、`node scripts/dev/gap-coverage.mjs`（19/19）、`node scripts/dev/verify-injections.mjs`（168/168）、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .`（13/13）与 `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`（0 findings）全绿；
+  - `node scripts/dev/fixtures.mjs --domain stageb-onboarding`（6/6）、`node scripts/dev/fixtures.mjs`（266/266）与 `node scripts/dev/e2e-zip-harness.mjs`（162 条目、7 场景）退出 `0`。
+- **文档同步检查**：已将 `kit/skills/lib/skill-discovery.mjs`、`scripts/dev/preflight-suite-checks.mjs`、`scripts/dev/fixtures-stageb-onboarding.mjs` 与 `scripts/dev/fixtures-stageb-loop.mjs` 登记入 `docs/TDD.md`，并通过 `equip.mjs .` 与 `compose-agents.mjs .` 同步 `.agents/skills/` 与 `AGENTS.md`。
+- **遗留问题**：无（`fixtures-stageb-loop.mjs` 作为 Wave 3–5 占位已在 `fixtures.mjs` 与 `docs/TDD.md` 预注册；合并后按 `RELEASING.md` 等待其余切片决策）。

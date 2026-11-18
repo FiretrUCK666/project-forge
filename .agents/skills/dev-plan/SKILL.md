@@ -4,6 +4,12 @@ description: |
   需求分流、编写与审核四层工程文档（TDD、PRD、SPEC、Todo）、门型评估与规划内审自净化。
   触发词：需求规划、写方案、写设计文档、写 PRD、写 SPEC、写 Todo、拆任务、
   需求分流、立项、先出方案、文档自检、plan feature、write spec、triage task。
+metadata:
+  tier: both
+  intent: 写需求 / 澄清拍板 / 定方案 / 拆任务
+  script: node .agents/skills/dev-plan/scripts/doc-plan.mjs
+  order: 20
+  fallback: 按改动影响面人工分级（L3 改契约先写 docs/specs/ 与 docs/todo/，完成后用 git mv 归档；未装配 dev-plan 技能）
 ---
 
 # dev-plan：需求 → 澄清 → 设计 与独立 Critique 网关

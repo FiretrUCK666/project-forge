@@ -5,6 +5,28 @@ description: |
   认领 Issue、成对归档文档同步锁、执行验证绑定 HEAD、推分支开 PR、返工、审查后合并与安全清理。
   触发词：修 bug、做功能、推代码、提 PR、开 PR、合并收尾、清 worktree、处理 Issue、
   审外部 PR、收到 Issue、收到 PR、fix bug、implement feature、create PR、merge PR、cleanup worktree。
+metadata:
+  tier: both
+  intent: 做功能 / 修缺陷 / 启动隔离工作位
+  script: "`node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect`"
+  order: 30
+  fallback: 用原生 git switch -c <branch> 隔离改动并运行项目本地测试验证后再提交（未装配 dev-flow 技能）
+  extra_routes:
+    - order: 35
+      tier: both
+      intent: 实施者归档 / 实证 / 推分支提 PR
+      intent_local: 归档文档 / 验证并提交至特性分支
+      script: "`node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit`"
+    - order: 45
+      tier: full
+      intent: 审查者合并 PR / 确认后清理 Worktree
+      intent_local: 本地试合并入主干与确认后清理 Worktree
+      script: "`node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup`"
+    - order: 45
+      tier: lightweight
+      intent: 门禁放行后合并 PR / 确认后清理 Worktree
+      intent_local: 门禁放行后本地试合入主干与清理 Worktree
+      script: "`node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup`"
 ---
 
 # dev-flow：实现 → 实证测试-形式验证 → 合入 状态机

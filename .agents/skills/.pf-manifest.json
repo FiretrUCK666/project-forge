@@ -5,13 +5,13 @@
   "installedAt": "2026-11-18T06:58:41.787Z",
   "files": {
     "dev-explore/SKILL.md": {
-      "sha256": "48138e0b5c6be62dcc24adb410bd8382ad93760874657518a55c77e49c2b355a"
+      "sha256": "78b3cc0edbc41bfd92d584cf420e5547cdbea3361d1099d511b59c3552ecc61e"
     },
     "dev-explore/scripts/repo-map.mjs": {
       "sha256": "28e64ec77d3c3f119b776c7a5b357930bf6002213adb0c3b8e918a7261ea2615"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "48eaea27e0c376e24835f220fad3387132d7188976560a8e6d9c0ae2a2293116"
+      "sha256": "f643812463c2d348b6a93e0e8da143f1636d5c67cf9122ab6d04e6d778c74169"
     },
     "dev-flow/scripts/flow-batch.mjs": {
       "sha256": "9f8156b0f06024018b1837f7e032565976219ed7db9e0737635e50d1fedb5a2c"
@@ -53,7 +53,7 @@
       "sha256": "aa5df1d0d199c8eac74baa453f5cfeaf87ae336bbeedc58153a7b405a6b38146"
     },
     "dev-govern/SKILL.md": {
-      "sha256": "753815d5bf20be663b5ac1a7b4d37bd5ae6ae65e17a3faa64d4577ba4ad806fe"
+      "sha256": "bf2b876d2ae1b8ce3dff20cefb999c2d751e53410b4c893dbf864049abeacf9e"
     },
     "dev-govern/scripts/govern-audit.mjs": {
       "sha256": "7bdfd5a98f91de96f01950eae2211afab83acda523d52acff08d98aa97c53392"
@@ -77,7 +77,7 @@
       "sha256": "f5e9cdb1652601e6775fc23d9058aa995919df39449ed7f2801638f6babd2b32"
     },
     "dev-plan/SKILL.md": {
-      "sha256": "0ea6fea36be64510f108816c391de7d07393776b8c5178214f77de2c357dcb89"
+      "sha256": "b38ee828d32fab1f75c018bf968a26c7a91e14e16b54b16c936940d72586d0f8"
     },
     "dev-plan/scripts/doc-audit-repo.mjs": {
       "sha256": "7c1309702439e3a2435b47842bfc91ce16775c061f71c24c00759ff05aef31ad"
@@ -92,7 +92,7 @@
       "sha256": "e1f2c88a121cf4c30e1301769f2493225502b7e6d0637a5c15a12de7ff518ab9"
     },
     "dev-review/SKILL.md": {
-      "sha256": "0cb39e16521caaae41c430834c95d0f85a96ce004047a138106ed5fdc6c8d8a6"
+      "sha256": "b3df1ab2b6c598ef3640617026f1f650b99e2d25d1bbffe1011b271ca8ef8b93"
     },
     "dev-review/scripts/review-diff.mjs": {
       "sha256": "9671f0e847f2fff852c2ee8545e7d276cb28e0232e9c278b4ef4ac2f5df2e874"
@@ -119,7 +119,7 @@
       "sha256": "38a1637d6ee13faa92a493d579eb10b22fda6be1a41d3f321a04eb0028e20ef0"
     },
     "lib/cli.mjs": {
-      "sha256": "245da2422de1fee6cc357adfefea288a31fda6193201647269d000350466cd5e"
+      "sha256": "a9e49677dee9b0c778a435774830d6098c2bae9fc45c79c159c2043b498b618d"
     },
     "lib/command-lex.mjs": {
       "sha256": "bd67c6ff761219e13fd8d6773cdafb2732083794c460ebed52166aca29f1adea"
@@ -209,10 +209,13 @@
       "sha256": "626835df8cc7206e3175e9757b0d0f8b3f1df23c98f745a035664e33a602db4f"
     },
     "lib/shared.mjs": {
-      "sha256": "563c9f7152b93ecebfd182a0bf743e7561141403834a2507068950ed3c63ba52"
+      "sha256": "db9166ac679ac240a43960f0ea9c69aa4d691fa51c90a72ad6b79cbdd78426c1"
     },
     "lib/signals.mjs": {
       "sha256": "ecdc6df599809d7b92f6e984df741afe822b9c45bd0de42805cf095478cedda8"
+    },
+    "lib/skill-discovery.mjs": {
+      "sha256": "b099825eaee09e37e54730f0f7c09c7e5af641ecf4841c926b5f8192f1ba02a9"
     },
     "lib/static-gates-lexer.mjs": {
       "sha256": "00139ac78a199276f1cc22acc5d43f0f9ea0be5b1d78a8102527be4b9344ce6e"

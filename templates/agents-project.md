@@ -16,32 +16,7 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 
 | 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
 | --- | --- | --- |
-| 理解项目 / 梳理架构 / 找模块入口 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/repo-map.mjs` |
-| 写需求 / 澄清拍板 / 定方案 / 拆任务 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs` |
-| 做功能 / 修缺陷 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
-<!-- project-forge: if has-remote -->
-| 实施者归档 / 实证 / 推分支提 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
-<!-- project-forge: if is-full -->
-| 本地预审 / 独立双门审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
-| 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
-<!-- project-forge: endif -->
-<!-- project-forge: if is-lightweight -->
-| 门禁放行后合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
-<!-- project-forge: endif -->
-<!-- project-forge: endif -->
-<!-- project-forge: if no-remote -->
-| 归档文档 / 验证并提交至特性分支 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
-<!-- project-forge: if is-full -->
-| 本地预审 / 隔离工作树独立双门审查 | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
-| 本地试合并入主干与确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
-<!-- project-forge: endif -->
-<!-- project-forge: if is-lightweight -->
-| 门禁放行后本地试合入主干与清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
-<!-- project-forge: endif -->
-<!-- project-forge: endif -->
-<!-- project-forge: if is-full -->
-| 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
-<!-- project-forge: endif -->
+{{KIT_ROUTING_ROWS}}
 <!-- project-forge: if is-lightweight -->
 | 工程基线检查 / 按需升档完整套件 | 见「环境与构建验证」或升档完整套件 | 运行项目构建/测试命令（用本工具 `equip --tier full` 升档） |
 <!-- project-forge: endif -->

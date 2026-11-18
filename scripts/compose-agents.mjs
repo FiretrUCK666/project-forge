@@ -17,7 +17,7 @@ import { flushAndExit, isMainModule, readTextSafe } from './lib/text.mjs'
 import { clearStaleTemps, writeAtomic } from './lib/fs-atomic.mjs'
 import * as protocol from './lib/protocol.mjs'
 import {
-  COMMAND_ORDER, buildVars, commandPlanOf, customSkillsOf, explorationStrategyBlock,
+  COMMAND_ORDER, buildVars, commandPlanOf, customSkillsOf, excludedSkillsFor, explorationStrategyBlock,
 } from './lib/agents-defaults.mjs'
 import { renderTemplate, TemplateError } from './lib/template.mjs'
 import {
@@ -34,8 +34,6 @@ import {
 } from './lib/agents-sections.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
-const KIT_SKILLS = protocol.KIT_SKILLS ?? ['dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern']
-const LIGHTWEIGHT_KIT_SKILLS = protocol.LIGHTWEIGHT_KIT_SKILLS ?? ['dev-explore', 'dev-plan', 'dev-flow']
 const EQUIP_TIERS = protocol.EQUIP_TIERS ?? ['lightweight', 'full']
 const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
 const AGENTS_WARN_BYTES = protocol.AGENTS_WARN_BYTES ?? 24576
@@ -103,28 +101,6 @@ function resolveEffectiveTier(explicitTier, manifest, facts) {
   const fTier = facts?.tier
   if (EQUIP_TIERS.includes(fTier)) return fTier
   return 'full'
-}
-
-function excludedSkillsFor(facts, manifest, tier, root) {
-  const excluded = new Set()
-  const fromManifest = !manifest?.invalid && Array.isArray(manifest?.data?.disabledSkills)
-    ? manifest.data.disabledSkills
-    : []
-  const fromFacts = Array.isArray(facts?.kit?.disabledSkills) ? facts.kit.disabledSkills : []
-  for (const s of [...fromManifest, ...fromFacts]) {
-    if (typeof s === 'string' && s.trim()) excluded.add(s.trim())
-  }
-  if (tier === 'lightweight') {
-    for (const s of KIT_SKILLS) {
-      if (!LIGHTWEIGHT_KIT_SKILLS.includes(s)) excluded.add(s)
-    }
-  }
-  if (root && (existsSync(join(root, '.agents')) || existsSync(join(root, PF_MANIFEST_REL)))) {
-    for (const s of KIT_SKILLS) {
-      if (!existsSync(join(root, '.agents', 'skills', s, 'SKILL.md'))) excluded.add(s)
-    }
-  }
-  return excluded
 }
 
 function writeManifestRegions(root, agentsText, protectedIds = [], removedIds = []) {
@@ -204,17 +180,17 @@ export function buildConditions(facts, { tier } = {}) {
   }
 }
 
-export function renderAgentsTemplate(facts, templateText, root, { tier, manifest } = {}) {
+export function renderAgentsTemplate(facts, templateText, root, { tier, manifest, kitDir } = {}) {
   const targetRoot = root || facts?.target?.path
   const resolvedManifest = manifest ?? (targetRoot ? readManifestSafe(targetRoot) : null)
   const effectiveTier = resolveEffectiveTier(tier, resolvedManifest, facts)
   const rendered = renderTemplate(
     templateText,
     buildConditions(facts, { tier: effectiveTier }),
-    buildVars(facts, root),
+    buildVars(facts, root, { tier: effectiveTier, kitDir }),
     'template.md',
   )
-  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, effectiveTier, targetRoot))
+  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, effectiveTier, targetRoot, { kitDir }))
 }
 
 function volatileValues(facts) {

@@ -4,6 +4,13 @@ description: |
   独立代码审查、本地严苛预审、不可信外部 PR 供应链拦截、行为/结构双门与门型评估，以及六锁防死循环收敛。
   触发词：代码审查、审一下改动、审查 PR、本地预审、提交前审查、检查 diff、审外部 PR、
   供应链扫描、故障注入审查、复审、打回返工、review、pre-review、untrusted scan。
+metadata:
+  tier: full
+  intent: 本地预审 / 独立双门审查 / 审外部 PR
+  intent_local: 本地预审 / 隔离工作树独立双门审查
+  script: node .agents/skills/dev-review/scripts/review-pack.mjs
+  order: 40
+  fallback: 由独立上下文审查者核对 git diff 与本地测试实证，确认无误后再推进合入（未装配 dev-review 技能）
 ---
 
 # dev-review：评审 → 实证测试-形式验证 → 验收 双门六锁把关器

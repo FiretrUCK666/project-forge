@@ -11,9 +11,21 @@
  */
 
 import { COMMON_SKIP_DIRS } from '../../kit/skills/lib/git.mjs'
+import {
+  discoverCustomSkills,
+  discoverKitSkills,
+  discoverKitSkillsDetailed,
+  parseSkillFrontmatter,
+} from '../../kit/skills/lib/skill-discovery.mjs'
 import { scanLines } from './markdown.mjs'
 
-export { COMMON_SKIP_DIRS }
+export {
+  COMMON_SKIP_DIRS,
+  discoverCustomSkills,
+  discoverKitSkills,
+  discoverKitSkillsDetailed,
+  parseSkillFrontmatter,
+}
 
 /**
  * 三态结论与「工具产物归属」两套契约的唯一真相源住在 `kit/skills/lib/`：
@@ -303,18 +315,21 @@ export const AGENTS_WARN_BYTES = 24576
 export const KIT_SKILL_MAX_LINES = 180
 export const PF_MANIFEST_SCHEMA_VERSION = 2
 export const EQUIP_TIERS = Object.freeze(['lightweight', 'full'])
-export const LIGHTWEIGHT_KIT_SKILLS = Object.freeze([
-  'dev-explore',
-  'dev-plan',
-  'dev-flow',
-])
-export const KIT_SKILLS = Object.freeze([
-  'dev-explore',
-  'dev-plan',
-  'dev-flow',
-  'dev-review',
-  'dev-govern',
-])
+
+export function getKitSkills(kitSkillsRoot) {
+  return Object.freeze(discoverKitSkills(kitSkillsRoot).map((s) => s.dirName))
+}
+
+export function getLightweightKitSkills(kitSkillsRoot) {
+  return Object.freeze(
+    discoverKitSkills(kitSkillsRoot)
+      .filter((s) => s.tier === 'both' || s.tier === 'lightweight')
+      .map((s) => s.dirName),
+  )
+}
+
+export const LIGHTWEIGHT_KIT_SKILLS = getLightweightKitSkills()
+export const KIT_SKILLS = getKitSkills()
 
 /** macOS Finder / 归档器常见元数据条目名，跨全链路扫描与打包校验统一过滤。 */
 export const MACOS_METADATA_NAMES = Object.freeze([
@@ -418,6 +433,7 @@ export const TEMPLATE_VARS = Object.freeze([
   'README_LIST',
   'WORKSPACE_PACKAGES',
   'CONVENTIONS_HINT',
+  'KIT_ROUTING_ROWS',
   'CUSTOM_SKILLS_BLOCK',
   'PROFILE_QUICK_TEST',
   'PROFILE_FULL_TEST',

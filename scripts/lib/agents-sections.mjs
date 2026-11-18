@@ -58,7 +58,7 @@ export function filterIntentRouting(rendered, excludedSkills) {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]
     if (i > intentRegion.start && i < intentRegion.end && /^\s*\|/.test(line)) {
-      const m = /\.agents\/skills\/([a-z0-9-]+)\//i.exec(line)
+      const m = /\.agents\/skills\/([a-z0-9._-]+)\//i.exec(line)
       if (m && excluded.has(m[1])) continue
     }
     out.push(line)

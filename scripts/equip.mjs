@@ -31,10 +31,10 @@ import {
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import {
   EQUIP_TIERS,
-  KIT_SKILLS,
-  LIGHTWEIGHT_KIT_SKILLS,
   PF_MANIFEST_REL,
   PF_MANIFEST_SCHEMA_VERSION,
+  getKitSkills,
+  getLightweightKitSkills,
   isMacOsMetadata,
 } from './lib/protocol.mjs'
 import { flushAndExit, isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
@@ -62,10 +62,10 @@ function buildFilterMatcher(option) {
   }
 }
 
-function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}, extraAllowed = null) {
+function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}, extraAllowed = null, kitSkills = getKitSkills()) {
   const extras = []
   const managedTopDirs = new Set(
-    [...KIT_SKILLS, 'lib', ...[...kitFiles.keys()].map((k) => k.split('/')[0]).filter(Boolean)],
+    [...kitSkills, 'lib', ...[...kitFiles.keys()].map((k) => k.split('/')[0]).filter(Boolean)],
   )
   for (const top of managedTopDirs) {
     const topPath = join(skillsDir, top)
@@ -121,8 +121,16 @@ function walkInstalledMjsFiles(skillsDir) {
   return out
 }
 
-function inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existingExists) {
-  const required = effectiveTier === 'lightweight' ? LIGHTWEIGHT_KIT_SKILLS : KIT_SKILLS
+function inspectInstalledIntegrity(
+  skillsDir,
+  effectiveTier,
+  disabledSet,
+  removedMap,
+  existingExists,
+  kitSkills = getKitSkills(),
+  lightweightSkills = getLightweightKitSkills(),
+) {
+  const required = effectiveTier === 'lightweight' ? lightweightSkills : kitSkills
   const disabledCoreSkills = []
   const brokenImports = []
   const invalidFrontmatters = []
@@ -170,8 +178,10 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
 
   const existing = readExistingManifest(manifestPath)
   const effectiveTier = resolveEffectiveTier(tier, existing)
+  const kitSkills = getKitSkills(kitDir)
+  const lightweightSkills = getLightweightKitSkills(kitDir)
   const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, LIGHTWEIGHT_KIT_SKILLS)
+  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, lightweightSkills)
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
   const removedMap = existing.valid ? normalizeRemovedFiles(existing.data?.removedFiles) : {}
@@ -224,11 +234,11 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
       extraManaged.push(rel)
     }
   }
-  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap, toleratedHigherTier)) {
+  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap, toleratedHigherTier, kitSkills)) {
     if (!extraManaged.includes(rel)) extraManaged.push(rel)
   }
   extraManaged.sort()
-  const integrity = inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existing.exists)
+  const integrity = inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existing.exists, kitSkills, lightweightSkills)
 
   const ok = existing.exists && existing.valid
     && missing.length === 0 && drifted.length === 0
@@ -267,8 +277,10 @@ export function equip(targetDir, {
   const manifestPath = join(root, PF_MANIFEST_REL)
   const existing = readExistingManifest(manifestPath)
   const effectiveTier = resolveEffectiveTier(tier, existing)
+  const kitSkills = getKitSkills(kitDir)
+  const lightweightSkills = getLightweightKitSkills(kitDir)
   const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, LIGHTWEIGHT_KIT_SKILLS)
+  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, lightweightSkills)
 
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
@@ -277,6 +289,19 @@ export function equip(targetDir, {
 
   const restoreMatcher = buildFilterMatcher(restore)
   const adoptMatcher = buildFilterMatcher(adoptCustom)
+
+  const untrackedCustomSkills = new Set()
+  for (const skill of kitSkills) {
+    if (disabledSet.has(skill)) continue
+    const skillMdRel = `${skill}/SKILL.md`
+    const skillMdAbs = join(skillsDir, skillMdRel)
+    if (!existsSync(skillMdAbs)) continue
+    const hasAnyTracked = [...prevFiles.keys()].some((r) => r === skillMdRel || r.startsWith(`${skill}/`))
+    const upSkillMd = allKitFiles.get(skillMdRel)
+    if (!hasAnyTracked && upSkillMd && normalizedSha256(readFileSync(skillMdAbs)) !== upSkillMd.sha256) {
+      untrackedCustomSkills.add(skill)
+    }
+  }
 
   if (restoreMatcher) {
     for (const skill of [...disabledSet]) if (restoreMatcher(skill)) disabledSet.delete(skill)
@@ -330,6 +355,14 @@ export function equip(targetDir, {
   for (const rel of kitKeys) {
     const src = kitFiles.get(rel)
     const top = rel.split('/')[0]
+    if (untrackedCustomSkills.has(top)) {
+      if (rel === `${top}/SKILL.md`) {
+        const dest = join(skillsDir, rel)
+        const diskHash = normalizedSha256(readFileSync(dest))
+        conflicts.push({ path: rel, reason: 'untracked-modified', diskSha256: diskHash, incomingSha256: src.sha256 })
+      }
+      continue
+    }
     const dest = join(skillsDir, rel)
     const oldHash = prevFiles.get(rel)
 
@@ -391,7 +424,7 @@ export function equip(targetDir, {
   }
 
   if (adoptMatcher) {
-    for (const extraRel of collectManagedDirExtras(skillsDir, kitFiles, {})) {
+    for (const extraRel of collectManagedDirExtras(skillsDir, kitFiles, {}, null, kitSkills)) {
       if (!adoptMatcher(extraRel)) continue
       const abs = join(skillsDir, extraRel)
       if (!existsSync(abs)) continue
@@ -538,11 +571,12 @@ function formatCheckReport(res) {
   return lines.join('\n')
 }
 
-function consumeOptionalValue(argv, idx, targetSpecified) {
+function consumeOptionalValue(argv, idx, targetSpecified, kitDir = DEFAULT_KIT_SKILLS_DIR) {
   const next = argv[idx + 1]
   if (!next || next.startsWith('-')) return { value: true, consumed: false }
   const norm = normalizeSkillFilterArg(next)
-  const looksLikeSkill = KIT_SKILLS.includes(norm) || norm.startsWith('lib/') || norm.includes('/')
+  const knownSkills = getKitSkills(kitDir)
+  const looksLikeSkill = knownSkills.includes(norm) || norm.startsWith('lib/') || norm.includes('/')
   if (!targetSpecified && !next.startsWith('.agents/') && !looksLikeSkill && existsSync(next) && statSync(next).isDirectory()) {
     return { value: true, consumed: false }
   }
@@ -564,14 +598,20 @@ async function main(argv) {
   let restore = false
   let adoptCustom = false
   let kitDir = DEFAULT_KIT_SKILLS_DIR
+  for (let k = 0; k < argv.length; k++) {
+    if (argv[k] === '--kit-dir' && argv[k + 1]) kitDir = resolve(argv[k + 1])
+    else if (argv[k].startsWith('--kit-dir=')) kitDir = resolve(argv[k].slice('--kit-dir='.length))
+  }
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--help' || arg === '-h') {
+      const fullCount = getKitSkills(kitDir).length
+      const lightCount = getLightweightKitSkills(kitDir).length
       process.stdout.write([
         '用法：node scripts/equip.mjs [目标目录] [选项]',
         '',
-        '  --tier <lightweight|full>  装配档位（lightweight 3 技能 / full 全套 5 技能）',
+        `  --tier <lightweight|full>  装配档位（lightweight ${lightCount} 技能 / full 全套 ${fullCount} 技能）`,
         '  --check                    只读校验，不一致退出码 1（已豁免定制文件退出 0）',
         '  --adopt-custom [path]      将手工修改或二次编辑的托管技能登记为定制豁免',
         '  --restore [pathOrSkill]    显式恢复此前删除记入墓碑的技能或文件',
@@ -602,14 +642,14 @@ async function main(argv) {
     else if (arg === '--kit-dir') kitDir = resolve(argv[++i] || '')
     else if (arg.startsWith('--kit-dir=')) kitDir = resolve(arg.slice('--kit-dir='.length))
     else if (arg === '--restore') {
-      const peek = consumeOptionalValue(argv, i, targetSpecified)
+      const peek = consumeOptionalValue(argv, i, targetSpecified, kitDir)
       if (peek.consumed) i += 1
       restore = peek.value === true ? true : [...(Array.isArray(restore) ? restore : []), peek.value]
     } else if (arg.startsWith('--restore=')) {
       const val = arg.slice('--restore='.length)
       restore = [...(Array.isArray(restore) ? restore : []), val || '*']
     } else if (arg === '--adopt-custom') {
-      const peek = consumeOptionalValue(argv, i, targetSpecified)
+      const peek = consumeOptionalValue(argv, i, targetSpecified, kitDir)
       if (peek.consumed) i += 1
       adoptCustom = peek.value === true ? true : [...(Array.isArray(adoptCustom) ? adoptCustom : []), peek.value]
     } else if (arg.startsWith('--adopt-custom=')) {

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: v9 B1：动态 Skill 发现、自有技能路由保留与升级补齐
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
 issue: 71
@@ -9,10 +9,10 @@ pr: null
 branch: feat/b1-skill-discovery
 owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-18
 task_id: b1-skill-discovery
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue71-b1-skill-discovery-spec.md
 ---
 

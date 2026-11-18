@@ -7,11 +7,19 @@
 
 export {
   flushAndExit,
+  getKnownKitSkills,
   hasSkillSupport,
   parseStandardCli,
   printNextStep,
   resolveAvailableSkills,
 } from './cli.mjs'
+
+export {
+  discoverCustomSkills,
+  discoverKitSkills,
+  discoverKitSkillsDetailed,
+  parseSkillFrontmatter,
+} from './skill-discovery.mjs'
 
 export {
   buildNonInteractiveEnv,

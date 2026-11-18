@@ -5,6 +5,12 @@ description: |
   触发词：探索代码、梳理架构、这个模块怎么跑的、找入口、代码结构、项目结构、
   先看看代码、哪里定义的、模块边界、可复用模块、read codebase、explore repo、find entrypoints。
   完全只读，不修改任何文件，不创建分支或工作树。
+metadata:
+  tier: both
+  intent: 理解项目 / 梳理架构 / 找模块入口
+  script: node .agents/skills/dev-explore/scripts/repo-map.mjs
+  order: 10
+  fallback: 手工查看项目清单、CI 工作流与入口源码（未装配 dev-explore 技能）
 ---
 
 # dev-explore：8 阶段前瞻侦察与资产清单

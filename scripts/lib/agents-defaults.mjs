@@ -10,8 +10,8 @@ import { join } from 'node:path'
 import * as protocol from './protocol.mjs'
 import { ECO_COMMANDS_SHOWN_PER_KIND } from './render.mjs'
 
-const KIT_SKILLS = protocol.KIT_SKILLS ?? ['dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern']
 const INLINE_COMMAND_MAX_BYTES = protocol.COMMAND_DISPLAY_MAX_BYTES ?? 500
+const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 export const COMMAND_ORDER = ['install', 'build', 'typecheck', 'lint', 'test', 'verify']
 export const COMMAND_LABEL = {
@@ -20,12 +20,19 @@ export const COMMAND_LABEL = {
 }
 
 export function customSkillsOf(facts) {
-  const kitSet = new Set(KIT_SKILLS)
-  const raw = Array.isArray(facts?.kit?.customSkills)
+  const kitSet = new Set(protocol.getKitSkills())
+  const hasKitCustom = Array.isArray(facts?.kit?.customSkills)
+  const raw = hasKitCustom
     ? facts.kit.customSkills
     : (Array.isArray(facts?.localSkills) ? facts.localSkills : []).filter((s) => {
         const p = String(s?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
-        return /(?:^|\/)skills\/[^/]+$/i.test(p) && !/(?:^|\/)\.agents\/skills\/lib$/i.test(p)
+        if (/^skills\/[^/]+$/i.test(p)) return true
+        if (/^\.[^/]+\/skills\/[^/]+$/i.test(p)) {
+          const dirName = p.split('/').pop()
+          if (/^\.agents\/skills\//i.test(p) && kitSet.has(dirName)) return false
+          return true
+        }
+        return false
       })
 
   const seen = new Set()
@@ -38,13 +45,17 @@ export function customSkillsOf(facts) {
     if (!normPath) continue
     const dirName = normPath.split('/').pop()
     const displayName = rawName || dirName
-    if (kitSet.has(dirName) || kitSet.has(displayName)) continue
+    if (!hasKitCustom && /^\.agents\/skills\//i.test(normPath) && kitSet.has(dirName)) continue
     if (seen.has(normPath)) continue
     seen.add(normPath)
+    const description = String(item.description ?? '').replace(/\s+/g, ' ').trim()
+    const summary = String(item.summary ?? description).replace(/\s+/g, ' ').trim()
     result.push({
       path: normPath,
       name: displayName,
-      summary: String(item.summary ?? '').replace(/\s+/g, ' ').trim(),
+      ...(description ? { description } : {}),
+      summary,
+      ...(item.container ? { container: item.container } : {}),
     })
   }
   return result.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
@@ -194,10 +205,102 @@ export function customSkillsBlock(facts) {
   const custom = customSkillsOf(facts)
   if (custom.length === 0) return ''
   return custom
-    .map((s) => (s.summary
-      ? `- \`${s.path}/SKILL.md\`（\`${s.name}\`）：${s.summary}`
-      : `- \`${s.path}/SKILL.md\`（\`${s.name}\`）`))
+    .map((s) => {
+      const detail = s.description || s.summary
+      return detail
+        ? `- \`${s.path}/SKILL.md\`（\`${s.name}\`）：${detail}`
+        : `- \`${s.path}/SKILL.md\`（\`${s.name}\`）`
+    })
     .join('\n')
+}
+
+function formatScriptCell(script, skillPath) {
+  const s = String(script ?? '').trim()
+  if (!s) return `按 \`${skillPath}\` 指引执行`
+  return s.includes('`') ? s : `\`${s}\``
+}
+
+/**
+ * 动态渲染 `AGENTS.md` `意图路由` 表格行，合并按 `order` 排序的内置技能与项目自有技能。
+ */
+export function renderKitRoutingRows({
+  tier = 'full',
+  customSkills = [],
+  discoveredSkills,
+  hasRemote = true,
+} = {}) {
+  const skills = Array.isArray(discoveredSkills) ? discoveredSkills : protocol.discoverKitSkills()
+  const effectiveTier = tier === 'lightweight' ? 'lightweight' : 'full'
+  const entries = []
+  let seq = 0
+
+  for (const skill of skills) {
+    const skillTier = skill?.tier === 'both' || skill?.tier === 'lightweight' ? 'both' : 'full'
+    if (effectiveTier === 'lightweight' && skillTier !== 'both') continue
+    const skillPath = skill.path || `.agents/skills/${skill.dirName || skill.name}/SKILL.md`
+    const intentText = (hasRemote === false && skill.intentLocal ? skill.intentLocal : skill.intent)
+      || skill.summary || skill.description || skill.name
+    entries.push({
+      order: Number.isFinite(Number(skill.order)) ? Number(skill.order) : 100,
+      seq: seq++,
+      intent: String(intentText).replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|'),
+      target: `\`${skillPath}\``,
+      script: formatScriptCell(skill.script, skillPath),
+    })
+    for (const extra of skill.extraRoutes ?? []) {
+      if (extra.tier && extra.tier !== 'both' && extra.tier !== effectiveTier) continue
+      const erIntent = hasRemote === false ? (extra.intentLocal ?? extra.intent) : extra.intent
+      if (!erIntent) continue
+      entries.push({
+        order: Number.isFinite(Number(extra.order)) ? Number(extra.order) : 100,
+        seq: seq++,
+        intent: String(erIntent).replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|'),
+        target: `\`${skillPath}\``,
+        script: formatScriptCell(extra.script, skillPath),
+      })
+    }
+  }
+
+  entries.sort((a, b) => (a.order - b.order) || (a.seq - b.seq))
+  const rows = entries.map((e) => `| ${e.intent} | ${e.target} | ${e.script} |`)
+
+  for (const cs of customSkills ?? []) {
+    if (!cs || cs.valid === false) continue
+    const csPath = String(cs.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+    if (!csPath) continue
+    const csName = String(cs.name ?? csPath.split('/').pop()).trim()
+    const csDesc = String(cs.description || cs.summary || csName).replace(/\s+/g, ' ').trim()
+    const skillMdPath = csPath.endsWith('/SKILL.md') ? csPath : `${csPath}/SKILL.md`
+    const safeIntent = `${csName}：${csDesc}`.replace(/\|/g, '\\|')
+    rows.push(`| ${safeIntent} | \`${skillMdPath}\` | 静默读取 \`${skillMdPath}\` 并按指引执行 |`)
+  }
+
+  return rows.join('\n')
+}
+
+export function excludedSkillsFor(facts, manifest, tier, root, { kitDir } = {}) {
+  const excluded = new Set()
+  const fromManifest = !manifest?.invalid && Array.isArray(manifest?.data?.disabledSkills)
+    ? manifest.data.disabledSkills
+    : []
+  const fromFacts = Array.isArray(facts?.kit?.disabledSkills) ? facts.kit.disabledSkills : []
+  for (const s of [...fromManifest, ...fromFacts]) {
+    if (typeof s === 'string' && s.trim()) excluded.add(s.trim())
+  }
+  const discovered = protocol.discoverKitSkills(kitDir)
+  const kitSkillNames = discovered.map((s) => s.dirName)
+  const lightweightSet = new Set(discovered.filter((s) => s.tier === 'both').map((s) => s.dirName))
+  if (tier === 'lightweight') {
+    for (const s of kitSkillNames) {
+      if (!lightweightSet.has(s)) excluded.add(s)
+    }
+  }
+  if (root && (existsSync(join(root, '.agents')) || existsSync(join(root, PF_MANIFEST_REL)))) {
+    for (const s of kitSkillNames) {
+      if (!existsSync(join(root, '.agents', 'skills', s, 'SKILL.md'))) excluded.add(s)
+    }
+  }
+  return excluded
 }
 
 /**
@@ -269,7 +372,7 @@ export function buildDevProfileVars(facts, targetRoot) {
   }
 }
 
-export function buildVars(facts, root) {
+export function buildVars(facts, root, { tier, kitDir } = {}) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'
     ? 'CHANGELOG.md 的对应版本节'
@@ -283,6 +386,14 @@ export function buildVars(facts, root) {
     : (legacyWorkExists ? 'docs/work' : 'docs/todo')
 
   const commandPlan = commandPlanOf(facts)
+  const effectiveTier = tier === 'lightweight' || tier === 'full'
+    ? tier
+    : (facts?.kit?.tier === 'lightweight' || facts?.kit?.tier === 'full'
+        ? facts.kit.tier
+        : (facts?.tier === 'lightweight' || facts?.tier === 'full' ? facts.tier : 'full'))
+  const hasRemote = Boolean(facts?.git?.remote) && facts?.git?.isRepoRoot !== false
+  const customSkills = customSkillsOf(facts)
+  const discoveredSkills = protocol.discoverKitSkills(kitDir)
 
   return {
     PROJECT_NAME: facts.target?.name ?? '这个项目',
@@ -299,6 +410,7 @@ export function buildVars(facts, root) {
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
     CONVENTIONS_HINT: conventionsHint(facts),
+    KIT_ROUTING_ROWS: renderKitRoutingRows({ tier: effectiveTier, customSkills, discoveredSkills, hasRemote }),
     CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),
     ...buildDevProfileVars(facts, targetRoot),
   }

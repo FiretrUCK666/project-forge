@@ -7,13 +7,19 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-const KNOWN_KIT_SKILLS = Object.freeze([
-  'dev-explore',
-  'dev-plan',
-  'dev-flow',
-  'dev-review',
-  'dev-govern',
-])
+import { discoverKitSkills } from './skill-discovery.mjs'
+
+export function getKnownKitSkills(kitDir) {
+  return Object.freeze(discoverKitSkills(kitDir).map((s) => s.dirName))
+}
+
+function getSkillFallbacks(kitDir) {
+  const map = new Map()
+  for (const s of discoverKitSkills(kitDir)) {
+    if (s.fallback) map.set(s.dirName, s.fallback)
+  }
+  return map
+}
 
 function toSet(list) {
   if (!list) return new Set()
@@ -162,7 +168,7 @@ export function parseStandardCli(argv = [], schema = {}) {
  * 现场探测目标仓库 `.agents/skills/` 下实际已装配的技能目录，
  * 用于裁剪/降级 `[NEXT STEP]` 指引，兼容 lightweight 档与用户手动删减技能场景。
  */
-export function resolveAvailableSkills(repoRoot = process.cwd()) {
+export function resolveAvailableSkills(repoRoot = process.cwd(), { kitDir } = {}) {
   const skillsDir = join(resolve(repoRoot), '.agents', 'skills')
   const available = new Set()
   let hasSkillsDir = false
@@ -187,7 +193,7 @@ export function resolveAvailableSkills(repoRoot = process.cwd()) {
     skillsDir,
     skills: [...available].sort(),
     available,
-    knownKitSkills: KNOWN_KIT_SKILLS,
+    knownKitSkills: getKnownKitSkills(kitDir),
     has(skillName) {
       return available.has(skillName)
     },
@@ -210,19 +216,12 @@ export function hasSkillSupport(repoRoot = process.cwd(), skillName = 'dev-revie
   return info.has(skillName)
 }
 
-const DEFAULT_SKILL_FALLBACKS = Object.freeze({
-  'dev-explore': '手工查看项目清单、CI 工作流与入口源码（未装配 dev-explore 技能）',
-  'dev-plan': '按改动影响面人工分级（L3 改契约先写 docs/specs/ 与 docs/todo/，完成后用 git mv 归档；未装配 dev-plan 技能）',
-  'dev-flow': '用原生 git switch -c <branch> 隔离改动并运行项目本地测试验证后再提交（未装配 dev-flow 技能）',
-  'dev-review': '由独立上下文审查者核对 git diff 与本地测试实证，确认无误后再推进合入（未装配 dev-review 技能）',
-  'dev-govern': '手工运行项目测试与 git status / git worktree list 检查工作区干净状态（未装配 dev-govern 技能）',
-})
-
-function formatStepItem(item, skillsInfo) {
+function formatStepItem(item, skillsInfo, fallbackMap) {
   if (item && typeof item === 'object') {
     const skill = item.skill
     const text = String(item.text ?? '').trim()
-    const fallback = String(item.fallback ?? DEFAULT_SKILL_FALLBACKS[skill] ?? text).trim()
+    const defaultFb = skill ? `按原生 git 与项目流程手动执行（未装配 ${skill} 技能）` : text
+    const fallback = String(item.fallback ?? fallbackMap.get(skill) ?? defaultFb).trim()
     if (skill && skillsInfo && !skillsInfo.has(skill)) {
       return fallback
     }
@@ -232,9 +231,9 @@ function formatStepItem(item, skillsInfo) {
   const line = String(item ?? '').trim()
   if (!line || !skillsInfo) return line
 
-  const m = /\.agents\/skills\/([a-z0-9-]+)\//i.exec(line)
+  const m = /\.agents\/skills\/([a-z0-9._-]+)\//i.exec(line)
   if (m && !skillsInfo.has(m[1])) {
-    return DEFAULT_SKILL_FALLBACKS[m[1]] ?? line.replace(/node\s+["']?\.agents\/skills\/[^"'\s]+["']?[^\n]*/g, '按原生 git 与项目测试流程手动执行')
+    return fallbackMap.get(m[1]) ?? line.replace(/node\s+["']?\.agents\/skills\/[^"'\s]+["']?[^\n]*/g, '按原生 git 与项目测试流程手动执行')
   }
   return line
 }
@@ -243,14 +242,15 @@ function formatStepItem(item, skillsInfo) {
  * 在每个 CLI 输出末尾打印清晰的下一步唯一合法动作卡片。
  * 当传入 repoRoot 或 availableSkills 时，对缺失的兄弟技能自动降级为纯 Git / 人工指令。
  */
-export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkills } = {}) {
+export function printNextStep(lines, { jsonMode = false, repoRoot, availableSkills, kitDir } = {}) {
   if (jsonMode) return
-  const skillsInfo = availableSkills ?? (repoRoot ? resolveAvailableSkills(repoRoot) : null)
+  const skillsInfo = availableSkills ?? (repoRoot ? resolveAvailableSkills(repoRoot, { kitDir }) : null)
+  const fallbackMap = getSkillFallbacks(kitDir)
   const rawItems = Array.isArray(lines) ? lines : [lines]
   const rendered = []
   for (const item of rawItems) {
     if (!item) continue
-    const line = formatStepItem(item, skillsInfo)
+    const line = formatStepItem(item, skillsInfo, fallbackMap)
     if (line && !rendered.includes(line)) rendered.push(line)
   }
   if (rendered.length === 0) return

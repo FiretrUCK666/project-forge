@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 import * as protocol from './protocol.mjs'
 // 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
-const { hasRealContent } = protocol
+const { discoverCustomSkills, discoverKitSkills, hasRealContent } = protocol
 import {
   isMacMetadataName,
   posixPath,
@@ -23,7 +23,6 @@ import {
   isJunkFile,
 } from './survey-ecosystem.mjs'
 
-const KIT_SKILLS = protocol.KIT_SKILLS ?? ['dev-explore', 'dev-plan', 'dev-flow', 'dev-review', 'dev-govern']
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
 
 function scanManagedSkillDir(baseRel, root) {
@@ -105,24 +104,52 @@ function hashMatchesNormalized(filePath, expectedHash) {
   }
 }
 
-export function detectKit(root) {
+export function detectKit(root, { kitDir } = {}) {
   const skillsRoot = join(root, '.agents', 'skills')
   const manifestFull = join(root, PF_MANIFEST_REL)
   const manifestExists = existsSync(manifestFull)
-  const hiddenContainers = discoverSkillContainers(root, { hiddenOnly: true })
-  const allHiddenSkills = hiddenContainers.flatMap((dir) => scanManagedSkillDir(dir, root))
+  const discoveredKit = discoverKitSkills(kitDir)
+  const kitSkillNames = discoveredKit.map((s) => s.dirName)
+  const lightweightSkillNames = discoveredKit.filter((s) => s.tier === 'both').map((s) => s.dirName)
+  const kitSkillSet = new Set(kitSkillNames)
+
+  const rawText = manifestExists ? readTextSafe(manifestFull) : undefined
+  let manifest = null
+  if (manifestExists) {
+    try { manifest = rawText ? JSON.parse(rawText) : null } catch { manifest = null }
+  }
+  const manifestValid = Boolean(
+    manifestExists
+    && manifest
+    && typeof manifest === 'object'
+    && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2)
+    && manifest.files
+    && typeof manifest.files === 'object'
+    && !Array.isArray(manifest.files),
+  )
+
   const agentsSkills = scanManagedSkillDir('.agents/skills', root)
   const installedSkills = agentsSkills.map((s) => s.dirName)
-  const managedSkills = KIT_SKILLS.filter((k) => installedSkills.includes(k))
-  const customSkills = allHiddenSkills
-    .filter((s) => !KIT_SKILLS.includes(s.dirName))
-    .map(({ name, path, summary, valid }) => ({
+  const manifestManagedDirs = new Set()
+  if (manifestValid) {
+    for (const key of Object.keys(manifest.files)) {
+      const clean = posixPath(key).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
+      const top = clean.split('/')[0]
+      if (top && top !== 'lib') manifestManagedDirs.add(top)
+    }
+  }
+  const managedSkills = kitSkillNames.filter((k) => (
+    installedSkills.includes(k) && (!manifestValid || manifestManagedDirs.has(k))
+  ))
+  const customSkills = discoverCustomSkills(root, kitSkillSet, manifestValid ? manifest : null)
+    .map(({ name, description, summary, path, container, valid }) => ({
       name,
-      path,
+      ...(description ? { description } : {}),
       ...(summary ? { summary } : {}),
+      path,
+      container,
       valid,
     }))
-    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   if (!manifestExists) {
     return {
@@ -147,22 +174,11 @@ export function detectKit(root) {
       installedSkills,
       managedSkills,
       customSkills,
+      uninstalledKitSkills: [],
       kitSkillsCovered: managedSkills,
       agentsRegions: [],
     }
   }
-
-  const rawText = readTextSafe(manifestFull)
-  let manifest
-  try { manifest = rawText ? JSON.parse(rawText) : null } catch { manifest = null }
-  const manifestValid = Boolean(
-    manifest
-    && typeof manifest === 'object'
-    && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2)
-    && manifest.files
-    && typeof manifest.files === 'object'
-    && !Array.isArray(manifest.files),
-  )
 
   if (!manifestValid) {
     return {
@@ -187,6 +203,7 @@ export function detectKit(root) {
       installedSkills,
       managedSkills,
       customSkills,
+      uninstalledKitSkills: kitSkillNames.filter((k) => !installedSkills.includes(k)),
       kitSkillsCovered: managedSkills,
       agentsRegions: [],
     }
@@ -245,6 +262,13 @@ export function detectKit(root) {
   const tier = manifest.tier === 'lightweight' || manifest.tier === 'full'
     ? manifest.tier
     : (manifest.schemaVersion === 1 ? 'full' : undefined)
+  const expectedForTier = tier === 'lightweight' ? lightweightSkillNames : kitSkillNames
+  const uninstalledKitSkills = expectedForTier.filter((k) => (
+    !installedSkills.includes(k)
+    && !disabledSet.has(k)
+    && !removedSet.has(`${k}/SKILL.md`)
+    && !removedSet.has(k)
+  ))
 
   return {
     present: true,
@@ -264,10 +288,11 @@ export function detectKit(root) {
     customizedFiles,
     removedAgentsRegions,
     versionMismatch,
-    drifted: missingFiles.length > 0 || modifiedFiles.length > 0 || versionMismatch,
+    drifted: missingFiles.length > 0 || modifiedFiles.length > 0 || versionMismatch || uninstalledKitSkills.length > 0,
     installedSkills,
     managedSkills,
     customSkills,
+    uninstalledKitSkills,
     kitSkillsCovered: managedSkills,
     agentsRegions,
   }

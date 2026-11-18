@@ -8,8 +8,8 @@ import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
 import {
-  COMMON_SKIP_DIRS, KIT_SKILLS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
-  isMacOsMetadata, markerSyntaxFor, parseMarkers,
+  COMMON_SKIP_DIRS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
+  getKitSkills, isMacOsMetadata, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
@@ -188,13 +188,14 @@ export function scan(targetDir) {
       ? Object.keys(manifest.files).sort()
       : []
     const managedTopDirs = new Set(managedFiles.map((f) => f.split('/')[0]).filter(Boolean))
+    const kitSkillSet = new Set(getKitSkills())
     const customSkills = []
     const skillsDir = join(root, '.agents', 'skills')
     if (existsSync(skillsDir)) {
       try {
         for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
           if (isMacOsMetadata(entry.name) || !entry.isDirectory()) continue
-          if (KIT_SKILLS.includes(entry.name) || managedTopDirs.has(entry.name)) continue
+          if (kitSkillSet.has(entry.name) || managedTopDirs.has(entry.name)) continue
           const sub = join(skillsDir, entry.name)
           if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) {
             customSkills.push(entry.name)

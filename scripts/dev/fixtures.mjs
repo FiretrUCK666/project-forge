@@ -39,6 +39,8 @@ import { registerOnboardingCases } from './fixtures-onboarding.mjs'
 import { registerDocDepthCases } from './fixtures-doc-depth.mjs'
 import { registerIssue50Cases } from './fixtures-issue50.mjs'
 import { registerIssue52Cases } from './fixtures-issue52.mjs'
+import { registerStageBOnboardingCases } from './fixtures-stageb-onboarding.mjs'
+import { registerStageBLoopCases } from './fixtures-stageb-loop.mjs'
 
 initTestBackupDir()
 
@@ -70,6 +72,8 @@ const DOMAIN_REGISTRY = [
   ['survey', registerSurveyCases],
   ['issue50', registerIssue50Cases],
   ['issue52', registerIssue52Cases],
+  ['stageb-onboarding', registerStageBOnboardingCases],
+  ['stageb-loop', registerStageBLoopCases],
 ]
 
 function parseCliFlags(argv) {

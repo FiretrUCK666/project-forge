@@ -7,8 +7,8 @@ created: 2026-11-18
 updated: 2026-11-18
 issue: 71
 pr: null
-branch: null
-owner: plan-stage-b
+branch: feat/b1-skill-discovery
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-stage-b-r2, round=2, sha=ed451b4f0224, summary=R2 复审通过：5份SKILL.md完整路径展开、skill-discovery架构隔离、preflight-suite拆行及C1-C3闭环完备)"
@@ -120,9 +120,9 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C1: `kit/skills/lib/skill-discovery.mjs` (new) 动态扫描技能目录及 YAML `metadata` 字段（`tier`、`intent`、`script`、`order`、`fallback`），`scripts/lib/protocol.mjs`、`kit/skills/lib/cli.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/survey-reentry.mjs` 与 `scripts/handoff.mjs` 全量清除硬编码 5 技能数组（`KNOWN_KIT_SKILLS` 等静态断言不存在）；向临时 `kit/skills/` 放入第 6 个合规范内置技能后，`KIT_SKILLS`、`equip.mjs`、`compose-agents.mjs` 渲染 `{{KIT_ROUTING_ROWS}}` 与 `preflight-suite.mjs` 均零修改源码自动识别并退出 `0`。
-- [ ] C2: 修复 `survey-reentry.mjs` 与 `agents-defaults.mjs` 的 `customSkillsOf` 漏读非隐藏技能容器缺陷，同时提取 `.agents/skills/*`、其他隐藏技能容器与非隐藏 `skills/*` 下全部非托管自有 `SKILL.md` 的 YAML frontmatter `name` 与 `description`，完整进入 `survey.mjs --json` `kit.customSkills` 与 `AGENTS.md` `意图路由`；`S1–S4` 升级完整保留且不覆写同名/异名自有技能；静态断言 `kit/` 与 `scripts/` 产品层代码不含任何具体业务项目自有 Skill 名称硬编码。
-- [ ] C3: 旧版已规范仓在缺少新版新增内置技能且该技能未进入 `.pf-manifest.json` `disabledSkills`/`removedFiles` 墓碑时，`survey.mjs` 在 `kit.uninstalledKitSkills` 报出并把 `artifactPlan` `kit-skills` 设为 `upgrade`；重跑 `S1–S4`（`equip.mjs` + `compose-agents.mjs`）自动补齐新技能并完整保留既有 `disabledSkills`、`removedFiles`、`customizedFiles` 与自有技能，`equip.mjs --check` 与 `compose-agents.mjs --check` 退出 `0`。
+- [x] C1: `kit/skills/lib/skill-discovery.mjs` (new) 动态扫描技能目录及 YAML `metadata` 字段（`tier`、`intent`、`script`、`order`、`fallback`），`scripts/lib/protocol.mjs`、`kit/skills/lib/cli.mjs`、`scripts/equip.mjs`、`scripts/compose-agents.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/lib/survey-reentry.mjs` 与 `scripts/handoff.mjs` 全量清除硬编码 5 技能数组（`KNOWN_KIT_SKILLS` 等静态断言不存在）；向临时 `kit/skills/` 放入第 6 个合规范内置技能后，`KIT_SKILLS`、`equip.mjs`、`compose-agents.mjs` 渲染 `{{KIT_ROUTING_ROWS}}` 与 `preflight-suite.mjs` 均零修改源码自动识别并退出 `0`。
+- [x] C2: 修复 `survey-reentry.mjs` 与 `agents-defaults.mjs` 的 `customSkillsOf` 漏读非隐藏技能容器缺陷，同时提取 `.agents/skills/*`、其他隐藏技能容器与非隐藏 `skills/*` 下全部非托管自有 `SKILL.md` 的 YAML frontmatter `name` 与 `description`，完整进入 `survey.mjs --json` `kit.customSkills` 与 `AGENTS.md` `意图路由`；`S1–S4` 升级完整保留且不覆写同名/异名自有技能；静态断言 `kit/` 与 `scripts/` 产品层代码不含任何具体业务项目自有 Skill 名称硬编码。
+- [x] C3: 旧版已规范仓在缺少新版新增内置技能且该技能未进入 `.pf-manifest.json` `disabledSkills`/`removedFiles` 墓碑时，`survey.mjs` 在 `kit.uninstalledKitSkills` 报出并把 `artifactPlan` `kit-skills` 设为 `upgrade`；重跑 `S1–S4`（`equip.mjs` + `compose-agents.mjs`）自动补齐新技能并完整保留既有 `disabledSkills`、`removedFiles`、`customizedFiles` 与自有技能，`equip.mjs --check` 与 `compose-agents.mjs --check` 退出 `0`。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -140,6 +140,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：拆分 `scripts/dev/preflight-suite-checks.mjs` 使 `preflight-suite.mjs` 收敛至 `606` 行；新增零依赖单源扫描器 `kit/skills/lib/skill-discovery.mjs`，在 5 份 `kit/skills/dev-*/SKILL.md` 写入 YAML `metadata.{tier,intent,script,order,fallback}`（含 `dev-review` `intent_local` 与 `dev-flow` `extra_routes` 以对齐 `no-remote`/`lightweight` 约束）；清除 `protocol.mjs`、`cli.mjs`、`equip.mjs`、`compose-agents.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`survey-reentry.mjs` 与 `handoff.mjs` 中的硬编码 5 技能数组；将 `templates/agents-project.md` 静态路由改为 `{{KIT_ROUTING_ROWS}}`；修复 `discoverCustomSkills` / `detectKit` / `customSkillsOf` 对非隐藏 `skills/*`、隐藏容器与同名自有技能的完整解析和保留；在 `detectKit` 与 `computeArtifactPlan` 实现 `uninstalledKitSkills` 增量升级判定并在 `fixtures-stageb-onboarding.mjs` 落盘 `C1–C3` 正反双向断言。
+- **与草案的差异**：无核心差异；同步清理 `scripts/dev/fixtures-equip.mjs` 对 5 技能的静态断言并导出 `checkKitSuite` 以支撑 `C1` 第 6 技能无改码自检。
+- **关联同步文件**：`.agents/skills/`（含 `.pf-manifest.json`）、`AGENTS.md`（未触发漂移且满足字节预算）、`docs/TDD.md`、`scripts/dev/fixtures-stageb-loop.mjs`。

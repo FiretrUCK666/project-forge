@@ -3,7 +3,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 
@@ -379,21 +379,28 @@ export function classifyHomePath(rel, line) {
 
 const SECRET_FAST_PRECHECK_RE = /(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-(?:proj-)?|AKIA|-----BEGIN\s+(?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)/
 
-export function scanWorkspaceRaw(root) {
+export function scanWorkspaceRaw(root, opts = {}) {
   const homeNorm = homedir().replace(/\\/g, '/')
   const homeLeaf = homeNorm.length > 4 ? basename(homeNorm).toLowerCase() : ''
   const homeRe = homeNorm.length > 4
     ? new RegExp(`(?<![\\w.\\-/:])${homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
     : undefined
 
+  const maxDepth = Number.isFinite(opts.maxDepth) ? opts.maxDepth : 64
+  const maxFiles = Number.isFinite(opts.maxFiles) ? opts.maxFiles : 20000
   const files = []
   const dirs = []
   const nestedRepos = []
+  const seenRealDirs = new Set()
   let depthReached = 0
   let truncated = false
 
   const walk = (dir, depth) => {
-    if (depth > 6 || files.length > 20000) { truncated = true; return }
+    if (depth > maxDepth || files.length >= maxFiles) { truncated = true; return }
+    let realDir = dir
+    try { realDir = realpathSync(dir) } catch { return }
+    if (seenRealDirs.has(realDir)) return
+    seenRealDirs.add(realDir)
     if (depth > depthReached) depthReached = depth
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }

@@ -20,9 +20,9 @@ metadata:
 ## 硬性纪律
 
 1. **严格只读**：只读不写，严禁修改、创建或删除任何文件，严禁切换分支。
-2. **全深度无盲区枚举**：Git 仓库默认使用 `git ls-files -z` + 4KB NUL 探测（无深度限制，自动忽略 macOS 元数据），通过包清单（`package.json`、`pom.xml`、`build.gradle*`、`Cargo.toml`、`pyproject.toml`、`go.work`、`*.csproj`、`Package.swift`、`Makefile`/`justfile`/`Taskfile.yml`）与带 `working-directory` 的 CI 步骤识别前后端分离与多生态入口。
+2. **全深度无盲区枚举**：Git 仓库默认使用 `git ls-files -z` + 4KB NUL 探测（无深度限制，自动忽略 macOS 元数据），通过包清单（`package.json` 含 `exports` 对象映射、`pyproject.toml` `[project.scripts]`、`cmd/*/main.go`、`pom.xml`、`build.gradle*`、`Cargo.toml`、`go.work`、`*.csproj`、`Package.swift`、`Makefile`/`justfile`/`Taskfile.yml`）与带 `working-directory` 的 CI 步骤识别前后端分离、CLI 与多生态入口。
 3. **先查复用再造轮子**：结尾必须输出**可复用现成模块清单**（`reusableModules`、既有脚本、校验器与公共工具），供 `dev-plan` 方案选型与实施复用。
-4. **不越权、不当人肉代理**：结合 `Feature Map` 与 `smoke-verify` 锁定真实本地运行入口，动手后由程序跑实证；尊重 `Dev Profile` 显式配置（含 `none`）。
+4. **不越权、不当人肉代理**：结合 `Feature Map`、`businessFlows`（服务对象、核心入口路由/CLI/UI/作业面与文档源码差异）与 `smoke-verify` 锁定真实本地运行入口，动手后由程序跑实证；尊重 `Dev Profile` 显式配置（含 `none`）。
 
 ## 四级探索策略（按复杂度选档，不浪费上下文）
 
@@ -58,7 +58,7 @@ node ".agents/skills/dev-explore/scripts/repo-map.mjs" . --json
 
 ## 必须交付的探索结论模板与下游移交
 
-1. **真实入口与 Feature Map**：功能/入口名 -> 源码文件路径 -> 可执行的测试或 `smoke-verify` 验证命令。
+1. **真实入口、Feature Map 与 Business Flows**：功能/入口名 -> 源码文件路径 -> 可执行的测试或 `smoke-verify` 验证命令，以及 `businessFlows`（服务对象、路由/CLI/UI/作业面、文档源码差异）。
 2. **可复用现成模块清单**：已存在的共享库、辅助函数、契约类型与现成脚本（标注文件路径与导出符号）。
 3. **验证与架构边界**：`Dev Profile`（`quick-test`、`smoke-verify`、`merge-gate`、`arch-rules`）以及 CI 实际运行命令与 `working-directory`。
 4. **移交下游（无缝衔接）**：

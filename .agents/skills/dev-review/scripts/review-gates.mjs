@@ -31,10 +31,22 @@ export function checkDocCodeParity(repoRoot, mainRoot, diff, devProfile, task) {
   for (const u of diff.untracked) changedFiles.add(u)
   const chunks = diff.chunks ?? splitDiffByFile(diff.text)
 
-  const docCandidates = ['docs/TDD.md', 'README.md', 'README.en.md', 'AGENTS.md']
+  const rootReadmes = []
+  try {
+    for (const name of readdirSync(repoRoot)) {
+      if (/^readme$/i.test(name) || /^readme(?:\.[A-Za-z0-9_.-]+)?\.(?:md|mdx|rst|txt|adoc)$/i.test(name)) rootReadmes.push(name)
+      else if (/^(?:contributing|security)(?:\.[A-Za-z0-9_.-]+)?\.md$/i.test(name)) rootReadmes.push(name)
+    }
+  } catch { /* ignore */ }
+  const docCandidates = [...new Set(['docs/TDD.md', 'README.md', 'README.en.md', 'AGENTS.md', ...rootReadmes])]
   const existingDocs = docCandidates.filter((d) => existsSync(join(repoRoot, d)))
   const docsTouched = [...changedFiles].filter((f) =>
-    f === 'docs/TDD.md' || /^README(?:\.[^/]+)?\.md$/i.test(f) || f === 'AGENTS.md' || f.endsWith('/AGENTS.md'),
+    f === 'docs/TDD.md'
+    || /^README$/i.test(f)
+    || /^README(?:\.[^/]+)?\.(?:md|mdx|rst|txt|adoc)$/i.test(f)
+    || /^(?:CONTRIBUTING|SECURITY)(?:\.[^/]+)?\.md$/i.test(f)
+    || f === 'AGENTS.md'
+    || f.endsWith('/AGENTS.md'),
   )
 
   const triggers = []

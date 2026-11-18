@@ -28,6 +28,7 @@ import { toMarkdown } from '../lib/render.mjs'
 import { detectKit } from '../lib/survey-reentry.mjs'
 import { computeArtifactPlan, summarizeRemoteCapabilities } from '../survey.mjs'
 import { gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runNode, SKILL_ROOT, survey, tmpProject } from './fixtures-helpers.mjs'
+import { registerStageBOnboardingB4aCases } from './fixtures-stageb-onboarding-b4a.mjs'
 import { checkKitSuite } from './preflight-suite.mjs'
 
 function walkFiles(dir, pred) {
@@ -758,4 +759,6 @@ export function registerStageBOnboardingCases(cases) {
       return true
     } finally { rmTree(bareDir); rmTree(workDir); rmTree(huskyDir); rmTree(customHookDir); rmTree(lefthookDir); rmTree(noHookDir) }
   }])
+
+  registerStageBOnboardingB4aCases(cases)
 }

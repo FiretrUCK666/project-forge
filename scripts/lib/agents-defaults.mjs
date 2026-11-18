@@ -25,8 +25,9 @@ export function customSkillsOf(facts) {
   const raw = hasKitCustom
     ? facts.kit.customSkills
     : (Array.isArray(facts?.localSkills) ? facts.localSkills : []).filter((s) => {
+        if (s?.isMirror === true) return false
         const p = String(s?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
-        if (/^skills\/[^/]+$/i.test(p)) return true
+        if (/^(?:[^./][^/]*\/)*skills\/[^/]+$/i.test(p)) return true
         if (/^\.[^/]+\/skills\/[^/]+$/i.test(p)) {
           const dirName = p.split('/').pop()
           if (/^\.agents\/skills\//i.test(p) && kitSet.has(dirName)) return false
@@ -38,7 +39,7 @@ export function customSkillsOf(facts) {
   const seen = new Set()
   const result = []
   for (const item of raw) {
-    if (!item || typeof item !== 'object' || item.valid === false) continue
+    if (!item || typeof item !== 'object' || item.valid === false || item.isMirror === true) continue
     const rawPath = String(item.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
     const rawName = String(item.name ?? '').trim()
     const normPath = rawPath || (rawName ? `.agents/skills/${rawName}` : '')
@@ -192,6 +193,10 @@ export function conventionsHint(facts) {
     bits.push(`项目里已有这些 AI 约定文件：${others.map((f) => `\`${f}\``).join('、')}。`
       + '逐条读一遍，把其中仍然成立的规则合进本节；合完问用户要不要把旧文件改成'
       + '指向 `AGENTS.md` 的单行引用——留着两份，迟早各说各的')
+  }
+  const subdirAgents = facts.docs?.subdirAgentsFiles ?? []
+  if (subdirAgents.length > 0) {
+    bits.push(`检测到子目录分段契约：${subdirAgents.map((f) => `\`${f}\``).join('、')}——进入对应子目录前按需加读，原样保留不回并覆盖。`)
   }
   const tooling = facts.conventions?.workflowTooling ?? []
   if (tooling.length > 0) {

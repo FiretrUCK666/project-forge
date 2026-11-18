@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path'
 
 import { resolveAvailableSkills } from '../../lib/cli.mjs'
 import {
-  buildDocFilename, checkMermaidLabelWidth, docDateTag, parseDocFilename,
+  buildDocFilename, checkMermaidLabelWidth, docDateTag, isManagedPlanDoc, parseDocFilename,
   parseDocFrontmatter, renderStandardDocTemplate,
 } from '../../lib/docs.mjs'
 import { gitRun, isMacOsJunkPath, posixPath, readJsonSafe } from '../../lib/git.mjs'
@@ -21,6 +21,23 @@ import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
 const REPO_PATH_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|sh|ps1|rs|go|java|kt|cs|json|ya?ml|toml|lock|txt|cfg|ini|md)$/i
+
+function isRootReadmeRel(rel) {
+  return /^readme$/i.test(rel)
+    || /^readme(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|markdown|rst|txt|adoc|asciidoc|org)$/i.test(rel)
+}
+
+function findPrimaryReadmeRel(repoRoot) {
+  try {
+    const names = readdirSync(repoRoot, { withFileTypes: true })
+      .filter((d) => d.isFile() && isRootReadmeRel(d.name))
+      .map((d) => d.name)
+      .sort()
+    return names.find((n) => /^readme\.md$/i.test(n)) ?? names[0] ?? ''
+  } catch {
+    return ''
+  }
+}
 
 function checkAgentsPathsAndRefs(repoRoot, agentsText, devProfile, defaultBranch, findings) {
   const paths = new Set()
@@ -214,13 +231,14 @@ async function checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, autho
   if (commits.length < 8) return
 
   const targetDoc = authoritativeTddPath
-    || (existsSync(join(repoRoot, 'docs', 'TDD.md')) ? 'docs/TDD.md' : existsSync(join(repoRoot, 'README.md')) ? 'README.md' : '')
+    || (existsSync(join(repoRoot, 'docs', 'TDD.md')) ? 'docs/TDD.md' : findPrimaryReadmeRel(repoRoot))
   if (!targetDoc) return
 
   const isDocUpdate = (rel, codeDir) => {
-    if (rel === 'AGENTS.md' || rel === 'docs/TDD.md' || rel === 'README.md' || rel === 'README.en.md' || rel === 'ARCHITECTURE.md') return true
+    if (rel === 'AGENTS.md' || rel === 'docs/TDD.md' || isRootReadmeRel(rel) || rel === 'ARCHITECTURE.md') return true
+    if (/^(?:contributing|security)(?:\.[a-z0-9_.-]+)?\.(?:md|mdx|rst|txt)$/i.test(rel)) return true
     if (authoritativeTddPath && rel === authoritativeTddPath) return true
-    if (codeDir && rel === `${codeDir}/AGENTS.md`) return true
+    if (codeDir && (rel === `${codeDir}/AGENTS.md` || rel === `${codeDir}/CLAUDE.md`)) return true
     if (rel.startsWith('docs/') && rel.endsWith('.md') && !rel.startsWith('docs/todo/') && !rel.startsWith('docs/archive/')) return true
     return false
   }
@@ -343,7 +361,8 @@ function tddShellReasons(text) {
 
 export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, findings) {
   const hasCode = files.some((f) => CODE_EXT_RE.test(f.name))
-  if (!existsSync(join(repoRoot, 'README.md'))) {
+  const hasReadme = files.some((f) => !f.rel.includes('/') && isRootReadmeRel(f.name)) || Boolean(findPrimaryReadmeRel(repoRoot))
+  if (!hasReadme) {
     addFinding(findings, {
       id: 'docs.missing-readme',
       category: 'docs',
@@ -499,6 +518,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
         if (!name.endsWith('.md')) continue
         const info = readTextStrictInfo(join(todoDir, name))
         if (!info?.text) continue
+        if (!isManagedPlanDoc(`docs/todo/${name}`, info.text)) continue
         const unchecked = (info.text.match(/^- \[ \]\s+.+$/gm) ?? []).length
         if (unchecked === 0) {
           addFinding(findings, {
@@ -532,6 +552,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
       const fullDoc = join(dirAbs, ent.name)
       const info = readTextStrictInfo(fullDoc)
       if (!info?.text) continue
+      if (!isManagedPlanDoc(relDoc, info.text)) continue
       const fm = parseDocFrontmatter(info.text)
       const fn = parseDocFilename(ent.name)
 

@@ -9,7 +9,11 @@ import { fileURLToPath } from 'node:url'
 
 import * as protocol from './protocol.mjs'
 // 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
-const { discoverCustomSkills, discoverKitSkills, hasRealContent } = protocol
+const { discoverKitSkills, hasRealContent } = protocol
+import { discoverCustomSkillsWithMirrors, listCustomContainers } from '../../kit/skills/lib/skill-discovery.mjs'
+import { isManagedPlanDoc } from '../../kit/skills/lib/docs.mjs'
+
+export { isManagedPlanDoc }
 import {
   isMacMetadataName,
   posixPath,
@@ -51,34 +55,15 @@ function scanManagedSkillDir(baseRel, root) {
   return out
 }
 
-/** 通用技能容器扫描：查找 `skills/<name>/SKILL.md` 及任意隐藏/顶层容器 `<dir>/skills/<name>/SKILL.md`。 */
-function discoverSkillContainers(root, { hiddenOnly = false } = {}) {
-  const containers = []
-  if (!hiddenOnly && existsSync(join(root, 'skills'))) {
-    containers.push('skills')
-  }
-  let topEntries = []
-  try {
-    topEntries = readdirSync(root, { withFileTypes: true })
-      .filter((e) => !isMacMetadataName(e.name))
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  } catch { return containers }
-  for (const entry of topEntries) {
-    if (!entry.isDirectory()) continue
-    if (entry.name === '.git' || entry.name === '.worktrees' || SKIP_DIRS.has(entry.name)) continue
-    if (hiddenOnly && !entry.name.startsWith('.')) continue
-    const candidate = `${entry.name}/skills`
-    if (existsSync(join(root, entry.name, 'skills'))) {
-      containers.push(candidate)
-    }
-  }
-  return [...new Set(containers)]
-}
-
 export function detectLocalSkills(root) {
+  const kitNames = new Set(discoverKitSkills().map((s) => s.dirName))
+  const { customSkills, mirrorCopies } = discoverCustomSkillsWithMirrors(root, kitNames, null)
+  const mirrorSet = new Set(mirrorCopies.map((m) => m.path))
+  const mirrorMap = new Map(mirrorCopies.map((m) => [m.path, m.mirrorsOf]))
   const found = []
-  for (const dir of discoverSkillContainers(root)) {
+  for (const dir of listCustomContainers(root)) {
     for (const item of scanManagedSkillDir(dir, root)) {
+      if (mirrorSet.has(item.path)) continue
       found.push({
         path: item.path,
         name: item.name === item.dirName ? undefined : item.name,
@@ -86,6 +71,19 @@ export function detectLocalSkills(root) {
         valid: item.valid,
       })
     }
+  }
+  for (const m of mirrorCopies) {
+    found.push({
+      path: m.path,
+      name: m.name,
+      ...(m.summary ? { summary: m.summary } : {}),
+      valid: m.valid,
+      isMirror: true,
+      mirrorsOf: mirrorMap.get(m.path),
+    })
+  }
+  if (found.length === 0 && customSkills.length > 0) {
+    return customSkills.map((s) => ({ path: s.path, name: s.name, summary: s.summary, valid: s.valid }))
   }
   return found
 }
@@ -141,15 +139,18 @@ export function detectKit(root, { kitDir } = {}) {
   const managedSkills = kitSkillNames.filter((k) => (
     installedSkills.includes(k) && (!manifestValid || manifestManagedDirs.has(k))
   ))
-  const customSkills = discoverCustomSkills(root, kitSkillSet, manifestValid ? manifest : null)
-    .map(({ name, description, summary, path, container, valid }) => ({
-      name,
-      ...(description ? { description } : {}),
-      ...(summary ? { summary } : {}),
-      path,
-      container,
-      valid,
-    }))
+  const customDiscovery = discoverCustomSkillsWithMirrors(root, kitSkillSet, manifestValid ? manifest : null)
+  const mapSkillRec = ({ name, description, summary, path, container, valid, mirrorsOf }) => ({
+    name,
+    ...(description ? { description } : {}),
+    ...(summary ? { summary } : {}),
+    path,
+    container,
+    valid,
+    ...(mirrorsOf ? { mirrorsOf } : {}),
+  })
+  const customSkills = customDiscovery.customSkills.map(mapSkillRec)
+  const mirrorCopies = customDiscovery.mirrorCopies.map(mapSkillRec)
 
   if (!manifestExists) {
     return {
@@ -174,6 +175,7 @@ export function detectKit(root, { kitDir } = {}) {
       installedSkills,
       managedSkills,
       customSkills,
+      mirrorCopies,
       uninstalledKitSkills: [],
       kitSkillsCovered: managedSkills,
       agentsRegions: [],
@@ -203,6 +205,7 @@ export function detectKit(root, { kitDir } = {}) {
       installedSkills,
       managedSkills,
       customSkills,
+      mirrorCopies,
       uninstalledKitSkills: kitSkillNames.filter((k) => !installedSkills.includes(k)),
       kitSkillsCovered: managedSkills,
       agentsRegions: [],
@@ -292,6 +295,7 @@ export function detectKit(root, { kitDir } = {}) {
     installedSkills,
     managedSkills,
     customSkills,
+    mirrorCopies,
     uninstalledKitSkills,
     kitSkillsCovered: managedSkills,
     agentsRegions,
@@ -410,13 +414,25 @@ function extractProfileAndBuildCommands(agentsText) {
   return cmds
 }
 
-export function isReentryProject(docs, kit) {
+function hasManagedPlanContent(root, list) {
+  if (!hasRealContent(list)) return false
+  if (!root) return true
+  return (list ?? []).some((rel) => {
+    const clean = String(rel ?? '').replace(/\\/g, '/')
+    if (!clean || clean.endsWith('/.gitkeep')) return false
+    const text = readTextSafe(join(root, clean)) ?? ''
+    return isManagedPlanDoc(clean, text)
+  })
+}
+
+export function isReentryProject(docs, kit, root = null) {
   return Boolean(
     kit?.manifestExists
     || (docs?.agentsMarkers?.marks ?? 0) > 0
     || docs?.tdd
-    || hasRealContent(docs?.specsDirContent)
-    || hasRealContent(docs?.todoDirContent),
+    || hasManagedPlanContent(root, docs?.specsDirContent)
+    || hasManagedPlanContent(root, docs?.todoDirContent)
+    || hasManagedPlanContent(root, docs?.prdDirContent),
   )
 }
 

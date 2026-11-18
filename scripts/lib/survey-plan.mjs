@@ -222,6 +222,23 @@ export function computeExplorationStrategy(facts) {
     })
   }
 
+  if (codeFiles > 0 || (facts?.ecosystem?.manifests?.length ?? 0) > 0) {
+    const flowTargets = [...new Set([
+      ...(facts?.docs?.readme ? [facts.docs.readme] : []),
+      ...(facts?.docs?.tdd ? [facts.docs.tdd] : []),
+      ...(facts?.docs?.existingDesignDocs ?? []).slice(0, 2),
+      ...(facts?.ecosystem?.manifests ?? []).slice(0, 3),
+      ...(facts?.ecosystem?.subdirs ?? []).map((s) => `${s.dir}/`).slice(0, 3),
+    ])].slice(0, 8)
+    if (flowTargets.length === 0) flowTargets.push('.')
+    shards.push({
+      id: 'business-flows',
+      scope: '核心业务流、服务入口与文档源码差异',
+      focus: '梳理服务对象、核心路由/CLI/UI/作业面，核对文档宣称与源码真实实现差异并产出改前基线',
+      targets: flowTargets,
+    })
+  }
+
   return {
     tier: 'parallel-subagents',
     reason: reasons.join('；'),

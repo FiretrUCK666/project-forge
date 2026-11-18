@@ -115,6 +115,10 @@ arch-rules: <fromGlob> -> <toGlob>
 | `<核心能力 1>` | `<入口文件路径>` | `{{QUICK_CMD}}` |
 | `<核心能力 2>` | `<入口文件路径>` | `<可本地执行的单测或冒烟命令>` |
 
+### 核心业务流与服务入口
+
+{{BUSINESS_FLOWS_BLOCK}}
+
 <!-- /section -->
 
 <!-- section: flow optional -->
@@ -242,6 +246,10 @@ sequenceDiagram
 
 - **版本号唯一来源**：<哪个文件的哪个字段；其余地方一律引用它，不许各写一份>
 - **制品与源码的对应**：<入库还是走发布页附件；二者不能混>
+
+### 改前实跑基线（preForgeBaseline）
+
+{{PRE_FORGE_BASELINE_BLOCK}}
 
 <!-- /section -->
 

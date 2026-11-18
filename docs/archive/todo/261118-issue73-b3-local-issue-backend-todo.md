@@ -5,7 +5,7 @@ status: done
 created: 2026-11-18
 updated: 2026-11-19
 issue: 73
-pr: null
+pr: 87
 branch: feat/b3-local-issue-backend
 owner: impl-73
 approved: false

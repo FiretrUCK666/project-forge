@@ -425,6 +425,7 @@ async function runScenarioG(pkgRoot, sandbox, env) {
   runGit(wtA, ['add', '-A'])
   runGit(wtA, ['commit', '-qm', 'feat: ta'])
   assertOk(runNodeScript(flowG, ['verify', '--task', 'ta', '--mode', 'gate'], wtA, env), 'Scenario G verify ta')
+  assertOk(runNodeScript(flowG, ['submit', '--task', 'ta', '--agent', 'alice'], wtA, env), 'Scenario G submit ta')
   assertOk(await recordWithToken(flowG, revG, 'ta', repoG, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-g']), 'Scenario G review ta')
   const mq = runNodeScript(flowG, ['batch', 'merge-queue', '--tasks', 'ta', '--json'], repoG, env)
   assertOk(mq, 'Scenario G merge-queue ta')

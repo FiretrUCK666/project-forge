@@ -218,6 +218,7 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   const flowD1 = join(repoD1, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD1 = join(repoD1, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
   assertOk(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--json'], repoD1, env), 'Scenario D1 start')
+  assertOk(runNodeScript(flowD1, ['claim', '--task', 'd1'], repoD1, env), 'Scenario D1 claim')
   const preExploreD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
   if (preExploreD1.phase !== 'needs-explore') {
     throw new Error(`Scenario D1 expected needs-explore before explore, got ${preExploreD1.phase}`)

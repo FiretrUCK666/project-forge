@@ -6,7 +6,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { prepareExecInvocation } from './exec.mjs'
@@ -572,4 +572,127 @@ export function collectMasterPrdSpecTexts(repoRoot, prdRel, prdData = null) {
   }
 
   return texts
+}
+
+/**
+ * C19: 1:N 总控 PRD 四态确定性闭环评估。
+ *
+ * 返回状态：`hold-manual-or-active` | `hold-staged` | `ready-auto-close` | `blocked-unclosed` | `already-archived` | `not-found`。
+ */
+export function evaluateMasterPrdClosureState(repoRoot, prdRel, {
+  currentSpecRel = null,
+  currentTodoRel = null,
+  includeMasterPrd = false,
+} = {}) {
+  const empty = {
+    applies: false, state: 'not-found', prdRel: prdRel ?? null, isMasterPrd: false,
+    archivePrd: false, shouldHold: false, blocked: false,
+    otherActiveSlices: [], uncoveredCriteria: [], uncheckedCriteria: [],
+  }
+  if (!prdRel) return empty
+  const normPrdRel = posixPath(prdRel).replace(/^\.\//, '')
+  const prdAbs = join(repoRoot, normPrdRel)
+  if (normPrdRel.startsWith('docs/archive/prd/') && existsSync(prdAbs)) {
+    return {
+      ...empty,
+      applies: true, state: 'already-archived', prdRel: normPrdRel,
+      archivedPrdRel: normPrdRel, isMasterPrd: true, alreadyArchived: true,
+    }
+  }
+  if (!existsSync(prdAbs)) {
+    const archivedCandidate = `docs/archive/prd/${basename(normPrdRel)}`
+    if (existsSync(join(repoRoot, archivedCandidate))) {
+      return {
+        ...empty,
+        applies: true, state: 'already-archived', prdRel: normPrdRel,
+        archivedPrdRel: archivedCandidate, isMasterPrd: true, alreadyArchived: true,
+      }
+    }
+    return { ...empty, prdRel: normPrdRel }
+  }
+
+  const normCurSpec = currentSpecRel ? posixPath(currentSpecRel).replace(/^\.\//, '') : null
+  const normCurTodo = currentTodoRel ? posixPath(currentTodoRel).replace(/^\.\//, '') : null
+  const prdRaw = readTextSafe(prdAbs) ?? ''
+  const fm = parseDocFrontmatter(prdRaw)
+  const archivePolicy = String(fm.data?.archive_policy ?? '').trim().toLowerCase()
+  const prdLinkedSpec = resolveRelDocTarget(repoRoot, prdAbs, fm.data?.related_spec)
+
+  const otherActiveSlices = []
+  for (const item of listMdRecursive(join(repoRoot, 'docs', 'specs'), repoRoot)) {
+    if (normCurSpec && item.rel === normCurSpec) continue
+    const sFm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const status = String(sFm.data?.status ?? '').toLowerCase()
+    if (status === 'superseded' || status === 'dropped') continue
+    const linkedPrd = resolveRelDocTarget(repoRoot, item.abs, sFm.data?.related_prd)
+    if (linkedPrd === normPrdRel || (prdLinkedSpec && prdLinkedSpec === item.rel)) {
+      otherActiveSlices.push(item.rel)
+    }
+  }
+  for (const item of listMdRecursive(join(repoRoot, 'docs', 'todo'), repoRoot)) {
+    if (normCurTodo && item.rel === normCurTodo) continue
+    const tFm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const status = String(tFm.data?.status ?? '').toLowerCase()
+    if (status === 'done' || status === 'archived' || status === 'dropped') continue
+    const linkedSpec = resolveRelDocTarget(repoRoot, item.abs, tFm.data?.related_spec)
+    if (normCurSpec && linkedSpec === normCurSpec) continue
+    const linkedPrd = resolveRelDocTarget(repoRoot, item.abs, tFm.data?.related_prd)
+    if (linkedPrd === normPrdRel) otherActiveSlices.push(item.rel)
+  }
+
+  let archivedSiblings = 0
+  for (const item of listMdRecursive(join(repoRoot, 'docs', 'archive', 'specs'), repoRoot)) {
+    if (normCurSpec && item.rel === normCurSpec) continue
+    const sFm = parseDocFrontmatter(readTextSafe(item.abs) ?? '')
+    const linkedPrd = resolveRelDocTarget(repoRoot, item.abs, sFm.data?.related_prd)
+    if (linkedPrd === normPrdRel || (prdLinkedSpec && prdLinkedSpec === item.rel)) archivedSiblings += 1
+  }
+
+  const prdCriteria = []
+  let inFence = false
+  for (const line of prdRaw.replace(/\r\n/g, '\n').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = /^- \[([ xX])\]\s+(C\d+)\b([^\n]*)/.exec(line)
+    if (m) prdCriteria.push({ id: m[2], checked: m[1].toLowerCase() === 'x', text: line.trim() })
+  }
+  const prdIds = [...new Set(prdCriteria.map((c) => c.id))]
+  const uncheckedCriteria = prdCriteria.filter((c) => !c.checked).map((c) => c.text)
+  const specTexts = collectMasterPrdSpecTexts(repoRoot, normPrdRel, fm.data)
+  const uncoveredCriteria = prdIds.filter((id) => {
+    const re = new RegExp(`\\b${id}(?![0-9])`)
+    return !specTexts.some((txt) => re.test(txt))
+  })
+  const isMasterPrd = fm.data?.multi_spec === true
+    || archivePolicy === 'manual'
+    || otherActiveSlices.length > 0
+    || archivedSiblings > 0
+    || ((fm.data?.related_spec === null || fm.data?.related_spec === undefined) && prdIds.length > 0)
+
+  const base = {
+    applies: true,
+    prdRel: normPrdRel,
+    isMasterPrd,
+    archivePolicy: archivePolicy || null,
+    otherActiveSlices,
+    uncoveredCriteria,
+    uncheckedCriteria,
+  }
+  if (!includeMasterPrd && (archivePolicy === 'manual' || otherActiveSlices.length > 0)) {
+    return { ...base, state: 'hold-manual-or-active', archivePrd: false, shouldHold: true, blocked: false }
+  }
+  if (!includeMasterPrd && uncoveredCriteria.length > 0) {
+    return { ...base, state: 'hold-staged', archivePrd: false, shouldHold: true, blocked: false }
+  }
+  if (uncheckedCriteria.length > 0) {
+    return {
+      ...base,
+      state: 'blocked-unclosed',
+      code: 'BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED',
+      archivePrd: false,
+      shouldHold: false,
+      blocked: true,
+    }
+  }
+  return { ...base, state: 'ready-auto-close', archivePrd: true, shouldHold: false, blocked: false }
 }

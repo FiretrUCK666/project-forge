@@ -6,7 +6,7 @@
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { execShellCommand, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
+import { execShellCommand, gitRun, gitStatusPorcelainZ, readTextSafe } from '../../lib/git.mjs'
 import { isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
 import { isProfileExplicitNone } from '../../lib/profile.mjs'
@@ -144,17 +144,86 @@ export async function runTrialMerge({
   const addRes = await gitRun(mainRoot, ['worktree', 'add', '-q', '--detach', tmpAbs, oldBaseSha])
   if (!addRes.ok) throw new Error(`创建临时试合 worktree 失败：${addRes.stderr}`)
 
+  const UNMERGED_XY_RE = /^(?:UU|AA|DD|AU|UA|DU|UD|U.|.U)$/
+  const extractBoundedConflictHunks = (rootAbs, entries, maxPerFile = 4, maxTotal = 8) => {
+    const conflictEntries = (entries ?? []).filter((e) => e?.file && UNMERGED_XY_RE.test(String(e.xy ?? '')))
+    const conflictFiles = conflictEntries.map((e) => e.file)
+    const hunks = []
+    let truncated = false
+    for (const entry of conflictEntries) {
+      if (hunks.length >= maxTotal) { truncated = true; break }
+      const raw = readTextSafe(join(rootAbs, entry.file))
+      if (!raw) continue
+      const lines = raw.split(/\r?\n/)
+      let perFileCount = 0
+      let i = 0
+      while (i < lines.length) {
+        if (/^<{7}(?:\s|$)/.test(lines[i])) {
+          const startLine = i + 1
+          let midIdx = -1
+          let endIdx = -1
+          for (let j = i + 1; j < lines.length; j += 1) {
+            if (midIdx < 0 && /^={7}(?:\s|$)/.test(lines[j])) midIdx = j
+            else if (/^>{7}(?:\s|$)/.test(lines[j])) { endIdx = j; break }
+          }
+          if (endIdx >= 0) {
+            if (perFileCount >= maxPerFile || hunks.length >= maxTotal) {
+              truncated = true
+              break
+            }
+            const oursLines = midIdx > i ? lines.slice(i + 1, midIdx) : []
+            const theirsLines = midIdx >= 0 ? lines.slice(midIdx + 1, endIdx) : lines.slice(i + 1, endIdx)
+            hunks.push({
+              file: entry.file,
+              xy: entry.xy,
+              startLine,
+              endLine: endIdx + 1,
+              oursSnippet: oursLines.slice(0, 6).join('\n'),
+              theirsSnippet: theirsLines.slice(0, 6).join('\n'),
+            })
+            perFileCount += 1
+            i = endIdx + 1
+            continue
+          }
+        }
+        i += 1
+      }
+    }
+    return { conflictFiles, conflictHunks: hunks, truncated }
+  }
+
   let mergedSha = null
   try {
     const mRes = await gitRun(tmpAbs, ['merge', '--no-ff', '-q', '--no-edit', branchSha, '-m', `Merge branch '${branch}' (${ledger.taskId})`])
     if (!mRes.ok) {
+      const stConf = await gitStatusPorcelainZ(tmpAbs)
+      const extracted = extractBoundedConflictHunks(tmpAbs, stConf.entries, 4, 8)
       await gitRun(tmpAbs, ['merge', '--abort'])
+      const errDetail = (mRes.stderr || mRes.stdout).trim()
       return {
         ok: false,
         blocked: true,
         code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
         exitCode: 3,
-        message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${baseBranch} 存在冲突：${(mRes.stderr || mRes.stdout).trim()}`,
+        conflictFiles: extracted.conflictFiles,
+        conflictHunks: extracted.conflictHunks,
+        conflictSummary: {
+          totalFiles: extracted.conflictFiles.length,
+          totalHunks: extracted.conflictHunks.length,
+          truncated: extracted.truncated,
+        },
+        recoveryPacket: {
+          code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
+          branch,
+          baseBranch,
+          conflictFiles: extracted.conflictFiles,
+          conflictHunks: extracted.conflictHunks,
+          commands: [
+            `node ".agents/skills/dev-flow/scripts/flow.mjs" sync --task ${ledger.taskId}`,
+            'GIT_EDITOR=true git rebase --continue',
+          ],
+        },
+        message: `BLOCKED_TRIAL_MERGE_CONFLICT: 临时试合 ${branch} 到 ${baseBranch} 存在冲突：${errDetail}`,
       }
     }
     const fastMergedHead = readHeadFast(resolveGitDirFast(tmpAbs))?.oid ?? null

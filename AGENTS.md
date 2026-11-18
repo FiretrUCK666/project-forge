@@ -18,6 +18,7 @@
 | 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 | 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
+| 里程碑管理 / 裸粘贴 Issue・PR・Milestone 链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect <URL...>` / `milestone` |
 <!-- project-forge: end 意图路由 -->
 
 <!-- project-forge: begin 行事总纲 -->
@@ -173,17 +174,17 @@ node scripts/dev/verify-injections.mjs
 
   先核对远端与源仓库：`origin` 与声明源一致且有写权限为 **maintainer**（公开/私有仓均同源独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先跑 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 独立分支、合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审或独立上下文审查（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁推正本/打标/发版/提前删分支，标签 403 降级）；只读为 **clone-readonly**（停下选 Fork/独立新建/`.git/pf-local-mode`）；未匹配注册主机退化 `generic-git`（需远端合 MR 后带 `--remote-merged`）；外来 PR 为 **inbound-external-pr**（见 `CONTRIBUTING.md`）。
 
-- **第二步：状态路由、五档分流与三正交策略**——先跑 `flow.mjs next`（或 `doc-plan.mjs triage`），沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档位与门型（`two-way` vs `one-way`）：复杂度高时主动建议建总控 PRD，**多轮澄清直至待拍板事项清零再定稿**（`doc-plan` 尊重自有模板并禁自审 `SELF_CRITIQUE_REJECTED`）：
+- **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度，跑 `flow.mjs next`（扫描就绪 `docs/specs/*.md` 与依赖写域，`Wave 1 >= 2` 返 `parallelDispatch: true` 并行派发且只出单一 `[NEXT STEP]`）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`）：多轮澄清直至待拍板清零，`critique-pass`/`reject` 禁自审、全历史换人且 3 轮停损（`critique-override` 解锁）：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |
-  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑对应检验 |
-  | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写复现失败测试再修（Red-Green）** |
+  | **Case 1** | 纯问答 / 错别字 / 单行格式 | 0 文档，直接改，跑对应检验（前缀 `docs:`） |
+  | **Case 2** | 明确局部缺陷，不改对外契约 | 0 文档，**先写复现失败测试再修（Red-Green，前缀 `fix:`）** |
   | **Case 3** | `L2` 功能调整，不改外部契约 | 在 `docs/todo/` 建 Todo 冻结 `C1`..`Cn`；跑 `doc-plan.mjs audit` 直通 |
-  | **Case 4** | `L3` 跨模块/契约变更或高风险 | 先建 `docs/specs/` + `docs/todo/` Todo；经 `audit` + 独立 Critique -> `critique-pass` 后交人 `approve` |
+  | **Case 4** | `L3` 跨模块/契约变更或高风险 | 先建 `docs/specs/` + `docs/todo/` Todo；经 `audit` + 3 轮停损 Critique -> `critique-pass` 后 `approve` |
   | **Case 5** | 与 `docs/TDD.md`（若存在）或生效 `SPEC` 冲突 | **阻断并先更新 `docs/TDD.md`**（若存在），内审获批后再继续 |
 
-  按三正交策略定级：`low`（纯非可执行文本白名单；无 CI 时强制 `verify` 静态必检）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`evidence.json` 拦截 `quick --target` 顶替全量。Case 2/3/4 单任务在隔离 `impl` 位派 `impl` 子代理；账本存于 `.worktrees/.state/tasks/<taskId>.json`。
+  风险定级：`low`（纯非可执行文本白名单，可选无令牌 `review-pack record`；无 CI 必过静态门禁）/ `medium` / `high`（高风险/`one-way`/Case>=4 必走独立审查与故障注入）；`escalation.mjs` 统一分级建单；`flow.mjs milestone` 按需绑里程碑。`evidence.json` 拦截 `quick --target` 顶替全量。Case 2/3/4 单任务在隔离 `impl` 位派 `impl` 子代理；账本存于 `.worktrees/.state/tasks/<taskId>.json`。
 
 - **第三步：全量 Worktree 隔离、跨轮复用与共享依赖**——
 
@@ -197,11 +198,11 @@ node scripts/dev/verify-injections.mjs
 
 - **第四步：认领与 PR 前文档同步（有远端时适用）**——
 
-  **谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者只调度不代提 PR；`flow.mjs claim` 认领，弃领 `release`）；**一任务一分支一 PR**（复用已有 OPEN PR，返工原分支追加）。**PR 前跑 `flow.mjs finalize`**：全勾 `[x]`，成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`（`1:N` 总控 PRD 默认保留于 `docs/prd/` 维持 `active`，全量收口时带 `--include-master-prd` 一并归档）；`submit` 推后**零跟踪文件写回**、查重 PR 并套用 `.github/pull_request_template.md`。双写：认领/释放->Issue；提 PR->Issue（`Fixes #N`）；退回/通过/返工->PR+Issue；已合并->Issue。无远端只记账本。
+  **谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（协调者只调度不代提 PR；`flow.mjs claim` 认领，弃领 `release`）；建单/PR 统一前缀（`Case 1 -> docs:`/`Case 2 -> fix:`/`Case >= 3 -> feat:`）、四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`）并继承 Milestone；**一任务一分支一 PR**，变基/试合附 `GIT_EDITOR=true`/`--no-edit`。**PR 前跑 `flow.mjs finalize`**：全勾 `[x]`，成对 `git mv` 归档至 `docs/archive/{prd,specs,todo}/`；`1:N` 总控 PRD 走四态确定性闭环（全覆盖全勾 `[x]` 自动同分支归档，仍留 `[ ]` 则 `finalize`/`verify` 拦 `BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED`）；`submit` 推后**零跟踪文件写回**、查重 PR 并套用 `.github/pull_request_template.md`。双写：认领/释放->Issue；提 PR->Issue（`Fixes #N`）；退回/通过/返工->PR+Issue；已合并->Issue。无远端只记账本。
 
 - **第五步：独立审查与合并**——
 
-  **独立审查通过后由审查者直接合**（**Round 2+ 永远新建独立 `review` 子代理并在同 `HEAD`/增量视野/历史停损硬锁下复审**）；外部 PR 先过安全扫描；**仅弱化门禁须人点头**（退出码 4）。审查与返工自动沉淀 `signals.jsonl` 供 `govern-audit.mjs retro` 复盘。
+  **独立审查通过后由审查者直接合**（**Round 2+ 永远新建历史未用过的独立 `review` 子代理，受 `artifact_baseline` 防空转、同 `HEAD`/增量视野/全历史换人与 3 轮硬停损+`stopLossPacket` 约束**）；外部 PR 先过安全扫描；**仅弱化门禁须人点头**（退出码 4）。审查与返工自动沉淀 `signals.jsonl` 供 `govern-audit.mjs retro` 复盘。
 
   | 改动 | 谁能合 |
   | --- | --- |

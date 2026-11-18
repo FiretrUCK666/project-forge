@@ -7,15 +7,78 @@
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
-import { gitRun, gitRunBuffer, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { hasSkillSupport } from '../../lib/cli.mjs'
+import {
+  checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId,
+} from '../../lib/critique-rounds.mjs'
+import { gitRun, gitRunBuffer, posixPath, readTextSafe, sha256Text } from '../../lib/git.mjs'
 import {
   getCachedRangeDiffCommits, isAncestorLinearFast, parseRawAndUnifiedDiff,
   resolveGitDirFast, setCachedRangeDiffCommits,
 } from '../../lib/git-fast.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
-import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile } from '../../lib/static-gates.mjs'
-import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import { detectGateWeakening, evaluateArchRules, gitDiffRawEntriesAndText, splitDiffByFile, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, hasCommits } from './review-diff.mjs'
+
+export { checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId }
+
+/** C22③: 判断任务是否属于低风险纯非可执行文档变更，允许可选 review-pack record 免令牌落盘。 */
+export async function isOptionalLowRiskReview({ mainRoot, targetRoot, baseLedger }) {
+  if (!baseLedger?.baseSha) return false
+  const dRes = await gitDiffRawEntriesAndText(targetRoot, `${baseLedger.baseSha}..HEAD`)
+  if (!dRes.ok || dRes.entries.length === 0) return false
+  const profile = parseAgentsProfile(mainRoot)
+  const chg = dRes.entries.map((e) => e.file)
+  const gwHits = await detectGateWeakening(targetRoot, baseLedger.baseSha, baseLedger.baseBranch, { nameStatusEntries: dRes.entries })
+  const pol = determineWorkflowPolicy({
+    changedFiles: chg,
+    ownArchived: [baseLedger.archivedTodoFile, baseLedger.archivedSpecFile, baseLedger.archivedPrdFile].filter(Boolean),
+    caseType: baseLedger.caseType,
+    highRiskGlobs: profile.highRisk,
+    doNotEditGlobs: profile.doNotEdit,
+    gateWeakeningHits: gwHits,
+    hasRemote: baseLedger.role !== 'local-only',
+    hasCiWorkflow: hasRepoCiWorkflow(targetRoot),
+    visualFilesChanged: chg.filter((f) => UI_VISUAL_EXT_RE.test(f)),
+    profile,
+    hasDevReview: hasSkillSupport(mainRoot, 'dev-review'),
+  })
+  return pol.riskTier === 'low' && !pol.independentReviewRequired
+}
+
+/** 计算待审分支相对 `baseSha` 的代码改动基线指纹（A4 防空转）。 */
+export async function computeReviewArtifactBaseline({ targetRoot, baseSha, headSha } = {}) {
+  if (!targetRoot || !baseSha || !headSha || headSha === 'UNBORN') {
+    return { headSha: headSha ?? null, diffSha: null, files: [] }
+  }
+  const diffRes = await gitDiffRawEntriesAndText(targetRoot, `${baseSha}..${headSha}`)
+  if (!diffRes.ok) return { headSha, diffSha: null, files: [] }
+  const files = diffRes.entries.map((e) => `${e.status}:${normRel(e.file)}`).sort()
+  const digest = sha256Text(`${files.join('\n')}\n${String(diffRes.diffText ?? diffRes.text ?? '')}`)
+  return { headSha, diffSha: digest.slice(0, 16), files }
+}
+
+/** 构造停损升级结构化证据包（C13/A4），携带热点文件、重复指纹与交接命令。 */
+export function buildReviewStopLossPacket({
+  taskId, round, headSha, reasons = [], repeatedItems = [], mustFixList = [], excludedReviewers = [], ledgerPath = null,
+} = {}) {
+  const hotspotFiles = [...new Set((mustFixList ?? []).map((m) => m?.file).filter(Boolean).map(normRel))]
+  return {
+    code: 'STOP_LOSS_ESCALATE',
+    taskId,
+    round,
+    headSha,
+    reasons,
+    repeatedFingerprints: (repeatedItems ?? []).map((i) => i.fingerprint).filter(Boolean),
+    hotspotFiles,
+    excludedReviewers,
+    rootCauseHypothesis: '同一阻塞问题连续复现或审查已满 3 轮仍未闭环，局部返工无法收敛，须拆出专项根治单或人工裁决。',
+    docPlanBridge: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --touches-contract --summary "Stop-loss escalation for ${taskId}"`,
+    ledgerPath,
+    recoveryCommand: `node ".agents/skills/dev-review/scripts/review-pack.mjs" override --task ${taskId} --human-approved --reason "<维护者裁决原因>"`,
+  }
+}
 
 export const VALID_DISPOSITIONS = new Set(['fixed', 'rebutted-wrong', 'intentional', 'deferred'])
 

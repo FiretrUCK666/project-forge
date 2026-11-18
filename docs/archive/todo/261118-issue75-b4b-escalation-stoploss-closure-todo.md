@@ -1,18 +1,18 @@
 ---
 kind: todo
-title: v9 B4b：纯调度、分级建单、双侧 3 轮停损与 1:N 总控 PRD 自动收口
-status: active
+title: "v9 B4b：纯调度、分级建单、双侧 3 轮停损与 1:N 总控 PRD 自动收口"
+status: done
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-19
 issue: 75
 pr: null
-branch: null
-owner: "plan-stage-b"
+branch: feat/b4b-escalation-stoploss-closure
+owner: impl-75
 approved: false
-done_at: null
+done_at: 2026-11-19
 task_id: b4b-escalation-stoploss-closure
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
-related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
+related_prd: ../../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_spec: ../specs/261118-issue75-b4b-escalation-stoploss-closure-spec.md
 ---
 
@@ -43,12 +43,12 @@ related_spec: ../specs/261118-issue75-b4b-escalation-stoploss-closure-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C11: 固化主会话薄上下文纯调度、`flow-batch`/`workflow-policy` 默认并行优先扫描就绪 `docs/specs/*.md` 并输出 `parallelDispatch: true`（`Wave 1 >= 2` 且不压回 `--task firstTask`）、`flow-next`/`doc-plan` 单一 `[NEXT STEP]` 输出，并对齐 `references/collaboration.md`/`kit/skills/dev-flow/SKILL.md`/`review-ledger.mjs`/`flow.mjs` 中 `git rebase --continue`/`git merge` 非交互保护。
-- [ ] C12: 交付 `kit/skills/lib/escalation.mjs` (new) 统一分级建单路由（含远端 `probeForWrite`），接管 `govern-state.mjs` 与 `review-ledger.mjs`。
-- [ ] C13: 实现 `review-locks.mjs` `checkDistinctRoundReviewer` 全历史换人锁（`BLOCKED_SAME_REVIEWER_REREVIEW`）、`flow-next.mjs` `excludedReviewers` 与结构化 `stopLossPacket`。
-- [ ] C14: 在 `critique-rounds.mjs`、`doc-plan.mjs` 与 `doc-audit.mjs` 补齐 `critique-reject`/`critique-override`、全历史换人、同 SHA 锁与 3 轮停损升级，同步更新 `injections-data-workflow.mjs` (`I64`/`I78`)。
-- [ ] C19: 在 `doc-substantive.mjs` 交付单源 `evaluateMasterPrdClosureState` 接入 `docs.mjs` 与 `flow-lifecycle`（`finalize` + `verify`），实现 `1:N` 总控 PRD 确定性四态收口与并行后重跑幂等归档，在 `fixtures-stageb-loop.mjs` 跑通正反双向用例。
-- [ ] C22: 交付 `C22` 六项闭环增强：`A4/A5`（`artifact_baseline` 防空转、`flow-trial-merge` 有界冲突提取与恢复包）、Issue/PR 统一工作前缀（含 `Case 1 -> docs:`）与四态单表语义标签（`in-progress` / `in-review` / `changes-requested` / `reviewed`）、`low` 风险 PR 可选 `review-pack record`、`review-gates`/`review-ledger` 切片 `C*` 隔离与 `check-fault` 自动 `faultRecord`、按需跨后端 `capabilities.milestones`（`GitHub` 直连、`local-only` 持久存储且 `migrate` 带出、`generic-git` 本地分组映射并输出可直接照单配平台的结构化清单）与 `AGENTS.md`/`SKILL.md` `milestone`/裸链接可发现性入口，以及双侧复用共享 3 轮硬停损校验器并同步对齐 `kit/skills/dev-plan/SKILL.md`、`README.md`、`README.en.md`、`templates/agents-project.md`、`references/collaboration.md` 与 `references/docs-set.md`。
+- [x] C11: 固化主会话薄上下文纯调度、`flow-batch`/`workflow-policy` 默认并行优先扫描就绪 `docs/specs/*.md` 并输出 `parallelDispatch: true`（`Wave 1 >= 2` 且不压回 `--task firstTask`）、`flow-next`/`doc-plan` 单一 `[NEXT STEP]` 输出，并对齐 `references/collaboration.md`/`kit/skills/dev-flow/SKILL.md`/`review-ledger.mjs`/`flow.mjs` 中 `git rebase --continue`/`git merge` 非交互保护。
+- [x] C12: 交付 `kit/skills/lib/escalation.mjs` (new) 统一分级建单路由（含远端 `probeForWrite`），接管 `govern-state.mjs` 与 `review-ledger.mjs`。
+- [x] C13: 实现 `review-locks.mjs` `checkDistinctRoundReviewer` 全历史换人锁（`BLOCKED_SAME_REVIEWER_REREVIEW`）、`flow-next.mjs` `excludedReviewers` 与结构化 `stopLossPacket`。
+- [x] C14: 在 `critique-rounds.mjs`、`doc-plan.mjs` 与 `doc-audit.mjs` 补齐 `critique-reject`/`critique-override`、全历史换人、同 SHA 锁与 3 轮停损升级，同步更新 `injections-data-workflow.mjs` (`I64`/`I78`)。
+- [x] C19: 在 `doc-substantive.mjs` 交付单源 `evaluateMasterPrdClosureState` 接入 `docs.mjs` 与 `flow-lifecycle`（`finalize` + `verify`），实现 `1:N` 总控 PRD 确定性四态收口与并行后重跑幂等归档，在 `fixtures-stageb-loop.mjs` 跑通正反双向用例。
+- [x] C22: 交付 `C22` 六项闭环增强：`A4/A5`（`artifact_baseline` 防空转、`flow-trial-merge` 有界冲突提取与恢复包）、Issue/PR 统一工作前缀（含 `Case 1 -> docs:`）与四态单表语义标签（`in-progress` / `in-review` / `changes-requested` / `reviewed`）、`low` 风险 PR 可选 `review-pack record`、`review-gates`/`review-ledger` 切片 `C*` 隔离与 `check-fault` 自动 `faultRecord`、按需跨后端 `capabilities.milestones`（`GitHub` 直连、`local-only` 持久存储且 `migrate` 带出、`generic-git` 本地分组映射并输出可直接照单配平台的结构化清单）与 `AGENTS.md`/`SKILL.md` `milestone`/裸链接可发现性入口，以及双侧复用共享 3 轮硬停损校验器并同步对齐 `kit/skills/dev-plan/SKILL.md`、`README.md`、`README.en.md`、`templates/agents-project.md`、`references/collaboration.md` 与 `references/docs-set.md`。
 
 ## 执行步骤
 
@@ -79,9 +79,9 @@ related_spec: ../specs/261118-issue75-b4b-escalation-stoploss-closure-spec.md
 
 ## 断点与遗留决策
 
-- **当前状态**：`待 Wave 4 启动`（依赖 `#73`、`#74` 先行合入）
+- **当前状态**：已完成，无遗留
 - **待拍板事项**：无
-- **下一步第一件事**：Wave 4 启动后执行 `flow.mjs start --task b4b-escalation-stoploss-closure --issue 75 --case 4` 进入 `.worktrees/impl-b4b-escalation-stoploss-closure`。
+- **下一步第一件事**：经独立 `review` 子代理审查通过并合入后收尾清理工作树。
 
 ## 澄清与补充记录
 
@@ -91,6 +91,6 @@ related_spec: ../specs/261118-issue75-b4b-escalation-stoploss-closure-spec.md
 
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
-- **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+- **实际验证命令与结果**：`node scripts/dev/preflight.mjs`（34/34）、`node scripts/dev/gap-coverage.mjs`（20/20）、`node scripts/dev/fixtures.mjs`（286/286）、`node scripts/compose-agents.mjs . --check`（`AGENTS.md` 24133 B < 24576 B）、`node scripts/equip.mjs . --check`、`node scripts/review.mjs .`、`node scripts/sync-toc.mjs README.md README.en.md --check`、`node scripts/dev/verify-injections.mjs --jobs 4`（169/169）、`node scripts/dev/e2e-zip-harness.mjs`（168 条目全通）、`node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .`（5/5）、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`（0 finding），并在隔离 `$TMPDIR` 实跑 `critique-reject`/`critique-override`、代码审核 3 轮停损 exit 4、`C19` 四态收口与 `milestone` 跨后端 CLI 均通过。
+- **文档同步检查**：已重跑 `compose-agents.mjs .`、`equip.mjs . --tier full` 与 `sync-toc.mjs`，对齐 `docs/TDD.md`、`README.md`、`README.en.md`、`references/collaboration.md`、`references/docs-set.md`、`templates/agents-project.md`、`SKILL.md` 与 `kit/skills/*/SKILL.md`；总控 PRD 仅勾选 `B4b` 条款（保留 `B5` 未勾），触发 `C19` 保持 `active` 在 `docs/prd/`。
+- **遗留问题**：无（`B5` 通用 E2E 门禁与盲跑闭环留待 Wave 5 `#76`）。

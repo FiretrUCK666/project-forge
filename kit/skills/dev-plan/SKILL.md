@@ -38,7 +38,7 @@ metadata:
 | **Case 1**（问答 / 错别字 / 单行） | **0 文档** | 不写多余文档，直接转交执行并跑对应校验 |
 | **Case 2**（明确局部 Bugfix，不改契约） | **0 文档** | 强制 **Red-Green**：先补失败复现回归测试再修绿；触及高风险须独立审查 |
 | **Case 3**（L2 局部功能，不改外部契约） | 只建 `docs/todo/` | 澄清并冻结 `C1..Cn`，跑 `doc-plan.mjs audit` 自净化直通（非平凡 Todo 建议走 Critique） |
-| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> 1–2 轮**独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审）-> 原位改净 -> `critique-pass` -> 交人 `approve` |
+| **Case 4**（L3 跨模块 / 改外部契约） | `docs/specs/` + `docs/todo/`；**一份 SPEC 装不下时再加 `docs/prd/`** | 跑 `audit` -> **独立只读 Critique**（`SELF_CRITIQUE_REJECTED` 禁自审；全历史换人 + 3 轮硬停损 `STOP_LOSS_ESCALATE`，支持 `critique-reject`/`critique-override`）-> 交人 `approve` |
 | **Case 5**（与 `docs/TDD.md` 或生效 SPEC 冲突） | **阻断拆解** | 先修订 `docs/TDD.md` 并经独立确认后再续 |
 
 说明：`contributor-fork` 若上游仓未接入 `docs/`，私有草案绝不混入 PR diff。
@@ -53,7 +53,7 @@ metadata:
 
 ## 独立 Critique、`impl` 工作树协同与移交 `dev-flow`
 
-- **不可自审硬锁**：`doc-plan.mjs critique-pass --file ... --reviewer <id>` 强制校验复核人不可与文档 `owner` 相同（否则 `SELF_CRITIQUE_REJECTED`）；Critique 通过后若正文未改即可由人/维护者执行 `approve`（修改正文会触发 `BLOCKED_CRITIQUE_STALE` 需复核）。
+- **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `2`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `2`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），须人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。支持 `--milestone` 对齐里程碑关联。
 - **`impl` 工作树协同**：若 `flow.mjs start --task <id>` 已先建好隔离工作树，`doc-plan.mjs init --task <id>` 会直接把规划单落盘到 `.worktrees/impl-<id>/` 避免撕裂；若先规划后建工作树，`flow.mjs start --spec ... --todo ...` 会自动将规划文档迁入实施工作树并同步 `-issue<N>-` 命名。
 - **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。`lightweight` 档缺省兄弟技能时退化为原生 Git 指引。
 
@@ -63,17 +63,19 @@ metadata:
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd]
 
-# 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--no-prune]
+# 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承；支持 --milestone）
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/specs/<YYMMDD-slug-spec>.md"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 
-# 4. 关联、独立 Critique、批准、成对归档（--include-master-prd 含总控 PRD）与取代
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--branch <B>] [--status <S>]
+# 4. 关联、独立 Critique（通过/退回/人工解锁）、批准、成对归档（--include-master-prd 含总控 PRD）与取代
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--milestone <N|标题>] [--branch <B>] [--status <S>]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --summary "<结论>"
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-reject --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --findings "<意见>" --summary "<退回原因>"
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-override --file "docs/specs/<file>" --human-approved --reason "<裁决理由>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "docs/specs/<file>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" archive [<slug-or-path>] [--task <id>] [--include-master-prd]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" supersede "<oldSpec>" --by "<newSpec>"

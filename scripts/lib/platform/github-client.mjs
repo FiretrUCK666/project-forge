@@ -564,6 +564,32 @@ export function createGitHubClient({
     }
   }
 
+  async function listMilestones(repo, { state = 'open', perPage = 100 } = {}) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    return rest('GET', `/repos/${norm}/milestones`, { query: { state, per_page: perPage } })
+  }
+
+  async function createMilestone(repo, { title, description = '', dueOn = null } = {}) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    return rest('POST', `/repos/${norm}/milestones`, {
+      body: { title: String(title ?? '').trim(), ...(description ? { description } : {}), ...(dueOn ? { due_on: dueOn } : {}) },
+    })
+  }
+
+  async function closeMilestone(repo, number) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    return rest('PATCH', `/repos/${norm}/milestones/${Number(number)}`, { body: { state: 'closed' } })
+  }
+
+  async function assignMilestone(repo, number, milestoneNumber) {
+    const norm = normalizeGitHubRepo(repo)
+    if (!norm) throw new Error(`无效的 GitHub 仓库名：${repo}`)
+    return rest('PATCH', `/repos/${norm}/issues/${Number(number)}`, { body: { milestone: Number(milestoneNumber) } })
+  }
+
   return {
     channel: resolvedChannel,
     rest,
@@ -579,6 +605,10 @@ export function createGitHubClient({
     ensureFork,
     postComment,
     addLabels,
+    listMilestones,
+    createMilestone,
+    closeMilestone,
+    assignMilestone,
     getBranchProtection,
     applyBranchProtectionSwitchA,
   }

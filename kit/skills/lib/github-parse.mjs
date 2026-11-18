@@ -98,6 +98,7 @@ export function resolveContributorIdentity({ explicitActor, ghLogin, gitName, le
 const PR_URL_PULL_RE = /^https?:\/\/[^/\s]+\/(.+?)\/(?:pull|pulls)\/(\d+)(?:[/?#]|$)/i
 const PR_URL_MR_RE = /^https?:\/\/[^/\s]+\/(.+?)\/-\/merge_requests\/(\d+)(?:[/?#]|$)/i
 const ISSUE_URL_RE = /^https?:\/\/[^/\s]+\/(.+?)\/issues\/(\d+)(?:[/?#]|$)/i
+const MILESTONE_URL_RE = /^https?:\/\/[^/\s]+\/(.+?)\/milestone\/(\d+)(?:[/?#]|$)/i
 
 function normalizeRepoPath(raw) {
   return String(raw ?? '').replace(/\/-$/, '').replace(/^\/+|\/+$/g, '')
@@ -148,15 +149,39 @@ export function parseIssueNumbers(rawOrList, { strict = false } = {}) {
   return nums
 }
 
-/** 解析混合输入列表（任意 HTTP(S) Issue/PR/MR URL / #N / issue#N / pr#N / !M）。 */
+/** 解析 Milestone 引用（正整数、`milestone#N`、`m#N` 或 HTTP(S) Milestone URL）。 */
+export function parseMilestoneNumber(raw, { strict = false } = {}) {
+  if (raw === undefined || raw === null || raw === '') return null
+  if (typeof raw === 'number') {
+    if (Number.isInteger(raw) && raw > 0) return raw
+    if (strict) throw new Error(`Milestone 编号必须为正整数，收到：${raw}`)
+    return null
+  }
+  const s = String(raw).trim()
+  if (!s) return null
+  const um = MILESTONE_URL_RE.exec(s)
+  if (um) return Number(um[2])
+  const pm = /^(?:milestone#|m#)?(\d+)$/i.exec(s)
+  if (pm) {
+    const n = Number(pm[1])
+    if (Number.isInteger(n) && n > 0) return n
+  }
+  if (strict) throw new Error(`Milestone 引用格式无效：${raw}`)
+  return null
+}
+
+/** 解析混合输入列表（任意 HTTP(S) Issue/PR/MR/Milestone URL / #N / issue#N / pr#N / !M）。 */
 export function parseFlowInputs(inputs = [], defaultRepo = null) {
   const issues = []
   const prs = []
+  const milestones = []
   const unknown = []
   for (const raw of inputs) {
     const s = String(raw ?? '').trim()
     if (!s) continue
-    let m = ISSUE_URL_RE.exec(s)
+    let m = MILESTONE_URL_RE.exec(s)
+    if (m) { milestones.push({ repo: normalizeRepoPath(m[1]), number: Number(m[2]), raw: s }); continue }
+    m = ISSUE_URL_RE.exec(s)
     if (m) { issues.push({ repo: normalizeRepoPath(m[1]), number: Number(m[2]), raw: s }); continue }
     m = PR_URL_PULL_RE.exec(s) || PR_URL_MR_RE.exec(s)
     if (m) { prs.push({ repo: normalizeRepoPath(m[1]), number: Number(m[2]), raw: s }); continue }
@@ -166,7 +191,7 @@ export function parseFlowInputs(inputs = [], defaultRepo = null) {
     if (m) { issues.push({ repo: defaultRepo, number: Number(m[1]), raw: s }); continue }
     unknown.push(s)
   }
-  return { issues, prs, unknown }
+  return { issues, prs, milestones, unknown }
 }
 
 /** 解析并按同名/上下文去重汇总提交的 check-runs 与 commit statuses，查询异常且无明确失败时强降级为 unknown。 */
@@ -287,6 +312,17 @@ export function normalizeRepoMetaPayload(data = {}, viewerLogin = null) {
   }
 }
 
+export function normalizeMilestonePayload(d = {}) {
+  return {
+    number: d.number ?? null,
+    title: d.title ?? '',
+    state: String(d.state ?? 'open').toLowerCase(),
+    description: d.description ?? '',
+    dueOn: d.due_on ?? d.dueOn ?? null,
+    url: d.html_url ?? d.url ?? null,
+  }
+}
+
 export function normalizeIssuePayload(d = {}, isRest = false) {
   return {
     number: d.number,
@@ -295,6 +331,7 @@ export function normalizeIssuePayload(d = {}, isRest = false) {
     body: d.body ?? '',
     url: isRest ? (d.html_url ?? null) : (d.url ?? null),
     labels: (d.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean),
+    milestone: d.milestone ? normalizeMilestonePayload(d.milestone) : null,
     relations: parseBodyRelations(d.body),
   }
 }

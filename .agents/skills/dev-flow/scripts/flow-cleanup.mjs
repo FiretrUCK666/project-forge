@@ -13,7 +13,7 @@ import {
   parseWorktreeListPorcelain, posixPath, samePath,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { listTaskLedgers, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { listTaskLedgers, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -297,7 +297,7 @@ export async function handleCleanup(opts, roots) {
 
   ledger.status = (keptWorktrees.length === 0 && !keepLocalBr && !keepRemoteBr) ? 'cleaned' : ledger.status
   ledger.cleanedAt = new Date().toISOString()
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, cleanedAt: ledger.cleanedAt }), { createIfMissing: true })
   const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, status: ledger.status }
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
@@ -379,7 +379,7 @@ export async function handleAbort(opts, roots) {
   }
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
   if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees }, null, 2)}\n`)
   else {
     process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)

@@ -19,6 +19,7 @@ import {
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
   hydratePrTemplateBody,
+  scanUnstartedReadySlices,
 } from './workflow-helpers.mjs'
 
 export {
@@ -27,6 +28,7 @@ export {
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
   hydratePrTemplateBody,
+  scanUnstartedReadySlices,
 }
 
 export const LOW_RISK_TEXT_EXT_RE = /\.(?:md|mdx|txt|rst)$/i
@@ -389,28 +391,51 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
 /** 评估唯一活跃任务或集合状态并给出单一入口下一步路由与精简上下文。 */
 export function evaluateNextState({
   activeTasks = [],
+  allLedgers = activeTasks,
   selectedTask = null,
   taskRuntime = null,
   multiTaskFiles = null,
+  repoRoot = null,
 } = {}) {
   if (!selectedTask) {
+    const readySlices = repoRoot ? scanUnstartedReadySlices(repoRoot, allLedgers) : []
     if (activeTasks.length === 0) {
+      const wavePlan = readySlices.length > 0 ? buildMultiTaskWavePlan(readySlices) : null
+      const parallelDispatch = Boolean(wavePlan?.parallelDispatch)
+      const firstReady = wavePlan?.order?.[0] ?? null
       return {
         taskId: null,
         phase: 'idle',
         ownerRole: 'coordinator',
-        nextAction: '当前无活跃任务；请先运行 doc-plan.mjs triage 或 flow.mjs start --task <id> 启动任务。',
-        command: 'node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug>',
+        parallelDispatch,
+        readySlices,
+        ...(wavePlan ? { wavePlan, waves: wavePlan.waves } : {}),
+        nextAction: parallelDispatch
+          ? `检测到 ${wavePlan.waves[0].tasks.length} 个无冲突就绪切片（${wavePlan.parallelizable.join(', ')}），主会话仅纯调度并行派发隔离实施子代理。`
+          : (firstReady
+              ? `检测到 1 个就绪切片（${firstReady}），按单一主动作启动隔离工作区。`
+              : '当前无活跃任务；请先运行 doc-plan.mjs triage 或 flow.mjs start --task <id> 启动任务。'),
+        command: parallelDispatch
+          ? 'node ".agents/skills/dev-flow/scripts/flow.mjs" batch plan --json'
+          : (firstReady
+              ? `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${firstReady} --case 4`
+              : 'node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug>'),
         blockingReasons: [],
         worktreePath: null,
         reviewWorktreePath: null,
         policy: null,
-        coordinatorGuidance: { delegateImpl: false, delegateFreshReview: false, note: '无活跃任务，先规划或 start 新建隔离工作位。' },
+        coordinatorGuidance: {
+          delegateImpl: false,
+          delegateFreshReview: false,
+          note: parallelDispatch ? '主会话保持纯调度，严禁将并行 Wave 1 折叠成单一任务。' : '无活跃任务，先规划或 start 新建隔离工作位。',
+        },
         compactContext: null,
         candidates: [],
       }
     }
-    const wavePlan = buildMultiTaskWavePlan(activeTasks, multiTaskFiles)
+    const combined = [...activeTasks, ...readySlices]
+    const wavePlan = buildMultiTaskWavePlan(combined, multiTaskFiles)
+    const parallelDispatch = Boolean(wavePlan.parallelDispatch)
     const waveSummary = wavePlan.waves
       .map((w) => `Wave ${w.wave}(${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(',')}`)
       .join(' -> ')
@@ -419,8 +444,14 @@ export function evaluateNextState({
       taskId: null,
       phase: 'ambiguous',
       ownerRole: 'coordinator',
-      nextAction: `检测到 ${activeTasks.length} 个未闭环任务，波次计划（${wavePlan.waves.length} 波）：${waveSummary}。按波次推进单任务 --task <id>。`,
-      command: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${firstTask}`,
+      parallelDispatch,
+      readySlices,
+      nextAction: parallelDispatch
+        ? `检测到 Wave 1 有 ${wavePlan.waves[0].tasks.length} 个可并行任务/就绪切片（${wavePlan.parallelizable.join(', ')}）：${waveSummary}。主会话保持纯调度并并行派发。`
+        : `检测到 ${combined.length} 个任务/切片，按波次顺序推进：${waveSummary}。`,
+      command: parallelDispatch
+        ? `node ".agents/skills/dev-flow/scripts/flow.mjs" batch plan --tasks ${wavePlan.parallelizable.join(',')} --json`
+        : `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${firstTask}`,
       blockingReasons: ['MULTIPLE_ACTIVE_TASKS'],
       worktreePath: null,
       reviewWorktreePath: null,
@@ -430,7 +461,7 @@ export function evaluateNextState({
       coordinatorGuidance: {
         delegateImpl: false,
         delegateFreshReview: false,
-        note: `共 ${wavePlan.waves.length} 波次（Wave 1 可并行：${wavePlan.parallelizable.join(', ') || firstTask}）。`,
+        note: `共 ${wavePlan.waves.length} 波次（Wave 1：${wavePlan.parallelizable.join(', ') || firstTask}；parallelDispatch=${parallelDispatch}）。`,
       },
       compactContext: null,
       candidates: activeTasks.map((t) => ({ taskId: t.taskId, status: t.status, branch: t.branch ?? null, worktreePath: t.worktreePath ?? null })),

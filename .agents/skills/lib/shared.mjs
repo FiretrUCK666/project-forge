@@ -135,6 +135,7 @@ export {
   nextReviewRound,
   readTaskLedger,
   recordMountedDepsInLedger,
+  resolveLedgerRoot,
   resolveTaskContext,
   sanitizeTaskId,
   taskLedgerPath,
@@ -190,6 +191,7 @@ export {
 export {
   checkCoreSubstantiveness,
   checkDocRegression,
+  evaluateMasterPrdClosureState,
   extractDocSnapshot,
   extractTechAnchors,
   isStubValue,
@@ -307,3 +309,14 @@ export {
   readSignalsJsonl,
   resolveGovernStateDir,
 } from './signals.mjs'
+
+export {
+  applyIssuesToBackend,
+  buildEscalationIssuePayload,
+  buildIssues,
+  classifyEscalationTier,
+  escalateToBackend,
+  formatWorkTitle,
+  resolveEscalationBackend,
+  workTypePrefix,
+} from './escalation.mjs'

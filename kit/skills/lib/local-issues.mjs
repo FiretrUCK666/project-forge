@@ -40,6 +40,7 @@ function issuePaths(mainRoot, gitDir, number) {
   return {
     rootDir,
     indexPath: join(rootDir, 'index.json'),
+    milestonesPath: join(rootDir, 'milestones.json'),
     itemsDir: join(rootDir, 'items'),
     lockPath: join(rootDir, 'issues.lock'),
     itemPath: number !== undefined && number !== null ? join(rootDir, 'items', `${Number(number)}.json`) : null,
@@ -108,6 +109,7 @@ function summarizeItem(item) {
     state: item.state,
     labels: [...(item.labels ?? [])],
     assignees: [...(item.assignees ?? [])],
+    milestone: item.milestone ?? null,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     closedAt: item.closedAt ?? null,
@@ -134,6 +136,7 @@ export async function createLocalIssue({
   body = '',
   labels = [],
   assignees = [],
+  milestone = null,
 } = {}) {
   const cleanTitle = String(title ?? '').trim()
   if (!cleanTitle) return { ok: false, error: 'missing-title' }
@@ -159,6 +162,7 @@ export async function createLocalIssue({
       labels: cleanLabels,
       comments: [],
       assignees: cleanAssignees,
+      milestone: milestone ?? null,
       relations: parseBodyRelations(normalizedBody),
       url: `local-issue://${num}`,
       createdAt: now,
@@ -461,4 +465,83 @@ export async function releaseLocalIssue({
     item.comments.push(comment)
     return { ok: true, local: true, issue: item.number, assignees: item.assignees, labels: item.labels, comment: { ok: true, id: comment.id } }
   })
+}
+
+function readOrInitMilestones(milestonesPath) {
+  const res = readStrictLocalJson(milestonesPath, '本地里程碑 milestones.json')
+  if (res.exists) {
+    const d = res.data
+    if (!Number.isInteger(d.nextId) || d.nextId < 1 || !Array.isArray(d.items)) {
+      throw new Error(`LOCAL_ISSUE_CORRUPTED: milestones.json 结构非法 (${milestonesPath})`)
+    }
+    return d
+  }
+  return { version: 1, nextId: 1, items: [] }
+}
+
+/** 本地原子创建里程碑（支持 local-only 与 generic-git 降级落盘）。 */
+export async function createLocalMilestone({ mainRoot = process.cwd(), gitDir = null, title, description = '', dueOn = null } = {}) {
+  const cleanTitle = String(title ?? '').trim()
+  if (!cleanTitle) return { ok: false, error: 'missing-title' }
+  const paths = issuePaths(mainRoot, gitDir)
+  return withFileLock(paths.lockPath, () => {
+    mkdirSync(paths.rootDir, { recursive: true })
+    const store = readOrInitMilestones(paths.milestonesPath)
+    const dup = store.items.find((m) => m.title.toLowerCase() === cleanTitle.toLowerCase() && m.state === 'open')
+    if (dup) return { ok: true, local: true, existing: true, ...dup }
+    const now = new Date().toISOString()
+    const item = {
+      number: store.nextId, title: cleanTitle, state: 'open', description: String(description ?? ''),
+      dueOn: dueOn ?? null, url: `local-milestone://${store.nextId}`, createdAt: now, updatedAt: now, closedAt: null,
+    }
+    store.nextId += 1
+    store.items.push(item)
+    writeJsonAtomic(paths.milestonesPath, store)
+    return { ok: true, local: true, ...item }
+  })
+}
+
+/** 列出本地里程碑（open | closed | all）。 */
+export function listLocalMilestones({ mainRoot = process.cwd(), gitDir = null, state = 'open' } = {}) {
+  const paths = issuePaths(mainRoot, gitDir)
+  const store = readOrInitMilestones(paths.milestonesPath)
+  const stLow = String(state ?? 'open').toLowerCase()
+  const milestones = store.items.filter((m) => stLow === 'all' || String(m.state).toLowerCase() === stLow)
+  return { ok: true, local: true, milestones }
+}
+
+/** 原子关闭本地里程碑。 */
+export async function closeLocalMilestone({ mainRoot = process.cwd(), gitDir = null, number } = {}) {
+  const num = Number(number)
+  if (!Number.isInteger(num) || num <= 0) return { ok: false, error: 'invalid-milestone-number' }
+  const paths = issuePaths(mainRoot, gitDir)
+  return withFileLock(paths.lockPath, () => {
+    const store = readOrInitMilestones(paths.milestonesPath)
+    const hit = store.items.find((m) => m.number === num)
+    if (!hit) return { ok: false, error: `milestone #${num} not found` }
+    hit.state = 'closed'
+    hit.closedAt = new Date().toISOString()
+    hit.updatedAt = hit.closedAt
+    writeJsonAtomic(paths.milestonesPath, store)
+    return { ok: true, local: true, ...hit }
+  })
+}
+
+/** 原子为本地工单绑定里程碑（按编号或标题匹配）。 */
+export async function assignLocalMilestone({ mainRoot = process.cwd(), gitDir = null, number, milestone } = {}) {
+  const issueNum = Number(number)
+  const paths = issuePaths(mainRoot, gitDir)
+  const store = readOrInitMilestones(paths.milestonesPath)
+  const rawMs = milestone?.number ?? milestone
+  const msNum = Number(rawMs)
+  const hitMs = Number.isInteger(msNum) && msNum > 0
+    ? store.items.find((m) => m.number === msNum)
+    : store.items.find((m) => m.title.toLowerCase() === String(rawMs ?? '').trim().toLowerCase())
+  if (!hitMs) return { ok: false, error: `local milestone not found: ${milestone}` }
+  if (!Number.isInteger(issueNum) || issueNum <= 0) return { ok: true, local: true, milestone: hitMs }
+  const res = await mutateLocalIssue(mainRoot, gitDir, issueNum, (item) => {
+    item.milestone = { number: hitMs.number, title: hitMs.title, state: hitMs.state }
+    return { ok: true, local: true, number: issueNum, milestone: item.milestone }
+  })
+  return res
 }

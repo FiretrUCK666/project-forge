@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { checkAuthorIsNotImplementer } from '../../lib/doc-requirements.mjs'
 import { slugify } from '../../lib/docs.mjs'
+import { workTypePrefix } from '../../lib/escalation.mjs'
 import {
   canonicalPath, detectInProgressGitOp, ensureWorktreesIgnored,
   gitRun, gitRunBuffer, gitStatusPorcelainZ, parseWorktreeListPorcelain, posixPath,
@@ -21,11 +22,11 @@ import {
   resolveDefaultBranchFromRefs, resolveGitDirFast, resolveRefShaFast,
 } from '../../lib/git-fast.mjs'
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
-import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, writeTaskLedger } from '../../lib/ledger.mjs'
+import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
-  parseIssueNumbers, parsePrNumber, parseRemotesTopology,
+  parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
   parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -228,7 +229,7 @@ export async function inspectWorkspace(targetDir = process.cwd(), opts = {}) {
     activeTasks: listTaskLedgers(mainRoot, { includeTerminal: false }).map((t) => ({
       taskId: t.taskId, slug: t.slug, status: t.status, branch: t.branch, worktreePath: t.worktreePath, prNumber: t.prNumber,
     })),
-    inputs: { issues: fetchedIssues, prs: fetchedPrs, unknown: graph.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues), graph },
+    inputs: { issues: fetchedIssues, prs: fetchedPrs, milestones: graph.milestones ?? [], unknown: graph.unknown, reuseExistingPr, issueGraph: analyzeIssueDependencies(fetchedIssues), graph },
   }
 }
 
@@ -361,6 +362,9 @@ export async function handleStart(opts, roots) {
   }
 
   const defaultPrTask = effectiveExternalPr ? `review-pr-${effectiveExternalPr}` : (prNumber ? `pr-${prNumber}` : null)
+  const milestoneVal = opts.milestone !== undefined
+    ? (parseMilestoneNumber(opts.milestone) ?? String(opts.milestone).trim())
+    : (parsedPos.milestones?.[0]?.number ?? state.inputs.milestones?.[0]?.number ?? null)
   const rawTaskId = opts.task ?? (opts.slug ? slugify(opts.slug) : (linkedIssues[0] ? `issue-${linkedIssues[0]}` : (defaultPrTask ?? (opts.title ? slugify(opts.title) : prelimTaskId))))
   const taskId = sanitizeTaskId(rawTaskId)
   const slug = slugify(opts.slug ?? (opts.title ? opts.title : taskId))
@@ -420,7 +424,8 @@ export async function handleStart(opts, roots) {
     if ((existing.linkedIssues ?? []).length > 0 && existsSync(existingWorkRoot)) {
       await syncTaskDocsSafe(existingWorkRoot, existing)
     }
-    writeTaskLedger(roots.mainRoot, existing)
+    if (milestoneVal && !existing.milestone) existing.milestone = milestoneVal
+    await updateTaskLedger(roots.mainRoot, existing.taskId, (cur) => ({ ...(cur ?? existing), ...existing }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...existing, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
@@ -530,7 +535,7 @@ export async function handleStart(opts, roots) {
       issueContext, issueContextUnavailable, prContext, prContextUnavailable, ...prPatch,
       status: 'review-ready', untrustedScanPassed: false, untrustedApproved: false, humanApprovedExec: false,
     })
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify(ledger, null, 2)}\n`)
     else {
       process.stdout.write(`已建立外部 PR 审查隔离位：${reviewRel}（detached @ ${targetSha.slice(0, 7)}，未挂载依赖）\n`)
@@ -539,7 +544,7 @@ export async function handleStart(opts, roots) {
     return { exitCode: 0 }
   }
 
-  const branchPrefix = caseType === 2 ? 'fix' : caseType === 1 ? 'docs' : 'feat'
+  const branchPrefix = workTypePrefix(caseType)
   const reusedPrBranch = state.inputs.reuseExistingPr?.branch ?? null
   const branch = opts.branch || reusedPrBranch || `${branchPrefix}/${slug}`
 
@@ -584,10 +589,10 @@ export async function handleStart(opts, roots) {
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
       linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable,
       prContext, prContextUnavailable, ...prPatch, status: 'started',
-      ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
+      ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
     if (linkedIssues.length > 0) await syncTaskDocsSafe(roots.mainRoot, ledger)
-    writeTaskLedger(roots.mainRoot, ledger)
+    await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
     if (opts.json) process.stdout.write(`${JSON.stringify({ ...ledger, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
@@ -623,7 +628,7 @@ export async function handleStart(opts, roots) {
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
     linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable,
     prContext, prContextUnavailable, ...prPatch, status: 'started',
-    ...stackFields, ...depMeta, ...(filesList.length > 0 ? { files: filesList } : {}),
+    ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
   })
   recordMountedDepsInLedger(ledger, implRel, depMount)
 
@@ -632,7 +637,7 @@ export async function handleStart(opts, roots) {
   if (!ledger.specFile) ledger.specFile = findMatchingDocStrict(implAbs, 'docs/specs', slug, taskId, linkedIssues)
   if (!ledger.prdFile) ledger.prdFile = findMatchingDocStrict(implAbs, 'docs/prd', slug, taskId, linkedIssues)
   if (linkedIssues.length > 0) await syncTaskDocsSafe(implAbs, ledger)
-  writeTaskLedger(roots.mainRoot, ledger)
+  await updateTaskLedger(roots.mainRoot, ledger.taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ...ledger, depsMount: depMount, migratedDocs, ...(createdIssue ? { createdIssue } : {}) }, null, 2)}\n`)

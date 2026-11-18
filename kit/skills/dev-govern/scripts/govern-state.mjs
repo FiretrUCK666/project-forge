@@ -15,13 +15,13 @@ import {
   gitRun, gitStatusPorcelainZ, isMacOsJunkPath, posixPath, readJsonSafe,
   writeAtomic, writeJsonAtomic,
 } from '../../lib/git.mjs'
-import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from '../../lib/platform.mjs'
-import { createTaskBackend } from '../../lib/task-backend.mjs'
+import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { applyIssuesToBackend, buildIssues } from '../../lib/escalation.mjs'
 import { appendGovernSignal, inferSignalModule, readSignalsJsonl, resolveGovernStateDir } from '../../lib/signals.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, readTextStrictInfo } from './govern-checks.mjs'
 
-export { readSignalsJsonl, resolveGovernStateDir }
+export { applyIssuesToBackend, buildIssues, readSignalsJsonl, resolveGovernStateDir }
+export const applyGitHubIssues = applyIssuesToBackend
 
 const SEVERITY_RANK = Object.freeze({ info: 0, low: 1, medium: 2, high: 3, critical: 4 })
 
@@ -449,77 +449,6 @@ export async function handleSampleCommits(workRoot, mainRoot, gitDir, isGit, opt
   }
   return 0
 }
-
-export function buildIssues(findings) {
-  const actionable = findings.filter((f) => f.severity !== 'info')
-  const grouped = new Map()
-  for (const f of actionable) {
-    if (!grouped.has(f.category)) grouped.set(f.category, [])
-    grouped.get(f.category).push(f)
-  }
-  const issues = []
-  for (const [cat, items] of grouped.entries()) {
-    const highest = items.some((x) => x.severity === 'critical') ? 'critical'
-      : items.some((x) => x.severity === 'high') ? 'high' : 'medium'
-    const title = `[govern/${cat}] Resolve ${items.length} ${cat} finding(s) (max severity: ${highest})`
-    const bodyLines = [
-      `## Audit Category: \`${cat}\``, '', 'Findings detected by `govern-audit`:', '',
-      ...items.slice(0, 25).map((item, idx) =>
-        `${idx + 1}. **[${item.severity.toUpperCase()}]** ${item.title}${item.action ? ` — Action: ${item.action}` : ''}`),
-      ...(items.length > 25 ? ['', `_...and ${items.length - 25} more items in category \`${cat}\`._`] : []),
-      '', '## Acceptance Criteria', '',
-      ...items.slice(0, 5).map((item, idx) => `- [ ] C${idx + 1}: Resolve \`${item.id}\``), '',
-    ]
-    issues.push({ category: cat, severity: highest, title, labels: ['governance', cat], body: bodyLines.join('\n') })
-  }
-  return issues
-}
-
-export async function applyIssuesToBackend(repoRoot, issues, opts = {}) {
-  if (issues.length === 0) return { applied: [], error: undefined }
-  const fastGitDir = resolveGitDirFast(repoRoot)
-  const fastCfg = readGitConfigFast(fastGitDir)
-  const remotes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(repoRoot, ['remote', '-v'])
-  const remoteUrls = parseRemoteUrls(remotes.stdout)
-  const topology = parseRemotesTopology(remotes.stdout)
-  const originUrl = remoteUrls.origin ?? Object.values(remoteUrls)[0]
-  const targetRepo = githubRepoFull(originUrl)
-  const hasRemote = Boolean(remotes.ok && Object.keys(remoteUrls).length > 0)
-  const markers = fastGitDir ? detectGitModeMarkers(fastGitDir, { hasRemote }) : { localMode: false }
-  const isLocal = !hasRemote || markers.localMode || topology.providerId === 'none'
-  const isGeneric = hasRemote && !markers.localMode && (topology.providerId === 'generic-git' || !targetRepo)
-
-  let backend
-  if (isLocal || isGeneric) {
-    backend = createTaskBackend({
-      role: isLocal ? 'local-only' : 'generic-git',
-      providerId: isLocal ? 'none' : 'generic-git',
-      targetRepo, mainRoot: repoRoot, gitDir: fastGitDir,
-    })
-  } else {
-    const probe = opts._ghProbe ?? (opts._ghClient
-      ? { env: { providerId: 'github', trackB: { tier: opts._ghClient.tier ?? 'gh-cli' } }, client: opts._ghClient }
-      : await probeForWrite({ cwd: repoRoot, remoteUrls }))
-    if (probe.env.trackB.tier !== 'gh-cli' && probe.env.trackB.tier !== 'node-https-token') {
-      return { applied: [], error: '`gh` CLI / GitHub token is not available; sign in to GitHub first.' }
-    }
-    backend = createTaskBackend({
-      role: 'maintainer', providerId: 'github', targetRepo,
-      client: probe.client, mainRoot: repoRoot, gitDir: fastGitDir,
-    })
-  }
-  const created = []
-  for (const iss of issues) {
-    const res = await backend.createIssue({
-      repo: targetRepo, title: iss.title, body: iss.body, labels: iss.labels ?? [],
-    })
-    if (!res.ok) return { applied: created, error: `Issue create failed: ${res.error ?? 'unknown error'}` }
-    created.push({ title: iss.title, url: res.url, number: res.number, ...(res.local ? { local: true } : {}) })
-  }
-  return { applied: created, error: undefined }
-}
-
-export const applyGitHubIssues = applyIssuesToBackend
 
 export function buildGovernNextSteps({ mode, opts, mainRoot, cluster, devProfile, findings = [], plan, reconcileSummary, findingsCount }) {
   const skills = resolveAvailableSkills(mainRoot)

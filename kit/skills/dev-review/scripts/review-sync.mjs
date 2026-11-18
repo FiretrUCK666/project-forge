@@ -39,6 +39,16 @@ export function buildCriteriaStatusSummary({ workTreeRoot, mainRoot, ledger, ver
   return `fail: ${failList.join(', ')}${passIds.length > 0 ? ` / pass: ${passIds.join(', ')}` : ''}`
 }
 
+function resolveFaultInjectionSummary(opts = {}, ledger = {}) {
+  const explicit = String(opts['fault-injection'] ?? '').trim()
+  if (explicit) return explicit
+  const fr = ledger?.faultRecord
+  if (fr && fr.restoredAt) {
+    return `已通过两阶段故障注入与干净还原（round=${fr.round ?? '-'}, failed=${fr.failedCmd ?? 'injected'}, restoredAt=${fr.restoredAt}）`
+  }
+  return '未触及高风险路径或未附额外故障注入摘要'
+}
+
 export async function syncReviewToGitHub({
   mainRoot, workTreeRoot, ledger, round, verdict, headSha, reviewerId, implementerId,
   stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
@@ -67,7 +77,7 @@ export async function syncReviewToGitHub({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
     })
-    const faultInjectionText = String(opts['fault-injection'] ?? '').trim() || '未触及高风险路径或未附额外故障注入摘要'
+    const faultInjectionText = resolveFaultInjectionSummary(opts, ledger)
     const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
     const staleLabel = verdict === 'changes' ? 'reviewed' : 'changes-requested'
     const statePayload = {
@@ -88,8 +98,13 @@ export async function syncReviewToGitHub({
       const commentRes = await backend.postComment({
         taskId: ledger.taskId, number: num, body: issueCommentBody, author: reviewerId, statePayload,
       })
-      const labelRes = await backend.addLabels({ taskId: ledger.taskId, number: num, labels: [labelName] })
-      await backend.removeLabel({ taskId: ledger.taskId, number: num, label: staleLabel })
+      const labelRes = typeof backend.syncStateLabel === 'function'
+        ? await backend.syncStateLabel({ taskId: ledger.taskId, number: num, state: labelName })
+        : await (async () => {
+            const addR = await backend.addLabels({ taskId: ledger.taskId, number: num, labels: [labelName] })
+            await backend.removeLabel({ taskId: ledger.taskId, number: num, label: staleLabel })
+            return addR
+          })()
       results.push({ kind: 'issue', number: num, comment: commentRes, label: labelRes })
     }
     return { synced: results.some((r) => r.comment?.ok), local: true, label: labelName, results }
@@ -122,7 +137,7 @@ export async function syncReviewToGitHub({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
     })
-    const faultInjectionText = String(opts['fault-injection'] ?? '').trim() || '未触及高风险路径或未附额外故障注入摘要'
+    const faultInjectionText = resolveFaultInjectionSummary(opts, ledger)
     const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
     const staleLabel = verdict === 'changes' ? 'reviewed' : 'changes-requested'
     const statePayload = {
@@ -187,8 +202,13 @@ export async function syncReviewToGitHub({
       const commentRes = await backend.postComment({
         repo: targetRepo, number: t.number, body: targetBody, statePayload,
       })
-      const labelRes = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
-      await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
+      const labelRes = typeof backend.syncStateLabel === 'function'
+        ? await backend.syncStateLabel({ repo: targetRepo, number: t.number, state: labelName })
+        : await (async () => {
+            const addR = await backend.addLabels({ repo: targetRepo, number: t.number, labels: [labelName] })
+            await backend.removeLabel({ repo: targetRepo, number: t.number, label: staleLabel })
+            return addR
+          })()
       results.push({ kind: t.kind, number: t.number, comment: commentRes, label: labelRes })
     }
 

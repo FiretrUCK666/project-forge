@@ -265,7 +265,7 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
 
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 3\n')
     gitCommitFast(dir, 'attempt fix', { updateOnly: true })
-    const r2Repeat = await handleRecord({ task: 't-rev', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 2), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
+    const r2Repeat = await handleRecord({ task: 't-rev', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-c', 'review-token': await issueTokenFor(dir, 't-rev', 2), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
     if (r2Repeat !== 4) {
       return `连续两轮同一 must-fix 未触发停损（应 exit 4）：exit=${r2Repeat}`
     }
@@ -275,10 +275,10 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     await handleRecord({ task: 't-r3', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 1), 'must-fix': ['C1: src/app.mjs:1 问题一'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 4\n')
     gitCommitFast(dir, 'r2 fix', { updateOnly: true })
-    await handleRecord({ task: 't-r3', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 2), 'must-fix': ['C2: src/app.mjs:1 问题二'] }, revRoots)
+    await handleRecord({ task: 't-r3', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-c', 'review-token': await issueTokenFor(dir, 't-r3', 2), 'must-fix': ['C2: src/app.mjs:1 问题二'] }, revRoots)
     writeFileSync(join(dir, 'src/app.mjs'), 'export const ok = 5\n')
     gitCommitFast(dir, 'r3 fix', { updateOnly: true })
-    const r3Stop = await handleRecord({ task: 't-r3', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-r3', 3), 'must-fix': ['C3: src/app.mjs:1 问题三'] }, revRoots)
+    const r3Stop = await handleRecord({ task: 't-r3', round: '3', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-d', 'review-token': await issueTokenFor(dir, 't-r3', 3), 'must-fix': ['C3: src/app.mjs:1 问题三'] }, revRoots)
     if (r3Stop !== 4) return `第 3 轮上限未触发停损：exit=${r3Stop}`
     return true
   } finally { rmTree(dir) }

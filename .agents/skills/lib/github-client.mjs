@@ -18,11 +18,13 @@ import {
   isRetryableHttpOutcome,
   normalizeCommentEntries,
   normalizeIssuePayload,
+  normalizeMilestonePayload,
   normalizePrPayload,
   normalizeRepoMetaPayload,
   parseBodyRelations,
   parseFlowInputs,
   parseIssueNumbers,
+  parseMilestoneNumber,
   parsePfStateTags,
   parsePrNumber,
   parseRetryAfterMs,
@@ -38,6 +40,7 @@ export {
   parseBodyRelations,
   parseFlowInputs,
   parseIssueNumbers,
+  parseMilestoneNumber,
   parsePfStateTags,
   parsePrNumber,
   resolveContributorIdentity,
@@ -252,7 +255,7 @@ export function createGitHubClient({
 
     async getIssue(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await callGh(['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels'])
+        const res = await callGh(['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,labels,milestone'])
         if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
         try { return { ok: true, ...normalizeIssuePayload(JSON.parse(res.stdout), false) } } catch { return { ok: false, error: 'invalid-json' } }
       }
@@ -267,7 +270,7 @@ export function createGitHubClient({
     async listIssues({ repo, state = 'open', perPage = 30 } = {}) {
       if (!repo) return { ok: false, issues: [], error: 'missing-repo' }
       if (tier === 'gh-cli') {
-        const res = await callGh(['issue', 'list', '--repo', repo, '--state', state, '--limit', String(perPage), '--json', 'number,title,state,body,url,labels'])
+        const res = await callGh(['issue', 'list', '--repo', repo, '--state', state, '--limit', String(perPage), '--json', 'number,title,state,body,url,labels,milestone'])
         if (!res.ok) return { ok: false, issues: [], status: res.status || res.code, error: res.stderr ?? res.data?.message }
         try {
           const raw = JSON.parse(res.stdout)
@@ -542,15 +545,17 @@ export function createGitHubClient({
       return makeMcpDelegate('update_pr_base', { repo: cleanRepo, number: num, base: cleanBase })
     },
 
-    async createIssue({ repo, title, body = '', labels = [] } = {}) {
+    async createIssue({ repo, title, body = '', labels = [], milestone = null } = {}) {
       const cleanTitle = String(title ?? '').trim()
       if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }
       const normalizedBody = String(body ?? '').replace(/\r\n/g, '\n').trim()
       const cleanLabels = Array.isArray(labels) ? labels.map((l) => String(l ?? '').trim()).filter(Boolean) : []
+      const msVal = milestone?.number ?? milestone?.title ?? milestone
       if (tier === 'gh-cli') {
         return withUtf8TempFile('pf-issue-body', normalizedBody, async (tmpFile) => {
           const args = ['issue', 'create', '--repo', repo, '--title', cleanTitle, '--body-file', tmpFile]
           for (const lbl of cleanLabels) args.push('--label', lbl)
+          if (msVal !== null && msVal !== undefined && String(msVal).trim()) args.push('--milestone', String(msVal).trim())
           const res = await callGh(args)
           if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
           const url = res.stdout.trim().split('\n').pop()
@@ -561,16 +566,21 @@ export function createGitHubClient({
       if (tier === 'node-https-token') {
         const payload = { title: cleanTitle, body: normalizedBody }
         if (cleanLabels.length > 0) payload.labels = cleanLabels
+        const msNum = parseMilestoneNumber(msVal)
+        if (msNum) payload.milestone = msNum
         const res = await callHttps('POST', `/repos/${repo}/issues`, payload)
         if (!res.ok) return { ok: false, status: res.status, error: res.data?.message ?? 'create-issue-failed' }
         return {
           ok: true, number: res.data?.number ?? null, url: res.data?.html_url ?? null,
           title: res.data?.title ?? cleanTitle,
           labels: (res.data?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean),
+          milestone: res.data?.milestone ? normalizeMilestonePayload(res.data.milestone) : null,
         }
       }
       return makeMcpDelegate('create_issue', {
-        repo, title: cleanTitle, body: normalizedBody, ...(cleanLabels.length > 0 ? { labels: cleanLabels } : {}),
+        repo, title: cleanTitle, body: normalizedBody,
+        ...(cleanLabels.length > 0 ? { labels: cleanLabels } : {}),
+        ...(msVal ? { milestone: msVal } : {}),
       }, { action: 'create_issue' })
     },
 
@@ -642,6 +652,81 @@ export function createGitHubClient({
         return { ...summary, ok, ...(!ok ? { status: crRes?.status ?? stRes?.status ?? 0, error: warnings.join('; ') } : {}) }
       }
       return { ...makeMcpDelegate('get_commit_checks', { repo: cleanRepo, ref: cleanRef }), skipped: true, reason: tier }
+    },
+
+    async listLabels({ repo } = {}) {
+      if (!repo) return { ok: false, labels: [] }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await callGh(['api', `repos/${repo}/labels?per_page=100`])
+          : await callHttps('GET', `/repos/${repo}/labels?per_page=100`)
+        if (!res.ok) return { ok: false, labels: [], status: res.status }
+        const data = tier === 'node-https-token' ? res.data : (() => { try { return JSON.parse(res.stdout) } catch { return [] } })()
+        return { ok: true, labels: (Array.isArray(data) ? data : []).map((l) => String(l?.name ?? '')).filter(Boolean) }
+      }
+      return { ...makeMcpDelegate('list_labels', { repo }), labels: [] }
+    },
+
+    async listMilestones({ repo, state = 'open' } = {}) {
+      if (!repo) return { ok: false, milestones: [] }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await callGh(['api', `repos/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=100`])
+          : await callHttps('GET', `/repos/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=100`)
+        if (!res.ok) return { ok: false, milestones: [], status: res.status, error: res.stderr ?? res.data?.message }
+        const raw = tier === 'node-https-token' ? res.data : (() => { try { return JSON.parse(res.stdout) } catch { return [] } })()
+        return { ok: true, milestones: (Array.isArray(raw) ? raw : []).map(normalizeMilestonePayload) }
+      }
+      return { ...makeMcpDelegate('list_milestones', { repo, state }), milestones: [] }
+    },
+
+    async createMilestone({ repo, title, description = '', dueOn = null } = {}) {
+      const cleanTitle = String(title ?? '').trim()
+      if (!repo || !cleanTitle) return { ok: false, error: 'missing-repo-or-title' }
+      const body = { title: cleanTitle, ...(description ? { description: String(description) } : {}), ...(dueOn ? { due_on: String(dueOn) } : {}) }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await withUtf8TempFile('pf-ms', JSON.stringify(body), (tmp) => callGh(['api', `repos/${repo}/milestones`, '-X', 'POST', '--input', tmp]))
+          : await callHttps('POST', `/repos/${repo}/milestones`, body)
+        if (!res.ok) return { ok: false, status: res.status, error: res.stderr ?? res.data?.message }
+        const data = tier === 'node-https-token' ? res.data : (() => { try { return JSON.parse(res.stdout) } catch { return {} } })()
+        return { ok: true, ...normalizeMilestonePayload(data) }
+      }
+      return makeMcpDelegate('create_milestone', { repo, ...body })
+    },
+
+    async closeMilestone({ repo, number } = {}) {
+      const num = parseMilestoneNumber(number)
+      if (!repo || !num) return { ok: false, error: 'missing-repo-or-number' }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await withUtf8TempFile('pf-ms-close', JSON.stringify({ state: 'closed' }), (tmp) => callGh(['api', `repos/${repo}/milestones/${num}`, '-X', 'PATCH', '--input', tmp]))
+          : await callHttps('PATCH', `/repos/${repo}/milestones/${num}`, { state: 'closed' })
+        if (!res.ok) return { ok: false, status: res.status, error: res.stderr ?? res.data?.message }
+        const data = tier === 'node-https-token' ? res.data : (() => { try { return JSON.parse(res.stdout) } catch { return {} } })()
+        return { ok: true, ...normalizeMilestonePayload(data) }
+      }
+      return makeMcpDelegate('close_milestone', { repo, number: num })
+    },
+
+    async assignMilestone({ repo, number, milestone } = {}) {
+      const num = Number(number)
+      if (!repo || !Number.isInteger(num) || num <= 0) return { ok: false, error: 'missing-repo-or-number' }
+      let msNum = parseMilestoneNumber(milestone?.number ?? milestone)
+      if (!msNum && milestone && String(milestone).trim()) {
+        const listed = await this.listMilestones({ repo, state: 'all' })
+        const hit = listed.milestones?.find((m) => m.title === String(milestone).trim())
+        if (hit) msNum = hit.number
+      }
+      if (!msNum) return { ok: false, error: `milestone-not-found: ${milestone}` }
+      if (tier === 'gh-cli' || tier === 'node-https-token') {
+        const res = tier === 'gh-cli'
+          ? await withUtf8TempFile('pf-ms-assign', JSON.stringify({ milestone: msNum }), (tmp) => callGh(['api', `repos/${repo}/issues/${num}`, '-X', 'PATCH', '--input', tmp]))
+          : await callHttps('PATCH', `/repos/${repo}/issues/${num}`, { milestone: msNum })
+        if (!res.ok) return { ok: false, status: res.status, error: res.stderr ?? res.data?.message }
+        return { ok: true, number: num, milestone: msNum }
+      }
+      return makeMcpDelegate('assign_milestone', { repo, number: num, milestone: msNum })
     },
   }
 }

@@ -4,11 +4,11 @@ title: 平台事实、文档通用性与演进
 status: approved
 tier: L3
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: 50
 pr: null
-branch: fix/v8-criteria-trust
-owner: null
+branch: feat/platform-and-docs
+owner: FiretrUCK666
 approved: true
 implemented: false
 plan_critique: "passed (round=3 reviewer=self:lead mode=after-3-independent-rounds)"
@@ -149,13 +149,13 @@ flowchart LR
 
 ## 三、冻结的验收标准
 
-- [ ] C1: **取舍真的能改变结论**。`computeArtifactPlan` 必须读取舍表：在 `AGENTS.md` 取舍节写上
+- [x] C1: **取舍真的能改变结论**。`computeArtifactPlan` 必须读取舍表：在 `AGENTS.md` 取舍节写上
   `no-auto-release` 之后，`ci-release` 的动作不得再是 `ask-human`；**反向**：把该行删掉后必须回到
   `ask-human`（否则等于取舍被写死）。同一份仓连跑两次 `survey`，`questions` 逐字相同**且**取舍节不变
   时两者产物完全一致——只验「不抖动」这半边，因为取舍现在还不参与 `questions` 生成，
   「变则变」那半边**没有实现对象**，写进判据就是编。`questions` 非空时 JSON 顶层必须带
   `needsHuman: { count, kinds[] }` 这样的机器可读标记，不能只有 Markdown 正文。
-- [ ] C2: **两个入口报同一份能力，且「做不到」必须说成做不到**。`survey --json` 与 `review --json`
+- [x] C2: **两个入口报同一份能力，且「做不到」必须说成做不到**。`survey --json` 与 `review --json`
   都必须在顶层输出 `git.capabilities = { known, providerId, issues, pullRequests, releases, checks }`
   这六个键；两处取值必须一致（同一份仓同一次勘察）。**认不出的托管**（GitLab / Gitea / 任意非 GitHub 主机）
   必须报「确定的做不到」——`known` 不得为 `true` 却让调用方以为能建 Issue 或发 Release；
@@ -163,7 +163,7 @@ flowchart LR
   这种既不知道又不像不知道的中间态。零远端时 `questions` 出现 `q.remote-setup`；
   非 GitHub 远端时 `q.release-strategy` 文案里**不得出现** `RELEASE_TOKEN` / `gh release`；
   **反向**：GitHub 上的现有输出（5 选 1 文案）不变，且四项能力全为 `true`。
-- [ ] C3: `artifactPlan` 里每个 `action: create` 都**在 `ARTIFACT_EXECUTORS` 里有执行者**，否则 `review`
+- [x] C3: `artifactPlan` 里每个 `action: create` 都**在 `ARTIFACT_EXECUTORS` 里有执行者**，否则 `review`
   报 `ARTIFACT_WITHOUT_EXECUTOR`（门禁红）；连 `id` 都没有的项报 `ARTIFACT_WITHOUT_ID`；
   标为人工执行的项必须写清「从哪儿开始」。**九种动作都要有明确归宿**：`create` 查执行者，
   其余八种（`calibrate` / `preserve` / `ask-human` / `skip` / `snapshot` / `equip` / `optional` / `upgrade`）
@@ -171,20 +171,20 @@ flowchart LR
   要补上，否则它们会被误判成缺执行者。**落盘后的去向按实测分两种**：`ci-check` 从 `create` 变 `preserve`，
   `agents-contract` 从 `create` 变 `calibrate`（`compose-agents` 会故意留待填占位）——
   判据写成「一律变 preserve」会把第二条判红。反向：已就绪项（`preserve`）重跑后仍为 `preserve`，不得来回跳。
-- [ ] C4: `dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；当前选择：彻底只读；**主流程也不许再让这个只读技能承担写入职责**——`SKILL.md` 的 S3 落盘步骤必须写明「只读取证，由本步落笔」，而不是「调 dev-explore 编写或校准 `docs/TDD.md`」；反向：`equip --bootstrap-empty` 仍能生成初始 TDD，`dev-govern` 仍能报出该补哪些模块。
-- [ ] C5: 治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），**三面以上即跨模块**；可判形式：同一件事的三种同义改写、以及**完全不含「治理 / 规范化」字样**但跨三面的输入，都必须判 Case 4；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**——这条**不能放在 `doc-audit` 里**：
+- [x] C4: `dev-explore` 的「严格只读」与「写入或校准 TDD」二者**只保留一个**；当前选择：彻底只读；**主流程也不许再让这个只读技能承担写入职责**——`SKILL.md` 的 S3 落盘步骤必须写明「只读取证，由本步落笔」，而不是「调 dev-explore 编写或校准 `docs/TDD.md`」；反向：`equip --bootstrap-empty` 仍能生成初始 TDD，`dev-govern` 仍能报出该补哪些模块。
+- [x] C5: 治理类输入判 **Case 4**：判据是「这件事会同时碰到几个面」（文档 / CI / 契约 / 目录结构 / 源码 / 工具链），**三面以上即跨模块**；可判形式：同一件事的三种同义改写、以及**完全不含「治理 / 规范化」字样**但跨三面的输入，都必须判 Case 4；写任何治理文件之前先建治理 PRD；**这份 PRD 的 `C1..Cn` 必须覆盖 `artifactPlan` 的每一项**——这条**不能放在 `doc-audit` 里**：
 `artifactPlan` 由产品层 `scripts/survey.mjs` 算，而 `doc-audit.mjs` 住在会被原样复制进用户项目的 `kit/` 里，
 `kit/**` 全程不 import `scripts/**`。所以落点是 `scripts/review.mjs`（它已经同时拿到 survey 事实与文档清单）
 （缺一项即门禁红）；**另一条**：每个 C 项还必须被某份 SPEC 认领（`checkMasterPrdCoverage` 已落地）；治理 PRD 在重入时可继续追加而非每次重开。
 **待改**：`assessPrdNeed` 现在只认「四面/分批/12 文件」三条，实测 `triage('给这个仓库做整体规范化治理')` 判 Case 4 但 `prdRequired: false`——
 「治理类输入必须建 PRD」这条要落进 `assessPrdNeed`，不是已经成立的现状。
-- [ ] C6: 账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
-- [ ] C7: 规划文档（PRD / SPEC / Todo）的 Critique **Round 2 及以后必须由新建的独立子代理执行**，与代码审查同一条规矩；`doc-plan critique-pass` 必须能识别「这一轮的复核人就是上一轮的复核人」并拒绝，而不是只比较「复核人是否等于文档负责人」；反向：换一个真正新建的复核人时流程不受影响。
-- [ ] C8: 同一件事的 PRD / SPEC / Todo 必须被认作一个兄弟集，**且判定不能依赖「同一天创建」**：今天建 PRD、明天建 SPEC 时，`issue` / `branch` / `owner` / `status` 仍要双向同步；写在其中一份上的 Issue 编号要能被其余几份读到；**反向：确实属于两件事的同名 slug 不得被误合并**——
+- [x] C6: 账本存在 `explored` 字段（含时间、档位、索引符号数）；缺失时 **`flow next` 只给探索这一步**（不能一路做到合并才被拦）、且 `flow merge` 拦截（退出码 4）；`tddSyncWarning` 非空时 `finalize` 退出码非 0；两个以上未闭环任务时 `flow next` 输出**波次计划**（哪些可并行、哪些有依赖）而非「请显式传入 --task」；空 diff 时 `structuralGate.status` 为 `nothing-to-review`，不得是 `clean`。
+- [x] C7: 规划文档（PRD / SPEC / Todo）的 Critique **Round 2 及以后必须由新建的独立子代理执行**，与代码审查同一条规矩；`doc-plan critique-pass` 必须能识别「这一轮的复核人就是上一轮的复核人」并拒绝，而不是只比较「复核人是否等于文档负责人」；反向：换一个真正新建的复核人时流程不受影响。
+- [x] C8: 同一件事的 PRD / SPEC / Todo 必须被认作一个兄弟集，**且判定不能依赖「同一天创建」**：今天建 PRD、明天建 SPEC 时，`issue` / `branch` / `owner` / `status` 仍要双向同步；写在其中一份上的 Issue 编号要能被其余几份读到；**反向：确实属于两件事的同名 slug 不得被误合并**——
 这条**当前不成立**：`docs.mjs` 的设计注释明说「slugify 之后重名本身就是同一件事的强信号」，
 实测两份不同的事会给对方改写 `issue` 与 `related_spec`。要满足这条就得加一层「同一件事」的判据
 （比如必须同时给出相同 Issue 或显式 `--same-group`），这是本次要改的，不是现状。
-- [ ] C9: **四层都要通用，TDD 那层也要**。现状是三层做到了、TDD 没做到：
+- [x] C9: **四层都要通用，TDD 那层也要**。现状是三层做到了、TDD 没做到：
   `tdd-structure.mjs` 的 `TDD_CORE_SECTIONS` 是 **5 节硬要求**（文档信息 / 背景非目标 / 架构全景 / 核心流程 / 不变量），
   而 `doc-requirements.mjs` 的自定义声明通道只覆盖 prd / spec / todo，**没有 tdd**。
   实测：一份论文型 TDD（文档信息 + 背景与非目标 + 数据与实验步骤）被 `doc-plan audit` 判红，
@@ -196,7 +196,7 @@ flowchart LR
   ④**反向**：自定义模板不能变成「什么都不用写」的免检通道——主干三节写进 `omit_sections` 也不许删；
   ⑤TDD 那层的落点是 `kit/skills/templates/docs-tdd.md`、`tdd-structure.mjs`、`tdd-shape.mjs`，这三处都要进这次改动；
   ⑥证明：同一份论文型 TDD 在改完之后 `doc-plan audit` 判绿，而**空壳 TDD 仍判红**（否则就是放松而不是通用化）。
-- [ ] C10: 规划分流必须能判出「这件事大到一份 SPEC 装不下」：同时碰四面以上、需求自己说了要分批、声明要动 12 个以上文件，三条任一条成立就必须先写总控 PRD 再拆 SPEC + Todo；`triage` 输出 `prdRequired` 与判定依据；**反向**：只碰一两面的小需求不得被判进来；**事后兜底**：`docs/specs/` 里有两份以上生效 SPEC、却没有任何 PRD 被两份以上 SPEC 共同认领时，`audit` 必须报 `ORPHAN_SLICES_NO_MASTER_PRD`。
+- [x] C10: 规划分流必须能判出「这件事大到一份 SPEC 装不下」：同时碰四面以上、需求自己说了要分批、声明要动 12 个以上文件，三条任一条成立就必须先写总控 PRD 再拆 SPEC + Todo；`triage` 输出 `prdRequired` 与判定依据；**反向**：只碰一两面的小需求不得被判进来；**事后兜底**：`docs/specs/` 里有两份以上生效 SPEC、却没有任何 PRD 被两份以上 SPEC 共同认领时，`audit` 必须报 `ORPHAN_SLICES_NO_MASTER_PRD`。
 
 ## 四、高风险点、门型与回滚路径
 
@@ -205,4 +205,4 @@ flowchart LR
 
 ## 实现说明
 
-<!-- 在合并之前补齐真实实现摘要与验证结果 -->
+已完成 `C1..C10` 全部闭环并拆出内聚辅助模块控制单文件 `<= 800` 行：`scripts/survey.mjs` 与 `scripts/lib/survey-questions.mjs` 接入 `AGENTS.md` 取舍、规范化问句与 `needsHuman`/`NEEDS_HUMAN` 标记；`scripts/review.mjs` 与 `scripts/lib/review-helpers.mjs` 修复 `findUnexecutableArtifacts` TDZ 缺陷、新增 `artifacts` 切面与 `git.capabilities` 输出并校验治理 PRD 对 `artifactPlan` 覆盖；`scripts/lib/artifact-executors.mjs` 对齐全部 11 项执行入口并跳过 `optional`/`upgrade`；`kit/skills/dev-plan/scripts/doc-audit.mjs` 与 `doc-audit-repo.mjs` 强求治理任务先建 PRD；`kit/skills/lib/doc-verify.mjs` 限制命令核查仅跑白名单只读命令；`kit/skills/lib/ledger.mjs`、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-flow/scripts/flow-explore.mjs`、`flow-next.mjs`、`flow-merge.mjs`、`flow-lifecycle.mjs`、`kit/skills/lib/workflow-helpers.mjs` 与 `kit/skills/dev-review/scripts/review-gates.mjs` 补齐 `explored` 前置探索门禁、多任务波次排期、`finalize` `BLOCKED_TDD_SYNC` 阻断及空 diff `nothing-to-review`；`kit/skills/lib/docs.mjs` 实现同 `slug` 活跃文档互异隔离；`kit/skills/lib/doc-requirements.mjs`、`doc-templates.mjs`、`tdd-structure.mjs`、`tdd-shape.mjs`、`tdd-facts.mjs`、`tdd-scaffold.mjs` 与 `kit/skills/templates/docs-tdd.md` 支持自定义 TDD 声明并锁定三大不可豁免核心。回归与注入验证集中于 `scripts/dev/fixtures-issue50.mjs` 与 `scripts/dev/injections-data.mjs`（`I146..I151`）。

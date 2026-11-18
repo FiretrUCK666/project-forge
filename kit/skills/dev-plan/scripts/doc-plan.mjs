@@ -134,6 +134,8 @@ async function initDoc({
       // 只收集生成 TDD 需要的那几项事实：跑整套勘察既慢又跨层。
       const facts = await collectTddFacts(writeRoot)
       content = buildPreFilledTdd(facts, {
+        repoRoot: writeRoot,
+        noPrune: Boolean(noPrune),
         projectName: title,
         today,
         topLevelDirs: facts?.tddShape?.topLevelDirs ?? [],
@@ -218,8 +220,9 @@ function critiquePassDoc({ repoRoot, file, reviewer, round = 1, summary = '', fi
     throw new Error(`SELF_CRITIQUE_REJECTED: critique-pass 独立复核人 (${reviewer}) 不得与文档负责人 (${fmPre.data.owner}) 相同`)
   }
 
-  // Round 2 起必须换人。上一轮的复核人记在 frontmatter 里，读得到。
-  const prevReviewer = parseCritiqueReviewer(fmPre.data?.plan_critique)
+  // Round 2 起必须换人。上一轮的复核人记在 frontmatter（或传统 Plan Critique 行）里，读得到。
+  const legacyCritiquePre = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(rawPre)?.[1]?.trim() ?? null
+  const prevReviewer = parseCritiqueReviewer(fmPre.data?.plan_critique ?? legacyCritiquePre)
   if (Number(round) >= 2 && prevReviewer && normActorId(prevReviewer) === normActorId(reviewer)) {
     throw new Error(`BLOCKED_CRITIQUE_SAME_REVIEWER: Round ${round} 的复核人 (${reviewer}) 与上一轮相同。`
       + 'Round 2 起必须新建独立子代理复审——复用上一轮的上下文见过自己提出的意见，这一轮已经不算独立审了。')
@@ -443,16 +446,17 @@ function printHelp() {
     '  init           --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--prd <path>] [--spec <path>] [--no-prune] [--json]',
     '  clarify        --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--approve] [--json]',
-    '  audit          [--file <docPath> | .] [--json]',
-    '  critique-pass  --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
-    '  approve        --file <specPath> [--skip-critique-reason <文本>] [--json]',
-    '  archive        [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
-    '  supersede      <oldSpec> --by <newSpec> [--json]',
-    '  list           [--json]',
+    '  audit           [--file <docPath> | .] [--json]',
+    '  critique-scope  --file <docPath> [--reviewer <id>] [--round <n>] [--json]',
+    '  critique-pass   --file <docPath> --reviewer <id> [--round 1|2] [--summary <文本>] [--json]',
+    '  approve         --file <specPath> [--skip-critique-reason <文本>] [--json]',
+    '  archive         [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
+    '  supersede       <oldSpec> --by <newSpec> [--json]',
+    '  list            [--json]',
   ].join('\n') + '\n')
 }
 
-const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-pass', 'approve', 'archive', 'supersede', 'list']
+const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'approve', 'archive', 'supersede', 'list']
 
 async function main(argv) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }

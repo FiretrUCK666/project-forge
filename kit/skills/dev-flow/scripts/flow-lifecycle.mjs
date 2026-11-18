@@ -4,20 +4,19 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import {
-  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter, } from '../../lib/docs.mjs'
+  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, isSharedMasterPrd, } from '../../lib/docs.mjs'
 import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
-import { readGitConfigFast, readHeadFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { nextReviewRound, recordMountedDepsInLedger, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
-import { isProfileExplicitNone, parseAgentsProfile } from '../../lib/profile.mjs'
-import { appendGovernSignal } from '../../lib/signals.mjs'
+import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
@@ -30,61 +29,16 @@ import {
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
+import {
+  collectFinalizeChangedFiles,
+  computeFlowCoupledSync,
+  emitFlowSignal,
+  findStrictDocBySlug,
+  findUncheckedLines,
+  handleRework,
+} from './flow-lifecycle-helpers.mjs'
 
-function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
-  const agentsRoot = existsSync(join(implRoot, 'AGENTS.md')) ? implRoot : mainRoot
-  const agentsText = readTextSafe(join(agentsRoot, 'AGENTS.md'))
-  if (!agentsText) return []
-  const rules = parseCoupledSyncRules(agentsText)
-  return rules.length > 0 ? evaluateCoupledSync(changedFiles, rules, agentsRoot) : []
-}
-
-async function collectFinalizeChangedFiles(implRoot, ledger, statusEntries, gitCommonDir = null, headSha = null, preDiffEntries = undefined) {
-  const baseDiffEntries = Array.isArray(preDiffEntries)
-    ? preDiffEntries
-    : (ledger.baseSha && headSha && headSha === ledger.baseSha ? [] : undefined)
-  const merged = new Set(await getChangedFiles(implRoot, ledger.baseSha, { statusEntries, diffEntries: baseDiffEntries }))
-  for (const baseRef of [...new Set([ledger.baseBranch, 'main', 'master'].filter(Boolean))]) {
-    const fastRefSha = gitCommonDir ? resolveRefShaFast(gitCommonDir, `refs/heads/${baseRef}`) : null
-    if (fastRefSha && ledger.baseSha && fastRefSha === ledger.baseSha) break
-    const mb = await gitRun(implRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
-    const mbSha = mb.ok ? mb.stdout?.trim() : ''
-    if (mbSha) {
-      if (mbSha !== ledger.baseSha) {
-        for (const f of await getChangedFiles(implRoot, mbSha, { statusEntries })) merged.add(f)
-      }
-      break
-    }
-  }
-  return [...merged].sort()
-}
-
-function findUncheckedLines(text) {
-  const out = []
-  let inFence = false
-  for (const line of String(text ?? '').split('\n')) {
-    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
-    if (!inFence && /^- \[ \]/.test(line) && !/(?:<!--\s*waive:|\[waive:|豁免|跳过原因)/i.test(line)) out.push(line.trim())
-  }
-  return out
-}
-function findStrictDocBySlug(root, dirRel, ledger) {
-  const abs = join(root, dirRel)
-  if (!existsSync(abs)) return null
-  try {
-    for (const n of readdirSync(abs).filter((x) => x.endsWith('.md')).sort()) {
-      const fn = parseDocFilename(n)
-      if (fn && fn.slug === ledger.slug) return `${dirRel}/${n}`
-      const fm = parseDocFrontmatter(readTextSafe(join(abs, n)) ?? '')
-      if (fm.data?.task_id === ledger.taskId) return `${dirRel}/${n}`
-    }
-  } catch { /* ignore */ }
-  return null
-}
-
-async function emitFlowSignal(roots, payload) {
-  await appendGovernSignal({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, ...payload })
-}
+export { handleRework }
 
 export async function handleFinalize(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
@@ -201,6 +155,31 @@ export async function handleFinalize(opts, roots) {
     writeAtomic(specAbs, specText)
   }
 
+  const finDiff = ledger.baseSha
+    ? (currentHead && currentHead === ledger.baseSha ? { ok: true, entries: [], diffText: '' } : await gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`))
+    : null
+  const finDiffEntries = finDiff?.ok ? finDiff.entries : undefined
+  const changed = await collectFinalizeChangedFiles(implRoot, ledger, stZ.entries, roots.gitDir, currentHead, finDiffEntries)
+  const parity = await checkTddSyncParity(implRoot, changed, ledger, {
+    statusEntries: stZ.entries, diffEntries: finDiffEntries, diffText: finDiff?.diffText,
+  })
+  const coupledSyncWarnings = computeFlowCoupledSync(implRoot, roots.mainRoot, changed)
+  const agentsRoot = existsSync(join(implRoot, 'AGENTS.md')) ? implRoot : roots.mainRoot
+  const agentsDecisions = readDecisions(readTextSafe(join(agentsRoot, 'AGENTS.md')) ?? '')
+  if (parity.tddSyncWarning && !opts['no-tdd'] && !agentsDecisions.has('no-tdd')) {
+    const blockedOut = {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_TDD_SYNC',
+      taskId,
+      coupledSyncWarnings,
+      ...parity,
+    }
+    if (opts.json) process.stdout.write(`${JSON.stringify(blockedOut, null, 2)}\n`)
+    process.stderr.write(`BLOCKED_TDD_SYNC: ${parity.tddSyncWarning}\n`)
+    return { exitCode: 1 }
+  }
+
   let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel }, archivedMasterPrd: null }
   if (prdRel || specRel || todoRel) {
     archivedGroup = await archiveCompletedDocsGroup(implRoot, {
@@ -217,16 +196,6 @@ export async function handleFinalize(opts, roots) {
     if (archivedGroup.byKind.spec) { ledger.specFile = archivedGroup.byKind.spec; ledger.archivedSpecFile = archivedGroup.byKind.spec }
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
   }
-
-  const finDiff = ledger.baseSha
-    ? (currentHead && currentHead === ledger.baseSha ? { ok: true, entries: [], diffText: '' } : await gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`))
-    : null
-  const finDiffEntries = finDiff?.ok ? finDiff.entries : undefined
-  const changed = await collectFinalizeChangedFiles(implRoot, ledger, stZ.entries, roots.gitDir, currentHead, finDiffEntries)
-  const parity = await checkTddSyncParity(implRoot, changed, ledger, {
-    statusEntries: stZ.entries, diffEntries: finDiffEntries, diffText: finDiff?.diffText,
-  })
-  const coupledSyncWarnings = computeFlowCoupledSync(implRoot, roots.mainRoot, changed)
 
   ledger.finalized = true
   ledger.finalizedHead = currentHead
@@ -752,44 +721,6 @@ export async function handleSubmit(opts, roots) {
     if (prResult?.oneClickPrUrl) process.stdout.write(`- 一键创建 PR 链接：${prResult.oneClickPrUrl}\n`)
     if (prResult?.delegated) process.stdout.write(`- 待宿主 MCP 代理执行 PR 载荷：${JSON.stringify(prResult.jsonPayload)}\n`)
     printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
-  }
-  return { exitCode: 0 }
-}
-export async function handleRework(opts, roots) {
-  const ctx = await resolveTaskContext(roots, opts)
-  const { taskId, ledger } = ctx
-  const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  const profile = parseAgentsProfile(implRoot)
-  const changed = await getChangedFiles(implRoot, ledger.baseSha)
-
-  // 豁免由 finalize 成对自动归档移入 docs/archive/ 的关联文档，避免与 do-not-edit: docs/archive/ 自相冲突
-  const ownArchived = new Set([ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean))
-  const forbiddenTouched = changed.filter((f) => !ownArchived.has(f) && profile.doNotEdit.some((pat) => matchGlob(f, pat)))
-  const rebutsInput = Array.isArray(opts.rebut) ? opts.rebut : (opts.rebut ? [opts.rebut] : [])
-  const addedRebuts = []
-
-  for (const raw of rebutsInput) {
-    const idx = raw.indexOf(':')
-    const findingId = idx > 0 ? raw.slice(0, idx).trim() : 'general'
-    const reason = idx > 0 ? raw.slice(idx + 1).trim() : raw.trim()
-    const item = { findingId, reason, recordedAt: new Date().toISOString() }
-    addedRebuts.push(item)
-    ledger.rebuts = [...(ledger.rebuts ?? []), item]
-    if ((ledger.rounds ?? []).length > 0) {
-      const last = ledger.rounds[ledger.rounds.length - 1]
-      last.rebuts = [...(last.rebuts ?? []), item]
-    }
-  }
-
-  ledger.status = 'rework'
-  writeTaskLedger(roots.mainRoot, ledger)
-  await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'flow.rework', severity: 'medium', source: 'flow-rework', file: changed[0] ?? '', taskId, message: `rework entered (rebuts=${addedRebuts.length}, forbidden=${forbiddenTouched.length})`, meta: { forbiddenTouched, rebutCount: addedRebuts.length } })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, branch: ledger.branch, prNumber: ledger.prNumber, forbiddenTouched, addedRebuts }, null, 2)}\n`)
-  else {
-    process.stdout.write(`进入返工模式（task=${taskId}，原分支=${ledger.branch}，原 PR=${ledger.prNumber ?? '待创建'}）：\n`)
-    if (forbiddenTouched.length > 0) process.stdout.write(`- 警告：以下变更命中 do-not-edit 列表：${forbiddenTouched.join(', ')}\n`)
-    if (addedRebuts.length > 0) process.stdout.write(`- 已记录 ${addedRebuts.length} 条有据反驳。\n`)
-    printNextStep([{ skill: 'dev-flow', text: `1. node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }, { skill: 'dev-flow', text: `2. node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId} --rework` }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }
 }

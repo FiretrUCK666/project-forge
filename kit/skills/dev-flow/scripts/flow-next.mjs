@@ -214,7 +214,22 @@ export async function handleNext(opts, roots) {
     }
   }
 
-  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime, hasDevReview })
+  let multiTaskFiles = null
+  if (!selectedTask && activeTasks.length > 0) {
+    multiTaskFiles = {}
+    await Promise.all(activeTasks.map(async (t) => {
+      const files = new Set(Array.isArray(t.files) ? t.files : (Array.isArray(t.scopeFiles) ? t.scopeFiles : []))
+      const tRoot = t.worktreePath ? resolve(roots.mainRoot, t.worktreePath) : null
+      if (tRoot && existsSync(tRoot)) {
+        try {
+          for (const f of await getChangedFiles(tRoot, t.baseSha)) files.add(f)
+        } catch { /* ignore */ }
+      }
+      multiTaskFiles[t.taskId] = [...files].sort()
+    }))
+  }
+
+  let out = evaluateNextState({ activeTasks, selectedTask, taskRuntime, hasDevReview, multiTaskFiles })
 
   // 待审查时签发一枚一次性令牌。
   //
@@ -274,6 +289,12 @@ export async function handleNext(opts, roots) {
     if (payload.blockingReasons.length > 0) process.stdout.write(`- 阻塞原因: ${payload.blockingReasons.join(', ')}\n`)
     for (const w of payload.warnings ?? []) {
       process.stdout.write(`- 提醒 ${w.code}: ${w.message}\n`)
+    }
+    if (payload.waves?.length > 0) {
+      process.stdout.write('- 波次计划:\n')
+      for (const w of payload.waves) {
+        process.stdout.write(`  Wave ${w.wave} (${w.canParallel ? '可并行' : '单列/串行'}): ${w.tasks.map((t) => t.taskId).join(', ')}\n`)
+      }
     }
     if (payload.candidates?.length > 0) {
       for (const c of payload.candidates) process.stdout.write(`  * --task ${c.taskId} (status=${c.status}, branch=${c.branch ?? '-'})\n`)

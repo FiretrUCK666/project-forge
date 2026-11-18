@@ -316,3 +316,14 @@ export async function issueTokenFor(mainRoot, taskId, round) {
   void writeTaskLedger
   return token
 }
+
+/** 为非探索类下游夹具补记一条合规探索证据，避免被前置门禁阻断。 */
+export async function seedExploredFor(mainRoot, ...taskIds) {
+  const { createExploredEvidence, readTaskLedger, writeTaskLedger } = await import('../../kit/skills/lib/ledger.mjs')
+  for (const id of taskIds) {
+    const ledger = readTaskLedger(mainRoot, id)
+    if (!ledger) throw new Error(`找不到任务账本：${id}`)
+    ledger.explored = createExploredEvidence({ at: '2026-01-01T00:00:00Z', tier: 'direct-read', symbolCount: 1, by: 'fixture-seed' })
+    writeTaskLedger(mainRoot, ledger)
+  }
+}

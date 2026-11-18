@@ -94,6 +94,31 @@ export function taskLedgerPath(mainRoot, taskId) {
   return join(mainRoot, '.worktrees', '.state', 'tasks', `${sanitizeTaskId(taskId)}.json`)
 }
 
+export function normalizeExploredEvidence(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const at = typeof raw.at === 'string' && raw.at.trim() ? raw.at.trim() : null
+  const tier = typeof raw.tier === 'string' && raw.tier.trim() ? raw.tier.trim() : null
+  const symNum = Number(raw.symbolCount ?? raw.symbols ?? raw.indexedSymbols)
+  if (!at || !tier || !Number.isFinite(symNum) || symNum < 0) return null
+  const by = typeof raw.by === 'string' && raw.by.trim() ? raw.by.trim() : undefined
+  const source = typeof raw.source === 'string' && raw.source.trim() ? raw.source.trim() : undefined
+  return {
+    at,
+    tier,
+    symbolCount: Math.floor(symNum),
+    ...(by ? { by } : {}),
+    ...(source ? { source } : {}),
+  }
+}
+
+export function createExploredEvidence({ at = new Date().toISOString(), tier = 'direct-read', symbolCount = 0, by, source = 'repo-map' } = {}) {
+  return normalizeExploredEvidence({ at, tier, symbolCount, by, source })
+}
+
+export function hasExploredEvidence(ledger) {
+  return normalizeExploredEvidence(ledger?.explored) !== null
+}
+
 /** 构建符合跨模块统一契约的默认任务账本结构。 */
 export function createDefaultLedger(partial = {}) {
   const taskId = sanitizeTaskId(partial.taskId)
@@ -175,7 +200,7 @@ export function createDefaultLedger(partial = {}) {
      * `by` 是派发者标识（子代理名或会话标识）。它不承担防伪——防伪在 `reviewTokens`；
      * 它承担的是「事后能追到是谁说的」。
      */
-    explored: partial.explored ?? null,
+    explored: normalizeExploredEvidence(partial.explored),
     /**
      * 独立审查的一次性令牌。
      *
@@ -193,6 +218,7 @@ export function createDefaultLedger(partial = {}) {
     rebuts: Array.isArray(partial.rebuts) ? partial.rebuts : [],
     status: partial.status ?? 'started',
     ...partial,
+    explored: normalizeExploredEvidence(partial.explored),
     taskId,
   }
 }

@@ -15,6 +15,7 @@ export const FORM_INDEPENDENT_CORE = Object.freeze({
   prd: Object.freeze(['goal', 'non-goals', 'acceptance']),
   spec: Object.freeze(['goal', 'non-goals', 'acceptance']),
   todo: Object.freeze(['goal', 'non-goals', 'acceptance']),
+  tdd: Object.freeze(['background', 'arch', 'build']),
 })
 
 /**
@@ -99,14 +100,16 @@ export const SECTION_DEFS = Object.freeze({
   },
   flow: {
     id: 'flow',
-    label: '关键交互与用户路径',
-    keywords: ['关键交互', '用户路径', '交互流程', '业务流程', '主流程'],
+    label: '关键交互与核心流程',
+    keywords: ['关键交互', '用户路径', '交互流程', '业务流程', '主流程', '核心流程', '状态流转', '流水线', '主链路', '生命周期', '流程', 'flow'],
     evidence: [
       /(?:用户|调用方|操作者)[^\n]{0,20}(?:输入|点击|触发|执行)/,
+      /(?:主链路|正常主链路|数据流|调用链)/,
+      /(?:状态(?:迁移|流转)|状态机)/,
       /^\d+\.\s+\S/m,
     ],
     core: false,
-    fixHint: '从用户入口写到终态，含失败与缺配置时的可见反馈。',
+    fixHint: '从入口写到终态，含主链路、状态流转与失败语义。',
   },
   pending: {
     id: 'pending',
@@ -257,35 +260,173 @@ export const SECTION_DEFS = Object.freeze({
     core: false,
     fixHint: '可通过 doc-plan.mjs clarify 追加已确认要求。',
   },
+
+  // ── TDD 主干与自适应可选章节（与 docs-tdd.md / tdd-shape.mjs 对齐）────
+  'doc-info': {
+    id: 'doc-info',
+    label: '文档信息',
+    keywords: ['文档信息', '文档说明', 'doc info', 'metadata', 'version'],
+    evidence: [/(?:文档版本|版本号|最近更新|编制日期|更新日期)/, /(?:基线|适用范围|关联工程契约)/],
+    core: false,
+    fixHint: '说明文档版本、编制日期、基线依据与运行环境；自定义精简 TDD 可在 omit_sections 中豁免。',
+  },
+  background: {
+    id: 'background',
+    label: '定位、背景与非目标',
+    keywords: ['背景', '非目标', '范围', '定位', '研究问题', 'overview', 'scope', 'background', 'positioning'],
+    evidence: [
+      /(?:核心定位|解决的核心问题|研究问题|服务对象)/,
+      /(?:非目标|明确不做|不承担|不在本文范围)/,
+      /(?:架构目标|关键取舍)/,
+    ],
+    core: true,
+    fixHint: '说清本系统定位、核心目标与明确不承担的边界（Non-Goals）。',
+  },
+  arch: {
+    id: 'arch',
+    label: '系统架构与边界',
+    keywords: ['架构全景', '系统架构', '架构设计', '架构', 'architecture', '模块', '组件', '边界', '设计方案'],
+    evidence: [
+      /(?:模块|目录|组件)[^\n]{0,20}(?:职责|边界|依赖)/,
+      /(?:arch-rules|分层禁引|依赖方向)/,
+      /(?:入口文件|entrypoint|Feature\s*Map)/i,
+      /\|\s*(?:模块|组件|层次|层级)\s*\|/,
+    ],
+    core: true,
+    fixHint: '列清核心模块/组件边界、依赖方向与入口位置。',
+  },
+  build: {
+    id: 'build',
+    label: '构建与验证链路',
+    keywords: ['构建', '测试', '发布链路', '验证', '门禁', 'build', 'verify', 'verification', 'experiment'],
+    evidence: [
+      /(?:quick-test|full-test|smoke-verify|merge-gate|构建|单测|测试|验证|复现)[^\n]{0,30}(?:命令|脚本|步骤|判定|流程)/i,
+      /(?:npm\s+test|pytest|cargo\s+test|go\s+test|node\s+scripts)/i,
+    ],
+    core: true,
+    fixHint: '给出真实的构建、测试、冒烟验证命令或实验复现判定方式。',
+  },
+  invariants: {
+    id: 'invariants',
+    label: '核心不变量与安全红线',
+    keywords: ['不变量', '安全红线', '红线', 'invariant'],
+    evidence: [/(?:不变量|invariant)/i, /(?:安全红线|破坏即事故|零容忍)/, /(?:单一真相源|原子写入|幂等)/],
+    core: false,
+    fixHint: '写清系统在任何路径下不得破坏的不变量与安全红线。',
+  },
+  stack: {
+    id: 'stack',
+    label: '技术栈选型',
+    keywords: ['技术栈', '栈选型', 'stack'],
+    evidence: [/(?:运行时|核心框架|工程结构)/],
+    core: false,
+    fixHint: '列清运行时下限与关键依赖边界。',
+  },
+  integration: {
+    id: 'integration',
+    label: '外部集成与依赖边界',
+    keywords: ['外部集成', '依赖边界', 'integration'],
+    evidence: [/(?:外部系统|交互方式|失败语义)/],
+    core: false,
+    fixHint: '列清外部系统的调用方式与失败退化语义。',
+  },
+  security: {
+    id: 'security',
+    label: '安全与权限边界',
+    keywords: ['安全与权限', '安全边界', 'security'],
+    evidence: [/(?:权限|鉴权|凭据|校验方式)/],
+    core: false,
+    fixHint: '说明权限校验与不可信输入处置边界。',
+  },
+  data: {
+    id: 'data',
+    label: '数据模型与持久化契约',
+    keywords: ['数据模型', '持久化', '数据与实验', 'data'],
+    evidence: [/(?:持久化|schema|数据表|存储载体|数据集)/i],
+    core: false,
+    fixHint: '说明关键数据结构、存储介质与变更约定。',
+  },
+  api: {
+    id: 'api',
+    label: '对外接口与交互时序',
+    keywords: ['对外接口', '接口与交互', 'api'],
+    evidence: [/(?:接口|endpoint|子命令|路由)/i],
+    core: false,
+    fixHint: '说明对外接口、参数与错误返回约定。',
+  },
+  deploy: {
+    id: 'deploy',
+    label: '部署与环境差异',
+    keywords: ['部署与环境', '部署', 'deploy'],
+    evidence: [/(?:部署|容器|环境变量|运行时环境)/],
+    core: false,
+    fixHint: '写清环境差异与部署拓扑。',
+  },
+  perf: {
+    id: 'perf',
+    label: '性能与容量基线',
+    keywords: ['性能与容量', '性能基线', 'perf'],
+    evidence: [/(?:吞吐|延迟|P95|容量|预算)/i],
+    core: false,
+    fixHint: '给出可实测的性能指标与基线条件。',
+  },
+  frontend: {
+    id: 'frontend',
+    label: '前端与交互层',
+    keywords: ['前端与交互', '前端', 'frontend'],
+    evidence: [/(?:组件|样式|路由|可访问性)/],
+    core: false,
+    fixHint: '说明前端架构、状态流与构建产物目录。',
+  },
+  observability: {
+    id: 'observability',
+    label: '可观测性与运维',
+    keywords: ['可观测性', '运维', 'observability'],
+    evidence: [/(?:日志|指标|追踪|告警)/],
+    core: false,
+    fixHint: '说明日志、指标与故障排查入口。',
+  },
+  migration: {
+    id: 'migration',
+    label: '迁移与兼容策略',
+    keywords: ['迁移与兼容', '迁移', 'migration'],
+    evidence: [/(?:迁移|兼容期|回滚演练)/],
+    core: false,
+    fixHint: '写清存量数据或旧接口迁移步骤。',
+  },
+  decisions: {
+    id: 'decisions',
+    label: '关键决策记录',
+    keywords: ['关键决策', '决策记录', 'decisions'],
+    evidence: [/(?:备选方案|为什么选它|重新考虑)/],
+    core: false,
+    fixHint: '记录关键架构取舍及推翻条件。',
+  },
+  'glossary-only': {
+    id: 'glossary-only',
+    label: '已知限制与技术债',
+    keywords: ['已知限制', '技术债', 'limitations'],
+    evidence: [/(?:已知缺陷|妥协|触发条件)/],
+    core: false,
+    fixHint: '如实记录已知限制与触发治理条件。',
+  },
 })
 
 export const DEFAULT_OPTIONAL_SECTIONS = Object.freeze({
   prd: Object.freeze([]),
   spec: Object.freeze([]),
   todo: Object.freeze([]),
+  tdd: Object.freeze(['doc-info', 'flow', 'invariants']),
 })
 
 const CUSTOM_DECL_REL = Object.freeze({
   prd: ['docs/templates/prd.md', 'docs/templates/prd-template.md', '.github/prd-template.md'],
   spec: ['docs/templates/spec.md', 'docs/templates/spec-template.md', '.github/spec-template.md'],
   todo: ['docs/templates/todo.md', 'docs/templates/todo-template.md', '.github/todo-template.md'],
+  tdd: ['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', '.github/tdd-template.md', '.github/tdd_template.md'],
 })
 
-/**
- * 读项目自己声明的章节要求。
- *
- * 约定写在自定义模板的 frontmatter 里：
- *
- * ```yaml
- * ---
- * required_sections: [door]        # 额外要求（不能包含主干，它已经强制）
- * omit_sections: [door]            # 这类项目不需要的章节
- * ---
- * ```
- *
- * 读不出来就返回 null——**不抛错也不阻塞**：一个写坏的声明不该让整个文档链停摆。
- */
-function readProjectDeclaration(repoRoot, kind) {
+export function readProjectDeclaration(repoRoot, kind) {
   const candidates = CUSTOM_DECL_REL[kind] ?? []
   for (const rel of candidates) {
     const abs = join(repoRoot, rel)
@@ -301,12 +442,18 @@ function readProjectDeclaration(repoRoot, kind) {
   return null
 }
 
-/**
- * 这份文档必须有哪几节。
- *
- * 返回值里每项都带 `core: true|false`，调用方据此决定措辞：
- * 主干缺失是「你少回答了根本问题」，可选缺失是「你自己的模板要求了它」。
- */
+function resolveSectionDef(id) {
+  if (SECTION_DEFS[id]) return SECTION_DEFS[id]
+  return {
+    id,
+    label: id,
+    keywords: [id],
+    evidence: [],
+    core: false,
+    fixHint: `补充自定义模板声明的「${id}」节并填写真实内容。`,
+  }
+}
+
 export function resolveDocRequirements(repoRoot, kind) {
   const coreIds = FORM_INDEPENDENT_CORE[kind] ?? []
   const decl = repoRoot ? readProjectDeclaration(repoRoot, kind) : null
@@ -325,7 +472,7 @@ export function resolveDocRequirements(repoRoot, kind) {
   return {
     kind,
     source: decl ? `项目声明（${decl.rel}）` : '工具默认',
-    sections: ids.map((id) => SECTION_DEFS[id]).filter(Boolean),
+    sections: ids.map((id) => resolveSectionDef(id)).filter(Boolean),
     omit: omitIds,
   }
 }
@@ -418,10 +565,11 @@ export function resolveSectionPresence(text, docRequirements) {
 
   // 证据一：标题命中关键字（弱证据，但命中即认）
   for (const [title, sectionBody] of byTitle.entries()) {
+    const lowTitle = title.toLowerCase()
     for (const id of ids) {
-      const def = SECTION_DEFS[id]
+      const def = resolveSectionDef(id)
       if (!def || found.has(id)) continue
-      if (def.keywords.some((k) => title.includes(k))) found.set(id, { body: sectionBody, via: 'title' })
+      if (def.keywords.some((k) => lowTitle.includes(String(k).toLowerCase()))) found.set(id, { body: sectionBody, via: 'title' })
     }
   }
 

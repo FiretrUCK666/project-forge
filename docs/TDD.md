@@ -105,15 +105,15 @@ flowchart LR
 | `kit/skills/templates/` | 产品层 | 四层工程文档母版（TDD 与 prd/spec/todo），生成器直接读它们且只有这一份 |
 | `scripts/equip-ci.mjs` | 产品层 | 按勘察事实把 `templates/ci-check.yml` / `ci-release.yml` 落盘（已有工作流拒绝覆盖，非 GitHub 远端直接退出） |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 全目录核验原子自更新（支持代理/`GH_TOKEN`/回滚）与双语 README 目录同步 |
-| `scripts/lib/` | 产品层 | 首次配置/升级/交棒专用库（含安装期模板与渲染、`scripts/lib/platform/` 平台适配器层：`index.mjs`、`registry.mjs`、`github.mjs`、`github-probe.mjs`、`github-client.mjs`） |
-| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（含 `doc-requirements.mjs` 文档必须有什么的单一真相源、`doc-template-render.mjs` 模板渲染、`doc-shape.mjs` 规划文档实时形态探测与跳过校验、`doc-substantive.mjs` 核心实质性校验与跨轮退化快照比对、`doc-frontmatter.mjs` Frontmatter 解析与原子更新、`doc-comments.mjs` 协同评论渲染、`tdd-shape.mjs` 与 `tdd-facts.mjs` 文档形态判定、`criteria-lock.mjs` 验收标准冻结、`critique-rounds.mjs` 规划审核范围、`handoff-package.mjs` 交接包（内置 `git-status-fast.mjs` 状态与 Worktree 快速探针，`shared.mjs` 汇总导出 `cli.mjs`、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`workflow-policy.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs`） |
-| `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测） |
-| `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs` 并支持 `clarify`/`--no-prune`/`--prd`，配合 `doc-audit.mjs` 与 `kit/skills/dev-plan/scripts/triage-rules.mjs`） |
-| `kit/skills/dev-flow/` | 产品层 | 隔离流转、并行调度与堆叠同步（`flow.mjs`、`flow-next.mjs`、`flow-inspect.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs`、`flow-cleanup.mjs`、`flow-sync.mjs`、`flow-batch.mjs`、`flow-trial-merge.mjs`、`worktree-deps.mjs`） |
+| `scripts/lib/` | 产品层 | 首次配置/升级/交棒专用库（含 `survey-questions.mjs` 问题与 `needsHuman`、`review-helpers.mjs` CLI/治理 PRD 覆盖率检查、`artifact-executors.mjs` 执行者对照、`scripts/lib/platform/` 平台适配器层：`index.mjs`、`registry.mjs`、`github.mjs`、`github-probe.mjs`、`github-client.mjs`） |
+| `kit/skills/lib/` | 产品层 | 自包含正交运行内核（含 `doc-requirements.mjs` 自定义与不可豁免核心真相源、`doc-template-render.mjs` 模板渲染、`doc-shape.mjs` 规划文档实时形态探测与跳过校验、`doc-substantive.mjs` 核心实质性校验与跨轮退化快照比对、`doc-frontmatter.mjs` Frontmatter 解析与原子更新、`doc-comments.mjs` 协同评论渲染、`doc-verify.mjs` 只读命令与事实核对、`tdd-shape.mjs` / `tdd-facts.mjs` / `tdd-structure.mjs` / `tdd-scaffold.mjs` 自定义 TDD 形态与主干校验、`criteria-lock.mjs` 验收标准冻结、`critique-rounds.mjs` 规划审核范围、`workflow-helpers.mjs` PR 模板与多任务波次排期、`handoff-package.mjs` 交接包（内置 `git-status-fast.mjs` 状态与 Worktree 快速探针，`shared.mjs` 汇总导出 `cli.mjs`、`exec.mjs`、`git.mjs`、`git-fast.mjs`、`profile.mjs`、`profile-sniffer.mjs`、`static-gates-lexer.mjs`、`static-gates.mjs`、`workflow-policy.mjs`、`ledger.mjs`、`docs.mjs`、`doc-templates.mjs`、`tdd-parity.mjs`、`signals.mjs`、`platform-probe.mjs`、`platform.mjs`、`github-client.mjs`、`task-backend.mjs`、`task-graph.mjs`） |
+| `kit/skills/dev-explore/` | 产品层 | 只读多生态扫描（`kit/skills/dev-explore/scripts/repo-map.mjs`：`git ls-files -z` + 4KB NUL 探测与可选探索记账） |
+| `kit/skills/dev-plan/` | 产品层 | 五档分流、规划生成与内审（`doc-plan.mjs` 导出 `triageTask` / `auditDoc` / `listDocs` 并支持 `clarify`/`critique-scope`/`--no-prune`/`--prd`，配合 `doc-audit.mjs`、`kit/skills/dev-plan/scripts/doc-audit-repo.mjs` 与 `kit/skills/dev-plan/scripts/triage-rules.mjs`） |
+| `kit/skills/dev-flow/` | 产品层 | 隔离流转、并行调度与堆叠同步（`flow.mjs`、`flow-next.mjs`、`flow-inspect.mjs`、`flow-explore.mjs`、`flow-lifecycle.mjs`、`flow-lifecycle-helpers.mjs`、`flow-merge.mjs`、`flow-cleanup.mjs`、`flow-sync.mjs`、`flow-batch.mjs`、`flow-trial-merge.mjs`、`worktree-deps.mjs`） |
 | `kit/skills/dev-review/` | 产品层 | 外部 PR 安全扫描、审查槽同步、先实证后读 diff 门禁（`check-empirical` / `check-fault` 护航 `--include-diff`）、六锁硬拦截与双门双写（`review-pack.mjs`、`kit/skills/dev-review/scripts/review-empirical.mjs`、`kit/skills/dev-review/scripts/review-empirical-state.mjs`、`review-diff.mjs`、`review-gates.mjs`、`review-locks.mjs`、`review-ledger.mjs`） |
 | `kit/skills/dev-govern/` | 产品层 | 基线增量审计、测试分层、跨版本采集与复盘补丁（`govern-audit.mjs`、`govern-checks.mjs`、`govern-docs.mjs`、`govern-state.mjs`、`govern-tests.mjs`、`govern-retro.mjs`、`release-prep-lib.mjs`） |
 | `assets/readme/` | 产品层 | 6 张中英双语浅深色安全矢量图（`hero*.svg`、`workflow*.svg`、`architecture*.svg`） |
-| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`scripts/dev/fixtures-doc-depth.mjs`、`scripts/dev/fixtures-doc-triage.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`scripts/dev/fixtures-flow-cleanup.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`scripts/dev/fixtures-onboarding.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
+| `scripts/dev/` | 自用层 | 门禁与夹具矩阵：`preflight.mjs`、`preflight-contracts.mjs`、`preflight-suite.mjs`、`preflight-e2e.mjs`、`gap-coverage.mjs`、`fixtures.mjs`（调度 `fixtures-claims.mjs`、`fixtures-contracts.mjs`、`fixtures-core.mjs`、`fixtures-docs.mjs`、`scripts/dev/fixtures-doc-depth.mjs`、`scripts/dev/fixtures-doc-triage.mjs`、`fixtures-equip.mjs`、`fixtures-explore.mjs`、`fixtures-flow.mjs`、`scripts/dev/fixtures-flow-cleanup.mjs`、`fixtures-git-fast.mjs`、`fixtures-govern.mjs`、`fixtures-helpers.mjs`、`scripts/dev/fixtures-issue50.mjs`、`scripts/dev/fixtures-onboarding.mjs`、`fixtures-flow-state.mjs`、`fixtures-flow-parallel.mjs`、`fixtures-review-govern.mjs`、`fixtures-platform.mjs`、`fixtures-review.mjs`、`scripts/dev/fixtures-review-empirical.mjs`、`fixtures-survey.mjs`）、`verify-injections.mjs`、`injections-data.mjs`、`bench.mjs`、`evidence.mjs`、`e2e-zip-harness.mjs` |
 
 ### 共享内核模块职责（`scripts/lib/` 与 `kit/skills/lib/`）
 
@@ -135,6 +135,9 @@ flowchart LR
 | `scripts/lib/survey-reentry.mjs` | 套件现状、自有技能与重入漂移检测 | `isReentryProject`、`detectKit`、`detectLocalSkills`、`detectTddStalePaths`、`detectStaleAgentScripts` |
 | `scripts/lib/survey-plan.mjs` | 探索分片策略与装配档位推荐 | `computeExplorationStrategy`、`computeRecommendedTier` |
 | `scripts/lib/survey-gap-rules.mjs` | 勘察的缺口判据表 | `GAP_RULES`；由 `survey.mjs` 的 `judgeGaps` 展开，`gap-coverage.mjs` 核对覆盖 |
+| `scripts/lib/artifact-executors.mjs` | `artifactPlan` 执行者对照表 | `ARTIFACT_EXECUTORS`、`NON_CREATE_ARTIFACT_ACTIONS`、`findUnexecutableArtifacts`（覆盖 11 项产物 `create` 执行入口，跳过 `optional`/`upgrade` 等非新建动作） |
+| `scripts/lib/survey-questions.mjs` | 勘察问句规则、`needsHuman` 与成熟度判定 | `QUESTION_RULES`、`judgeMaturity`、`judgeGaps`、`summarizeNeedsHuman`、`hasDecision`、`decisionValue`（与 `computeArtifactPlan` 共同读取 `AGENTS.md` `## 取舍` 并输出 `NEEDS_HUMAN`） |
+| `scripts/lib/review-helpers.mjs` | 体检 CLI 解析、结果汇总与治理 PRD 覆盖核查 | `parseReviewCliArgs`、`summarizeReviewResults`（输出 `git.capabilities`）、`checkGovernancePrdCoverage`（校验治理 PRD 的 `C*` 覆盖 `artifactPlan`） |
 | `scripts/lib/platform/index.mjs` | 安装期平台探测统一门面 | 汇总导出 `probePlatformEnv`、`normalizeGitHubRepo`、`listHostingProviders`、`classifyWorkspaceIdentity` 等适配接口 |
 | `scripts/lib/platform/registry.mjs` | 平台抽象注册表与多远端拓扑模型 | `registerHostingProvider`、`resolveRemotesTopology`、`GENERIC_GIT_PROVIDER`、`classifyTopologyIdentity` |
 | `scripts/lib/platform/github.mjs` | GitHub 适配器入口 | `GITHUB_PROVIDER`、`probeGitHubEnv`、`resolveWorkspaceIdentity`、`createGitHubClient` |
@@ -280,9 +283,9 @@ flowchart TD
 
 | 技能 | 负责阶段 | 核心脚本 | 权限边界与关键产出 |
 | --- | --- | --- | --- |
-| `dev-explore` | 1. 需求侦察与定位 | `repo-map.mjs` | **只读，不写业务代码**。识别语言、验证命令、可复用模块与 `Feature Map` |
-| `dev-plan` | 2–3. 澄清、定档与方案内审 | `doc-plan.mjs`、`doc-audit.mjs` | 多轮澄清待拍板项；按 Case 1–5 建 PRD/SPEC/Todo（`C1..Cn`），走不可自审的独立 Critique |
-| `dev-flow` | 4–5 与 7–8. 隔离开发、实证、合并与清理 | `flow.mjs`、`flow-batch.mjs`、`worktree-deps.mjs` | 建 `.worktrees/impl-*`（谁改谁认领并提 PR），`finalize` 归档、`verify` 记实证、试合推进主干与 7 步清理 |
+| `dev-explore` | 1. 需求侦察与定位 | `repo-map.mjs` | **只读，不写业务代码**。识别语言、验证命令、可复用模块与 `Feature Map`；可向账本写入 `explored` 探索证据 |
+| `dev-plan` | 2–3. 澄清、定档与方案内审 | `doc-plan.mjs`、`doc-audit.mjs`、`doc-audit-repo.mjs` | 多轮澄清待拍板项；按 Case 1–5 建 PRD/SPEC/Todo（`C1..Cn`），治理需求强制 PRD，`critique-scope` 与不可自审且 Round 2+ 换人的独立 Critique |
+| `dev-flow` | 4–5 与 7–8. 隔离开发、实证、合并与清理 | `flow.mjs`、`flow-explore.mjs`、`flow-lifecycle-helpers.mjs`、`flow-batch.mjs`、`worktree-deps.mjs` | 建 `.worktrees/impl-*`（谁改谁认领并提 PR），`explore` 记探索证据、`finalize` 强阻断未同步 TDD 并归档、`verify` 记实证、试合推进主干与 7 步清理 |
 | `dev-review` | 6. 独立双门审查与停损 | `review-pack.mjs` | 外部 PR 先扫投毒；用独立 `review-*` 槽跑行为/结构双门与故障注入，Round 2+ 换新上下文并受六锁约束 |
 | `dev-govern` | 巡检与事后复盘（独立于单次流转，反哺规划） | `govern-audit.mjs` | 运行期信号自动记入 `signals.jsonl`；平时随时审计死链/死代码/假测试/过期 Worktree，`retro` 输出规则补丁 |
 
@@ -347,8 +350,8 @@ flowchart TD
 
 - **澄清机制与规划边界**：`dev-plan` 支持一次解析多个 Issue/PR 链接，需求跨多模块或复杂度较高时主动建议先建总控 PRD，经多轮提问消解全部待拍板事项后再冻结 `C*` 并创建文档；尊重目标仓自有的文档模板：约定放在 docs 下的 templates 目录，或以 template 结尾的 .github 文件；`critique-pass` 硬拒自审（`SELF_CRITIQUE_REJECTED`）；若 `impl` 工作树已创建则直接落盘其中。
 - **Worktree 隔离、权责归属与槽复用**：`flow-inspect.mjs` 在仓库有提交历史时统一创建 `.worktrees/impl-<taskId>`（仅 0 提交且非并行的仓原地开分支），同一任务跨轮最多复用 1 个 `impl` 槽与 1 个 `review` 槽；`start`/`sync`/`submit`/`review-diff` 推进时以 `{ mode: 'deps' }` 调用 `unmountSharedDeps` 先解绑再同步并重挂载，同时通过 `recordMountedDepsInLedger` 把实际挂载路径写入账本 `mountedDeps` 与 `mountedDepsByWorktree`。`worktree-deps.mjs` 默认走 `mode: 'cleanup'` 删穿保护（`scanOutboundLinks` 全深度 `lstat().isSymbolicLink()` 遍历，越界 `depth > 24` fail-closed 报 `scan-truncated`），`flow-cleanup.mjs`（含 `cleanup` 与 `abort`）删前校验 `git worktree list` 注册状态、自动放行账本 `mountedDeps`（回执逐条列出 `{ path, target, source }` 并标明「工具挂载，自动解绑」）、对未登记/悬空（`unresolved-target`）/截断链接与被跟踪外链以 `EXIT_POLICY_BLOCK` 阻断（支持 `--allow-outbound` 逐条放行）并在删除前先解绑内部 junction；**谁改代码谁认领并负责 `finalize`/`verify`/`submit` 及 PR/Issue 评论**（`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 阻止协调者代提 PR）；本地合并通过 `flow-trial-merge.mjs` 在 `.worktrees/.tmp-merge-*` 临时试合（`cleanupTrialWorktree` 先 `mode: 'deps'` 解绑且禁止吞错强删）确认全绿后再 `ff-only` / CAS 更新主干。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理实施。
-- **单入口路由、三正交策略与结构化评论**：`flow-next.mjs`（`flow.mjs next [--probe-auth]`）统一判断下一合法动作及执行角色（`ownerRole`），并按需从远端 `pf-state` 恢复轮次；`workflow-policy.mjs` 依据真实 `baseSha..HEAD` 差异判定 `low`/`medium`/`high` 风险策略并核验 `<gitCommonDir>/project-forge-flow/tasks/<taskId>/evidence.json`（禁止 `quick --target` 顶替全量、禁止 `submit` 后工作区变脏）；`doc-templates.mjs` 统一生成结构化 PR/Issue 审查与流转评论（标题直接以中文结论词开头、附逐条标准对照表与 `delegatedPayloads`）；`finalize --include-master-prd` 允许在总控 PRD 全部勾选后保留原元信息一并归档并写 `archivedPrdFile` 豁免 `do-not-edit`。
-- **六锁硬拦截与多任务协同**：`review-locks.mjs` 代码级强制执行历史停损锁定、同 `HEAD` 复审拦截、Round 2+ 增量 hunk（及 `flow sync` 变基后 `git range-diff`）视野限制、跨文件指纹比对与未清门禁阻断伪 `pass`；Round 2+ 一律新建独立 `review` 子代理。`task-graph.mjs`、`flow-sync.mjs` 与 `flow-batch.mjs` 提供外部阻塞图谱、堆叠分支同步、并行切片互斥规划（`withFileLock` / `computeWorktreeEnv`）与 FIFO 合并队列。
+- **单入口路由、三正交策略与结构化评论**：`flow-next.mjs`（`flow.mjs next [--probe-auth]`）统一判断下一合法动作及执行角色（`ownerRole`），对缺 `explored` 证据的任务先路由至 `needs-explore`（`flow explore`），多未闭环任务附带 `workflow-helpers.mjs` 计算的多波次 `wavePlan`，并按需从远端 `pf-state` 恢复轮次；`workflow-policy.mjs` 依据真实 `baseSha..HEAD` 差异判定 `low`/`medium`/`high` 风险策略并核验 `<gitCommonDir>/project-forge-flow/tasks/<taskId>/evidence.json`（禁止 `quick --target` 顶替全量、禁止 `submit` 后工作区变脏）；`doc-templates.mjs` 统一生成结构化 PR/Issue 审查与流转评论（标题直接以中文结论词开头、附逐条标准对照表与 `delegatedPayloads`）；`flow-lifecycle.mjs` 对未同步的 `tddSyncWarning` 在归档前阻断（`--no-tdd` / `AGENTS.md` `no-tdd` 可显式豁免），`finalize --include-master-prd` 允许在总控 PRD 全部勾选后保留原元信息一并归档并写 `archivedPrdFile` 豁免 `do-not-edit`。
+- **六锁硬拦截与多任务协同**：`review-locks.mjs` 代码级强制执行历史停损锁定、同 `HEAD` 复审拦截、Round 2+ 增量 hunk（及 `flow sync` 变基后 `git range-diff`）视野限制、跨文件指纹比对与未清门禁阻断伪 `pass`；`review-gates.mjs` `assessStructuralGate` 在空 diff 时返回 `nothing-to-review`；Round 2+ 一律新建独立 `review` 子代理。`task-graph.mjs`、`flow-sync.mjs` 与 `flow-batch.mjs` 提供外部阻塞图谱、堆叠分支同步、并行切片互斥规划（`withFileLock` / `computeWorktreeEnv`）与 FIFO 合并队列。
 - **治理扫描、文档死链与规则下沉**：`static-gates-lexer.mjs` 与 `static-gates.mjs` 执行多语言词法剥离并检测断言缺失、纯 Mock 自证及 CI 删步退化；`govern-docs.mjs` 在 `docs/archive/` 中跳过历史归档链接，持续拦截活跃文档死链；`tdd-parity.mjs` 检查模块、导出或 CLI 变更是否漏改架构文档；`flow verify`/`review-pack record`/`flow rework` 自动向 `<gitCommonDir>/project-forge-govern/signals.jsonl` 记账，由 `govern-audit.mjs retro` 生成可落盘的规则补丁。
 
 ### CLI 入口速查表
@@ -362,8 +365,8 @@ flowchart TD
 | `scripts/review.mjs` / `handoff.mjs` | 交付成熟度体检与交棒净度扫描 | `review.mjs .` / `handoff.mjs . --verify` |
 | `scripts/update.mjs` / `sync-toc.mjs` | 压缩包原子自更新与双语目录同步 | `update.mjs --check` / `sync-toc.mjs --check` |
 | `.agents/skills/dev-explore/scripts/repo-map.mjs` | 全深度源码拓扑与 `Feature Map` 扫描 | `[dir] [--focus <subDir>] [--json]` |
-| `.agents/skills/dev-plan/scripts/doc-plan.mjs` | 五档分流、模板生成、审计与归档 | `triage \| init \| audit \| critique-pass \| approve \| archive --include-master-prd` |
-| `.agents/skills/dev-flow/scripts/flow.mjs` | 全生命周期隔离流转与并行状态机 | `next \| inspect \| start \| claim \| finalize --include-master-prd \| verify \| submit \| rework \| sync \| merge \| cleanup \| batch` |
+| `.agents/skills/dev-plan/scripts/doc-plan.mjs` | 五档分流、模板生成、审计与归档 | `triage \| init \| audit \| critique-scope \| critique-pass \| approve \| archive --include-master-prd` |
+| `.agents/skills/dev-flow/scripts/flow.mjs` | 全生命周期隔离流转与并行状态机 | `next \| inspect \| start \| claim \| explore \| finalize --include-master-prd \| verify \| submit \| rework \| sync \| merge \| cleanup \| batch` |
 | `.agents/skills/dev-review/scripts/review-pack.mjs` | 审查打包、供应链扫描、双门六锁记账 | `--task \| --pr --untrusted-scan \| --local \| record \| override` |
 | `.agents/skills/dev-govern/scripts/govern-audit.mjs` | 静态体检、Worktree 巡检、复盘与发版筹备 | `audit \| reconcile \| plan \| record \| cluster \| sample \| retro \| release-prep` |
 
@@ -372,9 +375,9 @@ flowchart TD
 | 层级 | 路径或母版载体 | 定位与生命周期控制 |
 | --- | --- | --- |
 | 入口契约层 | `AGENTS.md`、`templates/agents-project.md` | 保留意图路由、总纲、7 键 `Dev Profile`、高风险/联动表与协作防呆细则（`lightweight < 14KB`，`full <= 30KB`） |
-| 常青架构层 | `docs/TDD.md`、`kit/skills/templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图 |
+| 常青架构层 | `docs/TDD.md`、`kit/skills/templates/docs-tdd.md` | 顶部 `## 文档信息` 表、技术基线、模块表、`arch-rules`、`Feature Map` 与短名 Mermaid 图；支持目标仓通过 TDD 模板声明按 `omit_sections`/`required_sections` 裁剪扩展并锁定定位、架构边界、构建验证三大不可豁免核心 |
 | 需求基线层 | `kit/skills/templates/docs-prd.md`、`docs/prd/` | YAML Frontmatter + 顶部元信息表 + 冻结 `C1/C2`；`docs.mjs` `isSharedMasterPrd` 保护 `1:N` 总控 PRD 维持 `active` 直至子 SPEC 全部完结才归档 |
-| 规格与任务单层 | `kit/skills/templates/docs-spec.md`、`docs/specs/`、`kit/skills/templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表；`doc-templates.mjs` 统一 `prd`/`spec`/`todo` 结构，随 `finalize` / `archive` 成对归档 |
+| 规格与任务单层 | `kit/skills/templates/docs-spec.md`、`docs/specs/`、`kit/skills/templates/docs-todo.md`、`docs/todo/` | YAML Frontmatter + 顶部元信息表；`doc-templates.mjs` 统一 `prd`/`spec`/`todo` 结构，`docs.mjs` `isCompatibleActiveSibling` 区分同 `slug` 不同任务文档，随 `finalize` / `archive` 成对归档 |
 
 - **Mermaid 纯字符显示宽度硬上限**：普通矩形与分组标题单行 `<= 16` 单位，菱形与边标签 `<= 12` 单位，严禁 HTML 标签；校验集中于 `kit/skills/lib/doc-templates.mjs`（经 `docs.mjs` 与 `shared.mjs` 导出 `checkMermaidLabelWidth`，按图表类型分流覆盖 `flowchart`/`graph`、`sequenceDiagram`、`stateDiagram`/`stateDiagram-v2` 与 `erDiagram`）。
 

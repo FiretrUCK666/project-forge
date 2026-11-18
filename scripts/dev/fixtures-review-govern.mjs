@@ -12,7 +12,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readZip, stripCommonPrefix, writeZip } from '../zip.mjs'
-import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
 
 const FIXTURES_M4_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -467,6 +467,7 @@ export function registerReviewGovernCases(cases) {
       }
 
       await handleStart({ task: 'c3-t', case: '2', slug: 'c3-t', implementer: 'alice' }, roots)
+      await seedExploredFor(dir, 'c3-t')
       const wt = join(dir, '.worktrees', 'impl-c3-t')
       writeFileSync(join(wt, 'src/app.mjs'), 'export const app = 2\n')
       gitCommitFast(wt, 'change app', { files: ['src/app.mjs'], name: 'alice', email: 'alice@acme.test' })

@@ -17,19 +17,20 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+const SUBCOMMANDS = ['inspect', 'next', 'explore', 'start', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
 
 function printHelp() {
   process.stdout.write([
     '用法：node .agents/skills/dev-flow/scripts/flow.mjs <子命令> [选项]',
     '',
-    '子命令（next/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
+    '子命令（next/explore/claim/release/finalize/verify/submit/rework/sync/merge/cleanup/status/abort 支持自动推断 --task）：',
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--probe-auth] [--json]',
+    '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
-    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--include-master-prd] [--json]',
+    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--json]',
     '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--visual-checked] [--human-approved] [--json]',
     '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
@@ -54,16 +55,16 @@ async function main(argv) {
         'keep-branch', 'keep-worktree', 'only-review-worktree', 'keep-local-branch', 'keep-remote-branch',
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
-        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff',
+        'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'visual-evidence', 'title', 'body',
-        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot',
+        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
       ],
       multiFlags: ['rebut', 'allow-outbound'],
-      usageHint: 'flow.mjs <inspect|next|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
+      usageHint: 'flow.mjs <inspect|next|explore|start|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -116,6 +117,10 @@ async function main(argv) {
     if (sub === 'next') {
       const { handleNext } = await import('./flow-next.mjs')
       return (await handleNext(opts, roots)).exitCode
+    }
+    if (sub === 'explore') {
+      const { handleExplore } = await import('./flow-explore.mjs')
+      return (await handleExplore(opts, roots)).exitCode
     }
     if (sub === 'start') {
       const { handleStart } = await import('./flow-inspect.mjs')

@@ -175,16 +175,31 @@ export function detectTddShapes(facts = {}) {
   return { enabled, reasons }
 }
 
+import { FORM_INDEPENDENT_CORE } from './doc-requirements.mjs'
+
 /**
  * 把形状开关翻成「模板里该删哪几节」。
  *
- * 只删**模板声明为 optional 且当前没开**的节；主干节永远不在这里出现。
+ * 只删**模板声明为 optional 且当前没开**的节，或项目声明 `omit_sections` 明确豁免的非核心节；
+ * `FORM_INDEPENDENT_CORE.tdd` 三项主干节永远不在这里出现。
  */
-export function tddDropSections(shape) {
+export function tddDropSections(shape, { omit = null, required = null } = {}) {
+  const core = new Set(FORM_INDEPENDENT_CORE.tdd ?? [])
+  const omitSet = omit instanceof Set ? omit : new Set(Array.isArray(omit) ? omit : [])
+  const reqSet = required instanceof Set ? required : new Set(Array.isArray(required) ? required : [])
   const drop = new Set()
   for (const def of TDD_SHAPES) {
+    if (core.has(def.id)) continue
+    if (reqSet.has(def.id)) continue
+    if (omitSet.has(def.id)) {
+      drop.add(def.id)
+      continue
+    }
     if (def.always) continue
-    if (!shape.enabled.has(def.id)) drop.add(def.id)
+    if (!shape?.enabled?.has?.(def.id)) drop.add(def.id)
+  }
+  for (const optId of ['doc-info', 'flow', 'invariants']) {
+    if (!core.has(optId) && omitSet.has(optId) && !reqSet.has(optId)) drop.add(optId)
   }
   return drop
 }

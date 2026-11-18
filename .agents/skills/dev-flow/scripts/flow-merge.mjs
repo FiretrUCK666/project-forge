@@ -11,7 +11,7 @@ import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
+import { hasExploredEvidence, resolveTaskContext, writeTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -65,6 +65,12 @@ export async function assertPreMergeGates({
   if (stZ.entries.length > 0) {
     process.stderr.write('BLOCKED_DIRTY_WORKTREE: 实施工作区存在未提交改动，请先提交并验证后再执行 merge。\n')
     return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_DIRTY_WORKTREE' }
+  }
+  if (ledger.role !== 'inbound-external-pr' && !hasExploredEvidence(ledger)) {
+    const msg = `BLOCKED_NOT_EXPLORED: 任务 ${taskId} 缺少只读探索证据（ledger.explored），请先运行 flow.mjs explore --task ${taskId} 记录后再合并。`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_NOT_EXPLORED', taskId }, null, 2)}\n`)
+    process.stderr.write(`${msg}\n`)
+    return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_NOT_EXPLORED' }
   }
 
   const currentHead = headRes.ok ? headRes.stdout.trim() : null

@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
-import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowParallelCases(cases) {
 cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
@@ -107,6 +107,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
 
     const cStart = await handleStart({ task: 'child-t', slug: 'child', after: 'parent-t', case: '1', implementer: 'dev-a' }, roots)
     if (cStart.exitCode !== 0) return `子任务 --after start 失败：${cStart.exitCode}`
+    await seedExploredFor(dir, 'child-t')
     const cRoot = join(dir, '.worktrees', 'impl-child-t')
     writeFileSync(join(cRoot, 'child-file.mjs'), 'export const c = 1\n')
     gitCommitFast(cRoot, 'feat: child work', { files: ['child-file.mjs'] })
@@ -244,6 +245,7 @@ cases.push(['flow batch plan/disjoint(I68)/merge-queue/resume-session 并行调�
     await handleStart({ task: 'ta', slug: 'ta', case: '1', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
     await handleStart({ task: 'tb', slug: 'tb', case: '1', files: 'src/b.mjs', implementer: 'dev-a' }, roots)
     await handleStart({ task: 'tc', slug: 'tc', case: '1', files: 'src/a.mjs', implementer: 'dev-a' }, roots)
+    await seedExploredFor(dir, 'ta', 'tb', 'tc')
 
     const disjBad = await handleBatch({ _: ['check-disjoint'], tasks: 'ta,tc' }, roots)
     if (disjBad.exitCode !== 3 || disjBad.code !== 'BLOCKED_OVERLAPPING_SLICE_FILES') {

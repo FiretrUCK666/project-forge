@@ -166,6 +166,69 @@ function ledgerMatchesGroup(ledger, members, targetSlug, effectiveIssue) {
   return true
 }
 
+function readDocIdentityMeta(repoRoot, rel) {
+  const fn = parseDocFilename(rel)
+  const raw = readTextSafe(join(repoRoot, rel))
+  const fm = raw ? parseDocFrontmatter(raw) : null
+  const kind = inferDocKindFromPath(rel, fm?.data ?? null)
+  const issueNum = Number(fm?.data?.issue)
+  const prNum = Number(fm?.data?.pr)
+  const issue = fn?.issue ?? (Number.isInteger(issueNum) && issueNum > 0 ? issueNum : null)
+  const pr = Number.isInteger(prNum) && prNum > 0 ? prNum : null
+  const branch = typeof fm?.data?.branch === 'string' && fm.data.branch.trim() && !/^(?:null|none|无)$/i.test(fm.data.branch.trim())
+    ? fm.data.branch.trim()
+    : null
+  const taskId = typeof fm?.data?.task_id === 'string' && fm.data.task_id.trim() && !/^(?:null|none|无)$/i.test(fm.data.task_id.trim())
+    ? fm.data.task_id.trim()
+    : null
+  const related = {}
+  for (const rk of ['related_prd', 'related_spec', 'related_todo']) {
+    const targetRel = resolveRelatedTargetRel(repoRoot, rel, fm?.data?.[rk])
+    if (targetRel && targetRel.startsWith('docs/')) related[rk] = targetRel
+  }
+  return { kind, date: fn?.date ?? null, slug: fn?.slug ?? null, issue, pr, branch, taskId, related }
+}
+
+function isCompatibleActiveSibling(candRel, candMeta, { seedRel, seedMeta, explicitSet, groupIssue, targetDate, byRelMeta }) {
+  if (candRel === seedRel || explicitSet.has(candRel)) return true
+  if (groupIssue && candMeta.issue && candMeta.issue !== groupIssue) return false
+  if (seedMeta) {
+    if (seedMeta.pr && candMeta.pr && candMeta.pr !== seedMeta.pr) return false
+    if (seedMeta.taskId && candMeta.taskId && candMeta.taskId !== seedMeta.taskId) return false
+    if (seedMeta.branch && candMeta.branch && candMeta.branch !== seedMeta.branch) return false
+
+    const linkedSeedToCand = seedRel && Object.values(candMeta.related).includes(seedRel)
+    const linkedCandToSeed = Object.values(seedMeta.related).includes(candRel)
+    const explicitlyLinked = Boolean(linkedSeedToCand || linkedCandToSeed)
+    if (!explicitlyLinked) {
+      // 未显式互指时，若对方已绑定另一个明确 Issue 且自己无 Issue 且日期不同，不盲目混并
+      if (!groupIssue && !seedMeta.issue && candMeta.issue && candMeta.date && targetDate && candMeta.date !== targetDate) {
+        return false
+      }
+      // 同一类型（如两份独立活跃 SPEC）重名 slug 在不同日期不得互吞
+      if (seedMeta.kind && candMeta.kind && candMeta.kind === seedMeta.kind) return false
+      // 明确指向其他同类型文档则属于另一件事
+      if (seedMeta.kind && candMeta.related[`related_${seedMeta.kind}`] && candMeta.related[`related_${seedMeta.kind}`] !== seedRel) {
+        return false
+      }
+      if (candMeta.kind && seedMeta.related[`related_${candMeta.kind}`] && seedMeta.related[`related_${candMeta.kind}`] !== candRel) {
+        return false
+      }
+    }
+  }
+  for (const [expRel, expMeta] of byRelMeta.entries()) {
+    if (expRel === candRel) continue
+    if (expMeta.issue && candMeta.issue && candMeta.issue !== expMeta.issue) return false
+    if (expMeta.pr && candMeta.pr && candMeta.pr !== expMeta.pr) return false
+    if (expMeta.taskId && candMeta.taskId && candMeta.taskId !== expMeta.taskId) return false
+    if (expMeta.branch && candMeta.branch && candMeta.branch !== expMeta.branch) return false
+    if (expMeta.kind && candMeta.kind === expMeta.kind && !Object.values(expMeta.related).includes(candRel) && !Object.values(candMeta.related).includes(expRel)) {
+      return false
+    }
+  }
+  return true
+}
+
 function collectSiblingSet(repoRoot, { slugOrPath, includeArchived = false, explicitRels = [], currentIssue = null } = {}) {
   const activeDirs = ['docs/prd', 'docs/specs', 'docs/todo']
   const archiveDirs = ['docs/archive/prd', 'docs/archive/specs', 'docs/archive/todo']
@@ -194,25 +257,59 @@ function collectSiblingSet(repoRoot, { slugOrPath, includeArchived = false, expl
   }
 
   const siblingSet = new Set()
-  if (seedRel && (includeArchived || !seedRel.startsWith('docs/archive/'))) siblingSet.add(seedRel)
+  const explicitSet = new Set()
+  if (seedRel && (includeArchived || !seedRel.startsWith('docs/archive/'))) {
+    siblingSet.add(seedRel)
+    explicitSet.add(seedRel)
+  }
   for (const expRel of explicitRels) {
     const norm = posixPath(expRel)
     if (norm && existsSync(join(repoRoot, norm)) && norm.startsWith('docs/') && (includeArchived || !norm.startsWith('docs/archive/'))) {
       siblingSet.add(norm)
+      explicitSet.add(norm)
     }
   }
 
+  const byRelMeta = new Map()
+  for (const r of explicitSet) byRelMeta.set(r, readDocIdentityMeta(repoRoot, r))
+  const seedMeta = seedRel ? (byRelMeta.get(seedRel) ?? readDocIdentityMeta(repoRoot, seedRel)) : null
+
+  let groupIssue = Number.isInteger(Number(currentIssue)) && Number(currentIssue) > 0 ? Number(currentIssue) : null
+  if (!groupIssue) {
+    for (const rel of explicitSet) {
+      const iss = byRelMeta.get(rel)?.issue ?? docIssueNumber(repoRoot, rel)
+      if (iss) { groupIssue = iss; break }
+    }
+  }
+
+  const slugMatches = []
   // 仅按 slug 匹配活跃目录，绝不以裸 slug 拉入 docs/archive/** 历史同 slug 文档
   for (const rel of allActive) {
     const fn = parseDocFilename(rel)
-    if (fn && targetSlug && fn.slug === targetSlug) {
-      siblingSet.add(rel)
-    } else if (!fn && targetSlug && basename(rel, '.md') === targetSlug) {
-      siblingSet.add(rel)
-    }
+    const matched = (fn && targetSlug && fn.slug === targetSlug)
+      || (!fn && targetSlug && basename(rel, '.md') === targetSlug)
+    if (!matched) continue
+    const candMeta = readDocIdentityMeta(repoRoot, rel)
+    if (!rel.startsWith('docs/archive/') && !isCompatibleActiveSibling(rel, candMeta, { seedRel, seedMeta, explicitSet, groupIssue, targetDate, byRelMeta })) continue
+    slugMatches.push({ rel, meta: candMeta })
   }
 
-  let groupIssue = Number.isInteger(Number(currentIssue)) && Number(currentIssue) > 0 ? Number(currentIssue) : null
+  // 若某个类型在同 slug 活跃区同时存在多个无明确关联文档，只收精确日匹配或已互指者，避免误合并不同任务
+  const byKindCount = new Map()
+  for (const m of slugMatches) {
+    if (!m.meta.kind) continue
+    byKindCount.set(m.meta.kind, (byKindCount.get(m.meta.kind) ?? 0) + 1)
+  }
+  for (const { rel, meta } of slugMatches) {
+    const isLinked = explicitSet.has(rel)
+      || (seedRel && Object.values(meta.related).includes(seedRel))
+      || (seedMeta && Object.values(seedMeta.related).includes(rel))
+    if (!isLinked && meta.kind && (byKindCount.get(meta.kind) ?? 0) > 1) {
+      if (!(targetDate && meta.date === targetDate)) continue
+    }
+    siblingSet.add(rel)
+  }
+
   if (!groupIssue) {
     for (const rel of siblingSet) {
       const iss = docIssueNumber(repoRoot, rel)
@@ -326,7 +423,13 @@ export async function syncDocsLifecycle(repoRoot, {
   slugOrPath, issue, pr, branch, owner, status, approved, implemented, doneAt, planCritique,
   preserveTerminalStatus = false,
 } = {}) {
-  const { siblingSet, allActive, allArchived, seedRel, targetDate, targetSlug } = collectSiblingSet(repoRoot, { slugOrPath })
+  const preIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
+    ? Number(String(issue).replace(/^#/, '').trim())
+    : null
+  const { siblingSet, allActive, allArchived, seedRel, targetDate, targetSlug } = collectSiblingSet(repoRoot, {
+    slugOrPath,
+    currentIssue: Number.isInteger(preIssue) && preIssue > 0 ? preIssue : null,
+  })
 
   const activeSpecRel = [...siblingSet].find((p) => inferDocKindFromPath(p, null) === 'spec')
     ?? (seedRel && inferDocKindFromPath(seedRel, null) === 'spec' ? seedRel : null)

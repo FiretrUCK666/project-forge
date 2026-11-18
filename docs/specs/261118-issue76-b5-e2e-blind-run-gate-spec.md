@@ -30,9 +30,9 @@ critique_anchors: "{\"sections\":{\"goal\":{\"present\":true,\"substantive\":tru
 | 分支 / Issue / PR | 待启动 Wave 5 认领 / `#76` / 未关联 |
 | 负责人 / 内审状态 | `plan-stage-b` / `pending` |
 | 关联 PRD / Todo | [v9 总控 PRD](../prd/261118-v9-stageb-adaptive-architecture-prd.md) / [B5 Todo](../todo/261118-issue76-b5-e2e-blind-run-gate-todo.md) |
-| 认领的验收标准 | `C15`、`C16`、`C17`、`C18` |
+| 认领的验收标准 | `C15`、`C16`、`C17`、`C18`、`C23` |
 
-- **变更一句话**：修补 `GATE_TIER_RANK` 与 `assessBehavioralGate` 的端到端门禁旁路，接入通用「运行 + 观察」回执与 E2E 失败自动建单，补全 `I160–I173` 注入与离线 Scenarios `H–J`，并以 `$TMPDIR` 真实开源仓盲跑及本仓最后一片 `C19` 免参自动收口完成全阶段闭环。
+- **变更一句话**：修补 `GATE_TIER_RANK` 与 `assessBehavioralGate` 的端到端门禁旁路并纳入 `A6` 校验（合并前 `headSha === evidence.headSha === review.headSha`、`executed/succeeded/errorOnly` 三态计分、脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断建单与确定性 CLI 故障注入 Stub），跑通离线与模拟远端 Scenarios `H–J`，并以零提示词（Zero-Hint）全机制主调度组、轻模型对照组与 `$TMPDIR` 多生态真实开源仓（含 `LoopForge-main`）盲跑及最后一片 `C19` 免参收口完成全阶段闭环。
 
 ## 系统变更全景
 
@@ -48,18 +48,18 @@ flowchart LR
 | 模块 / 文件 | 变更性质 | 核心职责 |
 | --- | --- | --- |
 | `kit/skills/lib/workflow-policy.mjs` | 改造 | 保留 7 键 `Dev Profile`，修复 `GATE_TIER_RANK` 下 `full`/`gate` 跳过 `smoke-verify` 缺陷并强校 `e2eObservation` |
-| `kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 改造 | 在 `flow.mjs` 严格 `parseStandardCli` 注册 `--e2e-evidence` 与帮助文案，支持 `verify --e2e-evidence`（兼容 `--visual-checked`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）与入账 |
-| `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 改造 | 修复 `assessBehavioralGate` `!smokeRequired` 逻辑缺陷，清除既有前端驱动工具硬编码文案；缺 E2E 实证阻断 `--include-diff` 与 `pass` |
+| `kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs` | 改造 | 在 `flow.mjs` 严格 `parseStandardCli` 注册 `--e2e-evidence` 与帮助文案，支持 `verify --e2e-evidence`（兼容 `--visual-checked`），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）与输出脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断包桥接 `C12` `escalation.mjs` (new) 建单；合并前强校 `headSha === evidence.headSha === review.headSha` 且工作区无脏改动 |
+| `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 改造 | 修复 `assessBehavioralGate` `!smokeRequired` 逻辑缺陷，清除既有前端驱动工具硬编码文案；缺 E2E 实证阻断 `--include-diff` 与 `pass`；`evidence.json` 拆分 `executed` / `succeeded` / `errorOnly` 三态阻断错路径刷绿；强校三方 `headSha` 一致性 |
 | `scripts/dev/preflight-contract-rules.mjs` (new)、`scripts/dev/preflight-contracts.mjs`、`scripts/dev/injections-data-core.mjs` | 新增 / 改造 | 先抽离常量与收尾校验辅助压降 `preflight-contracts.mjs <= 700` 行，同步迁移 `I7`/`I9c`/`I9f` 注入目标，并加入通用 E2E 与零具体工具名合约检查 |
-| `scripts/dev/fixtures-stageb-loop.mjs` (new)、`scripts/dev/injections-data-stageb.mjs` (new)、`scripts/dev/injections-data.mjs` | 修改 / 新增 | 写入 `C15` 双向用例及覆盖 `C1..C15`/`C19` 的 `I160–I173` 故障注入集合 |
-| `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`scripts/dev/e2e-zip-harness.mjs` | 新增 / 改造 | 在解压 `git archive --format=zip` 黑盒环境下运行 Scenarios `H`、`I`、`J` 全闭环 |
-| `scripts/dev/blind-run-harness.mjs` (new) | 新增 | `$TMPDIR` 隔离真实开源仓（含带自有技能与规则已规范仓 `S1–S4` 升级）极简低提示词盲跑验收器（不入用户包，登记 `docs/TDD.md`） |
+| `scripts/dev/fixtures-stageb-loop.mjs` (new)、`scripts/dev/injections-data-stageb.mjs` (new)、`scripts/dev/injections-data.mjs` | 修改 / 新增 | 写入 `C15`、`C23` 双向用例、确定性零 LLM Node CLI 故障注入 Stub 及覆盖 `C1..C15`/`C19`/`C20–C23` 的 `I160+` 故障注入集合 |
+| `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`scripts/dev/e2e-zip-harness.mjs` | 新增 / 改造 | 在解压 `git archive --format=zip` 黑盒环境下自建本地 HTTP/SSH 模拟远端与凭据，交错运行 Scenarios `H`、`I`、`J`（含无远端迁有远端、PR/Issue 标签前缀、按需 Milestone、双侧停损、`A1–A6` 与 E2E 失败建单） |
+| `scripts/dev/blind-run-harness.mjs` (new) | 新增 | `$TMPDIR` 隔离多生态真实开源仓（含 `LoopForge-main` 同构/自有技能 `S1–S4` 升级）与零提示词（Zero-Hint）全机制主调度组 + 轻模型对照组盲跑验收器（不入用户包，登记 `docs/TDD.md`） |
 | `templates/agents-project.md`、`SKILL.md`、`AGENTS.md`、`docs/TDD.md`、`README.md`、`README.en.md` | 改造 | 替换通用 E2E 实证文案、登记 `blind-run-harness.mjs` (new)（防孤儿报错）、同步双语 README 目录与校准全局体积 |
 
 ## 一、背景与边界声明
 
-- **要改什么**：端到端门禁与策略引擎（`workflow-policy`、`review-gates`、`review-empirical`、`flow-lifecycle`）、`preflight-contracts.mjs` 行数拆分、Stage B 故障注入集（`I160+`）、离线 `zip` E2E Scenarios `H–J`、`$TMPDIR` 真实开源仓盲跑脚本及全仓文档同步。
-- **不改什么**：严禁扩张 `DEV_PROFILE_KEYS` 的 7 个标准键名（复用现有 `smoke-verify:` 键位）；不在任何通用门禁、模板或报错文案中出现具体前端/自动化端到端驱动库或客户端测试框架名称；不在非纯文档仓豁免运行时变更。
+- **要改什么**：端到端门禁与策略引擎（`workflow-policy`、`review-gates`、`review-empirical`、`flow-lifecycle`、`flow-merge`）、`A6` 合前三方 `headSha` 校验 / 三态计分 / 脱敏诊断建单 / 确定性 CLI Stub、`preflight-contracts.mjs` 行数拆分、Stage B 故障注入集（`I160+` 含 `C20–C23` 探针）、离线 `zip` + 模拟 HTTP/SSH 远端 Scenarios `H–J`、零提示词（Zero-Hint）全机制与 `$TMPDIR` 多生态（含 `LoopForge-main`）盲跑脚本及全仓文档同步。
+- **不改什么**：严禁扩张 `DEV_PROFILE_KEYS` 的 7 个标准键名（复用现有 `smoke-verify:` 键位）；不在任何通用门禁、模板或报错文案中出现具体前端/自动化端到端驱动库或客户端测试框架名称；不在非纯文档仓豁免运行时变更；零提示词盲跑 prompt 严禁泄露内部脚本、命令、工作树或角色分工提示。
 - **本期不做**：不将 `scripts/dev/blind-run-harness.mjs` (new) 打进随包分发的 `kit/` 或 `.gitattributes` 导出清单；不在 `$TMPDIR` 盲跑期间向任何外部开源仓库远端执行写操作或推送。
 - **复用既有模块**：复用 `kit/skills/lib/profile.mjs`、`kit/skills/lib/signals.mjs`、`kit/skills/lib/escalation.mjs` (new)（`B4b` 交付）、`scripts/dev/e2e-zip-harness.mjs`、`scripts/dev/verify-injections.mjs`。
 - **架构基线关系**：同时作为 Stage B（`v9`）最后一片实施任务，`B5` 在自收口时直接通过 `flow.mjs finalize --task b5-e2e-blind-run-gate`（不传 `--include-master-prd`）实证 `C19` 与显式 `--include-master-prd` 的等价自动闭合语义。
@@ -73,15 +73,16 @@ flowchart LR
    - **`kit/skills/lib/workflow-policy.mjs`**：当 `runtimeFilesTouched.length > 0`、`riskTier !== 'low'` 且 `Dev Profile` 中 `smoke-verify` 未显式声明 `none` 时：`determineWorkflowPolicy` 与 `validateVerificationEvidence` 禁止以 `full`/`gate`（仅单测）顶替 `smoke`；缺 `smokeVerifiedOnHead` 或缺结构化 `e2eObservation` 时返回 `BLOCKED_INSUFFICIENT_VERIFICATION_TIER` 或 `BLOCKED_E2E_OBSERVATION_REQUIRED`（退出码 `3`）。若用户仓既无真实 `smoke-verify` 命令也未显式写 `smoke-verify: none` 且未传 `--cmd`/`--e2e-evidence`，按 `Q3` 定稿结论阻断并引导补全。
    - **`flow.mjs verify` 与 `review-pack.mjs`**：支持 `--e2e-evidence <text>`（保留 `--visual-checked` 作为别名写入 `e2eObservation`）；E2E 运行失败记录 `e2e.runtime-fail` 事件至 `signals.jsonl` 并由 `escalation.mjs` 创建追踪工单。
    - **`review-gates.mjs` 与 `review-empirical.mjs`**：修复 `assessBehavioralGate` 中 `!smokeRequired` 导致永远不标记 `verified-on-head` 的缺陷，清除既有具体端到端驱动库/工具硬编码文案；在需要 E2E 实证而缺失时阻断 `--include-diff`（`BLOCKED_EMPIRICAL_FIRST`）与 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`）。
-2. **`I160–I173` 故障注入与双向夹具（`C16`）**：
-   - 新增 `scripts/dev/injections-data-stageb.mjs` (new)，注册进 `scripts/dev/injections-data.mjs`，编号从 `I160` 起至 `I173`（覆盖 `C1..C15` 与 `C19` 全部防线被篡改时的必红抓错探针）。
-3. **离线黑盒 `e2e-zip-harness` Scenarios `H–J`（`C17`）**：
-   - 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new)，从 `git archive --format=zip` 解压安装包黑盒执行：
-     - **Scenario H**：纯无远端 `local-only` 起步建单、推进、评审 -> 新增 `origin` 远端 -> 无痛平滑迁单切回远端 -> PR 合入自动关单；
-     - **Scenario I**：代码评审与规划 Critique 双侧跨轮同人拦截、3 轮停损归因包、分级建单与多切片最后一片自动收口；
-     - **Scenario J**：Node+Python 异构仓、非标文档与用户既有 `docs/specs/*` 原样保留、自定义脚本、第 6 个临时内置技能与自有 `skills/*` `S1–S4` 升级、`.githooks/pre-push` 拦直推与全零删分支放行、`generic-git` 及真实非 `0` 端到端失败自动建单修复后复绿。
-4. **`$TMPDIR` 真实开源仓盲跑终验（`C18`）**：
-   - 新增 `scripts/dev/blind-run-harness.mjs` (new)（仅在 `scripts/dev/` 下且登记于 `docs/TDD.md` 防 `checkOrphanScripts` 报错）：克隆隔离真实多生态开源项目（含带项目级自有 Skill 与自定义规范的已规范仓重跑 `S1–S4`）至 `$TMPDIR`（无远端写操作），验证极简低提示词下 `survey -> equip -> compose-agents -> flow -> review` 与实跑对方原生测试全绿；任何新发现的通用架构断点经「建单 -> SPEC/Todo -> 修复 -> 离线夹具/注入沉淀」闭环清零。
+2. **`I160+` 故障注入、确定性 CLI Stub 与 `A6` 校验（`C16`、`C23`）**：
+   - **合并前指纹与三态计分（`A6`）**：`flow-merge.mjs` 与 `review-empirical.mjs` 在合并前强校 `headSha === evidence.headSha === review.headSha` 且工作区无脏改动；`evidence.json` 与盲跑结果计分明确拆分 `executed`、`succeeded` 与 `errorOnly` 三态（阻断空跑或错误分支退出 `0` 刷绿）；`flow.mjs verify` / `review` / E2E 失败自动输出脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断包并桥接 `C12` `escalation.mjs` (new) 自动建单。
+   - **故障注入与确定性 CLI Stub**：新增 `scripts/dev/injections-data-stageb.mjs` (new)，注册进 `scripts/dev/injections-data.mjs`，编号自 `I160` 起覆盖 `C1..C15`、`C19` 及 `C20–C23` 全部核心探针（包含零 LLM 确定性 Node CLI 故障注入 Stub 验证失败降级与退避分支）。
+3. **离线黑盒 `e2e-zip-harness` Scenarios `H–J` 与模拟远端（`C17`、`C23`）**：
+   - 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new)，在解压 `git archive --format=zip` 黑盒环境内启停自建本地 HTTP/SSH 模拟远端与凭据，交错跑通：
+     - **Scenario H**：纯无远端 `local-only` 起步建单、推进、评审 -> 新增 `origin` 远端 -> 无痛平滑迁单切回远端 -> PR/Issue 规范前缀与单表语义标签、按需 Milestone 绑定继承、`A1/A2/A3` 退避与 `alreadyMerged` 续尾 -> PR 合入自动关单；
+     - **Scenario I**：代码评审与规划 Critique 双侧跨轮同人拦截、共享 3 轮硬停损（`STOP_LOSS_ESCALATE`）与结构化恢复包、`artifact_baseline` 防空转、有限冲突块提取、切片 `C*` 隔离/`faultRecord`、`low` 风险可选记录、分级建单与多切片最后一片自动收口；
+     - **Scenario J**：Node+Python 异构仓、非标文档与用户既有 `docs/specs/*` 原样保留、自定义脚本、第 6 个临时内置技能与非隐藏自有 `skills/*`（含 `*/AGENTS.md`、多语配对、`pyproject.toml`/`cmd/*/main.go`、`e2e/` 隔离）`S1–S4` 升级、`.githooks/pre-push` 拦直推与全零删分支放行、`generic-git` 本地兼容追踪及真实非 `0` 端到端失败（`executed/succeeded/errorOnly` + 脱敏诊断包）自动建单修复后复绿。
+4. **零提示词（Zero-Hint）全机制主调度盲测与 `$TMPDIR` 真实开源仓终验（`C18`、`C23`）**：
+   - 新增 `scripts/dev/blind-run-harness.mjs` (new)（仅在 `scripts/dev/` 下且登记于 `docs/TDD.md` 防 `checkOrphanScripts` 报错）：以完全无本仓前置提示词的全新独立子代理纯调度组**及轻/弱模型对照组**执行 Zero-Hint 盲跑，并在 `$TMPDIR` 隔离克隆真实多生态开源项目（Node/Python/Go/Rust 及含自有项目级技能 `LoopForge-main` 同构/自有技能 `S1–S4` 升级，无远端写操作），必测场景覆盖：① **裸粘贴 Issue 链接**（无额外操作词）；② **裸粘贴 PR 链接**（含同源 PR 与 Fork `inbound-external-pr` 链接）；③ **全新异构仓全周期**（「初次接入含 `business-flows`/非标布局/原生测试隔离/自有技能保留」->「Day-2 真实业务开发」->「二次重跑 `S1–S4` 无损升级」）。任何跳过、漏评、漏归档、弱模型跑偏或歧义均走标准 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀进离线回归。
 
 ### 数据与状态变更
 
@@ -97,8 +98,8 @@ flowchart LR
 
 1. 先从 `scripts/dev/preflight-contracts.mjs` 抽离 `scripts/dev/preflight-contract-rules.mjs` (new)，同步更新 `scripts/dev/injections-data-core.mjs`（`I7`/`I9c`/`I9f`），并验证 `preflight.mjs` 与 `verify-injections.mjs` 绿灯。
 2. 修复 `workflow-policy.mjs`、`flow.mjs`（注册 `--e2e-evidence`）、`flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` 及 `templates/agents-project.md`/`SKILL.md` 的通用 E2E 门禁逻辑与文案，并在 `scripts/dev/fixtures-stageb-loop.mjs` (new) 写入 `C15` 双向断言。
-3. 实现 `scripts/dev/injections-data-stageb.mjs` (new)（`I160–I173`）与 `scripts/dev/e2e-scenarios-stageb.mjs` (new)（Scenarios `H–J`）并跑通 `verify-injections.mjs` 与 `e2e-zip-harness.mjs`。
-4. 实现 `scripts/dev/blind-run-harness.mjs` (new) 并完成 `$TMPDIR` 真实开源仓盲跑闭环（若检出问题则在隔离分支走「建单 -> SPEC/Todo -> 修复 -> 夹具/注入沉淀」清零），更新 `docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md` 与 `.agents/skills/`；随后在本分支直接运行 `flow.mjs finalize --task b5-e2e-blind-run-gate`（不传 `--include-master-prd`）实证 `C19` 自动收口与总控 PRD 归档。
+3. 实现 `scripts/dev/injections-data-stageb.mjs` (new)（`I160+` 与零 LLM CLI Stub）与 `scripts/dev/e2e-scenarios-stageb.mjs` (new)（自建模拟 HTTP/SSH 远端交错跑通 Scenarios `H–J`）并跑通 `verify-injections.mjs` 与 `e2e-zip-harness.mjs`。
+4. 实现 `scripts/dev/blind-run-harness.mjs` (new) 与 `flow-merge`/`review-empirical` `A6` 校验，完成 Zero-Hint 全机制（主模型 + 轻模型对照，含裸 Issue/PR 链接及初次接入+Day-2+二次 `S1–S4`）与 `$TMPDIR` 多生态（含 `LoopForge-main`）真实开源仓盲跑闭环（若检出问题则在隔离分支走「`Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge`」清零并沉淀离线回归），更新 `docs/TDD.md`、`README.md`、`README.en.md`、`AGENTS.md` 与 `.agents/skills/`；随后在本分支直接运行 `flow.mjs finalize --task b5-e2e-blind-run-gate`（不传 `--include-master-prd`）实证 `C19` 自动收口与总控 PRD 归档。
 
 ## 三、备选方案与否决理由
 
@@ -111,11 +112,11 @@ flowchart LR
 
 | 文件 / 目录 | 改动性质 | 改什么 | 谁会被影响 |
 | --- | --- | --- | --- |
-| `kit/skills/lib/workflow-policy.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs` | 修改 | 在 `flow.mjs` 注册 `--e2e-evidence`、修复 `full`/`gate` 跳过 `smoke-verify` 漏洞、接入 E2E 回执与失败自动建单 | `flow`、`verify`、`submit`、门禁层 |
-| `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 修改 | 修 `!smokeRequired` 缺陷、清除具体工具硬编码、阻断缺实证 `--include-diff`/`pass` | `dev-review` 双门实证 |
+| `kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/escalation.mjs` (new)、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`flow-lifecycle.mjs`、`flow-merge.mjs` | 修改 | 在 `flow.mjs` 注册 `--e2e-evidence`、修复 `full`/`gate` 跳过 `smoke-verify` 漏洞、接入 E2E 脱敏诊断回执与失败自动建单、落地 `A6` 合并前 `headSha === evidence.headSha === review.headSha` 与干净工作区校核 | `flow`、`verify`、`submit`、`merge`、门禁层 |
+| `kit/skills/dev-review/scripts/review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`review-locks.mjs`、`review-pack.mjs`、`kit/skills/dev-review/SKILL.md` | 修改 | 修 `!smokeRequired` 缺陷、清除具体工具硬编码、阻断缺实证 `--include-diff`/`pass`、拆分 `executed/succeeded/errorOnly` 三态计分并校验三方 `headSha` 一致性 | `dev-review` 双门实证 |
 | `scripts/dev/preflight-contract-rules.mjs` (new)、`preflight-contracts.mjs`、`scripts/dev/injections-data-core.mjs` | 新增 / 修改 | 拆分减行、更新 `I7`/`I9c`/`I9f` 定位并增加通用 E2E 工具名静态禁忌校验 | `preflight`、`verify-injections` |
-| `scripts/dev/injections-data-stageb.mjs` (new)、`injections-data.mjs`、`scripts/dev/fixtures-stageb-loop.mjs` (new) | 新增 / 修改 | `I160–I173` 全套故障注入与 `C15` 双向断言 | `verify-injections`、`fixtures` |
-| `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`e2e-zip-harness.mjs`、`scripts/dev/blind-run-harness.mjs` (new) | 新增 / 修改 | 离线黑盒 Scenarios `H–J` 与 `$TMPDIR` 真实开源仓盲跑终验 | 端到端黑盒质量验收 |
+| `scripts/dev/injections-data-stageb.mjs` (new)、`injections-data.mjs`、`scripts/dev/fixtures-stageb-loop.mjs` (new) | 新增 / 修改 | `I160+`（含 `C20–C23` 探针与确定性零 LLM Node CLI 故障注入 Stub）与 `C15`/`C23` 双向断言 | `verify-injections`、`fixtures` |
+| `scripts/dev/e2e-scenarios-stageb.mjs` (new)、`e2e-zip-harness.mjs`、`scripts/dev/blind-run-harness.mjs` (new) | 新增 / 修改 | 自建 HTTP/SSH 模拟远端交错跑通离线黑盒 Scenarios `H–J`、Zero-Hint 主调度组 + 轻模型对照与 `$TMPDIR`（含 `LoopForge-main`）真实开源仓盲跑终验 | 端到端黑盒质量验收 |
 | `templates/agents-project.md`、`SKILL.md`、`AGENTS.md`、`docs/TDD.md`、`README.md`、`README.en.md` | 修改 | 文案对齐、`blind-run-harness` 登记 TDD、双语 README 与体积校验校准 | 全仓一致性与发布前基线 |
 
 - **对外可见的变化**：非低危运行态改动的 `flow.mjs verify` 强制要求通过 `smoke-verify` 并记录 `--e2e-evidence` 观察回执；未配 `smoke-verify` 且未显式写 `none` 时阻断引导补全。
@@ -127,6 +128,7 @@ flowchart LR
 - [ ] C16: 新增 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（故障注入从 `I160` 起编号），覆盖 `C1..C15`、`C19` 全部正反双向用例与门禁拆解探测，`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs` 100% 通过。
 - [ ] C17: 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new) 接入 `scripts/dev/e2e-zip-harness.mjs`，从 `git archive --format=zip` 解压安装包黑盒执行 Scenario `H`（无远端本地工单起步 -> 新增远端并迁移/切回远端完整闭环至自动关单）、Scenario `I`（评审/规划双侧跨轮同人拦截、3 轮停损归因与分级建单）与 Scenario `J`（Node+Python 异构仓、非标文档、自定义脚本、自有技能 `S1–S4` 升级、`.githooks/pre-push`、`generic-git` 及真实非 `exit 0` 端到端实测失败建单修复复绿），退出码 `0`。
 - [ ] C18: 新增 `scripts/dev/blind-run-harness.mjs` (new)（留存 `scripts/dev/` 不进用户包，并登记于 `docs/TDD.md` 通过孤儿脚本审计），在隔离 `$TMPDIR` 克隆副本对多生态真实开源项目（含带自有项目级 Skill 与自定义规则且用新版重跑 `S1–S4` 校准的已规范仓）执行极简低提示词盲跑验收与实跑对方原生测试；发现的阻塞/跨范围问题全部通过「建单 -> SPEC/Todo -> 修复 -> 沉淀夹具与故障注入」清零；全仓所有 `.mjs <= 800` 行、`AGENTS.md` 符合体积预算（本仓 `< 24576 B`），`merge-gate` 全链命令全绿。
+- [ ] C23: 交付 `A6` 校验、跨特性交错 `Scenarios H–J` 与零提示词（Zero-Hint）盲测终验：① `flow-merge.mjs` 与 `review-empirical.mjs` 合并前强校 `headSha === evidence.headSha === review.headSha` 且工作区无脏改动，`evidence.json` 与盲跑结果计分拆分 `executed` / `succeeded` / `errorOnly` 三态（阻断空跑/错路径刷绿）；`flow.mjs verify` / `review` / E2E 失败输出脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断包并桥接 `C12` `escalation.mjs` (new) 自动建单；编写确定性零 LLM Node CLI 故障注入 Stub 覆盖 `I160+`（含 `C20–C23` 探针）；② `scripts/dev/e2e-scenarios-stageb.mjs` (new) 在自建 HTTP/SSH 模拟远端与凭据下交错跑通离线 `Scenarios H–J`（覆盖无远端迁有远端、PR/Issue 标签前缀、按需 Milestone、双侧停损、`A1–A5` 与 E2E 失败建单）；③ 增设零提示词（Zero-Hint）全机制主调度组（全新无本仓上下文子代理）与轻/弱模型对照组对照及 `$TMPDIR` 多生态（Node/Python/Go/Rust 与 `LoopForge-main` 同构/自有技能升级）盲跑，必测「裸粘贴 Issue 链接」「裸粘贴同源 PR 与 Fork `inbound-external-pr` 链接」「初次接入含 `business-flows`/非标目录/原生测试隔离/自有技能保留 + Day-2 真实业务开发 + 二次 `S1–S4` 无损升级」，暴露的跳过/漏评/漏归档/弱模型跑偏或歧义一律按 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀进离线回归。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -141,6 +143,7 @@ flowchart LR
 ## 澄清与补充记录
 
 - （Wave 5 收官切片；本片在 `flow.mjs finalize` 时直接实证 `C19` 免传 `--include-master-prd` 自动闭合总控 PRD）
+- （2026-11-18 · Issue `#83` 增补 `C23`：纳入 LoopForge `A6` 合并前 `headSha` 一致性/三态计分/脱敏诊断建单/CLI Stub、自建 HTTP/SSH 模拟远端交错 `Scenarios H–J`、零提示词（Zero-Hint）全机制主调度组 + 轻/弱模型对照组，以及含 `LoopForge-main` 同构升级、裸 Issue/PR 链接（含同源 PR 与 `inbound-external-pr`）及初次接入+Day-2+二次 `S1–S4` 在内的 `$TMPDIR` 盲跑终验）
 
 ## 实现说明
 

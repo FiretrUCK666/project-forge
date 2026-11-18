@@ -33,7 +33,7 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 ## 任务范围与验证基准
 
-- **影响路径**：`scripts/lib/survey-docs.mjs`、`scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-ecosystem.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/survey.mjs`、`kit/skills/lib/doc-shape.mjs`、`kit/skills/lib/doc-requirements.mjs`、`kit/skills/lib/tdd-facts.mjs`、`kit/skills/lib/tdd-scaffold.mjs`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-plan/scripts/doc-audit-repo.mjs`、`SKILL.md`、`references/survey.md`、`references/docs-set.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)
+- **影响路径**：`scripts/lib/survey-docs.mjs`、`scripts/lib/survey-workspace.mjs`、`scripts/lib/survey-ecosystem.mjs`、`scripts/lib/survey-plan.mjs`、`scripts/lib/survey-reentry.mjs`、`scripts/lib/agents-defaults.mjs`、`scripts/survey.mjs`、`kit/skills/lib/skill-discovery.mjs`、`kit/skills/lib/doc-shape.mjs`、`kit/skills/lib/doc-requirements.mjs`、`kit/skills/lib/doc-templates.mjs`、`kit/skills/lib/profile-sniffer.mjs`、`kit/skills/lib/tdd-facts.mjs`、`kit/skills/lib/tdd-scaffold.mjs`、`kit/skills/dev-explore/SKILL.md`、`kit/skills/dev-explore/scripts/repo-map.mjs`、`kit/skills/dev-plan/scripts/doc-audit-repo.mjs`、`kit/skills/dev-govern/scripts/release-prep-lib.mjs`、`kit/skills/dev-govern/scripts/govern-docs.mjs`、`kit/skills/dev-review/scripts/review-gates.mjs`、`SKILL.md`、`references/survey.md`、`references/docs-set.md`、`scripts/dev/fixtures-stageb-onboarding.mjs` (new)
 - **复用既有模块**：`kit/skills/lib/profile-sniffer.mjs`、`kit/skills/lib/doc-shape.mjs`、`kit/skills/lib/doc-requirements.mjs`、`kit/skills/lib/tdd-facts.mjs`
 - **本期不做**：不触碰 `B3` 写域中的 `platform.mjs`/`render.mjs`/`survey-questions.mjs`/`flow*`；不写死具体外部目录名或项目名
 - **门型与回滚路径**：`one-way`；合入前丢弃分支，合入后单次 `git revert` 并重跑 `equip.mjs .` 与 `merge-gate`
@@ -45,13 +45,14 @@ related_spec: ../specs/261118-issue74-b4a-heterogeneous-survey-spec.md
 
 - [ ] C9: `survey-docs.mjs` 探测非标设计目录、非 `.md` README、中性 CI（消除 `ci.absent` 误报）与 `.githooks/`；`survey-reentry.mjs` 与 `doc-audit-repo.mjs` 隔离外来 `docs/` 防误报 `FRONTMATTER_INVALID`；复用 `doc-shape.mjs` 证据跳节与异构模板兼容；`survey-workspace.mjs`/`survey-ecosystem.mjs`/`repo-map.mjs` 解除 `depth > 6` 硬截断并识别多包 glob、自动化脚本与 `exports` 对象映射。
 - [ ] C10: `survey-plan.mjs` 新增 `business-flows` 分片只读 `repo-map.mjs` 输出业务流映射；`SKILL.md` 与 `references/survey.md` 规定 `S1 -> S3` 改前只读实跑对方既有测试与入口建立基线；重资产入 `docs/TDD.md`，`AGENTS.md` 严守轻量体积上限。
+- [ ] C21: 落地 `A7` 存量异构盲点：`survey-reentry`/`skill-discovery`/`agents-defaults`/`survey-docs` 区分非隐藏 `skills/*`、`.agents/skills/*` 与深层宿主镜像并扫描 `*/AGENTS.md`；`survey-docs`/`doc-shape`/`release-prep-lib`（`<= 795` 行）/`govern-docs`/`review-gates`/`doc-templates` 泛化多语配对文件名（`README.*.md`、`CONTRIBUTING.*.md`、`SECURITY*.md`、`*.zh-CN.md`）；`repo-map.mjs` 补 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`；`profile-sniffer.mjs` 隔离重型 `e2e/`/`webtest/` 并聚合多 workflow。
 
 ## 执行步骤
 
 | 步骤 | 做什么 | 怎么验 | 前置依赖 |
 | --- | --- | --- | --- |
-| 1 | 扩展 `survey-docs`/`survey-workspace`/`survey-ecosystem`/`survey-reentry` 与 `doc-audit-repo`/`doc-shape` 异构兼容，并在 `fixtures-stageb-onboarding.mjs` 写失败前置用例 | 新夹具先红后绿 | `#71`、`#72` 已合入 `main` |
-| 2 | 实现 `business-flows` 分片、`repo-map.mjs` 业务流分析、`tdd-facts`/`tdd-scaffold` 承接与 `SKILL.md`/`references/` 基线规范 | `fixtures-stageb-onboarding.mjs` 全绿且 `SKILL.md <= 200` 行 | 步骤 1 |
+| 1 | 扩展 `survey-docs`/`survey-workspace`/`survey-ecosystem`/`survey-reentry`/`agents-defaults`/`skill-discovery`/`profile-sniffer`、`doc-audit-repo`/`doc-shape`/`doc-templates`/`release-prep-lib`/`govern-docs`/`review-gates` 异构兼容与 `A7` 盲点，并在 `fixtures-stageb-onboarding.mjs` 写失败前置用例 | 新夹具先红后绿，且 `release-prep-lib.mjs <= 795` | `#71`、`#72` 已合入 `main` |
+| 2 | 实现 `business-flows` 分片、`repo-map.mjs` 业务流分析（含 `pyproject.toml` `[project.scripts]` 与 `cmd/*/main.go`）、`tdd-facts`/`tdd-scaffold` 承接与 `SKILL.md`/`references/` 基线规范 | `fixtures-stageb-onboarding.mjs` 全绿且 `SKILL.md <= 200` 行 | 步骤 1 |
 | 3 | 若平行列 `B3` 先合入，执行 rebase 后运行 `node scripts/equip.mjs .` 并跑通全量 `merge-gate` | 全量门禁全绿 | 步骤 2 |
 
 ## 风险与应对

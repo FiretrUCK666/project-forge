@@ -252,6 +252,11 @@ export async function handleIssue(opts, roots) {
       })
       if (created.delegated) {
         if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, code: 'ACTION_REQUIRED_MIGRATE_DELEGATED', localNumber: item.number, ...created }, null, 2)}\n`)
+        else {
+          process.stderr.write(`ACTION_REQUIRED_MIGRATE_DELEGATED: 无直连 GitHub 凭据，本地工单 #${item.number} 迁移已生成宿主代理载荷。\n`)
+          process.stdout.write(`${JSON.stringify(created.jsonPayload)}\n`)
+          printNextStep(['请在宿主 MCP 完成远端建单，并在确认后执行 issue close 关闭原本地工单。'], { repoRoot: roots.mainRoot })
+        }
         return { exitCode: EXIT_ACTION_REQUIRED }
       }
       if (!created.ok || !created.number) {

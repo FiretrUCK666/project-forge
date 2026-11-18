@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "tier": "full",
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-18T19:55:28.779Z",
+  "installedAt": "2026-11-18T20:15:53.976Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "1063a7364e27092b0442af592d4c829389be170e5f806c4ff7a2e72d441be856"
@@ -17,7 +17,7 @@
       "sha256": "9f8156b0f06024018b1837f7e032565976219ed7db9e0737635e50d1fedb5a2c"
     },
     "dev-flow/scripts/flow-cleanup.mjs": {
-      "sha256": "8d7fb41fdba18b45eb588c63a3c63cba09e223b1102b33180c0facfbb275ab58"
+      "sha256": "58c309a0eb796fca032d4ecfdc19e55249f13c0de57e32f852f682234781675f"
     },
     "dev-flow/scripts/flow-context.mjs": {
       "sha256": "26d6a1b5e34549151c06c700d369bb3c5712952b9e6e3b5753b0242785ecd9df"
@@ -29,7 +29,7 @@
       "sha256": "fda1b13c0403c74581f55bbc4cd62426d8c96775fbed61064c1e27bcc4f0eda4"
     },
     "dev-flow/scripts/flow-issues.mjs": {
-      "sha256": "4694ad648842f658e9399c2946aac086b21805579ca7dde36594715cd3e8c70f"
+      "sha256": "dc6274dc1b70cfe2c5555249eeb2f06d172d24a4db26a936bb7596e7c97f23bf"
     },
     "dev-flow/scripts/flow-lifecycle-helpers.mjs": {
       "sha256": "a59d96645798ad994a0de5cfb4ca1edc338a729c6155b84fa2d79c1bd279d4c3"
@@ -38,7 +38,7 @@
       "sha256": "f4d9622a5862445cd2b482970e1cd9b5fd35ec71ec9fba1328056022e267ea47"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "37b3143e758ef03e1b4e8a7a96a57a3bac5c4f52912e467bb50d0ba443d2a06f"
+      "sha256": "b72724b4ed93f931966439bf0b46abbb1063dcc21e366af2db75f63cddc56f10"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "5b3f41dd22eb41501a832565aa821934278bb73eef94ea7c5310fe618cfae4c0"
@@ -197,7 +197,7 @@
       "sha256": "4423c088e59a5e104f5ec4a18f910ef65aff970544a2690622bee48b24876fe4"
     },
     "lib/local-issues.mjs": {
-      "sha256": "4069e58ea92c448dbbbf20cd2db9a2ddd828df409ded217164a4e875d71f9168"
+      "sha256": "485af20762a9334eb12e62296f71896def8c2af6241167c89087db2261f890ae"
     },
     "lib/no-changelog-voice.mjs": {
       "sha256": "db70929f635116ca94760bdaec3267920dd5feb12855252f0e440cf8d1c0a882"
@@ -209,7 +209,7 @@
       "sha256": "8819a5af9f62e0cb2c5d1b284d195fab323f1d803a7d6c564a4930b4f811b541"
     },
     "lib/platform.mjs": {
-      "sha256": "e647f5676154d6f6895bcb92b147d0df5ab5babb28637af0289f8cc4b50ab71d"
+      "sha256": "bc4bc24123a0484292092c7e6e413ec496cb80c29bbdcbfd9f0a988fa53769e8"
     },
     "lib/profile-sniffer.mjs": {
       "sha256": "3c6b490e440a345f096f543699202842864fcc69b1ecb5dbe150e354812c2d18"

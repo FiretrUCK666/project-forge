@@ -2,7 +2,7 @@
  * fixtures-stageb-loop.mjs —— Stage B 自迭代闭环双向行为夹具（C7–C8、C20）。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { handleNext } from '../../kit/skills/dev-flow/scripts/flow-next.mjs'
@@ -22,7 +22,7 @@ import {
   parsePrNumber,
 } from '../../kit/skills/lib/github-client.mjs'
 import { readTaskLedger, updateTaskLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
-import { createLocalIssue, getLocalIssue, listLocalIssues } from '../../kit/skills/lib/local-issues.mjs'
+import { createLocalIssue, getLocalIssue, listLocalIssues, updateLocalIssue } from '../../kit/skills/lib/local-issues.mjs'
 import { detectGitModeMarkers } from '../../kit/skills/lib/platform.mjs'
 import { extractHostAndPath } from '../../kit/skills/lib/platform-probe.mjs'
 import { buildSessionOrientation } from '../../kit/skills/lib/session-orient.mjs'
@@ -83,6 +83,41 @@ export function registerStageBLoopCases(cases) {
       }
       const st = gitSync(dir, ['status', '--porcelain'], { encoding: 'utf8' })
       if (st.stdout.trim() !== '') return `本地工单污染了 git status：${st.stdout}`
+
+      // [MF-1] 正反双向：损坏 index.json / items/*.json 必须显式报错且绝不覆盖，ENOENT 才返回 404 或重建索引
+      const missingRes = getLocalIssue({ mainRoot: dir, number: 999 })
+      if (missingRes.ok || missingRes.status !== 404) return `不存在的本地工单未按 ENOENT 返回 404：${JSON.stringify(missingRes)}`
+      const issuesDir = join(dir, '.git', 'project-forge-flow', 'issues')
+      const idxFile = join(issuesDir, 'index.json')
+      const item1File = join(issuesDir, 'items', '1.json')
+      const origIdx = readFileSync(idxFile, 'utf8')
+      const origItem1 = readFileSync(item1File, 'utf8')
+      writeFileSync(idxFile, '{corrupted-index')
+      writeFileSync(item1File, '{corrupted-item-1')
+      let errCreateBoth = null
+      try { await createLocalIssue({ mainRoot: dir, title: '不应覆盖损坏数据' }) } catch (e) { errCreateBoth = e }
+      if (!errCreateBoth || !String(errCreateBoth.message).includes('LOCAL_ISSUE_CORRUPTED')) {
+        return `损坏 index+item 时 createLocalIssue 未显式阻断：${errCreateBoth?.message}`
+      }
+      if (readFileSync(idxFile, 'utf8') !== '{corrupted-index' || readFileSync(item1File, 'utf8') !== '{corrupted-item-1') {
+        return '损坏文件在 createLocalIssue 失败后仍被覆盖'
+      }
+      writeFileSync(idxFile, origIdx)
+      let errView = null
+      let errList = null
+      let errUpdate = null
+      try { getLocalIssue({ mainRoot: dir, number: 1 }) } catch (e) { errView = e }
+      try { listLocalIssues({ mainRoot: dir, state: 'all' }) } catch (e) { errList = e }
+      try { await updateLocalIssue({ mainRoot: dir, number: 1, patch: { title: 'x' } }) } catch (e) { errUpdate = e }
+      if (!errView || !String(errView.message).includes('LOCAL_ISSUE_CORRUPTED')
+        || !errList || !String(errList.message).includes('LOCAL_ISSUE_CORRUPTED')
+        || !errUpdate || !String(errUpdate.message).includes('LOCAL_ISSUE_CORRUPTED')) {
+        return `损坏 items/1.json 时 view/list/update 静默误判或吞错：view=${errView?.message}, list=${errList?.message}, upd=${errUpdate?.message}`
+      }
+      writeFileSync(item1File, origItem1)
+      unlinkSync(idxFile)
+      const rebuilt = await createLocalIssue({ mainRoot: dir, title: '无 index 重建' })
+      if (!rebuilt.ok || rebuilt.number !== 2) return `index.json ENOENT 重建自增编号异常：${JSON.stringify(rebuilt)}`
       return true
     } finally {
       rmTree(dir)
@@ -108,7 +143,11 @@ export function registerStageBLoopCases(cases) {
         return 'render.mjs 仍误指引无远端仓写裸 .git/pf-local-mode'
       }
 
-      gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'])
+      appendFileSync(
+        join(dir, '.git', 'config'),
+        '\n[remote "origin"]\n\turl = https://github.com/acme/demo.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n',
+        'utf8',
+      )
       const afterRemote = detectGitModeMarkers(dir)
       if (afterRemote.localMode || !afterRemote.staleNoRemote) {
         return `绑远端后 stale no-remote 未失效：${JSON.stringify(afterRemote)}`
@@ -273,7 +312,19 @@ export function registerStageBLoopCases(cases) {
           return { ok: true, id: 1, verifiedReadback: true }
         },
       }
+      let migDelegatedOut = ''
+      let migDelegatedErr = ''
+      let migDelegatedRes
       try {
+        process.stdout.write = (c) => { migDelegatedOut += String(c); return true }
+        process.stderr.write = (c) => { migDelegatedErr += String(c); return true }
+        const delegatedClient = { tier: 'none', async createIssue({ title }) { return { ok: false, delegated: true, jsonPayload: { title } } } }
+        migDelegatedRes = await handleIssue({
+          _: ['migrate'], _ghClient: delegatedClient,
+          _ghProbe: { env: { providerId: 'github', trackB: { tier: 'none' } }, client: delegatedClient },
+        }, roots)
+        process.stdout.write = () => true
+        process.stderr.write = origErr
         nextOut = await handleNext({ json: true }, roots)
         migRes = await handleIssue({
           _: ['migrate'], _ghClient: fakeRemoteClient,
@@ -282,6 +333,10 @@ export function registerStageBLoopCases(cases) {
         }, roots)
       } finally {
         process.stdout.write = origOut
+        process.stderr.write = origErr
+      }
+      if (migDelegatedRes.exitCode !== 4 || !migDelegatedErr.includes('ACTION_REQUIRED_MIGRATE_DELEGATED') || !migDelegatedOut.includes('"title"')) {
+        return `migrate delegated 非 JSON 控制台提示异常：exit=${migDelegatedRes.exitCode}, err=${migDelegatedErr}, out=${migDelegatedOut}`
       }
       const warnCodes = (nextOut.payload?.warnings ?? []).map((w) => w.code)
       if (!warnCodes.includes('WARN_REMOTE_DRIFT_AGENTS') || !warnCodes.includes('WARN_UNMIGRATED_LOCAL_ISSUES')) {
@@ -294,7 +349,7 @@ export function registerStageBLoopCases(cases) {
     } finally {
       rmTree(dir)
     }
-  }])
+  }, 4000])
 
   cases.push(['C20：A1-A3 HTTP 退避禁重试禁重定向、幂等恢复、Checks 不假绿与通用 URL 解析', async () => {
     // 1. 协议路径 URL 泛化与 Windows 正斜杠排除（零平台品牌词）
@@ -443,22 +498,6 @@ export function registerStageBLoopCases(cases) {
       process.stdout.write = () => true
       process.stderr.write = () => true
       try {
-        await handleStart({ task: 'm2', slug: 'm2', issue: '15', case: '3', implementer: 'alice', json: true, _ghClient: idemClient }, lRoots)
-        await seedExploredFor(ledgerDir, 'm2')
-        const wtM2 = join(ledgerDir, '.worktrees/impl-m2')
-        writeFileSync(join(wtM2, 'src/app.mjs'), 'export const ok = 2\n')
-        gitSync(wtM2, ['add', 'src/app.mjs'])
-        gitSync(wtM2, ['commit', '-qm', 'feat: m2'])
-        await handleFinalize({ task: 'm2', 'no-tdd': true, json: true }, await resolveRepoRoots(wtM2))
-        await handleVerify({ task: 'm2', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtM2))
-        const m2 = readTaskLedger(ledgerDir, 'm2')
-        m2.prNumber = 77
-        writeTaskLedger(ledgerDir, m2)
-        const tok = await issueTokenFor(ledgerDir, 'm2', 1)
-        const revWtM2 = join(ledgerDir, '.worktrees/review-m2')
-        gitSync(ledgerDir, ['worktree', 'add', '--detach', revWtM2, m2.verifiedHead])
-        await handleReviewRecord({ task: 'm2', verdict: 'pass', 'reviewer-id': 'rev-m2', 'review-token': tok, evidence: 'ok', json: true }, await resolveRepoRoots(revWtM2))
-
         const seqCalls = []
         const makeProbe = (checksBucket, mergeThrows) => ({
           env: { providerId: 'github', trackB: { tier: 'node-https-token', login: 'alice' } },
@@ -476,6 +515,22 @@ export function registerStageBLoopCases(cases) {
             async closeIssue({ number }) { seqCalls.push(`close:${number}`); return { ok: true, state: 'CLOSED', alreadyClosed: false } },
           },
         })
+        await handleStart({ task: 'm2', slug: 'm2', issue: '15', case: '3', implementer: 'alice', json: true, _ghClient: idemClient, _ghProbe: makeProbe('pass', false) }, lRoots)
+        await seedExploredFor(ledgerDir, 'm2')
+        const wtM2 = join(ledgerDir, '.worktrees/impl-m2')
+        writeFileSync(join(wtM2, 'src/app.mjs'), 'export const ok = 2\n')
+        gitSync(wtM2, ['add', 'src/app.mjs'])
+        gitSync(wtM2, ['commit', '-qm', 'feat: m2'])
+        await handleFinalize({ task: 'm2', 'no-tdd': true, json: true }, await resolveRepoRoots(wtM2))
+        await handleVerify({ task: 'm2', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtM2))
+        const m2 = readTaskLedger(ledgerDir, 'm2')
+        m2.prNumber = 77
+        writeTaskLedger(ledgerDir, m2)
+        const tok = await issueTokenFor(ledgerDir, 'm2', 1)
+        const revWtM2 = join(ledgerDir, '.worktrees/review-m2')
+        gitSync(ledgerDir, ['worktree', 'add', '--detach', revWtM2, m2.verifiedHead])
+        await handleReviewRecord({ task: 'm2', verdict: 'pass', 'reviewer-id': 'rev-m2', 'review-token': tok, evidence: 'ok', json: true }, await resolveRepoRoots(revWtM2))
+
         const blkUnknown = await handleMerge({ task: 'm2', json: true, _ghProbe: makeProbe('unknown', false), _ghClient: makeProbe('unknown', false).client }, lRoots)
         if (blkUnknown.exitCode !== 3) return `checks.bucket=unknown 未阻断 merge：${blkUnknown.exitCode}`
         const okAlready = await handleMerge({ task: 'm2', json: true, _ghProbe: makeProbe('pass', true), _ghClient: makeProbe('pass', true).client }, lRoots)
@@ -491,5 +546,67 @@ export function registerStageBLoopCases(cases) {
     } finally {
       rmTree(ledgerDir)
     }
-  }])
+  }, 2000])
+
+  cases.push(['C8：generic-git bare remote 未传 --remote-merged 阻断与传入 --remote-merged 放行并先评后关', async () => {
+    const bareDir = tmpProject({})
+    const workDir = tmpProject({
+      '.gitignore': '.worktrees/\n',
+      'README.md': '# bare-generic\n',
+      'src/app.mjs': 'export const v = 1\n',
+    })
+    gitInitBare(bareDir)
+    gitInit(workDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+    gitSync(workDir, ['remote', 'add', 'origin', bareDir])
+    gitSync(workDir, ['push', '-u', 'origin', 'main'])
+    try {
+      equip(workDir, { tier: 'full', noBackup: true })
+      const roots = await resolveRepoRoots(workDir)
+      const origOut = process.stdout.write.bind(process.stdout)
+      const origErr = process.stderr.write.bind(process.stderr)
+      process.stdout.write = () => true
+      process.stderr.write = () => true
+      try {
+        const cr = await createLocalIssue({ mainRoot: workDir, title: '通用裸仓工单' })
+        if (!cr.ok || cr.number !== 1) return `创建本地工单失败：${JSON.stringify(cr)}`
+        const st = await handleStart({ task: 'bare-merge', issue: '1', slug: 'bare-merge', case: '3', implementer: 'alice', json: true }, roots)
+        if (st.exitCode !== 0) return `generic-git bare start 失败：${st.exitCode}`
+        const lg0 = readTaskLedger(workDir, 'bare-merge')
+        if (!lg0 || lg0.providerId !== 'generic-git') return `bare remote 未判 providerId=generic-git：${JSON.stringify(lg0)}`
+        await seedExploredFor(workDir, 'bare-merge')
+        const wtAbs = join(workDir, lg0.worktreePath)
+        writeFileSync(join(wtAbs, 'src/app.mjs'), 'export const v = 2\n')
+        gitSync(wtAbs, ['add', 'src/app.mjs'])
+        gitSync(wtAbs, ['commit', '-qm', 'feat: bare work'])
+        await handleFinalize({ task: 'bare-merge', 'no-tdd': true, json: true }, await resolveRepoRoots(wtAbs))
+        await handleVerify({ task: 'bare-merge', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtAbs))
+        await handleSubmit({ task: 'bare-merge', agent: 'alice', json: true }, await resolveRepoRoots(wtAbs))
+        const revTok = await issueTokenFor(workDir, 'bare-merge', 1)
+        const revWt = join(workDir, lg0.reviewWorktreePath)
+        const revCode = await handleReviewRecord({
+          task: 'bare-merge', verdict: 'pass', 'reviewer-id': 'rev-bare', 'review-token': revTok, evidence: 'ok', json: true,
+        }, await resolveRepoRoots(revWt))
+        if (revCode !== 0) return `review record 失败：${revCode}`
+
+        const blk = await handleMerge({ task: 'bare-merge', json: true }, roots)
+        if (blk.exitCode !== 3 || blk.code !== 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED') {
+          return `generic-git 未传 --remote-merged 未按 3 阻断：${JSON.stringify(blk)}`
+        }
+        const okMerge = await handleMerge({ task: 'bare-merge', 'remote-merged': true, json: true }, roots)
+        if (okMerge.exitCode !== 0) return `generic-git 传入 --remote-merged 仍死锁：${JSON.stringify(okMerge)}`
+        const lgAfter = readTaskLedger(workDir, 'bare-merge')
+        const closedIss = getLocalIssue({ mainRoot: workDir, number: 1 })
+        if (lgAfter.status !== 'merged' || closedIss.state !== 'CLOSED') {
+          return `generic-git --remote-merged 后账本或本地单未闭环：status=${lgAfter.status}, state=${closedIss.state}`
+        }
+        return true
+      } finally {
+        process.stdout.write = origOut
+        process.stderr.write = origErr
+      }
+    } finally {
+      rmTree(workDir)
+      rmTree(bareDir)
+    }
+  }, 4000])
 }

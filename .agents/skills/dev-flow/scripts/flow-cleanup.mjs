@@ -174,7 +174,7 @@ export async function buildCleanupChecklist(mainRoot, ledger, remoteUrls, target
     : null
   const remoteBranchExists = Boolean(shouldProbeRemote && lsRes.ok && lsRes.stdout.trim() !== '')
 
-  const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git')
+  const needGhApi = Boolean(targetRepo && ledger.branch && ledger.role !== 'local-only' && ledger.role !== 'generic-git' && ledger.providerId !== 'generic-git')
   const ghProbe = _ghProbe
     ?? (_ghClient ? { env: { providerId: 'github', trackB: { tier: _ghClient.tier ?? 'gh-cli' } }, client: _ghClient } : null)
     ?? (needGhApi ? await probeForWrite({ cwd: mainRoot, remoteUrls }) : null)

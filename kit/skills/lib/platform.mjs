@@ -10,48 +10,23 @@ import { isAbsolute, join, resolve } from 'node:path'
 
 import { readJsonSafe, readTextSafe } from './git.mjs'
 import {
-  DEFAULT_PROBE_TIMEOUT_MS,
-  TEAM_PROBE_HINT,
-  buildOneClickPrUrl,
-  detectRemoteProtocol,
-  extractHostAndPath,
-  githubRepoFull,
-  githubRepoPath,
-  lookupSshHost,
-  normalizeGitHubRepo,
-  parseRemoteUrlHost,
-  parseSshConfigDetails,
-  parseSshConfigHostMap,
-  probeGitHubEnvCore,
-  probeSshKeyReadiness,
-  probeSshTransport,
+  TEAM_PROBE_HINT, extractHostAndPath, githubRepoFull, githubRepoPath,
+  lookupSshHost, normalizeGitHubRepo, parseSshConfigHostMap, probeGitHubEnvCore,
 } from './platform-probe.mjs'
-import {
-  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
-  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
-  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
-  summarizeCommitChecks,
-} from './github-client.mjs'
+import { createGitHubClient } from './github-client.mjs'
 
 export {
-  DEFAULT_PROBE_TIMEOUT_MS,
-  TEAM_PROBE_HINT,
-  buildOneClickPrUrl,
-  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
-  detectRemoteProtocol,
-  githubRepoFull,
-  githubRepoPath,
-  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
-  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity,
-  lookupSshHost,
-  normalizeGitHubRepo,
-  parseRemoteUrlHost,
-  parseSshConfigDetails,
-  parseSshConfigHostMap,
-  probeSshKeyReadiness,
-  probeSshTransport,
-  summarizeCommitChecks,
+  TEAM_PROBE_HINT, githubRepoFull, githubRepoPath, lookupSshHost, normalizeGitHubRepo, parseSshConfigHostMap,
 }
+export {
+  DEFAULT_PROBE_TIMEOUT_MS, buildOneClickPrUrl, detectRemoteProtocol,
+  parseRemoteUrlHost, parseSshConfigDetails, probeSshKeyReadiness, probeSshTransport,
+} from './platform-probe.mjs'
+export {
+  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
+  parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity, summarizeCommitChecks,
+} from './github-client.mjs'
 
 export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
@@ -723,18 +698,8 @@ export async function probeGitHubEnv({
   }
 
   const core = await probeGitHubEnvCore({
-    cwd,
-    remoteUrls,
-    branch,
-    defaultBranch,
-    probeNetwork,
-    verifyToken,
-    mcpAvailable,
-    offline,
-    runner,
-    httpRequest,
-    env,
-    sshHostMap,
+    cwd, remoteUrls, branch, defaultBranch, probeNetwork, verifyToken,
+    mcpAvailable, offline, runner, httpRequest, env, sshHostMap,
   })
 
   const sshState = core.ssh.state === 'available' || core.ssh.state === 'port443-only'

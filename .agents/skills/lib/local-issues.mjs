@@ -6,10 +6,10 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），并发安全依赖 `withFileLock` 与原子写入。
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-import { readJsonSafe, readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
+import { readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import { computeWriteBackFingerprint, parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
 
@@ -46,9 +46,45 @@ function issuePaths(mainRoot, gitDir, number) {
   }
 }
 
+function readStrictLocalJson(filePath, label) {
+  let raw
+  try {
+    raw = readFileSync(filePath, 'utf8')
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { exists: false, data: null }
+    throw new Error(`LOCAL_ISSUE_READ_FAILED: 无法读取${label} (${filePath}): ${err instanceof Error ? err.message : String(err)}`)
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('JSON 顶层结构必须为对象')
+    }
+    return { exists: true, data: parsed }
+  } catch (err) {
+    throw new Error(`LOCAL_ISSUE_CORRUPTED: ${label}已损坏 (${filePath}): ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+function readStrictLocalIssueItem(filePath, expectedNum, label) {
+  const res = readStrictLocalJson(filePath, label)
+  if (!res.exists) return null
+  const item = res.data
+  const validNum = expectedNum !== null && expectedNum !== undefined
+    ? Number.isInteger(item.number) && item.number === expectedNum
+    : Number.isInteger(item.number) && item.number > 0
+  if (!validNum) {
+    throw new Error(`LOCAL_ISSUE_CORRUPTED: ${label}数据结构非法 (${filePath})`)
+  }
+  return item
+}
+
 function readOrInitIndex(rootDir, indexPath, itemsDir) {
-  const existing = readJsonSafe(indexPath)
-  if (existing && typeof existing === 'object' && Number.isInteger(existing.nextId) && existing.items && typeof existing.items === 'object') {
+  const idxRes = readStrictLocalJson(indexPath, '本地工单索引 index.json')
+  if (idxRes.exists) {
+    const existing = idxRes.data
+    if (!Number.isInteger(existing.nextId) || existing.nextId < 1 || !existing.items || typeof existing.items !== 'object' || Array.isArray(existing.items)) {
+      throw new Error(`LOCAL_ISSUE_CORRUPTED: 本地工单索引 index.json 结构非法 (${indexPath})`)
+    }
     return existing
   }
   const items = {}
@@ -56,11 +92,10 @@ function readOrInitIndex(rootDir, indexPath, itemsDir) {
   if (existsSync(itemsDir)) {
     for (const f of readdirSync(itemsDir)) {
       if (!/^\d+\.json$/.test(f)) continue
-      const item = readJsonSafe(join(itemsDir, f))
-      if (item && Number.isInteger(item.number)) {
-        maxId = Math.max(maxId, item.number)
-        items[String(item.number)] = summarizeItem(item)
-      }
+      const item = readStrictLocalIssueItem(join(itemsDir, f), null, `本地工单 ${f}`)
+      if (!item) continue
+      maxId = Math.max(maxId, item.number)
+      items[String(item.number)] = summarizeItem(item)
     }
   }
   return { version: 1, nextId: maxId + 1, items }
@@ -110,6 +145,11 @@ export async function createLocalIssue({
     mkdirSync(paths.itemsDir, { recursive: true })
     const idx = readOrInitIndex(paths.rootDir, paths.indexPath, paths.itemsDir)
     const num = Number(idx.nextId) || 1
+    const itemFile = join(paths.itemsDir, `${num}.json`)
+    if (existsSync(itemFile)) {
+      readStrictLocalJson(itemFile, `本地工单 #${num}`)
+      throw new Error(`LOCAL_ISSUE_CORRUPTED: 本地工单 #${num} 文件已存在且 index.json 未同步 (${itemFile})`)
+    }
     const now = new Date().toISOString()
     const item = {
       number: num,
@@ -139,7 +179,7 @@ export function getLocalIssue({ mainRoot = process.cwd(), gitDir = null, number 
   const num = Number(number)
   if (!Number.isInteger(num) || num <= 0) return { ok: false, error: 'invalid-issue-number' }
   const paths = issuePaths(mainRoot, gitDir, num)
-  const item = readJsonSafe(paths.itemPath)
+  const item = readStrictLocalIssueItem(paths.itemPath, num, `本地工单 #${num}`)
   if (!item) return { ok: false, status: 404, error: `local-issue-not-found: #${num}` }
   const comments = Array.isArray(item.comments) ? item.comments : []
   return {
@@ -156,13 +196,14 @@ export function getLocalIssue({ mainRoot = process.cwd(), gitDir = null, number 
 /** 列举本地工单（默认 `state = 'open'`，支持 `'open' | 'closed' | 'all'`）。 */
 export function listLocalIssues({ mainRoot = process.cwd(), gitDir = null, state = 'open' } = {}) {
   const paths = issuePaths(mainRoot, gitDir)
+  if (existsSync(paths.indexPath)) readOrInitIndex(paths.rootDir, paths.indexPath, paths.itemsDir)
   if (!existsSync(paths.itemsDir)) return { ok: true, local: true, issues: [] }
   const want = String(state ?? 'open').toLowerCase()
   const issues = []
   for (const name of readdirSync(paths.itemsDir).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))) {
     if (!/^\d+\.json$/.test(name)) continue
-    const item = readJsonSafe(join(paths.itemsDir, name))
-    if (!item || !Number.isInteger(item.number)) continue
+    const item = readStrictLocalIssueItem(join(paths.itemsDir, name), null, `本地工单 ${name}`)
+    if (!item) continue
     const itemState = String(item.state ?? 'OPEN').toUpperCase()
     if (want === 'open' && itemState !== 'OPEN') continue
     if (want === 'closed' && itemState !== 'CLOSED') continue
@@ -183,7 +224,7 @@ async function mutateLocalIssue(mainRoot, gitDir, number, fn) {
   if (!Number.isInteger(num) || num <= 0) return { ok: false, error: 'invalid-issue-number' }
   const paths = issuePaths(mainRoot, gitDir, num)
   return withFileLock(paths.lockPath, () => {
-    const item = readJsonSafe(paths.itemPath)
+    const item = readStrictLocalIssueItem(paths.itemPath, num, `本地工单 #${num}`)
     if (!item) return { ok: false, status: 404, error: `local-issue-not-found: #${num}` }
     const idx = readOrInitIndex(paths.rootDir, paths.indexPath, paths.itemsDir)
     const outcome = fn(item, idx, paths)

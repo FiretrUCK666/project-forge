@@ -302,8 +302,8 @@ export async function handleMerge(opts, roots) {
         await gitRun(roots.mainRoot, ['merge', '--ff-only', '--no-edit', `${pushRemote}/${baseBranch}`])
       }
     }
-  } else if (ledger.branch || ledger.role === 'generic-git') {
-    if (ledger.role === 'generic-git') {
+  } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
+    if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
       mergeRes = await backend.mergePr({
         remoteMerged: Boolean(opts['remote-merged']),
         humanApproved: Boolean(opts['human-approved']),
@@ -327,7 +327,7 @@ export async function handleMerge(opts, roots) {
     if (mergeRes.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, ...mergeRes }, null, 2)}\n`)
       process.stderr.write(`${mergeRes.message}\n`)
-      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK }
+      return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
       const mergeContrib = resolveContributorIdentity({ ledgerActor: ledger.implementerId })

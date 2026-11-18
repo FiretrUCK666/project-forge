@@ -8,7 +8,7 @@ issue: 59
 pr: null
 branch: feat/govern-tdd-and-split
 owner: plan-59
-approved: false
+approved: true
 done_at: null
 task_id: issue-59
 planned_at: 930aea1c1d9837ead25887330e554af1e18a705c

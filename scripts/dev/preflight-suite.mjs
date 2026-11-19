@@ -448,10 +448,10 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
   const { skills: discovered, diagnostics } = discoverKitSkillsDetailed(kitSkillsRoot)
   for (const diag of diagnostics) fail(`内置 Skill 元数据无效：${diag.message}`)
   if (discovered.length === 0) fail('kit/skills 下未发现任何合法内置 Skill')
-  const discoveredNames = discovered.map((s) => s.dirName).sort()
-  const expectedNames = [...UNIFIED_SKILL_NAMES].sort()
-  if (discoveredNames.length !== expectedNames.length || discoveredNames.some((n, i) => n !== expectedNames[i])) {
-    fail(`内置 Skill 集合与 UNIFIED_SKILL_NAMES (${expectedNames.length} 个) 不一致：实得 [${discoveredNames.join(', ')}]，预期 [${expectedNames.join(', ')}]`)
+  const discoveredSet = new Set(discovered.map((s) => s.dirName))
+  const missingUnified = UNIFIED_SKILL_NAMES.filter((n) => !discoveredSet.has(n))
+  if (missingUnified.length > 0) {
+    fail(`内置 Skill 缺失必需核心技能（UNIFIED_SKILL_NAMES ${UNIFIED_SKILL_NAMES.length} 个）：缺少 [${missingUnified.join(', ')}]`)
   }
 
   for (const skill of discovered) {

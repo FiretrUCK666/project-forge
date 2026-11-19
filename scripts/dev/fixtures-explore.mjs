@@ -106,6 +106,8 @@ cases.push(['8 层深 Java+React repo-map、Dev Profile 显式 none 与未知 fl
     // 3. Dev Profile 显式 none -> flow verify 与 submit 正常放行 + status/abort 可用
     const st = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-none', '--case', '1', '--slug', 'none-ok', '--json'], { cwd: dir })
     if (st.status !== 0) return `start 失败：${st.stderr}`
+    const exp = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['explore', '--task', 't-none', '--json'], { cwd: dir })
+    if (exp.status !== 0) return `explore 失败：${exp.stderr}`
     const ver = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--json'], { cwd: dir })
     if (ver.status !== 0) return `Dev Profile quick-test: none 时 verify 失败：${ver.stderr}`
     const sub = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--json'], { cwd: dir })

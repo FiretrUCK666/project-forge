@@ -597,7 +597,11 @@ export async function handleStart(opts, roots) {
     else {
       if (createdIssue) process.stdout.write(`已创建工单 #${createdIssue.number}${createdIssue.url ? ` (${createdIssue.url})` : ''}。\n`)
       process.stdout.write(`任务 ${taskId} 已就绪（Tier 1 初始无提交分支模式）：branch=${branch}, role=${role}\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
+      printNextStep([
+        { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+        { skill: 'dev-flow', text: `2. 再执行 flow.mjs explore 记录探索证据：node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}` },
+        { skill: 'dev-flow', text: `3. 完成 claim 与 explore 后推进实施，提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
+      ], { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
@@ -651,9 +655,9 @@ export async function handleStart(opts, roots) {
       for (const w of state.driftWarnings) process.stdout.write(`- [提醒] ${w.message}\n`)
     }
     printNextStep([
-      linkedIssues.length > 0 && role !== 'local-only' && role !== 'generic-git'
-        ? { skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` }
-        : `在 ${implRel} 中推进实施；提交评审时将自动同步创建 ${reviewRel} 审查工作树。`,
+      { skill: 'dev-flow', text: `1. 先执行 flow.mjs claim 认领任务：node ".agents/skills/dev-flow/scripts/flow.mjs" claim --task ${taskId}` },
+      { skill: 'dev-flow', text: `2. 再执行 flow.mjs explore 记录探索证据：node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}` },
+      `3. 完成 claim 与 explore 后，在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
     ], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }

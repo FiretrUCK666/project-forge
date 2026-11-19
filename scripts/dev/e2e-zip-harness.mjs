@@ -265,9 +265,10 @@ async function runScenarioD(pkgRoot, sandbox, env) {
   runGit(wtD1, ['add', '-A'])
   runGit(wtD1, ['commit', '-qm', 'fix: d1'])
   assertOk(runNodeScript(flowD1, ['verify', '--task', 'd1', '--mode', 'full'], wtD1, env), 'Scenario D1 verify')
-  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit')
+  assertBlocked(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'BLOCKED_NOT_EXPLORED', 'Scenario D1 un-explored submit blocked')
   assertBlocked(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'BLOCKED_NOT_EXPLORED', 'Scenario D1 un-explored merge blocked')
   assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explore')
+  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit after explore')
   const nextD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
   if (!nextD1.reviewToken) throw new Error(`Scenario D1 missing reviewToken after explore: ${JSON.stringify(nextD1)}`)
   assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1',

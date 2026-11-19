@@ -545,7 +545,10 @@ export async function handleClaim(opts, roots) {
     if (opts.json) process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, mode: 'local-ledger-only', status: ledger.status, takeover: isTakeover }, null, 2)}\n`)
     else {
       process.stdout.write(`已在本地账本登记认领（role=${ledger.role}，未触碰平台 API）。\n`)
-      printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
+      const nextCmd = hasExploredEvidence(ledger)
+        ? `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
+        : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
+      printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
     }
     return { exitCode: 0 }
   }
@@ -617,7 +620,10 @@ export async function handleClaim(opts, roots) {
     process.stdout.write(`${JSON.stringify({ taskId, role: ledger.role, targetRepo, takeover: isTakeover, claimResults, ...(prTakeoverResult ? { prTakeoverResult } : {}) }, null, 2)}\n`)
   } else {
     process.stdout.write(`任务 ${taskId} 已${isTakeover ? '接管' : '认领'}（target=${targetRepo}, issues=${ledger.linkedIssues.join(',')}）。\n`)
-    printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}` }], { repoRoot: roots.mainRoot })
+    const nextCmd = hasExploredEvidence(ledger)
+      ? `node ".agents/skills/dev-flow/scripts/flow.mjs" finalize --task ${taskId}`
+      : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
+    printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
   }
   return { exitCode: 0 }
 }

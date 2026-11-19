@@ -78,6 +78,7 @@ export function registerFlowStateCases(cases) {
     try {
       const roots = await resolveRepoRoots(qOnlyDir)
       await handleStart({ task: 'q1', case: '2', slug: 'q1' }, roots)
+      await seedExploredFor(qOnlyDir, 'q1')
       const wtq = join(qOnlyDir, '.worktrees', 'impl-q1')
       writeFileSync(join(wtq, 'src/a.mjs'), 'export const q = 2\n')
       gitCommitFast(wtq, 'q2', { updateOnly: true })
@@ -235,6 +236,7 @@ export function registerFlowStateCases(cases) {
       if (sCom.isolation !== 'worktree' || sCom.worktreePath !== '.worktrees/impl-c2-wt' || sCom.baseSha !== mainSha) {
         return `有提交仓 Case 1 未强制 Tier 2 或 baseSha 不对：${JSON.stringify(sCom)}`
       }
+      await seedExploredFor(committed, 'c2-wt')
 
       const implAbs = join(committed, sCom.worktreePath)
       const revAbs = join(committed, sCom.reviewWorktreePath)
@@ -291,6 +293,7 @@ export function registerFlowStateCases(cases) {
       }
 
       await handleStart({ task: 'm1', case: '4', slug: 'm1', issue: '11', spec: 'docs/specs/261116-issue11-m1-spec.md' }, roots)
+      await seedExploredFor(dir, 'm1')
       const st = readTaskLedger(dir, 'm1')
       const wt = join(dir, st.worktreePath)
       const masterAfterStart = readFileSync(join(wt, 'docs/prd/261116-issue10-master-prd.md'), 'utf8')

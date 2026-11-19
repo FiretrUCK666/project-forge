@@ -445,39 +445,27 @@ export function hydratePrTemplateBody({
   const todoText = repoRoot && todoRel && existsSync(join(repoRoot, todoRel)) ? readTextSafe(join(repoRoot, todoRel)) : ''
   const readableTitle = resolveReadablePrTitle(repoRoot, ledger)
 
-  const specGoalBullets = extractMeaningfulBullets(
-    extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景)/]),
-    3,
-  )
-  const todoOutcomeBullets = extractMeaningfulBullets(
-    extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果)/]),
-    3,
-  )
-  const summaryLines = [
+  const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景)/]), 3)
+  const todoOutcomeBullets = extractMeaningfulBullets(extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果)/]), 3)
+  const summaryText = [
     `- **${readableTitle}**（任务 \`${taskId}\`，实施者：${actorDisplay}，涉及 ${changedFiles.length} 个文件）`,
     ...todoOutcomeBullets.map((b) => `- ${b}`),
     ...(todoOutcomeBullets.length === 0 ? specGoalBullets.map((b) => `- ${b}`) : []),
-  ]
-  const summaryText = summaryLines.join('\n')
-
-  const whyLines = [
+  ].join('\n')
+  const whyText = [
     ...(specGoalBullets.length > 0 ? specGoalBullets.slice(0, 2).map((b) => `- ${b}`) : [`- 完成任务 \`${taskId}\` 并对齐工程契约与文档。`]),
     `- 关联文档：${docSummary}`,
-  ]
-  const whyText = whyLines.join('\n')
-
+  ].join('\n')
   const basisText = [
     `- 档位与风险：Case ${ledger?.caseType ?? 3} / risk=\`${policy?.riskTier ?? 'medium'}\``,
     `- 分支与隔离：\`${ledger?.branch ?? 'unknown'}\`（${ledger?.worktreePath ?? 'branch'}）`,
     `- 关联文档：${docSummary}`,
   ].join('\n')
-
   const riskLines = [
     `- 风险等级：\`${policy?.riskTier ?? 'medium'}\`（变更文件 ${changedFiles.length} 个）`,
     policy?.highRiskHits?.length ? `- 命中高风险路径：${policy.highRiskHits.slice(0, 6).map((f) => `\`${f}\``).join('、')}` : null,
     policy?.oneWayBoundaryHits?.length ? `- 触及 one-way 边界：${policy.oneWayBoundaryHits.slice(0, 6).map((f) => `\`${f}\``).join('、')}` : null,
   ].filter(Boolean).join('\n')
-
   const verifyText = buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged, visualVerifiedOnHead })
   const rollbackText = `- 回滚基线：\`${String(ledger?.baseSha ?? '').slice(0, 7) || ledger?.baseBranch || 'main'}\`（反向提交 \`git revert\` 并重跑完整门禁）`
   const mergeAuthText = policy?.independentReviewRequired === false
@@ -488,47 +476,25 @@ export function hydratePrTemplateBody({
   const tplPath = repoRoot ? join(repoRoot, '.github', 'pull_request_template.md') : ''
   const tplRaw = tplPath && existsSync(tplPath) ? readTextSafe(tplPath) : null
   if (!tplRaw) {
-    return [
-      '## 变更摘要', '', summaryText, '',
-      '## 改动理由', '', whyText, '',
-      '## 关联 Issue', '', fixesLine, '',
-      '## 影响面与风险', '', riskLines, '',
-      '## 验证证据', '', verifyText, '',
-      '## 回滚方式', '', rollbackText, '',
-      pfTag,
-    ].join('\n')
+    return ['## 变更摘要', '', summaryText, '', '## 改动理由', '', whyText, '', '## 关联 Issue', '', fixesLine, '', '## 影响面与风险', '', riskLines, '', '## 验证证据', '', verifyText, '', '## 回滚方式', '', rollbackText, '', pfTag].join('\n')
   }
 
   let body = stripHtmlCommentsOutsideFences(tplRaw)
   body = removeSectionByHeading(body, '独立审查与故障注入')
-
-  const issueAndDocsText = [
-    fixesLine,
-    `- 关联文档：${docSummary}`,
-  ].join('\n')
-  const riskAndRollbackText = [riskLines, rollbackText].filter(Boolean).join('\n')
-
   const sectionUpdates = [
     [['变更摘要', '改了什么'], summaryText],
-    [['关联 Issue 与文档'], issueAndDocsText],
+    [['关联 Issue 与文档'], `${fixesLine}\n- 关联文档：${docSummary}`],
     [['关联 Issue'], fixesLine],
     [['改动理由', '为什么'], whyText],
     [['实现依据'], basisText],
-    [['影响面、风险与回滚方式'], riskAndRollbackText],
+    [['影响面、风险与回滚方式'], [riskLines, rollbackText].filter(Boolean).join('\n')],
     [['影响面与风险', '风险与影响范围'], riskLines],
     [['验证证据', '怎么验证的'], verifyText],
     [['回滚方式', '回滚点'], rollbackText],
     [['合并授权'], mergeAuthText],
   ]
-  for (const [headings, content] of sectionUpdates) {
-    const res = replaceSectionIfPresent(body, headings, content)
-    body = res.text
-  }
-  body = updateChecklistByEvidence(body, {
-    verifyPassed,
-    finalized: Boolean(ledger?.finalized),
-    hasNoSecrets: verifyPassed,
-  })
+  for (const [headings, content] of sectionUpdates) body = replaceSectionIfPresent(body, headings, content).text
+  body = updateChecklistByEvidence(body, { verifyPassed, finalized: Boolean(ledger?.finalized), hasNoSecrets: verifyPassed })
   return `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
 }
 

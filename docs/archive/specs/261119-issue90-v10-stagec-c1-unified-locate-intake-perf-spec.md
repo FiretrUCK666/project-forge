@@ -8,7 +8,7 @@ updated: 2026-11-19
 issue: 90
 pr: null
 branch: feat/stagec-c1
-owner: impl-c2
+owner: impl-c1
 approved: true
 implemented: true
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=7a607116f7ef, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"

@@ -7,7 +7,7 @@ updated: 2026-11-19
 issue: 90
 pr: null
 branch: feat/stagec-c1
-owner: impl-c2
+owner: impl-c1
 approved: false
 done_at: 2026-11-19
 task_id: v10-stagec-c1

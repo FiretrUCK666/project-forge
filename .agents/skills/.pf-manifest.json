@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-19T04:49:25.078Z",
+  "installedAt": "2026-11-19T04:52:05.012Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "6e2d6a28f77485ce45f4f5a84aa8cd486a7171429501915e6a2761e30c661683"
@@ -310,7 +310,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-helpers.mjs": {
-      "sha256": "48bf7a397501308c11d7acb43ddf68e6d1fc0d7b19637477bdc367571a81ff2e"
+      "sha256": "989fde8e6f421ba71b57af961ceda7afcca01c76fa01a14b457f60d133e84a83"
     },
     "lib/workflow-policy.mjs": {
       "sha256": "90e88aae26d51ad3e955b4e3fc25428199a2f0327696007b840261d4f4e151da"

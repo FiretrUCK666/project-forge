@@ -15,15 +15,19 @@ import {
 } from './git-fast.mjs'
 import { hasHumanMergeAuthority } from './profile.mjs'
 import {
-  buildLexedViews, detectCommentedDeadCodeBlocks, extractLineCommentInfo, HARD_SLEEP_RULES,
+  buildLexedViews, checkProcessArtifactFilename, detectCommentedDeadCodeBlocks,
+  extractLineCommentInfo, findProcessArtifactFilenameViolations, HARD_SLEEP_RULES,
   isRustLifetimeAt, looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE,
-  MOCK_SPY_ASSERT_RE, scanTestAntiCheat, stripCodeCommentsLines,
+  MOCK_SPY_ASSERT_RE, PROCESS_ARTIFACT_EXCLUDED_DIR_RE, PROCESS_ARTIFACT_FILENAME_RE,
+  scanTestAntiCheat, stripCodeCommentsLines,
 } from './static-gates-lexer.mjs'
 
 export {
-  buildLexedViews, detectCommentedDeadCodeBlocks, extractLineCommentInfo, HARD_SLEEP_RULES,
+  buildLexedViews, checkProcessArtifactFilename, detectCommentedDeadCodeBlocks,
+  extractLineCommentInfo, findProcessArtifactFilenameViolations, HARD_SLEEP_RULES,
   isRustLifetimeAt, looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE,
-  MOCK_SPY_ASSERT_RE, scanTestAntiCheat, stripCodeCommentsLines,
+  MOCK_SPY_ASSERT_RE, PROCESS_ARTIFACT_EXCLUDED_DIR_RE, PROCESS_ARTIFACT_FILENAME_RE,
+  scanTestAntiCheat, stripCodeCommentsLines,
 }
 
 export const PACKAGE_LOCKFILES = Object.freeze([

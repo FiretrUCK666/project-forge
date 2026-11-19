@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * fixtures-stagec-c2.mjs —— Stage C-2（C5..C8 + 普通审查范围外高危自动升级 + 审查评论表格精炼）正反双向行为断言。
+ * fixtures-edit-pyramid.mjs —— dev-edit 词法门禁、过程工件命名拦截、严格三层倒金字塔与 dev-govern 自动触发正反双向断言。
  *
- * 同时支持独立执行（`node scripts/dev/fixtures-stagec-c2.mjs`）与由 `fixtures.mjs` 自动发现加载。
+ * 同时支持独立执行（`node scripts/dev/fixtures-edit-pyramid.mjs`）与由 `fixtures.mjs` 自动发现加载。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -18,7 +18,7 @@ import { runEditGate } from '../../kit/skills/dev-edit/scripts/edit-gate.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import { handleRecord } from '../../kit/skills/dev-review/scripts/review-ledger.mjs'
 import {
-  compactCriterionSummary, compactReviewCriteriaTable, syncReviewToGitHub,
+  formatReviewCriteriaTable, sanitizeReviewTableCell, syncReviewToGitHub,
 } from '../../kit/skills/dev-review/scripts/review-sync.mjs'
 import { loadGovernState } from '../../kit/skills/dev-govern/scripts/govern-state.mjs'
 import {
@@ -41,8 +41,8 @@ async function withQuietIo(fn) {
   }
 }
 
-export function registerStageCC2Cases(cases) {
-  cases.push(['StageC C5：第 6 技能 dev-edit 与 edit-gate 词法去噪全入口门禁（正反双向）', async () => {
+export function registerEditPyramidCases(cases) {
+  cases.push(['StageC C5：第 6 技能 dev-edit、edit-gate 词法去噪与过程工件命名拦截（正反双向）', async () => {
     const kitSkills = discoverKitSkills(join(SKILL_ROOT, 'kit', 'skills'))
     const devEdit = kitSkills.find((s) => s.dirName === 'dev-edit')
     if (!devEdit || devEdit.order !== 33) {
@@ -103,6 +103,16 @@ export function registerStageCC2Cases(cases) {
       'test/bad-sleep.test.mjs': "import assert from 'node:assert/strict'\nawait new Promise((r) => setTimeout(r, 1500))\nassert.ok(true)\n",
       'test/bad-headed.test.mjs': "import assert from 'node:assert/strict'\nconst opts = { headless: false }\nassert.ok(opts)\n",
       'test/good.test.mjs': "import assert from 'node:assert/strict'\nconst sample = 'setTimeout(r, 2000)'\nassert.strictEqual(typeof sample, 'string')\n",
+      // 过程工件文件名（正向应阻断）与常规业务文件名（反向应放行）
+      'src/issue99-fix.mjs': 'export const fix = 1\n',
+      'tests/stagec-c2.test.mjs': "import assert from 'node:assert/strict'\nassert.ok(true)\n",
+      'scripts/wave3-runner.mjs': 'export const run = 1\n',
+      'src/local-issues.mjs': 'export const listIssues = () => []\n',
+      'src/flow-issues.mjs': 'export const syncIssues = () => []\n',
+      'src/review-pr.mjs': 'export const scanPr = () => true\n',
+      'src/api/v2/handler.mjs': 'export const handle = () => 200\n',
+      'src/staged.mjs': 'export const staged = true\n',
+      'docs/specs/261119-issue91-spec.md': '# spec\n',
     })
     gitInit(dir, { branch: 'main', name: 't', email: 't@t.t' })
 
@@ -119,11 +129,15 @@ export function registerStageCC2Cases(cases) {
         return `pre-edit 未返回相邻复用符号提示：${JSON.stringify(preBlock.reuseHints)}`
       }
 
-      // 2. 正向阻断：bad.mjs + huge.mjs + 4 类坏测试必须全部命中对应规则
+      // 2. 正向阻断：bad.mjs + huge.mjs + 4 类坏测试 + 3 类过程工件文件名必须全部命中对应规则
       const badRes = await runEditGate({
         mode: 'verify',
         dir,
-        files: ['src/ui/bad.mjs', 'src/core/huge.mjs', 'test/bad-zero.test.mjs', 'test/bad-mock.test.mjs', 'test/bad-sleep.test.mjs', 'test/bad-headed.test.mjs'],
+        files: [
+          'src/ui/bad.mjs', 'src/core/huge.mjs',
+          'test/bad-zero.test.mjs', 'test/bad-mock.test.mjs', 'test/bad-sleep.test.mjs', 'test/bad-headed.test.mjs',
+          'src/issue99-fix.mjs', 'tests/stagec-c2.test.mjs', 'scripts/wave3-runner.mjs',
+        ],
       })
       const ruleIds = new Set(badRes.blockers.map((b) => b.ruleId))
       for (const want of [
@@ -136,16 +150,35 @@ export function registerStageCC2Cases(cases) {
         'edit.test-mock-tautology',
         'edit.test-hard-sleep',
         'edit.test-non-headless',
+        'naming.process-artifact-filename',
       ]) {
         if (!ruleIds.has(want)) return `edit-gate 漏报 ${want}：actual=${JSON.stringify([...ruleIds])}`
       }
+      const namingHits = badRes.blockers.filter((b) => b.ruleId === 'naming.process-artifact-filename').map((b) => b.file)
+      if (namingHits.length !== 3) {
+        return `过程工件文件名阻断数不符（期望 3）：${JSON.stringify(namingHits)}`
+      }
       if (badRes.exitCode !== 3) return `edit-gate 命中阻塞项未返回 exitCode=3：${badRes.exitCode}`
 
-      // 3. 反向防误报：词法去噪免疫字面量/正则、pf-allow 锚点、夹具白名单、745 行紧文件不阻断、--with-native 无外部 linter 安全跳过
+      // 2b. govern-audit 同步执行 naming.process-artifact-filename 且不误伤合法业务文件与 docs/specs/
+      const govAud = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['audit', dir, '--categories', 'hygiene', '--json'])
+      if (govAud.status !== 0) return `govern-audit hygiene 失败：${govAud.stderr}`
+      const govNamingIds = (JSON.parse(govAud.stdout).findings ?? []).filter((f) => f.id.startsWith('naming.process-artifact-filename.')).map((f) => f.file)
+      for (const badName of ['src/issue99-fix.mjs', 'tests/stagec-c2.test.mjs', 'scripts/wave3-runner.mjs']) {
+        if (!govNamingIds.includes(badName)) return `govern-audit 漏报过程工件文件名 ${badName}：${JSON.stringify(govNamingIds)}`
+      }
+      for (const goodName of ['src/local-issues.mjs', 'src/flow-issues.mjs', 'src/review-pr.mjs', 'src/api/v2/handler.mjs', 'src/staged.mjs', 'docs/specs/261119-issue91-spec.md']) {
+        if (govNamingIds.includes(goodName)) return `govern-audit 误报合法文件名 ${goodName}：${JSON.stringify(govNamingIds)}`
+      }
+
+      // 3. 反向防误报：词法去噪免疫字面量/正则、pf-allow 锚点、夹具白名单、745 行紧文件、合法业务文件名不阻断、--with-native 安全跳过
       const cleanRes = await runEditGate({
         mode: 'standalone',
         dir,
-        files: ['src/shared/clean.mjs', 'src/shared/tight.mjs', 'test/fixtures/sample.mjs', 'test/good.test.mjs'],
+        files: [
+          'src/shared/clean.mjs', 'src/shared/tight.mjs', 'test/fixtures/sample.mjs', 'test/good.test.mjs',
+          'src/local-issues.mjs', 'src/flow-issues.mjs', 'src/review-pr.mjs', 'src/api/v2/handler.mjs', 'src/staged.mjs', 'docs/specs/261119-issue91-spec.md',
+        ],
         withNative: true,
       })
       if (!cleanRes.ok || cleanRes.exitCode !== 0 || cleanRes.blockers.length > 0) {
@@ -156,6 +189,13 @@ export function registerStageCC2Cases(cases) {
       }
       if (cleanRes.nearLimitFiles.length !== 1 || cleanRes.nearLimitFiles[0].file !== 'src/shared/tight.mjs') {
         return `745 行紧文件未产生 advisory 预警：${JSON.stringify(cleanRes.nearLimitFiles)}`
+      }
+
+      // 3b. 对接 flow-lifecycle-hooks.mjs 契约：不传 --changed 仅传 --task <id> --json 仍扫描变动文件
+      writeFileSync(join(dir, 'src/shared/clean.mjs'), '// @ts-ignore\nexport const ok = false\n')
+      const hookCli = await runAbsAsync('kit/skills/dev-edit/scripts/edit-gate.mjs', ['--dir', dir, '--task', 'c5-hook', '--json'])
+      if (hookCli.status !== 3 || !hookCli.stdout.includes('edit.suppression-bypass')) {
+        return `edit-gate CLI (--task 无 --changed) 未自动扫描脏文件：status=${hookCli.status}, out=${hookCli.stdout}`
       }
 
       // 4. --skip-edit-gate 审计与 final 阻断
@@ -174,24 +214,21 @@ export function registerStageCC2Cases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['StageC C6：signals 指纹兼容、labelRes 失败告警、普通审查范围外高危建单与 review-sync 表格精炼', async () => {
+  cases.push(['StageC C6：signals 指纹兼容、labelRes 失败告警、普通审查范围外高危建单与 review-sync 表格无损安全化', async () => {
     const ledgerSrc = readFileSync(join(SKILL_ROOT, 'kit', 'skills', 'dev-review', 'scripts', 'review-ledger.mjs'), 'utf8')
     if (/\bwriteTaskLedger\s*\(/.test(ledgerSrc)) {
       return 'review-ledger.mjs 仍残留未迁移的 writeTaskLedger 调用'
     }
 
-    // 1. 表格精炼纯函数正反断言
-    const longCriterion = '（SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及超限文件（补充一大段说明防止撑爆表格单元格排版测试文本）'
-    const compact = compactCriterionSummary(longCriterion, 120)
-    if (compact.length > 120 || compact.includes('\n')) {
-      return `compactCriterionSummary 未控制在 120 字符单行内：len=${compact.length}, text=${compact}`
+    // 1. 表格无损安全化纯函数正反断言（绝不截断原文，仅折行并转义未转义竖线）
+    const longCriterion = '（SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及超限文件（完整保留长条款原文绝对不得截断）'
+    const rawWithPipeAndNl = `${longCriterion}\n支持 verify|standalone 模式，已转义 \\| 不重复转义`
+    const sanitized = sanitizeReviewTableCell(rawWithPipeAndNl)
+    if (sanitized.includes('\n') || !sanitized.includes(longCriterion) || !sanitized.includes('verify\\|standalone') || sanitized.includes('\\\\|')) {
+      return `sanitizeReviewTableCell 未无损保留全文或竖线转义异常：${sanitized}`
     }
-    if (((compact.match(/`/g) ?? []).length % 2) !== 0) {
-      return `compactCriterionSummary 截断导致反引号不配对：${compact}`
-    }
-    const shortText = '保留短条款原样文本'
-    if (compactCriterionSummary(shortText, 120) !== shortText) {
-      return 'compactCriterionSummary 误改短文本'
+    if (sanitized.length < longCriterion.length) {
+      return `sanitizeReviewTableCell 发生截断：len=${sanitized.length} < ${longCriterion.length}`
     }
     const samplePrBody = [
       '### 审核不通过 · Round 1',
@@ -200,20 +237,19 @@ export function registerStageCC2Cases(cases) {
       '',
       '| 标准 | 状态 | 核对内容与阻塞定位 |',
       '| --- | --- | --- |',
-      `| C5 | FAIL | [MF-1] \`src/app.mjs:12\`: ${longCriterion} |`,
+      `| C5 | FAIL | [MF-1] \`src/app.mjs:12\`: ${longCriterion} (verify|standalone) |`,
       '',
       '#### Must Fix（阻塞合入）',
       '',
       `1. **[MF-1] \`src/app.mjs:12\`**：${longCriterion}`,
     ].join('\n')
-    const compactedBody = compactReviewCriteriaTable(samplePrBody, 120)
-    const tableRow = compactedBody.split('\n').find((l) => l.startsWith('| C5 | FAIL |'))
-    const cell3 = tableRow?.split('|')[3]?.trim() ?? ''
-    if (!tableRow || cell3.length > 120 || !cell3.includes('src/app.mjs:12')) {
-      return `compactReviewCriteriaTable 未压缩表格单元格或丢失定位：${tableRow}`
+    const formattedBody = formatReviewCriteriaTable(samplePrBody)
+    const tableRow = formattedBody.split('\n').find((l) => l.startsWith('| C5 | FAIL |'))
+    if (!tableRow || !tableRow.includes(longCriterion) || !tableRow.includes('verify\\|standalone') || !tableRow.includes('src/app.mjs:12')) {
+      return `formatReviewCriteriaTable 未完整保留长条款或未转义竖线：${tableRow}`
     }
-    if (!compactedBody.includes(`1. **[MF-1] \`src/app.mjs:12\`**：${longCriterion}`)) {
-      return 'compactReviewCriteriaTable 误删了 Must Fix 详情节正文'
+    if (!formattedBody.includes(`1. **[MF-1] \`src/app.mjs:12\`**：${longCriterion}`)) {
+      return 'formatReviewCriteriaTable 误改了 Must Fix 详情节正文'
     }
 
     // 2. 端到端仓测试：旧无指纹信号兼容、labelRes 失败可见、普通审查范围外高危自动建单与去重、低危不建单
@@ -303,9 +339,8 @@ export function registerStageCC2Cases(cases) {
         }
         const prTarget = syncRes.delegatedPayloads?.targets?.find((t) => t.kind === 'pr')
         const prRow = prTarget?.rawBody?.split('\n').find((l) => l.startsWith('| C5 | PASS |'))
-        const prCell = prRow?.split('|')[3]?.trim() ?? ''
-        if (!prRow || prCell.length > 120) {
-          return `syncReviewToGitHub PR 评论表格未压缩 C5：len=${prCell.length}, row=${prRow}`
+        if (!prRow || !prRow.includes(longCriterion)) {
+          return `syncReviewToGitHub PR 评论表格未完整保留 C5 原文（发生截断或丢失）：row=${prRow}`
         }
       } finally { rmTree(syncDir) }
       return true
@@ -363,12 +398,18 @@ export function registerStageCC2Cases(cases) {
         return `Tier 1 升格未生成唯一重构单：${JSON.stringify(listLocalIssues({ mainRoot: dir, gitDir: roots.gitDir }).issues)}`
       }
 
-      // 2. 二次运行 --auto 不得对同指纹重复建单
+      // 2. 二次运行 --auto 不得对同指纹重复建单；且直调 govern-retro.mjs summary --task t-2 --json（对接 flow-lifecycle-hooks）正常执行
       const r2 = await runAbsAsync('kit/skills/dev-govern/scripts/govern-audit.mjs', ['retro', dir, '--auto', '--task', 't-2', '--json'])
       if (r2.status !== 0) return `retro --auto 失败：${r2.stderr}`
       const j2 = JSON.parse(r2.stdout)
       if (listLocalIssues({ mainRoot: dir, gitDir: roots.gitDir }).issues.length !== 1 || !j2.tier1EscalationResults.some((x) => x.deduplicated)) {
         return `同指纹 Tier 1 重构单未去重：issues=${listLocalIssues({ mainRoot: dir, gitDir: roots.gitDir }).issues.length}, res=${JSON.stringify(j2.tier1EscalationResults)}`
+      }
+      const rDirect = await runAbsAsync('kit/skills/dev-govern/scripts/govern-retro.mjs', ['summary', dir, '--task', 't-2', '--json'])
+      if (rDirect.status !== 0) return `govern-retro.mjs summary 直调 CLI 失败：${rDirect.stderr}`
+      const jDirect = JSON.parse(rDirect.stdout)
+      if (!jDirect.defaultAgentsWriteDisabled || !jDirect.auto || jDirect.taskFilter !== 't-2') {
+        return `govern-retro.mjs summary 直调输出异常：${rDirect.stdout}`
       }
 
       // 3. --allow-tier3-fallback 缺 reason 必报错退出 2；带 reason 才写 [TIER-3-FALLBACK]
@@ -532,12 +573,12 @@ export function registerStageCC2Cases(cases) {
   }])
 }
 
-export const registerCases = registerStageCC2Cases
-export default registerStageCC2Cases
+export const registerCases = registerEditPyramidCases
+export default registerEditPyramidCases
 
 if (isMainModule(import.meta.url, process.argv[1])) {
   const cases = []
-  registerStageCC2Cases(cases)
+  registerEditPyramidCases(cases)
   ;(async () => {
     let failed = 0
     for (const [name, fn] of cases) {
@@ -554,7 +595,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
         process.stderr.write(`FAIL: ${name}\n  ${err instanceof Error ? err.stack : String(err)}\n`)
       }
     }
-    process.stdout.write(`\nStage C-2 夹具汇总：${cases.length - failed} 通过，${failed} 失败。\n`)
+    process.stdout.write(`\nedit-pyramid 夹具汇总：${cases.length - failed} 通过，${failed} 失败。\n`)
     await flushAndExit(failed === 0 ? 0 : 1)
   })()
 }

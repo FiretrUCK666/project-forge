@@ -23,7 +23,7 @@ critique_anchors: "{\"sections\":{\"goal\":{\"present\":true,\"substantive\":tru
 ## 文档信息与变更概览
 
 - **所属总控 PRD**：[Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)（承接验收标准 `C5–C8`，对应 `SC5–SC8`）
-- **所属波次与并行约束**：Wave C-1 右翼，与 [Stage C-1 设计规范](../specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md) 并行开发、写域严格零交叠；依赖 Stage B 合入 `main`
+- **所属波次与并行约束**：Wave C-1 右翼，与 [Stage C-1 设计规范](../archive/specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md) 并行开发、写域严格零交叠；依赖 Stage B 合入 `main`
 - **关联待办**：[Stage C-2 Todo](../todo/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-todo.md)
 - Issue: #91
 
@@ -127,8 +127,8 @@ flowchart LR
    - `kit/skills/dev-govern/scripts/govern-tests.mjs`
    - `kit/skills/dev-govern/scripts/govern-audit.mjs`
 4. **独立双向夹具与派生装配同步**：
-   - `scripts/dev/fixtures-stagec-c2.mjs` (new)
-   - `scripts/dev/injections-data-stagec-c2.mjs` (new)
+   - `scripts/dev/fixtures-edit-pyramid.mjs` (new)
+   - `scripts/dev/injections-data-edit-pyramid.mjs` (new)
    - 在本 PR 内运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步派生 `.agents/skills/` 与 `AGENTS.md` `意图路由`（保证 CI `equip.mjs . --check` 与 `compose-agents.mjs . --check` 全绿）。
 
 ## 五、冻结的验收标准
@@ -164,7 +164,7 @@ flowchart LR
 
 ## 实现说明
 
-- 第 6 技能 `kit/skills/dev-edit/SKILL.md`（56L，`order: 33`）与 `kit/skills/dev-edit/scripts/edit-gate.mjs`（456L）落地；基于 `static-gates-lexer.mjs` `buildLexedViews` 对本仓 30 个变更文件实测 0 误报，正反夹具覆盖 9 类阻断与词法去噪免疫。
-- `signals.jsonl` 扩展 `{ defectClass, pyramidTier, fingerprint, targetArtifact }` 与旧条目读时虚拟指纹补全；`review-ledger.mjs`（600L）零 `writeTaskLedger`、写入条级信号并在普通审查对命中 `classifyEscalationTier === 'escalated-issue'` 的范围外/存量发现按指纹去重自动建单；`review-sync.mjs` 修复 `labelRes`/`addRes` 失败静默忽略并将 PR 审查表格单元格压缩至单行 `<= 120` 字符。
-- `govern-retro.mjs` 彻底废除默认回写 `AGENTS.md`，复发 `>= 2` 次强制按 Tier 1 重构单（去重）/ Tier 2 确定性静态门禁分派，仅 `--allow-tier3-fallback --reason` 允许写 `[TIER-3-FALLBACK]` 并自动清理过期或已由 Tier 2 覆盖条款。
-- `govern-audit.mjs`（`--changed --quiet --json`、`--skip-govern`）、`govern-state.mjs`（670L）与 `govern-tests.mjs`（移除 `NON_UNIT_TEST_RE`、接入 `profile-sniffer.mjs` 元数据分层与小仓免报 `tests.unfiltered-quick-test`）全部通过双向夹具（`5/5`）与故障注入（`9/9`）及 `$TMPDIR` 异构仓实测。
+- 第 6 技能 `kit/skills/dev-edit/SKILL.md`（65L，`order: 33`，含「无预设工具运行时实证分级策略」）与 `kit/skills/dev-edit/scripts/edit-gate.mjs`（459L，支持不传 `--changed` 仅传 `--task` 自动扫描变更文件以无缝对接 `flow-lifecycle-hooks.mjs`）落地；基于 `static-gates-lexer.mjs` `buildLexedViews` 与通用 Tier 2 规则 `naming.process-artifact-filename`（`edit-gate` 与 `govern-audit` 双端共享），正反夹具覆盖 10 类阻断与词法去噪免疫。
+- `signals.jsonl` 扩展 `{ defectClass, pyramidTier, fingerprint, targetArtifact }` 与旧条目读时虚拟指纹补全；`review-ledger.mjs`（600L）零 `writeTaskLedger`、写入条级信号并在普通审查对命中 `classifyEscalationTier === 'escalated-issue'` 的范围外/存量发现按指纹去重自动建单；`review-sync.mjs` 修复 `labelRes`/`addRes` 失败静默忽略，并按维护者决策对 PR 审查表格仅做无损 Markdown 安全化（折行并转义未转义竖线，完整保留条款原文不做截断）。
+- `govern-retro.mjs` 彻底废除默认回写 `AGENTS.md` 并补齐 `summary --task {taskId} --json` 直调 CLI 入口（对接 `flow-lifecycle-hooks.mjs`），复发 `>= 2` 次强制按 Tier 1 重构单（去重）/ Tier 2 确定性静态门禁分派，仅 `--allow-tier3-fallback --reason` 允许写 `[TIER-3-FALLBACK]` 并自动清理过期或已由 Tier 2 覆盖条款。
+- `govern-audit.mjs`（`--changed --quiet --json`、`--skip-govern`）、`govern-state.mjs`（670L）、`dev-govern/SKILL.md`（已清净旧档位残留 wording）与 `govern-tests.mjs`（移除 `NON_UNIT_TEST_RE`、接入 `profile-sniffer.mjs` 元数据分层与小仓免报 `tests.unfiltered-quick-test`）全部按功能域命名为 `scripts/dev/fixtures-edit-pyramid.mjs` 与 `scripts/dev/injections-data-edit-pyramid.mjs` 并通过全量自动发现门禁与故障注入实测。

@@ -2,7 +2,7 @@
  * review-sync.mjs —— 将独立审查结果按 `TaskBackend` 通道双写回远端 PR/Issue 或本地工单。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），远端写入前强制经 `probeForWrite` 探测通道。
- * 显式汇总评论与标签同步状态，并将 PR 审查单中的验收标准逐条核对表压缩为单行可读摘要。
+ * 显式汇总评论与标签同步状态，并对 PR 审查单中的验收标准逐条核对表做无损 Markdown 表格安全化。
  */
 
 import { buildReviewComments } from '../../lib/docs.mjs'
@@ -17,43 +17,19 @@ import { computeSignalFingerprint, inferDefectClass, inferSignalModule } from '.
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
 
-const DEFAULT_TABLE_CELL_MAX = 120
+const ISSUE_TITLE_MAX = 72
 const FILE_REF_RE = /\b((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,10})(?::(\d+))?\b/
 
-/** 将单条验收标准或阻塞核对文本压缩为单行可读摘要（默认 <= 120 字符，避免撑爆 Markdown 表格）。 */
-export function compactCriterionSummary(rawText, maxChars = DEFAULT_TABLE_CELL_MAX) {
-  const limit = Number.isInteger(maxChars) && maxChars >= 24 ? maxChars : DEFAULT_TABLE_CELL_MAX
-  let clean = String(rawText ?? '')
+/** 无损安全化 Markdown 表格单元格：仅折行并转义未转义竖线，完整保留全部条款原文不做任何截断。 */
+export function sanitizeReviewTableCell(rawText) {
+  return String(rawText ?? '')
     .replace(/\r?\n/g, ' ')
-    .replace(/\|/g, '\\|')
-    .replace(/\s+/g, ' ')
+    .replace(/(?<!\\)\|/g, '\\|')
     .trim()
-  if (clean.length <= limit) return clean
-
-  // 优先去掉冗长中文/英文括号补充说明，保留核心动词与定位
-  const stripped = clean
-    .replace(/（[^（）]{18,}）/g, '')
-    .replace(/\([^()]{24,}\)/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (stripped.length >= 16 && stripped.length <= limit) return stripped
-  if (stripped.length >= 24 && stripped.length < clean.length) clean = stripped
-  if (clean.length <= limit) return clean
-
-  let cut = clean.slice(0, limit - 1).trimEnd()
-  // 避免在反引号中间截断破坏表格格式
-  const ticks = (cut.match(/`/g) ?? []).length
-  if (ticks % 2 === 1) {
-    const lastTick = cut.lastIndexOf('`')
-    if (lastTick > limit * 0.5) cut = cut.slice(0, lastTick).trimEnd()
-    else cut = `${cut.slice(0, Math.max(1, cut.length - 1))}\``
-  }
-  cut = cut.replace(/[，、；：,:;\s-]+$/, '')
-  return `${cut}…`
 }
 
-/** 压缩 PR 审查评论中「验收标准逐条核对」表格第三列单元格，保留完整 Must Fix 正文不动。 */
-export function compactReviewCriteriaTable(prCommentBody, maxChars = DEFAULT_TABLE_CELL_MAX) {
+/** 无损安全化 PR 审查评论中「验收标准逐条核对」表格单元格（仅折叠换行并转义未转义竖线，零截断）。 */
+export function formatReviewCriteriaTable(prCommentBody) {
   const lines = String(prCommentBody ?? '').split('\n')
   let inCriteriaTable = false
   const out = []
@@ -71,14 +47,20 @@ export function compactReviewCriteriaTable(prCommentBody, maxChars = DEFAULT_TAB
       }
       const rowM = /^\|\s*(C\d+[^|]*?)\s*\|\s*(PASS|FAIL)\s*\|\s*(.+?)\s*\|$/.exec(line)
       if (rowM) {
-        const compacted = compactCriterionSummary(rowM[3], maxChars)
-        out.push(`| ${rowM[1].trim()} | ${rowM[2].trim()} | ${compacted} |`)
+        const safeCell = sanitizeReviewTableCell(rowM[3])
+        out.push(`| ${rowM[1].trim()} | ${rowM[2].trim()} | ${safeCell} |`)
         continue
       }
     }
     out.push(line)
   }
   return out.join('\n')
+}
+
+function formatShortIssueTitle(rawText, maxChars = ISSUE_TITLE_MAX) {
+  const clean = String(rawText ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim()
+  if (clean.length <= maxChars) return clean
+  return `${clean.slice(0, maxChars - 1).trimEnd()}…`
 }
 
 /** 汇总评论与标签双写结果，防止忽略 `labelRes` 失败或降级。 */
@@ -202,7 +184,7 @@ export function collectNormalReviewEscalations({
     if (seenFingerprints.has(fingerprint)) continue
     seenFingerprints.add(fingerprint)
 
-    const shortSummary = compactCriterionSummary(cand.summary, 72)
+    const shortSummary = formatShortIssueTitle(cand.summary, ISSUE_TITLE_MAX)
     const escalationItem = {
       source: 'review',
       outOfScope: cand.outOfScope,
@@ -284,7 +266,6 @@ export async function syncReviewToGitHub({
       return { synced: false, labelSynced: true, labelWarnings: [], skipped: true, reason: `role-${ledger.role ?? 'local'}` }
     }
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
-    const compactCriteria = criteria.map((c) => ({ ...c, text: compactCriterionSummary(c.text) }))
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -298,7 +279,7 @@ export async function syncReviewToGitHub({
     const { issueCommentBody } = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha,
       sourceLine: `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`,
-      criteria: compactCriteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
+      criteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
       mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems,
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
@@ -357,7 +338,6 @@ export async function syncReviewToGitHub({
       : `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`
 
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
-    const compactCriteria = criteria.map((c) => ({ ...c, text: compactCriterionSummary(c.text) }))
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -370,11 +350,11 @@ export async function syncReviewToGitHub({
     }
 
     const built = buildReviewComments({
-      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria: compactCriteria, criteriaStatusText,
+      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria, criteriaStatusText,
       faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
       rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
-    const prCommentBody = compactReviewCriteriaTable(built.prCommentBody)
+    const prCommentBody = formatReviewCriteriaTable(built.prCommentBody)
     const { issueCommentBody, stateTag } = built
     const targets = [
       ...(prNum ? [{ kind: 'pr', number: prNum }] : []),

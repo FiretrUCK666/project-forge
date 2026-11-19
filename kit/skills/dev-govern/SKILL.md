@@ -6,7 +6,6 @@ description: |
   清理过期 worktree、检查 deadcode、安全扫描、治理计划、批量提 Issue、技术债盘点、
   规则下沉、园艺聚类、sample 抽检、arch-rules 检查、release-prep、发版筹备、汇总更新日志。
 metadata:
-  tier: full
   intent: 代码体检 / 清技术债 / retro 复盘下沉
   script: node .agents/skills/dev-govern/scripts/govern-audit.mjs
   order: 50
@@ -91,11 +90,12 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 - **事后历史抽检与任务复盘（`sample` / `retro`）**：定期运行 `sample --commits 30` 统计 `Revert` 与 48 小时返工热点；任务合入后运行 `retro [--task <id>] [--apply-patches] [--json]` 自动读取 `dev-flow`（`verify`/`rework`）与 `dev-review`（`record` `--disposition`）自动沉淀的 `<gitCommonDir>/project-forge-govern/signals.jsonl`，统计无效审查率并产出规则/门禁/夹具建议补丁，反馈给下轮 `dev-plan`。
 - **顽固 Bug 三步止损**：同一模块或同一缺陷连续尝试修复 **3 次仍复发或退回**时，立即停手止损，禁止继续试错打补丁；用 `sample` 与 `cluster` 复盘架构边界与回归测试缺口，交由人类维护者拍板方案后再动。
 
-## 与其余四套研发技能的联动
+## 与其余五套研发技能的联动
 
 - **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift`、`hygiene.god-file`/`arch-boundary` 或准备执行 `retro` 规则下沉前，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 摸清真实模块入口与 `reusableModules`，再落笔治理或修订 `docs/TDD.md`。
 - **`dev-plan`**：`govern-audit.mjs plan --write-todo` 生成符合统一模板的标准 Todo 并可直接通过 `doc-plan.mjs audit`；命中跨模块债或 `retro` 建议整改时，自动指引先走 `doc-plan.mjs triage`（L3 建 `SPEC + Todo`）。
-- **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理；`flow.mjs verify`/`rework` 自动向 `signals.jsonl` 写入运行时信号供 `retro` 消费（`lightweight` 档缺省兄弟技能时自动降级为原生 Git 指引）。
+- **`dev-edit`**：`edit-gate.mjs` 与本技能共用 `static-gates.mjs` 词法与过程工件文件名拦截内核，`retro` 产出的 Tier 2 确定性规则可直接沉淀到 `edit-gate`、`arch-rules` 或 CI。
+- **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理；`flow.mjs verify`/`rework` 自动向 `signals.jsonl` 写入运行时信号供 `retro` 消费（未装配兄弟技能时自动降级为原生 Git 指引）。
 - **`dev-review`**：每轮整改与规则下沉后运行 `AGENTS.md` 全部验证命令，再用 `review-pack.mjs --local` 收口确认；`review-pack.mjs record` 的 `--disposition` 反馈自动入库 `signals.jsonl`。
 
 ## 执行与安全护栏

@@ -26,7 +26,7 @@ import {
 import { appendGovernSignal, inferSignalModule } from '../../lib/signals.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, FIXTURE_FILE_RE, NEAR_LIMIT_LINES, TEST_CASE_RE, TEST_FILE_RE,
-  evaluateArchRules, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
+  checkProcessArtifactFilename, evaluateArchRules, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
 } from '../../lib/static-gates.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
 
@@ -225,7 +225,7 @@ export async function runEditGate(opts = {}) {
     entries = opts.files.map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
   } else if (typeof opts.files === 'string' && opts.files.trim()) {
     entries = opts.files.split(',').map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
-  } else if (opts.changed || mode === 'verify') {
+  } else {
     entries = await collectChangedEntries(workTreeRoot, isGit, defaultBranch)
   }
 
@@ -247,6 +247,10 @@ export async function runEditGate(opts = {}) {
     const rel = entry.file
     if (!isLegalArchiveMove(entry) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
       blockers.push({ ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' })
+    }
+    if (mode === 'pre-edit' || existsSync(join(workTreeRoot, rel))) {
+      const procNameHit = checkProcessArtifactFilename(rel)
+      if (procNameHit) blockers.push(procNameHit)
     }
     if (highRiskGlobs.some((pat) => matchGlob(rel, pat))) {
       highRiskHits.push(rel)

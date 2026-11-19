@@ -458,3 +458,37 @@ export function scanTestAntiCheat({
 
   return findings
 }
+
+export const PROCESS_ARTIFACT_EXCLUDED_DIR_RE = /^(?:docs\/(?:prd|specs|todo|archive|release-notes|adr)\/|\.git\/|\.worktrees\/|node_modules\/)/i
+export const PROCESS_ARTIFACT_FILENAME_RE = /(?:^|[-_.])(?:issue\d+|pr\d+|mr\d+|ticket\d+|wave\d+|phase\d+|sprint\d+|slice\d+|batch\d+|stage[-_][a-z0-9]+|stage[0-9]+[a-z]?|stage[a-z][0-9]+|stage(?!d(?:$|[-_.])|s(?:$|[-_.]))[a-z])(?:$|[-_.])|[-_][bc]\d+[a-z]?(?:$|[-_.])/i
+
+/** 通用 Tier 2 静态规则：拦截源码/脚本/测试中的过程编号或阶段命名文件名（排除规划/归档文档目录）。 */
+export function checkProcessArtifactFilename(fileRel) {
+  const norm = String(fileRel ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
+  if (!norm || PROCESS_ARTIFACT_EXCLUDED_DIR_RE.test(norm)) return null
+  const base = norm.split('/').pop() ?? ''
+  const stem = base.replace(/\.[^.]+$/, '')
+  if (!stem) return null
+  const m = PROCESS_ARTIFACT_FILENAME_RE.exec(stem)
+  if (!m) return null
+  const token = m[0].replace(/^[-_.]+|[-_.]+$/g, '')
+  return {
+    ruleId: 'naming.process-artifact-filename',
+    defectClass: 'stale-contract',
+    severity: 'high',
+    file: norm,
+    line: 1,
+    token,
+    message: `过程编号文件名违规（${norm}）：命中「${token}」——源码/脚本/测试须按功能域命名，禁止使用 issue/pr/mr/ticket/stage/wave/phase/sprint/slice/batch/-bN/-cN 等过程标识`,
+    fixHint: '请按模块或功能域重命名文件（如 fixtures-edit-pyramid.mjs），过程编号仅保留在 docs/{prd,specs,todo,archive}/ 中。',
+  }
+}
+
+export function findProcessArtifactFilenameViolations(fileRelList = []) {
+  const out = []
+  for (const rel of fileRelList ?? []) {
+    const hit = checkProcessArtifactFilename(rel)
+    if (hit) out.push(hit)
+  }
+  return out
+}

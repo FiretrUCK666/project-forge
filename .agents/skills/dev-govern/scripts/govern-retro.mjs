@@ -1,5 +1,6 @@
+#!/usr/bin/env node
 /**
- * govern-retro.mjs —— `govern-audit.mjs retro`：严格三层纠偏倒金字塔与 `--auto` 自动复盘引擎。
+ * govern-retro.mjs —— `govern-audit.mjs retro` 与直调 CLI：严格三层纠偏倒金字塔与 `--auto` 自动复盘引擎。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），彻底废除默认写回 `AGENTS.md`：
  *   - Tier 1（架构重构优先）：结构耦合/状态分裂/竞态/超长紧文件复发 >=2 次经 escalation.mjs 建单去重；
@@ -9,12 +10,12 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
-import { printNextStep } from '../../lib/cli.mjs'
+import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { buildDocFilename, docIsoDate, serializeDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import { buildEscalationIssuePayload, escalateToBackend } from '../../lib/escalation.mjs'
-import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
+import { isMainModule, posixPath, readTextSafe, resolveRepoRoots, writeAtomic } from '../../lib/git.mjs'
 import { listTaskLedgers, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { detectOptionalNativeCheckers } from '../../lib/profile-sniffer.mjs'
 import {
@@ -558,4 +559,36 @@ export async function handleRetro(workRoot, mainRoot, gitDir, isGit, opts) {
     ], { repoRoot: mainRoot })
   }
   return 0
+}
+
+export async function runRetroCli(argv = process.argv.slice(2)) {
+  const { sub, opts } = parseStandardCli(argv, {
+    subcommands: ['summary', 'retro'],
+    allowPositionalWithoutSubcommand: true,
+    booleanFlags: ['json', 'auto', 'apply-patches', 'allow-tier3-fallback', 'skip-govern', 'escalate', 'help'],
+    valueFlags: ['dir', 'task', 'reason'],
+  })
+  if (opts.help) {
+    process.stdout.write('用法：node govern-retro.mjs [summary|retro] [dir] [--task <id>] [--auto] [--apply-patches] [--allow-tier3-fallback --reason "<text>"] [--skip-govern --reason "<text>"] [--json]\n')
+    return 0
+  }
+  const targetDir = resolve(String(opts.dir ?? opts._?.[0] ?? process.cwd()))
+  const roots = await resolveRepoRoots(targetDir)
+  return handleRetro(roots.workTreeRoot, roots.mainRoot, roots.gitDir, roots.isGit, {
+    task: opts.task ?? null,
+    auto: Boolean(opts.auto || !sub || sub === 'summary'),
+    applyPatches: Boolean(opts['apply-patches']),
+    allowTier3Fallback: Boolean(opts['allow-tier3-fallback']),
+    skipGovern: Boolean(opts['skip-govern']),
+    escalate: Boolean(opts.escalate),
+    reason: opts.reason ?? '',
+    json: Boolean(opts.json),
+  })
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  runRetroCli().then((code) => flushAndExit(code)).catch((err) => {
+    process.stderr.write(`govern-retro error: ${err instanceof Error ? err.message : String(err)}\n`)
+    return flushAndExit(2)
+  })
 }

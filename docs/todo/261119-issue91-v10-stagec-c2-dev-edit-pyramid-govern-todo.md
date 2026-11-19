@@ -30,7 +30,7 @@ related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec
 
 - **修改范围**：新增目录 `kit/skills/dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/` (new) 下的 `edit-gate.mjs` (new)；扩展 `signals.jsonl`、`review-ledger.mjs`（修复第 194–199 行 `labelRes` 漏洞、写入指纹与第 546/688 行 `writeTaskLedger` 迁移）、`govern-retro.mjs` 落实严格三层倒金字塔；补全 `govern-audit.mjs` 与 `govern-state.mjs` 自动触发接口；重写 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 判定消除小仓假阳性；在本 PR 内同步运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 刷新 `.agents/skills/` 与 `AGENTS.md` `意图路由`。
 - **严禁触碰**：`templates/agents-project.md` 及手改 `AGENTS.md` 受管模板结构、`SKILL.md`、`scripts/` 核心安装脚本、`kit/skills/dev-flow/`、`kit/skills/dev-explore/`、`kit/skills/dev-plan/`、`kit/skills/dev-review/scripts/{review-pack,review-pr}.mjs` 与 `kit/skills/dev-govern/scripts/release-prep-lib.mjs`（保留给 C1 写域），以及 `261118-*` Stage B 文件。
-- **验证基准命令**：`node scripts/dev/fixtures-stagec-c2.mjs`（单跑与全量 `fixtures.mjs` 均需通过）、`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`、`node scripts/dev/preflight.mjs`。
+- **验证基准命令**：`node scripts/dev/fixtures-edit-pyramid.mjs`（单跑与全量 `fixtures.mjs` 均需通过）、`node scripts/equip.mjs . --check`、`node scripts/compose-agents.mjs . --check`、`node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json`、`node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`、`node scripts/dev/preflight.mjs`。
 
 ### 不做什么（Non-Goals）
 
@@ -51,12 +51,12 @@ related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec
 - [x] 1. **新增第 6 技能 `dev-edit/` 与 `edit-gate.mjs`（C5）**：创建 `kit/skills/dev-edit/` (new)、`kit/skills/dev-edit/scripts/` (new)、`kit/skills/dev-edit/SKILL.md` (new)（`order: 33`）与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)（不超过 550 行）；扩展 `kit/skills/lib/static-gates-lexer.mjs` 与 `kit/skills/lib/static-gates.mjs`（维持不超过 720 行）支持剥离注释与字面量后拦截 6 类坏味、超过 800 行超限并联动可选原生检查（绝不硬绑定第三方 linter 二进制），对齐 `flow.mjs verify` 调用契约。
 - [x] 2. **扩展信号指纹、`review-ledger` 漏洞修复与倒金字塔引擎（C6）**：更新 `kit/skills/lib/signals.mjs` 增加 `defectClass`/`pyramidTier`/`fingerprint`/`targetArtifact` 结构与旧记录读时补全；升级 `kit/skills/dev-review/scripts/review-ledger.mjs` 修复第 194–199 行忽略 `labelRes` 失败漏洞、迁移第 546/688 行 `writeTaskLedger` 至 `updateTaskLedger` 并在 `record` 写入按条指纹；重写 `kit/skills/dev-govern/scripts/govern-retro.mjs` 彻底取消默认追加 `AGENTS.md`，对复发 `>= 2` 次自动经 Stage B 基线 `kit/skills/lib/escalation.mjs` (new) 或 `profile-sniffer.mjs` 升格 Tier 1/Tier 2（禁用未授权 Tier 3）。
 - [x] 3. **打通 `dev-govern` 自动触发与清理测试误判（C7、C8）**：升级 `kit/skills/dev-govern/scripts/govern-audit.mjs`（新增 `--changed --quiet --json`）与 `govern-state.mjs`（支撑 `--auto` 复盘基准与 `--skip-govern` 审计记录），更新 `kit/skills/dev-govern/SKILL.md`；扩展 `kit/skills/lib/profile-sniffer.mjs` 测试分层元数据探测，移除 `kit/skills/dev-govern/scripts/govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 硬编码及小型仓库 `unfiltered-quick-test` 误报。
-- [x] 4. **独立双向夹具、派生路由同步与全门禁验收（C5–C8）**：新增 `scripts/dev/fixtures-stagec-c2.mjs` (new) 与 `scripts/dev/injections-data-stagec-c2.mjs` (new) 覆盖全正反场景；在本 PR 运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 保持 `.agents/skills/` 与 `AGENTS.md` `意图路由` 对齐，并完成 `C1` rebase 与全量 `merge-gate`。
+- [x] 4. **独立双向夹具、派生路由同步与全门禁验收（C5–C8）**：新增 `scripts/dev/fixtures-edit-pyramid.mjs` (new) 与 `scripts/dev/injections-data-edit-pyramid.mjs` (new) 覆盖全正反场景；在本 PR 运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 保持 `.agents/skills/` 与 `AGENTS.md` `意图路由` 对齐，并完成 `C1` rebase 与全量 `merge-gate`。
 
 ## 风险与应对
 
 - **词法剥离在模板字符串与正则中的边缘误报**：使用现有 `static-gates-lexer.mjs` 状态机扫描 JS/TS/Py/Rust/Go 语法并写入正反例夹具对比验证。
-- **跨文件并行验收**：若 `C1` 尚未合入，确保 `fixtures-stagec-c2.mjs` (new) 可脱离 `fixtures.mjs` 直接单执行通过；`C1` 合入后立即被自动发现接入总门禁。
+- **跨文件并行验收**：确保 `fixtures-edit-pyramid.mjs` (new) 可独立执行并被 `fixtures.mjs` 自动发现接入总门禁。
 
 ## 回滚预案
 
@@ -64,25 +64,25 @@ related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec
 
 ## 协作与依赖
 
-- **前置依赖**：Stage B 全量合入（提供 `escalation.mjs` (new)）；与 `C1` 通过 `--mode verify --json`、`--changed --quiet --json`、`--auto --json` CLI 契约并行对接。
+- **前置依赖**：Stage B 全量合入（提供 `escalation.mjs` (new)）；与 `C1` 通过 `--task {taskId} --json`、`--changed --quiet --json`、`summary --task {taskId} --json` CLI 契约对接。
 - **下游交接**：合入 Wave C-1 后为 Wave C-2 的 `C4`（`dev-iterate` 测试质量门与 `escalation` 信号写回）提供就绪的 `edit-gate` 与指纹基线。
 
 ## 断点与遗留决策
 
-- 已完成，无遗留（Q2 全改码入口覆盖与钩子边界、Q3 倒金字塔禁默认改 `AGENTS.md`、普通审查范围外高危确定性升级及审查评论表格单行精炼均已落地实证）。
+- 已完成，无遗留（Q2 全改码入口覆盖与钩子边界、Q3 倒金字塔禁默认改 `AGENTS.md`、普通审查范围外高危确定性升级、无损 Markdown 表格安全化、过程工件命名通用门禁及无预设工具运行时实证策略均已落地实证）。
 
 ## 澄清与补充记录
 
 - `2026-11-19`：明确 `C2` 严禁触碰 `dev-flow/`，全套自动挂载由 `C1` `flow-lifecycle-hooks.mjs` (new) 按约定 CLI 参数完成。
-- `2026-11-19`：补充普通审查范围外/存量高危发现确定性经 `classifyEscalationTier` + `escalateToBackend` 建单流转，以及 `review-sync.mjs` 验收标准表格单行摘要精炼（`<= 120` 字符）。
+- `2026-11-19`：补充普通审查范围外/存量高危发现确定性经 `classifyEscalationTier` + `escalateToBackend` 建单流转；按维护者最新决策撤销 `review-sync.mjs` 验收标准表格 120 字符截断，改为无损 Markdown 表格安全化（折行 + 竖线转义）；按功能域重命名夹具/注入脚本为 `fixtures-edit-pyramid.mjs` / `injections-data-edit-pyramid.mjs` 并在 `static-gates`/`edit-gate`/`govern-audit` 落地通用 Tier 2 `naming.process-artifact-filename` 规则。
 
 ## 完成后的记录
 
 - **分支与归属**：`feat/v10-stagec-c2`（Issue `#91`，任务 `stagec-c2`）
 - **实际验证命令与结果**：
-  - `node scripts/dev/fixtures-stagec-c2.mjs`：5/5 双向断言全绿（C5/C6/C7/C8 + 范围外自动建单 + 表格精炼）
-  - `node scripts/dev/injections-data-stagec-c2.mjs`：9/9 故障注入精准拦截（I180..I188）
+  - `node scripts/dev/fixtures-edit-pyramid.mjs`：5/5 双向断言全绿（C5/C6/C7/C8 + 过程工件文件名通用门禁 + 范围外自动建单 + 无损表格安全化 + `flow-lifecycle-hooks` 契约对接）
+  - `node scripts/dev/injections-data-edit-pyramid.mjs`：10/10 故障注入精准拦截（I187..I196）
   - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode verify --changed --json`：exit 0，0 blockers
   - `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`：exit 0，0 findings
-  - `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`：exit 0（`AGENTS.md` `24460 B < 24576 B`）
-  - `write-probe-audit.mjs`：85 个目标脚本 0 违规；`$TMPDIR` Python+Node 异构仓实测 `edit-gate` 阻断/修复放行与 `retro --auto` Tier 1 升格（`AGENTS.md` 零改写）通过。
+  - `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`：exit 0（`AGENTS.md < 24576 B`）
+  - `write-probe-audit.mjs`：全目标脚本 0 违规；`$TMPDIR` Python+Node 异构仓实测 `edit-gate` 阻断（含过程工件文件名）/修复放行与 `retro --auto` Tier 1 升格（`AGENTS.md` 零改写）通过。

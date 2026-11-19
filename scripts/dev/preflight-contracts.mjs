@@ -496,7 +496,7 @@ function checkWorkflowLifecycleContracts({ ROOT, readText, fail, note }) {
     if (!existsSync(p)) { fail(`工作流生命周期契约缺失（${file}）：文件不存在`); continue }
     const text = readText(p)
     const missing = tokens.filter((t) => !text.includes(t))
-    if (missing.length > 0) fail(`工作流生命周期契约缺失（${file}）：缺少「${missing.join('、')}」——8 阶段全链路与五套件衔接必须显式对齐`)
+    if (missing.length > 0) fail(`工作流生命周期契约缺失（${file}）：缺少「${missing.join('、')}」——8 阶段全链路与内置研发技能衔接必须显式对齐`)
   }
   note(`工作流生命周期契约：根 SKILL.md 与 ${checks.length - 1} 套研发技能全量覆盖 8 阶段核心门控与双向衔接`)
 }

@@ -19,7 +19,7 @@ import { handleClaim, handleMerge } from '../../kit/skills/dev-flow/scripts/flow
 import { handleRecord } from '../../kit/skills/dev-review/scripts/review-ledger.mjs'
 import { reviewProject } from '../review.mjs'
 import { verifyClaims } from '../lib/claims.mjs'
-import { checkEquip } from '../equip.mjs'
+import { checkEquip, equip } from '../equip.mjs'
 import { scan as handoffScan } from '../handoff.mjs'
 import { SKILL_ROOT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runNode, tmpProject } from './fixtures-helpers.mjs'
 
@@ -494,10 +494,130 @@ export function registerOnboardingCases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['C5/C6：有无 dev-review 合并门禁及 2x5 跨组合兼容性矩阵', async () => {
+  const runRoleMatrixForMode = async (mode) => {
+    const cleanups = []
+    const hasReviewKit = mode === 'full-kit'
+    try {
+      for (const role of ['local-only', 'maintainer', 'contributor-fork', 'generic-git', 'inbound-external-pr']) {
+        const { dir, bares, prHead } = setupMatrixRepo(mode, role, { caseType: 2 })
+        cleanups.push(dir, ...bares)
+        equip(dir, { noBackup: true })
+        if (!hasReviewKit) rmTree(join(dir, '.agents', 'skills', 'dev-review'))
+        gitCommitFast(dir, `equip ${mode}`)
+
+        const flowRel = '.agents/skills/dev-flow/scripts/flow.mjs'
+        const roots = await resolveRepoRoots(dir)
+        const gh = createMemoryGhHarness('acme/demo', 'alice')
+
+        if (role === 'inbound-external-pr') {
+          if (!hasReviewKit) {
+            const ins = runLocal(dir, flowRel, ['inspect', '--external-pr', '42'])
+            if (ins.stdout.includes('review-pack.mjs')) return `no-dev-review inspect 外部 PR 不应打印 review-pack.mjs：${ins.stdout}`
+            const stCli = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--json'])
+            if (stCli.status !== 3 || !`${stCli.stdout}${stCli.stderr}`.includes('BLOCKED_REQUIRES_DEV_REVIEW')) {
+              return `no-dev-review 外部 PR start 未阻断为 BLOCKED_REQUIRES_DEV_REVIEW：status=${stCli.status}`
+            }
+            const ledgerDir = join(dir, '.worktrees', '.state', 'tasks')
+            mkdirSync(ledgerDir, { recursive: true })
+            writeFileSync(join(ledgerDir, 'review-pr-42.json'), JSON.stringify({
+              schemaVersion: 2, taskId: 'review-pr-42', role: 'inbound-external-pr', status: 'review-ready', prNumber: 42,
+            }), 'utf8')
+            const nxExt = runLocal(dir, flowRel, ['next', '--task', 'review-pr-42', '--json'])
+            const vExt = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
+            if (!nxExt.stdout.includes('BLOCKED_REQUIRES_DEV_REVIEW') || vExt.status !== 3 || vExt.stdout.includes('review-pack.mjs')) {
+              return `no-dev-review 外部 PR next/verify 未正确阻断：next=${nxExt.stdout} verify=${vExt.status}`
+            }
+          } else {
+            const stFull = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--pr-ref', prHead, '--json'])
+            if (stFull.status !== 0) return `full-kit 外部 PR start 失败：${stFull.stderr}`
+            const vBlocked = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
+            if (vBlocked.status !== 3) return `full-kit 外部 PR 未扫描 verify 应退出 3：${vBlocked.status}`
+          }
+          continue
+        }
+
+        // local-only / maintainer / contributor-fork / generic-git
+        const taskId = `mx-${mode}-${role}`
+        const useMockApi = role === 'maintainer' || role === 'contributor-fork'
+        if (useMockApi) {
+          const st = await handleStart({ task: taskId, case: '2', slug: taskId, issue: '10', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          if (st.exitCode !== 0) return `start(${mode}/${role}) 失败：${st.exitCode}`
+          const cl = await handleClaim({ task: taskId, agent: 'alice', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          if (cl.exitCode !== 0) return `claim(${mode}/${role}) 失败`
+          const ex = await handleExplore({ task: taskId }, roots)
+          if (ex.exitCode !== 0) return `explore(${mode}/${role}) 失败：${ex.exitCode}`
+        } else {
+          const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--json'])
+          if (stCli.status !== 0) return `cli start(${mode}/${role}) 失败：${stCli.stderr}`
+          const exCli = runLocal(dir, flowRel, ['explore', '--task', taskId])
+          if (exCli.status !== 0) return `cli explore(${mode}/${role}) 失败：${exCli.stderr}`
+        }
+
+        const implAbs = join(dir, '.worktrees', `impl-${taskId}`)
+        writeFileSync(join(implAbs, 'src/ok.mjs'), `export const ok = '${mode}-${role}'\n`, 'utf8')
+        gitSync(implAbs, ['add', '-A'])
+        gitSync(implAbs, ['commit', '-qm', `impl ${mode} ${role}`])
+
+        const vRes = runLocal(dir, flowRel, ['verify', '--task', taskId, '--mode', 'full'])
+        if (vRes.status !== 0) return `verify(${mode}/${role}) 失败：${vRes.stderr}`
+
+        if (useMockApi) {
+          const sub = await handleSubmit({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          if (sub.exitCode !== 0) return `submit(${mode}/${role}) 失败：${sub.exitCode}`
+        } else {
+          const subCli = runLocal(dir, flowRel, ['submit', '--task', taskId])
+          if (subCli.status !== 0) return `cli submit(${mode}/${role}) 失败：${subCli.stderr}`
+          if (!hasReviewKit && subCli.stdout.includes('review-pack.mjs')) {
+            return `no-dev-review ${role} submit 不应输出 review-pack.mjs：${subCli.stdout}`
+          }
+        }
+
+        const nx = JSON.parse(runLocal(dir, flowRel, ['next', '--task', taskId, '--json']).stdout)
+        if (role === 'contributor-fork') {
+          if (nx.phase !== 'awaiting-upstream-merge') {
+            return `${mode} contributor-fork submit 后应立即进入 awaiting-upstream-merge，实际=${nx.phase}`
+          }
+          const mBlockedFork = await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
+          if (mBlockedFork.exitCode === 0) return `${mode} contributor-fork 禁止自合却退出 0`
+          continue
+        }
+
+        if (hasReviewKit) {
+          if (nx.phase !== 'needs-review') return `full-kit ${role} 应进入 needs-review，实际=${nx.phase}`
+          const mUnreviewed = useMockApi
+            ? await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
+            : await handleMerge({ task: taskId, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
+          if (mUnreviewed.exitCode === 0) return `full-kit ${role} 未经独立审查 PASS 竟允许 merge 放行`
+
+          const tok = await issueTokenFor(dir, taskId, 1)
+          const rec = await handleRecord({
+            task: taskId, round: '1', verdict: 'pass', 'reviewer-id': 'rev-bob', 'review-token': tok,
+            evidence: '矩阵实测：测试全绿，输出符合预期',
+            ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}),
+          }, roots)
+          if (rec !== 0) return `full-kit ${role} review record 失败：${rec}`
+        } else {
+          const expectedPhase = role === 'generic-git' ? 'awaiting-remote-mr' : 'ready-to-merge'
+          if (nx.phase !== expectedPhase) return `no-dev-review ${role} 应进入 ${expectedPhase}，实际=${nx.phase}`
+        }
+
+        if (role === 'generic-git') {
+          const mNeedFlag = await handleMerge({ task: taskId }, roots)
+          if (mNeedFlag.exitCode === 0) return `${mode} generic-git 缺 --remote-merged 竟退出 0`
+          const mGenOk = await handleMerge({ task: taskId, 'remote-merged': true }, roots)
+          if (mGenOk.exitCode !== 0) return `${mode} generic-git --remote-merged merge 失败：${mGenOk.exitCode}`
+        } else {
+          const mOk = await handleMerge({ task: taskId, ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}) }, roots)
+          if (mOk.exitCode !== 0) return `${mode} ${role} merge 失败：${mOk.exitCode}`
+        }
+      }
+      return true
+    } finally { cleanups.forEach(rmTree) }
+  }
+
+  cases.push(['C5/C6a：无 dev-review 高风险 6 类触发源合并门禁（缺确认退出 4，齐备放行）', async () => {
     const cleanups = []
     try {
-      // A. 无 dev-review 高风险全 6 类触发源 -> 缺失确认或 --reason 必退出 4，齐备后退出 0
       const hrTriggers = [
         ['highRiskHits', { file: 'src/core/key.mjs', content: 'export const k = 2\n' }, 2],
         ['gateWeakeningHits', { file: 'test/ok.test.mjs', content: 'import assert from "node:assert/strict"\n' }, 2],
@@ -509,7 +629,7 @@ export function registerOnboardingCases(cases) {
       for (const [label, change, caseType] of hrTriggers) {
         const { dir, bares } = setupMatrixRepo('norev', 'local-only', { caseType })
         cleanups.push(dir, ...bares)
-        if ((await runNode('equip.mjs', [dir, '--no-backup'])).status !== 0) return 'equip 失败'
+        equip(dir, { noBackup: true })
         rmTree(join(dir, '.agents', 'skills', 'dev-review'))
         gitCommitFast(dir, 'equip without dev-review')
         const taskId = `hr-${label.toLowerCase().replace(/[^a-z0-9]/g, '')}`
@@ -555,128 +675,13 @@ export function registerOnboardingCases(cases) {
         const mOk = await handleMerge({ task: taskId, 'human-approved': true, reason: 'human verified risk' }, roots)
         if (mOk.exitCode !== 0) return `no-dev-review ${label} 附 --human-approved --reason 未放行：exit=${mOk.exitCode}`
       }
-
-      // B. 2 审查态（无 dev-review / 完整套件）× 5 roles 全组合端到端矩阵
-      for (const mode of ['no-dev-review', 'full-kit']) {
-        const hasReviewKit = mode === 'full-kit'
-        for (const role of ['local-only', 'maintainer', 'contributor-fork', 'generic-git', 'inbound-external-pr']) {
-          const { dir, bares, prHead } = setupMatrixRepo(mode, role, { caseType: 2 })
-          cleanups.push(dir, ...bares)
-          const eq = await runNode('equip.mjs', [dir, '--no-backup'])
-          if (eq.status !== 0) return `矩阵 equip ${mode}/${role} 失败：${eq.stderr}`
-          if (!hasReviewKit) rmTree(join(dir, '.agents', 'skills', 'dev-review'))
-          gitCommitFast(dir, `equip ${mode}`)
-
-          const flowRel = '.agents/skills/dev-flow/scripts/flow.mjs'
-          const roots = await resolveRepoRoots(dir)
-          const gh = createMemoryGhHarness('acme/demo', 'alice')
-
-          if (role === 'inbound-external-pr') {
-            if (!hasReviewKit) {
-              const ins = runLocal(dir, flowRel, ['inspect', '--external-pr', '42'])
-              if (ins.stdout.includes('review-pack.mjs')) return `no-dev-review inspect 外部 PR 不应打印 review-pack.mjs：${ins.stdout}`
-              const stCli = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--json'])
-              if (stCli.status !== 3 || !`${stCli.stdout}${stCli.stderr}`.includes('BLOCKED_REQUIRES_DEV_REVIEW')) {
-                return `no-dev-review 外部 PR start 未阻断为 BLOCKED_REQUIRES_DEV_REVIEW：status=${stCli.status}`
-              }
-              const ledgerDir = join(dir, '.worktrees', '.state', 'tasks')
-              mkdirSync(ledgerDir, { recursive: true })
-              writeFileSync(join(ledgerDir, 'review-pr-42.json'), JSON.stringify({
-                schemaVersion: 2, taskId: 'review-pr-42', role: 'inbound-external-pr', status: 'review-ready', prNumber: 42,
-              }), 'utf8')
-              const nxExt = runLocal(dir, flowRel, ['next', '--task', 'review-pr-42', '--json'])
-              const vExt = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
-              if (!nxExt.stdout.includes('BLOCKED_REQUIRES_DEV_REVIEW') || vExt.status !== 3 || vExt.stdout.includes('review-pack.mjs')) {
-                return `no-dev-review 外部 PR next/verify 未正确阻断：next=${nxExt.stdout} verify=${vExt.status}`
-              }
-            } else {
-              const stFull = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--pr-ref', prHead, '--json'])
-              if (stFull.status !== 0) return `full-kit 外部 PR start 失败：${stFull.stderr}`
-              const vBlocked = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
-              if (vBlocked.status !== 3) return `full-kit 外部 PR 未扫描 verify 应退出 3：${vBlocked.status}`
-            }
-            continue
-          }
-
-          // local-only / maintainer / contributor-fork / generic-git
-          const taskId = `mx-${mode}-${role}`
-          const useMockApi = role === 'maintainer' || role === 'contributor-fork'
-          if (useMockApi) {
-            const st = await handleStart({ task: taskId, case: '2', slug: taskId, issue: '10', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (st.exitCode !== 0) return `start(${mode}/${role}) 失败：${st.exitCode}`
-            const cl = await handleClaim({ task: taskId, agent: 'alice', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (cl.exitCode !== 0) return `claim(${mode}/${role}) 失败`
-            const ex = await handleExplore({ task: taskId }, roots)
-            if (ex.exitCode !== 0) return `explore(${mode}/${role}) 失败：${ex.exitCode}`
-          } else {
-            const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--json'])
-            if (stCli.status !== 0) return `cli start(${mode}/${role}) 失败：${stCli.stderr}`
-            const exCli = runLocal(dir, flowRel, ['explore', '--task', taskId])
-            if (exCli.status !== 0) return `cli explore(${mode}/${role}) 失败：${exCli.stderr}`
-          }
-
-          const implAbs = join(dir, '.worktrees', `impl-${taskId}`)
-          writeFileSync(join(implAbs, 'src/ok.mjs'), `export const ok = '${mode}-${role}'\n`, 'utf8')
-          gitSync(implAbs, ['add', '-A'])
-          gitSync(implAbs, ['commit', '-qm', `impl ${mode} ${role}`])
-
-          const vRes = runLocal(dir, flowRel, ['verify', '--task', taskId, '--mode', 'full'])
-          if (vRes.status !== 0) return `verify(${mode}/${role}) 失败：${vRes.stderr}`
-
-          if (useMockApi) {
-            const sub = await handleSubmit({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (sub.exitCode !== 0) return `submit(${mode}/${role}) 失败：${sub.exitCode}`
-          } else {
-            const subCli = runLocal(dir, flowRel, ['submit', '--task', taskId])
-            if (subCli.status !== 0) return `cli submit(${mode}/${role}) 失败：${subCli.stderr}`
-            if (!hasReviewKit && subCli.stdout.includes('review-pack.mjs')) {
-              return `no-dev-review ${role} submit 不应输出 review-pack.mjs：${subCli.stdout}`
-            }
-          }
-
-          const nx = JSON.parse(runLocal(dir, flowRel, ['next', '--task', taskId, '--json']).stdout)
-          if (role === 'contributor-fork') {
-            if (nx.phase !== 'awaiting-upstream-merge') {
-              return `${mode} contributor-fork submit 后应立即进入 awaiting-upstream-merge，实际=${nx.phase}`
-            }
-            const mBlockedFork = await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (mBlockedFork.exitCode === 0) return `${mode} contributor-fork 禁止自合却退出 0`
-            continue
-          }
-
-          if (hasReviewKit) {
-            if (nx.phase !== 'needs-review') return `full-kit ${role} 应进入 needs-review，实际=${nx.phase}`
-            const mUnreviewed = useMockApi
-              ? await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
-              : await handleMerge({ task: taskId, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
-            if (mUnreviewed.exitCode === 0) return `full-kit ${role} 未经独立审查 PASS 竟允许 merge 放行`
-
-            const tok = await issueTokenFor(dir, taskId, 1)
-            const rec = await handleRecord({
-              task: taskId, round: '1', verdict: 'pass', 'reviewer-id': 'rev-bob', 'review-token': tok,
-              evidence: '矩阵实测：测试全绿，输出符合预期',
-              ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}),
-            }, roots)
-            if (rec !== 0) return `full-kit ${role} review record 失败：${rec}`
-          } else {
-            const expectedPhase = role === 'generic-git' ? 'awaiting-remote-mr' : 'ready-to-merge'
-            if (nx.phase !== expectedPhase) return `no-dev-review ${role} 应进入 ${expectedPhase}，实际=${nx.phase}`
-          }
-
-          if (role === 'generic-git') {
-            const mNeedFlag = await handleMerge({ task: taskId }, roots)
-            if (mNeedFlag.exitCode === 0) return `${mode} generic-git 缺 --remote-merged 竟退出 0`
-            const mGenOk = await handleMerge({ task: taskId, 'remote-merged': true }, roots)
-            if (mGenOk.exitCode !== 0) return `${mode} generic-git --remote-merged merge 失败：${mGenOk.exitCode}`
-          } else {
-            const mOk = await handleMerge({ task: taskId, ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}) }, roots)
-            if (mOk.exitCode !== 0) return `${mode} ${role} merge 失败：${mOk.exitCode}`
-          }
-        }
-      }
       return true
     } finally { cleanups.forEach(rmTree) }
-  }])
+  }, 15000])
+
+  cases.push(['C5/C6b：无 dev-review × 5 角色兼容性矩阵', () => runRoleMatrixForMode('no-dev-review'), 15000])
+
+  cases.push(['C5/C6c：有无 dev-review 合并门禁（完整套件 × 5 角色兼容性矩阵）', () => runRoleMatrixForMode('full-kit'), 15000])
 
   cases.push(['C9：5 类典型项目形态端到端接管、backup 还原、handoff 与内置 dev-flow 实测', async () => {
     const makePkgShape = (name, readme, extraFiles, scripts, testCmd) => ({

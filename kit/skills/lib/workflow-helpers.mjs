@@ -276,6 +276,18 @@ function extractMarkdownSectionText(text, headingPatterns = []) {
   return buf.join('\n').trim()
 }
 
+function truncatePreservingCodeSpans(text, maxLen = 180) {
+  const s = String(text ?? '').trim()
+  if (s.length <= maxLen) return s
+  let cut = s.slice(0, maxLen)
+  const ticks = (cut.match(/`/g) ?? []).length
+  if (ticks % 2 === 1) {
+    const lastTick = cut.lastIndexOf('`')
+    if (lastTick > 0) cut = cut.slice(0, lastTick)
+  }
+  return `${cut.replace(/[\s、，,;；:：(\[（-]+$/, '')}...`
+}
+
 function extractMeaningfulBullets(text, maxItems = 4) {
   if (!text) return []
   const lines = stripHtmlCommentsOutsideFences(text).split('\n')
@@ -286,10 +298,10 @@ function extractMeaningfulBullets(text, maxItems = 4) {
     if (inFence) continue
     const t = line.trim()
     if (!t || /^#/.test(t) || /^\|/.test(t) || /^[-*_]{3,}$/.test(t)) continue
-    if (/^\*\*在合并之前写完/.test(t) || /待实施后补全|TBD|FIXME/i.test(t)) continue
     const cleaned = t.replace(/^(?:[-*]|\d+\.)\s+(?:\[[ xX]\]\s*)?/, '').trim()
     if (cleaned.length < 4) continue
-    out.push(cleaned.slice(0, 180))
+    if (/^(?:\*\*)?在合并之前写完/.test(cleaned) || /待实施后补全|TBD|FIXME/i.test(cleaned)) continue
+    out.push(truncatePreservingCodeSpans(cleaned, 180))
     if (out.length >= maxItems) break
   }
   return out

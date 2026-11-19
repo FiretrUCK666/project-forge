@@ -83,7 +83,7 @@ do-not-edit: docs/archive/, docs/release-notes/
 | 入口 | `SKILL.md` | 调度与红线：四步、门控表、能力矩阵（**不写判据**） |
 | 决策 | `references/` | 每份回答一类问题；动手前读完全文 |
 | 落盘骨架 | `templates/` | 被治理项目母版；生成时求值条件块与占位符 |
-| 内置技能 | `kit/skills/` -> `.agents/skills/` | 五套自包含研发 Skill 单源；经 `equip.mjs` 生成与 `.pf-manifest.json` 校验 |
+| 内置技能 | `kit/skills/` -> `.agents/skills/` | 内置自包含研发 Skill 套件单源；经 `equip.mjs` 生成与 `.pf-manifest.json` 校验 |
 | 引擎 | `scripts/` | `survey`、`equip`、`backup`、`compose-agents`、`review`、`handoff`、`sync-toc`、`update` |
 
 `scripts/lib/` 收敛标记与预算（`protocol.mjs`）、模板求值（`template.mjs`）、报告排版（`render.mjs`）、契约回查（`claims.mjs`）与平台探针（`platform/`）。完整架构与双层平面细节见 `docs/TDD.md`；`scripts/dev/` 与 `.agents/` 仅自用不进用户包。
@@ -209,7 +209,7 @@ node scripts/dev/verify-injections.mjs
 | `scripts/lib/` | 标记语法、条件求值、报告排版的单一真相源；错一处，四条路径同时静默失效 |
 | `scripts/dev/preflight.mjs` | 门禁本身。它被改松时没有任何东西会报错，包括它自己 |
 | `templates/` | 写进别人项目里的骨架；条件写错一整块会静默消失 |
-| `kit/` | 随包分发且同步进 `.agents/skills/` 的五套研发 Skill；改后须重跑 `equip.mjs .` |
+| `kit/` | 随包分发且同步进 `.agents/skills/` 的内置研发 Skill 套件；改后须重跑 `equip.mjs .` |
 | `SKILL.md` | 入口。删掉一条门控，等于让后面每一步都失去前置检查 |
 | `AGENTS.md` | 本文件。它是受管区间的容器，改坏了刷新就再也对不上 |
 | `.github/workflows/` | 发布链路的门；门被改松，下一次发版就没人拦 |

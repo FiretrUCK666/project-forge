@@ -88,7 +88,7 @@ function runNodeAsync(scriptPath, args, cwd, label = '') {
 
 async function runFixturesIn(root, expect = '', injId = '') {
   const args = []
-  if (expect) args.push('--only', expect)
+  if (expect) args.push('--only', expect, '--bail-on', expect)
   const { out, err, timedOut, step } = await runNodeAsync(
     join(root, 'scripts', 'dev', 'fixtures.mjs'),
     args,
@@ -172,7 +172,11 @@ async function runInjectionInSlot(inj, root) {
       writeFileSync(full, original.replace(from, to), 'utf8')
     }
 
-    const result = await runBothIn(root, inj)
+    let result = await runBothIn(root, inj)
+    if (result.timedOut) {
+      // 仅对偶发进程超时重跑一次以抗 CI 调度抖动；判据未捕获（hit=false）绝不重试
+      result = await runBothIn(root, inj)
+    }
     if (result.timedOut) {
       return { id: inj.id, what: inj.what, skipped: `执行超时 (>${INJ_STEP_TIMEOUT_MS}ms): ${result.timedOutStep}` }
     }

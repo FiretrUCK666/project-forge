@@ -30,7 +30,7 @@ metadata:
 1. **先 `next` / `inspect` / `intake` 再动手（`TaskBackend` 抹平三态，默认并行优先）**：
    - `flow.mjs next [--probe-auth]` 是跨会话唯一入口：在 `idle`/`ambiguous` 态同步扫描未 `start` 的就绪 `docs/specs/*.md`（读取 `Depends on` 与写域），`Wave 1 >= 2` 时直接返回 `parallelDispatch: true` 供主会话薄上下文纯调度并行派发；每次只输出单一 `[NEXT STEP]`，并在审查阶段附 `excludedReviewers`；
    - `flow.mjs inspect [Issue/PR/Milestone URL...]` 识别五态身份（`local-only` / `maintainer` / `contributor-fork` / `clone-readonly` / `inbound-external-pr` / `generic-git`），解析多 Issue 依赖、已有 OPEN PR 与裸粘贴 Milestone URL；`flow.mjs milestone` 按需管理跨后端里程碑（`submit` 创建 PR 自动继承关联 Issue 里程碑）。
-   - `flow.mjs intake --pr <M> | --issue <N>` 执行五态全局业务分诊（`accept` / `defer` / `reject-out-of-scope` / `reject-duplicate` / `needs-info`）：适用于外部 PR、外部 Issue 及未经内部审批的新增需求/缺陷；已 `approved` 的本仓自研规划自动豁免；默认预演，传 `--apply` 经三段式结构化评论（决策头 + 人话理由 + `pf-state`）写回平台并贴标/关单。AI 结合 `docs/TDD.md` 与现状深度分析后可直接传 `--decision` + `--rationale` / `--rationale-file`（重复项附 `--duplicate-of <N>`）落地结论。
+   - `flow.mjs intake --pr <M> | --issue <N>` 执行五态全局业务分诊（`accept` / `reject` / `merge-duplicate` / `needs-info` / `defer`）：适用于外部 PR、外部 Issue 及未经内部审批的新增需求/缺陷；已 `approved` 的本仓自研规划自动豁免；默认预演，传 `--apply` 经三段式结构化评论（决策头 + 人话理由 + `pf-state`）写回平台并贴标/关单。AI 结合 `docs/TDD.md` 与现状深度分析后可直接传 `--decision` + `--rationale` / `--rationale-file`（重复项附 `--duplicate-of <N>`）落地结论。
 2. **全量 Worktree 隔离、跨轮槽复用与防毒化共享依赖**：
    - 有历史提交仓（`commits > 0`）无论 Case 1/2/3/4 **一律**入第 2 档 `.worktrees/impl-<id>`（含分支占用与主仓脏改动拦截）；仅 0 提交非并行仓允许第 1 档本地特性分支；外部 PR（`--external-pr <M>`）入 `.worktrees/review-pr-<M>`，过 `--untrusted-scan` 前绝不挂依赖或执行脚本。
    - 每任务最多复用 1 个 `impl` 槽 + 1 个 `review` 槽；`submit`/`review-pack` 推进 `review-<id>` 时自动 `unmountSharedDeps` -> 同步 `HEAD` -> 重挂载依赖（`--reset-review-slot` 清理故障注入残留）；所有变基/试合同步命令附 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 在 `--abort` 前输出有界冲突摘要与恢复包。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；多任务由 `batch plan`/`check-disjoint`/`merge-queue`/`resume-session` 与 `sync`（`--after` 堆叠 `rebase --onto`）协同。
@@ -50,7 +50,7 @@ metadata:
 # 1. 状态重水合 / 身份与多 Issue・PR・Milestone 拓扑探测 / 全局业务分诊 / 账本与里程碑管理
 node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR/Milestone URL...] [--probe-auth]
-node ".agents/skills/dev-flow/scripts/flow.mjs" intake (--pr <M> | --issue <N>) [--decision <accept|defer|reject-out-of-scope|reject-duplicate|needs-info>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]
+node ".agents/skills/dev-flow/scripts/flow.mjs" intake (--pr <M> | --issue <N>) [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--issue <N>] [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 

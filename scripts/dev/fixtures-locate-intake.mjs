@@ -25,7 +25,7 @@ import { buildEscalationIssuePayload } from '../../kit/skills/lib/escalation.mjs
 import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
 import { addLabelsWithEnsureAndReadback, mapWithConcurrency } from '../../kit/skills/lib/github-labels.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
-import { evaluateIntakeTriage, hasIntakeBlockingSignal, readIntakeRecord, writeIntakeRecord } from '../../kit/skills/lib/intake-triage.mjs'
+import { evaluateIntakeTriage, hasIntakeBlockingSignal, INTAKE_DECISIONS, readIntakeRecord, writeIntakeRecord } from '../../kit/skills/lib/intake-triage.mjs'
 import { readTaskLedger, updateTaskLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
 import { extractHeadlessSummary, indexMarkdownSections } from '../../kit/skills/lib/markdown-scan.mjs'
 import { buildSessionOrientation } from '../../kit/skills/lib/session-orient.mjs'
@@ -198,8 +198,15 @@ export function registerLocateIntakeCases(cases) {
 
   // 3. 全局业务分诊 flow intake、17 接口 TaskBackend.closePr、github-labels 并发/403 降级、write-probe 与 review-pack 前置阻断
   cases.push(['全局业务分诊 flow intake、closePr 17 接口、并发限流建标回读、write-probe 审计与 review-pack 前置拦截', async () => {
-    if (TASK_BACKEND_METHODS.length !== 17 || !TASK_BACKEND_METHODS.includes('closePr')) {
+      if (TASK_BACKEND_METHODS.length !== 17 || !TASK_BACKEND_METHODS.includes('closePr')) {
       return `TASK_BACKEND_METHODS 应含 17 方法与 closePr：len=${TASK_BACKEND_METHODS.length}`
+    }
+    // 校验 dev-flow/SKILL.md 中 --decision 枚举与 INTAKE_DECISIONS 完全对齐（防 CLI 与文档漂移）
+    const devFlowSkillMd = readFileSync(join(SKILL_ROOT, 'kit/skills/dev-flow/SKILL.md'), 'utf8')
+    const decMatch = /--decision\s+<([^>]+)>/.exec(devFlowSkillMd)
+    const docDecisions = decMatch ? decMatch[1].split('|').map((s) => s.trim()) : []
+    if (docDecisions.join('|') !== INTAKE_DECISIONS.join('|')) {
+      return `dev-flow/SKILL.md --decision 枚举与 INTAKE_DECISIONS 不一致：doc=${docDecisions.join('|')} code=${INTAKE_DECISIONS.join('|')}`
     }
 
     // github-labels 并发池限流 4 + 缺失建标写后回读 + 403 降级
@@ -633,7 +640,9 @@ export function registerLocateIntakeCases(cases) {
         '# Todo: 统一装配与按需定位实施清单',
         '',
         '## 完成后的记录',
+        '- **在合并之前写完**（Issue `#90`）：',
         '- 全量门禁与 300 文件基准测试均已实测通过。',
+        `- 长条总结测试超长截断时避免把反引号切开：${'验证细节说明，'.repeat(22)}\`kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs\` 均已校验。`,
         '',
       ].join('\n'),
     })
@@ -685,6 +694,13 @@ export function registerLocateIntakeCases(cases) {
       }
       if (!body.includes('Fixes #90') || !body.includes('- [x] 门禁全绿')) {
         return `verifyPassed=true 时未填充关联 Issue 或未勾选实证自查项：\n${body}`
+      }
+      if (body.includes('在合并之前写完')) {
+        return `PR 正文未过滤「在合并之前写完」引导行：\n${body}`
+      }
+      const summaryLineBadTick = body.split('\n').find((l) => l.startsWith('- ') && ((l.match(/`/g) ?? []).length % 2 === 1))
+      if (summaryLineBadTick) {
+        return `PR 正文截断导致反引号不配对：${summaryLineBadTick}`
       }
 
       // 紧凑建单正文（escalation）不抄长文且包含三段

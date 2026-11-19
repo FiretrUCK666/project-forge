@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-19T04:52:05.012Z",
+  "installedAt": "2026-11-19T05:30:36.393Z",
   "files": {
     "dev-explore/SKILL.md": {
       "sha256": "6e2d6a28f77485ce45f4f5a84aa8cd486a7171429501915e6a2761e30c661683"
@@ -13,7 +13,7 @@
       "sha256": "d648f48bcd385757aa4355aff62decf950a3591391e19e0f9a7211edab8bcf89"
     },
     "dev-flow/SKILL.md": {
-      "sha256": "2e63ad182ad8b5d37361b2b16536386487d94e5fa66f04ef16418b86bc8c1ec6"
+      "sha256": "cb6450d0958e47e825c47e115f55b85a8dda58fb54f97eb23bdc1ede1633c1a9"
     },
     "dev-flow/scripts/flow-batch.mjs": {
       "sha256": "317cf0d1a087d88ba497fe31b0c85e4e5d3a448997b87acd48c973f1dbc38222"
@@ -310,7 +310,7 @@
       "sha256": "6db7e7abc8b1cf64325bc12bcc21aabb3e58dbc25173604d6dc92cba839af43c"
     },
     "lib/workflow-helpers.mjs": {
-      "sha256": "989fde8e6f421ba71b57af961ceda7afcca01c76fa01a14b457f60d133e84a83"
+      "sha256": "36bd7d7ac708031430462ff12f234dc9f6758b9773e2130a2f3994c427200609"
     },
     "lib/workflow-policy.mjs": {
       "sha256": "90e88aae26d51ad3e955b4e3fc25428199a2f0327696007b840261d4f4e151da"

@@ -388,21 +388,26 @@ function replaceSectionIfPresent(md, headingCandidates, newBody) {
 function removeSectionByHeading(md, headingTitle) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
   const target = String(headingTitle).trim()
+  const out = []
   let inFence = false
+  let skipping = false
   for (let i = 0; i < lines.length; i += 1) {
-    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
-    if (inFence) continue
-    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
-    if (!m || m[1] !== target) continue
-    let end = lines.length
-    let innerFence = false
-    for (let j = i + 1; j < lines.length; j += 1) {
-      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
-      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+    const line = lines[i]
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      if (!skipping) out.push(line)
+      continue
     }
-    return [...lines.slice(0, i), ...lines.slice(end)].join('\n')
+    if (!inFence) {
+      const m = /^##\s+(.+?)\s*$/.exec(line)
+      if (m) {
+        if (m[1] === target) { skipping = true; continue }
+        skipping = false
+      }
+    }
+    if (!skipping) out.push(line)
   }
-  return md
+  return out.join('\n')
 }
 
 function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }) {

@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: v10 统一八技能、倒金字塔与双向演进架构（Stage C）
-status: active
+status: done
 created: 2026-11-19
 updated: 2026-11-19
 issue: null
@@ -154,10 +154,10 @@ Stage C 优先复用已有与 Stage B 建立的基础设施，拒绝平行重复
 - [x] C10: （SC10）落地不依赖手工时间戳/日期的工具过时校验：通过 `symbol-index.mjs` 导出符号与 Git tree 基线对比仓外 `{gitCommonDir}/project-forge-verify/cache.json` 自动判 `stale`，并按低/中/高风险执行告警提示、E2E 兜底或硬阻断策略。
 - [x] C11: （SC11）重构 `dev-review`（拆出 `review-context.mjs` (new)），无论 `docs/feature-map.json` (new) 是否存在预设工具，均强制注入 `businessFlows`、相邻模块与运行时能力并在输出 `--include-diff` 前强制完成真实运行或端到端实证校验。
 - [x] C12: （SC12）完整跑通 `dev-verify-tools` 三大自然语言/斜杠核心场景——创造新工具（仓外草稿成熟后沉淀注册入 `docs/feature-map.json` (new)）、自动复用已有工具（含过时分级处置）及工具体检清理（消除僵尸引用与高风险盲区）。
-- [ ] C13: （SC13）新增第 8 技能 `dev-iterate/` (new)，与静态 `dev-govern` 严格划清边界并共用 `kit/skills/lib/test-inventory.mjs` (new)；依据功能地图盲区与高发信号生成符合质量门禁的业务/并发/性能测试直接进入目标仓原生测试目录并支持分片并发执行；抓出真实缺陷或退化时经 Stage B 基线 `escalation.mjs` (new) 转交 `dev-plan -> dev-edit -> dev-review` 修复并记录信号。
-- [ ] C14: （SC14）实现跨代双向演进与融合机制：收窄 `TOOL_OWNED_PREFIXES`、支持 `.agents/forge-overlays/` (new)、`.agents/forge-hooks.json` (new)（挂入 `flow-lifecycle-hooks.mjs` (new)）、目标仓 Git `pre-push.local` 钩子与嵌套技能去重发现并将自定义载荷纳入 `untrusted-scan`；解除 `disabledCoreSkills` 升级死锁；升级 `.pf-manifest.json` 至 schema v3 与 `REGION_MIGRATIONS`，实现条件三方合并 `merge3.mjs` (new)（`.mjs` 冲突禁写文本标记，改写 `.upstream` + `.pf-conflict` 与 `pendingConflict` 并校验 `node --check` 与静态 ESM ABI）。
-- [ ] C15: （SC15）新增并跑通 Stage B+C 离线全链路 `Scenarios H–L`（`scripts/dev/e2e-scenarios-stagec.mjs` (new)），在本仓完成 8 技能与 `docs/feature-map.json` (new) 自举全绿，并在本地自建模拟 HTTP/SSH 远端仓库验证双协作者、打标、`closePr`、升级融合与回滚链路。
-- [ ] C16: （SC16）扩展 Stage B 基线 `scripts/dev/blind-run-harness.mjs` (new)（拆出 `scripts/dev/blind-run-matrix.mjs` (new)），在 `$TMPDIR` 下对 Node、Python、Rust、Go 与 `LoopForge-main`（含 `local/skills/*`、Day-2 与跨代再升级）矩阵，于 Zero-Hint（含裸 Issue/PR 拒审关单、设置 Milestone、无论有无工具先E2E、双侧返工停损）下完成 `gemini-4-hydrogen-xhigh` 与 `gemini-3.8-flash-high` 对照盲测并通过全部定量门槛与回归门禁。
+- [x] C13: （SC13）新增第 8 技能 `dev-iterate/` (new)，与静态 `dev-govern` 严格划清边界并共用 `kit/skills/lib/test-inventory.mjs` (new)；依据功能地图盲区与高发信号生成符合质量门禁的业务/并发/性能测试直接进入目标仓原生测试目录并支持分片并发执行；抓出真实缺陷或退化时经 Stage B 基线 `escalation.mjs` (new) 转交 `dev-plan -> dev-edit -> dev-review` 修复并记录信号。
+- [x] C14: （SC14）实现跨代双向演进与融合机制：收窄 `TOOL_OWNED_PREFIXES`、支持 `.agents/forge-overlays/` (new)、`.agents/forge-hooks.json` (new)（挂入 `flow-lifecycle-hooks.mjs` (new)）、目标仓 Git `pre-push.local` 钩子与嵌套技能去重发现并将自定义载荷纳入 `untrusted-scan`；解除 `disabledCoreSkills` 升级死锁；升级 `.pf-manifest.json` 至 schema v3 与 `REGION_MIGRATIONS`，实现条件三方合并 `merge3.mjs` (new)（`.mjs` 冲突禁写文本标记，改写 `.upstream` + `.pf-conflict` 与 `pendingConflict` 并校验 `node --check` 与静态 ESM ABI）。
+- [x] C15: （SC15）新增并跑通 Stage B+C 离线全链路 `Scenarios H–L`（`scripts/dev/e2e-scenarios-stagec.mjs` (new)），在本仓完成 8 技能与 `docs/feature-map.json` (new) 自举全绿，并在本地自建模拟 HTTP/SSH 远端仓库验证双协作者、打标、`closePr`、升级融合与回滚链路。
+- [x] C16: （SC16）扩展 Stage B 基线 `scripts/dev/blind-run-harness.mjs` (new)（拆出 `scripts/dev/blind-run-matrix.mjs` (new)），在 `$TMPDIR` 下对 Node、Python、Rust、Go 与 `LoopForge-main`（含 `local/skills/*`、Day-2 与跨代再升级）矩阵，于 Zero-Hint（含裸 Issue/PR 拒审关单、设置 Milestone、无论有无工具先E2E、双侧返工停损）下完成 `gemini-4-hydrogen-xhigh` 与 `gemini-3.8-flash-high` 对照盲测并通过全部定量门槛与回归门禁。
 <!-- criteria:end -->
 
 ## 九、待拍板问题

@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 import {
   FORBIDDEN_PLATFORM_RE, KIT_SKILL_MAX_LINES, PF_MANIFEST_REL,
-  REPO_ONLY_DIRS, REPO_ONLY_FILES, discoverKitSkillsDetailed, templateVarsOf,
+  REPO_ONLY_DIRS, REPO_ONLY_FILES, UNIFIED_SKILL_NAMES, discoverKitSkillsDetailed, templateVarsOf,
 } from '../lib/protocol.mjs'
 import { checkEquip } from '../equip.mjs'
 import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
@@ -448,6 +448,11 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
   const { skills: discovered, diagnostics } = discoverKitSkillsDetailed(kitSkillsRoot)
   for (const diag of diagnostics) fail(`内置 Skill 元数据无效：${diag.message}`)
   if (discovered.length === 0) fail('kit/skills 下未发现任何合法内置 Skill')
+  const discoveredSet = new Set(discovered.map((s) => s.dirName))
+  const missingUnified = UNIFIED_SKILL_NAMES.filter((n) => !discoveredSet.has(n))
+  if (missingUnified.length > 0) {
+    fail(`内置 Skill 缺失必需核心技能（UNIFIED_SKILL_NAMES ${UNIFIED_SKILL_NAMES.length} 个）：缺少 [${missingUnified.join(', ')}]`)
+  }
 
   for (const skill of discovered) {
     const entry = join(kitSkillsRoot, skill.dirName, 'SKILL.md')

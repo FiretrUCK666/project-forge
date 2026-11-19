@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
+import { runEvolutionScenarios } from './e2e-scenarios-evolution.mjs'
 import { runStageBScenarios } from './e2e-scenarios-lifecycle.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -480,18 +481,20 @@ async function main() {
       await runScenarioA(pkgRoot, sandbox, env, eng)
       await runScenarioBAndC(pkgRoot, sandbox, env, eng)
     }
+    const helpers = {
+      assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+    }
     await Promise.all([
       runFast(),
       runScenarioD(pkgRoot, sandbox, env),
       runScenarioE(pkgRoot, sandbox, env),
       runScenarioF(pkgRoot, sandbox, env),
       runScenarioG(pkgRoot, sandbox, env),
-      runStageBScenarios(pkgRoot, sandbox, env, {
-        assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
-      }),
     ])
+    await runStageBScenarios(pkgRoot, sandbox, env, helpers)
+    await runEvolutionScenarios(pkgRoot, sandbox, env, helpers)
     const ms = Math.round(performance.now() - t0)
-    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：7 大基础场景 + Stage B Scenarios H-J（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
+    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：基础场景 A–G + 生命周期与演化 Scenarios H–L（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0
   } catch (err) {
     process.stderr.write(`FAIL  e2e-zip-harness: ${err instanceof Error ? err.stack || err.message : String(err)}\n`)

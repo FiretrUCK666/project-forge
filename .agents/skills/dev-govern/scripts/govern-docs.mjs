@@ -19,6 +19,9 @@ import { readDecisions, resolveAuthoritativeTddPath } from '../../lib/profile.mj
 import { CODE_EXT_RE, isTestOrFixtureFile, matchGlob } from '../../lib/static-gates.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { AGENTS_MAX_BYTES, AGENTS_WARN_BYTES, addFinding, readTextStrictInfo } from './govern-checks.mjs'
+import { checkEvergreenAuthorityDocs, discoverEvergreenAuthorityDocs } from './govern-evergreen.mjs'
+
+export { discoverEvergreenAuthorityDocs }
 
 const REPO_PATH_EXT_RE = /\.(?:mjs|cjs|js|ts|tsx|jsx|py|sh|ps1|rs|go|java|kt|cs|json|ya?ml|toml|lock|txt|cfg|ini|md)$/i
 
@@ -52,14 +55,27 @@ function checkAgentsPathsAndRefs(repoRoot, agentsText, devProfile, defaultBranch
     return raw
   }
 
+  const optionalSuffixRe = /^\s*[（(]\s*(?:若存在|如存在|如果存在|可选|按需|if\s+(?:it\s+)?exists?|optional)[^）)]*[）)]/i
+  const optionalPrefixRe = /(?:若存在|如存在|如果存在|可选|optional|if\s+exists?)\s*[:：]?\s*$/i
+  const requiredPaths = new Set()
+  const optionalPaths = new Set()
+
   for (const m of agentsText.matchAll(/`([^`\n]+)`/g)) {
     const tok = m[1].trim()
+    const matchIdx = m.index ?? 0
+    const before = agentsText.slice(Math.max(0, matchIdx - 24), matchIdx)
+    const after = agentsText.slice(matchIdx + m[0].length, matchIdx + m[0].length + 28)
+    const isOptional = optionalSuffixRe.test(after) || optionalPrefixRe.test(before)
     for (const word of tok.split(/\s+/)) {
       const p = extractRepoPath(word)
-      if (p) paths.add(p)
+      if (!p) continue
+      if (isOptional) optionalPaths.add(p)
+      else requiredPaths.add(p)
     }
     for (const bm of tok.matchAll(/\bgit\s+(?:switch|checkout)\s+([A-Za-z0-9][A-Za-z0-9._/-]*)/g)) branches.add(bm[1])
   }
+  for (const p of requiredPaths) paths.add(p)
+  for (const p of optionalPaths) if (requiredPaths.has(p)) paths.add(p)
 
   for (const block of agentsText.matchAll(/```[a-zA-Z]*\n([\s\S]*?)```/g)) {
     for (const line of block[1].split('\n')) {
@@ -509,6 +525,7 @@ export async function auditDocs(repoRoot, isGit, files, devProfile, defaultBranc
   }
 
   checkMarkdownDeadLinks(repoRoot, files, findings)
+  checkEvergreenAuthorityDocs(repoRoot, files, agentsInfo?.text ?? '', authoritativeTddPath, findings)
   await checkDocChurnStaleness(repoRoot, isGit, scopeRel, findings, authoritativeTddPath)
 
   const todoDir = join(repoRoot, 'docs', 'todo')

@@ -546,11 +546,12 @@ export function locateDocuments(repoRoot = process.cwd(), options = {}) {
 
 /** 供交棒包复用的 Top-3 定位入口：结合任务影响路径与关键词返回最相关文档切片（零写入）。 */
 export function locateTopSlicesForPaths(repoRoot, {
-  paths = [], keywords = [], excludeFiles = [], limit = 3, budgetLines = 48,
+  paths = [], keywords = [], excludeFiles = [], priorityFiles = [], limit = 3, budgetLines = 48,
 } = {}) {
   const root = canonicalPath(repoRoot)
   if (!existsSync(root) || !statSync(root).isDirectory()) return []
   const normExcludes = new Set((excludeFiles ?? []).map((p) => posixPath(String(p)).replace(/^\.\//, '')))
+  const normPriority = new Set((priorityFiles ?? []).map((p) => posixPath(String(p)).replace(/^\.\//, '')))
   const normPaths = (paths ?? []).map((p) => posixPath(String(p)).replace(/^\.\//, '')).filter(Boolean)
   const pathDirs = new Set()
   const rawSeeds = []
@@ -582,7 +583,7 @@ export function locateTopSlicesForPaths(repoRoot, {
       for (const p of normPaths) {
         if (sliceText.includes(p) || sliceText.includes(basename(p))) boost += 22
       }
-      if (/^(?:docs\/TDD\.md|ARCHITECTURE\.md|docs\/ARCHITECTURE\.md|AGENTS\.md)$/i.test(item.rel)) boost += 12
+      if (normPriority.has(item.rel) || /^(?:docs\/TDD\.md|ARCHITECTURE\.md|docs\/ARCHITECTURE\.md|AGENTS\.md)$/i.test(item.rel)) boost += 14
       if (hit.score + boost > 0) candidates.push({ ...hit, score: hit.score + boost })
     }
   }

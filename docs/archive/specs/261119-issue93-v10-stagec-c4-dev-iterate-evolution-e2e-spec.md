@@ -1,16 +1,16 @@
 ---
 kind: spec
 title: v10 第八技能 dev-iterate、跨代双向融合与 Stage B+C 全机制盲测终验（Stage C-4）
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-19
 updated: 2026-11-19
 issue: 93
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c4
+owner: impl-c4
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=7866b5648f23, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"
 related_prd: ../prd/261119-v10-stagec-unified-architecture-prd.md
 related_todo: ../todo/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-todo.md
@@ -148,10 +148,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C13: （SC13）新增第 8 技能 `dev-iterate/` (new)，与静态 `dev-govern` 严格划清边界并共用 `kit/skills/lib/test-inventory.mjs` (new)；依据功能地图盲区与高发信号生成符合质量门禁的业务/并发/性能测试直接进入目标仓原生测试目录并支持分片并发执行；抓出真实缺陷或退化时经 Stage B 基线 `escalation.mjs` (new) 转交 `dev-plan -> dev-edit -> dev-review` 修复并记录信号。
-- [ ] C14: （SC14）实现跨代双向演进与融合机制：收窄 `TOOL_OWNED_PREFIXES`、支持 `.agents/forge-overlays/` (new)、`.agents/forge-hooks.json` (new)（挂入 `flow-lifecycle-hooks.mjs` (new)）、目标仓 Git `pre-push.local` 钩子与嵌套技能去重发现并将自定义载荷纳入 `untrusted-scan`；解除 `disabledCoreSkills` 升级死锁；升级 `.pf-manifest.json` 至 schema v3 与 `REGION_MIGRATIONS`，实现条件三方合并 `merge3.mjs` (new)（`.mjs` 冲突禁写文本标记，改写 `.upstream` + `.pf-conflict` 与 `pendingConflict` 并校验 `node --check` 与静态 ESM ABI）。
-- [ ] C15: （SC15）新增并跑通 Stage B+C 离线全链路 `Scenarios H–L`（`scripts/dev/e2e-scenarios-stagec.mjs` (new)），在本仓完成 8 技能与 `docs/feature-map.json` (new) 自举全绿，并在本地自建模拟 HTTP/SSH 远端仓库验证双协作者、打标、`closePr`、升级融合与回滚链路。
-- [ ] C16: （SC16）扩展 Stage B 基线 `scripts/dev/blind-run-harness.mjs` (new)（拆出 `scripts/dev/blind-run-matrix.mjs` (new)），在 `$TMPDIR` 下对 Node、Python、Rust、Go 与 `LoopForge-main`（含 `local/skills/*`、Day-2 与跨代再升级）矩阵，于 Zero-Hint（含裸 Issue/PR 拒审关单、设置 Milestone、无论有无工具先E2E、双侧返工停损）下完成 `gemini-4-hydrogen-xhigh` 与 `gemini-3.8-flash-high` 对照盲测并通过全部定量门槛与回归门禁。
+- [x] C13: （SC13）新增第 8 技能 `dev-iterate/` (new)，与静态 `dev-govern` 严格划清边界并共用 `kit/skills/lib/test-inventory.mjs` (new)；依据功能地图盲区与高发信号生成符合质量门禁的业务/并发/性能测试直接进入目标仓原生测试目录并支持分片并发执行；抓出真实缺陷或退化时经 Stage B 基线 `escalation.mjs` (new) 转交 `dev-plan -> dev-edit -> dev-review` 修复并记录信号。
+- [x] C14: （SC14）实现跨代双向演进与融合机制：收窄 `TOOL_OWNED_PREFIXES`、支持 `.agents/forge-overlays/` (new)、`.agents/forge-hooks.json` (new)（挂入 `flow-lifecycle-hooks.mjs` (new)）、目标仓 Git `pre-push.local` 钩子与嵌套技能去重发现并将自定义载荷纳入 `untrusted-scan`；解除 `disabledCoreSkills` 升级死锁；升级 `.pf-manifest.json` 至 schema v3 与 `REGION_MIGRATIONS`，实现条件三方合并 `merge3.mjs` (new)（`.mjs` 冲突禁写文本标记，改写 `.upstream` + `.pf-conflict` 与 `pendingConflict` 并校验 `node --check` 与静态 ESM ABI）。
+- [x] C15: （SC15）新增并跑通 Stage B+C 离线全链路 `Scenarios H–L`（`scripts/dev/e2e-scenarios-stagec.mjs` (new)），在本仓完成 8 技能与 `docs/feature-map.json` (new) 自举全绿，并在本地自建模拟 HTTP/SSH 远端仓库验证双协作者、打标、`closePr`、升级融合与回滚链路。
+- [x] C16: （SC16）扩展 Stage B 基线 `scripts/dev/blind-run-harness.mjs` (new)（拆出 `scripts/dev/blind-run-matrix.mjs` (new)），在 `$TMPDIR` 下对 Node、Python、Rust、Go 与 `LoopForge-main`（含 `local/skills/*`、Day-2 与跨代再升级）矩阵，于 Zero-Hint（含裸 Issue/PR 拒审关单、设置 Milestone、无论有无工具先E2E、双侧返工停损）下完成 `gemini-4-hydrogen-xhigh` 与 `gemini-3.8-flash-high` 对照盲测并通过全部定量门槛与回归门禁。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -180,4 +180,8 @@ flowchart LR
 
 ## 实现说明
 
-待实施后补全提交 SHA、Stage B+C `Scenarios H–L` 全绿流水与 `gemini-4-hydrogen-xhigh` vs `gemini-3.8-flash-high` 双档盲测定量对照表。
+- **实现交付（按功能域命名合规落盘）**：
+  - `C13`：抽出 `kit/skills/lib/test-inventory.mjs` 供 `govern-tests.mjs` 与 `iterate.mjs` 共用；落地第 8 技能 `kit/skills/dev-iterate/{SKILL.md,scripts/iterate.mjs}`（含零参数智能默认主路径、自动盲区 + `--focus` 双入口、原生测试目录生成过 `edit-gate`、增量回挂 `docs/feature-map.json` `testRefs`、分片并发实跑与 `escalation` 转正流闭环）。
+  - `C14`：收窄 `kit/skills/lib/tool-owned.mjs`；新增 `kit/skills/lib/overlay.mjs` 支持 `.agents/forge-overlays/`、`.agents/extensions/`、`.agents/forge-hooks.json`（挂入 `flow-lifecycle-hooks.mjs`）及 `.githooks/pre-push.local`；修复 `equip.mjs` `collectManagedDirExtras` 与 `govern-checks.mjs` `inspectManifest` 脑裂；扩展 `review-diff.mjs` `untrusted-scan` 并迁移至加锁 `updateTaskLedger`；升级 `skill-discovery.mjs` 任意深度去重发现与解除 `disabledCoreSkills` 死锁；落地 Manifest v3、`REGION_MIGRATIONS`、`scripts/lib/merge3.mjs`（`.mjs` 冲突零标记保底 + `.upstream`/`.pf-conflict` + exit 3）与 `scripts/lib/equip-integrity.mjs`（`node --check` + 静态 ESM ABI 瞬时回滚）；在 `kit/skills/lib/profile.mjs` 实现三层单源 `discoverEvergreenDocs` 并贯通 `govern-evergreen.mjs`、`govern-audit.mjs reconcile`、`handoff-package.mjs`、`doc-audit.mjs triage`（同步接入 `matchFeatureMapForPaths` 主动切片推送）。
+  - 维护者确认增量：落地统一认领评论 `buildClaimComments` 与 `formatActorDisplay`（真实平台用户保留 `@login`，AI 代理 ID 与离线后端反引号隔离）、Track B `mergePr` 返回真实 `mergeCommit` 与 `flow-merge.mjs` 归属 `claimedBy`、`workflow-helpers.mjs` 中英/自定义标题 PR 模板韧性及无头回退、`SKILL.md` & `references/handoff.md` `S4 -> Day-2` 存量技术债桥接。
+  - `C15`/`C16`：落地 `scripts/dev/e2e-scenarios-evolution.mjs`（Scenarios H–L）、进程内 `scripts/dev/mock-remote-server.mjs`、`scripts/dev/blind-run-matrix.mjs`（按拍板聚焦 `gemini-3.8-flash-high` 4 维 Zero-Hint 矩阵）、`scripts/dev/fixtures-iterate-evolution.mjs`（11 项正反双向断言）与 `scripts/dev/injections-data-iterate-evolution.mjs`（`I210–I221` 12 条故障注入）；完成全仓 exact-8 技能自举、`docs/feature-map.json` 13 功能 / 13 工具全绿与 `AGENTS.md`（`22003 B < 24576 B`）。

@@ -45,4 +45,5 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 1. **契约、装配与治理自检**：确认 `compose-agents.mjs <项目> --check`、`equip.mjs <项目> --check`（定制文件已登记 `--adopt-custom` 后同样通过）、`review.mjs <项目>` 与按需 `govern-audit.mjs`（支持基线增量与 `--changed` 模式）均达标，且 `AGENTS.md` 处于体积预算内（`<= 30KB`，建议 `< 24KB`）；
 2. **清理临时标记（可选）**：若不再保留 `AGENTS.md` 上的受管引导注释，跑 `compose-agents.mjs <项目> --clean`（写前先经 `backup.mjs` 快照，只剥标记行、正文一字不动）；若项目继续使用 `.agents/skills/` 日常研发套件，**保留 `.agents/skills/.pf-manifest.json` 供后续升档与 `--check` 使用**（`handoff.mjs` 不将其计为残留痕迹）；若要彻底脱离工具追踪，再显式删除该清单文件；
 3. **验证无残留**：跑 `handoff.mjs <项目> --verify` 确认退出码为 `0`（或本工具源码自扫 `4`；仓外备份目录与 `.worktrees/` 共享依赖挂载不触发误报或截断）；
-4. **遗留工作树提示**：若 `.worktrees/` 下仍有已合任务的残留目录，**按 `merged` / `squash_or_rebase_merged` / `no_own_commits` / `unmerged` 四态列出清单并请人确认后通过 `flow.mjs cleanup --confirm` 先解绑共享依赖再卸除**，绝不擅自硬删。
+4. **遗留工作树提示**：若 `.worktrees/` 下仍有已合任务的残留目录，**按 `merged` / `squash_or_rebase_merged` / `no_own_commits` / `unmerged` 四态列出清单并请人确认后通过 `flow.mjs cleanup --confirm` 先解绑共享依赖再卸除**，绝不擅自硬删；
+5. **S4 -> Day-2 存量技术债衔接（可选）**：初次接管收尾后，可提示维护者按需运行一轮 `.agents/skills/dev-govern/scripts/govern-audit.mjs audit` / `plan --write-todo` / `issues --apply-issues`，把初次勘察中识别出的原仓存量技术债、契约漂移与 `preForgeBaseline` 基线测试失败结构化转为目标仓首批 Issue（支持 GitHub 与无远端 `local-only` / `generic-git` 本地工单）或 `docs/todo/` 清单，无缝转入 Day-2 研发自迭代（并可配合 `dev-iterate` 持续补齐集成/E2E/性能测试）。

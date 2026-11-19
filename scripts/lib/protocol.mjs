@@ -49,10 +49,12 @@ export {
   hasRealContent,
   isToolOwnedPath,
   isToolSkeletonFile,
+  isUserExtensionSlot,
   normalizeRelPath,
   projectOwnedPaths,
   TOOL_OWNED_PREFIXES,
   TOOL_SKELETON_FILES,
+  USER_EXTENSION_SLOTS,
 } from '../../kit/skills/lib/tool-owned.mjs'
 
 /**
@@ -314,7 +316,17 @@ export const AGENTS_MAX_BYTES = 30720
 export const AGENTS_COMPACT_RECOMMENDED_BYTES = 24576
 export const AGENTS_WARN_BYTES = AGENTS_COMPACT_RECOMMENDED_BYTES
 export const KIT_SKILL_MAX_LINES = 180
-export const PF_MANIFEST_SCHEMA_VERSION = 2
+export const PF_MANIFEST_SCHEMA_VERSION = 3
+
+/** 跨代升级 `AGENTS.md` 受管区块名称迁移表（旧版 ID -> 当前规范 ID，供 `compose-agents` 无损自动迁移）。 */
+export const REGION_MIGRATIONS = Object.freeze({
+  协作流程: '日常协作与风险分流',
+  日常协作: '日常协作与风险分流',
+  构建与测试: '构建与验证',
+  编码规范: '修改守则',
+  项目红线: '修改守则补充',
+  核心原则: '行事总纲',
+})
 
 /** 统一八技能规范名清单（波次演进期按磁盘已落盘目录动态装配与校验）。 */
 export const UNIFIED_SKILL_NAMES = Object.freeze([

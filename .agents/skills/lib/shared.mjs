@@ -73,6 +73,7 @@ export {
 export {
   detectEcosystemCommands,
   DEV_PROFILE_KEYS,
+  discoverEvergreenDocs,
   discoverWorkspacePackages,
   hasHumanMergeAuthority,
   isProfileExplicitNone,
@@ -300,11 +301,43 @@ export {
   hasRealContent,
   isToolOwnedPath,
   isToolSkeletonFile,
+  isUserExtensionSlot,
   normalizeRelPath,
   projectOwnedPaths,
   TOOL_OWNED_PREFIXES,
   TOOL_SKELETON_FILES,
+  USER_EXTENSION_SLOTS,
 } from './tool-owned.mjs'
+
+export {
+  FORGE_EXTENSIONS_REL,
+  FORGE_HOOKS_REL,
+  FORGE_OVERLAYS_REL,
+  LOCAL_PRE_PUSH_REL,
+  VALID_HOOK_STAGES,
+  discoverForgeExtensions,
+  inspectLocalPrePushHook,
+  isAllowedExtensionPath,
+  loadForgeHooksConfig,
+  loadForgeOverlays,
+  resolveStageHookCommands,
+  scanExtensionSlotHazards,
+  validateForgeHooksConfig,
+} from './overlay.mjs'
+
+export {
+  FEATURE_MAP_REL,
+  cmdCoversTestFile,
+  collectConfiguredTestEntries,
+  collectJustfileRecipes,
+  collectMakefileTargets,
+  collectTestInventory,
+  expandVerificationCommands,
+  isPathInQuickTestScope,
+  readFeatureMapSafe,
+  resolveNativeTestDir,
+  updateFeatureMapTestRefs,
+} from './test-inventory.mjs'
 
 export {
   appendGovernSignal,
@@ -368,7 +401,12 @@ export {
 } from './intake-triage.mjs'
 
 export {
+  buildClaimComments,
   buildIntakeDecisionComments,
+  buildMergeComments,
+  buildReviewComments,
+  buildSubmitComments,
+  formatActorDisplay,
 } from './doc-comments.mjs'
 
 export {

@@ -437,12 +437,13 @@ export function registerOnboardingCases(cases) {
       }
       await runNode('equip.mjs', [dir, '--restore', 'dev-flow', '--no-backup'])
 
-      // 核心技能进 disabledSkills 时必须退出 1
-      rmTree(join(dir, '.agents/skills/dev-plan'))
+      // 故意禁用并经 equip 写入 disabledSkills 墓碑后，不得死锁 equip --check
+      rmTree(join(dir, '.agents/skills/dev-govern'))
       await runNode('equip.mjs', [dir, '--no-backup'])
       const disChk = await runNode('equip.mjs', [dir, '--check'])
-      if (disChk.status === 0 || checkEquip(dir).ok) {
-        return '核心技能进入 disabledSkills 时 equip --check 竟退出 0'
+      const disReport = checkEquip(dir)
+      if (disChk.status !== 0 || !disReport.ok || !disReport.disabledSkills.includes('dev-govern')) {
+        return `故意禁用技能写入 disabledSkills 墓碑后不应死锁 equip --check: status=${disChk.status} ok=${disReport.ok} disabled=${JSON.stringify(disReport.disabledSkills)} broken=${JSON.stringify(disReport.brokenImports)}`
       }
       return true
     } finally { rmTree(dir) }

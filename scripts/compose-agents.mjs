@@ -122,7 +122,7 @@ function writeManifestRegions(root, agentsText, protectedIds = [], removedIds = 
   const nextData = {
     ...manifest.data,
     agentsRegions: nextRegions,
-    ...(manifest.data.schemaVersion === 2 || nextRemoved.length > 0 || Array.isArray(manifest.data.removedAgentsRegions)
+    ...(manifest.data.schemaVersion >= 2 || nextRemoved.length > 0 || Array.isArray(manifest.data.removedAgentsRegions)
       ? { removedAgentsRegions: nextRemoved }
       : {}),
   }
@@ -562,6 +562,9 @@ async function main(argv) {
       await maybePreWriteBackup(root, existing, noBackup)
       writeAtomic(agentsPath, refreshed.text)
       const bits = []
+      if (refreshed.migratedRegions?.length > 0) {
+        bits.push(`迁移旧区间 ${refreshed.migratedRegions.length} 节（${refreshed.migratedRegions.map((m) => `${m.from}->${m.to}`).join('、')}）`)
+      }
       if (refreshed.filled.length > 0) bits.push(`填了 ${refreshed.filled.length} 段（${refreshed.filled.join('、')}）`)
       if (refreshed.synced.length > 0) bits.push(`跟上模板 ${refreshed.synced.length} 段（${refreshed.synced.join('、')}）`)
       if (refreshed.inserted.length > 0) bits.push(`插入 ${refreshed.inserted.length} 节（${refreshed.inserted.join('、')}）`)

@@ -80,4 +80,20 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha || [ -n "${local
   fi
 done
 
+case "${PF_SKIP_LOCAL_HOOKS:-}" in
+  1|true|yes)
+    exit 0
+    ;;
+esac
+
+hook_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+local_hook="${hook_dir}/pre-push.local"
+if [ -f "$local_hook" ]; then
+  if [ -x "$local_hook" ]; then
+    "$local_hook" "$@"
+  else
+    sh "$local_hook" "$@"
+  fi
+fi
+
 exit 0

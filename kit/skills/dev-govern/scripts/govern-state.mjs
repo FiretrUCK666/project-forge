@@ -523,6 +523,16 @@ export function formatTextReport(result) {
     lines.push('', '[RECONCILE]')
     lines.push(`  AGENTS.md Bytes : ${r.agentsBytes ?? 'missing'} / ${AGENTS_MAX_BYTES} (warn >= ${AGENTS_WARN_BYTES})`)
     lines.push(`  docs/TDD.md     : ${r.tddPresent ? 'present' : 'missing'}`)
+    if (Array.isArray(r.evergreenDocs) && r.evergreenDocs.length > 0) {
+      lines.push(`  Evergreen Docs  : ${r.evergreenDocs.map((d) => `${d.path}(${d.family})`).join(', ')}`)
+    }
+    if (r.featureMapDrift) {
+      const fd = r.featureMapDrift
+      lines.push(`  FeatureMap Drift: unmapped=${fd.unmappedSourceModules?.length ?? 0}, missing=${fd.missingEntryPaths?.length ?? 0}, stale=${fd.staleFeatures?.length ?? 0}, hotSkew=${fd.hotDocSkewModules?.length ?? 0}`)
+    }
+    if (Array.isArray(r.nextCommands) && r.nextCommands.length > 0) {
+      lines.push(`  Next Commands   : ${r.nextCommands.join(' ; ')}`)
+    }
     lines.push(`  Worktrees       : ${r.worktrees.total} registered [merged=${wc.merged ?? 0}, squash_or_rebase=${wc.squash_or_rebase_merged ?? 0}, no_own_commits=${wc.no_own_commits ?? 0}, unmerged=${wc.unmerged ?? 0}] | ${r.worktrees.stale.length} candidate(s)`)
     lines.push(`  Skill Manifest  : ${r.manifest.status}${r.manifest.checkedFiles !== undefined ? ` (${r.manifest.checkedFiles} managed files, ${r.manifest.customizedCount ?? 0} customized)` : ''}`)
   }

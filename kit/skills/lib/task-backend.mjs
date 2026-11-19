@@ -9,6 +9,7 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { buildClaimComments } from './doc-comments.mjs'
 import { gitRun, gitStatusPorcelainZ, readTextSafe, withFileLock } from './git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 import { createGitHubClient, parsePfStateTags } from './github-client.mjs'
@@ -323,12 +324,22 @@ export class GitHubBackend {
     const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
     const repo = this.targetRepo
     const results = []
+    const rendered = buildClaimComments({
+      action: takeover ? 'takeover' : 'claim',
+      taskId,
+      actor,
+      actorDisplay,
+      branch,
+      previousActor,
+      reason,
+      issues: issueList,
+      prNumber,
+      backendKind: this.kind,
+    })
     for (const num of issueList) {
       const comment = await this.postComment({
         repo, number: num,
-        body: takeover
-          ? `接管认领：由 ${actorDisplay ?? actor} 接管任务 \`${taskId}\`（分支 \`${branch}\`，原认领人：${previousActor ?? '无/未知'}），原因：${reason}。`
-          : `认领：由 ${actorDisplay ?? actor} 在分支 \`${branch}\` 开始处理（task: \`${taskId}\`）。`,
+        body: rendered.issueCommentBody,
         statePayload: takeover
           ? { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, reason }
           : { taskId, action: 'claim', agent: actor, branch },
@@ -340,7 +351,7 @@ export class GitHubBackend {
     if (takeover && prNumber) {
       prResult = await this.postComment({
         repo, number: prNumber,
-        body: `接管认领：由 ${actorDisplay ?? actor} 接管关联 PR #${prNumber}（分支 \`${branch}\`，关联 Issue：${issueList.map((n) => `#${n}`).join(', ')}），原因：${reason}。`,
+        body: rendered.prCommentBody,
         statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, prNumber, reason },
       })
     }
@@ -351,10 +362,20 @@ export class GitHubBackend {
     const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
     const repo = this.targetRepo
     const results = []
+    const rendered = buildClaimComments({
+      action: 'release',
+      taskId,
+      actor,
+      actorDisplay,
+      branch,
+      reason,
+      issues: issueList,
+      backendKind: this.kind,
+    })
     for (const num of issueList) {
       const comment = await this.postComment({
         repo, number: num,
-        body: `释放认领：${actorDisplay ?? actor} 放弃任务 \`${taskId}\`（分支 \`${branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`,
+        body: rendered.issueCommentBody,
         statePayload: { taskId, action: 'release', agent: actor, branch: branch ?? null, ...(reason ? { reason } : {}) },
       })
       const labelRemoved = await this.removeLabel({ repo, number: num, label: 'in-progress' })

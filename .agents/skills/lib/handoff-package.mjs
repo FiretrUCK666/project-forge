@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { readTextSafe } from './git.mjs'
 import { locateTopSlicesForPaths } from './doc-locator.mjs'
 import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
+import { matchFeatureMapForPaths } from './feature-map.mjs'
 import { nextReviewRound } from './ledger.mjs'
+import { discoverEvergreenDocs } from './profile.mjs'
 
 /** 从一份规划文档里抽出 `- [ ] Cn: ...` 的原文条目。 */
 function extractCriteria(text) {
@@ -242,10 +244,13 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   ].filter(Boolean)
   let relatedSlices = []
   try {
+    const ev = discoverEvergreenDocs(locateRoot)
+    const priorityFiles = (ev?.markdownDocs ?? []).map((d) => d.path)
     relatedSlices = locateTopSlicesForPaths(locateRoot, {
       paths,
       keywords,
       excludeFiles: [specRel, todoRel].filter(Boolean),
+      priorityFiles,
       limit: 3,
       budgetLines: 48,
     }).map((s) => ({
@@ -261,6 +266,22 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     }))
   } catch {
     relatedSlices = []
+  }
+
+  let featureMapContext = { exists: false, corrupt: false, warning: null, matchedFeatures: [], businessFlows: [], verificationTools: [], testRefs: [] }
+  try {
+    const fm = matchFeatureMapForPaths(locateRoot, paths, keywords)
+    featureMapContext = {
+      exists: Boolean(fm.exists),
+      corrupt: Boolean(fm.corrupt),
+      warning: fm.warning ?? null,
+      matchedFeatures: (fm.matchedFeatures ?? []).map((f) => ({ id: f.id, name: f.name, matchedBy: f.matchedBy })),
+      businessFlows: fm.businessFlows ?? [],
+      verificationTools: (fm.verificationTools ?? []).map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
+      testRefs: fm.testRefs ?? [],
+    }
+  } catch {
+    // Fail-Soft on read-only handoff context assembly
   }
 
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
@@ -351,6 +372,20 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
       lines.push(`- \`${s.relPath}:${s.startLine}-${s.endLine}\`${label}${s.summary ? ` — ${s.summary}` : ''}`)
       lines.push(`  - 绝对路径：\`${s.absPath}\``)
       lines.push(`  - 复读命令：\`${s.locateCommand}\``)
+    }
+    lines.push('')
+  }
+
+  if (featureMapContext.businessFlows.length > 0 || featureMapContext.verificationTools.length > 0) {
+    lines.push('## 受波及业务流与验证工具（来自 docs/feature-map.json）')
+    lines.push('')
+    if (featureMapContext.businessFlows.length > 0) {
+      for (const bf of featureMapContext.businessFlows.slice(0, 6)) lines.push(`- 业务流：${bf}`)
+    }
+    if (featureMapContext.verificationTools.length > 0) {
+      for (const vt of featureMapContext.verificationTools.slice(0, 5)) {
+        lines.push(`- 验证工具 \`${vt.id}\`（${vt.riskLevel ?? 'medium'}）：\`${vt.command}\``)
+      }
     }
     lines.push('')
   }
@@ -492,6 +527,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
       nonGoals,
       design,
       relatedSlices,
+      featureMapContext,
       commands: { quick, full, mergeGate },
       requiredGates: gates,
     },

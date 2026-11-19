@@ -1,19 +1,19 @@
 ---
 kind: todo
-title: "v10 第七技能 dev-verify-tools、docs/feature-map.json 与先实证后 Diff 审查（Stage C-3）"
+title: v10 第七技能 dev-verify-tools、docs/feature-map.json 与先实证后 Diff 审查（Stage C-3）
 status: active
 created: 2026-11-19
 updated: 2026-11-19
-issue: null
+issue: 92
 pr: null
 branch: null
-owner: "plan-stage-c"
+owner: plan-stage-c
 approved: false
 done_at: null
 task_id: v10-stagec-c3
-planned_at: "8566de3da467f5137f362ecad4323dbc093dca00"
+planned_at: 8566de3da467f5137f362ecad4323dbc093dca00
 related_prd: ../prd/261119-v10-stagec-unified-architecture-prd.md
-related_spec: ../specs/261119-v10-stagec-c3-dev-verify-tools-review-spec.md
+related_spec: ../specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md
 ---
 
 # 任务清单：v10 第七技能 dev-verify-tools、docs/feature-map.json 与先实证后 Diff 审查（Stage C-3）
@@ -23,7 +23,8 @@ related_spec: ../specs/261119-v10-stagec-c3-dev-verify-tools-review-spec.md
 - **任务编号**：`v10-stagec-c3`
 - **所属波次**：Wave C-2 左翼（与 `v10-stagec-c4` 并行推进，写域严格互斥；需待 Wave C-1 合入 `main` 后启动）
 - **关联总控**：[Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-- **关联设计**：[Stage C-3 设计规范](../specs/261119-v10-stagec-c3-dev-verify-tools-review-spec.md)
+- **关联设计**：[Stage C-3 设计规范](../specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md)
+- Issue: #92
 
 ## 任务范围与验证基准
 

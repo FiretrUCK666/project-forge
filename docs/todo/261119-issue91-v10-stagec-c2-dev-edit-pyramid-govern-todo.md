@@ -1,19 +1,19 @@
 ---
 kind: todo
-title: "v10 第六技能 dev-edit、严格三层倒金字塔与 dev-govern 自动触发（Stage C-2）"
+title: v10 第六技能 dev-edit、严格三层倒金字塔与 dev-govern 自动触发（Stage C-2）
 status: active
 created: 2026-11-19
 updated: 2026-11-19
-issue: null
+issue: 91
 pr: null
 branch: null
-owner: "plan-stage-c"
+owner: plan-stage-c
 approved: false
 done_at: null
 task_id: v10-stagec-c2
-planned_at: "8566de3da467f5137f362ecad4323dbc093dca00"
+planned_at: 8566de3da467f5137f362ecad4323dbc093dca00
 related_prd: ../prd/261119-v10-stagec-unified-architecture-prd.md
-related_spec: ../specs/261119-v10-stagec-c2-dev-edit-pyramid-govern-spec.md
+related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec.md
 ---
 
 # 任务清单：v10 第六技能 dev-edit、严格三层倒金字塔与 dev-govern 自动触发（Stage C-2）
@@ -23,7 +23,8 @@ related_spec: ../specs/261119-v10-stagec-c2-dev-edit-pyramid-govern-spec.md
 - **任务编号**：`v10-stagec-c2`
 - **所属波次**：Wave C-1 右翼（与 `v10-stagec-c1` 并行开发，零文件交叠；依赖 Stage B 合入 `main`）
 - **关联总控**：[Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-- **关联设计**：[Stage C-2 设计规范](../specs/261119-v10-stagec-c2-dev-edit-pyramid-govern-spec.md)
+- **关联设计**：[Stage C-2 设计规范](../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec.md)
+- Issue: #91
 
 ## 任务范围与验证基准
 

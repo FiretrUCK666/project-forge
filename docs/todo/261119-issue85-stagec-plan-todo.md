@@ -23,10 +23,10 @@ related_spec: null
 - **任务编号**：`stagec-plan`（仅覆盖本次规划文档落地与提交闭环，`related_prd` 与 `related_spec` 故意置 `null`，确保后续合并本规划 PR 时仅归档本规划 Todo 而保留 Stage C 总控 PRD 与 `C1–C4` 设计/待办文件处于激活状态）
 - **关联规划成品**：
   - [Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-  - [Stage C-1 SPEC](../specs/261119-v10-stagec-c1-unified-locate-intake-perf-spec.md) 与 [Stage C-1 Todo](../todo/261119-v10-stagec-c1-unified-locate-intake-perf-todo.md)
-  - [Stage C-2 SPEC](../specs/261119-v10-stagec-c2-dev-edit-pyramid-govern-spec.md) 与 [Stage C-2 Todo](../todo/261119-v10-stagec-c2-dev-edit-pyramid-govern-todo.md)
-  - [Stage C-3 SPEC](../specs/261119-v10-stagec-c3-dev-verify-tools-review-spec.md) 与 [Stage C-3 Todo](../todo/261119-v10-stagec-c3-dev-verify-tools-review-todo.md)
-  - [Stage C-4 SPEC](../specs/261119-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md) 与 [Stage C-4 Todo](../todo/261119-v10-stagec-c4-dev-iterate-evolution-e2e-todo.md)
+  - [Stage C-1 SPEC](../specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md) 与 [Stage C-1 Todo](../todo/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-todo.md)
+  - [Stage C-2 SPEC](../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec.md) 与 [Stage C-2 Todo](../todo/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-todo.md)
+  - [Stage C-3 SPEC](../specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md) 与 [Stage C-3 Todo](../todo/261119-issue92-v10-stagec-c3-dev-verify-tools-review-todo.md)
+  - [Stage C-4 SPEC](../specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md) 与 [Stage C-4 Todo](../todo/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-todo.md)
 
 ## 任务范围与验证基准
 
@@ -41,16 +41,16 @@ related_spec: null
 ## 验收标准与执行清单
 
 <!-- criteria:start -->
-- [ ] C1: 完成 Stage C 总控 PRD 与 `C1–C4` 切片全部 4 套 `SPEC + Todo`，冻结 `SC1..SC16`（映射 `C1..C16`）并保证 Wave C-1（`C1 || C2`）与 Wave C-2（`C3 || C4`）写域严格互斥且全部紧文件预设 `<= 730–800` 行拆分布局。
-- [ ] C2: 全部新增文档逐份及全仓通过 `doc-plan.mjs audit`、`preflight.mjs`、`fixtures.mjs --domain doc-rules/doc-depth` 与 `govern-audit.mjs audit . --changed --strict`，且与已有 Stage B 文档共存零错误、零未封闭或孤儿切片。
-- [ ] C3: 草案干净提交至 `.worktrees/impl-stagec-plan` 分支（不自做 critique/approve/submit），向协调者汇报完整文档清单与 `HEAD` SHA 供独立内审。
+- [x] C1: 完成 Stage C 总控 PRD 与 `C1–C4` 切片全部 4 套 `SPEC + Todo`，冻结 `SC1..SC16`（映射 `C1..C16`）并保证 Wave C-1（`C1 || C2`）与 Wave C-2（`C3 || C4`）写域严格互斥且全部紧文件预设 `<= 730–800` 行拆分布局。
+- [x] C2: 全部新增文档逐份及全仓通过 `doc-plan.mjs audit`、`preflight.mjs`、`fixtures.mjs --domain doc-rules/doc-depth` 与 `govern-audit.mjs audit . --changed --strict`，且与已有 Stage B 文档共存零错误、零未封闭或孤儿切片。
+- [x] C3: 草案干净提交至 `.worktrees/impl-stagec-plan` 分支（不自做 critique/approve/submit），向协调者汇报完整文档清单与 `HEAD` SHA 供独立内审。
 <!-- criteria:end -->
 
 ## 执行步骤
 
 - [x] 1. 在 `.worktrees/impl-stagec-plan` 起草总控 PRD 与 `C1–C4` 切片 `SPEC + Todo` 共 9 份规划文档及本规划闭环 Todo。
-- [ ] 2. 逐份及全仓库运行 `doc-plan.mjs audit`、`preflight.mjs`、`fixtures` 与 `govern-audit --changed --strict`，修正所有告警或边界问题。
-- [ ] 3. 核验仅包含本次新增 `docs/` 规划文件后提交至当前隔离分支，向协调者汇报文档清单与 `HEAD` SHA。
+- [x] 2. 逐份及全仓库运行 `doc-plan.mjs audit`、`preflight.mjs`、`fixtures` 与 `govern-audit --changed --strict`，修正所有告警或边界问题。
+- [x] 3. 核验仅包含本次新增 `docs/` 规划文件后提交至当前隔离分支，向协调者汇报文档清单与 `HEAD` SHA。
 
 ## 风险与应对
 
@@ -66,7 +66,7 @@ related_spec: null
 
 ## 断点与遗留决策
 
-- 无未决决策，等待本地审计全绿提交并汇报协调者指派独立内审。
+- 已完成，无遗留断点；`C1..C4` 已建独立 Issue（`#90`–`#93`）并由 `critic-stage-c-r2` 独立重审签核 `approve`。
 
 ## 澄清与补充记录
 
@@ -74,4 +74,4 @@ related_spec: null
 
 ## 完成后的记录
 
-- 待 `critic-stage-c` 独立内审与后续收尾归档时补全 PR 号与最终合并 SHA。
+- 已完成 Stage C (`v10`) 总控 PRD（`status: active`）与 4 套可并行切片 `SPEC + Todo`（`approved: true`，关联 Issue `#90`、`#91`、`#92`、`#93`）起草、`critic-stage-c-r2` Round 2 签核与全门禁校验；本 `#85` 规划单随 `finalize` 归档至 `docs/archive/todo/`，其余 9 份 Stage C 文档保留在 `docs/{prd,specs,todo}/` 就绪待实施。

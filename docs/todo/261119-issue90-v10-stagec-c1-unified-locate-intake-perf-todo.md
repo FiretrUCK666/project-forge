@@ -1,19 +1,19 @@
 ---
 kind: todo
-title: "v10 统一八技能、零写入按需定位、全局业务分诊与性能重构（Stage C-1）"
+title: v10 统一八技能、零写入按需定位、全局业务分诊与性能重构（Stage C-1）
 status: active
 created: 2026-11-19
 updated: 2026-11-19
-issue: null
+issue: 90
 pr: null
 branch: null
-owner: "plan-stage-c"
+owner: plan-stage-c
 approved: false
 done_at: null
 task_id: v10-stagec-c1
-planned_at: "8566de3da467f5137f362ecad4323dbc093dca00"
+planned_at: 8566de3da467f5137f362ecad4323dbc093dca00
 related_prd: ../prd/261119-v10-stagec-unified-architecture-prd.md
-related_spec: ../specs/261119-v10-stagec-c1-unified-locate-intake-perf-spec.md
+related_spec: ../specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md
 ---
 
 # 任务清单：v10 统一八技能、零写入按需定位、全局业务分诊与性能重构（Stage C-1）
@@ -23,7 +23,8 @@ related_spec: ../specs/261119-v10-stagec-c1-unified-locate-intake-perf-spec.md
 - **任务编号**：`v10-stagec-c1`
 - **所属波次**：Wave C-1 左翼（与 `v10-stagec-c2` 并行实施，严守互斥写域；需待 Stage B 全量合入 `main` 后启动）
 - **关联总控**：[Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-- **关联设计**：[Stage C-1 设计规范](../specs/261119-v10-stagec-c1-unified-locate-intake-perf-spec.md)
+- **关联设计**：[Stage C-1 设计规范](../specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md)
+- Issue: #90
 
 ## 任务范围与验证基准
 

@@ -1,19 +1,19 @@
 ---
 kind: todo
-title: "v10 第八技能 dev-iterate、跨代双向融合与 Stage B+C 全机制盲测终验（Stage C-4）"
+title: v10 第八技能 dev-iterate、跨代双向融合与 Stage B+C 全机制盲测终验（Stage C-4）
 status: active
 created: 2026-11-19
 updated: 2026-11-19
-issue: null
+issue: 93
 pr: null
 branch: null
-owner: "plan-stage-c"
+owner: plan-stage-c
 approved: false
 done_at: null
 task_id: v10-stagec-c4
-planned_at: "8566de3da467f5137f362ecad4323dbc093dca00"
+planned_at: 8566de3da467f5137f362ecad4323dbc093dca00
 related_prd: ../prd/261119-v10-stagec-unified-architecture-prd.md
-related_spec: ../specs/261119-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md
+related_spec: ../specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md
 ---
 
 # 任务清单：v10 第八技能 dev-iterate、跨代双向融合与 Stage B+C 全机制盲测终验（Stage C-4）
@@ -23,7 +23,8 @@ related_spec: ../specs/261119-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md
 - **任务编号**：`v10-stagec-c4`
 - **所属波次**：Wave C-2 右翼（与 `v10-stagec-c3` 并行推进，写域严格零交叠；在 Wave C-1 合入 `main` 后启动）
 - **关联总控**：[Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-- **关联设计**：[Stage C-4 设计规范](../specs/261119-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md)
+- **关联设计**：[Stage C-4 设计规范](../specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md)
+- Issue: #93
 
 ## 任务范围与验证基准
 

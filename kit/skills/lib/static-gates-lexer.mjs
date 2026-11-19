@@ -1,11 +1,11 @@
 /**
- * static-gates-lexer.mjs —— 多语言词法注释与块字面量剥离器（供 static-gates 与 shared 复用）。
+ * static-gates-lexer.mjs —— 多语言词法注释与字面量剥离器、死代码块及单测反作弊扫描内核。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），支持：
  *   - JS/TS/Rust/C-family 行/块注释与正则字面量避让；
  *   - Rust `'a` / `'static` 生命周期与 C/C++ `#define` 预处理避让；
- *   - HTML `<!-- ... -->` 多行注释；
- *   - Python `"""` / `'''` 多行块（`inBlock = 'py-dq' | 'py-sq'`，含 `r`/`f`/`b`/`u` 前缀与闭合后同行 `#` 注释）。
+ *   - HTML `<!-- ... -->` 多行注释与 Python `"""` / `'''` 多行块；
+ *   - 剥离字符串与正则字面量构建纯代码视图，消除规则源码自检误报。
  */
 
 export const C_FAMILY_NO_HASH_COMMENT_EXTS = new Set([
@@ -22,17 +22,13 @@ export function isRustLifetimeAt(s, idx, ext) {
   const m = /^'([A-Za-z_][A-Za-z0-9_]*)/.exec(rest)
   if (!m) return false
   const after = rest[m[0].length]
-  // `'a'` is a char literal; `'a` or `'static` without closing `'` is a Rust lifetime
   return after !== '\''
 }
 
 function findPyTripleEnd(s, startIdx, delim) {
   let j = startIdx
   while (j < s.length) {
-    if (s[j] === '\\') {
-      j += 2
-      continue
-    }
+    if (s[j] === '\\') { j += 2; continue }
     if (s.slice(j, j + 3) === delim) return j
     j += 1
   }
@@ -226,4 +222,239 @@ export function stripCodeCommentsLines(text, ext = '') {
     out.push(info.codeText)
   }
   return out
+}
+
+/** 在已去注释的单行代码中屏蔽字符串字面量与正则字面量内容，保留结构标点与行长映射。 */
+export function maskLiteralsInCodeLine(codeLine, ext = '') {
+  const s = String(codeLine ?? '')
+  const extLow = String(ext ?? '').toLowerCase().replace(/^\./, '')
+  const isPy = extLow === 'py'
+  const out = []
+  let i = 0
+  let prevSig = ''
+
+  while (i < s.length) {
+    const ch = s[i]
+    if (ch === '\'' && isRustLifetimeAt(s, i, extLow)) {
+      out.push(ch)
+      prevSig = '\''
+      i += 1
+      continue
+    }
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      const q = ch
+      out.push(q)
+      i += 1
+      while (i < s.length) {
+        const c = s[i]
+        if (c === '\\') { out.push(' ', ' '); i += 2; continue }
+        if (c === q) { out.push(q); i += 1; break }
+        out.push(' ')
+        i += 1
+      }
+      prevSig = q
+      continue
+    }
+    if (ch === '/' && !isPy) {
+      const canRegex = !prevSig || '=(:,?[!&|;{}~^+-*'.includes(prevSig)
+        || /\b(?:return|case|throw|typeof|await|yield)$/.test(s.slice(0, i).trimEnd())
+      if (canRegex) {
+        let j = i + 1
+        let inClass = false
+        let closed = false
+        while (j < s.length) {
+          const rc = s[j]
+          if (rc === '\\') { j += 2; continue }
+          if (rc === '[') inClass = true
+          else if (rc === ']' && inClass) inClass = false
+          else if (rc === '/' && !inClass) { closed = true; break }
+          j += 1
+        }
+        if (closed) {
+          out.push('/')
+          for (let k = i + 1; k < j; k += 1) out.push(' ')
+          out.push('/')
+          i = j + 1
+          while (i < s.length && /[A-Za-z]/.test(s[i])) { out.push(s[i]); i += 1 }
+          prevSig = '/'
+          continue
+        }
+      }
+    }
+    out.push(ch)
+    if (!/\s/.test(ch)) prevSig = ch
+    i += 1
+  }
+  return out.join('')
+}
+
+/** 一次词法扫描同时产出「纯代码视图」「去字面量代码视图」与「注释视图」。 */
+export function buildLexedViews(text, ext = '') {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
+  const codeLines = new Array(lines.length)
+  const codeNoLiteralLines = new Array(lines.length)
+  const commentLines = new Array(lines.length)
+  const pureSingleLineFlags = new Array(lines.length)
+  let inBlock = false
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const info = extractLineCommentInfo(lines[i], inBlock, ext)
+    inBlock = info.nextInBlock
+    codeLines[i] = info.codeText
+    codeNoLiteralLines[i] = maskLiteralsInCodeLine(info.codeText, ext)
+    commentLines[i] = info.commentText
+    pureSingleLineFlags[i] = info.pureSingleLine
+  }
+  return {
+    lines,
+    codeLines,
+    codeNoLiteralLines,
+    commentLines,
+    pureSingleLineFlags,
+    codeOnlyText: codeLines.join('\n'),
+    codeNoLiteralsText: codeNoLiteralLines.join('\n'),
+    commentOnlyText: commentLines.filter(Boolean).join('\n'),
+  }
+}
+
+/** 判定单行注释正文是否疑似被注释掉的死代码。 */
+export function looksLikeCommentedCode(body) {
+  const t = String(body ?? '').trim()
+  if (!t || t.startsWith('@') || /^[-=*#]{3,}$/.test(t)) return false
+  if (/[{};]\s*$/.test(t)) return true
+  if (/^(?:const|let|var|function|async\s+function|class|if|else\s+if|for|while|switch|return|import|export|def|async\s+def|try|except|finally|fn|pub\s+fn|func)\b/.test(t)) return true
+  if (/^[A-Za-z_][A-Za-z0-9_.]*\s*(?:=|:=|\([^)]*\)\s*(?:=>|\{|$))/.test(t)) return true
+  if (/^\s*[})\]]+\s*[,;]?\s*$/.test(t)) return true
+  return false
+}
+
+/** 扫描词法视图中的连续注释死代码块（>=4 行纯单行注释且含 >=3 行代码特征）。 */
+export function detectCommentedDeadCodeBlocks(views, { minRun = 4, minCodeLines = 3 } = {}) {
+  const blocks = []
+  let run = []
+  const flush = () => {
+    if (run.length >= minRun) {
+      const startLine = run[0].line
+      const isLicenseHeader = startLine <= 12 && run.some((c) => /copyright|license|spdx/i.test(c.body))
+      if (!isLicenseHeader) {
+        const codeCount = run.filter((c) => looksLikeCommentedCode(c.body)).length
+        if (codeCount >= minCodeLines) {
+          blocks.push({
+            startLine,
+            endLine: run[run.length - 1].line,
+            length: run.length,
+            excerpt: run[0].body.slice(0, 100),
+          })
+        }
+      }
+    }
+    run = []
+  }
+  const len = views.commentLines.length
+  for (let i = 0; i < len; i += 1) {
+    const body = views.commentLines[i]
+    if (views.pureSingleLineFlags[i] && body) run.push({ line: i + 1, body })
+    else flush()
+  }
+  flush()
+  return blocks
+}
+
+export const HARD_SLEEP_RULES = Object.freeze([
+  /\bsetTimeout\s*\([^,\n]+,\s*(?:[1-9]\d{3,})\s*\)/,
+  /\b(?:sleep|delay|waitForTimeout)\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
+  /\b(?:time|asyncio)\.sleep\s*\(\s*(?:[1-9]\d*(?:\.\d+)?)\s*\)/,
+  /^\s*sleep\s+(?:[1-9]\d*(?:\.\d+)?)(?:\s|$)/,
+  /\btime\.Sleep\s*\(\s*(?:[1-9]\d*\s*\*\s*time\.(?:Second|Minute)|(?:[1-9]\d{3,})\s*\*\s*time\.Millisecond)/,
+  /\bthread::sleep\s*\(\s*Duration::(?:from_secs\s*\(\s*[1-9]|from_millis\s*\(\s*(?:[1-9]\d{3,}))/,
+  /\bThread\.sleep\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
+])
+export const MOCK_SETUP_RE = /\b(?:vi\.fn|vi\.spyOn|jest\.fn|jest\.spyOn|mock\.fn|sinon\.(?:stub|spy|mock)|unittest\.mock|MagicMock|patch\.object|mock\.patch|mockReturnValue|mockResolvedValue|when\([^\n]+\)\.thenReturn)\b|\bpatch\s*\(/g
+export const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?:\.\s*not)?\s*\.\s*toHaveBeenCalled\w*\s*\((?:[^()\n]|\([^()\n]*\))*\)|[A-Za-z0-9_$.]+\s*\.\s*assert_(?:not_)?called(?:_once|_with|_once_with)?\s*\((?:[^()\n]|\([^()\n]*\))*\)|\bassert\s+[A-Za-z0-9_$.]+\s*\.\s*(?:called|calledOnce|calledTwice|calledThrice|call_count)\b[^\n]*|[A-Za-z0-9_$.]+\s*\.\s*(?:calledOnce|calledTwice|calledThrice|verify)\b(?:\s*\([^)\n]*\))?/
+
+/**
+ * 词法去噪后的单测反作弊检查（零断言、纯 Mock 自证、单测 >=1s 硬编码 sleep、非无头 UI 测试）。
+ */
+export function scanTestAntiCheat({
+  fileRel, text, ext = '', assertionRe, testCaseRe, isNonUnit = false,
+} = {}) {
+  const findings = []
+  const extNorm = ext || String(fileRel ?? '').split('.').pop()?.toLowerCase() || ''
+  const views = buildLexedViews(text, extNorm)
+  const codeOnlyText = views.codeOnlyText
+  const codeNoLiterals = views.codeNoLiteralsText
+  const testDeclCount = views.codeLines.filter((l) => testCaseRe.test(l)).length
+  const baseName = String(fileRel ?? '').split('/').pop() ?? ''
+  const isExplicitTest = /\.(?:test|spec)\.[^/]+$|_test\.[^/]+$|^test_[^/]+\.py$|(?:Tests?|IT)\.(?:java|kt|cs|swift)$|_unittest\.(?:cc|cpp)$/i.test(baseName)
+    || testDeclCount > 0
+
+  if (isExplicitTest && !assertionRe.test(codeOnlyText)) {
+    findings.push({
+      ruleId: 'edit.test-zero-assertion',
+      defectClass: 'mock-only-test',
+      severity: 'high',
+      file: fileRel,
+      line: 1,
+      message: `测试文件缺少真实断言（零断言用例）：${fileRel}`,
+      fixHint: '补充针对真实输出或状态转换的 assert/expect 断言，避免空跑假绿。',
+    })
+  }
+
+  if (isExplicitTest) {
+    const mockCount = (codeNoLiterals.match(MOCK_SETUP_RE) ?? []).length
+    const hasSpyAssert = MOCK_SPY_ASSERT_RE.test(codeOnlyText)
+    const nonSpyCode = codeOnlyText.replace(new RegExp(MOCK_SPY_ASSERT_RE.source, 'g'), '')
+    const hasRealAssertion = assertionRe.test(nonSpyCode)
+    if (mockCount >= 5 && hasSpyAssert && !hasRealAssertion) {
+      findings.push({
+        ruleId: 'edit.test-mock-tautology',
+        defectClass: 'mock-only-test',
+        severity: 'high',
+        file: fileRel,
+        line: 1,
+        message: `纯 Mock 自证测试（${mockCount} 处 mock 且仅有调用次数断言，0 真实行为断言）：${fileRel}`,
+        fixHint: '直接验证被测模块真实返回值或副作用状态，而不是只验证 mock 是否被调用。',
+      })
+    }
+  }
+
+  if (!isNonUnit) {
+    for (let i = 0; i < views.codeNoLiteralLines.length; i += 1) {
+      if (HARD_SLEEP_RULES.some((re) => re.test(views.codeNoLiteralLines[i]))) {
+        findings.push({
+          ruleId: 'edit.test-hard-sleep',
+          defectClass: 'race-condition',
+          severity: 'high',
+          file: fileRel,
+          line: i + 1,
+          message: `单元测试存在 >=1000ms 硬编码等待：${fileRel}:${i + 1}`,
+          fixHint: '改用事件回调、条件轮询或假时钟，禁止硬编码长时 sleep/setTimeout。',
+        })
+        break
+      }
+    }
+  }
+
+  const hasHeadlessGuard = /\bprocess\.env\.(?:CI|HEADLESS|DISPLAY)|os\.environ|headless\s*:\s*(?:true|Boolean|process\.env)/i.test(codeNoLiterals)
+  const hasTempHomeGuard = /\b(?:mkdtemp|tmpdir|tmp_path|tempdir|HOME\s*=|USERPROFILE\s*=)\b/i.test(codeNoLiterals)
+  const explicitHeaded = (/\bheadless\s*:\s*false\b/i.test(codeNoLiterals) && !hasHeadlessGuard)
+    || (/['"`]--headed['"`]/.test(codeOnlyText) && !hasHeadlessGuard)
+    || (/\b(?:pyautogui|pynput|NSApplication\.shared|robot\.mouseClick|osascript)\b/i.test(codeNoLiterals) && !hasHeadlessGuard)
+  const touchesRealHome = /(?:\b(?:os\.homedir\(\)|Path\.home\(\)|expanduser\(["']~)|["']~\/\.(?:config|local|ssh|aws|kube))/i.test(codeOnlyText)
+    && !hasTempHomeGuard
+  if (explicitHeaded || touchesRealHome) {
+    findings.push({
+      ruleId: 'edit.test-non-headless',
+      defectClass: 'missing-runtime-proof',
+      severity: 'high',
+      file: fileRel,
+      line: 1,
+      message: explicitHeaded
+        ? `测试未启用无头模式或缺少 CI/HEADLESS 守卫：${fileRel}`
+        : `测试直接访问宿主用户主目录且缺少临时目录隔离：${fileRel}`,
+      fixHint: '默认以 headless 模式运行并在临时目录中隔离测试状态。',
+    })
+  }
+
+  return findings
 }

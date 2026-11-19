@@ -6,8 +6,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 91
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c2
+owner: impl-c2
 approved: false
 done_at: null
 task_id: v10-stagec-c2
@@ -40,18 +40,18 @@ related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec
 ## 验收标准与执行清单
 
 <!-- criteria:start -->
-- [ ] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件，且绝不硬绑定第三方外部 linter 二进制。
-- [ ] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号、迁移其 `writeTaskLedger` 及修复第 194–199 行忽略 `labelRes` 失败漏洞；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 Stage B 基线 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/可选原生校验配置，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并清理过时条款。
-- [ ] C7: （SC7）打通 `dev-govern` 自动触发体系：`flow finalize`/`verify` 链路自动触发轻量 `govern-audit --changed` 体检，`flow merge`/`cleanup` 完成后自动触发轻量 `govern-retro` 复盘（支持 `--skip-govern` 并显式记账，严禁无痕跳过）。
-- [ ] C8: （SC8）移除 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 把测试路径段硬编码排除出单元测试的规则，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
+- [x] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件，且绝不硬绑定第三方外部 linter 二进制。
+- [x] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号、迁移其 `writeTaskLedger` 及修复第 194–199 行忽略 `labelRes` 失败漏洞；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 Stage B 基线 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/可选原生校验配置，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并清理过时条款。
+- [x] C7: （SC7）打通 `dev-govern` 自动触发体系：`flow finalize`/`verify` 链路自动触发轻量 `govern-audit --changed` 体检，`flow merge`/`cleanup` 完成后自动触发轻量 `govern-retro` 复盘（支持 `--skip-govern` 并显式记账，严禁无痕跳过）。
+- [x] C8: （SC8）移除 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 把测试路径段硬编码排除出单元测试的规则，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
 <!-- criteria:end -->
 
 ## 执行步骤
 
-- [ ] 1. **新增第 6 技能 `dev-edit/` 与 `edit-gate.mjs`（C5）**：创建 `kit/skills/dev-edit/` (new)、`kit/skills/dev-edit/scripts/` (new)、`kit/skills/dev-edit/SKILL.md` (new)（`order: 33`）与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)（不超过 550 行）；扩展 `kit/skills/lib/static-gates-lexer.mjs` 与 `kit/skills/lib/static-gates.mjs`（维持不超过 720 行）支持剥离注释与字面量后拦截 6 类坏味、超过 800 行超限并联动可选原生检查（绝不硬绑定第三方 linter 二进制），对齐 `flow.mjs verify` 调用契约。
-- [ ] 2. **扩展信号指纹、`review-ledger` 漏洞修复与倒金字塔引擎（C6）**：更新 `kit/skills/lib/signals.mjs` 增加 `defectClass`/`pyramidTier`/`fingerprint`/`targetArtifact` 结构与旧记录读时补全；升级 `kit/skills/dev-review/scripts/review-ledger.mjs` 修复第 194–199 行忽略 `labelRes` 失败漏洞、迁移第 546/688 行 `writeTaskLedger` 至 `updateTaskLedger` 并在 `record` 写入按条指纹；重写 `kit/skills/dev-govern/scripts/govern-retro.mjs` 彻底取消默认追加 `AGENTS.md`，对复发 `>= 2` 次自动经 Stage B 基线 `kit/skills/lib/escalation.mjs` (new) 或 `profile-sniffer.mjs` 升格 Tier 1/Tier 2（禁用未授权 Tier 3）。
-- [ ] 3. **打通 `dev-govern` 自动触发与清理测试误判（C7、C8）**：升级 `kit/skills/dev-govern/scripts/govern-audit.mjs`（新增 `--changed --quiet --json`）与 `govern-state.mjs`（支撑 `--auto` 复盘基准与 `--skip-govern` 审计记录），更新 `kit/skills/dev-govern/SKILL.md`；扩展 `kit/skills/lib/profile-sniffer.mjs` 测试分层元数据探测，移除 `kit/skills/dev-govern/scripts/govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 硬编码及小型仓库 `unfiltered-quick-test` 误报。
-- [ ] 4. **独立双向夹具、派生路由同步与全门禁验收（C5–C8）**：新增 `scripts/dev/fixtures-stagec-c2.mjs` (new) 与 `scripts/dev/injections-data-stagec-c2.mjs` (new) 覆盖全正反场景；在本 PR 运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 保持 `.agents/skills/` 与 `AGENTS.md` `意图路由` 对齐，并完成 `C1` rebase 与全量 `merge-gate`。
+- [x] 1. **新增第 6 技能 `dev-edit/` 与 `edit-gate.mjs`（C5）**：创建 `kit/skills/dev-edit/` (new)、`kit/skills/dev-edit/scripts/` (new)、`kit/skills/dev-edit/SKILL.md` (new)（`order: 33`）与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)（不超过 550 行）；扩展 `kit/skills/lib/static-gates-lexer.mjs` 与 `kit/skills/lib/static-gates.mjs`（维持不超过 720 行）支持剥离注释与字面量后拦截 6 类坏味、超过 800 行超限并联动可选原生检查（绝不硬绑定第三方 linter 二进制），对齐 `flow.mjs verify` 调用契约。
+- [x] 2. **扩展信号指纹、`review-ledger` 漏洞修复与倒金字塔引擎（C6）**：更新 `kit/skills/lib/signals.mjs` 增加 `defectClass`/`pyramidTier`/`fingerprint`/`targetArtifact` 结构与旧记录读时补全；升级 `kit/skills/dev-review/scripts/review-ledger.mjs` 修复第 194–199 行忽略 `labelRes` 失败漏洞、迁移第 546/688 行 `writeTaskLedger` 至 `updateTaskLedger` 并在 `record` 写入按条指纹；重写 `kit/skills/dev-govern/scripts/govern-retro.mjs` 彻底取消默认追加 `AGENTS.md`，对复发 `>= 2` 次自动经 Stage B 基线 `kit/skills/lib/escalation.mjs` (new) 或 `profile-sniffer.mjs` 升格 Tier 1/Tier 2（禁用未授权 Tier 3）。
+- [x] 3. **打通 `dev-govern` 自动触发与清理测试误判（C7、C8）**：升级 `kit/skills/dev-govern/scripts/govern-audit.mjs`（新增 `--changed --quiet --json`）与 `govern-state.mjs`（支撑 `--auto` 复盘基准与 `--skip-govern` 审计记录），更新 `kit/skills/dev-govern/SKILL.md`；扩展 `kit/skills/lib/profile-sniffer.mjs` 测试分层元数据探测，移除 `kit/skills/dev-govern/scripts/govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 硬编码及小型仓库 `unfiltered-quick-test` 误报。
+- [x] 4. **独立双向夹具、派生路由同步与全门禁验收（C5–C8）**：新增 `scripts/dev/fixtures-stagec-c2.mjs` (new) 与 `scripts/dev/injections-data-stagec-c2.mjs` (new) 覆盖全正反场景；在本 PR 运行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 保持 `.agents/skills/` 与 `AGENTS.md` `意图路由` 对齐，并完成 `C1` rebase 与全量 `merge-gate`。
 
 ## 风险与应对
 
@@ -69,12 +69,20 @@ related_spec: ../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec
 
 ## 断点与遗留决策
 
-- 无遗留未决决策：Q2（全改码入口覆盖与钩子边界）、Q3（倒金字塔禁止默认改 `AGENTS.md` 与自动触发时机）均已拍板定稿。
+- 已完成，无遗留（Q2 全改码入口覆盖与钩子边界、Q3 倒金字塔禁默认改 `AGENTS.md`、普通审查范围外高危确定性升级及审查评论表格单行精炼均已落地实证）。
 
 ## 澄清与补充记录
 
 - `2026-11-19`：明确 `C2` 严禁触碰 `dev-flow/`，全套自动挂载由 `C1` `flow-lifecycle-hooks.mjs` (new) 按约定 CLI 参数完成。
+- `2026-11-19`：补充普通审查范围外/存量高危发现确定性经 `classifyEscalationTier` + `escalateToBackend` 建单流转，以及 `review-sync.mjs` 验收标准表格单行摘要精炼（`<= 120` 字符）。
 
 ## 完成后的记录
 
-- 待实施、验证与合并后补全 PR 号、最终 `HEAD` SHA 及正反断言用例通过统计。
+- **分支与归属**：`feat/v10-stagec-c2`（Issue `#91`，任务 `stagec-c2`）
+- **实际验证命令与结果**：
+  - `node scripts/dev/fixtures-stagec-c2.mjs`：5/5 双向断言全绿（C5/C6/C7/C8 + 范围外自动建单 + 表格精炼）
+  - `node scripts/dev/injections-data-stagec-c2.mjs`：9/9 故障注入精准拦截（I180..I188）
+  - `node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode verify --changed --json`：exit 0，0 blockers
+  - `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --strict`：exit 0，0 findings
+  - `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`：exit 0（`AGENTS.md` `24460 B < 24576 B`）
+  - `write-probe-audit.mjs`：85 个目标脚本 0 违规；`$TMPDIR` Python+Node 异构仓实测 `edit-gate` 阻断/修复放行与 `retro --auto` Tier 1 升格（`AGENTS.md` 零改写）通过。

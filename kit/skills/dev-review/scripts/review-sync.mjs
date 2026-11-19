@@ -2,17 +2,228 @@
  * review-sync.mjs —— 将独立审查结果按 `TaskBackend` 通道双写回远端 PR/Issue 或本地工单。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），远端写入前强制经 `probeForWrite` 探测通道。
+ * 显式汇总评论与标签同步状态，并将 PR 审查单中的验收标准逐条核对表压缩为单行可读摘要。
  */
 
 import { buildReviewComments } from '../../lib/docs.mjs'
-import { gitRun } from '../../lib/git.mjs'
+import { buildEscalationIssuePayload, classifyEscalationTier } from '../../lib/escalation.mjs'
+import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, isInternalAgentSlug,
   parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
 } from '../../lib/platform.mjs'
+import { computeSignalFingerprint, inferDefectClass, inferSignalModule } from '../../lib/signals.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { parseAcceptanceCriteria } from './review-gates.mjs'
+
+const DEFAULT_TABLE_CELL_MAX = 120
+const FILE_REF_RE = /\b((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,10})(?::(\d+))?\b/
+
+/** 将单条验收标准或阻塞核对文本压缩为单行可读摘要（默认 <= 120 字符，避免撑爆 Markdown 表格）。 */
+export function compactCriterionSummary(rawText, maxChars = DEFAULT_TABLE_CELL_MAX) {
+  const limit = Number.isInteger(maxChars) && maxChars >= 24 ? maxChars : DEFAULT_TABLE_CELL_MAX
+  let clean = String(rawText ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\|/g, '\\|')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (clean.length <= limit) return clean
+
+  // 优先去掉冗长中文/英文括号补充说明，保留核心动词与定位
+  const stripped = clean
+    .replace(/（[^（）]{18,}）/g, '')
+    .replace(/\([^()]{24,}\)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (stripped.length >= 16 && stripped.length <= limit) return stripped
+  if (stripped.length >= 24 && stripped.length < clean.length) clean = stripped
+  if (clean.length <= limit) return clean
+
+  let cut = clean.slice(0, limit - 1).trimEnd()
+  // 避免在反引号中间截断破坏表格格式
+  const ticks = (cut.match(/`/g) ?? []).length
+  if (ticks % 2 === 1) {
+    const lastTick = cut.lastIndexOf('`')
+    if (lastTick > limit * 0.5) cut = cut.slice(0, lastTick).trimEnd()
+    else cut = `${cut.slice(0, Math.max(1, cut.length - 1))}\``
+  }
+  cut = cut.replace(/[，、；：,:;\s-]+$/, '')
+  return `${cut}…`
+}
+
+/** 压缩 PR 审查评论中「验收标准逐条核对」表格第三列单元格，保留完整 Must Fix 正文不动。 */
+export function compactReviewCriteriaTable(prCommentBody, maxChars = DEFAULT_TABLE_CELL_MAX) {
+  const lines = String(prCommentBody ?? '').split('\n')
+  let inCriteriaTable = false
+  const out = []
+  for (const line of lines) {
+    if (/^####\s+验收标准逐条核对(?:\s|$)/.test(line)) {
+      inCriteriaTable = true
+      out.push(line)
+      continue
+    }
+    if (inCriteriaTable) {
+      if (/^#{2,6}\s+/.test(line)) {
+        inCriteriaTable = false
+        out.push(line)
+        continue
+      }
+      const rowM = /^\|\s*(C\d+[^|]*?)\s*\|\s*(PASS|FAIL)\s*\|\s*(.+?)\s*\|$/.exec(line)
+      if (rowM) {
+        const compacted = compactCriterionSummary(rowM[3], maxChars)
+        out.push(`| ${rowM[1].trim()} | ${rowM[2].trim()} | ${compacted} |`)
+        continue
+      }
+    }
+    out.push(line)
+  }
+  return out.join('\n')
+}
+
+/** 汇总评论与标签双写结果，防止忽略 `labelRes` 失败或降级。 */
+export function summarizeLabelSyncStatus(results = []) {
+  const labelWarnings = []
+  let labelDegraded = false
+  let checkedLabels = 0
+  for (const r of results) {
+    if (!r || r.label === undefined || r.label === null) continue
+    checkedLabels += 1
+    const addRes = r.label.addRes
+    const degraded = Boolean(r.label.degraded || addRes?.degraded)
+    if (degraded) labelDegraded = true
+    const failed = r.label.ok === false || addRes?.ok === false
+    if (failed) {
+      const reason = r.label.error || addRes?.error || (degraded ? 'degraded (permission/403)' : 'label sync failed')
+      labelWarnings.push(`${r.kind}#${r.number}: ${reason}`)
+    }
+  }
+  const labelSynced = checkedLabels === 0 ? true : labelWarnings.length === 0
+  return { labelSynced, labelDegraded, labelWarnings }
+}
+
+function parseAdvisoryCandidate(raw, defaultKind) {
+  if (raw && typeof raw === 'object') {
+    const summary = String(raw.summary ?? raw.message ?? raw.text ?? raw.title ?? '').trim()
+    const file = posixPath(raw.file ?? (FILE_REF_RE.exec(summary)?.[1] ?? ''))
+    return {
+      ...raw,
+      summary,
+      file,
+      outOfScope: Boolean(raw.outOfScope || defaultKind === 'out-of-scope'),
+      preExisting: Boolean(raw.preExisting || defaultKind === 'pre-existing'),
+    }
+  }
+  const text = String(raw ?? '').trim()
+  if (!text) return null
+  const fileMatch = FILE_REF_RE.exec(text)
+  const file = fileMatch ? posixPath(fileMatch[1]) : ''
+  const line = fileMatch?.[2] ? Number(fileMatch[2]) : undefined
+  const low = text.toLowerCase()
+  const severity = /\[(?:critical|p0|sev0)\]/i.test(text) ? 'critical'
+    : /\[(?:high|p1|sev1|security|vuln)\]/i.test(text) ? 'high'
+      : /\[(?:medium|p2)\]/i.test(text) ? 'medium' : 'low'
+  const outOfScope = defaultKind === 'out-of-scope' || /\[out-of-scope\]|范围外/i.test(text)
+  const crossModule = /\[cross-module\]|跨模块/i.test(text)
+  const highRisk = /\[(?:high-risk|security|one-way)\]|高风险|安全漏洞/i.test(text)
+  const doorType = /\[one-way\]|单向门/i.test(text) ? 'one-way' : 'two-way'
+  const recurrenceCount = /\b(?:recurrence|repeat|复发)\s*[:=]?\s*([2-9]|\d{2,})/i.test(low) ? 2 : 1
+  return {
+    summary: text,
+    file,
+    ...(Number.isInteger(line) ? { line } : {}),
+    severity,
+    outOfScope,
+    preExisting: defaultKind === 'pre-existing',
+    crossModule,
+    highRisk,
+    doorType,
+    recurrenceCount,
+    singleFile: !crossModule,
+    inScope: !outOfScope,
+  }
+}
+
+/**
+ * 普通审查（非停损）范围外/存量发现确定性分级升级：
+ * 仅对命中 `classifyEscalationTier(item) === 'escalated-issue'` 的条目按指纹去重生成建单载荷。
+ */
+export function collectNormalReviewEscalations({
+  preExistingList = [],
+  outOfScopeList = [],
+  mustFixList = [],
+  taskId = '',
+  round = 1,
+  milestone = undefined,
+} = {}) {
+  const rawCandidates = [
+    ...(Array.isArray(outOfScopeList) ? outOfScopeList.map((x) => parseAdvisoryCandidate(x, 'out-of-scope')) : []),
+    ...(Array.isArray(preExistingList) ? preExistingList.map((x) => parseAdvisoryCandidate(x, 'pre-existing')) : []),
+    ...(Array.isArray(mustFixList)
+      ? mustFixList.filter((m) => m && (m.outOfScope || m.preExisting)).map((m) => parseAdvisoryCandidate(m, m.outOfScope ? 'out-of-scope' : 'pre-existing'))
+      : []),
+  ].filter((c) => c && c.summary)
+
+  const seenFingerprints = new Set()
+  const items = []
+  const payloads = []
+
+  for (const cand of rawCandidates) {
+    const tier = classifyEscalationTier({
+      source: 'review',
+      severity: cand.severity,
+      outOfScope: cand.outOfScope,
+      crossModule: cand.crossModule,
+      highRisk: cand.highRisk,
+      doorType: cand.doorType,
+      caseType: cand.caseType,
+      recurrenceCount: cand.recurrenceCount,
+      singleFile: cand.singleFile,
+      inScope: cand.inScope,
+      files: cand.file ? [cand.file] : (Array.isArray(cand.files) ? cand.files : []),
+      forceIssue: Boolean(cand.forceIssue),
+      e2eBlocking: Boolean(cand.e2eBlocking),
+    })
+    if (tier !== 'escalated-issue') continue
+
+    const moduleRoot = inferSignalModule(cand.file)
+    const defectClass = inferDefectClass({
+      ruleId: cand.outOfScope ? 'review.out-of-scope' : 'review.pre-existing',
+      pattern: cand.outOfScope ? 'review.out-of-scope' : 'review.pre-existing',
+      category: 'review',
+      message: cand.summary,
+    })
+    const ruleId = cand.ruleId || (cand.outOfScope ? 'review.out-of-scope' : 'review.pre-existing')
+    const fingerprint = cand.fingerprint || computeSignalFingerprint({
+      ruleId: `${ruleId}:${cand.summary.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim().slice(0, 64)}`,
+      defectClass,
+      moduleRoot,
+    })
+    if (seenFingerprints.has(fingerprint)) continue
+    seenFingerprints.add(fingerprint)
+
+    const shortSummary = compactCriterionSummary(cand.summary, 72)
+    const escalationItem = {
+      source: 'review',
+      outOfScope: cand.outOfScope,
+      severity: cand.severity || 'high',
+      caseType: cand.caseType ?? (cand.highRisk || cand.crossModule ? 3 : 2),
+      taskId,
+      category: defectClass,
+      title: `${cand.outOfScope ? 'review out-of-scope' : 'review pre-existing'} [fp:${fingerprint}] ${shortSummary}`,
+      summary: cand.summary,
+      rootCause: `普通审查 Round ${round} 发现范围外/存量高危问题（fingerprint=${fingerprint}，module=${moduleRoot}），独立建单跟进根治，不阻塞当前切片边界。`,
+      criteria: [`根治 [${fingerprint}] ${cand.summary} 并补齐双向回归测试`],
+      labels: ['escalation', cand.outOfScope ? 'out-of-scope' : 'pre-existing'],
+      ...(milestone !== undefined ? { milestone } : {}),
+    }
+    const payload = { ...buildEscalationIssuePayload(escalationItem), fingerprint, defectClass, moduleRoot }
+    items.push({ ...escalationItem, fingerprint, defectClass, moduleRoot })
+    payloads.push(payload)
+  }
+
+  return { items, payloads }
+}
 
 export function buildCriteriaStatusSummary({ workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList, explicitStatus, parsedCriteria }) {
   if (explicitStatus && String(explicitStatus).trim()) return String(explicitStatus).trim()
@@ -60,7 +271,7 @@ export async function syncReviewToGitHub({
     : []
 
   if (!prNum && issueNums.length === 0) {
-    return { synced: false, skipped: true, reason: 'no-linked-pr-or-issue' }
+    return { synced: false, labelSynced: true, labelWarnings: [], skipped: true, reason: 'no-linked-pr-or-issue' }
   }
 
   const isLocalBackendRole = ledger.role === 'local-only'
@@ -70,9 +281,10 @@ export async function syncReviewToGitHub({
 
   if (isLocalBackendRole) {
     if (issueNums.length === 0) {
-      return { synced: false, skipped: true, reason: `role-${ledger.role ?? 'local'}` }
+      return { synced: false, labelSynced: true, labelWarnings: [], skipped: true, reason: `role-${ledger.role ?? 'local'}` }
     }
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
+    const compactCriteria = criteria.map((c) => ({ ...c, text: compactCriterionSummary(c.text) }))
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -86,7 +298,7 @@ export async function syncReviewToGitHub({
     const { issueCommentBody } = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha,
       sourceLine: `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`,
-      criteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
+      criteria: compactCriteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
       mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems,
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
@@ -107,7 +319,19 @@ export async function syncReviewToGitHub({
           })()
       results.push({ kind: 'issue', number: num, comment: commentRes, label: labelRes })
     }
-    return { synced: results.some((r) => r.comment?.ok), local: true, label: labelName, results }
+    const synced = results.some((r) => r.comment?.ok)
+    const { labelSynced, labelDegraded, labelWarnings } = summarizeLabelSyncStatus(results)
+    return {
+      synced,
+      labelSynced,
+      fullySynced: synced && labelSynced,
+      labelDegraded,
+      labelWarnings,
+      local: true,
+      label: labelName,
+      results,
+      ...(!labelSynced ? { hint: `评论已写但标签同步失败或降级：${labelWarnings.join('；')}` } : {}),
+    }
   }
 
   let delegatedPayloads = null
@@ -133,6 +357,7 @@ export async function syncReviewToGitHub({
       : `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`
 
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
+    const compactCriteria = criteria.map((c) => ({ ...c, text: compactCriterionSummary(c.text) }))
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
       explicitStatus: opts['criteria-status'], parsedCriteria: criteria,
@@ -144,11 +369,13 @@ export async function syncReviewToGitHub({
       taskId: ledger.taskId, action: 'review', round, verdict, headSha, reviewerId, stopLossTriggered: stopLoss,
     }
 
-    const { prCommentBody, issueCommentBody, stateTag } = buildReviewComments({
-      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria, criteriaStatusText,
+    const built = buildReviewComments({
+      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria: compactCriteria, criteriaStatusText,
       faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
       rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })
+    const prCommentBody = compactReviewCriteriaTable(built.prCommentBody)
+    const { issueCommentBody, stateTag } = built
     const targets = [
       ...(prNum ? [{ kind: 'pr', number: prNum }] : []),
       ...issueNums.filter((n) => n !== prNum).map((n) => ({ kind: 'issue', number: n })),
@@ -173,21 +400,17 @@ export async function syncReviewToGitHub({
 
     if (!hasRemote) {
       return {
-        synced: false, offlineOrNoCreds: true, reason: 'no-remote', targetRepo, delegatedPayloads,
+        synced: false, labelSynced: false, labelWarnings: [], offlineOrNoCreds: true, reason: 'no-remote', targetRepo, delegatedPayloads,
         hint: '未配置远端，审查结论已安全保存至本地账本并附规范评论载荷（不阻塞离线使用）。',
       }
     }
     if (!targetRepo) {
-      return { synced: false, skipped: true, reason: 'no-github-repo', delegatedPayloads, hint: '非 GitHub 远端，审查结论已写入本地账本。' }
+      return { synced: false, labelSynced: false, labelWarnings: [], skipped: true, reason: 'no-github-repo', delegatedPayloads, hint: '非 GitHub 远端，审查结论已写入本地账本。' }
     }
     if ((!opts._ghClient && ghProbe?.env?.providerId !== 'github') || (tier !== 'gh-cli' && tier !== 'node-https-token')) {
       return {
-        synced: false,
-        offlineOrNoCreds: true,
-        tier,
-        targetRepo,
-        reason: `offline-or-no-credentials(${tier})`,
-        delegatedPayloads,
+        synced: false, labelSynced: false, labelWarnings: [], offlineOrNoCreds: true, tier, targetRepo,
+        reason: `offline-or-no-credentials(${tier})`, delegatedPayloads,
         hint: `离线或无可用 GitHub 凭据（tier=${tier}），已写入本地账本并输出规范化 delegatedPayloads 供宿主原样双写。`,
       }
     }
@@ -213,20 +436,28 @@ export async function syncReviewToGitHub({
     }
 
     const synced = results.some((r) => r.comment?.ok)
+    const { labelSynced, labelDegraded, labelWarnings } = summarizeLabelSyncStatus(results)
+    const hints = []
+    if (!synced) hints.push('远端评论同步未成功（可能处于离线或无写权限环境），审查结论已写入本地账本，请使用 delegatedPayloads 原样双写。')
+    if (!labelSynced) hints.push(`标签同步失败或降级：${labelWarnings.join('；')}`)
     return {
       synced,
+      labelSynced,
+      fullySynced: synced && labelSynced,
+      labelDegraded,
+      labelWarnings,
       targetRepo,
       label: labelName,
       delegatedPayloads,
       results,
-      ...(!synced ? {
-        offlineOrNoCreds: true,
-        hint: '远端评论同步未成功（可能处于离线或无写权限环境），审查结论已写入本地账本，请使用 delegatedPayloads 原样双写。',
-      } : {}),
+      ...(!synced ? { offlineOrNoCreds: true } : {}),
+      ...(hints.length > 0 ? { hint: hints.join(' ') } : {}),
     }
   } catch (err) {
     return {
       synced: false,
+      labelSynced: false,
+      labelWarnings: [],
       offlineOrNoCreds: true,
       ...(delegatedPayloads ? { delegatedPayloads } : {}),
       error: err instanceof Error ? err.message : String(err),

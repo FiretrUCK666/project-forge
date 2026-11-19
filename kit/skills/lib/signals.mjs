@@ -1,7 +1,9 @@
 /**
  * signals.mjs —— 统一运行期信号总线（withFileLock 并发保护写入 `<gitCommonDir>/project-forge-govern/signals.jsonl`）。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-flow、dev-review、dev-govern 共用。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-edit、dev-flow、dev-review、dev-govern 共用。
+ * 所有事件携带三层倒金字塔结构化字段：`defectClass`、`pyramidTier`、`fingerprint`、`targetArtifact`；
+ * 读旧无指纹历史条目时实时补全虚拟指纹，兼容既有账本。
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -10,12 +12,120 @@ import { join } from 'node:path'
 
 import { canonicalPath, posixPath, readTextSafe, sha256Text, withFileLock } from './git.mjs'
 
+export const DEFECT_CLASSES = Object.freeze([
+  'suppression-bypass',
+  'arch-boundary',
+  'state-split',
+  'mock-only-test',
+  'race-condition',
+  'stale-contract',
+  'missing-runtime-proof',
+  'file-bloat',
+  'dead-code',
+  'review-defect',
+  'general',
+])
+
+export const PYRAMID_TIERS = Object.freeze([
+  'tier1-architecture',
+  'tier2-deterministic-gate',
+  'tier3-prompt-fallback',
+])
+
+const TIER1_DEFECT_CLASSES = new Set([
+  'state-split',
+  'race-condition',
+  'file-bloat',
+])
+
 export function inferSignalModule(fileRel) {
   const clean = posixPath(fileRel).replace(/^\.\//, '').trim()
   if (!clean) return 'repo'
   const parts = clean.split('/')
   if (parts.length <= 1) return 'root'
   return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0]
+}
+
+/** 根据 ruleId/pattern/category/message 确定性推断故障类别 `defectClass`。 */
+export function inferDefectClass({ ruleId = '', pattern = '', category = '', message = '' } = {}) {
+  const hay = `${ruleId} ${pattern} ${category} ${message}`.toLowerCase()
+  if (/(?:suppression|excuse|ts-ignore|ts-nocheck|eslint-disable|noqa|type:\s*ignore|rust-allow|hack|workaround|skip-edit-gate|gate-weaken)/.test(hay)) {
+    return 'suppression-bypass'
+  }
+  if (/(?:arch-boundary|arch-rules|cross-layer|forbidden-import|circular-dep)/.test(hay)) {
+    return 'arch-boundary'
+  }
+  if (/(?:state-split|ledger-split|writeTaskLedger|dual-source|single-source|stop-loss|coupling|conflict)/.test(hay)) {
+    return 'state-split'
+  }
+  if (/(?:mock-tautology|mock-only|zero-assertion|hard-sleep|non-headless|test-anti-cheat)/.test(hay)) {
+    return 'mock-only-test'
+  }
+  if (/(?:race-condition|lock|concurrent|flaky|deadlock|toctou)/.test(hay)) {
+    return 'race-condition'
+  }
+  if (/(?:stale-contract|tdd-drift|tdd-stale|dead-link|tombstone|changelog-voice|outdated-doc|contract)/.test(hay)) {
+    return 'stale-contract'
+  }
+  if (/(?:e2e|smoke|runtime-proof|missing-evidence|verify\.|unverified|empirical)/.test(hay)) {
+    return 'missing-runtime-proof'
+  }
+  if (/(?:god-file|oversized|file-bloat|near-limit|800)/.test(hay)) {
+    return 'file-bloat'
+  }
+  if (/(?:deadcode|dead-code|commented-block|orphan|unused)/.test(hay)) {
+    return 'dead-code'
+  }
+  if (category === 'review' || /^review\./.test(String(pattern ?? ''))) {
+    return 'review-defect'
+  }
+  return 'general'
+}
+
+/** 依据倒金字塔优先级映射默认纠偏层级（默认绝不落入 Tier 3 提示词兜底）。 */
+export function inferPyramidTier(defectClass, { crossModule = false, stopLoss = false } = {}) {
+  const dc = String(defectClass ?? 'general').trim().toLowerCase()
+  if (stopLoss || TIER1_DEFECT_CLASSES.has(dc)) return 'tier1-architecture'
+  if (dc === 'arch-boundary' && crossModule) return 'tier1-architecture'
+  return 'tier2-deterministic-gate'
+}
+
+/** 计算稳定 12 位故障指纹：`sha256(ruleId + defectClass + moduleRoot)` 前 12 位。 */
+export function computeSignalFingerprint({ ruleId = '', pattern = '', defectClass = 'general', moduleRoot = '', module = '' } = {}) {
+  const normRule = String(ruleId || pattern || 'signal').trim().toLowerCase()
+  const normClass = String(defectClass || 'general').trim().toLowerCase()
+  const normMod = posixPath(String(moduleRoot || module || 'repo').trim()).replace(/^\.\//, '').toLowerCase() || 'repo'
+  return sha256Text(`${normRule}|${normClass}|${normMod}`).slice(0, 12)
+}
+
+/** 读取旧/新信号事件时补全结构化倒金字塔字段（兼容无指纹历史日志）。 */
+export function enrichSignalEvent(rawEvent) {
+  if (!rawEvent || typeof rawEvent !== 'object') return rawEvent
+  const moduleName = String(rawEvent.module ?? '').trim() || inferSignalModule(rawEvent.file ?? '')
+  const pattern = String(rawEvent.pattern ?? 'signal').trim() || 'signal'
+  const ruleId = String(rawEvent.ruleId ?? pattern).trim() || pattern
+  const defectClass = String(rawEvent.defectClass ?? '').trim()
+    || inferDefectClass({ ruleId, pattern, category: rawEvent.category, message: rawEvent.message })
+  const pyramidTier = PYRAMID_TIERS.includes(rawEvent.pyramidTier)
+    ? rawEvent.pyramidTier
+    : inferPyramidTier(defectClass, { stopLoss: /stop-loss/.test(pattern) })
+  const hasExplicitFp = typeof rawEvent.fingerprint === 'string' && rawEvent.fingerprint.trim().length > 0
+  const fingerprint = hasExplicitFp
+    ? rawEvent.fingerprint.trim()
+    : computeSignalFingerprint({ ruleId, pattern, defectClass, moduleRoot: moduleName })
+  const targetArtifact = String(rawEvent.targetArtifact ?? '').trim()
+    || (rawEvent.file ? posixPath(rawEvent.file) : moduleName)
+  return {
+    ...rawEvent,
+    module: moduleName,
+    pattern,
+    ruleId,
+    defectClass,
+    pyramidTier,
+    fingerprint,
+    targetArtifact,
+    ...(!hasExplicitFp ? { virtualFingerprint: true } : {}),
+  }
 }
 
 /**
@@ -29,7 +139,7 @@ export function resolveGovernStateDir(mainRoot, gitDir = null, isGit = Boolean(g
   return join(tmpdir(), 'project-forge-govern', hash)
 }
 
-/** 读取并解析 `signals.jsonl`（跳过空行与半写入损坏行），兼容字符串目录或 roots 上下文对象。 */
+/** 读取并解析 `signals.jsonl`（跳过空行与半写入损坏行；旧条目读时实时补全虚拟指纹）。 */
 export function readSignalsJsonl(stateDirOrRoots) {
   const stateDir = typeof stateDirOrRoots === 'string'
     ? stateDirOrRoots
@@ -43,7 +153,7 @@ export function readSignalsJsonl(stateDirOrRoots) {
     if (!trimmed) continue
     try {
       const obj = JSON.parse(trimmed)
-      if (obj && typeof obj === 'object') events.push(obj)
+      if (obj && typeof obj === 'object') events.push(enrichSignalEvent(obj))
     } catch { /* ignore corrupt partial line */ }
   }
   return { signalsPath, events }
@@ -61,6 +171,11 @@ export async function appendGovernSignal(opts = {}) {
     category = 'hygiene',
     module: explicitModule,
     pattern = '',
+    ruleId: explicitRuleId = '',
+    defectClass: explicitDefectClass = '',
+    pyramidTier: explicitPyramidTier = '',
+    fingerprint: explicitFingerprint = '',
+    targetArtifact: explicitTargetArtifact = '',
     severity = 'medium',
     source = 'workflow',
     file = '',
@@ -84,12 +199,27 @@ export async function appendGovernSignal(opts = {}) {
   const finalPattern = rawPattern
     || rawMessage.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 48)
     || 'signal'
+  const normCategory = String(category || 'hygiene').trim().toLowerCase()
+  const finalRuleId = String(explicitRuleId || finalPattern).trim() || finalPattern
+  const finalDefectClass = String(explicitDefectClass || '').trim().toLowerCase()
+    || inferDefectClass({ ruleId: finalRuleId, pattern: finalPattern, category: normCategory, message: rawMessage })
+  const finalPyramidTier = PYRAMID_TIERS.includes(explicitPyramidTier)
+    ? explicitPyramidTier
+    : inferPyramidTier(finalDefectClass, { stopLoss: /stop-loss/.test(finalPattern) })
+  const finalFingerprint = String(explicitFingerprint || '').trim()
+    || computeSignalFingerprint({ ruleId: finalRuleId, pattern: finalPattern, defectClass: finalDefectClass, moduleRoot: moduleName })
+  const finalTargetArtifact = String(explicitTargetArtifact || '').trim() || fileRel || moduleName
 
   const event = {
     ts: new Date().toISOString(),
-    category: String(category || 'hygiene').trim().toLowerCase(),
+    category: normCategory,
     module: moduleName,
     pattern: finalPattern,
+    ruleId: finalRuleId,
+    defectClass: finalDefectClass,
+    pyramidTier: finalPyramidTier,
+    fingerprint: finalFingerprint,
+    targetArtifact: finalTargetArtifact,
     severity: String(severity || 'medium').trim().toLowerCase(),
     source: String(source || 'workflow').trim().toLowerCase(),
     file: fileRel,

@@ -24,7 +24,8 @@ import {
   buildClusterReport, buildGovernNextSteps, buildIssues, applyIssuesToBackend,
   collectChangedFilesSet, countBySeverity, filterFindingsByBaselineAndChanged,
   formatTextReport, handleRecordSignal, handleSampleCommits, loadBaseline,
-  readSignalsJsonl, resolveGovernStateDir, saveBaseline, updateLoopState,
+  readSignalsJsonl, recordGovernAuditCheckpoint, recordGovernSkip,
+  resolveGovernStateDir, saveBaseline, updateLoopState,
 } from './govern-state.mjs'
 import { auditDocs, buildPlan } from './govern-docs.mjs'
 import { handleRetro } from './govern-retro.mjs'
@@ -68,6 +69,11 @@ function printHelp() {
     '  --to <rev>                   Target revision for `release-prep` (default: HEAD)',
     '  --version <ver>              Target release version override for `release-prep`',
     '  --strict                     Exit 1 if critical/high findings remain after filtering',
+    '  --quiet                      Concise lightweight output for automated lifecycle hooks',
+    '  --auto                       Automatic post-merge/cleanup retro mode with checkpoint persistence',
+    '  --allow-tier3-fallback       Explicit opt-in for `[TIER-3-FALLBACK]` prompt note (requires --reason)',
+    '  --skip-govern                Skip audit/retro with mandatory auditable `--reason "<text>"`',
+    '  --reason <text>              Audit rationale for `--skip-govern` or `--allow-tier3-fallback`',
     '  --json                       Emit machine-readable JSON',
     '',
     'Record Options:',
@@ -146,6 +152,12 @@ function normalizeParsedArgs(cli) {
     applyPatches: Boolean(opts['apply-patches']),
     writeTodo: Boolean(opts['write-todo']),
     strict: Boolean(opts.strict),
+    quiet: Boolean(opts.quiet),
+    auto: Boolean(opts.auto),
+    allowTier3Fallback: Boolean(opts['allow-tier3-fallback']),
+    skipGovern: Boolean(opts['skip-govern']),
+    escalate: Boolean(opts.escalate),
+    reason: opts.reason,
     json: Boolean(opts.json),
     task: opts.task,
     category: opts.category,
@@ -174,12 +186,13 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       booleanFlags: [
         'audit-only', 'plan-only', 'execute', 'reconcile', 'cluster',
         'signals-only', 'loop', 'issues', 'apply-issues', 'apply-patches', 'write-todo',
-        'strict', 'save-baseline', 'changed', 'all',
+        'strict', 'quiet', 'auto', 'allow-tier3-fallback', 'skip-govern', 'escalate',
+        'save-baseline', 'changed', 'all',
       ],
       valueFlags: [
         'scope', 'categories', 'commits', 'from', 'to', 'version',
         'category', 'pattern', 'rule', 'module', 'file', 'severity',
-        'source', 'message', 'title', 'note', 'task',
+        'source', 'message', 'title', 'note', 'task', 'reason',
       ],
       aliases: { rule: 'pattern', title: 'message' },
       usageHint: 'govern-audit.mjs [audit|reconcile|plan|issues|record|cluster|sample|retro|release-prep] [dir]',
@@ -206,6 +219,20 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   if (opts.sub === 'sample') return await handleSampleCommits(workTreeRoot, mainRoot, gitDir, isGit, opts)
   if (opts.sub === 'retro') return await handleRetro(workTreeRoot, mainRoot, gitDir, isGit, opts)
   if (opts.sub === 'release-prep') return await handleReleasePrep(workTreeRoot, mainRoot, gitDir, isGit, opts)
+
+  if (opts.skipGovern) {
+    const skipRes = await recordGovernSkip({
+      mainRoot, gitDir, isGit, taskId: opts.task ?? null, stage: opts.sub || 'audit', reason: opts.reason ?? '',
+    })
+    if (!skipRes.ok) {
+      process.stderr.write(`Error: ${skipRes.error}\n`)
+      return 2
+    }
+    const payload = { ok: true, mode: opts.sub || 'audit', skipped: true, recorded: true, ...skipRes }
+    if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+    else process.stdout.write(`DEV-GOVERN AUDIT SKIPPED (RECORDED): ${skipRes.record.reason}\n`)
+    return 0
+  }
 
   let scopeRel = ''
   if (opts.scope) {
@@ -254,6 +281,12 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
     if (hr.ok && hr.stdout.trim()) headSha = hr.stdout.trim()
   }
 
+  const fastChangedMode = Boolean(runLiveAudit && opts.changed && !opts.all && !opts.saveBaseline && !opts.reconcile)
+  const preChangedSet = fastChangedMode ? await collectChangedFilesSet(workTreeRoot, isGit, defaultBranch) : null
+  const scopedFiles = (fastChangedMode && opts.quiet && preChangedSet)
+    ? files.filter((f) => preChangedSet.has(f.rel) || f.rel === 'AGENTS.md' || f.rel === 'docs/TDD.md')
+    : files
+
   const fileCache = createFileContentCache()
   setActiveFileCache(fileCache)
   try {
@@ -262,20 +295,21 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
     const rawFindings = []
     let testsMeta = { ciRunSteps: [], testInventory: null }
 
-    if (runLiveAudit) {
-      if (catSet.has('security')) auditSecurity(files, trackedSet, rawFindings)
-      if (catSet.has('deadcode')) auditDeadcode(files, rawFindings)
-      if (catSet.has('tests')) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
-      if (catSet.has('perf')) auditPerf(workTreeRoot, files, rawFindings)
+    const skipFullForEmptyChanged = fastChangedMode && opts.quiet && preChangedSet && preChangedSet.size === 0
+    if (runLiveAudit && !skipFullForEmptyChanged) {
+      if (catSet.has('security')) auditSecurity(scopedFiles, trackedSet, rawFindings)
+      if (catSet.has('deadcode')) auditDeadcode(scopedFiles, rawFindings)
+      if (catSet.has('tests') && !opts.quiet) testsMeta = auditTests(workTreeRoot, files, devProfile, rawAgentsMeta, rawFindings)
+      if (catSet.has('perf') && !opts.quiet) auditPerf(workTreeRoot, scopedFiles, rawFindings)
     }
     let hygieneMeta = { worktrees: { total: 0, counts: {}, entries: [], stale: [] }, manifest: { present: false, status: 'not-checked', issues: [] }, archViolations: [] }
-    if (runLiveAudit) {
+    if (runLiveAudit && !skipFullForEmptyChanged) {
       const [, hygRes] = await Promise.all([
         catSet.has('docs')
-          ? auditDocs(workTreeRoot, isGit, files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, rawFindings)
+          ? auditDocs(workTreeRoot, isGit, opts.quiet ? scopedFiles : files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, rawFindings)
           : Promise.resolve(),
         catSet.has('hygiene')
-          ? auditHygiene(workTreeRoot, mainRoot, isGit, files, defaultBranch, devProfile, rawFindings)
+          ? auditHygiene(workTreeRoot, mainRoot, isGit, scopedFiles, defaultBranch, devProfile, rawFindings)
           : Promise.resolve(hygieneMeta),
       ])
       hygieneMeta = hygRes
@@ -283,7 +317,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
 
     return await finishAudit({
       opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta,
+      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet,
     })
   } finally {
     setActiveFileCache(null)
@@ -293,7 +327,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
 
 async function finishAudit({
   opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta,
+  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet = null,
 }) {
 
   let baselineSavedInfo = null
@@ -303,7 +337,7 @@ async function finishAudit({
 
   const existingBaseline = (!opts.saveBaseline && runLiveAudit) ? loadBaseline(mainRoot) : null
   const changedSet = (!opts.all && opts.changed && runLiveAudit)
-    ? await collectChangedFilesSet(workTreeRoot, isGit, defaultBranch)
+    ? (preChangedSet ?? await collectChangedFilesSet(workTreeRoot, isGit, defaultBranch))
     : null
   const filtered = filterFindingsByBaselineAndChanged({
     findings: rawFindings,
@@ -374,7 +408,39 @@ async function finishAudit({
     findingsCount: findings.length,
   })
 
+  const blockingCount = (counts.critical ?? 0) + (counts.high ?? 0)
+  const exitCode = (opts.strict && blockingCount > 0) ? 1 : 0
+  if (opts.auto || opts.task) {
+    await recordGovernAuditCheckpoint(mainRoot, gitDir, isGit, {
+      headSha, changed: Boolean(opts.changed), taskId: opts.task ?? null, counts, findingsCount: findings.length,
+    })
+  }
+
+  if (opts.quiet) {
+    const quietResult = {
+      ok: blockingCount === 0,
+      blocked: Boolean(opts.strict && blockingCount > 0),
+      exitCode,
+      mode,
+      repoRoot: posixPath(workTreeRoot),
+      changedApplied: filtered.changedApplied,
+      changedCount: changedSet ? changedSet.size : null,
+      counts,
+      findings,
+    }
+    if (opts.json) process.stdout.write(`${JSON.stringify(quietResult, null, 2)}\n`)
+    else if (findings.length === 0) process.stdout.write(`DEV-GOVERN (${opts.changed ? 'CHANGED' : mode.toUpperCase()}): PASS (0 findings)\n`)
+    else {
+      const lines = [`DEV-GOVERN (${opts.changed ? 'CHANGED' : mode.toUpperCase()}): ${findings.length} finding(s) [critical=${counts.critical}, high=${counts.high}, medium=${counts.medium}]`]
+      for (const f of findings.slice(0, 20)) lines.push(`  - [${f.severity.toUpperCase()}] ${f.id}: ${f.title}`)
+      process.stdout.write(`${lines.join('\n')}\n`)
+    }
+    return exitCode
+  }
+
   const result = {
+    ok: blockingCount === 0,
+    exitCode,
     mode,
     repoRoot: posixPath(workTreeRoot),
     mainRoot: posixPath(mainRoot),
@@ -403,8 +469,7 @@ async function finishAudit({
   if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
   else process.stdout.write(`${formatTextReport(result)}\n`)
 
-  if (opts.strict && (counts.critical > 0 || counts.high > 0)) return 1
-  return 0
+  return exitCode
 }
 
 export { main as runCli }

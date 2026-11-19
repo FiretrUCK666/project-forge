@@ -7,8 +7,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 91
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c2
+owner: impl-c2
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=a504eb5e67bc, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"
@@ -134,10 +134,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件，且绝不硬绑定第三方外部 linter 二进制。
-- [ ] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号、迁移其 `writeTaskLedger` 及修复第 194–199 行忽略 `labelRes` 失败漏洞；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 Stage B 基线 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/可选原生校验配置，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并清理过时条款。
-- [ ] C7: （SC7）打通 `dev-govern` 自动触发体系：`flow finalize`/`verify` 链路自动触发轻量 `govern-audit --changed` 体检，`flow merge`/`cleanup` 完成后自动触发轻量 `govern-retro` 复盘（支持 `--skip-govern` 并显式记账，严禁无痕跳过）。
-- [ ] C8: （SC8）移除 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 把测试路径段硬编码排除出单元测试的规则，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
+- [x] C5: （SC5）新增第 6 技能 `dev-edit/` (new) 与 `kit/skills/dev-edit/scripts/edit-gate.mjs` (new)，覆盖全量改码入口并前置集成进 `flow.mjs verify`；基于 `static-gates-lexer.mjs` 剥离注释/字面量后阻断压制注释、墓碑履历、死代码注释、`arch-rules` 越界、单测反作弊及 `> 800` 行超限文件，且绝不硬绑定第三方外部 linter 二进制。
+- [x] C6: （SC6）扩展 `signals.jsonl` 增加 `defectClass`、`pyramidTier`、`fingerprint` 并在 `review-ledger.mjs` 写入按条信号、迁移其 `writeTaskLedger` 及修复第 194–199 行忽略 `labelRes` 失败漏洞；废除 `govern-retro.mjs` 默认向 `AGENTS.md` 追加规范，同一模式复发 `>= 2` 次强制经 Stage B 基线 `escalation.mjs` (new) 优先升格为 Tier 1 结构重构或 Tier 2 静态检查/可选原生校验配置，仅显式 `--allow-tier3-fallback` 方允许带 `[TIER-3-FALLBACK]` 标记落地并清理过时条款。
+- [x] C7: （SC7）打通 `dev-govern` 自动触发体系：`flow finalize`/`verify` 链路自动触发轻量 `govern-audit --changed` 体检，`flow merge`/`cleanup` 完成后自动触发轻量 `govern-retro` 复盘（支持 `--skip-govern` 并显式记账，严禁无痕跳过）。
+- [x] C8: （SC8）移除 `govern-tests.mjs` 第 38 行 `NON_UNIT_TEST_RE` 把测试路径段硬编码排除出单元测试的规则，改为结合 `profile-sniffer.mjs` 探测出的目标仓测试分层元数据精准区分单测/集成/端到端测试，并修复小型仓库误报 `tests.unfiltered-quick-test` 的假阳性。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -164,4 +164,7 @@ flowchart LR
 
 ## 实现说明
 
-待实施后补全提交 SHA、词法去噪误报率测试统计与 `signals.jsonl` 升格示例输出。
+- 第 6 技能 `kit/skills/dev-edit/SKILL.md`（56L，`order: 33`）与 `kit/skills/dev-edit/scripts/edit-gate.mjs`（456L）落地；基于 `static-gates-lexer.mjs` `buildLexedViews` 对本仓 30 个变更文件实测 0 误报，正反夹具覆盖 9 类阻断与词法去噪免疫。
+- `signals.jsonl` 扩展 `{ defectClass, pyramidTier, fingerprint, targetArtifact }` 与旧条目读时虚拟指纹补全；`review-ledger.mjs`（600L）零 `writeTaskLedger`、写入条级信号并在普通审查对命中 `classifyEscalationTier === 'escalated-issue'` 的范围外/存量发现按指纹去重自动建单；`review-sync.mjs` 修复 `labelRes`/`addRes` 失败静默忽略并将 PR 审查表格单元格压缩至单行 `<= 120` 字符。
+- `govern-retro.mjs` 彻底废除默认回写 `AGENTS.md`，复发 `>= 2` 次强制按 Tier 1 重构单（去重）/ Tier 2 确定性静态门禁分派，仅 `--allow-tier3-fallback --reason` 允许写 `[TIER-3-FALLBACK]` 并自动清理过期或已由 Tier 2 覆盖条款。
+- `govern-audit.mjs`（`--changed --quiet --json`、`--skip-govern`）、`govern-state.mjs`（670L）与 `govern-tests.mjs`（移除 `NON_UNIT_TEST_RE`、接入 `profile-sniffer.mjs` 元数据分层与小仓免报 `tests.unfiltered-quick-test`）全部通过双向夹具（`5/5`）与故障注入（`9/9`）及 `$TMPDIR` 异构仓实测。

@@ -15,12 +15,16 @@ import {
 } from './git-fast.mjs'
 import { hasHumanMergeAuthority } from './profile.mjs'
 import {
-  extractLineCommentInfo,
-  isRustLifetimeAt,
-  stripCodeCommentsLines,
+  buildLexedViews, detectCommentedDeadCodeBlocks, extractLineCommentInfo, HARD_SLEEP_RULES,
+  isRustLifetimeAt, looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE,
+  MOCK_SPY_ASSERT_RE, scanTestAntiCheat, stripCodeCommentsLines,
 } from './static-gates-lexer.mjs'
 
-export { extractLineCommentInfo, isRustLifetimeAt, stripCodeCommentsLines }
+export {
+  buildLexedViews, detectCommentedDeadCodeBlocks, extractLineCommentInfo, HARD_SLEEP_RULES,
+  isRustLifetimeAt, looksLikeCommentedCode, maskLiteralsInCodeLine, MOCK_SETUP_RE,
+  MOCK_SPY_ASSERT_RE, scanTestAntiCheat, stripCodeCommentsLines,
+}
 
 export const PACKAGE_LOCKFILES = Object.freeze([
   'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
@@ -51,9 +55,12 @@ export const GATE_CI_PERM_WRITE_RE = /\b(?:contents|id-token|packages|security-e
 export const GATE_SHELL_BYPASS_RE = /(?:^|[\s;|&"'])\|\|\s*true(?:\s|$|["';&|])/
 
 export const TOMBSTONE_COMMENT_RE = /\b(?:used to be|previously (?:was|were|called|used)|migrated from|replaced old|formerly\b|removed in favor of|deprecated since v?\d|changed from\b.{1,30}\bto\b)|(?:以前是|原先是|原本是|之前是|旧版是|后来改成|后来改为|历史兼容保留)/i
+export const TOMBSTONE_DATE_RE = /\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s*(?:fixed|changed|updated|migrated|removed|replaced|修复|改为|改成|迁移|删除|替换)/i
 export const EXCUSE_COMMENT_RE = /@(?:ts-ignore|ts-nocheck)|eslint-disable(?:-next-line|-line)?|\bnoqa\b|type:\s*ignore\b|pragma\s+warning\s+disable|\b(?:hack|workaround)\b/i
 export const EXCUSE_TEMP_RE = /\bTEMP\b/
 export const RUST_ALLOW_RE = /^\s*#\[\s*allow\(/
+export const JUSTIFICATION_ANCHOR_RE = /\b(?:pf-allow|justification|justified-by|issue\s*#\d+)\s*[:：]/i
+export const NEAR_LIMIT_LINES = 730
 
 /** 通用路径 glob 匹配（支持 `*`、`**`、`?` 及目录前缀斜杠）。 */
 export function matchGlob(filePath, pattern) {
@@ -500,15 +507,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
   const isRegexLine = (l) => /^\s*(?:(?:export\s+)?(?:const|let|var)|if|else\s+if|return|\|\||&&|\?|:)\b.*\/[^/]+\//.test(l)
 
   if (status === 'D' && isTest) {
-    hits.push({
-      type: 'deleted-test-file',
-      category: 'gate-weakening',
-      severity: 'deterministic',
-      file: rel,
-      reason: `删除测试文件 ${rel}（直接削弱回归门禁）`,
-      detail: `删除测试文件 ${rel}`,
-      excerpt: [`- deleted ${rel}`],
-    })
+    hits.push({ type: 'deleted-test-file', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: `删除测试文件 ${rel}（直接削弱回归门禁）`, detail: `删除测试文件 ${rel}`, excerpt: [`- deleted ${rel}`] })
   }
 
   let inBlock = false
@@ -520,15 +519,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
     const trimmed = line.trim()
 
     if (isTest && codeText.trim() && GATE_SKIP_RE.test(codeText) && !isRegexLine(line)) {
-      hits.push({
-        type: 'test-skip-or-only',
-        category: 'gate-weakening',
-        severity: 'deterministic',
-        file: rel,
-        reason: '新增测试 skip/only/ignore 跳过标记',
-        detail: trimmed.slice(0, 120),
-        excerpt: [`+ ${line}`],
-      })
+      hits.push({ type: 'test-skip-or-only', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: '新增测试 skip/only/ignore 跳过标记', detail: trimmed.slice(0, 120), excerpt: [`+ ${line}`] })
     }
 
     if (isWorkflow) {
@@ -579,15 +570,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       const addedCmdSet = new Set(extractCiCommands(added).map((c) => c.norm))
       const deletedSteps = removedVerify.filter((c) => !addedCmdSet.has(c.norm))
       if (deletedSteps.length > 0) {
-        hits.push({
-          type: 'deleted-ci-step',
-          category: 'gate-weakening',
-          severity: 'deterministic',
-          file: rel,
-          reason: `删除 CI 验证步骤命令（${deletedSteps.slice(0, 2).map((d) => d.raw).join('; ')}）`,
-          detail: deletedSteps[0].raw.slice(0, 120),
-          excerpt: deletedSteps.slice(0, 4).map((d) => `- ${d.raw}`),
-        })
+        hits.push({ type: 'deleted-ci-step', category: 'gate-weakening', severity: 'deterministic', file: rel, reason: `删除 CI 验证步骤命令（${deletedSteps.slice(0, 2).map((d) => d.raw).join('; ')}）`, detail: deletedSteps[0].raw.slice(0, 120), excerpt: deletedSteps.slice(0, 4).map((d) => `- ${d.raw}`) })
       }
     }
   }
@@ -602,15 +585,7 @@ export function detectGateWeakeningInEntry({ file, status, added = [], removed =
       const remAsserts = hk.removed.filter(hasAssertOrTest)
       const addAsserts = hk.added.filter(hasAssertOrTest)
       if (remAsserts.length > addAsserts.length) {
-        hits.push({
-          type: 'deleted-assertion',
-          category: 'gate-weakening',
-          severity: 'advisory',
-          file: rel,
-          reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`,
-          detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`,
-          excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`),
-        })
+        hits.push({ type: 'deleted-assertion', category: 'gate-weakening', severity: 'advisory', file: rel, reason: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, detail: `测试断言净减少（-${remAsserts.length} / +${addAsserts.length}）`, excerpt: remAsserts.slice(0, 4).map((l) => `- ${l}`) })
       }
     }
   }
@@ -706,28 +681,34 @@ export async function detectGateWeakening(implRoot, baseRef, baseBranch, opts = 
   return findings
 }
 
-/** 扫描源码增行中的履历注释、借口压制与大文件指标。 */
-export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, warnLines = 800, highLines = 1500 }) {
-  const ext = posixPath(fileRel).split('.').pop()?.toLowerCase() ?? ''
+/** 扫描源码增行中的履历注释、借口压制、注释死代码与大文件/紧文件指标。 */
+export function scanStructuralHygiene({ fileRel, lines = [], fullLineCount = 0, warnLines = 800, highLines = 1500, nearLimitLines = NEAR_LIMIT_LINES }) {
+  const rel = posixPath(fileRel)
+  const ext = rel.split('.').pop()?.toLowerCase() ?? ''
+  const isFixture = FIXTURE_FILE_RE.test(rel)
+  const views = buildLexedViews(Array.isArray(lines) ? lines.join('\n') : String(lines ?? ''), ext)
   const tombstoneComments = []
   const excuseSuppressions = []
-  let inBlock = false
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
-    const { commentText, nextInBlock } = extractLineCommentInfo(line, inBlock, ext)
-    inBlock = nextInBlock
-    if (commentText && TOMBSTONE_COMMENT_RE.test(commentText)) {
-      tombstoneComments.push({ file: fileRel, line: i + 1, excerpt: line.trim().slice(0, 120) })
-    }
-    if ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(line)) {
-      excuseSuppressions.push({ file: fileRel, line: i + 1, excerpt: line.trim().slice(0, 120) })
+  if (!isFixture) {
+    for (let i = 0; i < views.lines.length; i += 1) {
+      const line = views.lines[i]
+      const commentText = views.commentLines[i]
+      if (commentText && (TOMBSTONE_COMMENT_RE.test(commentText) || TOMBSTONE_DATE_RE.test(commentText))) {
+        tombstoneComments.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
+      }
+      const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || line)
+      if (!hasJustify && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(views.codeNoLiteralLines[i]))) {
+        excuseSuppressions.push({ file: rel, line: i + 1, excerpt: line.trim().slice(0, 120) })
+      }
     }
   }
-
-  const godFile = (!isTestOrFixtureFile(fileRel) && !fileRel.endsWith('.min.js') && fullLineCount > warnLines)
-    ? { file: fileRel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
+  const deadCodeBlocks = isFixture ? [] : detectCommentedDeadCodeBlocks(views).map((b) => ({ file: rel, line: b.startLine, endLine: b.endLine, length: b.length, excerpt: b.excerpt }))
+  const isCheckableSrc = !isTestOrFixtureFile(rel) && !rel.endsWith('.min.js')
+  const godFile = (isCheckableSrc && fullLineCount > warnLines)
+    ? { file: rel, lines: fullLineCount, severity: fullLineCount > highLines ? 'high' : 'warn' }
     : null
-
-  return { tombstoneComments, excuseSuppressions, godFile }
+  const nearLimitFile = (isCheckableSrc && fullLineCount >= nearLimitLines && fullLineCount <= warnLines)
+    ? { file: rel, lines: fullLineCount, limit: warnLines }
+    : null
+  return { tombstoneComments, excuseSuppressions, deadCodeBlocks, godFile, nearLimitFile }
 }

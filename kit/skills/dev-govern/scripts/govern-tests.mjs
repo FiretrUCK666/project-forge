@@ -11,10 +11,12 @@ import { join, posix, resolve } from 'node:path'
 import { posixPath, readJsonSafe, readTextSafe } from '../../lib/git.mjs'
 import { detectGitModeMarkers } from '../../lib/platform.mjs'
 import { discoverWorkspacePackages, isProfileExplicitNone, readDecisions } from '../../lib/profile.mjs'
-import { scanNeutralCiSteps } from '../../lib/profile-sniffer.mjs'
 import {
-  ASSERTION_RE, CODE_EXT_RE, TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE,
-  stripCodeCommentsLines,
+  classifyTestFileTier, detectTestTierMetadata, scanNeutralCiSteps,
+} from '../../lib/profile-sniffer.mjs'
+import {
+  ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
+  TEST_CASE_RE, TEST_FILE_RE, TEST_SKIP_RE, stripCodeCommentsLines,
 } from '../../lib/static-gates.mjs'
 import { addFinding, readTextStrictInfo } from './govern-checks.mjs'
 
@@ -22,21 +24,10 @@ const PRIORITY_SCRIPT_HINTS = ['test', 'spec', 'e2e', 'lint', 'check', 'type', '
 const JUST_RECIPE_RE = /^@?([A-Za-z_][A-Za-z0-9_-]*)(?:\s+[^:\n]*)?:(?!=)/gm
 const HEAVY_E2E_TOOL_RE = /\b(?:playwright|cypress|puppeteer|selenium|testcontainers|docker(?:\s+|-)compose)\b/i
 const TARGET_FILTER_RE = /\{target\}|--changed|--related|--filter|-k\b|--grep\b|--testNamePattern|-t\b|--run\b/
+const UNIT_SCOPED_QUICK_RE = /(?:test:unit\b|--lib\b|-m\s+["']?not\s+(?:e2e|integration|slow)|(?:^|\s)tests?\/unit\b)/i
 
 const TEST_ONLY_RE = /(?:\b(?:it|test|describe|context|suite)\.only\s*\(|\b(?:fit|fdescribe)\s*\(|\{\s*only\s*:\s*true\b)/
-const HARD_SLEEP_RULES = [
-  /\bsetTimeout\s*\([^,\n]+,\s*(?:[1-9]\d{3,})\s*\)/,
-  /\b(?:sleep|delay|waitForTimeout)\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
-  /\b(?:time|asyncio)\.sleep\s*\(\s*(?:[1-9]\d*(?:\.\d+)?)\s*\)/,
-  /^\s*sleep\s+(?:[1-9]\d*(?:\.\d+)?)(?:\s|$)/,
-  /\btime\.Sleep\s*\(\s*(?:[1-9]\d*\s*\*\s*time\.(?:Second|Minute)|(?:[1-9]\d{3,})\s*\*\s*time\.Millisecond)/,
-  /\bthread::sleep\s*\(\s*Duration::(?:from_secs\s*\(\s*[1-9]|from_millis\s*\(\s*(?:[1-9]\d{3,}))/,
-  /\bThread\.sleep\s*\(\s*(?:[1-9]\d{3,})\s*\)/,
-]
-const MOCK_SETUP_RE = /\b(?:vi\.fn|vi\.spyOn|jest\.fn|jest\.spyOn|mock\.fn|sinon\.(?:stub|spy|mock)|unittest\.mock|MagicMock|patch\.object|mock\.patch|mockReturnValue|mockResolvedValue|when\([^\n]+\)\.thenReturn)\b|\bpatch\s*\(/g
-const MOCK_SPY_ASSERT_RE = /\bexpect\s*\((?:[^()\n]|\([^()\n]*\))+\)\s*(?:\.\s*not)?\s*\.\s*toHaveBeenCalled\w*\s*\((?:[^()\n]|\([^()\n]*\))*\)|[A-Za-z0-9_$.]+\s*\.\s*assert_(?:not_)?called(?:_once|_with|_once_with)?\s*\((?:[^()\n]|\([^()\n]*\))*\)|\bassert\s+[A-Za-z0-9_$.]+\s*\.\s*(?:called|calledOnce|calledTwice|calledThrice|call_count)\b[^\n]*|[A-Za-z0-9_$.]+\s*\.\s*(?:calledOnce|calledTwice|calledThrice|verify)\b(?:\s*\([^)\n]*\))?/
 const UNIT_HEAVY_RE = /\b(?:playwright\.launch|chromium\.launch|firefox\.launch|webkit\.launch|puppeteer\.launch|ffmpeg|ffprobe|docker(?:\s+compose|\s+build|\s+run)|testcontainers)\b|['"](?:@playwright\/test|playwright|puppeteer|cypress|selenium-webdriver|testcontainers)['"]|(?:for\s*\([^;\n]*;\s*[^;\n]*<\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|1e[5-9])|for\s+\w+\s+in\s+range\(\s*(?:[5-9]\d{4,}|[1-9]\d{5,}|100_000))/i
-const NON_UNIT_TEST_RE = /(?:^|\/)(?:e2e|integration|browser|perf|benchmark|benchmarks|load|stress)\/|(?:\.(?:e2e|int|integration|perf|bench)\.[^/]+$)/i
 
 function parseWorkflowCiSteps(repoRoot) {
   return scanNeutralCiSteps(repoRoot)
@@ -352,22 +343,19 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
     })
   }
 
-  if (testFiles.length >= 5 && quickCmds.length > 0 && !quickCmds.some((q) => TARGET_FILTER_RE.test(q))) {
-    addFinding(findings, {
-      id: 'tests.unfiltered-quick-test',
-      category: 'tests',
-      severity: 'low',
-      file: 'AGENTS.md',
-      title: `quick-test runs across ${testFiles.length} test files without {target} or changed/filter narrowing`,
-      action: 'Parameterize quick-test with {target} (or --filter/--changed) so each edit round only runs related unit tests.',
-    })
-  }
+  const tierMeta = detectTestTierMetadata(repoRoot, files.map((f) => f.rel))
+  const tierCounts = { unit: 0, integration: 0, e2e: 0 }
+  let totalTestLines = 0
 
   for (const f of testFiles) {
     const info = readTextStrictInfo(f.full)
     if (!info?.text) continue
     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
     const lines = info.text.split('\n')
+    totalTestLines += lines.length
+    const { tier: fileTier } = classifyTestFileTier(f.rel, info.text, tierMeta)
+    tierCounts[fileTier] = (tierCounts[fileTier] ?? 0) + 1
+    const isUnitTier = fileTier === 'unit'
     const codeLines = stripCodeCommentsLines(info.text, ext)
     const codeOnlyText = codeLines.join('\n')
     const isMetaFixtureHarness = /(?:^|\/)(?:fixtures|verify-injections|gap-coverage)\.[^/]+$/i.test(f.rel)
@@ -430,7 +418,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
 
     if (isMetaFixtureHarness) continue
 
-    if (!NON_UNIT_TEST_RE.test(f.rel)) {
+    if (isUnitTier) {
       for (let i = 0; i < codeLines.length; i += 1) {
         if (HARD_SLEEP_RULES.some((re) => re.test(codeLines[i]))) {
           addFinding(findings, {
@@ -448,7 +436,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       }
     }
 
-    if (isExplicitTestFile && !NON_UNIT_TEST_RE.test(f.rel)) {
+    if (isExplicitTestFile && isUnitTier) {
       let heavyLine = -1
       for (let i = 0; i < codeLines.length; i += 1) {
         if (UNIT_HEAVY_RE.test(codeLines[i])) { heavyLine = i + 1; break }
@@ -487,7 +475,7 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       }
     }
 
-    if (!NON_UNIT_TEST_RE.test(f.rel) && lines.length > 800) {
+    if (isUnitTier && lines.length > 800) {
       addFinding(findings, {
         id: `tests.oversized-file.${f.rel}`,
         category: 'tests',
@@ -517,6 +505,21 @@ export function auditTests(repoRoot, files, devProfile, rawAgentsMeta, findings)
       })
     }
   }
+
+  const hasNonUnitTier = (tierCounts.e2e + tierCounts.integration) > 0 || tierMeta.hasMultiTierConfig
+  const hasNarrowQuick = quickCmds.some((q) => TARGET_FILTER_RE.test(q) || UNIT_SCOPED_QUICK_RE.test(q))
+  const needsQuickFilter = testFiles.length >= 15 || totalTestLines >= 2500 || (hasNonUnitTier && testFiles.length >= 5)
+  if (quickCmds.length > 0 && !hasNarrowQuick && needsQuickFilter) {
+    addFinding(findings, {
+      id: 'tests.unfiltered-quick-test',
+      category: 'tests',
+      severity: 'low',
+      file: 'AGENTS.md',
+      title: `quick-test runs across ${testFiles.length} test files (${tierCounts.unit} unit / ${tierCounts.integration} integration / ${tierCounts.e2e} e2e) without {target} or unit-tier narrowing`,
+      action: 'Parameterize quick-test with {target} (or --filter/--changed/test:unit) so each edit round only runs fast unit tests.',
+    })
+  }
+  testInventory.tierSummary = { ...tierCounts, hasMultiTierConfig: tierMeta.hasMultiTierConfig, totalTestLines }
 
   const hasExplicitQuickOrFull = rawAgentsMeta.hasQuickKey || rawAgentsMeta.hasFullKey
     || isProfileExplicitNone(devProfile, 'quick-test') || isProfileExplicitNone(devProfile, 'full-test')

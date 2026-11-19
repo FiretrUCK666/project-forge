@@ -657,3 +657,132 @@ export function sniffLayeredCommands(repoRoot, { profile = null, fileRelList = n
     detectionEvidence,
   }
 }
+
+const E2E_FILE_SUFFIX_RE = /\.(?:e2e|browser)\.(?:test|spec)\.[^/]+$|\.(?:e2e|cy)\.[^/]+$/i
+const INT_FILE_SUFFIX_RE = /\.(?:integration|int)\.(?:test|spec)\.[^/]+$/i
+
+function extractPathArgsFromScript(scriptStr) {
+  const dirs = []
+  for (const tok of String(scriptStr ?? '').split(/\s+/)) {
+    const clean = posixPath(tok.replace(/^['"`]|['"`]$/g, '')).replace(/^\.\//, '').replace(/\/+$/, '')
+    if (!clean || clean.startsWith('-') || /^(?:node|npx|npm|pnpm|yarn|bun|vitest|jest|mocha|pytest|playwright|cypress|cargo|go|run|test|exec|uv|poetry)$/i.test(clean)) continue
+    if (clean.includes('/') || /^(?:test|tests|e2e|integration|unit|spec|specs|cypress)$/i.test(clean)) {
+      dirs.push(clean.replace(/\/\*+$/, ''))
+    }
+  }
+  return [...new Set(dirs)]
+}
+
+/** 探测目标仓实际已配置的原生静态/类型校验工具（绝不假设或强制要求全局安装第三方 linter 二进制）。 */
+export function detectOptionalNativeCheckers(repoRoot) {
+  const configured = []
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  const scripts = (pkg && typeof pkg.scripts === 'object' && pkg.scripts) ? pkg.scripts : {}
+  const pm = existsSync(join(repoRoot, 'pnpm-lock.yaml')) ? 'pnpm'
+    : existsSync(join(repoRoot, 'yarn.lock')) ? 'yarn'
+      : existsSync(join(repoRoot, 'bun.lock')) || existsSync(join(repoRoot, 'bun.lockb')) ? 'bun' : 'npm'
+  const runScript = (name) => (pm === 'npm' ? `npm run ${name}` : `${pm} ${name}`)
+  const hasFile = (...names) => names.find((n) => existsSync(join(repoRoot, n)))
+
+  const eslintCfg = hasFile('eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.yml', '.eslintrc.yaml')
+  if (eslintCfg || scripts.lint) configured.push({ id: 'eslint', tool: 'eslint', configFile: eslintCfg ?? 'package.json', command: scripts.lint ? runScript('lint') : null, declared: Boolean(scripts.lint) })
+  const biomeCfg = hasFile('biome.json', 'biome.jsonc')
+  if (biomeCfg) configured.push({ id: 'biome', tool: 'biome', configFile: biomeCfg, command: scripts.lint ? runScript('lint') : null, declared: Boolean(scripts.lint) })
+  const tsCfg = hasFile('tsconfig.json')
+  if (tsCfg) {
+    const tcKey = ['typecheck', 'type-check', 'check-types'].find((k) => scripts[k])
+    configured.push({ id: 'typescript', tool: 'tsc', configFile: tsCfg, command: tcKey ? runScript(tcKey) : null, declared: Boolean(tcKey) })
+  }
+  const pyProj = readTextSafe(join(repoRoot, 'pyproject.toml')) ?? ''
+  const ruffCfg = hasFile('ruff.toml', '.ruff.toml') || (/\[tool\.ruff\b/.test(pyProj) ? 'pyproject.toml' : null)
+  if (ruffCfg) configured.push({ id: 'ruff', tool: 'ruff', configFile: ruffCfg, command: 'ruff check .', declared: true })
+  if (existsSync(join(repoRoot, 'Cargo.toml'))) configured.push({ id: 'clippy', tool: 'cargo-clippy', configFile: 'Cargo.toml', command: 'cargo clippy --all-targets', declared: true })
+  if (existsSync(join(repoRoot, 'go.mod'))) configured.push({ id: 'go-vet', tool: 'go-vet', configFile: 'go.mod', command: 'go vet ./...', declared: true })
+  return { configured, hasNativeConfig: configured.length > 0 }
+}
+
+/** 探测目标仓测试分层元数据（package.json 脚本、测试框架配置、Pytest markers、Cargo/Go 结构）。 */
+export function detectTestTierMetadata(repoRoot, fileRelList = null) {
+  const unitDirs = new Set()
+  const integrationDirs = new Set()
+  const e2eDirs = new Set()
+  const scriptsByTier = { unit: [], integration: [], e2e: [] }
+  const pytestMarkers = new Set()
+  const pkg = readJsonSafe(join(repoRoot, 'package.json'))
+  const scripts = (pkg && typeof pkg.scripts === 'object' && pkg.scripts) ? pkg.scripts : {}
+  for (const [name, cmd] of Object.entries(scripts)) {
+    const low = name.toLowerCase()
+    const val = String(cmd ?? '')
+    if (/^(?:test:)?e2e$|^test:(?:browser|ui|playwright|cypress)$/i.test(low) || HEAVY_E2E_CMD_RE.test(val)) {
+      scriptsByTier.e2e.push({ name, cmd: val })
+      for (const d of extractPathArgsFromScript(val)) e2eDirs.add(d)
+    } else if (/^test:(?:int|integration|it|api|db)$|^integration$/i.test(low)) {
+      scriptsByTier.integration.push({ name, cmd: val })
+      for (const d of extractPathArgsFromScript(val)) integrationDirs.add(d)
+    } else if (/^test:unit$|^unit$/i.test(low)) {
+      scriptsByTier.unit.push({ name, cmd: val })
+      for (const d of extractPathArgsFromScript(val)) unitDirs.add(d)
+    }
+  }
+  for (const cfgName of ['playwright.config.ts', 'playwright.config.js', 'playwright.config.mjs', 'cypress.config.ts', 'cypress.config.js', 'cypress.config.mjs']) {
+    const txt = readTextSafe(join(repoRoot, cfgName))
+    if (!txt) continue
+    const td = /\btestDir\s*:\s*['"]([^'"]+)['"]/.exec(txt)?.[1]
+    if (td) e2eDirs.add(posixPath(td).replace(/^\.\//, '').replace(/\/+$/, ''))
+    const spec = /\bspecPattern\s*:\s*['"]([^'"]+)['"]/.exec(txt)?.[1]
+    if (spec) e2eDirs.add(posixPath(spec).replace(/^\.\//, '').split('/')[0])
+  }
+  for (const cfgName of ['vitest.config.ts', 'vitest.config.js', 'vitest.config.mjs', 'jest.config.js', 'jest.config.cjs', 'jest.config.mjs', 'jest.config.ts']) {
+    const txt = readTextSafe(join(repoRoot, cfgName))
+    if (!txt) continue
+    for (const m of txt.matchAll(/name\s*:\s*['"](unit|integration|e2e)['"][\s\S]{0,200}?(?:include|testMatch|roots)\s*:\s*\[\s*['"]([^'"]+)['"]/gi)) {
+      const base = posixPath(m[2]).replace(/^\.\//, '').replace(/^<rootDir>\//, '').split(/[*?]/)[0].replace(/\/+$/, '')
+      if (!base) continue
+      const t = m[1].toLowerCase()
+      if (t === 'e2e') e2eDirs.add(base)
+      else if (t === 'integration') integrationDirs.add(base)
+      else unitDirs.add(base)
+    }
+  }
+  for (const pyCfg of ['pytest.ini', 'pyproject.toml', 'setup.cfg']) {
+    const txt = readTextSafe(join(repoRoot, pyCfg))
+    if (txt) for (const m of txt.matchAll(/^\s*(e2e|integration|unit|slow|browser)\s*:/gim)) pytestMarkers.add(m[1].toLowerCase())
+  }
+  const hasCargo = existsSync(join(repoRoot, 'Cargo.toml'))
+  const hasGoMod = existsSync(join(repoRoot, 'go.mod'))
+  const hasMultiTierConfig = scriptsByTier.e2e.length > 0 || scriptsByTier.integration.length > 0
+    || e2eDirs.size > 0 || integrationDirs.size > 0 || pytestMarkers.has('e2e') || pytestMarkers.has('integration')
+  return {
+    unitDirs: [...unitDirs], integrationDirs: [...integrationDirs], e2eDirs: [...e2eDirs],
+    scriptsByTier, pytestMarkers: [...pytestMarkers], hasCargo, hasGoMod, hasMultiTierConfig,
+    fileCountHint: Array.isArray(fileRelList) ? fileRelList.length : null,
+  }
+}
+
+/** 结合仓库测试分层元数据与文件级标记精准判定单个测试文件层级（unit / integration / e2e）。 */
+export function classifyTestFileTier(relFile, fileText = '', tierMeta = null) {
+  const rel = posixPath(relFile).replace(/^\.\//, '')
+  const ext = rel.split('.').pop()?.toLowerCase() ?? ''
+  const txt = String(fileText ?? '')
+  const dirMatches = (dirs) => (dirs ?? []).some((d) => rel === d || rel.startsWith(`${d}/`))
+  if (ext === 'go') {
+    const tagM = /^\/\/(?:go:build|\s*\+build)\s+(.+)$/m.exec(txt.split('\n').slice(0, 12).join('\n'))
+    if (tagM) {
+      if (/\be2e\b/i.test(tagM[1])) return { tier: 'e2e', reason: 'go-build-tag' }
+      if (/\b(?:integration|functional|acceptance)\b/i.test(tagM[1])) return { tier: 'integration', reason: 'go-build-tag' }
+    }
+  }
+  if (ext === 'py') {
+    if (/@pytest\.mark\.(?:e2e|browser|playwright|selenium)\b/.test(txt)) return { tier: 'e2e', reason: 'pytest-marker' }
+    if (/@pytest\.mark\.(?:integration|slow|db)\b/.test(txt)) return { tier: 'integration', reason: 'pytest-marker' }
+  }
+  if (dirMatches(tierMeta?.e2eDirs)) return { tier: 'e2e', reason: 'config-e2e-dir' }
+  if (dirMatches(tierMeta?.integrationDirs)) return { tier: 'integration', reason: 'config-integration-dir' }
+  if (dirMatches(tierMeta?.unitDirs)) return { tier: 'unit', reason: 'config-unit-dir' }
+  if (ext === 'rs' && tierMeta?.hasCargo) {
+    return (rel.startsWith('tests/') || rel.includes('/tests/')) ? { tier: 'integration', reason: 'cargo-tests-dir' } : { tier: 'unit', reason: 'cargo-lib-unit' }
+  }
+  if (E2E_FILE_SUFFIX_RE.test(rel)) return { tier: 'e2e', reason: 'explicit-e2e-suffix' }
+  if (INT_FILE_SUFFIX_RE.test(rel)) return { tier: 'integration', reason: 'explicit-integration-suffix' }
+  return { tier: 'unit', reason: 'default-unit' }
+}

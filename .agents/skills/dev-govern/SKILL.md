@@ -15,29 +15,31 @@ metadata:
 
 # dev-govern
 
-对仓库做只读代码体检、分批重构治理、契约与工作树巡检（`reconcile`）、园艺信号聚类及历史抽检，
+对仓库做**只读静态代码体检、分批重构治理、契约与工作树巡检（`reconcile`）、园艺信号聚类、自动周期复盘与发版筹备**；
 全部入口收敛在：`node .agents/skills/dev-govern/scripts/govern-audit.mjs`。
+**职责红线**：本技能严守静态分析与历史信号复盘边界，**绝不编写业务或并发测试，也不启动目标业务服务**。
 
 ## 组合工作模式与新增子命令
 
 默认只读，先出事实与 `[GAP_SCAN]`，再按需出计划、聚类、抽检或生成 Issue：
 
 ```sh
-# 1. 只读审计、基线增量与模块聚类（支持 security,deadcode,tests,docs,hygiene,perf）
+# 1. 只读审计、基线增量与生命周期轻量自动体检（支持 security,deadcode,tests,docs,hygiene,perf）
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit [--scope src] [--categories security,tests,docs] [--cluster]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --save-baseline   # 快照存量基线至 <mainRoot>/.worktrees/.state/govern-baseline.json
-node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --changed         # 增量只报改动文件或新增/恶化项（--all 强制全量）
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --quiet --json  # flow finalize/verify 轻量增量体检
+node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --skip-govern --reason "<原因>" --json  # 显式留痕跳过，严禁无痕绕过
 
 # 2. 分批计划（--write-todo 生成标准 Frontmatter `-todo.md`）/ 多轮收敛 / 安全生成 GitHub Issue
 node .agents/skills/dev-govern/scripts/govern-audit.mjs plan [--write-todo]     # 兼容 --plan-only
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --execute --loop
 node .agents/skills/dev-govern/scripts/govern-audit.mjs issues [--apply-issues] # 兼容 --issues
 
-# 3. 园艺信号记录、聚类、事后抽检与闭环复盘
+# 3. 园艺信号记录、聚类、事后抽检与三层倒金字塔自动复盘
 node .agents/skills/dev-govern/scripts/govern-audit.mjs record --pattern <key> --message "<text>" [--module <dir>] [--file <path>]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs cluster [--signals-only]
 node .agents/skills/dev-govern/scripts/govern-audit.mjs sample [--commits 30]
-node .agents/skills/dev-govern/scripts/govern-audit.mjs retro [--task <id>] [--apply-patches] [--json]
+node .agents/skills/dev-govern/scripts/govern-audit.mjs retro [--task <id>] [--auto] [--apply-patches] [--allow-tier3-fallback --reason "<原因>"] [--json]
 
 # 4. 跨多版本人类可读发版筹备（支持跳跃自定义号、浅克隆警告与多子包版本聚合）
 node .agents/skills/dev-govern/scripts/govern-audit.mjs release-prep [--from <tag|rev>] [--to HEAD] [--version <ver>] [--json]
@@ -70,17 +72,18 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 ## 测试分层、控频与质量治理
 
 - **客观盘点与无 CI 诚实汇报**：汇总多构建工具脚本与测试目录生成 `testInventory`；无 `.github/workflows` 等 CI 配置且存在测试时发出 `tests.no-ci-config`（`low`），明示仅核对本地 `Dev Profile` 与脚本目录。
-- **分层分离与 `{target}` 窄化**：拦截 `quick-test` 与 `full-test`/`merge-gate` 合并或混入 Playwright/Cypress/Puppeteer/Selenium/Testcontainers/Docker Compose（`tests.collapsed-tiers`），以及测试文件 `>= 5` 却未配置 `{target}`/`--filter`/`--changed` 的无过滤快测（`tests.unfiltered-quick-test`）。
+- **分层分离与元数据驱动判定**：结合 `profile-sniffer.mjs` 读取目标仓 `package.json` 测试脚本（`test:unit`/`test:integration`/`test:e2e`）、测试框架配置（Vitest/Jest/Playwright/Cypress/Pytest markers）、Cargo `tests/` 与 Go build tags 精准划分单测/集成/端到端层级；小型单层极速测试仓免报 `tests.unfiltered-quick-test`，大仓或多层混跑时拦截 `tests.collapsed-tiers` 与 `tests.unfiltered-quick-test`。
 - **三段测试控频**：编码中只做语法/类型/单文件检查；一轮改动后跑 `flow.mjs verify --tier quick --target <path>`；合入前集中跑 1 次 `full-test` 与 `merge-gate`。
 - **反膨胀与假测审计**：剥离注释并跳过元夹具生成器后，识别非 E2E 单测硬编码 `>=1s` sleep（`tests.hard-sleep`）、单测混入浏览器/容器重依赖（`tests.heavy-in-unit`）、`>=5` mock 且仅断言调用次数而 0 真实值断言的纯 Mock 自证（`tests.mock-tautology`）、`>800` 行超大单测（`tests.oversized-file`）与无环境变量隔离的非无头配置（`tests.non-headless`）；重组或拆分测试目录前须先请人类确认。
 
-## 信任倒金字塔与规则下沉阶梯
+## 严格三层倒金字塔与自动复盘升格
 
-1. **防线顺序（倒金字塔）**：确定性静态护栏（类型、`arch-rules`、卫生脚本）与高频测试优先于人工或事后复审；能用静态门禁拦住的问题绝不依赖口头叮嘱。
-2. **规则下沉阶梯**：
-   - **第 1 次出现（L1）**：当场修根因，并用 `record` 记入园艺缓冲 `<gitCommonDir>/project-forge-govern/signals.jsonl`（零污染 `git status`）。
-   - **重复达 `>= 2` 次（L2）**：`cluster` / `audit --cluster` 按「模块 + 模式」去重标出 `sinkCandidate`，必须把规则下沉到 `AGENTS.md` `Dev Profile`（`arch-rules` / `smoke-verify`）或对应验证脚本，并在报错文本中直接给出根因修法。
-   - **高频或 3 次以上（L3）**：提升为硬门禁并在 CI 工作流强制执行。
+1. **禁止默认写回 `AGENTS.md`**：`signals.jsonl` 按 `{ defectClass, pyramidTier, fingerprint, targetArtifact }` 记录结构化故障指纹；`retro` 默认绝不向 `AGENTS.md` 追加自然语言规则，避免契约膨胀。
+2. **同类故障指纹复发 `>= 2` 次强制升格**：
+   - **Tier 1（架构重构优先）**：状态分裂、竞态、超长紧文件或跨模块结构耦合经 `escalation.mjs` 自动生成并按指纹去重 Tier 1 重构单。
+   - **Tier 2（确定性门禁次优先）**：可静态拦截缺陷产出 `arch-rules`、`dev-edit/scripts/edit-gate.mjs`、CI 或目标仓既有原生校验配置建议（绝不硬绑定第三方外部 linter 二进制）。
+   - **Tier 3（仅显式兜底与定期淘汰）**：仅传 `--allow-tier3-fallback --reason "<原因>"` 方允许写入带 `[TIER-3-FALLBACK]` 标记与到期条件的极简词条；常规 `retro` 自动识别并清理过期或已由 Tier 2 覆盖的陈旧条目。
+3. **生命周期自动触发**：`flow finalize`/`verify` 链路自动执行轻量 `audit . --changed --quiet --json`，`flow merge`/`cleanup` 后自动执行 `retro --auto --task <id> --json`；显式跳过必带 `--skip-govern --reason "<原因>"` 写入账本与信号流留痕。
 
 ## 园艺缓冲聚类、事后抽检与顽固 Bug 三步止损
 

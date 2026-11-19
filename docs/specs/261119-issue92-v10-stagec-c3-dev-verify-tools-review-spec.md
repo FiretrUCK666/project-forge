@@ -7,8 +7,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 92
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c3
+owner: impl-c3
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=178027c5d35d, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"
@@ -129,10 +129,10 @@ flowchart LR
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C9: （SC9）新增第 7 技能 `dev-verify-tools/` (new) 与唯一机读功能地图 `docs/feature-map.json` (new)（`verificationTools[]` + `testRefs`，无局部哈希且无冗余复写入 `docs/TDD.md`）；由 `repo-map.mjs` 自动从 E2E/脚本/`businessFlows` 预填并完成本仓自举；临时验证草稿锁入仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 并在 `flow cleanup`/`abort` 时确定性彻底销毁。
-- [ ] C10: （SC10）落地不依赖手工时间戳/日期的工具过时校验：通过 `symbol-index.mjs` 导出符号与 Git tree 基线对比仓外 `{gitCommonDir}/project-forge-verify/cache.json` 自动判 `stale`，并按低/中/高风险执行告警提示、E2E 兜底或硬阻断策略。
-- [ ] C11: （SC11）重构 `dev-review`（拆出 `review-context.mjs` (new)），无论 `docs/feature-map.json` (new) 是否存在预设工具，均强制注入 `businessFlows`、相邻模块与运行时能力并在输出 `--include-diff` 前强制完成真实运行或端到端实证校验。
-- [ ] C12: （SC12）完整跑通 `dev-verify-tools` 三大自然语言/斜杠核心场景——创造新工具（仓外草稿成熟后沉淀注册入 `docs/feature-map.json` (new)）、自动复用已有工具（含过时分级处置）及工具体检清理（消除僵尸引用与高风险盲区）。
+- [x] C9: （SC9）新增第 7 技能 `dev-verify-tools/` (new) 与唯一机读功能地图 `docs/feature-map.json` (new)（`verificationTools[]` + `testRefs`，无局部哈希且无冗余复写入 `docs/TDD.md`）；由 `repo-map.mjs` 自动从 E2E/脚本/`businessFlows` 预填并完成本仓自举；临时验证草稿锁入仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 并在 `flow cleanup`/`abort` 时确定性彻底销毁。
+- [x] C10: （SC10）落地不依赖手工时间戳/日期的工具过时校验：通过 `symbol-index.mjs` 导出符号与 Git tree 基线对比仓外 `{gitCommonDir}/project-forge-verify/cache.json` 自动判 `stale`，并按低/中/高风险执行告警提示、E2E 兜底或硬阻断策略。
+- [x] C11: （SC11）重构 `dev-review`（拆出 `review-context.mjs` (new)），无论 `docs/feature-map.json` (new) 是否存在预设工具，均强制注入 `businessFlows`、相邻模块与运行时能力并在输出 `--include-diff` 前强制完成真实运行或端到端实证校验。
+- [x] C12: （SC12）完整跑通 `dev-verify-tools` 三大自然语言/斜杠核心场景——创造新工具（仓外草稿成熟后沉淀注册入 `docs/feature-map.json` (new)）、自动复用已有工具（含过时分级处置）及工具体检清理（消除僵尸引用与高风险盲区）。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -159,4 +159,8 @@ flowchart LR
 
 ## 实现说明
 
-待实施后补全提交 SHA、本仓 `docs/feature-map.json` 自举条目数及三场景实测流水。
+- 分支：`feat/v10-stagec-c3`（关联 Issue `#92`，任务 `stagec-c3`）
+- 新增第 7 技能 `kit/skills/dev-verify-tools/`（`SKILL.md` `61L` `order: 48`、`verify-tools.mjs`、`verify-tools-audit.mjs`）及共享内核 `kit/skills/lib/feature-map.mjs`、`kit/skills/lib/verify-state.mjs`（含纯切片查询 `matchFeatureMapForPaths` 与 Fail-Soft/Fail-Closed 边界）。
+- 完成本仓 `docs/feature-map.json` 自举（12 项功能流、12 项验证工具、0 僵尸、0 盲区、0 局部哈希），对接 `repo-map.mjs` 增量预填与 `flow-cleanup.mjs` 仓外 `scratch/{taskId}/` 路径前缀校验销毁 + 跨 `>= 2` PR `verify.scratch-used` 固化提示。
+- 拆出 `kit/skills/dev-review/scripts/review-context.mjs`，升级 `review-pack.mjs`、`review-gates.mjs`、`review-empirical.mjs`、`review-empirical-state.mjs`、`kit/skills/dev-review/SKILL.md` 与 `workflow-policy.mjs`/`flow-lifecycle-helpers.mjs`，实现无论有无预设工具均强制业务流实证与防敷衍 `--e2e-evidence` 拦截。
+- 新增功能域夹具 `scripts/dev/fixtures-verify-tools.mjs` 与故障注入 `scripts/dev/injections-data-verify-tools.mjs`（`I197–I206`），同步运行 `equip.mjs .` 与 `compose-agents.mjs .`。

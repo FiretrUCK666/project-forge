@@ -17,8 +17,51 @@ import {
 } from '../../lib/git.mjs'
 import { nextReviewRound, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
-import { buildE2eDiagnosticPacket, scoreExecutionResult } from '../../lib/workflow-policy.mjs'
+import { buildE2eDiagnosticPacket, scoreExecutionResult, validateE2eEvidenceText } from '../../lib/workflow-policy.mjs'
 import { EXIT } from './review-diff.mjs'
+
+export function sanitizeCmdTemplate(rawCmd) {
+  return String(rawCmd ?? '')
+    .replace(/\s*(?:--[A-Za-z0-9_-]+(?:=|\s+)|-[A-Za-z]\s+)?\{target\}\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function collectDevProfileEmpiricalCmds(devProfile = {}) {
+  const auto = []
+  for (const key of ['quick-test', 'smoke-verify', 'full-test']) {
+    for (const raw of devProfile[key] ?? []) {
+      const clean = sanitizeCmdTemplate(raw)
+      if (clean && !auto.includes(clean)) auto.push(clean)
+    }
+  }
+  const mergeCmds = []
+  for (const raw of devProfile['merge-gate'] ?? []) {
+    const clean = sanitizeCmdTemplate(raw)
+    if (clean && !mergeCmds.includes(clean)) mergeCmds.push(clean)
+  }
+  const effectiveAuto = auto.length > 0 ? auto : mergeCmds
+  const allTestCmds = [...new Set([...effectiveAuto, ...mergeCmds])]
+  return { autoCommands: effectiveAuto, hasDevProfileTestCmds: allTestCmds.length > 0 }
+}
+
+/** 提取并校验 `--e2e-evidence` / `--visual-evidence` 输入，拦截无实质水话。 */
+export function resolveAndValidateE2eEvidenceInput(opts = {}) {
+  const explicitRaw = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || ''
+  if (explicitRaw) {
+    const check = validateE2eEvidenceText(explicitRaw)
+    if (!check.ok) {
+      return { ok: false, explicit: true, raw: explicitRaw, text: '', code: check.code, reason: check.reason }
+    }
+    return { ok: true, explicit: true, raw: explicitRaw, text: check.cleaned, code: null, reason: null }
+  }
+  if (opts['visual-checked']) {
+    return { ok: true, explicit: false, raw: '', text: 'e2e/visual runtime behavior observed and verified', code: null, reason: null }
+  }
+  return { ok: true, explicit: false, raw: '', text: '', code: null, reason: null }
+}
 
 function isInsideDir(candidateAbs, parentAbs) {
   const c = canonicalPath(candidateAbs)

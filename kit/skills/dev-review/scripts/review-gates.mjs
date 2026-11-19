@@ -18,6 +18,7 @@ import {
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 import { hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
+import { formatReviewContextLines } from './review-context.mjs'
 
 const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
 const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
@@ -520,7 +521,7 @@ export function assessDoor({ reviewRoot, mainRoot, diff, devProfile, hrHits, par
   }
 }
 
-export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate }) {
+export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate, reviewContext = null }) {
   const skills = resolveAvailableSkills(mainRoot)
   const nextSteps = []
   if (opts['untrusted-scan'] && untrustedWarnings.length === 0) {
@@ -531,6 +532,12 @@ export function buildPackNextSteps({ opts, mode, task, round, mainRoot, untruste
   }
   if (structuralGate.archViolations.length > 0) {
     nextSteps.push(`Fix ${structuralGate.archViolations.length} architecture boundary violation(s) at root cause before passing review.`)
+  }
+  if ((reviewContext?.staleHighRiskTools?.length ?? 0) > 0) {
+    nextSteps.push(`高风险验证工具已过期（${reviewContext.staleHighRiskTools.map((t) => t.toolId).join(', ')}）：禁止直接复用，须先升级工具或执行等效实时 E2E 实证。`)
+  }
+  for (const h of (reviewContext?.solidificationHints ?? []).slice(0, 2)) {
+    nextSteps.push(`[${h.code}] ${h.suggestion}`)
   }
   if (empiricalGate?.required && !empiricalGate.readyForDiff) {
     nextSteps.push('先跑实证与故障注入，再 --include-diff 取全文（未完成前 --include-diff 将退出码 3 阻断 BLOCKED_EMPIRICAL_FIRST）：')
@@ -595,6 +602,8 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
       lines.push(`  ${item.status}\t${item.file} (+${item.addedLines}/-${item.removedLines}, ${item.hunks.length} hunk(s))`)
     }
   }
+
+  if (pack.reviewContext) lines.push(...formatReviewContextLines(pack.reviewContext))
 
   lines.push('', '--- Doc-Code Parity Gate ---')
   if (pack.parity.triggers.length === 0 && pack.parity.todoIssues.length === 0 && (pack.parity.mermaidViolations?.length ?? 0) === 0) {

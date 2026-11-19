@@ -1,0 +1,463 @@
+{
+  "version": 1,
+  "features": [
+    {
+      "id": "survey",
+      "name": "只读勘察与双轴身份缺口判定",
+      "entrypoints": [
+        "scripts/survey.mjs",
+        "scripts/lib/platform/index.mjs"
+      ],
+      "modules": [
+        "scripts/survey.mjs",
+        "scripts/lib/platform/index.mjs",
+        "scripts/lib/survey-scan.mjs",
+        "scripts/lib/survey-questions.mjs",
+        "scripts/lib/survey-gap-rules.mjs"
+      ],
+      "businessFlows": [
+        "只读扫描目标仓生态、Git 拓扑与文档现状并输出 JSON/Markdown",
+        "按双轴五态身份判定缺口与 artifactPlan 十一项定界"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-survey-json",
+          "kind": "command",
+          "command": "node scripts/survey.mjs . --json",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "勘察",
+            "survey",
+            "缺口",
+            "身份判定"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-survey.mjs",
+        "scripts/dev/fixtures-heterogeneous-survey.mjs"
+      ]
+    },
+    {
+      "id": "equip",
+      "name": "统一技能集装配与 v2 账本校验",
+      "entrypoints": [
+        "scripts/equip.mjs",
+        "scripts/equip-ci.mjs",
+        "scripts/zip.mjs"
+      ],
+      "modules": [
+        "scripts/equip.mjs",
+        "scripts/equip-ci.mjs",
+        "scripts/zip.mjs",
+        "scripts/lib/equip-bootstrap.mjs",
+        "scripts/backup.mjs"
+      ],
+      "businessFlows": [
+        "将 kit/skills 幂等装配到 .agents/skills 并校验字节一致",
+        "空白目录 --bootstrap-empty 起步与写前仓外 .zip 快照备份"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-equip-check",
+          "kind": "command",
+          "command": "node scripts/equip.mjs . --check",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "equip",
+            "装配",
+            "技能套件",
+            "manifest"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-equip.mjs",
+        "scripts/dev/fixtures-onboarding.mjs"
+      ]
+    },
+    {
+      "id": "compose-agents",
+      "name": "受管工程契约渲染与预算门禁",
+      "entrypoints": [
+        "scripts/compose-agents.mjs"
+      ],
+      "modules": [
+        "scripts/compose-agents.mjs",
+        "scripts/lib/agents-defaults.mjs",
+        "scripts/lib/agents-sections.mjs",
+        "scripts/lib/template.mjs"
+      ],
+      "businessFlows": [
+        "从 templates/agents-project.md 渲染受管区间并保留手写段落",
+        "校验 AGENTS.md 字节预算与无条件残留"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-compose-agents",
+          "kind": "command",
+          "command": "node scripts/compose-agents.mjs . --check",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "AGENTS.md",
+            "compose-agents",
+            "意图路由",
+            "契约预算"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-contracts.mjs"
+      ]
+    },
+    {
+      "id": "delivery-review-handoff",
+      "name": "交付体检、文档同步、更新与交棒净度扫描",
+      "entrypoints": [
+        "scripts/review.mjs",
+        "scripts/handoff.mjs",
+        "scripts/sync-toc.mjs",
+        "scripts/update.mjs"
+      ],
+      "modules": [
+        "scripts/review.mjs",
+        "scripts/handoff.mjs",
+        "scripts/sync-toc.mjs",
+        "scripts/update.mjs",
+        "scripts/lib/review-helpers.mjs",
+        "scripts/lib/claims.mjs"
+      ],
+      "businessFlows": [
+        "核对交付体检缺口与契约声明回查",
+        "扫描标记残留与交棒净度退出码"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-delivery-review",
+          "kind": "command",
+          "command": "node scripts/review.mjs .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "review.mjs",
+            "handoff",
+            "体检",
+            "交棒"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-handoff-review.mjs",
+        "scripts/dev/fixtures-claims.mjs"
+      ]
+    },
+    {
+      "id": "dev-explore",
+      "name": "只读资产探索与零写入按需定位",
+      "entrypoints": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-explore/scripts/doc-locate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-explore/scripts/repo-map.mjs",
+        "kit/skills/dev-explore/scripts/doc-locate.mjs",
+        "kit/skills/lib/cli.mjs",
+        "kit/skills/lib/doc-locator.mjs",
+        "kit/skills/lib/markdown-scan.mjs",
+        "kit/skills/lib/symbol-index.mjs"
+      ],
+      "businessFlows": [
+        "枚举全仓多生态包清单、CI 步骤、可复用模块并增量预填 feature-map",
+        "零写入按节区与符号行号切片定位文档与源码"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-repo-map-json",
+          "kind": "command",
+          "command": "node .agents/skills/dev-explore/scripts/repo-map.mjs . --json",
+          "scriptPath": null,
+          "riskLevel": "low",
+          "triggerHints": [
+            "repo-map",
+            "doc-locate",
+            "探索",
+            "按需定位"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-explore.mjs",
+        "scripts/dev/fixtures-locate-intake.mjs"
+      ]
+    },
+    {
+      "id": "dev-plan",
+      "name": "五档需求分流与四层文档内审",
+      "entrypoints": [
+        "kit/skills/dev-plan/scripts/doc-plan.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-plan/scripts/doc-plan.mjs",
+        "kit/skills/dev-plan/scripts/doc-plan-ops.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit.mjs",
+        "kit/skills/dev-plan/scripts/triage-rules.mjs"
+      ],
+      "businessFlows": [
+        "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn",
+        "执行独立内审、不可自审、全历史换人与 3 轮停损校验"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-doc-plan-audit",
+          "kind": "command",
+          "command": "node .agents/skills/dev-plan/scripts/doc-plan.mjs audit .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "doc-plan",
+            "PRD",
+            "SPEC",
+            "Todo",
+            "内审"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-doc-rules.mjs",
+        "scripts/dev/fixtures-doc-triage.mjs",
+        "scripts/dev/fixtures-doc-closure.mjs"
+      ]
+    },
+    {
+      "id": "dev-edit",
+      "name": "改码边界核对与词法静态门禁",
+      "entrypoints": [
+        "kit/skills/dev-edit/scripts/edit-gate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-edit/scripts/edit-gate.mjs",
+        "kit/skills/lib/static-gates.mjs",
+        "kit/skills/lib/static-gates-lexer.mjs"
+      ],
+      "businessFlows": [
+        "改前核对 do-not-edit、紧文件预警与相邻复用符号",
+        "改后剥离注释字面量拦截压制注释、死代码、过程命名与单测反作弊"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-edit-gate",
+          "kind": "command",
+          "command": "node .agents/skills/dev-edit/scripts/edit-gate.mjs --mode standalone --changed --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "edit-gate",
+            "改码门禁",
+            "压制注释",
+            "死代码"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-edit-pyramid.mjs"
+      ]
+    },
+    {
+      "id": "dev-flow",
+      "name": "隔离工作树流转、分诊、实证与清理",
+      "entrypoints": [
+        "kit/skills/dev-flow/scripts/flow.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-flow/scripts/flow.mjs",
+        "kit/skills/dev-flow/scripts/flow-next.mjs",
+        "kit/skills/dev-flow/scripts/flow-inspect.mjs",
+        "kit/skills/dev-flow/scripts/flow-intake.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle.mjs",
+        "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs",
+        "kit/skills/dev-flow/scripts/flow-merge.mjs",
+        "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
+        "kit/skills/lib/workflow-policy.mjs"
+      ],
+      "businessFlows": [
+        "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
+        "归档锁 finalize、分层 verify、submit 提审、试合 merge 与销毁 scratch 清理"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-flow-inspect",
+          "kind": "command",
+          "command": "node .agents/skills/dev-flow/scripts/flow.mjs inspect --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "flow",
+            "worktree",
+            "cleanup",
+            "verify",
+            "submit"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-flow.mjs",
+        "scripts/dev/fixtures-flow-cleanup.mjs",
+        "scripts/dev/fixtures-e2e-gate.mjs"
+      ]
+    },
+    {
+      "id": "dev-verify-tools",
+      "name": "验证工具生命周期与免日期过时校验",
+      "entrypoints": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-verify-tools/scripts/verify-tools.mjs",
+        "kit/skills/dev-verify-tools/scripts/verify-tools-audit.mjs",
+        "kit/skills/lib/feature-map.mjs",
+        "kit/skills/lib/verify-state.mjs"
+      ],
+      "businessFlows": [
+        "仓外 scratch 试制探针并通过 edit-gate 与实跑后沉淀注册 docs/feature-map.json",
+        "按变更文件反查复用工具并基于 symbol-index 与 Git 树哈希执行低/中/高风险过时处置",
+        "审计僵尸引用、高风险盲区与跨 >=2 PR 临时脚本固化提示并安全清理"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-tools-self-audit",
+          "kind": "command",
+          "command": "node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit --json",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "verify-tools",
+            "feature-map",
+            "过时校验",
+            "scratch"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-verify-tools.mjs"
+      ]
+    },
+    {
+      "id": "dev-review",
+      "name": "先实证后 Diff 独立双门审查与六锁",
+      "entrypoints": [
+        "kit/skills/dev-review/scripts/review-pack.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-review/scripts/review-pack.mjs",
+        "kit/skills/dev-review/scripts/review-context.mjs",
+        "kit/skills/dev-review/scripts/review-gates.mjs",
+        "kit/skills/dev-review/scripts/review-empirical.mjs",
+        "kit/skills/dev-review/scripts/review-empirical-state.mjs",
+        "kit/skills/dev-review/scripts/review-locks.mjs",
+        "kit/skills/dev-review/scripts/review-ledger.mjs"
+      ],
+      "businessFlows": [
+        "按变更文件装配受波及 businessFlows、依赖逆邻域与运行时能力切片",
+        "无论有无预设工具均强制先业务流实证与故障注入再解锁 --include-diff",
+        "校验 --e2e-evidence 实质内容并执行六锁防死循环审查记账"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-review-empirical-fixtures",
+          "kind": "command",
+          "command": "node scripts/dev/fixtures.mjs --domain review-empirical",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "review-pack",
+            "include-diff",
+            "实证门禁",
+            "故障注入"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-review-empirical.mjs",
+        "scripts/dev/fixtures-review.mjs",
+        "scripts/dev/fixtures-verify-tools.mjs"
+      ]
+    },
+    {
+      "id": "dev-govern",
+      "name": "基线增量审计与倒金字塔复盘治理",
+      "entrypoints": [
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-govern/scripts/govern-retro.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-govern/scripts/govern-audit.mjs",
+        "kit/skills/dev-govern/scripts/govern-checks.mjs",
+        "kit/skills/dev-govern/scripts/govern-retro.mjs",
+        "kit/skills/dev-govern/scripts/govern-tests.mjs",
+        "kit/skills/lib/signals.mjs"
+      ],
+      "businessFlows": [
+        "增量审计全仓卫生、测试分层元数据与文档同步",
+        "聚合 signals.jsonl 复发指纹按严格三层倒金字塔升格"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-govern-audit",
+          "kind": "command",
+          "command": "node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "govern",
+            "审计",
+            "retro",
+            "signals"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-govern.mjs",
+        "scripts/dev/fixtures-edit-pyramid.mjs"
+      ]
+    },
+    {
+      "id": "preflight-gate",
+      "name": "全仓结构自检、边界校验与端到端冒烟",
+      "entrypoints": [
+        "scripts/dev/preflight.mjs"
+      ],
+      "modules": [
+        "scripts/dev/preflight.mjs",
+        "scripts/dev/preflight-suite.mjs",
+        "scripts/dev/preflight-contracts.mjs",
+        "scripts/dev/write-probe-audit.mjs"
+      ],
+      "businessFlows": [
+        "校验语法、零第三方依赖、架构边界、孤儿脚本与套件一致性",
+        "执行端到端冒烟与全量故障注入验证"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-preflight-smoke",
+          "kind": "smoke",
+          "command": "node scripts/dev/preflight.mjs",
+          "scriptPath": null,
+          "riskLevel": "high",
+          "triggerHints": [
+            "preflight",
+            "冒烟",
+            "门禁",
+            "merge-gate"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures.mjs",
+        "scripts/dev/verify-injections.mjs"
+      ]
+    }
+  ]
+}

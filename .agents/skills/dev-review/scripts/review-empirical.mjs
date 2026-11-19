@@ -8,51 +8,38 @@
 import { printNextStep } from '../../lib/cli.mjs'
 import { computeWorktreeEnv, posixPath } from '../../lib/git.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
-import { determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import {
+  determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
+  readVerificationEvidence, validateE2eEvidenceText,
+} from '../../lib/workflow-policy.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
   buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
-  checkUntrustedBeforeExec, computeCleanBaselineFingerprint, computeWorkspaceFingerprint,
-  emitGateBlock, getEffectiveStatusEntries, handleEmpiricalE2eFailure, hasPendingFaultInReceipt,
-  isSameScopeContext, readReceipt, recordMechanicalPack, resolveEmpiricalReceiptPath,
-  runCommandList, writeReceipt,
+  checkUntrustedBeforeExec, collectDevProfileEmpiricalCmds, computeCleanBaselineFingerprint,
+  computeWorkspaceFingerprint, emitGateBlock, getEffectiveStatusEntries, handleEmpiricalE2eFailure,
+  hasPendingFaultInReceipt, isSameScopeContext, readReceipt, recordMechanicalPack,
+  resolveAndValidateE2eEvidenceInput, resolveEmpiricalReceiptPath, runCommandList,
+  sanitizeCmdTemplate, writeReceipt,
 } from './review-empirical-state.mjs'
 
 export {
   checkDirtyFaultResidueBeforeSync,
+  collectDevProfileEmpiricalCmds,
   computeWorkspaceFingerprint,
   emitGateBlock,
   getEffectiveStatusEntries,
   recordMechanicalPack,
 }
 
-function sanitizeCmdTemplate(rawCmd) {
-  return String(rawCmd ?? '')
-    .replace(/\s*(?:--[A-Za-z0-9_-]+(?:=|\s+)|-[A-Za-z]\s+)?\{target\}\s*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-export function collectDevProfileEmpiricalCmds(devProfile = {}) {
-  const auto = []
-  for (const key of ['quick-test', 'smoke-verify', 'full-test']) {
-    for (const raw of devProfile[key] ?? []) {
-      const clean = sanitizeCmdTemplate(raw)
-      if (clean && !auto.includes(clean)) auto.push(clean)
-    }
-  }
-  const mergeCmds = []
-  for (const raw of devProfile['merge-gate'] ?? []) {
-    const clean = sanitizeCmdTemplate(raw)
-    if (clean && !mergeCmds.includes(clean)) mergeCmds.push(clean)
-  }
-  const effectiveAuto = auto.length > 0 ? auto : mergeCmds
-  const allTestCmds = [...new Set([...effectiveAuto, ...mergeCmds])]
-  return { autoCommands: effectiveAuto, hasDevProfileTestCmds: allTestCmds.length > 0 }
+function hasSubstantiveStoredObservation(holder, headSha) {
+  if (!hasValidE2eObservationOnHead(holder, headSha)) return false
+  const obs = holder?.e2eObservation
+  if (obs?.shallowRejected) return false
+  return validateE2eEvidenceText(obs?.summary ?? '').ok
 }
 
 export function computeEmpiricalRequirements({
-  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [],
+  diff, behavioralGate, effectiveProfile, task, gateWeakenedHits = [], reviewContext = null,
 }) {
   const allFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
   const isEmptyDiff = allFiles.length === 0
@@ -77,7 +64,9 @@ export function computeEmpiricalRequirements({
       explicitNone: effectiveProfile?.explicitNone,
     },
   })
-  const { autoCommands, hasDevProfileTestCmds } = collectDevProfileEmpiricalCmds(effectiveProfile)
+  const { autoCommands: profileAutoCmds, hasDevProfileTestCmds } = collectDevProfileEmpiricalCmds(effectiveProfile)
+  const toolAutoCmds = (reviewContext?.healthyToolCommands ?? []).filter(Boolean)
+  const autoCommands = profileAutoCmds.length > 0 ? profileAutoCmds : toolAutoCmds
   const runtimeTouched = (behavioralGate?.runtimeFilesTouched?.length ?? 0) > 0
   const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
   const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
@@ -85,7 +74,8 @@ export function computeEmpiricalRequirements({
   const empiricalRequired = !isEmptyDiff
   const faultRequired = !isEmptyDiff && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
   const visualCheckRequired = !isEmptyDiff && Boolean(behavioralGate?.empiricalVisualCheckRequired)
-  const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired)
+  const businessFlowEmpiricalRequired = !isEmptyDiff && !isLowRiskPureDoc && runtimeTouched && !policy.smokeExplicitNone
+  const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired || businessFlowEmpiricalRequired)
 
   return {
     isEmptyDiff,
@@ -97,7 +87,9 @@ export function computeEmpiricalRequirements({
     faultRequired,
     visualCheckRequired,
     smokeRequired,
+    businessFlowEmpiricalRequired,
     e2eObservationRequired,
+    hasPresetVerificationTools: Boolean(reviewContext?.empiricalTaskOrder?.hasPresetTools),
   }
 }
 
@@ -160,9 +152,9 @@ export function evaluateIncludeDiffGate({
     && receipt.faultRestoredClean === true
     && receipt.faultRestoredMeta?.fingerprint === workspaceFingerprint,
   )
-  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
-    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
+  const evInput = resolveAndValidateE2eEvidenceInput(opts)
+  const shallowE2eEvidence = evInput.ok ? null : { code: evInput.code, reason: evInput.reason, raw: evInput.raw }
+  const e2eEvidenceInput = evInput.ok ? evInput.text : ''
   const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
 
   const visualDone = !requirements.visualCheckRequired || Boolean(
@@ -176,9 +168,9 @@ export function evaluateIncludeDiffGate({
       && receipt?.empiricalVerified?.smokeExecuted === true),
   )
   const e2eObservationDone = !requirements.e2eObservationRequired || Boolean(
-    smokeOk && (
-      hasValidE2eObservationOnHead(receipt?.empiricalVerified, headSha)
-      || hasValidE2eObservationOnHead(evidence, headSha)
+    !shallowE2eEvidence && smokeOk && (
+      hasSubstantiveStoredObservation(receipt?.empiricalVerified, headSha)
+      || hasSubstantiveStoredObservation(evidence, headSha)
       || Boolean(e2eEvidenceInput)
       || behavioralGate?.visualVerifiedOnHead
       || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked))
@@ -194,20 +186,15 @@ export function evaluateIncludeDiffGate({
   if (requirements.e2eObservationRequired && !e2eObservationDone && (!requirements.visualCheckRequired || visualDone)) {
     missingSteps.push('e2e-observation')
   }
+  if (shallowE2eEvidence && !missingSteps.includes('e2e-observation')) {
+    missingSteps.push('e2e-observation')
+  }
 
   const readyForDiff = !dirtyFaultResidue && missingSteps.length === 0
   const unblockCommands = readyForDiff
     ? []
     : buildUnblockCommands({
-        missingSteps,
-        dirtyFaultResidue,
-        mode,
-        task,
-        round,
-        prNo,
-        baseRef,
-        reviewRoot,
-        mainRoot,
+        missingSteps, dirtyFaultResidue, mode, task, round, prNo, baseRef, reviewRoot, mainRoot,
         autoCommands: requirements.autoCommands,
       })
 
@@ -217,12 +204,8 @@ export function evaluateIncludeDiffGate({
     visualCheckRequired: requirements.visualCheckRequired,
     readyForDiff,
     dirtyFaultResidue,
-    mode,
-    round,
-    targetRoot: posixPath(reviewRoot),
-    headSha,
-    diffScope,
-    workspaceFingerprint,
+    shallowE2eEvidence,
+    mode, round, targetRoot: posixPath(reviewRoot), headSha, diffScope, workspaceFingerprint,
     baselineFingerprint: matchesBaseline ? receipt.baselineFingerprint : null,
     steps: {
       mechanicalPack: { done: mechanicalDone, at: mechanicalDone ? receipt.mechanicalPackAt : null },
@@ -233,17 +216,12 @@ export function evaluateIncludeDiffGate({
         at: empiricalDone ? receipt.empiricalVerified.verifiedAt : null,
       },
       faultFail: {
-        done: faultFailDone,
-        required: requirements.faultRequired,
+        done: faultFailDone, required: requirements.faultRequired,
         failedCmd: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.failedCmd : null,
         exitCode: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.exitCode : null,
         at: faultFailDone && receipt?.faultInjectedAndFailed ? receipt.faultInjectedAndFailed.injectedAt : null,
       },
-      faultRestore: {
-        done: faultRestoreDone,
-        required: requirements.faultRequired,
-        at: faultRestoreDone ? receipt?.faultRestoredAt : null,
-      },
+      faultRestore: { done: faultRestoreDone, required: requirements.faultRequired, at: faultRestoreDone ? receipt?.faultRestoredAt : null },
       visualCheck: { required: requirements.visualCheckRequired, done: visualDone },
       e2eObservation: {
         required: Boolean(requirements.e2eObservationRequired),
@@ -251,9 +229,7 @@ export function evaluateIncludeDiffGate({
         observation: receipt?.empiricalVerified?.e2eObservation ?? evidence?.e2eObservation ?? null,
       },
     },
-    missingSteps,
-    unblockCommands,
-    nextSteps: unblockCommands,
+    missingSteps, unblockCommands, nextSteps: unblockCommands,
   }
 }
 
@@ -301,10 +277,28 @@ export async function handleCheckEmpirical(ctx) {
     })
   }
 
-  const requirements = computeEmpiricalRequirements({ diff, behavioralGate, effectiveProfile, task, gateWeakenedHits })
+  const requirements = computeEmpiricalRequirements({
+    diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext: ctx.reviewContext ?? null,
+  })
   const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
   const commandsToRun = explicitCmds.length > 0 ? explicitCmds : requirements.autoCommands
   const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
+
+  const evInput = resolveAndValidateE2eEvidenceInput(opts)
+  if (!evInput.ok) {
+    return emitGateBlock({
+      opts,
+      code: evInput.code,
+      payload: {
+        status: evInput.code, code: evInput.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        rawEvidence: evInput.raw, error: evInput.reason,
+        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<执行入口 + 真实输出/状态>"`],
+      },
+      textLines: [evInput.code, evInput.reason],
+    })
+  }
+  const e2eEvidenceInput = evInput.text
 
   if (commandsToRun.length === 0 && !requirements.isEmptyDiff && !requirements.isLowRiskPureDoc) {
     const msg = 'BLOCKED_EMPIRICAL_CMD_REQUIRED: 未配置 Dev Profile 测试命令且触及非低风险变更，必须通过 --cmd "<C* 证伪命令>" 实跑验证。'
@@ -312,13 +306,8 @@ export async function handleCheckEmpirical(ctx) {
       opts,
       code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_CMD_REQUIRED',
-        code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        headSha,
-        workspaceFingerprint: currentFingerprint,
+        status: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', code: 'BLOCKED_EMPIRICAL_CMD_REQUIRED', exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
         nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --cmd "<验证命令>"`],
         error: msg,
       },
@@ -326,9 +315,6 @@ export async function handleCheckEmpirical(ctx) {
     })
   }
 
-  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
-    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
   const smokeCmdList = (behavioralGate?.smokeVerifyCommands ?? []).map(sanitizeCmdTemplate).filter(Boolean)
   const smokeExecuted = commandsToRun.length > 0 && (smokeCmdList.some((sc) => commandsToRun.includes(sc)) || explicitCmds.length > 0)
 
@@ -378,9 +364,9 @@ export async function handleCheckEmpirical(ctx) {
   }
 
   const flowEv = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
-  const carriedObs = hasValidE2eObservationOnHead(flowEv, headSha)
+  const carriedObs = hasSubstantiveStoredObservation(flowEv, headSha)
     ? flowEv.e2eObservation
-    : (sameCtx && hasValidE2eObservationOnHead(prev?.empiricalVerified, headSha) ? prev.empiricalVerified.e2eObservation : null)
+    : (sameCtx && hasSubstantiveStoredObservation(prev?.empiricalVerified, headSha) ? prev.empiricalVerified.e2eObservation : null)
   const e2eObservation = e2eEvidenceInput
     ? buildE2eObservation({
         summary: e2eEvidenceInput,
@@ -514,17 +500,10 @@ export async function handleCheckFault(ctx) {
     const targetFlags = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
     const msg = 'BLOCKED_EMPIRICAL_FIRST: 尚未采集当前工作区基线指纹，请先运行机械审查包与 check-empirical。'
     return emitGateBlock({
-      opts,
-      code: 'BLOCKED_EMPIRICAL_FIRST',
+      opts, code: 'BLOCKED_EMPIRICAL_FIRST',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_FIRST',
-        code: 'BLOCKED_EMPIRICAL_FIRST',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        headSha,
-        workspaceFingerprint: currentFingerprint,
-        missingSteps: ['mechanical-pack', 'check-empirical'],
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['mechanical-pack', 'check-empirical'],
         nextSteps: [
           `node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}`,
           `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags}`,
@@ -537,9 +516,7 @@ export async function handleCheckFault(ctx) {
 
   const explicitCmds = (opts.cmd ?? []).map((s) => String(s).trim()).filter(Boolean)
   const prevEmpiricalCmds = (prev?.empiricalVerified?.commands ?? []).map((c) => c.cmd).filter(Boolean)
-  const commandsToRun = explicitCmds.length > 0
-    ? explicitCmds
-    : (prevEmpiricalCmds.length > 0 ? prevEmpiricalCmds : requirements.autoCommands)
+  const commandsToRun = explicitCmds.length > 0 ? explicitCmds : (prevEmpiricalCmds.length > 0 ? prevEmpiricalCmds : requirements.autoCommands)
 
   if (commandsToRun.length === 0) {
     process.stderr.write('Error: check-fault requires --cmd "<command>" when no verification command is configured.\n')
@@ -553,19 +530,8 @@ export async function handleCheckFault(ctx) {
     if (currentFingerprint === baselineFingerprint) {
       const msg = 'BLOCKED_FAULT_NO_MUTATION: 工作区与基线指纹完全相同（未注入任何故障改动），禁止空跑故障注入。'
       return emitGateBlock({
-        opts,
-        code: 'BLOCKED_FAULT_NO_MUTATION',
-        payload: {
-          status: 'BLOCKED_FAULT_NO_MUTATION',
-          code: 'BLOCKED_FAULT_NO_MUTATION',
-          exitCode: EXIT.UNTRUSTED_HAZARD,
-          mode,
-          round,
-          headSha,
-          baselineFingerprint,
-          workspaceFingerprint: currentFingerprint,
-          error: msg,
-        },
+        opts, code: 'BLOCKED_FAULT_NO_MUTATION',
+        payload: { status: 'BLOCKED_FAULT_NO_MUTATION', code: 'BLOCKED_FAULT_NO_MUTATION', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, baselineFingerprint, workspaceFingerprint: currentFingerprint, error: msg },
         textLines: ['BLOCKED_FAULT_NO_MUTATION', msg],
       })
     }
@@ -575,84 +541,38 @@ export async function handleCheckFault(ctx) {
     if (!caught) {
       const msg = 'BLOCKED_FAULT_NOT_CAUGHT: 工作区已注入故障，但全部验证命令依然退出 0（测试未抓住该故障）。'
       return emitGateBlock({
-        opts,
-        code: 'BLOCKED_FAULT_NOT_CAUGHT',
-        payload: {
-          status: 'BLOCKED_FAULT_NOT_CAUGHT',
-          code: 'BLOCKED_FAULT_NOT_CAUGHT',
-          exitCode: EXIT.UNTRUSTED_HAZARD,
-          mode,
-          round,
-          headSha,
-          baselineFingerprint,
-          mutatedFingerprint: currentFingerprint,
-          commands: results,
-          error: msg,
-        },
+        opts, code: 'BLOCKED_FAULT_NOT_CAUGHT',
+        payload: { status: 'BLOCKED_FAULT_NOT_CAUGHT', code: 'BLOCKED_FAULT_NOT_CAUGHT', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, baselineFingerprint, mutatedFingerprint: currentFingerprint, commands: results, error: msg },
         textLines: ['BLOCKED_FAULT_NOT_CAUGHT', msg],
       })
     }
 
     const injectedAt = new Date().toISOString()
     const baseRecord = sameScope && prev ? prev : {
-      mode,
-      round,
-      prNo: prNo ?? null,
-      headSha,
-      diffScope,
-      baselineFingerprint,
-      untrustedScanClean: untrusted.scanClean ?? null,
-      humanApprovedExec: Boolean(untrusted.approved),
-      mechanicalPackSeen: false,
-      mechanicalPackAt: null,
-      empiricalVerified: null,
+      mode, round, prNo: prNo ?? null, headSha, diffScope, baselineFingerprint,
+      untrustedScanClean: untrusted.scanClean ?? null, humanApprovedExec: Boolean(untrusted.approved),
+      mechanicalPackSeen: false, mechanicalPackAt: null, empiricalVerified: null,
     }
     writeReceipt(receiptPath, {
-      ...baseRecord,
-      baselineFingerprint,
+      ...baseRecord, baselineFingerprint,
       faultInjectedAndFailed: {
-        baselineFingerprint,
-        mutatedFingerprint: currentFingerprint,
-        headSha,
-        round,
-        diffScope,
-        failedCmd: caught.cmd,
-        exitCode: caught.exitCode,
-        commands: results,
-        injectedAt,
+        baselineFingerprint, mutatedFingerprint: currentFingerprint, headSha, round, diffScope,
+        failedCmd: caught.cmd, exitCode: caught.exitCode, commands: results, injectedAt,
       },
-      faultRestoredClean: false,
-      faultRestoredAt: null,
-      faultRestoredMeta: null,
+      faultRestoredClean: false, faultRestoredAt: null, faultRestoredMeta: null,
     })
 
     const restoreHint = isCleanCommitMode
       ? `git -C "${posixPath(reviewRoot)}" checkout -- .`
       : '请将注入的故障手工还原回基线改动（保留原有 --local 未提交修改）'
-    const nextSteps = [
-      restoreHint,
-      `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase restore ${targetFlags} --cmd "${caught.cmd}"`,
-    ]
+    const nextSteps = [restoreHint, `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase restore ${targetFlags} --cmd "${caught.cmd}"`]
     const payload = {
-      status: 'FAULT_INJECTED_FAILED',
-      ok: true,
-      mode,
-      round,
-      targetRoot: posixPath(reviewRoot),
-      headSha,
-      baselineFingerprint,
-      mutatedFingerprint: currentFingerprint,
-      failedCmd: caught.cmd,
-      failedExitCode: caught.exitCode,
-      commands: results,
-      nextSteps,
+      status: 'FAULT_INJECTED_FAILED', ok: true, mode, round, targetRoot: posixPath(reviewRoot), headSha,
+      baselineFingerprint, mutatedFingerprint: currentFingerprint, failedCmd: caught.cmd, failedExitCode: caught.exitCode, commands: results, nextSteps,
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
     else {
-      process.stdout.write([
-        'FAULT_INJECTED_FAILED',
-        `Worktree : ${posixPath(reviewRoot)} | FailedCmd: ${caught.cmd} (exit=${caught.exitCode})`,
-      ].join('\n') + '\n')
+      process.stdout.write(['FAULT_INJECTED_FAILED', `Worktree : ${posixPath(reviewRoot)} | FailedCmd: ${caught.cmd} (exit=${caught.exitCode})`].join('\n') + '\n')
       printNextStep(nextSteps, { repoRoot: mainRoot })
     }
     return EXIT.OK
@@ -665,20 +585,8 @@ export async function handleCheckFault(ctx) {
       ? `BLOCKED_DIRTY_FAULT_RESIDUE: 工作区仍有未还原改动（${dirtyEntries.map((e) => e.file).slice(0, 5).join(', ')}），请先彻底还原再运行 --phase restore。`
       : 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作区指纹尚未还原回注入前基线（baselineFingerprint），请彻底还原后再运行 --phase restore。'
     return emitGateBlock({
-      opts,
-      code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-      payload: {
-        status: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-        code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        targetRoot: posixPath(reviewRoot),
-        baselineFingerprint,
-        workspaceFingerprint: currentFingerprint,
-        dirtyFiles: dirtyEntries.map((e) => e.file),
-        error: msg,
-      },
+      opts, code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
+      payload: { status: 'BLOCKED_DIRTY_FAULT_RESIDUE', code: 'BLOCKED_DIRTY_FAULT_RESIDUE', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, targetRoot: posixPath(reviewRoot), baselineFingerprint, workspaceFingerprint: currentFingerprint, dirtyFiles: dirtyEntries.map((e) => e.file), error: msg },
       textLines: ['BLOCKED_DIRTY_FAULT_RESIDUE', msg],
     })
   }
@@ -686,17 +594,10 @@ export async function handleCheckFault(ctx) {
   if (!sameScope || prev?.faultInjectedAndFailed?.baselineFingerprint !== baselineFingerprint) {
     const msg = 'BLOCKED_EMPIRICAL_FIRST: 尚未记录对应当前基线的 check-fault --phase fail 成功证据，不能直接标记还原。'
     return emitGateBlock({
-      opts,
-      code: 'BLOCKED_EMPIRICAL_FIRST',
+      opts, code: 'BLOCKED_EMPIRICAL_FIRST',
       payload: {
-        status: 'BLOCKED_EMPIRICAL_FIRST',
-        code: 'BLOCKED_EMPIRICAL_FIRST',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        headSha,
-        workspaceFingerprint: currentFingerprint,
-        missingSteps: ['check-fault:fail'],
+        status: 'BLOCKED_EMPIRICAL_FIRST', code: 'BLOCKED_EMPIRICAL_FIRST', exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint, missingSteps: ['check-fault:fail'],
         nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase fail ${targetFlags} --cmd "${commandsToRun[0]}"`],
         error: msg,
       },
@@ -709,71 +610,35 @@ export async function handleCheckFault(ctx) {
   if (failed) {
     const msg = `BLOCKED_EMPIRICAL_FAILED: 还原后复绿命令仍然失败 (exit=${failed.exitCode}): ${failed.cmd}`
     return emitGateBlock({
-      opts,
-      code: 'BLOCKED_EMPIRICAL_FAILED',
-      payload: {
-        status: 'BLOCKED_EMPIRICAL_FAILED',
-        code: 'BLOCKED_EMPIRICAL_FAILED',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        headSha,
-        workspaceFingerprint: currentFingerprint,
-        commands: results,
-        error: msg,
-      },
+      opts, code: 'BLOCKED_EMPIRICAL_FAILED',
+      payload: { status: 'BLOCKED_EMPIRICAL_FAILED', code: 'BLOCKED_EMPIRICAL_FAILED', exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha, workspaceFingerprint: currentFingerprint, commands: results, error: msg },
       textLines: ['BLOCKED_EMPIRICAL_FAILED', msg],
     })
   }
 
   const restoredAt = new Date().toISOString()
-  writeReceipt(receiptPath, {
-    ...prev,
-    faultRestoredClean: true,
-    faultRestoredAt: restoredAt,
-    faultRestoredMeta: { fingerprint: currentFingerprint, commands: results },
-  })
+  writeReceipt(receiptPath, { ...prev, faultRestoredClean: true, faultRestoredAt: restoredAt, faultRestoredMeta: { fingerprint: currentFingerprint, commands: results } })
   const faultRecord = {
-    headSha,
-    round,
-    baselineFingerprint,
-    workspaceFingerprint: currentFingerprint,
+    headSha, round, baselineFingerprint, workspaceFingerprint: currentFingerprint,
     failedCmd: prev?.faultInjectedAndFailed?.failedCmd ?? null,
     failedExitCode: prev?.faultInjectedAndFailed?.exitCode ?? null,
     commands: results.map((r) => ({ cmd: r.cmd, exitCode: r.exitCode, ok: r.ok })),
     restoredAt,
   }
-  if (task?.taskId) {
-    await updateTaskLedger(mainRoot, task.taskId, { faultRecord })
-  }
+  if (task?.taskId) await updateTaskLedger(mainRoot, task.taskId, { faultRecord })
 
   const gate = evaluateIncludeDiffGate({
     gitDir, mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot,
-    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries,
-    requirements, behavioralGate, opts,
+    headSha, diffScope, workspaceFingerprint: currentFingerprint, dirtyEntries, requirements, behavioralGate, opts,
   })
   const payload = {
-    status: 'FAULT_RESTORED_CLEAN',
-    ok: true,
-    mode,
-    round,
-    targetRoot: posixPath(reviewRoot),
-    headSha,
-    workspaceFingerprint: currentFingerprint,
-    baselineFingerprint,
-    faultRecord,
-    commands: results,
-    empiricalGate: gate,
-    nextSteps: gate.unblockCommands.length > 0
-      ? gate.unblockCommands
-      : [`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags} --include-diff`],
+    status: 'FAULT_RESTORED_CLEAN', ok: true, mode, round, targetRoot: posixPath(reviewRoot), headSha,
+    workspaceFingerprint: currentFingerprint, baselineFingerprint, faultRecord, commands: results, empiricalGate: gate,
+    nextSteps: gate.unblockCommands.length > 0 ? gate.unblockCommands : [`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags} --include-diff`],
   }
   if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
   else {
-    process.stdout.write([
-      'FAULT_RESTORED_CLEAN',
-      `Worktree : ${posixPath(reviewRoot)} | Restored cleanly & verified (${results.length} cmd)`,
-    ].join('\n') + '\n')
+    process.stdout.write(['FAULT_RESTORED_CLEAN', `Worktree : ${posixPath(reviewRoot)} | Restored cleanly & verified (${results.length} cmd)`].join('\n') + '\n')
     printNextStep(payload.nextSteps, { repoRoot: mainRoot })
   }
   return EXIT.OK

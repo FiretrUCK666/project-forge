@@ -17,7 +17,8 @@ import {
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_TEMP_RE, RUST_ALLOW_RE, TEST_FILE_RE,
-  TOMBSTONE_COMMENT_RE, evaluateArchRules, extractLineCommentInfo, isTestOrFixtureFile,
+  TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
+  extractLineCommentInfo, isTestOrFixtureFile,
 } from '../../lib/static-gates.mjs'
 
 export const AGENTS_WARN_BYTES = 24576
@@ -593,6 +594,17 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
     }
 
     if (CODE_EXT_RE.test(f.name)) {
+      const procNameHit = checkProcessArtifactFilename(f.rel)
+      if (procNameHit) {
+        addFinding(findings, {
+          id: `naming.process-artifact-filename.${f.rel}`,
+          category: 'hygiene',
+          severity: 'high',
+          file: f.rel,
+          title: procNameHit.message,
+          action: procNameHit.fixHint,
+        })
+      }
       codeRelList.push(f.rel)
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
       const lines = getLinesCached(f.full, info) ?? []

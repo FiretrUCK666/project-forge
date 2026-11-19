@@ -592,3 +592,79 @@ export function formatTextReport(result) {
   for (const s of result.nextSteps) lines.push(`  ${s}`)
   return lines.join('\n')
 }
+
+export function governStatePath(mainRoot) {
+  return join(mainRoot, '.worktrees', '.state', 'govern-state.json')
+}
+
+export function loadGovernState(mainRoot) {
+  const raw = readJsonSafe(governStatePath(mainRoot))
+  return {
+    schemaVersion: 1,
+    lastAudit: raw?.lastAudit ?? null,
+    lastRetro: raw?.lastRetro ?? null,
+    tier1Escalations: (raw?.tier1Escalations && typeof raw.tier1Escalations === 'object') ? raw.tier1Escalations : {},
+    tier3Fallbacks: Array.isArray(raw?.tier3Fallbacks) ? raw.tier3Fallbacks : [],
+    skips: Array.isArray(raw?.skips) ? raw.skips : [],
+  }
+}
+
+async function saveGovernState(mainRoot, gitDir, isGit, state) {
+  if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
+  const path = governStatePath(mainRoot)
+  writeJsonAtomic(path, { ...state, updatedAt: new Date().toISOString() })
+  return posixPath(path)
+}
+
+export async function recordGovernAuditCheckpoint(mainRoot, gitDir, isGit, entry = {}) {
+  const state = loadGovernState(mainRoot)
+  state.lastAudit = {
+    at: new Date().toISOString(),
+    headSha: entry.headSha ?? null,
+    changed: Boolean(entry.changed),
+    taskId: entry.taskId ?? null,
+    counts: entry.counts ?? {},
+    findingsCount: Number(entry.findingsCount ?? 0),
+  }
+  const statePath = await saveGovernState(mainRoot, gitDir, isGit, state)
+  return { statePath, lastAudit: state.lastAudit }
+}
+
+export async function recordGovernRetroCheckpoint(mainRoot, gitDir, isGit, entry = {}) {
+  const state = loadGovernState(mainRoot)
+  state.lastRetro = {
+    at: new Date().toISOString(),
+    taskId: entry.taskId ?? null,
+    auto: Boolean(entry.auto),
+    signalCount: Number(entry.signalCount ?? 0),
+    tier1Count: Number(entry.tier1Count ?? 0),
+    tier2Count: Number(entry.tier2Count ?? 0),
+    tier3Count: Number(entry.tier3Count ?? 0),
+  }
+  if (entry.tier1Escalations && typeof entry.tier1Escalations === 'object') {
+    state.tier1Escalations = { ...state.tier1Escalations, ...entry.tier1Escalations }
+  }
+  if (Array.isArray(entry.tier3Fallbacks)) {
+    const byFp = new Map(state.tier3Fallbacks.map((x) => [x.fingerprint || x.text, x]))
+    for (const item of entry.tier3Fallbacks) byFp.set(item.fingerprint || item.text, item)
+    state.tier3Fallbacks = [...byFp.values()].slice(-50)
+  }
+  const statePath = await saveGovernState(mainRoot, gitDir, isGit, state)
+  return { statePath, lastRetro: state.lastRetro, tier1Escalations: state.tier1Escalations }
+}
+
+export async function recordGovernSkip({ mainRoot, gitDir, isGit, taskId = null, stage = 'audit', reason = '', by = 'workflow' } = {}) {
+  const cleanReason = String(reason ?? '').trim()
+  if (!cleanReason) return { ok: false, error: '--skip-govern requires non-empty --reason "<text>"' }
+  const state = loadGovernState(mainRoot)
+  const record = { at: new Date().toISOString(), taskId, stage, reason: cleanReason, by }
+  state.skips = [...state.skips, record].slice(-100)
+  const statePath = await saveGovernState(mainRoot, gitDir, isGit, state)
+  const sig = await appendGovernSignal({
+    mainRoot, gitDir, isGit, category: 'hygiene', module: 'dev-govern',
+    pattern: 'govern.skipped', ruleId: `govern.skip.${stage}`, defectClass: 'suppression-bypass',
+    severity: 'medium', source: 'govern-skip', message: `dev-govern skipped (${stage}): ${cleanReason}`,
+    taskId, meta: { stage, reason: cleanReason, by },
+  })
+  return { ok: true, statePath, record, signalsPath: sig.signalsPath }
+}

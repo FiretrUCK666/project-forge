@@ -481,19 +481,18 @@ async function main() {
       await runScenarioA(pkgRoot, sandbox, env, eng)
       await runScenarioBAndC(pkgRoot, sandbox, env, eng)
     }
+    const helpers = {
+      assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+    }
     await Promise.all([
       runFast(),
       runScenarioD(pkgRoot, sandbox, env),
       runScenarioE(pkgRoot, sandbox, env),
       runScenarioF(pkgRoot, sandbox, env),
       runScenarioG(pkgRoot, sandbox, env),
-      runStageBScenarios(pkgRoot, sandbox, env, {
-        assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
-      }),
-      runEvolutionScenarios(pkgRoot, sandbox, env, {
-        assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
-      }),
     ])
+    await runStageBScenarios(pkgRoot, sandbox, env, helpers)
+    await runEvolutionScenarios(pkgRoot, sandbox, env, helpers)
     const ms = Math.round(performance.now() - t0)
     process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：基础场景 A–G + 生命周期与演化 Scenarios H–L（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0

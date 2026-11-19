@@ -199,7 +199,7 @@ server.listen(0, '127.0.0.1', () => {
     let settled = false
     const timer = setTimeout(() => {
       if (!settled) { settled = true; child.kill(); reject(new Error(`Mock GH server startup timeout: ${errBuf}`)) }
-    }, 10000)
+    }, 30000)
     child.stdout.on('data', (chunk) => {
       outBuf += String(chunk)
       const m = /READY:(\d+)/.exec(outBuf)

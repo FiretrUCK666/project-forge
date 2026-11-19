@@ -61,7 +61,8 @@ Suppose you want to add an "export to CSV" feature:
 | 3 | "Start on that plan" | `dev-flow` | Isolated `.worktrees/` slot, implementer-owned `claim`/`finalize`/`verify`/`submit`, run-and-observe E2E gate (`--e2e-evidence`, sanitized failure signals + escalation), 4-state master PRD closure, cross-backend milestones & state labels, and PR |
 | 4 | "Review this PR from an independent angle" | `dev-review` | External PR `--untrusted-scan`, E2E + fault-injection gates enforced before `--include-diff` unlocks substantive `business-flows`/`C*` review, Round 2+ full-history distinct-reviewer fresh context, six-lock convergence, and structured escalation on 3-round stop-loss |
 | 5 | "Merge if it passes, then clean up" | `dev-flow` | Reviewer merges after trial merge; 7-step cleanup runs only after you confirm the cleanup list |
-| Audits / retro | "Audit repo health or turn rework signals into rule patches" | `dev-govern` | Runs `audit`, `reconcile`, and `sample` anytime; `retro` reads `signals.jsonl` to produce rule patches for the next planning round |
+| Audits / retro | "Audit repo health or turn rework signals into rule patches" | `dev-govern` | Runs `audit`, `reconcile` (evergreen docs & feature-map alignment), and `sample` anytime; `retro` reads `signals.jsonl` to produce rule patches for the next planning round |
+| Test iteration | "Add integration/regression/E2E/perf tests or probe blindspots" | `dev-iterate` | Combines feature-map gaps, hotspot signals, and `--focus` topics to generate `edit-gate`-verified native tests in the repo's own test directories, runs them concurrently, and escalates real failures into the normal fix flow |
 
 **What you can skip:**
 

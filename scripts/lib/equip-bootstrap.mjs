@@ -446,6 +446,24 @@ export function normalizeCustomizedFiles(obj) {
   return sortObjectKeys(out)
 }
 
+export function normalizePendingConflicts(obj) {
+  const out = {}
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return out
+  for (const [k, v] of Object.entries(obj)) {
+    const rel = posixPath(k).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
+    if (!rel || !v || typeof v !== 'object') continue
+    out[rel] = {
+      recordedAt: typeof v.recordedAt === 'string' ? v.recordedAt : '',
+      baseSha256: typeof v.baseSha256 === 'string' ? v.baseSha256 : null,
+      diskSha256: typeof v.diskSha256 === 'string' ? v.diskSha256 : null,
+      upstreamSha256: typeof v.upstreamSha256 === 'string' ? v.upstreamSha256 : null,
+      upstreamFile: typeof v.upstreamFile === 'string' ? v.upstreamFile : `${rel}.upstream`,
+      conflictFile: typeof v.conflictFile === 'string' ? v.conflictFile : `${rel}.pf-conflict`,
+    }
+  }
+  return sortObjectKeys(out)
+}
+
 export function readExistingManifest(manifestPath) {
   if (!existsSync(manifestPath)) return { exists: false, valid: false, data: undefined }
   const text = readTextSafe(manifestPath)
@@ -453,7 +471,8 @@ export function readExistingManifest(manifestPath) {
   try {
     const parsed = JSON.parse(text)
     const valid = Boolean(
-      parsed && typeof parsed === 'object' && (parsed.schemaVersion === 1 || parsed.schemaVersion === 2)
+      parsed && typeof parsed === 'object'
+      && (parsed.schemaVersion === 1 || parsed.schemaVersion === 2 || parsed.schemaVersion === 3)
       && parsed.files && typeof parsed.files === 'object' && !Array.isArray(parsed.files),
     )
     return { exists: true, valid, data: valid ? parsed : undefined }

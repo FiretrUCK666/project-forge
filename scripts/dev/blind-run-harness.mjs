@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path'
 
 import { scoreExecutionResult } from '../../kit/skills/lib/workflow-policy.mjs'
 import { survey } from '../survey.mjs'
+import { BLIND_MODEL_BENCHMARK, runEvolutionBlindMatrix } from './blind-run-matrix.mjs'
 import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, seedExploredFor, SKILL_ROOT, tmpProject } from './fixtures-helpers.mjs'
 
 function runNode(scriptAbs, args, cwd, envExtra = {}) {
@@ -391,10 +392,11 @@ export async function runBlindHarness({ cloneSource = null } = {}) {
     await runPythonBlindSample(tracker, envExtra)
     await runPolyglotGoRustBlindSample(tracker, envExtra)
     await runZeroHintAndWeakModelGuard(tracker, sandbox, envExtra)
+    const matrixMetrics = await runEvolutionBlindMatrix(tracker, sandbox, envExtra)
     if (cloneSource) {
       await runReadOnlyCloneSample(tracker, cloneSource, sandbox, envExtra)
     }
-    return tracker.summarize()
+    return { ...tracker.summarize(), benchmark: BLIND_MODEL_BENCHMARK, matrixMetrics }
   } finally {
     rmTree(sandbox)
   }

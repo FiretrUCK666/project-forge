@@ -5,10 +5,10 @@
  * 严格保留显式填写的 `none` 禁用态，绝不回退猜测命令或默认高风险路径覆盖用户声明。
  */
 
-import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { basename, join, posix } from 'node:path'
 
-import { isMacOsJunkPath, posixPath, readTextSafe } from './git.mjs'
+import { COMMON_SKIP_DIRS, isMacOsJunkPath, posixPath, readTextSafe } from './git.mjs'
 import {
   discoverWorkspacePackages,
   parseYamlWorkspaceGlobs,
@@ -299,6 +299,7 @@ export function parseAgentsProfile(repoRoot) {
     archRules: [],
     highRisk: [],
     doNotEdit: [],
+    evergreenDocs: [],
     mergeAuthority: 'reviewer',
     explicitNone,
     decisions: new Set(),
@@ -340,7 +341,17 @@ export function parseAgentsProfile(repoRoot) {
       }
 
       const kv = /^(?:[-*]\s+)?`?(quick-test|full-test|smoke-verify|merge-gate|arch-rules|high-risk|do-not-edit)`?\s*:\s*(.*)$/i.exec(trimmed)
-      if (!kv) continue
+      if (!kv) {
+        const optEv = /^(?:[-*]\s+)?`?evergreen-docs`?\s*:\s*(.*)$/i.exec(trimmed)
+        if (optEv) {
+          const rawEv = stripInlineYamlComment(optEv[1])
+          if (rawEv === '') activeListKey = 'evergreenDocs'
+          else if (!isExplicitNoneValue(rawEv)) {
+            for (const item of parseListValue(rawEv)) profile.evergreenDocs.push(item)
+          }
+        }
+        continue
+      }
       const key = kv[1].toLowerCase()
       const rawVal = stripInlineYamlComment(kv[2])
 
@@ -397,6 +408,7 @@ export function parseAgentsProfile(repoRoot) {
 
   profile.highRisk = [...new Set(profile.highRisk)]
   profile.doNotEdit = [...new Set(profile.doNotEdit)]
+  profile.evergreenDocs = [...new Set(profile.evergreenDocs)]
   const seenRules = new Set()
   profile.archRules = profile.archRules.filter((r) => {
     if (seenRules.has(r.raw)) return false
@@ -446,7 +458,197 @@ export function parseDevProfile(repoRoot) {
     'arch-rules': p.archRules.map((r) => r.raw),
     'high-risk': [...p.highRisk],
     'do-not-edit': [...p.doNotEdit],
+    'evergreen-docs': [...p.evergreenDocs],
     explicitNone: p.explicitNone,
     mergeAuthority: p.mergeAuthority,
   }
+}
+
+const TRANSIENT_OR_EXCLUDED_DOC_RE = /^(?:docs\/(?:prd|specs|todo|archive|release-notes)\/|templates\/|\.worktrees\/|\.agents\/|\.git\/|node_modules\/)/i
+const NON_AUTHORITY_ROOT_MD_RE = /^(?:README(?:\.[a-z0-9_-]+)?|AGENTS|CONTRIBUTING(?:\.[a-z0-9_-]+)?|RELEASING(?:\.[a-z0-9_-]+)?|CHANGELOG(?:\.[a-z0-9_-]+)?|LICENSE(?:\.[a-z0-9_-]+)?|CODE_OF_CONDUCT|SECURITY_ADVISORY)\.mdx?$/i
+const CLASSIC_EVERGREEN_RE = /^(?:(?:docs\/(?:(?:architecture|design)\/)?)?(?:tdd|architecture|design|runbook|security)|(?:docs\/)?[a-z0-9._-]+-tdd|docs\/(?:architecture|design)\/[^/]+)\.mdx?$/i
+
+function isExcludedEvergreenPath(rel) {
+  const clean = posixPath(String(rel ?? '')).replace(/^\.\//, '')
+  if (!clean || clean.includes('..') || !/\.mdx?$/i.test(clean)) return true
+  if (TRANSIENT_OR_EXCLUDED_DOC_RE.test(clean)) return true
+  if (NON_AUTHORITY_ROOT_MD_RE.test(clean)) return true
+  if (/(?:^|\/)CHANGELOG(?:\.[a-z0-9_-]+)?\.mdx?$/i.test(clean)) return true
+  return false
+}
+
+function simpleGlobToRegex(globPattern) {
+  const clean = posixPath(String(globPattern ?? '')).replace(/^\.\//, '').replace(/\/+$/, '')
+  const esc = clean.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  const reStr = esc.replace(/\*\*\//g, '(?:.*/)?').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')
+  return new RegExp(`^${reStr}$`, 'i')
+}
+
+function walkActiveMarkdownFiles(repoRoot) {
+  const out = []
+  const skip = new Set([...COMMON_SKIP_DIRS, '.git', '.worktrees', '.agents', 'templates', 'node_modules'])
+  const walk = (absDir, relPrefix, depth) => {
+    if (depth > 6) return
+    let entries = []
+    try { entries = readdirSync(absDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)) } catch { return }
+    for (const e of entries) {
+      if (isMacOsJunkPath(e.name) || skip.has(e.name)) continue
+      const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name
+      if (e.isDirectory()) {
+        if (TRANSIENT_OR_EXCLUDED_DOC_RE.test(`${rel}/`)) continue
+        walk(join(absDir, e.name), rel, depth + 1)
+      } else if (e.isFile() && /\.mdx?$/i.test(e.name)) {
+        out.push(posixPath(rel))
+      }
+    }
+  }
+  walk(repoRoot, '', 0)
+  return out
+}
+
+function hasEvergreenFrontmatter(text) {
+  const s = String(text ?? '').replace(/\r\n/g, '\n')
+  if (!s.startsWith('---\n')) return false
+  const end = s.indexOf('\n---', 4)
+  if (end < 0) return false
+  const fm = s.slice(4, end)
+  return /^\s*(?:evergreen\s*:\s*true|lifecycle\s*:\s*['"]?evergreen['"]?|authority\s*:\s*true)\s*$/im.test(fm)
+}
+
+function extractCoupledSyncMdPaths(agentsText) {
+  const out = []
+  const lines = String(agentsText ?? '').replace(/\r\n/g, '\n').split('\n')
+  let inSection = false
+  for (const line of lines) {
+    if (/^##\s+改哪看哪(?:\s|$|[（(:：])/.test(line.trim())) { inSection = true; continue }
+    if (inSection && /^##\s+/.test(line.trim())) break
+    if (!inSection || !line.trim().startsWith('|')) continue
+    for (const m of line.matchAll(/`([^`\n]+\.mdx?)`/gi)) {
+      const p = posixPath(m[1].trim()).replace(/^\.\//, '')
+      if (p && !p.includes('*') && !p.includes('<')) out.push(p)
+    }
+  }
+  return out
+}
+
+function extractEntryLinkedMdPaths(text) {
+  const out = []
+  const src = String(text ?? '')
+  for (const m of src.matchAll(/\[[^\]]+\]\(([^)#\s]+\.mdx?)(?:#[^)]+)?\)/gi)) {
+    const raw = m[1].trim()
+    if (!/^(?:https?:|mailto:|\/)/i.test(raw)) out.push(posixPath(raw).replace(/^\.\//, ''))
+  }
+  for (const m of src.matchAll(/`([^`\n\s]+\.mdx?)`/gi)) {
+    const raw = m[1].trim()
+    if (!/^(?:https?:|mailto:|\/|<)/i.test(raw) && !/[<>*?{}]/.test(raw)) out.push(posixPath(raw).replace(/^\.\//, ''))
+  }
+  return out
+}
+
+function normalizeEvergreenStem(relPath) {
+  const base = posix.basename(posixPath(relPath)).replace(/\.mdx?$/i, '').toLowerCase()
+  return base.replace(/[-_]?tdd$/i, 'tdd')
+}
+
+/**
+ * 三层通用常青权威文档单一发现器（自动排除 docs/{prd,specs,todo,archive,release-notes}/、templates/、CHANGELOG 等瞬态/归档路径）：
+ *   Layer 1 (profile)     : AGENTS.md Dev Profile 可选 `evergreen-docs:`、「改哪看哪」活跃 `.md`、「## 取舍」`tdd-authority`；
+ *   Layer 2 (frontmatter) : 任意非瞬态 `.md` 头部 YAML Frontmatter 声明 `evergreen: true` / `lifecycle: evergreen` / `authority: true`；
+ *   Layer 3 (entry-link / convention) : AGENTS.md / README*.md 显式链接的活跃 `.md`、根与 `docs/` 经典常青基线与 `docs/feature-map.json`。
+ */
+export function discoverEvergreenDocs(repoRoot, options = {}) {
+  const root = String(repoRoot ?? '')
+  if (!root || !existsSync(root)) {
+    return { docs: [], markdownDocs: [], featureMap: null, duplicateGroups: [] }
+  }
+  const agentsText = options.agentsText ?? (readTextSafe(join(root, 'AGENTS.md')) ?? '')
+  const profile = options.profile ?? parseAgentsProfile(root)
+  const decisionMap = readDecisionMap(agentsText)
+  const allActiveMd = Array.isArray(options.files)
+    ? options.files.map((f) => posixPath(f?.rel ?? f)).filter((p) => /\.mdx?$/i.test(p))
+    : walkActiveMarkdownFiles(root)
+  const allMdSet = new Set(allActiveMd)
+
+  const byPath = new Map()
+  const addMd = (rawRel, source) => {
+    const clean = posixPath(String(rawRel ?? '')).replace(/^\.\//, '')
+    if (isExcludedEvergreenPath(clean)) return
+    const abs = join(root, clean)
+    try {
+      if (!existsSync(abs) || !statSync(abs).isFile()) return
+    } catch { return }
+    if (byPath.has(clean)) return
+    const stem = normalizeEvergreenStem(clean)
+    const family = ['tdd', 'architecture', 'design', 'runbook', 'security'].includes(stem) ? stem : stem
+    byPath.set(clean, { path: clean, kind: 'evergreen-doc', source, family, stem })
+  }
+
+  // Layer 1: explicit contract (Dev Profile optional evergreen-docs:, 改哪看哪, tdd-authority)
+  const tddAuth = options.authoritativeTddPath ?? resolveAuthoritativeTddPath(root)
+  if (tddAuth && decisionMap.has('tdd-authority')) addMd(tddAuth, 'profile')
+  for (const pattern of profile?.evergreenDocs ?? []) {
+    const cleanPat = posixPath(String(pattern ?? '')).replace(/^\.\//, '')
+    if (!cleanPat) continue
+    if (/[*?]/.test(cleanPat)) {
+      const re = simpleGlobToRegex(cleanPat)
+      for (const rel of allActiveMd) if (re.test(rel)) addMd(rel, 'profile')
+    } else {
+      addMd(cleanPat, 'profile')
+    }
+  }
+  for (const rel of extractCoupledSyncMdPaths(agentsText)) addMd(rel, 'profile')
+
+  // Layer 2: frontmatter self-declaration
+  for (const rel of allActiveMd) {
+    if (byPath.has(rel) || isExcludedEvergreenPath(rel)) continue
+    const txt = readTextSafe(join(root, rel))
+    if (txt && hasEvergreenFrontmatter(txt)) addMd(rel, 'frontmatter')
+  }
+
+  // Layer 3: zero-config fallback (entry links in AGENTS.md / README*.md + classic baselines + feature-map.json)
+  const entryTexts = [agentsText]
+  try {
+    for (const e of readdirSync(root, { withFileTypes: true })) {
+      if (e.isFile() && /^README(?:\.[a-z0-9_-]+)?\.mdx?$/i.test(e.name)) {
+        entryTexts.push(readTextSafe(join(root, e.name)) ?? '')
+      }
+    }
+  } catch { /* ignore */ }
+  for (const entryText of entryTexts) {
+    for (const rel of extractEntryLinkedMdPaths(entryText)) {
+      if (allMdSet.size === 0 || allMdSet.has(rel) || existsSync(join(root, rel))) addMd(rel, 'entry-link')
+    }
+  }
+  if (tddAuth) addMd(tddAuth, 'convention')
+  for (const rel of allActiveMd) {
+    if (CLASSIC_EVERGREEN_RE.test(rel)) addMd(rel, 'convention')
+  }
+
+  const markdownDocs = [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path))
+  const fmRel = 'docs/feature-map.json'
+  const featureMap = existsSync(join(root, fmRel))
+    ? { path: fmRel, kind: 'feature-map', source: 'convention', family: 'feature-map', stem: 'feature-map' }
+    : null
+  const docs = featureMap ? [...markdownDocs, featureMap] : [...markdownDocs]
+
+  // Duplicate groups: same stem across >=2 locations without explicit pointer or decision exemption
+  const byStem = new Map()
+  for (const d of markdownDocs) {
+    if (!byStem.has(d.stem)) byStem.set(d.stem, [])
+    byStem.get(d.stem).push(d.path)
+  }
+  const duplicateGroups = []
+  const allowAllDup = decisionMap.has('allow-duplicate-docs')
+  for (const [stem, paths] of byStem.entries()) {
+    if (paths.length < 2 || allowAllDup || decisionMap.has(`keep-duplicate-${stem}`)) continue
+    const texts = new Map(paths.map((p) => [p, readTextSafe(join(root, p)) ?? '']))
+    const hasPointer = paths.some((p) => {
+      const txt = texts.get(p) ?? ''
+      return paths.some((other) => other !== p && txt.includes(other) && /(?:权威|主文档|唯一|跳转|见|canonical|authority|single\s+source|see\s+|moved\s+to|redirect)/i.test(txt))
+    })
+    if (!hasPointer) {
+      duplicateGroups.push({ stem, family: stem, paths: [...paths].sort() })
+    }
+  }
+  return { docs, markdownDocs, featureMap, duplicateGroups }
 }

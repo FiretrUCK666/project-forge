@@ -15,6 +15,7 @@ import {
   readTextSafe, samePath, sha256Text,
 } from '../../lib/git.mjs'
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
+import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
 import {
   CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_TEMP_RE, RUST_ALLOW_RE, TEST_FILE_RE,
   TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
@@ -504,37 +505,64 @@ export function inspectManifest(repoRoot) {
     }
   }
 
-  const customizedMap = manifest.customizedFiles && typeof manifest.customizedFiles === 'object' ? manifest.customizedFiles : {}
+  const disabledSet = new Set(Array.isArray(manifest.disabledSkills) ? manifest.disabledSkills.map(String) : [])
+  const removedMap = manifest.removedFiles && typeof manifest.removedFiles === 'object' && !Array.isArray(manifest.removedFiles)
+    ? manifest.removedFiles
+    : {}
+  const customizedMap = manifest.customizedFiles && typeof manifest.customizedFiles === 'object' && !Array.isArray(manifest.customizedFiles)
+    ? manifest.customizedFiles
+    : {}
+  const pendingConflicts = manifest.pendingConflicts && typeof manifest.pendingConflicts === 'object' && !Array.isArray(manifest.pendingConflicts)
+    ? manifest.pendingConflicts
+    : {}
   const issues = []
   let checked = 0
   let customizedCount = 0
 
+  const hashDiskFile = (abs) => {
+    const buf = readFileSync(abs)
+    const textNormHash = !buf.subarray(0, 4096).includes(0)
+      ? sha256Text(buf.toString('utf8').replace(/\r\n/g, '\n'))
+      : null
+    const rawHash = sha256Text(buf.toString('utf8'))
+    return { textNormHash, rawHash }
+  }
+
   for (const [relKey, meta] of Object.entries(manifest.files)) {
+    const norm = posixPath(relKey).replace(/^\.agents\/skills\//, '').replace(/^\/+/, '')
+    if (!norm || isAllowedExtensionPath(norm) || isAllowedExtensionPath(`.agents/${norm}`)) continue
+    const topSkill = norm.split('/')[0]
+    if (disabledSet.has(topSkill) || Object.prototype.hasOwnProperty.call(removedMap, norm)) continue
     checked += 1
-    const norm = posixPath(relKey)
-    if (Object.prototype.hasOwnProperty.call(customizedMap, norm)) {
-      customizedCount += 1
-      continue
-    }
+
     const abs = norm.startsWith('.agents/skills/') ? join(repoRoot, norm) : join(skillsDir, norm)
     if (!existsSync(abs)) {
       issues.push({ file: norm, kind: 'missing-managed', detail: 'Managed skill file listed in manifest is missing on disk' })
       continue
     }
-    if (meta && typeof meta.sha256 === 'string') {
+
+    const customEntry = customizedMap[norm]
+    if (customEntry && typeof customEntry === 'object') {
       try {
-        const buf = readFileSync(abs)
-        const rawHash = sha256Text('') && buf.length >= 0 ? null : null
-        void rawHash
-        const textNormHash = !buf.subarray(0, 4096).includes(0)
-          ? sha256Text(buf.toString('utf8').replace(/\r\n/g, '\n'))
-          : null
-        const matches = textNormHash === meta.sha256
-        if (!matches) {
-          const directBufHash = sha256Text(buf.toString('utf8'))
-          if (directBufHash !== meta.sha256) {
-            issues.push({ file: norm, kind: 'drifted', detail: 'File checksum differs from manifest baseline (local modification or drift)' })
-          }
+        const { textNormHash, rawHash } = hashDiskFile(abs)
+        const baseSha = typeof customEntry.baseSha256 === 'string' ? customEntry.baseSha256 : null
+        if (!baseSha || textNormHash === baseSha || rawHash === baseSha) {
+          customizedCount += 1
+        } else {
+          issues.push({ file: norm, kind: 're-edited-custom', detail: 'Customized file changed after --adopt-custom baseline; re-adopt or merge' })
+        }
+      } catch {
+        issues.push({ file: norm, kind: 'unreadable', detail: 'Unable to hash customized file' })
+      }
+      continue
+    }
+
+    const expectedSha = typeof meta === 'string' ? meta : meta?.sha256
+    if (typeof expectedSha === 'string' && expectedSha) {
+      try {
+        const { textNormHash, rawHash } = hashDiskFile(abs)
+        if (textNormHash !== expectedSha && rawHash !== expectedSha) {
+          issues.push({ file: norm, kind: 'drifted', detail: 'File checksum differs from manifest baseline (local modification or drift)' })
         }
       } catch {
         issues.push({ file: norm, kind: 'unreadable', detail: 'Unable to hash managed file' })
@@ -542,13 +570,21 @@ export function inspectManifest(repoRoot) {
     }
   }
 
+  for (const [relKey, info] of Object.entries(pendingConflicts)) {
+    issues.push({
+      file: posixPath(relKey),
+      kind: 'pending-conflict',
+      detail: `Unresolved three-way upgrade conflict (${info?.conflictFile ?? `${relKey}.pf-conflict`})`,
+    })
+  }
+
   return {
     present: true,
     schemaVersion: manifest.schemaVersion ?? 1,
-    tier: manifest.tier ?? 'full',
     status: issues.length === 0 ? 'ok' : 'drift-detected',
     checkedFiles: checked,
     customizedCount,
+    pendingConflictCount: Object.keys(pendingConflicts).length,
     issues,
   }
 }

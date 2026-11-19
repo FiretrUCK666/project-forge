@@ -6,6 +6,7 @@ import { readTextSafe } from './git.mjs'
 import { locateTopSlicesForPaths } from './doc-locator.mjs'
 import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
+import { discoverEvergreenDocs } from './profile.mjs'
 
 /** 从一份规划文档里抽出 `- [ ] Cn: ...` 的原文条目。 */
 function extractCriteria(text) {
@@ -242,10 +243,13 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
   ].filter(Boolean)
   let relatedSlices = []
   try {
+    const ev = discoverEvergreenDocs(locateRoot)
+    const priorityFiles = (ev?.markdownDocs ?? []).map((d) => d.path)
     relatedSlices = locateTopSlicesForPaths(locateRoot, {
       paths,
       keywords,
       excludeFiles: [specRel, todoRel].filter(Boolean),
+      priorityFiles,
       limit: 3,
       budgetLines: 48,
     }).map((s) => ({

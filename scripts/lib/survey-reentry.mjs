@@ -119,7 +119,7 @@ export function detectKit(root, { kitDir } = {}) {
     manifestExists
     && manifest
     && typeof manifest === 'object'
-    && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2)
+    && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2 || manifest.schemaVersion === 3)
     && manifest.files
     && typeof manifest.files === 'object'
     && !Array.isArray(manifest.files),

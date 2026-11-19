@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { formatActorDisplay } from '../../lib/doc-comments.mjs'
 import { buildMergeComments } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
@@ -288,11 +289,19 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
-    const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.claimedBy || ledger.implementerId })
-    const mergeCommitSha = mergeRes?.sha ?? mergeRes?.mergeCommit ?? mergeRes?.mergedSha ?? null
+    const rawClaimed = String(ledger.claimedBy ?? '').trim()
+    const mergeContrib = resolveContributorIdentity({
+      explicitActor: rawClaimed || ledger.implementerId,
+      ghLogin: ghProbe?.env?.trackB?.login,
+      ledgerActor: ledger.implementerId,
+    })
+    const implementerDisplay = rawClaimed
+      ? formatActorDisplay(rawClaimed, { backendKind: backend.kind })
+      : formatActorDisplay(mergeContrib.actor, { isPlatformLogin: Boolean(ghProbe?.env?.trackB?.login && mergeContrib.actor === ghProbe.env.trackB.login), backendKind: backend.kind })
+    const mergeCommitSha = mergeRes?.mergeCommit ?? mergeRes?.sha ?? mergeRes?.mergedSha ?? null
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
       prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
-      reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
+      reviewerId: effectiveReviewer, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
       humanApprovedReason: ledger.humanApprovedReason ?? null,
     })
     await backend.postComment({
@@ -345,11 +354,13 @@ export async function handleMerge(opts, roots) {
       return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
-      const mergeContrib = resolveContributorIdentity({ ledgerActor: ledger.claimedBy || ledger.implementerId })
-      const mergeCommitSha = mergeRes?.mergedSha ?? mergeRes?.sha ?? null
+      const rawClaimed = String(ledger.claimedBy ?? '').trim()
+      const mergeContrib = resolveContributorIdentity({ explicitActor: rawClaimed || ledger.implementerId, ledgerActor: ledger.implementerId })
+      const implementerDisplay = formatActorDisplay(rawClaimed || mergeContrib.actor, { backendKind: backend.kind })
+      const mergeCommitSha = mergeRes?.mergeCommit ?? mergeRes?.mergedSha ?? mergeRes?.sha ?? null
       const { issueCommentBody: localMergeBody } = buildMergeComments({
         prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
-        reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
+        reviewerId: effectiveReviewer, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
         humanApprovedReason: ledger.humanApprovedReason ?? null,
       })
       for (const iss of ledger.linkedIssues ?? []) {

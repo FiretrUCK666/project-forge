@@ -211,7 +211,7 @@ server.listen(0, '127.0.0.1', () => {
           baseUrl,
           async getState() {
             try {
-              const r = await fetch(`${baseUrl}/__mock/state`, { headers: { Connection: 'close' } })
+              const r = await fetch(`${baseUrl}/__mock/state`, { headers: { Connection: 'close' }, signal: AbortSignal.timeout(5000) })
               return await r.json()
             } catch (e) {
               throw new Error(`Mock GH getState failed: ${e.message} | errBuf=${errBuf} | exit=${child.exitCode}`)
@@ -223,6 +223,7 @@ server.listen(0, '127.0.0.1', () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Connection: 'close' },
                 body: JSON.stringify({ simulateMerge504: Boolean(v) }),
+                signal: AbortSignal.timeout(5000),
               })
             } catch (e) {
               throw new Error(`Mock GH set504 failed: ${e.message} | errBuf=${errBuf} | exit=${child.exitCode}`)
@@ -270,6 +271,7 @@ async function call(method, path, body) {
   const r = await fetch(base + path, {
     method,
     headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(5000),
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const txt = await r.text()

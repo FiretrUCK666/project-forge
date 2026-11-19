@@ -19,6 +19,7 @@
 | 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
 | 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit --json` |
 | 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
+| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
 | 里程碑管理 / 裸粘贴 Issue・PR・Milestone 链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect <URL...>` / `milestone` |
 <!-- project-forge: end 意图路由 -->
@@ -62,6 +63,7 @@ do-not-edit: docs/archive/, docs/release-notes/
 ## 上下文阅读护栏
 
 - **按序按需定位**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `doc-locate.mjs` / `repo-map.mjs` 只读定位切片，再跑 `flow.mjs inspect` 获取任务状态。
+- **演进跳读**：`docs/TDD.md`（若存在）随项目演进持续丰富，新会话先读目录与架构全景再用 `doc-locate.mjs` 按节跳读，不强灌全文；`docs/feature-map.json`（若存在）由脚本按变更切片查询。
 - **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（`do-not-edit` 仅禁手工改历史归档，允许 `finalize`/`archive` 合法归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
 

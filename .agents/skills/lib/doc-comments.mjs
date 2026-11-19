@@ -4,6 +4,96 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 doc-templates.mjs / docs.mjs 汇总导出。
  */
 
+const AGENT_OR_LOCAL_ID_RE = /^(?:impl(?:-|$)|rev(?:-|$)|reviewer(?:-|$)|local(?:-|$)|maintainer$|local-agent|implementer|coordinator(?:-|$)|swarm(?:-|$)|worker(?:-|$)|subagent(?:-|$)|independent-review(?:er)?(?:-|$)|critic(?:-|$)|integrator(?:-|$)|agent-\d+|claude(?:-|$)|gemini(?:-|$)|gpt(?:-|$)|codex(?:-|$))/i
+const VALID_GH_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/
+
+/**
+ * 统一执行人/协作者展示格式化：
+ * - 真实平台登录账号（`backendKind === 'github'` 且非 AI/本地代号）保留 `@login`；
+ * - AI 代理 ID（如 `impl-c4`）、离线/本地后端或非法登录名一律反引号包裹防误 `@mention`。
+ */
+export function formatActorDisplay(rawActor, { isPlatformLogin = false, backendKind = 'github' } = {}) {
+  const clean = String(rawActor ?? '').replace(/<[^>]*>/g, '').trim().replace(/^`+|`+$/g, '')
+  if (!clean) return '`maintainer`'
+  const bare = clean.replace(/^@/, '')
+  if (!bare) return '`maintainer`'
+  const isOffline = backendKind === 'local-only' || backendKind === 'generic-git' || backendKind === 'local'
+  if (isOffline) return `\`${bare}\``
+  if (AGENT_OR_LOCAL_ID_RE.test(bare)) return `\`${bare}\``
+  if ((isPlatformLogin || clean.startsWith('@') || VALID_GH_LOGIN_RE.test(bare)) && VALID_GH_LOGIN_RE.test(bare)) {
+    return `@${bare}`
+  }
+  return `\`${bare}\``
+}
+
+/** 渲染 `claim` / `takeover` / `release` 统一结构化评论（动态省略不适用字段，零空占位）。 */
+export function buildClaimComments({
+  action = 'claim',
+  taskId = null,
+  actor = null,
+  actorDisplay = null,
+  branch = null,
+  previousActor = null,
+  reason = '',
+  issues = [],
+  prNumber = null,
+  isPlatformLogin = false,
+  backendKind = 'github',
+} = {}) {
+  const normAction = ['claim', 'takeover', 'release'].includes(String(action).toLowerCase())
+    ? String(action).toLowerCase()
+    : 'claim'
+  const headingMap = {
+    claim: '### 认领任务',
+    takeover: '### 接管认领',
+    release: '### 释放认领',
+  }
+  const actorText = formatActorDisplay(actorDisplay ?? actor, { isPlatformLogin, backendKind })
+  const prevText = previousActor ? formatActorDisplay(previousActor, { backendKind }) : null
+  const cleanTask = taskId ? String(taskId).trim() : ''
+  const cleanBranch = branch ? String(branch).trim() : ''
+  const cleanReason = reason ? String(reason).trim() : ''
+  const issuesText = Array.isArray(issues) && issues.length > 0
+    ? [...new Set(issues.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))].map((n) => `#${n}`).join(', ')
+    : ''
+
+  const nextStepMap = {
+    claim: '在隔离工作区完成实现、验证并提交待审。',
+    takeover: '在既有分支继续完成修改、验证后更新同一 PR 提审。',
+    release: '任务已恢复待认领状态，其他协作者可直接认领接手。',
+  }
+
+  const issueLines = [
+    headingMap[normAction],
+    '',
+    `- **执行人**：${actorText}`,
+    ...(cleanTask ? [`- **任务**：\`${cleanTask}\``] : []),
+    ...(cleanBranch ? [`- **分支**：\`${cleanBranch}\``] : []),
+    ...(normAction === 'takeover' && prevText ? [`- **原认领人**：${prevText}`] : []),
+    ...(prNumber ? [`- **关联 PR**：#${prNumber}`] : []),
+    ...(cleanReason ? [`- **原因**：${cleanReason}`] : []),
+    `- **下一步**：${nextStepMap[normAction]}`,
+  ]
+
+  const prLines = [
+    headingMap[normAction],
+    '',
+    `- **执行人**：${actorText}`,
+    ...(prNumber ? [`- **关联 PR**：#${prNumber}`] : []),
+    ...(cleanTask ? [`- **任务**：\`${cleanTask}\``] : []),
+    ...(cleanBranch ? [`- **分支**：\`${cleanBranch}\``] : []),
+    ...(normAction === 'takeover' && prevText ? [`- **原认领人**：${prevText}`] : []),
+    ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
+    ...(cleanReason ? [`- **原因**：${cleanReason}`] : []),
+    `- **下一步**：${nextStepMap[normAction]}`,
+  ]
+
+  return {
+    issueCommentBody: issueLines.join('\n'),
+    prCommentBody: prLines.join('\n'),
+  }
+}
+
 function cleanMdCell(s) {
   return String(s ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim()
 }

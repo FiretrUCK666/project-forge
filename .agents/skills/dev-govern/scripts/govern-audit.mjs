@@ -16,6 +16,7 @@ import {
 } from '../../lib/git.mjs'
 import { readGitIndexPathsFast, readHeadFast } from '../../lib/git-fast.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
+import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
 import {
   auditDeadcode, auditHygiene, auditPerf, auditSecurity,
   createFileContentCache, readTextStrictInfo, setActiveFileCache, walkFiles,
@@ -27,7 +28,7 @@ import {
   readSignalsJsonl, recordGovernAuditCheckpoint, recordGovernSkip,
   resolveGovernStateDir, saveBaseline, updateLoopState,
 } from './govern-state.mjs'
-import { auditDocs, buildPlan } from './govern-docs.mjs'
+import { auditDocs, buildPlan, discoverEvergreenAuthorityDocs } from './govern-docs.mjs'
 import { handleRetro } from './govern-retro.mjs'
 import { auditTests } from './govern-tests.mjs'
 import { handleReleasePrep } from './release-prep-lib.mjs'
@@ -317,7 +318,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
 
     return await finishAudit({
       opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet,
+      scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet, files,
     })
   } finally {
     setActiveFileCache(null)
@@ -327,7 +328,7 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
 
 async function finishAudit({
   opts, roots, workTreeRoot, mainRoot, gitDir, isGit, defaultBranch, headSha,
-  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet = null,
+  scopeRel, categories, runLiveAudit, devProfile, rawFindings, testsMeta, hygieneMeta, preChangedSet = null, files = [],
 }) {
 
   let baselineSavedInfo = null
@@ -351,9 +352,69 @@ async function finishAudit({
   let reconcileSummary
   if (opts.reconcile) {
     const agentsInfo = readTextStrictInfo(join(workTreeRoot, 'AGENTS.md'))
+    const evDiscovery = discoverEvergreenAuthorityDocs(workTreeRoot, files, agentsInfo?.text ?? '')
+    const evergreenDocs = evDiscovery.docs
+    const duplicateGroups = evDiscovery.duplicateGroups
+    const fm = readFeatureMapSafe(workTreeRoot)
+    const staleFeatures = fm.valid ? fm.features.filter((f) => f.stale === true).map((f) => f.id ?? f.name).filter(Boolean) : []
+    const missingEntryPaths = []
+    const mappedPaths = new Set()
+    if (fm.valid) {
+      for (const feat of fm.features) {
+        for (const p of [...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []), ...(Array.isArray(feat.files) ? feat.files : [])]) {
+          const normP = posixPath(p).replace(/^\.\//, '')
+          if (!normP) continue
+          mappedPaths.add(normP)
+          if (!existsSync(join(workTreeRoot, normP))) missingEntryPaths.push({ feature: feat.id ?? feat.name, path: normP })
+        }
+      }
+    }
+    const unmappedSourceModules = fm.valid
+      ? files
+          .map((f) => posixPath(f.rel ?? f))
+          .filter((rel) => /^(?:src|lib|app|packages|services|scripts)\//.test(rel)
+            && /\.(?:mjs|cjs|js|ts|tsx|py|go|rs|java|rb|php|cs)$/.test(rel)
+            && !/(?:^|\/)(?:test|tests|__tests__|fixtures|dev)\//i.test(rel)
+            && !mappedPaths.has(rel))
+          .slice(0, 20)
+      : []
+    const hotDocSkewModules = findings
+      .filter((f) => String(f.id ?? '').startsWith('docs.stale-vs-churn'))
+      .map((f) => f.file || f.title)
+      .slice(0, 10)
+    const docGapOrDrift = findings.some((f) => f.category === 'docs')
+      || duplicateGroups.length > 0
+      || missingEntryPaths.length > 0
+      || staleFeatures.length > 0
+      || unmappedSourceModules.length > 0
+      || hotDocSkewModules.length > 0
+    const nextCommands = docGapOrDrift
+      ? [
+          'node ".agents/skills/dev-explore/scripts/repo-map.mjs"',
+          ...evDiscovery.markdownDocs.slice(0, 6).map((d) => `node ".agents/skills/dev-explore/scripts/doc-locate.mjs" --file "${d.path}"`),
+        ]
+      : []
     reconcileSummary = {
       agentsBytes: agentsInfo?.text ? Buffer.byteLength(agentsInfo.text, 'utf8') : null,
       tddPresent: existsSync(join(workTreeRoot, 'docs', 'TDD.md')),
+      evergreenDocs,
+      duplicateGroups,
+      featureMap: {
+        path: FEATURE_MAP_REL,
+        present: fm.present,
+        valid: fm.valid,
+        featureCount: fm.features.length,
+        businessFlowCount: fm.businessFlows.length,
+        staleFeatures,
+        missingEntryPaths,
+      },
+      featureMapDrift: {
+        missingEntryPaths,
+        unmappedSourceModules,
+        staleFeatures,
+        hotDocSkewModules,
+      },
+      nextCommands,
       worktrees: hygieneMeta.worktrees,
       manifest: hygieneMeta.manifest,
     }

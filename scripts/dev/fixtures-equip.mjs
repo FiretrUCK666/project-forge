@@ -361,7 +361,7 @@ cases.push(['update.mjs 同盘 staging 原子更新（中断回滚保留旧 SKIL
     FAILURE_COOLDOWN_MS, applyPackage, readState, rememberState, resolveStatePath,
   } = await import('../update.mjs')
   const { PF_MANIFEST_SCHEMA_VERSION } = await import('../lib/protocol.mjs')
-  if (PF_MANIFEST_SCHEMA_VERSION !== 2) return `PF_MANIFEST_SCHEMA_VERSION=${PF_MANIFEST_SCHEMA_VERSION}`
+  if (PF_MANIFEST_SCHEMA_VERSION !== 3) return `PF_MANIFEST_SCHEMA_VERSION=${PF_MANIFEST_SCHEMA_VERSION}`
   if (FAILURE_COOLDOWN_MS !== 15 * 60 * 1000) return `FAILURE_COOLDOWN_MS=${FAILURE_COOLDOWN_MS}`
 
   // 1. applyPackage 写 kit/ 失败时：必须回滚并保留旧 SKILL.md 与旧文件内容

@@ -9,9 +9,29 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { scanLines } from './markdown.mjs'
-import { PF_MANIFEST_REL, markerRegions, parseMarkers } from './protocol.mjs'
+import { PF_MANIFEST_REL, REGION_MIGRATIONS, markerRegions, parseMarkers } from './protocol.mjs'
 import { readJsonSafe } from './text.mjs'
 import { DEV_PROFILE_KEYS, isAnglePlaceholder } from '../../kit/skills/lib/profile.mjs'
+
+/** 按 `REGION_MIGRATIONS` 将旧版 `AGENTS.md` 受管区间名称平滑迁移至当前规范 ID（保留 customized 标志与正文）。 */
+export function migrateRegionMarkers(text, migrations = REGION_MIGRATIONS) {
+  const source = String(text ?? '').replace(/\r\n/g, '\n')
+  if (!migrations || typeof migrations !== 'object') return { text: source, migrated: [] }
+  const { regions, broken } = markerRegions(source, 'AGENTS.md')
+  if (broken.length > 0) return { text: source, migrated: [] }
+  const lines = source.split('\n')
+  const presentIds = new Set(regions.map((r) => r.id))
+  const migrated = []
+  for (const r of regions) {
+    const targetId = migrations[r.id]
+    if (!targetId || targetId === r.id || presentIds.has(targetId)) continue
+    lines[r.start] = `<!-- project-forge: begin ${targetId}${r.customized ? ' customized' : ''} -->`
+    lines[r.end] = `<!-- project-forge: end ${targetId} -->`
+    presentIds.add(targetId)
+    migrated.push({ from: r.id, to: targetId })
+  }
+  return { text: lines.join('\n'), migrated }
+}
 
 function isCalibratedDevProfile(regionId, bodyLines) {
   if (regionId !== 'Dev Profile') return false
@@ -165,16 +185,18 @@ export function missingRegionsOf(presentIds, rendered, existingText, removedRegi
  * 并对缺少 `agentsRegions` 基线的既有非空区段默认采取 `protect` 策略。
  */
 export function refreshRegions(existing, rendered, volatile = [], baselineRegions = null, removedRegions = null) {
-  const current = markerRegions(existing, 'AGENTS.md')
+  const mig = migrateRegionMarkers(existing)
+  const migratedInput = mig.text
+  const current = markerRegions(migratedInput, 'AGENTS.md')
   const fresh = markerRegions(rendered, 'AGENTS.md')
   if (current.broken.length > 0) {
     return {
       text: existing, changed: false, broken: current.broken,
-      kept: [], inserted: [], filled: [], synced: [], protectedRegions: [],
+      kept: [], inserted: [], filled: [], synced: [], protectedRegions: [], migratedRegions: [],
     }
   }
 
-  const lines = existing.split('\n')
+  const lines = migratedInput.split('\n')
   const renderedLines = rendered.split('\n')
   const freshById = new Map(fresh.regions.map((r) => [r.id, r]))
   const currentById = new Map(current.regions.map((r) => [r.id, r]))
@@ -281,7 +303,7 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
 
   if (ops.length === 0) {
     return {
-      text: existing, changed: false, broken: [], kept, inserted: [], filled, synced, protectedRegions,
+      text: migratedInput, changed: migratedInput !== existing, broken: [], kept, inserted: [], filled, synced, protectedRegions, migratedRegions: mig.migrated,
     }
   }
 
@@ -289,7 +311,7 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
   for (const op of ops) lines.splice(op.at, op.remove, ...op.insert)
   const nextText = lines.join('\n')
   return {
-    text: nextText, changed: nextText !== existing, broken: [], kept, inserted, filled, synced, protectedRegions,
+    text: nextText, changed: nextText !== existing, broken: [], kept, inserted, filled, synced, protectedRegions, migratedRegions: mig.migrated,
   }
 }
 
@@ -357,12 +379,12 @@ function normalizedFileSha(filePath) {
   return createHash('sha256').update(payload).digest('hex')
 }
 
-/** 兼容 v1/v2 manifest 检查 `.agents/skills/` 状态，豁免墓碑与已登记定制文件。 */
+/** 兼容 v1/v2/v3 manifest 检查 `.agents/skills/` 状态，豁免墓碑与已登记定制文件。 */
 export function inspectKitManifestForReview(root, kit) {
   if (!kit?.manifestExists) return { state: 'absent' }
   const rawManifest = readJsonSafe(join(root, PF_MANIFEST_REL))
   const v2Valid = Boolean(rawManifest && typeof rawManifest === 'object'
-    && (rawManifest.schemaVersion === 1 || rawManifest.schemaVersion === 2)
+    && (rawManifest.schemaVersion === 1 || rawManifest.schemaVersion === 2 || rawManifest.schemaVersion === 3)
     && rawManifest.files && typeof rawManifest.files === 'object' && !Array.isArray(rawManifest.files))
   if (kit.corrupted && !v2Valid) return { state: 'corrupted' }
 

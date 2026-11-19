@@ -19,7 +19,8 @@ import {
   readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
 } from '../../lib/git-fast.mjs'
 import { isCleanWorktreeFast } from '../../lib/git-status-fast.mjs'
-import { recordMountedDepsInLedger, writeTaskLedger } from '../../lib/ledger.mjs'
+import { recordMountedDepsInLedger, updateTaskLedger } from '../../lib/ledger.mjs'
+import { isAllowedExtensionPath, scanExtensionSlotHazards } from '../../lib/overlay.mjs'
 import {
   GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, detectGateWeakeningInEntry,
   splitDiffByFile, summarizeHunkChanges,
@@ -148,7 +149,13 @@ export async function syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot, opts
   if (mountedUpdated || task.reviewWorktreeHead !== targetSha || !task.reviewWorktreePath) {
     task.reviewWorktreePath = posixPath(reviewRel)
     task.reviewWorktreeHead = targetSha
-    writeTaskLedger(mainRoot, task)
+    await updateTaskLedger(mainRoot, task.taskId, (cur) => ({
+      ...(cur ?? task),
+      reviewWorktreePath: task.reviewWorktreePath,
+      reviewWorktreeHead: task.reviewWorktreeHead,
+      ...(task.mountedDeps ? { mountedDeps: task.mountedDeps } : {}),
+      ...(task.mountedDepsByWorktree ? { mountedDepsByWorktree: task.mountedDepsByWorktree } : {}),
+    }), { createIfMissing: true })
   }
 
   return {
@@ -423,11 +430,26 @@ export function scanUntrustedDiff(diff, repoRoot) {
         excerpt,
       })
     } else if (f.startsWith('.husky/') || f.startsWith('.githooks/') || f.startsWith('.git/hooks/')) {
+      const payloadHits = scanExtensionSlotHazards(f, added.join('\n'))
       hazards.push({
         category: 'git-hook',
         file: f,
-        reason: 'Modifies local git hooks that run automatically on git commands',
+        reason: payloadHits.length > 0
+          ? `Modifies local git hook with high-risk payload (${payloadHits.map((h) => h.ruleId).join(', ')})`
+          : 'Modifies local git hooks that run automatically on git commands',
         excerpt,
+        ...(payloadHits.length > 0 ? { payloadHits } : {}),
+      })
+    } else if (isAllowedExtensionPath(f)) {
+      const payloadHits = scanExtensionSlotHazards(f, added.join('\n'))
+      hazards.push({
+        category: 'agent-extension-slot',
+        file: f,
+        reason: payloadHits.length > 0
+          ? `Modifies agent extension/overlay/hook slot with high-risk payload (${payloadHits.map((h) => h.ruleId).join(', ')})`
+          : 'Modifies agent overlay, extension skill, or declarative forge-hooks.json (requires human review before execution)',
+        excerpt,
+        ...(payloadHits.length > 0 ? { payloadHits } : {}),
       })
     } else if (f.startsWith('.agents/skills/')) {
       hazards.push({

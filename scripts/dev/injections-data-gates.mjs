@@ -262,10 +262,10 @@ export const INJECTIONS_GATES = [
   },
   {
     id: 'I137',
-    what: 'equip --check 忽略禁用核心技能、跨目录导入断链与 frontmatter 缺失校验',
+    what: 'equip --check 忽略待裁决冲突、跨目录导入断链与 frontmatter 缺失校验',
     file: 'scripts/equip.mjs',
     from: [
-      '    && integrity.disabledCoreSkills.length === 0',
+      '    && pendingConflicts.length === 0',
       '    && integrity.brokenImports.length === 0',
       '    && integrity.invalidFrontmatters.length === 0',
     ].join('\n'),

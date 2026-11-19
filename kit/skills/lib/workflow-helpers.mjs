@@ -12,6 +12,7 @@ import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-f
 import { formatWorkTitle } from './escalation.mjs'
 import { gitRun, posixPath, readTextSafe } from './git.mjs'
 import { resolveRefShaFast } from './git-fast.mjs'
+import { extractHeadlessSummary } from './markdown-scan.mjs'
 import { parseBodyRelations } from './platform.mjs'
 
 const DIAGNOSTIC_SECRET_PATTERNS = [
@@ -377,13 +378,17 @@ function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualF
 
 function replaceSectionIfPresent(md, headingCandidates, newBody) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
-  const wanted = new Set(headingCandidates.map((h) => String(h).trim()))
+  const matchHeading = (rawTitle) => {
+    const clean = String(rawTitle ?? '').replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '').trim()
+    const low = clean.toLowerCase()
+    return headingCandidates.some((cand) => (cand instanceof RegExp ? cand.test(clean) : String(cand).trim().toLowerCase() === low))
+  }
   let inFence = false
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
     if (inFence) continue
     const m = /^##\s+(.+?)\s*$/.exec(lines[i])
-    if (!m || !wanted.has(m[1])) continue
+    if (!m || !matchHeading(m[1])) continue
     let end = lines.length
     let innerFence = false
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -425,9 +430,9 @@ function removeSectionByHeading(md, headingTitle) {
 function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }) {
   return md.replace(/^- \[ \] (.+)$/gm, (full, label) => {
     const t = String(label)
-    if (verifyPassed && /(?:验证|测试|门禁|构建|全绿|通过)/.test(t)) return `- [x] ${t}`
-    if (finalized && /(?:文档|Todo|SPEC|README|TDD|归档)/.test(t)) return `- [x] ${t}`
-    if (hasNoSecrets && /(?:敏感|凭据|密钥|无多余|无关)/.test(t)) return `- [x] ${t}`
+    if (verifyPassed && /(?:验证|测试|门禁|构建|全绿|通过|\b(?:test|tests|verify|verified|check|checks|gate|build|ci|lint|pass|passed|green)\b)/i.test(t)) return `- [x] ${t}`
+    if (finalized && /(?:文档|Todo|SPEC|README|TDD|归档|\b(?:docs?|documentation|spec|todo|readme|tdd|archived?|changelog)\b)/i.test(t)) return `- [x] ${t}`
+    if (hasNoSecrets && /(?:敏感|凭据|密钥|无多余|无关|\b(?:secrets?|credentials?|tokens?|keys?|clean|unrelated)\b)/i.test(t)) return `- [x] ${t}`
     return full
   })
 }
@@ -457,15 +462,25 @@ export function hydratePrTemplateBody({
   const todoText = repoRoot && todoRel && existsSync(join(repoRoot, todoRel)) ? readTextSafe(join(repoRoot, todoRel)) : ''
   const readableTitle = resolveReadablePrTitle(repoRoot, ledger)
 
-  const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景)/]), 3)
-  const todoOutcomeBullets = extractMeaningfulBullets(extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果)/]), 3)
+  const specGoalBullets = extractMeaningfulBullets(extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景|summary|overview|goal|motivation|background|context|problem)/i]), 3)
+  const todoOutcomeBullets = extractMeaningfulBullets(extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果|results?|outcomes?|summary|notes)/i]), 3)
+  const headlessFallback = (todoOutcomeBullets.length === 0 && specGoalBullets.length === 0)
+    ? (() => {
+        const rawDoc = specText || todoText
+        const bodyBullets = extractMeaningfulBullets(parseDocFrontmatter(rawDoc).body || rawDoc, 2)
+        if (bodyBullets.length > 0) return bodyBullets
+        const hl = extractHeadlessSummary(rawDoc, { maxLength: 180 })
+        return hl ? [hl] : []
+      })()
+    : []
+  const effectiveGoalBullets = specGoalBullets.length > 0 ? specGoalBullets : headlessFallback
   const summaryText = [
     `- **${readableTitle}**（任务 \`${taskId}\`，实施者：${actorDisplay}，涉及 ${changedFiles.length} 个文件）`,
     ...todoOutcomeBullets.map((b) => `- ${b}`),
-    ...(todoOutcomeBullets.length === 0 ? specGoalBullets.map((b) => `- ${b}`) : []),
+    ...(todoOutcomeBullets.length === 0 ? effectiveGoalBullets.map((b) => `- ${b}`) : []),
   ].join('\n')
   const whyText = [
-    ...(specGoalBullets.length > 0 ? specGoalBullets.slice(0, 2).map((b) => `- ${b}`) : [`- 完成任务 \`${taskId}\` 并对齐工程契约与文档。`]),
+    ...(effectiveGoalBullets.length > 0 ? effectiveGoalBullets.slice(0, 2).map((b) => `- ${b}`) : [`- 完成任务 \`${taskId}\` 并对齐工程契约与文档。`]),
     `- 关联文档：${docSummary}`,
   ].join('\n')
   const basisText = [
@@ -494,16 +509,16 @@ export function hydratePrTemplateBody({
   let body = stripHtmlCommentsOutsideFences(tplRaw)
   body = removeSectionByHeading(body, '独立审查与故障注入')
   const sectionUpdates = [
-    [['变更摘要', '改了什么'], summaryText],
-    [['关联 Issue 与文档'], `${fixesLine}\n- 关联文档：${docSummary}`],
-    [['关联 Issue'], fixesLine],
-    [['改动理由', '为什么'], whyText],
-    [['实现依据'], basisText],
-    [['影响面、风险与回滚方式'], [riskLines, rollbackText].filter(Boolean).join('\n')],
-    [['影响面与风险', '风险与影响范围'], riskLines],
-    [['验证证据', '怎么验证的'], verifyText],
-    [['回滚方式', '回滚点'], rollbackText],
-    [['合并授权'], mergeAuthText],
+    [['变更摘要', '改了什么', '变更说明', '改动说明', /^(?:summary|description|overview|what(?:\s+changed)?|changes)$/i], summaryText],
+    [['关联 Issue 与文档', /^(?:related\s+issues?\s*(?:&|and)\s*docs?)$/i], `${fixesLine}\n- 关联文档：${docSummary}`],
+    [['关联 Issue', /^(?:related\s+issues?|issues?|linked\s+issues?)$/i], fixesLine],
+    [['改动理由', '为什么', /^(?:motivation|why|background|context|rationale)$/i], whyText],
+    [['实现依据', /^(?:design|implementation|approach)$/i], basisText],
+    [['影响面、风险与回滚方式', /^(?:impact,?\s*risk\s*(?:&|and)\s*rollback)$/i], [riskLines, rollbackText].filter(Boolean).join('\n')],
+    [['影响面与风险', '风险与影响范围', /^(?:impact|risks?|breaking\s+changes?)$/i], riskLines],
+    [['验证证据', '怎么验证的', '验证方式', '测试验证', /^(?:testing|test\s+plan|verification|how\s+has\s+this\s+been\s+tested\??)$/i], verifyText],
+    [['回滚方式', '回滚点', /^(?:rollback|revert\s+plan)$/i], rollbackText],
+    [['合并授权', /^(?:merge\s+authority|approval)$/i], mergeAuthText],
   ]
   for (const [headings, content] of sectionUpdates) body = replaceSectionIfPresent(body, headings, content).text
   body = updateChecklistByEvidence(body, { verifyPassed, finalized: Boolean(ledger?.finalized), hasNoSecrets: verifyPassed })

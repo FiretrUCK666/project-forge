@@ -41,7 +41,7 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 <!-- project-forge: begin Dev Profile -->
 ## Dev Profile
 
-以下键值由研发流脚本自动读取，核对后替换为真实值（无对应项填 `none`）：
+以下键值由研发流脚本自动读取，核对后替换为真实值（无对应项填 `none`；自定义常青文档可另加可选键 `evergreen-docs:` 或在文档头部写 `evergreen: true`）：
 
 ```yaml
 quick-test: {{PROFILE_QUICK_TEST}}
@@ -59,6 +59,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 ## 上下文阅读护栏
 
 - **按序按需定位**：`AGENTS.md` -> `docs/TDD.md`（若存在）-> 相关 `<subdir>/AGENTS.md` -> 用 `doc-locate.mjs` / `repo-map.mjs` 只读定位切片，再跑 `flow.mjs inspect` 获取任务状态。
+- **演进跳读**：`docs/TDD.md`（若存在）随项目演进持续丰富，新会话先读目录与架构全景再用 `doc-locate.mjs` 按节跳读，不强灌全文；`docs/feature-map.json`（若存在）由脚本按变更切片查询。
 - **默认不读**：`docs/archive/`、`node_modules/`、`dist/`、`build/`、`.worktrees/`、锁文件全文与构建缓存（`do-not-edit` 仅禁手工改历史归档，允许 `finalize`/`archive` 合法归档）。
 <!-- project-forge: end 上下文阅读护栏 -->
 <!-- project-forge: if has-exploration-strategy -->

@@ -268,7 +268,7 @@ export function createGitHubClient({
 
     async getPr(repo, number) {
       if (tier === 'gh-cli') {
-        const res = await callGh(['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,author,labels'])
+        const res = await callGh(['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,state,body,url,headRefName,baseRefName,headRefOid,baseRefOid,headRepository,headRepositoryOwner,mergedAt,mergeCommit,author,labels'])
         if (!res.ok) return { ok: false, status: res.status || res.code, error: res.stderr ?? res.data?.message }
         try {
           const raw = JSON.parse(res.stdout)
@@ -492,12 +492,25 @@ export function createGitHubClient({
             ])
           : await callHttps('PUT', `/repos/${repo}/pulls/${number}/merge`, { merge_method: method, ...(sha ? { sha } : {}) })
         const readback = await this.getPr(repo, number)
+        const mergeCommit = (typeof res?.data?.sha === 'string' && res.data.sha.trim())
+          ? res.data.sha.trim()
+          : (readback?.mergeCommit ?? null)
         if (!res.ok) {
-          if (readback.ok && readback.merged === true) return { ok: true, merged: true, alreadyMerged: true, state: 'MERGED' }
+          if (readback.ok && readback.merged === true) {
+            return {
+              ok: true, merged: true, alreadyMerged: true, state: 'MERGED',
+              ...(mergeCommit ? { mergeCommit, sha: mergeCommit } : {}),
+            }
+          }
           const status = Number(res.status ?? 0)
           return { ok: false, status, headMismatch: status === 409, mergeBlocked: status === 405, error: res.data?.message ?? res.stderr ?? 'merge-failed' }
         }
-        return { ok: readback.ok && readback.merged === true, merged: Boolean(readback.merged), state: readback.state ?? 'UNKNOWN' }
+        return {
+          ok: readback.ok && readback.merged === true,
+          merged: Boolean(readback.merged),
+          state: readback.state ?? 'UNKNOWN',
+          ...(mergeCommit ? { mergeCommit, sha: mergeCommit } : {}),
+        }
       }
       return makeMcpDelegate('merge_pr', { repo, number, method, ...(sha ? { sha } : {}) })
     },

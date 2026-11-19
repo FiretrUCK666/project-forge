@@ -90,12 +90,22 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 - **事后历史抽检与任务复盘（`sample` / `retro`）**：定期运行 `sample --commits 30` 统计 `Revert` 与 48 小时返工热点；任务合入后运行 `retro [--task <id>] [--apply-patches] [--json]` 自动读取 `dev-flow`（`verify`/`rework`）与 `dev-review`（`record` `--disposition`）自动沉淀的 `<gitCommonDir>/project-forge-govern/signals.jsonl`，统计无效审查率并产出规则/门禁/夹具建议补丁，反馈给下轮 `dev-plan`。
 - **顽固 Bug 三步止损**：同一模块或同一缺陷连续尝试修复 **3 次仍复发或退回**时，立即停手止损，禁止继续试错打补丁；用 `sample` 与 `cluster` 复盘架构边界与回归测试缺口，交由人类维护者拍板方案后再动。
 
-## 与其余五套研发技能的联动
+## 常青文档与功能地图深度核对
 
-- **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift`、`hygiene.god-file`/`arch-boundary` 或准备执行 `retro` 规则下沉前，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 摸清真实模块入口与 `reusableModules`，再落笔治理或修订 `docs/TDD.md`。
+除 `docs/TDD.md` 外，自动覆盖 `DESIGN.md`、`ARCHITECTURE.md`、`RUNBOOK.md`、`SECURITY.md` 及 `AGENTS.md`「改哪看哪」登记的常青权威文档与 `docs/feature-map.json`，固定三步执行：
+
+1. **机械定位**：先跑 `govern-audit.mjs reconcile` 获取 `evergreenDocs`、`featureMapDrift`（源码模块增删与热改温差）、`docs.duplicate-authority` 与 `nextCommands`；
+2. **按节语义核对**：按 `nextCommands` 调用 `dev-explore`（`repo-map.mjs` + `doc-locate.mjs --file <doc>`）按模块和章节对照源码核查语义漏项，不强灌全文；
+3. **隔离补全**：汇总缺口清单后走 `dev-flow` 隔离分支修改并经 `dev-review` 审校合入（绝不直接改主干）。
+
+## 与其余七套研发技能的联动
+
+- **`dev-explore`**：遇到 `docs.missing-tdd`、`docs.tdd-module-drift`、`featureMapDrift`、`hygiene.god-file`/`arch-boundary` 或准备执行 `retro` 规则下沉前，先跑 `node .agents/skills/dev-explore/scripts/repo-map.mjs` 与 `doc-locate.mjs --file <doc>` 摸清真实模块入口与章节切片，再落笔治理或修订常青文档。
 - **`dev-plan`**：`govern-audit.mjs plan --write-todo` 生成符合统一模板的标准 Todo 并可直接通过 `doc-plan.mjs audit`；命中跨模块债或 `retro` 建议整改时，自动指引先走 `doc-plan.mjs triage`（L3 建 `SPEC + Todo`）。
 - **`dev-edit`**：`edit-gate.mjs` 与本技能共用 `static-gates.mjs` 词法与过程工件文件名拦截内核，`retro` 产出的 Tier 2 确定性规则可直接沉淀到 `edit-gate`、`arch-rules` 或 CI。
 - **`dev-flow`**：按分批计划执行时通过 `flow.mjs start --todo <path>` 在独立工作树推进、`reconcile` 检出过期 worktree 后由 `flow.mjs cleanup` 四态安全清理；`flow.mjs verify`/`rework` 自动向 `signals.jsonl` 写入运行时信号供 `retro` 消费（未装配兄弟技能时自动降级为原生 Git 指引）。
+- **`dev-verify-tools`**：职责清晰划分——`dev-verify-tools` 专管验证工具条目生命周期、过时校验与草稿固化；本技能专管常青权威文档与 `docs/feature-map.json` 模块/业务流结构对齐。
+- **`dev-iterate`**：职责严格正交——本技能只做静态体检、文档核对与历史信号复盘；主动生成原生回归/集成/E2E/性能测试并并发实跑一律交由 `dev-iterate`。
 - **`dev-review`**：每轮整改与规则下沉后运行 `AGENTS.md` 全部验证命令，再用 `review-pack.mjs --local` 收口确认；`review-pack.mjs record` 的 `--disposition` 反馈自动入库 `signals.jsonl`。
 
 ## 执行与安全护栏

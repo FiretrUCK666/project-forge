@@ -328,7 +328,7 @@ export function listCustomContainers(repoRoot) {
   const seenReal = new Set()
 
   const walkNested = (absDir, relPrefix, depth) => {
-    if (depth > 4) return
+    if (depth > 16) return
     let realDir = absDir
     try { realDir = realpathSync(absDir) } catch { return }
     if (seenReal.has(realDir)) return
@@ -342,10 +342,13 @@ export function listCustomContainers(repoRoot) {
     } catch { return }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
       if (SKIP_CONTAINERS.has(entry.name)) continue
       const nextRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name
       const nextAbs = join(absDir, entry.name)
+      try {
+        if (!statSync(nextAbs).isDirectory()) continue
+      } catch { continue }
       if (entry.name.startsWith('.')) {
         if (depth === 0) {
           const sub = join(nextAbs, 'skills')
@@ -365,10 +368,12 @@ export function listCustomContainers(repoRoot) {
 
   walkNested(root, '', 0)
   const agentsContainers = []
-  const agentsSkills = join(root, '.agents', 'skills')
-  try {
-    if (existsSync(agentsSkills) && statSync(agentsSkills).isDirectory()) agentsContainers.push('.agents/skills')
-  } catch { /* ignore */ }
+  for (const rel of ['.agents/skills', '.agents/extensions']) {
+    const abs = join(root, rel)
+    try {
+      if (existsSync(abs) && statSync(abs).isDirectory()) agentsContainers.push(rel)
+    } catch { /* ignore */ }
+  }
 
   return [...new Set([...sourceContainers.sort(), ...agentsContainers, ...hiddenContainers.sort()])]
 }
@@ -410,6 +415,7 @@ export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set()
   const mirrorCopies = []
   const authoritativeSources = []
   const installedManaged = new Set()
+  const seenSkillRealPaths = new Set()
 
   const agentsDir = join(root, '.agents', 'skills')
   if (existsSync(agentsDir)) {
@@ -447,6 +453,10 @@ export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set()
         : (existsSync(join(skillDir, 'skill.md')) ? 'skill.md' : null)
       if (!entryName) continue
 
+      let realSkillDir = skillDir
+      try { realSkillDir = realpathSync(skillDir) } catch { /* keep logical path */ }
+      if (!isHiddenContainer && seenSkillRealPaths.has(realSkillDir)) continue
+
       const raw = readTextSafe(join(skillDir, entryName))
       if (raw === undefined) continue
       const fm = parseSkillFrontmatter(raw)
@@ -482,6 +492,7 @@ export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set()
           continue
         }
       } else {
+        seenSkillRealPaths.add(realSkillDir)
         authoritativeSources.push({ ...rec, rawHash })
       }
       customSkills.push(rec)

@@ -7,9 +7,16 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { execSafe, readJsonSafe } from '../../lib/git.mjs'
+import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasExploredEvidence } from '../../lib/ledger.mjs'
+import {
+  loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
+} from '../../lib/overlay.mjs'
 import { isInternalAgentSlug, resolveContributorIdentity } from '../../lib/platform.mjs'
+import { readDecisions } from '../../lib/profile.mjs'
+import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
+import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
+import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
 
 const NON_IMPL_ROLE_RE = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i
 
@@ -113,14 +120,77 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
 
 /** 读取仓库自定义 `.agents/forge-hooks.json` 配置（无配置返回 null）。 */
 export function readForgeHooksConfig(mainRoot, implRoot = null) {
-  for (const root of [implRoot, mainRoot].filter(Boolean)) {
-    const abs = join(root, '.agents', 'forge-hooks.json')
-    if (existsSync(abs)) {
-      const parsed = readJsonSafe(abs)
-      if (parsed && typeof parsed === 'object') return { path: abs, config: parsed }
+  const loaded = loadForgeHooksConfig(mainRoot, implRoot)
+  if (!loaded || !loaded.valid || !loaded.config) return null
+  return { path: loaded.path, config: loaded.config }
+}
+
+/**
+ * 在 finalize 阶段核对 `docs/feature-map.json` 同步：
+ * 若目标仓存在 `docs/feature-map.json` 且本次改动新增了核心源码模块/入口文件（跳过纯文档、测试与 `--no-tdd`），
+ * 检查新模块是否已覆盖或随本 PR 更新；缺同步时输出提醒，在 `--strict-sync` / `strict` 模式下阻断。
+ */
+export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger, opts = {}, changedEntries = null } = {}) {
+  const root = implRoot || mainRoot
+  if (!root || opts['no-tdd']) return { ok: true, skipped: true, reason: 'no-tdd-or-no-root' }
+  const agentsRoot = existsSync(join(root, 'AGENTS.md')) ? root : mainRoot
+  if (agentsRoot && readDecisions(readTextSafe(join(agentsRoot, 'AGENTS.md')) ?? '').has('no-tdd')) {
+    return { ok: true, skipped: true, reason: 'no-tdd-decision' }
+  }
+  const fm = readFeatureMapSafe(root)
+  if (!fm.present || !fm.valid) return { ok: true, skipped: true, reason: fm.present ? 'invalid-feature-map' : 'feature-map-absent' }
+
+  let entries = Array.isArray(changedEntries) ? changedEntries : null
+  if (!entries) {
+    const baseRef = ledger?.baseSha || ledger?.baseBranch || 'HEAD~1'
+    const diffRes = await gitDiffNameStatusZ(root, [baseRef, 'HEAD'])
+    entries = diffRes?.ok ? (diffRes.entries ?? []) : []
+  }
+  const normalizedEntries = entries.map((e) => ({
+    status: String(e.status ?? '').trim().toUpperCase(),
+    file: posixPath(e.file ?? '').replace(/^\.\//, ''),
+  })).filter((e) => e.file)
+
+  const featureMapUpdated = normalizedEntries.some((e) => e.file === FEATURE_MAP_REL)
+  const addedCoreModules = normalizedEntries
+    .filter((e) => e.status.startsWith('A') || e.status.startsWith('R'))
+    .map((e) => e.file)
+    .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f) && !isToolOwnedPath(f) && !/^docs\//.test(f) && !/^scripts\/dev\//.test(f))
+
+  if (addedCoreModules.length === 0 || featureMapUpdated) {
+    return { ok: true, featureMapUpdated, addedCoreModules, uncovered: [] }
+  }
+
+  const coveredPaths = new Set()
+  for (const feat of fm.features) {
+    for (const p of [
+      ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
+      ...(Array.isArray(feat.files) ? feat.files : []),
+      ...(Array.isArray(feat.paths) ? feat.paths : []),
+      ...(feat.entry ? [feat.entry] : []),
+    ]) {
+      const clean = posixPath(p).replace(/^\.\//, '').replace(/\/+$/, '')
+      if (clean) coveredPaths.add(clean)
     }
   }
-  return null
+  const uncovered = addedCoreModules.filter((mod) => ![...coveredPaths].some((cp) => mod === cp || mod.startsWith(`${cp}/`)))
+  if (uncovered.length === 0) return { ok: true, featureMapUpdated: false, addedCoreModules, uncovered: [] }
+
+  const msg = `新增核心源码模块/入口未同步更新 ${FEATURE_MAP_REL}：${uncovered.slice(0, 6).join(', ')}；请补充对应 feature 条目或随本 PR 同步刷新。`
+  if (ledger) {
+    ledger.hooks = { ...(ledger.hooks ?? {}), featureMapSyncMissing: uncovered }
+  }
+  if (opts['strict-sync']) {
+    return {
+      ok: false,
+      blocked: true,
+      code: 'BLOCKED_FEATURE_MAP_SYNC',
+      exitCode: 1,
+      uncovered,
+      message: `BLOCKED_FEATURE_MAP_SYNC: ${msg}`,
+    }
+  }
+  return { ok: true, warning: `[FEATURE-MAP SYNC REMINDER]: ${msg}`, uncovered }
 }
 
 function resolveSkillScript(mainRoot, implRoot, relPath) {
@@ -178,10 +248,50 @@ export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, led
 
 /**
  * `finalize` / `verify` / `merge` / `cleanup` 条件治理钩子分发器：
- * 支持 `--skip-govern` 记账，并按 `.agents/forge-hooks.json` 或显式配置触发轻量治理检查/复盘。
+ * 支持 `--skip-govern` 记账，在 `finalize` 同步核对 `docs/feature-map.json`，
+ * 并按 `.agents/forge-hooks.json` 触发声明式自定义钩子或轻量治理检查/复盘。
  */
 export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId, ledger, opts = {} } = {}) {
   const now = new Date().toISOString()
+  if (stage === 'finalize') {
+    const fmCheck = await checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger, opts })
+    if (!fmCheck.ok) return fmCheck
+    if (fmCheck.warning && !opts.json) process.stderr.write(`${fmCheck.warning}\n`)
+  }
+  const hookCfg = readForgeHooksConfig(mainRoot, implRoot)
+  const customCommands = hookCfg ? resolveStageHookCommands(hookCfg.config, stage) : []
+  const customResults = []
+  for (const item of customCommands) {
+    const hazards = scanExtensionSlotHazards('.agents/forge-hooks.json', item.command)
+    if (hazards.length > 0) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_UNSAFE_FORGE_HOOK',
+        exitCode: 3,
+        stage,
+        hazards,
+        message: `BLOCKED_UNSAFE_FORGE_HOOK (${stage}): .agents/forge-hooks.json 命中高危命令模式（${hazards.map((h) => h.ruleId).join(', ')}）`,
+      }
+    }
+    const cmdRes = await execShellCommand(item.command, implRoot || mainRoot, { timeout: 45000 })
+    customResults.push({ stageKey: item.stageKey, command: item.command, ok: cmdRes.ok, exitCode: cmdRes.code ?? (cmdRes.ok ? 0 : 1) })
+    if (!cmdRes.ok && item.strict) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_FORGE_HOOK_FAILED',
+        exitCode: 3,
+        stage,
+        customResults,
+        message: `BLOCKED_FORGE_HOOK_FAILED (${item.stageKey}): ${(cmdRes.stderr || cmdRes.stdout || 'non-zero exit').trim().slice(0, 300)}`,
+      }
+    }
+  }
+  if (ledger && customResults.length > 0) {
+    ledger.hooks = { ...(ledger.hooks ?? {}), [`custom_${stage}_at`]: now, [`custom_${stage}_ok`]: customResults.every((r) => r.ok) }
+  }
+
   if (opts['skip-govern']) {
     if (ledger) {
       ledger.hooks = {
@@ -191,16 +301,15 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
         governSkipReason: String(opts.reason ?? 'explicit-skip-govern').trim() || 'explicit-skip-govern',
       }
     }
-    return { ok: true, skipped: true, stage, reason: 'skip-govern-flag' }
+    return { ok: true, skipped: true, stage, reason: 'skip-govern-flag', ...(customResults.length ? { customResults } : {}) }
   }
-  const hookCfg = readForgeHooksConfig(mainRoot, implRoot)
   const stageCfg = hookCfg?.config?.hooks?.[stage] ?? hookCfg?.config?.[stage] ?? null
   if (stageCfg === false || stageCfg?.enabled === false || hookCfg?.config?.govern === false) {
-    return { ok: true, skipped: true, stage, reason: 'disabled-by-forge-hooks' }
+    return { ok: true, skipped: true, stage, reason: 'disabled-by-forge-hooks', ...(customResults.length ? { customResults } : {}) }
   }
   const governEnabled = Boolean(stageCfg?.govern === true || stageCfg?.enabled === true || opts['run-govern-hook'])
   if (!governEnabled) {
-    return { ok: true, skipped: true, stage, reason: 'opt-in-not-configured' }
+    return { ok: true, skipped: true, stage, reason: 'opt-in-not-configured', ...(customResults.length ? { customResults } : {}) }
   }
   const isRetroStage = stage === 'merge' || stage === 'cleanup'
   const relScript = isRetroStage
@@ -208,7 +317,7 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
     : '.agents/skills/dev-govern/scripts/govern-audit.mjs'
   const scriptPath = resolveSkillScript(mainRoot, implRoot, relScript)
   if (!scriptPath) {
-    return { ok: true, skipped: true, stage, reason: 'dev-govern-script-absent' }
+    return { ok: true, skipped: true, stage, reason: 'dev-govern-script-absent', ...(customResults.length ? { customResults } : {}) }
   }
   const args = isRetroStage
     ? ['summary', '--task', String(taskId), '--json']
@@ -231,5 +340,5 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
   if (ledger) {
     ledger.hooks = { ...(ledger.hooks ?? {}), [`govern_${stage}_at`]: now, [`govern_${stage}_ok`]: res.ok }
   }
-  return { ok: true, executed: true, stage, hookOk: res.ok, scriptPath }
+  return { ok: true, executed: true, stage, hookOk: res.ok, scriptPath, ...(customResults.length ? { customResults } : {}) }
 }

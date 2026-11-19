@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+import { buildClaimComments } from './doc-comments.mjs'
 import { readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import { computeWriteBackFingerprint, parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
@@ -409,9 +410,17 @@ export async function claimLocalIssue({
     if (!Array.isArray(item.comments)) item.comments = []
     const action = takeover ? 'takeover' : 'claim'
     const disp = actorDisplay ?? cleanActor ?? 'local'
-    const body = takeover
-      ? `接管认领：由 ${disp} 接管任务 \`${taskId ?? 'manual'}\`（分支 \`${branch ?? 'none'}\`，原认领人：${currentOwner ?? '无/未知'}），原因：${reason}。`
-      : `认领：由 ${disp} 在分支 \`${branch ?? 'none'}\` 开始处理（task: \`${taskId ?? 'manual'}\`）。`
+    const { issueCommentBody: body } = buildClaimComments({
+      action,
+      taskId,
+      actor: cleanActor || disp,
+      actorDisplay: disp,
+      branch,
+      previousActor: currentOwner,
+      reason,
+      issues: [item.number],
+      backendKind: 'local-only',
+    })
     const statePayload = takeover
       ? { taskId, action: 'takeover', agent: cleanActor || disp, previousAgent: currentOwner, branch, reason }
       : { taskId, action: 'claim', agent: cleanActor || disp, branch }
@@ -451,7 +460,16 @@ export async function releaseLocalIssue({
     item.labels = (Array.isArray(item.labels) ? item.labels : []).filter((l) => l !== 'in-progress')
     if (!Array.isArray(item.comments)) item.comments = []
     const disp = actorDisplay ?? cleanActor ?? 'local'
-    const body = `释放认领：${disp} 放弃任务 \`${taskId ?? 'manual'}\`（分支 \`${branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`
+    const { issueCommentBody: body } = buildClaimComments({
+      action: 'release',
+      taskId,
+      actor: cleanActor || disp,
+      actorDisplay: disp,
+      branch,
+      reason,
+      issues: [item.number],
+      backendKind: 'local-only',
+    })
     const statePayload = { taskId, action: 'release', agent: cleanActor || disp, branch: branch ?? null, ...(reason ? { reason } : {}) }
     const fp = computeWriteBackFingerprint(body, statePayload)
     const fullBody = `${body}\n\n<!-- pf-state:${JSON.stringify({ ...statePayload, writeBackFingerprint: fp })} -->`

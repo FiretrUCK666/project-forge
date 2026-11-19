@@ -7,8 +7,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 93
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c4
+owner: impl-c4
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=7866b5648f23, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"

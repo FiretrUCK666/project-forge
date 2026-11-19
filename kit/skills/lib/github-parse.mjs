@@ -339,11 +339,13 @@ export function normalizeIssuePayload(d = {}, isRest = false) {
 export function normalizePrPayload(d = {}, isRest = false) {
   if (!isRest) {
     const headRepo = d.headRepositoryOwner?.login && d.headRepository?.name ? `${d.headRepositoryOwner.login}/${d.headRepository.name}` : null
+    const mergeCommit = typeof d.mergeCommit === 'string' ? d.mergeCommit : (d.mergeCommit?.oid ?? null)
     return {
       ok: true, number: d.number, title: d.title, state: String(d.state ?? '').toUpperCase(), body: d.body ?? '',
       url: d.url, headBranch: d.headRefName, baseBranch: d.baseRefName,
       headRefOid: d.headRefOid ?? null, baseRefOid: d.baseRefOid ?? null, headRepo,
       merged: Boolean(d.mergedAt) || String(d.state ?? '').toUpperCase() === 'MERGED',
+      mergeCommit,
       author: d.author?.login ?? null, relations: parseBodyRelations(d.body),
     }
   }
@@ -351,7 +353,9 @@ export function normalizePrPayload(d = {}, isRest = false) {
     ok: true, number: d.number, title: d.title, state: d.merged ? 'MERGED' : String(d.state ?? '').toUpperCase(),
     body: d.body ?? '', url: d.html_url, headBranch: d.head?.ref ?? null, baseBranch: d.base?.ref ?? null,
     headRefOid: d.head?.sha ?? null, baseRefOid: d.base?.sha ?? null,
-    headRepo: d.head?.repo?.full_name ?? null, merged: Boolean(d.merged), author: d.user?.login ?? null,
+    headRepo: d.head?.repo?.full_name ?? null, merged: Boolean(d.merged),
+    mergeCommit: d.merge_commit_sha ?? d.mergeCommit?.oid ?? null,
+    author: d.user?.login ?? null,
     relations: parseBodyRelations(d.body),
   }
 }

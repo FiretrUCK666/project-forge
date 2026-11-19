@@ -6,8 +6,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 93
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/v10-stagec-c4
+owner: impl-c4
 approved: false
 done_at: null
 task_id: v10-stagec-c4

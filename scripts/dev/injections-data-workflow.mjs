@@ -107,10 +107,11 @@ export const INJECTIONS_WORKFLOW = [
   },
   {
     id: 'I63',
-    what: '关闭 flow-lifecycle.mjs handleSubmit 实施者权责校验',
-    file: 'kit/skills/dev-flow/scripts/flow-lifecycle.mjs',
-    from: '    const nonImplRole = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i.test(lowExplicit)',
-    to: '    const nonImplRole = false',
+    what: '关闭 flow-lifecycle-hooks.mjs 实施者权责校验',
+    file: 'kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs'],
+    from: '  const nonImplRole = NON_IMPL_ROLE_RE.test(lowExplicit)',
+    to: '  const nonImplRole = false',
     expect: 'submit 权责守卫未拦截非实施者',
   },
   {
@@ -152,14 +153,6 @@ export const INJECTIONS_WORKFLOW = [
     from: '  if (overlaps.length > 0) {',
     to: '  if (false && overlaps.length > 0) {',
     expect: 'BLOCKED_OVERLAPPING_SLICE_FILES 未拦截',
-  },
-  {
-    id: 'I69',
-    what: '破坏 equip.mjs --tier lightweight 降档保留高阶技能机制',
-    file: 'scripts/equip.mjs',
-    from: "    const diskHash = normalizedSha256(readFileSync(dest))\n    if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {",
-    to: "    const diskHash = normalizedSha256(readFileSync(dest))\n    if (false && effectiveTier === 'lightweight' && allKitFiles.has(rel)) {",
-    expect: 'lightweight 降档误删高阶技能',
   },
   {
     id: 'I70',

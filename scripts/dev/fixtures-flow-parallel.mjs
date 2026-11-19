@@ -332,7 +332,7 @@ cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push �
     return `GenericRemoteBackend 未阻断越权合入：${JSON.stringify(genBlock)}`
   }
 
-  // 2. no-remote 渲染 full 与 lightweight 零 PR/origin/push/pull_request 且保留核心边界关键词
+  // 2. no-remote 渲染零 PR/origin/push/pull_request 且保留核心边界关键词
   const noRemoteFacts = {
     target: { name: 'local-app', path: process.cwd() },
     git: { present: true, remote: null, tags: [], isRepoRoot: true },
@@ -341,15 +341,13 @@ cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push �
     docs: { readme: 'README.md', readmes: ['README.md'] },
     conventions: { defaultBranch: 'main', commitStyle: 'plain' },
   }
-  for (const tier of ['lightweight', 'full']) {
-    const out = renderAgentsTemplate(noRemoteFacts, tpl, process.cwd(), { tier })
-    for (const badRe of [/\bPR\b/, /\borigin\b/i, /\bpush\b/i, /\bpull_request\b/i]) {
-      const m = badRe.exec(out)
-      if (m) return `no-remote (${tier}) 仍泄漏远端词 ${m[0]}`
-    }
-    for (const reqWord of ['日常', '不打标签', '发版', '明确说', '不自己判断', '日常到此为止']) {
-      if (!out.includes(reqWord)) return `no-remote (${tier}) 丢失必要边界词：${reqWord}`
-    }
+  const out = renderAgentsTemplate(noRemoteFacts, tpl, process.cwd(), {})
+  for (const badRe of [/\bPR\b/, /\borigin\b/i, /\bpush\b/i, /\bpull_request\b/i]) {
+    const m = badRe.exec(out)
+    if (m) return `no-remote 仍泄漏远端词 ${m[0]}`
+  }
+  for (const reqWord of ['日常', '不打标签', '发版', '明确说', '不自己判断', '日常到此为止']) {
+    if (!out.includes(reqWord)) return `no-remote 丢失必要边界词：${reqWord}`
   }
 
   // 3. 纯本地仓免报 tests.no-ci-config
@@ -409,7 +407,7 @@ cases.push(['profile-sniffer 三层嗅探(4空格中立CI/Taskfile/非vendor深�
   } finally { rmTree(dir) }
 }])
 
-cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 降档(I69)与 doc-plan 防自审(I64)/自定模板', async () => {
+cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、equip 二次编辑再采用与 doc-plan 防自审(I64)/自定模板', async () => {
   const { maskVolatile } = await import('../lib/agents-sections.mjs')
   if (maskVolatile('node main.mjs domain maintainer git switch main', ['main']) !== 'node main.mjs domain maintainer git switch \u0000VOLATILE\u0000') {
     return 'maskVolatile 词边界失效：破坏了 main.mjs/domain/maintainer 标识符'
@@ -450,14 +448,14 @@ cases.push(['CONVENTIONS_HINT、maskVolatile(I65)、--adopt-custom/oversize、eq
     const overAllow = await runNode('compose-agents.mjs', [dir, '--check', '--allow-custom-oversize'])
     if (overAllow.status !== 0) return `--allow-custom-oversize 未放行自定义长文：${overAllow.stderr}`
 
-    // 2. equip --tier lightweight 降档保留高阶技能 + 二次编辑再采用
-    const dg = await runNode('equip.mjs', [dir, '--tier', 'lightweight', '--no-backup'])
-    if (dg.status !== 0) return `lightweight 降档失败：${dg.stderr}`
+    // 2. equip 重复幂等保留全部技能 + 二次编辑再采用
+    const dg = await runNode('equip.mjs', [dir, '--no-backup'])
+    if (dg.status !== 0) return `equip 幂等重跑失败：${dg.stderr}`
     if (!existsSync(join(dir, '.agents', 'skills', 'dev-review', 'SKILL.md'))) {
-      return 'lightweight 降档误删高阶技能 dev-review'
+      return 'equip 重跑误删技能 dev-review'
     }
-    const eqChk = await runNode('equip.mjs', [dir, '--check', '--tier', 'lightweight'])
-    if (eqChk.status !== 0) return `降档保留后 equip --check 失败：${eqChk.stderr}`
+    const eqChk = await runNode('equip.mjs', [dir, '--check'])
+    if (eqChk.status !== 0) return `equip --check 失败：${eqChk.stderr}`
 
     const flowSkill = join(dir, '.agents', 'skills', 'dev-flow', 'SKILL.md')
     writeFileSync(flowSkill, `${readFileSync(flowSkill, 'utf8')}\n<!-- custom v1 -->\n`)

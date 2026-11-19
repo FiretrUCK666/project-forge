@@ -32,6 +32,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { listDocs } from '../dev-plan/scripts/doc-audit.mjs'
+import { discoverContextDocs } from './doc-locator.mjs'
 import { listTaskLedgers } from './ledger.mjs'
 import { readTextSafe } from './git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
@@ -79,8 +80,17 @@ function summarize(kind, doc) {
  */
 export function buildSessionOrientation(mainRoot) {
   const listed = listDocs(mainRoot)
+  let contextDocs = { architecture: null, subAgents: [], headlessDocs: [], contextIndex: [], docLocateHints: [] }
+  try {
+    contextDocs = discoverContextDocs(mainRoot)
+  } catch {
+    contextDocs = { architecture: null, subAgents: [], headlessDocs: [], contextIndex: [], docLocateHints: [] }
+  }
   const docs = {
     tdd: listed.tdd ? summarize('tdd', listed.tdd) : null,
+    architecture: contextDocs.architecture,
+    subAgents: contextDocs.subAgents,
+    headlessDocs: contextDocs.headlessDocs,
     prd: (listed.prds ?? []).map((d) => summarize('prd', d)),
     specs: (listed.specs ?? []).map((d) => summarize('spec', d)),
     todos: (listed.todos ?? []).map((d) => summarize('todo', d)),
@@ -169,12 +179,30 @@ export function buildSessionOrientation(mainRoot) {
   lines.push('## 规划文档全景')
   lines.push('')
   if (docs.tdd) lines.push(`- **TDD**：\`${docs.tdd.file}\`（常青架构，随时可读）`)
+  if (docs.architecture) {
+    lines.push(`- **ARCHITECTURE**：\`${docs.architecture.file}\` — ${docs.architecture.summary || '架构概览'}`)
+  }
+  if (docs.subAgents.length > 0) {
+    lines.push(`- **子目录 AGENTS.md**：${docs.subAgents.length} 份`)
+    for (const sub of docs.subAgents.slice(0, 6)) {
+      lines.push(`  - \`${sub.file}\` — ${sub.summary || '子目录约定'}`)
+    }
+  }
+  if (docs.headlessDocs.length > 0) {
+    lines.push(`- **无头/非 Frontmatter 文档**：${docs.headlessDocs.length} 份（已提取首段摘要）`)
+    for (const hd of docs.headlessDocs.slice(0, 6)) {
+      lines.push(`  - \`${hd.file}\` — ${hd.summary || '无摘要'}`)
+    }
+  }
   lines.push(`- **PRD**：${docs.prd.length} 份`)
   for (const d of docs.prd) lines.push(`  - \`${d.file}\` — ${d.status ?? '无状态'} · ${d.checks}${d.issue ? ` · Issue #${d.issue}` : ''}`)
   lines.push(`- **SPEC**：${docs.specs.length} 份`)
   for (const d of docs.specs) lines.push(`  - \`${d.file}\` — ${d.status ?? '无状态'} · ${d.checks}${d.issue ? ` · Issue #${d.issue}` : ''}`)
   lines.push(`- **Todo**：${docs.todos.length} 份`)
   for (const d of docs.todos) lines.push(`  - \`${d.file}\` — ${d.status ?? '无状态'} · ${d.checks}${d.issue ? ` · Issue #${d.issue}` : ''}`)
+  if (contextDocs.docLocateHints.length > 0) {
+    lines.push(`- **按需定位锚点（勿整篇通读）**：\`${contextDocs.docLocateHints[0]}\``)
+  }
   lines.push('')
 
   if (tasks.length > 0) {
@@ -229,6 +257,8 @@ export function buildSessionOrientation(mainRoot) {
 
   return {
     docs,
+    contextIndex: contextDocs.contextIndex,
+    docLocateHints: contextDocs.docLocateHints,
     tasks,
     localIssues: openLocalIssues.map((i) => ({ number: i.number, title: i.title, state: i.state, labels: i.labels ?? [], assignees: i.assignees ?? [] })),
     pendingLocalMigration,

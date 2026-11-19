@@ -1,0 +1,76 @@
+/**
+ * injections-data-locate-intake.mjs —— 统一装配、按需定位、全局业务分诊、rebase 基线校准、可读 PR 正文与功能域命名门禁故障注入复验数据表（I179–I186）。
+ */
+
+export const INJECTIONS_LOCATE_INTAKE = [
+  {
+    id: 'I179',
+    what: '破坏 preflight-contract-rules.mjs 过程编号文件名确定性静态门禁（放行 issue50/stagec-c1 等命名）',
+    file: 'scripts/dev/preflight-contract-rules.mjs',
+    from: '    const m = PROCESS_ARTIFACT_FILENAME_RE.exec(stem)\n    if (m) hits.push({ path: norm, token: m[0].replace(/^[-_.]+|[-_.]+$/g, \'\') })',
+    to: '    const m = null\n    if (m) hits.push({ path: norm, token: \'\' })',
+    expect: '过程编号文件名漏报',
+  },
+  {
+    id: 'I180',
+    what: '破坏 workflow-helpers.mjs resolveEffectiveBaseSha 的 merge-base 校准（退回只信陈旧 ledger.baseSha）',
+    file: 'kit/skills/lib/workflow-helpers.mjs',
+    alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
+    from: '  return bestSha || storedBase',
+    to: '  return storedBase',
+    expect: 'resolveEffectiveBaseSha 未校准到 rebase 后的 merge-base',
+  },
+  {
+    id: 'I181',
+    what: '绕过 review-pack.mjs 前置 intake 拒绝门禁（已 reject PR 仍进入后续审查或被 EMPIRICAL_FIRST 掩盖）',
+    file: 'kit/skills/dev-review/scripts/review-pack.mjs',
+    alsoDropIn: ['.agents/skills/dev-review/scripts/review-pack.mjs'],
+    from: '  if (intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
+    to: '  if (false && intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
+    expect: 'review-pack 未前置拦截已 reject PR',
+  },
+  {
+    id: 'I182',
+    what: '破坏 flow-next.mjs hydrateRemotePfState 对 clone-readonly 的写鉴权前置阻断',
+    file: 'kit/skills/dev-flow/scripts/flow-next.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-next.mjs'],
+    from: "  if (ledger.role === 'clone-readonly') {\n    return { rehydrated: false, reason: 'write-auth-required' }\n  }",
+    to: "  if (false && ledger.role === 'clone-readonly') {\n    return { rehydrated: false, reason: 'write-auth-required' }\n  }",
+    expect: 'clone-readonly 未拦截远端状态回填',
+  },
+  {
+    id: 'I183',
+    what: '破坏 doc-frontmatter.mjs isManagedPlanDoc 收窄规则（重新在正文误匹配 bare plan:）',
+    file: 'kit/skills/lib/doc-frontmatter.mjs',
+    alsoDropIn: ['.agents/skills/lib/doc-frontmatter.mjs'],
+    from: '    if (/^\\s*(?:plan_critique|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\\s*:/im.test(head)) return true',
+    to: '    if (/^\\s*(?:plan_critique|plan|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\\s*:/im.test(head)) return true',
+    expect: '普通正文中的 bare plan: 被误判为受管规划文档',
+  },
+  {
+    id: 'I184',
+    what: '破坏 workflow-helpers.mjs hydratePrTemplateBody 剥离模板引导 HTML 注释逻辑',
+    file: 'kit/skills/lib/workflow-helpers.mjs',
+    alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
+    from: '  let body = stripHtmlCommentsOutsideFences(tplRaw)',
+    to: '  let body = tplRaw',
+    expect: 'PR 正文仍残留引导 HTML 注释',
+  },
+  {
+    id: 'I185',
+    what: '破坏 flow-lifecycle-hooks.mjs assertSubmitOwnership 对协调者/审查者代提交的拦截',
+    file: 'kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs',
+    alsoDropIn: ['.agents/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs'],
+    from: "  if (nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: 3,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
+    to: "  if (false && nonImplRole) {\n    return {\n      ok: false,\n      code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',\n      exitCode: 3,\n      message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,",
+    expect: '协调者代提交未被拦截',
+  },
+  {
+    id: 'I186',
+    what: '破坏 write-probe-audit.mjs 对 closePr / closeIssue 写接口的审计覆盖',
+    file: 'scripts/dev/write-probe-audit.mjs',
+    from: '|listOpenPrsByBase|closePr|closeIssue)\\s*\\(/g',
+    to: '|listOpenPrsByBase)\\s*\\(/g',
+    expect: 'write-probe-audit 未捕获未鉴权的 closePr/closeIssue',
+  },
+]

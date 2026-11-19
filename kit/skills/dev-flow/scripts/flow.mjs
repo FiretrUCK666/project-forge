@@ -17,7 +17,7 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
-const SUBCOMMANDS = ['inspect', 'next', 'explore', 'start', 'issue', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
 
 function printHelp() {
   process.stdout.write([
@@ -27,18 +27,19 @@ function printHelp() {
     '  inspect   [inputs...] [--probe-auth] [--external-pr <M>] [--json]',
     '  next      [--task <id>] [--ack-no-issue-context --reason "<原因>"] [--probe-auth] [--handoff] [--json]',
     '  explore   [--task <id>] [--focus <subdir>] [--tier <tier>] [--by <actor>] [--json]',
+    '  intake    [--pr <M> | --issue <N>] [--decision <accept|defer|reject-out-of-scope|reject-duplicate|needs-info>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]',
     '  start     [--task <id>] [--base <branch>] [--slug <slug>] [--case <1..5>] [--issue <N>] [--create-issue --title "<标题>"] [--after <parent>] [--files <a,b>] [--parallel] [--external-pr <M>] [--clone-choice <c>] [--strict-deps] [--force] [--json]',
     '  issue     <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]',
     '  milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--title "<标题>"] [--description "<描述>"] [--due <ISO>] [--issue <N>] [--pr <N>] [--task <id>] [--state open|closed|all] [--json]',
     '  claim     [--task <id>] [--issue <N>] [--agent <id>] [--takeover --reason "<原因>"] [--json]',
     '  release   [--task <id>] [--issue <N>] [--agent <id>] [--reason "<原因>"] [--json]',
-    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--json]',
-    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-checked] [--human-approved] [--json]',
+    '  finalize  [--task <id>] [--note <text>] [--strict-sync] [--no-tdd] [--include-master-prd] [--skip-govern] [--json]',
+    '  verify    [--task <id>] [--mode|--tier quick|smoke|full|gate] [--timeout <ms>] [--target <file>] [--cmd <custom>] [--e2e-evidence <text>] [--visual-checked] [--human-approved] [--skip-edit-gate] [--skip-govern] [--json]',
     '  submit    [--task <id>] [--draft] [--rework] [--new-pr] [--reset-review-slot] [--json]',
     '  rework    [--task <id>] [--rebut "<findingId>: <reason>"] [--json]',
     '  sync      [--task <id>] [--onto <branch>] [--probe-auth] [--json]',
-    '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--json]',
-    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
+    '  merge     [--task <id>] [--method merge|squash|rebase] [--remote-merged] [--human-approved] [--reason <text>] [--skip-govern] [--json]',
+    '  cleanup   [--task <id>] [--confirm] [--only-review-worktree|--keep-worktree] [--keep-local-branch] [--keep-remote-branch] [--keep-branch] [--force] [--allow-outbound <路径>] [--skip-govern] [--json]',
     '  status    [--task <id>] [--json]',
     '  abort     [--task <id>] [--confirm] [--keep-branch] [--force] [--allow-outbound <路径>] [--json]',
     '  batch     <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--enqueue-only] [--trial-local] [--task <id>] [--json]',
@@ -58,17 +59,18 @@ async function main(argv) {
         'human-approved', 'human-approved-exec', 'visual-checked', 'strict-sync', 'include-master-prd',
         'create-issue', 'takeover', 'reset-review-slot', 'remote-merged',
         'strict-deps', 'enqueue-only', 'new-pr', 'trial-local', 'handoff', 'no-tdd',
-        'ack-no-issue-context',
+        'ack-no-issue-context', 'apply', 'dry-run', 'skip-edit-gate', 'skip-govern', 'strict-lifecycle', 'run-govern-hook',
       ],
       valueFlags: [
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
-        'agent', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
+        'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
         'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
+        'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
       ],
       multiFlags: ['rebut', 'allow-outbound'],
-      usageHint: 'flow.mjs <inspect|next|explore|start|issue|milestone|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
+      usageHint: 'flow.mjs <inspect|next|explore|intake|start|issue|milestone|claim|release|finalize|verify|submit|rework|sync|merge|cleanup|status|abort|batch>',
     })
   } catch (err) {
     process.stderr.write(`flow 错误：${err.message}\n`)
@@ -127,6 +129,10 @@ async function main(argv) {
     if (sub === 'explore') {
       const { handleExplore } = await import('./flow-explore.mjs')
       return (await handleExplore(opts, roots)).exitCode
+    }
+    if (sub === 'intake') {
+      const { handleIntake } = await import('./flow-intake.mjs')
+      return (await handleIntake(opts, roots)).exitCode
     }
     if (sub === 'start') {
       const { handleStart } = await import('./flow-inspect.mjs')

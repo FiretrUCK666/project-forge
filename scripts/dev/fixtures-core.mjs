@@ -685,10 +685,10 @@ cases.push(['exec.mjs / git.mjs / template.mjs：Windows .cmd 解析、4KB 探�
   // 1. template.mjs 单遍嵌套条件求值与异常配对（正反双向）
   const tpl = [
     'top',
-    '<!-- project-forge: if is-full -->',
-    'full-only',
+    '<!-- project-forge: if has-release -->',
+    'release-only',
     '<!-- project-forge: if has-remote -->',
-    'full+remote',
+    'release+remote',
     '<!-- project-forge: endif -->',
     '<!-- project-forge: endif -->',
     '```md',
@@ -697,16 +697,16 @@ cases.push(['exec.mjs / git.mjs / template.mjs：Windows .cmd 解析、4KB 探�
     '<!-- project-forge: endif -->',
     '```',
   ].join('\n')
-  const renderedFull = evaluateConditions(tpl, { 'is-full': true, 'has-remote': false })
-  if (!renderedFull.includes('full-only') || renderedFull.includes('full+remote') || !renderedFull.includes('<!-- project-forge: if never -->')) {
+  const renderedFull = evaluateConditions(tpl, { 'has-release': true, 'has-remote': false })
+  if (!renderedFull.includes('release-only') || renderedFull.includes('release+remote') || !renderedFull.includes('<!-- project-forge: if never -->')) {
     return `嵌套条件求值异常：\n${renderedFull}`
   }
-  const renderedLight = evaluateConditions(tpl, { 'is-full': false, 'has-remote': true })
-  if (renderedLight.includes('full-only') || renderedLight.includes('full+remote')) {
-    return `外层为假时内层未一并移除：\n${renderedLight}`
+  const renderedOff = evaluateConditions(tpl, { 'has-release': false, 'has-remote': true })
+  if (renderedOff.includes('release-only') || renderedOff.includes('release+remote')) {
+    return `外层为假时内层未一并移除：\n${renderedOff}`
   }
   let badUnclosed = false
-  try { evaluateConditions('<!-- project-forge: if is-full -->\nx', { 'is-full': true }) } catch (e) { badUnclosed = e instanceof TemplateError }
+  try { evaluateConditions('<!-- project-forge: if has-release -->\nx', { 'has-release': true }) } catch (e) { badUnclosed = e instanceof TemplateError }
   if (!badUnclosed) return '未闭合 if 未抛出 TemplateError'
 
   // 2. gitLsFilesTextAndCode 4KB NUL 探测、packages/*/node_modules 跳过与 --focus ./src

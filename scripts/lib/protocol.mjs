@@ -311,24 +311,27 @@ export const FULL_READ_REFS = Object.freeze([
 
 /** 契约与工程套件预算上限（单一真相源）。 */
 export const AGENTS_MAX_BYTES = 30720
-export const AGENTS_WARN_BYTES = 24576
+export const AGENTS_COMPACT_RECOMMENDED_BYTES = 24576
+export const AGENTS_WARN_BYTES = AGENTS_COMPACT_RECOMMENDED_BYTES
 export const KIT_SKILL_MAX_LINES = 180
 export const PF_MANIFEST_SCHEMA_VERSION = 2
-export const EQUIP_TIERS = Object.freeze(['lightweight', 'full'])
+
+/** 统一八技能规范名清单（波次演进期按磁盘已落盘目录动态装配与校验）。 */
+export const UNIFIED_SKILL_NAMES = Object.freeze([
+  'dev-explore',
+  'dev-plan',
+  'dev-edit',
+  'dev-flow',
+  'dev-verify-tools',
+  'dev-review',
+  'dev-iterate',
+  'dev-govern',
+])
 
 export function getKitSkills(kitSkillsRoot) {
   return Object.freeze(discoverKitSkills(kitSkillsRoot).map((s) => s.dirName))
 }
 
-export function getLightweightKitSkills(kitSkillsRoot) {
-  return Object.freeze(
-    discoverKitSkills(kitSkillsRoot)
-      .filter((s) => s.tier === 'both' || s.tier === 'lightweight')
-      .map((s) => s.dirName),
-  )
-}
-
-export const LIGHTWEIGHT_KIT_SKILLS = getLightweightKitSkills()
 export const KIT_SKILLS = getKitSkills()
 
 /** macOS Finder / 归档器常见元数据条目名，跨全链路扫描与打包校验统一过滤。 */
@@ -405,8 +408,6 @@ export const TEMPLATE_CONDITIONS = Object.freeze([
   'is-plugin-or-skill',
   'has-bilingual-docs',
   'has-custom-skills',
-  'is-lightweight',
-  'is-full',
 ])
 
 /**

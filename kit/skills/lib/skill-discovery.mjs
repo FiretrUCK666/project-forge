@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { COMMON_SKIP_DIRS, isMacOsJunkPath, posixPath, readTextSafe } from './git.mjs'
+import { indentOf, parseYamlScalar, readYamlBlockScalar } from './doc-frontmatter.mjs'
 
 export const DEFAULT_KIT_SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SKIP_CONTAINERS = new Set([
@@ -18,71 +19,6 @@ const SKIP_CONTAINERS = new Set([
   '.git', '.worktrees', '.github', '.agents', 'fixtures', 'testdata', 'vendor', 'third_party', '__mocks__',
 ])
 const KEY_VAL_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/
-
-function splitInlineArray(inner) {
-  const items = []
-  let cur = ''
-  let quote = null
-  for (let i = 0; i < inner.length; i += 1) {
-    const ch = inner[i]
-    if (quote) {
-      if (ch === '\\' && quote === '"' && i + 1 < inner.length) {
-        cur += ch + inner[i + 1]
-        i += 1
-        continue
-      }
-      if (ch === quote) {
-        if (quote === '\'' && inner[i + 1] === '\'') {
-          cur += '\'\''
-          i += 1
-          continue
-        }
-        quote = null
-      }
-      cur += ch
-    } else if (ch === '"' || ch === '\'') {
-      quote = ch
-      cur += ch
-    } else if (ch === ',') {
-      if (cur.trim()) items.push(cur.trim())
-      cur = ''
-    } else {
-      cur += ch
-    }
-  }
-  if (cur.trim()) items.push(cur.trim())
-  return items
-}
-
-function parseYamlScalar(raw) {
-  const s = String(raw ?? '').trim()
-  if (!s || s === 'null' || s === '~') return null
-  if (s === 'true') return true
-  if (s === 'false') return false
-  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) return Number(s)
-  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
-    return s.slice(1, -1)
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t')
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\')
-  }
-  if (s.startsWith('\'') && s.endsWith('\'') && s.length >= 2) {
-    return s.slice(1, -1).replace(/''/g, '\'')
-  }
-  if (s.startsWith('[') && s.endsWith(']')) {
-    const inner = s.slice(1, -1).trim()
-    if (!inner) return []
-    return splitInlineArray(inner).map((item) => parseYamlScalar(item))
-  }
-  return s
-}
-
-function indentOf(line) {
-  let n = 0
-  while (n < line.length && line[n] === ' ') n += 1
-  return n
-}
 
 function nextMeaningfulIndex(lines, startIdx) {
   let i = startIdx
@@ -92,39 +28,6 @@ function nextMeaningfulIndex(lines, startIdx) {
     i += 1
   }
   return lines.length
-}
-
-function readBlockScalar(lines, startIdx, parentIndent, indicator) {
-  const folded = indicator.startsWith('>')
-  const collected = []
-  let minIndent = Infinity
-  let i = startIdx
-  while (i < lines.length) {
-    const line = lines[i]
-    if (!line.trim()) {
-      collected.push('')
-      i += 1
-      continue
-    }
-    const ind = indentOf(line)
-    if (ind <= parentIndent) break
-    if (ind < minIndent) minIndent = ind
-    collected.push(line)
-    i += 1
-  }
-  while (collected.length > 0 && collected[collected.length - 1] === '') collected.pop()
-  const base = Number.isFinite(minIndent) ? minIndent : parentIndent + 2
-  const stripped = collected.map((l) => (l === '' ? '' : l.slice(base)))
-  if (!folded) return { value: stripped.join('\n').trim(), nextIdx: i }
-  const out = []
-  for (const l of stripped) {
-    if (!l) {
-      if (out.length > 0 && out[out.length - 1] !== '\n') out.push('\n')
-    } else {
-      out.push(l)
-    }
-  }
-  return { value: out.join(' ').replace(/\s*\n\s*/g, '\n').trim(), nextIdx: i }
 }
 
 function parseYamlSequence(lines, startIdx, seqIndent, syntaxErrors) {
@@ -162,7 +65,7 @@ function parseYamlSequence(lines, startIdx, seqIndent, syntaxErrors) {
       const key = inlineKv[1]
       const tail = inlineKv[2].trim()
       if (/^[|>][+-]?$/.test(tail)) {
-        const blk = readBlockScalar(lines, i + 1, seqIndent, tail)
+        const blk = readYamlBlockScalar(lines, i + 1, seqIndent, tail)
         entry[key] = blk.value
         i = blk.nextIdx
       } else if (!tail) {
@@ -223,7 +126,7 @@ function parseYamlMapping(lines, startIdx, minIndent, syntaxErrors) {
     const key = kv[1]
     const tail = kv[2].trim()
     if (/^[|>][+-]?$/.test(tail)) {
-      const blk = readBlockScalar(lines, i + 1, mapIndent, tail)
+      const blk = readYamlBlockScalar(lines, i + 1, mapIndent, tail)
       obj[key] = blk.value
       i = blk.nextIdx
       continue
@@ -241,7 +144,7 @@ function parseYamlMapping(lines, startIdx, minIndent, syntaxErrors) {
           obj[key] = sub.value
           i = sub.nextIdx
         } else {
-          const blk = readBlockScalar(lines, i + 1, mapIndent, '>')
+          const blk = readYamlBlockScalar(lines, i + 1, mapIndent, '>')
           obj[key] = blk.value
           i = blk.nextIdx
         }
@@ -310,7 +213,6 @@ function normalizeExtraRoutes(rawRoutes) {
     .filter((r) => r && typeof r === 'object')
     .map((r) => ({
       order: Number.isFinite(Number(r.order)) ? Number(r.order) : 100,
-      tier: r.tier === 'both' || r.tier === 'lightweight' || r.tier === 'full' ? r.tier : 'both',
       intent: String(r.intent ?? r.intent_remote ?? '').trim(),
       ...(r.intent_local || r.intentLocal ? { intentLocal: String(r.intent_local ?? r.intentLocal).trim() } : {}),
       script: String(r.script ?? '').trim(),
@@ -361,16 +263,6 @@ export function discoverKitSkillsDetailed(kitSkillsRoot = DEFAULT_KIT_SKILLS_DIR
     const meta = fm.data.metadata && typeof fm.data.metadata === 'object' && !Array.isArray(fm.data.metadata)
       ? fm.data.metadata
       : {}
-    const rawTier = meta.tier
-    const tierStr = rawTier === undefined || rawTier === null ? '' : String(rawTier).trim()
-    if (tierStr && tierStr !== 'both' && tierStr !== 'lightweight' && tierStr !== 'full') {
-      diagnostics.push({
-        dir: entry.name, dirName: entry.name, file: relSkill,
-        message: `${relSkill} metadata.tier 无效「${tierStr}」（仅允许 both / lightweight / full）`,
-      })
-      continue
-    }
-    const tier = tierStr || 'both'
 
     const hasOrder = meta.order !== undefined && meta.order !== null && String(meta.order).trim() !== ''
     const orderNum = hasOrder ? Number(meta.order) : 500
@@ -393,7 +285,6 @@ export function discoverKitSkillsDetailed(kitSkillsRoot = DEFAULT_KIT_SKILLS_DIR
       name: fm.name,
       description: fm.description,
       summary,
-      tier,
       intent,
       ...(intentLocal ? { intentLocal } : {}),
       script,

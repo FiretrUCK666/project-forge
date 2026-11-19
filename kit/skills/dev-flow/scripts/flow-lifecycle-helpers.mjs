@@ -11,9 +11,9 @@ import { printNextStep } from '../../lib/cli.mjs'
 import { evaluateMasterPrdClosureState } from '../../lib/doc-substantive.mjs'
 import { evaluateCoupledSync, isSharedMasterPrd, parseCoupledSyncRules, parseDocFilename, parseDocFrontmatter } from '../../lib/docs.mjs'
 import { escalateToBackend } from '../../lib/escalation.mjs'
-import { gitRun, posixPath, readTextSafe } from '../../lib/git.mjs'
+import { gitRun, posixPath, readTextSafe, syncDetachedWorktree, writeAtomic } from '../../lib/git.mjs'
 import { resolveRefShaFast } from '../../lib/git-fast.mjs'
-import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
 import { parseMilestoneNumber } from '../../lib/platform.mjs'
 import {
@@ -21,6 +21,7 @@ import {
   buildE2eObservation,
   hasValidE2eObservationOnHead,
   readVerificationEvidence,
+  resolveEffectiveBaseSha,
   scoreExecutionResult,
   writeVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
@@ -28,6 +29,7 @@ import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { matchGlob } from '../../lib/static-gates.mjs'
 import { getChangedFiles } from './flow-inspect.mjs'
+import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
 export function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
   const agentsRoot = existsSync(join(implRoot, 'AGENTS.md')) ? implRoot : mainRoot
@@ -38,22 +40,11 @@ export function computeFlowCoupledSync(implRoot, mainRoot, changedFiles) {
 }
 
 export async function collectFinalizeChangedFiles(implRoot, ledger, statusEntries, gitCommonDir = null, headSha = null, preDiffEntries = undefined) {
+  const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir })
   const baseDiffEntries = Array.isArray(preDiffEntries)
     ? preDiffEntries
-    : (ledger.baseSha && headSha && headSha === ledger.baseSha ? [] : undefined)
-  const merged = new Set(await getChangedFiles(implRoot, ledger.baseSha, { statusEntries, diffEntries: baseDiffEntries }))
-  for (const baseRef of [...new Set([ledger.baseBranch, 'main', 'master'].filter(Boolean))]) {
-    const fastRefSha = gitCommonDir ? resolveRefShaFast(gitCommonDir, `refs/heads/${baseRef}`) : null
-    if (fastRefSha && ledger.baseSha && fastRefSha === ledger.baseSha) break
-    const mb = await gitRun(implRoot, ['--no-optional-locks', 'merge-base', baseRef, 'HEAD'])
-    const mbSha = mb.ok ? mb.stdout?.trim() : ''
-    if (mbSha) {
-      if (mbSha !== ledger.baseSha) {
-        for (const f of await getChangedFiles(implRoot, mbSha, { statusEntries })) merged.add(f)
-      }
-      break
-    }
-  }
+    : (effectiveBase && headSha && headSha === effectiveBase ? [] : undefined)
+  const merged = new Set(await getChangedFiles(implRoot, effectiveBase, { statusEntries, diffEntries: baseDiffEntries }))
   return [...merged].sort()
 }
 
@@ -324,6 +315,7 @@ export function recordVerifyEvidenceForFlow({
   roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName, targetVal,
   cmdStr, customCmd, exitCode, explicitNoneSkipped, docStaticRes,
   executed = !explicitNoneSkipped, errorOnly = false, e2eObservationText = '',
+  durationMs = null, smokeDurationMs = null,
   smokeCmd = null, smokeExitCode = null, smokeExecuted = false, smokeErrorOnly = false,
 }) {
   const prev = readVerificationEvidence(roots.gitDir, taskId)
@@ -338,6 +330,7 @@ export function recordVerifyEvidenceForFlow({
     headSha: currentHead, dirty, mode: modeName, target: targetVal,
     partial: modeName === 'quick' && Boolean(targetVal),
     exitCode, cmd: cmdStr, customCmd,
+    ...(Number.isFinite(Number(durationMs)) ? { durationMs: Math.max(0, Math.round(Number(durationMs))) } : {}),
     executed: mainScore.executed,
     succeeded: mainScore.succeeded,
     errorOnly: mainScore.errorOnly,
@@ -349,6 +342,7 @@ export function recordVerifyEvidenceForFlow({
     gates.smoke = {
       headSha: currentHead, dirty, mode: 'smoke', target: null, partial: false,
       exitCode: smokeExitCode, cmd: smokeCmd, customCmd: false,
+      ...(Number.isFinite(Number(smokeDurationMs)) ? { durationMs: Math.max(0, Math.round(Number(smokeDurationMs))) } : {}),
       executed: sScore.executed, succeeded: sScore.succeeded, errorOnly: sScore.errorOnly,
       status: sScore.succeeded ? 'passed' : 'failed',
       recordedAt: now,
@@ -400,4 +394,84 @@ export function recordVerifyEvidenceForFlow({
     gates, skipped: [...skipped],
   })
   return { overallExit, smokeVerifiedOnHead, e2eObservation }
+}
+
+export function ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note }) {
+  if (!specRel || !existsSync(join(implRoot, specRel))) return { ok: true }
+  const specAbs = join(implRoot, specRel)
+  let specText = readTextSafe(specAbs) ?? ''
+  if (!/^##\s+实现说明\s*$/m.test(specText)) specText = `${specText.trimEnd()}\n\n## 实现说明\n\n`
+  const secStart = specText.search(/^##\s+实现说明\s*$/m)
+  const afterSec = specText.slice(secStart)
+  const nextH2 = afterSec.slice(1).search(/\n##\s+/)
+  const secBody = (nextH2 > 0 ? afterSec.slice(0, nextH2 + 1) : afterSec).replace(/^##\s+实现说明\s*\n?/, '')
+  if (/<!--\s*project-forge:\s*fill|\b(?:TBD|FIXME)\b/i.test(secBody) || /\bTODO\b/.test(secBody)) {
+    return { ok: false, message: `BLOCKED_SPEC_IMPL_NOTE_EMPTY: ${specRel} 的「实现说明」仍含未填占位，请补齐真实说明后再 finalize。\n` }
+  }
+  if (!secBody.replace(/<!--[\s\S]*?-->/g, '').trim()) {
+    const autoSummary = [`- 实现提交基线: ${currentHead ?? 'uncommitted'}`, `- 关联任务: ${taskId}`, note ? `- 说明: ${note}` : null].filter(Boolean).join('\n')
+    specText = specText.replace(/(^##\s+实现说明\s*\n(?:<!--[\s\S]*?-->\s*\n?)?)/m, `$1\n${autoSummary}\n`)
+  }
+  writeAtomic(specAbs, specText)
+  return { ok: true }
+}
+
+export async function syncReviewSlotForSubmit(roots, ledger, taskId, currentHead, { resetDirty = false } = {}) {
+  if (ledger.tier !== 2 || !currentHead || !ledger.reviewWorktreePath) return null
+  const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
+  const mountedForReview = ledger.mountedDepsByWorktree?.[ledger.reviewWorktreePath] ?? ledger.mountedDeps ?? []
+  if (existsSync(reviewAbs) && !unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps', mountedPaths: mountedForReview })?.ok) {
+    throw new Error(`审查槽解绑共享依赖失败：${ledger.reviewWorktreePath}`)
+  }
+  const reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, currentHead, { resetDirty })
+  const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
+  recordMountedDepsInLedger(ledger, ledger.reviewWorktreePath, revDeps)
+  ledger.reviewWorktreeHead = currentHead
+  reviewSlotSync.depsMode = revDeps.mode
+  await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+  return reviewSlotSync
+}
+
+export function emitVerifyOutcomeOutput({
+  opts, roots, taskId, mode, rawTarget, cmd, targetTip, allOk, finalExit, ledger, policy,
+  evRec, e2eFailureReport, docStaticRes, visualFilesChanged, empiricalVisualCheckRequired, runRes, currentHead,
+}) {
+  if (docStaticRes && !docStaticRes.ok) {
+    process.stderr.write(`BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}\n`)
+  }
+  if (e2eFailureReport?.diagnostic && !opts.json) {
+    process.stderr.write(`E2E_RUNTIME_FAILED:\nEvidence:\n  - ${e2eFailureReport.diagnostic.Evidence.join('\n  - ')}\nUnknowns:\n  - ${e2eFailureReport.diagnostic.Unknowns.join('\n  - ')}\nNextSteps:\n  - ${e2eFailureReport.diagnostic.NextSteps.join('\n  - ')}\n`)
+  }
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify({
+      taskId, mode, target: rawTarget, cmd, ...(targetTip ? { targetTip } : {}),
+      ok: allOk, exitCode: finalExit, verifiedHead: ledger.verifiedHead, riskTier: policy.riskTier,
+      smokeVerifiedOnHead: evRec.smokeVerifiedOnHead, e2eObservation: evRec.e2eObservation,
+      ...(e2eFailureReport ? { diagnostic: e2eFailureReport.diagnostic, escalatedIssue: e2eFailureReport.escalation } : {}),
+      docStatic: docStaticRes, visualFilesChanged, empiricalVisualCheckRequired,
+      visualVerifiedHead: ledger.visualVerifiedHead, visualCheckEvidence: ledger.visualCheckEvidence,
+      stdout: runRes.stdout, stderr: runRes.stderr,
+    }, null, 2)}\n`)
+    return
+  }
+  if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
+  if (runRes.stderr) process.stdout.write(`${runRes.stderr}\n`)
+  if (targetTip) process.stdout.write(`${targetTip}\n`)
+  process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${finalExit} HEAD=${currentHead ?? 'unborn'} risk=${policy.riskTier}\n`)
+  if (allOk) {
+    const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }]
+    if (policy.smokeRequired && !evRec.e2eObservation) {
+      next.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
+    } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
+      next.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
+    }
+    printNextStep(next, { repoRoot: roots.mainRoot })
+  } else {
+    printNextStep(
+      e2eFailureReport?.diagnostic?.NextSteps?.length
+        ? e2eFailureReport.diagnostic.NextSteps
+        : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`],
+      { repoRoot: roots.mainRoot },
+    )
+  }
 }

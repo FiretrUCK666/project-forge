@@ -1,5 +1,5 @@
 /**
- * fixtures-issue50.mjs —— Issue #50（C1..C10 平台能力与文档系统闭环）正反双向行为断言。
+ * fixtures-doc-closure.mjs —— 平台能力与文档系统闭环正反双向行为断言。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

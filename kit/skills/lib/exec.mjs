@@ -555,6 +555,57 @@ function isPidAlive(pid) {
   }
 }
 
+function tryAcquireLockOnce(absLock, token, staleMs) {
+  let fd
+  try {
+    fd = openSync(absLock, 'wx')
+    try {
+      writeFileSync(fd, `${JSON.stringify({ pid: process.pid, token, createdAt: Date.now() })}\n`, 'utf8')
+    } finally {
+      try { closeSync(fd) } catch { /* ignore */ }
+    }
+    return true
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err
+    let parsed = null
+    let mtimeMs = 0
+    try {
+      const st = statSync(absLock)
+      mtimeMs = st.mtimeMs
+      const raw = readFileSync(absLock, 'utf8').trim()
+      if (raw) parsed = JSON.parse(raw)
+    } catch (readErr) {
+      if (readErr?.code === 'ENOENT') return false
+    }
+
+    const stamp = Number(parsed?.createdAt) || mtimeMs || 0
+    const expired = stamp > 0 && (Date.now() - stamp) >= staleMs
+    const deadOwner = Boolean(parsed?.pid && parsed.pid !== process.pid && !isPidAlive(Number(parsed.pid)) && (Date.now() - stamp) >= 200)
+    if (expired || deadOwner) {
+      try {
+        const recheck = readFileSync(absLock, 'utf8').trim()
+        const curParsed = recheck ? JSON.parse(recheck) : null
+        if (!parsed?.token || curParsed?.token === parsed.token) {
+          unlinkSync(absLock)
+        }
+      } catch {
+        try { unlinkSync(absLock) } catch { /* ignore */ }
+      }
+    }
+    return false
+  }
+}
+
+function releaseLockFile(absLock, token) {
+  try {
+    const raw = readFileSync(absLock, 'utf8').trim()
+    const cur = raw ? JSON.parse(raw) : null
+    if (!cur?.token || cur.token === token) unlinkSync(absLock)
+  } catch { /* already removed */ }
+}
+
+const SYNC_WAIT_BUF = new Int32Array(new SharedArrayBuffer(4))
+
 /**
  * 基于 `O_EXCL` (`wx`) 原子文件互斥锁，支持陈旧死锁自动回收与超时拦截。
  */
@@ -564,63 +615,39 @@ export async function withFileLock(lockPath, fn, { timeoutMs = 15000, staleMs = 
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const deadline = Date.now() + Math.max(50, Number(timeoutMs) || 15000)
 
-  let acquired = false
-  while (!acquired) {
-    let fd
-    try {
-      fd = openSync(absLock, 'wx')
-      try {
-        writeFileSync(fd, `${JSON.stringify({ pid: process.pid, token, createdAt: Date.now() })}\n`, 'utf8')
-      } finally {
-        try { closeSync(fd) } catch { /* ignore */ }
-      }
-      acquired = true
-      break
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err
-      let parsed = null
-      let mtimeMs = 0
-      try {
-        const st = statSync(absLock)
-        mtimeMs = st.mtimeMs
-        const raw = readFileSync(absLock, 'utf8').trim()
-        if (raw) parsed = JSON.parse(raw)
-      } catch (readErr) {
-        if (readErr?.code === 'ENOENT') continue
-      }
-
-      const stamp = Number(parsed?.createdAt) || mtimeMs || 0
-      const expired = stamp > 0 && (Date.now() - stamp) >= staleMs
-      const deadOwner = Boolean(parsed?.pid && parsed.pid !== process.pid && !isPidAlive(Number(parsed.pid)) && (Date.now() - stamp) >= 200)
-      if (expired || deadOwner) {
-        try {
-          const recheck = readFileSync(absLock, 'utf8').trim()
-          const curParsed = recheck ? JSON.parse(recheck) : null
-          if (!parsed?.token || curParsed?.token === parsed.token) {
-            unlinkSync(absLock)
-            continue
-          }
-        } catch {
-          try { unlinkSync(absLock) } catch { /* ignore */ }
-          continue
-        }
-      }
-
-      if (Date.now() >= deadline) {
-        throw new Error(`LOCK_TIMEOUT: 无法在 ${timeoutMs}ms 内获取互斥锁 ${absLock}`)
-      }
-      await new Promise((r) => setTimeout(r, Math.max(5, Number(pollMs) || 25)))
+  while (!tryAcquireLockOnce(absLock, token, staleMs)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`LOCK_TIMEOUT: 无法在 ${timeoutMs}ms 内获取互斥锁 ${absLock}`)
     }
+    await new Promise((r) => setTimeout(r, Math.max(5, Number(pollMs) || 25)))
   }
 
   try {
     return await fn()
   } finally {
-    try {
-      const raw = readFileSync(absLock, 'utf8').trim()
-      const cur = raw ? JSON.parse(raw) : null
-      if (!cur?.token || cur.token === token) unlinkSync(absLock)
-    } catch { /* already removed */ }
+    releaseLockFile(absLock, token)
+  }
+}
+
+/** 同步版原子文件互斥锁（与 `withFileLock` 共用同一锁文件格式，供同步兼容写封装复用）。 */
+export function withFileLockSync(lockPath, fn, { timeoutMs = 15000, staleMs = 30000, pollMs = 15 } = {}) {
+  const absLock = resolve(String(lockPath))
+  mkdirSync(dirname(absLock), { recursive: true })
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const deadline = Date.now() + Math.max(50, Number(timeoutMs) || 15000)
+  const stepMs = Math.max(5, Number(pollMs) || 15)
+
+  while (!tryAcquireLockOnce(absLock, token, staleMs)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`LOCK_TIMEOUT: 无法在 ${timeoutMs}ms 内获取互斥锁 ${absLock}`)
+    }
+    Atomics.wait(SYNC_WAIT_BUF, 0, 0, stepMs)
+  }
+
+  try {
+    return fn()
+  } finally {
+    releaseLockFile(absLock, token)
   }
 }
 

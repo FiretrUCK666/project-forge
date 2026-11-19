@@ -5,7 +5,6 @@ description: |
   触发词：需求规划、写方案、写设计文档、写 PRD、写 SPEC、写 Todo、拆任务、
   需求分流、立项、先出方案、文档自检、plan feature、write spec、triage task。
 metadata:
-  tier: both
   intent: 写需求 / 澄清拍板 / 定方案 / 拆任务
   script: node .agents/skills/dev-plan/scripts/doc-plan.mjs
   order: 20
@@ -18,7 +17,7 @@ metadata:
 
 ## 前置侦察、多链接协同与多轮互动澄清
 
-1. **先 `dev-explore` 后动笔**：起草任何规划前必须先通过 `repo-map.mjs` 查清真实文件、调用链、CI 命令与 `reusableModules`，禁止凭记忆编造路径或重复造轮子；若收到多个 Issue/PR URL，先用 `flow.mjs inspect [URL...]` 联查互指关系与依赖拓扑序再统一设计。
+1. **先 `dev-explore` 后动笔**：起草任何规划前必须先通过 `repo-map.mjs` 与零写入按需定位器 `doc-locate.mjs`（文档/符号切片定位首选）查清真实文件、调用链、CI 命令与 `reusableModules`，禁止凭记忆编造路径或重复造轮子；若收到多个 Issue/PR URL，先用 `flow.mjs inspect [URL...]` 联查互指关系与依赖拓扑序再统一设计。
 2. **PRD 双触发入口**：
    - 用户明确提出写 PRD；
    - 经 `dev-explore` 勘察发现跨多模块、流程不清或业务痛点较复杂时，**主动向用户建议先建总控 PRD**（支持 1 份总控 PRD 拆分为 N 份切片 `SPEC + Todo`）。
@@ -55,7 +54,7 @@ metadata:
 
 - **不可自审、全历史换人与 3 轮停损锁**：`critique-pass` / `critique-reject` 硬拒与 `owner` 相同者（`SELF_CRITIQUE_REJECTED`）、Round 2+ 复用任意历史轮次审稿人（`BLOCKED_CRITIQUE_SAME_REVIEWER`，退出码 `2`）及未改稿重审（`BLOCKED_CRITIQUE_SAME_SHA`，退出码 `2`）；连轮相同阻塞项或第 3 轮仍退回触发 `STOP_LOSS_ESCALATE`（退出码 `4`），须人类 `critique-override --human-approved --reason "..."` 解锁；Critique 通过后正文未改由维护者执行 `approve`（改正文触发 `BLOCKED_CRITIQUE_STALE`）。支持 `--milestone` 对齐里程碑关联。
 - **`impl` 工作树协同**：若 `flow.mjs start --task <id>` 已先建好隔离工作树，`doc-plan.mjs init --task <id>` 会直接把规划单落盘到 `.worktrees/impl-<id>/` 避免撕裂；若先规划后建工作树，`flow.mjs start --spec ... --todo ...` 会自动将规划文档迁入实施工作树并同步 `-issue<N>-` 命名。
-- **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。`lightweight` 档缺省兄弟技能时退化为原生 Git 指引。
+- **波次移交 `dev-flow`**：单任务 `audit`/`approve` 通过后按 `[NEXT STEP]` 移交 `dev-flow`（`flow.mjs start`）；多切片协同可配合 `flow.mjs start --after <parent>` 起堆叠子分支或 `flow.mjs batch plan` 按文件互斥划分波次。未装配兄弟技能时退化为原生 Git 指引。
 
 ## 标准命令流
 

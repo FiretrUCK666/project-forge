@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-onboarding-b4a.mjs —— B4a 异构勘察、business-flows 与 A7 盲点双向行为断言（C9/C10/C21）。
+ * fixtures-heterogeneous-survey.mjs —— 异构勘察、business-flows 与多生态盲点双向行为断言。
  */
 
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -249,10 +249,10 @@ export function registerStageBOnboardingB4aCases(cases) {
       const aud = auditDoc({ repoRoot: dir, file: 'docs/TDD.md' })
       if (!aud.ok) return `含 preForgeBaseline 的 docs/TDD.md 未通过审计：${JSON.stringify(aud.errors)}`
 
-      const comp = await runNode('compose-agents.mjs', [dir, '--tier', 'lightweight', '--no-backup'])
+      const comp = await runNode('compose-agents.mjs', [dir, '--no-backup'])
       if (comp.status !== 0) return `compose-agents 失败：${comp.stderr}`
       const agentsBytes = readFileSync(join(dir, 'AGENTS.md')).byteLength
-      if (agentsBytes >= 14336) return `lightweight AGENTS.md 超过 14KB 预算：${agentsBytes}`
+      if (agentsBytes >= 24576) return `AGENTS.md 超过 24KB 推荐预算：${agentsBytes}`
       const agentsText = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       if (!agentsText.includes('docs/TDD.md') || !agentsText.includes('business-flows') || agentsText.includes('abc1234')) {
         return `AGENTS.md 未保持薄指针（应指回 docs/TDD.md 而非塞入基线详情）：\n${agentsText}`
@@ -322,7 +322,7 @@ export function registerStageBOnboardingB4aCases(cases) {
 
     try {
       await gitInit(skillDir)
-      const eq = await runNode('equip.mjs', [skillDir, '--tier', 'full', '--no-backup'])
+      const eq = await runNode('equip.mjs', [skillDir, '--no-backup'])
       if (eq.status !== 0) return `C21 equip 失败：${eq.stderr}`
       // 在 .acme-host 写入一个受管 dev-flow 镜像副本
       mkdirSync(join(skillDir, '.acme-host', 'skills', 'dev-flow'), { recursive: true })
@@ -345,7 +345,7 @@ export function registerStageBOnboardingB4aCases(cases) {
       if (!mirrorPaths.has('.acme-host/skills/local-ops') || !mirrorPaths.has('.acme-host/skills/dev-flow')) {
         return `宿主镜像副本未识别到 mirrorCopies：${JSON.stringify([...mirrorPaths])}`
       }
-      const eq2 = await runNode('equip.mjs', [skillDir, '--tier', 'full', '--no-backup'])
+      const eq2 = await runNode('equip.mjs', [skillDir, '--no-backup'])
       if (eq2.status !== 0 || !existsSync(join(skillDir, '.acme-host/skills/dev-flow/SKILL.md'))) {
         return 'equip 重跑误删了宿主镜像目录'
       }

@@ -147,7 +147,7 @@ node scripts/dev/verify-injections.mjs   # 逐条拆掉判据，确认对应断�
 - **内置 Skill 100% 目录自包含与双层同构**：`kit/skills/**` 复制到目标项目的 `.agents/skills/**` 后独立运行，
   **严禁**在 `kit/skills/` 中 `import` `kit/skills/` 之外的仓库模块；修改 `kit/skills/**` 后必须通过
   `node scripts/equip.mjs .` 同步更新本仓库 `.agents/skills/` 并在同一次提交入库。
-- **`AGENTS.md` 硬上限与 v2 无损保护**：根 `AGENTS.md` 严禁超过 30KB（30720 字节；`lightweight` 档 `< 14KB`）；刷新受管区间与装配套件时借助
+- **`AGENTS.md` 硬上限与 v2 无损保护**：根 `AGENTS.md` 建议 `< 24KB`、硬上限 `30KB`（30720 字节）；刷新受管区间与装配套件时借助
   `.agents/skills/.pf-manifest.json`（v2 账本）保护未标 `customized` 的用户手改与删除墓碑不被静默覆盖。
 - **禁 emoji**：代码、注释、文档、提交信息一律禁止 emoji，条目符号用 `-`。
 

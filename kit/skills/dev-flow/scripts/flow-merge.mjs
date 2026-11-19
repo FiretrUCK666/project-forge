@@ -20,10 +20,11 @@ import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
-  validatePreMergeShaAndWorktree, validateVerificationEvidence,
+  resolveEffectiveBaseSha, validatePreMergeShaAndWorktree, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
+import { runLifecycleGovernHook } from './flow-lifecycle-hooks.mjs'
 import { runTrialMerge } from './flow-trial-merge.mjs'
 
 export { handleAbort, handleCleanup, handleStatus }
@@ -53,12 +54,13 @@ export async function assertPreMergeGates({
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
 
   const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), gitDir)?.oid ?? null
+  const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: gitDir })
   const [stZ, headRes, diffNsRes] = await Promise.all([
     gitStatusPorcelainZ(implRoot),
     fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-    !ledger.baseSha
+    !effectiveBase
       ? Promise.resolve(null)
-      : (fastHeadOid && fastHeadOid === ledger.baseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`)),
+      : (fastHeadOid && fastHeadOid === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
   ])
   const op = await detectInProgressGitOp(implRoot, { statusEntries: stZ.entries })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)
@@ -98,8 +100,8 @@ export async function assertPreMergeGates({
   const profile = preProfile ?? parseAgentsProfile(mainRoot)
   const sharedDiffEntries = diffNsRes?.ok ? diffNsRes.entries : undefined
   const [changed, gateFindings] = await Promise.all([
-    getChangedFiles(implRoot, ledger.baseSha, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
-    detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
+    getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
+    detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
   ])
   const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
   const hasDevReview = hasSkillSupport(mainRoot, 'dev-review')
@@ -152,10 +154,10 @@ export async function assertPreMergeGates({
     const hasApprove = Boolean(opts['human-approved'])
     const reasonText = String(opts.reason ?? '').trim()
     if (!hasApprove || !reasonText) {
-      const msg = `BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL: lightweight 档未装配 dev-review 且触及高风险/one-way 边界（${policy.reasons.join('；')}），须人类确认并同时附加 --human-approved --reason "<确认原因>"。\n`
-      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL', reasons: policy.reasons, message: msg.trim() }, null, 2)}\n`)
+      const msg = `BLOCKED_HIGH_RISK_HUMAN_APPROVAL: 未装配 dev-review 且触及高风险/one-way 边界（${policy.reasons.join('；')}），须人类确认并同时附加 --human-approved --reason "<确认原因>"。\n`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL', reasons: policy.reasons, message: msg.trim() }, null, 2)}\n`)
       process.stderr.write(msg)
-      return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_LIGHTWEIGHT_HIGH_RISK_APPROVAL' }
+      return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL' }
     }
     ledger.humanApprovedReason = reasonText
   }
@@ -286,9 +288,10 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
-    const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.implementerId })
+    const mergeContrib = resolveContributorIdentity({ ghLogin: ghProbe?.env?.trackB?.login, ledgerActor: ledger.claimedBy || ledger.implementerId })
+    const mergeCommitSha = mergeRes?.sha ?? mergeRes?.mergeCommit ?? mergeRes?.mergedSha ?? null
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
-      prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead,
+      prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
       reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
       humanApprovedReason: ledger.humanApprovedReason ?? null,
     })
@@ -342,9 +345,10 @@ export async function handleMerge(opts, roots) {
       return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
-      const mergeContrib = resolveContributorIdentity({ ledgerActor: ledger.implementerId })
+      const mergeContrib = resolveContributorIdentity({ ledgerActor: ledger.claimedBy || ledger.implementerId })
+      const mergeCommitSha = mergeRes?.mergedSha ?? mergeRes?.sha ?? null
       const { issueCommentBody: localMergeBody } = buildMergeComments({
-        prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead,
+        prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
         reviewerId: effectiveReviewer, implementerDisplay: mergeContrib.display, linkedIssues: ledger.linkedIssues ?? [],
         humanApprovedReason: ledger.humanApprovedReason ?? null,
       })
@@ -360,6 +364,7 @@ export async function handleMerge(opts, roots) {
 
   ledger.status = 'merged'
   ledger.mergedAt = new Date().toISOString()
+  await runLifecycleGovernHook({ stage: 'merge', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
   const checklist = await buildCleanupChecklist(roots.mainRoot, ledger, remoteUrls, originFull, pushRemote, {
     skipRemoteProbe: Boolean(opts._ghProbe || opts._ghClient),
@@ -422,6 +427,7 @@ export async function handleRelease(opts, roots) {
   ledger.releasedAt = new Date().toISOString()
   ledger.releaseReason = reason || null
   ledger.claimedAt = null
+  ledger.claimedBy = null
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
 
   if (opts.json) {
@@ -519,6 +525,7 @@ export async function handleClaim(opts, roots) {
     }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
+    ledger.claimedBy = String(opts.agent ?? '').trim() || actor
     if (isTakeover) {
       ledger.takeoverReason = takeoverReason
       ledger.takenOverAt = ledger.claimedAt
@@ -589,6 +596,7 @@ export async function handleClaim(opts, roots) {
 
   ledger.status = 'claimed'
   ledger.claimedAt = new Date().toISOString()
+  ledger.claimedBy = String(opts.agent ?? '').trim() || actor
   if (isTakeover) {
     ledger.takeoverReason = takeoverReason
     ledger.takenOverAt = ledger.claimedAt

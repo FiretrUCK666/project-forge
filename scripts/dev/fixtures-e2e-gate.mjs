@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-loop-b5.mjs —— B5 通用 E2E 硬门禁（C15）、A6 合前三方 SHA 校验、三态计分、脱敏建单与零 LLM CLI 故障注入 Stub 双向夹具。
+ * fixtures-e2e-gate.mjs —— 通用 E2E 硬门禁、合前三方 SHA 校验、三态计分与脱敏建单双向夹具。
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'

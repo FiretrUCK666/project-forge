@@ -8,7 +8,7 @@
  * 用法：node scripts/dev/verify-injections.mjs [--only I12] [--jobs 6]
  */
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -88,7 +88,7 @@ function runNodeAsync(scriptPath, args, cwd, label = '') {
 
 async function runFixturesIn(root, expect = '', injId = '') {
   const args = []
-  if (expect) args.push('--only', expect)
+  if (expect) args.push('--only', expect, '--bail-on', expect)
   const { out, err, timedOut, step } = await runNodeAsync(
     join(root, 'scripts', 'dev', 'fixtures.mjs'),
     args,
@@ -151,9 +151,12 @@ async function runBothIn(root, injOrExpect, injId = '') {
   return { failed: [...pre.failed, ...fix.failed] }
 }
 
-/** 把一条注入施加到它自己的副本上，跑门禁，返回结论。副本用完即删。 */
-async function runInjection(inj) {
-  const root = cloneTree(STAGING, join(SANDBOX, `run-${inj.id}`))
+/**
+ * 在复用的 worker 干净基线副本上精确修改目标文件并运行对应门禁，结束后仅还原被修改文件，
+ * 避免每条注入都整树重拷上百遍。
+ */
+async function runInjectionInSlot(inj, root) {
+  const modifiedRels = []
   try {
     const targets = [[inj.file, inj.from, inj.to]]
     for (const other of inj.alsoDropIn ?? []) targets.push([other, inj.from, inj.to])
@@ -165,28 +168,46 @@ async function runInjection(inj) {
       if (!original.includes(from)) {
         return { id: inj.id, what: inj.what, skipped: `${rel} 里找不到要替换的那一段` }
       }
+      if (!modifiedRels.includes(rel)) modifiedRels.push(rel)
       writeFileSync(full, original.replace(from, to), 'utf8')
     }
 
-    const result = await runBothIn(root, inj)
+    let result = await runBothIn(root, inj)
+    if (result.timedOut) {
+      // 仅对偶发进程超时重跑一次以抗 CI 调度抖动；判据未捕获（hit=false）绝不重试
+      result = await runBothIn(root, inj)
+    }
     if (result.timedOut) {
       return { id: inj.id, what: inj.what, skipped: `执行超时 (>${INJ_STEP_TIMEOUT_MS}ms): ${result.timedOutStep}` }
     }
     const sample = result.failed.find((line) => line.includes(inj.expect))
     return { id: inj.id, what: inj.what, hit: Boolean(sample), sample }
   } finally {
-    removeTree(root)
+    for (const rel of modifiedRels) {
+      const src = join(STAGING, rel)
+      const dst = join(root, rel)
+      if (existsSync(src)) {
+        mkdirSync(dirname(dst), { recursive: true })
+        copyFileSync(src, dst)
+      }
+    }
   }
 }
 
-/** 有限并发：每条注入要起几个 node 子进程，并发太高会把机器拖成彼此等 I/O。 */
-async function runWithConcurrency(items, limit, worker) {
+/** 有限并发槽位池：仅预建 `lanes` 份隔离副本，槽位内按脏文件差异刷新与精准还原。 */
+async function runWithSlotPool(items, limit) {
   const results = new Array(items.length)
+  const laneCount = Math.min(limit, items.length)
   let cursor = 0
-  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++
-      results[index] = await worker(items[index])
+  const lanes = Array.from({ length: laneCount }, async (_, laneIdx) => {
+    const slotRoot = cloneTree(STAGING, join(SANDBOX, `slot-${laneIdx}`))
+    try {
+      while (cursor < items.length) {
+        const index = cursor++
+        results[index] = await runInjectionInSlot(items[index], slotRoot)
+      }
+    } finally {
+      removeTree(slotRoot)
     }
   })
   await Promise.all(lanes)
@@ -221,7 +242,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     await flushAndExit(1)
   }
 
-  const results = await runWithConcurrency(selected, jobs, runInjection)
+  const results = await runWithSlotPool(selected, jobs)
 
   let bad = 0
   for (const result of results) {

@@ -26,7 +26,7 @@ A brand-new folder, or a repository that has been maintained for months, usually
 | **Clarify first, then eight stages** | Follows Requirement, Clarification, Design, Implementation, Review, Empirical & Formal Verification, Acceptance, and Merge. Complex requests propose a master PRD, run multi-round clarification to clear open questions, and pass distinct-reviewer, 3-round stop-loss Critique before coding starts |
 | **Full Worktree isolation and evidence** | Repos with commit history isolate in `.worktrees/` with reusable `impl`/`review` slots; whoever implements owns `claim`/`finalize`/`verify`/`submit` with zero dirty tracked files on push; merges require generic run-and-observe E2E (`--e2e-evidence`), dual gates, three-way `headSha` checks, Mermaid `16/12`, and CI |
 | **Adaptive remotes and topologies** | Unified `TaskBackend` handles GitHub, local-only repos without leaking remote terms, and `generic-git` without local merge overreach; also supports linked Issue+PR graphs, stacked PRs, and parallel wave queues |
-| **Two tiers and retro patches** | Small repos can start with `lightweight` (`< 14KB` contract + 3 skills) and upgrade via `--tier full`. Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule patches |
+| **Unified equip and retro patches** | Installs the complete on-disk skill suite without tier-splitting friction (compact contract `< 24KB`, skipping team-only files for solo/local repos). Runtime signals flow into `signals.jsonl` so `retro` proposes concrete gate and rule patches |
 
 ## Contents
 
@@ -50,7 +50,7 @@ A brand-new folder, or a repository that has been maintained for months, usually
   <img src="assets/readme/architecture-en.svg" alt="Role flow across the five everyday skills and the four proof gates required before merging" width="100%">
 </p>
 
-Daily work follows an 8-stage path: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `lightweight` installs the first three skills; `full` installs all five. Describe what you want in plain language, or paste Issue, PR, or Milestone links directly, and `AGENTS.md` routes it to the matching skill (with thin pure-orchestrator wave dispatch when ready specs can run in parallel).
+Daily work follows an 8-stage path: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**. `equip` installs all on-disk skills uniformly. Describe what you want in plain language, or paste Issue, PR, or Milestone links directly, and `AGENTS.md` routes it to the matching skill (with zero-write `doc-locate` context slicing, `flow intake` business triage, and thin pure-orchestrator wave dispatch when ready specs can run in parallel).
 
 Suppose you want to add an "export to CSV" feature:
 
@@ -167,10 +167,10 @@ Daily use is routed by `AGENTS.md`, so you never need these commands. They are h
 
 | Script | Purpose |
 | --- | --- |
-| `node scripts/survey.mjs <dir>` | Read-only inventory of structure, docs, remote topology, auth status, and recommended tier |
+| `node scripts/survey.mjs <dir>` | Read-only inventory of structure, docs, remote topology, and auth status |
 | `node scripts/backup.mjs create <dir>` | Create an incremental compressed snapshot outside the repository |
-| `node scripts/equip.mjs <dir> [--tier lightweight\|full]` | Install or losslessly upgrade `.agents/skills/` (`--check`, `--adopt-custom`, `--restore`) |
-| `node scripts/compose-agents.mjs <dir> [--tier lightweight\|full]` | Generate or losslessly refresh `AGENTS.md` (`lightweight < 14KB`, `full <= 30KB`) |
+| `node scripts/equip.mjs <dir>` | Install or losslessly refresh `.agents/skills/` (`--check`, `--adopt-custom`, `--restore`) |
+| `node scripts/compose-agents.mjs <dir>` | Generate or losslessly refresh `AGENTS.md` (target `< 24KB`, hard ceiling `<= 30KB`) |
 | `node scripts/review.mjs <dir>` | Delivery check: contract completeness and claim verification |
 | `node scripts/handoff.mjs <dir>` | Remove scaffold markers and temporary leftovers for handoff |
 | `node scripts/sync-toc.mjs README.md README.en.md` | Keep the bilingual README tables of contents in sync |

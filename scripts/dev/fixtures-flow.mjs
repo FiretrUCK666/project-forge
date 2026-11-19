@@ -444,9 +444,9 @@ cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全�
   } finally { rmTree(ciDir) }
 }])
 
-cases.push(['五套技能全场景联通：dev-govern 联动 explore/plan/flow 且产出 0 错 Todo + URL 直传正反双向', async () => {
+cases.push(['内置研发技能全场景联通：dev-govern 联动 explore/plan/flow 且产出 0 错 Todo + URL 直传正反双向', async () => {
   const { mkdirSync: mkd, rmSync: rmf } = await import('node:fs')
-  // 1. dev-govern plan --write-todo 联动 dev-explore / dev-plan / dev-flow，并按需在 lightweight 降级
+  // 1. dev-govern plan --write-todo 联动 dev-explore / dev-plan / dev-flow
   const govDir = tmpProject({
     '.gitignore': '.worktrees/\n',
     'README.md': '# gov-link\n',

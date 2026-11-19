@@ -6,13 +6,13 @@
  */
 
 import {
-  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync,
+  closeSync, existsSync, openSync, readdirSync, readSync, statSync,
 } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 
 import {
   buildNonInteractiveEnv, computeWorktreeEnv, execSafe, execShellCommand,
-  killProcessTree, resolveExecutable, withFileLock,
+  killProcessTree, resolveExecutable, withFileLock, withFileLockSync,
 } from './exec.mjs'
 import {
   COMMON_SKIP_DIRS, DEFAULT_WALK_SKIP_DIRS, LIKELY_DEFAULT_BRANCHES,
@@ -21,12 +21,18 @@ import {
   writeAtomic, writeJsonAtomic,
 } from './git-core.mjs'
 import {
-  countCommitsAheadDagFast, getCachedNameStatus, hasDotGitInAncestors, hasUnmergedIndexFast,
+  countCommitsAheadDagFast, getCachedNameStatus, hasUnmergedIndexFast,
   isAncestorLinearFast, readFirstParentsFast, readGitIndexPathsFast, readHeadFast,
   readLooseCommitLogFast, readReflogFast, resolveDefaultBranchFast, resolveGitDirFast,
   resolveRefShaFast, setCachedNameStatus,
 } from './git-fast.mjs'
-import { hasNoGlobalExcludesFast, isCleanWorktreeFast } from './git-status-fast.mjs'
+import { isCleanWorktreeFast } from './git-status-fast.mjs'
+import {
+  ensureWorktreesIgnored,
+  parseWorktreeListPorcelain,
+  resolveRepoRoots,
+  syncDetachedWorktree as syncDetachedWorktreeRaw,
+} from './git-worktree-env.mjs'
 
 export {
   COMMON_SKIP_DIRS,
@@ -35,6 +41,7 @@ export {
   buildNonInteractiveEnv,
   canonicalPath,
   computeWorktreeEnv,
+  ensureWorktreesIgnored,
   execSafe,
   execShellCommand,
   gitRun,
@@ -42,210 +49,21 @@ export {
   isMacOsJunkPath,
   isMainModule,
   killProcessTree,
+  parseWorktreeListPorcelain,
   posixPath,
   readJsonSafe,
   readTextSafe,
   resolveExecutable,
+  resolveRepoRoots,
   samePath,
   sha256File,
   sha256Text,
   unescapeGitPath,
   withFileLock,
+  withFileLockSync,
   writeAtomic,
   writeJsonAtomic,
 }
-
-/** 解析 `git worktree list --porcelain` 输出，路径统一 canonicalPath。 */
-export function parseWorktreeListPorcelain(text) {
-  const items = []
-  let cur = null
-  for (const rawLine of String(text ?? '').split('\n')) {
-    const line = rawLine.trimEnd()
-    if (line.trim() === '') {
-      if (cur) items.push(cur)
-      cur = null
-      continue
-    }
-    if (line.startsWith('worktree ')) {
-      cur = { path: canonicalPath(line.slice(9).trim()), head: null, branch: null, detached: false, bare: false, prunable: null }
-    } else if (cur && line.startsWith('HEAD ')) {
-      cur.head = line.slice(5).trim()
-    } else if (cur && line.startsWith('branch ')) {
-      cur.branch = line.slice(7).trim().replace(/^refs\/heads\//, '')
-    } else if (cur && line.trim() === 'detached') {
-      cur.detached = true
-    } else if (cur && line.trim() === 'bare') {
-      cur.bare = true
-    } else if (cur && line.startsWith('prunable')) {
-      cur.prunable = line.slice(8).trim() || 'missing directory'
-    }
-  }
-  if (cur) items.push(cur)
-  return items
-}
-
-function tryResolveRepoRootsFast(absCwd) {
-  const dotGit = join(absCwd, '.git')
-  if (!existsSync(dotGit)) return null
-  try {
-    const st = statSync(dotGit)
-    if (st.isDirectory()) {
-      if (!existsSync(join(dotGit, 'HEAD'))) return null
-      const cfg = readTextSafe(join(dotGit, 'config')) ?? ''
-      if (/^\s*bare\s*=\s*true\b/im.test(cfg)) return null
-      return {
-        isGit: true,
-        cwd: absCwd,
-        mainRoot: absCwd,
-        workTreeRoot: absCwd,
-        gitDir: dotGit,
-        workTreeGitDir: dotGit,
-        isWorktree: false,
-        isBare: false,
-      }
-    }
-    if (st.isFile()) {
-      const content = readFileSync(dotGit, 'utf8')
-      const m = /^gitdir:\s*(.+)$/im.exec(content)
-      if (!m) return null
-      const perWtGitDir = canonicalPath(resolve(absCwd, m[1].trim()))
-      if (!existsSync(join(perWtGitDir, 'HEAD'))) return null
-      const commondirFile = join(perWtGitDir, 'commondir')
-      if (!existsSync(commondirFile)) return null
-      const relCommon = readFileSync(commondirFile, 'utf8').trim()
-      const commonDir = canonicalPath(resolve(perWtGitDir, relCommon))
-      if (basename(commonDir).toLowerCase() !== '.git') return null
-      if (!samePath(dirname(dirname(perWtGitDir)), commonDir)) return null
-      const mainRoot = canonicalPath(dirname(commonDir))
-      return {
-        isGit: true,
-        cwd: absCwd,
-        mainRoot,
-        workTreeRoot: absCwd,
-        gitDir: commonDir,
-        workTreeGitDir: perWtGitDir,
-        isWorktree: !samePath(mainRoot, absCwd),
-        isBare: false,
-      }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-/**
- * 解析当前目录所属的 Git 仓库边界。
- * 常规仓与 `.worktrees/` 链接工作树通过本地 `.git` 元信息直接零开销解析；
- * 子目录、子模块或 `--separate-git-dir` 自动回退 `git rev-parse`。
- */
-export async function resolveRepoRoots(cwd = process.cwd()) {
-  const absCwd = canonicalPath(cwd)
-  const fast = tryResolveRepoRootsFast(absCwd)
-  if (fast) return fast
-  if (!hasDotGitInAncestors(absCwd)) {
-    return {
-      isGit: false, cwd: absCwd, mainRoot: absCwd, workTreeRoot: absCwd,
-      gitDir: null, workTreeGitDir: null, isWorktree: false, isBare: false,
-    }
-  }
-
-  const res = await gitRun(absCwd, [
-    'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--is-bare-repository', '--git-dir',
-  ])
-  if (!res.ok || !res.stdout) {
-    return {
-      isGit: false,
-      cwd: absCwd,
-      mainRoot: absCwd,
-      workTreeRoot: absCwd,
-      gitDir: null,
-      workTreeGitDir: null,
-      isWorktree: false,
-      isBare: false,
-    }
-  }
-  const lines = res.stdout.split('\n').map((l) => l.trim())
-  const inside = lines[0] === 'true'
-  const topLevel = lines[1] ? canonicalPath(lines[1]) : absCwd
-  const commonDir = lines[2] ? canonicalPath(resolve(absCwd, lines[2])) : join(topLevel, '.git')
-  const isBare = lines[3] === 'true'
-  const perWtGitDir = lines[4] ? canonicalPath(resolve(absCwd, lines[4])) : commonDir
-
-  if (!inside || isBare) {
-    return {
-      isGit: isBare,
-      cwd: absCwd,
-      mainRoot: absCwd,
-      workTreeRoot: absCwd,
-      gitDir: commonDir,
-      workTreeGitDir: perWtGitDir,
-      isWorktree: false,
-      isBare,
-    }
-  }
-
-  let mainRoot = null
-  const isStandardDotGit = basename(commonDir).toLowerCase() === '.git'
-  if (isStandardDotGit && samePath(commonDir, perWtGitDir) && samePath(dirname(commonDir), topLevel)) {
-    mainRoot = topLevel
-  } else if (isStandardDotGit && !samePath(commonDir, perWtGitDir) && samePath(dirname(dirname(perWtGitDir)), commonDir)) {
-    mainRoot = canonicalPath(dirname(commonDir))
-  } else {
-    const wtRes = await gitRun(topLevel, ['worktree', 'list', '--porcelain'])
-    if (wtRes.ok && wtRes.stdout) {
-      const list = parseWorktreeListPorcelain(wtRes.stdout)
-      const primary = list.find((item) => !item.bare)
-      if (primary?.path) mainRoot = primary.path
-    }
-    if (!mainRoot) {
-      mainRoot = isStandardDotGit ? canonicalPath(dirname(commonDir)) : topLevel
-    }
-  }
-
-  return {
-    isGit: true,
-    cwd: absCwd,
-    mainRoot,
-    workTreeRoot: topLevel,
-    gitDir: commonDir,
-    workTreeGitDir: perWtGitDir,
-    isWorktree: !samePath(mainRoot, topLevel),
-    isBare: false,
-  }
-}
-
-function hasWorktreesRuleInFile(filePath) {
-  const txt = readTextSafe(filePath)
-  return Boolean(txt && txt.split('\n').some((l) => /^\/?\.worktrees\/?$/.test(l.trim())))
-}
-
-/** 确保 .worktrees/ 已被 Git 忽略（优先零进程本地核对，写 `.git/info/exclude` 加文件锁）。 */
-export async function ensureWorktreesIgnored(mainRoot, gitDir) {
-  const actualGitDir = gitDir ?? join(mainRoot, '.git')
-  const excludeFile = join(actualGitDir, 'info', 'exclude')
-  if (hasWorktreesRuleInFile(join(mainRoot, '.gitignore')) || hasWorktreesRuleInFile(excludeFile)) return { ok: true, method: 'existing' }
-  if (!hasNoGlobalExcludesFast(actualGitDir) && (await gitRun(mainRoot, ['check-ignore', '-q', '.worktrees'])).ok) return { ok: true, method: 'existing' }
-  const lockPath = join(actualGitDir, 'project-forge-flow', 'locks', 'info-exclude.lock')
-  try {
-    return await withFileLock(lockPath, () => {
-      mkdirSync(dirname(excludeFile), { recursive: true })
-      const cur = readTextSafe(excludeFile) ?? ''
-      const hasRule = cur.split('\n').some((l) => {
-        const t = l.trim()
-        return t === '.worktrees' || t === '.worktrees/' || t === '/.worktrees' || t === '/.worktrees/'
-      })
-      if (!hasRule) {
-        const next = cur.length > 0 && !cur.endsWith('\n') ? `${cur}\n.worktrees/\n` : `${cur}.worktrees/\n`
-        writeAtomic(excludeFile, next)
-      }
-      return { ok: true, method: 'git-info-exclude' }
-    })
-  } catch {
-    return { ok: false, method: 'unignored' }
-  }
-}
-
 
 /** 使用 `git status --porcelain=v1 -z -u` 零截断解析工作区改动与冲突条目（干净工作区优先走零进程校验）。 */
 export async function gitStatusPorcelainZ(cwd) {
@@ -594,35 +412,5 @@ export async function inspectBranchMergeState(mainRoot, { branch, headSha, defau
 
 /** 同步或按需创建干净的 detached 审查隔离工作树至 targetSha，脏工作树直接阻断（支持 resetDirty）。 */
 export async function syncDetachedWorktree(mainRoot, wtAbs, targetSha, { resetDirty = false } = {}) {
-  if (!targetSha || targetSha === 'UNBORN') {
-    throw new Error('目标工作区尚无有效提交（UNBORN HEAD），无法同步审查隔离工作树')
-  }
-  if (existsSync(wtAbs)) {
-    if (resetDirty) {
-      await gitRun(wtAbs, ['reset', '--hard'])
-      await gitRun(wtAbs, ['clean', '-fd'])
-    }
-    const st = await gitStatusPorcelainZ(wtAbs)
-    if (!st.ok) throw new Error(`读取审查工作树状态失败（${wtAbs}）：${st.stderr}`)
-    if (st.entries.length > 0) {
-      throw new Error(`BLOCKED_DIRTY_REVIEW_WORKTREE: 审查工作树 ${wtAbs} 存在未提交改动，请先清理后再推进审查`)
-    }
-    const wtGitDir = resolveGitDirFast(wtAbs)
-    const fastSha = wtGitDir ? readTextSafe(join(wtGitDir, 'HEAD'))?.trim() : null
-    if (fastSha && /^[0-9a-f]{40,64}$/i.test(fastSha) && fastSha === targetSha) {
-      return { ok: true, action: resetDirty ? 'reset-synced' : 'already-synced', headSha: targetSha, path: wtAbs }
-    }
-    const curHead = (fastSha && /^[0-9a-f]{40,64}$/i.test(fastSha))
-      ? { ok: true, stdout: fastSha }
-      : await gitRun(wtAbs, ['rev-parse', 'HEAD'])
-    if (curHead.ok && curHead.stdout.trim() === targetSha) {
-      return { ok: true, action: resetDirty ? 'reset-synced' : 'already-synced', headSha: targetSha, path: wtAbs }
-    }
-    const co = await gitRun(wtAbs, ['checkout', '--detach', targetSha])
-    if (!co.ok) throw new Error(`推进审查工作树至 ${targetSha.slice(0, 7)} 失败：${co.stderr}`)
-    return { ok: true, action: resetDirty ? 'reset-updated' : 'updated', headSha: targetSha, path: wtAbs }
-  }
-  const addRes = await gitRun(mainRoot, ['worktree', 'add', '--detach', wtAbs, targetSha])
-  if (!addRes.ok) throw new Error(`创建审查隔离工作树失败：${addRes.stderr}`)
-  return { ok: true, action: 'created', headSha: targetSha, path: wtAbs }
+  return syncDetachedWorktreeRaw(mainRoot, wtAbs, targetSha, { resetDirty, checkStatusFn: gitStatusPorcelainZ })
 }

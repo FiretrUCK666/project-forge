@@ -174,20 +174,22 @@ export function buildSubmitComments({
 
 /** 渲染 `flow.mjs merge` 成功后的 PR 与关联 Issue 结构化收尾评论。 */
 export function buildMergeComments({
-  prNumber, branch, baseBranch, headSha = '', reviewerId, implementerDisplay, linkedIssues = [], humanApprovedReason = null,
+  prNumber, branch, baseBranch, headSha = '', mergeCommit = '', reviewerId, implementerDisplay, linkedIssues = [], humanApprovedReason = null,
 } = {}) {
   const shortHead = headSha ? String(headSha).slice(0, 7) : ''
+  const shortMerge = mergeCommit ? String(mergeCommit).slice(0, 7) : ''
   const issuesText = linkedIssues.map((n) => `#${n}`).join(', ')
   const reviewLine = reviewerId
     ? `- **审查结论**：由独立审查（\`${reviewerId}\`）复核通过（fail: 无）`
-    : `- **门禁结论**：lightweight 档门禁检查通过${humanApprovedReason ? `，人类确认放行（${humanApprovedReason}）` : ''}`
+    : `- **门禁结论**：门禁检查通过${humanApprovedReason ? `，人类确认放行（${humanApprovedReason}）` : ''}`
   const issueReviewLine = reviewerId
     ? `- **审查结论**：经独立审查（\`${reviewerId}\`）复核通过并合并（fail: 无）`
-    : `- **门禁结论**：lightweight 档门禁检查通过并合并${humanApprovedReason ? `（人类确认：${humanApprovedReason}）` : ''}`
+    : `- **门禁结论**：门禁检查通过并合并${humanApprovedReason ? `（人类确认：${humanApprovedReason}）` : ''}`
   const prCommentBody = [
     `### 已合并（PR #${prNumber} -> \`${baseBranch}\`）`,
     '',
     reviewLine,
+    ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     `- **来源分支 / 实施人**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''} · ${implementerDisplay}`,
     ...(issuesText ? [`- **关联 Issue**：${issuesText}`] : []),
     '- **下一步**：核对待清理 Worktree 与分支清单后由维护者确认执行 `flow.mjs cleanup --confirm`。',
@@ -196,8 +198,106 @@ export function buildMergeComments({
     `### 已合并 · PR #${prNumber}（\`${branch}\` -> \`${baseBranch}\`）`,
     '',
     issueReviewLine,
+    ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     `- **实施人**：${implementerDisplay}`,
     '- **下一步**：主干已更新，按收尾清单清理工作区。',
   ].join('\n')
   return { prCommentBody, issueCommentBody }
+}
+
+const INTAKE_DECISION_LABELS = Object.freeze({
+  accept: '接收进入规划/审查（ACCEPT）',
+  reject: '拒绝关闭（REJECT）',
+  defer: '暂缓排期（DEFER）',
+  'merge-duplicate': '重复提案关闭（MERGE-DUPLICATE）',
+  'needs-info': '需补充信息（NEEDS-INFO）',
+})
+
+/** 渲染 `flow.mjs intake` 三段式评论（结构化决策头 + AI 自由人话段 + 隐藏 `pf-state` 锚点），兼容三类后端。 */
+export function buildIntakeDecisionComments({
+  targetType = 'issue',
+  targetNumber = null,
+  decision = 'accept',
+  reason = '',
+  summary = '',
+  rationale = '',
+  humanExplanation = '',
+  duplicateOf = null,
+  dimensions = [],
+  labels = [],
+  featureRef = null,
+  tddRefs = [],
+  duplicates = [],
+  rollbackHint = '',
+  applied = false,
+  closed = false,
+  actor = 'dev-flow',
+  statePayload = null,
+} = {}) {
+  const kindLabel = targetType === 'pr' ? 'PR' : 'Issue'
+  const refLabel = targetNumber != null ? `${kindLabel} #${targetNumber}` : kindLabel
+  const decisionTitle = INTAKE_DECISION_LABELS[decision] ?? String(decision).toUpperCase()
+  const normDupOf = duplicateOf ? String(duplicateOf).replace(/^#/, '').trim() : null
+  const payload = statePayload && typeof statePayload === 'object'
+    ? statePayload
+    : {
+        kind: 'intake',
+        targetType,
+        targetNumber,
+        decision,
+        labels: Array.isArray(labels) ? labels : [],
+        applied: Boolean(applied),
+        closed: Boolean(closed),
+        ...(featureRef ? { featureRef } : {}),
+        ...(normDupOf ? { duplicateOf: normDupOf } : {}),
+        actor,
+      }
+  const stateTag = `<!-- pf-state:${JSON.stringify(payload)} -->`
+
+  const lines = [
+    `### 业务分诊结论 · ${decisionTitle}（${refLabel}）`,
+    '',
+    `- **分诊判定**：\`${decision}\``,
+    `- **处理方式**：${applied ? (closed ? '已执行打标并关闭' : '已执行评论与打标') : '仅预演评估（未执行远端写操作）'}`,
+    ...(labels.length > 0 ? [`- **建议/已贴标签**：${labels.map((l) => `\`${l}\``).join('、')}`] : []),
+    ...(normDupOf ? [`- **重复指向**：#${normDupOf}`] : []),
+    ...(featureRef ? [`- **关联特性锚点**：\`${featureRef}\``] : []),
+    ...(tddRefs.length > 0 ? [`- **契约定位依据**：${tddRefs.map((r) => `\`${r}\``).join('、')}`] : []),
+    ...(duplicates.length > 0 ? [`- **历史相似条目**：${duplicates.map((d) => (typeof d === 'string' ? `\`${d}\`` : `\`${d.ref ?? d.path ?? d.title}\``)).join('、')}`] : []),
+  ]
+
+  if (Array.isArray(dimensions) && dimensions.length > 0) {
+    lines.push('', '| 评估维度 | 结果 | 依据摘要 |', '| --- | --- | --- |')
+    for (const d of dimensions) {
+      lines.push(`| ${cleanMdCell(d.name ?? d.id)} | ${cleanMdCell(d.status ?? 'ok')} | ${cleanMdCell(d.detail ?? d.evidence ?? '-')} |`)
+    }
+  }
+
+  lines.push('', '#### 说明与后续指引', '')
+  const narrative = String(rationale || humanExplanation || reason || summary || '已完成五维业务边界与契约核对。').trim()
+  lines.push(narrative)
+  if (rollbackHint) {
+    lines.push('', `- **撤销与恢复路径**：${rollbackHint}`)
+  }
+  lines.push('', stateTag)
+
+  const commentBody = lines.join('\n')
+  const delegatedPayload = {
+    action: closed ? (targetType === 'pr' ? 'close-pr' : 'close-issue') : 'comment',
+    targetType,
+    targetNumber,
+    decision,
+    labels: Array.isArray(labels) ? labels : [],
+    ...(normDupOf ? { duplicateOf: normDupOf } : {}),
+    commentBody,
+    statePayload: payload,
+    ...(rollbackHint ? { rollbackHint } : {}),
+  }
+  return {
+    commentBody,
+    stateTag,
+    statePayload: payload,
+    delegatedPayload,
+    summaryLine: `${refLabel}: ${decision}${reason ? ` (${reason})` : ''}`,
+  }
 }

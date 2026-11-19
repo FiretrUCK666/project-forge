@@ -1,9 +1,9 @@
 /**
- * task-backend.mjs —— 统一 16 接口 TaskBackend 抽象层（GitHubBackend / GenericRemoteBackend / LocalOnlyBackend）。
+ * task-backend.mjs —— 统一 17 接口 TaskBackend 抽象层（GitHubBackend / GenericRemoteBackend / LocalOnlyBackend）。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），统一三态后端契约：
  *   claimTask, releaseTask, postComment, addLabels, removeLabel, createIssue, getIssue, listIssues,
- *   closeIssue, findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr
+ *   closeIssue, findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr, closePr
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -20,9 +20,11 @@ import {
   claimLocalIssue,
   closeLocalIssue,
   closeLocalMilestone,
+  closeLocalPr,
   createLocalIssue,
   createLocalMilestone,
   getLocalIssue,
+  getLocalPr,
   listLocalIssues,
   listLocalMilestones,
   releaseLocalIssue,
@@ -73,6 +75,7 @@ export const TASK_BACKEND_METHODS = Object.freeze([
   'listComments',
   'getCommitChecks',
   'mergePr',
+  'closePr',
 ])
 
 function resolveEffectiveGitDir(mainRoot, gitDir) {
@@ -93,9 +96,8 @@ function eventLogPath(mainRoot, gitDir, taskId = 'shared') {
 
 async function appendBackendEvent(mainRoot, gitDir, taskId, event) {
   const file = eventLogPath(mainRoot, gitDir, taskId)
-  const lockPath = `${file}.lock`
   const line = `${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`
-  await withFileLock(lockPath, () => {
+  await withFileLock(`${file}.lock`, () => {
     mkdirSync(join(file, '..'), { recursive: true })
     appendFileSync(file, line, 'utf8')
   })
@@ -104,8 +106,7 @@ async function appendBackendEvent(mainRoot, gitDir, taskId, event) {
 
 function readBackendEvents(mainRoot, gitDir, taskId) {
   if (!taskId) return []
-  const file = eventLogPath(mainRoot, gitDir, taskId)
-  const raw = readTextSafe(file)
+  const raw = readTextSafe(eventLogPath(mainRoot, gitDir, taskId))
   if (!raw) return []
   const events = []
   for (const line of raw.split('\n')) {
@@ -129,10 +130,35 @@ function normalizeFindArgs(repoOrOpts, headBranch, opts = {}) {
 }
 
 function normalizeGetPrArgs(repoOrOpts, number) {
+  if (typeof repoOrOpts === 'number') return { repo: null, number: repoOrOpts }
+  if (typeof repoOrOpts === 'string' && number === undefined && /^\d+$/.test(repoOrOpts.trim())) {
+    return { repo: null, number: Number(repoOrOpts.trim()) }
+  }
   if (repoOrOpts && typeof repoOrOpts === 'object') {
-    return { repo: repoOrOpts.repo ?? repoOrOpts.targetRepo ?? null, number: repoOrOpts.number }
+    return { repo: repoOrOpts.repo ?? repoOrOpts.targetRepo ?? null, number: repoOrOpts.number ?? repoOrOpts.prNumber }
   }
   return { repo: repoOrOpts ?? null, number }
+}
+
+function normalizeClosePrArgs(arg, maybeOpts = {}) {
+  const obj = (arg && typeof arg === 'object')
+    ? arg
+    : { ...(maybeOpts && typeof maybeOpts === 'object' ? maybeOpts : {}), number: arg }
+  const prNumber = Number(obj.number ?? obj.prNumber)
+  const labels = Array.isArray(obj.labels)
+    ? [...new Set(obj.labels.map((l) => String(l ?? '').trim()).filter(Boolean))]
+    : []
+  return {
+    repo: obj.repo ?? obj.targetRepo ?? null,
+    prNumber,
+    comment: String(obj.comment ?? '').trim(),
+    labels,
+    dryRun: Boolean(obj.dryRun),
+    statePayload: obj.statePayload && typeof obj.statePayload === 'object' ? obj.statePayload : {},
+    reason: String(obj.reason ?? '').trim(),
+    decision: obj.decision ?? null,
+    taskId: obj.taskId ?? null,
+  }
 }
 
 function normalizeIssueArgs(arg, maybeNumber) {
@@ -152,6 +178,7 @@ function normalizeListCommentArgs(arg, maybeNumber) {
 
 function buildLocalBackendMixins(kind, mainRoot, gitDir) {
   const issueListOf = (issue, issues) => (Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : []))
+  const modeLabel = kind === 'local-only' ? 'local-issues-store' : 'generic-remote-local-tracking'
 
   const localClaimTask = async ({
     taskId, issue, issues, prNumber, actor, actorDisplay, branch,
@@ -160,64 +187,49 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
     const nums = issueListOf(issue, issues)
     const results = []
     for (const num of nums) {
-      const cur = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (cur.ok) {
-        const res = await claimLocalIssue({
-          mainRoot, gitDir, number: num, taskId, actor, actorDisplay, branch, takeover, reason, labels,
-        })
+      if (getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
+        const res = await claimLocalIssue({ mainRoot, gitDir, number: num, taskId, actor, actorDisplay, branch, takeover, reason, labels })
         if (!res.ok) return res
         results.push(res)
       }
     }
     const eventPath = await appendBackendEvent(mainRoot, gitDir, taskId ?? 'shared', {
-      backend: kind,
-      action: takeover ? 'takeover' : 'claim',
-      taskId,
-      issues: nums,
-      prNumber: prNumber ?? null,
-      actor,
-      previousActor: previousActor ?? null,
-      branch,
-      ...(reason ? { reason } : {}),
+      backend: kind, action: takeover ? 'takeover' : 'claim', taskId, issues: nums,
+      prNumber: prNumber ?? null, actor, previousActor: previousActor ?? null, branch, ...(reason ? { reason } : {}),
     })
-    return { ok: true, local: true, mode: kind === 'local-only' ? 'local-issues-store' : 'generic-remote-local-tracking', results, eventPath }
+    return { ok: true, local: true, mode: modeLabel, results, eventPath }
   }
 
   const localReleaseTask = async ({ taskId, issue, issues, actor, actorDisplay, branch, reason = '' } = {}) => {
     const nums = issueListOf(issue, issues)
     const results = []
     for (const num of nums) {
-      const cur = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (cur.ok) {
+      if (getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
         results.push(await releaseLocalIssue({ mainRoot, gitDir, number: num, taskId, actor, actorDisplay, branch, reason }))
       }
     }
     const eventPath = await appendBackendEvent(mainRoot, gitDir, taskId ?? 'shared', {
       backend: kind, action: 'release', taskId, issues: nums, actor, branch, ...(reason ? { reason } : {}),
     })
-    return { ok: true, local: true, mode: kind === 'local-only' ? 'local-issues-store' : 'generic-remote-local-tracking', results, eventPath }
+    return { ok: true, local: true, mode: modeLabel, results, eventPath }
   }
 
   const localPostComment = async ({ taskId, repo, number, body, author, statePayload = {}, deduplicate = true } = {}) => {
     const num = number !== undefined && number !== null ? Number(number) : null
-    if (num && Number.isInteger(num) && num > 0) {
-      const cur = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (cur.ok) {
-        return addLocalIssueComment({ mainRoot, gitDir, number: num, body, author, statePayload, deduplicate })
-      }
+    if (num && Number.isInteger(num) && num > 0 && getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
+      return addLocalIssueComment({ mainRoot, gitDir, number: num, body, author, statePayload, deduplicate })
     }
     const idKey = num ? `ref-${num}` : (taskId ?? statePayload?.taskId ?? 'shared')
     const eventPath = await appendBackendEvent(mainRoot, gitDir, idKey, {
       backend: kind, action: 'comment', repo: repo ?? null, number: num, body, statePayload,
     })
-    return { ok: true, local: true, mode: kind === 'local-only' ? 'local-issues-store' : 'generic-remote-local-tracking', id: null, verifiedReadback: true, eventPath }
+    return { ok: true, local: true, mode: modeLabel, id: null, verifiedReadback: true, eventPath }
   }
 
   const localAddLabels = async ({ taskId, repo, number, labels = [] } = {}) => {
     const num = number !== undefined && number !== null ? Number(number) : null
-    if (num && Number.isInteger(num) && num > 0) {
-      const cur = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (cur.ok) return addLocalIssueLabels({ mainRoot, gitDir, number: num, labels })
+    if (num && Number.isInteger(num) && num > 0 && getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
+      return addLocalIssueLabels({ mainRoot, gitDir, number: num, labels })
     }
     await appendBackendEvent(mainRoot, gitDir, taskId ?? (num ? `ref-${num}` : 'shared'), {
       backend: kind, action: 'add-labels', repo: repo ?? null, number: num, labels,
@@ -227,9 +239,8 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
 
   const localRemoveLabel = async ({ taskId, repo, number, label } = {}) => {
     const num = number !== undefined && number !== null ? Number(number) : null
-    if (num && Number.isInteger(num) && num > 0) {
-      const cur = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (cur.ok) return removeLocalIssueLabel({ mainRoot, gitDir, number: num, label })
+    if (num && Number.isInteger(num) && num > 0 && getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
+      return removeLocalIssueLabel({ mainRoot, gitDir, number: num, label })
     }
     await appendBackendEvent(mainRoot, gitDir, taskId ?? (num ? `ref-${num}` : 'shared'), {
       backend: kind, action: 'remove-label', repo: repo ?? null, number: num, label,
@@ -240,14 +251,8 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
   const localCreateIssue = async ({ title, body = '', labels = [], assignees = [], milestone = null } = {}) => (
     createLocalIssue({ mainRoot, gitDir, title, body, labels, assignees, milestone })
   )
-
-  const localGetIssue = async (arg, maybeNumber) => {
-    const { number } = normalizeIssueArgs(arg, maybeNumber)
-    return getLocalIssue({ mainRoot, gitDir, number })
-  }
-
+  const localGetIssue = async (arg, maybeNumber) => getLocalIssue({ mainRoot, gitDir, number: normalizeIssueArgs(arg, maybeNumber).number })
   const localListIssues = async ({ state = 'open' } = {}) => listLocalIssues({ mainRoot, gitDir, state })
-
   const localCloseIssue = async (arg, maybeNumber) => {
     const norm = (arg && typeof arg === 'object') ? arg : { number: maybeNumber ?? arg }
     return closeLocalIssue({
@@ -261,9 +266,9 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
     const num = norm.number !== undefined && norm.number !== null ? Number(norm.number) : null
     if (num && Number.isInteger(num) && num > 0) {
       const issue = getLocalIssue({ mainRoot, gitDir, number: num })
-      if (issue.ok) {
-        return { ok: true, local: true, comments: issue.comments }
-      }
+      if (issue.ok) return { ok: true, local: true, comments: issue.comments }
+      const pr = getLocalPr({ mainRoot, gitDir, number: num })
+      if (pr.ok) return { ok: true, local: true, comments: pr.comments }
     }
     const keys = [...new Set([num ? `ref-${num}` : null, norm.taskId, !num && !norm.taskId ? 'shared' : null].filter(Boolean))]
     const events = []
@@ -290,17 +295,8 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
   }
 
   return {
-    localClaimTask,
-    localReleaseTask,
-    localPostComment,
-    localAddLabels,
-    localRemoveLabel,
-    localSyncStateLabel,
-    localCreateIssue,
-    localGetIssue,
-    localListIssues,
-    localCloseIssue,
-    localListComments,
+    localClaimTask, localReleaseTask, localPostComment, localAddLabels, localRemoveLabel,
+    localSyncStateLabel, localCreateIssue, localGetIssue, localListIssues, localCloseIssue, localListComments,
   }
 }
 
@@ -315,6 +311,11 @@ export class GitHubBackend {
     this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, milestones: true, checks: true, releases: true })
   }
 
+  _call(method, args, fallback = { ok: false, skipped: true, reason: 'client-unsupported' }) {
+    if (typeof this.client?.[method] !== 'function') return Promise.resolve(fallback)
+    return Promise.resolve(this.client[method](...args))
+  }
+
   async claimTask({
     taskId, issue, issues, prNumber, actor, actorDisplay, branch,
     takeover = false, reason = '', previousActor = null, labels = ['in-progress'],
@@ -324,8 +325,7 @@ export class GitHubBackend {
     const results = []
     for (const num of issueList) {
       const comment = await this.postComment({
-        repo,
-        number: num,
+        repo, number: num,
         body: takeover
           ? `接管认领：由 ${actorDisplay ?? actor} 接管任务 \`${taskId}\`（分支 \`${branch}\`，原认领人：${previousActor ?? '无/未知'}），原因：${reason}。`
           : `认领：由 ${actorDisplay ?? actor} 在分支 \`${branch}\` 开始处理（task: \`${taskId}\`）。`,
@@ -339,8 +339,7 @@ export class GitHubBackend {
     let prResult = null
     if (takeover && prNumber) {
       prResult = await this.postComment({
-        repo,
-        number: prNumber,
+        repo, number: prNumber,
         body: `接管认领：由 ${actorDisplay ?? actor} 接管关联 PR #${prNumber}（分支 \`${branch}\`，关联 Issue：${issueList.map((n) => `#${n}`).join(', ')}），原因：${reason}。`,
         statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, prNumber, reason },
       })
@@ -354,8 +353,7 @@ export class GitHubBackend {
     const results = []
     for (const num of issueList) {
       const comment = await this.postComment({
-        repo,
-        number: num,
+        repo, number: num,
         body: `释放认领：${actorDisplay ?? actor} 放弃任务 \`${taskId}\`（分支 \`${branch ?? 'none'}\`）${reason ? `，原因：${reason}` : ''}。`,
         statePayload: { taskId, action: 'release', agent: actor, branch: branch ?? null, ...(reason ? { reason } : {}) },
       })
@@ -365,25 +363,16 @@ export class GitHubBackend {
     return { ok: true, results }
   }
 
-  async postComment({ repo, number, body, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
-    if (typeof this.client?.postComment !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.postComment({ repo: repo ?? this.targetRepo, number, body, statePayload, deduplicate, existingComments })
+  postComment({ repo, number, body, statePayload = {}, deduplicate = true, existingComments = null } = {}) {
+    return this._call('postComment', [{ repo: repo ?? this.targetRepo, number, body, statePayload, deduplicate, existingComments }])
   }
 
-  async addLabels({ repo, number, labels = [] } = {}) {
-    if (typeof this.client?.addLabels !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.addLabels({ repo: repo ?? this.targetRepo, number, labels })
+  addLabels({ repo, number, labels = [], isPr = false } = {}) {
+    return this._call('addLabels', [{ repo: repo ?? this.targetRepo, number, labels, isPr }])
   }
 
-  async removeLabel({ repo, number, label } = {}) {
-    if (typeof this.client?.removeLabel !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.removeLabel({ repo: repo ?? this.targetRepo, number, label })
+  removeLabel({ repo, number, label } = {}) {
+    return this._call('removeLabel', [{ repo: repo ?? this.targetRepo, number, label }])
   }
 
   async syncStateLabel({ repo, number, state, fallbackLabels = [] } = {}) {
@@ -393,8 +382,7 @@ export class GitHubBackend {
       ? ((await Promise.resolve(this.client.listLabels({ repo: targetRepo })).catch(() => null))?.labels ?? [])
       : []
     const { primary, removes } = resolveSemanticStateLabel(state, repoLabels)
-    const addLabelsList = primary ? [primary] : fallbackLabels
-    const addRes = await this.addLabels({ repo: targetRepo, number, labels: addLabelsList })
+    const addRes = await this.addLabels({ repo: targetRepo, number, labels: primary ? [primary] : fallbackLabels })
     if (addRes?.reason && /403|forbidden/i.test(String(addRes.reason))) {
       return { ok: false, skipped: true, reason: addRes.reason, label: primary }
     }
@@ -404,118 +392,88 @@ export class GitHubBackend {
     return { ok: Boolean(addRes?.ok || !addRes?.skipped), label: primary, removes, addRes }
   }
 
-  async createIssue({ repo, title, body = '', labels = [], milestone = null } = {}) {
-    if (typeof this.client?.createIssue !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.createIssue({ repo: repo ?? this.targetRepo, title, body, labels, ...(milestone ? { milestone } : {}) })
+  createIssue({ repo, title, body = '', labels = [], milestone = null } = {}) {
+    return this._call('createIssue', [{ repo: repo ?? this.targetRepo, title, body, labels, ...(milestone ? { milestone } : {}) }])
   }
-
-  async listMilestones({ repo, state = 'open' } = {}) {
-    if (typeof this.client?.listMilestones !== 'function') return { ok: false, milestones: [], skipped: true, reason: 'client-unsupported' }
-    return this.client.listMilestones({ repo: repo ?? this.targetRepo, state })
+  listMilestones({ repo, state = 'open' } = {}) {
+    return this._call('listMilestones', [{ repo: repo ?? this.targetRepo, state }], { ok: false, milestones: [], skipped: true, reason: 'client-unsupported' })
   }
-
-  async createMilestone({ repo, title, description = '', dueOn = null } = {}) {
-    if (typeof this.client?.createMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
-    return this.client.createMilestone({ repo: repo ?? this.targetRepo, title, description, dueOn })
+  createMilestone({ repo, title, description = '', dueOn = null } = {}) {
+    return this._call('createMilestone', [{ repo: repo ?? this.targetRepo, title, description, dueOn }])
   }
-
-  async closeMilestone({ repo, number } = {}) {
-    if (typeof this.client?.closeMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
-    return this.client.closeMilestone({ repo: repo ?? this.targetRepo, number })
+  closeMilestone({ repo, number } = {}) {
+    return this._call('closeMilestone', [{ repo: repo ?? this.targetRepo, number }])
   }
-
-  async assignMilestone({ repo, number, milestone } = {}) {
-    if (typeof this.client?.assignMilestone !== 'function') return { ok: false, skipped: true, reason: 'client-unsupported' }
-    return this.client.assignMilestone({ repo: repo ?? this.targetRepo, number, milestone })
+  assignMilestone({ repo, number, milestone } = {}) {
+    return this._call('assignMilestone', [{ repo: repo ?? this.targetRepo, number, milestone }])
   }
-
-  async getIssue(arg, maybeNumber) {
-    if (typeof this.client?.getIssue !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
+  getIssue(arg, maybeNumber) {
     const norm = normalizeIssueArgs(arg, maybeNumber)
-    return this.client.getIssue(norm.repo ?? this.targetRepo, norm.number)
+    return this._call('getIssue', [norm.repo ?? this.targetRepo, norm.number])
   }
-
-  async listIssues({ repo, state = 'open', perPage = 30 } = {}) {
-    if (typeof this.client?.listIssues !== 'function') {
-      return { ok: false, issues: [], skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.listIssues({ repo: repo ?? this.targetRepo, state, perPage })
+  listIssues({ repo, state = 'open', perPage = 30 } = {}) {
+    return this._call('listIssues', [{ repo: repo ?? this.targetRepo, state, perPage }], { ok: false, issues: [], skipped: true, reason: 'client-unsupported' })
   }
-
-  async closeIssue(arg, maybeNumber) {
-    if (typeof this.client?.closeIssue !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
+  closeIssue(arg, maybeNumber) {
     const norm = normalizeIssueArgs(arg, maybeNumber)
-    return this.client.closeIssue({ repo: norm.repo ?? this.targetRepo, number: norm.number })
+    return this._call('closeIssue', [{ repo: norm.repo ?? this.targetRepo, number: norm.number }])
   }
-
-  async findOpenPrForBranch(repoOrOpts, headBranch, opts = {}) {
+  findOpenPrForBranch(repoOrOpts, headBranch, opts = {}) {
     const parsed = normalizeFindArgs(repoOrOpts, headBranch, opts)
-    if (typeof this.client?.findOpenPrForBranch !== 'function') {
-      return { ok: false, prs: [], skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.findOpenPrForBranch(parsed.repo ?? this.targetRepo, parsed.headBranch, {
-      headOwner: parsed.headOwner,
-      base: parsed.base,
-    })
+    return this._call('findOpenPrForBranch', [parsed.repo ?? this.targetRepo, parsed.headBranch, { headOwner: parsed.headOwner, base: parsed.base }], { ok: false, prs: [], skipped: true, reason: 'client-unsupported' })
   }
-
-  async createPr({ targetRepo, repo, head, base, title, body, draft = false } = {}) {
-    if (typeof this.client?.createPr !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.createPr({
-      targetRepo: targetRepo ?? repo ?? this.targetRepo,
-      head,
-      base,
-      title,
-      body,
-      draft,
-    })
+  createPr({ targetRepo, repo, head, base, title, body, draft = false } = {}) {
+    return this._call('createPr', [{ targetRepo: targetRepo ?? repo ?? this.targetRepo, head, base, title, body, draft }])
   }
-
-  async updatePrBase({ repo, number, base } = {}) {
-    if (typeof this.client?.updatePrBase !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
-    return this.client.updatePrBase({ repo: repo ?? this.targetRepo, number, base })
+  updatePrBase({ repo, number, base } = {}) {
+    return this._call('updatePrBase', [{ repo: repo ?? this.targetRepo, number, base }])
   }
-
-  async getPr(repoOrOpts, number) {
-    if (typeof this.client?.getPr !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
-    }
+  getPr(repoOrOpts, number) {
     const parsed = normalizeGetPrArgs(repoOrOpts, number)
-    return this.client.getPr(parsed.repo ?? this.targetRepo, parsed.number)
+    return this._call('getPr', [parsed.repo ?? this.targetRepo, parsed.number])
   }
-
-  async listComments(arg, maybeNumber) {
-    if (typeof this.client?.listComments !== 'function') {
-      return { ok: false, comments: [], skipped: true, reason: 'client-unsupported' }
-    }
+  listComments(arg, maybeNumber) {
     const norm = normalizeListCommentArgs(arg, maybeNumber)
-    return this.client.listComments({ ...norm, repo: norm.repo ?? this.targetRepo })
+    return this._call('listComments', [{ ...norm, repo: norm.repo ?? this.targetRepo }], { ok: false, comments: [], skipped: true, reason: 'client-unsupported' })
+  }
+  getCommitChecks({ repo, ref } = {}) {
+    return this._call('getCommitChecks', [{ repo: repo ?? this.targetRepo, ref }], { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true })
+  }
+  mergePr({ repo, number, method = 'merge', sha } = {}) {
+    return this._call('mergePr', [{ repo: repo ?? this.targetRepo, number, method, ...(sha ? { sha } : {}) }])
   }
 
-  async getCommitChecks({ repo, ref } = {}) {
-    if (typeof this.client?.getCommitChecks !== 'function') {
-      return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true }
+  async closePr(arg, maybeOpts = {}) {
+    const cfg = normalizeClosePrArgs(arg, maybeOpts)
+    const targetRepo = cfg.repo ?? this.targetRepo
+    if (!Number.isInteger(cfg.prNumber) || cfg.prNumber <= 0) return { ok: false, error: 'invalid-pr-number' }
+    if (cfg.dryRun) {
+      return {
+        ok: true,
+        dryRun: true,
+        repo: targetRepo,
+        number: cfg.prNumber,
+        state: 'OPEN',
+        planned: { comment: Boolean(cfg.comment), labels: cfg.labels, close: true },
+      }
     }
-    return this.client.getCommitChecks({ repo: repo ?? this.targetRepo, ref })
-  }
-
-  async mergePr({ repo, number, method = 'merge', sha } = {}) {
-    if (typeof this.client?.mergePr !== 'function') {
-      return { ok: false, skipped: true, reason: 'client-unsupported' }
+    const commentResult = cfg.comment
+      ? await this.postComment({ repo: targetRepo, number: cfg.prNumber, body: cfg.comment, statePayload: cfg.statePayload })
+      : null
+    const labelResult = cfg.labels.length > 0
+      ? await this.addLabels({ repo: targetRepo, number: cfg.prNumber, labels: cfg.labels, isPr: true })
+      : null
+    const closeRes = await this._call('closePr', [{ repo: targetRepo, number: cfg.prNumber, dryRun: false }])
+    return {
+      ...closeRes,
+      number: closeRes?.number ?? cfg.prNumber,
+      ...(commentResult ? { commentResult } : {}),
+      ...(labelResult ? { labelResult } : {}),
     }
-    return this.client.mergePr({ repo: repo ?? this.targetRepo, number, method, ...(sha ? { sha } : {}) })
   }
 }
+
+export { GitHubBackend as GitHubTaskBackend }
 
 export class GenericRemoteBackend {
   constructor({ targetRepo = null, pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null } = {}) {
@@ -562,51 +520,64 @@ export class GenericRemoteBackend {
     const res = await assignLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args })
     return { ...res, capabilities: this.capabilities, platformSetupChecklist: [`在托管平台将 #${args.number} 关联至里程碑 ${args.milestone}`] }
   }
-
-  async findOpenPrForBranch() {
-    return { ok: true, prs: [], skipped: true, reason: 'generic-git' }
-  }
-
+  async findOpenPrForBranch() { return { ok: true, prs: [], skipped: true, reason: 'generic-git' } }
   async createPr({ taskId, head, base, title } = {}) {
-    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
-      backend: this.kind, action: 'mr-intent', head, base, title,
-    })
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', { backend: this.kind, action: 'mr-intent', head, base, title })
     return { ok: true, mode: 'generic-git-push-only', number: null, status: 'submitted', eventPath }
   }
-
   async updatePrBase({ taskId, number, base } = {}) {
-    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
-      backend: this.kind, action: 'update-pr-base', number: number ?? null, base,
-    })
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', { backend: this.kind, action: 'update-pr-base', number: number ?? null, base })
     return { ok: true, number: number ?? null, base, mode: 'generic-remote-event-log', eventPath }
   }
+  async getPr() { return { ok: false, skipped: true, reason: 'generic-git' } }
+  async getCommitChecks() { return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'generic-git' } }
 
-  async getPr() {
-    return { ok: false, skipped: true, reason: 'generic-git' }
-  }
-
-  async getCommitChecks() {
-    return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'generic-git' }
+  async closePr(arg, maybeOpts = {}) {
+    const cfg = normalizeClosePrArgs(arg, maybeOpts)
+    if (!Number.isInteger(cfg.prNumber) || cfg.prNumber <= 0) return { ok: false, error: 'invalid-pr-number' }
+    const delegatedPayload = {
+      action: 'close-pr',
+      targetType: 'pr',
+      targetNumber: cfg.prNumber,
+      repo: cfg.repo ?? this.targetRepo,
+      comment: cfg.comment || null,
+      labels: cfg.labels,
+      state: 'closed',
+      ...(cfg.reason ? { reason: cfg.reason } : {}),
+      ...(Object.keys(cfg.statePayload).length > 0 ? { statePayload: cfg.statePayload } : {}),
+      instructions: [
+        cfg.comment ? `在托管平台 PR/MR #${cfg.prNumber} 下发布分诊说明评论` : null,
+        cfg.labels.length > 0 ? `为 PR/MR #${cfg.prNumber} 贴上标签：${cfg.labels.join(', ')}` : null,
+        `在托管平台 Web 控制台关闭 PR/MR #${cfg.prNumber}`,
+      ].filter(Boolean),
+    }
+    let eventPath = null
+    if (!cfg.dryRun) {
+      eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, cfg.taskId ?? `pr-${cfg.prNumber}`, {
+        backend: this.kind, action: 'close-pr-delegated', number: cfg.prNumber, labels: cfg.labels, comment: cfg.comment || null,
+      })
+    }
+    return {
+      ok: true,
+      delegated: true,
+      dryRun: cfg.dryRun,
+      number: cfg.prNumber,
+      state: cfg.dryRun ? 'OPEN' : 'CLOSED',
+      delegatedPayload,
+      ...(eventPath ? { eventPath } : {}),
+    }
   }
 
   async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {
     if (!remoteMerged && !humanApproved) {
       return {
-        ok: false,
-        blocked: true,
-        code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED',
-        exitCode: 3,
+        ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', exitCode: 3,
         message: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。',
       }
     }
     return {
-      ok: true,
-      merged: true,
-      remoteMerged: Boolean(remoteMerged),
-      humanApproved: Boolean(humanApproved),
-      state: 'MERGED',
-      branch: branch ?? ledger?.branch ?? null,
-      into: baseBranch ?? ledger?.baseBranch ?? 'main',
+      ok: true, merged: true, remoteMerged: Boolean(remoteMerged), humanApproved: Boolean(humanApproved),
+      state: 'MERGED', branch: branch ?? ledger?.branch ?? null, into: baseBranch ?? ledger?.baseBranch ?? 'main',
     }
   }
 }
@@ -636,76 +607,68 @@ export class LocalOnlyBackend {
   createMilestone(args = {}) { return createLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
   closeMilestone(args = {}) { return closeLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
   assignMilestone(args = {}) { return assignLocalMilestone({ mainRoot: this.mainRoot, gitDir: this.gitDir, ...args }) }
-
-  async findOpenPrForBranch() {
-    return { ok: true, prs: [], skipped: true, reason: 'local-only' }
-  }
+  async findOpenPrForBranch() { return { ok: true, prs: [], skipped: true, reason: 'local-only' } }
 
   async createPr({ taskId, head, base, title } = {}) {
-    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
-      backend: this.kind, action: 'local-ready', head, base, title,
-    })
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', { backend: this.kind, action: 'local-ready', head, base, title })
     return { ok: true, localReady: true, status: 'local-ready', number: null, eventPath }
   }
-
   async updatePrBase({ taskId, number, base } = {}) {
-    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', {
-      backend: this.kind, action: 'update-base', number: number ?? null, base,
-    })
+    const eventPath = await appendBackendEvent(this.mainRoot, this.gitDir, taskId ?? 'shared', { backend: this.kind, action: 'update-base', number: number ?? null, base })
     return { ok: true, number: number ?? null, base, mode: 'local-only', eventPath }
   }
 
-  async getPr() {
+  async getPr(repoOrOpts, number) {
+    const parsed = normalizeGetPrArgs(repoOrOpts, number)
+    const num = Number(parsed.number)
+    if (Number.isInteger(num) && num > 0) {
+      const stored = getLocalPr({ mainRoot: this.mainRoot, gitDir: this.gitDir, number: num })
+      if (stored.ok) return stored
+    }
     return { ok: false, skipped: true, reason: 'local-only' }
   }
 
-  async getCommitChecks() {
-    return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'local-only' }
+  async closePr(arg, maybeOpts = {}) {
+    const cfg = normalizeClosePrArgs(arg, maybeOpts)
+    if (!Number.isInteger(cfg.prNumber) || cfg.prNumber <= 0) return { ok: false, error: 'invalid-pr-number' }
+    if (cfg.dryRun) {
+      return {
+        ok: true, local: true, dryRun: true, number: cfg.prNumber, state: 'OPEN',
+        planned: { comment: Boolean(cfg.comment), labels: cfg.labels, close: true },
+      }
+    }
+    const res = await closeLocalPr({
+      mainRoot: this.mainRoot, gitDir: this.gitDir, number: cfg.prNumber,
+      comment: cfg.comment, labels: cfg.labels, statePayload: cfg.statePayload,
+      reason: cfg.reason, decision: cfg.decision,
+    })
+    if (res.ok) {
+      await appendBackendEvent(this.mainRoot, this.gitDir, cfg.taskId ?? `pr-${cfg.prNumber}`, {
+        backend: this.kind, action: 'close-pr', number: cfg.prNumber, labels: res.labels, decision: res.triage?.decision ?? null,
+      })
+    }
+    return res
   }
 
+  async getCommitChecks() { return { ok: true, bucket: 'none', total: 0, passed: [], pending: [], failed: [], skipped: true, reason: 'local-only' } }
+
   async mergePr({
-    ledger,
-    mainRoot: mrArg,
-    baseBranch: bbArg,
-    profile = null,
-    evidence = null,
-    policy = null,
-    changedFiles = [],
-    runVerify = true,
-    trialMerger = null,
+    ledger, mainRoot: mrArg, baseBranch: bbArg, profile = null, evidence = null,
+    policy = null, changedFiles = [], runVerify = true, trialMerger = null,
   } = {}) {
     const root = mrArg ?? this.mainRoot
     const targetBase = bbArg ?? ledger?.baseBranch ?? this.baseBranch ?? 'main'
     if (typeof trialMerger === 'function') {
-      const res = await trialMerger({
-        mainRoot: root,
-        ledger,
-        baseBranch: targetBase,
-        profile,
-        evidence,
-        policy,
-        changedFiles,
-        runVerify,
-      })
+      const res = await trialMerger({ mainRoot: root, ledger, baseBranch: targetBase, profile, evidence, policy, changedFiles, runVerify })
       if (res?.ok && ledger?.taskId) {
-        await appendBackendEvent(this.mainRoot, this.gitDir, ledger.taskId, {
-          backend: this.kind, action: 'merged', branch: ledger.branch ?? null, into: targetBase,
-        })
+        await appendBackendEvent(this.mainRoot, this.gitDir, ledger.taskId, { backend: this.kind, action: 'merged', branch: ledger.branch ?? null, into: targetBase })
       }
       return res
     }
-    if (!ledger?.branch) {
-      return { ok: true, localMerge: true, merged: true, into: targetBase }
-    }
+    if (!ledger?.branch) return { ok: true, localMerge: true, merged: true, into: targetBase }
     const mainSt = await gitStatusPorcelainZ(root)
     if (!mainSt.ok || mainSt.entries.length > 0) {
-      return {
-        ok: false,
-        blocked: true,
-        code: 'BLOCKED_DIRTY_MAIN',
-        exitCode: 3,
-        message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
-      }
+      return { ok: false, blocked: true, code: 'BLOCKED_DIRTY_MAIN', exitCode: 3, message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。' }
     }
     const fastGitDir = this.gitDir ?? resolveGitDirFast(root)
     const fastBrSha = resolveRefShaFast(fastGitDir, `refs/heads/${ledger.branch}`)
@@ -726,30 +689,16 @@ export class LocalOnlyBackend {
       const ff = await gitRun(root, ['merge', '--ff-only', branchSha])
       if (ff.ok) return { ok: true, localMerge: true, merged: true, into: targetBase, mergedSha: branchSha }
     }
-    return {
-      ok: false,
-      blocked: true,
-      code: 'BLOCKED_TRIAL_MERGER_REQUIRED',
-      exitCode: 3,
-      message: '非快进本地合并必须经 runTrialMerge 在临时 --detach worktree 试合复测。',
-    }
+    return { ok: false, blocked: true, code: 'BLOCKED_TRIAL_MERGER_REQUIRED', exitCode: 3, message: '非快进本地合并必须经 runTrialMerge 在临时 --detach worktree 试合复测。' }
   }
 }
 
-/** 根据身份角色与托管协议构造统一的 16 方法 TaskBackend。 */
+/** 根据身份角色与托管协议构造统一的 17 方法 TaskBackend。 */
 export function createTaskBackend({
-  role = 'local-only',
-  providerId = 'github',
-  targetRepo = null,
-  client = null,
-  pushRemote = 'origin',
-  mainRoot = process.cwd(),
-  gitDir = null,
-  baseBranch = 'main',
+  role = 'local-only', providerId = 'github', targetRepo = null, client = null,
+  pushRemote = 'origin', mainRoot = process.cwd(), gitDir = null, baseBranch = 'main',
 } = {}) {
-  if (role === 'local-only' || providerId === 'none') {
-    return new LocalOnlyBackend({ mainRoot, gitDir, baseBranch })
-  }
+  if (role === 'local-only' || providerId === 'none') return new LocalOnlyBackend({ mainRoot, gitDir, baseBranch })
   if (role === 'generic-git' || providerId === 'generic-git' || !targetRepo) {
     return new GenericRemoteBackend({ targetRepo, pushRemote, mainRoot, gitDir })
   }

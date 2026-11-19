@@ -3,7 +3,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { markdownHeadings } from '../sync-toc.mjs'
 
@@ -363,4 +363,32 @@ export function checkGenericE2eContracts({ ROOT, readText, fail, note }) {
     }
   }
   note(`通用 E2E 契约：${GENERIC_E2E_CONTRACT_PATHS.length} 个核心契约/门禁文件均无具体外部驱动工具硬编码且保留 smoke-verify 键`)
+}
+
+const PROCESS_FILENAME_EXCLUDED_DIR_RE = /^(?:docs\/(?:prd|specs|todo|archive|release-notes|adr)\/|\.git\/|\.worktrees\/|node_modules\/)/i
+export const PROCESS_ARTIFACT_FILENAME_RE = /(?:^|[-_.])(?:issue\d+|pr\d+|mr\d+|ticket\d+|wave\d+|phase\d+|sprint\d+|slice\d+|batch\d+|stage[-_][a-z0-9]+|stage[0-9]+[a-z]?|stage[a-z][0-9]+|stage(?!d(?:$|[-_.])|s(?:$|[-_.]))[a-z])(?:$|[-_.])|[-_][bc]\d+[a-z]?(?:$|[-_.])/i
+
+/** 扫描路径列表，返回命中过程编号/阶段命名（issueN/stageX/waveN/sliceN/-c1/-b4b 等）的违规条目。 */
+export function findProcessArtifactFilenames(relPaths) {
+  const hits = []
+  for (const raw of relPaths ?? []) {
+    const norm = String(raw ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+    if (!norm || PROCESS_FILENAME_EXCLUDED_DIR_RE.test(norm)) continue
+    const stem = basename(norm).replace(/\.[^.]+$/, '')
+    const m = PROCESS_ARTIFACT_FILENAME_RE.exec(stem)
+    if (m) hits.push({ path: norm, token: m[0].replace(/^[-_.]+|[-_.]+$/g, '') })
+  }
+  return hits
+}
+
+/** 确定性静态门禁：全仓源码/脚本/测试文件名必须按功能域命名，禁止过程编号/阶段命名。 */
+export function checkProcessArtifactFilenames({ ROOT, rel, walk, fail, note }) {
+  const files = walk(ROOT).map((abs) => rel(abs))
+  const violations = findProcessArtifactFilenames(files)
+  for (const v of violations) {
+    fail(`过程编号文件名违规（${v.path}）：命中「${v.token}」——源码/脚本/测试必须按功能域命名，严禁使用 issue/pr/stage/wave/phase/sprint/slice/batch/-bN/-cN 等过程标识`)
+  }
+  if (violations.length === 0) {
+    note(`功能域文件名门禁：扫描 ${files.length} 个文件，零过程编号/阶段命名违规`)
+  }
 }

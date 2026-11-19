@@ -36,8 +36,8 @@ import { readReceipt, resolveEmpiricalReceiptPath } from './review-empirical-sta
 import { handleOverride, handleRecord } from './review-ledger.mjs'
 import { parseRangeDiffNewCommits } from './review-locks.mjs'
 import {
-  emitPrUnresolvedBlock, ensurePrShasLocallyResolvable,
-  isExternalPrTaskLedger, resolvePrForReviewPack,
+  emitIntakeRejectedBlock, emitPrUnresolvedBlock, ensurePrShasLocallyResolvable,
+  evaluatePrIntakeGuard, isExternalPrTaskLedger, resolvePrForReviewPack,
 } from './review-pr.mjs'
 
 const SUBCOMMANDS = ['pack', 'record', 'override', 'check-empirical', 'check-fault']
@@ -63,6 +63,7 @@ function printHelp() {
     '  --head <ref>                  Override head ref (default HEAD)',
     '  --untrusted-scan              Run static supply-chain & gate-weakening scan before execution',
     '  --human-approved-exec         Allow continuing past untrusted hazard gate (use --ignore-scripts)',
+    '  --override-intake             Override BLOCKED_INTAKE_REJECTED for rejected/duplicate PRs (audited)',
     '  --include-diff                Embed full diffText/patch after empirical + fault-injection closure',
     '  --phase <fail|restore>        Phase for check-fault (fail = injected red test; restore = clean green check)',
     '  --cmd <command>               Repeatable verification command for check-empirical / check-fault',
@@ -204,6 +205,13 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   const isExternalPrTask = isExternalPrTaskLedger(task)
   const requiresPrResolution = mode === 'pr' || isExternalPrTask
 
+  let intakeGuard = prNo !== null && prNo !== undefined
+    ? evaluatePrIntakeGuard({ mainRoot, gitDir: roots.gitDir, prNumber: prNo, opts })
+    : null
+  if (intakeGuard?.blocked) {
+    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }
+  }
+
   let prResolution = null
   if (requiresPrResolution) {
     const prArg = opts.pr ?? opts['external-pr'] ?? task?.prNumber ?? taskExtPrNum ?? null
@@ -211,63 +219,39 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
     if (!prRes.ok) {
       return {
         earlyExitCode: emitPrUnresolvedBlock({
-          opts,
-          exitCode: EXIT.UNTRUSTED_HAZARD,
-          prArg,
-          reason: prRes.reason,
-          message: prRes.message,
+          opts, exitCode: EXIT.UNTRUSTED_HAZARD, prArg, reason: prRes.reason, message: prRes.message,
         }),
       }
     }
     prResolution = prRes
+    intakeGuard = evaluatePrIntakeGuard({ mainRoot, gitDir: roots.gitDir, prNumber: prResolution.prNumber, prResolution, opts })
+    if (intakeGuard.blocked) {
+      return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }
+    }
   }
 
   let slotSyncRes = null
   if (syncSlot) {
-    const dirtyCheck = await checkDirtyFaultResidueBeforeSync({
-      mainRoot,
-      gitDir: roots.gitDir,
-      opts,
-      task,
-      mode,
-      prNo,
-    })
+    const dirtyCheck = await checkDirtyFaultResidueBeforeSync({ mainRoot, gitDir: roots.gitDir, opts, task, mode, prNo })
     if (dirtyCheck.blocked) {
       return {
         earlyExitCode: emitGateBlock({
           opts,
           code: dirtyCheck.code,
           payload: {
-            status: dirtyCheck.code,
-            code: dirtyCheck.code,
-            exitCode: dirtyCheck.exitCode,
-            mode: dirtyCheck.mode,
-            round: dirtyCheck.round,
-            targetRoot: dirtyCheck.targetRoot,
-            dirtyFiles: dirtyCheck.dirtyFiles,
-            unrestoredFault: dirtyCheck.unrestoredFault,
-            nextSteps: dirtyCheck.nextSteps,
-            error: dirtyCheck.message,
+            status: dirtyCheck.code, code: dirtyCheck.code, exitCode: dirtyCheck.exitCode,
+            mode: dirtyCheck.mode, round: dirtyCheck.round, targetRoot: dirtyCheck.targetRoot,
+            dirtyFiles: dirtyCheck.dirtyFiles, unrestoredFault: dirtyCheck.unrestoredFault,
+            nextSteps: dirtyCheck.nextSteps, error: dirtyCheck.message,
           },
           textLines: [
-            dirtyCheck.code,
-            `Worktree : ${dirtyCheck.targetRoot}`,
-            `Reason   : ${dirtyCheck.message}`,
-            '',
-            '[NEXT STEP]',
-            ...dirtyCheck.nextSteps.map((s) => `  - ${s}`),
+            dirtyCheck.code, `Worktree : ${dirtyCheck.targetRoot}`, `Reason   : ${dirtyCheck.message}`, '',
+            '[NEXT STEP]', ...dirtyCheck.nextSteps.map((s) => `  - ${s}`),
           ],
         }),
       }
     }
-
-    slotSyncRes = await syncTier2ReviewSlotIfNeeded({
-      mainRoot,
-      worktreeRoot: roots.workTreeRoot,
-      opts,
-      task,
-      mode,
-    })
+    slotSyncRes = await syncTier2ReviewSlotIfNeeded({ mainRoot, worktreeRoot: roots.workTreeRoot, opts, task, mode })
   }
 
   const reviewRoot = await resolveReviewWorktree(mainRoot, roots.workTreeRoot, opts, task)
@@ -402,7 +386,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
   const effectiveProfile = existsSync(join(reviewRoot, 'AGENTS.md')) ? reviewProfile : parseDevProfile(mainRoot)
 
   return {
-    task, mode, isFlowMode, prNo, prResolution, baseRef, slotSyncRes, reviewRoot, round, headSha,
+    task, mode, isFlowMode, prNo, prResolution, intakeGuard, baseRef, slotSyncRes, reviewRoot, round, headSha,
     diffSpec, diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
   }
 }
@@ -420,7 +404,7 @@ async function main(argv = process.argv.slice(2)) {
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
       booleanFlags: [
-        'local', 'staged', 'untrusted-scan', 'human-approved-exec',
+        'local', 'staged', 'untrusted-scan', 'human-approved-exec', 'override-intake',
         'human-approved', 'include-diff', 'visual-checked',
         'reset-review-slot', 'enforce-gates', 'escalate',
       ],
@@ -480,7 +464,7 @@ async function main(argv = process.argv.slice(2)) {
     const ctx = await prepareReviewTargetContext(roots, opts, { syncSlot: true })
     if (ctx.earlyExitCode !== undefined) return ctx.earlyExitCode
     const {
-      task, mode, isFlowMode, prNo, prResolution, baseRef, slotSyncRes, reviewRoot, round, headSha,
+      task, mode, isFlowMode, prNo, prResolution, intakeGuard, baseRef, slotSyncRes, reviewRoot, round, headSha,
       diffScope, roundLockNote, priorOpenMustFix, rebuts, diff, effectiveProfile,
     } = ctx
 
@@ -578,23 +562,11 @@ async function main(argv = process.argv.slice(2)) {
     const empiricalRequirements = computeEmpiricalRequirements({
       diff, behavioralGate, effectiveProfile, task, gateWeakenedHits,
     })
-    let empiricalGate = evaluateIncludeDiffGate({
-      gitDir: roots.gitDir,
-      mode,
-      task,
-      round,
-      prNo,
-      baseRef,
-      reviewRoot,
-      mainRoot,
-      headSha,
-      diffScope,
-      workspaceFingerprint,
-      dirtyEntries,
-      requirements: empiricalRequirements,
-      behavioralGate,
-      opts,
-    })
+    const evalGateArgs = {
+      gitDir: roots.gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, headSha,
+      diffScope, workspaceFingerprint, dirtyEntries, requirements: empiricalRequirements, behavioralGate, opts,
+    }
+    let empiricalGate = evaluateIncludeDiffGate(evalGateArgs)
 
     if (includeDiff && !empiricalGate.readyForDiff) {
       const blockCode = empiricalGate.dirtyFaultResidue ? 'BLOCKED_DIRTY_FAULT_RESIDUE' : 'BLOCKED_EMPIRICAL_FIRST'
@@ -602,28 +574,17 @@ async function main(argv = process.argv.slice(2)) {
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作位存在未还原复绿的故障注入残留，禁止输出 --include-diff。'
         : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`
       const payload = {
-        status: blockCode,
-        code: blockCode,
-        exitCode: EXIT.UNTRUSTED_HAZARD,
-        mode,
-        round,
-        headSha,
-        diffScope,
-        workspaceFingerprint,
-        missingSteps: empiricalGate.missingSteps,
-        unblockCommands: empiricalGate.unblockCommands,
-        nextSteps: empiricalGate.unblockCommands,
-        empiricalGate,
-        error: msg,
+        status: blockCode, code: blockCode, exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha,
+        diffScope, workspaceFingerprint, missingSteps: empiricalGate.missingSteps,
+        unblockCommands: empiricalGate.unblockCommands, nextSteps: empiricalGate.unblockCommands,
+        empiricalGate, error: msg,
       }
       const textLines = [
         blockCode,
         `Scope    : ${diffScope} (HEAD ${headSha === 'UNBORN' ? 'UNBORN' : headSha.slice(0, 8)})`,
         `Target   : ${posixPath(reviewRoot)} | Fingerprint: ${workspaceFingerprint.slice(0, 12)}`,
         `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : 'restore verification required'}`,
-        `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`,
-        '',
-        '[NEXT STEP]',
+        `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`, '', '[NEXT STEP]',
         ...empiricalGate.unblockCommands.map((c, idx) => `  ${idx + 1}. ${c}`),
       ]
       return emitGateBlock({ opts, code: blockCode, payload, textLines })
@@ -631,36 +592,11 @@ async function main(argv = process.argv.slice(2)) {
 
     if (!includeDiff) {
       recordMechanicalPack({
-        gitDir: roots.gitDir,
-        mode,
-        task,
-        round,
-        prNo,
-        baseRef,
-        reviewRoot,
-        headSha,
-        diffScope,
-        workspaceFingerprint,
+        gitDir: roots.gitDir, mode, task, round, prNo, baseRef, reviewRoot, headSha, diffScope, workspaceFingerprint,
         untrustedScanClean: shouldScanUntrusted ? untrustedWarnings.length === 0 : undefined,
         humanApprovedExec: opts.humanApprovedExec,
       })
-      empiricalGate = evaluateIncludeDiffGate({
-        gitDir: roots.gitDir,
-        mode,
-        task,
-        round,
-        prNo,
-        baseRef,
-        reviewRoot,
-        mainRoot,
-        headSha,
-        diffScope,
-        workspaceFingerprint,
-        dirtyEntries,
-        requirements: empiricalRequirements,
-        behavioralGate,
-        opts,
-      })
+      empiricalGate = evaluateIncludeDiffGate(evalGateArgs)
     }
 
     const nextSteps = buildPackNextSteps({
@@ -679,15 +615,12 @@ async function main(argv = process.argv.slice(2)) {
       headSha,
       ...(prResolution ? {
         pr: {
-          number: prResolution.prNumber,
-          baseRefOid: prResolution.baseRefOid,
-          headRefOid: prResolution.headRefOid,
-          baseBranch: prResolution.baseBranch,
-          headBranch: prResolution.headBranch,
-          url: prResolution.url,
-          state: prResolution.state,
+          number: prResolution.prNumber, baseRefOid: prResolution.baseRefOid, headRefOid: prResolution.headRefOid,
+          baseBranch: prResolution.baseBranch, headBranch: prResolution.headBranch, url: prResolution.url,
+          state: prResolution.state, labels: prResolution.labels ?? [],
         },
       } : {}),
+      ...(intakeGuard && (intakeGuard.overridden || intakeGuard.decision || intakeGuard.sources?.length > 0) ? { intakeGuard } : {}),
       ...(slotSyncRes ? { reviewSlotSync: slotSyncRes } : {}),
       ...(includeDiff ? { diffText: diff.text } : {}),
       diff: {

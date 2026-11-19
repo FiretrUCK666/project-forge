@@ -1,5 +1,5 @@
 /**
- * e2e-scenarios-stageb.mjs —— 解压 `git archive --format=zip` 黑盒环境下自建本地 HTTP/SSH 模拟远端交错跑通 Scenarios H、I、J。
+ * e2e-scenarios-lifecycle.mjs —— 解压 `git archive --format=zip` 黑盒环境下自建本地 HTTP/SSH 模拟远端交错跑通 Scenarios H、I、J。
  */
 
 import { spawn } from 'node:child_process'

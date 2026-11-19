@@ -1,5 +1,5 @@
 /**
- * cli.mjs —— 五套研发技能统一的 CLI 参数解析、动态技能探测与降级导航输出。
+ * cli.mjs —— 内置研发技能套件统一的 CLI 参数解析、动态技能探测与降级导航输出。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 kit/skills/ 下全部脚本共用。
  */
@@ -166,7 +166,7 @@ export function parseStandardCli(argv = [], schema = {}) {
 
 /**
  * 现场探测目标仓库 `.agents/skills/` 下实际已装配的技能目录，
- * 用于裁剪/降级 `[NEXT STEP]` 指引，兼容 lightweight 档与用户手动删减技能场景。
+ * 用于裁剪/降级 `[NEXT STEP]` 指引，兼容用户手动删减或禁用技能场景。
  */
 export function resolveAvailableSkills(repoRoot = process.cwd(), { kitDir } = {}) {
   const skillsDir = join(resolve(repoRoot), '.agents', 'skills')
@@ -208,7 +208,7 @@ export function resolveAvailableSkills(repoRoot = process.cwd(), { kitDir } = {}
 /**
  * 判断仓库是否支持指定内置技能：
  * - 若未装配 `.agents/skills/` 目录（`hasSkillsDir === false`），按默认完整基线兼容返回 `true`；
- * - 若已显式装配 `.agents/skills/`，则仅当目标技能真实存在时返回 `true`（`lightweight` 无 `dev-review` 返回 `false`）。
+ * - 若已显式装配 `.agents/skills/`，则仅当目标技能真实存在时返回 `true`。
  */
 export function hasSkillSupport(repoRoot = process.cwd(), skillName = 'dev-review') {
   const info = resolveAvailableSkills(repoRoot)

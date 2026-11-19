@@ -1,10 +1,10 @@
 /**
- * injections-data-stageb.mjs —— Stage B 全量验收标准（C1..C15, C19, C20-C23）故障注入复验数据表（I160–I178）。
+ * injections-data-adaptive.mjs —— 自适应装配、Hooks、分级升级与 E2E 门禁故障注入复验数据表（I160–I178）。
  */
 
 const FORBIDDEN_E2E_DRIVER = 'play' + 'wright'
 
-export const INJECTIONS_STAGEB = [
+export const INJECTIONS_ADAPTIVE = [
   {
     id: 'I160',
     what: 'C1 skill-discovery 扫描跳过目录或丢弃第 6 临时内置技能',

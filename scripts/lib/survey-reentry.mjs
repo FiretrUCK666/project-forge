@@ -108,7 +108,6 @@ export function detectKit(root, { kitDir } = {}) {
   const manifestExists = existsSync(manifestFull)
   const discoveredKit = discoverKitSkills(kitDir)
   const kitSkillNames = discoveredKit.map((s) => s.dirName)
-  const lightweightSkillNames = discoveredKit.filter((s) => s.tier === 'both').map((s) => s.dirName)
   const kitSkillSet = new Set(kitSkillNames)
 
   const rawText = manifestExists ? readTextSafe(manifestFull) : undefined
@@ -262,11 +261,7 @@ export function detectKit(root, { kitDir } = {}) {
   const agentsRegions = manifest.agentsRegions && typeof manifest.agentsRegions === 'object'
     ? Object.keys(manifest.agentsRegions)
     : []
-  const tier = manifest.tier === 'lightweight' || manifest.tier === 'full'
-    ? manifest.tier
-    : (manifest.schemaVersion === 1 ? 'full' : undefined)
-  const expectedForTier = tier === 'lightweight' ? lightweightSkillNames : kitSkillNames
-  const uninstalledKitSkills = expectedForTier.filter((k) => (
+  const uninstalledKitSkills = kitSkillNames.filter((k) => (
     !installedSkills.includes(k)
     && !disabledSet.has(k)
     && !removedSet.has(`${k}/SKILL.md`)
@@ -280,7 +275,6 @@ export function detectKit(root, { kitDir } = {}) {
     corrupted: false,
     manifestPath: PF_MANIFEST_REL,
     schemaVersion: manifest.schemaVersion,
-    tier,
     forgeVersion: manifest.forgeVersion,
     installedAt: manifest.installedAt,
     filesCount: fileKeys.length,

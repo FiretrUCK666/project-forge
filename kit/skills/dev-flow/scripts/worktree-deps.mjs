@@ -469,10 +469,54 @@ export function unmountSharedDeps(mainRoot, wtRoot, { allowOutbound = [], mode =
   const mountedSet = new Set(
     (mountedPaths ?? []).map((p) => normalizeLinkRel(typeof p === 'string' ? p : p?.path)).filter(Boolean),
   )
-  const scan = scanOutboundLinks(wtAbs)
-  // 默认档（cleanup）下一步是 `git worktree remove`：未获准的外链、悬空链接或深度截断必须当场拦下。
-  // 依赖清场档（deps）worktree 不会消失：跳过已跟踪链接以防工作区变脏，其余照常解绑并校验目标完好。
+  // 默认档（cleanup）下一步是 `git worktree remove`：必须全树 fail-closed 扫描未获准外链、悬空链接与深度截断。
+  // 依赖清场档（deps）worktree 不会消失：若账本已提供精确 mountedPaths，则只对预期槽位单次 lstat 精准解绑，免全树递归遍历。
   const strict = mode !== 'deps'
+
+  if (!strict && mountedSet.size > 0) {
+    const unmounted = []
+    const skipped = []
+    const verifiedTargets = []
+    for (const rel of mountedSet) {
+      const abs = join(wtAbs, rel)
+      const st = lstatSafe(abs)
+      if (!st || !st.isSymbolicLink()) continue
+      const fastTracked = isPathInGitIndexFast(wtAbs, rel)
+      const isTracked = fastTracked !== null
+        ? fastTracked
+        : spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], { cwd: wtAbs, stdio: 'ignore', windowsHide: true }).status === 0
+      if (isTracked) {
+        skipped.push({ path: rel, reason: 'tracked-in-git' })
+        continue
+      }
+      let targetBefore = null
+      let resolvedBefore = null
+      try { targetBefore = readlinkSync(abs) } catch { /* ignore */ }
+      try { resolvedBefore = realpathSync.native(abs) } catch { /* ignore */ }
+      if (!dryRun) {
+        unlinkSync(abs)
+        if (lstatSafe(abs) !== null) throw new Error(`解绑链接失败，路径仍然存在：${abs}`)
+        if (resolvedBefore) verifiedTargets.push({ path: rel, resolved: posixPath(resolvedBefore) })
+        unmounted.push({ path: rel, target: targetBefore ?? resolvedBefore, source: 'tool-mounted', label: '工具挂载，自动解绑' })
+      }
+    }
+    const missingTargets = verifiedTargets.filter((item) => !existsSync(item.resolved))
+    if (missingTargets.length > 0) {
+      throw new Error(`安全校验失败：解绑之后外部目标不见了（${missingTargets.map((m) => `${m.path} -> ${m.resolved}`).join(', ')}）`)
+    }
+    return {
+      ok: true,
+      unmounted,
+      unmountedInternal: [],
+      skipped,
+      blocked: [],
+      truncated: false,
+      fastGuided: true,
+      scanned: { outbound: unmounted.length + skipped.length, internal: 0, broken: 0 },
+    }
+  }
+
+  const scan = scanOutboundLinks(wtAbs)
 
   const unmounted = []
   const unmountedInternal = []

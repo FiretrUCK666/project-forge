@@ -274,7 +274,7 @@ export function toText(result) {
     if (result.kitManifest) {
       const km = result.kitManifest
       lines.push('')
-      lines.push(`已保留 \`.agents/skills/\` 本地研发套件（清单 \`${km.path}\` v${km.schemaVersion ?? 1}${km.tier ? ` / ${km.tier}` : ''}，不计入残留痕迹）。`)
+      lines.push(`已保留 \`.agents/skills/\` 本地研发套件（清单 \`${km.path}\` v${km.schemaVersion ?? 1}，不计入残留痕迹）。`)
       if (km.customSkills.length > 0) {
         lines.push(`检测到项目自定义技能（已完整保留）：${km.customSkills.join('、')}`)
       }

@@ -92,17 +92,26 @@ export function buildEscalationIssuePayload(item = {}) {
 
   let body = typeof item.body === 'string' && item.body.trim() ? item.body : ''
   if (!body) {
+    const scopeParts = [
+      `Case ${caseType}`,
+      `source=${item.source ?? 'escalation'}`,
+      `tier=${escalationTier}`,
+      item.taskId ? `task=${item.taskId}` : null,
+      item.category ? `category=${item.category}` : null,
+      item.severity ? `severity=${String(item.severity).toLowerCase()}` : null,
+    ].filter(Boolean)
+    const filesList = Array.isArray(item.files) && item.files.length > 0
+      ? item.files.slice(0, 8).map((f) => `\`${posixPath(f)}\``).join('、')
+      : null
     const lines = [
-      '## 升级背景与根因',
-      '',
-      `- Source: \`${item.source ?? 'escalation'}\``,
-      `- Case: Case ${caseType}`,
-      `- Escalation Tier: \`${escalationTier}\``,
-      item.taskId ? `- Origin Task: \`${item.taskId}\`` : null,
-      item.category ? `- Category: \`${item.category}\`` : null,
-      item.severity ? `- Severity: \`${String(item.severity).toLowerCase()}\`` : null,
+      '## 背景与现象',
       '',
       rootCause,
+      '',
+      '## 范围与依据',
+      '',
+      `- 上下文：${scopeParts.join(' | ')}`,
+      filesList ? `- 涉及文件：${filesList}` : null,
     ].filter((x) => x !== null)
     if (item.stopLossPacket) {
       const p = item.stopLossPacket

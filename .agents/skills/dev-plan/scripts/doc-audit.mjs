@@ -18,6 +18,7 @@ import {
 } from '../../lib/doc-substantive.mjs'
 import { discoverEvergreenDocs, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { locateTopSlicesForPaths } from '../../lib/doc-locator.mjs'
+import { matchFeatureMapForPaths } from '../../lib/feature-map.mjs'
 import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
 import { numberingErrors } from '../../lib/doc-renumber.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
@@ -122,6 +123,7 @@ export function triageTask({
   const profile = repoRoot ? parseAgentsProfile(repoRoot) : null
   const coupledSyncWarnings = computeCoupledSyncWarnings(repoRoot, effectivePaths)
   let evergreenSlices = []
+  let featureMapContext = { exists: false, corrupt: false, warning: null, matchedFeatures: [], businessFlows: [], verificationTools: [], testRefs: [] }
   if (repoRoot) {
     try {
       const ev = discoverEvergreenDocs(repoRoot, { profile })
@@ -143,6 +145,20 @@ export function triageTask({
       }
     } catch {
       evergreenSlices = []
+    }
+    try {
+      const fm = matchFeatureMapForPaths(repoRoot, effectivePaths, text ? [text] : [])
+      featureMapContext = {
+        exists: Boolean(fm.exists),
+        corrupt: Boolean(fm.corrupt),
+        warning: fm.warning ?? null,
+        matchedFeatures: (fm.matchedFeatures ?? []).map((f) => ({ id: f.id, name: f.name })),
+        businessFlows: fm.businessFlows ?? [],
+        verificationTools: (fm.verificationTools ?? []).map((t) => ({ id: t.id, kind: t.kind, command: t.command, riskLevel: t.riskLevel })),
+        testRefs: fm.testRefs ?? [],
+      }
+    } catch {
+      // Fail-Soft when docs/feature-map.json is absent or unreadable
     }
   }
 
@@ -192,7 +208,7 @@ export function triageTask({
       docsRequired: [], redGreenRequired: true, needsReview: bugNeedsReview, specApprovalRequired: false,
       prdRequired: false, prdReasons: [], prdAdvice: null,
       faces, ...(pureDocCheck ? { pureDocCheck } : {}),
-      activeContracts, coupledSyncWarnings, evergreenSlices,
+      activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext,
     }
   }
   const buildCase3 = (pureDocCheck = null) => ({
@@ -202,7 +218,7 @@ export function triageTask({
     docsRequired: ['docs/todo/'], redGreenRequired: true, needsReview: true, specApprovalRequired: false,
     prdRequired: false, prdReasons: [], prdAdvice: prdNeed.advice,
     faces, ...(pureDocCheck ? { pureDocCheck } : {}),
-    activeContracts, coupledSyncWarnings, evergreenSlices,
+    activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext,
   })
 
   if (isConflict) {
@@ -211,7 +227,7 @@ export function triageTask({
       doorType: 'one-way', doorDetails: { ...door, doorType: 'one-way' }, critiqueTier: 'independent-critique',
       reason: '该需求与 docs/TDD.md 或生效 SPEC 存在架构/契约冲突，必须先更新 TDD.md 并获人类确认后再拆解。',
       docsRequired: ['docs/TDD.md (先更新并确认)'], redGreenRequired: true, needsReview: true, specApprovalRequired: true,
-      prdRequired: false, prdReasons: [], prdAdvice: null, faces, activeContracts, coupledSyncWarnings, evergreenSlices,
+      prdRequired: false, prdReasons: [], prdAdvice: null, faces, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext,
     }
   }
   if (isContract) {
@@ -224,7 +240,7 @@ export function triageTask({
       prdRequired: prdNeed.required,
       prdReasons: prdNeed.reasons,
       prdAdvice: prdNeed.advice,
-      redGreenRequired: true, needsReview: true, specApprovalRequired: true, faces, activeContracts, coupledSyncWarnings, evergreenSlices,
+      redGreenRequired: true, needsReview: true, specApprovalRequired: true, faces, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext,
     }
   }
   if (looksDocOnly) {
@@ -248,7 +264,7 @@ export function triageTask({
         reason: '属于文档完善或问答/错别字修正（Case 1），无需新增规划文档。',
         docsRequired: [], redGreenRequired: false, needsReview: door.doorType === 'one-way', specApprovalRequired: false,
         prdRequired: false, prdReasons: [], prdAdvice: null,
-        faces, pureDocCheck, activeContracts, coupledSyncWarnings, evergreenSlices,
+        faces, pureDocCheck, activeContracts, coupledSyncWarnings, evergreenSlices, featureMapContext,
       }
     }
     const rejectToBugfix = bugfix || hasRuntimeBug || (FIX_VERB_RE.test(signals.maskedText) && !hasExplicitFeature && !isCrossCutting && !isGovernance)

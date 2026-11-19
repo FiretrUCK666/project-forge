@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 import {
   FORBIDDEN_PLATFORM_RE, KIT_SKILL_MAX_LINES, PF_MANIFEST_REL,
-  REPO_ONLY_DIRS, REPO_ONLY_FILES, discoverKitSkillsDetailed, templateVarsOf,
+  REPO_ONLY_DIRS, REPO_ONLY_FILES, UNIFIED_SKILL_NAMES, discoverKitSkillsDetailed, templateVarsOf,
 } from '../lib/protocol.mjs'
 import { checkEquip } from '../equip.mjs'
 import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
@@ -448,6 +448,11 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
   const { skills: discovered, diagnostics } = discoverKitSkillsDetailed(kitSkillsRoot)
   for (const diag of diagnostics) fail(`内置 Skill 元数据无效：${diag.message}`)
   if (discovered.length === 0) fail('kit/skills 下未发现任何合法内置 Skill')
+  const discoveredNames = discovered.map((s) => s.dirName).sort()
+  const expectedNames = [...UNIFIED_SKILL_NAMES].sort()
+  if (discoveredNames.length !== expectedNames.length || discoveredNames.some((n, i) => n !== expectedNames[i])) {
+    fail(`内置 Skill 集合与 UNIFIED_SKILL_NAMES (${expectedNames.length} 个) 不一致：实得 [${discoveredNames.join(', ')}]，预期 [${expectedNames.join(', ')}]`)
+  }
 
   for (const skill of discovered) {
     const entry = join(kitSkillsRoot, skill.dirName, 'SKILL.md')

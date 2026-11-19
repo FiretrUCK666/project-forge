@@ -164,6 +164,8 @@ export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger
   const coveredPaths = new Set()
   for (const feat of fm.features) {
     for (const p of [
+      ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
+      ...(Array.isArray(feat.modules) ? feat.modules : []),
       ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
       ...(Array.isArray(feat.files) ? feat.files : []),
       ...(Array.isArray(feat.paths) ? feat.paths : []),

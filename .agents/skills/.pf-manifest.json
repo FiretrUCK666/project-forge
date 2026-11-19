@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-19T08:29:13.238Z",
+  "installedAt": "2026-11-19T09:25:31.520Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -46,7 +46,7 @@
       "sha256": "136e84d00eb9036435cddcdfd8e57780864ee0743e3d7ab232f295a7438331eb"
     },
     "dev-flow/scripts/flow-lifecycle-hooks.mjs": {
-      "sha256": "82e8fb8eb144d06a05acaf33325e40eb184a4fdc1f88bcb29706d113fc2d773d"
+      "sha256": "a9e6c20a738df3f0efaa55bc728468c132f129958d5793f857fcdd784b341e21"
     },
     "dev-flow/scripts/flow-lifecycle.mjs": {
       "sha256": "719acbeb42413d3d69ad19aefdd6d35dcd95cf0192f74f4fa2ecbd19d7dc8900"
@@ -73,7 +73,7 @@
       "sha256": "82bdd7cf6e52ac249c4f968b89b5b8aec26a38d9f911756a0b0275fdc02c2525"
     },
     "dev-govern/scripts/govern-audit.mjs": {
-      "sha256": "580df8c5cd16ef88e0dcaf79500514e62baaa552addadee3910e6864c3753362"
+      "sha256": "7f933e833f5f29c5edca047873cec63c9d4c2b304481ebf4edee9f073865898e"
     },
     "dev-govern/scripts/govern-checks.mjs": {
       "sha256": "0a2807c1ef5d9bed18adfec28a2fe3dfc0825a367bfb3a5d9cf80e1bd2b82fdf"
@@ -103,7 +103,7 @@
       "sha256": "3e26803cbdbe69bc7bd1a5267578a77e81c7ab993d0fd7ae53071efa8ecd7657"
     },
     "dev-iterate/scripts/iterate.mjs": {
-      "sha256": "f6774f79ec562d71eb47c0226ebe025938f99d674471fbebe988c2af89ac5297"
+      "sha256": "71240cab5997989107a2105a4cfb6ebb623b27159c0371dab7e0d7cbd14ca7cf"
     },
     "dev-plan/SKILL.md": {
       "sha256": "0f2bdb7eb78e8a27034d8dc7164ba2178c6b3a64d8244fa58a975c11f27cf510"
@@ -115,7 +115,7 @@
       "sha256": "7058dc3e9a1f032941d80c96a546dc9947e1e61497d8b9c8c57ac32511be2245"
     },
     "dev-plan/scripts/doc-audit.mjs": {
-      "sha256": "50087ff7d655a622bbbbfc0a1af31cc5e5eac24df2324cd7691293398db6b540"
+      "sha256": "439de61845736466ca6c0af2db641761f1315253c6f7a5478dee12f0f9806e8e"
     },
     "dev-plan/scripts/doc-plan-ops.mjs": {
       "sha256": "719a10dd9dd556abbac0163dee17ef06ec987c719795942c56c08f4ec0400c57"
@@ -259,7 +259,7 @@
       "sha256": "6775b1749b4ffb3e245eaaaaeff6cc3edddada312af3971c5801b1a7768214f1"
     },
     "lib/handoff-package.mjs": {
-      "sha256": "9826cf5e78d699fb0d5eb4afa31d6f7bfd9b348e41393e333d4b85ae357c201c"
+      "sha256": "cd48d012e0114a5eac8dc4451b72b6c49a353f0700d644802a76a37c6f747fba"
     },
     "lib/intake-triage.mjs": {
       "sha256": "6f0b5b57e8098e4e8bc0a7c41590d6aaa56b8fc9f80e8489c74ba9748123c4dc"
@@ -337,7 +337,7 @@
       "sha256": "40f5718abcd7bc0b42c9bafe7bf9b40b1ef35eac2673b3b40b7f3370cf3d85bb"
     },
     "lib/test-inventory.mjs": {
-      "sha256": "93f5ce031bbf981521300012b186e74f10a1fc3b6a5757e18127b45cf3bccf2c"
+      "sha256": "3cf9c825468fedaa9fd74a30ec359bbd5108e34e6098e6bcd831c92113a36724"
     },
     "lib/tool-owned.mjs": {
       "sha256": "9ee7d342c14e94f09469fa2ed70147645fbdf478426c6cec9bd884b591ca4ee8"

@@ -302,6 +302,8 @@ export function updateFeatureMapTestRefs(repoRoot, { featureIds = [], modulePath
   for (const feat of loaded.data.features) {
     const fId = String(feat.id ?? feat.name ?? '').trim().toLowerCase()
     const fFiles = [
+      ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
+      ...(Array.isArray(feat.modules) ? feat.modules : []),
       ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
       ...(Array.isArray(feat.files) ? feat.files : []),
       ...(Array.isArray(feat.paths) ? feat.paths : []),

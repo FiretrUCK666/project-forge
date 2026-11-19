@@ -41,7 +41,7 @@
     },
     {
       "id": "equip",
-      "name": "统一技能集装配与 v2 账本校验",
+      "name": "统一技能集装配、v3 账本三方融合与 ABI 回滚校验",
       "entrypoints": [
         "scripts/equip.mjs",
         "scripts/equip-ci.mjs",
@@ -52,10 +52,14 @@
         "scripts/equip-ci.mjs",
         "scripts/zip.mjs",
         "scripts/lib/equip-bootstrap.mjs",
+        "scripts/lib/merge3.mjs",
+        "scripts/lib/equip-integrity.mjs",
+        "kit/skills/lib/overlay.mjs",
         "scripts/backup.mjs"
       ],
       "businessFlows": [
-        "将 kit/skills 幂等装配到 .agents/skills 并校验字节一致",
+        "将 8 套 kit/skills 幂等装配到 .agents/skills 并校验字节一致与扩展槽豁免",
+        "三方合并无冲突融合、.mjs 冲突零标记保底与语法/ESM ABI 异常瞬时回滚",
         "空白目录 --bootstrap-empty 起步与写前仓外 .zip 快照备份"
       ],
       "verificationTools": [
@@ -69,13 +73,16 @@
             "equip",
             "装配",
             "技能套件",
-            "manifest"
+            "manifest",
+            "merge3",
+            "overlay"
           ]
         }
       ],
       "testRefs": [
         "scripts/dev/fixtures-equip.mjs",
-        "scripts/dev/fixtures-onboarding.mjs"
+        "scripts/dev/fixtures-onboarding.mjs",
+        "scripts/dev/fixtures-iterate-evolution.mjs"
       ]
     },
     {
@@ -420,7 +427,43 @@
       ],
       "testRefs": [
         "scripts/dev/fixtures-govern.mjs",
-        "scripts/dev/fixtures-edit-pyramid.mjs"
+        "scripts/dev/fixtures-edit-pyramid.mjs",
+        "scripts/dev/fixtures-iterate-evolution.mjs"
+      ]
+    },
+    {
+      "id": "dev-iterate",
+      "name": "正向测试扩展、盲区定向补测与并发压测迭代",
+      "entrypoints": [
+        "kit/skills/dev-iterate/scripts/iterate.mjs"
+      ],
+      "modules": [
+        "kit/skills/dev-iterate/scripts/iterate.mjs",
+        "kit/skills/lib/test-inventory.mjs"
+      ],
+      "businessFlows": [
+        "自动交叉比对 feature-map 盲区/signals 热点/近期变更或按 --focus 定向生成原生测试",
+        "经 edit-gate 反作弊校验后落盘目标仓原生测试目录并增量挂回 testRefs",
+        "分片并发实跑原生测试套件，捕获失败/超时/性能越阈后写信号并经 escalation 建单"
+      ],
+      "verificationTools": [
+        {
+          "id": "verify-dev-iterate-plan",
+          "kind": "command",
+          "command": "node .agents/skills/dev-iterate/scripts/iterate.mjs plan . --json",
+          "scriptPath": null,
+          "riskLevel": "medium",
+          "triggerHints": [
+            "iterate",
+            "补测试",
+            "集成测试",
+            "E2E测试",
+            "压测"
+          ]
+        }
+      ],
+      "testRefs": [
+        "scripts/dev/fixtures-iterate-evolution.mjs"
       ]
     },
     {

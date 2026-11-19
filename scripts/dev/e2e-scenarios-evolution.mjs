@@ -43,7 +43,7 @@ async function runScenarioH(pkgRoot, sandbox, env, h) {
   const locRes = h.runNodeScript(join(repoH, '.agents/skills/dev-explore/scripts/doc-locate.mjs'), ['--query', 'routeOrder', '--json'], repoH, env)
   h.assertOk(locRes, 'Scenario H doc-locate')
   const locJson = JSON.parse(locRes.stdout)
-  if (!Array.isArray(locJson.matches) || locJson.matches.length === 0) throw new Error(`Scenario H doc-locate missed matches: ${locRes.stdout}`)
+  if (!Array.isArray(locJson.slices) || locJson.slices.length === 0) throw new Error(`Scenario H doc-locate missed slices: ${locRes.stdout}`)
   const stAfter = h.runGit(repoH, ['status', '--porcelain']).stdout
   if (stBefore !== stAfter) throw new Error('Scenario H doc-locate polluted working tree')
 }

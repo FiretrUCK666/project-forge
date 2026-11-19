@@ -142,9 +142,9 @@ export async function buildIterationPlan(repoRoot, {
     let docSlices = []
     try {
       const located = locateDocuments(repoRoot, { query: focus, limit: 5 })
-      docSlices = (located?.matches ?? []).slice(0, 5).map((m) => ({
-        file: m.file,
-        heading: m.heading ?? null,
+      docSlices = (located?.slices ?? located?.matches ?? []).slice(0, 5).map((m) => ({
+        file: m.relPath ?? m.file,
+        heading: m.section ?? m.heading ?? null,
         lines: m.startLine && m.endLine ? `${m.startLine}-${m.endLine}` : null,
       }))
     } catch { /* graceful degrade */ }
@@ -218,6 +218,8 @@ export async function buildIterationPlan(repoRoot, {
     for (const feat of featureMap.features) {
       const testRefs = Array.isArray(feat.testRefs) ? feat.testRefs.filter(Boolean) : []
       const entryFiles = [
+        ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
+        ...(Array.isArray(feat.modules) ? feat.modules : []),
         ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
         ...(Array.isArray(feat.files) ? feat.files : []),
         ...(feat.entry ? [feat.entry] : []),

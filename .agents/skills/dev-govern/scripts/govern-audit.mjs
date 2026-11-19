@@ -361,7 +361,12 @@ async function finishAudit({
     const mappedPaths = new Set()
     if (fm.valid) {
       for (const feat of fm.features) {
-        for (const p of [...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []), ...(Array.isArray(feat.files) ? feat.files : [])]) {
+        for (const p of [
+          ...(Array.isArray(feat.entrypoints) ? feat.entrypoints : []),
+          ...(Array.isArray(feat.modules) ? feat.modules : []),
+          ...(Array.isArray(feat.entryFiles) ? feat.entryFiles : []),
+          ...(Array.isArray(feat.files) ? feat.files : []),
+        ]) {
           const normP = posixPath(p).replace(/^\.\//, '')
           if (!normP) continue
           mappedPaths.add(normP)

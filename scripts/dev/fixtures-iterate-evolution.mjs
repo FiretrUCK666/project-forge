@@ -20,6 +20,7 @@ import { inspectManifest } from '../../kit/skills/dev-govern/scripts/govern-chec
 import { checkEvergreenAuthorityDocs } from '../../kit/skills/dev-govern/scripts/govern-evergreen.mjs'
 import { collectDiff, scanUntrustedDiff } from '../../kit/skills/dev-review/scripts/review-diff.mjs'
 import { buildClaimComments, formatActorDisplay } from '../../kit/skills/lib/doc-comments.mjs'
+import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
 import { discoverEvergreenDocs } from '../../kit/skills/lib/profile.mjs'
 import { triageTask } from '../../kit/skills/dev-plan/scripts/doc-audit.mjs'
 import { createGitHubClient } from '../../kit/skills/lib/github-client.mjs'
@@ -621,6 +622,19 @@ export function registerIterateEvolutionCases(cases) {
       'docs/PROTOCOL.md': '# Protocol\n\nWire format for sync.\n',
       'docs/specs/261119-temp-spec.md': '---\nevergreen: true\n---\n# Temp Spec\n\nShould NEVER be classified as evergreen.\n',
       'docs/archive/old-doc.md': '---\nevergreen: true\n---\n# Old Archived Doc\n\nShould NEVER be classified as evergreen.\n',
+      'docs/feature-map.json': JSON.stringify({
+        version: 1,
+        features: [{
+          id: 'billing-core',
+          name: '账单结算',
+          entrypoints: ['src/billing.mjs'],
+          modules: ['src/billing.mjs'],
+          businessFlows: ['按分结算账单并校验精度'],
+          verificationTools: [{ id: 'verify-billing', kind: 'command', command: 'node test/billing.mjs', scriptPath: null, riskLevel: 'medium', triggerHints: ['billing'] }],
+          testRefs: [],
+        }],
+      }, null, 2),
+      'docs/specs/261119-billing-spec.md': '# SPEC: 账单结算优化\n\n## 影响路径\n\n- `src/billing.mjs`\n\n## 验收标准\n\n- [ ] C1: 精度校验通过\n',
       'src/billing.mjs': 'export const settle = (c) => c\n',
     })
     try {
@@ -638,7 +652,7 @@ export function registerIterateEvolutionCases(cases) {
       if (byPath.has('docs/specs/261119-temp-spec.md') || byPath.has('docs/archive/old-doc.md')) {
         return `瞬态 specs 或归档 archive 被误纳为常青文档: ${JSON.stringify(ev.docs)}`
       }
-      // triageTask 主动按变更路径从常青文档推送精确切片（不限于单份 TDD.md）
+      // triageTask 与 handoff-package 主动推送常青文档切片 + feature-map businessFlows/验证工具
       const tri = triageTask({
         repoRoot: dir,
         summary: 'Update billing invoice calculation rules',
@@ -646,6 +660,24 @@ export function registerIterateEvolutionCases(cases) {
       })
       if (!Array.isArray(tri.evergreenSlices) || !tri.evergreenSlices.some((s) => s.relPath === 'docs/BILLING_RULES.md')) {
         return `triageTask 未主动推送自定义常青文档切片 docs/BILLING_RULES.md: ${JSON.stringify(tri.evergreenSlices)}`
+      }
+      if (!tri.featureMapContext?.businessFlows?.includes('按分结算账单并校验精度')
+        || !tri.featureMapContext?.verificationTools?.some((t) => t.id === 'verify-billing')) {
+        return `triageTask 未主动推送 feature-map 业务流/验证工具: ${JSON.stringify(tri.featureMapContext)}`
+      }
+      const hp = buildHandoff({
+        mainRoot: dir,
+        ledger: { taskId: 'hp-bill', specFile: 'docs/specs/261119-billing-spec.md', branch: 'feat/bill', baseBranch: 'main' },
+        policy: { requiredGates: [] },
+      })
+      if (!hp.fields?.featureMapContext?.businessFlows?.includes('按分结算账单并校验精度') || !hp.prompt.includes('verify-billing')) {
+        return `handoff-package 未主动推送 feature-map 业务流与验证工具: ${JSON.stringify(hp.fields?.featureMapContext)}`
+      }
+      // Fail-Soft：损坏 feature-map.json 时读路径安全降级不崩
+      writeFileSync(join(dir, 'docs/feature-map.json'), '{broken json', 'utf8')
+      const triSoft = triageTask({ repoRoot: dir, summary: 'billing', paths: ['src/billing.mjs'] })
+      if (!triSoft.featureMapContext?.corrupt || !Array.isArray(triSoft.featureMapContext?.businessFlows)) {
+        return `损坏 feature-map.json 时 triageTask 未 Fail-Soft: ${JSON.stringify(triSoft.featureMapContext)}`
       }
       return true
     } finally { rmTree(dir) }

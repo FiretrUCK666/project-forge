@@ -142,7 +142,9 @@ export function registerVerifyToolsCases(cases) {
       const draft1 = await runAbsAsync(VT_SCRIPT, ['create', '--feature', 'orders', '--task', 't-sc-1', '--draft-only', '--json'], { cwd: dir })
       if (draft1.status !== 0) return `create --draft-only 失败：${draft1.stderr}`
       const d1 = JSON.parse(draft1.stdout)
-      if (!existsSync(d1.draftPath) || d1.draftPath.startsWith(dir.replace(/\\/g, '/'))) {
+      if (!existsSync(d1.draftPath)
+        || !isSafeTaskScratchPath(d1.draftPath, roots.gitDir, 't-sc-1', roots.mainRoot)
+        || !d1.draftPath.includes('/.git/project-forge-verify/scratch/t-sc-1/')) {
         return `草稿未落盘仓外命名空间：${d1.draftPath}`
       }
       const stBefore = gitSync(dir, ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim()

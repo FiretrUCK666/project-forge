@@ -6,7 +6,7 @@
  */
 
 import { existsSync, statSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { resolveExecutable } from '../../lib/exec.mjs'
 import {
@@ -96,7 +96,9 @@ function resolveRelativeImport(repoRoot, fromRel, spec, fileSet) {
   if (!spec.startsWith('./') && !spec.startsWith('../')) return null
   const baseDir = dirname(join(repoRoot, fromRel))
   const rawAbs = resolve(baseDir, spec)
-  const relBase = posixPath(rawAbs.slice(resolve(repoRoot).length)).replace(/^\/+/, '')
+  const relFromRoot = relative(resolve(repoRoot), rawAbs)
+  if (!relFromRoot || relFromRoot.startsWith('..') || isAbsolute(relFromRoot)) return null
+  const relBase = posixPath(relFromRoot).replace(/^\/+/, '')
   const cands = [
     relBase,
     `${relBase}.mjs`, `${relBase}.js`, `${relBase}.ts`, `${relBase}.tsx`, `${relBase}.cjs`, `${relBase}.py`,

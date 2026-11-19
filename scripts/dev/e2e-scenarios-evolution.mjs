@@ -220,7 +220,9 @@ async function runScenarioL(pkgRoot, sandbox, env, h) {
   h.assertOk(runPass, 'Scenario L dev-iterate run pass')
 
   // Intentional failing regression test -> escalation + signals.jsonl without modifying business source
-  writeFileSync(join(repoL, 'tests/integration/failing-check.test.mjs'), "import assert from 'node:assert/strict'\nimport test from 'node:test'\ntest('regression fails', () => { assert.equal(1, 2) })\n", 'utf8')
+  const failTestAbs = join(repoL, 'tests/integration/failing-check.test.mjs')
+  mkdirSync(dirname(failTestAbs), { recursive: true })
+  writeFileSync(failTestAbs, "import assert from 'node:assert/strict'\nimport test from 'node:test'\ntest('regression fails', () => { assert.equal(1, 2) })\n", 'utf8')
   const runFail = h.runNodeScript(iterScript, ['run', repoL, '--targets', 'tests/integration/failing-check.test.mjs', '--escalate', '--json'], repoL, env)
   if (runFail.status === 0) throw new Error('Scenario L failing test should exit non-zero')
   const failJson = JSON.parse(runFail.stdout)

@@ -73,9 +73,10 @@ export function registerLocateIntakeCases(cases) {
     if (repoBytes >= protocol.AGENTS_COMPACT_RECOMMENDED_BYTES) {
       return `本仓 AGENTS.md 超过 24KB 推荐预算：${repoBytes}`
     }
-    for (const unlanded of ['dev-edit', 'dev-verify-tools', 'dev-iterate']) {
-      if (repoAgents.includes(`.agents/skills/${unlanded}/SKILL.md`)) {
-        return `AGENTS.md 不应写入尚未落盘的技能路由：${unlanded}`
+    for (const candidate of ['dev-edit', 'dev-verify-tools', 'dev-iterate']) {
+      const landed = existsSync(join(SKILL_ROOT, 'kit', 'skills', candidate, 'SKILL.md'))
+      if (!landed && repoAgents.includes(`.agents/skills/${candidate}/SKILL.md`)) {
+        return `AGENTS.md 不应写入尚未落盘的技能路由：${candidate}`
       }
     }
 

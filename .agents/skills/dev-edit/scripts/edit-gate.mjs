@@ -62,22 +62,27 @@ function normalizeRelFile(repoRoot, raw) {
 
 async function collectChangedEntries(workRoot, isGit, defaultBranch) {
   const byFile = new Map()
-  if (!isGit) return []
+  const deletedFiles = new Set()
+  if (!isGit) return { entries: [], deletedFiles }
 
   const st = await gitStatusPorcelainZ(workRoot)
   if (st.ok) {
     for (const e of st.entries) {
       if (!e.file || isMacOsJunkPath(e.file)) continue
       const status = String(e.status ?? 'M').trim()
-      if (status.includes('D') && !status.includes('R')) continue
-      byFile.set(posixPath(e.file), { file: posixPath(e.file), status: status.includes('R') ? 'R' : status || 'M' })
+      const rel = posixPath(e.file)
+      if (status.includes('D') && !status.includes('R')) {
+        deletedFiles.add(rel)
+        continue
+      }
+      byFile.set(rel, { file: rel, status: status.includes('R') ? 'R' : status || 'M' })
     }
   }
 
   const fastGitDir = resolveGitDirFast(workRoot)
   const fastHead = readHeadFast(fastGitDir)
   const hasHead = fastHead ? Boolean(fastHead.oid) : (await gitRun(workRoot, ['rev-parse', '--verify', 'HEAD'])).ok
-  if (!hasHead) return [...byFile.values()]
+  if (!hasHead) return { entries: [...byFile.values()], deletedFiles }
 
   const bases = [...new Set([defaultBranch, 'main', 'master'].filter(Boolean))]
   for (const baseRef of bases) {
@@ -90,15 +95,19 @@ async function collectChangedEntries(workRoot, isGit, defaultBranch) {
       const diff = await gitDiffNameStatusZ(workRoot, [`${mb.stdout.trim()}..HEAD`])
       if (diff.ok) {
         for (const e of diff.entries) {
-          if (!e.file || isMacOsJunkPath(e.file) || e.status === 'D') continue
+          if (!e.file || isMacOsJunkPath(e.file)) continue
           const rel = posixPath(e.file)
+          if (e.status === 'D') {
+            deletedFiles.add(rel)
+            continue
+          }
           if (!byFile.has(rel)) byFile.set(rel, { file: rel, status: String(e.status || 'M') })
         }
       }
       break
     }
   }
-  return [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file))
+  return { entries: [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file)), deletedFiles }
 }
 
 function collectSiblingReuseHints(workRoot, targetFiles) {
@@ -133,9 +142,16 @@ function collectSiblingReuseHints(workRoot, targetFiles) {
   return hints
 }
 
-function isLegalArchiveMove(entry) {
+function isLegalArchiveMove(entry, deletedFiles = new Set()) {
   const rel = posixPath(entry?.file ?? '')
-  return rel.startsWith('docs/archive/') && /^R/i.test(String(entry?.status ?? ''))
+  if (!rel.startsWith('docs/archive/')) return false
+  const st = String(entry?.status ?? '')
+  if (/^R/i.test(st)) return true
+  if (/^A/i.test(st)) {
+    const origRel = rel.replace(/^docs\/archive\//, 'docs/')
+    if (deletedFiles.has(origRel)) return true
+  }
+  return false
 }
 
 async function runOptionalNativeChecks(workRoot, nativeInfo) {
@@ -221,12 +237,15 @@ export async function runEditGate(opts = {}) {
   const archRules = devProfile['arch-rules'] ?? []
 
   let entries = []
+  let deletedFiles = new Set()
   if (Array.isArray(opts.files) && opts.files.length > 0) {
     entries = opts.files.map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
   } else if (typeof opts.files === 'string' && opts.files.trim()) {
     entries = opts.files.split(',').map((f) => normalizeRelFile(workTreeRoot, f)).filter(Boolean).map((file) => ({ file, status: 'M' }))
   } else {
-    entries = await collectChangedEntries(workTreeRoot, isGit, defaultBranch)
+    const collected = await collectChangedEntries(workTreeRoot, isGit, defaultBranch)
+    entries = collected.entries
+    deletedFiles = collected.deletedFiles
   }
 
   const dedupEntries = []
@@ -242,11 +261,14 @@ export async function runEditGate(opts = {}) {
   const nearLimitFiles = []
   const highRiskHits = []
   const checkedFiles = dedupEntries.map((e) => e.file)
+  const delegatedToFlowPolicy = mode === 'verify' && Boolean(opts.task)
 
   for (const entry of dedupEntries) {
     const rel = entry.file
-    if (!isLegalArchiveMove(entry) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
-      blockers.push({ ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' })
+    if (!isLegalArchiveMove(entry, deletedFiles) && doNotEditGlobs.some((pat) => matchGlob(rel, pat))) {
+      const hit = { ruleId: 'edit.do-not-edit', defectClass: 'stale-contract', severity: 'high', file: rel, line: 1, message: `目标文件命中 AGENTS.md do-not-edit 禁改路径：${rel}`, fixHint: '停止修改受保护归档/生成目录；若属合法任务归档请走 flow.mjs finalize。' }
+      if (delegatedToFlowPolicy) warnings.push(hit)
+      else blockers.push(hit)
     }
     if (mode === 'pre-edit' || existsSync(join(workTreeRoot, rel))) {
       const procNameHit = checkProcessArtifactFilename(rel)
@@ -433,7 +455,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   const { opts, targetDir } = parsed
   const res = await runEditGate({
-    mode: opts.mode ?? 'standalone',
+    mode: opts.mode ?? (opts.task ? 'verify' : 'standalone'),
     dir: targetDir,
     files: opts.files,
     changed: Boolean(opts.changed),

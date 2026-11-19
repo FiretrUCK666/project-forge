@@ -108,6 +108,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
   // 3. 真实本地工作流：Case 3 start -> Todo 未勾选阻断 finalize -> 未 finalize 阻断 submit -> 代码改动使 verifiedHead 失效 -> submit 成功
   const localDir = tmpProject({
     '.gitignore': '.worktrees/\n',
+    'AGENTS.md': '# flow-local\n\n```yaml\nquick-test: exit 0\nfull-test: none\nsmoke-verify: none\n```\n',
     'package.json': '{"name":"flow-local","version":"1.0.0"}\n',
     'README.md': '# flow-local\n',
     'docs/TDD.md': '# TDD\n',

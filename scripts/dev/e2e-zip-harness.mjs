@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
+import { runStageBScenarios } from './e2e-scenarios-stageb.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
@@ -444,8 +445,11 @@ async function main() {
     await runScenarioE(pkgRoot, sandbox, env)
     await runScenarioF(pkgRoot, sandbox, env)
     await runScenarioG(pkgRoot, sandbox, env)
+    await runStageBScenarios(pkgRoot, sandbox, env, {
+      assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+    })
     const ms = Math.round(performance.now() - t0)
-    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：7 大场景 + 跨会话 --takeover + 全部防绕过拦截成立（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
+    process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：7 大基础场景 + Stage B Scenarios H-J（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0
   } catch (err) {
     process.stderr.write(`FAIL  e2e-zip-harness: ${err instanceof Error ? err.stack || err.message : String(err)}\n`)

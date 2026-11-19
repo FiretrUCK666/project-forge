@@ -12,23 +12,35 @@ import { checkMermaidLabelWidth } from './docs.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { hasExploredEvidence, sanitizeTaskId, nextReviewRound } from './ledger.mjs'
 import { isProfileExplicitNone } from './profile.mjs'
-import { GATE_WORKFLOW_FILE_RE, LOCKFILE_NAMES, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
+import { GATE_WORKFLOW_FILE_RE, CODE_EXT_RE, LOCKFILE_NAMES, TEST_FILE_RE, UI_VISUAL_EXT_RE, matchGlob } from './static-gates.mjs'
 import {
   analyzeIssueDependencies,
+  buildE2eDiagnosticPacket,
+  buildE2eObservation,
   buildInspectNextSteps,
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
+  hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
+  redactDiagnosticText,
   scanUnstartedReadySlices,
+  scoreExecutionResult,
+  validatePreMergeShaAndWorktree,
 } from './workflow-helpers.mjs'
 
 export {
   analyzeIssueDependencies,
+  buildE2eDiagnosticPacket,
+  buildE2eObservation,
   buildInspectNextSteps,
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
+  hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
+  redactDiagnosticText,
   scanUnstartedReadySlices,
+  scoreExecutionResult,
+  validatePreMergeShaAndWorktree,
 }
 
 export const LOW_RISK_TEXT_EXT_RE = /\.(?:md|mdx|txt|rst)$/i
@@ -165,6 +177,10 @@ export function determineWorkflowPolicy({
 
   const independentReviewRequired = hasDevReview ? (riskTier !== 'low') : false
   const humanApprovalRequired = !hasDevReview && riskTier === 'high'
+  const runtimeFilesTouched = files.filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
+  const smokeExplicitNone = isProfileExplicitNone(profile, 'smoke-verify')
+  const smokeConfigured = Boolean(profile?.smokeVerify) && !smokeExplicitNone
+  const smokeRequired = runtimeFilesTouched.length > 0 && riskTier !== 'low' && !smokeExplicitNone
 
   return {
     riskTier,
@@ -174,6 +190,10 @@ export function determineWorkflowPolicy({
     faultInjectionRequired: riskTier === 'high',
     requiredGates: resolveRequiredGates(riskTier, profile),
     staticDocCheckRequired: riskTier === 'low' && !hasCiWorkflow,
+    runtimeFilesTouched,
+    smokeRequired,
+    smokeConfigured,
+    smokeExplicitNone,
     reasons,
     highRiskHits,
     oneWayBoundaryHits,
@@ -342,9 +362,37 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
     if (!g) continue
     if (headSha && g.headSha !== headSha) continue
     if (g.dirty === true || g.exitCode !== 0 || g.partial === true) continue
+    if (g.status !== 'skipped-explicit-none' && (g.errorOnly === true || g.executed === false || g.succeeded === false)) continue
     const cfgCmd = configuredCmdForTier(profile, name)
     if (g.customCmd === true && cfgCmd && g.cmd !== cfgCmd) continue
     validGates.push({ name, rank: GATE_TIER_RANK[name] ?? 0, gate: g })
+  }
+
+  if (policy?.smokeRequired && policy?.riskTier !== 'low' && !isProfileExplicitNone(profile, 'smoke-verify')) {
+    const hasSmokeGate = validGates.some((v) => v.name === 'smoke') && evidence.smokeVerifiedOnHead !== false
+    if (!hasSmokeGate) {
+      const noCfg = !profile?.smokeVerify
+      return {
+        ok: false,
+        code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
+        exitCode: 3,
+        requiredTier: 'smoke',
+        reason: noCfg
+          ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
+          : `运行时代码改动禁止仅用 full/gate（单测）顶替 smoke-verify，当前 HEAD 缺少 smoke 执行实证（已通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]）。`,
+      }
+    }
+    const hasE2eObs = hasValidE2eObservationOnHead(evidence, headSha)
+      || Boolean(evidence.visualCheckEvidence && (!headSha || evidence.visualVerifiedHead === headSha))
+    if (!hasE2eObs) {
+      return {
+        ok: false,
+        code: 'BLOCKED_E2E_OBSERVATION_REQUIRED',
+        exitCode: 3,
+        requiredTier: 'smoke',
+        reason: '已完成 smoke 命令执行，但缺少当前 HEAD 的结构化 E2E 运行观察回执（e2eObservation），请核验真实输出/状态后传 --e2e-evidence "<观察实证>"。',
+      }
+    }
   }
 
   if (requiredGates.length > 0) {
@@ -616,10 +664,11 @@ export function evaluateNextState({
     phase = 'needs-verify'
     ownerRole = 'implementer'
     if (evidenceVal.code) blockingReasons.push(evidenceVal.code)
-    const recTier = policy?.requiredGates?.[0] ?? 'full'
+    const recTier = evidenceVal.requiredTier ?? policy?.requiredGates?.[0] ?? 'full'
     const modeFlag = policy?.riskTier === 'low' ? '' : ` --mode ${recTier}`
+    const e2eHint = policy?.smokeRequired ? ' --e2e-evidence "<运行观察实证>"' : ''
     nextAction = evidenceVal.reason ?? '请运行匹配的 verify 门禁锁定当前 HEAD'
-    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${t.taskId}${modeFlag}`
+    command = `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${t.taskId}${modeFlag}${e2eHint}`
   } else if (!['submitted', 'local-ready', 'awaiting-upstream-merge'].includes(t.status) || (t.lastSubmittedHead && currentHead && t.lastSubmittedHead !== currentHead)) {
     phase = 'needs-submit'
     ownerRole = 'implementer'

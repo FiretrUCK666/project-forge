@@ -17,6 +17,7 @@ import {
   classifyDoorType, detectGateWeakeningInEntry, evaluateArchRules, isTestOrFixtureFile, matchGlob,
   scanStructuralHygiene, splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
+import { hasValidE2eObservationOnHead } from '../../lib/workflow-policy.mjs'
 
 const EXPORT_API_RE = /^\s*(?:export\s+(?:default\s+|async\s+)?(?:function|const|let|var|class|type|interface|enum|\{)|module\.exports\b|exports\.[A-Za-z0-9_]+\s*=|pub\s+(?:fn|struct|enum|trait|mod|type)\s+|func\s+[A-Z]|def\s+[a-zA-Z][a-zA-Z0-9_]*\s*\()/
 const CLI_FLAG_RE = /(?:--[a-z][a-z0-9-]{1,}\b|\bprocess\.argv\b|\bargparse\b|\bcommander\b|\byargs\b|\bclap\b|\bflag\.)/
@@ -241,7 +242,9 @@ export function collectGateWeakeningHits(reviewRoot, diff) {
   return hits
 }
 
-export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories = [] }) {
+export function assessBehavioralGate({
+  diff, devProfile, task, headSha, gateWeakenedHits, parity, untrustedAdvisories = [], evidence = null, receipt = null,
+}) {
   const runtimeFilesTouched = [...diff.files.map((f) => f.file), ...diff.untracked]
     .filter((f) => CODE_EXT_RE.test(f) && !TEST_FILE_RE.test(f))
   const visualFilesChanged = [...new Set([...diff.files.map((f) => f.file), ...diff.untracked])]
@@ -250,15 +253,36 @@ export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeak
     .sort()
   const empiricalVisualCheckRequired = visualFilesChanged.length > 0
   const smokeCommands = devProfile['smoke-verify'] ?? []
+  const smokeExplicitNone = Boolean(devProfile?.explicitNone instanceof Set ? devProfile.explicitNone.has('smoke-verify') : false)
+  const hasProfileConfig = Boolean(
+    smokeCommands.length > 0
+    || (devProfile?.['quick-test']?.length ?? 0) > 0
+    || (devProfile?.['full-test']?.length ?? 0) > 0
+    || (devProfile?.['merge-gate']?.length ?? 0) > 0
+    || (devProfile?.explicitNone?.size ?? 0) > 0,
+  )
   const testCommands = [
     ...(devProfile['quick-test'] ?? []),
     ...(devProfile['full-test'] ?? []),
     ...(devProfile['merge-gate'] ?? []),
   ]
-  const smokeRequired = runtimeFilesTouched.length > 0 && smokeCommands.length > 0
+  const smokeRequired = runtimeFilesTouched.length > 0 && !smokeExplicitNone && (smokeCommands.length > 0 || hasProfileConfig)
   const headMatchesVerified = task?.verifiedHead
     ? (headSha !== 'UNBORN' && task.verifiedHead === headSha)
     : null
+  const smokeVerifiedOnHead = Boolean(
+    headSha && headSha !== 'UNBORN' && (
+      (evidence?.smokeVerifiedOnHead && evidence?.headSha === headSha && !evidence?.dirty && evidence?.gates?.smoke?.exitCode === 0)
+      || (receipt?.empiricalVerified?.headSha === headSha && receipt?.empiricalVerified?.executed !== false && !receipt?.empiricalVerified?.errorOnly && (smokeCommands.length === 0 || receipt?.empiricalVerified?.smokeExecuted !== false))
+    ),
+  )
+  const e2eObservedOnHead = Boolean(
+    headSha && headSha !== 'UNBORN' && (
+      hasValidE2eObservationOnHead(evidence, headSha)
+      || hasValidE2eObservationOnHead(receipt?.empiricalVerified, headSha)
+      || (evidence?.visualCheckEvidence && evidence?.visualVerifiedHead === headSha)
+    ),
+  )
   const visualVerifiedOnHead = Boolean(
     empiricalVisualCheckRequired
     && task?.visualVerifiedHead
@@ -278,14 +302,14 @@ export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeak
   for (const h of [...advisoryGateHits, ...untrustedAdvisories]) {
     warnings.push(`Assertion-change advisory in ${h.file}: ${h.reason}`)
   }
-  if (smokeRequired) {
-    warnings.push('Runtime code touched and smoke-verify configured: run smoke-verify locally and confirm real behavior before approval.')
-  } else if (runtimeFilesTouched.length > 0 && smokeCommands.length === 0 && parity.triggers.some((t) => t.type === 'cli-surface')) {
-    warnings.push('CLI/entrypoint code touched without `smoke-verify:` in AGENTS.md Dev Profile; exercise real CLI path manually.')
+  if (smokeRequired && smokeCommands.length > 0 && (!smokeVerifiedOnHead || !e2eObservedOnHead)) {
+    warnings.push('Runtime code touched with smoke-verify configured: execute end-to-end verification and observe real behavior (--e2e-evidence) before approval.')
+  } else if (smokeRequired && smokeCommands.length === 0 && !e2eObservedOnHead) {
+    warnings.push('Runtime code touched without `smoke-verify:` or `smoke-verify: none` in Dev Profile; configure `smoke-verify:` or supply real runtime E2E observation (--e2e-evidence).')
   }
   if (empiricalVisualCheckRequired && !visualVerifiedOnHead) {
     warnings.push(
-      `UI/visual files changed (${visualFilesChanged.length}: ${visualFilesChanged.slice(0, 5).join(', ')}): open actual rendered page/asset, walk through user interactions end-to-end, and check Light/Dark screenshots rather than relying on source reading alone.`,
+      `UI/visual files changed (${visualFilesChanged.length}: ${visualFilesChanged.slice(0, 5).join(', ')}): inspect rendered output, interactive flows, and Light/Dark contrast rather than relying on source reading alone.`,
     )
   }
   if ((parity.mermaidViolations?.length ?? 0) > 0) {
@@ -295,7 +319,11 @@ export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeak
   let status = 'verify-required'
   if (deterministicGateHits.length > 0) status = 'gate-weakened'
   else if (headMatchesVerified === false) status = 'needs-reverify'
-  else if (headMatchesVerified === true && !smokeRequired && (!empiricalVisualCheckRequired || visualVerifiedOnHead)) {
+  else if (
+    headMatchesVerified === true
+    && (!smokeRequired || (smokeVerifiedOnHead && e2eObservedOnHead))
+    && (!empiricalVisualCheckRequired || visualVerifiedOnHead)
+  ) {
     status = 'verified-on-head'
   }
 
@@ -304,6 +332,10 @@ export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeak
     verifiedHead: task?.verifiedHead ?? null,
     visualVerifiedHead: task?.visualVerifiedHead ?? null,
     visualVerifiedOnHead,
+    smokeVerifiedOnHead,
+    e2eObservedOnHead,
+    smokeExplicitNone,
+    e2eObservation: evidence?.e2eObservation ?? receipt?.empiricalVerified?.e2eObservation ?? null,
     headSha,
     headMatchesVerified,
     smokeVerifyCommands: smokeCommands,
@@ -312,9 +344,9 @@ export function assessBehavioralGate({ diff, devProfile, task, headSha, gateWeak
     visualFilesChanged,
     empiricalVisualCheckRequired,
     smokeRequired,
-    verificationHierarchy: 'Formal deterministic checks + empirical runtime/UI verification > adversarial code reading',
+    verificationHierarchy: 'Formal deterministic checks + empirical runtime/E2E verification > adversarial code reading',
     antiHumanProxyNote: smokeRequired
-      ? 'Execute smoke-verify locally in detached review worktree and verify stdout/exit behavior (never outsource initial runtime verification to humans).'
+      ? 'Execute end-to-end runtime verification locally in detached review worktree and observe real exit/output/state behavior (never substitute unit tests alone or outsource to humans).'
       : 'Run formal & empirical checks locally before judging; Must Fix requires a violated frozen C*, failed formal gate, or reproducible empirical failure.',
     warnings,
   }
@@ -626,14 +658,19 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
     lines.push('  HIGH-RISK PATHS TOUCHED (mandatory fault injection in detached review worktree):')
     for (const h of pack.highRiskHits) lines.push(`    - ${h.file} (rule: ${h.rule})`)
   }
-  lines.push('  Verification Precedence: Formal static gates + empirical execution/render checks > adversarial code reading.')
+  lines.push('  Verification Precedence: Formal static gates + empirical E2E execution/observation > adversarial code reading.')
+  if (bg.smokeRequired) {
+    lines.push('  Generic E2E Run + Observe Checklist (unit tests do NOT replace end-to-end runtime proof):')
+    lines.push('    - [ ] Execute real end-to-end command (`smoke-verify:` or explicit runtime entrypoint) against the review target')
+    lines.push('    - [ ] Observe real exit code, output, state transitions, and pass `--e2e-evidence "<observation>"`')
+  }
   if (bg.empiricalVisualCheckRequired) {
     lines.push('  Visual / UI Empirical Checklist (actual render + interaction + screenshots; never judge from reading code alone):')
-    lines.push('    - [ ] Open the actual rendered page, component, or SVG in a live browser/renderer (confirm clean render, no 404 or console errors)')
-    lines.push('    - [ ] Walk through interactive user flows end-to-end (clicks, form inputs, state transitions, error/empty states)')
+    lines.push('    - [ ] Inspect the actual rendered page, component, or SVG in a live runtime/renderer (confirm clean render and zero console/load errors)')
+    lines.push('    - [ ] Walk through interactive user flows end-to-end (inputs, state transitions, error/empty states)')
     lines.push('    - [ ] Capture and inspect Light & Dark theme screenshots for contrast, clipping, text overlap, and legibility')
   }
-  lines.push('  Fault Injection Protocol (Must Fix requires violated frozen C*, failed formal gate, or reproducible empirical failure; NO subjective code-reading nitpicks):')
+  lines.push('  Post-Unlock Substance & Fault Injection Protocol (after --include-diff, judge C* & business-flows substance/root cause; NO subjective nitpicks):')
   lines.push('    1. Temporarily break 1 core branch/guard in the review worktree and run test -> MUST FAIL.')
   lines.push('    2. Restore cleanly (`git checkout -- .`) and re-run test -> MUST PASS.')
   lines.push('    3. Classify findings strictly: Must Fix / Should Fix / Pre-existing (list all R1 locations at once).')

@@ -31,6 +31,7 @@ import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './fl
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 import {
   applySubmitPostActions,
+  cmdContainsSubcommand,
   collectFinalizeChangedFiles,
   computeFlowCoupledSync,
   emitFlowSignal,
@@ -39,6 +40,7 @@ import {
   findUncheckedLines,
   handleForkFinalize,
   handleRework,
+  handleVerifyE2eFailure,
   recordVerifyEvidenceForFlow,
 } from './flow-lifecycle-helpers.mjs'
 
@@ -314,9 +316,31 @@ export async function handleVerify(opts, roots) {
   }
 
   if (!cmd) {
+    if (mode === 'smoke' && !isExplicitNone) {
+      const { policy } = await computeVerifyPolicy()
+      if (policy.smokeRequired) {
+        await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: 'unconfigured smoke-verify for runtime changes', taskId })
+        process.stderr.write('BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none（Q3）；请在 AGENTS.md 补齐 smoke-verify，或通过 --cmd "<命令>" --e2e-evidence "<运行观察>" 传入。\n')
+        return { exitCode: EXIT_POLICY_BLOCK }
+      }
+    }
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.no-cmd`, severity: 'medium', source: 'flow-verify', message: `no verify command for ${mode}`, taskId })
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
     return { exitCode: 1 }
+  }
+
+  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
+  if ((mode === 'full' || mode === 'gate') && !profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !opts.cmd && !e2eEvidenceInput) {
+    const pre = await computeVerifyPolicy()
+    const prevEv = readVerificationEvidence(roots.gitDir, taskId)
+    const alreadySmokeOk = Boolean(prevEv && prevEv.headSha === pre.currentHead && !pre.dirty && prevEv.gates?.smoke?.exitCode === 0 && prevEv.smokeVerifiedOnHead)
+    if (pre.policy.smokeRequired && !alreadySmokeOk) {
+      await emitFlowSignal(roots, { category: 'e2e', module: 'workflow', pattern: 'verify.smoke.unconfigured', severity: 'medium', source: 'flow-verify', message: `blocked ${mode}: unconfigured smoke-verify`, taskId })
+      process.stderr.write(`BLOCKED_SMOKE_VERIFY_UNCONFIGURED: 运行时改动禁止在既无 smoke-verify 命令又未声明 smoke-verify: none 且无 --cmd/--e2e-evidence 时以 ${mode} 放行（Q3）；请在 AGENTS.md 补齐 smoke-verify，或传 --cmd "<命令>" --e2e-evidence "<运行观察>"。\n`)
+      return { exitCode: EXIT_POLICY_BLOCK }
+    }
   }
 
   let targetTip = null
@@ -344,16 +368,47 @@ export async function handleVerify(opts, roots) {
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, slotIndex: ledger.slotIndex })
   const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: wtEnv })
   const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
-  const docStaticRes = runRes.ok && policy.staticDocCheckRequired ? runLowRiskDocStaticCheck(implRoot, changedFiles) : null
-  const allOk = runRes.ok && (!docStaticRes || docStaticRes.ok)
-  const finalExit = recordVerifyEvidenceForFlow({
+  let smokeCmdUsed = mode === 'smoke' ? cmd : null
+  let smokeRunRes = mode === 'smoke' ? runRes : null
+  let smokeExecuted = mode === 'smoke'
+  if (mode === 'gate' && policy.smokeRequired && profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !profile.smokeVerify.includes('{target}')) {
+    const prevEv = readVerificationEvidence(roots.gitDir, taskId)
+    const alreadySmokeOk = Boolean(prevEv && prevEv.headSha === currentHead && !dirty && !prevEv.dirty && prevEv.gates?.smoke?.exitCode === 0 && prevEv.smokeVerifiedOnHead)
+    if (!alreadySmokeOk) {
+      if (cmdContainsSubcommand(cmd, profile.smokeVerify)) {
+        smokeCmdUsed = profile.smokeVerify
+        smokeRunRes = runRes
+        smokeExecuted = true
+      } else if (runRes.ok) {
+        smokeCmdUsed = profile.smokeVerify
+        smokeRunRes = await execShellCommand(profile.smokeVerify, implRoot, { timeout: timeoutMs, env: wtEnv })
+        smokeExecuted = true
+      }
+    }
+  }
+  const docStaticRes = runRes.ok && (!smokeRunRes || smokeRunRes.ok) && policy.staticDocCheckRequired
+    ? runLowRiskDocStaticCheck(implRoot, changedFiles)
+    : null
+  const execOk = runRes.ok && (!smokeRunRes || smokeRunRes.ok)
+  const allOk = execOk && (!docStaticRes || docStaticRes.ok)
+  const evRec = recordVerifyEvidenceForFlow({
     roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
     cmdStr: cmd, customCmd: Boolean(opts.cmd), exitCode: runRes.code,
-    explicitNoneSkipped: false, docStaticRes,
+    explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
+    e2eObservationText: e2eEvidenceInput,
+    smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
   })
+  const finalExit = !execOk && runRes.ok && smokeRunRes && !smokeRunRes.ok ? (smokeRunRes.code || 1) : evRec.overallExit
+  let e2eFailureReport = null
+  if ((mode === 'smoke' || smokeExecuted) && smokeRunRes && !smokeRunRes.ok) {
+    e2eFailureReport = await handleVerifyE2eFailure({
+      roots, implRoot, taskId, ledger, mode: smokeExecuted ? 'smoke' : mode,
+      cmd: smokeCmdUsed ?? cmd, runRes: smokeRunRes, currentHead, changedFiles, opts,
+    })
+  }
   const visualFilesChanged = policy.visualFilesChanged
   const empiricalVisualCheckRequired = visualFilesChanged.length > 0
-  const hasVisualCheckFlag = Boolean(opts['visual-checked'] || opts['visual-evidence'])
+  const hasVisualCheckFlag = Boolean(opts['visual-checked'] || opts['visual-evidence'] || opts['e2e-evidence'])
 
   ledger.verifiedHead = allOk ? currentHead : null
   ledger.verifiedCmd = cmd
@@ -365,9 +420,7 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    ledger.visualCheckEvidence = typeof opts['visual-evidence'] === 'string'
-      ? opts['visual-evidence']
-      : (ledger.visualCheckEvidence ?? '实际渲染、端到端交互与浅深色截图核验已确认')
+    ledger.visualCheckEvidence = e2eEvidenceInput || (ledger.visualCheckEvidence ?? '实际运行、端到端交互与输出观察核验已确认')
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
@@ -375,11 +428,16 @@ export async function handleVerify(opts, roots) {
   if (docStaticRes && !docStaticRes.ok) {
     process.stderr.write(`BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}\n`)
   }
+  if (e2eFailureReport?.diagnostic && !opts.json) {
+    process.stderr.write(`E2E_RUNTIME_FAILED:\nEvidence:\n  - ${e2eFailureReport.diagnostic.Evidence.join('\n  - ')}\nUnknowns:\n  - ${e2eFailureReport.diagnostic.Unknowns.join('\n  - ')}\nNextSteps:\n  - ${e2eFailureReport.diagnostic.NextSteps.join('\n  - ')}\n`)
+  }
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({
       taskId, mode, target: rawTarget, cmd, ...(targetTip ? { targetTip } : {}),
       ok: allOk, exitCode: finalExit, verifiedHead: ledger.verifiedHead, riskTier: policy.riskTier,
+      smokeVerifiedOnHead: evRec.smokeVerifiedOnHead, e2eObservation: evRec.e2eObservation,
+      ...(e2eFailureReport ? { diagnostic: e2eFailureReport.diagnostic, escalatedIssue: e2eFailureReport.escalation } : {}),
       docStatic: docStaticRes, visualFilesChanged, empiricalVisualCheckRequired,
       visualVerifiedHead: ledger.visualVerifiedHead, visualCheckEvidence: ledger.visualCheckEvidence,
       stdout: runRes.stdout, stderr: runRes.stderr,
@@ -391,12 +449,19 @@ export async function handleVerify(opts, roots) {
     process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${finalExit} HEAD=${currentHead ?? 'unborn'} risk=${policy.riskTier}\n`)
     if (allOk) {
       const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }]
-      if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
+      if (policy.smokeRequired && !evRec.e2eObservation) {
+        next.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
+      } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
         next.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
       }
       printNextStep(next, { repoRoot: roots.mainRoot })
     } else {
-      printNextStep([`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`], { repoRoot: roots.mainRoot })
+      printNextStep(
+        e2eFailureReport?.diagnostic?.NextSteps?.length
+          ? e2eFailureReport.diagnostic.NextSteps
+          : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`],
+        { repoRoot: roots.mainRoot },
+      )
     }
   }
   return { exitCode: allOk ? 0 : (finalExit || 1) }

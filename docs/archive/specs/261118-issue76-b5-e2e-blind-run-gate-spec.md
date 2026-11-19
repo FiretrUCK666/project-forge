@@ -1,16 +1,16 @@
 ---
 kind: spec
 title: v9 B5：通用 E2E 门禁、离线 Scenarios H–J、I160+ 注入与 $TMPDIR 盲跑终验
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-19
 issue: 76
 pr: null
-branch: null
-owner: plan-stage-b
+branch: feat/b5-e2e-blind-run-gate
+owner: impl-76
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w345-r3, round=2, sha=33835fa5f460, summary=R2 复核通过：移除escalation.mjs写域仅只读复用对齐PRD；C15/C23明确E2E优先diff实质根因审查及轻弱模型不跳过E2E只看diff专项盲测)"
 related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_todo: ../todo/261118-issue76-b5-e2e-blind-run-gate-todo.md
@@ -124,11 +124,11 @@ flowchart LR
 
 ## 五、冻结的验收标准
 
-- [ ] C15: 保留 7 键 `Dev Profile`，`workflow-policy.mjs`（`determineWorkflowPolicy`、`validateVerificationEvidence`）修复 `GATE_TIER_RANK` 下 `full`/`gate` 绕过 `smoke-verify` 缺陷——当 `runtimeFilesTouched.length > 0`、`riskTier !== 'low'` 且 `smoke-verify` 未显式设为 `none` 时强制校验 `smoke` (`smokeVerifiedOnHead`) 与结构化 `e2eObservation` 回执（缺失返回 `BLOCKED_INSUFFICIENT_VERIFICATION_TIER` 或 `BLOCKED_E2E_OBSERVATION_REQUIRED`，退出码 `3`）；`flow.mjs verify`（已在 `flow.mjs` `parseStandardCli` 注册 `--e2e-evidence`）与 `review-pack.mjs check-empirical`/`record` 支持 `--e2e-evidence`（兼容 `--visual-checked`）；`review-gates.mjs`（修复 `assessBehavioralGate` `!smokeRequired` 缺陷并清除既有前端驱动工具硬编码文案）、`review-empirical.mjs` 与 `review-locks.mjs` 在缺 E2E 实证时阻断 `--include-diff`（`BLOCKED_EMPIRICAL_FIRST`）与 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`），解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）并接入 `C12` 建单闭环。
-- [ ] C16: 新增 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（故障注入从 `I160` 起编号），覆盖 `C1..C15`、`C19` 全部正反双向用例与门禁拆解探测，`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs` 100% 通过。
-- [ ] C17: 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new) 接入 `scripts/dev/e2e-zip-harness.mjs`，从 `git archive --format=zip` 解压安装包黑盒执行 Scenario `H`（无远端本地工单起步 -> 新增远端并迁移/切回远端完整闭环至自动关单）、Scenario `I`（评审/规划双侧跨轮同人拦截、3 轮停损归因与分级建单）与 Scenario `J`（Node+Python 异构仓、非标文档、自定义脚本、自有技能 `S1–S4` 升级、`.githooks/pre-push`、`generic-git` 及真实非 `exit 0` 端到端实测失败建单修复复绿），退出码 `0`。
-- [ ] C18: 新增 `scripts/dev/blind-run-harness.mjs` (new)（留存 `scripts/dev/` 不进用户包，并登记于 `docs/TDD.md` 通过孤儿脚本审计），在隔离 `$TMPDIR` 克隆副本对多生态真实开源项目（含带自有项目级 Skill 与自定义规则且用新版重跑 `S1–S4` 校准的已规范仓）执行极简低提示词盲跑验收与实跑对方原生测试；发现的阻塞/跨范围问题全部通过「建单 -> SPEC/Todo -> 修复 -> 沉淀夹具与故障注入」清零；全仓所有 `.mjs <= 800` 行、`AGENTS.md` 符合体积预算（本仓 `< 24576 B`），`merge-gate` 全链命令全绿。
-- [ ] C23: 交付 `A6` 校验、跨特性交错 `Scenarios H–J` 与零提示词（Zero-Hint）盲测终验：① `flow-merge.mjs` 与 `review-empirical.mjs` 合并前强校 `headSha === evidence.headSha === review.headSha` 且工作区无脏改动，`evidence.json` 与盲跑结果计分拆分 `executed` / `succeeded` / `errorOnly` 三态（阻断空跑/错路径刷绿）；`flow.mjs verify` / `review` / E2E 失败输出脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断包并桥接 `C12` `escalation.mjs` (new) 自动建单；坚持「形式门禁 + 真实运行/E2E 实证 + `check-fault` 在前，解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺）」；编写确定性零 LLM Node CLI 故障注入 Stub 覆盖 `I160+`（含 `C20–C23` 探针）；② `scripts/dev/e2e-scenarios-stageb.mjs` (new) 在自建 HTTP/SSH 模拟远端与凭据下交错跑通离线 `Scenarios H–J`（覆盖无远端迁有远端、PR/Issue 标签前缀、按需 Milestone、双侧停损、`A1–A5` 与 E2E 失败建单）；③ 增设零提示词（Zero-Hint）全机制主调度组（全新无本仓上下文子代理）与轻/弱模型对照组对照及 `$TMPDIR` 多生态（Node/Python/Go/Rust 与 `LoopForge-main` 同构/自有技能升级）盲跑，必测「裸粘贴 Issue 链接」「裸粘贴同源 PR 与 Fork `inbound-external-pr` 链接」「初次接入含 `business-flows`/非标目录/原生测试隔离/自有技能保留 + Day-2 真实业务开发 + 二次 `S1–S4` 无损升级」并**专门验证轻/弱模型在审查时不跳过 E2E 只看 diff**，暴露的跳过/漏评/漏归档/弱模型跑偏或歧义一律按 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀进离线回归。
+- [x] C15: 保留 7 键 `Dev Profile`，`workflow-policy.mjs`（`determineWorkflowPolicy`、`validateVerificationEvidence`）修复 `GATE_TIER_RANK` 下 `full`/`gate` 绕过 `smoke-verify` 缺陷——当 `runtimeFilesTouched.length > 0`、`riskTier !== 'low'` 且 `smoke-verify` 未显式设为 `none` 时强制校验 `smoke` (`smokeVerifiedOnHead`) 与结构化 `e2eObservation` 回执（缺失返回 `BLOCKED_INSUFFICIENT_VERIFICATION_TIER` 或 `BLOCKED_E2E_OBSERVATION_REQUIRED`，退出码 `3`）；`flow.mjs verify`（已在 `flow.mjs` `parseStandardCli` 注册 `--e2e-evidence`）与 `review-pack.mjs check-empirical`/`record` 支持 `--e2e-evidence`（兼容 `--visual-checked`）；`review-gates.mjs`（修复 `assessBehavioralGate` `!smokeRequired` 缺陷并清除既有前端驱动工具硬编码文案）、`review-empirical.mjs` 与 `review-locks.mjs` 在缺 E2E 实证时阻断 `--include-diff`（`BLOCKED_EMPIRICAL_FIRST`）与 `pass`（`BLOCKED_PASS_WITH_OPEN_BLOCKERS`），解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺），E2E 运行失败自动写 `signals.jsonl`（`e2e.runtime-fail`）并接入 `C12` 建单闭环。
+- [x] C16: 新增 `scripts/dev/fixtures-stageb-onboarding.mjs` (new)、`scripts/dev/fixtures-stageb-loop.mjs` (new) 与 `scripts/dev/injections-data-stageb.mjs` (new)（故障注入从 `I160` 起编号），覆盖 `C1..C15`、`C19` 全部正反双向用例与门禁拆解探测，`node scripts/dev/fixtures.mjs` 与 `node scripts/dev/verify-injections.mjs` 100% 通过。
+- [x] C17: 新增 `scripts/dev/e2e-scenarios-stageb.mjs` (new) 接入 `scripts/dev/e2e-zip-harness.mjs`，从 `git archive --format=zip` 解压安装包黑盒执行 Scenario `H`（无远端本地工单起步 -> 新增远端并迁移/切回远端完整闭环至自动关单）、Scenario `I`（评审/规划双侧跨轮同人拦截、3 轮停损归因与分级建单）与 Scenario `J`（Node+Python 异构仓、非标文档、自定义脚本、自有技能 `S1–S4` 升级、`.githooks/pre-push`、`generic-git` 及真实非 `exit 0` 端到端实测失败建单修复复绿），退出码 `0`。
+- [x] C18: 新增 `scripts/dev/blind-run-harness.mjs` (new)（留存 `scripts/dev/` 不进用户包，并登记于 `docs/TDD.md` 通过孤儿脚本审计），在隔离 `$TMPDIR` 克隆副本对多生态真实开源项目（含带自有项目级 Skill 与自定义规则且用新版重跑 `S1–S4` 校准的已规范仓）执行极简低提示词盲跑验收与实跑对方原生测试；发现的阻塞/跨范围问题全部通过「建单 -> SPEC/Todo -> 修复 -> 沉淀夹具与故障注入」清零；全仓所有 `.mjs <= 800` 行、`AGENTS.md` 符合体积预算（本仓 `< 24576 B`），`merge-gate` 全链命令全绿。
+- [x] C23: 交付 `A6` 校验、跨特性交错 `Scenarios H–J` 与零提示词（Zero-Hint）盲测终验：① `flow-merge.mjs` 与 `review-empirical.mjs` 合并前强校 `headSha === evidence.headSha === review.headSha` 且工作区无脏改动，`evidence.json` 与盲跑结果计分拆分 `executed` / `succeeded` / `errorOnly` 三态（阻断空跑/错路径刷绿）；`flow.mjs verify` / `review` / E2E 失败输出脱敏 `Evidence` / `Unknowns` / `NextSteps` 诊断包并桥接 `C12` `escalation.mjs` (new) 自动建单；坚持「形式门禁 + 真实运行/E2E 实证 + `check-fault` 在前，解锁 `--include-diff` 后结合 `business-flows` / `C*` 做需求实质落地与根因判断（而非风格挑刺）」；编写确定性零 LLM Node CLI 故障注入 Stub 覆盖 `I160+`（含 `C20–C23` 探针）；② `scripts/dev/e2e-scenarios-stageb.mjs` (new) 在自建 HTTP/SSH 模拟远端与凭据下交错跑通离线 `Scenarios H–J`（覆盖无远端迁有远端、PR/Issue 标签前缀、按需 Milestone、双侧停损、`A1–A5` 与 E2E 失败建单）；③ 增设零提示词（Zero-Hint）全机制主调度组（全新无本仓上下文子代理）与轻/弱模型对照组对照及 `$TMPDIR` 多生态（Node/Python/Go/Rust 与 `LoopForge-main` 同构/自有技能升级）盲跑，必测「裸粘贴 Issue 链接」「裸粘贴同源 PR 与 Fork `inbound-external-pr` 链接」「初次接入含 `business-flows`/非标目录/原生测试隔离/自有技能保留 + Day-2 真实业务开发 + 二次 `S1–S4` 无损升级」并**专门验证轻/弱模型在审查时不跳过 E2E 只看 diff**，暴露的跳过/漏评/漏归档/弱模型跑偏或歧义一律按 `Issue -> SPEC/Todo -> Red-Green -> Review -> CI -> Merge` 根治并沉淀进离线回归。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -147,6 +147,6 @@ flowchart LR
 
 ## 实现说明
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：按 SPEC 拆分 `scripts/dev/preflight-contracts.mjs` -> `scripts/dev/preflight-contract-rules.mjs`、拆分 `kit/skills/lib/git.mjs` -> `kit/skills/lib/git-core.mjs` 与 `kit/skills/lib/git-fast-objects.mjs` -> `kit/skills/lib/git-fast.mjs`（全部保持 `<= 700` 行及导出 100% 兼容）；落地 `C15` 通用运行+观察 E2E 硬门禁（保留 7 键 `Dev Profile`，修复 `GATE_TIER_RANK` 跳过 `smoke-verify` 与 `assessBehavioralGate` `!smokeRequired` 缺陷，接入 `--e2e-evidence` 与 `e2e.runtime-fail` 脱敏信号建单，阻断缺 E2E 实证的 `--include-diff` 与 `pass`）、`A6` 合前三方 `headSha`/干净工作区校核与 `executed`/`succeeded`/`errorOnly` 三态计分；补齐 `I160–I178` 故障注入与双向夹具、交付离线 `scripts/dev/e2e-scenarios-stageb.mjs`（Scenarios `H–J`）及 `$TMPDIR` 多生态盲跑工具 `scripts/dev/blind-run-harness.mjs`。
+- **与草案的差异**：无实质偏离；新增 `kit/skills/lib/git-core.mjs` 与 `kit/skills/lib/git-fast-objects.mjs` 完成既有 Q6 行数瘦身，并在 `scripts/dev/fixtures-stageb-loop-b5.mjs` 独立承载 B5 双向验证与零 LLM CLI 故障注入 Stub 保持单文件 `<= 800` 行。
+- **关联同步文件**：`templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`、`.agents/skills/`、`docs/TDD.md`、`README.md`、`README.en.md`、`docs/archive/prd/261118-v9-stageb-adaptive-architecture-prd.md`、`docs/archive/todo/261118-issue76-b5-e2e-blind-run-gate-todo.md`。

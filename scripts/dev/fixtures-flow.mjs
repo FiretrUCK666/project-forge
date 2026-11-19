@@ -58,7 +58,7 @@ cases.push(['flow.mjs：smoke --target 替换与缺参阻断、门禁弱化阻�
     writeFileSync(join(implW2, 'test/ok.test.mjs'), 'import assert from "node:assert/strict"\n')
     gitCommitFast(implW2, 'weaken test', { updateOnly: true })
 
-    const vWeak = await handleVerify({ task: 't-w2', mode: 'gate' }, roots)
+    const vWeak = await handleVerify({ task: 't-w2', mode: 'gate', 'e2e-evidence': 'smoke file check ok' }, roots)
     if (vWeak.exitCode !== 0) return `verify 失败：${vWeak.exitCode}`
     await handleRecord({ task: 't-w2', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-w2', 'review-token': await issueTokenFor(dir, 't-w2', 1) }, roots)
 
@@ -307,7 +307,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
   const dir = tmpProject({
     '.gitignore': 'node_modules/\n.worktrees/\n',
     'package.json': '{"name":"t2-rev","version":"1.0.0"}\n',
-    'AGENTS.md': '# t2\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nmerge-gate: exit 0\n```\n',
+    'AGENTS.md': '# t2\n\n```yaml\nquick-test: exit 0\nfull-test: exit 0\nsmoke-verify: none\nmerge-gate: exit 0\n```\n',
     'src/app.mjs': 'export const v = 1\n',
   })
   gitInit(dir, { branch: 'main', name: 'impl', email: 'impl@example.com' })
@@ -382,7 +382,7 @@ cases.push(['Tier 2 review 槽同步防空 Diff、changes 清零 reviewPassedHea
 cases.push(['远端 CI 合并硬门禁：fail/pending 阻断、汇总重跑全绿放行与无工作流跳过正反双向', async () => {
   const ciDir = tmpProject({
     '.gitignore': '.worktrees/\n',
-    'AGENTS.md': '# ci-gate\n\n```yaml\nquick-test: exit 0\n```\n',
+    'AGENTS.md': '# ci-gate\n\n```yaml\nquick-test: exit 0\nsmoke-verify: none\n```\n',
     'src/app.mjs': 'export const c = 1\n',
   })
   gitInit(ciDir, { branch: 'main', name: 't', email: 't@t.t', origin: 'https://github.com/acme/ci-demo.git' })

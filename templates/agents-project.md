@@ -136,7 +136,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
 ```
 <!-- project-forge: endif -->
 
-**形式门禁通过且实际启动跑通（UI 须实际渲染、走通交互并核对浅深色截图）才算做完**——拿不出实际运行或渲染证据，不得声称「已验证」。
+**形式门禁通过且真实运行/E2E 观察达标（改运行态且 `smoke-verify` 非 `none` 须跑通并带 `--e2e-evidence`；UI 须走通交互核浅深色图；异常自动脱敏建单）才算做完**——无实证不得声称「已验证」。
 <!-- project-forge: end 构建与验证 -->
 
 <!-- project-forge: begin 修改守则 -->
@@ -279,7 +279,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   | 触碰「高风险路径」任一处 | 审查者合（独立上下文 + 故障注入） |
   | **弱化门禁** | **必须人点头** |
 
-  `contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`；「取舍」写 `merge-authority: human` 收回人合；发版/改可见性/改历史永不自动。六锁收敛见协作判据。
+  `contributor-fork` 禁自合；`generic-git` 须带 `--remote-merged`；「取舍」写 `merge-authority: human` 收回人合；合前强校三方 `headSha`、干净工作区与 E2E 观察；发版/改可见性/改历史永不自动。六锁收敛见协作判据。
 
 - **第六步：合并收尾与平台防乱码**——固定 7 步，顺序不能调：
   1. **把要写的东西写完，并纳入这次 PR**：Todo「完成后的记录」与勾选归档进 `docs/archive/todo/`、`docs/specs/` 标 `implemented`、断点写成「已完成，无遗留」。**提交进同一个分支**——合并后再改文件就得另开 PR；

@@ -37,6 +37,7 @@ import {
 } from './fixtures-helpers.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { registerStageBLoopB4bCases } from './fixtures-stageb-loop-b4b.mjs'
+import { registerStageBLoopB5Cases } from './fixtures-stageb-loop-b5.mjs'
 
 export function registerStageBLoopCases(cases) {
   cases.push(['C7：LocalOnlyBackend 16 接口、跨 Worktree 原子持久化与零 git status 污染', async () => {
@@ -64,7 +65,11 @@ export function registerStageBLoopCases(cases) {
       const cr = await localBk.createIssue({ title: '本地特性单', body: '初始正文', labels: ['feat'] })
       if (!cr.ok || cr.number !== 1) return `createIssue 失败：${JSON.stringify(cr)}`
       await localBk.addLabels({ number: 1, labels: ['triaged'] })
-      await localBk.postComment({ taskId: 'c7-task', number: 1, body: '进度评论', statePayload: { taskId: 'c7-task', action: 'progress' } })
+      const c1 = await localBk.postComment({ taskId: 'c7-task', number: 1, body: '进度评论', statePayload: { taskId: 'c7-task', action: 'progress' } })
+      const c2 = await localBk.postComment({ taskId: 'c7-task', number: 1, body: '进度评论', statePayload: { taskId: 'c7-task', action: 'progress' } })
+      if (!c1.ok || !c1.writeBackFingerprint || !c2.ok || !c2.deduplicated) {
+        return `localBk.postComment writeBackFingerprint 去重失效：c1=${JSON.stringify(c1)} c2=${JSON.stringify(c2)}`
+      }
       const cListByNum = await localBk.listComments(1)
       const cListByTask = await localBk.listComments({ number: 1, taskId: 'other-key' })
       if (!cListByNum.ok || cListByNum.comments.length !== 1 || cListByTask.comments.length !== 1) {
@@ -259,7 +264,7 @@ export function registerStageBLoopCases(cases) {
         if (finRes.exitCode !== 0) return `finalize 失败：${finRes.exitCode}`
         gitSync(wtAbs, ['add', '-A'])
         gitSync(wtAbs, ['commit', '-qm', 'docs: finalize issue 1'])
-        vRes = await handleVerify({ task: 'issue-1', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtAbs))
+        vRes = await handleVerify({ task: 'issue-1', mode: 'smoke', cmd: 'node -e "process.exit(0)"', 'e2e-evidence': 'smoke cli exit=0', json: true }, await resolveRepoRoots(wtAbs))
         if (vRes.exitCode !== 0) return `verify 失败：${vRes.exitCode}`
         subRes = await handleSubmit({ task: 'issue-1', agent: 'bob', json: true }, await resolveRepoRoots(wtAbs))
         if (subRes.exitCode !== 0) return `local-only submit 失败：${subRes.exitCode}`
@@ -403,6 +408,9 @@ export function registerStageBLoopCases(cases) {
       })
       const r = await noRetry.getIssue('a/b', 9)
       if (r.ok || calls !== 1) return `HTTP ${status} 禁止重试/禁止跟随重定向失败：calls=${calls}`
+      if (status === 302 && !String(r.error ?? '').includes('Redirect rejected')) {
+        return `HTTP 302 未显式拒绝重定向：${JSON.stringify(r)}`
+      }
     }
 
     // 3. createPr 并发查重、mergePr sha/409/405/alreadyMerged、getCommitChecks unknown、postComment 去重、closeIssue 幂等
@@ -523,7 +531,7 @@ export function registerStageBLoopCases(cases) {
         gitSync(wtM2, ['add', 'src/app.mjs'])
         gitSync(wtM2, ['commit', '-qm', 'feat: m2'])
         await handleFinalize({ task: 'm2', 'no-tdd': true, json: true }, await resolveRepoRoots(wtM2))
-        await handleVerify({ task: 'm2', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtM2))
+        await handleVerify({ task: 'm2', mode: 'smoke', cmd: 'node -e "process.exit(0)"', 'e2e-evidence': 'smoke cli exit=0', json: true }, await resolveRepoRoots(wtM2))
         const m2 = readTaskLedger(ledgerDir, 'm2')
         m2.prNumber = 77
         writeTaskLedger(ledgerDir, m2)
@@ -580,7 +588,7 @@ export function registerStageBLoopCases(cases) {
         gitSync(wtAbs, ['add', 'src/app.mjs'])
         gitSync(wtAbs, ['commit', '-qm', 'feat: bare work'])
         await handleFinalize({ task: 'bare-merge', 'no-tdd': true, json: true }, await resolveRepoRoots(wtAbs))
-        await handleVerify({ task: 'bare-merge', mode: 'smoke', cmd: 'node -e "process.exit(0)"', json: true }, await resolveRepoRoots(wtAbs))
+        await handleVerify({ task: 'bare-merge', mode: 'smoke', cmd: 'node -e "process.exit(0)"', 'e2e-evidence': 'smoke cli exit=0', json: true }, await resolveRepoRoots(wtAbs))
         await handleSubmit({ task: 'bare-merge', agent: 'alice', json: true }, await resolveRepoRoots(wtAbs))
         const revTok = await issueTokenFor(workDir, 'bare-merge', 1)
         const revWt = join(workDir, lg0.reviewWorktreePath)
@@ -612,4 +620,5 @@ export function registerStageBLoopCases(cases) {
   }, 4000])
 
   registerStageBLoopB4bCases(cases)
+  registerStageBLoopB5Cases(cases)
 }

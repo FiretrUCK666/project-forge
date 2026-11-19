@@ -452,6 +452,7 @@ export function registerReviewGovernCases(cases) {
       const filledAgents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
         .replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填完。')
         .replace('<填写项目快测命令>', 'node -e "process.exit(1)"')
+        .replace('<运行时端到端冒烟验证命令，或 none>', 'none')
       writeFileSync(join(dir, 'AGENTS.md'), filledAgents)
       gitCommitFast(dir, 'init agents', { files: ['AGENTS.md'], name: 'alice', email: 'alice@acme.test' })
 

@@ -19,6 +19,7 @@ import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
+import { readReceipt, resolveEmpiricalReceiptPath } from './review-empirical-state.mjs'
 import {
   buildReviewStopLossPacket, checkDistinctRoundReviewer, checkHistoricalStopLoss,
   checkIncrementalScopeLock, checkSameHeadRereview, collectExcludedReviewers,
@@ -268,6 +269,7 @@ export async function handleRecord(opts, roots) {
   }
 
   if (verdict === 'pass') {
+    const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber, reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch }))
     const passCheck = await evaluatePassBlockers({
       mainRoot,
       targetRoot,
@@ -277,6 +279,8 @@ export async function handleRecord(opts, roots) {
       headSha,
       enforceGates: Boolean(opts['enforce-gates']),
       humanApproved: Boolean(opts['human-approved']),
+      receipt,
+      opts,
     })
     if (passCheck.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ status: passCheck.code, exitCode: passCheck.exitCode, taskId, round, headSha, blockers: passCheck.blockers, error: passCheck.message }, null, 2)}\n`)
@@ -340,7 +344,10 @@ export async function handleRecord(opts, roots) {
     : ''
   const effectiveFaultInjection = String(opts['fault-injection'] ?? '').trim() || autoFaultText
 
-  const visualChecked = Boolean(opts['visual-checked'] || opts['visual-evidence'])
+  const e2eText = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || ''
+  const visualChecked = Boolean(opts['visual-checked'] || e2eText)
   const roundEntry = {
     round,
     baseSha: baseLedger.baseSha ?? null,
@@ -411,9 +418,7 @@ export async function handleRecord(opts, roots) {
 
   if (visualChecked) {
     updated.visualVerifiedHead = headSha
-    updated.visualCheckEvidence = typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim()
-      ? opts['visual-evidence'].trim()
-      : (updated.visualCheckEvidence ?? '独立审查已核验实际渲染、交互与浅深色截图')
+    updated.visualCheckEvidence = e2eText || (updated.visualCheckEvidence ?? '独立审查已核验真实端到端运行、交互与输出观察')
   }
 
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)

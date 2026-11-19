@@ -8,12 +8,12 @@
 import { printNextStep } from '../../lib/cli.mjs'
 import { computeWorktreeEnv, posixPath } from '../../lib/git.mjs'
 import { updateTaskLedger } from '../../lib/ledger.mjs'
-import { determineWorkflowPolicy } from '../../lib/workflow-policy.mjs'
+import { determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead, readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
   buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
   checkUntrustedBeforeExec, computeCleanBaselineFingerprint, computeWorkspaceFingerprint,
-  emitGateBlock, getEffectiveStatusEntries, hasPendingFaultInReceipt,
+  emitGateBlock, getEffectiveStatusEntries, handleEmpiricalE2eFailure, hasPendingFaultInReceipt,
   isSameScopeContext, readReceipt, recordMechanicalPack, resolveEmpiricalReceiptPath,
   runCommandList, writeReceipt,
 } from './review-empirical-state.mjs'
@@ -72,15 +72,20 @@ export function computeEmpiricalRequirements({
     gateWeakeningHits: gateWeakenedHits,
     visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
     diffBytes: diff?.bytes ?? 0,
+    profile: {
+      smokeVerify: effectiveProfile?.['smoke-verify']?.[0],
+      explicitNone: effectiveProfile?.explicitNone,
+    },
   })
   const { autoCommands, hasDevProfileTestCmds } = collectDevProfileEmpiricalCmds(effectiveProfile)
   const runtimeTouched = (behavioralGate?.runtimeFilesTouched?.length ?? 0) > 0
-  const smokeRequired = Boolean(behavioralGate?.smokeRequired)
+  const smokeRequired = Boolean(behavioralGate?.smokeRequired || policy.smokeRequired)
   const isLowRiskPureDoc = !isEmptyDiff && policy.riskTier === 'low'
 
   const empiricalRequired = !isEmptyDiff
   const faultRequired = !isEmptyDiff && (runtimeTouched || smokeRequired || hasDevProfileTestCmds || !isLowRiskPureDoc)
   const visualCheckRequired = !isEmptyDiff && Boolean(behavioralGate?.empiricalVisualCheckRequired)
+  const e2eObservationRequired = !isEmptyDiff && !isLowRiskPureDoc && (smokeRequired || visualCheckRequired)
 
   return {
     isEmptyDiff,
@@ -91,6 +96,8 @@ export function computeEmpiricalRequirements({
     empiricalRequired,
     faultRequired,
     visualCheckRequired,
+    smokeRequired,
+    e2eObservationRequired,
   }
 }
 
@@ -153,10 +160,29 @@ export function evaluateIncludeDiffGate({
     && receipt.faultRestoredClean === true
     && receipt.faultRestoredMeta?.fingerprint === workspaceFingerprint,
   )
+  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
+  const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
+
   const visualDone = !requirements.visualCheckRequired || Boolean(
     behavioralGate?.visualVerifiedOnHead
     || opts['visual-checked']
     || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked)),
+  )
+  const smokeOk = !requirements.smokeRequired || Boolean(
+    (evidence && evidence.headSha === headSha && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
+    || (empiricalDone && receipt?.empiricalVerified?.executed !== false && !receipt?.empiricalVerified?.errorOnly
+      && receipt?.empiricalVerified?.smokeExecuted === true),
+  )
+  const e2eObservationDone = !requirements.e2eObservationRequired || Boolean(
+    smokeOk && (
+      hasValidE2eObservationOnHead(receipt?.empiricalVerified, headSha)
+      || hasValidE2eObservationOnHead(evidence, headSha)
+      || Boolean(e2eEvidenceInput)
+      || behavioralGate?.visualVerifiedOnHead
+      || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked))
+    ),
   )
 
   const missingSteps = []
@@ -165,6 +191,9 @@ export function evaluateIncludeDiffGate({
   if (requirements.faultRequired && !faultFailDone) missingSteps.push('check-fault:fail')
   if (requirements.faultRequired && !faultRestoreDone) missingSteps.push('check-fault:restore')
   if (requirements.visualCheckRequired && !visualDone) missingSteps.push('visual-check')
+  if (requirements.e2eObservationRequired && !e2eObservationDone && (!requirements.visualCheckRequired || visualDone)) {
+    missingSteps.push('e2e-observation')
+  }
 
   const readyForDiff = !dirtyFaultResidue && missingSteps.length === 0
   const unblockCommands = readyForDiff
@@ -216,6 +245,11 @@ export function evaluateIncludeDiffGate({
         at: faultRestoreDone ? receipt?.faultRestoredAt : null,
       },
       visualCheck: { required: requirements.visualCheckRequired, done: visualDone },
+      e2eObservation: {
+        required: Boolean(requirements.e2eObservationRequired),
+        done: e2eObservationDone,
+        observation: receipt?.empiricalVerified?.e2eObservation ?? evidence?.e2eObservation ?? null,
+      },
     },
     missingSteps,
     unblockCommands,
@@ -292,6 +326,12 @@ export async function handleCheckEmpirical(ctx) {
     })
   }
 
+  const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
+    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
+    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
+  const smokeCmdList = (behavioralGate?.smokeVerifyCommands ?? []).map(sanitizeCmdTemplate).filter(Boolean)
+  const smokeExecuted = commandsToRun.length > 0 && (smokeCmdList.some((sc) => commandsToRun.includes(sc)) || explicitCmds.length > 0)
+
   let cmdResults = []
   let statusLabel = 'passed'
   let lowRiskNoRuntimeChecks = false
@@ -301,8 +341,12 @@ export async function handleCheckEmpirical(ctx) {
   } else {
     const wtEnv = computeWorktreeEnv({ mainRoot, gitDir, taskId: task?.taskId ?? mode, slotIndex: task?.slotIndex })
     cmdResults = await runCommandList(commandsToRun, { cwd: reviewRoot, env: wtEnv, stopOnFail: true })
-    const failed = cmdResults.find((r) => !r.ok)
+    const failed = cmdResults.find((r) => !r.ok || r.errorOnly)
     if (failed) {
+      const changedFiles = [...new Set([...(diff?.files ?? []).map((f) => f.file), ...(diff?.untracked ?? [])])]
+      const failReport = await handleEmpiricalE2eFailure({
+        mainRoot, gitDir, task, mode, failedCmdRes: failed, headSha, changedFiles, opts,
+      })
       const msg = `BLOCKED_EMPIRICAL_FAILED: 实证命令失败 (exit=${failed.exitCode}): ${failed.cmd}`
       return emitGateBlock({
         opts,
@@ -316,6 +360,8 @@ export async function handleCheckEmpirical(ctx) {
           headSha,
           workspaceFingerprint: currentFingerprint,
           commands: cmdResults,
+          diagnostic: failReport.diagnostic,
+          escalatedIssue: failReport.escalation,
           error: msg,
         },
         textLines: [
@@ -323,10 +369,29 @@ export async function handleCheckEmpirical(ctx) {
           `Command  : ${failed.cmd} (exit=${failed.exitCode})`,
           ...(failed.stdoutExcerpt ? [`Stdout   : ${failed.stdoutExcerpt}`] : []),
           ...(failed.stderrExcerpt ? [`Stderr   : ${failed.stderrExcerpt}`] : []),
+          `Evidence : ${failReport.diagnostic.Evidence.join(' | ')}`,
+          `Unknowns : ${failReport.diagnostic.Unknowns.join(' | ')}`,
+          `NextSteps: ${failReport.diagnostic.NextSteps.join(' | ')}`,
         ],
       })
     }
   }
+
+  const flowEv = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
+  const carriedObs = hasValidE2eObservationOnHead(flowEv, headSha)
+    ? flowEv.e2eObservation
+    : (sameCtx && hasValidE2eObservationOnHead(prev?.empiricalVerified, headSha) ? prev.empiricalVerified.e2eObservation : null)
+  const e2eObservation = e2eEvidenceInput
+    ? buildE2eObservation({
+        summary: e2eEvidenceInput,
+        headSha,
+        source: 'review-check-empirical',
+        cmd: commandsToRun.join(' && ') || null,
+        executed: commandsToRun.length > 0 || Boolean(e2eEvidenceInput),
+        succeeded: true,
+        errorOnly: false,
+      })
+    : carriedObs
 
   const keepMechanical = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint && prev?.mechanicalPackSeen)
   const keepFault = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint)
@@ -350,7 +415,12 @@ export async function handleCheckEmpirical(ctx) {
       round,
       diffScope,
       commands: cmdResults,
-      visualChecked: Boolean(opts['visual-checked']),
+      executed: commandsToRun.length > 0 || lowRiskNoRuntimeChecks,
+      succeeded: true,
+      errorOnly: false,
+      smokeExecuted,
+      e2eObservation,
+      visualChecked: Boolean(opts['visual-checked'] || e2eEvidenceInput),
       verifiedAt,
     },
     faultInjectedAndFailed: keepFault ? (prev?.faultInjectedAndFailed ?? null) : null,

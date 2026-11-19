@@ -20,7 +20,7 @@ import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged, checkUnresolvedDependencies } from '../../lib/task-graph.mjs'
 import {
   determineWorkflowPolicy, hasRepoCiWorkflow, readVerificationEvidence,
-  validateVerificationEvidence,
+  validatePreMergeShaAndWorktree, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildCleanupChecklist, handleAbort, handleCleanup, handleStatus, printCleanupChecklistText } from './flow-cleanup.mjs'
 import { buildTargetRepoContext, EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
@@ -167,12 +167,8 @@ export async function assertPreMergeGates({
       return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REQUIRES_INDEPENDENT_REVIEW' }
     }
     if (!stopLossActive) {
-      const reviewHeadOk = ledger.reviewPassed === true
-        && (!currentHead || ledger.reviewPassedHead === currentHead)
-        && (!ledger.lastReview || !currentHead || ledger.lastReview.headSha === currentHead)
-        && (!lastRound || !currentHead || lastRound.headSha === currentHead)
-      if (!reviewHeadOk) {
-        process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 独立审查结论未覆盖当前 HEAD（reviewPassed=${ledger.reviewPassed}, reviewPassedHead=${ledger.reviewPassedHead ?? 'null'}, currentHead=${currentHead ?? 'null'}）。\n`)
+      if (ledger.reviewPassed !== true) {
+        process.stderr.write(`BLOCKED_REVIEW_NOT_PASSED: 独立审查未通过（reviewPassed=${ledger.reviewPassed}）。\n`)
         return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_REVIEW_NOT_PASSED' }
       }
       if (lastRound && (lastRound.verdict !== 'pass' || (lastRound.blockers ?? []).length > 0)) {
@@ -185,6 +181,21 @@ export async function assertPreMergeGates({
   if (profile.mergeAuthority === 'human' && !opts['human-approved']) {
     process.stderr.write('BLOCKED_HUMAN_MERGE_AUTHORITY: 项目「取舍」声明了 merge-authority: human，请经人类确认后附加 --human-approved。\n')
     return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_HUMAN_MERGE_AUTHORITY' }
+  }
+
+  const shaGate = validatePreMergeShaAndWorktree({
+    currentHead,
+    evidence,
+    ledger,
+    lastRound,
+    dirtyCount: stZ.entries.length,
+    requiresReview,
+    stopLossActive,
+  })
+  if (!shaGate.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: shaGate.code, reason: shaGate.reason }, null, 2)}\n`)
+    process.stderr.write(`${shaGate.code}: ${shaGate.reason}\n`)
+    return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: shaGate.code }
   }
 
   return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer }

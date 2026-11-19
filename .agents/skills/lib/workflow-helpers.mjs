@@ -5,12 +5,172 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { formatWorkTitle } from './escalation.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { parseBodyRelations } from './platform.mjs'
+
+const DIAGNOSTIC_SECRET_PATTERNS = [
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bnpm_[A-Za-z0-9]{16,}\b/g,
+  /\bpypi-[A-Za-z0-9_-]{20,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bsk-(?:proj-)?[A-Za-z0-9]{20,}\b/g,
+  /(Authorization\s*:\s*Bearer\s+)[^\s"']+/gi,
+  /(https?:\/\/)([^:@/\s]+):([^@/\s]+)@/gi,
+]
+
+/** 对运行失败输出进行脱敏（掩盖令牌凭据与本机绝对主目录路径），用于诊断与建单。 */
+export function redactDiagnosticText(raw, maxLen = 600) {
+  let text = String(raw ?? '')
+  for (const pat of DIAGNOSTIC_SECRET_PATTERNS) {
+    text = text.replace(pat, (...args) => {
+      if (args.length >= 4 && /^https?:\/\//i.test(args[1])) return `${args[1]}<REDACTED>:<REDACTED>@`
+      if (args.length >= 2 && /^authorization/i.test(args[1])) return `${args[1]}<REDACTED>`
+      return '<REDACTED>'
+    })
+  }
+  try {
+    const home = homedir()
+    if (home && home.length > 2) {
+      const homePosix = posixPath(home)
+      const homeEsc = home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const homePosixEsc = homePosix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      text = text.replace(new RegExp(homeEsc, 'gi'), '<HOME>').replace(new RegExp(homePosixEsc, 'gi'), '<HOME>')
+    }
+  } catch { /* ignore */ }
+  text = text.replace(/[A-Za-z]:\\Users\\[^\\/\s]+/g, '<HOME>')
+    .replace(/\/(?:Users|home)\/[A-Za-z0-9._-]+/g, '<HOME>')
+    .trim()
+  if (maxLen > 0 && text.length > maxLen) return `${text.slice(0, maxLen)}...`
+  return text
+}
+
+/** A6 三态执行计分：区分 `executed`（确实执行）、`succeeded`（零退出）与 `errorOnly`（错路/空跑伪绿）。 */
+export function scoreExecutionResult({ executed = false, exitCode = 1, errorOnly = false } = {}) {
+  const didExec = Boolean(executed)
+  const isErrorOnly = Boolean(errorOnly)
+  const code = Number.isFinite(Number(exitCode)) ? Number(exitCode) : 1
+  const succeeded = didExec && !isErrorOnly && code === 0
+  return { executed: didExec, succeeded, errorOnly: isErrorOnly, ok: succeeded }
+}
+
+/** 构造结构化 E2E 运行与观察回执（`evidence.e2eObservation` / `receipt.e2eObservation`）。 */
+export function buildE2eObservation({
+  summary = '',
+  headSha = null,
+  source = 'verify',
+  cmd = null,
+  executed = true,
+  succeeded = true,
+  errorOnly = false,
+} = {}) {
+  const clean = String(summary ?? '').trim()
+  if (!clean) return null
+  const scored = scoreExecutionResult({ executed, exitCode: succeeded ? 0 : 1, errorOnly })
+  return {
+    summary: clean,
+    headSha: headSha ?? null,
+    source,
+    cmd: cmd ?? null,
+    executed: scored.executed,
+    succeeded: scored.succeeded,
+    errorOnly: scored.errorOnly,
+    observedAt: new Date().toISOString(),
+  }
+}
+
+/** 校验当前 `headSha` 是否具备有效的结构化 E2E 观察回执（拒绝 errorOnly / 未执行 / 跨 SHA 复用）。 */
+export function hasValidE2eObservationOnHead(holder, headSha = null) {
+  if (!holder || typeof holder !== 'object') return false
+  const obs = holder.e2eObservation && typeof holder.e2eObservation === 'object' ? holder.e2eObservation : null
+  if (!obs || !String(obs.summary ?? '').trim()) return false
+  if (obs.executed === false || obs.succeeded === false || obs.errorOnly === true) return false
+  if (headSha && headSha !== 'UNBORN' && obs.headSha && obs.headSha !== headSha) return false
+  if (headSha && headSha !== 'UNBORN' && holder.headSha && holder.headSha !== headSha) return false
+  return true
+}
+
+/** 构造脱敏后的 E2E 运行失败诊断包（`Evidence` / `Unknowns` / `NextSteps`）。 */
+export function buildE2eDiagnosticPacket({
+  cmd = '',
+  exitCode = 1,
+  stdout = '',
+  stderr = '',
+  headSha = null,
+  taskId = null,
+  mode = 'smoke',
+  changedFiles = [],
+  unknowns = [],
+  nextSteps = [],
+} = {}) {
+  const outExcerpt = redactDiagnosticText(stdout, 360)
+  const errExcerpt = redactDiagnosticText(stderr, 360)
+  const cleanCmd = redactDiagnosticText(cmd, 200)
+  const Evidence = [
+    `task=${taskId ?? 'local'} | mode=${mode} | head=${String(headSha ?? 'unknown').slice(0, 8)} | exit=${exitCode}`,
+    `cmd: ${cleanCmd || '(none)'}`,
+    ...(errExcerpt ? [`stderr: ${errExcerpt}`] : []),
+    ...(outExcerpt ? [`stdout: ${outExcerpt}`] : []),
+    ...(changedFiles.length > 0 ? [`changed(${changedFiles.length}): ${changedFiles.slice(0, 6).join(', ')}`] : []),
+  ]
+  const Unknowns = unknowns.length > 0
+    ? unknowns.map((u) => redactDiagnosticText(u, 220))
+    : ['需定位究竟是运行时实现缺陷、测试夹具假设漂移还是环境前置缺失导致非零退出']
+  const NextSteps = nextSteps.length > 0
+    ? nextSteps.map((s) => redactDiagnosticText(s, 220))
+    : [
+        `在隔离工作树本地复现并修复根因：${cleanCmd || 'run smoke-verify'}`,
+        `修复提交后重跑实证并附带真实观察记录：node ".agents/skills/dev-flow/scripts/flow.mjs" verify${taskId ? ` --task ${taskId}` : ''} --mode ${mode} --e2e-evidence "<修复后观察结论>"`,
+      ]
+  return { Evidence, Unknowns, NextSteps }
+}
+
+/** A6 合并前强校：`headSha === evidence.headSha === review.headSha` 且工作区无脏改动。 */
+export function validatePreMergeShaAndWorktree({
+  currentHead,
+  evidence = null,
+  ledger = null,
+  lastRound = null,
+  dirtyCount = 0,
+  requiresReview = true,
+  stopLossActive = false,
+} = {}) {
+  if (dirtyCount > 0 || evidence?.dirty === true) {
+    return {
+      ok: false,
+      code: 'BLOCKED_DIRTY_WORKTREE',
+      reason: `A6 合并前工作区非干净状态（dirty=${dirtyCount}, evidenceDirty=${Boolean(evidence?.dirty)}）。`,
+    }
+  }
+  if (!currentHead || !evidence?.headSha || evidence.headSha !== currentHead) {
+    return {
+      ok: false,
+      code: 'BLOCKED_PRE_MERGE_SHA_MISMATCH',
+      reason: `A6 合并前 SHA 不一致：HEAD=${String(currentHead ?? 'null').slice(0, 8)} vs evidence.headSha=${String(evidence?.headSha ?? 'null').slice(0, 8)}。`,
+    }
+  }
+  if (requiresReview && !stopLossActive) {
+    const revHead = lastRound?.headSha ?? ledger?.lastReview?.headSha ?? ledger?.reviewPassedHead ?? null
+    const allRevMatch = Boolean(revHead)
+      && ledger?.reviewPassedHead === currentHead
+      && (!ledger?.lastReview || ledger.lastReview.headSha === currentHead)
+      && (!lastRound || lastRound.headSha === currentHead)
+      && evidence.headSha === revHead
+    if (!allRevMatch) {
+      return {
+        ok: false,
+        code: 'BLOCKED_PRE_MERGE_SHA_MISMATCH',
+        reason: `A6 合并前三方 SHA 不一致：HEAD=${currentHead.slice(0, 8)} / evidence=${evidence.headSha.slice(0, 8)} / review=${String(revHead ?? 'null').slice(0, 8)}。`,
+      }
+    }
+  }
+  return { ok: true, code: null }
+}
 
 function replaceSectionBody(md, headingTitle, newBody) {
   const re = new RegExp(`(^##\\s+${headingTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$)([\\s\\S]*?)(?=\\n##\\s+|\\s*$)`, 'm')

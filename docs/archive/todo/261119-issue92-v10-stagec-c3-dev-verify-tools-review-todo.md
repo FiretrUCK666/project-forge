@@ -5,7 +5,7 @@ status: done
 created: 2026-11-19
 updated: 2026-11-19
 issue: 92
-pr: null
+pr: 97
 branch: feat/v10-stagec-c3
 owner: impl-c3
 approved: false

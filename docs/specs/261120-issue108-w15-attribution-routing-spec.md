@@ -41,8 +41,8 @@ high_risk_paths:
 ```mermaid
 flowchart LR
   In["身份采集层"] -->|双层| Core["归属统一格式化"]
-  Core --> Check{"已验GitHub?"}
-  Check -->|是| At["输出@login"]
+  Core --> Check{"能力支持@?"}
+  Check -->|是| At["输出@handle"]
   Check -->|否| Tick["反引号或省略"]
   At -->|5类评论| Gate["全平台门禁验证"]
   Tick -->|5类评论| Gate
@@ -92,9 +92,10 @@ flowchart LR
 
 2. **唯一归属格式化函数（`kit/skills/lib/doc-comments.mjs`）**：
    - 删除 `AGENT_OR_LOCAL_ID_RE`、`formatActorDisplay` 及第 23 行使 `isPlatformLogin: false` 失效的 `|| VALID_GH_LOGIN_RE.test(bare)` 死代码分支；
-   - 提供并全仓唯一复用 `formatAttribution({ account = null, verifiedPlatformLogin = false, agent = null, backendKind = 'github' } = {})`：
+   - 由托管后端能力声明驱动 `@mention` 判定（零平台名硬编码）：在 `platform.mjs`（`GITHUB_PROVIDER` / `GENERIC_GIT_PROVIDER`）与 `task-backend.mjs`（`GitHubBackend` / `GenericRemoteBackend` / `LocalOnlyBackend`）`capabilities` 声明 `mention: true | false`（在线托管可 `@handle` 为 `true`，`generic-git` / `local-only` 为 `false`）；
+   - 提供并全仓唯一复用 `formatAttribution({ account = null, verifiedPlatformLogin = false, agent = null, supportsMention = false, capabilities = null } = {})`（内部以 `const canMention = Boolean(verifiedPlatformLogin === true && (supportsMention === true || capabilities?.mention === true))` 判定，禁止按 `backendKind === 'github'` 硬编码）：
      - 剥离邮件后缀 `<...>` 与多余反引号/前导 `@`；
-     - 账号段：仅当 `backendKind === 'github' && verifiedPlatformLogin === true` 且 `account` 符合 `VALID_GH_LOGIN_RE`（`/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/`）时输出 `@${account}`；否则若 `account` 非空，一律输出 `` \`${account}\` ``；若 `account` 为空则账号段为空（不造 `@maintainer`）；
+     - 账号段：仅当 `canMention === true` 且 `account` 符合平台 handle 规范（`VALID_HANDLE_RE`，兼容原 `VALID_GH_LOGIN_RE`）时输出 `@${account}`；否则若 `account` 非空，一律输出 `` \`${account}\` ``；若 `account` 为空则账号段为空（不造 `@maintainer`）；
      - 代理段：若 `agent` 非空且与 `account` 不完全重复（忽略大小写或仅 `account` 为空时保留），输出 `` \`${agent}\` ``；
      - 组合规则：两者皆有输出 `${accountPart}（${agentPart}）`；仅其一存在输出对应单段；两者皆空返回 `''`，调用方**省略该归属行/片段**。
 
@@ -106,9 +107,9 @@ flowchart LR
      - 完整保留 `REVIEW_FIELDS` 四必检词（`审查来源`、`逐条标准状态`、`故障注入记录`、`止损记录`）于同一连续段落内，防 `preflight` 破坏；
      - 清除英文 `implementer=` 与 `(respecting repo mergeAuthority)`（`review-ledger.mjs:48` 改为中文合并提示）；
      - 新增并统一输出：`- **审查人**：${reviewerDisplay}`、`- **实施人**：${implementerDisplay}`（非空时输出）、`- **审查来源**：${sourceLine}`（例如 `独立审查上下文（隔离 worktree 复核）`）与 `- **实证核验**：${empiricalSummary}`；
-     - `实证核验` 在 `verdict === 'pass'` 与 `verdict === 'changes'` 的 PR 评论及 Issue 摘要评论中**均展示**，数据按优先级取自 `ledger.reviewEmpirical`（由 `review-ledger.mjs` `handleRecord` 采集：CLI `--evidence`、`--e2e-evidence`/`--visual-evidence`、`--artifact`、以及 `receipt.empiricalVerified` 实际跑过的命令/耗时/退出码与观察摘要），绝不输出空占位；
+     - `实证核验` 在 `verdict === 'pass'` 与 `verdict === 'changes'` 的 PR 评论及 Issue 摘要评论中**均展示**，数据按优先级取自 `ledger.reviewEmpirical`（由 `review-ledger.mjs` `handleRecord` 采集：CLI `--evidence`、`--e2e-evidence`/`--visual-evidence`、`--artifact`、以及 `receipt.empiricalVerified` 实际跑过的命令/耗时/退出码与观察摘要），绝不输出空占位，并完整保留 `Must Fix`、`Should Fix`、`Pre-existing` 与 `本轮消解` 分区；
    - `merge`（`buildMergeComments` + `flow-merge.mjs`）：保留 `- **实施人**：${implementerDisplay}`，将独立审查行升级为 `- **审查人**：${reviewerDisplay}`（经 `formatAttribution` 格式化，无 `reviewer` 时保留门禁/人工放行说明）；
-   - `intake`（`kit/skills/lib/doc-comments.mjs` `buildIntakeDecisionComments` + `kit/skills/lib/intake-triage.mjs` `evaluateIntakeTriage` + `kit/skills/dev-flow/scripts/flow-intake.mjs`）：修复 `flow-intake.mjs:206` `state.gitUser?.name` -> `state.gitIdentity?.name`；移除 `intake-triage.mjs:646` 与 `doc-comments.mjs:324` 的 `actor = 'dev-flow'` 硬编码兜底；由 `flow-intake.mjs` 透传 `account`/`verifiedPlatformLogin`/`agent`/`backendKind` 经 `evaluateIntakeTriage` 传入 `buildIntakeDecisionComments` 与 `statePayload`（同时兼容 `pf-state` 旧键 `actor` 并补 `account`），经 `formatAttribution` 生成分诊人展示，非空时输出 `- **分诊人**：${actorDisplay}`，无真实账号与显式代理时省略该行，绝不泄露 `'dev-flow'`；
+   - `intake`（`kit/skills/lib/doc-comments.mjs` `buildIntakeDecisionComments` + `kit/skills/lib/intake-triage.mjs` `evaluateIntakeTriage` + `kit/skills/dev-flow/scripts/flow-intake.mjs`）：修复 `flow-intake.mjs:206` `state.gitUser?.name` -> `state.gitIdentity?.name`；移除 `intake-triage.mjs:646` 与 `doc-comments.mjs:324` 的 `actor = 'dev-flow'` 硬编码兜底；由 `flow-intake.mjs` 透传 `account`/`verifiedPlatformLogin`/`agent`/`supportsMention`（来自后端 `capabilities?.mention`）经 `evaluateIntakeTriage` 传入 `buildIntakeDecisionComments` 与 `statePayload`（同时兼容 `pf-state` 旧键 `actor` 并补 `account`），经 `formatAttribution` 生成分诊人展示，非空时输出 `- **分诊人**：${actorDisplay}`，无真实账号与显式代理时省略该行，绝不泄露 `'dev-flow'`；
    - `flow-explore.mjs:32`：移除硬编码 `'dev-flow'` 兜底，改为从 `opts.by ?? opts.agent ?? ledger.agent ?? ledger.claimedBy ?? ledger.implementerId` 与 `account` 透传；若均缺省则仅记 `account` 或 omit（不写入 `'dev-flow'` 假代理名）。
 
 4. **`parseAcceptanceCriteria` `issueContext` 自动回退（`kit/skills/dev-review/scripts/review-gates.mjs`）**：
@@ -140,7 +141,7 @@ flowchart LR
 
 ### 异常、回退与安全边界
 
-- **零假 `@mention` 安全红线**：`formatAttribution` 仅在 `backendKind === 'github' && verifiedPlatformLogin === true` 且账号符合 GitHub 用户名规范时输出 `@login`；`local-only`、`generic-git`、离线无凭据、仅来自 `git config user.name` 的账号及所有 `agent` 一律反引号包裹，绝不产生假 `@mention`；缺失真实账号时省略而不捏造 `@maintainer`。
+- **零假 `@mention` 安全红线**：`formatAttribution` 严守能力驱动（零平台名硬编码）——仅当后端能力声明支持 `@mention`（`capabilities?.mention === true` / `supportsMention === true`）且通过实测验证登录名（`verifiedPlatformLogin === true`）且账号符合 handle 规范时才输出 `@handle`；`local-only`、`generic-git`、离线无凭据、仅来自 `git config user.name` 的账号及所有 `agent` 一律反引号包裹，绝不产生假 `@mention`；缺失真实账号时省略而不捏造 `@maintainer`。
 - **防膨胀模块预先拆解**：
   - 将 `kit/skills/lib/workflow-helpers.mjs`（现 797 行）中的 `hydratePrTemplateBody`、`resolveReadablePrTitle` 及其私有辅助拆至 `kit/skills/lib/pr-template-hydrate.mjs`，`workflow-helpers.mjs` 仅保留 re-export，行数降至约 485 行；
   - 将 `kit/skills/lib/doc-comments.mjs` 中的 `buildReviewComments` 拆至 `kit/skills/lib/review-comment-render.mjs`，由 `doc-comments.mjs` 与 `docs.mjs` 重导出，保证全仓所有 `.mjs` 均远低于 `800` 行红线。
@@ -157,7 +158,7 @@ flowchart LR
 
 | 方案 | 怎么做的 | 为什么没选 | 什么情况下该改回它 |
 | --- | --- | --- | --- |
-| 正交双层模型 + 唯一 `formatAttribution`（已选） | 彻底删除两套冲突正则，区分实测 `account` 与显式 `agent`，拆出 `pr-template-hydrate.mjs` 与 `review-comment-render.mjs` | 根除正则漏匹配与双轨打架，任意自定义代理名零误伤，且严格守住 `<=800` 行门禁 | 无需改回；若未来新增第二托管平台，只需扩展 `backendKind` 与 `verifiedPlatformLogin` 判定 |
+| 正交双层模型 + 唯一 `formatAttribution`（已选） | 彻底删除两套冲突正则，区分实测 `account` 与显式 `agent`，由后端 `capabilities.mention` 驱动 `@handle`，拆出 `pr-template-hydrate.mjs` 与 `review-comment-render.mjs` | 根除正则漏匹配与双轨打架，任意自定义代理名零误伤，零平台名硬编码且严格守住 `<=800` 行门禁 | 无需改回；若未来新增托管平台，只需声明 `capabilities.mention` 与 `verifiedPlatformLogin` 判定 |
 | 继续扩充黑名单正则并保留双轨函数（备选） | 在 `INTERNAL_AGENT_SLUG_RE` / `AGENT_OR_LOCAL_ID_RE` 追加 `impl-`、`plan-`、`alpha` 并打补丁包装 | 新代理命名无穷无尽，双正则必然继续漂移，且会在 `workflow-helpers.mjs` 突破 800 行 | 永不采用，属于治标不治本的补丁叠加 |
 
 ## 四、改动清单与影响面
@@ -166,9 +167,9 @@ flowchart LR
 | --- | --- | --- | --- |
 | `kit/skills/lib/github-parse.mjs` | 修改 | 删除 `INTERNAL_AGENT_SLUG_RE`，新增 `resolveIdentityLayers` | `github-client.mjs`、`platform.mjs`、全部 flow/review 调用方 |
 | `kit/skills/lib/github-client.mjs` | 修改 | 同步导出 `resolveIdentityLayers` 并清理旧导出引用 | `platform.mjs` |
-| `kit/skills/lib/platform.mjs` | 修改 | 同步重导出 `resolveIdentityLayers` | `flow-*.mjs`、`review-*.mjs`、`shared.mjs` |
+| `kit/skills/lib/platform.mjs` | 修改 | 同步重导出 `resolveIdentityLayers`，并在 `GITHUB_PROVIDER`/`GENERIC_GIT_PROVIDER` 声明 `capabilities.mention` | `flow-*.mjs`、`review-*.mjs`、`shared.mjs` |
 | `kit/skills/lib/shared.mjs` | 修改 | 替换 242/264/409 行旧导出为 `resolveIdentityLayers` 与 `formatAttribution` | `preflight-suite-checks.mjs`、全套测试夹具与脚本 |
-| `kit/skills/lib/intake-triage.mjs` | 修改 | 移除 646 行 `'dev-flow'` 兜底，透传 `account`/`verifiedPlatformLogin`/`agent`/`backendKind` 至评论渲染与 `pf-state` | `flow-intake.mjs`、`shared.mjs` |
+| `kit/skills/lib/intake-triage.mjs` | 修改 | 移除 646 行 `'dev-flow'` 兜底，透传 `account`/`verifiedPlatformLogin`/`agent`/`supportsMention` 至评论渲染与 `pf-state` | `flow-intake.mjs`、`shared.mjs` |
 | `kit/skills/lib/doc-comments.mjs` | 修改 | 删除 `AGENT_OR_LOCAL_ID_RE` 与死代码及 324 行 `'dev-flow'` 兜底，落地 `formatAttribution` 与 `认领人`/`实施人`/`分诊人` | `docs.mjs`、`shared.mjs`、`intake-triage.mjs`、`task-backend.mjs`、`local-issues.mjs`、`flow-*.mjs` |
 | `kit/skills/lib/review-comment-render.mjs` (new) | 新增 | 承接 `buildReviewComments`，支持 `审查人`/`实施人`/`审查来源`/`实证核验` 双状态输出 | `doc-comments.mjs`、`docs.mjs`、`review-sync.mjs` |
 | `kit/skills/lib/pr-template-hydrate.mjs` (new) | 新增 | 从 `workflow-helpers.mjs` 拆出 `hydratePrTemplateBody` 与 `resolveReadablePrTitle` 并用 `实施人` | `workflow-helpers.mjs`、`workflow-policy.mjs`、`flow-lifecycle.mjs` |
@@ -176,7 +177,7 @@ flowchart LR
 | `kit/skills/lib/workflow-helpers.mjs` | 修改 | 移出 PR 模板回填逻辑并 re-export，行数从 797 降至约 485 | `workflow-policy.mjs` |
 | `kit/skills/lib/workflow-policy.mjs` | 修改 | 确认重导出一致并严守 `<= 800` 行 | `flow-lifecycle.mjs`、`flow-merge.mjs` |
 | `kit/skills/lib/ledger.mjs` | 修改 | `createDefaultLedger` 补 `account`/`verifiedPlatformLogin`/`agent`/`reviewEmpirical` 并兼容旧键 | 全部读写账本模块 |
-| `kit/skills/lib/task-backend.mjs` | 修改 | `claimTask`/`releaseTask` 透传 `account`/`verifiedPlatformLogin`/`agent` 并写入 `pf-state` | `GitHubBackend`、`GenericRemoteBackend`、`LocalOnlyBackend` |
+| `kit/skills/lib/task-backend.mjs` | 修改 | `capabilities` 声明 `mention` 布尔能力，`claimTask`/`releaseTask` 透传 `account`/`verifiedPlatformLogin`/`agent`/`supportsMention` 并写入 `pf-state` | `GitHubBackend`、`GenericRemoteBackend`、`LocalOnlyBackend` |
 | `kit/skills/lib/local-issues.mjs` | 修改 | `claimLocalIssue`/`releaseLocalIssue` 透传双层身份及 `pf-state.account` | `local-only` / `generic-git` 工单流 |
 | `kit/skills/dev-flow/scripts/flow-inspect.mjs` | 修改 | `handleStart` 记录初始 `account`/`verifiedPlatformLogin`/`implementerId` | `flow start` |
 | `kit/skills/dev-flow/scripts/flow-intake.mjs` | 修改 | 修复 206 行 `state.gitIdentity?.name`，透传双层身份渲染 `分诊人` | `flow intake` |
@@ -218,8 +219,8 @@ flowchart LR
 
 > 动手改代码前冻结；实现期间不顺手删减或放宽标准。每条必须能由一条命令或断言实证。
 
-- [ ] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers` 与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, backendKind })`：仅 `backendKind === 'github' && verifiedPlatformLogin === true` 输出 `@login`，离线/非 GitHub/`git user.name`/`agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `fixtures-attribution-routing.mjs` 与 `I245–I246` 实测通过。
-- [ ] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），彻底清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `fixtures-attribution-routing.mjs` 与 `I247–I248` 实测通过。
+- [ ] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers`、后端能力声明 `capabilities.mention`（零平台名硬编码）与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, supportsMention, capabilities })`：仅当后端声明支持 `@mention` 且 `verifiedPlatformLogin === true` 时输出 `@handle`，其余平台、未验证/`git user.name`、离线/`generic-git`/`local-only` 及任意 `agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `fixtures-attribution-routing.mjs` 与 `I245–I246` 实测通过。
+- [ ] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），彻底清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要并完整保留 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解` 分区；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `fixtures-attribution-routing.mjs` 与 `I247–I248` 实测通过。
 - [ ] C3: 完成 `AGENTS.md` 路由去歧义（`dev-plan` 先于 `dev-flow`、`extra_routes` `order: 46` 收口 `intake/inspect/milestone`、去重里程碑行、`project-forge` 移至末行）、补全 8 技能脚本入口并清除 `dev-review` `tier: full`、刷新根 `SKILL.md` 为 `v3` 并补全 8 技能闭环（`<= 200L / 16384B`、`version: "6.0.0"`）、在 `references/survey.md`、`references/docs-set.md`、`references/collaboration.md` 与 `templates/agents-project.md` 落地四类资产真融合与主调度纯调度底线；经 `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）及 `I249` 实测通过。
 - [ ] C4: 从 797 行 `workflow-helpers.mjs` 拆出 `kit/skills/lib/pr-template-hydrate.mjs` (new) 并拆出 `kit/skills/lib/review-comment-render.mjs` (new)，全仓全部 `.mjs` 文件均 `<= 800` 行；新增 `scripts/dev/fixtures-attribution-routing.mjs` (new) 与 `scripts/dev/injections-data-attribution-routing.mjs` (new)（`I245–I249`），全矩阵覆盖 `github`/`generic-git`/`local-only` 三后端下 `claim/takeover/release`、`submit/rework`、`review pass/changes`（含 Case 2、Case 4 与外部 PR）、`merge` 及 `intake`（外部裸 URL、恶意与正常评论 5 态分诊），同步覆盖任意代理名、路由顺序、无 `tier: full`、根 `SKILL.md` 8 技能、真融合/纯调度与防自审/防代提锁；全量通过 `merge-gate`（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）。
 

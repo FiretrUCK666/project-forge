@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: v9 B5：通用 E2E 门禁、离线 Scenarios H–J、I160+ 注入与 $TMPDIR 盲跑终验
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-18
 updated: 2026-11-19
@@ -10,7 +10,7 @@ pr: null
 branch: feat/b5-e2e-blind-run-gate
 owner: impl-76
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-w345-r3, round=2, sha=33835fa5f460, summary=R2 复核通过：移除escalation.mjs写域仅只读复用对齐PRD；C15/C23明确E2E优先diff实质根因审查及轻弱模型不跳过E2E只看diff专项盲测)"
 related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
 related_todo: ../todo/261118-issue76-b5-e2e-blind-run-gate-todo.md
@@ -149,4 +149,4 @@ flowchart LR
 
 - **实际落地摘要**：按 SPEC 拆分 `scripts/dev/preflight-contracts.mjs` -> `scripts/dev/preflight-contract-rules.mjs`、拆分 `kit/skills/lib/git.mjs` -> `kit/skills/lib/git-core.mjs` 与 `kit/skills/lib/git-fast-objects.mjs` -> `kit/skills/lib/git-fast.mjs`（全部保持 `<= 700` 行及导出 100% 兼容）；落地 `C15` 通用运行+观察 E2E 硬门禁（保留 7 键 `Dev Profile`，修复 `GATE_TIER_RANK` 跳过 `smoke-verify` 与 `assessBehavioralGate` `!smokeRequired` 缺陷，接入 `--e2e-evidence` 与 `e2e.runtime-fail` 脱敏信号建单，阻断缺 E2E 实证的 `--include-diff` 与 `pass`）、`A6` 合前三方 `headSha`/干净工作区校核与 `executed`/`succeeded`/`errorOnly` 三态计分；补齐 `I160–I178` 故障注入与双向夹具、交付离线 `scripts/dev/e2e-scenarios-stageb.mjs`（Scenarios `H–J`）及 `$TMPDIR` 多生态盲跑工具 `scripts/dev/blind-run-harness.mjs`。
 - **与草案的差异**：无实质偏离；新增 `kit/skills/lib/git-core.mjs` 与 `kit/skills/lib/git-fast-objects.mjs` 完成既有 Q6 行数瘦身，并在 `scripts/dev/fixtures-stageb-loop-b5.mjs` 独立承载 B5 双向验证与零 LLM CLI 故障注入 Stub 保持单文件 `<= 800` 行。
-- **关联同步文件**：`templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`、`.agents/skills/`、`docs/TDD.md`、`README.md`、`README.en.md`、`docs/prd/261118-v9-stageb-adaptive-architecture-prd.md`、`docs/todo/261118-issue76-b5-e2e-blind-run-gate-todo.md`。
+- **关联同步文件**：`templates/agents-project.md`、`AGENTS.md`、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`、`.agents/skills/`、`docs/TDD.md`、`README.md`、`README.en.md`、`docs/archive/prd/261118-v9-stageb-adaptive-architecture-prd.md`、`docs/archive/todo/261118-issue76-b5-e2e-blind-run-gate-todo.md`。

@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: v9 B5：通用 E2E 门禁、离线 Scenarios H–J、I160+ 注入与 $TMPDIR 盲跑终验
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-19
 issue: 76
@@ -9,7 +9,7 @@ pr: null
 branch: feat/b5-e2e-blind-run-gate
 owner: impl-76
 approved: false
-done_at: null
+done_at: 2026-11-19
 task_id: b5-e2e-blind-run-gate
 planned_at: 0aa20686354bde9fb6d5d77ed3b06323039c5123
 related_prd: ../prd/261118-v9-stageb-adaptive-architecture-prd.md
@@ -92,5 +92,5 @@ related_spec: ../specs/261118-issue76-b5-e2e-blind-run-gate-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：已跑通 `preflight.mjs`（35/35 通过，0 孤儿脚本）、`fixtures.mjs`（288/288 通过）、`verify-injections.mjs`（`I1–I178` 全捕获）、`e2e-zip-harness.mjs`（Scenarios `A–J` 通过）、`blind-run-harness.mjs`（11/11 执行成功、`errorOnly=0`）、`compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）、`equip.mjs . --check`、`review.mjs .`（mature）与 `sync-toc.mjs --check`，并在归档提交后于最终 `HEAD` 复跑全链门禁与 `flow verify --mode gate --e2e-evidence`。
-- **文档同步检查**：已同步更新 `docs/TDD.md`（登记全部新增模块与 `blind-run-harness.mjs`）、`templates/agents-project.md`、`AGENTS.md`（`< 24576 B`）、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`（`equip.mjs` 已同步至 `.agents/skills/`）及双语 `README.md`/`README.en.md`（`sync-toc.mjs` 已同步），`docs/prd/261118-v9-stageb-adaptive-architecture-prd.md` `C1–C23` 已全部勾选 `[x]`。
+- **文档同步检查**：已同步更新 `docs/TDD.md`（登记全部新增模块与 `blind-run-harness.mjs`）、`templates/agents-project.md`、`AGENTS.md`（`< 24576 B`）、`references/collaboration.md`、`SKILL.md`、`kit/skills/dev-review/SKILL.md`（`equip.mjs` 已同步至 `.agents/skills/`）及双语 `README.md`/`README.en.md`（`sync-toc.mjs` 已同步），`docs/archive/prd/261118-v9-stageb-adaptive-architecture-prd.md` `C1–C23` 已全部勾选 `[x]`。
 - **遗留问题**：无（`C19` 免 `--include-master-prd` 闭环归档后完成终验并提审）。

@@ -1,7 +1,7 @@
 ---
 kind: prd
 title: v9 自适应工程架构与端到端自迭代闭环（Stage B）
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-19
 issue: null

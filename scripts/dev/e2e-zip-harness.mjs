@@ -162,8 +162,10 @@ async function loadPkgEngines(pkgRoot) {
 async function runScenarioA(pkgRoot, sandbox, env, eng) {
   const repoA = join(sandbox, 'repo-a')
   mkdirSync(repoA, { recursive: true })
-  const boot = await eng.equip(repoA, { bootstrapEmpty: true, env })
-  if (!boot?.bootstrap?.bootstrapped) throw new Error(`Scenario A bootstrap-empty failed: ${JSON.stringify(boot)}`)
+  const bootRes = runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoA, '--bootstrap-empty', '--no-backup'], repoA, env)
+  assertOk(bootRes, 'Scenario A bootstrap-empty')
+  const boot = JSON.parse(bootRes.stdout || '{}')
+  if (!boot?.bootstrap?.bootstrapped) throw new Error(`Scenario A bootstrap-empty failed: ${bootRes.stdout}`)
   for (const f of ['docs/TDD.md', '.gitattributes', '.gitignore', 'AGENTS.md', '.agents/skills/dev-flow/SKILL.md']) {
     if (!existsSync(join(repoA, f))) throw new Error(`Scenario A missing ${f}`)
   }

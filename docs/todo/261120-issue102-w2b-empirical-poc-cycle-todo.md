@@ -8,33 +8,14 @@ issue: 102
 pr: null
 branch: feat/w2b-empirical-poc-cycle
 owner: plan-v101
-approved: false
+approved: true
 task_id: w2b-empirical-poc-cycle
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue102-w2b-empirical-poc-cycle-spec.md
 plan_mode: autonomous
-depends_on:
-  - w1a-engine-fixes
-scope_files:
-  - kit/skills/dev-review/**
-  - kit/skills/dev-iterate/**
-  - kit/skills/dev-govern/**
-  - kit/skills/lib/workflow-policy.mjs
-  - kit/skills/lib/workflow-helpers.mjs
-  - kit/skills/lib/escalation.mjs
-  - kit/skills/lib/empirical-artifacts.mjs
-  - .agents/skills/dev-review/**
-  - .agents/skills/dev-iterate/**
-  - .agents/skills/dev-govern/**
-  - .agents/skills/lib/workflow-policy.mjs
-  - .agents/skills/lib/workflow-helpers.mjs
-  - .agents/skills/lib/escalation.mjs
-  - .agents/skills/lib/empirical-artifacts.mjs
-  - templates/agents-project.md
-  - AGENTS.md
-  - scripts/dev/fixtures-empirical-cycle.mjs
-  - scripts/dev/injections-data-empirical-cycle.mjs
+depends_on: [w1a-engine-fixes]
+scope_files: ["kit/skills/dev-review/**", "kit/skills/dev-iterate/**", "kit/skills/dev-govern/**", kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helpers.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/empirical-artifacts.mjs, ".agents/skills/dev-review/**", ".agents/skills/dev-iterate/**", ".agents/skills/dev-govern/**", .agents/skills/lib/workflow-policy.mjs, .agents/skills/lib/workflow-helpers.mjs, .agents/skills/lib/escalation.mjs, .agents/skills/lib/empirical-artifacts.mjs, templates/agents-project.md, AGENTS.md, scripts/dev/fixtures-empirical-cycle.mjs, scripts/dev/injections-data-empirical-cycle.mjs]
 ---
 
 # `w2b-empirical-poc-cycle` 实施 Todo（Issue `#102`）

@@ -1,17 +1,19 @@
 ---
 kind: prd
 title: v10.1 引擎加固、四大工程支柱与全景文档总控 PRD
-status: draft
+status: active
 created: 2026-11-20
 updated: 2026-11-20
 issue: null
 pr: null
 owner: plan-v101
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=8a95755ec71d, summary=Round 2 independent Plan Critique PASS (0 blockers))"
+critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"8a95755ec71d\",\"artifact_baseline\":{\"sha\":\"8a95755ec71da4dc3f5e6793b0a5376395adf601a4f4515fd27ed7076e67f920\",\"shortSha\":\"8a95755ec71d\",\"criteriaCount\":20,\"anchorCount\":217},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:04.527Z\"}]"
 related_spec: null
 related_todo: null
 multi_spec: true
 plan_mode: interactive
+critique_anchors: "{\"sections\":{\"goal\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!**：坚持 `dev-explore`、`dev-plan`、`dev-edit`、`dev-f\",\"!任何外部 npm 运行时或构建期依赖\",\"!具体浏览器或自动化驱动绑定代码进 `kit/` 或 `scripts/`\",\"!并行单 `#100`（`kit/skills/dev-flow/scripts/*` 中围绕 `\",\"250ms\",\"289.2ms\",\"3B\",\"CLI\",\"JSON\",\"PRD\",\"README\",\"README.en.md\",\"README.md\",\"SVG\",\"TDD\",\"`#100`\",\"`#101`\",\"`#102`\",\"`#103`\",\"`#104`\",\"`#105`\",\"`#99`\",\"`--visual-checked`\",\"`/grill-me`\",\"`/plan`\",\"`250 ms`\",\"`289.2 ms`\",\"`LoopForge-main`\",\"`PoC-first`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`autonomous`\",\"`bench.mjs`\",\"`compose-agents`\",\"`dev-edit`\",\"`dev-explore`\",\"`dev-flow`\",\"`dev-govern`\",\"`dev-iterate`\",\"`dev-plan`\",\"`dev-review`\",\"`dev-verify-tools`\",\"`docs/TDD.md`\",\"`docs/`\",\"`docs/archive/`\",\"`equip-bootstrap`\",\"`explore`\",\"`handoff`\",\"`interactive`\",\"`iterate.mjs cycle`\",\"`kit/`\",\"`kit/skills/dev-flow/scripts/*`\",\"`main`\",\"`node scripts/dev/bench.mjs`\",\"`node:*`\",\"`review`\",\"`scripts/`\",\"`survey(self)`\",\"`survey`\",\"`templates/`\",\"`取舍`\",\"bench.mjs\",\"docs/TDD.md\",\"iterate.mjs\",\"scripts/dev/bench.mjs\"]}},\"anchors\":[\"!**：坚持 `dev-explore`、`dev-plan`、`dev-edit`、`dev-f\",\"!任何外部 npm 运行时或构建期依赖\",\"!具体浏览器或自动化驱动绑定代码进 `kit/` 或 `scripts/`\",\"!并行单 `#100`（`kit/skills/dev-flow/scripts/*` 中围绕 `\",\"--case\",\"--check\",\"--goal\",\"--handoff\",\"250ms\",\"289.2ms\",\"3B\",\"<24576B\",\"<=250ms\",\"<=30KB\",\"<=800\",\"==0\",\">=16\",\"AGENTS\",\"AGENTS.md\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"C1\",\"C10\",\"C11\",\"C12\",\"C13\",\"C14\",\"C15\",\"C16\",\"C17\",\"C18\",\"C19\",\"C2\",\"C20\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"C9\",\"CLI\",\"HTML\",\"I225\",\"I239\",\"I250\",\"I259\",\"I260\",\"I269\",\"JSON\",\"PRD\",\"README\",\"README.en.md\",\"README.md\",\"SKILL\",\"SVG\",\"TDD\",\"UI_VISUAL_EXT_RE\",\"`#100`\",\"`#101`\",\"`#102`\",\"`#103`\",\"`#104`\",\"`#105`\",\"`#99`\",\"`--artifact {path}`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`.mjs <= 800`\",\"`/grill-me`\",\"`/plan`\",\"`16/12`\",\"`250 ms`\",\"`289.2 ms`\",\"`3`\",\"`<= 250 ms`\",\"`>= 16`\",\"`AGENTS.md < 24576 B`\",\"`AGENTS.md <= 30KB`\",\"`AGENTS.md`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`I225–I239`\",\"`I250–I259`\",\"`I260–I269`\",\"`LoopForge-main`\",\"`PoC-first`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`UI_VISUAL_EXT_RE`\",\"`agents-sections.mjs`\",\"`assets/readme/*.svg`\",\"`autonomous`\",\"`beautify-github-readme`\",\"`bench.mjs`\",\"`compose-agents.mjs`\",\"`compose-agents`\",\"`cycle --goal \\\"{goal}\\\" [--max-rounds 3] [--json]`\",\"`cycle`\",\"`depends_on`\",\"`dev-edit`\",\"`dev-explore`\",\"`dev-flow`\",\"`dev-govern`\",\"`dev-iterate`\",\"`dev-plan`\",\"`dev-review`\",\"`dev-verify-tools`\",\"`dirname(rel)`\",\"`doc-plan.mjs audit`\",\"`doc-plan.mjs triage`\",\"`doc-plan`\",\"`docs/TDD.md`\",\"`docs/`\",\"`docs/archive/`\",\"`docs/feature-map.json`\",\"`equip-bootstrap.mjs`\",\"`equip-bootstrap`\",\"`equip.mjs .`\",\"`equip`\",\"`evidence.json`\",\"`explore`\",\"`facts.docs.existingDesignDocs`\",\"`fixtures-empirical-cycle.mjs`\",\"`fixtures-engine-hardening.mjs`\",\"`fixtures-plan-wave.mjs`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start --case 3|4`\",\"`flow.mjs verify`\",\"`govern-audit`\",\"`handoff.mjs`\",\"`handoff`\",\"`interactive`\",\"`iterate.mjs cycle`\",\"`kit/`\",\"`kit/skills/dev-flow/scripts/*`\",\"`kit/skills/dev-govern/SKILL.md`\",\"`kit/skills/dev-iterate/SKILL.md`\",\"`kit/skills/dev-iterate/scripts/iterate.mjs`\",\"`kit/skills/dev-plan/SKILL.md`\",\"`kit/skills/lib/doc-slice-graph.mjs`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/escalation.mjs`\",\"`kit/skills/lib/plan-exit-gate.mjs`\",\"`main`\",\"`node scripts/dev/bench.mjs`\",\"`node:*`\",\"`oil-tone`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`pocCommand`\",\"`preflight`\",\"`reproEvidence`\",\"`review-pack.mjs check-empirical`\",\"`review.mjs`\",\"`review`\",\"`scope_files`\",\"`scripts/`\",\"`survey(self)`\",\"`survey-ecosystem.mjs`\",\"`survey-scan.mjs`\",\"`survey-workspace.mjs`\",\"`survey.mjs`\",\"`survey`\",\"`sync-toc --check`\",\"`sync-toc`\",\"`tdd-authority`\",\"`templates/`\",\"`templates/agents-project.md`\",\"`third_party/**`\",\"`unignoredOutputDirs`\",\"`vendor/**`\",\"`取舍`\",\"`意图路由`\",\"`探索策略`\",\"agents-sections.mjs\",\"bench.mjs\",\"compose-agents.mjs\",\"depends_on\",\"doc-plan.mjs\",\"docs/TDD.md\",\"docs/feature-map.json\",\"equip-bootstrap.mjs\",\"equip.mjs\",\"evidence.json\",\"existingDesignDocs\",\"fixtures-empirical-cycle.mjs\",\"fixtures-engine-hardening.mjs\",\"fixtures-plan-wave.mjs\",\"flow.mjs\",\"handoff.mjs\",\"iterate.mjs\",\"kit/skills/dev-govern/SKILL.md\",\"kit/skills/dev-iterate/SKILL.md\",\"kit/skills/dev-iterate/scripts/iterate.mjs\",\"kit/skills/dev-plan/SKILL.md\",\"kit/skills/lib/doc-slice-graph.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/escalation.mjs\",\"kit/skills/lib/plan-exit-gate.mjs\",\"pendingDecisions\",\"plan_mode\",\"pocCommand\",\"reproEvidence\",\"review-pack.mjs\",\"review.mjs\",\"scope_files\",\"scripts/dev/bench.mjs\",\"survey-ecosystem.mjs\",\"survey-scan.mjs\",\"survey-workspace.mjs\",\"survey.mjs\",\"templates/agents-project.md\",\"third_party\",\"unignoredOutputDirs\"],\"coreSections\":[\"goal\"],\"pendingResolved\":6,\"pendingUnresolved\":0,\"criteriaCount\":20}"
 ---
 
 # v10.1 引擎加固、四大工程支柱与全景文档总控 PRD
@@ -43,7 +45,7 @@ Stage C（v10）落地三层常青文档与统一状态机后，通过真实空�
 
 <!-- section: non-goals -->
 - 本轮不改并行单 `#100`（`kit/skills/dev-flow/scripts/*` 中围绕 `explore` 提交门控的修复）。
-- 本轮不引入任何外部 npm 运行时或构建期依赖，不引入 Chrome/Playwright 绑定代码进 `kit/` 或 `scripts/`。
+- 本轮不引入任何外部 npm 运行时或构建期依赖，不引入具体浏览器或自动化驱动绑定代码进 `kit/` 或 `scripts/`。
 - 本轮不把规划阶段文档在 PR `#105` 中提前归档进 `docs/archive/`（本 PRD 与 5 份切片文档合入 `main` 后作为活跃工程单长期驱动后续 Wave 1–3B 实施）。
 - Wave 3B（`#104`）合入并全绿后**不自动跑外部真实仓库测试集，也不自动打标签发版**——必须停在硬停机点等待维护者明确下令。
 <!-- section: non-goals-end -->
@@ -146,26 +148,26 @@ Wave 2 的 Slice 2（`#101`）与 Slice 3（`#102`）共享唯一前置 Slice 1�
 ### 总控端到端验收标准（20 条 `C1..C20` 严格切分至 5 个切片）
 
 <!-- criteria:start -->
-- [ ] **C1**（Slice 1 `#99`）：`compose-agents.mjs` / `agents-sections.mjs` 将手写 `取舍` 区纳入免字面漂移检查，且新增自定义技能后单次运行 `compose-agents.mjs` 同步收敛 `意图路由` 与 `探索策略`。
-- [ ] **C2**（Slice 1 `#99`）：`survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**` 等嵌入子包并对超多子包聚合摘要保障 `AGENTS.md <= 30KB`，且 `survey-workspace.mjs` 仅在输出目录存在未跟踪文件时才报 `unignoredOutputDirs`。
-- [ ] **C3**（Slice 1 `#99`）：`review.mjs` 识别 `facts.docs.existingDesignDocs` 与 `tdd-authority`；`equip-bootstrap.mjs` 消除生成 `README.md` 悬空脚本指针；`handoff.mjs` 按 `dirname(rel)` 校验内部相对参考文档并区分嵌入大文件。
-- [ ] **C4**（Slice 1 `#99`）：在不放宽 `bench.mjs` 预算（`250 ms`）的前提下优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `survey(self)` 本地实测中位数回到 `<= 250 ms`，并补齐 `fixtures-engine-hardening.mjs` (new) 与 `I225–I239` 注入用例。
-- [ ] **C5**（Slice 2 `#101`）：`doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互逐题清零与自治停机边界。
-- [ ] **C6**（Slice 2 `#101`）：抽离规划退场校验模块 `kit/skills/lib/plan-exit-gate.mjs` (new)，并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档过审，未就绪以退出码 `3` 阻断并输出 `BLOCKED_PLAN_NOT_READY`。
-- [ ] **C7**（Slice 2 `#101`）：新增 `kit/skills/lib/doc-slice-graph.mjs` (new) 并接入 `doc-plan.mjs audit`，校验总控 PRD 到切片 100% 覆盖、`scope_files` 与 `depends_on` 显式声明、依赖无环（`BLOCKED_SLICE_CYCLE`）及同波次无文件碰撞。
-- [ ] **C8**（Slice 2 `#101`）：升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行切片生成独立子代理交接包，同时在 `flow.mjs verify` 预透传 `--artifact`/`--visual-blocked-reason`，刷新 `equip.mjs .` 并补齐 `fixtures-plan-wave.mjs` (new) 与 `I250–I259`。
-- [ ] **C9**（Slice 3 `#102`）：`flow.mjs verify` 与 `review-pack.mjs check-empirical` 支持工具无关 `--artifact {path}`（校验真实非空文件并登记实证摘要至 `evidence.json`/审查回执，不脏工作区），并在 PR 验证表输出结构化实证与附件清单。
-- [ ] **C10**（Slice 3 `#102`）：触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 放行，必须提供非空 `--artifact` 或实质视觉观察，无渲染环境时必须显式传 `--visual-blocked-reason` 诚实报阻。
-- [ ] **C11**（Slice 3 `#102`）：在 `kit/skills/lib/escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 固化「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零硬编码工具）。
-- [ ] **C12**（Slice 3 `#102`）：`kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与硬停损），拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `.mjs <= 800` 行，在 `templates/agents-project.md` 与 `AGENTS.md` 确立「只锁客观输出边界」底线，刷新 `equip`/`compose-agents`（`AGENTS.md < 24576 B`），补齐 `fixtures-empirical-cycle.mjs` (new) 与 `I260–I269`。
-- [ ] **C13**（Slice 4 `#103`）：Wave 1 与 Wave 2 全部合入后，在本仓真实完成一轮 `dev-govern` + `dev-verify-tools` + `dev-iterate`（含 `cycle`）自举互转演练并修清实操发现缺陷，刷新 `docs/feature-map.json`。
-- [ ] **C14**（Slice 4 `#103`）：全面重写 `docs/TDD.md`，完整覆盖外部治理 `S1–S4`、全 8 个技能日常流转、双态规划门禁、波次图与 `handoff`、结构化实证与有界优化循环、三层常青文档与跨代升级。
-- [ ] **C15**（Slice 4 `#103`）：新版 `docs/TDD.md` 包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，讲透流转跳转、拦截点与核心原则。
-- [ ] **C16**（Slice 4 `#103`）：`docs/TDD.md` 全文采用无 AI 味平实中文，人类用户不读源码即可完全看懂系统运转方式，并通过 `preflight`/`doc-plan`/`govern-audit`/`sync-toc` 全部校验。
-- [ ] **C17**（Slice 5 `#104`）：严格按 `oil-tone` 重写 `README.md` 与 `README.en.md`（消除文字墙与 AI 味），覆盖 `S1–S4`、全 8 个技能日常自然语言与斜杠触发用法、有界优化循环与跨代融合，通过 `sync-toc --check`。
-- [ ] **C18**（Slice 5 `#104`）：按 `beautify-github-readme` 重设计全套现有 6 张 `assets/readme/*.svg` 并补充关键章节新 SVG（如 8 技能闭环与三层文档图），严格按每张图实际内容自然定高、画幅宽松不堆小字。
-- [ ] **C19**（Slice 5 `#104`）：全部 SVG 通过 `preflight` 字体（`>= 16`）、卫生与双语产品层检查。
-- [ ] **C20**（Slice 5 `#104`）：全部 SVG 与重排 README 在浏览器真实浅/深色背景下完成渲染截图核查；Wave 3B 合入全绿后强制停在外部测试集前硬停机点等待人工确认。
+- [ ] C1: （Slice 1 `#99`）`compose-agents.mjs` / `agents-sections.mjs` 将手写 `取舍` 区纳入免字面漂移检查，且新增自定义技能后单次运行 `compose-agents.mjs` 同步收敛 `意图路由` 与 `探索策略`。
+- [ ] C2: （Slice 1 `#99`）`survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**` 等嵌入子包并对超多子包聚合摘要保障 `AGENTS.md <= 30KB`，且 `survey-workspace.mjs` 仅在输出目录存在未跟踪文件时才报 `unignoredOutputDirs`。
+- [ ] C3: （Slice 1 `#99`）`review.mjs` 识别 `facts.docs.existingDesignDocs` 与 `tdd-authority`；`equip-bootstrap.mjs` 消除生成 `README.md` 悬空脚本指针；`handoff.mjs` 按 `dirname(rel)` 校验内部相对参考文档并区分嵌入大文件。
+- [ ] C4: （Slice 1 `#99`）在不放宽 `bench.mjs` 预算（`250 ms`）的前提下优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `survey(self)` 本地实测中位数回到 `<= 250 ms`，并补齐 `fixtures-engine-hardening.mjs` (new) 与 `I225–I239` 注入用例。
+- [ ] C5: （Slice 2 `#101`）`doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互逐题清零与自治停机边界。
+- [ ] C6: （Slice 2 `#101`）抽离规划退场校验模块 `kit/skills/lib/plan-exit-gate.mjs` (new)，并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档过审，未就绪以退出码 `3` 阻断并输出 `BLOCKED_PLAN_NOT_READY`。
+- [ ] C7: （Slice 2 `#101`）新增 `kit/skills/lib/doc-slice-graph.mjs` (new) 并接入 `doc-plan.mjs audit`，校验总控 PRD 到切片 100% 覆盖、`scope_files` 与 `depends_on` 显式声明、依赖无环（`BLOCKED_SLICE_CYCLE`）及同波次无文件碰撞。
+- [ ] C8: （Slice 2 `#101`）升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行切片生成独立子代理交接包，同时在 `flow.mjs verify` 预透传 `--artifact`/`--visual-blocked-reason`，刷新 `equip.mjs .` 并补齐 `fixtures-plan-wave.mjs` (new) 与 `I250–I259`。
+- [ ] C9: （Slice 3 `#102`）`flow.mjs verify` 与 `review-pack.mjs check-empirical` 支持工具无关 `--artifact {path}`（校验真实非空文件并登记实证摘要至 `evidence.json`/审查回执，不脏工作区），并在 PR 验证表输出结构化实证与附件清单。
+- [ ] C10: （Slice 3 `#102`）触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 放行，必须提供非空 `--artifact` 或实质视觉观察，无渲染环境时必须显式传 `--visual-blocked-reason` 诚实报阻。
+- [ ] C11: （Slice 3 `#102`）在 `kit/skills/lib/escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 固化「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零硬编码工具）。
+- [ ] C12: （Slice 3 `#102`）`kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与硬停损），拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `.mjs <= 800` 行，在 `templates/agents-project.md` 与 `AGENTS.md` 确立「只锁客观输出边界」底线，刷新 `equip`/`compose-agents`（`AGENTS.md < 24576 B`），补齐 `fixtures-empirical-cycle.mjs` (new) 与 `I260–I269`。
+- [ ] C13: （Slice 4 `#103`）Wave 1 与 Wave 2 全部合入后，在本仓真实完成一轮 `dev-govern` + `dev-verify-tools` + `dev-iterate`（含 `cycle`）自举互转演练并修清实操发现缺陷，刷新 `docs/feature-map.json`。
+- [ ] C14: （Slice 4 `#103`）全面重写 `docs/TDD.md`，完整覆盖外部治理 `S1–S4`、全 8 个技能日常流转、双态规划门禁、波次图与 `handoff`、结构化实证与有界优化循环、三层常青文档与跨代升级。
+- [ ] C15: （Slice 4 `#103`）新版 `docs/TDD.md` 包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，讲透流转跳转、拦截点与核心原则。
+- [ ] C16: （Slice 4 `#103`）`docs/TDD.md` 全文采用无 AI 味平实中文，人类用户不读源码即可完全看懂系统运转方式，并通过 `preflight`/`doc-plan`/`govern-audit`/`sync-toc` 全部校验。
+- [ ] C17: （Slice 5 `#104`）严格按 `oil-tone` 重写 `README.md` 与 `README.en.md`（消除文字墙与 AI 味），覆盖 `S1–S4`、全 8 个技能日常自然语言与斜杠触发用法、有界优化循环与跨代融合，通过 `sync-toc --check`。
+- [ ] C18: （Slice 5 `#104`）按 `beautify-github-readme` 重设计全套现有 6 张 `assets/readme/*.svg` 并补充关键章节新 SVG（如 8 技能闭环与三层文档图），严格按每张图实际内容自然定高、画幅宽松不堆小字。
+- [ ] C19: （Slice 5 `#104`）全部 SVG 通过 `preflight` 字体（`>= 16`）、卫生与双语产品层检查。
+- [ ] C20: （Slice 5 `#104`）全部 SVG 与重排 README 在浏览器真实浅/深色背景下完成渲染截图核查；Wave 3B 合入全绿后强制停在外部测试集前硬停机点等待人工确认。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

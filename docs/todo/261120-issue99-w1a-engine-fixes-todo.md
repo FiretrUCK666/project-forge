@@ -8,18 +8,14 @@ issue: 99
 pr: null
 branch: feat/w1a-engine-fixes
 owner: plan-v101
-approved: false
+approved: true
 task_id: w1a-engine-fixes
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue99-w1a-engine-fixes-spec.md
 plan_mode: autonomous
 depends_on: []
-scope_files:
-  - scripts/*.mjs
-  - scripts/lib/*.mjs
-  - scripts/dev/fixtures-engine-hardening.mjs
-  - scripts/dev/injections-data-engine-hardening.mjs
+scope_files: ["scripts/*.mjs", "scripts/lib/*.mjs", scripts/dev/fixtures-engine-hardening.mjs, scripts/dev/injections-data-engine-hardening.mjs]
 ---
 
 # `w1a-engine-fixes` 实施 Todo（Issue `#99`）

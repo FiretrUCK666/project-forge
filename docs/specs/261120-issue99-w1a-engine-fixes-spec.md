@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 引擎 8 项边界缺陷根治与 survey(self) 性能压回 250ms 规划规格
-status: draft
+status: approved
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
@@ -9,21 +9,18 @@ issue: 99
 pr: null
 branch: feat/w1a-engine-fixes
 owner: plan-v101
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=2c0d1d10b90e, summary=Round 2 independent Plan Critique PASS (0 blockers))"
+critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"2c0d1d10b90e\",\"artifact_baseline\":{\"sha\":\"2c0d1d10b90ed4d89bb5a41d14dfeed9f32ce524ac430356c962293666771292\",\"shortSha\":\"2c0d1d10b90e\",\"criteriaCount\":8,\"anchorCount\":117},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:04.930Z\"}]"
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue99-w1a-engine-fixes-todo.md
-high_risk_paths:
-  - scripts/lib/
+high_risk_paths: [scripts/lib/]
 task_id: w1a-engine-fixes
 plan_mode: autonomous
 depends_on: []
-scope_files:
-  - scripts/*.mjs
-  - scripts/lib/*.mjs
-  - scripts/dev/fixtures-engine-hardening.mjs
-  - scripts/dev/injections-data-engine-hardening.mjs
+scope_files: ["scripts/*.mjs", "scripts/lib/*.mjs", scripts/dev/fixtures-engine-hardening.mjs, scripts/dev/injections-data-engine-hardening.mjs]
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`kit/`、`templates/agents-project.md` 或 `.agents/\",\"!任何第三方依赖或异步进程池外部工具\",\"--count\",\"250ms\",\"289.2ms\",\"30KB\",\"52ms\",\">=500\",\"AGENTS\",\"AGENTS.md\",\"HEAD\",\"README\",\"README.md\",\"SECRET_FAST_PRECHECK_RE\",\"SURVEY_SELF_BUDGET_MS\",\"TDD\",\"`**/vscode-web/extensions/**`\",\"`.agents/`\",\"`.agents/skills/`\",\"`250 ms`\",\"`250`\",\"`30KB`\",\"`486`\",\"`52 ms`\",\"`63`\",\"`95`\",\"`AGENTS.md`\",\"`LoopForge-main`\",\"`README.md`\",\"`SECRET_FAST_PRECHECK_RE`\",\"`SURVEY_SELF_BUDGET_MS = 250`\",\"`SURVEY_SELF_BUDGET_MS`\",\"`agents-sections.mjs`\",\"`compose-agents.mjs`\",\"`dirname(rel)`\",\"`docs/TDD.md`\",\"`equip-bootstrap.mjs`\",\"`existingDesignDocs`\",\"`git rev-list --count HEAD`\",\"`handoff.mjs`\",\"`ignoredButTracked`\",\"`kit/`\",\"`main`\",\"`mightHaveHome`\",\"`node scripts/dev/bench.mjs`\",\"`node:*`\",\"`rawLogLines >= 500`\",\"`references/*.md`\",\"`review.mjs`\",\"`scripts/compose-agents.mjs`\",\"`scripts/dev/bench.mjs`\",\"`scripts/lib/survey-scan.mjs`\",\"`scripts/lib/survey-workspace.mjs`\",\"`survey(self) = 289.2 ms`\",\"`survey-ecosystem.mjs`\",\"`survey-workspace.mjs`\",\"`templates/agents-project.md`\",\"`third_party/**`\",\"`unignoredOutputDirs`\",\"`vendor/**`\",\"`取舍`\",\"`意图路由`\",\"`探索策略`\",\"agents-sections.mjs\",\"compose-agents.mjs\",\"docs/TDD.md\",\"equip-bootstrap.mjs\",\"existingDesignDocs\",\"handoff.mjs\",\"ignoredButTracked\",\"mightHaveHome\",\"rawLogLines\",\"review.mjs\",\"scripts/compose-agents.mjs\",\"scripts/dev/bench.mjs\",\"scripts/lib/survey-scan.mjs\",\"scripts/lib/survey-workspace.mjs\",\"survey-ecosystem.mjs\",\"survey-workspace.mjs\",\"templates/agents-project.md\",\"third_party\",\"unignoredOutputDirs\"]}},\"anchors\":[\"!`kit/`、`templates/agents-project.md` 或 `.agents/\",\"!任何第三方依赖或异步进程池外部工具\",\"--count\",\"250ms\",\"289.2ms\",\"30KB\",\"52ms\",\"<=250ms\",\">=500\",\"AGENTS\",\"AGENTS.md\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"HEAD\",\"I225\",\"I239\",\"README\",\"README.md\",\"SECRET_FAST_PRECHECK_RE\",\"SKILL_INTERNAL_RE\",\"SURVEY_SELF_BUDGET_MS\",\"TDD\",\"`## 取舍`\",\"`**/vscode-web/extensions/**`\",\"`--check`\",\"`.agents/`\",\"`.agents/skills/`\",\"`250 ms`\",\"`250`\",\"`30KB`\",\"`486`\",\"`52 ms`\",\"`63`\",\"`95`\",\"`<= 250 ms`\",\"`AGENTS.md`\",\"`I225–I239`\",\"`LoopForge-main`\",\"`README.md`\",\"`SECRET_FAST_PRECHECK_RE`\",\"`SKILL_INTERNAL_RE`\",\"`SURVEY_SELF_BUDGET_MS = 250`\",\"`SURVEY_SELF_BUDGET_MS`\",\"`agents-sections.mjs`\",\"`bin`\",\"`build`\",\"`compose-agents.mjs`\",\"`coverage`\",\"`customized`\",\"`dirname(rel)`\",\"`dist`\",\"`docs/TDD.md`\",\"`equip-bootstrap.mjs`\",\"`existingDesignDocs`\",\"`facts.docs.existingDesignDocs`\",\"`git rev-list --count HEAD`\",\"`git.output-dirs`\",\"`handoff.mjs`\",\"`ignoredButTracked`\",\"`kit/`\",\"`main`\",\"`mightHaveHome`\",\"`node scripts/dev/bench.mjs`\",\"`node:*`\",\"`out`\",\"`rawLogLines >= 500`\",\"`references/*.md`\",\"`review.mjs`\",\"`scripts/compose-agents.mjs`\",\"`scripts/dev/bench.mjs`\",\"`scripts/dev/fixtures-engine-hardening.mjs`\",\"`scripts/dev/injections-data-engine-hardening.mjs`\",\"`scripts/lib/survey-scan.mjs`\",\"`scripts/lib/survey-workspace.mjs`\",\"`survey(self) = 289.2 ms`\",\"`survey(self)`\",\"`survey-ecosystem.mjs`\",\"`survey-scan.mjs`\",\"`survey-workspace.mjs`\",\"`survey.mjs`\",\"`tdd-authority`\",\"`templates/agents-project.md`\",\"`third_party/**`\",\"`unignoredOutputDirs`\",\"`vendor/**`\",\"`取舍`\",\"`意图路由`\",\"`探索策略`\",\"agents-sections.mjs\",\"compose-agents.mjs\",\"docs/TDD.md\",\"equip-bootstrap.mjs\",\"existingDesignDocs\",\"handoff.mjs\",\"ignoredButTracked\",\"mightHaveHome\",\"rawLogLines\",\"review.mjs\",\"scripts/compose-agents.mjs\",\"scripts/dev/bench.mjs\",\"scripts/dev/fixtures-engine-hardening.mjs\",\"scripts/dev/injections-data-engine-hardening.mjs\",\"scripts/lib/survey-scan.mjs\",\"scripts/lib/survey-workspace.mjs\",\"survey-ecosystem.mjs\",\"survey-scan.mjs\",\"survey-workspace.mjs\",\"survey.mjs\",\"templates/agents-project.md\",\"third_party\",\"unignoredOutputDirs\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":8}"
 ---
 
 # 引擎 8 项边界缺陷根治与 `survey(self)` 性能压回 `<= 250 ms`（Issue `#99`）
@@ -110,14 +107,14 @@ flowchart LR
 ### 验收标准（对应 Issue `#99` 与总控 `C1..C4`）
 
 <!-- criteria:start -->
-- [ ] **C1**：`compose-agents.mjs` / `agents-sections.mjs` 将手写 `## 取舍` 纳入免模板字面漂移比对语义区，用户填写取舍决策后无需手工标 `customized` 即可通过 `--check` 与 `review.mjs`；反例为空骨架残留占位仍被拦截。
-- [ ] **C2**：新增自定义技能后单次运行 `compose-agents.mjs` 同时收敛 `意图路由` 与 `探索策略`，无需跑第二遍即通过 `--check`；反例为手工删除其中一节触发 `--check` 报错退出。
-- [ ] **C3**：`survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**`、`**/vscode-web/extensions/**` 等 vendored 嵌入子包并对超多子包聚合摘要，避免撑破 `AGENTS.md` `30KB` 上限；反例为真实未豁免的顶层工作区子包仍被精准识别。
-- [ ] **C4**：`survey-workspace.mjs` 在 Git 仓仅当同名输出目录（`dist`/`build`/`out`/`coverage`/`bin`）实际包含未跟踪文件时才报 `unignoredOutputDirs`，消除合法已跟踪目录的 `git.output-dirs` 与 `ignoredButTracked` 死锁；反例为同目录下存在未跟踪产物文件时必须继续报错。
-- [ ] **C5**：`review.mjs` 读取 `facts.docs.existingDesignDocs` 与 `tdd-authority`，存在存量架构文档时不再误报缺 `docs/TDD.md`；反例为仓内无任何架构设计文档且无豁免时仍报缺口。
-- [ ] **C6**：`equip-bootstrap.mjs` 空目录起步生成的 `README.md` 不再包含指向 `scripts/compose-agents.mjs` 的悬空指针，且生成内容通过自身合规检查。
-- [ ] **C7**：`handoff.mjs` 按 `dirname(rel)` 校验相对 `references/*.md`、限定 `SKILL_INTERNAL_RE` 为本工具真实参考文档，并区分 vendored 大文件与真实漏扫；反例为真实缺失相对引用或源码越界泄露仍阻断。
-- [ ] **C8**：剖析并优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `node scripts/dev/bench.mjs` 的 `survey(self)` 本地 1x 实测中位数回到 `<= 250 ms`（严禁放宽预算阈值），并在 `scripts/dev/fixtures-engine-hardening.mjs` (new) 与 `scripts/dev/injections-data-engine-hardening.mjs` (new)（号段 `I225–I239`）覆盖全部 8 项正反断言。
+- [ ] C1: `compose-agents.mjs` / `agents-sections.mjs` 将手写 `## 取舍` 纳入免模板字面漂移比对语义区，用户填写取舍决策后无需手工标 `customized` 即可通过 `--check` 与 `review.mjs`；反例为空骨架残留占位仍被拦截。
+- [ ] C2: 新增自定义技能后单次运行 `compose-agents.mjs` 同时收敛 `意图路由` 与 `探索策略`，无需跑第二遍即通过 `--check`；反例为手工删除其中一节触发 `--check` 报错退出。
+- [ ] C3: `survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**`、`**/vscode-web/extensions/**` 等 vendored 嵌入子包并对超多子包聚合摘要，避免撑破 `AGENTS.md` `30KB` 上限；反例为真实未豁免的顶层工作区子包仍被精准识别。
+- [ ] C4: `survey-workspace.mjs` 在 Git 仓仅当同名输出目录（`dist`/`build`/`out`/`coverage`/`bin`）实际包含未跟踪文件时才报 `unignoredOutputDirs`，消除合法已跟踪目录的 `git.output-dirs` 与 `ignoredButTracked` 死锁；反例为同目录下存在未跟踪产物文件时必须继续报错。
+- [ ] C5: `review.mjs` 读取 `facts.docs.existingDesignDocs` 与 `tdd-authority`，存在存量架构文档时不再误报缺 `docs/TDD.md`；反例为仓内无任何架构设计文档且无豁免时仍报缺口。
+- [ ] C6: `equip-bootstrap.mjs` 空目录起步生成的 `README.md` 不再包含指向 `scripts/compose-agents.mjs` 的悬空指针，且生成内容通过自身合规检查。
+- [ ] C7: `handoff.mjs` 按 `dirname(rel)` 校验相对 `references/*.md`、限定 `SKILL_INTERNAL_RE` 为本工具真实参考文档，并区分 vendored 大文件与真实漏扫；反例为真实缺失相对引用或源码越界泄露仍阻断。
+- [ ] C8: 剖析并优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `node scripts/dev/bench.mjs` 的 `survey(self)` 本地 1x 实测中位数回到 `<= 250 ms`（严禁放宽预算阈值），并在 `scripts/dev/fixtures-engine-hardening.mjs` (new) 与 `scripts/dev/injections-data-engine-hardening.mjs` (new)（号段 `I225–I239`）覆盖全部 8 项正反断言。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

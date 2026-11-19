@@ -8,19 +8,14 @@ issue: 104
 pr: null
 branch: feat/w3b-readme-svg-redesign
 owner: plan-v101
-approved: false
+approved: true
 task_id: w3b-readme-svg-redesign
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue104-w3b-readme-svg-redesign-spec.md
 plan_mode: interactive
-depends_on:
-  - w3a-panoramic-tdd
-scope_files:
-  - README.md
-  - README.en.md
-  - assets/readme/*.svg
-  - scripts/dev/preflight-suite-checks.mjs
+depends_on: [w3a-panoramic-tdd]
+scope_files: [README.md, README.en.md, "assets/readme/*.svg", scripts/dev/preflight-suite-checks.mjs]
 ---
 
 # `w3b-readme-svg-redesign` 实施 Todo（Issue `#104`）

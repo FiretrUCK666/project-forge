@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: 宿主无关双态规划门禁、PRD 切片图校验与波次交接包规格
-status: draft
+status: approved
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
@@ -9,32 +9,18 @@ issue: 101
 pr: null
 branch: feat/w2a-plan-wave-gate
 owner: plan-v101
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=c85145162203, summary=Round 2 independent Plan Critique PASS (0 blockers))"
+critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"c85145162203\",\"artifact_baseline\":{\"sha\":\"c851451622030e83742d15669a526a353ae7fae46af24142ce3c4ad71b2f5ceb\",\"shortSha\":\"c85145162203\",\"criteriaCount\":4,\"anchorCount\":73},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.361Z\"}]"
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue101-w2a-plan-wave-gate-todo.md
-high_risk_paths:
-  - kit/
+high_risk_paths: [kit/]
 task_id: w2a-plan-wave-gate
 plan_mode: autonomous
-depends_on:
-  - w1a-engine-fixes
-scope_files:
-  - kit/skills/dev-plan/**
-  - kit/skills/dev-flow/**
-  - kit/skills/lib/pending-decisions.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - kit/skills/lib/doc-slice-graph.mjs
-  - kit/skills/lib/plan-exit-gate.mjs
-  - .agents/skills/dev-plan/**
-  - .agents/skills/dev-flow/**
-  - .agents/skills/lib/pending-decisions.mjs
-  - .agents/skills/lib/handoff-package.mjs
-  - .agents/skills/lib/doc-slice-graph.mjs
-  - .agents/skills/lib/plan-exit-gate.mjs
-  - scripts/dev/fixtures-plan-wave.mjs
-  - scripts/dev/injections-data-plan-wave.mjs
+depends_on: [w1a-engine-fixes]
+scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib/pending-decisions.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-exit-gate.mjs, ".agents/skills/dev-plan/**", ".agents/skills/dev-flow/**", .agents/skills/lib/pending-decisions.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/lib/doc-slice-graph.mjs, .agents/skills/lib/plan-exit-gate.mjs, scripts/dev/fixtures-plan-wave.mjs, scripts/dev/injections-data-plan-wave.mjs]
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"PRD\",\"`#102`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`buildHandoff`\",\"`depends_on`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`scope_files`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"templates/agents-project.md\"]}},\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--case\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"C1\",\"C2\",\"C3\",\"C4\",\"I250\",\"I259\",\"PRD\",\"SKILL\",\"`#102`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`C1..Cn`\",\"`I250–I259`\",\"`approved: false`\",\"`buildHandoff`\",\"`depends_on`\",\"`doc-plan.mjs audit`\",\"`doc-plan.mjs triage`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start --case 3|4`\",\"`flow.mjs start`\",\"`flow.mjs verify`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-plan/SKILL.md`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/doc-slice-graph.mjs`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/plan-exit-gate.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`plan_mode`\",\"`scope_files`\",\"`scripts/dev/fixtures-plan-wave.mjs`\",\"`scripts/dev/injections-data-plan-wave.mjs`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"doc-plan.mjs\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/dev-plan/SKILL.md\",\"kit/skills/lib/doc-slice-graph.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/plan-exit-gate.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"scripts/dev/fixtures-plan-wave.mjs\",\"scripts/dev/injections-data-plan-wave.mjs\",\"templates/agents-project.md\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
 ---
 
 # 宿主无关双态规划门禁、PRD 切片图校验与波次交接包（Issue `#101`）
@@ -142,10 +128,10 @@ flowchart TD
 ### 验收标准（对应 Issue `#101` 与总控 `C5..C8`）
 
 <!-- criteria:start -->
-- [ ] **C1**：`doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
-- [ ] **C2**：抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
-- [ ] **C3**：`kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
-- [ ] **C4**：升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
+- [ ] C1: `doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
+- [ ] C2: 抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
+- [ ] C3: `kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
+- [ ] C4: 升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: Wave 2.5 本仓自举互转演练与全景 docs/TDD.md 重写规格
-status: draft
+status: approved
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
@@ -9,22 +9,18 @@ issue: 103
 pr: null
 branch: feat/w3a-panoramic-tdd
 owner: plan-v101
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=e6c4dd819f11, summary=Round 2 independent Plan Critique PASS (0 blockers))"
+critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"e6c4dd819f11\",\"artifact_baseline\":{\"sha\":\"e6c4dd819f1136a591ac4ec8726f4c591af305244ec888aa2c05bb515d2252c7\",\"shortSha\":\"e6c4dd819f11\",\"criteriaCount\":4,\"anchorCount\":39},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:06.189Z\"}]"
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue103-w3a-panoramic-tdd-todo.md
-high_risk_paths:
-  - AGENTS.md
+high_risk_paths: [AGENTS.md]
 task_id: w3a-panoramic-tdd
 plan_mode: interactive
-depends_on:
-  - w2a-plan-wave-gate
-  - w2b-empirical-poc-cycle
-scope_files:
-  - docs/TDD.md
-  - docs/feature-map.json
-  - AGENTS.md
+depends_on: [w2a-plan-wave-gate, w2b-empirical-poc-cycle]
+scope_files: [docs/TDD.md, docs/feature-map.json, AGENTS.md]
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!动 `README.md`、`README.en.md` 与 `assets/readme/*.\",\"HTML\",\"README\",\"README.en.md\",\"README.md\",\"TDD\",\"`#100`\",\"`#101`\",\"`#102`\",\"`#104`\",\"`#99`\",\"`16/12`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`assets/readme/*.svg`\",\"`dev-govern`\",\"`dev-iterate`\",\"`dev-plan -> dev-edit -> dev-review`\",\"`dev-verify-tools`\",\"`docs/TDD.md`\",\"`docs/feature-map.json`\",\"`escalation.mjs`\",\"`iterate.mjs cycle`\",\"`main`\",\"`tdd-structure.mjs`\",\"docs/TDD.md\",\"docs/feature-map.json\",\"escalation.mjs\",\"iterate.mjs\",\"tdd-structure.mjs\"]}},\"anchors\":[\"!动 `README.md`、`README.en.md` 与 `assets/readme/*.\",\"C1\",\"C2\",\"C3\",\"C4\",\"HTML\",\"README\",\"README.en.md\",\"README.md\",\"TDD\",\"`#100`\",\"`#101`\",\"`#102`\",\"`#104`\",\"`#99`\",\"`16/12`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`assets/readme/*.svg`\",\"`dev-govern`\",\"`dev-iterate`\",\"`dev-plan -> dev-edit -> dev-review`\",\"`dev-verify-tools`\",\"`doc-plan`\",\"`docs/TDD.md`\",\"`docs/feature-map.json`\",\"`escalation.mjs`\",\"`govern-audit`\",\"`iterate.mjs cycle`\",\"`main`\",\"`preflight`\",\"`sync-toc`\",\"`tdd-structure.mjs`\",\"docs/TDD.md\",\"docs/feature-map.json\",\"escalation.mjs\",\"iterate.mjs\",\"tdd-structure.mjs\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
 ---
 
 # Wave 2.5 自举互转演练与全景 `docs/TDD.md` 重写（Issue `#103`）
@@ -111,10 +107,10 @@ flowchart LR
 ### 验收标准（对应 Issue `#103` 与总控 `C13..C16`）
 
 <!-- criteria:start -->
-- [ ] **C1**：全面覆盖外部项目治理 `S1–S4`、全部 8 个技能日常研发流转、双态规划门禁、波次调度、结构化实证与有界优化循环、三层常青文档与跨代双向升级。
-- [ ] **C2**：包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，逐个流程写清跳转去向、确定性拦截点与核心设计原则。
-- [ ] **C3**：全文采用无 AI 味、平实通俗中文，让真实用户无需读代码符号即可完全看懂系统运转方式，并通过 `preflight` / `doc-plan` / `govern-audit` / `sync-toc` 全部校验。
-- [ ] **C4**：正式启动 `docs/TDD.md` 重写前，已在合入 Wave 1+2 后的 `main` 基线完成 Wave 2.5 本仓自举互转演练（真实跑通 `dev-govern` + `dev-verify-tools` + `dev-iterate` 互转），修清全部演练暴露缺陷并刷新 `docs/feature-map.json`。
+- [ ] C1: 全面覆盖外部项目治理 `S1–S4`、全部 8 个技能日常研发流转、双态规划门禁、波次调度、结构化实证与有界优化循环、三层常青文档与跨代双向升级。
+- [ ] C2: 包含多张符合 Mermaid `16/12` 宽度上限且零 HTML 标签的清晰架构图与流程图，逐个流程写清跳转去向、确定性拦截点与核心设计原则。
+- [ ] C3: 全文采用无 AI 味、平实通俗中文，让真实用户无需读代码符号即可完全看懂系统运转方式，并通过 `preflight` / `doc-plan` / `govern-audit` / `sync-toc` 全部校验。
+- [ ] C4: 正式启动 `docs/TDD.md` 重写前，已在合入 Wave 1+2 后的 `main` 基线完成 Wave 2.5 本仓自举互转演练（真实跑通 `dev-govern` + `dev-verify-tools` + `dev-iterate` 互转），修清全部演练暴露缺陷并刷新 `docs/feature-map.json`。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

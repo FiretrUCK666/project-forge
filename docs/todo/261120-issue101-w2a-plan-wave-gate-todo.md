@@ -8,29 +8,14 @@ issue: 101
 pr: null
 branch: feat/w2a-plan-wave-gate
 owner: plan-v101
-approved: false
+approved: true
 task_id: w2a-plan-wave-gate
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue101-w2a-plan-wave-gate-spec.md
 plan_mode: autonomous
-depends_on:
-  - w1a-engine-fixes
-scope_files:
-  - kit/skills/dev-plan/**
-  - kit/skills/dev-flow/**
-  - kit/skills/lib/pending-decisions.mjs
-  - kit/skills/lib/handoff-package.mjs
-  - kit/skills/lib/doc-slice-graph.mjs
-  - kit/skills/lib/plan-exit-gate.mjs
-  - .agents/skills/dev-plan/**
-  - .agents/skills/dev-flow/**
-  - .agents/skills/lib/pending-decisions.mjs
-  - .agents/skills/lib/handoff-package.mjs
-  - .agents/skills/lib/doc-slice-graph.mjs
-  - .agents/skills/lib/plan-exit-gate.mjs
-  - scripts/dev/fixtures-plan-wave.mjs
-  - scripts/dev/injections-data-plan-wave.mjs
+depends_on: [w1a-engine-fixes]
+scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib/pending-decisions.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-exit-gate.mjs, ".agents/skills/dev-plan/**", ".agents/skills/dev-flow/**", .agents/skills/lib/pending-decisions.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/lib/doc-slice-graph.mjs, .agents/skills/lib/plan-exit-gate.mjs, scripts/dev/fixtures-plan-wave.mjs, scripts/dev/injections-data-plan-wave.mjs]
 ---
 
 # `w2a-plan-wave-gate` 实施 Todo（Issue `#101`）

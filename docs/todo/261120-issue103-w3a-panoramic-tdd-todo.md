@@ -8,19 +8,14 @@ issue: 103
 pr: null
 branch: feat/w3a-panoramic-tdd
 owner: plan-v101
-approved: false
+approved: true
 task_id: w3a-panoramic-tdd
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue103-w3a-panoramic-tdd-spec.md
 plan_mode: interactive
-depends_on:
-  - w2a-plan-wave-gate
-  - w2b-empirical-poc-cycle
-scope_files:
-  - docs/TDD.md
-  - docs/feature-map.json
-  - AGENTS.md
+depends_on: [w2a-plan-wave-gate, w2b-empirical-poc-cycle]
+scope_files: [docs/TDD.md, docs/feature-map.json, AGENTS.md]
 ---
 
 # `w3a-panoramic-tdd` 实施 Todo（Issue `#103`）

@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: oil-tone 双语 README 重写、全套可变高度 SVG 重绘与测试前停机门规格
-status: draft
+status: approved
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
@@ -9,21 +9,18 @@ issue: 104
 pr: null
 branch: feat/w3b-readme-svg-redesign
 owner: plan-v101
-approved: false
+approved: true
 implemented: false
-plan_critique: pending
+plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=b6d960e24082, summary=Round 2 independent Plan Critique PASS (0 blockers))"
+critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"b6d960e24082\",\"artifact_baseline\":{\"sha\":\"b6d960e2408249b4294fb451c8ade5b523dd8ef1f2950ab874770f1f2e4fd616\",\"shortSha\":\"b6d960e24082\",\"criteriaCount\":4,\"anchorCount\":43},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:06.585Z\"}]"
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue104-w3b-readme-svg-redesign-todo.md
 high_risk_paths: []
 task_id: w3b-readme-svg-redesign
 plan_mode: interactive
-depends_on:
-  - w3a-panoramic-tdd
-scope_files:
-  - README.md
-  - README.en.md
-  - assets/readme/*.svg
-  - scripts/dev/preflight-suite-checks.mjs
+depends_on: [w3a-panoramic-tdd]
+scope_files: [README.md, README.en.md, "assets/readme/*.svg", scripts/dev/preflight-suite-checks.mjs]
+critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":false,\"anchors\":[\"!核心引擎 `scripts/*.mjs`（除按需更新 `scripts/dev/prefligh\",\"<16\",\">=16\",\"README\",\"README.en.md\",\"README.md\",\"SVG\",\"TDD\",\"UI_VISUAL_EXT_RE\",\"`#102`\",\"`--artifact`\",\"`< 16`\",\"`>= 16`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`UI_VISUAL_EXT_RE`\",\"`beautify-github-readme`\",\"`docs/TDD.md`\",\"`http(s)://`\",\"`iterate.mjs cycle`\",\"`kit/`\",\"`oil-tone`\",\"`scripts/*.mjs`\",\"`scripts/dev/preflight-suite-checks.mjs`\",\"docs/TDD.md\",\"iterate.mjs\",\"scripts/dev/preflight-suite-checks.mjs\"]}},\"anchors\":[\"!核心引擎 `scripts/*.mjs`（除按需更新 `scripts/dev/prefligh\",\"--check\",\"<16\",\">=16\",\"C1\",\"C2\",\"C3\",\"C4\",\"README\",\"README.en.md\",\"README.md\",\"SVG\",\"TDD\",\"UI_VISUAL_EXT_RE\",\"`#102`\",\"`--artifact`\",\"`< 16`\",\"`>= 16`\",\"`README.en.md`\",\"`README.md`\",\"`S1–S4`\",\"`UI_VISUAL_EXT_RE`\",\"`assets/readme/docs-layers-en.svg`\",\"`assets/readme/docs-layers.svg`\",\"`assets/readme/skills-cycle-en.svg`\",\"`assets/readme/skills-cycle.svg`\",\"`beautify-github-readme`\",\"`docs/TDD.md`\",\"`http(s)://`\",\"`iterate.mjs cycle`\",\"`kit/`\",\"`main`\",\"`node scripts/sync-toc.mjs README.md README.en.md --check`\",\"`oil-tone`\",\"`preflight`\",\"`review-pack check-empirical`\",\"`scripts/*.mjs`\",\"`scripts/dev/preflight-suite-checks.mjs`\",\"`verify`\",\"docs/TDD.md\",\"iterate.mjs\",\"scripts/dev/preflight-suite-checks.mjs\",\"scripts/sync-toc.mjs\"],\"coreSections\":[],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
 ---
 
 # `oil-tone` 双语 README 重写与可变高度 SVG 重设计（Issue `#104`）
@@ -122,10 +119,10 @@ flowchart LR
 ### 验收标准（对应 Issue `#104` 与总控 `C17..C20`）
 
 <!-- criteria:start -->
-- [ ] **C1**：严格遵循 `oil-tone` 面向真实人类全面重写 `README.md` 与 `README.en.md`（消灭文字墙与 AI 味），清晰介绍 `S1–S4`、全 8 个技能日常用法（自然语言与斜杠触发）、双态规划门禁、`iterate.mjs cycle` 有界优化循环与跨代融合，并通过 `node scripts/sync-toc.mjs README.md README.en.md --check`。
-- [ ] **C2**：按 `beautify-github-readme` 重新设计全套现有 6 张 SVG 并在关键章节补充新图示 `assets/readme/skills-cycle.svg` (new)、`assets/readme/skills-cycle-en.svg` (new)、`assets/readme/docs-layers.svg` (new)、`assets/readme/docs-layers-en.svg` (new)，同步最新 8 技能架构、三层常青文档与功能地图现状；严格按每张图实际内容自然定高、画幅宽松、字体 `>= 16`、不堆小字且零 AI 味。
-- [ ] **C3**：全部 SVG 通过 `preflight` 字体、卫生、禁止词与产品层检查，且在 `scripts/dev/preflight-suite-checks.mjs` 对齐新必选 SVG 注册校验。
-- [ ] **C4**：全部 SVG 与重构后双语 README 在浏览器真实浅/深色背景下完成渲染截图核查并以真实非空 `--artifact` 通过 `verify` 与 `review-pack check-empirical`；合入 `main` 后严格停在进入最终外部测试集前的硬停机点等待用户明确确认。
+- [ ] C1: 严格遵循 `oil-tone` 面向真实人类全面重写 `README.md` 与 `README.en.md`（消灭文字墙与 AI 味），清晰介绍 `S1–S4`、全 8 个技能日常用法（自然语言与斜杠触发）、双态规划门禁、`iterate.mjs cycle` 有界优化循环与跨代融合，并通过 `node scripts/sync-toc.mjs README.md README.en.md --check`。
+- [ ] C2: 按 `beautify-github-readme` 重新设计全套现有 6 张 SVG 并在关键章节补充新图示 `assets/readme/skills-cycle.svg` (new)、`assets/readme/skills-cycle-en.svg` (new)、`assets/readme/docs-layers.svg` (new)、`assets/readme/docs-layers-en.svg` (new)，同步最新 8 技能架构、三层常青文档与功能地图现状；严格按每张图实际内容自然定高、画幅宽松、字体 `>= 16`、不堆小字且零 AI 味。
+- [ ] C3: 全部 SVG 通过 `preflight` 字体、卫生、禁止词与产品层检查，且在 `scripts/dev/preflight-suite-checks.mjs` 对齐新必选 SVG 注册校验。
+- [ ] C4: 全部 SVG 与重构后双语 README 在浏览器真实浅/深色背景下完成渲染截图核查并以真实非空 `--artifact` 通过 `verify` 与 `review-pack check-empirical`；合入 `main` 后严格停在进入最终外部测试集前的硬停机点等待用户明确确认。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

@@ -38,7 +38,16 @@ node .agents/skills/dev-review/scripts/review-pack.mjs check-fault --phase fail|
 node .agents/skills/dev-review/scripts/review-pack.mjs (--task <id> | --pr <M> | --local | --staged | --base <ref>) --include-diff [--e2e-evidence "<观察结论>"|--visual-checked]
 ```
 
-注：未传 `--include-diff` 时，JSON 与纯文本均只输出 `diff.hunkIndex` 与统计摘要（不输出补丁行，防止绕过或撑爆上下文）；传 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的 `check-empirical`、`check-fault`（`fail` + `restore`）与运行态 E2E 观察（`--e2e-evidence` 或已有 `e2eObservation`）闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`。E2E 失败自动写入 `signals.jsonl`（`e2e.runtime-fail`）并输出脱敏诊断包与分级建单；`check-empirical` 与 `check-fault` 跳过 `syncTier2ReviewSlotIfNeeded` 保护在测故障与 `--local` 原未提交改动；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免除故障注入；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
+注：未传 `--include-diff` 时，JSON 与纯文本均只输出 `diff.hunkIndex`、业务流/邻域切片与统计摘要（不输出补丁行，防止绕过或撑爆上下文）；传 `--include-diff` 前须完成当前 `round`/`headSha`/`workspaceFingerprint` 的 `check-empirical`、`check-fault`（`fail` + `restore`）与受波及业务流运行态实证（`--e2e-evidence` 须写清执行入口与观察到的真实输出/状态，拦截仅填 `"ok"`/`"pass"`/`"lgtm"`/`"done"`/`"已验证"` 等无实质水话返回 `BLOCKED_SHALLOW_E2E_EVIDENCE`）闭环，否则以退出码 `3` 返回 `BLOCKED_EMPIRICAL_FIRST` 或 `BLOCKED_DIRTY_FAULT_RESIDUE`。E2E 失败自动写入 `signals.jsonl`（`e2e.runtime-fail`）并输出脱敏诊断包与分级建单；`check-empirical` 与 `check-fault` 跳过 `syncTier2ReviewSlotIfNeeded` 保护在测故障与 `--local` 原未提交改动；空 diff 或 `low` 级纯文档（0 运行时文件且无测试命令）免除故障注入；遇冲突态（`MERGE_HEAD`/`REBASE_HEAD`）或 `git diff` 失败直接报错阻断。
+
+## 零预设工具分级实证策略与上下文装配
+
+`review-context.mjs` 按变更文件机读反查 `docs/feature-map.json` 切片（绝不整表灌入上下文；缺文件或损坏时 Fail-Soft 自动轻量化内存预填不阻断）及依赖逆邻域，无条件注入受波及 `businessFlows`、直接相邻模块接口、可用运行时能力与跨 `>= 2` PR `verify.scratch-used` 固化提示。**无论功能地图是否登记预设工具，严禁跳过业务流实证直接看 `--include-diff`**：
+
+1. **优先已登记健康工具**：功能地图存在未过时工具时优先运行 `verify-tools.mjs run` 入证；高风险过期工具（`BLOCKED_STALE_HIGH_RISK_TOOL`）硬阻断直接复用。
+2. **复用本机/宿主可用运行能力**：无预设工具或中风险工具过期时，按项目形态复用本机/宿主可用的运行环境、无头浏览器、GUI 驱动或模拟器真启真测受波及业务流与相邻模块边界。
+3. **仓外 `scratch/{taskId}/` 现写一次性探针**：缺少现成测试入口时，在仓外 `{gitCommonDir}/project-forge-verify/scratch/{taskId}/` 现写一次性探针脚本真启真采证（严禁脏仓树，随 `flow cleanup`/`abort` 自动销毁并在同一功能跨 `>= 2` 个 PR 使用时提示另开独立 PR 固化）。
+4. **缺不可替代外部环境如实阻断**：因缺少外部服务、专有硬件或凭据而无法真跑时，必须如实报告缺口并阻断通过，绝不假绿。
 
 ## 不可信外部 PR 供应链门禁
 

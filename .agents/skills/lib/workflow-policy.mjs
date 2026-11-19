@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { checkMermaidLabelWidth } from './docs.mjs'
+import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { hasExploredEvidence, sanitizeTaskId, nextReviewRound } from './ledger.mjs'
 import { isProfileExplicitNone } from './profile.mjs'
@@ -44,6 +45,7 @@ export {
   resolveReadablePrTitle,
   scanUnstartedReadySlices,
   scoreExecutionResult,
+  validateE2eEvidenceText,
   validatePreMergeShaAndWorktree,
 }
 
@@ -384,6 +386,17 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
         reason: noCfg
           ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
           : `运行时代码改动禁止仅用 full/gate（单测）顶替 smoke-verify，当前 HEAD 缺少 smoke 执行实证（已通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]）。`,
+      }
+    }
+    const rawObsSummary = evidence.e2eObservation?.summary ?? ''
+    if (evidence.e2eObservation?.shallowRejected || (rawObsSummary && !validateE2eEvidenceText(rawObsSummary).ok)) {
+      const check = validateE2eEvidenceText(rawObsSummary)
+      return {
+        ok: false,
+        code: 'BLOCKED_SHALLOW_E2E_EVIDENCE',
+        exitCode: 3,
+        requiredTier: 'smoke',
+        reason: check.reason ?? 'E2E 观察回执仅为无实质水话，请写明执行入口与观察到的真实输出/状态。',
       }
     }
     const hasE2eObs = hasValidE2eObservationOnHead(evidence, headSha)

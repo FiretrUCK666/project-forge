@@ -11,6 +11,7 @@ import { basename, join } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import { discoverContextDocs } from '../../lib/doc-locator.mjs'
+import { FEATURE_MAP_REL, prefillFeatureMapFromRepoMap } from '../../lib/feature-map.mjs'
 import {
   gitLsFilesTextAndCode, gitRun, isMainModule, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots,
 } from '../../lib/git.mjs'
@@ -468,7 +469,7 @@ async function detectHotspots(root, focus) {
     .map(([file, touches]) => ({ file, touches }))
 }
 
-export async function generateRepoMap(targetDir = process.cwd(), { focus } = {}) {
+export async function generateRepoMap(targetDir = process.cwd(), { focus, writeFeatureMap = false } = {}) {
   const roots = await resolveRepoRoots(targetDir)
   const root = roots.isGit ? roots.workTreeRoot : roots.cwd
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`目标目录不存在：${root}`)
@@ -511,7 +512,7 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     ? scan.files.filter((f) => f.rel === focusRel || f.rel.startsWith(`${focusRel}/`)).map((f) => f.rel).slice(0, 80)
     : []
 
-  return {
+  const map = {
     root,
     name: basename(root),
     isGit: roots.isGit,
@@ -555,6 +556,14 @@ export async function generateRepoMap(targetDir = process.cwd(), { focus } = {})
     docLocateHint: contextDocs.docLocateHints[0] ?? 'node .agents/skills/dev-explore/scripts/doc-locate.mjs --query "<关键词>"',
     docLocateHints: contextDocs.docLocateHints,
     hotspots,
+  }
+  const fmSync = prefillFeatureMapFromRepoMap(root, map, { write: Boolean(writeFeatureMap) })
+  return {
+    ...map,
+    featureMapPath: FEATURE_MAP_REL,
+    featureMapExists: existsSync(join(root, FEATURE_MAP_REL)),
+    featureMapWritten: fmSync.written,
+    featureMapIndex: fmSync.featureMap,
   }
 }
 
@@ -635,9 +644,9 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       positionalDir: 'first',
-      booleanFlags: ['json', 'help'],
+      booleanFlags: ['json', 'help', 'write-feature-map'],
       valueFlags: ['focus', 'dir', 'repo', 'task', 'tier', 'by'],
-      usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--task <id>] [--json]',
+      usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--task <id>] [--write-feature-map] [--json]',
     })
   } catch (err) {
     process.stderr.write(`${err.message}\n`)
@@ -645,7 +654,7 @@ async function main(argv) {
   }
   if (cli.help) {
     process.stdout.write([
-      '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--dir <path>] [--focus <subdir>] [--task <id>] [--json]',
+      '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--dir <path>] [--focus <subdir>] [--task <id>] [--write-feature-map] [--json]',
       '',
       '无深度限制枚举全仓文本源码与多生态包清单（git ls-files -z + 4KB NUL 探测），',
       '输出入口、Dev Profile 命令、带 working-directory 的 CI 步骤、可复用模块、文档索引与 Feature Map。',
@@ -654,7 +663,7 @@ async function main(argv) {
   }
 
   try {
-    const map = await generateRepoMap(cli.targetDir, { focus: cli.opts.focus })
+    const map = await generateRepoMap(cli.targetDir, { focus: cli.opts.focus, writeFeatureMap: Boolean(cli.opts['write-feature-map']) })
     if (cli.opts.task) {
       const roots = await resolveRepoRoots(cli.targetDir)
       const { ledger } = await resolveTaskContext(roots, { task: cli.opts.task })

@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { destroyTaskScratchDir, findAffectedFeatures, readFeatureMap } from '../../lib/feature-map.mjs'
 import {
   canonicalPath, detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, inspectBranchMergeState,
   parseWorktreeListPorcelain, posixPath, samePath,
@@ -34,6 +35,23 @@ function isCwdInside(wtAbs) {
   if (samePath(cwd, wt)) return true
   const rel = relative(wt, cwd)
   return Boolean(rel && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+async function cleanupTaskVerifyScratch(roots, taskId, ledger, source = 'flow-cleanup') {
+  const fm = readFeatureMap(roots.mainRoot)
+  const ledgerFiles = Array.isArray(ledger?.files) ? ledger.files : []
+  const aff = fm && ledgerFiles.length > 0 ? findAffectedFeatures(fm, ledgerFiles) : null
+  const fallbackFeatureId = aff?.matchedFeatures?.[0]?.id ?? ledger?.slug ?? null
+  const fallbackModules = aff?.matchedFeatures?.[0]?.modules ?? ledgerFiles.slice(0, 6)
+  return destroyTaskScratchDir({
+    gitCommonDir: roots.gitDir,
+    mainRoot: roots.mainRoot,
+    taskId,
+    recordSignal: true,
+    fallbackFeatureId,
+    fallbackModules,
+    source,
+  })
 }
 
 function mountedPathsForWorktree(ledger, wtRel) {
@@ -303,14 +321,15 @@ export async function handleCleanup(opts, roots) {
     deletedRemoteBranch = true
   }
 
+  const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-cleanup')
   ledger.status = (keptWorktrees.length === 0 && !keepLocalBr && !keepRemoteBr) ? 'cleaned' : ledger.status
   ledger.cleanedAt = new Date().toISOString()
   await runLifecycleGovernHook({ stage: 'cleanup', mainRoot: roots.mainRoot, implRoot: roots.mainRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, cleanedAt: ledger.cleanedAt, ...(ledger.hooks ? { hooks: ledger.hooks } : {}) }), { createIfMissing: true })
-  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, status: ledger.status }
+  const summary = { taskId, removedWorktrees, keptWorktrees, deletedLocalBranch, mergeState: cl.mergeState?.state ?? null, deletedRemoteBranch, verifyScratchCleanup, status: ledger.status }
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
   else {
-    process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}。\n`)
+    process.stdout.write(`清理完成（task=${taskId}）：移除 worktree ${removedWorktrees.length} 个（保留 ${keptWorktrees.length} 个），本地分支删除=${deletedLocalBranch}，远端分支删除=${deletedRemoteBranch}${verifyScratchCleanup?.destroyed ? `，已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
     printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
   }
@@ -432,13 +451,14 @@ export async function handleAbort(opts, roots) {
     if (cur.ok && cur.stdout.trim() === ledger.branch) await gitRun(roots.mainRoot, ['switch', ledger.baseBranch || 'main'])
     await gitRun(roots.mainRoot, opts.force ? ['branch', '-D', ledger.branch] : ['branch', '-d', ledger.branch])
   }
+  const verifyScratchCleanup = await cleanupTaskVerifyScratch(roots, taskId, ledger, 'flow-abort')
   ledger.status = 'aborted'
   ledger.abortedAt = new Date().toISOString()
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), status: ledger.status, abortedAt: ledger.abortedAt }), { createIfMissing: true })
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees }, null, 2)}\n`)
+  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, taskId, status: 'aborted', removedWorktrees, verifyScratchCleanup }, null, 2)}\n`)
   else {
-    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted。\n`)
+    process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
   }
-  return { exitCode: 0, removedWorktrees }
+  return { exitCode: 0, removedWorktrees, verifyScratchCleanup }
 }

@@ -20,6 +20,7 @@ import {
   buildE2eDiagnosticPacket,
   buildE2eObservation,
   hasValidE2eObservationOnHead,
+  validateE2eEvidenceText,
   readVerificationEvidence,
   resolveEffectiveBaseSha,
   scoreExecutionResult,
@@ -372,28 +373,49 @@ export function recordVerifyEvidenceForFlow({
   const docFailed = Boolean(docStaticRes && !docStaticRes.ok)
   const overallExit = docFailed ? 3 : (errorOnly ? 1 : exitCode)
   let e2eObservation = sameClean && hasValidE2eObservationOnHead(prev, currentHead) ? prev.e2eObservation : null
+  let shallowE2eEvidence = null
   if (String(e2eObservationText ?? '').trim()) {
-    e2eObservation = buildE2eObservation({
-      summary: e2eObservationText,
-      headSha: currentHead,
-      source: 'flow-verify',
-      cmd: smokeCmd ?? cmdStr,
-      executed: !explicitNoneSkipped && !errorOnly,
-      succeeded: overallExit === 0 && (!smokeGate || smokeVerifiedOnHead),
-      errorOnly,
-    })
+    const evCheck = validateE2eEvidenceText(e2eObservationText)
+    if (!evCheck.ok) {
+      shallowE2eEvidence = evCheck
+      e2eObservation = {
+        summary: String(e2eObservationText).trim(),
+        headSha: currentHead,
+        source: 'flow-verify',
+        cmd: smokeCmd ?? cmdStr,
+        executed: !explicitNoneSkipped && !errorOnly,
+        succeeded: false,
+        errorOnly: false,
+        shallowRejected: true,
+        reason: evCheck.reason,
+        observedAt: new Date().toISOString(),
+      }
+      process.stderr.write(`${evCheck.code}: ${evCheck.reason}\n`)
+    } else {
+      e2eObservation = buildE2eObservation({
+        summary: e2eObservationText,
+        headSha: currentHead,
+        source: 'flow-verify',
+        cmd: smokeCmd ?? cmdStr,
+        executed: !explicitNoneSkipped && !errorOnly,
+        succeeded: overallExit === 0 && (!smokeGate || smokeVerifiedOnHead),
+        errorOnly,
+      })
+    }
   }
+  const finalOverallExit = shallowE2eEvidence ? 3 : overallExit
   writeVerificationEvidence(roots.gitDir, taskId, {
     taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
-    riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: overallExit,
+    riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: finalOverallExit,
     executed: !explicitNoneSkipped,
-    succeeded: overallExit === 0 && !errorOnly,
+    succeeded: finalOverallExit === 0 && !errorOnly,
     errorOnly: Boolean(errorOnly),
     smokeVerifiedOnHead,
     e2eObservation,
+    ...(shallowE2eEvidence ? { shallowE2eEvidence } : {}),
     gates, skipped: [...skipped],
   })
-  return { overallExit, smokeVerifiedOnHead, e2eObservation }
+  return { overallExit: finalOverallExit, smokeVerifiedOnHead, e2eObservation, shallowE2eEvidence }
 }
 
 export function ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note }) {

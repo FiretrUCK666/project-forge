@@ -6,19 +6,19 @@
  * Self-contained module: uses Node 18+ built-in `node:*` modules and `kit/skills/lib/` only.
  */
 
-import { existsSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import { flushAndExit, parseStandardCli } from '../../lib/cli.mjs'
 import { evaluateCoupledSync, parseCoupledSyncRules } from '../../lib/docs.mjs'
+import { gitRun, isMainModule, posixPath, readTextSafe, resolveRepoRoots } from '../../lib/git.mjs'
 import {
-  gitRun, isMainModule, posixPath, readTextSafe, resolveDefaultBranch, resolveRepoRoots, } from '../../lib/git.mjs'
-import {
-  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedRangeDiffCommits, } from '../../lib/git-fast.mjs'
+  getCachedRangeDiffCommits, isAncestorLinearFast, readHeadFast, resolveGitDirFast, setCachedRangeDiffCommits,
+} from '../../lib/git-fast.mjs'
 import { listTaskLedgers, readTaskLedger, resolveTaskContext, sanitizeTaskId, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
 import { parseDevProfile } from '../../lib/profile.mjs'
-import { parsePrNumber } from '../../lib/platform.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
+import { assembleReviewContext, resolveDefaultBaseRef, validatePackCliArgs } from './review-context.mjs'
 import {
   EXIT, collectDiff, computeDiffRange, hasCommits, resolveReviewWorktree,
   scanUntrustedDiff, syncTier2ReviewSlotIfNeeded,
@@ -80,87 +80,6 @@ function printHelp() {
     `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
     '',
   ].join('\n'))
-}
-
-async function resolveDefaultBaseRef(repoRoot, headRef) {
-  const fastGitDir = resolveGitDirFast(repoRoot)
-  const canFastRefs = Boolean(fastGitDir && !existsSync(join(fastGitDir, 'reftable')))
-  if (canFastRefs) {
-    const origHeadTxt = readTextSafe(join(fastGitDir, 'refs', 'remotes', 'origin', 'HEAD'))?.trim()
-    if (origHeadTxt?.startsWith('ref:')) {
-      const symTarget = origHeadTxt.slice(4).trim()
-      if (resolveRefShaFast(fastGitDir, symTarget)) return symTarget.replace(/^refs\/remotes\//, '')
-    }
-    const def = await resolveDefaultBranch(repoRoot)
-    for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
-      const fullRef = cand.startsWith('origin/') ? `refs/remotes/${cand}` : `refs/heads/${cand}`
-      if (resolveRefShaFast(fastGitDir, fullRef)) return cand
-    }
-  }
-  const sym = await gitRun(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-  if (sym.ok && sym.stdout.trim()) {
-    const ref = sym.stdout.trim()
-    if ((await gitRun(repoRoot, ['rev-parse', '--verify', ref])).ok) return ref
-  }
-  const def = await resolveDefaultBranch(repoRoot)
-  for (const cand of [def, 'main', 'master', `origin/${def}`, 'origin/main', 'origin/master', 'trunk'].filter(Boolean)) {
-    if ((await gitRun(repoRoot, ['rev-parse', '--verify', cand])).ok) return cand
-  }
-  if ((await gitRun(repoRoot, ['rev-parse', '--verify', `${headRef}~1`])).ok) return `${headRef}~1`
-  return undefined
-}
-
-function validateCliArgs(cli) {
-  const { sub, opts } = cli
-  if (!sub && opts._.length === 1) {
-    const posPr = parsePrNumber(String(opts._[0]).trim())
-    if (posPr !== null && opts.pr === undefined && opts['external-pr'] === undefined) {
-      opts.pr = String(posPr)
-      opts._.shift()
-    }
-  }
-  if (opts.pr !== undefined) {
-    const prNum = parsePrNumber(opts.pr, { strict: true })
-    if (prNum !== null) opts.pr = String(prNum)
-  }
-  if (opts['external-pr'] !== undefined) {
-    const extNum = parsePrNumber(opts['external-pr'], { strict: true })
-    if (extNum !== null) opts['external-pr'] = String(extNum)
-  }
-  if (opts._.length > 1) {
-    throw new Error(`多余的位置参数：${opts._.slice(1).join(' ')}`)
-  }
-  if (opts._.length === 1) {
-    const cand = resolve(String(opts._[0]))
-    if (opts.dir !== undefined) {
-      throw new Error(`未知参数或重复目录：${opts._[0]}`)
-    }
-    if (!existsSync(cand) || !statSync(cand).isDirectory()) {
-      throw new Error(`未知子命令或不存在的目录：${opts._[0]}`)
-    }
-  }
-  if (sub && !SUBCOMMANDS.includes(sub)) {
-    throw new Error(`未知子命令：${sub}`)
-  }
-  if (sub === 'check-fault') {
-    const phase = String(opts.phase ?? '').trim().toLowerCase()
-    if (phase !== 'fail' && phase !== 'restore') {
-      throw new Error('check-fault 必须指定 --phase fail 或 --phase restore')
-    }
-  }
-
-  const hasLocal = Boolean(opts.local)
-  const hasStaged = Boolean(opts.staged)
-  const hasTask = opts.task !== undefined
-  const hasPr = opts.pr !== undefined || opts['external-pr'] !== undefined
-  const hasBase = opts.base !== undefined
-
-  if (hasLocal && (hasStaged || hasTask || hasPr || hasBase)) {
-    throw new Error('--local 与 --staged/--task/--pr/--base 互斥，不能同时指定')
-  }
-  if (hasStaged && (hasTask || hasPr || hasBase)) {
-    throw new Error('--staged 与 --task/--pr/--base 互斥，不能同时指定')
-  }
 }
 
 async function resolveTaskForPack(roots, opts) {
@@ -417,7 +336,7 @@ async function main(argv = process.argv.slice(2)) {
       multiFlags: ['cmd', 'must-fix', 'should-fix', 'pre-existing', 'disposition', 'rebut-accepted', 'resolved'],
       usageHint: 'review-pack.mjs [pack|record|override|check-empirical|check-fault] [dir] [options]',
     })
-    validateCliArgs(cli)
+    validatePackCliArgs(cli, SUBCOMMANDS)
   } catch (err) {
     process.stderr.write(`Error: ${err.message}\n`)
     return EXIT.USAGE_OR_POLICY
@@ -455,7 +374,11 @@ async function main(argv = process.argv.slice(2)) {
         evidence,
         receipt,
       })
-      const empCtx = { ...ctx, opts, roots, behavioralGate, gateWeakenedHits, scanUntrustedDiff }
+      const reviewContext = await assembleReviewContext({
+        reviewRoot: ctx.reviewRoot, mainRoot, gitDir: roots.gitDir, diff: ctx.diff,
+        effectiveProfile: ctx.effectiveProfile, baseRef: ctx.baseRef, task: ctx.task,
+      })
+      const empCtx = { ...ctx, opts, roots, behavioralGate, gateWeakenedHits, scanUntrustedDiff, reviewContext }
       return sub === 'check-empirical'
         ? await handleCheckEmpirical(empCtx)
         : await handleCheckFault(empCtx)
@@ -554,13 +477,17 @@ async function main(argv = process.argv.slice(2)) {
       }
     }
 
+    const reviewContext = await assembleReviewContext({
+      reviewRoot, mainRoot, gitDir: roots.gitDir, diff, effectiveProfile, baseRef, task,
+    })
+
     const includeDiff = Boolean(opts['include-diff'])
     const dirtyEntries = await getEffectiveStatusEntries(reviewRoot, mainRoot)
     const workspaceFingerprint = await computeWorkspaceFingerprint({
       reviewRoot, mainRoot, headSha, diff, statusEntries: dirtyEntries,
     })
     const empiricalRequirements = computeEmpiricalRequirements({
-      diff, behavioralGate, effectiveProfile, task, gateWeakenedHits,
+      diff, behavioralGate, effectiveProfile, task, gateWeakenedHits, reviewContext,
     })
     const evalGateArgs = {
       gitDir: roots.gitDir, mode, task, round, prNo, baseRef, reviewRoot, mainRoot, headSha,
@@ -569,14 +496,22 @@ async function main(argv = process.argv.slice(2)) {
     let empiricalGate = evaluateIncludeDiffGate(evalGateArgs)
 
     if (includeDiff && !empiricalGate.readyForDiff) {
-      const blockCode = empiricalGate.dirtyFaultResidue ? 'BLOCKED_DIRTY_FAULT_RESIDUE' : 'BLOCKED_EMPIRICAL_FIRST'
+      const blockCode = empiricalGate.dirtyFaultResidue
+        ? 'BLOCKED_DIRTY_FAULT_RESIDUE'
+        : (empiricalGate.shallowE2eEvidence ? 'BLOCKED_SHALLOW_E2E_EVIDENCE' : 'BLOCKED_EMPIRICAL_FIRST')
       const msg = blockCode === 'BLOCKED_DIRTY_FAULT_RESIDUE'
         ? 'BLOCKED_DIRTY_FAULT_RESIDUE: 当前工作位存在未还原复绿的故障注入残留，禁止输出 --include-diff。'
-        : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`
+        : (blockCode === 'BLOCKED_SHALLOW_E2E_EVIDENCE'
+            ? `${empiricalGate.shallowE2eEvidence.code}: ${empiricalGate.shallowE2eEvidence.reason}`
+            : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`)
       const payload = {
         status: blockCode, code: blockCode, exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha,
         diffScope, workspaceFingerprint, missingSteps: empiricalGate.missingSteps,
         unblockCommands: empiricalGate.unblockCommands, nextSteps: empiricalGate.unblockCommands,
+        affectedBusinessFlows: reviewContext.affectedBusinessFlows,
+        adjacentModules: reviewContext.adjacentModules,
+        empiricalTaskOrder: reviewContext.empiricalTaskOrder,
+        solidificationHints: reviewContext.solidificationHints,
         empiricalGate, error: msg,
       }
       const textLines = [
@@ -584,6 +519,8 @@ async function main(argv = process.argv.slice(2)) {
         `Scope    : ${diffScope} (HEAD ${headSha === 'UNBORN' ? 'UNBORN' : headSha.slice(0, 8)})`,
         `Target   : ${posixPath(reviewRoot)} | Fingerprint: ${workspaceFingerprint.slice(0, 12)}`,
         `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : 'restore verification required'}`,
+        ...(reviewContext.affectedBusinessFlows.length > 0 ? [`Flows    : ${reviewContext.affectedBusinessFlows.slice(0, 4).join(' ; ')}`] : []),
+        `Strategy : ${reviewContext.empiricalTaskOrder.strategy}`,
         `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`, '', '[NEXT STEP]',
         ...empiricalGate.unblockCommands.map((c, idx) => `  ${idx + 1}. ${c}`),
       ]
@@ -600,7 +537,7 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     const nextSteps = buildPackNextSteps({
-      opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate,
+      opts, mode, task, round, mainRoot, untrustedWarnings, doorAssessment, structuralGate, empiricalGate, reviewContext,
     })
 
     const pack = {
@@ -645,6 +582,7 @@ async function main(argv = process.argv.slice(2)) {
       behavioralGate,
       structuralGate,
       doorAssessment,
+      reviewContext,
       empiricalGate,
       untrustedWarnings,
       untrustedAdvisories,

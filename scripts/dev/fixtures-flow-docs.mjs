@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, issueTokenFor, loadPreflight,
-  readDirRefs, rmTree, runAbsAsync, runNode, survey, textsOf, tmpProject,
+  readDirRefs, rmTree, runAbsAsync, runNode, seedExploredFor, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
 
@@ -124,6 +124,7 @@ cases.push(['flow.mjs + doc-plan.mjs：五档分流、Issue+PR 复用与依赖�
 
     const start1 = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['start', '--task', 't-flow', '--case', '3', '--slug', 'demo-feat', '--json'], { cwd: localDir })
     if (start1.status !== 0) return `flow start 失败：${start1.stderr}`
+    await seedExploredFor(localDir, 't-flow')
     const ledger1 = JSON.parse(start1.stdout)
     const wtRoot = join(localDir, ledger1.worktreePath)
 

@@ -574,6 +574,7 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
       .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
     await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
+    await seedExploredFor(urlDir, 'note-case')
     const finBad = await finUrl({ task: 'note-case' }, urlRoots)
     if (finBad.exitCode === 0) {
       return `finalize 未拦截大写 placeholder：status=${finBad.exitCode}`

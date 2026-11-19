@@ -5,7 +5,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, tmpProject } from './fixtures-helpers.mjs'
+import { gitCommitFast, gitInit, gitSync, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 function makeDeepDir(baseAbs, depthCount) {
   let cur = baseAbs
@@ -154,6 +154,7 @@ export function registerFlowCleanupCases(cases) {
       const roots = await resolveRepoRoots(dir)
       const s1 = await handleStart({ task: 'c2-auto', case: '2', slug: 'c2-auto' }, roots)
       if (s1.exitCode !== 0) return `start 失败：${s1.exitCode}`
+      await seedExploredFor(dir, 'c2-auto')
       const l1 = readTaskLedger(dir, 'c2-auto')
       if (!Array.isArray(l1.mountedDeps) || !l1.mountedDeps.includes('node_modules') || !l1.mountedDeps.includes('packages/app/node_modules')) {
         return `start 未将实际挂载路径写入账本 mountedDeps：${JSON.stringify(l1)}`

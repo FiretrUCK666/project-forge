@@ -15,6 +15,7 @@ import { readTaskLedger, recordMountedDepsInLedger, resolveTaskContext, updateTa
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { checkStackedParentMerged } from '../../lib/task-graph.mjs'
+import { resolveEffectiveBaseSha } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK } from './flow-inspect.mjs'
 import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
 
@@ -84,46 +85,55 @@ export async function handleSync(opts = {}, roots) {
     throw new Error(`找不到 sync 目标基线分支或提交：${targetBaseBranch}`)
   }
 
-  if (ledger.tier === 2) {
-    const implUm = unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps' })
-    if (!implUm?.ok) throw new Error(`sync 前解绑实施工作区共享依赖失败：${JSON.stringify(implUm?.blocked ?? [])}`)
-  }
+  // 若 HEAD 已经基于目标基线（例如用户手工执行过 `git rebase origin/main`），直接刷新 ledger.baseSha，不重放旧提交
+  const alreadyAnc = await gitRun(implRoot, ['--no-optional-locks', 'merge-base', '--is-ancestor', newBaseSha, 'HEAD'])
+  const alreadyBasedOnTarget = Boolean(alreadyAnc.ok)
+  let depMount = { mode: ledger.depsMode ?? 'none' }
 
-  const rebaseArgs = oldBaseSha
-    ? ['rebase', '--onto', newBaseSha, oldBaseSha, ...(ledger.branch ? [ledger.branch] : [])]
-    : ['rebase', newBaseSha]
-  const rbRes = await gitRun(implRoot, rebaseArgs)
-  if (!rbRes.ok) {
-    const conflictSt = await gitStatusPorcelainZ(implRoot)
-    const conflicts = conflictSt.entries.map((e) => e.file)
-    await gitRun(implRoot, ['rebase', '--abort'])
+  if (!alreadyBasedOnTarget) {
     if (ledger.tier === 2) {
-      const remount = mountSharedDeps(roots.mainRoot, implRoot)
-      ledger.depsMode = remount.mode
-      recordMountedDepsInLedger(ledger, ledger.worktreePath, remount)
-      await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+      const mountedForImpl = ledger.mountedDepsByWorktree?.[ledger.worktreePath] ?? ledger.mountedDeps ?? []
+      const implUm = unmountSharedDeps(roots.mainRoot, implRoot, { mode: 'deps', mountedPaths: mountedForImpl })
+      if (!implUm?.ok) throw new Error(`sync 前解绑实施工作区共享依赖失败：${JSON.stringify(implUm?.blocked ?? [])}`)
     }
-    const payload = {
-      ok: false,
-      blocked: true,
-      code: 'BLOCKED_SYNC_REBASE_CONFLICT',
-      exitCode: EXIT_POLICY_BLOCK,
-      taskId,
-      onto: targetBaseBranch,
-      newBaseSha,
-      oldBaseSha,
-      conflicts,
-      stderr: rbRes.stderr,
-    }
-    if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-    process.stderr.write(`BLOCKED_SYNC_REBASE_CONFLICT: sync 变基到 ${targetBaseBranch} 产生冲突（${conflicts.join(', ') || rbRes.stderr}），已中止变基保护现场。\n`)
-    return { exitCode: EXIT_POLICY_BLOCK, ...payload }
-  }
 
-  const depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }
-  if (ledger.tier === 2) {
-    ledger.depsMode = depMount.mode
-    recordMountedDepsInLedger(ledger, ledger.worktreePath, depMount)
+    const calibratedOldBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir, pushRemote })
+    const rebaseArgs = calibratedOldBase
+      ? ['rebase', '--onto', newBaseSha, calibratedOldBase, ...(ledger.branch ? [ledger.branch] : [])]
+      : ['rebase', newBaseSha]
+    const rbRes = await gitRun(implRoot, rebaseArgs)
+    if (!rbRes.ok) {
+      const conflictSt = await gitStatusPorcelainZ(implRoot)
+      const conflicts = conflictSt.entries.map((e) => e.file)
+      await gitRun(implRoot, ['rebase', '--abort'])
+      if (ledger.tier === 2) {
+        const remount = mountSharedDeps(roots.mainRoot, implRoot)
+        ledger.depsMode = remount.mode
+        recordMountedDepsInLedger(ledger, ledger.worktreePath, remount)
+        await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+      }
+      const payload = {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_SYNC_REBASE_CONFLICT',
+        exitCode: EXIT_POLICY_BLOCK,
+        taskId,
+        onto: targetBaseBranch,
+        newBaseSha,
+        oldBaseSha: calibratedOldBase ?? oldBaseSha,
+        conflicts,
+        stderr: rbRes.stderr,
+      }
+      if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+      process.stderr.write(`BLOCKED_SYNC_REBASE_CONFLICT: sync 变基到 ${targetBaseBranch} 产生冲突（${conflicts.join(', ') || rbRes.stderr}），已中止变基保护现场。\n`)
+      return { exitCode: EXIT_POLICY_BLOCK, ...payload }
+    }
+
+    depMount = ledger.tier === 2 ? mountSharedDeps(roots.mainRoot, implRoot) : { mode: 'none' }
+    if (ledger.tier === 2) {
+      ledger.depsMode = depMount.mode
+      recordMountedDepsInLedger(ledger, ledger.worktreePath, depMount)
+    }
   }
   const fastNewHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
   const newHeadRes = fastNewHead ? { ok: true, stdout: fastNewHead } : await gitRun(implRoot, ['rev-parse', 'HEAD'])
@@ -177,6 +187,7 @@ export async function handleSync(opts = {}, roots) {
     ok: true,
     taskId,
     parentMerged,
+    alreadyBasedOnTarget,
     syncCount: ledger.syncCount,
     roundBaseSha,
     baseBranch: ledger.baseBranch,

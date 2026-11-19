@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readTextSafe } from './git.mjs'
+import { locateTopSlicesForPaths } from './doc-locator.mjs'
 import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
 import { nextReviewRound } from './ledger.mjs'
 
@@ -231,6 +232,37 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     nonGoals.push(g)
   }
 
+  // 结合变更路径与验收关键词抽取相关度 Top-3 文档切片，替代全文塞入。
+  const wtCandidate = ledger?.worktreePath ? join(mainRoot, ledger.worktreePath) : null
+  const locateRoot = wtCandidate && existsSync(wtCandidate) ? wtCandidate : mainRoot
+  const keywords = [
+    ledger?.taskId,
+    parseDocFrontmatter(specText || todoText)?.data?.title,
+    ...criteria.slice(0, 6).map((c) => c.text),
+  ].filter(Boolean)
+  let relatedSlices = []
+  try {
+    relatedSlices = locateTopSlicesForPaths(locateRoot, {
+      paths,
+      keywords,
+      excludeFiles: [specRel, todoRel].filter(Boolean),
+      limit: 3,
+      budgetLines: 48,
+    }).map((s) => ({
+      absPath: s.absPath,
+      relPath: s.relPath,
+      kind: s.kind,
+      section: s.section,
+      startLine: s.startLine,
+      endLine: s.endLine,
+      score: s.score,
+      summary: s.summary,
+      locateCommand: s.locateCommand,
+    }))
+  } catch {
+    relatedSlices = []
+  }
+
   // 验收命令从 AGENTS.md 的 Dev Profile 读，不在这里编。
   const agentsText = readTextSafe(join(mainRoot, 'AGENTS.md')) ?? ''
   const quick = /^\s*quick-test:\s*(.+)$/m.exec(agentsText)?.[1]?.trim() ?? null
@@ -307,6 +339,20 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
     lines.push("")
     lines.push(design)
     lines.push("")
+  }
+
+  if (relatedSlices.length > 0) {
+    lines.push('## 相关规范与架构切片（Top-3 按需定位）')
+    lines.push('')
+    lines.push('仅注入与当前影响路径最相关的 3 处锚点（不塞整篇文档）；需细读某节正文时运行对应命令：')
+    lines.push('')
+    for (const s of relatedSlices) {
+      const label = s.section ? `（${s.section}）` : ''
+      lines.push(`- \`${s.relPath}:${s.startLine}-${s.endLine}\`${label}${s.summary ? ` — ${s.summary}` : ''}`)
+      lines.push(`  - 绝对路径：\`${s.absPath}\``)
+      lines.push(`  - 复读命令：\`${s.locateCommand}\``)
+    }
+    lines.push('')
   }
 
   if (nonGoals.length > 0) {
@@ -445,6 +491,7 @@ export function buildHandoff({ mainRoot, ledger, policy = null, headSha = null, 
       paths,
       nonGoals,
       design,
+      relatedSlices,
       commands: { quick, full, mergeGate },
       requiredGates: gates,
     },

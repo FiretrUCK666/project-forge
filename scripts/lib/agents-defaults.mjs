@@ -226,22 +226,18 @@ function formatScriptCell(script, skillPath) {
 }
 
 /**
- * 动态渲染 `AGENTS.md` `意图路由` 表格行，合并按 `order` 排序的内置技能与项目自有技能。
+ * 动态渲染 `AGENTS.md` `意图路由` 表格行，合并按 `order` 排序的已落盘内置技能与项目自有技能。
  */
 export function renderKitRoutingRows({
-  tier = 'full',
   customSkills = [],
   discoveredSkills,
   hasRemote = true,
 } = {}) {
   const skills = Array.isArray(discoveredSkills) ? discoveredSkills : protocol.discoverKitSkills()
-  const effectiveTier = tier === 'lightweight' ? 'lightweight' : 'full'
   const entries = []
   let seq = 0
 
   for (const skill of skills) {
-    const skillTier = skill?.tier === 'both' || skill?.tier === 'lightweight' ? 'both' : 'full'
-    if (effectiveTier === 'lightweight' && skillTier !== 'both') continue
     const skillPath = skill.path || `.agents/skills/${skill.dirName || skill.name}/SKILL.md`
     const intentText = (hasRemote === false && skill.intentLocal ? skill.intentLocal : skill.intent)
       || skill.summary || skill.description || skill.name
@@ -253,7 +249,6 @@ export function renderKitRoutingRows({
       script: formatScriptCell(skill.script, skillPath),
     })
     for (const extra of skill.extraRoutes ?? []) {
-      if (extra.tier && extra.tier !== 'both' && extra.tier !== effectiveTier) continue
       const erIntent = hasRemote === false ? (extra.intentLocal ?? extra.intent) : extra.intent
       if (!erIntent) continue
       entries.push({
@@ -283,7 +278,7 @@ export function renderKitRoutingRows({
   return rows.join('\n')
 }
 
-export function excludedSkillsFor(facts, manifest, tier, root, { kitDir } = {}) {
+export function excludedSkillsFor(facts, manifest, root, { kitDir } = {}) {
   const excluded = new Set()
   const fromManifest = !manifest?.invalid && Array.isArray(manifest?.data?.disabledSkills)
     ? manifest.data.disabledSkills
@@ -294,12 +289,6 @@ export function excludedSkillsFor(facts, manifest, tier, root, { kitDir } = {}) 
   }
   const discovered = protocol.discoverKitSkills(kitDir)
   const kitSkillNames = discovered.map((s) => s.dirName)
-  const lightweightSet = new Set(discovered.filter((s) => s.tier === 'both').map((s) => s.dirName))
-  if (tier === 'lightweight') {
-    for (const s of kitSkillNames) {
-      if (!lightweightSet.has(s)) excluded.add(s)
-    }
-  }
   if (root && (existsSync(join(root, '.agents')) || existsSync(join(root, PF_MANIFEST_REL)))) {
     for (const s of kitSkillNames) {
       if (!existsSync(join(root, '.agents', 'skills', s, 'SKILL.md'))) excluded.add(s)
@@ -377,7 +366,7 @@ export function buildDevProfileVars(facts, targetRoot) {
   }
 }
 
-export function buildVars(facts, root, { tier, kitDir } = {}) {
+export function buildVars(facts, root, { kitDir } = {}) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'
     ? 'CHANGELOG.md 的对应版本节'
@@ -391,11 +380,6 @@ export function buildVars(facts, root, { tier, kitDir } = {}) {
     : (legacyWorkExists ? 'docs/work' : 'docs/todo')
 
   const commandPlan = commandPlanOf(facts)
-  const effectiveTier = tier === 'lightweight' || tier === 'full'
-    ? tier
-    : (facts?.kit?.tier === 'lightweight' || facts?.kit?.tier === 'full'
-        ? facts.kit.tier
-        : (facts?.tier === 'lightweight' || facts?.tier === 'full' ? facts.tier : 'full'))
   const hasRemote = Boolean(facts?.git?.remote) && facts?.git?.isRepoRoot !== false
   const customSkills = customSkillsOf(facts)
   const discoveredSkills = protocol.discoverKitSkills(kitDir)
@@ -415,7 +399,7 @@ export function buildVars(facts, root, { tier, kitDir } = {}) {
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
     WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
     CONVENTIONS_HINT: conventionsHint(facts),
-    KIT_ROUTING_ROWS: renderKitRoutingRows({ tier: effectiveTier, customSkills, discoveredSkills, hasRemote }),
+    KIT_ROUTING_ROWS: renderKitRoutingRows({ customSkills, discoveredSkills, hasRemote }),
     CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),
     ...buildDevProfileVars(facts, targetRoot),
   }

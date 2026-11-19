@@ -6,15 +6,15 @@
  * 绝不直接调用源仓库业务实现脚本，退出码 0 仅在 7 大场景、跨会话接管与全部负面拦截全部成立时返回。
  */
 
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { prepareExecInvocation } from '../../kit/skills/lib/exec.mjs'
 import { readZip, stripCommonPrefix } from '../zip.mjs'
-import { runStageBScenarios } from './e2e-scenarios-stageb.mjs'
+import { runStageBScenarios } from './e2e-scenarios-lifecycle.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
@@ -70,11 +70,29 @@ function writeFiles(baseDir, files) {
   }
 }
 
+let SEEDED_GIT_TEMPLATE = null
+
+function ensureSeededGitTemplate(sandbox) {
+  if (SEEDED_GIT_TEMPLATE && existsSync(SEEDED_GIT_TEMPLATE)) return SEEDED_GIT_TEMPLATE
+  const tpl = join(sandbox, '_seeded-git-tpl')
+  mkdirSync(tpl, { recursive: true })
+  runGit(tpl, ['init', '-q', '-b', 'main'])
+  runGit(tpl, ['config', 'user.name', 'alice'])
+  runGit(tpl, ['config', 'user.email', 'alice@example.com'])
+  SEEDED_GIT_TEMPLATE = join(tpl, '.git')
+  return SEEDED_GIT_TEMPLATE
+}
+
 function initGitRepo(dir, files = {}, origin = null) {
+  mkdirSync(dir, { recursive: true })
+  if (SEEDED_GIT_TEMPLATE && existsSync(SEEDED_GIT_TEMPLATE)) {
+    cpSync(SEEDED_GIT_TEMPLATE, join(dir, '.git'), { recursive: true })
+  } else {
+    runGit(dir, ['init', '-q', '-b', 'main'])
+    runGit(dir, ['config', 'user.name', 'alice'])
+    runGit(dir, ['config', 'user.email', 'alice@example.com'])
+  }
   writeFiles(dir, files)
-  runGit(dir, ['init', '-q', '-b', 'main'])
-  runGit(dir, ['config', 'user.name', 'alice'])
-  runGit(dir, ['config', 'user.email', 'alice@example.com'])
   if (origin) runGit(dir, ['remote', 'add', 'origin', origin])
   if (Object.keys(files).length > 0) {
     runGit(dir, ['add', '-A'])
@@ -122,11 +140,30 @@ function extractRealArchivePackage(sandbox) {
   return { pkgRoot, entryCount: entries.length }
 }
 
-async function runScenarioA(pkgRoot, sandbox, env) {
+async function loadPkgEngines(pkgRoot) {
+  const [surveyMod, equipMod, composeMod, reviewMod, backupMod] = await Promise.all([
+    import(pathToFileURL(join(pkgRoot, 'scripts', 'survey.mjs')).href),
+    import(pathToFileURL(join(pkgRoot, 'scripts', 'equip.mjs')).href),
+    import(pathToFileURL(join(pkgRoot, 'scripts', 'compose-agents.mjs')).href),
+    import(pathToFileURL(join(pkgRoot, 'scripts', 'review.mjs')).href),
+    import(pathToFileURL(join(pkgRoot, 'scripts', 'backup.mjs')).href),
+  ])
+  return {
+    survey: surveyMod.survey,
+    equip: equipMod.equip,
+    checkEquip: equipMod.checkEquip,
+    composeAgents: composeMod.composeAgents,
+    checkCompose: composeMod.checkAgents,
+    reviewProject: reviewMod.reviewProject,
+    createBackup: backupMod.createBackup,
+  }
+}
+
+async function runScenarioA(pkgRoot, sandbox, env, eng) {
   const repoA = join(sandbox, 'repo-a')
   mkdirSync(repoA, { recursive: true })
-  const boot = runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoA, '--bootstrap-empty'], repoA, env)
-  assertOk(boot, 'Scenario A bootstrap-empty')
+  const boot = await eng.equip(repoA, { bootstrapEmpty: true, env })
+  if (!boot?.bootstrap?.bootstrapped) throw new Error(`Scenario A bootstrap-empty failed: ${JSON.stringify(boot)}`)
   for (const f of ['docs/TDD.md', '.gitattributes', '.gitignore', 'AGENTS.md', '.agents/skills/dev-flow/SKILL.md']) {
     if (!existsSync(join(repoA, f))) throw new Error(`Scenario A missing ${f}`)
   }
@@ -134,12 +171,11 @@ async function runScenarioA(pkgRoot, sandbox, env) {
     throw new Error('Scenario A leaked toy greet code')
   }
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'compose-agents.mjs'), [repoA, '--check'], repoA, env), 'Scenario A compose --check')
-  const rev = runNodeScript(join(pkgRoot, 'scripts', 'review.mjs'), [repoA, '--json'], repoA, env)
-  assertOk(rev, 'Scenario A review')
-  if ((JSON.parse(rev.stdout).missing ?? []).length > 0) throw new Error(`Scenario A review has missing items: ${rev.stdout}`)
+  const rev = await eng.reviewProject(repoA)
+  if ((rev.missing ?? []).length > 0) throw new Error(`Scenario A review has missing items: ${JSON.stringify(rev.missing)}`)
 }
 
-async function runScenarioBAndC(pkgRoot, sandbox, env) {
+async function runScenarioBAndC(pkgRoot, sandbox, env, eng) {
   const repoB = join(sandbox, 'repo-b')
   mkdirSync(repoB, { recursive: true })
   initGitRepo(repoB, {
@@ -151,9 +187,7 @@ async function runScenarioBAndC(pkgRoot, sandbox, env) {
     '.agents/skills/custom-helper/SKILL.md': '---\nname: custom-helper\ndescription: Custom helper skill for monorepo.\n---\n# custom-helper\n',
   })
 
-  const sv = runNodeScript(join(pkgRoot, 'scripts', 'survey.mjs'), [repoB], repoB, env)
-  assertOk(sv, 'Scenario B survey')
-  const facts = JSON.parse(sv.stdout)
+  const facts = await eng.survey(repoB)
   if (!facts.ecosystem?.kinds?.includes('node') || !facts.ecosystem?.kinds?.includes('java')) {
     throw new Error(`Scenario B missed node/java: ${JSON.stringify(facts.ecosystem)}`)
   }
@@ -161,18 +195,16 @@ async function runScenarioBAndC(pkgRoot, sandbox, env) {
     throw new Error('Scenario B missed custom skill custom-helper')
   }
 
-  assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoB, '--no-backup'], repoB, env), 'Scenario B equip')
+  await eng.equip(repoB, { noBackup: true, env })
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'compose-agents.mjs'), [repoB, '--no-backup'], repoB, env), 'Scenario B compose')
   if (!existsSync(join(repoB, '.agents/skills/custom-helper/SKILL.md'))) {
     throw new Error('Scenario B overwrote custom skill')
   }
 
-  // Scenario C: .zip backup + --adopt-custom + lightweight downgrade preserving dev-review
-  const bk = runNodeScript(join(pkgRoot, 'scripts', 'backup.mjs'), ['create', repoB, '--json'], repoB, env)
-  assertOk(bk, 'Scenario C backup create')
-  const bkData = JSON.parse(bk.stdout)
+  // Scenario C: .zip backup + --adopt-custom + unified equip idempotency
+  const bkData = eng.createBackup(repoB, { label: 'e2e-c', env })
   const bkFile = bkData.archivePath ?? bkData.path
-  if (bkData.format !== 'zip' || !bkFile || !existsSync(bkFile)) throw new Error(`Scenario C backup not .zip: ${bk.stdout}`)
+  if (bkData.format !== 'zip' || !bkFile || !existsSync(bkFile)) throw new Error(`Scenario C backup not .zip: ${JSON.stringify(bkData)}`)
   if (readZip(readFileSync(bkFile)).length === 0) throw new Error('Scenario C backup .zip unreadable')
 
   const agentsPath = join(repoB, 'AGENTS.md')
@@ -186,11 +218,12 @@ async function runScenarioBAndC(pkgRoot, sandbox, env) {
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'compose-agents.mjs'), [repoB, '--adopt-custom', '--no-backup'], repoB, env), 'Scenario C adopt-custom')
   assertOk(runNodeScript(join(pkgRoot, 'scripts', 'compose-agents.mjs'), [repoB, '--check'], repoB, env), 'Scenario C check after adopt-custom')
 
-  assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoB, '--tier', 'lightweight', '--no-backup'], repoB, env), 'Scenario C equip lightweight')
+  await eng.equip(repoB, { noBackup: true, env })
   if (!existsSync(join(repoB, '.agents/skills/dev-review/SKILL.md'))) {
-    throw new Error('Scenario C lightweight downgrade removed dev-review')
+    throw new Error('Scenario C unified equip missing dev-review')
   }
-  assertOk(runNodeScript(join(pkgRoot, 'scripts', 'equip.mjs'), [repoB, '--check', '--tier', 'lightweight'], repoB, env), 'Scenario C equip check lightweight')
+  const chk = eng.checkEquip(repoB)
+  if (!chk.ok) throw new Error(`Scenario C equip --check failed: ${JSON.stringify(chk)}`)
 }
 
 async function runScenarioD(pkgRoot, sandbox, env) {
@@ -439,15 +472,22 @@ async function main() {
   const t0 = performance.now()
   try {
     const { pkgRoot, entryCount } = extractRealArchivePackage(sandbox)
-    await runScenarioA(pkgRoot, sandbox, env)
-    await runScenarioBAndC(pkgRoot, sandbox, env)
-    await runScenarioD(pkgRoot, sandbox, env)
-    await runScenarioE(pkgRoot, sandbox, env)
-    await runScenarioF(pkgRoot, sandbox, env)
-    await runScenarioG(pkgRoot, sandbox, env)
-    await runStageBScenarios(pkgRoot, sandbox, env, {
-      assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
-    })
+    ensureSeededGitTemplate(sandbox)
+    const eng = await loadPkgEngines(pkgRoot)
+    const runFast = async () => {
+      await runScenarioA(pkgRoot, sandbox, env, eng)
+      await runScenarioBAndC(pkgRoot, sandbox, env, eng)
+    }
+    await Promise.all([
+      runFast(),
+      runScenarioD(pkgRoot, sandbox, env),
+      runScenarioE(pkgRoot, sandbox, env),
+      runScenarioF(pkgRoot, sandbox, env),
+      runScenarioG(pkgRoot, sandbox, env),
+      runStageBScenarios(pkgRoot, sandbox, env, {
+        assertOk, assertBlocked, initGitRepo, issueTokenFor, recordWithToken, runGit, runNodeScript, writeFiles,
+      }),
+    ])
     const ms = Math.round(performance.now() - t0)
     process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：7 大基础场景 + Stage B Scenarios H-J（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0

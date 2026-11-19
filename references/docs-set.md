@@ -4,16 +4,16 @@
 
 需要为项目生成、刷新、瘦身或体检工程文档（`AGENTS.md`、`docs/` 四层文档、`README`、`CONTRIBUTING`、`LICENSE`、`RELEASING`）之前读完本文件。
 
-## 一、按场景分流与两档渐进装配
+## 一、按真实协作态裁剪文档与统一装配
 
-| 项目现状 | 启用文档范围与推荐档位 | 明确不塞的文件 |
+| 项目现状 | 启用文档范围与统一装配 | 明确不塞的文件 |
 | --- | --- | --- |
-| 纯本地个人工具 / 小型仓库 | `lightweight` 档：`AGENTS.md`（`< 14KB`）、`README.md`、`docs/TDD.md`（代码仓）、按需 `docs/todo/` | 不强求 `CONTRIBUTING.md`、CI、发布说明 |
-| 多人协作 / 大型仓库 | `full` 档：全套 5 个技能 + 上述 + `CONTRIBUTING.md` + Issue/PR 模板 + `LICENSE` + CI | 不必强行开启发布流水线（无分发包时） |
-| 对外发版 / 插件 / 包 | `full` 档 + `RELEASING.md` + 发布说明（`docs/release-notes/` 或 `CHANGELOG.md`） | 未确认发版策略前不乱改既有 `CHANGELOG` |
+| 纯本地个人工具 / 单人仓库 | 统一装配研发套件 + 紧凑 `AGENTS.md`（约 `15–20KB`，上限 `30KB`）、`README.md`、`docs/TDD.md`（代码仓）、按需 `docs/todo/` | 不强求 `CONTRIBUTING.md`、CI、发布说明 |
+| 多人协作 / 团队仓库 | 统一装配研发套件 + 上述 + `CONTRIBUTING.md` + Issue/PR 模板 + `LICENSE` + CI | 不必强行开启发布流水线（无分发包时） |
+| 对外发版 / 插件 / 包 | 上述 + `RELEASING.md` + 发布说明（`docs/release-notes/` 或 `CHANGELOG.md`） | 未确认发版策略前不乱改既有 `CHANGELOG` |
 | 纯文档 / 能力目录 | `AGENTS.md`（`Dev Profile` 测试键写 `none`）、`README.md`、协作与交付说明 | 不填伪构建/伪测试命令 |
 
-- **存量异构结构无损融合铁律**：接入已有仓库时严格遵循 `artifactPlan` 逐项处置——**已存在的 `README`、`CONTRIBUTING`、单/双 `LICENSE`、存量架构设计文档（`ARCHITECTURE.md`、`*-TDD.md`、`docs/{design,architecture,adr}/`）、已有自动化工作流、`.agents/skills/<custom>/` 与非标目录布局一律原样保留融合（`preserve`），绝不推翻既有目录树或强制建立第二套双轨设计文档**；随时可通过 `equip.mjs --tier full` 与 `compose-agents.mjs --tier full` 无损升档补齐缺失资产。
+- **存量异构结构无损融合铁律**：接入已有仓库时严格遵循 `artifactPlan` 逐项处置——**已存在的 `README`、`CONTRIBUTING`、单/双 `LICENSE`、存量架构设计文档（`ARCHITECTURE.md`、`*-TDD.md`、`docs/{design,architecture,adr}/`）、已有自动化工作流、`.agents/skills/<custom>/` 与非标目录布局一律原样保留融合（`preserve`），绝不推翻既有目录树或强制建立第二套双轨设计文档**；随时可通过 `equip.mjs` 与 `compose-agents.mjs` 无损补齐缺失资产。
 
 ## 二、四层设计文档体系（`docs/`）
 
@@ -30,18 +30,18 @@
 - **Mermaid `16/12` 防截断与可读性硬门禁**：图只画拓扑短名，详细路径与职责一律写进图下对照表；禁止在节点或边标签内使用 `<br/>` 等 HTML 标签；单行显示宽度（全角/汉字计 `2` 单位、半角 ASCII 计 `1` 单位）：**矩形节点与分组标题 `<= 16` 单位，菱形节点与边标签 `<= 12` 单位**。该门禁已由 `kit/skills/lib/docs.mjs`（`checkMermaidLabelWidth`）随包接入 `doc-plan.mjs audit`、`review-pack.mjs` 与 `govern-audit.mjs`。
 - **`docs/TDD.md` 三场景生成与持续校准（与 `S1` / `--bootstrap-empty` / `dev-explore` 协同）**：
   1. **空白目录起步（`maturity: 'empty'`，`explorationStrategy.tier: 'none'`）**：走 `equip.mjs --bootstrap-empty [--stack <universal|node|python|go|rust|java|docs|...>]` 直接落盘零玩具源码通用治理基线、`docs/TDD.md`、`docs/{prd,specs,todo}/.gitkeep`、`.agents/skills/` 与初始自洽 `AGENTS.md`（原样保留已有 `README`/`LICENSE`），**不派只读子代理**；真实业务代码与构建清单就位后再增量校准 `docs/TDD.md` 与 `AGENTS.md`。同时 `doc-plan` 尊重仓库自有的 `docs/templates/*.md` / `.github/*-template.md` 并对 `prd`/`TDD`/非平凡 `todo` 强制独立 Plan Critique（`SELF_CRITIQUE_REJECTED`）。
-  2. **存量仓库接入（`single-pass` / `parallel-subagents`）**：`S1` 由 `survey.mjs` 计算 `explorationStrategy.tier` 与分片（含 `business-flows`）；`S1 -> S3` 进入任何写入前先以**只读方式实跑对方既有测试与主入口**记录 `preForgeBaseline`，`S3` 先跑 `backup.mjs` 与 `equip.mjs` 装配 `.agents/skills/`，再调用 `.agents/skills/dev-explore/` 内的 `repo-map.mjs`（`parallel-subagents` 时按不重叠 `shards` 并行派发只读子代理勘察入口、模块边界、主数据流、`businessFlows` 与状态机）汇总真实事实，以 `kit/skills/templates/docs-tdd.md` 为骨架将 `businessFlows` 与 `preForgeBaseline` 写入 `docs/TDD.md`（已存在存量设计文档则优先 `preserve` 并在 `AGENTS.md`「## 取舍」登记），`AGENTS.md` 仅留薄指针指向 `docs/TDD.md` 以维持预算（`lightweight < 14KB` / `full <= 30KB`），先于 `compose-agents.mjs` 写入。
+  2. **存量仓库接入（`single-pass` / `parallel-subagents`）**：`S1` 由 `survey.mjs` 计算 `explorationStrategy.tier` 与分片（含 `business-flows`）；`S1 -> S3` 进入任何写入前先以**只读方式实跑对方既有测试与主入口**记录 `preForgeBaseline`，`S3` 先跑 `backup.mjs` 与 `equip.mjs` 装配 `.agents/skills/`，再调用 `.agents/skills/dev-explore/` 内的 `repo-map.mjs` / `doc-locate.mjs`（`parallel-subagents` 时按不重叠 `shards` 并行派发只读子代理勘察入口、模块边界、主数据流、`businessFlows` 与状态机）汇总真实事实，以 `kit/skills/templates/docs-tdd.md` 为骨架将 `businessFlows` 与 `preForgeBaseline` 写入 `docs/TDD.md`（已存在存量设计文档则优先 `preserve` 并在 `AGENTS.md`「## 取舍」登记），`AGENTS.md` 仅留薄指针指向 `docs/TDD.md` 以维持预算（`<= 30KB`，建议 `< 24KB`），先于 `compose-agents.mjs` 写入。
   3. **日常迭代与跨月重入校准**：改动涉及顶层模块边界、对外 CLI 或共享契约时，`flow.mjs finalize` 核查 `docs/TDD.md` 最近更新日期同步；日常结合 `govern-audit.mjs` 检查 `docs.tdd-module-drift`、失效路径与活跃文档 Frontmatter/互链（`docs.frontmatter-invalid`、`docs.broken-related-link`、`docs.filename-issue-mismatch`）；跨月重入依 `survey.mjs` 输出的 `reentry.staleTddPaths` 与 `unregisteredTopDirs` 局部校准，保留既有架构决断。
 
-## 三、`AGENTS.md`：给 AI 看的契约（`lightweight < 14KB` / `full <= 30KB`）
+## 三、`AGENTS.md`：给 AI 看的紧凑契约（建议 `< 24KB`，上限 `<= 30KB`）
 
-- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录> [--tier lightweight|full]`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`；改写已有非空 `AGENTS.md` 前（含默认刷新、`--upgrade` 与有变化的 `--clean`）自动经 `scripts/backup.mjs` 创建 `.zip` 快照（支持 `--format tar.gz` 且兼容恢复 `.tar.gz`，`--no-backup` 可跳过，`--check` 严格零写入）。
+- **唯一生成入口**：`node scripts/compose-agents.mjs <目标目录>`（母版 `templates/agents-project.md`）。渲染后**严禁残留**任何 `{{VAR}}` 或 `if/endif`；改写已有非空 `AGENTS.md` 前（含默认刷新、`--upgrade` 与有变化的 `--clean`）自动经 `scripts/backup.mjs` 创建 `.zip` 快照（支持 `--format tar.gz` 且兼容恢复 `.tar.gz`，`--no-backup` 可跳过，`--check` 严格零写入）。
 - **核心构成**：
-  1. 顶部 **自然语言静默意图路由表**（直载已装配的 `.agents/skills/` 并先跑对应 `.mjs`，`lightweight` 档自动过滤未装入的 `dev-review`/`dev-govern` 行；若有仓库自有技能 `kit.customSkills`，由 `has-custom-skills` 自动追加并存路由）；
-  2. **`行事总纲与决策准则`**（四条准则、信任倒金字塔与同类纠偏满 2 次下沉脚本、最优解与 UX/DX/AX 取舍、不当人肉代理）与**测试分层与控频**；
+  1. 顶部 **自然语言静默意图路由表**（按磁盘已落盘的 `.agents/skills/` 动态渲染并过滤显式 `disabledSkills`；若有仓库自有技能 `kit.customSkills`，由 `has-custom-skills` 自动追加并存路由）；
+  2. **`行事总纲与决策准则`**（四条准则、信任倒金字塔与同类纠偏满 2 次沉入结构重构或静态检查、最优解与 UX/DX/AX 取舍、不当人肉代理）与**测试分层与控频**；
   3. 受管 **`Dev Profile`**（`quick-test` / `full-test` / `smoke-verify` / `merge-gate` / `arch-rules` / `high-risk` / `do-not-edit` 供引擎统一从 `profile.mjs` 读取，**显式 `none` 视为合法禁用态绝不回退覆盖**）；
   4. **上下文阅读护栏**、五档分流、身份与隔离收尾、`高风险路径`、`改哪看哪` 联动表及 `取舍` 人工手写节。
-- **体积、保护与重入校准**：`full` 档硬上限 **`30KB`（30720 字节）**、**`24KB`（24576 字节）起预警**；`lightweight` 档控制在 **`14KB` 以内**；遵循**严进常删**与子目录就近 `<subdir>/AGENTS.md`；缺 `agentsRegions` 基线时对既有非空区段默认采取 `protect` 不覆盖，已删区间记入 `removedAgentsRegions` 不强行插回；跨月重入时先核对 `reentry` 信号（`staleAgentPaths` / `staleAgentScripts` / `unregisteredTopDirs`），完整保留手写规范与 `.agents/skills/<custom>/`。
+- **体积、保护与重入校准**：硬上限 **`30KB`（30720 字节）**、**`24KB`（24576 字节）起预警**，默认空模板约 `15KB`；遵循**严进常删**与子目录就近 `<subdir>/AGENTS.md`；缺 `agentsRegions` 基线时对既有非空区段默认采取 `protect` 不覆盖，已删区间记入 `removedAgentsRegions` 不强行插回；跨月重入时先核对 `reentry` 信号（`staleAgentPaths` / `staleAgentScripts` / `unregisteredTopDirs`），完整保留手写规范与 `.agents/skills/<custom>/`。
 
 ## 四、`README`：给人看的门面
 

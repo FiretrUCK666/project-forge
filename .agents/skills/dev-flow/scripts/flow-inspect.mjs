@@ -274,7 +274,7 @@ export async function handleStart(opts, roots) {
     ?? (state.identity.role === 'inbound-external-pr' ? (prNumber ?? state.inputs.prs[0]?.number ?? null) : null)
   if (effectiveExternalPr && !prNumber) prNumber = effectiveExternalPr
   if (effectiveExternalPr && !hasSkillSupport(roots.mainRoot, 'dev-review')) {
-    const msg = `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${effectiveExternalPr} 的不可信扫描与隔离审查需要 dev-review 技能，当前 lightweight 档未装配该技能；请通过 project-forge 工具运行 equip --tier full 升级后重试。`
+    const msg = `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${effectiveExternalPr} 的不可信扫描与隔离审查需要 dev-review 技能，当前仓库未装配该技能；请通过 project-forge 运行 equip 补齐工具包后重试。`
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_REQUIRES_DEV_REVIEW', prNumber: effectiveExternalPr, message: msg }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
     return { exitCode: EXIT_POLICY_BLOCK }

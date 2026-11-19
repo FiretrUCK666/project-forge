@@ -1,5 +1,5 @@
 /**
- * fixtures-equip.mjs —— 装配夹具：equip 装备与两档升档、compose-agents 装配、backup 快照与 update 原子更新。
+ * fixtures-equip.mjs —— 装配夹具：equip 统一完整装配、compose-agents 装配、backup 快照与 update 原子更新。
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -7,7 +7,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { SKILL_ROOT, gitInit, rmTree, runAbsAsync, runNode, survey, tmpProject } from './fixtures-helpers.mjs'
-import { KIT_SKILLS, LIGHTWEIGHT_KIT_SKILLS } from '../lib/protocol.mjs'
+import { KIT_SKILLS } from '../lib/protocol.mjs'
 
 export function registerEquipCases(cases) {
 cases.push(['backup.mjs + equip/compose-agents：写前快照创建、恢复防污染清理多余文件、dry-run 与空变更跳过', async () => {
@@ -282,45 +282,34 @@ cases.push(['equip.mjs + survey.mjs：通用空目录基线、已有 README/LICE
   }
 }])
 
-cases.push(['两档装配（lightweight/full）无损升档、manifest v2 删除墓碑与 --adopt-custom 绿灯', async () => {
+cases.push(['统一完整装配、manifest v2 删除墓碑与 --adopt-custom 绿灯', async () => {
   const dir = tmpProject({
     'package.json': '{"name":"tier-demo","version":"1.0.0","scripts":{"test":"node --test"}}\n',
-    'README.md': '# tier-demo\n\n两档渐进装配与 manifest v2 测试仓。\n',
+    'README.md': '# tier-demo\n\n统一完整装配与 manifest v2 测试仓。\n',
     'src/index.mjs': 'export const ok = true\n',
   })
   gitInit(dir)
   try {
-    const lightSet = new Set(LIGHTWEIGHT_KIT_SKILLS)
-    const fullOnlySkills = KIT_SKILLS.filter((s) => !lightSet.has(s))
-    const tombSkill = lightSet.has('dev-plan') ? 'dev-plan' : LIGHTWEIGHT_KIT_SKILLS[0]
+    const tombSkill = KIT_SKILLS.includes('dev-plan') ? 'dev-plan' : KIT_SKILLS[0]
 
-    // 1. lightweight 档：仅装轻量级技能，AGENTS.md 体积 < 14336 字节
-    const eqLight = await runNode('equip.mjs', [dir, '--tier', 'lightweight', '--no-backup'])
-    if (eqLight.status !== 0) return `equip lightweight 失败：${eqLight.stderr}`
-    if (
-      LIGHTWEIGHT_KIT_SKILLS.some((s) => !existsSync(join(dir, `.agents/skills/${s}/SKILL.md`)))
-      || fullOnlySkills.some((s) => existsSync(join(dir, `.agents/skills/${s}`)))
-    ) {
-      return 'lightweight 档未按动态轻量级清单裁剪技能'
+    // 1. 统一完整装配：一次装齐所有在盘技能与 docs/{prd,specs,todo}/.gitkeep，AGENTS.md 体积 < 24576 字节
+    const eqInit = await runNode('equip.mjs', [dir, '--no-backup'])
+    if (eqInit.status !== 0) return `equip 统一装配失败：${eqInit.stderr}`
+    if (KIT_SKILLS.some((s) => !existsSync(join(dir, `.agents/skills/${s}/SKILL.md`))) || !existsSync(join(dir, 'docs/specs/.gitkeep'))) {
+      return '统一完整装配未装齐全部在盘技能或 docs/{prd,specs,todo}/.gitkeep'
     }
-    const compLight = await runNode('compose-agents.mjs', [dir, '--tier', 'lightweight', '--no-backup'])
-    if (compLight.status !== 0) return `compose lightweight 失败：${compLight.stderr}`
-    const lightAgents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    const lightBytes = Buffer.byteLength(lightAgents, 'utf8')
-    if (lightBytes >= 14336) return `lightweight AGENTS.md 体积过高：${lightBytes}`
-    if (fullOnlySkills.some((s) => lightAgents.includes(`.agents/skills/${s}/SKILL.md`))) {
-      return 'lightweight 意图路由未过滤仅 full 档技能'
-    }
+    const compInit = await runNode('compose-agents.mjs', [dir, '--no-backup'])
+    if (compInit.status !== 0) return `compose-agents 失败：${compInit.stderr}`
+    const agentsText = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agentsBytes = Buffer.byteLength(agentsText, 'utf8')
+    if (agentsBytes >= 24576) return `AGENTS.md 体积超过 24KB 推荐预算：${agentsBytes}`
 
-    // 2. 删除技能并写人改内容后升档 full：保留删除墓碑（绝不写回）并无损升档
+    // 2. 删除技能后重跑 equip：保留删除墓碑（绝不写回）
     rmTree(join(dir, `.agents/skills/${tombSkill}`))
-    const eqFull = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
-    if (eqFull.status !== 0) return `升档 full 失败：${eqFull.stderr}`
+    const eqAgain = await runNode('equip.mjs', [dir, '--no-backup'])
+    if (eqAgain.status !== 0) return `墓碑后重跑 equip 失败：${eqAgain.stderr}`
     if (existsSync(join(dir, `.agents/skills/${tombSkill}`))) {
       return `用户主动删除 ${tombSkill} 后 equip 竟将其强行写回（违反墓碑原则）`
-    }
-    if (fullOnlySkills.some((s) => !existsSync(join(dir, `.agents/skills/${s}/SKILL.md`))) || !existsSync(join(dir, 'docs/specs/.gitkeep'))) {
-      return '无损升档 full 未补全 full 技能或 docs/{prd,specs,todo}/.gitkeep'
     }
 
     // 3. --restore 显式恢复已删核心技能，确保核心套件完好再校验 CRLF 与定制豁免

@@ -1,55 +1,6 @@
 /**
- * survey-plan.mjs —— 探索策略分片与两档渐进装配（lightweight / full）推荐判定。
+ * survey-plan.mjs —— 探索策略分片判定（按真实通读成本决定 single-pass / parallel-subagents）。
  */
-
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-
-/**
- * 依据仓库规模、多包布局与团队协作信号，推荐装配档位（`lightweight` | `full`）。
- * 存量个人小仓、纯文档与空白起步推荐 `lightweight` 降低侵入；大型、多包或团队协作仓推荐 `full`。
- */
-export function computeRecommendedTier(facts, root) {
-  const kit = facts?.kit ?? {}
-  if (kit.tier === 'full') {
-    return {
-      recommendedTier: 'full',
-      reason: '当前项目已装配 full 全量档位',
-    }
-  }
-
-  const codeFiles = facts?.scale?.codeFiles ?? 0
-  const effectiveFiles = facts?.scale?.effectiveFiles ?? 0
-  const workspaceDeclared = Boolean(facts?.workspace?.declared)
-  const subdirCount = facts?.ecosystem?.subdirs?.length ?? 0
-  const multiAuthor = (facts?.git?.historyAuthors?.length ?? 0) > 1
-  const teamScope = facts?.git?.collaborationScope === 'team-collaborator'
-  const hasCollabDocs = Boolean(
-    facts?.docs?.contributing
-    || facts?.docs?.prTemplate
-    || facts?.docs?.issueTemplates
-    || (root && (existsSync(join(root, '.github', 'CODEOWNERS')) || existsSync(join(root, 'CODEOWNERS')))),
-  )
-  const hasFullDocsLayers = Boolean(facts?.docs?.specsDir && facts?.docs?.todoDir && facts?.docs?.prdDir)
-
-  const reasons = []
-  if (codeFiles > 80 || effectiveFiles > 120) reasons.push(`项目规模较大（代码 ${codeFiles} 个 / 有效文件 ${effectiveFiles} 个）`)
-  if (workspaceDeclared || subdirCount > 1) reasons.push('存在多包或前后端分离布局')
-  if (teamScope || multiAuthor || hasCollabDocs) reasons.push('检测到多人协同或团队 PR 治理信号')
-  if (hasFullDocsLayers) reasons.push('已建立完整四层工程文档目录')
-
-  if (reasons.length > 0) {
-    return {
-      recommendedTier: 'full',
-      reason: `${reasons.join('、')}，推荐 full 档位（5 套内置研发技能 + 完整协作/审校契约）`,
-    }
-  }
-
-  return {
-    recommendedTier: 'lightweight',
-    reason: '个人或中小规模仓，推荐 lightweight 轻量档位（紧凑 AGENTS.md + 核心 explore/plan/flow 三技能；后续可随时 --tier full 无损升档）',
-  }
-}
 
 /**
  * 探索策略：按**真实通读成本**分档，不是按文件数。

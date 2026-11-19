@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-onboarding.mjs —— Stage B 接入与发现层双向行为夹具（C1–C6）。
+ * fixtures-skills-hooks.mjs —— 技能动态发现、自有技能保护、分支保护与 Git Hooks 双向行为夹具。
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -23,12 +23,11 @@ import { renderKitRoutingRows } from '../lib/agents-defaults.mjs'
 import { buildSwitchABranchProtectionPayload, createGitHubClient } from '../lib/platform/github-client.mjs'
 import { GITHUB_PROVIDER } from '../lib/platform/github.mjs'
 import { GENERIC_GIT_PROVIDER as ENGINE_GENERIC_GIT_PROVIDER, getHostingProvider as getEngineHostingProvider } from '../lib/platform/registry.mjs'
-import { FORBIDDEN_PLATFORM_RE, getKitSkills, getLightweightKitSkills } from '../lib/protocol.mjs'
+import { FORBIDDEN_PLATFORM_RE, getKitSkills } from '../lib/protocol.mjs'
 import { toMarkdown } from '../lib/render.mjs'
 import { detectKit } from '../lib/survey-reentry.mjs'
 import { computeArtifactPlan, summarizeRemoteCapabilities } from '../survey.mjs'
 import { gitCommitFast, gitInit, gitInitBare, gitSync, rmTree, runNode, SKILL_ROOT, survey, tmpProject } from './fixtures-helpers.mjs'
-import { registerStageBOnboardingB4aCases } from './fixtures-stageb-onboarding-b4a.mjs'
 import { checkKitSuite } from './preflight-suite.mjs'
 
 function walkFiles(dir, pred) {
@@ -89,7 +88,7 @@ export function registerStageBOnboardingCases(cases) {
       const parsedDefault = parseSkillFrontmatter(readFileSync(join(defaultDir, 'dev-sample', 'SKILL.md'), 'utf8'))
       const defDisc = discoverKitSkillsDetailed(defaultDir)
       const defSkill = defDisc.skills[0]
-      if (!parsedDefault.valid || defDisc.diagnostics.length > 0 || defSkill?.tier !== 'both' || defSkill?.order !== 500 || defSkill?.script !== '') {
+      if (!parsedDefault.valid || defDisc.diagnostics.length > 0 || defSkill?.order !== 500 || defSkill?.script !== '') {
         return `缺省 metadata 默认值错误：${JSON.stringify({ parsedValid: parsedDefault.valid, defDisc })}`
       }
     } finally {
@@ -137,34 +136,26 @@ export function registerStageBOnboardingCases(cases) {
       writeFileSync(join(tempKit, 'dev-sixth', 'scripts', 'sixth.mjs'), 'export const ok = true\n')
 
       const allNames = getKitSkills(tempKit)
-      const lightNames = getLightweightKitSkills(tempKit)
-      if (!allNames.includes('dev-sixth') || !lightNames.includes('dev-sixth')) {
-        return `getKitSkills/getLightweightKitSkills 未动态识别 dev-sixth：all=${allNames.join(',')} light=${lightNames.join(',')}`
+      if (!allNames.includes('dev-sixth')) {
+        return `getKitSkills 未动态识别 dev-sixth：all=${allNames.join(',')}`
       }
 
-      // equip full & lightweight 均自动装配 dev-sixth
+      // 统一 equip 自动装配 dev-sixth
       const targetFull = tmpProject({ 'package.json': '{"name":"c1-full"}\n' })
-      const targetLight = tmpProject({ 'package.json': '{"name":"c1-light"}\n' })
       try {
         await gitInit(targetFull)
-        await gitInit(targetLight)
-        const resFull = equip(targetFull, { kitDir: tempKit, tier: 'full', noBackup: true })
-        const resLight = equip(targetLight, { kitDir: tempKit, tier: 'lightweight', noBackup: true })
+        const resFull = equip(targetFull, { kitDir: tempKit, noBackup: true })
         if (!resFull.added.includes('dev-sixth/SKILL.md') || !existsSync(join(targetFull, '.agents/skills/dev-sixth/scripts/sixth.mjs'))) {
-          return `equip full 未安装 dev-sixth：${JSON.stringify(resFull.added)}`
-        }
-        if (!resLight.added.includes('dev-sixth/SKILL.md')) {
-          return `equip lightweight 未安装 tier=both 的 dev-sixth：${JSON.stringify(resLight.added)}`
+          return `equip 未安装 dev-sixth：${JSON.stringify(resFull.added)}`
         }
 
         // compose-agents {{KIT_ROUTING_ROWS}} 与 preflight checkKitSuite 零改源码通过
         const fullSurvey = await survey(targetFull)
-        const renderedFull = renderAgentsTemplate(fullSurvey, tplText, targetFull, { tier: 'full', kitDir: tempKit })
+        const renderedFull = renderAgentsTemplate(fullSurvey, tplText, targetFull, { kitDir: tempKit })
         if (!renderedFull.includes('第六扩展意图') || !renderedFull.includes('.agents/skills/dev-sixth/SKILL.md')) {
           return 'compose-agents {{KIT_ROUTING_ROWS}} 未渲染 dev-sixth 路由行'
         }
         const noRemoteRows = renderKitRoutingRows({
-          tier: 'full',
           hasRemote: false,
           discoveredSkills: discoverKitSkills(tempKit),
         })
@@ -172,27 +163,8 @@ export function registerStageBOnboardingCases(cases) {
           return `no-remote 动态路由行泄露 PR/origin/push 或漏掉第 6 技能：${noRemoteRows}`
         }
 
-        // full-only 第 6 技能在 lightweight 下被过滤
-        writeFileSync(
-          join(tempKit, 'dev-sixth', 'SKILL.md'),
-          minimalSkillMd('dev-sixth', '仅完整版扩展技能', [
-            'tier: full',
-            'intent: 仅完整版第六意图',
-            'script: node .agents/skills/dev-sixth/scripts/sixth.mjs',
-            'order: 60',
-          ]),
-        )
-        const lightRows = renderKitRoutingRows({
-          tier: 'lightweight',
-          hasRemote: true,
-          discoveredSkills: discoverKitSkills(tempKit),
-        })
-        if (lightRows.includes('dev-sixth') || lightRows.includes('仅完整版第六意图')) {
-          return `lightweight 模式不应渲染 tier=full 的 dev-sixth：${lightRows}`
-        }
-
         // checkKitSuite 对含合法第 6 技能的套件副本通过
-        equip(repoCopy, { kitDir: tempKit, tier: 'full', noBackup: true })
+        equip(repoCopy, { kitDir: tempKit, noBackup: true })
         const suitePass = makeSuiteCtx(repoCopy)
         checkKitSuite(suitePass.ctx, new Map())
         if (suitePass.errors.length > 0) {
@@ -200,7 +172,6 @@ export function registerStageBOnboardingCases(cases) {
         }
       } finally {
         rmTree(targetFull)
-        rmTree(targetLight)
       }
       return true
     } finally {
@@ -217,21 +188,21 @@ export function registerStageBOnboardingCases(cases) {
       writeFileSync(join(repoCopy, 'SKILL.md'), '---\nname: project-forge\ndescription: tmp\n---\n')
       cpSync(join(SKILL_ROOT, 'kit', 'skills'), join(repoCopy, 'kit', 'skills'), { recursive: true })
 
-      // 添加合法第 5 之外的非 dev-* 目录名与非法 tier 的 dev-bad
+      // 添加合法之外的非 dev-* 目录名与非法 order 的 dev-bad
       const tempKit = join(repoCopy, 'kit', 'skills')
       mkdirSync(join(tempKit, 'notes-only'), { recursive: true })
       mkdirSync(join(tempKit, 'dev-bad'), { recursive: true })
-      writeFileSync(join(tempKit, 'dev-bad', 'SKILL.md'), minimalSkillMd('dev-bad', '坏档位技能', ['tier: platinum']))
+      writeFileSync(join(tempKit, 'dev-bad', 'SKILL.md'), minimalSkillMd('dev-bad', '坏序号技能', ['order: not-a-number']))
 
       const { skills, diagnostics } = discoverKitSkillsDetailed(tempKit)
       if (skills.some((s) => s.dirName === 'dev-bad' || s.dirName === 'notes-only')) {
         return `非法或无 SKILL.md 目录不应进入发现列表：${skills.map((s) => s.dirName).join(',')}`
       }
       if (!diagnostics.some((d) => d.dirName === 'dev-bad')) {
-        return `非法 metadata.tier 未产生诊断：${JSON.stringify(diagnostics)}`
+        return `非法 metadata.order 未产生诊断：${JSON.stringify(diagnostics)}`
       }
 
-      equip(repoCopy, { kitDir: tempKit, tier: 'full', noBackup: true })
+      equip(repoCopy, { kitDir: tempKit, noBackup: true })
       const suiteFail = makeSuiteCtx(repoCopy)
       checkKitSuite(suiteFail.ctx, new Map())
       if (!suiteFail.errors.some((e) => e.includes('dev-bad'))) {
@@ -242,8 +213,8 @@ export function registerStageBOnboardingCases(cases) {
       rmTree(join(tempKit, 'dev-bad'))
       mkdirSync(join(tempKit, 'dev-long'), { recursive: true })
       const filler = Array.from({ length: 185 }, (_, i) => `line-${i + 1}`).join('\n')
-      writeFileSync(join(tempKit, 'dev-long', 'SKILL.md'), `${minimalSkillMd('dev-long', '超长技能', ['tier: full'])}\n${filler}\n`)
-      equip(repoCopy, { kitDir: tempKit, tier: 'full', noBackup: true })
+      writeFileSync(join(tempKit, 'dev-long', 'SKILL.md'), `${minimalSkillMd('dev-long', '超长技能', ['order: 90'])}\n${filler}\n`)
+      equip(repoCopy, { kitDir: tempKit, noBackup: true })
       const suiteLong = makeSuiteCtx(repoCopy)
       checkKitSuite(suiteLong.ctx, new Map())
       if (!suiteLong.errors.some((e) => e.includes('dev-long') && e.includes('180'))) {
@@ -320,14 +291,14 @@ export function registerStageBOnboardingCases(cases) {
 
       // 执行 S1-S4（equip + compose-agents）并验证只读、全量写入 AGENTS.md、重复幂等保留
       const snapshotsBefore = Object.fromEntries(customSpecs.map((s) => [s.rel, readFileSync(join(dir, s.rel), 'utf8')]))
-      const eq = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const eq = await runNode('equip.mjs', [dir, '--no-backup'])
       if (eq.status !== 0) return `C2 equip 失败：${eq.stderr}`
-      const comp = await runNode('compose-agents.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const comp = await runNode('compose-agents.mjs', [dir, '--no-backup'])
       if (comp.status !== 0) return `C2 compose-agents 失败：${comp.stderr}`
 
       const agentsText = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
       const agentsBytes = Buffer.byteLength(agentsText, 'utf8')
-      if (agentsBytes > 30720) return `C2 full AGENTS.md 超过 30720B：${agentsBytes}`
+      if (agentsBytes > 30720) return `C2 AGENTS.md 超过 30720B：${agentsBytes}`
       for (const item of customSpecs) {
         const after = readFileSync(join(dir, item.rel), 'utf8')
         if (after !== snapshotsBefore[item.rel]) return `自有技能文件被改写：${item.rel}`
@@ -337,7 +308,7 @@ export function registerStageBOnboardingCases(cases) {
       }
 
       // 升级重跑仍保留所有自有技能且 --check 为 0
-      const eqAgain = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const eqAgain = await runNode('equip.mjs', [dir, '--no-backup'])
       const eqChk = await runNode('equip.mjs', [dir, '--check'])
       if (eqAgain.status !== 0 || eqChk.status !== 0) {
         return `C2 重跑或 --check 失败：${eqChk.stdout || eqChk.stderr}`
@@ -359,7 +330,7 @@ export function registerStageBOnboardingCases(cases) {
     })
     try {
       await gitInit(dir)
-      const eq = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const eq = await runNode('equip.mjs', [dir, '--no-backup'])
       if (eq.status !== 0) return `equip 失败：${eq.stderr}`
 
       const facts = await survey(dir)
@@ -395,10 +366,10 @@ export function registerStageBOnboardingCases(cases) {
     const customKitScratch = mkdtempSync(join(tmpdir(), 'pf-c3-kit-'))
     try {
       await gitInit(dir)
-      // 1. 以 full 档初始化已标准化旧仓（生成 AGENTS.md 并完结人类待填节），再登记定制文件 + 墓碑文件
-      const initEq = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      // 1. 统一完整装配初始化已标准化旧仓（生成 AGENTS.md 并完结人类待填节），再登记定制文件 + 墓碑文件
+      const initEq = await runNode('equip.mjs', [dir, '--no-backup'])
       if (initEq.status !== 0) return `C3 初始化失败：${initEq.stderr}`
-      const initComp = await runNode('compose-agents.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const initComp = await runNode('compose-agents.mjs', [dir, '--no-backup'])
       if (initComp.status !== 0) return `C3 初始 compose-agents 失败：${initComp.stderr}`
       const agentsPath = join(dir, 'AGENTS.md')
       let stdAgents = readFileSync(agentsPath, 'utf8')
@@ -481,19 +452,19 @@ export function registerStageBOnboardingCases(cases) {
     }
   }])
 
-  // C3 反向：已墓碑禁用或 removedFiles 删除的技能不误判为待安装，lightweight 档缺失 full-only 技能保持 preserve
-  cases.push(['StageB C3 反向：disabledSkills/removedFiles 墓碑不强行补齐，lightweight 档不提示 full 技能缺失', async () => {
+  // C3 反向：已墓碑禁用或 removedFiles 删除的技能不误判为待安装，干净装配状态保持 preserve
+  cases.push(['StageB C3 反向：disabledSkills/removedFiles 墓碑不强行补齐，干净装配保持 preserve', async () => {
     const dir = tmpProject({ 'package.json': '{"name":"c3-neg"}\n' })
-    const lightDir = tmpProject({ 'package.json': '{"name":"c3-light-neg"}\n' })
+    const cleanDir = tmpProject({ 'package.json': '{"name":"c3-clean-neg"}\n' })
     try {
       await gitInit(dir)
-      await gitInit(lightDir)
+      await gitInit(cleanDir)
 
-      // 场景 1：full 档用户主动删除 dev-govern（记录在 disabledSkills），survey 不得要求升级补回且 equip 保持删除
-      const eq = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      // 场景 1：用户主动删除 dev-govern（记录在 disabledSkills），survey 不得要求升级补回且 equip 保持删除
+      const eq = await runNode('equip.mjs', [dir, '--no-backup'])
       if (eq.status !== 0) return `初始化失败：${eq.stderr}`
       rmTree(join(dir, '.agents/skills/dev-govern'))
-      const eq2 = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      const eq2 = await runNode('equip.mjs', [dir, '--no-backup'])
       if (eq2.status !== 0) return `记录墓碑失败：${eq2.stderr}`
 
       const tombFacts = await survey(dir)
@@ -511,21 +482,21 @@ export function registerStageBOnboardingCases(cases) {
         return `removedFiles 含 dev-govern/SKILL.md 时不应进入 uninstalledKitSkills：${JSON.stringify(rmFacts.kit)}`
       }
 
-      // 场景 2：lightweight 档缺失 full-only 技能属正常裁剪，artifactPlan 保持 preserve
-      const eqL = await runNode('equip.mjs', [lightDir, '--tier', 'lightweight', '--no-backup'])
-      if (eqL.status !== 0) return `lightweight 装配失败：${eqL.stderr}`
-      const lightFacts = await survey(lightDir)
-      if ((lightFacts.kit?.uninstalledKitSkills ?? []).length > 0) {
-        return `lightweight 不应误报 full 技能缺失：${JSON.stringify(lightFacts.kit.uninstalledKitSkills)}`
+      // 场景 2：完整装配干净状态下 artifactPlan 保持 preserve
+      const eqClean = await runNode('equip.mjs', [cleanDir, '--no-backup'])
+      if (eqClean.status !== 0) return `干净装配失败：${eqClean.stderr}`
+      const cleanFacts = await survey(cleanDir)
+      if ((cleanFacts.kit?.uninstalledKitSkills ?? []).length > 0) {
+        return `干净装配不应误报技能缺失：${JSON.stringify(cleanFacts.kit.uninstalledKitSkills)}`
       }
-      const lightPlan = (lightFacts.artifactPlan ?? []).find((x) => x.id === 'kit-skills')
-      if (lightPlan?.action !== 'preserve') {
-        return `lightweight 干净状态下 artifactPlan 应为 preserve：${JSON.stringify(lightPlan)}`
+      const cleanPlan = (cleanFacts.artifactPlan ?? []).find((x) => x.id === 'kit-skills')
+      if (cleanPlan?.action !== 'preserve') {
+        return `干净装配状态下 artifactPlan 应为 preserve：${JSON.stringify(cleanPlan)}`
       }
       return true
     } finally {
       rmTree(dir)
-      rmTree(lightDir)
+      rmTree(cleanDir)
     }
   }])
 
@@ -666,7 +637,7 @@ export function registerStageBOnboardingCases(cases) {
         return 'AGENTS.md 取舍写入 branch-protection/no-branch-protection 后仍重复提问'
       }
 
-      const bootRes = await runNode('equip.mjs', [dirBoot, '--bootstrap-empty', '--tier', 'lightweight', '--no-backup'])
+      const bootRes = await runNode('equip.mjs', [dirBoot, '--bootstrap-empty', '--no-backup'])
       if (bootRes.status !== 0) return `--bootstrap-empty 失败：${bootRes.stderr}`
       const fBoot = await survey(dirBoot)
       const qRemote = fBoot.questions.find((q) => q.id === 'q.remote-setup')
@@ -705,34 +676,34 @@ export function registerStageBOnboardingCases(cases) {
         return `无冲突仓库 S3 [NEXT STEP] 未自动附带 --with-hooks：${JSON.stringify(fClean.nextStep)}`
       }
       const fNoHook = await survey(noHookDir)
-      if (fNoHook.nextStep?.withHooks !== false || toMarkdown(fNoHook).includes('--tier lightweight --with-hooks')) {
+      if (fNoHook.nextStep?.withHooks !== false || (fNoHook.nextStep?.command ?? '').includes('--with-hooks')) {
         return `no-git-hooks 仓库不应推荐 --with-hooks：${JSON.stringify(fNoHook.nextStep)}`
       }
 
       // 2) .husky / custom .githooks/pre-push / lefthook.yml / 自定义 core.hooksPath 一律 preserve
       const fHusky = await survey(huskyDir)
       if (!fHusky.git.hooks?.hasConflict || fHusky.nextStep?.withHooks !== false) return `.husky 冲突未识别：${JSON.stringify(fHusky.git.hooks)}`
-      const eqHusky = await runNode('equip.mjs', [huskyDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      const eqHusky = await runNode('equip.mjs', [huskyDir, '--with-hooks', '--no-backup'])
       if (eqHusky.status !== 0 || JSON.parse(eqHusky.stdout).hooks?.action !== 'preserve' || existsSync(join(huskyDir, '.githooks/pre-push'))) {
         return `.husky 场景未 preserve：${eqHusky.stdout}`
       }
-      const eqLefthook = await runNode('equip.mjs', [lefthookDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      const eqLefthook = await runNode('equip.mjs', [lefthookDir, '--with-hooks', '--no-backup'])
       if (eqLefthook.status !== 0 || JSON.parse(eqLefthook.stdout).hooks?.action !== 'preserve' || existsSync(join(lefthookDir, '.githooks/pre-push'))) {
         return `lefthook 场景未 preserve：${eqLefthook.stdout}`
       }
-      const eqCustom = await runNode('equip.mjs', [customHookDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      const eqCustom = await runNode('equip.mjs', [customHookDir, '--with-hooks', '--no-backup'])
       if (eqCustom.status !== 0 || JSON.parse(eqCustom.stdout).hooks?.action !== 'preserve' || !readFileSync(join(customHookDir, '.githooks/pre-push'), 'utf8').includes('# custom')) {
         return `已有非 forge pre-push 被篡改：${eqCustom.stdout}`
       }
       gitSync(huskyDir, ['config', '--local', 'core.hooksPath', 'custom-hooks'])
       rmTree(join(huskyDir, '.husky'))
-      const eqCustomPath = await runNode('equip.mjs', [huskyDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      const eqCustomPath = await runNode('equip.mjs', [huskyDir, '--with-hooks', '--no-backup'])
       if (JSON.parse(eqCustomPath.stdout).hooks?.action !== 'preserve' || gitSync(huskyDir, ['config', '--local', '--get', 'core.hooksPath'], { encoding: 'utf8' }).stdout.trim() !== 'custom-hooks') {
         return `自定义 core.hooksPath 未 preserve：${eqCustomPath.stdout}`
       }
 
       // 3) 真实安装 --with-hooks + 真实 bare 仓 git push 测试
-      const eqHook = await runNode('equip.mjs', [workDir, '--tier', 'lightweight', '--with-hooks', '--no-backup'])
+      const eqHook = await runNode('equip.mjs', [workDir, '--with-hooks', '--no-backup'])
       if (eqHook.status !== 0 || JSON.parse(eqHook.stdout).hooks?.action !== 'installed') return `equip --with-hooks 失败：${eqHook.stdout} ${eqHook.stderr}`
       const hookContent = readFileSync(join(workDir, '.githooks/pre-push'), 'utf8')
       if (/\r\n/.test(hookContent) || (process.platform !== 'win32' && (statSync(join(workDir, '.githooks/pre-push')).mode & 0o111) === 0)) {
@@ -759,6 +730,4 @@ export function registerStageBOnboardingCases(cases) {
       return true
     } finally { rmTree(bareDir); rmTree(workDir); rmTree(huskyDir); rmTree(customHookDir); rmTree(lefthookDir); rmTree(noHookDir) }
   }])
-
-  registerStageBOnboardingB4aCases(cases)
 }

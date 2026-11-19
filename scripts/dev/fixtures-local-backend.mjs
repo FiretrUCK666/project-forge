@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-loop.mjs —— Stage B 自迭代闭环双向行为夹具（C7–C8、C20）。
+ * fixtures-local-backend.mjs —— 无远端 LocalOnlyBackend、HTTP 退避幂等与通用 URL 双向行为夹具。
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -36,13 +36,11 @@ import {
   rmTree, runAbsAsync, seedExploredFor, SKILL_ROOT, survey, tmpProject,
 } from './fixtures-helpers.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
-import { registerStageBLoopB4bCases } from './fixtures-stageb-loop-b4b.mjs'
-import { registerStageBLoopB5Cases } from './fixtures-stageb-loop-b5.mjs'
 
 export function registerStageBLoopCases(cases) {
-  cases.push(['C7：LocalOnlyBackend 16 接口、跨 Worktree 原子持久化与零 git status 污染', async () => {
-    if (TASK_BACKEND_METHODS.length !== 16) return `TASK_BACKEND_METHODS 数量应为 16，实际 ${TASK_BACKEND_METHODS.length}`
-    for (const m of ['getIssue', 'listIssues', 'closeIssue']) {
+  cases.push(['C7：LocalOnlyBackend 17 接口、跨 Worktree 原子持久化与零 git status 污染', async () => {
+    if (TASK_BACKEND_METHODS.length !== 17) return `TASK_BACKEND_METHODS 数量应为 17，实际 ${TASK_BACKEND_METHODS.length}`
+    for (const m of ['getIssue', 'listIssues', 'closeIssue', 'closePr']) {
       if (!TASK_BACKEND_METHODS.includes(m)) return `TASK_BACKEND_METHODS 缺失 ${m}`
     }
     const dir = tmpProject({ 'README.md': '# c7\n', '.gitignore': '.worktrees/\n' })
@@ -618,7 +616,4 @@ export function registerStageBLoopCases(cases) {
       rmTree(bareDir)
     }
   }, 4000])
-
-  registerStageBLoopB4bCases(cases)
-  registerStageBLoopB5Cases(cases)
 }

@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * `.agents/skills/` 工程套件装配、两档分档（lightweight / full）、manifest v2 墓碑/定制豁免、
+ * `.agents/skills/` 工程套件统一装配、manifest v2 墓碑/定制豁免、
  * 字节级校验与通用空白工程初始化。
  *
  * - 只使用 Node 18+ 内置模块，零第三方依赖。
- * - 降档 `--tier lightweight` 保留既有且完好校验的高阶技能，不误删用户已装配内容。
- * - `--adopt-custom` 登记定制豁免及二次改写重采用后，`--check` 返回 0。
+ * - 按 `kit/skills/` 已落盘技能执行统一全量装配，支持 `--adopt-custom` 定制豁免与 `--restore` 恢复。
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
@@ -17,7 +16,6 @@ import { writeAtomic } from './lib/fs-atomic.mjs'
 import { cleanStaleLocalModeMarker } from '../kit/skills/lib/platform.mjs'
 import { detectSkillKind } from './lib/survey-ecosystem.mjs'
 import {
-  filterKitByTier,
   generateInitialBootstrappedAgents,
   installGitHooks,
   normalizeCustomizedFiles,
@@ -32,18 +30,16 @@ import {
 } from './lib/equip-bootstrap.mjs'
 import { bootstrapEmpty, starterTemplates } from './lib/starter-templates.mjs'
 import {
-  EQUIP_TIERS,
   PF_MANIFEST_REL,
   PF_MANIFEST_SCHEMA_VERSION,
   getKitSkills,
-  getLightweightKitSkills,
   isMacOsMetadata,
 } from './lib/protocol.mjs'
 import { flushAndExit, isMainModule, posixPath, readTextSafe, skillVersion } from './lib/text.mjs'
 
 const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_KIT_SKILLS_DIR = join(SKILL_ROOT, 'kit', 'skills')
-const FULL_GITKEEP_PATHS = ['docs/prd/.gitkeep', 'docs/specs/.gitkeep', 'docs/todo/.gitkeep']
+const DOCS_GITKEEP_PATHS = ['docs/prd/.gitkeep', 'docs/specs/.gitkeep', 'docs/todo/.gitkeep']
 
 function normalizeSkillFilterArg(raw) {
   return posixPath(String(raw ?? ''))
@@ -96,17 +92,6 @@ function collectManagedDirExtras(skillsDir, kitFiles, customizedFiles = {}, extr
   return extras.sort()
 }
 
-function resolveEffectiveTier(requestedTier, existing) {
-  if (requestedTier !== undefined) {
-    if (!EQUIP_TIERS.includes(requestedTier)) {
-      throw new Error(`--tier 必须是 ${EQUIP_TIERS.join(' | ')} 之一（收到：${requestedTier}）`)
-    }
-    return requestedTier
-  }
-  const prevTier = existing.valid ? existing.data?.tier : undefined
-  return EQUIP_TIERS.includes(prevTier) ? prevTier : 'full'
-}
-
 function walkInstalledMjsFiles(skillsDir) {
   const out = []
   if (!existsSync(skillsDir)) return out
@@ -125,19 +110,16 @@ function walkInstalledMjsFiles(skillsDir) {
 
 function inspectInstalledIntegrity(
   skillsDir,
-  effectiveTier,
   disabledSet,
   removedMap,
   existingExists,
   kitSkills = getKitSkills(),
-  lightweightSkills = getLightweightKitSkills(),
 ) {
-  const required = effectiveTier === 'lightweight' ? lightweightSkills : kitSkills
   const disabledCoreSkills = []
   const brokenImports = []
   const invalidFrontmatters = []
 
-  for (const skill of required) {
+  for (const skill of kitSkills) {
     const skillEntry = `${skill}/SKILL.md`
     if (disabledSet.has(skill) || Boolean(removedMap[skillEntry]) || (existingExists && !existsSync(join(skillsDir, skillEntry)))) {
       disabledCoreSkills.push(skill)
@@ -169,7 +151,7 @@ function inspectInstalledIntegrity(
 /**
  * 字节级与结构一致性只读校验 `<targetDir>/.agents/skills/`（含核心技能、跨目录导入断链与 YAML frontmatter 校验）。
  */
-export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } = {}) {
+export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR } = {}) {
   const root = resolve(targetDir)
   const skillsDir = join(root, '.agents', 'skills')
   const manifestPath = join(root, PF_MANIFEST_REL)
@@ -179,11 +161,8 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
   }
 
   const existing = readExistingManifest(manifestPath)
-  const effectiveTier = resolveEffectiveTier(tier, existing)
   const kitSkills = getKitSkills(kitDir)
-  const lightweightSkills = getLightweightKitSkills(kitDir)
-  const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, lightweightSkills)
+  const kitFiles = walkKitFiles(kitDir)
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
   const removedMap = existing.valid ? normalizeRemovedFiles(existing.data?.removedFiles) : {}
@@ -194,7 +173,6 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
   const unregistered = []
   const extraManaged = []
   const customized = []
-  const toleratedHigherTier = new Set()
 
   if (!existing.exists) missing.push(PF_MANIFEST_REL)
   else if (!existing.valid) drifted.push(PF_MANIFEST_REL)
@@ -228,19 +206,14 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
     for (const rel of prevFiles.keys()) {
       const top = rel.split('/')[0]
       if (disabledSet.has(top) || removedMap[rel] || kitFiles.has(rel)) continue
-      if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {
-        toleratedHigherTier.add(rel)
-        inspectManagedEntry(rel, allKitFiles.get(rel))
-        continue
-      }
       extraManaged.push(rel)
     }
   }
-  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap, toleratedHigherTier, kitSkills)) {
+  for (const rel of collectManagedDirExtras(skillsDir, kitFiles, customizedMap, null, kitSkills)) {
     if (!extraManaged.includes(rel)) extraManaged.push(rel)
   }
   extraManaged.sort()
-  const integrity = inspectInstalledIntegrity(skillsDir, effectiveTier, disabledSet, removedMap, existing.exists, kitSkills, lightweightSkills)
+  const integrity = inspectInstalledIntegrity(skillsDir, disabledSet, removedMap, existing.exists, kitSkills)
 
   const ok = existing.exists && existing.valid
     && missing.length === 0 && drifted.length === 0
@@ -250,7 +223,7 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
     && integrity.invalidFrontmatters.length === 0
 
   return {
-    ok, target: root, tier: effectiveTier, schemaVersion: existing.data?.schemaVersion,
+    ok, target: root, schemaVersion: existing.data?.schemaVersion,
     manifestPath: PF_MANIFEST_REL, missing, drifted, unregistered, extraManaged, customized,
     disabledCoreSkills: integrity.disabledCoreSkills,
     brokenImports: integrity.brokenImports,
@@ -260,11 +233,10 @@ export function checkEquip(targetDir, { kitDir = DEFAULT_KIT_SKILLS_DIR, tier } 
 }
 
 /**
- * 将 `kit/skills/**` 按两档策略与 manifest v2（删除墓碑 + 定制豁免 + 降档保留）同步到 `<targetDir>/.agents/skills/**`。
+ * 将 `kit/skills/**` 按统一全量装配策略与 manifest v2（删除墓碑 + 定制豁免）同步到 `<targetDir>/.agents/skills/**`。
  */
 export function equip(targetDir, {
   kitDir = DEFAULT_KIT_SKILLS_DIR,
-  tier,
   dryRun = false,
   noBackup = false,
   restore = false,
@@ -278,11 +250,8 @@ export function equip(targetDir, {
   const skillsDir = join(root, '.agents', 'skills')
   const manifestPath = join(root, PF_MANIFEST_REL)
   const existing = readExistingManifest(manifestPath)
-  const effectiveTier = resolveEffectiveTier(tier, existing)
   const kitSkills = getKitSkills(kitDir)
-  const lightweightSkills = getLightweightKitSkills(kitDir)
-  const allKitFiles = walkKitFiles(kitDir)
-  const kitFiles = filterKitByTier(allKitFiles, effectiveTier, lightweightSkills)
+  const kitFiles = walkKitFiles(kitDir)
 
   const prevFiles = normalizePrevFiles(existing.data?.files)
   const disabledSet = new Set(existing.valid ? normalizeStringArray(existing.data?.disabledSkills) : [])
@@ -299,7 +268,7 @@ export function equip(targetDir, {
     const skillMdAbs = join(skillsDir, skillMdRel)
     if (!existsSync(skillMdAbs)) continue
     const hasAnyTracked = [...prevFiles.keys()].some((r) => r === skillMdRel || r.startsWith(`${skill}/`))
-    const upSkillMd = allKitFiles.get(skillMdRel)
+    const upSkillMd = kitFiles.get(skillMdRel)
     if (!hasAnyTracked && upSkillMd && normalizedSha256(readFileSync(skillMdAbs)) !== upSkillMd.sha256) {
       untrackedCustomSkills.add(skill)
     }
@@ -344,7 +313,6 @@ export function equip(targetDir, {
   const unchanged = []
   const conflicts = []
   const retired = []
-  const preservedHigherTier = []
   const orphanedModified = []
   const adopted = []
   const customized = []
@@ -430,7 +398,7 @@ export function equip(targetDir, {
       if (!adoptMatcher(extraRel)) continue
       const abs = join(skillsDir, extraRel)
       if (!existsSync(abs)) continue
-      const up = allKitFiles.get(extraRel)
+      const up = kitFiles.get(extraRel)
       nextCustomized[extraRel] = {
         adoptedAt: now,
         baseSha256: normalizedSha256(readFileSync(abs)),
@@ -451,32 +419,6 @@ export function equip(targetDir, {
       continue
     }
     const diskHash = normalizedSha256(readFileSync(dest))
-    if (effectiveTier === 'lightweight' && allKitFiles.has(rel)) {
-      const upItem = allKitFiles.get(rel)
-      if (adoptMatcher && adoptMatcher(rel)) {
-        nextCustomized[rel] = { adoptedAt: now, baseSha256: diskHash, upstreamSha256: upItem.sha256 }
-        nextFiles[rel] = { sha256: oldHash || upItem.sha256 }
-        if (!adopted.includes(rel)) adopted.push(rel)
-        customized.push({ path: rel, upstreamChanged: false })
-      } else if (diskHash === upItem.sha256 || diskHash === oldHash) {
-        nextFiles[rel] = { sha256: diskHash === upItem.sha256 ? upItem.sha256 : oldHash }
-        preservedHigherTier.push(rel)
-      } else if (nextCustomized[rel]?.baseSha256 === diskHash) {
-        nextFiles[rel] = { sha256: oldHash || upItem.sha256 }
-        preservedHigherTier.push(rel)
-        customized.push({ path: rel, upstreamChanged: nextCustomized[rel].upstreamSha256 !== upItem.sha256 })
-      } else {
-        nextFiles[rel] = { sha256: oldHash }
-        conflicts.push({
-          path: rel,
-          reason: nextCustomized[rel] ? 're-edited-custom' : 'modified-preserved',
-          baselineSha256: oldHash,
-          diskSha256: diskHash,
-          incomingSha256: upItem.sha256,
-        })
-      }
-      continue
-    }
     if (diskHash === oldHash) {
       pendingDeletes.push(dest)
       retired.push(rel)
@@ -486,19 +428,16 @@ export function equip(targetDir, {
     }
   }
 
-  if (effectiveTier === 'full') {
-    for (const relKeep of FULL_GITKEEP_PATHS) {
-      const keepDest = join(root, relKeep)
-      if (!existsSync(keepDest)) {
-        pendingWrites.push({ dest: keepDest, buf: Buffer.alloc(0) })
-        ensuredGitkeeps.push(relKeep)
-      }
+  for (const relKeep of DOCS_GITKEEP_PATHS) {
+    const keepDest = join(root, relKeep)
+    if (!existsSync(keepDest)) {
+      pendingWrites.push({ dest: keepDest, buf: Buffer.alloc(0) })
+      ensuredGitkeeps.push(relKeep)
     }
   }
 
   const nextManifest = {
     schemaVersion: PF_MANIFEST_SCHEMA_VERSION,
-    tier: effectiveTier,
     forgeVersion,
     installedAt: existing.data?.installedAt || now,
     files: sortObjectKeys(Object.fromEntries(Object.entries(nextFiles).map(([k, v]) => [k, v]))),
@@ -510,7 +449,7 @@ export function equip(targetDir, {
   }
 
   const prevNormalizedRaw = existing.valid ? JSON.stringify({
-    schemaVersion: existing.data.schemaVersion, tier: existing.data.tier, forgeVersion: existing.data.forgeVersion,
+    schemaVersion: existing.data.schemaVersion, forgeVersion: existing.data.forgeVersion,
     installedAt: existing.data.installedAt, files: sortObjectKeys(existing.data.files),
     disabledSkills: normalizeStringArray(existing.data.disabledSkills),
     removedFiles: normalizeRemovedFiles(existing.data.removedFiles),
@@ -552,9 +491,9 @@ export function equip(targetDir, {
   }
 
   return {
-    target: root, tier: effectiveTier, schemaVersion: PF_MANIFEST_SCHEMA_VERSION, dryRun, backup,
+    target: root, schemaVersion: PF_MANIFEST_SCHEMA_VERSION, dryRun, backup,
     manifestPath: PF_MANIFEST_REL, manifestUpdated: manifestChanged,
-    added, restored, upgraded, unchanged, preservedHigherTier, conflicts, retired,
+    added, restored, upgraded, unchanged, conflicts, retired,
     orphanedModified, adopted, customized,
     disabledSkills: nextManifest.disabledSkills, removedFiles: Object.keys(nextManifest.removedFiles), ensuredGitkeeps,
     ...(cleanedStaleLocalMode.length > 0 ? { cleanedStaleLocalMode } : {}),
@@ -601,7 +540,6 @@ async function main(argv) {
   let lang
   let name
   let description = ''
-  let tier
   let restore = false
   let adoptCustom = false
   let kitDir = DEFAULT_KIT_SKILLS_DIR
@@ -613,12 +551,11 @@ async function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--help' || arg === '-h') {
-      const fullCount = getKitSkills(kitDir).length
-      const lightCount = getLightweightKitSkills(kitDir).length
+      const skillCount = getKitSkills(kitDir).length
       process.stdout.write([
         '用法：node scripts/equip.mjs [目标目录] [选项]',
         '',
-        `  --tier <lightweight|full>  装配档位（lightweight ${lightCount} 技能 / full 全套 ${fullCount} 技能）`,
+        `  （默认）                   统一完整装配全部已落盘研发技能（当前 ${skillCount} 套）并写入 .pf-manifest.json`,
         '  --check                    只读校验，不一致退出码 1（已豁免定制文件退出 0）',
         '  --adopt-custom [path]      将手工修改或二次编辑的托管技能登记为定制豁免',
         '  --restore [pathOrSkill]    显式恢复此前删除记入墓碑的技能或文件',
@@ -638,8 +575,6 @@ async function main(argv) {
     else if (arg === '--no-backup') noBackup = true
     else if (arg === '--bootstrap-empty') doBootstrap = true
     else if (arg === '--with-hooks') withHooks = true
-    else if (arg === '--tier') tier = argv[++i]
-    else if (arg.startsWith('--tier=')) tier = arg.slice('--tier='.length)
     else if (arg === '--stack') stack = argv[++i]
     else if (arg.startsWith('--stack=')) stack = arg.slice('--stack='.length)
     else if (arg === '--lang') lang = argv[++i]
@@ -675,7 +610,7 @@ async function main(argv) {
 
   try {
     if (check) {
-      const res = checkEquip(target, { kitDir, tier })
+      const res = checkEquip(target, { kitDir })
       if (!res.ok) {
         process.stderr.write(`${formatCheckReport(res)}\n`)
         return 1
@@ -696,7 +631,7 @@ async function main(argv) {
       }
     }
 
-    const equipResult = equip(target, { kitDir, tier, dryRun, noBackup, restore, adoptCustom })
+    const equipResult = equip(target, { kitDir, dryRun, noBackup, restore, adoptCustom })
     let hooksResult
     if (withHooks) {
       hooksResult = installGitHooks(target, { dryRun })

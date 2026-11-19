@@ -409,16 +409,6 @@ export function walkKitFiles(kitDir) {
   return map
 }
 
-export function filterKitByTier(kitFiles, tier, lightweightSkills) {
-  if (tier !== 'lightweight') return new Map(kitFiles)
-  const allowedTops = new Set(['lib', ...lightweightSkills])
-  const filtered = new Map()
-  for (const [rel, item] of kitFiles.entries()) {
-    if (allowedTops.has(rel.split('/')[0])) filtered.set(rel, item)
-  }
-  return filtered
-}
-
 export function normalizeStringArray(arr) {
   if (!Array.isArray(arr)) return []
   return [...new Set(arr.map((x) => posixPath(String(x ?? '')).replace(/^\/+|\/+$/g, '')).filter(Boolean))].sort()

@@ -55,6 +55,7 @@ export {
   syncDetachedWorktree,
   unescapeGitPath,
   withFileLock,
+  withFileLockSync,
   writeAtomic,
   writeJsonAtomic,
 } from './git.mjs'
@@ -211,6 +212,8 @@ export {
   hydratePrTemplateBody,
   LOW_RISK_TEXT_EXT_RE,
   readVerificationEvidence,
+  resolveEffectiveBaseSha,
+  resolveReadablePrTitle,
   resolveRequiredGates,
   runLowRiskDocStaticCheck,
   validateVerificationEvidence,
@@ -320,3 +323,57 @@ export {
   resolveEscalationBackend,
   workTypePrefix,
 } from './escalation.mjs'
+
+export {
+  extractHeadlessSummary,
+  fencedSpans,
+  findFrontmatterEndLine,
+  indexMarkdownSections,
+  markerPositions,
+  scanLines,
+  splitSections,
+} from './markdown-scan.mjs'
+
+export {
+  classifyFileKind,
+  discoverContextDocs,
+  formatLocateText,
+  locateDocuments,
+  locateSymbolsInText,
+  locateTopSlicesForPaths,
+  VALID_LOCATE_KINDS,
+  VALID_LOCATE_SCOPES,
+} from './doc-locator.mjs'
+
+export {
+  DEFAULT_GITHUB_CONCURRENCY,
+  addLabelsWithEnsureAndReadback,
+  closePrViaRest,
+  createLabel,
+  mapWithConcurrency,
+  normalizeLabelList,
+} from './github-labels.mjs'
+
+export {
+  INTAKE_BLOCKING_DECISIONS,
+  INTAKE_DECISION_TO_LABELS,
+  INTAKE_DECISIONS,
+  INTAKE_REJECT_LABELS,
+  evaluateIntakeTriage,
+  hasIntakeBlockingSignal,
+  isApprovedInternalPlan,
+  readIntakeRecord,
+  resolveIntakeDir,
+  writeIntakeRecord,
+} from './intake-triage.mjs'
+
+export {
+  buildIntakeDecisionComments,
+} from './doc-comments.mjs'
+
+export {
+  indentOf,
+  parseYamlScalar,
+  readYamlBlockScalar,
+  splitInlineArrayItems,
+} from './doc-frontmatter.mjs'

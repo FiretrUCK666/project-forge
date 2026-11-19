@@ -545,3 +545,132 @@ export async function assignLocalMilestone({ mainRoot = process.cwd(), gitDir = 
   })
   return res
 }
+
+/** 解析本地 PR 状态与分诊持久目录：`<effectiveGitDir>/project-forge-flow/prs`。 */
+export function resolveLocalPrsDir(mainRoot = process.cwd(), gitDir = null) {
+  const commonGitDir = resolveEffectiveCommonGitDir(mainRoot, gitDir)
+  if (commonGitDir) return join(commonGitDir, 'project-forge-flow', 'prs')
+  return join(mainRoot || process.cwd(), '.worktrees', '.state', 'prs')
+}
+
+function localPrPath(mainRoot, gitDir, number) {
+  const rootDir = resolveLocalPrsDir(mainRoot, gitDir)
+  return { rootDir, lockPath: join(rootDir, 'prs.lock'), filePath: join(rootDir, `${Number(number)}.json`) }
+}
+
+/** 读取本地持久化 PR 记录（含 state、labels、comments、triage），不存在时返回 404。 */
+export function getLocalPr({ mainRoot = process.cwd(), gitDir = null, number } = {}) {
+  const num = Number(number)
+  if (!Number.isInteger(num) || num <= 0) return { ok: false, error: 'invalid-pr-number' }
+  const { filePath } = localPrPath(mainRoot, gitDir, num)
+  const res = readStrictLocalJson(filePath, `本地 PR #${num}`)
+  if (!res.exists) return { ok: false, status: 404, error: `local-pr-not-found: #${num}` }
+  const item = res.data
+  return {
+    ok: true,
+    local: true,
+    ...item,
+    number: item.number ?? num,
+    state: String(item.state ?? 'OPEN').toUpperCase(),
+    labels: Array.isArray(item.labels) ? item.labels : [],
+    comments: Array.isArray(item.comments) ? item.comments : [],
+  }
+}
+
+/** 原子写入本地 PR 关闭与分诊结果（评论 + 标签 + triage + state=CLOSED），支持幂等读回。 */
+export async function closeLocalPr({
+  mainRoot = process.cwd(),
+  gitDir = null,
+  number,
+  comment = '',
+  labels = [],
+  statePayload = {},
+  reason = '',
+  decision = null,
+  author = 'local',
+} = {}) {
+  const num = Number(number)
+  if (!Number.isInteger(num) || num <= 0) return { ok: false, error: 'invalid-pr-number' }
+  const { rootDir, lockPath, filePath } = localPrPath(mainRoot, gitDir, num)
+  const cleanComment = String(comment ?? '').replace(/\r\n/g, '\n').trim()
+  const addLabels = normalizeLabels(labels)
+
+  return withFileLock(lockPath, () => {
+    mkdirSync(rootDir, { recursive: true })
+    const existingRes = readStrictLocalJson(filePath, `本地 PR #${num}`)
+    const now = new Date().toISOString()
+    const item = existingRes.exists
+      ? existingRes.data
+      : {
+          number: num,
+          title: `Local PR #${num}`,
+          state: 'OPEN',
+          labels: [],
+          comments: [],
+          triage: null,
+          url: `local-pr://${num}`,
+          createdAt: now,
+          updatedAt: now,
+          closedAt: null,
+        }
+    const wasClosed = String(item.state ?? 'OPEN').toUpperCase() === 'CLOSED'
+    item.labels = normalizeLabels([...(item.labels ?? []), ...addLabels])
+    if (!Array.isArray(item.comments)) item.comments = []
+
+    let commentResult = null
+    if (cleanComment) {
+      const hasState = statePayload && typeof statePayload === 'object' && Object.keys(statePayload).length > 0
+      const fp = hasState ? computeWriteBackFingerprint(cleanComment, statePayload) : null
+      const finalState = hasState ? { ...statePayload, writeBackFingerprint: statePayload.writeBackFingerprint ?? fp } : null
+      const tag = hasState ? `<!-- pf-state:${JSON.stringify(finalState)} -->` : ''
+      const fullBody = hasState && !cleanComment.includes('<!-- pf-state:') ? `${cleanComment}\n\n${tag}` : cleanComment
+      const dup = fp ? item.comments.find((c) => commentMatchesFp(c, fp)) : null
+      if (dup) {
+        commentResult = { ok: true, local: true, deduplicated: true, skipped: true, id: dup.id, url: dup.url, verifiedReadback: true }
+      } else {
+        const nextId = (item.comments.reduce((m, c) => Math.max(m, Number(c?.id) || 0), 0)) + 1
+        const pfStates = parsePfStateTags(fullBody)
+        const entry = {
+          id: nextId,
+          author: author || 'local',
+          body: fullBody,
+          createdAt: now,
+          updatedAt: now,
+          url: `local-pr://${num}#comment-${nextId}`,
+          pfState: pfStates.length > 0 ? pfStates[pfStates.length - 1] : null,
+          pfStates,
+        }
+        item.comments.push(entry)
+        commentResult = { ok: true, local: true, id: entry.id, url: entry.url, verifiedReadback: true, ...(fp ? { writeBackFingerprint: fp } : {}) }
+      }
+    }
+
+    item.state = 'CLOSED'
+    item.closedAt = item.closedAt ?? now
+    item.updatedAt = now
+    if (reason) item.closeReason = String(reason)
+    if (decision || reason || Object.keys(statePayload ?? {}).length > 0) {
+      item.triage = {
+        decision: decision ?? statePayload?.decision ?? 'reject',
+        reason: reason || null,
+        labels: item.labels,
+        statePayload: statePayload && Object.keys(statePayload).length > 0 ? statePayload : null,
+        updatedAt: now,
+      }
+    }
+    writeJsonAtomic(filePath, item)
+    return {
+      ok: true,
+      local: true,
+      number: num,
+      state: 'CLOSED',
+      alreadyClosed: wasClosed,
+      labels: item.labels,
+      comments: item.comments,
+      triage: item.triage,
+      closedAt: item.closedAt,
+      url: item.url,
+      ...(commentResult ? { commentResult } : {}),
+    }
+  })
+}

@@ -7,8 +7,8 @@ created: 2026-11-19
 updated: 2026-11-19
 issue: 90
 pr: null
-branch: null
-owner: plan-stage-c
+branch: feat/stagec-c1
+owner: impl-c1
 approved: true
 implemented: false
 plan_critique: "passed (reviewer=critic-stage-c-r2, round=2, sha=7a607116f7ef, summary=Round 2 独立全量重审 PASS（HEAD ce3f3e5）：#256 阻塞项全部修净，写域互斥与源码事实对齐通过。)"
@@ -137,16 +137,16 @@ flowchart LR
    - `kit/skills/dev-govern/scripts/release-prep-lib.mjs`、`kit/skills/dev-govern/scripts/release-prep-collect.mjs` (new)
 3. **测试与门禁设施**：
    - 增补规则至 Stage B 基线 `scripts/dev/preflight-contract-rules.mjs` (new)，修改 `scripts/dev/preflight-contracts.mjs`、`scripts/dev/preflight-suite.mjs`、`scripts/dev/preflight-suite-checks.mjs`、`scripts/dev/preflight-e2e.mjs`、`scripts/dev/verify-injections.mjs`、`scripts/dev/e2e-zip-harness.mjs`、`scripts/dev/write-probe-audit.mjs`、`scripts/dev/bench.mjs`
-   - `scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-equip.mjs`、`scripts/dev/fixtures-onboarding.mjs`、`scripts/dev/fixtures-stageb-onboarding.mjs`、`scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-gates.mjs`、`scripts/dev/injections-data-workflow.mjs`、`scripts/dev/fixtures-stagec-c1.mjs` (new)、`scripts/dev/injections-data-stagec-c1.mjs` (new)
+   - `scripts/dev/fixtures.mjs`、`scripts/dev/injections-data.mjs`、`scripts/dev/fixtures-equip.mjs`、`scripts/dev/fixtures-onboarding.mjs`、`scripts/dev/fixtures-skills-hooks.mjs`、`scripts/dev/injections-data-core.mjs`、`scripts/dev/injections-data-gates.mjs`、`scripts/dev/injections-data-workflow.mjs`、`scripts/dev/fixtures-locate-intake.mjs` (new)、`scripts/dev/injections-data-locate-intake.mjs` (new)
    - 执行 `node scripts/equip.mjs . && node scripts/compose-agents.mjs .` 同步 `.agents/skills/` 与 `AGENTS.md`（若后合入 Wave C-1 需 rebase 并重跑该双指令对齐）。
 
 ## 五、冻结的验收标准
 
 <!-- criteria:start -->
-- [ ] C1: （SC1）废除 `lightweight` 技能裁剪与 `14KB` 软/硬字节预算（保留 `--tier` 迁移别名提示），修复 `agents-defaults.mjs` `excludedSkillsFor` 漏洞、抽取共享 YAML 块标量读取器统一 `doc-frontmatter.mjs` 与 `skill-discovery.mjs` 并全域清理五技能字面量升级为统一 8 技能（波次间按实盘技能动态同步 `AGENTS.md`）；完成 `templates/agents-project.md` 去重，使空模板渲染产物约 `15KB` 且本仓 `AGENTS.md` 控制在 `18–19.8KB`（`< 24576 B`）。
-- [ ] C2: （SC2）将 fenced-code-aware Markdown 解析器下沉至 `kit/skills/lib/markdown-scan.mjs` (new)，交付零写入的 `kit/skills/dev-explore/scripts/doc-locate.mjs` (new)（支持 `--kind`/`--scope`/`--limit`/`--worktree`、无头首段摘要、绝对路径返回与 `~40–120ms`/`~1.5–2.2 KB` 预算）；接入 `session-orient.mjs`（识别 `ARCHITECTURE.md`/`*/AGENTS.md`/无头文档）与 `repo-map.mjs`，且 `handoff` 仅注入相关度 Top-3 定位切片。
-- [ ] C3: （SC3）落地全局业务分诊 `flow.mjs intake --pr {M} | --issue {N}`（豁免本仓已 `approve` 自研任务，`docs/TDD.md` 定位 + `--feature-ref` 锚点，经 `doc-comments.mjs` `buildIntakeDecisionComments` 输出结构化头 + `pf-state` + 人话评论并打标/关闭）；将 `TASK_BACKEND_METHODS` 扩至 17 方法（补齐 `closePr`、`GenericRemoteBackend` `delegatedPayload`、`LocalOnlyBackend` 持久化），在 `github-client.mjs` 实现 `getPr.labels`、REST 自动建标与 `addLabels` 写后回读及 `403` 降级，`write-probe-audit.mjs` 纳入 `closePr`/`closeIssue`，`review-pack` 前置阻断未分诊或已拒绝 PR。
-- [ ] C4: （SC4）收敛 `ledger.mjs` 统一原子加锁写入（保留 `writeTaskLedger` 加锁兼容委托），修复 `claimedAt`、`hasExploredEvidence`、`--agent`、`hydrateRemotePfState` 写权限校验与 `R1` 三项漏补（`doc-audit.mjs:7` `readdirSync`、`flow-batch.mjs:218-223` `queue.unshift`、`docs.mjs:556` `ledgerRoot`），统一 `flow status` 委托 `evaluateNextState`；API 批量调用限定并发 4，优化 `release-prep-lib.mjs`、`worktree-deps.mjs`、`verify-injections.mjs` 与 `e2e-zip-harness.mjs`（含 `fixtures`/`injections-data` 模块自动发现）。
+- [x] C1: （SC1）废除 `lightweight` 技能裁剪与 `14KB` 软/硬字节预算（保留 `--tier` 迁移别名提示），修复 `agents-defaults.mjs` `excludedSkillsFor` 漏洞、抽取共享 YAML 块标量读取器统一 `doc-frontmatter.mjs` 与 `skill-discovery.mjs` 并全域清理五技能字面量升级为统一 8 技能（波次间按实盘技能动态同步 `AGENTS.md`）；完成 `templates/agents-project.md` 去重，使空模板渲染产物约 `15KB` 且本仓 `AGENTS.md` 控制在 `18–19.8KB`（`< 24576 B`）。
+- [x] C2: （SC2）将 fenced-code-aware Markdown 解析器下沉至 `kit/skills/lib/markdown-scan.mjs` (new)，交付零写入的 `kit/skills/dev-explore/scripts/doc-locate.mjs` (new)（支持 `--kind`/`--scope`/`--limit`/`--worktree`、无头首段摘要、绝对路径返回与 `~40–120ms`/`~1.5–2.2 KB` 预算）；接入 `session-orient.mjs`（识别 `ARCHITECTURE.md`/`*/AGENTS.md`/无头文档）与 `repo-map.mjs`，且 `handoff` 仅注入相关度 Top-3 定位切片。
+- [x] C3: （SC3）落地全局业务分诊 `flow.mjs intake --pr {M} | --issue {N}`（豁免本仓已 `approve` 自研任务，`docs/TDD.md` 定位 + `--feature-ref` 锚点，经 `doc-comments.mjs` `buildIntakeDecisionComments` 输出结构化头 + `pf-state` + 人话评论并打标/关闭）；将 `TASK_BACKEND_METHODS` 扩至 17 方法（补齐 `closePr`、`GenericRemoteBackend` `delegatedPayload`、`LocalOnlyBackend` 持久化），在 `github-client.mjs` 实现 `getPr.labels`、REST 自动建标与 `addLabels` 写后回读及 `403` 降级，`write-probe-audit.mjs` 纳入 `closePr`/`closeIssue`，`review-pack` 前置阻断未分诊或已拒绝 PR。
+- [x] C4: （SC4）收敛 `ledger.mjs` 统一原子加锁写入（保留 `writeTaskLedger` 加锁兼容委托），修复 `claimedAt`、`hasExploredEvidence`、`--agent`、`hydrateRemotePfState` 写权限校验与 `R1` 三项漏补（`doc-audit.mjs:7` `readdirSync`、`flow-batch.mjs:218-223` `queue.unshift`、`docs.mjs:556` `ledgerRoot`），统一 `flow status` 委托 `evaluateNextState`；API 批量调用限定并发 4，优化 `release-prep-lib.mjs`、`worktree-deps.mjs`、`verify-injections.mjs` 与 `e2e-zip-harness.mjs`（含 `fixtures`/`injections-data` 模块自动发现）。
 <!-- criteria:end -->
 
 ## 六、高风险点、门型与回滚路径
@@ -178,4 +178,8 @@ flowchart LR
 
 ## 实现说明
 
-待实施后补全提交 SHA、渲染字节实测对照表与基准耗时对比数据。
+- **维护者拍板彻底清理零历史包袱**：按维护者最新拍板，彻底移除 `lightweight` 概念、CLI `--tier lightweight` 与迁移别名、`LIGHTWEIGHT_*` / `14336 B` 预算常量及所有双档文案与分支（不再保留旧版迁移分支）；统一完整装配当前在盘技能并保留动态扩展机制（不提前写入未落盘的 `dev-edit`/`dev-verify-tools`/`dev-iterate` 路由行）。
+- **架构纠偏——全仓测试脚本按功能域命名并沉入 Tier 2 确定性静态门禁**：将 9 份过程编号命名测试脚本全部改名为功能域命名（`fixtures-doc-closure.mjs`、`fixtures-review-token.mjs`、`fixtures-skills-hooks.mjs`、`fixtures-heterogeneous-survey.mjs`、`fixtures-local-backend.mjs`、`fixtures-escalation-stoploss.mjs`、`fixtures-e2e-gate.mjs`、`injections-data-adaptive.mjs`、`e2e-scenarios-lifecycle.mjs`），本切片新增测试与注入命名为 `fixtures-locate-intake.mjs` / `injections-data-locate-intake.mjs`；升级 `fixtures.mjs`/`injections-data.mjs`/`preflight-suite.mjs` 通用按功能域前缀自动发现；在 `scripts/dev/preflight-contract-rules.mjs` 新增确定性门禁 `checkProcessArtifactFilenames`（扫描除规划/归档/发布说明文档目录外的全仓文件，配双向夹具与 `I179` 故障注入）。
+- **PR/Issue 可读性根治与实时自举缺陷修复**：`flow-lifecycle.mjs` + `workflow-helpers.mjs` 实现可读 PR 标题解析（优先 SPEC/Todo/Issue）、剥离模板 `<!-- ... -->` 引导注释与静态独立审查占位段、自动注入含耗时/退出码与 E2E 观察的 Markdown 验证证据表；统一 `escalation.mjs`/`flow-issues.mjs` 紧凑建单与 `doc-comments.mjs` 合并评论（附 `mergeCommit` 短 SHA 与 `claimedBy`）；修复手动 `git rebase origin/main` 后 `ledger.baseSha` 滞后误报（`resolveEffectiveBaseSha` + `flow sync` 快速刷新），并补齐 `isManagedPlanDoc` frontmatter 收窄与 `verify.*.fail` 命令脱敏。
+- **渲染字节实测对照**：纯文档模板渲染 `12,637 B`，Node 示例仓渲染 `13,243 B`，本仓 `AGENTS.md` 实测 `21,234 B`（`< 24,576 B` 推荐预算与 `30,720 B` 硬上限）。
+- **基准与定位耗时对比**：`doc-locate.mjs` 本仓实测 CLI 97 ms（内核 26 ms）、文本输出 `1,580 B`、零写入；`bench.mjs` 对比基线：`survey(300 files)` `218 -> 187 ms`，`flow inspect(self)` `276 -> 207 ms`，`survey(self)` `425 -> 358 ms`，`review(self)` `389 -> 372 ms`，`preflight(self)` `2008 -> 1907 ms`，`backup.zip(1000 files)` `90 ms`；`verify-injections.mjs` 槽位池复用后 193 条注入全量约 95 s（`193/193` 捕获）。

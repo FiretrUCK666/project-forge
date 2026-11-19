@@ -109,14 +109,9 @@ export function toMarkdown(facts) {
   lines.push(`- **版本控制**：${gitLine(facts.git)}`)
   lines.push(`- **文档与自动化**：${docsLine(facts.docs)}`)
   lines.push(`- **规模**：${facts.scale.totalFiles} 个文件（代码 ${facts.scale.codeFiles}，文档 ${facts.scale.docFiles}）`)
-  if (facts.recommendedTier) {
-    const reasonText = facts.recommendedTierReason ? ` —— ${facts.recommendedTierReason}` : ''
-    lines.push(`- **推荐装配档位**：\`${facts.recommendedTier}\`${reasonText}`)
-  }
   if (facts.kit?.manifestExists) {
     const k = facts.kit
     const kitParts = [`schema v${k.schemaVersion ?? 1}`]
-    if (k.tier) kitParts.push(`档位 \`${k.tier}\``)
     if ((k.disabledSkills?.length ?? 0) > 0) kitParts.push(`已禁用技能：${k.disabledSkills.join('、')}`)
     if ((k.customizedFiles?.length ?? 0) > 0) kitParts.push(`已豁免定制 ${k.customizedFiles.length} 个`)
     lines.push(`- **工程套件清单**：${kitParts.join('；')}`)

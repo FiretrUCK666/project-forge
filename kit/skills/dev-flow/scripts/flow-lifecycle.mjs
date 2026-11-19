@@ -8,33 +8,38 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
+import { archiveCompletedDocsGroup, buildSubmitComments, docIsoDate } from '../../lib/docs.mjs'
 import {
-  archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, } from '../../lib/docs.mjs'
-import { formatWorkTitle } from '../../lib/escalation.mjs'
-import {
-  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text, syncDetachedWorktree, writeAtomic, } from '../../lib/git.mjs'
+  computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
+} from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { nextReviewRound, recordMountedDepsInLedger, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, isInternalAgentSlug, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
+} from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
-import { detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
+import { detectGateWeakening, gitDiffRawEntriesAndText, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { assertNoDuplicatePrForTask, checkUntrustedPrGate } from '../../lib/task-graph.mjs'
 import { checkFrozenCriteria } from '../../lib/criteria-lock.mjs'
 import { checkTddSyncParity } from '../../lib/tdd-parity.mjs'
 import {
   buildSubmitNextSteps, determineWorkflowPolicy, hasRepoCiWorkflow, hydratePrTemplateBody,
-  readVerificationEvidence, runLowRiskDocStaticCheck, validateVerificationEvidence,
+  readVerificationEvidence, redactDiagnosticText, resolveEffectiveBaseSha, resolveReadablePrTitle,
+  runLowRiskDocStaticCheck, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
-import { mountSharedDeps, unmountSharedDeps } from './worktree-deps.mjs'
+import {
+  assertSubmitOwnership, checkLifecyclePreconditions, runLifecycleGovernHook, runPreVerifyEditGateHook,
+} from './flow-lifecycle-hooks.mjs'
 import {
   applySubmitPostActions,
   cmdContainsSubcommand,
   collectFinalizeChangedFiles,
   computeFlowCoupledSync,
   emitFlowSignal,
+  emitVerifyOutcomeOutput,
+  ensureSpecImplNoteReady,
   evaluateFlowMasterPrdGate,
   findStrictDocBySlug,
   findUncheckedLines,
@@ -42,6 +47,7 @@ import {
   handleRework,
   handleVerifyE2eFailure,
   recordVerifyEvidenceForFlow,
+  syncReviewSlotForSubmit,
 } from './flow-lifecycle-helpers.mjs'
 
 export { handleRework }
@@ -51,6 +57,13 @@ export async function handleFinalize(opts, roots) {
   const { taskId, ledger } = ctx
   const implRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`实施工作区不存在：${implRoot}`)
+
+  const preCheck = checkLifecyclePreconditions(ledger, opts)
+  if (!preCheck.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: preCheck.code, reason: preCheck.message }, null, 2)}\n`)
+    process.stderr.write(`${preCheck.message}\n`)
+    return { exitCode: preCheck.exitCode ?? EXIT_POLICY_BLOCK }
+  }
 
   const fastFinHead = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
   const [stZ, headRes] = await Promise.all([
@@ -96,27 +109,12 @@ export async function handleFinalize(opts, roots) {
 
   const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
   if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: 1 } }
-  if (specRel && existsSync(join(implRoot, specRel))) {
-    const specAbs = join(implRoot, specRel)
-    let specText = readTextSafe(specAbs) ?? ''
-    if (!/^##\s+实现说明\s*$/m.test(specText)) specText = `${specText.trimEnd()}\n\n## 实现说明\n\n`
-    const secStart = specText.search(/^##\s+实现说明\s*$/m)
-    const afterSec = specText.slice(secStart)
-    const nextH2 = afterSec.slice(1).search(/\n##\s+/)
-    const secBody = (nextH2 > 0 ? afterSec.slice(0, nextH2 + 1) : afterSec).replace(/^##\s+实现说明\s*\n?/, '')
-    if (/<!--\s*project-forge:\s*fill|\b(?:TBD|FIXME)\b/i.test(secBody) || /\bTODO\b/.test(secBody)) {
-      process.stderr.write(`BLOCKED_SPEC_IMPL_NOTE_EMPTY: ${specRel} 的「实现说明」仍含未填占位，请补齐真实说明后再 finalize。\n`)
-      return { exitCode: 1 }
-    }
-    if (!secBody.replace(/<!--[\s\S]*?-->/g, '').trim()) {
-      const autoSummary = [`- 实现提交基线: ${currentHead ?? 'uncommitted'}`, `- 关联任务: ${taskId}`, opts.note ? `- 说明: ${opts.note}` : null].filter(Boolean).join('\n')
-      specText = specText.replace(/(^##\s+实现说明\s*\n(?:<!--[\s\S]*?-->\s*\n?)?)/m, `$1\n${autoSummary}\n`)
-    }
-    writeAtomic(specAbs, specText)
-  }
+  const specNoteCheck = ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note: opts.note })
+  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: 1 } }
 
-  const finDiff = ledger.baseSha
-    ? (currentHead && currentHead === ledger.baseSha ? { ok: true, entries: [], diffText: '' } : await gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`))
+  const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
+  const finDiff = effectiveBase
+    ? (currentHead && currentHead === effectiveBase ? { ok: true, entries: [], diffText: '' } : await gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`))
     : null
   const finDiffEntries = finDiff?.ok ? finDiff.entries : undefined
   const changed = await collectFinalizeChangedFiles(implRoot, ledger, stZ.entries, roots.gitDir, currentHead, finDiffEntries)
@@ -157,6 +155,13 @@ export async function handleFinalize(opts, roots) {
     if (archivedGroup.byKind.todo) { ledger.todoFile = archivedGroup.byKind.todo; ledger.archivedTodoFile = archivedGroup.byKind.todo }
   }
 
+  const governHook = await runLifecycleGovernHook({ stage: 'finalize', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  if (!governHook.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(governHook, null, 2)}\n`)
+    process.stderr.write(`${governHook.message}\n`)
+    return { exitCode: governHook.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+
   ledger.finalized = true
   ledger.finalizedHead = currentHead
   ledger.status = 'finalized'
@@ -166,7 +171,7 @@ export async function handleFinalize(opts, roots) {
     taskId, finalized: true, finalizedHead: currentHead,
     prdFile: ledger.prdFile, archivedPrdFile: ledger.archivedPrdFile, archivedMasterPrd: archivedGroup.archivedMasterPrd ?? null,
     specFile: ledger.specFile, todoFile: ledger.todoFile,
-    archivedDocs: archivedGroup.moved, coupledSyncWarnings, ...parity,
+    archivedDocs: archivedGroup.moved, coupledSyncWarnings, ...(preCheck.warnings.length ? { lifecycleWarnings: preCheck.warnings } : {}), ...parity,
   }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else {
@@ -193,6 +198,21 @@ export async function handleVerify(opts, roots) {
   const workRel = ledger.worktreePath || (ledger.role === 'inbound-external-pr' ? ledger.reviewWorktreePath : null)
   const implRoot = workRel ? resolve(roots.mainRoot, workRel) : roots.mainRoot
   if (!existsSync(implRoot)) throw new Error(`工作区目录不存在：${implRoot}`)
+
+  const verifyPreCheck = checkLifecyclePreconditions(ledger, opts)
+  if (!verifyPreCheck.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: verifyPreCheck.code, reason: verifyPreCheck.message }, null, 2)}\n`)
+    process.stderr.write(`${verifyPreCheck.message}\n`)
+    return { exitCode: verifyPreCheck.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+
+  const editGateRes = await runPreVerifyEditGateHook({ mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
+  if (!editGateRes.ok) {
+    await emitFlowSignal(roots, { category: 'hygiene', module: 'workflow', pattern: 'verify.edit-gate.fail', severity: 'high', source: 'flow-verify', message: editGateRes.message, taskId })
+    if (opts.json) process.stdout.write(`${JSON.stringify(editGateRes, null, 2)}\n`)
+    process.stderr.write(`${editGateRes.message}\n`)
+    return { exitCode: editGateRes.exitCode ?? EXIT_POLICY_BLOCK }
+  }
 
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
   const untrustedGate = checkUntrustedPrGate(ledger, { humanApproved: Boolean(opts['human-approved'] || opts['human-approved-exec']), hasDevReview })
@@ -253,19 +273,20 @@ export async function handleVerify(opts, roots) {
   const computeVerifyPolicy = async (stZReuse = null) => {
     const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
     const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
+    const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
     const [stZ, headRes, diffNsRes, remoteRes] = await Promise.all([
       stZReuse ? Promise.resolve(stZReuse) : gitStatusPorcelainZ(implRoot),
       fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-      !ledger.baseSha
+      !effectiveBase
         ? Promise.resolve(null)
-        : (fastHeadOid && fastHeadOid === ledger.baseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`)),
+        : (fastHeadOid && fastHeadOid === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
       fastCfg ? Promise.resolve({ ok: true, stdout: fastCfg.remoteText }) : gitRun(roots.mainRoot, ['remote', '-v']),
     ])
     const currentHead = headRes.ok ? headRes.stdout.trim() : null
     const sharedDiffEntries = diffNsRes?.ok ? diffNsRes.entries : undefined
     const [changedFiles, gateHits] = await Promise.all([
-      getChangedFiles(implRoot, ledger.baseSha, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
-      detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
+      getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedDiffEntries }),
+      detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: sharedDiffEntries }),
     ])
     const dirty = stZ.entries.length > 0
     const stStdout = stZ.entries.map((e) => `${e.xy} ${e.file}`).join('\n')
@@ -366,11 +387,14 @@ export async function handleVerify(opts, roots) {
     return { exitCode: 1 }
   }
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, slotIndex: ledger.slotIndex })
+  const tRunStart = Date.now()
   const runRes = await execShellCommand(cmd, implRoot, { timeout: timeoutMs, env: wtEnv })
+  const runDurationMs = Date.now() - tRunStart
   const { currentHead, dirty, stStdout, changedFiles, policy } = await computeVerifyPolicy()
   let smokeCmdUsed = mode === 'smoke' ? cmd : null
   let smokeRunRes = mode === 'smoke' ? runRes : null
   let smokeExecuted = mode === 'smoke'
+  let smokeDurationMs = mode === 'smoke' ? runDurationMs : null
   if (mode === 'gate' && policy.smokeRequired && profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !profile.smokeVerify.includes('{target}')) {
     const prevEv = readVerificationEvidence(roots.gitDir, taskId)
     const alreadySmokeOk = Boolean(prevEv && prevEv.headSha === currentHead && !dirty && !prevEv.dirty && prevEv.gates?.smoke?.exitCode === 0 && prevEv.smokeVerifiedOnHead)
@@ -379,9 +403,12 @@ export async function handleVerify(opts, roots) {
         smokeCmdUsed = profile.smokeVerify
         smokeRunRes = runRes
         smokeExecuted = true
+        smokeDurationMs = runDurationMs
       } else if (runRes.ok) {
         smokeCmdUsed = profile.smokeVerify
+        const tSmokeStart = Date.now()
         smokeRunRes = await execShellCommand(profile.smokeVerify, implRoot, { timeout: timeoutMs, env: wtEnv })
+        smokeDurationMs = Date.now() - tSmokeStart
         smokeExecuted = true
       }
     }
@@ -395,7 +422,7 @@ export async function handleVerify(opts, roots) {
     roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
     cmdStr: cmd, customCmd: Boolean(opts.cmd), exitCode: runRes.code,
     explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
-    e2eObservationText: e2eEvidenceInput,
+    e2eObservationText: e2eEvidenceInput, durationMs: runDurationMs, smokeDurationMs,
     smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
   })
   const finalExit = !execOk && runRes.ok && smokeRunRes && !smokeRunRes.ok ? (smokeRunRes.code || 1) : evRec.overallExit
@@ -423,47 +450,13 @@ export async function handleVerify(opts, roots) {
     ledger.visualCheckEvidence = e2eEvidenceInput || (ledger.visualCheckEvidence ?? '实际运行、端到端交互与输出观察核验已确认')
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
+  await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })
   await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-  await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? changedFiles[0] ?? '', taskId, message: `verify (${mode}) exit=${finalExit}: ${cmd}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
-  if (docStaticRes && !docStaticRes.ok) {
-    process.stderr.write(`BLOCKED_STATIC_DOC_CHECK_FAILED: 无 CI 低风险静态必检未通过：${docStaticRes.errors.map((e) => e.message).slice(0, 3).join('；')}\n`)
-  }
-  if (e2eFailureReport?.diagnostic && !opts.json) {
-    process.stderr.write(`E2E_RUNTIME_FAILED:\nEvidence:\n  - ${e2eFailureReport.diagnostic.Evidence.join('\n  - ')}\nUnknowns:\n  - ${e2eFailureReport.diagnostic.Unknowns.join('\n  - ')}\nNextSteps:\n  - ${e2eFailureReport.diagnostic.NextSteps.join('\n  - ')}\n`)
-  }
-
-  if (opts.json) {
-    process.stdout.write(`${JSON.stringify({
-      taskId, mode, target: rawTarget, cmd, ...(targetTip ? { targetTip } : {}),
-      ok: allOk, exitCode: finalExit, verifiedHead: ledger.verifiedHead, riskTier: policy.riskTier,
-      smokeVerifiedOnHead: evRec.smokeVerifiedOnHead, e2eObservation: evRec.e2eObservation,
-      ...(e2eFailureReport ? { diagnostic: e2eFailureReport.diagnostic, escalatedIssue: e2eFailureReport.escalation } : {}),
-      docStatic: docStaticRes, visualFilesChanged, empiricalVisualCheckRequired,
-      visualVerifiedHead: ledger.visualVerifiedHead, visualCheckEvidence: ledger.visualCheckEvidence,
-      stdout: runRes.stdout, stderr: runRes.stderr,
-    }, null, 2)}\n`)
-  } else {
-    if (runRes.stdout) process.stdout.write(`${runRes.stdout}\n`)
-    if (runRes.stderr) process.stderr.write(`${runRes.stderr}\n`)
-    if (targetTip) process.stdout.write(`${targetTip}\n`)
-    process.stdout.write(`verify (${mode}${rawTarget ? ` target=${rawTarget}` : ''}): cmd="${cmd}" exit=${finalExit} HEAD=${currentHead ?? 'unborn'} risk=${policy.riskTier}\n`)
-    if (allOk) {
-      const next = [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }]
-      if (policy.smokeRequired && !evRec.e2eObservation) {
-        next.unshift(`检测到运行时改动（smokeRequired=true）：请核验实际运行输出/状态并补充 --e2e-evidence "<观察结论>"：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId} --mode smoke --e2e-evidence "<运行观察>"`)
-      } else if (empiricalVisualCheckRequired && ledger.visualVerifiedHead !== currentHead) {
-        next.unshift(`检测到 UI/视觉改动（${visualFilesChanged.slice(0, 5).join(', ')}）：请核验实际渲染、交互与浅深色截图后补 --visual-checked。`)
-      }
-      printNextStep(next, { repoRoot: roots.mainRoot })
-    } else {
-      printNextStep(
-        e2eFailureReport?.diagnostic?.NextSteps?.length
-          ? e2eFailureReport.diagnostic.NextSteps
-          : [`验证未通过（exit=${finalExit}），请修复后重新运行 verify。`],
-        { repoRoot: roots.mainRoot },
-      )
-    }
-  }
+  await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: allOk ? `verify.${mode}.pass` : `verify.${mode}.fail`, severity: allOk ? 'info' : 'high', source: 'flow-verify', file: docStaticRes?.errors?.[0]?.file ?? changedFiles[0] ?? '', taskId, message: `verify (${mode}) exit=${finalExit}: ${redactDiagnosticText(cmd, 240)}`, meta: { riskTier: policy.riskTier, target: rawTarget } })
+  emitVerifyOutcomeOutput({
+    opts, roots, taskId, mode, rawTarget, cmd, targetTip, allOk, finalExit, ledger, policy,
+    evRec, e2eFailureReport, docStaticRes, visualFilesChanged, empiricalVisualCheckRequired, runRes, currentHead,
+  })
   return { exitCode: allOk ? 0 : (finalExit || 1) }
 }
 
@@ -476,37 +469,11 @@ export async function handleSubmit(opts, roots) {
   const op = await detectInProgressGitOp(implRoot, { wtGitDir: resolveGitDirFast(implRoot) })
   if (op.inProgress) throw new Error(`BLOCKED_GIT_CONFLICT_IN_PROGRESS: 工作区正处于 ${op.op} 冲突状态，请先解决冲突`)
 
-  const rawExplicitAgent = String(opts.agent ?? '').trim()
-  if (rawExplicitAgent) {
-    const lowExplicit = rawExplicitAgent.toLowerCase()
-    const nonImplRole = /(?:^|[-_.])(?:coordinator|orchestrator|dispatcher|reviewer|critic)(?:$|[-_.])/i.test(lowExplicit)
-    if (opts.takeover) {
-      if (!String(opts.reason ?? '').trim()) {
-        process.stderr.write('BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。\n')
-        return { exitCode: EXIT_POLICY_BLOCK }
-      }
-      if (nonImplRole) {
-        const msg = `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者角色 (${rawExplicitAgent}) 不得借 --takeover 代实施者 submit。`
-        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', reason: msg }, null, 2)}\n`)
-        process.stderr.write(`${msg}\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
-      }
-      const nextContrib = resolveContributorIdentity({ explicitActor: rawExplicitAgent, ledgerActor: ledger.implementerId })
-      ledger.implementerId = nextContrib.actor
-    } else if (nonImplRole) {
-      const msg = `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`
-      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', reason: msg }, null, 2)}\n`)
-      process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT_POLICY_BLOCK }
-    } else if (ledger.implementerId && !isInternalAgentSlug(ledger.implementerId)) {
-      const resolvedExplicit = resolveContributorIdentity({ explicitActor: rawExplicitAgent, ledgerActor: ledger.implementerId })
-      if (resolvedExplicit.actor.toLowerCase() !== String(ledger.implementerId).toLowerCase()) {
-        const msg = `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${resolvedExplicit.actor}) 与已认领实施者 (${ledger.implementerId}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`
-        if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH', reason: msg }, null, 2)}\n`)
-        process.stderr.write(`${msg}\n`)
-        return { exitCode: EXIT_POLICY_BLOCK }
-      }
-    }
+  const ownRes = assertSubmitOwnership(ledger, opts)
+  if (!ownRes.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: ownRes.code, reason: ownRes.message }, null, 2)}\n`)
+    process.stderr.write(`${ownRes.message}\n`)
+    return { exitCode: ownRes.exitCode ?? EXIT_POLICY_BLOCK }
   }
 
   const fastHeadOid = readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null
@@ -547,13 +514,14 @@ export async function handleSubmit(opts, roots) {
   }
 
   const profile = parseAgentsProfile(implRoot)
-  const submitDiffRes = !ledger.baseSha
+  const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
+  const submitDiffRes = !effectiveBase
     ? null
-    : (fastHeadOid && fastHeadOid === ledger.baseSha ? { ok: true, entries: [] } : await gitDiffRawEntriesAndText(implRoot, `${ledger.baseSha}..HEAD`))
+    : (fastHeadOid && fastHeadOid === effectiveBase ? { ok: true, entries: [] } : await gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`))
   const submitDiffEntries = submitDiffRes?.ok ? submitDiffRes.entries : undefined
   const [changedForVisual, gateFindings] = await Promise.all([
-    getChangedFiles(implRoot, ledger.baseSha, { statusEntries: stZ.entries, diffEntries: submitDiffEntries }),
-    detectGateWeakening(implRoot, ledger.baseSha, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: submitDiffEntries }),
+    getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: submitDiffEntries }),
+    detectGateWeakening(implRoot, effectiveBase, ledger.baseBranch, { headSha: currentHead, nameStatusEntries: submitDiffEntries }),
   ])
   const ownArchived = [ledger.archivedTodoFile, ledger.archivedSpecFile, ledger.archivedPrdFile].filter(Boolean)
   const hasDevReview = hasSkillSupport(roots.mainRoot, 'dev-review')
@@ -582,23 +550,8 @@ export async function handleSubmit(opts, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  // Tier 2 在提交独立审查前先安全解绑旧 Junction，按需 --reset-review-slot 清理脏审查位，同步最新 HEAD 后重挂载依赖
-  let reviewSlotSync = null
-  if (ledger.tier === 2 && currentHead && ledger.reviewWorktreePath) {
-    const reviewAbs = resolve(roots.mainRoot, ledger.reviewWorktreePath)
-    if (existsSync(reviewAbs) && !unmountSharedDeps(roots.mainRoot, reviewAbs, { mode: 'deps' })?.ok) throw new Error(`审查槽解绑共享依赖失败：${ledger.reviewWorktreePath}`)
-    reviewSlotSync = await syncDetachedWorktree(roots.mainRoot, reviewAbs, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
-    const revDeps = mountSharedDeps(roots.mainRoot, reviewAbs)
-    recordMountedDepsInLedger(ledger, ledger.reviewWorktreePath, revDeps)
-    ledger.reviewWorktreeHead = currentHead
-    reviewSlotSync.depsMode = revDeps.mode
-    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
-  }
-
-  const nextRound = (ledger.rounds ?? []).length > 0
-    ? nextReviewRound(ledger)
-    : 1
-
+  const reviewSlotSync = await syncReviewSlotForSubmit(roots, ledger, taskId, currentHead, { resetDirty: Boolean(opts['reset-review-slot']) })
+  const nextRound = (ledger.rounds ?? []).length > 0 ? nextReviewRound(ledger) : 1
   const postLocalLifecycleComments = async ({ targetRepo = null, pushRemote = null, actionFallback }) => {
     if ((ledger.linkedIssues ?? []).length === 0) return
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
@@ -607,17 +560,11 @@ export async function handleSubmit(opts, roots) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
     const { issueCommentBodyFor } = buildSubmitComments({
       isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitActor.display,
-      branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: null,
-      linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
+      branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: null, linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
     })
     for (const iss of ledger.linkedIssues ?? []) {
-      await localBackend.postComment({
-        taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActor.actor,
-        statePayload: { taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, agent: submitActor.actor, headSha: currentHead },
-      })
-      if (typeof localBackend.syncStateLabel === 'function') {
-        await Promise.resolve(localBackend.syncStateLabel({ taskId, number: iss, state: 'in-review' })).catch(() => null)
-      }
+      await localBackend.postComment({ taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActor.actor, statePayload: { taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, agent: submitActor.actor, headSha: currentHead } })
+      if (typeof localBackend.syncStateLabel === 'function') await Promise.resolve(localBackend.syncStateLabel({ taskId, number: iss, state: 'in-review' })).catch(() => null)
     }
   }
 
@@ -696,49 +643,25 @@ export async function handleSubmit(opts, roots) {
   const commentResults = []
   if (isRework && ledger.prNumber) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({
-      isRework: true, round: nextRound, shortHead, actorDisplay: submitActor.display,
-      branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber,
-      linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
-    })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: true, round: nextRound, shortHead, actorDisplay: submitActor.display, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
-    commentResults.push({
-      target: `PR #${ledger.prNumber}`,
-      res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, headSha: currentHead } }),
-    })
+    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, headSha: currentHead } }) })
     for (const iss of ledger.linkedIssues ?? []) {
-      commentResults.push({
-        target: `Issue #${iss}`,
-        res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, prNumber: ledger.prNumber, headSha: currentHead } }),
-      })
+      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, prNumber: ledger.prNumber, headSha: currentHead } }) })
     }
     await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
   } else {
-    const title = formatWorkTitle(opts.title ?? ledger.slug, ledger.caseType)
-    const body = opts.body ?? hydratePrTemplateBody({
-      repoRoot: implRoot, taskId, ledger, policy, actorDisplay: submitActor.display,
-      visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual,
-    })
-
+    const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
+    const body = opts.body ?? hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitActor.display, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number
       ledger.prUrl = prResult.url ?? null
       ledger.prState = 'OPEN'
-      const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({
-        isRework: false, round: 1, shortHead, actorDisplay: submitActor.display,
-        branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number,
-        prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [],
-      })
-      commentResults.push({
-        target: `PR #${prResult.number}`,
-        res: await backend.postComment({ repo: targetRepo, number: prResult.number, body: prCommentBody, statePayload: { taskId, action: 'pr-submitted', round: 1, agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }),
-      })
+      const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitActor.display, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
+      commentResults.push({ target: `PR #${prResult.number}`, res: await backend.postComment({ repo: targetRepo, number: prResult.number, body: prCommentBody, statePayload: { taskId, action: 'pr-submitted', round: 1, agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }) })
       for (const iss of ledger.linkedIssues ?? []) {
-        commentResults.push({
-          target: `Issue #${iss}`,
-          res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }),
-        })
+        commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }) })
       }
       await applySubmitPostActions({ backend, targetRepo, prNumber: prResult.number, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: false })
     }

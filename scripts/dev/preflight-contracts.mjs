@@ -25,6 +25,7 @@ import {
   STALE_DAILY_END,
   acceptanceIdMissing,
   checkGenericE2eContracts,
+  checkProcessArtifactFilenames,
   completionRecordBeforeMerge,
   finishCommandsOf,
   finishRequiredMissing,
@@ -512,4 +513,5 @@ export async function runContractChecks(ctx) {
   checkStarterLanguageCoverage(ctx)
   checkWorkflowLifecycleContracts(ctx)
   checkGenericE2eContracts(ctx)
+  checkProcessArtifactFilenames(ctx)
 }

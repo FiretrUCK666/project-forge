@@ -47,6 +47,7 @@ export async function handleExplore(opts, roots) {
     explored,
     codeFileCount: map.codeFileCount ?? 0,
     symbolCount: map.symbolCount ?? 0,
+    ...(Array.isArray(map.docLocateHints) ? { docLocateHints: map.docLocateHints } : {}),
   }
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)

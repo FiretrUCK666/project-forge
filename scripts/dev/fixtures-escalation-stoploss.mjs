@@ -1,5 +1,5 @@
 /**
- * fixtures-stageb-loop-b4b.mjs —— B4b 分级升级、停损闭环、总控四态收口与 C22/四项缺陷双向断言。
+ * fixtures-escalation-stoploss.mjs —— 分级升级、停损闭环与总控四态收口双向断言。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

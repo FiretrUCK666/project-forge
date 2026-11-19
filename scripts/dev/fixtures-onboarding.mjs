@@ -1,5 +1,5 @@
 /**
- * fixtures-onboarding.mjs —— 外部新项目接管断点、根仓 wrapDir、两档五态（2x5）与 5 形态端到端正反矩阵（C1-C9）。
+ * fixtures-onboarding.mjs —— 外部新项目接管断点、根仓 wrapDir、有无 dev-review × 五态（2x5）与 5 形态端到端正反矩阵（C1-C9）。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -274,7 +274,7 @@ export function registerOnboardingCases(cases) {
     return true
   }])
 
-  cases.push(['C2/C4：Dev Profile 自动预填、校准免漂移与 lightweight 模板纯净隔离', async () => {
+  cases.push(['C2/C4：Dev Profile 自动预填、校准免漂移与统一模板体积预算', async () => {
     const nodeDir = tmpProject({
       'package-lock.json': '{}',
       'package.json': JSON.stringify({ name: 'node-ok', version: '1.0.0', scripts: { test: 'node --version', check: 'node --version' } }),
@@ -284,16 +284,9 @@ export function registerOnboardingCases(cases) {
     gitInit(nodeDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     const docsDir = tmpProject({ 'README.md': '# pure-docs\n\n纯文档仓库说明文档示例。\n' })
     const bootDir = tmpProject({})
-    const lightDir = tmpProject({
-      'package-lock.json': '{}',
-      'package.json': JSON.stringify({ name: 'light-ok', version: '1.0.0', scripts: { test: 'node --version', check: 'node --version' } }),
-      'README.md': '# light-ok\n\n轻量档纯净模板隔离验证外部示例仓。\n',
-      'src/index.mjs': 'export const ok = 1\n',
-    })
-    gitInit(lightDir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
 
     try {
-      // 1. 未装配默认走 full，且预填真实 Node 命令
+      // 1. 统一完整装配，且预填真实 Node 命令
       const cDefault = await runNode('compose-agents.mjs', [nodeDir, '--no-backup'])
       if (cDefault.status !== 0) return `compose-agents 默认渲染失败：${cDefault.stderr}`
       const defaultAgents = readFileSync(join(nodeDir, 'AGENTS.md'), 'utf8')
@@ -301,8 +294,10 @@ export function registerOnboardingCases(cases) {
         return `Node 仓未预填真实 Dev Profile 命令：\n${defaultAgents.slice(0, 1200)}`
       }
       if (!defaultAgents.includes('独立审查') || !defaultAgents.includes('审查者直接合')) {
-        return '未装配默认 resolveEffectiveTier 未保留 full 档独立审查与审查者直接合契约'
+        return '默认渲染未保留独立审查与审查者直接合契约'
       }
+      const defaultBytes = Buffer.byteLength(defaultAgents, 'utf8')
+      if (defaultBytes >= 24576) return `默认 AGENTS.md 超过 24KB 推荐预算：${defaultBytes}`
 
       // 2. 纯文档仓命令与 arch-rules 默认 none，无 fill Dev Profile 标记
       const cDocs = await runNode('compose-agents.mjs', [docsDir, '--no-backup'])
@@ -312,10 +307,13 @@ export function registerOnboardingCases(cases) {
         return `纯文档仓 Dev Profile 默认值缺失：\n${docsAgents.slice(0, 1200)}`
       }
       if (docsAgents.includes('fill Dev Profile')) return '纯文档仓全部预填为非占位却仍残留 fill Dev Profile 标记'
+      if (!/^##\s+高风险路径/m.test(docsAgents)) {
+        return '高风险路径标题未保持 ^##\\s+高风险路径 前缀'
+      }
 
-      // 3. 装配 full 后校准 Node 仓 Dev Profile 与占位，compose-agents --check 与 review.mjs 均退出 0，且再次刷新保护校准值
-      const eqFull = await runNode('equip.mjs', [nodeDir, '--tier', 'full', '--no-backup'])
-      if (eqFull.status !== 0) return `equip full 失败：${eqFull.stderr}`
+      // 3. 统一装配后校准 Node 仓 Dev Profile 与占位，compose-agents --check 与 review.mjs 均退出 0，且再次刷新保护校准值
+      const eqFull = await runNode('equip.mjs', [nodeDir, '--no-backup'])
+      if (eqFull.status !== 0) return `equip 失败：${eqFull.stderr}`
       const calibrated = calibrateAgentsText(defaultAgents, 'npm test', 'src/')
         .replace('quick-test: npm test', 'quick-test: npm run test -- --fast')
       writeFileSync(join(nodeDir, 'AGENTS.md'), calibrated, 'utf8')
@@ -328,22 +326,7 @@ export function registerOnboardingCases(cases) {
         return 'compose-agents 刷新时覆盖了用户已校准的 Dev Profile'
       }
 
-      // 4. --tier lightweight 体积 < 14KB 且零泄露 dev-review/dev-govern/强制独立审查/故障注入
-      const eqLight = await runNode('equip.mjs', [lightDir, '--tier', 'lightweight', '--no-backup'])
-      if (eqLight.status !== 0) return `equip --tier lightweight 失败：${eqLight.stderr}`
-      const cLight = await runNode('compose-agents.mjs', [lightDir, '--tier', 'lightweight', '--no-backup'])
-      if (cLight.status !== 0) return `compose-agents --tier lightweight 失败：${cLight.stderr}`
-      const lightText = readFileSync(join(lightDir, 'AGENTS.md'), 'utf8')
-      const lightBytes = Buffer.byteLength(lightText, 'utf8')
-      if (lightBytes >= 14336) return `lightweight AGENTS.md 超过 14KB：${lightBytes}`
-      for (const banned of ['dev-review', 'dev-govern', 'review-pack.mjs', 'govern-audit.mjs', '独立审查', '故障注入']) {
-        if (lightText.includes(banned)) return `lightweight AGENTS.md 仍残留「${banned}」`
-      }
-      if (!/^##\s+高风险路径（触碰须人类确认）/m.test(lightText)) {
-        return 'lightweight 档高风险路径标题未保持 ^##\\s+高风险路径 前缀'
-      }
-
-      // 5. bootstrap-empty 后直接跑 compose --check 与 review 退出 0
+      // 4. bootstrap-empty 后直接跑 compose --check 与 review 退出 0
       const eqBoot = await runNode('equip.mjs', [bootDir, '--bootstrap-empty', '--stack', 'node', '--no-backup'])
       if (eqBoot.status !== 0) return `bootstrap-empty 失败：${eqBoot.stderr}`
       const chkBoot = await runNode('compose-agents.mjs', [bootDir, '--check'])
@@ -356,7 +339,6 @@ export function registerOnboardingCases(cases) {
       rmTree(nodeDir)
       rmTree(docsDir)
       rmTree(bootDir)
-      rmTree(lightDir)
     }
   }])
 
@@ -421,12 +403,10 @@ export function registerOnboardingCases(cases) {
   cases.push(['C7：equip --check 深度一致性校验（核心技能、lib 导入断链、frontmatter）', async () => {
     const dir = tmpProject({ 'README.md': '# eq\n', 'src/index.mjs': 'export const a = 1\n' })
     try {
-      for (const tier of ['lightweight', 'full']) {
-        const eq = await runNode('equip.mjs', [dir, '--tier', tier, '--no-backup'])
-        if (eq.status !== 0) return `equip ${tier} 失败：${eq.stderr}`
-        const chk = await runNode('equip.mjs', [dir, '--check'])
-        if (chk.status !== 0) return `完好 ${tier} 仓 equip --check 应返回 0：${chk.stdout}${chk.stderr}`
-      }
+      const eq = await runNode('equip.mjs', [dir, '--no-backup'])
+      if (eq.status !== 0) return `equip 失败：${eq.stderr}`
+      const chk = await runNode('equip.mjs', [dir, '--check'])
+      if (chk.status !== 0) return `完好仓 equip --check 应返回 0：${chk.stdout}${chk.stderr}`
 
       // 合法 --adopt-custom 仍退出 0
       const flowDoc = join(dir, '.agents/skills/dev-flow/SKILL.md')
@@ -459,10 +439,10 @@ export function registerOnboardingCases(cases) {
 
       // 核心技能进 disabledSkills 时必须退出 1
       rmTree(join(dir, '.agents/skills/dev-plan'))
-      await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
+      await runNode('equip.mjs', [dir, '--no-backup'])
       const disChk = await runNode('equip.mjs', [dir, '--check'])
       if (disChk.status === 0 || checkEquip(dir).ok) {
-        return '当前档位核心技能进入 disabledSkills 时 equip --check 竟退出 0'
+        return '核心技能进入 disabledSkills 时 equip --check 竟退出 0'
       }
       return true
     } finally { rmTree(dir) }
@@ -514,10 +494,10 @@ export function registerOnboardingCases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['C5/C6：lightweight 与 full 档合并门禁及 2x5 跨组合兼容性矩阵', async () => {
+  cases.push(['C5/C6：有无 dev-review 合并门禁及 2x5 跨组合兼容性矩阵', async () => {
     const cleanups = []
     try {
-      // A. lightweight 高风险全 6 类触发源 -> 缺失确认或 --reason 必退出 4，齐备后退出 0
+      // A. 无 dev-review 高风险全 6 类触发源 -> 缺失确认或 --reason 必退出 4，齐备后退出 0
       const hrTriggers = [
         ['highRiskHits', { file: 'src/core/key.mjs', content: 'export const k = 2\n' }, 2],
         ['gateWeakeningHits', { file: 'test/ok.test.mjs', content: 'import assert from "node:assert/strict"\n' }, 2],
@@ -527,10 +507,11 @@ export function registerOnboardingCases(cases) {
         ['doNotEdit', { file: 'docs/frozen/lock.md', content: '# changed\n' }, 2],
       ]
       for (const [label, change, caseType] of hrTriggers) {
-        const { dir, bares } = setupMatrixRepo('lightweight', 'local-only', { caseType })
+        const { dir, bares } = setupMatrixRepo('norev', 'local-only', { caseType })
         cleanups.push(dir, ...bares)
-        if ((await runNode('equip.mjs', [dir, '--tier', 'lightweight', '--no-backup'])).status !== 0) return 'equip lightweight 失败'
-        gitCommitFast(dir, 'equip')
+        if ((await runNode('equip.mjs', [dir, '--no-backup'])).status !== 0) return 'equip 失败'
+        rmTree(join(dir, '.agents', 'skills', 'dev-review'))
+        gitCommitFast(dir, 'equip without dev-review')
         const taskId = `hr-${label.toLowerCase().replace(/[^a-z0-9]/g, '')}`
         const roots = await resolveRepoRoots(dir)
         const s = await handleStart({
@@ -539,9 +520,9 @@ export function registerOnboardingCases(cases) {
           slug: taskId,
           ...(caseType >= 4 ? { spec: 'docs/specs/261118-issue88-mx-spec.md', todo: 'docs/todo/261118-issue88-mx-todo.md' } : {}),
         }, roots)
-        if (s.exitCode !== 0) return `lightweight high-risk(${label}) start 失败：${s.exitCode}`
+        if (s.exitCode !== 0) return `no-dev-review high-risk(${label}) start 失败：${s.exitCode}`
         const ex = await handleExplore({ task: taskId }, roots)
-        if (ex.exitCode !== 0) return `lightweight high-risk(${label}) explore 失败：${ex.exitCode}`
+        if (ex.exitCode !== 0) return `no-dev-review high-risk(${label}) explore 失败：${ex.exitCode}`
         const implAbs = join(dir, '.worktrees', `impl-${taskId}`)
         mkdirSync(dirname(join(implAbs, change.file)), { recursive: true })
         writeFileSync(join(implAbs, change.file), change.content, 'utf8')
@@ -568,33 +549,35 @@ export function registerOnboardingCases(cases) {
         if (nx.exitCode !== 0) return `next(${label}) 失败`
 
         const mNoApprove = await handleMerge({ task: taskId }, roots)
-        if (mNoApprove.exitCode !== 4) return `lightweight ${label} 无 --human-approved 未返回退出码 4：exit=${mNoApprove.exitCode}`
+        if (mNoApprove.exitCode !== 4) return `no-dev-review ${label} 无 --human-approved 未返回退出码 4：exit=${mNoApprove.exitCode}`
         const mNoReason = await handleMerge({ task: taskId, 'human-approved': true }, roots)
-        if (mNoReason.exitCode !== 4) return `lightweight ${label} 缺 --reason 未返回退出码 4：exit=${mNoReason.exitCode}`
+        if (mNoReason.exitCode !== 4) return `no-dev-review ${label} 缺 --reason 未返回退出码 4：exit=${mNoReason.exitCode}`
         const mOk = await handleMerge({ task: taskId, 'human-approved': true, reason: 'human verified risk' }, roots)
-        if (mOk.exitCode !== 0) return `lightweight ${label} 附 --human-approved --reason 未放行：exit=${mOk.exitCode}`
+        if (mOk.exitCode !== 0) return `no-dev-review ${label} 附 --human-approved --reason 未放行：exit=${mOk.exitCode}`
       }
 
-      // B. 2 tiers × 5 roles 全组合端到端矩阵
-      for (const tier of ['lightweight', 'full']) {
+      // B. 2 审查态（无 dev-review / 完整套件）× 5 roles 全组合端到端矩阵
+      for (const mode of ['no-dev-review', 'full-kit']) {
+        const hasReviewKit = mode === 'full-kit'
         for (const role of ['local-only', 'maintainer', 'contributor-fork', 'generic-git', 'inbound-external-pr']) {
-          const { dir, bares, prHead } = setupMatrixRepo(tier, role, { caseType: 2 })
+          const { dir, bares, prHead } = setupMatrixRepo(mode, role, { caseType: 2 })
           cleanups.push(dir, ...bares)
-          const eq = await runNode('equip.mjs', [dir, '--tier', tier, '--no-backup'])
-          if (eq.status !== 0) return `矩阵 equip ${tier}/${role} 失败：${eq.stderr}`
-          gitCommitFast(dir, `equip ${tier}`)
+          const eq = await runNode('equip.mjs', [dir, '--no-backup'])
+          if (eq.status !== 0) return `矩阵 equip ${mode}/${role} 失败：${eq.stderr}`
+          if (!hasReviewKit) rmTree(join(dir, '.agents', 'skills', 'dev-review'))
+          gitCommitFast(dir, `equip ${mode}`)
 
           const flowRel = '.agents/skills/dev-flow/scripts/flow.mjs'
           const roots = await resolveRepoRoots(dir)
           const gh = createMemoryGhHarness('acme/demo', 'alice')
 
           if (role === 'inbound-external-pr') {
-            if (tier === 'lightweight') {
+            if (!hasReviewKit) {
               const ins = runLocal(dir, flowRel, ['inspect', '--external-pr', '42'])
-              if (ins.stdout.includes('review-pack.mjs')) return `lightweight inspect 外部 PR 不应打印 review-pack.mjs：${ins.stdout}`
+              if (ins.stdout.includes('review-pack.mjs')) return `no-dev-review inspect 外部 PR 不应打印 review-pack.mjs：${ins.stdout}`
               const stCli = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--json'])
               if (stCli.status !== 3 || !`${stCli.stdout}${stCli.stderr}`.includes('BLOCKED_REQUIRES_DEV_REVIEW')) {
-                return `lightweight 外部 PR start 未阻断为 BLOCKED_REQUIRES_DEV_REVIEW：status=${stCli.status}`
+                return `no-dev-review 外部 PR start 未阻断为 BLOCKED_REQUIRES_DEV_REVIEW：status=${stCli.status}`
               }
               const ledgerDir = join(dir, '.worktrees', '.state', 'tasks')
               mkdirSync(ledgerDir, { recursive: true })
@@ -604,69 +587,69 @@ export function registerOnboardingCases(cases) {
               const nxExt = runLocal(dir, flowRel, ['next', '--task', 'review-pr-42', '--json'])
               const vExt = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
               if (!nxExt.stdout.includes('BLOCKED_REQUIRES_DEV_REVIEW') || vExt.status !== 3 || vExt.stdout.includes('review-pack.mjs')) {
-                return `lightweight 外部 PR next/verify 未正确阻断：next=${nxExt.stdout} verify=${vExt.status}`
+                return `no-dev-review 外部 PR next/verify 未正确阻断：next=${nxExt.stdout} verify=${vExt.status}`
               }
             } else {
               const stFull = runLocal(dir, flowRel, ['start', '--external-pr', '42', '--pr-ref', prHead, '--json'])
-              if (stFull.status !== 0) return `full 外部 PR start 失败：${stFull.stderr}`
+              if (stFull.status !== 0) return `full-kit 外部 PR start 失败：${stFull.stderr}`
               const vBlocked = runLocal(dir, flowRel, ['verify', '--task', 'review-pr-42'])
-              if (vBlocked.status !== 3) return `full 外部 PR 未扫描 verify 应退出 3：${vBlocked.status}`
+              if (vBlocked.status !== 3) return `full-kit 外部 PR 未扫描 verify 应退出 3：${vBlocked.status}`
             }
             continue
           }
 
           // local-only / maintainer / contributor-fork / generic-git
-          const taskId = `mx-${tier}-${role}`
+          const taskId = `mx-${mode}-${role}`
           const useMockApi = role === 'maintainer' || role === 'contributor-fork'
           if (useMockApi) {
             const st = await handleStart({ task: taskId, case: '2', slug: taskId, issue: '10', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (st.exitCode !== 0) return `start(${tier}/${role}) 失败：${st.exitCode}`
+            if (st.exitCode !== 0) return `start(${mode}/${role}) 失败：${st.exitCode}`
             const cl = await handleClaim({ task: taskId, agent: 'alice', _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (cl.exitCode !== 0) return `claim(${tier}/${role}) 失败`
+            if (cl.exitCode !== 0) return `claim(${mode}/${role}) 失败`
             const ex = await handleExplore({ task: taskId }, roots)
-            if (ex.exitCode !== 0) return `explore(${tier}/${role}) 失败：${ex.exitCode}`
+            if (ex.exitCode !== 0) return `explore(${mode}/${role}) 失败：${ex.exitCode}`
           } else {
             const stCli = runLocal(dir, flowRel, ['start', '--task', taskId, '--case', '2', '--slug', taskId, '--json'])
-            if (stCli.status !== 0) return `cli start(${tier}/${role}) 失败：${stCli.stderr}`
+            if (stCli.status !== 0) return `cli start(${mode}/${role}) 失败：${stCli.stderr}`
             const exCli = runLocal(dir, flowRel, ['explore', '--task', taskId])
-            if (exCli.status !== 0) return `cli explore(${tier}/${role}) 失败：${exCli.stderr}`
+            if (exCli.status !== 0) return `cli explore(${mode}/${role}) 失败：${exCli.stderr}`
           }
 
           const implAbs = join(dir, '.worktrees', `impl-${taskId}`)
-          writeFileSync(join(implAbs, 'src/ok.mjs'), `export const ok = '${tier}-${role}'\n`, 'utf8')
+          writeFileSync(join(implAbs, 'src/ok.mjs'), `export const ok = '${mode}-${role}'\n`, 'utf8')
           gitSync(implAbs, ['add', '-A'])
-          gitSync(implAbs, ['commit', '-qm', `impl ${tier} ${role}`])
+          gitSync(implAbs, ['commit', '-qm', `impl ${mode} ${role}`])
 
           const vRes = runLocal(dir, flowRel, ['verify', '--task', taskId, '--mode', 'full'])
-          if (vRes.status !== 0) return `verify(${tier}/${role}) 失败：${vRes.stderr}`
+          if (vRes.status !== 0) return `verify(${mode}/${role}) 失败：${vRes.stderr}`
 
           if (useMockApi) {
             const sub = await handleSubmit({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (sub.exitCode !== 0) return `submit(${tier}/${role}) 失败：${sub.exitCode}`
+            if (sub.exitCode !== 0) return `submit(${mode}/${role}) 失败：${sub.exitCode}`
           } else {
             const subCli = runLocal(dir, flowRel, ['submit', '--task', taskId])
-            if (subCli.status !== 0) return `cli submit(${tier}/${role}) 失败：${subCli.stderr}`
-            if (tier === 'lightweight' && subCli.stdout.includes('review-pack.mjs')) {
-              return `lightweight ${role} submit 不应输出 review-pack.mjs：${subCli.stdout}`
+            if (subCli.status !== 0) return `cli submit(${mode}/${role}) 失败：${subCli.stderr}`
+            if (!hasReviewKit && subCli.stdout.includes('review-pack.mjs')) {
+              return `no-dev-review ${role} submit 不应输出 review-pack.mjs：${subCli.stdout}`
             }
           }
 
           const nx = JSON.parse(runLocal(dir, flowRel, ['next', '--task', taskId, '--json']).stdout)
           if (role === 'contributor-fork') {
             if (nx.phase !== 'awaiting-upstream-merge') {
-              return `${tier} contributor-fork submit 后应立即进入 awaiting-upstream-merge，实际=${nx.phase}`
+              return `${mode} contributor-fork submit 后应立即进入 awaiting-upstream-merge，实际=${nx.phase}`
             }
             const mBlockedFork = await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe }, roots)
-            if (mBlockedFork.exitCode === 0) return `${tier} contributor-fork 禁止自合却退出 0`
+            if (mBlockedFork.exitCode === 0) return `${mode} contributor-fork 禁止自合却退出 0`
             continue
           }
 
-          if (tier === 'full') {
-            if (nx.phase !== 'needs-review') return `full ${role} 应进入 needs-review，实际=${nx.phase}`
+          if (hasReviewKit) {
+            if (nx.phase !== 'needs-review') return `full-kit ${role} 应进入 needs-review，实际=${nx.phase}`
             const mUnreviewed = useMockApi
               ? await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
               : await handleMerge({ task: taskId, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
-            if (mUnreviewed.exitCode === 0) return `full ${role} 未经独立审查 PASS 竟允许 merge 放行`
+            if (mUnreviewed.exitCode === 0) return `full-kit ${role} 未经独立审查 PASS 竟允许 merge 放行`
 
             const tok = await issueTokenFor(dir, taskId, 1)
             const rec = await handleRecord({
@@ -674,20 +657,20 @@ export function registerOnboardingCases(cases) {
               evidence: '矩阵实测：测试全绿，输出符合预期',
               ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}),
             }, roots)
-            if (rec !== 0) return `full ${role} review record 失败：${rec}`
+            if (rec !== 0) return `full-kit ${role} review record 失败：${rec}`
           } else {
             const expectedPhase = role === 'generic-git' ? 'awaiting-remote-mr' : 'ready-to-merge'
-            if (nx.phase !== expectedPhase) return `lightweight ${role} 应进入 ${expectedPhase}，实际=${nx.phase}`
+            if (nx.phase !== expectedPhase) return `no-dev-review ${role} 应进入 ${expectedPhase}，实际=${nx.phase}`
           }
 
           if (role === 'generic-git') {
             const mNeedFlag = await handleMerge({ task: taskId }, roots)
-            if (mNeedFlag.exitCode === 0) return `${tier} generic-git 缺 --remote-merged 竟退出 0`
+            if (mNeedFlag.exitCode === 0) return `${mode} generic-git 缺 --remote-merged 竟退出 0`
             const mGenOk = await handleMerge({ task: taskId, 'remote-merged': true }, roots)
-            if (mGenOk.exitCode !== 0) return `${tier} generic-git --remote-merged merge 失败：${mGenOk.exitCode}`
+            if (mGenOk.exitCode !== 0) return `${mode} generic-git --remote-merged merge 失败：${mGenOk.exitCode}`
           } else {
             const mOk = await handleMerge({ task: taskId, ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}) }, roots)
-            if (mOk.exitCode !== 0) return `${tier} ${role} merge 失败：${mOk.exitCode}`
+            if (mOk.exitCode !== 0) return `${mode} ${role} merge 失败：${mOk.exitCode}`
           }
         }
       }
@@ -696,9 +679,8 @@ export function registerOnboardingCases(cases) {
   }])
 
   cases.push(['C9：5 类典型项目形态端到端接管、backup 还原、handoff 与内置 dev-flow 实测', async () => {
-    const makePkgShape = (name, tier, readme, extraFiles, scripts, testCmd) => ({
+    const makePkgShape = (name, readme, extraFiles, scripts, testCmd) => ({
       name,
-      tier,
       runNativeTest: testCmd,
       files: {
         '.gitignore': '.worktrees/\n',
@@ -709,18 +691,17 @@ export function registerOnboardingCases(cases) {
       },
     })
     const shapes = [
-      makePkgShape('frontend', 'lightweight', '前端应用示例项目，提供页面渲染与组件测试入口，验证项目接管全流程。',
+      makePkgShape('frontend', '前端应用示例项目，提供页面渲染与组件测试入口，验证项目接管全流程。',
         { 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', 'src/App.mjs': 'export const r = () => 1\n' },
         { test: 'node test/ok.test.mjs', build: 'node -e "0"' }, ['node', 'test/ok.test.mjs']),
-      makePkgShape('backend', 'full', '后端服务示例项目，提供 HTTP 入口与服务状态校验测试，验证项目接管全流程。',
+      makePkgShape('backend', '后端服务示例项目，提供 HTTP 入口与服务状态校验测试，验证项目接管全流程。',
         { 'package-lock.json': '{}', 'src/server.mjs': 'export const port = 3000\n' },
         { test: 'node test/ok.test.mjs', check: 'node test/ok.test.mjs' }, ['node', 'test/ok.test.mjs']),
-      makePkgShape('pure-lib', 'lightweight', '纯工具库示例项目，对外提供无副作用数学辅助函数并附带单元测试。',
+      makePkgShape('pure-lib', '纯工具库示例项目，对外提供无副作用数学辅助函数并附带单元测试。',
         { 'package-lock.json': '{}', 'src/index.mjs': 'export const add = (a, b) => a + b\n' },
         { test: 'node test/ok.test.mjs' }, ['node', 'test/ok.test.mjs']),
       {
         name: 'pure-docs',
-        tier: 'lightweight',
         runNativeTest: null,
         files: {
           '.gitignore': '.worktrees/\n',
@@ -728,7 +709,7 @@ export function registerOnboardingCases(cases) {
           'guide/intro.md': '# Intro\n\n简介内容。\n',
         },
       },
-      makePkgShape('ci-enabled', 'full', '带 CI 流水线项目示例，通过 GitHub Actions 工作流运行测试与检查。',
+      makePkgShape('ci-enabled', '带 CI 流水线项目示例，通过 GitHub Actions 工作流运行测试与检查。',
         { 'package-lock.json': '{}', '.github/workflows/ci.yml': 'name: CI\non: [push, pull_request]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n', 'src/main.mjs': 'export const v = 1\n' },
         { test: 'node test/ok.test.mjs', check: 'node test/ok.test.mjs' }, ['node', 'test/ok.test.mjs']),
     ]
@@ -739,7 +720,7 @@ export function registerOnboardingCases(cases) {
       try {
         const sv = await runNode('survey.mjs', [dir, '--json'])
         if (sv.status !== 0) return `${shape.name} survey 失败：${sv.stderr}`
-        const eq = await runNode('equip.mjs', [dir, '--tier', shape.tier, '--no-backup'])
+        const eq = await runNode('equip.mjs', [dir, '--no-backup'])
         if (eq.status !== 0) return `${shape.name} equip 失败：${eq.stderr}`
         const eqChk = await runNode('equip.mjs', [dir, '--check'])
         if (eqChk.status !== 0) return `${shape.name} equip --check 失败：${eqChk.stdout}${eqChk.stderr}`

@@ -2,7 +2,7 @@
 /**
  * compose-agents.mjs —— 生成或刷新目标项目的 AGENTS.md。
  *
- * - 支持 `--tier lightweight|full` 求值 `is-lightweight` / `is-full`。
+ * - 统一单一紧凑契约体系，仅按项目真实属性（有无远端、是否发版、多包、多语等）条件渲染。
  * - 兼容 `.pf-manifest.json` v1/v2：按 `disabledSkills` 从意图路由过滤已禁用技能，
  *   按 `removedAgentsRegions` 跳过用户主动删除的区间，无基线时对既有非空区段默认 `protect`。
  * - `--check` / `--status` / `--clean` / `--upgrade` 保持幂等与写前仓外快照保护。
@@ -34,7 +34,6 @@ import {
 } from './lib/agents-sections.mjs'
 
 const { LIKELY_DEFAULT_BRANCHES, markerRegions, parseMarkers, stripMarkers } = protocol
-const EQUIP_TIERS = protocol.EQUIP_TIERS ?? ['lightweight', 'full']
 const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
 const AGENTS_WARN_BYTES = protocol.AGENTS_WARN_BYTES ?? 24576
 const PF_MANIFEST_REL = protocol.PF_MANIFEST_REL ?? '.agents/skills/.pf-manifest.json'
@@ -92,17 +91,6 @@ function readManifestSafe(root) {
   }
 }
 
-function resolveEffectiveTier(explicitTier, manifest, facts) {
-  if (explicitTier) return explicitTier
-  const mTier = !manifest?.invalid ? manifest?.data?.tier : undefined
-  if (EQUIP_TIERS.includes(mTier)) return mTier
-  const kTier = facts?.kit?.tier
-  if (EQUIP_TIERS.includes(kTier)) return kTier
-  const fTier = facts?.tier
-  if (EQUIP_TIERS.includes(fTier)) return fTier
-  return 'full'
-}
-
 function writeManifestRegions(root, agentsText, protectedIds = [], removedIds = []) {
   const manifest = readManifestSafe(root)
   if (!manifest || manifest.invalid) return false
@@ -146,7 +134,7 @@ function writeManifestRegions(root, agentsText, protectedIds = [], removedIds = 
 
 export { buildVars }
 
-export function buildConditions(facts, { tier } = {}) {
+export function buildConditions(facts) {
   const commands = facts.commands ?? {}
   const plan = commandPlanOf(facts)
   const hasCommands = plan.block.trim().length > 0
@@ -155,7 +143,6 @@ export function buildConditions(facts, { tier } = {}) {
   const tags = facts.git?.tags ?? []
   const hasRemote = Boolean(facts.git?.remote) && facts.git?.isRepoRoot !== false && !facts.git?.localMode
   const hasCustomSkills = customSkillsOf(facts).length > 0
-  const effectiveTier = resolveEffectiveTier(tier, null, facts)
 
   return {
     'has-commands': hasCommands,
@@ -175,22 +162,19 @@ export function buildConditions(facts, { tier } = {}) {
     'has-bilingual-docs': Boolean(facts.docs?.readmePair),
     'has-custom-skills': hasCustomSkills,
     'has-exploration-strategy': explorationStrategyBlock(facts).length > 0,
-    'is-lightweight': effectiveTier === 'lightweight',
-    'is-full': effectiveTier === 'full',
   }
 }
 
-export function renderAgentsTemplate(facts, templateText, root, { tier, manifest, kitDir } = {}) {
+export function renderAgentsTemplate(facts, templateText, root, { manifest, kitDir } = {}) {
   const targetRoot = root || facts?.target?.path
   const resolvedManifest = manifest ?? (targetRoot ? readManifestSafe(targetRoot) : null)
-  const effectiveTier = resolveEffectiveTier(tier, resolvedManifest, facts)
   const rendered = renderTemplate(
     templateText,
-    buildConditions(facts, { tier: effectiveTier }),
-    buildVars(facts, root, { tier: effectiveTier, kitDir }),
+    buildConditions(facts),
+    buildVars(facts, root, { kitDir }),
     'template.md',
   )
-  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, effectiveTier, targetRoot, { kitDir }))
+  return filterIntentRouting(rendered, excludedSkillsFor(facts, resolvedManifest, targetRoot, { kitDir }))
 }
 
 function volatileValues(facts) {
@@ -280,7 +264,6 @@ async function main(argv) {
   let mode = 'default'
   let verbose = false
   let noBackup = false
-  let explicitTier
   let restoreRegions = false
   let adoptCustom = false
   let allowCustomOversize = false
@@ -292,7 +275,6 @@ async function main(argv) {
         '用法：node scripts/compose-agents.mjs [目标目录] [选项]',
         '',
         '  （默认）                   文件不存在就建一份；已存在就刷新还带占位的区间、补上新增的节',
-        '  --tier <lightweight|full>  按档位渲染（is-lightweight / is-full）',
         '  --adopt-custom [id,...]    将手工修改/保护的受管区头标为 customized 并写入 manifest 基线',
         '  --allow-custom-oversize    当受管区本身 <= 30KB 且超限源自项目自定义长文时放行刷新与校验',
         '  --restore-regions          允许重新补回此前已记入 removedAgentsRegions 的区间',
@@ -328,18 +310,11 @@ async function main(argv) {
       const ids = arg.slice('--adopt-custom='.length).split(',').map((s) => s.trim()).filter(Boolean)
       adoptCustom = ids.length > 0 ? [...(Array.isArray(adoptCustom) ? adoptCustom : []), ...ids] : true
     } else if (arg === '--verbose') verbose = true
-    else if (arg === '--tier') explicitTier = argv[++i]
-    else if (arg.startsWith('--tier=')) explicitTier = arg.slice('--tier='.length)
     else if (!arg.startsWith('-') && !targetSpecified) { target = arg; targetSpecified = true }
     else {
       process.stderr.write(`未知选项：${arg}（用 --help 看用法）\n`)
       return 2
     }
-  }
-
-  if (explicitTier !== undefined && !EQUIP_TIERS.includes(explicitTier)) {
-    process.stderr.write(`--tier 必须是 ${EQUIP_TIERS.join(' | ')} 之一（收到：${explicitTier}）\n`)
-    return 2
   }
 
   const root = resolve(target)
@@ -350,14 +325,6 @@ async function main(argv) {
   const agentsPath = join(root, 'AGENTS.md')
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
   const manifest = readManifestSafe(root)
-  const manifestTier = !manifest?.invalid ? manifest?.data?.tier : undefined
-  if (explicitTier !== undefined && EQUIP_TIERS.includes(manifestTier) && explicitTier !== manifestTier) {
-    process.stderr.write(
-      `TIER_CONFLICT: --tier ${explicitTier} 与 ${PF_MANIFEST_REL} 记录的 tier (${manifestTier}) 冲突；`
-      + `请先运行 equip.mjs --tier ${explicitTier} 同步工具包档位，或移除与 manifest 不一致的 --tier 参数。\n`,
-    )
-    return 2
-  }
 
   if (!existsSync(agentsPath)) {
     if (mode === 'status' || mode === 'check') {
@@ -368,7 +335,7 @@ async function main(argv) {
       process.stdout.write('没有 AGENTS.md，无从清理或追加。要生成就跑一次不带参数。\n')
       return 0
     }
-    return await generate(root, agentsPath, template, { tier: explicitTier, manifest })
+    return await generate(root, agentsPath, template, { manifest })
   }
 
   const existing = (readTextSafe(agentsPath) ?? '').replace(/\r\n/g, '\n')
@@ -393,7 +360,7 @@ async function main(argv) {
   let facts
   try {
     facts = await factsOf(root)
-    rendered = renderAgentsTemplate(facts, template, root, { tier: explicitTier, manifest })
+    rendered = renderAgentsTemplate(facts, template, root, { manifest })
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
@@ -618,11 +585,11 @@ async function factsOf(root) {
   return survey(root)
 }
 
-async function generate(root, agentsPath, template, { tier, manifest } = {}) {
+async function generate(root, agentsPath, template, { manifest } = {}) {
   let content
   try {
     const facts = await factsOf(root)
-    content = renderAgentsTemplate(facts, template, root, { tier, manifest })
+    content = renderAgentsTemplate(facts, template, root, { manifest })
   } catch (error) {
     process.stderr.write(`模板渲染失败：${error instanceof Error ? error.message : String(error)}\n`)
     return 2
@@ -648,11 +615,11 @@ async function generate(root, agentsPath, template, { tier, manifest } = {}) {
   return 0
 }
 
-export async function contractHealth(root, { tier, facts: precomputedFacts } = {}) {
+export async function contractHealth(root, { facts: precomputedFacts } = {}) {
   const template = readFileSync(TEMPLATE_PATH, 'utf8').replace(/\r\n/g, '\n')
   const facts = precomputedFacts ?? await factsOf(root)
   const manifest = readManifestSafe(root)
-  const rendered = renderAgentsTemplate(facts, template, root, { tier, manifest })
+  const rendered = renderAgentsTemplate(facts, template, root, { manifest })
   const agentsPath = join(root, 'AGENTS.md')
   const removedSet = new Set(!manifest?.invalid && Array.isArray(manifest?.data?.removedAgentsRegions)
     ? manifest.data.removedAgentsRegions : [])

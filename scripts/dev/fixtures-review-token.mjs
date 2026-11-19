@@ -1,5 +1,5 @@
 /**
- * fixtures-issue52.mjs —— Issue #52（C1..C4 独立审查令牌、Issue/PR 上下文持久化、PR SHA Diff 与契约一致性）双向夹具。
+ * fixtures-review-token.mjs —— 独立审查令牌、Issue/PR 上下文持久化、PR SHA Diff 与契约一致性双向夹具。
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -362,7 +362,7 @@ export function registerIssue52Cases(cases) {
     } finally { fakeGh.cleanup(); rmTree(dir) }
   }])
 
-  cases.push(['C4：compose-agents --tier 冲突拦截与意图路由缺技能 SKILL.md 死链检测', async () => {
+  cases.push(['C4：compose-agents 意图路由缺技能 SKILL.md 死链检测', async () => {
     const dir = tmpProject({
       '.gitignore': '.worktrees/\nnode_modules/\n',
       'package.json': '{"name":"c4-demo","version":"1.0.0","private":true,"scripts":{"test":"exit 0"}}\n',
@@ -371,25 +371,15 @@ export function registerIssue52Cases(cases) {
     })
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
-      const eq = await runNode('equip.mjs', [dir, '--tier', 'full', '--no-backup'])
-      if (eq.status !== 0) return `equip full 失败：${eq.stderr}`
+      const eq = await runNode('equip.mjs', [dir, '--no-backup'])
+      if (eq.status !== 0) return `equip 失败：${eq.stderr}`
       const comp = await runNode('compose-agents.mjs', [dir, '--no-backup'])
       if (comp.status !== 0) return `compose-agents 失败：${comp.stderr}`
       writeFileSync(join(dir, 'AGENTS.md'), readFileSync(join(dir, 'AGENTS.md'), 'utf8').replace(/^<!-- project-forge: fill [^\n]*-->$/gm, '已填写。'))
       const chkOk = await runNode('compose-agents.mjs', [dir, '--check'])
       if (chkOk.status !== 0) return `一致仓 compose-agents --check 失败：${chkOk.stderr}`
 
-      // 1. --tier 与 .pf-manifest.json tier 冲突
-      const mismatch = await runNode('compose-agents.mjs', [dir, '--check', '--tier', 'lightweight'])
-      if (mismatch.status === 0 || !mismatch.stderr.includes('TIER_CONFLICT')) {
-        return `--tier 与 manifest 冲突未阻断：exit=${mismatch.status} err=${mismatch.stderr}`
-      }
-      const mismatchWrite = await runNode('compose-agents.mjs', [dir, '--tier', 'lightweight', '--no-backup'])
-      if (mismatchWrite.status === 0 || !mismatchWrite.stderr.includes('TIER_CONFLICT')) {
-        return `生成阶段 --tier 与 manifest 冲突未阻断：exit=${mismatchWrite.status} err=${mismatchWrite.stderr}`
-      }
-
-      // 2. 删除 .agents/skills/dev-review 但未更新 manifest -> --check 检出死链并失败
+      // 1. 删除 .agents/skills/dev-review 但未更新 manifest -> --check 检出死链并失败
       rmTree(join(dir, '.agents', 'skills', 'dev-review'))
       const deadChk = await runNode('compose-agents.mjs', [dir, '--check'])
       if (deadChk.status === 0 || !deadChk.stderr.includes('.agents/skills/dev-review/SKILL.md')) {

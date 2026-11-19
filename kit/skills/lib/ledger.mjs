@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 import {
-  canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots, samePath, withFileLock, writeJsonAtomic,
+  canonicalPath, gitRun, posixPath, readJsonSafe, readTextSafe, resolveRepoRoots, samePath, withFileLock, withFileLockSync, writeJsonAtomic,
 } from './git.mjs'
 import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
@@ -206,6 +206,7 @@ export function createDefaultLedger(partial = {}) {
     visualVerifiedHead: partial.visualVerifiedHead ?? null,
     visualCheckEvidence: partial.visualCheckEvidence ?? null,
     implementerId: partial.implementerId ?? null,
+    claimedBy: partial.claimedBy ?? null,
     reviewerId: partial.reviewerId ?? null,
     /**
      * 探索证据：这个任务开干之前，有没有人真的读过这个仓。
@@ -270,7 +271,7 @@ export function recordMountedDepsInLedger(ledger, worktreeRel, mountResult) {
   return normalizedPaths
 }
 
-export function writeTaskLedger(mainRoot, ledger) {
+function writeTaskLedgerUnlocked(mainRoot, ledger) {
   const p = taskLedgerPath(mainRoot, ledger.taskId)
   const existing = readJsonSafe(p)
   const safeInput = { ...ledger }
@@ -299,6 +300,13 @@ function resolveLedgerLockDir(mainRoot) {
   return join(mainRoot, '.worktrees', '.state', 'locks')
 }
 
+/** 加锁同步兼容写封装：内部经与 `updateTaskLedger` 相同的互斥锁落盘，供尚未迁移的同步调用方平滑过渡。 */
+export function writeTaskLedger(mainRoot, ledger) {
+  const id = sanitizeTaskId(ledger.taskId)
+  const lockPath = join(resolveLedgerLockDir(mainRoot), `ledger-${id}.lock`)
+  return withFileLockSync(lockPath, () => writeTaskLedgerUnlocked(mainRoot, { ...ledger, taskId: id }))
+}
+
 /** 原子读取、转换并写回任务账本（防止直接裸写丢失契约默认值，且经文件锁防并发竞态）。 */
 export async function updateTaskLedger(mainRoot, taskId, updater, { createIfMissing = false, defaults = {} } = {}) {
   const id = sanitizeTaskId(taskId)
@@ -318,7 +326,7 @@ export async function updateTaskLedger(mainRoot, taskId, updater, { createIfMiss
       }
     }
     const merged = createDefaultLedger({ ...base, ...next, taskId: id })
-    const path = writeTaskLedger(mainRoot, merged)
+    const path = writeTaskLedgerUnlocked(mainRoot, merged)
     return { ledger: readTaskLedger(mainRoot, id) ?? merged, path }
   })
 }

@@ -26,11 +26,11 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 
 ## 三、托管 Skill 套装升级与退役自净化
 
-日常研发流技能套装由 `equip.mjs` 从本工具 `kit/skills/` 按档位（`lightweight` / `full`）装配至 `<目标目录>/.agents/skills/`，并通过 `.agents/skills/.pf-manifest.json`（`schemaVersion: 2`，记录 `tier`、`files`、`disabledSkills`、`removedFiles`、`customizedFiles`、`agentsRegions` 与 `removedAgentsRegions`）实现幂等与跨月重入安全升级（文本统一按 LF 写入，校验兼容 CRLF/LF 归一等价）：
+日常研发流技能套装由 `equip.mjs` 从本工具 `kit/skills/` 统一装配至 `<目标目录>/.agents/skills/`，并通过 `.agents/skills/.pf-manifest.json`（`schemaVersion: 2`，记录 `files`、`disabledSkills`、`removedFiles`、`customizedFiles`、`agentsRegions` 与 `removedAgentsRegions`）实现幂等与跨月重入安全升级（文本统一按 LF 写入，校验兼容 CRLF/LF 归一等价）：
 
 | 本地文件现场状态 | `equip.mjs` 执行动作 | 安全边界 |
 | --- | --- | --- |
-| 目标文件尚不存在（且不在墓碑中） | 复制写入并登记新 SHA256 | 按选定档位装配；随时可 `--tier full` 无损升档补齐 |
+| 目标文件尚不存在（且不在墓碑中） | 复制写入并登记新 SHA256 | 统一完整装配全部已落盘研发技能 |
 | 用户已删除的整套技能或单文件 | 记入 `disabledSkills` / `removedFiles` 墓碑并跳过 | **绝不擅自恢复**；仅在显式传 `--restore [pathOrSkill]` 时找回 |
 | 当前哈希 === 旧 manifest 哈希 | 无损升级为新版（`diskHash === src.sha256` 自动收敛） | 同哈希跳过保幂等，修复中断导致的基线漂移 |
 | 已通过 `--adopt-custom` 登记定制 | 登记进 `customizedFiles`；`--check` 返回 `0` | 若上游新版有变化仅提示「可供参考合并」，不阻塞门禁 |
@@ -42,7 +42,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 
 ## 四、交棒前四步清单
 
-1. **契约、装配与治理自检**：确认 `compose-agents.mjs <项目> --check`、`equip.mjs <项目> --check`（定制文件已登记 `--adopt-custom` 后同样通过）、`review.mjs <项目>` 与按需 `govern-audit.mjs`（支持基线增量与 `--changed` 模式）均达标，且 `AGENTS.md` 处于对应档位预算内；
+1. **契约、装配与治理自检**：确认 `compose-agents.mjs <项目> --check`、`equip.mjs <项目> --check`（定制文件已登记 `--adopt-custom` 后同样通过）、`review.mjs <项目>` 与按需 `govern-audit.mjs`（支持基线增量与 `--changed` 模式）均达标，且 `AGENTS.md` 处于体积预算内（`<= 30KB`，建议 `< 24KB`）；
 2. **清理临时标记（可选）**：若不再保留 `AGENTS.md` 上的受管引导注释，跑 `compose-agents.mjs <项目> --clean`（写前先经 `backup.mjs` 快照，只剥标记行、正文一字不动）；若项目继续使用 `.agents/skills/` 日常研发套件，**保留 `.agents/skills/.pf-manifest.json` 供后续升档与 `--check` 使用**（`handoff.mjs` 不将其计为残留痕迹）；若要彻底脱离工具追踪，再显式删除该清单文件；
 3. **验证无残留**：跑 `handoff.mjs <项目> --verify` 确认退出码为 `0`（或本工具源码自扫 `4`；仓外备份目录与 `.worktrees/` 共享依赖挂载不触发误报或截断）；
 4. **遗留工作树提示**：若 `.worktrees/` 下仍有已合任务的残留目录，**按 `merged` / `squash_or_rebase_merged` / `no_own_commits` / `unmerged` 四态列出清单并请人确认后通过 `flow.mjs cleanup --confirm` 先解绑共享依赖再卸除**，绝不擅自硬删。

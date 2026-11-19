@@ -1,7 +1,7 @@
 /**
  * workflow-policy.mjs —— L3 纯策略判定、分层实证 evidence.json 校验、无 CI 低风险静态检查与状态路由核心。
  *
- * 严格零第三方依赖（仅 Node 18+ 内置模块），不依赖 dev-govern，确保 lightweight 档位完整可用。
+ * 严格零第三方依赖（仅 Node 18+ 内置模块），不依赖 dev-govern，确保全模式稳定可用。
  */
 
 import { existsSync, readdirSync } from 'node:fs'
@@ -23,6 +23,8 @@ import {
   hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
   redactDiagnosticText,
+  resolveEffectiveBaseSha,
+  resolveReadablePrTitle,
   scanUnstartedReadySlices,
   scoreExecutionResult,
   validatePreMergeShaAndWorktree,
@@ -38,6 +40,8 @@ export {
   hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
   redactDiagnosticText,
+  resolveEffectiveBaseSha,
+  resolveReadablePrTitle,
   scanUnstartedReadySlices,
   scoreExecutionResult,
   validatePreMergeShaAndWorktree,
@@ -599,8 +603,8 @@ export function evaluateNextState({
       phase = 'blocked'
       ownerRole = 'human'
       blockingReasons.push('BLOCKED_REQUIRES_DEV_REVIEW')
-      nextAction = '当前项目为 lightweight 档且未装配 dev-review，外部 PR 不可信扫描与隔离审查须先通过 project-forge 升级为 full 档'
-      command = 'equip --tier full'
+      nextAction = '当前项目未装配 dev-review 技能，外部 PR 不可信扫描与隔离审查须先通过 project-forge 运行 equip 补齐完整技能集'
+      command = 'node scripts/equip.mjs .'
     } else {
       ownerRole = 'reviewer'
       if (!reviewCoversHead) {
@@ -697,7 +701,7 @@ export function evaluateNextState({
     phase = 'ready-to-merge'
     ownerRole = policy?.humanApprovalRequired ? 'human' : 'reviewer'
     nextAction = policy?.humanApprovalRequired
-      ? 'lightweight 档触及高风险/one-way 边界，请人类确认后带 --human-approved --reason "<确认原因>" 执行 merge'
+      ? '当前仓库未装配 dev-review 且触及高风险/one-way 边界，请人类确认后带 --human-approved --reason "<确认原因>" 执行 merge'
       : (policy?.independentReviewRequired === false
         ? '门禁与实证全部就绪，可执行 merge 完成合并'
         : '门禁与审查全部就绪，由审查者执行 merge 完成合并')

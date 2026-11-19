@@ -134,7 +134,7 @@ cases.push(['装套件前后 codeFiles 与 tier 完全相同（工具产物不�
   gitInit(dir, { branch: 'main' })
   try {
     const before = await survey(dir)
-    const equip = await runAbsAsync('scripts/equip.mjs', [dir, '--tier', 'full'])
+    const equip = await runAbsAsync('scripts/equip.mjs', [dir])
     if (equip.status !== 0) return `equip 失败：${equip.stderr}`
     const after = await survey(dir)
     if (before.scale.codeFiles !== after.scale.codeFiles) {

@@ -26,7 +26,7 @@
 | **先澄清，再按八步推进** | 按需求、澄清、设计、实现、评审、实证测试、验收、合并的顺序推进。复杂需求先建议建 PRD，多轮澄清待拍板事项并经全历史换人、3 轮停损的独立 Critique 审核后再隔离开工 |
 | **全 Worktree 隔离与实证** | 有提交历史默认进入 `.worktrees/` 隔离槽复用，谁改代码谁认领并负责提 PR，推分支后零跟踪文件写脏；合入前须齐备通用运行+观察 E2E（`--e2e-evidence`）、双门独立审查、三方 `headSha` 校核、Mermaid `16/12` 与跨平台 CI 检查 |
 | **本地 / 非 GitHub 自适应** | 统一 `TaskBackend` 适配 GitHub、纯本地无远端和 `generic-git`（非 GitHub 远端不越权在本地强合主干）；还支持外部 Issue+PR 互链防重、堆叠 PR 与并行波次 |
-| **两档配置与复盘下沉** | 个人小仓库只装 `lightweight`（`< 14KB` 契约 + 3 个技能），随时 `--tier full` 补到 5 个。运行期间的门禁与返工信号自动记入 `signals.jsonl`，可通过 `retro` 提取规则补丁 |
+| **统一装配与复盘下沉** | 统一装配全套已落盘研发技能（零双档裁剪割裂，默认契约 `< 24KB`），按仓库真实协作态跳过不适用的多人模板。运行期门禁与返工信号自动记入 `signals.jsonl`，可通过 `retro` 提取规则补丁 |
 
 ## 目录
 
@@ -50,7 +50,7 @@
   <img src="assets/readme/architecture.svg" alt="五个日常技能的先后分工与合入前四项实证要求" width="100%">
 </p>
 
-日常研发按 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八个阶段推进。`lightweight` 档装前三个技能，`full` 档装全部五个；直接用自然语言说明意图，或直接粘贴 Issue、PR 与 Milestone 链接，`AGENTS.md` 会路由到对应技能（多切片就绪时主会话保持薄上下文纯调度，默认并行分波派发）。
+日常研发按 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八个阶段推进。`equip` 统一装配全部已落盘技能，直接用自然语言说明意图，或直接粘贴 Issue、PR 与 Milestone 链接，`AGENTS.md` 会路由到对应技能（支持零写入 `doc-locate` 按需定位、`flow intake` 业务分诊，多切片就绪时主会话保持薄上下文纯调度，默认并行分波派发）。
 
 假设你要给项目加一个「导出 CSV」的功能：
 
@@ -167,10 +167,10 @@ PF_UPDATE_SOURCE="https://github.com/<owner>/project-forge"
 
 | 脚本 | 用途 |
 | --- | --- |
-| `node scripts/survey.mjs <目录>` | 只读盘点结构、文档、远端拓扑、认证状态与推荐档位 |
+| `node scripts/survey.mjs <目录>` | 只读盘点结构、文档、远端拓扑与认证状态 |
 | `node scripts/backup.mjs create <目录>` | 在仓库外部创建增量压缩快照 |
-| `node scripts/equip.mjs <目录> [--tier lightweight\|full]` | 装配或无损升档 `.agents/skills/`（支持 `--check`、`--adopt-custom`、`--restore`） |
-| `node scripts/compose-agents.mjs <目录> [--tier lightweight\|full]` | 生成或无损刷新 `AGENTS.md`（`lightweight < 14KB`、`full <= 30KB`） |
+| `node scripts/equip.mjs <目录>` | 统一装配或无损刷新 `.agents/skills/`（支持 `--check`、`--adopt-custom`、`--restore`） |
+| `node scripts/compose-agents.mjs <目录>` | 生成或无损刷新 `AGENTS.md`（目标 `< 24KB`，硬上限 `<= 30KB`） |
 | `node scripts/review.mjs <目录>` | 交付体检：规范齐备度与声明回查 |
 | `node scripts/handoff.mjs <目录>` | 清理引导标记与临时残留，方便交棒 |
 | `node scripts/sync-toc.mjs README.md README.en.md` | 同步双语 README 的目录锚点 |

@@ -14,7 +14,6 @@
 import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { claimsOf } from './lib/claims.mjs'
 import { computeNavigation } from './lib/render.mjs'
 import * as protocol from './lib/protocol.mjs'
 import {
@@ -40,32 +39,13 @@ import {
   resolveWorkspaceIdentity,
 } from './lib/platform/index.mjs'
 import {
-  detectArtifacts,
-  detectEcosystem,
-  detectTaskEntriesDetailed,
-  detectUniversalCommands,
-  detectWorkspace,
-} from './lib/survey-ecosystem.mjs'
-import {
   classifyHomePath,
   detectConventions,
-  detectDocs,
   detectGit,
   finalizeWalkWorkspace,
-  scanWorkspaceRaw,
 } from './lib/survey-workspace.mjs'
-import {
-  collectTopModuleDirs,
-  detectKit,
-  detectLocalSkills,
-  detectStaleAgentScripts,
-  detectTddStalePaths,
-  isReentryProject,
-} from './lib/survey-reentry.mjs'
-import {
-  computeExplorationStrategy,
-  computeRecommendedTier,
-} from './lib/survey-plan.mjs'
+import { detectReentry, scanProjectStaticFacts } from './lib/survey-scan.mjs'
+import { computeExplorationStrategy } from './lib/survey-plan.mjs'
 import {
   flushAndExit,
   githubRepoPath,
@@ -76,76 +56,6 @@ import {
 } from './lib/text.mjs'
 
 const AGENTS_MAX_BYTES = protocol.AGENTS_MAX_BYTES ?? 30720
-
-function detectReentry(root, { docs, kit, ecosystem, commandsByEcosystem, workspace, ws, taskEntryMeta }) {
-  const isReentry = isReentryProject(docs, kit, root)
-  const agentsText = docs?.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
-  const tddText = docs?.tdd ? (readTextSafe(join(root, docs.tdd)) ?? '') : ''
-
-  let staleAgentPaths = []
-  let staleAgentScripts = []
-  let agentClaims
-  if (agentsText) {
-    agentClaims = claimsOf(agentsText)
-    // 三类不算「契约失约」：
-    //
-    //   - **工具自己装的东西**（`.agents/**`）：它的存在与否由 `equip` 决定，不由项目决定。
-    //     算进来的直接后果是「生成一次契约，contract 里就多出十几条失效路径」，
-    //     而生成契约这个动作本身把仓从「干净」推成了「漂移」——因果是倒的。
-    //   - **写着「若存在」的路径**：契约原文就没承诺它一定在。
-    //   - **工具建的骨架**（`docs/prd/.gitkeep` 一类）：存在不代表有内容，缺席也不代表失约。
-    const optional = new Set(agentClaims.optionalPaths ?? [])
-    const combinedRefs = [...new Set([
-      ...(agentClaims.paths ?? []),
-      ...(agentClaims.dirs ?? []).map((d) => d.replace(/\/+$/, '')),
-    ])]
-      .filter((p) => !protocol.isToolOwnedPath(p))
-      .filter((p) => !optional.has(p))
-      .sort()
-    staleAgentPaths = combinedRefs.filter((p) => !existsSync(join(root, p)))
-    staleAgentScripts = detectStaleAgentScripts({
-      agentsText,
-      agentClaims,
-      ecosystem,
-      commandsByEcosystem,
-      taskEntryMeta,
-    })
-  }
-
-  const staleTddPaths = detectTddStalePaths(root, docs?.tdd)
-
-  let unregisteredTopDirs = []
-  if (docs?.agents && (docs.agentsMarkers?.fills?.length ?? 0) === 0 && (ws?.codeFiles ?? 0) > 0) {
-    const combinedDocText = `${agentsText}\n${tddText}`
-    for (const candidate of collectTopModuleDirs(root, workspace)) {
-      const leaf = candidate.includes('/') ? candidate.split('/').pop() : candidate
-      const leafPrefixRe = leaf
-        ? new RegExp(`(?<![A-Za-z0-9_-])${leaf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`)
-        : undefined
-      const mentioned = combinedDocText.includes(candidate)
-        || (leafPrefixRe ? leafPrefixRe.test(combinedDocText) : false)
-      if (!mentioned) unregisteredTopDirs.push(candidate)
-    }
-  }
-
-  const drifted = Boolean(
-    staleAgentPaths.length
-    || staleAgentScripts.length
-    || staleTddPaths.length
-    || kit?.drifted
-    || kit?.versionMismatch,
-  )
-
-  return {
-    isReentry,
-    staleAgentPaths,
-    staleAgentScripts,
-    staleTddPaths,
-    unregisteredTopDirs,
-    preservedForeignPlanDocs: docs?.preservedForeignPlanDocs ?? [],
-    drifted,
-  }
-}
 
 export function computeArtifactPlan(facts) {
   const maturity = facts?.maturity ?? 'partial'
@@ -158,7 +68,6 @@ export function computeArtifactPlan(facts) {
   const commands = facts?.commands ?? {}
   const kit = facts?.kit ?? {}
   const reentry = facts?.reentry ?? {}
-  const recommendedTier = facts?.recommendedTier ?? kit?.recommendedTier ?? 'lightweight'
   const isEmpty = maturity === 'empty' || ((scale.totalFiles ?? 0) === 0 && (git.commits ?? 0) === 0)
   const items = []
 
@@ -187,7 +96,7 @@ export function computeArtifactPlan(facts) {
       : { id: 'git-baseline', artifact: '.git / .gitattributes / .gitignore', status: '已就绪', action: 'preserve', detail: '版本库、.gitattributes 与 .gitignore 均已到位，保持现状' })
   }
 
-  // 3. 受管 .agents/skills/ 与自有扩展技能（支持 v2 墓碑/定制与两档渐进装配）
+  // 3. 受管 .agents/skills/ 与自有扩展技能（统一全量装配 + v2 墓碑/定制保护）
   const customSkills = kit.customSkills ?? []
   const customNote = customSkills.length > 0
     ? `；原样保留自有扩展技能（${customSkills.map((s) => s.path).join('、')}）`
@@ -198,11 +107,11 @@ export function computeArtifactPlan(facts) {
   if (!kit.manifestExists && hasDecision(facts, 'no-kit')) {
     items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已在取舍中豁免（no-kit）', action: 'skip', detail: 'AGENTS.md「取舍」已明确不装配本地技能套件' })
   } else if (!kit.manifestExists) {
-    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `未装配（推荐 ${recommendedTier} 档）`, action: 'equip', detail: `运行 equip.mjs --tier ${recommendedTier} 写入受管技能并生成 .pf-manifest.json（v2）${customNote}` })
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '未装配', action: 'equip', detail: `运行 equip.mjs 统一装配全部已落盘研发技能并生成 .pf-manifest.json（v2）${customNote}` })
   } else if (kit.corrupted || kit.drifted || kit.versionMismatch || (kit.missingFiles?.length ?? 0) > 0) {
-    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `已装配 ${kit.tier ?? 'full'} 档（需无损升级/修复）`, action: 'upgrade', detail: `运行 equip.mjs 三态升级：未改文件升新、用户定制与删除墓碑严格保留、退役文件自净化${customNote}` })
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: '已装配（需无损升级/修复）', action: 'upgrade', detail: `运行 equip.mjs 三态升级：未改文件升新、用户定制与删除墓碑严格保留、退役文件自净化${customNote}` })
   } else {
-    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `已就绪（${kit.tier ?? 'full'} 档，${kit.managedSkills?.length ?? 0} 个受管技能${customizedNote}）`, action: 'preserve', detail: `与当前版本基线一致${customNote}` })
+    items.push({ id: 'kit-skills', artifact: '.agents/skills/', status: `已就绪（${kit.managedSkills?.length ?? 0} 个受管技能${customizedNote}）`, action: 'preserve', detail: `与当前版本基线一致${customNote}` })
   }
 
   // 4. docs/TDD.md 与存量设计文档
@@ -236,7 +145,7 @@ export function computeArtifactPlan(facts) {
   if (!docs.agents && isEmpty) {
     items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: '空目录（待项目起步后生成）', action: 'skip', detail: '先完成空目录起步骨架与源码后，再运行 compose-agents.mjs 合成契约' })
   } else if (!docs.agents) {
-    items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: `缺失（推荐 ${recommendedTier} 档）`, action: 'create', detail: `运行 compose-agents.mjs --tier ${recommendedTier} 生成受管区间并按真实事实填实空白位${otherNote}` })
+    items.push({ id: 'agents-contract', artifact: 'AGENTS.md', status: '缺失', action: 'create', detail: `运行 compose-agents.mjs 生成紧凑受管契约并按真实事实填实空白位${otherNote}` })
   } else {
     const driftReasons = []
     if ((reentry.staleAgentPaths?.length ?? 0) > 0) driftReasons.push('失效路径')
@@ -425,7 +334,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
 
-  // 先派生 git 子进程，与本地磁盘扫描（文件树、生态、文档、套件）并发推进
+  // 先派生 git 子进程，与本地磁盘单趟扫描并发推进
   const gitPromise = detectGit(root, {
     probeAuth: opts.probeAuth === true,
     verifyToken: opts.verifyToken === true,
@@ -434,17 +343,10 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     offline: opts.offline,
     fastUnbornStatus: opts.fastUnbornStatus === true,
   })
-  const rawWs = scanWorkspaceRaw(root)
-  const relFiles = rawWs.files.map((f) => f.rel)
-  const ecosystem = detectEcosystem(root, relFiles)
-  const taskEntryMeta = detectTaskEntriesDetailed(root)
-  const taskCommands = taskEntryMeta.commands
-  const docs = detectDocs(root, { files: relFiles })
-  const workspace = detectWorkspace(root, relFiles)
-  const kit = detectKit(root)
-  const localSkills = detectLocalSkills(root)
-  const artifacts = detectArtifacts(root, ecosystem, relFiles)
-  const universal = detectUniversalCommands(root)
+  const {
+    rawWs, ecosystem, taskEntryMeta, taskCommands, docs, workspace,
+    kit, localSkills, artifacts, universal, agentsText, tddText,
+  } = scanProjectStaticFacts(root)
 
   const gitFacts = await gitPromise
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
@@ -503,6 +405,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     workspace,
     ws,
     taskEntryMeta,
+    agentsText,
+    tddText,
   })
 
   const gitIdentityOut = {
@@ -511,14 +415,11 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     ...(role.teamProbeHint ? { teamProbeHint: role.teamProbeHint } : {}),
   }
 
-  const agentsText = docs.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
   const decisions = Object.fromEntries(readDecisionMap(agentsText))
 
   const facts = {
     target: { path: root, name: ecosystem.projectName, dirName: basename(root) },
     maturity: 'partial',
-    recommendedTier: 'lightweight',
-    recommendedTierReason: '',
     decisions,
     git: {
       available: gitFacts.available,
@@ -623,11 +524,6 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   facts.projectGapsComputed = true
   facts.maturity = judgeMaturity(facts)
 
-  const tierRec = computeRecommendedTier(facts, root)
-  facts.recommendedTier = tierRec.recommendedTier
-  facts.recommendedTierReason = tierRec.reason
-  facts.kit.recommendedTier = tierRec.recommendedTier
-
   facts.explorationStrategy = computeExplorationStrategy(facts)
   facts.artifactPlan = computeArtifactPlan(facts)
   facts.needsHuman = summarizeNeedsHuman(facts)
@@ -649,7 +545,6 @@ export {
   judgeRole,
   main as runCli,
   computeExplorationStrategy,
-  computeRecommendedTier,
   classifyHomePath,
   readTextSafe,
   readJsonSafe,

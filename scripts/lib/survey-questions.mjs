@@ -193,7 +193,6 @@ export function computeS3NextStep(facts) {
   const git = facts?.git ?? {}
   const hooks = git.hooks ?? {}
   const targetPath = facts?.target?.path || '.'
-  const tier = facts?.recommendedTier ?? facts?.kit?.recommendedTier ?? 'lightweight'
   const isEmpty = facts?.maturity === 'empty'
     || ((facts?.scale?.totalFiles ?? 0) === 0 && (git.commits ?? 0) === 0)
 
@@ -205,8 +204,8 @@ export function computeS3NextStep(facts) {
 
   const quotedTarget = /\s/.test(targetPath) ? `"${targetPath}"` : targetPath
   const equipCommand = isEmpty
-    ? `node scripts/equip.mjs ${quotedTarget} --bootstrap-empty --tier ${tier}${withHooks ? ' --with-hooks' : ''}`
-    : `node scripts/equip.mjs ${quotedTarget} --tier ${tier}${withHooks ? ' --with-hooks' : ''}`
+    ? `node scripts/equip.mjs ${quotedTarget} --bootstrap-empty${withHooks ? ' --with-hooks' : ''}`
+    : `node scripts/equip.mjs ${quotedTarget}${withHooks ? ' --with-hooks' : ''}`
 
   const canProtectApi = Boolean(
     git.present === true

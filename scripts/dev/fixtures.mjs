@@ -4,77 +4,49 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { cpus, tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { flushAndExit } from '../../kit/skills/lib/cli.mjs'
 import { killProcessTree, supportsSafeDetachedSpawn } from '../../kit/skills/lib/exec.mjs'
 import { initTestBackupDir, traceFixtureStage } from './fixtures-helpers.mjs'
-import { registerCoreCases } from './fixtures-core.mjs'
-import { registerSurveyCases } from './fixtures-survey.mjs'
-import { registerContractCases } from './fixtures-contracts.mjs'
-import { registerReviewCases } from './fixtures-review.mjs'
-import { registerReviewContractsCases } from './fixtures-review-contracts.mjs'
-import { registerClaimsCases } from './fixtures-claims.mjs'
-import { registerFlowDocsCases } from './fixtures-flow-docs.mjs'
-import { registerDocRuleCases } from './fixtures-doc-rules.mjs'
-import { registerDocShapeCases } from './fixtures-doc-shapes.mjs'
-import { registerDocTriageCases } from './fixtures-doc-triage.mjs'
-import { registerHandoffReviewCases } from './fixtures-handoff-review.mjs'
-import { registerExploreCases } from './fixtures-explore.mjs'
-import { registerDocsCases } from './fixtures-docs.mjs'
-import { registerFlowCases } from './fixtures-flow.mjs'
-import { registerFlowCleanupCases } from './fixtures-flow-cleanup.mjs'
-import { registerFlowStateCases } from './fixtures-flow-state.mjs'
-import { registerFlowParallelCases } from './fixtures-flow-parallel.mjs'
-import { registerLifecycleCases } from './fixtures-lifecycle.mjs'
-import { registerReviewGovernCases } from './fixtures-review-govern.mjs'
-import { registerGovernCases } from './fixtures-govern.mjs'
-import { registerEquipCases } from './fixtures-equip.mjs'
-import { registerPlatformCases } from './fixtures-platform.mjs'
-import { registerReviewEmpiricalCases } from './fixtures-review-empirical.mjs'
-import { registerOnboardingCases } from './fixtures-onboarding.mjs'
-import { registerDocDepthCases } from './fixtures-doc-depth.mjs'
-import { registerIssue50Cases } from './fixtures-issue50.mjs'
-import { registerIssue52Cases } from './fixtures-issue52.mjs'
-import { registerStageBOnboardingCases } from './fixtures-stageb-onboarding.mjs'
-import { registerStageBLoopCases } from './fixtures-stageb-loop.mjs'
 
 initTestBackupDir()
 
-const DOMAIN_REGISTRY = [
-  ['flow', registerFlowCases],
-  ['flow-cleanup', registerFlowCleanupCases],
-  ['flow-state', registerFlowStateCases],
-  ['flow-parallel', registerFlowParallelCases],
-  ['lifecycle', registerLifecycleCases],
-  ['review-govern', registerReviewGovernCases],
-  ['review-empirical', registerReviewEmpiricalCases],
-  ['govern', registerGovernCases],
-  ['claims', registerClaimsCases],
-  ['flow-docs', registerFlowDocsCases],
-  ['doc-rules', registerDocRuleCases],
-  ['doc-shapes', registerDocShapeCases],
-  ['doc-depth', registerDocDepthCases],
-  ['doc-triage', registerDocTriageCases],
-  ['handoff-review', registerHandoffReviewCases],
-  ['equip', registerEquipCases],
-  ['onboarding', registerOnboardingCases],
-  ['docs', registerDocsCases],
-  ['platform', registerPlatformCases],
-  ['explore', registerExploreCases],
-  ['contracts', registerContractCases],
-  ['core', registerCoreCases],
-  ['review', registerReviewCases],
-  ['review-contracts', registerReviewContractsCases],
-  ['survey', registerSurveyCases],
-  ['issue50', registerIssue50Cases],
-  ['issue52', registerIssue52Cases],
-  ['stageb-onboarding', registerStageBOnboardingCases],
-  ['stageb-loop', registerStageBLoopCases], // 无远端本地工单、HTTP 退避幂等与通用 URL 断言
+// 重型测试域靠前调度以均衡并发子进程耗时；其余按文件名升序自动发现注册
+const PRIORITY_DOMAINS = [
+  'flow', 'flow-cleanup', 'flow-state', 'flow-parallel', 'lifecycle',
+  'review-govern', 'review-empirical', 'govern', 'claims', 'flow-docs',
+  'doc-rules', 'doc-shapes', 'doc-depth', 'doc-triage', 'handoff-review',
+  'equip', 'onboarding', 'docs', 'platform', 'explore', 'contracts',
+  'core', 'review', 'review-contracts', 'survey',
 ]
+const PRIORITY_INDEX = new Map(PRIORITY_DOMAINS.map((name, i) => [name, i]))
+
+// 通用自动发现并注册全部 `scripts/dev/fixtures-*.mjs` 功能域模块（自动跳过不含 register*Cases 的纯辅助模块）
+const FIXTURES_DIR = dirname(fileURLToPath(import.meta.url))
+const DISCOVERED_FILES = readdirSync(FIXTURES_DIR)
+  .filter((n) => /^fixtures-[^/]+\.mjs$/.test(n) && n !== 'fixtures-helpers.mjs')
+  .sort((a, b) => {
+    const da = a.replace(/^fixtures-/, '').replace(/\.mjs$/, '')
+    const db = b.replace(/^fixtures-/, '').replace(/\.mjs$/, '')
+    const pa = PRIORITY_INDEX.has(da) ? PRIORITY_INDEX.get(da) : Number.MAX_SAFE_INTEGER
+    const pb = PRIORITY_INDEX.has(db) ? PRIORITY_INDEX.get(db) : Number.MAX_SAFE_INTEGER
+    return pa !== pb ? pa - pb : da.localeCompare(db)
+  })
+
+const DOMAIN_REGISTRY = []
+for (const file of DISCOVERED_FILES) {
+  const mod = await import(pathToFileURL(join(FIXTURES_DIR, file)).href)
+  const regFn = Object.entries(mod).find(([k, v]) => typeof v === 'function' && /^register.*Cases$/.test(k))?.[1]
+    ?? (typeof mod.default === 'function' ? mod.default : null)
+  if (regFn) {
+    const domainName = file.replace(/^fixtures-/, '').replace(/\.mjs$/, '')
+    DOMAIN_REGISTRY.push([domainName, regFn])
+  }
+}
 
 function parseCliFlags(argv) {
   let prefer = ''

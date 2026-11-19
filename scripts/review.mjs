@@ -398,10 +398,9 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       add(finding('notice', 'kit', 'kit.drifted',
         `受管 \`.agents/skills/\` 存在漂移（${reasons.join('；')}）——可运行 \`node scripts/equip.mjs .\` 做无损升级或 \`--adopt-custom\` 豁免`))
     } else {
-      const tierLabel = kState.tier ? `${kState.tier} 档，` : ''
       const extraNote = kState.customCount > 0 ? `，已豁免定制 ${kState.customCount} 项` : ''
       add(finding('ok', 'kit', 'kit.ready',
-        `受管 \`.agents/skills/\` 套件已就绪（${tierLabel}${kState.filesCount} 个托管文件，版本 ${kState.forgeVersion ?? '未知'}${extraNote}）`))
+        `受管 \`.agents/skills/\` 套件已就绪（${kState.filesCount} 个托管文件，版本 ${kState.forgeVersion ?? '未知'}${extraNote}）`))
     }
   }
 

@@ -14,12 +14,12 @@ import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/gi
 import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { buildSessionOrientation } from '../../lib/session-orient.mjs'
 import { ensureReviewToken, listTaskLedgers, resolveTaskContext, updateTaskLedger, nextReviewRound } from '../../lib/ledger.mjs'
-import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv } from '../../lib/platform.mjs'
+import { detectDeclaredRepo, detectGitModeMarkers, parsePfStateTags, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText } from '../../lib/static-gates.mjs'
 import {
   determineWorkflowPolicy, evaluateNextState, hasRepoCiWorkflow,
-  readVerificationEvidence, validateVerificationEvidence,
+  readVerificationEvidence, resolveEffectiveBaseSha, validateVerificationEvidence,
 } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, detectRemoteDriftWarnings, getChangedFiles } from './flow-context.mjs'
 
@@ -36,11 +36,23 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
   if (!targetRepo || ledger.role === 'local-only' || ledger.role === 'generic-git') {
     return { rehydrated: false, reason: 'no-github-target' }
   }
+  if (ledger.role === 'clone-readonly') {
+    return { rehydrated: false, reason: 'write-auth-required' }
+  }
 
-  const ghProbe = opts._ghProbe ?? (await probeGitHubEnv({ cwd: roots.mainRoot, remoteUrls, probeNetwork: true }))
+  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
-  const canApi = Boolean(opts._ghClient || opts._ghProbe) || ghProbe.env?.trackB?.tier === 'gh-cli' || ghProbe.env?.trackB?.tier === 'node-https-token'
-  if (!canApi || typeof ghClient?.listComments !== 'function') return { rehydrated: false, reason: 'api-unavailable' }
+  const tier = ghProbe?.env?.trackB?.tier ?? (opts._ghClient?.tier ?? null)
+  const hasWriteChannel = tier === 'gh-cli' || tier === 'node-https-token' || Boolean(opts._ghClient)
+  if (!hasWriteChannel || typeof ghClient?.listComments !== 'function') {
+    return { rehydrated: false, reason: 'write-auth-required' }
+  }
+  if (typeof ghClient?.getRepoMeta === 'function') {
+    const meta = await ghClient.getRepoMeta(targetRepo).catch(() => null)
+    if (meta?.ok && meta.permissions && meta.permissions.push === false) {
+      return { rehydrated: false, reason: 'write-auth-required' }
+    }
+  }
 
   const numbers = [
     ...(ledger.prNumber ? [Number(ledger.prNumber)] : []),
@@ -171,13 +183,14 @@ export async function handleNext(opts, roots) {
     const exists = existsSync(implRoot)
     const profile = parseAgentsProfile(roots.mainRoot)
     const fastHeadOid = exists ? (readHeadFast(resolveGitDirFast(implRoot), roots.gitDir)?.oid ?? null) : null
+    const effectiveBase = exists ? await resolveEffectiveBaseSha(implRoot, selectedTask, { gitCommonDir: roots.gitDir }) : selectedTask.baseSha
     const [stZ, headRes, diffRawRes] = exists
       ? await Promise.all([
           gitStatusPorcelainZ(implRoot),
           fastHeadOid ? Promise.resolve({ ok: true, stdout: fastHeadOid }) : gitRun(implRoot, ['rev-parse', 'HEAD']),
-          !selectedTask.baseSha
+          !effectiveBase
             ? Promise.resolve(null)
-            : (fastHeadOid && fastHeadOid === selectedTask.baseSha ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${selectedTask.baseSha}..HEAD`)),
+            : (fastHeadOid && fastHeadOid === effectiveBase ? Promise.resolve({ ok: true, entries: [] }) : gitDiffRawEntriesAndText(implRoot, `${effectiveBase}..HEAD`)),
         ])
       : [{ ok: true, entries: [] }, { ok: false, stdout: '' }, null]
     const headSha = headRes.ok ? headRes.stdout.trim() : null
@@ -185,8 +198,8 @@ export async function handleNext(opts, roots) {
     const [op, changedFiles, gateHits] = exists
       ? await Promise.all([
           detectInProgressGitOp(implRoot, { statusEntries: stZ.entries }),
-          getChangedFiles(implRoot, selectedTask.baseSha, { statusEntries: stZ.entries, diffEntries: sharedEntries }),
-          detectGateWeakening(implRoot, selectedTask.baseSha, selectedTask.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
+          getChangedFiles(implRoot, effectiveBase, { statusEntries: stZ.entries, diffEntries: sharedEntries }),
+          detectGateWeakening(implRoot, effectiveBase, selectedTask.baseBranch, { headSha, nameStatusEntries: sharedEntries }),
         ])
       : [{ inProgress: false }, [], []]
     const ownArchived = [selectedTask.archivedTodoFile, selectedTask.archivedSpecFile, selectedTask.archivedPrdFile].filter(Boolean)

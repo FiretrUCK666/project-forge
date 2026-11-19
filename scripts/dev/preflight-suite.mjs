@@ -275,6 +275,12 @@ function checkOrphanScripts({ ROOT, rel, readText, walk, fail, note }) {
     graph.set(s, deps)
   }
 
+  // 动态按功能域前缀自动发现的夹具与故障注入模块，自动纳入对应调度器的可达边
+  const autoFixtures = allScripts.filter((s) => /^scripts\/dev\/fixtures-[^/]+\.mjs$/.test(s) && s !== 'scripts/dev/fixtures-helpers.mjs')
+  const autoInjections = allScripts.filter((s) => /^scripts\/dev\/injections-data-[^/]+\.mjs$/.test(s))
+  if (graph.has('scripts/dev/fixtures.mjs')) graph.get('scripts/dev/fixtures.mjs').push(...autoFixtures)
+  if (graph.has('scripts/dev/injections-data.mjs')) graph.get('scripts/dev/injections-data.mjs').push(...autoInjections)
+
   const reachable = new Set(roots)
   const queue = [...roots]
   while (queue.length > 0) {

@@ -27,7 +27,7 @@ export const CUSTOM_DECL_REL = Object.freeze({
   tdd: Object.freeze(['docs/templates/tdd.md', 'docs/templates/tdd-template.md', 'docs/.templates/tdd.md', 'doc/templates/tdd.md', 'doc/templates/tdd-template.md', '.github/tdd-template.md', '.github/tdd_template.md']),
 })
 
-function splitInlineArrayItems(inner) {
+export function splitInlineArrayItems(inner) {
   const items = []
   let cur = ''
   let quote = null
@@ -62,7 +62,7 @@ function splitInlineArrayItems(inner) {
   return items
 }
 
-function parseYamlScalar(raw) {
+export function parseYamlScalar(raw) {
   const s = String(raw ?? '').trim()
   if (!s || s === 'null' || s === '~') return null
   if (s === 'true') return true
@@ -84,6 +84,53 @@ function parseYamlScalar(raw) {
     return splitInlineArrayItems(inner).map((item) => parseYamlScalar(item))
   }
   return s
+}
+
+export function indentOf(line) {
+  let n = 0
+  while (n < line.length && line[n] === ' ') n += 1
+  return n
+}
+
+/** 共享 YAML 块标量读取器（支持 `|`、`|-`|`|+`、`>`、`>-`、`>+`），供文档与技能解析共用。 */
+export function readYamlBlockScalar(lines, startIdx, parentIndent = 0, indicator = '|') {
+  const indStr = String(indicator ?? '|').trim()
+  const folded = indStr.startsWith('>')
+  const keepTrailing = indStr.endsWith('+')
+  const collected = []
+  let minIndent = Infinity
+  let i = startIdx
+  while (i < lines.length) {
+    const line = lines[i]
+    if (!line.trim()) {
+      collected.push('')
+      i += 1
+      continue
+    }
+    const ind = indentOf(line)
+    if (ind <= parentIndent) break
+    if (ind < minIndent) minIndent = ind
+    collected.push(line)
+    i += 1
+  }
+  if (!keepTrailing) {
+    while (collected.length > 0 && collected[collected.length - 1] === '') collected.pop()
+  }
+  const base = Number.isFinite(minIndent) ? minIndent : parentIndent + 2
+  const stripped = collected.map((l) => (l === '' ? '' : l.slice(base)))
+  if (!folded) {
+    const joined = stripped.join('\n')
+    return { value: keepTrailing ? joined : joined.trim(), nextIdx: i }
+  }
+  const out = []
+  for (const l of stripped) {
+    if (!l) {
+      if (out.length > 0 && out[out.length - 1] !== '\n') out.push('\n')
+    } else {
+      out.push(l)
+    }
+  }
+  return { value: out.join(' ').replace(/\s*\n\s*/g, '\n').trim(), nextIdx: i }
 }
 
 function formatYamlScalar(val) {
@@ -137,7 +184,11 @@ export function parseDocFrontmatter(text) {
       const key = kv[1]
       const tail = kv[2].trim()
       if (!keyOrder.includes(key)) keyOrder.push(key)
-      if (!tail) {
+      if (/^[|>][+-]?$/.test(tail)) {
+        const blk = readYamlBlockScalar(fmLines, i + 1, 0, tail)
+        data[key] = blk.value
+        i = blk.nextIdx - 1
+      } else if (!tail) {
         const blockItems = []
         let j = i + 1
         while (j < fmLines.length && /^\s+-\s+(.*)$/.test(fmLines[j])) {
@@ -244,9 +295,16 @@ export function isManagedPlanDoc(rel, text = '') {
   const normText = String(text ?? '').replace(/\r\n/g, '\n')
   const head = normText.split('\n').slice(0, 60).join('\n')
 
-  if (/^\s*kind\s*:\s*['"]?(?:prd|specs?|todos?|plan)['"]?(?:\s*#.*)?$/im.test(head)) return true
-  if (/^\s*(?:plan_critique|plan|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\s*:/im.test(head)) return true
-  if (/^\s*task_id\s*:/im.test(head) && /^\s*(?:status|approved|owner|branch)\s*:/im.test(head)) return true
+  if (normText.startsWith('---\n')) {
+    const fmClose = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(normText)
+    const fmBlock = fmClose ? fmClose[1] : head.slice(4)
+    if (/^\s*kind\s*:\s*['"]?(?:prd|specs?|todos?|plan)['"]?(?:\s*#.*)?$/im.test(fmBlock)) return true
+    if (/^\s*(?:plan_critique|plan|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\s*:/im.test(fmBlock)) return true
+    if (/^\s*task_id\s*:/im.test(fmBlock) && /^\s*(?:status|approved|owner|branch)\s*:/im.test(fmBlock)) return true
+  } else {
+    if (/^\s*(?:plan_critique|planned_at|related_prd|related_spec|related_todo|high_risk_paths)\s*:/im.test(head)) return true
+    if (/^\s*task_id\s*:/im.test(head) && /^\s*(?:status|approved|owner|branch)\s*:/im.test(head)) return true
+  }
   if (/^(?:-\s+)?(?:Plan Critique|Related (?:SPEC|PRD|Todo))\s*:/im.test(head)) return true
   if (/^(?:-\s+)?(?:\*\*)?Planned at(?:\*\*)?\s*[:：]/im.test(head)) return true
   if (/^#\s*(?:PRD|SPEC|Todo)\s*[:：]/m.test(head)) return true

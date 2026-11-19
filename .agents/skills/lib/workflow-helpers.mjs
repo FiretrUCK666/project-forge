@@ -10,7 +10,8 @@ import { basename, join } from 'node:path'
 
 import { isManagedPlanDoc, parseDocFilename, parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { formatWorkTitle } from './escalation.mjs'
-import { posixPath, readTextSafe } from './git.mjs'
+import { gitRun, posixPath, readTextSafe } from './git.mjs'
+import { resolveRefShaFast } from './git-fast.mjs'
 import { parseBodyRelations } from './platform.mjs'
 
 const DIAGNOSTIC_SECRET_PATTERNS = [
@@ -172,18 +173,255 @@ export function validatePreMergeShaAndWorktree({
   return { ok: true, code: null }
 }
 
-function replaceSectionBody(md, headingTitle, newBody) {
-  const re = new RegExp(`(^##\\s+${headingTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$)([\\s\\S]*?)(?=\\n##\\s+|\\s*$)`, 'm')
-  if (!re.test(md)) return `${md.trimEnd()}\n\n## ${headingTitle}\n\n${newBody}\n`
-  return md.replace(re, `$1\n\n${newBody}\n`)
+/**
+ * 以 `merge-base(baseBranch, HEAD)` 校准有效比较基线，避免手动 `git rebase origin/main` 后
+ * 滞后的 `ledger.baseSha` 把已合入主干的文件误算进当前任务 diff 与 `runtimeFilesTouched`。
+ */
+export async function resolveEffectiveBaseSha(repoRoot, ledger, { gitCommonDir = null, pushRemote = 'origin' } = {}) {
+  const storedBase = ledger?.baseSha ?? null
+  if (!repoRoot) return storedBase
+  const baseBranch = String(ledger?.baseBranch || 'main').trim() || 'main'
+  const candidates = []
+  const seen = new Set()
+  const addCand = (ref) => {
+    if (ref && !seen.has(ref)) { seen.add(ref); candidates.push(ref) }
+  }
+  addCand(`refs/remotes/${pushRemote}/${baseBranch}`)
+  addCand(`refs/heads/${baseBranch}`)
+  addCand(baseBranch)
+
+  let bestSha = null
+  for (const ref of candidates) {
+    const refSha = gitCommonDir ? resolveRefShaFast(gitCommonDir, ref) : null
+    const probeRef = refSha || ref
+    const mb = await gitRun(repoRoot, ['--no-optional-locks', 'merge-base', probeRef, 'HEAD'])
+    const mbSha = mb.ok ? mb.stdout.trim() : ''
+    if (!mbSha || !/^[0-9a-f]{40,64}$/i.test(mbSha)) continue
+    if (storedBase && mbSha !== storedBase) {
+      const anc = await gitRun(repoRoot, ['--no-optional-locks', 'merge-base', '--is-ancestor', storedBase, mbSha])
+      if (!anc.ok) continue
+    }
+    if (!bestSha) {
+      bestSha = mbSha
+    } else if (bestSha !== mbSha) {
+      const newer = await gitRun(repoRoot, ['--no-optional-locks', 'merge-base', '--is-ancestor', bestSha, mbSha])
+      if (newer.ok) bestSha = mbSha
+    }
+  }
+  return bestSha || storedBase
 }
 
-/** 读取 `.github/pull_request_template.md` 并注入任务上下文、`Fixes #N`、实证输出与 `pf-state`。 */
+function stripHtmlCommentsOutsideFences(md) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  let inFence = false
+  let inComment = false
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+    if (inFence) { out.push(line); continue }
+    let cur = line
+    if (inComment) {
+      const endIdx = cur.indexOf('-->')
+      if (endIdx < 0) continue
+      cur = cur.slice(endIdx + 3)
+      inComment = false
+    }
+    while (cur.includes('<!--')) {
+      const start = cur.indexOf('<!--')
+      const end = cur.indexOf('-->', start + 4)
+      if (end >= 0) {
+        cur = `${cur.slice(0, start)}${cur.slice(end + 3)}`
+      } else {
+        cur = cur.slice(0, start)
+        inComment = true
+        break
+      }
+    }
+    out.push(cur.trimEnd())
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+function extractReadableHeading(text) {
+  if (!text) return null
+  const fm = parseDocFrontmatter(text)
+  const fmTitle = typeof fm.data?.title === 'string' ? fm.data.title.trim() : ''
+  const h1Match = /^#\s+(.+)$/m.exec(fm.body || text)
+  const raw = fmTitle || (h1Match ? h1Match[1].trim() : '')
+  if (!raw) return null
+  return raw.replace(/^(?:SPEC|PRD|Todo|TODO|规范|规格|任务)\s*[:：]\s*/i, '').trim() || null
+}
+
+function extractMarkdownSectionText(text, headingPatterns = []) {
+  if (!text) return ''
+  const clean = stripHtmlCommentsOutsideFences(parseDocFrontmatter(text).body || text)
+  const lines = clean.split('\n')
+  let inFence = false
+  let capturing = false
+  const buf = []
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; if (capturing) buf.push(line); continue }
+    if (!inFence && /^##\s+/.test(line)) {
+      if (capturing) break
+      const title = line.replace(/^##\s+/, '').trim()
+      if (headingPatterns.some((re) => re.test(title))) capturing = true
+      continue
+    }
+    if (capturing) buf.push(line)
+  }
+  return buf.join('\n').trim()
+}
+
+function extractMeaningfulBullets(text, maxItems = 4) {
+  if (!text) return []
+  const lines = stripHtmlCommentsOutsideFences(text).split('\n')
+  const out = []
+  let inFence = false
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const t = line.trim()
+    if (!t || /^#/.test(t) || /^\|/.test(t) || /^[-*_]{3,}$/.test(t)) continue
+    if (/^\*\*在合并之前写完/.test(t) || /待实施后补全|TBD|FIXME/i.test(t)) continue
+    const cleaned = t.replace(/^(?:[-*]|\d+\.)\s+(?:\[[ xX]\]\s*)?/, '').trim()
+    if (cleaned.length < 4) continue
+    out.push(cleaned.slice(0, 180))
+    if (out.length >= maxItems) break
+  }
+  return out
+}
+
+/** 优先从关联 SPEC / Todo / Issue 提取可读标题并附加工作类型前缀，避免裸拼英文 taskId。 */
+export function resolveReadablePrTitle(repoRoot, ledger, explicitTitle = null) {
+  const manual = String(explicitTitle ?? '').trim()
+  if (manual) return formatWorkTitle(manual, ledger?.caseType)
+  const docCandidates = [
+    ledger?.specFile, ledger?.archivedSpecFile,
+    ledger?.todoFile, ledger?.archivedTodoFile,
+  ].filter(Boolean)
+  if (repoRoot) {
+    for (const rel of docCandidates) {
+      const abs = join(repoRoot, rel)
+      if (!existsSync(abs)) continue
+      const title = extractReadableHeading(readTextSafe(abs))
+      if (title) return formatWorkTitle(title, ledger?.caseType)
+    }
+  }
+  const issueTitle = Array.isArray(ledger?.issueContext)
+    ? ledger.issueContext.map((i) => String(i?.title ?? '').trim()).find(Boolean)
+    : ''
+  if (issueTitle) return formatWorkTitle(issueTitle, ledger?.caseType)
+  return formatWorkTitle(ledger?.slug ?? ledger?.taskId ?? 'update', ledger?.caseType)
+}
+
+function formatDurationMs(ms) {
+  const n = Number(ms)
+  if (!Number.isFinite(n) || n < 0) return '-'
+  if (n < 1000) return `${Math.round(n)}ms`
+  return `${(n / 1000).toFixed(2)}s`
+}
+
+function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged = [], visualVerifiedOnHead = false }) {
+  const rows = []
+  const gates = evidence?.gates && typeof evidence.gates === 'object' ? evidence.gates : null
+  const labelMap = { gate: 'merge-gate', full: 'full-test', smoke: 'smoke-verify', quick: 'quick-test', docStatic: 'doc-static' }
+  if (gates) {
+    for (const key of ['gate', 'full', 'smoke', 'quick', 'docStatic']) {
+      const g = gates[key]
+      if (!g) continue
+      const status = g.status === 'skipped-explicit-none'
+        ? 'SKIP (none)'
+        : ((g.exitCode === 0 && g.ok !== false && g.succeeded !== false) ? 'PASS' : 'FAIL')
+      const cmdPart = g.cmd ? ` (\`${String(g.cmd).slice(0, 72)}\`)` : ''
+      rows.push(`| ${labelMap[key] ?? key}${cmdPart} | ${status} | ${formatDurationMs(g.durationMs)} | ${g.exitCode ?? 0} |`)
+    }
+  }
+  if (rows.length === 0) {
+    const mode = ledger?.verifiedMode ?? 'verify'
+    const cmdPart = ledger?.verifiedCmd ? ` (\`${String(ledger.verifiedCmd).slice(0, 72)}\`)` : ''
+    const exit = ledger?.lastVerifyExitCode ?? 0
+    rows.push(`| ${mode}${cmdPart} | ${exit === 0 ? 'PASS' : 'FAIL'} | - | ${exit} |`)
+  }
+  const lines = [
+    '| 验证项 | 结果 | 耗时 | 退出码 |',
+    '| --- | --- | --- | --- |',
+    ...rows,
+    '',
+    `- **验证基线**：HEAD \`${shortHead}\``,
+  ]
+  const e2eSummary = String(evidence?.e2eObservation?.summary ?? '').trim()
+  if (e2eSummary) {
+    lines.push(`- **E2E 运行观察**：${e2eSummary}`)
+  }
+  if (visualFilesChanged.length > 0) {
+    lines.push(`- **视觉与交互核验**：${visualVerifiedOnHead ? `已核验（${ledger?.visualCheckEvidence ?? 'confirmed'}）` : `涉及 ${visualFilesChanged.slice(0, 5).join(', ')}`}`)
+  }
+  return lines.join('\n')
+}
+
+function replaceSectionIfPresent(md, headingCandidates, newBody) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  const wanted = new Set(headingCandidates.map((h) => String(h).trim()))
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
+    if (!m || !wanted.has(m[1])) continue
+    let end = lines.length
+    let innerFence = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
+      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+    }
+    const replacement = [lines[i], '', ...String(newBody ?? '').split('\n'), '']
+    const nextLines = [...lines.slice(0, i), ...replacement, ...lines.slice(end)]
+    return { matched: true, text: nextLines.join('\n') }
+  }
+  return { matched: false, text: md }
+}
+
+function removeSectionByHeading(md, headingTitle) {
+  const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
+  const target = String(headingTitle).trim()
+  let inFence = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = /^##\s+(.+?)\s*$/.exec(lines[i])
+    if (!m || m[1] !== target) continue
+    let end = lines.length
+    let innerFence = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^\s*(?:```|~~~)/.test(lines[j])) { innerFence = !innerFence; continue }
+      if (!innerFence && /^##\s+/.test(lines[j])) { end = j; break }
+    }
+    return [...lines.slice(0, i), ...lines.slice(end)].join('\n')
+  }
+  return md
+}
+
+function updateChecklistByEvidence(md, { verifyPassed, finalized, hasNoSecrets }) {
+  return md.replace(/^- \[ \] (.+)$/gm, (full, label) => {
+    const t = String(label)
+    if (verifyPassed && /(?:验证|测试|门禁|构建|全绿|通过)/.test(t)) return `- [x] ${t}`
+    if (finalized && /(?:文档|Todo|SPEC|README|TDD|归档)/.test(t)) return `- [x] ${t}`
+    if (hasNoSecrets && /(?:敏感|凭据|密钥|无多余|无关)/.test(t)) return `- [x] ${t}`
+    return full
+  })
+}
+
+/** 读取 `.github/pull_request_template.md`，剥离引导注释并基于 SPEC/Todo/`evidence.json` 填充实证 PR 正文。 */
 export function hydratePrTemplateBody({
   repoRoot,
   taskId,
   ledger,
   policy = null,
+  evidence = null,
   actorDisplay = 'maintainer',
   visualFilesChanged = [],
   visualVerifiedOnHead = false,
@@ -196,46 +434,97 @@ export function hydratePrTemplateBody({
   const docSummary = docLinks.length > 0 ? docLinks.map((p) => `\`${p}\``).join('、') : `无（Case ${ledger?.caseType ?? 3}）`
   const pfTag = `<!-- pf-state:${JSON.stringify({ taskId, action: 'pr-body', branch: ledger?.branch ?? null, headSha: currentHead || null })} -->`
 
+  const specRel = ledger?.specFile ?? ledger?.archivedSpecFile
+  const todoRel = ledger?.todoFile ?? ledger?.archivedTodoFile
+  const specText = repoRoot && specRel && existsSync(join(repoRoot, specRel)) ? readTextSafe(join(repoRoot, specRel)) : ''
+  const todoText = repoRoot && todoRel && existsSync(join(repoRoot, todoRel)) ? readTextSafe(join(repoRoot, todoRel)) : ''
+  const readableTitle = resolveReadablePrTitle(repoRoot, ledger)
+
+  const specGoalBullets = extractMeaningfulBullets(
+    extractMarkdownSectionText(specText, [/(?:目标|范围|概述|要解决的问题|背景)/]),
+    3,
+  )
+  const todoOutcomeBullets = extractMeaningfulBullets(
+    extractMarkdownSectionText(todoText, [/(?:完成后的记录|实际结果|成果)/]),
+    3,
+  )
+  const summaryLines = [
+    `- **${readableTitle}**（任务 \`${taskId}\`，实施者：${actorDisplay}，涉及 ${changedFiles.length} 个文件）`,
+    ...todoOutcomeBullets.map((b) => `- ${b}`),
+    ...(todoOutcomeBullets.length === 0 ? specGoalBullets.map((b) => `- ${b}`) : []),
+  ]
+  const summaryText = summaryLines.join('\n')
+
+  const whyLines = [
+    ...(specGoalBullets.length > 0 ? specGoalBullets.slice(0, 2).map((b) => `- ${b}`) : [`- 完成任务 \`${taskId}\` 并对齐工程契约与文档。`]),
+    `- 关联文档：${docSummary}`,
+  ]
+  const whyText = whyLines.join('\n')
+
+  const basisText = [
+    `- 档位与风险：Case ${ledger?.caseType ?? 3} / risk=\`${policy?.riskTier ?? 'medium'}\``,
+    `- 分支与隔离：\`${ledger?.branch ?? 'unknown'}\`（${ledger?.worktreePath ?? 'branch'}）`,
+    `- 关联文档：${docSummary}`,
+  ].join('\n')
+
+  const riskLines = [
+    `- 风险等级：\`${policy?.riskTier ?? 'medium'}\`（变更文件 ${changedFiles.length} 个）`,
+    policy?.highRiskHits?.length ? `- 命中高风险路径：${policy.highRiskHits.slice(0, 6).map((f) => `\`${f}\``).join('、')}` : null,
+    policy?.oneWayBoundaryHits?.length ? `- 触及 one-way 边界：${policy.oneWayBoundaryHits.slice(0, 6).map((f) => `\`${f}\``).join('、')}` : null,
+  ].filter(Boolean).join('\n')
+
+  const verifyText = buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged, visualVerifiedOnHead })
+  const rollbackText = `- 回滚基线：\`${String(ledger?.baseSha ?? '').slice(0, 7) || ledger?.baseBranch || 'main'}\`（反向提交 \`git revert\` 并重跑完整门禁）`
+  const mergeAuthText = policy?.independentReviewRequired === false
+    ? '- 低风险纯文档改动：门禁绿灯可直接合入'
+    : '- 独立审查 `fail` 为空且 CI 绿灯后由审查者合入（审查结论以独立评论记录；若含弱化门禁须人工确认）'
+
+  const verifyPassed = Boolean(ledger?.lastVerifyExitCode === 0 && (!currentHead || ledger?.verifiedHead === currentHead))
   const tplPath = repoRoot ? join(repoRoot, '.github', 'pull_request_template.md') : ''
   const tplRaw = tplPath && existsSync(tplPath) ? readTextSafe(tplPath) : null
   if (!tplRaw) {
     return [
-      '## 改动说明',
-      `- 任务编号：\`${taskId}\``,
-      `- 提交人：${actorDisplay}`,
-      `- 验证命令：\`${ledger?.verifiedCmd ?? 'verified'}\` @ \`${shortHead}\``,
-      visualFilesChanged.length > 0
-        ? `- 视觉与交互实证：${visualVerifiedOnHead ? `已核验（${ledger?.visualCheckEvidence ?? 'confirmed'}）` : `涉及 UI/视觉文件（${visualFilesChanged.slice(0, 5).join(', ')}），审查须核对实际渲染与浅深色截图`}`
-        : null,
-      `\n${fixesLine}`,
-      '',
-      '## 实现依据',
-      `- role=${ledger?.role ?? 'unknown'}, case=${ledger?.caseType ?? 3}, risk=${policy?.riskTier ?? 'medium'}, isolation=${ledger?.isolation ?? 'worktree'}`,
-      `- 关联文档：${docSummary}`,
-      '',
+      '## 变更摘要', '', summaryText, '',
+      '## 改动理由', '', whyText, '',
+      '## 关联 Issue', '', fixesLine, '',
+      '## 影响面与风险', '', riskLines, '',
+      '## 验证证据', '', verifyText, '',
+      '## 回滚方式', '', rollbackText, '',
       pfTag,
-    ].filter((x) => x !== null).join('\n')
+    ].join('\n')
   }
 
-  let body = tplRaw.replace(/\r\n/g, '\n')
-  body = replaceSectionBody(body, '改了什么', `- \`${formatWorkTitle(ledger?.slug ?? taskId, ledger?.caseType)}\`（任务 \`${taskId}\`，提交人：${actorDisplay}，涉及 ${changedFiles.length} 个文件）`)
-  body = replaceSectionBody(body, '关联 Issue', fixesLine)
-  body = replaceSectionBody(body, '为什么', `- 完成任务 \`${taskId}\` 并同步对应工程文档。\n\n关联文档: ${docSummary}`)
-  body = replaceSectionBody(body, '实现依据', `1. 分档：Case ${ledger?.caseType ?? 3}（risk=${policy?.riskTier ?? 'medium'}）\n2. 隔离：\`${ledger?.worktreePath ?? 'branch'}\` / 分支 \`${ledger?.branch ?? 'unknown'}\`\n3. 关联文档：${docSummary}`)
-  const verifyText = [
-    `- 命令：\`${ledger?.verifiedCmd ?? 'verified'}\`（mode=${ledger?.verifiedMode ?? 'quick'}，exit=${ledger?.lastVerifyExitCode ?? 0}，HEAD=\`${shortHead}\`）`,
-    visualFilesChanged.length > 0
-      ? `- 视觉核验：${visualVerifiedOnHead ? `已核验（${ledger?.visualCheckEvidence ?? 'confirmed'}）` : `涉及 ${visualFilesChanged.slice(0, 5).join(', ')}`}`
-      : null,
-  ].filter(Boolean).join('\n')
-  body = replaceSectionBody(body, '怎么验证的', verifyText)
-  body = replaceSectionBody(body, '回滚点', `- 回滚基线：\`${String(ledger?.baseSha ?? '').slice(0, 7) || ledger?.baseBranch || 'main'}\`（反向提交 \`git revert\` 并重跑门禁）`)
-  body = replaceSectionBody(body, '风险与影响范围', `- 风险等级：\`${policy?.riskTier ?? 'medium'}\`${policy?.highRiskHits?.length ? `（命中高风险路径：${policy.highRiskHits.slice(0, 5).join(', ')}）` : ''}`)
-  body = replaceSectionBody(body, '合并授权', policy?.independentReviewRequired === false ? '- 低风险纯文档改动：门禁绿灯可直接合入' : '- 独立审查 `fail` 为空且 CI 绿灯后由审查者合入（若含弱化门禁须人工确认）')
-  body = replaceSectionBody(body, '独立审查与故障注入', policy?.independentReviewRequired === false
-    ? '低风险纯非可执行文档改动，免除独立审查子代理（已完成本地静态文档门禁）。'
-    : `- **审查来源**：待独立审查子代理接手\n- **逐条标准状态**：待 Round 1 核对（HEAD \`${shortHead}\`）\n- **故障注入记录**：待补充\n- **止损记录**：未触发`)
-  return `${body.trimEnd()}\n\n${pfTag}\n`
+  let body = stripHtmlCommentsOutsideFences(tplRaw)
+  body = removeSectionByHeading(body, '独立审查与故障注入')
+
+  const issueAndDocsText = [
+    fixesLine,
+    `- 关联文档：${docSummary}`,
+  ].join('\n')
+  const riskAndRollbackText = [riskLines, rollbackText].filter(Boolean).join('\n')
+
+  const sectionUpdates = [
+    [['变更摘要', '改了什么'], summaryText],
+    [['关联 Issue 与文档'], issueAndDocsText],
+    [['关联 Issue'], fixesLine],
+    [['改动理由', '为什么'], whyText],
+    [['实现依据'], basisText],
+    [['影响面、风险与回滚方式'], riskAndRollbackText],
+    [['影响面与风险', '风险与影响范围'], riskLines],
+    [['验证证据', '怎么验证的'], verifyText],
+    [['回滚方式', '回滚点'], rollbackText],
+    [['合并授权'], mergeAuthText],
+  ]
+  for (const [headings, content] of sectionUpdates) {
+    const res = replaceSectionIfPresent(body, headings, content)
+    body = res.text
+  }
+  body = updateChecklistByEvidence(body, {
+    verifyPassed,
+    finalized: Boolean(ledger?.finalized),
+    hasNoSecrets: verifyPassed,
+  })
+  return `${body.replace(/\n{3,}/g, '\n\n').trimEnd()}\n\n${pfTag}\n`
 }
 
 /** 对多个 Issue 依正文提取出的 Depends on / Blocks 关系进行拓扑排序与策略建议。 */
@@ -280,7 +569,7 @@ export function analyzeIssueDependencies(issueItems = []) {
   }
 }
 
-/** 构造 `flow.mjs submit` 结束时的下一步唯一合法动作（避免 lightweight 档引导不存在的 review-pack.mjs）。 */
+/** 构造 `flow.mjs submit` 结束时的下一步唯一合法动作（未装配 dev-review 时不引导 review-pack.mjs）。 */
 export function buildSubmitNextSteps({ taskId, role, policy, nextRound = 1, hasDevReview = true } = {}) {
   if (role === 'contributor-fork') {
     return ['当前处于 awaiting-upstream-merge，请等待上游维护者合并；合并前严禁删除该 Fork 分支。']
@@ -293,11 +582,11 @@ export function buildSubmitNextSteps({ taskId, role, policy, nextRound = 1, hasD
   return [{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}${remoteFlag}${approveFlag}` }]
 }
 
-/** 构造 `flow.mjs inspect` 结束时的下一步指引（在 lightweight 档阻断外部 PR 并指引升档而非打印 review-pack.mjs）。 */
+/** 构造 `flow.mjs inspect` 结束时的下一步指引（未装配 dev-review 时阻断外部 PR 并提示补齐技能）。 */
 export function buildInspectNextSteps({ role, teamProbeHint, extPrNum, reuseExistingPr, hasDevReview = true } = {}) {
   if (extPrNum) {
     if (!hasDevReview) {
-      return ['当前项目为 lightweight 档且未装配 dev-review，外部 PR 不可信扫描与审查需先升级为 full 档（--tier full）。']
+      return ['当前项目未装配 dev-review 技能，外部 PR 不可信扫描与审查需先通过 project-forge 的 equip 补齐完整技能集。']
     }
     return [
       { skill: 'dev-flow', text: `1. 建立只读隔离审查位（不挂载依赖）：node ".agents/skills/dev-flow/scripts/flow.mjs" start --external-pr ${extPrNum}` },

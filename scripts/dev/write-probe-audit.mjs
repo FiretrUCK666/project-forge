@@ -15,11 +15,12 @@ export const WRITE_PROBE_SKIP_FILES = new Set([
   'kit/skills/lib/platform.mjs',
   'kit/skills/lib/platform-probe.mjs',
   'kit/skills/lib/github-client.mjs',
+  'kit/skills/lib/github-labels.mjs',
   'kit/skills/lib/task-backend.mjs',
   'kit/skills/lib/shared.mjs',
 ])
 
-const MEMBER_WRITE_CALL_RE = /(?:\.|\?\.\s*)(createIssue|postComment|addLabels|removeLabel|createPr|mergePr|updatePrBase|claimTask|releaseTask|getCommitChecks|findOpenPrForBranch|listOpenPrsByBase)\s*\(/g
+const MEMBER_WRITE_CALL_RE = /(?:\.|\?\.\s*)(createIssue|postComment|addLabels|removeLabel|createPr|mergePr|updatePrBase|claimTask|releaseTask|getCommitChecks|findOpenPrForBranch|listOpenPrsByBase|closePr|closeIssue)\s*\(/g
 const BARE_WRITE_CALL_RE = /(?<![.\w$])(createIssue|removeLabel)\s*\(/g
 const PROBE_FOR_WRITE_CALL_RE = /\bprobeForWrite\s*\(/g
 const PROBE_ENV_CALL_RE = /\bprobeGitHubEnv\s*\(/g

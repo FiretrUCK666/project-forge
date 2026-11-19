@@ -286,7 +286,7 @@ export function checkUntrustedPrGate(ledger, { humanApproved = false, hasDevRevi
       blocked: true,
       code: 'BLOCKED_REQUIRES_DEV_REVIEW',
       exitCode: 3,
-      message: `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${pr} 的供应链不可信扫描需要 dev-review 技能，当前 lightweight 档未装配该技能；请升级为 full 档后重试。`,
+      message: `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${pr} 的供应链不可信扫描需要 dev-review 技能，当前项目未装配该技能；请通过 project-forge 的 equip 补齐技能后重试。`,
     }
   }
   const scanOk = ledger.untrustedScanPassed === true

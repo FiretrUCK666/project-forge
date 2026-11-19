@@ -123,7 +123,7 @@ async function runNodeOwnSkillsDay2AndUpgrade(tracker, envExtra) {
       JSON.stringify(s1?.kit?.customSkills),
     )
 
-    const eq1 = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--tier', 'full', '--no-backup'], dir, envExtra)
+    const eq1 = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
     const ca1 = runNode(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), [dir, '--no-backup'], dir, envExtra)
     replaceProfilePlaceholders(join(dir, 'AGENTS.md'), {
       quick: 'node test/unit.mjs',
@@ -182,7 +182,7 @@ async function runNodeOwnSkillsDay2AndUpgrade(tracker, envExtra) {
     // 二次 S1-S4 升级 + 删除墓碑不回写验证
     rmTree(join(dir, '.agents', 'skills', 'dev-govern'))
     gitCommitFast(dir, 'chore: tombstone dev-govern')
-    const eq2 = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--tier', 'full', '--no-backup'], dir, envExtra)
+    const eq2 = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
     const ca2 = runNode(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), [dir, '--no-backup'], dir, envExtra)
     const agentsAfter = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     assertStep(
@@ -211,9 +211,9 @@ async function runPythonBlindSample(tracker, envExtra) {
   gitInit(dir, { branch: 'main', name: 'bob', email: 'bob@example.com' })
   try {
     const s = await survey(dir, { quiet: true })
-    const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--tier', 'lightweight', '--no-backup'], dir, envExtra)
+    const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
     const ca = runNode(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), [dir, '--no-backup'], dir, envExtra)
-    assertStep(tracker, 'python:survey-and-equip-lightweight', Boolean(s) && eq.status === 0 && ca.status === 0, `eq=${eq.status} ca=${ca.status}`)
+    assertStep(tracker, 'python:survey-and-equip', Boolean(s) && eq.status === 0 && ca.status === 0, `eq=${eq.status} ca=${ca.status}`)
 
     const pyCmd = findExecutable(['python', 'python3'])
     if (!pyCmd) {
@@ -253,7 +253,7 @@ async function runPolyglotGoRustBlindSample(tracker, envExtra) {
   gitInit(dir, { branch: 'main', name: 'dev', email: 'dev@example.com' })
   try {
     const s = await survey(dir, { quiet: true })
-    const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--tier', 'lightweight', '--no-backup'], dir, envExtra)
+    const eq = runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
     const ca = runNode(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), [dir, '--no-backup'], dir, envExtra)
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     assertStep(
@@ -295,7 +295,7 @@ async function runZeroHintAndWeakModelGuard(tracker, sandbox, envExtra) {
   gitSync(dir, ['remote', 'add', 'origin', 'https://github.com/acme/blind-demo.git'])
   gitSync(dir, ['config', `url.${bareDir.replace(/\\/g, '/')}.pushInsteadOf`, 'https://github.com/acme/blind-demo.git'])
   try {
-    runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--tier', 'full', '--no-backup'], dir, envExtra)
+    runNode(join(SKILL_ROOT, 'scripts', 'equip.mjs'), [dir, '--no-backup'], dir, envExtra)
     runNode(join(SKILL_ROOT, 'scripts', 'compose-agents.mjs'), [dir, '--no-backup'], dir, envExtra)
     replaceProfilePlaceholders(join(dir, 'AGENTS.md'), { smoke: 'node test/smoke.mjs' })
     gitCommitFast(dir, 'chore: zh init')

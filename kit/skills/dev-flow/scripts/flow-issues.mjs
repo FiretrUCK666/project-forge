@@ -89,12 +89,22 @@ export async function createIssueForStart({
   })
   const rawTitle = String(opts.title ?? opts.slug ?? prelimTaskId).trim()
   const issueTitle = formatWorkTitle(rawTitle, caseType)
+  const docRefs = [opts.spec, opts.todo, opts.prd].filter(Boolean).map((p) => `\`${p}\``).join('、')
   const issueBody = String(opts.body ?? [
-    `## 任务追踪`,
-    `- Slug: \`${slugify(opts.slug ?? rawTitle)}\``,
-    `- Case: Case ${caseType}`,
-    opts.task ? `- Task ID: \`${opts.task}\`` : null,
-  ].filter(Boolean).join('\n')).trim()
+    '## 背景与现象',
+    '',
+    `推进「${rawTitle}」任务（Case ${caseType}）。`,
+    '',
+    '## 范围与依据',
+    '',
+    `- 任务标识：\`${opts.task ?? slugify(opts.slug ?? rawTitle)}\``,
+    docRefs ? `- 关联文档：${docRefs}` : null,
+    opts.files ? `- 预计写域：${String(opts.files).split(/[\s,]+/).filter(Boolean).slice(0, 8).map((f) => `\`${f}\``).join('、')}` : null,
+    '',
+    '## 验收标准',
+    '',
+    `- [ ] C1: 完成「${rawTitle}」实现并通过对应正反双向测试与完整门禁`,
+  ].filter((x) => x !== null).join('\n')).trim()
   const issueLabels = parseCsvList(opts.labels)
   const milestone = await resolveMilestoneId(
     backend,

@@ -51,7 +51,7 @@ scope_files:
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs --only engine-hardening` 全绿。
-- [ ] `node scripts/dev/bench.mjs` 实测 `survey(self)` 中位数 `<= 250 ms`。
-- [ ] `node scripts/dev/verify-injections.mjs --only I225,I226,I227,I228,I229,I230,I231,I232` 全数变红命中。
+- [ ] `node scripts/dev/fixtures.mjs --domain engine-hardening` 全绿。
+- [ ] `node scripts/dev/bench.mjs --strict-budget` 实测 `survey(self)` 中位数 `<= 250 ms` 且 `review(self) <= 450 ms`。
+- [ ] 逐条执行 `node scripts/dev/verify-injections.mjs --only I225`（覆盖 `I225..I232`）或全量 `verify-injections.mjs` 全数变红命中。
 - [ ] 全量 `merge-gate` 全绿通过且独立审查放行。

@@ -54,11 +54,11 @@ scope_files:
 - [ ] **T1（`C1` 双态规划模式落地）**：在 `kit/skills/dev-plan/scripts/doc-plan.mjs`、`triage-rules.mjs`、`doc-plan-ops.mjs`、`kit/skills/lib/doc-frontmatter.mjs` 与 `pending-decisions.mjs` 支持 `plan_mode: interactive | autonomous` 并校验枚举合法性，同步更新 `kit/skills/templates/docs-*.md` 与 `kit/skills/dev-plan/SKILL.md` 双态交互规则（零宿主胶水）。
 - [ ] **T2（`C2` 规划退场硬校验抽离与接入）**：新增 `kit/skills/lib/plan-exit-gate.mjs` (new)，实现 `evaluatePlanExitGate`，接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 Case 3/4 `start` 流程，在 `pendingDecisions > 0` 或未过审时返回退出码 `3` 与 `BLOCKED_PLAN_NOT_READY`。
 - [ ] **T3（`C3` 切片有向图与波次防撞校验）**：新增 `kit/skills/lib/doc-slice-graph.mjs` (new) 并接入 `doc-audit.mjs` / `doc-audit-repo.mjs`，完成总控 `C1..Cn` 100% 覆盖、`scope_files` + `depends_on` 必填、拓扑判环 `BLOCKED_SLICE_CYCLE` 与同波次写域路径冲突检测。
-- [ ] **T4（`C4` 波次交接包与 verify 标志预透传）**：升级 `kit/skills/dev-flow/scripts/flow-batch.mjs` 与 `kit/skills/lib/handoff-package.mjs` 支持 `batch plan --handoff [--json]` 按拓扑输出波次与独立切片交接包；在 `kit/skills/dev-flow/scripts/flow.mjs` 与 `flow-lifecycle.mjs` `verify` 预透传 `--artifact` 与 `--visual-blocked-reason` 参数给 `workflow-policy.mjs`。
+- [ ] **T4（`C4` 波次交接包与 verify 标志预透传）**：升级 `kit/skills/dev-flow/scripts/flow-batch.mjs` 与 `kit/skills/lib/handoff-package.mjs` 支持 `batch plan --handoff [--json]`（保持 `{ wave, canParallel, tasks }` 兼容并附带交接包）；在 `kit/skills/dev-flow/scripts/flow.mjs` 用 `multiFlags`/`valueFlags` 注册 `--artifact` 与 `--visual-blocked-reason`，移除 `flow-lifecycle.mjs` 裸 `--visual-checked` 硬合成伪造串，经 `flow-lifecycle-helpers.mjs` 透传 `{ artifacts, visualBlockedReason, visualCheckedRaw }` 给 `workflow-policy.mjs`。
 - [ ] **T5（同步工具包与双证回归）**：执行 `node scripts/equip.mjs .`，新增 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`），跑通 `fixtures` 与 `verify-injections`。
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs --only plan-wave` 全绿。
-- [ ] `node scripts/dev/verify-injections.mjs --only I250,I251,I252,I253` 全数变红命中。
-- [ ] `node scripts/equip.mjs . --check && node scripts/dev/preflight.mjs` 全绿，且与 `#102` 零文件碰撞。
+- [ ] `node scripts/dev/fixtures.mjs --domain plan-wave` 全绿。
+- [ ] 逐条执行 `node scripts/dev/verify-injections.mjs --only I250`（覆盖 `I250..I253`）或全量 `verify-injections.mjs` 全数变红命中。
+- [ ] `node scripts/equip.mjs . --check && node scripts/dev/preflight.mjs` 全绿，且与 `#102` 保持零源码碰撞（若 `#102` 先合，rebase `main` 后重跑 `equip.mjs .` 重建 `.pf-manifest.json`）。

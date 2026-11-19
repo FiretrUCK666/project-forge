@@ -41,7 +41,7 @@ scope_files:
 
 ## 三、实施任务清单
 
-- [ ] **T1（`C4` Wave 2.5 真实自举互转演练）**：在 Wave 1 与 Wave 2 均合入 `main` 后，顺序执行 `govern-audit.mjs audit .`、`verify-tools.mjs audit`、`iterate.mjs discover` 与 `iterate.mjs cycle`，将发现的新问题按正流修复清零并留存 `--artifact` 实证，同步刷新 `docs/feature-map.json` 与 `AGENTS.md`。
+- [ ] **T1（`C4` Wave 2.5 真实自举互转演练）**：在 Wave 1 与 Wave 2 均合入 `main` 后，顺序执行 `govern-audit.mjs audit .`、`verify-tools.mjs audit`、`iterate.mjs plan` 与 `iterate.mjs cycle`，将发现的新问题按 `escalation.mjs` 另开独立修复 PR 走完正流合入 `main` 并留存 `--artifact` 实证（避免越出 `#103` `scope_files`），随后刷新 `docs/feature-map.json` 与 `AGENTS.md` 再启动 `docs/TDD.md` 提交。
 - [ ] **T2（`C1` 全景章节大纲重构）**：依据 `kit/skills/lib/tdd-structure.mjs` 必选节边界重写 `docs/TDD.md`，系统贯通 `S1–S4`、全 8 个技能接力、双态规划门禁、波次调度与交接包、`--artifact` 实证与 UI 拦截、`PoC-first` 原则、`iterate.mjs cycle`、三层常青文档与跨代双向融合升级。
 - [ ] **T3（`C2` 合规 Mermaid 全景图示）**：绘制至少 4 张全景架构与流程 Mermaid 图（含外部治理、8 技能研发、波次门禁、实证优化循环），严守矩形/子图 `<= 16`、边/菱形 `<= 12` 显示宽度与零 HTML 标签。
 - [ ] **T4（`C3` 去 AI 味可读性润色与全门禁校验）**：参照 `oil-tone` 改写为平实通俗中文确保人类无需读源码即可理解运转全貌，并通过 `preflight` / `doc-plan` / `govern-audit` / `sync-toc` 与 `doc-locate.mjs` 节级定位实测。

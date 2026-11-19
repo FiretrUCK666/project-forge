@@ -68,8 +68,8 @@ flowchart LR
 - **真实执行链路**（按顺序跑通并保存运行日志至 `.pf-state` 非跟踪实证目录供 PR `--artifact` 检验）：
   1. `node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --json`（排查死代码、规则下沉与文档/索引漂移）；
   2. `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit --json`（核验 `docs/feature-map.json` 覆盖率、符号锚点与树哈希有效性，补齐 `#99`/`#101`/`#102` 新增功能域映射）；
-  3. `node .agents/skills/dev-iterate/scripts/iterate.mjs discover . --json` + `cycle --goal "v10.1 self-bootstrap hardening" --max-rounds 3 --json`（串联 `Observe -> PoC/Escalate (autonomous) -> Fix/Verify -> Reflect` 检查盲区）；
-  4. 若发现可复现真缺陷，按 `escalation.mjs` 结构化上报（附 `pocCommand` / `reproEvidence`）并走完修补与合入闭环，随后重跑 `compose-agents.mjs .` 保证契约收敛。
+  3. `node .agents/skills/dev-iterate/scripts/iterate.mjs plan --json` + `cycle --goal "v10.1 self-bootstrap hardening" --max-rounds 3 --json`（串联 `Observe -> PoC/Escalate (autonomous) -> Fix/Verify -> Reflect` 检查盲区）；
+  4. 若发现可复现真缺陷，按 `escalation.mjs` 结构化上报（附 `pocCommand` / `reproEvidence`）并另开独立修复 PR 走完闭环合入 `main` 后，再继续 `docs/TDD.md` 重写（严守本切片 `scope_files`，不越界混改源码），随后重跑 `compose-agents.mjs .` 保证契约收敛。
 
 ### 2.2 全景 `docs/TDD.md` 重写架构与图谱规划（`C1..C3` / 总控 `C14..C16`）
 

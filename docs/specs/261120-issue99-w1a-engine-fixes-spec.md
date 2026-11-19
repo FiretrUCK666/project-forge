@@ -100,9 +100,9 @@ flowchart LR
 <!-- section: gates -->
 - **门型**：`two-way`（但 `scripts/lib/` 属本仓高风险路径，须通过独立审查 + `I225–I239` 故障注入实证）。
 - **验证命令契约**：
-  - `node scripts/dev/fixtures.mjs --only engine-hardening`
-  - `node scripts/dev/bench.mjs`（连续 3 轮中位数 `survey(self) <= 250 ms`）
-  - `node scripts/dev/verify-injections.mjs --only I225,I226,I227,I228,I229,I230,I231,I232`
+  - `node scripts/dev/fixtures.mjs --domain engine-hardening`
+  - `node scripts/dev/bench.mjs --strict-budget`（连续 3 轮中位数 `survey(self) <= 250 ms`，且连带 `review(self) <= 450 ms`）
+  - 逐条校验注入（如 `node scripts/dev/verify-injections.mjs --only I225` 至 `I232`）或全量 `node scripts/dev/verify-injections.mjs`
   - 全仓合前：`merge-gate` 全绿。
 <!-- section: gates-end -->
 

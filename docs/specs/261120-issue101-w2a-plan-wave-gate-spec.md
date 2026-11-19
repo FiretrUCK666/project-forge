@@ -59,7 +59,8 @@ scope_files:
 
 <!-- section: non-goals -->
 - 严禁探测、导入、绑定或兼容任何特定 AI 宿主的 `/plan`、`/grill-me` 斜杠命令、私有状态文件或宿主环境变量。
-- 不修改 `kit/skills/dev-review/**`、`kit/skills/dev-iterate/**`、`kit/skills/dev-govern/**`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-helpers.mjs` 与 `templates/agents-project.md`（留给 Wave 2 并行切片 `#102` 独占编辑，保障波内零冲突）。
+- 不修改 `kit/skills/dev-review/**`、`kit/skills/dev-iterate/**`、`kit/skills/dev-govern/**`、`kit/skills/lib/workflow-policy.mjs`、`kit/skills/lib/workflow-helpers.mjs`、`kit/skills/lib/empirical-artifacts.mjs` (new) 与 `templates/agents-project.md`（留给 Wave 2 并行切片 `#102` 独占编辑，保障波内零冲突）。
+- 注：`.agents/skills/.pf-manifest.json` 为 `equip.mjs .` 自动生成的确定性构建派生清单（不在手写业务逻辑写域内；先合入一方直推，后合入一方 rebase `main` 后重跑 `equip.mjs .` 刷新）。
 - 不新增第 9 个技能。
 <!-- section: non-goals-end -->
 <!-- section: goal-end -->
@@ -100,12 +101,16 @@ flowchart TD
   1. **总控 `C1..Cn` 100% 覆盖**：沿用并加固对 `multi_spec: true` 总控 PRD `<!-- criteria:start -->` 列表向全部关联 `SPEC` 的映射，漏认领任意条即报 `UNCOVERED_ACCEPTANCE_CRITERIA`（失败）；
   2. **切片元数据必填**：归属 `multi_spec` 总控的每个活跃切片 `SPEC` 与 `Todo` 必须显式声明非空 `scope_files` 数组与可解析的 `depends_on` 数组（缺项报结构性错误）；
   3. **有向依赖图判环**：按 `task_id` / `issue` / `slug` 构图执行 Kahn / DFS 三色拓扑判环，发现任意环或指向不存在节点的悬空依赖时，输出结构化错误 `BLOCKED_SLICE_CYCLE`（或缺失节点错误）；
-  4. **同波次写域碰撞检查**：对同处一个就绪拓扑波次（如同无前置或同一前置集合之后并行就绪）的切片两两比对 `scope_files`（支持前缀目录、`*`/`**` glob 与精确文件路径交叉匹配），发生潜在同波次写同一文件时显式报错阻断（如 `Wave 2` 切片 2 与切片 3 必须严格零交叉）。
+  4. **同波次写域碰撞检查**：对同处一个就绪拓扑波次（如同无前置或同一前置集合之后并行就绪）的切片两两比对 `scope_files`（支持前缀目录、`*`/`**` glob 与精确文件路径交叉匹配，显式排除 `.agents/skills/.pf-manifest.json` 等确定性派生构建清单），发生潜在同波次写同一源码/文档路径时显式报错阻断（如 `Wave 2` 切片 2 与切片 3 必须严格零交叉）。
 
 ### 2.4 `C4` 升级 `flow.mjs batch plan --handoff [--json]` 与 Wave 2 标志透传预留
 
-- **升级文件**：`kit/skills/dev-flow/scripts/flow-batch.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/lib/handoff-package.mjs`、`kit/skills/lib/workflow-policy.mjs`? **注意写域**：`workflow-policy.mjs` 由 `#102` 独占修改！本切片绝不触碰 `workflow-policy.mjs`，而是在 `flow-batch.mjs` 直接复用 `doc-slice-graph.mjs` (new) + `handoff-package.mjs`（`buildHandoff`）按拓扑波次算出 `waves: [{ wave: 1, ready: true, slices: [...] }, ...]`，在传 `--handoff` 时为当前可执行首波次每个切片拼装含 `taskId`、`C1..Cn`、`scopeFiles`、`dependsOn` 与直接派发命令的独立交接包（支持 `--json` 与文本输出）。
-- **与 Slice 3（`#102`）并行无碰撞透传预留**：在 `kit/skills/dev-flow/scripts/flow.mjs` `verify` 命令参数表中新增工具无关多值标志 `--artifact` 与字符串标志 `--visual-blocked-reason`（并在 `flow-lifecycle.mjs` / `flow-lifecycle-helpers.mjs` 中把 `artifacts` 与 `visualBlockedReason` 原样传入 `workflow-policy.mjs` 既有入口参数对象）。本切片不写消费策略，从而让 Slice 3（`#102`）在 `workflow-policy.mjs` 独立实现实证校验时与 Slice 2 保持 0 文件冲突。
+- **升级文件**：`kit/skills/dev-flow/scripts/flow-batch.mjs`、`kit/skills/dev-flow/scripts/flow.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle.mjs`、`kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs`、`kit/skills/lib/handoff-package.mjs`（本切片不修改 `#102` 独占的 `kit/skills/lib/workflow-policy.mjs`）。
+- **波次交接包输出结构（兼容 `buildMultiTaskWavePlan`）**：`flow-batch.mjs` 复用 `doc-slice-graph.mjs` (new) + `handoff-package.mjs`（`buildHandoff`），保持既有 `buildMultiTaskWavePlan` 返回格式 `{ wave, canParallel, tasks }` 不破坏现有调用方，同时为当前可执行波次中的每个切片附带 `handoffs`（含 `taskId`、`C1..Cn`、`scopeFiles`、`dependsOn` 与直接派发命令，支持 `--json` 与文本输出）。
+- **与 Slice 3（`#102`）并行无碰撞透传契约**：
+  1. 在 `kit/skills/dev-flow/scripts/flow.mjs` `verify` 中使用 `multiFlags` 注册 `artifact`、使用 `valueFlags` 注册 `visual-blocked-reason`；
+  2. 移除 `kit/skills/dev-flow/scripts/flow-lifecycle.mjs` 中为裸 `--visual-checked` 硬编码合成伪造 `'e2e/visual runtime behavior observed and verified'` 字符串的逻辑；
+  3. 经 `flow-lifecycle.mjs` -> `flow-lifecycle-helpers.mjs`（`recordVerifyEvidenceForFlow`）将 `{ artifacts, visualBlockedReason, visualCheckedRaw: Boolean(opts['visual-checked']), observationSummary }` 完整透传给 `kit/skills/lib/workflow-policy.mjs` 约定校验入口（`validateVerifyPrecheck` / `writeVerificationEvidence` 前置预检：前置未实现时 Fail-Soft、待 `#102` 实现后按返回的 `{ ok, code, exitCode }` 在 `verify` 阶段阻断退出）。
 - **同步生成物与双证覆盖**：运行 `node scripts/equip.mjs .` 同步 `.agents/skills/` 镜像，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（号段 `I250–I259`）覆写正反断言与故障注入。
 
 ### 2.5 可复用基础设施与备选方案
@@ -128,8 +133,8 @@ flowchart TD
 <!-- section: gates -->
 - **门型**：`one-way` 级别门禁语义变更（新增 `BLOCKED_PLAN_NOT_READY` 与 `BLOCKED_SLICE_CYCLE` 退出码阻断，且涉及 `kit/` 高风险路径），须通过 `critic` 内审、双向 fixture、`I250–I259` 故障注入与独立审查。
 - **验证命令**：
-  - `node scripts/dev/fixtures.mjs --only plan-wave`
-  - `node scripts/dev/verify-injections.mjs --only I250,I251,I252,I253`
+  - `node scripts/dev/fixtures.mjs --domain plan-wave`
+  - 逐条校验注入（如 `node scripts/dev/verify-injections.mjs --only I250` 至 `I253`）或全量 `node scripts/dev/verify-injections.mjs`
   - `node scripts/equip.mjs . --check && node scripts/dev/preflight.mjs`
 <!-- section: gates-end -->
 

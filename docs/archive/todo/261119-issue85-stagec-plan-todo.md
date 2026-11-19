@@ -1,17 +1,17 @@
 ---
 kind: todo
 title: "Stage C（v10）全套规划文档起草、写域审计与提交（#85）"
-status: active
+status: done
 created: 2026-11-19
 updated: 2026-11-19
 issue: 85
 pr: null
 branch: feat/docs-v10-统一8技能-dev-edit倒金字塔-dev-verify-tools-dev-iterate-全局分
-owner: "plan-stage-c"
+owner: FiretrUCK666
 approved: false
-done_at: null
+done_at: 2026-11-19
 task_id: stagec-plan
-planned_at: "8566de3da467f5137f362ecad4323dbc093dca00"
+planned_at: 8566de3da467f5137f362ecad4323dbc093dca00
 related_prd: null
 related_spec: null
 ---
@@ -22,11 +22,11 @@ related_spec: null
 
 - **任务编号**：`stagec-plan`（仅覆盖本次规划文档落地与提交闭环，`related_prd` 与 `related_spec` 故意置 `null`，确保后续合并本规划 PR 时仅归档本规划 Todo 而保留 Stage C 总控 PRD 与 `C1–C4` 设计/待办文件处于激活状态）
 - **关联规划成品**：
-  - [Stage C 总控 PRD](../prd/261119-v10-stagec-unified-architecture-prd.md)
-  - [Stage C-1 SPEC](../specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md) 与 [Stage C-1 Todo](../todo/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-todo.md)
-  - [Stage C-2 SPEC](../specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec.md) 与 [Stage C-2 Todo](../todo/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-todo.md)
-  - [Stage C-3 SPEC](../specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md) 与 [Stage C-3 Todo](../todo/261119-issue92-v10-stagec-c3-dev-verify-tools-review-todo.md)
-  - [Stage C-4 SPEC](../specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md) 与 [Stage C-4 Todo](../todo/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-todo.md)
+  - Stage C 总控 PRD：`docs/prd/261119-v10-stagec-unified-architecture-prd.md`
+  - Stage C-1（#90）：`docs/specs/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-spec.md` 与 `docs/todo/261119-issue90-v10-stagec-c1-unified-locate-intake-perf-todo.md`
+  - Stage C-2（#91）：`docs/specs/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-spec.md` 与 `docs/todo/261119-issue91-v10-stagec-c2-dev-edit-pyramid-govern-todo.md`
+  - Stage C-3（#92）：`docs/specs/261119-issue92-v10-stagec-c3-dev-verify-tools-review-spec.md` 与 `docs/todo/261119-issue92-v10-stagec-c3-dev-verify-tools-review-todo.md`
+  - Stage C-4（#93）：`docs/specs/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-spec.md` 与 `docs/todo/261119-issue93-v10-stagec-c4-dev-iterate-evolution-e2e-todo.md`
 
 ## 任务范围与验证基准
 

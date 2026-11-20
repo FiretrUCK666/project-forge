@@ -5,7 +5,7 @@ status: done
 created: 2026-11-20
 updated: 2026-11-20
 issue: 101
-pr: null
+pr: 112
 branch: feat/w2a-plan-wave-gate
 owner: impl-w2a
 plan_mode: autonomous

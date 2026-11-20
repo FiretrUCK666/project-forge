@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 102
-pr: null
+pr: 111
 branch: feat/w2b-empirical-poc-cycle
 owner: impl-w2b
 approved: true

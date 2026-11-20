@@ -1,23 +1,23 @@
 ---
 kind: spec
 title: 宿主无关双态规划门禁、PRD 切片图校验与波次交接包规格
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 101
 pr: null
 branch: feat/w2a-plan-wave-gate
-owner: plan-v101
+owner: impl-w2a
+plan_mode: autonomous
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=c85145162203, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"c85145162203\",\"artifact_baseline\":{\"sha\":\"c851451622030e83742d15669a526a353ae7fae46af24142ce3c4ad71b2f5ceb\",\"shortSha\":\"c85145162203\",\"criteriaCount\":4,\"anchorCount\":73},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.361Z\"}]"
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue101-w2a-plan-wave-gate-todo.md
 high_risk_paths: [kit/]
 task_id: w2a-plan-wave-gate
-plan_mode: autonomous
 depends_on: [w1a-engine-fixes]
 scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib/pending-decisions.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-exit-gate.mjs, ".agents/skills/dev-plan/**", ".agents/skills/dev-flow/**", .agents/skills/lib/pending-decisions.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/lib/doc-slice-graph.mjs, .agents/skills/lib/plan-exit-gate.mjs, scripts/dev/fixtures-plan-wave.mjs, scripts/dev/injections-data-plan-wave.mjs]
 critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"PRD\",\"`#102`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`buildHandoff`\",\"`depends_on`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`scope_files`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"templates/agents-project.md\"]}},\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--case\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"C1\",\"C2\",\"C3\",\"C4\",\"I250\",\"I259\",\"PRD\",\"SKILL\",\"`#102`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`C1..Cn`\",\"`I250–I259`\",\"`approved: false`\",\"`buildHandoff`\",\"`depends_on`\",\"`doc-plan.mjs audit`\",\"`doc-plan.mjs triage`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start --case 3|4`\",\"`flow.mjs start`\",\"`flow.mjs verify`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-plan/SKILL.md`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/doc-slice-graph.mjs`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/plan-exit-gate.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`plan_mode`\",\"`scope_files`\",\"`scripts/dev/fixtures-plan-wave.mjs`\",\"`scripts/dev/injections-data-plan-wave.mjs`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"doc-plan.mjs\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/dev-plan/SKILL.md\",\"kit/skills/lib/doc-slice-graph.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/plan-exit-gate.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"scripts/dev/fixtures-plan-wave.mjs\",\"scripts/dev/injections-data-plan-wave.mjs\",\"templates/agents-project.md\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
@@ -25,7 +25,7 @@ critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\
 
 # 宿主无关双态规划门禁、PRD 切片图校验与波次交接包（Issue `#101`）
 
-> 所属总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2a-plan-wave-gate Todo](../todo/261120-issue101-w2a-plan-wave-gate-todo.md)
+> 所属总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2a-plan-wave-gate Todo](../todo/261120-issue101-w2a-plan-wave-gate-todo.md)
 >
 > 总控 PRD 认领范围：覆盖总控 `C5..C8`（总控 `C5` -> 本切片 `C1`；总控 `C6` -> 本切片 `C2`；总控 `C7` -> 本切片 `C3`；总控 `C8` -> 本切片 `C4` 及 Wave 2 透传契约）。
 

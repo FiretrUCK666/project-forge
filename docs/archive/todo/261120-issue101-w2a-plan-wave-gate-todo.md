@@ -1,26 +1,27 @@
 ---
 kind: todo
 title: 宿主无关双态规划门禁、PRD 切片图校验与波次交接包实施清单
-status: active
+status: done
 created: 2026-11-20
 updated: 2026-11-20
 issue: 101
 pr: null
 branch: feat/w2a-plan-wave-gate
-owner: plan-v101
+owner: impl-w2a
+plan_mode: autonomous
 approved: true
+done_at: 2026-11-20
 task_id: w2a-plan-wave-gate
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue101-w2a-plan-wave-gate-spec.md
-plan_mode: autonomous
 depends_on: [w1a-engine-fixes]
 scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib/pending-decisions.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-exit-gate.mjs, ".agents/skills/dev-plan/**", ".agents/skills/dev-flow/**", .agents/skills/lib/pending-decisions.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/lib/doc-slice-graph.mjs, .agents/skills/lib/plan-exit-gate.mjs, scripts/dev/fixtures-plan-wave.mjs, scripts/dev/injections-data-plan-wave.mjs]
 ---
 
 # `w2a-plan-wave-gate` 实施 Todo（Issue `#101`）
 
-> 对应 SPEC：[w2a-plan-wave-gate SPEC](../specs/261120-issue101-w2a-plan-wave-gate-spec.md)　｜　总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)
+> 对应 SPEC：[w2a-plan-wave-gate SPEC](../specs/261120-issue101-w2a-plan-wave-gate-spec.md)　｜　总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)
 
 ## 一、要做什么
 

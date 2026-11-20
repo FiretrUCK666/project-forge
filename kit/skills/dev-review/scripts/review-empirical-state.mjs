@@ -11,7 +11,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { escalateToBackend } from '../../lib/escalation.mjs'
-import { artifactPathsOf, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
+import { artifactPathsOf, evaluateObservationSubstance, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
 import {
   canonicalPath, execShellCommand, gitStatusPorcelainZ,
   posixPath, readJsonSafe, samePath, sha256File, sha256Text, writeJsonAtomic,
@@ -76,6 +76,39 @@ export function resolveArtifactAndVisualInput(opts = {}, { repoRoot = null, visu
     observationSummary: String(opts['e2e-evidence'] ?? opts['visual-evidence'] ?? '').trim(),
     visualBlockedReason: String(opts['visual-blocked-reason'] ?? '').trim(),
   })
+}
+
+/**
+ * 归一化记录审查结论时要落账的运行观察与环境阻塞说明。
+ *
+ * 两处输入走同一套实质判据：`--e2e-evidence` 与 `--visual-blocked-reason` 都不是自由文本，
+ * 写「ok」「lgtm」占位等于没写。校验不过就带着结构化原因返回，由调用方阻断。
+ */
+export function resolveReviewObservationInputs(opts = {}) {
+  const rawObs = String(opts['e2e-evidence'] ?? opts['visual-evidence'] ?? '').trim()
+  const rawBlocked = String(opts['visual-blocked-reason'] ?? '').trim()
+  let e2eText = ''
+  if (rawObs) {
+    const check = evaluateObservationSubstance(rawObs)
+    if (!check.ok) return { ok: false, code: check.code, reason: check.reason, field: 'e2e-evidence', e2eText: '', blockedReasonText: '' }
+    e2eText = check.text
+  }
+  let blockedReasonText = ''
+  if (rawBlocked) {
+    const check = evaluateObservationSubstance(rawBlocked)
+    if (!check.ok) {
+      return {
+        ok: false,
+        code: check.code,
+        reason: `环境阻塞说明必须写清这台机器为什么渲染不了，而不是一句话占位。${check.reason}`,
+        field: 'visual-blocked-reason',
+        e2eText,
+        blockedReasonText: '',
+      }
+    }
+    blockedReasonText = check.text
+  }
+  return { ok: true, code: null, reason: null, field: null, e2eText, blockedReasonText }
 }
 
 function isInsideDir(candidateAbs, parentAbs) {

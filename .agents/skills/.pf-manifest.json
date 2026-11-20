@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-20T07:38:59.349Z",
+  "installedAt": "2026-11-20T08:47:54.047Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -139,7 +139,7 @@
       "sha256": "0f9b5b9dd6378d84ab4319aeb7026364bde4b6fc3ee09997512876d34b0b5576"
     },
     "dev-review/scripts/review-empirical-state.mjs": {
-      "sha256": "f0b1bd919e7b47d589fad2d8218ce35b8302039619e2f54a74cc28399a57e9ca"
+      "sha256": "8aca671f3a74437ed53019f33378f2b96598107f06f18dfa87fa2d0388d0dd65"
     },
     "dev-review/scripts/review-empirical.mjs": {
       "sha256": "f1e03e28fd08c7b9cfb36787af80c8364bfc70e182a0d578ed6acb420fad0325"
@@ -148,7 +148,7 @@
       "sha256": "d145c5fea531724dc9960b9357a36a3e296687f3033dbc93decd60db42af3c67"
     },
     "dev-review/scripts/review-ledger.mjs": {
-      "sha256": "b4faeab1e5c8d1cf23df37445823c9af9cb780b6a6c2f5d3efcfb0b71e56f752"
+      "sha256": "6218186a74328f220c94e7f9da5cb53ac8ba12896714dc737d90406250cf0ebf"
     },
     "dev-review/scripts/review-locks.mjs": {
       "sha256": "823105a04ca1ea40d842bbcd87fec9bcbc018f37aad6dfb842d2b17453d65ce2"
@@ -223,10 +223,10 @@
       "sha256": "c3763eecc1275338b20e7d7d7243f9b89efee9f12c2678841c8e11f5badacea0"
     },
     "lib/empirical-artifacts.mjs": {
-      "sha256": "87714483b807b9f36182320e501e192f3a923e37ef307b58982c8e984dc01966"
+      "sha256": "9765ba8b2cd22b2be0bef6db46dc9958ca062e4e47982ebca9c8d058e8ea65d3"
     },
     "lib/escalation.mjs": {
-      "sha256": "6672bd0b57192b15c50224d865b1e8268a82631ae9ec257f0ceb6ecb3370e576"
+      "sha256": "9fdd0bb397a54d2d1a73c76c92016efc590da60ef7f3af73721eae4c276dc5d7"
     },
     "lib/exec.mjs": {
       "sha256": "67ad14f3f08c7d9c8928a60c0ac8c62f411d9ea3bcefb9fb2bffc84e7a1d57ed"
@@ -295,7 +295,7 @@
       "sha256": "a95396877d4d8e1677aa916460b73a18d0223c316505263c40042d68b8b9ff99"
     },
     "lib/pr-template-hydrate.mjs": {
-      "sha256": "05bbdf81c86fbb94b7e3c2654e337a2a2a9efae85b04be79e4d2bcafe6cd15cc"
+      "sha256": "65784453b4e23df88ae8f66f392a256ecca7144816ff6d903b4ebafcccd44d01"
     },
     "lib/profile-sniffer.mjs": {
       "sha256": "eee65f4d59cbd89094dcfb73c5d142b0d9e457412addb95b4b54ad5ce8c89a08"

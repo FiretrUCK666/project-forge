@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
-import { formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
+import { evaluateObservationSubstance, formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
 import { formatWorkTitle } from './escalation.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
@@ -180,20 +180,44 @@ export function buildVerificationEvidenceSection({ evidence, ledger, shortHead, 
   return lines.join('\n')
 }
 
-/** 把 evidence.json 与账本里的界面核验结论汇成 `formatArtifactEvidenceLines` 需要的一层视图。 */
+/**
+ * 把 evidence.json 与账本里的界面核验结论汇成 `formatArtifactEvidenceLines` 需要的一层视图。
+ *
+ * 顺序即优先级：真附件 > 已落账观察 > 已落账环境阻塞 > 账本里的观察结论。
+ * `visualVerifiedOnHead` 只用来区分「声明了核验」与「什么都没声明」，绝不拿它推断证据形态
+ * ——一个布尔值证明不了附件存在，也替代不了观察原文。
+ */
 function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], visualVerifiedOnHead = false }) {
   const uiFiles = (Array.isArray(visualFilesChanged) ? visualFilesChanged : [])
     .map((f) => posixPath(String(f ?? '')).trim()).filter(Boolean).sort()
   if (uiFiles.length === 0) return null
   const stored = evidence?.visual && typeof evidence.visual === 'object' ? evidence.visual : null
-  const verified = Boolean(visualVerifiedOnHead || (uiFiles.length > 0 && (stored?.observation || stored?.blockedReason)))
-  return {
+  const records = Array.isArray(evidence?.artifacts) ? evidence.artifacts : []
+  const view = {
     required: true,
     uiFiles,
-    satisfiedBy: verified ? (stored?.observation ? 'observation' : (stored?.blockedReason ? 'blocked' : 'artifacts')) : null,
-    observation: String(stored?.observation ?? ledger?.visualCheckEvidence ?? '').trim(),
-    blockedReason: String(stored?.blockedReason ?? '').trim(),
+    satisfiedBy: records.length > 0 ? 'artifacts' : null,
+    observation: '',
+    blockedReason: '',
+    claimedNoProof: false,
   }
+  if (view.satisfiedBy) return view
+  const candidates = [
+    { satisfiedBy: 'observation', text: String(stored?.observation ?? '').trim() },
+    { satisfiedBy: 'blocked', text: String(stored?.blockedReason ?? '').trim() },
+    { satisfiedBy: 'observation', text: String(ledger?.visualCheckEvidence ?? '').trim() },
+  ]
+  for (const cand of candidates) {
+    if (!cand.text) continue
+    const substance = evaluateObservationSubstance(cand.text)
+    if (!substance.ok) continue
+    view.satisfiedBy = cand.satisfiedBy
+    if (cand.satisfiedBy === 'blocked') view.blockedReason = substance.text
+    else view.observation = substance.text
+    return view
+  }
+  view.claimedNoProof = Boolean(visualVerifiedOnHead)
+  return view
 }
 
 function replaceSectionIfPresent(md, headingCandidates, newBody) {

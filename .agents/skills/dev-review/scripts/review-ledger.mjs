@@ -22,7 +22,7 @@ import {
 } from '../../lib/signals.mjs'
 import { readVerificationEvidence } from '../../lib/workflow-policy.mjs'
 import { EXIT, resolveReviewTargetSha } from './review-diff.mjs'
-import { readReceipt, resolveEmpiricalReceiptPath } from './review-empirical-state.mjs'
+import { readReceipt, resolveEmpiricalReceiptPath, resolveReviewObservationInputs } from './review-empirical-state.mjs'
 import {
   buildReviewStopLossPacket, checkDistinctRoundReviewer, checkHistoricalStopLoss,
   checkIncrementalScopeLock, checkSameHeadRereview, collectExcludedReviewers,
@@ -348,9 +348,15 @@ export async function handleRecord(opts, roots) {
     : ''
   const effectiveFaultInjection = String(opts['fault-injection'] ?? '').trim() || autoFaultText
 
-  const e2eText = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-    || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
-    || ''
+  const obsInput = resolveReviewObservationInputs(opts)
+  if (!obsInput.ok) {
+    const msg = `${obsInput.code}: ${obsInput.reason}`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: obsInput.code, exitCode: EXIT.UNTRUSTED_HAZARD, taskId, round, headSha, field: obsInput.field, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.UNTRUSTED_HAZARD
+  }
+  const { e2eText, blockedReasonText } = obsInput
   const artifactInput = normalizeArtifactRecords({ repoRoot: targetRoot, artifacts: artifactPathsOf(opts) })
   if (!artifactInput.ok) {
     const msg = `BLOCKED_ARTIFACT_INVALID: ${artifactInput.error}`
@@ -365,6 +371,7 @@ export async function handleRecord(opts, roots) {
   if (evidenceRaw) empParts.push(`审查命令与实证：${evidenceRaw}`)
   if (e2eText) empParts.push(`E2E/交互观察：${e2eText}`)
   if (artifactText) empParts.push(`产物核验：${artifactText}`)
+  if (blockedReasonText) empParts.push(`环境阻塞待人工核验：${blockedReasonText}`)
   const recEmp = receipt?.empiricalVerified
   if (recEmp && typeof recEmp === 'object') {
     const cmds = Array.isArray(recEmp.commands) ? recEmp.commands : []
@@ -373,7 +380,7 @@ export async function handleRecord(opts, roots) {
     else if (recEmp.e2eObservation?.summary) empParts.push(`回执观察：${recEmp.e2eObservation.summary}`)
   }
   const reviewEmpirical = empParts.join(' | ') || null
-  const visualChecked = Boolean(e2eText || artifactRecords.length > 0)
+  const visualChecked = Boolean(e2eText || artifactRecords.length > 0 || blockedReasonText)
   const roundEntry = {
     round,
     baseSha: baseLedger.baseSha ?? null,
@@ -447,7 +454,9 @@ export async function handleRecord(opts, roots) {
 
   if (visualChecked) {
     updated.visualVerifiedHead = headSha
-    updated.visualCheckEvidence = e2eText || artifactText || updated.visualCheckEvidence
+    updated.visualCheckEvidence = e2eText || artifactText
+      || (blockedReasonText ? `环境阻塞待人工或带界面节点核验——${blockedReasonText}` : '')
+      || updated.visualCheckEvidence
   }
 
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)

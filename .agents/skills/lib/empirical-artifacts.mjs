@@ -327,6 +327,9 @@ export function precheckVisualAndArtifacts({
 /**
  * 渲染 PR「验证证据」里的结构化实证摘要与附件清单。
  * 只写客观事实：文件相对路径、字节数、校验指纹前缀、环境阻塞说明。
+ *
+ * 一条铁律：**没有附件记录就不能说「已附附件」**。`satisfiedBy` 只描述证据形态，
+ * 真附件是否存在以 `records` 为准——两者不一致时按最保守的一侧渲染。
  */
 export function formatArtifactEvidenceLines({ records = [], visual = null } = {}) {
   const lines = []
@@ -341,10 +344,13 @@ export function formatArtifactEvidenceLines({ records = [], visual = null } = {}
   }
   if (visual?.required) {
     const touch = `涉及界面资源 ${visual.uiFiles.slice(0, 5).join(', ')}${visual.uiFiles.length > 5 ? ' 等' : ''}`
-    if (visual.satisfiedBy === 'artifacts') lines.push(`- **视觉与交互核验**：${touch}；已附真实非空实证附件`)
+    const byArtifacts = visual.satisfiedBy === 'artifacts' && list.length > 0
+    if (byArtifacts) lines.push(`- **视觉与交互核验**：${touch}；已附真实非空实证附件`)
     else if (visual.satisfiedBy === 'observation') lines.push(`- **视觉与交互核验**：${visual.observation}`)
     else if (visual.satisfiedBy === 'blocked') {
       lines.push(`- **视觉与交互核验**：环境阻塞待人工或带界面节点核验——${visual.blockedReason}`)
+    } else if (visual.claimedNoProof) {
+      lines.push(`- **视觉与交互核验**：${touch}；账本声明已核验，但实证里查不到附件或观察原文，需人工复核`)
     } else lines.push(`- **视觉与交互核验**：${touch}；尚未提供实证附件或观察记录`)
   }
   return lines

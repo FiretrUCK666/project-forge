@@ -51,10 +51,11 @@ scope_files: ["kit/skills/dev-review/**", "kit/skills/dev-iterate/**", "kit/skil
 
 ## 五、完成记录
 
-- `kit/skills/lib/empirical-artifacts.mjs` 承载附件存在性/常规文件/非空校验、`{ relPath, bytes, sha256Prefix, capturedAt }` 元数据、观察实质判据与 PR 实证清单渲染；`workflow-policy.mjs` 只加 `validateVerifyPrecheck` 与 `evaluateStoredVisualEvidence` 接线，实测 `796` 行，`workflow-helpers.mjs` 实测 `485` 行，`pr-template-hydrate.mjs` 实测 `349` 行。
+- `kit/skills/lib/empirical-artifacts.mjs` 承载附件存在性/常规文件/非空校验、`{ relPath, bytes, sha256Prefix, capturedAt }` 元数据、观察实质判据与 PR 实证清单渲染；`workflow-policy.mjs` 只加 `validateVerifyPrecheck` 与 `evaluateStoredVisualEvidence` 接线，实测 `798` 行，`workflow-helpers.mjs` 实测 `485` 行，`pr-template-hydrate.mjs` 实测 `373` 行，新增模块实测 `364` 行。
 - 附件记录写入仓外 `evidence.json` 与审查回执，`git status` 保持零新增跟踪文件；`--artifact` 在 `review-pack.mjs` 登记为多值标志，逐条校验真实存在、非目录且非 0 字节。
 - 触及 `UI_VISUAL_EXT_RE` 时，裸 `--visual-checked` 在 `verify` 与 `submit` 两处均被拦（`BLOCKED_VISUAL_EVIDENCE_REQUIRED`）；旧式硬编码确认串与 `lgtm` 一类水话均被判为无效观察，无渲染环境须显式 `--visual-blocked-reason` 并同步披露在 PR 实证表。
-- `escalation.mjs` 支持可选 `reproEvidence`/`pocCommand`，建单正文自动带「最小复现」与「复现命令」两行，不识别任何具体工具名。
+- PR 验证表按四种证据形态如实渲染：有附件才写「已附真实非空实证附件」并列出附件表；只有观察时渲染观察原文；环境阻塞时披露「待人工或带界面节点核验」；什么都没有时如实写「尚未提供实证附件或观察记录」。布尔值 `visualVerifiedOnHead` 只用于区分「声明过」与「没声明」，绝不据此推断证据形态。
+- `escalation.mjs` 支持可选 `reproEvidence`/`pocCommand`，建单正文自动带「最小复现」与「复现命令」两行，不识别任何具体工具名；超限字段在载荷组装处截断并标注「已截断」，同时以 `reproTruncated`/`reproWarnings` 留痕。
 - `iterate.mjs cycle` 默认 `3` 轮、硬上限 `10` 轮，三条停损 `ROUND_LIMIT_REACHED`/`NO_PROGRESS_STALL`/`ONE_WAY_GATE_HIT` 触发即输出 `stopped: true` 与 `stopReason`，停损时退出码 `4`，全程只读。
-- 实测读数：`fixtures.mjs --domain empirical-cycle` 11 项通过 0 失败；全量 `fixtures.mjs` 343 项通过 0 失败；`verify-injections.mjs` 全量 261 条判据全部变红命中（含 `I260–I269` 十条）；`preflight.mjs` 自检通过 0 项失败（36 项读数）；`AGENTS.md` 实测 `22582` 字节（`< 24576 B`）。
+- 实测读数：`fixtures.mjs --domain empirical-cycle` 12 项通过 0 失败；全量 `fixtures.mjs` 344 项通过 0 失败；`verify-injections.mjs` 全量 261 条判据全部变红命中（含 `I260–I269` 十条）；`preflight.mjs` 自检通过 0 项失败（36 项读数）；`AGENTS.md` 实测 `22605` 字节（`< 24576 B`）；全仓最大 `.mjs` 为 `workflow-policy.mjs` 的 `798` 行（`<= 800`）。
 - 与 `#101` 零源码碰撞：本次未触碰 `kit/skills/dev-flow/**`、`kit/skills/dev-plan/**`、`pending-decisions.mjs` 与 `handoff-package.mjs`；`flow.mjs verify` 的 `--artifact` 与 `--visual-blocked-reason` 参数接收仍由 `#101` 落地，本切片的 `validateVerifyPrecheck` 已按其透传契约预留入口。

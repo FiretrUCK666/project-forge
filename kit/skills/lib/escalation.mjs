@@ -100,14 +100,27 @@ export function validateReproEvidenceFields(item = {}) {
   return { ok: errors.length === 0, errors, reproEvidence, pocCommand }
 }
 
+/** 把超限的复现证据字段截到上限内，并显式标注被截断，避免正文被整段日志灌满。 */
+function clampReproField(text) {
+  if (!text) return null
+  if (text.length <= REPRO_EVIDENCE_MAX_CHARS) return text
+  const keep = Math.max(0, REPRO_EVIDENCE_MAX_CHARS - 12)
+  return `${text.slice(0, keep)}…（已截断）`
+}
+
 /**
  * 组装包含 Case、验收清单 C1..Cn、根因与单一 `[NEXT STEP]` 的标准 Escalation Issue 载荷。
+ *
+ * 复现证据字段在这里就按上限收敛：超限时截断并在正文里写明「已截断」，
+ * 同时把原始校验错误挂在载荷上供调用方上报——静默接受会把整段日志抄进建单正文。
  */
 export function buildEscalationIssuePayload(item = {}) {
   const caseType = inferEscalationCase(item)
   const escalationTier = classifyEscalationTier(item)
   const title = formatWorkTitle(item.title ?? item.summary ?? '未命名升级问题', caseType)
-  const { reproEvidence, pocCommand } = normalizeReproEvidence(item)
+  const reproCheck = validateReproEvidenceFields(item)
+  const reproEvidence = clampReproField(reproCheck.reproEvidence)
+  const pocCommand = clampReproField(reproCheck.pocCommand)
   const labels = [...new Set((Array.isArray(item.labels) && item.labels.length > 0 ? item.labels : [item.stopLoss ? 'stop-loss' : 'escalation'])
     .map((l) => String(l ?? '').trim())
     .filter(Boolean))]
@@ -173,6 +186,7 @@ export function buildEscalationIssuePayload(item = {}) {
     nextStep,
     ...(reproEvidence ? { reproEvidence } : {}),
     ...(pocCommand ? { pocCommand } : {}),
+    ...(reproCheck.ok ? {} : { reproTruncated: true, reproWarnings: reproCheck.errors }),
     ...(item.category ? { category: item.category } : {}),
     ...(item.severity ? { severity: item.severity } : {}),
     ...(item.milestone !== undefined && item.milestone !== null ? { milestone: item.milestone } : {}),

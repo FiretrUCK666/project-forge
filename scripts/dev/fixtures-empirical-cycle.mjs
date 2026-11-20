@@ -18,6 +18,7 @@ import {
   REPRO_EVIDENCE_MAX_CHARS, buildEscalationIssuePayload,
   normalizeReproEvidence, validateReproEvidenceFields,
 } from '../../kit/skills/lib/escalation.mjs'
+import { hydratePrTemplateBody } from '../../kit/skills/lib/pr-template-hydrate.mjs'
 import {
   DEFAULT_MAX_ROUNDS, HARD_MAX_ROUNDS, STOP_REASONS,
   buildCyclePlan, computeRoundProgress, detectStopLoss,
@@ -25,7 +26,13 @@ import {
   trailingZeroProgressRounds,
 } from '../../kit/skills/dev-iterate/scripts/iterate-cycle.mjs'
 import { validateVerificationEvidence, validateVerifyPrecheck } from '../../kit/skills/lib/workflow-policy.mjs'
-import { rmTree, runAbs, tmpProject } from './fixtures-helpers.mjs'
+import { resolveRepoRoots } from '../../kit/skills/lib/git.mjs'
+import {
+  createDefaultLedger, ensureReviewToken, readTaskLedger, updateTaskLedger,
+} from '../../kit/skills/lib/ledger.mjs'
+import { handleRecord } from '../../kit/skills/dev-review/scripts/review-ledger.mjs'
+import { resolveReviewObservationInputs } from '../../kit/skills/dev-review/scripts/review-empirical-state.mjs'
+import { gitInit, rmTree, runAbs, tmpProject } from './fixtures-helpers.mjs'
 
 function makeRepo() {
   const dir = tmpProject({
@@ -35,6 +42,23 @@ function makeRepo() {
     'artifacts/nested/keep.txt': 'x\n',
   })
   return dir
+}
+
+/** 静音收集 CLI 输出，供直接调用 `handleRecord` 的断言使用。 */
+async function withQuietIo(fn) {
+  const origOut = process.stdout.write.bind(process.stdout)
+  const origErr = process.stderr.write.bind(process.stderr)
+  let stdout = ''
+  let stderr = ''
+  process.stdout.write = (chunk) => { stdout += String(chunk); return true }
+  process.stderr.write = (chunk) => { stderr += String(chunk); return true }
+  try {
+    const res = await fn()
+    return { res, stdout, stderr }
+  } finally {
+    process.stdout.write = origOut
+    process.stderr.write = origErr
+  }
 }
 
 export function registerEmpiricalCycleCases(cases) {
@@ -116,6 +140,65 @@ export function registerEmpiricalCycleCases(cases) {
       if (gate.code !== 'BLOCKED_VISUAL_EVIDENCE_REQUIRED') return `阻断码不符：${gate.code}`
       return true
     } finally { rmTree(dir) }
+  }])
+
+  cases.push(['C1：PR 验证表按四种证据形态如实渲染——有附件、只有观察、环境阻塞、什么都没有，且绝不在无附件时声称已附附件', async () => {
+    const head = 'd'.repeat(40)
+    const ui = ['src/App.tsx']
+    const render = (evidence, extra = {}) => hydratePrTemplateBody({
+      repoRoot: null,
+      taskId: 'render-probe',
+      ledger: { taskId: 'render-probe', caseType: 3, branch: 'feat/render', lastVerifyExitCode: 0, verifiedHead: head, ...(extra.ledger ?? {}) },
+      policy: { riskTier: 'medium', highRiskHits: [], oneWayBoundaryHits: [] },
+      evidence: { gates: { full: { cmd: 'node test.mjs', exitCode: 0, durationMs: 10 } }, ...evidence },
+      currentHead: head,
+      changedFiles: [...ui],
+      visualFilesChanged: [...ui],
+      ...(extra.rest ?? {}),
+    })
+
+    // ① 有真实附件：只能说「已附真实非空实证附件」，并列出附件表。
+    const withArtifacts = render({ artifacts: [{ relPath: 'shots/dark.png', bytes: 20, sha256Prefix: 'aaaaaaaaaaaa' }] }, {
+      rest: { visualVerifiedOnHead: true },
+    })
+    if (!withArtifacts.includes('已附真实非空实证附件')) return `有附件时未声明已附附件：\n${withArtifacts}`
+    if (!withArtifacts.includes('| 实证附件 | 字节数 | 校验指纹 |') || !withArtifacts.includes('shots/dark.png')) {
+      return `有附件时未渲染附件表：\n${withArtifacts}`
+    }
+
+    // ② 只有观察：渲染观察原文，不得出现「已附附件」。
+    const obsText = '在预览环境打开列表页，浅色与深色主题下卡片均无截断，翻页交互后数据刷新正常'
+    const withObs = render({ visual: { required: true, headSha: head, observation: obsText } }, { rest: { visualVerifiedOnHead: true } })
+    if (!withObs.includes(obsText)) return `只有观察时未渲染观察原文：\n${withObs}`
+    if (withObs.includes('已附真实非空实证附件')) return `只有观察却声称已附附件：\n${withObs}`
+
+    // ③ 环境阻塞：披露待人工核验，不得出现「已附附件」。
+    const blockedReason = '当前环境无图形会话，无法启动界面渲染进程；改由人工或有界面节点复核'
+    const withBlocked = render({ visual: { required: true, headSha: head, blockedReason } }, { rest: { visualVerifiedOnHead: true } })
+    if (!withBlocked.includes('环境阻塞待人工或带界面节点核验')) return `环境阻塞未披露：\n${withBlocked}`
+    if (withBlocked.includes('已附真实非空实证附件')) return `环境阻塞却声称已附附件：\n${withBlocked}`
+
+    // ④ 什么都没有（这正是 flow verify 的真实产出形态）：不得声称已附附件，也不得伪造观察。
+    const empty = render({}, { rest: { visualVerifiedOnHead: true } })
+    if (empty.includes('已附真实非空实证附件')) return `无任何证据却声称已附附件（MF-1 回归）：\n${empty}`
+    if (!empty.includes('需人工复核') && !empty.includes('尚未提供实证附件或观察记录')) {
+      return `无任何证据时未如实披露：\n${empty}`
+    }
+    if (empty.includes('| 实证附件 | 字节数 | 校验指纹 |')) return `无附件时却渲染了附件表：\n${empty}`
+
+    // ⑤ 账本里存着真实观察：应作为 observation 渲染出来，而不是丢掉原文去说「已核验」。
+    const ledgerObs = '独立审查在预览节点打开结算页，确认深色主题下按钮对比度足够且无横向滚动'
+    const fromLedger = render({}, { ledger: { visualCheckEvidence: ledgerObs }, rest: { visualVerifiedOnHead: true } })
+    if (!fromLedger.includes(ledgerObs)) return `账本观察原文未渲染：\n${fromLedger}`
+
+    // ⑥ 纯函数层同口径：satisfiedBy=artifacts 但无记录时必须回落到「尚未提供」。
+    const lines = formatArtifactEvidenceLines({
+      records: [],
+      visual: { required: true, uiFiles: ui, satisfiedBy: 'artifacts', observation: '', blockedReason: '' },
+    }).join('\n')
+    if (lines.includes('已附真实非空实证附件')) return `formatArtifactEvidenceLines 在无记录时仍声称已附附件：\n${lines}`
+    if (!lines.includes('尚未提供实证附件或观察记录')) return `无记录时未回落到诚实文案：\n${lines}`
+    return true
   }])
 
   cases.push(['C2：触及 UI_VISUAL_EXT_RE 时裸 --visual-checked 被阻断，须有真附件、实质观察或显式环境阻塞说明', async () => {
@@ -256,9 +339,70 @@ export function registerEmpiricalCycleCases(cases) {
     const vOk = validateReproEvidenceFields({ reproEvidence: 'exit=1', pocCommand: 'node repro.mjs' })
     if (!vOk.ok) return `合法复现字段被误判：${JSON.stringify(vOk)}`
 
+    // 校验必须真的接线到建单链路：超长字段被截断、标注截断、并带出警告，不能原样写进正文。
+    const overflowPayload = buildEscalationIssuePayload({ title: '超长复现', summary: 'x', caseType: 3, reproEvidence: long })
+    if (overflowPayload.reproEvidence === long) return '超长 reproEvidence 被原样写进建单正文（validateReproEvidenceFields 未接线）'
+    if (overflowPayload.reproEvidence.length > REPRO_EVIDENCE_MAX_CHARS) return `截断后仍超限：${overflowPayload.reproEvidence.length}`
+    if (!overflowPayload.reproEvidence.endsWith('（已截断）')) return `截断后未标注截断：${overflowPayload.reproEvidence.slice(-10)}`
+    if (overflowPayload.reproTruncated !== true || !overflowPayload.reproWarnings?.length) {
+      return `截断未在载荷上留痕：${JSON.stringify({ t: overflowPayload.reproTruncated, w: overflowPayload.reproWarnings })}`
+    }
+    if (overflowPayload.body.includes(long)) return '超长 reproEvidence 仍被整段抄进建单正文'
+    const cleanPayload = buildEscalationIssuePayload({ title: '正常复现', summary: 'x', caseType: 3, reproEvidence: 'exit=1' })
+    if (cleanPayload.reproTruncated !== undefined) return '未超限时不应标记截断'
+
     const normalized = normalizeReproEvidence({ reproEvidence: ['a'], pocCommand: ['b', 'c'] })
     if (normalized.pocCommand !== 'b && c') return `数组形态 pocCommand 未拼接：${normalized.pocCommand}`
     return true
+  }])
+
+  cases.push(['C2：审查记录阶段的 --e2e-evidence 与 --visual-blocked-reason 都过实质判据，占位理由被拒而不是静默丢弃', async () => {
+    const okObs = resolveReviewObservationInputs({ 'e2e-evidence': '实跑 node test.mjs 输出 12 项通过 0 失败，退出码 0' })
+    if (!okObs.ok || !okObs.e2eText) return `合法 E2E 观察被误判：${JSON.stringify(okObs)}`
+
+    const waterE2e = resolveReviewObservationInputs({ 'e2e-evidence': 'lgtm' })
+    if (waterE2e.ok || waterE2e.field !== 'e2e-evidence') return `水话 E2E 观察未被拒：${JSON.stringify(waterE2e)}`
+
+    const waterBlocked = resolveReviewObservationInputs({ 'visual-blocked-reason': 'ok' })
+    if (waterBlocked.ok || waterBlocked.field !== 'visual-blocked-reason') return `占位阻塞理由未被拒：${JSON.stringify(waterBlocked)}`
+
+    const realBlocked = resolveReviewObservationInputs({
+      'visual-blocked-reason': '当前环境无图形会话，无法启动界面渲染进程；改由人工或有界面节点复核',
+    })
+    if (!realBlocked.ok || !realBlocked.blockedReasonText) return `真实的阻塞理由被误判：${JSON.stringify(realBlocked)}`
+
+    const legacyBlocked = resolveReviewObservationInputs({ 'visual-blocked-reason': SYNTHETIC_OBSERVATION_TEXTS[1] })
+    if (legacyBlocked.ok) return '旧式硬编码确认串被当成合法阻塞理由'
+
+    // 经真实 CLI 走一遍 record：参数必须被读到，不能注册了却不消费。
+    const dir = makeRepo()
+    try {
+      gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
+      const roots = await resolveRepoRoots(dir)
+      await updateTaskLedger(dir, 'obs-t', () => createDefaultLedger({
+        taskId: 'obs-t', caseType: 2, role: 'maintainer', providerId: 'github', branch: 'fix/obs',
+        implementerId: 'impl-x', verifiedHead: 'e'.repeat(40), lastVerifyExitCode: 0,
+      }), { createIfMissing: true })
+      const token = ensureReviewToken(dir, readTaskLedger(dir, 'obs-t'), 1).token
+
+      const water = await withQuietIo(() => handleRecord({
+        task: 'obs-t', round: '1', verdict: 'changes', 'reviewer-id': 'rev-y', 'review-token': token,
+        evidence: 'ran node test.mjs', 'visual-blocked-reason': 'ok', json: true,
+      }, roots))
+      if (water.res !== 3) return `占位 --visual-blocked-reason 未经 CLI 阻断：exit=${water.res} out=${water.stdout}`
+
+      const goodBlocked = '当前环境无图形会话，无法启动界面渲染进程；改由人工或有界面节点复核'
+      const accepted = await withQuietIo(() => handleRecord({
+        task: 'obs-t', round: '1', verdict: 'changes', 'reviewer-id': 'rev-y', 'review-token': token,
+        evidence: 'ran node test.mjs', 'visual-blocked-reason': goodBlocked, json: true,
+      }, roots))
+      if (accepted.res !== 0) return `真实阻塞理由未经 CLI 放行：exit=${accepted.res} out=${accepted.stdout} err=${accepted.stderr}`
+      const ledgerAfter = readTaskLedger(dir, 'obs-t')
+      if (!String(ledgerAfter.visualCheckEvidence ?? '').includes('当前环境无图形会话')) {
+        return `--visual-blocked-reason 未被写入账本（注册了却不消费）：${ledgerAfter.visualCheckEvidence}`
+      }
+      return true
+    } finally { rmTree(dir) }
   }])
 
   cases.push(['C4：cycle 四阶段编排只读，默认 3 轮、硬上限 10 轮', async () => {

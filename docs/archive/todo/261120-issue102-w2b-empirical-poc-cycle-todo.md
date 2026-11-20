@@ -1,17 +1,18 @@
 ---
 kind: todo
 title: 工具无关结构化实证附件、PoC 先行原则与有界优化循环实施清单
-status: completed
+status: done
 created: 2026-11-20
 updated: 2026-11-20
 issue: 102
 pr: null
 branch: feat/w2b-empirical-poc-cycle
-owner: plan-v101
+owner: impl-w2b
 approved: true
+done_at: 2026-11-20
 task_id: w2b-empirical-poc-cycle
 planned_at: d2f412968988fd6d2b656ba6b52ee136f0b0ce34
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_spec: ../specs/261120-issue102-w2b-empirical-poc-cycle-spec.md
 plan_mode: autonomous
 depends_on: [w1a-engine-fixes]
@@ -20,7 +21,7 @@ scope_files: ["kit/skills/dev-review/**", "kit/skills/dev-iterate/**", "kit/skil
 
 # `w2b-empirical-poc-cycle` 实施 Todo（Issue `#102`）
 
-> 对应 SPEC：[w2b-empirical-poc-cycle SPEC](../specs/261120-issue102-w2b-empirical-poc-cycle-spec.md)　｜　总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)
+> 对应 SPEC：[w2b-empirical-poc-cycle SPEC](../specs/261120-issue102-w2b-empirical-poc-cycle-spec.md)　｜　总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)
 
 ## 一、要做什么
 

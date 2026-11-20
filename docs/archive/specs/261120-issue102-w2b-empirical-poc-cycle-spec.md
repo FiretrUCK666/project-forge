@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 工具无关结构化实证附件、PoC 先行消误报原则与有界优化循环规格
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 102
 pr: null
 branch: feat/w2b-empirical-poc-cycle
-owner: plan-v101
+owner: impl-w2b
 approved: true
 implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=6a4c0c338ebc, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"6a4c0c338ebc\",\"artifact_baseline\":{\"sha\":\"6a4c0c338ebc75a5a0d88336c25c69352de603411066151cd81348043e6729ef\",\"shortSha\":\"6a4c0c338ebc\",\"criteriaCount\":4,\"anchorCount\":96},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.791Z\"}]"
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md
 high_risk_paths: [kit/, templates/, AGENTS.md]
 task_id: w2b-empirical-poc-cycle
@@ -25,7 +25,7 @@ critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\
 
 # 工具无关结构化实证附件、PoC 先行原则与有界优化循环（Issue `#102`）
 
-> 所属总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2b-empirical-poc-cycle Todo](../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md)
+> 所属总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2b-empirical-poc-cycle Todo](../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md)
 >
 > 总控 PRD 认领范围：覆盖总控 `C9..C12`（总控 `C9` -> 本切片 `C1`；总控 `C10` -> 本切片 `C2`；总控 `C11` -> 本切片 `C3`；总控 `C12` -> 本切片 `C4`）。
 
@@ -140,3 +140,9 @@ flowchart LR
 <!-- section: pending -->
 - 已定：实证附件字段、UI 阻断契约、PoC 字段名与 `cycle` 停损阈值均已拍板定稿，无未决事项。
 <!-- section: pending-end -->
+
+## 实现说明
+
+
+- 实现提交基线: dcf84c57c72833eecb6515497ac78816644eb454
+- 关联任务: w2b-empirical-poc-cycle

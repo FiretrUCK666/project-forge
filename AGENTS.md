@@ -53,7 +53,7 @@
 quick-test: node scripts/dev/preflight.mjs
 full-test: node scripts/dev/fixtures.mjs
 smoke-verify: node scripts/dev/preflight.mjs
-merge-gate: node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs
+merge-gate: node scripts/dev/merge-gate.mjs
 arch-rules: kit/** -> scripts/dev/**, kit/** -> scripts/lib/**, scripts/*.mjs -> scripts/dev/**, scripts/lib/** -> scripts/dev/**
 high-risk: scripts/lib/, scripts/dev/preflight.mjs, templates/, kit/, SKILL.md, AGENTS.md, .github/workflows/, .gitattributes
 do-not-edit: docs/archive/, docs/release-notes/

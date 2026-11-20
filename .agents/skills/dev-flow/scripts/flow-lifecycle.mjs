@@ -727,7 +727,12 @@ export async function handleSubmit(opts, roots) {
     await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
   } else {
     const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
-    const body = opts.body ?? hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
+    // 提案正文由账本与模板确定性生成，不接受整段替换。
+    //
+    // 正文里排着实证上下文（验证绑定哪个 HEAD、门禁跑过什么、界面核验观测到什么），
+    // 而这些都能从账本与实证记录读出来。一旦允许调用方传 `--body`，人（或模型）就会
+    // 传一段自己写的进去，实证栏随即变成自由发挥——它显示的是「他说的」，不是「记录里的」。
+    const body = hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number

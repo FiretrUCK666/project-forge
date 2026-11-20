@@ -345,7 +345,7 @@ async function runZeroHintAndWeakModelGuard(tracker, sandbox, envExtra) {
       tracker,
       'weak-model:blocks-diff-and-pass-before-e2e',
       diffBlocked.status === 3 && diffBlocked.stdout.includes('e2e-observation')
-      && passBlocked.status === 2 && passBlocked.stdout.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS'),
+      && passBlocked.status === EXIT.FACT && passBlocked.stdout.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS'),
       `diff=${diffBlocked.status} pass=${passBlocked.status}`,
     )
 

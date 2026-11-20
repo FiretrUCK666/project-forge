@@ -478,10 +478,10 @@ async function runScenarioI(pkgRoot, sandbox, env, helpers) {
   const revI = join(repoI, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
 
   // Critique 双侧锁 + 3 轮硬停损 + override
-  assertOk(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'C1: need clearer boundary'], repoI, env), 'Scenario I critique R1')
+  assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'C1: need clearer boundary'], repoI, env), 'CRITIQUE_REJECTED', 'Scenario I critique R1')
   assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-1', '--findings', 'same'], repoI, env), 'BLOCKED_CRITIQUE_SAME_REVIEWER', 'Scenario I critique same reviewer')
   writeFiles(repoI, { 'docs/specs/261118-issue1-s1-spec.md': `${readFileSync(join(repoI, 'docs/specs/261118-issue1-s1-spec.md'), 'utf8')}\n- rev2\n` })
-  assertOk(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-2', '--findings', 'C1: need boundary 2'], repoI, env), 'Scenario I critique R2')
+  assertBlocked(runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-2', '--findings', 'C1: need boundary 2'], repoI, env), 'CRITIQUE_REJECTED', 'Scenario I critique R2')
   writeFiles(repoI, { 'docs/specs/261118-issue1-s1-spec.md': `${readFileSync(join(repoI, 'docs/specs/261118-issue1-s1-spec.md'), 'utf8')}\n- rev3\n` })
   const critStop = runNodeScript(planI, ['critique-reject', '--file', 'docs/specs/261118-issue1-s1-spec.md', '--reviewer', 'crit-3', '--findings', 'C1: stop loss'], repoI, env)
   if (critStop.status !== 4) throw new Error(`Scenario I critique stop-loss expected 4 got ${critStop.status}: ${critStop.stderr}`)

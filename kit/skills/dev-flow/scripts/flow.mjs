@@ -9,6 +9,7 @@
 import { basename } from 'node:path'
 
 import { flushAndExit, hasSkillSupport, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { isMainModule, resolveRepoRoots } from '../../lib/git.mjs'
 import { parsePrNumber } from '../../lib/platform.mjs'
 import { detectGateWeakening } from '../../lib/static-gates.mjs'
@@ -18,6 +19,17 @@ import { analyzeIssueDependencies, inspectWorkspace } from './flow-inspect.mjs'
 export { main as runCli, analyzeIssueDependencies, detectGateWeakening, inspectWorkspace }
 
 const SUBCOMMANDS = ['inspect', 'next', 'explore', 'intake', 'start', 'issue', 'milestone', 'claim', 'release', 'finalize', 'verify', 'submit', 'rework', 'sync', 'merge', 'cleanup', 'status', 'abort', 'batch']
+
+/**
+ * 由脚本确定性生成、不接受调用方整段替换的参数归属。
+ *
+ * 病根不在「传了个参数」，而在**同一个字段有两个生产者**：脚本按账本与模板生成一份，
+ * 调用方又能塞一份进来，于是最终写进平台的到底是哪一份说不清——它显示的是「他说的」，
+ * 不是「记录里的」。所以这里按子命令收窄注册，传了就按用法错误拒绝。
+ */
+const GENERATED_BODY_SUBCOMMANDS = new Set(['submit', 'rework'])
+/** 只允许建单与评论写正文的子命令（那里的正文是内容本身）。 */
+const CONTENT_BODY_SUBCOMMANDS = new Set(['issue', 'milestone', 'intake', 'next', 'claim', 'release'])
 
 function printHelp() {
   process.stdout.write([
@@ -80,6 +92,18 @@ async function main(argv) {
   }
   const { sub, opts } = cli
   if (cli.help) { printHelp(); return 0 }
+
+  // 按子命令收窄：提审与返工分支的正文由脚本生成，不接受调用方传入。
+  if (GENERATED_BODY_SUBCOMMANDS.has(sub) && (opts.body !== undefined || opts.comment !== undefined || opts.note !== undefined)) {
+    process.stderr.write('BLOCKED_GENERATED_BODY_HAS_SINGLE_PRODUCER: submit/rework 的提案正文由账本、模板与实证记录确定性生成，'
+      + '不接受 --body / --comment / --note。想改正文里的事实，就去改账本与实证记录本身；'
+      + '想改标题，用 --title。\n')
+    return EXIT.USAGE
+  }
+  if (!CONTENT_BODY_SUBCOMMANDS.has(sub) && !GENERATED_BODY_SUBCOMMANDS.has(sub) && opts.body !== undefined) {
+    process.stderr.write(`BLOCKED_BODY_PARAM_ON_${String(sub ?? 'unknown').toUpperCase()}: 子命令 ${sub} 不写正文，不接受 --body。\n`)
+    return EXIT.USAGE
+  }
 
   const roots = await resolveRepoRoots(cli.targetDir)
 

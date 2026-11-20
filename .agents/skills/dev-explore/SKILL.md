@@ -7,7 +7,7 @@ description: |
   完全只读，不修改任何文件，不创建分支或工作树。
 metadata:
   intent: 理解项目 / 梳理架构 / 找模块入口 / 按需定位文档与符号
-  script: node .agents/skills/dev-explore/scripts/repo-map.mjs
+  script: "`node .agents/skills/dev-explore/scripts/doc-locate.mjs` / `repo-map.mjs`"
   order: 10
   fallback: 手工查看项目清单、CI 工作流与入口源码（未装配 dev-explore 技能）
 ---

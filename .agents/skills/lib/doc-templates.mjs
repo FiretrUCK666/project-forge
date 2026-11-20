@@ -640,4 +640,4 @@ export function buildArchivedDocPatch({
 }
 
 // ── PR / Issue 协同评论统一结构化渲染（已拆分至 doc-comments.mjs） ───────
-export { buildReviewComments, buildSubmitComments, buildMergeComments } from './doc-comments.mjs'
+export { buildReviewComments, buildSubmitComments, buildMergeComments, formatAttribution } from './doc-comments.mjs'

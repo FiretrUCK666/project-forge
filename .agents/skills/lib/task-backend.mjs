@@ -182,35 +182,42 @@ function buildLocalBackendMixins(kind, mainRoot, gitDir) {
   const modeLabel = kind === 'local-only' ? 'local-issues-store' : 'generic-remote-local-tracking'
 
   const localClaimTask = async ({
-    taskId, issue, issues, prNumber, actor, actorDisplay, branch,
-    takeover = false, reason = '', previousActor = null, labels = ['in-progress'],
+    taskId, issue, issues, prNumber, actor, actorDisplay, account = null, verifiedPlatformLogin = false, agent = null, branch,
+    takeover = false, reason = '', previousActor = null, previousAccount = null, previousVerifiedPlatformLogin = false, previousAgent = null, labels = ['in-progress'],
   } = {}) => {
     const nums = issueListOf(issue, issues)
     const results = []
     for (const num of nums) {
       if (getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
-        const res = await claimLocalIssue({ mainRoot, gitDir, number: num, taskId, actor, actorDisplay, branch, takeover, reason, labels })
+        const res = await claimLocalIssue({
+          mainRoot, gitDir, number: num, taskId, actor, actorDisplay,
+          account, verifiedPlatformLogin, agent,
+          branch, takeover, reason, previousActor, previousAccount, previousVerifiedPlatformLogin, previousAgent, labels,
+        })
         if (!res.ok) return res
         results.push(res)
       }
     }
     const eventPath = await appendBackendEvent(mainRoot, gitDir, taskId ?? 'shared', {
       backend: kind, action: takeover ? 'takeover' : 'claim', taskId, issues: nums,
-      prNumber: prNumber ?? null, actor, previousActor: previousActor ?? null, branch, ...(reason ? { reason } : {}),
+      prNumber: prNumber ?? null, actor: agent ?? actor ?? account ?? null, account: account ?? null, agent: agent ?? actor ?? null,
+      previousActor: previousActor ?? null, branch, ...(reason ? { reason } : {}),
     })
     return { ok: true, local: true, mode: modeLabel, results, eventPath }
   }
 
-  const localReleaseTask = async ({ taskId, issue, issues, actor, actorDisplay, branch, reason = '' } = {}) => {
+  const localReleaseTask = async ({ taskId, issue, issues, actor, actorDisplay, account = null, verifiedPlatformLogin = false, agent = null, branch, reason = '' } = {}) => {
     const nums = issueListOf(issue, issues)
     const results = []
     for (const num of nums) {
       if (getLocalIssue({ mainRoot, gitDir, number: num }).ok) {
-        results.push(await releaseLocalIssue({ mainRoot, gitDir, number: num, taskId, actor, actorDisplay, branch, reason }))
+        results.push(await releaseLocalIssue({
+          mainRoot, gitDir, number: num, taskId, actor, actorDisplay, account, verifiedPlatformLogin, agent, branch, reason,
+        }))
       }
     }
     const eventPath = await appendBackendEvent(mainRoot, gitDir, taskId ?? 'shared', {
-      backend: kind, action: 'release', taskId, issues: nums, actor, branch, ...(reason ? { reason } : {}),
+      backend: kind, action: 'release', taskId, issues: nums, actor: agent ?? actor ?? account ?? null, account: account ?? null, agent: agent ?? actor ?? null, branch, ...(reason ? { reason } : {}),
     })
     return { ok: true, local: true, mode: modeLabel, results, eventPath }
   }
@@ -309,7 +316,7 @@ export class GitHubBackend {
     this.mainRoot = mainRoot
     this.gitDir = gitDir
     this.client = client ?? createGitHubClient({ cwd: mainRoot })
-    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, milestones: true, checks: true, releases: true })
+    this.capabilities = Object.freeze({ api: true, pr: true, issues: true, labels: true, milestones: true, checks: true, releases: true, mention: true })
   }
 
   _call(method, args, fallback = { ok: false, skipped: true, reason: 'client-unsupported' }) {
@@ -318,8 +325,8 @@ export class GitHubBackend {
   }
 
   async claimTask({
-    taskId, issue, issues, prNumber, actor, actorDisplay, branch,
-    takeover = false, reason = '', previousActor = null, labels = ['in-progress'],
+    taskId, issue, issues, prNumber, actor, actorDisplay, account = null, verifiedPlatformLogin = false, agent = null, branch,
+    takeover = false, reason = '', previousActor = null, previousAccount = null, previousVerifiedPlatformLogin = false, previousAgent = null, labels = ['in-progress'],
   } = {}) {
     const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
     const repo = this.targetRepo
@@ -327,22 +334,36 @@ export class GitHubBackend {
     const rendered = buildClaimComments({
       action: takeover ? 'takeover' : 'claim',
       taskId,
+      account,
+      verifiedPlatformLogin,
+      agent,
       actor,
       actorDisplay,
       branch,
       previousActor,
+      previousAccount,
+      previousVerifiedPlatformLogin,
+      previousAgent,
       reason,
       issues: issueList,
       prNumber,
-      backendKind: this.kind,
+      capabilities: this.capabilities,
     })
+    const effectiveAgent = agent ?? actor ?? null
+    const baseState = {
+      taskId,
+      action: takeover ? 'takeover' : 'claim',
+      ...(account ? { account, verifiedPlatformLogin: Boolean(verifiedPlatformLogin) } : {}),
+      ...(effectiveAgent ? { agent: effectiveAgent } : {}),
+      ...(takeover && (previousAgent || previousActor) ? { previousAgent: previousAgent ?? previousActor } : {}),
+      branch,
+      ...(takeover && reason ? { reason } : {}),
+    }
     for (const num of issueList) {
       const comment = await this.postComment({
         repo, number: num,
         body: rendered.issueCommentBody,
-        statePayload: takeover
-          ? { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, reason }
-          : { taskId, action: 'claim', agent: actor, branch },
+        statePayload: baseState,
       })
       const label = await this.syncStateLabel({ repo, number: num, state: 'in-progress', fallbackLabels: labels })
       results.push({ issue: num, action: takeover ? 'takeover' : 'claim', comment, label })
@@ -352,31 +373,42 @@ export class GitHubBackend {
       prResult = await this.postComment({
         repo, number: prNumber,
         body: rendered.prCommentBody,
-        statePayload: { taskId, action: 'takeover', agent: actor, previousAgent: previousActor, branch, prNumber, reason },
+        statePayload: { ...baseState, prNumber },
       })
     }
     return { ok: true, results, prResult }
   }
 
-  async releaseTask({ taskId, issue, issues, actor, actorDisplay, branch, reason = '' } = {}) {
+  async releaseTask({ taskId, issue, issues, actor, actorDisplay, account = null, verifiedPlatformLogin = false, agent = null, branch, reason = '' } = {}) {
     const issueList = Array.isArray(issues) ? issues : (issue !== undefined && issue !== null ? [issue] : [])
     const repo = this.targetRepo
     const results = []
     const rendered = buildClaimComments({
       action: 'release',
       taskId,
+      account,
+      verifiedPlatformLogin,
+      agent,
       actor,
       actorDisplay,
       branch,
       reason,
       issues: issueList,
-      backendKind: this.kind,
+      capabilities: this.capabilities,
     })
+    const effectiveAgent = agent ?? actor ?? null
     for (const num of issueList) {
       const comment = await this.postComment({
         repo, number: num,
         body: rendered.issueCommentBody,
-        statePayload: { taskId, action: 'release', agent: actor, branch: branch ?? null, ...(reason ? { reason } : {}) },
+        statePayload: {
+          taskId,
+          action: 'release',
+          ...(account ? { account, verifiedPlatformLogin: Boolean(verifiedPlatformLogin) } : {}),
+          ...(effectiveAgent ? { agent: effectiveAgent } : {}),
+          branch: branch ?? null,
+          ...(reason ? { reason } : {}),
+        },
       })
       const labelRemoved = await this.removeLabel({ repo, number: num, label: 'in-progress' })
       results.push({ issue: num, comment, labelRemoved })
@@ -503,7 +535,7 @@ export class GenericRemoteBackend {
     this.pushRemote = pushRemote
     this.mainRoot = mainRoot
     this.gitDir = gitDir
-    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: false, checks: false, releases: false })
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: false, checks: false, releases: false, mention: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }
 
@@ -609,7 +641,7 @@ export class LocalOnlyBackend {
     this.mainRoot = mainRoot
     this.gitDir = gitDir
     this.baseBranch = baseBranch
-    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: true, checks: false, releases: false })
+    this.capabilities = Object.freeze({ api: false, pr: false, issues: true, labels: true, milestones: true, checks: false, releases: false, mention: false })
     this._local = buildLocalBackendMixins(this.kind, mainRoot, gitDir)
   }
 

@@ -9,7 +9,7 @@ import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
 import { resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import { closeLocalIssue, getLocalIssue, listLocalIssues } from '../../lib/local-issues.mjs'
-import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveContributorIdentity } from '../../lib/platform.mjs'
+import { parseIssueNumbers, parseMilestoneNumber, probeForWrite, probeGitHubEnv, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext } from './flow-context.mjs'
 import { EXIT_ACTION_REQUIRED, EXIT_POLICY_BLOCK, inspectWorkspace } from './flow-inspect.mjs'
@@ -232,12 +232,13 @@ export async function handleIssue(opts, roots) {
     const backend = buildBackendForIssue({
       role, providerId, targetRepo, ghProbe, clientOverride: opts._ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
     })
-    const contrib = resolveContributorIdentity({
-      explicitActor: opts.agent,
+    const idLayers = resolveIdentityLayers({
       ghLogin: ghProbe?.env?.trackB?.login,
+      ghTier: ghProbe?.env?.trackB?.tier,
       gitName: state.gitIdentity?.name,
+      explicitAgent: opts.agent,
     })
-    const res = await backend.postComment({ repo: targetRepo, number: num, body, author: contrib.actor })
+    const res = await backend.postComment({ repo: targetRepo, number: num, body, author: idLayers.agent || idLayers.account || undefined })
     if (!res.ok && !res.delegated) throw new Error(`发表工单评论失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, number: num, comment: res }, null, 2)}\n`)
     else process.stdout.write(`已向工单 #${num} 追加评论。\n`)

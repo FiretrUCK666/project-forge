@@ -5,13 +5,13 @@
  * 显式汇总评论与标签同步状态，并对 PR 审查单中的验收标准逐条核对表做无损 Markdown 表格安全化。
  */
 
-import { buildReviewComments } from '../../lib/docs.mjs'
+import { buildReviewComments, formatAttribution } from '../../lib/docs.mjs'
 import { buildEscalationIssuePayload, classifyEscalationTier } from '../../lib/escalation.mjs'
 import { gitRun, posixPath } from '../../lib/git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import {
-  detectDeclaredRepo, githubRepoFull, isInternalAgentSlug,
-  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
+  detectDeclaredRepo, getHostingProvider, githubRepoFull,
+  parsePrNumber, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
 import { computeSignalFingerprint, inferDefectClass, inferSignalModule } from '../../lib/signals.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -244,8 +244,8 @@ function resolveFaultInjectionSummary(opts = {}, ledger = {}) {
 
 export async function syncReviewToGitHub({
   mainRoot, workTreeRoot, ledger, round, verdict, headSha, reviewerId, implementerId,
-  stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
-  rebuttedItems = [], resolvedItems = [], nextSteps = [], opts,
+  empiricalSummary: empiricalSummaryArg = '', stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList = [],
+  rebuttedItems = [], resolvedItems = [], nextSteps = [], opts = {},
 }) {
   const prNum = parsePrNumber(ledger.prNumber)
   const issueNums = Array.isArray(ledger.linkedIssues)
@@ -256,6 +256,7 @@ export async function syncReviewToGitHub({
     return { synced: false, labelSynced: true, labelWarnings: [], skipped: true, reason: 'no-linked-pr-or-issue' }
   }
 
+  const empiricalSummary = String(empiricalSummaryArg || ledger.reviewEmpirical || opts?.evidence || '').trim()
   const isLocalBackendRole = ledger.role === 'local-only'
     || ledger.role === 'generic-git'
     || ledger.providerId === 'generic-git'
@@ -265,6 +266,17 @@ export async function syncReviewToGitHub({
     if (issueNums.length === 0) {
       return { synced: false, labelSynced: true, labelWarnings: [], skipped: true, reason: `role-${ledger.role ?? 'local'}` }
     }
+    const backend = createTaskBackend({
+      role: ledger.role, providerId: ledger.providerId ?? 'none', mainRoot, gitDir: opts.gitDir,
+    })
+    const revLayers = resolveIdentityLayers({ explicitAgent: reviewerId })
+    const implLayers = resolveIdentityLayers({
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? implementerId ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+    })
+    const reviewerDisplay = formatAttribution({ ...revLayers, capabilities: backend.capabilities })
+    const implementerDisplay = formatAttribution({ ...implLayers, capabilities: backend.capabilities })
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
     const criteriaStatusText = buildCriteriaStatusSummary({
       workTreeRoot, mainRoot, ledger, verdict, headSha, mustFixList,
@@ -278,13 +290,11 @@ export async function syncReviewToGitHub({
     }
     const { issueCommentBody } = buildReviewComments({
       round, verdict, baseSha: ledger.baseSha, headSha,
-      sourceLine: `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`,
+      sourceLine: '独立审查上下文（隔离 worktree 复核）',
+      reviewerDisplay, implementerDisplay, empiricalSummary,
       criteria, criteriaStatusText, faultInjectionText, stopLoss, stopReasons,
       mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems,
       prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
-    })
-    const backend = createTaskBackend({
-      role: ledger.role, providerId: ledger.providerId ?? 'none', mainRoot, gitDir: opts.gitDir,
     })
     const results = []
     for (const num of issueNums) {
@@ -332,10 +342,16 @@ export async function syncReviewToGitHub({
     const ghClient = opts._ghClient ?? ghProbe?.client ?? null
     const tier = ghClient?.tier ?? ghProbe?.env?.trackB?.tier ?? 'offline'
     const ghLogin = ghProbe?.env?.trackB?.login
-    const implDisplay = resolveContributorIdentity({ ghLogin, ledgerActor: implementerId }).display
-    const sourceLine = isInternalAgentSlug(reviewerId) && ghLogin
-      ? `@${ghLogin}（独立审查子代理 \`${reviewerId}\`，隔离 worktree 复核，实施人：${implDisplay}）`
-      : `\`${reviewerId}\`（独立上下文，implementer=\`${implementerId || 'unknown'}\`）`
+    const providerCaps = getHostingProvider(ledger.providerId || 'github')?.capabilities ?? { mention: true }
+    const revLayers = resolveIdentityLayers({ ghLogin, ghTier: tier, explicitAgent: reviewerId })
+    const implLayers = resolveIdentityLayers({
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? implementerId ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+    })
+    const reviewerDisplay = formatAttribution({ ...revLayers, capabilities: providerCaps })
+    const implementerDisplay = formatAttribution({ ...implLayers, capabilities: providerCaps })
+    const sourceLine = '独立审查上下文（隔离 worktree 复核）'
 
     const criteria = parseAcceptanceCriteria(workTreeRoot, mainRoot, ledger)
     const criteriaStatusText = buildCriteriaStatusSummary({
@@ -346,11 +362,14 @@ export async function syncReviewToGitHub({
     const labelName = verdict === 'changes' ? 'changes-requested' : 'reviewed'
     const staleLabel = verdict === 'changes' ? 'reviewed' : 'changes-requested'
     const statePayload = {
-      taskId: ledger.taskId, action: 'review', round, verdict, headSha, reviewerId, stopLossTriggered: stopLoss,
+      taskId: ledger.taskId, action: 'review', round, verdict, headSha, reviewerId,
+      ...(revLayers.account ? { account: revLayers.account, verifiedPlatformLogin: revLayers.verifiedPlatformLogin } : {}),
+      stopLossTriggered: stopLoss,
     }
 
     const built = buildReviewComments({
-      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine, criteria, criteriaStatusText,
+      round, verdict, baseSha: ledger.baseSha, headSha, sourceLine,
+      reviewerDisplay, implementerDisplay, empiricalSummary, criteria, criteriaStatusText,
       faultInjectionText, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList,
       rebuttedItems, resolvedItems, prNum, labelName, staleLabel, role: ledger.role, nextSteps, statePayload,
     })

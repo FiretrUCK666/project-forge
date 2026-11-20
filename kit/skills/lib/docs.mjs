@@ -729,6 +729,7 @@ export {
   checkMermaidLabelWidth,
   displayWidth,
   evaluateCoupledSync,
+  formatAttribution,
   MERMAID_LIMITS,
   parseCoupledSyncRules,
   resolveRepoCustomDocTemplate,

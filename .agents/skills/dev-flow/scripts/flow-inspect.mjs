@@ -27,7 +27,7 @@ import { getLocalIssue } from '../../lib/local-issues.mjs'
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
-  parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, resolveWorkspaceIdentity,
+  parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, resolveWorkspaceIdentity,
 } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import {
@@ -493,9 +493,13 @@ export async function handleStart(opts, roots) {
   const depMeta = state.inputs?.graph?.externalDependencies?.length
     ? { dependsOn: state.inputs.graph.externalDependencies }
     : {}
-  const implementerId = resolveContributorIdentity({
-    explicitActor: opts.implementer, ghLogin: state.github?.trackB?.login, gitName: state.gitIdentity?.name,
-  }).actor
+  const startIdentity = resolveIdentityLayers({
+    ghLogin: state.github?.trackB?.login,
+    ghTier: state.github?.trackB?.tier,
+    gitName: state.gitIdentity?.name,
+    explicitAgent: opts.agent ?? opts.implementer,
+  })
+  const implementerId = startIdentity.agent || startIdentity.account || 'local-agent'
 
   const { targetRepo } = buildTargetRepoContext(role, state.remoteUrls ?? {}, state.declaredRepo)
   const activePrForStart = effectiveExternalPr ?? prNumber ?? null
@@ -587,7 +591,9 @@ export async function handleStart(opts, roots) {
       taskId, slug, caseType, tier: 1, isolation: 'branch', role, providerId, branch, baseBranch, baseSha,
       worktreePath: null, reviewWorktreePath: `.worktrees/review-${taskId}`,
       todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-      linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable,
+      linkedIssues, prNumber, implementerId,
+      account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
+      issueContext, issueContextUnavailable,
       prContext, prContextUnavailable, ...prPatch, status: 'started',
       ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
     })
@@ -630,7 +636,9 @@ export async function handleStart(opts, roots) {
     taskId, slug, caseType, tier: 2, isolation: 'worktree', role, providerId, branch, baseBranch, baseSha,
     worktreePath: implRel, reviewWorktreePath: reviewRel, depsMode: depMount.mode,
     todoFile: initialTodo ?? null, specFile: initialSpec ?? null, prdFile: initialPrd ?? null,
-    linkedIssues, prNumber, implementerId, issueContext, issueContextUnavailable,
+    linkedIssues, prNumber, implementerId,
+    account: startIdentity.account, verifiedPlatformLogin: startIdentity.verifiedPlatformLogin, agent: startIdentity.agent,
+    issueContext, issueContextUnavailable,
     prContext, prContextUnavailable, ...prPatch, status: 'started',
     ...stackFields, ...depMeta, ...(milestoneVal ? { milestone: milestoneVal } : {}), ...(filesList.length > 0 ? { files: filesList } : {}),
   })

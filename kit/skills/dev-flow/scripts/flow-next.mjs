@@ -77,9 +77,26 @@ async function hydrateRemotePfState({ roots, ledger, opts }) {
       const states = Array.isArray(c.pfStates) && c.pfStates.length > 0 ? c.pfStates : parsePfStateTags(c.body)
       for (const st of states) {
         if (st.taskId && st.taskId !== ledger.taskId) continue
-        if ((st.action === 'claim' || st.action === 'takeover') && st.agent && st.agent !== ledger.implementerId) {
-          ledger.implementerId = st.agent
-          changed = true
+        if (st.action === 'claim' || st.action === 'takeover') {
+          if (st.account && st.account !== ledger.account) {
+            ledger.account = st.account
+            if (st.verifiedPlatformLogin !== undefined) ledger.verifiedPlatformLogin = Boolean(st.verifiedPlatformLogin)
+            changed = true
+          }
+          const stAgent = st.agent || st.actor || null
+          if (stAgent && stAgent !== ledger.agent) {
+            ledger.agent = stAgent
+            changed = true
+          }
+          const nextOwner = stAgent || st.account || null
+          if (nextOwner && nextOwner !== ledger.implementerId) {
+            ledger.implementerId = nextOwner
+            changed = true
+          }
+          if (stAgent && stAgent !== ledger.claimedBy) {
+            ledger.claimedBy = stAgent
+            changed = true
+          }
         } else if (st.action === 'pr-created' && st.prNumber && !ledger.prNumber) {
           ledger.prNumber = Number(st.prNumber)
           changed = true

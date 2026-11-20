@@ -72,27 +72,53 @@ export function parseBodyRelations(body) {
   return out
 }
 
-const INTERNAL_AGENT_SLUG_RE = /^(?:local-agent|implementer|coordinator(?:-|$)|swarm(?:-|$)|worker(?:-|$)|subagent(?:-|$)|independent-review(?:er)?(?:-|$)|critic(?:-|$)|integrator(?:-|$)|agent-\d+|claude(?:-|$)|gemini(?:-|$)|gpt(?:-|$)|codex(?:-|$))/i
+/**
+ * 解析双层正交身份：
+ * - `account` 仅来自实测验证通过的平台登录名或 `git config user.name`（或账本已记录 `ledgerAccount`）；
+ *   绝不从 `--agent`/`--reviewer-id` 写入，绝不硬造 `'maintainer'`；
+ * - `agent` 仅来自显式代理标识（或 `ledgerAgent`），零黑名单正则过滤，任意自定义名称原样保留。
+ */
+export function resolveIdentityLayers({
+  ghLogin = null,
+  ghTier = null,
+  verifiedPlatformLogin = undefined,
+  gitName = null,
+  explicitAgent = null,
+  ledgerAccount = null,
+  ledgerAgent = null,
+  ledgerVerifiedPlatformLogin = undefined,
+} = {}) {
+  const clean = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim().replace(/^`+|`+$/g, '').replace(/^@+/, '').trim()
+  const cleanGh = clean(ghLogin)
+  const isVerifiedTier = ghTier === 'gh-cli' || ghTier === 'node-https-token' || ghTier === 'authenticated'
+  const ghVerified = Boolean(cleanGh && (verifiedPlatformLogin === true || (verifiedPlatformLogin !== false && isVerifiedTier)))
 
-/** 判断标识是否为内部 AI 角色/调度代号而非真实仓库协作者账号。 */
-export function isInternalAgentSlug(val) {
-  const clean = String(val ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
-  return clean ? INTERNAL_AGENT_SLUG_RE.test(clean) : true
-}
+  let account = null
+  let isPlatformVerified = false
+  if (ghVerified) {
+    account = cleanGh
+    isPlatformVerified = true
+  } else {
+    const cleanGit = clean(gitName)
+    const cleanLedgerAcc = clean(ledgerAccount)
+    if (cleanGit) {
+      account = cleanGit
+      isPlatformVerified = false
+    } else if (cleanLedgerAcc) {
+      account = cleanLedgerAcc
+      isPlatformVerified = Boolean(ledgerVerifiedPlatformLogin)
+    } else if (cleanGh) {
+      account = cleanGh
+      isPlatformVerified = false
+    }
+  }
 
-/** 优先解析真实协作者署名（过滤内部子代理代号与冗余邮箱后缀），返回 `{ actor, display }`。 */
-export function resolveContributorIdentity({ explicitActor, ghLogin, gitName, ledgerActor } = {}) {
-  const clean = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim().replace(/^@/, '')
-  const exp = clean(explicitActor)
-  const picks = [
-    exp && !isInternalAgentSlug(exp) ? exp : '',
-    clean(ghLogin),
-    clean(gitName),
-    clean(ledgerActor),
-  ].filter((x) => x && !isInternalAgentSlug(x))
-  const actor = picks[0] || (!exp || isInternalAgentSlug(exp) ? 'maintainer' : exp)
-  const display = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(actor) ? `@${actor}` : actor
-  return { actor, display }
+  const agent = clean(explicitAgent) || clean(ledgerAgent) || null
+  return {
+    account: account || null,
+    verifiedPlatformLogin: Boolean(account && isPlatformVerified),
+    agent,
+  }
 }
 
 const PR_URL_PULL_RE = /^https?:\/\/[^/\s]+\/(.+?)\/(?:pull|pulls)\/(\d+)(?:[/?#]|$)/i

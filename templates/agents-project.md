@@ -10,10 +10,7 @@ AI 新开会话先读本文件，确认定位、入口、边界、命令与协�
 | 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
 | --- | --- | --- |
 {{KIT_ROUTING_ROWS}}
-| 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
-<!-- project-forge: if has-remote -->
-| 里程碑管理 / 裸粘贴 Issue・PR・Milestone 链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect <URL...>` / `milestone` |
-<!-- project-forge: endif -->
+| 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: if has-custom-skills -->
 
 ### 项目自有技能（自动识别，与上方研发流并存）
@@ -178,7 +175,7 @@ do-not-edit: {{PROFILE_DO_NOT_EDIT}}
   还没有远端时按 `local-only` 运作，通过本地特性分支与临时 `--detach` 试合推进主干；高风险或 `one-way` 变更仍须独立审查，新增提案可走 `flow.mjs intake` 离线分诊。
 <!-- project-forge: endif -->
 
-- **第二步：纯调度分波、五档分流与三正交策略**——主会话薄上下文调度，跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
+- **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度底线：无论是否配置远端或大仓接入，主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查一律派发独立隔离代理。跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |

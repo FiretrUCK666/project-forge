@@ -208,6 +208,10 @@ export function createDefaultLedger(partial = {}) {
     implementerId: partial.implementerId ?? null,
     claimedBy: partial.claimedBy ?? null,
     reviewerId: partial.reviewerId ?? null,
+    account: partial.account ?? null,
+    verifiedPlatformLogin: Boolean(partial.verifiedPlatformLogin),
+    agent: partial.agent ?? null,
+    reviewEmpirical: partial.reviewEmpirical ?? null,
     /**
      * 探索证据：这个任务开干之前，有没有人真的读过这个仓。
      *

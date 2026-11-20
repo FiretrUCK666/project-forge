@@ -239,7 +239,6 @@ export {
   hasForkModeMarker,
   hasLocalOnlyMarker,
   hasStandaloneModeMarker,
-  isInternalAgentSlug,
   listComments,
   listHostingProviders,
   listOpenPrsByHead,
@@ -261,7 +260,7 @@ export {
   probeSshTransport,
   registerHostingProvider,
   removeLabel,
-  resolveContributorIdentity,
+  resolveIdentityLayers,
   resolveRemoteDescriptor,
   resolveWorkspaceIdentity,
   summarizeCommitChecks,
@@ -406,7 +405,7 @@ export {
   buildMergeComments,
   buildReviewComments,
   buildSubmitComments,
-  formatActorDisplay,
+  formatAttribution,
 } from './doc-comments.mjs'
 
 export {

@@ -49,9 +49,9 @@ export const INJECTIONS_LOCATE_INTAKE = [
   },
   {
     id: 'I184',
-    what: '破坏 workflow-helpers.mjs hydratePrTemplateBody 剥离模板引导 HTML 注释逻辑',
-    file: 'kit/skills/lib/workflow-helpers.mjs',
-    alsoDropIn: ['.agents/skills/lib/workflow-helpers.mjs'],
+    what: '破坏 pr-template-hydrate.mjs hydratePrTemplateBody 剥离模板引导 HTML 注释逻辑',
+    file: 'kit/skills/lib/pr-template-hydrate.mjs',
+    alsoDropIn: ['.agents/skills/lib/pr-template-hydrate.mjs'],
     from: '  let body = stripHtmlCommentsOutsideFences(tplRaw)',
     to: '  let body = tplRaw',
     expect: 'PR 正文仍残留引导 HTML 注释',

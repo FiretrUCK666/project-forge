@@ -23,15 +23,15 @@ export {
   parseRemoteUrlHost, parseSshConfigDetails, probeSshKeyReadiness, probeSshTransport,
 } from './platform-probe.mjs'
 export {
-  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest, isInternalAgentSlug,
+  closeIssue, computeWriteBackFingerprint, createGitHubClient, createIssue, githubHttpsRequest,
   listComments, listIssues, listOpenPrsByHead, parseBodyRelations, parseFlowInputs, parseIssueNumbers,
-  parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel, resolveContributorIdentity, summarizeCommitChecks,
+  parseMilestoneNumber, parsePfStateTags, parsePrNumber, removeLabel, resolveIdentityLayers, summarizeCommitChecks,
 } from './github-client.mjs'
 
 export const GENERIC_GIT_PROVIDER = Object.freeze({
   id: 'generic-git',
   label: 'Generic Git Remote',
-  capabilities: Object.freeze({ api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false }),
+  capabilities: Object.freeze({ api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false, mention: false }),
 })
 
 const PROVIDER_REGISTRY = new Map()
@@ -46,7 +46,7 @@ function resolveEffectiveHost(host, sshHostMap) {
 const GITHUB_PROVIDER = Object.freeze({
   id: 'github',
   label: 'GitHub',
-  capabilities: Object.freeze({ api: true, pr: true, issues: true, releases: true, labels: true, milestones: true, branchProtection: true }),
+  capabilities: Object.freeze({ api: true, pr: true, issues: true, releases: true, labels: true, milestones: true, branchProtection: true, mention: true }),
   matchRemote(remoteUrl, sshHostMap) {
     const ext = extractHostAndPath(remoteUrl)
     if (!ext) return false

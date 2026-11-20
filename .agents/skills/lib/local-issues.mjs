@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-import { buildClaimComments } from './doc-comments.mjs'
+import { buildClaimComments, formatAttribution } from './doc-comments.mjs'
 import { readTextSafe, withFileLock, writeJsonAtomic } from './git.mjs'
 import { resolveGitDirFast } from './git-fast.mjs'
 import { computeWriteBackFingerprint, parseBodyRelations, parsePfStateTags } from './github-parse.mjs'
@@ -369,16 +369,25 @@ export async function claimLocalIssue({
   taskId = null,
   actor = null,
   actorDisplay = null,
+  account = null,
+  verifiedPlatformLogin = false,
+  agent = null,
   branch = null,
   takeover = false,
   reason = '',
+  previousActor = null,
+  previousAccount = null,
+  previousVerifiedPlatformLogin = false,
+  previousAgent = null,
   labels = ['in-progress'],
 } = {}) {
-  const cleanActor = String(actor ?? '').trim()
+  const cleanAgent = String(agent ?? actor ?? '').trim()
+  const cleanAccount = String(account ?? '').trim()
+  const ownerKey = cleanAgent || cleanAccount
   return mutateLocalIssue(mainRoot, gitDir, number, (item) => {
     const assignees = Array.isArray(item.assignees) ? item.assignees : []
     const currentOwner = assignees[0] ?? null
-    if (currentOwner && cleanActor && currentOwner !== cleanActor && !takeover) {
+    if (currentOwner && ownerKey && currentOwner !== ownerKey && !takeover) {
       return {
         __abort: true,
         result: {
@@ -405,25 +414,42 @@ export async function claimLocalIssue({
         },
       }
     }
-    if (cleanActor) item.assignees = [cleanActor]
+    if (ownerKey) item.assignees = [ownerKey]
     item.labels = normalizeLabels([...(item.labels ?? []), ...normalizeLabels(labels)])
     if (!Array.isArray(item.comments)) item.comments = []
     const action = takeover ? 'takeover' : 'claim'
-    const disp = actorDisplay ?? cleanActor ?? 'local'
+    const disp = String(actorDisplay ?? '').trim() || formatAttribution({
+      account: cleanAccount || null,
+      verifiedPlatformLogin: Boolean(verifiedPlatformLogin),
+      agent: cleanAgent || null,
+      supportsMention: false,
+    })
+    const prevEff = previousActor ?? currentOwner
     const { issueCommentBody: body } = buildClaimComments({
       action,
       taskId,
-      actor: cleanActor || disp,
-      actorDisplay: disp,
+      account: cleanAccount || null,
+      verifiedPlatformLogin: Boolean(verifiedPlatformLogin),
+      agent: cleanAgent || null,
+      actorDisplay: disp || null,
       branch,
-      previousActor: currentOwner,
+      previousActor: prevEff,
+      previousAccount,
+      previousVerifiedPlatformLogin,
+      previousAgent,
       reason,
       issues: [item.number],
-      backendKind: 'local-only',
+      supportsMention: false,
     })
-    const statePayload = takeover
-      ? { taskId, action: 'takeover', agent: cleanActor || disp, previousAgent: currentOwner, branch, reason }
-      : { taskId, action: 'claim', agent: cleanActor || disp, branch }
+    const statePayload = {
+      taskId,
+      action,
+      ...(cleanAccount ? { account: cleanAccount, verifiedPlatformLogin: Boolean(verifiedPlatformLogin) } : {}),
+      ...(cleanAgent ? { agent: cleanAgent } : {}),
+      ...(takeover && prevEff ? { previousAgent: prevEff } : {}),
+      branch,
+      ...(takeover && reason ? { reason } : {}),
+    }
     const fp = computeWriteBackFingerprint(body, statePayload)
     const enriched = { ...statePayload, writeBackFingerprint: fp }
     const fullBody = `${body}\n\n<!-- pf-state:${JSON.stringify(enriched)} -->`
@@ -431,7 +457,7 @@ export async function claimLocalIssue({
     const now = new Date().toISOString()
     const pfStates = parsePfStateTags(fullBody)
     const comment = {
-      id: nextCommentId, author: cleanActor || 'local', body: fullBody, createdAt: now, updatedAt: now,
+      id: nextCommentId, author: ownerKey || 'local', body: fullBody, createdAt: now, updatedAt: now,
       url: `local-issue://${item.number}#comment-${nextCommentId}`, pfState: pfStates[pfStates.length - 1] ?? null, pfStates,
     }
     item.comments.push(comment)
@@ -450,34 +476,53 @@ export async function releaseLocalIssue({
   taskId = null,
   actor = null,
   actorDisplay = null,
+  account = null,
+  verifiedPlatformLogin = false,
+  agent = null,
   branch = null,
   reason = '',
 } = {}) {
-  const cleanActor = String(actor ?? '').trim()
+  const cleanAgent = String(agent ?? actor ?? '').trim()
+  const cleanAccount = String(account ?? '').trim()
+  const ownerKey = cleanAgent || cleanAccount
   return mutateLocalIssue(mainRoot, gitDir, number, (item) => {
     const prev = Array.isArray(item.assignees) ? item.assignees : []
-    item.assignees = cleanActor ? prev.filter((a) => a !== cleanActor) : []
+    item.assignees = ownerKey ? prev.filter((a) => a !== ownerKey) : []
     item.labels = (Array.isArray(item.labels) ? item.labels : []).filter((l) => l !== 'in-progress')
     if (!Array.isArray(item.comments)) item.comments = []
-    const disp = actorDisplay ?? cleanActor ?? 'local'
+    const disp = String(actorDisplay ?? '').trim() || formatAttribution({
+      account: cleanAccount || null,
+      verifiedPlatformLogin: Boolean(verifiedPlatformLogin),
+      agent: cleanAgent || null,
+      supportsMention: false,
+    })
     const { issueCommentBody: body } = buildClaimComments({
       action: 'release',
       taskId,
-      actor: cleanActor || disp,
-      actorDisplay: disp,
+      account: cleanAccount || null,
+      verifiedPlatformLogin: Boolean(verifiedPlatformLogin),
+      agent: cleanAgent || null,
+      actorDisplay: disp || null,
       branch,
       reason,
       issues: [item.number],
-      backendKind: 'local-only',
+      supportsMention: false,
     })
-    const statePayload = { taskId, action: 'release', agent: cleanActor || disp, branch: branch ?? null, ...(reason ? { reason } : {}) }
+    const statePayload = {
+      taskId,
+      action: 'release',
+      ...(cleanAccount ? { account: cleanAccount, verifiedPlatformLogin: Boolean(verifiedPlatformLogin) } : {}),
+      ...(cleanAgent ? { agent: cleanAgent } : {}),
+      branch: branch ?? null,
+      ...(reason ? { reason } : {}),
+    }
     const fp = computeWriteBackFingerprint(body, statePayload)
     const fullBody = `${body}\n\n<!-- pf-state:${JSON.stringify({ ...statePayload, writeBackFingerprint: fp })} -->`
     const nextCommentId = (item.comments.reduce((m, c) => Math.max(m, Number(c?.id) || 0), 0)) + 1
     const now = new Date().toISOString()
     const pfStates = parsePfStateTags(fullBody)
     const comment = {
-      id: nextCommentId, author: cleanActor || 'local', body: fullBody, createdAt: now, updatedAt: now,
+      id: nextCommentId, author: ownerKey || 'local', body: fullBody, createdAt: now, updatedAt: now,
       url: `local-issue://${item.number}#comment-${nextCommentId}`, pfState: pfStates[pfStates.length - 1] ?? null, pfStates,
     }
     item.comments.push(comment)

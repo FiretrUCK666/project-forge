@@ -5,7 +5,6 @@ description: |
   触发词：代码审查、审一下改动、审查 PR、本地预审、提交前审查、检查 diff、审外部 PR、
   供应链扫描、故障注入审查、复审、打回返工、review、pre-review、untrusted scan。
 metadata:
-  tier: full
   intent: 本地预审 / 独立双门审查 / 审外部 PR
   intent_local: 本地预审 / 隔离工作树独立双门审查
   script: node .agents/skills/dev-review/scripts/review-pack.mjs

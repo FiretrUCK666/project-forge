@@ -77,11 +77,11 @@ export const INJECTIONS_ITERATE_EVOLUTION = [
   },
   {
     id: 'I219',
-    what: 'formatActorDisplay 不再对 AI 代理 ID 反引号隔离（泄露误 @mention）',
+    what: 'formatAttribution 忽视 capabilities.mention 与 verifiedPlatformLogin 直接输出 @handle（泄露误 @mention）',
     file: 'kit/skills/lib/doc-comments.mjs',
-    from: '  if (AGENT_OR_LOCAL_ID_RE.test(bare)) return `\\`${bare}\\``',
-    to: '  if (false && AGENT_OR_LOCAL_ID_RE.test(bare)) return `\\`${bare}\\``',
-    expect: 'formatActorDisplay 防误 @mention',
+    from: '  const canMention = Boolean(verifiedPlatformLogin === true && (supportsMention === true || capabilities?.mention === true))',
+    to: '  const canMention = true',
+    expect: 'formatAttribution 防误 @mention',
   },
   {
     id: 'I220',
@@ -94,7 +94,7 @@ export const INJECTIONS_ITERATE_EVOLUTION = [
   {
     id: 'I221',
     what: 'hydratePrTemplateBody 取消自定义标题 SPEC 的无头回退摘要',
-    file: 'kit/skills/lib/workflow-helpers.mjs',
+    file: 'kit/skills/lib/pr-template-hydrate.mjs',
     from: '  const headlessFallback = (todoOutcomeBullets.length === 0 && specGoalBullets.length === 0)',
     to: '  const headlessFallback = false && (todoOutcomeBullets.length === 0 && specGoalBullets.length === 0)',
     expect: '中英/自定义标题 PR 模板回填',

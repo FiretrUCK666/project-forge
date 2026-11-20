@@ -533,6 +533,37 @@ export function registerPlanWaveCases(cases) {
     } finally { rmTree(dir) }
   }])
 
+  cases.push(['doc-plan audit 跨路径审计不假绿：目标目录自身是 worktree 根时以它作审计根', async () => {
+    const { runAbsAsync } = await import('./fixtures-helpers.mjs')
+    const dir = makeWaveRepo({ specs: [{ file: 'docs/todo/261120-w-todo.md', text: makeDoc({ kind: 'todo', title: 'W', status: 'active', extra: ['owner: p', 'approved: false', 'done_at: null', 'task_id: w', 'planned_at: HEAD', 'related_prd: null', 'related_spec: null'], body: ['## 验收标准', '- [ ] C1: x'] }) }] })
+    const wtRel = '.worktrees/impl-x'
+    gitSync(dir, ['worktree', 'add', '-q', wtRel, '-b', 'feat/x'])
+    const wtAbs = join(dir, wtRel)
+    mkdirSync(join(wtAbs, 'docs/todo'), { recursive: true })
+    // 故意写一个非法 status：审计必须抓到它，否则「扫不到 = 假绿」这条就没被证伪。
+    writeFileSync(join(wtAbs, 'docs/todo/261120-y-todo.md'), makeDoc({
+      kind: 'todo', title: 'Y', status: 'bogus-state',
+      extra: ['owner: p', 'approved: false', 'done_at: null', 'task_id: y', 'planned_at: HEAD', 'related_prd: null', 'related_spec: null'],
+      body: ['## 验收标准', '- [ ] C1: 未勾选'],
+    }), 'utf8')
+    try {
+      // 反向：worktree 里那份 Todo 还没勾完，跨路径审计必须审到它并报失败。
+      // 只按外仓根算相对路径会扫不到任何文档，返回 auditedCount: 0 / ok: true ——
+      // 一份都没查却报全部通过，比报错危险得多。
+      const res = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', wtAbs, '--dir', dir, '--json'])
+      const out = JSON.parse(res.stdout)
+      if (out.auditedCount === 0) return `跨路径审计没扫到任何文档（假绿）：${res.stdout.slice(0, 200)}`
+      if (out.ok) return '跨路径审计漏报了 worktree 里的问题文档'
+
+      // 正向：目标目录不是独立工程根时，仍按外仓根审计——不要把所有子目录都当成新根。
+      const sub = join(dir, 'docs')
+      const subRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', sub, '--dir', dir, '--json'])
+      const subOut = JSON.parse(subRes.stdout)
+      if (subOut.auditedCount === 0) return '审计普通子目录时一份文档都没扫到'
+      return true
+    } finally { rmTree(dir) }
+  }])
+
   cases.push(['待拍板扫描器保持原判据：只有「已定/决定/结论」算拍板，光写「建议」不算', async () => {
     // 正向：明确结论 + 整节写「无」都算清零
     const cleared = analyzePendingDecisions([

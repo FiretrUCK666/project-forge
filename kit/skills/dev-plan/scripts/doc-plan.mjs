@@ -51,6 +51,19 @@ import {
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 
+/**
+ * 目标目录自身是不是一个独立的工程根（仓库根或 worktree 根）。
+ *
+ * 认的是「它自己带 `docs/` 或 `.git`」这件事，不是路径长什么样——写死
+ * `.worktrees/` 这类命名只对当前约定成立，换个仓就失效。
+ */
+function isStandaloneWorkRoot(targetAbs, outerRoot) {
+  if (!existsSync(targetAbs)) return false
+  if (resolve(targetAbs) === resolve(outerRoot)) return false
+  if (existsSync(join(targetAbs, '.git'))) return true
+  return existsSync(join(targetAbs, 'docs')) && existsSync(join(targetAbs, 'AGENTS.md'))
+}
+
 function parseIssueArg(rawIssue) {
   if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
   const nums = parseIssueNumbers(rawIssue, { strict: true })
@@ -387,7 +400,15 @@ async function main(argv) {
       const targetAbs = resolve(repoRoot, target)
       const isDirScope = target === '.' || (existsSync(targetAbs) && statSync(targetAbs).isDirectory())
       if (isDirScope) {
-        const batch = auditRepoDocs(repoRoot, target)
+        // 跨路径审计：目标目录自身是仓库根或 worktree 根时，以它作为审计根。
+        //
+        // 否则 `relative(repoRoot, 目标)` 会算出 `../...` 这种仓外相对路径，
+        // 扫不到任何文档，于是返回 `auditedCount: 0, ok: true`——**一份都没查，却报全部通过**。
+        // 这种假绿比报错危险得多：它让人以为审过了。
+        const innerRoot = isStandaloneWorkRoot(targetAbs, repoRoot) ? targetAbs : null
+        const auditRoot = innerRoot ?? repoRoot
+        const auditScope = innerRoot ? '.' : target
+        const batch = auditRepoDocs(auditRoot, auditScope)
         if (cli.json) process.stdout.write(`${JSON.stringify(batch, null, 2)}\n`)
         else {
           process.stdout.write(`仓库工程文档审计（${batch.scope}，共 ${batch.auditedCount} 份）：${batch.ok ? '全部通过' : `${batch.failedCount} 份失败`}\n`)

@@ -143,10 +143,11 @@ flowchart TD
 
 ## 实现说明
 
+- **跨路径审计不假绿**：`doc-plan.mjs audit <目录>` 在目标目录自身是仓库根或 worktree 根时，以它作为审计根；否则会按外仓根算相对路径，扫不到任何文档却返回 `auditedCount: 0, ok: true`。这条以「非法 status 的文档必须被抓到」的正反用例钉住。
 - **`plan_mode` 落在既有判据模块里**：`kit/skills/lib/pending-decisions.mjs` 新增 `PLAN_MODES` / `deriveDefaultPlanMode` / `resolveDocPlanMode` / `planModeErrors`；`doc-plan.mjs` 的 `triage` 与 `init` 都接 `--plan-mode`，非法值抛结构化 `INVALID_PLAN_MODE`（含 `allowed` 与 `fixHint`），文档里被改成非法值时 `audit` 也报同码。默认推导只看已声明事实：`one-way` 门、`Case >= 4`、`tier: L3/L4`、PRD 走 `interactive`，其余 `autonomous`。
 - **规划退场门禁**：`kit/skills/lib/plan-exit-gate.mjs` 实现 `evaluatePlanExitGate`，接在 `flow-inspect.mjs` 的 `handleStart` 里、`inspectWorkspace` 之后与建分支建工作位之前；未就绪返回 `BLOCKED_PLAN_NOT_READY` + 退出码 `3`。判据分档：Case 1/2/5 不适用；Case 3 只要求待拍板清零（`audit` 直通，不走 `approve`）；Case 4 另要求 `approved` 与内审非 `pending`/`rejected`，并核对认领的 `multi_spec` 总控 PRD。一份都没绑时记 `WARN_PLAN_NOT_BOUND` 而不阻断——本仓支持「先 `start` 再 `doc-plan init --task`」的顺序；`--allow-plan-bootstrap` 给规划 PR 自举豁免，放行同时把被绕过的理由原样打出来。
 - **切片图四检**：`kit/skills/lib/doc-slice-graph.mjs` 实现认领覆盖（`UNCOVERED_ACCEPTANCE_CRITERIA`）、元数据必填（`SLICE_METADATA_MISSING`，仅对认领活跃 `multi_spec` 总控的切片要求）、依赖判环与悬空（`BLOCKED_SLICE_CYCLE`）、同波次写域碰撞（`BLOCKED_SLICE_OVERLAP`，显式排除 `.agents/skills/.pf-manifest.json`），由 `doc-audit-repo.mjs` 在整仓范围接入 `doc-plan.mjs audit .`；单文件审计不跑切片图检查（关系不在这份视野里）。
 - **波次交接包**：`flow-batch.mjs` 的 `batch plan --handoff` 复用 `buildHandoff` 为当前可执行波次的每个切片生成 `{ taskId, sourceDoc, criteriaCount, criteria, scopeFiles, dependsOn, dispatchCommand, prompt }`，既有 `{ wave, canParallel, tasks }` 返回形状一字不改；不传 `--handoff` 时不算交接包。
 - **verify 透传**：`flow.mjs` 用 `multiFlags` 注册 `artifact`、`valueFlags` 注册 `visual-blocked-reason`；`flow-lifecycle.mjs` 删掉裸 `--visual-checked` 合成观察串的逻辑，改为把 `{ artifacts, visualCheckedRaw, visualBlockedReason, observationSummary }` 经 `recordVerifyEvidenceForFlow` 交给 `workflow-policy.mjs` 的 `validateVerifyPrecheck`。该入口由并行切片 `#102` 提供：缺失时以命名空间导入探测并 Fail-Soft 放行，存在时按其 `{ ok, code, exitCode }` 阻断。
-- **双证**：`scripts/dev/fixtures-plan-wave.mjs`（9 组正反用例）与 `scripts/dev/injections-data-plan-wave.mjs`（`I250–I259` 十条注入）均已落地，全量 `fixtures.mjs` 341 项通过、`verify-injections.mjs` 零未命中。
+- **双证**：`scripts/dev/fixtures-plan-wave.mjs`（10 组正反用例）与 `scripts/dev/injections-data-plan-wave.mjs`（`I250–I259` 十条注入）均已落地，全量 `fixtures.mjs` 342 项通过、`verify-injections.mjs` 零未命中。
 

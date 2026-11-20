@@ -147,7 +147,7 @@ function setupMatrixRepo(tier, role, { highRiskFile = false, weakTest = false, c
     'test/ok.test.mjs': 'import assert from "node:assert/strict"\nassert.equal(1, 1)\nassert.equal(2, 2)\n',
   }
   if (caseType >= 4) {
-    files['docs/specs/261118-issue88-mx-spec.md'] = '---\nkind: spec\ntitle: mx\nstatus: approved\nowner: planner-bob\n---\n\n# SPEC: mx\n\n## 要解决的问题\n\n高风险测试。\n\n## 冻结的验收标准\n\n- [ ] C1: 通过\n'
+    files['docs/specs/261118-issue88-mx-spec.md'] = '---\nkind: spec\ntitle: mx\nstatus: approved\nowner: planner-bob\napproved: true\nplan_critique: passed\n---\n\n# SPEC: mx\n\n## 要解决的问题\n\n高风险测试。\n\n## 冻结的验收标准\n\n- [ ] C1: 通过\n'
     files['docs/todo/261118-issue88-mx-todo.md'] = '---\nkind: todo\ntitle: mx\nstatus: active\nowner: planner-bob\n---\n\n# Todo: mx\n\n## 验收标准与执行清单\n\n- [ ] C1: 通过\n'
   }
   const dir = tmpProject(files)

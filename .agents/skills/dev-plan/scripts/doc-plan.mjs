@@ -5,7 +5,7 @@
  * 子命令：
  *   triage         --summary <text> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]
  *   init           --kind prd|spec|todo|pair|all --slug <slug> --title <title> [--issue <N>] [--task <id>] [--spec <path>] [--force] [--json]
- *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name>] [--status <s>] [--approve] [--json]
+ *   link           <slug-or-path> [--issue <N>] [--pr <M>] [--branch <name>] [--owner <name> --owner-reason "<原因>"] [--status <s>] [--json]
  *   audit          [--file <docPath> | .] [--json]
  *   critique-pass     --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--json]
  *   critique-reject   --file <docPath> --reviewer <id> [--round N] [--summary <text>] [--findings <t>...] [--json]
@@ -20,9 +20,10 @@ import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import {
   archiveCompletedDocsGroup, buildDocFilename, DOC_FRONTMATTER_KEY_ORDER,
-  docDateTag, docIsoDate, parseDocFilename, parseDocFrontmatter,
+  docDateTag, docIsoDate, isApprovingStatusValue, parseDocFilename, parseDocFrontmatter,
   renderStandardDocTemplate, resolveRepoCustomDocTemplate, slugify, syncDocsLifecycle, updateDocFrontmatter,
 } from '../../lib/docs.mjs'
 import {
@@ -262,7 +263,7 @@ function printHelp() {
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--json]',
     '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
-    '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--milestone <m>] [--approve] [--json]',
+    '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
     '  critique-scope     --file <docPath> [--reviewer <id>] [--round <n>] [--json]',
     '  critique-pass      --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
@@ -285,7 +286,7 @@ async function main(argv) {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
       usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-override|approve|archive|supersede|list>',
@@ -387,10 +388,26 @@ async function main(argv) {
       const target = opts._[0] ?? opts.file ?? opts.slug
       if (!target) throw new Error('link 需要传入 <slug-or-path>（如 261115-my-feature 或 docs/specs/...）')
       const prVal = opts.pr !== undefined ? parsePrNumber(opts.pr, { strict: true }) : undefined
+      // 生命周期同步不得写入批准：批准只由 `approve` 一个入口写，它同时核对依据。
+      // 这里把状态改成已批准，等于绕过整条依据校验——文档会带着「已批准」却没有任何凭据。
+      if (opts.approve) {
+        throw Object.assign(
+          new Error('BLOCKED_APPROVAL_HAS_SINGLE_ENTRY: link 不接受 --approve。批准只能由唯一入口写入，它会在写入前核对依据：'
+            + 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "<文档>"'),
+          { code: 'BLOCKED_APPROVAL_HAS_SINGLE_ENTRY', exitCode: EXIT.USAGE },
+        )
+      }
+      if (opts.status !== undefined && isApprovingStatusValue(opts.status)) {
+        throw Object.assign(
+          new Error(`BLOCKED_APPROVAL_HAS_SINGLE_ENTRY: link --status ${opts.status} 是批准档位，不能由生命周期同步写入。`
+            + '请改用唯一入口：node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "<文档>"'),
+          { code: 'BLOCKED_APPROVAL_HAS_SINGLE_ENTRY', exitCode: EXIT.USAGE },
+        )
+      }
       const res = await syncDocsLifecycle(repoRoot, {
         slugOrPath: target, issue: opts.issue !== undefined ? parseIssueArg(opts.issue) : undefined, pr: prVal,
-        branch: opts.branch, owner: opts.owner, status: opts.status,
-        approved: opts.approve ? true : undefined, implemented: opts.implemented ? true : undefined, doneAt: opts['done-at'],
+        branch: opts.branch, owner: opts.owner, ownerReason: opts['owner-reason'], status: opts.status,
+        implemented: opts.implemented ? true : undefined, doneAt: opts['done-at'],
       })
       if (opts.milestone) {
         const msTarget = res.byKind?.spec ?? res.byKind?.prd ?? res.byKind?.todo ?? target

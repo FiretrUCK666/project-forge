@@ -58,7 +58,7 @@ export function registerLifecycleCases(cases) {
         '',
       ].join('\n'),
       'docs/specs/261117-issue9-lc-spec.md': [
-        '---', 'kind: spec', 'title: lc', 'status: approved', 'owner: me', '---', '',
+        '---', 'kind: spec', 'title: lc', 'status: approved', 'owner: me', 'approved: true', 'plan_critique: passed', '---', '',
         '# SPEC: lc', '', '## 要解决的问题', '', '流转测试。', '',
         '## 冻结的验收标准', '', '- [ ] C1: 退出码 0', '',
         '## 影响范围', '', '- `src/a.mjs`', '',

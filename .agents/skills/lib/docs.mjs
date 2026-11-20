@@ -18,6 +18,8 @@ import {
   updateDocFrontmatter,
 } from './doc-frontmatter.mjs'
 import { evaluateMasterPrdClosureState } from './doc-substantive.mjs'
+import { collectOwnerHistory, isApprovingStatus, PREVIOUS_OWNERS_KEY } from './doc-approval.mjs'
+import { EXIT } from './exit-codes.mjs'
 import { gitRun, posixPath, readTextSafe, writeAtomic } from './git.mjs'
 import { hasDotGitInAncestors, isPathInGitIndexFast } from './git-fast.mjs'
 import { listTaskLedgers, resolveLedgerRoot, updateTaskLedger } from './ledger.mjs'
@@ -33,10 +35,12 @@ export {
   updateDocFrontmatter,
 }
 
+export { collectOwnerHistory, isApprovingStatus, isApprovingStatusValue, PREVIOUS_OWNERS_KEY } from './doc-approval.mjs'
+
 export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
-  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_mode', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
-  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
-  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'previous_owners', 'plan_mode', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'previous_owners', 'plan_mode', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
+  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'previous_owners', 'plan_mode', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
 })
 
 
@@ -419,7 +423,7 @@ export function isSharedMasterPrd(repoRoot, prdRel, activeSpecRel = null) {
 
 /** 同步 PRD / SPEC / Todo 生命周期、重命名、互链与任务账本（不再锁在 renameMap > 0）。 */
 export async function syncDocsLifecycle(repoRoot, {
-  slugOrPath, issue, pr, branch, owner, status, approved, implemented, doneAt, planCritique,
+  slugOrPath, issue, pr, branch, owner, ownerReason, status, approved, implemented, doneAt, planCritique,
   preserveTerminalStatus = false, ledgerRoot = null,
 } = {}) {
   const preIssue = issue !== undefined && issue !== null && String(issue).trim() !== ''
@@ -510,11 +514,47 @@ export async function syncDocsLifecycle(repoRoot, {
     if (effectiveIssue !== undefined) patch.issue = effectiveIssue
     if (pr !== undefined) patch.pr = pr === null ? null : Number(pr)
     if (branch !== undefined) patch.branch = branch
-    if (owner !== undefined) patch.owner = owner
+
+    // 负责人变更要留痕：原负责人进历史集合，理由进文档。
+    //
+    // 自审锁判的是「这个人在这个文档上有没有话语权」，而只看当前字段的话，
+    // 改一行 Frontmatter 就能让原负责人以复核人身份重新登场——他写的稿子还在这里。
+    // 所以变更必须带理由，并把原负责人留在历史里，三处自审判定按「历史 ∪ 当前」比对。
+    if (owner !== undefined) {
+      const prevOwner = String(fm.data?.owner ?? '').trim()
+      const nextOwner = String(owner ?? '').trim()
+      const changing = Boolean(prevOwner) && prevOwner !== 'null' && prevOwner !== nextOwner
+      if (changing) {
+        const why = String(ownerReason ?? '').trim()
+        if (!why) {
+          throw Object.assign(
+            new Error(`OWNER_CHANGE_REASON_REQUIRED: ${sib.rel} 的负责人要从 ${prevOwner} 改成 ${nextOwner}，`
+              + '必须同时传 --owner-reason "<变更原因>"。原负责人会进历史集合，自审锁按历史比对，'
+              + '不留痕的改写等于让原负责人换个身份继续给自己放行。'),
+            { code: 'OWNER_CHANGE_REASON_REQUIRED', exitCode: EXIT.USAGE },
+          )
+        }
+        patch.owner = nextOwner
+        patch[PREVIOUS_OWNERS_KEY] = [...new Set([...collectOwnerHistory(fm.data), prevOwner])]
+        patch.owner_changed_reason = why
+        patch.owner_changed_at = today
+      } else {
+        patch.owner = owner
+      }
+    }
+
     if (status !== undefined) {
       const curSt = String(fm.data?.status ?? '').toLowerCase()
       const isTerminal = ['done', 'implemented', 'superseded', 'archived'].includes(curSt)
-      if (!preserveTerminalStatus || !isTerminal) patch.status = status
+      if (!preserveTerminalStatus || !isTerminal) {
+        patch.status = status
+        // 回退必须同批清标记：状态与批准标记是同一件事的两面，
+        // 只改一面就会留下「已回退到草稿、批准仍为真」的文档——而分诊豁免只看那个标记。
+        if (!isApprovingStatus(sib.kind, status)) {
+          patch.approved = false
+          patch.implemented = false
+        }
+      }
     }
     if (approved !== undefined) patch.approved = Boolean(approved)
     if (implemented !== undefined && sib.kind === 'spec') patch.implemented = Boolean(implemented)

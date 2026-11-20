@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -112,14 +113,14 @@ export async function handleFinalize(opts, roots) {
     const unchecked = findUncheckedLines(readTextSafe(absDoc) ?? '')
     if (unchecked.length > 0) {
       process.stderr.write(`BLOCKED_UNCHECKED_${label}: ${relDoc} 仍有未勾选验收条目：\n${unchecked.map((u) => `  ${u}`).join('\n')}\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
   }
 
   const criteriaDrift = checkFrozenCriteria(ledger, implRoot)
-  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: 1 } }
+  if (criteriaDrift.blocked) { process.stderr.write(criteriaDrift.message); return { exitCode: EXIT.ACTION } }
   const specNoteCheck = ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note: opts.note })
-  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: 1 } }
+  if (!specNoteCheck.ok) { process.stderr.write(specNoteCheck.message); return { exitCode: EXIT.ACTION } }
 
   const effectiveBase = await resolveEffectiveBaseSha(implRoot, ledger, { gitCommonDir: roots.gitDir })
   const finDiff = effectiveBase
@@ -144,7 +145,7 @@ export async function handleFinalize(opts, roots) {
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(blockedOut, null, 2)}\n`)
     process.stderr.write(`BLOCKED_TDD_SYNC: ${parity.tddSyncWarning}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
 
   let archivedGroup = { moved: [], byKind: { prd: prdRel, spec: specRel, todo: todoRel }, archivedMasterPrd: null }
@@ -196,9 +197,9 @@ export async function handleFinalize(opts, roots) {
   }
   if (opts['strict-sync'] && coupledSyncWarnings.length > 0) {
     process.stderr.write(`BLOCKED_COUPLED_SYNC: 触发 AGENTS.md「改哪看哪」联动同步规则且未更新伴随文件（共 ${coupledSyncWarnings.length} 组）。\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export async function handleVerify(opts, roots) {
@@ -252,14 +253,14 @@ export async function handleVerify(opts, roots) {
   if (!['quick', 'smoke', 'full', 'gate'].includes(mode)) {
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-mode', severity: 'low', source: 'flow-verify', message: `invalid verify mode: ${mode}`, taskId })
     process.stderr.write(`INVALID_VERIFY_MODE: --mode / --tier 仅支持 quick | smoke | full | gate，收到：${mode}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
   let rawTarget = opts.target !== undefined ? String(opts.target).trim() : null
   if (rawTarget !== null) {
     if (!rawTarget || /[;&|`$><\r\n]/.test(rawTarget)) {
       await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: 'verify.invalid-target', severity: 'low', source: 'flow-verify', message: `invalid target: ${opts.target}`, taskId })
       process.stderr.write(`INVALID_TARGET_ARG: --target 值非法或含不允许的元字符：${opts.target}\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
     rawTarget = posixPath(rawTarget)
   }
@@ -316,7 +317,7 @@ export async function handleVerify(opts, roots) {
     const docOk = !docStaticRes || docStaticRes.ok
     recordVerifyEvidenceForFlow({
       roots, taskId, ledger, profileKey, currentHead, dirty, policy, modeName: mode, targetVal: rawTarget,
-      cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: 0,
+      cmdStr: 'none (explicitly disabled)', customCmd: false, exitCode: EXIT.OK,
       explicitNoneSkipped: true, docStaticRes,
     })
     ledger.verifiedHead = docOk ? currentHead : null
@@ -337,12 +338,12 @@ export async function handleVerify(opts, roots) {
       return { exitCode: EXIT_POLICY_BLOCK }
     }
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: 0, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
+      process.stdout.write(`${JSON.stringify({ taskId, mode, cmd: ledger.verifiedCmd, skippedReason: 'explicit-none', ok: true, exitCode: EXIT.OK, verifiedHead: currentHead, riskTier: policy.riskTier, docStatic: docStaticRes }, null, 2)}\n`)
     } else {
       process.stdout.write(`verify (${mode}): AGENTS.md Dev Profile 显式配置 \`${profileKey}: none\`，已放行并绑定 HEAD=${currentHead ?? 'unborn'}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" submit --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (!cmd) {
@@ -356,7 +357,7 @@ export async function handleVerify(opts, roots) {
     }
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.no-cmd`, severity: 'medium', source: 'flow-verify', message: `no verify command for ${mode}`, taskId })
     process.stderr.write(`NO_VERIFY_COMMAND: 未从 AGENTS.md Dev Profile 或项目清单识别到 ${mode} 验证命令，请通过 --cmd "<命令>" 显式传入（纯文档仓请配 \`${profileKey}: none\`）。\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
 
   // 证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文。
@@ -390,7 +391,7 @@ export async function handleVerify(opts, roots) {
     } else {
       await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.missing-target`, severity: 'low', source: 'flow-verify', message: `missing --target for ${mode}`, taskId })
       process.stderr.write(`MISSING_TARGET_ARG: 验证命令 "${cmd}" 含 {target} 占位符，请追加 --target <file> 指定单测文件或用例。\n`)
-      return { exitCode: 1 }
+      return { exitCode: EXIT.ACTION }
     }
   }
 
@@ -399,7 +400,7 @@ export async function handleVerify(opts, roots) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
     await emitFlowSignal(roots, { category: 'tests', module: 'workflow', pattern: `verify.${mode}.invalid-timeout`, severity: 'low', source: 'flow-verify', message: `invalid timeout: ${opts.timeout}`, taskId })
     process.stderr.write(`INVALID_TIMEOUT_ARG: --timeout 须为 >= 1000 的毫秒数，收到：${opts.timeout}\n`)
-    return { exitCode: 1 }
+    return { exitCode: EXIT.ACTION }
   }
   const wtEnv = computeWorktreeEnv({ mainRoot: roots.mainRoot, gitDir: roots.gitDir, taskId, slotIndex: ledger.slotIndex })
   const tRunStart = Date.now()
@@ -640,7 +641,7 @@ export async function handleSubmit(opts, roots) {
       process.stdout.write(`本地模式提交校验已通过（HEAD=${shortHead}，未配置远端不执行 push）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   const fastRemoteCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -667,7 +668,7 @@ export async function handleSubmit(opts, roots) {
       process.stdout.write(`submit 完成：已推送至 ${pushRemote}/${ledger.branch} @ ${currentHead?.slice(0, 7)}（generic-git 模式跳过平台 API）。\n`)
       printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   // 提审要开 PR——那是平台写操作。用「不联网」的探测结果判断「能不能写」，
@@ -751,5 +752,5 @@ export async function handleSubmit(opts, roots) {
     if (prResult?.delegated) process.stdout.write(`- 待宿主 MCP 代理执行 PR 载荷：${JSON.stringify(prResult.jsonPayload)}\n`)
     printNextStep(buildSubmitNextSteps({ taskId, role: ledger.role, policy, nextRound, hasDevReview }), { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }

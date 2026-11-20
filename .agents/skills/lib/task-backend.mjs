@@ -6,6 +6,7 @@
  *   closeIssue, findOpenPrForBranch, createPr, updatePrBase, getPr, listComments, getCommitChecks, mergePr, closePr
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -624,7 +625,7 @@ export class GenericRemoteBackend {
   async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {
     if (!remoteMerged && !humanApproved) {
       return {
-        ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', exitCode: 3,
+        ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', exitCode: EXIT.FACT,
         message: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。',
       }
     }
@@ -721,12 +722,12 @@ export class LocalOnlyBackend {
     if (!ledger?.branch) return { ok: true, localMerge: true, merged: true, into: targetBase }
     const mainSt = await gitStatusPorcelainZ(root)
     if (!mainSt.ok || mainSt.entries.length > 0) {
-      return { ok: false, blocked: true, code: 'BLOCKED_DIRTY_MAIN', exitCode: 3, message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。' }
+      return { ok: false, blocked: true, code: 'BLOCKED_DIRTY_MAIN', exitCode: EXIT.FACT, message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。' }
     }
     const fastGitDir = this.gitDir ?? resolveGitDirFast(root)
     const fastBrSha = resolveRefShaFast(fastGitDir, `refs/heads/${ledger.branch}`)
     const brRes = fastBrSha ? { ok: true, stdout: fastBrSha } : await gitRun(root, ['rev-parse', '--verify', `refs/heads/${ledger.branch}`])
-    if (!brRes.ok) return { ok: false, blocked: true, code: 'BRANCH_NOT_FOUND', exitCode: 1, message: brRes.stderr }
+    if (!brRes.ok) return { ok: false, blocked: true, code: 'BRANCH_NOT_FOUND', exitCode: EXIT.ACTION, message: brRes.stderr }
     const branchSha = brRes.stdout.trim()
     const baseRef = `refs/heads/${targetBase}`
     const fastBaseSha = resolveRefShaFast(fastGitDir, baseRef)
@@ -742,7 +743,7 @@ export class LocalOnlyBackend {
       const ff = await gitRun(root, ['merge', '--ff-only', branchSha])
       if (ff.ok) return { ok: true, localMerge: true, merged: true, into: targetBase, mergedSha: branchSha }
     }
-    return { ok: false, blocked: true, code: 'BLOCKED_TRIAL_MERGER_REQUIRED', exitCode: 3, message: '非快进本地合并必须经 runTrialMerge 在临时 --detach worktree 试合复测。' }
+    return { ok: false, blocked: true, code: 'BLOCKED_TRIAL_MERGER_REQUIRED', exitCode: EXIT.FACT, message: '非快进本地合并必须经 runTrialMerge 在临时 --detach worktree 试合复测。' }
   }
 }
 

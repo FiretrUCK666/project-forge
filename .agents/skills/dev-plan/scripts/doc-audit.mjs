@@ -20,6 +20,7 @@ import { discoverEvergreenDocs, parseAgentsProfile, resolveAuthoritativeTddPath 
 import { locateTopSlicesForPaths } from '../../lib/doc-locator.mjs'
 import { matchFeatureMapForPaths } from '../../lib/feature-map.mjs'
 import { pendingDecisionErrors, planModeErrors } from '../../lib/pending-decisions.mjs'
+import { resolveApprovalBasis } from '../../lib/plan-exit-gate.mjs'
 import { evaluateSliceGraph } from '../../lib/doc-slice-graph.mjs'
 import { numberingErrors } from '../../lib/doc-renumber.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
@@ -347,6 +348,25 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
         const fn = parseDocFilename(relDoc)
         if (fn && ((fmIssue && fn.issue !== fmIssue) || (fn.issue && fmIssue !== fn.issue))) {
           errors.push({ code: 'ISSUE_FILENAME_MISMATCH', line: findFmKeyLine(lines, fmEndIdx, 'issue'), message: `Frontmatter issue (${fmIssue ?? 'null'}) 与文件名 (${relDoc}) 的 -issue<N>- 不一致`, fixHint: '运行 `doc-plan.mjs link <file> --issue <N>` 对齐文件名与 Frontmatter。' })
+        }
+      }
+
+      // 批准与依据必须自洽：说「已批准」就得说得出凭什么。
+      //
+      // 判法不在这里。`resolveApprovalBasis` 是「这条批准有没有依据」的唯一实现，
+      // 退场门禁调的是同一个函数——两处各判一遍，迟早对同一份文档给出相反结论。
+      // 本文件只负责把它的结论翻译成一条审计错误。
+      if (fm.data.approved === true) {
+        const basis = resolveApprovalBasis({ docType, text: normRaw, data: fm.data })
+        if (basis.applicable && !basis.hasBasis) {
+          errors.push({
+            code: 'APPROVAL_WITHOUT_BASIS',
+            line: findFmKeyLine(lines, fmEndIdx, 'approved'),
+            message: `Frontmatter 写着 \`approved: true\`，但找不到任何批准依据（plan_critique=${fm.data.plan_critique ?? '未声明'}，critique_override=${fm.data.critique_override ? '有' : '无'}）`,
+            fixHint: basis.basis === 'override-stale'
+              ? '人类 critique-override 之后正文又改过，签字只对当时那一版有效；重跑 critique-override 再 approve。'
+              : '批准只能由 `doc-plan.mjs approve` 写入：先经独立 Critique 跑 critique-pass（或 critique-override），再 approve。',
+          })
         }
       }
 

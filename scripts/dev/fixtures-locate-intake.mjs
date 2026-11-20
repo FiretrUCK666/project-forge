@@ -2,6 +2,7 @@
  * fixtures-locate-intake.mjs —— 统一装配、按需定位、全局业务分诊、状态机/基线校准、可读 PR/Issue 与功能域命名门禁双向行为断言。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -677,8 +678,8 @@ export function registerLocateIntakeCases(cases) {
           mode: 'gate',
           e2eObservation: { summary: 'doc-locate 实测 58ms 返回绝对路径与行号' },
           gates: {
-            quick: { cmd: 'node scripts/dev/preflight.mjs', exitCode: 0, durationMs: 420 },
-            gate: { cmd: 'node scripts/dev/fixtures.mjs', exitCode: 0, durationMs: 3100 },
+            quick: { cmd: 'node scripts/dev/preflight.mjs', exitCode: EXIT.OK, durationMs: 420 },
+            gate: { cmd: 'node scripts/dev/fixtures.mjs', exitCode: EXIT.OK, durationMs: 3100 },
           },
         },
         actorDisplay: 'impl-c1',

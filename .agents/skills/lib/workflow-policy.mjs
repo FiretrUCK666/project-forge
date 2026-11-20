@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），不依赖 dev-govern，确保全模式稳定可用。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -340,15 +341,15 @@ function configuredCmdForTier(profile, tierName) {
  */
 export function validateVerificationEvidence({ policy, evidence, headSha, profile = null, explicitCmdUsed = false } = {}) {
   if (!evidence || typeof evidence !== 'object' || !evidence.gates || Object.keys(evidence.gates).length === 0) {
-    return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
+    return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
   }
   const vis = evaluateStoredVisualEvidence({ evidence, policy, headSha })
-  if (!vis.ok) return { ok: false, code: vis.code, exitCode: 3, uiFiles: vis.uiFiles, reason: vis.reason }
+  if (!vis.ok) return { ok: false, code: vis.code, exitCode: EXIT.FACT, uiFiles: vis.uiFiles, reason: vis.reason }
   if (evidence.dirty === true || (headSha && evidence.headSha !== headSha)) {
     return {
       ok: false,
       code: 'BLOCKED_STALE_VERIFICATION',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: `实证已过期（dirty=${Boolean(evidence.dirty)}, evidenceHead=${String(evidence.headSha ?? '').slice(0, 7)}, currentHead=${String(headSha ?? '').slice(0, 7)}），请提交并重跑 verify。`,
     }
   }
@@ -360,7 +361,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         reason: `无 CI 仓库的低风险文档静态必检未通过：${detail}`,
       }
     }
@@ -368,9 +369,9 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
 
   if (policy?.riskTier === 'low') {
     if (evidence.exitCode !== 0) {
-      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '最新 verify 退出码非 0，请修复后重跑。' }
+      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '最新 verify 退出码非 0，请修复后重跑。' }
     }
-    return { ok: true, code: null, exitCode: 0 }
+    return { ok: true, code: null, exitCode: EXIT.OK }
   }
 
   const requiredGates = Array.isArray(policy?.requiredGates)
@@ -396,7 +397,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: noCfg
           ? '运行时代码改动且 Dev Profile 未配置真实 smoke-verify 命令也未显式写 smoke-verify: none：请在 AGENTS.md 补齐 smoke-verify，或运行 verify --mode smoke --cmd "<端到端命令>" --e2e-evidence "<运行观察>"。'
@@ -409,7 +410,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_SHALLOW_E2E_EVIDENCE',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: check.reason ?? 'E2E 观察回执仅为无实质水话，请写明执行入口与观察到的真实输出/状态。',
       }
@@ -420,7 +421,7 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_E2E_OBSERVATION_REQUIRED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier: 'smoke',
         reason: '已完成 smoke 命令执行，但缺少当前 HEAD 的结构化 E2E 运行观察回执（e2eObservation），请核验真实输出/状态后传 --e2e-evidence "<观察实证>"。',
       }
@@ -435,14 +436,14 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         requiredTier,
         reason: onlyPartial
           ? `仅有单文件快测（quick --target=${evidence.gates.quick.target}），不足以满足 ${policy?.riskTier} 风险所需的 ${requiredTier} 全量门禁。`
           : `${policy?.riskTier ?? 'medium'} 风险变更要求通过 ${requiredTier}（或更高级）门禁，当前仅通过 [${validGates.map((v) => v.name).join(', ') || 'none'}]。`,
       }
     }
-    return { ok: true, code: null, exitCode: 0 }
+    return { ok: true, code: null, exitCode: EXIT.OK }
   }
 
   if (validGates.length === 0) {
@@ -451,21 +452,21 @@ export function validateVerificationEvidence({ policy, evidence, headSha, profil
       return {
         ok: false,
         code: 'BLOCKED_INSUFFICIENT_VERIFICATION_TIER',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         reason: `仅有单文件快测（quick --target=${evidence.gates.quick.target}），请运行不带 --target 的全量 verify。`,
       }
     }
     if (!explicitCmdUsed && evidence.exitCode !== 0) {
-      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '当前 HEAD 未通过 verify 校验。' }
+      return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: EXIT.FACT, reason: '当前 HEAD 未通过 verify 校验。' }
     }
     return {
       ok: false,
       code: 'BLOCKED_NOT_VERIFIED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: '当前 HEAD 缺少有效的全量 verify 通过记录。',
     }
   }
-  return { ok: true, code: null, exitCode: 0 }
+  return { ok: true, code: null, exitCode: EXIT.OK }
 }
 
 /** 评估唯一活跃任务或集合状态并给出单一入口下一步路由与精简上下文。 */

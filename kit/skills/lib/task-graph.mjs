@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），绝不使用任何环境变量夹具后门，所有外部查询经函数参数注入。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -259,7 +260,7 @@ export function checkUnresolvedDependencies(graph, { force = false, strictDeps =
     return {
       blocked: true,
       code: 'BLOCKED_UNRESOLVED_DEPENDENCY',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       blockers: graph.unresolvedBlockers,
       message: `BLOCKED_UNRESOLVED_DEPENDENCY: 存在未关闭的前置依赖 Issue（${summary}），请先解决依赖或确认后带 --force 继续。`,
     }
@@ -269,7 +270,7 @@ export function checkUnresolvedDependencies(graph, { force = false, strictDeps =
     return {
       blocked: true,
       code: 'BLOCKED_UNRESOLVED_DEPENDENCY',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       unverified: graph.unverifiedDependencies,
       message: `BLOCKED_UNRESOLVED_DEPENDENCY: 严格依赖模式下无法离线核验前置 Issue 状态（${summary}）。`,
     }
@@ -285,7 +286,7 @@ export function checkUntrustedPrGate(ledger, { humanApproved = false, hasDevRevi
     return {
       blocked: true,
       code: 'BLOCKED_REQUIRES_DEV_REVIEW',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       message: `BLOCKED_REQUIRES_DEV_REVIEW: 外部 PR #${pr} 的供应链不可信扫描需要 dev-review 技能，当前项目未装配该技能；请通过 project-forge 的 equip 补齐技能后重试。`,
     }
   }
@@ -296,7 +297,7 @@ export function checkUntrustedPrGate(ledger, { humanApproved = false, hasDevRevi
     return {
       blocked: true,
       code: 'BLOCKED_UNTRUSTED_PR_UNSCANNED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       message: `BLOCKED_UNTRUSTED_PR_UNSCANNED: 外部 PR #${pr} ${stage}，严禁挂载依赖或执行构建测试命令。`,
     }
   }
@@ -310,7 +311,7 @@ export function assertNoDuplicatePrForTask({ ledger, graph, branchOpenPrs = [] }
     return {
       blocked: true,
       code: 'BLOCKED_DUPLICATE_PR_FOR_LINKED_ISSUE',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       prNumber: Number(existingPr),
       message: `BLOCKED_DUPLICATE_PR_FOR_LINKED_ISSUE: 任务已存在关联 PR #${existingPr}，必须直接复用原分支与 PR，严禁重复创建第二条 PR。`,
     }
@@ -349,7 +350,7 @@ export async function checkStackedParentMerged(mainRoot, ledger, { backend = nul
   return {
     blocked: true,
     code: 'BLOCKED_STACK_PARENT_UNMERGED',
-    exitCode: 3,
+    exitCode: EXIT.FACT,
     parentTaskId: ledger.parentTaskId ?? null,
     parentBranch,
     parentPrNumber: parentPrNum,

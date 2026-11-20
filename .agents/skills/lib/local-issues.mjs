@@ -6,6 +6,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），并发安全依赖 `withFileLock` 与原子写入。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
@@ -394,7 +395,7 @@ export async function claimLocalIssue({
           ok: false,
           blocked: true,
           code: 'BLOCKED_ISSUE_ALREADY_CLAIMED',
-          exitCode: 3,
+          exitCode: EXIT.FACT,
           number: item.number,
           claimedBy: currentOwner,
           message: `BLOCKED_ISSUE_ALREADY_CLAIMED: 本地工单 #${item.number} 已被 ${currentOwner} 认领；如需接管请显式传 --takeover --reason "..."。`,
@@ -408,7 +409,7 @@ export async function claimLocalIssue({
           ok: false,
           blocked: true,
           code: 'BLOCKED_TAKEOVER_REASON_REQUIRED',
-          exitCode: 3,
+          exitCode: EXIT.FACT,
           number: item.number,
           message: `BLOCKED_TAKEOVER_REASON_REQUIRED: 接管本地工单 #${item.number} 必须提供 --reason 说明接管原因。`,
         },

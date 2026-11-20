@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs explore 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -55,5 +56,5 @@ export async function handleExplore(opts, roots) {
     process.stdout.write(`探索证据已记入账本（task=${taskId}, tier=${explored.tier}, symbols=${explored.symbolCount}, at=${explored.at}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, payload: out }
+  return { exitCode: EXIT.OK, payload: out }
 }

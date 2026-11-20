@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 与 flow-merge.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 
@@ -333,7 +334,7 @@ export async function handleCleanup(opts, roots) {
     printUnmountedLinksText(removedWorktrees)
     printNextStep(['按确认范围完成清理；如需继续调整可带 --only-review-worktree / --keep-local-branch / --keep-remote-branch 重跑。'], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, ...summary }
+  return { exitCode: EXIT.OK, ...summary }
 }
 
 export async function handleStatus(opts, roots) {
@@ -349,7 +350,7 @@ export async function handleStatus(opts, roots) {
       for (const t of active) process.stdout.write(`- ${t.taskId}: status=${t.status}, branch=${t.branch ?? '-'}\n`)
       printNextStep(active.map((t) => ({ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${t.taskId}` })), { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   const { taskId, ledger, source } = ctx
@@ -427,7 +428,7 @@ export async function handleStatus(opts, roots) {
     process.stdout.write(`任务状态：${taskId}（推断来源=${source}，phase=${evaluated.phase}）\n- status=${ledger.status} | role=${ledger.role} | branch=${ledger.branch ?? '-'}\n- HEAD=${head?.slice(0, 7) ?? 'unborn'} | dirty=${stZ.entries.length} | verified=${ledger.verifiedHead === head} | reviewPassed=${Boolean(ledger.reviewPassed)}\n`)
     printNextStep([{ skill: 'dev-flow', text: nextAction }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export async function handleAbort(opts, roots) {
@@ -460,5 +461,5 @@ export async function handleAbort(opts, roots) {
     process.stdout.write(`任务 ${taskId} 已安全放弃并更新账本为 aborted${verifyScratchCleanup?.destroyed ? `，并已销毁仓外 scratch (${verifyScratchCleanup.fileCount} 文件)` : ''}。\n`)
     printUnmountedLinksText(removedWorktrees)
   }
-  return { exitCode: 0, removedWorktrees, verifyScratchCleanup }
+  return { exitCode: EXIT.OK, removedWorktrees, verifyScratchCleanup }
 }

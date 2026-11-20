@@ -1,3 +1,4 @@
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 /**
  * injections-data-empirical-cycle.mjs —— 工具无关结构化实证、UI 裸开关拦截、PoC 先行建单
  * 与有界优化循环停损的故障注入复验表（I260-I269）。
@@ -47,8 +48,8 @@ export const INJECTIONS_EMPIRICAL_CYCLE = [
     what: 'C2 提交阶段跳过已落账实证的界面核验判据（声明了却没有证据也放行）',
     file: 'kit/skills/lib/workflow-policy.mjs',
     alsoDropIn: ['.agents/skills/lib/workflow-policy.mjs'],
-    from: '  if (!vis.ok) return { ok: false, code: vis.code, exitCode: 3, uiFiles: vis.uiFiles, reason: vis.reason }',
-    to: '  if (false && !vis.ok) return { ok: false, code: vis.code, exitCode: 3, uiFiles: vis.uiFiles, reason: vis.reason }',
+    from: '  if (!vis.ok) return { ok: false, code: vis.code, exitCode: EXIT.FACT, uiFiles: vis.uiFiles, reason: vis.reason }',
+    to: '  if (false && !vis.ok) return { ok: false, code: vis.code, exitCode: EXIT.FACT, uiFiles: vis.uiFiles, reason: vis.reason }',
     expect: 'C2：submit 阶段核对已落账实证',
   },
   {

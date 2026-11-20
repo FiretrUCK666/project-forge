@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -433,7 +434,7 @@ export async function handleStart(opts, roots) {
       process.stdout.write(`任务 ${taskId} 已存在（幂等复用）：isolation=${existing.isolation}, branch=${existing.branch ?? 'detached'}\n`)
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" status --task ${taskId}` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   let baseBranch = state.defaultBranch || 'main'
@@ -546,7 +547,7 @@ export async function handleStart(opts, roots) {
       process.stdout.write(`已建立外部 PR 审查隔离位：${reviewRel}（detached @ ${targetSha.slice(0, 7)}，未挂载依赖）\n`)
       printNextStep([{ skill: 'dev-review', text: `node ".agents/skills/dev-review/scripts/review-pack.mjs" --pr ${effectiveExternalPr} --untrusted-scan` }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   const branchPrefix = workTypePrefix(caseType)
@@ -632,7 +633,7 @@ export async function handleStart(opts, roots) {
         { skill: 'dev-flow', text: `3. 完成 claim 与 explore 后推进实施，提交后运行：node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` },
       ], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   // commits > 0 全量进入 Tier 2 Worktree 隔离，不再允许在主仓原地切换分支
@@ -691,5 +692,5 @@ export async function handleStart(opts, roots) {
       `3. 完成 claim 与 explore 后，在 ${implRel} 中推进实施、验证与提审（提交评审时将自动同步创建 ${reviewRel} 审查工作树）。`,
     ], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }

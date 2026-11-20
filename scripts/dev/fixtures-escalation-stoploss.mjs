@@ -2,6 +2,7 @@
  * fixtures-escalation-stoploss.mjs —— 分级升级、停损闭环与总控四态收口双向断言。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -548,7 +549,7 @@ export function registerStageBLoopB4bCases(cases) {
       const tmRes = await runTrialMerge({
         mainRoot: dir, ledger: readTaskLedger(dir, 'docs-task'), baseBranch: 'main',
         profile: { fullTest: 'exit 0', quickTest: 'exit 0' },
-        evidence: { headSha: (await gitRun(wtDocs, ['rev-parse', 'HEAD'])).stdout.trim(), dirty: false, gates: { full: { exitCode: 0 } }, skipped: [] },
+        evidence: { headSha: (await gitRun(wtDocs, ['rev-parse', 'HEAD'])).stdout.trim(), dirty: false, gates: { full: { exitCode: EXIT.OK } }, skipped: [] },
         policy: { riskTier: 'medium', requiredGates: ['full'] }, changedFiles: ['src/app.mjs'],
       })
       if (tmRes.code !== 'BLOCKED_TRIAL_MERGE_CONFLICT' || !tmRes.conflictHunks?.length || !tmRes.recoveryPacket?.commands?.some((c) => c.includes('GIT_EDITOR=true'))) {

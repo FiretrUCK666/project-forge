@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），保持默认无外网 <= 300ms 预算。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -167,13 +168,13 @@ export async function handleNext(opts, roots) {
       const msg = 'BLOCKED_ACK_REQUIRES_TASK: --ack-no-issue-context 必须指定单个任务（传 --task <id>）。'
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_ACK_REQUIRES_TASK', error: msg }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: 2 }
+      return { exitCode: EXIT.USAGE }
     }
     if (!reason) {
       const msg = 'BLOCKED_ACK_MISSING_REASON: --ack-no-issue-context 必须附带非空 --reason "<无法取得 Issue 上下文的原因>"。'
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: 'BLOCKED_ACK_MISSING_REASON', taskId: selectedTask.taskId, error: msg }, null, 2)}\n`)
       process.stderr.write(`${msg}\n`)
-      return { exitCode: 2 }
+      return { exitCode: EXIT.USAGE }
     }
     const unavail = Array.isArray(selectedTask.issueContextUnavailable)
       ? selectedTask.issueContextUnavailable.map(Number).filter((n) => Number.isInteger(n) && n > 0)
@@ -414,5 +415,5 @@ export async function handleNext(opts, roots) {
     }
     printNextStep([{ skill: 'dev-flow', text: payload.command }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, payload }
+  return { exitCode: EXIT.OK, payload }
 }

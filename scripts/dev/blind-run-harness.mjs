@@ -5,6 +5,7 @@
  * 对外部上游仓零写操作；按 `executed / succeeded / errorOnly` 三态严格计分。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -41,7 +42,7 @@ function createTracker() {
       entries.push({ name, executed: true, succeeded: score.ok, errorOnly: false, skipped: false, detail })
     },
     recordErrorOnly(name, detail = '') {
-      const score = scoreExecutionResult({ executed: true, exitCode: 0, errorOnly: true })
+      const score = scoreExecutionResult({ executed: true, exitCode: EXIT.OK, errorOnly: true })
       entries.push({ name, executed: true, succeeded: score.ok, errorOnly: true, skipped: false, detail })
     },
     skipToolchain(name, reason) {

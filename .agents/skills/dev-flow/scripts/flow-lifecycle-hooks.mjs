@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），支持按需探测已装配技能并优雅跳过未落盘钩子。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -30,7 +31,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       return {
         ok: false,
         code: 'BLOCKED_TAKEOVER_REASON_REQUIRED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         message: 'BLOCKED_TAKEOVER_REASON_REQUIRED: --takeover 必须同时传入 --reason "<接管原因>"。',
       }
     }
@@ -38,7 +39,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者角色 (${rawExplicitAgent}) 不得借 --takeover 代实施者 submit。`,
       }
     }
@@ -51,7 +52,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
     return {
       ok: false,
       code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者身份 (${rawExplicitAgent}) 禁止代实施者 submit；谁改代码谁认领并负责提交与 PR 评论。`,
     }
   }
@@ -61,7 +62,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${rawExplicitAgent}) 与已认领实施者 (${ledger.claimedBy}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`,
       }
     }
@@ -73,7 +74,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${rawExplicitAgent}) 与已认领实施者 (${ledger.implementerId}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`,
       }
     }
@@ -89,7 +90,7 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
     return {
       ok: false,
       code: 'BLOCKED_NOT_CLAIMED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       warnings,
       message: `BLOCKED_NOT_CLAIMED: 任务 ${ledger.taskId} 已释放认领，请先重新执行 flow.mjs claim --task ${ledger.taskId} 再继续。`,
     }
@@ -111,7 +112,7 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
   if (opts['strict-lifecycle'] && warnings.length > 0) {
     const first = warnings[0]
     const code = first.code === 'WARN_NOT_CLAIMED' ? 'BLOCKED_NOT_CLAIMED' : 'BLOCKED_NOT_EXPLORED'
-    return { ok: false, code, exitCode: 3, warnings, message: `${code}: ${first.message}` }
+    return { ok: false, code, exitCode: EXIT.FACT, warnings, message: `${code}: ${first.message}` }
   }
   return { ok: true, warnings }
 }
@@ -185,7 +186,7 @@ export async function checkFeatureMapSyncOnFinalize({ implRoot, mainRoot, ledger
       ok: false,
       blocked: true,
       code: 'BLOCKED_FEATURE_MAP_SYNC',
-      exitCode: 1,
+      exitCode: EXIT.ACTION,
       uncovered,
       message: `BLOCKED_FEATURE_MAP_SYNC: ${msg}`,
     }
@@ -235,7 +236,7 @@ export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, led
       ok: false,
       blocked: true,
       code: 'BLOCKED_EDIT_GATE_FAILED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       scriptPath,
       message: `BLOCKED_EDIT_GATE_FAILED: dev-edit 前置编辑门禁未通过（exit=${res.code}）：${detail || 'see edit-gate output'}`,
     }
@@ -268,7 +269,7 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
         ok: false,
         blocked: true,
         code: 'BLOCKED_UNSAFE_FORGE_HOOK',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         stage,
         hazards,
         message: `BLOCKED_UNSAFE_FORGE_HOOK (${stage}): .agents/forge-hooks.json 命中高危命令模式（${hazards.map((h) => h.ruleId).join(', ')}）`,
@@ -281,7 +282,7 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
         ok: false,
         blocked: true,
         code: 'BLOCKED_FORGE_HOOK_FAILED',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         stage,
         customResults,
         message: `BLOCKED_FORGE_HOOK_FAILED (${item.stageKey}): ${(cmdRes.stderr || cmdRes.stdout || 'non-zero exit').trim().slice(0, 300)}`,
@@ -332,7 +333,7 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
       ok: false,
       blocked: true,
       code: 'BLOCKED_GOVERN_HOOK_FAILED',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       stage,
       message: `BLOCKED_GOVERN_HOOK_FAILED (${stage}): ${(res.stderr || res.stdout || '').trim().slice(0, 300)}`,
     }

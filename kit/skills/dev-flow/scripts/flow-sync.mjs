@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -202,5 +203,5 @@ export async function handleSync(opts = {}, roots) {
     process.stdout.write(`sync 完成（task=${taskId}, syncCount=${ledger.syncCount}, onto=${targetBaseBranch}@${newBaseSha.slice(0, 7)}, HEAD=${newHeadSha?.slice(0, 7)}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" verify --task ${taskId}` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }

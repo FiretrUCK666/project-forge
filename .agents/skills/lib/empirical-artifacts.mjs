@@ -8,6 +8,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块）。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { statSync } from 'node:fs'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 
@@ -177,7 +178,7 @@ export function validateArtifactsAndVisual({
     return {
       ok: false,
       code: normalized.code ?? 'BLOCKED_ARTIFACT_INVALID',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       reason: normalized.error,
       records: normalized.records,
       errors: normalized.errors,
@@ -203,7 +204,7 @@ export function validateArtifactsAndVisual({
   }
 
   if (!required || visual.satisfiedBy) {
-    return { ok: true, code: null, exitCode: 0, reason: null, records: normalized.records, errors: [], visual }
+    return { ok: true, code: null, exitCode: EXIT.OK, reason: null, records: normalized.records, errors: [], visual }
   }
 
   const placeholder = observation.code === 'BLOCKED_VISUAL_OBSERVATION_PLACEHOLDER' ? observation.reason : null
@@ -212,7 +213,7 @@ export function validateArtifactsAndVisual({
     placeholder,
     '请至少满足一项：① 附真实非空实证附件 --artifact "<产物路径>"（可多个）；② 写下实际渲染/交互观察摘要（看了哪一屏、看到了什么）；③ 环境确实无法渲染时显式声明 --visual-blocked-reason "<阻塞原因>" 诚实报阻。',
   ].filter(Boolean).join(' ')
-  return { ok: false, code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED', exitCode: 3, reason, records: normalized.records, errors: [], visual }
+  return { ok: false, code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED', exitCode: EXIT.FACT, reason, records: normalized.records, errors: [], visual }
 }
 
 /**

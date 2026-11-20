@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），远端写操作统一先经 `probeForWrite` 探测通道。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { printNextStep } from '../../lib/cli.mjs'
 import { slugify } from '../../lib/docs.mjs'
 import { formatWorkTitle } from '../../lib/escalation.mjs'
@@ -127,7 +128,7 @@ export async function createIssueForStart({
   if (!createRes.ok || !createRes.number) {
     throw new Error(`创建工单失败：${createRes.error ?? '未返回有效 Issue 编号'}`)
   }
-  return { exitCode: 0, createdIssue: createRes }
+  return { exitCode: EXIT.OK, createdIssue: createRes }
 }
 
 /** 执行 `flow.mjs issue <create|list|view|comment|close|migrate>`。 */
@@ -176,7 +177,7 @@ export async function handleIssue(opts, roots) {
     if (!res.ok) throw new Error(`创建工单失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, role, issue: res }, null, 2)}\n`)
     else process.stdout.write(`已创建工单 #${res.number}（${res.url ?? role}）：${res.title}\n`)
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'list') {
@@ -197,7 +198,7 @@ export async function handleIssue(opts, roots) {
         process.stdout.write(`#${it.number} [${it.state}] ${it.title}${it.labels?.length ? ` (${it.labels.join(', ')})` : ''}\n`)
       }
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'view') {
@@ -219,7 +220,7 @@ export async function handleIssue(opts, roots) {
         for (const c of res.comments) process.stdout.write(`- [${c.author ?? 'user'}] ${c.body}\n`)
       }
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'comment') {
@@ -242,7 +243,7 @@ export async function handleIssue(opts, roots) {
     if (!res.ok && !res.delegated) throw new Error(`发表工单评论失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, number: num, comment: res }, null, 2)}\n`)
     else process.stdout.write(`已向工单 #${num} 追加评论。\n`)
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'close') {
@@ -266,7 +267,7 @@ export async function handleIssue(opts, roots) {
     if (!res.ok && !res.delegated) throw new Error(`关闭工单 #${num} 失败：${res.error ?? 'unknown'}`)
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: true, number: num, close: res }, null, 2)}\n`)
     else process.stdout.write(`工单 #${num} 已关闭${res.alreadyClosed ? '（原本已关闭，幂等跳过）' : ''}。\n`)
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'migrate') {
@@ -343,7 +344,7 @@ export async function handleIssue(opts, roots) {
       for (const m of migrated) process.stdout.write(`- 本地 #${m.localNumber} -> 远端 #${m.remoteNumber}${m.remoteUrl ? ` (${m.remoteUrl})` : ''}\n`)
       if (migrated.length > 0) printNextStep(['可用 `flow.mjs start --issue <远端编号>` 继续基于远端工单协作。'], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   throw new Error(`未知 issue 子动作：${action}（支持 create | list | view | comment | close | migrate）`)
@@ -381,7 +382,7 @@ export async function handleMilestone(opts, roots) {
       for (const m of items) process.stdout.write(`- #${m.number} [${m.state}] ${m.title}${m.dueOn ? ` (due=${m.dueOn})` : ''}\n`)
       for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'create') {
@@ -404,7 +405,7 @@ export async function handleMilestone(opts, roots) {
       process.stdout.write(`已创建里程碑 #${res.number ?? '?'}：${res.title ?? title}\n`)
       for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'assign') {
@@ -442,7 +443,7 @@ export async function handleMilestone(opts, roots) {
       process.stdout.write(`已将 ${targetNums.map((n) => `#${n}`).join(', ')} 归入里程碑 ${msId}。\n`)
       for (const step of results[0]?.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   if (action === 'close') {
@@ -461,7 +462,7 @@ export async function handleMilestone(opts, roots) {
       process.stdout.write(`已关闭里程碑 #${msNum}。\n`)
       for (const step of res.platformSetupChecklist ?? []) process.stdout.write(`- [人工同步清单] ${step}\n`)
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   throw new Error(`未知 milestone 子动作：${action}（支持 create | list | assign | close）`)

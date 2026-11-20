@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），由 flow.mjs 与 flow-batch.mjs 调度。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -281,7 +282,7 @@ export async function handleMerge(opts, roots) {
         process.stdout.write(`无直连 GitHub 凭据，已生成合并代理载荷：${JSON.stringify(mergeRes.jsonPayload)}\n`)
         printNextStep(['请在宿主 MCP 完成合并并回读 state=MERGED 后，再向人展示待清理清单。'], { repoRoot: roots.mainRoot })
       }
-      return { exitCode: 0 }
+      return { exitCode: EXIT.OK }
     }
     if (!mergeRes.ok || !mergeRes.merged) {
       const detail = mergeRes.headMismatch ? `409 HEAD 漂移(${mergeRes.error ?? ''})`
@@ -398,7 +399,7 @@ export async function handleMerge(opts, roots) {
     printCleanupChecklistText(checklist)
     printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" cleanup --task ${taskId} --confirm` }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 export async function handleRelease(opts, roots) {
@@ -473,7 +474,7 @@ export async function handleRelease(opts, roots) {
       { skill: 'dev-flow', text: `或安全放弃任务与工作区：node ".agents/skills/dev-flow/scripts/flow.mjs" abort --task ${taskId} --confirm` },
     ], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }
 
 /** 解析 Issue 评论流中的最新有效认领状态（claim/takeover 激活，release 释放）。 */
@@ -596,7 +597,7 @@ export async function handleClaim(opts, roots) {
         : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
       printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
     }
-    return { exitCode: 0 }
+    return { exitCode: EXIT.OK }
   }
 
   // 认领/释放都要往平台写。写之前必须联网探清通道——
@@ -690,5 +691,5 @@ export async function handleClaim(opts, roots) {
       : `node ".agents/skills/dev-flow/scripts/flow.mjs" explore --task ${taskId}`
     printNextStep([{ skill: 'dev-flow', text: nextCmd }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0 }
+  return { exitCode: EXIT.OK }
 }

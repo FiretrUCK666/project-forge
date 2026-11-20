@@ -3,6 +3,7 @@
  * 成功后再推进干净 `mainRoot` 的基线分支，严禁直接在 `mainRoot` 运行 `git switch` / `git merge --no-ff`。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -86,7 +87,7 @@ export async function runTrialMerge({
       ok: false,
       blocked: true,
       code: 'BLOCKED_DIRTY_MAIN',
-      exitCode: 3,
+      exitCode: EXIT.FACT,
       message: 'BLOCKED_DIRTY_MAIN: 主工作区存在未提交改动，无法并入基线分支，请清理后再 merge。',
     }
   }
@@ -204,7 +205,7 @@ export async function runTrialMerge({
         ok: false,
         blocked: true,
         code: 'BLOCKED_TRIAL_MERGE_CONFLICT',
-        exitCode: 3,
+        exitCode: EXIT.FACT,
         conflictFiles: extracted.conflictFiles,
         conflictHunks: extracted.conflictHunks,
         conflictSummary: {
@@ -239,7 +240,7 @@ export async function runTrialMerge({
             ok: false,
             blocked: true,
             code: 'BLOCKED_STATIC_DOC_CHECK_FAILED',
-            exitCode: 3,
+            exitCode: EXIT.FACT,
             message: `BLOCKED_STATIC_DOC_CHECK_FAILED: 试合后文档静态校验失败：${docCheck.errors.map((e) => e.message).slice(0, 3).join('；')}`,
           }
         }
@@ -252,7 +253,7 @@ export async function runTrialMerge({
             ok: false,
             blocked: true,
             code: 'BLOCKED_TRIAL_MERGE_VERIFY_FAILED',
-            exitCode: 3,
+            exitCode: EXIT.FACT,
             message: `BLOCKED_TRIAL_MERGE_VERIFY_FAILED: 临时试合后复测失败（cmd="${trialCmd}", exit=${execRes.code}）：${(execRes.stderr || execRes.stdout).trim().slice(0, 300)}`,
           }
         }

@@ -4,6 +4,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 dev-plan 与 dev-review 共用。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
@@ -68,7 +69,7 @@ export function checkDistinctRoundReviewer(rounds = [], currentReviewerId, {
     return {
       blocked: true,
       code,
-      exitCode: 2,
+      exitCode: EXIT.USAGE,
       matchedRound: matched.round ?? null,
       matchedReviewer: matched.reviewerId ?? matched.reviewer,
       excludedReviewers,

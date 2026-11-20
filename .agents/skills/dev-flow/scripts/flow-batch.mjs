@@ -5,6 +5,7 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），零特定宿主名称耦合。
  */
 
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -219,7 +220,7 @@ async function handleBatchPlan(opts, roots) {
       printNextStep([{ skill: 'dev-flow', text: `node ".agents/skills/dev-flow/scripts/flow.mjs" next --task ${wave1[0].taskId}` }], { repoRoot: roots.mainRoot })
     }
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 async function handleCheckDisjoint(opts, roots) {
@@ -260,7 +261,7 @@ async function handleCheckDisjoint(opts, roots) {
   const out = { ok: true, disjoint: true, tasks: perTask, overlaps: [] }
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else process.stdout.write(`并行切片互斥校验通过：${taskIds.length} 个任务零文件重叠。\n`)
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 async function handleMergeQueue(opts, roots) {
@@ -284,7 +285,7 @@ async function handleMergeQueue(opts, roots) {
       const out = { ok: true, action: 'enqueued', queue }
       if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
       else process.stdout.write(`已入队 FIFO 合并队列：${queue.join(', ')}\n`)
-      return { exitCode: 0, ...out }
+      return { exitCode: EXIT.OK, ...out }
     }
 
     const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
@@ -475,7 +476,7 @@ async function handleResumeSession(opts, roots) {
     process.stdout.write(`会话句柄已轮换（task=${taskId}, epoch=${sessionHandle.epoch}, token=${sessionHandle.handoffToken}）。\n`)
     printNextStep([{ skill: 'dev-flow', text: nextState.command }], { repoRoot: roots.mainRoot })
   }
-  return { exitCode: 0, ...out }
+  return { exitCode: EXIT.OK, ...out }
 }
 
 export async function handleBatch(opts, roots) {

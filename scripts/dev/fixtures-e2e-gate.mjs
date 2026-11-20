@@ -2,6 +2,7 @@
  * fixtures-e2e-gate.mjs —— 通用 E2E 硬门禁、合前三方 SHA 校验、三态计分与脱敏建单双向夹具。
  */
 
+import { EXIT } from '../../kit/skills/lib/exit-codes.mjs'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -235,13 +236,13 @@ export function registerStageBLoopB5Cases(cases) {
 
   cases.push(['A6：合前三方 headSha/干净工作区校核、三态计分与确定性零 LLM CLI 故障注入 Stub', async () => {
     // 1. 三态计分：executed / succeeded / errorOnly
-    if (scoreExecutionResult({ executed: false, exitCode: 0, errorOnly: false }).ok !== false) {
+    if (scoreExecutionResult({ executed: false, exitCode: EXIT.OK, errorOnly: false }).ok !== false) {
       return 'scoreExecutionResult 未拦截 executed=false 的伪绿'
     }
-    if (scoreExecutionResult({ executed: true, exitCode: 0, errorOnly: true }).ok !== false) {
+    if (scoreExecutionResult({ executed: true, exitCode: EXIT.OK, errorOnly: true }).ok !== false) {
       return 'scoreExecutionResult 未拦截 errorOnly=true 的伪绿'
     }
-    if (scoreExecutionResult({ executed: true, exitCode: 0, errorOnly: false }).ok !== true) {
+    if (scoreExecutionResult({ executed: true, exitCode: EXIT.OK, errorOnly: false }).ok !== true) {
       return 'scoreExecutionResult 正向通过失败'
     }
 

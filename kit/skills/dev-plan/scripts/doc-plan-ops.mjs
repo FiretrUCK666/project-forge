@@ -8,9 +8,9 @@ import { existsSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
-import { parseCritiqueOverride, parseCritiqueRounds } from '../../lib/critique-rounds.mjs'
-import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, stripCritiqueMeta, updateDocFrontmatter } from '../../lib/docs.mjs'
-import { posixPath, readTextSafe, sha256Text, writeAtomic } from '../../lib/git.mjs'
+import { evaluateCritiqueOverride, parseCritiqueRounds } from '../../lib/critique-rounds.mjs'
+import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, updateDocFrontmatter } from '../../lib/docs.mjs'
+import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { auditDoc, detectDocType } from './doc-audit.mjs'
 
 /** 校验 Critique/Audit/停损条件后批准 SPEC/PRD/Todo 并冻结 C1..Cn 验收指纹。 */
@@ -44,17 +44,19 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
 
   if (docType === 'spec' || docType === 'prd') {
     const priorRounds = parseCritiqueRounds(fm.data, workingText)
-    const override = parseCritiqueOverride(fm.data)
+    // override 生效与正文指纹比对走共用判据：`plan-exit-gate.mjs` 用的是同一份。
+    // 两处各写一遍，迟早算出不同的结论，然后「approve 说有效、门禁说过期」同时成立。
+    const overrideState = evaluateCritiqueOverride(workingText, fm.data)
     const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
-    const currentSha = sha256Text(stripCritiqueMeta(workingText)).slice(0, 12)
-    if (hasStopLoss && !override?.approved) {
+    if (hasStopLoss && !overrideState.approved) {
       throw Object.assign(new Error(`STOP_LOSS_ESCALATE: ${audit.file} 已触发规划 Critique 停损且尚未解锁；请先运行 doc-plan.mjs critique-override --file "${audit.file}" --human-approved --reason "..."`), { code: 'STOP_LOSS_ESCALATE', exitCode: 4 })
     }
-    if (override?.approved) {
-      if (override.sha && currentSha !== override.sha) {
-        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${override.sha} !== current=${currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
+    if (overrideState.approved) {
+      if (overrideState.stale) {
+        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${overrideState.sha} !== current=${overrideState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
       }
     } else {
+      const currentSha = overrideState.currentSha
       const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
       if (!/^passed\b/i.test(critiqueVal)) {
         if (skipCritiqueReason && String(skipCritiqueReason).trim()) {

@@ -31,6 +31,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { evaluateCritiqueOverride } from './critique-rounds.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { analyzePendingDecisions, planModeErrors } from './pending-decisions.mjs'
 
@@ -128,6 +129,54 @@ function readDirMarkdownSafe(dirAbs) {
 }
 
 /**
+ * 内审是否「未过」——先看人类 override，再看 `plan_critique`。
+ *
+ * ## 为什么不能只看 `plan_critique`
+ *
+ * 停损之后由人签字放行（`critique-override --human-approved`），随后 `approve` 通过。
+ * 但 `approveSpec` 走 override 分支时只改 `status`/`approved`，**不会改写** `plan_critique`，
+ * 于是文档里仍留着 `rejected (reviewer=…, round=3, …)`。那是**当初被拒过**的历史，
+ * 不是**现在仍未过审**。把两者等价，人签的字就白签了：门禁拦住已经获批的规划。
+ *
+ * ## 但 override 只对签字时那份正文有效
+ *
+ * 签字后正文再被改动，人批的就不是当前这一版了。判据是正文指纹，
+ * 与 `approve` 的 `BLOCKED_CRITIQUE_STALE` 用同一个函数（`evaluateCritiqueOverride`），
+ * 两处若各算一次，「approve 说有效、门禁说过期」就会同时成立。
+ *
+ * @param {{rel: string, text: string, data: object}} doc
+ * @returns {{blocked: boolean, message: string, fixHint: string, basis: string}}
+ */
+export function resolveCritiqueReadiness(doc) {
+  const overrideState = evaluateCritiqueOverride(doc.text ?? '', doc.data ?? {})
+
+  if (overrideState.approved && !overrideState.stale) {
+    return { blocked: false, message: '', fixHint: '', basis: 'human-override' }
+  }
+  if (overrideState.approved && overrideState.stale) {
+    return {
+      blocked: true,
+      basis: 'override-stale',
+      message: `在人类 critique-override 之后正文又改动了（override=${overrideState.sha} !== current=${overrideState.currentSha}），`
+        + '人批的是当时那一版，不是现在这一版',
+      fixHint: '要么撤销那处改动，要么重新跑 critique-override 签字；改完再走 approve。',
+    }
+  }
+
+  const critique = normalizeStatus(doc.data?.plan_critique).split(/\s+/)[0]
+  if (!critique || !UNREADY_CRITIQUE.has(critique)) {
+    return { blocked: false, message: '', fixHint: '', basis: 'passed' }
+  }
+  return {
+    blocked: true,
+    basis: 'critique-unready',
+    message: `的规划内审仍是 ${critique}（plan_critique: ${doc.data?.plan_critique}）`,
+    fixHint: '内审非得是 passed 才能退场；退回的意见要改完再重审，不能带着未过审的稿子开工。'
+      + '若已由人裁决放行，须先跑 critique-override --human-approved --reason "<裁决说明>"。',
+  }
+}
+
+/**
  * 单份文档的退场判据。返回 `reasons` 数组，空数组即合格。
  *
  * 每条理由都写成「哪里不对 + 怎么改」，因为这道门是要给人看的：
@@ -193,14 +242,15 @@ function evaluateDoc(doc, { requireApproval = true } = {}) {
       })
     }
 
-    // 内审挂着未过或已退回时，批准状态是自相矛盾的。
-    const critique = normalizeStatus(data.plan_critique).split(/\s+/)[0]
-    if (critique && UNREADY_CRITIQUE.has(critique)) {
+    // 内审是否「未过」由 `resolveCritiqueReadiness` 判：它会先看人类 override 有没有签字放行。
+    // 「有过 rejected 记录」与「现在仍未过审」是两件事——把前者当后者，等于让人签的字不生效。
+    const readiness = resolveCritiqueReadiness(doc)
+    if (readiness.blocked) {
       reasons.push({
         code: PLAN_EXIT_BLOCK_CODE,
         file: doc.rel,
-        message: `${doc.rel} 的规划内审仍是 ${critique}（plan_critique: ${data.plan_critique}）`,
-        fixHint: '内审非得是 passed 才能退场；退回的意见要改完再重审，不能带着未过审的稿子开工。',
+        message: `${doc.rel} ${readiness.message}`,
+        fixHint: readiness.fixHint,
       })
     }
   }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-20T09:18:46.006Z",
+  "installedAt": "2026-11-20T09:39:26.160Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -118,7 +118,7 @@
       "sha256": "614ea2bb0e1000b5ecb7b093e99f131227ca2f51623ff82e13d8e3401a6c054b"
     },
     "dev-plan/scripts/doc-plan-ops.mjs": {
-      "sha256": "719a10dd9dd556abbac0163dee17ef06ec987c719795942c56c08f4ec0400c57"
+      "sha256": "7948d828872d268e5b543f2db73ce445b123db225682f27b275f6fb184b6da58"
     },
     "dev-plan/scripts/doc-plan.mjs": {
       "sha256": "c1ec9ed0923b87dabf6bd29a3467138791ae94b8d94e3c7f179ca6d8d839a48f"
@@ -178,7 +178,7 @@
       "sha256": "8ccfedeba1932a419d58ff83fb5ef8f86e338b02039d10f0f8f946fb0f46c1c9"
     },
     "lib/critique-rounds.mjs": {
-      "sha256": "c0c9fb64978ce794167b0c3bcc77b617d1ccdffb373c1f37c5533718d39da9d8"
+      "sha256": "38da39f8fa59a7f99cfd78bb1643eca6c9acc661d025e06d7f2fff3a593b0e1b"
     },
     "lib/doc-comments.mjs": {
       "sha256": "d3742b587a16af4c9874be377801091a2a8a0bc131f1dd0846e3cf1c017174a1"
@@ -286,7 +286,7 @@
       "sha256": "ed3154694199ca1970dbdc1a493bb19d1a839366eb9d758fe996bed70f1bf0e2"
     },
     "lib/plan-exit-gate.mjs": {
-      "sha256": "fe7baff90ac3c11a8ba9f87150c8b989c56c92c5c2f782cb95f853b1f4a0c598"
+      "sha256": "46b04800f9f81af138aaad46acb6302178b3bb4748e73ac5df9658ae2cabbc73"
     },
     "lib/platform-probe.mjs": {
       "sha256": "8819a5af9f62e0cb2c5d1b284d195fab323f1d803a7d6c564a4930b4f811b541"

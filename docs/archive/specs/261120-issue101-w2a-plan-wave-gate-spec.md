@@ -1,23 +1,23 @@
 ---
 kind: spec
 title: 宿主无关双态规划门禁、PRD 切片图校验与波次交接包规格
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 101
-pr: null
+pr: 112
 branch: feat/w2a-plan-wave-gate
-owner: plan-v101
+owner: impl-w2a
+plan_mode: autonomous
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=c85145162203, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"c85145162203\",\"artifact_baseline\":{\"sha\":\"c851451622030e83742d15669a526a353ae7fae46af24142ce3c4ad71b2f5ceb\",\"shortSha\":\"c85145162203\",\"criteriaCount\":4,\"anchorCount\":73},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.361Z\"}]"
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue101-w2a-plan-wave-gate-todo.md
 high_risk_paths: [kit/]
 task_id: w2a-plan-wave-gate
-plan_mode: autonomous
 depends_on: [w1a-engine-fixes]
 scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib/pending-decisions.mjs, kit/skills/lib/handoff-package.mjs, kit/skills/lib/doc-slice-graph.mjs, kit/skills/lib/plan-exit-gate.mjs, ".agents/skills/dev-plan/**", ".agents/skills/dev-flow/**", .agents/skills/lib/pending-decisions.mjs, .agents/skills/lib/handoff-package.mjs, .agents/skills/lib/doc-slice-graph.mjs, .agents/skills/lib/plan-exit-gate.mjs, scripts/dev/fixtures-plan-wave.mjs, scripts/dev/injections-data-plan-wave.mjs]
 critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"PRD\",\"`#102`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`buildHandoff`\",\"`depends_on`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`scope_files`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"templates/agents-project.md\"]}},\"anchors\":[\"!`kit/skills/dev-review/**`、`kit/skills/dev-itera\",\"!第 9 个技能\",\"--case\",\"--handoff\",\".agents/skills/.pf-manifest.json\",\"==0\",\"BLOCKED_PLAN_NOT_READY\",\"BLOCKED_SLICE_CYCLE\",\"C1\",\"C2\",\"C3\",\"C4\",\"I250\",\"I259\",\"PRD\",\"SKILL\",\"`#102`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`.agents/skills/.pf-manifest.json`\",\"`/grill-me`\",\"`/plan`\",\"`3`\",\"`BLOCKED_PLAN_NOT_READY`\",\"`BLOCKED_SLICE_CYCLE`\",\"`C1..Cn`\",\"`I250–I259`\",\"`approved: false`\",\"`buildHandoff`\",\"`depends_on`\",\"`doc-plan.mjs audit`\",\"`doc-plan.mjs triage`\",\"`equip.mjs .`\",\"`flow.mjs batch plan --handoff [--json]`\",\"`flow.mjs start --case 3|4`\",\"`flow.mjs start`\",\"`flow.mjs verify`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-plan/SKILL.md`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/doc-slice-graph.mjs`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/plan-exit-gate.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multi_spec: true`\",\"`pendingDecisions === 0`\",\"`plan_mode: interactive | autonomous`\",\"`plan_mode`\",\"`scope_files`\",\"`scripts/dev/fixtures-plan-wave.mjs`\",\"`scripts/dev/injections-data-plan-wave.mjs`\",\"`templates/agents-project.md`\",\"buildHandoff\",\"depends_on\",\"doc-plan.mjs\",\"equip.mjs\",\"flow.mjs\",\"kit/skills/dev-plan/SKILL.md\",\"kit/skills/lib/doc-slice-graph.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/plan-exit-gate.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multi_spec\",\"pendingDecisions\",\"plan_mode\",\"scope_files\",\"scripts/dev/fixtures-plan-wave.mjs\",\"scripts/dev/injections-data-plan-wave.mjs\",\"templates/agents-project.md\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
@@ -25,7 +25,7 @@ critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\
 
 # 宿主无关双态规划门禁、PRD 切片图校验与波次交接包（Issue `#101`）
 
-> 所属总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2a-plan-wave-gate Todo](../todo/261120-issue101-w2a-plan-wave-gate-todo.md)
+> 所属总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2a-plan-wave-gate Todo](../todo/261120-issue101-w2a-plan-wave-gate-todo.md)
 >
 > 总控 PRD 认领范围：覆盖总控 `C5..C8`（总控 `C5` -> 本切片 `C1`；总控 `C6` -> 本切片 `C2`；总控 `C7` -> 本切片 `C3`；总控 `C8` -> 本切片 `C4` 及 Wave 2 透传契约）。
 
@@ -78,7 +78,7 @@ flowchart TD
   - Case 1 / Case 2 直接放行 `{ ok: true, blocked: false }`；
   - Case 3 检查关联 Todo/SPEC 是否存在且 `pendingDecisions.length === 0` 且满足 L2 过审要求；
   - Case 4 检查关联 SPEC（及关联 Master PRD 若 `multi_spec: true`）是否存在、`pendingDecisions.length === 0`、且 `approved === true`（或 `status === 'approved'`，同时若含 `plan_critique` 则不得为 `pending`/`rejected`）。
-  - 未就绪时返回 `{ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', exitCode: 3, reasons: [...] }`；接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 `handleStart`，在 `inspectWorkspace` 之后、创建 branch/worktree 之前阻断并返回退出码 `3`。注意支持独立规划 PR 任务本身（如尚未存在目标切片 SPEC 且命令行明确正在立项规划 PR 本身时通过 `--allow-plan-bootstrap` 或 Case 4 规划单标识区分，避免鸡生蛋死锁；日常开发 Case 3/4 任务若无已过审规划必拦）。
+  - 未就绪时返回 `{ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', exitCode: 3, reasons: [...] }`；接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 `handleStart`，在 `inspectWorkspace` 之后、创建 branch/worktree 之前阻断并返回退出码 `3`。注意支持独立规划 PR 任务本身（如尚未存在目标切片 SPEC 且命令行明确正在立项规划 PR 本身时通过 `--allow-plan-bootstrap` 或 Case 4 规划单标识区分，避免鸡生蛋死锁）。已绑定规划文档的日常 Case 3/4 任务若无已过审规划必拦；**一份规划都没绑时记 `WARN_PLAN_NOT_BOUND` 放行而不阻断**——本仓支持「先 `flow.mjs start`，再 `doc-plan.mjs init --task`」这个既有顺序（`init` 的 `--task` 参数就是为它准备的），拦死会把这条合法路径判死，判死之后人只会加豁免，连该拦的也一起放过。
 
 ### 2.3 `C3` 总控 PRD -> 切片有向图校验
 
@@ -128,10 +128,10 @@ flowchart TD
 ### 验收标准（对应 Issue `#101` 与总控 `C5..C8`）
 
 <!-- criteria:start -->
-- [ ] C1: `doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
-- [ ] C2: 抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
-- [ ] C3: `kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
-- [ ] C4: 升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
+- [x] C1: `doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
+- [x] C2: 抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
+- [x] C3: `kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
+- [x] C4: 升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -140,3 +140,14 @@ flowchart TD
 <!-- section: pending -->
 - 已定：双态门禁语义、退出码 `3` 契约、切片图校验规则及 Wave 2 并行透传均已拍板锁定，无未决事项。
 <!-- section: pending-end -->
+
+## 实现说明
+
+- **跨路径审计不假绿**：`doc-plan.mjs audit <目录>` 在目标目录自身是仓库根或 worktree 根时，以它作为审计根；否则会按外仓根算相对路径，扫不到任何文档却返回 `auditedCount: 0, ok: true`。这条以「非法 status 的文档必须被抓到」的正反用例钉住。
+- **`plan_mode` 落在既有判据模块里**：`kit/skills/lib/pending-decisions.mjs` 新增 `PLAN_MODES` / `deriveDefaultPlanMode` / `resolveDocPlanMode` / `planModeErrors`；`doc-plan.mjs` 的 `triage` 与 `init` 都接 `--plan-mode`，非法值抛结构化 `INVALID_PLAN_MODE`（含 `allowed` 与 `fixHint`），文档里被改成非法值时 `audit` 也报同码。默认推导只看已声明事实：`one-way` 门、`Case >= 4`、`tier: L3/L4`、PRD 走 `interactive`，其余 `autonomous`。
+- **规划退场门禁**：`kit/skills/lib/plan-exit-gate.mjs` 实现 `evaluatePlanExitGate`，接在 `flow-inspect.mjs` 的 `handleStart` 里、`inspectWorkspace` 之后与建分支建工作位之前；未就绪返回 `BLOCKED_PLAN_NOT_READY` + 退出码 `3`。判据分档：Case 1/2/5 不适用；Case 3 只要求待拍板清零（`audit` 直通，不走 `approve`）；Case 4 另要求 `approved` 与内审非 `pending`/`rejected`，并核对认领的 `multi_spec` 总控 PRD。一份都没绑时记 `WARN_PLAN_NOT_BOUND` 而不阻断——本仓支持「先 `start` 再 `doc-plan init --task`」的顺序；`--allow-plan-bootstrap` 给规划 PR 自举豁免，放行同时把被绕过的理由原样打出来。
+- **切片图四检**：`kit/skills/lib/doc-slice-graph.mjs` 实现认领覆盖（`UNCOVERED_ACCEPTANCE_CRITERIA`）、元数据必填（`SLICE_METADATA_MISSING`，仅对认领活跃 `multi_spec` 总控的切片要求）、依赖判环与悬空（`BLOCKED_SLICE_CYCLE`）、同波次写域碰撞（`BLOCKED_SLICE_OVERLAP`，显式排除 `.agents/skills/.pf-manifest.json`），由 `doc-audit-repo.mjs` 在整仓范围接入 `doc-plan.mjs audit .`；单文件审计不跑切片图检查（关系不在这份视野里）。
+- **波次交接包**：`flow-batch.mjs` 的 `batch plan --handoff` 复用 `buildHandoff` 为当前可执行波次的每个切片生成 `{ taskId, sourceDoc, criteriaCount, criteria, scopeFiles, dependsOn, dispatchCommand, prompt }`，既有 `{ wave, canParallel, tasks }` 返回形状一字不改；不传 `--handoff` 时不算交接包。
+- **verify 透传**：`flow.mjs` 用 `multiFlags` 注册 `artifact`、`valueFlags` 注册 `visual-blocked-reason`；`flow-lifecycle.mjs` 删掉裸 `--visual-checked` 合成观察串的逻辑，改为把 `{ artifacts, visualCheckedRaw, visualBlockedReason, observationSummary }` 经 `recordVerifyEvidenceForFlow` 交给 `workflow-policy.mjs` 的 `validateVerifyPrecheck`。该入口由并行切片 `#102` 提供：缺失时以命名空间导入探测并 Fail-Soft 放行，存在时按其 `{ ok, code, exitCode }` 阻断。
+- **双证**：`scripts/dev/fixtures-plan-wave.mjs`（10 组正反用例）与 `scripts/dev/injections-data-plan-wave.mjs`（`I250–I259` 十条注入）均已落地，全量 `fixtures.mjs` 342 项通过、`verify-injections.mjs` 零未命中。
+

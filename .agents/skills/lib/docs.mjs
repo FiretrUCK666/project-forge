@@ -34,9 +34,9 @@ export {
 }
 
 export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
-  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
-  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
-  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_mode', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
+  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
 })
 
 

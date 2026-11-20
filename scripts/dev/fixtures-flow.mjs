@@ -571,7 +571,12 @@ cases.push(['全链路 URL 直传、finalize 实现说明拦截、submit 零脏�
     writeFileSync(join(urlDir, spRel), spTxt0
       .replace(/^- \[ \] C1: .*$/m, '- [x] C1: verified')
       .replace(/^- \[ \] C2: .*$/m, '- [x] C2: verified')
-      .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`))
+      .replace(/(- \*\*实际落地摘要\*\*)：.*$/m, `$1：- ${placeholderTodo}`)
+      // Case 4 的规划退场要求 SPEC 已过审：这里直接改成过审态，
+      // 让本用例聚焦「实现说明里的大写占位」这一条判据。
+      .replace(/^status: draft$/m, 'status: approved')
+      .replace(/^approved: false$/m, 'approved: true')
+      .replace(/^plan_critique: pending$/m, 'plan_critique: passed'))
     gitCommitFast(urlDir, 'spec todo', { files: [spRel] })
     await startUrl({ task: 'note-case', slug: 'note-case', case: '4' }, urlRoots)
     await seedExploredFor(urlDir, 'note-case')

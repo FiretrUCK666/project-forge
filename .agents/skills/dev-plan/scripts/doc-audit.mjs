@@ -19,7 +19,8 @@ import {
 import { discoverEvergreenDocs, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { locateTopSlicesForPaths } from '../../lib/doc-locator.mjs'
 import { matchFeatureMapForPaths } from '../../lib/feature-map.mjs'
-import { pendingDecisionErrors } from '../../lib/pending-decisions.mjs'
+import { pendingDecisionErrors, planModeErrors } from '../../lib/pending-decisions.mjs'
+import { evaluateSliceGraph } from '../../lib/doc-slice-graph.mjs'
 import { numberingErrors } from '../../lib/doc-renumber.mjs'
 import { checkTddStructure } from '../../lib/tdd-structure.mjs'
 import { classifyDoorType } from '../../lib/static-gates.mjs'
@@ -509,6 +510,8 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
 
     // 待拍板没清空就往下走，等于让实现去猜答案。
     errors.push(...pendingDecisionErrors(normRaw))
+    // 双态规划写了非法值时，退场门禁会按「没声明」处理——那样两种流都不成立。
+    errors.push(...planModeErrors(normRaw))
 
     // 核心与设计节实质性检查（零字数下限）与跨轮防退化快照比对
     errors.push(...checkCoreSubstantiveness(bodyForSections, docType))
@@ -668,5 +671,5 @@ export function checkOrphanSlices(repoRoot) {
 }
 
 export function auditRepoDocs(repoRoot, scope = '.') {
-  return runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices })
+  return runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices, evaluateSliceGraph })
 }

@@ -52,6 +52,15 @@ import {
 
 export { handleRework }
 
+/**
+ * `--artifact` 可重复，值可能是路径也可能是说明；统一成去空、去重的字符串数组。
+ * 空数组和「没传」语义不同，所以不把两者压成一个值。
+ */
+function normalizeArtifactList(raw) {
+  const list = Array.isArray(raw) ? raw : (raw === undefined || raw === null ? [] : [raw])
+  return [...new Set(list.map((v) => String(v).trim()).filter(Boolean))]
+}
+
 export async function handleFinalize(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx
@@ -350,9 +359,15 @@ export async function handleVerify(opts, roots) {
     return { exitCode: 1 }
   }
 
+  // 证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文。
+  //
+  // 裸 `--visual-checked` 是「我核验过了」的口头声明，它自身**不带观察内容**。
+  // 这里不替它编一句「observed and verified」——编出来的句子会被当成观察证据写进
+  // evidence.json，然后一路通过后面的门禁，而实际上谁也没说看到了什么。
+  // 缺什么就让它缺着，交给校验入口去要求补齐。
   const e2eEvidenceInput = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
-    || (opts['visual-checked'] ? 'e2e/visual runtime behavior observed and verified' : '')
+    || ''
   if ((mode === 'full' || mode === 'gate') && !profile.smokeVerify && !isProfileExplicitNone(profile, 'smoke-verify') && !opts.cmd && !e2eEvidenceInput) {
     const pre = await computeVerifyPolicy()
     const prevEv = readVerificationEvidence(roots.gitDir, taskId)
@@ -424,8 +439,20 @@ export async function handleVerify(opts, roots) {
     explicitNoneSkipped: false, docStaticRes, executed: true, errorOnly: false,
     e2eObservationText: e2eEvidenceInput, durationMs: runDurationMs, smokeDurationMs,
     smokeCmd: smokeCmdUsed, smokeExitCode: smokeRunRes?.code ?? null, smokeExecuted, smokeErrorOnly: false,
+    artifacts: normalizeArtifactList(opts.artifact),
+    visualCheckedRaw: Boolean(opts['visual-checked']),
+    visualBlockedReason: typeof opts['visual-blocked-reason'] === 'string' ? opts['visual-blocked-reason'].trim() : '',
   })
   const finalExit = !execOk && runRes.ok && smokeRunRes && !smokeRunRes.ok ? (smokeRunRes.code || 1) : evRec.overallExit
+  // 前置预检拦下时，实证已经写不进去，剩下的 ledger 收尾与输出都按「未通过」走。
+  if (evRec.precheck?.blocked) {
+    ledger.lastVerifyExitCode = finalExit
+    ledger.verifiedHead = null
+    ledger.status = 'verify-failed'
+    await updateTaskLedger(roots.mainRoot, taskId, (cur) => ({ ...(cur ?? ledger), ...ledger }), { createIfMissing: true })
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, taskId, mode, code: evRec.precheck.code ?? 'BLOCKED_VERIFY_PRECHECK', exitCode: finalExit, reasons: evRec.precheck.reasons ?? null }, null, 2)}\n`)
+    return { exitCode: finalExit || EXIT_POLICY_BLOCK }
+  }
   let e2eFailureReport = null
   if ((mode === 'smoke' || smokeExecuted) && smokeRunRes && !smokeRunRes.ok) {
     e2eFailureReport = await handleVerifyE2eFailure({
@@ -447,7 +474,11 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    ledger.visualCheckEvidence = e2eEvidenceInput || (ledger.visualCheckEvidence ?? '实际运行、端到端交互与输出观察核验已确认')
+    // 有原文就存原文；只有裸 --visual-checked 时记「声明」本身，不编造观察内容。
+    // 两者必须分得开——后面判定「有没有真观察」靠的是 evidence.json 里的 e2eObservation，
+    // 而那条只有真传了 --e2e-evidence / --visual-evidence 才会有。
+    ledger.visualCheckEvidence = e2eEvidenceInput
+      || (opts['visual-checked'] ? '已声明核验（--visual-checked，未附观察原文）' : (ledger.visualCheckEvidence ?? null))
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
   await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })

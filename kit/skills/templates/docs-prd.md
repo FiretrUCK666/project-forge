@@ -7,6 +7,7 @@ updated: {{TODAY}}
 issue: {{ISSUE}}
 pr: null
 owner: "{{OWNER}}"
+plan_mode: autonomous
 plan_critique: pending
 related_spec: null
 related_todo: null
@@ -22,6 +23,7 @@ related_todo: null
 | 创建 / 更新 | `{{TODAY}}` / `{{TODAY}}` |
 | 关联 Issue / PR | {{ISSUE_LABEL}} / 未关联 |
 | 提出方 / 负责人 | {{OWNER_LABEL}} |
+| 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
 | 关联设计 / 任务单 | 按需补齐 `related_spec` / `related_todo` |
 
 - **目标读者**：实现者、审查者与后续接手人

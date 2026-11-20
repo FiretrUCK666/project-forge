@@ -210,7 +210,11 @@
         "kit/skills/dev-plan/scripts/doc-plan.mjs",
         "kit/skills/dev-plan/scripts/doc-plan-ops.mjs",
         "kit/skills/dev-plan/scripts/doc-audit.mjs",
-        "kit/skills/dev-plan/scripts/triage-rules.mjs"
+        "kit/skills/dev-plan/scripts/triage-rules.mjs",
+        "kit/skills/lib/plan-exit-gate.mjs",
+        "kit/skills/lib/doc-slice-graph.mjs",
+        "kit/skills/lib/pending-decisions.mjs",
+        "kit/skills/dev-plan/scripts/doc-audit-repo.mjs"
       ],
       "businessFlows": [
         "按 Case 1-5 分流生成 PRD/SPEC/Todo 与冻结 C1..Cn",
@@ -235,7 +239,9 @@
       "testRefs": [
         "scripts/dev/fixtures-doc-rules.mjs",
         "scripts/dev/fixtures-doc-triage.mjs",
-        "scripts/dev/fixtures-doc-closure.mjs"
+        "scripts/dev/fixtures-doc-closure.mjs",
+        "scripts/dev/fixtures-plan-wave.mjs",
+        "scripts/dev/fixtures-plan-wave-slices.mjs"
       ]
     },
     {
@@ -288,11 +294,13 @@
         "kit/skills/dev-flow/scripts/flow-merge.mjs",
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
         "kit/skills/lib/workflow-policy.mjs",
-        "kit/skills/lib/pr-template-hydrate.mjs"
+        "kit/skills/lib/pr-template-hydrate.mjs",
+        "kit/skills/dev-flow/scripts/flow-batch.mjs"
       ],
       "businessFlows": [
         "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
-        "归档锁 finalize、分层 verify、submit 提审、试合 merge 与销毁 scratch 清理"
+        "归档锁 finalize、分层 verify、submit 提审、试合 merge 与销毁 scratch 清理",
+        "按切片依赖拓扑排波次并为就绪切片生成交接包"
       ],
       "verificationTools": [
         {
@@ -314,7 +322,8 @@
         "scripts/dev/fixtures-flow.mjs",
         "scripts/dev/fixtures-flow-cleanup.mjs",
         "scripts/dev/fixtures-e2e-gate.mjs",
-        "scripts/dev/fixtures-attribution-routing.mjs"
+        "scripts/dev/fixtures-attribution-routing.mjs",
+        "scripts/dev/fixtures-plan-wave.mjs"
       ]
     },
     {

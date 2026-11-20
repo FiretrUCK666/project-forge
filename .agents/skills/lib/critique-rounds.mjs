@@ -181,6 +181,53 @@ export function parseCritiqueOverride(fmData) {
   return null
 }
 
+/**
+ * 正文指纹：剥掉易变生命周期元字段后取前 12 位。
+ *
+ * 这套口径是 `critique-override` 签字、`critique-pass` 记录与 `approve` 复核三方共用的
+ * **同一个**指纹。三处各写一份，迟早算出三个不同的值，然后「签名有效」与「签名过期」
+ * 同时成立。所以只在这里定义，另两处引用。
+ */
+export function critiqueTextFingerprint(rawText) {
+  return sha256Text(stripCritiqueMeta(rawText)).slice(0, 12)
+}
+
+/**
+ * 人类 override 的生效判定。
+ *
+ * ## 为什么需要它
+ *
+ * 停损之后由人签字放行，文档里 `plan_critique` 仍留着 `rejected (reviewer=…, round=3, …)`。
+ * 那是**历史事实**——当初确实被拒过——不是**当前状态**。把「有过 rejected 记录」
+ * 当成「现在仍未过审」，等于让人签的字不生效：人已经拍板放行，门禁还在拦。
+ *
+ * ## 但它只对签字时那份正文有效
+ *
+ * 签字后正文再被改动，签名就过期了——人批的是当时那一版，不是改动后的新版。
+ * 判据就是正文指纹，与 `approve` 的 `BLOCKED_CRITIQUE_STALE` 完全一致：
+ * 两处若用不同口径，「approve 说没过期、门禁说过期」就会同时成立。
+ *
+ * @param {string} rawText 文档全文
+ * @param {object} fmData Frontmatter 数据
+ * @returns {{present: boolean, approved: boolean, stale: boolean, sha: string|null,
+ *   currentSha: string, override: object|null}}
+ */
+export function evaluateCritiqueOverride(rawText, fmData) {
+  const override = parseCritiqueOverride(fmData)
+  const approved = override?.approved === true
+  const recordedSha = typeof override?.sha === 'string' ? override.sha.trim().toLowerCase() : ''
+  const currentSha = critiqueTextFingerprint(rawText)
+  return {
+    present: Boolean(override),
+    approved,
+    // 没记 sha 的旧记录无从比对，按「不冲突」算——不能因为缺个字段就把人的签字作废。
+    stale: approved && Boolean(recordedSha) && currentSha !== recordedSha,
+    sha: recordedSha || null,
+    currentSha,
+    override,
+  }
+}
+
 /** 把一轮的意见存成一行（`;;` 分隔）。 */
 export function serializeFindings(round, findings = []) {
   const parts = []
@@ -517,7 +564,7 @@ export function critiqueOverrideDoc({
   const fm = parseDocFrontmatter(text)
   const relDoc = posixPath(relative(repoRoot, abs))
   const effType = docType ?? inferDocTypeLight(relDoc, fm.data)
-  const digest = sha256Text(stripCritiqueMeta(text)).slice(0, 12)
+  const digest = critiqueTextFingerprint(text)
   const priorRounds = parseCritiqueRounds(fm.data, text)
   const overrideObj = {
     approved: true,

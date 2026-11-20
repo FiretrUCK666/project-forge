@@ -21,9 +21,10 @@ metadata:
 2. **PRD 双触发入口**：
    - 用户明确提出写 PRD；
    - 经 `dev-explore` 勘察发现跨多模块、流程不清或业务痛点较复杂时，**主动向用户建议先建总控 PRD**（支持 1 份总控 PRD 拆分为 N 份切片 `SPEC + Todo`）。
-3. **多轮互动澄清直至「无待拍板问题」**：
-   - 遇到范围边界、接口取舍、异常降级策略或兼容性不明确时，**主动停下来向用户提问澄清**（可多轮互动），把每轮拍板结果直接补充完善进 PRD/SPEC/Todo 的对应章节与 `C1..Cn`；
-   - **硬门槛**：文档中「待拍板事项 / 未决问题」全部消解且路径/命令核实后，才可进入 `audit` 与独立 Critique（严禁把未拍板问号留给实现或审查）。
+3. **先声明规划态，再决定怎么澄清**：规划单的 Frontmatter 有 `plan_mode`，取值只两个——`interactive | autonomous`，生成时用 `--plan-mode` 指定，不指定则由 `triage` 结论里的门型与档位推导（单向门、Case 4、L3 与总控 PRD 默认 `interactive`，其余 `autonomous`）。
+   - **`interactive`（逐题问到零）**：每个待拍板问题都要逐项与用户沟通确认，一轮问不完就再来一轮，每轮结论直接补进 PRD/SPEC/Todo 的对应章节与 `C1..Cn`，直到「无待拍板问题」。判据是**这个决定错了撤不撤得回来**——单向门、跨模块、改外部契约都撤不回来，猜错的代价由后面的人承担。
+   - **`autonomous`（默认推进）**：按仓内既有最佳模式自行拍板并写进文档，只在三种情况下停下来发问——遭遇 `one-way` 不可逆门、Case 5（与 `docs/TDD.md` 冲突）、真业务语义歧义（同一句话能理解成两件不同的事）。
+   - **共同下限**：两种模式下「待拍板事项 / 未决问题」全部消解且路径/命令核实后，才可进入 `audit` 与独立 Critique（严禁把未拍板问号留给实现或审查）。区别只在**谁来拍**，不在**要不要拍**。
 4. **尊重仓库自有模板与短名图表**：`doc-plan.mjs init` 自动识别并套用仓库既有的 `docs/templates/*.md` / `.github/*-template.md`，同时注入 YAML Frontmatter、元信息概览表与 SPEC 短名 Mermaid（矩形/分组单行 `<= 16`、菱形/边 `<= 12` 单位，禁节点内 HTML 标签）。
 5. **说人话四要素 + 三不写**：
    - **三件必答**：真实痛点与目标、本期明确不做（防膨胀）、可运行/可断言的 `C1..Cn`——这三件与项目形态无关，任何项目都得写。**其余章节按形态取舍**：有状态的业务才写状态规则，有身份的才写权限，有门的才标 `two-way`/`one-way`；没门的项目写个门型只是编。
@@ -59,11 +60,11 @@ metadata:
 ## 标准命令流
 
 ```sh
-# 1. 五档分流 + 门型判断 + 改哪看哪联动预警
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd]
+# 1. 五档分流 + 门型判断 + 改哪看哪联动预警（结论含建议规划态 planMode）
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
 
 # 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承；支持 --milestone）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--no-prune]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]

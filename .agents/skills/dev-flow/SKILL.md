@@ -37,12 +37,13 @@ metadata:
    - `flow.mjs intake --pr <M> | --issue <N>` 执行五态全局业务分诊（`accept` / `reject` / `merge-duplicate` / `needs-info` / `defer`）：适用于外部 PR、外部 Issue 及未经内部审批的新增需求/缺陷；已 `approved` 的本仓自研规划自动豁免；默认预演，传 `--apply` 经三段式结构化评论（决策头 + 人话理由 + `pf-state`）写回平台并贴标/关单。AI 结合 `docs/TDD.md` 与现状深度分析后可直接传 `--decision` + `--rationale` / `--rationale-file`（重复项附 `--duplicate-of <N>`）落地结论。
 2. **全量 Worktree 隔离、跨轮槽复用与防毒化共享依赖**：
    - 有历史提交仓（`commits > 0`）无论 Case 1/2/3/4 **一律**入第 2 档 `.worktrees/impl-<id>`（含分支占用与主仓脏改动拦截）；仅 0 提交非并行仓允许第 1 档本地特性分支；外部 PR（`--external-pr <M>`）入 `.worktrees/review-pr-<M>`，过 `--untrusted-scan` 前绝不挂依赖或执行脚本。
+   - **规划退场门禁**：`start --case 3|4` 在建分支建工作位之前读已绑定的 SPEC/Todo（`--spec`/`--todo`、账本既有值或按 slug/issue 检索），逐条核对「待拍板清零 + 规划态合法 + 过审」；未就绪以退出码 `3` 报 `BLOCKED_PLAN_NOT_READY`，不留下任何工作位。判据在 `kit/skills/lib/plan-exit-gate.mjs`，与 `dev-plan` 共用同一份。Case 3 只要求待拍板清零（`audit` 直通即可，不走 `approve`），Case 4 另要求 `approved`、内审非 `pending`/`rejected`，且认领的 `multi_spec` 总控 PRD 也已定稿。**开规划 PR 自身**时加 `--allow-plan-bootstrap` 显式豁免（放行但会把被绕过的理由原样打出来）。
    - 每任务最多复用 1 个 `impl` 槽 + 1 个 `review` 槽；`submit`/`review-pack` 推进 `review-<id>` 时自动 `unmountSharedDeps` -> 同步 `HEAD` -> 重挂载依赖（`--reset-review-slot` 清理故障注入残留）；所有变基/试合同步命令附 `GIT_EDITOR=true` / `--no-edit` 非交互保护，`flow-trial-merge` 在 `--abort` 前输出有界冲突摘要与恢复包。Case 2/3/4 单任务在隔离 `impl` 位派发 `impl` 子代理；多任务由 `batch plan`/`check-disjoint`/`merge-queue`/`resume-session` 与 `sync`（`--after` 堆叠 `rebase --onto`）协同。
 3. **谁改谁认领、统一工作前缀与双写评论（协调者不代提）**：
    - **谁改代码谁在隔离 `impl` 位跑完 `claim` -> `finalize` -> `verify` -> `submit` 与 PR/Issue 评论**（协调者只负责调度派发与验收，不得代提 PR；`submit` 传非原认领人或 `coordinator-*`/`reviewer-*` 触发 `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH`）。所有建单与 PR 入口统一遵循 `Case 1 -> docs:` / `Case 2 -> fix:` / `Case >= 3 -> feat:` 规范前缀及四态语义标签（`in-progress`/`in-review`/`changes-requested`/`reviewed`）。接管须 `--takeover --reason` 双写 Issue+PR，弃领用 `release`。
 4. **文档同步锁（`1:N` 总控四态闭环）与防旁路分层 `evidence.json`**：
    - `finalize [--strict-sync] [--include-master-prd]`：校验 `C1..Cn` 全勾 `[x]`、检查 `docs/TDD.md` 同步与「改哪看哪」联动，成对 `git mv` 归档至 `docs/archive/`；`1:N` 总控 PRD 执行四态闭环（手动/有活跃兄弟维持 `active`；有未覆盖后续 `C*` 维持 `active`；100% 覆盖且全勾 `[x]` 自动同分支归档；100% 覆盖留 `[ ]` 则 `finalize`/`verify` 均拦截 `BLOCKED_LAST_SLICE_MASTER_PRD_UNCLOSED`）。`contributor-fork` 且上游无 `docs/` 时私有草案隔离至 `.worktrees/.state/private-docs/`。
-   - `verify --mode quick|smoke|full|gate`：写入 `<gitCommonDir>/project-forge-flow/tasks/<id>/evidence.json`（并向 `signals.jsonl` 写事件）绑定 `verifiedHead === HEAD`；`submit`/`merge` 现场按 `low`/`medium`/`high` 三正交策略核验，`quick --target` 绝不顶替全量门禁，无 CI 低风险纯文档变更须过 `runLowRiskDocStaticCheck`。
+   - `verify --mode quick|smoke|full|gate`：写入 `<gitCommonDir>/project-forge-flow/tasks/<id>/evidence.json`（并向 `signals.jsonl` 写事件）绑定 `verifiedHead === HEAD`；`submit`/`merge` 现场按 `low`/`medium`/`high` 三正交策略核验，`quick --target` 绝不顶替全量门禁，无 CI 低风险纯文档变更须过 `runLowRiskDocStaticCheck`。证据只取人说过的：`--e2e-evidence` / `--visual-evidence` 的原文才写成观察记录，裸 `--visual-checked` 只记「已声明核验」，不代为生成观察串。`--artifact <path>`（可重复）与 `--visual-blocked-reason "<原因>"` 一并透传给实证校验入口：前置未实现时 Fail-Soft 放行，实现后按其返回码阻断。
    - `submit` 推后**零跟踪文件写回**，先查 OPEN PR 防重、套用 `.github/pull_request_template.md` 并继承 Milestone 后移交 `dev-review`。
 5. **审查者合入、临时 `--detach` 试合、`generic-git` 防越权与 7 步确认清理**：
    - 独立审查 PASS（`low` 风险可免审查直接合或可选 `review-pack record` 写状态单）后由审查者执行 `flow.mjs merge`（校验 `verifiedHead === HEAD`、`reviewPassedHead === HEAD`、远端 CI 绿灯与堆叠父 PR 已合）；`generic-git` 禁本地强合（退出码 `3`，需 `--remote-merged` 或 `--human-approved`）；本地合入须先建 `.worktrees/.tmp-merge-*` `--detach` 试合复测再推进主干；弱化门禁或停损解锁（退出码 `4`）必传 `--human-approved --reason`。
@@ -58,10 +59,10 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" intake (--pr <M> | --issue <N>) 
 node ".agents/skills/dev-flow/scripts/flow.mjs" milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--issue <N>] [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>]
 
-# 2. 启动工作位（--after 堆叠子分支 / --files 切片声明 / --create-issue 建单 / --milestone）、变基同步与并行队列
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>]
+# 2. 启动工作位（--after 堆叠子分支 / --files 切片声明 / --create-issue 建单 / --milestone；Case 3/4 走规划退场门禁，开规划 PR 自身加 --allow-plan-bootstrap）、变基同步与并行队列
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--issue <N|URL>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>] [--allow-plan-bootstrap]
 node ".agents/skills/dev-flow/scripts/flow.mjs" sync [--task <id>] [--onto <branch>]
-node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>]
+node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--handoff]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm] [--allow-outbound <路径>]
 
 # 3. 实施者探索 / 认领 / 释放 / 归档锁（--include-master-prd）与分层实证
@@ -70,7 +71,7 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N|URL>] [--takeo
 node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync] [--include-master-prd]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <file>]
-node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate [--artifact <path>]... [--visual-checked] [--visual-blocked-reason "<原因>"]
 
 # 4. 实施者提交待审 -> 移交 dev-review -> 返工 -> 审查者合入 -> 确认清理
 node ".agents/skills/dev-flow/scripts/flow.mjs" submit [--rework] [--reset-review-slot]

@@ -661,7 +661,19 @@ export function registerOnboardingCases(cases) {
           gitSync(implAbs, ['add', '-A'])
           gitSync(implAbs, ['commit', '-qm', `finalize ${label}`])
         }
-        const ver = await handleVerify({ task: taskId, mode: 'gate' }, roots)
+        // 触及界面资源的变更要先过实证前置校验：这条用例跑在无渲染环境的临时仓里，
+        // 按规矩就得如实报阻，不能靠裸布尔开关冒充「我看过了」。
+        //
+        // 这里顺手把它变成自证伪：不带报阻说明时必须被拦下，带上才放行。否则
+        // 一旦前置校验哪天不生效了，这条用例会一声不响地永远绿着。
+        const visualBlocked = { 'visual-blocked-reason': '临时仓无浏览器与渲染环境，无法观察界面' }
+        if (label === 'visual') {
+          const bareVer = await handleVerify({ task: taskId, mode: 'gate' }, roots)
+          if (bareVer.exitCode === 0) {
+            return `verify(${label}) 无任何界面实证却放行了——实证前置校验没生效`
+          }
+        }
+        const ver = await handleVerify({ task: taskId, mode: 'gate', ...(label === 'visual' ? visualBlocked : {}) }, roots)
         if (ver.exitCode !== 0) return `verify(${label}) 失败：${ver.exitCode}`
         const sub = await handleSubmit({ task: taskId }, roots)
         if (sub.exitCode !== 0) return `submit(${label}) 失败：${sub.exitCode}`

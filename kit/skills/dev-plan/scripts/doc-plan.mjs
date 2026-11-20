@@ -17,7 +17,7 @@
  */
 
 import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
@@ -27,7 +27,7 @@ import {
 } from '../../lib/docs.mjs'
 import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
-  posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
+  canonicalPath, posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
 import {
   buildCritiqueScope, collectExcludedReviewers, CRITIQUE_FINDINGS_KEY,
@@ -45,8 +45,37 @@ import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { parseIssueNumbers, parsePrNumber } from '../../lib/platform.mjs'
 import { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask } from './doc-audit.mjs'
 import { approveSpec, clarifyDoc, supersedeSpec } from './doc-plan-ops.mjs'
+import {
+  isValidPlanMode, normalizePlanMode, PLAN_MODES, resolveDocPlanMode,
+} from '../../lib/pending-decisions.mjs'
 
 export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
+
+/**
+ * 目标目录自身是不是一个独立的工程根（仓库根或 worktree 根）。
+ *
+ * 判据是「它自己就是一个 git 根」，不是「它长得像」：`.git` 是目录（独立仓）或
+ * 指向别处的文件（worktree）都算。
+ *
+ * 这条判据只承认 git 根，不认「带 `docs/` + `AGENTS.md`」这种形状。理由不是形状不对，
+ * 而是形状不够格：一个普通子包目录完全可以两样都有。把它当成独立根，审计范围就从
+ * `pkg/` 变成 `.`，仓根下真正该审的那几份受管规划**一份都不在视野里**——扫了个空，
+ * 却报全部通过。这与「路径没归一化」是同一类假绿，只是换了个入口。
+ *
+ * 唯一的例外是审计根之外的目录：那种情况下相对路径根本算不出来，只能按它自己作根。
+ */
+function isStandaloneWorkRoot(targetAbs, outerRoot) {
+  if (!existsSync(targetAbs)) return false
+  // 两边都归一化再比：同一目录可能经符号链接或长短文件名有两个名字，
+  // 拿字面量比会把「自己」认成「别人」，白跑一遍独立根逻辑。
+  const target = canonicalPath(targetAbs)
+  const outer = canonicalPath(outerRoot)
+  if (target === outer) return false
+  if (existsSync(join(target, '.git'))) return true
+  const insideOuter = target.startsWith(outer + sep)
+  const containsOuter = outer.startsWith(target + sep)
+  return !insideOuter && !containsOuter
+}
 
 function parseIssueArg(rawIssue) {
   if (rawIssue === undefined || rawIssue === null || rawIssue === '') return null
@@ -55,9 +84,29 @@ function parseIssueArg(rawIssue) {
   return nums[0]
 }
 
+/**
+ * 校验 `--plan-mode`：显式给了就必须是合法枚举，没给则返回 null 交给下游按门型/档位推导。
+ *
+ * 非法值直接抛结构化错误而不是静默降级——静默降级会让人以为自己选了 interactive，
+ * 实际跑的是 autonomous，逐题澄清那一步就这样悄悄消失了。
+ */
+function resolveCliPlanMode(raw) {
+  if (raw === undefined || raw === null || raw === '') return null
+  const norm = normalizePlanMode(raw)
+  if (isValidPlanMode(norm)) return norm
+  const err = new Error(`--plan-mode 仅支持 ${PLAN_MODES.join(' | ')}，收到：${raw}`)
+  err.code = 'INVALID_PLAN_MODE'
+  err.details = {
+    allowed: [...PLAN_MODES],
+    fixHint: '不可逆或跨契约的规划用 interactive（逐题确认到零待拍板），局部可逆的改动用 autonomous（默认推进，仅单向门 / Case 5 / 真业务歧义才停）。',
+  }
+  throw err
+}
+
 async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
   taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
+  planMode = null,
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
@@ -149,7 +198,7 @@ async function initDoc({
       content = renderStandardDocTemplate({
         kind: item.kind, repoRoot: writeRoot, title, safeSlug, today, headSha, headBranch,
         taskId, issueNum, owner, quickCmd, relatedPrdRel, relatedSpecRel,
-        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape,
+        pruneUnfilled: false, noPrune: Boolean(noPrune), docShape, planMode,
       })
     }
     mkdirSync(dirname(item.absFile), { recursive: true })
@@ -210,8 +259,8 @@ function printHelp() {
     '用法：node .agents/skills/dev-plan/scripts/doc-plan.mjs <子命令> [选项]',
     '',
     '子命令：',
-    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--no-prune] [--json]',
+    '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O>] [--status <S>] [--milestone <m>] [--approve] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
@@ -236,7 +285,7 @@ async function main(argv) {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
       booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved'],
-      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone'],
+      valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
       usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-override|approve|archive|supersede|list>',
@@ -271,15 +320,24 @@ async function main(argv) {
         triagePaths = (await gitStatusPorcelainZ(repoRoot)).entries.map((e) => e.file)
       }
       const filesNum = isNumericFiles ? Number(rawFilesOpt) : (filesAsPaths.length > 0 ? filesAsPaths.length : undefined)
+      const explicitPlanMode = resolveCliPlanMode(opts['plan-mode'])
       const result = triageTask({
         summary, files: filesNum, touchesContract: Boolean(opts['touches-contract']),
         conflictsTdd: Boolean(opts['conflicts-tdd']), docOnly: Boolean(opts['doc-only']),
         bugfix: Boolean(opts.bugfix), paths: triagePaths, repoRoot,
       })
+      // 规划态跟着分流结论走：门型与档位是已经判出来的事实，拿它们推默认值，
+      // 人就不用为了「这算不算不可逆」再猜一遍。
+      result.planMode = resolveDocPlanMode({
+        kind: result.docsRequired?.includes('docs/specs/') ? 'spec' : (result.docsRequired?.length ? 'todo' : null),
+        caseType: result.caseType,
+        doorType: result.doorType,
+        explicit: explicitPlanMode,
+      })
       if (cli.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
       else {
         process.stdout.write(`分流结论：Case ${result.caseType} (${result.action})${result.blocked ? ' [BLOCKED]' : ''}\n`)
-        process.stdout.write(`- 门型: ${result.doorType} | 规划内审档位: ${result.critiqueTier}\n- 理由: ${result.reason}\n`)
+        process.stdout.write(`- 门型: ${result.doorType} | 规划内审档位: ${result.critiqueTier} | 规划态: ${result.planMode}\n- 理由: ${result.reason}\n`)
         process.stdout.write(`- 必建文档: ${result.docsRequired.join(', ') || '无 (0 文档)'}\n`)
         process.stdout.write(`- Red-Green 回归测试: ${result.redGreenRequired ? '强制' : '不需要'} | 独立审查: ${result.needsReview ? '需要' : '低风险免除'}\n`)
         for (const w of result.coupledSyncWarnings ?? []) {
@@ -304,6 +362,7 @@ async function main(argv) {
         kind: opts.kind, slug: opts.slug, title: opts.title, taskId: opts.task,
         issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec,
         relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
+        planMode: resolveCliPlanMode(opts['plan-mode']),
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -354,7 +413,15 @@ async function main(argv) {
       const targetAbs = resolve(repoRoot, target)
       const isDirScope = target === '.' || (existsSync(targetAbs) && statSync(targetAbs).isDirectory())
       if (isDirScope) {
-        const batch = auditRepoDocs(repoRoot, target)
+        // 跨路径审计：目标目录自身是仓库根或 worktree 根时，以它作为审计根。
+        //
+        // 否则 `relative(repoRoot, 目标)` 会算出 `../...` 这种仓外相对路径，
+        // 扫不到任何文档，于是返回 `auditedCount: 0, ok: true`——**一份都没查，却报全部通过**。
+        // 这种假绿比报错危险得多：它让人以为审过了。
+        const innerRoot = isStandaloneWorkRoot(targetAbs, repoRoot) ? targetAbs : null
+        const auditRoot = innerRoot ?? repoRoot
+        const auditScope = innerRoot ? '.' : target
+        const batch = auditRepoDocs(auditRoot, auditScope)
         if (cli.json) process.stdout.write(`${JSON.stringify(batch, null, 2)}\n`)
         else {
           process.stdout.write(`仓库工程文档审计（${batch.scope}，共 ${batch.auditedCount} 份）：${batch.ok ? '全部通过' : `${batch.failedCount} 份失败`}\n`)

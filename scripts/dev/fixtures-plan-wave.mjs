@@ -5,7 +5,7 @@
  * `doc-slice-graph.mjs`（切片图四检）、`flow batch plan --handoff`（交接包与透传标志）。
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -642,6 +642,28 @@ export function registerPlanWaveCases(cases) {
       const subRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', sub, '--dir', dir, '--json'])
       const subOut = JSON.parse(subRes.stdout)
       if (subOut.auditedCount === 0) return '审计普通子目录时一份文档都没扫到'
+
+      // 同一目录两个名字（符号链接 / 短文件名）时，两边坐标系必须对齐。
+      //
+      // 这不是假想的边角：macOS 的临时目录就是 `/var -> /private/var` 的符号链接，
+      // 审计根按 realpath 归一、scope 参数却是原样路径，`relative()` 就会算出仓外相对路径，
+      // 一份文档都匹配不上，然后返回 `auditedCount: 0, ok: true`。这种情况在本机
+      // （临时目录没有链接）永远复现不出来，所以必须在这里自己造一个别名出来。
+      const alias = `${dir}-alias`
+      let aliasReady = true
+      try { symlinkSync(dir, alias, process.platform === 'win32' ? 'junction' : 'dir') } catch { aliasReady = false }
+      if (aliasReady) {
+        try {
+          const aliasRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', join(alias, 'docs'), '--dir', dir, '--json'])
+          const aliasOut = JSON.parse(aliasRes.stdout)
+          if (aliasOut.auditedCount === 0) {
+            return `同一目录换个别名访问就一份都扫不到了（假绿）；scope=${aliasOut.scope}，ok=${aliasOut.ok}`
+          }
+          if (!String(aliasOut.scope).startsWith('docs')) {
+            return `别名访问时算出的审计范围跑到了仓外：${aliasOut.scope}`
+          }
+        } finally { rmTree(alias) }
+      }
       return true
     } finally { rmTree(dir) }
   }])

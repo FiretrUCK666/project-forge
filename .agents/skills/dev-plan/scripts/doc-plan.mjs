@@ -27,7 +27,7 @@ import {
 } from '../../lib/docs.mjs'
 import {
   ensureWorktreesIgnored, gitRun, gitStatusPorcelainZ, isMainModule,
-  posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
+  canonicalPath, posixPath, readTextSafe, resolveRepoRoots, sha256Text, writeAtomic,
 } from '../../lib/git.mjs'
 import {
   buildCritiqueScope, collectExcludedReviewers, CRITIQUE_FINDINGS_KEY,
@@ -59,7 +59,9 @@ export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
  */
 function isStandaloneWorkRoot(targetAbs, outerRoot) {
   if (!existsSync(targetAbs)) return false
-  if (resolve(targetAbs) === resolve(outerRoot)) return false
+  // 两边都归一化再比：同一目录可能经符号链接或长短文件名有两个名字，
+  // 拿字面量比会把「自己」认成「别人」，白跑一遍独立根逻辑。
+  if (canonicalPath(targetAbs) === canonicalPath(outerRoot)) return false
   if (existsSync(join(targetAbs, '.git'))) return true
   return existsSync(join(targetAbs, 'docs')) && existsSync(join(targetAbs, 'AGENTS.md'))
 }

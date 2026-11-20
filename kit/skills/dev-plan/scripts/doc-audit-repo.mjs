@@ -7,7 +7,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 
-import { posixPath, readTextSafe } from '../../lib/git.mjs'
+import { canonicalPath, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { isManagedPlanDoc, parseDocFrontmatter } from '../../lib/docs.mjs'
 
 export function collectMarkdownFiles(dir, root) {
@@ -50,14 +50,22 @@ export function listDocs(repoRoot) {
 }
 
 export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices, evaluateSliceGraph = null }) {
-  const scopeAbs = resolve(repoRoot, scope)
-  const scopeRel = posixPath(relative(repoRoot, scopeAbs))
+  // 两边都先归一化到真实路径，再算相对路径。
+  //
+  // 调用方给过来的 root 通常已按 `realpath` 归一（`resolveRepoRoots` 就是这么做的），
+  // 而 scope 参数是用户原样敲的路径。只要这条路径经过符号链接或短文件名，
+  // 两边就不在同一个坐标系里，`relative()` 算出 `../../xxx/docs` 这种仓外相对路径，
+  // 一份文档都匹配不上，于是返回 `auditedCount: 0, ok: true`——**一份都没查，却报全部通过**。
+  // 这种假绿比报错危险：它让人以为审过了。
+  const rootAbs = canonicalPath(repoRoot)
+  const scopeAbs = canonicalPath(resolve(repoRoot, scope))
+  const scopeRel = posixPath(relative(rootAbs, scopeAbs))
   const targets = []
   const preservedForeignPlanDocs = []
   for (const d of ['docs/prd', 'docs/specs', 'docs/todo']) {
-    const dirAbs = join(repoRoot, d)
+    const dirAbs = join(rootAbs, d)
     if (!existsSync(dirAbs)) continue
-    for (const item of collectMarkdownFiles(dirAbs, repoRoot)) {
+    for (const item of collectMarkdownFiles(dirAbs, rootAbs)) {
       if (!scopeRel || scopeRel === '.' || item.rel === scopeRel || item.rel.startsWith(`${scopeRel}/`)) {
         const text = readTextSafe(item.abs) ?? ''
         if (isManagedPlanDoc(item.rel, text)) targets.push(item.rel)
@@ -65,11 +73,11 @@ export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCove
       }
     }
   }
-  const results = targets.map((file) => auditDoc({ repoRoot, file }))
+  const results = targets.map((file) => auditDoc({ repoRoot: rootAbs, file }))
   // 切片图检查只在整仓范围跑：它判的是「切片之间」的关系，单文件审计时那些关系
   // 根本不在这份视野里，跑出来的结论只会是缺上下文导致的误报。
   const sliceGraph = (typeof evaluateSliceGraph === 'function' && (!scopeRel || scopeRel === '.'))
-    ? evaluateSliceGraph(repoRoot)
+    ? evaluateSliceGraph(rootAbs)
     : { ok: true, errors: [] }
   const coverageErrors = [
     ...checkMasterPrdCoverage(repoRoot),

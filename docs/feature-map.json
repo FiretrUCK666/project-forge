@@ -240,7 +240,8 @@
         "scripts/dev/fixtures-doc-rules.mjs",
         "scripts/dev/fixtures-doc-triage.mjs",
         "scripts/dev/fixtures-doc-closure.mjs",
-        "scripts/dev/fixtures-plan-wave.mjs"
+        "scripts/dev/fixtures-plan-wave.mjs",
+        "scripts/dev/fixtures-plan-wave-slices.mjs"
       ]
     },
     {

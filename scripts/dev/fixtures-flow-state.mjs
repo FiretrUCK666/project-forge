@@ -172,9 +172,10 @@ export function registerFlowStateCases(cases) {
         writeTaskLedger(dir, { ...l1, implementerId: 'alice' })
 
         const badCoord = await handleSubmit({ task: 'c1-code', agent: 'coordinator-hydrogen', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: mockClient } }, roots)
+        const badCoordTakeover = await handleSubmit({ task: 'c1-code', agent: 'coordinator-hydrogen', takeover: true, reason: 'coord takeover', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: mockClient } }, roots)
         const badOther = await handleSubmit({ task: 'c1-code', agent: 'bob', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'bob' } }, client: mockClient } }, roots)
-        if (badCoord.exitCode !== 3 || badOther.exitCode !== 3) {
-          return `submit 权责守卫未拦截非实施者：coord=${badCoord.exitCode}, other=${badOther.exitCode}`
+        if (badCoord.exitCode !== 3 || badCoordTakeover.exitCode !== 3 || badOther.exitCode !== 3) {
+          return `submit 权责守卫未拦截非实施者：coord=${badCoord.exitCode}, coordTakeover=${badCoordTakeover.exitCode}, other=${badOther.exitCode}`
         }
 
         const okAlice = await handleSubmit({ task: 'c1-code', agent: 'alice', json: true, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'alice' } }, client: mockClient } }, roots)

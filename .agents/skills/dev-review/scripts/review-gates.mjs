@@ -167,6 +167,27 @@ export function checkDocCodeParity(repoRoot, mainRoot, diff, devProfile, task) {
 export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
   const criteria = []
   const seen = new Set()
+  const appendCriteriaFromText = (txt, sourceLabel) => {
+    if (!txt) return
+    let inFence = false
+    let nextAuto = 1
+    for (const rawLine of String(txt).replace(/\r\n/g, '\n').split('\n')) {
+      if (/^\s*(?:```|~~~)/.test(rawLine)) { inFence = !inFence; continue }
+      if (inFence) continue
+      const m = /^- \[([ xX])\]\s+(?:(C\d+)\s*:\s*)?(.+)$/.exec(rawLine.trim())
+      if (!m) continue
+      let id = m[2] ? m[2].toUpperCase() : null
+      if (!id) {
+        while (seen.has(`C${nextAuto}`)) nextAuto += 1
+        id = `C${nextAuto}`
+        nextAuto += 1
+      }
+      if (seen.has(id)) continue
+      seen.add(id)
+      criteria.push({ id, checked: m[1].toLowerCase() === 'x', text: m[3].trim(), source: sourceLabel })
+    }
+  }
+
   const readFrom = (relPath) => {
     if (!relPath) return
     const p1 = join(repoRoot, relPath)
@@ -207,6 +228,19 @@ export function parseAcceptanceCriteria(repoRoot, mainRoot, task) {
     const sharedInRepo = isSharedMasterPrd(repoRoot, prdRel, sliceSpecRel) || isSharedMasterPrd(mainRoot, prdRel, sliceSpecRel)
     if (criteria.length > 0 && sharedInRepo) continue
     readFrom(prdRel)
+  }
+
+  // Case 2 或外部 PR 无本地规划文件时，回退解析账本 issueContext 与 prContext 复选框
+  if (criteria.length === 0) {
+    for (const iss of Array.isArray(task?.issueContext) ? task.issueContext : []) {
+      const issLabel = iss?.number ? `issue#${iss.number}` : 'issue'
+      appendCriteriaFromText(iss?.body || iss?.summary || '', issLabel)
+    }
+    if (task?.prContext && typeof task.prContext === 'object') {
+      const prNum = task.prNumber ?? task.prContext.number ?? null
+      const prLabel = prNum ? `pr#${prNum}` : 'pr'
+      appendCriteriaFromText(task.prContext.body || task.prContext.summary || '', prLabel)
+    }
   }
   return criteria
 }

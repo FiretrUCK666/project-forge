@@ -13,7 +13,11 @@
 | 对外发版 / 插件 / 包 | 上述 + `RELEASING.md` + 发布说明（`docs/release-notes/` 或 `CHANGELOG.md`） | 未确认发版策略前不乱改既有 `CHANGELOG` |
 | 纯文档 / 能力目录 | `AGENTS.md`（`Dev Profile` 测试键写 `none`）、`README.md`、协作与交付说明 | 不填伪构建/伪测试命令 |
 
-- **存量异构结构无损融合铁律**：接入已有仓库时严格遵循 `artifactPlan` 逐项处置——**已存在的 `README`、`CONTRIBUTING`、单/双 `LICENSE`、存量架构设计文档（`ARCHITECTURE.md`、`*-TDD.md`、`docs/{design,architecture,adr}/`）、已有自动化工作流、`.agents/skills/<custom>/` 与非标目录布局一律原样保留融合（`preserve`），绝不推翻既有目录树或强制建立第二套双轨设计文档**；随时可通过 `equip.mjs` 与 `compose-agents.mjs` 无损补齐缺失资产。
+- **四类存量资产真融合与原仓建单流**：接入已有仓库时严格遵循 `artifactPlan` 逐项落实四类真融合，绝不推翻既有目录树或制造双轨文档：
+  1. **长青文档**（`README`、`CONTRIBUTING`、`LICENSE`、`ARCHITECTURE.md`、`*-TDD.md`、`docs/{design,architecture,adr}/`）：一律 `preserve` 并统一纳管进 `evergreen-docs:` / `docs/TDD.md`，合并冲突副本；
+  2. **非长青/过期/无效文档**：归档至 `docs/archive/` 或标出无效残片确认清理，防止污染 `doc-locate`；
+  3. **既有脚本、工具、数据模型与 CI**：融入 `Dev Profile`、`docs/feature-map.json` 与 `docs/TDD.md`（`tdd-shape.mjs` 裁剪），标出失效脚本清理建议；
+  4. **既有 AI 约定**（`AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.agents/skills/<custom>/`）：做语义去重与无损融合；勘察发现的原仓遗留问题统一通过 `TaskBackend` 建本地/远端 Issue 按正常流程分步修清。随时可通过 `equip.mjs` 与 `compose-agents.mjs` 无损补齐缺失资产。
 
 ## 二、四层设计文档体系（`docs/`）
 

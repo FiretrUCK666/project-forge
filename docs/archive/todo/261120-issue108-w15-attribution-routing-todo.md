@@ -1,15 +1,15 @@
 ---
 kind: todo
 title: 统一跨平台双层身份归属展示、生命周期标签与 AGENTS 意图路由去歧义
-status: active
+status: done
 created: 2026-11-20
 updated: 2026-11-20
 issue: 108
 pr: null
 branch: feat/issue108-attribution-routing
-owner: plan-108
+owner: impl-108
 approved: true
-done_at: null
+done_at: 2026-11-20
 task_id: w15-attribution-routing
 planned_at: 01d47cc31d278e8e00ecd7e61784846f7a8331ae
 related_prd: null
@@ -27,9 +27,9 @@ related_spec: ../specs/261120-issue108-w15-attribution-routing-spec.md
 | 分支 / 基线 | `feat/issue108-attribution-routing` @ `01d47cc` |
 | 任务编号 | `w15-attribution-routing` |
 | 负责人 / 审批 | `plan-108` / `false` |
-| 关联 Issue / PR / SPEC | #108 / 未关联 / `docs/specs/261120-issue108-w15-attribution-routing-spec.md` |
+| 关联 Issue / PR / SPEC | #108 / 未关联 / `docs/archive/specs/261120-issue108-w15-attribution-routing-spec.md` |
 
-- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，以及 `docs/specs/261120-issue108-w15-attribution-routing-spec.md` 冻结条款。
+- **断点恢复**：接手人先核对 Frontmatter `status`/`branch`/`issue` 与对应分支最新提交，以及 `docs/archive/specs/261120-issue108-w15-attribution-routing-spec.md` 冻结条款。
 
 ## 任务范围与验证基准
 
@@ -43,10 +43,10 @@ related_spec: ../specs/261120-issue108-w15-attribution-routing-spec.md
 
 > 每条 `C*` 必须对应一条可运行的命令或断言；完成并自测通过后勾选 `[x]`。
 
-- [ ] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers`、后端能力声明 `capabilities.mention`（零平台名硬编码）与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, supportsMention, capabilities })`：仅当后端声明支持 `@mention` 且 `verifiedPlatformLogin === true` 时输出 `@handle`，其余平台、未验证/`git user.name`、离线/`generic-git`/`local-only` 及任意 `agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `node scripts/dev/fixtures.mjs --domain attribution-routing` 与 `I245–I246` 实测通过。
-- [ ] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要并完整保留 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解` 分区；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `node scripts/dev/fixtures.mjs --domain attribution-routing` 与 `I247–I248` 实测通过。
-- [ ] C3: 完成 `AGENTS.md` 路由去歧义（`dev-plan` 先于 `dev-flow`、`extra_routes` `order: 46` 收口 `intake/inspect/milestone`、去重里程碑行、`project-forge` 移至末行）、补全 8 技能脚本入口并清除 `dev-review` `tier: full`、刷新根 `SKILL.md` 为 `v3` 并补全 8 技能闭环（`<= 200L / 16384B`、`version: "6.0.0"`）、在 `references/survey.md`、`references/docs-set.md`、`references/collaboration.md` 与 `templates/agents-project.md` 落地四类资产真融合与主调度纯调度底线；经 `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）及 `I249` 实测通过。
-- [ ] C4: 从 797 行 `workflow-helpers.mjs` 拆出 `kit/skills/lib/pr-template-hydrate.mjs` (new) 并拆出 `kit/skills/lib/review-comment-render.mjs` (new)，全仓全部 `.mjs` 文件均 `<= 800` 行；新增 `scripts/dev/fixtures-attribution-routing.mjs` (new) 与 `scripts/dev/injections-data-attribution-routing.mjs` (new)（`I245–I249`），全矩阵覆盖 `github`/`generic-git`/`local-only` 三后端下 `claim/takeover/release`、`submit/rework`、`review pass/changes`（含 Case 2、Case 4 与外部 PR）、`merge` 及 `intake`（外部裸 URL、恶意与正常评论 5 态分诊），全量通过 `merge-gate`（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）。
+- [x] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers`、后端能力声明 `capabilities.mention`（零平台名硬编码）与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, supportsMention, capabilities })`：仅当后端声明支持 `@mention` 且 `verifiedPlatformLogin === true` 时输出 `@handle`，其余平台、未验证/`git user.name`、离线/`generic-git`/`local-only` 及任意 `agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `node scripts/dev/fixtures.mjs --domain attribution-routing` 与 `I245–I246` 实测通过。
+- [x] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要并完整保留 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解` 分区；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `node scripts/dev/fixtures.mjs --domain attribution-routing` 与 `I247–I248` 实测通过。
+- [x] C3: 完成 `AGENTS.md` 路由去歧义（`dev-plan` 先于 `dev-flow`、`extra_routes` `order: 46` 收口 `intake/inspect/milestone`、去重里程碑行、`project-forge` 移至末行）、补全 8 技能脚本入口并清除 `dev-review` `tier: full`、刷新根 `SKILL.md` 为 `v3` 并补全 8 技能闭环（`<= 200L / 16384B`、`version: "6.0.0"`）、在 `references/survey.md`、`references/docs-set.md`、`references/collaboration.md` 与 `templates/agents-project.md` 落地四类资产真融合与主调度纯调度底线；经 `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）及 `I249` 实测通过。
+- [x] C4: 从 797 行 `workflow-helpers.mjs` 拆出 `kit/skills/lib/pr-template-hydrate.mjs` (new) 并拆出 `kit/skills/lib/review-comment-render.mjs` (new)，全仓全部 `.mjs` 文件均 `<= 800` 行；新增 `scripts/dev/fixtures-attribution-routing.mjs` (new) 与 `scripts/dev/injections-data-attribution-routing.mjs` (new)（`I245–I249`），全矩阵覆盖 `github`/`generic-git`/`local-only` 三后端下 `claim/takeover/release`、`submit/rework`、`review pass/changes`（含 Case 2、Case 4 与外部 PR）、`merge` 及 `intake`（外部裸 URL、恶意与正常评论 5 态分诊），全量通过 `merge-gate`（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）。
 
 ## 执行步骤
 
@@ -87,5 +87,8 @@ related_spec: ../specs/261120-issue108-w15-attribution-routing-spec.md
 **在合并之前写完，随这次改动一起提交。**（有 PR 时随关联 `PRD`/`SPEC` 一并经 `flow.mjs finalize` 成对归档至 `docs/archive/todo/`，不另开只改记录的 PR）
 
 - **实际验证命令与结果**：
-- **文档同步检查**：
-- **遗留问题**：
+  - `node scripts/dev/fixtures.mjs`：324 项通过，0 项失败（含 `attribution-routing` 新增 6 项矩阵夹具与 `flow-state` 10 项）
+  - `node scripts/dev/verify-injections.mjs --jobs 4`：236 条故障注入判据全部红灯捕获（含 `I245–I249`、`I63`、`I145`、`I184`、`I219`、`I221`）
+  - 全仓 334 个 `.mjs` 均 `<= 800` 行（最大 `profile-sniffer.mjs` 789 行）；`AGENTS.md` 22424 B（`< 24576` B）；`SKILL.md` 102 行 / 13856 B（`<= 200L / 16384B`）；归档提交后将在干净 HEAD 复跑全套 8 条 `merge-gate` 门禁与导出包校验
+- **文档同步检查**：已同步更新 `docs/TDD.md`、`docs/feature-map.json`、`AGENTS.md`、`.agents/skills/`（`equip.mjs .`）、`SKILL.md`、`references/{survey,docs-set,collaboration}.md`、`templates/agents-project.md` 及本 SPEC/Todo
+- **遗留问题**：无

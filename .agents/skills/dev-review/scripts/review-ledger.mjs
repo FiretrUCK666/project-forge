@@ -45,7 +45,7 @@ function resolveRecordNextSteps({ taskId, verdict, round, role, mainRoot, exclud
       return ['Review PASSED (contributor-fork): wait for upstream maintainer merge; do NOT delete your fork branch before PR is merged.']
     }
     if (skills.has('dev-flow')) {
-      return [`node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId} (respecting repo mergeAuthority)`]
+      return [`node ".agents/skills/dev-flow/scripts/flow.mjs" merge --task ${taskId}`]
     }
     return ['Review PASSED: merge via GitHub PR or `git merge --no-ff` after verifying merge authority rules.']
   }
@@ -271,8 +271,8 @@ export async function handleRecord(opts, roots) {
     return scopeLock.exitCode
   }
 
+  const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber, reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch }))
   if (verdict === 'pass') {
-    const receipt = readReceipt(resolveEmpiricalReceiptPath({ gitDir: roots.gitDir, mode: 'task', task: baseLedger, prNo: baseLedger.prNumber, reviewRoot: targetRoot, baseRef: baseLedger.baseSha || baseLedger.baseBranch }))
     const passCheck = await evaluatePassBlockers({
       mainRoot,
       targetRoot,
@@ -350,6 +350,19 @@ export async function handleRecord(opts, roots) {
   const e2eText = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
+  const artifactText = typeof opts.artifact === 'string' ? opts.artifact.trim() : ''
+  const empParts = []
+  if (evidenceRaw) empParts.push(`审查命令与实证：${evidenceRaw}`)
+  if (e2eText) empParts.push(`E2E/交互观察：${e2eText}`)
+  if (artifactText) empParts.push(`产物核验：${artifactText}`)
+  const recEmp = receipt?.empiricalVerified
+  if (recEmp && typeof recEmp === 'object') {
+    const cmds = Array.isArray(recEmp.commands) ? recEmp.commands : []
+    const cmdSummary = cmds.map((c) => `${c.cmd || 'cmd'}(exit=${c.exitCode ?? 0}${c.durationMs !== undefined ? `,${c.durationMs}ms` : ''})`).filter(Boolean).slice(0, 3).join('；')
+    if (cmdSummary) empParts.push(`回执实跑：${cmdSummary}`)
+    else if (recEmp.e2eObservation?.summary) empParts.push(`回执观察：${recEmp.e2eObservation.summary}`)
+  }
+  const reviewEmpirical = empParts.join(' | ') || null
   const visualChecked = Boolean(opts['visual-checked'] || e2eText)
   const roundEntry = {
     round,
@@ -361,6 +374,7 @@ export async function handleRecord(opts, roots) {
     optionalLowRisk: optionalLowRiskRecord,
     // 跑过什么。没有它，'我跑过' 和 '我觉得' 在账本里分不出来。
     reviewEvidence: evidenceRaw,
+    ...(reviewEmpirical ? { reviewEmpirical } : {}),
     blockers: mustFixList.map((m) => m.summary),
     mustFix: mustFixList,
     shouldFix: shouldFixList,
@@ -397,6 +411,7 @@ export async function handleRecord(opts, roots) {
     } : {}),
     implementerId: implementerId || baseLedger.implementerId,
     reviewerId,
+    ...(reviewEmpirical ? { reviewEmpirical } : {}),
     rounds: filteredRounds,
     dispositionStats,
     ...(stopLossPacket ? { stopLossPacket } : {}),
@@ -454,7 +469,7 @@ export async function handleRecord(opts, roots) {
   const nextSteps = resolveRecordNextSteps({ taskId, verdict, round, role: updated.role, mainRoot, excludedReviewers })
   const githubSync = await syncReviewToGitHub({
     mainRoot, workTreeRoot: targetRoot, ledger: updated, round, verdict, headSha, reviewerId, implementerId,
-    stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
+    empiricalSummary: reviewEmpirical, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
   })
   const shouldWriteEscalation = Boolean(opts.escalate || updated.role === 'local-only' || opts._ghProbe || opts._ghClient)
 

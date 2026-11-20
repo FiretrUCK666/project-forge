@@ -8,7 +8,7 @@ description: |
   iterate tests、add integration tests、add e2e tests、regression tests、stress test。
 metadata:
   intent: 正向扩展回归/集成/E2E/性能测试与盲区压测
-  script: "`node .agents/skills/dev-iterate/scripts/iterate.mjs`"
+  script: "`node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run`)"
   order: 55
   fallback: 按项目原生测试目录补充集成/回归用例，确认不污染快速单测且发现缺陷时另起任务单修复（未装配 dev-iterate 技能）
 ---

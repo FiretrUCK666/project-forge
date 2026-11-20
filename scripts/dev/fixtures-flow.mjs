@@ -228,14 +228,14 @@ cases.push(['Trust Gateway：createIssue/listComments、start --create-issue 联
       return `离线 record 阻塞或缺少规范 delegatedPayloads：status=${offlineRec.status}, out=${offlineRec.stdout}, err=${offlineRec.stderr}`
     }
 
-    // 传内部调度代号（如 coordinator-hydrogen-xhigh）认领时必须自动解析为真实 GitHub 协作者账号
+    // 传代理标识（如 coordinator-hydrogen-xhigh）认领时必须保留双层归属且绝不发出假 @coordinator-* mention
     const sanitizeClaim = await handleClaim({
       task: 'gw-feat', agent: 'coordinator-hydrogen-xhigh', takeover: true, reason: '调度代号纠偏', json: true,
       _ghClient: client, _ghProbe: { env: { trackB: { tier: 'gh-cli', login: 'real-alice' } }, client },
     }, roots)
     const sanitizeBody = commentsByNum.get(77)?.at(-1)?.body ?? ''
-    if (sanitizeClaim.exitCode !== 0 || !sanitizeBody.includes('@real-alice') || sanitizeBody.includes('coordinator-hydrogen-xhigh')) {
-      return `handleClaim 未过滤内部子代理代号：${sanitizeBody}`
+    if (sanitizeClaim.exitCode !== 0 || !sanitizeBody.includes('@real-alice') || sanitizeBody.includes('@coordinator-hydrogen-xhigh') || !sanitizeBody.includes('`coordinator-hydrogen-xhigh`')) {
+      return `handleClaim 双层归属或防假 @mention 异常：${sanitizeBody}`
     }
     return true
   } finally {

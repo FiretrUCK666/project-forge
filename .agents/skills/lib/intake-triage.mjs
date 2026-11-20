@@ -643,8 +643,6 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
   const shouldClose = decision === 'reject' || decision === 'merge-duplicate'
   const reason = buildDefaultReason(decision, dimensions, exemption)
   const rollbackHint = buildRollbackHint({ targetType, targetNumber, decision, labels })
-  const actor = String(input.actor ?? 'dev-flow').trim() || 'dev-flow'
-
   const rendered = buildIntakeDecisionComments({
     targetType,
     targetNumber,
@@ -662,7 +660,13 @@ export function evaluateIntakeTriage(repoRoot, input = {}) {
     rollbackHint,
     applied: Boolean(input.applied),
     closed: Boolean(input.applied && shouldClose),
-    actor,
+    account: input.account ?? null,
+    verifiedPlatformLogin: Boolean(input.verifiedPlatformLogin),
+    agent: input.agent ?? null,
+    supportsMention: Boolean(input.supportsMention),
+    capabilities: input.capabilities ?? null,
+    actor: input.actor ?? null,
+    actorDisplay: input.actorDisplay ?? null,
   })
 
   return {

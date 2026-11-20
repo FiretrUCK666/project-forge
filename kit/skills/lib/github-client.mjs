@@ -15,17 +15,17 @@ import {
   createLabelViaApi, mapWithConcurrency, normalizeLabelList,
 } from './github-labels.mjs'
 import {
-  MAX_RETRY_DELAY_MS, computeWriteBackFingerprint, extractCliHttpStatus, isInternalAgentSlug,
+  MAX_RETRY_DELAY_MS, computeWriteBackFingerprint, extractCliHttpStatus,
   isRetryableHttpOutcome, normalizeCommentEntries, normalizeIssuePayload, normalizeMilestonePayload,
   normalizePrPayload, normalizeRepoMetaPayload, parseBodyRelations, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePfStateTags, parsePrNumber, parseRetryAfterMs,
-  redactGhTokens, resolveContributorIdentity, stripPfStateTags, summarizeCommitChecks,
+  redactGhTokens, resolveIdentityLayers, stripPfStateTags, summarizeCommitChecks,
 } from './github-parse.mjs'
 
 export {
-  DEFAULT_GITHUB_CONCURRENCY, computeWriteBackFingerprint, isInternalAgentSlug, mapWithConcurrency,
+  DEFAULT_GITHUB_CONCURRENCY, computeWriteBackFingerprint, mapWithConcurrency,
   parseBodyRelations, parseFlowInputs, parseIssueNumbers, parseMilestoneNumber,
-  parsePfStateTags, parsePrNumber, resolveContributorIdentity, stripPfStateTags, summarizeCommitChecks,
+  parsePfStateTags, parsePrNumber, resolveIdentityLayers, stripPfStateTags, summarizeCommitChecks,
 }
 
 let ghTmpCounter = 0

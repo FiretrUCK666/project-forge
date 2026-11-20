@@ -11,7 +11,7 @@ description: |
   适用于任意语言的仓库：12 种生态（Node、Python、Rust、Go、Java、Ruby、PHP、.NET、C/C++、
   Dart、Swift、Elixir）走清单精准推断，其余语言从 CI 的 run 块与 Makefile/justfile/Taskfile
   读取已被真实执行的命令；空目录 `--bootstrap-empty` 统一搭通用工程基线（支持 `--stack`），
-  只读勘察先行，幂等不覆盖，支持 v2 墓碑/定制豁免与纯本地降级运行；默认私有仓库。
+  只读勘察先行，幂等不覆盖，支持 v3 账本（墓碑/定制豁免/三方合并与 overlay 扩展）与纯本地降级运行；默认私有仓库。
   不用于：纯概念问答、临时只改一行代码且不涉及工程治理、或跳过勘察强行覆盖手写规范。
 metadata:
   version: "6.0.0"
@@ -22,16 +22,16 @@ metadata:
 
 给一个项目目录，先只读勘察事实，一次把版本控制、紧凑工程契约、统一研发技能套件与协作通道装配到位。
 
-**本文件只写调度与红线，不复述各 `references/` 里的具体判据。** 反直觉规则（防错判维护者、跨平台路径与 Junction 防删穿、`HostingProvider` 降级、外部 PR 防投毒、v2 账本墓碑与定制豁免）全部住在 `references/`，动手前按门控读对应全文，严禁凭直觉跳过。
+**本文件只写调度与红线，不复述各 `references/` 里的具体判据。** 反直觉规则（防错判维护者、跨平台路径与 Junction 防删穿、`HostingProvider` 降级、外部 PR 防投毒、v3 账本墓碑与定制豁免/三方合并）全部住在 `references/`，动手前按门控读对应全文，严禁凭直觉跳过。
 
 ## 四步（起步、存量接入或重入升级）
 
 | 步 | 做什么 | 必读 / 入口 |
 | --- | --- | --- |
 | **S1 勘察** | 先更新再只读扫：`update.mjs --quiet`（1h 检查 / 15m 失败冷却、staging 校验后最后原子写 `SKILL.md`）后跑 `survey.mjs --markdown --probe-auth`（无远端亦探测本机凭据），获取 `explorationStrategy.tier` 与 `artifactPlan`；若目录空白或仅含 `README`/`LICENSE`/配置（`none` / 0 业务文件），停下问 3–4 个简明问题后走 `--bootstrap-empty` 生成通用治理基线、初始 `docs/TDD.md` 与自洽 `AGENTS.md`，**不派只读子代理**；存量或重入仓记下 `tier` 与 `shards`（含 `business-flows`）供 `S3` 前只读实跑既有测试与主入口产出 `preForgeBaseline` | `references/survey.md` |
-| **S2 定范围** | 逐项按 `facts.artifactPlan` 确定处置动作（仅按真实协作态豁免多人协作制品）：**存量 `README`/`CONTRIBUTING`/单双 `LICENSE`/存量设计文档（`ARCHITECTURE.md`、`docs/adr/` 等）/工作流/`.agents/skills/<custom>/` 一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可或待选发版策略（5 选 1）走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`，并由 `equip.mjs` 按 v2 账本尊重 `disabledSkills`/`removedFiles` 墓碑与定制豁免 | 本文件 |
+| **S2 定范围** | 逐项按 `facts.artifactPlan` 确定处置动作（仅按真实协作态豁免多人协作制品），落实**四类存量资产真融合**（长青文档纳单源、过期文档归档/清理、脚本/数据模型/CI 融入 Profile 与地图、既有 AI 约定语义去重）：**存量 `README`/`CONTRIBUTING`/单双 `LICENSE`/存量设计文档（`ARCHITECTURE.md`、`docs/adr/` 等）/工作流/`.agents/skills/<custom>/` 一律 `preserve` 原样融合**；缺项按 `create`/`equip`/`upgrade` 补齐，缺许可或待选发版策略（5 选 1）走 `ask-human`；跨月重入按 `reentry` 做 `calibrate`，并由 `equip.mjs` 按 v3 账本尊重 `disabledSkills`/`removedFiles` 墓碑与定制豁免 | 本文件 |
 | **S3 落盘** | **第 0 步：非空存量仓先跑 `backup.mjs create "<项目目录>" --label pre-forge` 打全仓快照**（按 `treeSha256` 去重并钉住初始基线）；进入写入前，对存量代码仓以**只读方式实跑对方既有测试与主入口**生成 `preForgeBaseline`（结合 `dev-explore` `businessFlows` 映射），再严格按「版本控制 → 文档 → 远端 → 自动化」推进：配 Git 基线；跑 `equip.mjs` 统一装配 `.agents/skills/` 后，存量/重入仓依 `S1` `tier` 调 `.agents/skills/dev-explore/`（`parallel-subagents` 时按 `shards` 并行只读深挖，否则 `single-pass`）**只读取证**，由本步将 `businessFlows` 与 `preForgeBaseline` 落笔 `docs/TDD.md`（含 `## 文档信息` 表与短名 Mermaid 图）与 `prd`/`specs`/`todo`，生成/无损刷新 `AGENTS.md`（仅留薄指针保持 `<= 30KB`、建议 `< 24KB`，含 `行事总纲`、7 键 `Dev Profile` 与自有技能并存路由）；按 `HostingProvider`（`github` / `generic-git` 降级）与五态身份配远端与自动化 | 见门控表 |
-| **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check`（已登记定制文件豁免通过）+ `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记（保留 `.agents/skills/` 时不把 `.pf-manifest.json` 计为残留）；可选跑一轮 `dev-govern audit/plan` 将初次勘察发现的存量技术债、漂移与基线测试失败转成目标仓首批 Issue/Todo（支持有/无远端），无缝进入 Day-2 自迭代 | `references/handoff.md` |
+| **S4 验收交棒** | 跑项目声明门禁 + `equip.mjs --check`（已登记定制文件豁免通过）+ `compose-agents.mjs --check` + `review.mjs`；汇报结论并经 `handoff.mjs` 询问是否清理引导标记（保留 `.agents/skills/` 时不把 `.pf-manifest.json` 计为残留）；将勘察发现的原仓问题全部通过 `TaskBackend` 建本地/远端 Issue（`dev-govern audit/plan`）按正常流分步修清，无缝进入 Day-2 自迭代 | `references/handoff.md` |
 
 **S3 顺序不可逆**：`.gitattributes` 与 `.gitignore` 必须在首次提交之前落盘；文档与地址须在推送之前就绪；自动化跑的命令与 `AGENTS.md` / `README.md` 必须一致。
 
@@ -55,8 +55,8 @@ metadata:
 | --- | --- | --- |
 | **1. 需求侦察与判身份** | `dev-explore` 只读跑 `doc-locate.mjs` / `repo-map.mjs` 输出精确切片、`Feature Map` 与 `reusableModules`；`flow.mjs inspect` 判五态、多 Issue/PR/Milestone 链接及依赖图；`flow.mjs intake` 做全局业务分诊 | `references/collaboration.md`「一、先判角色」 |
 | **2–3. 澄清、设计与 Critique** | `dev-plan` 联查多链接与自有模板，**多轮互动澄清直至无待拍板问题**（复杂需求主动建议 PRD），按 Case 1–5 分流并走不可自审、全历史换人、3 轮停损 Critique | `references/collaboration.md`「二、五档开工分流」 |
-| **4. 隔离实现与提审锁** | 主会话薄上下文纯调度（就绪 `SPEC` 默认并行优先分波 `parallelDispatch`），`dev-flow` 由单一 `[NEXT STEP]` 路由进 `impl-*`/`review-*` 槽；**谁改代码谁认领并负责 `finalize`/`verify`（非低风险改运行态必跑 `smoke-verify` + `--e2e-evidence`，失败写信号脱敏建单）/`submit`** | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
-| **5–7. 评审、实证与验收** | `dev-review` 对外部 PR 先过 `intake` 分诊与 `--untrusted-scan`；强制先过运行/E2E 实证（`--e2e-evidence`）与 `check-fault` 再解锁 `--include-diff`（结合 `business-flows`/`C*` 做实质核查），Round 2+ 全历史换人新上下文 + 六锁与统一分级停损升级 | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
+| **4. 隔离实现、编辑门禁与提审** | 主会话无论有无远端一律**只调度与验收、不亲自改业务源码、不代提 PR**；`dev-flow`（`flow.mjs next`、`parallelDispatch`）派隔离 `impl` 位，**改码前/后过 `dev-edit`（`edit-gate.mjs` 禁改区/压制/`arch-rules`/`<=800L`）**，由实施者完成 `claim`/`finalize`/`verify`（含 `smoke-verify` + `--e2e-evidence`）/`submit` | `references/collaboration.md`「三、三档隔离」「四、认领、PR 前文档同步」 |
+| **5–7. 评审、工具与迭代** | `dev-review` 先过 `intake` 与 `--untrusted-scan`，先跑 `dev-verify-tools` 复用/免日期校验与 `check-empirical`/`check-fault` 再解锁 `--include-diff`（Round 2+ 全历史换人与六锁收敛）；正向扩展盲区测试与并发压测走 `dev-iterate`（`escalation.mjs` 建单转正流） | `references/collaboration.md`「五、收到别人的 Issue」「六、审别人提进来的 PR」「七、审查循环：怎么才会停」 |
 | **8. 合入、清理与复盘** | 独立审查 PASS 后由审查者 `flow.mjs merge`（弱化门禁必拦），问人确认后 7 步清理；`dev-govern` 经 `audit`/`reconcile`/`retro` 读取 `signals.jsonl` 下沉门禁 | `references/collaboration.md`「八、谁能合」「九、合并：收尾七步」 |
 
 ## 能力矩阵与默认范围
@@ -72,7 +72,7 @@ metadata:
 ## 只有用户能拍板的事与硬不变量
 
 1. **只用户能定**：许可证、署名来源、仓库可见性（默认私有）、归属账号、外部贡献与发版策略（5 选 1）。
-2. **只读先行与 v2 墓碑/定制豁免**：勘察前零写入；重复运行字节幂等；用户已删除的技能或文件记入 `disabledSkills`/`removedFiles` 墓碑绝不擅自写回（仅 `--restore` 恢复）；经 `--adopt-custom` 豁免的手改文件不阻断 `--check`；跨系统换行归一等价不误报漂移。
+2. **只读先行与 v3 墓碑/定制豁免**：勘察前零写入；重复运行字节幂等；用户已删除的技能或文件记入 `disabledSkills`/`removedFiles` 墓碑绝不擅自写回（仅 `--restore` 恢复）；经 `--adopt-custom` 豁免的手改文件不阻断 `--check`；支持三方合并、overlay 扩展与跨系统换行归一。
 3. **凭据零入库与跨平台安全**：扫描拦截密钥与大文件；探测注入无弹窗变量与 `5000ms` 超时且不写 `~/.ssh/known_hosts`；含中文/非 ASCII 正文一律经临时 UTF-8 文件按 `--body-file` / API JSON 提交并回读。
 4. **按能不能撤回分档（日常与发版分开）**：提交、推自己的分支、开/改 PR 都能撤回，属于日常，不打标签不发版；合并默认分支、发版、改可见性、改写历史撤不回来，发版只由人明令触发，**强推与改写已推历史永不自动**。
 5. **合并由审查者收尾、弱化门禁必问**：独立审查 `fail` 为空且 `reviewPassedHead === HEAD` 由审查者直接合（`contributor-fork` 交上游合）；**弱化门禁必须人点头**；`取舍` 中写 `merge-authority: human` 时收回人工确认。

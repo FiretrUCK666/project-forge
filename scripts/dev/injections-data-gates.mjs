@@ -351,8 +351,8 @@ export const INJECTIONS_GATES = [
     alsoPatches: [
       {
         file: 'kit/skills/dev-review/scripts/review-sync.mjs',
-        from: '  parsePrNumber, parseRemoteUrls, probeForWrite, resolveContributorIdentity,',
-        to: '  parsePrNumber, parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveContributorIdentity,',
+        from: '  parsePrNumber, parseRemoteUrls, probeForWrite, resolveIdentityLayers,',
+        to: '  parsePrNumber, parseRemoteUrls, probeForWrite, probeGitHubEnv, resolveIdentityLayers,',
       },
     ],
     expect: '写操作必须联网探通道',

@@ -29,7 +29,7 @@ export async function handleExplore(opts, roots) {
 
   const map = await generateRepoMap(workRoot, { focus: opts.focus })
   const tier = opts.tier ? String(opts.tier).trim() : detectExploreTier(workRoot, map)
-  const by = opts.by ?? opts.agent ?? ledger.implementerId ?? 'dev-flow'
+  const by = opts.by ?? opts.agent ?? ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? ledger.account ?? undefined
   const explored = createExploredEvidence({
     at: new Date().toISOString(),
     tier,

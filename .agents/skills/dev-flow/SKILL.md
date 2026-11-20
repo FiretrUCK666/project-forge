@@ -3,10 +3,10 @@ name: dev-flow
 description: |
   统一驱动 Git 日常研发全流程：探测身份与凭据、按三档创建分支或 Worktree 并按子包挂载共享依赖、
   认领 Issue、成对归档文档同步锁、执行验证绑定 HEAD、推分支开 PR、返工、审查后合并与安全清理。
-  触发词：修 bug、做功能、推代码、提 PR、开 PR、合并收尾、清 worktree、处理 Issue、
-  审外部 PR、收到 Issue、收到 PR、fix bug、implement feature、create PR、merge PR、cleanup worktree。
+  触发词：修 bug、推代码、提 PR、开 PR、合并收尾、清 worktree、处理 Issue、
+  收到 Issue、收到 PR、fix bug、create PR、merge PR、cleanup worktree。
 metadata:
-  intent: 做功能 / 修缺陷 / 启动隔离工作位
+  intent: 已定案开工 / 明确局部修缺陷 / 查任务状态 / 启动隔离工作位
   script: "`node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect`"
   order: 30
   fallback: 用原生 git switch -c <branch> 隔离改动并运行项目本地测试验证后再提交（未装配 dev-flow 技能）
@@ -19,6 +19,10 @@ metadata:
       intent: 审查者合并 PR / 确认后清理 Worktree
       intent_local: 本地试合并入主干与确认后清理 Worktree
       script: "`node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup`"
+    - order: 46
+      intent: 外部 Issue・PR 业务分诊 / 里程碑管理 / 裸粘贴链接
+      intent_local: 本地新增提案分诊 / 里程碑管理
+      script: "`node .agents/skills/dev-flow/scripts/flow.mjs intake` / `inspect <URL...>` / `milestone`"
 ---
 
 # dev-flow：实现 → 实证测试-形式验证 → 合入 状态机

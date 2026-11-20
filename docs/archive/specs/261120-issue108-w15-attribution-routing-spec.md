@@ -1,16 +1,16 @@
 ---
 kind: spec
 title: 统一跨平台双层身份归属展示、生命周期标签与 AGENTS 意图路由去歧义
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 108
 pr: null
 branch: feat/issue108-attribution-routing
-owner: plan-108
+owner: impl-108
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-108-r2, round=2, sha=7429f0eb804b, summary=Round 2 独立复审通过：R1 两项 BLOCKER 已消解，能力驱动 @mention、评论完整性与实证核验、路由与 8 技能、四类真融合、纯调度及 <=800 行拆解全量对齐)"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-108-r2\",\"sha\":\"7429f0eb804b\",\"artifact_baseline\":{\"sha\":\"7429f0eb804b60db19f796e9e91a4c164c54a9458a53235f7c85c35a2e66231f\",\"shortSha\":\"7429f0eb804b\",\"criteriaCount\":4,\"anchorCount\":530},\"summary\":\"Round 2 独立复审通过：R1 两项 BLOCKER 已消解，能力驱动 @mention、评论完整性与实证核验、路由与 8 技能、四类真融合、纯调度及 <=800 行拆解全量对齐\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-20T00:32:11.862Z\"}]"
 related_prd: null
@@ -30,7 +30,7 @@ critique_anchors: "{\"sections\":{\"goal\":{\"present\":true,\"substantive\":tru
 | 创建 / 更新 | `2026-11-20` / `2026-11-20` |
 | 分支 / Issue / PR | `feat/issue108-attribution-routing` / #108 / 未关联 |
 | 负责人 / 内审状态 | `plan-108` / `pending` |
-| 关联 PRD / Todo | `related_prd: null` / `docs/todo/261120-issue108-w15-attribution-routing-todo.md` |
+| 关联 PRD / Todo | `related_prd: null` / `docs/archive/todo/261120-issue108-w15-attribution-routing-todo.md` |
 
 - **变更一句话**：以双层正交身份模型（`account` + `agent`）与唯一 `formatAttribution` 彻底取代两套冲突正则黑名单、统一 PR 正文与全生命周期 5 类中文评论标签、补全 `parseAcceptanceCriteria` 回退与 `实证核验` 摘要、去歧义 `AGENTS.md` 路由与 8 技能/根 `SKILL.md`、落地四类资产真融合与主调度纯调度底线，并预先拆解逼近 800 行的 `.mjs` 模块。
 
@@ -217,10 +217,10 @@ flowchart LR
 
 > 动手改代码前冻结；实现期间不顺手删减或放宽标准。每条必须能由一条命令或断言实证。
 
-- [ ] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers`、后端能力声明 `capabilities.mention`（零平台名硬编码）与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, supportsMention, capabilities })`：仅当后端声明支持 `@mention` 且 `verifiedPlatformLogin === true` 时输出 `@handle`，其余平台、未验证/`git user.name`、离线/`generic-git`/`local-only` 及任意 `agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `fixtures-attribution-routing.mjs` 与 `I245–I246` 实测通过。
-- [ ] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），彻底清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要并完整保留 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解` 分区；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `fixtures-attribution-routing.mjs` 与 `I247–I248` 实测通过。
-- [ ] C3: 完成 `AGENTS.md` 路由去歧义（`dev-plan` 先于 `dev-flow`、`extra_routes` `order: 46` 收口 `intake/inspect/milestone`、去重里程碑行、`project-forge` 移至末行）、补全 8 技能脚本入口并清除 `dev-review` `tier: full`、刷新根 `SKILL.md` 为 `v3` 并补全 8 技能闭环（`<= 200L / 16384B`、`version: "6.0.0"`）、在 `references/survey.md`、`references/docs-set.md`、`references/collaboration.md` 与 `templates/agents-project.md` 落地四类资产真融合与主调度纯调度底线；经 `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）及 `I249` 实测通过。
-- [ ] C4: 从 797 行 `workflow-helpers.mjs` 拆出 `kit/skills/lib/pr-template-hydrate.mjs` (new) 并拆出 `kit/skills/lib/review-comment-render.mjs` (new)，全仓全部 `.mjs` 文件均 `<= 800` 行；新增 `scripts/dev/fixtures-attribution-routing.mjs` (new) 与 `scripts/dev/injections-data-attribution-routing.mjs` (new)（`I245–I249`），全矩阵覆盖 `github`/`generic-git`/`local-only` 三后端下 `claim/takeover/release`、`submit/rework`、`review pass/changes`（含 Case 2、Case 4 与外部 PR）、`merge` 及 `intake`（外部裸 URL、恶意与正常评论 5 态分诊），同步覆盖任意代理名、路由顺序、无 `tier: full`、根 `SKILL.md` 8 技能、真融合/纯调度与防自审/防代提锁；全量通过 `merge-gate`（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）。
+- [x] C1: 删除 `github-parse.mjs` `INTERNAL_AGENT_SLUG_RE` 与 `doc-comments.mjs` `AGENT_OR_LOCAL_ID_RE` 及死代码分支，落地正交双层身份 `resolveIdentityLayers`、后端能力声明 `capabilities.mention`（零平台名硬编码）与唯一 `formatAttribution({ account, verifiedPlatformLogin, agent, supportsMention, capabilities })`：仅当后端声明支持 `@mention` 且 `verifiedPlatformLogin === true` 时输出 `@handle`，其余平台、未验证/`git user.name`、离线/`generic-git`/`local-only` 及任意 `agent` 一律反引号包裹，无真实账号时省略而非造 `@maintainer`；经 `fixtures-attribution-routing.mjs` 与 `I245–I246` 实测通过。
+- [x] C2: 统一 PR 正文与 5 类评论标签（`认领人`/`原认领人`、`实施人`、`审查人`、`分诊人`），彻底清除 `implementer=` 与 `(respecting repo mergeAuthority)`；`parseAcceptanceCriteria` 在 Case 2/外部 PR 缺 SPEC/Todo 时回退解析 `ledger.issueContext`/`prContext` 复选框，`buildReviewComments` 在 `PASS` 与 `CHANGES_REQUESTED` 中均输出 `实证核验` 摘要并完整保留 `Must Fix`/`Should Fix`/`Pre-existing`/`本轮消解` 分区；修复 `flow-intake.mjs:206`（`state.gitIdentity?.name`）与 `flow-explore.mjs:32`；保留自审锁、`BLOCKED_SUBMIT_OWNERSHIP_MISMATCH` 及 `pf-state` 旧键兼容并补齐 `account`；经 `fixtures-attribution-routing.mjs` 与 `I247–I248` 实测通过。
+- [x] C3: 完成 `AGENTS.md` 路由去歧义（`dev-plan` 先于 `dev-flow`、`extra_routes` `order: 46` 收口 `intake/inspect/milestone`、去重里程碑行、`project-forge` 移至末行）、补全 8 技能脚本入口并清除 `dev-review` `tier: full`、刷新根 `SKILL.md` 为 `v3` 并补全 8 技能闭环（`<= 200L / 16384B`、`version: "6.0.0"`）、在 `references/survey.md`、`references/docs-set.md`、`references/collaboration.md` 与 `templates/agents-project.md` 落地四类资产真融合与主调度纯调度底线；经 `node scripts/equip.mjs . --check && node scripts/compose-agents.mjs . --check`（`AGENTS.md < 24576 B`）及 `I249` 实测通过。
+- [x] C4: 从 797 行 `workflow-helpers.mjs` 拆出 `kit/skills/lib/pr-template-hydrate.mjs` (new) 并拆出 `kit/skills/lib/review-comment-render.mjs` (new)，全仓全部 `.mjs` 文件均 `<= 800` 行；新增 `scripts/dev/fixtures-attribution-routing.mjs` (new) 与 `scripts/dev/injections-data-attribution-routing.mjs` (new)（`I245–I249`），全矩阵覆盖 `github`/`generic-git`/`local-only` 三后端下 `claim/takeover/release`、`submit/rework`、`review pass/changes`（含 Case 2、Case 4 与外部 PR）、`merge` 及 `intake`（外部裸 URL、恶意与正常评论 5 态分诊），同步覆盖任意代理名、路由顺序、无 `tier: full`、根 `SKILL.md` 8 技能、真融合/纯调度与防自审/防代提锁；全量通过 `merge-gate`（`preflight.mjs`、`gap-coverage.mjs`、`fixtures.mjs`、`compose-agents.mjs . --check`、`equip.mjs . --check`、`review.mjs .`、`sync-toc.mjs --check`、`verify-injections.mjs`）。
 
 ## 六、高风险点、门型与回滚路径
 
@@ -236,6 +236,6 @@ flowchart LR
 
 > 代码合入前补齐，随功能 PR 一同提交并标记 `implemented`；若常青架构已同步进 `docs/TDD.md`，随关联 `PRD`/`Todo` 成对归档至 `docs/archive/specs/`。
 
-- **实际落地摘要**：
-- **与草案的差异**：
-- **关联同步文件**：
+- **实际落地摘要**：已删除旧双正则与 `'dev-flow'` 硬编码兜底（`github-parse.mjs` / `doc-comments.mjs` / `intake-triage.mjs` / `flow-explore.mjs`），落地正交三元组 `resolveIdentityLayers` 与能力驱动 `formatAttribution`（`capabilities.mention` + `verifiedPlatformLogin`）；统一 PR 正文与 5 类评论中文标签及 `REVIEW_FIELDS` + `实证核验`（`PASS`/`CHANGES_REQUESTED` 双态）与 `issueContext`/`prContext` 验收标准回退；完成 `workflow-helpers.mjs` 拆出 `pr-template-hydrate.mjs` 与 `review-comment-render.mjs`（全仓 `.mjs` 均 `<= 800` 行，最大 789 行）；完成 7 份 `kit/skills/*/SKILL.md`、`templates/agents-project.md`、根 `SKILL.md`（102 行 / 13856 字节）与 `references/{survey,docs-set,collaboration}.md` 路由去歧义、8 技能矩阵及四类资产真融合规范对齐，并通过 `equip.mjs .` 与 `compose-agents.mjs .`（`AGENTS.md` 22424 字节）。
+- **与草案的差异**：`templates/agents-project.md` 路由表末行保持零侵入表述「调用治理技能（`survey` / `equip` / `review` / `handoff`）」且主调度段用「合入单」替代无 `has-remote` 门控的裸 `PR`，以满足目标项目无 `project-forge` 残留及无远端模板不出现 `PR` 的既有双向夹具契约；`fixtures-flow-state.mjs` 在 `badCoord` 测试段补齐 `badCoordTakeover`（`--takeover` 角色拦截），确保消除 `resolveContributorIdentity` 隐式折叠后 `I63` 故障注入仍准确红灯；`I245`–`I249` 分别独立拆分为正交单点注入（不共用合并项）。
+- **关联同步文件**：`docs/archive/todo/261120-issue108-w15-attribution-routing-todo.md`、`docs/TDD.md`、`docs/feature-map.json`、`AGENTS.md`、`.agents/skills/`（`equip.mjs .` 同步产物）。

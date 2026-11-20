@@ -12,7 +12,6 @@ import { hasExploredEvidence } from '../../lib/ledger.mjs'
 import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
-import { isInternalAgentSlug, resolveContributorIdentity } from '../../lib/platform.mjs'
 import { readDecisions } from '../../lib/profile.mjs'
 import { CODE_EXT_RE, TEST_FILE_RE } from '../../lib/static-gates.mjs'
 import { FEATURE_MAP_REL, readFeatureMapSafe } from '../../lib/test-inventory.mjs'
@@ -43,10 +42,10 @@ export function assertSubmitOwnership(ledger, opts = {}) {
         message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 协调者/审查者角色 (${rawExplicitAgent}) 不得借 --takeover 代实施者 submit。`,
       }
     }
-    const nextContrib = resolveContributorIdentity({ explicitActor: rawExplicitAgent, ledgerActor: ledger.implementerId })
-    ledger.implementerId = nextContrib.actor
+    ledger.agent = rawExplicitAgent
+    ledger.implementerId = rawExplicitAgent
     ledger.claimedBy = rawExplicitAgent
-    return { ok: true, takenOverBy: nextContrib.actor }
+    return { ok: true, takenOverBy: rawExplicitAgent }
   }
   if (nonImplRole) {
     return {
@@ -58,8 +57,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
   }
   if (ledger.claimedBy && String(ledger.claimedBy).trim()) {
     const claimedNorm = String(ledger.claimedBy).trim().toLowerCase()
-    const explicitResolved = resolveContributorIdentity({ explicitActor: rawExplicitAgent, ledgerActor: ledger.implementerId })
-    if (lowExplicit !== claimedNorm && explicitResolved.actor.toLowerCase() !== claimedNorm) {
+    if (lowExplicit !== claimedNorm) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
@@ -69,14 +67,15 @@ export function assertSubmitOwnership(ledger, opts = {}) {
     }
     return { ok: true }
   }
-  if (ledger.implementerId && !isInternalAgentSlug(ledger.implementerId)) {
-    const resolvedExplicit = resolveContributorIdentity({ explicitActor: rawExplicitAgent, ledgerActor: ledger.implementerId })
-    if (resolvedExplicit.actor.toLowerCase() !== String(ledger.implementerId).toLowerCase()) {
+  if (ledger.implementerId && String(ledger.implementerId).trim() && ledger.implementerId !== 'local-agent') {
+    const implNorm = String(ledger.implementerId).trim().toLowerCase()
+    const accNorm = String(ledger.account ?? '').trim().toLowerCase()
+    if (lowExplicit !== implNorm && (!accNorm || lowExplicit !== accNorm)) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',
         exitCode: 3,
-        message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${resolvedExplicit.actor}) 与已认领实施者 (${ledger.implementerId}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`,
+        message: `BLOCKED_SUBMIT_OWNERSHIP_MISMATCH: 提交者 (${rawExplicitAgent}) 与已认领实施者 (${ledger.implementerId}) 不一致；请由原实施者提交或带 --takeover --reason "..." 接管。`,
       }
     }
   }

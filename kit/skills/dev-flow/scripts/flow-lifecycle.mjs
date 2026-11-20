@@ -8,14 +8,14 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
-import { archiveCompletedDocsGroup, buildSubmitComments, docIsoDate } from '../../lib/docs.mjs'
+import { archiveCompletedDocsGroup, buildSubmitComments, docIsoDate, formatAttribution } from '../../lib/docs.mjs'
 import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveContributorIdentity,
+  detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
 import { isProfileExplicitNone, parseAgentsProfile, readDecisions } from '../../lib/profile.mjs'
 import { detectGateWeakening, gitDiffRawEntriesAndText, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
@@ -566,15 +566,35 @@ export async function handleSubmit(opts, roots) {
   const postLocalLifecycleComments = async ({ targetRepo = null, pushRemote = null, actionFallback }) => {
     if ((ledger.linkedIssues ?? []).length === 0) return
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId ?? 'none', targetRepo, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const submitActor = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
+    const submitLayers = resolveIdentityLayers({
+      explicitAgent: opts.agent,
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+    })
+    const submitDisplay = formatAttribution({ ...submitLayers, capabilities: localBackend.capabilities })
+    const submitActorId = submitLayers.agent || submitLayers.account || undefined
     const isReworkLocal = Boolean(opts.rework) || (ledger.rounds ?? []).length > 0
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
     const { issueCommentBodyFor } = buildSubmitComments({
-      isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitActor.display,
+      isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitDisplay,
       branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: null, linkedIssues: ledger.linkedIssues ?? [], recentRebuts,
     })
     for (const iss of ledger.linkedIssues ?? []) {
-      await localBackend.postComment({ taskId, number: iss, body: issueCommentBodyFor(iss), author: submitActor.actor, statePayload: { taskId, action: isReworkLocal ? 'rework-submitted' : actionFallback, round: nextRound, agent: submitActor.actor, headSha: currentHead } })
+      await localBackend.postComment({
+        taskId,
+        number: iss,
+        body: issueCommentBodyFor(iss),
+        author: submitActorId,
+        statePayload: {
+          taskId,
+          action: isReworkLocal ? 'rework-submitted' : actionFallback,
+          round: nextRound,
+          ...(submitLayers.account ? { account: submitLayers.account, verifiedPlatformLogin: submitLayers.verifiedPlatformLogin } : {}),
+          ...(submitLayers.agent ? { agent: submitLayers.agent } : {}),
+          headSha: currentHead,
+        },
+      })
       if (typeof localBackend.syncStateLabel === 'function') await Promise.resolve(localBackend.syncStateLabel({ taskId, number: iss, state: 'in-review' })).catch(() => null)
     }
   }
@@ -626,7 +646,19 @@ export async function handleSubmit(opts, roots) {
     role: ledger.role, providerId: ledger.providerId, targetRepo,
     client: opts._ghClient ?? ghProbe.client, pushRemote, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
   })
-  const submitActor = resolveContributorIdentity({ explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login, ledgerActor: ledger.implementerId })
+  const submitLayers = resolveIdentityLayers({
+    ghLogin: ghProbe.env?.trackB?.login,
+    ghTier: ghProbe.env?.trackB?.tier,
+    explicitAgent: opts.agent,
+    ledgerAccount: ledger.account,
+    ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+    ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+  })
+  const submitDisplay = formatAttribution({ ...submitLayers, capabilities: backend.capabilities })
+  const submitStateIdentity = {
+    ...(submitLayers.account ? { account: submitLayers.account, verifiedPlatformLogin: submitLayers.verifiedPlatformLogin } : {}),
+    ...(submitLayers.agent ? { agent: submitLayers.agent } : {}),
+  }
   const shortHead = currentHead?.slice(0, 7) ?? 'unknown'
   const originOwner = originFull ? originFull.split('/')[0] : null
   const headSpec = ledger.role === 'contributor-fork' && originOwner ? `${originOwner}:${ledger.branch}` : ledger.branch
@@ -654,25 +686,25 @@ export async function handleSubmit(opts, roots) {
   const commentResults = []
   if (isRework && ledger.prNumber) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: true, round: nextRound, shortHead, actorDisplay: submitActor.display, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: true, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
-    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, headSha: currentHead } }) })
+    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
     for (const iss of ledger.linkedIssues ?? []) {
-      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, agent: submitActor.actor, prNumber: ledger.prNumber, headSha: currentHead } }) })
+      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
     }
     await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
   } else {
     const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
-    const body = opts.body ?? hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitActor.display, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
+    const body = opts.body ?? hydratePrTemplateBody({ repoRoot: implRoot, taskId, ledger, policy, evidence, actorDisplay: submitDisplay, implementerDisplay: submitDisplay, visualFilesChanged, visualVerifiedOnHead, currentHead, changedFiles: changedForVisual })
     prResult = await backend.createPr({ targetRepo, head: headSpec, base: ledger.baseBranch, title, body, draft: Boolean(opts.draft) })
     if (prResult.ok && prResult.number) {
       ledger.prNumber = prResult.number
       ledger.prUrl = prResult.url ?? null
       ledger.prState = 'OPEN'
-      const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitActor.display, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
-      commentResults.push({ target: `PR #${prResult.number}`, res: await backend.postComment({ repo: targetRepo, number: prResult.number, body: prCommentBody, statePayload: { taskId, action: 'pr-submitted', round: 1, agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }) })
+      const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: false, round: 1, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: prResult.number, prUrl: prResult.url, linkedIssues: ledger.linkedIssues ?? [] })
+      commentResults.push({ target: `PR #${prResult.number}`, res: await backend.postComment({ repo: targetRepo, number: prResult.number, body: prCommentBody, statePayload: { taskId, action: 'pr-submitted', round: 1, ...submitStateIdentity, prNumber: prResult.number, headSha: currentHead } }) })
       for (const iss of ledger.linkedIssues ?? []) {
-        commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', agent: submitActor.actor, prNumber: prResult.number, headSha: currentHead } }) })
+        commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'pr-created', ...submitStateIdentity, prNumber: prResult.number, headSha: currentHead } }) })
       }
       await applySubmitPostActions({ backend, targetRepo, prNumber: prResult.number, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: false })
     }

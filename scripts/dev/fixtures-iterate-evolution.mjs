@@ -19,7 +19,7 @@ import { discoverCustomSkillsWithMirrors } from '../../kit/skills/lib/skill-disc
 import { inspectManifest } from '../../kit/skills/dev-govern/scripts/govern-checks.mjs'
 import { checkEvergreenAuthorityDocs } from '../../kit/skills/dev-govern/scripts/govern-evergreen.mjs'
 import { collectDiff, scanUntrustedDiff } from '../../kit/skills/dev-review/scripts/review-diff.mjs'
-import { buildClaimComments, formatActorDisplay } from '../../kit/skills/lib/doc-comments.mjs'
+import { buildClaimComments, formatAttribution } from '../../kit/skills/lib/doc-comments.mjs'
 import { buildHandoff } from '../../kit/skills/lib/handoff-package.mjs'
 import { discoverEvergreenDocs } from '../../kit/skills/lib/profile.mjs'
 import { triageTask } from '../../kit/skills/dev-plan/scripts/doc-audit.mjs'
@@ -469,21 +469,21 @@ export function registerIterateEvolutionCases(cases) {
     } finally { rmTree(dir) }
   }])
 
-  cases.push(['维护者增量：统一认领评论、formatActorDisplay 防误 @mention、mergeCommit 与真实实施人归属', async () => {
-    // 1. formatActorDisplay 正反边界
-    if (formatActorDisplay('octocat', { isPlatformLogin: true }) !== '@octocat') {
+  cases.push(['维护者增量：统一认领评论、formatAttribution 防误 @mention、mergeCommit 与真实实施人归属', async () => {
+    // 1. formatAttribution 正反边界
+    if (formatAttribution({ account: 'octocat', verifiedPlatformLogin: true, supportsMention: true }) !== '@octocat') {
       return '真实平台用户应保留 @login'
     }
-    if (formatActorDisplay('impl-c4', { isPlatformLogin: true }) !== '`impl-c4`'
-      || formatActorDisplay('agent-1', { isPlatformLogin: true }) !== '`agent-1`'
-      || formatActorDisplay('alice', { backendKind: 'local-only' }) !== '`alice`') {
-      return `AI 代理 ID 或离线后端用户被错误 @mention: impl=${formatActorDisplay('impl-c4', { isPlatformLogin: true })} local=${formatActorDisplay('alice', { backendKind: 'local-only' })}`
+    if (formatAttribution({ account: null, verifiedPlatformLogin: true, agent: 'impl-c4', supportsMention: true }) !== '`impl-c4`'
+      || formatAttribution({ account: null, verifiedPlatformLogin: true, agent: 'agent-1', supportsMention: true }) !== '`agent-1`'
+      || formatAttribution({ account: 'alice', verifiedPlatformLogin: true, supportsMention: false }) !== '`alice`') {
+      return `AI 代理 ID 或离线后端用户被错误 @mention: impl=${formatAttribution({ agent: 'impl-c4', supportsMention: true })} local=${formatAttribution({ account: 'alice', verifiedPlatformLogin: true, supportsMention: false })}`
     }
     // 2. buildClaimComments 三态渲染 + 动态省略无适用字段
-    const claimC = buildClaimComments({ action: 'claim', actor: 'impl-c4', isPlatformLogin: true, taskId: 'task-1', branch: 'feat/x', issues: [93] })
-    const takeoverC = buildClaimComments({ action: 'takeover', actor: 'octocat', isPlatformLogin: true, previousActor: 'impl-c4', taskId: 'task-1', reason: 'stale lock' })
-    const releaseC = buildClaimComments({ action: 'release', actor: 'impl-c4', backendKind: 'local-only', taskId: 'task-1' })
-    if (!claimC.issueCommentBody.includes('### 认领任务') || !claimC.issueCommentBody.includes('`impl-c4`') || claimC.issueCommentBody.includes('原认领人') || claimC.issueCommentBody.includes('原因')) {
+    const claimC = buildClaimComments({ action: 'claim', agent: 'impl-c4', verifiedPlatformLogin: true, supportsMention: true, taskId: 'task-1', branch: 'feat/x', issues: [93] })
+    const takeoverC = buildClaimComments({ action: 'takeover', account: 'octocat', verifiedPlatformLogin: true, supportsMention: true, previousActor: 'impl-c4', taskId: 'task-1', reason: 'stale lock' })
+    const releaseC = buildClaimComments({ action: 'release', agent: 'impl-c4', supportsMention: false, taskId: 'task-1' })
+    if (!claimC.issueCommentBody.includes('### 认领任务') || !claimC.issueCommentBody.includes('- **认领人**：`impl-c4`') || claimC.issueCommentBody.includes('原认领人') || claimC.issueCommentBody.includes('原因')) {
       return `claim 评论格式异常或含空字段: ${claimC.issueCommentBody}`
     }
     if (!takeoverC.issueCommentBody.includes('### 接管认领') || !takeoverC.issueCommentBody.includes('@octocat') || !takeoverC.issueCommentBody.includes('原认领人') || !takeoverC.issueCommentBody.includes('stale lock')) {
@@ -517,8 +517,8 @@ export function registerIterateEvolutionCases(cases) {
         return `Mock 远端 403/建标/closePr 异常: iss=${iss.ok} fork=${JSON.stringify(forkAddLabel)} closed=${JSON.stringify(closed)} forkBackend=${Boolean(forkBackend)}`
       }
       const mergeSrc = readFileSync(join(SKILL_ROOT, 'kit/skills/dev-flow/scripts/flow-merge.mjs'), 'utf8')
-      if (!mergeSrc.includes('ledger.claimedBy') || !mergeSrc.includes('formatActorDisplay')) {
-        return 'flow-merge.mjs 尚未优先归属真实实施人 ledger.claimedBy 并经 formatActorDisplay 格式化'
+      if (!mergeSrc.includes('ledger.claimedBy') || !mergeSrc.includes('formatAttribution')) {
+        return 'flow-merge.mjs 尚未优先归属真实实施人 ledger.claimedBy 并经 formatAttribution 格式化'
       }
       return true
     } finally { srv.close(); rmTree(mockDir) }

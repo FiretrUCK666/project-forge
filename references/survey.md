@@ -32,7 +32,7 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 | `git.role` | 双轴五态身份：`local-only`（无远端或 `pf-local-mode`）、`maintainer`（与声明源一致且有写权限，或 `generic-git` 通用降级放行本地全流程）、`contributor-fork`（存在不同 `upstream` / Fork 仓 / `pf-fork-mode`）、`clone-readonly`（克隆他人正本且无写权限，**绝不误判为 maintainer**）、`undetermined`（缺依据，按保守贡献者处理） |
 | `git.auth` | `https`、`ssh`（含 443 回退与指纹未收录提示）、`apiChannel`、`details`、`remediationCmd`（协议错配修复命令；缺凭据时渲染三路线认证指引） |
 | `docs` | `readmes`（含双语及 `.rst`/无后缀 README）、`agents`、`agentsBytes`（超 `30720` 报异常、`24576` 预警）、`tdd`、`existingDesignDocs`（配合单源 `discoverEvergreenDocs` 支持可选 `evergreen-docs:`、Frontmatter `evergreen: true` 与入口链接三层纳管常青文档，避免双轨）、`nonStandardDocs`、`preservedForeignPlanDocs`（原样保留目标仓原生 `docs/{specs,todo}/*`）、`workflowFacts`（含 `.github/workflows` 与中立 CI `neutralCiConfigs`，明确拆分 `checkWorkflows` 与 `releaseWorkflows`）、`contributing`、`releasing`、`license` |
-| `kit` | 扫描非隐藏 `skills/*`（含嵌套 `*/skills/*`）与任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码，自动区分宿主镜像副本 `mirrorCopies` 不双计不误删），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2，保留 `disabledSkills`、`removedFiles`、`customizedFiles`） |
+| `kit` | 扫描非隐藏 `skills/*`（含嵌套 `*/skills/*`）与任意隐藏/项目技能容器 `<dir>/skills/<name>/SKILL.md`（无特定宿主路径硬编码，自动区分宿主镜像副本 `mirrorCopies` 不双计不误删），读取 `.agents/skills/.pf-manifest.json`（兼容 v1/v2/v3，保留 `disabledSkills`、`removedFiles`、`customizedFiles`） |
 | `explorationStrategy` | 依据 `effectiveFiles`、多包/多生态与重入状态输出 `{ tier, reason, shards }`：`tier` 取 `none`（0 业务文件，转空目录起步）、`single-pass`（中小仓单路通读）、`parallel-subagents`（大型或重入仓，附 2–5 个不重叠 `shards` 分片，含 `business-flows` 核心业务流分片） |
 | `artifactPlan` | 由 `computeArtifactPlan` 产出的 11 项治理产物确定性处置列表（含拆分的 `ci-check` 与 `ci-release`），直接指明 `snapshot` / `preserve` / `calibrate` / `create` / `equip` / `upgrade` / `ask-human` / `optional` / `skip` |
 | `reentry` | 仅当存在 `.pf-manifest.json`、受管标记或既定四层契约时判为重入（不误判存量手写 `AGENTS.md`）；输出 `staleAgentPaths`、`staleAgentScripts`（按 `commandsByEcosystem` 逐栈校验）、`staleTddPaths` 与 `unregisteredTopDirs` |
@@ -45,13 +45,22 @@ node "<本 skill 目录>/scripts/survey.mjs" <目标目录> [--probe-auth] [--ve
 - **分片汇总规范**：子代理严禁修改任何文件、严禁越界重复扫描他人分片，只回传**真实存在路径 + 关键事实摘要 + 发现的漂移/风险**（其中 `business-flows` 分片对照 `repo-map.mjs` 的 `businessFlows` 汇总服务对象、路由/CLI/UI/作业面与文档源码差异）；主代理收齐后与 `reentry` 四个漂移列表交叉核对，再敲定校准与落盘范围。
 - **改前只读实跑基线（`S1 -> S3` 前置）**：对非空存量代码仓进入 `S3` 写入前，先以**只读非破坏方式实跑对方既有测试与主入口**，采集 **`preForgeBaseline`**（执行命令、退出码/通过情况、主入口实测状态）直接写入 `docs/TDD.md`（`AGENTS.md` 仅留薄指针以守住体积预算），确保后续治理全过程可对照改前真基线核验无退化。
 
+### 四类存量资产真融合协议（S2/S3 必守）
+
+存量项目接入绝不做「表面补齐几份文件」的浅层覆盖，而是按四类资产做结构化融合，并把发现的原仓问题全部通过 `TaskBackend` 建本地或远端 Issue 按正常流程分步修清：
+
+1. **长青文档**：识别既有架构/设计/API/数据库说明（`ARCHITECTURE.md`、`docs/adr/` 等）并统一纳入 `evergreen-docs:` / `docs/TDD.md` 单源映射，合并冲突多副本并清理过期副本。
+2. **非长青/过期/无效文档**：历史临时方案、过期 Todo 或无效文档归档至 `docs/archive/` 或标出无效残片确认清理，防止污染 `doc-locate` 与后续检索。
+3. **既有脚本、工具、数据模型/迁移与 CI**：直接融入 `Dev Profile`、`docs/feature-map.json` 与 `docs/TDD.md`（配合 `tdd-shape.mjs` 裁剪数据模型与部署节），对失效或冲突脚本清晰标出清理建议。
+4. **既有 AI 约定（`AGENTS.md`、`CLAUDE.md`、`.cursorrules`、自有技能）**：做语义去重与无损融合（而非机械追加堆叠），保留项目自身约定与扩展槽位。
+
 ### `artifactPlan` 逐项确定性处置对照表（按表落地，不自由重写）
 
 | 产物 `id` | 常见 `action` 取值 | 存量融合与落地铁律 |
 | --- | --- | --- |
 | `pre-backup` | `snapshot` / `skip` | 非空目录写前必先 `backup.mjs create <目录> --label pre-forge`；空目录跳过 |
 | `git-baseline` | `create` / `calibrate` / `preserve` | 已存在 `.gitignore`/`.gitattributes` 仅增补缺失安全/二进制规则，不清空已有规则 |
-| `kit-skills` | `equip` / `upgrade` / `preserve` | 统一全量装配或无损升级已落盘研发技能；尊重 v2 墓碑/定制并原样保留自有扩展技能 |
+| `kit-skills` | `equip` / `upgrade` / `preserve` | 统一全量装配或无损升级已落盘研发技能；尊重 v3 墓碑/定制/三方合并并原样保留自有扩展技能 |
 | `docs-tdd` | `create` / `calibrate` / `preserve` / `skip` | 纯文档仓可省；已有存量架构设计文档时优先 `preserve` 防双轨；漂移时仅局部校准 |
 | `agents-contract` | `create` / `calibrate` / `preserve` | 缺失时先吸收既有 AI 约定（`otherAiConventions`）；漂移时保留手写规则，只刷新失效项 |
 | `readme` | `preserve` / `create` | **已有 README 强制 `preserve`**：严禁套模板重写样式，仅失效命令/入口做最小校准 |

@@ -287,7 +287,8 @@
         "kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs",
         "kit/skills/dev-flow/scripts/flow-merge.mjs",
         "kit/skills/dev-flow/scripts/flow-cleanup.mjs",
-        "kit/skills/lib/workflow-policy.mjs"
+        "kit/skills/lib/workflow-policy.mjs",
+        "kit/skills/lib/pr-template-hydrate.mjs"
       ],
       "businessFlows": [
         "双轴身份探测、全局 intake 分诊与 Worktree 隔离启动",
@@ -312,7 +313,8 @@
       "testRefs": [
         "scripts/dev/fixtures-flow.mjs",
         "scripts/dev/fixtures-flow-cleanup.mjs",
-        "scripts/dev/fixtures-e2e-gate.mjs"
+        "scripts/dev/fixtures-e2e-gate.mjs",
+        "scripts/dev/fixtures-attribution-routing.mjs"
       ]
     },
     {
@@ -364,7 +366,8 @@
         "kit/skills/dev-review/scripts/review-empirical.mjs",
         "kit/skills/dev-review/scripts/review-empirical-state.mjs",
         "kit/skills/dev-review/scripts/review-locks.mjs",
-        "kit/skills/dev-review/scripts/review-ledger.mjs"
+        "kit/skills/dev-review/scripts/review-ledger.mjs",
+        "kit/skills/lib/review-comment-render.mjs"
       ],
       "businessFlows": [
         "按变更文件装配受波及 businessFlows、依赖逆邻域与运行时能力切片",
@@ -389,7 +392,8 @@
       "testRefs": [
         "scripts/dev/fixtures-review-empirical.mjs",
         "scripts/dev/fixtures-review.mjs",
-        "scripts/dev/fixtures-verify-tools.mjs"
+        "scripts/dev/fixtures-verify-tools.mjs",
+        "scripts/dev/fixtures-attribution-routing.mjs"
       ]
     },
     {

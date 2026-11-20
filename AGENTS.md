@@ -10,18 +10,18 @@
 
 | 用户自然语言意图 | 加载本地 Skill | 先跑引擎脚本（按需传参） |
 | --- | --- | --- |
-| 理解项目 / 梳理架构 / 找模块入口 / 按需定位文档与符号 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/repo-map.mjs` |
-| 写需求 / 澄清拍板 / 定方案 / 拆任务 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs` |
-| 做功能 / 修缺陷 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
+| 理解项目 / 梳理架构 / 找模块入口 / 按需定位文档与符号 | `.agents/skills/dev-explore/SKILL.md` | `node .agents/skills/dev-explore/scripts/doc-locate.mjs` / `repo-map.mjs` |
+| 新需求 / 做新功能 / 跨模块改造 / 澄清拍板 / 写方案与拆任务 | `.agents/skills/dev-plan/SKILL.md` | `node .agents/skills/dev-plan/scripts/doc-plan.mjs triage` / `init` / `audit` |
+| 已定案开工 / 明确局部修缺陷 / 查任务状态 / 启动隔离工作位 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs next` / `inspect` |
 | 改码规范 / 改前边界核对与静态自检 | `.agents/skills/dev-edit/SKILL.md` | `node .agents/skills/dev-edit/scripts/edit-gate.mjs --changed --json` |
 | 实施者归档 / 实证 / 推分支提 PR | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs finalize` -> `verify` -> `submit` |
 | 本地预审 / 独立双门审查 / 审外部 PR | `.agents/skills/dev-review/SKILL.md` | `node .agents/skills/dev-review/scripts/review-pack.mjs` |
 | 审查者合并 PR / 确认后清理 Worktree | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs merge` / `cleanup` |
-| 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs audit --json` |
-| 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` |
-| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` |
-| 首次规范化接管 / 升级工具包 / 交棒退场 | 运行本工具 `survey` / `equip` / `review` / `handoff` | 始终先只读 `survey.mjs`，不直接写业务代码 |
-| 里程碑管理 / 裸粘贴 Issue・PR・Milestone 链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs inspect <URL...>` / `milestone` |
+| 外部 Issue・PR 业务分诊 / 里程碑管理 / 裸粘贴链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs intake` / `inspect <URL...>` / `milestone` |
+| 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`) |
+| 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`) |
+| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run`) |
+| 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
 
 <!-- project-forge: begin 行事总纲 -->
@@ -170,7 +170,7 @@ node scripts/dev/verify-injections.mjs
 - **第一步：双轴五态身份判定与入站分诊**——
   先核对远端与源仓库：`origin` 与声明源一致且有写权为 **maintainer**（独立分支开 PR，禁直推主干）。多协作者团队遵循：① 零历史新成员先 `flow.mjs inspect --probe-auth` 验写权限；② 开工 `flow.mjs claim` 防撞车，接管未合分支须 `--takeover --reason` 双写 Issue+PR（弃领 `release`）；③ 合前同步并守 `CODEOWNERS`/Merge Queue；④ `reviewerId !== implementerId` 互审（保守仓写 `merge-authority: human`）。Fork 为 **contributor-fork**（只推 `origin` 向 `upstream` 开 PR，禁自合与提前删分支，标签 403 降级）；只读为 **clone-readonly**（三选一）；未注册主机退化 `generic-git`（远端合 MR 后带 `--remote-merged`）；外部/新增 Issue 与 PR 先经 `flow.mjs intake` 业务分诊（已 `approve` 自研豁免）。
 
-- **第二步：纯调度分波、五档分流与三正交策略**——主会话薄上下文调度，跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
+- **第二步：纯调度分波、五档分流与三正交策略**——主会话保持薄上下文纯调度底线：无论是否配置远端或大仓接入，主调度**只调度与验收，不亲自改业务源码、不代提合入单**，探索/规划/实施/审查一律派发独立隔离代理。跑 `flow.mjs next`（就绪 `docs/specs/*.md` 在 `Wave 1 >= 2` 时并行派发）或 `doc-plan.mjs triage`，沿 **8 阶段闭环（需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入）**判档与门型（`two-way`/`one-way`），多轮澄清清零待拍板项：
 
   | 档位 | 触发特征 | 文档与检查动作 |
   | --- | --- | --- |

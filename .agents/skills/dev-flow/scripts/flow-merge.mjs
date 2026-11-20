@@ -8,13 +8,12 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
-import { formatActorDisplay } from '../../lib/doc-comments.mjs'
-import { buildMergeComments } from '../../lib/docs.mjs'
+import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { hasExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
-  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveContributorIdentity, probeForWrite } from '../../lib/platform.mjs'
+  detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { classifyDoorType, detectGateWeakening, gitDiffRawEntriesAndText, matchGlob, UI_VISUAL_EXT_RE } from '../../lib/static-gates.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
@@ -289,19 +288,21 @@ export async function handleMerge(opts, roots) {
         : (mergeRes.mergeBlocked ? `405 合并受阻(${mergeRes.error ?? ''})` : (mergeRes.state ?? mergeRes.error))
       throw new Error(`PR #${ledger.prNumber} 合并或回读确认 MERGED 失败（${detail}）`)
     }
-    const rawClaimed = String(ledger.claimedBy ?? '').trim()
-    const mergeContrib = resolveContributorIdentity({
-      explicitActor: rawClaimed || ledger.implementerId,
+    const mergeImplLayers = resolveIdentityLayers({
       ghLogin: ghProbe?.env?.trackB?.login,
-      ledgerActor: ledger.implementerId,
+      ghTier: ghProbe?.env?.trackB?.tier,
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
     })
-    const implementerDisplay = rawClaimed
-      ? formatActorDisplay(rawClaimed, { backendKind: backend.kind })
-      : formatActorDisplay(mergeContrib.actor, { isPlatformLogin: Boolean(ghProbe?.env?.trackB?.login && mergeContrib.actor === ghProbe.env.trackB.login), backendKind: backend.kind })
+    const implementerDisplay = formatAttribution({ ...mergeImplLayers, capabilities: backend.capabilities })
+    const reviewerDisplay = effectiveReviewer
+      ? formatAttribution({ agent: effectiveReviewer, capabilities: backend.capabilities })
+      : ''
     const mergeCommitSha = mergeRes?.mergeCommit ?? mergeRes?.sha ?? mergeRes?.mergedSha ?? null
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
       prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
-      reviewerId: effectiveReviewer, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
+      reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
       humanApprovedReason: ledger.humanApprovedReason ?? null,
     })
     await backend.postComment({
@@ -354,13 +355,19 @@ export async function handleMerge(opts, roots) {
       return { exitCode: mergeRes.exitCode ?? EXIT_POLICY_BLOCK, ...(mergeRes.code ? { code: mergeRes.code } : {}) }
     }
     if ((ledger.linkedIssues ?? []).length > 0 && mergeRes?.merged !== false) {
-      const rawClaimed = String(ledger.claimedBy ?? '').trim()
-      const mergeContrib = resolveContributorIdentity({ explicitActor: rawClaimed || ledger.implementerId, ledgerActor: ledger.implementerId })
-      const implementerDisplay = formatActorDisplay(rawClaimed || mergeContrib.actor, { backendKind: backend.kind })
+      const mergeImplLayers = resolveIdentityLayers({
+        ledgerAccount: ledger.account,
+        ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+        ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+      })
+      const implementerDisplay = formatAttribution({ ...mergeImplLayers, capabilities: backend.capabilities })
+      const reviewerDisplay = effectiveReviewer
+        ? formatAttribution({ agent: effectiveReviewer, capabilities: backend.capabilities })
+        : ''
       const mergeCommitSha = mergeRes?.mergeCommit ?? mergeRes?.mergedSha ?? mergeRes?.sha ?? null
       const { issueCommentBody: localMergeBody } = buildMergeComments({
         prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
-        reviewerId: effectiveReviewer, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
+        reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
         humanApprovedReason: ledger.humanApprovedReason ?? null,
       })
       for (const iss of ledger.linkedIssues ?? []) {
@@ -404,9 +411,6 @@ export async function handleRelease(opts, roots) {
   ]
   if (extraIssues.length > 0) ledger.linkedIssues = [...new Set([...(ledger.linkedIssues ?? []), ...extraIssues])]
 
-  const relInit = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
-  let actor = relInit.actor
-  let actorDisplay = relInit.display
   const reason = String(opts.reason ?? '').trim()
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
@@ -418,20 +422,39 @@ export async function handleRelease(opts, roots) {
   const releaseResults = []
   if (!skipApi) {
     // 认领/释放都要往平台写。写之前必须联网探清通道——
-  // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
-  const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
+    // 用「不联网」的探测结果判断「能不能写」，必然得到「不能」，而且不报错。
+    const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
     const ghClient = opts._ghClient ?? ghProbe.client
     const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const onlineRel = resolveContributorIdentity({
-      explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: ledger.implementerId,
+    const relLayers = resolveIdentityLayers({
+      explicitAgent: opts.agent,
+      ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login,
+      ghTier: ghProbe.env?.trackB?.tier ?? ghClient?.tier ?? (ghClient ? 'authenticated' : null),
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
     })
-    actor = onlineRel.actor
-    actorDisplay = onlineRel.display
-    const rel = await backend.releaseTask({ taskId, issues: ledger.linkedIssues, actor, actorDisplay, branch: ledger.branch, reason })
+    const actorDisplay = formatAttribution({ ...relLayers, capabilities: backend.capabilities })
+    const rel = await backend.releaseTask({
+      taskId, issues: ledger.linkedIssues,
+      account: relLayers.account, verifiedPlatformLogin: relLayers.verifiedPlatformLogin, agent: relLayers.agent,
+      actor: relLayers.agent || relLayers.account, actorDisplay, branch: ledger.branch, reason,
+    })
     releaseResults.push(...(rel.results ?? []))
   } else {
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    await localBackend.releaseTask({ taskId, issues: ledger.linkedIssues, actor, actorDisplay, branch: ledger.branch, reason })
+    const relLayers = resolveIdentityLayers({
+      explicitAgent: opts.agent,
+      ledgerAccount: ledger.account,
+      ledgerAgent: ledger.agent ?? ledger.claimedBy ?? ledger.implementerId,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+    })
+    const actorDisplay = formatAttribution({ ...relLayers, capabilities: localBackend.capabilities })
+    await localBackend.releaseTask({
+      taskId, issues: ledger.linkedIssues,
+      account: relLayers.account, verifiedPlatformLogin: relLayers.verifiedPlatformLogin, agent: relLayers.agent,
+      actor: relLayers.agent || relLayers.account, actorDisplay, branch: ledger.branch, reason,
+    })
   }
 
   ledger.status = 'released'
@@ -463,6 +486,9 @@ export function analyzeIssueClaimState(comments = []) {
       if (action === 'claim' || action === 'takeover') {
         activeClaim = {
           action, actor: st.agent || st.actor || st.owner || c?.author || null,
+          account: st.account ?? null,
+          verifiedPlatformLogin: Boolean(st.verifiedPlatformLogin),
+          agent: st.agent ?? null,
           login: c?.author ?? null, taskId: st.taskId ?? null, branch: st.branch ?? null,
           reason: st.reason ?? null, commentId: c?.id ?? null, createdAt: c?.createdAt ?? null,
         }
@@ -508,16 +534,8 @@ export async function handleClaim(opts, roots) {
     return { exitCode: EXIT_POLICY_BLOCK }
   }
 
-  const initContrib = resolveContributorIdentity({ explicitActor: opts.agent, ledgerActor: ledger.implementerId })
-  const prevImpl = ledger.implementerId
-  let actor = initContrib.actor
-  let actorDisplay = initContrib.display
-  ledger.implementerId = actor
+  const prevAgent = ledger.agent ?? ledger.claimedBy ?? ledger.implementerId ?? null
   const claimRoot = ledger.worktreePath ? resolve(roots.mainRoot, ledger.worktreePath) : roots.mainRoot
-  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-    const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
-    await syncTaskDocsSafe(claimRoot, ledger)
-  }
 
   const fastCfg = roots.gitDir ? readGitConfigFast(roots.gitDir) : null
   const remoteRes = fastCfg ? { ok: true, stdout: fastCfg.remoteText } : await gitRun(roots.mainRoot, ['remote', '-v'])
@@ -527,8 +545,36 @@ export async function handleClaim(opts, roots) {
 
   const skipApi = ledger.role === 'local-only' || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || (ledger.linkedIssues ?? []).length === 0 || !targetRepo
   if (skipApi) {
+    const gitNameRes = await gitRun(roots.mainRoot, ['config', 'user.name']).catch(() => ({ ok: false, stdout: '' }))
+    const localLayers = resolveIdentityLayers({
+      explicitAgent: opts.agent,
+      gitName: gitNameRes.ok ? gitNameRes.stdout.trim() : null,
+      ledgerAccount: ledger.account,
+      ledgerAgent: prevAgent,
+      ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
+    })
+    if (localLayers.account) {
+      ledger.account = localLayers.account
+      ledger.verifiedPlatformLogin = localLayers.verifiedPlatformLogin
+    }
+    if (localLayers.agent) {
+      ledger.agent = localLayers.agent
+      ledger.implementerId = localLayers.agent
+    } else if (!ledger.implementerId && localLayers.account) {
+      ledger.implementerId = localLayers.account
+    }
+    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
+      const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
+      await syncTaskDocsSafe(claimRoot, ledger)
+    }
     const localBackend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-    const localClaim = await localBackend.claimTask({ taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber, actor, actorDisplay, branch: ledger.branch, takeover: isTakeover, reason: takeoverReason })
+    const actorDisplay = formatAttribution({ ...localLayers, capabilities: localBackend.capabilities })
+    const localClaim = await localBackend.claimTask({
+      taskId, issues: ledger.linkedIssues, prNumber: ledger.prNumber,
+      account: localLayers.account, verifiedPlatformLogin: localLayers.verifiedPlatformLogin, agent: localLayers.agent,
+      actor: localLayers.agent || localLayers.account, actorDisplay, branch: ledger.branch,
+      takeover: isTakeover, reason: takeoverReason,
+    })
     if (localClaim?.blocked) {
       if (opts.json) process.stdout.write(`${JSON.stringify({ blocked: true, taskId, ...localClaim }, null, 2)}\n`)
       process.stderr.write(`${localClaim.message}\n`)
@@ -536,7 +582,7 @@ export async function handleClaim(opts, roots) {
     }
     ledger.status = 'claimed'
     ledger.claimedAt = new Date().toISOString()
-    ledger.claimedBy = String(opts.agent ?? '').trim() || actor
+    ledger.claimedBy = String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null
     if (isTakeover) {
       ledger.takeoverReason = takeoverReason
       ledger.takenOverAt = ledger.claimedAt
@@ -558,18 +604,30 @@ export async function handleClaim(opts, roots) {
   const ghProbe = opts._ghProbe ?? (await probeForWrite({ cwd: roots.mainRoot, remoteUrls }))
   const ghClient = opts._ghClient ?? ghProbe.client
   const backend = createTaskBackend({ role: ledger.role, providerId: ledger.providerId, targetRepo, client: ghClient, mainRoot: roots.mainRoot, gitDir: roots.gitDir })
-  const onlineContrib = resolveContributorIdentity({
-    explicitActor: opts.agent, ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login, ledgerActor: prevImpl,
+  const onlineLayers = resolveIdentityLayers({
+    explicitAgent: opts.agent,
+    ghLogin: ghProbe.env?.trackB?.login ?? ghClient?.login,
+    ghTier: ghProbe.env?.trackB?.tier ?? ghClient?.tier ?? (ghClient ? 'authenticated' : null),
+    ledgerAccount: ledger.account,
+    ledgerAgent: prevAgent,
+    ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
   })
-  if (onlineContrib.actor !== actor) {
-    actor = onlineContrib.actor
-    actorDisplay = onlineContrib.display
-    ledger.implementerId = actor
-    if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
-      const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
-      await syncTaskDocsSafe(claimRoot, ledger)
-    }
+  if (onlineLayers.account) {
+    ledger.account = onlineLayers.account
+    ledger.verifiedPlatformLogin = onlineLayers.verifiedPlatformLogin
   }
+  if (onlineLayers.agent) {
+    ledger.agent = onlineLayers.agent
+    ledger.implementerId = onlineLayers.agent
+  } else if (!ledger.implementerId && onlineLayers.account) {
+    ledger.implementerId = onlineLayers.account
+  }
+  if ((ledger.linkedIssues ?? []).length > 0 && existsSync(claimRoot)) {
+    const { syncTaskDocsSafe } = await import('./flow-inspect.mjs')
+    await syncTaskDocsSafe(claimRoot, ledger)
+  }
+  const actorKey = onlineLayers.agent || onlineLayers.account
+  const actorDisplay = formatAttribution({ ...onlineLayers, capabilities: backend.capabilities })
   const canQueryComments = Boolean(opts._ghClient) || ghProbe.env.trackB.tier === 'gh-cli' || ghProbe.env.trackB.tier === 'node-https-token'
   const activeClaimsByIssue = new Map()
   if (canQueryComments) {
@@ -577,7 +635,7 @@ export async function handleClaim(opts, roots) {
       const listRes = await backend.listComments({ repo: targetRepo, number: num })
       if (!listRes.ok) continue
       const activeClaim = analyzeIssueClaimState(listRes.comments)
-      if (activeClaim && !isSameClaimant(activeClaim, actor, ghProbe.env.trackB.login)) {
+      if (activeClaim && !isSameClaimant(activeClaim, actorKey, ghProbe.env.trackB.login)) {
         if (!isTakeover) {
           if (opts.json) {
             process.stdout.write(`${JSON.stringify({
@@ -593,24 +651,31 @@ export async function handleClaim(opts, roots) {
     }
   }
 
-  const prevActors = [...activeClaimsByIssue.values()].map((c) => c.actor ?? c.login).filter(Boolean)
+  const prevClaim = [...activeClaimsByIssue.values()][0] ?? null
+  const prevActors = [...activeClaimsByIssue.values()].map((c) => c.agent ?? c.actor ?? c.login).filter(Boolean)
   const claimOut = await backend.claimTask({
     taskId,
     issues: ledger.linkedIssues,
     prNumber: ledger.prNumber,
-    actor,
+    account: onlineLayers.account,
+    verifiedPlatformLogin: onlineLayers.verifiedPlatformLogin,
+    agent: onlineLayers.agent,
+    actor: actorKey,
     actorDisplay,
     branch: ledger.branch,
     takeover: isTakeover,
     reason: takeoverReason,
     previousActor: prevActors[0] ?? null,
+    previousAccount: prevClaim?.account ?? null,
+    previousVerifiedPlatformLogin: Boolean(prevClaim?.verifiedPlatformLogin),
+    previousAgent: prevClaim?.agent ?? prevActors[0] ?? null,
   })
   const claimResults = claimOut.results ?? []
   const prTakeoverResult = claimOut.prResult ?? null
 
   ledger.status = 'claimed'
   ledger.claimedAt = new Date().toISOString()
-  ledger.claimedBy = String(opts.agent ?? '').trim() || actor
+  ledger.claimedBy = String(opts.agent ?? '').trim() || onlineLayers.agent || onlineLayers.account || null
   if (isTakeover) {
     ledger.takeoverReason = takeoverReason
     ledger.takenOverAt = ledger.claimedAt

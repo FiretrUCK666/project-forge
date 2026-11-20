@@ -20,7 +20,7 @@ import {
 } from '../../lib/intake-triage.mjs'
 import { readTaskLedger, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { getLocalIssue, getLocalPr, listLocalIssues } from '../../lib/local-issues.mjs'
-import { parseIssueNumbers, parsePrNumber, probeForWrite, resolveContributorIdentity } from '../../lib/platform.mjs'
+import { getHostingProvider, parseIssueNumbers, parsePrNumber, probeForWrite, resolveIdentityLayers } from '../../lib/platform.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildTargetRepoContext, resolveReadClient } from './flow-context.mjs'
 import { EXIT_ACTION_REQUIRED, inspectWorkspace } from './flow-inspect.mjs'
@@ -200,12 +200,31 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     mainRoot, gitDir, targetType, targetNumber, opts, state, targetRepo, ledger,
   })
 
-  const actorInfo = resolveContributorIdentity({
-    explicitActor: opts.actor ?? opts.agent,
-    ghLogin: state.github?.trackB?.login,
-    gitName: state.gitUser?.name,
-  })
   const applyMode = Boolean(opts.apply) && !Boolean(opts['dry-run'])
+  const useRemoteGh = providerId === 'github' && role !== 'local-only' && role !== 'generic-git' && Boolean(targetRepo)
+  const ghProbe = applyMode && useRemoteGh
+    ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls: state.remoteUrls ?? {} })))
+    : (opts._ghProbe ?? null)
+  const backend = applyMode
+    ? (opts._backend ?? createTaskBackend({
+        role,
+        providerId,
+        targetRepo,
+        client: opts._ghClient ?? ghProbe?.client,
+        pushRemote,
+        mainRoot,
+        gitDir,
+      }))
+    : (opts._backend ?? null)
+  const effectiveCaps = backend?.capabilities
+    ?? (role !== 'local-only' && role !== 'generic-git' ? getHostingProvider(providerId)?.capabilities : null)
+    ?? { mention: false }
+  const actorLayers = resolveIdentityLayers({
+    ghLogin: ghProbe?.env?.trackB?.login ?? state.github?.trackB?.login,
+    ghTier: ghProbe?.env?.trackB?.tier ?? state.github?.trackB?.tier,
+    gitName: state.gitIdentity?.name,
+    explicitAgent: opts.actor ?? opts.agent,
+  })
 
   const evaluation = evaluateIntakeTriage(mainRoot, {
     targetType,
@@ -222,7 +241,11 @@ export async function handleIntake(opts = {}, rootsArg = null) {
     labels: hydrated.labels,
     closedIssues: hydrated.closedIssues,
     gitDir,
-    actor: actorInfo.actor,
+    account: actorLayers.account,
+    verifiedPlatformLogin: actorLayers.verifiedPlatformLogin,
+    agent: actorLayers.agent,
+    supportsMention: Boolean(effectiveCaps?.mention === true),
+    capabilities: effectiveCaps,
     applied: applyMode,
   })
 
@@ -231,19 +254,6 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   let delegated = false
 
   if (applyMode) {
-    const useRemoteGh = providerId === 'github' && role !== 'local-only' && role !== 'generic-git' && Boolean(targetRepo)
-    const ghProbe = useRemoteGh
-      ? (opts._ghProbe ?? (await probeForWrite({ cwd: mainRoot, remoteUrls: state.remoteUrls ?? {} })))
-      : null
-    const backend = opts._backend ?? createTaskBackend({
-      role,
-      providerId,
-      targetRepo,
-      client: opts._ghClient ?? ghProbe?.client,
-      pushRemote,
-      mainRoot,
-      gitDir,
-    })
 
     const cleanComment = stripPfStateTags(evaluation.commentBody)
     actions = { backend: backend.kind, comment: null, labels: null, close: null }
@@ -321,7 +331,10 @@ export async function handleIntake(opts = {}, rootsArg = null) {
       duplicates: evaluation.duplicates,
       dimensions: evaluation.dimensions,
       rollbackHint: evaluation.rollbackHint,
-      actor: actorInfo.actor,
+      account: actorLayers.account,
+      verifiedPlatformLogin: actorLayers.verifiedPlatformLogin,
+      agent: actorLayers.agent,
+      actor: actorLayers.agent || actorLayers.account || null,
       applied: true,
       delegated,
       backend: backend.kind,

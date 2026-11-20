@@ -103,6 +103,36 @@ export function commandsOmittedNote(facts, tooLong) {
   return ['这条命令太长，不写进上面那个代码块（照抄会被截断的尾巴带坏）：', ...parts].join('\n')
 }
 
+const SUBDIR_CMD_AGGREGATE_THRESHOLD = 6
+const COMMANDS_BLOCK_MAX_BYTES = 4096
+
+function renderEcoBucket(header, bucket, kindTag, sources, skipped) {
+  const pairs = COMMAND_ORDER
+    .map((key) => [key, bucket?.[key]])
+    .filter(([, value]) => typeof value === 'string' && value.trim())
+  const lines = [header]
+  const rendered = []
+  const omittedHere = []
+  for (const [key, value] of pairs) {
+    const text = `${value}  # ${COMMAND_LABEL[key]}`
+    if (Buffer.byteLength(text, 'utf8') > INLINE_COMMAND_MAX_BYTES) {
+      omittedHere.push({ text: value, kind: kindTag, label: COMMAND_LABEL[key], source: sources[key] })
+      continue
+    }
+    rendered.push(text)
+  }
+  skipped.push(...omittedHere)
+  for (const line of rendered.slice(0, ECO_COMMANDS_SHOWN_PER_KIND)) lines.push(line)
+  const hidden = Math.max(0, rendered.length - ECO_COMMANDS_SHOWN_PER_KIND)
+  if (hidden > 0) {
+    lines.push(`# 另有 ${hidden} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
+  }
+  if (rendered.length === 0 && omittedHere.length > 0) {
+    lines.push(`# ${kindTag} 的命令都太长，见本节下方「去哪看」`)
+  }
+  return lines
+}
+
 export function commandsBlock(facts) {
   const byEco = facts.commandsByEcosystem ?? {}
   const sources = facts.commandSources ?? {}
@@ -111,33 +141,53 @@ export function commandsBlock(facts) {
   if (kinds.length > 1) {
     const blocks = []
     const skipped = []
-    for (const kind of kinds) {
-      const pairs = COMMAND_ORDER
-        .map((key) => [key, byEco[kind]?.[key]])
-        .filter(([, value]) => typeof value === 'string' && value.trim())
-      const lines = [`# --- ${kind} ---`]
-      const rendered = []
-      const omittedHere = []
-      for (const [key, value] of pairs) {
-        const text = `${value}  # ${COMMAND_LABEL[key]}`
-        if (Buffer.byteLength(text, 'utf8') > INLINE_COMMAND_MAX_BYTES) {
-          omittedHere.push({ text: value, kind, label: COMMAND_LABEL[key], source: sources[key] })
+    const rootKinds = kinds.filter((k) => !k.includes('/'))
+    const subdirKinds = kinds.filter((k) => k.includes('/'))
+    const shouldAggregateSubdirs = subdirKinds.length > SUBDIR_CMD_AGGREGATE_THRESHOLD
+
+    for (const kind of (shouldAggregateSubdirs ? rootKinds : kinds)) {
+      blocks.push(renderEcoBucket(`# --- ${kind} ---`, byEco[kind], kind, sources, skipped).join('\n'))
+    }
+
+    if (shouldAggregateSubdirs) {
+      const groups = new Map()
+      for (const dir of subdirKinds) {
+        const top = dir.split('/')[0] || dir
+        if (!groups.has(top)) groups.set(top, [])
+        groups.get(top).push(dir)
+      }
+      for (const [top, dirs] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (dirs.length === 1) {
+          blocks.push(renderEcoBucket(`# --- ${dirs[0]} ---`, byEco[dirs[0]], dirs[0], sources, skipped).join('\n'))
           continue
         }
-        rendered.push(text)
+        const rep = dirs[0]
+        const lines = renderEcoBucket(`# --- ${top}/*（共 ${dirs.length} 个子包，示例 ${rep}） ---`, byEco[rep], top, sources, skipped)
+        lines.push(`# 其余 ${dirs.length - 1} 个 ${top}/* 子包按各自清单命令运行`)
+        blocks.push(lines.join('\n'))
       }
-      skipped.push(...omittedHere)
-      for (const line of rendered.slice(0, ECO_COMMANDS_SHOWN_PER_KIND)) lines.push(line)
-      const hidden = Math.max(0, rendered.length - ECO_COMMANDS_SHOWN_PER_KIND)
-      if (hidden > 0) {
-        lines.push(`# 另有 ${hidden} 条同类命令未展开，完整清单见该生态的 CI 配置与任务运行器文件`)
-      }
-      if (rendered.length === 0 && omittedHere.length > 0) {
-        lines.push(`# ${kind} 的命令都太长，见本节下方「去哪看」`)
-      }
-      blocks.push(lines.join('\n'))
     }
-    return { block: blocks.join('\n\n'), tooLong: skipped }
+
+    let combined = blocks.join('\n\n')
+    if (shouldAggregateSubdirs && Buffer.byteLength(combined, 'utf8') > COMMANDS_BLOCK_MAX_BYTES) {
+      const compact = []
+      for (const kind of rootKinds) {
+        compact.push(renderEcoBucket(`# --- ${kind} ---`, byEco[kind], kind, sources, []).join('\n'))
+      }
+      if (subdirKinds.length > 0) {
+        const groups = new Map()
+        for (const dir of subdirKinds) {
+          const top = dir.split('/')[0] || dir
+          groups.set(top, (groups.get(top) ?? 0) + 1)
+        }
+        compact.push([
+          `# --- 子包聚合（共 ${subdirKinds.length} 个） ---`,
+          ...[...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([t, n]) => `# ${t}/*：${n} 个子包（命令见各子包清单）`),
+        ].join('\n'))
+      }
+      combined = compact.join('\n\n')
+    }
+    return { block: combined, tooLong: skipped }
   }
 
   const source = kinds.length === 1 ? byEco[kinds[0]] : facts.commands ?? {}
@@ -366,6 +416,20 @@ export function buildDevProfileVars(facts, targetRoot) {
   }
 }
 
+function formatWorkspacePackages(packages) {
+  if (!Array.isArray(packages) || packages.length === 0) return '各子包'
+  if (packages.length <= 12) return packages.map((p) => `\`${p}\``).join('、')
+  const byTop = new Map()
+  for (const p of packages) {
+    const top = String(p).split('/')[0] || p
+    byTop.set(top, (byTop.get(top) ?? 0) + 1)
+  }
+  return [...byTop.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([top, cnt]) => (cnt > 1 ? `\`${top}/*\`（${cnt} 个）` : `\`${top}\``))
+    .join('、')
+}
+
 export function buildVars(facts, root, { kitDir } = {}) {
   const conventions = facts.conventions ?? {}
   const releaseNotesTarget = conventions.releaseNotesMode === 'changelog'
@@ -397,7 +461,7 @@ export function buildVars(facts, root, { kitDir } = {}) {
     WORK_DIR: `${resolvedWorkDir}/`,
     COMMIT_STYLE_HINT: commitStyleHint(facts),
     README_LIST: readmes.length > 0 ? readmes.map((r) => `\`${r}\``).join('、') : '`README.md`',
-    WORKSPACE_PACKAGES: packages.length > 0 ? packages.map((p) => `\`${p}\``).join('、') : '各子包',
+    WORKSPACE_PACKAGES: formatWorkspacePackages(packages),
     CONVENTIONS_HINT: conventionsHint(facts),
     KIT_ROUTING_ROWS: renderKitRoutingRows({ customSkills, discoveredSkills, hasRemote }),
     CUSTOM_SKILLS_BLOCK: customSkillsBlock(facts),

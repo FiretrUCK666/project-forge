@@ -135,8 +135,8 @@ export const INJECTIONS_GATES = [
     id: 'I121',
     what: '超长命令被截断后仍塞进可执行块（照抄必失败）',
     file: 'scripts/lib/agents-defaults.mjs',
-    from: '        if (Buffer.byteLength(text, \'utf8\') > INLINE_COMMAND_MAX_BYTES) {',
-    to: '        if (false) {',
+    from: '    if (Buffer.byteLength(text, \'utf8\') > INLINE_COMMAND_MAX_BYTES) {',
+    to: '    if (false) {',
     expect: '超 500 字节的命令不进可执行块',
   },
   {

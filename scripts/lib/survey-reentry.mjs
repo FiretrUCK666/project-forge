@@ -88,29 +88,61 @@ export function detectLocalSkills(root) {
   return found
 }
 
-function hashMatchesNormalized(filePath, expectedHash) {
+function hashBufferMatchesNormalized(buf, expectedHash) {
+  if (createHash('sha256').update(buf).digest('hex') === expectedHash) return true
+  if (!buf.subarray(0, 4096).includes(0)) {
+    const lfBuf = Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
+    return createHash('sha256').update(lfBuf).digest('hex') === expectedHash
+  }
+  return false
+}
+
+function hashMatchesNormalized(filePath, expectedHash, cachedBuf = null) {
   try {
-    const buf = readFileSync(filePath)
-    if (createHash('sha256').update(buf).digest('hex') === expectedHash) return true
-    if (!buf.subarray(0, 4096).includes(0)) {
-      const lfBuf = Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
-      return createHash('sha256').update(lfBuf).digest('hex') === expectedHash
-    }
-    return false
+    const buf = cachedBuf ?? readFileSync(filePath)
+    return hashBufferMatchesNormalized(buf, expectedHash)
   } catch {
     return false
   }
 }
 
-export function detectKit(root, { kitDir } = {}) {
+function listInstalledSkillDirNames(root, textByRel = null) {
+  if (textByRel && textByRel.size > 0) {
+    const dirs = new Set()
+    for (const rel of textByRel.keys()) {
+      if (!rel.startsWith('.agents/skills/')) continue
+      const parts = rel.split('/')
+      if (parts.length === 4 && (parts[3] === 'SKILL.md' || parts[3] === 'skill.md')) {
+        dirs.add(parts[2])
+      }
+    }
+    return [...dirs].sort()
+  }
+  const full = join(root, '.agents', 'skills')
+  if (!existsSync(full)) return []
+  let entries = []
+  try {
+    entries = readdirSync(full, { withFileTypes: true })
+  } catch { return [] }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || isMacMetadataName(entry.name)) continue
+    const sub = join(full, entry.name)
+    if (existsSync(join(sub, 'SKILL.md')) || existsSync(join(sub, 'skill.md'))) out.push(entry.name)
+  }
+  return out.sort()
+}
+
+export function detectKit(root, { kitDir, rawFiles } = {}) {
   const skillsRoot = join(root, '.agents', 'skills')
   const manifestFull = join(root, PF_MANIFEST_REL)
-  const manifestExists = existsSync(manifestFull)
+  const cachedManifestText = rawFiles?.textByRel?.get(PF_MANIFEST_REL)
+  const manifestExists = cachedManifestText !== undefined || existsSync(manifestFull)
   const discoveredKit = discoverKitSkills(kitDir)
   const kitSkillNames = discoveredKit.map((s) => s.dirName)
   const kitSkillSet = new Set(kitSkillNames)
 
-  const rawText = manifestExists ? readTextSafe(manifestFull) : undefined
+  const rawText = manifestExists ? (cachedManifestText ?? readTextSafe(manifestFull)) : undefined
   let manifest = null
   if (manifestExists) {
     try { manifest = rawText ? JSON.parse(rawText) : null } catch { manifest = null }
@@ -125,8 +157,7 @@ export function detectKit(root, { kitDir } = {}) {
     && !Array.isArray(manifest.files),
   )
 
-  const agentsSkills = scanManagedSkillDir('.agents/skills', root)
-  const installedSkills = agentsSkills.map((s) => s.dirName)
+  const installedSkills = listInstalledSkillDirNames(root, rawFiles?.textByRel ?? null)
   const manifestManagedDirs = new Set()
   if (manifestValid) {
     for (const key of Object.keys(manifest.files)) {
@@ -237,16 +268,18 @@ export function detectKit(root, { kitDir } = {}) {
     const normRel = posixPath(rel)
     const topSkill = normRel.split('/')[0]
     if (removedSet.has(normRel) || disabledSet.has(topSkill)) continue
+    const fullRel = normRel.startsWith('.agents/skills/') ? normRel : `.agents/skills/${normRel}`
+    const cachedBuf = rawFiles?.bufByRel?.get(fullRel) ?? null
     const abs = normRel.startsWith('.agents/skills/')
       ? join(root, normRel)
       : join(skillsRoot, normRel)
-    if (!existsSync(abs)) {
+    if (!cachedBuf && !existsSync(abs)) {
       missingFiles.push(normRel)
       continue
     }
     if (customizedSet.has(normRel)) continue
     const expectedHash = typeof entry === 'string' ? entry : entry?.sha256
-    if (expectedHash && !hashMatchesNormalized(abs, expectedHash)) {
+    if (expectedHash && !hashMatchesNormalized(abs, expectedHash, cachedBuf)) {
       modifiedFiles.push(normRel)
     }
   }
@@ -304,9 +337,9 @@ const UNREGISTERED_SKIP_TOP_DIRS = new Set([
   'docs', 'scripts', 'tests', 'test', '__tests__',
 ])
 
-export function detectTddStalePaths(root, tddRel) {
+export function detectTddStalePaths(root, tddRel, preReadText = undefined, relSet = null) {
   if (!tddRel) return []
-  const text = readTextSafe(join(root, tddRel))
+  const text = preReadText !== undefined ? preReadText : readTextSafe(join(root, tddRel))
   if (!text) return []
   const source = text.replace(/\r\n/g, '\n')
   const snippets = []
@@ -326,7 +359,7 @@ export function detectTddStalePaths(root, tddRel) {
       if (clean.includes('..') || /[<>*?{}$]/.test(clean)) continue
       if (TDD_IGNORED_PREFIXES.some((p) => clean.startsWith(p))) continue
       if (!TDD_SOURCE_PATH_EXT.test(clean)) continue
-      if (!existsSync(join(root, clean))) stale.add(clean)
+      if (!(relSet?.has(clean) || existsSync(join(root, clean)))) stale.add(clean)
     }
   }
   return [...stale].sort()
@@ -350,10 +383,24 @@ function dirContainsFiles(root, dir, { codeOnly = false, depth = 0 } = {}) {
   return false
 }
 
-export function collectTopModuleDirs(root, workspace) {
+export function collectTopModuleDirs(root, workspace, relFiles = null) {
   const candidates = []
   if (workspace?.declared && (workspace.packages?.length ?? 0) > 0) {
     for (const p of workspace.packages) candidates.push(p)
+  } else if (Array.isArray(relFiles) && relFiles.length > 0) {
+    const found = new Set()
+    for (const rel of relFiles) {
+      if (!CODE_EXT.test(rel)) continue
+      const parts = rel.split('/')
+      if (parts.length < 2) continue
+      const top = parts[0]
+      if (top === 'src') {
+        if (parts.length >= 3 && !SKIP_DIRS.has(parts[1])) found.add(`src/${parts[1]}`)
+      } else if (!top.startsWith('.') && !UNREGISTERED_SKIP_TOP_DIRS.has(top)) {
+        found.add(top)
+      }
+    }
+    return [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   } else {
     if (existsSync(join(root, 'src'))) {
       let entries = []

@@ -576,6 +576,27 @@ async function main(argv) {
       process.stderr.write(`[保护跳过] 以下区间曾被手工修改或缺乏基线（与 ${PF_MANIFEST_REL} 不符且未标 customized），已保留你的改动未覆盖：${refreshed.protectedRegions.join('、')}。\n`)
     }
     writeManifestRegions(root, nextText, refreshed.protectedRegions, newlyRemoved)
+    if (refreshed.changed) {
+      const convergedFacts = await factsOf(root)
+      const convergedManifest = readManifestSafe(root)
+      const convergedRendered = renderAgentsTemplate(convergedFacts, template, root, { manifest: convergedManifest })
+      const convergedBaseline = convergedManifest && !convergedManifest.invalid ? (convergedManifest.data.agentsRegions ?? {}) : null
+      const convergedRefresh = refreshRegions(nextText, convergedRendered, volatileValues(convergedFacts), convergedBaseline, removedSet)
+      if (convergedRefresh.changed) {
+        const convergedSize = checkAgentsBytes(convergedRefresh.text)
+        if (!convergedSize.oversize || (allowCustomOversize && convergedSize.managedBytes <= AGENTS_MAX_BYTES && convergedSize.customBytes > 0)) {
+          writeAtomic(agentsPath, convergedRefresh.text)
+          writeManifestRegions(
+            root,
+            convergedRefresh.text,
+            [...new Set([...refreshed.protectedRegions, ...convergedRefresh.protectedRegions])],
+            newlyRemoved,
+          )
+          renderedCache = convergedRendered
+          rendered = convergedRendered
+        }
+      }
+    }
     report(agentsPath, inspect(agentsPath, rendered, removedSet), { verbose })
     return 0
   }

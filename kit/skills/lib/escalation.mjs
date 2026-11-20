@@ -70,6 +70,36 @@ function inferEscalationCase(item = {}) {
   return 2
 }
 
+/** 复现证据字段的长度上限：超过它就不再是「最小复现」，而是把整段日志抄进建单正文。 */
+export const REPRO_EVIDENCE_MAX_CHARS = 1200
+
+/**
+ * 归一化「最小复现」与「可重放 PoC 命令」两个可选证据字段。
+ * 值只描述现象与命令本身，不限定任何具体工具：任何能独立重放并观察结果的入口都算。
+ */
+export function normalizeReproEvidence(item = {}) {
+  const repro = item && typeof item === 'object' ? item.reproEvidence : null
+  const cmd = item && typeof item === 'object' ? item.pocCommand : null
+  const reproText = (Array.isArray(repro) ? repro : [repro])
+    .map((x) => String(x ?? '').trim()).filter(Boolean).join('；')
+  const pocText = (Array.isArray(cmd) ? cmd : [cmd])
+    .map((x) => String(x ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' && ')
+  return { reproEvidence: reproText || null, pocCommand: pocText || null }
+}
+
+/** 校验复现证据字段：单行命令、有界长度；不做工具白名单识别。 */
+export function validateReproEvidenceFields(item = {}) {
+  const { reproEvidence, pocCommand } = normalizeReproEvidence(item)
+  const errors = []
+  if (reproEvidence && reproEvidence.length > REPRO_EVIDENCE_MAX_CHARS) {
+    errors.push(`reproEvidence 超过 ${REPRO_EVIDENCE_MAX_CHARS} 字符，请只留最小可复现的现象与退出码摘要`)
+  }
+  if (pocCommand && pocCommand.length > REPRO_EVIDENCE_MAX_CHARS) {
+    errors.push(`pocCommand 超过 ${REPRO_EVIDENCE_MAX_CHARS} 字符，请只留一条可独立重放的命令`)
+  }
+  return { ok: errors.length === 0, errors, reproEvidence, pocCommand }
+}
+
 /**
  * 组装包含 Case、验收清单 C1..Cn、根因与单一 `[NEXT STEP]` 的标准 Escalation Issue 载荷。
  */
@@ -77,6 +107,7 @@ export function buildEscalationIssuePayload(item = {}) {
   const caseType = inferEscalationCase(item)
   const escalationTier = classifyEscalationTier(item)
   const title = formatWorkTitle(item.title ?? item.summary ?? '未命名升级问题', caseType)
+  const { reproEvidence, pocCommand } = normalizeReproEvidence(item)
   const labels = [...new Set((Array.isArray(item.labels) && item.labels.length > 0 ? item.labels : [item.stopLoss ? 'stop-loss' : 'escalation'])
     .map((l) => String(l ?? '').trim())
     .filter(Boolean))]
@@ -112,6 +143,8 @@ export function buildEscalationIssuePayload(item = {}) {
       '',
       `- 上下文：${scopeParts.join(' | ')}`,
       filesList ? `- 涉及文件：${filesList}` : null,
+      reproEvidence ? `- 最小复现：${reproEvidence}` : null,
+      pocCommand ? `- 复现命令：\`${pocCommand}\`` : null,
     ].filter((x) => x !== null)
     if (item.stopLossPacket) {
       const p = item.stopLossPacket
@@ -138,6 +171,8 @@ export function buildEscalationIssuePayload(item = {}) {
     rootCause,
     criteria,
     nextStep,
+    ...(reproEvidence ? { reproEvidence } : {}),
+    ...(pocCommand ? { pocCommand } : {}),
     ...(item.category ? { category: item.category } : {}),
     ...(item.severity ? { severity: item.severity } : {}),
     ...(item.milestone !== undefined && item.milestone !== null ? { milestone: item.milestone } : {}),

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
+import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { buildEscalationIssuePayload, escalateToBackend } from '../../lib/escalation.mjs'
 import { posixPath } from '../../lib/git.mjs'
 import {
@@ -350,7 +351,16 @@ export async function handleRecord(opts, roots) {
   const e2eText = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
-  const artifactText = typeof opts.artifact === 'string' ? opts.artifact.trim() : ''
+  const artifactInput = normalizeArtifactRecords({ repoRoot: targetRoot, artifacts: artifactPathsOf(opts) })
+  if (!artifactInput.ok) {
+    const msg = `BLOCKED_ARTIFACT_INVALID: ${artifactInput.error}`
+    if (opts.json) process.stdout.write(`${JSON.stringify({ status: 'BLOCKED_ARTIFACT_INVALID', exitCode: EXIT.UNTRUSTED_HAZARD, taskId, round, headSha, artifactErrors: artifactInput.errors, error: msg }, null, 2)}\n`)
+    else process.stdout.write(`${msg}\n`)
+    process.stderr.write(`${msg}\n`)
+    return EXIT.UNTRUSTED_HAZARD
+  }
+  const artifactRecords = artifactInput.records
+  const artifactText = artifactRecords.map((r) => `${r.relPath}(${r.bytes}B,${r.sha256Prefix})`).join('、')
   const empParts = []
   if (evidenceRaw) empParts.push(`审查命令与实证：${evidenceRaw}`)
   if (e2eText) empParts.push(`E2E/交互观察：${e2eText}`)
@@ -363,7 +373,7 @@ export async function handleRecord(opts, roots) {
     else if (recEmp.e2eObservation?.summary) empParts.push(`回执观察：${recEmp.e2eObservation.summary}`)
   }
   const reviewEmpirical = empParts.join(' | ') || null
-  const visualChecked = Boolean(opts['visual-checked'] || e2eText)
+  const visualChecked = Boolean(e2eText || artifactRecords.length > 0)
   const roundEntry = {
     round,
     baseSha: baseLedger.baseSha ?? null,
@@ -386,6 +396,7 @@ export async function handleRecord(opts, roots) {
     resolvedItems,
     faultInjection: effectiveFaultInjection,
     visualChecked,
+    ...(artifactRecords.length > 0 ? { artifacts: mergeArtifactRecords(prevRound?.artifacts ?? [], artifactRecords) } : {}),
     stopLossTriggered: stopLoss,
     stopLossReasons: stopReasons,
     recordedAt: new Date().toISOString(),
@@ -436,7 +447,7 @@ export async function handleRecord(opts, roots) {
 
   if (visualChecked) {
     updated.visualVerifiedHead = headSha
-    updated.visualCheckEvidence = e2eText || (updated.visualCheckEvidence ?? '独立审查已核验真实端到端运行、交互与输出观察')
+    updated.visualCheckEvidence = e2eText || artifactText || updated.visualCheckEvidence
   }
 
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)

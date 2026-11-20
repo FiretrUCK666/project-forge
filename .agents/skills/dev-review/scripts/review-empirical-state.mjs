@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { escalateToBackend } from '../../lib/escalation.mjs'
+import { artifactPathsOf, validateArtifactsAndVisual } from '../../lib/empirical-artifacts.mjs'
 import {
   canonicalPath, execShellCommand, gitStatusPorcelainZ,
   posixPath, readJsonSafe, samePath, sha256File, sha256Text, writeJsonAtomic,
@@ -45,22 +46,36 @@ export function collectDevProfileEmpiricalCmds(devProfile = {}) {
   return { autoCommands: effectiveAuto, hasDevProfileTestCmds: allTestCmds.length > 0 }
 }
 
-/** 提取并校验 `--e2e-evidence` / `--visual-evidence` 输入，拦截无实质水话。 */
+/**
+ * 提取并校验 `--e2e-evidence` / `--visual-evidence` 输入，拦截无实质水话。
+ * 裸 `--visual-checked` 不在本函数里合成任何观察文本：只声明「我核验过」不构成证据，
+ * 界面资源改动是否有实证由 `resolveArtifactAndVisualInput` 判定。
+ */
 export function resolveAndValidateE2eEvidenceInput(opts = {}) {
   const explicitRaw = (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
     || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim())
     || ''
-  if (explicitRaw) {
-    const check = validateE2eEvidenceText(explicitRaw)
-    if (!check.ok) {
-      return { ok: false, explicit: true, raw: explicitRaw, text: '', code: check.code, reason: check.reason }
-    }
-    return { ok: true, explicit: true, raw: explicitRaw, text: check.cleaned, code: null, reason: null }
+  if (!explicitRaw) return { ok: true, explicit: false, raw: '', text: '', code: null, reason: null }
+  const check = validateE2eEvidenceText(explicitRaw)
+  if (!check.ok) {
+    return { ok: false, explicit: true, raw: explicitRaw, text: '', code: check.code, reason: check.reason }
   }
-  if (opts['visual-checked']) {
-    return { ok: true, explicit: false, raw: '', text: 'e2e/visual runtime behavior observed and verified', code: null, reason: null }
-  }
-  return { ok: true, explicit: false, raw: '', text: '', code: null, reason: null }
+  return { ok: true, explicit: true, raw: explicitRaw, text: check.cleaned, code: null, reason: null }
+}
+
+/**
+ * 汇总审查侧的实证附件与界面核验结论：附件必须是真实非空常规文件，观察必须有实质内容。
+ * 变更未触及界面资源时不触发界面判据，只需附件本身合法。
+ */
+export function resolveArtifactAndVisualInput(opts = {}, { repoRoot = null, visualFilesChanged = [] } = {}) {
+  return validateArtifactsAndVisual({
+    repoRoot,
+    artifacts: artifactPathsOf(opts),
+    visualFilesChanged,
+    visualCheckedRaw: Boolean(opts['visual-checked']),
+    observationSummary: String(opts['e2e-evidence'] ?? opts['visual-evidence'] ?? '').trim(),
+    visualBlockedReason: String(opts['visual-blocked-reason'] ?? '').trim(),
+  })
 }
 
 function isInsideDir(candidateAbs, parentAbs) {
@@ -259,12 +274,12 @@ export function buildUnblockCommands({ missingSteps, dirtyFaultResidue, mode, ta
     cmds.push(`还原故障后运行: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-fault --phase restore ${targetFlags} --cmd "${sampleCmd}"`)
   }
   if (missingSteps.includes('visual-check')) {
-    cmds.push('核验实际渲染/交互与浅深色视觉效果后追加 --visual-checked')
+    cmds.push('核验实际渲染/交互与浅深色视觉效果后追加 --artifact "<真实非空产物路径>"；无渲染环境时改用 --visual-blocked-reason "<阻塞原因>" 诚实报阻')
   }
   if (missingSteps.includes('e2e-observation')) {
     cmds.push(`运行端到端实证并附带运行观察结论后重试: node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --e2e-evidence "<运行观察实证>"`)
   }
-  const extraVisual = missingSteps.includes('visual-check') ? ' --visual-checked' : ''
+  const extraVisual = missingSteps.includes('visual-check') ? ' --artifact "<真实非空产物路径>"' : ''
   const extraE2e = missingSteps.includes('e2e-observation') ? ' --e2e-evidence "<运行观察实证>"' : ''
   cmds.push(`node ".agents/skills/dev-review/scripts/review-pack.mjs" ${targetFlags}${extraVisual}${extraE2e} --include-diff`)
   return cmds
@@ -567,6 +582,12 @@ export async function handleEmpiricalE2eFailure({
         files: changedFiles.slice(0, 10),
         taskId: task?.taskId ?? null,
         labels: ['e2e-fail'],
+        // 建单正文带上最小失败复现与可独立重放的命令，接手的人不必先猜怎么复现。
+        reproEvidence: [
+          `exit=${failedCmdRes?.exitCode ?? 1}`,
+          ...(failedCmdRes?.stderrExcerpt ? [`stderr=${String(failedCmdRes.stderrExcerpt).slice(0, 200)}`] : []),
+        ].join('；'),
+        ...(failedCmdRes?.cmd ? { pocCommand: failedCmdRes.cmd } : {}),
       },
       _ghProbe: opts._ghProbe ?? null,
       _ghClient: opts._ghClient ?? null,

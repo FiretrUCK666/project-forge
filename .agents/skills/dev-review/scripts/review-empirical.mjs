@@ -12,14 +12,15 @@ import {
   determineWorkflowPolicy, buildE2eObservation, hasValidE2eObservationOnHead,
   readVerificationEvidence, validateE2eEvidenceText,
 } from '../../lib/workflow-policy.mjs'
+import { mergeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
 import { EXIT } from './review-diff.mjs'
 import {
   buildModeTargetFlags, buildUnblockCommands, checkDirtyFaultResidueBeforeSync,
   checkUntrustedBeforeExec, collectDevProfileEmpiricalCmds, computeCleanBaselineFingerprint,
   computeWorkspaceFingerprint, emitGateBlock, getEffectiveStatusEntries, handleEmpiricalE2eFailure,
   hasPendingFaultInReceipt, isSameScopeContext, readReceipt, recordMechanicalPack,
-  resolveAndValidateE2eEvidenceInput, resolveEmpiricalReceiptPath, runCommandList,
-  sanitizeCmdTemplate, writeReceipt,
+  resolveAndValidateE2eEvidenceInput, resolveArtifactAndVisualInput, resolveEmpiricalReceiptPath,
+  runCommandList, sanitizeCmdTemplate, writeReceipt,
 } from './review-empirical-state.mjs'
 
 export {
@@ -156,12 +157,33 @@ export function evaluateIncludeDiffGate({
   const shallowE2eEvidence = evInput.ok ? null : { code: evInput.code, reason: evInput.reason, raw: evInput.raw }
   const e2eEvidenceInput = evInput.ok ? evInput.text : ''
   const evidence = task?.taskId ? readVerificationEvidence(gitDir, task.taskId) : null
-
-  const visualDone = !requirements.visualCheckRequired || Boolean(
-    behavioralGate?.visualVerifiedOnHead
-    || opts['visual-checked']
+  const artifactVisual = resolveArtifactAndVisualInput(opts, {
+    repoRoot: reviewRoot,
+    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  })
+  if (!artifactVisual.ok) {
+    const targetFlagsForArtifact = buildModeTargetFlags({ mode, task, round, prNo, baseRef: opts.base, reviewRoot, mainRoot })
+    return emitGateBlock({
+      opts,
+      code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
+      payload: {
+        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        uiFiles: artifactVisual.visual.uiFiles,
+        artifactErrors: artifactVisual.errors,
+        error: artifactVisual.reason,
+        nextSteps: [`node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlagsForArtifact} --artifact "<真实非空产物路径>"`],
+      },
+      textLines: ['BLOCKED_VISUAL_EVIDENCE_REQUIRED', artifactVisual.reason],
+    })
+  }
+  const visualSatisfied = Boolean(
+    artifactVisual.visual.satisfiedBy !== null
+    || behavioralGate?.visualVerifiedOnHead
     || (matchesBaseline && (receipt?.empiricalVerified?.visualChecked || receipt?.visualChecked)),
   )
+
+  const visualDone = !requirements.visualCheckRequired || visualSatisfied
   const smokeOk = !requirements.smokeRequired || Boolean(
     (evidence && evidence.headSha === headSha && !evidence.dirty && evidence.smokeVerifiedOnHead !== false && evidence.gates?.smoke?.exitCode === 0)
     || (empiricalDone && receipt?.empiricalVerified?.executed !== false && !receipt?.empiricalVerified?.errorOnly
@@ -300,6 +322,28 @@ export async function handleCheckEmpirical(ctx) {
   }
   const e2eEvidenceInput = evInput.text
 
+  const artifactVisual = resolveArtifactAndVisualInput(opts, {
+    repoRoot: reviewRoot,
+    visualFilesChanged: behavioralGate?.visualFilesChanged ?? [],
+  })
+  if (!artifactVisual.ok) {
+    return emitGateBlock({
+      opts,
+      code: 'BLOCKED_VISUAL_EVIDENCE_REQUIRED',
+      payload: {
+        status: artifactVisual.code, code: artifactVisual.code, exitCode: EXIT.UNTRUSTED_HAZARD,
+        mode, round, headSha, workspaceFingerprint: currentFingerprint,
+        uiFiles: artifactVisual.visual.uiFiles, artifactErrors: artifactVisual.errors,
+        error: artifactVisual.reason,
+        nextSteps: [
+          `node ".agents/skills/dev-review/scripts/review-pack.mjs" check-empirical ${targetFlags} --artifact "<真实非空产物路径>"`
+          + ` 或 --visual-blocked-reason "<无渲染环境的诚实阻塞说明>"`,
+        ],
+      },
+      textLines: ['BLOCKED_VISUAL_EVIDENCE_REQUIRED', artifactVisual.reason],
+    })
+  }
+
   if (commandsToRun.length === 0 && !requirements.isEmptyDiff && !requirements.isLowRiskPureDoc) {
     const msg = 'BLOCKED_EMPIRICAL_CMD_REQUIRED: 未配置 Dev Profile 测试命令且触及非低风险变更，必须通过 --cmd "<C* 证伪命令>" 实跑验证。'
     return emitGateBlock({
@@ -382,6 +426,8 @@ export async function handleCheckEmpirical(ctx) {
   const keepMechanical = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint && prev?.mechanicalPackSeen)
   const keepFault = Boolean(sameCtx && prev?.baselineFingerprint === currentFingerprint)
   const verifiedAt = new Date().toISOString()
+  const artifacts = mergeArtifactRecords(prev?.artifacts ?? [], artifactVisual.records ?? [])
+  const visualChecked = Boolean(artifactVisual.visual.satisfiedBy || e2eEvidenceInput)
   writeReceipt(receiptPath, {
     mode,
     round,
@@ -393,6 +439,7 @@ export async function handleCheckEmpirical(ctx) {
     humanApprovedExec: Boolean(untrusted.approved || prev?.humanApprovedExec),
     mechanicalPackSeen: keepMechanical,
     mechanicalPackAt: keepMechanical ? prev.mechanicalPackAt : null,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
     empiricalVerified: {
       status: statusLabel,
       lowRiskNoRuntimeChecks,
@@ -406,7 +453,8 @@ export async function handleCheckEmpirical(ctx) {
       errorOnly: false,
       smokeExecuted,
       e2eObservation,
-      visualChecked: Boolean(opts['visual-checked'] || e2eEvidenceInput),
+      visualChecked,
+      ...(artifactVisual.visual.required ? { visual: artifactVisual.visual } : {}),
       verifiedAt,
     },
     faultInjectedAndFailed: keepFault ? (prev?.faultInjectedAndFailed ?? null) : null,

@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { checkMermaidLabelWidth } from './docs.mjs'
+import { evaluateStoredVisualEvidence, precheckVisualAndArtifacts } from './empirical-artifacts.mjs'
 import { validateE2eEvidenceText } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import { hasExploredEvidence, sanitizeTaskId, nextReviewRound } from './ledger.mjs'
@@ -21,6 +22,7 @@ import {
   buildInspectNextSteps,
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
+  buildVerificationEvidenceSection,
   hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
   redactDiagnosticText,
@@ -38,6 +40,7 @@ export {
   buildInspectNextSteps,
   buildMultiTaskWavePlan,
   buildSubmitNextSteps,
+  buildVerificationEvidenceSection,
   hasValidE2eObservationOnHead,
   hydratePrTemplateBody,
   redactDiagnosticText,
@@ -314,6 +317,15 @@ export function writeVerificationEvidence(gitCommonDir, taskId, record) {
   return path
 }
 
+/** `flow verify` 前置实证预检：校验附件与界面核验结论，通过后把元数据并入 `evidence.json`（只写仓外状态，不碰被跟踪文件）。 */
+export function validateVerifyPrecheck({ repoRoot = null, gitCommonDir = null, taskId = null, headSha = null, policy = null, record = true, ...rest } = {}) {
+  const evidencePath = record && gitCommonDir && taskId ? verificationEvidencePath(gitCommonDir, taskId) : null
+  return precheckVisualAndArtifacts({
+    ...rest, repoRoot, evidencePath, headSha,
+    visualFilesChanged: rest.visualFilesChanged ?? policy?.visualFilesChanged ?? [],
+  })
+}
+
 function configuredCmdForTier(profile, tierName) {
   if (!profile) return undefined
   const map = { quick: ['quickTest', 'quick-test'], smoke: ['smokeVerify', 'smoke-verify'], full: ['fullTest', 'full-test'], gate: ['mergeGate', 'merge-gate'] }
@@ -324,11 +336,14 @@ function configuredCmdForTier(profile, tierName) {
 
 /**
  * 现场校验分层实证 evidence.json，堵死 `--tier quick --target` 与跳过必填门禁的旁路。
+ * 界面资源的实证底线同时守一道：只留下布尔开关自证的不算放行（判据归 `empirical-artifacts.mjs`）。
  */
 export function validateVerificationEvidence({ policy, evidence, headSha, profile = null, explicitCmdUsed = false } = {}) {
   if (!evidence || typeof evidence !== 'object' || !evidence.gates || Object.keys(evidence.gates).length === 0) {
     return { ok: false, code: 'BLOCKED_NOT_VERIFIED', exitCode: 3, reason: '缺少当前任务的 verify 实证记录（evidence.json），请先运行 flow.mjs verify。' }
   }
+  const vis = evaluateStoredVisualEvidence({ evidence, policy, headSha })
+  if (!vis.ok) return { ok: false, code: vis.code, exitCode: 3, uiFiles: vis.uiFiles, reason: vis.reason }
   if (evidence.dirty === true || (headSha && evidence.headSha !== headSha)) {
     return {
       ok: false,

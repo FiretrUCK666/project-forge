@@ -8,8 +8,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
 import { formatWorkTitle } from './escalation.mjs'
-import { readTextSafe } from './git.mjs'
+import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
 
 function stripHtmlCommentsOutsideFences(md) {
@@ -138,7 +139,11 @@ function formatDurationMs(ms) {
   return `${(n / 1000).toFixed(2)}s`
 }
 
-function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged = [], visualVerifiedOnHead = false }) {
+/**
+ * 渲染 PR「验证证据」：门禁表格 + 验证基线 + 结构化实证摘要与附件清单。
+ * 实证附件与视觉核验那几行统一由 `empirical-artifacts.mjs` 产出，本函数只负责门禁表格。
+ */
+export function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged = [], visualVerifiedOnHead = false }) {
   const rows = []
   const gates = evidence?.gates && typeof evidence.gates === 'object' ? evidence.gates : null
   const labelMap = { gate: 'merge-gate', full: 'full-test', smoke: 'smoke-verify', quick: 'quick-test', docStatic: 'doc-static' }
@@ -167,13 +172,28 @@ function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualF
     `- **验证基线**：HEAD \`${shortHead}\``,
   ]
   const e2eSummary = String(evidence?.e2eObservation?.summary ?? '').trim()
-  if (e2eSummary) {
-    lines.push(`- **E2E 运行观察**：${e2eSummary}`)
-  }
-  if (visualFilesChanged.length > 0) {
-    lines.push(`- **视觉与交互核验**：${visualVerifiedOnHead ? `已核验（${ledger?.visualCheckEvidence ?? 'confirmed'}）` : `涉及 ${visualFilesChanged.slice(0, 5).join(', ')}`}`)
-  }
+  if (e2eSummary) lines.push(`- **E2E 运行观察**：${e2eSummary}`)
+  lines.push(...formatArtifactEvidenceLines({
+    records: Array.isArray(evidence?.artifacts) ? evidence.artifacts : [],
+    visual: buildVisualEvidenceView({ evidence, ledger, visualFilesChanged, visualVerifiedOnHead }),
+  }))
   return lines.join('\n')
+}
+
+/** 把 evidence.json 与账本里的界面核验结论汇成 `formatArtifactEvidenceLines` 需要的一层视图。 */
+function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], visualVerifiedOnHead = false }) {
+  const uiFiles = (Array.isArray(visualFilesChanged) ? visualFilesChanged : [])
+    .map((f) => posixPath(String(f ?? '')).trim()).filter(Boolean).sort()
+  if (uiFiles.length === 0) return null
+  const stored = evidence?.visual && typeof evidence.visual === 'object' ? evidence.visual : null
+  const verified = Boolean(visualVerifiedOnHead || (uiFiles.length > 0 && (stored?.observation || stored?.blockedReason)))
+  return {
+    required: true,
+    uiFiles,
+    satisfiedBy: verified ? (stored?.observation ? 'observation' : (stored?.blockedReason ? 'blocked' : 'artifacts')) : null,
+    observation: String(stored?.observation ?? ledger?.visualCheckEvidence ?? '').trim(),
+    blockedReason: String(stored?.blockedReason ?? '').trim(),
+  }
 }
 
 function replaceSectionIfPresent(md, headingCandidates, newBody) {

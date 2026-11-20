@@ -6,7 +6,7 @@ tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 108
-pr: null
+pr: 110
 branch: feat/issue108-attribution-routing
 owner: impl-108
 approved: true

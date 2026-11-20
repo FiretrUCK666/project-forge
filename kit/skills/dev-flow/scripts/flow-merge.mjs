@@ -213,7 +213,7 @@ export async function assertPreMergeGates({
     return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: shaGate.code }
   }
 
-  return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer }
+  return { ok: true, implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer, stopLossActive, gateFindings }
 }
 
 export async function handleMerge(opts, roots) {
@@ -244,7 +244,12 @@ export async function handleMerge(opts, roots) {
   })
   if (!gate.ok) return { exitCode: gate.exitCode, code: gate.code }
 
-  const { implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer } = gate
+  const { implRoot, currentHead, profile, changed, policy, evidence, effectiveReviewer, stopLossActive, gateFindings } = gate
+  // 被绕过的项逐条入账：结论行写「人类签字放行」却说不出绕过了什么，等于把放行说成通过。
+  const mergeBypassed = [
+    stopLossActive ? '独立审查停损（STOP_LOSS_ESCALATE）' : null,
+    (gateFindings ?? []).length > 0 ? `门禁弱化检查（${(gateFindings ?? []).map((f) => f.type).join(', ')}）` : null,
+  ].filter(Boolean)
   const baseBranch = ledger.baseBranch || 'main'
   let mergeRes = null
 
@@ -313,10 +318,15 @@ export async function handleMerge(opts, roots) {
       ? formatAttribution({ agent: effectiveReviewer, capabilities: backend.capabilities })
       : ''
     const mergeCommitSha = mergeRes?.mergeCommit ?? mergeRes?.sha ?? mergeRes?.mergedSha ?? null
+    // 被绕过的项逐条入账：结论行写「人类签字放行」却说不出绕过了什么，等于把放行说成通过。
+    const mergeBypassed = [
+      stopLossActive ? '独立审查停损（STOP_LOSS_ESCALATE）' : null,
+      gateFindings.length > 0 ? `门禁弱化检查（${gateFindings.map((f) => f.type).join(', ')}）` : null,
+    ].filter(Boolean)
     const { prCommentBody: mergePrBody, issueCommentBody: mergeIssueBody } = buildMergeComments({
       prNumber: ledger.prNumber, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
       reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
-      humanApprovedReason: ledger.humanApprovedReason ?? null,
+      humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
     })
     await backend.postComment({
       repo: originFull,
@@ -380,7 +390,7 @@ export async function handleMerge(opts, roots) {
       const { issueCommentBody: localMergeBody } = buildMergeComments({
         prNumber: ledger.prNumber ?? null, branch: ledger.branch, baseBranch, headSha: currentHead, mergeCommit: mergeCommitSha,
         reviewerId: effectiveReviewer, reviewerDisplay, implementerDisplay, linkedIssues: ledger.linkedIssues ?? [],
-        humanApprovedReason: ledger.humanApprovedReason ?? null,
+        humanApprovedReason: ledger.humanApprovedReason ?? null, bypassed: mergeBypassed,
       })
       for (const iss of ledger.linkedIssues ?? []) {
         await backend.postComment({ taskId, number: iss, body: localMergeBody, statePayload: { taskId, action: 'merged', branch: ledger.branch, reviewerId: effectiveReviewer ?? null } })

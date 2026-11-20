@@ -191,22 +191,27 @@ export function buildMergeComments({
   prNumber, branch, baseBranch, headSha = '', mergeCommit = '',
   reviewerId = null, reviewerDisplay = null,
   implementerDisplay = '', linkedIssues = [], humanApprovedReason = null,
+  bypassed = [],
 } = {}) {
   const shortHead = headSha ? String(headSha).slice(0, 7) : ''
   const shortMerge = mergeCommit ? String(mergeCommit).slice(0, 7) : ''
   const issuesText = linkedIssues.map((n) => `#${n}`).join(', ')
   const cleanImpl = String(implementerDisplay ?? '').trim()
   const cleanReviewer = String(reviewerDisplay ?? (reviewerId ? formatAttribution({ agent: reviewerId }) : '')).trim()
-  const reviewLine = cleanReviewer
-    ? `- **审查人**：${cleanReviewer}（独立复核通过，fail: 无）`
-    : `- **门禁结论**：门禁检查通过${humanApprovedReason ? `，人类确认放行（${humanApprovedReason}）` : ''}`
-  const issueReviewLine = cleanReviewer
-    ? `- **审查人**：${cleanReviewer}（独立复核通过并合并，fail: 无）`
-    : `- **门禁结论**：门禁检查通过并合并${humanApprovedReason ? `（人类确认：${humanApprovedReason}）` : ''}`
+  const skipped = (Array.isArray(bypassed) ? bypassed : []).filter(Boolean)
+  // 结论行要么写清是谁独立复核放的，要么写清人类凭什么放行、逐条列出被绕过的项。
+  // 「门禁检查通过」这种不带主语的结论什么也没说：既没说谁判的，也没说绕过了什么。
+  const conclusion = (suffix) => {
+    if (cleanReviewer) return `- **审查人**：${cleanReviewer}（独立复核通过${suffix}，fail: 无）`
+    const parts = [`- **门禁结论**：人类签字放行${suffix}`]
+    if (humanApprovedReason) parts.push(`- **放行理由**：${humanApprovedReason}`)
+    parts.push(skipped.length > 0 ? `- **被绕过项**：${skipped.join('、')}` : '- **被绕过项**：无（逐条核对通过）')
+    return parts.join('\n')
+  }
   const prCommentBody = [
     `### 已合并（PR #${prNumber} -> \`${baseBranch}\`）`,
     '',
-    reviewLine,
+    conclusion(''),
     ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     cleanImpl
       ? `- **来源分支 / 实施人**：\`${branch}\`${shortHead ? ` @ \`${shortHead}\`` : ''} · ${cleanImpl}`
@@ -217,7 +222,7 @@ export function buildMergeComments({
   const issueCommentBody = [
     `### 已合并 · PR #${prNumber}（\`${branch}\` -> \`${baseBranch}\`）`,
     '',
-    issueReviewLine,
+    conclusion('并合并'),
     ...(shortMerge ? [`- **合并提交**：\`${shortMerge}\``] : []),
     ...(cleanImpl ? [`- **实施人**：${cleanImpl}`] : []),
     '- **下一步**：主干已更新，按收尾清单清理工作区。',

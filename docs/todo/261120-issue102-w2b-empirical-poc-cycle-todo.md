@@ -1,7 +1,7 @@
 ---
 kind: todo
 title: 工具无关结构化实证附件、PoC 先行原则与有界优化循环实施清单
-status: active
+status: completed
 created: 2026-11-20
 updated: 2026-11-20
 issue: 102

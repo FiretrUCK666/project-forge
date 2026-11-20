@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { claimsOf } from './claims.mjs'
 import * as protocol from './protocol.mjs'
 import {
@@ -24,31 +25,43 @@ import {
   detectUniversalCommands,
   detectWorkspace,
 } from './survey-ecosystem.mjs'
-import { detectDocs, scanWorkspaceRaw } from './survey-workspace.mjs'
+import { detectDocs, startWorkspaceWalkAsync } from './survey-workspace.mjs'
 import { readTextSafe } from './text.mjs'
 
 /**
- * 合并单趟本地磁盘勘察：一次遍历文件树并共享结果，同步识别生态、任务入口、文档、套件与自有技能。
+ * 合并单趟本地磁盘勘察：一次遍历文件树并共享结果，在异步读盘并发推进期间先行解析生态与任务入口。
  */
-export function scanProjectStaticFacts(root) {
-  const rawWs = scanWorkspaceRaw(root)
-  const relFiles = rawWs.files.map((f) => f.rel)
+export async function scanProjectStaticFacts(root) {
+  const { relFiles, dirs, readPromise } = startWorkspaceWalkAsync(root)
+  const rawWs = await readPromise
+  const relSet = new Set(relFiles)
+  const dirSet = new Set(dirs)
   const ecosystem = detectEcosystem(root, relFiles)
   const taskEntryMeta = detectTaskEntriesDetailed(root)
   const taskCommands = taskEntryMeta.commands
-  const docs = detectDocs(root, { files: relFiles })
+  const neutralCi = scanNeutralCiSteps(root)
   const workspace = detectWorkspace(root, relFiles)
-  const kit = detectKit(root)
-  const localSkills = buildLocalSkillsFromKit(root, kit)
   const artifacts = detectArtifacts(root, ecosystem, relFiles)
-  const universal = detectUniversalCommands(root)
+  const universal = detectUniversalCommands(root, { neutralCi, runners: taskEntryMeta.runners })
 
-  const agentsText = docs?.agents ? (readTextSafe(join(root, docs.agents.file)) ?? '') : ''
-  const tddText = docs?.tdd ? (readTextSafe(join(root, docs.tdd)) ?? '') : ''
+  const textByRel = new Map()
+  const bufByRel = new Map()
+  for (const f of rawWs.files) {
+    if (typeof f.text === 'string') textByRel.set(f.rel, f.text)
+    if (f.rawBuf) bufByRel.set(f.rel, f.rawBuf)
+  }
+  const docs = detectDocs(root, { files: relFiles, textByRel, neutralCi })
+  const kit = detectKit(root, { rawFiles: { textByRel, bufByRel, relSet } })
+  const localSkills = buildLocalSkillsFromKit(root, kit)
+
+  const agentsText = docs?.agents ? (textByRel.get(docs.agents.file) ?? readTextSafe(join(root, docs.agents.file)) ?? '') : ''
+  const tddText = docs?.tdd ? (textByRel.get(docs.tdd) ?? readTextSafe(join(root, docs.tdd)) ?? '') : ''
 
   return {
     rawWs,
     relFiles,
+    relSet,
+    dirSet,
     ecosystem,
     taskEntryMeta,
     taskCommands,
@@ -103,6 +116,9 @@ export function detectReentry(root, {
   taskEntryMeta,
   agentsText: preReadAgents,
   tddText: preReadTdd,
+  relSet = null,
+  dirSet = null,
+  relFiles = null,
 }) {
   const isReentry = isReentryProject(docs, kit, root)
   const agentsText = preReadAgents !== undefined
@@ -125,7 +141,7 @@ export function detectReentry(root, {
       .filter((p) => !protocol.isToolOwnedPath(p))
       .filter((p) => !optional.has(p))
       .sort()
-    staleAgentPaths = combinedRefs.filter((p) => !existsSync(join(root, p)))
+    staleAgentPaths = combinedRefs.filter((p) => !(relSet?.has(p) || dirSet?.has(p) || existsSync(join(root, p))))
     staleAgentScripts = detectStaleAgentScripts({
       agentsText,
       agentClaims,
@@ -135,12 +151,12 @@ export function detectReentry(root, {
     })
   }
 
-  const staleTddPaths = detectTddStalePaths(root, docs?.tdd)
+  const staleTddPaths = detectTddStalePaths(root, docs?.tdd, tddText, relSet)
 
   let unregisteredTopDirs = []
   if (docs?.agents && (docs.agentsMarkers?.fills?.length ?? 0) === 0 && (ws?.codeFiles ?? 0) > 0) {
     const combinedDocText = `${agentsText}\n${tddText}`
-    for (const candidate of collectTopModuleDirs(root, workspace)) {
+    for (const candidate of collectTopModuleDirs(root, workspace, relFiles)) {
       const leaf = candidate.includes('/') ? candidate.split('/').pop() : candidate
       const leafPrefixRe = leaf
         ? new RegExp(`(?<![A-Za-z0-9_-])${leaf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`)

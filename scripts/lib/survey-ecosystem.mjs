@@ -18,8 +18,15 @@ import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, rea
 
 export const SKIP_DIRS = COMMON_SKIP_DIRS
 
+export function isVendoredOrEmbeddedPackageDir(dirRel) {
+  const norm = String(dirRel ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!norm) return false
+  return norm.split('/').some((seg) => seg === 'vendor' || seg === 'third_party')
+    || /(?:^|\/)vscode-web\/extensions(?:\/|$)/i.test(norm)
+}
+
 export const OUTPUT_DIRS = new Set([
-  'node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage',
+  'node_modules', '.venv', '__pycache__', 'dist', 'build', 'out', 'target', 'coverage', 'bin',
 ])
 
 export const CODE_EXT = /\.(?:js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|rs|go|java|kt|kts|scala|c|cc|cpp|h|hpp|m|mm|cs|rb|php|sh|bash|zsh|ps1|lua|r|swift|dart|ex|exs|clj|hs|erl|jl|zig|sol|sql|proto)$/i
@@ -434,10 +441,11 @@ export function detectSkillKind(root) {
 }
 
 function scanSubdirectories(root, s, fileRelList = null) {
-  const discovery = discoverWorkspacePackages(root, fileRelList)
+  const filteredFiles = Array.isArray(fileRelList) ? fileRelList.filter((rel) => !isVendoredOrEmbeddedPackageDir(rel)) : null
+  const discovery = discoverWorkspacePackages(root, filteredFiles)
   for (const pkg of discovery.packages) {
     const dir = pkg.dirRel
-    if (!dir || pkg.ecosystems.length === 0) continue
+    if (!dir || pkg.ecosystems.length === 0 || isVendoredOrEmbeddedPackageDir(dir)) continue
     const full = join(root, dir)
     if (!existsSync(full)) continue
     const sub = newEcosystemState()
@@ -560,12 +568,12 @@ function classifyCommand(cmd) {
   return classifyCommandText(cmd, COMMAND_KINDS)
 }
 
-export function detectCiCommands(root) {
+export function detectCiCommands(root, neutralCi = null) {
   const commands = {}
   const sources = {}
   const evidence = []
   const testCmds = []
-  const { steps } = scanNeutralCiSteps(root)
+  const { steps } = neutralCi ?? scanNeutralCiSteps(root)
   for (const step of steps) {
     const cleanCmd = String(step.cmd ?? '').trim().replace(/\s+/g, ' ')
     if (!cleanCmd) continue
@@ -588,17 +596,17 @@ export function detectCiCommands(root) {
 }
 
 /** 从 Makefile / justfile / Taskfile 里读已经定义好的 target，作为无 CI 时的第二道兜底。 */
-export function detectDeclaredTaskCommands(root) {
-  const runners = scanDeclaredTaskRunners(root)
+export function detectDeclaredTaskCommands(root, preRunners = null) {
+  const runners = preRunners ?? scanDeclaredTaskRunners(root)
   return { commands: runners.commands, sources: runners.sources, evidence: runners.evidence }
 }
 
 /**
  * 语言无关的命令兜底：CI 优先，其次 Makefile / justfile / Taskfile。
  */
-export function detectUniversalCommands(root) {
-  const ci = detectCiCommands(root)
-  const declared = detectDeclaredTaskCommands(root)
+export function detectUniversalCommands(root, opts = {}) {
+  const ci = detectCiCommands(root, opts.neutralCi ?? null)
+  const declared = detectDeclaredTaskCommands(root, opts.runners ?? null)
   const commands = {}
   const sources = {}
   const detectionEvidence = []
@@ -613,8 +621,8 @@ export function detectUniversalCommands(root) {
   return { commands, sources, detectionEvidence }
 }
 
-export function detectTaskEntriesDetailed(root) {
-  const runners = scanDeclaredTaskRunners(root)
+export function detectTaskEntriesDetailed(root, preRunners = null) {
+  const runners = preRunners ?? scanDeclaredTaskRunners(root)
   const commands = {}
   if (runners.makeTargets.has('test')) commands.test ??= 'make test'
   if (runners.makeTargets.has('build')) commands.build ??= 'make build'
@@ -623,7 +631,7 @@ export function detectTaskEntriesDetailed(root) {
   if (runners.justRecipes.has('build')) commands.build ??= 'just build'
   if (runners.taskNames.has('test')) commands.test ??= 'task test'
   if (runners.taskNames.has('build')) commands.build ??= 'task build'
-  return { commands, makeTargets: runners.makeTargets, justRecipes: runners.justRecipes, taskNames: runners.taskNames }
+  return { commands, makeTargets: runners.makeTargets, justRecipes: runners.justRecipes, taskNames: runners.taskNames, runners }
 }
 
 export function detectTaskEntries(root) {
@@ -678,7 +686,7 @@ function listWorkspaceCandidateDirs(root, relFiles = null) {
       if (slash <= 0) continue
       const dirRel = rel.slice(0, slash)
       const base = rel.slice(slash + 1)
-      if (dirRel.split('/').some((seg) => SKIP_DIRS.has(seg) || seg === '.git' || seg === '.worktrees' || seg === 'fixtures')) continue
+      if (isVendoredOrEmbeddedPackageDir(dirRel) || dirRel.split('/').some((seg) => SKIP_DIRS.has(seg) || seg === '.git' || seg === '.worktrees' || seg === 'fixtures')) continue
       addDir(dirRel, WORKSPACE_MANIFEST_NAMES.has(base))
       const parts = dirRel.split('/')
       for (let i = 1; i < parts.length; i += 1) addDir(parts.slice(0, i).join('/'), false)
@@ -693,8 +701,9 @@ function listWorkspaceCandidateDirs(root, relFiles = null) {
     if (relPrefix) addDir(relPrefix, hasManifest)
     for (const entry of entries) {
       if (!entry.isDirectory() || isMacMetadataName(entry.name) || entry.isSymbolicLink()) continue
-      if (SKIP_DIRS.has(entry.name) || entry.name === '.git' || entry.name === '.worktrees' || entry.name === 'fixtures') continue
+      if (SKIP_DIRS.has(entry.name) || entry.name === 'vendor' || entry.name === 'third_party' || entry.name === '.git' || entry.name === '.worktrees' || entry.name === 'fixtures') continue
       const nextRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name
+      if (isVendoredOrEmbeddedPackageDir(nextRel)) continue
       walk(join(absDir, entry.name), nextRel, depth + 1)
     }
   }
@@ -715,6 +724,7 @@ export function detectWorkspace(root, relFiles = null) {
     const patterns = declaredGlobs.length > 0 ? declaredGlobs : ['packages/*', 'apps/*', 'crates/*', 'workspaces/*']
     const candidateDirs = listWorkspaceCandidateDirs(root, relFiles)
     for (const [dirRel, hasManifest] of candidateDirs.entries()) {
+      if (isVendoredOrEmbeddedPackageDir(dirRel)) continue
       const matched = patterns.some((pat) => {
         if (pat.endsWith('/**')) {
           const base = pat.slice(0, -3)

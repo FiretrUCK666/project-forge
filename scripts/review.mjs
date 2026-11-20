@@ -30,7 +30,7 @@ import {
 } from './lib/review-helpers.mjs'
 
 import { findUnexecutableArtifacts } from './lib/artifact-executors.mjs'
-import { readDecisionMap, readDecisions } from '../kit/skills/lib/profile.mjs'
+import { readDecisionMap, readDecisions, resolveAuthoritativeTddPath } from '../kit/skills/lib/profile.mjs'
 
 export { readDecisionMap, readDecisions }
 
@@ -357,7 +357,9 @@ export async function reviewProject(targetDir, { scopes } = {}) {
 
   const needsTdd = (facts.scale.codeFiles ?? 0) > 0 && !(facts.ecosystem.kinds ?? []).includes('docs-only')
   const staleTddPaths = facts.reentry?.staleTddPaths ?? []
-  const existingArchDocs = facts.docs.archDocs ?? facts.docs.designDocs ?? facts.docs.existingArchDocs ?? []
+  const decisionMap = readDecisionMap(agentsText)
+  const authTddPath = resolveAuthoritativeTddPath(root, decisionMap)
+  const existingArchDocs = facts.docs.existingDesignDocs ?? facts.docs.archDocs ?? facts.docs.designDocs ?? facts.docs.existingArchDocs ?? []
   if (staleTddPaths.length > 0) {
     add(finding('missing', 'docs', 'docs.tdd-stale-paths',
       `技术设计文档 \`${facts.docs.tdd || 'docs/TDD.md'}\` 中以下源码路径已不存在：${staleTddPaths.slice(0, 6).join('、')}——请随重构同步校准`, {
@@ -366,6 +368,8 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   } else if (needsTdd) {
     if (facts.docs.tdd) {
       add(finding('ok', 'docs', 'docs.tdd.ok', `技术设计文档已就绪（${facts.docs.tdd}）`))
+    } else if (authTddPath) {
+      add(finding('ok', 'docs', 'docs.tdd.ok', `已按 tdd-authority 声明使用存量设计文档（${authTddPath}）`))
     } else if (existingArchDocs.length > 0) {
       add(finding('ok', 'docs', 'docs.tdd.ok', `已存在存量架构设计文档（${existingArchDocs.slice(0, 3).join('、')}）`))
     } else if (!decisions.has('no-tdd')) {

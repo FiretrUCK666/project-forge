@@ -3,7 +3,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 
@@ -216,9 +217,9 @@ export async function detectGit(root, opts = {}) {
       : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/heads', 'refs/remotes/origin']),
     fastHeadUnborn
       ? Promise.resolve({ ok: true, stdout: '' })
-      : (fastCommitLog
+      : (fastCommitLog && fastCommitLog.entries.length < 500
           ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
-          : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '500'])),
+          : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '5000'])),
     fastTrackedPaths !== null ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
     lsIgnoredPromise,
   ])
@@ -254,7 +255,8 @@ export async function detectGit(root, opts = {}) {
   const rawLogLines = logRes.ok && logRes.stdout ? logRes.stdout.split('\n').filter(Boolean) : []
   const historyAuthorsSet = new Set()
   const recentSubjects = []
-  for (const line of rawLogLines) {
+  const logSlice = rawLogLines.length > 500 ? rawLogLines.slice(0, 500) : rawLogLines
+  for (const line of logSlice) {
     const parts = line.split('\x1f')
     const author = parts[0] ?? ''
     const parents = (parts[1] ?? '').trim()
@@ -271,7 +273,7 @@ export async function detectGit(root, opts = {}) {
   let commits = 0
   let commitsState = 'ok'
   if (head !== undefined) {
-    if (rawLogLines.length < 500) {
+    if (rawLogLines.length < 5000) {
       commits = rawLogLines.length
     } else {
       const count = await git(root, ['rev-list', '--count', 'HEAD'])
@@ -377,11 +379,83 @@ export function classifyHomePath(rel, line) {
   return 'leak'
 }
 
-const SECRET_FAST_PRECHECK_RE = /(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-(?:proj-)?|AKIA|-----BEGIN\s+(?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)/
+const SECRET_FAST_PRECHECK_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|npm_[A-Za-z0-9]{36}|pypi-[A-Za-z0-9_-]{50,}|sk-(?:proj-)?[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16})\b|-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/
+const DEPENDENCY_OUTPUT_DIRS = new Set(['node_modules', '.venv', '__pycache__', 'target'])
 
-export function scanWorkspaceRaw(root, opts = {}) {
+function countLinesFast(text) {
+  if (!text) return 0
+  let count = 1
+  let idx = text.indexOf('\n')
+  while (idx !== -1) {
+    count += 1
+    idx = text.indexOf('\n', idx + 1)
+  }
+  if (text.charCodeAt(text.length - 1) === 10) count -= 1
+  return count
+}
+
+function collectUntrackedCandidatesInDir(root, dirRel, trackedSet, hasIgnoredPrefix, limit = 64) {
+  const candidates = []
+  const stack = [{ abs: join(root, dirRel), rel: dirRel }]
+  while (stack.length > 0 && candidates.length < limit) {
+    const cur = stack.pop()
+    let entries
+    try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink() || isMacMetadataName(entry.name) || entry.name === '.git') continue
+      const nextRel = `${cur.rel}/${entry.name}`
+      if (entry.isDirectory()) {
+        stack.push({ abs: join(cur.abs, entry.name), rel: nextRel })
+      } else if (entry.isFile() && !isJunkFile(nextRel)) {
+        if (trackedSet.has(nextRel) || hasIgnoredPrefix(nextRel)) continue
+        candidates.push(nextRel)
+        if (candidates.length >= limit) break
+      }
+    }
+  }
+  return candidates
+}
+
+function processFileBuffer(rec, buf, homeFastRe, homeRe) {
+  if (buf === undefined || buf.subarray(0, 4096).includes(0)) {
+    rec.unreadable = true
+    return
+  }
+  let text = buf.toString('utf8')
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
+  if (text.includes('\r')) text = text.replace(/\r\n/g, '\n')
+  rec.text = text
+  if (rec.rel.startsWith('.agents/skills/')) rec.rawBuf = buf
+  const mightHaveSecret = SECRET_FAST_PRECHECK_RE.test(text)
+  const mightHaveHome = Boolean(homeFastRe && homeFastRe.test(text))
+  if (mightHaveSecret || mightHaveHome) {
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
+      if (mightHaveSecret) {
+        for (const pat of SECRET_CONTENT_PATTERNS) {
+          if (pat.re.test(line)) {
+            if (!rec.textSecrets) rec.textSecrets = []
+            rec.textSecrets.push({ file: rec.rel, line: i + 1, kind: pat.label })
+          }
+        }
+      }
+      if (mightHaveHome && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
+        const category = classifyHomePath(rec.rel, line)
+        if (category) {
+          if (!rec.textLeaks) rec.textLeaks = []
+          rec.textLeaks.push({ file: rec.rel, line: i + 1, category })
+        }
+      }
+    }
+  }
+}
+
+function collectWorkspaceWalk(root, opts = {}) {
   const homeNorm = homedir().replace(/\\/g, '/')
-  const homeLeaf = homeNorm.length > 4 ? basename(homeNorm).toLowerCase() : ''
+  const homeFastRe = homeNorm.length > 4
+    ? new RegExp(homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '[\\\\/]+'), 'i')
+    : undefined
   const homeRe = homeNorm.length > 4
     ? new RegExp(`(?<![\\w.\\-/:])${homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
     : undefined
@@ -391,16 +465,19 @@ export function scanWorkspaceRaw(root, opts = {}) {
   const files = []
   const dirs = []
   const nestedRepos = []
+  const readQueue = []
   const seenRealDirs = new Set()
   let depthReached = 0
   let truncated = false
 
   const walk = (dir, depth) => {
     if (depth > maxDepth || files.length >= maxFiles) { truncated = true; return }
-    let realDir = dir
-    try { realDir = realpathSync(dir) } catch { return }
-    if (seenRealDirs.has(realDir)) return
-    seenRealDirs.add(realDir)
+    if (depth === 0) {
+      let realDir = dir
+      try { realDir = realpathSync(dir) } catch { return }
+      if (seenRealDirs.has(realDir)) return
+      seenRealDirs.add(realDir)
+    }
     if (depth > depthReached) depthReached = depth
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
@@ -428,40 +505,13 @@ export function scanWorkspaceRaw(root, opts = {}) {
           full,
           size: st.size,
           text: null,
+          rawBuf: null,
           textSecrets: null,
           textLeaks: null,
           unreadable: false,
         }
         if (TEXT_EXT.test(entry.name) && st.size <= 256 * 1024) {
-          const text = readTextSafe(full)
-          if (text === undefined) {
-            rec.unreadable = true
-          } else {
-            rec.text = text
-            const mightHaveSecret = SECRET_FAST_PRECHECK_RE.test(text)
-            const mightHaveHome = Boolean(homeLeaf && text.toLowerCase().includes(homeLeaf))
-            if (mightHaveSecret || mightHaveHome) {
-              const lines = text.split('\n')
-              for (let i = 0; i < lines.length; i += 1) {
-                const line = lines[i]
-                if (mightHaveSecret) {
-                  for (const pat of SECRET_CONTENT_PATTERNS) {
-                    if (pat.re.test(line)) {
-                      if (!rec.textSecrets) rec.textSecrets = []
-                      rec.textSecrets.push({ file: rel, line: i + 1, kind: pat.label })
-                    }
-                  }
-                }
-                if (mightHaveHome && homeRe.test(line.replace(/\\\\/g, '/').replace(/\\/g, '/'))) {
-                  const category = classifyHomePath(rel, line)
-                  if (category) {
-                    if (!rec.textLeaks) rec.textLeaks = []
-                    rec.textLeaks.push({ file: rel, line: i + 1, category })
-                  }
-                }
-              }
-            }
-          }
+          readQueue.push({ rec, full })
         }
         files.push(rec)
       }
@@ -471,7 +521,45 @@ export function scanWorkspaceRaw(root, opts = {}) {
   const nestedUnique = [...new Set(nestedRepos.map((p) => p.replace(/\/?\.gitmodules$/, '').replace(/\/?\.git$/, '') || '.'))]
     .filter((p) => p !== '.')
 
+  return { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe }
+}
+
+export function scanWorkspaceRaw(root, opts = {}) {
+  const { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe } = collectWorkspaceWalk(root, opts)
+  for (const { rec, full } of readQueue) {
+    let buf
+    try { buf = readFileSync(full) } catch { buf = undefined }
+    processFileBuffer(rec, buf, homeFastRe, homeRe)
+  }
   return { files, dirs, nestedUnique, depthReached, truncated }
+}
+
+export function startWorkspaceWalkAsync(root, opts = {}) {
+  const ctx = collectWorkspaceWalk(root, opts)
+  const { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe } = ctx
+  const relFiles = files.map((f) => f.rel)
+  const readPromise = (async () => {
+    if (readQueue.length > 0) {
+      const workers = Math.min(24, readQueue.length)
+      let cursor = 0
+      await Promise.all(Array.from({ length: workers }, async () => {
+        while (cursor < readQueue.length) {
+          const idx = cursor
+          cursor += 1
+          const { rec, full } = readQueue[idx]
+          let buf
+          try { buf = await readFile(full) } catch { buf = undefined }
+          processFileBuffer(rec, buf, homeFastRe, homeRe)
+        }
+      }))
+    }
+    return { files, dirs, nestedUnique, depthReached, truncated }
+  })()
+  return { relFiles, dirs, readPromise }
+}
+
+export async function scanWorkspaceRawAsync(root, opts = {}) {
+  return startWorkspaceWalkAsync(root, opts).readPromise
 }
 
 export async function finalizeWalkWorkspace(root, raw, gitFacts) {
@@ -495,6 +583,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
     return false
   }
 
+  const pendingTrackableDirs = []
   if (canAskGit) {
     const checkList = []
     for (const d of dirs) {
@@ -534,7 +623,30 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
 
   for (const dir of dirs) {
     const leaf = dir.split('/').pop()
-    if (OUTPUT_DIRS.has(leaf) && !hasIgnoredPrefix(dir)) unignoredOutputDirs.push(dir)
+    if (!OUTPUT_DIRS.has(leaf) || hasIgnoredPrefix(dir)) continue
+    if (!canAskGit) {
+      if (leaf !== 'bin') unignoredOutputDirs.push(dir)
+      continue
+    }
+    if (DEPENDENCY_OUTPUT_DIRS.has(leaf)) {
+      unignoredOutputDirs.push(dir)
+    } else {
+      const candidates = collectUntrackedCandidatesInDir(root, dir, trackedSet, hasIgnoredPrefix)
+      if (candidates.length > 0) pendingTrackableDirs.push({ dir, candidates })
+    }
+  }
+
+  if (canAskGit && pendingTrackableDirs.length > 0) {
+    const allCandidates = [...new Set(pendingTrackableDirs.flatMap((x) => x.candidates))]
+    const res = await git(root, ['check-ignore', '-z', '--stdin'], { input: `${allCandidates.join('\0')}\0` })
+    if (res.ok || res.status === 1) {
+      for (const item of res.stdout.split('\0')) {
+        if (item) ignoredSet.add(item.replace(/\/$/, ''))
+      }
+    }
+    for (const { dir, candidates } of pendingTrackableDirs) {
+      if (candidates.some((rel) => !hasIgnoredPrefix(rel))) unignoredOutputDirs.push(dir)
+    }
   }
 
   for (const file of files) {
@@ -549,7 +661,7 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
       if (CODE_EXT.test(file.name)) {
         codeFiles += 1
         // 行数只能从已经读进内存的文本里数，不为此多开一次 IO。
-        if (typeof file.text === 'string') codeLines += protocol.countTextLines(file.text)
+        if (typeof file.text === 'string') codeLines += countLinesFast(file.text)
       } else if (DOC_EXT.test(file.name)) docFiles += 1
     }
 
@@ -600,6 +712,6 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
 }
 
 export async function walkWorkspace(root, gitFacts) {
-  return finalizeWalkWorkspace(root, scanWorkspaceRaw(root), gitFacts)
+  return finalizeWalkWorkspace(root, await scanWorkspaceRawAsync(root), gitFacts)
 }
 

@@ -140,7 +140,7 @@ node scripts/dev/verify-injections.mjs
 - **严控范围与依赖**：改前先读邻近实现，清净被替换旧逻辑；不擅自引入第三方依赖，确需引入须先说明理由并获确认。
 - **测试正反双向与分层控频**：修缺陷先写复现失败测试（Red-Green）；新判定/解析逻辑必配正反双向用例。编码中跑语法检查与 `--tier quick --target <path>`，合前跑 1 次 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测 `>=1s` sleep 与弱化门禁；单测超 800 行按模块拆分。
 - **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时同提交同步 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
-- 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
+- 本项目历史提交用的是「类型: 说明」的约定式格式——沿用它，不要混用第二套格式，不用内部编号充当说明
 - **多语文档成对同步**：本仓库有 `README.md`、`README.en.md`，改任一语言版本必须同步另一份并保持双向链接有效。
 <!-- project-forge: end 修改守则 -->
 

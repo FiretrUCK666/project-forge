@@ -10,7 +10,7 @@ pr: null
 branch: feat/w2b-empirical-poc-cycle
 owner: plan-v101
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=6a4c0c338ebc, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"6a4c0c338ebc\",\"artifact_baseline\":{\"sha\":\"6a4c0c338ebc75a5a0d88336c25c69352de603411066151cd81348043e6729ef\",\"shortSha\":\"6a4c0c338ebc\",\"criteriaCount\":4,\"anchorCount\":96},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.791Z\"}]"
 related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
@@ -128,10 +128,10 @@ flowchart LR
 ### 验收标准（对应 Issue `#102` 与总控 `C9..C12`）
 
 <!-- criteria:start -->
-- [ ] C1: 拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 严格 `<= 800` 行；`review-pack.mjs check-empirical`、`workflow-policy.mjs`（含与 `flow.mjs verify` 透传对接）及 `buildVerificationEvidenceSection` 支持 `--artifact {path}`：真实非空文件校验通过并记入 `evidence.json`/审查回执（零脏工作区），并在 PR 验证表自动渲染结构化实证摘要与附件清单；反例为不存在或 0 字节文件阻断。
-- [ ] C2: 触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 敷衍放行，必须附带非空 `--artifact` 或实质视觉观察，无渲染环境须显式传 `--visual-blocked-reason` 诚实报阻。
-- [ ] C3: 在 `escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 融入「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零具体工具硬编码）。
-- [ ] C4: 在 `kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与轮次/零进展/单向门硬停损），在 `templates/agents-project.md` 固化「只锁客观输出边界」底线，刷新 `equip.mjs .` / `compose-agents.mjs .`（`AGENTS.md < 24576 B`）并补齐 `scripts/dev/fixtures-empirical-cycle.mjs` (new) 与 `scripts/dev/injections-data-empirical-cycle.mjs` (new)（`I260–I269`）。
+- [x] C1: 拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 严格 `<= 800` 行；`review-pack.mjs check-empirical`、`workflow-policy.mjs`（含与 `flow.mjs verify` 透传对接）及 `buildVerificationEvidenceSection` 支持 `--artifact {path}`：真实非空文件校验通过并记入 `evidence.json`/审查回执（零脏工作区），并在 PR 验证表自动渲染结构化实证摘要与附件清单；反例为不存在或 0 字节文件阻断。
+- [x] C2: 触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 敷衍放行，必须附带非空 `--artifact` 或实质视觉观察，无渲染环境须显式传 `--visual-blocked-reason` 诚实报阻。
+- [x] C3: 在 `escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 融入「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零具体工具硬编码）。
+- [x] C4: 在 `kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与轮次/零进展/单向门硬停损），在 `templates/agents-project.md` 固化「只锁客观输出边界」底线，刷新 `equip.mjs .` / `compose-agents.mjs .`（`AGENTS.md < 24576 B`）并补齐 `scripts/dev/fixtures-empirical-cycle.mjs` (new) 与 `scripts/dev/injections-data-empirical-cycle.mjs` (new)（`I260–I269`）。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 

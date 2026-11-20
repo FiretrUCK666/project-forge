@@ -25,6 +25,7 @@ import {
   isMainModule, posixPath, resolveRepoRoots,
 } from '../../lib/git.mjs'
 import { sanitizeTaskId } from '../../lib/ledger.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 import { appendGovernSignal } from '../../lib/signals.mjs'
 import { runEditGate } from '../../dev-edit/scripts/edit-gate.mjs'
 import { generateRepoMap } from '../../dev-explore/scripts/repo-map.mjs'
@@ -32,7 +33,7 @@ import { guardExistingFeatureMapForWrite, handleAudit, handleClean } from './ver
 
 export { handleAudit, handleClean }
 
-export const EXIT = Object.freeze({ OK: 0, ERROR: 1, USAGE: 2, BLOCKED: 3 })
+export { EXIT }
 const SUBCOMMANDS = ['sync', 'create', 'run', 'audit', 'clean']
 
 function printHelp() {
@@ -162,7 +163,7 @@ export async function handleCreate(opts, roots) {
     const draftAbs = join(scratchInfo.dir, draftName)
     if (!isSafeTaskScratchPath(draftAbs, roots.gitDir, taskId, roots.mainRoot)) {
       process.stderr.write(`BLOCKED_UNSAFE_SCRATCH_PATH: 拒绝在仓外 scratch 前缀之外写草稿 (${draftAbs})\n`)
-      return { exitCode: EXIT.BLOCKED }
+      return { exitCode: EXIT.FACT }
     }
     if (!existsSync(draftAbs) || opts['draft-content']) {
       const content = typeof opts['draft-content'] === 'string' && opts['draft-content'].length > 0
@@ -208,12 +209,12 @@ export async function handleCreate(opts, roots) {
     if (!isSafeTaskScratchPath(srcAbs, roots.gitDir, taskId, roots.mainRoot)) {
       const msg = `BLOCKED_SCRATCH_SOURCE_OUTSIDE_SANDBOX: --from-scratch 必须位于 ${scratchInfo.posixDir} 内`
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT.BLOCKED, ok: false, code: 'BLOCKED_SCRATCH_SOURCE_OUTSIDE_SANDBOX', error: msg }
+      return { exitCode: EXIT.FACT, ok: false, code: 'BLOCKED_SCRATCH_SOURCE_OUTSIDE_SANDBOX', error: msg }
     }
     if (!existsSync(srcAbs)) {
       const msg = `BLOCKED_SCRATCH_SOURCE_MISSING: 仓外草稿不存在：${posixPath(srcAbs)}`
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT.BLOCKED, ok: false, code: 'BLOCKED_SCRATCH_SOURCE_MISSING', error: msg }
+      return { exitCode: EXIT.FACT, ok: false, code: 'BLOCKED_SCRATCH_SOURCE_MISSING', error: msg }
     }
     if (!scriptRel) {
       process.stderr.write('Error: 使用 --from-scratch 沉淀时必须同时指定目标仓相对路径 --script <relPath>。\n')
@@ -228,7 +229,7 @@ export async function handleCreate(opts, roots) {
   if (scriptRel && !existsSync(targetScriptAbs)) {
     const msg = `BLOCKED_MISSING_TOOL_SCRIPT: 指定的持久化脚本不存在：${scriptRel}`
     process.stderr.write(`${msg}\n`)
-    return { exitCode: EXIT.BLOCKED, ok: false, code: 'BLOCKED_MISSING_TOOL_SCRIPT', error: msg }
+    return { exitCode: EXIT.FACT, ok: false, code: 'BLOCKED_MISSING_TOOL_SCRIPT', error: msg }
   }
 
   // 过 edit-gate 静态卫生门禁，阻断压制注释、死代码、过程命名或架构越界
@@ -241,7 +242,7 @@ export async function handleCreate(opts, roots) {
       const payload = { ok: false, code: 'BLOCKED_EDIT_GATE_FAILED', scriptPath: scriptRel, editGate: editGateRes, error: msg }
       emitOut(opts, payload, [msg, ...(editGateRes.blockers ?? []).map((b) => `  - [${b.ruleId}] ${b.message}`)])
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT.BLOCKED, ...payload }
+      return { exitCode: EXIT.FACT, ...payload }
     }
   }
 
@@ -283,7 +284,7 @@ export async function handleCreate(opts, roots) {
       const payload = { ok: false, code: 'BLOCKED_TOOL_RUN_FAILED', tool: toolDef, runOutcome, error: msg }
       emitOut(opts, payload, [msg, runOutcome.stderrExcerpt || runOutcome.stdoutExcerpt])
       process.stderr.write(`${msg}\n`)
-      return { exitCode: EXIT.BLOCKED, ...payload }
+      return { exitCode: EXIT.FACT, ...payload }
     }
   }
 
@@ -536,7 +537,7 @@ export async function handleRun(opts, roots) {
     })
   }
 
-  const exitCode = blockedCode ? EXIT.BLOCKED : (anyFailed ? EXIT.ERROR : EXIT.OK)
+  const exitCode = blockedCode ? EXIT.FACT : (anyFailed ? EXIT.ERROR : EXIT.OK)
   const payload = { ok: exitCode === EXIT.OK, code: blockedCode, mapSource, taskId, baseRef, matched: true, results }
   const lines = [`[verify-tools run] matched=${results.length} ok=${payload.ok}${blockedCode ? ` code=${blockedCode}` : ''}`]
   for (const r of results) {

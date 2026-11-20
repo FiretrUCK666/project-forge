@@ -10,7 +10,7 @@ import { createGitHubClient } from '../../kit/skills/lib/github-client.mjs'
 import { readTaskLedger, writeTaskLedger } from '../../kit/skills/lib/ledger.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
 import {
-  createFakeGhEnv, gitCommitFast, gitInit, gitSync,
+  createFakeGhEnv, EXIT, gitCommitFast, gitInit, gitSync,
   rmTree, runAbsAsync, runNode, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -97,21 +97,21 @@ export function registerIssue52Cases(cases) {
       const noTok = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 't52', '--verdict', 'pass', '--reviewer-id', 'rev-c', '--evidence', 'ok', '--json',
       ], { cwd: dir })
-      if (noTok.status !== 2 || !noTok.stdout.includes('BLOCKED_REVIEW_TOKEN')) {
+      if (noTok.status !== EXIT.FACT || !noTok.stdout.includes('BLOCKED_REVIEW_TOKEN')) {
         return `缺 --review-token 未阻断：exit=${noTok.status} out=${noTok.stdout}`
       }
 
       const badTok = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 't52', '--verdict', 'pass', '--reviewer-id', 'rev-c', '--review-token', 'pf-rv-deadbeef', '--evidence', 'ok', '--json',
       ], { cwd: dir })
-      if (badTok.status !== 2 || !badTok.stdout.includes('UNKNOWN_REVIEW_TOKEN')) {
+      if (badTok.status !== EXIT.FACT || !badTok.stdout.includes('UNKNOWN_REVIEW_TOKEN')) {
         return `假令牌未报 UNKNOWN_REVIEW_TOKEN：exit=${badTok.status} out=${badTok.stdout}`
       }
 
       const wrongRound = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 't52', '--round', '3', '--verdict', 'pass', '--reviewer-id', 'rev-c', '--review-token', tok, '--evidence', 'ok', '--json',
       ], { cwd: dir })
-      if (wrongRound.status !== 2 || !wrongRound.stdout.includes('REVIEW_TOKEN_ROUND_MISMATCH')) {
+      if (wrongRound.status !== EXIT.FACT || !wrongRound.stdout.includes('REVIEW_TOKEN_ROUND_MISMATCH')) {
         return `错轮次令牌未阻断：exit=${wrongRound.status} out=${wrongRound.stdout}`
       }
 
@@ -119,7 +119,7 @@ export function registerIssue52Cases(cases) {
       const spoofSelf = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 't52', '--verdict', 'pass', '--reviewer-id', 'alice', '--implementer-id', 'bob', '--review-token', tok, '--evidence', 'ok', '--json',
       ], { cwd: dir })
-      if (spoofSelf.status !== 2 || !spoofSelf.stdout.includes('SELF_REVIEW_REJECTED')) {
+      if (spoofSelf.status !== EXIT.FACT || !spoofSelf.stdout.includes('SELF_REVIEW_REJECTED')) {
         return `伪造 --implementer-id 绕过了自审检查：exit=${spoofSelf.status} out=${spoofSelf.stdout}`
       }
 
@@ -154,7 +154,7 @@ export function registerIssue52Cases(cases) {
       const reuse = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', [
         'record', '--task', 't52', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-d', '--review-token', tok, '--evidence', 'replay', '--json',
       ], { cwd: dir })
-      if (reuse.status !== 2 || !reuse.stdout.includes('REVIEW_TOKEN_ALREADY_CONSUMED')) {
+      if (reuse.status !== EXIT.FACT || !reuse.stdout.includes('REVIEW_TOKEN_ALREADY_CONSUMED')) {
         return `重复消费令牌未阻断：exit=${reuse.status} out=${reuse.stdout}`
       }
       return true

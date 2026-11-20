@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { hydrateGeneratedDoc } from './fixtures-doc-fill.mjs'
-import { createFakeGhEnv, gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
+import { createFakeGhEnv, EXIT, gitCommitFast, gitInit, gitSync, issueTokenFor, rmTree, runAbsAsync, runNode, seedExploredFor, survey, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowParallelCases(cases) {
 cases.push(['外部图谱单 Issue 未关闭依赖拦截(I66)、外部 PR 扫前阻断挂载/verify、Issue+PR 互链防重', async () => {
@@ -172,7 +172,7 @@ cases.push(['--after 堆叠分支、父未合阻断(I67)、flow sync 变基/冲�
 
     // 变基后 Round 2 增量锁：挑刺未改动旧文件 other.mjs 必须拦截，挑刺 child-file.mjs 放行
     const oos = await handleRecord({ task: 'child-t', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-a', 'review-token': await issueTokenFor(dir, 'child-t', 2), 'must-fix': ['C1: other.mjs:1 unrelated'] }, roots)
-    if (oos !== 2) {
+    if (oos !== EXIT.FACT) {
       return `sync 后增量视野硬锁未拦截越界文件：exit=${oos}`
     }
 

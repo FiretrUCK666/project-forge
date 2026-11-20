@@ -29,8 +29,9 @@ import {
   checkProcessArtifactFilename, evaluateArchRules, matchGlob, scanStructuralHygiene, scanTestAntiCheat,
 } from '../../lib/static-gates.mjs'
 import { extractSymbols } from '../../lib/symbol-index.mjs'
+import { EXIT } from '../../lib/exit-codes.mjs'
 
-export const EXIT = Object.freeze({ OK: 0, USAGE: 2, BLOCKED: 3 })
+export { EXIT }
 const VALID_MODES = new Set(['verify', 'pre-edit', 'standalone'])
 
 function printHelp() {
@@ -210,7 +211,7 @@ export async function runEditGate(opts = {}) {
 
   if (opts.skipEditGate) {
     if (opts.final) {
-      return { ok: false, mode, exitCode: EXIT.BLOCKED, code: 'BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL', error: '最终合并前 verify 禁止使用 --skip-edit-gate 绕过词法静态门禁。' }
+      return { ok: false, mode, exitCode: EXIT.FACT, code: 'BLOCKED_SKIP_EDIT_GATE_FORBIDDEN_ON_FINAL', error: '最终合并前 verify 禁止使用 --skip-edit-gate 绕过词法静态门禁。' }
     }
     const reason = String(opts.reason ?? '').trim()
     if (!reason) {
@@ -299,7 +300,7 @@ export async function runEditGate(opts = {}) {
     const reuseHints = collectSiblingReuseHints(workTreeRoot, checkedFiles)
     const ok = blockers.length === 0
     return {
-      ok, mode, exitCode: ok ? EXIT.OK : EXIT.BLOCKED, repoRoot: posixPath(workTreeRoot),
+      ok, mode, exitCode: ok ? EXIT.OK : EXIT.FACT, repoRoot: posixPath(workTreeRoot),
       checkedFiles, blockers, violations: blockers, warnings, nearLimitFiles, highRiskHits, reuseHints, nativeCheckers,
       summary: { checked: checkedFiles.length, blockers: blockers.length, warnings: warnings.length },
     }
@@ -393,7 +394,7 @@ export async function runEditGate(opts = {}) {
   return {
     ok,
     mode,
-    exitCode: ok ? EXIT.OK : EXIT.BLOCKED,
+    exitCode: ok ? EXIT.OK : EXIT.FACT,
     repoRoot: posixPath(workTreeRoot),
     checkedFiles,
     blockers,

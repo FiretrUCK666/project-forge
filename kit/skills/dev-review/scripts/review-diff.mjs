@@ -26,13 +26,7 @@ import {
   splitDiffByFile, summarizeHunkChanges,
 } from '../../lib/static-gates.mjs'
 
-export const EXIT = Object.freeze({
-  OK: 0,
-  ERROR: 1,
-  USAGE_OR_POLICY: 2,
-  UNTRUSTED_HAZARD: 3,
-  STOP_LOSS: 4,
-})
+export { EXIT } from '../../lib/exit-codes.mjs'
 
 const LIFECYCLE_HOOK_RE = /"(?:preinstall|install|postinstall|preuninstall|uninstall|postuninstall|prepublish|prepublishOnly|preprepare|prepare|postprepare|prepack|postpack)"\s*:/
 const BUILD_SCRIPT_RE = /(?:^|\/)(?:Makefile|GNUmakefile|makefile|justfile|Taskfile\.ya?ml|build\.rs|setup\.py)$|\.(?:mk)$|(?:^|\/)(?:preinstall|install|postinstall|bootstrap)\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$|(?:^|\/)(?:scripts?|tools?|build)\/[^/]*(?:build|install|setup|bootstrap|hook)[^/]*\.(?:sh|bash|ps1|bat|cmd|py|mjs|js|cjs)$/i

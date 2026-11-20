@@ -218,7 +218,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '1', verdict: 'changes', evidence: 'ok', 'reviewer-id': '@Rev-A',
         'must-fix': ['C1: src/app.mjs:1 第一轮问题'], 'review-token': tok1,
       }, roots))
-      if (r1.res !== 2 || r1Ok.res !== 0) return `token/R1 异常：${r1.res}/${r1Ok.res}`
+      if (r1.res !== EXIT.FACT || r1Ok.res !== 0) return `token/R1 异常：${r1.res}/${r1Ok.res}`
 
       writeFileSync(join(wt, 'src/app.mjs'), 'export const x = 3\n')
       gitCommitFast(wt, 'fix: v3', { updateOnly: true })
@@ -228,7 +228,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '2', verdict: 'changes', evidence: 'ok', 'reviewer-id': 'rev-a',
         'must-fix': ['C2: src/app.mjs:1 新问题'], 'review-token': undefined,
       }, roots))
-      if (sameR2.res !== 2 || !sameR2.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
+      if (sameR2.res !== EXIT.FACT || !sameR2.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
         return `R2 复用 @Rev-A 未被拦截：exit=${sameR2.res}, err=${sameR2.err}`
       }
 
@@ -261,7 +261,7 @@ export function registerStageBLoopB4bCases(cases) {
         task: 'c13-t', round: '3', verdict: 'changes', evidence: 'ok', 'reviewer-id': 'rev-a',
         'must-fix': ['C3: src/app.mjs:1 三轮问题'], 'review-token': tok3,
       }, roots))
-      if (reuseR1.res !== 2 || !reuseR1.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
+      if (reuseR1.res !== EXIT.FACT || !reuseR1.err.includes('BLOCKED_SAME_REVIEWER_REREVIEW')) {
         return `R3 复用历史 R1 rev-a 未被全历史锁拦截：exit=${reuseR1.res}, err=${reuseR1.err}`
       }
 
@@ -342,29 +342,29 @@ export function registerStageBLoopB4bCases(cases) {
     gitInit(dir, { branch: 'main', name: 'alice', email: 'alice@example.com' })
     try {
       const selfRej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'author-a', '--findings', 'C1: bad', '--dir', dir]))
-      if (selfRej.res !== 2 || !selfRej.err.includes('SELF_CRITIQUE_REJECTED')) {
+      if (selfRej.res !== EXIT.FACT || !selfRej.err.includes('SELF_CRITIQUE_REJECTED')) {
         return `critique-reject 未拦同人自审：exit=${selfRej.res}, err=${selfRej.err}`
       }
 
       const r1Rej = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-1', '--round', '1', '--findings', 'C1: 缺异常分支', '--summary', '需补异常路径', '--dir', dir, '--json']))
-      if (r1Rej.res !== 0) return `R1 critique-reject 失败：${r1Rej.err}`
+      if (r1Rej.res !== EXIT.FACT) return `R1 critique-reject 失败：${r1Rej.err}`
 
       // 未改稿直接 critique-pass -> BLOCKED_CRITIQUE_SAME_SHA (2)
       const sameSha = await withQuietIo(() => runDocPlanCli(['critique-pass', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--summary', 'ok', '--dir', dir]))
-      if (sameSha.res !== 2 || !sameSha.err.includes('BLOCKED_CRITIQUE_SAME_SHA')) {
+      if (sameSha.res !== EXIT.FACT || !sameSha.err.includes('BLOCKED_CRITIQUE_SAME_SHA')) {
         return `未改稿直接复审未被拦截：exit=${sameSha.res}, err=${sameSha.err}`
       }
 
       // 改稿后用 critic-1 重审 -> BLOCKED_CRITIQUE_SAME_REVIEWER (2)
       writeFileSync(join(dir, specFile), readFileSync(join(dir, specFile), 'utf8').replace('第一版草案', '第二版补异常'))
       const sameRev = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-1', '--round', '2', '--findings', 'C2: 补门型', '--dir', dir]))
-      if (sameRev.res !== 2 || !sameRev.err.includes('BLOCKED_CRITIQUE_SAME_REVIEWER')) {
+      if (sameRev.res !== EXIT.FACT || !sameRev.err.includes('BLOCKED_CRITIQUE_SAME_REVIEWER')) {
         return `R2 复用 critic-1 未被拦截：exit=${sameRev.res}, err=${sameRev.err}`
       }
 
       // R2 critic-2 与 R1 不同意见正常放行 (0)
       const r2Diff = await withQuietIo(() => runDocPlanCli(['critique-reject', '--file', specFile, '--reviewer', 'critic-2', '--round', '2', '--findings', 'C2: 补充回滚点', '--dir', dir]))
-      if (r2Diff.res !== 0) return `R2 critic-2 不同意见不应停损：exit=${r2Diff.res}, err=${r2Diff.err}`
+      if (r2Diff.res !== EXIT.FACT) return `R2 critic-2 不同意见不应停损：exit=${r2Diff.res}, err=${r2Diff.err}`
 
       // R3 再改稿后即使换 critic-3 仍 reject -> 第 3 轮硬停损 (4) + 信号写入
       writeFileSync(join(dir, specFile), readFileSync(join(dir, specFile), 'utf8').replace('第二版补异常', '第三版补回滚'))

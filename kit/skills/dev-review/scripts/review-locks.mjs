@@ -356,7 +356,7 @@ export function checkHistoricalStopLoss(prevRounds, ledger, opts = {}) {
   return {
     blocked: true,
     code: 'STOP_LOSS_ESCALATE',
-    exitCode: EXIT.STOP_LOSS,
+    exitCode: EXIT.HUMAN,
     message: 'STOP_LOSS_ESCALATE: 历史轮次已触发停损且未获人类维护者解锁，禁止继续通过 record 绕过；请先运行 `review-pack.mjs override --human-approved --reason "..."`。',
   }
 }
@@ -367,7 +367,7 @@ export function checkSameHeadRereview({ round, prevRound, headSha }) {
     return {
       blocked: true,
       code: 'BLOCKED_SAME_HEAD_REREVIEW',
-      exitCode: EXIT.USAGE_OR_POLICY,
+      exitCode: EXIT.FACT,
       message: `BLOCKED_SAME_HEAD_REREVIEW: Round ${round} 待审 HEAD (${headSha.slice(0, 7)}) 与 Round ${prevRound.round} 完全相同，实施者必须提交新修复后再复审。`,
     }
   }
@@ -430,7 +430,7 @@ export async function checkIncrementalScopeLock({
     return {
       blocked: true,
       code: 'BLOCKED_OUT_OF_SCOPE_MUST_FIX',
-      exitCode: EXIT.USAGE_OR_POLICY,
+      exitCode: EXIT.FACT,
       range: scope.range,
       outOfScope,
       message: `BLOCKED_OUT_OF_SCOPE_MUST_FIX: Round ${round} 增量视野硬锁拒绝以下越界阻塞项（非阻塞建议请改用 --should-fix 或 --pre-existing）：${outOfScope.map((o) => `[${o.item.id}] ${o.reason}`).join('；')}`,
@@ -536,7 +536,7 @@ export async function evaluatePassBlockers({
   return {
     blocked: blockers.length > 0,
     code: 'BLOCKED_PASS_WITH_OPEN_BLOCKERS',
-    exitCode: EXIT.USAGE_OR_POLICY,
+    exitCode: EXIT.FACT,
     blockers,
     message: blockers.length > 0 ? `BLOCKED_PASS_WITH_OPEN_BLOCKERS: 存在未收口阻塞门禁，禁止记录 pass：${blockers.join('；')}` : '',
   }

@@ -77,7 +77,7 @@ function printHelp() {
     '  [--rebut-accepted <idOrFp>...] [--resolved <idOrFp>...] [--fault-injection <text>]',
     '  [--enforce-gates] [--evidence <text>] [--artifact <path>]... [--e2e-evidence <text>] [--visual-blocked-reason <text>] [--visual-checked] [--visual-evidence <text>] [--human-approved] [--reason <text>]',
     '',
-    `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.UNTRUSTED_HAZARD}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.STOP_LOSS}=STOP_LOSS_ESCALATE`,
+    `Exit Codes: 0=ok, 1=error, 2=usage/self-review, ${EXIT.FACT}=BLOCKED_EMPIRICAL_FIRST/DIRTY_RESIDUE/UNTRUSTED_HAZARD, ${EXIT.HUMAN}=STOP_LOSS_ESCALATE`,
     '',
   ].join('\n'))
 }
@@ -128,7 +128,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
     ? evaluatePrIntakeGuard({ mainRoot, gitDir: roots.gitDir, prNumber: prNo, opts })
     : null
   if (intakeGuard?.blocked) {
-    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }
+    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }
   }
 
   let prResolution = null
@@ -138,14 +138,14 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
     if (!prRes.ok) {
       return {
         earlyExitCode: emitPrUnresolvedBlock({
-          opts, exitCode: EXIT.UNTRUSTED_HAZARD, prArg, reason: prRes.reason, message: prRes.message,
+          opts, exitCode: EXIT.FACT, prArg, reason: prRes.reason, message: prRes.message,
         }),
       }
     }
     prResolution = prRes
     intakeGuard = evaluatePrIntakeGuard({ mainRoot, gitDir: roots.gitDir, prNumber: prResolution.prNumber, prResolution, opts })
     if (intakeGuard.blocked) {
-      return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }
+      return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }
     }
   }
 
@@ -189,7 +189,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
       return {
         earlyExitCode: emitPrUnresolvedBlock({
           opts,
-          exitCode: EXIT.UNTRUSTED_HAZARD,
+          exitCode: EXIT.FACT,
           prArg: prResolution.prNumber,
           reason: shaCheck.reason,
           message: shaCheck.message,
@@ -206,7 +206,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
       const headRes = commitsExist ? await gitRun(reviewRoot, ['rev-parse', headRef]) : { ok: false, stdout: 'UNBORN' }
       if (commitsExist && opts.head && !headRes.ok) {
         process.stderr.write(`Error: cannot resolve --head "${headRef}": ${headRes.stderr}\n`)
-        return { earlyExitCode: EXIT.ERROR }
+        return { earlyExitCode: EXIT.ACTION }
       }
       headSha = headRes.ok ? headRes.stdout.trim() : 'UNBORN'
     }
@@ -292,7 +292,7 @@ async function prepareReviewTargetContext(roots, opts, { syncSlot = true } = {})
     if (!diffSpec) {
       if (!baseRef) {
         process.stderr.write('Error: cannot resolve base ref (unborn or single-commit repo); pass --base <ref>.\n')
-        return { earlyExitCode: EXIT.ERROR }
+        return { earlyExitCode: EXIT.ACTION }
       }
       diffSpec = { mode: 'range', range: await computeDiffRange(reviewRoot, baseRef, headRef) }
       diffScope = `${baseRef}...${headRef}`
@@ -339,7 +339,7 @@ async function main(argv = process.argv.slice(2)) {
     validatePackCliArgs(cli, SUBCOMMANDS)
   } catch (err) {
     process.stderr.write(`Error: ${err.message}\n`)
-    return EXIT.USAGE_OR_POLICY
+    return EXIT.USAGE
   }
 
   const { sub, opts } = cli
@@ -348,7 +348,7 @@ async function main(argv = process.argv.slice(2)) {
   const roots = await resolveRepoRoots(startDir)
   if (!roots.isGit) {
     process.stderr.write(`Error: not inside a git repository: ${startDir}\n`)
-    return EXIT.ERROR
+    return EXIT.ACTION
   }
 
   try {
@@ -403,7 +403,7 @@ async function main(argv = process.argv.slice(2)) {
       if (hazards.length > 0 && !opts.humanApprovedExec) {
         const payload = {
           status: 'BLOCKED_UNTRUSTED_HAZARD',
-          exitCode: EXIT.UNTRUSTED_HAZARD,
+          exitCode: EXIT.FACT,
           diffScope,
           headSha,
           hazards,
@@ -416,7 +416,7 @@ async function main(argv = process.argv.slice(2)) {
           const lines = [
             'BLOCKED_UNTRUSTED_HAZARD',
             `Scope    : ${diffScope} (HEAD ${headSha})`,
-            `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`,
+            `Exit Code: ${EXIT.FACT}`,
             'High-risk / supply-chain or gate-weakening changes detected before execution:',
             ...hazards.flatMap((h) => [
               `  - [${h.category}] ${h.file}: ${h.reason}`,
@@ -430,8 +430,8 @@ async function main(argv = process.argv.slice(2)) {
           ]
           process.stdout.write(`${lines.join('\n')}\n`)
         }
-        process.stderr.write(`BLOCKED_UNTRUSTED_HAZARD: ${hazards.length} high-risk change(s) detected (exit ${EXIT.UNTRUSTED_HAZARD})\n`)
-        return EXIT.UNTRUSTED_HAZARD
+        process.stderr.write(`BLOCKED_UNTRUSTED_HAZARD: ${hazards.length} high-risk change(s) detected (exit ${EXIT.FACT})\n`)
+        return EXIT.FACT
       }
       untrustedWarnings = hazards
       if (task && isExternalPrTaskLedger(task)) {
@@ -505,7 +505,7 @@ async function main(argv = process.argv.slice(2)) {
             ? `${empiricalGate.shallowE2eEvidence.code}: ${empiricalGate.shallowE2eEvidence.reason}`
             : `BLOCKED_EMPIRICAL_FIRST: 尚未完成当前轮次/指纹的业务流实证与故障注入闭环（缺失：${empiricalGate.missingSteps.join(', ')}），禁止输出 --include-diff。`)
       const payload = {
-        status: blockCode, code: blockCode, exitCode: EXIT.UNTRUSTED_HAZARD, mode, round, headSha,
+        status: blockCode, code: blockCode, exitCode: EXIT.FACT, mode, round, headSha,
         diffScope, workspaceFingerprint, missingSteps: empiricalGate.missingSteps,
         unblockCommands: empiricalGate.unblockCommands, nextSteps: empiricalGate.unblockCommands,
         affectedBusinessFlows: reviewContext.affectedBusinessFlows,
@@ -521,7 +521,7 @@ async function main(argv = process.argv.slice(2)) {
         `Missing  : ${empiricalGate.missingSteps.length > 0 ? empiricalGate.missingSteps.join(', ') : 'restore verification required'}`,
         ...(reviewContext.affectedBusinessFlows.length > 0 ? [`Flows    : ${reviewContext.affectedBusinessFlows.slice(0, 4).join(' ; ')}`] : []),
         `Strategy : ${reviewContext.empiricalTaskOrder.strategy}`,
-        `Exit Code: ${EXIT.UNTRUSTED_HAZARD}`, '', '[NEXT STEP]',
+        `Exit Code: ${EXIT.FACT}`, '', '[NEXT STEP]',
         ...empiricalGate.unblockCommands.map((c, idx) => `  ${idx + 1}. ${c}`),
       ]
       return emitGateBlock({ opts, code: blockCode, payload, textLines })
@@ -598,7 +598,7 @@ async function main(argv = process.argv.slice(2)) {
     return EXIT.OK
   } catch (err) {
     process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`)
-    return EXIT.ERROR
+    return EXIT.ACTION
   }
 }
 

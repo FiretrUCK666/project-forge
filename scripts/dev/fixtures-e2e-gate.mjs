@@ -177,7 +177,7 @@ export function registerStageBLoopB5Cases(cases) {
         const passBlocked = await withQuietIo(async () => handleRecord({
           task: 'e-t', round: '1', verdict: 'pass', 'reviewer-id': 'rev-e', 'review-token': tokE, evidence: 'ok', json: true,
         }, await resolveRepoRoots(eRev)))
-        if (passBlocked.res !== 2 || !passBlocked.out.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
+        if (passBlocked.res !== EXIT.FACT || !passBlocked.out.includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
           return `缺 E2E 观察时 pass 竟未被 BLOCKED_PASS_WITH_OPEN_BLOCKERS 拦截：exit=${passBlocked.res}, out=${passBlocked.out}`
         }
       } finally {
@@ -313,7 +313,7 @@ export function registerStageBLoopB5Cases(cases) {
       const stubInvalidMode = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'a6-t', '--mode', 'bogus'], { cwd: dir })
       const stubBadFlag = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['--nonexistent-flag'], { cwd: dir })
       const stubNoToken = await runAbsAsync('kit/skills/dev-review/scripts/review-pack.mjs', ['record', '--task', 'a6-t', '--verdict', 'pass', '--reviewer-id', 'rev-z', '--evidence', 'ok', '--json'], { cwd: dir })
-      if (stubInvalidMode.status === 0 || stubBadFlag.status === 0 || stubNoToken.status !== 2) {
+      if (stubInvalidMode.status === 0 || stubBadFlag.status === 0 || stubNoToken.status !== EXIT.FACT) {
         return `零 LLM CLI Stub 未按预期阻断异常参数/令牌：${JSON.stringify({ stubInvalidMode: stubInvalidMode.status, stubBadFlag: stubBadFlag.status, stubNoToken: stubNoToken.status })}`
       }
 

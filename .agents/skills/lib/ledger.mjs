@@ -241,8 +241,57 @@ export function createDefaultLedger(partial = {}) {
     status: partial.status ?? 'started',
     ...partial,
     explored: normalizeExploredEvidence(partial.explored),
+    /** 历史实施者集合（含接管前的原认领人），供三处自审判定按「历史 ∪ 当前」比对。 */
+    previousImplementers: Array.isArray(partial.previousImplementers) ? partial.previousImplementers.map(String) : [],
     taskId,
   }
+}
+
+/** 归一化参与人标识（去前导 `@`、小写）。 */
+function normActor(value) {
+  return String(value ?? '').trim().replace(/^@/, '').toLowerCase()
+}
+
+/**
+ * 历史实施者集合 ∪ 当前实施者（去重保序）。
+ *
+ * 三处自审判定（代码审查、规划 Critique、作者即实施者）都按这份集合比对，
+ * 不只看当前字段：一次接管就能让原实施者换个身份回来审自己的活。
+ */
+export function collectImplementerHistory(ledger) {
+  const out = []
+  const seen = new Set()
+  const push = (v) => {
+    const s = String(v ?? '').trim()
+    if (!s) return
+    const key = normActor(s)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    out.push(s)
+  }
+  push(ledger?.implementerId)
+  push(ledger?.claimedBy)
+  for (const p of Array.isArray(ledger?.previousImplementers) ? ledger.previousImplementers : []) push(p)
+  return out
+}
+
+/** 把即将被替换的实施者记进历史（接管与重新认领时调用）。 */
+export function rememberPreviousImplementer(ledger, nextActor) {
+  const out = []
+  const seen = new Set()
+  const nextKey = normActor(nextActor)
+  const push = (v) => {
+    const s = String(v ?? '').trim()
+    if (!s) return
+    const key = normActor(s)
+    if (!key || key === nextKey || seen.has(key)) return
+    seen.add(key)
+    out.push(s)
+  }
+  for (const p of Array.isArray(ledger?.previousImplementers) ? ledger.previousImplementers : []) push(p)
+  push(ledger?.implementerId)
+  push(ledger?.claimedBy)
+  return out
 }
 
 export function readTaskLedger(mainRoot, taskId) {

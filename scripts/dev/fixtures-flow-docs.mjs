@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, issueTokenFor, loadPreflight,
+  EXIT, HERE, SCRIPTS, SKILL_ROOT, existingKept, gitCommitFast, gitInit, gitSync, issueTokenFor, loadPreflight,
   readDirRefs, rmTree, runAbsAsync, runNode, seedExploredFor, survey, textsOf, tmpProject,
 } from './fixtures-helpers.mjs'
 
@@ -260,7 +260,7 @@ cases.push(['review-pack.mjs + govern-audit.mjs：外部 PR 投毒拦截与正�
     }, null, 2))
 
     const selfRev = await handleRecord({ task: 't-rev', round: '1', verdict: 'pass', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'author-a', 'implementer-id': 'author-a' }, revRoots)
-    if (selfRev !== 2) return `同人自审未被拒绝：exit=${selfRev}`
+    if (selfRev !== EXIT.FACT) return `同人自审未被拒绝：exit=${selfRev}`
 
     const r1 = await handleRecord({ task: 't-rev', round: '1', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-b', 'review-token': await issueTokenFor(dir, 't-rev', 1), 'must-fix': ['C1: 缺少边界空值检查'] }, revRoots)
     if (r1 !== 0) return `Round 1 record 失败：${r1}`

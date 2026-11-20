@@ -387,7 +387,7 @@ export async function checkDirtyFaultResidueBeforeSync({ mainRoot, gitDir, opts,
   return {
     blocked: true,
     code: 'BLOCKED_DIRTY_FAULT_RESIDUE',
-    exitCode: EXIT.UNTRUSTED_HAZARD,
+    exitCode: EXIT.FACT,
     mode,
     round: expectedRound,
     targetRoot: posixPath(slotRoot),
@@ -448,7 +448,7 @@ export function emitGateBlock({ opts, code, payload, textLines }) {
     process.stdout.write(`${textLines.join('\n')}\n`)
   }
   process.stderr.write(`${payload.error ?? code}\n`)
-  return payload.exitCode ?? EXIT.UNTRUSTED_HAZARD
+  return payload.exitCode ?? EXIT.FACT
 }
 
 export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, receipt, diff, reviewRoot, scanUntrustedDiff }) {
@@ -479,7 +479,7 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
       payload: {
         status: 'BLOCKED_UNTRUSTED_HAZARD',
         code: 'BLOCKED_UNTRUSTED_HAZARD',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
+        exitCode: EXIT.FACT,
         mode,
         pr: prNo ?? task?.prNumber ?? null,
         headSha,
@@ -510,7 +510,7 @@ export function checkUntrustedBeforeExec({ opts, task, mode, headSha, prNo, rece
       payload: {
         status: 'BLOCKED_UNTRUSTED_HAZARD',
         code: 'BLOCKED_UNTRUSTED_HAZARD',
-        exitCode: EXIT.UNTRUSTED_HAZARD,
+        exitCode: EXIT.FACT,
         mode,
         pr: prDisplay,
         headSha,

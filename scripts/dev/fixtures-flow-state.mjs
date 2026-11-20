@@ -9,7 +9,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
+import { EXIT, gitCommitFast, gitInit, gitInitBare, gitSync, issueTokenFor, rmTree, runAbsAsync, seedExploredFor, tmpProject } from './fixtures-helpers.mjs'
 
 export function registerFlowStateCases(cases) {
   cases.push(['三正交策略、无 CI 低风险静态门禁、evidence.json 防旁路、flow next 与 submit 权责锁', async () => {
@@ -466,7 +466,7 @@ export function registerFlowStateCases(cases) {
         'record', '--task', 'c4-lk', '--round', '2', '--verdict', 'pass', '--evidence', '夹具实测：命令已跑，输出符合预期',
         '--reviewer-id', 'rev-2', '--review-token', await issueTokenFor(dir, 'c4-lk', 2), '--json',
       ], { cwd: dir })
-      if (sameHead.status !== 2 || !sameHead.stdout.includes('BLOCKED_SAME_HEAD_REREVIEW')) {
+      if (sameHead.status !== EXIT.FACT || !sameHead.stdout.includes('BLOCKED_SAME_HEAD_REREVIEW')) {
         return `同 HEAD 复审未被拦截：exit=${sameHead.status}, out=${sameHead.stdout}`
       }
 
@@ -476,10 +476,10 @@ export function registerFlowStateCases(cases) {
       await hVerify({ task: 'c4-lk' }, roots)
 
       const outScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-2', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/a.mjs:10 outside hunk'] }, roots)
-      if (outScope !== 2) return `Round 2 未改旧文件新刺未被拦截：exit=${outScope}`
+      if (outScope !== EXIT.FACT) return `Round 2 未改旧文件新刺未被拦截：exit=${outScope}`
 
       const subjScope = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-2', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: rename helper style nitpick'] }, roots)
-      if (subjScope !== 2) return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope}`
+      if (subjScope !== EXIT.FACT) return `Round 2 无文件路径主观挑刺未被拦截：exit=${subjScope}`
 
       const r2CrossC1 = await hRecord({ task: 'c4-lk', round: '2', verdict: 'changes', 'evidence': '夹具实测：命令已跑，输出符合预期', 'reviewer-id': 'rev-2', 'review-token': await issueTokenFor(dir, 'c4-lk', 2), 'must-fix': ['C1: src/b.mjs:1 new diff bug'] }, roots)
       if (r2CrossC1 !== 0) return `不同文件同标 C1 误触发停损或遭拒：exit=${r2CrossC1}`
@@ -506,7 +506,7 @@ export function registerFlowStateCases(cases) {
         'record', '--task', 'c4-lk', '--round', '4', '--verdict', 'pass', '--reviewer-id', 'rev-4',
         '--review-token', await issueTokenFor(dir, 'c4-lk', 4), '--evidence', '夹具实测：命令已跑，输出符合预期'
       ], { cwd: dir })
-      if (passBlocked.status !== 2 || !(passBlocked.stdout + passBlocked.stderr).includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
+      if (passBlocked.status !== EXIT.FACT || !(passBlocked.stdout + passBlocked.stderr).includes('BLOCKED_PASS_WITH_OPEN_BLOCKERS')) {
         return `失败 verify 后虚假 pass 未被拦截：exit=${passBlocked.status}, out=${passBlocked.stdout}, err=${passBlocked.stderr}`
       }
       await hVerify({ task: 'c4-lk' }, roots)

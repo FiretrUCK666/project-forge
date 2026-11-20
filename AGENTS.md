@@ -20,7 +20,7 @@
 | 外部 Issue・PR 业务分诊 / 里程碑管理 / 裸粘贴链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs intake` / `inspect <URL...>` / `milestone` |
 | 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`) |
 | 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`) |
-| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run`) |
+| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run` / `cycle`) |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
 
@@ -30,6 +30,7 @@
 - **四条准则**：1. **治本不治标**（查根因，不用补丁遮掩）；2. **写原则不写死**（提炼可迁移原则）；3. **融入结构**（查复用合入主干，不留双轨）；4. **保持清朗**（清废弃路径与冗余分支）。
 - **信任倒金字塔**：`确定性静态与类型门禁（类型/Schema/arch-rules） > 真实启动运行与端到端实证（测试/smoke-verify/UI 渲染交互与浅深色截图/CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未实证挑刺不阻塞合入；同类纠偏复发**满 2 次**沉入结构重构或确定性静态检查并清理死代码。
 - **改前改后与人肉禁令**：先给无历史包袱最优解；改前查复用并判 `two-way`/`one-way` 门型；改后拿实测或渲染交互证据再汇报，不让用户代劳验收。
+- **只锁客观输出边界**：验收锁产物、接口与断言，不锁私有过程——过程一改就误报的规则只会逼人绕过它。
 <!-- project-forge: end 行事总纲 -->
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位

@@ -12,8 +12,9 @@ import {
   analyzePendingDecisions, deriveDefaultPlanMode, PLAN_MODES, planModeErrors, resolveDocPlanMode,
 } from '../../kit/skills/lib/pending-decisions.mjs'
 import {
-  evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG,
+  evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG, resolveCritiqueReadiness,
 } from '../../kit/skills/lib/plan-exit-gate.mjs'
+import { critiqueTextFingerprint } from '../../kit/skills/lib/critique-rounds.mjs'
 import {
   compileScopePattern, DERIVED_MANIFEST_PATHS, evaluateSliceGraph, extractMasterCriteria, scopesOverlap,
 } from '../../kit/skills/lib/doc-slice-graph.mjs'
@@ -280,6 +281,87 @@ export function registerPlanWaveCases(cases) {
         return '门禁拦下之后仍然建了工作位——它必须在建分支之前'
       }
       if (booted.exitCode !== 0) return `--allow-plan-bootstrap 未能放行规划 PR 自举：${booted.exitCode}`
+      return true
+    } finally { rmTree(dir) }
+  }])
+
+  cases.push(['停损 override 放行后门禁不再误拦：签字有效即过审，无签字或正文改动过仍拦住', async () => {
+    // 真实形状来自 e2e Scenario I：critique-reject 三轮触发停损 -> 人类 critique-override
+    // -> approve（只改 status/approved，**不动** plan_critique）-> flow start --case 4。
+    // `plan_critique: rejected (...)` 会在 override 之后原样留着，它是「当初被拒过」的历史，
+    // 不是「现在仍未过审」。把两者等价，等于让人签的字不生效。
+    const specBody = (overrideJson) => {
+      const lines = [
+        '---', 'kind: spec', 'title: "S-stop-loss"', 'status: approved', 'tier: L3',
+        'created: 2026-11-20', 'updated: 2026-11-20', 'issue: 1', 'pr: null', 'branch: null',
+        'owner: planner', 'plan_mode: autonomous', 'approved: true', 'implemented: false',
+        'plan_critique: rejected (reviewer=crit-3, round=3, sha=f841d5825ad0)',
+        ...(overrideJson ? [`critique_override: '${overrideJson}'`] : []),
+        'related_prd: ../prd/261120-master-prd.md', 'related_todo: null', 'high_risk_paths: []',
+        'task_id: slice-stop', 'depends_on: []', 'scope_files: [src/a.mjs]',
+        '---', '', '# SPEC: S-stop-loss', '', '## 要解决的问题', '- a', '', '## 本期不做', '- b', '',
+        '## 门型与回滚路径', '- two-way', '', '## 验收标准', '- [x] C1: `src/a.mjs` ok', '',
+      ]
+      return lines.join('\n')
+    }
+    const overrideFor = (text) => JSON.stringify({
+      approved: true, reason: 'approved after stop-loss', by: 'human-maintainer',
+      at: '2026-11-20T00:00:00.000Z', sha: critiqueTextFingerprint(text), overriddenRounds: [3],
+    })
+
+    const bare = specBody(null)
+    const withOverride = specBody(overrideFor(bare))
+    // override 记在 Frontmatter 里且被 stripCritiqueMeta 剥掉，所以签字前后正文指纹应当一致。
+    if (critiqueTextFingerprint(withOverride) !== critiqueTextFingerprint(bare)) {
+      return '签字前后正文指纹不一致——override 元字段混进了指纹'
+    }
+    const tampered = `${withOverride}\n- override 之后又加的一条\n`
+
+    const dir = makeWaveRepo({
+      master: makeMaster({ criteria: ['C1'] }),
+      specs: [
+        { file: 'docs/specs/261120-issue1-stop-spec.md', text: bare },
+        { file: 'docs/specs/261120-issue2-signed-spec.md', text: withOverride },
+        { file: 'docs/specs/261120-issue3-tampered-spec.md', text: tampered },
+      ],
+    })
+    gitCommitFast(dir, 'init stop-loss docs')
+    try {
+      // 正面：签字有效 -> 放行
+      const fresh = evaluatePlanExitGate(dir, { caseType: 4, taskId: 'slice-stop', docs: { spec: 'docs/specs/261120-issue2-signed-spec.md' } })
+      if (!fresh.ok) {
+        return `override 签字有效仍被拦截：${JSON.stringify((fresh.reasons ?? []).map((r) => r.message))}`
+      }
+
+      // 反面 A：没有 override -> 仍拦住，判据是 plan_critique 本身
+      const unsigned = evaluatePlanExitGate(dir, { caseType: 4, taskId: 'slice-stop', docs: { spec: 'docs/specs/261120-issue1-stop-spec.md' } })
+      if (!unsigned.blocked) return '没有 override 的 rejected 文档被放行了'
+      if (!unsigned.reasons.some((r) => r.code === 'BLOCKED_PLAN_NOT_READY' && r.message.includes('rejected'))) {
+        return `拦截理由没说清是内审未过：${JSON.stringify(unsigned.reasons.map((r) => r.message))}`
+      }
+      if (!unsigned.reasons.some((r) => String(r.fixHint).includes('critique-override'))) {
+        return `拦截理由没指出可以用 override 裁决：${JSON.stringify(unsigned.reasons.map((r) => r.fixHint))}`
+      }
+
+      // 反面 B：有 override 但正文改过 -> 仍拦，且理由必须是「override 之后正文被改动」
+      const stale = evaluatePlanExitGate(dir, { caseType: 4, taskId: 'slice-stop', docs: { spec: 'docs/specs/261120-issue3-tampered-spec.md' } })
+      if (!stale.blocked) return 'override 之后正文被改动，却仍然放行了——人批的不是这一版'
+      const staleReason = stale.reasons.find((r) => r.code === 'BLOCKED_PLAN_NOT_READY' && /override/.test(r.message))
+      if (!staleReason) {
+        return `正文改动后的拦截理由没说清是 override 过期：${JSON.stringify(stale.reasons.map((r) => r.message))}`
+      }
+      if (!staleReason.message.includes('critique-override') || !staleReason.message.includes('正文')) {
+        return `override 过期理由措辞不清：${staleReason.message}`
+      }
+
+      // 判据要点直测：三种输入各自落到 should/shouldn't block
+      const { parseDocFrontmatter } = await import('../../kit/skills/lib/doc-frontmatter.mjs')
+      const readinessOf = (text) => resolveCritiqueReadiness({
+        rel: 'docs/specs/x-spec.md', text, data: parseDocFrontmatter(text).data,
+      })
+      if (readinessOf(withOverride).basis !== 'human-override') return '签字有效时判据依据不是 human-override'
+      if (readinessOf(bare).basis !== 'critique-unready') return '无签字时判据依据不是 critique-unready'
+      if (readinessOf(tampered).basis !== 'override-stale') return '正文改动时判据依据不是 override-stale'
       return true
     } finally { rmTree(dir) }
   }])

@@ -46,17 +46,19 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
     const priorRounds = parseCritiqueRounds(fm.data, workingText)
     // override 生效与正文指纹比对走共用判据：`plan-exit-gate.mjs` 用的是同一份。
     // 两处各写一遍，迟早算出不同的结论，然后「approve 说有效、门禁说过期」同时成立。
-    const overrideState = evaluateCritiqueOverride(workingText, fm.data)
+    const critiqueState = evaluateCritiqueOverride(workingText, fm.data)
+    // 判据负责算「签字是否有效、是否已过期」；这里只读原始记录本身的签字与否。
+    const override = critiqueState.override
     const hasStopLoss = priorRounds.some((r) => Boolean(r.stopLossTriggered))
-    if (hasStopLoss && !overrideState.approved) {
+    if (hasStopLoss && !override?.approved) {
       throw Object.assign(new Error(`STOP_LOSS_ESCALATE: ${audit.file} 已触发规划 Critique 停损且尚未解锁；请先运行 doc-plan.mjs critique-override --file "${audit.file}" --human-approved --reason "..."`), { code: 'STOP_LOSS_ESCALATE', exitCode: 4 })
     }
-    if (overrideState.approved) {
-      if (overrideState.stale) {
-        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${overrideState.sha} !== current=${overrideState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
+    if (critiqueState.approved) {
+      if (critiqueState.stale) {
+        throw Object.assign(new Error(`BLOCKED_CRITIQUE_STALE: ${audit.file} 在人类 critique-override 后正文已被修改（override=${critiqueState.sha} !== current=${critiqueState.currentSha}），请重新复核或重签 override`), { code: 'BLOCKED_CRITIQUE_STALE', exitCode: 2 })
       }
     } else {
-      const currentSha = overrideState.currentSha
+      const currentSha = critiqueState.currentSha
       const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
       if (!/^passed\b/i.test(critiqueVal)) {
         if (skipCritiqueReason && String(skipCritiqueReason).trim()) {

@@ -394,6 +394,16 @@ export function checkSliceGraphCycles(repoRoot, graph = null) {
  * 波次怎么算：与 `buildMultiTaskWavePlan` 同一个定义——第 N 波的成员，是「前置都已在
  * 前 N-1 波里排完」的那些切片。同一波次里排除掉串行保守标记的，剩下的会被一起派发，
  * 所以它们的 `scope_files` 必须两两零交叉。
+ *
+ * ## 只判「还会被派发」的切片
+ *
+ * 已完成与已归档的切片不进候选集，理由不是省事，而是它们**不会再次被并行派发**：
+ * 一个 `implemented` 的切片已经合进主干，两个都做完的切片「写了同一批文件」是既成事实，
+ * 不是待处理的冲突。把它们算进来，等于每次合并之后都拿历史账目去判今天的排期——
+ * 而且必然红：已合并的切片越多，历史写域交叉越多。
+ *
+ * 这条过滤同时把「已完成的前置算已满足」也一并解决了：依赖目标不在候选集里，
+ * 波次推导就按「已满足」处理，不会把它拉进同一波。
  */
 export function checkWaveScopeOverlap(repoRoot, graph = null) {
   const g = graph ?? buildSliceGraph(repoRoot)
@@ -402,6 +412,7 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
   const nodes = g.slices
     .filter((s) => s.kind === 'spec' && s.key)
     .filter((s) => g.masters.length === 0 || g.masters.some((m) => m.rel === s.masterRel))
+    .filter((s) => !s.done && !s.archived)
   if (nodes.length < 2) return out
 
   const byKey = new Map(nodes.map((n) => [n.key, n]))
@@ -409,9 +420,10 @@ export function checkWaveScopeOverlap(repoRoot, graph = null) {
   let wave = 0
   let remaining = new Set(byKey.keys())
   while (remaining.size > 0) {
-    // 本波次 = 依赖全都排在更早波次（或依赖已完成）的那些。
+    // 本波次 = 依赖全都排在更早波次、或压根不在候选集里的那些。
+    // 不在候选集 = 已完成 / 已归档 / 从未声明：前两种是已满足，后一种归检查三去报。
     const ready = [...remaining].filter((k) => (byKey.get(k).dependsOn ?? [])
-      .every((d) => !byKey.has(d) || waveOf.has(d) || byKey.get(d)?.done))
+      .every((d) => !byKey.has(d) || waveOf.has(d)))
     if (ready.length === 0) break
     for (const k of ready) {
       waveOf.set(k, wave)

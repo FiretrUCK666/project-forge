@@ -5,7 +5,7 @@
  * `doc-slice-graph.mjs`（切片图四检）、`flow batch plan --handoff`（交接包与透传标志）。
  */
 
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -16,7 +16,7 @@ import {
 } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { critiqueTextFingerprint } from '../../kit/skills/lib/critique-rounds.mjs'
 import {
-  compileScopePattern, DERIVED_MANIFEST_PATHS, evaluateSliceGraph, extractMasterCriteria, scopesOverlap,
+  buildSliceGraph, compileScopePattern, DERIVED_MANIFEST_PATHS, evaluateSliceGraph, extractMasterCriteria, scopesOverlap,
 } from '../../kit/skills/lib/doc-slice-graph.mjs'
 import { resolveRepoRoots } from '../../kit/skills/lib/shared.mjs'
 import { handleStart } from '../../kit/skills/dev-flow/scripts/flow-inspect.mjs'
@@ -462,6 +462,71 @@ export function registerPlanWaveCases(cases) {
         return '确定性派生清单被当成了写域碰撞'
       }
     } finally { rmTree(manifest) }
+
+    // 反向 8：两个都还没做完的活跃切片写同一份文件 -> 必须报碰撞。
+    // 这一条与下面的正向构成一对：只有「已完成」这一条线能把同样形状的碰撞判掉，
+    // 不能反过来把活跃切片的碰撞也一并放过。
+    const activeCollide = makeWaveRepo({
+      master: makeMaster({ criteria: ['C1', 'C2'] }),
+      specs: [
+        { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, scope: ['AGENTS.md'], deps: [], criteria: ['C1'] }) },
+        { file: 'docs/specs/261120-issue2-b-spec.md', text: makeSpec({ taskId: 'slice-b', issue: 2, scope: ['AGENTS.md'], deps: [], criteria: ['C2'] }) },
+      ],
+    })
+    try {
+      const r = evaluateSliceGraph(activeCollide)
+      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
+      if (!hit) return `两个活跃切片写同一份文件没被报碰撞：${JSON.stringify(r.errors.map((e) => e.code))}`
+      if (!hit.message.includes('AGENTS.md')) return `活跃切片碰撞没有指出具体路径：${hit.message}`
+    } finally { rmTree(activeCollide) }
+
+    // 正向 4：两个都已完成（implemented）的切片写同一份文件 -> 不报。
+    //
+    // 已完成/已归档的切片不会再被并行派发，「它们都写过 AGENTS.md」是既成事实，
+    // 不是待处理的冲突。把它们算进同波次碰撞，会让每一次合并之后的仓库常驻一条
+    // 历史交叉告警——报出来的不是问题，是噪音。
+    //
+    // 两份都放 `docs/specs/`：只有这样它们才都归属同一份活跃总控、才都进候选集，
+    // 判决才真的由「已完成」这一条线作出。放进 `docs/archive/specs/` 时
+    // `related_prd` 会解析到归档目录、匹配不上活跃总控，用例会因为归属不符而静默通过——
+    // 那不是在测过滤条件，那是在测一个永远不会失败的摆设。
+    const doneCollide = makeWaveRepo({
+      master: makeMaster({ criteria: ['C1', 'C2'] }),
+      specs: [
+        { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, status: 'implemented', scope: ['AGENTS.md'], deps: [], criteria: ['C1'] }) },
+        { file: 'docs/specs/261120-issue2-b-spec.md', text: makeSpec({ taskId: 'slice-b', issue: 2, status: 'implemented', scope: ['AGENTS.md'], deps: [], criteria: ['C2'] }) },
+      ],
+    })
+    try {
+      const r = evaluateSliceGraph(doneCollide)
+      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
+      if (hit) return `已完成的切片之间被误报成同波次碰撞：${hit.message}`
+      // 前提自检：这两片确实都在候选视野里，否则上面的「没报错」毫无意义。
+      const g = buildSliceGraph(doneCollide)
+      const inMaster = g.slices.filter((s) => s.kind === 'spec' && s.masterRel === 'docs/prd/261120-master-prd.md')
+      if (inMaster.length !== 2) return `正例前提不成立：归属同一总控的切片数为 ${inMaster.length}，应为 2`
+      if (!inMaster.every((s) => s.done)) return '正例前提不成立：这两片并未被判定为已完成'
+    } finally { rmTree(doneCollide) }
+
+    // 正向 5：活跃切片依赖一个已完成的切片、两者写同一份文件 -> 也不报。
+    //
+    // 依赖已满足，活跃切片必然落在更晚的波次；硬把它和前一片拉到同一波次，
+    // 等于说「你的前置跟你并行」——那既不合拓扑，也把最常见的续做场景判成冲突。
+    const mixedDep = makeWaveRepo({
+      master: makeMaster({ criteria: ['C1', 'C2'] }),
+      specs: [
+        { file: 'docs/specs/261120-issue1-new-spec.md', text: makeSpec({ taskId: 'new-slice', issue: 1, scope: ['AGENTS.md'], deps: ['old-slice'], criteria: ['C1'] }) },
+        { file: 'docs/specs/261120-issue2-old-spec.md', text: makeSpec({ taskId: 'old-slice', issue: 2, status: 'implemented', scope: ['AGENTS.md'], deps: [], criteria: ['C2'] }) },
+      ],
+    })
+    try {
+      const r = evaluateSliceGraph(mixedDep)
+      const hit = r.errors.find((e) => e.code === 'BLOCKED_SLICE_OVERLAP')
+      if (hit) return `依赖已完成切片时被误报成同波次碰撞：${hit.message}`
+      if (r.errors.some((e) => e.code === 'BLOCKED_SLICE_CYCLE')) {
+        return `依赖已完成切片被误判成环或悬空：${JSON.stringify(r.errors.map((e) => e.code))}`
+      }
+    } finally { rmTree(mixedDep) }
     return true
   }])
 
@@ -492,7 +557,7 @@ export function registerPlanWaveCases(cases) {
     const dir = makeWaveRepo({
       master: makeMaster({ criteria: ['C1', 'C2'] }),
       specs: [
-        { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, scope: ['kit/a/only.mjs'], deps: [], criteria: ['C1'] }) },
+        { file: 'docs/specs/261120-issue1-a-spec.md', text: makeSpec({ taskId: 'slice-a', issue: 1, scope: ['kit/a/only.mjs'], deps: [], criteria: ['C1'], extra: ['case_type: 3'] }) },
         { file: 'docs/specs/261120-issue2-b-spec.md', text: makeSpec({ taskId: 'slice-b', issue: 2, scope: ['kit/b/only.mjs'], deps: [], criteria: ['C2'] }) },
       ],
     })
@@ -524,7 +589,29 @@ export function registerPlanWaveCases(cases) {
         if (!h.dispatchCommand.includes(`--task ${h.taskId}`)) return `派发命令没带 taskId：${h.dispatchCommand}`
         if (h.criteriaCount < 1) return `交接包没抽到验收标准：${h.taskId}`
         if (!h.prompt || !h.prompt.includes(h.taskId)) return `交接包正文缺失或不含 taskId：${h.taskId}`
+        // 派发命令的档位必须跟着切片走：一律写死 --case 4 会让只有 Todo 的 Case 3 切片
+        // 拿到一个它不满足的档位要求，命令直接跑不起来。
+        if (!h.dispatchCommand.includes(`--case ${h.caseType}`)) {
+          return `派发命令的档位与切片不符（caseType=${h.caseType}）：${h.dispatchCommand}`
+        }
       }
+
+      // 正向 3：档位跟着切片自己声明的走，不是一律 4。
+      //
+      // 只断言「命令里的档位 == 返回的 caseType」是自证的——两处都由同一个变量拼出来。
+      // 得钉住一个**外部可核的期望值**：切片显式写了 `case_type: 3`，命令就必须是 `--case 3`。
+      const explicitThree = handoffs.find((h) => h.taskId === 'slice-a')
+      if (!explicitThree) return `交接包缺 slice-a：${JSON.stringify(handoffs.map((h) => h.taskId))}`
+      if (explicitThree.caseType !== 3) {
+        return `切片显式声明 case_type: 3 没被采纳，实际 ${explicitThree.caseType}`
+      }
+      if (!explicitThree.dispatchCommand.includes('--case 3')) {
+        return `显式 Case 3 切片拿到的派发命令档位不对：${explicitThree.dispatchCommand}`
+      }
+      // 正向 4：没显式声明档位的切片按有无 SPEC 推——有 SPEC 就是 Case 4。
+      const inferred = handoffs.find((h) => h.taskId === 'slice-b')
+      if (!inferred) return `交接包缺 slice-b`
+      if (inferred.caseType !== 4) return `有 SPEC 的切片应派生 Case 4，实际 ${inferred.caseType}`
 
       // 反向 1：不传 --handoff 时不额外计算交接包
       const origOut2 = process.stdout.write.bind(process.stdout)
@@ -557,13 +644,74 @@ export function registerPlanWaveCases(cases) {
     }
     if (!/multiFlags: \[[^\]]*'artifact'/.test(helpText)) return 'artifact 未按可重复标志注册'
 
-    // 正向 3：Fail-Soft —— 现在 workflow-policy 里还没有 validateVerifyPrecheck，
-    // 记录实证这一步必须照常工作，不许为「一个还没写的函数」把整条 verify 拦死。
+    // 正向 3：Fail-Soft 探测仍在——入口缺席时必须放行，不能为「一个还没写的函数」把整条 verify 拦死。
     const helpers = readFileSync(new URL('../../kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs', import.meta.url), 'utf8')
     if (!helpers.includes('validateVerifyPrecheck')) return '前置预检入口未接'
     if (!/typeof fn !== 'function'\) return null/.test(helpers)) {
       return '前置预检未按 Fail-Soft 处理：入口缺席时应直接放行'
     }
+
+    // 反向 2：参数名必须与 `validateVerifyPrecheck` 读的一字不差。
+    // 名字对不上时它内部拿到的根与实证路径全是 null：校验照旧通过、却什么都没落账，
+    // 门禁看着在工作，附件实证链条其实断在这儿。
+    for (const field of ['repoRoot:', 'gitCommonDir:', 'headSha:']) {
+      if (!new RegExp(`\\b${field}`).test(helpers)) {
+        return `前置预检少传 ${field}——名字对不上就等于什么都没落账`
+      }
+    }
+
+    // 正向 4 / 反向 3-4：端到端验一次「附件到底有没有落进 evidence.json」。
+    //
+    // 这一条是整组用例的关键：前面几条只证明「标志收得下、代码里有这个函数」，
+    // 而真正会坏的地方是**校验过了、记录没写进去**。附件能拦人放人却不落账，
+    // 等于 `--artifact` 在端到端下完全没用，而所有断言都还是绿的。
+    const { handleStart: startForArtifact } = await import('../../kit/skills/dev-flow/scripts/flow-inspect.mjs')
+    const { handleVerify: verifyForArtifact } = await import('../../kit/skills/dev-flow/scripts/flow-lifecycle.mjs')
+    const { resolveRepoRoots: resolveRootsForArtifact } = await import('../../kit/skills/lib/shared.mjs')
+    const { gitCommitFast: commitForArtifact, gitSync: gitForArtifact } = await import('./fixtures-helpers.mjs')
+
+    const evDir = makeWaveRepo({})
+    try {
+      const evRoots = await resolveRootsForArtifact(evDir)
+      const st = await startForArtifact({
+        task: 'art-ev', case: '1', slug: 'art-ev', files: 'src/App.tsx', implementer: 'alice',
+      }, evRoots)
+      if (st.exitCode !== 0) return `附件用例 start 失败：${st.exitCode}`
+      const evWt = join(evDir, '.worktrees', 'impl-art-ev')
+      mkdirSync(join(evWt, 'src'), { recursive: true })
+      writeFileSync(join(evWt, 'src', 'App.tsx'), 'export const App = () => null\n', 'utf8')
+      const goodArt = join(evWt, 'shot.txt')
+      writeFileSync(goodArt, 'nonempty-evidence', 'utf8')
+      const emptyArt = join(evWt, 'empty.txt')
+      writeFileSync(emptyArt, '', 'utf8')
+      gitForArtifact(evWt, ['add', '-A'])
+      gitForArtifact(evWt, ['commit', '-qm', 'app'])
+
+      const evPath = join(evDir, '.git', 'project-forge-flow', 'tasks', 'art-ev', 'evidence.json')
+
+      // 反向 3：空文件不是实证，必须拦住，且不许把它写进 evidence.json。
+      const emptyRes = await verifyForArtifact({ task: 'art-ev', mode: 'gate', artifact: [emptyArt] }, evRoots)
+      if (emptyRes.exitCode === 0) return '0 字节空附件被放行了——空文件不能当实证'
+
+      // 反向 4：不存在的附件同样必须拦住。
+      const missingRes = await verifyForArtifact({ task: 'art-ev', mode: 'gate', artifact: [join(evWt, 'no-such-file.png')] }, evRoots)
+      if (missingRes.exitCode === 0) return '不存在的附件被放行了'
+
+      // 正向 4：真附件放行，且**必须真的出现在 evidence.json 里**。
+      const okRes = await verifyForArtifact({ task: 'art-ev', mode: 'gate', artifact: [goodArt] }, evRoots)
+      if (okRes.exitCode !== 0) return `合法附件未放行：${okRes.exitCode}`
+      if (!existsSync(evPath)) return 'verify 通过了却没有写出 evidence.json'
+      const ev = JSON.parse(readFileSync(evPath, 'utf8'))
+      const rec = (ev.artifacts ?? []).find((r) => String(r.relPath ?? '').endsWith('shot.txt'))
+      if (!rec) return `合法附件没有落进 evidence.json：${JSON.stringify(ev.artifacts)}`
+      if (!(rec.bytes > 0)) return `附件登记的字节数为 ${rec.bytes}——元数据没写全`
+      if (!/^[a-f0-9]{8,}$/i.test(String(rec.sha256Prefix ?? ''))) {
+        return `附件缺少校验指纹：${JSON.stringify(rec)}`
+      }
+      if (!ev.visual || ev.visual.required !== true) {
+        return `触及界面资源的变更没有留下界面核验记录：${JSON.stringify(ev.visual)}`
+      }
+    } finally { rmTree(evDir) }
     return true
   }])
 
@@ -642,6 +790,22 @@ export function registerPlanWaveCases(cases) {
       const subRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', sub, '--dir', dir, '--json'])
       const subOut = JSON.parse(subRes.stdout)
       if (subOut.auditedCount === 0) return '审计普通子目录时一份文档都没扫到'
+      if (subOut.scope !== 'docs') return `普通子目录被当成独立根了（scope=${subOut.scope}）`
+
+      // 反向 2：一个带 `docs/` + `AGENTS.md` 的普通子包目录**不是**独立工程根。
+      //
+      // 早先按「长得像工程根」认，这种目录会被当成新根、审计范围从 `pkg/` 变成 `.`，
+      // 于是仓根那几份真正该审的受管规划一份都不在视野里——扫了个空却报全部通过。
+      // 这和路径没归一是同一类假绿，只是换了个入口。
+      const pkg = join(dir, 'pkg')
+      mkdirSync(join(pkg, 'docs'), { recursive: true })
+      writeFileSync(join(pkg, 'AGENTS.md'), '# pkg\n', 'utf8')
+      writeFileSync(join(pkg, 'docs', 'note.md'), '# note\n', 'utf8')
+      const pkgRes = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', ['audit', pkg, '--dir', dir, '--json'])
+      const pkgOut = JSON.parse(pkgRes.stdout)
+      if (pkgOut.scope === '.') {
+        return '带 docs/ 与 AGENTS.md 的普通子包目录被当成了独立工程根——仓根受管规划会滑出视野'
+      }
 
       // 同一目录两个名字（符号链接 / 短文件名）时，两边坐标系必须对齐。
       //

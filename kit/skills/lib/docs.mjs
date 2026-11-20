@@ -740,8 +740,6 @@ import { buildArchivedDocPatch, buildStandardDocContent } from './doc-templates.
  * 统一工程文档模板生成器（YAML Frontmatter + 顶部可见元信息概览表 + SPEC 短名 Mermaid 图）。
  * 供 `doc-plan.mjs init` 与 `govern-audit.mjs --write-todo` 共用唯一格式源。
  */
-export { resolveDocPlanMode } from './pending-decisions.mjs'
-
 export function renderStandardDocTemplate(opts = {}) {
   return buildStandardDocContent({
     today: docIsoDate(),

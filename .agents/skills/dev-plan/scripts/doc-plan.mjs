@@ -17,7 +17,7 @@
  */
 
 import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs'
 import {
@@ -54,16 +54,27 @@ export { auditDoc, auditRepoDocs, listDocs, stripCritiqueMeta, triageTask }
 /**
  * 目标目录自身是不是一个独立的工程根（仓库根或 worktree 根）。
  *
- * 认的是「它自己带 `docs/` 或 `.git`」这件事，不是路径长什么样——写死
- * `.worktrees/` 这类命名只对当前约定成立，换个仓就失效。
+ * 判据是「它自己就是一个 git 根」，不是「它长得像」：`.git` 是目录（独立仓）或
+ * 指向别处的文件（worktree）都算。
+ *
+ * 早先还认「带 `docs/` + `AGENTS.md`」这个形状，那是错的：一个普通的子包目录完全
+ * 可能两样都有，把它当成独立根，审计范围就会从 `pkg/` 变成 `.`，而仓根下真正该审的
+ * 那几份受管规划**一份都不在视野里**——扫了个空，却报全部通过。这和「路径没归一化」
+ * 是同一类假绿，只是换了个入口。
+ *
+ * 唯一的例外是审计根之外的目录：那种情况下相对路径根本算不出来，只能按它自己作根。
  */
 function isStandaloneWorkRoot(targetAbs, outerRoot) {
   if (!existsSync(targetAbs)) return false
   // 两边都归一化再比：同一目录可能经符号链接或长短文件名有两个名字，
   // 拿字面量比会把「自己」认成「别人」，白跑一遍独立根逻辑。
-  if (canonicalPath(targetAbs) === canonicalPath(outerRoot)) return false
-  if (existsSync(join(targetAbs, '.git'))) return true
-  return existsSync(join(targetAbs, 'docs')) && existsSync(join(targetAbs, 'AGENTS.md'))
+  const target = canonicalPath(targetAbs)
+  const outer = canonicalPath(outerRoot)
+  if (target === outer) return false
+  if (existsSync(join(target, '.git'))) return true
+  const insideOuter = target.startsWith(outer + sep)
+  const containsOuter = outer.startsWith(target + sep)
+  return !insideOuter && !containsOuter
 }
 
 function parseIssueArg(rawIssue) {

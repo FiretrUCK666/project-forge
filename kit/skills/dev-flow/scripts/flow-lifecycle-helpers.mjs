@@ -325,14 +325,26 @@ export async function handleVerifyE2eFailure({
  *
  * 用命名空间导入而不是具名导入，是因为具名导入不存在的导出会让整个模块在链接期就抛错——
  * 那样 Fail-Soft 无从谈起，两侧谁先合入都会把对方打断。
+ *
+ * ## 参数名必须与对方读的一字不差
+ *
+ * 它读的是 `repoRoot` / `gitCommonDir` / `headSha`。名字对不上时它内部的实证路径与根全是
+ * `null`，于是「校验通过、什么都没落账」——门禁看着在工作，附件实证链条其实是断的。
+ *
+ * ## 传 `record: false`，落账只写一次
+ *
+ * 默认它自己会往 `evidence.json` 写一份。紧随其后的 `writeVerificationEvidence` 写的是
+ * 整份新对象，会把刚写进去的 `artifacts` / `visual` 整个抹掉。与其让两处抢着写再合并，
+ * 不如让它只校验、把结果交回来，由本文件一次性写全——写一次就没有覆盖窗口。
  */
 function runVerifyPrecheck(payload) {
   const fn = workflowPolicy?.validateVerifyPrecheck
   if (typeof fn !== 'function') return null
   try {
-    const res = fn(payload)
-    if (!res || res.ok !== false) return null
-    return { ...res, blocked: true, exitCode: Number(res.exitCode) || 3 }
+    const res = fn({ ...payload, record: false })
+    if (!res) return null
+    if (res.ok === false) return { ...res, blocked: true, exitCode: Number(res.exitCode) || 3 }
+    return { ...res, blocked: false }
   } catch (err) {
     process.stderr.write(`前置换算异常，按 Fail-Soft 放行：${err instanceof Error ? err.message : String(err)}\n`)
     return null
@@ -348,7 +360,10 @@ export function recordVerifyEvidenceForFlow({
   artifacts = [], visualCheckedRaw = false, visualBlockedReason = '',
 }) {
   const precheck = runVerifyPrecheck({
-    policy, taskId, currentHead, dirty, mode: modeName, exitCode,
+    repoRoot: roots.workTreeRoot,
+    gitCommonDir: roots.gitDir,
+    headSha: currentHead,
+    policy, taskId, dirty, mode: modeName, exitCode,
     artifacts, visualCheckedRaw, visualBlockedReason,
     observationSummary: String(e2eObservationText ?? '').trim(),
   })
@@ -442,6 +457,15 @@ export function recordVerifyEvidenceForFlow({
     }
   }
   const finalOverallExit = shallowE2eEvidence ? 3 : overallExit
+  // 预检算出的附件记录与界面核验结论，并进这一次写入。
+  // 先前的做法是预检自己写一份、这里再整份覆盖，附件落账被后写的抹掉；
+  // 现在预检只算不写，由这里一次写全，没有覆盖窗口。
+  const precheckRecords = Array.isArray(precheck?.records) ? precheck.records : []
+  const precheckVisual = precheck?.visual && precheck.visual.required ? precheck.visual : null
+  const carriedArtifacts = precheckRecords.length > 0
+    ? precheckRecords
+    : (Array.isArray(prev?.artifacts) ? prev.artifacts : [])
+  const carriedVisual = precheckVisual ?? (prev?.visual ?? null)
   writeVerificationEvidence(roots.gitDir, taskId, {
     taskId, baseSha: ledger.baseSha, headSha: currentHead, dirty,
     riskTier: policy.riskTier, mode: modeName, target: targetVal, exitCode: finalOverallExit,
@@ -451,9 +475,11 @@ export function recordVerifyEvidenceForFlow({
     smokeVerifiedOnHead,
     e2eObservation,
     ...(shallowE2eEvidence ? { shallowE2eEvidence } : {}),
+    ...(carriedArtifacts.length > 0 ? { artifacts: carriedArtifacts } : {}),
+    ...(carriedVisual ? { visual: carriedVisual } : {}),
     gates, skipped: [...skipped],
   })
-  return { overallExit: finalOverallExit, smokeVerifiedOnHead, e2eObservation, shallowE2eEvidence }
+  return { overallExit: finalOverallExit, smokeVerifiedOnHead, e2eObservation, shallowE2eEvidence, precheck }
 }
 
 export function ensureSpecImplNoteReady(implRoot, specRel, { currentHead, taskId, note }) {

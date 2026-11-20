@@ -78,7 +78,7 @@ flowchart TD
   - Case 1 / Case 2 直接放行 `{ ok: true, blocked: false }`；
   - Case 3 检查关联 Todo/SPEC 是否存在且 `pendingDecisions.length === 0` 且满足 L2 过审要求；
   - Case 4 检查关联 SPEC（及关联 Master PRD 若 `multi_spec: true`）是否存在、`pendingDecisions.length === 0`、且 `approved === true`（或 `status === 'approved'`，同时若含 `plan_critique` 则不得为 `pending`/`rejected`）。
-  - 未就绪时返回 `{ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', exitCode: 3, reasons: [...] }`；接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 `handleStart`，在 `inspectWorkspace` 之后、创建 branch/worktree 之前阻断并返回退出码 `3`。注意支持独立规划 PR 任务本身（如尚未存在目标切片 SPEC 且命令行明确正在立项规划 PR 本身时通过 `--allow-plan-bootstrap` 或 Case 4 规划单标识区分，避免鸡生蛋死锁；日常开发 Case 3/4 任务若无已过审规划必拦）。
+  - 未就绪时返回 `{ ok: false, blocked: true, code: 'BLOCKED_PLAN_NOT_READY', exitCode: 3, reasons: [...] }`；接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 `handleStart`，在 `inspectWorkspace` 之后、创建 branch/worktree 之前阻断并返回退出码 `3`。注意支持独立规划 PR 任务本身（如尚未存在目标切片 SPEC 且命令行明确正在立项规划 PR 本身时通过 `--allow-plan-bootstrap` 或 Case 4 规划单标识区分，避免鸡生蛋死锁）。已绑定规划文档的日常 Case 3/4 任务若无已过审规划必拦；**一份规划都没绑时记 `WARN_PLAN_NOT_BOUND` 放行而不阻断**——本仓支持「先 `flow.mjs start`，再 `doc-plan.mjs init --task`」这个既有顺序（`init` 的 `--task` 参数就是为它准备的），拦死会把这条合法路径判死，判死之后人只会加豁免，连该拦的也一起放过。
 
 ### 2.3 `C3` 总控 PRD -> 切片有向图校验
 

@@ -88,6 +88,7 @@ function buildSliceHandoff({ mainRoot, task, slice, profile }) {
   const criteria = payload?.fields?.criteria ?? []
   const scopeFiles = slice?.scopeFiles ?? task.files ?? []
   const dependsOn = slice?.dependsOn ?? task.dependsOn ?? []
+  const caseType = caseTypeOfSlice(slice, task)
   return {
     taskId: task.taskId,
     sourceDoc: payload?.fields?.sourceDoc ?? slice?.specFile ?? null,
@@ -95,9 +96,42 @@ function buildSliceHandoff({ mainRoot, task, slice, profile }) {
     criteria: criteria.map((c) => (typeof c === 'string' ? c : (c?.id ? `${c.id}: ${c.text ?? ''}`.trim() : String(c)))),
     scopeFiles,
     dependsOn,
-    dispatchCommand: `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${task.taskId} --case 4 --spec "${slice?.specFile ?? '<spec>'}"${slice?.todoFile ? ` --todo "${slice.todoFile}"` : ''}`,
+    caseType,
+    dispatchCommand: buildDispatchCommand({ taskId: task.taskId, caseType, slice }),
     prompt: payload?.prompt ?? '',
   }
+}
+
+/** 按档位拼派发命令：Case 3 没有 SPEC，硬塞一个 `--spec "<spec>"` 会让命令直接跑不通。 */
+function buildDispatchCommand({ taskId, caseType, slice }) {
+  const parts = [`node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${taskId} --case ${caseType}`]
+  const spec = slice?.specFile
+  const todo = slice?.todoFile
+  if (spec) parts.push(`--spec "${spec}"`)
+  else if (caseType >= 4) parts.push('--spec "<spec>"')
+  if (todo) parts.push(`--todo "${todo}"`)
+  return parts.join(' ')
+}
+
+/**
+ * 切片该按哪一档派发。
+ *
+ * 不能一律写死 `--case 4`：那会让 Case 3 的切片（只有 Todo、没有 SPEC）拿到一个
+ * 它根本不满足的档位要求，派发命令直接跑不起来。判据取自切片自己声明的档位信息：
+ *
+ * - 显式写了 `case_type`（或 `case`）就用它；
+ * - 否则按规划级别推：切片有 SPEC = 走过 `L3` 档的设计单 = Case 4；
+ *   只有 Todo = `L2` 档的功能调整 = Case 3。
+ *
+ * 两者都拿不到时退回 Case 4——宁可让派发命令要求更严，也不要让一片真需要 SPEC 的
+ * 工作按 Case 3 溜过去。
+ */
+function caseTypeOfSlice(slice, task) {
+  const explicit = Number(slice?.caseType ?? slice?.data?.case_type ?? slice?.data?.case ?? task?.caseType ?? NaN)
+  if (Number.isInteger(explicit) && explicit >= 1 && explicit <= 5) return explicit
+  if (slice?.specFile) return 4
+  if (slice?.todoFile) return 3
+  return 4
 }
 
 function readProfileSafe(mainRoot) {

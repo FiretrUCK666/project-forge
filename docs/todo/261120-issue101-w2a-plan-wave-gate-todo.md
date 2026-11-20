@@ -36,14 +36,20 @@ scope_files: ["kit/skills/dev-plan/**", "kit/skills/dev-flow/**", kit/skills/lib
 
 ## 三、实施任务清单
 
-- [ ] **T1（`C1` 双态规划模式落地）**：在 `kit/skills/dev-plan/scripts/doc-plan.mjs`、`triage-rules.mjs`、`doc-plan-ops.mjs`、`kit/skills/lib/doc-frontmatter.mjs` 与 `pending-decisions.mjs` 支持 `plan_mode: interactive | autonomous` 并校验枚举合法性，同步更新 `kit/skills/templates/docs-*.md` 与 `kit/skills/dev-plan/SKILL.md` 双态交互规则（零宿主胶水）。
-- [ ] **T2（`C2` 规划退场硬校验抽离与接入）**：新增 `kit/skills/lib/plan-exit-gate.mjs` (new)，实现 `evaluatePlanExitGate`，接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 Case 3/4 `start` 流程，在 `pendingDecisions > 0` 或未过审时返回退出码 `3` 与 `BLOCKED_PLAN_NOT_READY`。
-- [ ] **T3（`C3` 切片有向图与波次防撞校验）**：新增 `kit/skills/lib/doc-slice-graph.mjs` (new) 并接入 `doc-audit.mjs` / `doc-audit-repo.mjs`，完成总控 `C1..Cn` 100% 覆盖、`scope_files` + `depends_on` 必填、拓扑判环 `BLOCKED_SLICE_CYCLE` 与同波次写域路径冲突检测。
-- [ ] **T4（`C4` 波次交接包与 verify 标志预透传）**：升级 `kit/skills/dev-flow/scripts/flow-batch.mjs` 与 `kit/skills/lib/handoff-package.mjs` 支持 `batch plan --handoff [--json]`（保持 `{ wave, canParallel, tasks }` 兼容并附带交接包）；在 `kit/skills/dev-flow/scripts/flow.mjs` 用 `multiFlags`/`valueFlags` 注册 `--artifact` 与 `--visual-blocked-reason`，移除 `flow-lifecycle.mjs` 裸 `--visual-checked` 硬合成伪造串，经 `flow-lifecycle-helpers.mjs` 透传 `{ artifacts, visualBlockedReason, visualCheckedRaw }` 给 `workflow-policy.mjs`。
-- [ ] **T5（同步工具包与双证回归）**：执行 `node scripts/equip.mjs .`，新增 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`），跑通 `fixtures` 与 `verify-injections`。
+- [x] **T1（`C1` 双态规划模式落地）**：在 `kit/skills/dev-plan/scripts/doc-plan.mjs`、`triage-rules.mjs`、`doc-plan-ops.mjs`、`kit/skills/lib/doc-frontmatter.mjs` 与 `pending-decisions.mjs` 支持 `plan_mode: interactive | autonomous` 并校验枚举合法性，同步更新 `kit/skills/templates/docs-*.md` 与 `kit/skills/dev-plan/SKILL.md` 双态交互规则（零宿主胶水）。
+- [x] **T2（`C2` 规划退场硬校验抽离与接入）**：新增 `kit/skills/lib/plan-exit-gate.mjs` (new)，实现 `evaluatePlanExitGate`，接入 `kit/skills/dev-flow/scripts/flow-inspect.mjs` / `flow-lifecycle.mjs` 中 Case 3/4 `start` 流程，在 `pendingDecisions > 0` 或未过审时返回退出码 `3` 与 `BLOCKED_PLAN_NOT_READY`。
+- [x] **T3（`C3` 切片有向图与波次防撞校验）**：新增 `kit/skills/lib/doc-slice-graph.mjs` (new) 并接入 `doc-audit.mjs` / `doc-audit-repo.mjs`，完成总控 `C1..Cn` 100% 覆盖、`scope_files` + `depends_on` 必填、拓扑判环 `BLOCKED_SLICE_CYCLE` 与同波次写域路径冲突检测。
+- [x] **T4（`C4` 波次交接包与 verify 标志预透传）**：升级 `kit/skills/dev-flow/scripts/flow-batch.mjs` 与 `kit/skills/lib/handoff-package.mjs` 支持 `batch plan --handoff [--json]`（保持 `{ wave, canParallel, tasks }` 兼容并附带交接包）；在 `kit/skills/dev-flow/scripts/flow.mjs` 用 `multiFlags`/`valueFlags` 注册 `--artifact` 与 `--visual-blocked-reason`，移除 `flow-lifecycle.mjs` 裸 `--visual-checked` 硬合成伪造串，经 `flow-lifecycle-helpers.mjs` 透传 `{ artifacts, visualBlockedReason, visualCheckedRaw }` 给 `workflow-policy.mjs`。
+- [x] **T5（同步工具包与双证回归）**：执行 `node scripts/equip.mjs .`，新增 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`），跑通 `fixtures` 与 `verify-injections`。
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs --domain plan-wave` 全绿。
-- [ ] 逐条执行 `node scripts/dev/verify-injections.mjs --only I250`（覆盖 `I250..I253`）或全量 `verify-injections.mjs` 全数变红命中。
-- [ ] `node scripts/equip.mjs . --check && node scripts/dev/preflight.mjs` 全绿，且与 `#102` 保持零源码碰撞（若 `#102` 先合，rebase `main` 后重跑 `equip.mjs .` 重建 `.pf-manifest.json`）。
+- [x] `node scripts/dev/fixtures.mjs --domain plan-wave` 全绿。
+- [x] 逐条执行 `node scripts/dev/verify-injections.mjs --only I250`（覆盖 `I250..I253`）或全量 `verify-injections.mjs` 全数变红命中。
+- [x] `node scripts/equip.mjs . --check && node scripts/dev/preflight.mjs` 全绿，且与 `#102` 保持零源码碰撞（若 `#102` 先合，rebase `main` 后重跑 `equip.mjs .` 重建 `.pf-manifest.json`）。
+
+## 完成记录
+
+- **实测读数**：`fixtures.mjs` 341 项通过 / 0 失败；`fixtures.mjs --domain plan-wave` 9 项通过；`verify-injections.mjs` 全量跑完，`I250..I259` 十条全部命中变红、零未命中；`preflight.mjs` 36 项读数 0 失败；`equip.mjs . --check`、`compose-agents.mjs . --check`、`gap-coverage.mjs`、`review.mjs .`、`sync-toc.mjs --check`、`govern-audit.mjs audit .` 均通过。
+- **与 `#102` 的接口**：`workflow-policy.mjs` 未改一行；`validateVerifyPrecheck` 缺席时按 Fail-Soft 放行，实现后按其返回码阻断。`AGENTS.md`、`templates/agents-project.md`、`dev-review/`、`dev-iterate/`、`dev-govern/` 与 `workflow-helpers.mjs` 均无改动。
+

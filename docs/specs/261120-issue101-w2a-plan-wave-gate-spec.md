@@ -128,10 +128,10 @@ flowchart TD
 ### 验收标准（对应 Issue `#101` 与总控 `C5..C8`）
 
 <!-- criteria:start -->
-- [ ] C1: `doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
-- [ ] C2: 抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
-- [ ] C3: `kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
-- [ ] C4: 升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
+- [x] C1: `doc-plan.mjs triage` 与规划文档 Frontmatter 支持 `plan_mode: interactive | autonomous`（零宿主胶水），并在 `kit/skills/dev-plan/SKILL.md` 明确交互态逐题拍板清零、自治态仅遇单向门/Case 5/真业务歧义才停的规则；反例为非法 `plan_mode` 值被静态审计报错。
+- [x] C2: 抽离 `kit/skills/lib/plan-exit-gate.mjs` (new) 并在 `flow.mjs start --case 3|4` 前置强校 `pendingDecisions === 0` 且文档已过审；反例为存在未拍板项或 `approved: false` 时以退出码 `3` 阻断 `BLOCKED_PLAN_NOT_READY`。
+- [x] C3: `kit/skills/lib/doc-slice-graph.mjs` (new) 与 `doc-plan.mjs audit` 针对总控 PRD + 子切片校验：① 100% 覆盖总控 `C1..Cn`；② 显式声明 `scope_files` 与 `depends_on`；③ 依赖无环（环依赖报 `BLOCKED_SLICE_CYCLE`）；④ 同并行波次切片无 `scope_files` 碰撞。
+- [x] C4: 升级 `flow.mjs batch plan --handoff [--json]` 按依赖拓扑输出波次并为就绪并行波次切片生成独立子代理交接包，同时预透传 `flow.mjs verify` 的 `--artifact` / `--visual-blocked-reason` 参数，刷新 `equip.mjs .`，并在 `scripts/dev/fixtures-plan-wave.mjs` (new) 与 `scripts/dev/injections-data-plan-wave.mjs` (new)（`I250–I259`）完成正反双证。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -140,3 +140,13 @@ flowchart TD
 <!-- section: pending -->
 - 已定：双态门禁语义、退出码 `3` 契约、切片图校验规则及 Wave 2 并行透传均已拍板锁定，无未决事项。
 <!-- section: pending-end -->
+
+## 实现说明
+
+- **`plan_mode` 落在既有判据模块里**：`kit/skills/lib/pending-decisions.mjs` 新增 `PLAN_MODES` / `deriveDefaultPlanMode` / `resolveDocPlanMode` / `planModeErrors`；`doc-plan.mjs` 的 `triage` 与 `init` 都接 `--plan-mode`，非法值抛结构化 `INVALID_PLAN_MODE`（含 `allowed` 与 `fixHint`），文档里被改成非法值时 `audit` 也报同码。默认推导只看已声明事实：`one-way` 门、`Case >= 4`、`tier: L3/L4`、PRD 走 `interactive`，其余 `autonomous`。
+- **规划退场门禁**：`kit/skills/lib/plan-exit-gate.mjs` 实现 `evaluatePlanExitGate`，接在 `flow-inspect.mjs` 的 `handleStart` 里、`inspectWorkspace` 之后与建分支建工作位之前；未就绪返回 `BLOCKED_PLAN_NOT_READY` + 退出码 `3`。判据分档：Case 1/2/5 不适用；Case 3 只要求待拍板清零（`audit` 直通，不走 `approve`）；Case 4 另要求 `approved` 与内审非 `pending`/`rejected`，并核对认领的 `multi_spec` 总控 PRD。一份都没绑时记 `WARN_PLAN_NOT_BOUND` 而不阻断——本仓支持「先 `start` 再 `doc-plan init --task`」的顺序；`--allow-plan-bootstrap` 给规划 PR 自举豁免，放行同时把被绕过的理由原样打出来。
+- **切片图四检**：`kit/skills/lib/doc-slice-graph.mjs` 实现认领覆盖（`UNCOVERED_ACCEPTANCE_CRITERIA`）、元数据必填（`SLICE_METADATA_MISSING`，仅对认领活跃 `multi_spec` 总控的切片要求）、依赖判环与悬空（`BLOCKED_SLICE_CYCLE`）、同波次写域碰撞（`BLOCKED_SLICE_OVERLAP`，显式排除 `.agents/skills/.pf-manifest.json`），由 `doc-audit-repo.mjs` 在整仓范围接入 `doc-plan.mjs audit .`；单文件审计不跑切片图检查（关系不在这份视野里）。
+- **波次交接包**：`flow-batch.mjs` 的 `batch plan --handoff` 复用 `buildHandoff` 为当前可执行波次的每个切片生成 `{ taskId, sourceDoc, criteriaCount, criteria, scopeFiles, dependsOn, dispatchCommand, prompt }`，既有 `{ wave, canParallel, tasks }` 返回形状一字不改；不传 `--handoff` 时不算交接包。
+- **verify 透传**：`flow.mjs` 用 `multiFlags` 注册 `artifact`、`valueFlags` 注册 `visual-blocked-reason`；`flow-lifecycle.mjs` 删掉裸 `--visual-checked` 合成观察串的逻辑，改为把 `{ artifacts, visualCheckedRaw, visualBlockedReason, observationSummary }` 经 `recordVerifyEvidenceForFlow` 交给 `workflow-policy.mjs` 的 `validateVerifyPrecheck`。该入口由并行切片 `#102` 提供：缺失时以命名空间导入探测并 Fail-Soft 放行，存在时按其 `{ ok, code, exitCode }` 阻断。
+- **双证**：`scripts/dev/fixtures-plan-wave.mjs`（9 组正反用例）与 `scripts/dev/injections-data-plan-wave.mjs`（`I250–I259` 十条注入）均已落地，全量 `fixtures.mjs` 341 项通过、`verify-injections.mjs` 零未命中。
+

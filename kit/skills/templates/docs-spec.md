@@ -9,6 +9,7 @@ issue: {{ISSUE}}
 pr: null
 branch: {{BRANCH}}
 owner: "{{OWNER}}"
+plan_mode: interactive
 approved: false
 implemented: false
 plan_critique: pending
@@ -28,6 +29,7 @@ high_risk_paths: []
 | 创建 / 更新 | `{{TODAY}}` / `{{TODAY}}` |
 | 分支 / Issue / PR | `{{BRANCH}}` / {{ISSUE_LABEL}} / 未关联 |
 | 负责人 / 内审状态 | {{OWNER_LABEL}} / `pending` |
+| 规划态 | `interactive`（逐题问到零拍板）/ `autonomous`（默认推进，仅单向门、Case 5 或真业务歧义才停） |
 | 关联 PRD / Todo | 按需补齐 `related_prd` / `related_todo` |
 
 - **变更一句话**：<这次改完之后，系统多/少了什么能力>

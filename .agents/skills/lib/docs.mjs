@@ -34,9 +34,9 @@ export {
 }
 
 export const DOC_FRONTMATTER_KEY_ORDER = Object.freeze({
-  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
-  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
-  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
+  prd: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'owner', 'plan_mode', 'plan_critique', 'critique_rounds', 'critique_override', 'related_spec', 'related_todo'],
+  spec: ['kind', 'title', 'status', 'tier', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'implemented', 'plan_critique', 'critique_rounds', 'critique_override', 'related_prd', 'related_todo', 'high_risk_paths'],
+  todo: ['kind', 'title', 'status', 'created', 'updated', 'issue', 'pr', 'branch', 'owner', 'plan_mode', 'approved', 'done_at', 'task_id', 'planned_at', 'related_prd', 'related_spec'],
 })
 
 
@@ -740,6 +740,8 @@ import { buildArchivedDocPatch, buildStandardDocContent } from './doc-templates.
  * 统一工程文档模板生成器（YAML Frontmatter + 顶部可见元信息概览表 + SPEC 短名 Mermaid 图）。
  * 供 `doc-plan.mjs init` 与 `govern-audit.mjs --write-todo` 共用唯一格式源。
  */
+export { resolveDocPlanMode } from './pending-decisions.mjs'
+
 export function renderStandardDocTemplate(opts = {}) {
   return buildStandardDocContent({
     today: docIsoDate(),

@@ -24,6 +24,7 @@ import {
 import { readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { createDefaultLedger, listTaskLedgers, readTaskLedger, recordMountedDepsInLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { getLocalIssue } from '../../lib/local-issues.mjs'
+import { evaluatePlanExitGate, formatPlanExitGate, PLAN_BOOTSTRAP_FLAG } from '../../lib/plan-exit-gate.mjs'
 import {
   cleanStaleLocalModeMarker, detectDeclaredRepo, detectGitModeMarkers, githubRepoFull, parseFlowInputs,
   parseIssueNumbers, parseMilestoneNumber, parsePrNumber, parseRemotesTopology,
@@ -570,6 +571,28 @@ export async function handleStart(opts, roots) {
   const initialTodo = opts.todo ?? existing?.todoFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/todo', slug, taskId, linkedIssues)
   const initialSpec = opts.spec ?? existing?.specFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/specs', slug, taskId, linkedIssues)
   const initialPrd = opts.prd ?? existing?.prdFile ?? findMatchingDocStrict(roots.mainRoot, 'docs/prd', slug, taskId, linkedIssues)
+
+  // 规划退场门禁：没有过审的规划就不许开工。
+  //
+  // 位置在这里是因为它两头都得对——往上，`inspectWorkspace` 已跑完、外部 PR 审查位已早退
+  // （那类任务不建规划文档）、账本里的既有任务已幂等复用；往下就是建分支与建工作位。
+  // 工作位一旦建好，"有没有规划" 就不再重要了，活儿反正在做了。
+  const planGate = evaluatePlanExitGate(roots.mainRoot, {
+    caseType, slug, taskId, issue: linkedIssues[0] ?? null,
+    docs: { spec: initialSpec, todo: initialTodo, prd: initialPrd },
+    allowBootstrap: Boolean(opts[PLAN_BOOTSTRAP_FLAG]),
+    // 只有 `--pr-ref` 才算「接管既有 PR 的某个提交」——那类任务的规划在那边已经走过一遍，
+    // 本仓看不到也无从判定。单纯带 `--pr` 不算豁免，否则谁都能用它绕开这道门。
+    reusePrRef: Boolean(opts['pr-ref']),
+  })
+  if (planGate.blocked) {
+    const lines = formatPlanExitGate(planGate)
+    if (opts.json) process.stdout.write(`${JSON.stringify(planGate, null, 2)}\n`)
+    for (const line of lines) process.stderr.write(`${line}\n`)
+    return { exitCode: planGate.exitCode ?? EXIT_POLICY_BLOCK }
+  }
+  // 豁免放行时也说一句：被绕过的是哪一条，事后才有得核对。
+  for (const line of formatPlanExitGate(planGate)) process.stderr.write(`${line}\n`)
 
   for (const docRel of [initialSpec, initialTodo]) {
     const authored = checkAuthorIsNotImplementer(roots.mainRoot, docRel, implementerId)

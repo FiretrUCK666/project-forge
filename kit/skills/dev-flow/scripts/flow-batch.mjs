@@ -10,12 +10,15 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { printNextStep } from '../../lib/cli.mjs'
+import { buildSliceGraph } from '../../lib/doc-slice-graph.mjs'
 import {
   gitRun, posixPath, readJsonSafe, resolveDefaultBranch, withFileLock, writeJsonAtomic,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, readRefsFast, resolveGitDirFast, resolveRefShaFast } from '../../lib/git-fast.mjs'
+import { buildHandoff } from '../../lib/handoff-package.mjs'
 import { listTaskLedgers, readTaskLedger, sanitizeTaskId, updateTaskLedger } from '../../lib/ledger.mjs'
 import { detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite } from '../../lib/platform.mjs'
+import { parseAgentsProfile } from '../../lib/profile.mjs'
 import { createTaskBackend } from '../../lib/task-backend.mjs'
 import { buildMultiTaskWavePlan, evaluateNextState, hasRepoCiWorkflow, scanUnstartedReadySlices } from '../../lib/workflow-policy.mjs'
 import { buildTargetRepoContext, EXIT_POLICY_BLOCK, getChangedFiles } from './flow-inspect.mjs'
@@ -56,6 +59,55 @@ async function collectTaskTouchedFiles(mainRoot, ledger) {
   return [...files].sort()
 }
 
+/**
+ * 为一枚切片装配交接包。
+ *
+ * 复用 `handoff-package.mjs` 的 `buildHandoff`——它是审查、返工、接管共用的同一份
+ * 交接包生成器，判据（验收标准怎么抽、路径怎么认、角色边界怎么写）只该有一处。
+ * 这里只做三件它不做的事：
+ *
+ * 1. 把「还没开工的切片」翻译成它认识的 ledger 形状（`buildHandoff` 收的是账本）；
+ * 2. 补上 `scopeFiles` / `dependsOn` / 派发命令——这三项来自切片图，账本里还没有；
+ * 3. 把结果压成适合批量消费的字段，`prompt` 原样保留，子代理拿到的仍是那份完整提示。
+ */
+function buildSliceHandoff({ mainRoot, task, slice, profile }) {
+  const pseudoLedger = {
+    taskId: task.taskId,
+    specFile: slice?.specFile ?? task.specFile ?? null,
+    todoFile: slice?.todoFile ?? task.todoFile ?? null,
+    worktreePath: null,
+    linkedIssues: [],
+  }
+  let payload = null
+  try {
+    payload = buildHandoff({ mainRoot, ledger: pseudoLedger, profile, ownerRole: 'implementer' })
+  } catch {
+    // 规划文档读不到时不让整批波次规划失败：交接包是附加信息，缺了它波次拓扑照样有用。
+    payload = null
+  }
+  const criteria = payload?.fields?.criteria ?? []
+  const scopeFiles = slice?.scopeFiles ?? task.files ?? []
+  const dependsOn = slice?.dependsOn ?? task.dependsOn ?? []
+  return {
+    taskId: task.taskId,
+    sourceDoc: payload?.fields?.sourceDoc ?? slice?.specFile ?? null,
+    criteriaCount: payload?.fields?.criteriaCount ?? criteria.length,
+    criteria: criteria.map((c) => (typeof c === 'string' ? c : (c?.id ? `${c.id}: ${c.text ?? ''}`.trim() : String(c)))),
+    scopeFiles,
+    dependsOn,
+    dispatchCommand: `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${task.taskId} --case 4 --spec "${slice?.specFile ?? '<spec>'}"${slice?.todoFile ? ` --todo "${slice.todoFile}"` : ''}`,
+    prompt: payload?.prompt ?? '',
+  }
+}
+
+function readProfileSafe(mainRoot) {
+  try {
+    return parseAgentsProfile(mainRoot)
+  } catch {
+    return null
+  }
+}
+
 async function handleBatchPlan(opts, roots) {
   const explicitTasks = Boolean(opts.tasks && String(opts.tasks).trim())
   const taskIds = parseTasksList(opts, roots.mainRoot)
@@ -86,10 +138,46 @@ async function handleBatchPlan(opts, roots) {
     order: wavePlan.order,
     parallelizable: wavePlan.parallelizable,
   }
+
+  // `--handoff`：为当前可执行波次里的每个切片配上交接包。
+  //
+  // 只在显式要求时才算，因为交接包要读规划全文、抽验收标准与路径，成本远高于算波次；
+  // 日常只看波次拓扑的人不该为它付这份开销。
+  if (opts.handoff) {
+    const graph = buildSliceGraph(roots.mainRoot)
+    const sliceByKey = new Map()
+    for (const s of graph.slices) {
+      if (!s.key) continue
+      const prev = sliceByKey.get(s.key)
+      // SPEC 与 Todo 是同一片的两面：合并成一份对外视图，验收标准以 SPEC 为准。
+      sliceByKey.set(s.key, prev ? { ...prev, todoFile: s.kind === 'todo' ? s.rel : prev.todoFile, specFile: s.kind === 'spec' ? s.rel : prev.specFile } : {
+        ...s,
+        specFile: s.kind === 'spec' ? s.rel : null,
+        todoFile: s.kind === 'todo' ? s.rel : null,
+      })
+    }
+    const targetWave = waves[0] ? [waves[0]] : []
+    for (const w of targetWave) {
+      w.handoffs = w.tasks.map((t) => buildSliceHandoff({
+        mainRoot: roots.mainRoot, task: t, slice: sliceByKey.get(t.taskId) ?? null, profile: readProfileSafe(roots.mainRoot),
+      }))
+    }
+    out.handoffWave = targetWave[0]?.wave ?? null
+  }
+
   if (opts.json) process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
   else {
     process.stdout.write(`并行波次规划（共 ${out.totalTasks} 个任务/就绪切片，${waves.length} 个波次，parallelDispatch=${out.parallelDispatch}）：\n`)
     for (const w of waves) process.stdout.write(`  Wave ${w.wave} (${w.canParallel ? '可并行' : '串行'}): ${w.tasks.map((t) => t.taskId).join(', ')}\n`)
+    if (out.handoffWave !== null && out.handoffWave !== undefined) {
+      const hw = waves.find((w) => w.wave === out.handoffWave)
+      for (const h of hw?.handoffs ?? []) {
+        process.stdout.write(`\n[交接包] ${h.taskId}（依据 ${h.sourceDoc ?? '无规划文档'}，验收标准 ${h.criteriaCount} 条）\n`)
+        process.stdout.write(`  派发：${h.dispatchCommand}\n`)
+        if (h.scopeFiles.length > 0) process.stdout.write(`  写域：${h.scopeFiles.join(', ')}\n`)
+        if (h.dependsOn.length > 0) process.stdout.write(`  依赖：${h.dependsOn.join(', ')}\n`)
+      }
+    }
     const wave1 = waves[0]?.tasks ?? []
     if (wave1.length >= 2) {
       printNextStep([{ skill: 'dev-flow', text: `并行派发 Wave 1（${wave1.map((t) => t.taskId).join(', ')}）至各自隔离工作位` }], { repoRoot: roots.mainRoot })

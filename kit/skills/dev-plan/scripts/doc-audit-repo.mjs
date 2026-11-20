@@ -49,7 +49,7 @@ export function listDocs(repoRoot) {
   }
 }
 
-export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices }) {
+export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCoverage, checkOrphanSlices, evaluateSliceGraph = null }) {
   const scopeAbs = resolve(repoRoot, scope)
   const scopeRel = posixPath(relative(repoRoot, scopeAbs))
   const targets = []
@@ -66,7 +66,16 @@ export function runRepoDocsAudit(repoRoot, scope, { auditDoc, checkMasterPrdCove
     }
   }
   const results = targets.map((file) => auditDoc({ repoRoot, file }))
-  const coverageErrors = [...checkMasterPrdCoverage(repoRoot), ...checkOrphanSlices(repoRoot)]
+  // 切片图检查只在整仓范围跑：它判的是「切片之间」的关系，单文件审计时那些关系
+  // 根本不在这份视野里，跑出来的结论只会是缺上下文导致的误报。
+  const sliceGraph = (typeof evaluateSliceGraph === 'function' && (!scopeRel || scopeRel === '.'))
+    ? evaluateSliceGraph(repoRoot)
+    : { ok: true, errors: [] }
+  const coverageErrors = [
+    ...checkMasterPrdCoverage(repoRoot),
+    ...checkOrphanSlices(repoRoot),
+    ...(sliceGraph.errors ?? []),
+  ]
   const allErrors = [...results.flatMap((r) => r.errors ?? []), ...coverageErrors]
   const failedCount = results.filter((r) => !r.ok).length + (coverageErrors.length > 0 ? 1 : 0)
   return {

@@ -12,6 +12,7 @@ import { CUSTOM_DECL_REL } from './doc-frontmatter.mjs'
 import { resolveDocRequirements } from './doc-requirements.mjs'
 import { formatDocShapeSkippedBlock, resolveDocShapePolicy } from './doc-shape.mjs'
 import { renderDocTemplate } from './doc-template-render.mjs'
+import { resolveDocPlanMode } from './pending-decisions.mjs'
 import { resolveAuthoritativeTddPath } from './profile.mjs'
 
 export const MERMAID_LIMITS = Object.freeze({
@@ -328,6 +329,7 @@ export function buildStandardDocContent({
   pruneUnfilled = true,
   noPrune = false,
   docShape = null,
+  planMode = null,
   serializeFm,
   keyOrders,
 }) {
@@ -358,7 +360,8 @@ export function buildStandardDocContent({
   if (kind === 'prd') {
     const fm = serializeFm({
       kind: 'prd', title, status: 'draft', created: today, updated: today,
-      issue: issueNum, pr: null, owner: owner ?? null, plan_critique: 'pending',
+      issue: issueNum, pr: null, owner: owner ?? null, plan_mode: resolveDocPlanMode({ kind: 'prd', explicit: planMode }),
+      plan_critique: 'pending',
       related_spec: relatedSpecRel ?? null, related_todo: relatedTodoRel ?? null,
     }, keyOrders.prd)
     const body = renderDocTemplate('prd', {
@@ -391,6 +394,7 @@ export function buildStandardDocContent({
     const fm = serializeFm({
       kind: 'spec', title, status: 'draft', tier: 'L3', created: today, updated: today,
       issue: issueNum, pr: null, branch: headBranch, owner: owner ?? null,
+      plan_mode: resolveDocPlanMode({ kind: 'spec', tier: 'L3', explicit: planMode }),
       approved: false, implemented: false, plan_critique: 'pending',
       related_prd: relatedPrdRel ?? null, related_todo: relatedTodoRel ?? null, high_risk_paths: [],
     }, keyOrders.spec)
@@ -437,6 +441,7 @@ export function buildStandardDocContent({
   const fm = serializeFm({
     kind: 'todo', title, status: 'active', created: today, updated: today,
     issue: issueNum, pr: null, branch: headBranch, owner: owner ?? null,
+    plan_mode: resolveDocPlanMode({ kind: 'todo', explicit: planMode }),
     approved: false, done_at: null, task_id: taskId ?? safeSlug ?? 'task',
     planned_at: headSha, related_prd: relatedPrdRel ?? null, related_spec: relatedSpecRel ?? null,
   }, keyOrders.todo)

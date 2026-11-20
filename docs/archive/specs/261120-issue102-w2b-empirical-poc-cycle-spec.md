@@ -1,31 +1,31 @@
 ---
 kind: spec
 title: 工具无关结构化实证附件、PoC 先行消误报原则与有界优化循环规格
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 102
-pr: null
+pr: 111
 branch: feat/w2b-empirical-poc-cycle
-owner: plan-v101
+owner: impl-w2b
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=6a4c0c338ebc, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"6a4c0c338ebc\",\"artifact_baseline\":{\"sha\":\"6a4c0c338ebc75a5a0d88336c25c69352de603411066151cd81348043e6729ef\",\"shortSha\":\"6a4c0c338ebc\",\"criteriaCount\":4,\"anchorCount\":96},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:05.791Z\"}]"
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md
 high_risk_paths: [kit/, templates/, AGENTS.md]
 task_id: w2b-empirical-poc-cycle
 plan_mode: autonomous
 depends_on: [w1a-engine-fixes]
-scope_files: ["kit/skills/dev-review/**", "kit/skills/dev-iterate/**", "kit/skills/dev-govern/**", kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helpers.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/empirical-artifacts.mjs, ".agents/skills/dev-review/**", ".agents/skills/dev-iterate/**", ".agents/skills/dev-govern/**", .agents/skills/lib/workflow-policy.mjs, .agents/skills/lib/workflow-helpers.mjs, .agents/skills/lib/escalation.mjs, .agents/skills/lib/empirical-artifacts.mjs, templates/agents-project.md, AGENTS.md, scripts/dev/fixtures-empirical-cycle.mjs, scripts/dev/injections-data-empirical-cycle.mjs]
+scope_files: ["kit/skills/dev-review/**", "kit/skills/dev-iterate/**", "kit/skills/dev-govern/**", kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-helpers.mjs, kit/skills/lib/escalation.mjs, kit/skills/lib/empirical-artifacts.mjs, kit/skills/lib/pr-template-hydrate.mjs, ".agents/skills/dev-review/**", ".agents/skills/dev-iterate/**", ".agents/skills/dev-govern/**", .agents/skills/lib/workflow-policy.mjs, .agents/skills/lib/workflow-helpers.mjs, .agents/skills/lib/escalation.mjs, .agents/skills/lib/empirical-artifacts.mjs, .agents/skills/lib/pr-template-hydrate.mjs, templates/agents-project.md, AGENTS.md, scripts/dev/fixtures-empirical-cycle.mjs, scripts/dev/injections-data-empirical-cycle.mjs]
 critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\":true,\"anchors\":[\"!第 9 个技能且不绑定任何外部工具的前提下\",\".agents/skills/.pf-manifest.json\",\".agents/skills/lib/empirical-artifacts.mjs\",\"<24576B\",\"<=800\",\"AGENTS\",\"AGENTS.md\",\"`#101`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`.agents/skills/.pf-manifest.json`\",\"`.agents/skills/lib/empirical-artifacts.mjs`\",\"`.mjs <= 800`\",\"`0`\",\"`783`\",\"`797`\",\"`AGENTS.md < 24576 B`\",\"`AGENTS.md`\",\"`PoC-first`\",\"`compose-agents.mjs .`\",\"`dev-plan -> dev-edit -> dev-review`\",\"`equip.mjs .`\",\"`evidence.json`\",\"`flow.mjs verify`\",\"`iterate.mjs cycle`\",\"`kit/skills/dev-flow/**`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-plan/**`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/escalation.mjs`\",\"`kit/skills/lib/handoff-package.mjs`\",\"`kit/skills/lib/pending-decisions.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multiFlags`\",\"`pocCommand`\",\"`reproEvidence`\",\"`templates/agents-project.md`\",\"`valueFlags`\",\"`workflow-policy.mjs`\",\"`{ artifacts, visualBlockedReason, visualCheckedRaw }`\",\"compose-agents.mjs\",\"equip.mjs\",\"evidence.json\",\"flow.mjs\",\"iterate.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/escalation.mjs\",\"kit/skills/lib/handoff-package.mjs\",\"kit/skills/lib/pending-decisions.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multiFlags\",\"pocCommand\",\"reproEvidence\",\"templates/agents-project.md\",\"valueFlags\",\"visualBlockedReason\",\"visualCheckedRaw\",\"workflow-policy.mjs\"]}},\"anchors\":[\"!第 9 个技能且不绑定任何外部工具的前提下\",\"--goal\",\".agents/skills/.pf-manifest.json\",\".agents/skills/lib/empirical-artifacts.mjs\",\"<24576B\",\"<=800\",\"AGENTS\",\"AGENTS.md\",\"C1\",\"C2\",\"C3\",\"C4\",\"I260\",\"I269\",\"SKILL\",\"UI_VISUAL_EXT_RE\",\"`#101`\",\"`--artifact {path}`\",\"`--artifact`\",\"`--visual-blocked-reason`\",\"`--visual-checked`\",\"`.agents/skills/.pf-manifest.json`\",\"`.agents/skills/lib/empirical-artifacts.mjs`\",\"`.mjs <= 800`\",\"`0`\",\"`783`\",\"`797`\",\"`<= 800`\",\"`AGENTS.md < 24576 B`\",\"`AGENTS.md`\",\"`I260–I269`\",\"`PoC-first`\",\"`UI_VISUAL_EXT_RE`\",\"`buildVerificationEvidenceSection`\",\"`compose-agents.mjs .`\",\"`cycle --goal \\\"{goal}\\\" [--max-rounds 3] [--json]`\",\"`dev-plan -> dev-edit -> dev-review`\",\"`equip.mjs .`\",\"`escalation.mjs`\",\"`evidence.json`\",\"`flow.mjs verify`\",\"`iterate.mjs cycle`\",\"`kit/skills/dev-flow/**`\",\"`kit/skills/dev-govern/**`\",\"`kit/skills/dev-govern/SKILL.md`\",\"`kit/skills/dev-iterate/**`\",\"`kit/skills/dev-iterate/SKILL.md`\",\"`kit/skills/dev-iterate/scripts/iterate.mjs`\",\"`kit/skills/dev-plan/**`\",\"`kit/skills/dev-review/**`\",\"`kit/skills/lib/empirical-artifacts.mjs`\",\"`kit/skills/lib/escalation.mjs`\",\"`kit/skills/lib/handoff-package.mjs`\",\"`kit/skills/lib/pending-decisions.mjs`\",\"`kit/skills/lib/workflow-helpers.mjs`\",\"`kit/skills/lib/workflow-policy.mjs`\",\"`main`\",\"`multiFlags`\",\"`pocCommand`\",\"`reproEvidence`\",\"`review-pack.mjs check-empirical`\",\"`scripts/dev/fixtures-empirical-cycle.mjs`\",\"`scripts/dev/injections-data-empirical-cycle.mjs`\",\"`templates/agents-project.md`\",\"`valueFlags`\",\"`workflow-helpers.mjs`\",\"`workflow-policy.mjs`\",\"`{ artifacts, visualBlockedReason, visualCheckedRaw }`\",\"buildVerificationEvidenceSection\",\"compose-agents.mjs\",\"equip.mjs\",\"escalation.mjs\",\"evidence.json\",\"flow.mjs\",\"iterate.mjs\",\"kit/skills/dev-govern/SKILL.md\",\"kit/skills/dev-iterate/SKILL.md\",\"kit/skills/dev-iterate/scripts/iterate.mjs\",\"kit/skills/lib/empirical-artifacts.mjs\",\"kit/skills/lib/escalation.mjs\",\"kit/skills/lib/handoff-package.mjs\",\"kit/skills/lib/pending-decisions.mjs\",\"kit/skills/lib/workflow-helpers.mjs\",\"kit/skills/lib/workflow-policy.mjs\",\"multiFlags\",\"pocCommand\",\"reproEvidence\",\"review-pack.mjs\",\"scripts/dev/fixtures-empirical-cycle.mjs\",\"scripts/dev/injections-data-empirical-cycle.mjs\",\"templates/agents-project.md\",\"valueFlags\",\"visualBlockedReason\",\"visualCheckedRaw\",\"workflow-helpers.mjs\",\"workflow-policy.mjs\"],\"coreSections\":[\"non-goals\"],\"pendingResolved\":1,\"pendingUnresolved\":0,\"criteriaCount\":4}"
 ---
 
 # 工具无关结构化实证附件、PoC 先行原则与有界优化循环（Issue `#102`）
 
-> 所属总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2b-empirical-poc-cycle Todo](../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md)
+> 所属总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w2b-empirical-poc-cycle Todo](../todo/261120-issue102-w2b-empirical-poc-cycle-todo.md)
 >
 > 总控 PRD 认领范围：覆盖总控 `C9..C12`（总控 `C9` -> 本切片 `C1`；总控 `C10` -> 本切片 `C2`；总控 `C11` -> 本切片 `C3`；总控 `C12` -> 本切片 `C4`）。
 
@@ -75,7 +75,7 @@ flowchart LR
   - 在 `kit/skills/lib/empirical-artifacts.mjs` (new) 实现 `validateArtifactsAndVisual`、`normalizeArtifactRecords` 与 `formatArtifactEvidenceLines`；`workflow-policy.mjs`（提供 `validateVerifyPrecheck` 供 `flow verify` 透传入口调用，并同步加固 `validateVerificationEvidence`）与 `review-pack.mjs check-empirical` 薄委托调用，接收可选多值参数 `artifacts`；
   - 对每个声明的附件路径校验：文件必须真实存在、为常规文件且 `size > 0`（缺失、目录或空文件立即报结构化错误阻断，并提示不得把临时大二进制或敏感快照遗留脏工作区）；
   - 计算并登记标准化元数据 `{ relPath, bytes, sha256Prefix, capturedAt }` 到 `.pf-state` 中的 `evidence.json` 及独立审查实证回执，不额外修改 Git 跟踪文件；
-  - `kit/skills/lib/workflow-helpers.mjs` 中 `buildVerificationEvidenceSection`（由 `hydratePrTemplateBody` 调用）薄委托调用 `empirical-artifacts.mjs` (new) 渲染结构化实证摘要与附件清单（文件相对路径、字节数与校验指纹前缀），保持 `workflow-helpers.mjs <= 800` 行。
+  - `kit/skills/lib/pr-template-hydrate.mjs` 中 `buildVerificationEvidenceSection`（由同文件 `hydratePrTemplateBody` 调用、经 `kit/skills/lib/workflow-helpers.mjs` 重导出）薄委托调用 `empirical-artifacts.mjs` (new) 渲染结构化实证摘要与附件清单（文件相对路径、字节数与校验指纹前缀），保持 `workflow-helpers.mjs <= 800` 行。
 
 ### 2.2 `C2` 触及 `UI_VISUAL_EXT_RE` 禁止裸传 `--visual-checked`
 
@@ -128,10 +128,10 @@ flowchart LR
 ### 验收标准（对应 Issue `#102` 与总控 `C9..C12`）
 
 <!-- criteria:start -->
-- [ ] C1: 拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 严格 `<= 800` 行；`review-pack.mjs check-empirical`、`workflow-policy.mjs`（含与 `flow.mjs verify` 透传对接）及 `buildVerificationEvidenceSection` 支持 `--artifact {path}`：真实非空文件校验通过并记入 `evidence.json`/审查回执（零脏工作区），并在 PR 验证表自动渲染结构化实证摘要与附件清单；反例为不存在或 0 字节文件阻断。
-- [ ] C2: 触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 敷衍放行，必须附带非空 `--artifact` 或实质视觉观察，无渲染环境须显式传 `--visual-blocked-reason` 诚实报阻。
-- [ ] C3: 在 `escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 融入「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零具体工具硬编码）。
-- [ ] C4: 在 `kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与轮次/零进展/单向门硬停损），在 `templates/agents-project.md` 固化「只锁客观输出边界」底线，刷新 `equip.mjs .` / `compose-agents.mjs .`（`AGENTS.md < 24576 B`）并补齐 `scripts/dev/fixtures-empirical-cycle.mjs` (new) 与 `scripts/dev/injections-data-empirical-cycle.mjs` (new)（`I260–I269`）。
+- [x] C1: 拆出 `kit/skills/lib/empirical-artifacts.mjs` (new) 保全 `workflow-helpers.mjs` 与 `workflow-policy.mjs` 严格 `<= 800` 行；`review-pack.mjs check-empirical`、`workflow-policy.mjs`（含与 `flow.mjs verify` 透传对接）及 `buildVerificationEvidenceSection` 支持 `--artifact {path}`：真实非空文件校验通过并记入 `evidence.json`/审查回执（零脏工作区），并在 PR 验证表自动渲染结构化实证摘要与附件清单；反例为不存在或 0 字节文件阻断。
+- [x] C2: 触及 `UI_VISUAL_EXT_RE` 文件时禁止裸传 `--visual-checked` 敷衍放行，必须附带非空 `--artifact` 或实质视觉观察，无渲染环境须显式传 `--visual-blocked-reason` 诚实报阻。
+- [x] C3: 在 `escalation.mjs`、`kit/skills/dev-iterate/SKILL.md`、`kit/skills/dev-govern/SKILL.md` 融入「最小运行复现消误报 -> 复跑证伪与回归 -> 评估 Tier 1/2 整类加固」原则及可选 `reproEvidence`/`pocCommand` 字段（零具体工具硬编码）。
+- [x] C4: 在 `kit/skills/dev-iterate/scripts/iterate.mjs` 新增只读编排子命令 `cycle --goal "{goal}" [--max-rounds 3] [--json]`（串联四阶段与轮次/零进展/单向门硬停损），在 `templates/agents-project.md` 固化「只锁客观输出边界」底线，刷新 `equip.mjs .` / `compose-agents.mjs .`（`AGENTS.md < 24576 B`）并补齐 `scripts/dev/fixtures-empirical-cycle.mjs` (new) 与 `scripts/dev/injections-data-empirical-cycle.mjs` (new)（`I260–I269`）。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -140,3 +140,9 @@ flowchart LR
 <!-- section: pending -->
 - 已定：实证附件字段、UI 阻断契约、PoC 字段名与 `cycle` 停损阈值均已拍板定稿，无未决事项。
 <!-- section: pending-end -->
+
+## 实现说明
+
+
+- 实现提交基线: dcf84c57c72833eecb6515497ac78816644eb454
+- 关联任务: w2b-empirical-poc-cycle

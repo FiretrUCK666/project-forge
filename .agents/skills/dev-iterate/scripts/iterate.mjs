@@ -27,10 +27,11 @@ import {
   resolveNativeTestDir, slugTestToken, updateFeatureMapTestRefs, validateGeneratedTestQuality,
 } from '../../lib/test-inventory.mjs'
 import { isToolOwnedPath } from '../../lib/tool-owned.mjs'
+import { buildCyclePlan, formatCycleText } from './iterate-cycle.mjs'
 
 export { validateGeneratedTestQuality }
 
-const SUBCOMMANDS = ['plan', 'generate', 'run']
+const SUBCOMMANDS = ['plan', 'generate', 'run', 'cycle']
 const VALID_TIERS = new Set(['integration', 'e2e', 'perf', 'regression'])
 const SKIP_DIRS = new Set([...COMMON_SKIP_DIRS, '.git', '.worktrees', '.agents', 'docs'])
 
@@ -42,9 +43,14 @@ function printHelp() {
     '  plan        交叉比对 feature-map / signals.jsonl / 近期变更（或 --focus 主题）输出补测候选计划',
     '  generate    按原生目录与栈惯例生成测试（默认预演；传 --write 过反作弊校验后落盘并回挂 testRefs）',
     '  run         分片并发实跑原生测试；失败/超时/性能越阈自动写信号并按需经 escalation 建单',
+    '  cycle       有界只读优化循环：Observe -> PoC/Escalate -> Fix/Verify -> Reflect，内置三条硬停损',
     '',
     'Options:',
     '  --dir <path>             目标仓库目录',
+    '  --goal <text>            cycle 的优化目标（一句话说清这一轮想把什么做得更好）',
+    '  --max-rounds <N>         cycle 轮次上限（默认 3，硬上限 10）',
+    '  --progress-history <json>  cycle 历史进度（JSON 数组，每项含 round/observed/passed/verified/advanced）',
+    '  --pending-gates <json>   cycle 待拍板门禁（JSON 数组，one-way/高风险项会立刻停损）',
     '  --focus <topic>          按自然语言主题/业务流先做 doc-locate + 符号勘察再定向建测',
     '  --tier <tier>            测试层级：integration | e2e | perf | regression（默认 integration）',
     '  --limit <N>              最多生成/规划候选数（默认 5）',
@@ -548,8 +554,8 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
       allowPositionalWithoutSubcommand: true,
       positionalDir: 'auto',
       booleanFlags: ['write', 'escalate', 'no-signals'],
-      valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'timeout-ms', 'perf-budget-ms'],
-      usageHint: 'iterate.mjs [plan|generate|run] [dir]',
+      valueFlags: ['focus', 'tier', 'limit', 'targets', 'concurrency', 'timeout-ms', 'perf-budget-ms', 'goal', 'max-rounds', 'progress-history', 'pending-gates'],
+      usageHint: 'iterate.mjs [plan|generate|run|cycle] [dir]',
     })
   } catch (err) {
     process.stderr.write(`iterate 错误：${err instanceof Error ? err.message : String(err)}\n`)
@@ -560,6 +566,18 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
   const opts = cli.opts
   const roots = await resolveRepoRoots(cli.targetDir)
   const repoRoot = roots.workTreeRoot
+
+  if (sub === 'cycle') {
+    const plan = buildCyclePlan({
+      goal: opts.goal ?? '',
+      maxRounds: opts['max-rounds'],
+      progressHistory: opts['progress-history'],
+      pendingGates: opts['pending-gates'],
+    })
+    if (opts.json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
+    else process.stdout.write(`${formatCycleText(plan)}\n`)
+    return plan.stopped ? 4 : 0
+  }
 
   if (sub === 'plan') {
     const out = await buildIterationPlan(repoRoot, {

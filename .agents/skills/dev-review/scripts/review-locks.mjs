@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { hasSkillSupport } from '../../lib/cli.mjs'
+import { evaluateStoredVisualEvidence } from '../../lib/empirical-artifacts.mjs'
 import {
   checkDistinctRoundReviewer, collectExcludedReviewers, evaluateThreeRoundStopLoss, normActorId,
 } from '../../lib/critique-rounds.mjs'
@@ -495,7 +496,6 @@ export async function evaluatePassBlockers({
       )
       const e2eInput = Boolean(
         (typeof opts['e2e-evidence'] === 'string' && opts['e2e-evidence'].trim())
-        || opts['visual-checked']
         || (typeof opts['visual-evidence'] === 'string' && opts['visual-evidence'].trim()),
       )
       const e2eObsOk = Boolean(
@@ -508,6 +508,10 @@ export async function evaluatePassBlockers({
         blockers.push(`缺少当前 HEAD 的 E2E 运行与观察实证（smokeVerifiedOnHead=${smokeOk}, e2eObservation=${e2eObsOk}）`)
       }
     }
+
+    // 触及界面资源时，实证必须是真附件或真观察：布尔开关自己证明不了任何事。
+    const visualProbe = evaluateStoredVisualEvidence({ evidence, policy: pol, headSha })
+    if (!visualProbe.ok) blockers.push(visualProbe.reason)
   }
 
   if (enforceGates) {

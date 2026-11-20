@@ -712,6 +712,8 @@ export function formatPackText(pack, fullDiffText = '', includeFullDiff = false)
     lines.push('    - [ ] Inspect the actual rendered page, component, or SVG in a live runtime/renderer (confirm clean render and zero console/load errors)')
     lines.push('    - [ ] Walk through interactive user flows end-to-end (inputs, state transitions, error/empty states)')
     lines.push('    - [ ] Capture and inspect Light & Dark theme screenshots for contrast, clipping, text overlap, and legibility')
+    lines.push('    - [ ] Pass each real output with `--artifact <path>` (non-empty regular file) or record the render observation; `--visual-checked` alone is not accepted')
+    lines.push('    - [ ] No render environment here? Declare `--visual-blocked-reason "<reason>"` so the gap is disclosed instead of faked')
   }
   lines.push('  Post-Unlock Substance & Fault Injection Protocol (after --include-diff, judge C* & business-flows substance/root cause; NO subjective nitpicks):')
   lines.push('    1. Temporarily break 1 core branch/guard in the review worktree and run test -> MUST FAIL.')

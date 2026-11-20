@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-20T12:33:05.547Z",
+  "installedAt": "2026-11-20T12:43:16.005Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -124,7 +124,7 @@
       "sha256": "e193f3d5ddfbbb5f20bcff2c7a77632ce758bb652cf5542a3a75b7e5e7b37f2c"
     },
     "dev-plan/scripts/doc-plan.mjs": {
-      "sha256": "2912f514bdad084115ce45a9a9b1887a5219202f75f5ba12afd89d92c7037297"
+      "sha256": "451482c35634f551c05aaf22bbec52e9e49e0902c2e16985c34f0ff679c11353"
     },
     "dev-plan/scripts/triage-rules.mjs": {
       "sha256": "e1f2c88a121cf4c30e1301769f2493225502b7e6d0637a5c15a12de7ff518ab9"

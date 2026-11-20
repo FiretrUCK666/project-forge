@@ -20,7 +20,7 @@
 | 外部 Issue・PR 业务分诊 / 里程碑管理 / 裸粘贴链接 | `.agents/skills/dev-flow/SKILL.md` | `node .agents/skills/dev-flow/scripts/flow.mjs intake` / `inspect <URL...>` / `milestone` |
 | 验证工具创造 / 自动复用与过时校验 / 体检清理 | `.agents/skills/dev-verify-tools/SKILL.md` | `node .agents/skills/dev-verify-tools/scripts/verify-tools.mjs` (`audit` / `run` / `create`) |
 | 代码体检 / 清技术债 / retro 复盘下沉 | `.agents/skills/dev-govern/SKILL.md` | `node .agents/skills/dev-govern/scripts/govern-audit.mjs` (`audit` / `reconcile` / `retro`) |
-| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run`) |
+| 正向扩展回归/集成/E2E/性能测试与盲区压测 | `.agents/skills/dev-iterate/SKILL.md` | `node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run` / `cycle`) |
 | 首次规范化接管 / 升级工具包 / 交棒退场 | 调用治理技能（`survey` / `equip` / `review` / `handoff`） | 始终先只读 `survey.mjs`，不直接写业务代码 |
 <!-- project-forge: end 意图路由 -->
 
@@ -30,6 +30,7 @@
 - **四条准则**：1. **治本不治标**（查根因，不用补丁遮掩）；2. **写原则不写死**（提炼可迁移原则）；3. **融入结构**（查复用合入主干，不留双轨）；4. **保持清朗**（清废弃路径与冗余分支）。
 - **信任倒金字塔**：`确定性静态与类型门禁（类型/Schema/arch-rules） > 真实启动运行与端到端实证（测试/smoke-verify/UI 渲染交互与浅深色截图/CLI 实测） > 静态读代码与独立审查 > 文档约定`；主观未实证挑刺不阻塞合入；同类纠偏复发**满 2 次**沉入结构重构或确定性静态检查并清理死代码。
 - **改前改后与人肉禁令**：先给无历史包袱最优解；改前查复用并判 `two-way`/`one-way` 门型；改后拿实测或渲染交互证据再汇报，不让用户代劳验收。
+- **只锁客观输出边界**：验收锁产物、接口与断言，不锁私有过程——过程一改就误报的规则只会逼人绕过它。
 <!-- project-forge: end 行事总纲 -->
 <!-- project-forge: begin 项目定位 -->
 ## 项目定位
@@ -139,7 +140,7 @@ node scripts/dev/verify-injections.mjs
 - **严控范围与依赖**：改前先读邻近实现，清净被替换旧逻辑；不擅自引入第三方依赖，确需引入须先说明理由并获确认。
 - **测试正反双向与分层控频**：修缺陷先写复现失败测试（Red-Green）；新判定/解析逻辑必配正反双向用例。编码中跑语法检查与 `--tier quick --target <path>`，合前跑 1 次 `full-test`/`merge-gate`；禁零断言、纯 Mock 自证（>=5 mock 仅查调用次数）、单测 `>=1s` sleep 与弱化门禁；单测超 800 行按模块拆分。
 - **禁坏味注释与文档同步**：只写现状——**禁立碑履历**、**死代码注释块**及无故压制（`HACK`/`WORKAROUND`/`TEMP`/`@ts-ignore`/`eslint-disable`/`# type: ignore`/`# noqa`/`#[allow(`）；改导出、CLI、模块边界或契约时同提交同步 `docs/TDD.md`（若存在）、`README.md`、`AGENTS.md`。
-- 本项目历史提交是平铺的一句说明——沿用它，不要混用第二套格式，不用内部编号充当说明
+- 本项目历史提交用的是「类型: 说明」的约定式格式——沿用它，不要混用第二套格式，不用内部编号充当说明
 - **多语文档成对同步**：本仓库有 `README.md`、`README.en.md`，改任一语言版本必须同步另一份并保持双向链接有效。
 <!-- project-forge: end 修改守则 -->
 

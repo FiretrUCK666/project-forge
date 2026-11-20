@@ -8,7 +8,7 @@ description: |
   iterate tests、add integration tests、add e2e tests、regression tests、stress test。
 metadata:
   intent: 正向扩展回归/集成/E2E/性能测试与盲区压测
-  script: "`node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run`)"
+  script: "`node .agents/skills/dev-iterate/scripts/iterate.mjs` (`plan` / `generate` / `run` / `cycle`)"
   order: 55
   fallback: 按项目原生测试目录补充集成/回归用例，确认不污染快速单测且发现缺陷时另起任务单修复（未装配 dev-iterate 技能）
 ---
@@ -34,6 +34,15 @@ metadata:
 4. **分片并发执行与缺陷升级闭环**：
    - `run` 按受限并发池（`--concurrency`）并行实跑原生测试套件，并可设 `--perf-budget-ms` 监控性能退化；
    - 捕获真实失败、竞态超时或性能越阈时，**严禁在测点绕过或直接篡改业务源码**，而是经 `kit/skills/lib/escalation.mjs` 建单（`dev-plan -> dev-edit -> dev-review` 正流修复）并写入结构化信号（`defectClass`、`fingerprint`、`pyramidTier`）至 `signals.jsonl`。
+5. **先最小运行复现，再评整类加固（四步通用准则）**：
+   - **① 最小运行复现消误报**：静态告警、审查疑点或推测缺陷，一律先用最小可执行 PoC 证明它真实可达；复现不出来就先当误报处理，不写补丁；
+   - **② 复跑证伪 + 回归防护**：修完用**同一条** PoC 复跑变绿，并把正反两面断言固化进回归用例，防止同类问题再溜进来；
+   - **③ 评估整类加固（Tier 1/2）**：确认这个单点缺陷是不是同一种模式在别处也有的折射——能靠类型/静态门禁/Linter 下沉就做 Tier 1，能靠共享边界原语一次性收口就做 Tier 2，别只补出问题的那一处；
+   - **④ 只锁客观边界**：验收锁在产物、接口与断言上，不锁私有实现过程——过程一改就误报的规则，只会逼人绕过。
+6. **有界优化循环 `cycle`（只读编排，不自旋）**：
+   - 四阶段推进：`Observe`（找盲区与热点）-> `PoC/Escalate (autonomous)`（先复现再升级建单）-> `Fix/Verify`（走正流修并复跑）-> `Reflect`（评整类加固）；
+   - 三条硬停损：`ROUND_LIMIT_REACHED`（达到轮次上限，默认 3、硬上限 10）、`NO_PROGRESS_STALL`（连续两轮零进展）、`ONE_WAY_GATE_HIT`（触及单向门或高风险边界需人工拍板）；
+   - 触发即输出 `stopped: true` 与 `stopReason` 并退出码 `4`；**绝不自动改源码、不提交、不跳过 `dev-plan -> dev-edit -> dev-review` 正流**。
 
 ## 标准命令流
 
@@ -46,4 +55,7 @@ node ".agents/skills/dev-iterate/scripts/iterate.mjs" generate --focus "<业务�
 
 # 3. 分片并发实跑新增与关联原生测试套件；遇真实失败或性能越阈自动写信号并经 escalation 建单
 node ".agents/skills/dev-iterate/scripts/iterate.mjs" run [--targets <a,b>] [--concurrency 4] [--perf-budget-ms 15000] [--escalate] [--json]
+
+# 4. 有界只读优化循环：给出四阶段编排与三条硬停损判定（--max-rounds 默认 3，硬上限 10）
+node ".agents/skills/dev-iterate/scripts/iterate.mjs" cycle --goal "<这一轮想把什么做得更好>" [--max-rounds 3] [--progress-history "<json>"] [--pending-gates "<json>"] [--json]
 ```

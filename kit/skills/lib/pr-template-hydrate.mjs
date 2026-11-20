@@ -8,8 +8,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseDocFrontmatter } from './doc-frontmatter.mjs'
+import { evaluateObservationSubstance, formatArtifactEvidenceLines } from './empirical-artifacts.mjs'
 import { formatWorkTitle } from './escalation.mjs'
-import { readTextSafe } from './git.mjs'
+import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
 
 function stripHtmlCommentsOutsideFences(md) {
@@ -138,7 +139,11 @@ function formatDurationMs(ms) {
   return `${(n / 1000).toFixed(2)}s`
 }
 
-function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged = [], visualVerifiedOnHead = false }) {
+/**
+ * 渲染 PR「验证证据」：门禁表格 + 验证基线 + 结构化实证摘要与附件清单。
+ * 实证附件与视觉核验那几行统一由 `empirical-artifacts.mjs` 产出，本函数只负责门禁表格。
+ */
+export function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualFilesChanged = [], visualVerifiedOnHead = false }) {
   const rows = []
   const gates = evidence?.gates && typeof evidence.gates === 'object' ? evidence.gates : null
   const labelMap = { gate: 'merge-gate', full: 'full-test', smoke: 'smoke-verify', quick: 'quick-test', docStatic: 'doc-static' }
@@ -167,13 +172,52 @@ function buildVerificationEvidenceSection({ evidence, ledger, shortHead, visualF
     `- **验证基线**：HEAD \`${shortHead}\``,
   ]
   const e2eSummary = String(evidence?.e2eObservation?.summary ?? '').trim()
-  if (e2eSummary) {
-    lines.push(`- **E2E 运行观察**：${e2eSummary}`)
-  }
-  if (visualFilesChanged.length > 0) {
-    lines.push(`- **视觉与交互核验**：${visualVerifiedOnHead ? `已核验（${ledger?.visualCheckEvidence ?? 'confirmed'}）` : `涉及 ${visualFilesChanged.slice(0, 5).join(', ')}`}`)
-  }
+  if (e2eSummary) lines.push(`- **E2E 运行观察**：${e2eSummary}`)
+  lines.push(...formatArtifactEvidenceLines({
+    records: Array.isArray(evidence?.artifacts) ? evidence.artifacts : [],
+    visual: buildVisualEvidenceView({ evidence, ledger, visualFilesChanged, visualVerifiedOnHead }),
+  }))
   return lines.join('\n')
+}
+
+/**
+ * 把 evidence.json 与账本里的界面核验结论汇成 `formatArtifactEvidenceLines` 需要的一层视图。
+ *
+ * 顺序即优先级：真附件 > 已落账观察 > 已落账环境阻塞 > 账本里的观察结论。
+ * `visualVerifiedOnHead` 只用来区分「声明了核验」与「什么都没声明」，绝不拿它推断证据形态
+ * ——一个布尔值证明不了附件存在，也替代不了观察原文。
+ */
+function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], visualVerifiedOnHead = false }) {
+  const uiFiles = (Array.isArray(visualFilesChanged) ? visualFilesChanged : [])
+    .map((f) => posixPath(String(f ?? '')).trim()).filter(Boolean).sort()
+  if (uiFiles.length === 0) return null
+  const stored = evidence?.visual && typeof evidence.visual === 'object' ? evidence.visual : null
+  const records = Array.isArray(evidence?.artifacts) ? evidence.artifacts : []
+  const view = {
+    required: true,
+    uiFiles,
+    satisfiedBy: records.length > 0 ? 'artifacts' : null,
+    observation: '',
+    blockedReason: '',
+    claimedNoProof: false,
+  }
+  if (view.satisfiedBy) return view
+  const candidates = [
+    { satisfiedBy: 'observation', text: String(stored?.observation ?? '').trim() },
+    { satisfiedBy: 'blocked', text: String(stored?.blockedReason ?? '').trim() },
+    { satisfiedBy: 'observation', text: String(ledger?.visualCheckEvidence ?? '').trim() },
+  ]
+  for (const cand of candidates) {
+    if (!cand.text) continue
+    const substance = evaluateObservationSubstance(cand.text)
+    if (!substance.ok) continue
+    view.satisfiedBy = cand.satisfiedBy
+    if (cand.satisfiedBy === 'blocked') view.blockedReason = substance.text
+    else view.observation = substance.text
+    return view
+  }
+  view.claimedNoProof = Boolean(visualVerifiedOnHead)
+  return view
 }
 
 function replaceSectionIfPresent(md, headingCandidates, newBody) {

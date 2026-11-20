@@ -149,7 +149,7 @@ function starterReadme({ names, summary, stack }) {
     '## 快速开始',
     '',
     `- 基线配置：\`${stack}\`（工程边界与后续构建命令以 \`AGENTS.md\` 与 \`docs/TDD.md\` 为准）`,
-    '- 待补齐真实源码或文档入口后，运行 `node scripts/compose-agents.mjs .`（或更新 `AGENTS.md` `Dev Profile`）同步命令契约。',
+    '- 待补齐真实源码或文档入口后，请同步更新 `AGENTS.md`（`## Dev Profile` 与模块入口）及 `docs/TDD.md`（已装配本地研发套件时可由 `dev-explore` / `dev-plan` 辅助校准）。',
     '',
     '## 目录与文档导航',
     '',

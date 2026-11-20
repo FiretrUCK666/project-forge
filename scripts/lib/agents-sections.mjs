@@ -51,6 +51,31 @@ function isCalibratedDevProfile(regionId, bodyLines) {
   })
 }
 
+function isPlaceholderTradeoffLine(line) {
+  const t = line.trim()
+  return /^[-*]?\s*`?<[^>\n]+>`?(?:\s*[:：]\s*`?<[^>\n]+>`?)?$/.test(t)
+    || /^[-*]?\s*`?[a-z][a-z0-9._-]*`?\s*[:：]\s*`?<[^>\n]+>`?$/i.test(t)
+}
+
+function isHandwrittenTradeoff(regionId, bodyLines) {
+  if (regionId !== '取舍') return false
+  const bodyText = bodyLines.join('\n')
+  if (parseMarkers(bodyText, 'AGENTS.md').some((m) => m.kind === 'fill')) return false
+  const meaningful = bodyLines
+    .map((l) => l.trim())
+    .filter((l) => {
+      if (!l) return false
+      if (/^#{1,3}\s+取舍/.test(l)) return false
+      if (/^由维护者手写，脚本不碰/.test(l)) return false
+      if (/^可用键名见体检/.test(l)) return false
+      if (/^```/.test(l)) return false
+      if (/^<!--[\s\S]*-->$/.test(l)) return false
+      return true
+    })
+  if (meaningful.length === 0) return false
+  return !meaningful.some(isPlaceholderTradeoffLine)
+}
+
 export function sha256Of(text) {
   return createHash('sha256').update(String(text ?? '').replace(/\r\n/g, '\n'), 'utf8').digest('hex')
 }
@@ -241,6 +266,10 @@ export function refreshRegions(existing, rendered, volatile = [], baselineRegion
         kept.push(region.id)
         continue
       }
+      if (isHandwrittenTradeoff(region.id, bodyLines)) {
+        kept.push(region.id)
+        continue
+      }
       if (normalizeBody(bodyLines, volatile) === normalizeBody(renderedBody, volatile)) {
         kept.push(region.id)
         continue
@@ -331,6 +360,7 @@ export function driftRegions(existing, rendered, volatile = []) {
     if (!source) continue
     const bodyLines = lines.slice(region.start + 1, region.end)
     if (isCalibratedDevProfile(region.id, bodyLines)) continue
+    if (isHandwrittenTradeoff(region.id, bodyLines)) continue
     const renderedBody = renderedLines.slice(source.start + 1, source.end)
     if (parseMarkers(renderedBody.join('\n'), 'AGENTS.md').some((m) => m.kind === 'fill')) continue
 

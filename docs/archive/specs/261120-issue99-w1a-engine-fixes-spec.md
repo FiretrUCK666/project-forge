@@ -1,19 +1,19 @@
 ---
 kind: spec
 title: 引擎 8 项边界缺陷根治与 survey(self) 性能压回 250ms 规划规格
-status: approved
+status: implemented
 tier: L3
 created: 2026-11-20
 updated: 2026-11-20
 issue: 99
 pr: null
-branch: feat/w1a-engine-fixes
-owner: plan-v101
+branch: feat/issue99-w1a-engine-fixes
+owner: impl-99
 approved: true
-implemented: false
+implemented: true
 plan_critique: "passed (reviewer=critic-v101-r2, round=2, sha=2c0d1d10b90e, summary=Round 2 independent Plan Critique PASS (0 blockers))"
 critique_rounds: "[{\"round\":2,\"verdict\":\"passed\",\"reviewerId\":\"critic-v101-r2\",\"sha\":\"2c0d1d10b90e\",\"artifact_baseline\":{\"sha\":\"2c0d1d10b90ed4d89bb5a41d14dfeed9f32ce524ac430356c962293666771292\",\"shortSha\":\"2c0d1d10b90e\",\"criteriaCount\":8,\"anchorCount\":117},\"summary\":\"Round 2 independent Plan Critique PASS (0 blockers)\",\"findings\":[],\"stopLossTriggered\":false,\"recordedAt\":\"2026-11-19T18:21:04.930Z\"}]"
-related_prd: ../prd/261120-v10-1-hardening-pillars-docs-prd.md
+related_prd: ../../prd/261120-v10-1-hardening-pillars-docs-prd.md
 related_todo: ../todo/261120-issue99-w1a-engine-fixes-todo.md
 high_risk_paths: [scripts/lib/]
 task_id: w1a-engine-fixes
@@ -25,7 +25,7 @@ critique_anchors: "{\"sections\":{\"non-goals\":{\"present\":true,\"substantive\
 
 # 引擎 8 项边界缺陷根治与 `survey(self)` 性能压回 `<= 250 ms`（Issue `#99`）
 
-> 所属总控 PRD：[v10.1 总控 PRD](../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w1a-engine-fixes Todo](../todo/261120-issue99-w1a-engine-fixes-todo.md)
+> 所属总控 PRD：[v10.1 总控 PRD](../../prd/261120-v10-1-hardening-pillars-docs-prd.md)　｜　配对 Todo：[w1a-engine-fixes Todo](../todo/261120-issue99-w1a-engine-fixes-todo.md)
 >
 > 总控 PRD 认领范围：覆盖总控 `C1..C4`（总控 `C1` -> 切片 `C1..C2`；总控 `C2` -> 切片 `C3..C4`；总控 `C3` -> 切片 `C5..C7`；总控 `C4` -> 切片 `C8` 及双向证伪门禁）。
 
@@ -107,14 +107,14 @@ flowchart LR
 ### 验收标准（对应 Issue `#99` 与总控 `C1..C4`）
 
 <!-- criteria:start -->
-- [ ] C1: `compose-agents.mjs` / `agents-sections.mjs` 将手写 `## 取舍` 纳入免模板字面漂移比对语义区，用户填写取舍决策后无需手工标 `customized` 即可通过 `--check` 与 `review.mjs`；反例为空骨架残留占位仍被拦截。
-- [ ] C2: 新增自定义技能后单次运行 `compose-agents.mjs` 同时收敛 `意图路由` 与 `探索策略`，无需跑第二遍即通过 `--check`；反例为手工删除其中一节触发 `--check` 报错退出。
-- [ ] C3: `survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**`、`**/vscode-web/extensions/**` 等 vendored 嵌入子包并对超多子包聚合摘要，避免撑破 `AGENTS.md` `30KB` 上限；反例为真实未豁免的顶层工作区子包仍被精准识别。
-- [ ] C4: `survey-workspace.mjs` 在 Git 仓仅当同名输出目录（`dist`/`build`/`out`/`coverage`/`bin`）实际包含未跟踪文件时才报 `unignoredOutputDirs`，消除合法已跟踪目录的 `git.output-dirs` 与 `ignoredButTracked` 死锁；反例为同目录下存在未跟踪产物文件时必须继续报错。
-- [ ] C5: `review.mjs` 读取 `facts.docs.existingDesignDocs` 与 `tdd-authority`，存在存量架构文档时不再误报缺 `docs/TDD.md`；反例为仓内无任何架构设计文档且无豁免时仍报缺口。
-- [ ] C6: `equip-bootstrap.mjs` 空目录起步生成的 `README.md` 不再包含指向 `scripts/compose-agents.mjs` 的悬空指针，且生成内容通过自身合规检查。
-- [ ] C7: `handoff.mjs` 按 `dirname(rel)` 校验相对 `references/*.md`、限定 `SKILL_INTERNAL_RE` 为本工具真实参考文档，并区分 vendored 大文件与真实漏扫；反例为真实缺失相对引用或源码越界泄露仍阻断。
-- [ ] C8: 剖析并优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `node scripts/dev/bench.mjs` 的 `survey(self)` 本地 1x 实测中位数回到 `<= 250 ms`（严禁放宽预算阈值），并在 `scripts/dev/fixtures-engine-hardening.mjs` (new) 与 `scripts/dev/injections-data-engine-hardening.mjs` (new)（号段 `I225–I239`）覆盖全部 8 项正反断言。
+- [x] C1: `compose-agents.mjs` / `agents-sections.mjs` 将手写 `## 取舍` 纳入免模板字面漂移比对语义区，用户填写取舍决策后无需手工标 `customized` 即可通过 `--check` 与 `review.mjs`；反例为空骨架残留占位仍被拦截。
+- [x] C2: 新增自定义技能后单次运行 `compose-agents.mjs` 同时收敛 `意图路由` 与 `探索策略`，无需跑第二遍即通过 `--check`；反例为手工删除其中一节触发 `--check` 报错退出。
+- [x] C3: `survey-ecosystem.mjs` / `compose-agents.mjs` 跳过 `vendor/**`、`third_party/**`、`**/vscode-web/extensions/**` 等 vendored 嵌入子包并对超多子包聚合摘要，避免撑破 `AGENTS.md` `30KB` 上限；反例为真实未豁免的顶层工作区子包仍被精准识别。
+- [x] C4: `survey-workspace.mjs` 在 Git 仓仅当同名输出目录（`dist`/`build`/`out`/`coverage`/`bin`）实际包含未跟踪文件时才报 `unignoredOutputDirs`，消除合法已跟踪目录的 `git.output-dirs` 与 `ignoredButTracked` 死锁；反例为同目录下存在未跟踪产物文件时必须继续报错。
+- [x] C5: `review.mjs` 读取 `facts.docs.existingDesignDocs` 与 `tdd-authority`，存在存量架构文档时不再误报缺 `docs/TDD.md`；反例为仓内无任何架构设计文档且无豁免时仍报缺口。
+- [x] C6: `equip-bootstrap.mjs` 空目录起步生成的 `README.md` 不再包含指向 `scripts/compose-agents.mjs` 的悬空指针，且生成内容通过自身合规检查。
+- [x] C7: `handoff.mjs` 按 `dirname(rel)` 校验相对 `references/*.md`、限定 `SKILL_INTERNAL_RE` 为本工具真实参考文档，并区分 vendored 大文件与真实漏扫；反例为真实缺失相对引用或源码越界泄露仍阻断。
+- [x] C8: 剖析并优化 `survey.mjs` / `survey-scan.mjs` / `survey-workspace.mjs`，使 `node scripts/dev/bench.mjs` 的 `survey(self)` 本地 1x 实测中位数回到 `<= 250 ms`（严禁放宽预算阈值），并在 `scripts/dev/fixtures-engine-hardening.mjs` (new) 与 `scripts/dev/injections-data-engine-hardening.mjs` (new)（号段 `I225–I239`）覆盖全部 8 项正反断言。
 <!-- criteria:end -->
 <!-- section: acceptance-end -->
 
@@ -123,3 +123,9 @@ flowchart LR
 <!-- section: pending -->
 - 已定：8 项根因定位、`survey(self)` 剖析数据（`289.2 ms` 基线拆解）与正反用例及 `I225–I239` 注入边界均已实证确认锁定，无未决事项。
 <!-- section: pending-end -->
+
+## 实现说明
+
+
+- 实现提交基线: 38059d4804e8b7a3de1d0fc468b64e77c3b961a7
+- 关联任务: w1a-engine-fixes

@@ -14,7 +14,7 @@
 import { existsSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { computeNavigation } from './lib/render.mjs'
+import { computeNavigation } from './lib/navigation.mjs'
 import * as protocol from './lib/protocol.mjs'
 import {
   computeS3NextStep,
@@ -334,7 +334,7 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
   const root = resolve(targetDir)
   if (!existsSync(root)) throw new Error(`目标目录不存在：${root}`)
 
-  // 先派生 git 子进程，与本地磁盘单趟扫描并发推进
+  // 先同步派生 git 子进程，再立即启动目录遍历与无阻塞异步读盘，使 git 子进程与 libuv 线程池真正并行
   const gitPromise = detectGit(root, {
     probeAuth: opts.probeAuth === true,
     verifyToken: opts.verifyToken === true,
@@ -343,12 +343,11 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     offline: opts.offline,
     fastUnbornStatus: opts.fastUnbornStatus === true,
   })
+  const [gitFacts, staticFacts] = await Promise.all([gitPromise, scanProjectStaticFacts(root)])
   const {
-    rawWs, ecosystem, taskEntryMeta, taskCommands, docs, workspace,
+    rawWs, relFiles, relSet, dirSet, ecosystem, taskEntryMeta, taskCommands, docs, workspace,
     kit, localSkills, artifacts, universal, agentsText, tddText,
-  } = scanProjectStaticFacts(root)
-
-  const gitFacts = await gitPromise
+  } = staticFacts
   const ws = await finalizeWalkWorkspace(root, rawWs, gitFacts)
   const conventions = detectConventions(root, { gitFacts, docs, ecosystem })
 
@@ -407,6 +406,9 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     taskEntryMeta,
     agentsText,
     tddText,
+    relSet,
+    dirSet,
+    relFiles,
   })
 
   const gitIdentityOut = {
@@ -489,8 +491,8 @@ export async function survey(targetDir = process.cwd(), opts = {}) {
     docs,
     reentry,
     ignores: {
-      hasGitignore: existsSync(join(root, '.gitignore')),
-      hasGitattributes: existsSync(join(root, '.gitattributes')),
+      hasGitignore: relSet ? relSet.has('.gitignore') : existsSync(join(root, '.gitignore')),
+      hasGitattributes: relSet ? relSet.has('.gitattributes') : existsSync(join(root, '.gitattributes')),
       unignoredOutputDirs: ws.unignoredOutputDirs,
       ignoredButTracked: ws.ignoredButTracked,
     },

@@ -26,7 +26,7 @@ node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
 
 ## 三、托管 Skill 套装升级与退役自净化
 
-日常研发流技能套装由 `equip.mjs` 从本工具 `kit/skills/` 统一装配至 `<目标目录>/.agents/skills/`，并通过 `.agents/skills/.pf-manifest.json`（`schemaVersion: 2`，记录 `files`、`disabledSkills`、`removedFiles`、`customizedFiles`、`agentsRegions` 与 `removedAgentsRegions`）实现幂等与跨月重入安全升级（文本统一按 LF 写入，校验兼容 CRLF/LF 归一等价）：
+日常研发流技能套装由 `equip.mjs` 从本工具 `kit/skills/` 统一装配至 `<目标目录>/.agents/skills/`，并通过 `.agents/skills/.pf-manifest.json`（`schemaVersion: 3`，兼容 `v1/v2/v3`，记录 `files`、`disabledSkills`、`removedFiles`、`customizedFiles`、`pendingConflicts`、`agentsRegions` 与 `removedAgentsRegions`）实现幂等与跨月重入安全升级（文本统一按 LF 写入，校验兼容 CRLF/LF 归一等价）：
 
 | 本地文件现场状态 | `equip.mjs` 执行动作 | 安全边界 |
 | --- | --- | --- |

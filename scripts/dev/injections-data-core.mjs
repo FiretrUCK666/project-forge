@@ -38,7 +38,7 @@ export const INJECTIONS_CORE = [
   {
     id: 'I5',
     what: '导航不再推 docs-set',
-    file: 'scripts/lib/render.mjs',
+    file: 'scripts/lib/navigation.mjs',
     from: '  if (docsTriggers.some(Boolean)) {',
     to: '  if (false) {',
     expect: 'docs-set',
@@ -338,7 +338,7 @@ export const INJECTIONS_CORE = [
     id: 'I31',
     what: '置空 survey-scan.mjs detectReentry 对 docs/TDD.md 失效源码路径的检测',
     file: 'scripts/lib/survey-scan.mjs',
-    from: '  const staleTddPaths = detectTddStalePaths(root, docs?.tdd)',
+    from: '  const staleTddPaths = detectTddStalePaths(root, docs?.tdd, tddText, relSet)',
     to: '  const staleTddPaths = []',
     expect: 'reentry.staleTddPaths 未检出失效 TDD 路径',
   },

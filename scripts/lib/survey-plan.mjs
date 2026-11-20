@@ -137,7 +137,7 @@ export function computeExplorationStrategy(facts) {
   ]
 
   const customSkills = facts?.kit?.customSkills ?? []
-  if (customSkills.length > 0 || otherConventionsCount > 0 || reentry.drifted || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
+  if (customSkills.length > 0 || otherConventionsCount > 0 || tddDrift || kitDrift || (reentry.unregisteredTopDirs?.length ?? 0) > 0) {
     // 这一段会被写进 `AGENTS.md` 自己的受管区。所以它**不能把 `AGENTS.md` 列成目标**：
     // 第一次渲染时这个文件还不存在，渲染完它才出现，第二次就多出一项——
     // 于是「生成一次契约」本身把仓从「一致」推成「漂移」，`--check` 每次必红。
@@ -147,7 +147,7 @@ export function computeExplorationStrategy(facts) {
       ...(facts?.docs?.tdd ? [facts.docs.tdd] : []),
       ...(facts?.docs?.otherAiConventions ?? []),
       ...customSkills.map((s) => `${s.path}/SKILL.md`),
-      ...(reentry.staleAgentPaths ?? []),
+      ...(reentry.staleTddPaths ?? []),
     ].filter((p) => p && p !== selfFile))].slice(0, 8)
     if (convTargets.length === 0) convTargets.push('契约自身（AGENTS.md）')
     shards.push({

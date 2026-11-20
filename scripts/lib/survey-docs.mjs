@@ -217,9 +217,9 @@ function detectAiConventions(root, files = null) {
   }
 }
 
-function parseAgentMarkers(root, agents) {
+function parseAgentMarkers(root, agents, textByRel = null) {
   if (!agents) return { marks: 0, fills: [] }
-  const text = readTextSafe(join(root, agents)) ?? ''
+  const text = textByRel?.get(agents) ?? readTextSafe(join(root, agents)) ?? ''
   const markers = parseMarkers(text, agents)
   return {
     marks: markers.length,
@@ -240,6 +240,8 @@ function sortPrimaryFirst(files, exactPrimaryLower, englishLower) {
 
 export function detectDocs(root, opts = {}) {
   const files = opts?.files ?? null
+  const textByRel = opts?.textByRel ?? null
+  const preNeutralCi = opts?.neutralCi ?? null
   let entries = []
   let fileEntries = []
   try {
@@ -316,7 +318,7 @@ export function detectDocs(root, opts = {}) {
     }
   }
 
-  const neutralCi = scanNeutralCiSteps(root)
+  const neutralCi = preNeutralCi ?? scanNeutralCiSteps(root)
   const neutralCiConfigs = neutralCi.ciConfigFiles.filter((rel) => !rel.startsWith('.github/workflows/'))
   workflowFacts.neutralCiConfigs = neutralCiConfigs
   for (const rel of neutralCiConfigs) {
@@ -352,19 +354,30 @@ export function detectDocs(root, opts = {}) {
 function partitionPlanDir(root, dirRel) {
   const dirAbs = join(root, dirRel)
   if (!existsSync(dirAbs)) return { content: [], foreign: [] }
-  const rawFiles = walkBoundedRelFiles(root, [dirRel], { maxDepth: 4 })
-  const topNames = listRelFiles(dirAbs, dirRel)
-  const all = [...new Set([...topNames, ...rawFiles])].sort()
+  let all
+  if (Array.isArray(files) && files.length > 0) {
+    const prefix = `${dirRel}/`
+    const fromScan = files.map((f) => String(f?.rel ?? f).replace(/\\/g, '/')).filter((r) => r.startsWith(prefix))
+    const topNames = listRelFiles(dirAbs, dirRel)
+    all = [...new Set([...topNames, ...fromScan])].sort()
+  } else {
+    const rawFiles = walkBoundedRelFiles(root, [dirRel], { maxDepth: 4 })
+    const topNames = listRelFiles(dirAbs, dirRel)
+    all = [...new Set([...topNames, ...rawFiles])].sort()
+  }
   const content = []
   const foreign = []
   for (const rel of all) {
     const base = rel.split('/').pop() ?? ''
     if (base === '.gitkeep') { content.push(rel); continue }
-    const abs = join(root, rel)
-    let isDir = false
-    try { isDir = statSync(abs).isDirectory() } catch { isDir = false }
-    if (isDir) continue
-    const text = readTextSafe(abs) ?? ''
+    const cachedText = textByRel?.get(rel)
+    if (cachedText === undefined) {
+      const abs = join(root, rel)
+      let isDir = false
+      try { isDir = statSync(abs).isDirectory() } catch { isDir = false }
+      if (isDir) continue
+    }
+    const text = cachedText ?? readTextSafe(join(root, rel)) ?? ''
     if (isManagedPlanDoc(rel, text)) content.push(rel)
     else foreign.push(rel)
   }
@@ -395,7 +408,7 @@ function partitionPlanDir(root, dirRel) {
     nonMdReadmes: nonStandard.nonMdReadmes,
     agents: agents ? { file: agents } : undefined,
     agentsBytes,
-    agentsMarkers: parseAgentMarkers(root, agents),
+    agentsMarkers: parseAgentMarkers(root, agents, textByRel),
     contributing,
     contributingFiles,
     localizedDocs,

@@ -44,6 +44,20 @@ const SKILL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_FILES = 20000
 const MAX_BYTES = 256 * 1024
 
+const OWN_REF_NAMES = (() => {
+  try {
+    return readdirSync(join(SKILL_ROOT, 'references'))
+      .filter((n) => n.endsWith('.md'))
+      .map((n) => n.replace(/\.md$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  } catch {
+    return [
+      'collaboration', 'docs-set', 'handoff', 'plugin-ecosystems',
+      'publish-ecosystems', 'publish', 'remote-github', 'skill-project',
+      'survey', 'version-control',
+    ]
+  }
+})()
+
 /**
  * 本项目自己的文件里**不该出现**的指针：指向本 skill 内部的参考与脚本。
  *
@@ -51,7 +65,16 @@ const MAX_BYTES = 256 * 1024
  * `scripts/`。而它们比普通死链更要紧：那些位置上原本写着一条规则，删掉指针就把它
  * 一起删了。所以扫描时单列一档，提示的是「**先把规则搬进项目自己的文档，再删指针**」。
  */
-const SKILL_INTERNAL_RE = /(?:references\/[A-Za-z0-9_-]+\.md|(?:\.\.\/)*project-forge\/scripts\/[A-Za-z0-9_.-]+|\bscripts\/(?:survey|compose-agents|equip|backup|review|handoff|sync-toc|update|zip)\.mjs)/g
+const SKILL_INTERNAL_RE = new RegExp(
+  `(?:references/(?:${OWN_REF_NAMES.join('|')})\\.md|(?:\\.\\.\\/)*project-forge/scripts/[A-Za-z0-9_.-]+|\\bscripts/(?:survey|compose-agents|equip|backup|review|handoff|sync-toc|update|zip)\\.mjs)`,
+  'g',
+)
+
+function isVendoredRel(rel) {
+  const norm = String(rel ?? '').replace(/\\/g, '/')
+  return /(?:^|\/)(?:vendor|third_party)(?:\/|$)/i.test(norm)
+    || /(?:^|\/)vscode-web\/extensions(?:\/|$)/i.test(norm)
+}
 
 function isSelfScan(root) {
   return samePath(resolve(root), SKILL_ROOT)
@@ -65,7 +88,7 @@ function isSkillOwnPath(rel) {
 
 function walk(root) {
   const out = []
-  const state = { truncated: false, unreadable: 0, skippedLarge: 0, depthLimited: 0, symlinks: 0 }
+  const state = { truncated: false, unreadable: 0, skippedLarge: 0, skippedVendoredLarge: 0, depthLimited: 0, symlinks: 0 }
   const go = (dir, depth) => {
     if (depth > MAX_DEPTH) { state.depthLimited += 1; state.truncated = true; return }
     if (out.length > MAX_FILES) { state.truncated = true; return }
@@ -81,10 +104,15 @@ function walk(root) {
       if (entry.isDirectory()) {
         go(full, depth + 1)
       } else if (entry.isFile() && (SCAN_EXT.test(entry.name) || TEMP_RE.test(entry.name))) {
+        const rel = relative(root, full).split(sep).join('/')
         let size = 0
         try { size = statSync(full).size } catch { state.unreadable += 1; state.truncated = true; continue }
-        if (size > MAX_BYTES) { state.skippedLarge += 1; state.truncated = true; continue }
-        out.push(relative(root, full).split(sep).join('/'))
+        if (size > MAX_BYTES) {
+          if (isVendoredRel(rel)) state.skippedVendoredLarge += 1
+          else { state.skippedLarge += 1; state.truncated = true }
+          continue
+        }
+        out.push(rel)
       }
     }
   }
@@ -158,8 +186,8 @@ export function scan(targetDir) {
       for (const m of line.matchAll(SKILL_INTERNAL_RE)) {
         const target = m[0]
         if (!target.includes('/')) continue
-        // 目标项目里真实存在这个相对路径 → 不是悬空指针，是它自己也有同名文件。
-        if (existsSync(join(root, target))) continue
+        // 目标项目里（含当前文档所在目录相对路径）真实存在这个路径 → 不是悬空指针。
+        if (existsSync(join(root, target)) || existsSync(join(root, dirname(rel), target))) continue
         danglingPointers.push({ file: rel, line: info.index + 1, target })
       }
     }
@@ -207,7 +235,7 @@ export function scan(targetDir) {
       path: PF_MANIFEST_REL,
       valid: Boolean(
         manifest
-        && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2)
+        && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2 || manifest.schemaVersion === 3)
         && manifest.files
         && typeof manifest.files === 'object'
         && !Array.isArray(manifest.files),
@@ -361,6 +389,9 @@ export function toText(result) {
   lines.push('- 上面每一处都是**读出来的事实**，不是猜的：标记就写在文件里。')
   lines.push('- 这个脚本**不会替你删**。删除不可逆，判据与顺序见 `references/handoff.md`。')
   lines.push('- 项目里的 `skills/` 之类的目录是**项目自己的**，不是痕迹——它们是内容，盘点时不要碰。')
+  if ((result.scanCoverage?.skippedVendoredLarge ?? 0) > 0) {
+    lines.push(`- 已跳过 ${result.scanCoverage.skippedVendoredLarge} 个嵌入第三方目录（vendor/third_party/vscode-web/extensions）大文件，不计入截断漏扫。`)
+  }
   if (result.truncated) {
     lines.push('- **这一趟没扫全**：目录太深、文件太多，或有单个文件超过 256 KB 没读。'
       + '上面列的是「扫到的」，不是「全部的」——`--verify` 会因此返回 3，别把它当成干净。')

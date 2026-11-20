@@ -78,7 +78,7 @@ async function main(argv) {
         'task', 'slug', 'case', 'files', 'external-pr', 'pr', 'issue', 'issues', 'base',
         'branch', 'clone-choice', 'fork-url', 'pr-ref', 'implementer', 'todo', 'spec', 'prd',
         'agent', 'actor', 'note', 'mode', 'tier', 'timeout', 'target', 'cmd', 'e2e-evidence', 'visual-evidence', 'title', 'body', 'comment', 'state',
-        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'slot', 'focus', 'by',
+        'labels', 'method', 'reason', 'after', 'onto', 'tasks', 'enqueue', 'action', 'focus', 'by',
         'milestone', 'due', 'due-on', 'description',
         'feature-ref', 'decision', 'rationale', 'rationale-file', 'duplicate-of',
         'visual-blocked-reason',

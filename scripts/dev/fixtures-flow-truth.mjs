@@ -9,13 +9,36 @@
  *   3. 派生粒度「一条执行块算一步」：改一条输入即变一条输出，且多行块不被拆行。
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
 import { deriveMergeGate, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
 import { resolveApprovalBasis } from '../../kit/skills/lib/plan-exit-gate.mjs'
+import { auditEntry, auditHandRolled, ENTRY_SPECS, evaluateParity, extractDeclared, HAND_ROLLED_SPECS } from './cli-parity.mjs'
 import { rmTree, tmpProject } from './fixtures-helpers.mjs'
+
+const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..')
+
+/** 目录遍历：与 preflight 注入的那份同签名，避免夹具自带一套私有遍历。 */
+function makeWalker() {
+  return (dir, pred) => {
+    const out = []
+    const rec = (d) => {
+      let names = []
+      try { names = readdirSync(d) } catch { return }
+      for (const n of names) {
+        const p = join(d, n)
+        let st = null
+        try { st = statSync(p) } catch { continue }
+        if (st.isDirectory()) rec(p)
+        else if (pred(n)) out.push(p)
+      }
+    }
+    rec(dir)
+    return out
+  }
+}
 
 /** 造一份只有指定文件的临时仓。 */
 function repoWith(files) {
@@ -64,6 +87,30 @@ const RELEASE_PIPELINE = [
   '    steps:',
   '      - name: 发版',
   '        run: gh release create "$TAG" --notes-file docs/release-notes/x.md',
+  '',
+].join('\n')
+
+/**
+ * 一份**只违反写作用域**的流水线：触发形态合规、步骤不需要远端上下文。
+ *
+ * 单看这一条谓词，才能证明它真的在起作用——三条谓词同时不成立时，任何一条被拆掉，
+ * 另外两条仍会把这份流水线排除，断言照样通过，看上去一切正常。
+ */
+const WRITE_SCOPE_ONLY_PIPELINE = [
+  'name: narrow',
+  '',
+  'on:',
+  '  pull_request:',
+  '',
+  'permissions:',
+  '  issues: write',
+  '',
+  'jobs:',
+  '  narrow:',
+  '    runs-on: ubuntu-latest',
+  '    steps:',
+  '      - name: 本地自检',
+  '        run: node scripts/dev/preflight.mjs',
   '',
 ].join('\n')
 
@@ -176,12 +223,19 @@ export function registerFlowTruthCases(cases) {
       if (gate.verdict === GATE_VERDICT.PASSED) return '派生成功被当成了跑通，未核验折成了通过'
     } finally { rmTree(ci) }
 
-    // 三、有文件却读不懂：这是真故障，必须阻断。
+    // 三、有文件却读不懂：这是真故障，必须阻断，且理由要说「读不懂」。
+    //
+    // 只断言 verdict 不够：把「解析失败」这条判据拆掉，结果会落进第四条（派生为空）那条路，
+    // verdict 一样是 FAILED。所以理由必须区分开——一个是「文件读不懂」，一个是「文件读得懂
+    // 却一步都派生不出来」，两者对应不同的修法。
     const broken = repoWith({ '.github/workflows/ci.yml': 'not a yaml: [\n  broken\n' })
     try {
       const gate = deriveMergeGate(broken)
       if (gate.verdict !== GATE_VERDICT.FAILED || !gate.blocking) {
         return `解析失败没有阻断（verdict=${gate.verdict}, blocking=${gate.blocking}）——降级成空清单就是假绿`
+      }
+      if (!gate.reasons.some((r) => r.includes('读不懂'))) {
+        return `解析失败被当成了别的问题：${JSON.stringify(gate.reasons)}——理由没说「文件读不懂」，修的人会去改谓词`
       }
     } finally { rmTree(broken) }
 
@@ -229,6 +283,28 @@ export function registerFlowTruthCases(cases) {
         return `改一条输入应让输出变一条，实际 ${before} -> ${after}`
       }
     } finally { rmTree(dir) }
+
+    // 单谓词隔离：只违反写作用域的流水线也必须被排除，且理由点名写作用域。
+    //
+    // 这一条是判据真的在起作用的唯一证明：三条谓词同时不成立时，拆掉任意一条，
+    // 另外两条仍会排除它，看上去一切正常。只有「只违反一条」才能把它单独钉住。
+    const narrow = repoWith({
+      '.github/workflows/check.yml': VALID_PIPELINE,
+      '.github/workflows/narrow.yml': WRITE_SCOPE_ONLY_PIPELINE,
+    })
+    try {
+      const gate = deriveMergeGate(narrow)
+      if (gate.adoptedFiles.includes('.github/workflows/narrow.yml')) {
+        return '只违反写作用域的流水线被采纳了——权限谓词没起作用'
+      }
+      const why = gate.skippedFiles.find((s) => s.file === '.github/workflows/narrow.yml')
+      if (!why || !why.reason.includes('写作用域')) {
+        return `只违反写作用域时的排除理由没点名写作用域：${JSON.stringify(why)}`
+      }
+      if (gate.skippedFiles.some((s) => s.file === '.github/workflows/narrow.yml' && /触发形态|远端上下文/.test(s.reason))) {
+        return `只违反写作用域却报了别的理由：${why.reason}`
+      }
+    } finally { rmTree(narrow) }
     return true
   }])
 
@@ -253,6 +329,86 @@ export function registerFlowTruthCases(cases) {
       return `应按 1 个执行块计，实际 ${blocks.length} 个：${JSON.stringify(blocks.map((b) => b.cmd))}`
     }
     if (/shell/.test(blocks[0].cmd)) return 'defaults.run.shell 被当成了执行块——它给的是用哪个 shell，不是跑什么'
+    return true
+  }])
+
+  cases.push(['C7：参数三重对拍——帮助里有的必须注册得上，注册了的必须有人读，暗参数只许少不许多', async () => {
+    const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
+    const entry = read('kit/skills/dev-flow/scripts/flow.mjs')
+
+    // 判据零：句中提及不算声明位置。
+    const declared = extractDeclared(entry)
+    if (!declared.found) return '流程入口的帮助函数体没被截出来'
+    if (declared.flags.includes('body-file')) {
+      return '句中提及的 --body-file 被当成了声明位置——那是别的命令的参数，算进来反向差集全是假红灯'
+    }
+    // 正例：行首声明与方括号分组都能认出来。
+    if (!declared.flags.includes('task')) return '行首声明的 --task 没被认出来'
+    if (!declared.flags.includes('json')) return '方括号分组里的 --json 没被认出来'
+    // 反例一：句中提及不算（帮助正文里讲的是别的命令的参数）。
+    const withProse = [
+      'function printHelp() {',
+      '  process.stdout.write([',
+      '    \'  audit      [--changed] [--json]\',',
+      '    \'  建单走 gh issue create --body-file，安装走 npm ci --ignore-scripts。\',',
+      '    \'  --changed   只看改动过的文件\',',
+      '  ].join(\'\\n\'))',
+      '}',
+    ].join('\n')
+    const proseDeclared = extractDeclared(withProse)
+    if (proseDeclared.flags.includes('body-file') || proseDeclared.flags.includes('ignore-scripts')) {
+      return `句中提及被当成了声明位置：${JSON.stringify(proseDeclared.flags)}——反向差集因此全是假红灯`
+    }
+    if (!proseDeclared.flags.includes('changed') || !proseDeclared.flags.includes('json')) {
+      return `真正的声明位置反而漏了：${JSON.stringify(proseDeclared.flags)}`
+    }
+    // 反例二：用法行括号里的参数算声明，行首没有也算。
+    const usageOnly = [
+      'function printHelp() {',
+      '  process.stdout.write([',
+      '    \'用法：node x.mjs [--alpha] [--beta <v>]\',',
+      '  ].join(\'\\n\'))',
+      '}',
+    ].join('\n')
+    const usageDeclared = extractDeclared(usageOnly)
+    if (!usageDeclared.flags.includes('alpha') || !usageDeclared.flags.includes('beta')) {
+      return `方括号分组里的参数没被认出来：${JSON.stringify(usageDeclared.flags)}`
+    }
+
+    // 判据一/二：五种仕样的注册与声明必须双向覆盖，全局参数走唯一白名单。
+    const walkDir = makeWalker()
+    const audits = [
+      ...ENTRY_SPECS.map((spec) => auditEntry(spec, { ROOT, walk: walkDir })),
+      ...HAND_ROLLED_SPECS.map((spec) => auditHandRolled(spec, { ROOT })),
+    ]
+    for (const a of audits) {
+      if (!a.ok) return `参数对拍失败：${a.error}`
+      if (a.undeclaredInCode.length > 0) {
+        return `${a.label}帮助里声明了没注册的参数（照着敲会被拒）：${a.undeclaredInCode.join(', ')}`
+      }
+      if (a.dead.length > 0) {
+        return `${a.label}有死参数（注册了却没有任何读取点）：${a.dead.join(', ')}`
+      }
+    }
+    const { failures } = evaluateParity(audits)
+    if (failures.length > 0) return `参数对拍不通过：${failures.join('；')}`
+
+    // 反例三：新增一个只有代码知道、帮助里看不到的暗参数，必须被抓到。
+    const flowAudit = audits.find((a) => a.label === '流程入口')
+    const planted = { ...flowAudit, dark: [...flowAudit.dark, 'brand-new-flag'] }
+    if (!evaluateParity([planted]).failures.some((f) => f.includes('brand-new-flag'))) {
+      return '新出现的暗参数没有被抓到——那一类问题会继续悄悄长大'
+    }
+    // 反例四：注册了却没人读，必须被抓到。
+    const deadPlanted = { ...flowAudit, dead: ['no-such-reader'] }
+    if (!evaluateParity([deadPlanted]).failures.some((f) => f.includes('no-such-reader'))) {
+      return '死参数没有被抓到——参数会越攒越多，看着能用其实不做事'
+    }
+    // 反例五：帮助里声明的参数没注册，必须被抓到。
+    const fakeDeclared = { ...flowAudit, undeclaredInCode: ['not-registered'] }
+    if (!evaluateParity([fakeDeclared]).failures.some((f) => f.includes('not-registered'))) {
+      return '帮助里声明了没注册的参数却没被抓到'
+    }
     return true
   }])
 }

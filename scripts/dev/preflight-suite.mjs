@@ -16,6 +16,7 @@ import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
 import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
+import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
@@ -604,6 +605,24 @@ function checkKitWriteProbes({ ROOT, fail, note }) {
   if (violations.length === 0) note(`写路径联网探测：${targets.length} 个脚本均已通过 probeForWrite 与显式 probeNetwork 门禁（0 违规）`)
 }
 
+/**
+ * 参数三重对拍：注册表、帮助声明、读取点。
+ *
+ * 一个参数只活在三分之二处，比完全没有更坏——它看起来像能用。所以这里不查文档写得好不好，
+ * 只查这三件事对不对得上：帮助里有的必须注册得上，注册了的必须有人读，暗参数只许少不许多。
+ */
+function checkCliParity({ ROOT, fail, note, walk }) {
+  const audits = [
+    ...ENTRY_SPECS.map((spec) => auditEntry(spec, { ROOT, walk })),
+    ...HAND_ROLLED_SPECS.map((spec) => auditHandRolled(spec, { ROOT })),
+  ]
+  const { failures, notes } = evaluateParity(audits)
+  for (const message of failures) fail(`参数对拍：${message}`)
+  const globalCheck = auditGlobalWhitelist({ ROOT })
+  if (!globalCheck.ok) fail(`参数对拍：${globalCheck.error}`)
+  if (failures.length === 0) note(`参数对拍：${notes.join('；')}`)
+}
+
 export async function runSuiteChecks(ctx) {
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
@@ -623,6 +642,7 @@ export async function runSuiteChecks(ctx) {
   checkPlatformLock(ctx)
   checkStructureRules(ctx)
   checkKitSuite(ctx, syntaxErrors)
+  checkCliParity(ctx)
   checkKitWriteProbes(ctx)
   checkHygiene(ctx)
 }

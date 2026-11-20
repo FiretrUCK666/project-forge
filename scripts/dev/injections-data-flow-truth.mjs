@@ -1,0 +1,84 @@
+/**
+ * injections-data-flow-truth.mjs —— 流程真相收口（Issue #113）的故障注入复验表（I270-I277）。
+ *
+ * 每条注入拆掉一处判据，期望某条断言变红。判据拆掉却没人报，说明那条断言其实是恒真的。
+ *
+ * 导出 `INJECTIONS_FLOW_TRUTH` 供 `injections-data.mjs` 自动发现加载。
+ */
+
+export const INJECTIONS_FLOW_TRUTH = [
+  {
+    id: 'I270',
+    what: 'C1 批准依据退化为「过审即唯一依据」，人类签字放行与带理由跳过都不再成立',
+    file: 'kit/skills/lib/plan-exit-gate.mjs',
+    alsoDropIn: ['.agents/skills/lib/plan-exit-gate.mjs'],
+    from: "  if (critique === 'skipped') {",
+    to: "  if (false && critique === 'skipped') {",
+    alsoPatches: [{
+      file: 'kit/skills/lib/plan-exit-gate.mjs',
+      from: '  if (overrideState.approved && !overrideState.stale) {',
+      to: '  if (false && overrideState.approved && !overrideState.stale) {',
+    }],
+    expect: 'C1：批准依据三种合法取值 + 两种不成立',
+  },
+  {
+    id: 'I271',
+    what: 'C1 人类签字过期后仍算有效依据（签字跟着的正文改过了也放行）',
+    file: 'kit/skills/lib/plan-exit-gate.mjs',
+    alsoDropIn: ['.agents/skills/lib/plan-exit-gate.mjs'],
+    from: '  if (overrideState.approved && !overrideState.stale) {',
+    to: '  if (overrideState.approved) {',
+    expect: 'C1：批准依据三种合法取值 + 两种不成立',
+  },
+  {
+    id: 'I272',
+    what: 'C10 没有流水线文件时折回「通过」，而不是如实记不适用',
+    file: 'kit/skills/lib/gate-truth.mjs',
+    alsoDropIn: ['.agents/skills/lib/gate-truth.mjs'],
+    from: '  if (pipelineFiles.length === 0) {',
+    to: '  if (false) {',
+    expect: 'C10：合入门禁四档互斥',
+  },
+  {
+    id: 'I273',
+    what: 'C10 流水线存在但解析不出来时当作未核验（不阻断），而不是判失败',
+    file: 'kit/skills/lib/gate-truth.mjs',
+    alsoDropIn: ['.agents/skills/lib/gate-truth.mjs'],
+    from: '  const broken = evaluated.filter((e) => !e.parsed)',
+    to: '  const broken = []',
+    expect: 'C10：合入门禁四档互斥',
+  },
+  {
+    id: 'I274',
+    what: 'C6 结构谓词不再拦写作用域，发版流水线也被当成本地可跑的门禁采纳',
+    file: 'kit/skills/lib/gate-truth.mjs',
+    alsoDropIn: ['.agents/skills/lib/gate-truth.mjs'],
+    from: '  const permissionOk = !hasWriteScope && !writeAll',
+    to: '  const permissionOk = true',
+    expect: 'C6：结构谓词不按文件名排除',
+  },
+  {
+    id: 'I275',
+    what: 'C7 参数对拍把句中提及也当成声明位置（反向差集因此全是假红灯）',
+    file: 'scripts/dev/cli-parity.mjs',
+    from: '    const head = /^--([a-z0-9][\\w-]*)/i.exec(content)',
+    to: '    const head = /--([a-z0-9][\\w-]*)/i.exec(content)',
+    expect: 'C7：参数三重对拍',
+  },
+  {
+    id: 'I276',
+    what: 'C7 死参数不再被判死（注册了没人读也算活着）',
+    file: 'scripts/dev/cli-parity.mjs',
+    from: '    if (a.dead.length > 0) {',
+    to: '    if (false) {',
+    expect: 'C7：参数三重对拍',
+  },
+  {
+    id: 'I277',
+    what: 'C7 新出现的暗参数不再被拦（只有代码知道、帮助里看不到也可以）',
+    file: 'scripts/dev/cli-parity.mjs',
+    from: '    if (fresh.length > 0) {',
+    to: '    if (false) {',
+    expect: 'C7：参数三重对拍',
+  },
+]

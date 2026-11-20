@@ -8,7 +8,7 @@ issue: 108
 pr: null
 branch: feat/issue108-attribution-routing
 owner: plan-108
-approved: false
+approved: true
 done_at: null
 task_id: w15-attribution-routing
 planned_at: 01d47cc31d278e8e00ecd7e61784846f7a8331ae

@@ -69,8 +69,7 @@ export function assertSubmitOwnership(ledger, opts = {}) {
   }
   if (ledger.implementerId && String(ledger.implementerId).trim() && ledger.implementerId !== 'local-agent') {
     const implNorm = String(ledger.implementerId).trim().toLowerCase()
-    const accNorm = String(ledger.account ?? '').trim().toLowerCase()
-    if (lowExplicit !== implNorm && (!accNorm || lowExplicit !== accNorm)) {
+    if (lowExplicit !== implNorm) {
       return {
         ok: false,
         code: 'BLOCKED_SUBMIT_OWNERSHIP_MISMATCH',

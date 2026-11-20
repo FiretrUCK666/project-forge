@@ -201,7 +201,7 @@ export function registerFlowCleanupCases(cases) {
       gitCommitFast(implAbs1, 'round 2')
       await handleFinalize({ task: 'c2-auto' }, roots)
       await handleVerify({ task: 'c2-auto', mode: 'gate' }, roots)
-      const subRes2 = await handleSubmit({ task: 'c2-auto', rework: true }, roots)
+      const subRes2 = await handleSubmit({ task: 'c2-auto' }, roots)
       if (subRes2.exitCode !== 0) return `二次 submit（review 槽已挂载 node_modules）失败：${subRes2.exitCode}`
 
       // 先把分支合并进 main，再验证真实 CLI cleanup 不带 --allow-outbound，自动解绑并输出「工具挂载，自动解绑」回执

@@ -537,3 +537,31 @@ export function nextReviewRound(ledger) {
   const nums = rounds.map((r) => Number(r?.round ?? r) || 0).filter((n) => n > 0)
   return nums.length > 0 ? Math.max(...nums) + 1 : 1
 }
+
+/**
+ * 这个任务当前是不是返工态——**从账本读出，不是从开关读入**。
+ *
+ * 判据是两件已经发生过的事：末轮结论是退回，且那一轮的审查令牌已被消费。
+ * 两个条件都成立，说明有人真的审过、真的退回过；缺任何一个都还没到返工。
+ *
+ * 为什么不收一个 `--rework` 开关：真实返工本来就能从账本读出来。留着开关，
+ * 模型会先传参数、再换路试——参数成了「我要走返工分支」的自我声明，
+ * 而账本里的历史才是事实。
+ */
+export function deriveReworkState(ledger) {
+  const rounds = Array.isArray(ledger?.rounds) ? ledger.rounds : []
+  const sorted = [...rounds].sort((a, b) => (Number(a?.round) || 0) - (Number(b?.round) || 0))
+  const last = sorted.length > 0 ? sorted[sorted.length - 1] : null
+  const verdict = String(last?.verdict ?? '').toLowerCase()
+  const tokens = Array.isArray(ledger?.reviewTokens) ? ledger.reviewTokens : []
+  const lastRoundNum = Number(last?.round) || 0
+  const consumed = tokens.some((t) => Number(t?.round) === lastRoundNum && (t?.consumed === true || Boolean(t?.consumedAt)))
+  const isRework = Boolean(last) && (verdict === 'changes' || verdict === 'changes-requested' || verdict === 'rejected') && consumed
+  return {
+    isRework,
+    round: lastRoundNum,
+    verdict: verdict || null,
+    tokenConsumed: consumed,
+    reason: isRework ? `账本 Round ${lastRoundNum} 结论为 ${verdict} 且该轮审查令牌已消费` : '账本里没有已消费令牌的退回轮次',
+  }
+}

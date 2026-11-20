@@ -586,8 +586,8 @@ export function registerOnboardingCases(cases) {
         if (hasReviewKit) {
           if (nx.phase !== 'needs-review') return `full-kit ${role} 应进入 needs-review，实际=${nx.phase}`
           const mUnreviewed = useMockApi
-            ? await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
-            : await handleMerge({ task: taskId, ...(role === 'generic-git' ? { 'remote-merged': true } : {}) }, roots)
+            ? await handleMerge({ task: taskId, _ghClient: gh.client, _ghProbe: gh.ghProbe, ...(role === 'generic-git' ? { 'human-approved': true, reason: '远端是不可达的内网仓，已在别处人工核对合并结果' } : {}) }, roots)
+            : await handleMerge({ task: taskId, ...(role === 'generic-git' ? { 'human-approved': true, reason: '远端是不可达的内网仓，已在别处人工核对合并结果' } : {}) }, roots)
           if (mUnreviewed.exitCode === 0) return `full-kit ${role} 未经独立审查 PASS 竟允许 merge 放行`
 
           const tok = await issueTokenFor(dir, taskId, 1)
@@ -604,9 +604,9 @@ export function registerOnboardingCases(cases) {
 
         if (role === 'generic-git') {
           const mNeedFlag = await handleMerge({ task: taskId }, roots)
-          if (mNeedFlag.exitCode === 0) return `${mode} generic-git 缺 --remote-merged 竟退出 0`
-          const mGenOk = await handleMerge({ task: taskId, 'remote-merged': true }, roots)
-          if (mGenOk.exitCode !== 0) return `${mode} generic-git --remote-merged merge 失败：${mGenOk.exitCode}`
+          if (mNeedFlag.exitCode === 0) return `${mode} generic-git 缺人类签字竟退出 0`
+          const mGenOk = await handleMerge({ task: taskId, 'human-approved': true, reason: '远端是不可达的内网仓，已在别处人工核对合并结果' }, roots)
+          if (mGenOk.exitCode !== 0) return `${mode} generic-git 人类签字后 merge 失败：${mGenOk.exitCode}`
         } else {
           const mOk = await handleMerge({ task: taskId, ...(useMockApi ? { _ghClient: gh.client, _ghProbe: gh.ghProbe } : {}) }, roots)
           if (mOk.exitCode !== 0) return `${mode} ${role} merge 失败：${mOk.exitCode}`

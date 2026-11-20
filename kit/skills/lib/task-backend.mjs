@@ -11,7 +11,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { buildClaimComments } from './doc-comments.mjs'
-import { gitRun, gitStatusPorcelainZ, readTextSafe, withFileLock } from './git.mjs'
+import { gitRun, gitStatusPorcelainZ, inspectBranchMergeState, readTextSafe, withFileLock } from './git.mjs'
 import { readHeadFast, resolveGitDirFast, resolveRefShaFast } from './git-fast.mjs'
 import { createGitHubClient, parsePfStateTags } from './github-client.mjs'
 import { sanitizeTaskId } from './ledger.mjs'
@@ -622,16 +622,55 @@ export class GenericRemoteBackend {
     }
   }
 
-  async mergePr({ remoteMerged = false, humanApproved = false, ledger, branch, baseBranch } = {}) {
-    if (!remoteMerged && !humanApproved) {
+  /**
+   * generic-git 收尾：先看远端事实，再决定能不能算合并。判定用既有的四态合流判定
+   * （`inspectBranchMergeState`），别的三处也用它。判定前先取回远端——本地引用是上次
+   * 取回时的快照，不取回就判会把「远端已合但我还没看到」误报成未合并。
+   */
+  async mergePr({ humanApproved = false, ledger, branch, baseBranch } = {}) {
+    const targetBranch = branch ?? ledger?.branch ?? null
+    const base = baseBranch ?? ledger?.baseBranch ?? 'main'
+    const fetchRes = await gitRun(this.mainRoot, ['fetch', '--prune', '--quiet', 'origin'])
+    const fetched = fetchRes.ok
+    if (!fetched && !humanApproved) {
       return {
-        ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', exitCode: EXIT.FACT,
-        message: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。',
+        ok: false, blocked: true, code: 'BLOCKED_MERGE_STATE_UNVERIFIED', exitCode: EXIT.FACT,
+        fetched: false, humanApproved: false,
+        message: `BLOCKED_MERGE_STATE_UNVERIFIED: 取回远端失败（${(fetchRes.stderr || '').trim().slice(0, 200)}），`
+          + '无法核验分支是否已在远端合并。请先修复网络或凭据再重试；'
+          + '确需人工拍板时带 --human-approved --reason "<为什么可以在核不到的情况下放行>"。',
+      }
+    }
+    // 核不到远端 + 人类签字：唯一允许「带着不确定性放行」的通道。区别必须写进记录
+    // （`verified: false` 加签字理由），事后有人问「这次凭什么合的」，答案在账本里。
+    if (!fetched && humanApproved) {
+      return {
+        ok: true, merged: true, fetched: false, verified: false, humanApproved: true,
+        state: 'MERGED', branch: targetBranch, into: base,
+        reason: '远端取回失败，由人类签字放行；合并状态未经机器核验',
+      }
+    }
+    // 核对远端引用，不是本地分支：本地那条可能还停在合并前，拿它判等于用旧快照回答新问题。
+    const remote = 'origin'
+    const baseRef = fetched ? `${remote}/${base}` : base
+    const targetRef = targetBranch ? (fetched ? `${remote}/${targetBranch}` : targetBranch) : undefined
+    const state = await inspectBranchMergeState(this.mainRoot, {
+      branch: targetRef,
+      defaultBranch: baseRef,
+      gitDir: this.gitDir,
+    })
+    const mergedStates = new Set(['merged', 'squash_or_rebase_merged', 'no_own_commits'])
+    if (!mergedStates.has(state.state)) {
+      return {
+        ok: false, blocked: true, code: 'BLOCKED_REMOTE_NOT_MERGED', exitCode: EXIT.FACT,
+        fetched, mergeState: state.state, ownCommits: state.ownCommits,
+        message: `BLOCKED_REMOTE_NOT_MERGED: 远端核验显示分支 ${targetBranch} 上还有 ${state.ownCommits} 个提交没进 ${base}`
+          + `（四态判定=${state.state}）。请先在远端托管完成合并，再重跑 merge。`,
       }
     }
     return {
-      ok: true, merged: true, remoteMerged: Boolean(remoteMerged), humanApproved: Boolean(humanApproved),
-      state: 'MERGED', branch: branch ?? ledger?.branch ?? null, into: baseBranch ?? ledger?.baseBranch ?? 'main',
+      ok: true, merged: true, fetched, mergeState: state.state, humanApproved: Boolean(humanApproved),
+      state: 'MERGED', branch: targetBranch, into: base,
     }
   }
 }

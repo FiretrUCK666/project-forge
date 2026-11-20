@@ -14,7 +14,7 @@ import {
   computeWorktreeEnv, detectInProgressGitOp, execShellCommand, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ, posixPath, readTextSafe, sha256Text,
 } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { deriveReworkState, hasExploredEvidence, nextReviewRound, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseRemotesTopology, parseRemoteUrls, probeForWrite, resolveIdentityLayers,
 } from '../../lib/platform.mjs'
@@ -610,7 +610,7 @@ export async function handleSubmit(opts, roots) {
     })
     const submitDisplay = formatAttribution({ ...submitLayers, capabilities: localBackend.capabilities })
     const submitActorId = submitLayers.agent || submitLayers.account || undefined
-    const isReworkLocal = Boolean(opts.rework) || (ledger.rounds ?? []).length > 0
+    const isReworkLocal = deriveReworkState(ledger).isRework
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
     const { issueCommentBodyFor } = buildSubmitComments({
       isRework: isReworkLocal, round: nextRound, shortHead: currentHead?.slice(0, 7) ?? 'unknown', actorDisplay: submitDisplay,
@@ -707,7 +707,7 @@ export async function handleSubmit(opts, roots) {
       return { exitCode: dup.exitCode ?? EXIT_POLICY_BLOCK }
     }
   }
-  if (!ledger.prNumber && !opts.rework) {
+  if (!ledger.prNumber) {
     const openPrRes = await backend.findOpenPrForBranch({ repo: targetRepo, branch: ledger.branch, headOwner: ledger.role === 'contributor-fork' ? originOwner : undefined, base: ledger.baseBranch })
     if (openPrRes?.ok && Array.isArray(openPrRes.prs) && openPrRes.prs.length > 0) {
       const found = openPrRes.prs[0]
@@ -716,19 +716,26 @@ export async function handleSubmit(opts, roots) {
       ledger.prState = found.state ?? 'OPEN'
     }
   }
-  const isRework = Boolean(opts.rework) || Boolean(ledger.prNumber)
+  // 返工与否由账本推导：末轮退回且令牌已消费。不收开关，也不靠「有没有 PR 号」猜。
+  const reworkState = deriveReworkState(ledger)
+  // 「这一轮是不是返工」和「PR 在不在」是两件事，不能用一个变量代言：
+  // 前者决定评论与轮次的措辞，后者决定走「复用已有 PR」还是「新建 PR」。
+  // 混在一起就会出现「PR 明明在，却又建了一个」——提案重复、评论各说一半。
+  const hasExistingPr = Boolean(ledger.prNumber)
 
   let prResult = null
   const commentResults = []
-  if (isRework && ledger.prNumber) {
+  const isRework = reworkState.isRework
+  if (hasExistingPr) {
     const recentRebuts = (ledger.rebuts ?? []).slice(-3).map((r) => `${r.findingId}: ${r.reason}`).join('；')
-    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework: true, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
+    const { prCommentBody, issueCommentBodyFor } = buildSubmitComments({ isRework, round: nextRound, shortHead, actorDisplay: submitDisplay, branch: ledger.branch, verifiedCmd: ledger.verifiedCmd, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], recentRebuts })
     prResult = { reusedPr: ledger.prNumber, head: shortHead }
-    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
+    const reuseAction = isRework ? 'rework-submitted' : 'submitted-existing-pr'
+    commentResults.push({ target: `PR #${ledger.prNumber}`, res: await backend.postComment({ repo: targetRepo, number: ledger.prNumber, body: prCommentBody, statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, headSha: currentHead } }) })
     for (const iss of ledger.linkedIssues ?? []) {
-      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: 'rework-submitted', round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
+      commentResults.push({ target: `Issue #${iss}`, res: await backend.postComment({ repo: targetRepo, number: iss, body: issueCommentBodyFor(iss), statePayload: { taskId, action: reuseAction, round: nextRound, ...submitStateIdentity, prNumber: ledger.prNumber, headSha: currentHead } }) })
     }
-    await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework: true })
+    await applySubmitPostActions({ backend, targetRepo, prNumber: ledger.prNumber, linkedIssues: ledger.linkedIssues ?? [], ledger, roots, isRework })
   } else {
     const title = resolveReadablePrTitle(implRoot, ledger, opts.title)
     // 提案正文由账本与模板确定性生成，不接受整段替换。

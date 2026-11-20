@@ -327,8 +327,10 @@ cases.push(['13 方法统一 TaskBackend、no-remote AGENTS 零 PR/origin/push �
     }
   }
   const gen = createTaskBackend({ role: 'generic-git', providerId: 'generic-git' })
-  const genBlock = await gen.mergePr({ remoteMerged: false, humanApproved: false })
-  if (genBlock.ok || genBlock.code !== 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' || genBlock.exitCode !== 3) {
+  // 护栏：核不到远端事实时不许假装合并。两类阻断码都可接受——
+  // 「取不回远端」与「远端还没合」是两种不同的不知道，都阻断，都不算通过。
+  const genBlock = await gen.mergePr({ humanApproved: false })
+  if (genBlock.ok || !/BLOCKED_(MERGE_STATE_UNVERIFIED|REMOTE_NOT_MERGED)/.test(String(genBlock.code)) || genBlock.exitCode !== 3) {
     return `GenericRemoteBackend 未阻断越权合入：${JSON.stringify(genBlock)}`
   }
 

@@ -376,7 +376,6 @@ async function handleMergeQueue(opts, roots) {
         mergeRes = await backend.mergePr({ repo: originFull, number: ledger.prNumber, method: opts.method ?? 'merge' })
       } else if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git') {
         mergeRes = await backend.mergePr({
-          remoteMerged: Boolean(opts['remote-merged']),
           humanApproved: Boolean(opts['human-approved']),
           ledger,
           branch: ledger.branch,

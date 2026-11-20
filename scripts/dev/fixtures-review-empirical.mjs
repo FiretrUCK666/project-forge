@@ -348,7 +348,7 @@ export function registerReviewEmpiricalCases(cases) {
       writeFileSync(join(implWt, 'src/app.mjs'), '// R2 commit\nexport const computeVal = () => 2\n')
       gitCommitFast(implWt, 'fix: r2', { updateOnly: true })
       await handleVerify({ task: 'r-t', mode: 'full' }, roots)
-      await handleSubmit({ task: 'r-t', agent: 'alice', rework: true }, roots)
+      await handleSubmit({ task: 'r-t', agent: 'alice' }, roots)
 
       const r2Blocked = await runRp(['--task', 'r-t', '--round', '2', '--include-diff', '--json'], dir)
       if (r2Blocked.status !== 3 || !`${r2Blocked.stdout}\n${r2Blocked.stderr}`.includes('BLOCKED_EMPIRICAL_FIRST')) {

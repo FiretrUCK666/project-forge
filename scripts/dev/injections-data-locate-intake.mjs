@@ -26,8 +26,8 @@ export const INJECTIONS_LOCATE_INTAKE = [
     what: '绕过 review-pack.mjs 前置 intake 拒绝门禁（已 reject PR 仍进入后续审查或被 EMPIRICAL_FIRST 掩盖）',
     file: 'kit/skills/dev-review/scripts/review-pack.mjs',
     alsoDropIn: ['.agents/skills/dev-review/scripts/review-pack.mjs'],
-    from: '  if (intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
-    to: '  if (false && intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.UNTRUSTED_HAZARD, guard: intakeGuard }) }\n  }',
+    from: '  if (intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }\n  }',
+    to: '  if (false && intakeGuard?.blocked) {\n    return { earlyExitCode: emitIntakeRejectedBlock({ opts, exitCode: EXIT.FACT, guard: intakeGuard }) }\n  }',
     expect: 'review-pack 未前置拦截已 reject PR',
   },
   {

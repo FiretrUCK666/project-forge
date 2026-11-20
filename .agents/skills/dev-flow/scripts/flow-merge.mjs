@@ -45,8 +45,9 @@ export async function assertPreMergeGates({
     process.stderr.write(`BLOCKED_ROLE_CANNOT_MERGE: 当前身份为 ${ledger.role}，不允许执行合并。\n`)
     return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_ROLE_CANNOT_MERGE' }
   }
-  if (ledger.role === 'generic-git' && !opts['remote-merged'] && !opts['human-approved']) {
-    const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并，确认后再带 --remote-merged（或 --human-approved）执行 merge。'
+  if (ledger.role === 'generic-git' && !opts['human-approved']) {
+    const msg = 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED: generic-git 有远端仓必须先在远端托管平台完成 MR/PR 合并；'
+      + 'merge 会现场取回远端，并按四态合流判定核验，核不到就阻断。确需人工拍板时带 --human-approved --reason "<原因>"。'
     if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED', role: ledger.role }, null, 2)}\n`)
     process.stderr.write(`${msg}\n`)
     return { ok: false, exitCode: EXIT_POLICY_BLOCK, code: 'BLOCKED_GENERIC_REMOTE_MR_REQUIRED' }
@@ -342,7 +343,6 @@ export async function handleMerge(opts, roots) {
   } else if (ledger.branch || ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
     if (ledger.role === 'generic-git' || ledger.providerId === 'generic-git' || backend?.kind === 'generic-git') {
       mergeRes = await backend.mergePr({
-        remoteMerged: Boolean(opts['remote-merged']),
         humanApproved: Boolean(opts['human-approved']),
         ledger,
         branch: ledger.branch,

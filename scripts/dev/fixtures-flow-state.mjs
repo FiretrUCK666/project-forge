@@ -254,7 +254,7 @@ export function registerFlowStateCases(cases) {
       writeFileSync(join(implAbs, 'src/a.mjs'), 'export const a = 3\n')
       gitCommitFast(implAbs, 'r2', { updateOnly: true })
       await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['verify', '--task', 'c2-wt', '--mode', 'gate'], { cwd: implAbs })
-      const subReset = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--rework', '--reset-review-slot', '--json'], { cwd: implAbs })
+      const subReset = await runAbsAsync('kit/skills/dev-flow/scripts/flow.mjs', ['submit', '--task', 'c2-wt', '--reset-review-slot', '--json'], { cwd: implAbs })
       if (subReset.status !== 0) return `submit --reset-review-slot 失败：${subReset.stderr}`
       if (existsSync(join(revAbs, 'stray.tmp')) || existsSync(join(revAbs, 'node_modules')) || !readFileSync(join(revAbs, 'src/a.mjs'), 'utf8').includes('a = 3')) {
         return '--reset-review-slot 未清理脏审查位或锁变化未解除共享依赖'

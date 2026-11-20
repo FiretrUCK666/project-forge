@@ -39,8 +39,8 @@ export const INJECTIONS_EMPIRICAL_CYCLE = [
     what: 'C2 观察实质判据失效，敷衍占位水话（lgtm/已验证）重新被当成视觉观察放行',
     file: 'kit/skills/lib/empirical-artifacts.mjs',
     alsoDropIn: ['.agents/skills/lib/empirical-artifacts.mjs'],
-    from: '  const check = validateE2eEvidenceText(text)\n  if (!check.ok) return { ok: false, code: check.code, reason: check.reason }',
-    to: '  const check = validateE2eEvidenceText(text)\n  if (false && !check.ok) return { ok: false, code: check.code, reason: check.reason }',
+    from: "  const check = evaluateTextSubstance(text, { subject: '观察摘要' })\n  if (!check.ok) return { ok: false, code: check.code, reason: check.reason }",
+    to: "  const check = evaluateTextSubstance(text, { subject: '观察摘要' })\n  if (false && !check.ok) return { ok: false, code: check.code, reason: check.reason }",
     expect: 'C2：观察文本实质判据拒绝占位水话',
   },
   {

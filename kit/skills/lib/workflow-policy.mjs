@@ -79,7 +79,7 @@ function normRel(p) {
   return posixPath(String(p ?? '')).trim().replace(/^\.\//, '').replace(/^\/+/, '')
 }
 
-/** 探测仓库是否配置了会在 PR/push 自动触发的 CI 检查工作流。 */
+/** 探测仓库是否配置了会在提案或推默认分支时自动触发的检查工作流（读触发键，不认文件名）。 */
 export function hasRepoCiWorkflow(repoRoot) {
   const wfDir = join(repoRoot, '.github', 'workflows')
   if (!existsSync(wfDir)) return false
@@ -91,7 +91,7 @@ export function hasRepoCiWorkflow(repoRoot) {
       if (/\bpull_request\b/i.test(txt)) return true
       if (/\bpush\b/i.test(txt) && !(/\btags\s*:/i.test(txt) && !/\bbranches\s*:/i.test(txt))) return true
     }
-  } catch { /* ignore */ }
+  } catch { /* 读不到就当没有 */ }
   return false
 }
 
@@ -741,11 +741,9 @@ export function evaluateNextState({
 
   // 主工作区直接改文件：warning 不是 blocker。
   //
-  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干。主 Agent 若在自己的工作区直接 write，
-  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了——可这条此前没有任何东西看得见。
-  //
-  // 它是**警告不是拦截**：小改动（Case 1）本来就该在主工作区做，拦死会把正常路径也堵住。
-  // 真正的硬拦留在 merge。所以它进 `warnings` 而不进 `blockingReasons`——两件事不能混。
+  // Case 2/3/4 的活该在 `.worktrees/impl-<id>/` 里干，主 Agent 若在自己的工作区直接 write，
+  // 隔离位形同虚设，而「这次改动包含什么」也就说不清了。它是警告不是拦截：小改动（Case 1）
+  // 本来就该在主工作区做，拦死会把正常路径也堵住；真正的硬拦留在 merge。
   const warnings = []
   if ((rt.mainDirtyCount ?? 0) > 0 && t.worktreePath) {
     warnings.push({

@@ -10,6 +10,7 @@ import { resolve } from 'node:path'
 
 import { hasSkillSupport, printNextStep } from '../../lib/cli.mjs'
 import { buildMergeComments, formatAttribution } from '../../lib/docs.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
 import { hasExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
@@ -147,20 +148,30 @@ export async function assertPreMergeGates({
     return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_STOP_LOSS_ESCALATE' }
   }
   if (stopLossActive && opts['human-approved']) {
+    // 解锁停损是放行点里最重的一个：它让「连续两轮同一阻塞项」或「三轮未收口」的结论
+    // 直接失效。此前这里在缺省 `--reason` 时自动填一句占位串，等于校验点要求理由、
+    // 调用点却自己编一个——校验被绕过，而账本里留下一句谁也没说过的「理由」。
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '停损解锁理由' })
+    if (!reasonCheck.ok) {
+      const msg = `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 解锁停损必须写清：为什么这次可以放过、放过的代价是什么。\n`
+      if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_SHALLOW_OVERRIDE_REASON', stopLoss: true, message: msg.trim() }, null, 2)}\n`)
+      process.stderr.write(msg)
+      return { ok: false, exitCode: EXIT.HUMAN, code: 'BLOCKED_SHALLOW_OVERRIDE_REASON' }
+    }
     ledger.humanApprovedStopLoss = true
-    ledger.humanApprovedReason = opts.reason ?? ledger.humanApprovedReason ?? 'human-approved-stop-loss-override'
+    ledger.humanApprovedReason = reasonCheck.cleaned
   }
 
   if (!hasDevReview && policy.humanApprovalRequired) {
     const hasApprove = Boolean(opts['human-approved'])
-    const reasonText = String(opts.reason ?? '').trim()
-    if (!hasApprove || !reasonText) {
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '高风险人工确认理由' })
+    if (!hasApprove || !reasonCheck.ok) {
       const msg = `BLOCKED_HIGH_RISK_HUMAN_APPROVAL: 未装配 dev-review 且触及高风险/one-way 边界（${policy.reasons.join('；')}），须人类确认并同时附加 --human-approved --reason "<确认原因>"。\n`
       if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, blocked: true, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL', reasons: policy.reasons, message: msg.trim() }, null, 2)}\n`)
       process.stderr.write(msg)
       return { ok: false, exitCode: EXIT_ACTION_REQUIRED, code: 'BLOCKED_HIGH_RISK_HUMAN_APPROVAL' }
     }
-    ledger.humanApprovedReason = reasonText
+    ledger.humanApprovedReason = reasonCheck.cleaned
   }
 
   const requiresReview = hasDevReview && (policy.independentReviewRequired || (policy.riskTier !== 'low' && (rounds.length > 0 || Boolean(ledger.lastReview))))

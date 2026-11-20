@@ -399,8 +399,12 @@ export function registerEmpiricalCycleCases(cases) {
       }, roots))
       if (accepted.res !== 0) return `真实阻塞理由未经 CLI 放行：exit=${accepted.res} out=${accepted.stdout} err=${accepted.stderr}`
       const ledgerAfter = readTaskLedger(dir, 'obs-t')
-      if (!String(ledgerAfter.visualCheckEvidence ?? '').includes('当前环境无图形会话')) {
-        return `--visual-blocked-reason 未被写入账本（注册了却不消费）：${ledgerAfter.visualCheckEvidence}`
+      if (!String(ledgerAfter.visualBlockedReason ?? '').includes('当前环境无图形会话')) {
+        return `--visual-blocked-reason 未被写入账本（注册了却不消费）：${ledgerAfter.visualBlockedReason}`
+      }
+      // 阻塞说明落自己的字段；证据字段只写真实观察，两者不共用。
+      if (ledgerAfter.visualCheckEvidence) {
+        return `阻塞说明被当成了观察证据：${ledgerAfter.visualCheckEvidence}`
       }
       return true
     } finally { rmTree(dir) }

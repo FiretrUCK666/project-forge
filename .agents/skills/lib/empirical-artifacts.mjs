@@ -13,7 +13,7 @@ import { statSync } from 'node:fs'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 
 import { posixPath, readJsonSafe, sha256File, writeJsonAtomic } from './git.mjs'
-import { validateE2eEvidenceText } from './feature-map.mjs'
+import { evaluateTextSubstance } from './evidence-substance.mjs'
 
 /** 单个附件体积上限：超过它就不再是「实证产物」，而是留下来的临时大二进制。 */
 export const ARTIFACT_MAX_BYTES = 50 * 1024 * 1024
@@ -135,7 +135,7 @@ export function normalizeArtifactRecords({ repoRoot = null, artifacts = [], capt
 
 /**
  * 判断一段观察文本是否「有实质」：拒绝占位符、无信息水话与旧式合成串。
- * 复用 `validateE2eEvidenceText` 的同一套判据，不再另立第二份口径。
+ * 判据只有一处实现（`evidence-substance.mjs`），提审、审查回执、放行理由三处都调它。
  */
 export function evaluateObservationSubstance(raw) {
   const text = String(raw ?? '').trim()
@@ -148,7 +148,7 @@ export function evaluateObservationSubstance(raw) {
       reason: `观察摘要「${text}」是旧式硬编码确认串，没有记录任何真实渲染结果；请写清看了哪个界面、看到了什么。`,
     }
   }
-  const check = validateE2eEvidenceText(text)
+  const check = evaluateTextSubstance(text, { subject: '观察摘要' })
   if (!check.ok) return { ok: false, code: check.code, reason: check.reason }
   return { ok: true, code: null, reason: null, text: check.cleaned }
 }

@@ -11,6 +11,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { criteriaFingerprint, extractCriteria } from '../../lib/criteria-lock.mjs'
 import { evaluateCritiqueOverride, parseCritiqueRounds } from '../../lib/critique-rounds.mjs'
 import { DOC_FRONTMATTER_KEY_ORDER, docIsoDate, parseDocFrontmatter, updateDocFrontmatter } from '../../lib/docs.mjs'
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { posixPath, readTextSafe, writeAtomic } from '../../lib/git.mjs'
 import { auditDoc, detectDocType } from './doc-audit.mjs'
 
@@ -63,7 +64,16 @@ export function approveSpec({ repoRoot, file, skipCritiqueReason }) {
       const critiqueVal = String(fm.data?.plan_critique ?? (/^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(workingText)?.[1] ?? '')).trim()
       if (!/^passed\b/i.test(critiqueVal)) {
         if (skipCritiqueReason && String(skipCritiqueReason).trim()) {
-          skippedCritiqueValue = `skipped (reason=${String(skipCritiqueReason).trim()})`
+          // 跳过规划内审是本切片里最直接的一条后门：只校验非空，传一个占位词就能产出
+          // 「已批准 + 跳过评审」。所以它和别的放行点用同一个判据，不再单独放宽。
+          const reasonCheck = evaluateReleaseReason(skipCritiqueReason, { subject: '跳过规划内审的理由' })
+          if (!reasonCheck.ok) {
+            throw Object.assign(
+              new Error(`BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 跳过规划内审必须写清：这次为什么不用它、漏掉它可能放过什么。`),
+              { code: 'BLOCKED_SHALLOW_OVERRIDE_REASON', exitCode: EXIT.USAGE },
+            )
+          }
+          skippedCritiqueValue = `skipped (reason=${reasonCheck.cleaned})`
           if (!fm.hasFrontmatter) {
             const skipLine = `- Plan Critique: ${skippedCritiqueValue}`
             workingText = /^(?:-\s+)?Plan Critique:.*$/mi.test(workingText)

@@ -205,6 +205,14 @@ export function createDefaultLedger(partial = {}) {
     empiricalVisualCheckRequired: Boolean(partial.empiricalVisualCheckRequired),
     visualVerifiedHead: partial.visualVerifiedHead ?? null,
     visualCheckEvidence: partial.visualCheckEvidence ?? null,
+    /**
+     * 环境确实无法渲染时的诚实报阻说明。
+     *
+     * 它与 `visualCheckEvidence` 是两件事，不能共用一个字段：前者是「我没看到」，
+     * 后者是「我看到了什么」。混在一起，读的人分不出「真核验过」和「报了个阻」，
+     * 而这两件事的后果完全相反——一个可以合，一个必须等人工或有界面节点复核。
+     */
+    visualBlockedReason: partial.visualBlockedReason ?? null,
     implementerId: partial.implementerId ?? null,
     claimedBy: partial.claimedBy ?? null,
     reviewerId: partial.reviewerId ?? null,

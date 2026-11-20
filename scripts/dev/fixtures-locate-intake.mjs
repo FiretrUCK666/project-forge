@@ -577,7 +577,8 @@ export function registerLocateIntakeCases(cases) {
       }
       const bypassLedger = readTaskLedger(dir, 'rb-t1')
       const hookBypass = await runPreVerifyEditGateHook({
-        mainRoot: dir, implRoot: wtDir, taskId: 'rb-t1', ledger: bypassLedger, opts: { 'skip-edit-gate': true },
+        mainRoot: dir, implRoot: wtDir, taskId: 'rb-t1', ledger: bypassLedger,
+        opts: { 'skip-edit-gate': true, reason: '本次只改夹具里的 mock 脚本，改码门禁查的是产品代码结构，跳过它不会漏掉产品问题' },
       })
       if (!hookBypass.ok || hookBypass.reason !== 'skip-edit-gate-flag' || !bypassLedger.hooks?.editGateSkippedAt) {
         return `--skip-edit-gate 未留痕放行：${JSON.stringify(hookBypass)}`

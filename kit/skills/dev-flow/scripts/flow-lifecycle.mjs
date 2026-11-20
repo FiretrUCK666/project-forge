@@ -475,11 +475,15 @@ export async function handleVerify(opts, roots) {
   ledger.empiricalVisualCheckRequired = empiricalVisualCheckRequired
   if (allOk && hasVisualCheckFlag) {
     ledger.visualVerifiedHead = currentHead
-    // 有原文就存原文；只有裸 --visual-checked 时记「声明」本身，不编造观察内容。
-    // 两者必须分得开——后面判定「有没有真观察」靠的是 evidence.json 里的 e2eObservation，
-    // 而那条只有真传了 --e2e-evidence / --visual-evidence 才会有。
-    ledger.visualCheckEvidence = e2eEvidenceInput
-      || (opts['visual-checked'] ? '已声明核验（--visual-checked，未附观察原文）' : (ledger.visualCheckEvidence ?? null))
+    // 这个字段只接受入参原文或既有真实记录；两者都没有就不写。
+    //
+    // 它不得由任何开关派生。此前这里会给裸 `--visual-checked` 拼一句「已声明核验」，
+    // 于是「核验过」这件事在账本里有了文字，而文字不是观察——后面读到它的人（和模型）
+    // 分不出「真的看了界面」和「打了个开关」。开关只表示「他声明核验过」，
+    // 这个语义由 `visualVerifiedHead` 与 `empiricalVisualCheckRequired` 两个字段表达，
+    // 不需要也不允许占用观察字段。
+    const priorEvidence = typeof ledger.visualCheckEvidence === 'string' ? ledger.visualCheckEvidence.trim() : ''
+    ledger.visualCheckEvidence = e2eEvidenceInput || priorEvidence || null
   }
   ledger.status = allOk ? 'verified' : 'verify-failed'
   await runLifecycleGovernHook({ stage: 'verify', mainRoot: roots.mainRoot, implRoot, taskId, ledger, opts })

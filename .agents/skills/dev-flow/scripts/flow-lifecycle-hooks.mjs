@@ -8,6 +8,7 @@ import { EXIT } from '../../lib/exit-codes.mjs'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
 import { hasExploredEvidence } from '../../lib/ledger.mjs'
 import {
@@ -209,14 +210,28 @@ function resolveSkillScript(mainRoot, implRoot, relPath) {
 export async function runPreVerifyEditGateHook({ mainRoot, implRoot, taskId, ledger, opts = {} } = {}) {
   const now = new Date().toISOString()
   if (opts['skip-edit-gate']) {
+    // 跳过改码门禁是放行点：理由必填，且必须实质。
+    //
+    // 此前这里在缺省 `--reason` 时自动填一句占位串，等于校验点要求理由、调用点却自己
+    // 编一个——账本里留下一句谁也没说过的「理由」，而门禁看起来是被正当放行的。
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '跳过改码门禁的理由' })
+    if (!reasonCheck.ok) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_SHALLOW_OVERRIDE_REASON',
+        exitCode: EXIT.USAGE,
+        message: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 跳过改码门禁必须写清：这次为什么不用它、漏掉它可能放过什么。`,
+      }
+    }
     if (ledger) {
       ledger.hooks = {
         ...(ledger.hooks ?? {}),
         editGateSkippedAt: now,
-        editGateSkipReason: String(opts.reason ?? 'explicit-skip-edit-gate').trim() || 'explicit-skip-edit-gate',
+        editGateSkipReason: reasonCheck.cleaned,
       }
     }
-    return { ok: true, skipped: true, reason: 'skip-edit-gate-flag' }
+    return { ok: true, skipped: true, reason: 'skip-edit-gate-flag', skipReason: reasonCheck.cleaned }
   }
   const hookCfg = readForgeHooksConfig(mainRoot, implRoot)
   if (hookCfg?.config?.editGate === false || hookCfg?.config?.hooks?.editGate?.enabled === false) {
@@ -294,15 +309,28 @@ export async function runLifecycleGovernHook({ stage, mainRoot, implRoot, taskId
   }
 
   if (opts['skip-govern']) {
+    // 跳过治理巡检同样是放行点，理由的标准与改码门禁那处一致。
+    const reasonCheck = evaluateReleaseReason(opts.reason, { subject: '跳过治理巡检的理由' })
+    if (!reasonCheck.ok) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'BLOCKED_SHALLOW_OVERRIDE_REASON',
+        exitCode: EXIT.USAGE,
+        stage,
+        message: `BLOCKED_SHALLOW_OVERRIDE_REASON: ${reasonCheck.reason} 跳过治理巡检必须写清：这次为什么不跑它、可能漏掉什么。`,
+        ...(customResults.length ? { customResults } : {}),
+      }
+    }
     if (ledger) {
       ledger.hooks = {
         ...(ledger.hooks ?? {}),
         governSkippedStage: stage,
         governSkippedAt: now,
-        governSkipReason: String(opts.reason ?? 'explicit-skip-govern').trim() || 'explicit-skip-govern',
+        governSkipReason: reasonCheck.cleaned,
       }
     }
-    return { ok: true, skipped: true, stage, reason: 'skip-govern-flag', ...(customResults.length ? { customResults } : {}) }
+    return { ok: true, skipped: true, stage, reason: 'skip-govern-flag', skipReason: reasonCheck.cleaned, ...(customResults.length ? { customResults } : {}) }
   }
   const stageCfg = hookCfg?.config?.hooks?.[stage] ?? hookCfg?.config?.[stage] ?? null
   if (stageCfg === false || stageCfg?.enabled === false || hookCfg?.config?.govern === false) {

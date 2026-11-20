@@ -457,9 +457,15 @@ export async function handleRecord(opts, roots) {
 
   if (visualChecked) {
     updated.visualVerifiedHead = headSha
-    updated.visualCheckEvidence = e2eText || artifactText
-      || (blockedReasonText ? `环境阻塞待人工或带界面节点核验——${blockedReasonText}` : '')
-      || updated.visualCheckEvidence
+    // 这个字段只接受入参原文、真实附件记录或既有真实记录；三者都没有就不写。
+    //
+    // 它不得由任何开关或阻塞说明派生。阻塞说明是「我这儿渲染不出来」的诚实报阻，
+    // 不是「我看到了什么」；把它拼成证据字段，等于把一次报阻洗成一次核验。
+    // 阻塞原因落到 `visualBlockedReason`，与证据字段并列而不是顶替它。
+    const inlineEvidence = e2eText || artifactText
+    const priorEvidence = typeof updated.visualCheckEvidence === 'string' ? updated.visualCheckEvidence.trim() : ''
+    updated.visualCheckEvidence = inlineEvidence || priorEvidence || null
+    updated.visualBlockedReason = blockedReasonText || (updated.visualBlockedReason ?? null)
   }
 
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)

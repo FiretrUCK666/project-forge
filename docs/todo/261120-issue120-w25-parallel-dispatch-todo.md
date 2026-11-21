@@ -1,13 +1,13 @@
 ---
 kind: todo
-title: 并行度机制实施清单：依赖满足单点、并行度全阶段可见、串行理由枚举
+title: Phase 3A PR-A 实施清单：工作流、规划隔离、交接瘦身与单一依赖图
 status: active
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-21
 issue: 120
 pr: null
-branch: fix/w25-parallel-dispatch
-owner: plan-wave25
+branch: feat/w25-parallel-dispatch
+owner: plan-pra
 approved: false
 done_at: null
 task_id: w25-parallel-dispatch
@@ -16,52 +16,44 @@ related_prd: ../prd/261120-w25-hardening-prd.md
 related_spec: ../specs/261120-issue120-w25-parallel-dispatch-spec.md
 plan_mode: interactive
 depends_on: []
-scope_files: ["kit/skills/lib/workflow-helpers.mjs", "kit/skills/lib/workflow-policy.mjs", "kit/skills/lib/doc-slice-graph.mjs", "scripts/dev/fixtures-parallel-dispatch.mjs"]
+scope_files: ["kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-flow/scripts/flow-inspect.mjs", "kit/skills/dev-flow/scripts/flow-next.mjs", "kit/skills/dev-flow/scripts/flow-batch.mjs", "kit/skills/dev-flow/scripts/flow-cleanup.mjs", "kit/skills/dev-flow/scripts/flow-merge.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle.mjs", "kit/skills/dev-flow/scripts/flow-lifecycle-hooks.mjs", "kit/skills/dev-flow/scripts/flow-explore.mjs", "kit/skills/dev-flow/SKILL.md", "kit/skills/dev-plan/scripts/doc-plan.mjs", "kit/skills/dev-plan/scripts/doc-plan-ops.mjs", "kit/skills/dev-plan/scripts/doc-audit.mjs", "kit/skills/dev-plan/SKILL.md", "kit/skills/dev-review/scripts/review-sync.mjs", "kit/skills/dev-review/scripts/review-pack.mjs", "kit/skills/dev-review/scripts/review-ledger.mjs", "kit/skills/dev-govern/scripts/govern-state.mjs", "kit/skills/lib/ledger.mjs", "kit/skills/lib/plan-sync.mjs", "kit/skills/lib/critique-rounds.mjs", "kit/skills/lib/plan-exit-gate.mjs", "kit/skills/lib/doc-substantive.mjs", "kit/skills/lib/handoff-package.mjs", "kit/skills/lib/workflow-helpers.mjs", "kit/skills/lib/workflow-policy.mjs", "kit/skills/lib/doc-slice-graph.mjs", "kit/skills/lib/escalation.mjs", "kit/skills/lib/signals.mjs", "kit/skills/lib/exit-codes.mjs", "scripts/dev/fixtures.mjs", "scripts/dev/verify-injections.mjs", "scripts/dev/fixtures-parallel-dispatch.mjs", "scripts/dev/fixtures-flow-explore-gate.mjs", "scripts/dev/fixtures-doc-depth.mjs", "scripts/dev/fixtures-plan-wave-slices.mjs", "scripts/dev/injections-data-flow-explore.mjs", "scripts/dev/injections-data-parallel-dispatch.mjs", ".agents/skills/**", "AGENTS.md"]
 ---
 
 # `w25-parallel-dispatch` 实施 Todo（Issue `#120`）
 
-> 对应 SPEC：[parallel-dispatch SPEC](../specs/261120-issue120-w25-parallel-dispatch-spec.md)
+> 对应 SPEC：[Phase 3A PR-A SPEC](../specs/261120-issue120-w25-parallel-dispatch-spec.md)
 >
-> **基线**：`a0fe4df`。本切片无前置，可立即开工。
+> **基线**：`85e5f9d`。本切片无前置，可立即开工。
 
 ## 一、要做什么
 
 <!-- section: goal -->
-让并行度从「一句被忽略的建议」变成一条可核对的结论：
+在隔离 worktree 完成 PR-A 七项治本改造：
 
-- **依赖满足单点**：一个函数判「目标切片存在且状态属于完成集合」，切片图与就绪扫描共用；归档自然满足，悬空仍报出。
-- **全阶段可见**：选中任务时也返回并行度、波次与就绪切片。
-- **串行留理由**：理由码来自封闭枚举；可并行却串行时阻断并给两条合法出口；单就绪切片不阻断。
-- **两路径对拍**：就绪扫描与切片图对同一批切片给出相同波次划分。
+- **规划隔离与远端同步**：`flow start --planning` / `doc-plan init --worktree` 隔离起草并平滑转入实施；新增 `kit/skills/lib/plan-sync.mjs` (new) 统一经 `createTaskBackend()` + `capabilities` 同步进度与标签（无远端报 `NOT_APPLICABLE`）。
+- **账本内审与去棘轮**：Critique 历史迁入单任务账本、`plan-exit-gate.mjs` 改严格白名单、拆分 `critique-continue` 与 `critique-override`、修缺 frontmatter 空操作与 PRD 状态；删除 `DOC_REGRESSION_ANCHOR_LOST` 并收紧 Case 4 为 2 轮上限。
+- **全局视图、瘦身交接与单一依赖图**：实现 `flow status --all`；重建 `handoff-package.mjs`；波次/依赖收口到 `doc-slice-graph.mjs` 并支持 `serial-by-overlap`；补全外部 PR 入站、多目标逐条 `try/catch`、折叠 `BLOCKED_NOT_EXPLORED`、`signals.jsonl` 隔离过滤、`--jobs` 透传与 `I320–I349`。
 
 ## 二、不做什么
 
 <!-- section: non-goals -->
-不改拓扑算法；不改缺写域保守串行判据；不改账本结构与后端；不改并行阈值；不加强制并行开关；不加跳过判定开关；不改认领与工作位隔离；不碰 `docs/archive/`。
-
-不以任何形式打补丁：不把建议改成强制、不加「找不到就算满足」、不用自由文本当理由、不在文档里写「应当并行」了事。
+不触碰 Phase 3B 专属模块（`git-status-fast.mjs`、`git-fast.mjs`、`bench.mjs`、`evidence.mjs`、`protocol.mjs`、`verify-tools.mjs`、`feature-map.json`、`govern-checks.mjs`、`govern-retro.mjs`）；不改缺写域保守串行判据、并行阈值与拓扑核心；不加跳过门禁开关；不新建 `collab/*.json` 文件；不硬编码平台名；不碰 `docs/archive/`。
 <!-- section: non-goals-end -->
 
 ## 三、实施任务清单
 
-- [ ] **T1（`C1` 单点判定）**：在切片图模块抽出「依赖是否满足」函数（目标切片存在且状态属于完成集合，活跃与归档文档一并参与）；`workflow-helpers.mjs` 的就绪扫描改调它，删除自己那段按活跃账本判的逻辑；确保悬空依赖仍被报出。
-- [ ] **T2（`C4` 波次单点）**：波次计算以切片图模块为唯一实现；就绪扫描的波次编排改调它，删除重复分层逻辑。
-- [ ] **T3（`C2` 全阶段可见）**：`workflow-policy.mjs` 的选中任务返回路径补上并行度、波次、就绪切片三个字段；核对无活跃任务分支的取值不变。
-- [ ] **T4（`C3` 串行理由枚举）**：定义封闭枚举（写域重叠、依赖单链、需人拍板、单任务）与每个码对应的系统生成说明；波次计划输出串行结论并区分有无理由。
-- [ ] **T5（`C3` 阻断与出口）**：选中任务路径输出并行度结论三态（并行 / 带理由串行 / 无理由阻断）；可并行却串行时给两条合法出口；单就绪切片不阻断。
-- [ ] **T6（`C4` 结果对拍）**：新增对拍断言——就绪扫描与切片图对同一批切片给出相同波次划分；改动任一侧过滤即变红。
-- [ ] **T7（夹具）**：新增 `scripts/dev/fixtures-parallel-dispatch.mjs` (new)，承接 `C1..C5` 正反断言，含「归档前置就绪」「悬空仍报出」「单任务不阻断」「全阶段可见」四条关键断言。
-- [ ] **T8（行数核对）**：逐文件核对 `.mjs <= 800`；`workflow-policy.mjs` 因补字段变长且已由后续片拆分，本片只补字段不搬逻辑；若超 800 行，先把并行度结论计算下沉到编排辅助模块。
-- [ ] **T9（同步）**：`kit/` 改动后跑 `node scripts/equip.mjs .`；返回字段新增属于对外契约变化，同提交同步 `docs/TDD.md` 对应模块行与相关技能文档的说明。
+- [ ] **T1（`C1` 规划隔离 worktree）**：`flow.mjs` 与 `flow-inspect.mjs` 支持 `start --planning --task`，`doc-plan.mjs` 支持 `init --worktree`，`ledger.mjs` 与 `workflow-policy.mjs` 支持 `planning` 状态及过审后复用同一 worktree 转入实施。
+- [ ] **T2（`C2` 规划期 `TaskBackend` 同步）**：新增 `kit/skills/lib/plan-sync.mjs` (new)，接入 `doc-plan.mjs` 的 `init` / `critique-reject` / `critique-pass` / `stop-loss` / `approve`，带幂等键 `taskId + phase + round`，`github` 写精简评论与状态标签（PR 防刷屏），`local-only`/`generic-git` 写本地日志并报 `NOT_APPLICABLE`。
+- [ ] **T3（`C3` 账本态 Critique 与白名单门禁）**：`critique-rounds.mjs` 迁入账本存储并兼容旧 Frontmatter 回读、停损后允许继续写入意见、落盘/回读失败显式抛错、拆分 `critique-continue` 与 `critique-override`、修缺 frontmatter 空操作；`plan-exit-gate.mjs` 改严格白名单且 `formatPlanExitGate` 输出 `warnings`；`doc-audit.mjs` 的 PRD 补 `superseded` 且 PRD `critique-pass` 不误提示 `approve`。
+- [ ] **T4（`C4` 砍掉棘轮与理性化规划）**：删除 `doc-substantive.mjs` 的 `DOC_REGRESSION_ANCHOR_LOST`（保留结构节非空与冻结 `C1..Cn`），`doc-audit.mjs` 对 SPEC 超 380 行给软提示，Case 3 不跑多轮换人 Critique，Case 4 停损上限改为 2 轮；更新 `scripts/dev/fixtures-doc-depth.mjs`。
+- [ ] **T5（`C5` 全局视图与交接包重建）**：`flow.mjs` 与 `flow-cleanup.mjs` 新增 `status --all [--json]`；重建 `handoff-package.mjs`（注入真实 `mustFix`/`shouldFix`/`blockers`、`scope_files`、修非目标吞节与设计节正则、内嵌 5 行极简回执模板及详报落账本/评论与 15 行回报约束）；消除 `flow-inspect.mjs` 重复输出 `formatPlanExitGate`。
+- [ ] **T6（`C6` 单一三态依赖图）**：删除 `workflow-helpers.mjs` 分裂正则/字面波次逻辑，收口到 `doc-slice-graph.mjs`（归档前置满足、未就绪 `depends_on` 不静默丢弃、写域重叠 `serial-by-overlap` 不报假错 `BLOCKED_SLICE_OVERLAP`、`workflow-policy.mjs` `needs-*` 可见并行切片）；更新 `scripts/dev/fixtures-plan-wave-slices.mjs`。
+- [ ] **T7（`C7` 入站/多目标/折叠探索/信号/并发）**：`flow-inspect.mjs` 外部 PR 写受理评论与 `external-contribution` 标签并继承 SPEC `issue:`；`flow-merge.mjs` 与 `review-sync.mjs` 逐条 `try/catch` 落账本禁 `.some()` 吞错；审查完成强校 `review-pack record`；`escalation.mjs` 默认自动建单；折叠 `BLOCKED_NOT_EXPLORED` 并更新 `scripts/dev/fixtures-flow-explore-gate.mjs` 与 `scripts/dev/injections-data-flow-explore.mjs`（`I240–I244`）；`signals.mjs` 隔离作用域与 `govern-state.mjs` 仅聚类 `severity >= medium`；支持 `--jobs N` 与 `verify-injections.mjs --only` 逗号多 ID。
+- [ ] **T8（夹具、注入与体积同步）**：新增 `scripts/dev/fixtures-parallel-dispatch.mjs` (new) 与 `scripts/dev/injections-data-parallel-dispatch.mjs` (new)（`I320–I349`）；逐文件核对全仓 `.mjs <= 800` 行；同步 `kit/skills/dev-flow/SKILL.md` / `kit/skills/dev-plan/SKILL.md`，执行 `node scripts/equip.mjs .` 与 `node scripts/compose-agents.mjs .`（`AGENTS.md < 24576` 字节）。
 
 ## 四、验收与合前检查
 
-- [ ] 两个前置已实现并归档时，就绪扫描返回该切片就绪。
-- [ ] 有任务选中时，状态查询返回体含并行度、波次、就绪切片且波次非空。
-- [ ] 可并行却串行时阻断并给两条出口；传枚举理由后放行并进报告；单就绪切片不阻断。
-- [ ] 就绪扫描与切片图的波次划分对拍一致。
-- [ ] `node scripts/dev/fixtures.mjs --domain parallel-dispatch` 全绿，`C1..C5` 正反各一条断言。
-- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs` 全绿。
-- [ ] `.agents/skills/` 与 `kit/skills/` 字节级一致。
-- [ ] `doc-plan.mjs audit . --json` 返回 `ok: true`。
+- [ ] `node .agents/skills/dev-plan/scripts/doc-plan.mjs audit docs/specs/261120-issue120-w25-parallel-dispatch-spec.md --json` 返回 `ok: true`。
+- [ ] `node scripts/dev/fixtures.mjs --domain parallel-dispatch --jobs 6` 全绿（覆盖 `C1..C7` 正反双向断言）。
+- [ ] `node scripts/dev/verify-injections.mjs --only I240,I241,I242,I243,I244,I320,I321,I322,I323,I324,I325,I326 --jobs 6` 全部命中变红通过。
+- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs --jobs 6 && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs .` 全绿，全仓 `.mjs <= 800` 行且 `AGENTS.md < 24576` 字节。

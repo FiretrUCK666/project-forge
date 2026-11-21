@@ -181,16 +181,23 @@ export async function detectGit(root, opts = {}) {
   })()
   const fastHeadUnborn = Boolean(fastHeadInfo?.unborn)
   const fastHeadOid = (dotFast && !dotFast.useReftable && !fastHeadUnborn) ? readHeadFast(dotFast.workGitDir, dotFast.commonDir)?.oid : null
-  const fastCommitLog = (fastHeadOid && !dotFast?.isShallow) ? readLooseCommitLogFast(workTreeRoot, dotFast.commonDir, fastHeadOid, 500) : null
-  const logPromise = fastHeadUnborn
-    ? Promise.resolve({ ok: true, stdout: '' })
-    : (fastCommitLog?.complete && fastCommitLog.entries.length < 500
-        ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
-        : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '5000']))
   const skipUnbornStatus = Boolean(fastUnbornStatus && fastHeadUnborn && fastIndexAbsent)
   const fastSurveyStatus = (!skipUnbornStatus && dotFast && !dotFast.useReftable)
     ? inspectSurveyStatusFast(workTreeRoot)
     : null
+  const stPromise = skipUnbornStatus
+    ? Promise.resolve({ ok: true, stdout: `# branch.oid (initial)\n# branch.head ${fastHeadInfo.branch}\n` })
+    : (fastSurveyStatus?.ok
+        ? Promise.resolve({
+            ok: true,
+            stdout: [
+              `# branch.oid ${fastSurveyStatus.headInfo.oid || '(initial)'}`,
+              `# branch.head ${fastSurveyStatus.headInfo.detached ? '(detached)' : fastSurveyStatus.headInfo.branch}`,
+              ...Array.from({ length: fastSurveyStatus.dirty }, (_, idx) => `? fast-dirty-${idx}`),
+              ...fastSurveyStatus.ignored.map((p) => `! ${p}`),
+            ].join('\n'),
+          })
+        : git(root, ['status', '--porcelain=v2', '--branch', '--ignored=matching', '--untracked-files=normal']))
   const sysEntriesPromise = userScopeMap ? getSystemGitConfigEntriesAsync() : null
   const lsIgnoredPromise = (dotFast && !dotFast.useReftable && userScopeMap)
     ? sysEntriesPromise.then((sysEntries) => (
@@ -199,22 +206,16 @@ export async function detectGit(root, opts = {}) {
         : git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z'])
     ))
     : git(root, ['ls-files', '-i', '-c', '--exclude-standard', '-z'])
+  const fastCommitLog = (fastHeadOid && !dotFast?.isShallow) ? readLooseCommitLogFast(workTreeRoot, dotFast.commonDir, fastHeadOid, 500) : null
+  const logPromise = fastHeadUnborn
+    ? Promise.resolve({ ok: true, stdout: '' })
+    : (fastCommitLog?.complete && fastCommitLog.entries.length < 500
+        ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
+        : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '5000']))
   const [sysEntries, cfg, st, remotes, refsRes, logRes, lsFiles, lsIgnoredRes] = await Promise.all([
     sysEntriesPromise ?? Promise.resolve(null),
     userScopeMap ? Promise.resolve(null) : git(root, ['config', '--list', '--show-scope', '--show-origin']),
-    skipUnbornStatus
-      ? Promise.resolve({ ok: true, stdout: `# branch.oid (initial)\n# branch.head ${fastHeadInfo.branch}\n` })
-      : (fastSurveyStatus?.ok
-          ? Promise.resolve({
-              ok: true,
-              stdout: [
-                `# branch.oid ${fastSurveyStatus.headInfo.oid || '(initial)'}`,
-                `# branch.head ${fastSurveyStatus.headInfo.detached ? '(detached)' : fastSurveyStatus.headInfo.branch}`,
-                ...Array.from({ length: fastSurveyStatus.dirty }, (_, idx) => `? fast-dirty-${idx}`),
-                ...fastSurveyStatus.ignored.map((p) => `! ${p}`),
-              ].join('\n'),
-            })
-          : git(root, ['status', '--porcelain=v2', '--branch', '--ignored=matching', '--untracked-files=normal'])),
+    stPromise,
     dotFast && dotFast.remoteText !== null ? Promise.resolve({ ok: true, stdout: dotFast.remoteText }) : git(root, ['remote', '-v']),
     dotFast && !dotFast.useReftable && dotFast.fastTags !== null
       ? Promise.resolve(null)
@@ -379,7 +380,7 @@ export function classifyHomePath(rel, line) {
   return 'leak'
 }
 
-const SECRET_FAST_PRECHECK_RE = /(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-|AKIA|-----BEGIN )/
+const SECRET_FAST_PRECHECK_RE = /(?:\b(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-(?:proj-)?[A-Za-z0-9]{20}|AKIA)|-----BEGIN )/
 const DEPENDENCY_OUTPUT_DIRS = new Set(['node_modules', '.venv', '__pycache__', 'target'])
 
 function countLinesFast(text) {

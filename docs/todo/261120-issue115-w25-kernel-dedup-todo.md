@@ -31,6 +31,7 @@ scope_files:
   - kit/skills/lib/task-backend-local.mjs
   - kit/skills/lib/issue-template-hydrate.mjs
   - kit/skills/lib/escalation.mjs
+  - kit/skills/lib/plan-sync.mjs
   - kit/skills/lib/doc-locator.mjs
   - kit/skills/lib/feature-map.mjs
   - kit/skills/lib/verify-state.mjs
@@ -38,6 +39,7 @@ scope_files:
   - kit/skills/lib/static-gates-lexer.mjs
   - kit/skills/lib/static-gates-comment-hygiene.mjs
   - kit/skills/dev-explore/scripts/doc-locate.mjs
+  - kit/skills/dev-plan/scripts/doc-plan.mjs
   - kit/skills/dev-flow/scripts/flow-issues.mjs
   - kit/skills/dev-flow/scripts/worktree-deps.mjs
   - kit/skills/dev-flow/scripts/flow-lifecycle-helpers.mjs
@@ -51,14 +53,17 @@ scope_files:
   - kit/skills/dev-govern/scripts/govern-audit.mjs
   - kit/skills/dev-govern/scripts/govern-checks.mjs
   - kit/skills/dev-govern/scripts/govern-retro.mjs
+  - scripts/lib/fs-atomic.mjs
   - scripts/lib/protocol.mjs
   - scripts/lib/text.mjs
   - scripts/lib/update-ops.mjs
+  - scripts/lib/platform/github.mjs
   - scripts/lib/platform/registry.mjs
   - scripts/lib/survey-ecosystem.mjs
   - scripts/lib/survey-workspace.mjs
   - scripts/lib/equip-bootstrap.mjs
   - scripts/lib/agents-defaults.mjs
+  - scripts/survey.mjs
   - scripts/compose-agents.mjs
   - scripts/lib/review-helpers.mjs
   - scripts/equip-ci.mjs
@@ -96,20 +101,20 @@ scope_files:
 ## 二、非目标
 
 <!-- section: non-goals -->
-- 不改动 PR-A（`#120`）波次/规划隔离核心；不新增第 9 个 skill 或 `docs/adr/`。
+- 不改动 PR-A（`#120`）波次/规划隔离核心；不新增第 9 个 skill 或独立 ADR 目录。
 - 不修改逼近 800 行的非目标文件（`flow-inspect.mjs`、`docs.mjs`、`profile-sniffer.mjs`、`flow-merge.mjs`、`equip.mjs`）。
 - 不削弱默认全量 `preflight` 与 `merge-gate` 校验强度。
 
 ## 三、实施任务清单
 
 <!-- section: tasks -->
-- [ ] **T1（`C1` 共享内核去重与 `#119` 死代码清理）**: 将 `readTextSafe`、`isMacOsJunkPath`、`isInsideDir(candidateAbs, parentAbs)` 收敛至 `kit/skills/lib/git-core.mjs` 并修复 `scripts/lib/update-ops.mjs` 反序 bug；将 `parseSshConfigHostMap`/`lookupSshHost` 统一于 `kit/skills/lib/platform.mjs`；将 `countTextLines` 统一于 `kit/skills/lib/static-gates.mjs` 并重导出至 `protocol.mjs` 与 `edit-gate.mjs`；删除 `protocol.mjs`/`text.mjs`/`survey-workspace.mjs`/`survey-ecosystem.mjs` 等零引用死代码；新增 `scripts/dev/preflight-kernel-parity.mjs` (new) 固化 `--slot` 零残留与重复原语检查。
-- [ ] **T2（`C2` 多远端/无远端注册表收口）**: 在 `scripts/lib/platform/registry.mjs` 与 `kit/skills/lib/platform.mjs` 增加 `registerHostingProvider` 适配器方法契约校验；将 `LocalOnlyBackend`/`GenericRemoteBackend` 从 `kit/skills/lib/task-backend.mjs` 拆入 `kit/skills/lib/task-backend-local.mjs` (new)，并使 `createTaskBackend` 走注册表分发；修改 `scripts/equip-ci.mjs` 消费 `facts.artifactPlan`；将 `detectDeclaredRepo` 与 `survey-ecosystem.mjs` 改为注册表解析去宿主化。
+- [ ] **T1（`C1` 共享内核去重与 `#119` 死代码清理）**: 将 `readTextSafe`、`isMacOsJunkPath`、`isInsideDir(candidateAbs, parentAbs)` 收敛至 `kit/skills/lib/git-core.mjs` 并修复 `scripts/lib/update-ops.mjs` 反序 bug；将 `parseSshConfigHostMap`/`lookupSshHost` 统一于 `kit/skills/lib/platform.mjs`；将 `countTextLines` 统一于 `kit/skills/lib/static-gates.mjs` 并重导出至 `protocol.mjs` 与 `edit-gate.mjs`；删除 `fs-atomic.mjs` `parentOf` 与 `protocol.mjs`/`text.mjs`/`survey-workspace.mjs`/`survey-ecosystem.mjs` 零引用死代码；新增 `scripts/dev/preflight-kernel-parity.mjs` (new) 固化 `--slot` 零残留与重复原语检查。
+- [ ] **T2（`C2` 多远端/无远端注册表与规划远端同步收口）**: 对齐 `scripts/lib/platform/github.mjs`+`registry.mjs` 与 `kit/skills/lib/platform.mjs` 双侧 `GITHUB_PROVIDER` 与 `registerHostingProvider` 适配器契约校验；将 `LocalOnlyBackend`/`GenericRemoteBackend` 从 `kit/skills/lib/task-backend.mjs` 拆入 `kit/skills/lib/task-backend-local.mjs` (new)，并使 `createTaskBackend` 走注册表分发；修改 `scripts/equip-ci.mjs` 消费 `scripts/survey.mjs` `computeArtifactPlan` 产出的 `facts.artifactPlan`；将 `detectDeclaredRepo` 与 `survey-ecosystem.mjs` 改为注册表解析去宿主化；在 `kit/skills/lib/plan-sync.mjs` 提取 `resolveDocIssueNumber` 并修复 `doc-plan.mjs` `critique-pass`/`critique-reject`/`approve` 透传 `issueNumber`。
 - [ ] **T3（`C3` 统一 `hydrateIssueBody` 与首次接入零误报）**: 新建 `kit/skills/lib/issue-template-hydrate.mjs` (new) 实现 `hydrateIssueBody`（保留 `.github/ISSUE_TEMPLATE/`、剥离围栏外 `<!-- ... -->`、归一化 `\n`、`local-only`/`generic-git` 干净降级），并接入 `flow issue create`、`flow start --create-issue`、`escalation.mjs` 与 `govern-audit issues`；在 `scripts/lib/equip-bootstrap.mjs` 为空仓落盘合法空 `docs/feature-map.json` 并使 `verify-tools audit` 降级 `NOT_APPLICABLE`；`doc-locator.mjs` 将 `references/` 纳入 `contextIndex` 且 `doc-locate.mjs` 支持 `--list`；修复 `scripts/compose-agents.mjs` 与 `scripts/lib/agents-defaults.mjs` 单次幂等。
-- [ ] **T4（`C4` `#117` 验证工具指纹与功能地图刷新）**: 更新 `kit/skills/lib/feature-map.mjs` `computeFeatureFingerprint` 纳入 `scriptPath` 内容哈希及路径边界校验；更新 `verify-tools.mjs` / `verify-tools-audit.mjs` 落地零执行非零退出、禁止 stale 通过时静默覆写基线，并在 `verify-state.mjs` 记录 `verify.scratch-used`；执行 `node scripts/equip.mjs .` 后刷新 `docs/feature-map.json` 与全部验证工具，清除已归档 `#116` 僵尸引用，实现 `verify-tools audit` 0 stale / 0 zombies / 0 blindSpots。
+- [ ] **T4（`C4` `#117` 验证工具指纹与功能地图刷新）**: 更新 `kit/skills/lib/verify-state.mjs`（由 `feature-map.mjs` 重导出）`computeFeatureFingerprint` 纳入 `scriptPath` 内容哈希及路径边界校验；更新 `verify-tools.mjs` / `verify-tools-audit.mjs` 落地零执行非零退出、禁止 stale 通过时静默覆写基线，并在 `verify-state.mjs` 记录 `verify.scratch-used`；执行 `node scripts/equip.mjs .` 后刷新 `docs/feature-map.json` 与全部验证工具，清除已归档 `#116` 僵尸引用，实现 `verify-tools audit` 0 stale / 0 zombies / 0 blindSpots。
 - [ ] **T5（`C5` `#118` 治理真实性与三项注释卫生升级）**: 将 `scripts/dev/evidence.mjs` 改为 `git ls-files -z` + `!isRepoOnlyPath`；在 `flow-lifecycle-helpers.mjs`/`flow-lifecycle.mjs` 排除 `.pf-manifest.json` 信号 blame；修复 `govern-checks.mjs` `orphan_dir` 清理提示、`govern-retro.mjs` 失效建议淘汰与 `review-helpers.mjs` 命令匹配；落地三项确定性注释升级（缺 Issue 的 `HACK`/`WORKAROUND`/`TEMP` 引导 `escalation.mjs`、新建 `kit/skills/lib/static-gates-comment-hygiene.mjs` (new) 检查 `--changed` + 基线棘轮反引号失效路径、更新 `dev-edit`/`dev-review` `SKILL.md` why-not-what 与 `docs/TDD.md`/`AGENTS.md ## 取舍` 规则并同步 `.agents/skills/`）。
-- [ ] **T6（`C6` `#114` 快路径、增量门禁、安全并发与 1x 硬预算）**: 修复 `git-status-fast.mjs` `eol=crlf` 按文件匹配回退与 `git-fast.mjs` 多父合并提交，配与原生 `git` 一致性正反测试；为 `preflight.mjs`/`preflight-suite.mjs` 新增 `--changed` 增量模式；移除 `bench.mjs` 2.5x CI 缩放并实现 `--strict-budget` 1x 硬预算；在 `e2e-zip-harness.mjs`、`merge-gate.mjs`、`fixtures.mjs` 对纯只读/独立沙盒步骤实施安全有界并发，保持确定性输出与等价退出码。
-- [ ] **T7（`C7` 规范退役被吸收草案与 `w25-hardening-prd`）**: 在本分支用 `doc-plan.mjs supersede` / `archive` 规范退役 `#114`/`#117`/`#118`/`#119` 草案 SPEC/Todo 与 `docs/prd/261120-w25-hardening-prd.md`，验证 `doc-plan.mjs audit . --json` 仅保留 `v10.1` 主 PRD + `#103` + `#104`（及提交前待 `finalize` 的 `#115`）且零报错。
+- [ ] **T6（`C6` `#114` 快路径、增量门禁、安全并发与 1x 硬预算）**: 修复 `git-status-fast.mjs` `eol=crlf` 按文件匹配回退、`git-fast.mjs` `readGitConfigFast` 在 linked worktree 解析 `commondir/config` 与 `readLooseCommitLogFast` 多父合并提交，配与原生 `git` 及 linked worktree 正反测试；为 `preflight.mjs`/`preflight-suite.mjs` 新增 `--changed` 增量模式；移除 `bench.mjs` 2.5x CI 缩放并实现 `--strict-budget` 1x 硬预算；在 `e2e-zip-harness.mjs`（隔离 `H/I/J` `mockSrv`）、`merge-gate.mjs`、`fixtures.mjs` 对纯只读/独立沙盒步骤实施安全有界并发，保持确定性输出与等价退出码。
+- [ ] **T7（`C7` 无冲突顺序退役吸收草案与 `w25-hardening-prd`）**: `finalize` 前先用 `doc-plan.mjs supersede` + `git mv`（禁调 `buildArchivedDocPatch` 覆写）归档 `#114`/`#117`/`#118`/`#119`，再勾选 `docs/prd/261120-w25-hardening-prd.md` `C1..C7`（暂留 `docs/prd/` 防 `BROKEN_RELATED_LINK`），最后经 `flow finalize` 原子共归档 `#115` 与 PRD（`status: done`），验证 `doc-plan.mjs audit . --json` 仅保留 `v10.1` 主 PRD + `#103` + `#104` 且零报错。
 - [ ] **T8（`C8` `I370–I385` 故障注入与全量合前验收）**: 新建 `scripts/dev/injections-data-kernel-dedup.mjs` (new) 注册 `I370–I385` 16 条故障注入；在 `fixtures.mjs`/`fixtures-verify-tools.mjs`/`fixtures-govern.mjs` 补齐 GitHub/`generic-git`/`local-only`/存量自定义模板正反双向用例；验证全部 `.mjs <= 800` 行，跑通 `compose-agents .`、`equip . --check`、`preflight.mjs`、`merge-gate.mjs`、`verify-injections.mjs` 与 `bench.mjs --strict-budget`。
 
 ## 四、验收与合前检查

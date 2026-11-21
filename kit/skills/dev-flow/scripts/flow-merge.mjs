@@ -14,7 +14,7 @@ import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { evaluateRemoteChecks } from '../../lib/gate-truth.mjs'
 import { detectInProgressGitOp, gitDiffNameStatusZ, gitRun, gitStatusPorcelainZ } from '../../lib/git.mjs'
 import { readGitConfigFast, readHeadFast, resolveGitDirFast } from '../../lib/git-fast.mjs'
-import { hasExploredEvidence, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
+import { hasExploredEvidence, rememberPreviousImplementer, resolveTaskContext, updateTaskLedger } from '../../lib/ledger.mjs'
 import {
   detectDeclaredRepo, parseFlowInputs, parseIssueNumbers, parsePfStateTags, parsePrNumber, parseRemotesTopology, parseRemoteUrls, probeGitHubEnv, resolveIdentityLayers, probeForWrite } from '../../lib/platform.mjs'
 import { parseAgentsProfile } from '../../lib/profile.mjs'
@@ -565,6 +565,11 @@ export async function handleClaim(opts, roots) {
       ledgerAgent: prevAgent,
       ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
     })
+    const nextLocalActor = String(opts.agent ?? '').trim() || localLayers.agent || localLayers.account || null
+    if (nextLocalActor) {
+      // 换人认领或接管覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
+      ledger.previousImplementers = rememberPreviousImplementer(ledger, nextLocalActor)
+    }
     if (localLayers.account) {
       ledger.account = localLayers.account
       ledger.verifiedPlatformLogin = localLayers.verifiedPlatformLogin
@@ -624,6 +629,11 @@ export async function handleClaim(opts, roots) {
     ledgerAgent: prevAgent,
     ledgerVerifiedPlatformLogin: ledger.verifiedPlatformLogin,
   })
+  const nextOnlineActor = String(opts.agent ?? '').trim() || onlineLayers.agent || onlineLayers.account || null
+  if (nextOnlineActor) {
+    // 换人认领或接管覆写之前先记账：历史集合是自审判定的唯一依据，不记就等于没换过人。
+    ledger.previousImplementers = rememberPreviousImplementer(ledger, nextOnlineActor)
+  }
   if (onlineLayers.account) {
     ledger.account = onlineLayers.account
     ledger.verifiedPlatformLogin = onlineLayers.verifiedPlatformLogin
@@ -665,6 +675,14 @@ export async function handleClaim(opts, roots) {
 
   const prevClaim = [...activeClaimsByIssue.values()][0] ?? null
   const prevActors = [...activeClaimsByIssue.values()].map((c) => c.agent ?? c.actor ?? c.login).filter(Boolean)
+  if (isTakeover && prevActors.length > 0 && nextOnlineActor) {
+    for (const prev of prevActors) {
+      ledger.previousImplementers = rememberPreviousImplementer(
+        { previousImplementers: ledger.previousImplementers, implementerId: prev },
+        nextOnlineActor,
+      )
+    }
+  }
   const claimOut = await backend.claimTask({
     taskId,
     issues: ledger.linkedIssues,

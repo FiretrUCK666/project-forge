@@ -433,7 +433,7 @@ async function main(argv = process.argv.slice(2)) {
           headSha,
           hazards,
           advisories: untrustedAdvisories,
-          nextStep: 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec (and use --ignore-scripts) after explicit approval.',
+          nextStep: 'Do NOT mount dependencies or run tests. Show these hazards to a human maintainer; only re-run with --human-approved-exec --reason "<原因>" (and use --ignore-scripts) after explicit approval.',
         }
         if (opts.json) {
           process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
@@ -451,7 +451,7 @@ async function main(argv = process.argv.slice(2)) {
             '[NEXT STEP]',
             '  1. Read-only inspect the flagged diff above; DO NOT mount deps or execute tests/scripts.',
             '  2. Ask a human maintainer for explicit sign-off.',
-            '  3. Only if approved, re-run with `--human-approved-exec` and isolate installs using `--ignore-scripts`.',
+            '  3. Only if approved, re-run with `--human-approved-exec --reason "<原因>"` and isolate installs using `--ignore-scripts`.',
           ]
           process.stdout.write(`${lines.join('\n')}\n`)
         }

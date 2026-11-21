@@ -664,6 +664,84 @@ export function registerFlowTruthCases(cases) {
     return true
   }])
 
+  cases.push(['M2-2：flow claim --takeover 接管后，旧实施者尝试提交审查被自审锁拦截（正反双向）', async () => {
+    const { handleClaim } = await import('../../kit/skills/dev-flow/scripts/flow-merge.mjs')
+    const { handleRecord } = await import('../../kit/skills/dev-review/scripts/review-ledger.mjs')
+    const { createDefaultLedger, ensureReviewToken, readTaskLedger, updateTaskLedger } = await import('../../kit/skills/lib/ledger.mjs')
+    const { createGitHubClient } = await import('../../kit/skills/lib/shared.mjs')
+    const { resolveRepoRoots } = await import('../../kit/skills/lib/git.mjs')
+    const { EXIT, gitInit } = await import('./fixtures-helpers.mjs')
+
+    const quiet = async (fn) => {
+      const origOut = process.stdout.write.bind(process.stdout), origErr = process.stderr.write.bind(process.stderr)
+      let stdout = '', stderr = ''
+      process.stdout.write = (c) => { stdout += String(c); return true }
+      process.stderr.write = (c) => { stderr += String(c); return true }
+      try { return { res: await fn(), stdout, stderr } } finally { process.stdout.write = origOut; process.stderr.write = origErr }
+    }
+
+    const dir = tmpProject({ '.gitignore': '.worktrees/\n', 'README.md': '# takeover\n', 'AGENTS.md': '# Demo\n```yaml\nquick-test: exit 0\n```\n' })
+    gitInit(dir, { branch: 'main', origin: 'https://github.com/acme/demo.git' })
+
+    try {
+      const roots = await resolveRepoRoots(dir)
+      const comments = []
+      const runner = async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'api' && /issues\/42\/comments/.test(args[1])) {
+          if (args.includes('POST')) {
+            const body = readFileSync(args[args.indexOf('-F') + 1].replace(/^body=@/, ''), 'utf8')
+            const entry = { id: comments.length + 1, user: { login: 'bot-user' }, body }
+            comments.push(entry)
+            return { ok: true, code: 0, stdout: JSON.stringify(entry), stderr: '' }
+          }
+          return { ok: true, code: 0, stdout: JSON.stringify(comments), stderr: '' }
+        }
+        if (cmd === 'gh' && args[0] === 'issue' && args[1] === 'edit') return { ok: true, code: 0, stdout: '', stderr: '' }
+        return { ok: false, code: 1, stdout: '', stderr: 'unsupported' }
+      }
+      const mockClient = createGitHubClient({ tier: 'gh-cli', login: 'bot-user', runner })
+      const mockProbe = { env: { trackB: { tier: 'gh-cli', login: 'bot-user' } }, client: mockClient }
+
+      const verifyPath = async ({ taskId, role, providerId, linkedIssues, oldActor, newActor, reviewerActor, extraClaimOpts = {} }) => {
+        await updateTaskLedger(dir, taskId, () => createDefaultLedger({
+          taskId, caseType: 2, role, providerId, branch: `feat/${taskId}`, linkedIssues,
+          implementerId: oldActor, claimedBy: oldActor, agent: oldActor, status: 'claimed',
+        }), { createIfMissing: true })
+
+        const take = await quiet(() => handleClaim({ task: taskId, agent: newActor, takeover: true, reason: '接力收尾', json: true, ...extraClaimOpts }, roots))
+        if (take.res.exitCode !== 0) return `${taskId} claim --takeover 失败: exit=${take.res.exitCode} err=${take.stderr}`
+        const afterTake = JSON.parse(readFileSync(join(dir, '.worktrees/.state/tasks', `${taskId}.json`), 'utf8'))
+        if (afterTake.implementerId !== newActor || !afterTake.previousImplementers?.includes(oldActor)) {
+          return `${taskId} claim --takeover 未记录前任实施者: ${JSON.stringify({ impl: afterTake.implementerId, prev: afterTake.previousImplementers })}`
+        }
+
+        const tok = ensureReviewToken(dir, readTaskLedger(dir, taskId), 1).token
+        // 反面：接管前旧实施者尝试提交审查，必须被自审锁拦截。
+        const oldRec = await quiet(() => handleRecord({
+          task: taskId, round: '1', verdict: 'changes', 'reviewer-id': oldActor, 'review-token': tok,
+          evidence: 'node test.mjs pass', 'must-fix': ['C1: 补充边界'], json: true,
+        }, roots))
+        if (oldRec.res !== EXIT.FACT || !oldRec.stdout.includes('SELF_REVIEW_REJECTED')) {
+          return `${taskId} 旧实施者 ${oldActor} 接管后仍通过自审校验: exit=${oldRec.res} out=${oldRec.stdout}`
+        }
+
+        // 正面：独立第三人可正常提交审查，不被自审锁误伤。
+        const indRec = await quiet(() => handleRecord({
+          task: taskId, round: '1', verdict: 'changes', 'reviewer-id': reviewerActor, 'review-token': tok,
+          evidence: 'node test.mjs pass', 'must-fix': ['C1: 补充边界'], json: true,
+        }, roots))
+        if (indRec.res !== 0) return `${taskId} 独立审查者 ${reviewerActor} 被误拦: exit=${indRec.res} out=${indRec.stdout} err=${indRec.stderr}`
+        return true
+      }
+
+      const localCheck = await verifyPath({ taskId: 'claim-local', role: 'local-only', providerId: 'none', linkedIssues: [], oldActor: 'agent-a', newActor: 'agent-b', reviewerActor: 'agent-c' })
+      if (localCheck !== true) return localCheck
+      const onlineCheck = await verifyPath({ taskId: 'claim-online', role: 'maintainer', providerId: 'github', linkedIssues: [42], oldActor: 'agent-old', newActor: 'agent-new', reviewerActor: 'agent-ind', extraClaimOpts: { _ghProbe: mockProbe, _ghClient: mockClient } })
+      if (onlineCheck !== true) return onlineCheck
+    } finally { rmTree(dir) }
+    return true
+  }])
+
   cases.push(['C6：远端检查判定单点——五档互斥，有工作流却没 check-run 阻断，没工作流才算不适用', async () => {
     const cases = [
       ['语义分桶全绿', { ok: true, bucket: 'pass' }, { ciRequired: true }, 'passed', false],

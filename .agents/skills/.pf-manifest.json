@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "forgeVersion": "6.0.0",
-  "installedAt": "2026-11-21T11:37:46.355Z",
+  "installedAt": "2026-11-21T12:30:10.939Z",
   "files": {
     "dev-edit/SKILL.md": {
       "sha256": "85193f196f06ca33eb1fee2d629d9afe068fbc83ee8dbc0670db5958095fc661"
@@ -52,7 +52,7 @@
       "sha256": "1eab9cfa4b7478e1aa85d7d024128825e99b15124d4d4db15daf27f98d9324d2"
     },
     "dev-flow/scripts/flow-merge.mjs": {
-      "sha256": "505996a9ff7be550873e3c1b68c19f25ecc4510364ce4c04c3ef95f1c3d6fed8"
+      "sha256": "9a64f5fbe77d72db5b5ffab1f5cbee90fa9912b185b72bfeb19085a37e8dc14e"
     },
     "dev-flow/scripts/flow-next.mjs": {
       "sha256": "e3a7fa14ec8302cd9d649ae5f7e700e17f6c4cc2785c89a9e37df1c0dce18e89"
@@ -154,7 +154,7 @@
       "sha256": "da2927ea56e473c33ac22a56015ad9ce44ec240ac162de51567e5cb0472ba549"
     },
     "dev-review/scripts/review-pack.mjs": {
-      "sha256": "b67cb7f1747c86e482fb019d3c056b567909c91e58a2c62fa0b78e6b26575247"
+      "sha256": "f0c71aae9383f620c1fae47545f355f538d16d9cd6d7bbb6dcd1cffdf2a564cc"
     },
     "dev-review/scripts/review-pr.mjs": {
       "sha256": "6d8c8069ad956e708bdc15aad57cc8785a288b8f90dbeda2047b1278549a2b1c"
@@ -247,7 +247,7 @@
       "sha256": "94acec09609cd5fd14e2f52d643fc55d8d7f4803454136c232f2bb65b64a90e0"
     },
     "lib/gate-truth.mjs": {
-      "sha256": "9dca476e303ad75e529455934f7210342f2b4012c7b36a51887c458c03d889cf"
+      "sha256": "a7c0365094bfacc1b260b6a65c878547cf485015eedae5a4293afaa3196579c6"
     },
     "lib/git-core.mjs": {
       "sha256": "1802ee6931ceca7cac7a335c1b4b698ad5ae0b5332962d055e0794dee394ab27"

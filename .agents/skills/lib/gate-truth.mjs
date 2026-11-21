@@ -21,9 +21,11 @@
  *
  * ## 适用范围（这条不写清，分发出去就红）
  *
- * 本模块随 `kit/` 进用户安装包，会装到用别的托管平台 CI 的项目、用 Jenkins 类流水线的
- * 项目、只有本地脚本的项目，以及完全没有 CI 的项目里去。判据读的是 YAML 流水线形状，
- * **只对具备可识别流水线文件的仓生效**：
+ * 本模块随 `kit/` 进用户安装包：其中 `kit/` 里的流程脚本（`flow-merge.mjs`、
+ * `flow-batch.mjs`）只调用远端检查判定（`evaluateRemoteChecks`），与下面的四档无关；
+ * 而 `deriveMergeGate` 派生器目前由本仓开发期门禁编排脚本（不进用户包）调用。即便被调用到
+ * 用别的托管平台 CI、Jenkins 类流水线、只有本地脚本或完全没有 CI 的项目里，它读的是
+ * 可识别的 YAML 流水线形状，**只对具备可识别流水线文件的仓生效**：
  *
  * - 一个可识别的流水线文件都没有 → `not-applicable`，**不阻断**（没有对象可判）；
  * - 有文件但解析不出来（空文件、非 YAML 结构） → `failed`，**阻断**（这是真故障）；
@@ -33,10 +35,9 @@
  * 前者是判据不适用于本仓，后者是本判据自己坏了——把后者降级成前者，门禁会静默变空，
  * 而输出看起来只像「这个仓不需要检查」。
  *
- * 至于「会不会把非该类 CI 的项目判死」：这个派生器只服务本仓的合入门禁编排
- * （本仓的开发期编排脚本，不进用户包）。`kit/` 里进用户包的部分只用
- * 远端检查判定（`evaluateRemoteChecks`），与本四档无关。所以这里可以要求
- * 「有流水线就得派生出步骤」，代价不会转嫁给用户项目。
+ * 正因 `kit/` 进用户包的调用方只走 `evaluateRemoteChecks`，且 `deriveMergeGate` 对无
+ * 可识别流水线文件的仓固定返回 `not-applicable`（不阻断），这里可以要求「有流水线就得派生出步骤」，
+ * 不会把非该类 CI 的用户项目判死。
  *
  * 把 `not-applicable` 折成通过则是另一种放弃：它在输出里必须显式出现。
  *
@@ -345,9 +346,8 @@ export function deriveMergeGate(repoRoot) {
     file: b.file, startLine: b.startLine, endLine: b.endLine, cmd: b.cmd, lineCount: b.lineCount,
   })))
 
-  // 解析漏读与「本来就没有可跑步骤」是两件事，判据必须分开。
-  // 前者会让门禁静默变空，后者只是这份流水线不适用于本仓——混在一起，
-  // 要么把正常项目判死，要么把坏掉的解析当成「没有检查」放过去。
+  // 两种失败原因必须分开报告，但均判为 FAILED / blocking: true，防止门禁静默变空：
+  // 前者是文件写着 run 步骤却切不出执行块（解析漏读），后者是谓词把现有流水线全部排除。
   const parserGaps = evaluated.filter((e) => e.parserGap)
   if (parserGaps.length > 0) {
     return {

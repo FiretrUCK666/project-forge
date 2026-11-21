@@ -6,7 +6,7 @@
 
 ## 一、交棒 vs 撤销（两件完全不同的事）
 
-- **交棒**留下这个项目长出来的真能力：`AGENTS.md`（带意图路由与 Dev Profile）、`docs/` 四层文档、`.agents/skills/` 本地研发技能套装、`.gitignore`/`.gitattributes` 与 GitHub 工作流模板——仅剥掉一次性托管标记并清除未收尾的临时产物。
+- **交棒**留下这个项目长出来的真能力：`AGENTS.md`（带意图路由与 Dev Profile）、`docs/` 四层文档（含 `docs/feature-map.json`）、`.agents/skills/` 本地研发技能套装、`.gitignore`/`.gitattributes` 与按平台能力适配的工作流模板（GitHub 仓含 `.github/workflows/`，`local-only`/`generic-git` 仓跳过）——仅剥掉一次性托管标记并清除未收尾的临时产物。
 - **绝不做成「撤销」**：不要把刚替项目配好的 `AGENTS.md`、`.agents/skills/` 或门禁脚本一并删光，让项目回到未治理前。
 
 ## 二、四档退出码与验证命令
@@ -14,7 +14,7 @@
 执行以下命令确认当前工程是否仍有未收口的临时引导标记或残留临时文件：
 
 ```sh
-node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify]
+node "<本 skill 目录>/scripts/handoff.mjs" <目标目录> [--verify | --scan] [--json]
 ```
 
 **四档退出码**语义（调用方必须按码分流，绝不把 `3` 误看成 `0`）：

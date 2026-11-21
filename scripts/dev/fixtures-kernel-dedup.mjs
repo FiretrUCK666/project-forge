@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * fixtures-kernel-dedup.mjs —— Phase 3B (PR-B #115) C1-C6 正反双向行为夹具（含 I370-I385 故障注入覆盖）。
+ * fixtures-kernel-dedup.mjs —— 内核单源去重与 CLI/门禁对拍正反双向行为夹具（含 I370-I385 故障注入覆盖）。
  *
  * 自动被 `scripts/dev/fixtures.mjs` 发现执行，也可直接运行 `node scripts/dev/fixtures-kernel-dedup.mjs`。
  */

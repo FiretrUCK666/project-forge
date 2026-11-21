@@ -16,6 +16,7 @@ import { githubRepoPath as engineGithubRepoPath } from '../lib/text.mjs'
 import { checkMermaidLabelWidth } from '../../kit/skills/lib/docs.mjs'
 import { DOC_TEMPLATE_VARS } from '../../kit/skills/lib/doc-template-render.mjs'
 import { buildNonInteractiveEnv as kitBuildNonInteractiveEnv } from '../../kit/skills/lib/git.mjs'
+import { DEV_PROFILE_KEYS } from '../../kit/skills/lib/profile.mjs'
 import { auditEntry, auditGlobalWhitelist, auditHandRolled, evaluateParity, ENTRY_SPECS, HAND_ROLLED_SPECS } from './cli-parity.mjs'
 import { evaluateExitCodeParity } from './exit-code-parity.mjs'
 import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
@@ -37,15 +38,7 @@ const EMOJI_RE = /\p{Extended_Pictographic}/u
 const SVG_BANNED_JARGON_RE = /(?:FORGE\s+SPECIMEN|存量无损融合|跨月重入校准)/
 const SVG_TINY_FONT_RE = /\bfont-size\s*=\s*["']\s*(?:[0-9]|1[0-5])(?:\.\d+)?(?:px)?\s*["']/i
 
-const EXPECTED_DEV_PROFILE_KEYS = [
-  'quick-test',
-  'full-test',
-  'smoke-verify',
-  'merge-gate',
-  'arch-rules',
-  'high-risk',
-  'do-not-edit',
-]
+const EXPECTED_DEV_PROFILE_KEYS = DEV_PROFILE_KEYS
 
 function sameKeyList(a, b) {
   if (a.length !== b.length) return false
@@ -244,7 +237,14 @@ function checkDevProfileParity({ ROOT, rel, readText, walk, fail, note }) {
     }
   }
 
-  note(`Dev Profile：templates + ${profileRel} + shared.mjs 7 键单源对齐，全仓零重复解析器副本`)
+  const defaultsText = readText(join(ROOT, 'scripts', 'lib', 'agents-defaults.mjs'))
+  const expectedVarKeys = expected.map((k) => `PROFILE_${k.toUpperCase().replace(/-/g, '_')}`)
+  const missingDefaults = expectedVarKeys.filter((vk) => !new RegExp(`\\b${vk}\\s*:`).test(defaultsText))
+  if (missingDefaults.length > 0) {
+    fail(`Dev Profile 键集核对：scripts/lib/agents-defaults.mjs buildDevProfileVars 缺少 ${missingDefaults.join(', ')}`)
+  }
+
+  note(`Dev Profile：templates + ${profileRel} + shared.mjs + agents-defaults.mjs ${expected.length} 键单源对齐，全仓零重复解析器副本`)
 }
 
 function checkOrphanScripts({ ROOT, rel, readText, walk, fail, note }) {

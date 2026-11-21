@@ -19,8 +19,8 @@
 # 项目名
 
 <!--
-可选徽章示例（按项目类型挑 3–6 枚，逐个实测出图后再保留）：
-- CI 状态：`https://img.shields.io/github/actions/workflow/status/<owner>/<repo>/ci.yml`（公开仓且已配工作流可用）
+可选徽章示例（按项目类型挑 3–6 枚，逐个实测出图后再保留；generic-git 与 local-only 仓勿贴 GitHub CI 或星标徽章）：
+- CI 状态：`https://img.shields.io/github/actions/workflow/status/<owner>/<repo>/check.yml`（公开 GitHub 仓且已配 `.github/workflows/check.yml` 可用）
 - 制品库版本：`https://img.shields.io/npm/v/<包名>`（或 PyPI / crates 对应地址；仅已发布可用）
 - 运行基线：`https://img.shields.io/node/v/<包名>` 或 `https://img.shields.io/badge/<语言>-<最低版本>-blue`
 - 许可证：`https://img.shields.io/npm/l/<包名>` 或 `https://img.shields.io/badge/license-<许可>-blue`（私有仓按实际授权范围或省略）
@@ -111,7 +111,7 @@
 ## 遇到问题
 
 - **常见现象与排查**：列举 1-2 条高频报错的定位方法与处理建议。
-- **反馈渠道**：前往仓库 Issues 反馈，并附上当前版本号、运行环境与完整报错原文。
+- **反馈渠道**：GitHub 托管仓库请前往 Issues 反馈；`generic-git` 托管或 `local-only` 纯本地项目按项目约定渠道或本地工单（`flow.mjs issue`）记录，并附上当前版本号、运行环境与完整报错原文。
 
 ## 研发协作与本地技能（可选）
 
@@ -119,13 +119,16 @@
 
 本仓库已在根目录配备 `AGENTS.md` 工程契约与 `.agents/skills/` 本地研发技能套件，直接提出研发诉求即可按工程流程路由到对应步骤，无需记忆繁琐命令行：
 
-- `dev-explore`：按改动体量自适应读取相关模块并保持技术设计同步
+- `dev-explore`：只读探索代码库结构、模块边界与文档/符号按需定位，不修改文件或工作区
 - `dev-plan`：拆解需求、沉淀设计与任务单，明确「只改这里」和可证伪验收标准
-- `dev-flow`：统一处理分支与隔离工作区创建、测试/冒烟实证、PR 提交与收尾清理
+- `dev-flow`：统一处理分支与隔离工作区创建、测试/冒烟实证、PR/MR 提交与收尾清理
+- `dev-edit`：改前边界核对、复用查重与剥离注释的静态自检门禁
 - `dev-review`：独立上下文双门审查（运行实证门 + 结构复杂度门）与故障注入核验
+- `dev-verify-tools`：管理验证工具生命周期与功能地图（`docs/feature-map.json`），自动复用并防过期
 - `dev-govern`：复盘问题根因并下沉为静态门禁，清理无用代码与准备发版说明
+- `dev-iterate`：基于功能地图与盲区定向扩展集成、E2E 与压测用例
 
 ## 参与贡献与许可
 
-- **参与贡献**：参见 `CONTRIBUTING.md`（本地修改前请确保测试与门禁命令通过，命令口径须与 `AGENTS.md` 保持一致）。
+- **参与贡献**：参见 `CONTRIBUTING.md`（若存在；单人维护或纯本地项目可省略 `CONTRIBUTING.md`，本地修改确保测试与门禁命令通过并与 `AGENTS.md` 一致即可）。
 - **开源许可**：参见 `LICENSE`（一句话写明许可证名称；私有仓库如无许可文件则写明授权范围）。

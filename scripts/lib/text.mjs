@@ -8,78 +8,40 @@
  * 而那种分歧出现在「读文件」上时，症状通常是**静默损坏**。
  */
 
-import { readFileSync, realpathSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 
 import {
+  canonicalPath,
   isMacMetadataName,
   isMacOsJunkPath,
+  isMainModule,
+  posixPath,
   readJsonSafe,
   readTextSafe,
+  samePath,
 } from '../../kit/skills/lib/git-core.mjs'
-import { lookupSshHost, parseSshConfigHostMap } from '../../kit/skills/lib/platform.mjs'
+import {
+  githubRepoPath,
+  lookupSshHost,
+  parseRemoteUrlHost,
+  parseSshConfigHostMap,
+} from '../../kit/skills/lib/platform-probe.mjs'
 
 export {
+  canonicalPath,
+  githubRepoPath,
   isMacMetadataName,
   isMacOsJunkPath,
+  isMainModule,
   lookupSshHost,
+  parseRemoteUrlHost,
   parseSshConfigHostMap,
+  posixPath,
   readJsonSafe,
   readTextSafe,
+  samePath,
 }
 export const isMacMetadataPath = isMacOsJunkPath
-
-/**
- * 将路径归一为跨平台真实规范路径：
- * 从目标路径向上寻找最深已存在祖先目录调用 `realpathSync.native`（解析 macOS `/var` -> `/private/var`
- * 与 Windows Junction），再拼回尚未存在的尾部相对段并做 Unicode NFC 归一（消除 APFS NFD 差异）。
- */
-export function canonicalPath(p) {
-  if (p === undefined || p === null) return ''
-  const raw = String(p)
-  if (raw.trim() === '') return ''
-  let cur = resolve(raw)
-  const tail = []
-  while (true) {
-    try {
-      const real = realpathSync.native(cur)
-      const joined = tail.length > 0 ? join(real, ...tail.reverse()) : real
-      return joined.normalize('NFC')
-    } catch {
-      const parent = dirname(cur)
-      if (parent === cur) {
-        return resolve(raw).normalize('NFC')
-      }
-      tail.push(basename(cur))
-      cur = parent
-    }
-  }
-}
-
-/**
- * 两个路径是不是同一个位置。
- *
- * 判据按 `canonicalPath` 归一（支持不存在尾部路径、macOS `/var` vs `/private/var` 与 APFS NFD）；
- * 仅在 Windows（`win32`）按大小写不敏感比对，不在 Linux 上错误 `.toLowerCase()`。
- */
-export function samePath(a, b) {
-  if (a === undefined || a === null || b === undefined || b === null) return false
-  if (String(a).trim() === '' || String(b).trim() === '') return false
-  const ca = canonicalPath(a)
-  const cb = canonicalPath(b)
-  if (!ca || !cb) return false
-  if (ca === cb) return true
-  if (process.platform === 'win32') {
-    return ca.toLowerCase() === cb.toLowerCase()
-  }
-  return false
-}
-
-/** 路径归一化成正斜杠。进出集合都过这一层，别各写各的。 */
-export function posixPath(p) {
-  return String(p ?? '').replace(/\\/g, '/')
-}
 
 /**
  * 把一个 Buffer 解成文本：先按严格 UTF-8，再按 UTF-16，最后宽松兜底。
@@ -147,27 +109,6 @@ export function readUtf8Strict(p) {
 }
 
 /**
- * 本文件是不是被**直接执行**（而不是被 import）。
- *
- * 判据不能用字面路径比较：`process.argv[1]` 保留调用方写下的写法，而 `import.meta.url`
- * 已被 Node 解析成真实路径。经符号链接或 junction 调用时两者永不相等，脚本于是
- * **什么都不做并返回 0**——而调用方会把它读成「检查通过」。所以按真实路径归一后比较。
- */
-export function isMainModule(metaUrl, argv1) {
-  if (typeof argv1 !== 'string' || argv1 === '') return false
-  const target = fileURLToPath(metaUrl)
-  try {
-    if (resolve(argv1) === resolve(target)) return true
-  } catch { /* 路径非法就走真实路径比较 */ }
-  const real = (p) => {
-    try { return realpathSync.native(p) } catch { return undefined }
-  }
-  const a = real(argv1)
-  const b = real(target)
-  return a !== undefined && b !== undefined && a === b
-}
-
-/**
  * frontmatter 区块（不含两端的 `---` 行）。不是 frontmatter 时返回 undefined。
  *
  * 只此一处切分：能力目录的识别、版本读取都从这里取块。各切各的迟早会在某个边界条件上
@@ -205,28 +146,6 @@ export function skillSource(text) {
   return m === null ? undefined : m[1].trim()
 }
 
-/** 提取 Git 远端地址的主机名与协议（不依赖平台）。 */
-export function parseRemoteUrlHost(value) {
-  const s = String(value ?? '').trim()
-  if (!s) return { protocol: 'unknown', host: undefined }
-  if (/^file:\/\//i.test(s)) return { protocol: 'file', host: undefined }
-  const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\/(?:[^/@]+@)?([^/:?#]+)(?::\d+)?(?:\/|$)/i.exec(s)
-  if (schemeMatch) {
-    const proto = schemeMatch[1].toLowerCase()
-    const protocol = proto === 'ssh' ? 'ssh' : (proto === 'http' || proto === 'https' ? 'https' : proto)
-    return { protocol, host: schemeMatch[2].toLowerCase() }
-  }
-  const scpMatch = /^(?:[^/:@\s]+@)?([^/:@\s]+):(.+)$/.exec(s)
-  if (scpMatch && !/^[A-Za-z]:\\/.test(s) && !/^[A-Za-z]:\//.test(s)) {
-    return { protocol: 'ssh', host: scpMatch[1].toLowerCase() }
-  }
-  const bareHostMatch = /^([^/\s]+\.[^/\s]+)\/(.+)$/.exec(s)
-  if (bareHostMatch) {
-    return { protocol: 'unknown', host: bareHostMatch[1].toLowerCase() }
-  }
-  return { protocol: 'unknown', host: undefined }
-}
-
 /**
  * 把仓库地址归一成 `owner/name`。
  *
@@ -257,26 +176,6 @@ export function repoPath(value) {
   }
   s = s.replace(/\.git$/, '').replace(/^\/+/, '').replace(/\/+$/, '')
   return /^[^/\s]+\/[^/\s]+$/.test(s) ? s : undefined
-}
-
-const GITHUB_HOST_RE = /^(?:www\.|ssh\.)?github\.com$/i
-
-/**
- * 把一个 **GitHub** 地址归一成 `owner/name`（支持 `~/.ssh/config` SSH 别名映射与 `ssh.github.com:443`）。
- * 不是 GitHub 的地址返回 undefined。
- */
-export function githubRepoPath(value, sshHostMap) {
-  const s = String(value ?? '').trim()
-  if (!s) return undefined
-  const { protocol, host } = parseRemoteUrlHost(s)
-  if (!host) return undefined
-  let effectiveHost = host
-  if (protocol === 'ssh' && sshHostMap) {
-    const mapped = lookupSshHost(sshHostMap, host)
-    if (mapped) effectiveHost = mapped.toLowerCase()
-  }
-  if (!GITHUB_HOST_RE.test(effectiveHost)) return undefined
-  return repoPath(s)
 }
 
 export { flushAndExit } from '../../kit/skills/lib/cli.mjs'

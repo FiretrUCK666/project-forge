@@ -37,7 +37,7 @@ metadata:
 5. **先最小运行复现，再评整类加固（四步通用准则）**：
    - **① 最小运行复现消误报**：静态告警、审查疑点或推测缺陷，一律先用最小可执行 PoC 证明它真实可达；复现不出来就先当误报处理，不写补丁；
    - **② 复跑证伪 + 回归防护**：修完用**同一条** PoC 复跑变绿，并把正反两面断言固化进回归用例，防止同类问题再溜进来；
-   - **③ 评估整类加固（Tier 1/2）**：确认这个单点缺陷是不是同一种模式在别处也有的折射——能靠类型/静态门禁/Linter 下沉就做 Tier 1，能靠共享边界原语一次性收口就做 Tier 2，别只补出问题的那一处；
+   - **③ 评估整类加固（Tier 1/2）**：确认这个单点缺陷是不是同一种模式在别处也有的折射——能靠共享边界原语或架构解耦一次性收口就做 Tier 1，能靠类型/静态门禁/Linter 下沉拦截就做 Tier 2，别只补出问题的那一处；
    - **④ 只锁客观边界**：验收锁在产物、接口与断言上，不锁私有实现过程——过程一改就误报的规则，只会逼人绕过。
 6. **有界优化循环 `cycle`（只读编排，不自旋）**：
    - 四阶段推进：`Observe`（找盲区与热点）-> `PoC/Escalate (autonomous)`（先复现再升级建单）-> `Fix/Verify`（走正流修并复跑）-> `Reflect`（评整类加固）；
@@ -50,8 +50,8 @@ metadata:
 # 1. 自动扫描功能地图盲区、高频信号热点与近期变更，输出补测计划
 node ".agents/skills/dev-iterate/scripts/iterate.mjs" plan [--dir <repo>] [--tier integration|e2e|perf|regression] [--json]
 
-# 2. 按自然语言主题定向勘察并规划/生成原生测试（先预演，传 --write 落盘并增量更新 testRefs）
-node ".agents/skills/dev-iterate/scripts/iterate.mjs" generate --focus "<业务流或模块主题>" [--tier integration|e2e|perf|regression] [--write] [--json]
+# 2. 按自然语言主题定向勘察并规划/生成原生测试（先预演，传 --write 落盘并增量更新 testRefs；--limit 控制候选上限）
+node ".agents/skills/dev-iterate/scripts/iterate.mjs" generate --focus "<业务流或模块主题>" [--tier integration|e2e|perf|regression] [--limit 5] [--write] [--json]
 
 # 3. 分片并发实跑新增与关联原生测试套件；遇真实失败或性能越阈自动写信号并经 escalation 建单
 node ".agents/skills/dev-iterate/scripts/iterate.mjs" run [--targets <a,b>] [--concurrency 4] [--perf-budget-ms 15000] [--escalate] [--json]

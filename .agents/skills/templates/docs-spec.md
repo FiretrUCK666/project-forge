@@ -15,6 +15,9 @@ implemented: false
 plan_critique: pending
 related_prd: null
 related_todo: null
+task_id: null
+scope_files: []
+depends_on: []
 high_risk_paths: []
 ---
 
@@ -54,7 +57,6 @@ flowchart LR
 - **本期不做**：{{NON_GOALS}}
 - **复用既有模块**：{{REUSABLE}}
 - **架构基线关系**：<对齐既有不变量与 `arch-rules`；若冲突，须先退回更新>（依据：{{TDD_REF}}）
-- **替代方案与否决理由**：<还考虑过哪条路、为什么不选它——这段最能防止下一轮推翻重来>
 
 <!-- /section -->
 

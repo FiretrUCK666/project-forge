@@ -44,7 +44,7 @@ export const VALID_STATUS_BY_TYPE = Object.freeze({
   todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
 })
 
-const CONCRETE_ANCHOR_RE = /(?:`[^`]+`|\bexit\b|退出码|\bassert|expect|返回\s*\d|status\s*=|\.[a-z]{1,4}\b|\d+\s*(?:ms|s|条|项|个|KB|B|行))/i
+const DOC_CONCRETE_ANCHOR_RE = /(?:`[^`]+`|\bexit\b|退出码|\bassert|expect|返回\s*\d|status\s*=|\.[a-z]{1,4}\b|\d+\s*(?:ms|s|条|项|个|KB|B|行))/i
 const CONVENTION_DOC_DIRS = new Set(['docs/prd', 'docs/specs', 'docs/todo', 'docs/archive', 'docs/archive/prd', 'docs/archive/specs', 'docs/archive/todo'])
 
 function scanActiveContracts(root) {
@@ -425,7 +425,7 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
   for (const item of bodyLines) {
     collectPlaceholderErrors(item.rawLine, item.strippedLine, item.lineNo, errors)
     const isCriterion = /^- \[[ xX]\]\s+C\d+\b/.test(item.rawLine)
-    if (isCriterion && VAGUE_FLUFF_RE.test(item.strippedLine) && !CONCRETE_ANCHOR_RE.test(item.strippedLine)) {
+    if (isCriterion && VAGUE_FLUFF_RE.test(item.strippedLine) && !DOC_CONCRETE_ANCHOR_RE.test(item.strippedLine)) {
       errors.push({
         code: 'VAGUE_CRITERION',
         line: item.lineNo,

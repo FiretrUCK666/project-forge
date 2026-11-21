@@ -63,16 +63,17 @@ metadata:
 # 1. 五档分流 + 门型判断 + 改哪看哪联动预警（结论含建议规划态 planMode）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --summary "<需求描述>" [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--plan-mode interactive | autonomous]
 
-# 2. 按统一模板生成文档（自动按工作区形态裁剪适用章节，--no-prune 强制全保留；--prd/--spec 建立互链并继承；支持 --milestone）
-node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree] [--no-prune]
+# 2. 按统一模板生成文档（支持 prd/spec/todo/tdd/pair/all；--no-prune 全保留；--prd/--spec 建立互链并继承；支持 --milestone）
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" init --kind <prd|spec|todo|tdd|pair|all> --slug "<slug>" --title "<标题>" [--issue <N>] [--milestone <N|标题>] [--task "<taskId>"] [--prd "<prdPath>"] [--spec "<specPath>"] [--plan-mode interactive | autonomous] [--worktree] [--no-prune]
 
 # 3. 多轮互动澄清落盘与规划内审自净化（实质性校验零字数门槛、跨轮防退化比对、Mermaid 16/12、Frontmatter 互链）
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" clarify --file "docs/specs/<file>" --question "<问题>" --decision "<结论>" [--by user] [--criterion "<追加 C 项>"]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "docs/specs/<YYMMDD-slug-spec>.md"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit .
 
-# 4. 关联、独立 Critique（通过/退回/继续重写/人工解锁）、批准、成对归档（--include-master-prd 含总控 PRD）与取代
+# 4. 关联、生成只读评审边界（critique-scope）、独立 Critique、批准、成对归档（--include-master-prd）与取代
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "<slug-or-path>" [--issue <N>] [--pr <M>] [--milestone <N|标题>] [--branch <B>] [--status <S>]
+node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-scope --file "docs/specs/<file>" [--reviewer "<criticId>"] [--round <N>] [--json]
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-pass --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --summary "<结论>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-reject --file "docs/specs/<file>" --reviewer "<criticId>" --round 1 --findings "<意见>" --summary "<退回原因>"
 node ".agents/skills/dev-plan/scripts/doc-plan.mjs" critique-continue --file "docs/specs/<file>" --reason "<改进方向>"

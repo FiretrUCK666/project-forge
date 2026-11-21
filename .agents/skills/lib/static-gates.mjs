@@ -16,7 +16,7 @@ import {
   computePatchRawDigest, getCachedCommitDiff, getCachedEntriesDiffText, parseRawAndUnifiedDiff,
   readHeadFast, resolveGitDirFast, resolveRefShaFast, setCachedCommitDiff,
 } from './git-fast.mjs'
-import { hasHumanMergeAuthority } from './profile.mjs'
+import { DEFAULT_HIGH_RISK_PATHS, hasHumanMergeAuthority, parseArchRuleItem } from './profile.mjs'
 import {
   buildLexedViews, checkProcessArtifactFilename, detectCommentedDeadCodeBlocks,
   extractLineCommentInfo, findProcessArtifactFilenameViolations, HARD_SLEEP_RULES,
@@ -81,20 +81,7 @@ export function countTextLines(text) {
   return lines.length
 }
 
-/** 通用路径 glob 匹配（支持 `*`、`**`、`?` 及目录前缀斜杠）。 */
-function parseArchRuleItem(rawRule) {
-  if (rawRule && typeof rawRule === 'object') {
-    const from = String(rawRule.fromGlob ?? rawRule.from ?? '').trim()
-    const to = String(rawRule.toGlob ?? rawRule.to ?? '').trim()
-    return from && to ? { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` } : null
-  }
-  const m = /^(.+?)\s*(?:->|→)\s*(.+)$/.exec(String(rawRule ?? '').trim())
-  if (!m) return null
-  const from = m[1].trim().replace(/^`+|`+$/g, '')
-  const to = m[2].trim().replace(/^`+|`+$/g, '')
-  if (!from || !to || /^(?:none|<[^>]+>)$/i.test(from) || /^(?:none|<[^>]+>)$/i.test(to)) return null
-  return { from, to, fromGlob: from, toGlob: to, raw: `${from} -> ${to}` }
-}
+export { parseArchRuleItem }
 
 function resolveGoModules(repoRoot) {
   const modules = []
@@ -294,7 +281,7 @@ export function classifyDoorType({
   diffBytes = 0,
 } = {}) {
   const files = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => posixPath(f).replace(/^\.\//, ''))
-  const riskPatterns = [...new Set([...(Array.isArray(highRisk) ? highRisk : []), '.github/workflows/', 'AGENTS.md', '.gitattributes'])]
+  const riskPatterns = [...new Set([...(Array.isArray(highRisk) ? highRisk : []), ...DEFAULT_HIGH_RISK_PATHS])]
   const signals = []
 
   if (gateWeakened) signals.push('检测到弱化/放宽测试或 CI 门禁检查（必须人工拍板）')

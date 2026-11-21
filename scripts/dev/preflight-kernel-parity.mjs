@@ -35,6 +35,25 @@ const SINGLE_SOURCE_DEFS = Object.freeze([
   { name: 'parseSshConfigHostMap', re: /\bfunction\s+parseSshConfigHostMap\s*\(/, canonical: 'kit/skills/lib/platform-probe.mjs' },
   { name: 'lookupSshHost', re: /\bfunction\s+lookupSshHost\s*\(/, canonical: 'kit/skills/lib/platform-probe.mjs' },
   { name: 'countTextLines', re: /\bfunction\s+countTextLines\s*\(/, canonical: 'kit/skills/lib/static-gates.mjs' },
+  { name: 'canonicalPath', re: /\bfunction\s+canonicalPath\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'samePath', re: /\bfunction\s+samePath\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'posixPath', re: /\bfunction\s+posixPath\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'isMainModule', re: /\bfunction\s+isMainModule\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'writeAtomic', re: /\bfunction\s+writeAtomic\s*\(/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'VERIFY_EXIT', re: /\bconst\s+VERIFY_EXIT\s*=/, canonical: 'kit/skills/lib/exit-codes.mjs' },
+  { name: 'LIKELY_DEFAULT_BRANCHES', re: /\bconst\s+LIKELY_DEFAULT_BRANCHES\s*=/, canonical: 'kit/skills/lib/git-core.mjs' },
+  { name: 'summarizeSkillDescription', re: /\bfunction\s+summarizeSkillDescription\s*\(/, canonical: 'kit/skills/lib/skill-discovery.mjs' },
+  { name: 'DEFAULT_KIT_SKILLS_DIR', re: /\bconst\s+DEFAULT_KIT_SKILLS_DIR\s*=/, canonical: 'kit/skills/lib/skill-discovery.mjs' },
+  { name: 'parseRemoteUrlHost', re: /\bfunction\s+parseRemoteUrlHost\s*\(/, canonical: 'kit/skills/lib/platform-probe.mjs' },
+  { name: 'githubRepoPath', re: /\bfunction\s+githubRepoPath\s*\(/, canonical: 'kit/skills/lib/platform-probe.mjs' },
+  { name: 'NON_API_CLIENT_TIERS', re: /\bconst\s+NON_API_CLIENT_TIERS\s*=/, canonical: 'kit/skills/lib/github-client.mjs' },
+  { name: 'PLACEHOLDER_TEXT_RE', re: /\bconst\s+PLACEHOLDER_TEXT_RE\s*=/, canonical: 'kit/skills/lib/doc-substantive.mjs' },
+  { name: 'parseArchRuleItem', re: /\bfunction\s+parseArchRuleItem\s*\(/, canonical: 'kit/skills/lib/profile.mjs' },
+  { name: 'looksLikeCommentedCode', re: /\bfunction\s+looksLikeCommentedCode\s*\(/, canonical: 'kit/skills/lib/static-gates-lexer.mjs' },
+  { name: 'extractCriteria', re: /\bfunction\s+extractCriteria\s*\(/, canonical: 'kit/skills/lib/criteria-lock.mjs' },
+  { name: 'DECIDED_RE', re: /\bconst\s+DECIDED_RE\s*=/, canonical: 'kit/skills/lib/pending-decisions.mjs' },
+  { name: 'AGENTS_MAX_BYTES', re: /\bconst\s+AGENTS_MAX_BYTES\s*=/, canonical: 'kit/skills/lib/tool-owned.mjs' },
+  { name: 'registerHostingProvider', re: /\bfunction\s+registerHostingProvider\s*\(/, canonical: 'kit/skills/lib/platform-registry.mjs' },
 ])
 
 const RETIRED_DEAD_EXPORTS = Object.freeze([
@@ -89,7 +108,7 @@ export function runKernelParityChecks({ ROOT = DEFAULT_ROOT, rel, readText, fail
     failFn('内核对等：isInsideDir 路径分隔符前缀边界判定失效（/tmp/repo2 与 /tmp/repo 混淆）')
   }
 
-  noteFn(`内核对等：${productFiles.length} 个产品脚本通过 5 组共享原语单源、--slot 零残留与 800 行边界对拍`)
+  noteFn(`内核对等：${productFiles.length} 个产品脚本通过 ${SINGLE_SOURCE_DEFS.length} 项共享原语单源、--slot 零残留与 800 行边界对拍`)
   return { ok: failures.length === 0, checked: productFiles.length, failures }
 }
 

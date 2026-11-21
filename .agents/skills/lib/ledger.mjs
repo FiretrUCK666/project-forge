@@ -122,14 +122,15 @@ export function hasExploredEvidence(ledger) {
 /** 构建符合跨模块统一契约的默认任务账本结构。 */
 export function createDefaultLedger(partial = {}) {
   const taskId = sanitizeTaskId(partial.taskId)
+  const role = partial.role ?? 'local-only'
   return {
     taskId,
     slug: partial.slug ?? defaultSlug(taskId),
     caseType: partial.caseType ?? 3,
     tier: partial.tier ?? 2,
     isolation: partial.isolation ?? 'worktree',
-    role: partial.role ?? 'local-only',
-    providerId: partial.providerId ?? 'github',
+    role,
+    providerId: partial.providerId ?? (role === 'local-only' ? 'none' : null),
     branch: partial.branch ?? null,
     baseBranch: partial.baseBranch ?? 'main',
     baseSha: partial.baseSha ?? null,

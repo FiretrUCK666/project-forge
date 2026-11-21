@@ -639,13 +639,32 @@ function formatText(map) {
   return `${lines.join('\n')}\n`
 }
 
+function printHelp() {
+  process.stdout.write([
+    '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [选项]',
+    '',
+    '选项：',
+    '  --dir <path>           目标仓库根目录',
+    '  --focus <subdir>       聚焦指定子目录',
+    '  --task <id>            将探索证据写入对应任务账本',
+    '  --tier <tier>          覆盖探索层级（direct-read | single-subagent | parallel-subagents）',
+    '  --by <actor>           记录探索执行者标识',
+    '  --write-feature-map    按探测结果增量预填 docs/feature-map.json',
+    '  --json                 输出结构化 JSON',
+    '  --help                 显示帮助',
+    '',
+    '无深度限制枚举全仓文本源码与多生态包清单（git ls-files -z + 4KB NUL 探测），',
+    '输出入口、Dev Profile 命令、带 working-directory 的 CI 步骤、可复用模块、文档索引与 Feature Map。',
+  ].join('\n') + '\n')
+}
+
 async function main(argv) {
   let cli
   try {
     cli = parseStandardCli(argv, {
       positionalDir: 'first',
-      booleanFlags: ['json', 'help', 'write-feature-map'],
-      valueFlags: ['focus', 'dir', 'repo', 'task', 'tier', 'by'],
+      booleanFlags: ['write-feature-map'],
+      valueFlags: ['focus', 'task', 'tier', 'by'],
       usageHint: 'node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--focus <subdir>] [--task <id>] [--write-feature-map] [--json]',
     })
   } catch (err) {
@@ -653,12 +672,7 @@ async function main(argv) {
     return 2
   }
   if (cli.help) {
-    process.stdout.write([
-      '用法：node .agents/skills/dev-explore/scripts/repo-map.mjs [targetDir] [--dir <path>] [--focus <subdir>] [--task <id>] [--write-feature-map] [--json]',
-      '',
-      '无深度限制枚举全仓文本源码与多生态包清单（git ls-files -z + 4KB NUL 探测），',
-      '输出入口、Dev Profile 命令、带 working-directory 的 CI 步骤、可复用模块、文档索引与 Feature Map。',
-    ].join('\n') + '\n')
+    printHelp()
     return 0
   }
 

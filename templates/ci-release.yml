@@ -66,7 +66,7 @@ jobs:
       INPUT_TAG: ${{ inputs.tag }}
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       NOTES_DIR: 'docs/release-notes'  # TODO(2)
-      VERSION_MANIFEST: 'package.json'  # TODO(2)
+      VERSION_MANIFEST: '<版本来源文件>'  # TODO(2)
     steps:
       - name: 校验触发标签非空（防 workflow_dispatch 落回默认分支名）
         run: |
@@ -103,8 +103,12 @@ jobs:
           # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
           # 示例 3（SKILL.md metadata.version）：
           # ACTUAL=$(git show "$TAG:SKILL.md" | sed -n 's/^[[:space:]]*version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' | head -1)
+          # 示例 4（Java pom.xml）：
+          # ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" | sed -n 's/^[[:space:]]*<version>\([^<]*\)<\/version>.*/\1/p' | head -1)
           ACTUAL=$(git show "$TAG:$VERSION_MANIFEST" \
-            | sed -n 's/^[[:space:]]*"\{0,1\}version"\{0,1\}[[:space:]]*[:=][[:space:]]*"\{0,1\}\([^",]*\)"\{0,1\}.*/\1/p' \
+            | sed -n \
+              -e 's/^[[:space:]]*"\{0,1\}version"\{0,1\}[[:space:]]*[:=][[:space:]]*["'\'']\{0,1\}\([^"'\'',]*\)["'\'']\{0,1\}.*/\1/p' \
+              -e 's/^[[:space:]]*<version>\([^<]*\)<\/version>.*/\1/p' \
             | head -1)
           if [ -z "$ACTUAL" ]; then
             echo "::error::在标签 $TAG 的 $VERSION_MANIFEST 中读不到版本号。"

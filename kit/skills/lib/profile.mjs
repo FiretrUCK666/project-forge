@@ -17,6 +17,14 @@ import {
 
 export { discoverWorkspacePackages, parseYamlWorkspaceGlobs, sniffLayeredCommands }
 
+export const DEFAULT_HIGH_RISK_PATHS = Object.freeze(['.github/workflows/', 'AGENTS.md', '.gitattributes'])
+
+export function defaultHighRiskPaths(repoRoot) {
+  return repoRoot && existsSync(join(repoRoot, '.github'))
+    ? [...DEFAULT_HIGH_RISK_PATHS]
+    : ['AGENTS.md', '.gitattributes']
+}
+
 export const DEV_PROFILE_KEYS = Object.freeze([
   'quick-test',
   'full-test',
@@ -83,7 +91,7 @@ function parseListValue(raw) {
     .filter((x) => x && !isPlaceholderVal(x))
 }
 
-function parseArchRuleItem(rawRule) {
+export function parseArchRuleItem(rawRule) {
   if (rawRule && typeof rawRule === 'object') {
     const rawFrom = rawRule.fromGlob ?? rawRule.from
     const rawTo = rawRule.toGlob ?? rawRule.to
@@ -459,7 +467,7 @@ export function parseAgentsProfile(repoRoot) {
     return true
   })
   if (profile.highRisk.length === 0 && !explicitNone.has('high-risk')) {
-    profile.highRisk = ['.github/workflows/', 'AGENTS.md']
+    profile.highRisk = defaultHighRiskPaths(repoRoot)
   }
 
   const needFallback = (!profile.quickTest && !explicitNone.has('quick-test'))

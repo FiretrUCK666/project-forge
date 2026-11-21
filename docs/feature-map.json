@@ -27,6 +27,7 @@
         "scripts/lib/platform/github-probe.mjs",
         "scripts/lib/render.mjs",
         "scripts/lib/text.mjs",
+        "kit/skills/lib/platform-registry.mjs",
         "kit/skills/lib/platform.mjs",
         "kit/skills/lib/platform-probe.mjs",
         "kit/skills/lib/git-core.mjs",
@@ -42,7 +43,7 @@
       ],
       "businessFlows": [
         "只读扫描目标仓生态、Git 拓扑与文档现状并输出 JSON/Markdown",
-        "按双轴五态身份判定缺口与 artifactPlan 十一项定界"
+        "按双轴五态身份判定缺口与 artifactPlan 十三项定界"
       ],
       "verificationTools": [
         {
@@ -616,11 +617,12 @@
       "modules": [
         "scripts/dev/preflight.mjs",
         "scripts/dev/preflight-suite.mjs",
+        "scripts/dev/preflight-suite-checks.mjs",
         "scripts/dev/preflight-kernel-parity.mjs",
         "scripts/dev/preflight-contracts.mjs",
+        "scripts/dev/preflight-contract-rules.mjs",
         "scripts/dev/preflight-e2e.mjs",
-        "scripts/dev/fixtures-kernel-dedup.mjs",
-        "scripts/dev/injections-data-kernel-dedup.mjs",
+        "scripts/dev/cli-parity.mjs",
         "scripts/dev/evidence.mjs",
         "scripts/dev/bench.mjs",
         "scripts/dev/write-probe-audit.mjs"

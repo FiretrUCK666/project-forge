@@ -29,10 +29,10 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --save-baseline   
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --changed --quiet --json  # flow finalize/verify 轻量增量体检
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit . --skip-govern --reason "<原因>" --json  # 显式留痕跳过，严禁无痕绕过
 
-# 2. 分批计划（--write-todo 生成标准 Frontmatter `-todo.md`）/ 多轮收敛 / 安全生成 GitHub Issue
+# 2. 分批计划（--write-todo 生成标准 Frontmatter `-todo.md`）/ 多轮收敛 / 按 TaskBackend 三态建单（github / generic-git / local-only）
 node .agents/skills/dev-govern/scripts/govern-audit.mjs plan [--write-todo]     # 兼容 --plan-only
 node .agents/skills/dev-govern/scripts/govern-audit.mjs audit --execute --loop
-node .agents/skills/dev-govern/scripts/govern-audit.mjs issues [--apply-issues] # 兼容 --issues
+node .agents/skills/dev-govern/scripts/govern-audit.mjs issues [--apply-issues] # 兼容 --issues（支持三态本地与远端工单）
 
 # 3. 园艺信号记录、聚类、事后抽检与三层倒金字塔自动复盘
 node .agents/skills/dev-govern/scripts/govern-audit.mjs record --pattern <key> --message "<text>" [--module <dir>] [--file <path>]
@@ -90,7 +90,7 @@ node .agents/skills/dev-govern/scripts/govern-audit.mjs reconcile
 
 1. **最小运行复现消误报**：任何静态告警、审查疑点或推测缺陷，先写一个最小可执行复现证明它真实可达；复现不出来就先按误报处理，不写补丁、不建单。
 2. **复跑证伪 + 回归防护**：修完后用**同一条**复现命令复跑变绿，并把正反两面断言固化进回归用例，让同类问题再出现时当场被拦下。
-3. **评估整类加固（Tier 1 / Tier 2）**：确认这个单点缺陷是否折射出同模式共性——能靠类型、静态门禁或原生校验配置下沉就做 **Tier 1**；能靠共享边界原语一次性收口就做 **Tier 2**。只补出问题的那一处，等于等着同一个问题换个位置再来。
+3. **评估整类加固（Tier 1 / Tier 2）**：确认这个单点缺陷是否折射出同模式共性——能靠共享边界原语或架构解耦一次性收口的做 **Tier 1**；能靠类型、确定性静态门禁或原生校验配置下沉拦截的做 **Tier 2**。只补出问题的那一处，等于等着同一个问题换个位置再来。
 4. **只锁客观边界**：加固后的验收锁在产物、接口与断言上，不锁私有实现过程。过程一改就误报的规则只会逼人绕过它。
 
 ## 园艺缓冲聚类、事后抽检与顽固 Bug 三步止损

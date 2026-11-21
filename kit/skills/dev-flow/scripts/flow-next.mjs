@@ -314,7 +314,7 @@ export async function handleNext(opts, roots) {
         mainRoot: roots.mainRoot,
         gitDir: roots.gitDir,
         role: selectedTask?.role && selectedTask.role !== 'local-only' ? selectedTask.role : 'maintainer',
-        providerId: topo.providerId ?? 'github',
+        providerId: topo.providerId ?? 'none',
       })
       if (selectedTask?.role === 'local-only') {
         driftWarnings.push({

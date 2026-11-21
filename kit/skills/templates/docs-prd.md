@@ -7,7 +7,8 @@ updated: {{TODAY}}
 issue: {{ISSUE}}
 pr: null
 owner: "{{OWNER}}"
-plan_mode: autonomous
+plan_mode: interactive
+multi_spec: false
 plan_critique: pending
 related_spec: null
 related_todo: null
@@ -19,7 +20,7 @@ related_todo: null
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| dropped`） |
+| 当前状态 | `draft`（枚举：`draft \| active \| in_review \| done \| superseded \| dropped`） |
 | 创建 / 更新 | `{{TODAY}}` / `{{TODAY}}` |
 | 关联 Issue / PR | {{ISSUE_LABEL}} / 未关联 |
 | 提出方 / 负责人 | {{OWNER_LABEL}} |
@@ -194,4 +195,4 @@ related_todo: null
 
 <!-- /section -->
 
-> 确认需调整系统模块或对外契约时，以此 PRD 为依据补充 `docs/specs/` 后再进入实现；需求全部交付后随同关联 `SPEC`/`Todo` 成对归档至 `docs/archive/prd/`。
+> 确认需调整系统模块或对外契约时，以此 PRD 为依据补充 `docs/specs/` 后再进入实现；需求全部交付后随同关联 `SPEC`/`Todo` 成对归档至 `docs/archive/prd/`；`1:N` 总控 PRD 走四态闭环（子切片合入时仅追加关联进度，全部分支交付完成后统一归档总控 PRD）。

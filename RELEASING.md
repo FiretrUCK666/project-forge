@@ -23,7 +23,7 @@
 ## 说明写在哪
 
 **目录模式**：`docs/release-notes/<标签>.md`，一个标签一份文件，**文件名与标签逐字相同**。
-标签带 `v` 前缀，所以 `v3.1.0` 对应 `docs/release-notes/v3.1.0.md`。
+标签带 `v` 前缀，所以 `v6.0.0` 对应 `docs/release-notes/v6.0.0.md`。
 
 它和源码一起入库、一起走同一次提交与推送。发布页上的正文由
 `.github/workflows/release.yml` 从仓库里那份文件投递过去——**说明只有一个来源**，
@@ -57,7 +57,7 @@
 
 ### 版本号怎么定
 
-先定号，再动手。版本号只有一个权威来源：`SKILL.md` 的 `metadata.version`；Git 标签与它**必须严格同号**（标签 `v3.1.0` 对应 `3.1.0`）。这个字段存在的唯一理由，是让没有版本历史的副本知道自己属于哪一版——对不上就是在说假话。
+先定号，再动手。版本号只有一个权威来源：`SKILL.md` 的 `metadata.version`；Git 标签与它**必须严格同号**（标签 `v6.0.0` 对应 `6.0.0`）。这个字段存在的唯一理由，是让没有版本历史的副本知道自己属于哪一版——对不上就是在说假话。
 
 **支持任意跨度与自定义版本号**：长周期多轮迭代后允许直接跨越多级版本或指定自定义号（例如 `v1.0.0` 连改多轮后直接发布 `3.0.0` 或 `v4.0.0`），不假设每次只能按一位小步递进。
 
@@ -79,12 +79,14 @@
    node scripts/dev/preflight.mjs                              # 结构 + 引用 + 模板 + 自举 + 冒烟
    node scripts/dev/gap-coverage.mjs                           # survey 缺口与 review 结论配对检查
    node scripts/dev/fixtures.mjs                               # 行为断言：正反双向
+   node scripts/dev/bench.mjs                                  # 核心命令与快照性能基准
+   node scripts/dev/e2e-zip-harness.mjs                        # 真包解压 E2E 沙盒全链路实证
+   node scripts/dev/verify-injections.mjs --jobs 4             # 故障注入全量复验（全红、还原后全绿）
    node scripts/compose-agents.mjs . --check                   # 本仓库契约完好
    node scripts/equip.mjs . --check                            # kit/skills 与 .agents/skills 字节级一致
    node scripts/review.mjs .                                   # 交付体检，0 个「缺」
    node scripts/sync-toc.mjs README.md README.en.md --check     # 双语 README 目录同步
    node .agents/skills/dev-govern/scripts/govern-audit.mjs audit .
-   node scripts/dev/verify-injections.mjs                      # 故障注入全量复验（全红、还原后全绿）
    ```
 
    发版前跑的是**要发出去的那一份**，不是「我本地看着没问题」。用户包内容也要真导一次：
@@ -124,4 +126,4 @@
 `REPO_ONLY_*` 两处必须说同一件事——`preflight` 会核对。两处不一致的症状是：某个只服务本仓库
 的目录悄悄进了用户包，而拿到包的人打开一看是个他看不懂的协作设施。
 
-新增自用文件时放进 `scripts/dev/` 或 `docs/`——那两处整目录排除，不必逐个登记。
+新增自用文件时放进 `scripts/dev/`、`docs/`、`.agents/` 或 `.github/`——这些目录由 `.gitattributes` 整目录排除出用户包，不必逐个登记。

@@ -449,11 +449,21 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       }))
   }
 
+  const hasRemote = typeof facts.git.remote === 'string' && facts.git.remote.length > 0
+    && facts.git.isRepoRoot !== false
+  const caps = facts.git.capabilities ?? null
+  const onGithub = facts.git.providerId
+    ? (facts.git.providerId === 'github' || Boolean(facts.git.topology?.providerIds?.includes('github')))
+    : (typeof facts.git.remote === 'string' && /github\.com/i.test(facts.git.remote))
+  const canReleasePlatform = caps
+    ? (caps.known === true && caps.releases === true)
+    : onGithub
   const releaseWorkflows = facts.docs.workflowFacts.releaseWorkflows ?? []
   if (facts.docs.workflowFacts.hasRelease) {
     add(finding('ok', 'release', 'release.present',
       releaseWorkflows.length > 0 ? `发布自动化有（${releaseWorkflows.join('、')}）` : '发布自动化有'))
-  } else if (facts.ecosystem.publishable && !facts.ecosystem.private && !decisions.has('no-release')) {
+  } else if (hasRemote && onGithub && canReleasePlatform
+    && facts.ecosystem.publishable && !facts.ecosystem.private && !decisions.has('no-release')) {
     add(finding('notice', 'release', 'release.absent',
       '项目有可发布形态，但没有发布自动化——可以手发，也可以让标签触发', {
         decision: 'no-auto-release',
@@ -516,12 +526,10 @@ export async function reviewProject(targetDir, { scopes } = {}) {
   }
 
   // ── 协作基础设施 ──────────────────────────────────────────────────
-  const hasRemote = typeof facts.git.remote === 'string' && facts.git.remote.length > 0
-    && facts.git.isRepoRoot !== false
-  if (!hasRemote) {
-    add(finding('ok', 'collaboration', 'collab.no-remote', '没有远端：谈不上收别人的改动'))
+  if (!hasRemote || facts.git.role === 'local-only' || facts.git.providerId === 'none') {
+    add(finding('ok', 'collaboration', 'collab.no-remote',
+      hasRemote ? '已启用本地模式：跳过远端协作基础设施检查' : '没有远端：谈不上收别人的改动'))
   } else {
-    const caps = facts.git.capabilities ?? null
     if (caps && caps.known === false) {
       add(finding('notice', 'collaboration', 'collab.remote-unknown',
         `认不出 ${caps.providerId ?? '这个'} 远端能做什么（Issue / PR / 发布 / 检查状态），`
@@ -540,14 +548,17 @@ export async function reviewProject(targetDir, { scopes } = {}) {
           }))
       }
     }
-    if (!facts.docs.prTemplate) {
+    const supportsPr = caps ? caps.pullRequests === true : onGithub
+    const supportsIssues = caps ? caps.issues === true : onGithub
+    const supportsBranchProtection = caps ? caps.branchProtection === true : onGithub
+    if (supportsPr && !facts.docs.prTemplate) {
       add(finding('notice', 'collaboration', 'collab.pr-template',
         '有远端却没有 PR 模板——别人提改动时不知道该说明什么，审查的人只能从代码反推意图', {
           decision: 'no-collab-templates',
           ref: { file: 'references/collaboration.md', section: '八、谁能合' },
         }))
     }
-    if (!facts.docs.issueTemplates) {
+    if (supportsIssues && !facts.docs.issueTemplates) {
       add(finding('notice', 'collaboration', 'collab.issue-templates',
         '有远端却没有 Issue 模板——每份缺陷报告都要来回追问「环境是什么、怎么复现」', {
           decision: 'no-collab-templates',
@@ -558,7 +569,7 @@ export async function reviewProject(targetDir, { scopes } = {}) {
       add(finding('ok', 'collaboration', 'collab.prt-safe',
         '用了 `pull_request_target` 但没检出提案的代码（合法用法）'))
     }
-    if (facts.git.role !== 'contributor-fork' && !decisions.has('no-ci')) {
+    if (supportsBranchProtection && facts.git.role !== 'contributor-fork' && !decisions.has('no-ci')) {
       if (decisions.has('branch-protection')) {
         add(finding('ok', 'collaboration', 'collab.branch-protection.ok', '已在 AGENTS.md「取舍」登记默认分支开关 A 保护策略'))
       } else if (!decisions.has('no-branch-protection')) {

@@ -10,8 +10,9 @@
  * 而失效的表现是「明明有标记却说干净」——那会把不可逆动作变成默认动作。
  */
 
-import { COMMON_SKIP_DIRS, isMacMetadataName, isMacOsJunkPath } from '../../kit/skills/lib/git-core.mjs'
+import { COMMON_SKIP_DIRS, LIKELY_DEFAULT_BRANCHES, isMacMetadataName, isMacOsJunkPath } from '../../kit/skills/lib/git-core.mjs'
 import {
+  UNIFIED_SKILL_NAMES,
   discoverCustomSkills,
   discoverKitSkills,
   discoverKitSkillsDetailed,
@@ -21,6 +22,8 @@ import { scanLines } from './markdown.mjs'
 
 export {
   COMMON_SKIP_DIRS,
+  LIKELY_DEFAULT_BRANCHES,
+  UNIFIED_SKILL_NAMES,
   discoverCustomSkills,
   discoverKitSkills,
   discoverKitSkillsDetailed,
@@ -46,6 +49,9 @@ export {
 } from '../../kit/skills/lib/verdict.mjs'
 
 export {
+  AGENTS_COMPACT_RECOMMENDED_BYTES,
+  AGENTS_MAX_BYTES,
+  AGENTS_WARN_BYTES,
   hasRealContent,
   isToolOwnedPath,
   isToolSkeletonFile,
@@ -280,10 +286,7 @@ export const FULL_READ_REFS = Object.freeze([
   'references/remote-github.md',
 ])
 
-/** 契约与工程套件预算上限（单一真相源）。 */
-export const AGENTS_MAX_BYTES = 30720
-export const AGENTS_COMPACT_RECOMMENDED_BYTES = 24576
-export const AGENTS_WARN_BYTES = AGENTS_COMPACT_RECOMMENDED_BYTES
+/** 工程套件预算上限（与 AGENTS_* 上限同源于 tool-owned.mjs）。 */
 export const KIT_SKILL_MAX_LINES = 180
 export const PF_MANIFEST_SCHEMA_VERSION = 3
 
@@ -296,18 +299,6 @@ export const REGION_MIGRATIONS = Object.freeze({
   项目红线: '修改守则补充',
   核心原则: '行事总纲',
 })
-
-/** 统一八技能规范名清单（波次演进期按磁盘已落盘目录动态装配与校验）。 */
-export const UNIFIED_SKILL_NAMES = Object.freeze([
-  'dev-explore',
-  'dev-plan',
-  'dev-edit',
-  'dev-flow',
-  'dev-verify-tools',
-  'dev-review',
-  'dev-iterate',
-  'dev-govern',
-])
 
 export function getKitSkills(kitSkillsRoot) {
   return Object.freeze(discoverKitSkills(kitSkillsRoot).map((s) => s.dirName))
@@ -431,18 +422,6 @@ export function conditionMarkers(text, file = 'template.md') {
 export function templateVarsOf(text) {
   return [...new Set([...String(text ?? '').matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
 }
-
-/**
- * 常见的默认分支名。
- *
- * 两个用途，都在同一处定义：`survey` 拿它当**闸门**（只有当前分支落在这里面，才允许把
- * 「当前分支」当默认分支用），`compose` 拿它当**掩码**（比对受管区间时把这些名字抹掉，
- * 免得换台机器跑就报漂移）。
- *
- * 它是**一份与环境无关的固定集合**，不是「已知的默认分支清单」——分支叫 `release/x`
- * 的项目照样是合法项目，只是那个名字不能当默认分支用。
- */
-export const LIKELY_DEFAULT_BRANCHES = Object.freeze(['main', 'master', 'trunk', 'develop', 'default', 'development'])
 
 // ── 用户包边界 ──────────────────────────────────────────────────────
 //

@@ -2,22 +2,13 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { extractCriteria } from './criteria-lock.mjs'
 import { readTextSafe } from './git.mjs'
 import { locateTopSlicesForPaths } from './doc-locator.mjs'
 import { parseDocFrontmatter, parseDocFilename } from './docs.mjs'
 import { matchFeatureMapForPaths } from './feature-map.mjs'
 import { nextReviewRound } from './ledger.mjs'
 import { discoverEvergreenDocs } from './profile.mjs'
-
-/** 从一份规划文档里抽出 `- [ ] Cn: ...` 的原文条目。 */
-function extractCriteria(text) {
-  const out = []
-  for (const line of String(text ?? '').replace(/\r\n/g, '\n').split('\n')) {
-    const m = /^- \[[ xX]\]\s+(C\d+)\s*[:：]\s*(.+)$/.exec(line.trim())
-    if (m) out.push({ id: m[1], text: m[2].trim() })
-  }
-  return out
-}
 
 /**
  * 从「影响路径」一类表述里抽出反引号包住的相对路径。

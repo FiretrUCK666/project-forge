@@ -2,7 +2,7 @@
  * shared.mjs —— 研发工作流内置技能套件的统一向后兼容出口。
  *
  * 严格零第三方依赖（仅 Node 18+ 内置模块），汇总重导出 cli、git、profile、
- * static-gates、ledger、docs、platform 七个正交内核模块的全部公开符号。
+ * static-gates、ledger、docs、platform 等各正交内核模块的全部公开符号。
  */
 
 export {

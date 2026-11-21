@@ -43,7 +43,8 @@ import {
 import { analyzeIssueDependencies } from '../../lib/workflow-policy.mjs'
 import {
   buildTargetRepoContext, detectRemoteDriftWarnings, findMatchingDocStrict,
-  getChangedFiles, migrateUncommittedPlanDocs, resolveAndHydrateTaskContexts, syncTaskDocsSafe,
+  getChangedFiles, migrateUncommittedPlanDocs, resolveAndHydrateTaskContexts,
+  resolvePreferredRemoteName, syncTaskDocsSafe,
 } from './flow-context.mjs'
 import { mountSharedDeps } from './worktree-deps.mjs'
 
@@ -273,7 +274,7 @@ async function ackInboundExternalPr(roots, state, prNumber, opts = {}) {
     client = probe?.client ?? null
   }
   const backend = opts._backend ?? createTaskBackend({
-    role: 'maintainer', providerId: 'github', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
+    role: 'maintainer', providerId: state.identity?.providerId ?? 'none', targetRepo, client, mainRoot: roots.mainRoot, gitDir: roots.gitDir,
   })
   if (!backend?.capabilities?.api || (!client && !opts._backend)) {
     return { synced: false, labelSynced: false, skipped: true, reason: 'offline-or-no-client' }
@@ -341,7 +342,7 @@ export async function handleStart(opts, roots) {
     }
   }
   let role = state.identity.role
-  const providerId = state.identity.providerId ?? 'github'
+  const providerId = state.identity.providerId ?? (role === 'local-only' ? 'none' : 'generic-git')
 
   if (role === 'clone-readonly' && !effectiveExternalPr) {
     const choice = opts['clone-choice']
@@ -603,7 +604,7 @@ export async function handleStart(opts, roots) {
     const reviewAbs = join(roots.mainRoot, reviewRel)
     let targetSha = opts['pr-ref'] ?? null
     if (!targetSha) {
-      const fetchRemote = state.remotesTopology?.find((r) => r.providerId === 'github')?.name ?? 'origin'
+      const fetchRemote = resolvePreferredRemoteName(state.remotesTopology, state.identity.providerId ?? 'github')
       const fetchRes = await gitRun(roots.mainRoot, ['fetch', fetchRemote, `pull/${effectiveExternalPr}/head`])
       if (fetchRes.ok) {
         const fh = await gitRun(roots.mainRoot, ['rev-parse', 'FETCH_HEAD'])
@@ -620,7 +621,7 @@ export async function handleStart(opts, roots) {
     }
     const inboundAck = await ackInboundExternalPr(roots, state, effectiveExternalPr, opts)
     const ledger = createDefaultLedger({
-      taskId, slug, caseType, tier: 3, isolation: 'review-pr', role: 'inbound-external-pr', providerId: 'github',
+      taskId, slug, caseType, tier: 3, isolation: 'review-pr', role: 'inbound-external-pr', providerId: state.identity.providerId ?? 'none',
       branch: null, baseBranch, baseSha: baseSha ?? targetSha, worktreePath: null, reviewWorktreePath: reviewRel,
       linkedIssues, prNumber: effectiveExternalPr, implementerId: `external-pr-${effectiveExternalPr}`,
       issueContext, issueContextUnavailable, prContext, prContextUnavailable, ...prPatch,

@@ -1,5 +1,5 @@
 /**
- * survey-reentry.mjs —— 通用技能容器探测、`.pf-manifest.json`（v1/v2）读取与重入失步诊断。
+ * survey-reentry.mjs —— 通用技能容器探测、`.pf-manifest.json`（v1/v2/v3）读取与重入失步诊断。
  */
 
 import { createHash } from 'node:crypto'

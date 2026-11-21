@@ -14,6 +14,16 @@ import { COMMON_SKIP_DIRS, isMacOsJunkPath, posixPath, readTextSafe } from './gi
 import { indentOf, parseYamlScalar, readYamlBlockScalar } from './doc-frontmatter.mjs'
 
 export const DEFAULT_KIT_SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+export const UNIFIED_SKILL_NAMES = Object.freeze([
+  'dev-explore',
+  'dev-plan',
+  'dev-edit',
+  'dev-flow',
+  'dev-verify-tools',
+  'dev-review',
+  'dev-iterate',
+  'dev-govern',
+])
 const SKIP_CONTAINERS = new Set([
   ...COMMON_SKIP_DIRS,
   '.git', '.worktrees', '.github', '.agents', 'fixtures', 'testdata', 'vendor', 'third_party', '__mocks__',

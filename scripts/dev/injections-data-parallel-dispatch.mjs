@@ -1,5 +1,5 @@
 /**
- * injections-data-parallel-dispatch.mjs —— Issue #120 (Phase 3A PR-A, I350–I361) 故障注入表。
+ * injections-data-parallel-dispatch.mjs —— 并行波次调度、归因路由与跨端对齐故障注入表（I350–I361）。
  *
  * 导出 `INJECTIONS_PARALLEL_DISPATCH` 供 `injections-data.mjs` 自动发现加载。
  */

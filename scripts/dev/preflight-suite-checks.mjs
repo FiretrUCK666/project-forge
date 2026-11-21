@@ -2,7 +2,7 @@
  * preflight-suite-checks.mjs —— 从 preflight-suite.mjs 拆出的模板、视觉、同构实例与常青保鲜检查。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import {
@@ -78,8 +78,13 @@ export function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note
     'assets/readme/workflow.svg', 'assets/readme/workflow-en.svg',
     'assets/readme/architecture.svg', 'assets/readme/architecture-en.svg',
   ]
+  const svgDir = join(ROOT, 'assets', 'readme')
+  const discoveredSvgs = existsSync(svgDir)
+    ? readdirSync(svgDir).filter((name) => /\.svg$/i.test(name)).sort().map((name) => `assets/readme/${name}`)
+    : []
+  const svgFiles = [...new Set([...requiredSvgs, ...discoveredSvgs])]
   const heights = new Set()
-  for (const relPath of requiredSvgs) {
+  for (const relPath of svgFiles) {
     const abs = join(ROOT, relPath)
     if (!existsSync(abs)) { fail(`缺少 README 图解资产：${relPath}`); continue }
     const vb = /\bviewBox\s*=\s*["']\s*0\s+0\s+\d+(?:\.\d+)?\s+(\d+(?:\.\d+)?)\s*["']/i.exec(readText(abs))
@@ -104,7 +109,7 @@ export function checkReadmeVisualsAndDocFrontmatter({ ROOT, readText, fail, note
       if (typeof fm.data[k] !== 'string' || !fm.data[k].trim()) fail(`${tplRel} YAML Frontmatter 字段「${k}」不可为空`)
     }
   }
-  note(`视觉与文档前导：6 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
+  note(`视觉与文档前导：${svgFiles.length} 张 README SVG（${heights.size} 种独立高度）、双语徽章与 3 份 docs-* YAML frontmatter 齐全合规`)
 }
 
 export function checkOwnInstances({ ROOT, rel, readText, walk, fail, note }) {

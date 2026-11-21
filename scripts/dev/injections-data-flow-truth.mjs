@@ -1,5 +1,5 @@
 /**
- * injections-data-flow-truth.mjs —— 流程真相收口（Issue #113）的故障注入复验表（I270-I277）。
+ * injections-data-flow-truth.mjs —— 流程门禁真相与阻断码收口的故障注入复验表（I270-I277）。
  *
  * 每条注入拆掉一处判据，期望某条断言变红。判据拆掉却没人报，说明那条断言其实是恒真的。
  *

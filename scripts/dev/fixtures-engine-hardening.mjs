@@ -1,5 +1,5 @@
 /**
- * fixtures-engine-hardening.mjs —— Issue #99 引擎 8 项边界缺陷与 handoff schemaVersion=3 正反双向行为断言。
+ * fixtures-engine-hardening.mjs —— 引擎边界防退化与 handoff schemaVersion=3 正反双向行为断言。
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'

@@ -140,7 +140,7 @@ async function hydrateTargetMetadata({
     const readClient = await resolveReadClient({
       mainRoot,
       remoteUrls: state.remoteUrls ?? {},
-      providerId: state.github?.providerId ?? 'github',
+      providerId: state.github?.providerId ?? state.identity?.providerId ?? 'none',
       targetRepo,
       opts,
     })
@@ -431,16 +431,47 @@ export async function handleIntake(opts = {}, rootsArg = null) {
   return { exitCode: delegated ? EXIT.HUMAN : 0, result }
 }
 
+function printHelp() {
+  process.stdout.write([
+    '用法：node .agents/skills/dev-flow/scripts/flow-intake.mjs [options] [url...]',
+    '',
+    'Options:',
+    '  --pr <M>                  目标 PR 编号或 URL',
+    '  --issue <N>               目标 Issue 编号或 URL',
+    '  --task <id>               已绑定 Issue/PR 的任务 ID',
+    '  --decision <d>            人工分诊裁决（accept | defer | reject-out-of-scope | reject-duplicate | needs-info）',
+    '  --rationale <text>        裁决理由说明',
+    '  --rationale-file <path>   从 UTF-8 文件读取裁决理由',
+    '  --duplicate-of <N>        重复指向的原 Issue/PR 编号',
+    '  --feature-ref <id>        关联 Feature Map 条目',
+    '  --title <text>            离线补充标题',
+    '  --body <text>             离线补充正文',
+    '  --files <a,b>             补充涉及路径（逗号分隔）',
+    '  --branch <name>           补充源分支名',
+    '  --labels <a,b>            补充标签（逗号分隔）',
+    '  --actor <id>              分诊执行者',
+    '  --agent <id>              分诊代理标识',
+    '  --apply                   执行写入评论/标签/关闭与持久化分诊记录',
+    '  --dry-run                 仅预演不写入（默认）',
+    '  --json                    输出结构化 JSON',
+    '  --help                    显示帮助',
+  ].join('\n') + '\n')
+}
+
 /** 供 `flow.mjs` 或独立调用方直接以 `(repoRoot, argv)` 形式运行 `flow intake`。 */
 export async function runFlowIntake(repoRoot = process.cwd(), argv = []) {
   const cli = parseStandardCli(argv, {
-    booleanFlags: ['apply', 'dry-run'],
+    booleanFlags: ['apply', 'dry-run', 'help'],
     valueFlags: [
       'pr', 'issue', 'feature-ref', 'decision', 'rationale', 'rationale-file',
       'duplicate-of', 'task', 'title', 'body', 'files', 'branch', 'labels', 'actor', 'agent',
     ],
     usageHint: 'flow-intake.mjs (--pr <M> | --issue <N>) [--decision <d>] [--rationale "<text>"] [--rationale-file <path>] [--duplicate-of <#N>] [--feature-ref <id>] [--apply] [--dry-run] [--json]',
   })
+  if (cli.help) {
+    printHelp()
+    return { exitCode: 0 }
+  }
   const startDir = cli.opts.dir ? resolve(String(cli.opts.dir)) : resolve(String(repoRoot || process.cwd()))
   const roots = await resolveRepoRoots(startDir)
   return handleIntake({ ...cli.opts, json: cli.json }, roots)

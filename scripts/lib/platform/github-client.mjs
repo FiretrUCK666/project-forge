@@ -10,6 +10,12 @@ import { join } from 'node:path'
 
 import { buildNonInteractiveEnv } from '../../../kit/skills/lib/exec.mjs'
 import {
+  NON_RETRYABLE_STATUSES,
+  RETRYABLE_NET_CODES,
+  extractCliHttpStatus,
+  isRetryableHttpOutcome,
+} from '../../../kit/skills/lib/github-parse.mjs'
+import {
   DEFAULT_PROBE_TIMEOUT_MS,
   TOKEN_VAULT,
   buildOneClickPrUrl,
@@ -44,17 +50,7 @@ function isPermissionError(err) {
   return /403|forbidden|resource not accessible|must have (?:triage|write|admin) access|permission|upgrade to github pro/i.test(msg)
 }
 
-const NON_RETRYABLE_HTTP_STATUS = new Set([400, 401, 403, 404, 405, 409, 413, 422])
-const RETRYABLE_NET_CODES = new Set([
-  'ETIMEDOUT',
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'EAI_AGAIN',
-  'ENOTFOUND',
-  'EPIPE',
-  'ESOCKETTIMEDOUT',
-  'ECONNABORTED',
-])
+const NON_RETRYABLE_HTTP_STATUS = NON_RETRYABLE_STATUSES
 
 function defaultSleep(ms) {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()
@@ -63,32 +59,15 @@ function defaultSleep(ms) {
 function isRetryableRestError(err) {
   if (!err) return false
   const status = Number(err.status ?? 0)
-  if (status >= 300 && status < 400) return false
-  if (status === 429 || (status >= 500 && status < 600)) return true
-  if (NON_RETRYABLE_HTTP_STATUS.has(status) || (status >= 400 && status < 500)) return false
-  const code = String(err.code ?? '')
-  if (RETRYABLE_NET_CODES.has(code) || /^ERR_TLS_/i.test(code)) return true
-  if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.timedOut === true) return true
-  const msg = String(err.message ?? '')
-  return status === 0 && /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ERR_TLS_|TLS|timed?\s*out|socket hang up|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable|504 Gateway/i.test(msg)
+  if (NON_RETRYABLE_HTTP_STATUS.has(status)) return false
+  if (RETRYABLE_NET_CODES.has(String(err.code ?? ''))) return true
+  return isRetryableHttpOutcome(err)
 }
 
 function extractGhHttpStatus(stderr, parsed) {
   const raw = Number(parsed?.status)
   if (Number.isFinite(raw) && raw >= 100 && raw <= 599) return raw
-  const text = String(stderr ?? '')
-  const m = text.match(/(?:HTTP|status(?:\s+code)?)\s*[:=]?\s*(\d{3})\b/i)
-  if (m) {
-    const code = Number(m[1])
-    if (code >= 100 && code <= 599) return code
-  }
-  if (/403 Forbidden/i.test(text)) return 403
-  if (/404 Not Found/i.test(text)) return 404
-  if (/429 Too Many Requests/i.test(text)) return 429
-  if (/502 Bad Gateway/i.test(text)) return 502
-  if (/503 Service Unavailable/i.test(text)) return 503
-  if (/504 Gateway/i.test(text)) return 504
-  return 0
+  return extractCliHttpStatus(stderr)
 }
 
 /**

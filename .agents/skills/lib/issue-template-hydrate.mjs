@@ -9,7 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { posixPath, readTextSafe } from './git.mjs'
-import { replaceSectionIfPresent, stripHtmlCommentsOutsideFences } from './pr-template-hydrate.mjs'
+import { removeSectionIfPresent, replaceSectionIfPresent, stripHtmlCommentsOutsideFences } from './pr-template-hydrate.mjs'
 
 export function normalizeEscapedNewlines(text) {
   const s = String(text ?? '').replace(/\r\n/g, '\n')
@@ -175,17 +175,20 @@ export function hydrateIssueBody(repoRoot, kind = 'feature', fields = {}, opts =
   let md = stripHtmlCommentsOutsideFences(stripYamlFrontmatter(tpl.raw))
   md = replaceSectionIfPresent(md, ['期望发生什么', '期望的用法与结果', 'Expected Behavior', 'Expected Result'], sec.expected).text
   md = replaceSectionIfPresent(md, ['实际发生什么', '想解决什么问题', '背景与现象', 'Actual Behavior', 'Problem', 'Context'], sec.actual).text
-  if (sec.repro) {
-    md = replaceSectionIfPresent(md, ['怎么复现', '复现步骤', 'Steps to Reproduce', 'Reproduction'], sec.repro).text
-  }
+  const reproCandidates = ['怎么复现', '复现步骤', 'Steps to Reproduce', 'Reproduction']
+  md = sec.repro
+    ? replaceSectionIfPresent(md, reproCandidates, sec.repro).text
+    : removeSectionIfPresent(md, reproCandidates).text
   md = replaceSectionIfPresent(md, ['环境', '版本与环境', 'Environment'], sec.environment).text
-  if (sec.scope) {
-    md = replaceSectionIfPresent(md, ['影响范围', '范围与依据', 'Scope', 'Impact'], sec.scope).text
-  }
+  const scopeCandidates = ['影响范围', '范围与依据', 'Scope', 'Impact']
+  md = sec.scope
+    ? replaceSectionIfPresent(md, scopeCandidates, sec.scope).text
+    : removeSectionIfPresent(md, scopeCandidates).text
   md = replaceSectionIfPresent(md, ['备选方案，以及不这样做的后果', '备选方案', 'Alternatives'], sec.alternatives).text
-  if (sec.extra) {
-    md = replaceSectionIfPresent(md, ['补充信息', 'Additional Context', '根因与影响'], sec.extra).text
-  }
+  const extraCandidates = ['补充信息', 'Additional Context', '根因与影响']
+  md = sec.extra
+    ? replaceSectionIfPresent(md, extraCandidates, sec.extra).text
+    : removeSectionIfPresent(md, extraCandidates).text
   md = replaceSectionIfPresent(md, ['验收标准', 'Acceptance Criteria'], sec.criteria).text
   md = replaceSectionIfPresent(md, ['不在本次范围', 'Out of Scope'], sec.outOfScope).text
   md = replaceSectionIfPresent(md, ['关联的设计产物', 'Related Docs'], sec.docRefs).text

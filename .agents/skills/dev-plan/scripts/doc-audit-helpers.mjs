@@ -4,7 +4,8 @@
  * 严格零第三方依赖（仅 Node 18+ 内置模块），供 doc-audit.mjs 调用以控制单文件体积。
  */
 
-const PLACEHOLDER_TEXT_RE = /(?:待补充|待填写|待核实|\bTBD\b|\bFIXME\b|<!--\s*(?:project-forge:\s*)?fill)/i
+import { PLACEHOLDER_TEXT_RE } from '../../lib/doc-substantive.mjs'
+
 const ANGLE_PLACEHOLDER_RE = /<([^>\n]{1,60})>/g
 const PATH_PREFIX_RE = /^(?:src|lib|kit|scripts|tests?|spec|app|apps|packages|pkg|cmd|internal|docs|templates|references|\.github)\//
 
@@ -41,9 +42,12 @@ function isGenericOrJsxAngle(rawText, matchIdx, rawMatch, inner) {
   return false
 }
 
+const FILL_COMMENT_RE = /<!--\s*(?:project-forge:\s*)?fill/i
+
 /** 收集单行文本或 Frontmatter 字符串字段中的未清理占位符错误。 */
 export function collectPlaceholderErrors(rawText, strippedText, lineNo, errors) {
-  if (PLACEHOLDER_TEXT_RE.test(rawText)) {
+  const nonCodeText = String(strippedText ?? '').replace(/`[^`\n]+`/g, '')
+  if (PLACEHOLDER_TEXT_RE.test(nonCodeText) || FILL_COMMENT_RE.test(rawText)) {
     errors.push({
       code: 'UNRESOLVED_PLACEHOLDER',
       line: lineNo,

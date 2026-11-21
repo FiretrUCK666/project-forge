@@ -97,7 +97,7 @@ flowchart LR
 | `scripts/review.mjs`、`scripts/handoff.mjs` | 产品层 | 交付体检（含 `claims.mjs` 路径与脚本真实性回查）与交棒四档退出码净度扫描 |
 | `scripts/update.mjs`、`scripts/sync-toc.mjs` | 产品层 | 同盘 staging 校验原子自更新（含 `15` 分钟失败冷却与回滚）与双语 README 目录锚点同步 |
 | `scripts/lib/` | 产品层 | 安装期与升级专用库，含 `protocol.mjs`、`template.mjs`、`render.mjs`、`claims.mjs`、`merge3.mjs`、`equip-bootstrap.mjs`、`equip-integrity.mjs`、`agents-defaults.mjs`、`agents-sections.mjs`、`survey-*.mjs` 及 `platform/` 适配器 |
-| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（60 余个单职责模块，含 `shared.mjs` 统一重导出与 `overlay.mjs` 扩展机制） |
+| `kit/skills/lib/` | 产品层 | 8 个内置技能共享的零依赖运行内核（77 个单职责模块，含 `shared.mjs` 统一重导出、`platform-registry.mjs` 平台注册表与 `overlay.mjs` 扩展机制） |
 | `kit/skills/dev-explore/` | 产品层 | 只读探索与零写入按需定位（`repo-map.mjs`、`doc-locate.mjs`） |
 | `kit/skills/dev-plan/` | 产品层 | 五档分流、模板初始化、多轮澄清、账本态 Critique 与切片依赖审计（`doc-plan.mjs`、`doc-audit.mjs`） |
 | `kit/skills/dev-edit/` | 产品层 | 改前边界核对、复用查找与词法静态门禁（`edit-gate.mjs`） |
@@ -320,7 +320,7 @@ flowchart LR
 
 - **规划隔离与账本态内审**：支持 `flow.mjs start --planning` 或 `doc-plan.mjs init --worktree` 在独立 worktree 中起草规划，过审后运行 `flow.mjs start` 原地平滑转入实施而无需迁移文档。多轮 Critique 记录全部存入单任务账本 `ledger.planCritique`，Frontmatter 只留单行 `plan_critique` 印记，同时去掉了单调膨胀的锚点计数棘轮，只保留核心章节非空、C 编号锁定与实质性防退化护栏。
 - **退场白名单与单一三态图**：`plan-exit-gate.mjs` 在 `flow.mjs start --case 3|4` 前置强校验，仅放行 SHA 一致的 `passed`、带理由的 `human-override` 或带实质理由的 `skipped`，否则以退出码 `3` 报 `BLOCKED_PLAN_NOT_READY`。切片规划统一收口到 `doc-slice-graph.mjs`，显式区分逻辑 `depends_on`、未完成阻断与 `serial-by-overlap`（无逻辑依赖但 `scope_files` 相交时自动排入先后子波次，不再误报冲突）。
-- **并流调度与瘦身交接包**：`flow.mjs next` 在空闲态扫描就绪规格并在 `Wave 1 >= 2` 时返回 `parallelDispatch: true`；`flow.mjs batch plan --handoff` 调用 `handoff-package.mjs` 按波次生成仅包含真实 `mustFix`/`shouldFix`、`scope_files` 与极简 `5` 行回执模板的子代理交接包，防止详报与日志撑爆主调度上下文；`flow.mjs status --all` 提供全仓活跃任务与波次的统一只读总览。
+- **并流调度与瘦身交接包**：`flow.mjs next` 在空闲态扫描就绪规格并在 `Wave 1 >= 2` 时返回 `parallelDispatch: true`；`flow.mjs batch plan --handoff` 调用 `handoff-package.mjs` 按波次生成每包 `<= 15 行`（含 `taskId`/`spec`/`todo`/真实 `mustFix`/`shouldFix`/`scope_files` 与极简 `5` 行回执模板）的子代理交接包，防止详报与日志撑爆主调度上下文；`flow.mjs status --all` 提供全仓活跃任务与波次的统一只读总览。
 
 ### 支柱二：工具无关结构化实证与界面防敷衍
 
@@ -333,7 +333,7 @@ flowchart LR
 静态告警、审查疑点或推测缺陷在拿到运行证据前只算「可疑」。`escalation.mjs`、`dev-iterate` 与 `dev-govern` 共用四步处置原则：
 1. **最小运行复现消误报**：先编写并运行一条最小可复现 PoC 命令；复现不出来即按误报处理，不写补丁、不建单。
 2. **复跑证伪与回归防护**：修复后用同一条命令复跑确认变绿，并把正反双向断言写入回归测试。
-3. **评估整类加固（Tier 1 / Tier 2）**：判断单点缺陷是否来自同类模式缺失——能用静态门禁或原生规则拦下的做 Tier 1，能用共享边界原语一次性收口的做 Tier 2。
+3. **评估整类加固（Tier 1 / Tier 2）**：判断单点缺陷是否来自同类模式缺失——能用共享边界原语或架构重构一次性收口的做 Tier 1，能用静态门禁或原生规则拦下的做 Tier 2。
 4. **结构化建单证据**：`escalation.mjs` 支持有界长度（`<= 1200` 字符）的 `reproEvidence` 与 `pocCommand` 字段，把可重放命令直接带入工单正文。
 
 ### 支柱四：有界优化循环与「只锁客观输出边界」

@@ -68,7 +68,7 @@ export {
 export const LOW_RISK_TEXT_EXT_RE = /\.(?:md|mdx|txt|rst)$/i
 export const GATE_TIER_RANK = Object.freeze({ quick: 1, smoke: 2, full: 3, gate: 4 })
 
-const EXTRA_CI_FILE_RE = /(?:^|\/)(?:\.travis\.ya?ml|\.drone\.ya?ml|\.buildkite\/pipeline\.ya?ml|\.woodpecker(?:\.ya?ml|\/[^/]+\.ya?ml))$/i
+export const EXTRA_CI_FILE_RE = /(?:^|\/)(?:\.travis\.ya?ml|\.drone\.ya?ml|\.buildkite\/pipeline\.ya?ml|\.woodpecker(?:\.ya?ml|\/[^/]+\.ya?ml))$/i
 const MANIFEST_HIGH_BASENAMES = new Set([
   'package.json', 'pyproject.toml', 'cargo.toml', 'go.mod', 'go.work',
   'pom.xml', 'build.gradle', 'build.gradle.kts', 'composer.json', 'gemfile',

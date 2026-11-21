@@ -12,15 +12,14 @@ import { parseDocFrontmatter } from './doc-frontmatter.mjs'
 import { prepareExecInvocation } from './exec.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fast.mjs'
-import { analyzePendingDecisions } from './pending-decisions.mjs'
+import { DECIDED_RE, analyzePendingDecisions } from './pending-decisions.mjs'
 
 export const VAGUE_FLUFF_RE = /(?:提高质量|提升质量|保证稳定|确保稳定|保持稳定|确保安全|优化体验|提升体验|增强体验|改善体验|完善功能|优化功能|增强功能|做好测试|提升性能|改善性能|优化性能|增强健壮性|提升健壮性|代码整洁|按需处理|合理设计|合理规划|全面优化|整体提升|正常工作|正常运行|improve\s+(?:experience|quality|performance)|enhance\s+(?:experience|stability|quality)|ensure\s+stability|optimize\s+feature)/i
 
-const PLACEHOLDER_TEXT_RE = /(?:待补齐|待补充|待填写|待核实|\bTBD\b|\bFIXME\b|<!--\s*(?:project-forge:\s*)?fill)/i
+export const PLACEHOLDER_TEXT_RE = /(?:待补齐|待补充|待填写|待核实|\bTBD\b|\bFIXME\b|<!--\s*(?:project-forge:\s*)?fill)/i
 const ANGLE_PLACEHOLDER_RE = /<[^>\n]{1,120}>/g
 const ANGLE_PLACEHOLDER_SINGLE_RE = /<[^>\n]{1,120}>/
 const EXACT_STUB_RE = /^(?:待补齐|待补充|待填写|待核实|待定|待确认|暂无|暂缺|无|没有|略|同上|tbd|tba|todo|fixme|none|n\/a|na|-+|—+|_+)$/i
-const DECIDED_RE = /(?:已定|已拍板|决定|结论|采纳建议|按建议执行|已确认)\s*[:：]/i
 
 const SECTION_SPECS = Object.freeze([
   { id: 'non-goals', label: '不做什么', keywords: ['本期不做', '明确不做', '非目标', 'Non-Goals', '不在本次范围', '范围外', 'Out of scope', '不做'] },

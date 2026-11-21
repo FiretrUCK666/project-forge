@@ -12,6 +12,7 @@ import {
   hasStandaloneModeMarker,
   parseBodyRelations,
 } from '../../../kit/skills/lib/platform.mjs'
+import { GITHUB_PROVIDER as CORE_GITHUB_PROVIDER } from '../../../kit/skills/lib/platform-registry.mjs'
 import { githubRepoPath, parseSshConfigHostMap } from '../text.mjs'
 import {
   DEFAULT_PROBE_TIMEOUT_MS,
@@ -119,30 +120,9 @@ export async function resolveWorkspaceIdentity({
 
 /** 标准 HostingProvider 接口实现：GitHub 适配器（产品层唯一注册的托管平台）。 */
 export const GITHUB_PROVIDER = Object.freeze({
-  id: 'github',
-  label: 'GitHub',
-  capabilities: Object.freeze({
-    api: true,
-    pr: true,
-    issues: true,
-    releases: true,
-    labels: true,
-    milestones: true,
-    branchProtection: true,
-  }),
+  ...CORE_GITHUB_PROVIDER,
   matchRemote(remoteUrl, sshHostMap) {
     return Boolean(githubRepoPath(remoteUrl, sshHostMap))
-  },
-  normalizeRepo(remoteUrl, sshHostMap) {
-    return normalizeGitHubRepo(remoteUrl, sshHostMap)
-  },
-  parseRelations(body) {
-    return parseBodyRelations(body)
-  },
-  formatIssueRef(repo, number) {
-    const n = Number(number)
-    if (!Number.isInteger(n) || n <= 0) return ''
-    return repo ? `${repo}#${n}` : `#${n}`
   },
   async probeTransport(ctx = {}) {
     const safeEnv = buildNonInteractiveEnv(ctx.env ?? process.env)

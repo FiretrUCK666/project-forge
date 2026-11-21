@@ -32,8 +32,8 @@ metadata:
 
 | 风险级别 | 过时判定动作 | 返回码与处置 |
 | --- | --- | --- |
-| `low` | `STALE_WARN` 告警运行 | 输出变更模块与增删导出符号，允许带警告执行并在通过后自动刷新基线 |
-| `medium` | `STALE_MEDIUM_FALLBACK` | 阻断无提醒直接复用，记录治理债信号，引导转跑 `testRefs`/E2E 或仓外 `scratch/{taskId}/` 验证 |
+| `low` | `STALE_WARN` 告警运行 | 输出变更模块与增删导出符号，允许带警告执行（**不自动刷新基线**，须显式 `--refresh-baseline`） |
+| `medium` | `STALE_MEDIUM_FALLBACK` | 退出码 `3` 阻断无提醒直接复用，写治理债信号；可加 `--allow-medium-fallback --live-e2e-cmd "<cmd>"` 或转跑 `testRefs` / 仓外 `scratch/{taskId}/` |
 | `high` | `BLOCKED_STALE_HIGH_RISK_TOOL` | 硬阻断（退出码 `3`），必须先升级工具重采基线（`--refresh-baseline`）或以等效实时 E2E（`--live-e2e-cmd`）替代 |
 
 ## 三大核心场景与与 `dev-review` 交接
@@ -50,10 +50,10 @@ node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" sync --json
 
 # 2. 场景 1（创造）：先在仓外 scratch 试制，成熟后过 edit-gate 与实跑再沉淀入库
 node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" create --feature <id> --task <taskId> --draft-only --json
-node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" create --feature <id> --tool-id <tid> --script <relPath> --risk medium --task <taskId> --promote --json
+node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" create --feature <id> --tool-id <tid> [--from-scratch <path> | --script <relPath>] [--command "<cmd>"] --risk medium --task <taskId> --promote --json
 
-# 3. 场景 2（自动复用）：反查变更文件匹配工具、执行免日期过时分派并刷新基线
-node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" run --changed [--base main] [--task <taskId>] [--refresh-baseline] [--live-e2e-cmd "<cmd>"] --json
+# 3. 场景 2（自动复用）：反查变更文件匹配工具、执行免日期过时分派（空 feature-map 返回 NOT_APPLICABLE 退出 0；有条目未命中返回 NO_TOOLS_MATCHED 退出 3）
+node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" run --changed [--base main] [--task <taskId>] [--refresh-baseline] [--allow-medium-fallback --live-e2e-cmd "<cmd>"] [--live-e2e-cmd "<cmd>"] --json
 
 # 4. 场景 3（体检清理）：检查僵尸引用/漂移/盲区/跨 PR 固化提示，确认后清理
 node ".agents/skills/dev-verify-tools/scripts/verify-tools.mjs" audit [--base main] --json

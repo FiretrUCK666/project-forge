@@ -16,7 +16,7 @@ import { isSymbolCandidatePath, summarizeSymbolCoverage } from '../../kit/skills
 import { scanNeutralCiSteps } from '../../kit/skills/lib/profile-sniffer.mjs'
 import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
 
-const LIKELY_DEFAULT_BRANCHES = protocol.LIKELY_DEFAULT_BRANCHES ?? ['main', 'master', 'trunk', 'develop', 'default', 'development']
+const { LIKELY_DEFAULT_BRANCHES } = protocol
 const parseMarkers = protocol.parseMarkers
 const DOC_EXT_RE = /\.(?:md|mdx|markdown|rst|txt|adoc|asciidoc)$/i
 const SKIP_SCAN_DIRS = new Set([

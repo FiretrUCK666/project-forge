@@ -7,16 +7,17 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, posix } from 'node:path'
 
+import { FEATURE_MAP_REL } from './feature-map.mjs'
 import { posixPath, readJsonSafe, readTextSafe, writeJsonAtomic } from './git.mjs'
 import {
   ASSERTION_RE, CODE_EXT_RE, HARD_SLEEP_RULES, MOCK_SETUP_RE, MOCK_SPY_ASSERT_RE,
   checkProcessArtifactFilename, scanStructuralHygiene, stripCodeCommentsLines,
 } from './static-gates.mjs'
 
+export { FEATURE_MAP_REL }
+
 const PRIORITY_SCRIPT_HINTS = ['test', 'spec', 'e2e', 'lint', 'check', 'type', 'build', 'verify', 'ci']
 const JUST_RECIPE_RE = /^@?([A-Za-z_][A-Za-z0-9_-]*)(?:\s+[^:\n]*)?:(?!=)/gm
-
-export const FEATURE_MAP_REL = 'docs/feature-map.json'
 
 function readUtf8FileSafe(absPath) {
   if (!existsSync(absPath)) return null

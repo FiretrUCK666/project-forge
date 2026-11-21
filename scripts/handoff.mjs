@@ -7,10 +7,13 @@ import { fileURLToPath } from 'node:url'
 import { flushAndExit, isMainModule, readJsonSafe, readTextSafe, samePath } from './lib/text.mjs'
 import { scanLines } from './lib/markdown.mjs'
 import { processAlive } from './lib/fs-atomic.mjs'
+import { VERIFY_EXIT } from '../kit/skills/lib/exit-codes.mjs'
 import {
   COMMON_SKIP_DIRS, LEGACY_MARKERS, LEGACY_PATH_SPECS, PF_MANIFEST_REL,
   getKitSkills, isMacOsMetadata, markerSyntaxFor, parseMarkers,
 } from './lib/protocol.mjs'
+
+export { VERIFY_EXIT }
 
 /** 扫哪些文件。只扫文本类；二进制里的「标记」不可能是我们写的。 */
 const SCAN_EXT = /\.(?:md|mdx|markdown|ya?ml|json|toml|txt)$/i
@@ -66,7 +69,7 @@ const OWN_REF_NAMES = (() => {
  * 一起删了。所以扫描时单列一档，提示的是「**先把规则搬进项目自己的文档，再删指针**」。
  */
 const SKILL_INTERNAL_RE = new RegExp(
-  `(?:references/(?:${OWN_REF_NAMES.join('|')})\\.md|(?:\\.\\.\\/)*project-forge/scripts/[A-Za-z0-9_.-]+|\\bscripts/(?:survey|compose-agents|equip|backup|review|handoff|sync-toc|update|zip)\\.mjs)`,
+  `(?:references/(?:${OWN_REF_NAMES.join('|')})\\.md|(?:\\.\\.\\/)*project-forge/scripts/[A-Za-z0-9_.-]+|\\bscripts/(?:survey|compose-agents|equip|equip-ci|backup|review|handoff|sync-toc|update|zip)\\.mjs)`,
   'g',
 )
 
@@ -399,21 +402,6 @@ export function toText(result) {
 
   return lines.join('\n')
 }
-
-/**
- * `--verify` 的退出码。**这是唯一一处定义**——帮助文本、`SKILL.md` 与
- * `references/handoff.md` 里的那几行都对着它，`preflight` 会核对三处说的是不是同一批码。
- *
- * 为什么值得单独立成常量：四个码里有两个是**非零但不代表「有痕迹」**的特殊档
- * （没扫全、这一趟不适用）。少一档、改一个数字，症状都是「一次没做完或不适用的检查
- * 被读成了通过」——而那正是不可逆动作前的最后一道关。
- */
-export const VERIFY_EXIT = Object.freeze({
-  clean: 0,
-  dirty: 1,
-  truncated: 3,
-  notApplicable: 4,
-})
 
 function main(argv) {
   let target = process.cwd()

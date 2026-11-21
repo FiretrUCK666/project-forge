@@ -7,13 +7,12 @@
 import { writeTaskLedger } from '../../lib/ledger.mjs'
 import { gitRun } from '../../lib/git.mjs'
 import { readGitConfigFast } from '../../lib/git-fast.mjs'
+import { NON_API_CLIENT_TIERS } from '../../lib/github-client.mjs'
 import { hasIntakeBlockingSignal, readIntakeRecord } from '../../lib/intake-triage.mjs'
 import { getLocalPr } from '../../lib/local-issues.mjs'
 import {
   detectDeclaredRepo, githubRepoFull, parseRemoteUrls, probeGitHubEnv,
 } from '../../lib/platform.mjs'
-
-const NON_API_CLIENT_TIERS = new Set(['none', 'offline', 'half-duplex', 'mcp-delegate'])
 
 /** 判断任务账本是否属于外部 PR / 隔离 PR 审查位（禁止经 `--task` 绕过 PR 检查）。 */
 export function isExternalPrTaskLedger(task) {

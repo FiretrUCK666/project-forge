@@ -52,15 +52,16 @@ metadata:
 ## 标准命令流
 
 ```sh
-# 1. 状态重水合 / 身份与多 Issue・PR・Milestone 拓扑探测 / 全局业务分诊 / 账本与里程碑管理
-node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth] [--json]
+# 1. 状态重水合 / 身份与多 Issue・PR・Milestone 拓扑探测 / 全局业务分诊 / 工单、账本与里程碑管理
+node ".agents/skills/dev-flow/scripts/flow.mjs" next [--task <id>] [--probe-auth] [--handoff] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" inspect [Issue/PR/Milestone URL...] [--probe-auth]
 node ".agents/skills/dev-flow/scripts/flow.mjs" intake (--pr <M> | --issue <N>) [--decision <accept|reject|merge-duplicate|needs-info|defer>] [--rationale "<说明>" | --rationale-file <路径>] [--duplicate-of <N>] [--feature-ref <path>] [--apply | --dry-run] [--json]
+node ".agents/skills/dev-flow/scripts/flow.mjs" issue <create|list|view|comment|close|migrate> [--issue <N>] [--title "<标题>"] [--body "<内容>"] [--labels a,b] [--milestone <N|标题>] [--state open|closed|all] [--reason "<原因>"] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" milestone <create|list|assign|close> [--milestone <N|标题|URL>] [--issue <N>] [--task <id>] [--json]
 node ".agents/skills/dev-flow/scripts/flow.mjs" status [--task <id>] [--all] [--json]
 
-# 2. 启动工作位（--planning 规划隔离 / --after 堆叠子分支 / --files 切片声明 / --create-issue 建单 / --milestone；Case 3/4 走规划退场门禁，开规划 PR 自身加 --allow-plan-bootstrap）、变基同步与并行队列
-node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..4> [--planning] [--issue <N|URL>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files a,b] [--external-pr <M|URL>] [--allow-plan-bootstrap]
+# 2. 启动工作位（--planning 规划隔离 / --base 基线分支 / --spec|--todo|--prd 显式绑定 / --create-issue 建单 / --parallel / --after / --files；Case 3/4 走规划退场门禁）、变基同步与并行队列
+node ".agents/skills/dev-flow/scripts/flow.mjs" start --task <id> --slug <slug> --case <1..5> [--base <branch>] [--planning] [--issue <N|URL>] [--create-issue --title "<标题>"] [--spec <path>] [--todo <path>] [--prd <path>] [--pr <M|URL>] [--milestone <N|标题|URL>] [--after <parent>] [--files a,b] [--parallel] [--external-pr <M|URL>] [--allow-plan-bootstrap]
 node ".agents/skills/dev-flow/scripts/flow.mjs" sync [--task <id>] [--onto <branch>]
 node ".agents/skills/dev-flow/scripts/flow.mjs" batch <plan|check-disjoint|merge-queue|resume-session> [--tasks <a,b>] [--enqueue <id>] [--handoff]
 node ".agents/skills/dev-flow/scripts/flow.mjs" abort [--task <id>] [--confirm] [--allow-outbound <路径>]
@@ -71,7 +72,7 @@ node ".agents/skills/dev-flow/scripts/flow.mjs" claim [--issue <N|URL>] [--takeo
 node ".agents/skills/dev-flow/scripts/flow.mjs" release [--task <id>] [--reason "<释放原因>"]
 node ".agents/skills/dev-flow/scripts/flow.mjs" finalize [--strict-sync] [--include-master-prd]
 node ".agents/skills/dev-flow/scripts/flow.mjs" verify --tier quick [--target <file>]
-node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate [--artifact <path>]... [--visual-checked] [--visual-blocked-reason "<原因>"]
+node ".agents/skills/dev-flow/scripts/flow.mjs" verify --mode smoke|full|gate [--e2e-evidence "<运行观察>"] [--visual-evidence "<视觉观察>"] [--artifact <path>]... [--visual-checked] [--visual-blocked-reason "<原因>"]
 
 # 4. 实施者提交待审 -> 移交 dev-review -> 返工 -> 审查者合入 -> 确认清理
 node ".agents/skills/dev-flow/scripts/flow.mjs" submit [--reset-review-slot]

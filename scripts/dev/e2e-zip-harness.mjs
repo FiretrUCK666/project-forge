@@ -254,21 +254,22 @@ async function runScenarioD(pkgRoot, sandbox, env) {
 
   const flowD1 = join(repoD1, '.agents', 'skills', 'dev-flow', 'scripts', 'flow.mjs')
   const revD1 = join(repoD1, '.agents', 'skills', 'dev-review', 'scripts', 'review-pack.mjs')
-  assertOk(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--json'], repoD1, env), 'Scenario D1 start')
+  const startD1 = JSON.parse(runNodeScript(flowD1, ['start', '--task', 'd1', '--case', '2', '--slug', 'd1', '--json'], repoD1, env).stdout)
+  if (!startD1.explored || startD1.explored.source !== 'flow-start') {
+    throw new Error(`Scenario D1 expected auto-explored evidence on start, got ${JSON.stringify(startD1.explored)}`)
+  }
   assertOk(runNodeScript(flowD1, ['claim', '--task', 'd1'], repoD1, env), 'Scenario D1 claim')
-  const preExploreD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
-  if (preExploreD1.phase !== 'needs-explore') {
-    throw new Error(`Scenario D1 expected needs-explore before explore, got ${preExploreD1.phase}`)
+  const preVerifyD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
+  if (preVerifyD1.phase === 'needs-explore') {
+    throw new Error(`Scenario D1 expected phase != needs-explore after auto-explore, got ${preVerifyD1.phase}`)
   }
   const wtD1 = join(repoD1, '.worktrees', 'impl-d1')
   writeFiles(wtD1, { 'src/a.mjs': 'export const a = 2\n' })
   runGit(wtD1, ['add', '-A'])
   runGit(wtD1, ['commit', '-qm', 'fix: d1'])
   assertOk(runNodeScript(flowD1, ['verify', '--task', 'd1', '--mode', 'full'], wtD1, env), 'Scenario D1 verify')
-  assertBlocked(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'BLOCKED_NOT_EXPLORED', 'Scenario D1 un-explored submit blocked')
-  assertBlocked(runNodeScript(flowD1, ['merge', '--task', 'd1'], repoD1, env), 'BLOCKED_NOT_EXPLORED', 'Scenario D1 un-explored merge blocked')
-  assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explore')
-  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit after explore')
+  assertOk(runNodeScript(flowD1, ['explore', '--task', 'd1'], repoD1, env), 'Scenario D1 explicit explore refresh')
+  assertOk(runNodeScript(flowD1, ['submit', '--task', 'd1'], wtD1, env), 'Scenario D1 submit after auto-explore')
   const nextD1 = JSON.parse(runNodeScript(flowD1, ['next', '--task', 'd1', '--json'], repoD1, env).stdout)
   if (!nextD1.reviewToken) throw new Error(`Scenario D1 missing reviewToken after explore: ${JSON.stringify(nextD1)}`)
   assertOk(runNodeScript(revD1, ['record', '--task', 'd1', '--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-d1',

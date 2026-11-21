@@ -329,13 +329,19 @@ export function registerDocDepthCases(cases) {
         return `短内容含真实锚点或合法「无」位置被误伤：${JSON.stringify(conciseAud.errors)}`
       }
 
-      // 3. critique-pass 写入 critique_anchors，link --issue 不触发 BLOCKED_CRITIQUE_STALE
+      // 3. critique-pass 不再向 Frontmatter 写入 critique_anchors，而是写入账本/sidecar，link --issue 不触发 BLOCKED_CRITIQUE_STALE
       const cp = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'critique-pass', '--file', conciseRel, '--reviewer', 'critic-1', '--json',
       ], { cwd: dir })
       if (cp.status !== 0) return `critique-pass 失败：${cp.stderr}`
-      if (!readFileSync(join(dir, conciseRel), 'utf8').includes('critique_anchors:')) {
-        return 'critique-pass 未写入 critique_anchors 快照'
+      const postCpText = readFileSync(join(dir, conciseRel), 'utf8')
+      if (postCpText.includes('critique_anchors:') || postCpText.includes('critique_rounds:')) {
+        return 'critique-pass 不应再向 Frontmatter 写入 critique_anchors/critique_rounds'
+      }
+      const { readPlanCritiqueEntrySync } = await import('../../kit/skills/lib/critique-rounds.mjs')
+      const { entry: cpEntry } = readPlanCritiqueEntrySync({ repoRoot: dir, relDoc: conciseRel })
+      if (!cpEntry?.anchors || !Array.isArray(cpEntry?.rounds) || cpEntry.rounds.length !== 1) {
+        return `critique-pass 未将 anchors/rounds 写入持久化存储：${JSON.stringify(cpEntry)}`
       }
       const lk = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'link', conciseRel, '--issue', '88', '--json',
@@ -345,17 +351,17 @@ export function registerDocDepthCases(cases) {
       const ap = await runAbsAsync('kit/skills/dev-plan/scripts/doc-plan.mjs', [
         'approve', '--file', renamedConciseRel, '--json',
       ], { cwd: dir })
-      if (ap.status !== 0) return `critique_anchors 存在时 link 后 approve 误触发 stale：${ap.stderr}`
+      if (ap.status !== 0) return `link 后 approve 误触发 stale：${ap.stderr}`
 
-      // 4. 跨轮退化检测：删锚点 / 清空核心节 / 退化套话 + 正向增量 delta
+      // 4. 跨轮退化检测：精简改写删锚点不再报 DOC_REGRESSION_ANCHOR_LOST，仍校验核心节清空与 delta 统计
       const anchorLost = baselineConcise
         .replace('、修改 `src/app.mjs` 的 `runCli` 返回退出码 0，待机功耗 <= 5uA', '')
         .replace('修改 `src/app.mjs` 的 `runCli` 返回退出码 0，待机功耗 <= 5uA', '修改 `src/app.mjs` 逻辑')
         .replace('- 调整 `runCli` 参数 `--strict`，保证 `src/app.mjs` 退出码 0。', '- 调整 `src/app.mjs` 逻辑。')
       writeFileSync(join(dir, conciseRel), anchorLost)
       const regAnchor = auditDoc({ repoRoot: dir, file: conciseRel, baselineText: baselineConcise })
-      if (regAnchor.ok || !regAnchor.errors.some((e) => e.code === 'DOC_REGRESSION_ANCHOR_LOST') || (regAnchor.delta?.anchorsRemoved?.length ?? 0) === 0) {
-        return `核心实质性与跨轮退化拦截：静默删减锚点未报 DOC_REGRESSION_ANCHOR_LOST：${JSON.stringify(regAnchor)}`
+      if (!regAnchor.ok || regAnchor.errors.some((e) => e.code === 'DOC_REGRESSION_ANCHOR_LOST') || (regAnchor.delta?.anchorsRemoved?.length ?? 0) === 0) {
+        return `精简改写应放行且仍统计 anchorsRemoved delta：${JSON.stringify(regAnchor)}`
       }
 
       const coreEmptied = baselineConcise.replace(

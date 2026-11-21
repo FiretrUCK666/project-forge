@@ -32,8 +32,10 @@ import {
 } from '../../lib/git.mjs'
 import {
   buildCritiqueScope, collectExcludedReviewers, CRITIQUE_FINDINGS_KEY,
-  critiqueOverrideDoc, critiquePassDoc, critiqueRejectDoc, parseCritiqueRounds,
+  critiqueContinueDoc, critiqueOverrideDoc, critiquePassDoc, critiqueRejectDoc,
+  parseCritiqueRounds, readPlanCritiqueEntrySync,
 } from '../../lib/critique-rounds.mjs'
+import { syncPlanPhaseToBackend } from '../../lib/plan-sync.mjs'
 import { renderVerificationForReviewer, verifyDocClaims } from '../../lib/doc-verify.mjs'
 import { probeWorkspaceDocShape } from '../../lib/doc-shape.mjs'
 import { collectTddFacts } from '../../lib/tdd-facts.mjs'
@@ -108,7 +110,7 @@ function resolveCliPlanMode(raw) {
 async function initDoc({
   repoRoot, mainRoot, gitDir, isGit, type, kind, slug, title,
   taskId, issue, owner, branch, relatedSpec, relatedPrd, milestone, force = false, noPrune = false,
-  planMode = null,
+  planMode = null, worktree = false,
 }) {
   const effectiveKind = kind ?? type
   if (!['prd', 'spec', 'todo', 'tdd', 'pair', 'all'].includes(effectiveKind)) {
@@ -119,14 +121,32 @@ async function initDoc({
   const dateTag = docDateTag()
   const today = docIsoDate()
 
-  // 若绑定 taskId 且已有隔离 worktree，直接落盘至实施工作树防止 doc-plan 与 flow start 撕裂
   let writeRoot = repoRoot
   let existingLedger = null
-  if (taskId) {
-    existingLedger = readTaskLedger(mainRoot, sanitizeTaskId(taskId))
+  const effTaskId = taskId ? sanitizeTaskId(taskId) : (worktree ? sanitizeTaskId(safeSlug) : null)
+  if (effTaskId) {
+    existingLedger = readTaskLedger(mainRoot, effTaskId)
     if (existingLedger?.worktreePath && existsSync(join(mainRoot, existingLedger.worktreePath))) {
       writeRoot = join(mainRoot, existingLedger.worktreePath)
     }
+  }
+  let planningBranch = branch ?? existingLedger?.branch ?? null
+  let planningWorktreeRel = existingLedger?.worktreePath ?? null
+  if (worktree) {
+    if (!isGit) throw new Error('--worktree 仅支持 Git 仓库')
+    await ensureWorktreesIgnored(mainRoot, gitDir)
+    planningWorktreeRel = planningWorktreeRel || `.worktrees/impl-${effTaskId}`
+    planningBranch = planningBranch || `feat/${effTaskId}`
+    const wtAbs = join(mainRoot, planningWorktreeRel)
+    if (!existsSync(wtAbs)) {
+      const hasBr = await gitRun(mainRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${planningBranch}`])
+      const addArgs = hasBr.ok
+        ? ['worktree', 'add', wtAbs, planningBranch]
+        : ['worktree', 'add', '-b', planningBranch, wtAbs, 'HEAD']
+      const wtRes = await gitRun(mainRoot, addArgs)
+      if (!wtRes.ok) throw new Error(`创建规划隔离 worktree 失败：${wtRes.stderr}`)
+    }
+    writeRoot = wtAbs
   }
 
   const dirMap = { prd: 'docs/prd', spec: 'docs/specs', todo: 'docs/todo', tdd: 'docs' }
@@ -229,10 +249,9 @@ async function initDoc({
       if (item.kind !== 'tdd') updateDocFrontmatter(item.absFile, { milestone }, { defaultKeyOrder: DOC_FRONTMATTER_KEY_ORDER[item.kind] ?? [] })
     }
   }
-  if (taskId) {
+  if (effTaskId) {
     if (isGit) await ensureWorktreesIgnored(mainRoot, gitDir)
-    const id = sanitizeTaskId(taskId)
-    await updateTaskLedger(mainRoot, id, (cur) => {
+    await updateTaskLedger(mainRoot, effTaskId, (cur) => {
       const next = { ...cur }
       for (const item of planned) {
         if (item.kind === 'prd') next.prdFile = item.file
@@ -243,8 +262,27 @@ async function initDoc({
         next.linkedIssues = [...next.linkedIssues, issueNum]
       }
       if (milestone) next.milestone = milestone
+      if (worktree) {
+        next.isolation = 'worktree'
+        next.worktreePath = planningWorktreeRel
+        next.branch = planningBranch
+        if (!cur.status || cur.status === 'planned' || cur.status === 'planning') {
+          next.status = 'planning'
+          next.planning = true
+        }
+      }
       return next
-    }, { createIfMissing: true, defaults: { taskId: id, slug: safeSlug, isolation: null, status: 'planned' } })
+    }, {
+      createIfMissing: true,
+      defaults: {
+        taskId: effTaskId, slug: safeSlug,
+        isolation: worktree ? 'worktree' : null,
+        worktreePath: worktree ? planningWorktreeRel : null,
+        branch: worktree ? planningBranch : null,
+        planning: worktree,
+        status: worktree ? 'planning' : 'planned',
+      },
+    })
     ledgerUpdated = true
   }
 
@@ -252,6 +290,7 @@ async function initDoc({
   return {
     type: effectiveKind, kind: effectiveKind, writeRoot, file: primary.file, absFile: primary.absFile,
     files: planned.map((p) => p.file), created: planned.map((p) => ({ kind: p.kind, file: p.file })),
+    taskId: effTaskId, worktreePath: planningWorktreeRel, branch: planningBranch,
     issue: issueNum, milestone: milestone ?? null, plannedAt: headSha, ledgerUpdated, customTemplates,
   }
 }
@@ -262,13 +301,14 @@ function printHelp() {
     '',
     '子命令：',
     '  triage             --summary <文本> [--files <n>] [--paths a,b] [--touches-contract] [--conflicts-tdd] [--doc-only] [--bugfix] [--plan-mode interactive | autonomous] [--json]',
-    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--no-prune] [--json]',
+    '  init               --kind <prd|spec|todo|pair|all> --slug <slug> --title <标题> [--issue <N>] [--task <id>] [--milestone <m>] [--prd <path>] [--spec <path>] [--plan-mode interactive | autonomous] [--worktree] [--no-prune] [--json]',
     '  clarify            --file <docPath> --decision <结论> [--question <问题>] [--by <actor>] [--criterion <C条目>] [--json]',
     '  link               <slug-or-path> [--issue <N>] [--pr <M>] [--branch <B>] [--owner <O> --owner-reason "<变更原因>"] [--status <S>] [--milestone <m>] [--json]',
     '  audit              [--file <docPath> | .] [--json]',
     '  critique-scope     --file <docPath> [--reviewer <id>] [--round <n>] [--json]',
     '  critique-pass      --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
     '  critique-reject    --file <docPath> --reviewer <id> [--round <N>] [--summary <文本>] [--findings <t>...] [--json]',
+    '  critique-continue  --file <docPath> --reason <改进方向> [--by <actor>] [--task <id>] [--json]',
     '  critique-override  --file <docPath> --human-approved --reason <原因> [--by <actor>] [--json]',
     '  approve            --file <specPath> [--skip-critique-reason <文本>] [--json]',
     '  archive            [<slug-or-path>] [--task <id>] [--done-at <YYYY-MM-DD>] [--include-master-prd] [--json]',
@@ -277,7 +317,7 @@ function printHelp() {
   ].join('\n') + '\n')
 }
 
-const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'critique-reject', 'critique-override', 'approve', 'archive', 'supersede', 'list']
+const SUBCOMMANDS = ['triage', 'init', 'clarify', 'link', 'audit', 'critique-scope', 'critique-pass', 'critique-reject', 'critique-continue', 'critique-override', 'approve', 'archive', 'supersede', 'list']
 
 async function main(argv) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') { printHelp(); return 0 }
@@ -286,11 +326,11 @@ async function main(argv) {
   try {
     cli = parseStandardCli(argv, {
       subcommands: SUBCOMMANDS,
-      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved'],
+      booleanFlags: ['touches-contract', 'conflicts-tdd', 'doc-only', 'bugfix', 'force', 'approve', 'implemented', 'include-master-prd', 'no-prune', 'human-approved', 'worktree'],
       valueFlags: ['summary', 'files', 'paths', 'kind', 'type', 'slug', 'title', 'issue', 'task', 'spec', 'prd', 'file', 'pr', 'branch', 'owner', 'owner-reason', 'status', 'done-at', 'reviewer', 'round', 'skip-critique-reason', 'by', 'question', 'decision', 'criterion', 'reason', 'milestone', 'plan-mode'],
       multiFlags: ['findings', 'finding'],
       aliases: { type: 'kind' },
-      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-override|approve|archive|supersede|list>',
+      usageHint: 'doc-plan.mjs <triage|init|clarify|link|audit|critique-scope|critique-pass|critique-reject|critique-continue|critique-override|approve|archive|supersede|list>',
     })
   } catch (err) {
     process.stderr.write(`doc-plan 错误：${err.message}\n`)
@@ -365,10 +405,16 @@ async function main(argv) {
         issue: opts.issue, owner: opts.owner, branch: opts.branch, relatedSpec: opts.spec,
         relatedPrd: opts.prd, milestone: opts.milestone, force: Boolean(opts.force), noPrune: Boolean(opts['no-prune']),
         planMode: resolveCliPlanMode(opts['plan-mode']),
+        worktree: Boolean(opts.worktree),
       })
+      res.planSync = await syncPlanPhaseToBackend({
+        repoRoot: res.writeRoot ?? repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'init', file: res.file, taskId: res.taskId ?? opts.task ?? null,
+        issueNumber: res.issue ?? null, summary: `初始化 ${res.kind.toUpperCase()}: ${opts.title}`,
+      }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
-        process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}）\n`)
+        process.stdout.write(`已生成 ${res.kind.toUpperCase()}：${res.files.join(', ')}（Planned at: ${res.plannedAt}${res.worktreePath ? `, worktree=${res.worktreePath}` : ''}）\n`)
         printNextStep([{ skill: 'dev-plan', text: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" audit --file "${res.file}"` }], { repoRoot: mainRoot })
       }
       return 0
@@ -498,16 +544,23 @@ async function main(argv) {
       if (!existsSync(scopeAbs)) throw new Error(`找不到文档：${opts.file}`)
       const scopeText = readTextSafe(scopeAbs) ?? ''
       const scopeFm = parseDocFrontmatter(scopeText)
+      const scopeRel = posixPath(relative(repoRoot, scopeAbs))
       const curSha = sha256Text(stripCritiqueMeta(scopeText)).slice(0, 12)
       const prevSha = /\bsha=([a-f0-9]{8,64})\b/i.exec(String(scopeFm.data?.plan_critique ?? ''))?.[1] ?? null
-      const priorRounds = parseCritiqueRounds(scopeFm.data, scopeText)
+      const { entry: ledgerEntry } = readPlanCritiqueEntrySync({
+        repoRoot, mainRoot, gitDir: roots.gitDir, taskId: opts.task ?? null, fmData: scopeFm.data, relDoc: scopeRel,
+      })
+      const priorRounds = parseCritiqueRounds(scopeFm.data, scopeText, ledgerEntry)
       const excludedReviewers = collectExcludedReviewers(priorRounds, scopeFm.data?.owner)
       const roundNum = Number(opts.round ?? (priorRounds.reduce((m, r) => Math.max(m, Number(r.round) || 0), 0) + 1))
+      const ledgerFindings = Array.isArray(ledgerEntry?.findings)
+        ? ledgerEntry.findings.map((f) => `Round ${f.round}: ${(f.items ?? []).join('; ')}`).join(' ;; ')
+        : ''
       const scope = buildCritiqueScope({
         round: roundNum,
         currentSha: curSha,
         previousSha: prevSha,
-        findingsRaw: scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? '',
+        findingsRaw: ledgerFindings || (scopeFm.data?.[CRITIQUE_FINDINGS_KEY] ?? ''),
         reviewer: opts.reviewer ?? '(未指定)',
       })
       const facts = await verifyDocClaims(repoRoot, scopeText)
@@ -530,12 +583,20 @@ async function main(argv) {
         repoRoot, mainRoot, gitDir: roots.gitDir, isGit: roots.isGit,
         file: opts.file, reviewer: opts.reviewer, round: opts.round ?? null,
         summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
-        auditDoc, docType: null,
+        auditDoc, docType: null, taskId: opts.task ?? null,
       })
+      res.planSync = await syncPlanPhaseToBackend({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'critique-pass', file: res.file, round: res.round, sha: res.sha,
+        actor: res.reviewer, summary: res.summary ?? '', taskId: opts.task ?? null,
+      }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`Critique 通过记录已写入 ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
-        printNextStep([{ skill: 'dev-plan', text: `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${res.file}"` }], { repoRoot: mainRoot })
+        const passNext = res.docType === 'prd'
+          ? `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" link "${res.file}" --status active`
+          : `node ".agents/skills/dev-plan/scripts/doc-plan.mjs" approve --file "${res.file}"`
+        printNextStep([{ skill: 'dev-plan', text: passNext }], { repoRoot: mainRoot })
       }
       return 0
     }
@@ -549,6 +610,12 @@ async function main(argv) {
         summary: opts.summary ?? '', findings: Array.isArray(findingArg) ? findingArg : [findingArg],
         taskId: opts.task ?? null,
       })
+      res.planSync = await syncPlanPhaseToBackend({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: res.stopLossTriggered ? 'stop-loss' : 'critique-reject',
+        file: res.file, round: res.round, sha: res.sha, actor: res.reviewer,
+        summary: res.summary || res.findings?.[0] || '', taskId: opts.task ?? null,
+      }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
         process.stdout.write(`${res.status}: ${res.file}（reviewer=${res.reviewer}, round=${res.round}, sha=${res.sha}）\n`)
@@ -559,11 +626,29 @@ async function main(argv) {
       return res.exitCode ?? 0
     }
 
+    if (sub === 'critique-continue') {
+      if (!opts.file) throw new Error('critique-continue 需要 --file <docPath>')
+      const res = await critiqueContinueDoc({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        file: opts.file, reason: opts.reason ?? '',
+        by: opts.by ?? opts.reviewer ?? 'human-maintainer',
+        taskId: opts.task ?? null,
+      })
+      if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
+      else {
+        process.stdout.write(`${res.status}: ${res.file}（sha=${res.sha}, reason=${res.continued.reason}, unlockApprove=false）\n`)
+        printNextStep([{ skill: 'dev-plan', text: res.nextStep }], { repoRoot: mainRoot })
+      }
+      return 0
+    }
+
     if (sub === 'critique-override') {
       if (!opts.file) throw new Error('critique-override 需要 --file <docPath>')
-      const res = critiqueOverrideDoc({
-        repoRoot, file: opts.file, humanApproved: Boolean(opts['human-approved']),
+      const res = await critiqueOverrideDoc({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        file: opts.file, humanApproved: Boolean(opts['human-approved']),
         reason: opts.reason ?? '', by: opts.by ?? opts.reviewer ?? 'human-maintainer',
+        taskId: opts.task ?? null,
       })
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)
       else {
@@ -575,7 +660,10 @@ async function main(argv) {
 
     if (sub === 'approve') {
       if (!opts.file) throw new Error('approve 需要 --file <specPath>')
-      const res = approveSpec({ repoRoot, file: opts.file, skipCritiqueReason: opts['skip-critique-reason'] })
+      const res = approveSpec({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        file: opts.file, skipCritiqueReason: opts['skip-critique-reason'], taskId: opts.task ?? null,
+      })
       const fm = parseDocFrontmatter(readTextSafe(resolve(repoRoot, res.file)) ?? '')
       const taskKey = opts.task ?? fm.data?.task_id
       if (taskKey && res.criteriaFingerprint) {
@@ -591,6 +679,11 @@ async function main(argv) {
       const fn = parseDocFilename(res.file)
       const slugVal = fn?.slug ?? 'task'
       const issueNum = Number.isInteger(Number(fm.data?.issue)) && Number(fm.data.issue) > 0 ? Number(fm.data.issue) : (fn?.issue ?? null)
+      res.planSync = await syncPlanPhaseToBackend({
+        repoRoot, mainRoot, gitDir: roots.gitDir,
+        phase: 'approve', file: res.file, taskId: taskKey ?? null,
+        issueNumber: issueNum ?? null, summary: `已批准 ${res.file}（C1..Cn=${res.criteriaCount}）`,
+      }).catch((err) => ({ ok: false, synced: false, status: 'SYNC_ERROR', error: err?.message ?? String(err) }))
       const startHint = `node ".agents/skills/dev-flow/scripts/flow.mjs" start --task ${fm.data?.task_id ?? slugVal} --slug ${slugVal} --case ${fm.data?.kind === 'todo' ? 3 : 4}${issueNum ? ` --issue ${issueNum}` : ' [--issue <N> | --create-issue --title "<标题>"]'}`
       if (res.status === 'approved' || res.status === 'active') res.nextStep = startHint
       if (cli.json) process.stdout.write(`${JSON.stringify(res, null, 2)}\n`)

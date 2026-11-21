@@ -5,6 +5,7 @@
  * 所有远端写路径统一经 `probeForWrite` 探测，兼顾 `github` / `local-only` / `generic-git` 三态后端。
  */
 
+import { EXIT } from './exit-codes.mjs'
 import { posixPath, gitRun } from './git.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
@@ -286,6 +287,22 @@ export async function resolveEscalationBackend(repoRoot, opts = {}) {
   }
 }
 
+/** 校验 `--no-escalate` 豁免：启用时必须带非空 `--reason` 才能跳过自动建单。 */
+export function evaluateNoEscalateExemption({ noEscalate = false, reason = '' } = {}) {
+  if (!noEscalate) return { ok: true, skip: false, reason: null }
+  const clean = String(reason ?? '').trim()
+  if (!clean) {
+    return {
+      ok: false,
+      skip: false,
+      code: 'MISSING_NO_ESCALATE_REASON',
+      exitCode: EXIT.USAGE,
+      error: 'MISSING_NO_ESCALATE_REASON: --no-escalate 必须同时传入非空 --reason "<跳过自动建单原因>"',
+    }
+  }
+  return { ok: true, skip: true, reason: clean }
+}
+
 /**
  * 统一 Escalation 建单出口：带未闭环标题去重与远端写入门禁，适配三态后端。
  */
@@ -296,9 +313,23 @@ export async function escalateToBackend({
   item = {},
   force = false,
   deduplicate = true,
+  noEscalate = false,
+  reason = '',
   _ghProbe = null,
   _ghClient = null,
 } = {}) {
+  const exemption = evaluateNoEscalateExemption({ noEscalate, reason })
+  if (!exemption.ok) return exemption
+  if (exemption.skip) {
+    return {
+      ok: true,
+      skipped: true,
+      tier: 'exempted',
+      action: 'no-escalate-exempted',
+      reason: exemption.reason,
+      title: String(item?.title ?? ''),
+    }
+  }
   const payload = buildEscalationIssuePayload(item)
   if (!force && payload.escalationTier === 'inline-todo') {
     return {
@@ -389,4 +420,40 @@ export async function applyIssuesToBackend(repoRoot, issues, opts = {}) {
     created.push({ title: res.title, url: res.url, number: res.number, ...(res.local ? { local: true } : {}) })
   }
   return { applied: created, error: undefined }
+}
+
+/**
+ * 审查默认升级出口：在未显式 `--no-escalate --reason` 豁免时自动调用 `escalateToBackend` 建单；
+ * `local-only` 自动写本地工单，远端故障降级 `delegated` 并附带告警而不掩盖错误。
+ */
+export async function autoEscalateBlockingFindings({
+  repoRoot = null,
+  backend = null,
+  targetRepo = null,
+  item = {},
+  noEscalate = false,
+  noEscalateReason = '',
+  force = true,
+  deduplicate = true,
+  _ghProbe = null,
+  _ghClient = null,
+} = {}) {
+  const res = await escalateToBackend({
+    backend, targetRepo, repoRoot,
+    item: { ...item, forceIssue: true },
+    force, deduplicate,
+    noEscalate, reason: noEscalateReason,
+    _ghProbe, _ghClient,
+  })
+  if (!res.ok && res.code === 'MISSING_NO_ESCALATE_REASON') return res
+  if (!res.ok) {
+    return {
+      ...res,
+      degraded: Boolean(res.delegated),
+      warning: res.delegated
+        ? `WARN_ESCALATION_DELEGATED: 远端未就绪，已降级为 delegated 负载 (${res.error ?? 'offline'})`
+        : `WARN_ESCALATION_FAILED: 自动建单失败 (${res.error ?? 'unknown error'})`,
+    }
+  }
+  return res
 }

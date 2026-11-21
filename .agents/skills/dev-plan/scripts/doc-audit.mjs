@@ -19,6 +19,7 @@ import {
 import { discoverEvergreenDocs, parseAgentsProfile, resolveAuthoritativeTddPath } from '../../lib/profile.mjs'
 import { locateTopSlicesForPaths } from '../../lib/doc-locator.mjs'
 import { matchFeatureMapForPaths } from '../../lib/feature-map.mjs'
+import { readPlanCritiqueEntrySync } from '../../lib/critique-rounds.mjs'
 import { pendingDecisionErrors, planModeErrors } from '../../lib/pending-decisions.mjs'
 import { resolveApprovalBasis } from '../../lib/plan-exit-gate.mjs'
 import { evaluateSliceGraph } from '../../lib/doc-slice-graph.mjs'
@@ -38,7 +39,7 @@ import {
 export { collectMarkdownFiles, listDocs, stripCritiqueMeta }
 
 export const VALID_STATUS_BY_TYPE = Object.freeze({
-  prd: new Set(['draft', 'active', 'in_review', 'done', 'dropped']),
+  prd: new Set(['draft', 'active', 'in_review', 'done', 'superseded', 'dropped']),
   spec: new Set(['draft', 'approved', 'implementing', 'in_review', 'implemented', 'superseded']),
   todo: new Set(['draft', 'active', 'pending', 'in_review', 'done', 'archived', 'dropped']),
 })
@@ -357,7 +358,8 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
       // 退场门禁调的是同一个函数——两处各判一遍，迟早对同一份文档给出相反结论。
       // 本文件只负责把它的结论翻译成一条审计错误。
       if (fm.data.approved === true) {
-        const basis = resolveApprovalBasis({ docType, text: normRaw, data: fm.data })
+        const { entry: ledgerEntry } = readPlanCritiqueEntrySync({ repoRoot, fmData: fm.data, relDoc })
+        const basis = resolveApprovalBasis({ rel: relDoc, docType, text: normRaw, data: fm.data, ledgerEntry })
         if (basis.applicable && !basis.hasBasis) {
           errors.push({
             code: 'APPROVAL_WITHOUT_BASIS',
@@ -569,6 +571,15 @@ export function auditDoc({ repoRoot, file, baselineText = null }) {
         fixHint: '把这几节从自定义模板的 omit_sections 里移除；要写得合身，减的是可选章节，不是主干。',
       })
     }
+  }
+
+  if (docType === 'spec' && bodyLines.length > 380) {
+    warnings.push({
+      code: 'WARN_SPEC_BODY_LONG',
+      line: startBodyLine + 1,
+      message: `SPEC 正文共 ${bodyLines.length} 行（> 380 行），建议按职责拆分为总控 PRD + 多份切片 SPEC`,
+      fixHint: '若结构清晰可保留；仅当涵盖多个独立模块时考虑拆片。',
+    })
   }
 
   const legacyCritique = /^(?:-\s+)?Plan Critique:\s*(.+)$/mi.exec(normRaw)?.[1]?.trim() ?? null

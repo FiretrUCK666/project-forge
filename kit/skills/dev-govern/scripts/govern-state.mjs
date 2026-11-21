@@ -265,7 +265,13 @@ export function buildClusterReport(signals, findings) {
     }
   }
 
+  let keptSignals = 0
   for (const ev of signals) {
+    const sev = String(ev.severity ?? 'medium').toLowerCase()
+    if (!['medium', 'high', 'critical'].includes(sev)) continue
+    if (/\.pass$/i.test(String(ev.pattern ?? ''))) continue
+    if (/\.(?:md|mdx)$/i.test(String(ev.file ?? ''))) continue
+    keptSignals += 1
     upsert({
       module: ev.module || inferSignalModule(ev.file), pattern: ev.pattern || 'manual-signal', category: ev.category || 'hygiene',
       sourceKind: 'signal', file: ev.file || '', line: ev.line, message: ev.message || ev.note || ev.pattern,
@@ -281,7 +287,7 @@ export function buildClusterReport(signals, findings) {
   const clusters = [...map.values()].sort((a, b) => (b.count - a.count) || a.key.localeCompare(b.key))
   const sinkCandidates = clusters.filter((c) => c.sinkCandidate)
   return {
-    totalEvents: signals.length + findings.length, signalEvents: signals.length, auditFindings: findings.length,
+    totalEvents: keptSignals + findings.length, signalEvents: keptSignals, auditFindings: findings.length,
     totalClusters: clusters.length, sinkCandidateCount: sinkCandidates.length, clusters, sinkCandidates,
   }
 }

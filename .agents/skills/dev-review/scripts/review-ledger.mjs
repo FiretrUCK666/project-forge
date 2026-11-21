@@ -10,7 +10,7 @@ import { resolve } from 'node:path'
 
 import { printNextStep, resolveAvailableSkills } from '../../lib/cli.mjs'
 import { artifactPathsOf, mergeArtifactRecords, normalizeArtifactRecords } from '../../lib/empirical-artifacts.mjs'
-import { buildEscalationIssuePayload, escalateToBackend } from '../../lib/escalation.mjs'
+import { autoEscalateBlockingFindings, buildEscalationIssuePayload, evaluateNoEscalateExemption } from '../../lib/escalation.mjs'
 import { posixPath } from '../../lib/git.mjs'
 import {
   collectImplementerHistory, consumeReviewToken, createDefaultLedger, nextReviewRound,
@@ -61,6 +61,15 @@ function resolveRecordNextSteps({ taskId, verdict, round, role, mainRoot, exclud
 
 export async function handleRecord(opts, roots) {
   const { mainRoot, workTreeRoot } = roots
+  const noEscalateExemption = evaluateNoEscalateExemption({
+    noEscalate: Boolean(opts['no-escalate']),
+    reason: opts.reason ?? '',
+  })
+  if (!noEscalateExemption.ok) {
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, code: noEscalateExemption.code, error: noEscalateExemption.error }, null, 2)}\n`)
+    process.stderr.write(`${noEscalateExemption.error}\n`)
+    return noEscalateExemption.exitCode
+  }
   let taskId
   let existing = null
 
@@ -472,7 +481,7 @@ export async function handleRecord(opts, roots) {
   const { path: tPath } = await updateTaskLedger(mainRoot, taskId, () => updated)
   if (stopLossPacket) stopLossPacket.ledgerPath = posixPath(tPath)
   await appendGovernSignal({
-    mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, category: 'review',
+    mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot, category: 'review',
     module: mustFixList[0]?.file ? undefined : 'review',
     pattern: stopLoss ? 'review.stop-loss' : (verdict === 'pass' ? 'review.pass' : 'review.changes'),
     severity: stopLoss ? 'high' : (verdict === 'pass' ? 'info' : 'medium'),
@@ -488,7 +497,7 @@ export async function handleRecord(opts, roots) {
     const pyramidTier = inferPyramidTier(defectClass, { stopLoss })
     const fingerprint = computeSignalFingerprint({ ruleId, pattern: 'review.must-fix', defectClass, moduleRoot: modRoot })
     await appendGovernSignal({
-      mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, category: 'review', module: modRoot,
+      mainRoot, gitDir: roots.gitDir, isGit: roots.isGit, workRoot: targetRoot, category: 'review', module: modRoot,
       pattern: 'review.must-fix', ruleId, defectClass, pyramidTier, fingerprint,
       targetArtifact: mf.file || modRoot, severity: mf.gateFailure ? 'high' : 'medium',
       source: 'review-finding', file: mf.file || '', line: mf.line ?? undefined,
@@ -501,7 +510,18 @@ export async function handleRecord(opts, roots) {
     mainRoot, workTreeRoot: targetRoot, ledger: updated, round, verdict, headSha, reviewerId, implementerId,
     empiricalSummary: reviewEmpirical, stopLoss, stopReasons, mustFixList, shouldFixList, preExistingList, rebuttedItems, resolvedItems, nextSteps, opts,
   })
-  const shouldWriteEscalation = Boolean(opts.escalate || updated.role === 'local-only' || opts._ghProbe || opts._ghClient)
+  if (Array.isArray(githubSync.syncFailures) && githubSync.syncFailures.length > 0) {
+    await updateTaskLedger(mainRoot, taskId, (cur) => ({
+      ...cur,
+      syncFailures: [...(Array.isArray(cur.syncFailures) ? cur.syncFailures : []), ...githubSync.syncFailures],
+    }))
+  }
+  const hasRepeatedSevereBlockers = mustFixList.length > 0 && prevRounds.length >= 1
+    && mustFixList.some((m) => (prevRounds.at(-1)?.mustFix ?? []).some((pm) => sameBlockerItem(m, pm)))
+  const shouldWriteEscalation = !noEscalateExemption.skip && Boolean(
+    opts.escalate || stopLoss || outOfScopeList.length > 0 || hasRepeatedSevereBlockers
+    || updated.role === 'local-only' || opts._ghProbe || opts._ghClient,
+  )
 
   if (stopLoss) {
     const escalationItem = {
@@ -514,12 +534,17 @@ export async function handleRecord(opts, roots) {
     }
     const escalationPayload = buildEscalationIssuePayload(escalationItem)
     const escalatedIssue = shouldWriteEscalation
-      ? await escalateToBackend({ repoRoot: mainRoot, item: escalationItem, _ghProbe: opts._ghProbe, _ghClient: opts._ghClient }).catch((e) => ({ ok: false, error: e?.message }))
+      ? await autoEscalateBlockingFindings({
+          repoRoot: mainRoot, item: escalationItem, noEscalate: noEscalateExemption.skip,
+          noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+        }).catch((e) => ({ ok: false, error: e?.message }))
       : null
     const payload = {
       status: 'STOP_LOSS_ESCALATE', exitCode: EXIT.HUMAN, taskId, round, headSha, reasons: stopReasons,
       unresolvedMustFix: mustFixList, rebuttedItems, resolvedItems, excludedReviewers, stopLossPacket, escalationPayload,
-      ...(escalatedIssue ? { escalatedIssue } : {}), ledgerPath: posixPath(tPath), githubSync,
+      ...(escalatedIssue ? { escalatedIssue } : {}),
+      ...(noEscalateExemption.skip ? { escalationSkipped: { reason: noEscalateExemption.reason } } : {}),
+      ledgerPath: posixPath(tPath), githubSync,
       nextStep: stopLossPacket.recoveryCommand,
     }
     if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
@@ -533,6 +558,7 @@ export async function handleRecord(opts, roots) {
         ...(githubSync.synced ? [`GitHub   : synced to ${githubSync.targetRepo} (${githubSync.results.map((r) => `${r.kind}#${r.number}`).join(', ')})`] : []),
         ...(githubSync.labelWarnings?.length > 0 ? [`LabelWarn: ${githubSync.labelWarnings.join('; ')}`] : []),
         ...(escalatedIssue?.ok ? [`Escalated: Issue #${escalatedIssue.number} (${escalatedIssue.title})`] : []),
+        ...(escalatedIssue?.warning ? [`EscWarn  : ${escalatedIssue.warning}`] : []),
         'Remaining Must-Fix:',
         ...(mustFixList.length > 0 ? mustFixList.map((m) => `  - [${m.id}] (fp:${m.fingerprint}) ${m.summary}`) : ['  - (verdict=changes at round >= 3)']),
       ].join('\n') + '\n')
@@ -549,11 +575,26 @@ export async function handleRecord(opts, roots) {
   const escalatedIssues = []
   if (shouldWriteEscalation && normalEscalations.items.length > 0) {
     for (const item of normalEscalations.items) {
-      const res = await escalateToBackend({
-        repoRoot: mainRoot, item, deduplicate: true, _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+      const res = await autoEscalateBlockingFindings({
+        repoRoot: mainRoot, item, deduplicate: true, noEscalate: noEscalateExemption.skip,
+        noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
       }).catch((e) => ({ ok: false, error: e?.message }))
       escalatedIssues.push({ ...res, fingerprint: item.fingerprint })
     }
+  } else if (shouldWriteEscalation && hasRepeatedSevereBlockers && mustFixList.length > 0) {
+    const first = mustFixList[0]
+    const repItem = {
+      source: 'review', severity: 'high', caseType: 4, taskId,
+      title: `repeated review blocker for ${taskId}: ${first.id}`,
+      summary: first.summary, fingerprint: first.fingerprint,
+      criteria: [`C1: 解决连续两轮未闭环严重阻塞 [${first.id}] ${first.summary}`],
+      labels: ['escalation'],
+    }
+    const res = await autoEscalateBlockingFindings({
+      repoRoot: mainRoot, item: repItem, deduplicate: true, noEscalate: noEscalateExemption.skip,
+      noEscalateReason: noEscalateExemption.reason ?? '', _ghProbe: opts._ghProbe, _ghClient: opts._ghClient,
+    }).catch((e) => ({ ok: false, error: e?.message }))
+    escalatedIssues.push({ ...res, fingerprint: repItem.fingerprint })
   }
 
   if (opts.json) {
@@ -565,6 +606,7 @@ export async function handleRecord(opts, roots) {
       outOfScopeCount: outOfScopeList.length, dispositionStats, rebuttedItems, resolvedItems,
       ...(escalationPayloads.length > 0 ? { escalationPayloads } : {}),
       ...(escalatedIssues.length > 0 ? { escalatedIssues } : {}),
+      ...(noEscalateExemption.skip ? { escalationSkipped: { reason: noEscalateExemption.reason } } : {}),
       ledgerPath: posixPath(tPath), githubSync, nextSteps,
     }, null, 2)}\n`)
   } else {

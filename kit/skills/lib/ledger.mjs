@@ -16,7 +16,7 @@ import { hasDotGitInAncestors, readHeadFast, resolveGitDirFast } from './git-fas
 import { parseIssueNumbers, parsePrNumber } from './github-client.mjs'
 
 const TERMINAL_TASK_STATUSES = new Set(['cleaned', 'aborted'])
-const OPEN_TASK_STATUSES = new Set(['planned', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
+const OPEN_TASK_STATUSES = new Set(['planned', 'planning', 'started', 'claimed', 'released', 'finalized', 'verified', 'verify-failed', 'submitted', 'rework', 'review-ready', 'awaiting-upstream-merge', 'local-ready'])
 
 /**
  * 发一枚独立审查令牌。**只由 `flow next` 在 `needs-review` 阶段调用。**
@@ -247,6 +247,12 @@ export function createDefaultLedger(partial = {}) {
     humanApprovedStopLoss: Boolean(partial.humanApprovedStopLoss),
     humanApprovedReason: partial.humanApprovedReason ?? null,
     rebuts: Array.isArray(partial.rebuts) ? partial.rebuts : [],
+    planning: Boolean(partial.planning),
+    planSyncKeys: Array.isArray(partial.planSyncKeys) ? partial.planSyncKeys : [],
+    planCritique: (partial.planCritique && typeof partial.planCritique === 'object' && !Array.isArray(partial.planCritique))
+      ? partial.planCritique
+      : {},
+    syncFailures: Array.isArray(partial.syncFailures) ? partial.syncFailures : [],
     status: partial.status ?? 'started',
     ...partial,
     explored: normalizeExploredEvidence(partial.explored),

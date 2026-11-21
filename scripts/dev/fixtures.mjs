@@ -359,6 +359,45 @@ async function main() {
     found[1](domainCases)
     const filtered = selectOnlyCases(domainCases, only)
     if (!filtered) return 1
+    const domainLanes = Number.isFinite(jobsArg) && jobsArg >= 1
+      ? Math.min(Math.floor(jobsArg), Math.max(1, cpus().length), filtered.length)
+      : 1
+    if (domainLanes > 1 && !only && !bailOn && process.env.PF_FIXTURE_WORKER !== '1') {
+      const allCases = []
+      let startIdx = 0
+      let endIdx = 0
+      for (const [name, registerFn] of DOMAIN_REGISTRY) {
+        if (name === domain) {
+          startIdx = allCases.length
+          registerFn(allCases)
+          endIdx = allCases.length
+        } else {
+          registerFn(allCases)
+        }
+      }
+      const scriptPath = fileURLToPath(import.meta.url)
+      const workerBkRoot = mkdtempSync(join(tmpdir(), 'pf-fix-pool-'))
+      try {
+        const dispatchOrder = buildDispatchOrder(allCases).filter((idx) => idx >= startIdx && idx < endIdx)
+        const { passed: totalPassed, failures: allFailures } = await runDynamicWorkerPool(
+          scriptPath,
+          dispatchOrder,
+          domainLanes,
+          workerBkRoot,
+          allCases.map(([name]) => name),
+          allCases.map(([, , costMs]) => (Number(costMs) > 0 ? Number(costMs) : 0)),
+        )
+        if (allFailures.length === 0) {
+          process.stdout.write(`行为断言：${totalPassed} 项通过，0 项失败（--domain ${domain}, ${domainLanes} 隔离子进程动态并发）。\n`)
+          return 0
+        }
+        for (const f of allFailures) process.stderr.write(`FAIL  ${f}\n`)
+        process.stderr.write(`\n行为断言：${totalPassed} 通过 / ${allFailures.length} 失败（--domain ${domain}）。\n`)
+        return 1
+      } finally {
+        try { rmSync(workerBkRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }) } catch { /* ignore */ }
+      }
+    }
     let passed = 0
     const failures = []
     for (const entry of filtered) {

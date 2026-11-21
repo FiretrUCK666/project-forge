@@ -50,8 +50,8 @@ export const INJECTIONS_EDIT_PYRAMID = [
     what: 'C6 signals.mjs 读旧无指纹日志时跳过实时虚拟指纹补全',
     file: 'kit/skills/lib/signals.mjs',
     alsoDropIn: ['.agents/skills/lib/signals.mjs'],
-    from: '      if (obj && typeof obj === \'object\') events.push(enrichSignalEvent(obj))',
-    to: '      if (obj && typeof obj === \'object\') events.push(obj)',
+    from: '      const ev = enrichSignalEvent(obj)',
+    to: '      const ev = obj',
     expect: 'StageC C6：signals 指纹兼容',
   },
   {

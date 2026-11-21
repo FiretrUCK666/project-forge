@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 
 import { evaluateReleaseReason } from '../../lib/evidence-substance.mjs'
 import { execSafe, execShellCommand, gitDiffNameStatusZ, posixPath, readTextSafe } from '../../lib/git.mjs'
-import { hasExploredEvidence, rememberPreviousImplementer } from '../../lib/ledger.mjs'
+import { rememberPreviousImplementer } from '../../lib/ledger.mjs'
 import {
   loadForgeHooksConfig, resolveStageHookCommands, scanExtensionSlotHazards,
 } from '../../lib/overlay.mjs'
@@ -107,16 +107,8 @@ export function checkLifecyclePreconditions(ledger, opts = {}) {
       message: `任务 ${ledger.taskId} 尚未记录 claimedAt，建议先运行 flow.mjs claim --task ${ledger.taskId}。`,
     })
   }
-  if (!hasExploredEvidence(ledger)) {
-    warnings.push({
-      code: 'WARN_NOT_EXPLORED',
-      message: `任务 ${ledger.taskId} 尚未记录 explored 探索证据，合并前需运行 flow.mjs explore --task ${ledger.taskId}。`,
-    })
-  }
   if (opts['strict-lifecycle'] && warnings.length > 0) {
-    const first = warnings[0]
-    const code = first.code === 'WARN_NOT_CLAIMED' ? 'BLOCKED_NOT_CLAIMED' : 'BLOCKED_NOT_EXPLORED'
-    return { ok: false, code, exitCode: EXIT.FACT, warnings, message: `${code}: ${first.message}` }
+    return { ok: false, code: 'BLOCKED_NOT_CLAIMED', exitCode: EXIT.FACT, warnings, message: `BLOCKED_NOT_CLAIMED: ${warnings[0].message}` }
   }
   return { ok: true, warnings }
 }

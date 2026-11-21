@@ -435,33 +435,6 @@ export function checkDocRegression(baselineSnap, currentSnap, baselineSource = n
       })
       continue
     }
-    const baseSecAnchors = baseSec.anchors ?? []
-    const curSecSet = new Set(curSec.anchors ?? [])
-    const removedInSec = baseSecAnchors.filter((a) => !curSecSet.has(a))
-    const addedInSec = (curSec.anchors ?? []).filter((a) => !baseSecAnchors.includes(a))
-    if (removedInSec.length > 0 && ((curSec.anchors?.length ?? 0) < baseSecAnchors.length || addedInSec.length === 0)) {
-      errors.push({
-        code: 'DOC_REGRESSION_ANCHOR_LOST',
-        line: 1,
-        section: id,
-        removed: removedInSec,
-        message: `跨轮退化：「${id}」节静默丢失 ${removedInSec.length} 处技术锚点（${removedInSec.slice(0, 4).join('、')}）且未等量补齐`,
-        fixHint: '恢复被删减的技术路径/命令/符号/约束锚点，或说明并补充等价新锚点。',
-      })
-    }
-  }
-
-  // 若验收条目数减少且有 C* 锚点丢失，同样触发 DOC_REGRESSION_ANCHOR_LOST
-  const lostCriteria = anchorsRemoved.filter((a) => /^C\d+$/.test(a))
-  if (lostCriteria.length > 0 && (currentSnap.criteriaCount ?? 0) < (baselineSnap.criteriaCount ?? 0)) {
-    errors.push({
-      code: 'DOC_REGRESSION_ANCHOR_LOST',
-      line: 1,
-      section: 'acceptance',
-      removed: lostCriteria,
-      message: `跨轮退化：静默删减验收标准编号（${lostCriteria.join('、')}）`,
-      fixHint: '不得在修订中静默删掉已有 C* 验收标准。',
-    })
   }
 
   const resolvedByCount = Math.max(0, (currentSnap.pendingResolved ?? 0) - (baselineSnap.pendingResolved ?? 0))

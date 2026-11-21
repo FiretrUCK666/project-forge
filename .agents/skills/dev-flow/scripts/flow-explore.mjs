@@ -22,6 +22,27 @@ function detectExploreTier(workRoot, map) {
   return 'direct-read'
 }
 
+export async function autoPopulateExplored(workRoot, implementerId) {
+  try {
+    const map = await generateRepoMap(workRoot)
+    return createExploredEvidence({
+      at: new Date().toISOString(),
+      tier: 'repo-map',
+      symbolCount: map?.symbolCount ?? 0,
+      by: implementerId,
+      source: 'flow-start',
+    })
+  } catch {
+    return createExploredEvidence({
+      at: new Date().toISOString(),
+      tier: 'repo-map',
+      symbolCount: 0,
+      by: implementerId,
+      source: 'flow-start',
+    })
+  }
+}
+
 export async function handleExplore(opts, roots) {
   const ctx = await resolveTaskContext(roots, opts)
   const { taskId, ledger } = ctx

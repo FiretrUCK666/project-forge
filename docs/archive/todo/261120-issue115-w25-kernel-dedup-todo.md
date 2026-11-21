@@ -7,7 +7,7 @@ updated: 2026-11-22
 issue: 115
 pr: null
 branch: feat/w25-kernel-dedup
-owner: plan-prb
+owner: impl-prb
 approved: false
 done_at: 2026-11-22
 task_id: w25-kernel-dedup

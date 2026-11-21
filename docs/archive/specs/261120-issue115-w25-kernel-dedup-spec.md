@@ -8,7 +8,7 @@ updated: 2026-11-22
 issue: 115
 pr: null
 branch: feat/w25-kernel-dedup
-owner: plan-prb
+owner: impl-prb
 plan_mode: interactive
 approved: true
 implemented: true

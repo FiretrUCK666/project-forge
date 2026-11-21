@@ -648,7 +648,16 @@ async function runScenarioJ(pkgRoot, sandbox, env, helpers) {
   assertOk(runNodeScript(flowJ, ['verify', '--task', 'j1', '--mode', 'gate', '--e2e-evidence', 'J_SMOKE_OK exit=0'], wtJ, env), 'Scenario J verify fixed')
   assertOk(runNodeScript(flowJ, ['submit', '--task', 'j1', '--agent', 'alice'], wtJ, env), 'Scenario J submit')
   assertOk(await recordWithToken(flowJ, revJ, 'j1', repoJ, env, ['--round', '1', '--verdict', 'pass', '--reviewer-id', 'rev-j']), 'Scenario J pass')
-  assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1', '--human-approved', '--reason', '远端是不可达的内网仓，已在别处人工核对合并结果'], repoJ, env), 'Scenario J generic-git merge')
+  // generic-git 的收尾要现场取回远端、按四态合流判定核验。这个场景里的远端是本地裸仓，
+  // 所以要真的让远端的 main 前进到分支尖端——那就是一次快进合并的等价结果。
+  // 不能直接 push 到 main：钩子禁止直推默认分支，那条禁令本身是对的，测试不该绕过它。
+  const ledgerPath = join(repoJ, '.worktrees', '.state', 'tasks', 'j1.json')
+  const jBranch = String(JSON.parse(readFileSync(ledgerPath, 'utf8')).branch ?? '')
+  if (!jBranch) throw new Error('Scenario J ledger has no branch')
+  runGit(wtJ, ['push', '-q', 'origin', `${jBranch}:${jBranch}`])
+  const jTip = String(runGit(wtJ, ['rev-parse', 'HEAD']).stdout).trim()
+  runGit(bareJ, ['update-ref', 'refs/heads/main', jTip])
+  assertOk(runNodeScript(flowJ, ['merge', '--task', 'j1'], repoJ, env), 'Scenario J generic-git merge')
 }
 
 export async function runStageBScenarios(pkgRoot, sandbox, env, helpers) {

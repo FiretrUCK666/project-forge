@@ -1,67 +1,222 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-labelledby="wf-t wf-d">
-  <title id="wf-t">三类起点汇入 S1-S4 治理流程轨道</title>
-  <desc id="wf-d">以地铁线路图几何展示空目录起步、存量仓接入与跨代升级汇入 S1-S4 四步，上方标注写前 .zip 快照与失败整包回滚。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge 接管四步流程</title>
+  <desc id="svg-desc">只读勘察（survey.mjs）、确认范围与保留手写资产、写前 .zip 快照可整包回滚、体检与交棒（review · handoff）。</desc>
+
   <defs>
-    <style>
-      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
-      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
-    </style>
-    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
-    </marker>
-    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
-    </marker>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
   </defs>
-  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
-  <rect x="0.75" y="0.75" width="1198.5" height="358.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
-  <!-- Swiss Editorial Running Folio -->
-  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">02</text>
-  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">ONBOARDING · S1–S4</text>
-  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">三类起点 · 四步流程</text>
-  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
 
-  <!-- Left Origin Branch Labels (Directly on Open Paper) -->
-  <text x="172" y="138" class="sans" font-size="19" font-weight="600" fill="#161614" text-anchor="end">空目录起步</text>
-  <text x="172" y="218" class="sans" font-size="19" font-weight="600" fill="#161614" text-anchor="end">存量仓接入</text>
-  <text x="172" y="298" class="sans" font-size="19" font-weight="600" fill="#161614" text-anchor="end">跨代升级</text>
+  <rect width="1200" height="490" fill="#F5F1E8"/>
+  <rect width="1200" height="490" fill="url(#paper-speck)"/>
 
-  <!-- Vignelli 45-Degree Transit Geometry -->
-  <g fill="none" stroke="#161614" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M 198 132 L 248 132 L 328 212"/>
-    <path d="M 198 212 L 1096 212"/>
-    <path d="M 198 292 L 248 292 L 328 212"/>
+  <g id="connectors">
+    <line x1="290" y1="202" x2="350" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="290" cy="202" r="5" fill="#1E4DD8"/>
+    <circle cx="350" cy="202" r="5" fill="#1E4DD8"/>
+
+    <line x1="570" y1="202" x2="630" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="570" cy="202" r="5" fill="#1E4DD8"/>
+    <circle cx="630" cy="202" r="5" fill="#1E4DD8"/>
+
+    <line x1="850" y1="202" x2="910" y2="202" stroke="#1B1E38" stroke-width="3.5"/>
+    <circle cx="850" cy="202" r="5" fill="#1E4DD8"/>
+    <circle cx="910" cy="202" r="5" fill="#1E4DD8"/>
   </g>
-  <circle cx="198" cy="132" r="7" fill="#F2EFE9" stroke="#161614" stroke-width="3.5"/>
-  <circle cx="198" cy="212" r="7" fill="#F2EFE9" stroke="#161614" stroke-width="3.5"/>
-  <circle cx="198" cy="292" r="7" fill="#F2EFE9" stroke="#161614" stroke-width="3.5"/>
 
-  <!-- Overhead Vermilion Rollback Transit Loop -->
-  <path d="M 852 198 L 852 132 Q 852 114 834 114 L 650 114 Q 632 114 632 132 L 632 190" fill="none" stroke="#C93B2B" stroke-width="2.6" stroke-dasharray="8 5" marker-end="url(#a-red)"/>
-  <text x="742" y="100" class="sans" font-size="18" font-weight="600" fill="#C93B2B" text-anchor="middle">写前 .zip 快照 · 失败可整包回滚</text>
+  <!-- Stage 1 (cx=180, [96..264]): Layered Dossier + Slim L-Square + Translucent Magnifying Loupe -->
+  <g id="stage-1">
+    <!-- Layered Blueprint Dossier -->
+    <rect x="124" y="130" width="112" height="144" fill="#1E4DD8"/>
+    <rect x="124" y="130" width="112" height="144" fill="url(#blueprint-grid)"/>
+    <rect x="112" y="116" width="114" height="146" fill="#F5F1E8" stroke="#1E4DD8" stroke-width="2.5"/>
+    <rect x="176" y="116" width="50" height="52" fill="url(#ht-indigo)"/>
+    <line x1="128" y1="146" x2="164" y2="146" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="128" y1="164" x2="178" y2="164" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="128" y1="182" x2="204" y2="182" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="128" y1="200" x2="194" y2="200" stroke="#1E4DD8" stroke-width="3"/>
 
-  <!-- Four Circular Metro Stations -->
-  <circle cx="430" cy="212" r="12" fill="#F2EFE9" stroke="#161614" stroke-width="4.5"/>
-  <text x="408" y="194" class="mono" font-size="17" font-weight="700" fill="#5E5A53" text-anchor="end">01</text>
-  <text x="430" y="264" class="sans" font-size="22" font-weight="700" fill="#161614" text-anchor="middle">只读勘察</text>
-  <text x="430" y="294" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle">survey.mjs</text>
+    <!-- Slim Ochre Drafting L-Square + Indigo Corner Bracket -->
+    <rect x="96" y="104" width="16" height="180" fill="#DDA027"/>
+    <rect x="96" y="104" width="134" height="16" fill="#DDA027"/>
+    <rect x="96" y="104" width="28" height="28" fill="#1B1E38"/>
+    <circle cx="110" cy="118" r="3.5" fill="#F5F1E8"/>
 
-  <circle cx="632" cy="212" r="12" fill="#F2EFE9" stroke="#161614" stroke-width="4.5"/>
-  <text x="610" y="194" class="mono" font-size="17" font-weight="700" fill="#5E5A53" text-anchor="end">02</text>
-  <text x="632" y="264" class="sans" font-size="22" font-weight="700" fill="#161614" text-anchor="middle">确认范围</text>
-  <text x="632" y="294" class="sans" font-size="17" fill="#5E5A53" text-anchor="middle">保留手写资产</text>
+    <!-- Translucent Magnifying Loupe within [96..264] -->
+    <g id="loupe">
+      <line x1="232" y1="238" x2="256" y2="262" stroke="#1B1E38" stroke-width="13" stroke-linecap="round"/>
+      <line x1="244" y1="250" x2="256" y2="262" stroke="#1E4DD8" stroke-width="13" stroke-linecap="round"/>
+      <circle cx="206" cy="212" r="40" fill="#1B1E38"/>
+      <circle cx="206" cy="212" r="34" fill="#1E4DD8"/>
+      <circle cx="206" cy="212" r="26" fill="#F5F1E8"/>
+      <circle cx="206" cy="212" r="26" fill="#DDA027" fill-opacity="0.72"/>
+      <path d="M 188 202 A 19 19 0 0 1 218 194" fill="none" stroke="#F5F1E8" stroke-width="3.5" stroke-linecap="round"/>
+    </g>
+  </g>
 
-  <circle cx="852" cy="212" r="15" fill="#C93B2B"/>
-  <circle cx="852" cy="212" r="6" fill="#FAF8F4"/>
-  <text x="830" y="194" class="mono" font-size="17" font-weight="700" fill="#C93B2B" text-anchor="end">03</text>
-  <text x="852" y="264" class="sans" font-size="22" font-weight="700" fill="#C93B2B" text-anchor="middle">备份后写入</text>
-  <text x="852" y="294" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle">equip · compose</text>
+  <!-- Stage 2 (cx=460, [376..544]): Calibration Grid + Checkmark -->
+  <g id="stage-2">
+    <!-- Outer bi-color ruler frame (168x168 centered at 460,202) -->
+    <rect x="376" y="118" width="168" height="168" fill="#1E4DD8"/>
+    <polygon points="460,118 544,118 544,286 460,286" fill="#DDA027"/>
+    <!-- Inner 4x4 grid backing -->
+    <rect x="398" y="140" width="124" height="124" fill="#F5F1E8"/>
+    <line x1="429" y1="140" x2="429" y2="264" stroke="#DDA027" stroke-width="3"/>
+    <line x1="460" y1="140" x2="460" y2="264" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="491" y1="140" x2="491" y2="264" stroke="#DDA027" stroke-width="3"/>
+    <line x1="398" y1="171" x2="522" y2="171" stroke="#1E4DD8" stroke-width="3"/>
+    <line x1="398" y1="202" x2="522" y2="202" stroke="#DDA027" stroke-width="3"/>
+    <line x1="398" y1="233" x2="522" y2="233" stroke="#DDA027" stroke-width="3"/>
+    <rect x="376" y="130" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="142" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="154" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="166" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="178" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="190" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="202" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="214" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="226" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="238" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="250" width="13" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="262" width="8" height="2.2" fill="#F5F1E8"/>
+    <rect x="376" y="274" width="13" height="2.2" fill="#F5F1E8"/>
+    <!-- Bold Two-Tone Vermilion + Deep Indigo Checkmark -->
+    <polygon points="416,204 432,188 458,214 442,230" fill="#D93829"/>
+    <polygon points="442,230 524,146 540,162 458,246" fill="#1B1E38"/>
+    <polygon points="442,230 460,212 474,226 458,246" fill="#B8421B"/>
+  </g>
 
-  <circle cx="1052" cy="212" r="12" fill="#161614"/>
-  <circle cx="1052" cy="212" r="4.5" fill="#FAF8F4"/>
-  <text x="1030" y="194" class="mono" font-size="17" font-weight="700" fill="#161614" text-anchor="end">04</text>
-  <text x="1052" y="264" class="sans" font-size="22" font-weight="700" fill="#161614" text-anchor="middle">体检与交棒</text>
-  <text x="1052" y="294" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle">review · handoff</text>
+  <!-- Stage 3 (cx=740, [663..817]): Split Vermilion/Ochre Zipper Archive Capsule + Dashed Safety Rollback Arc -->
+  <g id="stage-3">
+    <!-- Overhead Dashed Safety Return Arc -->
+    <path d="M 847 106 C 813 42, 661 42, 623 118" fill="none" stroke="#D93829" stroke-width="3" stroke-dasharray="10 7"/>
+    <polygon points="617,127 631,116 618,110" fill="#D93829"/>
 
-  <line x1="1104" y1="196" x2="1104" y2="228" stroke="#161614" stroke-width="4.5"/>
+    <!-- Split Capsule Body (rx=44) -->
+    <clipPath id="capsule-clip">
+      <rect x="663" y="96" width="154" height="214" rx="44"/>
+    </clipPath>
+    <g clip-path="url(#capsule-clip)">
+      <rect x="663" y="96" width="77" height="214" fill="#D93829"/>
+      <rect x="740" y="96" width="77" height="214" fill="#DDA027"/>
+      <rect x="663" y="218" width="77" height="92" fill="url(#ht-indigo)"/>
+      <rect x="663" y="96" width="154" height="28" fill="#1B1E38" fill-opacity="0.12"/>
+    </g>
+    <!-- Curved open upper zipper track + central teeth -->
+    <path d="M 663 134 L 711 134 Q 735 134 740 152" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <path d="M 817 134 L 769 134 Q 745 134 740 152" fill="none" stroke="#1B1E38" stroke-width="7"/>
+    <rect x="728" y="136" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="142" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="149" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="155" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="162" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="168" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="175" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="181" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="188" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="194" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="201" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="207" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="214" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="220" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="227" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="233" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="240" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="246" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="253" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="259" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="266" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="272" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="279" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="285" width="11" height="6" fill="#1B1E38"/>
+    <rect x="728" y="292" width="11" height="6" fill="#1B1E38"/>
+    <rect x="741" y="298" width="11" height="6" fill="#1B1E38"/>
+    <!-- Sculpted Zipper Pull -->
+    <rect x="729" y="142" width="22" height="22" rx="4" fill="#1B1E38"/>
+    <rect x="731" y="156" width="18" height="32" rx="5" fill="#DDA027" stroke="#1B1E38" stroke-width="3"/>
+    <rect x="737" y="168" width="6" height="12" rx="2" fill="#1B1E38"/>
+  </g>
+
+  <!-- Stage 4 (cx=1020, [938..1104]): Cobalt Tabbed Folio + Plumb-Bob + Rosette Wax Seal -->
+  <g id="stage-4">
+    <!-- Folio Tabs and Main Cover -->
+    <rect x="1086" y="120" width="18" height="44" rx="4" fill="#1E4DD8"/>
+    <rect x="1086" y="176" width="18" height="44" rx="4" fill="#153499"/>
+    <rect x="938" y="100" width="150" height="202" rx="6" fill="#1E4DD8"/>
+    <rect x="938" y="100" width="22" height="202" rx="3" fill="url(#ht-indigo-dense)"/>
+    <rect x="946" y="106" width="124" height="6" fill="#F5F1E8"/>
+    <rect x="946" y="290" width="124" height="6" fill="#F5F1E8"/>
+
+    <!-- Plumb-Bob Hanging from Top Cord -->
+    <line x1="994" y1="68" x2="994" y2="122" stroke="#1B1E38" stroke-width="4"/>
+    <circle cx="994" cy="130" r="12" fill="#DDA027"/>
+    <polygon points="994,140 966,174 994,258" fill="#DDA027"/>
+    <polygon points="994,140 1022,174 994,258" fill="#1B1E38"/>
+    <line x1="966" y1="174" x2="1022" y2="174" stroke="#1E4DD8" stroke-width="2.5"/>
+
+    <!-- Scalloped Vermilion Rosette Wax Seal -->
+    <g transform="translate(1050, 244)">
+      <circle cx="0" cy="-24" r="9" fill="#D93829"/>
+      <circle cx="17" cy="-17" r="9" fill="#D93829"/>
+      <circle cx="24" cy="0" r="9" fill="#D93829"/>
+      <circle cx="17" cy="17" r="9" fill="#D93829"/>
+      <circle cx="0" cy="24" r="9" fill="#D93829"/>
+      <circle cx="-17" cy="17" r="9" fill="#D93829"/>
+      <circle cx="-24" cy="0" r="9" fill="#D93829"/>
+      <circle cx="-17" cy="-17" r="9" fill="#D93829"/>
+      <circle cx="0" cy="0" r="22" fill="#D93829"/>
+      <circle cx="0" cy="0" r="16" fill="none" stroke="#1B1E38" stroke-width="2.5"/>
+      <circle cx="0" cy="0" r="9" fill="#A82418"/>
+    </g>
+  </g>
+
+  <g id="stage-labels">
+    
+    <text x="180" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">只读勘察</text>
+    <text x="180" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">survey.mjs</text>
+  
+    <text x="460" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">确认范围</text>
+    <text x="460" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">保留手写资产</text>
+  
+    <text x="740" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#D93829">写前 .zip 快照</text>
+    <text x="740" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">可整包回滚</text>
+  
+    <text x="1020" y="394" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="800" fill="#1B1E38">体检与交棒</text>
+    <text x="1020" y="428" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">review · handoff</text>
+  
+  </g>
 </svg>

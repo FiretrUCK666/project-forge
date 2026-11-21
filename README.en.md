@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme/hero-en.svg" alt="project-forge: read-only survey first, then fit Git baselines, three-layer docs, eight daily skills, and merge gates" width="100%">
+  <img src="assets/readme/hero-en.svg" alt="project-forge: survey-first repository governance for version control, evergreen docs, and eight local skills with zero dependencies across multi-remote and local-only setups" width="100%">
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@ In a new folder or a repository maintained for months, most wasted time sits out
 ## External Governance and Upgrades
 
 <p align="center">
-  <img src="assets/readme/workflow-en.svg" alt="Three repository starting points entering the S1 to S4 pipeline with external snapshots before writes" width="100%">
+  <img src="assets/readme/workflow-en.svg" alt="S1 to S4 governance pipeline: read-only survey (survey.mjs), confirm scope while keeping custom files, pre-write external .zip snapshot with full rollback, and audit and handoff (review and handoff)" width="100%">
 </p>
 
 Empty directories, partially configured repositories, and older setups returning for an upgrade all move through the same four steps: **S1 Read-only Survey → S2 Scope and Fusion → S3 Backup and Ordered Write → S4 Review and Handoff**:
@@ -72,7 +72,7 @@ Across upgrades, `equip.mjs` tracks managed files through `.agents/skills/.pf-ma
 ## Eight Daily Skills and Workflow
 
 <p align="center">
-  <img src="assets/readme/architecture-en.svg" alt="Role division across the eight built-in skills and the four merge gates" width="100%">
+  <img src="assets/readme/architecture-en.svg" alt="Main branch and isolated worktree topology: .worktrees/impl runs explore, plan, edit, and flow, .worktrees/review gates independent merge via dev-review, supported by outer-loop skills dev-verify-tools, dev-iterate, and dev-govern" width="100%">
 </p>
 
 Daily work installs all eight skills across eight stages: **Requirement → Clarification → Design → Implementation → Review → Empirical & Formal Verification → Acceptance → Merge**.
@@ -99,7 +99,7 @@ Describe your goal in plain language—or paste Issue, PR, or Milestone URLs—a
 ## Bounded Optimization Loop and PoC-First
 
 <p align="center">
-  <img src="assets/readme/skills-cycle-en.svg" alt="Four-phase iterate.mjs cycle state machine and three hard stop-loss limits" width="100%">
+  <img src="assets/readme/skills-cycle-en.svg" alt="Eight-skill lifecycle loop: dev-explore through dev-review with max 3-round plan critique and code rework arcs, connected to outer-loop dev-govern, dev-iterate, and dev-verify-tools with defect escalation" width="100%">
 </p>
 
 When investigating gaps or review findings, `dev-iterate`, `dev-review`, and `dev-govern` share one rule: **run a minimal reproduction (`PoC-first`) to confirm the issue before writing any fix**.
@@ -118,7 +118,7 @@ When investigating gaps or review findings, `dev-iterate`, `dev-review`, and `de
 ## Three-Layer Evergreen Docs and Slicing
 
 <p align="center">
-  <img src="assets/readme/docs-layers-en.svg" alt="Three evergreen doc layers, on-demand doc-locate slicing, and four-layer planning closure" width="100%">
+  <img src="assets/readme/docs-layers-en.svg" alt="Three evergreen doc layers (AGENTS.md routing and hard invariants, docs/TDD.md section-read architecture, docs/feature-map.json modules and verify tools) with four-layer planning archive flow" width="100%">
 </p>
 
 Project knowledge lives in **three evergreen layers** alongside **four planning folders**. During daily tasks, `doc-locate.mjs` returns `startLine..endLine` slices by heading or symbol so long files are never dumped whole into context:

@@ -1,94 +1,149 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" role="img" aria-labelledby="dl-t dl-d">
-  <title id="dl-t">Isometric Three-Layer Evergreen Docs &amp; On-Demand Slicing</title>
-  <desc id="dl-d">Three 30-degree isometric architectural planes for AGENTS.md, docs/TDD.md, and docs/feature-map.json, pierced by a vermilion doc-locate section cut for on-demand reading.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="580" viewBox="0 0 1200 580" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge — 3-Layer Evergreen Docs &amp; Archive</title>
+  <desc id="svg-desc">Three isometric blueprint planes: AGENTS.md (routing and invariants), docs/TDD.md (architecture with on-demand section slice), and docs/feature-map.json (module and verify tool map); completed plans move to docs/archive/.</desc>
+
   <defs>
-    <style>
-      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
-      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
-    </style>
-    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
-    </marker>
-    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
-    </marker>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
   </defs>
-  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
-  <rect x="0.75" y="0.75" width="1198.5" height="518.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
-  <!-- Swiss Editorial Running Folio -->
-  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">05</text>
-  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">EVERGREEN DOCS · 3 LAYERS</text>
-  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">READ ON DEMAND · NO DUMPS</text>
-  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
 
-  <!-- Vertical Vermilion Section-Cut Axis -->
-  <line x1="368" y1="84" x2="368" y2="482" stroke="#C93B2B" stroke-width="2" stroke-dasharray="6 5"/>
+  <rect width="1200" height="580" fill="#F5F1E8"/>
+  <rect width="1200" height="580" fill="url(#paper-speck)"/>
 
-  <!-- L3 Bottom Plane (Deep Ink Feature Map Stratum) -->
-  <g id="iso-l3">
-    <polygon points="156,390 368,456 368,466 156,400" fill="#0A0A09" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,456 580,390 580,400 368,466" fill="#2B2B28" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,324 580,390 368,456 156,390" fill="#161614" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
-    <g stroke="#5E5A53" stroke-width="1" stroke-opacity="0.7">
-      <line x1="262" y1="390" x2="368" y2="357"/>
-      <line x1="308" y1="406" x2="414" y2="373"/>
-      <line x1="354" y1="422" x2="460" y2="389"/>
+  <g id="docs-left-copy">
+    
+    <circle cx="70" cy="128" r="5.5" fill="#DDA027"/>
+    <text x="90" y="136" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="800" fill="#1B1E38">AGENTS.md</text>
+    <text x="90" y="170" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="500" fill="#3D4260">Routing &amp; hard invariants</text>
+  
+    <circle cx="70" cy="254" r="5.5" fill="#D93829"/>
+    <text x="90" y="262" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="800" fill="#1E4DD8">docs/TDD.md</text>
+    <text x="90" y="296" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="500" fill="#3D4260">Architecture · section-read</text>
+  
+    <circle cx="70" cy="380" r="5.5" fill="#1B1E38"/>
+    <text x="90" y="388" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="800" fill="#1B1E38">docs/feature-map.json</text>
+    <text x="90" y="422" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="500" fill="#3D4260">Modules &amp; verify tools</text>
+  
+    <line x1="90" y1="476" x2="500" y2="476" stroke="#1B1E38" stroke-opacity="0.16" stroke-width="1"/>
+    <text x="90" y="508" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#575B78">docs/{prd,specs,todo}  &#8594;  docs/archive/</text>
+  </g>
+
+  <g id="docs-isometric-strata">
+    <!-- 3D-Occluded Tail Emerging Below Layer 3 (504 to 532, 48px clear of bottom) -->
+    <line x1="868" y1="504" x2="868" y2="532" stroke="#D93829" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="868" cy="532" r="2.5" fill="#D93829"/>
+
+    <!-- LAYER 3 (BOTTOM, cy=414): Deep Indigo Modular Node Grid + Halftone Cast Shadow -->
+    <g id="stratum-3">
+      <polygon points="868.0,342.5 1086.2,433.4 868.0,524.3 649.8,433.4" fill="url(#ht-indigo-dense)"/>
+      <polygon points="868.0,324.0 1084.0,414.0 868.0,504.0 652.0,414.0" fill="#1B1E38"/>
+      <line x1="902.6" y1="345.6" x2="703.8" y2="428.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="833.4" y1="345.6" x2="1032.2" y2="428.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="945.8" y1="363.6" x2="747.0" y2="446.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="790.2" y1="363.6" x2="989.0" y2="446.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="989.0" y1="381.6" x2="790.2" y2="464.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="747.0" y1="381.6" x2="945.8" y2="464.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="1032.2" y1="399.6" x2="833.4" y2="482.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <line x1="703.8" y1="399.6" x2="902.6" y2="482.4" stroke="#DDA027" stroke-opacity="0.55" stroke-width="1.2"/>
+      <circle cx="868.0" cy="360.0" r="5.2" fill="#F5F1E8"/>
+      <circle cx="824.8" cy="378.0" r="4.2" fill="#DDA027"/>
+      <circle cx="781.6" cy="396.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="738.4" cy="414.0" r="5.2" fill="#F5F1E8"/>
+      <circle cx="911.2" cy="378.0" r="4.2" fill="#DDA027"/>
+      <circle cx="868.0" cy="396.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="824.8" cy="414.0" r="5.2" fill="#F5F1E8"/>
+      <circle cx="781.6" cy="432.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="954.4" cy="396.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="911.2" cy="414.0" r="5.2" fill="#F5F1E8"/>
+      <circle cx="868.0" cy="432.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="824.8" cy="450.0" r="4.2" fill="#DDA027"/>
+      <circle cx="997.6" cy="414.0" r="5.2" fill="#F5F1E8"/>
+      <circle cx="954.4" cy="432.0" r="4.2" fill="#1E4DD8"/>
+      <circle cx="911.2" cy="450.0" r="4.2" fill="#DDA027"/>
+      <circle cx="868.0" cy="468.0" r="5.2" fill="#F5F1E8"/>
+      <!-- Center Ochre Registration Ring + Socket Hole -->
+      <ellipse cx="868" cy="414" rx="11" ry="5.5" fill="none" stroke="#DDA027" stroke-width="2.4"/>
+      <ellipse cx="868" cy="414" rx="4.2" ry="2.0" fill="#1B1E38"/>
     </g>
-  </g>
 
-  <!-- L2 Middle Plane (Warm Stone TDD Stratum + Vermilion Illuminated Slice) -->
-  <g id="iso-l2">
-    <polygon points="156,276 368,342 368,352 156,286" fill="#C9C1B2" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,342 580,276 580,286 368,352" fill="#D8D1C3" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,210 580,276 368,342 156,276" fill="#E6E0D5" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
-    <g stroke="#8A8479" stroke-width="0.9" stroke-opacity="0.55">
-      <line x1="262" y1="276" x2="368" y2="243"/>
-      <line x1="315" y1="292" x2="421" y2="259"/>
-      <line x1="368" y1="309" x2="474" y2="276"/>
-      <line x1="315" y1="259" x2="421" y2="292"/>
-      <line x1="368" y1="243" x2="474" y2="276"/>
+    <!-- 3D-Occluded Rod Segment Between Layer 2 Bottom (380) and Layer 3 Center (414) -->
+    <line x1="868" y1="380" x2="868" y2="414" stroke="#D93829" stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- LAYER 2 (MIDDLE, cy=290): Cobalt Elevation Blueprint + Vermilion Precision Highlight Slice -->
+    <g id="stratum-2">
+      <!-- Slight Indigo Thickness Lip -->
+      <polygon points="652.0,290.0 868.0,380.0 1084.0,290.0 1084.0,297.0 868.0,387.0 652.0,297.0" fill="#153499"/>
+      <!-- Main Cobalt Plane -->
+      <polygon points="868.0,200.0 1084.0,290.0 868.0,380.0 652.0,290.0" fill="#1E4DD8"/>
+      <!-- Highlight Slice Band (doc-locate targeted read slice!) -->
+      <polygon points="783.8,235.1 999.8,325.1 950.1,345.8 734.1,255.8" fill="#D93829"/>
+      <!-- Overprint Deep Core Crosshair Square inside Slice -->
+      <polygon points="861.5,267.5 922.0,292.7 872.3,313.4 811.8,288.2" fill="#A82418"/>
+      <!-- Crisp White Blueprint Architecture and Dimension Wireframe -->
+      <polygon points="857.2,224.3 1025.7,294.5 878.8,355.7 710.3,285.5" fill="none" stroke="#F5F1E8" stroke-width="1.6"/>
+      <polyline points="816.2,259.4 916.6,251.8 1000.8,286.9" fill="none" stroke="#F5F1E8" stroke-width="1.8"/>
+      <line x1="783.8" y1="254.9" x2="952.2" y2="325.1" stroke="#F5F1E8" stroke-width="1.3"/>
+      <line x1="941.4" y1="259.4" x2="794.6" y2="320.6" stroke="#F5F1E8" stroke-width="1.3"/>
+      <!-- Corner Title Block Box -->
+      <polygon points="885.3,320.6 924.2,336.8 878.8,355.7 839.9,339.5" fill="none" stroke="#F5F1E8" stroke-width="1.4"/>
+      <ellipse cx="868" cy="290" rx="12" ry="6" fill="none" stroke="#F5F1E8" stroke-width="2.2"/>
     </g>
-    <polygon points="368,256 432,276 368,296 304,276" fill="#C93B2B" fill-opacity="0.88" stroke="#161614" stroke-width="1.2"/>
+
+    <!-- 3D-Occluded Rod Segment Between Layer 1 Bottom (256) and Layer 2 Center (290) -->
+    <line x1="868" y1="256" x2="868" y2="290" stroke="#D93829" stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- LAYER 1 (TOP, cy=166): Warm Ochre Contract Sheet + Cream Inset + Halftone Mesh -->
+    <g id="stratum-1">
+      <polygon points="868.0,76.0 1084.0,166.0 868.0,256.0 652.0,166.0" fill="#DDA027"/>
+      <!-- Cream Contract Inset Window -->
+      <polygon points="807.5,121.0 906.9,162.4 805.4,204.7 706.0,163.3" fill="#F5F1E8"/>
+      <!-- Halftone Risograph Corner Block -->
+      <polygon points="837.8,164.2 911.2,194.8 831.3,228.1 757.8,197.5" fill="url(#ht-indigo)"/>
+      <!-- Fine White Ruling Lines and Spec Header Blocks -->
+      <polygon points="969.5,148.9 1023.5,171.4 913.4,217.3 859.4,194.8" fill="none" stroke="#F5F1E8" stroke-width="1.5"/>
+      <line x1="878.8" y1="100.3" x2="960.9" y2="134.5" stroke="#F5F1E8" stroke-width="1.6"/>
+      <line x1="861.5" y1="107.5" x2="943.6" y2="141.7" stroke="#F5F1E8" stroke-width="1.6"/>
+      <line x1="844.2" y1="114.7" x2="906.9" y2="140.8" stroke="#F5F1E8" stroke-width="1.6"/>
+      <!-- Vermilion Registration Target Ring -->
+      <ellipse cx="868" cy="166" rx="11" ry="5.5" fill="none" stroke="#D93829" stroke-width="2.5"/>
+    </g>
+
+    <!-- Top Plumb Rod Entering Layer 1 Center (48 to 166, 48px clear of top) -->
+    <line x1="868" y1="48" x2="868" y2="166" stroke="#D93829" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="868" cy="48" r="2.5" fill="#D93829"/>
   </g>
-
-  <!-- L1 Top Plane (Crisp Alabaster Entry Contract Stratum) -->
-  <g id="iso-l1">
-    <polygon points="156,162 368,228 368,238 156,172" fill="#D6CFC2" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,228 580,162 580,172 368,238" fill="#E5DFD3" stroke="#161614" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="368,96 580,162 368,228 156,162" fill="#FAF8F4" stroke="#161614" stroke-width="1.6" stroke-linejoin="round"/>
-    <line x1="278" y1="162" x2="458" y2="162" stroke="#CBC4B6" stroke-width="1"/>
-    <circle cx="368" cy="162" r="5" fill="#C93B2B"/>
-  </g>
-
-  <!-- Left Section-Cut Callout -->
-  <line x1="156" y1="276" x2="302" y2="276" stroke="#C93B2B" stroke-width="1.8" marker-end="url(#a-red)"/>
-  <text x="48" y="254" class="mono" font-size="19" font-weight="700" fill="#C93B2B">doc-locate</text>
-  <text x="48" y="282" class="mono" font-size="16" font-weight="600" fill="#161614">L120..L180</text>
-  <text x="48" y="308" class="sans" font-size="16" font-weight="500" fill="#5E5A53">Read by section</text>
-
-  <!-- Right Side: Unboxed Editorial Callouts and Leader Lines -->
-  <line x1="582" y1="162" x2="676" y2="162" stroke="#161614" stroke-width="1.4"/>
-  <circle cx="582" cy="162" r="4" fill="#161614"/>
-  <text x="696" y="156" class="mono" font-size="18" font-weight="700" fill="#8A8479">L1</text>
-  <text x="732" y="156" class="mono" font-size="22" font-weight="700" fill="#161614">AGENTS.md</text>
-  <text x="732" y="186" class="sans" font-size="18" fill="#5E5A53">Routing &amp; rules (&lt;24KB)</text>
-
-  <line x1="582" y1="276" x2="676" y2="276" stroke="#C93B2B" stroke-width="1.6"/>
-  <circle cx="582" cy="276" r="4" fill="#C93B2B"/>
-  <text x="696" y="270" class="mono" font-size="18" font-weight="700" fill="#C93B2B">L2</text>
-  <text x="732" y="270" class="mono" font-size="22" font-weight="700" fill="#161614">docs/TDD.md</text>
-  <text x="732" y="300" class="sans" font-size="18" fill="#5E5A53">Architecture &amp; bounds</text>
-
-  <line x1="582" y1="390" x2="676" y2="390" stroke="#161614" stroke-width="1.4"/>
-  <circle cx="582" cy="390" r="4" fill="#161614"/>
-  <text x="696" y="384" class="mono" font-size="18" font-weight="700" fill="#8A8479">L3</text>
-  <text x="732" y="384" class="mono" font-size="21" font-weight="700" fill="#161614">docs/feature-map.json</text>
-  <text x="732" y="414" class="sans" font-size="18" fill="#5E5A53">Modules &amp; verify-tool map</text>
-
-  <!-- Bottom-Right Minimal Swiss Lifecycle Strip -->
-  <line x1="696" y1="448" x2="1152" y2="448" stroke="#CBC4B6" stroke-width="1.2"/>
-  <text x="696" y="482" class="mono" font-size="16" font-weight="600" fill="#5E5A53">docs/{prd,specs,todo}</text>
-  <line x1="912" y1="476" x2="994" y2="476" stroke="#161614" stroke-width="1.6" marker-end="url(#a-ink)"/>
-  <text x="953" y="468" class="mono" font-size="16" fill="#C93B2B" text-anchor="middle">finalize</text>
-  <text x="1006" y="482" class="mono" font-size="16" font-weight="700" fill="#161614">docs/archive/</text>
 </svg>

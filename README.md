@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme/hero.svg" alt="project-forge：先只读勘察现状，再按项目体量配齐 Git 基线、三层文档、8 套日常技能与合入门禁" width="100%">
+  <img src="assets/readme/hero.svg" alt="project-forge：先勘察再落盘的仓库工程治理技能，补齐版本管理、项目文档与八个本地研发技能，零第三方依赖，支持任意 Git 远端与纯本地" width="100%">
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@
 ## 外部项目治理与跨代升级
 
 <p align="center">
-  <img src="assets/readme/workflow.svg" alt="三类起点进入 S1 到 S4 治理流水线并在写入前创建仓外快照" width="100%">
+  <img src="assets/readme/workflow.svg" alt="S1 到 S4 治理流水线：只读勘察（survey.mjs）、确认范围并保留手写资产、写前仓外 .zip 快照与整包回滚、体检与交棒（review 与 handoff）" width="100%">
 </p>
 
 无论面对空白目录、半配好的存量仓库，还是已有旧版配置的跨代重入仓库，治理都按 **S1 只读勘察 → S2 定范围与融合 → S3 备份后按序落盘 → S4 体检与交棒** 四步推进：
@@ -72,7 +72,7 @@
 ## 八个日常技能与完整流程
 
 <p align="center">
-  <img src="assets/readme/architecture.svg" alt="八个内置技能的职责分工与合并前四项门禁" width="100%">
+  <img src="assets/readme/architecture.svg" alt="主干 main 与隔离工作树拓扑：.worktrees/impl 运行 explore、plan、edit、flow，经 .worktrees/review 由 dev-review 独立审查合入，外环由 dev-verify-tools、dev-iterate 与 dev-govern 支撑" width="100%">
 </p>
 
 日常研发统一装配全部 8 个内置技能，围绕 **需求 → 澄清 → 设计 → 实现 → 评审 → 实证测试-形式验证 → 验收 → 合入** 八个阶段运转。日常通过自然语言静默触发（也可直接粘贴 Issue、PR 或 Milestone 链接），由 `AGENTS.md` 自动路由到对应技能，需要时也可直接运行底层 CLI 脚本。
@@ -97,7 +97,7 @@
 ## 有界优化循环与先复现原则
 
 <p align="center">
-  <img src="assets/readme/skills-cycle.svg" alt="iterate.mjs cycle 四阶段状态机与三条硬停损规则" width="100%">
+  <img src="assets/readme/skills-cycle.svg" alt="八个内置技能协作闭环：dev-explore 到 dev-review 主链含最多 3 轮独立内审 Critique 与代码审查返工，外环衔接 dev-govern、dev-iterate 与 dev-verify-tools 并支持缺陷回流建单" width="100%">
 </p>
 
 发现疑点或测试盲区时，`dev-iterate`、`dev-review` 和 `dev-govern` 共用一条核心原则：**先跑通最小运行复现（`PoC-first`），确认问题真实存在后再进入修复流程**。
@@ -116,7 +116,7 @@
 ## 三层常青文档与按需切片
 
 <p align="center">
-  <img src="assets/readme/docs-layers.svg" alt="三层常青文档结构、doc-locate 按需切片与四层规划归档" width="100%">
+  <img src="assets/readme/docs-layers.svg" alt="三层常青文档（AGENTS.md 路由表与硬约束、docs/TDD.md 架构按节跳读、docs/feature-map.json 模块与验证工具映射）与四层规划归档流转" width="100%">
 </p>
 
 项目文档分为**三层常青文档**和**四层规划单据**。平时由 `dev-explore` 的 `doc-locate.mjs` 按章节或符号返回 `startLine..endLine` 切片，避免把整篇长文档塞进会话上下文：

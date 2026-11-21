@@ -1,99 +1,149 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="1200" height="480" role="img" aria-labelledby="h-t h-d">
-  <title id="h-t">project-forge: Repository governance &amp; 8 daily skills for any Git repo</title>
-  <desc id="h-d">Swiss editorial poster paired with a pure geometric chaos-to-order composition showing loose files calibrated through S1-S4 and a .zip backup seal into governed repository artifacts.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">project-forge — Survey-first repository governance</title>
+  <desc id="svg-desc">Contemporary Risograph Hero: bold typography alongside interlocking arches, anvil, drafting compass, and folded blueprints. Node 18+, zero deps, multi-remote and local-only.</desc>
+
   <defs>
-    <style>
-      .sans { font-family: 'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif; }
-      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', Consolas, monospace; }
-    </style>
-    <marker id="a-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#161614"/>
-    </marker>
-    <marker id="a-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#C93B2B"/>
-    </marker>
+    <!-- Organic warm cotton paper speckles -->
+    <pattern id="paper-speck" width="160" height="160" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="24" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="64" cy="12" r="0.8" fill="#B5482A" fill-opacity="0.16"/>
+      <circle cx="118" cy="38" r="1.3" fill="#6F6758" fill-opacity="0.18"/>
+      <circle cx="42" cy="76" r="0.9" fill="#1B1E38" fill-opacity="0.14"/>
+      <circle cx="95" cy="92" r="1.2" fill="#8C8270" fill-opacity="0.24"/>
+      <circle cx="144" cy="74" r="0.8" fill="#B5482A" fill-opacity="0.15"/>
+      <circle cx="24" cy="132" r="1.4" fill="#7D7464" fill-opacity="0.2"/>
+      <circle cx="78" cy="146" r="0.9" fill="#1B1E38" fill-opacity="0.12"/>
+      <circle cx="132" cy="128" r="1.1" fill="#8C8270" fill-opacity="0.22"/>
+      <circle cx="152" cy="150" r="0.7" fill="#6F6758" fill-opacity="0.16"/>
+    </pattern>
+
+    <!-- 45-degree Risograph halftone screens -->
+    <pattern id="ht-indigo" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#1B1E38" fill-opacity="0.52"/>
+    </pattern>
+    <pattern id="ht-indigo-dense" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="2.0" fill="#1B1E38" fill-opacity="0.76"/>
+    </pattern>
+    <pattern id="ht-red" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#D93829" fill-opacity="0.58"/>
+    </pattern>
+    <pattern id="ht-cobalt" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.75" fill="#1E4DD8" fill-opacity="0.48"/>
+    </pattern>
+    <pattern id="ht-ochre" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4" cy="4" r="1.85" fill="#DDA027" fill-opacity="0.62"/>
+    </pattern>
+    <pattern id="ht-cream" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="3.5" cy="3.5" r="1.75" fill="#F5F1E8" fill-opacity="0.65"/>
+    </pattern>
+    <pattern id="blueprint-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#F5F1E8" stroke-opacity="0.18" stroke-width="0.8"/>
+    </pattern>
   </defs>
-  <!-- Matte Archival Print Sheet (Zero Cards, Zero Drop Shadows, Zero Color Stripes) -->
-  <rect x="0.75" y="0.75" width="1198.5" height="478.5" rx="4" fill="#F2EFE9" stroke="#CBC4B6" stroke-width="1.5"/>
-  <!-- Swiss Editorial Running Folio -->
-  <text x="48" y="40" class="mono" font-size="16" font-weight="600" letter-spacing="1.4" fill="#161614">01</text>
-  <text x="92" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.4" fill="#5E5A53">PROJECT-FORGE</text>
-  <text x="1152" y="40" class="mono" font-size="16" font-weight="500" letter-spacing="1.2" fill="#5E5A53" text-anchor="end">NODE 18+ · ZERO DEPS</text>
-  <line x1="48" y1="56" x2="1152" y2="56" stroke="#161614" stroke-width="1.2"/>
 
-  <!-- Left Editorial Typography Field (Open Paper, Zero Boxes) -->
-  <text x="48" y="168" class="sans" font-size="64" font-weight="700" fill="#161614" letter-spacing="-2.2">project-forge</text>
-  <line x1="48" y1="196" x2="128" y2="196" stroke="#C93B2B" stroke-width="3.5"/>
+  <rect width="1200" height="620" fill="#F5F1E8"/>
+  <rect width="1200" height="620" fill="url(#paper-speck)"/>
 
-  <text x="48" y="246" class="sans" font-size="18" font-weight="500" fill="#161614">Inspect any repository read-only, then align Git, docs &amp; 8 skills</text>
-  <text x="48" y="278" class="sans" font-size="18" font-weight="400" fill="#5E5A53">Keeps handwritten files intact; backs up to an external .zip first</text>
+  <g id="hero-copy" transform="translate(64, 0)">
+    <text x="0" y="236" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="60" font-weight="800" letter-spacing="-1.5" fill="#1B1E38">project<tspan fill="#D93829">-</tspan>forge</text>
+    <text x="0" y="294" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="500" fill="#2E324D">Survey-first repository governance</text>
+    <text x="0" y="330" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="500" fill="#2E324D">Version control, evergreen docs &amp; 8 local skills</text>
+    <rect x="0" y="366" width="48" height="2.5" fill="#1E4DD8"/>
+    <text x="0" y="404" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="600" fill="#3D4260">Node 18+ · Zero deps · Multi-remote &amp; local-only</text>
+  </g>
 
-  <!-- Unboxed Swiss Typographic Index Columns -->
-  <line x1="48" y1="336" x2="544" y2="336" stroke="#CBC4B6" stroke-width="1.2"/>
-  <line x1="208" y1="336" x2="208" y2="432" stroke="#CBC4B6" stroke-width="1"/>
-  <line x1="376" y1="336" x2="376" y2="432" stroke="#CBC4B6" stroke-width="1"/>
+  <g id="hero-risograph">
+    <!-- Warm ochre base field + lower right halftone corner shadow -->
+    <rect x="592" y="294" width="232" height="222" fill="#DDA027"/>
+    <rect x="850" y="468" width="128" height="62" fill="url(#ht-indigo-dense)"/>
+    <path d="M 656 490 A 96 96 0 0 1 824 490 Z" fill="#F5F1E8" fill-opacity="0.34"/>
 
-  <text x="48" y="384" class="mono" font-size="34" font-weight="700" fill="#C93B2B">0</text>
-  <text x="48" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Zero Deps</text>
+    <!-- Monumental interlocking Bauhaus arches (Cobalt + Ochre + Vermilion + Overprint Spine) -->
+    <!-- Left Cobalt Arch -->
+    <path d="M 592 346 L 592 56 L 776 56 L 776 346 L 732 346 L 732 162 A 48 48 0 0 0 636 162 L 636 346 Z" fill="#1E4DD8"/>
+    <!-- Nested Inner Ochre Arch -->
+    <path d="M 654 368 L 654 128 L 814 128 L 814 368 L 772 368 L 772 204 A 38 38 0 0 0 696 204 L 696 368 Z" fill="#DDA027" fill-opacity="0.92"/>
+    <!-- Right Vermilion Arch -->
+    <path d="M 732 386 L 732 56 L 912 56 L 912 386 L 866 386 L 866 164 A 46 46 0 0 0 774 164 L 774 386 Z" fill="#D93829"/>
+    <!-- Risograph Overprint Plum-Indigo Spine where Cobalt and Vermilion overlap -->
+    <rect x="732" y="56" width="44" height="312" fill="#221C46"/>
+    <rect x="732" y="130" width="44" height="238" fill="#1B1E38" fill-opacity="0.35"/>
+    <!-- Halftone lower pillars inside arches -->
+    <rect x="592" y="246" width="44" height="100" fill="url(#ht-indigo-dense)"/>
+    <rect x="866" y="302" width="46" height="84" fill="url(#ht-indigo)"/>
 
-  <text x="228" y="384" class="mono" font-size="34" font-weight="700" fill="#161614">8</text>
-  <text x="228" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Local Skills</text>
+    <!-- Lower-left Domed Pill Capsule with Halftone Texture -->
+    <path d="M 592 248 A 36 36 0 0 1 664 248 L 664 346 L 592 346 Z" fill="#1E4DD8"/>
+    <path d="M 592 248 A 36 36 0 0 1 664 248 L 664 248 L 592 248 Z" fill="#D93829"/>
+    <rect x="592" y="248" width="72" height="98" fill="url(#ht-cream)"/>
+    <rect x="634" y="216" width="30" height="130" fill="#D93829" fill-opacity="0.55"/>
 
-  <text x="396" y="382" class="sans" font-size="26" font-weight="700" fill="#161614">Any Git</text>
-  <text x="396" y="420" class="sans" font-size="18" font-weight="500" fill="#5E5A53">Remote &amp; Local</text>
-
-  <!-- Vertical Architectural Divider -->
-  <line x1="576" y1="84" x2="576" y2="436" stroke="#CBC4B6" stroke-width="1.2"/>
-
-  <!-- Right Pure Geometric Artwork: Chaos Shards -> Vermilion Registration Axis -> Aligned Strata -->
-  <g id="chaos-to-strata">
-    <g fill="none" stroke="#8A8479" stroke-width="1.3">
-      <rect x="614" y="108" width="112" height="44" transform="rotate(-14 670 130)" stroke-dasharray="5 4"/>
-      <rect x="628" y="184" width="118" height="46" transform="rotate(9 687 207)"/>
-      <rect x="606" y="264" width="106" height="42" transform="rotate(-7 659 285)" stroke-dasharray="4 4"/>
-      <rect x="636" y="340" width="108" height="42" transform="rotate(11 690 361)"/>
-      <line x1="600" y1="158" x2="742" y2="196" stroke-opacity="0.5"/>
-      <line x1="608" y1="330" x2="746" y2="278" stroke-opacity="0.5"/>
-    </g>
-    <text x="670" y="136" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(-14 670 130)">README?</text>
-    <text x="687" y="213" class="mono" font-size="16" fill="#161614" text-anchor="middle" transform="rotate(9 687 207)">src/</text>
-    <text x="659" y="291" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(-7 659 285)">.env?</text>
-    <text x="690" y="367" class="mono" font-size="16" fill="#5E5A53" text-anchor="middle" transform="rotate(11 690 361)">ci?</text>
-
-    <!-- Vermilion Registration Axis + Concentric .zip Seal -->
-    <line x1="786" y1="84" x2="786" y2="436" stroke="#C93B2B" stroke-width="2.4"/>
-    <text x="772" y="104" class="mono" font-size="16" font-weight="700" fill="#C93B2B" text-anchor="end">S1–S4</text>
-    <circle cx="786" cy="260" r="37" fill="#C93B2B"/>
-    <circle cx="786" cy="260" r="30" fill="none" stroke="#F2EFE9" stroke-width="1.2" stroke-dasharray="3 3"/>
-    <text x="786" y="256" class="mono" font-size="16" font-weight="700" fill="#FAF8F4" text-anchor="middle">.zip</text>
-    <text x="786" y="277" class="sans" font-size="16" font-weight="500" fill="#F2EFE9" text-anchor="middle">Backup</text>
-
-    <!-- Horizontal Registration Rays -->
-    <g stroke="#161614" stroke-width="1.4">
-      <line x1="786" y1="149" x2="848" y2="149"/>
-      <line x1="823" y1="225" x2="848" y2="225"/>
-      <line x1="823" y1="301" x2="848" y2="301"/>
-      <line x1="786" y1="377" x2="848" y2="377"/>
+    <!-- Sculpted Forge Anvil -->
+    <g id="anvil">
+      <path d="M 818 264 L 1126 264 L 1126 286 Q 1084 294 1068 320 L 1068 368 L 1094 388 L 1094 402 L 908 402 L 908 388 L 934 368 Q 934 328 898 308 Q 848 292 818 264 Z" fill="#1B1E38"/>
+      <!-- Vermilion base arch cutout -->
+      <path d="M 948 402 A 44 44 0 0 1 1036 402 Z" fill="#D93829"/>
+      <path d="M 848 264 L 912 264 L 912 292 L 870 284 Z" fill="#1E4DD8" fill-opacity="0.45"/>
     </g>
 
-    <!-- Four Sharp Parallel Architectural Strata -->
-    <path d="M 858 100 L 848 100 L 848 424 L 858 424" fill="none" stroke="#161614" stroke-width="1.8"/>
-    <text x="866" y="103" class="mono" font-size="16" font-weight="600" fill="#5E5A53">&lt;!-- begin / end --&gt;</text>
+    <!-- Precision Drafting Compass -->
+    <g id="compass">
+      <!-- Top peg and collar -->
+      <rect x="992" y="66" width="16" height="30" rx="2" fill="#1B1E38"/>
+      <circle cx="1000" cy="116" r="22" fill="#1E4DD8"/>
+      <circle cx="1000" cy="116" r="9.5" fill="#DDA027"/>
+      <!-- Left and Right Compass Legs (Ochre outside, Vermilion overprint where crossing anvil) -->
+      <polygon points="984,132 1000,136 932,374 918,370" fill="#DDA027"/>
+      <polygon points="1000,136 1016,132 1082,370 1068,374" fill="#DDA027"/>
+      <!-- Overprint Vermilion segments across dark anvil plane -->
+      <polygon points="956,232 971,236 948,314 934,310" fill="#D93829"/>
+      <polygon points="1029,236 1044,232 1066,310 1052,314" fill="#D93829"/>
+      <!-- Needle steel tips -->
+      <polygon points="918,370 930,374 916,404" fill="#DDA027"/>
+      <polygon points="1070,374 1082,370 1084,404" fill="#DDA027"/>
+      <!-- Horizontal Cobalt Calibration Crossbar and Center T -->
+      <rect x="942" y="185" width="116" height="5" fill="#1E4DD8"/>
+      <circle cx="942" cy="187.5" r="4.5" fill="#1E4DD8"/>
+      <circle cx="1058" cy="187.5" r="4.5" fill="#1E4DD8"/>
+      <rect x="997" y="168" width="6" height="39" rx="2" fill="#1B1E38"/>
+    </g>
 
-    <rect x="864" y="120" width="288" height="58" fill="#161614"/>
-    <text x="882" y="155" class="mono" font-size="18" font-weight="600" fill="#FAF8F4">AGENTS.md</text>
-    <text x="1134" y="155" class="sans" font-size="16" fill="#CBC4B6" text-anchor="end">Contract</text>
-
-    <rect x="864" y="196" width="288" height="58" fill="#FAF8F4" stroke="#161614" stroke-width="1.4"/>
-    <text x="882" y="231" class="mono" font-size="18" font-weight="600" fill="#161614">docs/TDD.md</text>
-    <text x="1134" y="231" class="sans" font-size="16" fill="#5E5A53" text-anchor="end">Architecture</text>
-
-    <rect x="864" y="272" width="288" height="58" fill="#E6E0D5" stroke="#161614" stroke-width="1.4"/>
-    <text x="882" y="307" class="mono" font-size="16" font-weight="600" fill="#161614">feature-map.json</text>
-    <text x="1134" y="307" class="sans" font-size="16" fill="#5E5A53" text-anchor="end">Index</text>
-
-    <rect x="864" y="348" width="288" height="58" fill="#FAF8F4" stroke="#C93B2B" stroke-width="1.6"/>
-    <text x="882" y="383" class="mono" font-size="17" font-weight="600" fill="#161614">.agents/skills/</text>
-    <text x="1134" y="383" class="sans" font-size="16" font-weight="700" fill="#C93B2B" text-anchor="end">8 Skills</text>
+    <!-- Folded Cobalt Architectural Blueprint Sheets (Bottom Foreground) -->
+    <g id="blueprints">
+      <!-- Right Back Sheet (Vermilion reverse fold + Cobalt front) -->
+      <g transform="translate(888, 434) rotate(22)">
+        <rect x="-112" y="-76" width="214" height="142" fill="#D93829"/>
+        <rect x="-118" y="-82" width="214" height="142" fill="#153499"/>
+        <rect x="-118" y="-82" width="214" height="142" fill="url(#blueprint-grid)"/>
+        <rect x="-98" y="-64" width="174" height="106" fill="none" stroke="#F5F1E8" stroke-width="2"/>
+        <line x1="-98" y1="-22" x2="76" y2="-22" stroke="#F5F1E8" stroke-width="1.5"/>
+        <line x1="-18" y1="-64" x2="-18" y2="42" stroke="#F5F1E8" stroke-width="1.5"/>
+        <circle cx="28" cy="10" r="22" fill="none" stroke="#F5F1E8" stroke-width="1.5"/>
+      </g>
+      <!-- Left Main Sheet (Tilted Cobalt Blueprint with Geometric Wireframe) -->
+      <g transform="translate(744, 466) rotate(-22)">
+        <!-- Indigo cast shadow edge -->
+        <rect x="-102" y="-66" width="224" height="146" fill="#1B1E38"/>
+        <!-- Vermilion underside curl -->
+        <path d="M 104 82 Q 124 62 120 -68 L 100 -68 L 100 82 Z" fill="#D93829"/>
+        <!-- Main Cobalt sheet -->
+        <rect x="-112" y="-76" width="220" height="146" fill="#1E4DD8"/>
+        <rect x="-112" y="-76" width="220" height="146" fill="url(#blueprint-grid)"/>
+        <!-- Crisp Cream Orthographic Technical Spec Drawing -->
+        <rect x="-92" y="-58" width="180" height="110" fill="none" stroke="#F5F1E8" stroke-width="2"/>
+        <rect x="-66" y="-40" width="96" height="62" fill="none" stroke="#F5F1E8" stroke-width="1.8"/>
+        <line x1="-66" y1="22" x2="30" y2="-40" stroke="#F5F1E8" stroke-width="1.4" stroke-dasharray="5 4"/>
+        <line x1="-66" y1="-40" x2="30" y2="22" stroke="#F5F1E8" stroke-width="1.4"/>
+        <!-- Dimension lines and ticks -->
+        <line x1="-66" y1="36" x2="30" y2="36" stroke="#F5F1E8" stroke-width="1.3"/>
+        <line x1="-66" y1="30" x2="-66" y2="42" stroke="#F5F1E8" stroke-width="1.3"/>
+        <line x1="30" y1="30" x2="30" y2="42" stroke="#F5F1E8" stroke-width="1.3"/>
+        <line x1="48" y1="-40" x2="48" y2="22" stroke="#F5F1E8" stroke-width="1.3"/>
+        <line x1="42" y1="-40" x2="54" y2="-40" stroke="#F5F1E8" stroke-width="1.3"/>
+        <line x1="42" y1="22" x2="54" y2="22" stroke="#F5F1E8" stroke-width="1.3"/>
+        <!-- Title block corner -->
+        <rect x="30" y="30" width="58" height="22" fill="none" stroke="#F5F1E8" stroke-width="1.3"/>
+      </g>
+    </g>
   </g>
 </svg>

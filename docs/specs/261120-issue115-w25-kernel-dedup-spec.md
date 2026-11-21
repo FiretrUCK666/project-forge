@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "PR-B（#115）共享内核去重、多远端注册表收口、验证治理真实性与性能预算合并方案"
-status: draft
+status: approved
 tier: L3
 created: 2026-11-20
 updated: 2026-11-22
@@ -10,9 +10,9 @@ pr: null
 branch: feat/w25-kernel-dedup
 owner: plan-prb
 plan_mode: interactive
-approved: false
+approved: true
 implemented: false
-plan_critique: "rejected (reviewer=critic-prb, round=1, sha=f1eecf91dcad, summary=Round 1 Critique REJECT: C7 退役步骤与 doc-plan/doc-audit 源码规则冲突会导致 audit/archive 失败，另有若干源码位置需对齐)"
+plan_critique: "passed (reviewer=critic-prb-r2, round=2, sha=b58631669e82, summary=Round 2 Critique PASS: C7 退役顺序与 doc-audit/flow-lifecycle 源码完全对齐，源码符号、800L 拆文件方案与 I370-I385 均已核实无阻塞项)"
 related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue115-w25-kernel-dedup-todo.md
 high_risk_paths: [kit/, scripts/lib/, scripts/dev/, templates/, AGENTS.md]

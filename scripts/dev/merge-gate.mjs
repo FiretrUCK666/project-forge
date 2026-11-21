@@ -40,8 +40,13 @@ import { isMainModule } from '../../kit/skills/lib/git.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** 一条派生步骤的实跑结果。退出码非零即失败，不看输出里写了什么。 */
-function runStep(step, cwd) {
+/**
+ * 一条派生步骤的实跑结果。退出码非零即失败，不看输出里写了什么。
+ *
+ * `env` 由调用方给：流水线自己声明的环境条件（CI 标记、矩阵变量）要照原样带上，
+ * 否则「远端绿、本地红」可能只是环境不同，而门禁会把它当成代码有问题。
+ */
+function runStep(step, cwd, extraEnv = {}) {
   const started = Date.now()
   const res = spawnSync(step.cmd, {
     cwd,
@@ -49,7 +54,7 @@ function runStep(step, cwd) {
     encoding: 'utf8',
     timeout: 30 * 60 * 1000,
     windowsHide: true,
-    env: { ...process.env, CI: '1' },
+    env: { ...process.env, ...extraEnv },
   })
   return {
     ...step,
@@ -100,9 +105,12 @@ async function main(argv) {
     return EXIT.OK
   }
 
+  // 流水线文件自己声明的环境条件（nv: 块里的 CI 标记与矩阵变量）按原样带上：ench 一类脚本
+  // 会按 CI 标记放大预算，本地不带上就会得到一张与远端不同的成绩单。
+  const pipelineEnv = derived.evidenceEnv ?? { CI: '1' }
   const executed = []
   for (const step of derived.steps) {
-    const res = runStep(step, repoRoot)
+    const res = runStep(step, repoRoot, pipelineEnv)
     executed.push(res)
     if (!cli.json) process.stdout.write(`[${res.status === 0 ? 'ok' : 'FAIL'}] ${step.file}:${step.startLine} ${step.cmd.split('\n')[0].slice(0, 90)}\n`)
     if (res.status !== 0) break

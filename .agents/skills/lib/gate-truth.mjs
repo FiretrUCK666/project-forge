@@ -155,7 +155,40 @@ export function readPipelineShape(relFile, text) {
   }
 
   if (triggers.size === 0) return { parsed: false, reason: '读不到触发形态（缺少 on: 声明）' }
-  return { parsed: true, triggers: [...triggers].sort(), permissions: permissions ?? {}, hasPermissionsBlock: permissions !== null }
+  return {
+    parsed: true,
+    triggers: [...triggers].sort(),
+    permissions: permissions ?? {},
+    hasPermissionsBlock: permissions !== null,
+    env: readDeclaredEnv(lines),
+  }
+}
+
+/**
+ * 读顶层 `env:` 块里声明的环境条件。
+ *
+ * 流水线里写着的东西要照原样带给实跑：`bench` 这类脚本会按 CI 标记放大预算，
+ * 本地不带上同一个标记，就会得到一张与远端不同的成绩单——然后拿它当代码有问题。
+ * 只读顶层、只认字面量，不做变量求值：求值需要平台上下文，而本判据要求可离线复核。
+ */
+function readDeclaredEnv(lines) {
+  const env = {}
+  let inEnv = false
+  let envIndent = -1
+  for (const line of lines) {
+    if (!line.trim() || line.trim().startsWith('#')) continue
+    const indent = /^(\s*)/.exec(line)[1].length
+    const body = line.trim()
+    if (/^env\s*:\s*$/.test(body)) { inEnv = true; envIndent = indent; continue }
+    if (!inEnv) continue
+    if (indent <= envIndent) { inEnv = false; continue }
+    const m = /^([A-Za-z_][\w]*)\s*:\s*(.*)$/.exec(body)
+    if (!m) continue
+    const raw = m[2].trim()
+    if (!raw || raw.startsWith('${{')) continue
+    env[m[1]] = raw.replace(/^['"]|['"]$/g, '')
+  }
+  return env
 }
 
 /** 远端上下文的关键词：命中就说明这一步离不开远端，不属于本地可跑的门禁。 */
@@ -220,7 +253,7 @@ export function evaluatePipeline(repoRoot, rel) {
   }
   const predicates = evaluateStructuralPredicates(shape, blocks)
   const adopted = predicates.triggerOk && predicates.permissionOk && predicates.remoteFree && blocks.length > 0
-  return { file: rel, parsed: true, reason: null, adopted, predicates, blocks, triggers: shape.triggers }
+  return { file: rel, parsed: true, reason: null, adopted, predicates, blocks, triggers: shape.triggers, env: shape.env }
 }
 
 /**
@@ -289,6 +322,9 @@ export function deriveMergeGate(repoRoot) {
     steps,
     adoptedFiles: adopted.map((e) => e.file),
     skippedFiles: skipped,
+    // 流水线自己声明的环境条件随派生结果一起交出去：编排脚本按它设置进程环境，
+    // 才跑得出与远端同一张成绩单（例如按 CI 标记放大的性能预算）。
+    evidenceEnv: { CI: '1', ...(adopted.find((e) => e.env)?.env ?? {}) },
     reasons: [`已派生 ${steps.length} 步，来自 ${adopted.length} 份流水线文件；尚未执行，所以还不是通过`],
   }
 }

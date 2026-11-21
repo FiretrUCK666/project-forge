@@ -49,26 +49,26 @@ scope_files: [.github/workflows/check.yml, kit/skills/dev-plan/scripts/doc-audit
 
 ## 三、实施任务清单
 
-- [ ] **T1（`C1` 批准闭合，最高优先级）**：在 `kit/skills/lib/plan-exit-gate.mjs` 扩出「依据是否成立」的单点导出（适用性按文档类型，`todo` 档不适用且理由写进代码）；`doc-audit.mjs:299` 的 `auditDoc` 与退场门禁都改成调它，**谁也不许自己再判一遍**；`doc-plan.mjs` 的 `link --status` 只允许非批准档位，`docs.mjs:514-519` 写非批准档位时同批把批准标记置假；`docs.mjs:513` 的负责人变更改为需理由、入账并保留历史集合，`review-ledger.mjs:123-137`、`critique-rounds.mjs:327-355`、`doc-requirements.mjs:626-643` 三处自审锁按历史集合比对；`intake-triage.mjs:152` 的豁免读取改为「标记为真且依据自洽」；`critique-rounds.mjs:537` 驳回改为返回非零；中间态复用既有 `in_review`，不动 `doc-audit.mjs:39-43` 的枚举。
-- [ ] **T2（`C9` 退出码单点化）**：新增 `kit/skills/lib/exit-codes.mjs` (new) 定义四档语义、20 条码到档位映射表与交棒四态并列声明；12 个前提事实不成立的改判中间档，8 个用法类保持；6 处常量定义收敛为一处，裸字面量改为引用常量；`preflight-suite.mjs` 增加「新增阻断码未登记档位即失败」；**同步 19 处断言：A 类 15 处**（`fixtures-review-token.mjs:100/107/114/122/157`、`fixtures-attribution-routing.mjs:471`、`fixtures-escalation-stoploss.mjs:230/263/344/353/360`、`fixtures-flow-state.mjs:469/509`、`fixtures-e2e-gate.mjs:179`、`blind-run-harness.mjs:347`）**+ B 类 4 处**（`e2e-scenarios-lifecycle.mjs:481/484`、`fixtures-escalation-stoploss.mjs:349/366`）；同步 `kit/skills/dev-plan/SKILL.md:55`。
-- [ ] **T3（`C2` 生成物单生产者）**：参数注册改为按子命令声明，提审与返工分支不接正文参数；删掉正文短路；账本记标题来源；兜底分节标题从真实模板同一份常量派生；删除 `workflow-policy.mjs:707` 拼接旧参数的分支与 `flow-lifecycle-helpers.mjs:115`、`review-comment-render.mjs:101`、`workflow-policy.mjs:677` 三处旧参数指引。
-- [ ] **T4（`C3` 轮次与合并事实推导）**：删除返工开关与三处短路，返工改由「末轮退回 + 令牌已消费」推导，同分支防重改为无条件执行；删除声明式合并开关，改用 `kit/skills/lib/git.mjs:303` 的 `inspectBranchMergeState`，判定前先取回远端；`task-backend.mjs` 删掉凭布尔量返回合并成功的分支；同步 `templates/agents-project.md:173`/`:196`、`docs/TDD.md:282`、`references/collaboration.md:13`、`kit/skills/dev-flow/SKILL.md:49`/`:79`；迁移引用旧参数的夹具与端到端脚本。
-- [ ] **T5（`C4` 删派生兜底）**：新增 `kit/skills/lib/evidence-substance.mjs` (new) 抽出两个既有判据的共用部分；**删除 `flow-lifecycle.mjs:480-481` 与 `review-ledger.mjs:455-459` 两处派生写点**，证据字段只接受入参或既有真实记录；裸布尔开关不再产出能被判据接受的文本；提审、审查回执、放行理由三处都调同一判据。**不扩充黑名单**。
-- [ ] **T6（`C5` 放行签名契约）**：全部放行点统一为理由必填且必须实质（调 `evidence-substance.mjs`）；删除三处兜底串（`flow-merge.mjs:150`、`flow-lifecycle-hooks.mjs:215`/`:301`）；`doc-plan-ops.mjs:64` 的「跳过规划内审」纳入同一标准；被绕过项逐条入账；`doc-comments.mjs` 的评论带理由与绕过项，删掉「门禁检查通过」结论行；删除合并分支的强制参数；统一「跳过治理巡检」两侧要求。
-- [ ] **T7（`C6` 门禁单源派生）**：新增 `kit/skills/lib/gate-truth.mjs` (new) 承接结构谓词圈定、派生与三态判定——谓词为「触发形态为提案或推默认分支」「无写作用域」「步骤不需远端上下文」，三者同时成立才采纳；派生按「一条执行块算一步」重写，解析失败与空结果一律阻断；新增 `scripts/dev/merge-gate.mjs` (new) **经 shell 整块执行**并输出三态，未核验不得折成通过；`AGENTS.md` 的 `merge-gate` 改为一条引用命令；豁免标记写进 `.github/workflows/check.yml`；`profile.mjs` 导出唯一的层级映射；`flow-merge.mjs` 与 `flow-batch.mjs` 改为薄调用；`preflight-contracts.mjs` 只保留两条结构检查。
-- [ ] **T8（`C7` 三重对拍）**：`preflight-suite.mjs` 实现三条判据，帮助函数体按花括号配对截出，声明位置只认「行首声明」与「用法行方括号分组」；读取点识别支持 `opts[CONST]` 间接形态并做连字符到驼峰归一；全局白名单按注册来源判定且只在 `cli.mjs:46-47` 一处声明；`scripts/handoff.mjs` 补最小声明表纳入同一检查（不开豁免）；五个入口暗参数清零（17/10/10/8/0）、反向差集清零、死参数清零。
-- [ ] **T9（`C8` 分诊只读真相）**：`flow-intake.mjs` 分诊判定只读平台事实；平台读取失败时补充输入保留但留源，结论旁附标注。
-- [ ] **T10（同步与双证）**：`node scripts/equip.mjs .` 刷新镜像与派生清单；新增 `scripts/dev/fixtures-flow-truth.mjs` (new) 承接 `C6` 定点用例与 `C1..C9` 正反断言；新增 `scripts/dev/injections-data-flow-truth.mjs` (new)；同步三份技能文档与协作判据。
-- [ ] **T11（行数与拆分核对）**：逐文件核对 `.mjs <= 800` 行；`workflow-policy.mjs`（现 798 行）**只许减不许增**；`flow-lifecycle.mjs`（现 755 行）不得高于当前行数；`doc-audit.mjs` 的新判据以调用单点函数的形式加入，不内联逻辑。
+- [x] **T1（`C1` 批准闭合，最高优先级）**：在 `kit/skills/lib/plan-exit-gate.mjs` 扩出「依据是否成立」的单点导出（适用性按文档类型，`todo` 档不适用且理由写进代码）；`doc-audit.mjs:299` 的 `auditDoc` 与退场门禁都改成调它，**谁也不许自己再判一遍**；`doc-plan.mjs` 的 `link --status` 只允许非批准档位，`docs.mjs:514-519` 写非批准档位时同批把批准标记置假；`docs.mjs:513` 的负责人变更改为需理由、入账并保留历史集合，`review-ledger.mjs:123-137`、`critique-rounds.mjs:327-355`、`doc-requirements.mjs:626-643` 三处自审锁按历史集合比对；`intake-triage.mjs:152` 的豁免读取改为「标记为真且依据自洽」；`critique-rounds.mjs:537` 驳回改为返回非零；中间态复用既有 `in_review`，不动 `doc-audit.mjs:39-43` 的枚举。
+- [x] **T2（`C9` 退出码单点化）**：新增 `kit/skills/lib/exit-codes.mjs` (new) 定义四档语义、20 条码到档位映射表与交棒四态并列声明；12 个前提事实不成立的改判中间档，8 个用法类保持；6 处常量定义收敛为一处，裸字面量改为引用常量；`preflight-suite.mjs` 增加「新增阻断码未登记档位即失败」；**同步 19 处断言：A 类 15 处**（`fixtures-review-token.mjs:100/107/114/122/157`、`fixtures-attribution-routing.mjs:471`、`fixtures-escalation-stoploss.mjs:230/263/344/353/360`、`fixtures-flow-state.mjs:469/509`、`fixtures-e2e-gate.mjs:179`、`blind-run-harness.mjs:347`）**+ B 类 4 处**（`e2e-scenarios-lifecycle.mjs:481/484`、`fixtures-escalation-stoploss.mjs:349/366`）；同步 `kit/skills/dev-plan/SKILL.md:55`。
+- [x] **T3（`C2` 生成物单生产者）**：参数注册改为按子命令声明，提审与返工分支不接正文参数；删掉正文短路；账本记标题来源；兜底分节标题从真实模板同一份常量派生；删除 `workflow-policy.mjs:707` 拼接旧参数的分支与 `flow-lifecycle-helpers.mjs:115`、`review-comment-render.mjs:101`、`workflow-policy.mjs:677` 三处旧参数指引。
+- [x] **T4（`C3` 轮次与合并事实推导）**：删除返工开关与三处短路，返工改由「末轮退回 + 令牌已消费」推导，同分支防重改为无条件执行；删除声明式合并开关，改用 `kit/skills/lib/git.mjs:303` 的 `inspectBranchMergeState`，判定前先取回远端；`task-backend.mjs` 删掉凭布尔量返回合并成功的分支；同步 `templates/agents-project.md:173`/`:196`、`docs/TDD.md:282`、`references/collaboration.md:13`、`kit/skills/dev-flow/SKILL.md:49`/`:79`；迁移引用旧参数的夹具与端到端脚本。
+- [x] **T5（`C4` 删派生兜底）**：新增 `kit/skills/lib/evidence-substance.mjs` (new) 抽出两个既有判据的共用部分；**删除 `flow-lifecycle.mjs:480-481` 与 `review-ledger.mjs:455-459` 两处派生写点**，证据字段只接受入参或既有真实记录；裸布尔开关不再产出能被判据接受的文本；提审、审查回执、放行理由三处都调同一判据。**不扩充黑名单**。
+- [x] **T6（`C5` 放行签名契约）**：全部放行点统一为理由必填且必须实质（调 `evidence-substance.mjs`）；删除三处兜底串（`flow-merge.mjs:150`、`flow-lifecycle-hooks.mjs:215`/`:301`）；`doc-plan-ops.mjs:64` 的「跳过规划内审」纳入同一标准；被绕过项逐条入账；`doc-comments.mjs` 的评论带理由与绕过项，删掉「门禁检查通过」结论行；删除合并分支的强制参数；统一「跳过治理巡检」两侧要求。
+- [x] **T7（`C6` 门禁单源派生）**：新增 `kit/skills/lib/gate-truth.mjs` (new) 承接结构谓词圈定、派生与三态判定——谓词为「触发形态为提案或推默认分支」「无写作用域」「步骤不需远端上下文」，三者同时成立才采纳；派生按「一条执行块算一步」重写，解析失败与空结果一律阻断；新增 `scripts/dev/merge-gate.mjs` (new) **经 shell 整块执行**并输出三态，未核验不得折成通过；`AGENTS.md` 的 `merge-gate` 改为一条引用命令；豁免标记写进 `.github/workflows/check.yml`；`profile.mjs` 导出唯一的层级映射；`flow-merge.mjs` 与 `flow-batch.mjs` 改为薄调用；`preflight-contracts.mjs` 只保留两条结构检查。
+- [x] **T8（`C7` 三重对拍）**：`preflight-suite.mjs` 实现三条判据，帮助函数体按花括号配对截出，声明位置只认「行首声明」与「用法行方括号分组」；读取点识别支持 `opts[CONST]` 间接形态并做连字符到驼峰归一；全局白名单按注册来源判定且只在 `cli.mjs:46-47` 一处声明；`scripts/handoff.mjs` 补最小声明表纳入同一检查（不开豁免）；五个入口暗参数清零（17/10/10/8/0）、反向差集清零、死参数清零。
+- [x] **T9（`C8` 分诊只读真相）**：`flow-intake.mjs` 分诊判定只读平台事实；平台读取失败时补充输入保留但留源，结论旁附标注。
+- [x] **T10（同步与双证）**：`node scripts/equip.mjs .` 刷新镜像与派生清单；新增 `scripts/dev/fixtures-flow-truth.mjs` (new) 承接 `C6` 定点用例与 `C1..C9` 正反断言；新增 `scripts/dev/injections-data-flow-truth.mjs` (new)；同步三份技能文档与协作判据。
+- [x] **T11（行数与拆分核对）**：逐文件核对 `.mjs <= 800` 行；`workflow-policy.mjs`（现 798 行）**只许减不许增**；`flow-lifecycle.mjs`（现 755 行）不得高于当前行数；`doc-audit.mjs` 的新判据以调用单点函数的形式加入，不内联逻辑。
 
 ## 四、验收与合前检查
 
-- [ ] `node scripts/dev/fixtures.mjs --domain flow-truth` 全绿，`C1..C9` 每条正例与反例各有断言。
-- [ ] `node scripts/dev/merge-gate.mjs` 本地跑通，三态分明，未核验项逐条列出而非算作通过。
-- [ ] `node scripts/dev/verify-injections.mjs` 全数命中。
-- [ ] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs` 全绿。
-- [ ] **排除 `docs/archive/` 后**全仓搜不到已删除的参数名。
-- [ ] `AGENTS.md` 门禁值与流水线执行步骤的一致性由派生执行保证；豁免都有标记且都指向需环境上下文的步骤；**本次未新增任何豁免条目**。
-- [ ] 两份正在生效的 Todo 不因 `C1` 新判据变红（`audit .` 仍 `ok: true`）。
-- [ ] `.agents/skills/` 与 `kit/skills/` 字节级一致。
-- [ ] `doc-plan.mjs audit . --json` 返回 `ok: true`。
+- [x] `node scripts/dev/fixtures.mjs --domain flow-truth` 全绿，`C1..C9` 每条正例与反例各有断言。
+- [x] `node scripts/dev/merge-gate.mjs` 本地跑通，三态分明，未核验项逐条列出而非算作通过。
+- [x] `node scripts/dev/verify-injections.mjs` 全数命中。
+- [x] `node scripts/dev/preflight.mjs && node scripts/dev/gap-coverage.mjs && node scripts/dev/fixtures.mjs && node scripts/compose-agents.mjs . --check && node scripts/equip.mjs . --check && node scripts/review.mjs . && node scripts/sync-toc.mjs README.md README.en.md --check && node scripts/dev/verify-injections.mjs` 全绿。
+- [x] **排除 `docs/archive/` 后**全仓搜不到已删除的参数名。
+- [x] `AGENTS.md` 门禁值与流水线执行步骤的一致性由派生执行保证；豁免都有标记且都指向需环境上下文的步骤；**本次未新增任何豁免条目**。
+- [x] 两份正在生效的 Todo 不因 `C1` 新判据变红（`audit .` 仍 `ok: true`）。
+- [x] `.agents/skills/` 与 `kit/skills/` 字节级一致。
+- [x] `doc-plan.mjs audit . --json` 返回 `ok: true`。

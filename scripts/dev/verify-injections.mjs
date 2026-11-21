@@ -165,11 +165,17 @@ async function runInjectionInSlot(inj, root) {
     for (const [rel, from, to] of targets) {
       const full = join(root, rel)
       const original = readFileSync(full, 'utf8')
-      if (!original.includes(from)) {
+      // 锚点按 LF 写，工作区可能是 CRLF：本地检出若没按 `.gitattributes` 规范化，
+      // 注入就会「找不到那一段」而整条跳过——跳过在汇总里只记一处问题，
+      // 看起来像配置疏漏，实际是这条判据根本没被验过。这里统一到 LF 再比。
+      const lfOriginal = original.replace(/\r\n/g, '\n')
+      const lfFrom = String(from).replace(/\r\n/g, '\n')
+      if (!lfOriginal.includes(lfFrom)) {
         return { id: inj.id, what: inj.what, skipped: `${rel} 里找不到要替换的那一段` }
       }
       if (!modifiedRels.includes(rel)) modifiedRels.push(rel)
-      writeFileSync(full, original.replace(from, to), 'utf8')
+      const replaced = lfOriginal.replace(lfFrom, String(to).replace(/\r\n/g, '\n'))
+      writeFileSync(full, original.includes('\r\n') ? replaced.replace(/\n/g, '\r\n') : replaced, 'utf8')
     }
 
     let result = await runBothIn(root, inj)

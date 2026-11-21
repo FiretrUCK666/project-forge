@@ -13,7 +13,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
-import { deriveMergeGate, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
+import { deriveMergeGate, evaluateRemoteChecks, extractExecutionBlocks, GATE_VERDICT } from '../../kit/skills/lib/gate-truth.mjs'
 import { evaluateIntakeTriage } from '../../kit/skills/lib/intake-triage.mjs'
 import { resolveApprovalBasis } from '../../kit/skills/lib/plan-exit-gate.mjs'
 import { auditEntry, auditHandRolled, ENTRY_SPECS, evaluateParity, extractDeclared, HAND_ROLLED_SPECS } from './cli-parity.mjs'
@@ -489,6 +489,31 @@ export function registerFlowTruthCases(cases) {
       // 反例三：平台读取失败不得让分诊直接失败。
       if (!clean.ok) return '分诊因为平台读不到直接失败了——离线仓必须还能用'
     } finally { rmTree(dir) }
+    return true
+  }])
+
+  cases.push(['C6：远端检查判定单点——五档互斥，有工作流却没 check-run 阻断，没工作流才算不适用', async () => {
+    const cases = [
+      ['语义分桶全绿', { ok: true, bucket: 'pass' }, { ciRequired: true }, 'passed', false],
+      ['有失败检查', { ok: true, bucket: 'fail', failed: [{ name: 'gates', state: 'FAILURE' }] }, { ciRequired: true }, 'failed', true],
+      ['检查还在跑', { ok: true, bucket: 'pending', pending: [{ name: 'gates', state: 'IN_PROGRESS' }] }, { ciRequired: true }, 'pending', true],
+      ['有工作流但零 check-run', { ok: true, bucket: 'none' }, { ciRequired: true }, 'pending', true],
+      ['状态分桶认不出来', { ok: true, bucket: 'unknown', warnings: ['partial'] }, { ciRequired: true }, 'unverified', true],
+      ['读取整体失败', { ok: false, error: 'network' }, { ciRequired: true }, 'unverified', true],
+      ['仓库没有工作流', { ok: true, bucket: 'none' }, { ciRequired: false }, 'not-required', false],
+      ['后端不支持读检查', { skipped: true }, { ciRequired: true }, 'not-required', false],
+    ]
+    for (const [label, checks, opts, wantVerdict, wantBlocking] of cases) {
+      const got = evaluateRemoteChecks(checks, opts)
+      if (got.verdict !== wantVerdict) return `${label} 被判成 ${got.verdict}，应为 ${wantVerdict}`
+      if (got.blocking !== wantBlocking) return `${label} 的阻断性错了（blocking=${got.blocking}）`
+      if (wantBlocking && !got.code) return `${label} 阻断了却没给阻断码——调用方只能猜`
+      if (!wantBlocking && got.code) return `${label} 没阻断却给了阻断码 ${got.code}`
+    }
+    // 两款「不知道」不能被合并成同一档：等待与读取失败，修法完全不同。
+    const pendingV = evaluateRemoteChecks({ ok: true, bucket: 'pending', pending: [] }, { ciRequired: true })
+    const unverifiedV = evaluateRemoteChecks({ ok: false, error: 'boom' }, { ciRequired: true })
+    if (pendingV.code === unverifiedV.code) return '等待与核验失败用了同一个阻断码，修的人分不清要等还是要查'
     return true
   }])
 }

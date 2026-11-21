@@ -7,6 +7,7 @@
 
 import { EXIT } from './exit-codes.mjs'
 import { posixPath, gitRun } from './git.mjs'
+import { hydrateIssueBody } from './issue-template-hydrate.mjs'
 import { readGitConfigFast, resolveGitDirFast } from './git-fast.mjs'
 import { detectGitModeMarkers, githubRepoFull, parseRemoteUrls, parseRemotesTopology, probeForWrite } from './platform.mjs'
 import { createTaskBackend } from './task-backend.mjs'
@@ -115,7 +116,7 @@ function clampReproField(text) {
  * 复现证据字段在这里就按上限收敛：超限时截断并在正文里写明「已截断」，
  * 同时把原始校验错误挂在载荷上供调用方上报——静默接受会把整段日志抄进建单正文。
  */
-export function buildEscalationIssuePayload(item = {}) {
+export function buildEscalationIssuePayload(item = {}, opts = {}) {
   const caseType = inferEscalationCase(item)
   const escalationTier = classifyEscalationTier(item)
   const title = formatWorkTitle(item.title ?? item.summary ?? '未命名升级问题', caseType)
@@ -134,47 +135,28 @@ export function buildEscalationIssuePayload(item = {}) {
   })
   const rootCause = String(item.rootCause ?? item.reason ?? '同一阻塞或跨边界问题已超出局部热修承受上限，须拆出独立契约/架构根治。').trim()
   const nextStep = String(item.nextStep ?? 'node ".agents/skills/dev-plan/scripts/doc-plan.mjs" triage --touches-contract --summary "Escalation follow-up"').trim()
+  const repoRoot = opts?.repoRoot ?? item.repoRoot ?? item.mainRoot ?? null
 
-  let body = typeof item.body === 'string' && item.body.trim() ? item.body : ''
-  if (!body) {
-    const scopeParts = [
-      `Case ${caseType}`,
-      `source=${item.source ?? 'escalation'}`,
-      `tier=${escalationTier}`,
-      item.taskId ? `task=${item.taskId}` : null,
-      item.category ? `category=${item.category}` : null,
-      item.severity ? `severity=${String(item.severity).toLowerCase()}` : null,
-    ].filter(Boolean)
-    const filesList = Array.isArray(item.files) && item.files.length > 0
-      ? item.files.slice(0, 8).map((f) => `\`${posixPath(f)}\``).join('、')
-      : null
-    const lines = [
-      '## 背景与现象',
-      '',
+  const body = (typeof item.body === 'string' && item.body.trim())
+    ? hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', { rawBody: item.body }).trim()
+    : hydrateIssueBody(repoRoot, caseType === 2 ? 'bug' : 'feature', {
+      title: item.title ?? item.summary ?? '未命名升级问题',
+      summary: item.summary ?? rootCause,
+      findingsSummary: item.findingsSummary,
       rootCause,
-      '',
-      '## 范围与依据',
-      '',
-      `- 上下文：${scopeParts.join(' | ')}`,
-      filesList ? `- 涉及文件：${filesList}` : null,
-      reproEvidence ? `- 最小复现：${reproEvidence}` : null,
-      pocCommand ? `- 复现命令：\`${pocCommand}\`` : null,
-    ].filter((x) => x !== null)
-    if (item.stopLossPacket) {
-      const p = item.stopLossPacket
-      lines.push('', '## 停损证据快照', '')
-      if (p.reason) lines.push(`- 停损判定：${p.reason}`)
-      if (Array.isArray(p.hotspotFiles) && p.hotspotFiles.length > 0) {
-        lines.push(`- 热点文件：${p.hotspotFiles.map((f) => `\`${posixPath(f)}\``).join('、')}`)
-      }
-      if (Array.isArray(p.repeatedFingerprints) && p.repeatedFingerprints.length > 0) {
-        lines.push(`- 重复指纹：${p.repeatedFingerprints.map((fp) => `\`${fp}\``).join('、')}`)
-      }
-      if (p.docPlanBridge) lines.push(`- 交接命令：\`${p.docPlanBridge}\``)
-    }
-    lines.push('', '## 验收标准', '', ...criteria, '', '## [NEXT STEP]', '', `[NEXT STEP] ${nextStep}`, '')
-    body = lines.join('\n')
-  }
+      caseType,
+      source: item.source ?? 'escalation',
+      tier: escalationTier,
+      taskId: item.taskId,
+      category: item.category,
+      severity: item.severity,
+      files: item.files,
+      reproEvidence,
+      pocCommand,
+      stopLossPacket: item.stopLossPacket,
+      criteria,
+      nextStep,
+    }).trim()
 
   return {
     title,
@@ -195,7 +177,7 @@ export function buildEscalationIssuePayload(item = {}) {
 }
 
 /** 将 dev-govern 审计发现按类别聚合并输出统一 Escalation 载荷列表。 */
-export function buildIssues(findings = []) {
+export function buildIssues(findings = [], opts = {}) {
   const actionable = (Array.isArray(findings) ? findings : []).filter((f) => f && f.severity !== 'info')
   const grouped = new Map()
   for (const f of actionable) {
@@ -206,20 +188,16 @@ export function buildIssues(findings = []) {
   for (const [cat, items] of grouped.entries()) {
     const highest = items.some((x) => x.severity === 'critical') ? 'critical'
       : items.some((x) => x.severity === 'high') ? 'high' : 'medium'
-    const singleFile = new Set(items.map((x) => x.file).filter(Boolean)).size <= 1
+    const files = [...new Set(items.map((x) => x.file).filter(Boolean))]
+    const singleFile = files.length <= 1
     const rawTitle = `[govern/${cat}] Resolve ${items.length} ${cat} finding(s) (max severity: ${highest})`
-    const bodyLines = [
-      `## Audit Category: \`${cat}\``,
-      '- Case: Case 3',
-      '', 'Findings detected by `govern-audit`:', '',
+    const findingsSummary = [
+      `Findings detected by \`govern-audit\` (${cat}, max severity: ${highest}):`,
+      '',
       ...items.slice(0, 25).map((item, idx) =>
         `${idx + 1}. **[${String(item.severity ?? 'medium').toUpperCase()}]** ${item.title}${item.action ? ` — Action: ${item.action}` : ''}`),
       ...(items.length > 25 ? ['', `_...and ${items.length - 25} more items in category \`${cat}\`._`] : []),
-      '', '## Acceptance Criteria', '',
-      ...items.slice(0, 5).map((item, idx) => `- [ ] C${idx + 1}: Resolve \`${item.id}\``),
-      '', '## [NEXT STEP]', '',
-      '[NEXT STEP] node ".agents/skills/dev-govern/scripts/govern-audit.mjs" plan .', '',
-    ]
+    ].join('\n')
     issues.push(buildEscalationIssuePayload({
       source: 'govern',
       category: cat,
@@ -228,10 +206,14 @@ export function buildIssues(findings = []) {
       findings: items,
       count: items.length,
       singleFile,
+      files,
       title: rawTitle,
+      summary: `${items.length} ${cat} finding(s) detected by govern-audit`,
+      findingsSummary,
+      criteria: items.slice(0, 5).map((item, idx) => `- [ ] C${idx + 1}: Resolve \`${item.id}\``),
+      nextStep: 'node ".agents/skills/dev-govern/scripts/govern-audit.mjs" plan .',
       labels: ['governance', cat],
-      body: bodyLines.join('\n'),
-    }))
+    }, opts))
   }
   return issues
 }
@@ -330,7 +312,7 @@ export async function escalateToBackend({
       title: String(item?.title ?? ''),
     }
   }
-  const payload = buildEscalationIssuePayload(item)
+  const payload = buildEscalationIssuePayload(item, { repoRoot })
   if (!force && payload.escalationTier === 'inline-todo') {
     return {
       ok: true,

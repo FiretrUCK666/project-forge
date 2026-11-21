@@ -51,6 +51,12 @@ metadata:
 - 传 `--with-native` 时仅在目标仓已声明对应命令时按需调用；工具或配置不存在时安全跳过并记录，绝不要求全局安装第三方外部 linter 二进制。
 - 支持 `--skip-edit-gate --reason "<原因>"` 显式记账写入 `signals.jsonl` 留痕；最终合入前门禁仍须通过完整校验。
 
+## 注释与架构决策记录边界
+
+- **Why not What**：注释只写非显而易见的不变量、约束或边界原因（Why），不复述代码字面逻辑（What）；禁止履历墓碑与死代码块。
+- **临时绕过必带单号**：`HACK`/`WORKAROUND`/`TEMP` 注释必须注明追踪单号（`#<issue>`，先走 `flow.mjs issue create` 或 `escalation.mjs` 建单）；变更中注释反引号路径须指向仓内真实文件（`edit.broken-comment-path`）。
+- **架构决策落点**：跨模块或不可逆取舍写入 `docs/TDD.md` 或 `AGENTS.md ## 取舍`，不另建 `docs/adr/`。
+
 ## 标准命令流
 
 ```sh

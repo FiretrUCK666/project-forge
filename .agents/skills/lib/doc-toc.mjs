@@ -74,38 +74,3 @@ export function rewriteToc(text) {
   }
   return src
 }
-
-/**
- * 检查目录与正文是否对得上。
- *
- * 给审计用：手改文档加了一节却没更新目录，要能报出来。
- *
- * @param {string} text
- * @returns {Array<{line: number, kind: string, title: string}>}
- */
-export function findTocDrift(text) {
-  const src = String(text ?? '')
-  const m = TOC_BLOCK_RE.exec(src)
-  if (!m) return []
-
-  const listed = new Set(
-    [...m[2].matchAll(/^-\s+\[([^\]]+)\]\(#[^)]*\)/gm)].map((x) => x[1].trim()),
-  )
-  const actual = new Set(
-    src.split('\n')
-      .map((l) => H2_RE.exec(l)?.[1]?.trim())
-      .filter((x) => x && x !== '目录'),
-  )
-
-  const out = []
-  const tocStartLine = src.slice(0, m.index).split('\n').length
-  let n = tocStartLine
-  for (const title of listed) {
-    n += 1
-    if (!actual.has(title)) out.push({ line: n, kind: 'stale-entry', title })
-  }
-  for (const title of actual) {
-    if (!listed.has(title)) out.push({ line: 1, kind: 'missing-entry', title })
-  }
-  return out
-}

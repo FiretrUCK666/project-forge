@@ -493,8 +493,14 @@ async function main() {
       runScenarioF(pkgRoot, sandbox, env),
       runScenarioG(pkgRoot, sandbox, env),
     ])
-    await runStageBScenarios(pkgRoot, sandbox, env, helpers)
-    await runEvolutionScenarios(pkgRoot, sandbox, env, helpers)
+    const stageBSandbox = join(sandbox, 'stage-b')
+    const evoSandbox = join(sandbox, 'stage-evo')
+    mkdirSync(stageBSandbox, { recursive: true })
+    mkdirSync(evoSandbox, { recursive: true })
+    await Promise.all([
+      runStageBScenarios(pkgRoot, stageBSandbox, env, helpers),
+      runEvolutionScenarios(pkgRoot, evoSandbox, env, helpers),
+    ])
     const ms = Math.round(performance.now() - t0)
     process.stdout.write(`真 .zip 安装包 Fake-Agent E2E 全通：基础场景 A–G + 生命周期与演化 Scenarios H–L（包条目 ${entryCount}，耗时 ${ms} ms）。\n`)
     return 0

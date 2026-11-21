@@ -16,6 +16,7 @@ import { flushAndExit, parseStandardCli, printNextStep } from '../../lib/cli.mjs
 import { buildDocFilename, docIsoDate, serializeDocFrontmatter, slugify } from '../../lib/docs.mjs'
 import { buildEscalationIssuePayload, escalateToBackend } from '../../lib/escalation.mjs'
 import { isMainModule, posixPath, readTextSafe, resolveRepoRoots, writeAtomic } from '../../lib/git.mjs'
+import { countTextLines } from '../../lib/static-gates.mjs'
 import { listTaskLedgers, sanitizeTaskId } from '../../lib/ledger.mjs'
 import { detectOptionalNativeCheckers } from '../../lib/profile-sniffer.mjs'
 import {
@@ -279,16 +280,35 @@ export function buildRetroReport({
   const tier3Fallbacks = []
   const patches = []
 
+  const isObsoleteRetroTarget = (fileRel, defectClass = '') => {
+    const clean = posixPath(fileRel ?? '').replace(/^\.\//, '')
+    if (!clean || clean === 'repo' || clean === 'workflow') return false
+    const abs = join(workTreeRoot, clean)
+    if (!existsSync(abs)) return true
+    if (defectClass === 'file-bloat') {
+      const txt = readTextSafe(abs, 512 * 1024)
+      if (txt !== undefined && countTextLines(txt) <= 800) return true
+    }
+    return false
+  }
+  const retiredObsoleteProposals = []
+
   for (const rf of repeatedFailures) {
-    const isTier1 = TIER1_CLASSES.has(rf.defectClass)
-      || (rf.defectClass === 'arch-boundary' && rf.files.length >= 2)
-      || rf.pyramidTier === 'tier1-architecture'
+    const activeFiles = (rf.files ?? []).filter((f) => !isObsoleteRetroTarget(f, rf.defectClass))
+    if ((rf.files?.length ?? 0) > 0 && activeFiles.length === 0) {
+      retiredObsoleteProposals.push({ fingerprint: rf.fingerprint, defectClass: rf.defectClass, files: rf.files, reason: 'target-missing-or-resolved' })
+      continue
+    }
+    const scopedRf = activeFiles.length > 0 ? { ...rf, files: activeFiles } : rf
+    const isTier1 = TIER1_CLASSES.has(scopedRf.defectClass)
+      || (scopedRf.defectClass === 'arch-boundary' && scopedRf.files.length >= 2)
+      || scopedRf.pyramidTier === 'tier1-architecture'
     if (isTier1) {
-      const t1 = buildTier1Escalation(rf, taskFilter)
+      const t1 = buildTier1Escalation(scopedRf, taskFilter)
       tier1Escalations.push(t1)
       patches.push(t1)
     } else {
-      const t2 = buildTier2Proposal(rf, nativeCheckers)
+      const t2 = buildTier2Proposal(scopedRf, nativeCheckers)
       tier2Proposals.push(t2)
       patches.push(t2)
     }
@@ -307,7 +327,7 @@ export function buildRetroReport({
     patches.push(fpPatch)
   }
 
-  for (const hs of hotspots.slice(0, 3)) {
+  for (const hs of hotspots.filter((h) => !isObsoleteRetroTarget(h.file)).slice(0, 3)) {
     const hsPatch = {
       pyramidTier: hs.count >= 3 ? 'tier1-architecture' : 'tier2-deterministic-gate',
       targetKind: 'fixture',

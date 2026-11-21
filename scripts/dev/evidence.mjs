@@ -10,9 +10,9 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { skillVersion, skillSource } from '../lib/text.mjs'
@@ -21,14 +21,12 @@ import { isRepoOnlyPath } from '../lib/protocol.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
 
-function walk(dir, pred, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '.git' || entry.name === 'node_modules') continue
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) walk(full, pred, out)
-    else if (entry.isFile() && (pred === undefined || pred(full))) out.push(full)
+function listTrackedFiles(root) {
+  const res = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
+  if (res.status !== 0) {
+    throw new Error(`git ls-files 失败：${res.stderr || res.status}`)
   }
-  return out
+  return String(res.stdout ?? '').split('\0').filter(Boolean)
 }
 
 function sha256(file) {
@@ -50,11 +48,10 @@ function main(argv) {
   const version = skillVersion(skillText)
   const source = skillSource(skillText)
 
-  // 用户包 = 产品层。自用层按结构规则排除，与 `.gitattributes` 同源。
-  const all = walk(ROOT)
-  const shipped = all
-    .map((f) => relative(ROOT, f).split('\\').join('/'))
-    .filter((rel) => !isRepoOnlyPath(rel))
+  // 用户包 = 产品层。自用层按结构规则排除，与 `.gitattributes` 同源；严格从 git ls-files 读取已跟踪文件。
+  const shipped = listTrackedFiles(ROOT)
+    .map((f) => f.split('\\').join('/'))
+    .filter((rel) => !isRepoOnlyPath(rel) && existsSync(join(ROOT, rel)))
     .sort()
 
   const out = {

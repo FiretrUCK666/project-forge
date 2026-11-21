@@ -629,6 +629,17 @@ async function generate(root, agentsPath, template, { manifest } = {}) {
   mkdirSync(dirname(agentsPath), { recursive: true })
   writeAtomic(agentsPath, content)
   writeManifestRegions(root, content)
+  const convergedFacts = await factsOf(root)
+  const convergedManifest = readManifestSafe(root)
+  const convergedContent = renderAgentsTemplate(convergedFacts, template, root, { manifest: convergedManifest })
+  if (convergedContent !== content) {
+    const convergedSize = checkAgentsBytes(convergedContent)
+    if (!convergedSize.oversize) {
+      content = convergedContent
+      writeAtomic(agentsPath, content)
+      writeManifestRegions(root, content)
+    }
+  }
   const fills = parseMarkers(content, 'AGENTS.md').filter((m) => m.kind === 'fill')
   process.stdout.write('已生成 AGENTS.md（按勘察到的事实填了一部分）。\n')
   if (fills.length > 0) {

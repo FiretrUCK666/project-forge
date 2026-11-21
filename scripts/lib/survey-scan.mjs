@@ -51,7 +51,7 @@ export async function scanProjectStaticFacts(root) {
     if (f.rawBuf) bufByRel.set(f.rel, f.rawBuf)
   }
   const docs = detectDocs(root, { files: relFiles, textByRel, neutralCi })
-  const kit = detectKit(root, { rawFiles: { textByRel, bufByRel, relSet } })
+  const kit = detectKit(root, { rawFiles: { textByRel, bufByRel, relSet, dirs } })
   const localSkills = buildLocalSkillsFromKit(root, kit)
 
   const agentsText = docs?.agents ? (textByRel.get(docs.agents.file) ?? readTextSafe(join(root, docs.agents.file)) ?? '') : ''

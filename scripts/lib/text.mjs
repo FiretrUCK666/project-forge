@@ -8,43 +8,27 @@
  * 而那种分歧出现在「读文件」上时，症状通常是**静默损坏**。
  */
 
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/**
- * 读一个文本文件，**读不到就返回 undefined**（不是空串）。
- *
- * 这是全仓唯一的「安全读」。两条边界由它一处定义，别处只能依赖它：
- *
- *   - **超过上限的文件不读**：`256 KB` 是按「一个清单文件、一份文档」定的量级。
- *     超过它的多半是数据文件（`package-lock.json` 之外的东西、导出的表格），
- *     读进来只会占内存，而不读它也不影响任何判定——判定要的是结构，不是全文。
- *   - **含 NUL 字节的不读**：那是二进制。按 UTF-8 读出来是一串替换字符，
- *     后续所有正则都在那串垃圾上跑，报出来的结论会像真的。
- *
- * 行尾统一成 `\n`、去掉 BOM：调用方拿到的文本与它写回去时用的文本是同一份形状，
- * 否则「读了再写」会在 Windows 上悄悄改掉整个文件的行尾。
- */
-export function readTextSafe(filePath, maxBytes = 256 * 1024) {
-  try {
-    const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
-    const buf = readFileSync(filePath)
-    if (buf.subarray(0, 4096).includes(0)) return undefined
-    return buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return undefined
-  }
-}
+import {
+  isMacMetadataName,
+  isMacOsJunkPath,
+  readJsonSafe,
+  readTextSafe,
+} from '../../kit/skills/lib/git-core.mjs'
+import { lookupSshHost, parseSshConfigHostMap } from '../../kit/skills/lib/platform.mjs'
 
-/** 读一个 JSON 文件。读不到或不是合法 JSON 都返回 undefined——**不抛**。 */
-export function readJsonSafe(filePath) {
-  const text = readTextSafe(filePath)
-  if (text === undefined) return undefined
-  try { return JSON.parse(text) } catch { return undefined }
+export {
+  isMacMetadataName,
+  isMacOsJunkPath,
+  lookupSshHost,
+  parseSshConfigHostMap,
+  readJsonSafe,
+  readTextSafe,
 }
+export const isMacMetadataPath = isMacOsJunkPath
 
 /**
  * 将路径归一为跨平台真实规范路径：
@@ -97,22 +81,6 @@ export function posixPath(p) {
   return String(p ?? '').replace(/\\/g, '/')
 }
 
-/** 判断单个路径段是否为 macOS Finder / AppleDouble 元数据文件或目录。 */
-export function isMacMetadataName(name) {
-  const base = String(name ?? '')
-  return base === '.DS_Store'
-    || base.startsWith('._')
-    || base === '__MACOSX'
-    || base === '.Spotlight-V100'
-    || base === '.Trashes'
-    || base === '.fseventsd'
-}
-
-/** 判断相对路径任意层级是否命中 macOS 元数据条目。 */
-export function isMacMetadataPath(rel) {
-  return posixPath(rel).split('/').some((seg) => seg && isMacMetadataName(seg))
-}
-
 /**
  * 把一个 Buffer 解成文本：先按严格 UTF-8，再按 UTF-16，最后宽松兜底。
  *
@@ -140,13 +108,6 @@ export function decodeText(buffer) {
     }
   }
   return { text: stripBom(buffer.toString('utf8')), encoding: 'unknown' }
-}
-
-/** 读一个文本文件。读不出来返回 undefined（不是空串）。 */
-export function readTextFile(p) {
-  let buffer
-  try { buffer = readFileSync(p) } catch { return undefined }
-  return decodeText(buffer)
 }
 
 /**
@@ -244,85 +205,6 @@ export function skillSource(text) {
   return m === null ? undefined : m[1].trim()
 }
 
-/**
- * 解析 OpenSSH 配置文件（默认 `~/.ssh/config`），提取 `Host` 别名到 `HostName` 的只读映射。
- * 忽略通配符模式（`*` / `?` / `!`）与 `Match` 块；同一别名按 OpenSSH 规则先出现者优先。
- */
-export function parseSshConfigHostMap(input) {
-  let text = ''
-  if (typeof input === 'string') {
-    const looksInline = input.includes('\n') || input.includes('\r')
-      || /^\s*(?:Host|HostName|User|Port|IdentityFile)\b/im.test(input)
-    if (looksInline) {
-      text = input
-    } else if (input.trim() && existsSync(input.trim())) {
-      text = readTextSafe(input.trim()) ?? ''
-    } else {
-      text = input
-    }
-  } else if (input && typeof input === 'object') {
-    if (typeof input.configText === 'string') text = input.configText
-    else if (typeof input.text === 'string') text = input.text
-    else {
-      const cfgPath = input.configPath || input.path || join(homedir(), '.ssh', 'config')
-      text = existsSync(cfgPath) ? (readTextSafe(cfgPath) ?? '') : ''
-    }
-  } else {
-    const cfgPath = join(homedir(), '.ssh', 'config')
-    text = existsSync(cfgPath) ? (readTextSafe(cfgPath) ?? '') : ''
-  }
-
-  const hostMap = {}
-  let currentHosts = []
-  for (const rawLine of String(text).replace(/\r\n/g, '\n').split('\n')) {
-    const stripped = rawLine.replace(/(?:^|\s)#.*$/, '').trim()
-    if (!stripped) continue
-    const m = /^([A-Za-z0-9_-]+)\s*(?:=|\s)\s*(.+)$/.exec(stripped)
-    if (!m) continue
-    const key = m[1].toLowerCase()
-    const val = m[2].trim()
-    if (key === 'match') {
-      currentHosts = []
-      continue
-    }
-    if (key === 'host') {
-      currentHosts = val
-        .split(/\s+/)
-        .map((h) => h.replace(/^['"]|['"]$/g, '').trim())
-        .filter((h) => h && !/[*?![\]]/.test(h))
-      continue
-    }
-    if (key === 'hostname' && currentHosts.length > 0) {
-      const targetHost = val.replace(/^['"]|['"]$/g, '').trim()
-      if (!targetHost) continue
-      for (const alias of currentHosts) {
-        if (!Object.prototype.hasOwnProperty.call(hostMap, alias)) {
-          hostMap[alias] = targetHost
-        }
-      }
-    }
-  }
-  return hostMap
-}
-
-/** 按大小写不敏感查找 SSH Host 别名映射到的目标主机名。 */
-export function lookupSshHost(sshHostMap, host) {
-  if (!sshHostMap || typeof sshHostMap !== 'object' || !host) return undefined
-  const low = String(host).toLowerCase()
-  if (sshHostMap instanceof Map) {
-    if (sshHostMap.has(host)) return sshHostMap.get(host)
-    for (const [k, v] of sshHostMap.entries()) {
-      if (String(k).toLowerCase() === low) return v
-    }
-    return undefined
-  }
-  if (Object.prototype.hasOwnProperty.call(sshHostMap, host)) return sshHostMap[host]
-  for (const [k, v] of Object.entries(sshHostMap)) {
-    if (String(k).toLowerCase() === low) return v
-  }
-  return undefined
-}
-
 /** 提取 Git 远端地址的主机名与协议（不依赖平台）。 */
 export function parseRemoteUrlHost(value) {
   const s = String(value ?? '').trim()
@@ -354,7 +236,7 @@ export function parseRemoteUrlHost(value) {
  *
  * **认不出来时返回 undefined，而两个 undefined 相等**——这是它唯一危险的用法：
  * 拿它做等值比较却不管 undefined，就是「两个都认不出 → 判成一样 → 放行」。
- * 调用方因此必须用 `repoRelation()`，它把「没法比」变成第三种结果。
+ * 调用方在比较前必须显式排除 undefined。
  */
 export function repoPath(value) {
   let s = String(value ?? '').trim().toLowerCase()
@@ -395,34 +277,6 @@ export function githubRepoPath(value, sshHostMap) {
   }
   if (!GITHUB_HOST_RE.test(effectiveHost)) return undefined
   return repoPath(s)
-}
-
-/**
- * 两个仓库地址的关系：`same` / `different` / `unknown`。
- *
- * **存在的理由就是那个 `unknown`**：把「认不出」压进 undefined 之后，`a !== b` 在两个都
- * 认不出时返回 false，于是门禁把「没法比」读成「比过且一致」——这是最坏的一种失效，
- * 因为它看起来是绿的。
- */
-export function repoRelation(a, b) {
-  const pa = repoPath(a)
-  const pb = repoPath(b)
-  if (pa === undefined || pb === undefined) return 'unknown'
-  return pa === pb ? 'same' : 'different'
-}
-
-/**
- * 版本串归一：**只吃写法差异，不做版本序、不折叠预发布**。
- *
- * `0.1.5-rc.1` 与 `0.1.5` 归一后**不同**——那是两次不同的发布，折叠掉等于隐瞒
- * 「现在装的是 rc 还是正式版」这个事实。
- */
-export function normVersion(value) {
-  return String(value ?? '')
-    .trim()
-    .replace(/^[\^~>=<\s]+/, '')
-    .replace(/^[vV](?=\d)/, '')
-    .toLowerCase()
 }
 
 export { flushAndExit } from '../../kit/skills/lib/cli.mjs'

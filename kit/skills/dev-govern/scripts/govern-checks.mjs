@@ -17,10 +17,11 @@ import {
 import { isCleanWorktreeFast, readWorktreeListFast } from '../../lib/git-status-fast.mjs'
 import { isAllowedExtensionPath } from '../../lib/overlay.mjs'
 import {
-  CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_TEMP_RE, RUST_ALLOW_RE, TEST_FILE_RE,
-  TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
+  CODE_EXT_RE, EXCUSE_COMMENT_RE, EXCUSE_HACK_RE, EXCUSE_TEMP_RE, ISSUE_REF_RE, JUSTIFICATION_ANCHOR_RE,
+  RUST_ALLOW_RE, TEST_FILE_RE, TOMBSTONE_COMMENT_RE, checkProcessArtifactFilename, evaluateArchRules,
   extractLineCommentInfo, isTestOrFixtureFile,
 } from '../../lib/static-gates.mjs'
+import { scanBrokenCommentPaths } from '../../lib/static-gates-comment-hygiene.mjs'
 
 export const AGENTS_WARN_BYTES = 24576
 export const AGENTS_MAX_BYTES = 30720
@@ -589,7 +590,8 @@ export function inspectManifest(repoRoot) {
   }
 }
 
-export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBranch, devProfile, findings) {
+export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBranch, devProfile, findings, opts = {}) {
+  const changedSet = opts?.changedFilesSet instanceof Set ? opts.changedFilesSet : null
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
   const codeRelList = []
@@ -676,7 +678,9 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
             })
           }
         }
-        if ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(lines[i])) {
+        const hasJustify = JUSTIFICATION_ANCHOR_RE.test(commentText || lines[i])
+        const hasIssueRef = Boolean(commentText && EXCUSE_HACK_RE.test(commentText) && ISSUE_REF_RE.test(commentText))
+        if (!hasJustify && !hasIssueRef && ((commentText && (EXCUSE_COMMENT_RE.test(commentText) || EXCUSE_TEMP_RE.test(commentText))) || RUST_ALLOW_RE.test(lines[i]))) {
           excuseCount += 1
           if (excuseCount <= 5) {
             addFinding(findings, {
@@ -687,9 +691,25 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
               line: i + 1,
               title: `Excuse/suppression pragma or workaround marker at ${f.rel}:${i + 1}`,
               detail: lines[i].trim().slice(0, 100),
-              action: 'Fix root cause (types, lint, or contract boundary) instead of suppressing checks.',
+              action: 'Fix root cause, or link an active #<issue> (via flow.mjs issue create / escalation.mjs) for temporary workarounds.',
             })
           }
+        }
+      }
+      if (changedSet && changedSet.has(f.rel) && !isTestOrFixtureFile(f.rel)) {
+        const showRes = isGit ? await gitRun(workRoot, ['show', `HEAD:${f.rel}`]) : null
+        const headText = showRes?.ok ? showRes.stdout : null
+        for (const bp of scanBrokenCommentPaths({ repoRoot: workRoot, fileRel: f.rel, text: info.text, headText })) {
+          addFinding(findings, {
+            id: `hygiene.comment-broken-path.${f.rel}:${bp.line}`,
+            category: 'hygiene',
+            severity: 'medium',
+            file: f.rel,
+            line: bp.line,
+            title: `Broken comment path \`${bp.path}\` at ${f.rel}:${bp.line}`,
+            detail: bp.raw,
+            action: 'Update or remove stale backticked path references in comments.',
+          })
         }
       }
     }
@@ -736,15 +756,18 @@ export async function auditHygiene(workRoot, mainRoot, isGit, files, defaultBran
   const wtReport = await inspectWorktrees(mainRoot, isGit, defaultBranch)
   for (const s of wtReport.stale) {
     const isNoOwn = s.state === 'no_own_commits'
+    const isOrphan = s.state === 'orphan_dir'
     addFinding(findings, {
       id: `hygiene.stale-worktree.${s.path}`,
       category: 'hygiene',
       severity: isNoOwn ? 'low' : 'medium',
       file: s.path,
       title: `Worktree candidate [${s.state}]: ${s.path} (${s.reason})`,
-      action: isNoOwn
-        ? 'Confirm with human first and check uncommitted files before removing (branch has no own commits and may hold WIP).'
-        : 'Unmount any shared dependency junction first, confirm with user, then run `git worktree remove`.',
+      action: isOrphan
+        ? 'Unregistered directory inside .worktrees/ (not a git worktree). Confirm contents with user, then delete the directory directly instead of `git worktree remove`.'
+        : isNoOwn
+          ? 'Confirm with human first and check uncommitted files before removing (branch has no own commits and may hold WIP).'
+          : 'Unmount any shared dependency junction first, confirm with user, then run `git worktree remove`.',
     })
   }
 

@@ -3,11 +3,13 @@
  * preflight.mjs —— 这个 skill 自己的结构自检主入口（协调契约、套件卫生、端到端冒烟与 --package 校验）。
  */
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { countTextLines } from '../../kit/skills/lib/static-gates.mjs'
 import { isRepoOnlyPath, templateVarsOf } from '../lib/protocol.mjs'
 import { isMainModule } from '../lib/text.mjs'
 import {
@@ -63,26 +65,36 @@ function isWorktreeCheckout(dir) {
   }
 }
 
+const textCache = new Map()
 function readText(p) {
-  return readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
+  let v = textCache.get(p)
+  if (v === undefined) {
+    v = readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
+    textCache.set(p, v)
+  }
+  return v
 }
 
-function countLines(text) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  return lines.length
+const walkDirCache = new Map()
+function walkAllRaw(dir) {
+  let cached = walkDirCache.get(dir)
+  if (cached) return cached
+  const out = []
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '.worktrees') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...walkAllRaw(full))
+      else if (entry.isFile()) out.push(full)
+    }
+  }
+  walkDirCache.set(dir, out)
+  return out
 }
 
 function walk(dir, pred) {
-  const out = []
-  if (!existsSync(dir)) return out
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '.worktrees') continue
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...walk(full, pred))
-    else if (entry.isFile() && (pred === undefined || pred(full))) out.push(full)
-  }
-  return out
+  const all = walkAllRaw(dir)
+  return pred === undefined ? [...all] : all.filter(pred)
 }
 
 /**
@@ -137,8 +149,35 @@ function checkPackage(listPath) {
   return 0
 }
 
+function collectChangedRelPaths(root) {
+  const out = new Set()
+  const st = spawnSync('git', ['status', '--porcelain=v1', '-z'], { cwd: root, encoding: 'utf8' })
+  if (st.status === 0 && st.stdout) {
+    const parts = st.stdout.split('\0')
+    for (let i = 0; i < parts.length; i += 1) {
+      const entry = parts[i]
+      if (!entry || entry.length < 4) continue
+      const code = entry.slice(0, 2)
+      const p = entry.slice(3).replace(/\\/g, '/')
+      if (p) out.add(p)
+      if (code.includes('R') || code.includes('C')) i += 1
+    }
+  }
+  if (out.size === 0) {
+    const df = spawnSync('git', ['diff', '--name-only', 'HEAD~1..HEAD'], { cwd: root, encoding: 'utf8' })
+    if (df.status === 0 && df.stdout) {
+      for (const line of df.stdout.split(/\r?\n/)) {
+        const p = line.trim().replace(/\\/g, '/')
+        if (p) out.add(p)
+      }
+    }
+  }
+  return out
+}
+
 async function main() {
   const argv = process.argv.slice(2)
+  const changedOnly = argv.includes('--changed')
   const pkgIndex = argv.indexOf('--package')
   if (pkgIndex >= 0) {
     const listPath = argv[pkgIndex + 1]
@@ -149,24 +188,36 @@ async function main() {
     return checkPackage(listPath)
   }
 
+  const changedSet = changedOnly ? collectChangedRelPaths(ROOT) : null
+  if (changedOnly && changedSet.size === 0) {
+    process.stdout.write('\n自检通过（--changed）：工作区无改动，0 项失败。\n')
+    return 0
+  }
+
   const ctx = {
     ROOT,
     rel,
     readText,
-    countLines,
+    countLines: countTextLines,
     walk,
     isWorktreeCheckout,
     templateVarsOf,
     isRepoOnlyPath,
     isProductLayerPath,
+    changedSet,
     fail,
     note,
   }
 
+  const needsE2e = !changedSet || [...changedSet].some((p) => (
+    p === 'SKILL.md' || p === 'AGENTS.md' || /^templates\//.test(p)
+    || /^scripts\/(?:[^/]+\.mjs|lib\/)/.test(p) || /^kit\//.test(p)
+  ))
+
   await Promise.all([
     runContractChecks(ctx),
     runSuiteChecks(ctx),
-    runE2eChecks(ctx),
+    needsE2e ? runE2eChecks(ctx) : Promise.resolve(note('增量模式（--changed）：未触及产品引擎与模板，跳过全量 E2E 冒烟')),
   ])
 
   for (const n of notes) process.stdout.write(`  ${n}\n`)

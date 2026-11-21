@@ -444,7 +444,7 @@ export function buildVars(facts, root, { kitDir } = {}) {
     : (legacyWorkExists ? 'docs/work' : 'docs/todo')
 
   const commandPlan = commandPlanOf(facts)
-  const hasRemote = Boolean(facts?.git?.remote) && facts?.git?.isRepoRoot !== false
+  const hasRemote = Boolean(facts?.git?.remote) && facts?.git?.isRepoRoot !== false && !facts?.git?.localMode
   const customSkills = customSkillsOf(facts)
   const discoveredSkills = protocol.discoverKitSkills(kitDir)
 

@@ -13,7 +13,7 @@ import { formatWorkTitle } from './escalation.mjs'
 import { posixPath, readTextSafe } from './git.mjs'
 import { extractHeadlessSummary } from './markdown-scan.mjs'
 
-function stripHtmlCommentsOutsideFences(md) {
+export function stripHtmlCommentsOutsideFences(md) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
   const out = []
   let inFence = false
@@ -58,7 +58,7 @@ function extractReadableHeading(text) {
   return raw.replace(/^(?:SPEC|PRD|Todo|TODO|规范|规格|任务)\s*[:：]\s*/i, '').trim() || null
 }
 
-function extractMarkdownSectionText(text, headingPatterns = []) {
+export function extractMarkdownSectionText(text, headingPatterns = []) {
   if (!text) return ''
   const clean = stripHtmlCommentsOutsideFences(parseDocFrontmatter(text).body || text)
   const lines = clean.split('\n')
@@ -248,7 +248,7 @@ function buildVisualEvidenceView({ evidence, ledger, visualFilesChanged = [], vi
   return view
 }
 
-function replaceSectionIfPresent(md, headingCandidates, newBody) {
+export function replaceSectionIfPresent(md, headingCandidates, newBody) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n')
   const matchHeading = (rawTitle) => {
     const clean = String(rawTitle ?? '').replace(/^(?:\d+[.)、]\s*|[一二三四五六七八九十]+[、.)]\s*)/, '').trim()

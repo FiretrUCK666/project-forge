@@ -10,7 +10,7 @@ import { readTextSafe } from './git.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 /** 模板目录：与 `lib/` 同级，所以 `../templates/`。装到 `.agents/skills/` 后同样成立。 */
-export const DOC_TEMPLATE_DIR = join(HERE, '..', 'templates')
+const DOC_TEMPLATE_DIR = join(HERE, '..', 'templates')
 
 /**
  * 各文档类型的取值占位清单。
@@ -49,11 +49,6 @@ export function readDocTemplate(kind) {
   return readTextSafe(abs) ?? null
 }
 
-/** 模板里出现的所有占位名，用于 preflight 对照登记表。 */
-export function templateVarNames(text) {
-  return [...new Set([...String(text ?? '').matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))]
-}
-
 /** 模板里声明的章节及其是否可选。 */
 export function templateSections(text) {
   const out = []
@@ -63,7 +58,7 @@ export function templateSections(text) {
   return out
 }
 
-export function applySectionPolicy(text, dropSections, { pruneUnfilled = true } = {}) {
+function applySectionPolicy(text, dropSections, { pruneUnfilled = true } = {}) {
   const drop = dropSections ?? new Set()
   const sliced = String(text ?? '').replace(SECTION_RE, (whole, id, optional) => {
     if (!optional) return whole
@@ -103,7 +98,7 @@ const UNFILLED_MARKER_RE = /^待补齐$/m
  */
 const CRITERIA_BLOCK_RE = /<!--\s*criteria:start\s*-->([\s\S]*?)<!--\s*criteria:end\s*-->/
 
-export function fillCriteriaBlock(text, criteriaText) {
+function fillCriteriaBlock(text, criteriaText) {
   return String(text ?? '').replace(CRITERIA_BLOCK_RE, (_whole, fallback) => {
     const v = String(criteriaText ?? '').trim()
     return v ? v : fallback.trim()
@@ -111,7 +106,7 @@ export function fillCriteriaBlock(text, criteriaText) {
 }
 
 /** 填占位。填不上的写「待补齐」而不是空字符串。 */
-export function fillTemplateVars(text, vars) {
+function fillTemplateVars(text, vars) {
   return String(text ?? '').replace(/\{\{([A-Z0-9_]+)\}\}/g, (_whole, name) => {
     const v = vars[name]
     if (v === undefined || v === null) return '待补齐'

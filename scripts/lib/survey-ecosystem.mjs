@@ -11,10 +11,11 @@ import {
   scanDeclaredTaskRunners,
   scanNeutralCiSteps,
 } from '../../kit/skills/lib/profile-sniffer.mjs'
-import { matchGlob } from '../../kit/skills/lib/static-gates.mjs'
+import { matchGlob } from '../../kit/skills/lib/git-core.mjs'
 import { classifyCommandText, COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { COMMON_SKIP_DIRS } from './protocol.mjs'
-import { githubRepoPath, isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
+import { isMacMetadataName, isMacMetadataPath, readJsonSafe, readTextSafe } from './text.mjs'
+import { normalizeDeclaredRepo } from '../../kit/skills/lib/platform.mjs'
 
 export const SKIP_DIRS = COMMON_SKIP_DIRS
 
@@ -113,7 +114,7 @@ export const ECOSYSTEMS = [
       if (typeof pkg.version === 'string') s.declaredVersion = pkg.version.trim()
       if (pkg.private === true) s.private = true
       const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
-      if (repo) s.declaredRepo = githubRepoPath(repo)
+      if (repo) s.declaredRepo = normalizeDeclaredRepo(repo)
       s.packageManager = existsSync(join(root, 'pnpm-lock.yaml')) ? 'pnpm'
         : existsSync(join(root, 'yarn.lock')) ? 'yarn'
           : (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) ? 'bun'
@@ -156,14 +157,14 @@ export const ECOSYSTEMS = [
         if (!s.declaredRepo) {
           for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
             const value = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)?.[1]
-            const repo = githubRepoPath(value)
+            const repo = normalizeDeclaredRepo(value)
             if (repo) { s.declaredRepo = repo; break }
           }
         }
       }
       if (!s.declaredRepo && existsSync(join(root, 'setup.py'))) {
         const text = readTextSafe(join(root, 'setup.py')) ?? ''
-        s.declaredRepo = githubRepoPath(/url\s*=\s*["']([^"']+)["']/.exec(text)?.[1])
+        s.declaredRepo = normalizeDeclaredRepo(/url\s*=\s*["']([^"']+)["']/.exec(text)?.[1])
       }
       if (existsSync(join(root, 'uv.lock'))) s.commands.install ??= 'uv sync'
       else if (existsSync(join(root, 'pyproject.toml')) || existsSync(join(root, 'setup.py'))) {
@@ -188,7 +189,7 @@ export const ECOSYSTEMS = [
       else if (name && version) s.publishable = true
       const rustVersion = tomlString(text, 'rust-version')
       if (rustVersion) s.runtimeRequirements.push(`Rust ${rustVersion}`)
-      if (!s.declaredRepo) s.declaredRepo = githubRepoPath(tomlString(text, 'repository'))
+      if (!s.declaredRepo) s.declaredRepo = normalizeDeclaredRepo(tomlString(text, 'repository'))
       s.commands.build ??= 'cargo build'
       s.commands.test ??= 'cargo test'
       s.commands.lint ??= 'cargo clippy -- -D warnings'
@@ -203,7 +204,7 @@ export const ECOSYSTEMS = [
       const mod = /^module\s+(\S+)/m.exec(text)?.[1]
       if (mod) {
         s.projectName = mod.split('/').pop() || s.projectName
-        s.declaredRepo ??= githubRepoPath(mod)
+        s.declaredRepo ??= normalizeDeclaredRepo(mod)
         s.registryFree = true
       }
       const goVer = /^go\s+(\S+)/m.exec(text)?.[1]
@@ -264,7 +265,7 @@ export const ECOSYSTEMS = [
       ]
       if (!s.declaredRepo) {
         for (const candidate of candidates) {
-          const repo = githubRepoPath(candidate)
+          const repo = normalizeDeclaredRepo(candidate)
           if (repo) { s.declaredRepo = repo; break }
         }
       }
@@ -537,7 +538,7 @@ export function detectEcosystem(root, fileRelList = null) {
     if (!s.manifests.includes(skill.skillMeta.entry)) s.manifests.push(skill.skillMeta.entry)
     if (skill.skillMeta.version && !s.declaredVersion) s.declaredVersion = skill.skillMeta.version
     if (skill.skillMeta.source && !s.declaredRepo) {
-      s.declaredRepo = githubRepoPath(skill.skillMeta.source)
+      s.declaredRepo = normalizeDeclaredRepo(skill.skillMeta.source)
     }
     s.registryFree = true
   }
@@ -632,10 +633,6 @@ export function detectTaskEntriesDetailed(root, preRunners = null) {
   if (runners.taskNames.has('test')) commands.test ??= 'task test'
   if (runners.taskNames.has('build')) commands.build ??= 'task build'
   return { commands, makeTargets: runners.makeTargets, justRecipes: runners.justRecipes, taskNames: runners.taskNames, runners }
-}
-
-export function detectTaskEntries(root) {
-  return detectTaskEntriesDetailed(root).commands
 }
 
 const WORKSPACE_MANIFEST_NAMES = new Set([

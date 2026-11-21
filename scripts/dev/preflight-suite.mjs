@@ -21,6 +21,7 @@ import { evaluateExitCodeParity } from './exit-code-parity.mjs'
 import { blockedExitOf } from '../../kit/skills/lib/exit-codes.mjs'
 import { validateDocTocAnchors } from './preflight-contracts.mjs'
 import { collectKitWriteProbeTargets, scanKitWriteProbeViolations } from './write-probe-audit.mjs'
+import { runKernelParityChecks } from './preflight-kernel-parity.mjs'
 import { findChangelogVoice, findNewChangelogVoice, readChangelogVoiceBaseline } from '../../kit/skills/lib/no-changelog-voice.mjs'
 import {
   checkEvergreenFreshness,
@@ -484,8 +485,9 @@ export function checkKitSuite({ ROOT, rel, readText, countLines, walk, fail, not
   note(`工程套件：${discovered.length} 个 Skill（<= ${KIT_SKILL_MAX_LINES} 行）、${kitScripts.length} 个脚本（<= 800 行）自包含，与 .agents/skills/ 字节级一致`)
 }
 
-function checkHygiene({ ROOT, rel, walk, fail }) {
+function checkHygiene({ ROOT, rel, walk, fail, changedSet }) {
   const files = walk(ROOT, (f) => /\.(?:md|mjs|ya?ml|json|txt|svg)$/i.test(f))
+    .filter((f) => !changedSet || changedSet.has(rel(f)))
   const home = homedir().replace(/\\/g, '/')
   const homeRe = home.length > 4 ? new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : undefined
   for (const file of files) {
@@ -648,11 +650,13 @@ function checkExitCodeParity({ ROOT, walk, fail, note }) {
 }
 
 export async function runSuiteChecks(ctx) {
+  const filterChanged = (abs) => !ctx.changedSet || ctx.changedSet.has(ctx.rel(abs))
   const allMjs = [
     ...ctx.walk(join(ctx.ROOT, 'scripts'), (f) => f.endsWith('.mjs')),
     ...ctx.walk(join(ctx.ROOT, 'kit', 'skills'), (f) => f.endsWith('.mjs')),
   ]
-  const syntaxErrors = await batchSyntaxCheck([...new Set(allMjs)])
+  const syntaxTargets = [...new Set(allMjs)].filter(filterChanged)
+  const syntaxErrors = await batchSyntaxCheck(syntaxTargets)
   checkScripts(ctx, syntaxErrors)
   checkArchBoundaries(ctx)
   checkDevProfileParity(ctx)
@@ -669,5 +673,6 @@ export async function runSuiteChecks(ctx) {
   checkCliParity(ctx)
   checkExitCodeParity(ctx)
   checkKitWriteProbes(ctx)
+  runKernelParityChecks(ctx)
   checkHygiene(ctx)
 }

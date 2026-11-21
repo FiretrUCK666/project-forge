@@ -253,9 +253,20 @@ export function cmdContainsSubcommand(fullCmd, subCmd) {
   return full.split(/\s*(?:&&|;|\n)\s*/).map((s) => s.trim()).includes(target)
 }
 
+const SIGNAL_BLAME_NOISE_RE = /(?:^|\/)\.pf-manifest\.json$|^\.worktrees\//
+
+export function pickSignalBlameFile(changedFiles = [], fallback = '') {
+  const real = (Array.isArray(changedFiles) ? changedFiles : [])
+    .map((f) => posixPath(f))
+    .filter((f) => f && !SIGNAL_BLAME_NOISE_RE.test(f))
+  return real[0] ?? fallback
+}
+
 export async function handleVerifyE2eFailure({
   roots, taskId, ledger, mode, cmd, runRes, currentHead, changedFiles = [], opts = {},
 }) {
+  const blameFile = pickSignalBlameFile(changedFiles, '')
+  const filteredChanged = blameFile ? [blameFile, ...changedFiles.filter((f) => f !== blameFile && !SIGNAL_BLAME_NOISE_RE.test(posixPath(f)))] : []
   const diagnostic = buildE2eDiagnosticPacket({
     cmd,
     exitCode: runRes?.code ?? 1,
@@ -264,15 +275,15 @@ export async function handleVerifyE2eFailure({
     headSha: currentHead,
     taskId,
     mode,
-    changedFiles,
+    changedFiles: filteredChanged,
   })
   await emitFlowSignal(roots, {
     category: 'e2e',
-    module: changedFiles[0] ? undefined : 'e2e',
+    module: blameFile ? undefined : 'e2e',
     pattern: 'e2e.runtime-fail',
     severity: 'high',
     source: 'flow-verify',
-    file: changedFiles[0] ?? '',
+    file: blameFile,
     taskId,
     message: diagnostic.Evidence.slice(0, 2).join(' | '),
     meta: { exitCode: runRes?.code ?? 1, headSha: currentHead ?? null, mode },

@@ -86,7 +86,6 @@ function execTimed(scriptPath, args, cwd = ROOT) {
 
 function main() {
   const strictBudget = process.argv.includes('--strict-budget')
-  const budgetScale = (process.env.CI === 'true' && !strictBudget) ? 2.5 : 1
   const dir300 = buildFixture(300, 'pf-bench300-')
   initGit(dir300)
   const dir1000 = buildFixture(1000, 'pf-bench1k-')
@@ -113,16 +112,16 @@ function main() {
 
     let failed = 0
     for (const c of checks) {
-      const effectiveBudget = Math.round(c.budget * budgetScale)
+      const effectiveBudget = c.budget
       const median = measureMedian(c.label, c.fn)
       if (median === null || median > effectiveBudget) {
-        process.stderr.write(`FAIL  ${c.label} 耗时超预算：实测中位数 ${median === null ? 'ERROR' : `${Math.round(median)} ms`} > 预算 ${effectiveBudget} ms (${budgetScale}x)\n`)
+        process.stderr.write(`FAIL  ${c.label} 耗时超预算：实测中位数 ${median === null ? 'ERROR' : `${Math.round(median)} ms`} > 预算 ${effectiveBudget} ms (1x${strictBudget ? ' strict' : ''})\n`)
         failed += 1
       }
     }
 
     if (failed > 0) return 1
-    process.stdout.write(`\n耗时预算全部通过（${checks.length}/${checks.length} 项在预算内，scale=${budgetScale}x）。\n`)
+    process.stdout.write(`\n耗时预算全部通过（${checks.length}/${checks.length} 项在预算内，scale=1x）。\n`)
     return 0
   } finally {
     rmSync(dir300, { recursive: true, force: true })

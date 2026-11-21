@@ -3,8 +3,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { existsSync, readdirSync, readFile, readFileSync, realpathSync, stat, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 
@@ -183,6 +182,11 @@ export async function detectGit(root, opts = {}) {
   const fastHeadUnborn = Boolean(fastHeadInfo?.unborn)
   const fastHeadOid = (dotFast && !dotFast.useReftable && !fastHeadUnborn) ? readHeadFast(dotFast.workGitDir, dotFast.commonDir)?.oid : null
   const fastCommitLog = (fastHeadOid && !dotFast?.isShallow) ? readLooseCommitLogFast(workTreeRoot, dotFast.commonDir, fastHeadOid, 500) : null
+  const logPromise = fastHeadUnborn
+    ? Promise.resolve({ ok: true, stdout: '' })
+    : (fastCommitLog?.complete && fastCommitLog.entries.length < 500
+        ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
+        : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '5000']))
   const skipUnbornStatus = Boolean(fastUnbornStatus && fastHeadUnborn && fastIndexAbsent)
   const fastSurveyStatus = (!skipUnbornStatus && dotFast && !dotFast.useReftable)
     ? inspectSurveyStatusFast(workTreeRoot)
@@ -215,11 +219,7 @@ export async function detectGit(root, opts = {}) {
     dotFast && !dotFast.useReftable && dotFast.fastTags !== null
       ? Promise.resolve(null)
       : git(root, ['for-each-ref', '--sort=-creatordate', '--format=%(refname)\t%(symref:short)', 'refs/tags', 'refs/heads', 'refs/remotes/origin']),
-    fastHeadUnborn
-      ? Promise.resolve({ ok: true, stdout: '' })
-      : (fastCommitLog && fastCommitLog.entries.length < 500
-          ? Promise.resolve({ ok: true, stdout: fastCommitLog.entries.map((e) => `${e.author}\x1f${e.parents}\x1f${e.subject}`).join('\n') })
-          : git(root, ['log', '--format=%an <%ae>\x1f%P%x1f%s', '-n', '5000'])),
+    logPromise,
     fastTrackedPaths !== null ? Promise.resolve(null) : git(root, ['ls-files', '-z']),
     lsIgnoredPromise,
   ])
@@ -379,7 +379,7 @@ export function classifyHomePath(rel, line) {
   return 'leak'
 }
 
-const SECRET_FAST_PRECHECK_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|npm_[A-Za-z0-9]{36}|pypi-[A-Za-z0-9_-]{50,}|sk-(?:proj-)?[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16})\b|-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/
+const SECRET_FAST_PRECHECK_RE = /(?:gh[pousr]_|github_pat_|npm_|pypi-|sk-|AKIA|-----BEGIN )/
 const DEPENDENCY_OUTPUT_DIRS = new Set(['node_modules', '.venv', '__pycache__', 'target'])
 
 function countLinesFast(text) {
@@ -416,19 +416,30 @@ function collectUntrackedCandidatesInDir(root, dirRel, trackedSet, hasIgnoredPre
   return candidates
 }
 
-function processFileBuffer(rec, buf, homeFastRe, homeRe) {
-  if (buf === undefined || buf.subarray(0, 4096).includes(0)) {
+function processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii = true) {
+  if (buf === undefined || (buf.length > 4096 ? buf.subarray(0, 4096) : buf).includes(0)) {
     rec.unreadable = true
     return
   }
-  let text = buf.toString('utf8')
+  const isSkillFile = rec.rel.startsWith('.agents/skills/')
+  const isCodeFile = CODE_EXT.test(rec.name)
+  if (isSkillFile) rec.rawBuf = buf
+  const needText = !isCodeFile
+    && !rec.rel.startsWith('docs/archive/')
+    && !rec.rel.startsWith('kit/')
+    && (!isSkillFile || rec.rel === '.agents/skills/.pf-manifest.json' || rec.rel.endsWith('/SKILL.md') || rec.rel.endsWith('/skill.md'))
+  let text = (needText || !homeIsAscii) ? buf.toString('utf8') : buf.toString('latin1')
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
-  if (text.includes('\r')) text = text.replace(/\r\n/g, '\n')
-  rec.text = text
-  if (rec.rel.startsWith('.agents/skills/')) rec.rawBuf = buf
+  if (isCodeFile && !isSkillFile && !rec.rel.startsWith('kit/')) {
+    rec.lineCount = countLinesFast(text)
+  } else if (needText) {
+    if (text.includes('\r')) text = text.replace(/\r\n/g, '\n')
+    rec.text = text
+  }
   const mightHaveSecret = SECRET_FAST_PRECHECK_RE.test(text)
   const mightHaveHome = Boolean(homeFastRe && homeFastRe.test(text))
   if (mightHaveSecret || mightHaveHome) {
+    if (!needText && homeIsAscii) text = buf.toString('utf8')
     const lines = text.split('\n')
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]
@@ -453,6 +464,7 @@ function processFileBuffer(rec, buf, homeFastRe, homeRe) {
 
 function collectWorkspaceWalk(root, opts = {}) {
   const homeNorm = homedir().replace(/\\/g, '/')
+  const homeIsAscii = !/[^\x00-\x7f]/.test(homeNorm)
   const homeFastRe = homeNorm.length > 4
     ? new RegExp(homeNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '[\\\\/]+'), 'i')
     : undefined
@@ -470,7 +482,7 @@ function collectWorkspaceWalk(root, opts = {}) {
   let depthReached = 0
   let truncated = false
 
-  const walk = (dir, depth) => {
+  const walk = (dir, depth, relPrefix) => {
     if (depth > maxDepth || files.length >= maxFiles) { truncated = true; return }
     if (depth === 0) {
       let realDir = dir
@@ -484,7 +496,7 @@ function collectWorkspaceWalk(root, opts = {}) {
     for (const entry of entries) {
       if (entry.isSymbolicLink() || isMacMetadataName(entry.name)) continue
       const full = join(dir, entry.name)
-      const rel = relative(root, full).replace(/\\/g, '/')
+      const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
         if (entry.name === '.git') {
           if (rel !== '.git') nestedRepos.push(rel)
@@ -493,68 +505,71 @@ function collectWorkspaceWalk(root, opts = {}) {
         if (entry.name === '.worktrees') continue
         dirs.push(rel)
         if (SKIP_DIRS.has(entry.name)) continue
-        walk(full, depth + 1)
+        walk(full, depth + 1, rel)
       } else if (entry.isFile()) {
         if (entry.name === '.git') { nestedRepos.push(rel); continue }
         if (entry.name === '.gitmodules') nestedRepos.push(rel)
-        let st
-        try { st = statSync(full) } catch { continue }
         const rec = {
           rel,
           name: entry.name,
           full,
-          size: st.size,
+          size: 0,
           text: null,
           rawBuf: null,
           textSecrets: null,
           textLeaks: null,
           unreadable: false,
         }
-        if (TEXT_EXT.test(entry.name) && st.size <= 256 * 1024) {
-          readQueue.push({ rec, full })
-        }
+        readQueue.push({ rec, full, isText: TEXT_EXT.test(entry.name) })
         files.push(rec)
       }
     }
   }
-  walk(root, 0)
+  walk(root, 0, '')
   const nestedUnique = [...new Set(nestedRepos.map((p) => p.replace(/\/?\.gitmodules$/, '').replace(/\/?\.git$/, '') || '.'))]
     .filter((p) => p !== '.')
 
-  return { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe }
-}
-
-export function scanWorkspaceRaw(root, opts = {}) {
-  const { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe } = collectWorkspaceWalk(root, opts)
-  for (const { rec, full } of readQueue) {
-    let buf
-    try { buf = readFileSync(full) } catch { buf = undefined }
-    processFileBuffer(rec, buf, homeFastRe, homeRe)
-  }
-  return { files, dirs, nestedUnique, depthReached, truncated }
+  return { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe, homeIsAscii }
 }
 
 export function startWorkspaceWalkAsync(root, opts = {}) {
   const ctx = collectWorkspaceWalk(root, opts)
-  const { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe } = ctx
+  const { files, dirs, nestedUnique, depthReached, truncated, readQueue, homeFastRe, homeRe, homeIsAscii } = ctx
   const relFiles = files.map((f) => f.rel)
-  const readPromise = (async () => {
-    if (readQueue.length > 0) {
-      const workers = Math.min(24, readQueue.length)
-      let cursor = 0
-      await Promise.all(Array.from({ length: workers }, async () => {
-        while (cursor < readQueue.length) {
-          const idx = cursor
-          cursor += 1
-          const { rec, full } = readQueue[idx]
-          let buf
-          try { buf = await readFile(full) } catch { buf = undefined }
-          processFileBuffer(rec, buf, homeFastRe, homeRe)
+  const readPromise = readQueue.length === 0
+    ? Promise.resolve({ files, dirs, nestedUnique, depthReached, truncated })
+    : new Promise((resolveDone) => {
+        const limit = Math.min(128, readQueue.length)
+        let cursor = 0
+        let active = 0
+        const pump = () => {
+          while (active < limit && cursor < readQueue.length) {
+            const { rec, full, isText } = readQueue[cursor++]
+            active += 1
+            if (!isText) {
+              stat(full, (err, st) => {
+                if (!err && st) rec.size = st.size
+                active -= 1
+                if (active === 0 && cursor >= readQueue.length) resolveDone({ files, dirs, nestedUnique, depthReached, truncated })
+                else pump()
+              })
+              continue
+            }
+            readFile(full, (err, buf) => {
+              if (!err && buf !== undefined) {
+                rec.size = buf.length
+                if (buf.length <= 256 * 1024) processFileBuffer(rec, buf, homeFastRe, homeRe, homeIsAscii)
+              } else {
+                processFileBuffer(rec, undefined, homeFastRe, homeRe, homeIsAscii)
+              }
+              active -= 1
+              if (active === 0 && cursor >= readQueue.length) resolveDone({ files, dirs, nestedUnique, depthReached, truncated })
+              else pump()
+            })
+          }
         }
-      }))
-    }
-    return { files, dirs, nestedUnique, depthReached, truncated }
-  })()
+        pump()
+      })
   return { relFiles, dirs, readPromise }
 }
 
@@ -661,7 +676,8 @@ export async function finalizeWalkWorkspace(root, raw, gitFacts) {
       if (CODE_EXT.test(file.name)) {
         codeFiles += 1
         // 行数只能从已经读进内存的文本里数，不为此多开一次 IO。
-        if (typeof file.text === 'string') codeLines += countLinesFast(file.text)
+        if (typeof file.lineCount === 'number') codeLines += file.lineCount
+        else if (typeof file.text === 'string') codeLines += countLinesFast(file.text)
       } else if (DOC_EXT.test(file.name)) docFiles += 1
     }
 

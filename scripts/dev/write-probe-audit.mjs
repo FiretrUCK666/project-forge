@@ -16,6 +16,7 @@ export const WRITE_PROBE_SKIP_FILES = new Set([
   'kit/skills/lib/platform-probe.mjs',
   'kit/skills/lib/github-client.mjs',
   'kit/skills/lib/github-labels.mjs',
+  'kit/skills/lib/task-backend-local.mjs',
   'kit/skills/lib/task-backend.mjs',
   'kit/skills/lib/shared.mjs',
 ])

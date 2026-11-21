@@ -321,11 +321,12 @@ export async function handleCreate(opts, roots) {
 
   writeFeatureMap(workRoot, { version: 1, features: nextFeatures })
   const headSha = await resolveCurrentHead(workRoot)
-  const fp = await computeFeatureFingerprint(workRoot, feat)
+  const fp = await computeFeatureFingerprint(workRoot, feat, { tool: toolDef })
   const cacheRes = writeVerifyCacheEntry(roots.gitDir, roots.mainRoot, toolDef.id, {
     featureId: feat.id,
     symbolHash: fp.symbolHash,
     moduleTreeHash: fp.moduleTreeHash,
+    scriptHash: fp.scriptHash,
     verifiedSha: headSha,
     passedAtCommit: headSha,
     symbolsByFile: fp.symbolsByFile,
@@ -396,23 +397,48 @@ export async function handleRun(opts, roots) {
     }
   }
 
+  const totalTools = map.features.reduce((acc, f) => acc + (f.verificationTools?.length ?? 0), 0)
   const scratchDir = posixPath(resolveTaskScratchDir(roots.gitDir, taskId, roots.mainRoot))
   if (matched.length === 0) {
+    const isEmptyNotApplicable = totalTools === 0 && !opts.tool && !opts.feature
+    if (isEmptyNotApplicable) {
+      const payload = {
+        ok: true,
+        status: 'NOT_APPLICABLE',
+        matched: false,
+        executedCount: 0,
+        mapSource,
+        targetFiles,
+        scratchDir,
+        results: [],
+        fallbackHint: '当前 feature-map 为空（NOT_APPLICABLE）；若修改运行态代码，请运行对应测试或使用仓外 scratch 验证。',
+      }
+      emitOut(opts, payload, [
+        `[verify-tools run] NOT_APPLICABLE（空 feature-map，source=${mapSource}, files=${targetFiles.length}）`,
+        `  仓外 scratch 路径：${scratchDir}`,
+      ])
+      return { exitCode: EXIT.OK, ...payload }
+    }
+    const failCode = 'NO_TOOLS_MATCHED'
     const payload = {
-      ok: true,
+      ok: false,
+      status: 'FAILED',
+      code: failCode,
       matched: false,
+      executedCount: 0,
       mapSource,
       targetFiles,
       scratchDir,
       results: [],
-      fallbackHint: '未匹配到预设验证工具；禁止跳过实证，请优先运行受波及模块的测试/E2E 命令或在仓外 scratch 目录现写一次性探针实测。',
+      fallbackHint: '未匹配到可执行的预设验证工具（Fail-Closed）；请检查 --tool/--feature/--files 或补齐 feature-map 映射。',
     }
     emitOut(opts, payload, [
-      `[verify-tools run] 未匹配预设验证工具（source=${mapSource}, files=${targetFiles.length}）`,
+      `[verify-tools run] ${failCode}: 未匹配预设验证工具（source=${mapSource}, files=${targetFiles.length}）`,
       `  提示：${payload.fallbackHint}`,
       `  仓外 scratch 路径：${scratchDir}`,
     ])
-    return { exitCode: EXIT.OK, ...payload }
+    process.stderr.write(`${failCode}: 未匹配到预设验证工具，禁止静默空跑放行。\n`)
+    return { exitCode: EXIT.FACT, ...payload }
   }
 
   const headSha = await resolveCurrentHead(workRoot)
@@ -502,16 +528,16 @@ export async function handleRun(opts, roots) {
 
     let baselineUpdated = false
     const shouldPersistBaseline = passed && (
-      staleness.status === 'unbaselined'
-      || refreshBaseline
-      || (!usedLiveOverride && (!baseRef || staleness.status === 'stale'))
+      refreshBaseline
+      || (!usedLiveOverride && staleness.status === 'unbaselined')
     )
     if (shouldPersistBaseline) {
-      const fp = await computeFeatureFingerprint(workRoot, feature)
+      const fp = await computeFeatureFingerprint(workRoot, feature, { tool })
       writeVerifyCacheEntry(roots.gitDir, roots.mainRoot, tool.id, {
         featureId: feature.id,
         symbolHash: fp.symbolHash,
         moduleTreeHash: fp.moduleTreeHash,
+        scriptHash: fp.scriptHash,
         verifiedSha: headSha,
         passedAtCommit: headSha,
         symbolsByFile: fp.symbolsByFile,
@@ -537,15 +563,17 @@ export async function handleRun(opts, roots) {
     })
   }
 
-  const exitCode = blockedCode ? EXIT.FACT : (anyFailed ? EXIT.ERROR : EXIT.OK)
-  const payload = { ok: exitCode === EXIT.OK, code: blockedCode, mapSource, taskId, baseRef, matched: true, results }
-  const lines = [`[verify-tools run] matched=${results.length} ok=${payload.ok}${blockedCode ? ` code=${blockedCode}` : ''}`]
+  const executedCount = results.filter((r) => r.executed).length
+  const finalCode = blockedCode || (executedCount === 0 ? 'NO_TOOLS_EXECUTED' : null)
+  const exitCode = finalCode ? EXIT.FACT : (anyFailed ? EXIT.ERROR : EXIT.OK)
+  const payload = { ok: exitCode === EXIT.OK, code: finalCode, mapSource, taskId, baseRef, matched: true, executedCount, results }
+  const lines = [`[verify-tools run] matched=${results.length} executed=${executedCount} ok=${payload.ok}${finalCode ? ` code=${finalCode}` : ''}`]
   for (const r of results) {
     const tag = r.blocked ? `BLOCKED:${r.staleness.code}` : (r.warningCode ? `${r.warningCode} exit=${r.exitCode}` : `exit=${r.exitCode}`)
     lines.push(`  - [${r.featureId}/${r.toolId}] ${tag}${r.staleness?.reasons?.length ? ` | ${r.staleness.reasons.join('; ')}` : ''}`)
   }
   emitOut(opts, payload, lines)
-  if (blockedCode) process.stderr.write(`${blockedCode}: 验证工具过时或脚本缺失，请按提示处置。\n`)
+  if (finalCode) process.stderr.write(`${finalCode}: 验证工具过时、脚本缺失或零执行，请按提示处置。\n`)
   return { exitCode, ...payload }
 }
 

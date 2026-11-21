@@ -9,7 +9,7 @@ import { basename, join } from 'node:path'
 
 import { readTextSafe } from './text.mjs'
 import { parseMarkers } from './protocol.mjs'
-import { COMMAND_DISPLAY_MAX_BYTES, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
+import { COMMAND_DISPLAY_MAX_BYTES, splitCommandSegments, truncateCommandForDisplay } from '../../kit/skills/lib/command-lex.mjs'
 import { parseDocFrontmatter } from '../../kit/skills/lib/doc-frontmatter.mjs'
 
 export const REVIEW_SCOPES = new Set([
@@ -230,8 +230,16 @@ export function collectUnfilledReleaseNotes(root) {
 
 export function collectStaleCommandsInfo(agentsText, facts) {
   if (!agentsText || !facts.commands || Object.keys(facts.commands).length === 0) return null
+  const agentsNorm = String(agentsText).replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ')
   const declared = Object.values(facts.commands).filter((v) => typeof v === 'string' && v.trim())
-  const missing = declared.filter((cmd) => !agentsText.includes(cmd))
+  const missing = declared.filter((cmd) => {
+    if (agentsText.includes(cmd)) return false
+    const normCmd = cmd.replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim()
+    if (agentsNorm.includes(normCmd)) return false
+    const segments = splitCommandSegments(cmd).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+    if (segments.length > 1 && segments.every((seg) => agentsText.includes(seg) || agentsNorm.includes(seg))) return false
+    return true
+  })
   if (missing.length === 0) return null
   return {
     missingCount: missing.length,

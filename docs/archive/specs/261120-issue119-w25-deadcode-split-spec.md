@@ -1,14 +1,15 @@
 ---
 kind: spec
 title: 死代码清零与热点拆分：二十个零消费者导出删除、策略模块按职责三分
-status: draft
+status: superseded
 tier: L3
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-22
 issue: 119
 pr: null
 branch: fix/w25-deadcode-split
 owner: plan-wave25
+plan_mode: interactive
 approved: false
 implemented: false
 plan_critique: pending
@@ -16,9 +17,9 @@ related_prd: ../prd/261120-w25-hardening-prd.md
 related_todo: ../todo/261120-issue119-w25-deadcode-split-todo.md
 high_risk_paths: [kit/, scripts/lib/]
 task_id: w25-deadcode-split
-plan_mode: interactive
 depends_on: [w25-parallel-dispatch]
-scope_files: ["scripts/lib/fs-atomic.mjs", "scripts/lib/protocol.mjs", "scripts/lib/text.mjs", "scripts/lib/survey-ecosystem.mjs", "scripts/lib/survey-workspace.mjs", "kit/skills/lib/symbol-index.mjs", "kit/skills/lib/test-inventory.mjs", "kit/skills/lib/doc-toc.mjs", "kit/skills/lib/doc-facts.mjs", "kit/skills/lib/doc-template-render.mjs", "kit/skills/lib/platform-probe.mjs", "kit/skills/lib/workflow-policy.mjs", "kit/skills/lib/workflow-evidence.mjs", "kit/skills/lib/low-risk-doc-check.mjs", "kit/skills/lib/workflow-policy-next.mjs", "kit/skills/dev-flow/scripts/flow.mjs", "kit/skills/dev-explore/scripts/doc-locate.mjs", "scripts/dev/preflight-suite.mjs", "scripts/dev/fixtures-deadcode-split.mjs"]
+scope_files: [scripts/lib/fs-atomic.mjs, scripts/lib/protocol.mjs, scripts/lib/text.mjs, scripts/lib/survey-ecosystem.mjs, scripts/lib/survey-workspace.mjs, kit/skills/lib/symbol-index.mjs, kit/skills/lib/test-inventory.mjs, kit/skills/lib/doc-toc.mjs, kit/skills/lib/doc-facts.mjs, kit/skills/lib/doc-template-render.mjs, kit/skills/lib/platform-probe.mjs, kit/skills/lib/workflow-policy.mjs, kit/skills/lib/workflow-evidence.mjs, kit/skills/lib/low-risk-doc-check.mjs, kit/skills/lib/workflow-policy-next.mjs, kit/skills/dev-flow/scripts/flow.mjs, kit/skills/dev-explore/scripts/doc-locate.mjs, scripts/dev/preflight-suite.mjs, scripts/dev/fixtures-deadcode-split.mjs]
+superseded_by: 261120-issue115-w25-kernel-dedup-spec.md
 ---
 
 # 死代码清零与热点拆分（Issue `#119`）

@@ -24,6 +24,7 @@ export {
   classifyTopologyIdentity as classifyWorkspaceIdentity,
   getHostingProvider,
   listHostingProviders,
+  normalizeDeclaredRepo,
   parseSshConfigHostMap,
   probeTopologyEnv as probePlatformEnv,
   registerHostingProvider,

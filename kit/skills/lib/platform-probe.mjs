@@ -6,12 +6,13 @@
  * 绝不派生 `gh auth status`、`git credential fill`、`ssh` 或联网 `/user` 探测。
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import https from 'node:https'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { buildNonInteractiveEnv, execSafe } from './exec.mjs'
+import { readTextSafe } from './git-core.mjs'
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 5000
 export const SSH_PROBE_TIMEOUT_MS = 2500
@@ -22,18 +23,6 @@ export const TOKEN_VAULT = new WeakMap()
 
 const GITHUB_HOST_RE = /^(?:www\.|ssh\.)?github\.com$/i
 const SSH_KEY_FILE_RE = /^id_(?:ed25519|ecdsa|rsa|dsa|ecdsa_sk|ed25519_sk)(?:\.pub)?$/i
-
-function importSafeRead(filePath, maxBytes = 256 * 1024) {
-  try {
-    const st = statSync(filePath)
-    if (!st.isFile() || st.size > maxBytes) return undefined
-    const raw = readFileSync(filePath)
-    if (raw.subarray(0, 4096).includes(0)) return undefined
-    return raw.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return undefined
-  }
-}
 
 function resolveTildePath(p, env = process.env) {
   const s = String(p ?? '').trim().replace(/^['"]|['"]$/g, '')
@@ -57,7 +46,7 @@ export function parseSshConfigDetails(input, env = process.env) {
     if (looksInline) {
       text = input
     } else if (input.trim() && existsSync(input.trim())) {
-      text = importSafeRead(input.trim()) ?? ''
+      text = readTextSafe(input.trim(), 256 * 1024) ?? ''
     } else {
       text = input
     }
@@ -66,10 +55,10 @@ export function parseSshConfigDetails(input, env = process.env) {
     else if (typeof input.text === 'string') text = input.text
     else {
       const cfgPath = input.configPath || input.path || defaultCfgPath
-      text = existsSync(cfgPath) ? (importSafeRead(cfgPath) ?? '') : ''
+      text = existsSync(cfgPath) ? (readTextSafe(cfgPath, 256 * 1024) ?? '') : ''
     }
   } else {
-    text = existsSync(defaultCfgPath) ? (importSafeRead(defaultCfgPath) ?? '') : ''
+    text = existsSync(defaultCfgPath) ? (readTextSafe(defaultCfgPath, 256 * 1024) ?? '') : ''
   }
 
   const hostMap = new Map()
@@ -438,7 +427,7 @@ export async function probeSshTransport({
   return { state: 'undetermined', available: false, port: 22, host: targetHost, ...keyStatus, reason: '未能确认 SSH 认证状态' }
 }
 
-export async function probeHttpsCredential({ cwd, env, repo, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
+async function probeHttpsCredential({ cwd, env, repo, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
   const inputLines = ['protocol=https', 'host=github.com']
   if (repo) inputLines.push(`path=${repo}.git`)
   inputLines.push('', '')
@@ -467,7 +456,7 @@ export async function probeHttpsCredential({ cwd, env, repo, timeoutMs = DEFAULT
   return { state: 'available', hasToken: true, username: publicUsername, token: password, reason: 'HTTPS 凭据助手已返回可用凭据' }
 }
 
-export async function probeGhBridge({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
+async function probeGhBridge({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
   const [hostRes, globalRes] = await Promise.all([
     runner('git', ['config', '--get-all', 'credential.https://github.com.helper'], { cwd, env, timeoutMs }),
     runner('git', ['config', '--get-all', 'credential.helper'], { cwd, env, timeoutMs }),
@@ -477,7 +466,7 @@ export async function probeGhBridge({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOU
   return { configured, reason: configured ? '已配置 gh auth setup-git 桥接' : '未配置 gh auth setup-git 桥接' }
 }
 
-export async function probeGhCliAuth({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
+async function probeGhCliAuth({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, runner = defaultCommandRunner }) {
   const res = await runner('gh', ['auth', 'status', '--hostname', 'github.com'], { cwd, env, timeoutMs })
   if (res.errorCode === 'ENOENT') return { installed: false, authenticated: false, reason: '未安装 gh CLI' }
   if (res.timedOut) return { installed: true, authenticated: false, reason: 'gh auth status 超时' }
@@ -496,7 +485,7 @@ export async function probeGhCliAuth({ cwd, env, timeoutMs = DEFAULT_PROBE_TIMEO
   }
 }
 
-export function computeProtocolRemediation({
+function computeProtocolRemediation({
   originUrl,
   originRepo,
   ssh,

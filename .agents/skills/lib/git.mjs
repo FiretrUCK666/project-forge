@@ -16,7 +16,7 @@ import {
 } from './exec.mjs'
 import {
   COMMON_SKIP_DIRS, DEFAULT_WALK_SKIP_DIRS, LIKELY_DEFAULT_BRANCHES,
-  canonicalPath, gitRun, gitRunBuffer, isMacOsJunkPath, isMainModule, posixPath,
+  canonicalPath, gitRun, gitRunBuffer, isInsideDir, isMacMetadataName, isMacOsJunkPath, isMainModule, posixPath,
   readJsonSafe, readTextSafe, samePath, sha256File, sha256Text, unescapeGitPath,
   writeAtomic, writeJsonAtomic,
 } from './git-core.mjs'
@@ -46,6 +46,8 @@ export {
   execShellCommand,
   gitRun,
   gitRunBuffer,
+  isInsideDir,
+  isMacMetadataName,
   isMacOsJunkPath,
   isMainModule,
   killProcessTree,
@@ -278,7 +280,7 @@ export async function detectProjectConventions(repoRoot) {
     resolveDefaultBranch(repoRoot),
     isUnborn
       ? Promise.resolve({ ok: true, stdout: '' })
-      : (fastLog ? Promise.resolve({ ok: true, stdout: fastLog.entries.map((e) => e.subject).join('\n') }) : gitRun(repoRoot, ['log', '--format=%s', '-n', '20'])),
+      : (fastLog?.complete ? Promise.resolve({ ok: true, stdout: fastLog.entries.map((e) => e.subject).join('\n') }) : gitRun(repoRoot, ['log', '--format=%s', '-n', '20'])),
   ])
 
   const subjects = logRes.ok && logRes.stdout

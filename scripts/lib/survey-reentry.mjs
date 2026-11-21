@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url'
 import * as protocol from './protocol.mjs'
 // 「有内容才算痕迹」的判据与「工具产物归属」同一处，避免两条判据各写一份。
 const { discoverKitSkills, hasRealContent } = protocol
-import { discoverCustomSkillsWithMirrors, listCustomContainers } from '../../kit/skills/lib/skill-discovery.mjs'
-import { isManagedPlanDoc } from '../../kit/skills/lib/docs.mjs'
+import { DEFAULT_KIT_SKILLS_DIR, discoverCustomSkillsWithMirrors, listCustomContainers } from '../../kit/skills/lib/skill-discovery.mjs'
+import { isManagedPlanDoc } from '../../kit/skills/lib/doc-frontmatter.mjs'
 
 export { isManagedPlanDoc }
 import {
@@ -89,12 +89,14 @@ export function detectLocalSkills(root) {
 }
 
 function hashBufferMatchesNormalized(buf, expectedHash) {
-  if (createHash('sha256').update(buf).digest('hex') === expectedHash) return true
-  if (!buf.subarray(0, 4096).includes(0)) {
-    const lfBuf = Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
-    return createHash('sha256').update(lfBuf).digest('hex') === expectedHash
+  if (!buf.includes(13)) {
+    return createHash('sha256').update(buf).digest('hex') === expectedHash
   }
-  return false
+  const head = buf.length > 4096 ? buf.subarray(0, 4096) : buf
+  if (!head.includes(0)) {
+    if (createHash('sha256').update(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1').digest('hex') === expectedHash) return true
+  }
+  return createHash('sha256').update(buf).digest('hex') === expectedHash
 }
 
 function hashMatchesNormalized(filePath, expectedHash, cachedBuf = null) {
@@ -138,8 +140,16 @@ export function detectKit(root, { kitDir, rawFiles } = {}) {
   const manifestFull = join(root, PF_MANIFEST_REL)
   const cachedManifestText = rawFiles?.textByRel?.get(PF_MANIFEST_REL)
   const manifestExists = cachedManifestText !== undefined || existsSync(manifestFull)
-  const discoveredKit = discoverKitSkills(kitDir)
-  const kitSkillNames = discoveredKit.map((s) => s.dirName)
+  const effectiveKitDir = kitDir ? resolve(kitDir) : DEFAULT_KIT_SKILLS_DIR
+  const kitSkillNames = (() => {
+    try {
+      return readdirSync(effectiveKitDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name !== 'lib' && !isMacMetadataName(e.name)
+          && (existsSync(join(effectiveKitDir, e.name, 'SKILL.md')) || existsSync(join(effectiveKitDir, e.name, 'skill.md'))))
+        .map((e) => e.name)
+        .sort()
+    } catch { return [] }
+  })()
   const kitSkillSet = new Set(kitSkillNames)
 
   const rawText = manifestExists ? (cachedManifestText ?? readTextSafe(manifestFull)) : undefined
@@ -169,7 +179,7 @@ export function detectKit(root, { kitDir, rawFiles } = {}) {
   const managedSkills = kitSkillNames.filter((k) => (
     installedSkills.includes(k) && (!manifestValid || manifestManagedDirs.has(k))
   ))
-  const customDiscovery = discoverCustomSkillsWithMirrors(root, kitSkillSet, manifestValid ? manifest : null)
+  const customDiscovery = discoverCustomSkillsWithMirrors(root, kitSkillSet, manifestValid ? manifest : null, { knownDirs: rawFiles?.dirs ?? null })
   const mapSkillRec = ({ name, description, summary, path, container, valid, mirrorsOf }) => ({
     name,
     ...(description ? { description } : {}),

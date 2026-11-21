@@ -29,7 +29,7 @@
  *   node scripts/dev/merge-gate.mjs --json
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,6 +47,59 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
  * `env` 由调用方给：流水线自己声明的环境条件（CI 标记、矩阵变量）要照原样带上，
  * 否则「远端绿、本地红」可能只是环境不同，而门禁会把它当成代码有问题。
  */
+function isHeavyOrStatefulStep(cmd) {
+  const s = String(cmd ?? '')
+  return /(?:fixtures\.mjs|verify-injections\.mjs|e2e-zip-harness\.mjs|blind-run-harness\.mjs|bench\.mjs|git\s+archive\b|tar\s+-|>)/.test(s)
+}
+
+function runStepAsync(step, cwd, extraEnv = {}) {
+  return new Promise((resolvePromise) => {
+    const started = Date.now()
+    const child = spawn(step.cmd, {
+      cwd,
+      shell: true,
+      windowsHide: true,
+      env: { ...process.env, ...extraEnv },
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const timer = setTimeout(() => {
+      try { child.kill() } catch { /* ignore */ }
+    }, 30 * 60 * 1000)
+    child.stdout?.on('data', (c) => { stdout = `${stdout}${c}`.slice(-4000) })
+    child.stderr?.on('data', (c) => { stderr = `${stderr}${c}`.slice(-4000) })
+    const done = (status, error = null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise({
+        ...step,
+        status: status ?? 1,
+        durationMs: Date.now() - started,
+        stdoutTail: stdout.slice(-1200),
+        stderrTail: stderr.slice(-1200),
+        error,
+      })
+    }
+    child.on('error', (err) => done(1, String(err?.message ?? err)))
+    child.on('close', (code) => done(code ?? 1, null))
+  })
+}
+
+async function runPoolBounded(tasks, concurrency = 4) {
+  const results = new Array(tasks.length)
+  let nextIdx = 0
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
+    while (nextIdx < tasks.length) {
+      const idx = nextIdx++
+      results[idx] = await tasks[idx]()
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 function runStep(step, cwd, extraEnv = {}) {
   const started = Date.now()
   const res = spawnSync(step.cmd, {
@@ -117,13 +170,39 @@ async function main(argv) {
   const substitutePlatformContext = (cmd) => String(cmd)
     .replace(/\$\{\{\s*runner\.temp\s*\}\}/g, localTemp)
     .replace(/\$\{\{[^}]+?\}\}/g, '')
+  const preparedSteps = derived.steps.map((step, idx) => ({
+    idx,
+    step: { ...step, cmd: substitutePlatformContext(step.cmd) },
+  }))
+  const readonlyEntries = preparedSteps.filter((x) => !isHeavyOrStatefulStep(x.step.cmd))
+  const heavyEntries = preparedSteps.filter((x) => isHeavyOrStatefulStep(x.step.cmd))
+  const resultsByIdx = new Array(preparedSteps.length)
+
+  if (readonlyEntries.length > 0) {
+    const roResults = await runPoolBounded(
+      readonlyEntries.map((entry) => () => runStepAsync(entry.step, repoRoot, pipelineEnv)),
+      4,
+    )
+    for (let i = 0; i < readonlyEntries.length; i += 1) {
+      resultsByIdx[readonlyEntries[i].idx] = roResults[i]
+    }
+  }
   const executed = []
-  for (const step of derived.steps) {
-    const res = runStep({ ...step, cmd: substitutePlatformContext(step.cmd) }, repoRoot, pipelineEnv)
+  let roFailed = false
+  for (let i = 0; i < preparedSteps.length; i += 1) {
+    let res = resultsByIdx[i]
+    if (!res) {
+      if (roFailed) break
+      res = runStep(preparedSteps[i].step, repoRoot, pipelineEnv)
+      resultsByIdx[i] = res
+    }
     executed.push(res)
     const ok = res.status === 0 ? 'ok' : 'FAIL'
-    if (!cli.json) process.stdout.write(`[${ok}] ${step.file}:${step.startLine} ${step.cmd.split('\n')[0].slice(0, 90)}\n`)
-    if (res.status !== 0) break
+    if (!cli.json) process.stdout.write(`[${ok}] ${res.file}:${res.startLine} ${res.cmd.split('\n')[0].slice(0, 90)}\n`)
+    if (res.status !== 0) {
+      roFailed = true
+      if (heavyEntries.some((h) => h.idx === i)) break
+    }
   }
 
   const firstFail = executed.find((e) => e.status !== 0)

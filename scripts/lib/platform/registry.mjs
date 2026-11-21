@@ -13,6 +13,7 @@ import {
   parseSshConfigHostMap,
   repoPath,
 } from '../text.mjs'
+import { normalizeDeclaredRepo, validateHostingProvider } from '../../../kit/skills/lib/platform.mjs'
 import {
   GITHUB_PROVIDER,
   detectGitModeMarkers,
@@ -154,16 +155,7 @@ export const GENERIC_GIT_PROVIDER = Object.freeze({
  * 产品层默认仅注册 `github`；测试或扩展可注册自定义适配器，但不可覆盖内置 `generic-git` 兜底。
  */
 export function registerHostingProvider(provider) {
-  if (!provider || typeof provider !== 'object') {
-    throw new Error('HostingProvider 必须是非空对象')
-  }
-  const id = String(provider.id ?? '').trim().toLowerCase()
-  if (!id || id === 'generic-git') {
-    throw new Error(`非法的 HostingProvider id：「${id}」`)
-  }
-  if (typeof provider.matchRemote !== 'function' || typeof provider.normalizeRepo !== 'function') {
-    throw new Error(`HostingProvider「${id}」必须实现 matchRemote 与 normalizeRepo`)
-  }
+  const id = validateHostingProvider(provider)
   const normalized = Object.freeze({
     ...provider,
     id,
@@ -456,4 +448,4 @@ export async function probeTopologyEnv(opts = {}) {
 // 产品层严格仅注册 GitHub 适配器
 registerHostingProvider(GITHUB_PROVIDER)
 
-export { parseSshConfigHostMap }
+export { normalizeDeclaredRepo, parseSshConfigHostMap }

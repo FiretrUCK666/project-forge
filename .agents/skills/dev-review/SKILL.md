@@ -121,3 +121,4 @@ node .agents/skills/dev-review/scripts/review-pack.mjs override \
 - `REVIEW_PASSED`：若未触发门禁弱化且未声明 `merge-authority: human`，**由当前最终通过审查的独立审查子代理直接运行 `node .agents/skills/dev-flow/scripts/flow.mjs merge` 合并 PR 并双写关闭评论**（严禁自动删除分支/worktree）；随后交回主会话向用户确认 `flow.mjs cleanup --confirm` 清理范围；
 - `CHANGES_REQUESTED`：实施者在原 `impl` 分支追加修复（`dev-flow` 的 `rework` -> `verify` -> `submit --rework` 更新同一 PR 并刷新评论），再由**新的独立 `review` 子代理上下文**复核；
 - `STOP_LOSS_ESCALATE`（退出码 `4`）或 `BLOCKED_EMPIRICAL_FIRST` / `BLOCKED_DIRTY_FAULT_RESIDUE` / `BLOCKED_UNTRUSTED_HAZARD`（退出码 `3`）：按返回 `nextSteps` 先完成实证与故障注入闭环（或外部高危项交人类 `override` / `--human-approved-exec`）。
+- **注释与决策复核**：确认新增注释只解释 Why（非复述 What）、`HACK`/`WORKAROUND`/`TEMP` 已绑定 `#<issue>`、无新增失效反引号路径，且架构取舍已同步 `docs/TDD.md` 或 `AGENTS.md ## 取舍`（不新增 `docs/adr/`）。

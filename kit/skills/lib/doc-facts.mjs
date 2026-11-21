@@ -111,21 +111,3 @@ export function checkPathClaim(root, rel) {
   if (existsSync(join(root, rel))) return { ok: true }
   return { ok: false, why: '文件不存在' }
 }
-
-/**
- * 把核不出来的部分挑出来——它们是审核人真正要花时间的地方。
- *
- * @param {string} text
- * @returns {{ sections: string[], pendingLines: string[] }}
- */
-export function splitJudgeable(text) {
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n')
-  const pending = []
-  for (const line of lines) {
-    // 只看判据与设计里那些「需要判断」的句子：带「必须 / 不得 / 才 / 否则」的
-    if (/(?:必须|不得|禁止|只准|才|否则|等于|算作)/.test(line) && line.trim().length > 20) {
-      pending.push(line.trim())
-    }
-  }
-  return { pendingLines: pending }
-}

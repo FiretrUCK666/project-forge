@@ -11,9 +11,9 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { readJsonSafe, readTextSafe } from './git.mjs'
 import {
   TEAM_PROBE_HINT, extractHostAndPath, githubRepoFull, githubRepoPath,
-  lookupSshHost, normalizeGitHubRepo, parseSshConfigHostMap, probeGitHubEnvCore,
+  lookupSshHost, normalizeGitHubRepo, parseRemoteUrlHost, parseSshConfigHostMap, probeGitHubEnvCore,
 } from './platform-probe.mjs'
-import { createGitHubClient } from './github-client.mjs'
+import { createGitHubClient, parseBodyRelations } from './github-client.mjs'
 
 export {
   TEAM_PROBE_HINT, githubRepoFull, githubRepoPath, lookupSshHost, normalizeGitHubRepo, parseSshConfigHostMap,
@@ -43,6 +43,28 @@ function resolveEffectiveHost(host, sshHostMap) {
   return mapped ? String(mapped).toLowerCase() : h
 }
 
+export const REQUIRED_PROVIDER_METHODS = Object.freeze([
+  'matchRemote',
+  'normalizeRepo',
+  'parseRelations',
+  'formatIssueRef',
+])
+
+export function validateHostingProvider(provider) {
+  if (!provider || typeof provider !== 'object') {
+    throw new Error('HostingProvider 必须是非空对象')
+  }
+  const id = String(provider.id ?? '').trim().toLowerCase()
+  if (!id || id === 'generic-git') {
+    throw new Error(`非法的 HostingProvider id：「${id}」`)
+  }
+  const missing = REQUIRED_PROVIDER_METHODS.filter((m) => typeof provider[m] !== 'function')
+  if (missing.length > 0) {
+    throw new Error(`HostingProvider「${id}」缺少必备方法契约：${missing.join(', ')}`)
+  }
+  return id
+}
+
 const GITHUB_PROVIDER = Object.freeze({
   id: 'github',
   label: 'GitHub',
@@ -56,12 +78,29 @@ const GITHUB_PROVIDER = Object.freeze({
   normalizeRepo(remoteUrl, sshHostMap) {
     return normalizeGitHubRepo(remoteUrl, sshHostMap)
   },
+  parseRelations(body) {
+    return parseBodyRelations(body)
+  },
+  formatIssueRef(repo, number) {
+    const n = Number(number)
+    if (!Number.isInteger(n) || n <= 0) return ''
+    return repo ? `${repo}#${n}` : `#${n}`
+  },
 })
 
-/** 注册平台适配器。 */
+/** 注册平台适配器（强校验必备方法契约，缺方法即 Fail-Closed 抛错）。 */
 export function registerHostingProvider(provider) {
-  if (!provider || typeof provider.id !== 'string') throw new Error('HostingProvider 必须包含有效 id')
-  PROVIDER_REGISTRY.set(provider.id, provider)
+  const id = validateHostingProvider(provider)
+  const normalized = Object.freeze({
+    ...provider,
+    id,
+    capabilities: Object.freeze({
+      api: false, pr: false, issues: false, releases: false, labels: false, milestones: false, branchProtection: false, mention: false,
+      ...(provider.capabilities && typeof provider.capabilities === 'object' ? provider.capabilities : {}),
+    }),
+  })
+  PROVIDER_REGISTRY.set(id, normalized)
+  return normalized
 }
 
 export function getHostingProvider(id) {
@@ -149,40 +188,64 @@ export function parseRemotesTopology(remoteOutput, sshHostMap = parseSshConfigHo
   }
 }
 
-/** 从项目清单提取声明的源仓库（owner/name）。 */
+/** 通过注册表适配器与通用远端规则归一声明仓库标识（不硬编码单一托管平台）。 */
+export function normalizeDeclaredRepo(value, sshHostMap = parseSshConfigHostMap()) {
+  const s = String(value ?? '').trim()
+  if (!s || /^file:\/\//i.test(s)) return undefined
+  for (const provider of PROVIDER_REGISTRY.values()) {
+    try {
+      if (provider.matchRemote(s, sshHostMap)) {
+        const slug = provider.normalizeRepo(s, sshHostMap)
+        if (slug) return slug
+      }
+    } catch { /* ignore failing adapter */ }
+  }
+  const bare = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(s)
+  if (bare && bare[1] !== '.' && bare[1] !== '..') {
+    return `${bare[1]}/${bare[2]}`.toLowerCase()
+  }
+  const { host } = parseRemoteUrlHost(s)
+  if (!host) return undefined
+  const ext = extractHostAndPath(s)
+  const rawPath = ext?.path ?? s.replace(/^[^/]+\//, '')
+  const clean = String(rawPath ?? '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '').toLowerCase()
+  return /^[^\s/]+(?:\/[^\s/]+)+$/.test(clean) ? clean : undefined
+}
+
+/** 从项目清单提取声明的源仓库（owner/name 或多段仓库标识）。 */
 export function detectDeclaredRepo(repoRoot, sshHostMap = parseSshConfigHostMap()) {
   const pkg = readJsonSafe(join(repoRoot, 'package.json'))
   if (pkg) {
     const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
-    const gh = githubRepoPath(repo, sshHostMap)
-    if (gh) return gh
+    const slug = normalizeDeclaredRepo(repo, sshHostMap)
+    if (slug) return slug
   }
   const skillMd = readTextSafe(join(repoRoot, 'SKILL.md'))
   if (skillMd) {
     const m = /^[ \t]+source:[ \t]*["']?([^"'\n]+?)["']?[ \t]*$/m.exec(skillMd)
-    const gh = githubRepoPath(m?.[1], sshHostMap)
-    if (gh) return gh
+    const slug = normalizeDeclaredRepo(m?.[1], sshHostMap)
+    if (slug) return slug
   }
   const cargo = readTextSafe(join(repoRoot, 'Cargo.toml'))
   if (cargo) {
     const m = /^\s*repository\s*=\s*["']([^"']+)["']/m.exec(cargo)
-    const gh = githubRepoPath(m?.[1], sshHostMap)
-    if (gh) return gh
+    const slug = normalizeDeclaredRepo(m?.[1], sshHostMap)
+    if (slug) return slug
   }
   const pyproject = readTextSafe(join(repoRoot, 'pyproject.toml'))
   if (pyproject) {
     const urls = /\[project\.urls\]([\s\S]*?)(?:\n\[|$)/.exec(pyproject)?.[1] ?? ''
     for (const key of ['Repository', 'Source', 'Homepage', 'Home']) {
       const m = new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, 'mi').exec(urls)
-      const gh = githubRepoPath(m?.[1], sshHostMap)
-      if (gh) return gh
+      const slug = normalizeDeclaredRepo(m?.[1], sshHostMap)
+      if (slug) return slug
     }
   }
   const gomod = readTextSafe(join(repoRoot, 'go.mod'))
   if (gomod) {
     const m = /^module\s+(\S+)/m.exec(gomod)
-    const gh = githubRepoPath(m?.[1], sshHostMap)
-    if (gh) return gh
+    const slug = normalizeDeclaredRepo(m?.[1], sshHostMap)
+    if (slug) return slug
   }
   return undefined
 }
@@ -670,9 +733,7 @@ export async function probeGitHubEnv({
   if (!originRaw) {
     return {
       env: {
-        hasRemote: false,
-        providerId: 'none',
-        protocol: null,
+        hasRemote: false, providerId: 'none', protocol: null,
         trackA: { ssh: 'n/a', https: 'n/a', remediationCmd: null },
         trackB: { tier: 'offline', ghCli: false, hasToken: false },
       },
@@ -685,11 +746,8 @@ export async function probeGitHubEnv({
     const proto = /^https?:/i.test(originRaw) ? 'https' : (/^(?:ssh:\/\/|[^@\s]+@)/i.test(originRaw) ? 'ssh' : 'local')
     return {
       env: {
-        hasRemote: true,
-        providerId: 'generic-git',
-        origin: descriptor.repoSlug ?? originRaw,
-        host: ext?.host ?? null,
-        protocol: proto,
+        hasRemote: true, providerId: 'generic-git', origin: descriptor.repoSlug ?? originRaw,
+        host: ext?.host ?? null, protocol: proto,
         trackA: { ssh: 'unprobed', https: 'unprobed', remediationCmd: null },
         trackB: { tier: 'generic-git', ghCli: false, hasToken: false },
       },
@@ -710,20 +768,16 @@ export async function probeGitHubEnv({
     : (core.httpsPublic.state === 'unprobed' ? 'unprobed' : 'no-credential')
 
   const resultEnv = {
-    hasRemote: true,
-    providerId: 'github',
+    hasRemote: true, providerId: 'github',
     origin: core.originRepo ? (githubRepoFull(originRaw, sshHostMap) ?? core.originRepo) : null,
     protocol: core.parsedOrigin?.protocol ?? null,
     trackA: {
-      ssh: sshState,
-      ...(core.ssh.login ? { sshLogin: core.ssh.login } : {}),
-      https: httpsState,
-      ...(core.httpsPublic.username ? { httpsUsername: core.httpsPublic.username } : {}),
+      ssh: sshState, ...(core.ssh.login ? { sshLogin: core.ssh.login } : {}),
+      https: httpsState, ...(core.httpsPublic.username ? { httpsUsername: core.httpsPublic.username } : {}),
       remediationCmd: core.remediationCmd ?? null,
     },
     trackB: {
-      tier: core.apiChannel.tier,
-      ghCli: Boolean(core.ghCli.authenticated),
+      tier: core.apiChannel.tier, ghCli: Boolean(core.ghCli.authenticated),
       ...(core.effectiveLogin ? { login: core.effectiveLogin } : {}),
       hasToken: Boolean(core.memoryToken && core.tokenVerified),
     },
@@ -732,10 +786,8 @@ export async function probeGitHubEnv({
   return {
     env: resultEnv,
     client: createGitHubClient({
-      tier: core.apiChannel.tier,
-      cwd,
-      token: core.tokenVerified ? core.memoryToken : null,
-      login: core.effectiveLogin,
+      tier: core.apiChannel.tier, cwd,
+      token: core.tokenVerified ? core.memoryToken : null, login: core.effectiveLogin,
     }),
   }
 }

@@ -310,7 +310,9 @@ async function main(argv = process.argv.slice(2), runtimeOpts = {}) {
           ? auditDocs(workTreeRoot, isGit, opts.quiet ? scopedFiles : files, devProfile, defaultBranch, scopeRel, rawAgentsMeta, rawFindings)
           : Promise.resolve(),
         catSet.has('hygiene')
-          ? auditHygiene(workTreeRoot, mainRoot, isGit, scopedFiles, defaultBranch, devProfile, rawFindings)
+          ? auditHygiene(workTreeRoot, mainRoot, isGit, scopedFiles, defaultBranch, devProfile, rawFindings, {
+            changedFilesSet: preChangedSet ?? (opts.changed && isGit ? await collectChangedFilesSet(workTreeRoot, isGit, defaultBranch) : null),
+          })
           : Promise.resolve(hygieneMeta),
       ])
       hygieneMeta = hygRes
@@ -447,7 +449,7 @@ async function finishAudit({
     writeAtomic(join(workTreeRoot, plan.todoRel), plan.todoDraft)
   }
 
-  const issues = opts.issues ? buildIssues(findings) : undefined
+  const issues = opts.issues ? buildIssues(findings, { repoRoot: workTreeRoot }) : undefined
   let applyResult
   if (opts.issues && opts.applyIssues && issues) {
     applyResult = await applyIssuesToBackend(workTreeRoot, issues, {

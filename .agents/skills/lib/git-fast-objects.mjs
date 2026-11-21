@@ -3,20 +3,208 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { inflateSync } from 'node:zlib'
 
 import { readTextSafe } from './git-core.mjs'
 
-/** 零子进程读取松散 Git 对象（自动解析 worktree commondir；仅 SHA-1 40 hex，packed/缺失返回 null）。 */
+const PACK_TYPE_NAMES = Object.freeze({ 1: 'commit', 2: 'tree', 3: 'blob', 4: 'tag' })
+const packIdxCache = new Map()
+
+function loadPackIndexes(commonDir) {
+  const packDir = join(commonDir, 'objects', 'pack')
+  if (!existsSync(packDir)) return []
+  let files
+  try { files = readdirSync(packDir) } catch { return [] }
+  const out = []
+  for (const name of files) {
+    if (!name.endsWith('.idx')) continue
+    const idxPath = join(packDir, name)
+    const packPath = `${idxPath.slice(0, -4)}.pack`
+    if (!existsSync(packPath)) continue
+    let cached = packIdxCache.get(idxPath)
+    if (!cached) {
+      try {
+        const idxBuf = readFileSync(idxPath)
+        if (idxBuf.length < 1032 || idxBuf.readUInt32BE(0) !== 0xff744f63 || idxBuf.readUInt32BE(4) !== 2) continue
+        const total = idxBuf.readUInt32BE(8 + 255 * 4)
+        const packSize = statSync(packPath).size
+        cached = { idxPath, packPath, idxBuf, total, packSize, packBuf: null, fd: null }
+        packIdxCache.set(idxPath, cached)
+      } catch { continue }
+    }
+    out.push(cached)
+  }
+  return out
+}
+
+function findOffsetInPackIdx(entry, shaBuf) {
+  const { idxBuf, total } = entry
+  if (total === 0) return -1
+  const b0 = shaBuf[0]
+  let lo = b0 === 0 ? 0 : idxBuf.readUInt32BE(8 + (b0 - 1) * 4)
+  let hi = idxBuf.readUInt32BE(8 + b0 * 4) - 1
+  const shaTableOff = 1032
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1
+    const cmp = shaBuf.compare(idxBuf, shaTableOff + mid * 20, shaTableOff + (mid + 1) * 20)
+    if (cmp === 0) {
+      const offPos = shaTableOff + total * 24 + mid * 4
+      const rawOff = idxBuf.readUInt32BE(offPos)
+      if ((rawOff & 0x80000000) === 0) return rawOff
+      const largeIdx = rawOff & 0x7fffffff
+      const bigPos = shaTableOff + total * 28 + largeIdx * 8
+      if (bigPos + 8 > idxBuf.length) return -1
+      return Number(idxBuf.readBigUInt64BE(bigPos))
+    }
+    if (cmp < 0) hi = mid - 1
+    else lo = mid + 1
+  }
+  return -1
+}
+
+function readDeltaSizeVarint(buf, pos) {
+  let size = 0
+  let shift = 0
+  let p = pos
+  while (p < buf.length) {
+    const b = buf[p++]
+    size |= (b & 0x7f) << shift
+    if ((b & 0x80) === 0) break
+    shift += 7
+  }
+  return { size, next: p }
+}
+
+function applyGitDelta(baseBuf, deltaBuf) {
+  const src = readDeltaSizeVarint(deltaBuf, 0)
+  const dst = readDeltaSizeVarint(deltaBuf, src.next)
+  if (baseBuf.length !== src.size) return null
+  const out = Buffer.allocUnsafe(dst.size)
+  let p = dst.next
+  let outPos = 0
+  while (p < deltaBuf.length) {
+    const cmd = deltaBuf[p++]
+    if (cmd & 0x80) {
+      let cpOff = 0
+      let cpSize = 0
+      if (cmd & 0x01) cpOff = deltaBuf[p++]
+      if (cmd & 0x02) cpOff |= deltaBuf[p++] << 8
+      if (cmd & 0x04) cpOff |= deltaBuf[p++] << 16
+      if (cmd & 0x08) cpOff |= (deltaBuf[p++] << 24) >>> 0
+      if (cmd & 0x10) cpSize = deltaBuf[p++]
+      if (cmd & 0x20) cpSize |= deltaBuf[p++] << 8
+      if (cmd & 0x40) cpSize |= deltaBuf[p++] << 16
+      if (cpSize === 0) cpSize = 0x10000
+      baseBuf.copy(out, outPos, cpOff, cpOff + cpSize)
+      outPos += cpSize
+    } else if (cmd > 0) {
+      deltaBuf.copy(out, outPos, p, p + cmd)
+      p += cmd
+      outPos += cmd
+    } else {
+      return null
+    }
+  }
+  return outPos === dst.size ? out : null
+}
+
+function readPackSlice(packEntry, offset, len) {
+  if (packEntry.packBuf) {
+    const end = Math.min(packEntry.packSize, offset + len)
+    return packEntry.packBuf.subarray(offset, end)
+  }
+  if (packEntry.fd === null) {
+    packEntry.fd = openSync(packEntry.packPath, 'r')
+    process.once('exit', () => {
+      try { if (packEntry.fd !== null) closeSync(packEntry.fd) } catch { /* ignore */ }
+      packEntry.fd = null
+    })
+  }
+  const nToRead = Math.min(len, packEntry.packSize - offset)
+  if (nToRead <= 0) return Buffer.alloc(0)
+  const buf = Buffer.allocUnsafe(nToRead)
+  const n = readSync(packEntry.fd, buf, 0, nToRead, offset)
+  return buf.subarray(0, n)
+}
+
+function readPackObjectAt(commonDir, packEntry, offset, depth = 0) {
+  if (depth > 32 || offset < 12 || offset >= packEntry.packSize) return null
+  const hdrBuf = readPackSlice(packEntry, offset, Math.min(64, packEntry.packSize - offset))
+  if (hdrBuf.length < 2) return null
+  let p = 0
+  let c = hdrBuf[p++]
+  const objType = (c >> 4) & 7
+  let expectedSize = c & 0x0f
+  let shift = 4
+  while ((c & 0x80) !== 0 && p < hdrBuf.length) {
+    c = hdrBuf[p++]
+    expectedSize += (c & 0x7f) * (2 ** shift)
+    shift += 7
+  }
+  let baseObj = null
+  if (objType === 6) {
+    let b = hdrBuf[p++]
+    let negOff = b & 0x7f
+    while ((b & 0x80) !== 0 && p < hdrBuf.length) {
+      b = hdrBuf[p++]
+      negOff = ((negOff + 1) << 7) | (b & 0x7f)
+    }
+    baseObj = readPackObjectAt(commonDir, packEntry, offset - negOff, depth + 1)
+    if (!baseObj) return null
+  } else if (objType === 7) {
+    if (p + 20 > hdrBuf.length) return null
+    const baseSha = hdrBuf.subarray(p, p + 20).toString('hex')
+    p += 20
+    baseObj = readGitObjectFast(commonDir, baseSha)
+    if (!baseObj) return null
+  } else if (!PACK_TYPE_NAMES[objType]) {
+    return null
+  }
+  const compStart = offset + p
+  let winSize = Math.min(packEntry.packSize - compStart, Math.max(4096, expectedSize * 2 + 256))
+  while (winSize > 0) {
+    const compSlice = readPackSlice(packEntry, compStart, winSize)
+    if (compSlice.length <= 0) return null
+    try {
+      const inflated = inflateSync(compSlice)
+      if (inflated.length !== expectedSize) return null
+      if (baseObj) {
+        const patched = applyGitDelta(baseObj.bodyBuf, inflated)
+        return patched ? { type: baseObj.type, bodyBuf: patched } : null
+      }
+      return { type: PACK_TYPE_NAMES[objType], bodyBuf: inflated }
+    } catch {
+      if (compStart + winSize >= packEntry.packSize) return null
+      winSize = Math.min(packEntry.packSize - compStart, winSize * 2)
+    }
+  }
+  return null
+}
+
+function readGitPackedObjectFast(commonDir, lowHex) {
+  const packs = loadPackIndexes(commonDir)
+  if (packs.length === 0) return null
+  const shaBuf = Buffer.from(lowHex, 'hex')
+  for (const p of packs) {
+    const offset = findOffsetInPackIdx(p, shaBuf)
+    if (offset >= 0) {
+      const obj = readPackObjectAt(commonDir, p, offset, 0)
+      if (obj) return obj
+    }
+  }
+  return null
+}
+
+/** 零子进程读取 Git 对象（先查松散对象，缺失时自动回退 pack/idx v2；自动解析 worktree commondir）。 */
 export function readGitObjectFast(gitDirOrCommonDir, sha) {
   if (!gitDirOrCommonDir || !sha || !/^[0-9a-f]{40}$/i.test(sha)) return null
   const cdTxt = readTextSafe(join(gitDirOrCommonDir, 'commondir'))
   const commonDir = cdTxt ? resolve(gitDirOrCommonDir, cdTxt.trim()) : gitDirOrCommonDir
   const low = sha.toLowerCase()
   const objPath = join(commonDir, 'objects', low.slice(0, 2), low.slice(2))
-  if (!existsSync(objPath)) return null
+  if (!existsSync(objPath)) return readGitPackedObjectFast(commonDir, low)
   try {
     const raw = inflateSync(readFileSync(objPath))
     const nul = raw.indexOf(0)

@@ -321,10 +321,37 @@ function sha256Normalized(text) {
   return createHash('sha256').update(String(text ?? '').replace(/\r\n/g, '\n'), 'utf8').digest('hex')
 }
 
-export function listCustomContainers(repoRoot) {
+export function listCustomContainers(repoRoot, knownDirs = null) {
   const root = resolve(repoRoot)
   const sourceContainers = []
   const hiddenContainers = []
+  const dirList = Array.isArray(knownDirs) ? knownDirs : (knownDirs instanceof Set ? [...knownDirs] : null)
+  const dirSet = dirList ? new Set(dirList.map((d) => posixPath(d))) : null
+  if (dirSet) {
+    const kitNorm = resolve(DEFAULT_KIT_SKILLS_DIR)
+    for (const rel of dirSet) {
+      const parts = rel.split('/')
+      if (parts.some((seg) => !seg || SKIP_CONTAINERS.has(seg))) continue
+      if (parts[0].startsWith('.')) {
+        if (parts.length === 2 && parts[1] === 'skills') hiddenContainers.push(rel)
+        continue
+      }
+      if (parts.some((seg, i) => i < parts.length - 1 && (seg.startsWith('.') || seg === 'skills'))) continue
+      if (parts.length <= 17 && parts[parts.length - 1] === 'skills') {
+        if (resolve(root, rel) !== kitNorm) sourceContainers.push(rel)
+      }
+    }
+    const agentsContainers = []
+    for (const rel of ['.agents/skills', '.agents/extensions']) {
+      if (dirSet.has(rel)) agentsContainers.push(rel)
+      else {
+        try {
+          if (existsSync(join(root, rel)) && statSync(join(root, rel)).isDirectory()) agentsContainers.push(rel)
+        } catch { /* ignore */ }
+      }
+    }
+    return [...new Set([...sourceContainers.sort(), ...agentsContainers, ...hiddenContainers.sort()])]
+  }
   const seenReal = new Set()
 
   const walkNested = (absDir, relPrefix, depth) => {
@@ -404,13 +431,13 @@ function isSymlinkIntoAuthoritative(skillDir, root) {
  * 只读扫描非隐藏 `skills/*`（含嵌套 `*\/skills/*`）、`.agents/skills/*` 与隐藏容器 `.*\/skills/*`：
  * 区分手写源技能、`.agents/skills/*` 托管技能与宿主镜像副本（不误删、不双计）。
  */
-export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set(), manifest = null) {
+export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set(), manifest = null, opts = {}) {
   const root = resolve(repoRoot)
   if (!existsSync(root)) return { customSkills: [], mirrorCopies: [] }
 
   const managed = managedSet instanceof Set ? managedSet : new Set(managedSet ?? [])
   const { hasValidFiles, managed: manifestManaged } = collectManifestManagedDirs(manifest)
-  const containers = listCustomContainers(root)
+  const containers = listCustomContainers(root, opts?.knownDirs ?? null)
   const customSkills = []
   const mirrorCopies = []
   const authoritativeSources = []
@@ -427,7 +454,11 @@ export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set()
       }
     } catch { /* ignore */ }
   }
-  const baselineHashes = readSkillBaselineHashes(managed)
+  let baselineHashes = null
+  const getBaselineHashes = () => {
+    if (!baselineHashes) baselineHashes = readSkillBaselineHashes(managed)
+    return baselineHashes
+  }
 
   for (const container of containers) {
     const absContainer = join(root, container)
@@ -482,7 +513,7 @@ export function discoverCustomSkillsWithMirrors(repoRoot, managedSet = new Set()
           && (src.rawHash === rawHash || src.description === fm.description || symlinkMirror)
         ))
         const kitManagedMirror = (managed.has(entry.name) || manifestManaged.has(entry.name))
-          && (installedManaged.has(entry.name) || baselineHashes.get(entry.name) === rawHash || symlinkMirror)
+          && (installedManaged.has(entry.name) || getBaselineHashes().get(entry.name) === rawHash || symlinkMirror)
         if (symlinkMirror || sourceMatch || kitManagedMirror) {
           mirrorCopies.push({
             ...rec,

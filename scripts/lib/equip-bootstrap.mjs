@@ -315,6 +315,7 @@ export function bootstrapEmpty(targetDir, {
   const names = sanitizeNames(name, root)
   const files = {
     ...starterTemplates(effectiveStack, names.display, description),
+    'docs/feature-map.json': `${JSON.stringify({ version: 1, features: [] }, null, 2)}\n`,
     'docs/prd/.gitkeep': '',
     'docs/specs/.gitkeep': '',
     'docs/todo/.gitkeep': '',

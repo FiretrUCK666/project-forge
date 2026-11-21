@@ -132,11 +132,6 @@ export function isSymbolRuleSupported(ext) {
   return Boolean(SYMBOL_RULES[EXT_TO_LANG[normalizeExt(ext)]])
 }
 
-/** 有规则的语言清单，供勘察统计「N 种语言里有 M 种缺规则」用。 */
-export function supportedLanguages() {
-  return [...new Set(Object.values(EXT_TO_LANG))].filter((lang) => SYMBOL_RULES[lang]).sort()
-}
-
 function normalizeExt(ext) {
   return String(ext ?? '').trim().toLowerCase().replace(/^\./, '')
 }
